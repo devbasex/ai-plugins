@@ -157,6 +157,41 @@ def test_3604_7_deleting_the_last_leaf_on_the_account_side_deletes_it_on_both(tm
     assert not _mcp(w["shared_file"]) and not _mcp(w["config"])
 
 
+def test_an_emptied_project_and_a_shared_change_of_its_item_reach_both_sides(tmp_path):
+    """アカウント側が最後の項目を消して `{}`、共有側が同じ項目を変えたとき、両側が共有側の値になり次の同期でも消えない。"""
+    w = _world(tmp_path, {"projects": {"/p": {"allowedTools": ["Read"]}}})
+    assert _sync(w) is None
+    _edit(w["config"], projects={"/p": {}})
+    _edit(w["shared_file"], projects={"/p": {"allowedTools": ["Bash"]}})
+    assert _sync(w) is None
+    want = {"/p": {"allowedTools": ["Bash"]}}
+    assert _read(w["config"])["projects"] == _read(w["shared_file"])["projects"] == want
+    assert _sync(w) is None
+    assert _read(w["config"])["projects"] == _read(w["shared_file"])["projects"] == want
+
+
+def test_a_shared_file_replaced_by_another_lane_is_synced_again(tmp_path, monkeypatch):
+    """錠を待つ間に別のレーンが共有側を正しく置き換えても、その実体で同期し直す（not_account_local にしない）。"""
+    w = _synced(tmp_path, {"m": "A"})
+    _edit(w["config"], mcpServers={"m": "A", "n": "mine"})
+    local = _local(w)
+    real = account_sync._claude_lock
+    done: list[bool] = []
+
+    @contextlib.contextmanager
+    def lock_then_replace(path):
+        with real(path):
+            if not done:
+                repl = _json(w["shared"] / "lane2.json", {**_read(w["shared_file"]), "mcpServers": {"m": "A", "o": "lane2"}})
+                os.replace(repl, w["shared_file"])
+                done.append(True)
+            yield
+
+    monkeypatch.setattr(account_sync, "_claude_lock", lock_then_replace)
+    assert ad.sync_config(local) is None
+    assert _mcp(w["shared_file"]) == _mcp(w["config"]) == {"m": "A", "n": "mine", "o": "lane2"}
+
+
 @pytest.mark.parametrize("gone", [{}, None], ids=["empty-object", "key-removed"])
 def test_3604_7_a_shared_change_wins_over_an_account_deletion(tmp_path, gone):
     w = _synced(tmp_path, {"a": "A"})
@@ -197,13 +232,14 @@ def test_no_change_writes_nothing(tmp_path):
     assert [(p.stat().st_ino, p.stat().st_mtime_ns) for p in (w["config"], w["shared_file"], w["acc"] / reg.BASE_FILE)] == before
 
 
-def test_the_shared_file_keeps_its_permissions(tmp_path):
+def test_the_shared_file_is_written_readable_only_by_its_owner(tmp_path):
+    """認証のヘッダーを持ちうる値を、他のユーザーが読める権限のファイルへ移さない。"""
     w = _world(tmp_path, {"mcpServers": {}}, {"mcpServers": {}})
     assert _sync(w) is None
     w["shared_file"].chmod(0o644)
-    _edit(w["config"], mcpServers={"m": "x"})
+    _edit(w["config"], mcpServers={"m": {"headers": {"Authorization": "fake-header"}}})
     assert _sync(w) is None
-    assert stat.S_IMODE(w["shared_file"].stat().st_mode) == 0o644 and _mcp(w["shared_file"]) == {"m": "x"}
+    assert stat.S_IMODE(w["shared_file"].stat().st_mode) == 0o600 and _mcp(w["shared_file"])["m"]
 
 
 def test_a_dotfiles_symlink_on_the_shared_side_is_written_through_and_kept(tmp_path):
@@ -388,12 +424,32 @@ def test_a_first_sync_stopped_before_the_account_side_redoes_the_first_sync(tmp_
 
 def test_temp_files_without_a_record_are_removed_and_the_previous_sync_stands(tmp_path):
     w = _synced(tmp_path, {"m": "A"})
-    stray = [Path(f"{w['config']}.ndf-sync.dead.tmp"), Path(f"{w['shared_file']}.ndf-sync.dead.tmp")]
+    mine = account_sync._owner(_local(w))
+    stray = [Path(f"{w['config']}.ndf-sync.dead.tmp"), Path(f"{w['shared_file']}.ndf-sync.{mine}-dead.tmp")]
     for p in stray:
         _json(p, {"mcpServers": {"m": "stray"}})
     assert _sync(w) is None
     assert not any(p.exists() for p in stray)
     assert _mcp(w["config"]) == _mcp(w["shared_file"]) == {"m": "A"}
+
+
+def test_the_shared_temp_file_of_another_account_is_kept_for_its_recovery(tmp_path, monkeypatch):
+    """アカウント A の同期が共有側の置き換えの前で止まった後、B の同期が A の一時ファイルを消さず、A の復旧が A の変更を残す。"""
+    w = _both_changed(tmp_path)
+    with monkeypatch.context() as m:
+        _fail_replace(m, w["shared_file"])
+        assert _sync(w) == "write_failed"
+    left = [p for p in w["shared"].iterdir() if ".ndf-sync." in p.name]
+    assert left
+    other = w["store"] / "work2"
+    other.mkdir()
+    _json(other / reg.CONFIG_FILE, {"oauthAccount": {"emailAddress": "work2@example.com"}, "userID": "u2"})
+    got = ad.check_local(w["store"], other, w["shared_file"])
+    assert not isinstance(got, str)
+    assert ad.sync_config(got) is None
+    assert all(p.exists() for p in left)
+    assert _sync(w) is None
+    assert _mcp(w["config"]) == _mcp(w["shared_file"]) == B_VALUE
 
 
 @pytest.mark.parametrize("again", ["record", "shared", "backup"])

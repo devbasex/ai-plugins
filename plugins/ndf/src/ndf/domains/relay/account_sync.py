@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import secrets
 import stat
 import time
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterator, Optional, Protocol, Union
 
@@ -130,6 +131,23 @@ def _load(fd: int) -> Any:
             return None
 
 
+def _reshared(local: Fixed) -> Optional[Fixed]:
+    """共有側だけが確かめの後に別の通常のファイルへ置き換わったとき（別のレーンや claude の保存）、その実体で固定し直す。
+
+    共有側の錠を持った後に呼ぶ。symlink・ハードリンク・アカウント側の実体と同じなら None（`not_account_local`）。"""
+    try:
+        st = os.lstat(local.shared)
+    except FileNotFoundError:
+        sid: Optional[tuple[int, int]] = None
+    except OSError:  # noqa: NDF401 ファイル: 調べられない実体は確かめに外れる
+        return None
+    else:
+        sid = (st.st_dev, st.st_ino)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or sid in {v for k, v in local.ids.items() if k != "shared"}:
+            return None
+    return replace(local, ids={**local.ids, "shared": sid})  # type: ignore[type-var]
+
+
 def _read_side(path: Path, want: Optional[tuple[int, int]]) -> Optional[dict[str, Any]]:
     """固定したパスの設定ファイル。無ければ空、JSON の object でなければ None。実体が違えば `_Lost`。"""
     try:
@@ -174,14 +192,16 @@ def _leaves(key: str, value: Any) -> dict[tuple[str, ...], Any]:
 
 
 def _unflatten(leaves: dict[tuple[str, ...], Any]) -> dict[str, Any]:
+    """葉から値を組み立てる。2 層の葉の入れ物は新しく作り、入力の object（空のプロジェクトなど）を書き換えない。"""
     out: dict[str, Any] = {}
+    built: dict[str, dict[str, Any]] = {}
     for path, v in sorted(leaves.items(), key=lambda kv: len(kv[0])):  # 1 層の葉を先に（空の項目を 2 層の葉で上書き）
         if len(path) == 1:
             out[path[0]] = v
         else:
-            sub = out.get(path[0])
-            if not isinstance(sub, dict):
-                sub = out[path[0]] = {}
+            sub = built.get(path[0])
+            if sub is None:
+                sub = built[path[0]] = out[path[0]] = {}
             sub[path[1]] = v
     return out
 
@@ -270,8 +290,9 @@ def _plan(local: Fixed, uid: Optional[str]) -> _Plan:
 
 
 def _mode(path: Path) -> int:
+    """書き込みの権限。今の権限から所有者の読み書きだけを残す（認証のヘッダーを他のユーザーが読める権限で書かない）。"""
     try:
-        return os.lstat(path).st_mode & 0o777
+        return os.stat(path).st_mode & 0o600
     except OSError:  # noqa: NDF401 ファイル: まだ無いファイルは 0600 で作る
         return 0o600
 
@@ -304,10 +325,21 @@ def _record(sides: _Sides, plan: _Plan, rnd: str, tmps: dict[str, Optional[Path]
     }
 
 
+def _owner(local: Fixed) -> str:
+    """共有側の一時ファイルの持ち主の印（アカウントの設定ディレクトリの実パスから決まる 16 桁）。"""
+    return hashlib.sha256(str(local.account).encode()).hexdigest()[:16]
+
+
+def _round(local: Fixed) -> str:
+    """回の名前 `<持ち主>-<乱数>`。共有側の一時ファイルをどのアカウントの回が作ったかを名前で分ける。"""
+    return f"{_owner(local)}-{secrets.token_hex(8)}"
+
+
 def _sweep(local: Fixed) -> None:
-    """途中の記録が指さない同期の一時ファイル（前の回の残り）を消す。"""
+    """このアカウントの前の回の一時ファイルを消す。共有側は持ち主の印が同じものだけ（他のアカウントの復旧に要る一時ファイルを残す）。"""
     found = [*local.account.glob(reg.SYNC_TMP_FORMAT.format(path="*", round="*"))]
-    found += local.shared.parent.glob(reg.SYNC_TMP_FORMAT.format(path=glob.escape(local.shared.name), round="*"))
+    mine = reg.SYNC_TMP_FORMAT.format(path=glob.escape(local.shared.name), round=f"{_owner(local)}-*")
+    found += local.shared.parent.glob(mine)
     for p in found:
         with suppress(OSError):  # noqa: NDF402 ファイル: 消せない残りは次の同期で消す（判定には使わない）
             p.unlink()
@@ -319,7 +351,7 @@ def _keep(local: Fixed, sides: _Sides, plan: _Plan) -> Optional[str]:
     old = _plain(base)
     try:
         if old is None or old.get("B") != sides.part or old.get("userID") != sides.uid:
-            rnd = secrets.token_hex(8)
+            rnd = _round(local)
             os.replace(_stage(base, _record(sides, plan, rnd, {"account": None, "shared": None}), rnd, 0o600), base)
         (local.account / reg.BASE_NEXT_FILE).unlink(missing_ok=True)
     except OSError:  # noqa: NDF401 ファイル: 書けなければ次の同期でそろえる
@@ -330,7 +362,7 @@ def _keep(local: Fixed, sides: _Sides, plan: _Plan) -> Optional[str]:
 
 def _write_round(local: Fixed, sides: _Sides, plan: _Plan) -> Optional[str]:
     """1〜6 の手順。途中の記録を書く前の失敗は一時ファイルを消し、書いた後の失敗は次の同期の復旧に任せる。"""
-    rnd, nxt = secrets.token_hex(8), local.account / reg.BASE_NEXT_FILE
+    rnd, nxt = _round(local), local.account / reg.BASE_NEXT_FILE
     made: list[Path] = []
     tmps: dict[str, Optional[Path]] = {"account": None, "shared": None}
     try:
@@ -381,8 +413,13 @@ def sync_config(local: Fixed) -> Optional[str]:
         return "same_file"
     try:
         with _claude_lock(local.config), _claude_lock(local.shared):
-            if not (_recheck(local.config, local.ids.get("config")) and _recheck(local.shared, local.ids.get("shared"))):
+            if not _recheck(local.config, local.ids.get("config")):
                 return af.NOT_LOCAL
+            if not _recheck(local.shared, local.ids.get("shared")):
+                again = _reshared(local)
+                if again is None:
+                    return af.NOT_LOCAL
+                local = again
             return _sync_held(local)
     except _Lost:
         return af.NOT_LOCAL

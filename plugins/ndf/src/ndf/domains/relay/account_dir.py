@@ -93,6 +93,7 @@ REASONS = {
     "lock_busy": ".claude.json の排他を取れない。次の同期でそろえる",
     "write_failed": ".claude.json を書けない。次の同期でそろえる",
     "lease_lost": "使用の届けが無い（消された）。子を起動しない",
+    "child_unknown": "子のプロセスの開始時刻を読めない。子を起動しない",
 }
 
 
@@ -765,8 +766,12 @@ def in_use(store: Path, name: str) -> bool:
 
 
 def attach(store: Path, name: str, lease: str, child_pid: int) -> Optional[str]:
-    """関所で止めた子の pid を届けに書き、`running` にする。書けなければ理由の符号（`lease_lost`・`lock_timeout`・`write_failed`）。"""
+    """関所で止めた子の pid を届けに書き、`running` にする。書けなければ理由の符号（`child_unknown`・`lease_lost`・
+    `lock_timeout`・`write_failed`）。子の開始時刻を取れなければ `child_unknown`（起動の失敗として呼び手が子を止めて回収する）。"""
     path = _lease_path(store, name, lease)
+    child = _who(child_pid)
+    if child["start"] is None:
+        return "child_unknown"
     try:
         with reg.locked(store, name):
             try:
@@ -775,7 +780,7 @@ def attach(store: Path, name: str, lease: str, child_pid: int) -> Optional[str]:
                 return "lease_lost"
             if not isinstance(row, dict):
                 return "lease_lost"
-            reg.write(path, {**row, "state": "running", "child": _who(child_pid)})
+            reg.write(path, {**row, "state": "running", "child": child})
     except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 排他を取れなければ呼び手が子を止めて回収する
         return "lock_timeout"
     except OSError:  # noqa: NDF401 ファイル: 書けない届けは呼び手が子を止めて回収する
@@ -784,8 +789,13 @@ def attach(store: Path, name: str, lease: str, child_pid: int) -> Optional[str]:
 
 
 def release(store: Path, name: str, lease: str) -> None:
-    """同期をせずに届けを消す（子の起動の失敗・`attach` の失敗・`acquire` で取った届けの子が終わった後）。"""
-    with reg.locked(store, name):
+    """同期をせずに届けを消す（子の起動の失敗・`attach` の失敗・`acquire` で取った届けの子が終わった後）。
+
+    登録の排他を待ちきれなくても届けは消す（自分の届けを消すだけで、使用中を空きへ変える向きにしか動かない）。"""
+    try:
+        with reg.locked(store, name):
+            _drop_lease(store, name, lease)
+    except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 待ちきれなくても、子を回収した後の届けは残さない
         _drop_lease(store, name, lease)
 
 
@@ -842,10 +852,13 @@ def _refused(w: _Where, reason: str, links: Optional[Links] = None) -> Prepared:
 
 
 def _checked(w: _Where, registered: reg.Account, launch: Launch) -> Union[Checked, str]:
-    """保留の更新を当ててから確かめる。`RELOGIN_REASONS` なら `needs_relogin` を立てる（書けなくても理由は変えない）。"""
-    local = check_local(w.store, w.account, w.shared_file)
-    if not isinstance(local, str):
-        apply_pending(registered.generation, local)
+    """保留の更新を当ててから確かめる。`RELOGIN_REASONS` なら `needs_relogin` を立てる（書けなくても理由は変えない）。
+
+    保留のファイルがあるときだけ、当てる前に実体を確かめる。当てた後の実体は `check_account` が確かめる。"""
+    if os.path.lexists(w.account / reg.PENDING_FILE):
+        local = check_local(w.store, w.account, w.shared_file)
+        if not isinstance(local, str):
+            apply_pending(registered.generation, local)
     got = check_account(w.store, w.account, registered, w.shared, w.shared_file, launch)
     if isinstance(got, str) and got in RELOGIN_REASONS:
         with suppress(reg.AccountError, OSError):  # noqa: NDF402 ファイル: `needs_relogin` を書けなくても起動は同じ理由で飛ばす（次の起動で試す）
@@ -928,4 +941,5 @@ def settle(store: Path, name: str, environ: Mapping[str, str], generation: str, 
             finally:
                 _drop_lease(store, name, lease)
     except reg.AccountLockTimeout:  # noqa: NDF401 ファイル: 書き戻せなければ次の起動の前の同期でそろえる
+        _drop_lease(store, name, lease)  # 子は終わっている。届けを残すと再登録・削除・更新が止まり続ける
         return "lock_timeout"

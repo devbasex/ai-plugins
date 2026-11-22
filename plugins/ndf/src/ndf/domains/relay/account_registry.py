@@ -300,7 +300,11 @@ def proc_start(pid: int) -> Optional[float]:
 
 
 def _alive(who: Any) -> bool:
-    return isinstance(who, dict) and isinstance(who.get("pid"), int) and proc_start(who["pid"]) == who.get("start")
+    """届けの `owner`・`child` が生きているか。開始時刻を取れたときだけ、記録の開始時刻との一致を生きているとみなす。"""
+    if not (isinstance(who, dict) and isinstance(who.get("pid"), int) and isinstance(who.get("start"), (int, float))):
+        return False
+    start = proc_start(who["pid"])
+    return start is not None and start == who["start"]
 
 
 def live_leases(store: Path, name: str) -> list[dict[str, Any]]:
@@ -331,6 +335,14 @@ def refuse_in_use(store: Path, name: str) -> None:
     if any(_alive(row.get("owner")) for row in live):
         raise AccountInUse(f"アカウント {name} を動いているレーンが使っている。その子を /exit で終えてから登録し直す")
     raise AccountInUse(f"アカウント {name} を動いているプロセス（pid {live[0]['child']['pid']}）が使っている。終えてから登録し直す")
+
+
+def ensure_free(store: Path, name: str) -> None:
+    """登録の排他の中で使用中を確かめるだけ（`account add` がログインを始める前と認可コードを渡す前に打つ）。
+
+    使用中なら `AccountInUse`、排他を待ちきれなければ `AccountLockTimeout`。登録の直前の確かめ（`register`）は別に残る。"""
+    with locked(store, name):
+        refuse_in_use(store, name)
 
 
 def generation(store: Path, name: str) -> str:

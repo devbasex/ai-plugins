@@ -280,6 +280,7 @@ def _register(store: Path, name: str, config_dir: Path, environ: Mapping[str, st
 
 
 def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float, settle: Settle = None) -> Added:
+    reg.ensure_free(store, name)  # 認可コードを渡す前に止める（途中の状態を残し、子を終えた後に同じコードで打ち直せる）
     p = _read_pending(store, name)
     try:
         if p is None:
@@ -313,6 +314,7 @@ def add(
     sweep_pending(store, now)
     check_name(store, name)
     if code is None:
+        reg.ensure_free(store, name)  # 使用中の名前ではログインを始めない（認可を済ませた後に拒まない）
         return _start(store, name, environ, now)
     return _finish(store, name, code, environ, now, settle)
 

@@ -423,6 +423,47 @@ def test_i10_registering_or_removing_stops_while_a_lease_lives(tmp_path):
         reg.remove_account(w["store"], "work1", lambda: True)
 
 
+def test_i10_a_lease_without_a_start_time_is_not_alive(tmp_path):
+    w = _world(tmp_path)
+    _put_lease(w, {"pid": os.getpid(), "start": None}, {"pid": os.getpid(), "start": None})
+    assert not ad.in_use(w["store"], "work1")
+
+
+def test_attach_refuses_a_child_whose_start_time_is_unknown(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    got = _prepare(w)
+    monkeypatch.setattr(reg, "proc_start", lambda pid: None)
+    assert ad.attach(w["store"], "work1", got.lease, os.getpid()) == "child_unknown"
+    assert _leases(w)[got.lease]["child"] is None
+
+
+def _busy_lock(monkeypatch) -> None:
+    """登録の排他を待ちきれないようにする。"""
+
+    def busy(*a, **kw):
+        raise reg.AccountLockTimeout("待ちきれない")
+
+    monkeypatch.setattr(reg, "locked", busy)
+
+
+def test_settle_and_release_drop_the_lease_even_when_the_lock_times_out(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    first, second = _prepare(w), _prepare(w)
+    with monkeypatch.context() as m:
+        _busy_lock(m)
+        assert ad.settle(w["store"], "work1", w["environ"], first.generation, first.lease) == "lock_timeout"
+        ad.release(w["store"], "work1", second.lease)
+    assert _leases(w) == {}
+
+
+def test_prepare_without_a_pending_file_checks_the_entity_once(tmp_path, monkeypatch):
+    w = _world(tmp_path)
+    calls: list[int] = []
+    real = ad.check_local
+    monkeypatch.setattr(ad, "check_local", lambda *a: calls.append(1) or real(*a))
+    assert _prepare(w).ok and len(calls) == 1
+
+
 def test_attach_marks_the_lease_running_and_release_drops_it(tmp_path):
     w = _world(tmp_path)
     got = _prepare(w)

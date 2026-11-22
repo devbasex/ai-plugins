@@ -473,6 +473,30 @@ def test_add_in_two_steps_registers_the_account(tmp_path, fake_claude):
         account_login.add(store, "work2", "good", env)
 
 
+def _live_lease(store: Path, name: str) -> None:
+    d = reg.lease_dir(store, name)
+    d.mkdir(parents=True, exist_ok=True)
+    me = {"pid": os.getpid(), "start": reg.proc_start(os.getpid())}
+    (d / "l1.json").write_text(json.dumps({"generation": "g1", "state": "running", "owner": me, "child": None}))
+
+
+def test_add_of_a_name_in_use_stops_before_the_login_and_before_passing_the_code(tmp_path, fake_claude):
+    store = tmp_path / "store"
+    env = dict(os.environ)
+    _live_lease(store, "work1")
+    with pytest.raises(reg.AccountInUse):
+        account_login.add(store, "work1", None, env)  # ログインを始めない
+    assert not (store / ".pending-work1").exists()
+    (reg.lease_dir(store, "work1") / "l1.json").unlink()
+    assert account_login.add(store, "work1", None, env).needs_code
+    _live_lease(store, "work1")
+    with pytest.raises(reg.AccountInUse):
+        account_login.add(store, "work1", "good", env)  # 認可コードを渡さず、途中の状態を残す
+    assert (store / ".pending-work1" / account_login.PENDING_FIFO).exists() and reg.names(store) == []
+    (reg.lease_dir(store, "work1") / "l1.json").unlink()
+    assert not account_login.add(store, "work1", "good", env).needs_code
+
+
 def test_login_env_does_not_carry_the_parents_provider_or_auth_profile(tmp_path):
     """登録用の子は、子の環境の表の account-drop の変数（提供元の選択・認証のプロファイルを含む）を親から継がない。"""
     drop = facts.ids("env", child="account-drop")
