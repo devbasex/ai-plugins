@@ -282,11 +282,9 @@ def cmd_scope(args: argparse.Namespace) -> int:
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
     try:
-        # `run` と同じ担当の指定と既定で決める（担当を足した打ち直しで `run` と違う範囲を返さない。PR 3944 の r3-4）
-        policy = _policy(wt)
-        reviewers = _reviewers(args.reviewer, policy)
-        # `run` と同じ重点で決める（重点を変えた打ち直しは全差分。PR 3944 の r4-3）
-        focus = drive.read_settings(policy.main, wt).focus
+        # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
+        # 全差分。PR 3944 の r3-4・r4-3）
+        resolved = _resolve(wt, args.reviewer)
     except ValueError as exc:
         return _stop("invalid", str(exc))
     except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
@@ -296,7 +294,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     g = git.Git(wt)
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), reviewers, focus)
+    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
     got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
@@ -371,10 +369,26 @@ def _reviewers(requested: Optional[list[str]], policy: Policy) -> tuple[str, ...
     return participants.assign(requested if requested else (), allowed=policy.allowed)  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
 
 
+class Resolved(NamedTuple):
+    """実行者の設定から決まる値（`run` と `review-scope` が同じに決める。PR 3944 の r3-4・r4-3）。"""
+
+    policy: Policy
+    reviewers: tuple[str, ...]
+    settings: drive.ReviewSettings
+
+
+def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
+    """メインディレクトリと `allowed`、今回の相手役、レビューの設定を求める。"""
+    policy = _policy(wt)
+    reviewers = _reviewers(requested, policy)
+    # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
+    return Resolved(policy, reviewers, drive.read_settings(policy.main, wt))
+
+
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
-    policy = _policy(wt)
+    got = _resolve(wt, args.reviewer)
     return drive.RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
@@ -382,12 +396,11 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=_reviewers(args.reviewer, policy),
+        reviewers=got.reviewers,
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
-        main=policy.main,
-        # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-        settings=drive.read_settings(policy.main, wt),
+        main=got.policy.main,
+        settings=got.settings,
     )
 
 
