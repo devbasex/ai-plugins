@@ -40,7 +40,7 @@ def test_decision4_fetch_record_lives_in_the_store_and_reads_from_any_state_dir(
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     # 状態の保存先には何も書かず、保存先の違う 2 つのラッパーが同じ記録を読む（モデル別の週の窓 95 を使用率に読む）
     for state in (state_a, state_b):
-        assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 95.0, False)]
+        assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, False)]
         assert not accounts.usage_dir(state).exists()
     # 旧い世代の取得の記録は読まない
     assert accounts.usages(state_a, store, NOW, {"work2": "g3"}) == []
@@ -50,14 +50,14 @@ def test_decision4_usages_merges_the_status_line_and_the_fetch_record_per_window
     store, state = tmp_path / "store", tmp_path / "state"
     accounts.write_usage(accounts.usage_path(state, "work1", "g1"), {"five_hour": (50.0, LATER)}, NOW)
     accounts.write_fetch(accounts.fetch_path(store, "work1", "g1"), _got(five_hour=(30.0, LATER), seven_day=(60.0, WEEK)), NOW)
-    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 60.0, False)]
+    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 60.0, 50.0, 60.0, WEEK, False)]
     # 取得の記録の窓が新しい resets_at を持てば、使用率が小さくてもそれを採る
     accounts.write_fetch(accounts.fetch_path(store, "work1", "g1"), _got(five_hour=(5.0, LATER + 18000)), NOW)
     windows = accounts.read_windows(accounts.usage_path(state, "work1", "g1"), accounts.fetch_path(store, "work1", "g1"))
     assert windows["five_hour"] == (5.0, LATER + 18000)
     # 片方が読めなければもう片方だけで読む
     accounts.fetch_path(store, "work1", "g1").write_text("{", encoding="utf-8")
-    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 50.0, False)]
+    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 50.0, 50.0, None, None, False)]
 
 
 def test_decision4_write_fetch_keeps_model_windows_apart_and_missing_windows(tmp_path):
@@ -69,7 +69,7 @@ def test_decision4_write_fetch_keeps_model_windows_apart_and_missing_windows(tmp
     windows = _fetch_record(path)["windows"]
     assert windows["seven_day_scoped"] == {"a": {"percent": 95.0, "resets_at": friday}, "b": {"percent": 100.0, "resets_at": thursday}}
     assert windows["five_hour"] == {"percent": 10.0, "resets_at": LATER}
-    assert accounts.usages(tmp_path / "state", tmp_path, NOW, {"work1": "g1"}) == [Usage("work1", 100.0, True)]
+    assert accounts.usages(tmp_path / "state", tmp_path, NOW, {"work1": "g1"}) == [Usage("work1", 100.0, 10.0, 100.0, None, True)]
     # 崩れたモデル別の窓（None）は前の値を残し、古い入力・失効した入力で下げない
     accounts.write_fetch(path, _got(five_hour=(3.0, LATER - 60), scoped=None), NOW)
     accounts.write_fetch(path, _got(five_hour=(1.0, NOW - 1)), NOW)
@@ -81,11 +81,11 @@ def test_decision4_spend_limit_holds_until_an_explicit_false(tmp_path):
     path = accounts.fetch_path(store, "work2", "g2")
     # 最初の応答が窓を持たず spend_limit_reached が真なら、窓もキャッシュも無くても上限の行で返る
     accounts.write_fetch(path, _got(spend_limit_reached=True), NOW)
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", None, True)]  # type: ignore[arg-type]
+    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", None, None, None, None, True)]
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER)), NOW)  # 応答に無い（None）なら真が残る
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, True)]
+    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, True)]
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER), spend_limit_reached=False), NOW)
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, False)]
+    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, False)]
 
 
 def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monkeypatch):
@@ -106,7 +106,7 @@ def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monk
 
     monkeypatch.setattr(accounts, "_read_json", replaced_after_first_read)
     # 同じ 1 回の内容から窓と上限の到達を取る（差し替え前の 10% と差し替え後の上限なしを組み合わせない）
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, True)] and len(reads) == 1
+    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, True)] and len(reads) == 1
 
 
 def test_decision4_write_fetch_keeps_the_attempt_time_and_clears_the_error(tmp_path):
