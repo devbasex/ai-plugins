@@ -41,7 +41,7 @@ flowchart LR
 flowchart LR
   F[(会話の記録)]
   RT["adapters/transcript.py<br/>read_tail(path, size)<br/>（hooks/context.py から移し、行頭の扱いを直す）"]
-  R["adapters/transcript.py<br/>last_context(tail, anchor)<br/>→ ContextRead(tokens, message_id, timestamp, state, reason)"]
+  R["adapters/transcript.py<br/>last_context(tail, anchor)<br/>→ ContextRead(tokens, message_id, timestamp, entry, state, reason)"]
   G["guard context-limit<br/>anchor = ToolUse(tool_use_id)"]
   W["ラッパー<br/>anchor = Tail()"]
   K["#4068 起こす hook<br/>anchor = Reply(last_assistant_message)"]
@@ -69,16 +69,17 @@ flowchart LR
 | --- | --- | --- |
 | `tokens` | `Optional[int]` | 読んだ応答の文脈の量。`state` が `none` なら None |
 | `message_id` | `Optional[str]` | 読んだ応答の `message.id` |
-| `timestamp` | `Optional[str]` | 読んだ応答の最後の行の `timestamp`（記録のまま。比べる側が解く） |
+| `timestamp` | `Optional[str]` | 読んだ応答の最後の行の `timestamp`（記録のまま。`current`・`behind` なら `timestamp_seconds` で UNIX 秒に直せることを確かめ済み） |
+| `entry` | `Optional[Mapping[str, Any]]` | 採用行を `json.loads` した object（`state` が `none` なら None）。#4068 の `last_turn` が寿命・モデル・キャッシュ・出力の量をこの行から読むために持たせ、記録を読み直させない。比べと hash からは外す（`field(compare=False)`） |
 | `state` | `str` | `current`（手がかりに合う今の応答か、それより後の応答）・`behind`（今の応答より前の応答）・`none`（量が無い） |
-| `reason` | `Optional[str]` | `state` が `current` でない理由。`unrecorded`（手がかりに合う応答が無い）・`after`（`Tail` で、応答の後に利用者の行がある）・`compacted`（圧縮の境の後に応答が無い）・`partial`（応答より新しい行に、JSON として読めない行がある）・`empty`（末尾に応答が無い）・`form`（照らしを通った応答の `usage` の形が違う。照らしに外れた応答の形が違うときは、照らしの理由のまま `none`） |
+| `reason` | `Optional[str]` | `state` が `current` でない理由。`unrecorded`（手がかりに合う応答が無い）・`after`（`Tail` で、応答の後に利用者の行がある）・`compacted`（圧縮の境の後に応答が無い）・`partial`（応答より新しい行に、JSON として読めない行がある）・`empty`（末尾に応答が無い）・`form`（照らしを通った応答の採用行の形（`usage`・`message.id`・`timestamp`）が違う。照らしに外れた応答の形が違うときは、照らしの理由のまま `none`） |
 
 読む単位の決まり:
 
 - **会話の行**は、`type` が `user` か `assistant` で、`isSidechain` が真でない行である。会話でない行（`last-prompt`・`api-request`・`attachment` など）は飛ばす。`isSidechain` が真の行はサブエージェントの会話の行で、その `usage` は子の文脈の量であり、親の会話の文脈ではないので数えない
 - **応答**は、同じ `message.id` の `assistant` の会話の行のまとまりである。`message.model` が `<synthetic>` の行（合成の応答）は応答に数えず、飛ばす。応答の間に別の行が挟まっても、同じ `message.id` なら 1 つにまとめる（1 つの応答の行が別の応答の行をまたいで再び現れることは無い。このマシンの会話の記録の 130,047 応答で 0 件）。`message.id` が空でない文字列でない `assistant` の行は、その行だけで 1 つの応答とする。**最後の応答**は、最も新しい物理の行を持つ応答である。文と `tool_use` の要素はまとまり全体からファイルの順に読む
 - **量・ID・時刻の採用元**は、最後の応答の**最も新しい物理の行**（以下「採用行」）だけである。量はその行の `message.usage`、ID はその行の `message.id`、時刻はその行の `timestamp` から読み、同じ応答の前の行が完全でも、そちらへ替えない（#4068 の詳細設計の「最後の行に `usage` が無ければ前の行が完全でも `form`」と同じ）
-- **採用行の形**は、`message.id` が空でない文字列・`timestamp` が文字列・`usage` が下の「文脈の量」の形であることを求める。どれかが欠けるか型が違うとき、照らしを通った応答（`current` の候補）なら `none`（`form`）、照らしに外れた応答（`behind` の候補）なら照らしの理由（`unrecorded`・`after`）のまま `none` にする。照らしの結果は形に依らずに決まる（`ToolUse` の照らしは `tool_use` の要素、`Reply` は文と利用者の行、`Tail` は利用者の行だけを見る）。同じ応答の採用行より前の行と、ほかの応答の行の形は見ない
+- **採用行の形**は、`message.id` が空でない文字列・`timestamp` が `timestamp_seconds` で UNIX 秒に直せる文字列・`usage` が下の「文脈の量」の形であることを求める。`timestamp_seconds(text: str) -> Optional[float]`（同じモジュール）は、末尾の `Z` を `+00:00` に替えて `datetime.fromisoformat` で解き、時差を持つ時刻なら UNIX 秒を、解けない・時差が無いなら None を返す。どれかが欠けるか型が違うとき、照らしを通った応答（`current` の候補）なら `none`（`form`）、照らしに外れた応答（`behind` の候補）なら照らしの理由（`unrecorded`・`after`）のまま `none` にする。照らしの結果は形に依らずに決まる（`ToolUse` の照らしは `tool_use` の要素、`Reply` は文と利用者の行、`Tail` は利用者の行だけを見る）。同じ応答の採用行より前の行と、ほかの応答の行の形は見ない
 - **利用者の行**は、`type` が `user` の会話の行のすべて（入力・Tool の結果・`isMeta` の行）である。`isMeta` の行は、Claude Code が利用者の入力の形で差し込む内部の行（Skill の本文・Stop の hook の差し戻しの文・画像の注記など。`isMeta` が真の `user` の行）で、次の応答の入力に入る。どれも応答の後に足された文脈なので、その後の応答はまだ無い（量は古い）と読む
 - **文脈の量**は、採用行の `usage` の `input_tokens`・`cache_read_input_tokens`・`cache_creation_input_tokens` の和である。`usage` が object で `input_tokens` が整数であることを求め、2 つのキャッシュの項目は無ければ 0 とする。どれかが整数以外の値を持てば `form` である
 - **読む範囲**は、最後の `system` の `compact_boundary` の行より後である
@@ -182,10 +183,10 @@ flowchart TD
 - **期待する動き**（テスト設計 14）: 上限をまたぐ応答 R の Tool の PreToolUse で、R が未記録なら、前の応答の量（上限未満）を `behind` で読んで通す。R が記録された後の R の Tool の PreToolUse は、R の量（上限以上）を `current` で読んで止める。R の後の応答の最初の Tool の PreToolUse は、その応答が未記録でも R の量を `behind` で読んで止める。PostToolUse の知らせは、R の Tool の PreToolUse が覚えた量（上限未満なら帯の中で知らせる）で決める
 - **根拠**: Value 2（読み取りを増やさない）・Value 3（判定は記録の状態だけで決まる）
 
-### 決定 6: 起こす費用を正しい量で決めるため、#4068 は `current` だけを今回の応答とし、照らした応答の形の違いだけを「記録の形が違う」にする
+### 決定 6: 起こす費用を正しい量で決めるため、#4068 は `current` だけを今回の応答とし、照らした応答の採用行の形の違いだけを「記録の形が違う」にする
 
 - **質問**: 量そのものを使う #4068 は、状態ごとにどうするか
-- **選んだ案**: 起こす hook は `last_context(tail, Reply(<Stop の入力の last_assistant_message か None>))` を呼び、`current` のときだけ量を `S`、時刻を最後の応答の時刻として使う。`behind`・`compacted`・`partial`・`empty` は一時的な失敗（次の Stop で読み直す）で、`form` は「記録の形が違う」（会話で止める）とする。`form` は照らしを通った応答の `usage` の形の違いにだけ出るので、照らしに外れた前の応答の欠けで会話ごと止めることは無い。寿命（`usage.cache_creation`）とモデル（`message.model`）は `last_turn` が同じ `message_id` の行から読み、欠ければ「記録の形が違う」とする。#4068 の時刻の照らし（応答の時刻が hook の動き始めより後なら何も書かない）は `ContextRead.timestamp` で行う
+- **選んだ案**: 起こす hook は `last_context(tail, Reply(<Stop の入力の last_assistant_message か None>))` を呼び、`current` のときだけ量を `S`、時刻を最後の応答の時刻として使う。`behind`・`compacted`・`partial`・`empty` は一時的な失敗（次の Stop で読み直す）で、`form` は「記録の形が違う」（会話で止める）とする。`form` は照らしを通った応答の採用行の形（`usage`・`message.id`・`timestamp`。「読む単位の決まり」の「採用行の形」）の違いにだけ出るので、照らしに外れた前の応答の欠けで会話ごと止めることは無い。寿命（`usage.cache_creation`）・モデル（`message.model`）・読み出し・書き込み・出力の量は、`last_turn` が `ContextRead.entry`（量と同じ採用行）から読み、記録を読み直さない。欠ければ「記録の形が違う」とする。#4068 の時刻の照らし（応答の時刻が hook の動き始めより後なら何も書かない）は `timestamp_seconds(ContextRead.timestamp)` で行う。読む項目ごとの取り出し元は詳細設計の「#4068 との受け渡し」の表にある
 - 採らなかった案: #4068 だけ読み方を自分で持ち続ける。照らしの規則が 2 か所に分かれ、片方の直しが届かない（決定 1）。照らしの前に `usage` の形を確かめる案も採らない。今回でない応答の欠けで会話ごと起こすのをやめる
 - **代償**: #4068 の詳細設計の `last_turn` の「責務」の行は、照らしと量の和をこの関数に任せる形で実装する。シグネチャと返り値（`TurnRead`）は変えない。`Reply` に「その後に利用者の行が無い」を足したので、#4068 の決定 4 が心配した「同じ文の前の応答を今回の応答と読む」場合は `behind` になる
 - **根拠**: Value 9。#4068 の決定 4 の規則を保ち、置き場を 1 つにする
@@ -247,18 +248,18 @@ flowchart TD
 | 9 | guard の PreToolUse: `behind` の 500,000 で止め、`behind` の 499,999 で止めない。`current` も同じ。`none` で判定しない。どの判定の `notes` にも `context_tokens` と `context_state` がある | `behind` で判定しない・状態を残さない |
 | 10 | guard の PostToolUse（#3995 の後）: PreToolUse が `behind` の 250,000 を覚えた呼び出しで、読み取り 0 回のまま知らせ、`advise` の `notes` に状態がある。499,999 で知らせ、500,000 で知らせない。並列の `Pre(A) → Pre(B) → Post(A) → Post(B)` で、各 PostToolUse が自分の ID の量と状態を使い、読み取りは 2 回。`state` の無い覚えた値は `behind` として使う | `behind` で読み直す・帯を外す・他の ID の値を使う |
 | 11 | ラッパー: `behind` の上限の量で静かな子に引継ぎを求め（#4049 の待ちは今のとおり）、`behind` の上限 − 1 で求めない。`none` で求めない。記録のファイルが読めない（権限の誤り）見本で、見回りが例外で止まらず量は None | 読めない失敗を投げる |
-| 12 | #4068 の `last_turn`（#4068 の実装の中で）: `current` で起こす時点を決め、`behind`・`compacted`・`partial`・`empty` は一時的な失敗、照らした応答の `form` と寿命・モデルの欠けは「記録の形が違う」 | 一時的な失敗で会話ごと止める |
+| 12 | #4068 の `last_turn`（#4068 の実装の中で）: `current` で起こす時点を決め、`behind`・`compacted`・`partial`・`empty` は一時的な失敗、照らした応答の `form` と寿命・モデル・出力の量の欠けは「記録の形が違う」。同じ `message.id` の 2 行で前の行と採用行の `usage`（読み出し・書き込み・寿命別の書き込み）が違う記録で、`LastTurn` の `tokens`・`cache_read`・`cache_write`・`ttl` がすべて採用行の値。採用行の寿命別の書き込みが両方 0 なら `known_ttl`、`known_ttl` も None なら `ttl` None で `wake_at` は None | 一時的な失敗で会話ごと止める・記録を読み直して前の行の値を混ぜる |
 | 13 | 読み手は渡された文字列だけを使い、ファイルを開かない（guard の 1 回の判定で `read_tail` の呼び出しは 1 回のまま） | 読み手の中で記録を読み直す |
 | 14 | 上限をまたぐ応答 R（前の応答 499,999・R 500,000）: R が未記録の記録で、R の Tool の PreToolUse は `behind` の 499,999 で通す。R が記録された後の R の Tool の PreToolUse は `current` の 500,000 で止める。R の後の応答が未記録の記録で、その応答の Tool の PreToolUse は `behind` の 500,000 で止める | 記録を待つ・未記録の間に止める・次の応答で止め損なう |
 | 15 | `read_tail`: 行の長さ 10 バイトの 3 行（`A…\n`・`B…\n`・`C…\n`）のファイルで、`size` 20（読み始めの直前が改行）は `B…\nC…\n`、`size` 15（行の途中）は `C…\n`、`size` 40（ファイルより大きい）は全体、改行を含まない 30 バイトの 1 行のファイルで `size` 10 は空。窓の先頭の行だけが応答で後を Tool の結果が占める記録で、ラッパーの `Tail` は上限の量を読んで引継ぎを求める | 行頭でも先頭の行を捨てる・切れた行を返す |
-| 16 | 採用行: 同じ `message.id` の 2 行の最後の行に `usage` が無い記録で、`Reply` が文に合えば `none`（`form`）、合わなければ `none`（`unrecorded`）。採用行の `message.id` が無い・数値、`timestamp` が無い・数値の記録で、照らしを通れば `form`、外れれば照らしの理由の `none`。同じ応答の前の行の `usage` だけが壊れた記録は、採用行の量を返す | 前の行の `usage` へ替える・ID や時刻の欠けで `current` を返す |
+| 16 | 採用行: 同じ `message.id` の 2 行の最後の行に `usage` が無い記録で、`Reply` が文に合えば `none`（`form`）、合わなければ `none`（`unrecorded`）。採用行の `message.id` が無い・数値、`timestamp` が無い・数値・`"yesterday"`（解けない文字列）・`"2026-11-22T12:00:00"`（時差が無い）の記録で、照らしを通れば `form`、外れれば照らしの理由の `none`。`"2026-11-22T12:00:00.123Z"` は読める。同じ応答の前の行の `usage` だけが壊れた記録は、採用行の量を返す | 前の行の `usage` へ替える・ID や時刻の欠けで `current` を返す |
 | 17 | 早い終わり: モジュールの `json.loads` を数える差し替え（monkeypatch）で、最も新しい応答の行の前に 100 行の古い会話の行を置いた見本を読む。`Tail` の解釈の回数は最も新しい応答の行までの行数で、古い 100 行を解釈しない。`Reply` は最後の応答のまとまりと、その前の別の応答の行 1 つまで。`ToolUse` は ID が最後の応答にあれば `Reply` と同じ回数で、無ければ古い 100 行のうち ID か `compact_boundary` の文字列を含む行だけを解釈する。`ToolUse("")` は古い行を探さずに `behind`（`unrecorded`） | 全行を解釈する・空の ID がすべての行に当たる |
 
 上限と判断開始の値は #3995 の関数が返す値（既定 500,000・250,000）を使い、境は − 1 と値で確かめる。時間で区切らず、.md の文言を照らさない。見本は「測った結果」の実測の記録の形から作る。
 
 ## どこを変えるか
 
-関数ごとの仕様と異常系は [詳細設計](./issue-4089-design-detail.md) にある（新設する関数が `last_context` の 1 つで、既存の `verdict.advise` のシグネチャを変えるため、別ファイルにした）。
+関数ごとの仕様と異常系は [詳細設計](./issue-4089-design-detail.md) にある（新設する関数が `last_context`・`timestamp_seconds` の 2 つで、既存の `verdict.advise` のシグネチャを変えるため、別ファイルにした）。
 
 契約と手順書は変えない。`contracts/hooks/guards.json` の `context-limit` と `relay.md` の引継ぎの判定は「文脈の量が上限を超えた」とだけ書き、どの応答の量かを約束していない（main の `ec8340675` で確かめた）。
 
@@ -267,7 +268,7 @@ flowchart TD
 | 項目 | 値 |
 | --- | --- |
 | 触るファイル | `plugins/ndf/src/ndf/adapters/transcript.py`（新設）・`plugins/ndf/src/ndf/domains/hooks/context.py`・`plugins/ndf/src/ndf/domains/hooks/verdict.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/src/ndf/domains/relay/observe.py`・`plugins/ndf/src/ndf/domains/relay/wrapper.py`・`plugins/ndf/tests/adapters/test_transcript.py`（新設）・`plugins/ndf/tests/domains/hooks/test_context.py`・`plugins/ndf/tests/domains/hooks/test_guards.py`・`plugins/ndf/tests/domains/relay/` の `context_tokens` を差し替えるテスト |
-| 新設する関数 | 1（`last_context`）。移して先頭の行の扱いを直す関数 1（`read_tail`） |
+| 新設する関数 | 2（`last_context`・`timestamp_seconds`）。移して先頭の行の扱いを直す関数 1（`read_tail`） |
 | シグネチャを変える関数 | 1（`verdict.advise`） |
 | 詳細設計 | [issue-4089-design-detail.md](./issue-4089-design-detail.md) |
 | 実装の順 | #3995 の実装と同時かその後。#4068 より前なら `last_turn` はこの関数を使って書く |

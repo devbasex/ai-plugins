@@ -24,11 +24,11 @@ tests/
 └── domains/hooks/test_context.py・test_guards.py・domains/relay/ の該当テスト
 ```
 
-依存の向き: `domains/hooks` と `domains/relay` が `adapters/transcript.py` を読み、`adapters/transcript.py` は標準ライブラリ（`json`・`os`・`dataclasses`）だけを読む。下の層から上の層への向きは無く、循環は無い。
+依存の向き: `domains/hooks` と `domains/relay` が `adapters/transcript.py` を読み、`adapters/transcript.py` は標準ライブラリ（`json`・`os`・`dataclasses`・`datetime`）だけを読む。下の層から上の層への向きは無く、循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/transcript.py` | 新設 | Claude Code の会話の記録の末尾を読み、最後の応答の文脈の量と古さを返す | 標準ライブラリ | `ToolUse`・`Reply`・`Tail`・`ContextRead` | `last_context`（新設）・`read_tail`（移す） |
+| `src/ndf/adapters/transcript.py` | 新設 | Claude Code の会話の記録の末尾を読み、最後の応答の文脈の量と古さを返す | 標準ライブラリ | `ToolUse`・`Reply`・`Tail`・`ContextRead` | `last_context`・`timestamp_seconds`（新設）・`read_tail`（移す） |
 | `src/ndf/domains/hooks/context.py` | 変更 | hook の 1 回の事象の文脈 | `adapters/transcript.py` | `HookContext` | `context_tokens`（削除）・`read_tail`（削除して import へ） |
 | `src/ndf/domains/hooks/verdict.py` | 変更 | guard の判定の値 | — | `Verdict` | `advise`（変更） |
 | `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量の guard | `adapters/transcript.py` | モジュール | `check`（変更） |
@@ -44,12 +44,15 @@ tests/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `last_context` | `src/ndf/adapters/transcript.py` | 新設 | `last_context(tail: str, anchor: Anchor) -> ContextRead` | 圧縮の境より後の最後の応答の文脈の量と、手がかりに照らした古さを返す |
+| `timestamp_seconds` | 同上 | 新設 | `timestamp_seconds(text: str) -> Optional[float]` | 記録の `timestamp` を UNIX 秒に直す。`last_context` の形の確かめと #4068 の `last_turn` が同じ関数を使う |
 | `read_tail` | 同上 | 移して先頭の行の扱いを直す | `read_tail(path: str, size: int) -> str` | 末尾 `size` バイトを読み、行の途中から始まるときだけ先頭の切れた行を捨てる。読めなければ空 |
 
 - `last_context`
   - 事前条件: `tail` は `read_tail` の返した文字列。`anchor` は `ToolUse`・`Reply`・`Tail` のどれか（`Anchor = Union[ToolUse, Reply, Tail]`）
-  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp` がそろい、どれも最後の応答の採用行（最も新しい物理の行）から読んだ値である。`none` ならどれも None で `reason` がある。`current` のとき `reason` は None
+  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろい、どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` ならどれも None で `reason` がある。`current` のとき `reason` は None
   - 副作用: 無し（ファイルを開かない）
+- `timestamp_seconds`
+  - 事後条件: 末尾の `Z` を `+00:00` に替えて `datetime.fromisoformat` で解く。時差を持つ時刻なら `.timestamp()` の値、`ValueError` か時差が無い（`tzinfo` が None）なら None。例外を投げない
 - `read_tail`
   - 事後条件: `start = max(0, 大きさ − size)`。`start` が 0 なら全体。`start > 0` なら `start − 1` から読み、先頭のバイトが改行なら残りの全体（先頭の行は完全な行として残す）、改行でなければ最初の改行の次から。読んだ範囲に改行が無ければ空。`OSError` なら空
   - 今の実装との違い: 今は `end > size` で改行があれば、読み始めが行頭でも先頭の行を捨てる。窓の先頭にだけ応答があり後を Tool の結果が占める記録で、ラッパーが上限以上の量を読めなくなるので直す（設計文書の「入出力のコントラクト」）。`ctx.transcript_tail` を使うほかの読み手には、完全な行が 1 行増えるだけである
@@ -59,7 +62,7 @@ tests/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `last_context` | 行が JSON でない | 書きかけの末尾・壊れた行 | `json.loads` の `ValueError` | 最後の応答より新しければ `none`（`partial`）、古ければ無視 | 無し | 次の読み取りで読み直せる |
-| `last_context` | 採用行の `usage` が object でない・`input_tokens` が整数でない・キャッシュの項目が整数以外の値、`message.id` が無い・空・文字列でない、`timestamp` が無い・文字列でない | 記録の形の変化 | 採用行の 1 行だけを確かめる | `current` の候補なら `none`（`form`）、`behind` の候補なら `none`（照らしの理由のまま） | 無し | 形が戻るまで量は無し |
+| `last_context` | 採用行の `usage` が object でない・`input_tokens` が整数でない・キャッシュの項目が整数以外の値、`message.id` が無い・空・文字列でない、`timestamp` が無い・文字列でない・`timestamp_seconds` が None（解けない・時差が無い） | 記録の形の変化 | 採用行の 1 行だけを確かめる | `current` の候補なら `none`（`form`）、`behind` の候補なら `none`（照らしの理由のまま） | 無し | 形が戻るまで量は無し |
 | `last_context` | 読む範囲に応答が無い | 圧縮の直後・末尾に収まらない大きな行・空の文字列 | 読み終えたとき | `none`（境に会ったなら `compacted`、それ以外は `empty`） | 無し | 次の応答の後に読める |
 | `read_tail` | 読めない | ファイルが無い・権限・入出力の失敗（`OSError`） | `open` | 空を返す | 無し | 次の読み取りで読み直せる |
 
@@ -80,7 +83,7 @@ tests/
 | `last_context` | `Tail`・最後の応答の後に利用者の行が無い | 最後の応答の量・`current` |
 | `last_context` | `Tail`・ある | 最後の応答の量・`behind`・`after` |
 
-形を確かめるのは、手がかりで `current` か `behind` を決めた後の、最後の応答の採用行（最も新しい物理の行）の 1 行だけである。確かめる項目は `message.usage`（設計文書の「文脈の量」の形）・`message.id`（空でない文字列）・`timestamp`（文字列）で、量・ID・時刻はこの行から読み、同じ応答の前の行へ替えない。`message.id` が文字列でない採用行は、その行だけを 1 つの応答として照らす（照らしは形に依らずに決まる）。`form` は `current` の候補の形の違いだけに出し、`behind` の候補の形の違いは照らしの理由（`unrecorded`・`after`）のまま `none` にする。#4068 が今回でない応答の欠けで会話ごと止めないためである。
+形を確かめるのは、手がかりで `current` か `behind` を決めた後の、最後の応答の採用行（最も新しい物理の行）の 1 行だけである。確かめる項目は `message.usage`（設計文書の「文脈の量」の形）・`message.id`（空でない文字列）・`timestamp`（`timestamp_seconds` が None でない文字列）で、量・ID・時刻はこの行から読み、同じ応答の前の行へ替えない。この 3 つが `form` の条件のすべてで、要求の受け入れ条件 6・10 と設計文書の決定 6 も同じ 3 つを指す。採用行の object は `ContextRead.entry` に入れて返す。`message.id` が文字列でない採用行は、その行だけを 1 つの応答として照らす（照らしは形に依らずに決まる）。`form` は `current` の候補の形の違いだけに出し、`behind` の候補の形の違いは照らしの理由（`unrecorded`・`after`）のまま `none` にする。#4068 が今回でない応答の欠けで会話ごと止めないためである。
 
 文はまとまりの各行の `message.content` が list のときの、`type` が `text` で `text` が文字列の要素をファイルの順につなぐ。`tool_use` の要素は `type` が `tool_use` で `id` が文字列の要素である。list でない `content` と、形の違う要素は飛ばす（照らしに外れる側へ倒れる）。
 
@@ -112,7 +115,8 @@ tests/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `last_context` | 設計文書のテスト設計 1〜5・17 | 境の行の直後に応答が 1 つだけある記録・応答の後の利用者の行が 0 行と 1 行 | 設計文書のテスト設計 6〜8・16。空の文字列で `empty` |
+| `last_context` | 設計文書のテスト設計 1〜5・17。`entry` が採用行の object で、前の行の object でない | 境の行の直後に応答が 1 つだけある記録・応答の後の利用者の行が 0 行と 1 行 | 設計文書のテスト設計 6〜8・16。空の文字列で `empty` |
+| `timestamp_seconds` | `"2026-11-22T12:00:00.123Z"`・`"2026-11-22T21:00:00+09:00"` が同じ秒 | 小数秒の無い時刻 | `"yesterday"`・`""`・`"2026-11-22T12:00:00"`（時差が無い）で None |
 | `read_tail` | 今のテストを `tests/adapters/test_transcript.py` へ移す | 設計文書のテスト設計 15（読み始めの直前が改行・行の途中・ファイルより大きい `size`） | 権限の無いファイルで空。改行の無い 1 行が `size` を超えるファイルで空 |
 
 ## 判定の値（`verdict.advise`）
@@ -215,15 +219,31 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 満たす決定: 決定 6、受け入れ条件 10
 
-#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail: str, known_ttl, last_message, started) -> TurnRead`）と返り値を変えずに、中で `last_context(tail, Reply(last_message))` を呼ぶ。#4068 の実装は、次の 2 点を #4068 の詳細設計から替える。
+#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail: str, known_ttl, last_message, started) -> TurnRead`）と返り値の型（`TurnRead`）を変えずに、中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の実装は、次の 3 点を #4068 の詳細設計から替える。
 
 - **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読み、その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）ので、`agents.tail` の文字列（任意のバイトの位置から始まり、先頭の切れた行を捨てない）を渡さない
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなり、空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、`noted` に無ければ `stop_waking`（`scope` `once`）を書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである
+- **寿命が決められないとき**: #4068 の設計の決定 2 の表で、寿命別の書き込みが両方 0 で `known_ttl` も None の行は「決められないので起こさない」である。#4068 の詳細設計の `LastTurn.ttl` は `1h`・`5m` だけなので、`ttl` に None を許し、`wake_at` は `ttl` が None なら None（起こさない）を返す。`TurnRead` は `LastTurn` を持つので、世代・待ち・`last` の書き込みは今のまま進む（会話を止める `form` にも、`unrecorded` にもしない）
 
 状態から `TurnRead` への対応は次のとおりで、ここが対応の唯一の保存先である。
 
 | `last_context` の結果 | `last_turn` の結果 |
 | --- | --- |
-| `current` | 寿命とモデルを同じ `message_id` の行から読む。そろえば `TurnRead(LastTurn, None)`、欠ければ `TurnRead(None, "form")`。時刻が `started` より後なら `TurnRead(None, "newer")` |
+| `current` | 下の表の項目をすべて `ContextRead` とその `entry`（量と同じ採用行）から読む。項目の 1 つでも「欠け・型違い」に当たれば `TurnRead(None, "form")`。そろい、`at > started` なら `TurnRead(None, "newer")`、ほかは `TurnRead(LastTurn, None)`（`form` を `newer` より先に確かめる） |
 | `none`（`form`） | `TurnRead(None, "form")` |
 | `behind`・`none`（`unrecorded`・`compacted`・`partial`・`empty`） | `TurnRead(None, "unrecorded")`（一時的） |
+
+`current` のときの `LastTurn` の項目の取り出し元（`u` は `entry["message"]["usage"]`）:
+
+| 項目 | 取り出し元 | 欠け・型違い（`form`） |
+| --- | --- | --- |
+| `message_id` | `ContextRead.message_id` | 無い（`last_context` が確かめ済み） |
+| `at` | `timestamp_seconds(ContextRead.timestamp)` | 無い（`last_context` が None でないことを確かめ済み。None が来たら `form`） |
+| `tokens` | `ContextRead.tokens` | 無い（`last_context` が確かめ済み） |
+| `cache_read` | `u` の `cache_read_input_tokens`。無ければ 0（`tokens` の和と同じ規則） | 無い（`last_context` が確かめ済み） |
+| `cache_write` | `u` の `cache_creation_input_tokens`。無ければ 0（同上） | 無い（同上） |
+| `output` | `u` の `output_tokens` | 無い・整数でない |
+| `model` | `entry["message"]["model"]` | 無い・空・文字列でない |
+| `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら `known_ttl`（None なら `ttl` None。上の「寿命が決められないとき」） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
+
+同じ `message.id` の前の行は、どの項目でも読まない。前の行と採用行で `usage` が違う複数行の応答でも、文脈の量（`tokens`・`S`）と起床の費用（`cache_read`・`cache_write`・`output`・`ttl`）は同じ採用行の値になる。
