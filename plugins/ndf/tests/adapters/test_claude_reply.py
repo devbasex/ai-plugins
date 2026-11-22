@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -123,11 +124,94 @@ def test_call_claude_timeout_is_not_ok(no_run_env):
     assert got.error.startswith("claude が期限を超えた: ") and got.failure is claude.Failure.TIMEOUT
 
 
-# ---------------------------------------------------------------- 中継のアカウントの親（#3604 の 11。確かめの本体は relay のテスト）
+# ---------------------------------------------------------------- 中継の確かめの差し込み（#3604 の 11。確かめの本体は relay のテスト）
 
 
-def test_call_claude_reads_the_relay_checks_through_the_entry_point():
-    """下の層の call_claude は中継の部品を読めないので、エントリポイントが名前から読んだ確かめを使う。"""
-    from ndf.domains.relay import plan_claude
+RECORD = "import json, os, sys; sys.stdin.read(); open(os.environ['OUT'], 'a').write('x'); print(json.dumps({'result': '{}'}))"
+LIMITED = "import json, sys; sys.stdin.read(); print(json.dumps({'is_error': True, 'api_error_status': 429, 'result': 'limit'}))"
 
-    assert claude._accounts() is plan_claude
+
+class FakeChecks:
+    """差し込む偽の確かめ。`begin` は `got` を返し、`retry` は `again` を返す。呼ばれた回数を数える。"""
+
+    def __init__(self, got, again=None):
+        self.got, self.again, self.calls = got, again, []
+
+    def begin(self, argv, env, cwd, keys):
+        self.calls.append(("begin", keys))
+        return self.got
+
+    def retry(self, argv, env, cwd, keys):
+        self.calls.append(("retry", keys))
+        return self.again
+
+
+def test_without_injected_checks_an_inherited_account_launches_as_before(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "relay_checks", None)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.setenv("OUT", str(tmp_path / "out"))
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.ok and (tmp_path / "out").read_text() == "x"
+
+
+def test_injected_checks_are_not_used_for_the_default_login(tmp_path, monkeypatch):
+    checks = FakeChecks(claude.AccountRefused(claude.Failure.REFUSED, "x"))
+    monkeypatch.setattr(claude, "relay_checks", checks)
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)
+    monkeypatch.setenv("OUT", str(tmp_path / "out"))
+
+    assert claude.call_claude([sys.executable, "-c", RECORD], "q", 30).ok and checks.calls == []
+
+
+def test_a_refusal_from_the_injected_checks_does_not_launch(tmp_path, monkeypatch):
+    checks = FakeChecks(claude.AccountRefused(claude.Failure.REFUSED, "key_gate"))
+    monkeypatch.setattr(claude, "relay_checks", checks)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "key:k1")
+    monkeypatch.setenv("OUT", str(tmp_path / "out"))
+
+    got = claude.call_claude([sys.executable, "-c", RECORD, *claude.PRINT_JSON], "q", 30)
+
+    assert (got.ok, got.failure, got.error) == (False, claude.Failure.REFUSED, "key_gate")
+    assert not (tmp_path / "out").exists() and checks.calls == [("begin", False)]
+
+
+def test_a_limit_is_retried_once_with_the_run_from_the_injected_checks(tmp_path, monkeypatch):
+    ended = []
+    out = tmp_path / "out"
+    first = claude.AccountRun(dict(os.environ), [sys.executable, "-c", LIMITED], end=lambda launched: ended.append(("first", launched)))
+    env = {**os.environ, "OUT": str(out)}
+    again = claude.AccountRun(env, [sys.executable, "-c", RECORD], end=lambda launched: ended.append(("again", launched)))
+    checks = FakeChecks(first, again)
+    monkeypatch.setattr(claude, "relay_checks", checks)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", LIMITED], "q", 30)
+
+    assert got.ok and out.read_text() == "x"
+    assert checks.calls == [("begin", False), ("retry", False)] and ended == [("first", True), ("again", True)]
+
+
+def test_a_failed_attach_stops_the_gated_child_before_it_becomes_claude(tmp_path, monkeypatch):
+    """関所の子は `attach` が理由を返すと開けられずに止まり、偽の claude は呼ばれず、`end` は起動しなかったとして呼ばれる。"""
+    ended = []
+
+    def gate(argv, fd, status_fd):
+        code = "import os, sys; fd = int(sys.argv[1]); go = os.read(fd, 1); os._exit(0 if go != b'1' else os.execvp(sys.argv[3], sys.argv[3:]))"
+        return [sys.executable, "-c", code, str(fd), str(status_fd), *argv]
+
+    run = claude.AccountRun(
+        {**os.environ, "OUT": str(tmp_path / "out")},
+        [sys.executable, "-c", RECORD],
+        gate=gate,
+        attach=lambda pid: "lease_lost",
+        end=ended.append,
+    )
+    monkeypatch.setattr(claude, "relay_checks", FakeChecks(run))
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+
+    got = claude.call_claude([sys.executable, "-c", RECORD], "q", 30)
+
+    assert got.failure is claude.Failure.LAUNCH and "lease_lost" in str(got.error)
+    assert not (tmp_path / "out").exists() and ended == [False]

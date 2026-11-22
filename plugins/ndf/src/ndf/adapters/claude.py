@@ -12,7 +12,7 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 中継の子から継いだ起動先（環境の `NDF_CLAUDE_ACCOUNT`）があれば、起動の前に中継の確かめ（`begin`）を当て、上限に当たったら
 替え先で 1 回だけ打ち直す（`retry`。#3604 #3864 の U12）。確かめの本体は `ndf.domains.relay.plan_claude` にあり、下の層の
-このモジュールは読めないので、エントリポイント（`ndf.cli.relay_checks`）がサブコマンドと同じく名前から読む。
+このモジュールは読めないので、一番上のエントリポイントが `set_relay_checks` で差し込む。差し込まれていなければ確かめを当てない。
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
 
-from ndf import cli, identity, process_group
+from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
 from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env
@@ -51,8 +51,6 @@ ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
 # U11a の実機の確かめ（PR #4086。Claude Code 2.1.330）で json・stream・min-json・min-stream の 4 形はどれも、標準入力を読み終えるか
 # 3 秒待ち切るまで helper を呼ばなかったので、置く形は無い（キーの子の claude -p は `key_gate` で起動しない）
 KEY_FORMS: frozenset[str] = frozenset()
-# 中継の確かめ（`begin`・`retry` を持つモジュール）を読む関数。起動先を継いだ `call_claude` だけが呼ぶ
-_accounts: Callable[[], Any] = cli.relay_checks
 
 
 class Permission(StrEnum):
@@ -330,6 +328,24 @@ class AccountRefused(NamedTuple):
     detail: str
 
 
+class RelayChecks(Protocol):
+    """中継の起動先を継いだ `claude -p` の確かめ（`ndf.domains.relay.plan_claude` が満たす）。`keys` は起動の形がキーを渡せるか。"""
+
+    def begin(self, argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) -> Union[AccountRun, AccountRefused]: ...
+
+    def retry(self, argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) -> Optional[AccountRun]: ...
+
+
+# 差し込まれた中継の確かめ。None なら確かめを当てない（エントリポイントを通らない呼び出しとテスト）
+relay_checks: Optional[RelayChecks] = None
+
+
+def set_relay_checks(checks: Optional[RelayChecks]) -> None:
+    """中継の確かめを差し込む（一番上のエントリポイントが起動時に 1 回呼ぶ）。"""
+    global relay_checks
+    relay_checks = checks
+
+
 class ClaudeReply(NamedTuple):
     """`claude -p --output-format json` の 1 回の回答。`answer` は縛った回答（`structured_output`）か本文の JSON。
 
@@ -421,16 +437,15 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
                 cli_floor.require("claude", argv[0], env, cwd)
             except cli_floor.TooOld as exc:
                 return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
-            if not env.get("NDF_CLAUDE_ACCOUNT"):
+            if relay_checks is None or not env.get("NDF_CLAUDE_ACCOUNT"):
                 return _run_claude(argv, prompt, timeout, cwd, env)
-            return _accounted(list(argv), prompt, timeout, cwd, env)
+            return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env)
     except launch_slot.NotLaunched as exc:
         return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
 
 
-def _accounted(argv: list[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
+def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
     """起動先を継いだ起動。中継の確かめに通れば起動し、登録済みアカウントの上限なら替え先で 1 回だけ打ち直す（決定 9）。"""
-    checks = _accounts()
     where = cwd if cwd is not None else Path.cwd()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
     keys = launch_form(argv) in KEY_FORMS
     got = checks.begin(argv, env, where, keys)

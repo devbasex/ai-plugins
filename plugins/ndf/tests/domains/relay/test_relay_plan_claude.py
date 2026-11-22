@@ -54,8 +54,8 @@ else:
 
 @pytest.fixture(autouse=True)
 def accounts_on(monkeypatch):
-    """`ndf` のエントリポイントが入れる中継の確かめを、テストでも入れる。"""
-    monkeypatch.setattr(claude, "_accounts", lambda: plan_claude)
+    """`ndf` のエントリポイント（`ndf/__main__.py`）が差し込む中継の確かめを、テストでも差し込む。"""
+    monkeypatch.setattr(claude, "relay_checks", plan_claude)
 
 
 @pytest.fixture(autouse=True)
@@ -237,10 +237,13 @@ def test_3604_11_the_lease_is_gone_after_a_timeout(tmp_path, monkeypatch):
 def test_default_login_does_not_load_the_relay_checks(tmp_path, monkeypatch):
     fake = Fake(tmp_path, monkeypatch)
 
-    def boom():
-        raise AssertionError("既定のログインで中継の確かめを読んだ")
+    class Boom:
+        def begin(self, *args):
+            raise AssertionError("既定のログインで中継の確かめを当てた")
 
-    monkeypatch.setattr(claude, "_accounts", boom)
+        retry = begin
+
+    monkeypatch.setattr(claude, "relay_checks", Boom())
 
     got = fake.call(*FULL)
 
