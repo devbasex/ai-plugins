@@ -67,15 +67,22 @@ class GuardSteps:
         return self._confirm(sec, "limit", now, judge)
 
     def _spent(self, sec: Section, now: float) -> bool:
-        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上か（上限の行の文言の変化に備える）。
+        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上か、使用率の API が上限の到達を返したか
+        （上限の行の文言の変化と、上限の行を出さない子に備える）。
 
         別のレーンが書いた上限の観測（`Usage.limited`）では検出しない（静かなだけの子を止めない）。観測は替え先の除外に使う。
+        `limited` の行のうち実測値で説明できないものだけ、今の世代の取得の記録の `spend_limit_reached` を読んで区別する。
         """
-        if sec.target is None or sec.target.lease is None:
+        t = sec.target
+        if t is None or t.lease is None or t.account is None:
             return False
         usage = self._inputs(now, False).usage
-        rows = usage.rows if usage is not None else []
-        return any(u.name == sec.account and u.percent is not None and u.percent >= accounts.FULL for u in rows)
+        mine = next((u for u in (usage.rows if usage is not None else []) if u.name == sec.account), None)
+        if mine is None or not mine.limited:
+            return False
+        if mine.percent is not None and mine.percent >= accounts.FULL:
+            return True
+        return accounts.spend_reached(self.store, t.account, t.generation)
 
     def _see_limit(self, sec: Section, line: str, now: float) -> bool:
         """今の登録済みアカウントの上限の観測を書く。書けた（か書かない起動先）なら真、錠を取れない・書けなければ偽。"""

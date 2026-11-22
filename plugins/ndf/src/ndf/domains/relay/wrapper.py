@@ -270,9 +270,9 @@ class Wrapper(GuardSteps, LaunchSteps):
         self.last_skip = ""
         self.memo = None  # 替え先の判断のキャッシュ（`GuardSteps._confirm`）
         self.fetcher = None if settings.fetch is None else wrapper_fetch.Fetcher(settings.state_dir, settings.fetch)
-        # 上限の観測の until（解けた後も、過ぎた後の取得の判定を 1 回終えるまで残す）と、取得の判定の結果の再利用
-        # （名前 → (世代・2 つの記録のスタンプ・tried・until, 次に `due` が真になる時刻)）
-        self.limit_untils: dict[str, float] = {}
+        # 上限の観測の until（名前 → (登録の世代, until)。解けた後も、過ぎた後の取得の判定を 1 回終えるまで残し、
+        # 世代が変われば捨てる）と、取得の判定の結果の再利用（名前 → (世代・2 つの記録のスタンプ・tried・until, 次に `due` が真になる時刻)）
+        self.limit_untils: dict[str, tuple[str, float]] = {}
         self.due_memo: dict[str, tuple[tuple, float]] = {}
 
     def run(self, prompt: str) -> Ended:
@@ -374,12 +374,14 @@ class Wrapper(GuardSteps, LaunchSteps):
             return
         usage = self._inputs(now, False).usage
         interval = limits.seconds("relay.usage-fetch")
+        gens = self.reader.generations()
         seen = usage.limited_until if usage is not None else {}
-        for n in [n for n, u in self.limit_untils.items() if n not in seen and u > now]:
-            del self.limit_untils[n]  # 期限の前に窓で解けた観測は残さない（過ぎた時刻で取り直さない）
-        self.limit_untils.update(seen)
-        for name, gen in self.reader.generations().items():
-            until = self.limit_untils.get(name)
+        for n in [n for n, (g, u) in self.limit_untils.items() if gens.get(n) != g or (n not in seen and u > now)]:
+            # 期限の前に窓で解けた観測は残さない（過ぎた時刻で取り直さない）。登録し直した名前は旧い世代の until を捨てる
+            del self.limit_untils[n]
+        self.limit_untils.update({n: (gens[n], u) for n, u in seen.items() if n in gens})
+        for name, gen in gens.items():
+            until = self.limit_untils.get(name, (gen, None))[1]
             passed = until is not None and until <= now
             tried = f.tried.get(name)
             quiet = not passed and tried is not None and now - tried < interval and usage is not None and now < usage.valid_until

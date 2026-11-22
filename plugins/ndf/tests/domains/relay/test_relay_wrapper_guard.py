@@ -354,6 +354,28 @@ def test_r1_3_another_lanes_observation_does_not_stop_a_quiet_child_without_a_sp
     assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason and not rows_of(w, "wait_reset")
 
 
+def test_r2_1_a_spend_limit_from_the_api_switches_a_quiet_child_without_a_spent_window(tmp_path):
+    # cross-review の r2-1: 使用率の API が上限の到達を返したら、窓が 100% 未満で上限の行の無い静かな子も上限として替える
+    now = time.time()
+
+    stores = []
+
+    def prepare(d, state):
+        stores.append(register(tmp_path, "work1", "work2"))
+        accounts.use(state, "work1")
+
+    def on_start(_sid):  # 起動の後に取得が上限の到達を返した
+        path = accounts.fetch_path(stores[0], "work1", "g1")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": now, "error": None, "windows": {}, "spend_limit_reached": True}), encoding="utf-8")
+        put_window(tmp_path, "work1", 50.0, now + 3600, now)
+        put_window(tmp_path, "work2", 10.0, now + 3600, now)
+
+    first = Hooked([b"working\r\n"] + [b""] * 8, None, on_start)
+    ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare)
+    assert _envs(spawn) == ["work1", "work2"] and spawn.calls[1][0][-1] == switch_decide.RESUME_PROMPT
+
+
 def _fetching(tmp_path, at):
     """取得の記録の `at` を別のラッパーが書いた形にした work1 と、キューへ入れた名前を数えるラッパー。"""
     store = register(tmp_path, "work1")
@@ -375,6 +397,34 @@ def test_r1_4_an_until_that_passed_since_the_last_try_queues_a_fetch(tmp_path):
     assert put == []
     w._queue_fetch(base + 11)
     assert put == [("work1", base + 11, base + 10)] and w.limit_untils == {}
+
+
+def test_r2_2_an_until_of_the_old_generation_does_not_queue_a_fetch_after_reregistering(tmp_path):
+    # cross-review の r2-2: 保留した until は登録の世代にひも付け、登録し直した名前では旧い世代の until で取り直さない
+    base = time.time()
+    w, put = _fetching(tmp_path, base - 1)
+    accounts.see_limit(tmp_path / "state", "work1", "g1", base, (base + 10, None, None))
+    w._queue_fetch(base)
+    assert put == [] and w.limit_untils == {"work1": ("g1", base + 10)}
+    store = register(tmp_path, "work1", generation="g2")  # 登録し直し、新しい世代はすぐに取った
+    path = accounts.fetch_path(store, "work1", "g2")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": base, "error": None, "windows": {}}), encoding="utf-8")
+    w._queue_fetch(base + 11)
+    assert put == [] and w.limit_untils == {}
+
+
+def test_r2_3_due_does_not_read_the_windows_once_the_interval_passed(tmp_path, monkeypatch):
+    # cross-review の r2-3: 取得のワーカーが排他の中で打つ `due` は、定期取得の間隔を満たせば窓のファイルを読まない
+    base = time.time()
+    store = register(tmp_path, "work1")
+    fetch = accounts.fetch_path(store, "work1", "g1")
+    fetch.parent.mkdir(parents=True, exist_ok=True)
+    fetch.write_text(json.dumps({"at": base, "error": None, "windows": {}}), encoding="utf-8")
+    usage = accounts.usage_path(tmp_path / "state", "work1", "g1")
+    monkeypatch.setattr(accounts, "read_windows", lambda *a: pytest.fail("窓を読んだ"))
+    interval = limits.seconds("relay.usage-fetch")
+    assert accounts.due(usage, fetch, base + interval, interval, None, None)
 
 
 def test_r1_5_a_fetch_taken_by_another_wrapper_is_not_rechecked_every_patrol(tmp_path, monkeypatch):

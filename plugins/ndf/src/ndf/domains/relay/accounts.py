@@ -463,6 +463,11 @@ def read_windows(usage: Path, fetch: Path) -> Windows:
     return _read_merged(usage, _read_json(fetch))
 
 
+def spend_reached(store: Path, name: str, generation: str) -> bool:
+    """使用率の API が、この名前・世代の上限の到達（`spend_limit_reached`）を真で返したか（取得の記録が読めなければ偽）。"""
+    return _read_json(fetch_path(store, name, generation)).get("spend_limit_reached") is True
+
+
 def _read_merged(usage: Path, fetched: Mapping[str, Any]) -> Windows:
     """`read_windows` の本体。取得の記録は読んだ後の内容で受け取る。"""
     return _merged(_read_windows(usage), _flat(fetched.get("windows")), -math.inf)
@@ -492,8 +497,19 @@ def due(usage: Path, fetch: Path, now: float, interval: float, until: Optional[f
     """取り直すか（I16）。最後に試した時刻から `interval` を過ぎたか、その後に過ぎたリセット（窓・上限の観測の `until`）があれば真。
 
     最後に試した時刻は取得の記録の `at` と `tried`（このラッパーが最後にキューへ入れた時刻）の大きいほう。
+    間隔を満たせば窓のファイルを読まずに真を返す（取得のワーカーが排他の中で打つので読み込みを増やさない）。
+    次に判定が変わる時刻の要る見回りは `due_at` を使う。
     """
-    return due_at(usage, fetch, interval, until, tried) <= now
+    tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
+    if not tried_at:
+        return True
+    last = max(tried_at)
+    if now - last >= interval:
+        return True
+    resets = [r for _, r in read_windows(usage, fetch).values()]
+    if until is not None:
+        resets.append(until)
+    return any(last < t <= now for t in resets)
 
 
 def due_at(usage: Path, fetch: Path, interval: float, until: Optional[float], tried: Optional[float]) -> float:
