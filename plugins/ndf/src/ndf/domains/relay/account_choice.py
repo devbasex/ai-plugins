@@ -365,12 +365,12 @@ def verify(
 def _key_ok(r: account_dir.Resolved, expected: Mapping[str, str]) -> bool:
     """登録簿のキーの子の実効値（詳細設計書の「起動の前の実効値の確かめ」）。提供元の選択がどれも偽、認証の値とヘッダーが空、
     接続先が既定（`DEFAULT_API_URL`）か空、ほかの確かめの変数が期待値と同じ、解けない源が無い。"""
-    base = (r.env.get("ANTHROPIC_BASE_URL") or "").rstrip("/")  # noqa: NDF501 利用者の入力: 無い接続先は既定の接続先
+    raw = r.env.get("ANTHROPIC_BASE_URL") or ""  # noqa: NDF501 利用者の入力: 無い接続先は既定の接続先
     return (
         not r.unresolved
         and all(reg.provider_on(r.env.get(k)) is False for k in reg.PROVIDER_ENV)
         and not any(r.env.get(k) for k in (*reg.AUTH_ENV, "ANTHROPIC_CUSTOM_HEADERS"))
-        and base in ("", account_dir.DEFAULT_API_URL)
+        and (raw == "" or raw.rstrip("/") == account_dir.DEFAULT_API_URL)  # 空かは元の値で見る（`/` だけの値を空と読まない）
         and all((r.env.get(k) or "") == (expected.get(k) or "") for k in _KEY_SAME)  # noqa: NDF501 利用者の入力: 無いと空文字を同じに読む
     )
 
@@ -388,7 +388,8 @@ class Read(NamedTuple):
 
     store: Path
     stamps: Mapping[str, Optional[tuple]]
-    exe_of: Optional[ExeOf] = None  # 関所のバージョンを読む `claude` の実パスの手（None なら `environ` の `PATH` で解決する）
+    # 子の環境の `PATH` で関所のバージョンを読む `claude` の実パスを返す手（None なら `cli_floor.resolve` をそのまま打つ）
+    exe_for: Optional[Callable[[Mapping[str, str]], Optional[str]]] = None
 
 
 def read_before(store: Path) -> Read:
@@ -407,7 +408,8 @@ def fallbacks(
     落ちれば前の 2 つだけ）。ファイルを書かない（`--settings` のファイルの合成は確かめ用の起動引数に JSON の文字列で置く）。
     `read` は呼び手が設定と登録簿を読む前に取ったスタンプ（`read_before`）。`stat` し直さない（読んだ後に更新されたスタンプで
     読む前のスタンプを上書きすると、古い設定の判定が残る）。
-    `claude` の実パスは関所のバージョンに依る候補（キーの子）があるときだけ `read.exe_of`（無ければ `environ` の `PATH`）で 1 回解決する。
+    `claude` の実パスは関所のバージョンに依る候補（キーの子）があるときだけ、候補の最終の環境の `PATH` で `read.exe_for` が解決する
+    （登録簿のキーの子は `environ` の `PATH` で 1 回。従量の接続の API キーの設定が `PATH` を持てば、その `PATH` でも 1 回）。
     """
     source = _settings_source(argv, cwd)
     extra = {str(source): account_dir.stat_stamp(source)} if source is not None else {}  # 通ったか外れたかによらず依存先に入れる
@@ -417,17 +419,25 @@ def fallbacks(
     names = sorted(book["keys"]) if book is not None and reg.use_on(book) else []
     gated = bool(names) or (metered is not None and _is_key(metered))
     src = _source(argv, cwd) if gated else ({}, False)
-    exe = (read.exe_of() if read.exe_of is not None else cli_floor.resolve(CLAUDE, environ, cwd)) if gated else None
-    if exe is not None:  # 関所の働くバージョンかは実行ファイルで決まるので、置き換わったら判定し直す
-        extra[exe] = account_dir.stat_stamp(Path(exe))
 
-    def exe_of() -> Optional[str]:
-        return exe
+    def exe_in(env: Mapping[str, str]) -> Callable[[], Optional[str]]:
+        exe = read.exe_for(env) if read.exe_for is not None else cli_floor.resolve(CLAUDE, env, cwd)
+        if exe is not None:  # 関所の働くバージョンかは実行ファイルで決まるので、置き換わったら判定し直す
+            extra[exe] = account_dir.stat_stamp(Path(exe))
+        return lambda: exe
 
+    exe_of = exe_in(environ) if gated else None
     out: list[account_dir.Probe] = []
     if metered is not None and reg.METERED not in tried:
         env = session_env.child_env(environ, Path(), reg.METERED, decided=True)  # 起動先を確定した子の環境（状態の保存先を読まない）
-        out.append(_probe(reg.METERED, _build(env, metered, cwd, argv, [], src), {**read.stamps, **extra}, cwd, environ, exe_of))
+        got = _build(env, metered, cwd, argv, [], src)
+        # 設定が `PATH` を重ねれば、実際の子と同じくその `PATH` で `claude` を解く
+        own = (
+            exe_in(got.child)
+            if not isinstance(got, str) and got.helper is not None and got.child.get("PATH") != environ.get("PATH")
+            else None
+        )
+        out.append(_probe(reg.METERED, got, {**read.stamps, **extra}, cwd, environ, own or exe_of))
     for name in names:
         target = f"{KEY_PREFIX}{name}"
         if target not in tried:
@@ -472,7 +482,10 @@ def drift(
     wait = None
     if target.startswith(KEY_PREFIX):
         book = _book(store)  # 無いか読めない登録簿のキーは消されたとして扱う。世代と使い方は同じ読み取りから照らす
-        gen = reg.row_generation(book["keys"].get(target[len(KEY_PREFIX) :])) if book is not None else None
+        row = book["keys"].get(target[len(KEY_PREFIX) :]) if book is not None else None
+        gen = (
+            reg.row_generation(row) if reg.row_key(row) is not None else None
+        )  # 値だけが消えた行も消されたとして扱う（払い出しと同じ検証）
         wait = "key_removed" if gen is None else "key_rekeyed" if gen != started.generation else None
         wait = wait or ("key_off" if not reg.use_on(book) else None)
     if started.helper is None:

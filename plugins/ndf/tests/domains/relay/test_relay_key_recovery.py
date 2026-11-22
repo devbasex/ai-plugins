@@ -134,8 +134,10 @@ def test_d12_fallbacks_has_no_api_key_while_the_use_is_off(tmp_path):
         ({"ANTHROPIC_BASE_URL": GATEWAY}, "key_overridden"),
         ({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/"}, None),
         ({"ANTHROPIC_CUSTOM_HEADERS": "X-Fake: secret-header-value"}, "key_overridden"),
+        ({"ANTHROPIC_BASE_URL": "/"}, "key_overridden"),
+        ({"ANTHROPIC_BASE_URL": "///"}, "key_overridden"),
     ],
-    ids=["gateway", "default-url", "headers"],
+    ids=["gateway", "default-url", "headers", "slash-only", "slashes-only"],
 )
 def test_d12_a_registry_key_goes_only_to_the_default_endpoint(tmp_path, extra, code):
     store = register(tmp_path)
@@ -409,6 +411,37 @@ def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_pat
     assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2", "key:k1"]
     sec.rekeyed = False
     assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2"]
+
+
+def test_r5_2_a_metered_key_declaration_with_its_own_path_is_judged_with_that_path(tmp_path, monkeypatch):
+    # 従量の API キーの設定が `PATH` を重ねれば、候補選定も止める直前の確かめもその `PATH` の `claude` で関所のバージョンを読む
+    dirs = _versions_by_exe(monkeypatch, tmp_path)
+    decl_dir = tmp_path / "bin-decl"
+    decl_dir.mkdir()
+    link = decl_dir / "claude"
+    link.symlink_to(dirs["old"] / "claude")
+    store = register(tmp_path)
+    decl = f"ANTHROPIC_API_KEY={KEY_MAIN} PATH={decl_dir}"
+    s, environ, _ = _child(tmp_path, PATH=str(dirs["new"]), NDF_SUPERVISE_CLAUDE_FALLBACK=decl)
+    reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
+    assert reg.METERED not in reader.read(0.0, True).fallbacks()
+    assert reader.recheck_fallback(reg.METERED) == "key_gate"
+    link.unlink()
+    link.symlink_to(dirs["new"] / "claude")
+    assert reader.recheck_fallback(reg.METERED) is None
+    assert reg.METERED in reader.read(1.0, True).fallbacks()
+
+
+def test_r5_3_a_key_value_removed_while_the_child_runs_is_a_removed_key(tmp_path):
+    # 世代を残したまま値だけが消えた行は、払い出しと同じ検証で消されたキー（止めてよい時点を待つ当たり）として扱う
+    store = register(tmp_path)
+    put_book(store)
+    book = reg.read_book(store)
+    del book["keys"]["key-main"]["key"]
+    reg.write(reg.book_path(store), book)
+    _, _, child = _child(tmp_path)
+    wait, _, _ = account_choice.drift("key:key-main", child, ["claude"], tmp_path, store, account_choice.Started("gen-1", None))
+    assert wait == "key_removed"
 
 
 def test_r1_7_the_sweep_reads_proc_only_when_a_leftover_can_go(tmp_path, monkeypatch):

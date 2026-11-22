@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import errno
 import functools
 import os
 import select
@@ -80,6 +81,7 @@ NO_UPDATE_REASON = "同じ会話を続ける手では更新しない"
 # 停止で次のセグメントを保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
 HALT_LINE = f"ndf-relay: 次のセグメントを起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 NO_CWD = "作業ディレクトリ {cwd} が無い"
+NOT_FOUND = "子の PATH に {exe} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
@@ -238,10 +240,12 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tupl
 
     `pass_fds` は関所（`account_dir.gated`）の開ける 1 バイトの読み口と起動の知らせの書き口。
     実行ファイルは子の `PATH` と作業ディレクトリで解決した絶対パスで渡す（ptyprocess は親の `PATH` で解決するため、確かめたバージョンと
-    別の `claude` を起動しない）。見つからなければそのまま渡し、起動の失敗にする。
+    別の `claude` を起動しない）。子の `PATH` で見つからなければ、親の `PATH` で探し直させずに `FileNotFoundError`（起動の失敗）。
     """
-    found = cli_floor.locate(argv[0], env, cwd) if argv else None
-    argv = [found, *argv[1:]] if found is not None else argv
+    found = cli_floor.locate(argv[0], env, cwd)
+    if found is None:
+        raise FileNotFoundError(errno.ENOENT, NOT_FOUND.format(exe=argv[0]))
+    argv = [found, *argv[1:]]
     try:
         size = os.get_terminal_size(sys.stdout.fileno())
         dims = (size.lines, size.columns)
