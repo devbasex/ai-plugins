@@ -84,6 +84,15 @@ def test_a_broken_complete_line_is_unsure_but_a_cut_edge_is_skipped(tmp_path):
     assert observe.turn_done(path, path.stat().st_size - first + 5)[0] is True
 
 
+def test_the_first_complete_line_after_a_cut_edge_is_read_alone(tmp_path):
+    # 切れた断片の直後の完全な行が最後の応答でも、断片と混ぜずに読む
+    reply = _assistant("end_turn", TEXT)
+    path = _write(tmp_path, [PROMPT, reply, TAIL_ROW])
+    tail = len(json.dumps(reply, ensure_ascii=False).encode()) + len(json.dumps(TAIL_ROW).encode()) + 2
+    assert observe.turn_done(path, tail + 5)[0] is True
+    assert observe.tool_pending(path, tail + 5) is False
+
+
 def test_reading_stops_at_the_last_assistant(tmp_path):
     # 最後の assistant より前の行は読まない（壊れていても判定に効かない）
     path = _write(tmp_path, [], tail='{"broken\n' + "".join(json.dumps(r) + "\n" for r in [_assistant("end_turn", TEXT), TAIL_ROW]))

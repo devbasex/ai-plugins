@@ -93,7 +93,7 @@ def _lines_backward(path: Path, size: int) -> Iterator[str]:
         lo = len(data) if cut < 0 else cut + 1
     hi = data.rfind(b"\n")
     while hi >= lo:
-        prev = data.rfind(b"\n", lo, hi)
+        prev = max(data.rfind(b"\n", lo, hi), lo - 1)  # 範囲内に改行が無ければ最初の完全な行は lo から
         yield data[prev + 1 : hi].decode("utf-8", errors="replace")
         hi = prev
 
