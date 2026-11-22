@@ -26,7 +26,7 @@ def state(**changes):
 
 
 def test_question_is_forwarded_before_anything_else():
-    got = switch_decide.decide(state(question=True, next_block="/goal x", auth_failed=True))
+    got = switch_decide.decide(state(question=True, next_block="/goal x", auth_pick=Pick("switch", "work2", "認証の失敗")))
     assert got.kind == "forward"
 
 
@@ -79,10 +79,33 @@ def test_context_over_the_limit_asks_for_a_handover_once():
     assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "wait"
 
 
-def test_auth_failure_is_reported_as_stalled_not_running():
-    # 認証の失敗で /goal が外れたレーンを running のまま扱わない（#3243）
-    got = switch_decide.decide(state(auth_failed=True))
-    assert got.kind == "stalled"
+def test_3864_7_an_auth_failure_without_a_target_is_stalled_while_the_child_is_alive():
+    # 受け入れ条件 #3864 の 7: 替え先が無ければ子を残す（stalled）。子が終わっていれば今の終わりの判断へ
+    pick = Pick("stalled", "work1", "work1 の認証に失敗し、替える先が無い")
+    assert switch_decide.decide(state(auth_pick=pick)).kind == "stalled"
+    assert switch_decide.decide(state(auth_pick=pick, child_alive=False, child_exit=0)).kind == "finish"
+
+
+def test_3864_6_an_auth_failure_resumes_on_the_target_with_the_auth_prompt():
+    # 受け入れ条件 #3864 の 6: 認証の失敗の switch は account の手で、同じ会話を AUTH_RESUME_PROMPT で続ける
+    got = switch_decide.decide(state(auth_pick=Pick("switch", "work2", "work1 の認証に失敗した"), next_block="/goal x"))
+    assert got == ("account", "work1 の認証に失敗した", switch_decide.AUTH_RESUME_PROMPT, "work2")
+    assert switch_decide.AUTH_RESUME_PROMPT == "認証の失敗でアカウントを替えた。中断したところから続ける"
+
+
+def test_3864_6_the_limit_comes_before_an_auth_failure():
+    # 上限の行と認証の失敗が同時なら上限が先（上限の switch も wait_reset も）
+    auth = Pick("switch", "work2", "認証")
+    got = switch_decide.decide(state(limit_pick=Pick("switch", "main", "上限"), auth_pick=auth))
+    assert (got.kind, got.prompt, got.account) == ("account", switch_decide.RESUME_PROMPT, "main")
+    assert switch_decide.decide(state(limit_pick=Pick("wait_reset", "work1", "待つ"), auth_pick=auth)).kind == "wait_reset"
+
+
+def test_3864_6_an_auth_switch_to_a_seen_target_in_a_spin_is_spin():
+    # 再起動ループの検出: 続きの中で既に起動した替え先なら spin、初めての替え先なら account
+    auth = Pick("switch", "work2", "認証")
+    assert switch_decide.decide(state(auth_pick=auth, spin=True, spin_seen=frozenset({"work2"}))).kind == "spin"
+    assert switch_decide.decide(state(auth_pick=auth, spin=True, spin_seen=frozenset({"work1"}))).kind == "account"
 
 
 def test_limit_pick_switches_account_with_resume_prompt():

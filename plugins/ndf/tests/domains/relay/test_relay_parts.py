@@ -511,8 +511,7 @@ def test_context_tokens_come_from_the_last_reply(tmp_path):
 
 
 def test_screen_facts():
-    assert observe.auth_failed(observe.plain(b"\x1b[31mPlease run /login\x1b[0m"))
-    assert observe.auth_failed("Goal cleared after an unrecoverable error (authentication failed)")
+    assert observe.auth_failed(observe.plain(b"\x1b[31mInvalid API key\x1b[0m"))
     assert not observe.auth_failed("all good")
 
 

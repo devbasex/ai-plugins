@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ndf.domains.relay import observe
 
 SIZE = 4096
@@ -110,3 +112,82 @@ def test_an_unreadable_record_is_none(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.open", deny)
     assert observe.turn_done(path, SIZE) is None and observe.tool_pending(path, SIZE) is None
+
+
+# ---------------------------------------------------------------- 認証の失敗の確かめ（U10。#3864 の決定 6・判断 13）
+
+SINCE = 1_000.0  # セグメントを起動した時刻（AT より前）
+LATER = 4_102_444_800.0  # AT より後（前のセグメントの失敗を読まないかの確かめ）
+
+
+def _api_error(error, status, text="Failed to authenticate: OAuth session expired and could not be refreshed"):
+    """claude が書く API の失敗の記録（実測の形。`error`・`apiErrorStatus` は記録の最上位の欄）。"""
+    row = {"type": "assistant", "timestamp": AT, "isApiErrorMessage": True, "error": error, "message": _assistant(None, {"type": "text", "text": text})["message"]}
+    if status is not None:
+        row["apiErrorStatus"] = status
+    return row
+
+
+RETRY_401 = {"type": "system", "subtype": "api_error", "timestamp": AT, "error": {"status": 401, "message": "authentication_error"}}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "⎿  Invalid API key · Fix external API key",
+        "● Login expired · Please run /login",
+        "Not logged in · run /login",
+        "Failed to authenticate: this login reached its time limit and cannot be renewed.",
+    ],
+)
+def test_3864_6_the_four_measured_lines_are_triggers(line):
+    # conductor の決定: 引き金は Failed to authenticate・Invalid API key・Login expired・Not logged in の 4 つ（大文字小文字を問わない）
+    assert observe.auth_failed(observe.plain(f"\x1b[31m{line}\x1b[0m".encode()))
+    assert observe.auth_failed(line.upper())
+
+
+@pytest.mark.parametrize("line", ["401 invalid x-api-key · retrying in 3s · attempt 3/10", "all good"])
+def test_3864_6_the_retry_line_of_an_api_key_is_not_a_trigger(line):
+    # API キーの打ち直しの間の行は引き金にしない（打ち直しが尽きた後の Invalid API key を待つ）
+    assert not observe.auth_failed(line)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [PROMPT, _api_error("authentication_failed", None), TAIL_ROW],  # OAuth の期限切れ（apiErrorStatus が無い）
+        [PROMPT, _api_error("authentication_failed", 401, "Invalid API key · Fix external API key"), TAIL_ROW],  # API キー
+        [PROMPT, _api_error("unknown", 401)],  # apiErrorStatus が 401 だけ
+        [PROMPT, RETRY_401, _api_error("authentication_failed", None), TAIL_ROW, {"type": "cost-state"}],
+    ],
+    ids=["oauth", "api-key", "status-401-only", "after-retries"],
+)
+def test_3864_6_a_credential_failure_is_the_last_conversation_row(tmp_path, rows):
+    # 判定は会話の行の最後の assistant の記録だけ。ファイルの最後の会話でない行は飛ばす
+    assert observe.credential_failure(_write(tmp_path, rows), SIZE, SINCE) is True
+
+
+@pytest.mark.parametrize(
+    "rows, since",
+    [
+        ([PROMPT, _api_error("rate_limit", 429)], SINCE),  # 上限は守り 3 が扱う
+        ([PROMPT, _api_error("billing_error", 400)], SINCE),  # 残高不足
+        ([PROMPT, _api_error("permission_error", 403)], SINCE),  # 権限の制限は替えない
+        ([PROMPT, RETRY_401, _api_error("permission_error", 403), TAIL_ROW], SINCE),  # 打ち直しの 401 は読まない
+        ([PROMPT, _api_error("authentication_failed", None), PROMPT], SINCE),  # 後ろに利用者の記録がある
+        ([PROMPT, _api_error("authentication_failed", None)], LATER),  # セグメントの起動より前の失敗
+        ([PROMPT, _assistant("end_turn", {"type": "text", "text": "API Error: 401 · Invalid API key"})], SINCE),  # 応答の引用
+        ([{**_api_error("authentication_failed", 401), "isApiErrorMessage": False}], SINCE),  # API の失敗の記録でない
+    ],
+    ids=["429", "400", "403", "retry-401-then-403", "user-after", "older", "quote", "not-api-error"],
+)
+def test_3864_6_other_failures_and_quotes_are_not_a_credential_failure(tmp_path, rows, since):
+    assert observe.credential_failure(_write(tmp_path, rows), SIZE, since) is False
+
+
+def test_3864_6_an_unsure_record_is_not_a_credential_failure(tmp_path):
+    # 確かめられない（無い・壊れた行・形が違う）ときは何もしない
+    assert observe.credential_failure(tmp_path / "missing.jsonl", SIZE, SINCE) is False
+    broken = _write(tmp_path, [PROMPT, _api_error("authentication_failed", None)], tail='{"type": "user", "mess\n')
+    assert observe.credential_failure(broken, SIZE, SINCE) is False
+    assert observe.credential_failure(_write(tmp_path, [{"type": "assistant", "message": "x"}]), SIZE, SINCE) is False
