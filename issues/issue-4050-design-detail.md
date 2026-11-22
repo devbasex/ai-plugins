@@ -67,7 +67,7 @@ plugins/ndf/
 | `src/ndf/progress/plan/wait_decide.py` | 変更 | `lane_held`・`lane_row_ended` を知らせにする | — | — | `NOTICE_KINDS`（変更） |
 | `src/ndf/progress/plan/__init__.py` | 変更 | 表示に `touches`・`held`・一覧を載せ、`add_lane` に書き手を渡せるようにし、質問のリクエストに `metadata` を載せる | `lane`・`idle` | — | `_row_item`・`_lane_items`・`_plan_metrics`・`add_lane`・`ask_request`・`complete_plan`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 質問のファイル（`question.json`）に AskUserQuestion の `metadata` を写す | — | — | 質問を書く関数（変更） |
-| `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes idle refresh / set / show` と呼び出し元の役割 | `idle` | — | `_cmd_idle`・`caller_actor`（新設） |
+| `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes idle refresh / set / show`・`ndf lanes batch` と呼び出し元の役割 | `idle`・`plan` | — | `_cmd_idle`・`_cmd_batch`・`caller_actor`（新設） |
 
 ## #4091 へ分けたもの（範囲外）
 
@@ -86,7 +86,7 @@ plugins/ndf/
 
 ## フェーズの表・順序・排他（`phases.json`・`definition`・`run`・`rules`・`lane`）
 
-満たす決定: 決定 1・決定 16・決定 17・決定 18・決定 19、提案の受け入れ条件 17〜21（承認資料）、不変条件 I2・I14〜I17
+満たす決定: 決定 1・決定 16・決定 17・決定 18・決定 19・決定 20、提案の受け入れ条件 17〜21（承認資料）、不変条件 I2・I14〜I17
 
 ### 契約の形
 
@@ -94,13 +94,13 @@ plugins/ndf/
 
 ```json
 {"phases": [
-  {"id": "design", "name": "設計", "shared": "その課題の文書と設計 Pull Request", "exclusion": "none", "requires": []},
-  {"id": "implement", "name": "実装", "shared": "コード（touches）・テストのスロット", "exclusion": "after_touches", "requires": ["design"]},
-  {"id": "release", "name": "リリース", "shared": "リポジトリの版", "exclusion": "release_batch", "requires": ["implement"]},
-  {"id": "spec", "name": "確定仕様化", "shared": "docs/specifications/ の該当ファイル", "exclusion": "declared_paths", "requires": ["implement"]},
-  {"id": "verify", "name": "検証", "shared": "利用者の環境に入った版・本物のアカウント", "exclusion": "one_per_repo", "requires": ["release"]},
-  {"id": "retrospective", "name": "振り返り", "shared": "Issue・Pull Request のコメントと新しい起票", "exclusion": "none", "requires": ["verify"]},
-  {"id": "backlog", "name": "棚卸し", "shared": "Issue の本文・マイルストーン・着手の順位", "exclusion": "one_per_repo", "requires": ["retrospective", "spec"]}
+  {"id": "design", "name": "設計", "shared": "その課題の文書と設計 Pull Request", "exclusion": "none", "requires": [], "context": "none", "carrier": "lane"},
+  {"id": "implement", "name": "実装", "shared": "コード（touches）・テストのスロット", "exclusion": "after_touches", "requires": ["design"], "context": "strong", "carrier": "lane"},
+  {"id": "release", "name": "リリース", "shared": "リポジトリの版", "exclusion": "organizer_batch", "requires": ["implement"], "context": "weak", "carrier": "organizer"},
+  {"id": "spec", "name": "確定仕様化", "shared": "docs/specifications/ の該当ファイル", "exclusion": "declared_paths", "requires": ["implement"], "context": "medium", "carrier": "lane"},
+  {"id": "verify", "name": "検証", "shared": "利用者の環境に入った版・本物のアカウント", "exclusion": "organizer_batch", "requires": ["release"], "context": "weak", "carrier": "organizer"},
+  {"id": "retrospective", "name": "振り返り", "shared": "Issue・Pull Request のコメントと新しい起票", "exclusion": "none", "requires": ["verify"], "context": "strong", "carrier": "lane"},
+  {"id": "backlog", "name": "棚卸し", "shared": "Issue の本文・マイルストーン・着手の順位", "exclusion": "organizer_batch", "requires": ["retrospective", "spec"], "context": "weak", "carrier": "organizer"}
 ]}
 ```
 
@@ -123,7 +123,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `PhaseDef` | `stages.py` | 新設 | `@dataclass(frozen=True) (id: str, name: str, exclusion: str, requires: tuple[str, ...])` | フェーズの表の 1 行 |
+| `PhaseDef` | `stages.py` | 新設 | `@dataclass(frozen=True) (id: str, name: str, exclusion: str, requires: tuple[str, ...], context: str, carrier: str)` | フェーズの表の 1 行 |
 | `StageDef.phase` | `stages.py` | 変更 | `Optional[str]` | クリーンアップは None |
 | `load_phases` | `definition.py` | 新設 | `() -> dict[str, PhaseDef]` | `phases.json` を読み、`requires` が表の `id` だけを指し輪を作らない（`graphlib.TopologicalSorter`）ことを確かめる。違えば定義の読み込みの誤りとして断る |
 | `_stage_def` | `definition.py` | 変更 | 変えない | `phase=meta.get("phase")`。値が表に無ければ定義の誤り（I16） |
@@ -134,11 +134,15 @@ plugins/ndf/
 | `Env.hold` | `run.py` | 変更 | `Callable[[StageDef, str, Optional[list[str]]], HoldResult]`（工程・フェーズ・宣言） | 計画の外は `HoldResult(enter=True)` |
 | `Env.idle` | `run.py` | 新設 | `Callable[[str, str], None]`（理由・工程） | `next` が待ち（承認の回答待ちかフェーズの待ち）を返す直前に呼ぶ。レーンでは `lane.mark_idle`、計画の外は何もしない |
 | `phase_of` | `lane/rules.py` | 新設 | `(row: LaneRow) -> Optional[str]` | 行が占めるフェーズ。実行中で、最後の `row_entered` が最後の `row_held` より新しければその `phase`、そうでなければ None（I14） |
-| `occupants` | `lane/rules.py` | 新設 | `(view, lanes, lane: str, phase: str) -> list[str]` | 同じリポジトリ（`_same_repo`）の別のレーンの実行中の行のうち `phase_of` が `phase` の行を `<レーン>/<行>` で返す。開発ループの行（`kind: loop`）は数えない |
+| `occupants` | `lane/rules.py` | 新設 | `(view, lanes, lane: str, phase: str) -> list[str]` | 同じリポジトリ（`_same_repo`）の別のレーンの実行中の行のうち `phase_of` が `phase` の行を `<レーン>/<行>` で返す。開発ループの行（`kind: loop`）は数えない。使うのは `spec_overlaps` だけ |
 | `spec_overlaps` | `lane/rules.py` | 新設 | `(view, lanes, lane: str, paths: list[str]) -> list[str]` | `occupants(…, "spec")` のうち、その行の `spec_paths` と `touch_hit` で重なる行。`paths` が空なら空 |
-| `phase_wait` | `lane/rules.py` | 新設 | `(view, lanes, lane: str, row: LaneRow, phase: str, paths: Optional[list[str]]) -> list[str]` | 規則 → 判定の表（`{"none": 空, "release_batch": 空, "after_touches": implementation_wait, "one_per_repo": occupants, "declared_paths": spec_overlaps}`）を引いて待つ先を返す。起動し直しの判定は、待ちの行の最後の `row_held` の `phase`（並びならそのどれか）の `phase_wait` が空かで決める |
+| `phase_wait` | `lane/rules.py` | 新設 | `(view, lanes, lane: str, row: LaneRow, phase: str, paths: Optional[list[str]]) -> list[str]` | 規則 → 判定の表（`{"none": 空, "organizer_batch": 空, "after_touches": implementation_wait, "declared_paths": spec_overlaps}`）を引いて待つ先を返す。起動し直しの判定は、待ちの行の最後の `row_held` の `phase`（並びならそのどれか）の `phase_wait` が空かで決める |
 | `enter_phase` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, stage: str, phase: str, paths: Optional[list[str]], base, git) -> HoldResult` | 下の「`enter_phase` の手順」 |
 | `mark_idle` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str, stage: str) -> Optional[int]` | 最後の `row_idle` が最後の `row_entered`・`row_answered` より新しければ書かない（同じ待ちの打ち直し）。そうでなければ `row_idle` を `checked_write` で書く |
+| `Env.delegate` | `run.py` | 新設 | `Callable[[StageDef, str], Optional[DelegateResult]]`（工程・フェーズ） | フェーズの表の `carrier` が `organizer` のフェーズ（検証・棚卸し）の最初の工程を始める手前で呼ぶ。計画の外は None（今のとおり行の conductor が流す）。リリースは今のリリースのリクエストのままで呼ばない |
+| `delegate` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, phase: str, stages: list[str], version: Optional[str]) -> DelegateResult` | 計画の排他の中で、同じ行の同じフェーズの委ねのリクエストが無ければ `request_opened`（`lane-verify` か `lane-backlog`）を書く。あれば書かずにそのキーを返す |
+| `_start`（委ねの枝） | `run.py` | 変更 | 変えない | `Env.delegate` がキーを返したら、そのフェーズの工程を始めずに「委ねた」として記録する。検証はステップの待ち（`waiting`。回答で終わる）にして `Env.idle("delegated", 工程)` を呼び、ほかの候補が無ければ待ちを返す。棚卸しは工程を `completed`（中身に委ねたリクエストのキー）にして次へ進む |
+| `batch` | `plan/__init__.py` | 新設 | `(conn, plan_id: str, keys: list[str], phase: str, result: str, report: str, reason: str) -> dict` | 挙げたリクエストが同じリポジトリ・同じフェーズの開いた委ねのリクエストかを確かめ、結果を書いて同じトランザクションで閉じる（`ndf lanes release` と同じ形）。CLI は `plan/cli.py` の `_cmd_batch`（書き手はオーガナイザーだけ） |
 | `LaneRow` の欄 | `lane/types.py` | 変更 | `phase: Optional[str]`・`entered: dict[str, int]`・`entered_seq: int`・`spec_paths: tuple[str, ...]`・`idle_seq: int`・`held_phase: tuple[str, ...]` | `implementing_seq` は `entered.get("implement", 0)` と同じ値を持つ。`holding` は `state == RUNNING and held_seq > entered_seq` |
 | `LaneRow.awaiting_next` | `lane/types.py` | 変更 | `@property -> bool` | 今の条件（`answered_seq > resumed_seq`）に、`not (entered_seq > idle_seq and idle_seq > 0)` を足す。`row_idle` を一度も持たない行（更新の前の行）は今のとおり |
 
@@ -160,7 +164,7 @@ plugins/ndf/
 3. `phase` が `spec` で `paths` が None なら、書かずに `HoldResult(declare=True)`
 4. `phase_wait` が空なら `row_entered`（`phase`・`stage`・`spec` なら `paths`）を書いて `HoldResult(enter=True)`
 5. 空でなければ、同じフェーズを待つ `row_held` が今の着席にあれば書かずに今の待ちを返し（I2）、無ければ `row_held`（`phase`・`waiting`・`stage`・`paths`）と計画の `lane_held` を同じトランザクションで書いて `HoldResult(held=…)`
-6. `none`・`release_batch` のフェーズは 4 だけを通る（排他は取るが待たない。`row_entered` は表示と占有の終わりのために書く）
+6. `none`・`organizer_batch` のフェーズは 4 だけを通る（排他は取るが待たない。`row_entered` は表示と占有の終わりのために書く）
 
 ### 異常系の処理
 
@@ -174,9 +178,11 @@ plugins/ndf/
 
 ### 単体テストの観点
 
-- `load_phases`: 7 つの `id` と `requires` が本文の図と同じ。輪を作る表・表に無い `id` を指す表で断る
+- `load_phases`: 7 つの `id` と `requires` が本文の図と、`context`・`carrier` が本文の「コンテキストの依存と担い手」の表と同じ。輪を作る表・表に無い `id` を指す表で断る
 - `decide`: `standard` の行で、デプロイが承認ゲートで回答を待つ間に `START`（確定仕様化）が返る。回答が載った後でも、確定仕様化が動いている間は確定仕様化（`RESUME`）が返る。確定仕様化を終えた後に回答があればデプロイの `CONSUME`。検証が `held` の行は確定仕様化を候補に残す。振り返りは検証の前に候補に入らない。棚卸しは振り返りと確定仕様化の両方が終わるまで候補に入らない。`light` の棚卸しは確定仕様化が無くても候補に入る。クリーンアップは Pull Request の直後に候補に入る
 - `phase_of`・`occupants`: `row_held` を後に持つ行は占めない。別のリポジトリのレーンと開発ループの行を数えない
+- `delegate`・`_start` の委ねの枝: 検証に入った計画の行の `next` が `lane-verify` を 1 回だけ書いて待ちを返し、打ち直しで増えない。回答の後の `next` がリポートを `verification` へ写して検証の工程を終える。棚卸しは `lane-backlog` を書いた `next` で工程が終わる。計画の外のスプリントは委ねない
+- `batch`: 別のリポジトリか別のフェーズのリクエストを混ぜると断る。オーガナイザー以外の書き手で断る
 - `spec_overlaps`: 別のファイルの宣言は重ならず、glob（`docs/specifications/*.md`）と具体のパスは重なる。空の宣言（`none`）は重ならない
 - `enter_phase`: `declare` は記録を書かない。同じフェーズの待ちを打ち直しても `row_held` が増えない。別のフェーズの待ちは別に書く（I2）
 - `awaiting_next`: `row_idle` → `row_answered` の行は真、`row_idle` → `row_entered` → `row_answered` の行は偽、`row_idle` を持たない行は今のとおり
@@ -579,9 +585,9 @@ plugins/ndf/
 | `skills/development-workflow/references/parallel-checks.md` | 「マシン全体の稼働中の数」に、実装の待ちの行を数えないことを足す |
 | `skills/issue-plan-strategy/references/parallel-plan.md` | `after` の行を「スプリントの行では実装のフェーズを始める条件、開発ループの行では行を始める条件」に直す |
 | `docs/contracts/commands.md` | `ndf lanes answered` の `--gate`（任意。承認ゲートの回答なら質問の id）、`ndf lanes row resumed` の `--answered`、`ndf lanes idle`、`status`・`wait` の結果の足したキー、`ndf progress next` の `held`・`drift` |
-| `contracts/schemas/io/lanes.args.schema.json` | `idle` の 3 つのサブコマンドの引数 |
+| `contracts/schemas/io/lanes.args.schema.json` | `idle` の 3 つのサブコマンドと `batch` の引数 |
 | `contracts/schemas/io/progress.args.schema.json` | `next` の `--spec-paths`（1 つ以上のパスか `none`） |
-| `skills/development-workflow/references/parallel.md`（7 つのフェーズ） | 節「7 つのフェーズ」を足し、フェーズと排他の表・順序の図・`declare` を受けたときの手（設計文書から書く確定仕様のパスを決めて `--spec-paths` で宣言する）・検証と棚卸しの待ちの読み方を書く。「まとめたリリース」に、リリースのフェーズの排他はこの節が持つと 1 文足す |
+| `skills/development-workflow/references/parallel.md`（7 つのフェーズ） | 節「7 つのフェーズ」を足し、フェーズと排他の表・順序の図・`declare` を受けたときの手（設計文書から書く確定仕様のパスを決めて `--spec-paths` で宣言する）・検証と棚卸しの待ちの読み方を書く。「まとめたリリース」の後ろに節「まとめた検証と棚卸し」を足す（委ねのリクエストを同じリポジトリでまとめ、単発の担い手（`ndf:supervisor`）に任せ、`ndf lanes batch` で閉じ、検証は各行へ `answered` を打つ）。文脈の上限に近づいた conductor の引継ぎ文書に、依存の強い境目（設計 → 実装・実装 → 振り返り）で決めたことの理由と捨てた案を残すことを書く |
 | `skills/development-workflow/SKILL.md`・`references/agent-layers.md`・`references/context-window.md` | 工程の並び（Pull Request → クリーンアップ → デプロイ → 確定仕様化 → 検証 → 振り返り → 棚卸し）と、承認の回答を待つ間に確定仕様化を流すことに直す |
 | `skills/plan-to-spec/SKILL.md` | 確定仕様化が実装の worktree を使わず、基のブランチから自分の worktree を作ること。書く確定仕様のパスを最初に決めること（計画の行では `--spec-paths` の宣言に使う） |
-| `docs/glossary/glossary.json`・`docs/glossary.md` | 設計文書の「用語」の 9 語を足し、`ndf records glossary render` で作り直す |
+| `docs/glossary/glossary.json`・`docs/glossary.md` | 設計文書の「用語」の 11 語を足し、`ndf records glossary render` で作り直す |
