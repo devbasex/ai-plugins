@@ -9,7 +9,7 @@
 ```text
 plugins/ndf/
 ├── contracts/
-│   ├── workflow/progress.json              # 事象 row_held・row_implementing・row_drift_reviewed・row_parked・row_seated・lane_held・lane_row_ended・idle_listed・idle_adjusted、lane_added の書き手
+│   ├── workflow/progress.json              # 事象 row_held・row_implementing・row_drift_reviewed・row_parked・row_seated・row_unparked・lane_held・lane_row_ended・idle_listed・idle_adjusted、lane_added の書き手
 │   └── schemas/io/lanes.args.schema.json   # ndf lanes idle の引数
 ├── docs/contracts/commands.md              # ndf lanes idle・status・wait、ndf progress next の結果
 ├── src/ndf/domains/relay/signals.py        # 質問のファイルに AskUserQuestion の metadata を写す
@@ -18,10 +18,10 @@ plugins/ndf/
 │   ├── run.py                              # Env.hold・Env.peek・_start・wait と next の手の組み立て・--drift-reviewed
 │   ├── gate/answering.py                   # lane_env
 │   ├── lane/
-│   │   ├── types.py                        # LaneRow の held_seq・held・implementing_seq・drift・review・drift_reviewed・parked_seq・seated_seq・holding・parked
-│   │   ├── fold.py                         # row_held・row_implementing・row_drift_reviewed・row_parked・row_seated の畳み込み、idle_* の畳み込み
-│   │   ├── rules.py                        # next_row・implementation_wait*・_order_graph（実装の開始で辺を切り替える）
-│   │   ├── __init__.py                     # begin_implementation*・review_drift*・changed_paths*・drift*・park*・seat*・end_row（lane_row_ended）
+│   │   ├── types.py                        # LaneRow の held_seq・held・implementing_seq・drift・review・drift_reviewed・parked_seq・seated_seq・unparked_seq・seat_fail・holding・parked・seat_progressed
+│   │   ├── fold.py                         # row_held・row_implementing・row_drift_reviewed・row_parked・row_seated・row_unparked の畳み込み、idle_* の畳み込み
+│   │   ├── rules.py                        # next_row・implementation_wait*・park_reason*・_order_graph・_after_sources（実装の開始で辺を切り替え、始めた行へは終わった行からだけ引く）
+│   │   ├── __init__.py                     # begin_implementation*・review_drift*・changed_paths*・drift*・park*・seat*・unpark*・end_row（lane_row_ended）
 │   │   ├── machine.py                      # lanes_of・held_seats（実装の待ちと席を返した行を数えない）
 │   │   ├── liveness.py                     # HELD・席を返した行の判定
 │   │   └── launch.py                       # 起動し直しの入力（next → row resumed --answered の順）
@@ -29,7 +29,7 @@ plugins/ndf/
 │       ├── __init__.py                     # _row_item・_lane_items・_plan_metrics、add_lane の書き手、ask_request（質問の metadata）
 │       ├── idle.py*                        # refresh*・adjust*・current*・show*
 │       ├── run.py                          # _halts・_parks*・snapshot_of・launch_lane（席の取り直し）・assign_idle*（耐久ステップ）
-│       ├── run_decide.py                   # Snapshot の released・parks・parked・idle・free、RunState.assign_failed、_launches・_after_observe・Assign*
+│       ├── run_decide.py                   # Snapshot の released・parks・parked・idle・free、Launch の answered・hold・fail_key、RunState.assign_failed、_launches・_after_observe・_fail・Assign*・ParkAct*
 │       ├── wait_decide.py                  # NOTICE_KINDS
 │       └── cli.py                          # ndf lanes idle・caller_actor*・answered の --gate・row resumed の --answered
 └── tests/progress/                         # test_lane・test_lane_machine・test_plan・test_plan_run・test_plan_wait・test_run_hold*・test_plan_idle*
@@ -39,20 +39,20 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `contracts/workflow/progress.json` | 変更 | 事象の定義に 9 つ足し、`lane_added` の書き手に `workflow` を足す | — | — | — |
+| `contracts/workflow/progress.json` | 変更 | 事象の定義に 10 足し、`lane_added` の書き手に `workflow` を足す | — | — | — |
 | `src/ndf/progress/model.py` | 変更 | 設計文書の名前と設計ブランチの head から課題の番号を取り出す | — | — | `design_issues`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 最初の `implement` の工程の手前で `Env.hold` を呼び、`work`・`wait`・`next` のどれでも待ちと確認を返す | `stages` | `Env` | `Env.hold`・`Env.peek`（新設の欄）、`_start`・`_drive`・`wait`・`report`・`_cmd_wait`（変更）、`_hold_report`・`_drift_report`（新設） |
 | `src/ndf/progress/gate/answering.py` | 変更 | `Env.hold`・`Env.peek` を取得・実装の開始の判定と記録につなぐ | `lane`・`run`・`ndf.adapters.git` | — | `lane_env`（変更） |
-| `src/ndf/progress/lane/types.py` | 変更 | 行の実装の待ちと実装の開始を持つ | — | `LaneRow` | `held_seq`・`held_at`・`held`・`hold_base`・`implementing_seq`・`drift`・`review`・`drift_reviewed`・`parked_seq`・`seated_seq`（欄）、`holding`・`implementing`・`parked`（新設） |
-| `src/ndf/progress/lane/fold.py` | 変更 | `row_held`・`row_implementing`・`row_drift_reviewed`・`row_parked`・`row_seated` と `idle_*` を畳み込む | `types` | — | レーンの畳み込み（変更）、`fold_idle`（新設） |
-| `src/ndf/progress/lane/rules.py` | 変更 | スプリントの行は `after` を見ずに始め、実装の手前で `after` と未確定の `touches` を照らす。I13 のグラフの辺を実装の開始で切り替える | `types` | — | `next_row`・`_order_graph`（変更）、`implementation_wait`（新設） |
-| `src/ndf/progress/lane/__init__.py` | 変更 | 実装の開始を判定して待ちか開始を書き、変わったファイルを求め、行の終わりを計画へ知らせる。回答の記録に質問の id を載せ、再開の印は回答の消費を確かめたときだけ書く | `rules`・`model`・`ndf.adapters.git` | — | `begin_implementation`・`review_drift`・`changed_paths`・`drift`・`park`・`seat`（新設）、`end_row`・`record_answer`・`record_resumed`（変更） |
+| `src/ndf/progress/lane/types.py` | 変更 | 行の実装の待ちと実装の開始を持つ | — | `LaneRow` | `held_seq`・`held_at`・`held`・`hold_base`・`implementing_seq`・`drift`・`review`・`drift_reviewed`・`parked_seq`・`seated_seq`・`unparked_seq`・`seat_fail`（欄）、`holding`・`implementing`・`parked`・`seat_progressed`（新設） |
+| `src/ndf/progress/lane/fold.py` | 変更 | `row_held`・`row_implementing`・`row_drift_reviewed`・`row_parked`・`row_seated`・`row_unparked` と `idle_*` を畳み込む | `types` | — | レーンの畳み込み（変更）、`fold_idle`（新設） |
+| `src/ndf/progress/lane/rules.py` | 変更 | スプリントの行は `after` を見ずに始め、実装の手前で `after` と未確定の `touches` を照らす。I13 のグラフの辺を実装の開始で切り替え、実装を始めた行と始まった行へは起点の終わった行からだけ辺を引く。席を返す理由を 1 か所で決める | `types` | — | `next_row`・`_order_graph`・`_after_sources`（変更）、`implementation_wait`・`park_reason`（新設） |
+| `src/ndf/progress/lane/__init__.py` | 変更 | 実装の開始を判定して待ちか開始を書き、変わったファイルを求め、行の終わりを計画へ知らせる。回答の記録に質問の id を載せ、再開の印は回答の消費を確かめたときだけ書く | `rules`・`model`・`ndf.adapters.git` | — | `begin_implementation`・`review_drift`・`changed_paths`・`drift`・`park`・`seat`・`unpark`（新設）、`end_row`・`record_answer`・`record_resumed`（変更） |
 | `src/ndf/progress/lane/machine.py` | 変更 | 実装の待ちの行と席を返した行のレーンを、記録だけで数えない | `types` | — | `lanes_of`・`held_seats`（変更） |
 | `src/ndf/progress/lane/liveness.py` | 変更 | 実装の待ちの行を `held`、承認ゲートで席を返した行を `waiting_answer` と記録から判定し、席を返す前の承認ゲートの待ちを見分ける | `types`・`stages` | — | `judge`・`judge_lanes`（変更）、`HELD`（定数）、`gate_wait`（新設） |
-| `src/ndf/progress/lane/launch.py` | 変更 | 回答の後の next と待ちの起動し直しの入力を `ndf progress next` → `ndf lanes row resumed` の順にし、回答の後の next では対象の回答の番号（`--answered <answered_seq>`）を渡す | — | — | 回答の後の next の入力（変更） |
+| `src/ndf/progress/lane/launch.py` | 変更 | 回答の後の next と待ちの起動し直しの入力を `ndf progress next` → `ndf lanes row resumed` の順にし、回答の後の next では対象の回答の番号（`--answered <Launch.answered>`。起動のキーの番号と別に運ぶ）を渡す | — | — | 回答の後の next の入力（変更） |
 | `src/ndf/progress/plan/idle.py` | 新設 | 一覧の作り直し・調整・読み | `lane`・`machine`・`github` | — | `refresh`・`adjust`・`current`・`show`・`order` |
 | `src/ndf/progress/plan/run.py` | 変更 | 写しに待ち・席を返す先・一覧を載せ、席の返却と取り直し・割り当ての耐久ステップを持つ | `idle`・`plan` | — | `_halts`・`snapshot_of`・`launch_lane`（変更）、`_parks`・`park_lane`・`assign_idle`（新設） |
-| `src/ndf/progress/plan/run_decide.py` | 変更 | 待ちの起動し直し・席を返す手・割り当ての手を足し、1 行に続きの手を 1 つに絞り、一覧が残る間は完了にしない | — | `Snapshot`・`RunState`・`Assign`（新設） | `_launches`・`_after_observe`・`decide`（変更）、`_assignable`（新設） |
+| `src/ndf/progress/plan/run_decide.py` | 変更 | 待ちの起動し直し・席を返す手・割り当ての手を足し、1 行に続きの手を 1 つに絞り、一覧が残る間は完了にしない | — | `Snapshot`・`RunState`・`Launch`・`Assign`（新設）・`ParkAct`（新設） | `_launches`・`_after_observe`・`decide`・`_fail`（変更）、`_assignable`・`Launch.fail_key`（新設） |
 | `src/ndf/progress/plan/wait_decide.py` | 変更 | `lane_held`・`lane_row_ended` を知らせにする | — | — | `NOTICE_KINDS`（変更） |
 | `src/ndf/progress/plan/__init__.py` | 変更 | 表示に `touches`・`held`・一覧を載せ、`add_lane` に書き手を渡せるようにし、質問のリクエストに `metadata` を載せる | `lane`・`idle` | — | `_row_item`・`_lane_items`・`_plan_metrics`・`add_lane`・`ask_request`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 質問のファイル（`question.json`）に AskUserQuestion の `metadata` を写す | — | — | 質問を書く関数（変更） |
@@ -60,7 +60,7 @@ plugins/ndf/
 
 ## 実装の待ちの判定と記録（`rules`・`lane`）
 
-満たす決定: 決定 2・決定 3・決定 6・決定 8、受け入れ条件 1・2・5・6
+満たす決定: 決定 2・決定 3・決定 6・決定 8・決定 13・決定 14、受け入れ条件 1・2・4・5・6・16
 
 ### 関数の仕様
 
@@ -68,18 +68,25 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `implementation_wait` | `lane/rules.py` | 新設 | `(view: PlanView, lanes: Lanes, lane: str) -> list[str]` | レーンの `after` のうち `after_met` が偽の値を、計画の並びの順で返す。レーンが `idle` を持ち `touches` が空なら、末尾に印 `TOUCHES_UNSET` を足す |
 | `next_row` | `lane/rules.py` | 変更 | 変えない | 行の入力が `kind: sprint` なら `waiting_after` を常に空にする。`loop` は今のとおり |
-| `_order_graph` | `lane/rules.py` | 変更 | 変えない | スプリントの行のレーンでは、レーン全体を指す `after` の辺を行ごとに引く。実装の開始を記録した行（`implementing`）へは、今の「始まった行」と同じく起点の始まった行から（`_after_sources(ref, lanes, True)`）、まだ実装を始めていない行（未着手と設計のフェーズの行）へは起点の末尾から（`_after_sources(ref, lanes, False)`）引く。先頭の行と最初の未着手の行だけで決めない。開発ループの行のレーンは今のとおり行の状態で読む |
+| `_order_graph` | `lane/rules.py` | 変更 | 変えない | スプリントの行のレーンでは、レーン全体を指す `after` の辺を行ごとに引く。実装の開始を記録した行（`implementing`）へは起点の終わった行から（`_after_sources(ref, lanes, ended=True)`）、まだ実装を始めていない行（未着手と設計のフェーズの行）へは起点の末尾から（`_after_sources(ref, lanes, ended=False)`）引く。先頭の行と最初の未着手の行だけで決めない。開発ループの行のレーンは今のとおり行の状態で読み、始まった行へは同じく起点の終わった行から（`ended=True`）、最初の未着手の行へは起点の末尾から引く（決定 14） |
+| `_after_sources` | `lane/rules.py` | 変更 | `(ref: str, lanes: Lanes, ended: bool) -> list[tuple[str, str]]` | `after` の 1 つが指す起点の行。`ended` が真なら、起点のうち終わった（完了か中止の）行だけを採る。レーンを指せばその終わった行の末尾、行を指せばその行が終わっていればその行で、どちらも無ければ空。偽なら今のとおりレーンの末尾の行か指した行。今の `started`（未着手でない行を採る）をやめる。実行中の行を起点に採ると、実行中の 2 行に後から足した `after` が前後の辺になり、I13 が重なりを見逃すため（決定 14） |
+| `park_reason` | `lane/rules.py` | 新設 | `(row: LaneRow, gate_key: Optional[str], alive: Optional[bool]) -> Optional[str]` | 席を返す理由を 1 か所で決める。`parked` でない実行中の行で、(1) `holding` で `held_seq > seated_at_seq` なら `held` (2) `gate_key`（`gate_wait` が返したリクエストのキー）があれば `gate`（実装を始めた行も含む。リリース承認を待つ行は実装を始めた後にある） (3) `holding` か `awaiting_next` で `alive` が偽なら `vacant`。`alive` が None（ラッパーの一覧を読めない）なら (3) を決めない。どれでもなければ None。耐久ワークフローの観測（`_parks`）と書く前の再検証（`park`）が同じこの関数を読み、2 つの条件を食い違わせない。`gate_key` は、観測では `gate_wait` が、再検証では `lane.regate` が作る（どちらも「回答が今の着席の後に載っていない・今の質問の id のリクエストが開いている」を同じ条件で見る）。再検証では `alive` を読まず（None を渡す）、(3) は手の理由が `vacant` のとき `holding` か `awaiting_next` が真かだけを確かめる（決定 13） |
 | `begin_implementation` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, stage: str, base: Callable[[], BaseRef], git: Callable[[], Git]) -> Begin` | 下の「手順」で、待ちか実装の開始のどちらかを、計画の排他の中で 1 回で決めて書く。`base`・`git` は Git が要ると決まったときだけ呼ぶ（`Git.remote()` も `git worktree list` もそれまで打たない） |
 | `review_drift` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str) -> None` | 実装の開始を記録し `review` が真の行に `row_drift_reviewed` を書く（確認待ちの判定は `review && !drift_reviewed` の 1 つで、`drift` の値を見ない）。記録が無い・`review` が偽・既に書いた行は書かない |
 | `changed_paths` | `lane/__init__.py` | 新設 | `(git: Git, base_sha: str, head_sha: str) -> Optional[list[str]]` | 計画の排他の外で `git diff --name-only <base_sha>..<head_sha>` を 1 回打ち、変わったパスを返す。読めなければ None |
 | `drift` | `lane/__init__.py` | 新設 | `(paths: Optional[Sequence[str]], touches: Sequence[str]) -> Optional[list[str]]` | 計画の排他の中で、`changed_paths` の結果のうち最新の `touches` のどれかと `touch_hit` で当たるものを昇順で返す。`paths` が None なら None。Git を読まない |
-| `park` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, reason: str, stopped: bool, request: Optional[str], seat: int, observed_answer: int) -> Optional[int]` | `lock_plan` の中で行を読み直し、`park_lane` の手順 1 の再検証を通った実行中の行にだけ `row_parked`（書き手 workflow）を書く。外れれば書かずに None |
-| `seat` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, launch_key: str) -> Optional[int]` | `lock_plan` の中で行を読み直し、席を返した行に `row_seated`（書き手 workflow）を書く。席を返していない行は書かない。`launch_lane` はラッパーを起動する前に呼ぶ |
+| `regate` | `lane/__init__.py` | 新設 | `(view: PlanView, row: LaneRow, act: ParkAct, current_gate: Callable[[], Optional[str]]) -> Optional[str]` | 再検証の `gate_key` を DB だけで作る。次のすべてを満たせば `act.request`、どれかが欠ければ None: (1) 回答が今の着席の後に載っていない（`answered_seq <= seated_at_seq`。`gate_wait` の (2) と同じ条件） (2) 計画のリクエスト `act.request` が開いている (3) `current_gate()` が `act.gate`（観測した質問の id）と同じ (4) そのリクエストの中身が `act.gate` と行のスプリントに合う（`lane_question` は `metadata.gate`・`metadata.sprint`、`lane-release` は `id` の `lane-release-<質問の id>`・`sprint_state`）。`park` と `park_lane` の手順 3 が呼ぶ |
+| `park` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, act: ParkAct, current_gate: Callable[[], Optional[str]]) -> Optional[int]` | `lock_plan` の中で行を読み直し、`park_lane` の手順 1 の再検証を通った実行中の行にだけ `row_parked`（書き手 workflow。中身に `reason`・`stopped`・`request`・`gate`）を書く。外れれば書かずに None。`current_gate` はスプリントが今待つ承認ゲートの質問の id を DB だけで読む関数で、呼び手（`plan/run.py`）が `gate.asking.waiting` から作って渡す（`lane` は `gate` を import しない。`record_resumed` の `consumed` と同じ形） |
+| `seat` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, launch_key: str, fail_key: str) -> Optional[int]` | `lock_plan` の中で行を読み直し、席を返した行に `row_seated`（書き手 workflow。中身に `launch`・`fail`）を書く。席を返していない行は書かない。`launch_lane` はラッパーを起動する前に呼ぶ |
+| `unpark` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, seat: int, reason: Literal["stop_failed", "gate_changed"]) -> Optional[int]` | `lock_plan` の中で行を読み直し、席を返した行で `seated_at_seq` が `seat` と同じときだけ `row_unparked`（書き手 workflow）を書く。`row_seated` と違い今の着席を新しくしない（`seated_at_seq` を進めない）ので、`held_seq > seated_at_seq` も `gate_wait` も元のまま成り立ち、次の読み直しで同じキーの席を返す手になる。`park_lane` がラッパーを止められなかったときと、止める直前に質問の id が変わったときに呼ぶ（決定 13） |
 | `end_row` | `lane/__init__.py` | 変更 | 変えない | `row_ended` と同じトランザクションで、計画に `lane_row_ended`（`lane`・`row`・`outcome`）を書く |
 | `LaneRow.holding` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and held_seq > 0 and implementing_seq == 0` |
 | `LaneRow.implementing` | `lane/types.py` | 新設 | `@property -> bool` | `implementing_seq > 0` |
 | `LaneRow.awaiting_review` | `lane/types.py` | 新設 | `@property -> bool` | `implementing and review and not drift_reviewed`。確認待ちの判定はこの 1 か所に置き、`begin_implementation` の手順 1・`lane_env` の `hold`・`peek` はどれもここを読む（`drift` の空・null で分けない） |
-| `LaneRow.parked` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and parked_seq > seated_seq`（席を返した行。回答が載っても `row_seated` まで真） |
+| `LaneRow.parked` | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and parked_seq > max(seated_seq, unparked_seq)`（席を返した行。回答が載っても `row_seated` まで真。`row_unparked` で偽に戻る） |
+| `LaneRow.unparked_seq` | `lane/types.py` | 新設（欄） | `int` | 最後の `row_unparked` の番号。`seated_at_seq` には入れない |
+| `LaneRow.seat_fail` | `lane/types.py` | 新設（欄） | `Optional[str]` | 最後の `row_seated` の `fail`（席を取り直した続きの手の失敗のキー。`Launch.fail_key`） |
+| `LaneRow.seat_progressed` | `lane/types.py` | 新設 | `@property -> bool` | 今の着席の間（`seated_at_seq` より後）に、`row_held`・`row_implementing`・回答の番号を持つ `row_resumed`（`--answered` で書いたもの）のどれかがある。回答の無い `row_resumed`（起動の試行の印）は数えない。起動し直した conductor が何も進めずに終わったかを読む |
 | `LaneRow.hold_base` | `lane/types.py` | 新設（欄） | `Optional[tuple[str, str]]` | 行の最初の `row_held` の（`ref`・`base_sha`）。後の `row_held` で上書きしない。差分の基準はこれだけで、着席ごとの待ちの記録（`held`・`held_seq`）と分ける |
 | `LaneRow.seated_at_seq` | `lane/types.py` | 新設 | `@property -> int` | 今の着席の始まりの番号（レーンのステートマシンの事象の番号）。`seated_seq` があればそれ、無ければ行の開始の事象の番号 |
 
@@ -136,6 +143,7 @@ plugins/ndf/
 
 - `implementation_wait`: 行を指す `after`・レーンを指す `after`・行の無いレーンを指す `after`（満たさない）の 3 通り。`idle` を持ち `touches` が空のレーンは `after` を満たしても印を返す
 - `next_row`: スプリントの行は `after` があっても `waiting_after` が空、開発ループの行は今のとおり
+- `_order_graph`・`_after_sources`（決定 14）: A と B が別の場所を触り、両方の行が実装を始めた後（A の行は `running`）、`lanes set` で B の `touches` を A と重なる値にして `after: [A]` を足すと I13 で断られる（実行中の行を起点に採ると通って落ちる）。行を指す `after: [A/r1]`（r1 が `running`）でも同じ。A の行が終わった後なら通る。開発ループの始まった行でも同じ。
 - `_order_graph`: A と B が同じ場所を触り `B.after=[A]`、両方が未着手のとき、B の `row start` も、続く A の `row start` も I13 で断られない。B が実装を始めた後に A へ行を足しても、始めた時点で終わっていた行からだけ辺を引く（今のテストが変えずに通る）。B の先頭の行が実装を始めた後に A へ未着手の行を足し、その A を待つ B の 2 行目を `row start` で設計へ進めても断られず、2 行目が `running` の間も A の末尾から 2 行目への辺が残る
 - `begin_implementation`: 1 回目は待ちを書き、2 回目は書かない。`row_seated` の後にまだ待つ先があれば、Git を打たずに、最初の待ちの `base_sha` を写した新しい待ちを 1 件書く。依存が解けた後は `row_implementing` を 1 回だけ書き、`row_resumed` だけでは待ちのまま。手順 2 と 3 の間に `lanes set` で満たしていない `after` を足すと開始を書かない。`after` が空の行と、`after` がすべて満たされた待ったことの無い行では、Git の呼び出し（`Git.remote()`・`git worktree list` を含む）が 0 回で、取得が失敗する作業場所でも実装を始める。今の待ちがあり依存が未解決の行で打ち直しても Git の呼び出しが 0 回。取得の失敗で何も書かない。計画の外のスプリントは `outside`
 - `drift` の算出: 最初の待ちの後、席を返す前に `touches` に当たるファイルを基のブランチへ入れ、再着席で依存が増えて待ち直し、その後に待ちが解けると、そのファイルが `drift` に載る（差分の基準を最後の `row_held` にすると落ちる）。手順 2 と 3 の間に `lanes set` で `touches` を広げると、広げた先に当たる変更も `drift` に載る。差分を読めず null で記録した後に conductor を起動し直しても、`--drift-reviewed` まで工程を起動しない
@@ -200,7 +208,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `lanes_of` | `lane/machine.py` | 変更 | 変えない | レーンの「実行中の行を持つ」を、実行中の行のうち `holding` でも `parked` でもない行があるかで決める。同じ計画（`admitted` の `own`）も他の計画（`read_lanes` が読む計画）も、この関数の同じ規則で数える。動いているラッパーは今のとおり `count` が数える |
 | `held_seats` | `lane/machine.py` | 変更 | 変えない | ハブへ渡す席を、`lanes_of` と同じ規則で決める（席を返した行のレーンを渡さない） |
-| `judge` | `lane/liveness.py` | 変更 | 変えない | 実行中の行が `parked` で `row_parked` の `reason` が `gate` なら、回答が載る前は `WAITING_ANSWER`、載った後は今の `RESUMING` を返す。`holding` なら `HELD`（`stall: false`）を返す。どちらもスプリントもラッパーも読まない |
+| `judge` | `lane/liveness.py` | 変更 | 変えない | 実行中の行が `parked` なら、回答が席を返した後に載っていれば今の `RESUMING`、`holding` なら `HELD`、どちらでもなければ（承認の回答を待つ）`WAITING_ANSWER` を返す（最後の `row_parked` の理由が `launch_failed` でも同じ規則で読む）。席を返していない行が `holding` なら `HELD`（`stall: false`）を返す。どちらもスプリントもラッパーも読まない |
 | `judge_lanes` | `lane/liveness.py` | 変更 | 変えない | `parked`・`holding` の行は材料（ラッパーの一覧・スプリントの待ち）を読む対象から外す。読む行の数は今以下になる |
 | `gate_wait` | `lane/liveness.py` | 新設 | `(row: LaneRow, sprint_wait: Mapping[str, Any], requests: Sequence[Request], defs: StageDefs) -> Optional[str]` | 席を返す前の行が今の承認ゲートの回答を待ち、その質問をオーガナイザーが計画のリクエストとして受けて回答できるかを決め、できればそのリクエストのキーを返す。条件は (1) スプリントの待ちの結果が `status: gate` で、`metrics` の工程とステップの定義が `gate`（設計承認・リリース承認）を持ち、`metrics.gate.id`（今のゲートの質問の id）がある (2) 回答が載っていない（`answered_seq` が今の着席より古い） (3) 計画の開いた（閉じていない）リクエストのうち、ゲートの種類に応じた次のものが 1 つある。設計承認ゲートは、種類 `lane_question`・このレーン・中身の `metadata` が `source: ndf-gate:1`・`gate` が今の質問の id・`sprint` が行のスプリントの ID のもの。リリース承認ゲートは、種類 `lane-release`・`id` が `asking.request_id` の値（`lane-release-<今の質問の id>`）・`sprint_state` が行のスプリントの ID のもの（`lanes release` が回答と同じトランザクションで閉じるので、開いていれば未回答）。工程名だけ・レーンだけで照らさないので、変更要求の後に流し直した質問（id が変わる）や、前の行・ゲートでない質問のリクエストでは止めない。どれかが欠ければ None（止めない）。`judge_lanes` が今読むスプリントの待ちの結果を使い、新しい読み取りを足さない |
 
@@ -213,45 +221,57 @@ plugins/ndf/
 
 ## 起動の手と割り当て（`plan/run`・`plan/run_decide`）
 
-満たす決定: 決定 4・決定 8・決定 11、受け入れ条件 3・4・12、I7・I8
+満たす決定: 決定 4・決定 8・決定 11・決定 13、受け入れ条件 3・4・12・16、I7・I8・I11
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_halts` | `plan/run.py` | 変えない | 変えない | 最後の行が終わったレーンだけを止める先にする（今のまま）。待ちの行は `_parks` で扱う |
-| `_parks` | `plan/run.py` | 新設 | `(view, rows, found: liveness.Probes \| None, verdicts) -> list[tuple[str, str, str, str, Optional[str]]]` | 席を返す先の（レーン, 行, スプリント, 理由, リクエスト）。`parked` でない実行中の行のうち、(1) `holding` で `held_seq > seated_at_seq`（今の着席の間に待ちを記録した。理由 `held`） (2) `gate_wait` がリクエストのキーを返す（理由 `gate`） (3) `holding` か `awaiting_next` で、ラッパーが動いていない（理由 `vacant`）、のどれか。起動し直した conductor のラッパーは、`next` が新しい待ちを記録するまで (1) に当たらないので止めない。ラッパーの一覧を読めなければ (3) を決めない |
-| `park_lane` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, lane: str, row: str, sid: str, reason: str, request: Optional[str], seat: int) -> dict` | 下の「席を返す手順」で、先に再検証と `row_parked` を 1 つのトランザクションで書き、その後にラッパーを止める。再検証で外れれば何もせず `{"ok": false, "stale": true}`（失敗に数えない）。止められなければ `row_seated` で席を戻し、`halt_failed` と同じ形で失敗を返す |
-| `snapshot_of` | `plan/run.py` | 変更 | 変えない | 写しに `parks`（`_parks`）・`parked`（席を返した行のスプリントの ID）・`released`（`parked` で `holding` で `implementation_wait` が空で、`awaiting_next` でない行の（レーン, 行, スプリント, `parked_seq`））と `idle`（`idle.current` の項目の番号の並びと `listed_seq`）と `free`（空きの数）を載せる。`released` は `row_implementing` が書かれるまで残る（`row_resumed` を見ない）。`answered` の番号も、席を返した行では `parked_seq` にする |
-| `launch_lane` | `plan/run.py` | 変更 | 変えない | 続きの手（`continues`）のうち、スプリントが写しの `parked` にあるもの（回答の後の next・待ちの起動し直し・中止）は `seated=True` にせず、行を始める手と同じく `machine.admitted` を通す。通ったら、同じ `admit.lock` の中で、ラッパーを起動する前に `lane.seat` で `row_seated` を書いてコミットし（席を先に確定する）、その後に起動の入力を渡してラッパーを起動する。起動に失敗したら `lane.park`（理由は前の `row_parked` と同じ・`stopped` は偽・`request` は前の値）で席を返し、今の起動の失敗と同じく打ち直しの回数を数える。席を返していない行の続きの手は今のとおり `seated=True` |
-| `_launches` | `plan/run_decide.py` | 変更 | 変えない | `parks` から席を返す手（`Launch(park=…)`）を作り、終わったレーンを止める手と同じ位置に並べる。`released` から起動し直しの手（`Launch(resume=sid, seq=parked_seq)`）を作り、回答の後の next の手と同じ位置に並べる。同じスプリントの回答の後の next があれば起動し直しの手を作らない（I10。回答の後の `next` も実装の境では `Env.hold` を通る）。中止の手も含め、続きの手は 1 行に 1 つ |
-| `_assignable` | `plan/run_decide.py` | 新設 | `(snap: Snapshot, acts: list[Launch], failed: Mapping[int, int]) -> Optional[Assign]` | 手が 1 つも無く、計画が `running`、`free >= 1` なら、一覧のうち `failed` に無い最初の課題の割り当ての手を返す |
+| `_parks` | `plan/run.py` | 新設 | `(view, rows, found: liveness.Probes \| None, verdicts) -> list[tuple[str, str, str, ParkAct]]` | 席を返す先の（レーン, 行, スプリント, 手の中身）。理由は `rules.park_reason`（`gate_key` は `gate_wait` の値、`alive` はラッパーの一覧）だけで決め、ここで条件を書き足さない。(1) `held`: 今の着席の間に待ちを記録した行 (2) `gate`: 今の承認ゲートのリクエストが開いた行（実装を始めた行も含む） (3) `vacant`: 待ちの行（実装の待ちか回答の後の next 待ち）でラッパーが動いていない行。起動し直した conductor のラッパーは、`next` が新しい待ちを記録するまで (1) に当たらないので止めない。ラッパーの一覧を読めなければ (3) を決めない。`ParkAct` には観測した着席の番号・`gate` なら質問の id（`metrics.gate.id`）を載せる。理由が `vacant` で、行が席を取り直した後（`seated_seq > 0`）に何も進めていなければ（`seat_progressed` が偽）、`charge` に `seat_fail`（その着席を開いた続きの手の失敗のキー）を載せる |
+| `park_lane` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, lane: str, row: str, sid: str, act: ParkAct) -> dict` | 下の「席を返す手順」で、先に再検証と `row_parked` を 1 つのトランザクションで書き、その後にラッパーを止める。再検証で外れれば何もせず `{"ok": false, "stale": true}`（失敗に数えない）。止める直前に質問の id が変わっていれば `row_unparked`（`gate_changed`）で戻して `stale` を返す。止められなければ `row_unparked`（`stop_failed`）で席を返したことを取り消し（`row_seated` は書かない）、`halt_failed` と同じ形で失敗を返す |
+| `snapshot_of` | `plan/run.py` | 変更 | 変えない | 写しに `parks`（`_parks`）・`parked`（席を返した行のスプリントの ID）・`released`（`parked` で `holding` で `implementation_wait` が空で、`awaiting_next` でない行の（レーン, 行, スプリント, `parked_seq`, `held_seq`））と `idle`（`idle.current` の項目の番号の並びと `listed_seq`）と `free`（空きの数）を載せる。`released` は `row_implementing` が書かれるまで残る（`row_resumed` を見ない）。`answered` の項目は（レーン, 行, スプリント, 起動のキーの番号, 回答の番号）で、2 つの番号を別々に運ぶ。起動のキーの番号は、席を返したかによらず `max(answered_seq, parked_seq)`（回答の後に最後に席を返した番号。一度も席を返していない行では今のとおり `answered_seq`）。席を取り直して `parked` が偽になっても番号が変わらないので、取り直した直後の読み直しで同じ回答の手が新しいキーで出ない（`RunState.launched` の照合が効く）。席を返し直すと `parked_seq` が進んで新しいキーになる。回答の番号は `answered_seq`（最後の `row_answered` の番号）である |
+| `launch_lane` | `plan/run.py` | 変更 | 変えない | 続きの手（`continues`）のうち、スプリントが写しの `parked` にあるもの（回答の後の next・待ちの起動し直し・中止）は `seated=True` にせず、行を始める手と同じく `machine.admitted` を通す。通ったら、同じ `admit.lock` の中で、ラッパーを起動する前に `lane.seat`（`launch` は手のキー、`fail` は `Launch.fail_key`）で `row_seated` を書いてコミットし（席を先に確定する）、その後に起動の入力を渡してラッパーを起動する。起動に失敗したら `lane.park` で席を返す。手は理由 `launch_failed`・`seat` は書いたばかりの着席の番号・`stopped` は偽・`request` と `gate` は前の `row_parked` の値で、`charge` を付けない（ここで数えるので、次の観測の `vacant` で数え直さない）。理由 `launch_failed` の再検証は理由ごとの条件を持たず、共通の外れ条件（`running` でない・既に `parked`・着席の番号が違う）だけを見る（起動の前に `row_seated` を書いたので、`held` や `gate` の条件で確かめ直すと必ず外れる）。今の起動の失敗と同じく打ち直しの回数を数える。回数は `Launch.fail_key` で数えるので、席を返すたびに起動のキーが変わっても同じ待ちの失敗として積もり、`policy.attempts` で打ち切って `launch_failed` を 1 回知らせる（決定 13）。席を返していない行の続きの手は今のとおり `seated=True` |
+| `_launches` | `plan/run_decide.py` | 変更 | 変えない | `parks` から席を返す手（`Launch(park=…)`）を作り、終わったレーンを止める手と同じ位置に並べる。`released` から起動し直しの手（`Launch(resume=sid, seq=parked_seq, hold=held_seq)`）を作り、回答の後の next の手（`Launch(resume=sid, seq=<起動のキーの番号>, answered=<回答の番号>)`）と同じ位置に並べる。失敗のキー（`Launch.fail_key`）が `RunState.failed` にある手は出さない（`_candidates` の `_skip` の照合のうち `failed` だけを `fail_key` で照らし、`launched`・`tried` は今のとおり `key` で照らす）。同じスプリントの回答の後の next があれば起動し直しの手を作らない（I10。回答の後の `next` も実装の境では `Env.hold` を通る）。中止の手も含め、続きの手は 1 行に 1 つ |
+| `_assignable` | `plan/run_decide.py` | 新設 | `(snap: Snapshot, acts: list[Launch], failed: Mapping[int, int]) -> Optional[Assign]` | 手が 1 つも無く、計画が `running`、`free >= 1` なら、一覧のうち `failed` に無い最初の課題の割り当ての手を返す。手の `skipped` に、今の写しの `listed_seq` で飛ばした（`failed` にある）課題を一覧の順で載せる |
+| `Launch.fail_key` | `plan/run_decide.py` | 新設 | `@property -> str` | 打ち直しの回数と打ち切りを数えるキー。席を返した行の続きの手では、席の世代（`parked_seq`）に依らず、手が応える記録の番号で決める。回答の後の next は、席を返したかによらず `next:<スプリント>:a<回答の番号>`、待ちの起動し直しは `resume:<スプリント>:h<held_seq>`、席を返す手は `key`（`park:<レーン>/<行>:<着席の番号>`。止められずに取り消しても着席は変わらないので同じ値）。ほかの手は `key` と同じ（今のまま）。同じ着席の 2 回の起動を防ぐ `RunState.launched` は今のとおり `key` で持つ |
+| `_count` | `plan/run_decide.py` | 新設 | `(state: RunState, lane: str, key: str, detail: str, policy: Policy, *, final: bool, kind: str) -> RunState` | 今の `_fail` の本体を、数えるキーと知らせの種類を引数で受ける形にしたもの。回数（`attempts`）・`failed`・`final`・知らせの閉じた後の戻し（`_reopen_closed` の照合）を `key` で数える |
+| `_fail` | `plan/run_decide.py` | 変更 | 変えない | `_count(state, act.lane, act.fail_key, …)` を呼ぶ。席を返す手（`act.park`）は止める手（`act.halt`）と同じく `final`（尽きたら打ち直さない。閉じても数え直さない）で、種類は `halt_failed`。ほかの手は今のとおり `launch_failed` |
+| `_charge` | `plan/run_decide.py` | 新設 | `(state: RunState, lane: str, fail_key: str, detail: str, policy: Policy) -> RunState` | 席を返す手の `charge` を数える。`_count(…, final=False, kind=LAUNCH_FAILED)`。打ち切ったら `launch_failed` で 1 回知らせ、知らせのリクエストが閉じたら数え直す（続きの手の失敗と同じ扱い） |
 | `_after_observe` | `plan/run_decide.py` | 変更 | 変えない | 全行が終わったとき（`snap.complete`）も、一覧に `failed` に無い課題が残っていれば `Complete` を打たない。`_assignable` が手を返せば割り当てを、返さなければ（`free` が 0）`Sleep` を打つ。残っていなければ今のとおり `Complete` へ進む |
-| `assign_idle` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, issue: int, listed_seq: int) -> dict` | 下の手順で割り当てで足すレーンを書く。結果は `{"ok": true, "lane": …}`・`{"ok": false, "stale": true}`・`{"ok": false, "detail": …}` のどれか |
-| `decide` | `plan/run_decide.py` | 変更 | 変えない | `_candidates` が空のとき `_assignable` を見る。`stale` は失敗に数えず `Observe` へ戻る。断られたら、その課題を `RunState.assign_failed` に（課題, `listed_seq`）で入れ、同じ課題で 1 回だけ `launch_failed` の形の知らせを作る |
+| `assign_idle` | `plan/run.py` | 新設（耐久ステップ） | `(spec: dict, issue: int, listed_seq: int, skipped: list[int]) -> dict` | 下の手順で割り当てで足すレーンを書く。結果は `{"ok": true, "lane": …}`・`{"ok": false, "stale": true}`・`{"ok": false, "detail": …}` のどれか |
+| `decide` | `plan/run_decide.py` | 変更 | 変えない | `_candidates` が空のとき `_assignable` を見る。`stale` は失敗に数えず `Observe` へ戻る。断られたら、その課題を `RunState.assign_failed` に（課題, `listed_seq`）で入れ、同じ課題で 1 回だけ `launch_failed` の形の知らせを作る。席を返す手が通り、手が `charge` を持てば、`_charge` でその失敗のキーを 1 回数える（起動し直した conductor が待ちも実装の開始も回答の消費も書かずに終わった。決定 13） |
 
 席を返す手順（`park_lane`）:
 
-1. トランザクションを始め、`lock_plan` を取り、行を読み直す。次のどれかなら書かずに `stale` を返す: 行が `running` でない・既に `parked`・今の着席の番号（`seated_at_seq`）が手の `seat` と違う・`implementing` が真（観測の後に `next` が実装を始めた）・理由が `held`（`_parks` の (1)）なら `holding` が偽か `held_seq <= seated_at_seq`、理由が `gate`（(2)）なら回答が載った（`answered_seq` が観測より新しい）か `request` が閉じた、理由が `vacant`（(3)。ラッパーの動いていない待ちの行）なら `holding` も `awaiting_next` も偽
-2. 同じトランザクションで `row_parked`（`stopped` は 3 で止める予定か）を書いてコミットする。以後、行は `parked` で、`begin_implementation` は手順 3 の排他の中で `parked` の行に `row_implementing` を書かない（今の待ちを返す。下の「`next` との競合」）
-3. コミットの後でラッパーが動いていれば `launch.stop` で止める
-4. 止められなければ、`lane.seat`（`launch` は `park:<…>:failed`）で席を戻し、`halt_failed` の形で失敗を返す。ラッパーは動いたままなので、次の読み直しで (1) の条件を満たせばまた席を返す手になる
+1. トランザクションを始め、`lock_plan` を取り、行を読み直す。次の表のどれかに当たれば書かずに `stale` を返す
+
+| 当たる手 | `stale` にする条件 |
+| --- | --- |
+| どの理由でも | 行が `running` でない・既に `parked`・今の着席の番号（`seated_at_seq`）が手の `seat` と違う |
+| `held`・`gate`・`vacant` | `rules.park_reason(row, gate_key, None)` が手の理由と違う値を返す。`gate_key` は `lane.regate` が作る |
+| `launch_failed` | 理由ごとの条件を持たない（上の行だけ） |
+
+   `park_reason` に当てると、`held` は `holding` で `held_seq > seated_at_seq` のときだけ通る（観測の後に `next` が実装を始めた行は `holding` が偽になって外れる）。`gate` は `regate` の 4 条件をすべて満たすときだけ通り、`implementing` では外さない（リリース承認を待つ行は実装を始めた後にあり、外すと毎回 `stale` になってリリース待ちの行が枠を返せない）。`vacant` は `holding` か `awaiting_next` が真のときだけ通る
+2. 同じトランザクションで `row_parked`（`stopped` は 3 で止める予定か・`gate` は手の質問の id）を書いてコミットする。以後、行は `parked` で、`begin_implementation` は手順 3 の排他の中で `parked` の行に `row_implementing` を書かない（今の待ちを返す。下の「`next` との競合」）
+3. コミットの後でラッパーが動いていれば、止める直前に理由が `gate` なら `regate` を読み直す（行は `parked` になったが、着席と回答とリクエストの条件は同じに読める）。None なら（質問の id が手の `gate` と違う・リクエストが閉じた・回答が載った）、止めずに `lane.unpark`（`gate_changed`）で戻して `stale` を返す（変更要求の後に流し直した質問がまだ計画へ届いていないうちに、古いリクエストを根拠にラッパーを止めない）。同じなら `launch.stop` で止める
+4. 止められなければ、`lane.unpark`（`stop_failed`）で席を返したことを取り消し、`halt_failed` の形で失敗を返す。`row_seated` は書かない（着席を新しくすると `held_seq > seated_at_seq` が崩れ、動いたままのラッパーが `vacant` にも当たらず、待つレーンが枠を占め続ける）。着席の番号が変わらないので、次の読み直しで `park_reason` が同じ理由を返し、同じキーの席を返す手になる。`_fail` が手のキーで回数を数え、`policy.attempts` 回続けて止められなければ打ち直さずに `halt_failed` を 1 回知らせる（決定 13）
 
 `next` との競合: `row_parked` と `row_implementing` はどちらも計画の排他の中で行を読み直してから書くので、先に書いたほうだけが通る。`park_lane` が先なら、止める前のラッパーが `next` を打っても実装を始めず（`parked` の行は `begin_implementation` の (a) と同じく今の待ちを返す）、止めた後の起動し直しの手（`released`）が席を取り直してから実装を始める。`next` が先なら、手順 1 の `implementing` の再検証で外れ、実装に進んだラッパーを止めない。承認の待ち（`gate`）の行で `park_lane` の後・停止の前に回答が載り、止める前の conductor が回答を消費しても、状態はスプリントのステートマシンにあり、席を返した行は `awaiting_next`（回答の後の next）として上限の判定を通して起動し直す（回答の消費の確かめは下の「起動し直しの入力」）。
 
 `assign_idle` の手順（1 つのトランザクション）:
 
 1. `lock_plan` を取り、最新の計画とレーンを読む
-2. 計画が `running` でない、`idle.current` の先頭（失敗した課題を飛ばした後の先頭）が `issue` でない、最後の `idle_listed`・`idle_adjusted` の番号が写しより新しい、のどれかなら書かずに `stale` を返す（観測の後の `idle set --pin`・`plan pause` を拾う）
+2. 計画が `running` でない、`idle.current` から手の `skipped`（観測した一覧の世代で割り当てに失敗した課題。耐久ステップの引数で運ぶので、再開しても同じ値を読む）を除いた先頭が `issue` でない、最後の `idle_listed`・`idle_adjusted` の番号が写しより新しい、のどれかなら書かずに `stale` を返す（観測の後の `idle set --pin`・`plan pause` を拾う）
 3. 1 で読んだ計画から、名前（`i<番号>`、重なれば `i<番号>-<n>`）と `after`（同じリポジトリの終わっていないレーンのすべて）を組み、`add_lane(..., actor="workflow", idle=issue)` で書く。`add_lane` は同じトランザクションの中で呼び、排他を取り直さない
 4. 計画の決まりで断られたら `{"ok": false, "detail": …}`
 
 - 席を返した行の続きの手（起動し直し・回答の後の next・中止）は、行を始める手と同じくマシン全体の上限の判定（`machine.admitted`）を通す。`admitted` が数える他のレーンのうち、席を返した行のレーンは `lanes_of` が数えないので、上限 1 で席を返した 2 レーンに回答が載ると、先に通った 1 本が起動して `row_seated` を書き、もう 1 本はその動いているラッパーを数えて上限で待つ（互いを数えて両方が止まることはない）
-- 入力は `ndf progress next` → `ndf lanes row resumed <スプリント> --answered <answered_seq>` の順にする（今の `launch.py` は逆で、番号も渡さない）。`row resumed` は無条件に書かない。`record_resumed` は計画の排他の中で行を読み直し、(1) 渡した番号が行の最後の `row_answered` の番号と同じで (2) その回答が消費された（`row_answered` が `gate` を持てば、スプリントがその質問の id の承認ゲートでもう待っておらず（`asking.waiting` が None か別の id）、`run.decide` が回答の消費（CONSUME）を返さない。`gate` を持たない回答は (1) だけ）ときだけ `row_resumed` を書く。(2) の確かめはスプリントを読むので、`plan/cli.py` の `row resumed` が `gate.asking.waiting`・`run.decide` で求める関数を作って `record_resumed(conn, sprint_id, actor, answered, consumed)` に渡す（`lane` は `run`・`gate` を import しない）。消費を確かめられなければ書かずに `stopped`・`precondition` を返し、`next` に `ndf progress next <スプリント>` → 同じ `row resumed` を載せる（`/goal` の下の conductor が打ち直す）。誰が消費したかは問わない（止める前の conductor が先に消費した行でも、起動し直した `next` の後に (2) が真になる）。`next` が起動済みの作業との排他などで回答を消費せずに戻っても `awaiting_next` は消えず、conductor が応答を終えてラッパーが無くなれば `_parks` の (3) で席を返し、新しいキーで起動し直す。待ちの起動し直し（回答の無い `released`）の入力は `--answered` を渡さず、`row resumed` は今のとおり起動の試行の印として書く。`next` の前に conductor が落ちても `row_resumed` が無いので、回答の後の next 待ち（`awaiting_next`）のまま残り、ラッパーも動いていないので次の読み直しで席を返す手（止めずに `row_parked`）を受け、その後の読み直しで新しいキーの続きの手になる。`next` を 2 回打っても `store.run_lock` の中で同じ手を返す。`row resumed` は起動の試行の印で、待ちを解かない
-- 続きの手のキーは今のとおり `next:<スプリント>:<seq>` で、席を返した行の `seq` は `parked_seq` である。席を返すたびに番号が進むので、同じ着席の待ちを 2 回起動せず（`RunState.launched`）、起動し直した conductor が落ちて席を返し直した後は新しいキーで起動できる（期限切れを待たない）
+- 入力は `ndf progress next` → `ndf lanes row resumed <スプリント> --answered <Launch.answered>` の順にする（今の `launch.py` は逆で、番号も渡さない）。`--answered` に渡すのは回答の番号（最後の `row_answered` の番号）で、起動のキーの番号（`Launch.seq`。席を返した行では `parked_seq`）ではない。`seq` を渡すと (1) の照合が外れ、回答を消費しても `row_resumed` が書かれず `awaiting_next` が残る。`row resumed` は無条件に書かない。`record_resumed` は計画の排他の中で行を読み直し、(1) 渡した番号が行の最後の `row_answered` の番号と同じで (2) その回答が消費された（`row_answered` が `gate` を持てば、スプリントがその質問の id の承認ゲートでもう待っておらず（`asking.waiting` が None か別の id）、`run.decide` が回答の消費（CONSUME）を返さない。`gate` を持たない回答は (1) だけ）ときだけ `row_resumed` を書く。(2) の確かめはスプリントを読むので、`plan/cli.py` の `row resumed` が `gate.asking.waiting`・`run.decide` で求める関数を作って `record_resumed(conn, sprint_id, actor, answered, consumed)` に渡す（`lane` は `run`・`gate` を import しない）。消費を確かめられなければ書かずに `stopped`・`precondition` を返し、`next` に `ndf progress next <スプリント>` → 同じ `row resumed` を載せる（`/goal` の下の conductor が打ち直す）。誰が消費したかは問わない（止める前の conductor が先に消費した行でも、起動し直した `next` の後に (2) が真になる）。`next` が起動済みの作業との排他などで回答を消費せずに戻っても `awaiting_next` は消えず、conductor が応答を終えてラッパーが無くなれば `_parks` の (3) で席を返し、新しいキーで起動し直す。待ちの起動し直し（回答の無い `released`）の入力は `--answered` を渡さず、`row resumed` は今のとおり起動の試行の印として書く。`next` の前に conductor が落ちても `row_resumed` が無いので、回答の後の next 待ち（`awaiting_next`）のまま残り、ラッパーも動いていないので次の読み直しで席を返す手（止めずに `row_parked`）を受け、その後の読み直しで新しいキーの続きの手になる。`next` を 2 回打っても `store.run_lock` の中で同じ手を返す。`row resumed` は起動の試行の印で、待ちを解かない
+- 続きの手のキーは今のとおり `next:<スプリント>:<seq>` で、席を返した行の `seq` は `parked_seq` である。席を返すたびに番号が進むので、同じ着席の待ちを 2 回起動せず（`RunState.launched`）、起動し直した conductor が落ちて席を返し直した後は新しいキーで起動できる（期限切れを待たない）。打ち直しの回数はキーでなく `Launch.fail_key` で数える（キーは席を返すたびに変わるので、キーで数えると同じ待ちの起動の失敗が上限に届かない）
 - 席を返す手（`park_lane`）は、席を返していない行にしか作らないので、`row_parked` を書いた後の読み直しで打ち直さない
 - 割り当ての手の後の次の読み直しで、足したレーンは `wakeable` に入り、行を始める手（上限の判定を通す）になる。割り当てそのものは上限の判定を通さない（席を使わない）
-- `RunState.assign_failed` は観測ごとに空にしない（`tried` と違う）。今の写しの `idle` の `listed_seq` が失敗を記録したときより新しい（一覧を作り直したか、その課題の調整が書かれた）項目は飛ばすのをやめる。知らせ済みの課題は `RunState.reported` で 2 回知らせない
+- `RunState.assign_failed` は観測ごとに空にしない（`tried` と違う）。今の写しの `idle` の `listed_seq` が失敗を記録したときより新しい（一覧を作り直したか、その課題の調整が書かれた）項目は飛ばすのをやめる。飛ばす課題は割り当ての手の `skipped` で `assign_idle` へ渡し、耐久ステップの確かめ直しも同じ課題を飛ばす。知らせ済みの課題は `RunState.reported` で 2 回知らせない
 
 席を返した行の回答と再開（承認の種類ごと。どれもラッパーへの打ち込みを使わない）:
 
@@ -266,9 +286,13 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Assign` | 型（`issue`・`key`・`listed_seq`） | `plan/run_decide.py` | — |
+| `Assign` | 型（`issue`・`key`・`listed_seq`・`skipped`） | `plan/run_decide.py` | — |
+| `ParkAct` | 型（`reason`（`held`・`gate`・`vacant`・`launch_failed`）・`request`・`gate`（質問の id）・`seat`・`stopped`・`charge`（数える失敗のキー）） | `lane/types.py`（`lane.park` の引数なので `lane` に置き、`plan/run_decide.py` が import する。`lane` から `plan` への import を作らない） | — |
+| `Launch.answered`・`Launch.hold` | 欄（回答の番号・待ちの番号。`seq` と別に運ぶ） | `plan/run_decide.py` | 0・0 |
 | `Snapshot.parks`・`Snapshot.parked`・`Snapshot.released`・`Snapshot.idle`・`Snapshot.free` | 欄 | `plan/run_decide.py` | 空・空・空・None・None |
-| `Launch.park` | 欄（（理由, リクエスト））。キーは `park:<レーン>/<行>:<着席の番号>` | `plan/run_decide.py` | None |
+| `Snapshot.answered`・`Snapshot.released` の項目 | 形（`answered` は（レーン, 行, スプリント, 起動のキーの番号, 回答の番号）、`released` は（レーン, 行, スプリント, `parked_seq`, `held_seq`）） | `plan/run_decide.py` | — |
+| `Launch.park` | 欄（`ParkAct`）。キーは `park:<レーン>/<行>:<着席の番号>` | `plan/run_decide.py` | None |
+| `ROW_PARKED`・`ROW_SEATED`・`ROW_UNPARKED` | 定数（事象の種類） | `lane/types.py` | `"row_parked"`・`"row_seated"`・`"row_unparked"` |
 | `RunState.assign_failed` | 欄（（課題, `listed_seq`）の並び） | `plan/run_decide.py` | 空 |
 | 割り当てで足すレーンの名前 | 規則 | `plan/run.py` | `i<課題の番号>`、重なれば `i<番号>-2`… |
 
@@ -282,18 +306,25 @@ plugins/ndf/
 ### 単体テストの観点
 
 - 待ちの行と承認の待ちの行の席を返す手が、行を始める手より前に出る。席を返した後の読み直しでは打たない
-- 観測の後、`park_lane` の前に同じ行の `next` が `row_implementing` を書くと、`park_lane` は `stale` でラッパーを止めず `row_parked` も書かない。逆に `row_parked` の後、停止の前に止める前のラッパーが `next` を打つと、実装を始めず待ちを返し、起動し直しの後に始める（排他の待ち合わせをテストで作る）。止められなければ `row_seated` で席が戻る
+- 観測の後、`park_lane` の前に同じ行の `next` が `row_implementing` を書くと、`park_lane` は `stale` でラッパーを止めず `row_parked` も書かない。逆に `row_parked` の後、停止の前に止める前のラッパーが `next` を打つと、実装を始めず待ちを返し、起動し直しの後に始める（排他の待ち合わせをテストで作る）
+- 実装を始めた行がリリース承認（`lane-release`）を待ち、今の質問の id のリクエストが開いていると、`park_lane` は `stale` にならず `row_parked` を書いてラッパーを止める。リリース待ちの行だけで全枠が埋まった計画でも、次の読み直しで一覧の先頭が割り当てられる（`implementing` で外すと毎回 `stale` になって落ちる）。`held` の手だけが、観測の後に実装を始めた行で `stale` になる
+- 観測の後・`park_lane` の前に、同じ着席の間に承認の対象が変わって質問の id が更新され、前の質問のリクエストがまだ開いている写しで、`park_lane` は `stale` で書かず止めない。`row_parked` のコミットの後・停止の前に `current_gate()` が別の id を返すと、`row_unparked` で戻して止めない（差し替えた停止の呼び出しが 0 回）
+- ラッパーを止められないと `row_unparked` が書かれ、`row_seated` は書かれず、`seated_at_seq` が変わらない。動いたままのラッパーの行は次の観測で同じキーの席を返す手になり、止められれば席を返す。`policy.attempts` 回続けて止められなければ `halt_failed` を 1 回知らせ、打ち直さない（`row_seated` で戻すと次の観測で手が出ずに落ちる）
 - 起動し直した conductor のラッパーが `next` を打つ前の読み直しで、席を返す手を打たない（`released` にも `parks` にも入らない）。その conductor が `next` の前に落ちると、席を返す手（止めない）を経て新しいキーで起動し直す
 - `implementation_wait` が空になった待ちの行の起動し直しが 1 回だけで、上限なら待ちに置かれる。`after` を満たしても `touches` が未確定の割り当てたレーンは起動し直さず、`lanes set` で `touches` だけを合わせた後の読み直しで起動し直す。回答の後の next も、席を返した行なら上限なら待ちに置かれる
 - 上限 1 で席を返した 2 レーンに回答が載ると、1 本が `row_seated` を書いてから起動し、もう 1 本は上限で待ち、1 本目の行が終わった後に起動する
-- 起動し直しで `row_seated` を書くのはラッパーの起動より前で、起動の入力の `next` は必ず新しい着席の後に走る。`row_seated` の前に別の `next`（オーガナイザーが打ったものなど）が走って依存が増えていても、新しい conductor の `next` が新しい着席の待ちを書き、`_parks` の (1) で席を返す（旧着席の待ちが対象外のまま残らない）。ラッパーの起動に失敗すると `row_parked` で席が戻り、稼働中の数に残らず、次の起動の手は新しいキーになる
+- 席を返した承認の待ちの行の回答の後の next で、`parked_seq` と回答の番号が違う（回答が席を返した後に載った）とき、起動の入力が `--answered <回答の番号>` を渡し、回答を消費した後の `row resumed` が `row_resumed` を書いて `awaiting_next` が消える。設計承認とリリース承認の両方で確かめる（`Launch.seq` を渡すと書かれずに落ちる）
+- 起動の失敗 1 回で、失敗のキーの回数が 1 だけ増える（`launch_failed` の手の `row_parked` が再検証で外れずに書かれ、次の観測の `vacant` で数え直さない）
+- 回答の後の next で席を取り直した直後の読み直しで、同じ回答の手が出ない（`parked` が偽になって起動のキーの番号が変わると、`launch.replace` が動き始めた conductor を置き換えて落ちる）
+- 待ちの起動し直しの起動が続けて失敗すると、席を返すたびに起動のキーが変わっても `Launch.fail_key` で数え、`policy.attempts` 回で打ち切って `launch_failed` を 1 回知らせ、それ以上ラッパーを起動しない（キーで数えると上限に届かず落ちる）。起動し直した conductor が待ちも実装の開始も回答の消費も書かずに終わり、`vacant` で席を返し直すことが続いても同じキーで数えて打ち切る。conductor が待ちを書いた着席の後の `vacant` は数えない。知らせのリクエストを閉じると再び打つ
+- 起動し直しで `row_seated` を書くのはラッパーの起動より前で、起動の入力の `next` は必ず新しい着席の後に走る。`row_seated` の前に別の `next`（オーガナイザーが打ったものなど）が走って依存が増えていても、新しい conductor の `next` が新しい着席の待ちを書き、`_parks` の (1) で席を返す（旧着席の待ちが対象外のまま残らない）。ラッパーの起動に失敗すると `row_parked` で席が戻り、稼働中の数に残らず、次の起動の手は新しいキーになる（失敗のキーは同じ）
 - 回答の後の next と待ちの起動し直しが同じ行で当たる写しで、手が 1 つ（回答の後の next）
 - 起動し直した conductor の `next` が回答を消費せずに戻る（差し替えた排他で進めない）と、`row resumed --answered` は `row_resumed` を書かず、行は `awaiting_next` のまま残る。回答を消費した後なら書く。止める前の conductor が先に消費していた行でも、起動し直した後の `row resumed` が書く。渡した番号より新しい回答が載っていれば書かない
 - 席を返した行がある計画を中止すると、中止の手が上限の判定を通る（空いた枠に別の設計が入った後は上限で待つ）。席を返していない行の中止は今のとおり `seated`
 - 割り当ての条件（手が無い・`running`・`free >= 1`・一覧に失敗していない課題がある）のどれかが欠けると打たない。1 回の判断で 1 本
 - 最後の既存の行が終わって空きができた読み直しで、一覧が残っていれば `Complete` でなく割り当てを打つ。一覧が空なら `Complete`
 - 観測の後、`assign_idle` の前に `idle set --pin` か `plan pause` を書くと、`stale` で書かずに読み直す（失敗の知らせを出さない）
-- 割り当てが断られたとき、3 回の観測を通して知らせが 1 回で、同じ課題を打ち直さず、次の読み直しで一覧の次の課題を割り当てる。一覧を作り直すと、その課題をまた割り当ての候補にする
+- 割り当てが断られたとき、3 回の観測を通して知らせが 1 回で、同じ課題を打ち直さず、次の読み直しで一覧の次の課題を割り当てる。その割り当ての耐久ステップは、渡された `skipped` で先頭の失敗した課題を飛ばして確かめ直し、`stale` にならずに書く（`skipped` を渡さないと 2 番目の課題が毎回 `stale` になって落ちる）。一覧を作り直すと、その課題をまた割り当ての候補にする
 
 ## 空いた時間にやることの一覧（`plan/idle`・`cli`）
 
@@ -323,7 +354,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `refresh` | GitHub を読めない | 認証・ネットワーク・上限 | `ndf.adapters.github` の例外 | 止める（前の一覧を残す） | `stopped`・`work_stopped`、終了コード 1 | 書かない。打ち直せる |
-| `refresh` | 計画の行の課題にマイルストーンが 1 つも無い | 計画の課題がマイルストーンを持たない | 読んだ Issue | 止める | `stopped`・`precondition`、`--milestone` を渡すよう `summary` に書く | 打ち直せる |
+| `refresh` | 読むマイルストーンが 1 つも無い | 計画の行の課題がマイルストーンを持たず、`--milestone` も渡されていない（計画から得たマイルストーンと明示の指定の和が空） | 読み取りの (2) の前 | 止める | `stopped`・`precondition`、`--milestone` を渡すよう `summary` に書く | `--milestone` を付けて打ち直せる（計画の課題がマイルストーンを持たなくても、明示の指定だけで一覧を作る） |
 | `refresh` | 基のブランチを取得できない | ネットワーク・認証・リモート名の誤り | `git fetch` の終了コード | 止める（前の一覧を残す） | `stopped`・`work_stopped`、終了コード 1 | 書かない。打ち直せる |
 | `adjust`・`refresh` | 書き手が organizer でない | レーンの conductor（中継の子）・workflow が打った | `caller_actor` で決めた書き手を事象の定義（`actors`）で照らす | 断る | `refused`・終了コード 1 | 書かない |
 | `show` | 上限を読めない | マシンの設定が壊れている | `named_cap.read` | 既定値で続ける | `free` を null、`warnings` に理由 | — |
@@ -346,7 +377,7 @@ plugins/ndf/
 ### 単体テストの観点
 
 - `order`: 連番 `01`・`63`・連番無しの 3 つのマイルストーンと、同じマイルストーンの番号の前後
-- `refresh`: 計画の行の課題・設計文書のある課題・設計 PR の開いた課題を除く。まとめた設計文書 `issue-4049-4050-design.md` は両方を除き、`issue-4050-design-detail.md` だけでは除かない。head が `design/issue-2489`・`design/4050-parallel-design-ahead`・`design/4049-4050-x` の開いた PR を一括の一覧で返し、#2489・#4049・#4050 を除く。`design/feature-x` は除かない。マイルストーンの一覧に混じった PR を項目に入れない。差し替えた GitHub の書き込みの呼び出しが 0 回。読み取りの呼び出しが、同じ課題を 3 行に持つ 12 行の計画・2 ページのマイルストーン・2 ページの PR の一覧で、束 1 + ページ 2 + ページ 2 の 5 回。読めなければ・取得できなければ `idle_listed` を書かない。リモート名が `upstream` の作業場所で `upstream/<基>` を読む
+- `refresh`: 計画の行の課題・設計文書のある課題・設計 PR の開いた課題を除く。まとめた設計文書 `issue-4049-4050-design.md` は両方を除き、`issue-4050-design-detail.md` だけでは除かない。head が `design/issue-2489`・`design/4050-parallel-design-ahead`・`design/4049-4050-x` の開いた PR を一括の一覧で返し、#2489・#4049・#4050 を除く。`design/feature-x` は除かない。マイルストーンの一覧に混じった PR を項目に入れない。差し替えた GitHub の書き込みの呼び出しが 0 回。読み取りの呼び出しが、同じ課題を 3 行に持つ 12 行の計画・2 ページのマイルストーン・2 ページの PR の一覧で、束 1 + ページ 2 + ページ 2 の 5 回。読めなければ・取得できなければ `idle_listed` を書かない。リモート名が `upstream` の作業場所で `upstream/<基>` を読む。計画の行の課題がどれもマイルストーンを持たないとき、`--milestone` 無しなら `precondition` で止まり、`--milestone <番号>` を付けるとその指定だけで一覧を作る（計画の課題のマイルストーンの有無だけで止めると落ちる）
 - `design_issues`: 上の名前のそれぞれと、数字の無い名前（空を返す）
 - `current`: `pin` が先頭、`exclude` が作り直しの後も外れたまま、割り当てで計画に入った課題が消える
 - 書き手の検査: conductor と workflow の `idle_listed`・`idle_adjusted` は断られる（事象を直接作る）。加えて、`NDF_RELAY_PLAN` を持つ環境で CLI の `ndf lanes idle set`・`refresh` を打つと `refused` になり、持たない環境では通る（CLI の経路）
@@ -376,7 +407,7 @@ plugins/ndf/
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `skills/development-workflow/references/parallel.md` | 知らせの表に `lane_held`（一覧を作り直し、待つ先を読む）と `lane_row_ended`（一覧を作り直す）を足す。節「空いた時間にやること」を足し、一覧を作り直す 4 つの時点・`pin`・`exclude` の基準（計画の目的に沿わない課題を外す・依存の先になる課題を先に出す）・割り当ては耐久ワークフローが行うこと・設計承認の回答を届ける前に `ndf lanes set <レーン> --touches <設計の結果の触るファイル> --after <重なるレーン>` を打つこと（合わせるまで実装は `touches` の待ちに入る）を書く。「耐久ワークフローがすること」の表に、実装の待ちと承認の待ちの行のラッパーを止める・待ちの解けで起動し直す・割り当て（一覧が残る間は計画を完了にしない）の行を足す。設計を直す手（確認の結果の `drift` を読み、続けるなら `next --drift-reviewed`、続けないなら行を中止して同じ課題の行を足す）を書く。「質問に回答する」「まとめたリリース」の `ndf lanes answered` に `--gate <質問の id>` を足し、席を返した行でも同じ経路（設計承認: `ndf answer` → `lanes answered` → `request close`、リリース承認: `lanes release` → `lanes answered`）で答えれば起動し直しが起きること、`ndf answer` だけでは起動し直しが起きないことを書く |
+| `skills/development-workflow/references/parallel.md` | 知らせの表に `lane_held`（一覧を作り直し、待つ先を読む）と `lane_row_ended`（一覧を作り直す）を足す。節「空いた時間にやること」を足し、一覧を作り直す 4 つの時点・`pin`・`exclude` の基準（計画の目的に沿わない課題を外す・依存の先になる課題を先に出す）・割り当ては耐久ワークフローが行うこと・設計承認の回答を届ける前に `ndf lanes set <計画> <レーン> --touches <設計の結果の触るファイル>... --after <重なるレーン>... --reason <理由>` を打つこと（重なるレーンが無ければ `--after` を値無しで渡して空にする。合わせずに回答を届けても壊れないが、起動し直した行が `touches` の待ちで止まり、合わせた後にもう 1 回起動し直す）を書く（決定 8）。「耐久ワークフローがすること」の表に、実装の待ちと承認の待ちの行のラッパーを止める・待ちの解けで起動し直す・割り当て（一覧が残る間は計画を完了にしない）の行を足す。設計を直す手（確認の結果の `drift` を読み、続けるなら `next --drift-reviewed`、続けないなら行を中止して同じ課題の行を足す）を書く。「質問に回答する」「まとめたリリース」の `ndf lanes answered` に `--gate <質問の id>` を足し、席を返した行でも同じ経路（設計承認: `ndf answer` → `lanes answered` → `request close`、リリース承認: `lanes release` → `lanes answered`）で答えれば起動し直しが起きること、`ndf answer` だけでは起動し直しが起きないことを書く |
 | `skills/development-workflow/references/asking.md` | 「並列の計画のレーン」に、承認ゲートの `AskUserQuestion` の `metadata` へ `source`（`ndf-gate:<番号>`）に加えて `gate`（`progress wait` の `metrics.gate.id`）と `sprint`（スプリントのステートマシンの ID）を付けることを書く。付けない質問は耐久ワークフローが席を返す対象にしない（止めずに待つだけで、壊れない） |
 | `skills/development-workflow/references/parallel-checks.md` | 「マシン全体の稼働中の数」に、実装の待ちの行を数えないことを足す |
 | `skills/issue-plan-strategy/references/parallel-plan.md` | `after` の行を「スプリントの行では実装のフェーズを始める条件、開発ループの行では行を始める条件」に直す |
