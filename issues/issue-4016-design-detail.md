@@ -27,11 +27,11 @@ plugins/ndf/
 docs/glossary/glossary.json, docs/glossary.md
 ```
 
-依存の向き: `crossreview/cli.py` → `adapters/write_gate.py`・`adapters/github.py`、`adapters/github.py` → `adapters/write_gate.py` → `identity`・`filelock`・`githubkit.throttling`。`threads.py` と `throttle_decide.py` は adapters を import せず、待ちの終わりを知らせる関数（`block`）を引数で受ける。循環は無い。
+依存の向き: `crossreview/cli.py` → `adapters/write_gate.py`・`adapters/github.py`、`adapters/github.py` → `adapters/write_gate.py` → `filelock`・`githubkit.throttling`。`threads.py` と `throttle_decide.py` は adapters を import せず、待ちの終わりを知らせる関数（`block`）を引数で受ける。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`identity`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.sent`・`WriteGate.block`（新設） |
+| `src/ndf/adapters/write_gate.py` | 新設 | 書き込みの要求にマシン全体の順番を取らせる githubkit の throttler | `filelock`・`githubkit.throttling`・`contracts.limits` | `WriteGate` | `kind_of`・`machine_gate`・`WriteGate.acquire`・`WriteGate.async_acquire`・`WriteGate.reserve`・`WriteGate.sent`・`WriteGate.block`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | `Client` に `WriteGate` を渡し、二次レート制限を `GitHubError` の属性で示す | `write_gate` | `GitHubError`・`RetryWithin` | `client`・`RetryWithin.__init__`・`RetryWithin.__call__`・`GitHubError.__init__`・`_translated`（変更） |
 | `src/ndf/domains/crossreview/threads.py` | 変更 | 行に付ける指摘をコミットごとのレビューで書き、閉じた理由を最初のコメントへ入れる | `throttle_decide`・`store`・`report_decide` | `Port`・`GitHubPort` | `sync`・`opening`・`patient`・`GitHubPort.__init__`（変更）、`finding_of`・`GitHubPort.open_review`・`Placed`（新設）、`_sync_one`・`GitHubPort._post` の間隔・`Pace.clock`（削除） |
 | `src/ndf/domains/crossreview/throttle_decide.py` | 変更 | 打ち直しの待ちを指数的に延ばす | `contracts.limits`・`contracts.routing` | モジュール | `wait_before_retry`（変更）、`secondary_limited`・`spacing_wait`・`SPACING`（削除） |
@@ -48,7 +48,8 @@ docs/glossary/glossary.json, docs/glossary.md
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `kind_of` | `adapters/write_gate.py` | 新設 | `kind_of(request: httpx.Request) -> Optional[str]` | 要求が読み取り（None）・書き込み（`WRITE`）・内容を作る書き込み（`CONTENT`）のどれかを決める |
-| `machine_gate` | 同上 | 新設 | `machine_gate() -> WriteGate` | マシンに 1 つの記録（`identity.load().state_dir / "github" / "write-gate.json"`）を使う `WriteGate` を作る |
+| `machine_gate` | 同上 | 新設 | `machine_gate() -> WriteGate` | OS のユーザーに 1 つの記録（`gate_path()`）を使う `WriteGate` を作る |
+| `gate_path` | 同上 | 新設 | `gate_path() -> Path` | `pwd.getpwuid(os.getuid()).pw_dir / ".local" / "state" / "ndf-github" / "write-gate.json"`。環境変数（`NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME`）を読まない |
 | `WriteGate.__init__` | 同上 | 新設 | `__init__(self, path: Path, clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep) -> None` | 記録のパスと時計を持つ |
 | `WriteGate.acquire` | 同上 | 新設 | `acquire(self, request: httpx.Request) -> Generator[None, Any, Any]`（`@contextmanager`） | 書き込みなら `reserve` の秒だけ眠り、送信のロックを取って待ちの終わりを読み直してから通す。文脈の出口（送り終えた後）で `sent` を呼んで送信のロックを放す。読み取りはすぐ通す |
 | `WriteGate.sent` | 同上 | 新設 | `sent(self, kind: str) -> None` | 送り終えた時刻から、記録の `next`（`CONTENT` なら `next_content` も）を延ばす |
@@ -88,7 +89,7 @@ docs/glossary/glossary.json, docs/glossary.md
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| 記録の形 | 型（JSON） | `<state_dir>/github/write-gate.json` | `{"version": 1, "next": 0.0, "next_content": 0.0, "blocked_until": 0.0, "written_at": 0.0}`（秒は UNIX 時刻。`written_at` は最後に書いたときの壁時計） |
+| 記録の形 | 型（JSON） | `gate_path()`（`<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json`） | `{"version": 1, "next": 0.0, "next_content": 0.0, "blocked_until": 0.0, "written_at": 0.0}`（秒は UNIX 時刻。`written_at` は最後に書いたときの壁時計） |
 | 送信のロック | ファイル | 記録と同じディレクトリの `write-gate.send.lock` | — |
 | `github.write-send-lock` | 設定値 | `contracts/limits.json` | `interval` 60（送信のロックを待つ上限の秒） |
 | `CLOCK_SLACK` | 定数 | `adapters/write_gate.py` | 1.0（壁時計が戻ったとみなす差の秒） |
@@ -117,7 +118,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | --- | --- | --- | --- |
 | `WriteGate` | githubkit の `BaseThrottler`・`LocalThrottler` | `githubkit/throttling.py`・`core.py` を読んだ | 継ぐ。`LocalThrottler` は同時の本数だけで間を空けない |
 | `WriteGate.reserve` | `slot_pool.lock`・`slot_pool.try_lock` | `grep -rn "FileLock" plugins/ndf/src` | ロックの作り方を `slot_pool.lock` に揃える（関数を import して使う） |
-| `machine_gate` | `identity.load().state_dir` | `grep -rn "identity.load().state_dir"` | 使う |
+| `machine_gate`・`gate_path` | `identity.load().state_dir` | `identity.py` の `_state_home`（`NDF_STATE_HOME` → `XDG_STATE_HOME` → `~/.local/state`） | 使わない。環境変数で保存先が変わり、同じユーザーの NDF の間で共有されない |
 | `kind_of` | 無し | `grep -rn "mutation" plugins/ndf/src/ndf/adapters` | 要求の分け方を持つ関数は無い |
 
 ### 単体テストの観点
@@ -128,6 +129,7 @@ docs/glossary/glossary.json, docs/glossary.md
 | `reserve` | 続けて 2 回 `WRITE` を取ると 2 回目の待ちが `github.write-spacing` の秒。`CONTENT` の後の `CONTENT` は `github.content-spacing` の秒 | 予約の時刻がちょうど今。`blocked_until` が今から 3,600 秒先（長い `retry-after`）でも捨てずに待つ。6 つの `CONTENT` が並んだ後ろの予約も捨てない | ロックが取れない（I5）・壊れた JSON・壁時計が 1 時間戻った記録（時刻がずれ、待ちの終わりの残りが保たれる） |
 | `reserve`（2 つのプロセス） | 2 つのプロセスが同じ記録で同時に取ると、予約の差が `github.write-spacing` の秒以上（受け入れ条件 4） | — | — |
 | `block` | `block(30)` の後の `reserve` の予約が今 + 30 秒以後（I3） | 短い `block` が長い待ちの終わりを縮めない | 記録を読めない |
+| `gate_path` | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` を変えた 2 つの子プロセスが同じパスを返し、同時に取った予約の差が `github.write-spacing` の秒以上 | — | — |
 | `acquire` | 読み取りは眠らない。書き込みは `reserve` の秒だけ眠る | 待ち 0 秒 | — |
 | `acquire`（送る時刻） | 偽の時計と偽の送信で、2 つの書き込みの送信の開始の差が `github.write-spacing` の秒以上。先の予約の眠りを遅らせても、後の書き込みは先の送り終えた時刻から数える（I6） | 応答に 5 秒かかる送信の間、ほかのスレッドの送信が始まらない | 眠りの間にほかのプロセスが `block` すると、送らずに予約し直し、送信の時刻が待ちの終わり以後（I3）。送信のロックが取れないと送って 1 行を出す（I5） |
 

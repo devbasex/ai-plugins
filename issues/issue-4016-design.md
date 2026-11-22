@@ -49,7 +49,7 @@ flowchart TD
   I2[publish.create_issue ほか] --> GH
   RV & P1 & Q1 --> GH[GitHub.rest / graphql]
   GH --> K[githubkit Client<br/>throttler: WriteGate]
-  K -->|書き込みなら順番を取る| G[(書き込みの順番の記録<br/>state_dir/github/write-gate.json<br/>filelock)]
+  K -->|書き込みなら順番を取る| G[(書き込みの順番の記録<br/>~ユーザー/.local/state/ndf-github/write-gate.json<br/>filelock)]
   K --> API[(GitHub)]
   RT[RetryWithin<br/>二次レート制限を受けた] -->|block| G
 ```
@@ -164,7 +164,7 @@ sequenceDiagram
 ### 決定 1: レーンの数によらず合計を抑えるため、間隔を githubkit の throttler でマシン全体に当てる
 
 - **質問**: 間隔をどの層に、どの範囲で置くか
-- **選んだ案**: githubkit の `BaseThrottler` を継いだ `WriteGate` を `client()` が `Client` に渡す。NDF のすべての書き込みが 1 か所を通り、マシンに 1 つの記録（`identity.load().state_dir / "github" / "write-gate.json"`）を filelock で守って順番を取る
+- **選んだ案**: githubkit の `BaseThrottler` を継いだ `WriteGate` を `client()` が `Client` に渡す。NDF のすべての書き込みが 1 か所を通り、マシンに 1 つの記録（`<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json`）を filelock で守って順番を取る。ホームは `pwd.getpwuid(os.getuid()).pw_dir` で引き、`NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` を読まない（`identity.load().state_dir` はこれらの環境変数で変わり、同じ OS のユーザーの NDF が別々の状態の保存先で動くと別々に予約して、要求の前提 2 の共有の範囲を満たさない）
 - 採らなかった案: 書く関数ごと（`threads.py`・`publish.py`・`issues_gh.py`）に間隔を置く（10 か所の呼び手のうち書く場所を漏れなく包む必要があり、新しく書く場所が漏れる）
 - 採らなかった案: pyrate-limiter の SQLite のバケットで数える（依存が 1 つ増える。窓の中の回数を数える形で、前の書き込みからの間隔と待ちの終わりの共有を持たない）
 - 採らなかった案: Octokit の throttling と同じく Redis で共有する（サーバーを 1 つ立てる必要がある。マシンの外の共有は要求の前提 2 で求めていない）
@@ -279,7 +279,7 @@ sequenceDiagram
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 書き込みの順番の記録 | NDF の GitHub への書き込みがマシン全体で順番を取るための記録（`<state_dir>/github/write-gate.json`）。次の書き込みの時刻・次の内容を作る書き込みの時刻・待ちの終わりを持つ | 追加（NDF の実行の基盤） |
+| 書き込みの順番の記録 | NDF の GitHub への書き込みがマシン全体で順番を取るための記録（`<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json`）。次の書き込みの時刻・次の内容を作る書き込みの時刻・待ちの終わりを持つ | 追加（NDF の実行の基盤） |
 | 内容を作る書き込み | REST の POST と、GraphQL の `create`・`add` で始まる mutation。前の内容を作る書き込みから `github.content-spacing` の秒を空ける | 追加（NDF の実行の基盤） |
 | 二次レート制限 | GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の `secondary rate limit` で返る | 追加（NDF の実行の基盤） |
 
@@ -296,6 +296,7 @@ sequenceDiagram
 | I5 | 記録が壊れた JSON・ロックが取れないとき、書き込みが通り、標準エラーへ 1 行が出る | 例外をそのまま出す |
 | 受け入れ条件 5 | `hinted` が偽の二次レート制限が続くと、待ちが 60・120・240 秒と延び、4 回目の失敗で例外を出す。`hinted` が真なら `retry_after` を待つ | 待ちを `interval` に固定する・回数の上限を見ない |
 | 受け入れ条件 6・I4 | 印を保存せずに打ち直すと（レビューを送った後に落ちた形）、PR に自分のスレッドがある指摘のレビューを作らず、印を埋める。ほかの人が同じ書式で書いたスレッドは拾わない | 書く前のスレッドの読み取りを外す・書き手を確かめない |
+| 決定 1（共有の範囲） | `NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME` の違う 2 つのプロセスが同じ記録を使い、同時に取った予約の差が `github.write-spacing` の秒以上 | 保存先を `identity.load().state_dir` から作る |
 | 決定 5 | レビューが 422 で断られた組の指摘が、1 件ずつの `open_thread` で書かれる | 422 の組を書かずに注意だけにする |
 
 ## どこを変えるか
