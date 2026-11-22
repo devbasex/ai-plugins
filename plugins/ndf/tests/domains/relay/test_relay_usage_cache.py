@@ -239,6 +239,7 @@ def test_limit_until_follows_the_rules_in_order():
     assert accounts.limit_until("Limit reached · resets 12:30pm", {}, seen, tokyo)[0] == three - 9000 + 86400  # 見た時刻より後で最も近い
     # (2) 窓の語だけ
     assert accounts.limit_until("weekly limit reached", five, seen, tokyo) == (seen + 86400, "seven_day", seen + 86400)
+    assert accounts.limit_until("You've hit your 5-hour limit", five, seen, tokyo) == (three, "five_hour", three)
     # (3) 100 以上の窓のうち遅いほう
     full = {"five_hour": (100.0, three), "seven_day": (100.0, seen + 86400)}
     assert accounts.limit_until("limit reached", full, seen, tokyo) == (seen + 86400, "seven_day", seen + 86400)

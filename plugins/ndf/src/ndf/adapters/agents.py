@@ -70,7 +70,7 @@ CLAUDE_USAGE_LIMIT_JSON = re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.M
 # （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない
 USAGE_LIMIT_LINES = (
     re.compile(r"^(?:ERROR:\s*)?(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b", re.MULTILINE),
+    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ -]+ )?(?:limit|budget)\b", re.MULTILINE),  # 「5-hour limit」のハイフンも通す
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?Monthly request limit reached", re.MULTILINE),
     CLAUDE_USAGE_LIMIT_JSON,

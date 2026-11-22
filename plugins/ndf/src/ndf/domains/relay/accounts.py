@@ -40,7 +40,7 @@ NAME_RE = signals.NAME_RE
 WINDOWS = account_registry.WINDOWS
 SCOPED = "seven_day_scoped"  # モデル別の週の窓。窓の名前は `seven_day_scoped/<識別>`
 FULL = 100.0
-WINDOW_WORDS = (("five_hour", re.compile(r"\bsession\b", re.I)), ("seven_day", re.compile(r"\bweek(?:ly)?\b", re.I)))
+WINDOW_WORDS = (("five_hour", re.compile(r"\bsession\b|\b5-hour\b", re.I)), ("seven_day", re.compile(r"\bweek(?:ly)?\b", re.I)))
 FETCH_LOCKS = ".fetch-locks"  # 取得の排他の錠の保存先（登録簿の下。アカウントのディレクトリの外）
 RESETS_RE = re.compile(r"\bresets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b(?:\s*\(([^)]+)\))?", re.I)
 
