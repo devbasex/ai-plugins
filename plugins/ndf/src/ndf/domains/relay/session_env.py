@@ -132,15 +132,19 @@ def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -
     起動の前に比べる変数（`account_registry.METERED_CHECKED`。秘密の変数のほか接続先・資格情報の選択・地域）も親から外す
     （比べる期待値をこの出力から作るので、保存した設定に無い親の接続先や資格情報の選択を期待値に入れない）。`extra` は検証を通したもの（呼び手が確かめる）で、
     ラッパーが確定する変数（`METERED_FIXED` と `NDF_` で始まる変数）は `extra` に依らず、`NDF_CLAUDE_ACCOUNT` は `metered`。
+    API キーの設定（`metered_kind(extra)` が `API_KEY_KIND`）では、比べる変数をすべて親から外し、`extra` のキー（`ANTHROPIC_API_KEY`）を
+    重ねない（親だけにある接続先・ヘッダー・資格情報の選択を子に残さず、キーは helper で渡す）。
     """
     # 親がアカウントの子なら共有の設定ディレクトリへ戻し、それが空（~/.claude）なら外す
     if "NDF_SHARED_CONFIG_DIR" in env:
         config = None if env["NDF_SHARED_CONFIG_DIR"] == "" else env["NDF_SHARED_CONFIG_DIR"]
     else:
         config = env.get("CLAUDE_CONFIG_DIR")
-    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.METERED_CHECKED if saved else ())}
+    key = account_registry.metered_kind(extra) == account_registry.API_KEY_KIND
+    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.METERED_CHECKED if saved or key else ())}
     out = {k: v for k, v in _without_auth(env).items() if k not in drop}
-    out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_")})
+    skip = {"ANTHROPIC_API_KEY"} if key else set()  # キーは `--settings` の `apiKeyHelper` で渡す
+    out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_") and k not in skip})
     out["NDF_CLAUDE_ACCOUNT"] = account_registry.METERED
     if config is None:
         out.pop("CLAUDE_CONFIG_DIR", None)

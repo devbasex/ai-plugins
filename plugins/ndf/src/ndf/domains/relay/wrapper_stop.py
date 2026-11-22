@@ -34,6 +34,9 @@ DRIFT_LINE = "ndf-relay: API キーの子の送信先・認証の設定（{sourc
 REVOKED_FIX_LINE = "ndf-relay: {names} の認証に失敗し、替える先が無い。{fixes}"
 AUTH_FIX_KEY = "ndf relay account add-api-key {name} で登録し直す"
 REVOKED_END = "{reason}。会話を送らずに止めた。直してから ndf relay で続ける"
+# 最初の払い出しを見届けた後、保留した入力を送る前に子の画面が静かであるべき秒。Claude Code 2.1.330 は入力欄を描く前（起動から
+# 約 0.2 秒）に helper を呼び、入力欄を描く前に打った入力は捨てる（2026-11-22 に実の子で確かめた。描いた後の約 0.5 秒なら届く）
+TYPE_QUIET = 1.0
 
 
 def revoked_fix(tried: set[str]) -> str:
@@ -149,6 +152,7 @@ class StopSteps:
         """
         if not sec.must_end:
             sec.must_end, sec.must_end_at = True, self.clock()
+            sec.held = None  # 保留した入力も送らずに捨てる（後継にも渡さない）
             self._say(DROP_LINE)
         sec.end_cause = sec.end_cause or cause
         if now and not sec.end_now:
@@ -167,6 +171,8 @@ class StopSteps:
         if self.key_memo != stamp:  # スタンプが変わったときだけ読む（当たれば同じ見回りで止めるので、外れた読みだけを残す）
             seen = key_helper.watch(self.dir, rec)
             self.key_memo = stamp
+        if seen.paid:
+            sec.paid = True
         refused = self._auth_seen(sec, screen)
         at = self.clock()  # 確かめた時刻（この見回りで止めへ移るなら、旧子の終わりの期限の起点）
         if refused and not sec.denied:  # 書けた後は打たない。書けなければ次の見回りで期限の残りの中で打ち直す
@@ -201,9 +207,42 @@ class StopSteps:
         sec = self._current()
         if sec.target is not None and sec.target.helper is not None:
             self._key_auth(sec, observe.plain(bytes(sec.screen)))
+            self._first_payout(sec)
         if not (sec.must_end and self._end_point(sec)):
             return None, False
         return self._stop_revoked(sec), True
+
+    @staticmethod
+    def typed(prompt: str) -> bytes:
+        """最初のプロンプトを子の端末へ打つバイト列（貼り付けの括りで 1 つの入力にし、改行で送る）。"""
+        return b"\x1b[200~" + prompt.encode() + b"\x1b[201~\r"
+
+    def _first_payout(self, sec: Section) -> None:
+        """最初の払い出しを見届けたら保留した入力を順に送る。`relay.key-helper` の `first` を過ぎても見届けなければ、設定の当たり
+        （出所は設定ファイル）として止める（別冊の「最初の払い出しまで送らない」）。"""
+        if sec.held is None or sec.must_end:
+            return
+        if sec.paid:
+            if self.clock() - sec.last_output < TYPE_QUIET:
+                return  # 入力欄を描き終えるまで待つ
+            held, sec.held = sec.held, None
+            for data in held:
+                sec.child.write(data)
+            if held:
+                sec.input_at = self.wall.now()
+                sec.screen.clear()
+        elif self.clock() - sec.started_at >= limits.value(key_helper.POLICY, "first"):
+            sec.end_source = sec.end_source or key_helper.SETTINGS_FILE
+            self._must_end(sec, "drift", now=True)
+
+    def _forget_tried(self, sec: Section) -> None:
+        """替えた子が応答を 1 つ返したら、この続きで認証に失敗した接続先の記録（`tried`）を空にする（決定 6）。"""
+        if not self.tried or sec.replied or sec.must_end or sec.auth_at is not None:
+            return  # 認証に失敗した子の応答では空にしない（その子の接続先を残したまま替え先を選ぶ）
+        got = observe.turn_done(observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id), self.s.transcript_bytes)
+        if got is not None and got[0] and got[1] is not None and got[1] > sec.wall_started:
+            sec.replied = True
+            self.tried.clear()
 
     def _end_point(self, sec: Section) -> bool:
         """キーの子を止める時点か。`end_now`・子の終わり・止めてよい時点・`relay.end-wait` の経過・静かな間の質問か API の失敗の記録。"""
@@ -256,7 +295,7 @@ class StopSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.after_auth(sec.account, rows, inputs.candidates(), [], self.s.guards)
+            return account_decide.after_auth(sec.account, rows, inputs.candidates(), inputs.fallbacks(), self.s.guards)
 
         try:
             while True:

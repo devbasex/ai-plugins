@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
 
 from ndf.contracts import facts, limits
-from ndf.domains.relay import account_files, claude_args
+from ndf.domains.relay import account_files, claude_args, key_helper
 from ndf.domains.relay import account_registry as reg
 
 # 同期と認証ファイルの部品を同じ名前で引けるようにする（詳細設計の関数の表は account_dir に置く）
@@ -129,7 +129,7 @@ class Local:
 class Resolved:
     """Claude Code が採用する実効値と出所。`helper` は確かめにだけ使い、画面・記録・理由の文に出さない。
 
-    `stamps` は読んだか探した源のパスごとの `(st_mtime_ns, st_ino, st_size)`（無ければ None）。
+    `stamps` は読んだか探した源のパスごとの `stat_stamp`（無ければ None）。
     `profile` は Anthropic の設定ディレクトリの有効なプロファイルの認証の形（無ければ None）。
     `env`（子の環境の秘密を含みうる）と `helper` は `repr` に出さない（I5）。"""
 
@@ -140,6 +140,13 @@ class Resolved:
     unresolved: list[str]
     stamps: dict[str, Optional[tuple]]
     profile: Optional[str] = None
+    # 確かめた設定への固定（別冊）: 設定ファイルのパス → 比べる範囲の SHA-256（読めないファイルは None）と、
+    # 名前の一覧を記録する場所（`managed-settings.d`）→ その一覧。`hooks_off` は実効の設定の `disableAllHooks`、
+    # `managed_only` は管理の設定の `allowManagedHooksOnly`（どちらかが真なら `--settings` の hook が働かない）
+    pins: dict[str, Optional[str]] = field(default_factory=dict)
+    dirs: dict[str, Optional[list[str]]] = field(default_factory=dict)
+    hooks_off: bool = False
+    managed_only: bool = False
 
 
 class Launch(NamedTuple):
@@ -161,7 +168,7 @@ class Checked:
 class Refused(str):
     """`check_account` の失敗の返り。値は理由の符号（`str` として比べられる）。
 
-    `items` は判定に当たった項目名（値を含まない）、`stamps` はその判定に使った源の `(st_mtime_ns, st_ino, st_size)`
+    `items` は判定に当たった項目名（値を含まない）、`stamps` はその判定に使った源の `stat_stamp`
     （アカウント側の認証ファイルと設定ファイル。`effective_env` まで進んだときはその `Resolved.stamps` も）。
     `ready` の `Probe.stamps` が失敗でも判定に使った `stamps` を持てるように、設定を読み直さずに渡す。"""
 
@@ -282,6 +289,7 @@ class _Layer:
     label: str
     data: dict[str, Any]
     broken: bool = False
+    path: Optional[Path] = None  # 読んだか探した設定ファイル（`--settings` の JSON の文字列は None）
 
     @property
     def has_items(self) -> bool:
@@ -289,16 +297,18 @@ class _Layer:
         return self.broken or bool(self.data)
 
 
-def _stamp(path: Path) -> Optional[tuple]:
+def stat_stamp(path: Union[str, Path], lstat: bool = False) -> Optional[tuple]:
+    """源のスタンプ（`stat`。`lstat` なら `lstat`）。作る側（`Probe.stamps`・`Resolved.stamps`）と比べる側（`launch_inputs`）が共有する。"""
     try:
-        st = os.stat(path)
+        st = os.lstat(path) if lstat else os.stat(path)
     except OSError:  # noqa: NDF401 ファイル: 無い源の stat は None で持ち、後から作られると変わる
         return None
     return _of(st)
 
 
 def _of(st: os.stat_result) -> tuple:
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    """更新時刻・inode・サイズに、属性の変更時刻とモードを足す（`chmod` で読めるようになった源もスタンプが変わる）。"""
+    return (st.st_mtime_ns, st.st_ino, st.st_size, st.st_ctime_ns, st.st_mode)
 
 
 def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolved: Optional[list[str]], need: bool = False) -> _Layer:
@@ -312,12 +322,12 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
         stamps[str(path)] = None
         if need and unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=need)
+        return _Layer(label, {}, broken=need, path=path)
     except OSError:
         stamps[str(path)] = None
         if unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=True)
+        return _Layer(label, {}, broken=True, path=path)
     stamps[str(path)] = _of(st)
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -326,8 +336,8 @@ def _layer(path: Path, label: str, stamps: dict[str, Optional[tuple]], unresolve
     if not isinstance(data, dict):
         if unresolved is not None:
             unresolved.append(label)
-        return _Layer(label, {}, broken=True)
-    return _Layer(label, data)
+        return _Layer(label, {}, broken=True, path=path)
+    return _Layer(label, data, path=path)
 
 
 def _flag(argv: Sequence[str], name: str) -> tuple[bool, Optional[str]]:
@@ -389,23 +399,26 @@ def _helper_of(layers: Sequence[Optional[_Layer]]) -> tuple[Optional[str], Optio
 
 def _managed(
     config_dir: Path, files: Sequence[Path], d: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]
-) -> tuple[_Layer, list[_Layer]]:
-    """管理の設定の源。(サーバーから取った写し, ファイルの源を重ねる順に)。"""
+) -> tuple[_Layer, list[_Layer], Union[list[str], None, bool]]:
+    """管理の設定の源。(サーバーから取った写し, ファイルの源を重ねる順に, `d` の読んだファイルの名前の一覧)。
+
+    一覧は `d` が無ければ None、列挙できなければ False（固定のファイルに一覧を記録しない）。固定のファイルへはこの 1 回の列挙を
+    記録する（別に列挙し直すと、その間に足されたファイルが一覧にだけ入り、読んでいない中身を helper が照らせない）。"""
     remote = _layer(config_dir / REMOTE_SETTINGS, f"管理の設定（{REMOTE_SETTINGS}）", stamps, unresolved)
     out = [_layer(f, f"管理の設定（{f.name}）", stamps, unresolved) for f in files]
     if not d.is_dir():
-        stamps[str(d.parent)] = _stamp(d.parent)
-        return remote, out
-    stamps[str(d)] = _stamp(d)
+        stamps[str(d.parent)] = stat_stamp(d.parent)
+        return remote, out, None
+    stamps[str(d)] = stat_stamp(d)
     try:
-        names = os.listdir(d)
+        picked = key_helper.listing(d)
     except OSError:  # 在るのに列挙できない（読めない管理の設定と同じく解けない）
         label = f"管理の設定（{d.name}）"
         unresolved.append(label)
-        return remote, [*out, _Layer(label, {}, broken=True)]
-    # Claude Code は隠しファイルを読まない
-    picked = sorted(n for n in names if n.endswith(".json") and not n.startswith("."))
-    return remote, out + [_layer(d / n, f"管理の設定（{d.name}/{n}）", stamps, unresolved) for n in picked]
+        return remote, [*out, _Layer(label, {}, broken=True)], False
+    if picked is None:  # 確かめた後に消えた
+        return remote, out, None
+    return remote, out + [_layer(d / n, f"管理の設定（{d.name}/{n}）", stamps, unresolved) for n in picked], picked
 
 
 def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple]], unresolved: list[str]) -> Optional[str]:
@@ -418,7 +431,7 @@ def _profile(env: Mapping[str, str], cwd: Path, stamps: dict[str, Optional[tuple
         return None
     conf = cwd / raw if raw else Path.home() / ".config" / "anthropic"
     active = conf / "active_config"
-    stamps[str(active)] = _stamp(active)
+    stamps[str(active)] = stat_stamp(active)
     try:
         name = active.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
@@ -441,14 +454,16 @@ def effective_env(
     cwd: Path,
     argv: Sequence[str],
     user_settings: Optional[Path] = None,
+    pin: bool = False,
 ) -> Resolved:
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。"""
+    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`pin` が真（キーの子の検証）の
+    ときだけ、確かめた設定への固定の `pins`・`dirs` を作る（ほかの子では SHA-256 を求めない）。"""
     stamps: dict[str, Optional[tuple]] = {}
     unresolved: list[str] = []
-    remote, files = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
+    remote, files, picked = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
     flag = _settings_flag(argv, cwd, stamps, unresolved)
     sources = _sources(argv, unresolved)
     user = _layer(user_settings or config_dir / "settings.json", "利用者の設定", stamps, None) if "user" in sources else None
@@ -468,7 +483,15 @@ def effective_env(
     else:
         helper, helper_origin = _helper_of([flag, local, project, user])
     profile = _profile(values, cwd, stamps, unresolved)
-    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile)
+    layers = [x for x in (user, project, local, flag, *files, remote) if x is not None]
+    pins: dict[str, Optional[str]] = {}
+    dirs: dict[str, Optional[list[str]]] = {}
+    if pin:
+        pins = {str(x.path): None if x.broken else key_helper.view_sha(x.data) for x in layers if x.path is not None}
+        dirs = {str(MANAGED_DIR): picked} if picked is not False else {}
+    hooks_off = any(x.data.get("disableAllHooks") is True for x in layers)
+    managed_only = any(x.data.get("allowManagedHooksOnly") is True for x in (*files, remote))
+    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, pins, dirs, hooks_off, managed_only)
 
 
 def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
@@ -639,7 +662,7 @@ def check_account(
 
     `shared_file` は親の環境から解いた共有側の設定ファイル、`launch` は子が受け取る環境・作業ディレクトリ・起動引数。通れば `Checked`、
     使えなければ最初に外れた理由の符号を `Refused`（`str`）で返す。`Refused` は判定に当たった項目名と使った源の `stamps` を持つ。"""
-    own = {str(p): _stamp(p) for p in (account / reg.CRED_FILE, config_file(account, True))}
+    own = {str(p): stat_stamp(p) for p in (account / reg.CRED_FILE, config_file(account, True))}
     local = check_local(store, account, shared_file)
     if isinstance(local, str):
         return Refused(local, stamps=own)
@@ -704,11 +727,11 @@ def _registered(store: Path, name: str) -> Optional[reg.Account]:
 
 def _probe_stamps(account: Path) -> dict[str, Optional[tuple]]:
     """判定に使う源の `stamps`。`account.json`・認証ファイル・設定ファイルの `stat` と、`projects`・`settings.json` の `lstat` と `stat`。"""
-    out = {str(p): _stamp(p) for p in (account / reg.ACCOUNT_FILE, account / reg.CRED_FILE, config_file(account, True))}
+    out = {str(p): stat_stamp(p) for p in (account / reg.ACCOUNT_FILE, account / reg.CRED_FILE, config_file(account, True))}
     for item in ("projects", "settings.json"):
         p = account / item
         out[f"{p} (lstat)"] = _of(os.lstat(p)) if os.path.lexists(p) else None
-        out[str(p)] = _stamp(p)
+        out[str(p)] = stat_stamp(p)
     return out
 
 

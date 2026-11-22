@@ -68,7 +68,7 @@ class GuardSteps:
             # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する。
             # 認証の失敗を確かめたセグメントでは、外した間を書けたかによらず今のアカウントを候補から除く（解けても同じアカウントで再開しない）
             candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
-            return account_decide.after_limit(sec.account, rows, candidates, [], self.s.guards)
+            return account_decide.after_limit(sec.account, rows, candidates, inputs.fallbacks(), self.s.guards)
 
         pick = self._confirm(sec, "limit", now, judge)
         # 認証に失敗したアカウントはリセットを待っても再開できない。替え先が無ければ認証の判断（stalled と直し方の 1 行）へ進める
@@ -188,10 +188,15 @@ class GuardSteps:
 
 
 def _stamp(inputs: launch_inputs.Inputs) -> tuple:
-    """判断の入力のスタンプ（使用率のキャッシュのスタンプと `valid_until`・名前ごとの起動できるかのキャッシュ）。
+    """判断の入力のスタンプ（使用率のキャッシュのスタンプと `valid_until`・名前ごとの起動できるかのキャッシュ・従量の接続の判定・
+    この続きで認証に失敗した接続先）。
 
     使用率のキャッシュはスタンプが変わるか `valid_until` を過ぎると読み直され、読み直すと `valid_until` も変わる。
     """
     usage = inputs.usage
-    probes = tuple((n, c.result, tuple(sorted(c.stamps.items()))) for n, c in sorted(inputs.launch.items()))
-    return (usage.stamp if usage else None, usage.valid_until if usage else None, inputs.names, probes)
+
+    def cached(caches: dict[str, launch_inputs.LaunchCache]) -> tuple:
+        return tuple((n, c.result, tuple(sorted(c.stamps.items()))) for n, c in sorted(caches.items()))
+
+    head = (usage.stamp if usage else None, usage.valid_until if usage else None, inputs.names)
+    return (*head, cached(inputs.launch), cached(inputs.fallback), tuple(sorted(inputs.tried)))

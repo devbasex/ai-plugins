@@ -25,11 +25,23 @@ SKIP_WHY = {
     "unusable": "再登録が要るか、外した間か、登録が無い",
     "metered_unavailable": "従量の接続の設定が無い",
     "metered_unclassified": "従量の接続の設定の提供元を 1 つに決められない（API キーと別の資格情報やヘッダーの併用など）",
-    "key_record": "API キーの払い出しの記録を作れない",
-    "key_unready": "API キーを持つ従量の接続は、払い出しの上限を子へ組み込めないので起動しない",
+    "key_record": "API キーの払い出しの記録か、確かめた設定への固定のファイルを作れない",
+    "metered_overridden": "設定ファイルか環境が、従量の接続の設定と別の提供元・資格情報・接続先・apiKeyHelper を入れる",
+    "key_overridden": "起動引数の --settings が別の apiKeyHelper を持つ",
+    "key_unresolved": "起動引数の --settings が読めないか、2 つ以上あるか、hooks の形が違う",
+    "key_pin": "設定ファイルが読めないか JSON の object でなく、確かめた設定へ固定できない",
+    "key_gate": "設定の変更を反映の前に拒む hook が働かない（Claude Code のバージョン・--bare・--safe-mode・hook の無効化・簡易の起動）",
+    "tried": "この続きで認証に失敗した",
 }
 RELOGIN_LINE = "ndf-relay: アカウント {name} は再登録が要る。ndf relay account add {name} で登録し直す"
 METERED_BROKEN_LINE = "ndf-relay: 従量の接続の設定が読めないか壊れている。ndf relay account check metered で確かめて設定し直す"
+METERED_EMPTY_LINE = (
+    "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）が空なので、従量の接続へ替えない。KEY=VALUE を書くか、環境変数を外す"
+)
+METERED_FIXED_LINE = (
+    "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）がラッパーの決める変数（{names}）を持つので、"
+    "従量の接続へ替えない。その変数を外す"
+)
 # 環境変数の従量の接続の設定を起動の前に確かめた知らせ（別冊 issue-3604-3864-design-detail-keys.md の提供元の確定。変数の名前だけを出し、値は出さない）
 METERED_UNCLASSIFIED_LINE = (
     "ndf-relay: 従量の接続の環境変数（NDF_SUPERVISE_CLAUDE_FALLBACK）が読めないか、提供元を 1 つに決められないので、従量の接続へ替えない。"
@@ -66,7 +78,9 @@ class Target:
 
     `config_dir`・`generation`・`lease` は登録済みアカウントの用意の済んだ設定ディレクトリ・登録の世代・使用の届けの ID、
     `reason` は起動の理由（`first`・`cut`・`limit`）、`skipped` は飛ばした名前、`resolved` はその組の実効値。
-    `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。
+    `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。`settings_file`・`pin_file` は
+    `--settings` の合成の一時ファイルと確かめた設定への固定のファイル（子の終わりに消す）、`held` は最初の払い出しを見届けてから
+    子の端末へ送る最初のプロンプト（キーの子は起動引数に載せない。別冊の「最初の払い出しまで送らない」）。
     """
 
     account: Optional[str]
@@ -79,6 +93,17 @@ class Target:
     argv: list[str]
     resolved: Optional[account_dir.Resolved]
     helper: Optional[key_helper.Record] = None
+    settings_file: Optional[Path] = None
+    pin_file: Optional[Path] = None
+    held: Optional[str] = None
+
+    def drop_files(self) -> None:
+        """`--settings` の合成の一時ファイルと固定のファイル（とその払い出しのマーク）を消す（子の終わり・起動の失敗）。"""
+        for path in (self.settings_file, self.pin_file):
+            if path is not None:
+                path.unlink(missing_ok=True)
+        if self.pin_file is not None:
+            self.pin_file.with_name(self.pin_file.name.removesuffix(".json") + ".ok").unlink(missing_ok=True)
 
 
 def _read_status(fd: int, seconds: float) -> Optional[bytes]:
@@ -181,19 +206,22 @@ def why_of(code: str, name: str) -> str:
 
 
 def _declared_note(store: Path, environ: Mapping[str, str]) -> Optional[str]:
-    """環境変数の従量の接続の設定が読めないか提供元を 1 つに決められなければ、その 1 行（`account_choice.build` が拒む設定と同じ判定）。
+    """環境変数の従量の接続の設定が使えなければ、その 1 行（`account_choice.metered_decl` と同じ検証。変数の名前だけを出す）。
 
-    環境変数が無い・空なら None（保存した設定の壊れは `METERED_BROKEN_LINE` が受け持つ）。
+    環境変数が無ければ None（保存した設定の壊れは `METERED_BROKEN_LINE` が受け持つ）。
     """
-    if reg.declared_env(environ) is None:
+    raw = reg.declared_env(environ)
+    if raw is None:
         return None
     try:
-        extra = reg.fallback_env(store, environ)
-    except ValueError:  # 利用者の入力: 閉じない引用符などで解けない環境変数
-        return METERED_UNCLASSIFIED_LINE
-    if not extra or reg.metered_kind(extra) is not None:
-        return None
-    return METERED_HEADERS_LINE if {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} <= extra.keys() else METERED_UNCLASSIFIED_LINE
+        reg.parse_declared(raw)
+    except reg.DeclError as exc:
+        if exc.code == "empty":
+            return METERED_EMPTY_LINE
+        if exc.code == "fixed":
+            return METERED_FIXED_LINE.format(names="・".join(exc.names))
+        return METERED_HEADERS_LINE if exc.code == "headers" else METERED_UNCLASSIFIED_LINE
+    return None
 
 
 def start_notes(store: Path, environ: Mapping[str, str]) -> list[str]:

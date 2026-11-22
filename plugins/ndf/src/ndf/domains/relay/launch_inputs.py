@@ -48,13 +48,28 @@ class Inputs:
     usage: Optional[UsageCache] = None
     launch: dict[str, LaunchCache] = field(default_factory=dict)
     names: tuple[str, ...] = ()
+    # 従量の接続の替え先の判定（名前 → キャッシュ。`account_choice.fallbacks` の `Probe`）と、この続きで認証に失敗した接続先
+    fallback: dict[str, LaunchCache] = field(default_factory=dict)
+    tried: frozenset[str] = frozenset()
 
     def candidates(self) -> list[str]:
         """起動できる候補（`names` のうちキャッシュの理由が None のもの）。"""
         return [n for n in self.names if n in self.launch and self.launch[n].result is None]
 
+    def fallbacks(self) -> list[str]:
+        """起動できる従量の接続（キャッシュの理由が None で `tried` に無いもの。`metered` の順）。"""
+        return [n for n, c in self.fallback.items() if c.result is None and n not in self.tried]
+
     def excluded(self, name: str) -> Optional[str]:
-        """試す前に外す理由の符号（候補に無ければキャッシュの理由か `unusable`、上限なら `limited`）。外さなければ None。"""
+        """試す前に外す理由の符号（候補に無ければキャッシュの理由か `unusable`、上限なら `limited`）。外さなければ None。
+
+        従量の接続は、設定が無いか検証に外れれば `metered_unavailable`、`tried` にあれば `tried`（上限の観測は当てない）。
+        """
+        if name == reg.METERED:
+            cached = self.fallback.get(name)
+            if cached is None:
+                return "metered_unavailable"
+            return cached.result or ("tried" if name in self.tried else None)
         if name not in self.candidates():
             cached = self.launch.get(name)
             return cached.result if cached is not None and cached.result else "unusable"
@@ -74,12 +89,7 @@ class Inputs:
 
 def _stat(key: str) -> Optional[tuple]:
     lstat = key.endswith(LSTAT)
-    path = key[: -len(LSTAT)] if lstat else key
-    try:
-        st = os.lstat(path) if lstat else os.stat(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い源は None のスタンプで持つ（後から作られると変わる）
-        return None
-    return (st.st_mtime_ns, st.st_ino, st.st_size)
+    return account_dir.stat_stamp(key[: -len(LSTAT)] if lstat else key, lstat)  # 作る側と同じ形で比べる
 
 
 def stamp(path: Path) -> Optional[tuple]:
@@ -118,8 +128,11 @@ class Reader:
     def __init__(self, store: Path, state_dir: Path, environ: Mapping[str, str], cwd: Path, argv: Sequence[str]):
         self.store, self.state_dir, self.environ, self.cwd, self.argv = store, state_dir, environ, cwd, list(argv)
         self.inputs = Inputs()
+        self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
+        # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定
+        self._fallback: Optional[tuple[dict[str, Optional[tuple]], dict[str, LaunchCache]]] = None
 
     def _registered(self) -> dict[str, reg.Account]:
         """登録済みアカウント。登録簿のディレクトリ・各登録のディレクトリと `account.json` のスタンプが同じなら読み直さない。"""
@@ -174,7 +187,32 @@ class Reader:
             usable = {n: a for n, a in accs.items() if not a.needs_relogin and n not in held}
             self.inputs.names = tuple(usable)
             self.inputs.launch = {n: self._probe(a, self.inputs.launch.get(n)) for n, a in usable.items()}
+            self.inputs.fallback = self._fallbacks(self.inputs.fallback)
+            self.inputs.tried = frozenset(self.tried)
         return self.inputs
+
+    def _fallbacks(self, old: dict[str, LaunchCache]) -> dict[str, LaunchCache]:
+        """従量の接続の判定。設定と記録のスタンプが同じなら打ち直さない（`tried` は判定の後に `Inputs` が当てる）。
+
+        設定が無い・壊れている（判定が空）ときも結果を残し、保存した設定のスタンプが変わったときだけ読み直す。保存した設定と
+        候補の依存先を 1 つの表にまとめて持ち、同じファイル（`metered.json` など）は見回りごとに 1 回だけ `stat` する。
+        `metered.json` のスタンプは設定を読む前に 1 回だけ取り、候補の判定へも渡す。表では読む前のスタンプを残す（読んだ後に別の
+        プロセスが更新したら、次の見回りでスタンプが違って読み直す。読んだ後のスタンプで上書きすると古い設定の判定が残る）。
+        """
+        cached = self._fallback
+        if cached is not None and cached[1] is old and unchanged(cached[0]):
+            return old
+        path = reg.metered_path(self.store)
+        before = _stat(str(path))
+        base = {} if reg.declared_env(self.environ) is not None else {str(path): before}
+        decl = account_choice.metered_decl(self.store, self.environ)
+        metered = decl if isinstance(decl, tuple) else None
+        probes = account_choice.fallbacks({str(path): before}, self.environ, metered, self.cwd, self.argv, frozenset())
+        got = {p.name: LaunchCache(p.stamps, p.reason) for p in probes}
+        for p in probes:
+            base.update({k: v for k, v in p.stamps.items() if k not in base})
+        self._fallback = (base, got)
+        return got
 
     def _probe(self, acc: reg.Account, old: Optional[LaunchCache]) -> LaunchCache:
         if old is not None and unchanged(old.stamps):

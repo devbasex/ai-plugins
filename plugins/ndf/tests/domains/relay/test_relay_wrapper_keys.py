@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ndf.contracts import limits
-from ndf.domains.relay import key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_launch, wrapper_stop
+from ndf.domains.relay import account_choice, key_helper, observe, switch_decide, wrapper, wrapper_auth, wrapper_stop
 from ndf.domains.relay.launch_target import Choice
 from relay_children import FakeChild, Spawner, clock_ticks, make_settings, register
 
@@ -31,9 +31,9 @@ API_KEY_SCREEN = "401 invalid x-api-key · retrying in 9s · attempt 10/10\r\n  
 
 
 @pytest.fixture(autouse=True)
-def key_child_ready(monkeypatch):
-    """停止の経路を確かめるため、払い出しの上限を子へ組み込んだ前提で API キーの子を起動する。"""
-    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", True)
+def cli_version(monkeypatch):
+    """起動する Claude Code のバージョン（`cli_floor` の記録）。偽のバージョンで、実の CLI を打たない。"""
+    monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd: "2.1.330")
 
 
 def _iso(at: float) -> str:
@@ -140,7 +140,8 @@ def test_3864_9_d12_a_refused_helper_stops_the_child_and_resumes_on_work2(tmp_pa
     ended, spawn, w, _ = _run(tmp_path, first, [FakeChild([], 0)], names=("work2",))
     (one, env1), (two, env2) = spawn.calls
     assert env1["NDF_CLAUDE_ACCOUNT"] == "metered" and env2["NDF_CLAUDE_ACCOUNT"] == "work2"
-    assert two[:3] == [wrapper.CLAUDE, "--resume", one[2]] and two[-1] == switch_decide.AUTH_RESUME_PROMPT
+    # キーの子の起動引数は `--settings` の合成を先に持つので、会話の ID は `--session-id` の次の語で読む
+    assert two[:3] == [wrapper.CLAUDE, "--resume", one[one.index("--session-id") + 1]] and two[-1] == switch_decide.AUTH_RESUME_PROMPT
     assert _stopped_in_the_hit_tick(first) and ended.cause == ""
     assert "metered" in w.tried
 
@@ -200,7 +201,7 @@ def _bare(tmp_path, **sec):
     w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), clock=lambda: 100.0)
     w.dir.mkdir(parents=True, exist_ok=True)
     w._safe_point = lambda s, idle: False
-    base = dict(must_end=True, end_now=False, must_end_at=100.0, child=FakeChild([b"x"], None), last_output=100.0)
+    base = dict(must_end=True, end_now=False, must_end_at=100.0, child=FakeChild([b"x"], None), last_output=100.0, held=None)
     return w, types.SimpleNamespace(**{**base, **sec})
 
 
@@ -262,15 +263,6 @@ def test_d12_end_point_after_quiet_with_a_question_or_an_api_error(tmp_path):
 
 def w_quiet(tmp_path) -> float:
     return make_settings(tmp_path).quiet
-
-
-def test_d12_an_api_key_child_is_not_launched_until_the_payout_limit_is_wired(tmp_path, monkeypatch):
-    # 設定のキーが ANTHROPIC_API_KEY のまま子へ渡る間は、払い出しの上限を迂回するので起動しない
-    monkeypatch.setattr(wrapper_launch, "KEY_CHILD_READY", False)
-    first = KeyChild({})
-    ended, spawn, w, out = _run(tmp_path, first)
-    assert spawn.calls == [] and ended.cause == "account_unavailable"
-    assert "払い出しの上限" in out and not (w.dir / key_helper.RECORD_FILE).exists()
 
 
 class Stubborn(FakeChild):

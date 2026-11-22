@@ -25,10 +25,6 @@ LAUNCH_FAILED = "子の claude を起動できない（{why}）"
 CHILD_ALIVE = "子（pid {pid}）を強制終了しても {seconds:g} 秒のうちに終わらない。次の子を起動せずに止める"
 AGAIN_RESTART = "、tmux の外で ndf relay restart {name} を打つ"
 SPUN = "spun"  # `_launch_target` の返り: 試した起動先がどれも再起動ループの検出に当たった
-# API キーを持つ従量の接続の子を起動してよいか（#3864 の決定 12）。`build` が `apiKeyHelper` に記録先と ID を渡し、
-# 確かめた設定への固定・最初の払い出しまでの会話の保留・接続先の変更を反映の前に拒む処理がそろうまで偽にしておく。
-# 偽の間は設定のキーが `ANTHROPIC_API_KEY` のまま子へ渡り、払い出しの上限を迂回するので起動しない
-KEY_CHILD_READY = False
 
 
 class Ended(NamedTuple):
@@ -73,8 +69,18 @@ class LaunchSteps:
     _inputs: Callable[[float, bool], launch_inputs.Inputs]
     _length: Callable[[Section, float], float]
 
+    def _metered(self) -> Optional[tuple[dict[str, str], bool]]:
+        """従量の接続の設定（変数の組と、保存した設定か）。無い・読めない・検証に外れれば None（詳細設計書の「従量の接続の設定の検証」）。"""
+        decl = account_choice.metered_decl(self.store, self.s.environ)
+        return decl if isinstance(decl, tuple) else None
+
+    def _fallbacks(self, now: float) -> list[str]:
+        """起動できる従量の接続の名前（`metered` の順。`tried` を除く）。判定は `LaunchCache` に残し、スタンプが同じなら打ち直さない。"""
+        return self._inputs(now, True).fallbacks()
+
     def _launch_target(self, req: Launch, argv: list[str], launch: str) -> Union[Launched, str, None]:
-        """`req.choice.names` を順に試して子を起動する（子が止まっている前提）。
+        """`req.choice.names` を順に試して子を起動する（子が止まっている前提）。`argv` は最初のプロンプトを除いた起動引数で、
+        プロンプト（`req.prompt`）は起動先ごとに足す（キーの子は起動引数に載せず、最初の払い出しの後に子の端末へ送る）。
 
         候補に無い・上限・再起動ループに当たる名前は用意せず 1 行で飛ばす。用意に落ちた名前と、関所の子が claude になれなかった
         名前も 1 行で飛ばして次へ進む。`fixed` の要求は除外を当てずに用意を試す（落ちれば既定のログインへ落とさない）。
@@ -87,7 +93,7 @@ class LaunchSteps:
             code = None if req.choice.fixed else inputs.excluded(name)
             spin = code is None and self._spins(req.kind, name)
             spun = spun or spin
-            got = None if code is not None or spin else self._try(name, req.reason, argv, launch)
+            got = None if code is not None or spin else self._try(name, req, argv, launch)
             if got is not None:
                 return Launched(dataclasses.replace(got.target, skipped=tuple(skipped)), got.child)
             if code is not None:
@@ -110,51 +116,58 @@ class LaunchSteps:
         if fb is not None:
             if self._spins(req.kind, fb):
                 return SPUN
-            got = self._try(fb, req.reason, argv, launch)
+            got = self._try(fb, req, argv, launch)
             if got is not None:
                 return Launched(dataclasses.replace(got.target, skipped=skipped), got.child)
             if req.reason in ("limit", "guard", "auth"):  # 同じ会話を別の認証で続けない
                 return SPUN if spun else None
         if self._spins(req.kind, None):
             return SPUN
-        target = Target(None, None, "", req.reason, skipped, None, self._env_for(None, launch), argv, None)
+        full = [*argv, req.prompt] if req.prompt else argv
+        target = Target(None, None, "", req.reason, skipped, None, self._env_for(None, launch), full, None)
         return Launched(target, self._spawn_target(target))
 
-    def _try(self, name: str, reason: str, argv: list[str], launch: str) -> Optional[Launched]:
+    def _skip(self, name: str, code: str) -> None:
+        self._log({"kind": "account_dir", "account": name, "reason": code})
+        self.last_skip = why_of(code, name)
+
+    def _try(self, name: str, req: Launch, argv: list[str], launch: str) -> Optional[Launched]:
         """1 つの名前を `account_choice.target_env` で用意して起動する。用意できない・関所の子が claude になれなければ、
-        理由の文を `last_skip` に置いて None（届けは解除済み）。"""
+        理由の文を `last_skip` に置いて None（届けは解除済み）。キーの子は払い出しの記録を作り、記録先と ID を helper に渡す。"""
         env = self._env_for(name, launch)
         helper = None
         if account_choice.key_child(env, name, self.store):
-            if not KEY_CHILD_READY:  # 払い出しの上限を当てられないキーの子を起動しない
-                self._log({"kind": "account_dir", "account": name, "reason": "key_unready"})
-                self.last_skip = why_of("key_unready", name)
-                return None
             try:  # 記録の無いキーの子を起動しない（払い出しを数えられない）
                 helper = key_helper.create(self.dir)
             except OSError:
-                self._log({"kind": "account_dir", "account": name, "reason": "key_record"})
-                self.last_skip = why_of("key_record", name)
+                self._skip(name, "key_record")
                 return None
-        got = account_choice.target_env(env, name, self.store, self.s.state_dir, self.s.cwd, argv)
+        if helper is not None:
+            got = account_choice.key_target(env, self.store, self.s.state_dir, self.s.cwd, argv, (helper.path, helper.helper_id))
+        else:
+            got = account_choice.target_env(env, name, self.store, self.s.state_dir, self.s.cwd, argv)
         if isinstance(got, str):
-            self._log({"kind": "account_dir", "account": name, "reason": got})
-            self.last_skip = why_of(got, name)
+            self._skip(name, got)
             return None
+        reason, held = req.reason, req.prompt if helper is not None and req.prompt else None
+        final = got.argv if held is not None or not req.prompt else [*got.argv, req.prompt]
         p = got.prepared
         if p is None:
-            target = Target(name, None, "", reason, (), None, got.env, got.argv, got.resolved, helper)
+            target = Target(name, None, "", reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held)
         else:
             links = p.links
             row = {"kind": "account_dir", "account": name, "reason": p.sync, "local_only": links.local_only, "skipped": links.skipped}
             self._log({**row, "added": links.added})
-            target = Target(name, p.config_dir, p.generation, reason, (), p.lease, got.env, got.argv, got.resolved)
+            target = Target(name, p.config_dir, p.generation, reason, (), p.lease, got.env, final, got.resolved)
         try:
             return Launched(target, self._spawn_target(target))
         except launch_target.GateFailed as exc:
-            self._log({"kind": "account_dir", "account": name, "reason": exc.code})
-            self.last_skip = why_of(exc.code, name)
+            target.drop_files()  # 起動しなかった子の一時ファイルと固定のファイルを残さない（起動した子は `_settle` が消す）
+            self._skip(name, exc.code)
             return None
+        except BaseException:
+            target.drop_files()
+            raise
 
     def _spawn_target(self, target: Target) -> Any:
         """起動の直前に停止要求を読み直し、子を起動する。関所の失敗は `GateFailed`（呼び手が次の候補へ進む）。
@@ -220,6 +233,8 @@ class LaunchSteps:
         再登録・削除を通さない。届けは子が終われば残骸として消される）。
         """
         t = sec.target
+        if t is not None and (t.settings_file or t.pin_file) and not sec.child.isalive():
+            t.drop_files()  # 子が終わるまでは残す（Claude Code は動いている間も --settings のファイルを読み直す）
         if sec.settled or t is None or t.account is None or t.lease is None:
             return
         if sec.child.isalive():
