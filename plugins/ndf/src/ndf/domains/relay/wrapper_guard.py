@@ -151,8 +151,8 @@ class GuardSteps:
             return pick
         names = self._names(sec, pick, reason, inputs, now)
         live = [n for n in names if not self._spins("account", n)]  # 再起動ループの検出で当たる名前を除く
-        # 認証の失敗を確かめたセグメントでは、上限の手でも認証の手でも、尽きたときに今のアカウントへ落とさない（既定のログインも起動しない）
-        held = sec.auth_at is not None
+        # 認証の失敗を確かめたセグメントとキーの子の停止（`revoked`）では、尽きたときに今のアカウントへ落とさない（既定のログインも起動しない）
+        held = sec.auth_at is not None or reason == "revoked"
         choice = Choice(tuple(live or names), None if held else sec.account, last=held)
         pick = pick._replace(account=choice.names[0])
         self.memo = (key, pick, choice, reason)

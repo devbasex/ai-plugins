@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_dir
+from ndf.domains.relay import account_choice, account_dir, key_helper
 from ndf.domains.relay import account_registry as reg
 
 # 起動先を試す起動（#3604 #3864 の決定 3・7）。理由の文に値・メールアドレス・パスを入れない
@@ -24,6 +24,7 @@ SKIP_WHY = {
     "limited": "上限に当たっている",
     "unusable": "再登録が要るか、外した間か、登録が無い",
     "metered_unavailable": "従量の接続の設定が無い",
+    "key_record": "API キーの払い出しの記録を作れない",
 }
 RELOGIN_LINE = "ndf-relay: アカウント {name} は再登録が要る。ndf relay account add {name} で登録し直す"
 METERED_BROKEN_LINE = "ndf-relay: 従量の接続の設定が読めないか壊れている。ndf relay account check metered で確かめて設定し直す"
@@ -54,6 +55,7 @@ class Target:
 
     `config_dir`・`generation`・`lease` は登録済みアカウントの用意の済んだ設定ディレクトリ・登録の世代・使用の届けの ID、
     `reason` は起動の理由（`first`・`cut`・`limit`）、`skipped` は飛ばした名前、`resolved` はその組の実効値。
+    `helper` はキーの子の払い出しの記録（キーの子でなければ None。#3864 の決定 12）。
     """
 
     account: Optional[str]
@@ -65,6 +67,7 @@ class Target:
     env: dict[str, str]
     argv: list[str]
     resolved: Optional[account_dir.Resolved]
+    helper: Optional[key_helper.Record] = None
 
 
 def _read_status(fd: int, seconds: float) -> Optional[bytes]:

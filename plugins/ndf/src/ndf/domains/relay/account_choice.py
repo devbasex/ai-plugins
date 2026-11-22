@@ -81,6 +81,12 @@ def _metered_decl(store: Path, env: Mapping[str, str]) -> Optional[tuple[dict[st
     return (extra, False) if extra else None
 
 
+def key_child(env: Mapping[str, str], target: str, store: Path) -> bool:
+    """キーの子か（環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。"""
+    decl = _metered_decl(store, env) if target == reg.METERED else None
+    return decl is not None and not decl[1] and reg.metered_kind(decl[0]) == reg.API_KEY_KIND
+
+
 def build(
     env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str]
 ) -> Union[tuple[dict[str, str], list[str]], str]:

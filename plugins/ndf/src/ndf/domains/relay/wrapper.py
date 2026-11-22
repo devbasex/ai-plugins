@@ -59,7 +59,8 @@ from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
 from ndf.domains.relay.wrapper_auth import AuthSteps
 from ndf.domains.relay.wrapper_guard import GuardSteps
-from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, CHILD_ALIVE, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
+from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
+from ndf.domains.relay.wrapper_stop import StopSteps
 
 # 画面の末尾として残すバイト数（上限と認証の失敗の行を探す範囲）
 SCREEN_KEEP = 65536
@@ -83,8 +84,6 @@ NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
 # 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
-QUESTION_LOCK = f"{signals.QUESTION_FILE}.lock"
-HALT_BROKEN = "質問が閉じるか子の終わりを待ってから止める"
 # 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
 # `again` は端末のラッパーなら AGAIN_RUN、名前つきのラッパー（NDF_RELAY_SPAWNED）なら AGAIN_RESTART（起動引数の中身は出さない）
 SPIN_LINE = (
@@ -188,6 +187,12 @@ class Section:
     wall_started: float = 0.0
     auth_at: Optional[float] = None
     auth_told: bool = False
+    # キーの子の停止（#3864 の決定 12）: 止める必要・待たずに止める・立てた時刻・立てた側（drift か auth）・設定の当たりの出所
+    must_end: bool = False
+    end_now: bool = False
+    must_end_at: Optional[float] = None
+    end_cause: Optional[str] = None
+    end_source: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -240,7 +245,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
+class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -279,10 +284,14 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         # 世代が変われば捨てる）と、取得の判定の結果の再利用（名前 → (世代・2 つの記録のスタンプ・tried・until, 次に `due` が真になる時刻)）
         self.limit_untils: dict[str, tuple[str, float]] = {}
         self.due_memo: dict[str, tuple[tuple, float]] = {}
+        # この続きで認証に失敗した従量の接続と API キー（ラッパーの終わりで消える）と、キーの子の記録の読みの結果（決定 12）
+        self.tried: set[str] = set()
+        self.key_memo: Optional[tuple] = None
 
     def run(self, prompt: str) -> Ended:
         """錠を取り、バージョンの混ざりを確かめてからセグメントを回す。"""
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.dir, 0o700)  # キーの子の払い出しの記録を置く（`key_helper.create` が 0700 を確かめる）
         with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
             if not got:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")
@@ -300,18 +309,16 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
     def _loop(self, prompt: str) -> Ended:
         stop_signal.drop_stop(self.dir)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
         halt_shown = False
-        first = self.s.first_session or str(uuid.uuid4())
-        # 利用者が --resume で続けた会話の途中では更新しない（I3）
-        self._tell_at_start()
-        ended = self._before_start(update=not self.s.first_resume)
-        if ended is None:
-            ended = self._start(Launch(1, first, self._initial(self.wall.now()), prompt, resume=self.s.first_resume))
+        ended = self._first_start(prompt)
         if ended is not None:
             return self._end(ended)
         while True:
             self._pump(self.s.tick)
             try:
-                step = switch_decide.decide(self._state())
+                ended, stopped = self._key_step()  # (2)〜(3) キーの子は替え先を読む前に止める（#3864 の決定 12）
+                if ended is not None:
+                    return self._end(ended)
+                step = switch_decide.decide(self._state(stopped))  # (4)
             except (signals.SignalError, accounts.AccountError) as exc:
                 return self._end(self._halt_broken(exc))
             self._note(step)
@@ -326,7 +333,19 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
             if ended is not None:
                 return self._end(ended)
 
-    def _state(self) -> switch_decide.SectionState:
+    def _first_start(self, prompt: str) -> Optional[Ended]:
+        """最初のセグメントを起動する。利用者が --resume で続けた会話の途中では更新しない（I3）。"""
+        first = self.s.first_session or str(uuid.uuid4())
+        self._tell_at_start()
+        ended = self._before_start(update=not self.s.first_resume)
+        return (
+            ended
+            if ended is not None
+            else self._start(Launch(1, first, self._initial(self.wall.now()), prompt, resume=self.s.first_resume))
+        )
+
+    def _state(self, stopped: bool) -> switch_decide.SectionState:
+        """見回り 1 回の状態。止める必要の立った子では上限・認証・見回りの替え先を読まず、止めた見回りでだけ替え先を取り直す。"""
         sec = self._current()
         sec.choice = None
         self._drain_fetch()
@@ -337,11 +356,13 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         screen = observe.plain(bytes(sec.screen))
         now = self.clock()
         spin = self._spin(sec, now)
-        seen = self._auth_seen(sec, screen)  # 上限の見回りでも先に確かめる（上限の手も `auth_at` で今のアカウントを除く）
-        limit = self._limit_pick(sec, screen)
+        key = sec.target is not None and sec.target.helper is not None  # キーの子の認証の失敗は `_key_auth` が止める
+        # 上限の見回りでも先に確かめる（上限の手も `auth_at` で今のアカウントを除く）
+        seen = not sec.must_end and not key and self._auth_seen(sec, screen)
+        limit = None if sec.must_end else self._limit_pick(sec, screen)
         auth = self._auth_pick(sec) if seen and limit is None else None  # 上限が先（替え先の確定を上書きしない）
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
-        guard = self._guard_pick(sec, self.wall.now()) if limit is None and auth is None and alive else None
+        guard = self._guard_pick(sec, self.wall.now()) if not sec.must_end and limit is None and auth is None and alive else None
         safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
         return switch_decide.SectionState(
             question=question,
@@ -364,6 +385,9 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
             spin_held=self.spin_held,
             guard_pick=guard,
             safe=safe,
+            must_end=sec.must_end,
+            end_ready=stopped,
+            drift_pick=self._revoked_pick(sec, self.wall.now()) if stopped else None,
         )
 
     def _queue_fetch(self, now: float) -> None:
@@ -571,14 +595,15 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         return Choice((first, *[n for n in rest if n != first]))
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
-        if step.kind == "account":
+        if step.kind == "account" and not sec.must_end:
             # 替え先の最後の確かめは子を止める直前に打つ。外れたら子を残し、次の見回りで候補を選び直す
             why = self._recheck_choice(sec)
             if why is not None:
                 sec.ended_at = None
                 self._log({"kind": "account_recheck", "account": sec.choice.names[0] if sec.choice else None, "reason": why})
                 return None
-        stopped = self._stop_if_clear(sec)
+        # キーの子は `_stop_revoked` が止め、`_revoked_pick` が止める直前の確かめも済ませてある
+        stopped = "stopped" if sec.must_end else self._stop_if_clear(sec)
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
@@ -639,6 +664,7 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
         "handover": _on_handover,
         "finish": _on_finish,
         "spin": _on_spin,
+        "revoked": StopSteps._on_revoked,
     }
 
     def _start(self, req: Launch) -> Optional[Ended]:
@@ -859,61 +885,6 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
             self.out.write(f"\r\n{line}\r\n".encode())
             self.out.flush()
 
-    def _stop_if_clear(self, sec: Section) -> str:
-        """質問の hook と同じロックを待たずに取り、質問のファイルが無ければロックを持ったまま子を止める（I4）。
-
-        `"stopped"` は子の終わりを確かめた、`"held"` はロックを取れない・質問のファイルが在る（子にも何もしない）、
-        `"alive"` は強制終了しても子が終わらない。止めたら止めた子の起動を今の起動から外し、残った hook が書けないようにする。
-        """
-        with signals.held(self.dir / QUESTION_LOCK, 0) as got:
-            if not got or signals.question_present(self.dir):
-                return "held"
-            stopped = self._stop_child(sec)
-            signals.set_launch(self.dir, None)
-            return "stopped" if stopped else "alive"
-
-    def _not_stopped(self, stopped: str, sec: Section) -> Optional[Ended]:
-        """子を止められなかったときの終わり。確かめが外れた（`held`）なら何もせず次の見回りで決め直し、終わらない子なら止まる。
-
-        `held` ならセグメントは続くので、終わりの時刻を取り消す（回答待ちの間もセグメントの長さに数え、次の判断で求め直す）。
-        """
-        if stopped == "held":
-            sec.ended_at = None
-            return None
-        return self._child_alive(sec)
-
-    @staticmethod
-    def _child_alive(sec: Section) -> Ended:
-        return Ended("refused", CHILD_ALIVE.format(pid=sec.child.pid, seconds=limits.seconds("relay.child-exit")))
-
-    def _halt_broken(self, exc: Exception) -> Ended:
-        """設定が壊れたときの終わり。回答待ちの質問を残したまま子を止めず、ロックの中の確かめが通るか子が終わるまで待つ（決定 5）。
-
-        待つ間は判断をせず（切り替え・起動し直し・引継ぎ・転送をしない）、子の出力と利用者の入力だけをそのまま渡す。
-        """
-        sec = self._current()
-        self._write_state("waiting", f"{exc}。{HALT_BROKEN}")
-        while sec.child.isalive():
-            stopped = self._stop_if_clear(sec)
-            if stopped == "alive":
-                return self._child_alive(sec)
-            if stopped == "stopped":
-                break
-            self._pump(self.s.tick)
-        return Ended("config_broken", str(exc))
-
-    def _stop_child(self, sec: Section) -> bool:
-        """子を強制終了し、子の終わりを確かめたら真。強制終了が偽を返したら `relay.child-exit` の秒まで終わりを待つ。"""
-        child = sec.child
-        if not child.isalive() or child.terminate(force=True):
-            return True
-        deadline = self.clock() + limits.seconds("relay.child-exit")
-        while child.isalive():
-            if self.clock() >= deadline:
-                return False
-            time.sleep(self.s.tick)
-        return True
-
     def _pump(self, timeout: float) -> None:
         """子の画面を端末へ写し、端末の入力を子へ渡す。どちらも無ければ `timeout` 秒で返る。"""
         sec = self._current()
@@ -924,7 +895,7 @@ class Wrapper(GuardSteps, AuthSteps, LaunchSteps):
             self._from_child(sec)
         if self.stdin_fd is not None and self.stdin_fd in ready:
             data = os.read(self.stdin_fd, READ_SIZE)
-            if data:
+            if data and not sec.must_end:  # 止める必要の立った子へは入力を送らずに捨てる（後継にも渡さない。決定 12）
                 sec.child.write(data)
                 sec.input_at = self.wall.now()
                 sec.screen.clear()

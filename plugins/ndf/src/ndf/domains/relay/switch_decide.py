@@ -30,6 +30,9 @@ FORWARD_UNKNOWN = "AskUserQuestion の質問を人かオーガナイザーへ回
 QUESTION_PENDING = "回答待ちの質問がある。子を止めず、子の端末へ書かない"
 # 再起動ループの検出に当たったときの理由（#3864 の決定 13）
 SPIN_REASON = "起動から間もないセグメントが続いた（再起動ループ）。次のセグメントを起動しない"
+# API キーの子で止める必要が立ち、止められる時点を待つ理由と、止めた後に替え先が無い理由（#3864 の決定 12）
+END_WAIT = "API キーの設定が変わった。止められる時点を待つ"
+REVOKED = "API キーの子を止めた。替える先が無い"
 # 既定のログイン（アカウントの指定が無い）の起動先の値。登録の名前に使えない括弧を含むので重ならない
 DEFAULT_TARGET = "(default)"
 
@@ -51,6 +54,8 @@ class SectionState:
     - `spin`・`spin_seen`・`spin_held`: 今のセグメントを終えて数える手で次を始めると再起動ループの検出に当たるか・
       続きの中で起動した起動先・検出に当たった後の保持（#3864 の決定 13）
     - `guard_pick`・`safe`: 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
+    - `must_end`・`end_ready`・`drift_pick`: API キーの子で止める必要が立ったか・この見回りで旧子の終わりを確かめたか・
+      止めた後に取り直した替え先の判断（`end_ready` が偽の間は None。#3864 の決定 12）
     """
 
     question: bool
@@ -73,10 +78,13 @@ class SectionState:
     spin_held: bool = False
     guard_pick: Optional[Pick] = None
     safe: bool = False
+    must_end: bool = False
+    end_ready: bool = False
+    drift_pick: Optional[Pick] = None
 
 
 class Step(NamedTuple):
-    """次の手。`kind` は `wait`・`forward`・`switch`・`account`・`wait_reset`・`stalled`・`handover`・`restart`・`finish`・`spin`。
+    """次の手。`kind` は `wait`・`forward`・`switch`・`account`・`wait_reset`・`stalled`・`handover`・`restart`・`finish`・`spin`・`revoked`。
 
     `prompt` は子へ送る 1 行、`account` は次に使うアカウント（替えないときは None）。
     """
@@ -141,7 +149,10 @@ def _spin_or(state: SectionState, step: Step) -> Step:
 
 
 def decide(state: SectionState) -> Step:
-    """次の手を決める。上から順に最初に当たった条件で決まる。"""
+    """次の手を決める。上から順に最初に当たった条件で決まる。API キーの子の停止（`_revoked`）がどれより先。"""
+    revoked = _revoked(state)
+    if revoked is not None:
+        return revoked
     if state.question:
         if state.question_forwarded:
             return Step("wait", QUESTION_PENDING)
@@ -167,6 +178,18 @@ def decide(state: SectionState) -> Step:
     step = _alive(state, quiet)
     # 止めてよい時点を待つ間も、文脈の上限の引継ぎと出力の止まりの再起動は先に打つ（tool_use のままハングした子を残さない）
     return guarded if guarded is not None and step.kind == "wait" else step
+
+
+def _revoked(state: SectionState) -> Optional[Step]:
+    """API キーの子の停止（決定 12）。止めるまでは `wait`、止めた後は替え先で `account`・再起動ループなら `spin`・無ければ `revoked`。"""
+    if not state.must_end:
+        return None
+    if not state.end_ready:
+        return Step("wait", END_WAIT)
+    pick = state.drift_pick
+    if pick is not None and pick.kind == "switch":
+        return _spin_or(state, Step("account", pick.reason, prompt=AUTH_RESUME_PROMPT, account=pick.account))
+    return Step("revoked", pick.reason if pick is not None else REVOKED)
 
 
 def _guard(state: SectionState) -> Optional[Step]:

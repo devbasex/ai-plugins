@@ -144,6 +144,8 @@
     "relay.registry-lock": {"summary": "リレーハブの登録簿の排他を待つ上限", "seconds": 5},
     "relay.child-exit": {"summary": "ラッパーが子を強制終了した後、子の終わりを確かめるまで待つ上限。終わらなければ次の子を起動せずに止める（#3814）", "seconds": 5},
     "relay.signal-lock": {"summary": "シグナルファイル（次のセグメントのマーカー・質問）の排他を待つ上限。hook の締め切りの中に収める", "seconds": 0.3},
+    "relay.key-helper": {"summary": "API キーの helper の払い出し。1 つの helper の ID でキーを出すのは seconds 秒の間に attempts 回まで。lock は記録の錠を待つ秒、gate は config-gate の hook の timeout の秒、first は起動から最初の払い出しまで会話を残す秒（#3864 の決定 12）", "seconds": 60, "attempts": 3, "lock": 0.5, "gate": 5, "first": 30},
+    "relay.end-wait": {"summary": "API キーの子で止める必要が立ってから、止めてよい時点を待つ上限の秒。過ぎたら子の状態によらず止める（#3864 の決定 12）", "seconds": 60},
     "relay.auth-hold": {"summary": "認証の失敗で、そのアカウントを替え先と指定の候補から外す秒（#3864）", "seconds": 3600},
     "relay.limit-unknown": {"summary": "上限の行を見たアカウントの使用率の記録に有効な窓が無いとき、上限として扱う秒（5 時間の窓の長さ）", "seconds": 18000},
     "relay.usage-fetch": {"summary": "1 つのアカウントの使用率の API を呼ぶ間隔の下限。取得の記録の at で数え、プロセスをまたぐ。間隔の中では、最後に試した後に過ぎたリセット 1 つにつき 1 回だけ取り直す（決定 4）", "seconds": 300},

@@ -165,6 +165,22 @@ def credential_failure(path: Path, size: int, since: float) -> Optional[bool]:
     return at is not None and at > since
 
 
+def api_error_since(path: Path, size: int, since: Optional[float]) -> bool:
+    """会話の行の最後が API の失敗の記録（`isApiErrorMessage` が真の `assistant`）で、その時刻が `since` より後か。
+
+    読めない・確かめられない記録は偽（呼び手は止めずに待つ。#3864 の決定 12 の `_end_point`）。
+    """
+    try:
+        rows = _talk(path, size)
+    except _Unsure:  # noqa: NDF401 ファイル: 確かめられない記録では止めずに待つ
+        return False
+    if not rows:
+        return False
+    last = rows[-1]
+    at = _time(last.get("timestamp"))
+    return last["type"] == "assistant" and last.get("isApiErrorMessage") is True and at is not None and (since is None or at > since)
+
+
 def tool_pending(path: Path, size: int) -> Optional[bool]:
     """最後の `assistant` の記録の `tool_use` に対応する `tool_result` が後ろに無いか。読めない・壊れた・形が違えば None。"""
     try:

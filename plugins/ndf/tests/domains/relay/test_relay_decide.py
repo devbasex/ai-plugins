@@ -501,7 +501,7 @@ SWITCH_K2 = Pick("switch", "work2", "metered の認証に失敗した。work2 �
         (dict(end_ready=False, limit_pick=Pick("wait_reset", None, "上限")), "wait"),
         # 止めた見回りで替え先があれば account（AUTH_RESUME_PROMPT）、再起動ループに当たれば spin、無ければ revoked
         (dict(end_ready=True, drift_pick=SWITCH_K2), "account"),
-        (dict(end_ready=True, drift_pick=SWITCH_K2, spin=True), "spin"),
+        (dict(end_ready=True, drift_pick=SWITCH_K2, spin=True, spin_seen=frozenset({"work2"})), "spin"),
         (dict(end_ready=True, drift_pick=None, auth_pick=Pick("stalled", "metered", "替え先が無い")), "revoked"),
         (dict(end_ready=True, drift_pick=None, child_alive=False, child_exit=1), "revoked"),
     ],

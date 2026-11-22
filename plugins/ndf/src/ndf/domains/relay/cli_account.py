@@ -8,16 +8,17 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import shlex
 import shutil
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator, NamedTuple, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.contracts import result
-from ndf.domains.relay import account_login, account_metered, account_registry, accounts
+from ndf.domains.relay import account_login, account_metered, account_registry, accounts, key_helper
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(f"{__package__}.cli")
@@ -25,11 +26,14 @@ ACCOUNT_COMMANDS = {
     "use": "子の claude を起動するアカウントを指定する",
     "show": "今選ばれるアカウント（環境変数 → 指定）を出す",
     "clear": "指定を消す",
+    "api-key-helper": "API キーの子の apiKeyHelper（キーだけを標準出力へ出す。ラッパーが起動引数に載せる）",
 }
 
 
 def run(args: argparse.Namespace) -> int:
     """`ndf relay account` の振り分け（指定の use・show・clear と、登録のサブコマンド）。"""
+    if args.account_action == "api-key-helper":
+        return _acc_key_helper(args)
     if args.account_action in ACCOUNT_REGISTRY_HANDLERS:
         return _account_registry(args)
     state_dir = identity.load().state_dir
@@ -43,6 +47,39 @@ def run(args: argparse.Namespace) -> int:
         return result.emit(result.result(TOOL, result.OK, "指定を消した" if done else "指定は無かった"))
     name = accounts.chosen(os.environ, state_dir)
     return result.emit(result.result(TOOL, result.OK, f"選ばれるアカウント: {name or '（claude の既定）'}", items=[{"account": name}]))
+
+
+def _metered_key(environ: Mapping[str, str], fp: str) -> Optional[str]:
+    """環境変数の設定が API キーの設定で、キーの SHA-256 が `fp` と同じならキーの値。無い・解けない・違えば None。"""
+    raw = account_registry.declared_env(environ)
+    if raw is None:
+        return None
+    try:
+        tokens = shlex.split(raw)
+    except ValueError:  # noqa: NDF401 利用者の入力: 解けない設定ではキーを出さない
+        return None
+    decl = dict(t.partition("=")[::2] for t in tokens if "=" in t)
+    if account_registry.metered_kind(decl) != account_registry.API_KEY_KIND:
+        return None
+    key = decl["ANTHROPIC_API_KEY"]
+    return key if key_helper.fingerprint(key) == fp else None
+
+
+def _acc_key_helper(a: argparse.Namespace) -> int:
+    """`api-key-helper metered <指紋>`。合うキーだけを標準出力へ出し、ほかは何も出さずに終了コード 1（別冊の「環境変数の設定の API キー」）。
+
+    記録先と ID は起動引数の `--record`・`--id` だけから決め（両方か、どちらも無いか）、ある起動は記録の錠の中で払い出しを照らす。
+    標準エラーと記録にキーの値も指紋も出さない。
+    """
+    if (a.record is None) != (a.id is None):
+        return 1
+    key = _metered_key(os.environ, a.fingerprint) if a.target == account_registry.METERED else None
+    if a.record is not None and not key_helper.pay(Path(a.record), a.id, key, time.time()):
+        return 1
+    if key is None:
+        return 1
+    sys.stdout.write(key)
+    return 0
 
 
 def _capacity_arg(v: str) -> Optional[float]:
@@ -269,6 +306,10 @@ def parser(sub: Any, help_text: str) -> None:
     acc_sub = acc.add_subparsers(dest="account_action", required=True)
     p = {name: acc_sub.add_parser(name, help=text, description=text) for name, text in texts.items()}
     p["use"].add_argument("name")
+    p["api-key-helper"].add_argument("target", help="metered")
+    p["api-key-helper"].add_argument("fingerprint", help="キーの値の SHA-256 の 16 進")
+    p["api-key-helper"].add_argument("--record", help="払い出しの記録（ラッパーが作る）")
+    p["api-key-helper"].add_argument("--id", help="helper の ID")
     p["add"].add_argument("name", help="アカウントの名前（英小文字・数字・- と _ の 32 字まで）")
     p["add"].add_argument("--code", help="認可コード。- なら標準入力の 1 行（引数と記録に残さない）")
     for opt, text in (("--profile", "AWS のプロファイル"), ("--region", "地域（省けばプロファイルの region）"), ("--model", "モデルの ID")):

@@ -1,9 +1,9 @@
 """API キーの helper の払い出しと記録（U11a。#3604 #3864 の受け入れ条件 #3864 の 9・決定 12・I9）。
 
-- `ndf relay account api-key-helper metered <指紋>` は、環境変数の宣言が API キーの宣言で、キーの SHA-256 が指紋と同じときだけ
-  キーを出す（別冊の「環境変数の宣言の API キー」）
-- `--record`・`--id` のある起動は、記録の錠の中で払い出しの上限（60 秒に 3 回・拒んだ後と拒否の印の後は 0 回）を照らし、
-  1 行を足してからキーを出す。錠・追記の失敗は失敗の印に残す（別冊の「キーの子の認証の失敗の停止」）
+- `ndf relay account api-key-helper metered <指紋>` は、環境変数の設定が API キーの設定で、キーの SHA-256 が指紋と同じときだけ
+  キーを出す（別冊の「環境変数の設定の API キー」）
+- `--record`・`--id` のある起動は、記録の錠の中で払い出しの上限（60 秒に 3 回・拒んだ後と拒否のマークの後は 0 回）を照らし、
+  1 行を足してからキーを出す。錠・追記の失敗は失敗のマークに残す（別冊の「キーの子の認証の失敗の停止」）
 値はすべて偽の値で、実のキーを使わない。
 """
 
@@ -45,9 +45,9 @@ def _helper(capsys, *extra) -> tuple[int, str, str]:
         (f"ANTHROPIC_API_KEY={FAKE_KEY}", FAKE_KEY),
         (f"ANTHROPIC_API_KEY={FAKE_KEY} ANTHROPIC_BASE_URL=https://gw.example.com", FAKE_KEY),
         ("ANTHROPIC_API_KEY=sk-ant-api03-fake-other-key", None),  # 指紋が違う
-        (f"CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY={FAKE_KEY}", None),  # API キーの宣言でない
+        (f"CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY={FAKE_KEY}", None),  # API キーの設定でない
         ("ANTHROPIC_API_KEY='unclosed", None),  # 解けない
-        (None, None),  # 宣言が無い
+        (None, None),  # 設定が無い
     ],
     ids=["match", "with-base-url", "other-key", "provider-mixed", "broken", "absent"],
 )

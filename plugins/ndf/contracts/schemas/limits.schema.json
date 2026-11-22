@@ -32,7 +32,10 @@
           "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
           "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
           "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
-          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本がスロットから取るメモリの重み（GiB）"}
+          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本がスロットから取るメモリの重み（GiB）"},
+          "lock": {"type": "number", "minimum": 0, "description": "錠を待つ上限の秒"},
+          "gate": {"type": "number", "minimum": 0, "description": "関所の hook の timeout の秒"},
+          "first": {"type": "number", "minimum": 0, "description": "最初の払い出しを待つ上限の秒"}
         }
       }
     }

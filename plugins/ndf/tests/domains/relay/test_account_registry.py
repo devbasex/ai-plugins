@@ -808,5 +808,5 @@ FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
     ],
 )
 def test_metered_kind_settles_the_provider_or_the_api_key(env, kind):
-    # 別冊の「宣言の提供元の確定」: 提供元の選択が 1 つか、API キーの宣言か、どちらでもなければ None
+    # 別冊の「設定の提供元の確定」: 提供元の選択が 1 つか、API キーの設定か、どちらでもなければ None
     assert reg.metered_kind(env) == kind

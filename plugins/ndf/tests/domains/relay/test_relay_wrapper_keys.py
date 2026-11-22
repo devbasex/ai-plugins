@@ -1,6 +1,6 @@
 """キーの子の停止の共通の経路（U11a。#3604 #3864 の受け入れ条件 #3864 の 9・決定 12・I9）。
 
-キーの子（API キーの宣言の従量の接続の子）が helper の拒み・記録の異常・失敗の印・401・設定の当たりを確かめたら、
+キーの子（API キーの設定の従量の接続の子）が helper の拒み・記録の異常・失敗のマーク・401・設定の当たりを確かめたら、
 同じ見回りの `_loop` の (2)〜(3) で替え先の候補を読む前に旧子を止め、止めた後の `_revoked_pick` だけが替え先を読む。
 替え先があれば `--resume`、無ければ直し方の 1 行と `account_unavailable` で終わり、子を残さない（`stalled` にしない）。
 値はすべて偽の値で、実のキーとアカウントを使わない。
@@ -148,7 +148,7 @@ def test_3864_9_d12_no_fallback_ends_with_the_fix_line_instead_of_stalling(tmp_p
 
 
 def test_3864_9_d12_a_401_writes_the_deny_mark_and_stops(tmp_path):
-    # 401 はキーの子では `_key_auth` が確かめる（`_auth_pick` は打たない）。止める前に拒否の印を足す
+    # 401 はキーの子では `_key_auth` が確かめる（`_auth_pick` は打たない）。止める前に拒否のマークを足す
     def failing(w):
         put_failure(tmp_path, w.section.session_id, time.time() + 1)
 
@@ -174,7 +174,7 @@ def test_d12_a_question_lock_that_never_frees_ends_refused_without_a_successor(t
     held = []
 
     def refuse_and_hold(w):
-        fd = os.open(w.dir / wrapper.QUESTION_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+        fd = os.open(w.dir / wrapper_stop.QUESTION_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
         held.append(fd)
         refuse(w)
@@ -236,3 +236,22 @@ def test_revoked_fix_names_every_tried_connection():
     line = wrapper_stop.revoked_fix({"metered", "key:k1"})
     assert line.index("key:k1") < line.index("metered")
     assert wrapper_auth.AUTH_FIX_METERED in line and "ndf relay account add-api-key k1" in line
+
+
+def test_d12_end_point_after_quiet_with_a_question_or_an_api_error(tmp_path):
+    # 静かな時間の後、回答待ちの質問があるか、最後の入力より後の API の失敗の記録で入力待ちに戻っていれば止める
+    w, sec = _bare(tmp_path, last_output=100.0 - w_quiet(tmp_path), session_id="s-1", input_at=None)
+    try:
+        assert not w._end_point(sec)
+        put_failure(tmp_path, "s-1", time.time())
+        assert w._end_point(sec)
+        sec.input_at = time.time() + 60
+        assert not w._end_point(sec)
+        (w.dir / wrapper.signals.QUESTION_FILE).write_text("{}")
+        assert w._end_point(sec)
+    finally:
+        sec.child.close()
+
+
+def w_quiet(tmp_path) -> float:
+    return make_settings(tmp_path).quiet
