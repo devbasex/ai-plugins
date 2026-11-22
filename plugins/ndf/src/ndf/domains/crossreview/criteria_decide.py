@@ -2,14 +2,17 @@
 
 - 基準の文は `contracts/data/review-criteria.json`、重要度の尺度と収束の妨げになるか（`blocking`）は
   `contracts/domains/severities.json` が持つ。相手役と修正担当への指示はここで組む
-- 相手役は基準に当たる指摘だけを重要度つきで書く。重要度の無い・知らない値の指摘は収束の妨げになる側に倒す
+- 相手役は基準に当たる指摘だけを重要度つきで書き、critical・major には起きることの 1 文（`impact`）を添える。ジャーナルへ入れるときは
+  1 文の無い critical・major を minor へ下げ、重要度の無い・知らない値の指摘は 1 文があれば major、無ければ minor にする
+  （#4014。`effective_severity`）。分からない重要度（None）を
+  収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional
 
 from ndf import contracts
@@ -19,6 +22,8 @@ TABLE = "data/review-criteria.json"
 SEVERITIES = "severities"
 # 読む設定のバージョン
 DECL_VERSION = 1
+# 修正担当の会話を保存するかのキー（#4013）
+FIXER_SESSIONS = "fixer_sessions"
 
 
 class ReviewDeclInvalid(ValueError):
@@ -42,14 +47,58 @@ def blocking(severity: Optional[str]) -> bool:
 
 def _rank(severity: Optional[str]) -> int:
     """重さの順位。分からない重要度は収束の妨げになる重さのうち最も軽いものと同じに数える。"""
-    if severity is not None:
-        return int(facts.value(SEVERITIES, severity, "rank"))
-    return min(int(r["rank"]) for r in facts.rows(SEVERITIES, blocking=True))
+    return int(facts.value(SEVERITIES, severity if severity is not None else _lightest_blocking(), "rank"))
+
+
+def _edge(blocking: bool, pick: Callable[..., Mapping[str, Any]]) -> str:
+    """収束の妨げになるか（`blocking`）で分けた重さのうち、`pick`（min か max）で順位の端にあるもの。"""
+    return str(pick(facts.rows(SEVERITIES, blocking=blocking), key=lambda r: int(r["rank"]))["id"])
+
+
+def _lightest_blocking() -> str:
+    """収束の妨げになる重さのうち最も軽いもの（major）。"""
+    return _edge(True, min)
+
+
+def _heaviest_light() -> str:
+    """収束の妨げにならない重さのうち最も重いもの（minor）。"""
+    return _edge(False, max)
+
+
+def _has_impact(impact: object) -> bool:
+    """起きることの 1 文を持つか（空白を除いて空でない文字列。`journal._text` と同じ規則）。"""
+    return isinstance(impact, str) and bool(impact.strip())
+
+
+def effective_severity(severity: Optional[str], impact: object) -> str:
+    """ジャーナルの行に書く重要度（#4014）。`severity` は `severity_of` を通した値。1 文の無い収束の妨げになる重さと
+    重要度の無い指摘は、妨げにならない重さのうち最も重いもの（minor）へ下げ、1 文のある重要度の無い指摘は妨げになる
+    重さのうち最も軽いもの（major）にする。妨げにならない重さは 1 文の有無によらずそのまま。"""
+    if severity is not None and not blocking(severity):
+        return severity
+    if not _has_impact(impact):
+        return _heaviest_light()
+    return severity if severity is not None else _lightest_blocking()
+
+
+def downgraded(row: Mapping[str, Any]) -> bool:
+    """ジャーナルへ入れるときに minor へ下げた行か（#4014）。`raised_severity` の無い行（引き継いだ行・前のバージョンの行）は偽。"""
+    if "raised_severity" not in row:
+        return False
+    return blocking(severity_of(row["raised_severity"])) and row.get("severity") == _heaviest_light()
 
 
 def heavier(known: Optional[str], raised: Optional[str]) -> Optional[str]:
     """同じ指摘が出し直されたときに残す重要度（重い方。同じ重さなら前の値）。"""
     return raised if _rank(raised) > _rank(known) else known
+
+
+def heavier_raised(known: Optional[str], raised: Optional[str]) -> Optional[str]:
+    """同じ指摘が出し直されたときに残す元の重要度（`raised_severity`）。収束の判定の `heavier` と違い、尺度にある値を
+    無い値（None）より優先し、両方あれば重い方（同じ重さなら前の値）を残す。ジャーナルへ入れる順によらず同じ値になる（#4014）。"""
+    if known is None or raised is None:
+        return raised if known is None else known
+    return heavier(known, raised)
 
 
 def focus_of(raw: Any, where: str) -> tuple[str, ...]:
@@ -66,6 +115,17 @@ def focus_of(raw: Any, where: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in focus)
 
 
+def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
+    """`.ndf/review.json` の中身（`focus_of` が version を確かめた後）から、修正担当の会話を保存するか（#4013）。
+    キーが無ければ偽。真偽値でなければ `ReviewDeclInvalid`（どちらの側にも黙って倒さない）。"""
+    if FIXER_SESSIONS not in raw:
+        return False
+    value = raw[FIXER_SESSIONS]
+    if not isinstance(value, bool):
+        raise ReviewDeclInvalid(f"{where} の {FIXER_SESSIONS} が {value!r}。true か false を書く")
+    return value
+
+
 def criteria_lines(focus: Sequence[str]) -> list[str]:
     """基準の行（番号の順）。重点があるときだけ基準 3 を足す。"""
     t = _table()
@@ -79,16 +139,30 @@ def reviewer_block(focus: Sequence[str]) -> list[str]:
     """相手役への「指摘の基準」のセクション。"""
     t = _table()
     names = "・".join(facts.ids(SEVERITIES))
-    blocking_names = "・".join(facts.ids(SEVERITIES, blocking=True))
-    light = "・".join(facts.ids(SEVERITIES, blocking=False))
+    impact = t["impact"]["reviewer"].format(
+        blocking="・".join(facts.ids(SEVERITIES, blocking=True)),
+        light_first=_heaviest_light(),
+        light="・".join(facts.ids(SEVERITIES, blocking=False)),
+    )
     return [
         "## 指摘の基準",
         "次のどれかに当たるものだけを指摘として書く。見つけたものはこのラウンドですべて書き、次のラウンドへ残さない。",
         *criteria_lines(focus),
         f"書かないもの: {'・'.join(t['not_written'])}",
         f"対応のアクションの無いもの（{'・'.join(t['no_action'])}）は指摘にしない。",
-        f"重要度 severity は {names} から選ぶ。基準に当たる指摘は {blocking_names}。{light} は収束を止めず、修正担当へ渡らない。",
+        f"重要度 severity は {names} から選ぶ。{impact}",
     ]
+
+
+def fixer_impact(row: Mapping[str, Any]) -> str:
+    """修正担当へ渡す指摘の行の末尾に添える起きることの 1 文（行が `impact` を持たなければ空。#4014）。"""
+    impact = row.get("impact")
+    return f"— {_table()['impact']['fixer_label']}: {impact.strip()}" if _has_impact(impact) else ""
+
+
+def fixer_ci_only() -> str:
+    """テストを CI に寄せる設定のリポジトリで、修正担当への指示に足す文（#4030）。"""
+    return str(_table()["fixer_ci_only"])
 
 
 def fixer_block(focus: Sequence[str]) -> list[str]:

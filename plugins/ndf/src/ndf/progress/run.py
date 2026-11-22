@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import time
@@ -486,8 +485,7 @@ def launch_worker(st: store.Store, machine_id: str, cwd: Path) -> Optional[int]:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as out:
         argv = invoke.ndf_command(TOOL, "work", machine_id)
-        env = invoke.ndf_env(os.environ)
-        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
     return proc.pid
 
 

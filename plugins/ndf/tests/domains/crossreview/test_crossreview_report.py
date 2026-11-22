@@ -162,6 +162,15 @@ def test_run_posts_the_record_with_the_fix_and_returns_its_url(wt: Path, tmp_pat
     assert {"kind": "comment", "number": PR, "url": f"https://github.com/{slug}/pull/{PR}#issuecomment-1"} in got["items"]
 
 
+def test_issue_4014_downgraded_finding_is_a_light_row_without_a_thread(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """#4014: 1 文の無い major は記録のコメントの表に minor と「軽い（直さずに残した）」で出て、スレッドを作らない。"""
+    fake = Fake(tmp_path / "st", {"codex": [[{"text": "A が止まる", "severity": "major", "path": "doc.md", "line": 2}]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert f"| r1-1 | codex | minor | doc.md:2 | A が止まる | {report_decide.LIGHT_LABEL} | — |" in hub.comments[-1][2]
+    assert hub.port.opened == []
+
+
 def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     def refuse(pr, body, previous):
         raise RuntimeError("403")

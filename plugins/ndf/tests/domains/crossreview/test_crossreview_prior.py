@@ -321,7 +321,12 @@ def test_rewound_pr_gets_its_own_record_and_threads(wt: Path, tmp_path: Path, ca
         capsys,
         monkeypatch,
         Fake(
-            state_dir, {"codex": [[{"text": "A が止まる", "severity": "major", "path": "doc.md"}]], "kiro": [[]]}, decide=lambda fid: None
+            state_dir,
+            {
+                "codex": [[{"text": "A が止まる", "severity": "major", "impact": "利用者の経路で処理が止まる", "path": "doc.md"}]],
+                "kiro": [[]],
+            },
+            decide=lambda fid: None,
         ),
         wt,
     )
