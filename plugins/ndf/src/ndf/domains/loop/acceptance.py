@@ -52,7 +52,7 @@ def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
     if len(issues) == 1:
         return {issues[0]: read_body(cwd, issues[0])}
     got = _hub(cwd).nodes(issues, "issueOrPullRequest", "body")
-    unread = sorted(n for n in issues if not isinstance(got.get(n, {}).get("body"), str))
+    unread = sorted(n for n in issues if n not in got or not isinstance(got[n].get("body"), str))
     if unread:
         raise acc.AcceptanceError(f"課題 {', '.join(f'#{n}' for n in unread)} の本文を読めない")
     return {n: got[n]["body"] for n in issues}
