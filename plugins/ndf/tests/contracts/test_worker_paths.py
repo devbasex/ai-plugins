@@ -1,479 +1,15 @@
+"""`worker_paths` の作業ディレクトリの中の名前の読み書き（`entry_state`・`read_file`・`write_file`・`staged_write`・`remove_file`）。"""
+
 from __future__ import annotations
 
+import errno
 import os
+import struct
 from pathlib import Path
 
 import pytest
 
 from ndf.contracts import worker_paths
-
-
-def _tree(root: Path) -> list[str]:
-    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
-
-
-def test_report_paths_returns_four_files_under_directory():
-    paths = worker_paths.report_paths(Path("/w"), "n")
-    assert paths == worker_paths.ReportPaths(
-        prompt=Path("/w/n.prompt.md"),
-        report=Path("/w/n.report.md"),
-        done=Path("/w/n.report.md.done"),
-        result=Path("/w/n.result.json"),
-    )
-
-
-@pytest.mark.parametrize("name", ["a", "a" * 64])
-def test_report_paths_accepts_names_of_1_and_64_chars(name):
-    assert worker_paths.report_paths(Path("/w"), name).report == Path(f"/w/{name}.report.md")
-
-
-def test_report_paths_absolutizes_relative_directory(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    paths = worker_paths.report_paths(Path("d"), "n")
-    assert all(p.is_absolute() and p.parent == tmp_path.resolve() / "d" for p in paths)
-
-
-def test_report_paths_does_not_resolve_link_named_result(tmp_path):
-    outside = tmp_path / "outside.json"
-    outside.write_text("{}", encoding="utf-8")
-    d = tmp_path / "d"
-    d.mkdir()
-    (d / "n.result.json").symlink_to(outside)
-    assert worker_paths.report_paths(d, "n").result == d.resolve() / "n.result.json"
-
-
-@pytest.mark.parametrize("name", ["", "../x", "a/b", "日本語", "a" * 65])
-def test_report_paths_rejects_bad_names_without_touching_files(tmp_path, name):
-    before = _tree(tmp_path)
-    with pytest.raises(worker_paths.NameInvalid):
-        worker_paths.report_paths(tmp_path, name)
-    assert _tree(tmp_path) == before
-
-
-def test_report_paths_resolves_a_link_to_an_existing_directory_and_keeps_missing_rest(tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
-    (tmp_path / "link").symlink_to(real)
-    assert worker_paths.report_paths(tmp_path / "link" / "new", "n").report == real.resolve() / "new" / "n.report.md"
-
-
-def test_report_paths_resolves_a_link_after_a_missing_part_cancelled_by_dotdot(tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
-    (tmp_path / "link").symlink_to(real)
-    paths = worker_paths.report_paths(tmp_path / "missing" / ".." / "link", "n")
-    assert paths.report == real.resolve() / "n.report.md"
-    with worker_paths.open_workdir(paths.report.parent, create=True) as wd:
-        assert wd.path == real.resolve()
-    assert not (tmp_path / "missing").exists()
-
-
-@pytest.mark.parametrize("under", [False, True])
-def test_report_paths_refuses_a_dangling_link_before_anything_is_created(tmp_path, under):
-    link = tmp_path / "link"
-    link.symlink_to(tmp_path / "target")
-    before = _tree(tmp_path)
-    with pytest.raises(worker_paths.EntryUnsafe) as e:
-        worker_paths.report_paths(link / "new" if under else link, "n")
-    assert e.value.kind == "symlink"
-    assert _tree(tmp_path) == before and not (tmp_path / "target").exists()
-
-
-@pytest.fixture
-def workdir(tmp_path):
-    """作業ディレクトリ（`d`）と、その外にある利用者のファイル（`outside`）。"""
-    d = tmp_path / "d"
-    d.mkdir()
-    outside = tmp_path / "outside.txt"
-    outside.write_text("利用者の中身", encoding="utf-8")
-    return d, outside
-
-
-def test_open_workdir_gives_fd_for_names_and_closes_on_exit(workdir):
-    d, _ = workdir
-    (d / "f").write_text("x", encoding="utf-8")
-    with worker_paths.open_workdir(d) as wd:
-        assert wd.path == d.resolve()
-        assert os.stat("f", dir_fd=wd.fd).st_size == 1
-    with pytest.raises(OSError):
-        os.fstat(wd.fd)
-
-
-def test_open_workdir_refuses_a_link_in_the_path_instead_of_resolving_it(tmp_path, workdir):
-    d, _ = workdir
-    link = tmp_path / "link"
-    link.symlink_to(d)
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(link):
-        pass
-    assert e.value.kind == "symlink"
-
-
-def test_report_paths_without_resolve_keeps_a_link_in_the_directory(tmp_path, workdir):
-    d, _ = workdir
-    link = tmp_path / "link"
-    link.symlink_to(d)
-    assert worker_paths.report_paths(link, "n", resolve=False).report == link.absolute() / "n.report.md"
-
-
-def test_open_workdir_refuses_a_link_in_the_middle_of_the_path_as_symlink(tmp_path, workdir):
-    d, _ = workdir
-    (d / "inner").mkdir()
-    link = tmp_path / "link"
-    link.symlink_to(d)
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(link / "inner"):
-        pass
-    assert e.value.kind == "symlink"
-
-
-def test_open_workdir_creates_missing_directories_when_asked(tmp_path):
-    target = tmp_path / "a" / "b"
-    with worker_paths.open_workdir(target, create=True) as wd:
-        assert wd.path == target.absolute()
-    assert target.is_dir()
-
-
-def test_open_workdir_does_not_create_under_a_link(tmp_path, workdir):
-    d, _ = workdir
-    link = tmp_path / "link"
-    link.symlink_to(d)
-    with pytest.raises(worker_paths.EntryUnsafe), worker_paths.open_workdir(link / "new", create=True):
-        pass
-    assert not (d / "new").exists()
-
-
-def _foreign(monkeypatch, foreign: Path) -> None:
-    """`foreign` の inode だけを別の利用者の持ち物に見せる（テストは別の利用者を作れないため）。"""
-    ino = foreign.stat().st_ino
-    real_fstat = os.fstat
-
-    def fstat(fd):
-        st = real_fstat(fd)
-        if st.st_ino != ino:
-            return st
-        fields = list(st)
-        fields[4] = os.geteuid() + 1  # st_uid
-        return os.stat_result(fields)
-
-    monkeypatch.setattr(worker_paths.os, "fstat", fstat)
-
-
-def test_open_workdir_refuses_a_created_directory_swapped_for_another_users_one(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    _foreign(monkeypatch, d)
-    target = tmp_path / "new"
-    real_mkdir = os.mkdir
-
-    def swap(part, *args, dir_fd=None, **kw):  # 作った直後に名前を前の報告の残る別の利用者のディレクトリへ差し替える
-        real_mkdir(part, *args, dir_fd=dir_fd, **kw)
-        if part == "new":
-            os.rmdir(part, dir_fd=dir_fd)
-            os.rename(d, target)
-
-    monkeypatch.setattr(worker_paths.os, "mkdir", swap)
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(target, create=True):
-        pass
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def test_open_workdir_refuses_another_users_directory_that_appears_before_mkdir(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    _foreign(monkeypatch, d)
-    target = tmp_path / "new"
-
-    def appear(part, *args, dir_fd=None, **kw):  # 最初の open の後、mkdir の前に別の利用者のディレクトリが現れる
-        if part == "new":
-            os.rename(d, target)
-        raise FileExistsError(part)
-
-    monkeypatch.setattr(worker_paths.os, "mkdir", appear)
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(target, create=True):
-        pass
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-@pytest.mark.parametrize("before_mkdir", [False, True])
-def test_open_workdir_accepts_own_directory_filled_by_a_concurrent_prepare(tmp_path, monkeypatch, before_mkdir):
-    target = tmp_path / "new"
-    real_mkdir = os.mkdir
-
-    def concurrent(part, *args, dir_fd=None, **kw):  # 同じ利用者の別の prepare が先に作って報告を置く
-        if part == "new" and before_mkdir:
-            real_mkdir(part, *args, dir_fd=dir_fd, **kw)
-            (target / "other.report.md").write_text("", encoding="utf-8")
-            raise FileExistsError(part)
-        real_mkdir(part, *args, dir_fd=dir_fd, **kw)
-        if part == "new":
-            (target / "other.report.md").write_text("", encoding="utf-8")
-
-    monkeypatch.setattr(worker_paths.os, "mkdir", concurrent)
-    with worker_paths.open_workdir(target, create=True) as wd:
-        assert worker_paths.entry_state(wd, "other.report.md") is not None
-        assert wd.created
-        worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
-
-
-@pytest.mark.parametrize("before_mkdir", [False, True])
-def test_check_entries_refuses_own_existing_directory_renamed_over_a_created_name(tmp_path, workdir, monkeypatch, before_mkdir):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    target = tmp_path / "new"
-    real_mkdir = os.mkdir
-
-    def swap(part, *args, dir_fd=None, **kw):  # 同じ親の中で、呼んだ利用者の既存のディレクトリを作った名前へ改名する
-        if part != "new":
-            return real_mkdir(part, *args, dir_fd=dir_fd, **kw)
-        if not before_mkdir:
-            real_mkdir(part, *args, dir_fd=dir_fd, **kw)
-            os.rmdir(part, dir_fd=dir_fd)
-        os.rename(d, target)
-        if before_mkdir:
-            raise FileExistsError(part)
-
-    monkeypatch.setattr(worker_paths.os, "mkdir", swap)
-    with worker_paths.open_workdir(target, create=True) as wd:
-        assert wd.created
-        with pytest.raises(worker_paths.EntryUnsafe) as e:
-            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def test_check_entries_accepts_names_in_a_directory_that_existed(workdir):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    with worker_paths.open_workdir(d, create=True) as wd:
-        assert not wd.created
-        worker_paths.check_entries(wd, ["n.report.md.done"])
-
-
-def test_prepare_paths_tells_a_missing_directory(tmp_path):
-    assert worker_paths.prepare_paths(tmp_path / "new", "n")[1].fresh
-    assert not worker_paths.prepare_paths(tmp_path, "n")[1].fresh
-
-
-def test_check_entries_refuses_a_directory_that_appeared_after_the_paths_were_resolved(tmp_path, workdir):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    target = tmp_path / "new"
-    paths, origin = worker_paths.prepare_paths(target, "n")
-    os.rename(d, target)  # 解いてから開くまでに、既存のディレクトリが同じ名前へ現れる
-    with worker_paths.open_workdir(paths.report.parent, create=True, origin=origin) as wd:
-        assert wd.created
-        with pytest.raises(worker_paths.EntryUnsafe) as e:
-            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def test_open_workdir_refuses_another_users_directory_that_appeared_after_the_paths_were_resolved(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    _foreign(monkeypatch, d)
-    target = tmp_path / "new"
-    paths, origin = worker_paths.prepare_paths(target, "n")
-    os.rename(d, target)  # 解いてから開くまでに、別の利用者のディレクトリが同じ名前へ現れる（最初の open で開ける）
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
-        pass
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def _on_missing(monkeypatch, name: str, action) -> None:
-    """解く途中で `name` が無いと観測した直後に `action` を 1 回だけ走らせる。"""
-    real_lookup = worker_paths._lookup
-    done = []
-
-    def lookup(parent, part):
-        child = real_lookup(parent, part)
-        if part == name and child is None and not done:
-            done.append(True)
-            action()
-        return child
-
-    monkeypatch.setattr(worker_paths, "_lookup", lookup)
-
-
-def test_prepare_paths_keeps_a_part_observed_missing_that_appears_right_after(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    target = tmp_path / "new"
-    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # 無いと観測した直後に既存のディレクトリが同じ名前へ移される
-    paths, origin = worker_paths.prepare_paths(target, "n")
-    assert origin.fresh == 1
-    assert paths.report == tmp_path.resolve() / "new" / "n.report.md"
-
-
-def test_prepare_paths_keeps_a_parent_observed_missing_that_appears_before_its_child_is_checked(tmp_path, monkeypatch):
-    parent = tmp_path.resolve() / "parent"
-    _on_missing(monkeypatch, "parent", parent.mkdir)  # parent が無いと観測した直後に、別の利用者の parent が現れる
-    paths, origin = worker_paths.prepare_paths(parent / "child", "n")
-    assert origin.fresh == 2
-    assert paths.report == tmp_path.resolve() / "parent" / "child" / "n.report.md"
-
-
-def test_prepare_paths_keeps_a_place_observed_missing_after_dotdot_returns_to_it(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    target = tmp_path.resolve() / "new"
-    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # new が無いと観測した後、既存のディレクトリが new へ移される
-    paths, origin = worker_paths.prepare_paths(tmp_path / "new" / ".." / "new", "n")
-    assert origin.fresh == 1
-    assert paths.report == target / "n.report.md"
-    with worker_paths.open_workdir(paths.report.parent, create=True, origin=origin) as wd:
-        assert wd.created
-        with pytest.raises(worker_paths.EntryUnsafe) as e:
-            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def test_prepare_paths_refuses_a_link_back_to_a_place_observed_missing(tmp_path, workdir, monkeypatch):
-    d, _ = workdir
-    (d / "n.report.md.done").write_text("", encoding="utf-8")
-    target = tmp_path.resolve() / "new"
-    (tmp_path / "alias").symlink_to("new")
-    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # new が無いと観測した後、既存のディレクトリが new へ移される
-    with pytest.raises(worker_paths.EntryUnsafe) as e:
-        worker_paths.prepare_paths(tmp_path / "new" / ".." / "alias", "n")
-    assert e.value.kind == "replaced"
-    assert (target / "n.report.md.done").exists()
-
-
-def test_prepare_paths_refuses_a_parent_swapped_before_an_absolute_link_is_followed(tmp_path, monkeypatch):
-    shared = tmp_path.resolve() / "shared"
-    (shared / "sub").mkdir(parents=True)
-    (shared / "alias").symlink_to(shared / "sub")
-    real_lookup = worker_paths._lookup
-    swapped = []
-
-    def lookup(parent, part):  # alias を読む直前に、shared を移して別の shared/sub を置く
-        if part == "alias" and not swapped:
-            swapped.append(True)
-            shared.rename(tmp_path / "moved")
-            (shared / "sub").mkdir(parents=True)
-            (shared / "sub" / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
-        return real_lookup(parent, part)
-
-    monkeypatch.setattr(worker_paths, "_lookup", lookup)
-    with pytest.raises(worker_paths.EntryUnsafe) as e:
-        worker_paths.prepare_paths(shared / "alias", "n")
-    assert e.value.kind == "replaced"
-    assert (shared / "sub" / "n.report.md").read_text(encoding="utf-8") == "別の作業の報告"
-
-
-def test_open_workdir_refuses_a_parent_swapped_after_the_paths_were_resolved(tmp_path):
-    parent = tmp_path / "shared"
-    parent.mkdir()
-    paths, origin = worker_paths.prepare_paths(parent / "new", "n")
-    parent.rename(tmp_path / "moved")
-    (parent / "new").mkdir(parents=True)  # 解いてから開くまでに、あった親が別のディレクトリへ差し替えられる
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
-        pass
-    assert e.value.kind == "replaced"
-    assert not (parent / "new" / "n.report.md").exists()
-
-
-def test_prepare_paths_ties_each_part_to_the_parent_it_checked(tmp_path, monkeypatch):
-    shared = tmp_path / "shared"
-    (shared / "sub").mkdir(parents=True)
-    real_lookup = worker_paths._lookup
-    swapped = []
-
-    def lookup(parent, part):  # sub を開く直前に、shared を移して別の shared/sub/new を置く
-        if part == "sub" and not swapped:
-            swapped.append(True)
-            shared.rename(tmp_path / "moved")
-            (shared / "sub" / "new").mkdir(parents=True)
-            (shared / "sub" / "new" / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
-        return real_lookup(parent, part)
-
-    monkeypatch.setattr(worker_paths, "_lookup", lookup)
-    paths, origin = worker_paths.prepare_paths(shared / "sub" / "new", "n")
-    assert origin.fresh == 1  # 確かめた親（移された shared）の下の sub には new が無い
-    assert origin.anchor == ((tmp_path / "moved" / "sub").stat().st_dev, (tmp_path / "moved" / "sub").stat().st_ino)
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
-        pass
-    assert e.value.kind == "replaced"
-    assert (shared / "sub" / "new" / "n.report.md").read_text(encoding="utf-8") == "別の作業の報告"
-    assert not (tmp_path / "moved" / "sub" / "new").exists()
-
-
-def test_open_workdir_does_not_recreate_a_parent_moved_after_the_paths_were_resolved(tmp_path):
-    parent = tmp_path / "shared"
-    parent.mkdir()
-    paths, origin = worker_paths.prepare_paths(parent / "new", "n")
-    parent.rename(tmp_path / "moved")  # 解いてから開くまでに、あった親が移される
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
-        pass
-    assert e.value.kind == "replaced"
-    assert not parent.exists() and not (tmp_path / "moved" / "new").exists()
-
-
-def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):
-    victim = tmp_path / "victim"
-    victim.mkdir()
-    (victim / "file").write_text("x", encoding="utf-8")
-    (victim / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
-    (tmp_path / "link").symlink_to(victim / "file")
-    before = _tree(tmp_path)
-    with pytest.raises(worker_paths.EntryUnsafe) as e:
-        worker_paths.report_paths(tmp_path / "missing" / ".." / "link" / "..", "n")
-    assert e.value.kind == "other"
-    assert _tree(tmp_path) == before
-
-
-def test_open_workdir_needs_only_search_permission_on_ancestors(tmp_path):
-    shared = tmp_path / "shared"
-    (shared / "mine").mkdir(parents=True)
-    shared.chmod(0o311)
-    try:
-        with worker_paths.open_workdir(shared / "mine") as wd:
-            assert os.stat(".", dir_fd=wd.fd).st_ino == (shared / "mine").stat().st_ino
-    finally:
-        shared.chmod(0o755)
-
-
-def test_open_workdir_refuses_a_parent_swapped_to_a_link_after_the_paths_were_built(tmp_path):
-    parent = tmp_path / "shared"
-    (parent / "d").mkdir(parents=True)
-    paths = worker_paths.report_paths(parent / "d", "n")
-    other = tmp_path / "other"
-    (other / "d").mkdir(parents=True)
-    (other / "d" / "n.result.json").write_text("{}", encoding="utf-8")
-    parent.rename(tmp_path / "moved")
-    parent.symlink_to(other)
-    with pytest.raises(worker_paths.EntryUnsafe), worker_paths.open_workdir(paths.report.parent):
-        pass
-    assert (other / "d" / "n.result.json").read_text(encoding="utf-8") == "{}"
-
-
-def test_open_workdir_path_is_the_opened_directory(workdir):
-    d, _ = workdir
-    with worker_paths.open_workdir(d.resolve()) as wd:
-        assert wd.path == d.resolve()
-        assert os.fstat(wd.fd).st_ino == d.stat().st_ino
-
-
-def test_open_workdir_stays_on_opened_directory_after_swap(tmp_path, workdir):
-    d, _ = workdir
-    (d / "r").write_text("元", encoding="utf-8")
-    (d / "gone").write_text("消す", encoding="utf-8")
-    other = tmp_path / "other"
-    other.mkdir()
-    for n in ("r", "w", "gone"):
-        (other / n).write_text("差し替え先", encoding="utf-8")
-    with worker_paths.open_workdir(d) as wd:
-        d.rename(tmp_path / "moved")
-        d.symlink_to(other)
-        assert worker_paths.entry_state(wd, "w") is None
-        assert worker_paths.read_file(wd, "r") == "元"
-        worker_paths.write_file(wd, "w", "新")
-        assert worker_paths.remove_file(wd, "gone") == "removed"
-    assert {n: (other / n).read_text(encoding="utf-8") for n in ("r", "w", "gone")} == dict.fromkeys(("r", "w", "gone"), "差し替え先")
-    assert (tmp_path / "moved" / "w").read_text(encoding="utf-8") == "新"
 
 
 def test_entry_state_none_for_missing_and_stat_for_regular_file(workdir):
@@ -699,6 +235,19 @@ def test_write_file_failure_leaves_no_temp_and_keeps_original(workdir, monkeypat
     assert [p.name for p in d.iterdir()] == ["f"]
 
 
+def test_staged_write_publishes_only_after_the_body_and_not_when_it_raises(workdir):
+    d, _ = workdir
+    (d / "f").write_text("元", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with worker_paths.staged_write(wd, "f", "新"):
+            assert (d / "f").read_text(encoding="utf-8") == "元"
+        assert (d / "f").read_text(encoding="utf-8") == "新"
+        with pytest.raises(OSError), worker_paths.staged_write(wd, "f", "後"):
+            raise OSError(28, os.strerror(28))
+    assert (d / "f").read_text(encoding="utf-8") == "新"
+    assert [p.name for p in d.iterdir()] == ["f"]
+
+
 def test_write_file_returns_after_publish_even_if_temp_dir_cleanup_fails(workdir, monkeypatch):
     d, _ = workdir
     (d / "f").write_text("元", encoding="utf-8")
@@ -726,7 +275,7 @@ def test_write_file_rejects_temp_dir_that_is_not_private(workdir, monkeypatch):
     with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe) as e:
         worker_paths.write_file(wd, "f", "新")
     assert e.value.kind == "other"
-    (kept,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    (kept,) = (p for p in d.iterdir() if p.name.startswith(".ndf-"))
     assert kept.is_dir()
     assert not (d / "f").exists()
 
@@ -760,7 +309,7 @@ def test_write_file_keeps_data_in_swapped_temp_dir_when_check_fails(workdir, mon
     monkeypatch.setattr(os, "mkdir", mkdir_then_swap)
     with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe):
         worker_paths.write_file(wd, "f", "新")
-    (swapped,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    (swapped,) = (p for p in d.iterdir() if p.name.startswith(".ndf-"))
     assert (swapped / "data").read_text(encoding="utf-8") == "別の手の中身"
     assert not (d / "f").exists()
 
@@ -803,7 +352,7 @@ def test_write_file_keeps_temp_dir_it_cannot_open(workdir, monkeypatch):
     real_open = os.open
 
     def fail_on_temp(path, flags, mode=0o777, *, dir_fd=None):
-        if str(path).startswith(".f."):
+        if str(path).startswith(".ndf-"):
             raise OSError(40, os.strerror(40))
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
@@ -812,7 +361,7 @@ def test_write_file_keeps_temp_dir_it_cannot_open(workdir, monkeypatch):
         worker_paths.write_file(wd, "f", "新")
     # 開けなければ作ったディレクトリだと確かめられないので、名前を消さずに残す（詳細設計の書き込みの手順 4）
     left = list(d.iterdir())
-    assert len(left) == 1 and left[0].name.startswith(".f.") and left[0].is_dir()
+    assert len(left) == 1 and left[0].name.startswith(".ndf-") and left[0].is_dir()
 
 
 def test_remove_file_removes_then_reports_absent(workdir):
@@ -871,3 +420,265 @@ def test_write_file_accepts_shared_directory_with_sticky_bit(workdir):
         worker_paths.write_file(wd, "f", "新")
     assert (d / "f").read_text(encoding="utf-8") == "新"
     assert [p.name for p in d.iterdir()] == ["f"]
+
+
+# --- #3877 r1: 置き換えたファイルのアクセス権 ---------------------------------------------------------
+
+
+def test_write_file_keeps_the_mode_and_group_of_a_replaced_file(workdir):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    before = (d / "r").stat()
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+        worker_paths.write_file(wd, "new", "作った")
+    after = (d / "r").stat()
+    assert (after.st_mode & 0o7777, after.st_gid) == (0o640, before.st_gid) and after.st_ino != before.st_ino
+    assert (d / "new").stat().st_mode & 0o777 == 0o600
+
+
+# --- #3877 r3: 所有者を保てない置き換え・長い名前・退けた名前の戻し ------------------------------------
+
+
+@pytest.mark.parametrize("field", ["uid", "gid"])
+def test_write_file_stops_before_replacing_when_the_owner_or_group_cannot_be_kept(workdir, monkeypatch, field):
+    # 別の利用者のファイルをグループの書き込み権限で置き換えると、所有者の権限が別の利用者に当たる。公開する前に止める
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o620)
+    real_entry_state = worker_paths.entry_state
+
+    def other_owner(wd, name):
+        st = real_entry_state(wd, name)
+        if st is None or name != "r":
+            return st
+        values = list(st[:10])
+        values[4 if field == "uid" else 5] += 1
+        return os.stat_result(values)
+
+    def refuse(*args, **kwargs):
+        raise PermissionError(errno.EPERM, "refused")
+
+    monkeypatch.setattr(worker_paths, "entry_state", other_owner)
+    monkeypatch.setattr(worker_paths.os, "fchown", refuse)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "owner"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+def test_write_file_accepts_a_name_at_the_length_limit(workdir):
+    # 一時ディレクトリの名前は出力名の長さに依らないので、上限ちょうどの名前も書ける
+    d, _ = workdir
+    name = "a" * os.pathconf(d, "PC_NAME_MAX")
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, name, "中身")
+    assert (d / name).read_text(encoding="utf-8") == "中身" and [p.name for p in d.iterdir()] == [name]
+
+
+def test_staged_write_restores_retired_names_when_publishing_fails(workdir, monkeypatch):
+    d, _ = workdir
+    for name, text in (("f", "前"), ("done", ""), ("result", "{}")):
+        (d / name).write_text(text, encoding="utf-8")
+
+    def fail(*args, **kwargs):
+        raise PermissionError(errno.EPERM, "sticky")
+
+    with worker_paths.open_workdir(d) as wd:
+        with worker_paths.staged_write(wd, "f", "", retire=("done", "result", "none")) as actions:
+            assert actions == {"done": "removed", "result": "removed", "none": "absent"}
+            assert not (d / "done").exists() and not (d / "result").exists()
+        assert sorted(p.name for p in d.iterdir()) == ["f"]
+        (d / "done").write_text("", encoding="utf-8")
+        (d / "result").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(os, "replace", fail)
+        with pytest.raises(PermissionError), worker_paths.staged_write(wd, "f", "後", retire=("done", "result")):
+            pass
+    assert (d / "f").read_text(encoding="utf-8") == "" and (d / "result").read_text(encoding="utf-8") == "{}"
+    assert sorted(p.name for p in d.iterdir()) == ["done", "f", "result"]
+
+
+def test_staged_write_keeps_a_retired_name_whose_place_was_taken(workdir):
+    # #3877 r4: 退けた後に別の手が同じ名前へ書いたら、古いもので上書きせずに回収先を知らせる
+    d, _ = workdir
+    (d / "f").write_text("前", encoding="utf-8")
+    (d / "done").write_text("古い", encoding="utf-8")
+    (d / "result").write_text("{}", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with pytest.raises(worker_paths.RetiredKept) as e, worker_paths.staged_write(wd, "f", "", retire=("done", "result")):
+            (d / "done").write_text("新しい", encoding="utf-8")
+            raise OSError(28, os.strerror(28))
+    assert isinstance(e.value.__cause__, OSError)
+    ((name, kept),) = e.value.left
+    assert name == "done" and kept.read_text(encoding="utf-8") == "古い" and str(kept) in str(e.value)
+    assert (d / "done").read_text(encoding="utf-8") == "新しい" and (d / "result").read_text(encoding="utf-8") == "{}"
+    assert (d / "f").read_text(encoding="utf-8") == "前"
+
+
+def _retire_then_take_the_place(d: Path, *, rename_tmp: bool):
+    """`done` を退けた後に同じ名前へ新しいファイルを書き、本体を失敗させる（`rename_tmp` なら一時ディレクトリも改名する）。"""
+    (d / "f").write_text("前", encoding="utf-8")
+    (d / "done").write_text("古い", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with pytest.raises(worker_paths.RetiredKept) as e, worker_paths.staged_write(wd, "f", "", retire=("done",)):
+            if rename_tmp:
+                (tmp,) = [p for p in d.iterdir() if p.name.startswith(".ndf-")]
+                tmp.rename(d / "moved")
+            (d / "done").write_text("新しい", encoding="utf-8")
+            raise OSError(28, os.strerror(28))
+    return e.value
+
+
+def test_retired_kept_names_where_the_temp_dir_is_now(workdir):
+    # #3877 r5: 回収先は記述子から引いた今の場所で、作った時点のパスではない
+    d, _ = workdir
+    err = _retire_then_take_the_place(d, rename_tmp=True)
+    ((name, kept),) = err.left
+    assert name == "done" and kept is not None and kept.parent.name == "moved" and kept.read_text(encoding="utf-8") == "古い"
+    assert (d / "done").read_text(encoding="utf-8") == "新しい"
+
+
+def test_retired_kept_is_not_hidden_by_a_cleanup_failure(workdir, monkeypatch):
+    # #3877 r5: 一時ファイルを消せなくても、回収先を持つ例外を呼び出し元へ返す
+    d, _ = workdir
+    real_unlink = os.unlink
+
+    def refuse_data(path, *, dir_fd=None):
+        if path == "data":
+            raise OSError(errno.EIO, "refused")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", refuse_data)
+    err = _retire_then_take_the_place(d, rename_tmp=False)
+    ((name, kept),) = err.left
+    assert name == "done" and kept is not None and kept.read_text(encoding="utf-8") == "古い"
+
+
+# --- #3877 r6: 拡張 ACL のある既存のファイルは ACL を写さずに置き換えない -------------------------------
+
+
+def _acl(*entries: tuple[int, int, int]) -> bytes:
+    """`system.posix_acl_access` の値（バージョン 2 と、タグ・権限・識別子の並び）。"""
+    return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *e) for e in entries)
+
+
+def _set_acl(path: Path) -> None:
+    """所有者のほかに別の利用者が読める ACL を付ける。対応しないファイルシステムならテストを飛ばす。"""
+    undefined = 0xFFFFFFFF
+    acl = _acl((0x01, 6, undefined), (0x02, 4, os.geteuid() + 1), (0x04, 0, undefined), (0x10, 4, undefined), (0x20, 0, undefined))
+    try:
+        os.setxattr(path, "system.posix_acl_access", acl)
+    except OSError:
+        pytest.skip("このファイルシステムは POSIX ACL に対応しない")
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="POSIX ACL を設定できない")
+def test_write_file_refuses_to_replace_a_file_that_has_an_extended_acl(workdir):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    _set_acl(d / "r")
+    before = (d / "r").stat()
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "acl"
+    after = (d / "r").stat()
+    assert (d / "r").read_text(encoding="utf-8") == "前" and after.st_ino == before.st_ino
+    assert [p.name for p in d.iterdir()] == ["r"]
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="POSIX ACL を設定できない")
+def test_write_file_replaces_a_file_without_an_acl_and_drops_the_inherited_one(workdir):
+    d, _ = workdir
+    undefined = 0xFFFFFFFF
+    # 所有者は rwx（一時ディレクトリが x を失うとその中にファイルを作れない）、別の利用者は読めるという既定の ACL
+    default = _acl((0x01, 7, undefined), (0x02, 4, os.geteuid() + 1), (0x04, 0, undefined), (0x10, 4, undefined), (0x20, 0, undefined))
+    try:
+        os.setxattr(d, "system.posix_acl_default", default)  # 下に作るファイルが継ぐ既定の ACL
+    except OSError:
+        pytest.skip("このファイルシステムは POSIX ACL に対応しない")
+    (d / "r").write_text("前", encoding="utf-8")
+    os.removexattr(d / "r", "system.posix_acl_access")
+    (d / "r").chmod(0o640)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    with pytest.raises(OSError) as e:
+        os.getxattr(d / "r", "system.posix_acl_access")
+    assert e.value.errno == errno.ENODATA
+    assert (d / "r").stat().st_mode & 0o777 == 0o640 and (d / "r").read_text(encoding="utf-8") == "後"
+
+
+def _as_macos(monkeypatch):
+    # macOS には O_PATH も os.getxattr も os.removexattr も無い
+    monkeypatch.delattr(os, "O_PATH", raising=False)
+    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
+
+
+def test_write_file_replaces_a_file_without_an_acl_on_macos(workdir, monkeypatch):
+    # 書き込み専用で開いた既存のファイルの記述子を acl_get_fd_np へ渡す経路で置き換える
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    _as_macos(monkeypatch)
+    seen = []
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: seen.append(os.fstat(fd).st_ino) or False)
+    before = (d / "r").stat().st_ino
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert before in seen
+    assert (d / "r").read_text(encoding="utf-8") == "後" and (d / "r").stat().st_mode & 0o777 == 0o640
+
+
+def test_write_file_refuses_on_macos_when_the_file_has_an_acl(workdir, monkeypatch):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    before = (d / "r").stat().st_ino
+    _as_macos(monkeypatch)
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: os.fstat(fd).st_ino == before)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "acl"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+class _FakeDarwinAcl:
+    """一時ファイルが親から ACL を継いだ macOS の libc。`acl_set_fd_np` が成功すれば項目が消える。"""
+
+    def __init__(self, before: int, *, set_result: int) -> None:
+        self.before, self.set_result, self.set_on, self.dropped = before, set_result, [], False
+
+    def has_acl(self, fd: int) -> bool:
+        return os.fstat(fd).st_ino != self.before and not self.dropped
+
+    def acl_init(self, count: int) -> int:
+        return 1
+
+    def acl_set_fd_np(self, fd: int, acl: int, kind: int) -> int:
+        self.set_on.append(os.fstat(fd).st_ino)
+        self.dropped = self.set_result == 0
+        return self.set_result
+
+    def acl_free(self, acl: int) -> None:
+        pass
+
+
+@pytest.mark.parametrize("set_result", [0, -1])
+def test_write_file_drops_the_inherited_acl_on_macos_or_refuses_to_publish(workdir, monkeypatch, set_result):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    before = (d / "r").stat().st_ino
+    _as_macos(monkeypatch)
+    fake = _FakeDarwinAcl(before, set_result=set_result)
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", fake.has_acl)
+    monkeypatch.setattr(worker_paths, "_darwin_acl_lib", lambda: fake)
+    with worker_paths.open_workdir(d) as wd:
+        if set_result == 0:
+            worker_paths.write_file(wd, "r", "後")
+        else:
+            with pytest.raises(worker_paths.EntryUnsafe) as e:
+                worker_paths.write_file(wd, "r", "後")
+            assert e.value.kind == "acl"
+    assert fake.set_on and before not in fake.set_on  # 外すのは一時ファイルだけで、置き換える前のファイルに触れない
+    assert (d / "r").read_text(encoding="utf-8") == ("後" if set_result == 0 else "前")
+    assert [p.name for p in d.iterdir()] == ["r"]

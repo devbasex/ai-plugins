@@ -12,12 +12,13 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
-from ndf import cli, contracts
-from ndf.contracts import causes, facts, limits, result, version
+from ndf import cli, contracts, identity
+from ndf.contracts import causes, facts, limits, result, version, worker_paths
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -126,6 +127,19 @@ def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _expected_result_dir(directory: Path) -> Optional[tuple[int, int]]:
+    """`ndf worker run` が渡した結果の保存先（`identity.WORKER_RESULT_DIR_ENV`）が `directory` なら、その `(st_dev, st_ino)`。
+
+    worker の外か、別の場所へ書くとき・値の形が違うときは None（突き合わせない）。
+    """
+    raw = os.environ.get(identity.WORKER_RESULT_DIR_ENV, "")
+    dev, _, rest = raw.partition(":")
+    ino, _, path = rest.partition(":")
+    if not (dev.isdigit() and ino.isdigit() and path) or Path(path) != directory:
+        return None
+    return int(dev), int(ino)
+
+
 def _cmd_emit(a: argparse.Namespace) -> int:
     obj = _result_from_args(a)
     if a.out is None:
@@ -134,9 +148,23 @@ def _cmd_emit(a: argparse.Namespace) -> int:
     buffer = io.StringIO()
     code = result.emit(obj, a.code, stream=buffer)
     line = buffer.getvalue()
-    if line:
-        Path(a.out).write_text(line, encoding="utf-8")
-        sys.stdout.write(line)
+    if not line:
+        return code
+    # `Path` は末尾の `/`・`/.` を落とすので、ディレクトリとして指定された生の引数をファイルの書き込み先にしない
+    if worker_paths.names_a_directory(a.out):
+        return result.emit(result.stopped(TOOL, "invalid", f"--out {a.out} はディレクトリを指す（ファイルのパスを渡す）"))
+    out = Path(a.out).absolute()
+    # リンクをたどらずに新しい inode として書く（worker の起動後に結果パスをリンクへ差し替えられても、指示先の外を書き換えない）。
+    # `..` が打ち消す要素は open_workdir が確かめる
+    try:
+        with worker_paths.open_workdir(out.parent) as wd:
+            expected = _expected_result_dir(wd.path)
+            if expected is not None:
+                worker_paths.check_dir_id(wd, expected)
+            worker_paths.write_file(wd, out.name, line)
+    except worker_paths.EntryUnsafe as exc:
+        return result.emit(result.stopped(TOOL, "invalid", f"--out {out} に書けない: {exc}"))
+    sys.stdout.write(line)
     return code
 
 
