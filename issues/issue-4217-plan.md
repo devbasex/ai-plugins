@@ -76,7 +76,12 @@
   - `time.sleep` を、呼ばれたら失敗する偽にする
   - `start` → 消した引数の並びで `plan_cli.main` が `causes.exit_code("invalid")` を返す → `status` の `metrics` に `max_lanes`・`max_plans` が無く、レーンの行に `plans` が無いことを確かめる
 - **満たす受け入れ条件:** 1（期待する結果の 3）
-- **進め方:** Task 1 と同じ。差し替えの漏れで子のプロセス（Git を含む）が起動すれば `Popen` の偽が落とす
+- **進め方:** テストを書いて通す。差し替えの漏れで子のプロセス（Git を含む）が起動すれば `Popen` の偽が落とす。**退行を捕まえることは、消したインタフェースを 1 つずつ一時的に戻して確かめる**（`start`・引数の解析・`status` は `admitted` を呼ばないので、Task 1 の排他を割る壊し方では落ちない。その手順は使わない）。次の 3 つを 1 つずつ入れ、そのたびに落ちたのが対応する確かめの `assert` であることを pytest の出力の落ちた行で見てから、元へ戻す（戻した状態をコミットする）
+  1. `plugins/ndf/src/ndf/progress/plan/cli.py` のパーサーに `limits` のサブコマンドを足す → `limits` の並びのケースで、終了コードが `causes.exit_code("invalid")` でなくなって落ちる
+  2. 同じファイルの `set` のパーサー（`sub.add_parser("set")`）に `--plans` の引数を足す → `set … --plans …` の並びのケースで同じく落ちる
+  3. `plugins/ndf/src/ndf/progress/plan/__init__.py` の `status_of`（`status` の本体）が組む `metrics` に `max_lanes` を足す → `metrics` に `max_lanes` が無いことの確かめで落ちる
+
+  確かめた手順と出力は Pull Request の本文へ書く
 
 ### Task 4: 確定仕様のテスト観点をテストにそろえる
 
