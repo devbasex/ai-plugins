@@ -384,7 +384,7 @@ plugins/ndf/
 | `compare` | 定義に `additionalProperties` が無く、見本に定義に無いキーが 1 つある | 食い違い 1 件（`unknown_keys`）。JSON Schema の検証だけなら通る形である |
 
 - 繰り返しの終わる条件: 異なる URL の数だけ取り、見本の件数だけ比べて終わる（打ち直しの繰り返しは持たない。失敗は次の日のジョブに任せる）
-- 報告側との契約: 毎日のジョブの報告（`scripts/runtime-smoke-latest.py report`）は、終了コードではなく `items` の `kind: mismatch` を相手ごとに数え、1 件以上の相手ごとに課題を 1 件作る。`kind: unreachable` だけの相手には作らない。報告のジョブは `live-samples` が失敗で終わっても動き（`if: ${{ !cancelled() && contains(needs.*.result, 'failure') }}`）、結果 JSON は `live-samples` の `if: always()` の手順が成果物へ上げる。成果物が無ければ（検証の前の失敗）報告は何もせずに終える
+- 報告側との契約: 毎日のジョブの報告（`scripts/runtime-smoke-latest.py report`）は、終了コードではなく `items` の `kind: mismatch` を相手ごとに数え、1 件以上の相手ごとに課題を 1 件作る。`kind: unreachable` だけの相手には作らない。報告のジョブは `live-samples` が失敗で終わっても動き（`if: ${{ !cancelled() && contains(needs.*.result, 'failure') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}`。任意の `ref` か `floors_ref` を試した手の起動では起動しない）、成果物の値（ランタイム名・`status`・版の一覧・`items`）は計画書の Task 11 の「成果物の値の照合」の形に限って課題へ写す。結果 JSON は `live-samples` の `if: always()` の手順が成果物へ上げる。成果物が無ければ（検証の前の失敗）報告は何もせずに終える
 
 ### 内部のデータと定数
 
