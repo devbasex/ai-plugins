@@ -48,10 +48,15 @@ class EntryUnsafe(EntryError):
 
 
 class RetiredKept(EntryError):
-    """`staged_write` が退けた名前を、公開に落ちた後に元へ戻せなかった。`left` は名前と回収先のパスの組の並び。"""
+    """`staged_write` が退けた名前を、公開に落ちた後に元へ戻せなかった。`left` は名前と回収先のパスの組の並び。
 
-    def __init__(self, left: list[tuple[str, Path]]) -> None:
-        shown = "・".join(f"{name} は {path}" for name, path in left)
+    回収先は一時ディレクトリの記述子から引いた今の場所で、その場所が開いた一時ディレクトリと同じ inode だと確かめられた
+    ものだけを載せる（一時ディレクトリや親が改名・差し替えされていれば、作った時点のパスは別の場所を指しうる）。
+    確かめられなければ None にし、回収先を確かめられないと書く。
+    """
+
+    def __init__(self, left: list[tuple[str, Optional[Path]]]) -> None:
+        shown = "・".join(f"{name} は {path}" if path is not None else f"{name} は回収先を確かめられない" for name, path in left)
         super().__init__(f"退けた名前を元へ戻せなかった（元の名前が埋まっているなど。上書きせずに残した: {shown}）")
         self.left = left
 
@@ -748,7 +753,7 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     retired: list[tuple[str, str]] = []
     kept = True
     st: Optional[os.stat_result] = None
-    tmp_path = wd.path / tmp
+    kept_error: Optional[RetiredKept] = None
     try:
         st = os.fstat(tmp_fd)
         # setgid のディレクトリの下では 0o2700 になるので、権限は所有者のほかに与えていないことだけを見る
@@ -769,16 +774,22 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
         created = False
         published = True
     except BaseException as exc:
-        left, kept = _restore_retired(wd, tmp_fd, tmp_path, retired)
+        left, kept = _restore_retired(wd, tmp_fd, retired)
         if left:
-            raise RetiredKept(left) from exc
+            kept_error = RetiredKept(left)
+            raise kept_error from exc
         raise
     finally:
         if published:
             _drop_retired(tmp_fd, retired)
         # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする。
         # 戻せなかった名前の中身を持つ一時ディレクトリも消さない
-        _clean_tmp(wd, tmp_fd, tmp, st if private and kept else None, created=created, published=published)
+        if kept_error is None:
+            _clean_tmp(wd, tmp_fd, tmp, st if private and kept else None, created=created, published=published)
+        else:
+            # 回収先を持つ例外を、後始末（一時ファイルの削除）の失敗で覆わない。記述子は `_clean_tmp` の finally が閉じる
+            with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 回収先を知らせる RetiredKept を上げるため
+                _clean_tmp(wd, tmp_fd, tmp, None, created=created, published=False)
 
 
 def _retire(wd: WorkDir, name: str, tmp_fd: int, slot: str, retired: list[tuple[str, str]]) -> str:
@@ -801,22 +812,23 @@ def _drop_retired(tmp_fd: int, retired: list[tuple[str, str]]) -> None:
             os.unlink(slot, dir_fd=tmp_fd)
 
 
-def _restore_retired(wd: WorkDir, tmp_fd: int, tmp_path: Path, retired: list[tuple[str, str]]) -> tuple[list[tuple[str, Path]], bool]:
+def _restore_retired(wd: WorkDir, tmp_fd: int, retired: list[tuple[str, str]]) -> tuple[list[tuple[str, Optional[Path]]], bool]:
     """公開できなかったときに、退けた名前を元の名前が空いているときだけ戻す。
 
     `os.link` は名前が埋まっていれば `FileExistsError` で失敗するので、空いているかの確かめと戻すことが 1 回の
     呼び出しで済む（`rename` は埋まった名前を黙って上書きする）。リンクをたどらない（退けた後にリンクへ差し替えられても
     リンク自体を戻す）。戻せた名前は一時ディレクトリの側の名前を消す。
-    戻せなかった名前と回収先のパスの組の並びと、一時ディレクトリを消してよいか（中身が残っていなければ真）を返す。
-    元の失敗を上げるため、ここでは上げない。
+    戻せなかった名前と回収先のパス（`_tmp_location` で確かめられなければ None）の組の並びと、一時ディレクトリを
+    消してよいか（中身が残っていなければ真）を返す。元の失敗を上げるため、ここでは上げない。
     """
-    left: list[tuple[str, Path]] = []
+    left: list[tuple[str, Optional[Path]]] = []
     empty = True
     for name, slot in reversed(retired):
         try:
             os.link(slot, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
         except OSError:  # noqa: NDF401 ファイル: 戻せなければ一時ディレクトリに中身を残し、回収先を知らせる
-            left.append((name, tmp_path / slot))
+            where = _tmp_location(tmp_fd)
+            left.append((name, where / slot if where is not None else None))
             empty = False
             continue
         try:
@@ -936,6 +948,21 @@ def _drop_tmp_dir(wd: WorkDir, tmp_fd: int, tmp: str, owned: os.stat_result, *, 
         return
     with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。空の一時ディレクトリを残して書き込みは成功として返す
         _remove_opened_dir(wd, tmp_fd, tmp, owned)
+
+
+def _tmp_location(fd: int) -> Optional[Path]:
+    """開いた一時ディレクトリの今の絶対パス。記述子から引き（Linux の `/proc/self/fd`）、そのパスが同じ inode を指すと確かめられたときだけ返す。
+
+    作った時点のパスは、一時ディレクトリや作業ディレクトリが改名されると、無い名前か差し替え先を指す。
+    引けない・消された（` (deleted)`）・別の inode を指すときは None。
+    """
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 確かめられなければ None（回収先を確かめられないと知らせる）
+        where = os.readlink(f"/proc/self/fd/{fd}")
+        if where.startswith("/") and not where.endswith(" (deleted)"):
+            now, opened = os.stat(where, follow_symlinks=False), os.fstat(fd)
+            if (now.st_dev, now.st_ino) == (opened.st_dev, opened.st_ino):
+                return Path(where)
+    return None
 
 
 def _current_name(fd: int, original: str) -> Optional[str]:

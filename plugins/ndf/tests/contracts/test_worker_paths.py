@@ -1147,3 +1147,42 @@ def test_staged_write_keeps_a_retired_name_whose_place_was_taken(workdir):
     assert name == "done" and kept.read_text(encoding="utf-8") == "古い" and str(kept) in str(e.value)
     assert (d / "done").read_text(encoding="utf-8") == "新しい" and (d / "result").read_text(encoding="utf-8") == "{}"
     assert (d / "f").read_text(encoding="utf-8") == "前"
+
+
+def _retire_then_take_the_place(d: Path, *, rename_tmp: bool):
+    """`done` を退けた後に同じ名前へ新しいファイルを書き、本体を失敗させる（`rename_tmp` なら一時ディレクトリも改名する）。"""
+    (d / "f").write_text("前", encoding="utf-8")
+    (d / "done").write_text("古い", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with pytest.raises(worker_paths.RetiredKept) as e, worker_paths.staged_write(wd, "f", "", retire=("done",)):
+            if rename_tmp:
+                (tmp,) = [p for p in d.iterdir() if p.name.startswith(".ndf-")]
+                tmp.rename(d / "moved")
+            (d / "done").write_text("新しい", encoding="utf-8")
+            raise OSError(28, os.strerror(28))
+    return e.value
+
+
+def test_retired_kept_names_where_the_temp_dir_is_now(workdir):
+    # #3877 r5: 回収先は記述子から引いた今の場所で、作った時点のパスではない
+    d, _ = workdir
+    err = _retire_then_take_the_place(d, rename_tmp=True)
+    ((name, kept),) = err.left
+    assert name == "done" and kept is not None and kept.parent.name == "moved" and kept.read_text(encoding="utf-8") == "古い"
+    assert (d / "done").read_text(encoding="utf-8") == "新しい"
+
+
+def test_retired_kept_is_not_hidden_by_a_cleanup_failure(workdir, monkeypatch):
+    # #3877 r5: 一時ファイルを消せなくても、回収先を持つ例外を呼び出し元へ返す
+    d, _ = workdir
+    real_unlink = os.unlink
+
+    def refuse_data(path, *, dir_fd=None):
+        if path == "data":
+            raise OSError(errno.EIO, "refused")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", refuse_data)
+    err = _retire_then_take_the_place(d, rename_tmp=False)
+    ((name, kept),) = err.left
+    assert name == "done" and kept is not None and kept.read_text(encoding="utf-8") == "古い"
