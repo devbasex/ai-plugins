@@ -502,6 +502,8 @@ _CHECK = "ndf records handoff check .ndf/handoff/x.md"
         ("main", "'ndf' records handoff check .ndf/handoff/x.md", True),
         ("main", "ndf records handoff check '.ndf/handoff/../x.md'", False),
         ("main", "ndf records handoff check .ndf/handoff/x.md\\\n.md", False),
+        ("main", "ndf records handoff check \\\n  .ndf/handoff/x.md \\\n  --trim --history .ndf/handoff/h.md", True),
+        ("main", 'ndf records handoff check ".ndf/handoff/x\\\n.md"', False),
         ("main", f"{_CHECK} --trim --history /home/u/notes.md", False),
         ("main", f"{_CHECK} --trim --history .ndf/handoff/../x.md", False),
         ("main", _CHECK + " --trim --history {wt}/.ndf/handoff/h.md", False),
@@ -543,6 +545,29 @@ def test_passes_runs_only_the_handoff_commands(handoff_repos, at, command, passe
     words = {k: os.path.realpath(v) for k, v in handoff_repos.items()}
     cwd = handoff_repos["main"] / "src" if at == "main/src" else handoff_repos[at]
     assert _passes(cwd, "Bash", command=command.format(**words)) is passes
+
+
+def test_passes_expands_a_quoted_tilde_like_the_cli(handoff_repos, monkeypatch):
+    # #3995: 引用したチルダは CLI が Path.expanduser で展開するので、展開した先で照らす（メインの ~ というリンクに惑わされない）
+    main = handoff_repos["main"]
+    (main / "~").symlink_to(main / ".ndf" / "handoff")
+    monkeypatch.setenv("HOME", str(handoff_repos["tmp"]))
+    for command in ("ndf records handoff check '~/x.md'", f"{_CHECK} --trim --history '~/h.md'"):
+        assert not _passes(main, "Bash", command=command)
+    monkeypatch.setenv("HOME", str(main / ".ndf" / "handoff"))
+    assert _passes(main, "Bash", command="ndf records handoff check '~/x.md' --trim --history=\"~/h.md\"")
+
+
+def test_handoff_bash_judges_once_per_tool_call(tmp_path, monkeypatch):
+    # #3995: 運用上限で通す連結は context-limit と script-chain の両方が見るが、判定は同じ呼び出しの中で 1 回だけ
+    _usage_transcript(tmp_path, 500_000)
+    (tmp_path / ".ndf" / "handoff").mkdir()
+    calls = []
+    real = context_limit._handoff_bash
+    monkeypatch.setattr(context_limit, "_handoff_bash", lambda ctx, params: calls.append(1) or real(ctx, params))
+    command = f"ndf relay context record --work 1 && {_CHECK}"
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, command))) is None
+    assert len(calls) == 1
 
 
 def test_passes_does_not_run_the_handoff_command_in_the_background(handoff_repos):
@@ -622,10 +647,16 @@ def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
     t = thresholds({}, tables.policy_value)
     for under, end in ((True, "次のセグメントのブロック"), (False, "ndf-next")):
         text = context_limit._reason(t, under, "/work/repo", ".ndf/handoff/")
-        parts = ("/work/repo/.ndf/handoff/parallel-<計画>.md ", "ndf records --cwd /work/repo handoff check")
+        parts = ("parallel-<計画>", "ndf records --cwd /work/repo handoff check '/work/repo/.ndf/handoff/<文書>.md' ")
         for part in ("TaskStop", "supervisor", "wait の行", *parts, end):
             assert part in text
         assert len(text) <= 600
+
+
+def test_context_limit_reason_quotes_a_main_directory_with_spaces():
+    # #3995: 空白を含むメインディレクトリでも、案内のコマンドを Bash がそのまま打てる（--cwd と文書がそれぞれ 1 引数）
+    text = context_limit._reason(thresholds({}, tables.policy_value), False, "/work/my repo", ".ndf/handoff/")
+    assert "ndf records --cwd '/work/my repo' handoff check '/work/my repo/.ndf/handoff/<文書>.md' " in text
 
 
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):

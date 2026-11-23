@@ -538,6 +538,8 @@ class HookContext:
     payload: dict[str, Any]
     tail_bytes: int = 262144
     env: dict[str, str] = field(default_factory=lambda: dict(os.environ))
+    # 同じ事象の guard どうしで分け合う判定（キーは判定した guard の名前。#3995 の `handoff_bash`）
+    memo: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def _str(self, key: str) -> str:
         value = self.payload.get(key)

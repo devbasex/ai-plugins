@@ -129,7 +129,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_in_handoff` | 同上 | 新設 | `_in_handoff(path: str, cwd: str, handoff_dir: str) -> bool` | 実際の読み書きの先が、`cwd` を含むリポジトリのメインディレクトリの引継ぎディレクトリの直下か |
 | `_ndf_args_pass` | 同上 | 新設 | `_ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool` | `ndf` に続く語が通す 2 つのコマンドの形で、`handoff check` が読み書きする本体と履歴（CLI と同じく `--cwd` の作業ツリーの根から解いた先）がメインディレクトリの引継ぎディレクトリの中か |
 | `_notice` | 同上 | 新設 | `_notice(tokens: int, t: Thresholds) -> str` | 判断開始の値を超えたことと役ごとの切りどころを書いた案内の文 |
-| `_reason` | 同上 | 新設 | `_reason(t: Thresholds, under_relay: bool, handoff_dir: str) -> str` | 運用上限の拒否の文（背景の作業の扱い・引継ぎ文書・終え方） |
+| `_reason` | 同上 | 新設 | `_reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> str` | 運用上限の拒否の文（背景の作業の扱い・メインディレクトリ `main` の下の絶対パスの引継ぎ文書と `--cwd <main>` での確かめ方・終え方） |
 | `remember` | `src/ndf/domains/hooks/counter.py` | 新設 | `remember(self, key: str, item: str, value: dict, keep: int) -> None` | 状態のファイルの `memo[key]`（`item` から値への表）に、今の入力の番号（`turn`）を添えて `item` の値を置く。置く前に `turn` の違う値を消し、置いた後に `keep` を超えた分を古い順（置いた順）に消す。数え手が使えなければ何もしない |
 | `take` | 同上 | 新設 | `take(self, key: str, item: str) -> dict \| None` | `memo[key]` の `item` の値を取り出して消す（消費する）。無い・数え手が使えない・形が違えば None |
 | `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない |
@@ -151,7 +151,7 @@ docs/glossary/glossary.json・docs/glossary.md
   - 副作用: 無い（ファイルを読まず、`os.path.realpath` と `.git` の読み取りだけ）。git のコマンドを起動しない
 - `_ndf_args_pass`
   - 事前条件: `words` は `body_argv` から先頭の `ndf` を除いた語で、どの語も展開（変数・チルダ・グロブ・コマンド置換）を含まない（含めば呼ぶ前に止める）。CLI の起点は Bash の `cwd` と同じでなければならないので、作業ディレクトリか Git の解決先を変える形は呼ぶ前に止める。(a) ラッパーのコマンドを持たない（`argv == body_argv`。`env -C <dir>`・`env GIT_DIR=…`・`timeout`・`nice` などを先頭に付けた `ndf` は止める。`body_argv` はラッパーを外すので、外した後の語だけを見ると `env -C <worktree>` の起点の変化を見落とす）。(b) 外側のスクリプトに変数の代入（前置きの `GIT_DIR=… ndf …` と単独の `GIT_WORK_TREE=…;` のどちらも。`ShellScript.assignments`）が無い（`argv` は代入の語を含まないので、`argv` だけでは見えない）。(c) `cd`・`pushd`・`export` などは `ndf` で始まらないので、下の `_passes` の条件で既に止まる。手順書（`handoff.md`・`relay.md`・`context-window.md`）の 2 つのコマンドはどれもラッパーも代入も付けないので、止まる形は手順に無い
-  - 事後条件: 次をすべて満たすときだけ真。(1) `--cwd <値>` は 0 か 1 回で、あれば起点 `start = os.path.realpath(os.path.join(cwd, 値))`（字面でなく実パス。CLI の Git はリンクを解いた先の作業ツリーを使うので、それにそろえる）を含むリポジトリのメインディレクトリが `os.path.realpath(cwd)` のものと同じ（求められなければ偽）。(2) `--cwd` を除いた語が `relay context record` で始まり、残りが `--work`・`--event`・`--verdict`・`--reason` とその値だけ（`--opt=値` の形も含め、ほかの語があれば偽）か、`records handoff check` で始まり、残りが位置引数の本体 1 つ・`--trim`・`--history <値>` だけ。(3) `handoff check` の本体と `--history` の値（あれば）が、どちらも `_in_handoff(値, base, params["handoff_dir"])` を満たす。`base` は CLI（`records/cli.py` の `_root` と `_handoff`）と同じ基準で求める。`--cwd` があれば `start`、無ければ `os.path.realpath(cwd)`（CLI の `Path.cwd()` は実パスを返す）を起点に、`.git` を持つ最も近い祖先（`strict._repo_root`。`git rev-parse --show-toplevel` と同じく、worktree ではその worktree の根）を `base` とする（求められなければ偽）。CLI は相対のパスをこの作業ツリーの根から解くので、Bash の `cwd` からは解かない。絶対のパスは `base` に依らない。例: worktree の `cwd` で `ndf records --cwd <メインディレクトリ> handoff check .ndf/handoff/next.md` は、メインディレクトリの根から解いて通す。`--cwd` 無しで worktree の `cwd` から同じ相対パスを渡すと、CLI は worktree の `.ndf/handoff/next.md` を読み書きするので止める。worktree の `cwd` で `cwd` がその根の下の `src` のとき `.ndf/handoff/next.md` を渡しても、`src/.ndf/handoff` でなく根から解く。メインディレクトリの `cwd` で `--cwd /tmp/wt-src`（worktree の `src` を指すリンク）なら、リンク元の祖先（`/tmp`）でなく worktree の根から解き、相対の本体は worktree の `.ndf/handoff` になるので止める
+  - 事後条件: 次をすべて満たすときだけ真。(1) `--cwd <値>` は 0 か 1 回で、あれば起点 `start = os.path.realpath(os.path.join(cwd, 値))`（字面でなく実パス。CLI の Git はリンクを解いた先の作業ツリーを使うので、それにそろえる）を含むリポジトリのメインディレクトリが `os.path.realpath(cwd)` のものと同じ（求められなければ偽）。(2) `--cwd` を除いた語が `relay context record` で始まり、残りが `--work`・`--event`・`--verdict`・`--reason` とその値だけ（`--opt=値` の形も含め、ほかの語があれば偽）か、`records handoff check` で始まり、残りが位置引数の本体 1 つ・`--trim`・`--history <値>` だけ。(3) `handoff check` の本体と `--history` の値（あれば）が、どちらも先頭のチルダを `os.path.expanduser` で展開した後に `_in_handoff(展開した値, base, params["handoff_dir"])` を満たす（CLI は `Path.expanduser()` を適用してから読み書きするので、引用した `'~/x.md'` も展開した先で照らす）。`base` は CLI（`records/cli.py` の `_root` と `_handoff`）と同じ基準で求める。`--cwd` があれば `start`、無ければ `os.path.realpath(cwd)`（CLI の `Path.cwd()` は実パスを返す）を起点に、`.git` を持つ最も近い祖先（`strict._repo_root`。`git rev-parse --show-toplevel` と同じく、worktree ではその worktree の根）を `base` とする（求められなければ偽）。CLI は相対のパスをこの作業ツリーの根から解くので、Bash の `cwd` からは解かない。絶対のパスは `base` に依らない。例: worktree の `cwd` で `ndf records --cwd <メインディレクトリ> handoff check .ndf/handoff/next.md` は、メインディレクトリの根から解いて通す。`--cwd` 無しで worktree の `cwd` から同じ相対パスを渡すと、CLI は worktree の `.ndf/handoff/next.md` を読み書きするので止める。worktree の `cwd` で `cwd` がその根の下の `src` のとき `.ndf/handoff/next.md` を渡しても、`src/.ndf/handoff` でなく根から解く。メインディレクトリの `cwd` で `--cwd /tmp/wt-src`（worktree の `src` を指すリンク）なら、リンク元の祖先（`/tmp`）でなく worktree の根から解き、相対の本体は worktree の `.ndf/handoff` になるので止める
   - 副作用: 無い（`_in_handoff` と同じ読み取りだけ）
 - `_notice`・`_reason`
   - 事後条件: 文は PreToolUse・PostToolUse の注入の上限（`hook.budget.*` の `inject_chars` 600 字）以下。文脈の量は `_reason` に入れない（`deny_key` が `none` で数えないので、文が呼び出しごとに変わっても数えには効かないが、拒否の文を同じにしておく）
@@ -177,7 +177,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `usage` が読めない | None |
 | PreToolUse・`tokens < limit` | `passing(context_tokens=tokens)` |
 | PreToolUse・`tokens ≥ limit`・`_passes` が真 | `passing(context_tokens=tokens)` |
-| PreToolUse・`tokens ≥ limit`・`_passes` が偽 | `deny(_reason(t, under, handoff_dir))`。notes は `context_tokens`・`under_relay` |
+| PreToolUse・`tokens ≥ limit`・`_passes` が偽 | `deny(_reason(t, under, main, handoff_dir))`（`main` は `_main(ctx.cwd)`）。notes は `context_tokens`・`under_relay` |
 | PostToolUse・`decide_from ≤ tokens < limit`・この入力の後で 1 回目 | `advise(_notice(tokens, t))` |
 | PostToolUse・ほか | `passing(context_tokens=tokens)` |
 
@@ -187,7 +187,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | --- | --- |
 | Read・Write・Edit で、`_in_handoff(file_path, ctx.cwd, params["handoff_dir"])` が真 | 通す（相対・絶対のどちらも。`..` とシンボリックリンクは `realpath` で解いた後の実際の先で照らす。引継ぎ文書の保存先はメインディレクトリだけなので、worktree の `cwd` からもメインディレクトリの `.ndf/handoff` を照らし、worktree の `.ndf/handoff` と別のリポジトリのものは外れる） |
 | `params["pass_tools"]` に名前がある Tool（TaskStop） | 通す |
-| Bash で、Tool の背景起動（`run_in_background: true`）でなく、`ctx.shell.commands` が 1 つ以上あり、外側のスクリプトに変数の代入が無く（`ctx.shell.assignments` が 0）、どの単純コマンドも語の字面（`ShellCommand.source`）を Bash と同じ値（引用とバックスラッシュのエスケープを外した値。展開・引用の外のグロブを含む語と語の中の行の継続は止める）に読み直した語が `ndf` で始まり（先頭が `ndf` ならラッパーを持たない）、続く語が `_ndf_args_pass` を満たし（`--cwd <値>` は `handoff.md` が手順で付ける唯一の共通オプション。本体と `--trim` の履歴の実際のパスを引継ぎディレクトリに限る）、語が展開を含まず、どれも背景（`background`）でなく、コマンド置換（`$(...)`・バッククォート）・入れ子の起動（`bash -c`・`eval`。`ctx.shell.waits` が `commands` より多い）・ヒアドキュメントとヒアストリング（`ctx.shell.heredocs`）を含まず、`ctx.shell.redirects` のどれもが許すリダイレクト（下の段落）である（見分け方は `tdd-cycle` で構文木を走らせて決める）。`&&`・`;`・`||`・パイプでつないだものは単純なコマンドを 1 つずつ照らし、すべてが上の条件を満たせば連結ごと通す（許可対象だけの連結は許す。1 つでも満たさないコマンドがあれば止める）。`script-chain` の guard も同じ判定（`context_limit.handoff_bash`）でこの連結を止めない | 通す |
+| Bash で、Tool の背景起動（`run_in_background: true`）でなく、`ctx.shell.commands` が 1 つ以上あり、外側のスクリプトに変数の代入が無く（`ctx.shell.assignments` が 0）、どの単純コマンドも語の字面（`ShellCommand.source`）を Bash と同じ値（引用とバックスラッシュのエスケープを外した値。展開・引用の外のグロブを含む語と語の中の行の継続（引用の外で前後とも空白でない `\<改行>`、引用の中の `\<改行>`）は止める。引数の間の継続は構文木の語が Bash と一致するので通す）に読み直した語が `ndf` で始まり（先頭が `ndf` ならラッパーを持たない）、続く語が `_ndf_args_pass` を満たし（`--cwd <値>` は `handoff.md` が手順で付ける唯一の共通オプション。本体と `--trim` の履歴の実際のパスを引継ぎディレクトリに限る）、語が展開を含まず、どれも背景（`background`）でなく、コマンド置換（`$(...)`・バッククォート）・入れ子の起動（`bash -c`・`eval`。`ctx.shell.waits` が `commands` より多い）・ヒアドキュメントとヒアストリング（`ctx.shell.heredocs`）を含まず、`ctx.shell.redirects` のどれもが許すリダイレクト（下の段落）である（見分け方は `tdd-cycle` で構文木を走らせて決める）。`&&`・`;`・`||`・パイプでつないだものは単純なコマンドを 1 つずつ照らし、すべてが上の条件を満たせば連結ごと通す（許可対象だけの連結は許す。1 つでも満たさないコマンドがあれば止める）。`script-chain` の guard も同じ判定（`context_limit.handoff_bash`）でこの連結を止めない。判定は `HookContext.memo` に置き、同じ Tool の呼び出しでは 1 回だけ行う | 通す |
 | ほか | 止める |
 
 許すリダイレクトは、引継ぎの 2 つのコマンドがファイルへ書かずに済む 2 つの形だけである。(1) ファイル記述子の複製で、演算子が `>&`・`<&` で先が数字だけか `-`（`2>&1`・`>&2`・`2>&-`）。(2) 演算子が `>`・`>>`・`&>`・`&>>` で、先が字面で `/dev/null`。ほか（ファイルへの `>`・`>>`・`>|`・`&>`・`&>>`・`<>`、入力の `<`、`>&` の先が数字でない語、先がプロセス置換 `>(...)`・`<(...)` か変数の展開を含む語）は止める。`ShellScript.redirects` は構文木のすべての `file_redirect` の（演算子, 先の字面, 先がプロセス置換か展開を含むか）の組で、`ShellScript.heredocs` は `heredoc_redirect`・`herestring_redirect` の数である。どちらも外側のスクリプトだけを見る（入れ子の起動は上の条件で先に止める）。
@@ -200,7 +200,9 @@ docs/glossary/glossary.json・docs/glossary.md
 | `heredocs` | `int` | `0` | `_walk` が `heredoc_redirect`・`herestring_redirect` の節を数える |
 | `assignments` | `int` | `0` | `_walk` が外側のスクリプトの `variable_assignment` の節（単純コマンドの前置きと単独の代入の両方）を数える |
 
-`_reason` の文（中継の下）: 「文脈の量が運用上限（{limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の wait の行をそのまま残す。引継ぎ文書（オーガナイザーは {handoff_dir}parallel-<計画>.md）を書いて ndf records handoff check で確かめ、応答の最後に次のセグメントのブロックを書いて終える」。中継の外は最後を「ndf-next のブロックを出して新しいセッションで続ける」にする。
+`HookContext` の変更: `memo: dict[str, Any]`（既定は空の表）を足す。1 回の事象の guard どうしで判定を分け合う置き場で、`handoff_bash` が `context-limit` のキーで判定を置き、`script-chain` の guard は同じ値を読む（語の読み直し・リポジトリの探索・パスの解決を 1 回にする）。
+
+`_reason` の文（中継の下）: 「文脈の量が運用上限（{limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の wait の行をそのまま残す。引継ぎ文書（オーガナイザーは <文書> を parallel-<計画>）を次の検査の絶対パスで書き、前景で ndf records --cwd {main} handoff check {main}/{handoff_dir}<文書>.md を打って確かめ、応答の最後に次のセグメントのブロックを書いて終える」。中継の外は最後を「ndf-next のブロックを出して新しいセッションで続ける」にする。`{main}` は `_main(ctx.cwd)`（メインディレクトリの実パス）で、worktree の `cwd` からも相対パスを使わずメインディレクトリの文書を書き・確かめる。`--cwd` の値と文書の絶対パスは `shlex.quote` で引用し、空白を含むメインディレクトリでもそれぞれ Bash の 1 引数にする。
 
 ### 内部のデータと定数
 
@@ -242,7 +244,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
-| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」 |
+| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書をメインディレクトリの .ndf/handoff の下に絶対パスで更新し、ndf records --cwd <メインディレクトリの絶対パス> handoff check <文書の絶対パス> で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」（worktree の `cwd` から相対パスで書くと guard が止めるので、メインディレクトリを基準にする） |
 
 `relay.result.schema.json` は `items` の `policy`・`margin`・`config_error` と `metrics` の `no_policy_rows` を消し、`metrics` に `decide_from`（integer）を足す（`metrics` は追加の項目を許さない）。`relay.args.schema.json` は `context resolve` の `--root`・`--policy` を消す。
 

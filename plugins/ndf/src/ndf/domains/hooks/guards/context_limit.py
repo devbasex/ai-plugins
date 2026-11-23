@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +40,8 @@ _DQUOTE_ESCAPES = frozenset('$`"\\\n')
 _NAME = "context-limit"
 # ファイルへ書かないリダイレクト（演算子と先を空白でつないだ字面）: 記述子の複製（先が数字か -）と、/dev/null へ向ける形
 _SAFE_REDIRECT = re.compile(r"[<>]& (?:-|[0-9]+)|&?>>? /dev/null")
+# 引用の外の語の途中の行の継続（前後とも空白でない）。Bash は 1 語につなぐが、構文木は 2 語に分ける
+_WORD_CONTINUATION = re.compile(r"\S\\\n\S")
 
 
 def _gitdir(dot: Path) -> Optional[Path]:
@@ -134,7 +137,8 @@ def _path_args(words: list[str], spec: dict) -> Optional[list[str]]:
 def _ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool:
     """`ndf` に続く語が通すコマンドの形で、`handoff check` が読み書きする先がメインディレクトリの引継ぎディレクトリの中か。
 
-    相対のパスは CLI（`records/cli.py` の `_root`）と同じく、`--cwd`（無ければ `cwd`）の実パスを含む worktree の根から解く。
+    パスは CLI（`records/cli.py` の `_root` と `_handoff`）と同じく、先頭のチルダを展開してから、相対なら `--cwd`
+    （無ければ `cwd`）の実パスを含む worktree の根から解く。
     """
     split = _split_cwd(words)
     if split is None or len(split[1]) > 1:
@@ -150,7 +154,7 @@ def _ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool:
         head = name.split()
         if rest[: len(head)] == head:
             paths = _path_args(rest[len(head) :], spec)
-            return paths is not None and all(_in_handoff(p, str(base), params["handoff_dir"]) for p in paths)
+            return paths is not None and all(_in_handoff(os.path.expanduser(p), str(base), params["handoff_dir"]) for p in paths)
     return False
 
 
@@ -196,6 +200,8 @@ def _redirect_ok(r) -> bool:
 
 def _command_ok(cmd, cwd: str, params: dict) -> bool:
     """背景でなく、語が Bash と同じ値に静的に決まり、先頭の語が `ndf`（ラッパーを持たない）の通すコマンドか。"""
+    if any("\\\n" in w for w in cmd.source):  # 引用の中の行の継続（二重引用では Bash が外す）
+        return False
     words = [_static_word(w) for w in cmd.source]
     if cmd.background or None in words or words[:1] != [identity.FIXED_WORDS["entrypoint"]]:
         return False
@@ -210,10 +216,17 @@ def params() -> dict:
 def handoff_bash(ctx, params: dict) -> bool:
     """`pass_ndf` のコマンドだけを前景で打つ Bash か（連結は単純なコマンドを 1 つずつ照らす）。
 
-    Tool の背景起動（`run_in_background`）・語の中の行の継続（構文木の語の切れ目が Bash と違う）は止める。
+    Tool の背景起動（`run_in_background`）・語の中の行の継続（構文木の語の切れ目が Bash と違う）は止める。引数の間の継続は通す。
+    判定は `ctx.memo` に置き、同じ Tool の呼び出しの `script-chain` の guard と分け合う。
     """
+    if _NAME not in ctx.memo:
+        ctx.memo[_NAME] = _handoff_bash(ctx, params)
+    return ctx.memo[_NAME]
+
+
+def _handoff_bash(ctx, params: dict) -> bool:
     shell = ctx.shell
-    if background_call(ctx.tool_input) or "\\\n" in ctx.command:
+    if background_call(ctx.tool_input) or _WORD_CONTINUATION.search(ctx.command):
         return False
     if not shell.commands or shell.assignments or shell.heredocs or len(shell.waits) > len(shell.commands):
         return False
@@ -233,15 +246,19 @@ def _passes(ctx, params: dict) -> bool:
 
 
 def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> str:
-    """運用上限の拒否の文（背景の監視の扱い・メインディレクトリ `main` の引継ぎ文書と確かめ方・終え方）。文脈の量は入れない。"""
+    """運用上限の拒否の文（背景の監視の扱い・メインディレクトリ `main` の引継ぎ文書と確かめ方・終え方）。文脈の量は入れない。
+
+    `--cwd` の値と文書の絶対パスは、空白を含んでも Bash の 1 引数になるよう引用する。
+    """
     end = "応答の最後に次のセグメントのブロックを書いて終える" if under_relay else "ndf-next のブロックを出して新しいセッションで続ける"
     docs = os.path.join(main, handoff_dir.strip("/"))
+    doc = shlex.quote(f"{docs}/<文書>.md")
     return (
         f"文脈の量が運用上限（{t.limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて"
         "完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
         "引継ぎ文書の「現在地」の wait の行をそのまま残す。"
-        f"引継ぎ文書はメインディレクトリの {docs}/ の下に絶対パスで書き（オーガナイザーは {docs}/parallel-<計画>.md ）、"
-        f"前景で ndf records --cwd {main} handoff check <文書の絶対パス> を打って確かめ、{end}"
+        "引継ぎ文書（オーガナイザーは <文書> を parallel-<計画>）を次の検査の絶対パスで書き、"
+        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、{end}"
     )
 
 
