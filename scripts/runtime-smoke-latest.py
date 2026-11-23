@@ -8,7 +8,7 @@
   JSON のデータとして読み、`--outcomes` の `<ランタイム>.json` が `failure` のランタイムと、`--samples`（`ndf samples verify` の
   結果 JSON）に食い違い（`kind: mismatch`）のある相手ごとに、同じ題の開いている課題があればコメントを足し、無ければ作る。
   無いファイルは読まない。成果物の値は決めた形に合うものだけを題と本文へコピーし、外れた値は標準エラーにも出さない。
-  `gh` が失敗したら、残りの報告を続けてから終了コード 1
+  課題の一覧は報告があるときに 1 回だけ取り、取れなければ終了コード 1。作成とコメントが失敗したら、残りの報告を続けてから終了コード 1
 
 版を上げる手順（`tests/runtime-smoke/README.md`）も `resolve` の出力を一覧へ写す。
 """
@@ -210,9 +210,13 @@ def samples_body(peer: str, run_url: str, lines: list[str]) -> str:
     )
 
 
-def report(title: str, body: str, repo: str | None) -> str:
-    """開いている同じ題の課題へコメントを足すか、無ければ作る。何をしたかを返す"""
-    listed = json.loads(run_gh(["issue", "list", *_repo_args(repo), "--state", "open", "--limit", "1000", "--json", "number,title"]))
+def open_issues(repo: str | None) -> list[dict]:
+    """開いている課題の番号と題"""
+    return json.loads(run_gh(["issue", "list", *_repo_args(repo), "--state", "open", "--limit", "1000", "--json", "number,title"]))
+
+
+def report(title: str, body: str, repo: str | None, listed: list[dict]) -> str:
+    """`listed`（開いている課題）に同じ題があればコメントを足し、無ければ作る。何をしたかを返す"""
     # 題の完全一致で探す（部分一致にすると別のランタイムの課題へ足してしまう）
     same = sorted(i["number"] for i in listed if i.get("title") == title)
     if same:
@@ -239,10 +243,17 @@ def cmd_report(args: argparse.Namespace) -> int:
     found = mismatches(Path(args.samples)) if args.samples else {}
     issues = [(TITLE.format(runtime=name), report_body(name, args.run_url, versions)) for name, versions in failed]
     issues += [(SAMPLES_TITLE.format(peer=peer), samples_body(peer, args.run_url, lines)) for peer, lines in found.items()]
+    if not issues:
+        return 0
+    try:
+        listed = open_issues(repo)
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: gh が失敗した（開いている課題の一覧）: {e.stderr or e}", file=sys.stderr)
+        return 1
     code = 0
     for title, body in issues:
         try:
-            print(report(title, body, repo))
+            print(report(title, body, repo, listed))
         except subprocess.CalledProcessError as e:
             print(f"ERROR: gh が失敗した（{title}）: {e.stderr or e}", file=sys.stderr)
             code = 1

@@ -91,7 +91,7 @@ class FakeGh:
 
     def __call__(self, args, stdin=None):
         self.calls.append((args, stdin))
-        if self.fail and args[:2] != ["issue", "list"]:
+        if self.fail and (self.fail == "list") == (args[:2] == ["issue", "list"]):
             raise subprocess.CalledProcessError(1, ["gh", *args], stderr="boom")
         if args[:2] == ["issue", "list"]:
             return json.dumps(self.issues)
@@ -182,7 +182,15 @@ def test_report_fails_when_gh_fails_after_trying_the_rest(mod, monkeypatch, tmp_
     outcomes = {f"{r}.json": outcome(r) for r in mod.RUNTIMES}
     code, gh = run_report(mod, monkeypatch, tmp_path, outcomes, [mismatch()], fail=True)
     assert code == 1
-    assert gh.kinds().count(["issue", "create"]) == 3
+    # 一覧は報告が何件でも 1 回だけ取る
+    assert gh.kinds() == [["issue", "list"], *[["issue", "create"]] * 3]
+    assert "gh" in capsys.readouterr().err
+
+
+def test_report_fails_without_writing_when_listing_fails(mod, monkeypatch, tmp_path, capsys):
+    code, gh = run_report(mod, monkeypatch, tmp_path, {"claude.json": outcome("claude")}, [mismatch()], fail="list")
+    assert code == 1
+    assert gh.kinds() == [["issue", "list"]]
     assert "gh" in capsys.readouterr().err
 
 
@@ -229,6 +237,7 @@ def test_report_reads_only_failed_outcomes_of_known_runtimes(mod, monkeypatch, t
     code, gh = run_report(mod, monkeypatch, tmp_path, outcomes)
     assert code == 0
     assert [title for title, _ in written(gh)] == [f"最新の版のスモークが落ちた: {r}" for r in failed]
+    assert gh.kinds().count(["issue", "list"]) == bool(failed)
     out = capsys.readouterr()
     assert "EVIL" not in f"{out.out}{out.err}{gh.calls}"
     # 読めたのに報告しないファイルは標準エラーへ知らせる（知らない名前のファイルは読まない）

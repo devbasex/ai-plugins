@@ -4,7 +4,7 @@ name: Runtime plugin smoke (latest CLI)
 # - runtime-smoke-latest: リリースの経路のスモーク（runtime-plugin-smoke.yml）は tests/runtime-smoke/cli-versions.env に
 #   書いたバージョンの CLI だけを入れる。ここでは claude・codex のその時点の最新のバージョンを解決して同じ手順で試す
 # - live-samples: テストの見本を、相手が公開する記述と突き合わせる（ndf samples verify）
-# - report: 上の 2 つのどれかが落ちた日だけ、課題を作るか、開いている課題へコメントを足す
+# - report: スモークが落ちたか、見本が食い違った日だけ、課題を作るか、開いている課題へコメントを足す
 # Pull Request と push では起動しない（必須のチェックに入れない。外部の相手の変更でデプロイを止めない）
 on:
   schedule:
@@ -44,7 +44,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          # 式の比較は大文字・小文字を区別しない。report の条件が main とみなす値（Main など）では、必ず main を取り出す
+          ref: ${{ (inputs.ref || 'main') == 'main' && 'main' || inputs.ref }}
       - name: Resolve the latest CLI version
         run: |
           mkdir -p "$(dirname "$LATEST_VERSIONS")"
@@ -126,6 +127,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # この試行が食い違いを見つけて上げた成果物の ID。食い違いが無い・上げていないときは空
+    outputs:
+      mismatch-artifact-id: ${{ steps.verify.outputs.mismatch == 'true' && steps.upload.outputs.artifact-id || '' }}
     steps:
       # 見本と定義は入力の ref に依らず main のものを使う
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,6 +146,7 @@ jobs:
           cache-dependency-glob: plugins/ndf/uv.lock
       # 結果 JSON（標準出力の最後の 1 行）を残してから、突き合わせの終了コードでこの手順を終える
       - name: Verify the samples against the published descriptions
+        id: verify
         run: |
           code=0
           out="$(plugins/ndf/bin/ndf samples verify --peer github)" || code=$?
@@ -149,9 +154,13 @@ jobs:
             printf '%s\n' "$out"
             mkdir -p tmp/live-samples
             printf '%s\n' "${out##*$'\n'}" > tmp/live-samples/result.json
+            if jq -e 'any(.items[]?; .kind == "mismatch")' tmp/live-samples/result.json > /dev/null; then
+              echo "mismatch=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
           exit "$code"
       - name: Upload the result
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -163,7 +172,7 @@ jobs:
   # （matrix のジョブがその ref のコードを動かし、成果物を書けるため）
   report:
     needs: [runtime-smoke-latest, live-samples]
-    if: ${{ !cancelled() && contains(needs.*.result, 'failure') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}
+    if: ${{ !cancelled() && (needs.runtime-smoke-latest.result == 'failure' || needs.live-samples.outputs.mismatch-artifact-id != '') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -179,15 +188,18 @@ jobs:
           sparse-checkout: scripts/runtime-smoke-latest.py
       # 名前でなく pattern で落とす（成果物が無い日も落ちない）。merge-multiple が無いと、落とした成果物の数で並びが変わる
       - name: Download the runtime outcomes
+        if: ${{ needs.runtime-smoke-latest.result != 'success' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: runtime-smoke-latest-*
           path: tmp/report/runtimes
           merge-multiple: true
+      # 名前で探すと、再実行のとき前の試行の結果を読む。検証のジョブが上げた成果物の ID で落とす
       - name: Download the result of the samples
+        if: ${{ needs.live-samples.outputs.mismatch-artifact-id != '' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: live-samples
+          artifact-ids: ${{ needs.live-samples.outputs.mismatch-artifact-id }}
           path: tmp/report/samples
           merge-multiple: true
       - name: Report the failures as issues
