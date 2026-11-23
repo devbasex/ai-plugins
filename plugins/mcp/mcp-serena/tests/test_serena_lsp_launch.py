@@ -22,7 +22,7 @@ def _server(name):
 
 
 def _expected(context):
-    return ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server", "--context", context, *COMMON_TAIL]
+    return ["--from", "serena-agent==2.1.0", "serena", "start-mcp-server", "--context", context, *COMMON_TAIL]
 
 
 def test_claude_code_launch_is_pinned_with_claude_code_context():

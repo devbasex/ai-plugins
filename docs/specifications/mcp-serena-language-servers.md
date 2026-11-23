@@ -164,7 +164,7 @@ graph TB
 
 ```json
 {"mcpServers": {"serena": {"type": "stdio", "command": "uvx",
-  "args": ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server",
+  "args": ["--from", "serena-agent==2.1.0", "serena", "start-mcp-server",
            "--context", "claude-code", "--project-from-cwd",
            "--add-mode", "no-memories", "--add-mode", "no-onboarding",
            "--enable-web-dashboard", "False"],
@@ -197,7 +197,7 @@ worktree（`.worktrees/<ブランチ名>`）で起動した Serena は worktree 
 - `--json` が無ければ、キーごとに `key: <JSON>` の行で出す
 - `--only` は検出を走らせたうえで、採る言語を名指しで置き換える。検出された言語のうち名指し
   されなかったものを `not_selected` として `mcp_serena_excluded` に書く
-- `--serena` は Serena の起動の前半を差し替える（既定 `uvx --from serena-agent==1.7.0 serena`。
+- `--serena` は Serena の起動の前半を差し替える（既定 `uvx --from serena-agent==2.1.0 serena`。
   テストは偽のコマンドを渡す）
 - `--dry-run` は検出と差分（`diff`）の表示だけを行い、ファイルを 1 つも書かない。`dry_run: true` を載せる
 - `--runtime codex` の `check` は、公式 LSP プラグイン・本体・`typescript_major_5` を飛ばし、

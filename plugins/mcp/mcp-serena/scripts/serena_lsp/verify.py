@@ -12,7 +12,7 @@ from . import detect, table
 from . import project_yml as py
 
 VERIFY_TIMEOUT = 120
-SERENA_CMD = "uvx --from serena-agent==1.7.0 serena"
+SERENA_CMD = "uvx --from serena-agent==2.1.0 serena"
 SERENA_GITIGNORE_LINES = ["/serena_config.yml", "/logs", "/language_servers", "/cache"]
 EXCLUDED_KEY = "mcp_serena_excluded"
 

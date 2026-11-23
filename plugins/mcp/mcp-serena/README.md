@@ -53,7 +53,7 @@ Codex では `--context codex` で起動します（`.codex.mcp.json`）。
 
 ### 前提
 
-- `uv`（`uvx`）。Serena は `uvx --from serena-agent==1.7.0` で起動します
+- `uv`（`uvx`）。Serena は `uvx --from serena-agent==2.1.0` で起動します
 - Serena 側の言語サーバは Serena が `.serena/language_servers/` へ自分で入れます
 - Claude Code の LSP プラグインと本体は利用者が入れます（Skill がコマンドを示します）
 
@@ -76,7 +76,7 @@ codex plugin add mcp-serena@ai-plugins
 
 | 項目 | mcp-serena（このプラグイン） | 公式の `serena` |
 | --- | --- | --- |
-| 版 | `serena-agent==1.7.0` に固定 | 最新を取得 |
+| 版 | `serena-agent==2.1.0` に固定 | 最新を取得 |
 | プロジェクトの有効化 | `--project-from-cwd` で自動 | `activate_project` を呼ぶ |
 | memory・onboarding | 使わない（`no-memories` / `no-onboarding`） | 使う |
 | 言語の設定 | `/mcp-serena:language-servers` が検出して書く | 自動の推定 |
