@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from ndf.domains.hooks import budget, dispatch
+from ndf.domains.hooks import budget, dispatch, tables
 from ndf.domains.hooks.guards import ask, process_wait, sleep
 from ndf.domains.relay import signals
 
@@ -229,6 +229,36 @@ def test_context_limit_does_not_record_relay_when_it_did_not_judge(tmp_path):
     _usage_transcript(tmp_path, 10)
     call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
     assert "under_relay" not in records()[-1]["notes"] and records()[-1]["notes"]["context_tokens"] == 10
+
+
+@pytest.mark.parametrize(
+    ("tokens", "env", "denied"),
+    [
+        (249_999, None, False),
+        (250_000, None, False),
+        (499_999, None, False),
+        (500_000, None, True),
+        (299_999, "300000", False),
+        (300_000, "300000", True),
+    ],
+)
+def test_context_limit_stops_at_the_operating_limit(tmp_path, monkeypatch, tokens, env, denied):
+    # #3995 の 3995:4・3995:9: PreToolUse は運用上限（500,000。NDF_CONTEXT_LIMIT で替える）から止め、判断開始の値（250,000）では止めない
+    if env is not None:
+        monkeypatch.setenv("NDF_CONTEXT_LIMIT", env)
+    _usage_transcript(tmp_path, tokens)
+    assert (deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None) is denied
+
+
+def test_context_limit_reads_the_limit_from_the_limits_table(tmp_path, monkeypatch):
+    # #3995 の 3995:1: 上限の設定の 2 つの値を差し替えると、guard は差し替えた運用上限で止める（コードに値を持たない）
+    real = tables.policy_value
+    swapped = {"context.decide-from": 100_000, "context.limit": 200_000}
+    monkeypatch.setattr(tables, "policy_value", lambda name, key: swapped[name] if name in swapped else real(name, key))
+    _usage_transcript(tmp_path, 199_999)
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is None
+    _usage_transcript(tmp_path, 200_000)
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
 
 
 def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):

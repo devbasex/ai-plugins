@@ -15,7 +15,7 @@ from ndf.domains.relay import signals
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 SRC = tables.PLUGIN_ROOT / "src"
-# 中継・オーガナイザー・通知・止め方の変数（テストを流す人の値を読まない）
+# 中継・オーガナイザー・通知・止め方・文脈の運用上限の変数（テストを流す人の値を読まない）
 ENV_NAMES = (
     "NDF_RELAY_DIR",
     "NDF_RELAY_LAUNCH",
@@ -23,6 +23,7 @@ ENV_NAMES = (
     "NDF_ORGANIZER_LANE",
     "NDF_FACTORY_RUN",
     "NDF_HOOK_OFF",
+    "NDF_CONTEXT_LIMIT",
     "NDF_WORKER_KIND",
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
