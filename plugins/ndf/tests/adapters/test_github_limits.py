@@ -53,6 +53,8 @@ class _Gate:
         (403, {"x-ratelimit-remaining": "12", "x-ratelimit-reset": str(int(NOW) + 45)}, SECONDARY, Limit(FIRST_WAIT, False)),
         (429, {}, SECONDARY, Limit(FIRST_WAIT, False)),
         (403, {"retry-after": "soon"}, SECONDARY, Limit(FIRST_WAIT, False)),
+        # PR 4267 の r3-1: 0 秒の待ちは githubkit が眠る秒に読み替え、フックと失敗の写しが同じ秒を使う
+        (403, {"retry-after": "0"}, SECONDARY, Limit(github_limits.SDK_DEFAULT_SLEEP, True)),
     ],
 )
 def test_limit_of_tells_the_secondary_limit_and_its_wait(status, headers, message, expected) -> None:
@@ -251,6 +253,16 @@ def test_retry_within_counts_the_sixty_seconds_githubkit_sleeps_for_a_zero_wait(
     assert github.RetryWithin(remaining=lambda: 60.0)(failed, 0).do_retry
     # r2-1: 見送った呼び手へ返す待ちも、予算と比べた 60 秒にそろえる（0 秒ならすぐ打ち直して同じ上限に当たる）
     assert github_limits.failure_of(failed, "POST /issues", False, NOW).retry_after == github_limits.SDK_DEFAULT_SLEEP
+
+
+def test_a_zero_wait_recorded_by_the_hook_is_not_told_again() -> None:
+    # PR 4267 の r3-1: フックが記録した 0 秒の待ち（60 秒に読み替え済み）を、失敗の写しは同じ応答について知らせ直さない
+    gate = _Gate()
+    failed = _failed(403, {"retry-after": "0"}, SECONDARY, True)
+    github_limits._record(gate, failed.response.raw_response)  # type: ignore[arg-type]
+    error = github.GitHubError.of(github_limits.failure_of(failed, "POST /issues", False, NOW))
+    github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)  # type: ignore[arg-type]
+    assert gate.blocked == [github_limits.SDK_DEFAULT_SLEEP]
 
 
 def test_a_secondary_limit_told_by_githubkit_is_shared_without_the_phrase() -> None:
