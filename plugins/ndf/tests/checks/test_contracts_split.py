@@ -134,6 +134,26 @@ def test_a_file_that_is_not_one_item_is_a_finding(root, rules, rel, value):
 
 
 @pytest.mark.parametrize(
+    ("field", "paths"),
+    [
+        ({"type": "object", "required": ["keys"]}, []),
+        ({"$ref": "#/$defs/endpoint"}, []),
+        ({"type": ["object", "null"]}, []),
+        ({"anyOf": [{"$ref": "#/$defs/endpoint"}, {"type": "null"}]}, []),
+        ({"type": ["string", "null"]}, [ITEM]),
+        ({"$ref": "#/$defs/none"}, [SCHEMAS[0]]),
+        ({"$ref": "https://example.invalid/x.json"}, [SCHEMAS[0]]),
+    ],
+    ids=["object", "local-ref", "type-list", "any-of", "not-object", "unresolved-ref", "remote-ref"],
+)
+def test_a_field_that_the_schema_allows_to_be_an_object_is_not_another_item(root, rules, field, paths):
+    schema = {"$defs": {"endpoint": {"type": "object"}}, "properties": {"summary": {"type": "string"}, "endpoint": field}}
+    _text(SCHEMAS[0], schema)(root)
+    _text(ITEM, {"summary": "x", "endpoint": {"flags": []}})(root)
+    assert _paths(root, _check(root, rules)) == paths
+
+
+@pytest.mark.parametrize(
     ("break_", "path", "named"),
     [
         (_text(f"{DIR}/limits/b.JSON", {}), f"{DIR}/limits", "b.JSON"),

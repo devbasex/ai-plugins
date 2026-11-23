@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from ndf import contracts
 from ndf.checks.model import Finding, Scope, Source
 
@@ -27,6 +30,10 @@ KEY = __name__.rsplit(".", 1)[-1]
 RULE = KEY.replace("_", "-")
 # 表の名前の形（ディレクトリの名前 1 つ。コントラクトの保存先の外を指させない）
 TABLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+# 値がオブジェクトであることそのものを断りうる、スキーマのキーワード（`None` は何も認めないスキーマ `false`）
+REFUSES_OBJECT = frozenset({"type", "enum", "const", "anyOf", "oneOf", None})
+# 参照を書くスキーマのキーワード
+REF_KEYWORDS = ("$ref", "$dynamicRef")
 
 
 def _tables(text: str) -> dict[str, str]:
@@ -41,26 +48,64 @@ def _tables(text: str) -> dict[str, str]:
     return tables
 
 
-def _object_fields(src: Source | None) -> frozenset[str]:
-    """項目のスキーマ `src` の欄のうち、値がオブジェクトのものの名前。スキーマとして読めなければ `ContractError`。"""
+def _refs(node: Any) -> Iterator[str]:
+    """スキーマの中の参照の値。"""
+    values = node.values() if isinstance(node, dict) else node if isinstance(node, list) else ()
+    if isinstance(node, dict):
+        yield from (node[k] for k in REF_KEYWORDS if isinstance(node.get(k), str))
+    for value in values:
+        yield from _refs(value)
+
+
+def _defined(schema: Any, ref: str) -> bool:
+    """参照がスキーマの中の定義（`#` と JSON ポインター）を指すか。"""
+    root, *parts = ref.split("/")
+    node = schema
+    for part in parts:
+        key = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return root == "#"
+
+
+def _schema_validator(src: Source | None) -> Draft202012Validator:
+    """項目のスキーマ `src` の検証器。スキーマとして読めなければ `ContractError`。"""
     if src is None:
         raise contracts.ContractError("項目のスキーマを読めない（無い・UTF-8 でない・リポジトリの外を指す）")
     try:
-        fields = contracts.parse_json(src.text)["properties"]
-        return frozenset(name for name, field in fields.items() if field.get("type") == "object")
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        schema = contracts.parse_json(src.text)
+        Draft202012Validator.check_schema(schema)
+        _ = schema["properties"].keys()
+    except (ValueError, KeyError, TypeError, SchemaError) as exc:
         raise contracts.ContractError(f"項目のスキーマを読めない: {exc!r}") from None
+    # 検証器はスキーマの外を指す参照をネットワークへ取りに行くので、渡す前に断る
+    unknown = sorted({ref for ref in _refs(schema) if not _defined(schema, ref)})
+    if unknown:
+        raise contracts.ContractError(f"項目のスキーマの参照をこのファイルの中で解けない: {', '.join(unknown)}")
+    return Draft202012Validator(schema)
 
 
-def _holds_items(data: dict[str, Any], source_key: str, object_fields: frozenset[str]) -> bool:
+def _is_field(name: str, value: dict[str, Any], validator: Draft202012Validator) -> bool:
+    """辞書の値が、項目のスキーマがオブジェクトを認める欄か。欄のスキーマの参照・型の配列・合成は検証器が解く。
+
+    欄の中身の誤り（必須の欄が無いなど）は見ない。
+    """
+    fields = validator.schema["properties"]
+    if name not in fields:
+        return False
+    return not any(e.validator in REFUSES_OBJECT and not e.path for e in validator.descend(value, fields[name]))
+
+
+def _holds_items(data: dict[str, Any], source_key: str, validator: Draft202012Validator) -> bool:
     """1 項目でなく、項目の集まりを持つ形か。
 
-    分ける前のキー（`source_key`）を持つか、オブジェクトの欄（`object_fields`）でない名前に辞書（別の項目）を持つ。
+    分ける前のキー（`source_key`）を持つか、オブジェクトの欄（`_is_field`）でない名前に辞書（別の項目）を持つ。
     """
-    return source_key in data or any(isinstance(v, dict) and k not in object_fields for k, v in data.items())
+    return source_key in data or any(isinstance(v, dict) and not _is_field(k, v, validator) for k, v in data.items())
 
 
-def _item_error(src: Source | None, source_key: str, object_fields: frozenset[str]) -> str | None:
+def _item_error(src: Source | None, source_key: str, validator: Draft202012Validator) -> str | None:
     """項目のファイル 1 つの誤り。無ければ `None`。`src` が `None` なら、検査が集めなかった（読めない）ファイル。"""
     if src is None:
         return "項目のファイルを読めない（UTF-8 でない・リポジトリの外を指す・ファイルでない）"
@@ -70,7 +115,7 @@ def _item_error(src: Source | None, source_key: str, object_fields: frozenset[st
         return f"項目のファイルを読めない: {exc}"
     if not isinstance(data, dict):
         return f"項目がオブジェクトでない（{type(data).__name__}）"
-    return "1 ファイルが 2 つ以上の項目を持つ形になっている" if _holds_items(data, source_key, object_fields) else None
+    return "1 ファイルが 2 つ以上の項目を持つ形になっている" if _holds_items(data, source_key, validator) else None
 
 
 @dataclass(frozen=True)
@@ -97,7 +142,7 @@ class _Table:
         except contracts.ContractError as exc:
             yield self.root, f"分けた表に{exc}"
         try:
-            object_fields = _object_fields(self.sources.get(self.schema))
+            validator = _schema_validator(self.sources.get(self.schema))
         except contracts.ContractError as exc:
             yield self.schema, str(exc)
             return
@@ -105,7 +150,7 @@ class _Table:
             path = self.root / name
             if name.startswith(contracts.META_PREFIX) or path.suffix != ".json":
                 continue
-            error = _item_error(self.sources.get(path), self.source_key, object_fields)
+            error = _item_error(self.sources.get(path), self.source_key, validator)
             if error is not None:
                 yield path, error
 
