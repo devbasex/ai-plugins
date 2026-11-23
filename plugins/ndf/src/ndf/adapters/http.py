@@ -184,12 +184,14 @@ def _shutdown(sock: socket.socket | None) -> None:
 class _Fetch:
     """取得 1 回の期限。転送の前後で同じ 1 つを使う。
 
-    `deadline` は単調時計（`_now`）の絶対時刻、`timeout` は上限の秒（理由の文に使う）、`watch` はその期限の監視。
+    `deadline` は単調時計（`_now`）の絶対時刻、`timeout` は上限の秒（理由の文に使う）、`watch` はその期限の監視、
+    `max_bytes` は本文の上限のバイト数（`None` は上限なし）。
     """
 
     deadline: float
     timeout: float
     watch: _Watchdog
+    max_bytes: int | None = None
 
 
 def _limit_hook(fetch: _Fetch):
@@ -208,13 +210,17 @@ def _limit_hook(fetch: _Fetch):
 def _read(resp: httpx.Response, fetch: _Fetch) -> bytes:
     """最終の応答の本文を、期限の内で読み切る。2xx でなければ読まずに `FetchError`。
 
-    受信のたびに本文を受け取り（量で溜めない）、受け取るたびに期限を確かめる。受信を待っている間に
+    受信のたびに本文を受け取り（量で溜めない）、受け取るたびに本文の上限と期限を確かめる。受信を待っている間に
     期限が来たら `_Watchdog` が待ちを止める。止めた受信が本文の終わりと読まれても、途中までの本文を返さない。
     """
     if not resp.is_success:
         raise FetchError(f"HTTP {resp.status_code}")
     parts: list[bytes] = []
+    size = 0
     for chunk in resp.iter_bytes():
+        size += len(chunk)
+        if fetch.max_bytes is not None and size > fetch.max_bytes:
+            raise FetchError(f"本文が {fetch.max_bytes} バイトを超えた")
         parts.append(chunk)
         if _now() > fetch.deadline:
             raise _expired(fetch.timeout)
@@ -233,18 +239,36 @@ def _follow(client: httpx.Client, request: httpx.Request, fetch: _Fetch) -> byte
     raise FetchError("転送が多すぎる")
 
 
-def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None = None) -> bytes:
-    """URL の本文を取得する。転送は追い、上限の秒数は転送の前後で通しで数える。
+def _once(client: httpx.Client, request: httpx.Request, fetch: _Fetch) -> bytes:
+    """要求を 1 回だけ送り、応答の本文を返す。3xx は本文を読まずに `FetchError`。"""
+    with contextlib.closing(client.send(request, stream=True)) as resp:
+        if resp.is_redirect:
+            raise FetchError(f"HTTP {resp.status_code}（転送は追わない）")
+        return _read(resp, fetch)
+
+
+def fetch_body(
+    url: str,
+    timeout: float,
+    transport: httpx.BaseTransport | None = None,
+    *,
+    max_bytes: int | None = None,
+    follow: bool = True,
+) -> bytes:
+    """URL の本文を取得する。既定では転送を追い、上限の秒数は転送の前後で通しで数える。
 
     上限は接続・応答の頭の受信・本文の受信のすべてに効く。最終の応答が 2xx なら本文の全部を返す。
+    `max_bytes` を渡すと、受け取った本文の合計がそれを超えた時点で読むのをやめる。`follow=False` なら要求を 1 回だけ送り、
+    3xx の応答は本文を読まずに失敗にする（転送の先へ要求を足さない）。
     上限を越えた・2xx でない・転送が多すぎる・URL が不正・接続できないときは
     `FetchError`（理由の日本語 1 行）を送出する。
     """
-    fetch = _Fetch(deadline=_now() + timeout, timeout=timeout, watch=_Watchdog(timeout))
+    fetch = _Fetch(deadline=_now() + timeout, timeout=timeout, watch=_Watchdog(timeout), max_bytes=max_bytes)
     hooks = {"request": [_limit_hook(fetch)]}
     try:
         with httpx.Client(transport=transport, timeout=timeout, event_hooks=hooks, limits=_NO_KEEPALIVE) as client:
-            return _follow(client, client.build_request("GET", url), fetch)
+            send = _follow if follow else _once
+            return send(client, client.build_request("GET", url), fetch)
     except httpx.TimeoutException as e:
         raise _expired(timeout) from e
     except httpx.InvalidURL as e:
