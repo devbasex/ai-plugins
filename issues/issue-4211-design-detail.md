@@ -57,7 +57,7 @@ flowchart LR
 | `wait` | `src/ndf/progress/command.py`（`ndf progress wait`） | 変更 | 今のまま | 今の委ねのキーの `delegate_answered` が無い委ねた検証の待ちを、承認ゲートの回答待ちと同じ `status: gate`（`metrics.delegated`・`metrics.gate: "delegated"`）で返す。生死の判定（`liveness.sprint_wait`）はこれを `SPRINT_GATE` と読む（下の「委ねた待ちと生死の判定」） |
 | `_consume_delegated` | `src/ndf/progress/run.py` | 新設 | `(conn, v: View, answer: dict) -> list[EventDraft]` | 今の委ねのキーの `delegate_answered` を読み、`done` なら委ねた工程の並びをすべて `completed` にし、文脈の `verification` へ、その行のリクエストのリポート（条件ごとの合否・保留）・要求の版・読んだ版・証跡を書いた PR を写す。`failed` なら並びの先頭を `failed`（`cause: delegate_failed`・リポート）にし、残りは未着手のまま |
 | `lane_env` | `src/ndf/progress/gate/answering.py` | 変更 | 今のまま | 計画の行のスプリントの `Env` に `delegate=lambda conn, v, phase, stages: delegate.delegate(conn, v, phase, stages)` を足す |
-| `delegate` | `src/ndf/progress/lane/delegate.py` | 新設 | `(conn, v: View, phase: str, stages: list[str]) -> Optional[str]` | スプリントの行（`lane.sprint_row`）を引き、無ければ None。計画の排他（`lane.lock_plan`）の中で、同じ委ねのキーの `request_opened` があればそのキーを返し、無ければ中身（設計文書の「データ構造」）を組んで `open_request` で書く。検証は文脈の `version`（無ければ null）・`release_pr`（無ければ null）を、棚卸しはその行の棚卸しの範囲 `since_ref`（下の「棚卸しの範囲」）を中身に入れる |
+| `delegate` | `src/ndf/progress/lane/delegate.py` | 新設 | `(conn, v: View, phase: str, stages: list[str]) -> Optional[str]` | スプリントの行（`lane.sprint_row`）を引き、無ければ None。計画の排他（`lane.lock_plan`）の中で、同じ委ねのキーの `request_opened` があればそのキーを返し、無ければ中身（設計文書の「データ構造」）を組んで `open_request` で書く。検証は文脈の `version`（無ければ null）・`release_pr`（無ければ null）・検証対象の ref `target_ref`（下の「版を出さない変更」）を、棚卸しはその行の棚卸しの範囲 `since_ref`（下の「棚卸しの範囲」）を中身に入れる |
 | `delegation_key` | `src/ndf/progress/lane/delegate.py` | 新設 | `(v: View, phase: str) -> str` | `<スプリントの ID>:<フェーズ>:<試み>`。試みは、そのフェーズの最初の工程の `stage_retried` の数 |
 | `environment_of` | `src/ndf/progress/lane/delegate.py` | 新設 | `(repo_root: Path, repo: str) -> str` | `.ndf/project.json` の `branch_strategy.verify.environment` を読み、空でない文字列ならそれ、無いか `verify` が `null` なら `repo`（`<owner>/<name>`）を返す |
 
@@ -76,7 +76,7 @@ flowchart LR
 
 `documentation` の検証は、体裁レビューとリリース後テストを 1 件の `lane-verify`（`stages` に 2 つ）で委ね、1 件の回答で 2 つとも消費する。モードが持たない工程は `stages` に入らない。
 
-**版を出さない変更。** 文脈に `version` が無い（デプロイの `delivery.versioned` が偽・デプロイの工程を持たないリポジトリ・今回の変更では版を出さない）検証は止めずに、`version: null` のリクエストで委ねる。そのリクエストは版の照合（`check_version`）の対象にならず、担い手は今の環境でその行の受け入れ条件（`documentation` なら体裁レビュー）だけを確かめる。版の無いことで止めるのは、文脈の `delivery.versioned` が真なのに `version` が無いとき（デプロイの出力の欠け）だけである。
+**版を出さない変更。** 文脈に `version` が無い（デプロイの `delivery.versioned` が偽・デプロイの工程を持たないリポジトリ・今回の変更では版を出さない）検証は止めずに、`version: null` のリクエストで委ねる。そのリクエストは版の照合（`check_version`）の対象にならず、担い手は今の環境でその行の受け入れ条件（`documentation` なら体裁レビュー）だけを確かめる。確かめる ref は版のタグでなく、`delegate` がリクエストに書く `target_ref`（委ねた時点のその行の作業場所の `git rev-parse HEAD`。検証のフェーズは基のブランチへ入った後なので、今回の変更を含むコミットを指す）で、`show` がリクエストごとに返す。版のあるリクエストの `target_ref` は null で、確かめる ref は導入した版のタグ（下の「`show` が返す担い手の手順」）。版の無いことで止めるのは、文脈の `delivery.versioned` が真なのに `version` が無いとき（デプロイの出力の欠け）だけである。
 
 **委ねた待ちと生死の判定。** 委ねた検証の待ちは、承認ゲートの回答待ちと同じ形でつなぐ。
 
@@ -93,7 +93,7 @@ flowchart LR
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 検証の版が無い | 文脈の `delivery.versioned` が真なのに、デプロイの出力に `version` が無い | 文脈の `version` を読む所 | 止める | `stopped`・`precondition`（「版を出すデプロイなのに検証する版が文脈に無い」） | デプロイを直してから `next` を打ち直す。リクエストは書かれない。`versioned` が偽か `delivery` が無いときは止めず、`version: null` で委ねる |
-| `delegate` | 棚卸しの範囲を読めない | 作業場所が無い・git が失敗する | `since_ref` を読む所 | 止める | `stopped`・`transient` | そのまま打ち直せる |
+| `delegate` | 棚卸しの範囲か検証対象の ref を読めない | 作業場所が無い・git が失敗する | `since_ref`・`target_ref` を読む所 | 止める | `stopped`・`transient` | そのまま打ち直せる |
 | `environment_of` | `.ndf/project.json` が読めない・形が違う | 利用者の設定の誤り | 読み込み | 止める | `stopped`・`precondition`（ファイルと誤り） | 設定を直して `next` を打ち直す |
 | `delegate` | 計画の排他を取れない | 別の書き手が長く持つ | `lock_plan` | 呼び出し元へ返す | `stopped`・`transient` | そのまま打ち直せる（キーで冪等） |
 | `_consume_delegated` | 回答のリポートが空 | 担い手の誤り（`close` が断るので起きない） | — | 既定値で続ける | 無し | — |
@@ -102,7 +102,7 @@ flowchart LR
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `delegate`・`_start` | 計画の行の検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・行が完了 | 打ち直しで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` の行は `version: null` で委ね、版の無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真で版の無い文脈で `precondition` |
+| `delegate`・`_start` | 計画の行の検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・行が完了 | 打ち直しで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` の行は `version: null` と作業場所の `HEAD` の `target_ref` で委ね、版の無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真で版の無い文脈で `precondition` |
 | `wait`・`liveness.judge` | 回答の前の委ねた待ちで `progress wait --timeout 0` が `gate` を返し、ラッパーの無い行の判定が `WAITING_ANSWER` | 回答の後は `RESUMING` | — |
 | `_consume_delegated` | `done` で委ねた工程がすべて完了し `verification` にその行のリポート・要求の版・読んだ版が載る。`documentation` で 2 工程とも完了 | 古い委ねのキーの回答を読まない。リポートに不合格や `not_run` の条件があっても `done` なら完了し振り返りへ進む | `failed` で先頭が `failed`・`decide` が `FAILED` |
 | `environment_of` | 宣言があればその名前 | `verify: null`・キー無し・空の文字列でリポジトリの名前 | 形の違う設定で `precondition` |
@@ -327,7 +327,7 @@ flowchart LR
 | 検証 | 1. 環境の版を読む（前。読むだけで、導入し直さない）→ 2. まとめで 1 回だけ、`release-verification` の環境の用意（導入し直し・`.ndf/release.json` の検証コマンド）を流し、結果をリポートの `common` に書く（版がすべて null のまとめは導入し直さない）→ 3. リクエストごとに、その課題に固有の受け入れ条件だけを確かめる（`documentation` の行は先に `layout-review`）。確かめる ref は読んだ版（前）のタグ、証跡はそのリクエストの `release_pr`（無ければ書かず、リポートだけに残す）へ、要求の版・読んだ版・課題を添えて書く → 4. 環境の版を読む（後。読むだけ）→ 5. `ndf lanes batch close … --observed-version <リポジトリ>=<前>,<後> --report <ファイル>` |
 | 棚卸し | 各リクエストの範囲の和集合（上の「棚卸しの範囲」: 最も古い `since_ref` と、各リクエストの `issues` の `--add`）で `backlog-refinement` の差分の棚卸しを 1 回流す → `ndf lanes batch close` |
 
-`show` はリクエストごとに、レーン・行・課題・工程・要求の版・`release_pr`・`since_ref` を返す。
+`show` はリクエストごとに、レーン・行・課題・工程・要求の版・確かめる対象（版があれば「導入した版のタグ」、版が null なら `target_ref` のコミット）・`release_pr`・`since_ref` を返す。
 
 ### 単体テストの観点
 

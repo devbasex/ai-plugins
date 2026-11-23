@@ -95,6 +95,7 @@ flowchart LR
 | `stages` | 文字列の配列 | 要る | 要る | 委ねた工程の並び（`documentation` の検証は `体裁レビュー`・`リリース後テスト` の 2 つ） |
 | `delegation` | 文字列 | 要る | 要る | 委ねのキー `<スプリント>:<フェーズ>:<試み>`。試みは同じフェーズを `ndf progress retry` で戻した回数 |
 | `version` | 文字列（semver）か null | 要る | 無い | 検証する版（デプロイの出力の `version`）。版を出さない変更（`delivery.versioned` が偽・デプロイの無いリポジトリ）は null で、版の照合をしない |
+| `target_ref` | 文字列か null | 要る | 無い | 版が null のリクエストで確かめる ref（委ねた時点の行の作業場所の `HEAD` のコミット。今回の変更を含む）。版があるときは null で、担い手は導入した版のタグで確かめる |
 | `release_pr` | 文字列か null | 要る | 無い | 要求の版のリリース記録を持つ PR（文脈の `release_pr`）。担い手がそのリクエストの証跡を書く先 |
 | `environment` | 文字列 | 要る | 無い | 検証の環境の名前 |
 | `since_ref` | 文字列か null | 無い | 要る | その行の差分の棚卸しの範囲の始まり（`ndf issues candidates --since-ref` に渡す、前のリリースのタグ）。まとめは各リクエストの範囲の和集合を処理する |
@@ -129,7 +130,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `ndf progress next`・`ndf progress wait`（委ねの境） | レーンの conductor・生死の判定 | 今のとおり | 検証: 回答の前は承認ゲートの回答待ちと同じ `status: gate`（`metrics.gate: "delegated"`・`metrics.delegated`）。conductor は応答を終え、生死の判定は回答待ち（止まりでない）と読む。棚卸し: 委ねた工程を終えて次の手を返す |
 | `ndf lanes batch assign <計画> <リクエスト>... [--lane <レーン>] --reason <理由>` | オーガナイザー | 開いた同じ種類の委ねのリクエスト。検証は同じ環境 | `ok`・`metrics.batch`（id・担い手のレーンと行・取りかかりのキー）。断るときは `stopped`・`precondition`（取りかかり中のまとめの計画と id・経過時間、または断った理由） |
-| `ndf lanes batch show <計画> <id>` | 担い手の conductor・オーガナイザー | — | まとめ（フェーズ・環境・リクエストごとのレーン・行・課題・工程・版）と、担い手が打つ `close` の雛形 |
+| `ndf lanes batch show <計画> <id>` | 担い手の conductor・オーガナイザー | — | まとめ（フェーズ・環境・リクエストごとのレーン・行・課題・工程・版・確かめる対象（版のタグか `target_ref`））と、担い手が打つ `close` の雛形 |
 | `ndf lanes batch close <計画> <id> --result done\|failed --report <ファイル> [--observed-version <リポジトリ>=<前>,<後>] [--cause <原因>] --reason <理由>` | 担い手の行の conductor・オーガナイザー | 検証の `done` は `--observed-version` が要る | `ok`・`metrics.closed`（閉じたリクエスト・回答した行）。閉じた後の打ち直しは前の結果を返す |
 | `ndf lanes batch abort <計画> (<id> \| --claim <種類>:<キー>) [--self] --reason <理由>` | 持ち主の計画のオーガナイザー（`<id>`。計画の状態を問わない）・別の計画のオーガナイザー（`<計画>` は自分の計画、`--claim` で取りかかりを名指す。持ち主の計画が `running` でなく担い手の行が実行中でないときだけ）・担い手の conductor（`--self`。計画の中止の入力からだけ） | — | `ok`。担い手の行は中止し、リクエストは開いたまま。担い手の行が実行中なら、ラッパーを止めて止まったことを確かめてから書き、確かめられなければ何も書かずに `transient` |
 | `ndf lanes request close <計画> <リクエスト>`（変更） | オーガナイザー | 委ねのリクエスト | 開いたまとめに入っていれば断る。まとめに入っていない `lane-verify` は、要求元へ `failed`（`delegate_withdrawn`）の回答を同じトランザクションで書いてから閉じる |
