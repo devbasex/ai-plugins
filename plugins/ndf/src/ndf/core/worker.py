@@ -824,8 +824,8 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
     前の報告が消えるのは完了マーカーと結果ファイルを退けた後だけなので、「前の完了マーカーが残るのに報告が空」の組は
     起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で無かった保存先にどれかが
     あれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
-    報告の一時ファイルは退ける前に作り、アクセス権・ACL の設定まで済ませる（`staged_write`）。置き換えを拒む条件
-    （所有者を保てない・ACL を写せないなど）では何も退けずに止まり、報告の公開が落ちたとき（sticky bit の所有者の
+    報告の一時ファイルは退ける前に作り、アクセス権（モードのビットとグループ）の設定まで済ませる（`staged_write`）。
+    置き換えを拒む条件（所有者を保てない・前の報告が拡張 ACL を持つなど）では何も退けずに止まり、報告の公開が落ちたとき（sticky bit の所有者の
     制約など）は退けた完了マーカーと結果ファイルを元へ戻して止まる。
     """
     worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
