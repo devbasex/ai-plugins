@@ -195,13 +195,14 @@ def _prompt(text: str) -> str:
 def _read(reply: claude.ClaudeReply) -> dict:
     """1 回の回答を判定の返りにする。回答の揺れ・失敗の種類の対応付けはここ 1 つが持つ。"""
     if reply.failure is not None:
-        return {"failure": str(reply.failure), "calls": 1, "error": reply.error}
-    if not reply.ok:
-        return {"failure": "auth" if _auth(reply.raw) else "exit", "calls": 1, "error": reply.error}
-    word = "".join(reply.raw.split())
-    if word not in ("wait", "report"):
-        return {"failure": "shape", "calls": 1, "error": reply.error}
-    return {"kind": word, "calls": 1}
+        failure = str(reply.failure)
+    elif not reply.ok:
+        failure = "auth" if _auth(reply.raw) else "exit"
+    elif (word := "".join(reply.raw.split())) in reply_judge.KINDS:
+        return {"kind": word, "calls": 1}
+    else:
+        failure = "shape"
+    return {"failure": failure, "calls": 1, "error": reply.error}
 
 
 def _auth(raw: str) -> bool:
