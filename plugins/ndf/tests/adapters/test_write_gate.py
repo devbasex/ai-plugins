@@ -913,13 +913,15 @@ COMMENT = graphql("mutation { addComment(input: {}) { x } }")
 def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, monkeypatch):
     # PR 4273 の r1-3: 予約の時刻を待つ間に取り消されたら、送らなかった予約を一覧と共通の `next` から除く
     seed(path, next=NOW + 3)
-    monkeypatch.setattr(write_gate, "_FINISHER", _Executor())
-    default = _Executor()
+    default, finisher = _Executor(), _Executor()
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
     real_sleep = asyncio.sleep
     sleeping = asyncio.Event()
 
     async def sleep(seconds: float) -> None:
         sleeping.set()
+        # PR 4273 の r3-2: 眠る間に既定のスレッドプールが別の書き込みの送信のロックの待ちで埋まる
+        default.frozen = True
         await asyncio.Event().wait()  # 取り消されるまで返らない
 
     monkeypatch.setattr(asyncio, "sleep", sleep)
@@ -946,8 +948,9 @@ def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, 
     assert asyncio.run(main())
     assert (record(path)["next"], record(path)["content"]) == (pytest.approx(NOW + 3), [])
     assert _send_lock_is_free(path)
-    # PR 4273 の r2-2: 取り消しの後始末（手順の close）はイベントループの上でなく実行器で進む
-    assert [fn.func.__name__ for fn in default.ran][-1] == "close"
+    # PR 4273 の r2-2・r3-2: 取り消しの後始末（手順の close）はイベントループの上でも既定のスレッドプールでもなく専用の実行器で進む
+    assert [fn.func.__name__ for fn in finisher.ran] == ["close"]
+    assert default.pending == []
 
 
 def test_a_caller_cancelled_just_as_the_send_is_allowed_withdraws_the_reservation(gate, path, monkeypatch):

@@ -17,8 +17,8 @@
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
 - 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを取った後の
   手順（最短の送信時刻を待った後の読み直しと、放す `_finish`）は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が
-  既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする。取り消しの後始末（`withdraw` と手順の `close`）も
-  ループの外で進め、送信のロックを持つときは `_FINISHER` を使う
+  既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする。取り消しの後始末（`withdraw` と手順の `close`・`throw`）も
+  ループの外の `_FINISHER` で進める（送信のロックを持たないときも。既定のスレッドプールの空きを待たない）
 - passwd に載らない UID は、環境に依らない UID ごとの保存先（`/tmp/ndf-github-<UID>`。オーナーと 0700 を確かめる）を使う
 - 待ちの予算を持つ呼び手（`within(remaining)`）は、どのロックの待ちも眠りも `remaining()` に収め、収まらなければ送らずに
   `Busy` を出す。予約を書いた後なら `withdraw` で取り消す。予算で縛ったロックの時間切れは I5 へ落とさない（決定 10）
@@ -72,7 +72,7 @@ CLOCK_SLACK = 1.0
 GATE_FILE = "write-gate.json"
 # passwd に載らない UID の保存先の親。環境変数（TMPDIR）を読まない（決定 1）
 SHARED_TMP = Path("/tmp")
-# 非同期の経路で送信のロックを持つ手順を進める専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
+# 非同期の経路で送信のロックを持つ手順と取り消しの後始末を進める専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
 _FINISHER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndf-write-gate-finish")
 SEND_LOCK_FILE = "write-gate.send.lock"
 PR_LOCK_DIR = "pr"
@@ -325,13 +325,15 @@ def _consume(done: asyncio.Future) -> None:
         done.exception()
 
 
-def _off_loop(loop: asyncio.AbstractEventLoop, holding: bool, fn: Callable[..., Any], *args: Any) -> asyncio.Future:
-    """後始末（記録の読み書きを含む）をイベントループの外で進める。送信のロックを持つなら `_FINISHER` で進める。
+def _off_loop(loop: asyncio.AbstractEventLoop, fn: Callable[..., Any], *args: Any) -> asyncio.Future:
+    """後始末（記録の読み書きを含む）をイベントループの外の `_FINISHER` で進める。
 
+    後始末は送信のロックを待たない（記録のロックも待たずに取る）。送信のロックを持たないときも既定のスレッドプールを
+    使わないのは、そこが別の書き込みの送信のロックの待ちで埋まると、取り消しがその待ちの上限まで終わらないためである（PR 4273 の r3-2）。
     ループが閉じかけて実行器へ渡せなければ、ほかに進める要求は無いのでその場で進める。
     """
     try:
-        future = loop.run_in_executor(_FINISHER if holding else None, fn, *args)
+        future = loop.run_in_executor(_FINISHER, fn, *args)
     except RuntimeError:  # ループの終わり: 待たせる相手がいないのでその場で後始末する
         future = loop.create_future()
         try:
@@ -355,15 +357,15 @@ def _abandon(gate: WriteGate, steps: Generator[Pause, None, Turn], loop: asyncio
     """取り消された非同期の手順の後始末。スレッドが終えてから、送らなかった予約を取り消し、持っている送信のロックを放す。
 
     送ってよくなった直後に取り消されたときも、予約は送られていないので取り消す。途中の手順は `close` で閉じ、`_steps` が取り消す。
-    どちらも記録を読み書きするので、イベントループの外（送信のロックを持てば `_FINISHER`）で進める。
+    どちらも記録を読み書きするので、イベントループの外の `_FINISHER` で進める（`_off_loop`）。
     """
     if step.cancelled() or step.exception() is not None:
         return
     finished, value = step.result()
     if not finished:
-        _off_loop(loop, value.holding, steps.close)
+        _off_loop(loop, steps.close)
         return
-    _off_loop(loop, value.send is not None, _give_back, gate, value)
+    _off_loop(loop, _give_back, gate, value)
 
 
 def _restore(record: Record, old: Reservation) -> None:
@@ -517,16 +519,14 @@ class WriteGate(BaseThrottler):
             except Busy as busy:
                 # 手順は送信のロックを放し予約を取り消してから `busy` を出し直す（`_steps`）。呼び出し元が取り消されても、
                 # 投入済みの後始末は取り消さない（shield）。取り消された後の結果（出し直しの Busy）はここで受け取る
-                throwing = loop.run_in_executor(_FINISHER if holding else None, steps.throw, busy)
-                throwing.add_done_callback(lambda done: done.cancelled() or done.exception())
-                await asyncio.shield(throwing)
+                await asyncio.shield(_off_loop(loop, steps.throw, busy))
                 raise
             try:
                 await asyncio.sleep(seconds)
             except BaseException:
                 # `_steps` が送信のロックを放し、送らなかった予約を取り消す。記録の読み書きをループの上で進めないため、
-                # 閉じる処理はループの外（送信のロックを持てば `_FINISHER`）で進め、投入済みの処理は取り消さない（shield）
-                await asyncio.shield(_off_loop(loop, holding, steps.close))
+                # 閉じる処理はループの外の `_FINISHER` で進め（既定のスレッドプールの空きを待たない）、投入済みの処理は取り消さない（shield）
+                await asyncio.shield(_off_loop(loop, steps.close))
                 raise
 
     @contextmanager
