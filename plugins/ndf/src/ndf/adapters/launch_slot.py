@@ -173,15 +173,19 @@ def gate(
 
 
 def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]], ensure: bool = True) -> None:
+    why = _why(agent, env, ensure)
+    if why is not None:
+        raise NotLaunched(why)
+
+
+def _why(agent: str, env: Optional[Mapping[str, str]], ensure: bool) -> Optional[str]:
+    """起動を断る理由を返す。断らないなら None。"""
     verdict = training_cache.verdict(agent, env=env)
     if verdict.stale and not ensure:
-        why = verdict.why
-    elif verdict.stale:
+        return verdict.why
+    if verdict.stale:
         # バックアップが使えず確かめ直せば直りうるなら、その場で確かめて記録する（#3907）。httpx を読むのはこのときだけ
         from ndf.adapters import training
 
-        why = training.ensure(agent, env=env)
-    else:
-        why = training_cache.refusal(agent, env=env)
-    if why is not None:
-        raise NotLaunched(why)
+        return training.ensure(agent, env=env)
+    return training_cache.refusal(agent, env=env)
