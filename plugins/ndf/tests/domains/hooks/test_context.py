@@ -36,7 +36,9 @@ def _transcript(tmp_path, tokens: int = 1000) -> None:
 
 
 def test_bash_pre_tool_use_parses_payload_shell_and_transcript_once(tmp_path, calls):
-    # sleep・script-chain の 2 つが構文木を、context-limit が会話の記録を読む
+    # sleep・script-chain の 2 つが構文木を、context-limit が会話の記録を読む（context-limit は .ndf のあるリポジトリだけを見る。#3995）
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".ndf").mkdir()
     _transcript(tmp_path)
     call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 1 && ndf plan status"))
     assert calls["parse_payload"] == 1 and calls["parse_shell"] == 1 and calls["read_tail"] == 1
