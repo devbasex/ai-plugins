@@ -8,7 +8,7 @@ from typing import Any, Callable, NamedTuple
 import pytest
 
 from ndf import contracts
-from ndf.contracts import facts
+from ndf.contracts import causes, facts, limits
 from ndf.domains.hooks import tables
 
 REL = "things"
@@ -95,6 +95,46 @@ def test_keys_differing_only_in_case_stop_and_name_both(reader, tmp_path, monkey
     # パスの並びは OS で違う（Windows は大小文字を区別せずに並べる）ため、挙がったキーは順不同で比べる
     named = str(caught.value).rsplit(": ", 1)[1]
     assert sorted(named.split(", ")) == ["A", "a"]
+
+
+@pytest.mark.parametrize(
+    ("read", "files"),
+    [
+        (lambda: limits.value("cause.infra-wait", "attempts"), ["limits/cause.infra-wait.json"]),
+        (lambda: causes.exit_code("unknown"), ["causes/unknown.json"]),
+        (lambda: causes.policy_of("ci_pending"), ["causes/ci_pending.json", "limits/cause.ci-pending.json"]),
+        (lambda: causes.errors({"kind": "no_such", "detail": "x"}), []),
+    ],
+    ids=["limits.value", "causes.exit_code", "causes.policy_of", "causes.errors"],
+)
+def test_reading_one_item_reads_only_its_files(monkeypatch, read, files):
+    # 1 項目の参照で表の全件を読むと、CLI の起動ごとの読みが項目の数だけ増える（PR 4335 の r1-4）
+    contracts.use_dir(None)
+    seen = []
+    original = contracts.load_json
+    monkeypatch.setattr(contracts, "load_json", lambda rel: seen.append(rel) or original(rel))
+    read()
+    assert sorted(r for r in seen if r.startswith(("limits/", "causes/"))) == files
+
+
+@pytest.mark.parametrize(
+    "reads",
+    [
+        (limits.table, causes.table),
+        (causes.table, limits.table),
+        (lambda: limits.policy("cause.ci-pending"), lambda: causes.row("ci_pending"), limits.table, causes.table),
+    ],
+    ids=["limits-first", "causes-first", "items-first"],
+)
+def test_reading_whole_tables_reads_each_file_once(monkeypatch, reads):
+    # 全件と 1 項目をどの順で読んでも、項目のファイルを読み直さない（PR 4335 の r2-1・r3-1）
+    contracts.use_dir(None)
+    seen = []
+    original = contracts.load_json
+    monkeypatch.setattr(contracts, "load_json", lambda rel: seen.append(rel) or original(rel))
+    for read in reads:
+        read()
+    assert contracts.duplicates(r for r in seen if r.startswith(("limits/", "causes/"))) == []
 
 
 def test_split_tables_lists_limits_and_causes_with_where_the_key_comes_from():
