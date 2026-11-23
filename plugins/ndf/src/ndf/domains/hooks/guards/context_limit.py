@@ -364,14 +364,14 @@ def _tool_use_id(ctx) -> Optional[str]:
 
 
 def _cwd_digest(cwd: str) -> str:
-    """覚えた値の `cwd` の照合に使うダイジェスト（作業ディレクトリのパスを状態ファイルへ平文で残さない）。"""
+    """覚えた値の `cwd` を照らすのに使うダイジェスト（作業ディレクトリのパスを状態ファイルへ平文で残さない）。"""
     return hashlib.sha256(cwd.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def _remembered(ctx, svc) -> Optional[int]:
     """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
 
-    `cwd` はダイジェストで照合する。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    `cwd` はダイジェストで照らす。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
     Tool の実行で判定の対象から外れることがある（サブディレクトリでの `git init` など）ので、対象の判定は知らせる直前に確かめ直す。
     """
     item = _tool_use_id(ctx)
