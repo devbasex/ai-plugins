@@ -19,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, limits_readers, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, contained, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -30,25 +30,28 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 
 
 def _walk(plugin_root: Path) -> list[Path]:
-    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
+    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。
+
+    本文は読まない。ファイルかディレクトリのシンボリックリンク（参照切れを含む）があれば `CheckError`
+    （どの規則もリンク先の本文を読まないよう、読む前に止める）。
+    """
     found = []
     for top, dirs, files in os.walk(plugin_root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        paths = [Path(top, name) for name in [*dirs, *files] if name not in SKIP_DIRS]
+        linked = next((path for path in paths if path.is_symlink()), None)
+        if linked is not None:
+            raise CheckError(f"シンボリックリンクを通るパスは読み書きしない: {linked}")
         found += [Path(top, name) for name in files]
     return found
 
 
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
-    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。
-
-    本文は読まない。シンボリックリンクがあれば `CheckError`（どの規則もリンク先の本文を読まないよう、読む前に止める）。
-    """
+    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。"""
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
         if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
-            if path.is_symlink():
-                contained(plugin_root, rel)
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
@@ -142,6 +145,8 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     written: list[str] | None = [] if args.write_spec else None
     try:
+        # 自分の定義と規則のデータも、リンクを断ってから読む
+        _walk(identity.ROOT)
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)

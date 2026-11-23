@@ -162,3 +162,27 @@ def test_select_does_not_read_through_a_symlink(plugin, rules, monkeypatch, tmp_
     with pytest.raises(model.CheckError, match="シンボリックリンク"):
         run.select(model.Scope(plugin.repo, plugin.root, "p"), rules, None, write_spec)
     assert read == []
+
+
+@pytest.mark.parametrize("rel", [".claude-plugin/plugin.json", "src/ndf/checks/rules.json", "manifests", "docs/gone.md", "bin/gone"])
+@pytest.mark.parametrize("broken", [False, True])
+def test_main_refuses_a_link_before_reading_anything(plugin, monkeypatch, tmp_path, rel, broken):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    outside = tmp_path / "outside"
+    if not broken:
+        outside.mkdir()
+    link = plugin.root / rel
+    link.unlink(missing_ok=True)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside)
+    monkeypatch.setattr(identity, "load", lambda: pytest.fail("plugin.json を読んだ"))
+    monkeypatch.setattr(run, "load_rules", lambda: pytest.fail("規則のデータを読んだ"))
+    stopped = []
+    monkeypatch.setattr(run, "emit", lambda summary, items, metrics, kind: stopped.append((summary, kind)) or 2)
+    assert run.main([]) == 2
+    assert stopped == [(f"シンボリックリンクを通るパスは読み書きしない: {link}", "config_broken")]
+
+
+def test_collect_allows_a_linked_environment(plugin, tmp_path):
+    (plugin.root / ".venv").symlink_to(tmp_path / "shared")
+    assert run.collect(plugin.root, plugin.repo)
