@@ -2600,19 +2600,13 @@
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。ラッパーが使用率の API（GET /api/oauth/usage）で、動いていないアカウントを含むすべての登録済みアカウントから取る。API が取れないときと応答の形が変わったときは、Claude Code が status line へ渡す rate_limits の値で代える。リセットの時刻を過ぎていない窓ごとに判断に使う（一覧はその大きいほうを出す）",
-      "source": "docs/specifications/ndf-relay-account-switching.md"
-    },
-    {
-      "term": "使用率のキャッシュ",
-      "context": "ndf-relay",
-      "meaning": "登録済みアカウントごとの使用率・リセットの時刻・記録の時刻を持つファイル。書き手は 2 つで、ラッパーの使用率の API での取得が登録簿の側の取得の記録（<アカウントの登録簿>/.usage-fetch/<名前>/<登録の世代>.json の windows）へ、NDF の status line が API の代わりとして状態の保存先の relay/accounts/usage/<名前>/<登録の世代>.json へ書く。ラッパーと一覧のコマンドは、窓ごとに 2 つを合わせて読む",
+      "meaning": "登録済みアカウントの 5 時間と 7 日の利用上限に対する使用の割合（%）。ラッパーが使用率の API（GET /api/oauth/usage）で、動いていないアカウントを含むすべての登録済みアカウントから取り、最後に成功した取得の値だけで判断する。リセットの時刻を過ぎていない窓ごとに判断に使う（一覧はその大きいほうを出す）",
       "source": "docs/specifications/ndf-relay-account-switching.md"
     },
     {
       "term": "使用率の記録",
       "context": "ndf-relay",
-      "meaning": "使用率のキャッシュへ使用率を書くこと。ラッパーは使用率の API で取った値をすべての登録済みアカウントについて書き、NDF の status line は受け取った入力の rate_limits から今の登録済みアカウントの値を書く（API が取れないときと形が変わったときの代わり）",
+      "meaning": "使用率の API の最後に成功した取得の値を持つファイル（<アカウントの登録簿>/.usage-fetch/<名前>/<登録の世代>.json）。成功した取得が窓を丸ごと置き換え、ラッパーと一覧のコマンドはこれだけを読む",
       "source": "docs/specifications/ndf-relay-account-switching.md"
     },
     {

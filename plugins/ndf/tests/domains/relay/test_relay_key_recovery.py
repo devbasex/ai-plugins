@@ -250,7 +250,7 @@ def test_r1_4_the_fallbacks_follow_the_accounts_after_a_limit(tmp_path):
     g._pinned_or = lambda pick, reason, current, now: pick
     ok = launch_inputs.LaunchCache({}, None)
     inputs = launch_inputs.Inputs(fallback={reg.METERED: ok, "key:k1": ok, "key:k2": ok}, tried=frozenset({"key:k2"}))
-    sec = SimpleNamespace(account="work1", limit_lost=False, auth_at=None)
+    sec = SimpleNamespace(account="work1", limit_at=None, target=None, auth_at=None)
     pick = account_decide.Pick("switch", reg.METERED, "")
     assert g._names(sec, pick, "limit", inputs, 0.0) == [reg.METERED, "key:k1"]
     assert g._names(sec, pick, "guard", inputs, 0.0) == [reg.METERED]
@@ -418,7 +418,7 @@ def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_pat
     ok = launch_inputs.LaunchCache({}, None)
     inputs = launch_inputs.Inputs(fallback={"key:k1": ok, "key:k2": ok})
     pick = account_decide.Pick("switch", "key:k2", "")
-    sec = SimpleNamespace(account="key:k1", limit_lost=False, auth_at=None, rekeyed=True)
+    sec = SimpleNamespace(account="key:k1", limit_at=None, target=None, auth_at=None, rekeyed=True)
     assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2", "key:k1"]
     sec.rekeyed = False
     assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2"]

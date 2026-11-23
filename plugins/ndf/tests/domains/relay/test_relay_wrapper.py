@@ -62,11 +62,11 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
 def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):
-        register(tmp_path, "team", "main")
+        store = register(tmp_path, "team", "main")
         put_usages(
-            state,
+            store,
             [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
-            measured_at=time.time() - 3600,
+            fetched_at=time.time() - 3600,
         )
         accounts.use(state, "team")
 
@@ -306,35 +306,36 @@ def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
     assert ended.cause == "" and rows_of(w, "stop") == []
 
 
-def _toggling(rows, monkeypatch):
-    """`rows` の名前だけを登録し、上限の観測を書けない（錠を取れない）形にする。
+def _toggling(tmp_path, rows, children):
+    """`rows` の名前だけを登録し、取得の記録へ `rows` を書く準備と、起動のたびに記録を書き直す子（取得が届いた）。
 
-    そのセグメントでは今のアカウントだけを上限として扱い、次のセグメントでは戻れる。替え先の候補は `rows` の中だけである。
+    上限の行を見たアカウントは、その後の取得が成功するまで上限として扱われる。起動のたびに取得が届くので、次の替えでは
+    記録だけで決まり、上限の行を見たアカウントへも戻れる。替え先の候補は `rows` の中だけである。
     """
-
-    def unwritable(*_a):
-        raise TimeoutError("記録の錠を取れない")
-
-    monkeypatch.setattr(accounts, "see_limit", unwritable)
+    store = register(tmp_path, *(u.name for u in rows))
 
     def prepare(d, state):
-        register(state.parent, *(u.name for u in rows))
-        put_usages(state, rows)
+        put_usages(store, rows)
         accounts.use(state, "team")
 
-    return prepare
+    def measured(child):
+        child.started = lambda *_: put_usages(store, rows)
+        return child
+
+    return prepare, [measured(c) for c in children]
 
 
-def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path, monkeypatch):
-    # 決定 13（替えの扱い）: 上限の観測が書けず team→main→team→main と既に起動した起動先へ戻る短い替えは数え、3 つ目の戻りで止まる
-    prepare = _toggling([Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], monkeypatch)
+def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path):
+    # 決定 13（替えの扱い）: team→main→team→main と既に起動した起動先へ戻る短い替えは数え、3 つ目の戻りで止まる
+    rows = [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)]
     children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([LIMIT_LINE, b"", b""], 1), FakeChild([], 0)]
+    prepare, children = _toggling(tmp_path, rows, children)
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "team", "main"]
     assert (ended.cause, ended.code) == ("spin", 1)
 
 
-def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path, monkeypatch):
+def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
     # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
     # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
     rows = [
@@ -342,8 +343,7 @@ def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path, mon
         Usage("main", 5.0, 5.0, None, None, False),
         Usage("gmail", 75.0, 5.0, 75.0, None, False),
     ]
-    prepare = _toggling(rows, monkeypatch)
-    children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)]
+    prepare, children = _toggling(tmp_path, rows, [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)])
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "gmail", "main"]
     assert ended.cause == "" and rows_of(w, "stop") == []
@@ -375,17 +375,16 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
 
 
 def test_d8_the_account_that_showed_the_limit_line_is_not_resumed_on_old_usage(tmp_path):
-    # 決定 8・I11: 上限の行を見た team は上限の観測で除かれ、古い 50% の記録でも同じアカウントで起動し直さない
+    # 決定 8・I11: 上限の行を見た後の取得が届かない間、team は上限として扱われ、古い 50% の記録でも同じアカウントで起動し直さない
     def prepare(d, state):
-        register(tmp_path, "team", "main")
-        put_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
+        store = register(tmp_path, "team", "main")
+        put_usages(store, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
 
     ended, spawn, w = run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
     (first, _), (second, env) = spawn.calls
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
     assert env["NDF_CLAUDE_ACCOUNT"] == "main" and ended.cause == ""
-    assert list(json.loads(accounts.limits_path(tmp_path / "state").read_text(encoding="utf-8"))) == ["team"]
 
 
 def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):
@@ -537,11 +536,11 @@ def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
 
 def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
     def prepare(d, state):
-        register(tmp_path, "team", "main")
+        store = register(tmp_path, "team", "main")
         put_usages(
-            state,
+            store,
             [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
-            measured_at=time.time() - 3600,
+            fetched_at=time.time() - 3600,
         )
         accounts.use(state, "team")
 
@@ -878,9 +877,9 @@ def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
 
 
 def _limit_usages(d, state):
-    register(state.parent, "team", "main")
+    store = register(state.parent, "team", "main")
     put_usages(
-        state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], measured_at=time.time() - 3600
+        store, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], fetched_at=time.time() - 3600
     )
     accounts.use(state, "team")
 

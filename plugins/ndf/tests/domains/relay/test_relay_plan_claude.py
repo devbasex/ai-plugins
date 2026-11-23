@@ -13,7 +13,6 @@ import json
 import os
 import shlex
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +21,7 @@ import pytest
 from ndf import identity
 from ndf.adapters import claude, cli_floor, launch_slot
 from ndf.contracts import facts
-from ndf.domains.relay import account_choice, account_dir, accounts, plan_claude, session_env
+from ndf.domains.relay import account_choice, plan_claude, session_env
 from ndf.testing import slots
 from ndf.domains.relay import account_registry as reg
 from relay_children import register
@@ -126,7 +125,7 @@ def _account_parent(fake: Fake, name: str = "work1", generation: str = "g1") -> 
     """ラッパーが登録済みアカウント `name` の子に渡す環境（`ndf plan` はこれを継ぐ）。"""
     parent = {"CLAUDE_CONFIG_DIR": str(fake.tmp / "claude")}
     child = session_env.child_env(parent, _state(), name, decided=True)
-    got = session_env.account_env(child, fake.store / name, accounts.usage_path(_state(), name, generation))
+    got = session_env.account_env(child, fake.store / name, generation)
     keep = (*facts.ids("env", child="account-set"), "NDF_CLAUDE_ACCOUNT")
     return {k: v for k, v in got.items() if k in keep}
 
@@ -196,11 +195,16 @@ def test_3604_11_minimal_launch_still_refuses_auth_in_the_env(tmp_path, monkeypa
     assert fake.calls() == []
 
 
-def test_3604_11_a_parent_without_the_usage_file_does_not_launch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("generation", [None, "../g1", "-g1"])
+def test_3604_11_a_parent_without_the_generation_does_not_launch(tmp_path, monkeypatch, generation):
+    # 世代が無い・世代の形でない親からは起動しない（パスの要素に使う値なので形を確かめる）
     fake = Fake(tmp_path, monkeypatch)
     register(tmp_path, "work1")
     fake.setenv(_account_parent(fake))
-    monkeypatch.delenv("NDF_ACCOUNT_USAGE_FILE")
+    if generation is None:
+        monkeypatch.delenv("NDF_ACCOUNT_GENERATION")
+    else:
+        monkeypatch.setenv("NDF_ACCOUNT_GENERATION", generation)
 
     got = fake.call(*FULL)
 
@@ -274,7 +278,6 @@ def test_d9_a_limited_account_is_retried_once_on_another_account(tmp_path, monke
     assert second["config"] == str(fake.store / "work2")
     assert first["leases"] and [row["state"] for row in second["leases"]] == ["running"]
     assert fake.leases("work1") == [] and fake.leases("work2") == []
-    assert "work1" in json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))
     assert "work2 で打ち直す" in capsys.readouterr().err
 
 
@@ -566,40 +569,6 @@ def test_a_relative_config_dir_is_resolved_from_the_child_cwd(tmp_path, monkeypa
     assert fake.leases("work1") == []
     trained = {os.path.normpath(str(conf)) for kind, _, conf in preface if kind == "training"}
     assert trained == {str(fake.store / "work1")}  # 学習の設定は子の作業ディレクトリから解いた設定ディレクトリで確かめる
-
-
-def test_the_retry_writes_the_limit_on_the_generation_the_first_launch_checked(tmp_path, monkeypatch):
-    fake = Fake(tmp_path, monkeypatch)
-    register(tmp_path, "work1", "work2")
-    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
-    real, done = account_dir.release, []
-
-    def release(store, name, lease):
-        real(store, name, lease)
-        if name == "work1" and not done:  # 最初の届けを消した後、打ち直しの前に同じ名前を登録し直す
-            done.append(True)
-            register(tmp_path, "work1", generation="g2")
-
-    monkeypatch.setattr(account_dir, "release", release)
-
-    fake.call(*FULL)
-
-    seen = json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))["work1"]
-    assert done and list(seen) == ["g1"]
-
-
-def test_the_retry_uses_the_estimate_even_when_the_weekly_window_is_full(tmp_path, monkeypatch):
-    fake = Fake(tmp_path, monkeypatch)
-    register(tmp_path, "work1", "work2")
-    fake.setenv({**_account_parent(fake), "FAKE_LIMITED": "work1"})
-    now = time.time()
-    five, week = now + 3600, now + 6 * 86400
-    accounts.write_usage(accounts.usage_path(_state(), "work1", "g1"), {"five_hour": (40.0, five), "seven_day": (100.0, week)}, now)
-
-    fake.call(*FULL)
-
-    entry = json.loads(accounts.limits_path(_state()).read_text(encoding="utf-8"))["work1"]["g1"]
-    assert (entry["until"], entry["window"], entry["window_resets_at"]) == (five, None, None)
 
 
 def _helper_while_waiting(fake: Fake, monkeypatch, on: int, data: Optional[dict] = None) -> None:

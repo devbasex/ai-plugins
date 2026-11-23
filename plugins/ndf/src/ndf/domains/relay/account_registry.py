@@ -33,7 +33,7 @@ from ndf.contracts import facts, limits
 from ndf.domains.relay import signals
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
-# 登録の世代の形（使用率のキャッシュのファイル名と記録のキーになる。`.`・`/` を含まない 1 つのパスの要素）。
+# 登録の世代の形（使用率の記録のファイル名と記録のキーになる。`.`・`/` を含まない 1 つのパスの要素）。
 # 登録は `secrets.token_hex(16)` を書く（決定の表の「登録の世代」）
 GEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない

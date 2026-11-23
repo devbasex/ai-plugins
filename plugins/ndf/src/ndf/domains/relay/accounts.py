@@ -5,12 +5,12 @@
 どちらも `chosen` で選ぶ（`session_env.child_env` が子へ渡す）。指定のファイルが壊れていれば `AccountError` を
 送出し、呼び出し元が理由を出して止まる（読めない指定を黙って既定へ倒さない）。
 
-使用率は、アカウントごと・登録の世代ごとのキャッシュ（`usage/<名前>/<世代>.json`）を NDF の status line が書き、
-中継は読むだけである（#3864 の決定 4）。認証の失敗で外した間は `held.json`、上限の行の観測は `limited.json` が持ち、
-どちらも名前の下に世代ごとの項目を持つ（書き手は自分の世代の項目だけを書く）。
+使用率は、使用率の API の取得の記録（`<アカウントの登録簿>/.usage-fetch/<名前>/<世代>.json`）だけから読む。成功した
+取得が窓を丸ごと置き換え、合わせ込みはしない（API の値がそのアカウントの今の値である）。上限は過ぎていない窓のどれかが
+100% 以上か、API が上限の到達（`spend_limit_reached`）を返したとき。認証の失敗で外した間は `held.json` が持ち、名前の下に
+世代ごとの項目を持つ（書き手は自分の世代の項目だけを書く）。
 
-使用率の API の取得の記録（`<アカウントの登録簿>/.usage-fetch/<名前>/<世代>.json`）は登録簿の側に置き、状態の保存先の
-違うラッパーも同じ記録で取り直しを判定して同じ窓を読む（I16）。取得の重複は名前ごとの取得の排他（`fetch_lock`）で防ぐ。
+取得の記録は登録簿の側に置き、状態の保存先の違うラッパーも同じ記録で取り直しを判定して同じ窓を読む（I16）。取得の重複は名前ごとの取得の排他（`fetch_lock`）で防ぐ。
 取得（`fetch_usage`）は登録の排他を確かめと書き込みの間だけ持ち、HTTP の往復はその外で行う。トークンの値は返り・記録・
 画面に出さない（C1・C2）。
 """
@@ -20,15 +20,12 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import threading
 import time
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta, tzinfo
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Optional, Union
-from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -40,9 +37,7 @@ NAME_RE = signals.NAME_RE
 WINDOWS = account_registry.WINDOWS
 SCOPED = "seven_day_scoped"  # モデル別の週の窓。窓の名前は `seven_day_scoped/<識別>`
 FULL = 100.0
-WINDOW_WORDS = (("five_hour", re.compile(r"\bsession\b|\b5-hour\b", re.I)), ("seven_day", re.compile(r"\bweek(?:ly)?\b", re.I)))
 FETCH_LOCKS = ".fetch-locks"  # 取得の排他の錠の保存先（登録簿の下。アカウントのディレクトリの外）
-RESETS_RE = re.compile(r"\bresets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b(?:\s*\(([^)]+)\))?", re.I)
 
 
 class AccountError(ValueError):
@@ -57,24 +52,8 @@ def pin_path(state_dir: Path) -> Path:
     return accounts_dir(state_dir) / "pinned.json"
 
 
-def usage_dir(state_dir: Path) -> Path:
-    """使用率のキャッシュの保存先（ファイルの表の `relay-usage` の `path` の先頭）。"""
-    return accounts_dir(state_dir) / PurePosixPath(facts.value("ndf-files", "relay-usage", "path")).parts[0]
-
-
-def usage_path(state_dir: Path, name: str, generation: str) -> Path:
-    """アカウント 1 つ・登録の世代 1 つのキャッシュ（`usage/<名前>/<世代>.json`。世代が空文字なら `_.json`）。"""
-    if not account_registry.valid_name(name):  # 登録名の検査（`..`・`/` を通さない）
-        raise AccountError(f"アカウントの名前の形が違う: {name}")
-    return usage_dir(state_dir) / name / f"{_gen(generation)}.json"
-
-
 def held_path(state_dir: Path) -> Path:
     return accounts_dir(state_dir) / facts.value("ndf-files", "relay-auth-held", "path")
-
-
-def limits_path(state_dir: Path) -> Path:
-    return accounts_dir(state_dir) / facts.value("ndf-files", "relay-limit-seen", "path")
 
 
 def pinned(state_dir: Path) -> Optional[str]:
@@ -171,87 +150,44 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _read_windows(path: Path) -> Windows:
-    return _flat(_read_json(path).get("windows"))
+def usages(store: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]:
+    """登録済みアカウントの今の世代の使用率の行（`usage_rows` の行だけ）。"""
+    return usage_rows(store, now, generations, {})[0]
 
 
-def _merge(prev: Optional[tuple[float, float]], new: tuple[float, float], now: float) -> Optional[tuple[float, float]]:
-    """書き込みの規則の窓ごとの比べ。失効した入力・古い入力では前の値を残し、同じ窓の使用率は減らさない。"""
-    if new[1] <= now or (prev is not None and new[1] < prev[1]):
-        return prev
-    if prev is None or new[1] > prev[1]:
-        return new
-    return (max(prev[0], new[0]), prev[1])
-
-
-def _merged(prev: Windows, windows: Mapping[str, tuple[float, float]], now: float) -> Windows:
-    """前の窓へ新しい窓を窓ごとに合わせる（書き込みの規則）。入力に無い窓は前の値を残す。"""
-    merged = dict(prev)
-    for k, w in windows.items():
-        got = _merge(prev.get(k), w, now)
-        if got is not None:
-            merged[k] = got
-    return merged
-
-
-def write_usage(path: Path, windows: Mapping[str, tuple[float, float]], now: float) -> None:
-    """status line と同じ形・同じ合わせ方で 1 つの記録を書く。錠が取れなければその回は書かない。
-
-    錠は status line と同じ `<ファイル>.lock` のファイルの `flock`（待たない）。オーナーが生きている間はほかの書き手が奪えない。
-    錠の場所がファイルでなければ（ディレクトリなど）消さずにその回は書かない。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock = _lock_path(path)
-    if lock.is_dir():  # status line と同じく、錠の場所を塞ぐものを消さずにその回は書かない
-        return
-    with signals.held(lock, 0.0) as got:
-        if not got:
-            return
-        prev = _read_windows(path)
-        merged = _merged(prev, windows, now)
-        if merged != prev:
-            signals.replace_json(path, {"windows": _nested(merged), "recorded_at": now})
-
-
-def _lock_path(path: Path) -> Path:
-    return path.with_name(path.name + ".lock")
-
-
-def usages(state_dir: Path, store: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]:
-    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねる（`usage_rows` の行だけ）。"""
-    return usage_rows(state_dir, store, now, generations)[0]
+def windows_of(store: Path, name: str, generation: str) -> Windows:
+    """取得の記録の窓（最後に成功した取得の値。失効した窓も残す）。"""
+    return _flat(_read_json(fetch_path(store, name, generation)).get("windows"))
 
 
 def usage_rows(
-    state_dir: Path, store: Path, now: float, generations: Mapping[str, str]
+    store: Path, now: float, generations: Mapping[str, str], seen: Mapping[str, tuple[str, float]]
 ) -> tuple[list[account_decide.Usage], frozenset[str]]:
-    """登録済みアカウントの今の世代のキャッシュを名前の順に読み、上限の観測を重ねた行と、API が上限の到達を返した名前。
+    """登録済みアカウントの今の世代の取得の記録を名前の順に読んだ行と、API が上限の到達を返した名前。
 
-    リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、上限の観測が続くとき。
-    読めない・窓の無い記録は返さない（使用率の分からないアカウント）。ただし上限の観測が続く名前は使用率の
-    分からない上限の行（`percent` が None）で返す。登録簿の側の取得の記録（`fetch_path`）の窓を `read_windows` で
-    合わせて読み、その `spend_limit_reached` が真の名前を上限にする（2 つ目の返り。同じ内容から取る）。
+    リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、`spend_limit_reached` が真のとき。
+    `seen` は上限を見た名前 → (世代, 見た時刻)。同じ世代の記録の `fetched_at` がその時刻より前なら、記録はまだ上限を写して
+    いないので上限とする（窓・到達・`fetched_at` は 1 回読んだ同じ内容から取る）。
+    読めない・窓の無い記録は、上限なら使用率の分からない上限の行（`percent` が None）、でなければ返さない。
     """
-    seen, spent = {}, set()
-    for n, g in generations.items():
-        # 取得の記録は 1 度だけ読み、窓と上限の到達（spend_limit_reached）を同じ内容から取る（間の置き換えを混ぜない）
-        fetched = _read_json(fetch_path(store, n, g))
-        seen[n] = _read_merged(usage_path(state_dir, n, g), fetched)
-        if fetched.get("spend_limit_reached") is True:
-            spent.add(n)
-    limited = set(limits_seen(state_dir, now, generations, seen)) | spent
-    rows = []
+    rows, spent = [], set()
     for name in sorted(generations):
-        w = seen[name]
-        if not w:
-            if name in limited:
-                rows.append(account_decide.Usage(name, None, None, None, None, True))
-            continue
-        rows.append(_windowed(name, w, now, name in limited))
+        fetched = _read_json(fetch_path(store, name, generations[name]))
+        w = _flat(fetched.get("windows"))
+        stop = fetched.get("spend_limit_reached") is True
+        if stop:
+            spent.add(name)
+        hit = seen.get(name)
+        at = _number(fetched.get("fetched_at"))
+        stop = stop or (hit is not None and hit[0] == generations[name] and (at is None or at < hit[1]))
+        if w:
+            rows.append(_windowed(name, w, now, stop))
+        elif stop:
+            rows.append(account_decide.Usage(name, None, None, None, None, True))
     return rows, frozenset(spent)
 
 
-def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_decide.Usage:
+def _windowed(name: str, w: Windows, now: float, spent: bool) -> account_decide.Usage:
     """窓ごとの値の行。過ぎた窓は 0% で、7 日の窓が過ぎていればそのリセットの時刻は分からない（None）。
 
     7 日の使用率は `seven_day` と、モデル別のスロットのうち過ぎていないものの最大の、大きいほう。
@@ -266,10 +202,10 @@ def _windowed(name: str, w: Windows, now: float, seen_limit: bool) -> account_de
     resets = w["seven_day"][1] if "seven_day" in w and w["seven_day"][1] > now else None
     percent = max(p if r > now else 0.0 for p, r in w.values())
     full = any(p >= FULL for p, r in w.values() if r > now)
-    return account_decide.Usage(name, percent, live("five_hour"), seven, resets, full or seen_limit)
+    return account_decide.Usage(name, percent, live("five_hour"), seven, resets, full or spent)
 
 
-# ---------------------------------------------------------------- 外した間と上限の観測（世代ごとの項目）
+# ---------------------------------------------------------------- 外した間（世代ごとの項目）
 
 
 def _entries(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
@@ -325,106 +261,18 @@ def unhold(state_dir: Path, name: str) -> None:
         _rewrite(path, lambda data: data.pop(name, None))
 
 
-def see_limit(state_dir: Path, name: str, generation: str, seen_at: float, limit: tuple[float, Optional[str], Optional[float]]) -> None:
-    """上限の行を初めて見た観測を書く（自分の世代の項目だけ）。`limit` は `limit_until` の返り（until・窓の名前・その resets_at）。"""
-    until, window, window_resets_at = limit
-    entry = {"seen_at": seen_at, "until": until, "window": window, "window_resets_at": window_resets_at}
-    _put(limits_path(state_dir), name, generation, entry, seen_at)
-
-
-def limits_seen(
-    state_dir: Path, now: float, generations: Mapping[str, str], windows: Mapping[str, Mapping[str, tuple[float, float]]]
-) -> dict[str, tuple[float, float]]:
-    """解除に当たらない上限の観測（名前 → (見た時刻, until)）。
-
-    解くのは `now ≥ until` か、観測の窓がキャッシュで `window_resets_at` と `until` のどちらよりも後の 100 未満の窓に
-    入れ替わったときだけ（`until` 以下の窓は上限より前の入力が遅れて届いたものとみなし、解かない）。
-    """
-    out = {}
-    for n, e in _current(limits_path(state_dir), generations).items():
-        if now >= e["until"]:
-            continue
-        w, at = e.get("window"), _number(e.get("window_resets_at"))
-        cur = windows[n].get(w) if n in windows and isinstance(w, str) and at is not None else None
-        seen = _number(e.get("seen_at"))
-        if seen is None or (cur is not None and at is not None and cur[1] > max(at, e["until"]) and cur[0] < FULL):
-            continue
-        out[n] = (seen, float(e["until"]))
-    return out
-
-
-def limit_until(
-    line: str, windows: Mapping[str, tuple[float, float]], seen_at: float, tz: tzinfo
-) -> tuple[float, Optional[str], Optional[float]]:
-    """上限の行とキャッシュから (until, 窓の名前, 見た時刻のその窓の resets_at) を決める（「上限の観測」の順）。時計を読まない。"""
-    word = next((k for k, pat in WINDOW_WORDS if pat.search(line)), None)
-    at = _line_reset(line, seen_at, tz)
-    if at is not None:
-        until, zone = at
-        name = word or next((k for k, (_, r) in windows.items() if _hm(r, zone) == _hm(until, zone)), None)
-        return until, name, (windows[name][1] if name in windows else None)
-    if word is not None and word in windows and windows[word][1] > seen_at:
-        return windows[word][1], word, windows[word][1]
-    full = [(r, k) for k, (p, r) in windows.items() if r > seen_at and p >= FULL]
-    if full:
-        r, k = max(full)
-        return r, k, r
-    return estimated_until(windows, seen_at)
-
-
-def estimated_until(windows: Mapping[str, tuple[float, float]], seen_at: float) -> tuple[float, None, None]:
-    """「上限の観測」の (4) の推定: `five_hour` がリセットを過ぎていなければその `resets_at`、無ければ `relay.limit-unknown` の後。"""
-    five = windows.get("five_hour")
-    if five is not None and five[1] > seen_at:
-        return five[1], None, None
-    return seen_at + limits.seconds("relay.limit-unknown"), None, None
-
-
-def _hm(at: float, zone: tzinfo) -> tuple[int, int]:
-    t = datetime.fromtimestamp(at, zone)
-    return t.hour, t.minute
-
-
-def _line_reset(line: str, seen_at: float, tz: tzinfo) -> Optional[tuple[float, tzinfo]]:
-    """行の `resets 3pm (Asia/Tokyo)` の時刻のうち、`seen_at` より後で最も近いもの（と読んだ時間帯）。読めなければ None。"""
-    m = RESETS_RE.search(line)
-    if m is None:
-        return None
-    minute = int(m.group(2)) if m.group(2) is not None else 0
-    if not 1 <= int(m.group(1)) <= 12 or minute > 59:
-        return None
-    zone = tz
-    if m.group(4):
-        try:
-            zone = ZoneInfo(m.group(4).strip())
-        except (ValueError, KeyError):
-            zone = tz
-    hour = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0)
-    t = datetime.fromtimestamp(seen_at, zone).replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if t.timestamp() <= seen_at:
-        t += timedelta(days=1)
-    return t.timestamp(), zone
-
-
 def forget(state_dir: Path, store: Path, name: str, drop: str) -> None:
-    """`name` の `drop` の世代（操作した登録簿の前の世代）の外した間・上限の観測・キャッシュ・取得の記録を消す。ほかの世代は残す。
+    """`name` の `drop` の世代（操作した登録簿の前の世代）の外した間・取得の記録を消す。ほかの世代は残す。
 
     取得の排他（`fetch_lock`）と登録簿の排他の中で呼ぶ（`account_register.register`・`account_registry.unregister` の `settle`）。世代は登録
     ごとに新しいので、同じ状態の保存先を別の登録簿（`NDF_ACCOUNTS_DIR`）と共有していても、ほかの登録簿の同じ名前の記録は
     消さない。取得の排他の錠のファイル（`fetch_lock_path`）は消さない。錠を取れなければ `TimeoutError`、消せなければ `OSError`。
     """
     key = _gen(drop)
-
-    def edit(data: dict[str, dict[str, dict[str, Any]]]) -> None:
-        if name in data:
-            data[name].pop(key, None)
-
-    for path in (held_path(state_dir), limits_path(state_dir)):
-        entries = _entries(path)
-        if name in entries and key in entries[name]:
-            _rewrite(path, edit)
-    cache = usage_path(state_dir, name, drop)
-    _unlink_all(cache, _lock_path(cache))
+    path = held_path(state_dir)
+    entries = _entries(path)
+    if name in entries and key in entries[name]:
+        _rewrite(path, lambda data: data[name].pop(key, None))
     _unlink_all(fetch_path(store, name, drop))
 
 
@@ -470,65 +318,37 @@ def fetch_wait() -> float:
     return http_s * 2 + refresh_s + limits.seconds("claude-accounts.lock") * 4
 
 
-def read_windows(usage: Path, fetch: Path) -> Windows:
-    """status line のキャッシュと取得の記録の窓を読み取り用に合わせる（新しい `resets_at`、同じなら大きいほう。失効した窓も残す）。"""
-    return _read_merged(usage, _read_json(fetch))
-
-
-def _read_merged(usage: Path, fetched: Mapping[str, Any]) -> Windows:
-    """`read_windows` の本体。取得の記録は読んだ後の内容で受け取る。"""
-    return _merged(_read_windows(usage), _flat(fetched.get("windows")), -math.inf)
-
-
 def write_fetch(path: Path, got: claude_usage.Usage, now: float) -> None:
-    """成功した取得の窓を取得の記録へ窓ごとに合わせて書く（取得の排他の中で呼ぶ。書き手は同時に 1 つ）。
+    """成功した取得の応答で取得の記録の窓を置き換える（取得の排他の中で呼ぶ。書き手は同時に 1 つ）。
 
-    `error` を null にし、`spend_limit_reached` は応答が真偽を持つときだけ置き換える。`at` は前の値を残す。
+    `error` を null にし、`fetched_at` を `now` にする。`spend_limit_reached` も応答の値にする（無ければ null）。`at` は前の値を残す。
     """
     prev = _read_json(path)
     windows = {k: w for k, w in (("five_hour", got.five_hour), ("seven_day", got.seven_day)) if w is not None}
-    if got.scoped is not None:  # 崩れていた（None）ならモデル別の窓は前の値を残す
+    if got.scoped is not None:  # 崩れていた（None）ならモデル別の窓は載せない
         windows.update({f"{SCOPED}/{ident}": (p, r) for ident, p, r in got.scoped})
-    spend = got.spend_limit_reached if got.spend_limit_reached is not None else prev.get("spend_limit_reached")
     row = {
         "at": _number(prev.get("at")),
+        "fetched_at": now,
         "error": None,
-        "spend_limit_reached": spend if isinstance(spend, bool) else None,
-        "windows": _nested(_merged(_flat(prev.get("windows")), windows, now)),
+        "spend_limit_reached": got.spend_limit_reached,
+        "windows": _nested(windows),
     }
     os.makedirs(path.parent, mode=0o700, exist_ok=True)
     signals.replace_json(path, row)
 
 
-def due(usage: Path, fetch: Path, now: float, interval: float, until: Optional[float], tried: Optional[float]) -> bool:
-    """取り直すか（I16）。最後に試した時刻から `interval` を過ぎたか、その後に過ぎたリセット（窓・上限の観測の `until`）があれば真。
+def due_at(fetch: Path, interval: float, tried: Optional[float]) -> float:
+    """取り直してよい最初の時刻（最後に試した時刻が無ければ -inf）。最後に試した時刻から `interval` 後か、その後の最初のリセット。
 
     最後に試した時刻は取得の記録の `at` と `tried`（このラッパーが最後にキューへ入れた時刻）の大きいほう。
-    間隔を満たせば窓のファイルを読まずに真を返す（取得のワーカーが排他の中で打つので読み込みを増やさない）。
-    次に判定が変わる時刻の要る見回りは `due_at` を使う。
     """
-    tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
-    if not tried_at:
-        return True
-    last = max(tried_at)
-    if now - last >= interval:
-        return True
-    resets = [r for _, r in read_windows(usage, fetch).values()]
-    if until is not None:
-        resets.append(until)
-    return any(last < t <= now for t in resets)
-
-
-def due_at(usage: Path, fetch: Path, interval: float, until: Optional[float], tried: Optional[float]) -> float:
-    """`due` が真になる最初の時刻（最後に試した時刻が無ければ -inf）。2 つのファイルが変わらない間は同じ値を返す。"""
     tried_at = [t for t in (_number(_read_json(fetch).get("at")), tried) if t is not None]
     if not tried_at:
         return -math.inf
     last = max(tried_at)
-    resets = [r for _, r in read_windows(usage, fetch).values()]
-    if until is not None:
-        resets.append(until)
-    return min([last + interval, *(t for t in resets if t > last)])
+    resets = [r for _, r in _flat(_read_json(fetch).get("windows")).values() if r > last]
+    return min([last + interval, *resets])
 
 
 class FetchGate:
@@ -697,6 +517,7 @@ def _mark(path: Path, **changes: Any) -> bool:
     spend, error = prev.get("spend_limit_reached"), prev.get("error")
     row = {
         "at": _number(prev.get("at")),
+        "fetched_at": _number(prev.get("fetched_at")),
         "error": error if isinstance(error, str) else None,
         "spend_limit_reached": spend if isinstance(spend, bool) else None,
         "windows": _nested(_flat(prev.get("windows"))),
@@ -711,28 +532,27 @@ def _mark(path: Path, **changes: Any) -> bool:
 
 
 def fetch_usage(
-    state_dir: Path, target: FetchTarget, now: float, until: Optional[float], gate: FetchGate, options: FetchOptions = FetchOptions()
+    target: FetchTarget, now: float, force: bool, gate: FetchGate, options: FetchOptions = FetchOptions()
 ) -> Optional[claude_usage.Usage]:
     """1 つの登録済みアカウントの使用率を取り、取得の記録へ書いて返す。呼ばなかったときは None（決定 4・I16）。
 
-    `now` はキューへ入れた時刻で、排他の中の判定と記録には使わない（その時点の `clock()` を読む）。
-    1 回の取得で、更新の POST は多くても 1 回、使用率の GET は多くても 2 回である。
+    `now` はキューへ入れた時刻で、排他の中の判定と記録には使わない（その時点の `clock()` を読む）。`force` なら取り直しの
+    間隔を待たない（上限を見た直後）。1 回の取得で、更新の POST は多くても 1 回、使用率の GET は多くても 2 回である。
     """
     with fetch_lock(target.store, target.name, 0) as got:
         if not got:
             return None  # 別の取得か登録・削除のコマンドが同じアカウントの排他を持つ
-        usage = usage_path(state_dir, target.name, target.generation)
-        return _fetch_locked(_Fetch(target, gate, options), usage, until)
+        return _fetch_locked(_Fetch(target, gate, options), force)
 
 
-def _fetch_locked(f: _Fetch, usage: Path, until: Optional[float]) -> Optional[claude_usage.Usage]:
-    if not due(usage, f.path, f.clock(), limits.seconds("relay.usage-fetch"), until, None):
+def _fetch_locked(f: _Fetch, force: bool) -> Optional[claude_usage.Usage]:
+    if not force and due_at(f.path, limits.seconds("relay.usage-fetch"), None) > f.clock():
         return None  # 別のラッパーが先に試した
     o = _credentials(f)
     if o is None:
         return None
     if o == "reregistered":
-        return f.error(o)  # 取得の記録もキャッシュも書かない
+        return f.error(o)  # 取得の記録を書かない
     if not _mark(f.path, at=f.clock(), error=o if isinstance(o, str) else None):
         return None
     if isinstance(o, str):

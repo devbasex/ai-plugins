@@ -46,7 +46,7 @@ def _set_values(environ: Mapping[str, str], state_dir: Path, account: Optional[s
     }
 
 
-def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, Optional[str]]:
+def _account_values(env: Mapping[str, str], config_dir: Path, generation: str) -> dict[str, Optional[str]]:
     """`account-set` の変数に入れる値。None は入れない（親の値も外す）。"""
     # 親に設定ディレクトリが無ければ空文字（~/.claude を指す）
     shared = next((env[k] for k in ("NDF_SHARED_CONFIG_DIR", "CLAUDE_CONFIG_DIR") if k in env), "")
@@ -59,7 +59,7 @@ def _account_values(env: Mapping[str, str], config_dir: Path, usage_file: Path) 
         "CLAUDE_CONFIG_DIR": str(config_dir),
         "NDF_SHARED_CONFIG_DIR": shared,
         "CLAUDE_CODE_PLUGIN_CACHE_DIR": cache,
-        "NDF_ACCOUNT_USAGE_FILE": str(usage_file),
+        "NDF_ACCOUNT_GENERATION": generation,
         "NDF_RELAY_PIN": None,
     }
 
@@ -116,16 +116,16 @@ def _without_auth(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in drop}
 
 
-def account_env(env: Mapping[str, str], config_dir: Path, usage_file: Path) -> dict[str, str]:
+def account_env(env: Mapping[str, str], config_dir: Path, generation: str) -> dict[str, str]:
     """登録済みアカウントの子の環境。`child_env` の出力 `env` に `account-set` の変数を入れ、`account-drop` の変数を外す。
 
-    `config_dir` は用意の済んだアカウントの設定ディレクトリ（`account_dir.prepare` が ok を返したパス）、`usage_file` は
-    ラッパーが解いた使用率の書き先の絶対パス。`NDF_SHARED_CONFIG_DIR` は親にあれば親の値、無ければ親の
+    `config_dir` は用意の済んだアカウントの設定ディレクトリ（`account_dir.prepare` が ok を返したパス）、`generation` は
+    起動を確かめた登録の世代（子の `ndf plan` がリースと替え先の判断に使う）。`NDF_SHARED_CONFIG_DIR` は親にあれば親の値、無ければ親の
     `CLAUDE_CONFIG_DIR`（無ければ空文字）。`CLAUDE_CODE_PLUGIN_CACHE_DIR` は親にあれば親の値、無ければ
     `<共有の設定ディレクトリ>/plugins`。表の `account-set` に値の無い名前があれば `KeyError`（表とコードの食い違い）。
     """
     out = _without_auth(env)
-    values = _account_values(env, config_dir, usage_file)
+    values = _account_values(env, config_dir, generation)
     return _apply(out, "account-set", values)
 
 
@@ -133,7 +133,7 @@ def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -
     """従量の接続の子の環境。`child_env` の出力 `env` を共有の設定ディレクトリへ戻し、`extra`（従量の接続の設定）を重ねる。
 
     `CLAUDE_CONFIG_DIR` は、親に `NDF_SHARED_CONFIG_DIR` があればその値（空なら外す）、無ければ親のまま。
-    `NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_USAGE_FILE` と `account-drop` の変数を外し、保存した設定（`saved`）なら
+    `NDF_SHARED_CONFIG_DIR`・`NDF_ACCOUNT_GENERATION` と `account-drop` の変数を外し、保存した設定（`saved`）なら
     起動の前に比べる変数（`account_registry.METERED_CHECKED`。秘密の変数のほか接続先・資格情報の選択・地域）も親から外す
     （比べる期待値をこの出力から作るので、保存した設定に無い親の接続先や資格情報の選択を期待値に入れない）。`extra` は検証を通したもの（呼び手が確かめる）で、
     ラッパーが確定する変数（`METERED_FIXED` と `NDF_` で始まる変数）は `extra` に依らず、`NDF_CLAUDE_ACCOUNT` は `metered`。
@@ -146,7 +146,7 @@ def metered_env(env: Mapping[str, str], extra: Mapping[str, str], saved: bool) -
     else:
         config = env.get("CLAUDE_CONFIG_DIR")
     key = account_registry.metered_kind(extra) == account_registry.API_KEY_KIND
-    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_USAGE_FILE", *(account_registry.METERED_CHECKED if saved or key else ())}
+    drop = {"NDF_SHARED_CONFIG_DIR", "NDF_ACCOUNT_GENERATION", *(account_registry.METERED_CHECKED if saved or key else ())}
     out = {k: v for k, v in _without_auth(env).items() if k not in drop}
     skip = {"ANTHROPIC_API_KEY"} if key else set()  # キーは `--settings` の `apiKeyHelper` で渡す
     out.update({k: v for k, v in extra.items() if k not in METERED_FIXED and not k.startswith("NDF_") and k not in skip})

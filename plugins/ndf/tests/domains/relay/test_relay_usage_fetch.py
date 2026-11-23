@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 import threading
@@ -38,67 +39,50 @@ def _got(**kw) -> claude_usage.Usage:
     return claude_usage.Usage(fetched_at=NOW, **kw)
 
 
-def test_decision4_fetch_record_lives_in_the_store_and_reads_from_any_state_dir(tmp_path):
-    store, state_a, state_b = tmp_path / "store", tmp_path / "state-a", tmp_path / "state-b"
+def test_decision4_fetch_record_lives_in_the_store(tmp_path):
+    store = tmp_path / "store"
     path = accounts.fetch_path(store, "work2", "g2")
     assert path == store / ".usage-fetch" / "work2" / "g2.json"
     assert accounts.fetch_path(store, "work2", "") == path.with_name("_.json")
     accounts.write_fetch(path, _got(five_hour=(40.0, LATER), seven_day=(20.0, WEEK), scoped=[("opus", 95.0, WEEK)]), NOW)
     rec = _fetch_record(path)
-    assert rec["error"] is None and rec["windows"]["seven_day_scoped"] == {"opus": {"percent": 95.0, "resets_at": WEEK}}
+    assert rec["error"] is None and rec["fetched_at"] == NOW
+    assert rec["windows"]["seven_day_scoped"] == {"opus": {"percent": 95.0, "resets_at": WEEK}}
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-    # 状態の保存先には何も書かず、保存先の違う 2 つのラッパーが同じ記録を読む（モデル別の週の窓 95 を使用率に読む）
-    for state in (state_a, state_b):
-        assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, False)]
-        assert not accounts.usage_dir(state).exists()
+    # モデル別の週の窓 95 を使用率に読む
+    assert accounts.usages(store, NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, False)]
     # 旧い世代の取得の記録は読まない
-    assert accounts.usages(state_a, store, NOW, {"work2": "g3"}) == []
+    assert accounts.usages(store, NOW, {"work2": "g3"}) == []
 
 
-def test_decision4_usages_merges_the_status_line_and_the_fetch_record_per_window(tmp_path):
-    store, state = tmp_path / "store", tmp_path / "state"
-    accounts.write_usage(accounts.usage_path(state, "work1", "g1"), {"five_hour": (50.0, LATER)}, NOW)
-    accounts.write_fetch(accounts.fetch_path(store, "work1", "g1"), _got(five_hour=(30.0, LATER), seven_day=(60.0, WEEK)), NOW)
-    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 60.0, 50.0, 60.0, WEEK, False)]
-    # 取得の記録の窓が新しい resets_at を持てば、使用率が小さくてもそれを採る
-    accounts.write_fetch(accounts.fetch_path(store, "work1", "g1"), _got(five_hour=(5.0, LATER + 18000)), NOW)
-    windows = accounts.read_windows(accounts.usage_path(state, "work1", "g1"), accounts.fetch_path(store, "work1", "g1"))
-    assert windows["five_hour"] == (5.0, LATER + 18000)
-    # 片方が読めなければもう片方だけで読む
-    accounts.fetch_path(store, "work1", "g1").write_text("{", encoding="utf-8")
-    assert accounts.usages(state, store, NOW, {"work1": "g1"}) == [Usage("work1", 50.0, 50.0, None, None, False)]
-
-
-def test_decision4_write_fetch_keeps_model_windows_apart_and_missing_windows(tmp_path):
+def test_decision4_write_fetch_replaces_the_windows_without_merging(tmp_path):
     path = accounts.fetch_path(tmp_path, "work1", "g1")
     thursday, friday = NOW + 4 * 86400, NOW + 5 * 86400
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER), scoped=[("a", 95.0, friday)]), NOW)
-    # 次の応答で別の識別の窓 B が 100。A と B を別々に残し、7 日を 100 と読む。応答に無い 5 時間の窓は前の値が残る
-    accounts.write_fetch(path, _got(scoped=[("b", 100.0, thursday)]), NOW)
-    windows = _fetch_record(path)["windows"]
-    assert windows["seven_day_scoped"] == {"a": {"percent": 95.0, "resets_at": friday}, "b": {"percent": 100.0, "resets_at": thursday}}
-    assert windows["five_hour"] == {"percent": 10.0, "resets_at": LATER}
-    assert accounts.usages(tmp_path / "state", tmp_path, NOW, {"work1": "g1"}) == [Usage("work1", 100.0, 10.0, 100.0, None, True)]
-    # 崩れたモデル別の窓（None）は前の値を残し、古い入力・失効した入力で下げない
-    accounts.write_fetch(path, _got(five_hour=(3.0, LATER - 60), scoped=None), NOW)
-    accounts.write_fetch(path, _got(five_hour=(1.0, NOW - 1)), NOW)
-    assert _fetch_record(path)["windows"] == windows
+    # 次の応答の窓で丸ごと置き換える。応答に無い 5 時間の窓と識別 A の窓は残らない
+    accounts.write_fetch(path, _got(scoped=[("b", 100.0, thursday)]), NOW + 60)
+    rec = _fetch_record(path)
+    assert rec["windows"] == {"seven_day_scoped": {"b": {"percent": 100.0, "resets_at": thursday}}} and rec["fetched_at"] == NOW + 60
+    assert accounts.usages(tmp_path, NOW, {"work1": "g1"}) == [Usage("work1", 100.0, None, 100.0, None, True)]
+    # resets_at が早まった・使用率が下がった応答もそのまま採る。崩れたモデル別の窓（None）は載せない
+    accounts.write_fetch(path, _got(five_hour=(3.0, LATER - 0.6), scoped=None), NOW + 120)
+    assert _fetch_record(path)["windows"] == {"five_hour": {"percent": 3.0, "resets_at": LATER - 0.6}}
+    assert accounts.usages(tmp_path, NOW + 120, {"work1": "g1"}) == [Usage("work1", 3.0, 3.0, None, None, False)]
 
 
-def test_decision4_spend_limit_holds_until_an_explicit_false(tmp_path):
-    store, state = tmp_path / "store", tmp_path / "state"
+def test_decision4_spend_limit_follows_the_last_response(tmp_path):
+    store = tmp_path / "store"
     path = accounts.fetch_path(store, "work2", "g2")
     # 最初の応答が窓を持たず spend_limit_reached が真なら、窓もキャッシュも無くても上限の行で返る
     accounts.write_fetch(path, _got(spend_limit_reached=True), NOW)
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", None, None, None, None, True)]
-    accounts.write_fetch(path, _got(five_hour=(10.0, LATER)), NOW)  # 応答に無い（None）なら真が残る
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, True)]
-    accounts.write_fetch(path, _got(five_hour=(10.0, LATER), spend_limit_reached=False), NOW)
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, False)]
+    assert accounts.usages(store, NOW, {"work2": "g2"}) == [Usage("work2", None, None, None, None, True)]
+    # 最後の応答がすべてを決める。応答に無い（None）なら前の真を残さない
+    accounts.write_fetch(path, _got(five_hour=(10.0, LATER)), NOW)
+    assert accounts.usages(store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, False)]
 
 
 def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monkeypatch):
-    store, state = tmp_path / "store", tmp_path / "state"
+    store = tmp_path / "store"
     path = accounts.fetch_path(store, "work2", "g2")
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER), spend_limit_reached=True), NOW)
     real, reads = accounts._read_json, []
@@ -115,7 +99,7 @@ def test_decision4_usages_reads_the_fetch_record_once_per_account(tmp_path, monk
 
     monkeypatch.setattr(accounts, "_read_json", replaced_after_first_read)
     # 同じ 1 回の内容から窓と上限の到達を取る（差し替え前の 10% と差し替え後の上限なしを組み合わせない）
-    assert accounts.usages(state, store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, True)] and len(reads) == 1
+    assert accounts.usages(store, NOW, {"work2": "g2"}) == [Usage("work2", 10.0, 10.0, None, None, True)] and len(reads) == 1
 
 
 def test_decision4_write_fetch_keeps_the_attempt_time_and_clears_the_error(tmp_path):
@@ -124,7 +108,7 @@ def test_decision4_write_fetch_keeps_the_attempt_time_and_clears_the_error(tmp_p
     path.write_text(json.dumps({"at": NOW - 5, "error": "network", "spend_limit_reached": None, "windows": {}}), encoding="utf-8")
     accounts.write_fetch(path, _got(five_hour=(10.0, LATER)), NOW)
     rec = _fetch_record(path)
-    assert rec["at"] == NOW - 5 and rec["error"] is None and rec["spend_limit_reached"] is None
+    assert rec["at"] == NOW - 5 and rec["fetched_at"] == NOW and rec["error"] is None and rec["spend_limit_reached"] is None
 
 
 def _attempted(store, at, windows=None):
@@ -135,35 +119,26 @@ def _attempted(store, at, windows=None):
 
 
 def test_i16_due_once_per_interval(tmp_path):
-    usage = accounts.usage_path(tmp_path / "state", "work1", "g1")
     fetch = accounts.fetch_path(tmp_path, "work1", "g1")
-    assert accounts.due(usage, fetch, NOW, INTERVAL, None, None)  # 試したことが無い
+    assert accounts.due_at(fetch, INTERVAL, None) == -math.inf  # 試したことが無い
     _attempted(tmp_path, NOW)
-    assert not accounts.due(usage, fetch, NOW + 10, INTERVAL, None, None)  # 別のラッパー（tried を持たない）も記録の at で数える
-    assert accounts.due(usage, fetch, NOW + INTERVAL, INTERVAL, None, None)
-    assert not accounts.due(usage, fetch, NOW + INTERVAL, INTERVAL, None, NOW + 10)  # このラッパーがキューへ入れた時刻
+    assert accounts.due_at(fetch, INTERVAL, None) == NOW + INTERVAL  # 別のラッパー（tried を持たない）も記録の at で数える
+    assert accounts.due_at(fetch, INTERVAL, NOW + 10) == NOW + 10 + INTERVAL  # このラッパーがキューへ入れた時刻
+    assert accounts.due_at(fetch, INTERVAL, NOW - 10) == NOW + INTERVAL  # 大きいほうの時刻から数える
     fetch.write_text("{", encoding="utf-8")  # 読めない取得の記録は at が無い
-    assert accounts.due(usage, fetch, NOW + 10, INTERVAL, None, None)
+    assert accounts.due_at(fetch, INTERVAL, None) == -math.inf
 
 
 def test_i16_due_once_per_reset_after_the_last_attempt(tmp_path):
-    usage = accounts.usage_path(tmp_path / "state", "work1", "g1")
     fetch = _attempted(tmp_path, NOW, {"five_hour": {"percent": 100.0, "resets_at": NOW + 100}})
-    assert not accounts.due(usage, fetch, NOW + 50, INTERVAL, None, None)
-    assert accounts.due(usage, fetch, NOW + 150, INTERVAL, None, None)  # 最後に試した後にリセットを過ぎた
-    # そのリセットで試した後は、取得が失敗して過ぎた窓が残っても真にならない
+    assert accounts.due_at(fetch, INTERVAL, None) == NOW + 100  # 最後に試した後の最初のリセット
+    # そのリセットで試した後は、取得が失敗して過ぎた窓が残っても間隔まで待つ
     _attempted(tmp_path, NOW + 120, {"five_hour": {"percent": 100.0, "resets_at": NOW + 100}})
-    assert not accounts.due(usage, fetch, NOW + 150, INTERVAL, None, None)
-    # status line のキャッシュのモデル別の窓のリセットと、上限の観測の until でも取り直す
-    _attempted(tmp_path, NOW)
-    accounts.write_usage(usage, {"seven_day_scoped/opus": (90.0, NOW + 100)}, NOW)
-    assert accounts.due(usage, fetch, NOW + 150, INTERVAL, None, None)
-    assert not accounts.due(usage, fetch, NOW + 150, INTERVAL, None, NOW + 120)
-    fetch.unlink()
-    usage.unlink()
-    _attempted(tmp_path, NOW)
-    assert accounts.due(usage, fetch, NOW + 150, INTERVAL, NOW + 100, None)
-    assert not accounts.due(usage, fetch, NOW + 150, INTERVAL, NOW + 200, None)
+    assert accounts.due_at(fetch, INTERVAL, None) == NOW + 120 + INTERVAL
+    # モデル別の窓のリセットでも取り直す。tried がそのリセットより後なら間隔まで待つ
+    _attempted(tmp_path, NOW, {"seven_day_scoped": {"opus": {"percent": 90.0, "resets_at": NOW + 100}}})
+    assert accounts.due_at(fetch, INTERVAL, None) == NOW + 100
+    assert accounts.due_at(fetch, INTERVAL, NOW + 120) == NOW + 120 + INTERVAL
 
 
 def test_i16_fetch_lock_is_one_per_store_and_name_and_never_taken_from_a_live_owner(tmp_path, hold_lock):
@@ -330,10 +305,10 @@ def _auth(w: dict) -> dict:
     return json.loads(w["auth"].read_text(encoding="utf-8"))
 
 
-def _fetch(w: dict, api: _Api, clock: _Clock, gate=None, state=None, until=None):
+def _fetch(w: dict, api: _Api, clock: _Clock, gate=None, force=False):
     target = accounts.FetchTarget(w["store"], "work2", "g2")
     options = accounts.FetchOptions(httpx.MockTransport(api), clock)
-    return accounts.fetch_usage(state or w["state"], target, clock(), until, gate or accounts.FetchGate(), options)
+    return accounts.fetch_usage(target, clock(), force, gate or accounts.FetchGate(), options)
 
 
 def _record(w: dict) -> dict:
@@ -346,21 +321,32 @@ def _no_token_in(*texts: str) -> None:
             assert token not in text
 
 
-def test_decision4_fetch_usage_takes_an_idle_account_into_the_store_record(world, tmp_path):
+def test_decision4_fetch_usage_takes_an_idle_account_into_the_store_record(world):
     clock, api = _Clock(), _Api()
     got = _fetch(world, api, clock)
     assert got is not None and got.error is None
     assert api.gets == [f"Bearer {ACCESS}"] and api.posts == []
     rec = _record(world)
-    assert rec["at"] == NOW and rec["error"] is None and rec["spend_limit_reached"] is True
+    assert rec["at"] == NOW and rec["fetched_at"] == NOW and rec["error"] is None and rec["spend_limit_reached"] is True
     assert rec["windows"]["five_hour"] == {"percent": 40.0, "resets_at": LATER}
-    assert not accounts.usage_dir(world["state"]).exists()  # 状態の保存先には書かない
-    # 保存先の違うラッパーが同じ記録を読み（モデル別の週の 95 と上限の到達）、300 秒の中で API を呼ばない
-    other = tmp_path / "state-b"
-    assert accounts.usages(other, world["store"], NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, True)]
+    assert not world["state"].exists()  # 状態の保存先には書かない
+    # 記録を読み（モデル別の週の 95 と上限の到達）、300 秒の中で API を呼ばない
+    assert accounts.usages(world["store"], NOW, {"work2": "g2"}) == [Usage("work2", 95.0, 40.0, 95.0, WEEK, True)]
     clock.t = NOW + 10
-    assert _fetch(world, api, clock, state=other) is None and _fetch(world, api, clock) is None
+    assert _fetch(world, api, clock) is None
     assert len(api.gets) == 1
+
+
+def test_decision4_forced_fetch_does_not_wait_for_the_interval(world):
+    full = {**_usage_body(), "five_hour": {"utilization": 100, "resets_at": _iso(LATER - 0.6)}}
+    clock, api = _Clock(), _Api(usage=[(200, _usage_body()), (200, full)])
+    assert _fetch(world, api, clock).error is None
+    clock.t = NOW + 10  # 間隔の中でも、上限を見た直後の取り直しは呼ぶ
+    got = _fetch(world, api, clock, force=True)
+    assert got is not None and got.error is None and len(api.gets) == 2
+    rec = _record(world)
+    assert rec["fetched_at"] == NOW + 10 and rec["windows"]["five_hour"]["percent"] == 100.0
+    assert accounts.usages(world["store"], NOW + 10, {"work2": "g2"})[0].five == 100.0
 
 
 def test_decision4_fetch_usage_retries_once_per_reset_inside_the_interval(world):
@@ -373,7 +359,7 @@ def test_decision4_fetch_usage_retries_once_per_reset_inside_the_interval(world)
     assert len(api.gets) == 2
 
 
-def test_decision4_two_wrappers_deciding_at_once_call_the_api_once(world, tmp_path):
+def test_decision4_two_wrappers_deciding_at_once_call_the_api_once(world):
     entered, release = threading.Event(), threading.Event()
 
     def stall() -> None:
@@ -385,7 +371,7 @@ def test_decision4_two_wrappers_deciding_at_once_call_the_api_once(world, tmp_pa
     t = threading.Thread(target=lambda: out.append(_fetch(world, api, clock)))
     t.start()
     assert entered.wait(5)
-    assert _fetch(world, api, clock, state=tmp_path / "state-b") is None  # 取得の排他を取れずに呼ばない
+    assert _fetch(world, api, clock) is None  # 取得の排他を取れずに呼ばない
     release.set()
     t.join(5)
     assert out[0].error is None and len(api.gets) == 1

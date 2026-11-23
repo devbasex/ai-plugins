@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import queue
 import threading
-from pathlib import Path
 from typing import Callable, Optional, Union
 
 from ndf.adapters import claude_usage
 from ndf.domains.relay import accounts
 
 # 使用率の API の応答の形が変わったときの 1 行（値と本文は出さない）
-SHAPE_LINE = "ndf-relay: 使用率の API の応答の形が変わった。status line の記録で続ける"
+SHAPE_LINE = "ndf-relay: 使用率の API の応答の形が変わった。最後に取れた値で続ける"
 
 Fetch = Callable[..., Optional[claude_usage.Usage]]  # `accounts.fetch_usage` の形（テストは偽物を渡す）
 Result = Union[claude_usage.Usage, Exception, None]
@@ -26,10 +25,10 @@ Result = Union[claude_usage.Usage, Exception, None]
 class Fetcher:
     """ラッパー 1 つの取得のスレッド。`busy` は取得の途中の名前、`tried` は名前ごとに最後にキューへ入れた登録の世代と時刻（壁時計）。"""
 
-    def __init__(self, state_dir: Path, fetch: Fetch):
-        self.state_dir, self.fetch = state_dir, fetch
+    def __init__(self, fetch: Fetch):
+        self.fetch = fetch
         self.gate = accounts.FetchGate()
-        self.jobs: queue.Queue[Optional[tuple[accounts.FetchTarget, float, Optional[float]]]] = queue.Queue()
+        self.jobs: queue.Queue[Optional[tuple[accounts.FetchTarget, float, bool]]] = queue.Queue()
         self.done: queue.Queue[tuple[str, Result]] = queue.Queue()
         self.busy: set[str] = set()
         self.tried: dict[str, tuple[str, float]] = {}
@@ -37,24 +36,24 @@ class Fetcher:
         self.thread: Optional[threading.Thread] = None
         self.closed = False
 
-    def put(self, target: accounts.FetchTarget, now: float, until: Optional[float]) -> None:
-        """取り直すアカウントをキューへ入れる（初めてならスレッドを始める）。"""
+    def put(self, target: accounts.FetchTarget, now: float, force: bool = False) -> None:
+        """取り直すアカウントをキューへ入れる（初めてならスレッドを始める）。`force` なら取り直しの間隔を待たない。"""
         if self.thread is None:
             self.thread = threading.Thread(target=self._work, name="ndf-relay-usage-fetch", daemon=True)
             self.thread.start()
         self.busy.add(target.name)
         self.tried[target.name] = (target.generation, now)
-        self.jobs.put((target, now, until))
+        self.jobs.put((target, now, force))
 
     def _work(self) -> None:
         while True:
             job = self.jobs.get()
             if job is None:
                 return
-            target, now, until = job
+            target, now, force = job
             got: Result
             try:
-                got = self.fetch(self.state_dir, target, now, until, self.gate)
+                got = self.fetch(target, now, force, self.gate)
             except Exception as exc:  # noqa: BLE001 ネットワーク: スレッドを止めず、返りのキューで見回りへ渡す（見回りが記録する）
                 got = exc
             self.done.put((target.name, got))

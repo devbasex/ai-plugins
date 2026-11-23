@@ -46,13 +46,13 @@ def _two(markers=True):
 
 def test_3604_1_pinned_account_runs_in_its_config_dir_through_the_gate(tmp_path):
     # 受け入れ条件 #3604 の 1: 指定 work2 の子は CLAUDE_CONFIG_DIR が <保存先>/work2 の絶対パス・NDF_CLAUDE_ACCOUNT が work2・
-    # NDF_SHARED_CONFIG_DIR が親の CLAUDE_CONFIG_DIR。新しい使用率のキャッシュの書き先も渡す。関所で起動し、届けは終わりに消える
+    # NDF_SHARED_CONFIG_DIR が親の CLAUDE_CONFIG_DIR。登録の世代も渡す。関所で起動し、届けは終わりに消える
     store = register(tmp_path, "work1", "work2")
     ended, spawn, w, _ = _run(tmp_path, [FakeChild([], 0)], lambda state: accounts.use(state, "work2"))
     (argv, env) = spawn.calls[0]
     assert env["CLAUDE_CONFIG_DIR"] == str((store / "work2").absolute()) and os.path.isabs(env["CLAUDE_CONFIG_DIR"])
     assert env["NDF_CLAUDE_ACCOUNT"] == "work2" and env["NDF_SHARED_CONFIG_DIR"] == str(tmp_path / "claude")
-    assert env["NDF_ACCOUNT_USAGE_FILE"] == str(accounts.usage_path(tmp_path / "state", "work2", "g1"))
+    assert env["NDF_ACCOUNT_GENERATION"] == "g1"
     assert argv[:2] == [wrapper.CLAUDE, "--session-id"] and spawn.gated == [0]
     assert not list(reg.lease_dir(store, "work2").glob("*.json"))
     row = rows_of(w, "account")[0]
@@ -232,7 +232,7 @@ def test_3864_11_without_env_or_pin_the_default_login_stays_and_prepare_is_never
 
 def _limited_then(tmp_path, monkeypatch, failing: set):
     """team の子が上限に当たり、main へ替える。最初の起動より後の `failing` の名前の prepare を競合（lock_timeout）で落とす。"""
-    register(tmp_path, "team", "main")
+    store = register(tmp_path, "team", "main")
     calls = []
     real = account_dir.prepare
 
@@ -246,9 +246,9 @@ def _limited_then(tmp_path, monkeypatch, failing: set):
 
     def setup(state):
         put_usages(
-            state,
+            store,
             [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
-            measured_at=time.time() - 3600,
+            fetched_at=time.time() - 3600,
         )
         accounts.use(state, "team")
 

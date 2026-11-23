@@ -17,9 +17,9 @@ import time
 import pytest
 
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_decide, accounts, key_helper, observe, switch_decide, wrapper
+from ndf.domains.relay import account_choice, account_decide, key_helper, observe, registry, switch_decide, wrapper
 from ndf.domains.relay import account_registry as reg
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, put_usages, register, rows_of
 
 FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
@@ -62,7 +62,7 @@ def test_3864_9_d8_a_limit_without_a_registered_target_resumes_on_metered(tmp_pa
     assert _envs(spawn) == ["work1", reg.METERED]
     assert two[1:3] == ["--resume", one[2]] and two[-1] == switch_decide.RESUME_PROMPT
     assert env2["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude") and env2["CLAUDE_CODE_USE_BEDROCK"] == "1"
-    assert "NDF_ACCOUNT_USAGE_FILE" not in env2 and "NDF_SHARED_CONFIG_DIR" not in env2
+    assert "NDF_ACCOUNT_GENERATION" not in env2 and "NDF_SHARED_CONFIG_DIR" not in env2
 
 
 def test_3864_9_d8_a_saved_metered_setting_does_not_carry_the_parent_aws_keys(tmp_path):
@@ -111,24 +111,38 @@ def test_4116_a_metered_setting_without_a_model_keeps_the_model_argument(tmp_pat
     assert [a for a in two if a.startswith("--model")] == ["--model"] and two[two.index("--model") + 1] == "opus"
 
 
-class JumpWall:
-    """上限の観測が書かれるまでは今、書かれた後は 2 日後を返す壁時計（リセットの待ちを壁時計で待たない）。"""
+def _fetch_after_wait(tmp_path, calls):
+    """偽の取得の手。上限を見た後の取り直し（`force`）だけが、ラッパーが wait_reset を記録した後に work1 の 10% の取得を書く。"""
+    log = None
 
-    def __init__(self, state):
-        self.state, self.base = state, time.time()
+    def fetch(target, now, force, gate):
+        nonlocal log
+        calls.append((target.name, force))
+        if not force:
+            return None
+        log = log or next((tmp_path / "state" / "relay").rglob(registry.LOG_FILE))
+        deadline = time.time() + 5.0
+        while time.time() < deadline and '"wait_reset"' not in log.read_text(encoding="utf-8"):
+            time.sleep(0.01)
+        put_usages(target.store, [account_decide.Usage(target.name, 10.0, 10.0, None, None, False)])
+        return None
 
-    def now(self) -> float:
-        return self.base + (2 * 86400.0 if accounts.limits_path(self.state).exists() else 0.0)
+    return fetch
 
 
 def test_3864_9_d8_a_broken_metered_setting_is_not_a_fallback(tmp_path):
-    # 壊れた従量の設定は替え先にしない。替え先が無いので wait_reset で待ち、リセットの後に同じアカウントで続ける
-    register(tmp_path, "work1")
+    # 壊れた従量の設定は替え先にしない。替え先が無いので wait_reset で待つ。上限を見た後の取得が届くまでは、上限を見る前の
+    # 記録が 10% でも work1 を上限として扱い、届いた記録で上限でないと分かったら同じアカウントで続ける
+    store = register(tmp_path, "work1")
+    put_usages(store, [account_decide.Usage("work1", 10.0, 10.0, None, None, False)], fetched_at=time.time() - 60)
     environ = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "CLAUDE_CODE_USE_BEDROCK=1 NDF_RELAY_DIR=/tmp/x"}
     children = [FakeChild([LIMIT_LINE], None), FakeChild([], 0)]
-    wall = JumpWall(tmp_path / "state")
-    ended, spawn, w, shown = _run(tmp_path, children, environ, initial=wrapper.Choice(("work1",)), wall=wall)
+    calls = []
+    fetch = _fetch_after_wait(tmp_path, calls)
+    ended, spawn, w, shown = _run(tmp_path, children, environ, initial=wrapper.Choice(("work1",)), fetch=fetch)
     assert _envs(spawn) == ["work1", "work1"] and rows_of(w, "wait_reset")
+    assert ("work1", True) in calls  # 上限を見たら間隔を待たずに取り直す
+    assert spawn.calls[1][0][1:3] == ["--resume", spawn.calls[0][0][2]]
     assert "NDF_RELAY_DIR" in shown and "/tmp/x" not in shown
 
 

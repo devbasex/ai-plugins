@@ -2,8 +2,8 @@
 
 中継の子（オーガナイザー・レーンの conductor）の中で打った `ndf plan` の worker の `claude -p` は、子の環境をそのまま継ぎ、
 子と同じ起動先（登録済みアカウント・従量の接続）で動く。起動の前に、中継の子と同じ確かめ（認証の上書き・使用の届け・
-従量の接続の照合）を当て、外れれば起動しない。登録済みアカウントの `claude -p` が利用上限に当たったら、その上限の観測を
-書き、替え先で同じ呼び出しを 1 回だけ打ち直す。API キーの子（`key:<名前>` と API キーの宣言の `metered`）は、Claude Code
+従量の接続の照合）を当て、外れれば起動しない。登録済みアカウントの `claude -p` が利用上限に当たったら、そのアカウントを
+上限として替え先を選び、同じ呼び出しを 1 回だけ打ち直す。API キーの子（`key:<名前>` と API キーの宣言の `metered`）は、Claude Code
 2.1.330 の `claude -p` にキーを安全に渡せる起動の形が無いため起動しない。Claude Code だけが対象である。
 
 例: `work1` で動くレーンの conductor が `ndf plan` を打ち、`work2` も登録している利用者のとき。
@@ -11,7 +11,7 @@
 | 順 | 起きること |
 | --- | --- |
 | 1 | worker の `claude -p` は、子から継いだ `CLAUDE_CONFIG_DIR=<保存先>/work1`・`NDF_CLAUDE_ACCOUNT=work1` で起動する。起動の前に worker の作業ディレクトリで認証の上書きを確かめ、`work1` の使用の届けを取り、関所で起動する |
-| 2 | `claude -p` が利用上限で終わる。`limited.json` に `work1` の上限の観測を書き（ほかの子のラッパーも `work1` を避ける）、標準エラーへ `ndf plan: アカウント work1 が利用上限に当たった。work2 で打ち直す` を出す |
+| 2 | `claude -p` が利用上限で終わる。`work1` を上限として替え先を選び（ファイルには何も書かない。ほかの子のラッパーは使用率の API の取得で `work1` の上限を知る）、標準エラーへ `ndf plan: アカウント work1 が利用上限に当たった。work2 で打ち直す` を出す |
 | 3 | `work2` の起動の前の用意を済ませ、同じ呼び出しを `work2` の設定ディレクトリで 1 回だけ打ち直す |
 | 4 | 打ち直しも上限なら、もう打ち直さずに上限の失敗を返し、計画の打ち直しの待ち（`supervise.limit-wait-max`、最長 3 時間）へ進む。子のアカウントは替えない（子は次の上限か見回りで替わる） |
 
@@ -37,8 +37,8 @@
 - 11 系の `ndf plan` の `claude -p` は子の環境をそのまま継ぐ。子をアカウントの設定ディレクトリで起動するようにした（#3604）ので、
   worker も子と同じアカウントで動き、同じ確かめが要る
 - `claude -p` が上限に当たると、計画の打ち直しの待ち（最長 3 時間）へ進んでいた。替え先があっても worker が止まる（#3864 の決定 9）
-- `claude -p` は status line を動かさないので、呼び出しごとに替え先を選ぶ入力が無い。上限に当たったときだけ選べば、上限の観測と
-  ほかの子が記録した使用率が入力になる
+- `claude -p` は status line を動かさないので、呼び出しごとに替え先を選ぶ入力が無い。上限に当たったときだけ選べば、上限に当たった
+  事実と、中継のラッパーが使用率の API で取った記録が入力になる
 
 ## 対象範囲
 
@@ -70,12 +70,12 @@
 
 | 親の `NDF_CLAUDE_ACCOUNT` | 確かめ | 外れたとき |
 | --- | --- | --- |
-| 登録済みアカウントの名前 | worker の最終の環境・起動引数・作業ディレクトリで `account_dir.auth_overrides` を打つ（`minimal` の起動は `--setting-sources ''` なので、利用者・プロジェクトの設定は見ず、管理の設定と `--settings` だけを見る）。通ったら `account_dir.acquire` で worker 自身の使用の届けを取り、関所で起動して `attach` し、終わった後に `release` で消す。継いだ世代は親が渡した `NDF_ACCOUNT_USAGE_FILE` のファイル名から読み、`acquire` は設定ディレクトリと世代が今の登録と同じときだけ届けを書く。起動のスロットを取った後、起動の直前に同じ `auth_overrides` を打ち直す（`recheck`。スロットを待つ間に足された `apiKeyHelper`・接続先の上書きで送らない） | 認証の上書き（最初の確かめでも起動の直前の `recheck` でも）: 項目名と「その設定から項目を外す」を入れた `Failure.REFUSED`。届けを取れない（`config_mismatch`・`reregistered`・排他の待ち切れ・書けない）・関所を開けられない: `Failure.LAUNCH` |
+| 登録済みアカウントの名前 | worker の最終の環境・起動引数・作業ディレクトリで `account_dir.auth_overrides` を打つ（`minimal` の起動は `--setting-sources ''` なので、利用者・プロジェクトの設定は見ず、管理の設定と `--settings` だけを見る）。通ったら `account_dir.acquire` で worker 自身の使用の届けを取り、関所で起動して `attach` し、終わった後に `release` で消す。継いだ世代は親が渡した `NDF_ACCOUNT_GENERATION` から読み、`acquire` は設定ディレクトリと世代が今の登録と同じときだけ届けを書く。起動のスロットを取った後、起動の直前に同じ `auth_overrides` を打ち直す（`recheck`。スロットを待つ間に足された `apiKeyHelper`・接続先の上書きで送らない） | 認証の上書き（最初の確かめでも起動の直前の `recheck` でも）: 項目名と「その設定から項目を外す」を入れた `Failure.REFUSED`。届けを取れない（`config_mismatch`・`reregistered`・排他の待ち切れ・書けない）・関所を開けられない: `Failure.LAUNCH` |
 | `metered` | 従量の接続の設定を読み直して `account_choice.target_env` でラッパーと同じ合成と照合を当て、その環境と起動引数で起動する。読み直した設定から作った親の接続の識別（`Built.pin`）が環境の `NDF_RELAY_PIN` と同じことを確かめる。起動のスロットを取った後、起動の直前に `reverify` で照合し直す | `metered_overridden`（設定ファイルが宣言と別の接続先・ヘッダーなどを足す）・`metered_changed`（親の起動の後に設定が替わった・`NDF_RELAY_PIN` が無い）で `Failure.REFUSED` |
 | `key:<名前>`・API キーの宣言の `metered` | 起動の形が `KEY_FORMS` に無いので起動しない | `key_gate` の `Failure.REFUSED` |
 
-`retry` は、親が登録済みアカウントのときだけ打ち直す。最初の起動が確かめた世代へ上限の観測（`until` は推定）を書き、
-`account_choice.retry_env` で替え先を選ぶ（[ndf-relay-account-switching.md](ndf-relay-account-switching.md) の `after_limit` の
+`retry` は、親が登録済みアカウントのときだけ打ち直す。取得の記録の行のうち今のアカウントを上限とした行で、
+`account_choice.retry_env` が替え先を選ぶ（何も書かない。[ndf-relay-account-switching.md](ndf-relay-account-switching.md) の `after_limit` の
 登録済みアカウントと従量の接続の順。`keys` が偽の間はキーの子を替え先にしない）。登録済みアカウントの替え先は `prepare` の
 届けのまま、起動のスロットを取った後の起動の直前に替え先の設定ディレクトリで `auth_overrides` を打ち直し（`recheck`）、
 関所で起動し、終わった後（成功・失敗・タイムアウトのどれも）に `settle` を打つ。最初の起動の届けは打ち直しの前に消す。
@@ -96,7 +96,7 @@
 ## データ・設定
 
 新しいファイルと設定は持たない。使う記録は [ndf-relay-account-config-dir.md](ndf-relay-account-config-dir.md) の使用の届けと、
-[ndf-relay-account-switching.md](ndf-relay-account-switching.md) の上限の観測、
+[ndf-relay-account-switching.md](ndf-relay-account-switching.md) の使用率の取得の記録（読むだけ）、
 [ndf-relay-metered-and-api-keys.md](ndf-relay-metered-and-api-keys.md) の合成の一時ファイルである。子の環境の `NDF_RELAY_PIN` は、
 ラッパーが `metered` と `key:<名前>` の子にだけ入れ、ほかの子では外す。
 
@@ -146,7 +146,7 @@
 | `work1` の通常の起動の間 `<保存先>/.leases/work1/` に `running` の届けがあり、終わった後（失敗・タイムアウトでも）に無い。親の子の後に `work1` を登録し直すと `reregistered` で起動しない | 届けを取らない・世代を見ない |
 | `metered` の親で、設定ファイルが別の接続先かヘッダーを足すと `metered_overridden`、親の起動の後に `metered.json` か宣言を替えると `metered_changed`、`NDF_RELAY_PIN` が無くても起動しない | 読み直した設定だけで照合する |
 | `key:` の親と API キーの宣言の `metered` の親は `key_gate` で起動しない | 起動の形を見ずにキーを渡す |
-| `work1` の上限で `limited.json` に `work1` が書かれ、`work2` で 1 回だけ打ち直す。打ち直しも上限なら 2 回目を打たない。替え先が無い・既定のログイン・`metered` では打ち直さない | 打ち直さない・2 回以上打ち直す・上限の観測を書かない |
+| `work1` の上限で、取得の記録が `work1` を上限と写していなくても `work1` を除いて `work2` で 1 回だけ打ち直す。打ち直しも上限なら 2 回目を打たない。替え先が無い・既定のログイン・`metered` では打ち直さない | 打ち直さない・2 回以上打ち直す・上限の `work1` で打ち直す |
 | 中継の外で export した `NDF_CLAUDE_ACCOUNT` だけの環境では確かめに入らない | `NDF_CLAUDE_ACCOUNT` だけで判定する |
 
 ## 関連リンク

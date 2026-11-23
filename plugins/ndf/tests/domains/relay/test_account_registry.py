@@ -88,7 +88,7 @@ def test_3604_2_i4_env_table_rows_for_account_children():
         "CLAUDE_CONFIG_DIR",
         "NDF_SHARED_CONFIG_DIR",
         "CLAUDE_CODE_PLUGIN_CACHE_DIR",
-        "NDF_ACCOUNT_USAGE_FILE",
+        "NDF_ACCOUNT_GENERATION",
         "NDF_RELAY_PIN",
     }
     # 秘密の値の変数は表の secret の列が真

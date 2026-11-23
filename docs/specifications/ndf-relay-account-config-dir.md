@@ -40,7 +40,7 @@
 | --- | --- |
 | 共有の設定ディレクトリ | 子へ渡す前の `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）。入れ子のラッパーでは親の `NDF_SHARED_CONFIG_DIR` が指す（`account_registry.shared_config_dir`） |
 | アカウントの設定ディレクトリ | `<保存先>/<名前>`。保存先は `NDF_ACCOUNTS_DIR`、無ければ `<共有の設定ディレクトリ>/ndf/accounts`（`account_registry.store_dir`） |
-| 登録の世代 | 登録・再登録のたびに `account.json` の `generation` へ書く乱数（`secrets.token_hex(16)`）。使用率・外した間・上限の観測は世代ごとに持ち、再登録の前の記録を新しい登録に効かせない |
+| 登録の世代 | 登録・再登録のたびに `account.json` の `generation` へ書く乱数（`secrets.token_hex(16)`）。使用率の取得の記録と外した間は世代ごとに持ち、再登録の前の記録を新しい登録に効かせない |
 | 使用の届け | 登録済みアカウントの設定ディレクトリを使うプロセスが生きている間、その名前の再登録・削除を止める記録（`<保存先>/.leases/<名前>/<届けの ID>.json`） |
 | 関所 | 子を claude として起動する前に 1 バイトの合図を待たせる小さな Python の起動（`account_dir.gated`）。合図の前に、子の pid を使用の届けへ書く |
 | 認証の上書き | 環境変数を外しても、設定ファイル・起動引数・プロファイルから入り、登録先の OAuth より上に来る認証の源と、既定でない接続先 |
@@ -87,7 +87,7 @@
 | I3 | 登録済みアカウントで起動する子の `projects` は、共有の設定ディレクトリの `projects` と同じ実体である | 外れれば `projects_not_shared` で起動せず、次の候補へ移る |
 | I4 | 登録済みアカウントの子の環境に認証の 13 変数（`account-drop`）が無い。実効の設定にも登録先の OAuth より上の認証の源と既定でない接続先が無い | 子の環境の表の `account-drop` の行から外す。設定に上書きがあれば `auth_overridden`（解けない源は `auth_unresolved`）でその候補を飛ばす |
 | I5 | トークン・キーの値を画面・記録・結果に出さない | 理由は決まった文（`account_dir.REASONS`）と項目の名前・出所だけで出す |
-| I10 | 子が動いている間、その名前の登録を替えず消さない。外した間・上限の観測・使用率の記録は今の登録の世代のものだけが判断に効く | 登録・削除のコマンドが使用の届けを見て止める。世代の違う記録を読む側が捨てる |
+| I10 | 子が動いている間、その名前の登録を替えず消さない。外した間と使用率の取得の記録は今の登録の世代のものだけが判断に効く | 登録・削除のコマンドが使用の届けを見て止める。世代の違う記録を読む側が捨てる |
 
 番号は設計の通し番号を保つ（I6〜I9・I11〜I16 は [ndf-relay-account-switching.md](ndf-relay-account-switching.md) と
 [ndf-relay-metered-and-api-keys.md](ndf-relay-metered-and-api-keys.md) にある）。
@@ -104,13 +104,13 @@
 | `CLAUDE_CONFIG_DIR` | `account-set` | 親の値のまま | `<保存先>/<名前>` の絶対パス |
 | `NDF_SHARED_CONFIG_DIR` | `account-set` | 親の値のまま | 親にあれば親の値、無ければ子へ渡す前の `CLAUDE_CONFIG_DIR`（無ければ空文字） |
 | `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `account-set` | 親の値のまま | 親にあればその値、無ければ `<共有の設定ディレクトリ>/plugins` |
-| `NDF_ACCOUNT_USAGE_FILE` | `account-set` | 親の値のまま | `<状態の保存先>/relay/accounts/usage/<名前>/<登録の世代>.json` の絶対パス（status line の書き先） |
+| `NDF_ACCOUNT_GENERATION` | `account-set` | 親の値のまま | 起動を確かめた登録の世代（空文字は世代の無い登録）。子の `ndf plan` がリースと上限の後の替え先の判断に使う |
 | `NDF_RELAY_PIN` | `account-set` | 親の値のまま | 外す（値が None の `account-set` は「外す」と読む） |
 | `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・提供元の選択の 6 つ（`CLAUDE_CODE_USE_BEDROCK`・`_VERTEX`・`_FOUNDRY`・`_ANTHROPIC_AWS`・`_ANTHROPIC_GOOGLE_CLOUD`・`_MANTLE`。表の `provider` の印）・`ANTHROPIC_PROFILE`・`ANTHROPIC_FEDERATION_RULE_ID`・`ANTHROPIC_ORGANIZATION_ID`（認証の 13 変数） | `account-drop` | 親の値のまま | 外す |
 
 既定のログインの子は 2 通りに分ける。指定も環境変数も無い子は今までと同じ環境である。指定か環境変数に名前があるのに、
 その用意に落ちて既定のログインへ移った子は `NDF_CLAUDE_ACCOUNT` を持たない（`child_env(…, decided=True)`）。子の変数を
-実際の認証と一致させ、status line と `ndf plan` が別の名前で使用率と上限を記録しないためである。
+実際の認証と一致させ、`ndf plan` が別の名前の使用の届けを取り、別の名前を上限として替え先を選ばないためである。
 
 ### 起動の前の確かめ
 
@@ -232,7 +232,7 @@ dotfiles への symlink を許すため、名前を 1 回 `realpath` で解き�
 終わって claude が残った届けは `child` が生きているので止めたままにする。`owner` も `child` も死んだ届けは残骸として消して
 進む。登録は旧形式の `.config.json` を `backups/.config.json.<Unix 秒>`（同じ名前があれば `-1`・`-2`…を足す）へ移し、
 新しい `generation` を書き、バックアップ・途中の記録・アカウント側の一時ファイルを消す（次の同期は最初の同期になる）。
-成功の後、旧い世代の外した間・上限の観測・使用率のキャッシュ・取得の記録を消す（`accounts.forget`）。削除は登録の
+成功の後、旧い世代の外した間と取得の記録を消す（`accounts.forget`）。削除は登録の
 ディレクトリを `<保存先>/.removing/<名前>/<世代>` へ 1 回の `os.replace` で移して一覧から外してから中身を消す。
 
 ## データ・設定
