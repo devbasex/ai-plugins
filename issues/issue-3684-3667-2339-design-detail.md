@@ -25,7 +25,7 @@ plugins/ndf/
 │           ├── mvv-signals.schema.json      * MVV の兆候の 1 行
 │           ├── mvv-validation.schema.json   * MVV の検証の 1 行
 │           ├── context-records.schema.json  * 文脈の記録の 1 行
-│           └── loop-event.schema.json       * 開発ループの事象の 1 行（実行の状態）
+│           └── loop-event.schema.json       * 開発ループのイベントの 1 行（実行の状態）
 ├── src/ndf/
 │   ├── checks/
 │   │   ├── limits_readers.py                * 規則 limit-readers
@@ -68,7 +68,7 @@ plugins/ndf/
 │   ├── domains/release/cli.py                assembled・cmd_record の outputs の version を product_version へ
 │   ├── progress/gate/asking.py               リリースのゲートが product_version を読む
 │   └── progress/invoke.py                    read_report・_call_skill が結果の版を見る
-├── skills/refactoring/SKILL.md               値の置き場の基準
+├── skills/refactoring/SKILL.md               値の保存先の基準
 └── tests/                                    下の「単体テストの観点」の表のファイル
 ```
 
@@ -78,7 +78,7 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/checks/limits_readers.py` | 新設 | 上限の設定の読み手の宣言と、実際に方針を引く import を突き合わせる | `ndf.contracts.limits`、`checks.model` | モジュール | `declared`・`actual`・`check`（新設） |
+| `src/ndf/checks/limits_readers.py` | 新設 | 上限の設定の読み手の指定と、実際に方針を引く import を突き合わせる | `ndf.contracts.limits`、`checks.model` | モジュール | `declared`・`actual`・`check`（新設） |
 | `src/ndf/checks/copy_dup.py` | 新設 | 2 つ以上のファイルの同じ名前の最上位の関数と、4 つ以上のファイルに出る文字列を数える | `checks.model` | モジュール | `top_functions`・`repeated_strings`・`check`（新設） |
 | `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`check`（新設） |
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
@@ -89,7 +89,7 @@ plugins/ndf/
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
 | `src/ndf/core/worker.py` | 変更 | worker の上限を上限の設定の新しい方針 `supervise.worker-run`（3,600 秒。値は今の `WORK_TIMEOUT` と同じ）から読む | `ndf.contracts.limits` | モジュール | `WORK_TIMEOUT`（削除）・`work_timeout`（新設） |
 
-## 上限の設定の読み手の宣言（規則 `limit-readers`）
+## 上限の設定の読み手の指定（規則 `limit-readers`）
 
 満たす決定: 決定 1、受け入れ条件 #3684 の 1・6
 
@@ -97,9 +97,9 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `declared` | `src/ndf/checks/limits_readers.py` | 新設 | `declared() -> dict[str, frozenset[str]]` | 上限の設定の方針ごとの、宣言された読み手のモジュールの名前 |
+| `declared` | `src/ndf/checks/limits_readers.py` | 新設 | `declared() -> dict[str, frozenset[str]]` | 上限の設定の方針ごとの、指定された読み手のモジュールの名前 |
 | `actual` | `src/ndf/checks/limits_readers.py` | 新設 | `actual(trees: Mapping[str, ast.Module]) -> dict[str, frozenset[str]]` | 構文木から、方針の名前を引く呼び出しを探し、方針ごとに引いたモジュールの名前を集める |
-| `check` | `src/ndf/checks/limits_readers.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 宣言と実際の食い違いを指摘にする（既存の規則と同じ入口の形） |
+| `check` | `src/ndf/checks/limits_readers.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 指定と実際の食い違いを指摘にする（既存の規則と同じ入口の形） |
 
 - `actual`
   - 事前条件: `trees` のキーはプラグインの根からの相対パスで、`src/` の下の `.py` だけを含む
@@ -120,13 +120,13 @@ plugins/ndf/
     1. 文字列の定数: その文字列
     2. 名前（`LOCK_POLICY`）: 同じモジュールの最上位の代入の右辺を 1. で解く
     3. 星付きの名前（`*POLICY`）: 最上位の代入の右辺が組（`("relay.max-named", "count")`）のとき、表の引数の位置の要素を 1. で解く
-    4. 属性（`machine.CAP_POLICY`）・import した名前: import の先のモジュールの最上位の代入を 2.・3. で解く（1 段だけ。先がさらに別のモジュールを指すときは解けないものにする）
-    5. 上のどれでも解けない（引数・関数の戻り値・f 文字列）: 「動的な読み口」の宣言で解く（次の項）
-  - 動的な読み口: 名前を実行時に組み立てる読み手は、`rules.json` の `limits.dynamic` に `{"module": "<モジュール>", "template": "<名前の型>", "vocabulary": "<契約のファイル>#<JSON Pointer>", "reason": "<理由>"}` を宣言する。`template` の `{}` に `vocabulary` の値を 1 つずつ入れた名前だけを引いたものとして数える（接頭辞で始まる方針をすべて数えることはしない）。今の実例は `ndf.domains.hooks.budget` の 2 つの型で、`hook.budget.{}` の語彙は `contracts/hooks/runtimes.json` の各ランタイムの `events.*.budget`、`hook.budget.{}.{}` は同じ語彙とランタイムの名前の組である。`budget.py` は `tables.policies()` の辞書を名前で引くので、上の表の関数を通らない
-  - 解けない読み口: 宣言の無い動的な読み口は `unresolved` の指摘にする（保存先は呼び出しの行）。黙って数えない・黙って捨てる、のどちらもしない
+    4. 属性（`machine.CAP_POLICY`）・import した名前: import の先のモジュールの最上位の代入を 2.・3. で解く（1 階層だけ。先がさらに別のモジュールを指すときは解けないものにする）
+    5. 上のどれでも解けない（引数・関数の戻り値・f 文字列）: 「動的な読み口」の指定で解く（次の項）
+  - 動的な読み口: 名前を実行時に組み立てる読み手は、`rules.json` の `limits.dynamic` に `{"module": "<モジュール>", "template": "<名前の型>", "vocabulary": "<契約のファイル>#<JSON Pointer>", "reason": "<理由>"}` を指定する。`template` の `{}` に `vocabulary` の値を 1 つずつ入れた名前だけを引いたものとして数える（接頭辞で始まる方針をすべて数えることはしない）。今の実例は `ndf.domains.hooks.budget` の 2 つの型で、`hook.budget.{}` の語彙は `contracts/hooks/runtimes.json` の各ランタイムの `events.*.budget`、`hook.budget.{}.{}` は同じ語彙とランタイムの名前の組である。`budget.py` は `tables.policies()` の辞書を名前で引くので、上の表の関数を通らない
+  - 解けない読み口: 指定の無い動的な読み口は `unresolved` の指摘にする（保存先は呼び出しの行）。黙って数えない・黙って捨てる、のどちらもしない
   - 副作用: 無し（構文木を読むだけ）
 - `check`
-  - 事後条件: 指摘は 3 種類で、宣言した読み手が引いていない方針（`unread`）と、宣言の無い方針を引いているモジュール（`undeclared`）と、解けない読み口（`unresolved`）。どれも方針の名前（解けたとき）とモジュールの名前を理由に含む
+  - 事後条件: 指摘は 3 種類で、指定した読み手が引いていない方針（`unread`）と、指定の無い方針を引いているモジュール（`undeclared`）と、解けない読み口（`unresolved`）。どれも方針の名前（解けたとき）とモジュールの名前を理由に含む
 
 ### 異常系の処理
 
@@ -139,10 +139,10 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `check` | 宣言した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
+| `check` | 指定した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
 | `check` | あるモジュールが方針を引くが、その方針の `read_by` にそのモジュールが無い | `undeclared` の指摘（保存先は呼び出しの行） |
-| `check` | 読み口の引数が解けず、`limits.dynamic` にそのモジュールの宣言も無い | `unresolved` の指摘（保存先は呼び出しの行） |
-| `check` | 宣言と実際が一致する | 指摘なし |
+| `check` | 読み口の引数が解けず、`limits.dynamic` にそのモジュールの指定も無い | `unresolved` の指摘（保存先は呼び出しの行） |
+| `check` | 指定と実際が一致する | 指摘なし |
 
 - 繰り返しの終わる条件: 方針の数（223）× 読み手の数で有限
 - 計算量の注意: 動的な読み口の名前は、語彙から組み立てた名前を集合にして方針の表と突き合わせる。方針ごとに全ファイルを走査しない
@@ -153,7 +153,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `read_by` | データ（方針の項目） | `contracts/limits.json` | 無し（必須） |
 | `limits.readers` | 設定値（読み口の関数の完全な名前と、方針の名前の引数の位置） | `src/ndf/checks/rules.json` | 上の「読み口」の表の 6 行 |
-| `limits.dynamic` | 設定値（動的な読み口の宣言） | 同上 | 上の「動的な読み口」の `ndf.domains.hooks.budget` の 2 行 |
+| `limits.dynamic` | 設定値（動的な読み口の指定） | 同上 | 上の「動的な読み口」の `ndf.domains.hooks.budget` の 2 行 |
 
 ### 既存の部品の再利用
 
@@ -166,10 +166,10 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `declared` | 方針ごとに宣言の集まりを返す | `read_by` が 1 つだけの方針 | 上限の設定を読めないときに `LimitsError` |
-| `actual` | 実コードの呼び出しの形をそのまま写した合成のモジュールで集める: `limits.seconds(LOCK_POLICY)`（最上位の定数）・`limits.value(*POLICY)`（組の定数）・`limits_mod.value("handoff.lines", "count")`（別名の import）・`from ndf.contracts.limits import seconds` の `seconds("x")`・`limits.from_env(env, "N", "p", "seconds")`（3 番目）・`tables.policy_value("hook.pushback", "attempts")` | `ndf.testing.limits` を `limits_mod` の別名で読むモジュール（集めない）・`machine.CAP_POLICY` のように別のモジュールの定数を指す引数（1 段だけ解く） | 構文の誤りで木が無いファイルは渡されない |
-| `actual`（動的な読み口） | 宣言した語彙の値から組み立てた名前だけを集める | 語彙に無い名前の方針 `hook.budget.unused` を足した設定（集めない。`check` で `unread`） | 宣言の無い f 文字列の読み口（集めずに `unresolved`） |
-| `check` | 一致すれば 0 件 | 宣言が 1 つで実際が 0 件（`unread` 1 件） | 宣言の無い方針を引くモジュール（`undeclared` 1 件）・解けない読み口（`unresolved` 1 件） |
+| `declared` | 方針ごとに指定の集まりを返す | `read_by` が 1 つだけの方針 | 上限の設定を読めないときに `LimitsError` |
+| `actual` | 実コードの呼び出しの形をそのまま写した合成のモジュールで集める: `limits.seconds(LOCK_POLICY)`（最上位の定数）・`limits.value(*POLICY)`（組の定数）・`limits_mod.value("handoff.lines", "count")`（別名の import）・`from ndf.contracts.limits import seconds` の `seconds("x")`・`limits.from_env(env, "N", "p", "seconds")`（3 番目）・`tables.policy_value("hook.pushback", "attempts")` | `ndf.testing.limits` を `limits_mod` の別名で読むモジュール（集めない）・`machine.CAP_POLICY` のように別のモジュールの定数を指す引数（1 階層だけ解く） | 構文の誤りで木が無いファイルは渡されない |
+| `actual`（動的な読み口） | 指定した語彙の値から組み立てた名前だけを集める | 語彙に無い名前の方針 `hook.budget.unused` を足した設定（集めない。`check` で `unread`） | 指定の無い f 文字列の読み口（集めずに `unresolved`） |
+| `check` | 一致すれば 0 件 | 指定が 1 つで実際が 0 件（`unread` 1 件） | 指定の無い方針を引くモジュール（`undeclared` 1 件）・解けない読み口（`unresolved` 1 件） |
 
 テストのファイル: `tests/checks/test_limits_readers.py`（新設）
 
@@ -185,7 +185,7 @@ plugins/ndf/
 | `repeated_strings` | `src/ndf/checks/copy_dup.py` | 新設 | `repeated_strings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 4 つ以上のファイルに出る 8〜80 字の文字列を指摘にする |
 | `check` | `src/ndf/checks/copy_dup.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 上の 2 つを並べて返す（既存の規則と同じ入口の形） |
 | `baseline` | `src/ndf/checks/ratchet.py` | 新設 | `baseline() -> dict[str, int]` | 規則ごとの基準の数 |
-| `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int], base: Mapping[str, int] \| None) -> list[str]` | 今の件数が基準と違う規則と、基準を宣言の前より上げた規則を文にする（空なら通る） |
+| `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int], base: Mapping[str, int] \| None) -> list[str]` | 今の件数が基準と違う規則と、基準を前の値より上げた規則を文にする（空なら通る） |
 | `lower` | `src/ndf/checks/ratchet.py` | 新設 | `lower(counts: Mapping[str, int], commit: str, day: str) -> list[str]` | 基準を下回った規則の基準を書き直し、書いた規則の名前を返す |
 
 - `top_functions`
@@ -369,7 +369,7 @@ plugins/ndf/
 | 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読む）・`usage.py:110`・`domains/relay/context_report.py:57`） |
 | 記録（MVV の兆候・検証） | `mvv-signals`・`mvv-validation` | `internal/mvv-signals.schema.json`・`internal/mvv-validation.schema.json`（新設） | `jsonl.append_locked`（呼び手は `domains/records/mvv.py:122・142`） | `jsonl.read_rows`（`mvv.py:90・135`） |
 | 記録（文脈の記録） | `context-records` | `internal/context-records.schema.json`（新設） | 書き手のモジュール（実装の単位 4 で `jsonl` へ寄せる） | `jsonl.read_rows`（`domains/relay/context_records.py:168`） |
-| 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append`。`version-shipped` の事象を組む 2 か所（`control_decide.py:284` の出荷の取り込みと `:321` の明示の出荷）はどちらも `version=` を `product_version=` に変える。旧い欄 `version`（文字列）を `product_version` へ移すのは、既存の行を読む `migrate` だけで、書き手に読み替えを置かない | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
+| 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append`。`version-shipped` のイベントを組む 2 か所（`control_decide.py:284` の出荷の取り込みと `:321` の明示の出荷）はどちらも `version=` を `product_version=` に変える。旧い欄 `version`（文字列）を `product_version` へ移すのは、既存の行を読む `migrate` だけで、書き手に読み替えを置かない | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
 | 実行（工程の文脈） | `context` | `workflow/context.schema.json`（既存。`version` を形の版に、製品の版を `product_version` へ） | 下の「工程の文脈の版」 | 同左 |
 | 実行（工程の入出力） | — | `workflow/stage-io.schema.json`（既存。`release-result` の `outputs.version` を `product_version` へ） | 版を足さない。工程の入出力は 1 回の実行の中で書いて読む値で、版をまたいで残らない | 同左 |
 | プラン | — | `workflow/parallel-plan.schema.json`（既存の `version: const 1`） | 人が書く | `progress/plan/__init__.py` の `read_doc`。今の版より大きい `version` は `precondition` で止める（今はスキーマの `const` で `invalid` になる） |
@@ -391,10 +391,10 @@ plugins/ndf/
 
 ### 工程の文脈の版
 
-工程の文脈は 1 つのファイルではなく、作成の時点の値（ステートマシンの文書の `context`）に、最新の改訂の `outputs_recorded` の事象の `outputs` を順に重ねて作る。重ねる所が今 2 つある（`progress/run.py:105` の `View.context` と `progress/command.py:489` の `machine_context`）。
+工程の文脈は 1 つのファイルではなく、作成の時点の値（ステートマシンの文書の `context`）に、最新の改訂の `outputs_recorded` のイベントの `outputs` を順に重ねて作る。重ねる所が今 2 つある（`progress/run.py:105` の `View.context` と `progress/command.py:489` の `machine_context`）。
 
-- **形の版は、作成の時点の値にだけ持たせる。** `_prepare_new`（`progress/command.py:539`）が `version: 1` を書く。`outputs_recorded` の `outputs` は宣言した出力の部分の辞書で、形の版を持たせない（`invoke.finished` の `value_errors`（`invoke.py:277`）に渡るのも部分の辞書で、そこへ版を足さない）
-- **重ねる入口を 1 つにする。** `progress/stages.py` に `compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]` を置き、`View.context` と `machine_context` の 2 つはこれを呼ぶ。`outputs_recorded` を書く 3 つの書き手（通常の実行と `ndf progress finish` が通る `stages.py:289`、ゲートの回答の `gate/answering.py:122・188・300`）はどれも同じ事象を書くので、読む側の 1 か所で受ければ全経路が通る
+- **形の版は、作成の時点の値にだけ持たせる。** `_prepare_new`（`progress/command.py:539`）が `version: 1` を書く。`outputs_recorded` の `outputs` は定義した出力の部分の辞書で、形の版を持たせない（`invoke.finished` の `value_errors`（`invoke.py:277`）に渡るのも部分の辞書で、そこへ版を足さない）
+- **重ねる入口を 1 つにする。** `progress/stages.py` に `compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]` を置き、`View.context` と `machine_context` の 2 つはこれを呼ぶ。`outputs_recorded` を書く 3 つの書き手（通常の実行と `ndf progress finish` が通る `stages.py:289`、ゲートの回答の `gate/answering.py:122・188・300`）はどれも同じイベントを書くので、読む側の 1 か所で受ければ全経路が通る
 - **`compose_context` の順序:** (1) 作成の時点の値を `internal.read_record("context", initial)` に通す。版 0（`version` が無いか文字列）は文字列の `version` を `product_version` へ移して版 1 にし、今の版より大きい整数の版は `precondition` の `InternalError` で止める（新しい NDF が保存した文脈を古い NDF が版 1 として読んで工程を再開しない）。(2) 各 `outputs` を古い順に重ねる前に、文字列の `version`（旧 `deploy` の出力）を `product_version` へ移す。(3) 最後に `version` を (1) で確かめた版で置き直す（出力が形の版を上書きしない）。この順序なので、更新の前に出荷した既存のスプリントを再開しても `release_record` は `product_version` で真になる
 - **`precondition` の伝え方:** `compose_context` の `InternalError` は 2 つの呼び手（`View.context` と `machine_context`）のどちらも捕まえずに上へ通し、`ndf progress` の各サブコマンドの入口が今の例外の表で `stopped`・`precondition`・終了コード 3（「新しい版の文脈を古い NDF が読んだ。プラグインを更新する」）にする。2 つの呼び手に別々の受け方を書かない
 - **保存済みの工程の定義（スナップショット）も移す:** `read_current`（`progress/command.py:395`）は、作成の時点に保存した工程の定義を `stages.snapshot_from` で復元する。配布する `stages/*.json` を直しても、既存のスプリントの `StageDef` の `inputs`・`outputs` は `version` のまま残り、`release-verification` に文脈の形の版 `1` が渡る。そこでスナップショットを内部データの種類 `stage-snapshot` とし、`snapshot_from` の前に `read_record("stage-snapshot", raw)` を通す。スナップショット自身の `version` は工程の定義の文書の版の文字列（`"1.0.0"`。`definition.py:382`）なので、版 0 の見分けは文脈と同じ（整数でなければ版 0）。版 0 → 1 の移し方: スナップショットの文字列の `version` を `definition_version` へ移し、各工程の `inputs`・`outputs` の `"version"` を `"product_version"` に置き換え、`version: 1` を足す。`snapshot_dict` は版 1 の形で書く（`definition_version` と `version: 1`）
@@ -402,7 +402,7 @@ plugins/ndf/
 
 ### リリースの結果の製品の版（出力元から後の工程の入力まで）
 
-製品の版の改名は、文脈と工程の定義だけでなく、版を出す側と結果のスキーマにも当てる。どれかが旧い `version` のままだと、`invoke.finished` が工程の出力の宣言に無いキーを捨てる（または結果のスキーマが拒む）ので、出荷の後の工程へ版が渡らない。
+製品の版の改名は、文脈と工程の定義だけでなく、版を出す側と結果のスキーマにも当てる。どれかが旧い `version` のままだと、`invoke.finished` が工程の出力の定義に無いキーを捨てる（または結果のスキーマが拒む）ので、出荷の後の工程へ版が渡らない。
 
 | 箇所 | 今 | 変えた後 |
 | --- | --- | --- |
@@ -413,7 +413,7 @@ plugins/ndf/
 
 読む側は、旧い `version` を `outputs` に持つ結果を受けない（結果のスキーマが拒み、`bad_report` になる）。結果は、同じ NDF の中で子プロセスまたは Skill が出してすぐ読む 1 回限りの値で、出す側と読む側の版がそろうためである。旧い名前が残るのは保存済みの値（`outputs_recorded` と スナップショット）だけで、これは `compose_context` と `read_record("stage-snapshot", ...)` が移す。
 
-確かめ（単体テスト）: `cmd_record` の結果 → `invoke.finished`（`deploy` の出力の宣言で拾う）→ `outputs_recorded` → `compose_context` → `release-verification` の入力の解決、を 1 本の流れで通し、入力に `product_version` の文字列が渡ることを見る。旧いスナップショット（入力が `version`）と旧い `deploy` の出力を持つ、出荷済みのスプリントを再開した場合も同じ値が渡ることを見る。
+確かめ（単体テスト）: `cmd_record` の結果 → `invoke.finished`（`deploy` の出力の定義で拾う）→ `outputs_recorded` → `compose_context` → `release-verification` の入力の解決、を 1 本の流れで通し、入力に `product_version` の文字列が渡ることを見る。旧いスナップショット（入力が `version`）と旧い `deploy` の出力を持つ、出荷済みのスプリントを再開した場合も同じ値が渡ることを見る。
 
 ### 結果の版と、形の違う結果
 
@@ -441,7 +441,7 @@ plugins/ndf/
 
 | 種類 | 実際の版 0 の行（サンプル） | 移し方 | 版 1 の行 |
 | --- | --- | --- | --- |
-| `loop-event` | `{"at": 1795400000.123456, "kind": "gate-answered", "lap": 2, "pr": 4301, "answer": "approved", "head": "abc", "note": ""}` | `at` が数なら `stamp(at)` で文字列にする。`status` は足さない（事象は結果を持たない） | `{"version": 1, "at": "2026-11-23T02:13:20.123456+00:00", "kind": "gate-answered", ...}` |
+| `loop-event` | `{"at": 1795400000.123456, "kind": "gate-answered", "lap": 2, "pr": 4301, "answer": "approved", "head": "abc", "note": ""}` | `at` が数なら `stamp(at)` で文字列にする。`status` は足さない（イベントは結果を持たない） | `{"version": 1, "at": "2026-11-23T02:13:20.123456+00:00", "kind": "gate-answered", ...}` |
 | `loop-event`（出荷） | `{"at": 1795400000.0, "kind": "version-shipped", "lap": 2, "version": "11.0.23"}` | 上に加え、文字列の `version` を `product_version` へ移す（形の版と衝突させない） | `{"version": 1, "at": "...", "kind": "version-shipped", "lap": 2, "product_version": "11.0.23"}` |
 | `loop-event`（貸し出し） | `{"at": 1795400000.0, "kind": "lease-taken", "session": "s1", "until": 1795400600.0}` | `at` だけを直す。`until` は書いた時刻ではなく期限（名前の対応表で別の意味）なので秒のまま | `{"version": 1, "at": "...", "kind": "lease-taken", "session": "s1", "until": 1795400600.0}` |
 | `usage` | `{"at": "2026-11-23T01:00:00+00:00", "caller": "claude-cli", "usage": {...}}` | `version` を足すだけ（`at` は既に `jsonl.now()` の UTC の文字列） | `{"version": 1, ...}` |
@@ -449,13 +449,13 @@ plugins/ndf/
 | `mvv-validation`・`context-records` | 今の書き手の行 | `version` を足すだけ（時刻の欄が `at` でない行は、名前の対応表の消した別名から `at` へ移す） | 同左 |
 | `context` | `{"pace": "auto", "version": "11.0.23", ...}` | 文字列の `version` を `product_version` へ移す。`version` が無い文脈はそのまま版 1 にする（未出荷のまま。`release_record` は `product_version` を見るので満たさない） | `{"version": 1, "pace": "auto", "product_version": "11.0.23", ...}` |
 
-- 読み手の変更: `record_decide` の `float(ev["at"])`（`record_decide.py:221・240・242`）は `epoch(ev["at"])` へ、`rec.event(kind, at: float, ...)` は `at` を `stamp(at)` で書く。`until` を読む `float(ev["until"])` は変えない。`record_decide` の `version-shipped` の要るキー（`VERSION_SHIPPED: ("lap", "version")`）と `ev["version"]` の読み（`record_decide.py:224`・`control_decide.py:286`）は `product_version` へ変える。時刻を秒へ直して比べるので、`stamp` はマイクロ秒まで残す（同じ秒の 2 つの事象の前後を保つ）
+- 読み手の変更: `record_decide` の `float(ev["at"])`（`record_decide.py:221・240・242`）は `epoch(ev["at"])` へ、`rec.event(kind, at: float, ...)` は `at` を `stamp(at)` で書く。`until` を読む `float(ev["until"])` は変えない。`record_decide` の `version-shipped` の要るキー（`VERSION_SHIPPED: ("lap", "version")`）と `ev["version"]` の読み（`record_decide.py:224`・`control_decide.py:286`）は `product_version` へ変える。時刻を秒へ直して比べるので、`stamp` はマイクロ秒まで残す（同じ秒の 2 つのイベントの前後を保つ）
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `read_record` | 形に合わない行 | 項目の欠け・型の違い | `read_record` | 呼び出し元へ返す（`InternalError`）。`jsonl.read_rows` から呼ばれたときは `read_rows` が受けて、その行を `Broken` に入れて読み進める（上の「`read_rows` の不合格の行の扱い」）。`LoopStore.read` から呼ばれたときは今の `StoreError` と同じく止める（開発ループの事象は 1 件欠けると状態を再生できない） | `read_rows` の経路は結果の `broken_rows` か警告に行番号が出る。`LoopStore.read` の経路は `stopped`・`invalid`・終了コード 2 | 行を直してから打ち直す |
+| `read_record` | 形に合わない行 | 項目の欠け・型の違い | `read_record` | 呼び出し元へ返す（`InternalError`）。`jsonl.read_rows` から呼ばれたときは `read_rows` が受けて、その行を `Broken` に入れて読み進める（上の「`read_rows` の不合格の行の扱い」）。`LoopStore.read` から呼ばれたときは今の `StoreError` と同じく止める（開発ループのイベントは 1 件欠けると状態を再生できない） | `read_rows` の経路は結果の `broken_rows` か警告に行番号が出る。`LoopStore.read` の経路は `stopped`・`invalid`・終了コード 2 | 行を直してから打ち直す |
 | `read_record` | 知らない種類 | `kind` の綴りの誤り | 同上 | 止める | `stopped`・`config_broken`・終了コード 2 | 綴りを直す |
 | `write_record` | 形に合わない行 | スキーマに無い欄・型の違い・時刻の書式 | `write_record` | 書かずに呼び出し元へ返す | `stopped`・`invalid`・終了コード 2 | 呼び出し元を直す |
 | `migrate` | 移せない版 | 今の版より新しい版 | `migrate` | 止める（新しい版を古い読み手が読まない。#1706 と同じ止まり方だが、理由を「新しい版の記録を古い NDF が読んだ」と出す） | `stopped`・`precondition`・終了コード 3 | プラグインを更新する |
@@ -482,7 +482,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `read_record` | 今の版の行をそのまま返す | 上の移し方の表のサンプルの 7 行が、それぞれ右の列の版 1 の行になる（数の `at`・文字列の `version`・`status` を持たない事象・`until` を秒のまま） | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
+| `read_record` | 今の版の行をそのまま返す | 上の移し方の表のサンプルの 7 行が、それぞれ右の列の版 1 の行になる（数の `at`・文字列の `version`・`status` を持たないイベント・`until` を秒のまま） | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
 | `write_record` | `version` と `at` を埋めて返す | `at` を呼び出し元が渡した行（上書きしない）・`+00:00` の時刻（通る）・`status` を持たない種類の行（通る） | スキーマに無い欄を持つ行（書かずに `InternalError`）・固有の欄の型の違い（同）・時差の無い時刻・`+09:00` の時刻・UTC の接尾辞を持つ不正な日付（`2026-02-30T00:00:00Z`。書式の検査器で落ちる） |
 | `migrate` | 合成した版 1 → 2 の移行で項目が移る（今の版は 1 なので、移行の経路は合成したスキーマで確かめる） | 移す項目が無い版（そのまま） | 新しい版（止まる） |
 | `jsonl.read_rows` | 合う行だけを返し、`Broken` が空 | 書きかけの最後の行（`Broken` 1 件・行番号つき）・項目の欠けた行（`Broken` 1 件・止まらない） | 今の版より新しい版の行（止まる） |
@@ -492,10 +492,10 @@ plugins/ndf/
 | `read_record("stage-snapshot")` | 版 1 のスナップショットをそのまま返す | 入力が `version` の旧いスナップショット（`product_version` へ移り、文字列の `version` は `definition_version` へ） | `version: 2`（`precondition`） |
 | `invoke.read_report` | `version` の無い結果を版 1 として受ける | `version: 1` | `version: 2` の結果（`stopped`・`precondition`。`bad_report` にしない）・`version: "1"`（`bad_report`） |
 | `stamp`・`epoch` | `epoch(stamp(t)) == t`（マイクロ秒まで） | 同じ秒の 2 つの時刻の前後が保たれる | 時差つきの文字列を `epoch` に渡す（`InternalError`） |
-| 開発ループの再生 | 版 0 の事象だけの `record.jsonl` と、版 0 と版 1 が混ざった `record.jsonl` から、今と同じ状態（回答の時刻・停止の時刻・出した版）が再生できる | 出荷の事象の `product_version` が `released` に入る | — |
+| 開発ループの再生 | 版 0 のイベントだけの `record.jsonl` と、版 0 と版 1 が混ざった `record.jsonl` から、今と同じ状態（回答の時刻・停止の時刻・出した版）が再生できる | 出荷のイベントの `product_version` が `released` に入る | — |
 | 条件 `release_record` | `product_version` を持つ文脈で真 | 形の版 `version: 1` だけを持つ未出荷の文脈で偽 | — |
 
-テストのファイル: `tests/contracts/test_internal.py`（新設）・`tests/domains/loop/` の再生のテスト（版 0 の事象を足す）・`tests/progress/` の条件のテスト
+テストのファイル: `tests/contracts/test_internal.py`（新設）・`tests/domains/loop/` の再生のテスト（版 0 のイベントを足す）・`tests/progress/` の条件のテスト
 
 ## 名前の対応表の規則（`internal-names`）
 
