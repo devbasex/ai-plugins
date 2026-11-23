@@ -272,7 +272,9 @@ def _restarts_by_reason(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _rework(rows: list[dict[str, Any]]) -> int | str:
     """「継続」の判定が 2 回以上ある工程の数（やり直し）。「継続」の判定が無ければ「不明」。"""
-    keep = Counter(r["stage"] for r in rows if r.get("event") == cr.EVENT_DECISION and r.get("verdict") == ct.Verdict.CONTINUE and r.get("stage"))
+    keep = Counter(
+        r["stage"] for r in rows if r.get("event") == cr.EVENT_DECISION and r.get("verdict") == ct.Verdict.CONTINUE and r.get("stage")
+    )
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
 
