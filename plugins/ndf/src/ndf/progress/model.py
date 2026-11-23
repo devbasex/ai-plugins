@@ -23,8 +23,10 @@ NEW = "new"
 REPO_KEY_LENGTH = 12
 # ステートマシンのワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors のキー）
 WORKFLOW_ACTOR = "workflow"
-# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた回答の回答した者・判定の結果を持つ文脈のキー（context.schema.json）
-MVV_PACES = ("fast", "auto")
+# スプリントの文脈のスキーマ
+CONTEXT = "workflow/context.schema.json"
+# 承認ゲートを MVV 判定で省ける進め方（文脈の pace の一部）・省いた回答の回答した者・判定の結果を持つ文脈のキー
+MVV_PACES = contracts.schema_enum(CONTEXT, "/$defs/mvv_pace")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
 # 承認ゲートの質問の id の長さ（sha256 の頭）
 QUESTION_ID_LENGTH = 16

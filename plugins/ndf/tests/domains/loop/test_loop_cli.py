@@ -152,6 +152,11 @@ def test_close_plan_and_review_args(loop: Callable[..., dict]) -> None:
     assert loop("close-plan", "--pace", "slow", "--route", "none")["cause"]["kind"] == "invalid"
 
 
+@pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
+def test_close_plan_accepts_every_pace_of_the_context_schema(loop: Callable[..., dict], pace: str) -> None:
+    assert loop("close-plan", "--pace", pace, "--route", "none")["status"] == "ok"
+
+
 def test_step_loop_tool_is_the_cli_name() -> None:
     """次の 1 手の既定のサブコマンド（`Step.tool`）は、この CLI のサブコマンドの名前と同じ。"""
     assert ctl.LOOP_TOOL == loop_cli.TOOL

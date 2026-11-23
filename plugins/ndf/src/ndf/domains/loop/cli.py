@@ -161,7 +161,7 @@ def _get(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def _close_plan(a: argparse.Namespace) -> dict[str, Any]:
-    paces = contracts.load_json(definition.CONTEXT)["properties"]["pace"]["enum"]
+    paces = [p for name in ("plain_pace", "mvv_pace") for p in contracts.schema_enum(definition.CONTEXT, f"/$defs/{name}")]
     facts = sprint_decide.CloseFacts(a.pace, tuple(a.route), a.mvv, a.record_pr, a.retrospective_due)
     plan = sprint_decide.close_plan(facts, paces)
     metrics = {"record_pr": plan.record_pr, "verify": plan.verify, "pace": plan.pace}

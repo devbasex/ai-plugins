@@ -31,7 +31,7 @@ from ndf.progress import model, stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
 NDF_SCHEMA = "workflow/ndf.schema.json"
-CONTEXT = "workflow/context.schema.json"
+CONTEXT = model.CONTEXT
 X_SOURCE = "x-source"
 MODES_DIR = "workflow/modes"
 STAGES_DIR = "workflow/stages"

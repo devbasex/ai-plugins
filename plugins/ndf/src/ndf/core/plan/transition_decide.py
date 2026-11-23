@@ -163,7 +163,7 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
     done = done._replace(kind=kind)
     route = routing.pick(kind, on_cause=step.on_cause, on_fail=step.on_fail, retry=_retry_state(step, state, done))
     rule = RULE_CONFLICT if kind == "base_conflict" else RULE_STOPPED
-    state = _chose(state, Choice(rule, chosen.SCRIPT, step.id, _taken(route, bool(state.prelude)), kind))
+    state = _chose(state, Choice(rule, chosen.Chooser.SCRIPT, step.id, _taken(route, bool(state.prelude)), kind))
     detail = f"ステップ {step.id} が {kind} で止まった"
     if route.to == routing.RETRY:
         retries = {**state.retries, _retry_key(step.id, kind): _used(state, step.id, kind) + 1}

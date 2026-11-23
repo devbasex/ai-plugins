@@ -8,7 +8,7 @@
   "properties": {
     "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。ステートマシンの作成が書く"},
     "mode": {"enum": ["light", "operation", "legacy-refactor", "standard", "documentation"], "description": "モード。モード判定が書く"},
-    "pace": {"enum": ["normal", "fast", "auto"], "description": "進め方。モード判定が書く"},
+    "pace": {"anyOf": [{"$ref": "#/$defs/plain_pace"}, {"$ref": "#/$defs/mvv_pace"}], "description": "進め方。モード判定が書く"},
     "mvv_ref": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "スプリントが参照する承認済みプロジェクト MVV の sha256（.ndf/mvv.json の versions の最後）。ステートマシンの作成が書き、承認が無ければ null。MVV 判定の前の検査 2 が承認の記録と照らす"},
     "mvv_gate": {"$ref": "#/$defs/mvv_gate", "description": "承認ゲートの直前の MVV 判定の結果。判定のステップが書き、承認ゲートのステップが読む", "x-source": "ステートマシンの MVV 判定のステップ（設計は design-mvv、デプロイは release-mvv）の outputs"},
     "worktree": {"type": "string", "pattern": "^/[^\\u0000]*$", "description": "作業場所の絶対パス。作業場所の用意が書く。git と作業へ渡す前にこの形で確かめる（3364-7）"},
@@ -21,6 +21,8 @@
     "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。実装が書き、コードレビューはここから後のコミット（つなぎ目）だけを読む"}
   },
   "$defs": {
+    "plain_pace": {"enum": ["normal"], "description": "利用者の承認でゲートを通る進め方"},
+    "mvv_pace": {"enum": ["fast", "auto"], "description": "承認ゲートを MVV 判定で省ける進め方"},
     "mvv_gate": {
       "type": "object",
       "description": "MVV 判定の結果。skip が真なら承認ゲートを人へ問わずに通す（回答した者 service:mvv）",
