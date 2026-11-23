@@ -20,7 +20,7 @@ def test_boot_does_nothing_below_the_floor(monkeypatch):
 
     def load(rel):
         data = real(rel)
-        if rel == boot.TOOLCHAIN:
+        if rel == toolchain.TABLE:
             return {**data, "python": {**data["python"], "hook_floor": "99.0"}}
         return data
 
