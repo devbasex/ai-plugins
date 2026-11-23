@@ -70,15 +70,16 @@ def kind_gaps(
     `covers`（名前 → その値があれば要らない名前。呼び手が `route.LAUNCH_SOURCES` を渡す）の値がそろっていれば、
     その元の名前は欠けとしない（`acceptance` を明示した複数課題の単位は、単独の `issue` を持たなくてよい）。
     """
+    spec = work_kinds()[kind]
     got = kind_values(kind, values, inputs)
     spared = {n for name, names in covers.items() if _filled(got.get(name)) for n in names}
     gaps = {
         n: sources[n] if n in sources else f"工程の入力 {n}（工程の定義の metadata.ndf.inputs）"
-        for n in work_kinds()[kind]["inputs"]
+        for n in spec["inputs"]
         if not _filled(got.get(n)) and n not in spared
     }
     if work_dir_of(kind, values) is None:
-        cwd = work_kinds()[kind]["cwd"]
+        cwd = spec["cwd"]
         gaps[cwd] = f"作業 {kind} の作業場所（差し込み {cwd}）"
     return gaps
 
