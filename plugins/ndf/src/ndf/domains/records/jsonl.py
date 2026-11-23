@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from filelock import FileLock
 
@@ -23,38 +24,93 @@ def now() -> str:
 
 
 class Broken(NamedTuple):
-    """読めずに除いた行: 行番号（1 から）と理由。"""
+    """読めずに除いた行: 行番号（1 から）・理由・それより前にある読めた行の数・辞書として読めた中身（読めなければ None）。"""
 
     line: int
     reason: str
+    before: int
+    raw: Optional[dict[str, Any]]
 
 
 def read_rows(path: Path, *, kind: str) -> tuple[list[dict[str, Any]], list[Broken]]:
     """種類 `kind` の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。"""
+    if not path.is_file():
+        return [], []
+    return _read_text(path.read_text(encoding="utf-8"), kind, 1)
+
+
+def read_checked(path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool]) -> tuple[list[dict[str, Any]], list[Broken]]:
+    """`wanted` が真の行と、ファイル全体の除いた行（錠は呼び手が持つ）。形は、前の呼び出しより後に足された行だけ確かめる。
+
+    確かめ終えた位置は `<ファイル>.checked` に置く。位置より前の中身か種類の形が変われば、初めから確かめ直す。新しいバージョンの行が
+    あれば位置を進めずに `InternalError`。
+    """
+    if not path.is_file():
+        return [], []
+    data, mark, shape = path.read_bytes(), Path(f"{path}.checked"), internal.fingerprint(kind)
+    size, broken = _load_mark(mark, data, shape)
+    rows = _known_rows(data[:size], kind, wanted, {b.line for b in broken})
+    added, bad = _read_text(data[size:].decode("utf-8"), kind, data.count(b"\n", 0, size) + 1)
+    # 書きかけの最後の行は次の追記で変わるので、改行で終わる所までを確かめ終えた位置にする
+    end = data.rfind(b"\n") + 1
+    if end > size:
+        held = [*broken, *(b for b in bad if b.line <= data.count(b"\n"))]
+        body = {"size": end, "digest": _digest(data[:end], shape), "broken": [[b.line, b.reason] for b in held]}
+        mark.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    return rows + [r for r in added if wanted(r)], broken + bad
+
+
+def _digest(data: bytes, shape: str) -> str:
+    return hashlib.sha256(shape.encode("utf-8") + data).hexdigest()
+
+
+def _load_mark(mark: Path, data: bytes, shape: str) -> tuple[int, list[Broken]]:
+    """確かめ終えた位置と、そこまでの除いた行。無い・読めない・今の中身と合わないなら初めから（0）。"""
+    try:
+        held = json.loads(mark.read_text(encoding="utf-8"))
+        size, digest = int(held["size"]), held["digest"]
+        broken = [Broken(int(line), str(reason), 0, None) for line, reason in held["broken"]]
+    except (OSError, ValueError, TypeError, KeyError):  # 位置は作り直せるので、読めなければ初めから確かめる
+        return 0, []
+    return (size, broken) if digest == _digest(data[:size], shape) else (0, [])
+
+
+def _known_rows(data: bytes, kind: str, wanted: Callable[[Mapping[str, Any]], bool], skip: set[int]) -> list[dict[str, Any]]:
+    """形を確かめ終えた行のうち `wanted` が真のもの（今のバージョンの形へ移すだけで、形は確かめない）。"""
+    rows = []
+    for number, line in enumerate(data.decode("utf-8").split("\n"), 1):
+        if line.strip() and number not in skip:
+            raw = json.loads(line)
+            if wanted(raw):
+                rows.append(internal.migrate(kind, raw))
+    return rows
+
+
+def _read_text(text: str, kind: str, first: int) -> tuple[list[dict[str, Any]], list[Broken]]:
     rows: list[dict[str, Any]] = []
     broken: list[Broken] = []
-    if not path.is_file():
-        return rows, broken
-    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+    for number, line in enumerate(text.split("\n"), first):
         if not line.strip():
             continue
+        raw: Any = None
         try:
-            rows.append(_row(kind, line))
+            raw = _object(line)
+            rows.append(internal.read_record(kind, raw))
         except internal.InternalError as exc:
             if exc.kind != "invalid":
                 raise
-            broken.append(Broken(number, str(exc)))
+            broken.append(Broken(number, str(exc), len(rows), raw))
     return rows, broken
 
 
-def _row(kind: str, line: str) -> dict[str, Any]:
+def _object(line: str) -> dict[str, Any]:
     try:
         raw = json.loads(line)
     except json.JSONDecodeError as exc:
         raise internal.InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
     if not isinstance(raw, dict):
         raise internal.InternalError("invalid", "辞書でない")
-    return internal.read_record(kind, raw)
+    return raw
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:

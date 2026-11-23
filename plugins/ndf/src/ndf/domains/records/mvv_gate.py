@@ -22,7 +22,6 @@ from ndf.adapters import llm, publish
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits
-from ndf.contracts.internal import InternalError
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -168,7 +167,7 @@ def gate(
     """承認ゲートを省けるかを判定し、出力 `mvv_gate` の値を返す（`mm.gate_outcome`）。進め方が fast・auto でなければ判定しない。
 
     判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
-    MVV 判定の記録に読めない行があれば `warnings` へ足す。
+    MVV 判定の記録に読めない行があれば `warnings` へ足す。新しいバージョンの行があれば、人へ問わずに `InternalError`（呼び手が止める）。
     """
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.gate_outcome(gate_name, None, False, [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])
@@ -176,5 +175,5 @@ def gate(
         return mm.gate_outcome(gate_name, None, False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない"])
     try:
         return _judged(root, gate_name, inputs, hub, ask, [] if warnings is None else warnings)
-    except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, InternalError, OSError) as exc:
+    except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
         return mm.gate_outcome(gate_name, None, False, [f"MVV 判定を打てない: {exc}"])

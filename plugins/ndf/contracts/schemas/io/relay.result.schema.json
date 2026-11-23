@@ -43,7 +43,7 @@
         },
         "skipped": {
           "type": "integer",
-          "description": "読めずに飛ばした判定の記録の行の数（context report）"
+          "description": "読めずに飛ばした判定の記録の行の数（context calibrate・report）"
         },
         "usage_skipped": {
           "type": "integer",

@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -111,6 +113,13 @@ def migrate(kind: str, raw: Mapping[str, Any]) -> Row:
     for step in spec.steps[found:current]:
         row = step(row)
     return {**row, "version": current}
+
+
+@contracts.cached_reader
+def fingerprint(kind: str) -> str:
+    """種類の形を見分ける値（種類のスキーマと共通の欄のスキーマの sha256）。形が変われば別の値になる。"""
+    blob = json.dumps([contracts.load_json(_kind(kind).schema), contracts.load_json(COMMON)], sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _kind(kind: str) -> Kind:

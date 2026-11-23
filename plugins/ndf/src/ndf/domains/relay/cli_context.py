@@ -49,13 +49,12 @@ def _context_record(args: argparse.Namespace) -> int:
 
 def _context_calibrate(args: argparse.Namespace) -> int:
     try:
-        body = context_records.calibrate(context_records.toplevel(None), args.days, time.time(), os.environ)
+        body, skipped = context_records.calibrate(context_records.toplevel(None), args.days, time.time(), os.environ)
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"見込みのファイルへ書けない: {exc}"))
     samples = body["samples"]
-    return result.emit(
-        result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics={"samples": sum(samples.values())})
-    )
+    metrics = {"samples": sum(samples.values()), "skipped": skipped}
+    return result.emit(result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics=metrics))
 
 
 def _span(args: argparse.Namespace) -> Optional[tuple[float, float]]:

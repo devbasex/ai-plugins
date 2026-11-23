@@ -62,6 +62,14 @@ def test_reusable_takes_only_the_latest_follow_for_the_same_key() -> None:
     assert md.reuse_row(again, "t4", "/w")["reused_from"] == "t1"
 
 
+def test_reusable_does_not_go_back_past_an_excluded_row_that_may_be_the_latest() -> None:
+    follow = md.judged_row("k", md.FOLLOW, "t1", "/m", {})
+    assert md.reusable([follow], "k", [(1, {"key": "k"})]) is None
+    assert md.reusable([follow], "k", [(1, None)]) is None and md.reusable([follow], "k", [(1, {})]) is None
+    assert md.reusable([follow], "k", [(1, {"key": "other"})]) == follow
+    assert md.reusable([follow], "k", [(0, {"key": "k"}), (0, None)]) == follow
+
+
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git_sandbox.isolate_git(tmp_path, monkeypatch)
@@ -106,15 +114,25 @@ def test_signals_count_with_the_base_branch_version_from_a_worktree(repo: Path) 
     assert mvv.signals(repo, "main", warnings=[]).overrides == 0
 
 
-def test_signals_count_the_rows_of_version_zero_and_report_the_rest(repo: Path) -> None:
+@pytest.fixture
+def main_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Git を起動しないメインディレクトリ（ベースブランチの設定はバージョン 2）。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    monkeypatch.setattr(mvv, "repo_key", str)
+    monkeypatch.setattr(mvv, "decl_at", lambda root, ref: _decl(2))
+    monkeypatch.setattr(mvv.git_mod.Git, "remote", lambda self: "origin")
+    return tmp_path
+
+
+def test_signals_count_the_rows_of_version_zero_and_report_the_rest(main_dir: Path) -> None:
     # バージョン 0 の兆候の `version` は MVV の設定のバージョン（整数）
-    old = {"at": "2026-11-14T01:00:00+00:00", "kind": md.OVERRIDE_PASS, "version": 2, "repo": mvv.repo_key(repo), "pr": 1}
+    old = {"at": "2026-11-14T01:00:00+00:00", "kind": md.OVERRIDE_PASS, "version": 2, "repo": str(main_dir), "pr": 1}
     path = mvv.record_path("mvv-signals")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(old) + "\n[]\n", encoding="utf-8")
-    mvv.record_answer(repo, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 2}, 2)
+    mvv.record_answer(main_dir, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 2}, 2)
     warnings: list[dict] = []
-    assert mvv.signals(repo, "develop", warnings=warnings).overrides == 2
+    assert mvv.signals(main_dir, "develop", warnings=warnings).overrides == 2
     assert warnings == [{"kind": "broken_rows", "path": str(path), "lines": [2]}]
 
 
@@ -149,6 +167,20 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     assert len(calls) == 3
     rows, broken = jsonl.read_rows(path, kind="mvv-validation")
     assert len(rows) == 4 and [b.line for b in broken] == [1]
+
+
+def test_mvv_validate_sprint_judges_again_after_a_row_of_the_same_inputs_that_does_not_fit(main_dir: Path) -> None:
+    verdicts = [md.FOLLOW, md.NOT_FOLLOW]
+    inputs = {"sprint": "本文"}
+
+    def judge(_: Any) -> tuple[str, dict]:
+        return verdicts.pop(0), {}
+
+    first = mvv.mvv_validate_sprint(main_dir, inputs, judge, warnings=[])
+    with mvv.record_path("mvv-validation").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({**first, "verdict": md.NOT_FOLLOW, "usd": "0.1"}) + "\n")
+    assert mvv.mvv_validate_sprint(main_dir, inputs, judge, warnings=[])["verdict"] == md.NOT_FOLLOW
+    assert verdicts == []
 
 
 # 現状固定（I-011 の前）: 記録の保存先は NDF_MVV_STATE_DIR → 状態の保存先の順。状態の保存先を解けなければ IdentityError のまま

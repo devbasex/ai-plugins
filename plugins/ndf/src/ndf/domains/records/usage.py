@@ -2,7 +2,7 @@
 
 使用量ログは 1 本の JSONL（表 ndf-files の usage-log-file）で、書き手（hook かスクリプトか）によらず同じ保存先に書く。
 同じ `agent_id` の差を書くときは、使用量ログの錠の中で既存の行を読んでから書く（別々のサブエージェントの hook が
-同時に走るため）。書き込みの失敗は hook を落とさず、標準エラーへ 1 行出して続ける（I5）。
+同時に走るため）。形は、前の停止より後に足された行だけ確かめる（`jsonl.read_checked`）。書き込みの失敗は hook を落とさず、標準エラーへ 1 行出して続ける（I5）。
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def record_subagent(
         path = usage_log_path(env)
         with jsonl.lock(path):
             total = transcript_usage(Path(transcript))
-            prior, broken = jsonl.read_rows(path, kind="usage")
+            prior, broken = jsonl.read_checked(path, kind="usage", wanted=lambda r: r.get("agent_id") == agent)
             warnings += jsonl.broken_items(path, broken)
             usage: Any = ud.stop_delta(prior, agent, total).as_dict() if isinstance(total, ud.Usage) else ud.UNKNOWN
             row = {"at": jsonl.now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}
