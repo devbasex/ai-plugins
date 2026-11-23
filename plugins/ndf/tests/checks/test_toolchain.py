@@ -1,0 +1,249 @@
+"""規則 toolchain: 配る構成の設定と、ワークフロー・`pyproject.toml`・ランチャーの指定の一致（#3687 の受け入れ条件 3・4）。"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import pytest
+
+from ndf import identity
+from ndf.checks import run, toolchain
+from ndf.checks.model import CheckError
+from ndf.contracts import toolchain as table
+
+UV = "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3"
+PY = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0"
+COMPAT = ".github/workflows/compat.yml"
+SETTINGS: dict[str, Any] = {
+    "workflows": ".github/workflows/*.yml",
+    "python_ci": ["3.11", "3.13"],
+    "python_compat": {"versions": ["3.10"], "workflows": [COMPAT]},
+    "plugin_pyprojects": ["plugins/ndf-dev/pyproject.toml"],
+    "launchers": ["plugins/ndf-dev/bin/ndf"],
+}
+
+
+def _workflow(*steps: str) -> str:
+    body = "".join(f"      {s}\n" for s in steps)
+    return f"name: w\non:\n  pull_request:\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n{body}"
+
+
+def _uv(version: str | None = None) -> str:
+    if version is None:
+        version = table.uv_version()
+    return f"- uses: {UV}\n        with:\n          enable-cache: true\n          version: {version}"
+
+
+def _py(version: str) -> str:
+    return f'- uses: {PY}\n        with:\n          python-version: "{version}"'
+
+
+def _launcher(version: str | None = None, digest: str | None = None) -> str:
+    version = table.uv_version() if version is None else version
+    digest = table.uv_installer_sha256() if digest is None else digest
+    return f'#!/usr/bin/env bash\nset -eu\nUV_VERSION="{version}"\n# 照合値\nUV_INSTALLER_SHA256="{digest}"\n'
+
+
+class Repo:
+    def __init__(self, plugin) -> None:
+        self.plugin = plugin
+
+    def file(self, rel: str, text: str) -> None:
+        path = self.plugin.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def settings(self, value: dict[str, Any] | None) -> None:
+        self.file(f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json", json.dumps({} if value is None else {"toolchain": value}))
+
+    def check(self, rules) -> list:
+        return toolchain.check(self.plugin.scope(), rules)
+
+
+@pytest.fixture
+def repo(plugin) -> Repo:
+    """設定と 3 つの指定箇所がそろったリポジトリ（`pyproject.toml` は fixture が写した本物）。"""
+    r = Repo(plugin)
+    r.settings(SETTINGS)
+    r.file(".github/workflows/ci.yml", _workflow(_py("3.13"), _uv(), "- run: uv run pytest"))
+    r.file(COMPAT, _workflow(_py("3.10")))
+    r.file("plugins/ndf-dev/bin/ndf", _launcher())
+    return r
+
+
+def _lines(found) -> list[tuple[str, int]]:
+    return [(f.path, f.line) for f in found]
+
+
+def test_settings_and_the_three_places_agree(repo, rules):
+    assert repo.check(rules) == []
+
+
+def test_registered_as_a_settings_rule():
+    assert run.SETTINGS_RULES[toolchain.RULE] is toolchain.check
+
+
+def test_without_toolchain_nothing_is_read(repo, rules, monkeypatch):
+    repo.settings(None)
+    repo.file(".github/workflows/ci.yml", "{")
+    monkeypatch.setattr(table, "table", lambda: pytest.fail("配る構成の設定を読んだ"))
+    assert repo.check(rules) == []
+
+
+def test_only_the_keys_that_are_present_are_checked(repo, rules):
+    repo.settings({"plugin_pyprojects": SETTINGS["plugin_pyprojects"]})
+    repo.file(".github/workflows/ci.yml", _workflow(_uv("0.0.1"), "- run: pip install uv"))
+    repo.file("plugins/ndf-dev/bin/ndf", _launcher("0.0.1"))
+    assert repo.check(rules) == []
+
+
+def test_a_glob_without_files_has_no_findings(repo, rules):
+    repo.settings({**SETTINGS, "workflows": ".github/none/*.yml"})
+    assert repo.check(rules) == []
+
+
+def test_python_version_outside_the_lists_is_a_finding(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), _py("3.12")))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 14)]
+
+
+def test_compat_version_outside_the_compat_workflows_is_a_finding(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow(_py("3.10")))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
+
+
+def test_compat_version_in_a_compat_workflow_passes(repo, rules):
+    repo.file(COMPAT, _workflow(_py("3.10"), _py("3.13")))
+    assert repo.check(rules) == []
+
+
+def test_unquoted_version_is_read_as_written(repo, rules):
+    # YAML の 3.10 は数として読むと 3.1 になる。書いたとおりの文字で比べる
+    repo.file(COMPAT, _workflow(f"- uses: {PY}\n        with:\n          python-version: 3.10"))
+    assert repo.check(rules) == []
+    repo.file(".github/workflows/ci.yml", _workflow(f"- uses: {PY}\n        with:\n          python-version: 3.10"))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
+
+
+def test_without_python_compat_only_python_ci_is_allowed(repo, rules):
+    repo.settings({k: v for k, v in SETTINGS.items() if k != "python_compat"})
+    assert _lines(repo.check(rules)) == [(COMPAT, 10)]
+
+
+@pytest.mark.parametrize(
+    ("step", "line"),
+    [
+        (f"- uses: {UV}", 8),
+        (f"- uses: {UV}\n        with:\n          enable-cache: true", 8),
+        (None, 11),
+    ],
+)
+def test_setup_uv_without_or_with_another_version_is_a_finding(repo, rules, step, line):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv("0.0.1") if step is None else step))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", line)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "python3 -m pip install --upgrade uv",
+        "pip3 install uv==0.5.0",
+        "pipx install uv",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    ],
+)
+def test_installing_uv_outside_setup_uv_is_a_finding(repo, rules, body):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), f"- run: {body}"))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 12)]
+
+
+def test_the_line_inside_a_block_run_is_reported(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow("- run: |\n          echo a\n          pip install --quiet uv"))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    ['python3 -m pip install --quiet "pathspec==1.1.1"', "uv pip install ruv-tool", "uv sync --frozen", "pip install uv-dynamic"],
+)
+def test_other_installs_are_not_findings(repo, rules, body):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), f"- run: {body}"))
+    assert repo.check(rules) == []
+
+
+@pytest.mark.parametrize(("version", "digest", "line"), [("0.0.1", None, 3), (None, "0" * 64, 5)])
+def test_launcher_lines_that_differ_are_findings(repo, rules, version, digest, line):
+    repo.file("plugins/ndf-dev/bin/ndf", _launcher(version, digest))
+    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/bin/ndf", line)]
+
+
+def test_launcher_without_the_lines_is_a_finding(repo, rules):
+    repo.file("plugins/ndf-dev/bin/ndf", "#!/usr/bin/env bash\n")
+    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/bin/ndf", 1)] * 2
+
+
+def test_a_missing_listed_file_is_a_finding(repo, rules):
+    repo.settings({**SETTINGS, "launchers": ["plugins/ndf-dev/bin/none"]})
+    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/bin/none", 1)]
+
+
+def test_broken_workflow_stops_with_its_path(repo, rules):
+    repo.file(".github/workflows/ci.yml", "jobs: [\n")
+    with pytest.raises(CheckError, match="ci.yml"):
+        repo.check(rules)
+
+
+def test_broken_contract_stops(repo, rules, monkeypatch):
+    def broken():
+        raise table.ToolchainError("形が違う")
+
+    monkeypatch.setattr(table, "table", broken)
+    with pytest.raises(CheckError, match="形が違う"):
+        repo.check(rules)
+
+
+def test_workflow_tools_reads_pinned_uses_and_steps_without_with(tmp_path):
+    path = tmp_path / "w.yml"
+    path.write_text(_workflow(f"- uses: {UV}", _py("3.13"), "- run: echo"), encoding="utf-8")
+    assert [(t.action, t.line, t.values) for t in toolchain.workflow_tools(path)] == [
+        (toolchain.SETUP_UV, 8, {}),
+        (toolchain.SETUP_PYTHON, 9, {"python-version": ("3.13", 11)}),
+    ]
+
+
+def test_workflow_tools_stops_on_broken_yaml(tmp_path):
+    path = tmp_path / "w.yml"
+    path.write_text("a: b: c\n", encoding="utf-8")
+    with pytest.raises(CheckError, match="w.yml"):
+        toolchain.workflow_tools(path)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('[project]\nname = "x"\nrequires-python = ">=3.11"\n', ((3, 11), 3)),
+        ('[project]\nrequires-python = ">=3.11,<4"\n', ((3, 11), 2)),
+        ('[project]\nrequires-python = "<4, >= 3.12"\n', ((3, 12), 2)),
+        ('[project]\nrequires-python = "<4"\n', (None, 2)),
+        ('[project]\nname = "x"\n', (None, 1)),
+    ],
+)
+def test_pyproject_floor(tmp_path, text, expected):
+    path = tmp_path / "pyproject.toml"
+    path.write_text(text, encoding="utf-8")
+    assert toolchain.pyproject_floor(path) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "line"),
+    [('[project]\nrequires-python = ">=3.10"\n', 2), ('[project]\nname = "x"\n', 1), ('[project]\nrequires-python = "<4"\n', 2)],
+)
+def test_pyproject_floor_that_differs_or_is_missing_is_a_finding(repo, rules, text, line):
+    repo.file("plugins/ndf-dev/pyproject.toml", text)
+    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/pyproject.toml", line)]
+
+
+def test_the_plugin_pyproject_matches_the_floor(repo, rules):
+    # fixture が写した本物の pyproject.toml の下限は、配る構成の設定の下限と同じ
+    assert toolchain.pyproject_floor(repo.plugin.root / "pyproject.toml")[0] == table.python_floor()
