@@ -17,7 +17,8 @@ plugins/ndf/
 │   ├── adapters/claude.py              … _inherited がキーで名前を得る
 │   ├── domains/hooks/guards/
 │   │   ├── relay_busy.py               … #4049 の _target が誤りを対象外にする
-│   │   └── ask.py                      … #4049 の時点で relay_dir の誤りを書かずに通す
+│   │   ├── ask.py                      … #4049 の時点で relay-dir・relay-session の誤りを書かずに通す
+│   │   └── context_limit.py            … #4049 の案内の分岐が誤りを中継の外の案内にする
 │   └── domains/relay/
 │       ├── signals.py                  … LAUNCH_ENV を消し、読み手がキーで名前を得る。relay_role は誤りを NESTED に
 │       ├── account_login.py            … AUTH_ENV を外し、関数の中で名前を引く
@@ -35,6 +36,7 @@ plugins/ndf/
 | `src/ndf/domains/relay/signals.py` | 変更 | 中継の名前をキーで得る | `identity` | モジュール `signals` | `relay_dir`・`relay_launch`・`launch_env`（変更）、#4049 の `relay_session`・#4061 の `relay_role` |
 | `src/ndf/adapters/claude.py` | 変更 | 中継のマーカーの名前をキーで得る | `identity` | モジュール `claude` | `_inherited`（変更） |
 | `src/ndf/domains/hooks/guards/relay_busy.py`・`ask.py` | 変更（#4049） | `fail_closed` の guard の頭の判定が契約の誤りを例外にしない | `relay.signals`・`identity` | モジュール `relay_busy`・`ask` | `_target`（#4049 の新設）、`check`・`on_deadline`（変更） |
+| `src/ndf/domains/hooks/guards/context_limit.py` | 変更（#4049） | 契約の誤りでも上限の拒否を中継の外の案内で保つ | `relay.signals`・`identity` | モジュール `context_limit` | `check`（変更） |
 | `src/ndf/domains/relay/account_login.py` | 変更 | ログインの子から外す名前を、子の環境を組む関数の中でキーから得る | `identity` | モジュール `account_login` | 定数 `AUTH_ENV`（削除）、子の環境を組む関数（変更） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの起動の入口で中継のキー（#4049 では 2 つ、#4062 から 3 つ）を解き、誤りを `config_broken` にする | `identity` | モジュール `cli` | ラッパーを起動する入口の関数（変更） |
 | `src/ndf/checks/facts.py` | 変更 | キーの重なりと、コードが呼ぶキーを確かめる | 既存のまま | モジュール `facts` | `env_key_findings`（新設）、`check`（変更） |
@@ -106,6 +108,7 @@ plugins/ndf/
 | `relay_role` | 同上 | #4061 の新設 | #4061 の詳細設計のとおり | `NDF_RELAY_DIR` と `NDF_RELAY_SESSION` の名前をキーで得て、`CHILD` と判定する前に `relay-launch`（#4062 の後）も解く。guard が `CHILD` の後に使うキーをここで解き切るので、後段の `relay_dir`・`relay_launch` は同じプロセスに残った表を引き、`EnvNameError` を上げない。どれかで `EnvNameError` を受けたら `NESTED` を返す（例外を上げない） |
 | `_target` | `src/ndf/domains/hooks/guards/relay_busy.py` | #4049 の新設 | #4049 の詳細設計のとおり | `relay-dir` の名前の値と `relay_session`（`relay-session` のキー）を見る。`EnvNameError` を受けたら偽（対象外）。`check`・`on_deadline` の先に行う判定が例外を上げない。#4061 の後は `relay_role` へ移る |
 | `ask.check`・`ask.on_deadline` | `src/ndf/domains/hooks/guards/ask.py` | 変更（#4049） | 変えない | 頭で、中継へ書く・オーガナイザーと通知へ転送する副作用の前に、`identity.env_name` で `relay-dir` と `relay-session` の両方を解く。どちらかで `EnvNameError` を受けたら、中継にもオーガナイザーにも通知にも書かずに通す（`check` は `passing(forwarded=[])`、`on_deadline` は None）。`relay-session` のキーだけを欠く契約では `relay_dir` が成功するので、`relay_dir` の呼び出しだけで受けない。#4061 の後は `relay_role` の `NESTED` に置き換わる |
+| `context_limit.check` | `src/ndf/domains/hooks/guards/context_limit.py` | 変更（#4049） | 変えない | 上限を超えた後の案内の分岐の `relay_dir(ctx.env)` の呼び出しに限って `EnvNameError` を受け、中継の外（`under = False`）の案内で `deny` を返す。上限の判定と次の 1 手を通す判定は受けの外に置く。`fail_closed` が偽なので、受けないと例外で拒否ごと失われる。#4061 の後も残す |
 | `_inherited` | `src/ndf/adapters/claude.py` | 変更（#4049） | 変えない | `env.get(identity.env_name("relay-dir"))` で読む |
 | `AUTH_ENV` | `src/ndf/domains/relay/account_login.py` | 削除（#4049） | — | 最上位の組をやめ、今 `AUTH_ENV` を読む子の環境を組む関数の中で `(*facts.ids("env", child="account-drop"), "NDF_CLAUDE_ACCOUNT", identity.env_name("relay-dir"))` を組む。import の時に契約を読まない |
 | ラッパーの起動の入口 | `src/ndf/domains/relay/cli.py` | 変更（#4049） | 変えない | 子を起動する前に `identity.env_name` で、#4049 の実装では `relay-dir`・`relay-session` の 2 つだけを解き（`relay-launch` の行は #4062 まで無いので必須にしない）、#4062 の実装から `relay-launch` を加えた 3 つを解く。各段階の PR のテストで、正常な契約のまま起動の入口が `config_broken` を返さず子を起こすことを確かめる。`EnvNameError` なら `result.stopped(TOOL, "config_broken", …)` を返し、`launch.json` を書かず子も起こさない |
