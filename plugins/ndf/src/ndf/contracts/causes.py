@@ -57,8 +57,8 @@ def _with_kind(kind: str, body: dict[str, Any]) -> dict[str, Any]:
     return {**body, "kind": kind}
 
 
-def validate(raw: dict[str, Any]) -> dict[str, CauseRow]:
-    """種類（ファイル名）→ 中身の辞書の形・exit が終了コードの表の stopped の id を指すこと・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
+def _rows_of(raw: dict[str, Any]) -> dict[str, CauseRow]:
+    """種類（ファイル名）→ 中身の辞書の形と、exit が終了コードの表の stopped の id を指すことを確かめ、種類ごとの行を返す。"""
     items = [_with_kind(kind, body) for kind, body in raw.items()]
     shape = [f"{item['kind']}: {e}" for item in items for e in contracts.schema_errors(item, SCHEMA)]
     if shape:
@@ -71,19 +71,34 @@ def validate(raw: dict[str, Any]) -> dict[str, CauseRow]:
         if exit_id not in stopped:
             errs.append(f"{item['kind']} の exit {exit_id!r} は終了コードの表の stopped の id {sorted(stopped)} に無い")
             continue
-        row = CauseRow(**{**item, "exit": stopped[exit_id], "exit_id": exit_id})
-        errs += _policy_errors(row)
-        out[row.kind] = row
+        out[item["kind"]] = CauseRow(**{**item, "exit": stopped[exit_id], "exit_id": exit_id})
+    _raise_errors(errs)
+    return out
+
+
+def _raise_errors(errs: list[str]) -> None:
     if errs:
         raise CausesError(f"停止理由の表 {TABLE} の誤り: {'; '.join(errs)}")
-    return out
+
+
+def _with_policies_checked(found: dict[str, CauseRow]) -> dict[str, CauseRow]:
+    """行が指す再試行の方針の有無と値を確かめる。方針のファイルを読む。"""
+    _raise_errors([e for item in found.values() for e in _policy_errors(item)])
+    return found
+
+
+@contracts.cached_reader
+def rows() -> dict[str, CauseRow]:
+    """表の全件を 1 プロセスに 1 回読み、種類ごとの行を返す（一覧に使う）。再試行の方針は名前だけを返し、そのファイルを読まない。"""
+    with contracts.raised_as(CausesError):
+        return _rows_of(contracts.load_table(TABLE, CausesError, "停止理由の表"))
 
 
 @contracts.cached_reader
 def table() -> dict[str, CauseRow]:
-    """表の全件を 1 プロセスに 1 回読み、種類ごとの行を返す（表全体の検査・一覧に使う。種類 1 つの参照は `row`・`has`）。"""
+    """`rows` に加えて再試行の方針の値まで確かめた表の全件（表全体の検査に使う。種類 1 つの参照は `row`・`has`）。"""
     with contracts.raised_as(CausesError):
-        return validate(contracts.load_table(TABLE, CausesError, "停止理由の表"))
+        return _with_policies_checked(rows())
 
 
 def has(kind: str) -> bool:
@@ -99,7 +114,7 @@ def row(kind: str) -> CauseRow:
         body = contracts.load_item(TABLE, kind)
         if body is None:
             raise CausesError(f"停止理由の表に種類 {kind!r} が無い")
-        return validate({kind: body})[kind]
+        return _with_policies_checked(_rows_of({kind: body}))[kind]
 
 
 def build(kind: str, detail: str, *, instance: Optional[str] = None, retry_after: Optional[float] = None) -> dict[str, Any]:

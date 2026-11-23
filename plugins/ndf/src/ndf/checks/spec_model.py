@@ -240,7 +240,7 @@ def _load(plugin_root: Path) -> SpecModel:
         bin_files=tuple(bin_files),
         entrypoints=tuple(sorted(entrypoints, key=lambda r: r["id"])),
         exit_codes=tuple(sorted(facts.rows(exit_codes.TABLE), key=lambda r: r["code"])),
-        causes=tuple(row for _, row in sorted(causes.table().items())),
+        causes=tuple(row for _, row in sorted(causes.rows().items())),
         manual_ids=tuple(sorted(facts.ids("manual-args"))),
         skill_io_ids=tuple(sorted(facts.ids("skill-io"))),
         public=public,

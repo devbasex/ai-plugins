@@ -40,7 +40,7 @@ def test_contract_table_names_known_verdicts_and_runtime_skips_known_guards():
         assert set(rt["skipped"]) <= names
         for spec in rt["events"].values():
             assert set(spec["outputs"]) <= set(KINDS) - {"pass"}
-            assert f"hook.budget.{spec['budget']}" in tables.policies()
+            assert tables.policy(f"hook.budget.{spec['budget']}") is not None
 
 
 @pytest.mark.parametrize("path", sample_paths(), ids=lambda p: "/".join(p.parts[-3:]))

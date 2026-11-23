@@ -90,12 +90,13 @@ plugins/ndf/
 | `table`（`limits`） | `src/ndf/contracts/limits.py` | 変更 | `table() -> dict[str, Policy]` | 読み先を `limits.json` から `limits/` へ替える。返りの形は変えない |
 | `table`（`causes`） | `src/ndf/contracts/causes.py` | 変更 | `table() -> dict[str, CauseRow]` | 読み先を `causes.json` から `causes/` へ替え、各ファイルの中身へ `kind`（ファイル名）を足してから確かめる |
 | `split_keys`・`load_item` | `src/ndf/contracts/__init__.py` | 新設 | `split_keys(rel: str) -> frozenset[str]`・`load_item(rel: str, key: str) -> dict[str, Any] \| None` | 分けた表のキーの集合（ディレクトリの一覧だけ）と、項目 1 つの中身（そのファイルだけ）を返す |
-| `policy`（`limits`）・`row`・`has`（`causes`） | `src/ndf/contracts/limits.py`・`causes.py` | 変更・新設（`has`） | `policy(name: str) -> Policy`・`row(kind: str) -> CauseRow`・`has(kind: str) -> bool` | 1 項目の参照では表の全件を読まない。`policy` はその方針のファイルだけを読み、形を確かめる。項目のファイルは、`table`・`policy`・`row` をどの順で呼んでも 1 プロセスに 1 回だけ読む。`row` はその種類のファイルを読み、形を確かめたうえで、`exit` が終了コードの表の stopped の id を指すことと、`retry` があれば再試行の方針（`limits.policy` でその方針のファイルだけを読む）を確かめ、合わなければ `CausesError` を返す。`has` は項目のファイルを読まない。表の全件の読み・確かめは `table` を呼ぶ検査・一覧だけが行う |
+| `policy`（`limits`）・`row`・`has`・`rows`（`causes`） | `src/ndf/contracts/limits.py`・`causes.py` | 変更・新設（`has`・`rows`） | `policy(name: str) -> Policy`・`row(kind: str) -> CauseRow`・`has(kind: str) -> bool`・`rows() -> dict[str, CauseRow]` | 1 項目の参照では表の全件を読まない。`policy` はその方針のファイルだけを読み、形を確かめる。項目のファイルは、`table`・`policy`・`row` をどの順で呼んでも 1 プロセスに 1 回だけ読む。`row` はその種類のファイルを読み、形を確かめたうえで、`exit` が終了コードの表の stopped の id を指すことと、`retry` があれば再試行の方針（`limits.policy` でその方針のファイルだけを読む）を確かめ、合わなければ `CausesError` を返す。`has` は項目のファイルを読まない。表の全件の読みは `table` を呼ぶ検査と `rows` を呼ぶ一覧だけが行う。再試行の方針の値まで全件を確かめるのは `table`（`ndf contracts check`）だけで、規約のモデル（`spec_model.py`）が呼ぶ `rows` は方針のファイルを読まない |
 | `load_split`（hook 側） | `src/ndf/domains/hooks/tables.py` | 新設 | `load_split(rel: str) -> dict[str, Any]` | 同じ規則を標準ライブラリだけで行う（`jsonschema` を使わない） |
 | `policy_value`（hook 側） | `src/ndf/domains/hooks/tables.py` | 変更 | `policy_value(name: str, key: str) -> Any` | `contracts/limits/<name>.json` の 1 ファイルだけを読む（表の全体を組み立てない） |
-| `policies`（hook 側） | `src/ndf/domains/hooks/tables.py` | 変更 | `policies(prefix: str = "") -> dict[str, dict[str, Any]]` | `contracts/limits/` のうち名前が `prefix` で始まる項目だけを読む。hook の経路で呼ぶのは SessionStart の予算の検査（`guards/session.py` の `check_budget`。`prefix="hook."` の 23 項目）だけで、`ndf hooks check-budget`（`cli.py`）も同じ `prefix` で呼ぶ |
-| `has_policy`（hook 側） | `src/ndf/domains/hooks/tables.py` | 新設 | `has_policy(name: str) -> bool` | `contracts/limits/<name>.json` が在るか（読まずに `Path.is_file()` だけ） |
-| `policy_name`・`budget_for`（hook 側） | `src/ndf/domains/hooks/budget.py` | 変更 | 変えない（`limits` を渡さない呼び出しの中身だけを替える） | `limits` を渡さないときは `policies()` で全件を組み立てず、`has_policy` で `hook.budget.<予算>.<ランタイム>` の有無を見て、使う 1 項目だけを `policy_value` の経路（1 項目 1 ファイル・1 プロセス 1 回）で読む。`main.py` が hook の起動のたびに `budget_for` を呼ぶため、ここで全件を読むと 1 起動ごとに 223 ファイルを読むことになる |
+| `policies`（hook 側） | `src/ndf/domains/hooks/tables.py` | 変更 | `policies(names: Collection[str]) -> dict[str, dict[str, Any]]` | `contracts/limits/` のうち名前が `names` にある項目だけを読む。呼ぶのは `budget.checked_policies` だけである |
+| `checked_policies`（hook 側） | `src/ndf/domains/hooks/budget.py` | 新設 | `checked_policies() -> dict[str, dict[str, Any]]` | 予算の検査（`check_budget`）が照らす方針だけを読む。対象はランタイムの事象の予算（ランタイム固有・共通）と guard の表の `limits` から求める（2026-11-23 の時点で 15 項目）。SessionStart（`guards/session.py`）と `ndf hooks check-budget`（`cli.py`）が同じこの読み手を使う |
+| `policy`（hook 側） | `src/ndf/domains/hooks/tables.py` | 新設 | `policy(name: str) -> Optional[dict[str, Any]]` | `contracts/limits/<name>.json` の 1 ファイルを読む。有無を先に照会せず、ファイルが無くて読めなければ None を返す（結果は 1 プロセスに 1 回だけ求める） |
+| `policy_name`・`budget_for`（hook 側） | `src/ndf/domains/hooks/budget.py` | 変更 | 変えない（`limits` を渡さない呼び出しの中身だけを替える） | `limits` を渡さないときは `policies()` で全件を組み立てず、`policy` で `hook.budget.<予算>.<ランタイム>` の読み込みを試み、無ければ共通の予算の 1 項目を同じ `policy`（1 項目 1 ファイル・1 プロセス 1 回）で読む。`main.py` が hook の起動のたびに `budget_for` を呼ぶため、ここで全件を読むと 1 起動ごとに 223 ファイルを読むことになる |
 
 - `load_split`
   - 事前条件: `contracts/<rel>/` がディレクトリとして在る
@@ -115,7 +116,7 @@ plugins/ndf/
   | PreToolUse（Read）で `read_repeat` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.read-repeat`。断るときは `hook.deny-repeat`・`hook.counter-lock` を足す | 3〜5 ファイル（40〜67 マイクロ秒） | 6 ファイル・分割の前の 188 マイクロ秒を超えない |
   | PreToolUse（Bash）で `sleep` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.sleep` | 3 ファイル | 同上 |
   | Stop で `unattended` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.unattended-mark`・`hook.pushback`・`hook.counter-lock` | 5 ファイル | 同上 |
-  | SessionStart（予算の検査） | 上に加えて `policies(prefix="hook.")` の 23 項目 | 25 ファイル程度（約 800 マイクロ秒） | 26 ファイル（1 セッションに 1 回だけなので、所要は分割の前より 1 ミリ秒までの増えを許す） |
+  | SessionStart（予算の検査） | 上に加えて `checked_policies` の 15 項目（予算と部品の上限） | 19 ファイル（23 項目を引いた 769 マイクロ秒より少ない） | 20 ファイル（1 セッションに 1 回だけなので、所要は分割の前より 1 ミリ秒までの増えを許す） |
 
   - 読み込みの回数は 1 起動につき 1 回から 3〜5 回へ増えるが、1 回あたりが小さくなるため、SessionStart を除くイベントの所要は分割の前より短い。読む回数を増やさないための同じ名前の控え（`cached_reader`）は、同じ方針を 2 回引くときにだけ効く。違う方針を引く回数は上の表のとおりに抑える
   - 縛り方: 単体テストで、上の 4 つのイベントそれぞれについて、hook の 1 起動のエントリポイント `main.run_entry(["<名前>", <ランタイム>, <イベント>], stdin=io.StringIO(<入力>), stdout=io.StringIO())` をプロセスの中で呼ぶ（子のプロセスを起動しない。状態の保存先は既存の `tests/domains/hooks/_hooks.py` の一時ディレクトリの用意を使う）。個々の guard から始めないのは、`main.py` が guard の前に読む `budget.budget_for` の予算と `hook.transcript-tail` を計測の外にしないためである。`tables` が `contracts/limits/` の下のファイルを読む関数を、読んだパスを記録して元の関数へ渡す関数に差し替え（1 プロセス 1 回の控えは各テストの前に空にする）、1 起動で読んだ `contracts/limits/` のファイルの数が「許す上限」の列以下であることを確かめる。`run_entry` は失敗を飲み込んで 0 を返すため、読みの数が少ないだけで通らないよう、同じテストで metrics の記録に `error` が無く、そのイベントの guard（`read_repeat`・`sleep`・`unattended`・SessionStart の予算の検査）が `guards` に載っていること（1 起動が guard まで届いたこと）も確かめる。`budget_for` が `policies()` で全件（223 ファイル）を組み立てる形へ戻すと、どのイベントのテストも落ちる。所要は Task 4 の測定の手順で同じ形に測り、単位の Pull Request の本文に書く（時間で合否を決めるテストは書かない）
@@ -151,7 +152,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `load_split` | 3 項目のディレクトリを読むと 3 キーの辞書になる。`_meta.json` はキーに入らない | 項目 0 件のディレクトリは空の辞書 | 上の異常系の 5 行それぞれ。CLI 側と hook 側の `load_split` へ同じ入力のディレクトリを渡し、同じ辞書か同じ誤りになる（1 つのテストで両方を引数化する） |
 | `policy_value`（hook 側） | 1 項目のファイルから値を返す | 同じ名前を 2 回引いてもファイルの読みは 1 回 | 項目のファイルが無い |
-| hook のイベントごとの読み（`main.run_entry` の 1 起動。予算の解決と `hook.transcript-tail` を含む） | 上の表の 4 つのイベントで、読んだファイルの数が許す上限以下で、そのイベントの guard まで届いている | `hook.budget.<予算>.<ランタイム>` の無いイベントは、`has_policy` の確かめだけで共通の予算の 1 項目を読む | `budget_for` が `policies()` の全件を組み立てると落ちる |
+| hook のイベントごとの読み（`main.run_entry` の 1 起動。予算の解決と `hook.transcript-tail` を含む） | 上の表の 4 つのイベントで、読んだファイルの数が許す上限以下で、そのイベントの guard まで届いている | `hook.budget.<予算>.<ランタイム>` の無いイベントは、ランタイム固有の予算の読み込みを 1 回試みるだけで共通の予算の 1 項目を読む | `budget_for` が `policies()` の全件を組み立てると落ちる |
 | `limits.table` | 分割した表から読んだ結果が、分割の前の `limits.json` と同じ辞書になる | — | ディレクトリが無ければ `LimitsError` |
 | `causes.table` | ファイル名が `kind` として入る | — | 中身に `kind` が書いてあってファイル名と違えば `CausesError` |
 
