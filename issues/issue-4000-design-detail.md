@@ -222,9 +222,11 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `call_claude` | `adapters/claude.py` | 変更 | `call_claude(argv, prompt, timeout, cwd=None, slot_wait: Optional[float] = None, new_group: bool = True, cli_floor: bool = True) -> ClaudeReply` | `slot_wait`・`new_group`・`cli_floor` を前置きへ渡す。`slot_wait` が None なら今の上限（`launch.wait.llm-cli`）。`new_group` が真なら今のとおり `claude` を新しい組で起動する。`cli_floor` が偽なら CLI の下限の確かめ（`claude --version`）を打たない（既定の真は今のとおり確かめる） |
-| `_accounted` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool`・`cli_floor: bool` | 同上を `_prefaced` へ渡す |
-| `_prefaced` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool`・`cli_floor: bool` | `launch_slot.gate(..., wait=slot_wait)`。`cli_floor` が偽なら下限の確かめを飛ばす。`new_group` を `_run_claude` へ渡す（関所の起動 `_gated` は中継の経路だけで、今のまま） |
+| `LaunchOptions` | `adapters/claude.py` | 新設 | `@dataclass(frozen=True)` の欄 `slot_wait: Optional[float] = None`・`new_group: bool = True`・`cli_floor: bool = True`（省いたときの値 `DEFAULT_LAUNCH`） | 前置きの選び方を 1 つにまとめる。3 つを別々の引数で配ると、通る関数が引数の数の上限（6）を越える |
+| `call_claude` | `adapters/claude.py` | 変更 | `call_claude(argv, prompt, timeout, cwd=None, options: LaunchOptions = DEFAULT_LAUNCH) -> ClaudeReply` | `options` を前置きへ渡す。`slot_wait` が None なら今の上限（`launch.wait.llm-cli`）。`new_group` が真なら今のとおり `claude` を新しい組で起動する。`cli_floor` が偽なら CLI の下限の確かめ（`claude --version`）を打たない（既定の真は今のとおり確かめる） |
+| `_accounted` | `adapters/claude.py` | 変更 | `_accounted(checks, base: AccountRun, prompt, timeout, cwd, options: LaunchOptions)` | 確かめへ渡す起動を `base`（このプロセスの環境と起動引数）1 つで受け、`options` を `_prefaced` へ渡す |
+| `_prefaced` | `adapters/claude.py` | 変更 | 末尾に `options: LaunchOptions` | `launch_slot.gate(..., wait=options.slot_wait)`。下限の確かめは `require_claude` が持つ。`options.new_group` を `_run_claude` へ渡す（関所の起動 `_gated` は中継の経路だけで、今のまま） |
+| `require_claude` | `adapters/claude.py` | 新設 | `require_claude(run: AccountRun, cwd, check: bool) -> Optional[ClaudeReply]` | CLI の下限を確かめ、古ければ起動しない回答（`Failure.REFUSED`）。`check` が偽なら確かめずに None |
 | `_run_claude` | `adapters/claude.py` | 変更 | 末尾に `new_group: bool = True` | `_popen` へ渡す |
 | `_popen` | `adapters/claude.py` | 変更 | 末尾に `new_group: bool = True` | `start_new_session=new_group`。偽なら呼び手の組に入り、`_talk` の時間切れの `_stop` は `process_group.stop_group` の「組が自分と同じなら `proc` へだけ送る」に従う |
 | `gate` | `adapters/launch_slot.py` | 変更 | `gate(agent, *, cwd=None, env=None, wait: Optional[float] = None)` | `held` へ渡す |

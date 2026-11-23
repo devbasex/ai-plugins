@@ -86,9 +86,9 @@ def test_issue_4000_popen_starts_a_new_group_by_default(launches, tmp_path):
     assert [call["start_new_session"] for call in launches.popen] == [True, False]
 
 
-@pytest.mark.parametrize(("passed", "expected"), [({}, True), ({"new_group": False}, False)])
+@pytest.mark.parametrize(("passed", "expected"), [({}, True), ({"options": claude.LaunchOptions(new_group=False)}, False)])
 def test_issue_4000_call_claude_passes_the_group_down(launches, passed, expected):
-    """#4000: `call_claude` の `new_group` が `Popen` まで届く（省けば今までどおり新しい組）。"""
+    """#4000: 選び方の `new_group` が `Popen` まで届く（省けば今までどおり新しい組）。"""
     got = claude.call_claude(["claude"], "q", 30, **passed)
 
     assert got.ok and [call["start_new_session"] for call in launches.popen] == [expected]
@@ -96,7 +96,7 @@ def test_issue_4000_call_claude_passes_the_group_down(launches, passed, expected
 
 def test_issue_4000_call_claude_with_a_zero_slot_wait_does_not_launch(launches, full_pool):
     """#4000: `slot_wait=0` で空きが無ければ `Failure.NO_SLOT` を返し、起動しない。"""
-    got = claude.call_claude(["claude"], "q", 30, slot_wait=0)
+    got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(slot_wait=0))
 
     assert got.failure is claude.Failure.NO_SLOT and not got.ok and launches.popen == []
 
@@ -110,6 +110,6 @@ def test_issue_4000_call_claude_checks_the_cli_floor_by_default(launches):
 
 def test_issue_4000_call_claude_can_skip_the_cli_floor(launches):
     """#4000: `cli_floor=False` なら下限を確かめず（`claude --version` を打たず）に起動する。"""
-    got = claude.call_claude(["claude"], "q", 30, cli_floor=False)
+    got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(cli_floor=False))
 
     assert got.ok and launches.floor == [] and len(launches.popen) == 1

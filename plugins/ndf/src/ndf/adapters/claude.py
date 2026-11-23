@@ -536,14 +536,26 @@ def _close_streams(proc: subprocess.Popen) -> None:
             pass
 
 
+@dataclass(frozen=True)
+class LaunchOptions:
+    """起動の前置きの選び方（#4000 の決定 3・決定 8）。省けば今までどおりの振る舞い。
+
+    - `slot_wait`: 重い起動のスロットを待つ上限の秒。None なら設定の上限（`launch.wait.llm-cli`）、0 なら待たずに `Failure.NO_SLOT`
+    - `new_group`: claude を専用のプロセスの組で起動するか。偽なら呼び手の組に入り、呼び手の 1 回の組への送信で claude も止まる
+    - `cli_floor`: CLI の下限（`claude --version`）を確かめるか。偽なら確かめずに起動する（今動いている claude を打つ子など、下限を満たすと分かっている起動）
+    """
+
+    slot_wait: Optional[float] = None
+    new_group: bool = True
+    cli_floor: bool = True
+
+
+# 選び方を省いた起動（今までどおり）
+DEFAULT_LAUNCH = LaunchOptions()
+
+
 def call_claude(
-    argv: Sequence[str],
-    prompt: str,
-    timeout: float,
-    cwd: Optional[Path] = None,
-    slot_wait: Optional[float] = None,
-    new_group: bool = True,
-    cli_floor: bool = True,
+    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None, options: LaunchOptions = DEFAULT_LAUNCH
 ) -> ClaudeReply:
     """`claude` を起動し、質問を標準入力で渡して回答を読む。起動の失敗・期限切れは `ok` が偽の回答にする。
 
@@ -552,14 +564,13 @@ def call_claude(
     （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
     環境と起動引数でこの前置きを打つ。
 
-    `slot_wait` は重い起動のスロットを待つ上限の秒（None なら設定の上限 `launch.wait.llm-cli`、0 なら待たない。#4000 の決定 8）。
-    `new_group` が真なら専用のプロセスの組で起動し、偽なら呼び手の組に入れる（呼び手が 1 回の送信で claude ごと止められる。#4000 の決定 3）。
-    `cli_floor` が偽なら下限の確かめ（`claude --version`）を打たずに起動する（親のセッションが動いている時点で下限を満たす子の起動）。
+    `options`（`LaunchOptions`）は前置きの選び方で、スロットを待つ上限・プロセスの組・下限の確かめの有無を決める。
     """
     env = child_process_env()
+    base = AccountRun(env, list(argv))
     if relay_checks is None or not _inherited(env):
-        return _prefaced(AccountRun(env, list(argv)), prompt, timeout, cwd, slot_wait, new_group, cli_floor)
-    return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env, slot_wait, new_group, cli_floor)
+        return _prefaced(base, prompt, timeout, cwd, options)
+    return _accounted(relay_checks, base, prompt, timeout, cwd, options)
 
 
 def _inherited(env: Mapping[str, str]) -> bool:
@@ -568,55 +579,54 @@ def _inherited(env: Mapping[str, str]) -> bool:
 
 
 def _accounted(
-    checks: RelayChecks,
-    argv: list[str],
-    prompt: str,
-    timeout: float,
-    cwd: Optional[Path],
-    env: dict[str, str],
-    slot_wait: Optional[float],
-    new_group: bool,
-    check_floor: bool,
+    checks: RelayChecks, base: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions
 ) -> ClaudeReply:
     """起動先を継いだ起動。中継の確かめに通れば起動し、登録済みアカウントの上限なら替え先で 1 回だけ打ち直す（決定 9）。
 
-    確かめ（キーを渡せない形の `key_gate` を含む）は前置きより先に打ち、前置きは確かめが確定した環境で打つ。
+    `base` は確かめへ渡す起動（このプロセスの環境と起動引数）。確かめ（キーを渡せない形の `key_gate` を含む）は前置きより
+    先に打ち、前置きは確かめが確定した環境で打つ。
     """
     where = _workdir(cwd).absolute()  # 作業ディレクトリの基準を Popen(cwd=…) と同じにする
-    keys = launch_form(argv) in KEY_FORMS
-    got = checks.begin(argv, env, where, keys)
+    keys = launch_form(base.argv) in KEY_FORMS
+    got = checks.begin(base.argv, base.env, where, keys)
     if isinstance(got, AccountRefused):
         return ClaudeReply.failed("", got.detail, failure=got.failure)
-    reply = _prefaced(got, prompt, timeout, cwd, slot_wait, new_group, check_floor)
+    reply = _prefaced(got, prompt, timeout, cwd, options)
     if reply.failure is not Failure.USAGE_LIMIT:
         return reply
-    again = checks.retry(argv, env, where, keys)
-    return reply if again is None else _prefaced(again, prompt, timeout, cwd, slot_wait, new_group, check_floor)
+    again = checks.retry(base.argv, base.env, where, keys)
+    return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
 
 
-def _prefaced(
-    run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], slot_wait: Optional[float], new_group: bool, check_floor: bool
-) -> ClaudeReply:
+def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
+    """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。"""
+    if not check:
+        return None
+    try:
+        cli_floor.require("claude", run.argv[0], run.env, cwd)
+    except cli_floor.TooOld as exc:
+        return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
+    return None
+
+
+def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
     """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。
 
-    `slot_wait` はスロットを待つ上限、`new_group` は claude を新しいプロセスの組に置くか（関所の起動は今までどおり新しい組）。
-    `check_floor` が偽なら CLI の下限を確かめない（`call_claude` の `cli_floor`）。
+    前置きの選び方は `options`（スロットを待つ上限・claude を置くプロセスの組・下限の確かめ）。関所の起動は今までどおり新しい組で起動する。
     """
     launched = False
     try:
-        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=slot_wait) as slot_env:
+        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait) as slot_env:
             run = run._replace(env={**run.env, **slot_env})
             refused = run.recheck() if run.recheck is not None else None
             if refused is not None:
                 return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
-            try:
-                if check_floor:
-                    cli_floor.require("claude", run.argv[0], run.env, cwd)
-            except cli_floor.TooOld as exc:
-                return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
+            too_old = require_claude(run, cwd, options.cli_floor)
+            if too_old is not None:
+                return too_old
             if run.gate is None:
                 launched = True
-                return _run_claude(run.argv, prompt, timeout, cwd, run.env, new_group)
+                return _run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group)
             proc = _gated(run, cwd)
             if isinstance(proc, ClaudeReply):
                 return proc
