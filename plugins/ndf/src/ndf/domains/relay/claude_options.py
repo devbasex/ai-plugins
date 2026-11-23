@@ -35,7 +35,6 @@ def take(table: Table, args: Sequence[str], i: int) -> tuple[Option, int]:
     if eq and name.startswith("--"):
         return Option(name, (word,), inline), i + 1
     nxt = args[i + 1] if i + 1 < len(args) else None
-    has_value = nxt is not None and not nxt.startswith("-")
     if word in table["flags"]:
         return Option(word, (word,), None), i + 1
     if word in table["variadic"]:
@@ -43,7 +42,7 @@ def take(table: Table, args: Sequence[str], i: int) -> tuple[Option, int]:
         while j < len(args) and not args[j].startswith("-"):
             j += 1
         return Option(word, tuple(args[i:j]), None), j
-    if nxt is not None and (has_value or word in table["value"]):
+    if nxt is not None and (not nxt.startswith("-") or word in table["value"]):
         return Option(word, (word, nxt), nxt), i + 2
     return Option(word, (word,), None), i + 1
 
