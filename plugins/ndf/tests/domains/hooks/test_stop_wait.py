@@ -405,5 +405,29 @@ def test_stop_wait_decides_the_rule_only_kinds_before_any_condition(tmp_path, mo
     assert got.kind == kind
     assert got.notes == {**notes, "judge_ms": 0, "judge_calls": 0}
     if kind == "pushback":
-        assert got.reason == stop_wait.reason(reply_wait.read_prose(reply_wait.prose_lines(reply)).matched)
+        matched = reply_wait.read_prose(reply_wait.prose_lines(reply)).matched
+        assert got.reason == stop_wait.reason(matched, kwargs.get("runtime", "claude"))
     assert judge.asked == [] and judge.parents == 0 and counter.waited == before
+
+
+# 人へ問う Tool の無いランタイム（Codex）は区分を先頭に書いた本文の質問で問う（asking.md の「ランタイムごとの扱い」）
+CATEGORIZED = "設計の材料を上に書いた。\n\n- ndf-gate:1 設計 Pull Request をマージしてよいですか。"
+
+
+def test_stop_wait_passes_a_categorized_prose_question_on_a_runtime_without_the_ask_tool(tmp_path, monkeypatch):
+    judge = Judge(monkeypatch, kind="wait")
+    got = _check(tmp_path, CATEGORIZED, runtime="codex")
+    assert got.kind == "pass" and got.notes["judge"] == "skip:asked"
+    assert judge.asked == [] and judge.parents == 0
+
+
+def test_stop_wait_still_pushes_back_a_categorized_prose_question_where_the_ask_tool_exists(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, CATEGORIZED)
+    assert got.kind == "pushback" and "AskUserQuestion" in got.reason
+
+
+def test_stop_wait_routes_the_pushback_to_the_prose_question_on_a_runtime_without_the_ask_tool(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, MISSED[0], runtime="codex")
+    assert got.kind == "pushback" and "AskUserQuestion" not in got.reason and "先頭に書いた本文の質問" in got.reason

@@ -10,15 +10,20 @@
 モデルの判定に従い、モデルを使えない Stop（Codex・休み・時間切れ・回答なしなど）ではルールの待ちとして変更を要求する。
 モデルへ渡す本文が字数の上限で切られても、判定を委ねた見出しは先頭に残す。変更要求の上限の後はエントリポイントが
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
+
+人へ問う Tool の無いランタイム（コントラクト表の `ask_tool` が null。Codex）では、区分の名前を先頭に書いた本文の質問が
+問い合わせの経路である（`asking.md` の「ランタイムごとの扱い」）。その質問のある応答は問うた応答として通し、変更要求の文も
+その形での出し直しを求める。
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Optional
 
-from ndf.domains.hooks import budget, reply_judge
+from ndf.domains.hooks import budget, reply_judge, tables
 from ndf.domains.hooks.verdict import Verdict, passing
 
 # 変更要求の文（#4000 の受け入れ条件 11）。Stop で差し戻すたびに会話へ入るので、その場で要る動作と参照だけにし、理由
@@ -26,9 +31,14 @@ from ndf.domains.hooks.verdict import Verdict, passing
 # `{matched}` はルールで止めたときだけ当たった文を入れ、軽いモデルで止めたときは空にする
 REASON = (
     "本文で人の回答を待って終えた{matched}。development-workflow の references/asking.md の「区分」に当たるなら"
-    " AskUserQuestion（metadata.source に区分）で出し直し、当たらなければ推奨の案で決めて理由を報告に 1 行で書き、続ける。"
+    "{route}、当たらなければ推奨の案で決めて理由を報告に 1 行で書き、続ける。"
     "待っていない（引用・ほかの場所の待ちの報告）なら質問の形の文を書き換えて終える。"
 )
+# 区分に当たる質問の出し直し先。`{tool}` はランタイムの `ask_tool`。Tool の無いランタイムは本文の質問で出す
+ROUTE_TOOL = " {tool}（metadata.source に区分）で出し直し"
+ROUTE_PROSE = "、区分の名前（ndf-gate:1・ndf-ask:cost など）を先頭に書いた本文の質問で出し直して終え"
+# 本文の質問の先頭の区分（`asking.md` の「区分」の表の名前）。行頭の強調・コード・括弧と「区分:」の前置きを許す
+CATEGORY = re.compile(r"^[\s*_`\[(（「【]*(?:区分\s*[:：]\s*[*_`]*)?(?:ndf-gate:[12]|ndf-ask:[a-z0-9][a-z0-9:-]*)")
 # 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
 LOGGED = "本文で人の回答を待って終えた（stop-wait）"
 # 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
@@ -42,14 +52,31 @@ monotonic = time.monotonic
 wall = time.time
 
 
-def reason(matched: tuple[str, ...] = ()) -> str:
-    """変更要求の文。`matched`（ルールが当たった文）があれば先頭の 1 文を「当たった文」として添え、無ければ括弧ごと省く。"""
+def ask_tool(runtime: str) -> Optional[str]:
+    """ランタイムの人へ問う Tool（コントラクト表の `ask_tool`）。無いランタイム・表に無いランタイムは None。"""
+    return tables.runtimes().get(runtime, {}).get("ask_tool")
+
+
+def reason(matched: tuple[str, ...] = (), runtime: str = "claude") -> str:
+    """変更要求の文。`matched`（ルールが当たった文）があれば先頭の 1 文を「当たった文」として添え、無ければ括弧ごと省く。
+
+    区分に当たる質問の出し直し先は `runtime` の `ask_tool` で、無ければ区分を先頭に書いた本文の質問にする。
+    """
+    tool = ask_tool(runtime)
+    route = ROUTE_TOOL.format(tool=tool) if tool else ROUTE_PROSE
     if not matched:
-        return REASON.format(matched="")
+        return REASON.format(matched="", route=route)
     first = " ".join(matched[0].split())
     if len(first) > MATCHED_CHARS:
         first = first[: MATCHED_CHARS - 1] + "…"
-    return REASON.format(matched=f"（当たった文:「{first}」）")
+    return REASON.format(matched=f"（当たった文:「{first}」）", route=route)
+
+
+def asked_in_prose(ctx) -> bool:
+    """人へ問う Tool の無いランタイムで、本文の行のどれかが区分の名前で始まる（区分付きの本文の質問で問うた）か。"""
+    if ask_tool(ctx.runtime):
+        return False
+    return any(CATEGORY.match(line.text) for line in ctx.reply_prose_lines)
 
 
 def _result(
@@ -58,6 +85,7 @@ def _result(
     wait: bool,
     judged: Optional[reply_judge.Judged] = None,
     matched: tuple[str, ...] = (),
+    runtime: str = "claude",
 ) -> Verdict:
     """判定と notes。`reply` が None（ルールを当てていない）なら notes に入れない。`matched` はルールで止めたときだけ渡す。
 
@@ -66,7 +94,7 @@ def _result(
     notes: dict = {"judge": judge, "judge_ms": round(judged.ms, 3) if judged else 0, "judge_calls": judged.calls if judged else 0}
     if reply is not None:
         notes = {"reply": reply, **notes}
-    return Verdict("pushback", reason=reason(matched), notes=notes, logged=LOGGED) if wait else passing(**notes)
+    return Verdict("pushback", reason=reason(matched, runtime), notes=notes, logged=LOGGED) if wait else passing(**notes)
 
 
 def _quick_skip(ctx, svc, text: str) -> Optional[str]:
@@ -114,7 +142,7 @@ def _ask(svc, text: str, seconds: float) -> tuple[str, bool, Optional[reply_judg
 def check(ctx, svc) -> Verdict:
     if not ctx.has_reply_prose:
         return _result("none", "skip:empty", False)
-    if ctx.asked_this_turn:
+    if ctx.asked_this_turn or asked_in_prose(ctx):
         return _result(None, "skip:asked", False)
     # ルールだけで決まる判定: 本文の種類 → （`judge`, 変更要求か）
     by_rule = {
@@ -126,7 +154,7 @@ def check(ctx, svc) -> Verdict:
     reading = ctx.reply_reading
     if kind in by_rule:
         # ルールで止めたときだけ当たった文を添える
-        return _result(kind, *by_rule[kind], matched=reading.matched)
+        return _result(kind, *by_rule[kind], matched=reading.matched, runtime=ctx.runtime)
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
     # ルールの待ちとして止めるときだけ当たった見出しを添える（モデルの wait で止めたときは添えない）
@@ -136,9 +164,10 @@ def check(ctx, svc) -> Verdict:
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:
         waited = skipped in _AFTER_LIMIT and not svc.counter.pushback_left() and svc.counter.model_waited()
-        return _result(kind, skipped, waited or rule_wait, matched=heading)
+        return _result(kind, skipped, waited or rule_wait, matched=heading, runtime=ctx.runtime)
     seconds = _seconds(ctx, svc)
     if seconds < MIN_SECONDS:
-        return _result(kind, "skip:time", rule_wait, matched=heading)
+        return _result(kind, "skip:time", rule_wait, matched=heading, runtime=ctx.runtime)
     judge, wait, judged = _ask(svc, text, seconds)
-    return _result(kind, judge, wait or (rule_wait and judge != "model"), judged, matched=heading if judge != "model" else ())
+    matched = heading if judge != "model" else ()
+    return _result(kind, judge, wait or (rule_wait and judge != "model"), judged, matched=matched, runtime=ctx.runtime)
