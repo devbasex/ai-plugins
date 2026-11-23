@@ -142,13 +142,18 @@ def _redirect(node: Any) -> Redirect:
     text = target.text.decode("utf-8", "replace") if target is not None else ""
     if op in (">&-", "<&-") and not text:
         op, text = op[:-1], "-"
-    dynamic = False
-    stack = [target] if target is not None else []
+    return Redirect(op, text, target is not None and _has_dynamic(target))
+
+
+def _has_dynamic(node: Any) -> bool:
+    """`node` とその子孫に、値が実行時に決まる節（展開・置換など）があるか。"""
+    stack = [node]
     while stack:
         current = stack.pop()
-        dynamic = dynamic or bool(_DYNAMIC_NODE.search(current.type))
+        if _DYNAMIC_NODE.search(current.type):
+            return True
         stack.extend(current.children)
-    return Redirect(op, text, dynamic)
+    return False
 
 
 def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[ShellCommand]:
