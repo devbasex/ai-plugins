@@ -777,3 +777,109 @@ def test_async_steps_holding_the_send_lock_resume_on_the_finisher(gate, path, cl
     assert sent_at == pytest.approx(NOW + 5)
     assert default.pending == [] and len(finisher.ran) == 2
     assert _send_lock_is_free(path)
+
+
+# async_acquire（passing と同じ振る舞い）
+
+
+def _patch_asyncio_sleep(monkeypatch, clock: Clock) -> list[float]:
+    """非同期の眠りを偽の時計で進め、眠った秒を残す。"""
+    slept: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clock.now += seconds
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    return slept
+
+
+def test_async_acquire_lets_a_read_through_without_the_record_or_the_threads(gate, path, monkeypatch):
+    default, finisher = _Executor(), _Executor()
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
+
+    async def read() -> bool:
+        asyncio.get_running_loop().set_default_executor(default)
+        async with gate.async_acquire(httpx.Request("GET", "https://api.github.com/repos/o/r")):
+            return True
+
+    assert asyncio.run(read())
+    assert default.ran == [] and finisher.ran == []
+    assert not path.exists()
+
+
+def test_async_acquire_sleeps_the_reserved_seconds_before_a_write(gate, path, clock, monkeypatch):
+    seed(path, next=NOW + 3)
+    slept = _patch_asyncio_sleep(monkeypatch, clock)
+
+    async def write() -> float:
+        async with gate.async_acquire(PATCH):
+            return clock.now
+
+    assert asyncio.run(write()) == pytest.approx(NOW + 3)
+    assert slept == [pytest.approx(3)] and clock.slept == []
+
+
+def test_async_acquire_holds_the_kind_of_the_request(gate, path):
+    async def write() -> None:
+        async with gate.async_acquire(graphql("mutation { addComment(input: {}) { x } }")):
+            pass
+
+    asyncio.run(write())
+
+    assert record(path)["sent_next"] == pytest.approx(NOW + W)
+    assert record(path)["sent_next_content"] == pytest.approx(NOW + C)
+    assert record(path)["next_content"] == pytest.approx(NOW + C)
+
+
+def test_async_acquire_records_and_releases_when_the_send_fails(gate, path):
+    async def write() -> None:
+        async with gate.async_acquire(PATCH):
+            raise RuntimeError("送れなかった")
+
+    with pytest.raises(RuntimeError, match="送れなかった"):
+        asyncio.run(write())
+
+    assert _send_lock_is_free(path)
+    assert record(path)["sent_next"] == pytest.approx(NOW + W)
+
+
+def test_async_acquire_releases_once_on_the_finisher(gate, path, monkeypatch):
+    finisher = _Executor()
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
+    finished = []
+    real = gate._finish
+
+    def spy(kind, send):
+        finished.append((kind, send is not None))
+        real(kind, send)
+
+    monkeypatch.setattr(gate, "_finish", spy)
+
+    async def write() -> None:
+        async with gate.async_acquire(PATCH):
+            assert not _send_lock_is_free(path)
+
+    asyncio.run(write())
+
+    assert finished == [(WRITE, True)]
+    assert [fn.func for fn in finisher.ran] == [spy]
+    assert _send_lock_is_free(path)
+
+
+def test_async_busy_neither_sends_nor_records_the_send(gate, path):
+    seed(path, blocked_until=NOW + 60)
+    entered = []
+
+    async def write() -> None:
+        async with gate.within(lambda: 3.0).async_acquire(PATCH):
+            entered.append(True)
+
+    with pytest.raises(write_gate.Busy):
+        asyncio.run(write())
+
+    assert entered == []
+    assert record(path)["sent_next"] == 0.0
+    assert _send_lock_is_free(path)
