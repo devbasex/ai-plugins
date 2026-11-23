@@ -78,11 +78,30 @@ plugins/ndf/
 
 - `actual`
   - 事前条件: `trees` のキーはプラグインの根からの相対パスで、`src/` の下の `.py` だけを含む
-  - 事後条件: 返す名前はモジュールの名前（`src/ndf/core/worker.py` → `ndf.core.worker`）である。方針の名前を文字列で渡した呼び出しと、接頭辞を組み立てて渡した呼び出しの両方を含む
-  - 接頭辞の読み方: 呼び出しの引数が定数の文字列の連結（`f"hook.budget.{event}"` を含む）のとき、その定数の部分を接頭辞として読む。接頭辞で始まる方針をすべて引いたものとして数える
+  - 事後条件: 返す名前はモジュールの名前（`src/ndf/core/worker.py` → `ndf.core.worker`）である。下の「読み口」に当たる呼び出しの、方針の名前の引数を「引数の解き方」で解いたものを集める
+  - 読み口（方針を引く関数。`rules.json` の `limits.readers` が持つ。実コードの呼び出しの形は右の列）:
+
+    | 関数（完全な名前） | 方針の名前の引数 | 実コードの例 |
+    | --- | --- | --- |
+    | `ndf.contracts.limits.policy` | 1 番目 | `limits.policy(name)` |
+    | `ndf.contracts.limits.value` | 1 番目 | `limits.value(*POLICY)`（`src/ndf/contracts/named_cap.py:80`）・`limits_mod.value("handoff.lines", "count")`（`src/ndf/domains/records/handoff.py:17`） |
+    | `ndf.contracts.limits.seconds` | 1 番目 | `limits.seconds(LOCK_POLICY)`（`src/ndf/domains/loop/store.py:79`）・`limits.seconds("locks.append")`（`src/ndf/domains/records/jsonl.py:53`） |
+    | `ndf.contracts.limits.scaled` | 1 番目 | `limits.scaled(name, measured)` |
+    | `ndf.contracts.limits.from_env` | 3 番目（`policy_name`） | `limits.from_env(environ, name, policy_name, key)` |
+    | `ndf.domains.hooks.tables.policy_value` | 1 番目 | `tables.policy_value("hook.pushback", "attempts")`（`src/ndf/domains/hooks/counter.py:89`） |
+
+  - 関数の名前の解き方: モジュールの import を読み、呼び出しの先を完全な名前へ直してから上の表と照らす。`from ndf.contracts import limits`・`from ndf.contracts import limits as limits_mod`・`from ndf.contracts.limits import seconds` のどれも同じ `ndf.contracts.limits.seconds` になる。名前だけで照らさない（`ndf.testing.limits` は上限の設定ではない別のモジュールで、`limits_mod` の別名も持つ）
+  - 引数の解き方（上から順に試す）:
+    1. 文字列の定数: その文字列
+    2. 名前（`LOCK_POLICY`）: 同じモジュールの最上位の代入の右辺を 1. で解く
+    3. 星付きの名前（`*POLICY`）: 最上位の代入の右辺が組（`("relay.max-named", "count")`）のとき、表の引数の位置の要素を 1. で解く
+    4. 属性（`machine.CAP_POLICY`）・import した名前: import の先のモジュールの最上位の代入を 2.・3. で解く（1 段だけ。先がさらに別のモジュールを指すときは解けないものにする）
+    5. 上のどれでも解けない（引数・関数の戻り値・f 文字列）: 「動的な読み口」の宣言で解く（次の項）
+  - 動的な読み口: 名前を実行時に組み立てる読み手は、`rules.json` の `limits.dynamic` に `{"module": "<モジュール>", "template": "<名前の型>", "vocabulary": "<契約のファイル>#<JSON Pointer>", "reason": "<理由>"}` を宣言する。`template` の `{}` に `vocabulary` の値を 1 つずつ入れた名前だけを引いたものとして数える（接頭辞で始まる方針をすべて数えることはしない）。今の実例は `ndf.domains.hooks.budget` の 2 つの型で、`hook.budget.{}` の語彙は `contracts/hooks/runtimes.json` の各ランタイムの `events.*.budget`、`hook.budget.{}.{}` は同じ語彙とランタイムの名前の組である。`budget.py` は `tables.policies()` の辞書を名前で引くので、上の表の関数を通らない
+  - 解けない読み口: 宣言の無い動的な読み口は `unresolved` の指摘にする（保存先は呼び出しの行）。黙って数えない・黙って捨てる、のどちらもしない
   - 副作用: 無し（構文木を読むだけ）
 - `check`
-  - 事後条件: 指摘は 2 種類で、宣言した読み手が引いていない方針（`unread`）と、宣言の無い方針を引いているモジュール（`undeclared`）。どちらも方針の名前とモジュールの名前を理由に含む
+  - 事後条件: 指摘は 3 種類で、宣言した読み手が引いていない方針（`unread`）と、宣言の無い方針を引いているモジュール（`undeclared`）と、解けない読み口（`unresolved`）。どれも方針の名前（解けたとき）とモジュールの名前を理由に含む
 
 ### 異常系の処理
 
@@ -97,17 +116,19 @@ plugins/ndf/
 | --- | --- | --- |
 | `check` | 宣言した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
 | `check` | あるモジュールが方針を引くが、その方針の `read_by` にそのモジュールが無い | `undeclared` の指摘（保存先は呼び出しの行） |
+| `check` | 読み口の引数が解けず、`limits.dynamic` にそのモジュールの宣言も無い | `unresolved` の指摘（保存先は呼び出しの行） |
 | `check` | 宣言と実際が一致する | 指摘なし |
 
 - 繰り返しの終わる条件: 方針の数（223）× 読み手の数で有限
-- 計算量の注意: 接頭辞の照合は方針の名前を辞書順に並べて二分探索する。方針ごとに全ファイルを走査しない
+- 計算量の注意: 動的な読み口の名前は、語彙から組み立てた名前を集合にして方針の表と突き合わせる。方針ごとに全ファイルを走査しない
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `read_by` | データ（方針の項目） | `contracts/limits.json` | 無し（必須） |
-| `POLICY_CALLS` | 定数（方針を引く関数の名前） | `src/ndf/checks/rules.json` の `limits.policy_calls` | `["policy", "policy_value", "seconds_of"]` |
+| `limits.readers` | 設定値（読み口の関数の完全な名前と、方針の名前の引数の位置） | `src/ndf/checks/rules.json` | 上の「読み口」の表の 6 行 |
+| `limits.dynamic` | 設定値（動的な読み口の宣言） | 同上 | 上の「動的な読み口」の `ndf.domains.hooks.budget` の 2 行 |
 
 ### 既存の部品の再利用
 
@@ -121,8 +142,9 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `declared` | 方針ごとに宣言の集まりを返す | `read_by` が 1 つだけの方針 | 上限の設定を読めないときに `LimitsError` |
-| `actual` | 文字列で渡した方針・接頭辞を組み立てて渡した方針の両方を集める | 接頭辞がほかの方針の名前の前方一致になる場合（`hook.budget` と `hook.budget.stop`） | 構文の誤りで木が無いファイルは渡されない |
-| `check` | 一致すれば 0 件 | 宣言が 1 つで実際が 0 件（`unread` 1 件） | 宣言の無い方針を引くモジュール（`undeclared` 1 件） |
+| `actual` | 実コードの呼び出しの形をそのまま写した合成のモジュールで集める: `limits.seconds(LOCK_POLICY)`（最上位の定数）・`limits.value(*POLICY)`（組の定数）・`limits_mod.value("handoff.lines", "count")`（別名の import）・`from ndf.contracts.limits import seconds` の `seconds("x")`・`limits.from_env(env, "N", "p", "seconds")`（3 番目）・`tables.policy_value("hook.pushback", "attempts")` | `ndf.testing.limits` を `limits_mod` の別名で読むモジュール（集めない）・`machine.CAP_POLICY` のように別のモジュールの定数を指す引数（1 段だけ解く） | 構文の誤りで木が無いファイルは渡されない |
+| `actual`（動的な読み口） | 宣言した語彙の値から組み立てた名前だけを集める | 語彙に無い名前の方針 `hook.budget.unused` を足した設定（集めない。`check` で `unread`） | 宣言の無い f 文字列の読み口（集めずに `unresolved`） |
+| `check` | 一致すれば 0 件 | 宣言が 1 つで実際が 0 件（`unread` 1 件） | 宣言の無い方針を引くモジュール（`undeclared` 1 件）・解けない読み口（`unresolved` 1 件） |
 
 テストのファイル: `tests/checks/test_limits_readers.py`（新設）
 
