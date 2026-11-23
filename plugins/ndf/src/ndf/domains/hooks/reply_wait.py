@@ -11,6 +11,7 @@ hook の閉包に入るため、標準ライブラリと、コードのブロッ
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 ANSWER = "回答待ち"
 APPROVAL = "承認待ち"
@@ -142,12 +143,19 @@ def _markdown_lines(text: str) -> list[str]:
     return lines[:-1] if normalized.endswith("\n") else lines
 
 
-def prose_lines(text: str) -> list[tuple[str, bool]]:
-    """コードのブロック・引用・表を除いた、空でない行と、箇条書きの項目かどうか。
+class ProseLine(NamedTuple):
+    """本文の 1 行。`bullet` は箇条書きの項目か。`heading` は ATX の見出しか（`text` は `#` を外した文）。"""
 
-    見出しは章題として除く。ただし本文の最後の見出しの後に本文の行が無ければ（「## このまま進めてよいですか？」で
-    終える応答）、`#` を外した文を最後の行に残す。後に本文が続く見出しは、問いに答えた章題（「### どうやって設定
-    しますか？」の後の説明）でも、検証結果の章題でも、最後の 3 行と完了の報告の文に数えない。
+    text: str
+    bullet: bool
+    heading: bool = False
+
+
+def prose_lines(text: str) -> list[ProseLine]:
+    """コードのブロック・引用・表を除いた、空でない行。見出しは `heading` の印を付けて残す。
+
+    見出しは最後の 3 行にも完了の報告の文にも数えず、利用者への問いの見出し（`_directed_heading`）だけを待ちの
+    候補にする（`_waits`）。
     コードのブロック（囲みの種類と長さ・インデントのコード）は CommonMark の解析（`markdown.code_lines`）で決める。
     本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
     """
@@ -155,29 +163,51 @@ def prose_lines(text: str) -> list[tuple[str, bool]]:
 
     lines = _markdown_lines(text)
     code = markdown.code_lines(text)
-    out: list[tuple[str, bool]] = []
-    heading = ""
+    out: list[ProseLine] = []
     for raw, in_code in zip(lines, code):
         line = raw.strip()
         if in_code or not line or line.startswith((">", "|")):
             continue
         if _HEADING.match(line):
             heading = _HEADING_MARKS.sub("", line)
+            if heading:
+                out.append(ProseLine(heading, False, True))
             continue
-        heading = ""
         stripped = _BULLET.sub("", line)
-        out.append((stripped, stripped != line))
-    if heading:
-        out.append((heading, False))
+        out.append(ProseLine(stripped, stripped != line))
     return out
 
 
-def _last_lines(lines: list[tuple[str, bool]]) -> list[str]:
-    """最後の 3 行。箇条書きで終わるなら、その箇条書きの前置きの行まで含める（「どうしますか。」＋選択肢）。"""
-    start = max(0, len(lines) - 3)
-    while 0 < start and lines[start][1]:
+def _last_lines(lines: list[ProseLine]) -> list[str]:
+    """見出しを除いた最後の 3 行。箇条書きで終わるなら、その箇条書きの前置きの行まで含める（「どうしますか。」＋選択肢）。"""
+    body = [line for line in lines if not line.heading]
+    start = max(0, len(body) - 3)
+    while 0 < start and body[start].bullet:
         start -= 1
-    return [text for text, _ in lines[start:]]
+    return [line.text for line in body[start:]]
+
+
+def _directed_heading(lines: list[ProseLine], at: int) -> bool:
+    """`at` の見出しが利用者への問いか（章題でないか）。
+
+    見出しが回答・承認を待つ文を持ち、次のどれかに当たれば問い: 後に本文の行が無い（「## このまま進めてよいですか？」で
+    終える）・承認の語を含む（「## このままマージしてよいですか？」の下に検証結果と結び）・次の見出しまでの行が
+    どれも箇条書き（「## どちらの案で進めますか？」の下に選択肢）。後の本文が問いに答える章題（「### どうやって
+    設定しますか？」の下の説明）は問いにしない。
+    """
+    text = lines[at].text
+    if not any(_asks_reply(s) for s in _sentences([text])):
+        return False
+    below: list[ProseLine] = []
+    for line in lines[at + 1 :]:
+        if line.heading:
+            break
+        below.append(line)
+    if not any(not line.heading for line in lines[at + 1 :]):
+        return True
+    if any(w in text for w in APPROVAL_WORDS):
+        return True
+    return bool(below) and all(line.bullet for line in below)
 
 
 def _opaque(match: re.Match[str]) -> str:
@@ -267,9 +297,10 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
-def _waits(lines: list[tuple[str, bool]]) -> list[str]:
-    """本文の行（`prose_lines` の返り）の最後の行から、回答・承認を待つ文を取り出す。"""
-    return [s for s in _sentences(_last_lines(lines)) if _asks_reply(s)]
+def _waits(lines: list[ProseLine]) -> list[str]:
+    """本文の行（`prose_lines` の返り）の、利用者への問いの見出しと、見出しを除いた最後の行から、回答・承認を待つ文を取り出す。"""
+    headings = [line.text for i, line in enumerate(lines) if line.heading and _directed_heading(lines, i)]
+    return [s for s in _sentences(headings + _last_lines(lines)) if _asks_reply(s)]
 
 
 def _unquoted(text: str) -> str:
@@ -345,7 +376,7 @@ def _blank_quote(match: re.Match[str]) -> str:
     return "\n" * match.group(0).count("\n")
 
 
-def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
+def _unquoted_lines(lines: list[ProseLine]) -> list[ProseLine]:
     """かぎ括弧の引用の中身を除き、空になった行を落とす（行を抜き出し直さない）。
 
     引用の開閉は行をまたいで追う（「ログの抜粋です。」の後の、2 行にわたる『…続けてもよいですか？』を本人の質問と
@@ -353,16 +384,16 @@ def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
     閉じない開きかっこは、これまでどおり引用に数えない。インラインコード・リンク先・URL は引用の開閉を追う前に
     伏せる（`「` を説明する行どうしで、かぎ括弧が対応して間の質問を消さない）。
     """
-    joined = "\n".join(_OPAQUE.sub(_opaque, text) for text, _ in lines)
+    joined = "\n".join(_OPAQUE.sub(_opaque, line.text) for line in lines)
     prev = None
     while prev != joined:
         prev = joined
         joined = _QUOTED.sub(_blank_quote, joined)
-    out: list[tuple[str, bool]] = []
-    for (_, bullet), text in zip(lines, joined.split("\n")):
+    out: list[ProseLine] = []
+    for line, text in zip(lines, joined.split("\n")):
         rest = text.strip()
         if rest:
-            out.append((rest, bullet))
+            out.append(line._replace(text=rest))
     return out
 
 
@@ -371,7 +402,7 @@ def _paren_wait(sentence: str) -> bool:
     return any(_is_wait(inner) for inner in _PAREN_INNER.findall(sentence))
 
 
-def _closing_report(lines: list[tuple[str, bool]]) -> bool:
+def _closing_report(lines: list[ProseLine]) -> bool:
     """定型の結び（「引き続きよろしくお願いします。」）で終え、結びの前が完了の報告だけの本文か。
 
     本文の全部の文（引用を除いた行）を見る。末尾から定型の結びの文を外し、残りの文がどれも待ちの形でなく
@@ -379,12 +410,14 @@ def _closing_report(lines: list[tuple[str, bool]]) -> bool:
     あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。括弧書きの中に待ちの形の文（「（このままマージしてよいですか）」）
     があっても偽。最後の行の最後の文が定型の結びでなければ、本文全体を文に分けずに偽を返す。
     """
+    # 見出しは章題で、完了の報告の文に数えない（問いの見出しは `_waits` が先に待ちにする）
+    lines = [line for line in lines if not line.heading]
     if not lines:
         return False
-    tail = _sentences([lines[-1][0]])
+    tail = _sentences([lines[-1].text])
     if not tail or not _CLOSING.match(_core(tail[-1])):
         return False
-    sentences = _sentences([text for text, _ in lines])
+    sentences = _sentences([line.text for line in lines])
     body = list(sentences)
     while body and _CLOSING.match(_core(body[-1])):
         # 結びの文の括弧書きの待ち（「引き続きよろしくお願いします（このままマージしてよいですか）。」）は外さない
@@ -396,7 +429,7 @@ def _closing_report(lines: list[tuple[str, bool]]) -> bool:
     return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
 
 
-def prose_kind(lines: list[tuple[str, bool]]) -> str:
+def prose_kind(lines: list[ProseLine]) -> str:
     """本文の行（`prose_lines` の空でない返り）を持つ応答の種類。`report` / `closing_report` / `elsewhere_wait` /
     `prose_wait`。
 

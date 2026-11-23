@@ -592,7 +592,7 @@ class HookContext:
         return markdown.code_lines(self.last_reply) if self.last_reply else []
 
     @cached_property
-    def reply_prose_lines(self) -> list[tuple[str, bool]]:
+    def reply_prose_lines(self) -> list[reply_wait.ProseLine]:
         """最後の応答の本文の行（ルールの `prose_lines`）。`has_reply_prose` と `last_reply_kind` が同じ返りを読む。"""
         return reply_wait.prose_lines(self.last_reply)
 

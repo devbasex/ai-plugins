@@ -259,6 +259,19 @@ def test_a_heading_followed_by_prose_is_a_title(text, kind):
     assert reply_wait.reply_kind(text) == kind
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 見出しの問いの下に選択肢
+        "## どちらの案で進めますか？\n- 案 A\n- 案 B",
+        # 見出しで承認を求め、下に検証結果と結び
+        "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+    ],
+)
+def test_a_heading_that_asks_the_user_is_a_wait(text):
+    assert reply_wait.reply_kind(text) == "prose_wait"
+
+
 def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():
     text = "対応が完了しました。引き続きよろしくお願いします（このままマージしてよいですか）。"
     assert reply_wait.reply_kind(text) != "closing_report"

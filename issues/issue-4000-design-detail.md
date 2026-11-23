@@ -215,7 +215,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `asked_since_prompt` | `context.py` | 新設 | `asked_since_prompt(tail: str) -> bool` | 会話の記録の末尾を後ろから読み、利用者の入力（`type` が `user` で `isMeta` が真でなく、`content` が文字列か text の要素を持つ行）に当たる前に、`name` が `AskUserQuestion` の `tool_use` があれば真 |
 | `HookContext.asked_this_turn` | `context.py` | 新設 | `cached_property -> bool` | `asked_since_prompt(self.transcript_tail)` |
-| `HookContext.reply_prose_lines` | `context.py` | 新設 | `cached_property -> list[tuple[str, bool]]` | `reply_wait.prose_lines(self.last_reply)`。`has_reply_prose` と `last_reply_kind` が同じ返りを読む |
+| `HookContext.reply_prose_lines` | `context.py` | 新設 | `cached_property -> list[reply_wait.ProseLine]`（`ProseLine` は `text`・`bullet`（箇条書きの項目か）・`heading`（ATX の見出しか。`text` は `#` を外した文）の組） | `reply_wait.prose_lines(self.last_reply)`。`has_reply_prose` と `last_reply_kind` が同じ返りを読む |
 | `HookContext.has_reply_prose` | `context.py` | 新設 | `cached_property -> bool` | `bool(self.reply_prose_lines)`。guard `stop-wait` の 1 行目 |
 | `HookContext.last_reply_kind` | `context.py` | 変更 | `cached_property -> str`（変えない） | `self.has_reply_prose` が偽なら `none`、真なら `reply_wait.prose_kind(self.reply_prose_lines)`（`reply_wait.reply_kind` は呼ばない。本文の行を 2 回抜き出さない）。11.0.22 の `classify_reply`・`_WAIT_RE`・`_TAIL_LINES` は消す（別の場所の待ちの正規表現は `reply_wait.ELSEWHERE_RE` の 1 つだけ） |
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
