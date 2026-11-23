@@ -93,6 +93,35 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
+# （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
+# （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
+# 差分を読めないか（起点が無いなど）は `git diff` 自身の終了コードで見て、空の差分と分ける（#3908 の r2-5）。
+# macOS 標準の Bash 3.2 でも動くよう `mapfile`・`wait $!`（プロセス置換の終了コード）を使わない（#3908 の r2-1）。
+# NUL 区切りのパスをプロセス置換から `read -d ''` で 1 つずつ読み、パスの後ろに空の区切り（パスは空にならない）と
+# `git diff` の終了コードを流して受け取る。配列を使うので包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
+# オプションと取り違えないよう、パスには `./` を前置して渡す（`ndf refactor run` がリポジトリ相対へ戻す。#3908 の r2-4）
+REFACTOR_WITH_PR = """ref=$1; shift
+if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
+fi
+files=() rc=1 end=
+while IFS= read -r -d '' f; do
+  if [ -n "$end" ]; then rc=$f
+  elif [ -z "$f" ]; then end=1
+  else files+=("./$f"); fi
+done < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --; printf '\\0%s\\0' "$?")
+if [ "$rc" != 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref からの差分を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "git diff が失敗"
+fi
+if [ "${#files[@]}" -eq 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
+fi
+exec "$@" --pr "$n" --scope "${files[@]}"
+"""
 
 Value = Union[str, list[str]]
 
@@ -472,6 +501,16 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
     return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
 
 
+def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
+    """設定が無いときの `{{refactor}}` の値（`REFACTOR_WITH_PR`）。PR の番号と触るファイルは打つ時点に読んで足す。
+
+    位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が `ndf refactor run` の argv になる。
+    """
+    entry = identity.FIXED_WORDS["entrypoint"]
+    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]
+    return ["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, *run]
+
+
 def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str]]:
     """設定が無いときの `{{review}}` の値（ブランチとマージ先が決まらなければ None）。
 
@@ -489,11 +528,12 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
     return review_launch(t.name, branch, base)
 
 
-def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
+def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> dict[str, Value]:
     """テンプレートが使う差し込みのうち値の無い `review`・`acceptance` の補い（単発の経路と工程から組む経路で共有する）。
 
     `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
-    決まらない差し込みは含めない。
+    課題を束ねた単位（`issues` が 2 つ以上）は、課題ごとの `--issue` を番号の順に並べる（#3908 の決定 7。代表の課題
+    （`issue`）だけでは残りの課題の条件を照らさない）。決まらない差し込みは含めない。
     """
     out: dict[str, Value] = {}
     if _omitted(t, values, "review"):
@@ -502,7 +542,8 @@ def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
             out["review"] = review
     issue = values.get("issue")
     if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
-        out["acceptance"] = [ACCEPTANCE_ISSUE, issue]
+        named = sorted({issue, *issues}, key=int) if len(issues) > 1 else [issue]
+        out["acceptance"] = [arg for n in named for arg in (ACCEPTANCE_ISSUE, n)]
     return out
 
 
@@ -521,13 +562,14 @@ def check_acceptance(values: Mapping[str, Value]) -> None:
             raise RouteError(f"acceptance の {arg} の後に値が無い: {' '.join(found)}")
 
 
-def launched(t: Template, values: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+def launched(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> tuple[dict[str, Value], dict[str, Value]]:
     """`values` に起動の補い（`launch_values`）を足して `acceptance` を検査（`check_acceptance`）した値と、補った値。
 
-    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。補った値は、
+    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。`issues` は工程の
+    入力の課題の並びで、束ねた単位の `acceptance` を課題ごとの `--issue` にする（#3908 の決定 7）。補った値は、
     `{{review}}` が既定の起動かを呼び手が見分けるために返す。検査に通らなければ `RouteError`。
     """
-    filled = launch_values(t, values)
+    filled = launch_values(t, values, issues=issues)
     out = {**values, **filled}
     check_acceptance(out)
     return out, filled

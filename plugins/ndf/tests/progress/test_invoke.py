@@ -305,17 +305,18 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
 
 
 def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
-    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）。
-    # 課題に依存しない差し込み（設定と worker の既定）はそろえ、課題の出所の欠けまで進める
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない。
+    # 題と本文は代表の課題（番号の最も小さい #3）から写す（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    run = _stage_run_of("impl", repo, [3, 4])
+    run = _stage_run_of("impl", repo, [4, 3])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
-    with pytest.raises(invoke.TemplateValuesMissing) as got:
-        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project=PROJECT, local_tests=True)
-    assert "issue" not in got.value.missing and "title" in got.value.missing
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.template_values(route.choose("implement"), run, work, repo, project=PROJECT, local_tests=True)
+    assert "issue" not in got and got["title"] == "#3 の題"
 
 
 def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
@@ -569,6 +570,31 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     named = {i["key"]: i["source"] for i in got.report["items"]}
     assert named["title"] == invoke.FROM_UNTRUSTED_ISSUE and named["body_file"] == invoke.FROM_UNTRUSTED_ISSUE
     assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+
+
+def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
+    # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue を写す
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke._issue_values(_stage_run_of("impl", repo, [4211, 3908]), work, repo)
+    body = work / invoke.ISSUE_BODY_FILE.format(number=3908)
+    assert got == {"title": "#3908 の題", "body_file": str(body), "issue": "3908"}
+    # 残りの課題（#4211）の閉鎖参照は足さない。設計の PR にも同じ本文が渡り、課題を閉じるのはスプリントの PR の
+    # 本文と「スプリントを閉じる」である（`/ndf:pr`。#3908 の r2-2・r2-3）
+    assert body.read_text(encoding="utf-8") == "#3908 の本文"
+
+
+def test_the_sprint_pr_refers_to_every_bundled_issue(tmp_path):
+    # #3908 の r2-2: スプリントの PR（`pr` のテンプレート）の本文へ、束ねたすべての課題を `Refs #<番号>` で載せる
+    run = invoke.StageRun(invoke.PLAN, "pr", {"issues": [4211, 3908]}, (), "none", "pr")
+    pr = route.templates()["pr"]
+    assert invoke._fill_refs(pr, {}, run) == {"refs": ["3908", "4211"]}
+    # 渡した値は上書きせず、`refs` を持たないテンプレートと課題の無い入力には足さない
+    assert invoke._fill_refs(pr, {"refs": ["1"]}, run) == {}
+    assert invoke._fill_refs(route.templates()["impl"], {}, run) == {}
+    assert invoke._fill_refs(pr, {}, replace(run, inputs={})) == {}
 
 
 def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):

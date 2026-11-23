@@ -11,7 +11,7 @@ import pytest
 import strategy_fixture
 
 from ndf import contracts, identity
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import Completed, Git, GitError
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, stages, store
@@ -561,6 +561,32 @@ def _sprint_branch_repo(repo: Path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "base")
     _git(repo, "checkout", "-q", "-b", "sprint/s1")
+
+
+def test_base_ref_is_the_local_branch_or_the_remote_tracking_one(repo):
+    # #3908 の決定 7: 差分の起点の規則（工程の条件 code_in_diff と同じ）を切り出したもの。
+    # 手元に読めるブランチはその名前、読めなければ作業場所のリモート名を付けた参照
+    _sprint_branch_repo(repo)
+    assert command.base_ref(Git(repo), "develop") == "develop"
+    assert command.base_ref(Git(repo), "release") == "origin/release"
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
+    assert command.base_ref(Git(repo), "release") == "upstream/release"
+
+
+def test_base_ref_is_resolved_once_while_a_stage_starts(tmp_path):
+    # #3908 の r2-5: 工程の始まりの中では、条件の判定と既定の起動の組み立てが同じ起点を 1 回だけ求める。範囲の外では毎回求める
+    calls: list[list[str]] = []
+
+    def runner(args: list[str], cwd: Path | None) -> Completed:
+        calls.append(args)
+        return Completed(0, "0" * 40 + "\n", "")
+
+    git = Git(tmp_path, runner)
+    with command.base_refs_once():
+        assert command.base_ref(git, "develop") == "develop"
+        assert command.base_ref(Git(tmp_path / ".", runner), "develop") == "develop"
+    assert len(calls) == 1
+    assert command.base_ref(git, "develop") == "develop" and len(calls) == 2
 
 
 def _commit(repo: Path, changed: dict[str, str]) -> str:
