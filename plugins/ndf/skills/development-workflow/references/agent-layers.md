@@ -267,7 +267,7 @@ worker が守る規則:
 - 作業: 調査
 - 結果: 完了
 - 見つけたもの: 3 件（`context-window.md:21` / `parallel-work.md:88` / `stage-notes.md:106`）
-- 置く場所: /tmp/claude-1000/<…>/scratchpad/設計-550/survey-550.md
+- 置く場所: /tmp/claude-1000/<…>/scratchpad/設計-550/survey-550.report.md
 - 次にすること: 無し
 ```
 
