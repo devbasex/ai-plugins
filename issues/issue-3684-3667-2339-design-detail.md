@@ -229,7 +229,28 @@ plugins/ndf/
   - 事後条件: 要素が 2 つ以上の `enum` だけを返す（1 つの `enum` は定数と重なっても事実の重複と言えない）
   - 副作用: 無し（契約の読み手を通して読むので、1 プロセス 1 回）
 - `_limit_dups`
-  - 事後条件: 名前が上限・回数・待ちを表す（`rules.json` の `facts.limit_name_pattern` に当たる）定数だけを照らす。当たらない名前の定数は、同じ数でも指摘しない
+  - 事後条件: 次の 3 つをすべて満たす定数だけを指摘する。数が偶然そろっただけの定数を落とさないため、名前と値の一致だけでは指摘しない
+    1. 名前が `rules.json` の `facts.limit_kinds` のどれかの語に当たる
+    2. 当たった語に対応する方針の値のキー（下の表）を持つ方針の、そのキーの値と等しい（ほかのキーの値とは照らさない。`ATTEMPT = 3` は `attempts` だけと照らし、`seconds: 3` とは照らさない）
+    3. `rules.json` の `facts.limit_constants` に載っていない
+  - 定数のまま置く値（決定 8 の外部の仕様の値と実装の都合の値）は、`facts.limit_constants` に `{"name": "<モジュール>.<定数>", "kind": "external" | "implementation", "reason": "<理由>"}` で 1 つずつ載せる。名前の型や値の範囲でまとめて外す書き方は持たない（広い除外で方針の写しが通るのを防ぐ）。`reason` は 1 字以上を必須とする。この表が #3667 の受け入れ条件 3 の「分けた一覧」の正本で、実装の PR の本文はこの表を写す
+  - 載せた定数が無くなった・照合に当たらなくなった行は `stale` の指摘にする（除外が残り続けて、後から足した同名の写しを通さないため）
+  - 語と方針の値のキーの対応（`facts.limit_kinds`）:
+
+    | 名前の語 | 照らす値のキー |
+    | --- | --- |
+    | `TIMEOUT`・`WAIT`・`SECONDS`・`GRACE` | `seconds`・`timeout`・`deadline` |
+    | `INTERVAL` | `interval`・`max_interval` |
+    | `MAX`・`LIMIT`・`CAP`・`KEEP`・`BUDGET` | `count` |
+    | `RETRY`・`ATTEMPT` | `attempts` |
+    | `DAYS` | `count`（上限の設定は日数を `count` で持つ） |
+
+  - 今の除外の例（実装の単位 3 で全件を載せる）:
+
+    | 定数 | 照合に当たる方針 | 種類 | 理由 |
+    | --- | --- | --- | --- |
+    | `ndf.domains.relay.account_login.POLL_INTERVAL`（0.1） | `procs.stop-tree`・`procs.stop-test` の `interval`（0.1） | `implementation` | ログインの締め切りまで条件を見直す間隔で、プロセスを止める猶予の方針とは別の事実。値が同じなのは偶然 |
+    | `ndf.domains.gws.thumbnails.CURL_TIMEOUT_EXIT`（28） | 名前の語 `TIMEOUT` が当たる方針のうち値 28 を持つもの（あれば） | `external` | curl の終了コード（curl の仕様）。変えると判定が壊れる |
 
 ### 異常系の処理
 
@@ -242,7 +263,8 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `facts.limit_name_pattern` | 設定値（上限・回数・待ちを表す名前） | `src/ndf/checks/rules.json` | `MAX\|LIMIT\|TIMEOUT\|WAIT\|RETRY\|DAYS\|SECONDS\|INTERVAL\|ATTEMPT\|GRACE\|KEEP\|BUDGET\|CAP` |
+| `facts.limit_kinds` | 設定値（上限・回数・待ちを表す名前の語と、照らす方針の値のキー） | `src/ndf/checks/rules.json` | 上の「語と方針の値のキーの対応」の表 |
+| `facts.limit_constants` | 設定値（定数のまま置く値の 1 つずつの除外と理由） | 同上 | 上の「今の除外の例」を含む全件（実装の単位 3 で測る） |
 | `facts.generated_schemas` | 設定値（照合から外すスキーマ） | 同上 | `["schemas/io/*.args.schema.json"]` |
 
 ### 単体テストの観点
@@ -251,7 +273,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `lit` | 辞書の定数で値の集まりも返す | 値に数が混ざる辞書（キーだけ） | キーが `None` を含む辞書（`None` を返す。今のまま） |
 | `_enum_dups` | `enum` と同じ集まりの定数で 1 件、部分集合で 1 件 | 要素 2 つの `enum`（照合する）・1 つ（照合しない）・関係の無い集まり（0 件） | スキーマを読めないときに例外 |
-| `_limit_dups` | 合成した上限の設定の方針の数（例: 1,800）と同じ値を持つ、名前が上限を表す定数で 1 件 | 名前が当たらない定数（0 件）・同じ数の表示の行数（0 件） | 上限の設定を読めないときに例外 |
+| `_limit_dups` | 合成した上限の設定の方針の `seconds`（例: 1,800）と同じ値を持つ `X_TIMEOUT` で 1 件 | 名前が当たらない定数（0 件）・同じ数の表示の行数（0 件）・語に対応しないキーだけが同じ値（`ATTEMPTS = 3` と `seconds: 3`。0 件）・実例の組 `POLL_INTERVAL = 0.1` と `procs.stop-tree`・`procs.stop-test` の `interval: 0.1` を `facts.limit_constants` に載せた設定（0 件）・同じ組で除外を消した設定（1 件） | 上限の設定を読めないときに例外・除外の行の定数が無い（`stale` 1 件）・`reason` が空の除外（設定の検証で止まる） |
 
 テストのファイル: `tests/checks/test_facts_enum.py`・`test_facts_limits.py`・`test_facts_dict.py`（新設）
 
