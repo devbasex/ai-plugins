@@ -1,7 +1,8 @@
 """本文が人の回答・承認を待って終えたかをルールだけで判定する（#4000）。
 
-10 系の `scripts/lib/wait_notice.py` の「本文の判定」をそのまま移した。語の列・文の分け方・最後の 3 行の取り方・
-操作の案内の外し方は 10 系と同じで、軽いモデルの前に置く前置きのルールとして使う。
+10 系の `scripts/lib/wait_notice.py` の「本文の判定」（`classify_reply_wait`）をそのまま移した。語の列・文の分け方・
+最後の 3 行の取り方・操作の案内の外し方は 10 系と同じである。guard `stop-wait` が軽いモデルの前に当てるのは `reply_kind` で、
+`classify_reply_wait` の待ちの文から、かぎ括弧の引用と、別の場所（ほかのセッション・レーン）の待ちの報告を外す。
 
 hook の閉包に入るため、標準ライブラリだけを読む。
 """
@@ -74,6 +75,10 @@ _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
 _DECORATION = "*_`~ 　"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 _BULLET = re.compile(r"^(?:[-*+・]|\d+[.)])\s+")
+# かぎ括弧の引用（ほかの人の質問を引いて経緯を書いた文を、本人の質問と読まない）
+_QUOTED = re.compile(r"「[^「」]*」|『[^『』]*』")
+# 別の場所（ほかのセッション・レーン）の待ちを報告する文。11 系の `classify_reply` と同じ形（context.py もこれを読む）
+ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
 
 
 def _prose_lines(text: str) -> list[tuple[str, bool]]:
@@ -164,13 +169,43 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
+def _waits(text: str) -> list[str]:
+    """本文の最後の行から、回答・承認を待つ文を取り出す。"""
+    return [s for s in _sentences(_last_lines(_prose_lines(text))) if _asks_reply(s)]
+
+
+def _unquoted(text: str) -> str:
+    """かぎ括弧の引用の中身を除いた本文（入れ子は内側から外す）。"""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _QUOTED.sub("", text)
+    return text
+
+
 def classify_reply_wait(text: str) -> str:
-    """本文が回答・承認を待って終えたかの種類（ANSWER / APPROVAL / NONE）。
+    """本文が回答・承認を待って終えたかの種類（ANSWER / APPROVAL / NONE）。10 系と同じ。
 
     操作の案内のリクエストの形（「更新を終えました。アプリを再起動してください。」）は待ちに数えない。
     """
-    sentences = _sentences(_last_lines(_prose_lines(text)))
-    waits = [s for s in sentences if _asks_reply(s)]
+    waits = _waits(text)
     if not waits:
         return NONE
     return APPROVAL if any(any(w in s for w in APPROVAL_WORDS) for s in waits) else ANSWER
+
+
+def reply_kind(text: str) -> str:
+    """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
+
+    `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
+    待ちの報告）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。待ちの文は `classify_reply_wait` と同じ形で
+    探し、かぎ括弧の引用の中身は見ない。
+    """
+    if not _prose_lines(text):
+        return "none"
+    waits = _waits(_unquoted(text))
+    if not waits:
+        return "report"
+    if all(ELSEWHERE_RE.search(s) for s in waits):
+        return "elsewhere_wait"
+    return "prose_wait"

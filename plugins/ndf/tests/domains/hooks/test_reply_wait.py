@@ -1,7 +1,8 @@
 """ルールの前置き（10 系から移した `classify_reply_wait`）の正誤（#4000 の受け入れ条件 0）。
 
 例の組は 10 系の `plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json`（`ndf--v10.27.77`）を移したもので、
-ai-plugins の対話のセッションで利用者の入力の直前に終わった実際の応答 225 件である。モデルを呼ばず、移した判定だけで測る。
+ai-plugins の対話のセッションで利用者の入力の直前に終わった実際の応答 225 件である。モデルを呼ばず、guard `stop-wait` が
+使う `reply_kind`（移した判定に、引用と別の場所の待ちの報告を外す前処理を足したもの）だけで測る。
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ def _examples() -> list[dict]:
 
 
 def _is_wait(text: str) -> bool:
-    return reply_wait.classify_reply_wait(text) != reply_wait.NONE
+    return reply_wait.reply_kind(text) == "prose_wait"
 
 
 def test_the_rule_catches_no_fewer_waits_than_the_10_series():
@@ -61,10 +62,23 @@ def test_the_misses_in_the_issue_are_caught_by_the_rule_alone(text):
     assert _is_wait(text)
 
 
-def test_a_quoted_question_is_still_read_as_a_wait():
-    """引用の誤検出の例は 10 系も 11 系も待ちと読む既知の弱点で、移した判定も引き継ぐ（#4000 の決定 1 の代償）。"""
+def test_a_quoted_question_is_a_report():
+    """引用の誤検出の例（#4000 の「何が起きたか」）は、ルールが変更要求を出さずに通す。"""
     text = "レーンの様子を報告します。このレーンは「どちらにするかの指示をください」と書いた後に応答を終えていて、こちらでは何も待っていません。"
-    assert _is_wait(text)
+    assert reply_wait.reply_kind(text) == "report"
+
+
+def test_a_question_outside_the_quote_is_still_a_wait():
+    assert _is_wait("このレーンは「どちらにするか」を書いていません。どちらにするか決めてください。")
+
+
+def test_a_wait_elsewhere_is_not_a_wait_here():
+    """別のレーンの承認待ちを伝えただけの応答は、ルールの待ちにしない（11 系の `elsewhere_wait` と同じ）。"""
+    assert reply_wait.reply_kind("p9 の作業を終えました。別のレーンは承認を待っています。") == "elsewhere_wait"
+
+
+def test_a_wait_elsewhere_with_a_question_here_is_a_wait():
+    assert _is_wait("別のレーンは承認を待っています。こちらは #4217 を載せてよいですか。")
 
 
 def test_a_question_inside_a_code_block_is_not_a_wait():
@@ -76,5 +90,6 @@ def test_an_operation_guide_is_not_a_wait():
     assert not _is_wait("更新を終えました。アプリを再起動してください。")
 
 
-def test_an_empty_reply_is_not_a_wait():
-    assert reply_wait.classify_reply_wait("") == reply_wait.NONE
+def test_an_empty_reply_is_none():
+    assert reply_wait.reply_kind("") == "none"
+    assert reply_wait.reply_kind("```\nprint(1)\n```") == "none"
