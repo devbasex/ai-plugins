@@ -8,6 +8,9 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
+import sys
+import warnings
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -27,6 +30,8 @@ SCRIPT_PREFIXES = ("bin/", "hooks/")
 SRC_DIR = "src"
 # 見るファイルを集めるときに降りないディレクトリ（依存の環境・キャッシュ）
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
+# `ReusedAnchorWarning` の文の、2 つ目の定義の位置（行の抜粋は字下げされ、行頭の語に当たらない）
+REUSED_ANCHOR_AT = re.compile(r'^second occurrence\s+in "[^"\n]*", line (\d+), column (\d+)', re.MULTILINE)
 
 
 class CheckError(Exception):
@@ -176,11 +181,23 @@ class Scope:
         return [s for s in self.sources if s.is_python]
 
 
+def _load_yaml(path: Path, text: str) -> Any:
+    """YAML の値。読み手の警告（同じ名前のアンカーなど）の文には入力の行の抜粋が載るので、標準エラーへはパスと位置だけを出す。"""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        doc = YAML(typ="rt").load(text)
+    for w in caught:
+        at = REUSED_ANCHOR_AT.search(str(w.message))
+        where = f":{at[1]}:{at[2]}" if at else ""
+        print(f"ワークフローの YAML の警告 {w.category.__name__}: {path}{where}", file=sys.stderr)
+    return doc
+
+
 def read_workflow(path: Path) -> Workflow:
     """ワークフローを読む。YAML として読めなければ `CheckError`。"""
     try:
         text = path.read_text(encoding="utf-8")
-        doc = YAML(typ="rt").load(text)
+        doc = _load_yaml(path, text)
     except YAMLError as exc:
         # 例外の文には入力の行の抜粋が載る（Git の外の設定ファイルも読みうる）。パスと位置だけを出す
         mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
@@ -188,6 +205,9 @@ def read_workflow(path: Path) -> Workflow:
         raise CheckError(f"ワークフローを YAML として読めない: {path}{where}") from None
     except UnicodeDecodeError as exc:
         raise CheckError(f"ワークフローを UTF-8 として読めない: {path}: 位置 {exc.start}") from None
+    except (ValueError, LookupError, AttributeError):
+        # 型のタグ（`!!int` など）や日付の値を変換できないときの例外の文には、値がそのまま載る
+        raise CheckError(f"ワークフローの値を型のとおりに読めない: {path}") from None
     except OSError as exc:
         raise CheckError(f"ワークフローを読めない: {path}: {exc.strerror}") from None
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
