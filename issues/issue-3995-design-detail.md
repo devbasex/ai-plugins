@@ -72,14 +72,14 @@ docs/glossary/glossary.json・docs/glossary.md
 
 - `thresholds`
   - 事前条件: `value(name, key)` は上限の設定の方針の値を返し、行か値が無ければ例外を上げる（`tables.policy_value` は `TableError`、`limits.value` は `LimitsError`）
-  - 事後条件: `decide_from ≤ limit` で、どちらも正の整数。`sources` は `{"decide_from": "default" | "env", "limit": "default" | "env"}` で、環境変数を無視したときだけ `"ignored": "NDF_CONTEXT_LIMIT=<値>"` を持つ
+  - 事後条件: `decide_from ≤ limit` で、どちらも正の整数。`sources` は `{"decide_from": "default" | "env", "limit": "default" | "env"}` で、環境変数を無視したときだけ `"ignored": "NDF_CONTEXT_LIMIT"`（変数名だけ。生値は記録と出力へ渡さない）を持つ
   - 副作用: 無い
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `thresholds` | `NDF_CONTEXT_LIMIT` が正の整数でない（`0`・`-1`・`abc`・`1.5`・`²`） | 利用者の入力 | `thresholds`（`re.fullmatch("[0-9]+")` で見てから `int`） | 既定値で続ける（`ignored` を出所に書く） | `resolve` の `items[0].sources.ignored` に値が出る。guard とラッパーは既定で動く | 無い |
+| `thresholds` | `NDF_CONTEXT_LIMIT` が正の整数でない（`0`・`-1`・`abc`・`1.5`・`²`） | 利用者の入力 | `thresholds`（`re.fullmatch("[0-9]+")` で見てから `int`） | 既定値で続ける（`ignored` を出所に書く） | `resolve` の `items[0].sources.ignored` に変数名だけが出る（生値は出さない）。guard とラッパーは既定で動く | 無い |
 | `thresholds` | 上限の設定の 2 つの値が逆（判断開始の値 > 運用上限） | 契約の書き誤り | `thresholds` | 判断開始の値を運用上限へ下げて続ける（出所は運用上限の出所） | 何も出ない | 契約を直す |
 | `thresholds` | 上限の設定に行が無い | 契約の壊れ | `value` | 呼び出し元へ返す（例外） | guard は dispatch が例外を `pass` にする（`fail_closed` は偽）。`resolve` は今の CLI の例外の扱いのまま | 契約を直して打ち直す |
 

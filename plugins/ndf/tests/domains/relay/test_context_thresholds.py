@@ -62,7 +62,7 @@ def test_env_that_is_not_a_positive_integer_is_ignored(raw):
     # 正の整数でない値は無視して既定で続け、出所に ignored を書く（guard とラッパーを落とさない）
     got = thresholds({"NDF_CONTEXT_LIMIT": raw}, limits.value)
     assert (got.decide_from, got.limit) == (250_000, 500_000)
-    assert got.sources == {"decide_from": "default", "limit": "default", "ignored": f"NDF_CONTEXT_LIMIT={raw}"}
+    assert got.sources == {"decide_from": "default", "limit": "default", "ignored": "NDF_CONTEXT_LIMIT"}
 
 
 def test_reversed_table_lowers_the_decide_from_to_the_limit():
@@ -111,9 +111,10 @@ def test_resolve_reads_the_env_limit(monkeypatch, capsys, raw, decide_from, limi
 
 def test_resolve_follows_the_limits_table(monkeypatch, capsys):
     # 上限の設定の 2 つの値を差し替えると、resolve は差し替えた値を返す（定数や別の行を読まない）
-    real = limits.value
+    # CLI は検証を通さない軽量の読み手（`hooks.tables.policy_value`）で引く（PR 4220 の cross-review r1-2）
+    real = tables.policy_value
     swapped = {context_thresholds.DECIDE_FROM: 100_000, context_thresholds.LIMIT: 200_000}
-    monkeypatch.setattr(limits, "value", lambda name, key: swapped[name] if name in swapped else real(name, key))
+    monkeypatch.setattr(tables, "policy_value", lambda name, key: swapped[name] if name in swapped else real(name, key))
     got = _resolve(monkeypatch, capsys, None)
     assert got["metrics"] == {"decide_from": 100_000, "limit": 200_000}
 

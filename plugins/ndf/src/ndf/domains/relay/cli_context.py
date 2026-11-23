@@ -11,7 +11,8 @@ import time
 from typing import Any, Callable, Optional
 
 from ndf import cli
-from ndf.contracts import limits, result
+from ndf.contracts import result
+from ndf.domains.hooks import tables
 from ndf.domains.relay import context_records, context_report, context_thresholds
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -25,7 +26,7 @@ CONTEXT_COMMANDS = {
 
 
 def _context_resolve(args: argparse.Namespace) -> int:
-    got = context_thresholds.thresholds(os.environ, limits.value)
+    got = context_thresholds.thresholds(os.environ, tables.policy_value)
     summary = f"判断開始の値 {got.decide_from} / 運用上限 {got.limit}"
     metrics = {"decide_from": got.decide_from, "limit": got.limit}
     return result.emit(result.result(TOOL, result.OK, summary, items=[got.as_dict()], metrics=metrics))
@@ -35,7 +36,7 @@ def _context_record(args: argparse.Namespace) -> int:
     root = context_records.toplevel(None)
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
     work = context_records.recorded_work(args.work, sid if sid else None)  # noqa: NDF501 利用者の入力: 空の CLAUDE_CODE_SESSION_ID は未設定と同じ
-    applied = context_thresholds.thresholds(os.environ, limits.value)
+    applied = context_thresholds.thresholds(os.environ, tables.policy_value)
     row = context_records.record_row(sid if sid else None, work, applied, args.event, args.reason)  # noqa: NDF501 利用者の入力: 空の CLAUDE_CODE_SESSION_ID は未設定と同じ
     try:
         context_records.append(context_records.repo_key(root), row, os.environ)
