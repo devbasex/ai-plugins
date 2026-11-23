@@ -4,7 +4,7 @@
 省いた文書: 詳細設計書（新設する関数 0・シグネチャを変える関数 0。下の「修正対象」に畳む）
 省いた文書: 実行計画（課題 1・PR 1）
 
-起動の排他の中で数える作り（#3989 の決定）を確かめるテスト 3 本が、本物の時間の待ちと子のプロセスを除くコミット 79b02ac21 で消え、代わりが無い。排他を偽の錠に、`ndf lanes status` の生死の材料を偽の口に差し替え、待たず子のプロセスも起動しないテストとして戻す。確定仕様のテスト観点は、戻したテストにそろえる。事実と受け入れ条件は [要求仕様](./issue-4217-requirements.md) にあり、コードは変えない。
+起動の排他の中で数える作り（#3989 の決定）を確かめるテスト 3 本が、本物の時間の待ちと子のプロセスを除くコミット 79b02ac21 で消え、代わりが無い。排他を偽の錠に、`ndf lanes status` の生死の材料を外部のコマンドを呼ばない偽に差し替え、待たず子のプロセスも起動しないテストとして戻す。確定仕様のテスト観点は、戻したテストにそろえる。事実と受け入れ条件は [要求仕様](./issue-4217-requirements.md) にあり、コードは変えない。
 
 ## 関連リンク
 
@@ -18,17 +18,17 @@
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `plugins/ndf/tests/progress/test_lane_machine.py` | テストを 2 本足す（下の Task 1・2）。`machine.admit_lock` を偽の錠に差し替える補助を、テストのファイルの中に置く |
-| `plugins/ndf/tests/progress/test_plan.py` | テストを 1 本足す（Task 3）。`plan_run.probes` を偽の口に差し替える |
-| `docs/specifications/ndf-parallel-machine-plan-limit.md` | 「テスト観点」の記述を、実際にあるテストのファイルと名前にそろえる（Task 4） |
+| `plugins/ndf/tests/progress/test_lane_machine.py` | テストを 2 本足す（下の Task 1・2）。`machine.admit_lock` を偽の錠に差し替える補助（出入りを呼び出しの記録へ積む）を、テストのファイルの中に置く |
+| `plugins/ndf/tests/progress/test_plan.py` | テストを 1 本足す（Task 3）。生死の材料を読む `plan_run.probes` を、外部のコマンドを呼ばない偽に差し替える |
+| `docs/specifications/ndf-parallel-machine-plan-limit.md` | 「テスト観点」の 4 項目に、確かめるテストのファイルと、範囲外にした項目の課題の番号を書く（Task 4。項目は消さない） |
 
 テストが呼ぶ既存の関数の振る舞い（変えない。テストが縛る前提）:
 
 | 関数 | 入力 | 返り・失敗の扱い |
 | --- | --- | --- |
-| `machine.admitted(own, lane_wrapper, listed, go, where)`（確定仕様の語では「起動の許可」。課題の本文の「起動の判定」と同じもの） | 自分の計画のレーン・起動するラッパーの名前・ラッパーの一覧を読む口・起動の手・計画の所在 | `admit_lock` の中で `cap()`・`listed()`・数える・`index_plan`・`go` の順に打つ。収まらなければ `waiting(RULE か OBSERVE, …)`。`admit_lock` が `LockBusy` を上げれば、どれも打たずに `waiting(LOCK, None, None)`（`{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}, "detail": …}`） |
+| `machine.admitted(own, lane_wrapper, listed, go, where)`（確定仕様の語では「起動の許可」） | 自分の計画のレーン・起動するラッパーの名前・ラッパーの一覧を読む関数・起動の手・計画の所在 | `admit_lock` の中で `cap()`・`listed()`・数える・`index_plan`・`go` の順に打つ。収まらなければ `waiting(RULE か OBSERVE, …)`。`admit_lock` が `LockBusy` を上げれば、どれも打たずに `waiting(LOCK, None, None)`（`{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}, "detail": …}`） |
 | `plan_cli.main(argv)` | `["limits", …]`・`["set", …, "--plans", …]` | 引数の誤りとして `causes.exit_code("invalid")` を返す（例外を上げない） |
-| `plan_run.probes(repo, plan)` | `status` が呼ぶ生死の材料の口 | 既定は `ndf relay ls` と `ndf progress wait` を子のプロセスで打つ。テストは差し替える |
+| `plan_run.probes(repo, plan)` | `status` が呼ぶ、生死の材料を読む関数の組 | 既定は `ndf relay ls` と `ndf progress wait` を子のプロセスで打つ。テストは差し替える |
 
 ## タスク分解
 
@@ -65,23 +65,24 @@
 ### Task 4: 確定仕様のテスト観点をテストにそろえる
 
 - **対象ファイル:** `docs/specifications/ndf-parallel-machine-plan-limit.md`
-- **変更内容:** 「テスト観点」の項目を、今あるテストと 1 つずつ照らす。照らす項目は 2 種類ある。
-  - 79b02ac21 がテストを消したファイル（`tests/progress/test_plan.py`・`test_lane_machine.py`・`test_plan_run.py`・`test_run_lanes.py`）を指す項目
-  - Task 1〜3 が確かめる項目（1 項目目・「別の 2 つの計画の起動の許可を同時に…」・「排他が取られているときは `lock`」）
+- **変更内容:** 「テスト観点」の 18 項目は、設計の工程で今あるテストと 1 つずつ照らし済みで、**直す項目は下の 4 つに決まっている**。照らした全文は設計 Pull Request の本文にある（判定は `ある` 13・`一部` 3・`無い` 2）。**項目は 1 つも消さない。**
 
-  照らした後の直し方:
-  - 1 項目目の「検査の誤りに I20・I2 が出ない」は、確かめているテストのファイル（`tests/progress/test_lane.py` など）を括弧に足す。どこにも無ければその句を消す
-  - 同時に起動を求める場合と `lock` の待ちの項目は、Task 1・2 のテストのファイル（`tests/progress/test_lane_machine.py`）を括弧に書く
-  - 照らして今あるテストが無い項目が残れば、その項目を消し、テストを戻す課題を `out-of-scope` で起票して番号を PR に書く（この課題の範囲外）
-  - 末尾の「ほかに `tests/progress/test_plan_run.py`… がある」の行は、今あるファイルだけを残す
+  | 項目 | 今の判定 | 直し方 |
+  | --- | --- | --- |
+  | 1 項目目（3 つの値・`ndf lanes limits`・`ndf lanes set --plans`・I20・I2） | 一部（消した引数の分だけ無い） | Task 3 のテストで満たす。名指すファイルは `tests/progress/test_plan.py` のままで、I20 を確かめているのは `tests/progress/test_lane.py` なのでそちらも括弧に足す |
+  | 12 項目目（別の 2 つの計画の起動の許可を同時に走らせても上限を超えない） | 一部（前半が無い） | Task 1 のテストで満たす。括弧に `tests/progress/test_lane_machine.py` を書く |
+  | 13 項目目（`machine_wait` の `lock`） | ある（`status` の側だけ） | 起動の許可の側の `lock` を Task 2 が確かめるので、その 1 文を足して同じファイルを指す |
+  | 9 項目目（上限を下げた後の続きの起動）・17 項目目（テストのスロットが変わらない）・18 項目目（時間で区切らない） | 一部・無い（この課題の範囲外） | 項目は消さず、行の末尾に別の課題の番号（#4221・#4222）を括弧で添える |
+
+  末尾の「テストのパスは …」の行が挙げる 2 本（`tests/progress/test_plan_run.py`・`tests/support/plan_decls.py`）は、どちらも実在するので変えない。
 - **満たす受け入れ条件:** 2
-- **進め方:** テスト駆動を適用しない（文書だけ）。照らした結果（項目ごとのテストの名前）を PR 本文の確かめの欄に書く
+- **進め方:** テスト駆動を適用しない（文書だけ）。直した後、項目が名指すファイルがすべて実在することを `ls` で確かめ、結果を Pull Request の本文へ書く
 
 ## レビューの単位
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| #4217 | Task 1〜4 | 4217:1・4217:2 | 約 130 | （実装の後に書き足す） |
+| #4217 | Task 1〜4 | 4217:1・4217:2 | 約 150（消えたテスト 3 本が 46 行で、呼び出しの順の記録と差し替えの偽で 2 倍ほどになる見込み。確定仕様の直しが 6 行） | （実装の後に書き足す） |
 
 ## リファクタリングの時機
 
