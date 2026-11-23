@@ -26,6 +26,10 @@ class CheckError(Exception):
     """規則のデータ・用語集・git が読めず、検査を始められない。"""
 
 
+class LinkRefused(CheckError):
+    """読み書きするパスがシンボリックリンクを通るか、保存先の外を指す。"""
+
+
 @dataclass(frozen=True)
 class Finding:
     """1 つの規則が 1 つの箇所で見つけた違反。`path` はリポジトリの根からの相対のパス。"""
@@ -112,7 +116,7 @@ def source_imports(src: Source, module: str) -> list[imports.Import]:
 
 
 def contained(root: Path, rel: str | Path) -> Path:
-    """`root` の下の `rel` の解決後のパス。`root` の外を指すか、シンボリックリンクを通れば `CheckError`（たどって読み書きしない）。"""
+    """`root` の下の `rel` の解決後のパス。`root` の外を指すか、シンボリックリンクを通れば `LinkRefused`（たどって読み書きしない）。"""
     base = root.resolve()
     named = Path(os.path.normpath(base / rel))
     try:
@@ -120,7 +124,7 @@ def contained(root: Path, rel: str | Path) -> Path:
     except (OSError, RuntimeError) as exc:
         raise CheckError(f"パスを解決できない: {rel}: {exc}") from exc
     if resolved != named or not resolved.is_relative_to(base):
-        raise CheckError(f"{base} の外を指すか、シンボリックリンクを通るパスは読み書きしない: {rel}")
+        raise LinkRefused(f"{base} の外を指すか、シンボリックリンクを通るパスは読み書きしない: {rel}")
     return resolved
 
 
@@ -140,6 +144,7 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側のキーの参照（欠ければ `KeyError`）に任せず、ここでキーの有無を見る。"""
+    contained(path.parent, path.name)
     data = read_json(path, "規則のデータを読めない")
     missing = [
         k

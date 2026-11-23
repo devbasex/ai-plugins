@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf import cli, identity
+from ndf import cli, contracts, identity
 from ndf.checks import child_deps, model, run
 from ndf.contracts import exit_codes, result
 
@@ -164,9 +164,19 @@ def test_select_does_not_read_through_a_symlink(plugin, rules, monkeypatch, tmp_
     assert read == []
 
 
-@pytest.mark.parametrize("rel", [".claude-plugin/plugin.json", "src/ndf/checks/rules.json", "manifests", "docs/gone.md", "bin/gone"])
+@pytest.mark.parametrize(
+    "rel",
+    [
+        ".claude-plugin/plugin.json",
+        "src/ndf/checks/rules.json",
+        "contracts/schemas/result.schema.json",
+        "manifests",
+        "docs/gone.md",
+        "bin/gone",
+    ],
+)
 @pytest.mark.parametrize("broken", [False, True])
-def test_main_refuses_a_link_before_reading_anything(plugin, monkeypatch, tmp_path, rel, broken):
+def test_main_refuses_a_link_without_opening_the_contracts(plugin, monkeypatch, capsys, tmp_path, last_result, rel, broken):
     monkeypatch.setattr(identity, "ROOT", plugin.root)
     outside = tmp_path / "outside"
     if not broken:
@@ -175,12 +185,44 @@ def test_main_refuses_a_link_before_reading_anything(plugin, monkeypatch, tmp_pa
     link.unlink(missing_ok=True)
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(outside)
+    # コントラクトのどのファイルを開いても ContractError になる保存先へ替える
+    contracts.use_dir(tmp_path / "no-contracts")
+    try:
+        code = run.main([])
+    finally:
+        contracts.use_dir(None)
+    report = last_result(capsys.readouterr().out)
+    assert code == exit_codes.unreadable_code()
+    assert report["cause"]["kind"] == "config_broken" and "シンボリックリンク" in report["cause"]["detail"]
+
+
+def test_main_does_not_load_a_linked_manifest(plugin, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    manifest = plugin.root / identity.MANIFEST_REL
+    manifest.symlink_to(manifest.rename(tmp_path / "outside.json"))
     monkeypatch.setattr(identity, "load", lambda: pytest.fail("plugin.json を読んだ"))
-    monkeypatch.setattr(run, "load_rules", lambda: pytest.fail("規則のデータを読んだ"))
-    stopped = []
-    monkeypatch.setattr(run, "emit", lambda summary, items, metrics, kind: stopped.append((summary, kind)) or 2)
-    assert run.main([]) == 2
-    assert stopped == [(f"シンボリックリンクを通るパスは読み書きしない: {link}", "config_broken")]
+    assert run.main([]) == exit_codes.unreadable_code()
+    capsys.readouterr()
+
+
+def test_linked_rules_are_not_read(tmp_path):
+    (tmp_path / "outside.json").write_text("{}", encoding="utf-8")
+    link = tmp_path / "rules.json"
+    link.symlink_to(tmp_path / "outside.json")
+    with pytest.raises(model.LinkRefused):
+        model.load_rules(link)
+
+
+def test_main_walks_the_plugin_once_and_not_for_review_items(plugin, monkeypatch, capsys):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    walked = []
+    real_walk = run._walk
+    monkeypatch.setattr(run, "_walk", lambda root: walked.append(root) or real_walk(root))
+    run.main([])
+    assert len(walked) == 1
+    run.main(["--only", "review-items"])
+    assert len(walked) == 1
+    capsys.readouterr()
 
 
 def test_collect_allows_a_linked_environment(plugin, tmp_path):
