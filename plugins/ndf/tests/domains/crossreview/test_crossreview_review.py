@@ -197,6 +197,37 @@ def test_position_refusal_is_read_from_every_reason(status, reasons, position, u
     assert threads.path_unresolved(status, reasons) is unresolved
 
 
+
+@pytest.mark.parametrize(
+    ("status", "reasons", "position", "unresolved"),
+    [
+        # 理由がなければどちらも偽
+        (422, [], False, False),
+        # 位置の語は大文字小文字を問わない
+        (422, ["Pull_Request_Review_Thread.Line MUST BE part of the diff"], True, False),
+        (422, ["PATH COULD NOT BE RESOLVED"], True, True),
+        # diff_hunk も位置の語
+        (422, ["pull_request_review_comment.diff_hunk is invalid"], True, False),
+        # 除外の語も大文字小文字を問わず、同じ理由の中にあっても効く
+        (422, ["line must be part of the diff (Rate Limit)"], False, False),
+        (422, ["path could not be resolved: SPAM detected"], False, False),
+        (422, ["line must be part of the diff", "flagged as spam"], False, False),
+        # 422 以外は解決できないパスでも偽
+        (403, ["path could not be resolved"], False, False),
+        (400, ["path could not be resolved"], False, False),
+        # 位置の語と解決できないパスが別の理由に並べば両方とも真
+        (422, ["line must be part of the diff", "path could not be resolved"], True, True),
+        # 位置の語が無い理由だけでは偽（除外の語が無くても）
+        (422, ["Not Found", "Validation Failed"], False, False),
+    ],
+)
+def test_position_refusal_ignores_case_and_any_refusal_reason(status, reasons, position, unresolved) -> None:
+    assert threads.position_refused(status, reasons) is position
+    assert threads.path_unresolved(status, reasons) is unresolved
+    # 理由は tuple でも読む
+    assert threads.position_refused(status, tuple(reasons)) is position
+    assert threads.path_unresolved(status, tuple(reasons)) is unresolved
+
 class _Refused(Exception):
     """`github.GitHubError` の形の偽物（状態・理由・二次レート制限でない）。"""
 
