@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-import subprocess
 
 import pytest
 
@@ -270,12 +269,20 @@ def test_context_limit_reads_the_limit_from_the_limits_table(tmp_path, monkeypat
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
 
 
-def _git(cwd, *args):
-    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout
+def _separate(main, meta):
+    """管理ディレクトリ `meta` を外に置いたメインディレクトリ（`git init --separate-git-dir` の .git のファイル）。"""
+    main.mkdir(parents=True, exist_ok=True)
+    meta.mkdir(parents=True)
+    (main / ".git").write_text(f"gitdir: {meta}\n", encoding="utf-8")
 
 
-def _commit(repo):
-    _git(repo, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+def _linked(common, worktree):
+    """共通の git のディレクトリ `common` に結んだ linked worktree（`git worktree add` が書く .git と commondir）。"""
+    admin = common / "worktrees" / worktree.name
+    admin.mkdir(parents=True)
+    (admin / "commondir").write_text("../..\n", encoding="utf-8")
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -328,12 +335,10 @@ def test_context_limit_skips_conversations_outside_ndf_without_reading(tmp_path,
 def test_context_limit_judges_a_worktree_by_the_main_directory(tmp_path):
     # #3995 の 3995:15: worktree に .ndf が無くても、メインディレクトリに .ndf があれば判定する
     main = tmp_path / "main"
-    main.mkdir()
-    _git(main, "init", "-q")
-    _commit(main)
+    (main / ".git").mkdir(parents=True)
     (main / ".ndf").mkdir()
     worktree = tmp_path / "wt"
-    _git(main, "worktree", "add", "-q", str(worktree))
+    _linked(main / ".git", worktree)
     assert not (worktree / ".ndf").exists()
     line = {"type": "assistant", "message": {"usage": {"input_tokens": 600_000}}}
     (worktree / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
@@ -343,11 +348,10 @@ def test_context_limit_judges_a_worktree_by_the_main_directory(tmp_path):
 def test_main_finds_the_main_directory_from_the_main_and_its_worktrees(tmp_path):
     main = tmp_path / "main"
     (main / "src").mkdir(parents=True)
-    _git(main, "init", "-q")
-    _commit(main)
+    (main / ".git").mkdir()
     (main / ".ndf").mkdir()
     worktree = tmp_path / "wt"
-    _git(main, "worktree", "add", "-q", str(worktree))
+    _linked(main / ".git", worktree)
     (worktree / "src").mkdir()
     want = os.path.realpath(main)
     for cwd in (main, main / "src", worktree, worktree / "src"):
@@ -358,9 +362,7 @@ def test_main_of_a_separate_git_dir_is_not_the_parent_of_the_git_dir(tmp_path):
     # 管理ディレクトリを外に置いたメインディレクトリは、管理ディレクトリの親でなくメインディレクトリそのもの
     main = tmp_path / "main"
     meta = tmp_path / "outside" / "meta.git"
-    meta.parent.mkdir()
-    _git(tmp_path, "init", "-q", f"--separate-git-dir={meta}", str(main))
-    _commit(main)
+    _separate(main, meta)
     (main / "src").mkdir()
     (main / ".ndf").mkdir()
     want = os.path.realpath(main)
@@ -372,13 +374,11 @@ def test_main_skips_a_worktree_of_a_separate_git_dir(tmp_path):
     # 管理ディレクトリを外に置いたリポジトリの linked worktree は主 worktree を特定できないので、親の .ndf を検査しない
     main = tmp_path / "main"
     meta = tmp_path / "outside" / "meta.git"
-    meta.parent.mkdir()
-    _git(tmp_path, "init", "-q", f"--separate-git-dir={meta}", str(main))
-    _commit(main)
+    _separate(main, meta)
     (main / ".ndf").mkdir()
     (meta.parent / ".ndf").mkdir()
     worktree = tmp_path / "wt"
-    _git(main, "worktree", "add", "-q", str(worktree))
+    _linked(meta, worktree)
     assert context_limit._main(str(main)) == os.path.realpath(main)
     assert context_limit._main(str(worktree)) is None
 
