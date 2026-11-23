@@ -119,7 +119,9 @@ def _judge_cases(cases: Optional[str], rounds: Optional[int], run: Optional[Any]
     if run is None:
         run = judge_child.run_cases
     try:
-        times = int(rounds) if rounds is not None else int(judge_child.setting("rounds"))
+        times = rounds if rounds is not None else judge_child.setting("rounds")
+        if not judge_child.positive_rounds(times):
+            return _invalid(f"周の数は 1 以上の整数にする（--rounds か上限の設定の rounds）: {times!r}")
         got = run(path, times)
     except judge_child.JudgeRefused as exc:
         return result.emit(result.stopped(TOOL, "refused", exc.reason))

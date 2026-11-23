@@ -93,3 +93,31 @@ def test_judge_cases_is_a_subcommand_of_ndf_hooks(capsys):
     finally:
         mod.judge_child.run_cases = mod_run
     assert _emitted(capsys)["status"] == "ok"
+
+
+@pytest.mark.parametrize("given", [0, -1])
+def test_judge_cases_refuses_rounds_that_are_not_positive(capsys, given):
+    seen: list[int] = []
+
+    def run(path, times):
+        seen.append(times)
+        return NO_MISS
+
+    assert cli._judge_cases(None, given, run) == 2
+    assert seen == []  # 1 回も打たずに全件合格としない
+    got = _emitted(capsys)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+
+
+@pytest.mark.parametrize("value", [0, True, "3", 1.5])
+def test_judge_cases_refuses_rounds_of_the_setting_that_are_not_a_positive_integer(monkeypatch, capsys, value):
+    monkeypatch.setattr(judge_child, "setting", lambda key: {"rounds": value}[key])
+    seen: list[int] = []
+
+    def run(path, times):
+        seen.append(times)
+        return NO_MISS
+
+    assert cli._judge_cases(None, None, run) == 2
+    assert seen == []
+    assert _emitted(capsys)["cause"]["kind"] == "invalid"

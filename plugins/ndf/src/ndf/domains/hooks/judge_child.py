@@ -14,22 +14,26 @@ hook の閉包の外で動く（hook の側はモジュール名の文字列で�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, Sequence
 
 from ndf import contracts
 from ndf.adapters import claude
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 from ndf.domains.relay import account_dir, claude_args
 
 # 判定の設定の方針の名前（`contracts/limits.json`）
 POLICY = "hook.stop-wait.judge"
 # 判定の例の組（`contracts/` からの相対）
 CASES = "hooks/reply-judge-cases.json"
+# 相対パスなら送信先を確かめられないとみなす設定ディレクトリの変数（判定用の `claude` はセッションと違う
+# 作業ディレクトリで動くので、相対パスが同じディレクトリに解ける保証が無い）
+RELATIVE_REFUSED = ("CLAUDE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR")
 # 打つ前に残っていなければならない秒。これを切れば起動せずに時間切れにする
 LEAST_SECONDS = 0.5
 # 質問の文で本文を囲むタグ
@@ -95,15 +99,20 @@ def endpoint_refusal(
 
     親の起動引数の接続のフラグと、実効の設定（解けない源・`apiKeyHelper`・指定のキー・設定の層が出所の接続の
     変数）を見る。子の環境が出所の変数は、セッション自身が使う接続なので理由にしない。
+    相対パスの設定ディレクトリ（`RELATIVE_REFUSED`）は、セッションと判定用の `claude` の作業ディレクトリが違うと
+    別のディレクトリに解けるので、同じ送信先と確かめられないとみなす。
     """
     endpoint = setting("endpoint")
     names = {name for name, _ in claude_args.options(list(parent_argv)[1:])}
     flagged = next((f for f in endpoint["flags"] if f in names), None)
     if flagged is not None:
         return flagged
+    relative = next((n for n in RELATIVE_REFUSED if env.get(n) and not Path(env[n]).is_absolute()), None)
+    if relative is not None:
+        return relative
     config = env.get("CLAUDE_CONFIG_DIR")
     where = Path(config) if config else Path.home() / ".claude"
-    got = resolve(env, where, project_dir, list(parent_argv), keys=endpoint["keys"])
+    got = resolve(env, where, project_dir, list(parent_argv), extra=account_dir.Extra(keys=tuple(endpoint["keys"])))
     return _resolved_refusal(got, tuple(endpoint["env_names"]))
 
 
@@ -240,19 +249,40 @@ def _endpoint_broken(got: dict, stat: Callable[[str], Any]) -> Optional[str]:
 def run_cases(path: Path, rounds: int, call: Caller = claude.call_claude) -> dict:
     """判定の例の組を 1 件ずつ `rounds` 周判定し、外れた例・件数・打った回数・秒を返す。
 
-    判定が `refused` で返れば残りの例を打たずに `JudgeRefused` を投げる。組が読めなければ `ValueError`。
+    判定が `refused` で返れば残りの例を打たずに `JudgeRefused` を投げる。組が読めない・`rounds` が正の整数でなければ
+    `ValueError`。打つ間は、Stop の経路で hook の側が子へ渡さない変数（環境変数の表の `child` が `drop` の行。
+    `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` を含む）をこのプロセスの環境から外し、Claude Code のセッションの中で
+    打っても入れ子の起動として断られないようにする（終われば戻す）。
     """
+    if not positive_rounds(rounds):
+        raise ValueError(f"周の数は 1 以上の整数にする: {rounds!r}")
     cases = _load_cases(path)
     seconds = float(setting("seconds"))
     missed: list[dict] = []
     spent: list[float] = []
-    for case in cases:
-        got = _rounds(case, rounds, seconds, call)
-        spent += [used for _, used in got]
-        wrong = [word for word, _ in got if word != case["expect"]]
-        if wrong:
-            missed.append({"id": case["id"], "expect": case["expect"], "got": wrong})
+    with _outside_session(os.environ):
+        for case in cases:
+            got = _rounds(case, rounds, seconds, call)
+            spent += [used for _, used in got]
+            wrong = [word for word, _ in got if word != case["expect"]]
+            if wrong:
+                missed.append({"id": case["id"], "expect": case["expect"], "got": wrong})
     return {"items": missed, "metrics": _metrics(len(cases), len(missed), len(spent), spent)}
+
+
+def positive_rounds(value: Any) -> bool:
+    """周の数として使える値（1 以上の整数。真偽値は外す）か。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+@contextlib.contextmanager
+def _outside_session(environ: MutableMapping[str, str]) -> Iterator[None]:
+    """環境変数の表の `child` が `drop` の変数を `environ` から外し、抜けるときに元の値へ戻す。"""
+    kept = {name: environ.pop(name) for name in facts.ids("env", child="drop") if name in environ}
+    try:
+        yield
+    finally:
+        environ.update(kept)
 
 
 def _metrics(cases: int, missed: int, calls: int, spent: list[float]) -> dict:

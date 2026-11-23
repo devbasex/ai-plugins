@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -101,10 +102,11 @@ class FakeResolve:
         self.keys = None
         self.calls = 0
 
-    def __call__(self, env, config_dir, cwd, argv, user_settings=None, keys=()):
+    def __call__(self, env, config_dir, cwd, argv, user_settings=None, extra=account_dir.Extra()):
+        # 署名は実物の `account_dir.effective_env` と同じ（キーは `extra.keys` で渡る）
         del env, config_dir, cwd, argv, user_settings
         self.calls += 1
-        self.keys = list(keys)
+        self.keys = list(extra.keys)
         return self.resolved
 
 
@@ -239,6 +241,53 @@ def test_endpoint_refusal_allows_an_unrelated_variable_of_a_settings_layer():
 )
 def test_endpoint_refusal_names_the_item_without_its_value(resolved, item):
     assert rj.endpoint_refusal({}, ("claude",), Path("/w"), FakeResolve(resolved)) == item
+
+
+def test_fake_resolve_has_the_signature_of_the_real_one():
+    import inspect
+
+    assert (
+        inspect.signature(FakeResolve.__call__).parameters.keys() - {"self"}
+        == inspect.signature(account_dir.effective_env).parameters.keys()
+    )
+
+
+@pytest.mark.parametrize("name", ["ANTHROPIC_CONFIG_DIR", "CLAUDE_CONFIG_DIR"])
+def test_endpoint_refusal_refuses_a_relative_config_directory(name):
+    resolve = FakeResolve(_resolved())
+    assert rj.endpoint_refusal({name: "anth"}, ("claude",), Path("/w"), resolve) == name
+    assert resolve.calls == 0
+
+
+def test_endpoint_refusal_allows_an_absolute_anthropic_config_directory(tmp_path):
+    resolve = FakeResolve(_resolved())
+    assert rj.endpoint_refusal({"ANTHROPIC_CONFIG_DIR": str(tmp_path)}, ("claude",), Path("/w"), resolve) is None
+
+
+@pytest.fixture
+def isolated(tmp_path, monkeypatch):
+    """実物の `effective_env` が読む管理の設定と HOME を一時ディレクトリへ替える（手元と CI の /etc・~ を読まない）。"""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    etc = tmp_path / "etc" / "claude-code"
+    etc.mkdir(parents=True)
+    monkeypatch.setattr(account_dir, "MANAGED_FILES", (etc / "managed-settings.json",))
+    monkeypatch.setattr(account_dir, "MANAGED_DIR", etc / "managed-settings.d")
+    project = tmp_path / "project"
+    project.mkdir()
+    return SimpleNamespace(home=home, project=project)
+
+
+def test_endpoint_refusal_with_the_real_resolver_allows_a_plain_session(isolated):
+    env = {"HOME": str(isolated.home), "ANTHROPIC_BASE_URL": "https://example.invalid"}
+    assert rj.endpoint_refusal(env, ("claude",), isolated.project) is None
+
+
+def test_endpoint_refusal_with_the_real_resolver_names_a_key_of_the_user_settings(isolated):
+    settings = isolated.home / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"awsCredentialExport": "echo x"}), encoding="utf-8")
+    assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == "awsCredentialExport"
 
 
 # ---------------------------------------------------------------- main（子のエントリポイント）
@@ -424,6 +473,29 @@ def test_run_cases_stops_at_a_refusal_and_keeps_the_reason(tmp_path):
         rj.run_cases(_cases_file(tmp_path, ROWS), 3, call)
     assert got.value.reason == "学習の設定の記録が期限切れ"
     assert "c" not in seen
+
+
+def test_run_cases_hides_the_session_variables_from_the_launch_and_puts_them_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s-1")
+    seen: list[tuple] = []
+
+    def call(argv, prompt, timeout, cwd=None, options=claude.DEFAULT_LAUNCH):
+        del argv, prompt, timeout, cwd, options
+        seen.append((os.environ.get("CLAUDECODE"), os.environ.get("CLAUDE_CODE_SESSION_ID")))
+        return answered("wait")
+
+    rj.run_cases(_cases_file(tmp_path, ROWS[:1]), 1, call)
+    assert seen == [(None, None)]  # 入れ子の起動として断られない
+    assert os.environ["CLAUDECODE"] == "1" and os.environ["CLAUDE_CODE_SESSION_ID"] == "s-1"
+
+
+@pytest.mark.parametrize("rounds", [0, -1, True])
+def test_run_cases_refuses_rounds_that_are_not_a_positive_integer(tmp_path, rounds):
+    call = FakeCall(answered("wait"))
+    with pytest.raises(ValueError):
+        rj.run_cases(_cases_file(tmp_path, ROWS), rounds, call)
+    assert call.argv == []
 
 
 @pytest.mark.parametrize("text", ["{broken", json.dumps({"cases": []}), json.dumps({"cases": [{"id": "a"}]})])
