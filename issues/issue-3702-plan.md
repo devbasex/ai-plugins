@@ -46,7 +46,7 @@
 ### Task 5: 単位のファイルの集め方・読み書きと `ndf plan units`
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/tests/core/plan/test_units_cli.py`（新設）
-- **変更内容:** `collect`（設計の結果の扱いを先に決め、計画の名前の規則を Markdown と単位のファイルに双方向に当て、省く判断 `omitted` の無い欠落・スプリントの起点に無い印の無い計画・単位を作らない課題の計画とタスクで止める）・`load`（パスの正規形と既存のディレクトリ・リポジトリの外の検査）・`designed`・`criteria_of`・`limits`・`render`・`parallel_cap`・`numbering`・`unit_plans`（流し方の記録 `units.json` も書く）と、サブコマンド `units check`（`--docs`・`--omitted`・`--lane-plans`・`--out`。`unit` の項目はスプリント全体の `seq`・マージの順・並列の相手）・`render`。`check` は上限で止めるときに Task 4 の案を返す。手で流す入口（`ndf progress units plans`・`run`）は単位ごとの差し込みを `progress` が組むので Task 8 に置く
+- **変更内容:** `collect`（設計の結果の扱いを先に決め、計画の名前の規則を Markdown と単位のファイルに双方向に当て、省く判断 `omitted` の無い欠落・スプリントの起点に無い印の無い計画・単位を作らない課題の計画とタスクで止める）・`load`（パスの正規形と既存のディレクトリ・リポジトリの外の検査）・`designed`・`criteria_of`・`limits`・`render`・`parallel_cap`・`numbering`・`unit_plans`（流し方の記録 `units.json` も書く）と、サブコマンド `units check`（`--docs`・`--omitted`・`--out`。`unit` の項目はスプリント全体の `seq`・マージの順・並列の相手）・`render`。`check` は上限で止めるときに Task 4 の案を返す。手で流す入口（`ndf progress units plans`・`run`）は単位ごとの差し込みを `progress` が組むので Task 8 に置く
 - **満たす受け入れ条件:** 3・4・6
 - **進め方:** コマンドの結果 JSON で落ちるテスト → 実装。書いたプランを `queue_decide.waves` に渡して組を確かめ、依存のある 2 単位を別々の本物の `ndf plan queue` の起動で流す。`issue-10-11-plan.md` に印があり JSON が無い入力、計画も `omitted` も無い課題、旧い形と省いた課題の `single` が `check` と `unit_plans` の両方で通る入力、2 つの計画を `render` で 1 つずつ書いた後にまとめて `check --docs` する入力、JSON だけ・印の欠け・このスプリントで書いた印の無い計画、「閉じる」課題のタスクを持つ統合計画、条件 2 を落とした単位、`src/./a.py` と既存のディレクトリのパスを足す
 
