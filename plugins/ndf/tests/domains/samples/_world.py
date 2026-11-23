@@ -97,6 +97,8 @@ class World:
             "sample": SAMPLE.replace("issue", name),
             "source": {"schema": changes.pop("url", URL), "pointer": changes.pop("pointer", POINTER)},
             "absent_keys": ABSENT,
+            "extra_keys": [],
+            "known_mismatches": [],
             **changes,
         }
         path = self.root / "contracts" / verify.DEFINITIONS / f"{name}.json"

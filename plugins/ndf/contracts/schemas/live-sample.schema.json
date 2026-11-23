@@ -10,7 +10,9 @@
     "peer",
     "sample",
     "source",
-    "absent_keys"
+    "absent_keys",
+    "extra_keys",
+    "known_mismatches"
   ],
   "properties": {
     "summary": {
@@ -38,8 +40,8 @@
       "properties": {
         "schema": {
           "type": "string",
-          "pattern": "^https://",
-          "description": "公開の記述（OpenAPI 3.1 の bundled 形式）の URL"
+          "pattern": "^https://[^/?#@\\s\\\\]+(/[^?#\\s]*)?$",
+          "description": "公開の記述（OpenAPI 3.1 の bundled 形式）の URL。認証情報・クエリ・フラグメントを書かない（認証情報や署名を定義に置かない）"
         },
         "pointer": {
           "type": "string",
@@ -56,6 +58,24 @@
         "minLength": 1
       },
       "description": "見本を録った時点の記述の定義にあり、見本（本物の応答）に無かったキー。見本の根からのパスで、辞書のキーを / で区切り、配列の要素は * で書く。親のキーを書けば下は書かない"
+    },
+    "extra_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "見本（本物の応答）にあり、記述の定義に無いと分かっているキー。書き方は absent_keys と同じ。このキーだけを除き、定義に載るか見本から消えれば食い違いにする"
+    },
+    "known_mismatches": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "本物の応答と記述が食い違うと分かっている所。突き合わせの説明 1 行をそのまま書く。この説明だけを除き、出なくなれば食い違いにする"
     }
   }
 }
