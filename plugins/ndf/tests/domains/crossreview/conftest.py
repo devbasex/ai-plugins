@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -34,20 +35,42 @@ def _runtimes_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(training, "ensure", lambda runtime, env=None, now=None, read=None: None)
 
 
+class _Everything(frozenset):
+    """どのパスも含む変更ファイルの集まり（差分で絞らない偽物）。"""
+
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
 class FakePort:
-    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならスレッドを作るのを断る。
+    """PR のスレッドの偽物。作った・返信した・resolve したものを残す。`fail` ならレビューとスレッドを作るのを断り、
+    `refuse_position` ならレビュー（`batches` に残す）を行の位置で断る。作ったスレッドは PR ごとに持ち、`open_threads` が自分の書いた
+    スレッドとして返す（返信と resolve も反映する）。`opened` はレビューと 1 件ずつの作成の両方で作ったスレッドを並べる。
     読む口（#3941）は `existing`（既存のコメント）と `left`（スレッド）を返し、読んだ回数を数える（`reads` は PR コメント、
     `review_reads` は相手役へ渡すだけのレビューコメントとレビュー本文。PR 3944 の r2-10）。"""
 
-    def __init__(self, fail: bool = False):
+    def __init__(self, fail: bool = False, files=None):
         self.opened: list[tuple[str, object, str, str]] = []
+        self.batches: list[tuple[str, list]] = []
+        self.singles: list[tuple[str, object, str, str]] = []
         self.replies: list[tuple[int, str]] = []
         self.resolved: list[int] = []
         self.fail = fail
+        self.refuse_position = False
         self.existing: list = []
         self.left: list = []
+        self.files = files
+        self.made: dict[int, list] = {}
+        self.pr = 0
         self.reads = 0
         self.review_reads = 0
+        self.thread_reads = 0
+        self.changed_reads = 0
+
+    def at(self, pr: int) -> "FakePort":
+        """PR を切り替える（作ったスレッドは PR ごとに読む）。"""
+        self.pr = pr
+        return self
 
     def comments(self):
         self.reads += 1
@@ -57,14 +80,43 @@ class FakePort:
         self.review_reads += 1
         return [r for r in self.existing if r.kind != "comment"]
 
+    def changed(self):
+        self.changed_reads += 1
+        return _Everything() if self.files is None else frozenset(self.files)
+
     def open_threads(self):
-        return list(self.left)
+        self.thread_reads += 1
+        out = []
+        for t in [*self.left, *self.made.get(self.pr, [])]:
+            replies = tuple(body for cid, body in self.replies if cid == t.comment)
+            out.append(t._replace(resolved=t.resolved or t.comment in self.resolved, replies=t.replies + replies))
+        return out
+
+    def _make(self, path, line, commit, body) -> int:
+        from ndf.domains.crossreview import prior_decide
+
+        self.opened.append((path, line, commit, body))
+        cid = 1000 + len(self.opened)
+        self.made.setdefault(self.pr, []).append(prior_decide.Thread(cid, body, False, path, line, True))
+        return cid
+
+    def open_review(self, commit, comments):
+        from ndf.domains.crossreview import threads
+
+        if self.fail:
+            raise RuntimeError("書けない")
+        if self.refuse_position:
+            raise threads.PositionRefused("pull_request_review_thread.line must be part of the diff")
+        self.batches.append((commit, list(comments)))
+        for c in comments:
+            self._make(c.path, c.line, commit, c.body)
+        return len(self.batches)
 
     def open_thread(self, path, line, commit, body):
         if self.fail:
             raise RuntimeError("書けない")
-        self.opened.append((path, line, commit, body))
-        return 1000 + len(self.opened)
+        self.singles.append((path, line, commit, body))
+        return self._make(path, line, commit, body)
 
     def reply(self, comment_id, body):
         self.replies.append((comment_id, body))
@@ -74,7 +126,8 @@ class FakePort:
 
 
 class FakeHub:
-    """PR へ書く口の偽物。記録のコメントとスレッドを残す（#3939）。"""
+    """PR へ書く口の偽物。記録のコメントとスレッドを残す（#3939）。同じ PR の公開のロックは何もしない（本物のホームの下へ
+    ロックのファイルを書かない）。"""
 
     def __init__(self):
         self.comments: list[tuple[str, int, str]] = []
@@ -93,7 +146,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, lambda pr: self.port, lambda pr: self.port)
+        return cli.Hub(comment, self.port.at, self.port.at, publishing=lambda pr: contextlib.nullcontext())
 
 
 @pytest.fixture(autouse=True)

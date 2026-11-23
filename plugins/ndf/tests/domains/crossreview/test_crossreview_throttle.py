@@ -1,4 +1,5 @@
-"""PR へ書く操作が GitHub の二次レート制限に当たったときの待ちと、スレッドを続けて作るときの間隔（#3941）。"""
+"""PR へ書く操作が GitHub の二次レート制限に当たったときの待ち（#3941・#4016 の決定 8）。書き込みの間隔はマシン全体の
+`WriteGate` が持ち、スレッドを書く口は間を空けない。"""
 
 from __future__ import annotations
 
@@ -13,32 +14,32 @@ HEAD = "a" * 40
 
 
 class _Limited(Exception):
-    """`github.GitHubError` の形（状態・待ちの秒・文）の偽物。"""
+    """`github.GitHubError` の形（状態・待ちの秒・二次レート制限か・GitHub が待ちの秒を示したか）の偽物。"""
 
-    def __init__(self, detail: str, status: int = 403, retry_after: Optional[float] = None):
+    def __init__(self, detail: str, status: int = 403, retry_after: Optional[float] = 60.0, secondary: bool = True, hinted: bool = False):
         super().__init__(detail)
-        self.status, self.retry_after = status, retry_after
+        self.status, self.retry_after, self.secondary, self.hinted, self.reasons = status, retry_after, secondary, hinted, ()
 
 
-def test_secondary_limit_is_told_by_the_marker_or_the_body() -> None:
-    assert throttle_decide.secondary_limited(403, "You have exceeded a secondary rate limit.")
-    assert throttle_decide.secondary_limited(429, "GitHub の上限（rest のスロット・secondary rate limit）: POST /x")
-    assert not throttle_decide.secondary_limited(403, "Resource not accessible by integration")
-    assert not throttle_decide.secondary_limited(500, "secondary rate limit")
+def test_wait_grows_exponentially_when_github_gives_no_wait() -> None:
+    """受け入れ条件 5: GitHub が待ちの秒を示さなければ 60・120・240 秒と延ばし、4 回目の失敗で打ち直さない。"""
+    assert [throttle_decide.wait_before_retry(True, n, 60.0, False) for n in (1, 2, 3)] == [60.0, 120.0, 240.0]
+    assert throttle_decide.wait_before_retry(True, 4, 60.0, False) is None
 
 
-def test_wait_uses_retry_after_then_the_interval_and_stops_at_the_attempts() -> None:
-    attempts = int(limits.value(throttle_decide.POLICY, "attempts"))
-    interval = limits.value(throttle_decide.POLICY, "interval")
-    assert throttle_decide.wait_before_retry(True, 1, 7.0) == 7.0
-    assert throttle_decide.wait_before_retry(True, 1, None) == interval
-    assert throttle_decide.wait_before_retry(True, attempts, 7.0) is None
-    assert throttle_decide.wait_before_retry(False, 1, 7.0) is None
+def test_wait_uses_the_hinted_seconds_and_does_not_wait_for_other_failures() -> None:
+    assert throttle_decide.wait_before_retry(True, 2, 7.0, True) == 7.0
+    assert throttle_decide.wait_before_retry(False, 1, 7.0, True) is None
 
 
-def test_patient_retries_only_the_secondary_limit() -> None:
-    waits: list[float] = []
-    calls = iter([_Limited("secondary rate limit", retry_after=2.0), "ok"])
+def test_wait_stops_growing_at_the_max_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    capped = limits.Policy(throttle_decide.POLICY, "", interval=60, factor=2, max_interval=100, attempts=10)
+    monkeypatch.setattr(limits, "policy", lambda name: capped)
+    assert throttle_decide.wait_before_retry(True, 3, None, False) == 100.0
+
+
+def _failing(*outcomes: object):
+    calls = iter(outcomes)
 
     def call():
         got = next(calls)
@@ -46,10 +47,26 @@ def test_patient_retries_only_the_secondary_limit() -> None:
             raise got
         return got
 
+    return call
+
+
+def test_patient_waits_longer_each_time_tells_the_gate_and_gives_up_at_the_attempts() -> None:
+    """受け入れ条件 5: 待ちの秒を `block` へ知らせてから眠る。4 回目の失敗はそのまま出す。"""
+    waits: list[float] = []
+    blocked: list[float] = []
+    call = _failing(*[_Limited("secondary rate limit") for _ in range(4)])
+    with pytest.raises(_Limited):
+        threads.patient(call, _Limited, waits.append, block=blocked.append)
+    assert waits == blocked == [60.0, 120.0, 240.0]
+
+
+def test_patient_uses_the_hinted_wait_and_does_not_retry_other_failures() -> None:
+    waits: list[float] = []
+    call = _failing(_Limited("secondary rate limit", retry_after=2.0, hinted=True), "ok")
     assert threads.patient(call, _Limited, waits.append) == "ok"
     assert waits == [2.0]
     with pytest.raises(_Limited):
-        threads.patient(lambda: (_ for _ in ()).throw(_Limited("403 forbidden")), _Limited, waits.append)
+        threads.patient(_failing(_Limited("403 forbidden", secondary=False)), _Limited, waits.append)
     assert waits == [2.0]
 
 
@@ -77,17 +94,29 @@ class _Publisher:
         return list(texts), {}
 
 
-def test_github_port_waits_on_the_limit_and_spaces_threads() -> None:
+def test_github_port_waits_only_on_the_limit_and_does_not_space_threads() -> None:
+    """#4016: 書き込みの間隔は `WriteGate` が持つので、口は二次レート制限の打ち直しの待ちだけ眠る。"""
     waits: list[float] = []
-    now = [100.0]
+    blocked: list[float] = []
     hub = _Hub(limited=1)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(waits.append, lambda: now[0]))
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=waits.append, block=blocked.append)
     assert port.open_thread("a.py", None, HEAD, "一つ目") == 1
     assert waits == [limits.value(throttle_decide.POLICY, "interval")]
+    # 打ち直しの待ちはマシン全体の待ちの終わりへも知らせる（PR 4265 の r1-1）
+    assert blocked == waits
     port.open_thread("a.py", None, HEAD, "二つ目")
-    assert waits[-1] == limits.value(throttle_decide.SPACING, "interval")
     port.reply(1, "直した")
-    assert len(hub.posts) == 3
+    assert len(hub.posts) == 3 and len(waits) == 1
+
+
+def test_review_waits_on_the_limit_like_other_writes() -> None:
+    """レビューの作成も二次レート制限なら 60・120 秒と延ばして打ち直し、待ちを `block` へ知らせる（受け入れ条件 5）。"""
+    waits: list[float] = []
+    blocked: list[float] = []
+    hub = _Hub(limited=2)
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=waits.append, block=blocked.append)
+    assert port.open_review(HEAD, [threads.Placed("r1-1", "a.py", 3, "本文")]) == 1
+    assert waits == blocked == [60.0, 120.0] and hub.posts == ["/repos/o/r/pulls/7/reviews"]
 
 
 def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
@@ -95,7 +124,7 @@ def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
     （投稿は attempts 回まで）。"""
     attempts = int(limits.value(throttle_decide.POLICY, "attempts"))
     hub = _Hub(limited=attempts * 2)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(lambda s: None, lambda: 0.0))
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=lambda s: None)
     with pytest.raises(_Limited):
         port.open_thread("a.py", 3, HEAD, "本文")
     assert hub.limited == attempts and hub.posts == []

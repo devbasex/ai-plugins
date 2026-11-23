@@ -7,7 +7,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import git_sandbox
+import httpx
 import pytest
+from githubkit import GitHub as Client
 
 from ndf import cli
 from ndf.adapters import github
@@ -131,15 +133,15 @@ def test_report_counts_transcript_once_and_the_last_response_missed_by_the_hook(
     assert got["since"].endswith("+09:00") and got["unknown_rows"] == 0
 
 
-class _SearchApi:
-    """GraphQL の検索だけに回答するクライアント（件数を文字列で返す）。"""
+def _search_api(calls: list[tuple[str, dict]]) -> Client:
+    """GraphQL の検索だけに回答する githubkit のクライアント（件数を文字列で返す。ネットワークへ出ない）。"""
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict]] = []
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append((body["query"], body["variables"]))
+        return httpx.Response(200, json={"data": {"search": {"issueCount": "4"}}})
 
-    def graphql(self, query: str, variables: dict) -> dict:
-        self.calls.append((query, variables))
-        return {"search": {"issueCount": "4"}}
+    return Client("t", transport=httpx.MockTransport(answer), http_cache=False, auto_retry=False)
 
 
 def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
@@ -151,13 +153,14 @@ def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
     git_sandbox.sh(tmp_path, "init", "-q", str(root))
     git_sandbox.sh(root, "remote", "add", "origin", "https://github.com/o/r.git")
     monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
-    api = _SearchApi()
+    calls: list[tuple[str, dict]] = []
+    api = _search_api(calls)
     monkeypatch.setattr(github, "client", lambda *a, **k: api)
     code = cli.main(["records", "--cwd", str(root), "usage", "report", "--since", "2026-11-14", "--until", "2026-11-14"])
     got = last_result(capsys.readouterr().out)
     assert code == 0 and got["status"] == "ok"
     assert got["items"][0]["closed_issues"] == 4
-    assert api.calls == [
+    assert calls == [
         (
             "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }",
             {"q": "repo:o/r is:issue closed:2026-11-14T00:00:00+09:00..2026-11-14T23:59:59+09:00"},

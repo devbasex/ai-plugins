@@ -58,7 +58,8 @@ def test_issue_4013_fixer_without_saved_sessions_never_keeps_a_conversation(
     state = _state(fake.state_dir)
     assert [f["outcome"] for f in state["findings"]] == [fin.FIXED, fin.FIXED]
     assert all(
-        set(f) == {"by", "id", "key", "outcome", "reason", "round", "section", "text", "severity", "impact", "raised_severity"}
+        set(f)
+        == {"by", "id", "key", "outcome", "reason", "round", "section", "text", "severity", "impact", "raised_severity", "occurrence"}
         for f in state["findings"]
     )
     # 相手役の引数は質問のほかは participants が組んだとおり（受け入れ条件 5）
