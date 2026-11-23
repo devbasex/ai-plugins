@@ -63,6 +63,21 @@ def test_shell_tree_reads_words_background_and_loops():
     assert not context.parse_shell("ls -la").loops
 
 
+def test_shell_tree_reads_redirects_heredocs_and_assignments():
+    # #3995 の Task 7: 運用上限の guard が引継ぎのコマンドを照らすための、外側のスクリプトのリダイレクト・ヒアドキュメント・代入
+    script = context.parse_shell("ndf records handoff check x 2>&1 >/dev/null")
+    assert script.redirects == (context.Redirect(">&", "1", False), context.Redirect(">", "/dev/null", False))
+    assert (script.heredocs, script.assignments) == (0, 0)
+    assert context.parse_shell("ndf records handoff check x").redirects == ()
+    assert context.parse_shell("ndf x 2>&-").redirects == (context.Redirect(">&", "-", False),)
+    assert context.parse_shell("cat <<E\na\nE\n").heredocs == 1
+    assert context.parse_shell("cat <<< a").heredocs == 1
+    assert [r.dynamic for r in context.parse_shell("ndf x > >(cat)").redirects] == [True]
+    assert [r.dynamic for r in context.parse_shell('ndf x > "$F"').redirects] == [True]
+    assert context.parse_shell("GIT_DIR=x ndf a").assignments == 1
+    assert context.parse_shell("GIT_DIR=x; ndf a").assignments == 1
+
+
 def _positions(text: str) -> dict[tuple[str, ...], tuple[bool, bool, bool]]:
     return {c.argv: (c.loop_body, c.loop_condition, c.background) for c in context.parse_shell(text).waits}
 

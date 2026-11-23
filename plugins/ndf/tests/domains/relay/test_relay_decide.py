@@ -80,6 +80,12 @@ def test_context_over_the_limit_asks_for_a_handover_once():
     assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "wait"
 
 
+def test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document():
+    # #3995 の 3995:7: 求める文は wait の行を残すことと ndf records handoff check を含み、背景の作業の終わりについて書かない
+    prompt = switch_decide.HANDOVER_PROMPT
+    assert "ndf lanes wait" in prompt and "ndf records handoff check" in prompt and "背景" not in prompt
+
+
 def _settings_limit(tmp_path, monkeypatch, env):
     """ラッパーの設定（wrapper_settings）が判断へ渡す運用上限。`env` は NDF_CONTEXT_LIMIT（None なら無し）。"""
     monkeypatch.chdir(tmp_path)

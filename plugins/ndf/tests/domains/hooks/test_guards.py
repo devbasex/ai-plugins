@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import json
 import os
+from pathlib import Path
 
+import git_sandbox
 import pytest
 
-from ndf.domains.hooks import budget, context, dispatch, tables
+from ndf import cli
+from ndf.domains.hooks import budget, context, dispatch, strict, tables
 from ndf.domains.hooks.guards import ask, context_limit, process_wait, sleep
+from ndf.domains.records import cli as records_cli
 from ndf.domains.relay import signals
+from ndf.domains.relay.context_thresholds import thresholds
 
 from ._hooks import advise_text, bash, call_entry, deny_reason, records, sample, stop
 
@@ -398,6 +404,204 @@ def test_main_is_none_outside_an_ndf_repository(tmp_path, dot_git):
         (tmp_path / ".git").write_text("x\n", encoding="utf-8")
         (tmp_path / ".ndf").mkdir()
     assert context_limit._main(str(tmp_path)) is None
+
+
+def _limit_params():
+    return next(g for g in tables.guards() if g["name"] == "context-limit")["params"]
+
+
+def _passes(cwd, tool, **tool_input):
+    payload = sample("claude", "PreToolUse", cwd, tool_name=tool, tool_input=tool_input)
+    return context_limit._passes(context.HookContext("claude", "PreToolUse", payload), _limit_params())
+
+
+@pytest.fixture
+def handoff_repos(tmp_path):
+    """メインディレクトリ（.ndf/handoff と src）・その linked worktree・別のリポジトリと、それぞれを指すリンク。"""
+    main = tmp_path / "main"
+    (main / ".git").mkdir(parents=True)
+    (main / ".ndf" / "handoff").mkdir(parents=True)
+    (main / "src").mkdir()
+    wt = tmp_path / "wt"
+    _linked(main / ".git", wt)
+    (wt / ".ndf" / "handoff").mkdir(parents=True)
+    (wt / "src").mkdir()
+    other = tmp_path / "other"
+    _ndf_repo(other)
+    (tmp_path / "link").symlink_to(main / ".ndf" / "handoff")
+    (tmp_path / "main-src").symlink_to(main / "src")
+    (tmp_path / "wt-src").symlink_to(wt / "src")
+    return {"main": main, "wt": wt, "other": other, "tmp": tmp_path}
+
+
+def test_passes_reads_and_writes_only_the_main_handoff_dir(handoff_repos):
+    # #3995 の Task 8: 運用上限でも通すのは、メインディレクトリの .ndf/handoff の直下の Read・Write・Edit だけ
+    main, wt, other, tmp = (handoff_repos[k] for k in ("main", "wt", "other", "tmp"))
+    for tool in ("Read", "Write", "Edit"):
+        assert _passes(main, tool, file_path=".ndf/handoff/x.md")
+        assert _passes(main, tool, file_path=str(main / ".ndf/handoff/x.md"))
+    assert _passes(wt, "Write", file_path=str(main / ".ndf/handoff/x.md"))
+    assert _passes(main, "Write", file_path=str(tmp / "link" / "x.md"))
+    for path in (".ndf/handoff/../settings.json", "other/handoff/x.md", ".ndf/handoff/sub/x.md", str(other / ".ndf/handoff/x.md")):
+        assert not _passes(main, "Write", file_path=path)
+    assert not _passes(wt, "Write", file_path=".ndf/handoff/x.md")
+    assert _passes(main, "TaskStop", task_id="x")
+    assert not _passes(main, "Glob", pattern="*")
+
+
+def test_passes_follows_links_out_of_the_handoff_dir(tmp_path):
+    # #3995 の Task 8: 文書・handoff・.ndf がリポジトリの外を指すリンクなら、実際の先が外なので止める
+    outside = tmp_path / "outside"
+    (outside / "handoff").mkdir(parents=True)
+    (outside / "f.md").write_text("x", encoding="utf-8")
+    doc, handoff, ndf = (tmp_path / name for name in ("doc", "handoff", "ndf"))
+    for repo in (doc, handoff, ndf):
+        (repo / ".git").mkdir(parents=True)
+    (doc / ".ndf" / "handoff").mkdir(parents=True)
+    (doc / ".ndf" / "handoff" / "x.md").symlink_to(outside / "f.md")
+    (handoff / ".ndf").mkdir()
+    (handoff / ".ndf" / "handoff").symlink_to(outside / "handoff")
+    (ndf / ".ndf").symlink_to(outside)
+    for repo in (doc, handoff, ndf):
+        for tool in ("Read", "Write", "Edit"):
+            assert not _passes(repo, tool, file_path=".ndf/handoff/x.md")
+
+
+def test_passes_writes_from_the_main_of_a_separate_git_dir(tmp_path):
+    # #3995 の Task 8: 管理ディレクトリを外に置いたメインディレクトリは自分の .ndf/handoff を書け、管理ディレクトリの親のものは書けない
+    main = tmp_path / "main"
+    meta = tmp_path / "outside" / "meta.git"
+    _separate(main, meta)
+    (main / ".ndf" / "handoff").mkdir(parents=True)
+    (meta.parent / ".ndf" / "handoff").mkdir(parents=True)
+    assert _passes(main, "Write", file_path=".ndf/handoff/x.md")
+    assert not _passes(main, "Write", file_path=str(meta.parent / ".ndf/handoff/x.md"))
+
+
+_CHECK = "ndf records handoff check .ndf/handoff/x.md"
+
+
+@pytest.mark.parametrize(
+    ("at", "command", "passes"),
+    [
+        ("main", "ndf records --cwd {main} handoff check {main}/.ndf/handoff/next.md --trim --history {main}/.ndf/handoff/n-h.md", True),
+        ("wt", "ndf records --cwd {main} handoff check {main}/.ndf/handoff/next.md --trim --history {main}/.ndf/handoff/n-h.md", True),
+        ("wt", "ndf records --cwd {main} handoff check .ndf/handoff/next.md --trim --history .ndf/handoff/next-history.md", True),
+        ("main/src", _CHECK, True),
+        ("main", "ndf relay context record --event 引継ぎ開始 --work 3995", True),
+        ("main", f"{_CHECK} 2>&1", True),
+        ("main", f"{_CHECK} 2>/dev/null", True),
+        ("main", f"ndf relay context record --event 引継ぎ開始 --work 3995 && {_CHECK}", True),
+        ("main", f"ndf relay context record --event 引継ぎ開始 --work 3995; {_CHECK}", True),
+        ("main", f"ndf relay context record --event 引継ぎ開始 --work 3995 | {_CHECK}", True),
+        ("main", "ndf records --cwd {tmp}/main-src handoff check .ndf/handoff/next.md", True),
+        ("main", f"{_CHECK} --trim --history /home/u/notes.md", False),
+        ("main", f"{_CHECK} --trim --history .ndf/handoff/../x.md", False),
+        ("main", _CHECK + " --trim --history {wt}/.ndf/handoff/h.md", False),
+        ("main", "ndf records handoff check README.md", False),
+        ("main", "ndf records --cwd {other} handoff check .ndf/handoff/next.md", False),
+        ("main", "ndf records --cwd {tmp}/wt-src handoff check .ndf/handoff/next.md", False),
+        ("wt", "ndf records handoff check .ndf/handoff/next.md", False),
+        ("main", "env -C {wt} ndf records handoff check .ndf/handoff/next.md --trim --history .ndf/handoff/next-history.md", False),
+        ("main", "env GIT_DIR={wt}/.git " + _CHECK, False),
+        ("main", "GIT_WORK_TREE={wt} " + _CHECK, False),
+        ("main", f"GIT_DIR=x; {_CHECK}", False),
+        ("main", f"timeout 60 {_CHECK}", False),
+        ("main", "cd {wt} && " + _CHECK, False),
+        ("main", f'{_CHECK} --trim --history "$H"', False),
+        ("main", "ndf records handoff check ~/x.md", False),
+        ("main", "ndf records handoff check *.md", False),
+        ("main", f"{_CHECK} --force", False),
+        ("main", f"{_CHECK} .ndf/handoff/y.md", False),
+        ("main", "ndf records handoff other .ndf/handoff/x.md", False),
+        ("main", "ndf relay context record --work 1 --out f", False),
+        ("main", f"{_CHECK} && rm y", False),
+        ("main", "ndf lanes status p1", False),
+        ("main", f"{_CHECK} > settings.json", False),
+        ("main", f"{_CHECK} >> f", False),
+        ("main", f"{_CHECK} >| f", False),
+        ("main", f"{_CHECK} &> f", False),
+        ("main", f"{_CHECK} 1<>f", False),
+        ("main", f"{_CHECK} < f", False),
+        ("main", f"{_CHECK} > >(cat)", False),
+        ("main", f"{_CHECK} >&out", False),
+        ("main", f'{_CHECK} > "$F"', False),
+        ("main", f"{_CHECK} <<'E'\na\nE\n", False),
+        ("main", f"{_CHECK} &", False),
+        ("main", f"{_CHECK} $(ndf relay context record --event 引継ぎ開始 --work 1)", False),
+    ],
+)
+def test_passes_runs_only_the_handoff_commands(handoff_repos, at, command, passes):
+    # #3995 の Task 8・3995:6: Bash は引継ぎの 2 つのコマンドだけ（許す引数・許すリダイレクト・許可対象だけの連結）を通す
+    words = {k: os.path.realpath(v) for k, v in handoff_repos.items()}
+    cwd = handoff_repos["main"] / "src" if at == "main/src" else handoff_repos[at]
+    assert _passes(cwd, "Bash", command=command.format(**words)) is passes
+
+
+def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsys):
+    # #3995 の Task 8: 真になった引数を実際に打つと、更新されるのはいつもメインディレクトリの .ndf/handoff の文書で、偽の組は worktree を更新する
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    main, wt = tmp_path / "main", tmp_path / "wt"
+    git_sandbox.sh(tmp_path, "init", "-q", str(main))
+    git_sandbox.sh(main, "commit", "-q", "--allow-empty", "-m", "x", identity=True)
+    git_sandbox.sh(main, "worktree", "add", "-q", "-b", "w", str(wt))
+    for root in (main, wt):
+        (root / ".ndf" / "handoff").mkdir(parents=True)
+        (root / "src").mkdir()
+    (tmp_path / "main-src").symlink_to(main / "src")
+    (tmp_path / "wt-src").symlink_to(wt / "src")
+    body = "## 現在地\n\n- x\n\n## 雑記\n\n- 移す\n"
+    cases = [
+        (main, str(main), True),
+        (wt, str(main), True),
+        (main / "src", None, True),
+        (main, str(tmp_path / "main-src"), True),
+        (wt, None, False),
+        (main, str(tmp_path / "wt-src"), False),
+    ]
+    for cwd, at, want in cases:
+        for root in (main, wt):
+            (root / ".ndf/handoff/next.md").write_text(body, encoding="utf-8")
+            (root / ".ndf/handoff/next-history.md").unlink(missing_ok=True)
+        opts = ["--cwd", at] if at is not None else []
+        words = ["records", *opts, "handoff", "check", ".ndf/handoff/next.md", "--trim", "--history", ".ndf/handoff/next-history.md"]
+        assert context_limit._ndf_args_pass(words, str(cwd), _limit_params()) is want
+        monkeypatch.chdir(cwd)
+        start = Path(os.path.realpath(at if at is not None else cwd))
+        assert records_cli._root(argparse.Namespace(cwd=Path(at) if at is not None else None)) == strict._repo_root(start)
+        cli.main(words)
+        capsys.readouterr()
+        updated = [root for root in (main, wt) if (root / ".ndf/handoff/next-history.md").exists()]
+        assert updated == [main if want else wt]
+
+
+def test_context_limit_passes_the_handoff_calls_at_the_operating_limit(tmp_path):
+    # #3995 の 3995:6: 運用上限で、引継ぎ文書の Read・TaskStop・引継ぎ文書の確かめは通り、ほかの呼び出しは止まる
+    _usage_transcript(tmp_path, 500_000)
+    (tmp_path / ".ndf" / "handoff").mkdir()
+    read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": ".ndf/handoff/next.md"})
+    stop_task = sample("claude", "PreToolUse", tmp_path, tool_name="TaskStop", tool_input={"task_id": "x"})
+    for payload in (read, stop_task, bash(tmp_path, "ndf records handoff check .ndf/handoff/next.md")):
+        assert deny_reason(call_entry("claude", "PreToolUse", payload)) is None
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ndf lanes status p1"))) is not None
+
+
+def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
+    # #3995 の 3995:8・テスト設計の 8: 監視を TaskStop で止め、supervisor を待ち、wait の行を残し、引継ぎ文書を書いて終える
+    t = thresholds({}, tables.policy_value)
+    for under, end in ((True, "次のセグメントのブロック"), (False, "ndf-next")):
+        text = context_limit._reason(t, under, ".ndf/handoff/")
+        for part in ("TaskStop", "supervisor", "wait の行", ".ndf/handoff/parallel-<計画>.md", "ndf records handoff check", end):
+            assert part in text
+        assert len(text) <= 600
+
+
+def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
+    # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
+    _usage_transcript(tmp_path, 500_000)
+    first = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
+    _usage_transcript(tmp_path, 600_000)
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) == first
 
 
 def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):
