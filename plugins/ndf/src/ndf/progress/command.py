@@ -713,7 +713,8 @@ def _cmd_check(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
     output, stage, errs = _read_stage_output(a, st)
     metrics = {"machine_id": a.machine_id, "stage": a.stage, "outputs": list(stage.outputs)}
     if errs:
-        return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics)
+        missing = [{"kind": "missing", "key": k, "source": definition.context_source(k)} for k in definition.missing_outputs(stage, output)]
+        return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics, items=missing)
     _, dropped = stages.keep_declared(stage.outputs, output["outputs"] if "outputs" in output else {})
     st.warnings.extend(f"工程 {a.stage} の定義の outputs に無いキーを finish が捨てる: {k}" for k in dropped)
     return result.result(TOOL, result.OK, f"{a.stage} の出力は規約に合う", metrics=metrics)

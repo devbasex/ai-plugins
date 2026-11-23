@@ -157,6 +157,33 @@ def test_input_needs_the_declared_context_keys():
     assert definition.validate_stage_input(stage, {"context": {}}) == ["context: 文脈のキー issues が無い"]
 
 
+@pytest.mark.parametrize("key", ["delivery", "mvv_gate"])
+def test_context_source_names_where_to_take_the_value(key):
+    source = definition.context_source(key)
+    assert isinstance(source, str) and source
+
+
+@pytest.mark.parametrize("key", ["issues", "存在しないキー"])
+def test_context_source_is_none_without_x_source_or_outside_the_schema(key):
+    assert definition.context_source(key) is None
+
+
+def test_missing_key_line_carries_the_source_only_when_the_key_has_one():
+    stage = definition.load_definition("standard").stage("デプロイ")
+    errs = definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"version": "1.2.3"}})
+    assert f"outputs: 文脈のキー delivery が無い（取り場所: {definition.context_source('delivery')}）" in errs
+    design = definition.load_definition("standard").stage("設計")
+    assert "outputs: 文脈のキー design_pr が無い" in definition.validate_stage_output(design, {"steps": [], "summary": "x"})
+
+
+def test_missing_key_lines_of_an_output_that_is_not_a_dict_still_list_every_key():
+    stage = definition.load_definition("standard").stage("デプロイ")
+    errs = definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": [1]})
+    assert [e for e in errs if "文脈のキー" in e] == [
+        f"outputs: 文脈のキー {k} が無い（取り場所: {definition.context_source(k)}）" for k in stage.outputs
+    ]
+
+
 def test_unknown_metadata_words_and_if_are_refused():
     step = _step("a", "work", "none", speed="fast")
     step["a"]["if"] = "${ .x }"

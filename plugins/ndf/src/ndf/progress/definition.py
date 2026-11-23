@@ -32,6 +32,7 @@ from ndf.progress import model, stages
 DSL = "workflow/dsl/workflow-1.0.3.json"
 NDF_SCHEMA = "workflow/ndf.schema.json"
 CONTEXT = "workflow/context.schema.json"
+X_SOURCE = "x-source"
 MODES_DIR = "workflow/modes"
 STAGES_DIR = "workflow/stages"
 # 規約の束へ入れるスキーマの保存先（contracts からのパス）
@@ -153,10 +154,25 @@ def dig(node: Any, *keys: str) -> Any:
     return node
 
 
-def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
+def _absent(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
     held = dig(obj, part)
     have = held if isinstance(held, dict) else {}
-    return [f"{part}: 文脈のキー {k} が無い" for k in keys if k not in have]
+    return [k for k in keys if k not in have]
+
+
+def missing_outputs(stage: stages.StageDef, obj: Any) -> list[str]:
+    """工程の出力に欠けた文脈のキー（工程の定義の `outputs` の順）。"""
+    return _absent(obj, "outputs", stage.outputs)
+
+
+def _missing_line(part: str, key: str) -> str:
+    line = f"{part}: 文脈のキー {key} が無い"
+    source = context_source(key)
+    return line if source is None else f"{line}（取り場所: {source}）"
+
+
+def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
+    return [_missing_line(part, k) for k in _absent(obj, part, keys)]
 
 
 def _validate_stage(stage: stages.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
@@ -193,8 +209,18 @@ def _ndf_meta(node: Mapping[str, Any]) -> Any:
     return dig(node, "metadata", NAMESPACE)
 
 
+def _context_properties() -> dict[str, Any]:
+    return contracts.load_json(CONTEXT)["properties"]
+
+
 def _context_keys() -> set[str]:
-    return set(contracts.load_json(CONTEXT)["properties"])
+    return set(_context_properties())
+
+
+def context_source(key: str) -> Optional[str]:
+    """文脈のスキーマのキーの `x-source`（値の取り場所の 1 行）。キーが無いか `x-source` を持たなければ None。"""
+    source = dig(_context_properties(), key, X_SOURCE)
+    return source if isinstance(source, str) else None
 
 
 def _context_key_errors(where: str, meta: dict[str, Any]) -> list[str]:
