@@ -1,0 +1,8 @@
+{
+  "summary": "hook の予算（SessionStart）",
+  "p95_ms": 300,
+  "deadline": 3.5,
+  "margin": 1.5,
+  "timeout": 6,
+  "inject_chars": 1500
+}

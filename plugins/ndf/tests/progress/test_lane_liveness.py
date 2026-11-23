@@ -290,7 +290,7 @@ def test_waits_and_stalled_wrappers_win_over_idle(row, sprint, wrapper, kind):
 
 
 def test_the_threshold_comes_from_limits(monkeypatch):
-    """閾値は limits.json の parallel-run.idle だけが持ち、変えると境目が変わる（受け入れ条件 5）。"""
+    """閾値は contracts/limits/parallel-run.idle.json だけが持ち、変えると境目が変わる（受け入れ条件 5）。"""
     from ndf.contracts import limits
 
     assert liveness.idle_after() == limits.seconds(liveness.IDLE_POLICY)

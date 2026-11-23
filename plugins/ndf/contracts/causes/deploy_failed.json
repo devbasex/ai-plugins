@@ -1,0 +1,7 @@
+{
+  "meaning": "CD の結果が失敗",
+  "std_type": "runtime",
+  "exit": "cd_failed",
+  "route": "human",
+  "retry": null
+}

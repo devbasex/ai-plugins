@@ -1,0 +1,4 @@
+{
+  "summary": "足したテストが全体の実行に収集されるかの確かめ（suite の collect_command）の上限（#620）",
+  "seconds": 120
+}

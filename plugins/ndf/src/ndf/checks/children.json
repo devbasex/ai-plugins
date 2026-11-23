@@ -57,7 +57,7 @@
     "AD4": {"issue": 3616, "packages": [], "needs": ["AD1", "C3", "T1"], "order": 6, "lane": "lci-junit", "closed": false}
   },
   "tables": {
-    "contracts/causes.json": ["D1", "D1+"],
-    "contracts/limits.json": ["D1", "T1+", "M3a"]
+    "contracts/causes/": ["D1", "D1+"],
+    "contracts/limits/": ["D1", "T1+", "M3a"]
   }
 }

@@ -1,0 +1,7 @@
+{
+  "meaning": "中継のラッパーが、上限か認証の失敗の後に替え先も今のアカウントも用意できず、子を起動せずに会話を送らずに止まった",
+  "std_type": "configuration",
+  "exit": "precondition",
+  "route": "human",
+  "retry": null
+}

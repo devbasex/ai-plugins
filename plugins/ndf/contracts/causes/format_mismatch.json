@@ -1,0 +1,7 @@
+{
+  "meaning": "計画が記録した形の番号（保存先・耐久の記録・ステートマシンの表のバージョン）が自分のものと違い、レーンを起動しなかった。計画と同じ形の NDF で打ち直す",
+  "std_type": "configuration",
+  "exit": "unreadable",
+  "route": "human",
+  "retry": null
+}

@@ -2,7 +2,7 @@
 
 <!-- ndf check --write-spec が生成する。手で直さない（SSOT は各節の出典） -->
 
-結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（停止理由）である。SSOT は `contracts/facts/exit-codes.json` と `contracts/causes.json`。ルートは `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである
+結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（停止理由）である。SSOT は `contracts/facts/exit-codes.json` と `contracts/causes/`（1 種類 1 ファイル）。ルートは `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである
 
 ## 終了コード
 

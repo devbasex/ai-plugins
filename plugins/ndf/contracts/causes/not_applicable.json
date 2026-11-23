@@ -1,0 +1,7 @@
+{
+  "meaning": "正常な否定の結果（立たない・変更なし・飛ばしてよい）。ルートはプランの on_cause が書く",
+  "std_type": "validation",
+  "exit": "precondition",
+  "route": "conductor",
+  "retry": null
+}

@@ -1,0 +1,7 @@
+{
+  "summary": ".git/config の lock で落ちた worktree の作成の打ち直し",
+  "seconds": 5,
+  "attempts": 6,
+  "interval": 1,
+  "same_cause": 6
+}

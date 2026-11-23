@@ -25,6 +25,7 @@ DEFAULT_DIR = ROOT / "contracts"
 SCHEMAS = "schemas"
 # 分けた表のディレクトリで、この文字で始まるファイルは項目でなく表そのものの値（`_meta.json` など）
 META_PREFIX = "_"
+META = "_meta.json"
 # 分ける表の一覧（事実の表。表の名前 → 項目の単位とキーの出所）
 SPLIT_TABLES = "domains/split-tables.json"
 T = TypeVar("T")
@@ -110,6 +111,17 @@ def load_split(rel: str) -> dict[str, Any]:
             raise ContractError(f"分けた表の項目 {path} がオブジェクトでない（{type(item).__name__}）")
         out[key] = item
     return out
+
+
+def load_table(rel: str, error_cls: type[ContractError], label: str) -> dict[str, Any]:
+    """分けた表 `rel` の `_meta.json` の形を確かめ、項目（`load_split`）を返す。項目が 1 つも無い表も `error_cls` で断る。"""
+    with raised_as(error_cls):
+        meta = load_json(f"{rel}/{META}")
+        require_schema(meta, schema_path("split-meta"), error_cls, f"{label} {rel}/{META}")
+        items = load_split(rel)
+    if not items:
+        raise error_cls(f"{label} {rel} に項目が 1 つも無い")
+    return items
 
 
 def split_tables() -> dict[str, dict[str, str]]:

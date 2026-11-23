@@ -1,0 +1,4 @@
+{
+  "summary": "statusline の設定の排他（.ndf-statusline.lock）を待つ上限。旧い statusline-switch.sh の flock と同じ錠で待ち合う",
+  "seconds": 10
+}

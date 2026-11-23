@@ -1,0 +1,4 @@
+{
+  "summary": "回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限",
+  "seconds": 120
+}

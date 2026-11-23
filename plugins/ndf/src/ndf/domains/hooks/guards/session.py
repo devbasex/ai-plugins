@@ -7,7 +7,9 @@ from ndf.domains.hooks.verdict import Verdict, advise
 
 
 def check(ctx, svc) -> Verdict | None:
-    errors = budget.check_budget(tables.policies(), budget.registrations_of(tables.PLUGIN_ROOT))
+    errors = budget.check_budget(tables.policies(prefix="hook."), budget.registrations_of(tables.PLUGIN_ROOT))
     if not errors:
         return None
-    return advise(f"hook の予算の検査で破れが {len(errors)} 件ある（先頭: {errors[0]}）。contracts/limits.json の hook の予算を直す")
+    return advise(
+        f"hook の予算の検査で破れが {len(errors)} 件ある（先頭: {errors[0]}）。contracts/limits/<方針の名前>.json の hook の予算か部品の上限を直す"
+    )

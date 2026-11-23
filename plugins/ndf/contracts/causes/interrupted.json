@@ -1,0 +1,7 @@
+{
+  "meaning": "期限・シグナル・遅れの見張りで打ち切った",
+  "std_type": "timeout",
+  "exit": "failed",
+  "route": "conductor",
+  "retry": null
+}

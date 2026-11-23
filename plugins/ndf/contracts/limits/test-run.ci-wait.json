@@ -1,0 +1,5 @@
+{
+  "summary": "CI の結果の待ちの上限 = max(seconds, factor × CI の実測の所要)",
+  "seconds": 3600,
+  "factor": 3
+}

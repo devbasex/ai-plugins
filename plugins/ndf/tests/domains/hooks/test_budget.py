@@ -5,10 +5,13 @@ from __future__ import annotations
 import copy
 import json
 
+import pytest
+
+from ndf import identity
 from ndf.contracts import facts, limits
 from ndf.domains.hooks import budget, tables
 
-from ._hooks import call_entry, sample
+from ._hooks import bash, call_entry, records, sample, stop
 
 
 def test_declared_budgets_keep_the_order():
@@ -64,11 +67,11 @@ def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns()
     broken["hook.counter-lock"]["seconds"] = 99
     assert budget.check_budget(broken, []) == [
         # ask-answered・ask-closed は ask-forward と同じ上限 hook.ask-forward を使う（#3814）
-        "ask-answered の部品の上限 hook.ask-forward が limits.json に無い",
-        "ask-closed の部品の上限 hook.ask-forward が limits.json に無い",
-        "ask-forward の部品の上限 hook.ask-forward が limits.json に無い",
+        "ask-answered の部品の上限 contracts/limits/hook.ask-forward.json が無い",
+        "ask-closed の部品の上限 contracts/limits/hook.ask-forward.json が無い",
+        "ask-forward の部品の上限 contracts/limits/hook.ask-forward.json が無い",
         # codex の Stop は hook.budget.stop.codex を読む（stop-wait のモデルの判定の秒を足さない。#4000）
-        "claude の Stop の予算が limits.json に無い",
+        "claude の Stop の予算が contracts/limits/hook.budget.stop.json に無い",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         # relay-marker の Stop は、claude では予算の行を消したので上の 1 行に、codex では hook.budget.stop.codex に当たる
@@ -141,7 +144,7 @@ def test_registration_file_without_a_hooks_object_has_no_rows(tmp_path):
 def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
     broken = copy.deepcopy(tables.policies())
     broken["hook.counter-lock"]["seconds"] = 30
-    monkeypatch.setattr(tables, "policies", lambda: broken)
+    monkeypatch.setattr(tables, "policies", lambda prefix: {k: v for k, v in broken.items() if k.startswith(prefix)})
     out = call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
     assert "予算の検査で破れ" in out["hookSpecificOutput"]["additionalContext"]
     monkeypatch.undo()
@@ -170,3 +173,65 @@ def test_hook_off_all_and_named_switch_guards_off(tmp_path, monkeypatch):
     assert call_entry("claude", "PreToolUse", payload) is None
     monkeypatch.setenv("NDF_HOOK_OFF", "all")
     assert call_entry("claude", "PreToolUse", payload) is None
+
+
+@pytest.fixture
+def read_limits(monkeypatch):
+    """`contracts/limits/` から読んだファイルの名前（読んだ順）。1 プロセス 1 回のキャッシュは空から始める。"""
+    got: list[str] = []
+    real = tables._read_json
+
+    def spy(path):
+        if path.parent == tables.LIMITS_DIR:
+            got.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(tables, "_read_json", spy)
+    tables.load.cache_clear()
+    yield got
+    tables.load.cache_clear()
+
+
+def _read_until_denied(tmp_path):
+    """同じ範囲の Read。1 つ前の呼び出しまでで上限に達していて、次の呼び出しを read-repeat が断る。"""
+    target = tmp_path / "a.txt"
+    target.write_text("x", encoding="utf-8")
+    payload = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(target)})
+    for _ in range(tables.policy_value("hook.read-repeat", "attempts")):
+        call_entry("claude", "PreToolUse", payload)
+    return payload
+
+
+def _stop_of_unattended_run(tmp_path):
+    prompt = f"/{identity.load().prefix}development-workflow #12"
+    call_entry("claude", "UserPromptSubmit", sample("claude", "UserPromptSubmit", tmp_path, prompt=prompt))
+    return stop(tmp_path, "終わりました")
+
+
+@pytest.mark.parametrize(
+    ("event", "guard", "payload_of", "cap"),
+    [
+        ("PreToolUse", "read-repeat", _read_until_denied, 6),
+        ("PreToolUse", "sleep", lambda p: bash(p, "sleep 999"), 6),
+        ("Stop", "unattended", _stop_of_unattended_run, 6),
+        ("SessionStart", "session", lambda p: sample("claude", "SessionStart", p), 26),
+    ],
+)
+def test_one_hook_run_reads_only_the_policies_it_uses(tmp_path, monkeypatch, read_limits, event, guard, payload_of, cap):
+    # #3687: 1 方針 1 ファイルなので、起動のたびに全件を読むと 200 を超えるファイルを読む。予算の解決から guard までの 1 起動分を数える
+    monkeypatch.setenv("NDF_FACTORY_RUN", "1")
+    payload = payload_of(tmp_path)
+    tables.load.cache_clear()
+    read_limits.clear()
+    call_entry("claude", event, payload)
+    record = records()[-1]
+    assert record["event"] == event and not record["error"]
+    assert guard in [g["name"] for g in record["guards"]]
+    assert 1 < len(read_limits) <= cap, read_limits
+
+
+def test_policy_value_reads_its_own_file_once(read_limits):
+    assert tables.policy_value("hook.sleep", "seconds") == tables.policy_value("hook.sleep", "seconds")
+    assert read_limits == ["hook.sleep.json"]
+    with pytest.raises(tables.TableError, match="no.such に seconds が無い"):
+        tables.policy_value("no.such", "seconds")

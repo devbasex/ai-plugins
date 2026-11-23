@@ -1,6 +1,7 @@
 {
   "summary": "1 ファイルから項目ごとのファイルへ分けた表。表は contracts/<表の名前>/ のディレクトリに置き、項目のファイル名（拡張子 .json を除く）がキーになる。_ で始まるファイルは表そのものの値（_meta.json）で、項目ではない",
   "owner": "D2（contracts/domains。初版は #3687）",
+  "shared_names": true,
   "columns": {
     "unit": {"type": "string", "summary": "1 ファイルが持つ項目の単位"},
     "key_from": {"type": "string", "summary": "項目のキーの出所"},

@@ -1,7 +1,7 @@
-"""上限の設定（`contracts/limits.json`）の読み手。
+"""上限の設定（`contracts/limits/<方針の名前>.json`。1 方針 1 ファイル）の読み手。
 
 時間・回数・間隔・量の上限は設定だけが値を持ち、コードは方針の名前で引く（値を写さない）。
-形は `contracts/schemas/limits.schema.json` にある。
+方針 1 つの形は `contracts/schemas/limits.schema.json` にある。
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from typing import Any, NamedTuple, Optional, get_type_hints
 
 from ndf import contracts
 
-NDF_SETTINGS = "limits.json"
+NDF_SETTINGS = "limits"
 SCHEMA = contracts.schema_path("limits")
+# 方針の名前の形（SSOT は設定のスキーマの $defs）
+NAME_SCHEMA = SCHEMA + "#/$defs/name"
 
 
 class LimitsError(contracts.ContractError):
@@ -64,16 +66,22 @@ class Policy(NamedTuple):
 VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 
-def validate(raw: object) -> dict[str, Policy]:
-    """設定の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
-    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の設定 {NDF_SETTINGS}")
-    return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
+def validate(raw: dict[str, Any]) -> dict[str, Policy]:
+    """方針の名前 → 中身の辞書を確かめて方針の表にする。形の誤りは `LimitsError`。"""
+    errs = [
+        f"{name}: {e}"
+        for name, row in raw.items()
+        for e in (*contracts.schema_errors(name, NAME_SCHEMA), *contracts.schema_errors(row, SCHEMA))
+    ]
+    if errs:
+        raise LimitsError(f"上限の設定 {NDF_SETTINGS} の形が違う: {'; '.join(errs)}")
+    return {name: Policy(name=name, **row) for name, row in raw.items()}
 
 
 @contracts.cached_reader
 def table() -> dict[str, Policy]:
     """設定を 1 プロセスに 1 回読む。"""
-    return validate(contracts.load_as(NDF_SETTINGS, LimitsError))
+    return validate(contracts.load_table(NDF_SETTINGS, LimitsError, "上限の設定"))
 
 
 def policy(name: str) -> Policy:

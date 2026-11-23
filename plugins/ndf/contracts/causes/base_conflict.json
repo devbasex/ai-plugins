@@ -1,0 +1,7 @@
+{
+  "meaning": "ベースブランチと衝突",
+  "std_type": "runtime",
+  "exit": "base_conflict",
+  "route": "step",
+  "retry": null
+}

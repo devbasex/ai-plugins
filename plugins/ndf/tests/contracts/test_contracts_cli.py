@@ -35,8 +35,8 @@ def test_check_passes_on_plugin_contracts(capsys):
 
 
 def test_check_reports_every_broken_table(contracts_copy, capsys):
-    contracts_copy("causes.json", text="{")
-    contracts_copy("limits.json", lambda d: {**d, "version": 1})
+    contracts_copy("causes/unknown.json", text="{")
+    contracts_copy("limits/_meta.json", lambda d: {**d, "version": 1})
     code, out, _ = _run(capsys, "check")
     report = json.loads(out)
     assert code == 2
@@ -44,7 +44,7 @@ def test_check_reports_every_broken_table(contracts_copy, capsys):
     assert len(report["items"]) >= 2
 
 
-@pytest.mark.parametrize("rel", ["schemas/result.schema.json", "causes.json"])
+@pytest.mark.parametrize("rel", ["schemas/result.schema.json", "causes/unknown.json"])
 def test_check_reports_json_when_output_contract_is_broken(contracts_copy, capsys, rel):
     contracts_copy(rel, text="{")
     code, out, _ = _run(capsys, "check")
@@ -54,7 +54,7 @@ def test_check_reports_json_when_output_contract_is_broken(contracts_copy, capsy
 
 
 def test_check_reports_missing_ref_target(contracts_copy, fact_table):
-    table = fact_table({"phase": {"type": "string", "summary": "s", "ref": "limits.json#monitor.phase."}}, [{"id": "a", "phase": "nope"}])
+    table = fact_table({"phase": {"type": "string", "summary": "s", "ref": "limits#monitor.phase."}}, [{"id": "a", "phase": "nope"}])
     contracts_copy("facts/sample.json", lambda _: table)
     assert contracts_cli.check_all() == ["sample:a の phase 'nope' の方針 monitor.phase.nope が上限の設定に無い"]
 
@@ -172,7 +172,9 @@ def test_fact_value_missing_table(capsys):
         ("schemas/causes.schema.json", 2),
         ("schemas/limits.schema.json", 3),
         ("schemas/release-verification.schema.json", 1),
-        ("causes.json", 1),
+        ("schemas/split-meta.schema.json", 2),
+        ("causes/unknown.json", 1),
+        ("causes/_meta.json", 1),
         ("facts/exit-codes.json", 2),
         ("facts/answers.json", 2),
         ("schemas/route-chosen.schema.json", 2),
@@ -188,11 +190,11 @@ def test_check_all_reports_one_broken_file(contracts_copy, broken, count):
 
 
 def test_check_all_broken_limits_also_breaks_causes(contracts_copy):
-    path = contracts_copy("limits.json", text="{")
+    path = contracts_copy("limits/cause.ci-pending.json", text="{")
     errs = contracts_cli.check_all()
     assert len(errs) == 2
     assert errs[0].startswith(f"コントラクト {path} が JSON として壊れている: ")
-    assert errs[1].startswith("停止理由の表 causes.json の誤り: ci_pending の再試行の方針: ")
+    assert errs[1].startswith("停止理由の表 causes の誤り: ci_pending の再試行の方針: ")
 
 
 def test_check_all_ignores_schemas_outside_its_list(contracts_copy):
@@ -269,7 +271,7 @@ def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
     assert dest.read_text(encoding="utf-8") == "old\n"
 
 
-@pytest.mark.parametrize("rel", ["causes.json", "facts/exit-codes.json"])
+@pytest.mark.parametrize("rel", ["causes/unknown.json", "facts/exit-codes.json"])
 def test_unreadable_contracts_stop_with_config_broken(contracts_copy, capsys, rel):
     contracts_copy(rel, text="{")
     code, out, _ = _run_top(capsys, "no-such-command")

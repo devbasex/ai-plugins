@@ -1,4 +1,4 @@
-"""停止理由の表（`contracts/causes.json`）の読み手と、結果 JSON の `cause` の組み立てと確かめ。
+"""停止理由の表（`contracts/causes/<種類>.json`。1 種類 1 ファイル）の読み手と、結果 JSON の `cause` の組み立てと確かめ。
 
 種類の語彙・既定のルートは表だけが持ち、終了コードの値は終了コードの表（`exit_codes`）だけが、再試行の値は上限の設定だけが持つ。
 表の `exit` は終了コードの表の stopped の行の id を指し、読み手が値に引き直して `CauseRow.exit` に置く。
@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts
 from ndf.contracts import exit_codes, facts, limits
 
-TABLE = "causes.json"
+TABLE = "causes"
 SCHEMA = contracts.schema_path("causes")
 # 結果 JSON の `cause` の形（SSOT は結果のスキーマの $defs）
 CAUSE_SCHEMA = contracts.schema_path("result") + "#/$defs/cause"
@@ -50,20 +50,28 @@ def _policy_errors(row: CauseRow) -> list[str]:
     return errs
 
 
-def validate(raw: Any) -> dict[str, CauseRow]:
-    """表の形・種類の重なり・exit が終了コードの表の stopped の id を指すこと・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
-    contracts.require_schema(raw, SCHEMA, CausesError, f"停止理由の表 {TABLE}")
+def _with_kind(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+    """項目の中身へ種類（ファイル名）を足す。中身の kind がファイル名と違えば `CausesError`。"""
+    if "kind" in body and body["kind"] != kind:
+        raise CausesError(f"停止理由の表 {TABLE}/{kind}.json の kind {body['kind']!r} がファイル名と違う")
+    return {**body, "kind": kind}
+
+
+def validate(raw: dict[str, Any]) -> dict[str, CauseRow]:
+    """種類（ファイル名）→ 中身の辞書の形・exit が終了コードの表の stopped の id を指すこと・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
+    items = [_with_kind(kind, body) for kind, body in raw.items()]
+    shape = [f"{item['kind']}: {e}" for item in items for e in contracts.schema_errors(item, SCHEMA)]
+    if shape:
+        raise CausesError(f"停止理由の表 {TABLE} の形が違う: {'; '.join(shape)}")
     errs: list[str] = []
     out: dict[str, CauseRow] = {}
     stopped = {r["id"]: r["code"] for r in facts.rows(exit_codes.TABLE, status=exit_codes.STOPPED)}
-    for item in raw["causes"]:
+    for item in items:
         exit_id = item["exit"]
         if exit_id not in stopped:
             errs.append(f"{item['kind']} の exit {exit_id!r} は終了コードの表の stopped の id {sorted(stopped)} に無い")
             continue
         row = CauseRow(**{**item, "exit": stopped[exit_id], "exit_id": exit_id})
-        if row.kind in out:
-            errs.append(f"種類 {row.kind} が 2 つある")
         errs += _policy_errors(row)
         out[row.kind] = row
     if errs:
@@ -75,7 +83,7 @@ def validate(raw: Any) -> dict[str, CauseRow]:
 def table() -> dict[str, CauseRow]:
     """表を 1 プロセスに 1 回読み、種類ごとの行を返す。"""
     with contracts.raised_as(CausesError):
-        return validate(contracts.load_json(TABLE))
+        return validate(contracts.load_table(TABLE, CausesError, "停止理由の表"))
 
 
 def row(kind: str) -> CauseRow:

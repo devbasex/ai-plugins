@@ -6,7 +6,7 @@
 | --- | --- |
 | 設定 | 保存先の表（`ndf-files` の `kind` が `ndf_settings`・`location` が `ndf` の行）と設定のスキーマ（`schemas/ndf-settings/`） |
 | サブコマンド | サブコマンドの表（`cli.COMMANDS`）・引数の定義（`spec_args`）・手書きの引数の表（`manual-args`）・結果のスキーマ（`schemas/io/`） |
-| 環境変数・受け渡しのファイル・終了コード・停止理由 | `env`・`ndf-files`・`exit-codes`・`causes.json` |
+| 環境変数・受け渡しのファイル・終了コード・停止理由 | `env`・`ndf-files`・`exit-codes`・`contracts/causes/` |
 | hook | hook の表（`hooks/runtimes.json`） |
 | Skill・起動スクリプト | 配る Skill の表（`manifests/skills.json`）・Skill の入出力の表（`skill-io`）・起動スクリプトの表（`launchers`） |
 
@@ -27,7 +27,8 @@ from jsonschema.exceptions import SchemaError
 from ndf import cli, contracts, identity
 from ndf.checks.model import CheckError, read_json
 from ndf.checks.spec_args import ArgTree, extract, from_manual
-from ndf.contracts import exit_codes, facts
+from ndf.contracts import causes, exit_codes, facts
+from ndf.contracts.causes import CauseRow
 
 DECL_KIND = "ndf_settings"
 # プラグインの根からのコントラクトの保存先（`ndf.contracts` の既定の保存先の名前）
@@ -168,7 +169,7 @@ class SpecModel:
     bin_files: tuple[str, ...]
     entrypoints: tuple[dict[str, Any], ...]
     exit_codes: tuple[dict[str, Any], ...]
-    causes: tuple[dict[str, Any], ...]
+    causes: tuple[CauseRow, ...]
     manual_ids: tuple[str, ...]
     skill_io_ids: tuple[str, ...]
     public: PublicIds = field(default_factory=frozenset)
@@ -239,7 +240,7 @@ def _load(plugin_root: Path) -> SpecModel:
         bin_files=tuple(bin_files),
         entrypoints=tuple(sorted(entrypoints, key=lambda r: r["id"])),
         exit_codes=tuple(sorted(facts.rows(exit_codes.TABLE), key=lambda r: r["code"])),
-        causes=tuple(sorted(contracts.load_json("causes.json")["causes"], key=lambda r: r["kind"])),
+        causes=tuple(row for _, row in sorted(causes.table().items())),
         manual_ids=tuple(sorted(facts.ids("manual-args"))),
         skill_io_ids=tuple(sorted(facts.ids("skill-io"))),
         public=public,

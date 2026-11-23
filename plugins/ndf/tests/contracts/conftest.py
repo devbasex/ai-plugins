@@ -19,7 +19,10 @@ def _plugin_contracts():
 
 
 class ContractsCopy:
-    """一時の保存先へ写したコントラクト（`root`）。呼ぶと 1 ファイルを書き換え、読み先をこの保存先にし直す。"""
+    """一時の保存先へコピーしたコントラクト（`root`）。呼ぶと 1 ファイルを書き換え、読み先をこの保存先にし直す。
+
+    分けた表は 1 項目のファイル（`causes/infra_wait.json`）か `_meta.json` を渡す。無いファイルは `fn(None)` の値で足す。
+    """
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -33,6 +36,14 @@ class ContractsCopy:
             path.write_text(json.dumps(fn(data), ensure_ascii=False), encoding="utf-8")
         contracts.use_dir(self.root)
         return path
+
+    def remove(self, pattern: str) -> None:
+        """`pattern`（`root` からの glob）に当たるファイルをすべて消し、読み先をこの保存先にし直す。"""
+        found = list(self.root.glob(pattern))
+        assert found, pattern
+        for path in found:
+            path.unlink()
+        contracts.use_dir(self.root)
 
 
 @pytest.fixture
