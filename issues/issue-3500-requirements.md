@@ -66,7 +66,9 @@ NDF がリポジトリの中に作る、git で追跡しない置き場は次の
 
 含む:
 - 置き場の一覧の、追跡しないフォルダ（`.worktrees`・`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/backlog/state`）と `.cross_refactoring` を、NDF のコードが置き場の単位（worktree ごとに 1 つか、メインディレクトリに 1 つ）のパスに作り、作るときに中へ `*` だけの `.gitignore` を置くこと
-- 置き場の一覧の起点を実際の置き場に合わせること（`.worktrees` と `.ndf/handoff` は実際にはメインディレクトリに 1 つなのに、一覧では worktree ごとになっている。`.ndf/loop` は一覧ではメインディレクトリだが、実際は git の内部のディレクトリに書く）
+- 置き場ごとの単位（worktree ごとに 1 つか、メインディレクトリに 1 つか）を、中身が何に属するかで決めること。計画の記録（`.ndf/parallel`）とスプリントの記録（`.ndf/sprints`）は複数の worktree にまたがるのでメインディレクトリに 1 つ、テストの出力などの一時ファイル（`.ndf/tmp`）と cross-refactoring の作業ファイルは worktree ごとにする
+- 今のコードが決めた単位と違う所に作る置き場を直すこと（計画の記録は、今は打った worktree の根に作られ、worktree を片付けると消える）
+- 置き場の一覧の設定ファイルのパスの起点を、決めた単位に合わせること（`.worktrees`・`.ndf/handoff`・`.ndf/parallel`・`.ndf/sprints` はメインディレクトリの根から数える。`.ndf/loop` は実際は git の内部のディレクトリに書く）
 - `.ndf/` の中の追跡しないファイル（`.ndf/worktree.local.json`）の行を、NDF が `.ndf/.gitignore` に書くこと
 - cross-refactoring が `info/exclude` へ書くのをやめ、`ndf worktree create` が根の `.gitignore` の登録を求めるのをやめること
 - 事例 1: 担当の起動の前に、担当が動くディレクトリの `.cross_refactoring/` を作り直すこと（前の作業ファイルを消し、追跡されていれば索引からも外す）
@@ -91,6 +93,7 @@ NDF がリポジトリの中に作る、git で追跡しない置き場は次の
 - [ ] 4. `.worktrees/` の中の `.gitignore` は、作った worktree の中のファイルの無視に影響しない（worktree の中で足したファイルは `git add -A` で入る）
 - [ ] 5. 事例 1: どの工程でも、担当を起動する直前に、担当が動くディレクトリの `.cross_refactoring/` には前の起動の作業ファイルが無く、`*` だけの `.gitignore` がある。前に追跡されていたファイルは索引から外れていて（`git ls-files .cross_refactoring` が空）、担当の次のコミットで追跡から外れる
 - [ ] 6. 事例 1 の片付けは `.cross_refactoring/` だけに効き、作業ディレクトリのほかのファイル・未コミットの変更・コミットは変わらない
+- [ ] 7. 計画の記録（`.ndf/parallel/<計画>/`）は、どの worktree から打ってもメインディレクトリの `.ndf/parallel/<計画>/` に書かれ、読まれる。記録を書いた worktree を片付けても記録は残る
 
 ## 影響
 
@@ -207,4 +210,8 @@ NDF がリポジトリの中に作る、git で追跡しない置き場は次の
 > 設計承認ゲートの回答（4 回目）: 「直してから」。「無視するフォルダが worktree 単位なのかルートディレクトリ単位なのかが不明。例えば .cross_refactoring は worktree 単位、.ndf/handoff はルートディレクトリで 1 つのはず」
 
 （書き手: 利用者（conductor が伝えた）、日付: 2026-11-23）
+
+> 設計承認ゲートの回答（5 回目）: 「資料を直してから」。「表の root が repo。の意味が分からない」。追加の問い: 「.ndf/parallel とか、worktree ごとで大丈夫なの？」（単位は今のコードがどこに作るかではなく、中身が何に属するかで決める）
+
+（書き手: 利用者（conductor とオーガナイザーが伝えた。括弧の中はオーガナイザーの補足）、日付: 2026-11-23）
 
