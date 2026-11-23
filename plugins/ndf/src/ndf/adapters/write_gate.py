@@ -9,8 +9,9 @@
   予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りなければ待つ（I6）。送信のロックは応答まで持つ
 - 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）。
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
-- 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを放す
-  `_finish` は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が既定のスレッドプールを埋めても放せるようにする
+- 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを取った後の
+  手順（最短の送信時刻を待った後の読み直しと、放す `_finish`）は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が
+  既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする
 - passwd に載らない UID は、環境に依らない UID ごとの保存先（`/tmp/ndf-github-<UID>`。オーナーと 0700 を確かめる）を使う
 
 ロックは取るたびに `slot_pool.lock` で作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
@@ -58,7 +59,7 @@ CLOCK_SLACK = 1.0
 GATE_FILE = "write-gate.json"
 # passwd に載らない UID の保存先の親。環境変数（TMPDIR）を読まない（決定 1）
 SHARED_TMP = Path("/tmp")
-# 非同期の経路で送信のロックを放す専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
+# 非同期の経路で送信のロックを持つ手順を進める専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
 _FINISHER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndf-write-gate-finish")
 SEND_LOCK_FILE = "write-gate.send.lock"
 PR_LOCK_DIR = "pr"
@@ -74,6 +75,8 @@ _IGNORED = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\\n])*"|#[^\n\r]*')
 _PARENS = re.compile(r"\([^()]*\)")
 _MUTATION = re.compile(r"[\s,﻿]*mutation(?![_0-9A-Za-z])")
 # 最初の選択の最初のフィールドの名前（別名 `a: field` なら field）
+# 送信前の分類（`write_of` の結果）を残す、httpx の要求の `extensions` のキー
+WRITES = "ndf.writes"
 _FIRST_FIELD = re.compile(r"[^{]*\{[\s,]*(?:[_A-Za-z][_0-9A-Za-z]*[\s,]*:[\s,]*)?([_A-Za-z][_0-9A-Za-z]*)")
 
 
@@ -82,6 +85,13 @@ class Writes(NamedTuple):
 
     kind: str
     count: int
+
+
+class Pause(NamedTuple):
+    """手順が眠る秒と、眠る間に送信のロックを持っているか（持っていれば非同期の経路は再開を `_FINISHER` で進める）。"""
+
+    seconds: float
+    holding: bool = False
 
 
 class Reservation(NamedTuple):
@@ -125,6 +135,14 @@ def write_of(request: httpx.Request) -> Optional[Writes]:
     return None if kind is None else Writes(kind, 1)
 
 
+def classified(request: httpx.Request) -> Optional[Writes]:
+    """`write_of` の結果を `request.extensions` に残して返す。送信前の分類を応答のフックで再利用する（PR 4265 の r3-1）。"""
+    if WRITES in request.extensions:
+        return request.extensions[WRITES]
+    writes = request.extensions[WRITES] = write_of(request)
+    return writes
+
+
 def _spacing(kind: str) -> tuple[float, float]:
     """1 件の書き込みが後ろへ空ける (どの書き込みとの秒, 内容を作る書き込みとの秒)。`WRITE` は後者が 0。"""
     write = limits.value(WRITE_SPACING, "interval")
@@ -158,15 +176,15 @@ def _earliest_send(record: dict[str, float], kind: str) -> float:
     return record["sent_next"]
 
 
-def _advance(steps: Generator[float, None, Optional[FileLock]]) -> tuple[bool, Any]:
-    """手順を 1 つ進める。(終わったか, 眠る秒または送信のロック)。StopIteration を Future へ渡さないために包む。"""
+def _advance(steps: Generator[Pause, None, Optional[FileLock]]) -> tuple[bool, Any]:
+    """手順を 1 つ進める。(終わったか, `Pause` または送信のロック)。StopIteration を Future へ渡さないために包む。"""
     try:
         return False, next(steps)
     except StopIteration as done:
         return True, done.value
 
 
-def _abandon(steps: Generator[float, None, Optional[FileLock]], step: asyncio.Future) -> None:
+def _abandon(steps: Generator[Pause, None, Optional[FileLock]], step: asyncio.Future) -> None:
     """取り消された非同期の手順の後始末。スレッドが終えてから、持っている送信のロックを放す。"""
     if step.cancelled() or step.exception() is not None:
         return
@@ -257,7 +275,7 @@ class WriteGate(BaseThrottler):
 
     @contextmanager
     def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
-        writes = write_of(request)
+        writes = classified(request)
         if writes is None:
             yield
             return
@@ -266,7 +284,7 @@ class WriteGate(BaseThrottler):
 
     @asynccontextmanager
     async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
-        writes = write_of(request)
+        writes = classified(request)
         if writes is None:
             yield
             return
@@ -280,10 +298,16 @@ class WriteGate(BaseThrottler):
             await asyncio.shield(finishing)
 
     async def _turn(self, kind: str, count: int) -> Optional[FileLock]:
-        """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。"""
+        """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。
+
+        送信のロックを持ったまま眠った手順の再開は `_FINISHER` で進める。既定のスレッドプールが送信のロックを待つ手順で
+        埋まっても、ロックを持つ手順がその空きを待たない。
+        """
         steps = self._steps(kind, count)
+        loop = asyncio.get_running_loop()
+        holding = False
         while True:
-            step = asyncio.ensure_future(asyncio.to_thread(_advance, steps))
+            step = asyncio.ensure_future(loop.run_in_executor(_FINISHER if holding else None, _advance, steps))
             try:
                 finished, value = await asyncio.shield(step)
             except asyncio.CancelledError:
@@ -291,8 +315,9 @@ class WriteGate(BaseThrottler):
                 raise
             if finished:
                 return value
+            holding = value.holding
             try:
-                await asyncio.sleep(value)
+                await asyncio.sleep(value.seconds)
             except BaseException:
                 steps.close()
                 raise
@@ -304,7 +329,7 @@ class WriteGate(BaseThrottler):
             send = None
             try:
                 while True:
-                    self.sleep(next(steps))
+                    self.sleep(next(steps).seconds)
             except StopIteration as done:
                 send = done.value
         try:
@@ -351,15 +376,15 @@ class WriteGate(BaseThrottler):
 
         self._apply(change)
 
-    def _steps(self, kind: str, count: int) -> Generator[float, None, Optional[FileLock]]:
+    def _steps(self, kind: str, count: int) -> Generator[Pause, None, Optional[FileLock]]:
         """眠る秒を順に出し、送ってよくなったら送信のロック（取れなければ None。I5）を返す。"""
         reservation = self.reserve(kind, count=count)
         while True:
             if reservation.wait > 0:
-                yield reservation.wait
+                yield Pause(reservation.wait)
             send = self._send_lock()
             try:
-                blocked = yield from self._settle(kind)
+                blocked = yield from self._settle(kind, send is not None)
             except BaseException:
                 if send is not None:
                     send.release()
@@ -370,8 +395,8 @@ class WriteGate(BaseThrottler):
                 send.release()
             reservation = self.reserve(kind, replacing=reservation, count=count)
 
-    def _settle(self, kind: str) -> Generator[float, None, bool]:
-        """送信のロックを持ったまま最短の送信時刻まで眠る秒を出す。待ちの終わりが延びていたら真。"""
+    def _settle(self, kind: str, holding: bool) -> Generator[Pause, None, bool]:
+        """送信のロックを持ったまま（`holding`）最短の送信時刻まで眠る秒を出す。待ちの終わりが延びていたら真。"""
         while True:
             seen = self._peek(kind)
             if seen is None:
@@ -381,7 +406,7 @@ class WriteGate(BaseThrottler):
                 return True
             if gap <= 0:
                 return False
-            yield gap
+            yield Pause(gap, holding)
 
     def _finish(self, kind: str, send: Optional[FileLock]) -> None:
         try:

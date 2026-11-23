@@ -171,17 +171,28 @@ def _open(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]], port:
     return port.open_thread(path, line, commit, opening(finding))
 
 
-def patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[float], None] = time.sleep) -> T:
-    """`call` を打つ。GitHub の二次レート制限（`errors` の失敗のうち `throttle_decide.secondary_limited`）なら待って打ち直す。"""
+def patient(
+    call: Callable[[], T],
+    errors: type[Exception],
+    sleep: Callable[[float], None] = time.sleep,
+    block: Optional[Callable[[float], None]] = None,
+) -> T:
+    """`call` を打つ。GitHub の二次レート制限（`errors` の失敗の `secondary` が真）なら待って打ち直す。
+
+    待つ前に、待ちの秒を `block`（`WriteGate.block`）へ知らせ、ほかのプロセスの書き込みも止める（#4016 の決定 7）。
+    `errors` の失敗は `github.GitHubError` の属性（`secondary`・`hinted`・`retry_after`）を持つ。
+    """
     attempt = 1
     while True:
         try:
             return call()
         except errors as exc:
-            limited = throttle_decide.secondary_limited(int(getattr(exc, "status", 0)), str(exc))
-            wait = throttle_decide.wait_before_retry(limited, attempt, getattr(exc, "retry_after", None))
+            failed: Any = exc
+            wait = throttle_decide.wait_before_retry(failed.secondary, attempt, failed.retry_after, failed.hinted)
             if wait is None:
                 raise
+            if block is not None:
+                block(wait)
             sleep(wait)
             attempt += 1
 
@@ -203,10 +214,13 @@ class GitHubPort:
         pr: int,
         errors: type[Exception],
         pace: Optional[Pace] = None,
+        block: Optional[Callable[[float], None]] = None,
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`pace` はテストが差し替える。
+        `block`（`WriteGate.block`）へ二次レート制限の打ち直しの待ちを毎回知らせ、ほかのプロセスの書き込みも止める（#4016）。
         信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
+        self.block = block
         self.sleep, self.clock = pace if pace is not None else Pace(time.sleep, time.monotonic)
         self._me: Optional[str] = None
         self._pr_head: Optional[str] = None
@@ -215,7 +229,7 @@ class GitHubPort:
         self._last_post: Optional[float] = None
 
     def _write(self, call: Callable[[], T]) -> T:
-        return patient(call, self.errors, self.sleep)
+        return patient(call, self.errors, self.sleep, self.block)
 
     def _safe(self, body: str) -> str:
         (safe,), _ = self.publisher.guarded(body)
