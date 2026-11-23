@@ -162,3 +162,35 @@ def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint
     assert out["summary"] == "工程 作業場所の用意 が失敗した: プランのテンプレート worktree が無い"
     assert out["metrics"]["stage"] == "作業場所の用意"
     assert [p["name"] for p in sprint.plans] == ["requirements"]
+
+
+# 工程「クリーンアップ」のプラン（merged.json）が今打つ引数（#3908 の受け入れ条件 5）
+MERGED_RUN = [
+    "sh",
+    "-c",
+    'n=$(gh pr list --head "$0" --state merged --json number --jq \'.[0].number // empty\') || exit 2; [ -n "$n" ] || exit 2; '
+    'ndf worktree merged "$n"',
+    BRANCH,
+]
+
+
+def _plan_of(name: str, repo: Path, work: Path) -> dict:
+    stage = next(s for s in definition.load_definition("standard").stages if s.name == "クリーンアップ")
+    held = invoke.stage_run(stage, stage.steps[0], {"worktree": str(repo), "branch": BRANCH, "issues": [ISSUE]})
+    r = replace(held, name=name)
+    return json.loads(invoke.plan_path(r, work, repo).read_text(encoding="utf-8"))
+
+
+def test_cleanup_plan_runs_the_same_argv(repo, sprint, tmp_path):
+    plan = _plan_of("merged", repo, tmp_path)
+    assert [s["run"] for s in plan["steps"]] == [MERGED_RUN]
+
+
+@pytest.mark.parametrize("name", ["merged", "fix"])
+def test_plans_without_the_worker_keep_their_argv_whether_the_worker_has_a_default(repo, sprint, tmp_path, monkeypatch, name):
+    # merged.json と fix.json は差し込み worker を使わないので、worker の既定の有無で組んだ argv が変わらない
+    with_default = _plan_of(name, repo, tmp_path)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=None)})
+    assert _plan_of(name, repo, tmp_path) == with_default
+    assert "ndf-worker" not in json.dumps(with_default)
