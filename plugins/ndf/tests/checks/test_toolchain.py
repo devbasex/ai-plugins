@@ -190,6 +190,13 @@ def test_a_continued_install_is_reported_at_its_first_line(repo, rules):
     assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
 
 
+def test_a_url_split_by_an_unquoted_line_continuation_is_one_word(repo, rules):
+    # 空白を挟まない行の継続は bash には 1 語（URL は https://astral.sh/uv/install.sh になる）
+    run = "- run: |\n          curl -LsSf https://astral.sh\\\n          /uv/install.sh | sh"
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), run))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 13)]
+
+
 @pytest.mark.parametrize(
     "body",
     [

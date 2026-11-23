@@ -46,6 +46,8 @@ UV_INSTALLER_URL = re.compile(r"\bastral\.sh/uv\b")
 # bash のエスケープ: 引用符の外はどの字も、二重引用符の中は `$`・`` ` ``・`"`・`\`・改行だけを字のまま残す
 UNQUOTED_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 QUOTED_ESCAPE = re.compile(r'\\([$`"\\\n])')
+# 語と語の間が行の継続だけ（空白を挟まない）なら、bash には 1 語
+LINE_CONTINUATION = re.compile(rb"(?:\\\n)+")
 # コマンドの前に付いても中身を変えない語（環境変数の代入・sudo・env）
 COMMAND_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=.*|sudo|env)$")
 # ランチャーの行（`<名前>="<値>"`）
@@ -154,15 +156,24 @@ def _commands(body: str) -> Iterator[tuple[int, list[str]]]:
     `if`・`while` などの制御構造の中のコマンドも、`$(…)` の中のコマンドも拾う。ヒアドキュメントの本文・コメント・
     引用符の中の字はコマンドにならない。環境変数の代入はコマンドの語に入れない。
     """
-    stack = [_bash().parse(body.encode("utf-8")).root_node]
+    source = body.encode("utf-8")
+    stack = [_bash().parse(source).root_node]
     while stack:
         node = stack.pop()
         if node.type == "command":
-            words = [
-                _word(c.named_children[0] if c.type == "command_name" and c.named_children else c)
-                for c in node.named_children
-                if c.type not in ("variable_assignment", "file_redirect", "herestring_redirect", "comment")
-            ]
+            words: list[str] = []
+            end = None
+            for c in node.named_children:
+                if c.type in ("variable_assignment", "file_redirect", "herestring_redirect", "comment"):
+                    end = None
+                    continue
+                text = _word(c.named_children[0] if c.type == "command_name" and c.named_children else c)
+                # 構文木は引用符の外の行の継続（バックスラッシュと改行）で語を分けるが、bash は前後を 1 語につなぐ
+                if words and end is not None and LINE_CONTINUATION.fullmatch(source[end : c.start_byte]):
+                    words[-1] += text
+                else:
+                    words.append(text)
+                end = c.end_byte
             yield node.start_point[0], words
         stack.extend(reversed(node.children))
 
