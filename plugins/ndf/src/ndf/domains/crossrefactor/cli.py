@@ -110,6 +110,8 @@ def _state(a: argparse.Namespace) -> dict[str, Any]:
     path = store.path_of(_root(a))
     data = store.load(path)
     items = data["items"] if "items" in data else []
+    # 更新前に保存した項目は計画の担当が足した欄を持ちうる。結果のコントラクトの欄と名前が重なるものは出さない
+    contracted = result.item_fields()
     shown = [
         {
             "kind": "state",
@@ -117,7 +119,7 @@ def _state(a: argparse.Namespace) -> dict[str, Any]:
             "phases": data["phases"] if "phases" in data else {},
             "final": data["final"] if "final" in data else None,
         },
-        *({"kind": "item", **i} for i in items),
+        *({"kind": "item", **{k: v for k, v in i.items() if k not in contracted}} for i in items),
     ]
     summary = f"状態ファイル {path}: 項目 {len(items)} 件" + ("・完了" if "done" in data else "")
     return result.result(TOOL, "ok", summary, shown, items_decide.counts(items))

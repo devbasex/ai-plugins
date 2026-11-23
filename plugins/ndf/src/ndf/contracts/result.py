@@ -107,6 +107,11 @@ def severity_errors(items: object) -> list[str]:
     return [f"items/{i}/severity: {word!r} は重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
 
 
+def item_fields() -> frozenset[str]:
+    """結果のコントラクトが items の要素に形を決めた欄の名前。"""
+    return frozenset(contracts.load_json(SCHEMA)["$defs"]["item"]["properties"])
+
+
 def code_for(obj: Any) -> Optional[int]:
     """既定の終了コード。ok は 0、gate は承認ゲートの最初の値、stopped は cause.kind の終了コード。決められなければ None。"""
     if not isinstance(obj, dict):

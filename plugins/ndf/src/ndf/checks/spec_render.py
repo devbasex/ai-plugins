@@ -548,10 +548,11 @@ def table_rows(source: Path, columns: Mapping[str, str]) -> list[dict[str, str]]
     if start is None:
         raise CheckError(f"項目の表を読めない: {source}: 列 {'・'.join(columns.values())} を持つ表が無い")
     header, rows = _cells(lines[start]), []
-    for line in takewhile(lambda row: row.startswith("|"), lines[start + 2 :]):
+    for number, line in enumerate(takewhile(lambda row: row.startswith("|"), lines[start + 2 :]), start + 3):
         cells = _cells(line)
         if len(cells) != len(header):
-            raise CheckError(f"項目の表を読めない: {source}: セルの数が列の数と違う行: {line}")
+            # 行の中身は検査のログへ出さない
+            raise CheckError(f"項目の表を読めない: {source}: {number} 行目のセルの数が列の数と違う")
         by_name = dict(zip(header, cells, strict=True))
         rows.append({key: by_name[name] for key, name in columns.items()})
     return rows
@@ -561,20 +562,23 @@ def _number(row: Mapping[str, str], key: str, absent: str) -> int | None:
     """数の列の値（`absent` なら None）。"""
     found = _NUMBER.fullmatch(row[key])
     if found is None and row[key] != absent:
-        raise CheckError(f"項目の表を読めない: 項目 {row['id']} の {key} が数でも {absent} でもない: {row[key]!r}")
+        raise CheckError(f"項目の表を読めない: 項目 {row['id']} の {key} が数でも {absent} でもない")
     return int(found.group(1)) if found is not None else None
 
 
 def _routes(cell: str) -> list[str]:
-    """ルートの並び。リンクはリンク先（対応表の文書）にする。空のセルは空の並び。"""
+    """ルートの並び。リンクはリンク先（対応表の文書）にする。空のセルと仮の `—` は空の並び。"""
     linked = _LINK.fullmatch(cell)
     if linked is not None:
         return [linked.group(1)]
-    return [word for part in cell.split(ROUTE_SEPARATOR) if (word := part.strip())]
+    return [word for part in cell.split(ROUTE_SEPARATOR) if (word := part.strip()) not in ("", NONE)]
 
 
 def review_items(source: Path, columns: Mapping[str, str]) -> list[dict[str, Any]]:
-    """項目の表の文書 `source` から、項目ごとのルートの並びを組み立てる。ルートの無い項目は空のまま返す。"""
+    """項目の表の文書 `source` から、項目ごとのルートの並びを組み立てる。ルートの無い項目は空のまま返す。
+
+    `text_sha` の原文は表の要旨のセル（`text`）で、Issue の本文は読まない。
+    """
     return [
         {
             "id": row["id"],
