@@ -174,6 +174,18 @@ MERGED_RUN = [
 ]
 
 
+@pytest.fixture
+def planned(repo, monkeypatch):
+    """プランを組むだけに要る設定と差し込み。スプリントのブランチへの切り替え・コミット・HEAD の取得はしない（`sprint` と違う）。"""
+    strategy_fixture.write(repo, "web-develop", PROJECT)
+    held = route.params()
+    patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
+    monkeypatch.setattr(route, "params", lambda: patched)
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    return repo
+
+
 def _plan_of(name: str, repo: Path, work: Path) -> dict:
     stage = next(s for s in definition.load_definition("standard").stages if s.name == "クリーンアップ")
     held = invoke.stage_run(stage, stage.steps[0], {"worktree": str(repo), "branch": BRANCH, "issues": [ISSUE]})
@@ -181,16 +193,16 @@ def _plan_of(name: str, repo: Path, work: Path) -> dict:
     return json.loads(invoke.plan_path(r, work, repo).read_text(encoding="utf-8"))
 
 
-def test_cleanup_plan_runs_the_same_argv(repo, sprint, tmp_path):
-    plan = _plan_of("merged", repo, tmp_path)
+def test_cleanup_plan_runs_the_same_argv(planned, tmp_path):
+    plan = _plan_of("merged", planned, tmp_path)
     assert [s["run"] for s in plan["steps"]] == [MERGED_RUN]
 
 
 @pytest.mark.parametrize("name", ["merged", "fix"])
-def test_plans_without_the_worker_keep_their_argv_whether_the_worker_has_a_default(repo, sprint, tmp_path, monkeypatch, name):
+def test_plans_without_the_worker_keep_their_argv_whether_the_worker_has_a_default(planned, tmp_path, monkeypatch, name):
     # merged.json と fix.json は差し込み worker を使わないので、worker の既定の有無で組んだ argv が変わらない
-    with_default = _plan_of(name, repo, tmp_path)
+    with_default = _plan_of(name, planned, tmp_path)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=None)})
-    assert _plan_of(name, repo, tmp_path) == with_default
+    assert _plan_of(name, planned, tmp_path) == with_default
     assert "ndf-worker" not in json.dumps(with_default)
