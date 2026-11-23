@@ -20,6 +20,8 @@ RULES_PATH = Path(__file__).with_name("rules.json")
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
+# 見るファイルを集めるときに降りないディレクトリ（依存の環境・キャッシュ）
+SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 
 
 class CheckError(Exception):
@@ -169,7 +171,11 @@ def load_settings(repo_root: Path) -> dict[str, Any]:
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側のキーの参照（欠ければ `KeyError`）に任せず、ここでキーの有無を見る。"""
     data = read_json(path, "規則のデータを読めない")
-    missing = [k for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps") if k not in data]
+    missing = [
+        k
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "experimental")
+        if k not in data
+    ]
     if missing:
         raise CheckError(f"規則のデータにキーが無い: {path}: {missing}")
     bad = [code for code, rule in data["smells"].items() if rule["suppress"] not in ("none", "boundary", "boundary-or-limit")]

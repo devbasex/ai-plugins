@@ -19,14 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks import child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
-SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
@@ -101,7 +100,7 @@ def check(
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
-    found += spec_docs.check(scope, rules, write_spec, written)
+    found += spec_docs.check(scope, rules, write_spec, written) + experimental.check(scope, rules)
     for name, rule in SETTINGS_RULES.items():
         if not only or name in only:
             found += rule(scope, rules)

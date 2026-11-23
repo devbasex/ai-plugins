@@ -135,6 +135,9 @@
   "child_deps": {
     "max_per_slot": 2
   },
+  "experimental": {
+    "summary": "既定で動くもの（プラグインの根の下で配るファイル）が実験版の保存先を参照する"
+  },
   "spec": {
     "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
     "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]
