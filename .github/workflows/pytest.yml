@@ -61,7 +61,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
-          python-version: "3.13"
+          python-version: "3.12"
       - if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 -m pip install --quiet "$(grep -oE 'pathspec==[0-9.]+' pyproject.toml)"
       - id: decide
