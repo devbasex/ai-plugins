@@ -2,7 +2,7 @@
 
 会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
 `context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、引継ぎに要る呼び出し（メインディレクトリの引継ぎ文書の Read・Write・Edit、
-`params.pass_tools`、`params.pass_ndf` の `ndf` のコマンドだけの前景の Bash）を除いて止める。`pass_ndf` だけの連結は
+`params.pass_tools`、`params.pass_ndf` の `ndf` のコマンドだけのフォアグラウンド Bash）を除いて止める。`pass_ndf` だけの連結は
 `script-chain` の guard も `handoff_bash` で通す。拒否の文は、注入の上限で切られないよう先頭に `--cwd <メインディレクトリ>` での
 引継ぎ文書の確かめ方と終え方（中継の下は次のセグメントのブロック、外は ndf-next）を、後に背景の監視の止め方を書き、文脈の量を入れない。拒否は同じ理由で数えられ、続けば案内へ下がる
 （#3345 の決定 92）。
@@ -165,34 +165,42 @@ def _static_word(text: str) -> Optional[str]:
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
-        c = text[i]
-        if c == "\\":
-            out.append(text[i + 1 : i + 2])
-            i += 2
-        elif c == "'":
-            end = text.find("'", i + 1)
-            if end < 0:
-                return None
-            out.append(text[i + 1 : end])
-            i = end + 1
-        elif c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                if text[i] in "$`":
-                    return None
-                if text[i] == "\\" and text[i + 1 : i + 2] in _DQUOTE_ESCAPES:
-                    i += 1
-                out.append(text[i])
-                i += 1
-            if i >= n:
-                return None
-            i += 1
-        elif c in "$`" or c in _UNQUOTED_SPECIAL:
+        piece, i = _static_piece(text, i)
+        if piece is None:
             return None
-        else:
-            out.append(c)
-            i += 1
+        out.append(piece)
     return "".join(out)
+
+
+def _static_piece(text: str, i: int) -> tuple[Optional[str], int]:
+    """`i` から始まる 1 つの区切り（エスケープ・引用・1 字）の値と次の位置。値が静的に決まらなければ値は None。"""
+    c = text[i]
+    if c == "\\":
+        return text[i + 1 : i + 2], i + 2
+    if c == "'":
+        end = text.find("'", i + 1)
+        return (None, i) if end < 0 else (text[i + 1 : end], end + 1)
+    if c == '"':
+        return _double_quoted(text, i)
+    if c in "$`" or c in _UNQUOTED_SPECIAL:
+        return None, i
+    return c, i + 1
+
+
+def _double_quoted(text: str, start: int) -> tuple[Optional[str], int]:
+    """`start` の二重引用の値と閉じた後の位置。展開を含むか閉じなければ値は None。"""
+    out: list[str] = []
+    i, n = start + 1, len(text)
+    while i < n and text[i] != '"':
+        if text[i] in "$`":
+            return None, i
+        if text[i] == "\\" and text[i + 1 : i + 2] in _DQUOTE_ESCAPES:
+            i += 1
+        out.append(text[i])
+        i += 1
+    if i >= n:
+        return None, i
+    return "".join(out), i + 1
 
 
 def _continuations_between_words(command: str) -> bool:
@@ -208,10 +216,10 @@ def _continuations_between_words(command: str) -> bool:
     while i < n:
         c = command[i]
         if c == "\\":
-            if command[i + 1 : i + 2] == "\n":
-                if not blank:
-                    return False
-            else:
+            continuation = command[i + 1 : i + 2] == "\n"
+            if continuation and not blank:
+                return False
+            if not continuation:
                 blank = start = False
             i += 2
             continue
@@ -308,7 +316,7 @@ def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> st
     """運用上限の拒否の文（背景の監視の扱い・メインディレクトリ `main` の引継ぎ文書と確かめ方・終え方）。文脈の量は入れない。
 
     注入の上限で切られても検査のコマンドと終え方が残るよう、それらを先頭に置き、メインディレクトリは `--cwd` の 1 回だけ書く
-    （文書はその根から解く相対パス。CLI と `_ndf_args_pass` は相対パスを `--cwd` の作業ツリーの根から解く）。
+    （文書はその根から解く相対パス。CLI と `_ndf_args_pass` は相対パスを `--cwd` の worktree の根から解く）。
     `--cwd` の値と文書は、空白を含んでも Bash の 1 引数になるよう引用する。
     """
     end = "応答の最後に次のセグメントのブロックを書いて終える" if under_relay else "ndf-next のブロックを出して新しいセッションで続ける"
