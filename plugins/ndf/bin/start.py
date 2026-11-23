@@ -32,7 +32,7 @@ PACKAGE = "ndf"
 STAMP = Path(sys.prefix) / ".deps-checked"
 # 入れる手段によって作られないことがあるファイル（RECORD に載っても欠けを数えない）
 OPTIONAL_SUFFIXES = (".pyc",)
-# エントリポイントと uv run が入れる変数と、エントリポイントが呼び出し元の値を写す変数（無かった値は写しを持たない）
+# エントリポイントと uv run が入れる・エントリポイントが消す変数と、エントリポイントが呼び出し元の値を写す変数（無かった値は写しを持たない）
 CALLER_ENV = {
     "CLAUDE_PLUGIN_ROOT": "NDF_CALLER_PLUGIN_ROOT",
     "UV_PROJECT_ENVIRONMENT": "NDF_CALLER_UV_PROJECT_ENVIRONMENT",
@@ -40,6 +40,8 @@ CALLER_ENV = {
     "UV_RUN_RECURSION_DEPTH": "NDF_CALLER_UV_RUN_RECURSION_DEPTH",
     "PATH": "NDF_CALLER_PATH",
     "PYTHONPATH": "NDF_CALLER_PYTHONPATH",
+    # エントリポイントが消す変数（uv run --no-sync を同期した環境で動かすため。#3687）
+    "UV_ISOLATED": "NDF_CALLER_UV_ISOLATED",
 }
 # 写しの空の値を「無かった」と読む変数（エントリポイントが無いときも空で写す）
 EMPTY_IS_UNSET = frozenset({"CLAUDE_PLUGIN_ROOT"})

@@ -17,7 +17,7 @@
 # 終了コードの表（contracts/facts/exit-codes.json）の deps_missing の終了コードで止まる。
 #
 # 呼び出し元の CLAUDE_PLUGIN_ROOT は、子へ自分の根を渡す前に NDF_CALLER_PLUGIN_ROOT へ写す（無ければ空）。
-# ほかに NDF と uv run が入れる UV_PROJECT_ENVIRONMENT・VIRTUAL_ENV・UV_RUN_RECURSION_DEPTH・PATH・PYTHONPATH は、
+# ほかに NDF と uv run が入れる UV_PROJECT_ENVIRONMENT・VIRTUAL_ENV・UV_RUN_RECURSION_DEPTH・PATH・PYTHONPATH と、NDF が消す UV_ISOLATED は、
 # 呼び出し元の値を NDF_CALLER_<名前> へ写す（あれば空でも写し、無ければ写しを消す。外側の ndf の写しを残さない）。
 # start.py は `python -m ndf` の前に、写しから呼び出し元の値へ戻す。NDF の子孫が利用先で打つ uv run が NDF の venv を
 # 書き換えない（#4029）。子が `ndf` を打てば、このファイルが毎回 NDF の venv を指し直す。
@@ -89,12 +89,15 @@ if got != want:
 fi
 
 export NDF_CALLER_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-for held in UV_PROJECT_ENVIRONMENT VIRTUAL_ENV UV_RUN_RECURSION_DEPTH PATH PYTHONPATH; do
+for held in UV_PROJECT_ENVIRONMENT VIRTUAL_ENV UV_RUN_RECURSION_DEPTH PATH PYTHONPATH UV_ISOLATED; do
   if [ -n "${!held+set}" ]; then export "NDF_CALLER_$held=${!held}"; else unset "NDF_CALLER_$held"; fi
 done
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
+# UV_ISOLATED は uv sync が受けず uv run --no-sync だけが受ける（真なら同期した環境でなく空の一時の環境で動く）。
+# 同期と実行を同じ環境に揃えるため消す。呼び出し元の値は上で写してあり、start.py が子へ戻す
+unset UV_ISOLATED
 # uv が真と読む値か（UV_NO_SYNC を uv と同じに読む）。外部コマンドを起動せずシェルの組み込みだけで比べる（bash 3.2 に ${var,,} は無い）
 truthy() {
   case "${1:-}" in

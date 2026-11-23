@@ -70,8 +70,8 @@ def test_a_whole_environment_is_checked_once_until_the_lock_changes(start, monke
 
 # --- 呼び出し元の環境へ戻す（#4029） ---
 
-# bin/ndf と uv run が NDF の子孫へ足す変数（呼び出し元の値へ戻す）
-ADDED = ("CLAUDE_PLUGIN_ROOT", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH")
+# bin/ndf と uv run が NDF の子孫へ足す・bin/ndf が消す変数（呼び出し元の値へ戻す）
+ADDED = ("CLAUDE_PLUGIN_ROOT", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH", "UV_ISOLATED")
 
 
 def test_the_callers_values_come_back_and_the_held_copies_go(start):
@@ -88,6 +88,7 @@ def test_the_callers_values_come_back_and_the_held_copies_go(start):
         "NDF_CALLER_PATH": "/usr/bin",
         "PYTHONPATH": "/ndf/src",
         "NDF_CALLER_PYTHONPATH": "/caller-pp",
+        "NDF_CALLER_UV_ISOLATED": "1",
         "HOME": "/home/x",
     }
 
@@ -98,6 +99,7 @@ def test_the_callers_values_come_back_and_the_held_copies_go(start):
         "UV_RUN_RECURSION_DEPTH": "",
         "PATH": "/usr/bin",
         "PYTHONPATH": "/caller-pp",
+        "UV_ISOLATED": "1",
         "HOME": "/home/x",
     }
 

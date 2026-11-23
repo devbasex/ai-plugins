@@ -445,6 +445,7 @@ plugins/ndf/
 | 箇所 | 種類 | 変える中身 |
 | --- | --- | --- |
 | `bin/ndf` の 98 行の直前 | 変更 | `UV_NO_SYNC` が真でなければ `"$uv_bin" sync --frozen --no-dev --inexact --quiet --project "$root"` を打ち（`--inexact`: 今の `uv run` と同じに、lock に無い追加のパッケージを消さない。`uv sync` の既定は消す）、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <uv の error: の行。無ければ最終行>"` を呼ぶ |
+| 同じ箇所（同期の前） | 変更 | 呼び出し元の `UV_ISOLATED` を、既にある写しの仕組み（#4029）で `NDF_CALLER_UV_ISOLATED` へ写してから消す。`uv sync` はこの変数を受けず、`uv run --no-sync` だけが受けて同期していない空の一時の環境で動くため、消して同期先と実行先を `UV_PROJECT_ENVIRONMENT` に揃える。`bin/start.py` の `CALLER_ENV` に足し、子へ呼び出し元の値を戻す。契約の `contracts/domains/env.json` に `NDF_CALLER_UV_ISOLATED` を足す |
 | 同じ箇所（`UV_NO_SYNC` が真のとき） | 変更 | 同期を飛ばして次の `exec` へ進む（今の `uv run` と同じに環境を書き換えない。`uv sync` はこの変数を受けないので `truthy` で分ける） |
 | `bin/ndf` の 98 行 | 変更 | `exec "$uv_bin" run --frozen --no-dev ...` の `--frozen` を `--no-sync` へ替える。直前の同期で用意した同じ環境（`UV_PROJECT_ENVIRONMENT`）をそのまま使い、`exec` の後に uv が環境を同期し直さない |
 
