@@ -120,7 +120,7 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
     """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
     列は旧い `context_decisions.boundary_row` と同じで、2 つの値（`decide_from`・`limit`・`sources`）を `applied` から書く。
-    消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
+    理由の語に無い `reason` は `ValueError`。消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
     row: dict[str, Any] = {
         "schema": SCHEMA,
         "at": jsonl.now(),
@@ -145,7 +145,7 @@ def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, eve
         "passed_once": False,
     }
     row.update(applied.as_dict())
-    row.update({"event": event} if event else {"stage": "cut", "verdict": ct.RESTART, "reason": reason})
+    row.update({"event": event} if event else {"stage": "cut", "verdict": ct.Verdict.RESTART, "reason": ct.Reason(reason)})
     return row
 
 
@@ -360,7 +360,9 @@ def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) 
 
 def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
-    launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.CONTINUE and (t := parse_ts(r.get("at"))))
+    launches = sorted(
+        (t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.Verdict.CONTINUE and (t := parse_ts(r.get("at")))
+    )
     out = []
     for (start, stage), (nxt, _) in pairwise(launches):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]

@@ -549,6 +549,11 @@ def test_record_row_writes_the_two_values_without_the_policy_columns(event, reas
     assert not set(POLICY_COLUMNS) & set(row)
 
 
+def test_record_row_refuses_a_reason_outside_the_words():
+    with pytest.raises(ValueError):
+        context_records.record_row("s1", "#1", APPLIED, None, "手働")
+
+
 def _new(row: dict) -> dict:
     """旧い行の方針の列を外し、新しい行の 2 つの値を足した行。"""
     kept = {k: v for k, v in row.items() if k not in POLICY_COLUMNS}

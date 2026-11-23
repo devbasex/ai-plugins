@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
@@ -102,16 +102,27 @@ def load_as(rel: str, error_cls: type[ContractError]) -> Any:
 
 
 @cached_reader
-def _schema_file(path: str) -> Any:
-    """スキーマのファイルを 1 プロセスに 1 回読む（同じファイルの一部と全体を使う読み手が共有する）。"""
+def load_schema(path: str) -> Mapping[str, Any]:
+    """スキーマのファイルを 1 プロセスに 1 回読む（検証器と、値をスキーマから組み立てる定数が共有する）。返す値は書き換えない。"""
     return load_json(path)
+
+
+def schema_enum(path: str, pointer: str) -> tuple[str, ...]:
+    """スキーマの JSON Pointer の先の `enum` を並びのまま返す。先か `enum` が無ければ `ContractError`。"""
+    node: Any = load_schema(path)
+    try:
+        for key in pointer.split("/")[1:]:
+            node = node[key]
+        return tuple(node["enum"])
+    except (KeyError, TypeError):
+        raise ContractError(f"スキーマ {path} の {pointer} に enum が無い") from None
 
 
 @cached_reader
 def _shipped_validator(rel: str) -> Draft202012Validator:
     """`rel` の検証器（スキーマ自体は確かめない）。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
     path, _, pointer = rel.partition("#")
-    schema = _schema_file(path)
+    schema = load_schema(path)
     if pointer:
         if "$defs" not in schema:
             raise ContractError(f"スキーマ {path} に $defs が無い（{rel} を引けない）")

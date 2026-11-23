@@ -109,10 +109,10 @@ def slack_call(
 
 # ---- 送信待ちの 1 件 ----
 
-# 知らせる事象（送信待ちの `kind`）と、本文の先頭に付ける見出し。事象の一覧の SSOT はスキーマ（notice.schema.json）の
-# kind の enum で、キーの集合はそれと一致させる（テストが確かめる）
-KIND_LABELS = {"question": "回答待ち", "approval": "承認待ち", "done": "完了"}
 NOTICE_SCHEMA = contracts.schema_path("notice")
+# 送信待ちの `kind` と、本文の先頭に付ける見出し（スキーマの kind の行の const と title）。title の無い行は値を見出しにする
+_KIND_ROWS = contracts.load_schema(NOTICE_SCHEMA)["properties"]["kind"]["oneOf"]
+KIND_LABELS = {row["const"]: row["title"] if "title" in row else row["const"] for row in _KIND_ROWS}
 
 
 class NoticeError(Exception):
