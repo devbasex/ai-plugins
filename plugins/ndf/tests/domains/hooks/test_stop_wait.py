@@ -385,3 +385,37 @@ def test_stop_wait_does_not_ask_codex_to_use_a_missing_tool(tmp_path, monkeypatc
     assert claude.kind == codex.kind == "pushback"
     assert stop_wait.ASK["claude"] in claude.reason and stop_wait.ASK["claude"] not in codex.reason
     assert stop_wait.ASK_WITHOUT_TOOL in codex.reason
+
+
+# レビュー r2-1: 質問の Tool が無いランタイムで、本文の最後の行に区分の行を置いた問いは正規の問いとして通し、待ちの知らせへ渡す
+@pytest.mark.parametrize("line", ["区分: ndf-gate:1", "- 区分: `ndf-ask:redline:C4`"], ids=["gate", "bullet-code"])
+def test_stop_wait_accepts_a_category_line_on_codex(tmp_path, monkeypatch, line):
+    judge = Judge(monkeypatch, kind="wait")
+    text = f"{MISSED[0]}\n\n{line}"
+    got = _check(tmp_path, text, runtime="codex")
+    assert got.kind == "pass" and got.notes["judge"] == "skip:category"
+    assert got.notes[stop_wait.ASKED_NOTE] == line.split(": ", 1)[1].strip("`")
+    assert judge.asked == []
+    # 質問の Tool があるランタイムでは区分の行を受けず、AskUserQuestion で出し直させる
+    assert _check(tmp_path, text).kind == "pushback"
+
+
+# レビュー r2-2: 人のいない実行（Factory）ではセグメントの報告で返す案内にし、報告を置いた応答は unattended の guard に任せる
+def test_stop_wait_guides_the_factory_run_to_the_segment_report(tmp_path, monkeypatch):
+    from ndf.domains.hooks.guards import unattended
+
+    Judge(monkeypatch, kind="report")
+    unattended.write_mark(unattended.mark_path(tmp_path, "s-1"), "s-1")
+    env = {"NDF_FACTORY_RUN": "1"}
+
+    def factory(reply, runtime):
+        ctx = context.HookContext(runtime, "Stop", {"last_assistant_message": reply, "session_id": "s-1"}, env=env)
+        return stop_wait.check(ctx, dispatch.GuardServices(tmp_path, FakeCounter(), DEADLINE))
+
+    for runtime in ("claude", "codex"):
+        got = factory(f"{MISSED[0]}\n\n区分: ndf-gate:1", runtime)
+        assert got.kind == "pushback" and stop_wait.ASK_FACTORY in got.reason
+        assert stop_wait.ASK_WITHOUT_TOOL not in got.reason and stop_wait.ASK["claude"] not in got.reason
+        reported = f"{MISSED[0]}\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 区分: ndf-gate:1\n- 質問: 進めてよいか"
+        got = factory(reported, runtime)
+        assert got.kind == "pass" and got.notes["judge"] == "skip:report"

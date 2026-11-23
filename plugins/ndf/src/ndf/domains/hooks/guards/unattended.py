@@ -159,6 +159,14 @@ def _on_prompt(ctx, svc) -> Optional[Verdict]:
     return advise(start_guide(form))
 
 
+def is_conductor(ctx, svc) -> bool:
+    """人のいない実行の conductor のセッションか（`NDF_FACTORY_RUN` があり、マーカーがある）。stop-wait も同じ判定を使う。"""
+    if not ctx.env.get("NDF_FACTORY_RUN"):
+        return False
+    path = mark_path(svc.state_dir, ctx.session_id)
+    return path is not None and path.is_file()
+
+
 def _on_stop(ctx, svc) -> Optional[Verdict]:
     path = mark_path(svc.state_dir, ctx.session_id)
     if path is None or not path.is_file() or _is_busy(ctx):

@@ -130,6 +130,7 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
     from ndf.domains.hooks import budget, dispatch
     from ndf.domains.hooks.context import HookContext
     from ndf.domains.hooks.counter import Counter
+    from ndf.domains.hooks.guards.stop_wait import ASKED_NOTE
 
     record, state_dir = run.record, run.state_dir
     found = budget.budget_for(runtime, event)
@@ -157,7 +158,9 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
         record["pushbacks"] = counter.data["pushbacks"] if counter.usable else None
     _, out = dispatch.render(outcome, runtime, event, found, tables.hooks_dir(state_dir) / "notes")
     if outcome.limited:
-        _notify_wait(state_dir, ctx, outcome.notes.get("limited_reason"))
+        _notify_wait(state_dir, ctx, f"変更要求の上限で止めずに通した: {outcome.notes.get('limited_reason') or ''}")  # noqa: NDF501 ファイル: 理由の無い変更要求は空
+    elif outcome.verdict.kind == "pass" and outcome.notes.get(ASKED_NOTE):
+        _notify_wait(state_dir, ctx, f"本文で区分 {outcome.notes[ASKED_NOTE]} の問いを出して終えた")
     _record_outcome(record, outcome)
     return out
 
@@ -231,13 +234,12 @@ def _follow_relay() -> None:
         return
 
 
-def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
-    """変更要求の上限で通した Stop の待ちの知らせを送信待ちへ書く（決定 92）。"""
+def _notify_wait(state_dir: Path, ctx: Any, text: str) -> None:
+    """待ちの知らせを送信待ちへ書く。変更要求の上限で通した Stop（決定 92）と、質問の Tool が無いランタイムで区分の行を
+    置いて問いを出した Stop（guard `stop-wait` の notes の `ASKED_NOTE`）で書く。"""
     from ndf.domains.hooks import outbox
 
     if not outbox.notify_configured(os.environ):
         return
-    shown = reason or ""  # noqa: NDF501 ファイル: 理由の無い変更要求は空
-    text = f"変更要求の上限で止めずに通した: {shown}"
     outbox.enqueue(state_dir, "wait", {"text": text, "cwd": ctx.cwd, "session_id": ctx.session_id}, os.environ)
     outbox.kick(state_dir, os.environ)

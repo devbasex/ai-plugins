@@ -10,15 +10,22 @@
 モデルの判定に従い、モデルを使えない Stop（Codex・休み・時間切れ・回答なしなど）ではルールの待ちとして変更を要求する。
 モデルへ渡す本文が字数の上限で切られても、判定を委ねた見出しは先頭に残す。変更要求の上限の後はエントリポイントが
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
+
+質問の Tool が無いランタイム（Codex）の対話実行で本文の最後の行に区分の行を置いた応答は正規の問いとして通し、その Stop で
+エントリポイントが待ちの知らせを書く。人のいない実行（Factory）ではセグメントの報告で問いを返す案内にし、報告を置いた
+応答は guard `unattended` に任せて通す。
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Optional
 
 from ndf.domains.hooks import budget, reply_judge
+from ndf.domains.hooks import report as ur
+from ndf.domains.hooks.guards import unattended
 from ndf.domains.hooks.verdict import Verdict, passing
 
 # 変更要求の文（#4000 の受け入れ条件 11）。10 系の `relay_lib/mark.py` の `WAIT_REASON` を出発点にした。区分の一覧は写さず
@@ -32,16 +39,27 @@ REASON = (
     "問いを出した後も、答えを待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
     "問いの形の文を書き換えて終える。"
 )
-# ランタイムごとの問い方。質問の Tool が無いランタイム（Codex。`contracts/hooks/runtimes.json` の skipped）は、問いを本文に
-# 残したまま終えれば変更要求の上限の後に通して待ちの知らせを出すので、承認待ちのまま終える案内にする。表に無いランタイムは
-# 質問の Tool が無いものとして扱う
+# ランタイムごとの問い方。質問の Tool が無いランタイム（Codex。`contracts/hooks/runtimes.json` の skipped）は、本文の最後の
+# 行に区分の行（`区分: ndf-gate:1`）を置いて終えれば、その Stop を通して待ちの知らせを書く（`CATEGORY_RE`）。表に無い
+# ランタイムは質問の Tool が無いものとして扱う
 ASK = {
     "claude": "当たるなら、AskUserQuestion の metadata.source に区分を付けて出し直す（材料は本文に書いてよい）。",
 }
 ASK_WITHOUT_TOOL = (
-    "このランタイムには AskUserQuestion が無い。当たるなら、問いと区分（ndf-gate:1 など）を本文の最後に残したまま終え、"
-    "承認を得るまで承認の要る操作（マージ・本番系へ届く操作）を行わない。変更要求の上限の後は止めずに通し、待ちの知らせを出す。"
+    "このランタイムには AskUserQuestion が無い。当たるなら、問いの後の本文の最後の行に「区分: ndf-gate:1」の形で区分を書いて"
+    "終える（その Stop は止めずに通し、待ちの知らせを出す）。承認を得るまで承認の要る操作（マージ・本番系へ届く操作）を行わない。"
 )
+# 人のいない実行（Factory。`unattended.is_conductor`）の問い方。人は本文を読まず、ランナーはセグメントの報告を読む
+ASK_FACTORY = (
+    "これは人のいない実行で、本文の問いは人へ届かない。当たるなら、最後の応答の末尾のセグメントの報告に「結果: 判断が要る」と"
+    "区分・質問・材料を書いて終える（development-workflow の references/asking.md の「人のいない実行」）。"
+)
+# Codex の対話実行で正規の問いと読む区分の行（本文の最後の行。前に `- ` を許し、区分はバッククォートで囲んでもよい）
+CATEGORY_RE = re.compile(r"^区分[ \t]*[:：][ \t]*`?(ndf-gate:\d+|ndf-ask:[A-Za-z0-9][\w:.-]*)`?[ \t]*$")
+# 区分の行で問いを受けた Stop の notes のキー（値は区分）。エントリポイントがこれを見て待ちの知らせを書く
+ASKED_NOTE = "prose_ask"
+# 問い方を選ぶ鍵のうち、人のいない実行を表す値（ランタイムの名前と重ならない）
+FACTORY = "factory"
 # 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
 LOGGED = "本文で人の回答を待って終えた（stop-wait）"
 # 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
@@ -58,9 +76,9 @@ wall = time.time
 def reason(matched: tuple[str, ...] = (), runtime: str = "claude") -> str:
     """変更要求の文。`matched`（ルールが当たった文）があれば先頭の 1 文を「当たった文」として添え、無ければ括弧ごと省く。
 
-    問い方は `runtime` で選ぶ（質問の Tool が無いランタイムは承認待ちのまま終える案内）。
+    問い方は `runtime` で選ぶ（`FACTORY` は人のいない実行のセグメントの報告、質問の Tool が無いランタイムは区分の行の案内）。
     """
-    ask = ASK.get(runtime, ASK_WITHOUT_TOOL)
+    ask = ASK_FACTORY if runtime == FACTORY else ASK.get(runtime, ASK_WITHOUT_TOOL)
     if not matched:
         return REASON.format(matched="", ask=ask)
     first = " ".join(matched[0].split())
@@ -129,19 +147,40 @@ def _ask(svc, text: str, seconds: float) -> tuple[str, bool, Optional[reply_judg
     return f"fallback:{judged.failure}", False, judged
 
 
+def _mode(ctx, svc) -> str:
+    """問い方を選ぶ鍵。人のいない実行の conductor なら `FACTORY`、ほかはランタイムの名前。"""
+    return FACTORY if unattended.is_conductor(ctx, svc) else ctx.runtime
+
+
+def _asked_category(ctx) -> Optional[str]:
+    """本文の最後の行が区分の行（`CATEGORY_RE`）なら区分。質問の Tool があるランタイムでは読まない（None）。"""
+    if ctx.runtime in ASK:
+        return None
+    m = CATEGORY_RE.match(ctx.reply_prose_lines[-1].text)
+    return m.group(1) if m else None
+
+
 def check(ctx, svc) -> Verdict:
     if not ctx.has_reply_prose:
         return _result(ctx.runtime, "none", "skip:empty", False)
     if ctx.asked_this_turn:
         return _result(ctx.runtime, None, "skip:asked", False)
+    mode = _mode(ctx, svc)
+    # 人のいない実行でセグメントの報告を置いた応答は、形を unattended の guard が確かめる（本文の問いを待ちと読まない）
+    if mode == FACTORY and ur.result_value(ctx.last_reply):
+        return _result(mode, None, "skip:report", False)
+    # 質問の Tool が無いランタイムの対話実行で区分の行を置いた応答は正規の問い。通して待ちの知らせを書く（エントリポイント）
+    category = _asked_category(ctx) if mode != FACTORY else None
+    if category is not None:
+        return passing(**{"judge": "skip:category", "judge_ms": 0, "judge_calls": 0, ASKED_NOTE: category})
     kind = ctx.last_reply_kind
     if kind == "elsewhere_wait":
-        return _result(ctx.runtime, kind, "skip:elsewhere", False)
+        return _result(mode, kind, "skip:elsewhere", False)
     if kind == "closing_report":
-        return _result(ctx.runtime, kind, "skip:closing", False)
+        return _result(mode, kind, "skip:closing", False)
     reading = ctx.reply_reading
     if kind == "prose_wait":
-        return _result(ctx.runtime, kind, "rule", True, matched=reading.matched)
+        return _result(mode, kind, "rule", True, matched=reading.matched)
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
     # ルールの待ちとして止めるときだけ当たった見出しを添える（モデルの wait で止めたときは添えない）
@@ -151,9 +190,9 @@ def check(ctx, svc) -> Verdict:
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:
         waited = skipped in _AFTER_LIMIT and not svc.counter.pushback_left() and svc.counter.model_waited()
-        return _result(ctx.runtime, kind, skipped, waited or rule_wait, matched=heading)
+        return _result(mode, kind, skipped, waited or rule_wait, matched=heading)
     seconds = _seconds(ctx, svc)
     if seconds < MIN_SECONDS:
-        return _result(ctx.runtime, kind, "skip:time", rule_wait, matched=heading)
+        return _result(mode, kind, "skip:time", rule_wait, matched=heading)
     judge, wait, judged = _ask(svc, text, seconds)
-    return _result(ctx.runtime, kind, judge, wait or (rule_wait and judge != "model"), judged, matched=heading if judge != "model" else ())
+    return _result(mode, kind, judge, wait or (rule_wait and judge != "model"), judged, matched=heading if judge != "model" else ())

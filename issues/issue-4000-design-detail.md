@@ -168,6 +168,8 @@ plugins/ndf/
 | --- | --- |
 | `ctx.has_reply_prose`（`ctx.reply_prose_lines` が空でないか）が偽（本文が空。文の判定はせず、`ctx.last_reply_kind` はまだ評価しない） | 通す（`reply=none`・`judge=skip:empty`） |
 | `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない（`ctx.last_reply_kind` を評価しない）。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
+| 人のいない実行の conductor（`unattended.is_conductor`: `NDF_FACTORY_RUN` があり、セッションのマーカーがある）で、最後の応答にセグメントの報告の結果の行（`report.result_value` が空でない）がある | 通す（`judge=skip:report`）。報告の形は guard `unattended` が確かめる。この実行形態の変更要求の文は、問い方をセグメントの報告（`結果: 判断が要る` と区分・質問・材料）で返す案内（`ASK_FACTORY`）にする（レビュー r2-2） |
+| 人のいない実行でなく、質問の Tool が無いランタイム（`ASK` に無い。Codex）で、本文の最後の行が区分の行（`区分: ndf-gate:1` など。`CATEGORY_RE`） | 通す（`judge=skip:category`。notes の `prose_ask` に区分）。エントリポイントは判定が通しのときこの notes を見て、その Stop で待ちの知らせを書く（レビュー r2-1） |
 | ここで初めて `ctx.last_reply_kind`（`ctx.reply_reading` の `kind`。`reply_wait.read_prose` の本文の判定。1 行目で持った `ctx.reply_prose_lines` を使い、本文の行を抜き出し直さない）を評価し、ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告だけ） | 通す（`judge=skip:elsewhere`） |
 | ルールの判定が `closing_report`（待ちの文が無く、定型の結び（「引き続きよろしくお願いします。」）を末尾から外した残りの文がどれも待ちの形でない丁寧の過去の言い切り（「ました」「でした」）。結びの前に質問・承認の依頼・言い切らない文があれば `prose_wait` か `report`） | 通す（`judge=skip:closing`）。軽いモデルを呼ばない |
 | ルールの判定が `prose_wait` | 変更要求（今の文面。`judge=rule`）。軽いモデルを呼ばない。上限に達していても返す（dispatch が上限で通し、待ち通知を送る） |
