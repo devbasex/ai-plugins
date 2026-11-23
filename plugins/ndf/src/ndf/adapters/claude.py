@@ -743,8 +743,13 @@ def _run_claude(
     try:
         proc = _popen(argv, cwd, env, new_group=new_group)
     except OSError as exc:
-        return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
+        return _launch_failed(exc)
     return _talk(proc, prompt, timeout)
+
+
+def _launch_failed(exc: OSError) -> ClaudeReply:
+    """子を起動できなかったときの回答（`Failure.LAUNCH`）。"""
+    return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
 
 
 def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
