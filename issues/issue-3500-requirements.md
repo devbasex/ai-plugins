@@ -53,9 +53,9 @@ $ git show --stat --format= HEAD
 
 ## 期待する結果
 
-担当の起動のたびに、前の起動の作業ファイルが作業ディレクトリと git の追跡から消え、作業ファイルが追跡されたまま次のコミットへ持ち越されない。`.cross_refactoring/` は作業場所の git の除外に入っていて、通常の `git add` では入らない。
+担当の起動のたびに、前の起動の作業ファイルが作業ディレクトリと git の追跡から消え、作業ファイルが追跡されたまま次のコミットへ持ち越されない。`.cross_refactoring/` と、NDF がリポジトリの中に置く追跡しない一時のフォルダ（`.ndf/tmp` など）は、worktree の初期化（`ndf worktree init`）が対象のリポジトリの `.gitignore` に登録し、通常の `git add` では入らない。
 
-2026-11-23 の設計承認ゲートで、利用者がこの最小の形を選んだ（「#3500 は難しく考えすぎ」）。担当が `git add -f` で入れる経路は、この課題では塞がない（「対象範囲」）。
+2026-11-23 の設計承認ゲートで、利用者がこの形を選んだ（「#3500 は難しく考えすぎ」。登録は `.gitignore` で、作業場所の `info/exclude` だけの形は採らない。登録は `/ndf:development-workflow` の初期化へ寄せる）。担当が `git add -f` で入れる経路は、この課題では塞がない（「対象範囲」）。
 
 ## 再現手順
 
@@ -76,17 +76,19 @@ $ git show --stat --format= HEAD
 
 ## 目的
 
-- 作業ファイルが追跡され続けて cross-refactoring のコミットへ持ち越されることを、担当の起動の前の片付けだけで止める
+- 作業ファイルが追跡され続けて cross-refactoring のコミットへ持ち越されることを、担当の起動の前の片付けで止める
+- NDF がリポジトリの中に置く追跡しないフォルダの `.gitignore` への登録を、worktree の初期化の 1 か所にまとめる
 
 ## 対象範囲
 
 含む:
 - コードを書く 5 工程（テストの追加・実装・修正・最終ゲートの直し・フレーキーなテストの直し）の担当の起動の前に、作業ディレクトリの `.cross_refactoring/` を消し、追跡されていれば索引からも外すこと
-- `.cross_refactoring/` を作業場所の git の除外へ入れること（今の `workspace._exclude_results` のまま）
+- worktree の初期化（`ndf worktree init`）が、`.cross_refactoring/`・`.worktrees/` と、`.ndf` の下の追跡しない置き場（`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state`）と個人設定（`.ndf/worktree.local.json`）を `.gitignore` に登録すること。`ndf worktree check` が登録の欠けを示すこと
+- cross-refactoring が、`.cross_refactoring/` が無視の対象でない作業場所で担当を起動しないこと
 
 含まない:
 - 担当が `git add -f` で入れた作業ファイルを、その起動のコミットから除くこと（コミットの作り直しはしない。最後の起動で入れたものは、次の起動が無ければ残る）
-- 対象のリポジトリの `.gitignore` を書き換えること
+- 書き足した `.gitignore` のコミットの経路（今の worktree の手順のまま）
 - 手順書の `Item-Id` の検査がコードに無いこと（#4195 に起票した）
 - 作業ファイル以外の、無視の対象のファイル（生成物・`.env` など）
 - cross-review の作業ファイル。cross-review は状態の保存先をレビューする worktree の外に置き、中なら `precondition` で止める（`plugins/ndf/skills/cross-review/SKILL.md` の `--state-dir`）ため、同じ経路が無い
@@ -99,18 +101,19 @@ $ git show --stat --format= HEAD
 
 - [ ] 1. コードを書く 5 工程のどれでも、担当を起動する直前に、作業ディレクトリに `.cross_refactoring/` が無い
 - [ ] 2. 起動の前に `.cross_refactoring/` の下のファイルが追跡されていれば、担当を起動する直前に索引から外れている（`git ls-files .cross_refactoring` が空）。担当が次のコミットを作ると、そのコミットで追跡から外れる
-- [ ] 3. `.cross_refactoring/` は作業場所の git の除外（共通の git ディレクトリの `info/exclude`）に入っていて、担当が `git add -A` で作った作業ファイルはコミットに入らない（今の振る舞いが退行しない）
-- [ ] 4. 対象のリポジトリの `.gitignore` は変わらない
-- [ ] 5. 片付けは作業ディレクトリの `.cross_refactoring/` だけに効き、ほかのファイル・未コミットの変更・コミットは変わらない。読み取りの工程の起動の前には片付けない
+- [ ] 3. `ndf worktree init` を打つと、無視の対象でない置き場だけが登録される。根の置き場（`.cross_refactoring/`・`.worktrees/`）は根の `.gitignore` へ、`.ndf` の下の置き場は `.ndf/.gitignore` へ足す。設定が既にあっても足し、既にある行は消さず、2 回打っても行が増えない
+- [ ] 4. `ndf worktree check` は、登録の欠けた置き場を結果に出し、ファイルを書かない
+- [ ] 5. `.cross_refactoring/` が無視の対象でない作業場所では、cross-refactoring は担当を起動する前に `precondition` で止まり、`ndf worktree init` を打って登録をコミットするよう示す
+- [ ] 6. 片付けは作業ディレクトリの `.cross_refactoring/` だけに効き、ほかのファイル・未コミットの変更・コミットは変わらない。読み取りの工程の起動の前には片付けない
 
 ## 影響
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わらない（`ndf refactor run` の引数と結果 JSON の形は同じ） |
+| 公開インタフェース | 変わる（互換あり）。`ndf worktree init` は設定が既にあっても `.gitignore` の登録を足し、`ndf worktree check` の結果に登録の欠けの項目が増える。`ndf refactor run` は登録の無い作業場所で `precondition` で止まる |
 | 重さ | 作業ファイルが Pull Request に入り、レビューで見つからなければ本流に残る。最終ゲートの直しでは正しい直しが止まり人へ渡る。回避は、レビューで見つけて手で外すことだけ |
 | データ | 変わらない（状態ファイルの形は同じ） |
-| 既存の振る舞い | 担当の起動の前に、前の起動の進捗のファイルが消える。作業ファイルが追跡されていたときは、次のコミットに削除が入る |
+| 既存の振る舞い | 初期化を打つと、利用者のリポジトリの `.gitignore` と `.ndf/.gitignore` に行が足される（1 回だけ）。担当の起動の前に、前の起動の進捗のファイルが消える。作業ファイルが追跡されていたときは、次のコミットに削除が入る |
 
 ## 検証手段
 
@@ -202,4 +205,8 @@ $ git show --stat --format= HEAD
 > 設計承認ゲートの回答: 「直してから」。「#3500 は難しく考えすぎ」。作業（担当の起動）の前に `.cross_refactoring/` があれば削除し（追跡済みなら追跡からも外す）、`.gitignore` に入れる。それだけでよい。コミットの作り直しと失敗したときの備えはすべてやめる。`git add -f` の経路が残ることは決定の記録に 1 行で書く
 
 （書き手: 利用者（conductor が設計承認ゲートの回答として伝えた。引用の文は conductor の要約を含む）、日付: 2026-11-23）
+
+> 設計承認ゲートの回答（2 回目）: info/exclude の形は「マージしない」。方針は「作業の前に .cross_refactoring/ があれば削除し（追跡済みなら追跡からも外す）、.gitignore に入れる」のまま。`.gitignore` への登録は `/ndf:development-workflow` の初期化（`ndf worktree check`・worktree の setup.py が `.ndf/.gitignore` を作る所・create.py の `.worktrees/` の確かめ）へ、`.cross_refactoring/` と `.ndf` の一時フォルダ（`.ndf/tmp` など要るもの）の登録を寄せる
+
+（書き手: 利用者（conductor とオーガナイザーが設計承認ゲートの回答として伝えた。引用の文は conductor の要約を含む）、日付: 2026-11-23）
 
