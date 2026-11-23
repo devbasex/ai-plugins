@@ -137,11 +137,14 @@ def values_in(wd: worker_paths.WorkDir) -> Optional[dict[str, Any]]:
         return None
 
 
+def _has_shape(held: Any, shape: Mapping[str, type]) -> bool:
+    """辞書で、`shape` のキーをどれもその型で持つか（ほかのキーは見ない）。"""
+    return isinstance(held, dict) and all(isinstance(held.get(k), t) for k, t in shape.items())
+
+
 def values_of(held: Any) -> Optional[dict[str, Any]]:
     """`values.json` の中身を読んだ値。辞書でない・キーか型が `VALUES_SHAPE` と違えば None。"""
-    if not isinstance(held, dict) or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
-        return None
-    return held
+    return held if _has_shape(held, VALUES_SHAPE) else None
 
 
 # 単発のプラン（`ndf route render・run`）が既定の worker の入力を持つ、プランの最上位のキー（PR 4319 の指摘 r2-2・r2-3）
@@ -159,8 +162,7 @@ def plan_values_error(raw: Mapping[str, Any]) -> Optional[str]:
     """プランの `PLAN_KEY` の形の誤り。無いか形が合えば None（`core.plan.model.parse` が `PlanError` にする）。"""
     if PLAN_KEY not in raw:
         return None
-    held = raw[PLAN_KEY]
-    if isinstance(held, dict) and all(isinstance(held.get(k), t) for k, t in PLAN_SHAPE.items()):
+    if _has_shape(raw[PLAN_KEY], PLAN_SHAPE):
         return None
     return f"{PLAN_KEY} は {', '.join(PLAN_SHAPE)} を持つ辞書にする"
 
