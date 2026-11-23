@@ -32,7 +32,9 @@ class EntryError(ValueError):
 
 
 class EntryUnsafe(EntryError):
-    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced。
+    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced・acl。
+
+    `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を新しい inode へ保てないこと（`_inherit_access`）。
 
     `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
     または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_entries`）。
@@ -627,7 +629,8 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
     公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
-    拡張 ACL のあるファイルは ACL ごと写し、写せなければグループの権限を写さない（アクセスを広げない）。
+    拡張 ACL のあるファイルは ACL ごと写し、所有者・所有グループを保てないか ACL を写せなければ、既存のファイルを
+    置き換える前に `EntryUnsafe`（`acl`）を上げる（アクセスを広げない）。
     """
     _check_name(name)
     data = text.encode("utf-8")
@@ -653,7 +656,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         created = True
         with os.fdopen(fd, "wb") as f:
             if existing is not None:
-                _inherit_access(f.fileno(), existing, _access_acl(wd, name, existing))
+                _inherit_access(f.fileno(), name, existing, _access_acl(wd, name, existing))
             f.write(data)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
@@ -680,7 +683,7 @@ def _access_acl(wd: WorkDir, name: str, existing: os.stat_result) -> "Optional[b
     `_inherit_access` はビットだけを写さず ACL ごと写す。リンクをたどらずに `O_PATH` で開いた記述子を `/proc/self/fd`
     から引き、確かめた inode（`existing`）でなければ `EntryUnsafe`（`replaced`）。POSIX ACL を引けない OS
     （`O_PATH` か `os.getxattr` が無い）と、ACL に対応しないファイルシステムは None。それ以外で引けなければ
-    `_ACL_UNKNOWN` を返し、`_inherit_access` はグループの権限を写さない（アクセスを広げない）。
+    `_ACL_UNKNOWN` を返し、`_inherit_access` は公開する前に止める（アクセスを広げない）。
     """
     if not hasattr(os, "O_PATH") or not hasattr(os, "getxattr"):
         return None
@@ -699,30 +702,50 @@ def _access_acl(wd: WorkDir, name: str, existing: os.stat_result) -> "Optional[b
         os.close(fd)
 
 
-def _inherit_access(fd: int, existing: os.stat_result, acl: "Optional[bytes] | _AclUnknown" = None) -> None:
+def _inherit_access(fd: int, name: str, existing: os.stat_result, acl: "Optional[bytes] | _AclUnknown" = None) -> None:
     """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
 
-    グループは呼んだ利用者が属するときだけ変えられる。変えられなければ元のグループのまま、モードだけを写す
-    （グループの権限を、元と違うグループへ与えない）。
-    既存のファイルに拡張 ACL（`acl`）があれば、グループのビットはマスクなので写さず、ACL ごと写す。
-    写せない（グループを変えられない・ACL を設定できない・ACL を確かめられなかった）ときは、グループのビットを 0 にして
-    所有者とその他の権限だけを写す（所有グループ・ACL で許した利用者へ元より広い権限を与えない）。
+    グループは呼んだ利用者が属するときだけ変えられる。拡張 ACL の無いファイルでグループを変えられなければ、元のグループの
+    まま、グループのビットを 0 にして所有者とその他の権限だけを写す（グループの権限を、元と違うグループへ与えない）。
+    拡張 ACL の無いファイルでは、一時ファイルが親のデフォルト ACL から継いだ ACL を先に外す（継いだ名前付きの項目が
+    元のグループのビットをマスクにして読めるようにならないため）。外せなければ `EntryUnsafe`（`acl`）。
+    既存のファイルに拡張 ACL（`acl`）があれば ACL ごと写す。`ACL_USER_OBJ`・`ACL_GROUP_OBJ` の適用先が変わらないよう、
+    写すのは新しいファイルの所有者と所有グループが元と同じときだけである。所有者・所有グループを保てない・ACL を
+    設定できない・ACL を確かめられなかったときは、公開する前に `EntryUnsafe`（`acl`）を上げる（元の ACL で拒まれていた
+    利用者へ `other` の権限を与えない）。
     """
     group_kept = True
     if existing.st_gid != os.fstat(fd).st_gid:
         try:
             os.fchown(fd, -1, existing.st_gid)
-        except PermissionError:  # 属さないグループへは変えられない。グループの権限を写さずに続ける
+        except PermissionError:  # 属さないグループへは変えられない
             group_kept = False
     mode = stat.S_IMODE(existing.st_mode) & 0o777
-    narrowed = mode & ~0o070
     if acl is None:
-        os.fchmod(fd, mode if group_kept else narrowed)
+        _drop_inherited_acl(fd, name)
+        os.fchmod(fd, mode if group_kept else mode & ~0o070)
         return
-    os.fchmod(fd, narrowed)
-    if group_kept and isinstance(acl, bytes):
-        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: ACL を写せなければグループの権限を 0 にしたまま公開する
-            os.setxattr(fd, _ACL_ACCESS, acl)
+    if not isinstance(acl, bytes) or not group_kept or os.fstat(fd).st_uid != existing.st_uid:
+        raise EntryUnsafe(name, "acl")
+    os.fchmod(fd, mode)
+    try:
+        os.setxattr(fd, _ACL_ACCESS, acl)
+    except OSError:
+        raise EntryUnsafe(name, "acl") from None
+
+
+def _drop_inherited_acl(fd: int, name: str) -> None:
+    """新しいファイル `fd` が親のデフォルト ACL から継いだ拡張 ACL を外す。外せなければ `EntryUnsafe`（`acl`）。
+
+    ACL を外せない OS（`os.removexattr` が無い）と、ACL が無い・ACL に対応しないファイルシステムは何もしない。
+    """
+    if not hasattr(os, "removexattr"):
+        return
+    try:
+        os.removexattr(fd, _ACL_ACCESS)
+    except OSError as e:
+        if e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP):
+            raise EntryUnsafe(name, "acl") from None
 
 
 def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_result], *, created: bool, published: bool) -> None:

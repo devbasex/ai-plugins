@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import struct
 from pathlib import Path
@@ -945,14 +946,53 @@ def test_write_file_copies_the_acl_of_a_replaced_file(workdir):
     assert (d / "r").read_text(encoding="utf-8") == "後"
 
 
-def test_write_file_drops_group_bits_when_the_acl_cannot_be_checked(workdir, monkeypatch):
+def test_write_file_stops_before_replacing_when_the_acl_cannot_be_checked(workdir, monkeypatch):
     d, _ = workdir
     (d / "r").write_text("前", encoding="utf-8")
     (d / "r").chmod(0o640)
     monkeypatch.setattr(worker_paths, "_access_acl", lambda wd, name, existing: worker_paths._ACL_UNKNOWN)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "acl"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="POSIX ACL を設定できない")
+def test_write_file_stops_before_replacing_when_the_acl_cannot_be_set(workdir, monkeypatch):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    undefined = 0xFFFFFFFF
+    acl = _acl((0x01, 6, undefined), (0x04, 0, undefined), (0x20, 0, undefined))
+    monkeypatch.setattr(worker_paths, "_access_acl", lambda wd, name, existing: acl)
+
+    def refuse(*args, **kwargs):
+        raise OSError(errno.EPERM, "refused")
+
+    monkeypatch.setattr(worker_paths.os, "setxattr", refuse)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "acl"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+@pytest.mark.skipif(not hasattr(os, "removexattr"), reason="POSIX ACL を外せない")
+def test_write_file_drops_an_acl_inherited_from_the_default_acl(workdir):
+    d, _ = workdir
+    undefined = 0xFFFFFFFF
+    default = _acl((0x01, 6, undefined), (0x02, 4, os.geteuid() + 1), (0x04, 0, undefined), (0x10, 4, undefined), (0x20, 0, undefined))
+    try:
+        os.setxattr(d, "system.posix_acl_default", default)
+    except OSError:
+        pytest.skip("このファイルシステムは POSIX ACL に対応しない")
+    (d / "r").write_text("前", encoding="utf-8")
+    os.removexattr(d / "r", "system.posix_acl_access")
+    (d / "r").chmod(0o640)
     with worker_paths.open_workdir(d) as wd:
         worker_paths.write_file(wd, "r", "後")
-    assert (d / "r").stat().st_mode & 0o777 == 0o600
+    with pytest.raises(OSError) as e:
+        os.getxattr(d / "r", "system.posix_acl_access")
+    assert e.value.errno == errno.ENODATA
+    assert (d / "r").stat().st_mode & 0o777 == 0o640 and (d / "r").read_text(encoding="utf-8") == "後"
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
