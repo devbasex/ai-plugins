@@ -8,7 +8,7 @@
 
 ```text
 plugins/ndf/
-├── bin/ndf                                   （変更: exec の前に uv sync を 1 回、exec は uv run --no-sync）
+├── bin/ndf                                   （変更: exec の前に uv sync --inexact を 1 回（UV_NO_SYNC なら飛ばす）、exec は uv run --no-sync）
 ├── contracts/
 │   ├── limits/                              * （limits.json を 223 項目へ分割 + _meta.json）
 │   ├── causes/                              * （causes.json を 35 項目へ分割 + _meta.json）
@@ -75,7 +75,7 @@ plugins/ndf/
 | `src/ndf/domains/hooks/tables.py` | 変更 | 分割した表を標準ライブラリで読む | `json`・`pathlib` | モジュール | `load`（変更）・`load_split`（新設）・`policies`（変更）・`policy_value`（変更） |
 | `src/ndf/domains/hooks/budget.py` | 変更 | hook の起動ごとの予算の引き方を 1 項目の読みへ替える | `tables` | モジュール | `policy_name`・`budget_for`（変更。`limits` を渡さないときの中身） |
 | `src/ndf/domains/hooks/boot.py` | 変更 | システム python の下限の読み先を替える | `tables` | モジュール | （既存の下限の判定の行だけ） |
-| `bin/ndf` | 変更 | 依存を同期してから uv へ渡す | — | シェルスクリプト | （`stop_deps_missing` の呼び出しを 1 か所足し、`exec` の `--frozen` を `--no-sync` へ替える） |
+| `bin/ndf` | 変更 | 依存を同期してから uv へ渡す | — | シェルスクリプト | `truthy`（新設。`UV_NO_SYNC` を uv と同じに読む）。`stop_deps_missing` の呼び出しを 1 か所足し、`exec` の `--frozen` を `--no-sync` へ替える |
 
 ## 分割した表の読み手
 
@@ -440,15 +440,16 @@ plugins/ndf/
 
 ### 関数の仕様
 
-`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）だけを使う。足すのは 98 行の `exec` の前の 3 行である。
+`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）と、新設の `truthy`（`UV_NO_SYNC` を uv と同じに 1・true・yes・y・on・t で、大文字小文字を問わず真と読む。外部コマンドを起動せずシェルの `case` で比べる）を使う。
 
 | 箇所 | 種類 | 変える中身 |
 | --- | --- | --- |
-| `bin/ndf` の 98 行の直前 | 変更 | `"$uv_bin" sync --frozen --no-dev --quiet --project "$root"` を打ち、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <ログの最終行>"` を呼ぶ |
+| `bin/ndf` の 98 行の直前 | 変更 | `UV_NO_SYNC` が真でなければ `"$uv_bin" sync --frozen --no-dev --inexact --quiet --project "$root"` を打ち（`--inexact`: 今の `uv run` と同じに、lock に無い追加のパッケージを消さない。`uv sync` の既定は消す）、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <uv の error: の行。無ければ最終行>"` を呼ぶ |
+| 同じ箇所（`UV_NO_SYNC` が真のとき） | 変更 | 同期を飛ばして次の `exec` へ進む（今の `uv run` と同じに環境を書き換えない。`uv sync` はこの変数を受けないので `truthy` で分ける） |
 | `bin/ndf` の 98 行 | 変更 | `exec "$uv_bin" run --frozen --no-dev ...` の `--frozen` を `--no-sync` へ替える。直前の同期で用意した同じ環境（`UV_PROJECT_ENVIRONMENT`）をそのまま使い、`exec` の後に uv が環境を同期し直さない |
 
 - 事前条件: `uv_bin` が決まっている（uv を探すか入れる処理の後）
-- 事後条件: `exec` へ進むのは同期が成功したときだけ。同期の経路を通るのは 1 起動に 1 回（`uv run --no-sync`）。成功したときのシグナルの伝わり方は今までと変わらない（`exec` のまま）
+- 事後条件: `exec` へ進むのは同期が成功したとき（`UV_NO_SYNC` が真のときは同期を飛ばしたとき）だけ。同期の経路を通るのは 1 起動に 1 回（`uv run --no-sync`）。成功したときのシグナルの伝わり方は今までと変わらない（`exec` のまま）
 - lock の扱い: 同期は今の `uv run` と同じ `--frozen`（lock を更新せず、定義と lock の鮮度は確かめない）。定義と lock の食い違いは、配る前に CI の `uv lock --check`（`script-structure.yml` の lock の検査）が落とす
 - 副作用: `.venv` の作成・更新と、ログのファイル（既にある `$log` を使う）
 

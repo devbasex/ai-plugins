@@ -51,7 +51,7 @@
 ### 決定 5: 依存を取れない場合も結果 JSON を返すため、`exec` の前に同期を 1 回挟む
 
 - **質問**: uv はあるが依存を取れないときに、結果 JSON と `deps_missing`（69）をどう返すか
-- **選んだ案**: `plugins/ndf/bin/ndf` が `exec uv run` の前に `uv sync --frozen --no-dev` を 1 回打つ。失敗したら既にある `stop_deps_missing` を通す。成功したら `exec uv run --no-sync` で渡す（同期済みの同じ環境を使い、`exec` の後に uv が同期し直さない）
+- **選んだ案**: `plugins/ndf/bin/ndf` が `exec uv run` の前に `uv sync --frozen --no-dev --inexact` を 1 回打つ。`--inexact` は、今の `uv run` と同じに lock に無い追加のパッケージを消さないために付ける（`uv sync` の既定は消す）。失敗したら既にある `stop_deps_missing` を通す。成功したら `exec uv run --no-sync` で渡す（同期済みの同じ環境を使い、`exec` の後に uv が同期し直さない）。呼び出し元が `UV_NO_SYNC` を真（uv と同じに 1・true・yes・y・on・t を大文字小文字を問わず）にしていれば、同期を飛ばしてそのまま `exec uv run --no-sync` へ進む（今の `uv run` と同じに環境を書き換えない。`uv sync` はこの変数を受けないのでランチャーが分ける）
 - 採らなかった案: `exec` をやめて `uv run` の終了コードを見る（シグナルの伝わり方が変わり、Ctrl-C と `SIGTERM` が中の処理へ届かなくなる）
 - 採らなかった案: venv が無いときだけ同期する（venv があっても lock と食い違えば `uv run --frozen` が取りに行き、同じ失敗が `exec` の後に起きる）
 - 採らなかった案: 同期の後も `uv run --frozen` のまま渡す（`uv run` が環境を同期し直すため同期の経路を 1 起動に 2 回通り、後続の処理で依存の用意に失敗すると結果 JSON が出ない）

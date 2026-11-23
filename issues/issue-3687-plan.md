@@ -101,7 +101,7 @@
 ### Task 12: 依存を用意できないときの結果 JSON
 
 - **対象ファイル:** `plugins/ndf/bin/ndf`、`plugins/ndf/tests/bin/test_start.py`
-- **変更内容:** `exec` の前に `uv sync --frozen --no-dev --quiet` を打ち、0 以外なら `stop_deps_missing` を通す。`exec` は `uv run --no-sync --no-dev --quiet` へ替え、同期済みの同じ環境を使う（同期の経路を 1 起動に 1 回だけ通す）
+- **変更内容:** `exec` の前に、`UV_NO_SYNC` が真（uv と同じに 1・true・yes・y・on・t を大文字小文字を問わず）でなければ `uv sync --frozen --no-dev --inexact --quiet` を打ち（`--inexact` で今の `uv run` と同じに lock に無い追加のパッケージを消さない）、0 以外なら `stop_deps_missing` を通す。`UV_NO_SYNC` が真なら同期を飛ばす（今の `uv run` と同じに環境を書き換えない）。`exec` は `uv run --no-sync --no-dev --quiet` へ替え、同期済みの同じ環境を使う（同期の経路を 1 起動に 1 回だけ通す）
 - **満たす受け入れ条件:** 5
 - **進め方:** 単体テストは子のプロセスを起動しない（`tdd-cycle` の「テストに書かないもの」）。同期の失敗のメッセージ（ログの最終行を含む）を `start.emit_deps_missing` へ直に渡し、結果 JSON 1 行と `deps_missing`（69）になることで落ちるテスト → 実装。シェルのランチャーを通した確認（偽の `uv` で同期を落とす・同期済みで 2 回打つ）はテストに足さず、受け入れ条件 5 のリリース後テスト（実機の確認）で行う。`bin/ndf` の変更は `shellcheck`（lint）で見る
 
