@@ -21,10 +21,22 @@ from typing import Optional
 from ndf.domains.hooks import budget, reply_judge
 from ndf.domains.hooks.verdict import Verdict, passing
 
+# 変更要求の文（#4000 の受け入れ条件 11）。10 系の `relay_lib/mark.py` の `WAIT_REASON` を出発点にした。区分の一覧と実行の形
+# ごとの出し方は写さず `development-workflow` の `references/asking.md` を指し、経路をここで分けない。`{matched}` はルールで
+# 止めたときだけ当たった文を入れ、軽いモデルで止めたときは空にする
 REASON = (
-    "本文で人の回答を待って終えた。人に問うときは AskUserQuestion を使う（中継とオーガナイザーへ質問が届き、"
-    "待ちの知らせも送られる）。問わずに進められるなら続ける"
+    "本文で人の回答を待って終えた{matched}。本文の質問は中継とオーガナイザーへ届かず、待ちの知らせも出ず、/goal も止まらない。"
+    "人へ問えるのは承認ゲート（設計の承認は ndf-gate:1、本番系へ届く操作の承認は ndf-gate:2）と、development-workflow の "
+    "references/asking.md の「区分」に当たる質問だけである。当たるなら、AskUserQuestion の metadata.source に区分を付けて"
+    "出し直す（材料は本文に書いてよい。並列の計画のレーン・人のいない実行・AskUserQuestion の無いランタイムは asking.md の"
+    "そのセクションの経路で出す）。当たらなければ人へ回さず推奨の案で決め、決めたことと理由を報告に 1 行で書いて続ける。"
+    "質問を出した後も、回答を待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
+    "質問の形の文を書き換えて終える。"
 )
+# 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
+LOGGED = "本文で人の回答を待って終えた（stop-wait）"
+# 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
+MATCHED_CHARS = 120
 # 判定の子を起動するのに要る残りの秒の下限（詳細設計の「処理の手順」）
 MIN_SECONDS = 0.5
 # 上限の後でもモデルの wait のフラグがあれば変更要求を返す理由（待ちの知らせへ渡す。決定 5）
@@ -34,12 +46,31 @@ monotonic = time.monotonic
 wall = time.time
 
 
-def _result(reply: Optional[str], judge: str, wait: bool, judged: Optional[reply_judge.Judged] = None) -> Verdict:
-    """判定と notes。`reply` が None（ルールを当てていない）なら notes に入れない。"""
+def reason(matched: tuple[str, ...] = ()) -> str:
+    """変更要求の文。`matched`（ルールが当たった文）があれば先頭の 1 文を「当たった文」として添え、無ければ括弧ごと省く。"""
+    if not matched:
+        return REASON.format(matched="")
+    first = " ".join(matched[0].split())
+    if len(first) > MATCHED_CHARS:
+        first = first[: MATCHED_CHARS - 1] + "…"
+    return REASON.format(matched=f"（当たった文:「{first}」）")
+
+
+def _result(
+    reply: Optional[str],
+    judge: str,
+    wait: bool,
+    judged: Optional[reply_judge.Judged] = None,
+    matched: tuple[str, ...] = (),
+) -> Verdict:
+    """判定と notes。`reply` が None（ルールを当てていない）なら notes に入れない。`matched` はルールで止めたときだけ渡す。
+
+    当たった文は会話へ返す `reason` にだけ入れ、計測と待ちの知らせへ渡す `logged` は本文を含まない固定の文にする。
+    """
     notes: dict = {"judge": judge, "judge_ms": round(judged.ms, 3) if judged else 0, "judge_calls": judged.calls if judged else 0}
     if reply is not None:
         notes = {"reply": reply, **notes}
-    return Verdict("pushback", reason=REASON, notes=notes) if wait else passing(**notes)
+    return Verdict("pushback", reason=reason(matched), notes=notes, logged=LOGGED) if wait else passing(**notes)
 
 
 def _quick_skip(ctx, svc, text: str) -> Optional[str]:
@@ -96,18 +127,22 @@ def check(ctx, svc) -> Verdict:
         "prose_wait": ("rule", True),
     }
     kind = ctx.last_reply_kind
+    reading = ctx.reply_reading
     if kind in by_rule:
-        return _result(kind, *by_rule[kind])
+        # ルールで止めたときだけ当たった文を添える
+        return _result(kind, *by_rule[kind], matched=reading.matched)
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
-    keep = ctx.reply_reading.delegated
+    # ルールの待ちとして止めるときだけ当たった見出しを添える（モデルの wait で止めたときは添えない）
+    heading = reading.matched if rule_wait else ()
+    keep = reading.delegated
     text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge.judge_setting("max_chars")), keep)
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:
         waited = skipped in _AFTER_LIMIT and not svc.counter.pushback_left() and svc.counter.model_waited()
-        return _result(kind, skipped, waited or rule_wait)
+        return _result(kind, skipped, waited or rule_wait, matched=heading)
     seconds = _seconds(ctx, svc)
     if seconds < MIN_SECONDS:
-        return _result(kind, "skip:time", rule_wait)
+        return _result(kind, "skip:time", rule_wait, matched=heading)
     judge, wait, judged = _ask(svc, text, seconds)
-    return _result(kind, judge, wait or (rule_wait and judge != "model"), judged)
+    return _result(kind, judge, wait or (rule_wait and judge != "model"), judged, matched=heading if judge != "model" else ())

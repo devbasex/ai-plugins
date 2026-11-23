@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.hooks import budget, context, dispatch, reply_judge, tables
+from ndf.domains.hooks import budget, context, dispatch, reply_judge, reply_wait, tables
 from ndf.domains.hooks.counter import Counter
 from ndf.domains.hooks.guards import stop_wait
 
@@ -335,6 +335,48 @@ def test_stop_wait_after_the_limit_is_passed_by_dispatch_as_limited(tmp_path, mo
     assert out.limited and out.verdict.kind == "pass" and out.notes["judge"] == "skip:limit" and judge.asked == []
 
 
+# 受け入れ条件 11 の (f)。文言は照らさず、当たった文が変更要求に載るか・載らないかだけを見る
+def test_stop_wait_shows_the_sentence_the_rule_matched(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    text = "作業を終えた。どちらにするか決めていただければ進めます。"
+    got = _check(tmp_path, text)
+    assert got.notes["judge"] == "rule" and "どちらにするか決めていただければ進めます。" in got.reason
+
+
+def test_stop_wait_shows_the_heading_when_the_rule_stops_a_heading_wait(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, HEADING_ASK, runtime="codex")
+    assert got.kind == "pushback" and "どちらの案で進めますか？" in got.reason
+
+
+def test_stop_wait_does_not_quote_the_reply_when_the_model_stopped_it(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="wait")
+    plain = _check(tmp_path, REPORT)
+    heading = _check(tmp_path, HEADING_ASK)
+    assert plain.kind == heading.kind == "pushback"
+    assert REPORT not in plain.reason and "どちらの案で進めますか" not in heading.reason
+    assert plain.reason == heading.reason == stop_wait.reason()
+
+
+def test_stop_wait_cuts_a_long_matched_sentence():
+    long = "あ" * (stop_wait.MATCHED_CHARS * 2)
+    shown = stop_wait.reason((long,))
+    assert long not in shown and "あ" * (stop_wait.MATCHED_CHARS - 1) + "…" in shown
+
+
+# 当たった文は会話へ返す文にだけ入れ、上限で通したときの計測と待ちの知らせへは本文を渡さない
+def test_stop_wait_keeps_the_matched_sentence_out_of_the_limited_reason(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    text = "作業を終えた。秘密の値 s3cr3t を入れてよいか決めていただければ進めます。"
+    spec = next(s for s in dispatch.load_specs() if s.name == "stop-wait")
+    ctx = context.HookContext("claude", "Stop", {"last_assistant_message": text})
+    with Counter.open("s-1", tmp_path) as counter:
+        counter.data["pushbacks"] = tables.policy_value("hook.pushback", "attempts")
+        out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
+    assert out.limited and "s3cr3t" not in out.notes["limited_reason"]
+    assert out.notes["limited_reason"] == stop_wait.LOGGED
+
+
 # ルールだけで決まる 3 種類（I-009）。モデルを呼ぶ前の条件（上限・実行環境・決定済み・裏の作業・時間・親の不明）に
 # 関わらず、判定・理由・notes の全体が同じで、モデルも親の起動も呼ばず、wait のフラグも立てない
 _RULE_ONLY = [
@@ -363,5 +405,5 @@ def test_stop_wait_decides_the_rule_only_kinds_before_any_condition(tmp_path, mo
     assert got.kind == kind
     assert got.notes == {**notes, "judge_ms": 0, "judge_calls": 0}
     if kind == "pushback":
-        assert got.reason == stop_wait.REASON
+        assert got.reason == stop_wait.reason(reply_wait.read_prose(reply_wait.prose_lines(reply)).matched)
     assert judge.asked == [] and judge.parents == 0 and counter.waited == before

@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import sys
+import types
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -352,6 +353,8 @@ def awaited_with(monkeypatch: pytest.MonkeyPatch, exchange: Any, killpg: Any = N
 
     monkeypatch.setattr(reply_judge, "_exchange", fake_exchange)
     monkeypatch.setattr(reply_judge, "_pause", lambda s: log.append(("sleep", s)))
+    # 起動の時刻 100.0 の後の時計にする（実の時計は CI の起動直後に 100 秒未満のことがあり、所要の秒が負になる）
+    monkeypatch.setattr(reply_judge, "time", types.SimpleNamespace(monotonic=lambda: 101.0))
     proc = StreamProc(log, code=code)
     try:
         try:

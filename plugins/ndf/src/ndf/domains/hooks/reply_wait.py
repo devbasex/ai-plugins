@@ -570,6 +570,8 @@ class ProseReading(NamedTuple):
 
     kind: str
     delegated: tuple[str, ...] = ()
+    # ルールが待ちと読んだ文（`prose_wait` は本人への待ちの文、`heading_wait` は承認・選択を求める見出し）。変更要求の文に添える
+    matched: tuple[str, ...] = ()
 
 
 def read_prose(lines: list[ProseLine]) -> ProseReading:
@@ -589,10 +591,10 @@ def read_prose(lines: list[ProseLine]) -> ProseReading:
     delegated = tuple(unquoted[i].text for i, kind in kinds.items() if kind in _DELEGATED)
     waits = _waits(unquoted, kinds)
     if waits and not all(_only_elsewhere(s) for s in waits):
-        return ProseReading("prose_wait", delegated)
+        return ProseReading("prose_wait", delegated, tuple(s for s in waits if not _only_elsewhere(s)))
     found = set(kinds.values())
     if REQUESTS in found:
-        return ProseReading("heading_wait", delegated)
+        return ProseReading("heading_wait", delegated, tuple(unquoted[i].text for i, kind in kinds.items() if kind == REQUESTS))
     if waits:
         # 判断できない見出し（UNSURE）を残したまま、別の場所の待ちだけとして通さない
         return ProseReading("report" if UNSURE in found else "elsewhere_wait", delegated)
