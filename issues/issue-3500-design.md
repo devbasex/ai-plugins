@@ -61,21 +61,25 @@ flowchart LR
 
 ### NDF が作る置き場と、無視する仕組み
 
-置き場の表（`plugins/ndf/contracts/domains/locations.json` の `root` が `repo` か `main` で `tracked` が偽の行）と、工程が書くファイルの表（`ndf-files.json` の `location` が `ndf` で `tracked` が偽の行）と、cross-refactoring の作業ファイルの置き場から引いた。「仕組み」の 1 はフォルダ自身の `.gitignore`、2 は `.ndf/.gitignore` の行である。
+置き場は次の 3 つから引いた。
 
-「単位」は、置き場が worktree ごとに 1 つあるか、メインディレクトリ（clone の根）に 1 つだけあるかである。置き場の表の `root` は `repo` が「今の worktree の根（`git rev-parse --show-toplevel`）」、`main` が「メインディレクトリで、どの worktree から読み書きしても同じ位置」を表す。メインディレクトリはコードによって `git worktree list` の先頭（`backlog/state.main_dir`）か、共通の git ディレクトリの親（`core/converge/location.main_dir`）で求める。下の表の単位は、表の `root` ではなく、その置き場を作る・読むコードと手順書が実際に使うパスで決めた（2026-11-23、main 5c2c1e62d）。
+- **置き場の一覧**（設定ファイル `plugins/ndf/contracts/domains/locations.json`）: NDF が使う保存先ごとに、パスと、そのパスをどこから数えるか（この文書では「一覧の起点」と呼ぶ。今の worktree の根か、メインディレクトリの根か）と、git で追跡するかを持つ。ここから、リポジトリの中にあって追跡しない置き場を引いた
+- **工程が書くファイルの一覧**（`plugins/ndf/contracts/domains/ndf-files.json`）: NDF の工程が書くファイルごとに、置き場と追跡するかを持つ。ここから、`.ndf/` の中にあって追跡しないファイルを引いた
+- cross-refactoring の作業ファイルの置き場（一覧には載っていない）
 
-| 置き場 | 種類 | 単位 | 単位を決めた根拠 | 作る所 | 仕組み | 置き場の表の `root` |
+「仕組み」の 1 はフォルダ自身の `.gitignore`、2 は `.ndf/.gitignore` の行である。「単位」は、置き場が worktree ごとに 1 つあるか、メインディレクトリ（clone した根のディレクトリ）に 1 つだけあるかである。単位は一覧の起点ではなく、その置き場を作る・読むコードと手順書が実際に使うパスで決めた（2026-11-23、main 5c2c1e62d）。一覧の起点が実際と食い違う 3 行（`.worktrees`・`.ndf/handoff`・`.ndf/loop`）は、実装で一覧を直す。
+
+| 置き場 | 種類 | 単位 | 単位を決めた根拠 | 作る所 | 仕組み | 一覧の起点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `.cross_refactoring` | フォルダ | worktree ごと | 担当が動くディレクトリ（`launch_decide.workdir_of`。cross-refactoring の作業場所 `rf<PR>/work`・`rf<PR>/read/<ランタイム>` の worktree）の根に作る | `crossrefactor/launch.run` | 1（起動の前に作り直す） | 無い（`repo` で足す） |
-| `.ndf/tmp` | フォルダ | worktree ごと | 表の `root` が `repo`。メインディレクトリも 1 つの worktree として含む（conductor はメインディレクトリの `.ndf/tmp` に作業ファイルを置く） | 計画の実行の記録を書くコード（未確認のまま残ること） | 1 | `repo`（合っている） |
-| `.ndf/sprints` | フォルダ | worktree ごと | 表の `root` が `repo` | スプリントの記録を書くコード（未確認のまま残ること） | 1 | `repo`（合っている） |
-| `.ndf/parallel` | フォルダ | worktree ごと | `progress/plan/run.py` が `command.ndf_settings_path`（`--show-toplevel`）で解く | `progress/plan/run.py` | 1 | `repo`（合っている） |
-| `.worktrees` | フォルダ | メインディレクトリに 1 つ | `worktree/repo.worktrees_dir(main_dir)` と `core/converge/location.default_base(main)` がメインディレクトリの下に解く | `worktree/create._check_location`・`core/converge/location` | 1 | `repo`（**食い違う**。`main` へ直す） |
-| `.ndf/handoff` | フォルダ | メインディレクトリに 1 つ | `development-workflow` の `references/handoff.md` が「メインディレクトリの `.ndf/handoff/`（worktree の `.ndf/` には書かない）」と定める。conductor（AI）が書く | 引継ぎ文書を書く手順（AI） | 1 | `repo`（**食い違う**。`main` へ直す） |
-| `.ndf/backlog/state` | フォルダ | メインディレクトリに 1 つ | `backlog/state.main_dir`（`git worktree list` の先頭）の下に解く | `backlog/state.py` | 1 | `main`（合っている） |
-| `.ndf/loop` | — | 作業ツリーに無い | `loop/store.open_store` は `core/durable.store_root`（`<git の共通ディレクトリ>/ndf/state`）の下に書き、作業ツリーに作らない | — | 要らない | `main`（**食い違う**。実体に合わせて行を直す） |
-| `.ndf/worktree.local.json` | ファイル | メインディレクトリに 1 つ | `worktree/ndf_settings.local_file(main_dir)` がメインディレクトリの `.ndf/` に解く。利用者が書く | 置き場を用意するのは `worktree/setup.init` | 2（メインディレクトリの `.ndf/.gitignore`） | — |
+| `.cross_refactoring` | フォルダ | worktree ごと | 担当が動く worktree（cross-refactoring が PR ごとに用意する書き込み用・読み取り用の worktree）の根に作る | cross-refactoring の担当の起動（`crossrefactor/launch.py`） | 1（起動の前に作り直す） | 載っていない（今の worktree の根で足す） |
+| `.ndf/tmp` | フォルダ | worktree ごと | 一覧の起点が今の worktree の根。メインディレクトリも 1 つの worktree として含む（conductor はメインディレクトリの `.ndf/tmp` に作業ファイルを置く） | 計画の実行の記録を書くコード（未確認のまま残ること） | 1 | 今の worktree の根（合っている） |
+| `.ndf/sprints` | フォルダ | worktree ごと | 一覧の起点が今の worktree の根 | スプリントの記録を書くコード（未確認のまま残ること） | 1 | 今の worktree の根（合っている） |
+| `.ndf/parallel` | フォルダ | worktree ごと | 計画の記録を書くコード（`progress/plan/run.py`）が、今の worktree の根（`git rev-parse --show-toplevel` の値）から数える | `progress/plan/run.py` | 1 | 今の worktree の根（合っている） |
+| `.worktrees` | フォルダ | メインディレクトリに 1 つ | worktree を作るコード（`worktree/repo.py`）と cross 系の作業場所を作るコード（`core/converge/location.py`）が、どちらもメインディレクトリの根から数える | `worktree/create.py`・`core/converge/location.py` | 1 | 今の worktree の根（**食い違う**。メインディレクトリの根へ直す） |
+| `.ndf/handoff` | フォルダ | メインディレクトリに 1 つ | `development-workflow` の手順書 `references/handoff.md` が「メインディレクトリの `.ndf/handoff/`（worktree の `.ndf/` には書かない）」と定める。conductor（AI）が書く | 引継ぎ文書を書く手順（AI） | 1 | 今の worktree の根（**食い違う**。メインディレクトリの根へ直す） |
+| `.ndf/backlog/state` | フォルダ | メインディレクトリに 1 つ | 棚卸しの状態を書くコード（`backlog/state.py`）が、`git worktree list` の先頭（メインディレクトリ）から数える | `backlog/state.py` | 1 | メインディレクトリの根（合っている） |
+| `.ndf/loop` | — | 作業ツリーに無い | 周回の記録を書くコード（`loop/store.py`）は、作業ツリーでなく git の内部のディレクトリ（`.git` の中の `ndf/state`）に書く | — | 要らない | メインディレクトリの根（**食い違う**。git の内部のディレクトリに合わせて直す） |
+| `.ndf/worktree.local.json` | ファイル | メインディレクトリに 1 つ | 個人設定を読むコード（`worktree/ndf_settings.py`）がメインディレクトリの `.ndf/` から読む。利用者が書く | 置き場を用意するのは `worktree/setup.py` の初期化 | 2（メインディレクトリの `.ndf/.gitignore`） | 工程が書くファイルの一覧に、追跡しないファイルとして載る |
 
 #### 単位ごとの書き分け
 
@@ -120,7 +124,7 @@ flowchart LR
 ## 影響と危険
 
 - **働く範囲**: この PR は設計文書だけで、振る舞いは変わらない。実装の後は、利用先のリポジトリでも `ndf refactor run`・`ndf worktree create`・`ndf worktree init` と、`.ndf` の下に記録を書くすべての工程に効く
-- **プロジェクトごとに違うもの**: 無い（置き場は置き場の表が持つ）
+- **プロジェクトごとに違うもの**: 無い（置き場は置き場の一覧が持つ）
 - **当たるモード**: すべてのモード。片付けは cross-refactoring を通すモード
 - **利用者のリポジトリへの差分**: `.ndf/.gitignore` に行が無いときだけ、その 1 行が出る。フォルダの中の `.gitignore` は自身も無視されるので差分に出ない。NDF は根の `.gitignore` を書かず、利用者が書いた既存の行（`.worktrees/` など）は消さない
 - **登録より前に切ったブランチ**: どのブランチでも動く（根の `.gitignore` を見ない）
@@ -144,7 +148,7 @@ flowchart LR
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1（フォルダを作るとき `.gitignore` を置く） | `ensure` がフォルダと `*` だけの `.gitignore` を作り、既にある `.gitignore` を書き換えない。置き場の表の追跡しないフォルダを作る各所（表の「作る所」）と `launch.run` を通すと `.gitignore` が置かれる | `mkdir` のまま残す・既存の `.gitignore` を上書きする |
+| 1（フォルダを作るとき `.gitignore` を置く） | `ensure` がフォルダと `*` だけの `.gitignore` を作り、既にある `.gitignore` を書き換えない。置き場の一覧の追跡しないフォルダを作る各所（表の「作る所」）と `launch.run` を通すと `.gitignore` が置かれる | `mkdir` のまま残す・既存の `.gitignore` を上書きする |
 | 2（`.ndf/.gitignore` の行） | `.ndf/.gitignore` が既にあって `worktree.local.json` の行が無いリポジトリで `init` を打つと行が足され、2 回目で増えず、既存の行が残る | 無いときだけ作る今の形のまま |
 | 3（登録が無くても入らない・根を書かない・止まらない） | 根の `.gitignore` と `info/exclude` に登録が無いリポジトリで、各置き場の中に書いて `git add -A` しても、中の `.gitignore` 自身を含めて入らない。根の `.gitignore` は作られない。`create` は `.worktrees/` の登録が無くても止まらず、cross-refactoring も止まらない | `.gitignore` に `*` を書かない・根の `.gitignore` を書く・登録の確かめを残して止める |
 | 4（worktree の中に影響しない） | `.worktrees/.gitignore` を置いた後に `create` で作った worktree で、足したファイルが `git add -A` で入り、主の `git status` に worktree が出ない | `.gitignore` を worktree の中に置く |
@@ -162,9 +166,9 @@ flowchart LR
 | `plugins/ndf/src/ndf/domains/crossrefactor/workspace.py` | `_exclude_results` を消し、`prepare` からの呼び出しを外す。モジュールの説明の「`.cross_refactoring/` を git の除外へ足す」の行を消す | 1 |
 | `plugins/ndf/src/ndf/domains/worktree/create.py` | `_check_location`: `check-ignore` で止めるのをやめ、`ignored_dir.ensure(<.worktrees>)` を呼ぶ。保存先が既にあれば止めるのは今のまま。シグネチャは変えない | 1 |
 | `plugins/ndf/src/ndf/core/converge/location.py` | `work_root` が作る `.worktrees/.ndf` の親（`.worktrees`）を `ignored_dir.ensure` で作る | 1 |
-| `plugins/ndf/src/ndf/domains/backlog/state.py`・`plugins/ndf/src/ndf/progress/plan/run.py` と、置き場の表の追跡しないフォルダを作るほかの所 | その置き場のフォルダ（置き場の表のパス。下の階層ではなく表のパスそのもの）を作る `mkdir` を `ignored_dir.ensure` に替える。実装の最初のタスクで、置き場の表の各パス（`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/backlog/state`）を作る箇所を、置き場の単位（「NDF が作る置き場と、無視する仕組み」の表）のパスに作っているかとあわせて `git grep` で洗い出し、触るファイルを実装計画に列挙する | 1 |
+| `plugins/ndf/src/ndf/domains/backlog/state.py`・`plugins/ndf/src/ndf/progress/plan/run.py` と、置き場の一覧の追跡しないフォルダを作るほかの所 | その置き場のフォルダ（一覧のパス。下の階層ではなく一覧のパスそのもの）を作る `mkdir` を `ignored_dir.ensure` に替える。実装の最初のタスクで、置き場の一覧の各パス（`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/backlog/state`）を作る箇所を、置き場の単位（「NDF が作る置き場と、無視する仕組み」の表）のパスに作っているかとあわせて `git grep` で洗い出し、触るファイルを実装計画に列挙する | 1 |
 | `plugins/ndf/src/ndf/domains/worktree/setup.py` | `init`: メインディレクトリの `.ndf/.gitignore` が既にあっても、`worktree.local.json` の行が無ければ末尾に足す（既存の行は消さない。`atomic.write_text`）。シグネチャは変えない | 2 |
-| `plugins/ndf/contracts/domains/locations.json` | `.cross_refactoring` の行（`root: repo`、`tracked: false`）を足す。`worktrees` と `ndf-handoff` の `root` を `main` へ直す。`ndf-loop` の行を実体（作業ツリーに置かない）に合わせて直す | 1 |
+| `plugins/ndf/contracts/domains/locations.json`（置き場の一覧） | `.cross_refactoring` の行（起点は今の worktree の根、追跡しない）を足す。`.worktrees` と `.ndf/handoff` の行の起点をメインディレクトリの根へ直す。`.ndf/loop` の行を、git の内部のディレクトリに書く実際に合わせて直す | 1 |
 | `plugins/ndf/skills/worktree/SKILL.md` | 手順 2-2 のシェル（根の `.gitignore` への書き足しとコミット）を、「`create` が `.worktrees/` を作るときに中へ `.gitignore` を置く」の説明に替える | 1 |
 | `plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md` | 「作業場所」の「`.cross_refactoring/` は git の除外へ足す」を、「担当を起動する前に `.cross_refactoring/` を作り直す（前の作業ファイルを消し、追跡されていれば索引から外し、`*` だけの `.gitignore` を置く）」に書き換える | 1 |
 | `plugins/ndf/tests/core/test_ignored_dir.py`（新設） | 受け入れ条件 1・3 の行 | — |
