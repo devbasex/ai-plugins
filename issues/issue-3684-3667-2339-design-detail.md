@@ -367,6 +367,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `VERSION` | 定数（今の版） | `src/ndf/contracts/internal.py` | 1 |
+| 書式の検査器 | 関数（`date-time` の検査。`datetime.fromisoformat` で読めて時差が 0） | `src/ndf/contracts/internal.py` | `jsonschema.FormatChecker()` に登録し、核の検証器だけに渡す（`ndf.contracts.schema_errors` は変えない） |
 | 読める版 | データ | `contracts/schemas/internal/<種類>.schema.json` の `properties.version.enum` | `[1]` |
 | 名前の対応表 | データ | `contracts/data/internal-names.json` | 時刻は `at`、結果は `status` |
 
@@ -375,7 +376,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `read_record` | 今の版の行をそのまま返す | `version` の無い行（版 1 として読む） | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
-| `write_record` | `version` と `at` を埋めて返す | `at` を呼び出し元が渡した行（上書きしない） | 対応表に無い名前を持つ行（書かずに `InternalError`）・時差の無い時刻 |
+| `write_record` | `version` と `at` を埋めて返す | `at` を呼び出し元が渡した行（上書きしない）・`+00:00` の時刻（通る） | 対応表に無い名前を持つ行（書かずに `InternalError`）・時差の無い時刻・`+09:00` の時刻・UTC の接尾辞を持つ不正な日付（`2026-02-30T00:00:00Z`。書式の検査器で落ちる） |
 | `migrate` | 合成した版 1 → 2 の移行で項目が移る（今の版は 1 なので、移行の経路は合成したスキーマで確かめる） | 移す項目が無い版（そのまま） | 新しい版（止まる） |
 
 テストのファイル: `tests/contracts/test_internal.py`（新設）
