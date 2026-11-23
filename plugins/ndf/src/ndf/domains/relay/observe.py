@@ -35,6 +35,12 @@ CURSOR_FORWARD = re.compile(r"\x1b\[[0-9]*C")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
 LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
+# 背景の作業の `id` がファイル名に使える形（記録の保存先の外を指すパスを組まない。#4036）
+TASK_ID = re.compile(r"[A-Za-z0-9_-]+")
+# Bash の Tool のシェルの `cmdline` が持つ目印（`claude` の直接の子の `bash -c source <設定ディレクトリ>/shell-snapshots/snapshot-…`。
+# Claude Code 2.1.330 で背景の呼び出しも同じ形と実測した。#4036）。設定ディレクトリは既定の `~/.claude` のほか、
+# 登録済みアカウントの子では NDF が渡す `CLAUDE_CONFIG_DIR` なので、ディレクトリ名に依存しない
+SHELL_SNAPSHOT = "/shell-snapshots/snapshot-"
 ENDED = ("end_turn", "stop_sequence")  # 応答が終わった `stop_reason`
 USAGE_KEYS = claude.CONTEXT_FIELDS
 
@@ -55,6 +61,91 @@ def auth_failed(screen: str) -> bool:
 def transcript_path(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
     key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     return signals.claude_config_root(environ) / "projects" / key / f"{session_id}.jsonl"
+
+
+def subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]:
+    """セッションの会話の記録の隣の、背景のサブエージェントの会話の記録。`agent_id` がファイル名に使えなければ None。"""
+    if not TASK_ID.fullmatch(agent_id):
+        return None
+    return transcript.with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"
+
+
+def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, task_id: str) -> Optional[Path]:
+    """背景のシェルの出力のファイル（`<一時の保存先>/claude-<uid>/<作業ディレクトリのキー>/<session_id>/tasks/<id>.output`）。
+
+    一時の保存先は `CLAUDE_CODE_TMPDIR`、無ければ `/tmp`（Claude Code 2.1.330 の実測）。`task_id` がファイル名に使えなければ None。
+    """
+    if not TASK_ID.fullmatch(task_id):
+        return None
+    key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    root = Path(environ.get("CLAUDE_CODE_TMPDIR") or "/tmp")  # noqa: S108 Claude Code が置く場所を読むだけで、ここでは作らない
+    return root / f"claude-{os.getuid()}" / key / session_id / "tasks" / f"{task_id}.output"
+
+
+def process_parents(proc: Path = Path("/proc")) -> Optional[dict[int, int]]:
+    """`/proc` のプロセスごとの親 PID（`/proc/<pid>/stat`）。`/proc` を読めなければ None。
+
+    レーンの判定の読み直しごとに 1 度だけ組み、各レーンの `live_shells` で共有する（レーンごとに全体を読み直さない）。
+    走査の間に終わったプロセスと、`stat` を読めないプロセス（`hidepid=1` の他のユーザーのもの。proc(5)）は載せない。
+    """
+    try:
+        entries = list(proc.iterdir())
+    except OSError:  # noqa: NDF401 ファイル: /proc を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
+        return None
+    parents: dict[int, int] = {}
+    for entry in entries:
+        ppid = _parent_of(entry) if entry.name.isdigit() else None
+        if ppid is not None:
+            parents[int(entry.name)] = ppid
+    return parents
+
+
+def _parent_of(entry: Path) -> Optional[int]:
+    """`/proc/<pid>/stat` の親 PID。終わった・他のユーザーのプロセス（読めない `stat`）は None。"""
+    try:
+        stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+    except (FileNotFoundError, ProcessLookupError, PermissionError):  # noqa: NDF401 ファイル: 終わった・他のユーザーのプロセスは数えない
+        return None
+    fields = stat.rpartition(")")[2].split()  # `pid (comm) state ppid …`。comm は括弧や空白を含み得る
+    return int(fields[1]) if len(fields) >= 2 and fields[1].isdigit() else None
+
+
+def live_shells(wrapper_pid: int, parents: Optional[Mapping[int, int]], proc: Path = Path("/proc")) -> Optional[int]:
+    """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。
+
+    `parents` は `process_parents` の返り（None なら None）。ラッパーか `claude` が見つからない・`cmdline` を読めなければ None。
+    子は親 PID で絞る（`task/<tid>/children` は読む間に子が終わると、生きている別の子も欠け得る。proc_tid_children(5)）。
+    """
+    if parents is None or wrapper_pid not in parents:
+        return None
+    try:
+        conductor = next((c for c in _children(parents, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
+        if conductor is None:
+            return None
+        return sum(1 for c in _children(parents, conductor) if _is_shell(_args(proc, c)))
+    except OSError:  # noqa: NDF401 ファイル: cmdline を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
+        return None
+
+
+def _children(parents: Mapping[int, int], pid: int) -> list[int]:
+    return sorted(c for c, p in parents.items() if p == pid)
+
+
+def _args(proc: Path, pid: int) -> list[str]:
+    """`cmdline` の引数。読む前か読む間にプロセスが終わっていれば空（後者は `ESRCH`）。"""
+    try:
+        raw = (proc / str(pid) / "cmdline").read_bytes()
+    except (FileNotFoundError, ProcessLookupError):  # 子を数える間に終わったプロセスは数えない
+        return []
+    return raw.decode("utf-8", errors="replace").split("\0")[:-1]
+
+
+def _name(args: list[str]) -> str:
+    return Path(args[0]).name if args else ""
+
+
+def _is_shell(args: list[str]) -> bool:
+    return _name(args) == "bash" and any(SHELL_SNAPSHOT in a for a in args[1:])
 
 
 def context_tokens(path: Path, size: int) -> Optional[int]:

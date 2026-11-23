@@ -238,7 +238,7 @@
               "string",
               "null"
             ],
-            "description": "記録したセッション（context record）"
+            "description": "記録したセッション（context record）・ラッパーの今のセグメントのセッション（hub ls）"
           },
           "transcript": {
             "type": [
@@ -472,6 +472,13 @@
           "expires_at": {
             "type": "string",
             "description": "登録の途中の状態の期限（account add）"
+          },
+          "pid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "ラッパーのプロセスの id（hub ls。状態のファイルが無ければ null）"
           },
           "registered": {
             "type": "boolean",

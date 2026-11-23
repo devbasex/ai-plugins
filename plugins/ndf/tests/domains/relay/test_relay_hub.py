@@ -645,3 +645,27 @@ def test_the_listing_reads_each_wrapper_state_once(ctx, monkeypatch):
     monkeypatch.setattr(registry, "read_state", lambda d: reads.append(d.name) or real(d))
     rows = hub.listing(ctx)
     assert [r["name"] for r in rows] == ["t1", "t2"] and sorted(reads) == ["t1", "t2"]
+
+
+def test_4036_the_listing_carries_the_session_cwd_and_pid(ctx, hold_lock):
+    # 会話の記録を組む材料（session_id・cwd）とラッパーの pid を一覧の行に載せる（#4036）
+    _spawned(ctx, "t1")
+    registry.write_state(
+        registry.wrapper_dir(ctx.state_dir, "t1"),
+        {"version": VERSION, "state": "running", "session_id": "s1", "cwd": "/w", "pid": 42},
+    )
+    registry.write_state(registry.wrapper_dir(ctx.state_dir, "bare"), {"state": "running", "session_id": "s2", "cwd": "/b", "pid": 7})
+    fd = hold_lock(registry.wrapper_dir(ctx.state_dir, "bare") / registry.LOCK_FILE)
+    try:
+        rows = {r["name"]: r for r in hub.listing(ctx)}
+    finally:
+        os.close(fd)
+    assert (rows["t1"]["session_id"], rows["t1"]["cwd"], rows["t1"]["pid"]) == ("s1", "/w", 42)
+    assert (rows["bare"]["session_id"], rows["bare"]["cwd"], rows["bare"]["pid"]) == ("s2", "/b", 7)
+
+
+def test_4036_a_row_without_the_state_file_carries_none(ctx):
+    _spawned(ctx, "t1")
+    (registry.wrapper_dir(ctx.state_dir, "t1") / registry.STATE_FILE).unlink()
+    row = hub.listing(ctx)[0]
+    assert (row["session_id"], row["cwd"], row["pid"]) == (None, None, None)

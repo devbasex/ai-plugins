@@ -13,7 +13,7 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/contracts/limits.json` | `parallel-run.idle` の閾値（600 秒） |
-| `plugins/ndf/src/ndf/domains/relay/registry.py` | `activity.json` の読み書き（`write_activity`・`read_activity`・`ACTIVITY_FILE`） |
+| `plugins/ndf/src/ndf/domains/relay/signals.py` | `activity.json` の読み書き（`write_activity`・`read_activity`・`ACTIVITY_FILE`） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | Stop のたびに背景の作業の一覧とセッションを書く |
 | `plugins/ndf/src/ndf/domains/relay/hub.py` | `ndf relay ls` の行に `session_id`・`cwd`・`pid` |
 | `plugins/ndf/src/ndf/domains/relay/observe.py` | `subagent_transcript_path`・`live_shells`・`shell_output_path` |
@@ -49,8 +49,8 @@
 
 ### Task 3: 活動の記録を書く（`activity.json` と Stop の hook）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/relay/registry.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設）
-- **変更内容:** `write_activity`・`read_activity`・`ACTIVITY_FILE`（`registry.py` の冒頭の表に 1 行）と、`check` が中継の下なら早い戻りの前に生の `background_tasks` と `session_id` を書くこと。`write_activity`・`read_activity` の単体テストも書き込み元の hook のテストと同じファイルに置く（地図に `registry.py` を覆うテストのファイルが無いため）
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設）
+- **変更内容:** `write_activity`・`read_activity`・`ACTIVITY_FILE`（`signals.py` に置く。Stop の hook の閉包に `jsonschema` を入れないため）と、`check` が中継の下なら早い戻りの前に生の `background_tasks` と `session_id` を書くこと。`write_activity`・`read_activity` の単体テストも書き込み元の hook のテストと同じファイルに置く（書き込み元の hook と読み書きを一緒に確かめるため）
 - **満たす受け入れ条件:** 2・4
 - **進め方:** 失敗するテスト（詳細設計の「活動の記録」と「Stop の hook が活動を書く」の単体テストの観点の 3 行。明示の空のリストと観測できなかった `null` を読み分ける）→ 通す最小実装 → 整理
 
@@ -92,7 +92,7 @@
 | --- | --- | --- |
 | 実装の前（準備のリファクタリング） | しない | 触るファイルの最大は `run_decide.py` の 591 行と `hub.py` の 513 行で、どちらも触るのは 6 タスク中 1 タスク。最も多く触られる `liveness.py`（149 行）は 2 タスク（Task 2・5）で、`test_lane_liveness.py` に 16 件、`test_relay_hub.py` に 48 件のテストがある |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
-| スプリントの終わり（cross-refactoring） | `observe.subagent_transcript_path` と `context_report._subagents_dir`（記録から `subagents` の保存先を組む同じ形の処理）。`registry.write_activity` が使う `signals.replace_json` と #3877 の `worker_paths.write_file`（置き換えで書く同じ形の処理） | 前者は詳細設計が範囲の外とした寄せ先で、同じ組み方が 2 か所に並ぶ。後者は `3877-u1-paths` と `4036-u1-record` の単位をまたぐ |
+| スプリントの終わり（cross-refactoring） | `observe.subagent_transcript_path` と `context_report._subagents_dir`（記録から `subagents` の保存先を組む同じ形の処理）。`signals.write_activity` が使う `signals.replace_json` と #3877 の `worker_paths.write_file`（置き換えで書く同じ形の処理） | 前者は詳細設計が範囲の外とした寄せ先で、同じ組み方が 2 か所に並ぶ。後者は `3877-u1-paths` と `4036-u1-record` の単位をまたぐ |
 
 ## リスクと対処
 

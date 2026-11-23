@@ -505,8 +505,16 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
         state = registry.read_state(registry.wrapper_dir(ctx.state_dir, name))
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
         row = {"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason")}  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
-        out.append({**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False})
+        listed = {**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False}
+        out.append({**listed, **_session(state, listed.get("cwd"))})
     return out
+
+
+def _session(state: Optional[Mapping[str, Any]], cwd: Any) -> dict[str, Any]:
+    """会話の記録を組む材料とラッパーの pid（#4036）。`cwd` は `claude` を起動した場所（状態の値）を、状態に無ければ登録簿の値を使う。"""
+    if state is None:
+        return {"session_id": None, "cwd": cwd, "pid": None}
+    return {"session_id": state.get("session_id"), "cwd": state.get("cwd") or cwd, "pid": state.get("pid")}
 
 
 def _log(base: Path, rid: str, got: Outcome) -> None:

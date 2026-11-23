@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -225,3 +226,126 @@ def test_4227_the_limit_line_drawn_by_cursor_moves_is_found():
 
 def test_4227_a_forward_move_keeps_words_apart():
     assert observe.plain(b"a\x1b[2Cb\x1b[3;1Hc") == "a b\nc"
+
+
+# 背景のサブエージェントの会話の記録と背景のシェル（#4036）。形は 2026-11-23 に Claude Code 2.1.330 で実測した
+SNAPSHOT = "/home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh"
+SHELL_ARGS = ["/bin/bash", "-c", f"source {SNAPSHOT} 2>/dev/null || true && eval 'sleep 45' < /dev/null"]
+
+
+def test_4036_the_subagent_transcript_sits_beside_the_session(tmp_path):
+    got = observe.subagent_transcript_path(tmp_path / "sid.jsonl", "a150335adf8797c51")
+    assert got == tmp_path / "sid" / "subagents" / "agent-a150335adf8797c51.jsonl"
+    assert observe.subagent_transcript_path(tmp_path / "sid.jsonl", "a-b_C9") == tmp_path / "sid" / "subagents" / "agent-a-b_C9.jsonl"
+
+
+@pytest.mark.parametrize("agent_id", ["", "../x", "a/b", "a.b"])
+def test_4036_an_unsafe_subagent_id_builds_no_path(tmp_path, agent_id):
+    assert observe.subagent_transcript_path(tmp_path / "sid.jsonl", agent_id) is None
+
+
+def test_4036_the_shell_output_path_follows_the_claude_temp_layout():
+    got = observe.shell_output_path({}, observe.Path("/tmp/m.x/work"), "sid", "b7prporwe")
+    assert got == observe.Path(f"/tmp/claude-{os.getuid()}/-tmp-m-x-work/sid/tasks/b7prporwe.output")
+    moved = observe.shell_output_path({"CLAUDE_CODE_TMPDIR": "/t"}, observe.Path("/w"), "sid", "b1")
+    assert moved == observe.Path(f"/t/claude-{os.getuid()}/-w/sid/tasks/b1.output")
+
+
+def test_4036_an_unsafe_shell_id_builds_no_path():
+    assert observe.shell_output_path({}, observe.Path("/w"), "sid", "../x") is None
+
+
+def _proc(root, pid, args, ppid=1, comm=None):
+    (root / str(pid)).mkdir(parents=True)
+    (root / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
+    name = comm if comm is not None else observe.Path(args[0]).name
+    (root / str(pid) / "stat").write_text(f"{pid} ({name}) S {ppid} {pid} {pid} 0", encoding="utf-8")
+
+
+def test_4036_live_shells_counts_the_bash_tool_shells_under_claude(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude", "--session-id", "s"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 13, ["node", "mcp-server.js"], ppid=11)
+    _proc(tmp_path, 14, ["bash", "-c", "echo x"], ppid=11)
+    _proc(tmp_path, 15, SHELL_ARGS, ppid=99)  # 別の claude のシェルは数えない
+    (tmp_path / "self").mkdir()  # 数字でない項目は読まない
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
+
+
+def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
+    # 登録済みアカウントの子は NDF が渡す CLAUDE_CONFIG_DIR の直下に shell-snapshots を置く
+    account = "/home/u/.ndf/accounts/a1/shell-snapshots/snapshot-bash-2-y.sh"
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, ["/bin/bash", "-c", f"source {account} 2>/dev/null || true && eval 'sleep 45' < /dev/null"], ppid=11)
+    _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 2
+
+
+def test_4036_live_shells_reads_the_parent_past_a_command_name_with_parens(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"], comm="a) S 7 (b")
+    _proc(tmp_path, 11, ["claude"], ppid=10, comm="cl) 3 (x")
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
+
+
+def test_4036_live_shells_is_zero_without_children(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 0
+
+
+def test_4036_live_shells_is_none_without_the_wrapper_or_claude(tmp_path):
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["tmux"], ppid=10)
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
+
+
+def _raising(monkeypatch, method, target, exc):
+    real = getattr(observe.Path, method)
+
+    def fake(self, *a, **k):
+        if self == target:
+            raise exc
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(observe.Path, method, fake)
+
+
+def test_4036_process_parents_skips_a_pid_whose_stat_is_denied(tmp_path, monkeypatch):
+    # hidepid=1 では他のユーザーの PID は見えても stat は読めない（proc(5)）。その PID だけを外して続ける
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 50, ["other"])
+    _raising(monkeypatch, "read_text", tmp_path / "50" / "stat", PermissionError("denied"))
+    parents = observe.process_parents(tmp_path)
+    assert 50 not in parents
+    assert observe.live_shells(10, parents, tmp_path) == 1
+
+
+def test_4036_process_parents_is_none_without_proc(tmp_path):
+    assert observe.process_parents(tmp_path / "missing") is None
+    assert observe.live_shells(10, None, tmp_path) is None
+
+
+def test_4036_live_shells_skips_a_shell_that_ends_while_cmdline_is_read(tmp_path, monkeypatch):
+    # 開いた後に子が消えると cmdline の読み取りは ESRCH（ProcessLookupError）になる。終わった子として数えない
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
+    parents = observe.process_parents(tmp_path)
+    _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", ProcessLookupError("gone"))
+    assert observe.live_shells(10, parents, tmp_path) == 1
+
+
+def test_4036_live_shells_is_none_when_cmdline_cannot_be_read(tmp_path, monkeypatch):
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    parents = observe.process_parents(tmp_path)
+    _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", PermissionError("denied"))
+    assert observe.live_shells(10, parents, tmp_path) is None
