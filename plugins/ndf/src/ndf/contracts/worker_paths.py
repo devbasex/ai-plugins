@@ -540,19 +540,33 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
 def check_writable(wd: WorkDir, name: str) -> None:
     """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。
 
-    無い名前は通す。リンク数が 1 の通常のファイルでなければ `EntryUnsafe`、呼んだ利用者が書き込めなければ
-    `PermissionError` を上げる。初期化の前に呼び、消してから書けずに止まる組を作らない。
+    リンク数が 1 の通常のファイルでなければ `EntryUnsafe` を上げる。置き換え（一時ディレクトリの `mkdir` と
+    `os.replace`）に要る権限が無ければ `PermissionError` を上げる。見るのは、作業ディレクトリへ書き込んで入れること
+    （名前が無くても要る）、既存のファイルへ書き込めること、sticky bit の付いた作業ディレクトリでは既存のファイルか
+    作業ディレクトリを呼んだ利用者が持つこと（ほかの利用者のファイルは、グループで書き込めても置き換えを拒まれる）である。
+    初期化の前に呼び、消してから書けずに止まる組を作らない。
     """
     _check_name(name)
-    if entry_state(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
-        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
+    st = entry_state(wd, name)
+    where = str(wd.path / name)
+    if not os.access(".", os.W_OK | os.X_OK, dir_fd=wd.fd):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path))
+    if st is None:
+        return
+    if not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), where)
+    euid = os.geteuid()
+    parent = os.fstat(wd.fd)
+    if parent.st_mode & stat.S_ISVTX and euid != 0 and euid not in (st.st_uid, parent.st_uid):
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), where)
 
 
 def write_file(wd: WorkDir, name: str, text: str) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
     置き換えを許すのは、呼んだ利用者が書き込める既存のファイルだけである（読み取り専用なら `PermissionError`）。
-    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は、作った名前で先に
+    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）だけでは拒まず、置き換えを拒まれる組（`check_writable`）を
+    書き始める前に拒む。一時ディレクトリの後始末は、作った名前で先に
     一致を確かめ、それで片付けられないとき（同じ親の別名へ移されたとき）だけ開いた記述子から今の名前を引いて、作業
     ディレクトリの直下で開いた記述子と同じ inode の名前だけを消す。記述子は後始末が終わるまで閉じない。開けなかった一時ディレクトリと、開いても所有者・モードの確かめに落ちた一時ディレクトリは作ったものだと確かめられないので消さない。消すのは名前で引く
     `rmdir` で、確かめた後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず

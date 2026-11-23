@@ -871,3 +871,30 @@ def test_write_file_accepts_shared_directory_with_sticky_bit(workdir):
         worker_paths.write_file(wd, "f", "新")
     assert (d / "f").read_text(encoding="utf-8") == "新"
     assert [p.name for p in d.iterdir()] == ["f"]
+
+
+def test_reset_keeps_the_previous_report_when_a_sticky_directory_refuses_the_prompt(tmp_path, monkeypatch):
+    # sticky bit の共有の保存先では、ほかの利用者のファイルはグループで書き込めても置き換えを拒まれる。
+    # 消す前に止まり、前の報告・完了マーカー・結果ファイルを残す（PR 4307 の r3-1）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}"), (paths.prompt, "前の起動指示")):
+        path.write_text(text, encoding="utf-8")
+    d.chmod(0o1755)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.check_writable(wd, paths.prompt.name)  # 自分のファイルは sticky でも置き換えられる
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)  # ほかの利用者として確かめる
+        with pytest.raises(PermissionError):
+            worker_paths.reset_report(wd, paths, keep=(paths.prompt.name,))
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+def test_check_writable_passes_another_users_file_in_a_directory_without_the_sticky_bit(tmp_path, monkeypatch):
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "w.prompt.md").write_text("", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)
+        worker_paths.check_writable(wd, "w.prompt.md")
