@@ -301,12 +301,16 @@ def _is_arithmetic(word: str, start: int) -> bool:
         elif char in "()":
             depth += 1 if char == "(" else -1
             if depth == 0:
-                i += 1
-                while word.startswith("\\\n", i):
-                    i += 2
-                return word[i : i + 1] == ")"
+                return word[_after_continuations(word, i + 1) :][:1] == ")"
         i += 1
     return False
+
+
+def _after_continuations(word: str, i: int) -> int:
+    """`i` から続く行の継続（`\\` と改行）を飛ばした位置。Bash は終端を読む前に継続を外す。"""
+    while word.startswith("\\\n", i):
+        i += 2
+    return i
 
 
 def _substitution_end(word: str, double: bool, start: int) -> int | None:
