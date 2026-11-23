@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import struct
 from pathlib import Path
 
 import pytest
@@ -916,3 +917,53 @@ def test_write_file_keeps_the_mode_and_group_of_a_replaced_file(workdir):
     after = (d / "r").stat()
     assert (after.st_mode & 0o7777, after.st_gid) == (0o640, before.st_gid) and after.st_ino != before.st_ino
     assert (d / "new").stat().st_mode & 0o777 == 0o600
+
+
+# --- #3877 r2: 拡張 ACL のあるファイルの置き換え・検索権限の無い要素を打ち消す `..` ------------------------------
+
+
+def _acl(*entries: tuple[int, int, int]) -> bytes:
+    """`system.posix_acl_access` の値（版 2 と、タグ・権限・識別子の並び）。"""
+    return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *e) for e in entries)
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="POSIX ACL を設定できない")
+def test_write_file_copies_the_acl_of_a_replaced_file(workdir):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o600)
+    undefined = 0xFFFFFFFF
+    # 所有グループは読めず、別の利用者だけが ACL で読める（モードのグループのビットはマスクの r になる）
+    acl = _acl((0x01, 6, undefined), (0x02, 4, os.geteuid() + 1), (0x04, 0, undefined), (0x10, 4, undefined), (0x20, 0, undefined))
+    try:
+        os.setxattr(d / "r", "system.posix_acl_access", acl)
+    except OSError:
+        pytest.skip("このファイルシステムは POSIX ACL に対応しない")
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert os.getxattr(d / "r", "system.posix_acl_access") == acl
+    assert (d / "r").read_text(encoding="utf-8") == "後"
+
+
+def test_write_file_drops_group_bits_when_the_acl_cannot_be_checked(workdir, monkeypatch):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    monkeypatch.setattr(worker_paths, "_access_acl", lambda wd, name, existing: worker_paths._ACL_UNKNOWN)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert (d / "r").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+def test_open_workdir_refuses_dotdot_that_cancels_a_directory_without_search_permission(workdir):
+    d, _ = workdir
+    (d / "result.json").write_text("前", encoding="utf-8")
+    (d / "private").mkdir()
+    (d / "private").chmod(0o600)
+    try:
+        with pytest.raises(PermissionError), worker_paths.open_workdir(d / "private" / ".."):
+            pass
+    finally:
+        (d / "private").chmod(0o700)
+    assert (d / "result.json").read_text(encoding="utf-8") == "前"

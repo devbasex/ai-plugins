@@ -303,45 +303,76 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
     その手前の要素は作らずに開き、開いた記述子を `origin.anchor` と突き合わせし、無くなっているか解いた時点のディレクトリで
     なければ `EntryUnsafe`（`replaced`）で止める。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
-    `directory` に `..` があれば、畳む前に `_check_cancelled` で打ち消す要素を確かめる（利用者の `--out` などを受けるとき）。
+    `directory` に `..` があれば、字面で畳まずに `_open_dir_through_dotdot` で一度の走査で開く（利用者の `--out` などを受けるとき）。
+    `origin` は `..` を含まないパス（`prepare_paths` が返したもの）にだけ渡す。
     """
-    _check_cancelled(directory)
-    path = Path(os.path.abspath(directory))
-    fd, created = _open_dir_nofollow(path, create=create, origin=origin)
+    probe = Path(directory).absolute()
+    path = Path(os.path.abspath(probe))
+    if ".." in probe.parts:
+        if origin is not None:
+            raise ValueError(f"origin は `..` を含まないパスにだけ渡す: {str(directory)!r}")
+        fd, created = _open_dir_through_dotdot(probe, create=create)
+    else:
+        fd, created = _open_dir_nofollow(path, create=create, origin=origin)
     try:
         yield WorkDir(path, fd, created)
     finally:
         os.close(fd)
 
 
-def _check_cancelled(directory: Path) -> None:
-    """`..` が打ち消す要素が、リンクでない既存のディレクトリであることを確かめる。違えば `EntryUnsafe`。
+def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:
+    """`..` を含む絶対パスを、根から 1 要素ずつ確かめた親の記述子に対して開き、`..` もその記述子から引いて一度で開く。
 
-    `os.path.abspath` は `alias/..` を字面で畳むが、カーネルは `alias` の指す先の親へ進む。字面で畳んだ場所を開くと、
-    利用者のパスが指す先とは別の既存のファイルを書き換えるので、打ち消す要素がリンク（`symlink`）・無い・
-    ディレクトリでない（`other`）なら書き込む前に拒む。打ち消さない要素のリンクは `_open_dir_nofollow` が拒む。
-    打ち消す要素は手前の要素から `lstat` するので、手前の要素がリンクでもその要素自身を打ち消すときに拒む。
+    `os.path.abspath` は `alias/..` を字面で畳むが、カーネルは `alias` の指す先の親へ進み、検索権限の無い `private/..` では
+    止まる。字面で畳んだ場所を開くと利用者のパスが指す先とは別の既存のファイルを書き換えるので、打ち消す要素も
+    リンクをたどらずに開き（リンクなら `symlink`、無い・ディレクトリでなければ `other` の `EntryUnsafe`）、`..` は開いた
+    記述子に対する `openat` で引く。カーネルがその要素の検索権限を確かめ、無ければ `PermissionError` で止まる。
+    引いた親が手前で開いた記述子と同じディレクトリでなければ（間に要素を移された）`EntryUnsafe`（`replaced`）。
+    確かめた記述子から先だけを開くので、確かめてから開くまでの差し替えは起きない。
+    打ち消す要素は `create` でも作らない。打ち消さない要素は `_open_dir_nofollow` と同じく `_open_child` で開く（作る）。
+    最後の位置は `O_RDONLY` で開き直す。開いた記述子と、無かった要素を作ったかを返す。
     """
-    probe = Path(directory).absolute()
-    kept: list[str] = []
-    for part in probe.parts[1:]:
-        if part in ("", "."):
-            continue
+    parts = [p for p in probe.parts[1:] if p not in ("", ".")]
+    cancelled: set[int] = set()
+    stack: list[int] = []
+    for i, part in enumerate(parts):
         if part != "..":
-            kept.append(part)
-            continue
-        if not kept:  # 根の親は根
-            continue
-        at = Path(probe.anchor).joinpath(*kept)
-        try:
-            st = os.lstat(at)
-        except (FileNotFoundError, NotADirectoryError):
-            raise EntryUnsafe(str(at), "other") from None
-        if stat.S_ISLNK(st.st_mode):
-            raise EntryUnsafe(str(at), "symlink")
-        if not stat.S_ISDIR(st.st_mode):
-            raise EntryUnsafe(str(at), "other")
-        kept.pop()
+            stack.append(i)
+        elif stack:  # 根の親は根
+            cancelled.add(stack.pop())
+    fds = [os.open(probe.anchor, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)]
+    created = False
+    try:
+        for i, part in enumerate(parts):
+            if part == "..":
+                if len(fds) > 1:
+                    _leave_dir(fds, probe)
+                continue
+            flags = _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            try:
+                child, made = _open_child(fds[-1], part, flags, probe, create=create and i not in cancelled)
+            except FileNotFoundError:
+                if i in cancelled:
+                    raise EntryUnsafe(str(probe), "other") from None
+                raise
+            created = created or made
+            fds.append(child)
+        return os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=fds[-1]), created
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def _leave_dir(fds: list[int], probe: Path) -> None:
+    """`fds[-1]` から `..` を引き、`fds[-2]` と同じディレクトリなら `fds[-1]` を閉じて外す。違えば `EntryUnsafe`（`replaced`）。"""
+    up = os.open("..", _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=fds[-1])
+    try:
+        now, before = os.fstat(up), os.fstat(fds[-2])
+    finally:
+        os.close(up)
+    if (now.st_dev, now.st_ino) != (before.st_dev, before.st_ino):
+        raise EntryUnsafe(str(probe), "replaced")
+    os.close(fds.pop())
 
 
 def dir_id(wd: WorkDir) -> tuple[int, int]:
@@ -596,6 +627,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
     公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
+    拡張 ACL のあるファイルは ACL ごと写し、写せなければグループの権限を写さない（アクセスを広げない）。
     """
     _check_name(name)
     data = text.encode("utf-8")
@@ -621,7 +653,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         created = True
         with os.fdopen(fd, "wb") as f:
             if existing is not None:
-                _inherit_access(f.fileno(), existing)
+                _inherit_access(f.fileno(), existing, _access_acl(wd, name, existing))
             f.write(data)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
@@ -631,11 +663,50 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         _clean_tmp(wd, tmp_fd, tmp, st if private else None, created=created, published=published)
 
 
-def _inherit_access(fd: int, existing: os.stat_result) -> None:
+_ACL_ACCESS = "system.posix_acl_access"
+
+
+class _AclUnknown:
+    """既存のファイルに拡張 ACL があるかを確かめられなかった（`_access_acl`）。"""
+
+
+_ACL_UNKNOWN = _AclUnknown()
+
+
+def _access_acl(wd: WorkDir, name: str, existing: os.stat_result) -> "Optional[bytes] | _AclUnknown":
+    """置き換える既存のファイルの POSIX ACL（`system.posix_acl_access` の値）。無ければ None。
+
+    拡張 ACL のあるファイルでは、モードのグループのビットは所有グループの権限ではなく ACL のマスクなので、
+    `_inherit_access` はビットだけを写さず ACL ごと写す。リンクをたどらずに `O_PATH` で開いた記述子を `/proc/self/fd`
+    から引き、確かめた inode（`existing`）でなければ `EntryUnsafe`（`replaced`）。POSIX ACL を引けない OS
+    （`O_PATH` か `os.getxattr` が無い）と、ACL に対応しないファイルシステムは None。それ以外で引けなければ
+    `_ACL_UNKNOWN` を返し、`_inherit_access` はグループの権限を写さない（アクセスを広げない）。
+    """
+    if not hasattr(os, "O_PATH") or not hasattr(os, "getxattr"):
+        return None
+    fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+    try:
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) != (existing.st_dev, existing.st_ino):
+            raise EntryUnsafe(name, "replaced")
+        try:
+            return os.getxattr(f"/proc/self/fd/{fd}", _ACL_ACCESS)
+        except OSError as e:
+            if e.errno in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP):
+                return None
+            return _ACL_UNKNOWN
+    finally:
+        os.close(fd)
+
+
+def _inherit_access(fd: int, existing: os.stat_result, acl: "Optional[bytes] | _AclUnknown" = None) -> None:
     """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
 
     グループは呼んだ利用者が属するときだけ変えられる。変えられなければ元のグループのまま、モードだけを写す
     （グループの権限を、元と違うグループへ与えない）。
+    既存のファイルに拡張 ACL（`acl`）があれば、グループのビットはマスクなので写さず、ACL ごと写す。
+    写せない（グループを変えられない・ACL を設定できない・ACL を確かめられなかった）ときは、グループのビットを 0 にして
+    所有者とその他の権限だけを写す（所有グループ・ACL で許した利用者へ元より広い権限を与えない）。
     """
     group_kept = True
     if existing.st_gid != os.fstat(fd).st_gid:
@@ -644,7 +715,14 @@ def _inherit_access(fd: int, existing: os.stat_result) -> None:
         except PermissionError:  # 属さないグループへは変えられない。グループの権限を写さずに続ける
             group_kept = False
     mode = stat.S_IMODE(existing.st_mode) & 0o777
-    os.fchmod(fd, mode if group_kept else mode & ~0o070)
+    narrowed = mode & ~0o070
+    if acl is None:
+        os.fchmod(fd, mode if group_kept else narrowed)
+        return
+    os.fchmod(fd, narrowed)
+    if group_kept and isinstance(acl, bytes):
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: ACL を写せなければグループの権限を 0 にしたまま公開する
+            os.setxattr(fd, _ACL_ACCESS, acl)
 
 
 def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_result], *, created: bool, published: bool) -> None:
