@@ -121,7 +121,8 @@ plugins/ndf/
 | 工程の定義 | 今 | 直した後 |
 | --- | --- | --- |
 | `requirements`・`worktree`・`design`・`design-detail`・`document-sources`・`document-rebuild`・`document-review` | `design` | `design`（変えない） |
-| `plan`・`implement`・`refactor`・`code-review`・`quality-gates`・`pull-request` | `implement` | `implement`（変えない） |
+| `plan` | `implement` | `implement`（#4050 では変えない。#3702 が `design` へ移し、工程の並びを詳細設計の直後へ移す。設計文書の決定 22） |
+| `implement`・`refactor`・`code-review`・`quality-gates`・`pull-request` | `implement` | `implement`（変えない） |
 | `cleanup` | `release` | 無し（キーを外す） |
 | `deploy` | `release` | `release`（変えない） |
 | `plan-to-spec` | `close` | `spec`。`inputs` から `worktree`・`branch` を外す |
@@ -471,9 +472,9 @@ plugins/ndf/
 
 ### 単体テストの観点
 
-- `standard` のスプリントで「計画」の手前と確定仕様化の手前でだけ `Env.hold` が呼ばれ、「要求と受け入れ条件」〜「ドキュメントレビュー」の 2 つ目以降の工程・同じフェーズの 2 つ目以降の工程・クリーンアップでは呼ばれない（クリーンアップと同じフェーズの次の工程では `Env.busy` だけが呼ばれる）
-- `light` のスプリントで最初の工程の手前で待つ。`drift` が空でないときは、工程の作業を起動しない（差し替えた作業の起動の呼び出しが 0 回）まま確認の結果を返し、`--drift-reviewed` の後に起動する
-- 設計の工程で `ndf progress work` を起動した worker が「計画」の手前まで進んで待ちを記録した後、CLI の `ndf progress wait`（`gate/entry.py` の入口から `lane_env` の `Env` で打つ経路）が `held` を `next` 無しで返す。確定仕様化の宣言の重なりで待った行でも同じ形（`held.phase` が `spec`）を返す。`Env` を渡さない `wait` の呼び出しに戻すと、工程を起動する `next` を返して落ちる
+- `standard` のスプリントで最初の `implement` の工程（#3702 の前は「計画」、後は「実装」。テストは `plan.json` の `phase` を両方の値にして流す）の手前と確定仕様化の手前でだけ `Env.hold` が呼ばれ、「要求と受け入れ条件」〜「ドキュメントレビュー」の 2 つ目以降の工程・同じフェーズの 2 つ目以降の工程・クリーンアップでは呼ばれない（クリーンアップと同じフェーズの次の工程では `Env.busy` だけが呼ばれる）
+- `light` のスプリントで最初の `implement` の工程（実装）の手前で待つ。`drift` が空でないときは、工程の作業を起動しない（差し替えた作業の起動の呼び出しが 0 回）まま確認の結果を返し、`--drift-reviewed` の後に起動する
+- 設計の工程で `ndf progress work` を起動した worker が最初の `implement` の工程の手前まで進んで待ちを記録した後、CLI の `ndf progress wait`（`gate/entry.py` の入口から `lane_env` の `Env` で打つ経路）が `held` を `next` 無しで返す。確定仕様化の宣言の重なりで待った行でも同じ形（`held.phase` が `spec`）を返す。`Env` を渡さない `wait` の呼び出しに戻すと、工程を起動する `next` を返して落ちる
 - `row resumed` の後、`next` の前に止めたスプリントで、次の `next` が `drift` を返す。ラッパーの conductor が起動し直しより先に `next` を打っても `drift` が返る
 - `drift` が null で記録された行で `next` を打ち直しても、起動し直した conductor が `next` を打っても、確認の結果を返して工程の作業を起動しない。`--drift-reviewed` の後にだけ起動する
 - 実装の後に確定仕様化を待つ行で、`next`・`wait`・`status`・`judge` が同じ待つ先（`phase_wait` の `spec`）を返す（`status` が `implementation_wait` を読むと空を出して落ちる）
