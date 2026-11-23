@@ -207,6 +207,7 @@ def issues(monkeypatch: pytest.MonkeyPatch) -> dict[int, str]:
     # 課題 1 は条件 1・2 に記録があり 3 に無い。課題 2 は記録が無い
     held = {1: acc.recorded_body(BODY, {1: "pytest"}, [2]), 2: BODY}
     monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: held[n])
+    monkeypatch.setattr(acceptance, "read_bodies", lambda cwd, ns: {n: held[n] for n in ns})
     return held
 
 
@@ -267,3 +268,18 @@ def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loo
     got = loop("record", "--issue", "7", "--pre-merge", "1=pytest", "--post-release", "2")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert [g["name"] for g in got["gaps"]] == ["7:1", "7:2"]
+
+
+def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, loop):
+    # 束ねた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）
+    calls: list[list[int]] = []
+
+    class Hub:
+        def nodes(self, numbers, node, fields):
+            calls.append(sorted(numbers))
+            return {n: {"body": BODY} for n in numbers}
+
+    monkeypatch.setattr(acceptance, "_hub", lambda cwd: Hub())
+    monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: pytest.fail("課題ごとに読んだ"))
+    got = loop("check", "--issue", "1", "--issue", "2")
+    assert calls == [[1, 2]] and [g["name"] for g in got["gaps"]][:1] == ["1:1"]

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,20 @@ def _hub(cwd: Path) -> github.GitHub:
 def read_body(cwd: Path, issue: int) -> str:
     """課題の本文（GitHub から読む）。テストが差し替える。"""
     return _hub(cwd).issue_body(issue).body
+
+
+def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
+    """課題ごとの本文。1 件は `read_body`、2 件以上は 1 回の GraphQL のクエリ（`github.graphql-batch` 件ごと）でまとめて読む。
+
+    束ねた課題の数だけ GitHub を呼ばない（#3908 の r1-8）。読めない課題があれば `AcceptanceError`。
+    """
+    if len(issues) == 1:
+        return {issues[0]: read_body(cwd, issues[0])}
+    got = _hub(cwd).nodes(issues, "issueOrPullRequest", "body")
+    unread = sorted(n for n in issues if not isinstance(got.get(n, {}).get("body"), str))
+    if unread:
+        raise acc.AcceptanceError(f"課題 {', '.join(f'#{n}' for n in unread)} の本文を読めない")
+    return {n: got[n]["body"] for n in issues}
 
 
 def write_body(cwd: Path, issue: int, body: str) -> None:
@@ -142,10 +157,9 @@ def parse_criteria(values: list[str], issues: list[int]) -> dict[int, set[int]]:
     return out
 
 
-def _check_one(cwd: Path, issue: int, wanted: set[int]) -> tuple[list[acc.Criterion], list[acc.Criterion], dict[int, acc.Check]]:
-    """1 つの課題の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らし、
+def _check_one(body: str, issue: int, wanted: set[int]) -> tuple[list[acc.Criterion], list[acc.Criterion], dict[int, acc.Check]]:
+    """1 つの課題（本文 `body`）の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らし、
     空でなければ 3 つとも `wanted` の番号に絞る。"""
-    body = read_body(cwd, issue)
     found = acc.criteria(body)
     missing = sorted(wanted - {c.number for c in found})
     if missing:
@@ -166,8 +180,9 @@ def _check(a: argparse.Namespace) -> dict[str, Any]:
     found: list[acc.Criterion] = []
     gaps: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
+    bodies = read_bodies(a.cwd, a.issue)
     for issue in a.issue:
-        each, left, checks = _check_one(a.cwd, issue, wanted.get(issue, set()))  # noqa: NDF502 利用者の入力: --criteria を渡さなかった課題は条件で絞らない
+        each, left, checks = _check_one(bodies[issue], issue, wanted.get(issue, set()))  # noqa: NDF502 利用者の入力: --criteria を渡さなかった課題は条件で絞らない
         tag = f"{issue}:" if prefixed else ""
         found += each
         gaps += [{"kind": "criterion", "name": f"{tag}{c.number}", "reason": f"確認の区分の記録が無い: {c.text}"} for c in left]
