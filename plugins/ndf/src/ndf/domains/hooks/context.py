@@ -25,6 +25,10 @@ _LOOP_NODES = _WAIT_LOOPS | frozenset({"for_statement", "c_style_for_statement"}
 _INNER_DEPTH = 5
 # 語として読むセクション（引用を外して読む）
 _WORD_NODES = frozenset({"word", "string", "raw_string", "number", "concatenation", "simple_expansion", "expansion", "ansi_c_string"})
+# リダイレクトの先が実行時に決まるセクションの種類（変数・算術の展開、コマンド置換・プロセス置換）
+_DYNAMIC_NODE = re.compile(r"(expansion|substitution)$")
+# ヒアドキュメントとヒアストリングのセクション
+_HEREDOC_NODES = frozenset({"heredoc_redirect", "herestring_redirect"})
 
 # 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
 _WAIT_RE = re.compile(
@@ -58,16 +62,29 @@ class ShellCommand(NamedTuple):
         return os.path.basename(self.body_argv[0]) if self.body_argv else ""
 
 
+class Redirect(NamedTuple):
+    """`file_redirect` の 1 つ。`op` は演算子（`2>&-` は `>&` と先 `-`）、`target` は先の字面、`dynamic` は先が実行時に決まるか。"""
+
+    op: str
+    target: str
+    dynamic: bool
+
+
 class ShellScript(NamedTuple):
     """シェルの構文木から読んだもの。
 
     `commands` と `loops`（ループのセクションを含むか）は外側の単純コマンドだけを見る。`waits` は外側の単純コマンドに、
     `bash -c` 系・`eval` の中身の単純コマンド（外側の背景とループの位置を引き継ぐ）を足した列で、待ちの guard が見る。
+    `redirects`・`heredocs`（ヒアドキュメントとヒアストリングの数）・`assignments`（変数の代入の数）は外側のスクリプトだけを見る
+    （#3995。運用上限の guard が引継ぎのコマンドを照らす）。
     """
 
     commands: tuple[ShellCommand, ...]
     loops: bool
     waits: tuple[ShellCommand, ...] = ()
+    redirects: tuple[Redirect, ...] = ()
+    heredocs: int = 0
+    assignments: int = 0
 
 
 def parse_payload(text: str) -> Optional[dict[str, Any]]:
@@ -85,34 +102,55 @@ def _parser() -> Any:
 
 def parse_shell(text: str) -> ShellScript:
     """シェルの文を構文木で読む（tree-sitter-bash）。"""
-    commands, loops = _walk(text)
-    waits = list(commands)
-    for cmd in commands:
-        waits += [c for script in _inner_scripts(cmd) for c in _collect(script, 1, cmd)]
-    return ShellScript(tuple(commands), loops, tuple(waits))
+    script = _walk(text)
+    waits = list(script.commands)
+    for cmd in script.commands:
+        waits += [c for inner in _inner_scripts(cmd) for c in _collect(inner, 1, cmd)]
+    return script._replace(waits=tuple(waits))
 
 
-def _walk(text: str) -> tuple[list[ShellCommand], bool]:
-    """1 つのスクリプトの単純コマンドと、ループのセクションを含むか。"""
+def _walk(text: str) -> ShellScript:
+    """1 つのスクリプトの単純コマンド・ループのセクションを含むか・リダイレクト・ヒアドキュメント・変数の代入（`waits` は空）。"""
     tree = _parser().parse(text.encode("utf-8"))
     commands: list[ShellCommand] = []
+    redirects: list[Redirect] = []
     loops = False
+    heredocs = assignments = 0
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
         loops = loops or node.type in _LOOP_NODES
+        heredocs += node.type in _HEREDOC_NODES
+        assignments += node.type == "variable_assignment"
         if node.type == "command":
             body, condition = _loop_position(node)
             commands.append(ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True))))
+        elif node.type == "file_redirect":
+            redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
-    return commands, loops
+    return ShellScript(tuple(commands), loops, (), tuple(redirects), heredocs, assignments)
+
+
+def _redirect(node: Any) -> Redirect:
+    """`file_redirect` の演算子・先の字面・先が実行時に決まるか。`>&-`・`<&-` は演算子と先 `-` に分ける。"""
+    target = node.child_by_field_name("destination")
+    op = "".join(c.text.decode("utf-8", "replace") for c in node.children if c != target and c.type != "file_descriptor")
+    text = target.text.decode("utf-8", "replace") if target is not None else ""
+    if op in (">&-", "<&-") and not text:
+        op, text = op[:-1], "-"
+    dynamic = False
+    stack = [target] if target is not None else []
+    while stack:
+        current = stack.pop()
+        dynamic = dynamic or bool(_DYNAMIC_NODE.search(current.type))
+        stack.extend(current.children)
+    return Redirect(op, text, dynamic)
 
 
 def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[ShellCommand]:
     """`bash -c` 系・`eval` の中身の単純コマンド。`outer` の背景とループの位置を論理和で引き継ぎ、深さの上限まで読み直す。"""
     found: list[ShellCommand] = []
-    commands, _ = _walk(text)
-    for inner in commands:
+    for inner in _walk(text).commands:
         cmd = _inherit(inner, outer)
         found.append(cmd)
         if depth < _INNER_DEPTH:
