@@ -898,3 +898,33 @@ def test_check_writable_passes_another_users_file_in_a_directory_without_the_sti
     with worker_paths.open_workdir(d) as wd:
         monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)
         worker_paths.check_writable(wd, "w.prompt.md")
+
+
+def test_reset_keeps_the_done_marker_when_the_result_of_another_user_cannot_be_removed(tmp_path, monkeypatch):
+    # sticky bit の保存先で結果ファイルだけをほかの利用者が持つと、消す前に止まり、完了マーカーを残す（PR 4307 の r4-1）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}")):
+        path.write_text(text, encoding="utf-8")
+    d.chmod(0o1755)
+    me, other = 4242, 4243  # root でも sticky bit の制限を受ける利用者として確かめる
+    real_stat, real_fstat = os.stat, os.fstat
+
+    def owned_by(st, uid):
+        return os.stat_result((*tuple(st)[:4], uid, *tuple(st)[5:10]))
+
+    def fake_stat(path, *args, **kwargs):
+        # 結果ファイルだけをほかの利用者の持ち物に見せる
+        st = real_stat(path, *args, **kwargs)
+        return owned_by(st, other) if path == paths.result.name else st
+
+    with worker_paths.open_workdir(d) as wd:
+        monkeypatch.setattr(os, "geteuid", lambda: me)
+        monkeypatch.setattr(os, "stat", fake_stat)
+        monkeypatch.setattr(os, "fstat", lambda fd: owned_by(real_fstat(fd), other + 1))  # 保存先もほかの利用者が持つ
+        with pytest.raises(PermissionError):
+            worker_paths.reset_report(wd, paths)
+        monkeypatch.undo()
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"

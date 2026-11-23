@@ -537,28 +537,35 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
         raise EntryUnreadable(name, str(e)) from None
 
 
-def check_writable(wd: WorkDir, name: str) -> None:
-    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。
+def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    """`name` を消せるか（置き換えも同じ権限が要る）を、何も変えずに確かめる。名前があればその stat を返す。
 
-    リンク数が 1 の通常のファイルでなければ `EntryUnsafe` を上げる。置き換え（一時ディレクトリの `mkdir` と
-    `os.replace`）に要る権限が無ければ `PermissionError` を上げる。見るのは、作業ディレクトリへ書き込んで入れること
-    （名前が無くても要る）、既存のファイルへ書き込めること、sticky bit の付いた作業ディレクトリでは既存のファイルか
-    作業ディレクトリを呼んだ利用者が持つこと（ほかの利用者のファイルは、グループで書き込めても置き換えを拒まれる）である。
-    初期化の前に呼び、消してから書けずに止まる組を作らない。
+    リンク数が 1 の通常のファイルでなければ `EntryUnsafe` を上げる。見るのは、作業ディレクトリへ書き込んで入れること
+    （名前が無くても要る）と、sticky bit の付いた作業ディレクトリでは既存のファイルか作業ディレクトリを呼んだ利用者が
+    持つこと（ほかの利用者のファイルは、グループで書き込めても消すことと置き換えることを拒まれる）で、無ければ
+    `PermissionError` を上げる。
     """
     _check_name(name)
     st = entry_state(wd, name)
-    where = str(wd.path / name)
     if not os.access(".", os.W_OK | os.X_OK, dir_fd=wd.fd):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path))
     if st is None:
-        return
-    if not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
-        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), where)
+        return None
     euid = os.geteuid()
     parent = os.fstat(wd.fd)
     if parent.st_mode & stat.S_ISVTX and euid != 0 and euid not in (st.st_uid, parent.st_uid):
-        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), where)
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), str(wd.path / name))
+    return st
+
+
+def check_writable(wd: WorkDir, name: str) -> None:
+    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。
+
+    `check_removable`（一時ディレクトリの `mkdir` と `os.replace` に要る作業ディレクトリ側の権限）に加えて、既存の
+    ファイルへ書き込めることを見て、無ければ `PermissionError` を上げる。初期化の前に呼び、消してから書けずに止まる組を作らない。
+    """
+    if check_removable(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
 
 
 def write_file(wd: WorkDir, name: str, text: str) -> None:
@@ -680,12 +687,15 @@ def reset_report(wd: WorkDir, paths: ReportPaths, keep: Iterable[str] = ()) -> t
     残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
     無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。どれかがリンクなら
     リンクもリンクの先も変えずに `EntryUnsafe` を上げる。報告を書き込めないときも、消す前に `PermissionError` で止める。
-    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、消す前に同じく書けるかを確かめる。
+    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、消す前に同じく書けるかを確かめる。完了マーカーと結果
+    ファイルは、どちらかを消す前に両方を消せるか（`check_removable`）を確かめ、片方だけ消えて止まる組を作らない。
     返りは完了マーカーと結果ファイルの `remove_file` の返り。
     """
     check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
     for name in (paths.report.name, *keep):
         check_writable(wd, name)
+    for name in (paths.done.name, paths.result.name):
+        check_removable(wd, name)
     done = remove_file(wd, paths.done.name)
     removed = remove_file(wd, paths.result.name)
     write_file(wd, paths.report.name, "")
