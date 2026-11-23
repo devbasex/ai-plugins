@@ -44,6 +44,12 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         ("rm \"${D:-'$F'}/cache\"", "\"${D:-'$F'}/cache\""),
         ("rm ${D:-'}'$F}/cache", "${D:-'}'$F}/cache"),
         ("rm ${D:-'$F'}/cache", None),
+        # 既定値が空を返しうる（位置パラメータ・行の継続だけ・引用の外の空の単引用）。二重引用の中の `''` は字が残る
+        ('rm "${D:-${1}}/cache"', '"${D:-${1}}/cache"'),
+        ('rm "${D:-\\\n}/cache"', '"${D:-\\\n}/cache"'),
+        ("rm ${D:-''}/cache", "${D:-''}/cache"),
+        ("rm \"${D:-''}/cache\"", None),
+        ('rm "${D:-$$}/x"', None),
         ("ls $W", None),
         ("rm -f 'cost$5.txt'", None),
         ("rm -f cost\\$5.txt", None),
@@ -60,6 +66,13 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         # `env -S` の `\$` は文字のまま渡り、`${D}` は env が展開する
         ("env -S 'rm -f \\${D}/cache'", None),
         ("env -S 'rm -f ${D}/cache'", "${D}'/cache'"),
+        # 二重引用の `\$` は外側の Bash が外すので、env が `${D}` を展開する（別の語・付けた語の両方）
+        ('env -S "rm -f \\${D}/cache"', "${D}'/cache'"),
+        ('env -S"rm -f \\${D}/cache"', "${D}'/cache'"),
+        ('env --split-string="rm -f \\${D}/cache"', "${D}'/cache'"),
+        ('env --split-string "rm -f \\${D}/cache"', "${D}'/cache'"),
+        # ANSI-C 引用の数値のエスケープは Bash が字に戻す（`\x72m` は `rm`）
+        ("bash -c $'\\x72m -f \"$W/x\"'", '"$W/x"'),
         # オプションの値は削除の対象でない。`--` の後は `-` で始まっても対象
         ('rm --interactive="$mode" /tmp/x', None),
         ('rm -- -"$W"', '-"$W"'),
@@ -87,6 +100,11 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "single-quote-in-double-quoted-default",
         "quoted-brace-in-default",
         "single-quoted-default",
+        "positional-only-default",
+        "line-continuation-default",
+        "empty-single-quotes-default",
+        "single-quotes-in-double-quoted-default",
+        "pid-default",
         "not-rm",
         "single-quoted-dollar",
         "escaped-dollar",
@@ -100,6 +118,11 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "eval-escaped",
         "env-split-escaped-dollar",
         "env-split-variable",
+        "env-split-double-quoted",
+        "env-split-attached",
+        "env-split-long-attached",
+        "env-split-long",
+        "ansi-c-hex-command",
         "option-value",
         "after-double-dash",
         "option-name-from-variable",
@@ -202,7 +225,15 @@ def test_the_table_row_is_not_counted_and_keeps_denying_after_the_limit(tmp_path
         ("${W:=/tmp}", False),
         ("${#W}", False),
         ("${1}", False),
+        ("${W:-${1}}", True),
+        ("${W:-''}", True),
+        ("${W:-$$}", False),
     ],
 )
 def test_can_be_empty_reads_the_form_of_one_expansion(expansion, empty):
     assert rm_variable.can_be_empty(expansion) is empty
+
+
+def test_can_be_empty_keeps_single_quotes_inside_double_quotes():
+    # 二重引用の中の既定値の `'` は字のまま残る
+    assert rm_variable.can_be_empty("${W:-''}", in_double=True) is False

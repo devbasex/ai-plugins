@@ -115,6 +115,11 @@ def test_split_env_string_keeps_which_parts_env_expands(text, source):
         ('"a\\b"', "a\\b"),
         ("$'it\\'s'", "it's"),
         ('"$W"', "$W"),
+        ("$'\\x72m'", "rm"),
+        ("$'\\162m'", "rm"),
+        ("$'\\u0072m'", "rm"),
+        ("$'\\xZ'", "\\xZ"),
+        ("$'\\cA'", "\x01"),
     ],
 )
 def test_shell_value_undoes_the_outer_quotes_and_escapes(text, value):

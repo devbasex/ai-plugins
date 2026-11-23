@@ -288,18 +288,18 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `risky_removal` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `risky_removal(script: ShellScript) -> str \| None` | `rm` の削除の対象に、展開が効く位置（引用の外か二重引用の中）の空になりうる変数を含む語があれば、その語の字面を返す。無ければ `None` |
 | `expanded_variables` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `expanded_variables(word: str, quote: str = "") -> list[str]` | 語の字面を左から 1 字ずつ読み、展開が効く位置の名前付きの変数の展開（`$NAME`）と `${…}` だけを返す。`${…:-…}`・`${…:+…}` などの既定値・代替値の中の展開も、外側のパラメータの種類（名前付き・位置・特殊）によらず続けて返す。単引用の中・`\$` で逃がした `$`・`$'…'` の中・特殊パラメータ（`$$`・`$1` など）は返さない |
-| `can_be_empty` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `can_be_empty(expansion: str) -> bool` | `expanded_variables` が返した 1 つの展開が空を返しうるか。報告の対象を決める判定で、既定値・代替値を読むかの判定（`expanded_variables`）とは別に持つ |
+| `can_be_empty` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `can_be_empty(expansion: str, in_double: bool = False) -> bool` | `expanded_variables` が返した 1 つの展開が、空を返しうる名前付きの変数の展開か。`in_double` は展開が二重引用の中か。報告の対象を決める判定で、既定値・代替値を読むかの判定（`expanded_variables`）とは別に持つ |
 | `check` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `risky_removal` が語を返したら `deny` に書き直しの形を添えて返す。ほかは `None`（通す） |
 
 - `risky_removal`
   - 事前条件: `script` は `ctx.shell`（`domains/hooks/context.py` の `ShellScript`）である。`waits` の各要素がラッパーを外した語（`body_argv`）と位置をそろえた字面（`body_source`）を持つ。語は構文上の引数 1 つ（tree-sitter-bash が隙間なく割ったセクションはつないで 1 語にする）
   - 事後条件: 返った語は `script.waits`（外側の単純コマンドと `bash -c` 系・`eval` の中身）のうち、ラッパー（`command`・`timeout` など）を外した後のコマンド名が `rm` のものの、削除の対象の字面と一致する。`--` より前の `-` で始まる語のうち、オプションの名前（`--name=値` の `=` より前、短いオプションは語全体）に `$`・`` ` `` を含まないものだけをオプションとして見ない（`-"$NAME"` は空なら `-` というファイルを指すので対象）。判定は `body_source`（引用とエスケープを残した字面）を `expanded_variables` で読んだ結果だけで行い、値の展開はしない。ドル記号が字面にあっても、引用かエスケープで文字のまま渡る語は止めない
 - `expanded_variables`
-  - 事前条件: `word` は `ShellCommand.body_source` の 1 要素（引用とエスケープを残した字面。`env -S` で分けた語は、GNU env が文字にした部分を単引用で囲み、env が展開する `${NAME}` を字面のまま置いた形）。`bash -c` 系・`eval` の中身は、外側のシェルが引用とエスケープを解いた値（`context.shell_value`）を読み直したもの
+  - 事前条件: `word` は `ShellCommand.body_source` の 1 要素（引用とエスケープを残した字面。`env -S` で分けた語は、GNU env が文字にした部分を単引用で囲み、env が展開する `${NAME}` を字面のまま置いた形。env が受け取る文字列は、外側のシェルが引用とエスケープを解いた値で、`-S` / `--split-string` を別の語にした形と付けた形のどちらも同じに読む。`env -S "rm \${D}"` の `${D}` は env が展開する）。`bash -c` 系・`eval` の中身は、外側のシェルが引用とエスケープを解いた値（`context.shell_value`）を読み直したもの。`context.shell_value` は ANSI-C 引用の数値のエスケープ（`\xHH`・`\nnn`・`\uHHHH`・`\UHHHHHHHH`）と `\cX` も Bash と同じく字に戻す（`$'\x72m'` は `rm`）
   - 事後条件: 状態は「引用の外」「単引用の中」「ANSI-C 引用の中」「二重引用の中」「二重引用の中の `${…}` の既定値」の 5 つで、`'` は引用の外でだけ単引用を始め、単引用の中では次の `'` まで何も解かない。`$'` は引用の外でだけ ANSI-C 引用を始め、その中では `\` が次の 1 字を文字にする（`\'` は引用を閉じない）。`$` の後の 1 字が特殊パラメータの字（`$`・`#`・`?`・`!`・`-`・`@`・`*`・数字）なら 2 字を読み、名前付きの変数として返さない。`\` は引用の外と二重引用の中で次の 1 字を文字にする（二重引用の中では `$`・`` ` ``・`"`・`\` の前でだけ）。`$NAME`・`${…}` は引用の外か二重引用の中で、逃がされていないときだけ返す。`${…}` の終端は入れ子の `${…}` を数え、引用の中の `}` を終端にしない。二重引用の中の `${…}` では、終端の探索でも既定値の読み取りでも `'` は文字のまま（Bash と同じく引用を始めない。`"${D:-'$F'}"` の `$F` は返す）
   - 副作用: 無し（文字列の判定だけ。シェルを起動しない）
 - `can_be_empty`
-  - 事後条件: `$NAME`・`${NAME}`・`${NAME:+…}`（変数が空なら空）・`${NAME:-}`（空の既定値）・`${NAME-…}`・`${NAME%…}` などは真。`${NAME:?…}`・空でない既定値の `${NAME:-…}`・`${NAME:=…}`・`${#NAME}` は偽。位置パラメータ・特殊パラメータ・間接参照（`${1}`・`${@}`・`${!NAME}`）は名前付きの変数でないので偽
+  - 事後条件: `$NAME`・`${NAME}`・`${NAME:+…}`（変数が空なら空）・`${NAME-…}`・`${NAME%…}` と、空を返しうる既定値の `${NAME:-…}` は真。`${NAME:?…}`・必ず字が残る既定値の `${NAME:-…}`・`${NAME:=…}`・`${#NAME}` は偽。既定値に字が残るかは、既定値を展開の位置の引用の状態から読み、引用とエスケープを外した後の字（二重引用の中の `'` は字）か、空を返さない展開（`$$`・`$#`・`$?`・`${…:?}`・`${#…}`・字が残る既定値の `${…:-…}`）があるかで決める。行の継続（`\` と改行）は字を残さず、`${1}` などの位置パラメータ・名前付きの変数は空を返しうる。コマンド置換を含む既定値は空を返しうるものとする（`${D:-${1}}`・`${D:-''}`・`${D:-\<改行>}` は真、`"${D:-''}"`・`${D:-$$}` は偽）。位置パラメータ・特殊パラメータ・間接参照（`${1}`・`${@}`・`${!NAME}`）は名前付きの変数でないので偽
   - 副作用: 無し（文字列の判定だけ。シェルを起動しない）
 - `check`
   - 事前条件: guard の表の行（`events` が `PreToolUse`・`tools` が `Bash`）から呼ばれる
@@ -321,8 +321,8 @@ plugins/ndf/
 | `risky_removal` | `--` より前の、名前が字面で決まるオプション（`--interactive="$mode"` の値など）にだけ変数がある | `None`（オプションで、削除の対象でない） |
 | `risky_removal` | `-` の後ろが変数で決まる語（`-"$NAME"`） | その語を返す（止める。空なら `-` というファイルを消す） |
 | `risky_removal` | `rm` の引数が固定のパスだけ | `None`（通す） |
-| `risky_removal` | 引数の展開が効く位置（`expanded_variables` の返り）に `can_be_empty` が真の展開がある（既定値・代替値の中も含む。`${DIR:-$FALLBACK}`・`${D:-${1:-$F}}`・`${DIR:+/tmp}`・`${DIR:-}` は止める） | その語を返す（止める） |
-| `risky_removal` | 展開が効く位置の変数が `${NAME:?}` の形と、空でない固定の既定値（`${NAME:-/tmp}`）だけ | `None`（空にならないか、空なら shell が止めるので、確認の条件に当たらない） |
+| `risky_removal` | 引数の展開が効く位置（`expanded_variables` の返り）に `can_be_empty` が真の展開がある（既定値・代替値の中も含む。`${DIR:-$FALLBACK}`・`${D:-${1:-$F}}`・`${D:-${1}}`・`${DIR:+/tmp}`・`${DIR:-}` は止める） | その語を返す（止める） |
+| `risky_removal` | 展開が効く位置の変数が `${NAME:?}` の形と、必ず字が残る既定値（`${NAME:-/tmp}`・`"${NAME:-''}"`）だけ | `None`（空にならないか、空なら shell が止めるので、確認の条件に当たらない） |
 | `risky_removal` | `$` が単引用の中（`'a$b'`）・ANSI-C 引用の中（`$'it\'s$x'`）・`\$` で逃がされている（`a\$b`・`"a\$b"`）・特殊パラメータ（`"$$NAME"`）だけ | `None`（ファイル名の文字か、空にならない値で、名前付きの変数でない） |
 | `check` | `risky_removal` が語を返した | `deny("…空になりうる変数 … を含む `rm` を止めた。報告の保存先の用意は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` で打つ。ほかの削除は `${NAME:?}` の形か固定のパスにする")` |
 

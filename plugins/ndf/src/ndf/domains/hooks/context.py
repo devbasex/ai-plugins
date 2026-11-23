@@ -229,6 +229,34 @@ _ANSI_C_ESCAPES = {
 _DQ_ESCAPABLE = '$`"\\\n'
 
 
+# ANSI-C 引用の数値のエスケープ（字・桁の上限・基数）
+_ANSI_C_NUMBERS = {"x": (2, 16), "u": (4, 16), "U": (8, 16)}
+_OCTAL = "01234567"
+_HEX = "0123456789abcdefABCDEF"
+
+
+def _ansi_c_escape(text: str, i: int) -> tuple[str, int]:
+    """`text[i]` の `\\` から読む ANSI-C 引用のエスケープの値と、読んだ字数（Bash の `$'…'` の規則）。"""
+    nx = text[i + 1]
+    if nx in _ANSI_C_NUMBERS:
+        width, base = _ANSI_C_NUMBERS[nx]
+        digits = _digits(text, i + 2, width, _HEX)
+        return (chr(int(digits, base)), 2 + len(digits)) if digits else ("\\" + nx, 2)
+    if nx in _OCTAL:
+        digits = _digits(text, i + 1, 3, _OCTAL)
+        return chr(int(digits, 8) & 0xFF), 1 + len(digits)
+    if nx == "c" and i + 2 < len(text):
+        return chr(ord(text[i + 2]) & 0x1F), 3
+    return _ANSI_C_ESCAPES.get(nx, "\\" + nx), 2
+
+
+def _digits(text: str, start: int, width: int, allowed: str) -> str:
+    end = start
+    while end < len(text) and end - start < width and text[end] in allowed:
+        end += 1
+    return text[start:end]
+
+
 def shell_value(text: str) -> str:
     """語の字面から、外側のシェルが引用とエスケープを解いた値。展開（`$NAME`・`$(…)`）は値が分からないので字面のまま残す。"""
     out: list[str] = []
@@ -242,8 +270,8 @@ def shell_value(text: str) -> str:
             out.append("" if ch == "'" else ch)
         elif quote == "$'":
             if ch == "\\" and nx:
-                out.append(_ANSI_C_ESCAPES.get(nx, ch + nx))
-                step = 2
+                char, step = _ansi_c_escape(text, i)
+                out.append(char)
             elif ch == "'":
                 quote = ""
             else:
@@ -365,11 +393,12 @@ class _Word(str):
 def _strip_wrappers(argv: tuple[str, ...], source: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """先頭のラッパーのコマンドとその引数を外した語と、それに位置をそろえた字面。読めない引数・コマンドを起動しない形なら空。
 
-    先頭がラッパーでなければ、語と字面をそのまま返す。
+    先頭がラッパーでなければ、語と字面をそのまま返す。ラッパーの後ろの語は、外側のシェルが引用とエスケープを解いた値
+    （`shell_value`）で読む（`env -S "rm \\${D}"` の env が受け取るのは `rm ${D}`）。
     """
     if not argv or os.path.basename(argv[0]) not in _WRAPPER_ARGS:
         return argv, source
-    words: Optional[list[str]] = [_Word(word, text) for word, text in zip(argv, source)]
+    words: Optional[list[str]] = [_Word(shell_value(text), text) for text in source]
     while words and os.path.basename(words[0]) in _WRAPPER_ARGS:
         words = _after_options(os.path.basename(words[0]), words[1:])
     if not words:
