@@ -47,6 +47,23 @@ def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, last_result):
     capsys.readouterr()
 
 
+def _settings_rule(scope, rules):
+    return [model.Finding("S1", "x", 1, str(scope.settings))]
+
+
+def test_only_without_a_settings_rule_does_not_read_a_broken_settings_file(plugin, monkeypatch, capsys, last_result):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    monkeypatch.setitem(run.SETTINGS_RULES, "S1", _settings_rule)
+    settings = plugin.repo / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
+    settings.parent.mkdir()
+    settings.write_text("{", encoding="utf-8")
+    plugin.write("src/ndf/a.py", "import requests\n")
+    assert run.main(["--only", "I3"]) == exit_codes.code_of("failed")
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == ["I3"]
+    assert run.main(["--only", "S1"]) == exit_codes.unreadable_code()
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "config_broken"
+
+
 def _missing_rules(monkeypatch, tmp_path):
     missing = tmp_path / "missing.json"
     monkeypatch.setattr(run, "load_rules", lambda: model.load_rules(missing))

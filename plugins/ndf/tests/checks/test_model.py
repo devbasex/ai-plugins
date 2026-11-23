@@ -141,6 +141,17 @@ def test_load_settings_is_empty_without_the_settings_file(tmp_path: Path) -> Non
     assert load_settings(tmp_path) == {}
 
 
+def test_load_settings_stops_on_a_settings_file_that_resolves_outside_the_repository(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    path = _settings_file(repo)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(outside)
+    with pytest.raises(CheckError, match="リポジトリの外"):
+        load_settings(repo)
+
+
 @pytest.mark.parametrize("text", ["{", "[]"], ids=["JSON でない", "オブジェクトでない"])
 def test_load_settings_stops_on_a_broken_settings_file(tmp_path: Path, text: str) -> None:
     path = _settings_file(tmp_path)

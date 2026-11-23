@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,9 @@ TOOL = cli.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
+# リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
+# 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
+SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {}
 
 
 def _walk(plugin_root: Path) -> list[Path]:
@@ -85,14 +89,22 @@ def _order(f: Finding) -> tuple[str, int, str, str]:
     return (f.path, f.line, f.rule, f.detail)
 
 
-def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
-    """見る範囲にすべての規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。"""
+def check(
+    scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None, only: list[str] | None = None
+) -> list[Finding]:
+    """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
+
+    設定を読む規則（`SETTINGS_RULES`）は、`only` が無いか `only` に名前があるときだけ当てる。
+    """
     found = unparsable(scope)
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
+    for name, rule in SETTINGS_RULES.items():
+        if not only or name in only:
+            found += rule(scope, rules)
     return sorted(found, key=_order)
 
 
@@ -101,7 +113,7 @@ def select(
 ) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    found = check(scope, rules, write_spec, written)
+    found = check(scope, rules, write_spec, written, only)
     return [f for f in found if not only or f.rule in only]
 
 
