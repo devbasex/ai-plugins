@@ -213,11 +213,11 @@ def test_open_workdir_accepts_own_directory_filled_by_a_concurrent_prepare(tmp_p
     with worker_paths.open_workdir(target, create=True) as wd:
         assert worker_paths.entry_state(wd, "other.report.md") is not None
         assert wd.created
-        worker_paths.check_fresh(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+        worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
 
 
 @pytest.mark.parametrize("before_mkdir", [False, True])
-def test_check_fresh_refuses_own_existing_directory_renamed_over_a_created_name(tmp_path, workdir, monkeypatch, before_mkdir):
+def test_check_entries_refuses_own_existing_directory_renamed_over_a_created_name(tmp_path, workdir, monkeypatch, before_mkdir):
     d, _ = workdir
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     target = tmp_path / "new"
@@ -237,17 +237,36 @@ def test_check_fresh_refuses_own_existing_directory_renamed_over_a_created_name(
     with worker_paths.open_workdir(target, create=True) as wd:
         assert wd.created
         with pytest.raises(worker_paths.EntryUnsafe) as e:
-            worker_paths.check_fresh(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
     assert e.value.kind == "replaced"
     assert (target / "n.report.md.done").exists()
 
 
-def test_check_fresh_accepts_names_in_a_directory_that_existed(workdir):
+def test_check_entries_accepts_names_in_a_directory_that_existed(workdir):
     d, _ = workdir
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     with worker_paths.open_workdir(d, create=True) as wd:
         assert not wd.created
-        worker_paths.check_fresh(wd, ["n.report.md.done"])
+        worker_paths.check_entries(wd, ["n.report.md.done"])
+
+
+def test_prepare_paths_tells_a_missing_directory(tmp_path):
+    assert worker_paths.prepare_paths(tmp_path / "new", "n")[1]
+    assert not worker_paths.prepare_paths(tmp_path, "n")[1]
+
+
+def test_check_entries_refuses_a_directory_that_appeared_after_the_paths_were_resolved(tmp_path, workdir):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    target = tmp_path / "new"
+    paths, fresh = worker_paths.prepare_paths(target, "n")
+    os.rename(d, target)  # 解いてから開くまでに、既存のディレクトリが同じ名前へ現れる
+    with worker_paths.open_workdir(paths.report.parent, create=True, fresh=fresh) as wd:
+        assert wd.created
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
 
 
 def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):

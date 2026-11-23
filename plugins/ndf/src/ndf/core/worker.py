@@ -710,9 +710,12 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
-def _paths_of(directory: str, name: str, *, resolve: bool = True) -> worker_paths.ReportPaths:
+def _paths_of(directory: str, name: str, *, resolve: bool = True) -> tuple[worker_paths.ReportPaths, bool]:
+    """パスと、解いた時点で保存先が無かったか（`resolve` が偽なら常に偽）を組で返す。"""
     try:
-        return worker_paths.report_paths(Path(directory), name, resolve=resolve)
+        if resolve:
+            return worker_paths.prepare_paths(Path(directory), name)
+        return worker_paths.report_paths(Path(directory), name, resolve=False), False
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
     except worker_paths.EntryError as exc:  # 参照先の無いリンク・リンクの循環は作る前に拒む
@@ -731,17 +734,17 @@ def _report_paths(report: str) -> worker_paths.ReportPaths:
         directory, name = worker_paths.report_name(Path(report))
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
-    return _paths_of(str(directory), name, resolve=False)
+    return _paths_of(str(directory), name, resolve=False)[0]
 
 
 @contextlib.contextmanager
-def _workdir(paths: worker_paths.ReportPaths, doing: str, *, create: bool = False) -> Iterator[worker_paths.WorkDir]:
-    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る）。
+def _workdir(paths: worker_paths.ReportPaths, doing: str, *, create: bool = False, fresh: bool = False) -> Iterator[worker_paths.WorkDir]:
+    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`fresh` は解いた時点で無かったこと）。
 
     リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。
     """
     try:
-        with worker_paths.open_workdir(paths.report.parent, create=create) as wd:
+        with worker_paths.open_workdir(paths.report.parent, create=create, fresh=fresh) as wd:
             yield wd
     except worker_paths.EntryError as exc:
         raise WorkerError("invalid", f"{paths.report.parent} で{doing}: {exc}") from None
@@ -753,13 +756,10 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
     """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
 
     前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
-    残るのに報告が空」の組は起きない。最初に無かった要素を経て開いた保存先に 3 つの名前のどれかがあれば、
-    既存のディレクトリへ差し替えられたとみなして何も変えない（`check_fresh`）。
+    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
+    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
     """
-    names = (paths.report.name, paths.done.name, paths.result.name)
-    worker_paths.check_fresh(wd, names)
-    for entry in (paths.report, paths.done, paths.result):
-        worker_paths.entry_state(wd, entry.name)
+    worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
     done = worker_paths.remove_file(wd, paths.done.name)
     removed = worker_paths.remove_file(wd, paths.result.name)
     worker_paths.write_file(wd, paths.report.name, "")
@@ -768,8 +768,8 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
 
 def _cmd_prepare(a: argparse.Namespace) -> int:
     """報告の保存先を用意し、3 つの絶対パスを `metrics.paths` に返す（#3877）。失敗のときはパスを返さない。"""
-    paths = _paths_of(a.dir, a.name)
-    with _workdir(paths, "報告の保存先を用意できない", create=True) as wd:
+    paths, fresh = _paths_of(a.dir, a.name)
+    with _workdir(paths, "報告の保存先を用意できない", create=True, fresh=fresh) as wd:
         done, removed = _reset(wd, paths)
     items = [
         {"kind": "report", "path": str(paths.report), "action": "created"},

@@ -35,7 +35,7 @@ class EntryUnsafe(EntryError):
     """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced。
 
     `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
-    または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_fresh`）。
+    または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_entries`）。
     """
 
     def __init__(self, name: str, kind: str) -> None:
@@ -81,9 +81,29 @@ def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportP
     偽なら `directory` も解かずに絶対パスにするだけである（`prepare` が返した解決済みのパスを受ける `append`・`collect`、
     supervise.py が選んだ状態の保存先を受ける `ndf answer work`）。
     """
+    if not resolve:
+        _check_worker_name(name)
+        return _paths_under(Path(os.path.abspath(directory)), name)
+    return prepare_paths(directory, name)[0]
+
+
+def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, bool]:
+    """`report_paths(resolve=True)` と同じパスを組み、解いた時点で保存先が無かったか（無い要素が残ったか）を組で返す。
+
+    `prepare` は真なら `open_workdir(fresh=True)` へ渡す。解いてから開くまでに別の実ディレクトリがその場所へ現れると、
+    開く側は最初の `open` で開けてしまい、無かったことを自分では知れないため。
+    """
+    _check_worker_name(name)
+    base, missing = _resolve_existing(directory)
+    return _paths_under(base, name), missing
+
+
+def _check_worker_name(name: str) -> None:
     if not NAME_RE.fullmatch(name):
         raise NameInvalid(f"worker の名前は [A-Za-z0-9._-] の 1〜64 文字にする: {name!r}")
-    base = _resolve_existing(directory) if resolve else Path(os.path.abspath(directory))
+
+
+def _paths_under(base: Path, name: str) -> ReportPaths:
     report = base / f"{name}{REPORT_SUFFIX}"
     return ReportPaths(
         prompt=base / f"{name}{PROMPT_SUFFIX}",
@@ -93,8 +113,8 @@ def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportP
     )
 
 
-def _resolve_existing(directory: Path) -> Path:
-    """存在する最も深い要素までを `strict=True` で解き、無い残りの要素を解かずに足す。
+def _resolve_existing(directory: Path) -> tuple[Path, bool]:
+    """存在する最も深い要素までを `strict=True` で解き、無い残りの要素を解かずに足す。無い要素が残ったかを組で返す。
 
     `Path.resolve()`（`strict=False`）は参照先の無いリンクも先のパスへ解くので、`create=True` の `open_workdir` が
     リンクの先にディレクトリを作ってしまう。存在する要素（リンク自体を含む）までを厳密に解き、解けなければ
@@ -126,7 +146,7 @@ def _resolve_existing(directory: Path) -> Path:
             base = _resolve_dir(base / part)
         else:
             missing.append(part)
-    return base.joinpath(*missing)
+    return base.joinpath(*missing), bool(missing)
 
 
 def _resolve_dir(probe: Path) -> Path:
@@ -163,7 +183,7 @@ def report_name(report: Path) -> tuple[Path, str]:
 
 
 @contextlib.contextmanager
-def open_workdir(directory: Path, *, create: bool = False) -> Iterator[WorkDir]:
+def open_workdir(directory: Path, *, create: bool = False, fresh: bool = False) -> Iterator[WorkDir]:
     """作業ディレクトリを 1 回だけ開き、抜けるときに閉じる。`WorkDir.path` は開いた場所そのものである。
 
     リンクは解かない。`directory` は `prepare` が利用者の入力を `report_paths` で解いた後のパスを渡す。根から 1 要素ずつリンクをたどらずに開くので、
@@ -172,13 +192,15 @@ def open_workdir(directory: Path, *, create: bool = False) -> Iterator[WorkDir]:
     最初に無かった要素が開くまでに呼んだ利用者の持ち物でないディレクトリになっていれば `EntryUnsafe`（`replaced`）で止める。
     最初に無かった要素を経て開いたときは `WorkDir.created` を真にする。オーナーは同じ利用者の既存のディレクトリへの
     差し替え（sticky bit の無い共有の親では、別の利用者も同じ親の中で改名できる）を見分けないので、初期化する側は
-    書き換える前に `check_fresh` で、新しく作ったディレクトリには無いはずの名前が無いことを確かめる。
+    書き換える前に `check_entries` で、新しく作ったディレクトリには無いはずの名前が無いことを確かめる。
+    `fresh` は呼ぶ側がパスを解いた時点で保存先が無かったこと（`prepare_paths`）で、真なら最初の `open` で開けても
+    `WorkDir.created` を真にする（解いてから開くまでに現れた実ディレクトリを既存とみなさない）。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
     """
     path = Path(os.path.abspath(directory))
     fd, created = _open_dir_nofollow(path, create=create)
     try:
-        yield WorkDir(path, fd, created)
+        yield WorkDir(path, fd, created or fresh)
     finally:
         os.close(fd)
 
@@ -245,7 +267,7 @@ def _check_created(fd: int, path: Path) -> None:
     オーナーが一致しても同一とは言えない。sticky bit の無い共有の親では、別の利用者が呼んだ利用者の既存のディレクトリを
     同じ親の中でこの名前へ改名でき、オーナーは変わらない。中身の有無も根拠にしない（同じ保存先を同じ利用者が別々の
     worker の名前で並行して準備すると、先に終えた呼び出しの報告が置かれた正規のディレクトリを開く）。そのため経たことを
-    `WorkDir.created` で返し、初期化する側が `check_fresh` で自分の名前が無いことを確かめる。
+    `WorkDir.created` で返し、初期化する側が `check_entries` で自分の名前が無いことを確かめる。
     以後の操作はこの記述子に対する相対なので、確かめた後に名前を差し替えられても差し替え先には当たらない。
     """
     st = os.fstat(fd)
@@ -253,20 +275,27 @@ def _check_created(fd: int, path: Path) -> None:
         raise EntryUnsafe(str(path), "replaced")
 
 
-def check_fresh(wd: WorkDir, names: Iterable[str]) -> None:
-    """`wd.created` なら、`names` のどれかがあれば書き換える前に `EntryUnsafe`（`replaced`）で止める。偽なら何もしない。
+def check_entries(wd: WorkDir, names: Iterable[str]) -> None:
+    """初期化する前に `names` を 1 回ずつ `lstat` で確かめる。無い名前は通す。
+
+    `wd.created` なら、ある名前は種類によらず `EntryUnsafe`（`replaced`）で止める。偽なら、ある名前は
+    `entry_state` と同じくリンク数が 1 の通常のファイルだけを通し、ほかは見つけた種類の `EntryUnsafe` で止める。
 
     最初に無かった要素を経て開いたディレクトリは、空で作られた後に、この呼び出しか同じ利用者の並行した準備が別の名前を
     足したものしか持たないはずである。この呼び出しが初期化する名前（worker の名前は稼働中の worker と重ねない）が既にあれば、
     既存のディレクトリへ差し替えられたとみなし、その中の報告・完了マーカー・結果ファイルを空にも削除もしない。
     """
-    if not wd.created:
-        return
     for name in names:
         _check_name(name)
-        with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 無いことが新しく作ったディレクトリである条件
-            os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+        try:
+            st = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+        except FileNotFoundError:  # noqa: NDF401 ファイル: 無い名前は初期化してよい
+            continue
+        if wd.created:
             raise EntryUnsafe(name, "replaced")
+        kind = _unsafe_kind(st)
+        if kind:
+            raise EntryUnsafe(name, kind)
 
 
 def _refused_kind(fd: int, part: str) -> str:
