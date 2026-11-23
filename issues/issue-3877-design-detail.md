@@ -1,4 +1,4 @@
-# #3877 の詳細設計: 報告の置き場所を `ndf worker prepare` で用意する
+# #3877 の詳細設計: 報告の保存先を `ndf worker prepare` で用意する
 
 設計文書 [issue-3877-design.md](./issue-3877-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。
 
@@ -28,7 +28,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | 作業ディレクトリと名前から、worker の 4 つのファイルのパスを組む | `pathlib`・`re`・`typing` | モジュール `ndf.contracts.worker_paths` | `ReportPaths`（新設）・`NameInvalid`（新設）・`report_paths`（新設） |
-| `plugins/ndf/src/ndf/core/worker.py` | 変更 | 置き場所を用意するサブコマンドを足す | `ndf.contracts.worker_paths`・`ndf.contracts.result` | モジュール `ndf.core.worker` | `_cmd_prepare`（新設）・`_add_prepare`（新設）・`_parser`（変更） |
+| `plugins/ndf/src/ndf/core/worker.py` | 変更 | 報告の保存先を用意するサブコマンドを足す | `ndf.contracts.worker_paths`・`ndf.contracts.result` | モジュール `ndf.core.worker` | `_cmd_prepare`（新設）・`_add_prepare`（新設）・`_parser`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | 空かもしれない変数をパスに含む `rm` を止める guard | `re`・`ndf.domains.hooks.verdict` | モジュール `ndf.domains.hooks.guards.rm_variable` | `risky_removal`（新設）・`check`（新設） |
 | `plugins/ndf/contracts/hooks/guards.json` | 変更 | guard の表に `rm-variable` の 1 行を足す | 無し（データ） | 表 `guards` | 無し |
 | `plugins/ndf/docs/contracts/commands.md` | 変更 | `ndf worker prepare` の節（生成物） | 無し（生成物） | 無し | 無し |
@@ -38,7 +38,7 @@ plugins/ndf/
 | `plugins/ndf/tests/core/test_worker_prepare.py` | 新設 | サブコマンドの返りとファイルの始末 | `ndf.core.worker` | モジュール | テスト関数 |
 | `plugins/ndf/tests/domains/hooks/test_rm_variable.py` | 新設 | guard の判定（決定 4 の条件つき） | `ndf.domains.hooks` | モジュール | テスト関数 |
 
-## 置き場所のパスを組む（`report_paths`）
+## 報告の保存先のパスを組む（`report_paths`）
 
 満たす決定: 決定 2、決定 3、決定 7、受け入れ条件 4
 
@@ -93,7 +93,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `report_paths` | `(Path("/w"), "n")` が `/w/n.prompt.md`・`/w/n.report.md`・`/w/n.report.md.done`・`/w/n.result.json` を返す | 名前が 1 文字と 64 文字は通る。65 文字は断る。相対パスの `directory` でも絶対パスで返る | 名前が空文字・`../x`・`a/b`・`日本語` は `NameInvalid` で、例外の前後でファイルシステムが変わらない |
 
-## 置き場所を用意するサブコマンド（`ndf worker prepare`）
+## 報告の保存先を用意するサブコマンド（`ndf worker prepare`）
 
 満たす決定: 決定 1、決定 3、決定 5、決定 6、受け入れ条件 1、受け入れ条件 3、受け入れ条件 4
 
@@ -141,7 +141,7 @@ plugins/ndf/
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `_cmd_prepare` | `metrics.paths` に `report`・`done`・`result` の 3 つの絶対パス。`items` に触ったパスを `{"kind": "report" / "done" / "result", "path": <絶対パス>, "action": "created" / "removed" / "absent"}` で 3 件。`summary` は「置き場所を用意した（報告 …・完了マーカー …・結果 …）」 | 結果 JSON（標準出力 1 行） | 報告のファイルの中身。前の作業の結果ファイルの中身。ログの出力は足さない（ファイルの始末だけの処理で、記録する状態を持たない） |
+| `_cmd_prepare` | `metrics.paths` に `report`・`done`・`result` の 3 つの絶対パス。`items` に触ったパスを `{"kind": "report" / "done" / "result", "path": <絶対パス>, "action": "created" / "removed" / "absent"}` で 3 件。`summary` は「報告の保存先を用意した（報告 …・完了マーカー …・結果 …）」 | 結果 JSON（標準出力 1 行） | 報告のファイルの中身。前の作業の結果ファイルの中身。ログの出力は足さない（ファイルの始末だけの処理で、記録する状態を持たない） |
 
 結果 JSON の `outputs` は使わない（決定 5）。`outputs` は工程の文脈のキーの閉じた語彙である。`contracts/schemas/result.schema.json` の `$defs/outputs` が `additionalProperties: false` を持つ。`result.emit`（`src/ndf/contracts/result.py:144-156`）がそれで検査する。`metrics` は自由な形（`result.schema.json` の `metrics` は型だけを決める）なので、スキーマを触らずに 3 つのパスを渡せる。
 
@@ -189,7 +189,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `risky_removal` | コマンドを語に分けられない | `ctx.shell` が字面を持たない（読めないコマンド） | `script.commands` が空か `source` が空 | 既定値で続ける（`None` を返して通す） | 出力なし（Bash はそのまま走る） | 後始末は無い |
-| `check` | 判定の中の例外 | 想定しない形の入力 | guard のエントリポイント（`domains/hooks/dispatch`） | 既定で通す（`guards.json` の `fail_closed` は偽にする。置き場所の用意を hook の不具合で止めない） | 出力なし | 後始末は無い |
+| `check` | 判定の中の例外 | 想定しない形の入力 | guard のエントリポイント（`domains/hooks/dispatch`） | 既定で通す（`guards.json` の `fail_closed` は偽にする。報告の保存先の用意を hook の不具合で止めない） | 出力なし | 後始末は無い |
 
 ### 処理の手順
 
@@ -199,7 +199,7 @@ plugins/ndf/
 | `risky_removal` | `rm` の引数が固定のパスだけ | `None`（通す） |
 | `risky_removal` | 引数の字面が `$NAME` か `${NAME}` を含み、`${NAME:?…}`・`${NAME:-…}`・`${NAME:+…}` の形でない | その語を返す（止める） |
 | `risky_removal` | 引数の字面が `${NAME:?}` の形だけ | `None`（空なら shell が止めるので、確認の条件に当たらない） |
-| `check` | `risky_removal` が語を返した | `deny("…空になりうる変数 … を含む `rm` を止めた。置き場所の用意は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` で打つ。ほかの削除は `${NAME:?}` の形か固定のパスにする")` |
+| `check` | `risky_removal` が語を返した | `deny("…空になりうる変数 … を含む `rm` を止めた。報告の保存先の用意は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` で打つ。ほかの削除は `${NAME:?}` の形か固定のパスにする")` |
 
 繰り返しは `script.commands` の数（1 回の Bash の呼び出しに現れる単純なコマンドの数）で終わる。計算量の注意は無い。
 
@@ -226,7 +226,7 @@ plugins/ndf/
 | `risky_removal` | `rm -f "$W/$n.report.md.done"` でその語を返す。`rm -rf /tmp/x` で `None` | `rm -f "${W:?}/x"` は `None`。`${W:-/tmp}` も `None`。`rm` を含まない行は `None` | 空のコマンド・語に分けられないコマンドで `None`（例外を上げない） |
 | `check` | 止める形で `deny` を返し、理由に `ndf worker prepare` の打ち方が入る | 通す形で `None` | 判定の中の例外を guard のエントリポイントが拾い、`fail_closed` が偽なので呼び出しを通す |
 
-## 手順書の置き場所の用意（`agent-layers.md`・`waiting.md`）
+## 手順書の報告の保存先の用意（`agent-layers.md`・`waiting.md`）
 
 満たす決定: 決定 1、決定 5、受け入れ条件 1、受け入れ条件 2
 
@@ -237,4 +237,4 @@ plugins/ndf/
 | `plugins/ndf/skills/development-workflow/references/agent-layers.md:235` | 起動指示の「置く場所」の欄が `: > <置く場所>; rm -f <置く場所>.done` を書く | supervisor は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` を 1 回打ち、結果 JSON の `metrics.paths.report` を「置く場所」に、`metrics.paths.result` を「作業の結果ファイル」に書き写す。待つのは `metrics.paths.done` である、とだけ書く |
 | `plugins/ndf/skills/development-workflow/references/waiting.md:229` | 「中間通知を受けたとき」が同じ 2 つのコマンドを書く | 同じ 1 行のコマンドへ書き換え、待つパスは `metrics.paths.done` から取ると書く |
 
-どちらの行にも、置き場所のパスを組み立てるシェルの変数と `rm` を残さない（受け入れ条件 1・2）。この 2 行が変わったことは、実装で 2 つのファイルを読んで確かめる。`.md` の文言を突き合わせる自動テストは置かない（文言を固定しても振る舞いを保証しないため。`AGENTS.md` の「DON'T」）。
+どちらの行にも、報告の保存先のパスを組み立てるシェルの変数と `rm` を残さない（受け入れ条件 1・2）。この 2 行が変わったことは、実装で 2 つのファイルを読んで確かめる。`.md` の文言を突き合わせる自動テストは置かない（文言を固定しても振る舞いを保証しないため。`AGENTS.md` の「DON'T」）。

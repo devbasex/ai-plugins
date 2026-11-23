@@ -117,7 +117,7 @@ plugins/ndf/
 | `$inputs` | 作業が読む差し込みの値を 1 行 1 件で並べた字面（`values.json` から組む） |
 | `$steps` | 手順の抜粋（`kinds.json` の `excerpt` のファイルの中身。無ければ「手順の抜粋は無い」の 1 行） |
 | `$skills` | 読む Skill の名前と `SKILL.md` の絶対パス（無ければ「無し」） |
-| `$report`・`$done`・`$result` | 置き場所の 3 つの絶対パス（`contracts.worker_paths.report_paths`。#3877） |
+| `$report`・`$done`・`$result` | 報告の保存先の 3 つの絶対パス（`contracts.worker_paths.report_paths`。#3877） |
 
 本文に書く 7 項目と規則 7 個の文面は、worker を起動指示で起動するときはこのファイルが、supervisor がサブエージェントで起動するときは `agent-layers.md` が持つ。どちらも同じ 7 項目と規則 7 個である。
 
@@ -257,7 +257,7 @@ plugins/ndf/
 | `work_prompt` | `core/route/__init__.py` の `_fill`（テンプレートの `{{名前}}` を埋める） | `grep -n "def _fill\|def resolve" plugins/ndf/src/ndf/core/route/__init__.py` | 使えない。プランの JSON の構造（配列の要素の展開）を埋める処理で、Markdown の本文を埋める用途と形が合わない |
 | `work_prompt` | `core/worker.py` の `system_prompt`・`skills_section`（`src/ndf/core/worker.py:207-233`） | `grep -n "def system_prompt" -A 10 plugins/ndf/src/ndf/core/worker.py` | 使えない。`ndf worker run` が `claude -p` へ渡す規則文を組む処理で、起動指示の 7 項目を組む処理ではない。読む Skill の本文を載せる側はこちらが持ち続ける |
 | `_write_prompt` | `invoke.read_values`（この設計で新設） | 同じ文書の「差し込みの値の受け渡し」 | 使う |
-| `_write_prompt` | `contracts.worker_paths.report_paths`（#3877 で新設） | 設計文書の「文脈と制約」（置き場所のパスの決め方は #3877 が持つ） | 使う。プロンプト・報告・完了マーカー・結果ファイルの 4 つはこの関数から取り、別の決め方を作らない。`contracts` の層なので `entry.py:95` の IG1 に触れない |
+| `_write_prompt` | `contracts.worker_paths.report_paths`（#3877 で新設） | 設計文書の「文脈と制約」（報告の保存先のパスの決め方は #3877 が持つ） | 使う。プロンプト・報告・完了マーカー・結果ファイルの 4 つはこの関数から取り、別の決め方を作らない。`contracts` の層なので `entry.py:95` の IG1 に触れない |
 
 ### 単体テストの観点
 

@@ -31,7 +31,7 @@ flowchart LR
 - `ndf answer work` が受け取れるのは `--state-dir`・`--cwd`・作業の名前の 3 つだけである（`entry.py:88-93`）。プロンプトの材料（課題の番号・作業場所・受け入れ条件）は、保存先から読めなければならない
 - プランの状態の保存先には今、`prs.json`・`outputs.json`・`progress.jsonl` がある（`plugins/ndf/src/ndf/core/plan/records.py:17-22`）。差し込みの値は残っていない
 - `ndf answer work` が受ける作業の名前は 7 件（`WORK_KINDS`）だが、`params.json` の説明が挙げる名前は 18 件である。唯一の基準を 1 つにする
-- 置き場所のパスの決め方は #3877 の `report_paths`（`contracts/worker_paths.py`）が持つ。この設計はその関数を使い、別の決め方を作らない。プロンプトのファイル（`<名前>.prompt.md`）もこの関数が返す 4 つのパスの 1 つにする
+- 報告の保存先のパスの決め方は #3877 の `report_paths`（`contracts/worker_paths.py`）が持つ。この設計はその関数を使い、別の決め方を作らない。プロンプトのファイル（`<名前>.prompt.md`）もこの関数が返す 4 つのパスの 1 つにする
 - worker（`ndf worker run`）は `claude -p` を起動する。プロンプトの中身は `plugins/ndf/skills/development-workflow/references/agent-layers.md` の「supervisor → worker」が定める 7 項目と規則 7 個である
 
 ## 解き方の全体像
