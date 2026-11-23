@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.relay import claude_options, signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
@@ -72,18 +72,6 @@ def _judge(key: str) -> Any:
     return tables.policy_value("hook.stop-wait.judge", key)
 
 
-def _markdown_lines(text: str) -> list[str]:
-    """`ndf.adapters.markdown.code_lines` と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n` だけ。末尾の改行の後は行にしない）。
-
-    `str.splitlines` は U+2028 なども改行に数えるので使わない（行がずれるとコードの行を本文と取り違える）。
-    """
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if not normalized:
-        return []
-    lines = normalized.split("\n")
-    return lines[:-1] if normalized.endswith("\n") else lines
-
-
 def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
     """コードブロックの行と空行を除いた本文。`max_chars` を超えれば末尾の `max_chars` 字（決定 7）。
 
@@ -94,7 +82,7 @@ def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence
     見出しはどれも見て、外れた分を足す（見出しの文が後ろに引用されて末尾に残っても、その後の見出しを見落とさない）。
     `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
     """
-    lines = _markdown_lines(text)
+    lines = reply_wait._markdown_lines(text)
     if len(code_lines) != len(lines):
         return ""
     prose = "\n".join(line for line, code in zip(lines, code_lines) if not code and line.strip())

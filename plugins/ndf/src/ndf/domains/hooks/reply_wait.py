@@ -188,7 +188,11 @@ _REPORT_ENDINGS = ("ました", "でした")
 
 
 def _markdown_lines(text: str) -> list[str]:
-    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
+    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n` だけ。末尾の改行の後は行にしない）。
+
+    `str.splitlines` は U+2028 なども改行に数えるので使わない（行がずれるとコードの行を本文と取り違える）。
+    `reply_judge.judge_text` も `markdown.code_lines` の返りと行を合わせるためにこれを使う。
+    """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     if not normalized:
         return []
