@@ -70,6 +70,10 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         ('rm -- "${D:-$((1 ? (2,3) : 4))}"', None),
         ('rm "${D:-`true`}/cache"', '"${D:-`true`}/cache"'),
         ('rm "${D:-`true`a}/cache"', None),
+        # 既定値全体では誤りになる後ろの字（`(x)`）も、置換の境界を取って字として読む
+        ("rm -- ${D:-$(true)(x)}", None),
+        # 算術展開の閉じ括弧の間の行の継続は Bash が外してから終端を読む
+        ('rm -- "${D:-$((1)\\\n)}"', None),
         # 空を代入する `:=` は空を返す
         ('rm "${D:=}/x"', '"${D:=}/x"'),
         ("ls $W", None),
@@ -146,6 +150,8 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "arithmetic-with-inner-parens",
         "backquote-substitution",
         "backquote-substitution-then-text",
+        "substitution-then-parenthesized-text",
+        "arithmetic-with-line-continuation",
         "empty-assignment",
         "not-rm",
         "single-quoted-dollar",
@@ -286,9 +292,23 @@ def test_can_be_empty_keeps_single_quotes_inside_double_quotes():
     assert rm_variable.can_be_empty("${W:-''}", in_double=True) is False
 
 
-def test_a_default_with_many_substitutions_is_parsed_once(monkeypatch):
-    # 既定値の置換の境界は 1 回の構文解析でまとめて取る（置換ごとに残りを読み直さない）
+@pytest.mark.parametrize(
+    ("command", "parses"),
+    [
+        # 既定値の置換の境界は 1 回の構文解析でまとめて取る（置換ごとに残りを読み直さない）
+        ('rm -- "${D:-$(true)$(true)$(true)$(true)$(true)fallback}"', 1),
+        # 先頭の字で決まる既定値は、後ろに置換があっても読まない
+        ('rm -- "${D:-prefix$(pwd)}"', 0),
+        # `` ` `` の置換だけの既定値は、境界が取れる文脈で 1 回だけ読む
+        ('rm "${D:-`true`a}/cache"', 1),
+        # `$(…)` の中のコメントの `` ` `` では読み直さない
+        ('rm "${D:-$(: # `x`\n)y}"', 1),
+    ],
+    ids=["many-substitutions", "leading-text", "backquote-only", "backquote-in-comment"],
+)
+def test_a_default_is_parsed_only_when_a_boundary_is_needed(monkeypatch, command, parses):
     parser = rm_variable._parser()
+    script = parse_shell(command)
     sizes: list[int] = []
 
     class Counting:
@@ -296,8 +316,7 @@ def test_a_default_with_many_substitutions_is_parsed_once(monkeypatch):
             sizes.append(len(source))
             return parser.parse(source)
 
-    rm_variable._substitutions.cache_clear()
+    rm_variable._boundaries.cache_clear()
     monkeypatch.setattr(rm_variable, "_parser", lambda: Counting())
-    command = 'rm -- "${D:-$(true)$(true)$(true)$(true)$(true)fallback}"'
-    assert rm_variable.risky_removal(parse_shell(command)) is None
-    assert len(sizes) == 1
+    assert rm_variable.risky_removal(script) is None
+    assert len(sizes) == parses
