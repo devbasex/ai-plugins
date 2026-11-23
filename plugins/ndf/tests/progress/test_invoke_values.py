@@ -127,8 +127,9 @@ def test_clear_values_removes_the_file_from_each_dir_and_skips_dirs_without_it(t
     assert not (held / invoke.VALUES_FILE).exists() and not bare.exists()
 
 
-def test_clear_values_removes_the_issue_copies_only_with_the_values(tmp_path):
-    # 差し込みを組み終えた試行の写しは消し、組み終える前に止まった試行の写しは残す（PR 4289 の指摘）
+def test_clear_values_removes_the_issue_copies_with_or_without_the_values(tmp_path):
+    # 差し込みを組み終える前に止まった試行（values.json が無い）の写しも消し、新しい試行で課題と書き手の権限を読み直す
+    # （PR 4289 の指摘）
     done, stopped = tmp_path / "a", tmp_path / "b"
     for d in (done, stopped):
         d.mkdir()
@@ -136,8 +137,7 @@ def test_clear_values_removes_the_issue_copies_only_with_the_values(tmp_path):
         (d / invoke.ISSUE_TITLE_FILE.format(number=7)).write_text("{}", encoding="utf-8")
     invoke.write_values(done, "close", {}, {}, True)
     invoke.clear_values([done, stopped])
-    assert sorted(f.name for f in done.iterdir()) == []
-    assert len(list(stopped.iterdir())) == 2
+    assert list(done.iterdir()) == [] and list(stopped.iterdir()) == []
 
 
 def _counting(monkeypatch, name: str) -> list:

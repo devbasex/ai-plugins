@@ -124,6 +124,16 @@ def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled
     assert filled == []
 
 
+@pytest.fixture
+def local(tmp_path, monkeypatch):
+    """手元（git と設定ファイル）で決まる値を差し替えた作業場所（git を起動しない）。ブランチは sprint/s1、マージ先は develop。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(invoke, "_branch_of", lambda run: "sprint/s1")
+    monkeypatch.setattr(route, "derived_locally", lambda t, given, cwd: {"repo": str(repo), "remote": "origin", "base": "develop", **given})
+    return repo
+
+
 def _close(tmp_path: Path, repo: Path) -> dict:
     """課題とマージの方式の両方を使う閉じのテンプレート（`close`）の差し込み。"""
     work = tmp_path / "w"
@@ -132,32 +142,30 @@ def _close(tmp_path: Path, repo: Path) -> dict:
     return invoke.template_values(route.choose("close"), run, work, repo, project=PROJECT, local_tests=True)
 
 
-def test_close_reads_the_issue_before_asking_github_for_the_merge_method(tmp_path, filled):
-    repo = _sprint_repo(tmp_path)
-    got = _close(tmp_path, repo)
+def test_close_reads_the_issue_before_asking_github_for_the_merge_method(tmp_path, filled, local):
+    got = _close(tmp_path, local)
     assert filled == [3092, "merge_method"]
     assert got["title"] == "#3092 の題" and got["merge_method"] == "squash"
 
 
-def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, monkeypatch):
+def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, local, monkeypatch):
     # マージの方式は課題を読んだ後に GitHub に問う。課題を読めずに止まる試行では問い合わせない（PR 4289 の指摘）
     def fail(location, n):
         raise invoke.github.GitHubError("読めない")
 
     monkeypatch.setattr(invoke, "issue_text", fail)
-    repo = _sprint_repo(tmp_path)
     with pytest.raises(invoke.github.GitHubError):
-        _close(tmp_path, repo)
+        _close(tmp_path, local)
     assert filled == []
 
 
-def test_a_retry_after_an_unknown_merge_method_does_not_read_the_issue_again(tmp_path, filled, monkeypatch):
-    # マージの方式を決められずに止まった試行の課題の写しは、次の試行の始まり（clear_values）で消さない（PR 4289 の指摘）
+def test_a_retry_after_an_unknown_merge_method_reads_the_issue_again(tmp_path, filled, local, monkeypatch):
+    # マージの方式を決められずに止まった試行の課題の写しも、次の試行の始まり（clear_values）で消し、課題と書き手の権限を
+    # 読み直す（PR 4289 の指摘）
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: filled.append("merge_method"))
-    repo = _sprint_repo(tmp_path)
     for _ in range(2):
         with pytest.raises(invoke.TemplateValuesMissing) as got:
-            _close(tmp_path, repo)
+            _close(tmp_path, local)
         assert set(got.value.missing) == {"merge_method"}
         invoke.clear_values([tmp_path / "w"])
-    assert filled == [3092, "merge_method", "merge_method"]
+    assert filled == [3092, "merge_method", 3092, "merge_method"]
