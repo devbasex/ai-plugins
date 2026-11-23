@@ -426,23 +426,62 @@ def work_values(t: Template, given: Collection[str], values: Mapping[str, Value]
     return worker_kinds.plan_values(t.name, values, local_tests)
 
 
+_ACL_ATTR = "system.posix_acl_access"
+
+
+def _existing_access(out: Path) -> Optional[tuple[os.stat_result, Optional[bytes]]]:
+    """置き換える前のプランのアクセス権（`lstat` の結果とアクセス ACL）。出力先が通常のファイルでなければ None。
+
+    シンボリックリンクはたどらない（`os.replace` が置き換えるのはリンクそのもので、リンクの先のモードを新しいプランに
+    写すと、別のファイルの公開範囲で worker の入力を出してしまう。PR 4319 の指摘 r4-1）。
+    """
+    try:
+        st = os.lstat(out)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    try:
+        acl: Optional[bytes] = os.getxattr(out, _ACL_ATTR, follow_symlinks=False)
+    except OSError:  # 拡張属性: ACL を持たないか、ファイルシステムが ACL を扱わなければモードと所有者だけを引き継ぐ
+        acl = None
+    return st, acl
+
+
+def _apply_access(fd: int, st: os.stat_result, acl: Optional[bytes]) -> None:
+    """書き終えた一時ファイルへ、置き換える前のプランの所有者・グループ・ACL・モードを写す。写せなければ `RouteError`。
+
+    モードだけでは読み書きできる利用者が決まらない（グループと ACL でも変わる）ので、実効のアクセス権を全部写し、
+    写せないときは公開をやめる（PR 4319 の指摘 r4-2）。
+    """
+    try:
+        if (st.st_uid, st.st_gid) != (os.getuid(), os.getgid()):
+            os.fchown(fd, st.st_uid, st.st_gid)
+        if acl is not None:
+            os.setxattr(fd, _ACL_ATTR, acl)
+        os.fchmod(fd, stat.S_IMODE(st.st_mode))
+    except OSError as exc:
+        raise RouteError(f"置き換える前のプランのアクセス権を引き継げないので公開しない: {exc}") from exc
+
+
 def _publish(out: Path, plan: Mapping[str, Any]) -> None:
     """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
 
     一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
-    書き換えない。作成時のモードは 0600 で、worker の入力（`work_values`）を含む新規のプランを他のユーザーに読ませない。
-    既存のプランを置き換えるときは、そのアクセス権を公開前に引き継ぐ（PR 4319 の指摘 r3-1・r3-2）。
+    書き換えない。書き終えるまでは作成時の 0600 のままにし、作成者のほかに書きかけを読ませも書き換えさせもしない
+    （PR 4319 の指摘 r4-3）。新規のプランは 0600 のまま公開する。既存の通常のファイルを置き換えるときだけ、書き終えた
+    後にそのアクセス権を引き継いでから置き換える（PR 4319 の指摘 r3-1・r3-2・r4-1・r4-2）。
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
     tmp = Path(name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            try:
-                os.fchmod(fh.fileno(), stat.S_IMODE(os.stat(out).st_mode))
-            except FileNotFoundError:  # noqa: S110 ファイル: 置き換える前のプランが無ければ mkstemp の 0600 のまま公開する
-                pass
             fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+            fh.flush()
+            found = _existing_access(out)
+            if found is not None:
+                _apply_access(fh.fileno(), *found)
         os.replace(tmp, out)
     finally:
         tmp.unlink(missing_ok=True)
