@@ -265,7 +265,7 @@ def test_template_values_missing_from_every_source_stop_as_precondition_by_name(
     # 課題を読む前に止まるので、課題の出所の差し込み（title・body_file・issue）はまだ挙げない（PR 4289 の r2-1）
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     named = {i["key"]: i["source"] for i in got.report["items"]}
@@ -288,7 +288,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
     run = _stage_run_of(name, repo, [3092])
@@ -310,7 +310,7 @@ def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tm
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     run = _stage_run_of("impl", repo, [3, 4])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
     with pytest.raises(invoke.TemplateValuesMissing) as got:
@@ -561,7 +561,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: None)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
@@ -611,7 +611,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
         raise error
 
     monkeypatch.setattr(invoke, "issue_text", fail)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))

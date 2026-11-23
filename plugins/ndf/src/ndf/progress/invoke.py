@@ -353,7 +353,8 @@ WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
 # 課題の本文を書き出す保存先のファイルと、題の写し（プランの実行の保存先の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
-# マージの方式を決められずに止まった試行の印（プランの実行の保存先の下。`clear_values` は消さず、方式が決まった試行が消す）
+# マージの方式を決められずに止まった試行の印（プランの実行の保存先の下。決まった方式を控える。`clear_values` は消さず、
+# 差し込みがそろった試行が消す）
 MERGE_PENDING_FILE = "merge-method-pending"
 
 
@@ -465,7 +466,10 @@ def template_values(
     （`route.derived_merge_method`）は課題を読んだ後に決める（課題を読めずに止まる試行で問い合わせを増やさない。PR 4289 の指摘）。
     ただしマージの方式を決められずに止まった試行の打ち直し（印 `MERGE_PENDING_FILE` がある）では、方式を課題より先に問い、
     決まらなければ課題を読まずに止める（`_merge_method_first`）。方式が決まるまで打ち直しのたびに課題と書き手の権限を
-    読み直さないためである（PR 4289 の指摘）。
+    読み直さないためである（PR 4289 の指摘）。決まった方式は印へ控え、その後で課題を読めずに止まった打ち直しは控えを
+    使って方式を問い直さない（印は差し込みがそろった試行が消す。PR 4289 の指摘）。
+    方式を問う GitHub の失敗のうち打ち直せば通りうるもの（上限・不達・5xx）は、方式が無いとせずに `github.GitHubError` を
+    上げ（呼び手の `plan_failure` が待ち時間付きの transient にする）、印を残して打ち直しが方式を先に問うようにする。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -476,36 +480,58 @@ def template_values(
     values = route.derived_locally(t, values, cwd)
     route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
     _require_before_issue(t.name, names, values)
-    values = _merge_method_first(t, names, values, work_dir)
+    pending = work_dir / MERGE_PENDING_FILE
+    values = _merge_method_first(t, names, values, pending)
     issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
-    values = route.derived_merge_method(t, {**values, **issued})
+    values = _ask_merge_method(t, {**values, **issued}, pending)
     values, launched = route.launched(t, values)
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if "merge_method" in missing:
-        (work_dir / MERGE_PENDING_FILE).touch()
+        plan_files.write_json(pending, {})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
+    pending.unlink(missing_ok=True)
     return values
 
 
-def _merge_method_first(
-    t: route.Template, names: Sequence[str], values: Mapping[str, route.Value], work_dir: Path
-) -> dict[str, route.Value]:
-    """前の試行がマージの方式を決められずに止まっていれば（印 `MERGE_PENDING_FILE` がある）、課題を読む前に方式を問う。
+def _merge_key(values: Mapping[str, route.Value]) -> list[Any]:
+    """マージの方式を決める値（`repo`・`base`・`remote`）。印に控えた方式がこの試行の値で決めたものかを比べる。"""
+    return [values.get(k) for k in ("repo", "base", "remote")]
 
-    まだ決まらなければ課題を読まずに `TemplateValuesMissing`（印は残す）、決まれば印を消して方式を足した値を返す。
-    印が無ければ今の値のまま（方式は課題の後に問う）。方式は `repo`・`base`・`remote` だけで決まり、課題の値に依らない。
+
+def _ask_merge_method(t: route.Template, values: Mapping[str, route.Value], pending: Path) -> dict[str, route.Value]:
+    """省いたマージの方式を GitHub に問う（`route.derived_merge_method`）。打ち直せば通りうる失敗は印を残して上げる。"""
+    try:
+        return route.derived_merge_method(t, values, raise_passing=True)
+    except github.GitHubError:
+        plan_files.write_json(pending, {})
+        raise
+
+
+def _merge_method_first(
+    t: route.Template, names: Sequence[str], values: Mapping[str, route.Value], pending: Path
+) -> dict[str, route.Value]:
+    """前の試行がマージの方式を決められずに止まっていれば（印 `pending` がある）、課題を読む前に方式を問う。
+
+    印に同じ `repo`・`base`・`remote` で決めた方式が控えてあれば問わずに使う（方式が決まった後で課題を読めずに止まった
+    打ち直し）。問うて決まらなければ課題を読まずに `TemplateValuesMissing`（印は残す）、決まれば方式を印へ控えて足した値を
+    返す。打ち直せば通りうる GitHub の失敗は印を残して上げる。印が無ければ今の値のまま（方式は課題の後に問う）。
+    方式は `repo`・`base`・`remote` だけで決まり、課題の値に依らない。
     """
-    pending = work_dir / MERGE_PENDING_FILE
     if not pending.is_file():
         return dict(values)
-    out = route.derived_merge_method(t, values)
+    held = plan_files.read_json(pending) or {}
+    method = held.get("merge_method")
+    if "merge_method" in t.params and "merge_method" not in values and isinstance(method, str) and held.get("key") == _merge_key(values):
+        return {**values, "merge_method": method}
+    out = _ask_merge_method(t, values, pending)
     missing = _missing(names, out, FILL_SOURCES)
     if "merge_method" in missing:
         raise TemplateValuesMissing(t.name, {"merge_method": missing["merge_method"]})
-    pending.unlink(missing_ok=True)
+    if isinstance(out.get("merge_method"), str):
+        plan_files.write_json(pending, {"key": _merge_key(values), "merge_method": out["merge_method"]})
     return out
 
 
@@ -868,8 +894,7 @@ def _github_kind(exc: github.GitHubError) -> str:
     分け方は課題の参照の読み手（`ndf.core.refs` の `_unreadable`）と同じ。状態が 0 でも届いて断られた失敗（GraphQL の誤り・
     認証が無い）は precondition。
     """
-    passing = exc.unreached or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
-    return "transient" if passing else "precondition"
+    return "transient" if exc.passing else "precondition"
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）

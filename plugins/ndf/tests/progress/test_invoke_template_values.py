@@ -43,7 +43,7 @@ def filled(monkeypatch):
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: read.append("merge_method") or "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: read.append("merge_method") or "squash")
     return read
 
 
@@ -163,7 +163,7 @@ def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_
     # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問い、決まらなければ課題を読まずに止める。
     # 決まった試行で課題と書き手の権限を読み直す（写しは clear_values が消している。PR 4289 の指摘）
     answers = iter([None, None, "squash"])
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: filled.append("merge_method") or next(answers))
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: filled.append("merge_method") or next(answers))
     for _ in range(2):
         with pytest.raises(invoke.TemplateValuesMissing) as got:
             _close(tmp_path, local)
@@ -172,3 +172,46 @@ def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_
     got = _close(tmp_path, local)
     assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
     assert got["merge_method"] == "squash" and not (tmp_path / "w" / invoke.MERGE_PENDING_FILE).exists()
+
+
+def _pending(tmp_path: Path) -> Path:
+    """マージの方式を決められずに止まった試行の印（前の試行が残したもの）。"""
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    (work / invoke.MERGE_PENDING_FILE).write_text("{}", encoding="utf-8")
+    return work / invoke.MERGE_PENDING_FILE
+
+
+def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_again(tmp_path, filled, local, monkeypatch):
+    # 印のある打ち直しで方式が決まった後に課題を読めずに止まっても、方式は印に控え、次の打ち直しは問い直さない。
+    # 課題を読めた試行が印を消す（PR 4289 の指摘）
+    pending = _pending(tmp_path)
+
+    def fail(location, n):
+        raise invoke.github.GitHubError("読めない", status=502)
+
+    with monkeypatch.context() as m:
+        m.setattr(invoke, "issue_text", fail)
+        with pytest.raises(invoke.github.GitHubError):
+            _close(tmp_path, local)
+    invoke.clear_values([tmp_path / "w"])
+    got = _close(tmp_path, local)
+    assert filled == ["merge_method", 3092]
+    assert got["merge_method"] == "squash" and not pending.exists()
+
+
+def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_path, filled, local, monkeypatch):
+    # 印のある打ち直しで方式を問う GitHub が上限に当たれば、方式が無いとせずに待ち時間付きの transient で止まり、
+    # 課題を読まずに印を残す（PR 4289 の指摘）
+    pending = _pending(tmp_path)
+
+    def limited(repo, base, remote=None, *, raise_passing=False):
+        assert raise_passing
+        raise invoke.github.GitHubError("上限", status=403, retry_after=60.0, quota="rest")
+
+    monkeypatch.setattr(route, "default_merge_method", limited)
+    with pytest.raises(invoke.github.GitHubError) as got:
+        _close(tmp_path, local)
+    stopped = invoke.plan_failure("close", got.value)
+    assert stopped["cause"]["kind"] == "transient" and stopped["cause"]["retry_after"] == 60.0
+    assert filled == [] and pending.exists()

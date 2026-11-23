@@ -425,15 +425,21 @@ def default_base(repo: Path) -> str:
         raise RouteError(f"base を決められない: {exc.reason}") from None
 
 
-def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) -> Optional[str]:
+def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *, raise_passing: bool = False) -> Optional[str]:
     """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
 
     `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    `raise_passing` が真なら、打ち直せば通りうる GitHub の失敗（`GitHubError.passing`。上限・不達・5xx）は None にせず
+    そのまま上げる（呼び手が待ち時間付きの一時的な停止にし、方式が無い場合と分ける）。
     """
     try:
         hub = github.GitHub(git.Git(repo).remote_repo(remote), github.client())
         allowed = hub.allowed_merge_methods(base)
-    except (git.GitError, github.GitHubError):  # noqa: NDF401 外部コマンド: リモートか GitHub の設定を読めない
+    except github.GitHubError as exc:
+        if raise_passing and exc.passing:
+            raise
+        return None
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモートを読めない
         return None
     return github.pick_merge_method(None, allowed)
 
@@ -552,11 +558,14 @@ def derived_locally(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[
     return out
 
 
-def derived_merge_method(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
-    """省いた `merge_method` を `base` のブランチで許された方式から決めて足す（GitHub を呼ぶ。読めなければ足さない）。"""
+def derived_merge_method(t: Template, given: Mapping[str, Value], *, raise_passing: bool = False) -> dict[str, Value]:
+    """省いた `merge_method` を `base` のブランチで許された方式から決めて足す（GitHub を呼ぶ。読めなければ足さない）。
+
+    `raise_passing` は `default_merge_method` へ渡す（真なら打ち直せば通りうる GitHub の失敗を上げる）。
+    """
     out = dict(given)
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
-        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
+        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out), raise_passing=raise_passing)
         if method is not None:
             out["merge_method"] = method
     return out
