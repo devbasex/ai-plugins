@@ -34,10 +34,11 @@ def _context_resolve(args: argparse.Namespace) -> int:
 
 def _context_record(args: argparse.Namespace) -> int:
     root = context_records.toplevel(None)
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    work = context_records.recorded_work(args.work, sid if sid else None)  # noqa: NDF501 利用者の入力: 空の CLAUDE_CODE_SESSION_ID は未設定と同じ
+    raw_sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    sid = raw_sid if raw_sid else None  # noqa: NDF501 利用者の入力: 空の CLAUDE_CODE_SESSION_ID は未設定と同じ
+    work = context_records.recorded_work(args.work, sid)
     applied = context_thresholds.thresholds(os.environ, tables.policy_value)
-    row = context_records.record_row(sid if sid else None, work, applied, args.event, args.reason)  # noqa: NDF501 利用者の入力: 空の CLAUDE_CODE_SESSION_ID は未設定と同じ
+    row = context_records.record_row(sid, work, applied, args.event, args.reason)
     try:
         context_records.append(context_records.repo_key(root), row, os.environ)
     except OSError as exc:
