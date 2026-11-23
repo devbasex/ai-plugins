@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -433,9 +434,25 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     if found is None:
         return None
     title, body = found
-    out.write_text(body, encoding="utf-8")
+    out.write_text(_with_closing(body, issues[1:]), encoding="utf-8")
     plan_files.write_json(copy, {"title": title})
     return {"title": title, "body_file": str(out), "issue": str(number)}
+
+
+# PR の本文の閉鎖参照（GitHub の closing keywords。大小を問わない）
+_CLOSING = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#{number}\b"
+
+
+def _with_closing(body: str, rest: Sequence[str]) -> str:
+    """代表の課題の本文の末尾へ、束ねた残りの課題の `Closes #<番号>` を足す（本文に閉鎖参照があれば足さない）。
+
+    実装の PR の本文は代表の課題の本文で、`gh pr create --body-file` へそのまま渡る。残りの課題は PR のマージで閉じるよう
+    ここで閉鎖参照を補う（#3908 の決定 7・r1-6）。
+    """
+    missing = [n for n in rest if not re.search(_CLOSING.format(number=n), body, re.IGNORECASE)]
+    if not missing:
+        return body
+    return body.rstrip("\n") + "\n\n" + "".join(f"Closes #{n}\n" for n in missing)
 
 
 def _branch_of(run: StageRun) -> Optional[str]:

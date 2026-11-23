@@ -581,7 +581,13 @@ def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_
     got = invoke._issue_values(_stage_run_of("impl", repo, [4211, 3908]), work, repo)
     body = work / invoke.ISSUE_BODY_FILE.format(number=3908)
     assert got == {"title": "#3908 の題", "body_file": str(body), "issue": "3908"}
-    assert body.read_text(encoding="utf-8") == "#3908 の本文"
+    # 残りの課題（#4211）は PR のマージで閉じるよう、本文の末尾へ閉鎖参照を補う（#3908 の r1-6）
+    assert body.read_text(encoding="utf-8") == "#3908 の本文\n\nCloses #4211\n"
+
+
+def test_the_closing_reference_already_in_the_body_is_not_added_again():
+    assert invoke._with_closing("本文\n\nfixes #4211", ["4211"]) == "本文\n\nfixes #4211"
+    assert invoke._with_closing("本文", []) == "本文"
 
 
 def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
