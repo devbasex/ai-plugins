@@ -606,13 +606,20 @@ def _accounted(
 
 def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
     """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。"""
-    if not check:
-        return None
     try:
-        cli_floor.require("claude", run.argv[0], run.env, cwd)
+        if check:
+            cli_floor.require("claude", run.argv[0], run.env, cwd)
     except cli_floor.TooOld as exc:
         return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
     return None
+
+
+def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
+    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に CLI の下限（`require_claude`）。通れば None。"""
+    refused = run.recheck() if run.recheck is not None else None
+    if refused is not None:
+        return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
+    return require_claude(run, cwd, options.cli_floor)
 
 
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
@@ -626,12 +633,9 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
             "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
         ) as slot_env:
             run = run._replace(env={**run.env, **slot_env})
-            refused = run.recheck() if run.recheck is not None else None
-            if refused is not None:
-                return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
-            too_old = require_claude(run, cwd, options.cli_floor)
-            if too_old is not None:
-                return too_old
+            stopped = _precheck(run, cwd, options)
+            if stopped is not None:
+                return stopped
             if run.gate is None:
                 launched = True
                 return _run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group)
