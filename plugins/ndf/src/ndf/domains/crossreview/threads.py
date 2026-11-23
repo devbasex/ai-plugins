@@ -172,6 +172,11 @@ def closing(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]]) -> 
     return None
 
 
+def review_body(count: int) -> str:
+    """行の指摘をまとめたレビューの本体の本文（`MARKER` で始め、相手役へ渡す既存のコメントから外す。指摘の本文は持たない）。"""
+    return f"{report_decide.MARKER}\n**cross-review のレビュー**（行の指摘 {count} 件をスレッドに書いた）\n"
+
+
 def finding_of(body: str) -> Optional[Mark]:
     """最初のコメントの本文（`opening` の形）から指摘の番号・発生の値・閉じた理由の有無を読む。cross-review の書式で
     始まらない・番号の無い本文は None。"""
@@ -339,10 +344,11 @@ class _Sync:
         return True
 
     def resolve(self) -> None:
-        """閉じた指摘のスレッドを 1 件ずつ resolve する。"""
+        """閉じた指摘のスレッドを 1 件ずつ resolve する。閉じた理由が PR に載った（返信できた・最初のコメントに入れた）
+        スレッドだけ閉じる（理由の無いまま閉じると次の実行の引き継ぎからも外れる）。"""
         for finding in self.findings:
             mark = self.done.get(finding["id"])
-            if not _has_comment(mark) or closing(finding, self.rounds) is None or mark.get("resolved"):
+            if not _has_comment(mark) or closing(finding, self.rounds) is None or mark.get("resolved") or not mark.get("replied"):
                 continue
             try:
                 self.port.resolve(mark["comment"])
@@ -377,9 +383,11 @@ def sync(data: dict[str, Any], port: Port) -> list[str]:
                 reviewed += members
         except PositionRefused:
             singles += members
-    made = [f for f in singles if run.single(f)]
-    # 6. スレッドを作ったら 1 回だけ読み直し、レビューで書いた指摘の id を埋める（resolve に要る id も口の手元に置く）
-    if (reviewed or made) and not run.fill(reviewed):
+    for finding in singles:
+        run.single(finding)
+    # 6. レビューで書いたときだけ 1 回読み直し、指摘の id を埋める（resolve に要る id も口の手元に置く）。1 件ずつの作成は
+    # 作成の応答が id を返すので読み直さない（resolve に要るときだけ口が取り直す）
+    if reviewed and not run.fill(reviewed):
         return run.warnings
     # 7. 閉じた指摘を 1 件ずつ resolve する
     run.resolve()
@@ -444,10 +452,11 @@ class GitHubPort:
 
     def open_review(self, commit: str, comments: Sequence[Placed]) -> int:
         """`commit` に 1 つのレビュー（`event: COMMENT`）で行に付けるコメントをまとめて書き、レビューの id を返す。本文は 1 回の
-        `guarded` に通す。行の位置で断られたら `PositionRefused`（ほかの失敗はそのまま出す）。差分の判定は呼び手が済ませる。"""
+        `guarded` に通す。行の位置で断られたら `PositionRefused`（ほかの失敗はそのまま出す）。差分の判定は呼び手が済ませる。
+        `event: COMMENT` のレビューは本体の `body` が要る（GitHub の必須。行のコメントの本文とは別）。"""
         bodies, _ = self.publisher.guarded(*(c.body for c in comments))
         placed = [{"path": c.path, "line": c.line, "side": "RIGHT", "body": str(b)} for c, b in zip(comments, bodies)]
-        payload = {"commit_id": commit, "event": "COMMENT", "comments": placed}
+        payload = {"commit_id": commit, "event": "COMMENT", "body": review_body(len(comments)), "comments": placed}
         try:
             made = self._write(lambda: self.hub.rest("POST", f"/repos/{self.hub.repo}/pulls/{self.pr}/reviews", payload))
         except self.errors as exc:

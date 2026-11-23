@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -40,6 +39,33 @@ def test_findings_of_one_commit_are_written_in_one_review() -> None:
     assert {fid: m["comment"] for fid, m in data[threads.THREADS].items()} == {"r1-1": 1001, "r1-2": 1002, "r2-1": 1003}
     # 変更ファイルは 1 回、スレッドは書く前と書いた後の 2 回だけ読む
     assert (port.changed_reads, port.thread_reads) == (1, 2)
+
+
+def test_findings_without_a_line_are_not_read_again_after_writing() -> None:
+    """1 件ずつの作成は応答の id を使い、書いた後にスレッドを読み直さない（書く前の 1 回だけ）。"""
+    port = FakePort()
+    data = _data(_finding("r1-1", 1, "a.py"), _finding("r1-2", 1, "b.py"))
+    assert threads.sync(data, port) == []
+    assert (len(port.singles), port.batches, port.thread_reads) == (2, [], 1)
+    assert {fid: m["comment"] for fid, m in data[threads.THREADS].items()} == {"r1-1": 1001, "r1-2": 1002}
+
+
+def test_thread_is_not_resolved_when_the_reply_fails() -> None:
+    """引き継いだ指摘を閉じる返信が失敗したら resolve せず、次の実行で返信してから閉じる。"""
+
+    class NoReply(FakePort):
+        def reply(self, comment_id, body):
+            raise RuntimeError("書けない")
+
+    port = NoReply()
+    port.left = [prior_decide.Thread(77, "前の実行のスレッド", False, "a.py", 3, True)]
+    data = _data(_finding("r1-1", 1, "a.py", 3, fin.FIXED))
+    data[threads.THREADS] = {"r1-1": {"comment": 77}}
+    assert threads.sync(data, port) and port.resolved == []
+    again = FakePort()
+    again.left = port.left
+    assert threads.sync(data, again) == []
+    assert (len(again.replies), again.resolved) == (1, [77])
 
 
 def test_nothing_is_read_or_written_without_findings() -> None:
@@ -217,6 +243,8 @@ def test_open_review_guards_every_body_once_and_posts_one_review() -> None:
     [(path, payload)] = hub.posts
     assert path == "/repos/o/r/pulls/7/reviews" and guard.calls == 1
     assert (payload["commit_id"], payload["event"]) == (HEAD1, "COMMENT")
+    # レビュー本体の本文（GitHub の必須）は行のコメントの本文と別に送る
+    assert payload["body"] == threads.review_body(2) and payload["body"].startswith(report_decide.MARKER)
     assert [(c["path"], c["line"], c["side"]) for c in payload["comments"]] == [("a.py", 3, "RIGHT"), ("a.py", 9, "RIGHT")]
     assert all("ghp_secret" not in c["body"] for c in payload["comments"])
 
@@ -273,13 +301,25 @@ def test_concurrent_reports_on_one_pr_write_each_thread_once(tmp_path: Path) -> 
     """不変条件 I4: 同じ PR への 2 つの公開を同時に走らせても、どの指摘のスレッドも 1 回だけ作る。"""
     from ndf.domains.crossreview import cli
 
-    class Slow(FakePort):
+    held, count, arrived, both = threading.Lock(), threading.Lock(), [], threading.Event()
+
+    @contextlib.contextmanager
+    def publishing(pr):
+        with count:
+            arrived.append(pr)
+            if len(arrived) == 2:
+                both.set()
+        with held:
+            yield
+
+    class Racing(FakePort):
         def open_threads(self):
-            time.sleep(0.05)
+            # 先に入った公開は、もう一方がロックの手前に着くまで書く前の読みで止まる（実時間でなく到達の順で競わせる）
+            both.wait(timeout=10)
             return super().open_threads()
 
-    state_dir, port, held = _state_dir(tmp_path), Slow(), threading.Lock()
-    hub = cli.Hub(lambda pr, body, previous: "https://github.com/o/r/pull/7#issuecomment-1", port.at, port.at, publishing=lambda pr: held)
+    state_dir, port = _state_dir(tmp_path), Racing()
+    hub = cli.Hub(lambda pr, body, previous: "https://github.com/o/r/pull/7#issuecomment-1", port.at, port.at, publishing=publishing)
     runs = [threading.Thread(target=cli._post_report, args=(state_dir, 7, None, (), lambda: hub)) for _ in range(2)]
     for run in runs:
         run.start()
