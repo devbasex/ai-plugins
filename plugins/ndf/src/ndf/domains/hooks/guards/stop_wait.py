@@ -21,9 +21,16 @@ from typing import Optional
 from ndf.domains.hooks import budget, reply_judge
 from ndf.domains.hooks.verdict import Verdict, passing
 
+# 変更要求の文。10 系の `relay_lib/mark.py` の `WAIT_REASON` に倣い、区分の名前は `development-workflow` の
+# `references/asking.md` の「区分」の表と合わせる（#4000 の受け入れ条件 11）
 REASON = (
-    "本文で人の回答を待って終えた。人に問うときは AskUserQuestion を使う（中継とオーガナイザーへ質問が届き、"
-    "待ちの知らせも送られる）。問わずに進められるなら続ける"
+    "この応答は AskUserQuestion を呼ばずに、本文で人の承認・判断を待って終えた。本文の待ちでは /goal の判定が止まらず、"
+    "中継とオーガナイザーへ質問が届かず、待ちの知らせも出ない。"
+    "承認ゲートの承認なら、同じ問いを AskUserQuestion で出し直し、metadata.source に ndf-gate:1（設計承認ゲート）か"
+    " ndf-gate:2（本番系へ届く操作の承認）を付ける（判断の材料は本文に書いてよい）。"
+    "レッドラインに当たる操作の承認なら ndf-ask:redline:<番号>、ほかの区分（cost・irreversible・human-action・legal・"
+    ".ndf/ask.json の extra）なら ndf-ask:<名前> を付ける。"
+    "区分に当たらない問いは人へ回さず、推奨の案で決め、決めたことと理由を報告に 1 行で書いてそのまま作業を続ける"
 )
 # 判定の子を起動するのに要る残りの秒の下限（詳細設計の「処理の手順」）
 MIN_SECONDS = 0.5
