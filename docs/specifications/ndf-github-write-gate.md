@@ -379,8 +379,7 @@ sequenceDiagram
 | `github.pr-publish-lock` | `lock` 900 | 同じ PR の公開のロックを待つ上限の秒。指摘 100 件の公開が 1 秒ずつ並ぶ約 100 秒に、ほかのレーンの書き込みの待ちを足しても収まる。1 時間のウィンドウが上限に達していると越えることがあり、そのときは `ReportFailed` で打ち直す |
 | `cross-review.secondary-rate-limit` | `attempts` 4・`interval` 60・`factor` 2・`max_interval` 600 | 二次レート制限の打ち直しの回数と、GitHub が待ちの秒を返さないときの待ち |
 
-前の宣言の `github.content-spacing`（`interval` 7.2。3,600 秒 ÷ 500 件の均等割り）は消し、上の 2 つの方針へ置き換える（決定 11）。
-新しい 2 つの方針は既存の値の名前（`seconds`・`count`）だけを使うので、`limits.schema.json` と `limits.Policy` は変えない。
+前の宣言の `github.content-spacing`（`interval` 7.2。3,600 秒 ÷ 500 件の均等割り）は消し、上の 2 つの方針へ置き換える（決定 11）。新しい 2 つの方針は既存の値の名前（`seconds`・`count`）だけを使うので、`limits.schema.json` と `limits.Policy` は変えない。
 
 決定 11 で実装を変える箇所:
 
@@ -388,9 +387,8 @@ sequenceDiagram
 | --- | --- |
 | `plugins/ndf/contracts/limits.json` | `github.content-spacing` を消し、`github.content-window.minute`（`seconds` 60・`count` 80）と `github.content-window.hour`（`seconds` 3600・`count` 500）を足す。`github.write-spacing` と `github.pr-publish-lock` の `summary` から 7.2 秒の記述を除く |
 | `plugins/ndf/src/ndf/adapters/write_gate.py` | `CONTENT_SPACING` を 2 つのウィンドウの方針に替える。記録の形を `version` 2（`content` の一覧）にし、予約・置き換え・`withdraw`・送り終え・最短の送信時刻・壁時計の戻り・I5 のプロセスの中の記録で一覧を扱う。冒頭の説明を直す |
-| `plugins/ndf/src/ndf/domains/crossreview/threads.py` | 冒頭の説明の `github.content-spacing` を 2 つの方針の名前へ |
-| `plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md` | 「内容を作る書き込みどうしの間隔」の 1 文を、ウィンドウの上限の説明へ |
-| `plugins/ndf/tests/adapters/test_write_gate.py`・`test_write_gate_budget.py` | 「テスト観点」の表のとおり |
+| `plugins/ndf/src/ndf/domains/crossreview/threads.py`・`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md` | 冒頭の説明の方針の名前と、「内容を作る書き込みどうしの間隔」の 1 文を、2 つのウィンドウの方針へ |
+| `plugins/ndf/tests/adapters/test_write_gate.py`・`test_write_gate_budget.py`・`test_write_gate_window.py`（新設。ウィンドウの観点を分けた） | 「テスト観点」の表のとおり |
 
 間隔とウィンドウの値は GitHub のアカウントの上限から決めるので、プロジェクトの設定では変えない。
 
@@ -469,12 +467,12 @@ GitHub の文書:
 | 返信と resolve の要求も順番を取り、続く 2 つの間が `github.write-spacing` の秒以上 | `tests/adapters/test_write_gate.py` |
 | 2 つのプロセス・8 つのスレッドが同時に順番を取っても、予約の差が間隔以上。環境変数の違う 2 つのプロセスが同じ記録を使う | 同上 |
 | 内容を作る書き込みが続いても、ウィンドウが上限未満なら予約の差は 1 秒で、時刻の一覧に予約の時刻が足される。前の 7.2 秒は待たない | 同上 |
-| 1 時間のウィンドウに 500 件（1 分のウィンドウに 80 件）がある記録では、次の内容を作る書き込みの予約が「後ろから 500 番目（80 番目）の時刻 + 3,600 秒（60 秒）」になる。内容を作らない書き込みは 1 秒だけ待つ | 同上 |
+| 1 時間のウィンドウに 500 件（1 分のウィンドウに 80 件）がある記録では、次の内容を作る書き込みの予約が「後ろから 500 番目（80 番目）の時刻 + 3,600 秒（60 秒）」になる。内容を作らない書き込みは 1 秒だけ待つ | `tests/adapters/test_write_gate_window.py` |
 | 送り終えると自分の項目が送り終えた時刻へ置き換わる。予約の置き換え・`withdraw` で自分の項目が除かれ、ほかの項目は残る。1 時間より古い項目は捨てられる。壁時計が戻った記録では一覧の時刻もずれる | 同上 |
 | ウィンドウの空きを待つ予約は次の書き込みの時刻を進めず、内容を作らない書き込みは待たない。空いた時刻に順番を取り直して送る | 同上 |
 | 送った 499 件の後、先の予約が眠る間に後ろの予約がウィンドウの空きを待つ時刻を取っても、先の予約は予約の時刻に送る。送る直前にウィンドウが空いていなければ、空くまでの眠りの間は送信のロックを持たない | 同上 |
-| 非同期の呼び手が予約の時刻を待つ間・送ってよくなった直後に取り消されると、送信のロックが放され、予約（次の時刻と一覧の項目）が取り消される | 同上 |
-| `version` 1 の記録を読むと、待ちの終わりと次の時刻を引き継ぎ、時刻の一覧を空として扱い、`version` 2 で書き直す | 同上 |
+| 非同期の呼び手が予約の時刻を待つ間・送ってよくなった直後に取り消されると、送信のロックが放され、予約（次の時刻と一覧の項目）が取り消される | `tests/adapters/test_write_gate.py` |
+| `version` 1 の記録を読むと、待ちの終わりと次の時刻を引き継ぎ、時刻の一覧を空として扱い、`version` 2 で書き直す | `tests/adapters/test_write_gate_window.py` |
 | 予算を持つ呼び手で、ウィンドウが空くまでの秒が予算以上なら送らず `Busy`。時刻の一覧に項目を残さない | `tests/adapters/test_write_gate_budget.py` |
 | 待ちの終わりの後の予約がその時刻以後。眠りの間にほかのプロセスが `block` すると予約を置き換える。短い `block` が長い待ちの終わりを縮めない | 同上 |
 | 先の書き込みの応答が遅くても、後の書き込みは先の送り終えた時刻 + 間隔まで送らず、送信が重ならない | 同上 |

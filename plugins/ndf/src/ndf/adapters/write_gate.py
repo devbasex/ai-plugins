@@ -297,7 +297,7 @@ def _ahead(content: list[float], turn: float, replacing: Optional[Reservation]) 
     """予約の時刻を決めるときに数える一覧。取り直し（`replacing`）では、順番の時刻 `turn` と旧予約の時刻の遅いほうより
     後ろの項目（旧予約の後に、より後ろの時刻を取った後続の予約）を除く。後続の予約が先の予約を押し戻さないためである。
 
-    新しい予約は一覧をすべて数える（先にウィンドウの空きを待つ予約の枠を奪わない）。
+    新しい予約は一覧をすべて数える（先にウィンドウの空きを待つ予約が数えた空きを、後から取る予約が使わない）。
     """
     if replacing is None:
         return content
@@ -338,7 +338,7 @@ def _off_loop(loop: asyncio.AbstractEventLoop, fn: Callable[..., Any], *args: An
         future = loop.create_future()
         try:
             future.set_result(fn(*args))
-        except Exception as exc:  # 後始末の失敗は呼び手の結果を変えない（`_consume` が受け取る）
+        except Exception as exc:  # noqa: BLE001 ファイル: 後始末の失敗は呼び手の結果を変えず、Future へ渡して `_consume` が受け取る
             future.set_exception(exc)
     future.add_done_callback(_consume)
     return future
@@ -560,7 +560,7 @@ class WriteGate(BaseThrottler):
 
         内容を作る書き込みがウィンドウの空きを待つ予約は、共通の `next` を進めない（`spaced` が偽）。ほかの書き込みは
         この予約の後ろへ並ばず、この予約は予約の時刻に順番を取り直す（`_steps`）。取り直しでは、自分の予約の時刻より
-        後ろの後続の予約を数えない（`_ahead`。後続の予約に先の枠を奪わせない。送る直前の `_closed` は残す）。
+        後ろの後続の予約を数えない（`_ahead`。先の予約が数えた空きを後続の予約に使わせない。送る直前の `_closed` は残す）。
         """
 
         def change(record: Record, now: float) -> Reservation | Busy:
@@ -637,19 +637,25 @@ class WriteGate(BaseThrottler):
         try:
             reservation = self.reserve(kind, count=count, remaining=remaining)
             while True:
-                wait = self._left(reservation, remaining)
-                if wait > 0:
-                    yield Pause(wait, until=reservation.at)
-                if reservation.spaced:
-                    again, send = yield from self._sendable(reservation, remaining)
-                    if not again:
-                        return Turn(reservation, send)
+                turn = yield from self._attempt(reservation, remaining)
+                if turn is not None:
+                    return turn
                 replaced, reservation = reservation, None
                 reservation = self.reserve(kind, replacing=replaced, count=count, remaining=remaining)
         except BaseException:
             if reservation is not None:
                 self.withdraw(reservation)
             raise
+
+    def _attempt(self, reservation: Reservation, remaining: Optional[Callable[[], float]]) -> Generator[Pause, None, Optional[Turn]]:
+        """予約の時刻まで眠り、送ってよければ `Turn`。ウィンドウの空きを待った予約と、送る直前に取り直しが要るときは None。"""
+        wait = self._left(reservation, remaining)
+        if wait > 0:
+            yield Pause(wait, until=reservation.at)
+        if not reservation.spaced:
+            return None
+        again, send = yield from self._sendable(reservation, remaining)
+        return None if again else Turn(reservation, send)
 
     def _left(self, reservation: Reservation, remaining: Optional[Callable[[], float]]) -> float:
         """眠る直前の、予約の時刻までの秒。予算があれば、予約を書いた後に過ぎた時間（記録の保存・非同期の再開）を引いて
