@@ -1,0 +1,7 @@
+{
+  "meaning": "プラグインの定義（plugin.json）かコントラクトのファイルが読めず、起動できない",
+  "std_type": "configuration",
+  "exit": "unreadable",
+  "route": "human",
+  "retry": null
+}

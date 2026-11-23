@@ -147,6 +147,7 @@ def test_closure_follows_function_level_imports(tmp_path):
                 "ndf.domains",
                 "ndf.domains.hooks",
                 "ndf.domains.hooks.tables",
+                "os",
                 "pathlib",
                 "typing",
             },

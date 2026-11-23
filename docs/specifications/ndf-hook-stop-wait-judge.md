@@ -24,7 +24,7 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 | ルールの語と文の分け方 | [`reply_wait.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_wait.py) の定数と `read_prose` |
 | 判定のリクエスト（hook の側）・送信先の確かめ・休みのマーカー | [`reply_judge.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_judge.py) |
 | 判定の子・質問の文・判定の例の組の確かめ | [`judge_child.py`](../../plugins/ndf/src/ndf/domains/hooks/judge_child.py) の `SYSTEM`・`QUESTION`・`run_cases` |
-| 値（モデル・秒・字数・休む間・周の数・送信先の確かめ） | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `hook.stop-wait.judge`・`hook.budget.stop`・`hook.budget.stop.codex`・`hook.pushback` |
+| 値（モデル・秒・字数・休む間・周の数・送信先の確かめ） | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `hook.stop-wait.judge`・`hook.budget.stop`・`hook.budget.stop.codex`・`hook.pushback` |
 | 判定の例の組 | [`contracts/hooks/reply-judge-cases.json`](../../plugins/ndf/contracts/hooks/reply-judge-cases.json) |
 | 問いの区分と出し方 | `development-workflow` の [`references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) |
 

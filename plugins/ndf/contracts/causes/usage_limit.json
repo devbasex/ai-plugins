@@ -1,0 +1,9 @@
+{
+  "meaning": "LLM の利用上限。retry_after があればその秒を待って打ち直し、無ければ人へ戻す",
+  "std_type": "communication",
+  "exit": "failed",
+  "route": "retry",
+  "retry": "cause.usage-limit",
+  "exhausted": "human",
+  "requires_retry_after": true
+}

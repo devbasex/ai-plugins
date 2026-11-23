@@ -37,7 +37,7 @@
 `metrics.machine` は `lanes`（マシンの稼働中の数）・`cap`（上限。読めなければ null）・`unreadable`（読めない計画）・`others`（ほかの計画の
 ステートマシンを読んだか）・`error`（上限を読めないときの文）である。起動できるレーンが無い `status` はほかの計画を読まず、`others` が偽になる。
 
-**上限の値は判定のたびに、マシンの設定 → `NDF_RELAY_MAX_NAMED` → 上限の設定 `relay.max-named`（`contracts/limits.json`）の順で読む。**
+**上限の値は判定のたびに、マシンの設定 → `NDF_RELAY_MAX_NAMED` → 上限の設定 `relay.max-named`（`contracts/limits/relay.max-named.json`）の順で読む。**
 どれも 1 以上の整数だけを受ける。人の指示を受けて変えるときは `ndf relay cap --named <数>` で書き、`ndf relay cap --clear` で消す
 （引数なしで今の値と出所を出す）。動いている耐久ワークフローとリレーハブも次の判定から新しい値を使う。下げても稼働中のレーンは止めない。
 

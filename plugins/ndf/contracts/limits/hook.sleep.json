@@ -1,0 +1,4 @@
+{
+  "summary": "sleep の guard が前景の sleep に許す秒。超える待ちは Monitor か背景の起動を勧める",
+  "seconds": 30
+}

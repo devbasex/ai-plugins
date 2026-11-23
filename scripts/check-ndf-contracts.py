@@ -4,11 +4,11 @@
 - `copy-mismatch`: 利用先の宣言の `$schema` が名指す Skill の下のスキーマ 4 本が、契約のスキーマ
   （`contracts/schemas/ndf-settings/<名前>.schema.json`）と 1 バイトでも違う（#3341 の決定 12。URL を変えずに済むよう
   中身をそろえる。どちらを正本にしてコピーを無くすかは #3518 の持ち物）
-- `limits-shape`・`limits-unknown`: 上限の宣言（`contracts/limits.json`）の方針の表が読めない・コードが文字列で引く
-  方針の名前が宣言に無い（`contracts_lib/limits_decl.py`。#2343）
+- `limits-shape`・`limits-unknown`: 上限の設定（`contracts/limits/`）に方針のファイルが 1 つも無い・コードが文字列で引く
+  方針のファイルが無い（`contracts_lib/limits_decl.py`。#2343）
 
 サブコマンドの引数・環境変数・設定のキー・受け渡しのファイル・公開する面と生成した規約のページは、NDF の検査の
-規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形は `ndf contracts check` が見る。
+規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形（上限の設定の中身を含む）は `ndf contracts check` が見る。
 
     python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [<ファイル>...]
 
@@ -70,7 +70,7 @@ def copy_mismatches(root: Path) -> list[dict]:
 
 def limits_violations(root: Path) -> list[dict]:
     return [
-        v(kind, path, name, why, "" if path == limits_decl.DECL else limits_decl.DECL)
+        v(kind, path, name, why, limits_decl.policy_path(name) if name else "")
         for kind, path, name, why in limits_decl.violations(root, limits_decl.code_files(root))
     ]
 
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{i['kind']}: {i['path']}: {i['name']}: {i['detail'][:200]}", file=sys.stderr)
         emit("stopped", f"契約の違反 {len(items)} 件", items, metrics)
         return 1
-    emit("ok", f"違反なし（スキーマのコピー {len(SCHEMA_COPIES)} 本・上限の宣言）", items, metrics)
+    emit("ok", f"違反なし（スキーマのコピー {len(SCHEMA_COPIES)} 本・上限の設定）", items, metrics)
     return 0
 
 

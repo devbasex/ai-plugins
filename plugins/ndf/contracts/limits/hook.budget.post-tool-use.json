@@ -1,0 +1,8 @@
+{
+  "summary": "hook の予算（PostToolUse）",
+  "p95_ms": 100,
+  "deadline": 1,
+  "margin": 0.5,
+  "timeout": 3,
+  "inject_chars": 600
+}

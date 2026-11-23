@@ -33,35 +33,34 @@ def test_scaled_follows_long_measurements():
 
 
 @pytest.mark.parametrize(
-    "change",
+    ("rel", "change"),
     [
-        lambda d: {**d, "version": 1},
-        lambda d: {k: v for k, v in d.items() if k != "owner"},
-        lambda d: {**d, "policies": {}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x"}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "seconds": -1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "attempts": 1.5}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "weird": 1}}},
-        lambda d: {**d, "policies": {"nodot": {"summary": "x", "seconds": 1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": " ", "seconds": 1}}},
+        ("_meta.json", lambda d: {**d, "version": 1}),
+        ("_meta.json", lambda d: {k: v for k, v in d.items() if k != "owner"}),
+        ("_meta.json", lambda d: {**d, "owner": ""}),
+        ("a.b.json", lambda _: {"summary": "x"}),
+        ("a.b.json", lambda _: {"summary": "x", "seconds": -1}),
+        ("a.b.json", lambda _: {"summary": "x", "attempts": 1.5}),
+        ("a.b.json", lambda _: {"summary": "x", "weird": 1}),
+        ("nodot.json", lambda _: {"summary": "x", "seconds": 1}),
+        ("a.b.json", lambda _: {"summary": " ", "seconds": 1}),
     ],
 )
-def test_wrong_shape_stops(contracts_copy, change):
-    contracts_copy("limits.json", change)
+def test_wrong_shape_stops(contracts_copy, rel, change):
+    contracts_copy(f"limits/{rel}", change)
     with pytest.raises(limits.LimitsError):
         limits.table()
 
 
-def test_duplicate_policy_names_stop(contracts_copy):
-    contracts_copy(
-        "limits.json", text='{"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}'
-    )
+def test_duplicate_keys_in_a_policy_stop(contracts_copy):
+    contracts_copy("limits/a.b.json", text='{"summary": "x", "seconds": 1, "seconds": 2}')
     with pytest.raises(limits.LimitsError, match="a.b"):
         limits.table()
 
 
-def test_missing_ndf_settings_stops(contracts_copy):
-    (contracts_copy.root / "limits.json").unlink()
+@pytest.mark.parametrize("pattern", ["limits/_meta.json", "limits/[!_]*.json"], ids=["no-meta", "no-policy"])
+def test_missing_ndf_settings_stops(contracts_copy, pattern):
+    contracts_copy.remove(pattern)
     with pytest.raises(limits.LimitsError):
         limits.table()
 
@@ -96,14 +95,14 @@ _SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
 
 def test_value_keys_match_policy_fields_and_schema():
     schema = contracts.load_json(limits.SCHEMA)
-    declared = schema["properties"]["policies"]["additionalProperties"]["properties"]
+    declared = schema["properties"]
     assert set(declared) - {"summary"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
     assert set(limits.Policy._fields) - {"name", "summary"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
     assert set(limits.VALUE_KEYS) == set(_SCHEMA_VALUE_KEYS)
 
 
 def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
-    """プラグインの `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
+    """プラグインの `contracts/limits/` に判定の方針があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
     from ndf.domains.hooks import reply_judge
 
     assert reply_judge.judge_setting("model") == "haiku"
@@ -114,7 +113,7 @@ def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
 
 @pytest.mark.parametrize("key", _SCHEMA_VALUE_KEYS)
 def test_value_reads_every_value_key(contracts_copy, key):
-    contracts_copy("limits.json", lambda d: {**d, "policies": {"a.b": {"summary": "x", key: 7}}})
+    contracts_copy("limits/a.b.json", lambda _: {"summary": "x", key: 7})
     assert limits.value("a.b", key) == 7
     assert getattr(limits.policy("a.b"), key) == 7
     others = [k for k in _SCHEMA_VALUE_KEYS if k != key]
@@ -128,7 +127,7 @@ def test_value_rejects_non_value_keys(key):
 
 
 def test_validate_builds_policies_with_name_and_absent_values_as_none():
-    got = limits.validate({"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}}})
+    got = limits.validate({"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}})
     assert got == {"a.b": limits.Policy(name="a.b", summary="x", seconds=1.5, attempts=2)}
     assert got["a.b"].interval is None
 

@@ -31,7 +31,7 @@
 | 替え先の環境・`--settings` の合成・起動の前の実効値の確かめ・起動の後の変更の検出 | `plugins/ndf/src/ndf/domains/relay/account_choice.py`（`fallbacks`・`build`・`verify`・`target_env`・`drift`）・`session_env.py`（`metered_env`・`key_env`） |
 | helper の記録・払い出しの上限・設定への固定・`config-gate` | `plugins/ndf/src/ndf/domains/relay/key_helper.py`・`cli_account.py`（`_acc_key_helper`・`_acc_config_gate`） |
 | キーの子の停止 | `plugins/ndf/src/ndf/domains/relay/wrapper_stop.py`（`_drift`・`_key_auth`・`_end_point`・`_stop_revoked`・`_on_revoked`） |
-| 待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `relay.key-helper`・`relay.end-wait`・`relay.child-exit`・`claude-api-keys.check` |
+| 待ちの上限 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `relay.key-helper`・`relay.end-wait`・`relay.child-exit`・`claude-api-keys.check` |
 
 ## 用語
 

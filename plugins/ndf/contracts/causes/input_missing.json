@@ -1,0 +1,7 @@
+{
+  "meaning": "工程の入力のキーがスプリントの文脈に無く、工程を始めなかった",
+  "std_type": "configuration",
+  "exit": "precondition",
+  "route": "conductor",
+  "retry": null
+}

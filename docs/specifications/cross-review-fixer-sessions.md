@@ -24,7 +24,7 @@
 | --- | --- |
 | 会話の続け方・新しい会話にする条件・起動し直し・`process` の文 | `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) |
 | `.ndf/review.json` の `fixer_sessions` の型・既定・残るもの | [docs/contracts/ndf-settings.md](../../plugins/ndf/docs/contracts/ndf-settings.md) と [review.schema.json](../../plugins/ndf/contracts/schemas/ndf-settings/review.schema.json) |
-| 窓の手前の余白 `cross-review.fixer.resume-margin`（`count` 50000） | [contracts/limits.json](../../plugins/ndf/contracts/limits.json) |
+| 窓の手前の余白 `cross-review.fixer.resume-margin`（`count` 50000） | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) |
 | 続けるかの判断 | [resume_decide.py](../../plugins/ndf/src/ndf/domains/crossreview/resume_decide.py) の `choose`・`grown` |
 | 会話の引数と結果の行の読み取り | [adapters/claude.py](../../plugins/ndf/src/ndf/adapters/claude.py) の `Session`・`session_args`・`result_line`・`context_tokens`・`context_window`・`compacted`・`conversation_missing` |
 

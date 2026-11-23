@@ -1,0 +1,7 @@
+{
+  "meaning": "push 前の検査（pre-push の hook）が push を断った",
+  "std_type": "validation",
+  "exit": "failed",
+  "route": "step",
+  "retry": null
+}

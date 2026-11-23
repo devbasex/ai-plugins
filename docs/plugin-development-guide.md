@@ -299,7 +299,7 @@ uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 - 1 つの CLI の配線（引数・終了コード・結果 JSON）は代表の数件の起動で確かめ、分岐はプロセスの中で関数を呼んで確かめる（10 系の [`plugins/ndf/scripts/tests/inproc.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/inproc.py)）。スクリプトの起動だけで 1 件 0.2〜0.4 秒かかる
 - git のリポジトリのような重い準備は、プロセスごとに 1 度作って複製する
 - テストヘルパーの固定の待ちを縮める。偽の HTTP サーバーは `serve_forever(poll_interval=0.01)` で回す。既定の 0.5 秒では、後始末の `shutdown()` が 1 件ごとに 0.5 秒待つ
-- プロセスの中で走るテストの待ちの間隔を、テストの側で差し替える。耐久ワークフローの問い合わせの間隔は 10 系の [`plugins/ndf/scripts/tests/conftest.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/conftest.py) のフィクスチャが縮める。上限の宣言（`contracts/limits.json`）は変えない
+- プロセスの中で走るテストの待ちの間隔を、テストの側で差し替える。耐久ワークフローの問い合わせの間隔は 10 系の [`plugins/ndf/scripts/tests/conftest.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/tests/conftest.py) のフィクスチャが縮める。上限の設定（`contracts/limits/`）は変えない
 - テストの対象のスクリプトの起動を縮める。その起動で使わないサードパーティのライブラリ（`markdown_it`・`tabulate`・`filelock` など）は、使う関数の中で import する
 
 テストが起こした子孫のプロセスは、pytest が SIGTERM で止められたときと終わったときに、根の `conftest.py` が読み込む `scripts/pytest_child_cleanup.py` が止める。テストの中で止め忘れても次のテストへ持ち越さないが、テストは自分で起こしたプロセスを自分で止める。

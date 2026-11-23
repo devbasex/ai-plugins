@@ -122,7 +122,7 @@ Codex では `"${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/ndf/` の下の、�
 ## Hooks
 
 hook は Claude Code と Codex のどちらも `hooks/entry.py` の 1 つのエントリポイントから呼ばれ、事象と Tool が当たる guard を順に動かします。
-guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits.json` にあります。
+guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits/`（1 方針 1 ファイル）にあります。
 
 | guard | 事象 | すること |
 | --- | --- | --- |

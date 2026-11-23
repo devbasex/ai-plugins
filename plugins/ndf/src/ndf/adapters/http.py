@@ -6,7 +6,7 @@
 - `request_json` は 1 回の要求を指定のメソッドで送り、`(状態, JSON の object)` を返す。転送を追わず、環境変数のプロキシに従い、
   接続の前から受信の終わりまでを 1 つの期限（`DeadlineBackend`）で縛る
 
-上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport`（`request_json` は `RequestOptions.transport`）に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits/`）から引いて渡す。テストは `transport`（`request_json` は `RequestOptions.transport`）に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 """
 

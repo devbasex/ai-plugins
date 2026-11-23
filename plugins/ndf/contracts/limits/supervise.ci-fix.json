@@ -1,0 +1,4 @@
+{
+  "summary": "CI テストの設定のあるリポジトリで、CI の結果の監視（ci-watch.py peek）が CI の失敗の改修を起動する回数の上限。数えるのは落ちた head の数",
+  "attempts": 3
+}

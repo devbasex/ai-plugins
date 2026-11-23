@@ -264,11 +264,11 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 **Claude Code では、禁じる待ち方を hook が止める**（guard `sleep`・`process-wait`・`script-chain`・`read-repeat`。PreToolUse の
 `Bash` と `Read` で動く）。止めたときは理由の欄に代わりの待ち方が出る。guard を外すのは環境変数 `NDF_HOOK_OFF`
-（guard の名前をカンマでつなぐ・`all`）だけで、上限の秒は `contracts/limits.json` から読む。
+（guard の名前をカンマでつなぐ・`all`）だけで、上限の秒は `contracts/limits/` から読む。
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
 | --- | --- | --- | --- |
-| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などのラッパーのコマンドとその引数の後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数によらず止める）か、ループの外か `for` の中で秒数が上限を超える（秒数が変数なら超えると読む）。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は入れ子 5 つまで見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_HOOK_OFF=sleep` | `limits.json` の `hook.sleep`（既定 30 秒） |
+| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などのラッパーのコマンドとその引数の後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数によらず止める）か、ループの外か `for` の中で秒数が上限を超える（秒数が変数なら超えると読む）。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は入れ子 5 つまで見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_HOOK_OFF=sleep` | `contracts/limits/hook.sleep.json`（既定 30 秒） |
 | process-wait | Bash（フォアグラウンドでも `run_in_background: true` でも）で、`-f` を付けた `pgrep` / `pkill`（`--full`・`-af` のように束ねたフラグを含む）が `while` / `until` のループの条件か本体にある。`sleep` と同じく `bash -c` 系・`eval` の中身とラッパーのコマンドの後ろも見る。終わりは完了マーカーのファイルか `Monitor` で待つよう案内する | `NDF_HOOK_OFF=process-wait` | 無し |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 | スイッチポイント | 寿命 5 分の supervisor（入力の `agent_type` が `ndf:supervisor`）が `cross-review` / `cross-refactoring` の Skill を起動し、自身の記録の今の文脈が最初の呼び出しの文脈の比以上ある（やり直しても止め続ける）。PreToolUse の `Skill` で動く | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |

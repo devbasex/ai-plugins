@@ -71,7 +71,7 @@ allowed-tools:
 | `--symbols FILE:NAME...` | 課題が触る関数を差分から引かずに渡す（`ndf refactor touched` と同じ形） | 差分から引く |
 | `--participants RUNTIME...` | 提案の参加者 | 既定の席 |
 | `--max-fix N` | 項目ごとの修正と、最終ゲート修正の回数の上限 | `2` |
-| `--budget-minutes N` | 実装の予算（分）。採る項目を選ぶのにだけ使う | `limits.json` の `cross-refactoring.default-budget` |
+| `--budget-minutes N` | 実装の予算（分）。採る項目を選ぶのにだけ使う | `contracts/limits/cross-refactoring.default-budget.json` |
 | `--safety-net-minutes N` | 安全網の上限（分）。止まった実行は、より大きい値で同じコマンドを打ち直すと続く | 実効の予算 × 設定の倍率 |
 | `--work DIR` | 対象のリポジトリの中の位置 | `.` |
 

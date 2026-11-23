@@ -24,7 +24,7 @@
 | 状況報告と切り替えのオーガナイザーの手順・背景の `wait` を止める順 | [`development-workflow` の `references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md) の「長い待ちの状況報告と切り替え」と「セッションの切り替え」 |
 | 判定の材料の読み取りと判定の関数 | [`lib/parallel_switch.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_switch.py) |
 | `wait` の上限の戻りの出力 | [`lib/parallel_cli.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/parallel_cli.py) の `wait_plan` |
-| 閾値とラッパーの確かめの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `parallel-switch.long-wait`・`parallel-switch.relay-check` |
+| 閾値とラッパーの確かめの上限 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `parallel-switch.long-wait`・`parallel-switch.relay-check` |
 | 再起動の判定の記録と理由の集合 | [ndf-context-restart-policy.md](ndf-context-restart-policy.md) |
 | 並列の計画とオーガナイザーの全体 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) |
 

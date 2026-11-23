@@ -2,7 +2,7 @@
   "summary": "収束ループ（cross-review と cross-refactoring）のフェーズ。行の並びはフェーズが進む順で、各フェーズの監視の上限は上限の設定の monitor.phase.<id> が持つ",
   "owner": "D2（contracts/domains）",
   "columns": {
-    "id": {"type": "string", "summary": "フェーズの名前", "ref": "limits.json#monitor.phase."},
+    "id": {"type": "string", "summary": "フェーズの名前", "ref": "limits#monitor.phase."},
     "skill": {"type": "string", "summary": "フェーズを持つ収束ループ（cross-review か cross-refactoring）"},
     "launch": {"type": "boolean", "summary": "cross-refactoring の進行がフェーズの開始を記録し、担当の CLI を起動するフェーズ"},
     "coding": {"type": "boolean", "summary": "担当がコードを書くフェーズ。安全網（書いた変更を検証で戻す仕組み）に数える"},

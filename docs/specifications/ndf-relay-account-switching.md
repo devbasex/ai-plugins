@@ -30,7 +30,7 @@
 | 替えるかの判断（純粋な関数） | `plugins/ndf/src/ndf/domains/relay/account_decide.py`・`switch_decide.py` |
 | 使用率の取得・取得の記録・外した間 | `plugins/ndf/src/ndf/domains/relay/accounts.py`・`plugins/ndf/src/ndf/adapters/claude_usage.py`・`adapters/http.py` |
 | 見回り・止めてよい時点・認証の失敗の確かめ | `plugins/ndf/src/ndf/domains/relay/wrapper.py`・`wrapper_guard.py`・`wrapper_auth.py`・`wrapper_fetch.py`・`observe.py` |
-| 閾値と秒 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `relay.*`（下の「データ・設定」） |
+| 閾値と秒 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `relay.*`（下の「データ・設定」） |
 | 記録の置き場 | [`contracts/domains/ndf-files.json`](../../plugins/ndf/contracts/domains/ndf-files.json) の `relay-usage-fetch`・`relay-auth-held` |
 
 ## 用語

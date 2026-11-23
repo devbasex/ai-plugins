@@ -17,7 +17,7 @@ GitHub が待ちの秒を返さない二次レート制限の打ち直しは、6
 | 二次レート制限の見分けと待ちの秒・応答のフック・githubkit の打ち直しの判断 | [`github_limits.py`](../../plugins/ndf/src/ndf/adapters/github_limits.py) の冒頭の説明 |
 | 指摘のスレッドの書き方（レビューのまとめ・クローズの理由・PR からの復元） | [`threads.py`](../../plugins/ndf/src/ndf/domains/crossreview/threads.py) の冒頭の説明 |
 | PR に残る記録の利用者向けの説明 | [`cross-review` の修正と巻き直し](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の「終わり方」 |
-| 間隔・ウィンドウの上限・ロック・打ち直しの値 | [上限の宣言](../../plugins/ndf/contracts/limits.json) の方針 `github.write-spacing`・`github.content-window.minute`・`github.content-window.hour`・`github.write-send-lock`・`github.pr-publish-lock`・`cross-review.secondary-rate-limit` |
+| 間隔・ウィンドウの上限・ロック・打ち直しの値 | [上限の設定](../../plugins/ndf/contracts/limits/) の方針 `github.write-spacing`・`github.content-window.minute`・`github.content-window.hour`・`github.write-send-lock`・`github.pr-publish-lock`・`cross-review.secondary-rate-limit` |
 
 コードのコメントの「決定 N」「I1〜I6」「E1〜E6」は、この文書の「決定と理由」「常に成り立つ条件」「ドメインイベント」の番号を指す。
 

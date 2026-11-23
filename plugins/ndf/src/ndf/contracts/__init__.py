@@ -25,6 +25,7 @@ DEFAULT_DIR = ROOT / "contracts"
 SCHEMAS = "schemas"
 # 分けた表のディレクトリで、この文字で始まるファイルは項目でなく表そのものの値（`_meta.json` など）
 META_PREFIX = "_"
+META = "_meta.json"
 # 分ける表の一覧（事実の表。表の名前 → 項目の単位とキーの出所）
 SPLIT_TABLES = "domains/split-tables.json"
 T = TypeVar("T")
@@ -84,8 +85,8 @@ def load_json(rel: str) -> Any:
         raise ContractError(f"コントラクト {path} が JSON として壊れている: {exc}") from None
 
 
-def load_split(rel: str) -> dict[str, Any]:
-    """`contracts/<rel>/` の項目のファイルを読み、ファイル名（拡張子 `.json` を除く）→ 中身の辞書を返す（ファイル名の昇順）。
+def _list_keys(rel: str) -> list[str]:
+    """`contracts/<rel>/` の項目のキー（ファイル名から拡張子 `.json` を除いたもの。ファイル名の昇順）。中身は読まない。
 
     `META_PREFIX` で始まるファイルは項目でないので読まない。ほかのファイルは拡張子が小文字の `.json` でなければ断る
     （黙って飛ばすと、書いたつもりの項目が表から消える）。大小文字だけが違うキーは、大小文字を区別しないファイルシステムで
@@ -103,13 +104,43 @@ def load_split(rel: str) -> dict[str, Any]:
     if folded:
         clash = [k for k in keys if k.casefold() in folded]
         raise ContractError(f"分けた表 {root} に大小文字だけが違うキーがある: {', '.join(clash)}")
-    out: dict[str, Any] = {}
-    for key, path in zip(keys, paths):
-        item = load_json(f"{rel}/{path.name}")
-        if not isinstance(item, dict):
-            raise ContractError(f"分けた表の項目 {path} がオブジェクトでない（{type(item).__name__}）")
-        out[key] = item
-    return out
+    return keys
+
+
+@cached_reader
+def _load_item(rel: str, key: str) -> dict[str, Any]:
+    """項目 1 つの中身。全件（`load_split`）と 1 項目（`load_item`）のどちらが先でも、ファイルは 1 プロセスに 1 回だけ読む。"""
+    item = load_json(f"{rel}/{key}.json")
+    if not isinstance(item, dict):
+        raise ContractError(f"分けた表の項目 {_dir / rel / key}.json がオブジェクトでない（{type(item).__name__}）")
+    return item
+
+
+def load_split(rel: str) -> dict[str, Any]:
+    """分けた表 `contracts/<rel>/` の、キー → 中身の辞書（ファイル名の昇順）。すべての項目のファイルを読む。"""
+    return {key: _load_item(rel, key) for key in _list_keys(rel)}
+
+
+@cached_reader
+def split_keys(rel: str) -> frozenset[str]:
+    """分けた表 `contracts/<rel>/` のキーの集合。ディレクトリの一覧を 1 プロセスに 1 回取るだけで、項目のファイルは読まない。"""
+    return frozenset(_list_keys(rel))
+
+
+def load_item(rel: str, key: str) -> dict[str, Any] | None:
+    """分けた表 `contracts/<rel>/` の項目 1 つの中身。そのファイルだけを読む。項目が無ければ None。"""
+    return _load_item(rel, key) if key in split_keys(rel) else None
+
+
+def load_table(rel: str, error_cls: type[ContractError], label: str) -> dict[str, Any]:
+    """分けた表 `rel` の `_meta.json` の形を確かめ、項目（`load_split`）を返す。項目が 1 つも無い表も `error_cls` で断る。"""
+    with raised_as(error_cls):
+        meta = load_json(f"{rel}/{META}")
+        require_schema(meta, schema_path("split-meta"), error_cls, f"{label} {rel}/{META}")
+        items = load_split(rel)
+    if not items:
+        raise error_cls(f"{label} {rel} に項目が 1 つも無い")
+    return items
 
 
 def split_tables() -> dict[str, dict[str, str]]:

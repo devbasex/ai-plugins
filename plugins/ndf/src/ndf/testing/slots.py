@@ -59,7 +59,7 @@ SLOTS_DIR_NAME = "test-slots"
 POLL_SECONDS = 2.0
 # 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
 STOP_INTERVAL_SECONDS = 30.0
-# テストの組を止める猶予と間隔の方針（contracts/limits.json）
+# テストの組を止める猶予と間隔の方針（contracts/limits/procs.stop-test.json）
 STOP_TEST = "procs.stop-test"
 STOP_FILE = "stop.json"
 
