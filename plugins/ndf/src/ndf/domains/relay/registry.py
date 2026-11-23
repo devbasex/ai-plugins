@@ -8,7 +8,7 @@
 | `wrapper.json` | 名前・バージョン・状態（`running`・`stalled`・`waiting`・`stopped`）・理由・セグメント・アカウント |
 | `log.jsonl` | セグメントの切り替えと、切り替えない理由が変わったときの 1 行 |
 | `next.json`・`question.json` | hook が書くシグナルファイル（`signals`） |
-| `activity.json` | Stop の hook が書く、最後の応答の時刻・セッション・背景の作業の一覧（`id`・`type`。観測できなければ `null`） |
+| `activity.json` | Stop の hook が書く、最後の応答の時刻・セッション・背景の作業の一覧（`id`・`type`。観測できなければ `null`。`signals`） |
 
 旧い NDF（10.x）のラッパーは `<旧い状態の根>/relay/<作業ディレクトリ>/relay.lock` を持つ。旧い状態の根は
 `NDF_STATE_HOME` → `$XDG_STATE_HOME/ndf` → `~/.local/state/ndf` の順で決まる（旧い NDF と同じ規則）。
@@ -28,7 +28,6 @@ NAME_RE = signals.NAME_RE
 LOCK_FILE = "relay.lock"
 STATE_FILE = "wrapper.json"
 LOG_FILE = "log.jsonl"
-ACTIVITY_FILE = "activity.json"
 # リレーハブの保存先（`hub.hub_dir`）の下の登録簿
 REGISTRY_FILE = "registry.json"
 
@@ -72,45 +71,6 @@ def append_log(directory: Path, row: Mapping[str, Any]) -> bool:
     except OSError:  # noqa: NDF401 ファイル: 診断の記録が書けなくても、替え先の起動や判断を続ける
         return False
     return True
-
-
-def write_activity(directory: Path, tasks: Any, session_id: Optional[str]) -> bool:
-    """`activity.json` に時刻・セッション・背景の作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
-
-    `tasks` は Stop の hook の入力の生の値。リストでなければ、観測できなかったことを表す `null` を書く（空のリストと分ける）。
-    """
-    rows = [_task(t) for t in tasks] if isinstance(tasks, list) else None
-    try:
-        signals.replace_json(directory / ACTIVITY_FILE, {"at": signals.now_iso(), "session_id": session_id, "tasks": rows})
-    except OSError:  # noqa: NDF401 ファイル: 活動の記録が書けなくても、次の Stop が書き直す
-        return False
-    return True
-
-
-def _task(item: Any) -> dict[str, str]:
-    """背景の作業の要素の `id`・`type`。形が違う値は空の文字列にして要素の数を保つ（読む側で走っているとみなす）。"""
-    data = item if isinstance(item, dict) else {}
-    return {key: value if isinstance(value := data.get(key), str) else "" for key in ("id", "type")}
-
-
-def read_activity(directory: Path) -> Optional[dict[str, Any]]:
-    """`activity.json`。無い・壊れている・形が違えば None。`tasks` が `null` の記録はそのまま返す。"""
-    try:
-        data = json.loads((directory / ACTIVITY_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない活動の記録は無いものとして判定を今までどおりにする
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("at"), str):
-        return None
-    session, tasks = data.get("session_id"), data.get("tasks")
-    if session is not None and not isinstance(session, str):
-        return None
-    if tasks is not None and not (isinstance(tasks, list) and all(_is_task(t) for t in tasks)):
-        return None
-    return data
-
-
-def _is_task(item: Any) -> bool:
-    return isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("type"), str)
 
 
 def read_registry(hub: Path) -> dict[str, dict[str, Any]]:

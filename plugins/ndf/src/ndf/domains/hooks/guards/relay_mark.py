@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from ndf.domains.hooks import tables
-from ndf.domains.relay import blocks, registry, signals
+from ndf.domains.relay import blocks, signals
 from ndf.domains.hooks.verdict import Verdict, passing, pushback
 
 
@@ -19,7 +19,7 @@ def check(ctx, svc) -> Verdict | None:
     directory = signals.relay_dir(ctx.env)
     if directory is None:
         return None
-    registry.write_activity(directory, ctx.payload.get("background_tasks"), ctx.payload.get("session_id"))
+    signals.write_activity(directory, ctx.payload.get("background_tasks"), ctx.payload.get("session_id"))
     if not ctx.last_reply:
         return None
     block = blocks.last_block(ctx.last_reply, svc.params["fence"])
