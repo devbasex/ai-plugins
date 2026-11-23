@@ -16,7 +16,7 @@
 | 応答ごとに積むか止めるかの表・流すきっかけ・`state.py flush` の出力の行 | [`cross-review` の投稿と記録](https://github.com/devbasex/ai-plugins/blob/ndf--v10.27.77/plugins/ndf/skills/cross-review/docs/07-posts-and-records.md) の「GitHub が使えないあいだの投稿（投稿キュー）」 |
 | 判定の出口（終了コード 8）・ステージ `posts` の待ち方・投稿待ちの止まりの形 | [`cross-review` の状態と判定](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md) の「判定の出口」 |
 | 一時的な失敗の語・項目のキー（`last_transient`） | [`post_queue.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/post_queue.py) の冒頭の説明と `is_transient_failure` / `reflush` |
-| 流し直しの待ちの合計と間隔 | [上限の宣言](../../plugins/ndf/contracts/limits/) の方針 `post-queue.transient-reflush` |
+| 流し直しの待ちの合計と間隔 | [上限の設定](../../plugins/ndf/contracts/limits/) の方針 `post-queue.transient-reflush` |
 
 決定の番号は #1843 の設計の番号である。コードのコメントの「決定 3」「決定 4・5」はこの番号を指す。
 
