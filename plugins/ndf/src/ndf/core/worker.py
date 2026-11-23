@@ -710,12 +710,12 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
-def _paths_of(directory: str, name: str, *, resolve: bool = True) -> tuple[worker_paths.ReportPaths, bool]:
-    """パスと、解いた時点で保存先が無かったか（`resolve` が偽なら常に偽）を組で返す。"""
+def _paths_of(directory: str, name: str, *, resolve: bool = True) -> tuple[worker_paths.ReportPaths, int]:
+    """パスと、解いた時点で無かった末尾の要素の数（`resolve` が偽なら常に 0）を組で返す。"""
     try:
         if resolve:
             return worker_paths.prepare_paths(Path(directory), name)
-        return worker_paths.report_paths(Path(directory), name, resolve=False), False
+        return worker_paths.report_paths(Path(directory), name, resolve=False), 0
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
     except worker_paths.EntryError as exc:  # 参照先の無いリンク・リンクの循環は作る前に拒む
@@ -738,8 +738,8 @@ def _report_paths(report: str) -> worker_paths.ReportPaths:
 
 
 @contextlib.contextmanager
-def _workdir(paths: worker_paths.ReportPaths, doing: str, *, create: bool = False, fresh: bool = False) -> Iterator[worker_paths.WorkDir]:
-    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`fresh` は解いた時点で無かったこと）。
+def _workdir(paths: worker_paths.ReportPaths, doing: str, *, create: bool = False, fresh: int = 0) -> Iterator[worker_paths.WorkDir]:
+    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`fresh` は解いた時点で無かった末尾の要素の数）。
 
     リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。
     """

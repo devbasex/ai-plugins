@@ -269,6 +269,38 @@ def test_check_entries_refuses_a_directory_that_appeared_after_the_paths_were_re
     assert (target / "n.report.md.done").exists()
 
 
+def test_open_workdir_refuses_another_users_directory_that_appeared_after_the_paths_were_resolved(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    _foreign(monkeypatch, d)
+    target = tmp_path / "new"
+    paths, fresh = worker_paths.prepare_paths(target, "n")
+    os.rename(d, target)  # 解いてから開くまでに、別の利用者のディレクトリが同じ名前へ現れる（最初の open で開ける）
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, fresh=fresh):
+        pass
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
+
+
+def test_prepare_paths_keeps_a_part_observed_missing_that_appears_while_rebuilding(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    target = tmp_path / "new"
+    real_lexists = os.path.lexists
+    calls = []
+
+    def lexists(p):  # 最初に無いと観測した後、組み直す前に既存のディレクトリが同じ名前へ移される
+        seen = real_lexists(p)
+        calls.append(Path(p))
+        if Path(p) == target and calls.count(target) == 1 and not seen:
+            os.rename(d, target)
+        return seen
+
+    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    paths, fresh = worker_paths.prepare_paths(target, "n")
+    assert fresh == 1
+    assert paths.report == tmp_path.resolve() / "new" / "n.report.md"
+
+
 def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):
     victim = tmp_path / "victim"
     victim.mkdir()
