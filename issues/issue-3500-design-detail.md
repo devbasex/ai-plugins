@@ -143,7 +143,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `clear_results` | 退避できない・コミットできない・退避を消せない | git の錠・権限 | `rename`・`git commit`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
-| `adopt_legacy` | 移し替え先に同じ名前がある・書き手が開いたまま別のファイルシステムにある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・権限 | 移す前の `exists`・`st_dev` の比較と `/proc/*/fd` の走査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
+| `adopt_legacy` | 移し替え先に同じ名前がある・書き手が開いたまま別のファイルシステムにある・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`st_dev` の比較と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
 | `_check_location` | `.worktrees` を作れない | 権限 | `prepare` | 止める | 終了コード 1 | 再実行可 |
 
 ### 並行と排他
@@ -163,6 +163,8 @@ plugins/ndf/
 - `record_dir` と `detach` は移し替えをしない（計画の起動の経路に移し替えの git とファイル操作を足さない）
 
 `adopt_legacy` は前の置き場の下の計画ごと（`<worktree>/.ndf/parallel/<計画>/`）に次の扱いをする。`worktree` がメインディレクトリなら何もしない。
+
+移す前の symlink の検査（どの行よりも先。当たればその計画を移さず `kept` に `symlink`、worktree も外さない）: 前の置き場は `worktree` の根から `.ndf`・`.ndf/parallel`・`<計画>` まで、新しい置き場はメインディレクトリの根から `.ndf`・`.ndf/parallel` までの各要素を、根の記述子から `os.open(<要素>, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, dir_fd=<親の記述子>)` で順に開く（要素が symlink なら `ELOOP`）。あわせて開いた記述子の実体が起点の実体の下にあることを確かめる。`rename`・複写・前の置き場の削除は、検査済みの親の記述子を基準に行い（`os.rename(<計画>, <計画>, src_dir_fd=..., dst_dir_fd=...)`、複写と削除も `dir_fd` を使い、中の symlink はたどらずリンクのまま扱う）、パスの文字列で引き直さない。`.ndf` や `parallel` が外を指していても、外の計画のディレクトリそのものを動かしたり消したりしない
 
 | 前の置き場 | 新しい置き場 | 同じファイルシステムか（`st_dev`） | 扱い |
 | --- | --- | --- | --- |
