@@ -105,11 +105,12 @@ flowchart LR
 | 事象 | 中身 |
 | --- | --- |
 | `batch_claimed` | id・フェーズ（`verify` か `backlog`）・取りかかりのキー（環境の名前かリポジトリ）・リクエストのキーの並び・リクエストごとの版・担い手のレーンと行・単発のレーンを足したか・時刻 |
+| `batch_revoked` | id・理由。担い手でない `abort` が停止の確かめの前に書く、担い手の起動を無効にする印。行の起動・再起動・`show`・`close` はこれがあれば進まない |
 | `batch_closed` | id・結果（`done`・`failed`・`aborted`）・理由・リポート（JSON。64 KiB まで。環境と版に共通する結果 `common` と、リクエストごとの条件の合否 `pass`・`fail`・`not_run` と証跡を書いた PR）・リポジトリごとの読んだ版（配布の前・配布の後・導入した版）・失敗の原因（`version_changed`・`install_mismatch`・`version_mismatch`・`work_failed`） |
 
 `done` は「確かめをやり終えた」（条件の不合格や、次の版で確かめる `not_run` を含む。今の `release-verification` と同じく振り返りへ進む）、`failed` は「確かめをやり終えられなかった」（環境の故障・版の食い違い）を表す。一部のリクエストの条件だけが不合格でも、まとめは `done` で閉じ、各行は自分の節だけを受け取る。
 
-**取りかかりの記録**（マシン全体。`<状態の保存先>/parallel/batches/<種類>-<キーの写し>.json`。種類は `env` か `backlog`）: 持ち主の組（計画の状態の保存先・計画の ID・まとめの id）・フェーズ・取りかかりの時刻。照合はいつも持ち主の組で行う（まとめの id は計画の中でしか一意でない）。排他は同じフォルダの `<状態の保存先>/parallel/batches/batches.lock`（flock。すべてのコマンドがこの 1 つのパスを開く）。
+**取りかかりの記録**（マシン全体。`<状態の保存先>/parallel/batches/<種類>-<キーの写し>.json`。種類は `env` か `backlog`）: 持ち主の組（持ち主の DB の参照・計画の状態の保存先・計画の ID・まとめの id）・フェーズ・取りかかりの時刻。DB の参照は、SQLite なら DB のファイルの絶対パス、ほかは利用者名・パスワードを落とした `<ドライバー>://<ホスト>:<ポート>/<DB 名>` で、認証情報を書かない。持ち主はこの参照で開き、呼び手の `NDF_PROGRESS_DB` は参照と同じ DB を指すときだけ使う。特定できなければ枠を保つ。照合はいつも持ち主の組で行う（まとめの id は計画の中でしか一意でない）。排他は同じフォルダの `<状態の保存先>/parallel/batches/batches.lock`（flock。すべてのコマンドがこの 1 つのパスを開く）。
 
 **スプリントの事象 `delegate_answered`**: 委ねのキー・結果（`done` か `failed`）・その行のリポートの節と `common`・要求の版・読んだ版・失敗の原因（`delegate_withdrawn` を含む）。文脈の `verification`（新しいキー）に、成功のリポート・要求の版・読んだ版を写す。
 
@@ -132,8 +133,8 @@ flowchart LR
 | `ndf lanes batch assign <計画> <リクエスト>... [--lane <レーン>] --reason <理由>` | オーガナイザー | 開いた同じ種類の委ねのリクエスト。検証は同じ環境 | `ok`・`metrics.batch`（id・担い手のレーンと行・取りかかりのキー）。断るときは `stopped`・`precondition`（取りかかり中のまとめの計画と id・経過時間、または断った理由） |
 | `ndf lanes batch show <計画> <id>` | 担い手の conductor・オーガナイザー | — | まとめ（フェーズ・環境・リクエストごとのレーン・行・課題・工程・版・確かめる対象（版のタグか `target_ref`））と、担い手が打つ `close` の雛形 |
 | `ndf lanes batch close <計画> <id> --result done\|failed --report <ファイル> [--observed-version <リポジトリ>=<配布の前>,<配布の後>,<導入した版>] [--cause <原因>] --reason <理由>` | 担い手の行の conductor・オーガナイザー | 検証の `done` は `--observed-version` が要る | `ok`・`metrics.closed`（閉じたリクエスト・回答した行）。閉じた後の打ち直しは前の結果を返す |
-| `ndf lanes batch abort <計画> (<id> \| --claim <種類>:<キー>) [--self] --reason <理由>` | 持ち主の計画のオーガナイザー（`<id>`。計画の状態を問わない）・別の計画のオーガナイザー（`<計画>` は自分の計画、`--claim` で取りかかりを名指す。持ち主の計画が `running` でなく担い手の行が実行中でないときだけ）・担い手の conductor（`--self`。計画の中止の入力からだけ） | — | `ok`。担い手の行は中止し、リクエストは開いたまま。担い手の行が実行中なら、ラッパーを止めて止まったことを確かめてから書き、確かめられなければ何も書かずに `transient` |
-| `ndf lanes request close <計画> <リクエスト>`（変更） | オーガナイザー | 委ねのリクエスト | 開いたまとめに入っていれば断る。まとめに入っていない `lane-verify` は、要求元へ `failed`（`delegate_withdrawn`）の回答を同じトランザクションで書いてから閉じる |
+| `ndf lanes batch abort <計画> (<id> \| --claim <種類>:<キー>) [--self] --reason <理由>` | 持ち主の計画のオーガナイザー（`<id>`。計画の状態を問わない）・別の計画のオーガナイザー（`<計画>` は自分の計画、`--claim` で取りかかりを名指す。持ち主の計画が `running` でなく担い手の行が実行中でないときだけ）・担い手の conductor（`--self`。計画の中止の入力からだけ） | — | `ok`。担い手の行は中止し、リクエストは開いたまま。担い手でない呼び手は先に `batch_revoked` を書いて担い手の起動を無効にし、担い手の行が実行中なら、ラッパーを止めて止まったことを確かめてから書き、確かめられなければ `batch_revoked` のほかは書かずに `transient` |
+| `ndf lanes request close <計画> <リクエスト>`（変更） | オーガナイザー | 委ねのリクエスト | 開いたまとめに入っていれば断る。まとめに入っていない `lane-verify` は、要求元の行が実行中なら `failed`（`delegate_withdrawn`）の回答を同じトランザクションで書いてから閉じ、要求元の行が終わっていれば回答を書かずに閉じる |
 
 書き手の見分けは、中継の子の環境変数で行う。`NDF_RELAY_PLAN` を持つ呼び出し（レーンの conductor）は `assign` と `--self` でない `abort` を断られ、`close` と `abort --self` はまとめの担い手の行のレーンのラッパー（`NDF_RELAY_NAME`）と合うときだけ通る。`NDF_RELAY_PLAN` を持たない呼び出しはオーガナイザーとして扱う。呼び手の計画は `cwd` の保存先から開く名前で、持ち主の計画は取りかかりの記録の保存先から開く。
 
@@ -225,7 +226,7 @@ sequenceDiagram
 ### 決定 7: 閉じと回答の片方だけが残らないため、`batch close` がまとめの結果・リクエストの閉じ・各行への回答・担い手の行の終わりを 1 つのトランザクションで書く
 
 - **質問**: まとめの結果を、リクエストと各行と担い手の行へどう反映するか。放棄はどう表すか
-- **選んだ案**: `batch close` は計画の排他の中の 1 つのトランザクションで、`batch_closed`・リクエストの閉じ・検証なら各行の `row_answered` とスプリントの `delegate_answered`・担い手の行の `row_ended`（`completed`）と子のステートマシンの完了を書き、コミットの後に取りかかりの記録を消す。棚卸しの `failed` はリクエストを閉じない（開いたリクエストが計画を完了させない）。行ごとに回答を打つ口（`ndf lanes answered --request`）は作らない。種類 `batch` の行の終わりと中止は、書き込みの共通の経路（`end_row`・`cancel_row`・`move_row`）で断り（`row end`・`row cancel`・`progress cancel`・`lanes move` のどれから来ても）、途中でやめるのは `batch abort`（担い手の行の中止・`batch_closed` の `aborted`・リクエストは開いたまま・回答は書かない）と、計画の中止（`stop --now` の未着手の行の中止と、実行中の担い手の中止の入力 `batch abort --self`）だけにする。委ねのリクエストを `request close` で単独に閉じるのは、まとめに入っていないものだけで、検証なら要求元へ失敗の回答を同じトランザクションで書く
+- **選んだ案**: `batch close` は計画の排他の中の 1 つのトランザクションで、`batch_closed`・リクエストの閉じ・検証なら各行の `row_answered` とスプリントの `delegate_answered`・担い手の行の `row_ended`（`completed`）と子のステートマシンの完了を書き、コミットの後に取りかかりの記録を消す。棚卸しの `failed` はリクエストを閉じない（開いたリクエストが計画を完了させない）。行ごとに回答を打つ口（`ndf lanes answered --request`）は作らない。種類 `batch` の行の終わりと中止は、書き込みの共通の経路（`end_row`・`cancel_row`・`move_row`）で断り（`row end`・`row cancel`・`progress cancel`・`lanes move` のどれから来ても）、途中でやめるのは `batch abort`（担い手の行の中止・`batch_closed` の `aborted`・リクエストは開いたまま・回答は書かない）と、計画の中止（`stop --now` の未着手の行の中止と、実行中の担い手の中止の入力 `batch abort --self`）だけにする。委ねのリクエストを `request close` で単独に閉じるのは、まとめに入っていないものだけで、検証なら要求元へ失敗の回答を同じトランザクションで書く。`close`・`request close` とも、回答は要求元の行が実行中のときだけ書き、終わった要求元（回答の前に中止した行）への回答は省いてリクエストを閉じる（`row_answered` は実行中の行にしか書けないため）
 - 採らなかった案: `batch close` がリクエストだけを閉じ、オーガナイザーが行ごとに `ndf lanes answered` を打つ（途中で落ちると、閉じたリクエストの行が回答を待ち続ける。#4050 の r1-12）
 - 採らなかった案: 担い手の行を `ndf lanes row end` で終える（まとめを閉じずに行だけが終わり、取りかかりが残る）
 - **代償**: `batch close` の 1 回のトランザクションは、まとめの行の数に比例して大きくなる（1 つの計画の行の数が上限）
