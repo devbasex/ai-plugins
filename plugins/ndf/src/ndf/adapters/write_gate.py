@@ -75,7 +75,7 @@ _IGNORED = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\\n])*"|#[^\n\r]*')
 _PARENS = re.compile(r"\([^()]*\)")
 _MUTATION = re.compile(r"[\s,﻿]*mutation(?![_0-9A-Za-z])")
 # 最初の選択の最初のフィールドの名前（別名 `a: field` なら field）
-# 送信前の分類（`write_of` の結果）を残す、httpx の要求の `extensions` の鍵
+# 送信前の分類（`write_of` の結果）を残す、httpx の要求の `extensions` のキー
 WRITES = "ndf.writes"
 _FIRST_FIELD = re.compile(r"[^{]*\{[\s,]*(?:[_A-Za-z][_0-9A-Za-z]*[\s,]*:[\s,]*)?([_A-Za-z][_0-9A-Za-z]*)")
 

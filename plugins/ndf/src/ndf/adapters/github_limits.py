@@ -40,7 +40,7 @@ REST_PHRASES = ("secondary rate",)
 GRAPHQL_PHRASES = ("secondary rate limit", "submitted too quickly")
 # `errors[]` の辞書から理由の文へつなぐ欄
 REASON_KEYS = ("message", "code", "field", "resource")
-# 同じ応答について `WriteGate.block` へ知らせた待ちの秒を残す、httpx の応答の `extensions` の鍵
+# 同じ応答について `WriteGate.block` へ知らせた待ちの秒を残す、httpx の応答の `extensions` のキー
 BLOCKED = "ndf.blocked"
 
 

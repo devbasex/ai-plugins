@@ -485,8 +485,7 @@ class _Counted(NamedTuple):
 
 @contextmanager
 def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
-    """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限なら `gate.block` で
-    待ちの終わりを知らせる（githubkit の打ち直しを通らない失敗も。応答のフックか打ち直しの判断が知らせ済みなら知らせ直さない）。"""
+    """失敗を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `github_limits.tell` で待ちの終わりを知らせる。"""
     try:
         yield
     except (RateLimitExceeded, RequestFailed, RequestError) as exc:
@@ -522,8 +521,7 @@ class GitHub:
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。
-        HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（mutation は応答のフック、読み取りは `_translating` が
-        `block` する。A6）。"""
+        HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（`block` は応答のフックか `_translating`。A6）。"""
         with _translating(GRAPHQL, gate=self.gate):
             resp = self.api.graphql._request(query, variables)  # 誤りの写しへ応答のヘッダー（`Retry-After`）を渡す
             try:

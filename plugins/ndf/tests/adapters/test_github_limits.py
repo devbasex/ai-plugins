@@ -143,7 +143,7 @@ def test_a_refusal_without_the_phrase_is_not_a_secondary_limit() -> None:
 
 
 def test_the_phrase_outside_the_json_message_is_not_a_secondary_limit() -> None:
-    # PR 4265 の r1-3: JSON の応答は `message` だけを照合する
+    # PR 4265 の r1-3: JSON の応答は `message` だけを見て判定する
     body = {"message": "Resource not accessible by integration", "errors": [SECONDARY], "documentation_url": "secondary rate limit"}
     error, gate = _rest_failure(httpx.Response(403, json=body))
     assert (error.secondary, error.retry_after) == (False, None)
