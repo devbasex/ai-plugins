@@ -9,7 +9,7 @@
     ndf relay cap [--named <数> | --clear]                    # 同時に動かす数の上限（マシンの設定。#3989）
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
-    ndf relay context resolve | record | calibrate | report   # 再起動の方針の適用値・判定の記録・見込み・作業ごとの集計
+    ndf relay context resolve | record | calibrate | report   # 文脈の切り替えの 2 つの値・判定の記録・見込み・作業ごとの集計
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる（決定 92）
     ndf relay decide < セグメントの状態の JSON                       # セグメントを切り替えるかの判断（#2962）

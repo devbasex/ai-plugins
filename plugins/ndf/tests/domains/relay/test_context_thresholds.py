@@ -118,7 +118,7 @@ def test_resolve_follows_the_limits_table(monkeypatch, capsys):
     assert got["metrics"] == {"decide_from": 100_000, "limit": 200_000}
 
 
-# --- 再起動の方針と設定の形を消した（#3995 の Task 5。3995:2・3995:10 の契約の側） ---
+# --- 再起動の方針と設定の形を消した（#3995 の Task 5。3995:2・3995:10 のコントラクトの側） ---
 
 
 @pytest.mark.parametrize("name", ["hook.context-limit", "relay.context"])

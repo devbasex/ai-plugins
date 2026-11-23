@@ -25,13 +25,13 @@
           "type": "integer",
           "description": "停止のリクエストが通ったラッパーの数（stop --all）"
         },
-        "policy": {
-          "type": "string",
-          "description": "適用する再起動の方針（context resolve）"
+        "decide_from": {
+          "type": "integer",
+          "description": "判断開始の値（context resolve）"
         },
         "limit": {
           "type": "integer",
-          "description": "適用する運用上限（context resolve）"
+          "description": "運用上限（context resolve）"
         },
         "samples": {
           "type": "integer",
@@ -44,10 +44,6 @@
         "skipped": {
           "type": "integer",
           "description": "読めずに飛ばした判定の記録の行の数（context report）"
-        },
-        "no_policy_rows": {
-          "type": "integer",
-          "description": "方針の列が無く現行方式として読んだ行の数（context report）"
         },
         "accounts": {
           "type": "integer",
@@ -209,12 +205,6 @@
             "type": "string",
             "description": "リレーハブの回答の要約（stop --all）"
           },
-          "policy": {
-            "type": [
-              "string"
-            ],
-            "description": "再起動の方針（context resolve・record）"
-          },
           "decide_from": {
             "type": "integer",
             "description": "判断開始の値（context resolve・record）"
@@ -223,20 +213,9 @@
             "type": "integer",
             "description": "運用上限（context resolve・record）"
           },
-          "margin": {
-            "type": "integer",
-            "description": "容量の余白（context resolve・record）"
-          },
           "sources": {
             "type": "object",
             "description": "値ごとの出所（context resolve・record）"
-          },
-          "config_error": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "壊れていて読まなかった設定の理由（context resolve・record）"
           },
           "schema": {
             "type": "integer",
@@ -425,10 +404,6 @@
           "quality": {
             "type": "object",
             "description": "品質（context report）"
-          },
-          "no_policy_rows": {
-            "type": "integer",
-            "description": "方針の列が無い行の数（context report）"
           },
           "email": {
             "type": [

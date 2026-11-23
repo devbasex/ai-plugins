@@ -457,18 +457,6 @@
         "subcommand": {
           "const": "context resolve",
           "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--root": {
-          "type": "string",
-          "description": "設定を読むリポジトリ（省けば今の作業場所の git の根）"
-        },
-        "--policy": {
-          "type": "string",
-          "enum": [
-            "current",
-            "trial"
-          ],
-          "description": "方針を上書きする"
         }
       },
       "required": [
