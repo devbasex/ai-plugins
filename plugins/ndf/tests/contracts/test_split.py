@@ -80,8 +80,11 @@ def test_keys_differing_only_in_case_stop_and_name_both(tmp_path, monkeypatch):
         return original(self)
 
     monkeypatch.setattr(Path, "iterdir", iterdir)
-    with pytest.raises(contracts.ContractError, match="A, a"):
+    with pytest.raises(contracts.ContractError, match="大小文字だけが違うキー") as caught:
         contracts.load_split(rel)
+    # パスの並びは OS で違う（Windows は大小文字を区別せずに並べる）ため、挙がったキーは順不同で比べる
+    named = str(caught.value).rsplit(": ", 1)[1]
+    assert sorted(named.split(", ")) == ["A", "a"]
 
 
 def test_split_tables_lists_limits_and_causes_with_where_the_key_comes_from():
