@@ -106,7 +106,7 @@ flowchart LR
 | --- | --- |
 | `batch_claimed` | id・フェーズ（`verify` か `backlog`）・取りかかりのキー（環境の名前かリポジトリ）・リクエストのキーの並び・リクエストごとの版・担い手のレーンと行・単発のレーンを足したか・時刻 |
 | `batch_revoked` | id・理由。担い手でない `abort` が停止の確かめの前に書く、担い手の起動を無効にする印。行の起動・再起動・`show`・`close` はこれがあれば進まない |
-| `batch_closed` | id・結果（`done`・`failed`・`aborted`）・理由・リポート（JSON。64 KiB まで。環境と版に共通する結果 `common` と、リクエストごとの条件の合否 `pass`・`fail`・`not_run` と証跡を書いた PR）・リポジトリごとの読んだ版（配布の前・配布の後・導入した版）・失敗の原因（`version_changed`・`install_mismatch`・`version_mismatch`・`work_failed`） |
+| `batch_closed` | id・結果（`done`・`failed`・`aborted`）・理由・リポート（JSON。64 KiB まで。環境と版に共通する結果 `common` と、リクエストごとの条件の合否 `pass`・`fail`・`not_run` と証跡を書いた PR）・リポジトリごとの読んだ版（配布の前・配布の後・導入した版）・失敗の原因（`version_changed`・`install_mismatch`・`version_mismatch`・`ref_unresolved`・`work_failed`） |
 
 `done` は「確かめをやり終えた」（条件の不合格や、次の版で確かめる `not_run` を含む。今の `release-verification` と同じく振り返りへ進む）、`failed` は「確かめをやり終えられなかった」（環境の故障・版の食い違い）を表す。一部のリクエストの条件だけが不合格でも、まとめは `done` で閉じ、各行は自分の節だけを受け取る。
 
