@@ -320,6 +320,21 @@ def test_write_file_failure_leaves_no_temp_and_keeps_original(workdir, monkeypat
     assert [p.name for p in d.iterdir()] == ["f"]
 
 
+def test_write_file_returns_after_publish_even_if_temp_dir_cleanup_fails(workdir, monkeypatch):
+    d, _ = workdir
+    (d / "f").write_text("元", encoding="utf-8")
+
+    def fail(*args, **kwargs):
+        raise OSError(16, os.strerror(16))
+
+    monkeypatch.setattr(os, "rmdir", fail)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "f", "新")
+    assert (d / "f").read_text(encoding="utf-8") == "新"
+    (tmp,) = (p for p in d.iterdir() if p.name != "f")
+    assert list(tmp.iterdir()) == []
+
+
 def test_write_file_rejects_temp_dir_that_is_not_private(workdir, monkeypatch):
     d, _ = workdir
     real_mkdir = os.mkdir

@@ -186,6 +186,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     tmp_fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
     created = False
     private = False
+    published = False
     st: Optional[os.stat_result] = None
     try:
         st = os.fstat(tmp_fd)
@@ -199,17 +200,20 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
             f.write(data)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
+        published = True
     finally:
-        _clean_tmp(wd, tmp_fd, tmp, st, created=created, private=private)
+        _clean_tmp(wd, tmp_fd, tmp, st, created=created, private=private, published=published)
 
 
-def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result], *, created: bool, private: bool) -> None:
+def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result], *, created: bool, private: bool, published: bool) -> None:
     """`write_file` の一時ディレクトリを片付け、最後に記述子を閉じる。
 
     片付けるのは所有者・モードの確かめを通った（`private`）一時ディレクトリだけである。照合で確かめられるのは
     開いた対象と今の名前の一致までで、`mkdir` で作った対象かどうかは確かめられないため。
     記述子は inode の突き合わせと `rmdir` が終わるまで閉じない。開いている間は inode が解放されず、同じ番号を
     別のディレクトリが再利用して突き合わせを通ることが無い。
+    公開した後（`published`）の片付けの失敗は上げない。名前は既に新しい inode を指しており、上げると呼び出し側は
+    書き込みが起きなかったと読み違える。残るのは中身の無い一時ディレクトリだけである。
     """
     try:
         if created:
@@ -217,7 +221,11 @@ def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result],
                 os.unlink("data", dir_fd=tmp_fd)
         # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
         if st is not None and private:
-            _remove_opened_dir(wd, tmp_fd, tmp, st)
+            if published:
+                with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。空の一時ディレクトリを残して書き込みは成功として返す
+                    _remove_opened_dir(wd, tmp_fd, tmp, st)
+            else:
+                _remove_opened_dir(wd, tmp_fd, tmp, st)
     finally:
         os.close(tmp_fd)
 
