@@ -143,8 +143,11 @@ def _markdown_lines(text: str) -> list[str]:
 
 
 def prose_lines(text: str) -> list[tuple[str, bool]]:
-    """コードのブロック・引用・表を除いた、空でない行と、箇条書きの項目かどうか。見出しは `#` を外した文を残す。
+    """コードのブロック・引用・表を除いた、空でない行と、箇条書きの項目かどうか。
 
+    見出しは章題として除く。ただし本文の最後の見出しの後に本文の行が無ければ（「## このまま進めてよいですか？」で
+    終える応答）、`#` を外した文を最後の行に残す。後に本文が続く見出しは、問いに答えた章題（「### どうやって設定
+    しますか？」の後の説明）でも、検証結果の章題でも、最後の 3 行と完了の報告の文に数えない。
     コードのブロック（囲みの種類と長さ・インデントのコード）は CommonMark の解析（`markdown.code_lines`）で決める。
     本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
     """
@@ -153,17 +156,19 @@ def prose_lines(text: str) -> list[tuple[str, bool]]:
     lines = _markdown_lines(text)
     code = markdown.code_lines(text)
     out: list[tuple[str, bool]] = []
+    heading = ""
     for raw, in_code in zip(lines, code):
         line = raw.strip()
         if in_code or not line or line.startswith((">", "|")):
             continue
         if _HEADING.match(line):
-            line = _HEADING_MARKS.sub("", line)
-            if line:
-                out.append((line, False))
+            heading = _HEADING_MARKS.sub("", line)
             continue
+        heading = ""
         stripped = _BULLET.sub("", line)
         out.append((stripped, stripped != line))
+    if heading:
+        out.append((heading, False))
     return out
 
 

@@ -241,6 +241,22 @@ def test_a_question_in_indented_or_long_fenced_code_is_not_a_wait(text):
 
 def test_a_question_in_a_heading_is_a_wait():
     assert reply_wait.reply_kind("## このまま進めてよいですか？") == "prose_wait"
+    assert reply_wait.reply_kind("作業を終えました。\n\n## このまま進めてよいですか？") == "prose_wait"
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        # 見出しの問いに後の本文が答えている
+        ("## よくある質問\n### どうやって設定しますか？\n環境変数で指定できます。", "report"),
+        # 章題が最後の 3 行を使い、前の質問を押し出さない
+        ("このまま進めてよいですか？\n\n## 検証結果\nテストはすべて通りました。\n差分は確認済みです。", "prose_wait"),
+        # 章題は完了の報告の文に数えない
+        ("## 実装結果\n対応が完了しました。\n引き続きよろしくお願いします。", "closing_report"),
+    ],
+)
+def test_a_heading_followed_by_prose_is_a_title(text, kind):
+    assert reply_wait.reply_kind(text) == kind
 
 
 def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():
