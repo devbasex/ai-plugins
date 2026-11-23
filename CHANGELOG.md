@@ -11,6 +11,30 @@
 
 ## [Unreleased]
 
+## [mcp-serena 3.0.5] - 2026-11-23
+
+### 利用者向けの変化
+
+- Serena 本体が 2.1.0 になる。MCP のツールは `initial_instructions` と `serena_repl` の 2 つになる。コードの作業の前に `initial_instructions` を呼び（`serena_repl` に渡す `session` の ID はその戻り値にしか無い）、操作は `serena_repl` に Python を渡す（例 `s.lsp.find_symbol("Foo", depth=1)`、使い方は `s.info("lsp")`）。`serena_repl` は公式で BETA（#4276）
+- `/mcp-serena:language-servers` の Skill は無くなる。言語サーバの設定（`.serena/project.yml`）は Serena 2.x が自動で作る（#4276）
+- hook は公式の `serena-hooks` だけになる（#4276）
+  - Claude Code: SessionStart → `activate`、PreToolUse（全 Tool）→ `remind`、SessionEnd → `cleanup`
+  - Codex: SessionStart（`startup|resume`）→ `activate`、PreToolUse（`Bash`）→ `remind`
+- Serena の呼び出しを自動で許可する hook（旧版の自動許可・公式の `auto-approve`）は置かない。REPL からは `s.shell.execute_shell_command` でシェルのコマンドを実行できるため、自動で許可すると Claude Code の Bash の許可と NDF の Bash の guard を通らずにコマンドが走る。`serena_repl` の呼び出しは通常の許可を通る（#4276）
+
+### 移行の手順
+
+1. プラグインを更新する（初回の起動で uvx が 2.1.0 を取得する）
+2. Codex では hook が変わるため、対話の Codex で `/hooks` を開いて mcp-serena の hook を信頼し直す
+3. 旧版の `/mcp-serena:language-servers` が `.serena/project.yml` に書いた `mcp_serena_excluded` のキーは使われなくなる。消してよい
+
+## [ndf 11.0.23] - 2026-11-23
+
+### 利用者向けの変化
+
+- エージェント `corder`・`qa` の Serena の使い方を Serena 2.1.0 に合わせた。最初に `initial_instructions` を呼び、操作は `serena_repl` に Python を渡す（#4276）
+- 設計の文書の追加（#4252・#4272）。リリース対象の振る舞いは変わらない
+
 ## [ndf 11.0.22] - 2026-11-23
 
 ### 利用者向けの変化
