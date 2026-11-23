@@ -126,3 +126,37 @@ def test_issue_4000_call_claude_without_ensure_training_refuses_a_stale_record(l
     got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(ensure_training=False))
 
     assert got.failure is claude.Failure.REFUSED and not got.ok and launches.popen == []
+
+
+class LimitedChecks:
+    """偽の中継の確かめ（実プロセスを起動しない）。`retried` は替え先を求めた回数。"""
+
+    def __init__(self) -> None:
+        self.retried = 0
+
+    def begin(self, argv, env, cwd, keys):
+        return claude.AccountRun(dict(env), list(argv))
+
+    def retry(self, argv, env, cwd, keys):
+        self.retried += 1
+        return claude.AccountRun(dict(env), list(argv))
+
+
+@pytest.mark.parametrize(("switch", "expected"), [(True, 2), (False, 1)])
+def test_issue_4000_switch_account_controls_the_retry_on_the_usage_limit(monkeypatch, switch, expected):
+    """#4000: `switch_account=False` なら中継を継いだ起動が利用上限に当たっても替え先で打ち直さない（省けば今までどおり 1 回打ち直す）。"""
+    checks = LimitedChecks()
+    launched: list[list[str]] = []
+
+    def limited(run, prompt, timeout, cwd, options):
+        launched.append(run.argv)
+        return claude.ClaudeReply.failed("", "上限", failure=claude.Failure.USAGE_LIMIT)
+
+    monkeypatch.setattr(claude, "relay_checks", checks)
+    monkeypatch.setattr(claude, "_prefaced", limited)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.setenv("NDF_RELAY_DIR", "/tmp/relay")
+
+    got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(switch_account=switch))
+
+    assert got.failure is claude.Failure.USAGE_LIMIT and len(launched) == expected and checks.retried == expected - 1

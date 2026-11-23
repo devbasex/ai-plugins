@@ -545,12 +545,15 @@ class LaunchOptions:
     - `cli_floor`: CLI の下限（`claude --version`）を確かめるか。偽なら確かめずに起動する（今動いている claude を打つ子など、下限を満たすと分かっている起動）
     - `ensure_training`: 学習に使わない設定の記録が無いか期限切れのとき、その場で確かめて記録するか（`training.ensure`）。
       偽なら確かめ直さずに `Failure.REFUSED`（アカウントの設定の API を呼ばず、設定も変えない）
+    - `switch_account`: 中継の起動先を継いだ起動が利用上限に当たったとき、替え先のアカウントで 1 回だけ打ち直すか。
+      偽なら打ち直さずに `Failure.USAGE_LIMIT` を返す（1 回の判定で 1 回だけ起動すると決めた呼び手）
     """
 
     slot_wait: Optional[float] = None
     new_group: bool = True
     cli_floor: bool = True
     ensure_training: bool = True
+    switch_account: bool = True
 
 
 # 選び方を省いた起動（今までどおり）
@@ -595,7 +598,7 @@ def _accounted(
     if isinstance(got, AccountRefused):
         return ClaudeReply.failed("", got.detail, failure=got.failure)
     reply = _prefaced(got, prompt, timeout, cwd, options)
-    if reply.failure is not Failure.USAGE_LIMIT:
+    if reply.failure is not Failure.USAGE_LIMIT or not options.switch_account:
         return reply
     again = checks.retry(base.argv, base.env, where, keys)
     return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
