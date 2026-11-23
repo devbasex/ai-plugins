@@ -107,7 +107,9 @@ def _list_keys(rel: str) -> list[str]:
     return keys
 
 
+@cached_reader
 def _load_item(rel: str, key: str) -> dict[str, Any]:
+    """項目 1 つの中身。全件（`load_split`）と 1 項目（`load_item`）のどちらが先でも、ファイルは 1 プロセスに 1 回だけ読む。"""
     item = load_json(f"{rel}/{key}.json")
     if not isinstance(item, dict):
         raise ContractError(f"分けた表の項目 {_dir / rel / key}.json がオブジェクトでない（{type(item).__name__}）")

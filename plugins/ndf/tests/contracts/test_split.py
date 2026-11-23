@@ -117,14 +117,23 @@ def test_reading_one_item_reads_only_its_files(monkeypatch, read, files):
     assert sorted(r for r in seen if r.startswith(("limits/", "causes/"))) == files
 
 
-def test_reading_whole_tables_reads_each_file_once(monkeypatch):
-    # 停止理由の全件の検査は、上限の全件で確かめた方針を読み直さない（PR 4335 の r2-1）
+@pytest.mark.parametrize(
+    "reads",
+    [
+        (limits.table, causes.table),
+        (causes.table, limits.table),
+        (lambda: limits.policy("cause.ci-pending"), lambda: causes.row("ci_pending"), limits.table, causes.table),
+    ],
+    ids=["limits-first", "causes-first", "items-first"],
+)
+def test_reading_whole_tables_reads_each_file_once(monkeypatch, reads):
+    # 全件と 1 項目をどの順で読んでも、項目のファイルを読み直さない（PR 4335 の r2-1・r3-1）
     contracts.use_dir(None)
     seen = []
     original = contracts.load_json
     monkeypatch.setattr(contracts, "load_json", lambda rel: seen.append(rel) or original(rel))
-    limits.table()
-    causes.table()
+    for read in reads:
+        read()
     assert contracts.duplicates(r for r in seen if r.startswith(("limits/", "causes/"))) == []
 
 
