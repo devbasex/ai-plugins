@@ -34,7 +34,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager
+from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, TypeVar
 
@@ -324,10 +324,8 @@ class WriteGate(BaseThrottler):
     def passing(self, request: httpx.Request, remaining: Optional[Callable[[], float]] = None) -> Generator[None, Any, Any]:
         """書き込みなら順番を取ってから通す（`remaining` があれば予算の中で。収まらなければ `Busy`）。読み取りはすぐ通す。"""
         writes = classified(request)
-        if writes is None:
-            yield
-            return
-        with self.hold(writes.kind, writes.count, remaining):
+        gate = nullcontext() if writes is None else self.hold(writes.kind, writes.count, remaining)
+        with gate:
             yield
 
     @asynccontextmanager
