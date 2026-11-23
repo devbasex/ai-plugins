@@ -362,8 +362,9 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
     """送信先の確かめの対象の名前。判定の子の `endpoint_refusal` の結果を変える材料だけから作る。
 
     材料は、親の起動引数のうち `endpoint.flags` に当たるオプションの名前（子はこの名前があれば値によらず拒む
-    ので値は入れない）・プロジェクトの根・`CLAUDE_CONFIG_DIR`（設定の層の保存先）・名前が `endpoint.env_names` に
-    前方一致する環境変数の名前（値は入れない）。プロンプトなどの位置引数とほかのオプション、API キーなどの値は
+    ので値は入れない）・プロジェクトの根・`CLAUDE_CONFIG_DIR`（設定の層の保存先）・`ANTHROPIC_CONFIG_DIR`（子の
+    `account_dir.effective_env` がプロファイルを読む保存先。相対パスはプロジェクトの根から解くので値のまま）・名前が
+    `endpoint.env_names` に前方一致する環境変数の名前（値は入れない）。プロンプトなどの位置引数とほかのオプション、API キーなどの値は
     入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
     引数の読み方は `claude_args` と同じ（`claude_options`）。
     """
@@ -372,7 +373,13 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
     flags = sorted({name for name, _ in claude_options.options(table, launch.argv[1:]) if name in endpoint["flags"]})
     names = sorted(name for name in env if name.startswith(tuple(endpoint["env_names"])))
     source = json.dumps(
-        {"flags": flags, "project_dir": launch.project_dir, "config_dir": env.get("CLAUDE_CONFIG_DIR"), "env": names},
+        {
+            "flags": flags,
+            "project_dir": launch.project_dir,
+            "config_dir": env.get("CLAUDE_CONFIG_DIR"),
+            "profile_dir": env.get("ANTHROPIC_CONFIG_DIR"),
+            "env": names,
+        },
         ensure_ascii=False,
     )
     return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]

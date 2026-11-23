@@ -433,6 +433,13 @@ def test_endpoint_rest_is_split_by_the_config_dir() -> None:
     )
 
 
+def test_endpoint_rest_is_split_by_the_anthropic_profile_dir() -> None:
+    # 子はこの保存先からプロファイルを読み、読めなければ拒むので、保存先が違えば別の対象にする
+    broken = {**ENV, "ANTHROPIC_CONFIG_DIR": "/home/u/.anthropic-broken"}
+    fixed = {**ENV, "ANTHROPIC_CONFIG_DIR": "/home/u/.anthropic"}
+    assert reply_judge.endpoint_scope(broken, LAUNCH) != reply_judge.endpoint_scope(fixed, LAUNCH)
+
+
 def test_mark_rest_writes_the_marker_for_the_owner_only(tmp_path: Path) -> None:
     reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
     assert reply_judge.rest_path(tmp_path).stat().st_mode & 0o777 == 0o600
