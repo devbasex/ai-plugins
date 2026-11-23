@@ -1,6 +1,6 @@
 {
   "name": "mcp-serena",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "Serena MCP server (serena-agent 2.1.0, REPL interface) for symbol-level code reading and editing, with Serena's official serena-hooks wired in",
   "author": {
     "name": "takemi-ohama",
