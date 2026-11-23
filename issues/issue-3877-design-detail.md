@@ -121,11 +121,12 @@ plugins/ndf/
 
 1. `entry_state(wd, name)` で確かめる（`EntryUnsafe` はそのまま上げる）
 2. 既存のファイルがあれば、`os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False)` が偽のとき `PermissionError`（`EACCES`）を上げて何も作らない。置き換えを許すのは、今の `Path.write_text` が開けるファイル（呼んだ利用者が書き込めるファイル）だけである。親のディレクトリに書き込めるだけでは、読み取り専用のファイルを置き換えない
-3. `os.mkdir(f".{name}.<乱数 16 字>", 0o700, dir_fd=wd.fd)` で私有の一時ディレクトリを作り、`os.open(同じ名前, O_RDONLY \| O_DIRECTORY \| O_NOFOLLOW \| O_CLOEXEC, dir_fd=wd.fd)` で開く。開いた記述子を `os.fstat` で確かめ、ディレクトリで、持ち主が `os.geteuid()` で、権限が `0o700` でなければ `EntryUnsafe`（`other`）にする（作ってから開くまでに名前を差し替えられたとき）
+3. `os.mkdir(f".{name}.<乱数 16 字>", 0o700, dir_fd=wd.fd)` で私有の一時ディレクトリを作り、`os.open(同じ名前, O_RDONLY \| O_DIRECTORY \| O_NOFOLLOW \| O_CLOEXEC, dir_fd=wd.fd)` で開く。開いた記述子を `os.fstat` で確かめ、ディレクトリで、持ち主が `os.geteuid()` で、グループとその他の利用者の権限（`0o077`）が無くなければ `EntryUnsafe`（`other`）にする（作ってから開くまでに名前を差し替えられたとき）。setgid のディレクトリの下では一時ディレクトリが setgid を継ぐ（`0o2700`）ので、権限を `0o700` と完全一致で比べない
 4. 一時ディレクトリの記述子に対して `os.open("data", O_WRONLY \| O_CREAT \| O_EXCL \| O_NOFOLLOW \| O_CLOEXEC, 0o600, dir_fd=一時ディレクトリ)` で新しい inode を作り、`text` を UTF-8 で書いて閉じる
 5. `os.replace("data", name, src_dir_fd=一時ディレクトリ, dst_dir_fd=wd.fd)` で公開する
-6. 成否によらず、一時ディレクトリの中の `data` を `os.unlink(…, dir_fd=一時ディレクトリ)`（公開した後は無いので `absent` を許す）、一時ディレクトリを `os.rmdir(…, dir_fd=wd.fd)` で消し、記述子を閉じる。途中の失敗は後始末の後に `OSError` を上げ直す
+6. 成否によらず、手順 4 で作って公開していない `data` だけを `os.unlink(…, dir_fd=一時ディレクトリ)` で消し（手順 3 の確かめに落ちたときは消さない）、記述子を閉じる。一時ディレクトリの名前は、`os.stat(…, dir_fd=wd.fd, follow_symlinks=False)` が開いた記述子と同じ inode（`st_dev`・`st_ino`）を返すときだけ `os.rmdir(…, dir_fd=wd.fd)` で消す（差し替え先のディレクトリを消さない。手順 3 の確かめに落ちたときの `rmdir` の失敗は飲む）。途中の失敗は後始末の後に `OSError` を上げ直す
 
+- `entry_state`・`read_file`・`write_file`・`remove_file` は入口で、作業ディレクトリの直下の 1 要素でない名前（空・`.`・`..`・区切りを含む名前。絶対パスを含む）を `EntryUnsafe`（`other`）で拒む。`dir_fd` は絶対パスを制限せず、`O_NOFOLLOW` と `follow_symlinks=False` は途中の要素のリンクに効かないため
 - 5 つとも、`report_paths` の返したパスに `resolve()` を当てない。リンクを解いてよいのは `open_workdir` が作業ディレクトリを開く 1 回だけである（作業ディレクトリそのものは supervisor が選んだ場所である）
 - 検査と操作の間に名前を差し替えられる競合は次のように塞ぐ
   - 親: 検査と操作は同じ `wd.fd` に対する相対の操作なので、検査の後に作業ディレクトリの名前を別のディレクトリへのリンクへ差し替えても、操作は開いた時点のディレクトリに当たる。差し替え先の同名のファイルは読まず、書かず、消さない

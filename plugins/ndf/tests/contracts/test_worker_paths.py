@@ -296,6 +296,73 @@ def test_write_file_rejects_temp_dir_that_is_not_private(workdir, monkeypatch):
     assert list(d.iterdir()) == []
 
 
+def test_write_file_accepts_temp_dir_inheriting_setgid(workdir, monkeypatch):
+    d, _ = workdir
+    real_mkdir = os.mkdir
+
+    def mkdir_with_setgid(path, mode=0o777, *, dir_fd=None):
+        real_mkdir(path, mode, dir_fd=dir_fd)
+        os.chmod(path, 0o2700, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", mkdir_with_setgid)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "f", "新")
+    assert (d / "f").read_text(encoding="utf-8") == "新"
+    assert [p.name for p in d.iterdir()] == ["f"]
+
+
+def test_write_file_keeps_data_in_swapped_temp_dir_when_check_fails(workdir, monkeypatch):
+    d, _ = workdir
+    real_mkdir = os.mkdir
+
+    def mkdir_then_swap(path, mode=0o777, *, dir_fd=None):
+        real_mkdir(path, mode, dir_fd=dir_fd)
+        (d / path).rename(d / "moved")
+        real_mkdir(d / path, 0o755)
+        (d / path).chmod(0o755)
+        (d / path / "data").write_text("別の手の中身", encoding="utf-8")
+
+    monkeypatch.setattr(os, "mkdir", mkdir_then_swap)
+    with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe):
+        worker_paths.write_file(wd, "f", "新")
+    (swapped,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    assert (swapped / "data").read_text(encoding="utf-8") == "別の手の中身"
+    assert not (d / "f").exists()
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "sub/f", "../outside.txt"])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda wd, name: worker_paths.entry_state(wd, name),
+        lambda wd, name: worker_paths.read_file(wd, name),
+        lambda wd, name: worker_paths.write_file(wd, name, "新"),
+        lambda wd, name: worker_paths.remove_file(wd, name),
+    ],
+    ids=["entry_state", "read_file", "write_file", "remove_file"],
+)
+def test_file_operations_reject_names_that_are_not_one_entry(workdir, name, call):
+    d, outside = workdir
+    (d / "sub").mkdir()
+    (d / "sub" / "f").write_text("下の中身", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe) as e:
+        call(wd, name)
+    assert e.value.kind == "other"
+    assert outside.read_text(encoding="utf-8") == "利用者の中身"
+    assert (d / "sub" / "f").read_text(encoding="utf-8") == "下の中身"
+
+
+def test_file_operations_reject_absolute_path(workdir):
+    d, outside = workdir
+    with worker_paths.open_workdir(d) as wd:
+        for call in (worker_paths.read_file, worker_paths.remove_file):
+            with pytest.raises(worker_paths.EntryUnsafe):
+                call(wd, str(outside))
+        with pytest.raises(worker_paths.EntryUnsafe):
+            worker_paths.write_file(wd, str(outside), "新")
+    assert outside.read_text(encoding="utf-8") == "利用者の中身"
+
+
 def test_write_file_removes_temp_dir_it_cannot_open(workdir, monkeypatch):
     d, _ = workdir
     real_open = os.open
