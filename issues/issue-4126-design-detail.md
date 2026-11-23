@@ -68,8 +68,8 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_env_keys` | 契約を読めない | ファイルが無い・読めない・JSON でない・`rows` が無い・キーを持つ行の `id` が空でない文字列でない | `read_text`・`json.loads`・`["rows"]` | `EnvNameError` を投げて呼び出し元へ返す | hook の経路は `relay_role` が受けて `NESTED` にする（中継とオーガナイザーの保存先へ書かない）。ラッパーは起動の入口で `config_broken` で止まる。ログインは子の環境を組む時点で誤りになる | 後始末なし。契約を直せば再実行できる |
-| `env_name` | キーの行が 0 行 | キーの打ち間違い・行のキーの付け忘れ | `env_name` | `EnvNameError` を投げる（既定の名前へ戻さない） | 同上 | 同上 |
+| `_env_keys` | 契約を読めない | ファイルが無い・読めない・JSON でない・`rows` が無い・キーを持つ行の `id` が空でない文字列でない | `read_text`・`json.loads`・`["rows"]` | `EnvNameError` を投げて呼び出し元へ返す | hook の経路は `relay_role` が受けて `NESTED` にする（中継とオーガナイザーの保存先へ書かない）。ラッパーと `relay status` へは届かない（`relay/cli.py` が import の時に読む `account_registry` などが `facts` で表を検証し、今のとおり `FactsError` で終わる。設計文書の決定 3） | 後始末なし。契約を直せば再実行できる |
+| `env_name` | キーの行が 0 行 | キーの打ち間違い・行のキーの付け忘れ | `env_name` | `EnvNameError` を投げる（既定の名前へ戻さない） | hook の経路は上と同じ。ラッパーは起動の入口で `config_broken` で止まる。`relay status` は動く。ログインは子の環境を組む時点で誤りになる | 同上 |
 | `env_name` | キーの行が 2 行以上 | 同じキーを 2 つの行に置いた | `env_name` | `EnvNameError` を投げる（先の行を使わない） | 同上 | 同上 |
 
 `_env_keys` の失敗は `lru_cache` に残らない（例外は保存されない）ので、同じプロセスで呼び直すと読み直す。
