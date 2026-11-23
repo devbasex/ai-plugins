@@ -1,26 +1,35 @@
 {
-  "description": "mcp-serena: 言語サーバの設定の食い違いの通知と、シンボル単位の手順への誘導",
+  "description": "mcp-serena: Serena 公式の serena-hooks（activate・remind・cleanup）",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook session-start --client claude-code",
-            "timeout": 10
+            "command": "uvx --from serena-agent==2.1.0 serena-hooks activate --client=claude-code"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Grep|Read|Bash|mcp__plugin_mcp-serena_serena__.*",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/mcp-serena/roots${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/bin/python\" \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook pre-tool-use --client claude-code",
-            "timeout": 5
+            "command": "uvx --from serena-agent==2.1.0 serena-hooks remind --client=claude-code"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from serena-agent==2.1.0 serena-hooks cleanup --client=claude-code"
           }
         ]
       }

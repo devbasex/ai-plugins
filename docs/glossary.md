@@ -26,7 +26,6 @@
 | NDF の指示書チェック（`ndf-instructions`） | instructions-check.py が見る指示書・スコープ・読み込み量・リリース済みバージョンの語 | 7 | `docs/glossary/ndf-instructions.md` |
 | NDF の課題の棚卸し（`ndf-issue-upkeep`） | backlog-refinement と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先 | 79 | `docs/glossary/ndf-issue-upkeep.md` |
 | NDF の worktree（`ndf-worktree`） | worktree の設定・セッション開始 hook・テスト環境の割り当ての語 | 34 | `docs/glossary/ndf-worktree.md` |
-| mcp-serena（`mcp-serena`） | mcp-serena が言語サーバーを選び、インストールを確かめるときの語 | 1 | `docs/glossary/mcp-serena.md` |
 | playwright-kit のテスト計画（`playwright-kit`） | 探索的テストとテスト設計技法の語。page role・oracle・HTSM など業界の定訳をそのまま使う | 6 | `docs/glossary/playwright-kit.md` |
 | このリポジトリの開発の検査（`repo-dev-checks`） | ai-plugins の開発で formatter と静的解析を手元と CI で走らせるときの語。NDF が利用者へ配る振る舞いではない | 13 | `docs/glossary/repo-dev-checks.md` |
 | NDF の学習の設定（`ndf-training-optout`） | LLM のアカウントが入力を学習に使う設定かを確かめ、学習に使う設定なら claude・codex を起動する前に Off へ書き換えるときの語 | 5 | `docs/glossary/ndf-training-optout.md` |

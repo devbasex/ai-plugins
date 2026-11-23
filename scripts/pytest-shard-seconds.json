@@ -1,15 +1,6 @@
 {
  "summary": "テストのファイルごとの実測秒（CI の JUnit XML の合計）。根の conftest.py がジョブの割り当てに使う。作り直しは scripts/pytest_shard.py seconds",
  "seconds": {
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_check.py": 0.9,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_configure.py": 6.3,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_detect.py": 0.2,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_hook_speed.py": 1.7,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_hooks.py": 2.2,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_launch.py": 0.0,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_project_yml.py": 0.1,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_table.py": 0.0,
-  "plugins/mcp/mcp-serena/tests/test_serena_lsp_this_repo.py": 0.1,
   "plugins/playwright-kit/skills/playwright-authoring/tests/test_app_ready.py": 1.6,
   "plugins/playwright-kit/skills/playwright-authoring/tests/test_lint_scenario.py": 0.6,
   "plugins/playwright-kit/skills/playwright-kit-ops/tests/test_a11y_cwv_routing.py": 0.0,

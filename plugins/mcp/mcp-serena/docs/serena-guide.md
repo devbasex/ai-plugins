@@ -1,68 +1,47 @@
 # Serena MCP ガイド
 
-Serena はシンボル単位でコードを読み書きするための MCP サーバです。コード操作だけに使い、
-memory は使いません。
+Serena（`serena-agent==2.1.0`）はシンボル単位でコードを読み書きするための MCP サーバです。
+コード操作だけに使い、memory は使いません。
 
-## 使い始める前に
+## ツールは 2 つ
 
-**言語サーバの設定はプロジェクトごとに行う。** 使うリポジトリで 1 度
-`/mcp-serena:language-servers` を実行し、`.serena/project.yml` の `language_servers` を
-書きます（詳細は `README.md`）。プロジェクトの有効化は `--project-from-cwd` で自動に行われる
-ため、`activate_project` は呼びません（Claude Code の文脈には無いツールです）。
+2.1.0 の既定のインタフェースは REPL で、MCP のツールは次の 2 つだけです。
 
-ツール名の接頭辞はランタイムで違います。
-
-| ランタイム | 接頭辞 |
+| ツール | 役割 |
 | --- | --- |
-| Claude Code | `mcp__plugin_mcp-serena_serena__` |
-| Codex | `mcp__serena__` |
+| `initial_instructions` | 手引きを返す。`serena_repl` に渡す `session` の ID もここにしか無い |
+| `serena_repl` | `session` と Python のコードを受けて実行する（公式で BETA） |
 
-以下は接頭辞を省いて書きます。
+ツール名の接頭辞は Claude Code が `mcp__plugin_mcp-serena_serena__`、Codex が `mcp__serena__` です。
 
-## コードを読む（推奨の順序）
+## 使う順序
 
-ファイルを丸ごと読む前に、シンボルの単位で必要な分だけを読みます。
+1. **コードの作業の前に `initial_instructions` を呼ぶ。** 返った手引きを読み、`session` の ID を控える
+2. **`serena_repl` に Python を渡す。** facade の `s` から操作する
 
-### 1. シンボルの概要（ファイル全体を読む前に）
-
-```text
-get_symbols_overview relative_path="path/to/file.py"
+```python
+s.info("lsp")                       # 使い方を引く（cfg・fs・edit・shell・lsp）
+s.lsp.find_symbol("Foo", depth=1)   # シンボルを探す
 ```
 
-### 2. シンボルの本体
+使えるメソッドと引数は版で変わるため、ここに写さず `s.info(...)` で引きます。
 
-```text
-find_symbol name_path_pattern="ClassName/method_name" relative_path="src/" include_body=true
-```
+## facade
 
-### 3. 呼び出し元
-
-```text
-find_referencing_symbols name_path="ClassName/method_name" relative_path="src/file.py"
-```
-
-シンボル名が分からないときは、Claude Code では `Grep`、Codex では `search_for_pattern` で
-候補を絞ってから 2 へ進みます。
-
-## コードを編集する
-
-| 目的 | ツール |
+| facade | 用途 |
 | --- | --- |
-| シンボルの本体を置き換える | `replace_symbol_body` |
-| シンボルの前後に足す | `insert_before_symbol` / `insert_after_symbol` |
-| 名前を変える（参照も追従する） | `rename_symbol` |
-| 参照の無いシンボルを消す | `safe_delete_symbol` |
+| `s.lsp` | シンボルの概要・検索・参照・実装・診断 |
+| `s.edit` | 内容の置換と、シンボル単位・行単位の編集 |
+| `s.fs` | ファイルの読み取り・作成・一覧・パターン検索 |
+| `s.shell` | シェルのコマンドの実行（`execute_shell_command`） |
+| `s.cfg` | 今の設定の表示 |
 
-## 診断を取る
-
-| ランタイム | 手段 |
-| --- | --- |
-| Claude Code（Python / TypeScript / PHP など） | 公式 LSP プラグインの診断が編集の次の手番に届く。呼ぶ手間は無い |
-| Claude Code（Bash） | `get_diagnostics_for_file` |
-| Codex | `get_diagnostics_for_file` |
+**`s.shell` はシェルのコマンドを実行できる。** このため、Serena の呼び出しを自動で許可する hook
+（公式の `auto-approve`）は置きません。置くと Claude Code の Bash の許可と NDF の Bash の guard を通らずに
+コマンドが走ります。`serena_repl` の呼び出しは、通常どおり Claude Code の許可を通ります。
 
 ## 誘導の hook
 
-設定した言語のファイルを `Read`・`cat`・`sed -n` などで 3 回続けて読むか、grep を 3 回続ける
-と（混在なら 4 回）、hook が 1 度だけ止めて上の手順を示します。数は止めた時点で戻るため、
-必要ならそのまま同じ操作を続けて構いません。Serena のシンボル系のツールを呼ぶと数が戻ります。
+公式の `serena-hooks remind` が、grep やコードのファイルの読み込みが続くと 1 度だけ止めて Serena を
+促します。止めた時点で数が戻るため、必要ならそのまま同じ操作を続けて構いません。Claude Code では
+Serena を呼ぶと数が戻ります。

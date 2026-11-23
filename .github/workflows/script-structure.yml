@@ -21,9 +21,9 @@ name: Script structure
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
 # 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。merge queue と push では常に打つ
 #
-# lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit・mcp-serena）に
+# lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit）に
 # そのプロジェクトの pyproject.toml と uv.lock が変わった Pull Request で打つ（#3370 の不変条件 IG5）。根は playwright-kit を
-# パスの依存で持つので、playwright-kit の入力が変わったら根も打つ。merge queue と push では 4 つとも常に打つ
+# パスの依存で持つので、playwright-kit の入力が変わったら根も打つ。merge queue と push では 3 つとも常に打つ
 #
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）
 on:
@@ -52,8 +52,6 @@ on:
       - "uv.lock"
       - "plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"
       - "plugins/playwright-kit/skills/playwright-kit-ops/uv.lock"
-      - "plugins/mcp/mcp-serena/pyproject.toml"
-      - "plugins/mcp/mcp-serena/uv.lock"
 
 permissions:
   contents: read
@@ -77,7 +75,7 @@ jobs:
         id: scope
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            for out in ndf lock_root lock_ndf lock_playwright lock_serena; do
+            for out in ndf lock_root lock_ndf lock_playwright; do
               echo "$out=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -91,7 +89,6 @@ jobs:
             echo "lock_root=$(touched pyproject.toml uv.lock "$pw/pyproject.toml" "$pw/uv.lock")"
             echo "lock_ndf=$(touched plugins/ndf/pyproject.toml plugins/ndf/uv.lock)"
             echo "lock_playwright=$(touched "$pw/pyproject.toml" "$pw/uv.lock")"
-            echo "lock_serena=$(touched plugins/mcp/mcp-serena/pyproject.toml plugins/mcp/mcp-serena/uv.lock)"
           } >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -115,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/plugin-deps.py action-pins --base HEAD^1 --head HEAD
       # フォームの YAML と Markdown を読む部品は uv の環境から入る（uv.lock の環境で起動し直す）。
-      # NDF の検査は plugins/ndf の lock で同期し、lock の一致の検査は 4 つの lock を読むため、4 つの lock をキャッシュのキーに入れる
+      # NDF の検査は plugins/ndf の lock で同期し、lock の一致の検査は 3 つの lock を読むため、3 つの lock をキャッシュのキーに入れる
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
@@ -123,7 +120,6 @@ jobs:
             uv.lock
             plugins/ndf/uv.lock
             plugins/playwright-kit/skills/playwright-kit-ops/uv.lock
-            plugins/mcp/mcp-serena/uv.lock
       # 確かめるテストの一覧のデータ（#3691 の受け入れ条件 2、決定 10）。lock の差分から、変わったパッケージ・使うモジュール・
       # そのテストを並べて artifact deps-affected に置く。lock の差分が無く目印のコメントも無ければ何も置かない。
       # 投稿は deps-affected-comment.yml が既定のブランチのコードで行う。tomllib が要るので上の 3.12 で打つ。
@@ -162,9 +158,6 @@ jobs:
       - name: Check that the playwright-kit lock matches its declaration
         if: steps.scope.outputs.lock_playwright == 'true'
         run: uv lock --check --project plugins/playwright-kit/skills/playwright-kit-ops
-      - name: Check that the mcp-serena lock matches its declaration
-        if: steps.scope.outputs.lock_serena == 'true'
-        run: uv lock --check --project plugins/mcp/mcp-serena
       # 差分（HEAD^1 と HEAD）で入った版（lock・UV_VERSION の 2 か所・.github/renovate-version）が公開から 7 日たったか
       # （#3370 の不変条件 I1）。依存の一覧の Issue のチェックは Renovate の待つ日数を飛ばせるため、ここで拒む。
       # 差分に当たる版が無ければ age の中の 1 回の git diff だけで取得せずに skipped で終わるので、条件を付けずに打つ

@@ -74,13 +74,6 @@
       "prPriority": 2
     },
     {
-      "description": "規則 3: mcp-serena の依存の更新を 1 本にまとめる",
-      "matchFileNames": ["plugins/mcp/mcp-serena/pyproject.toml"],
-      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
-      "groupName": "依存（plugins/mcp/mcp-serena）",
-      "prPriority": 2
-    },
-    {
       "description": "規則 4: playwright-kit の依存の更新を 1 本にまとめ、パスの依存で取り込む根の lock も同じ PR で作り直す",
       "matchFileNames": ["plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"],
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest", "pinDigest", "bump", "rollback", "replacement"],
@@ -131,13 +124,6 @@
       ],
       "matchPackageNames": ["dbos"],
       "enabled": false
-    },
-    {
-      "description": "規則 9: ruamel-yaml を plugins/ndf と mcp-serena で同じ版にそろえ、両方の lock を 1 本の PR で上げる（mcp-serena の定義の頭の注記の約束）",
-      "matchFileNames": ["plugins/ndf/pyproject.toml", "plugins/mcp/mcp-serena/pyproject.toml"],
-      "matchPackageNames": ["ruamel-yaml"],
-      "groupName": "ruamel-yaml（plugins/ndf と mcp-serena）",
-      "prPriority": 1
     },
     {
       "description": "規則 10: UV_VERSION の 2 か所を 1 本の PR で上げ、ブランチごとに 1 回 uv-pin でインストーラの sha256 を書き直す（決定 12）",

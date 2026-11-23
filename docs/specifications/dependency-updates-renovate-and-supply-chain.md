@@ -35,11 +35,11 @@ NDF は下限より古い外部 CLI（`gh`・`claude`・`codex`）を起動し�
 | 依存の PR の関門 | `.github/workflows/renovate-gate.yml` | 既定ブランチの定義と検証器で Renovate の PR の `renovate/artifacts` を確かめ、PR の先端（merge queue ではキューのコミット）へ commit status `ndf/renovate-gate` を付ける |
 | サプライチェーンの検査 | `.github/workflows/deps-weekly.yml` | ジョブ `supply-chain-report`（週 1 回と手動の脆弱性の知らせ）と `renovate-config`（Renovate の設定を変えた PR で設定を検証する） |
 | 確かめるテストの一覧の投稿 | `.github/workflows/deps-affected-comment.yml` | `script-structure.yml` が残した一覧のデータを、既定ブランチのコードで PR 番号と head の SHA を確かめてから 1 件のコメントに書く |
-| 定義と lock の一致・公開日・Action の参照の検査 | `.github/workflows/script-structure.yml` | `uv lock --check` を 4 つの uv のプロジェクトごとに打つ。`age`・`action-pins`・`affected` を打つ |
+| 定義と lock の一致・公開日・Action の参照の検査 | `.github/workflows/script-structure.yml` | `uv lock --check` を 3 つの uv のプロジェクトごとに打つ。`age`・`action-pins`・`affected` を打つ |
 | `--help` の照らし合わせ | `.github/workflows/runtime-plugin-smoke-latest.yml` | 毎日の最新の CLI のスモークの中で、使う引数を見本と照らす |
 | Dependabot の設定 | `.github/dependabot.yml` | Actions の参照を週 1 回上げ、`cooldown` の 7 日を持つ。Python と npm は扱わない |
 | 依存の検査のスクリプト | `scripts/plugin-deps.py` | サブコマンド `targets`・`holds`・`uv-pin`・`affected`・`post-affected`・`report`・`action-pins`・`age`・`cli-help`・`renovate-gate`・`renovate-log`。結果は統一の結果 JSON の 1 行（`tool: "plugin-deps"`）を標準出力へ出し、`stopped` なら終了コード 1。NDF のパッケージを import せず根の環境で動く |
-| 依存の定義と lock | 4 つの uv のプロジェクト（根・`plugins/ndf`・`plugins/playwright-kit/skills/playwright-kit-ops`・`plugins/mcp/mcp-serena`）の `pyproject.toml`・`uv.lock`、スライドのテンプレート（`plugins/ndf/skills/release/assets/slides/`）の `package.json`・`package-lock.json`・`.npmrc` | `[tool.uv] exclude-newer = "7 days"`・`.npmrc` の `min-release-age=7` と、上げる先のバージョン |
+| 依存の定義と lock | 3 つの uv のプロジェクト（根・`plugins/ndf`・`plugins/playwright-kit/skills/playwright-kit-ops`）の `pyproject.toml`・`uv.lock`、スライドのテンプレート（`plugins/ndf/skills/release/assets/slides/`）の `package.json`・`package-lock.json`・`.npmrc` | `[tool.uv] exclude-newer = "7 days"`・`.npmrc` の `min-release-age=7` と、上げる先のバージョン |
 | 外部 CLI の下限の表 | `plugins/ndf/contracts/domains/cli-floors.json` | `gh`・`claude`・`codex` の実行ファイル・バージョンを出す引数・読み方・下限・`--help` の見本 |
 | 下限の比べ | `plugins/ndf/src/ndf/adapters/cli_floor.py` | `require`・`refuse_old`・`TooOld`。起動の前にバージョンを下限と比べる |
 | 設定の検査のテスト | `scripts/tests/test_plugin_deps.py`・`plugins/ndf/tests/adapters/test_cli_floor.py` | 下の「常に成り立つ条件」と各サブコマンドを、記録した入力で縛る |
@@ -115,7 +115,7 @@ NDF は下限より古い外部 CLI（`gh`・`claude`・`codex`）を起動し�
 | I3 | 固定する依存と対象の外の依存は、規則の `description` に種類・相手・制約・見直す日・理由の 5 行をこの順で持つ。脆弱性の例外（uv の `exclude-newer-package`・npm の `overrides`）は、同じ勧告の ID・バージョン・外す日を持つ規則と組になる | 欄の欠けた規則と規則の無い例外は、設定の検査のテストが落とす。規則だけが先に入る状態は、例外を 2 つの PR で入れる手順の先行の PR として通す |
 | I4 | 解決できない上げ方では、更新の PR のチェック `renovate/artifacts` が赤になる | 今の head の `renovate/artifacts` が Renovate の App の書いた `success` でなければ、`ndf/renovate-gate` が `success` にならず merge queue に入らない |
 | I5 | 定時の検査（`renovate`・`supply-chain-report`）は週 1 回の定時と手動でだけ走り、PR では走らない | ワークフローの起動の条件を設定の検査のテストが確かめる |
-| I6 | Renovate の `minimumReleaseAge`・Dependabot の `cooldown.default-days`・4 つの `exclude-newer` は同じ 7 日で、正は `plugins/ndf/pyproject.toml` の値。lock の作り直しだけは Renovate の待つ日数を `null` にし、7 日を uv と npm が守る | 食い違うか、`null` を lock の作り直しの外に置くと、設定の検査のテストが落ちる |
+| I6 | Renovate の `minimumReleaseAge`・Dependabot の `cooldown.default-days`・3 つの `exclude-newer` は同じ 7 日で、正は `plugins/ndf/pyproject.toml` の値。lock の作り直しだけは Renovate の待つ日数を `null` にし、7 日を uv と npm が守る | 食い違うか、`null` を lock の作り直しの外に置くと、設定の検査のテストが落ちる |
 | I7 | 固定した依存は、固定したバージョンの外を上げる先にしない（httpx は `==0.28.1` だけ） | 固定の範囲を外すとテストが落ちる |
 | I8 | 依存の定義の各行の書き手は同じ時点に 1 つだけである | Renovate は App と秘密を置くまで動かない（`if: vars.RENOVATE_APP_CLIENT_ID != ''`）。`uv.lock` が食い違ったら、後に入る PR が `main` の上で lock を作り直す |
 | I9 | 対象の lock は、追跡している lock から `ignorePaths` を除いたものすべてである | lock を足して Renovate の対象から漏れると、設定の検査のテストが落ちる |
@@ -157,12 +157,12 @@ NDF は下限より古い外部 CLI（`gh`・`claude`・`codex`）を起動し�
 
 | # | 当てる依存 | 中身 |
 | --- | --- | --- |
-| 1〜5 | lock ごとの定義（根・`plugins/ndf`・mcp-serena・playwright-kit・スライドの `package.json`）の通常の更新 | `groupName: "依存（<ディレクトリ>）"`・`prPriority: 2`。lock の作り直しは同じまとまりに入れない（Renovate が通常の更新と作り直しの同じまとまりを扱わない） |
+| 1〜5（3 は欠番） | lock ごとの定義（根・`plugins/ndf`・playwright-kit・スライドの `package.json`）の通常の更新 | `groupName: "依存（<ディレクトリ>）"`・`prPriority: 2`。lock の作り直しは同じまとまりに入れない（Renovate が通常の更新と作り直しの同じまとまりを扱わない） |
 | 4 の追加 | playwright-kit | `postUpgradeTasks` に `uv lock --project .`（`fileFilters: ["uv.lock"]`・`executionMode: "branch"`）。根は playwright-kit を編集可能なパスの依存で取り込むので、根の lock も同じ PR で作り直す |
 | 6 | 人が書いたプレリリースを選ぶ依存の一覧（初めは空） | `ignoreUnstable: false`。種類 `プレリリースを選ぶ`・相手 `決定 106`・制約 `7 日たった最新の安定版が 365 日より古い` |
 | 7 | `httpx` | `allowedVersions: "==0.28.1"`。種類 `相手の制約`・相手 `githubkit 0.17.1`・制約 `httpx<1.0.0,>=0.23.0` |
 | 8 | `dbos` | `enabled: false`。種類 `対象の外`・相手 `C1+ の続き（#3285 の追補）`・制約 `plugins/ndf は 3.4.0・根は 3.1.0 のまま` |
-| 9 | `ruamel-yaml`（`plugins/ndf` と mcp-serena） | 両方の lock を同じバージョンにそろえて 1 本の PR で上げる（`prPriority: 1`） |
+| 9 | （欠番） | mcp-serena が自分の lock を持たなくなり、`ruamel-yaml` を `plugins/ndf` とそろえる規則は要らなくなった。3 も同じ理由で欠番 |
 | 10 | `astral-sh/uv`（`UV_VERSION` の 2 か所） | `groupName: "uv のインストーラ"`。`postUpgradeTasks` に `python3 scripts/plugin-deps.py uv-pin`（`executionMode: "branch"`）を置き、インストーラの sha256 を 2 か所へ書き直す |
 | 11 | `matchUpdateTypes: ["lockFileMaintenance"]` | `prPriority: 0`。lock ごとに 1 本で、通常の更新と別の承認の行 |
 | 12（足すときだけ） | 脆弱性の例外 | 種類 `脆弱性の例外`・相手 `<勧告の ID>`・制約 `<パッケージ>==<バージョン>`・見直す日（外す日）、`enabled: false`。`age` がこの組だけを 7 日の外として通す |
@@ -250,7 +250,7 @@ PR の外の変更を拾わない。`affected` は lock を読むだけで `uv` 
 
 | lock | パッケージ名から使う名前へ | 使う箇所の読み方 | 推移的な依存の親 |
 | --- | --- | --- | --- |
-| `uv.lock` | 既定は `-` を `_` にした名前。違うものは `IMPORT_NAMES`（`python-dotenv` → `dotenv` など）、CLI としてだけ使う依存は `NO_IMPORT` に持つ。4 つの定義の直接の依存がすべてどちらかで引けることをテストが縛る | そのプロジェクトの `*.py` の `import` を標準ライブラリの `ast` で読む | `[[package]]` の `dependencies` を `tomllib` で読んだ逆向きの関係 |
+| `uv.lock` | 既定は `-` を `_` にした名前。違うものは `IMPORT_NAMES`（`python-dotenv` → `dotenv` など）、CLI としてだけ使う依存は `NO_IMPORT` に持つ。3 つの定義の直接の依存がすべてどちらかで引けることをテストが縛る | そのプロジェクトの `*.py` の `import` を標準ライブラリの `ast` で読む | `[[package]]` の `dependencies` を `tomllib` で読んだ逆向きの関係 |
 | `package-lock.json` | パッケージ名のまま | そのディレクトリの `*.js`（`node_modules` を除く）の `require` と `import` | `packages` の `dependencies` の逆向きの関係 |
 
 `deps-affected-comment.yml` は `workflow_run`（`Script structure` の `completed`）で起動し、`pull-requests: write`・`actions: read` を持つ。
@@ -323,7 +323,7 @@ PR の外の変更を拾わない。`affected` は lock を読むだけで `uv` 
 | 設定 | 保存先 | 値 |
 | --- | --- | --- |
 | 待つ日数（正） | `plugins/ndf/pyproject.toml` の `[tool.uv] exclude-newer` | `"7 days"`（lock の `[options]` に `exclude-newer-span = "P7D"`） |
-| 待つ日数（写し） | 根・playwright-kit・mcp-serena の `exclude-newer`、`renovate.json` の `minimumReleaseAge`、`dependabot.yml` の `cooldown.default-days`、スライドの `.npmrc` の `min-release-age` | `"7 days"`・`"7 days"`・`7`・`7` |
+| 待つ日数（写し） | 根・playwright-kit の `exclude-newer`、`renovate.json` の `minimumReleaseAge`、`dependabot.yml` の `cooldown.default-days`、スライドの `.npmrc` の `min-release-age` | `"7 days"`・`"7 days"`・`7`・`7` |
 | Renovate のバージョン | `.github/renovate-version` | 公開から 7 日たった 44 系の 1 行 |
 | `UV_VERSION` と `UV_INSTALLER_SHA256` | `plugins/ndf/bin/ndf`・`scripts/lib/ndf_wrappers.py` | 2 か所で同じ組（テストが縛る）。`uv-pin` は `https://astral.sh/uv/<バージョン>/install.sh` を 1 回だけ取得して sha256 を計算し、2 か所を同じ値に書き直す |
 | 脆弱性の例外 | uv: `exclude-newer-package = { "<パッケージ>" = "<日時>" }  # <勧告の ID> 外す日 <YYYY-MM-DD> 版 <バージョン>`、npm: `package.json` の `overrides` | `renovate.json` の規則 12 と組 |
@@ -406,10 +406,10 @@ action へ渡って `uv-pin` が打たれること、Dependabot が SHA の参�
 
 ## テスト観点
 
-- `plugins/ndf` の依存（dev グループを含む）が、DBOS と httpx を除いて公開から 7 日たった最新の安定版にあり、4 つの uv のプロジェクトに
+- `plugins/ndf` の依存（dev グループを含む）が、DBOS と httpx を除いて公開から 7 日たった最新の安定版にあり、3 つの uv のプロジェクトに
   `exclude-newer = "7 days"`、各 lock に `exclude-newer-span = "P7D"` があり、`uv lock --check` が通ること。定義だけを書き換えた PR で
   対応する検査が落ち、`script-structure.yml` からプロジェクトを 1 つ外すとテストが落ちること
-- 7 日が Renovate・Dependabot・4 つの `pyproject.toml` で同じ値であること。どれか 1 つを `"6 days"` にするとテストが落ちること
+- 7 日が Renovate・Dependabot・3 つの `pyproject.toml` で同じ値であること。どれか 1 つを `"6 days"` にするとテストが落ちること
 - 定時のジョブが `schedule` と `workflow_dispatch` だけで起動し、承認と閉じる設定を外すとテストが落ちること
 - httpx の規則が `==0.28.1` と欄つきの理由を、DBOS の規則が `enabled: false` と欄つきの理由を持ち、依存の一覧の Issue の頭の固定の一覧が
   規則と同じこと。欄を 1 つ消す・許すバージョンを広げる・固定の一覧から httpx を消すとテストが落ちること

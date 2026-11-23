@@ -193,4 +193,3 @@ excluded_apis: []
 # Valid values: tools, REPL (see the global configuration for details); leave empty to use the global setting.
 # Note: the interface is fixed at startup. If a project is activated post-init, its setting is not applied.
 agent_interface:
-mcp_serena_excluded: []
