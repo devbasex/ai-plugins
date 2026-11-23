@@ -2,7 +2,7 @@
 
 実時間の経過と実プロセスの起動をテストに書かない（偽の `call`・偽の時計・偽の `resolve`・一時ディレクトリの
 設定ファイルで縛り、実の `/etc` と利用者の設定を読まない）。設定（`limits.json` の判定の行）はまだ無いので、
-設定を読む口（`reply_judge.setting`）を差し替えて、詳細設計書の「内部のデータと定数」の値をここで与える。
+設定を読む口（`judge_child.setting`）を差し替えて、詳細設計書の「内部のデータと定数」の値をここで与える。
 """
 
 from __future__ import annotations
@@ -10,11 +10,12 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.adapters import claude
-from ndf.adapters import reply_judge as rj
+from ndf.domains.hooks import judge_child as rj
 from ndf.domains.relay import account_dir
 
 # 詳細設計書の「内部のデータと定数」の `hook.stop-wait.judge`（設定の行が入るまでテストの中だけで与える）
@@ -247,73 +248,105 @@ def _stdin(monkeypatch, payload: dict) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
 
 
-def _payload(tmp_path: Path, **over) -> dict:
-    exe = tmp_path / "claude"
-    exe.write_text("#!/bin/sh\n")
-    found = exe.stat()
+# 親の実行ファイルの実パスと、親が読み込んだ実体の同一性（実のファイルを読まない）
+PARENT_EXE = "/home/u/.local/share/claude/versions/2.1.330"
+PARENT_ID = [2049, 777]
+
+
+class FakeStat:
+    """偽の `os.stat`。渡ったパスを覚え、決めた `[st_dev, st_ino]` を返す（`OSError` を投げることもできる）。"""
+
+    def __init__(self, ident=PARENT_ID, error: Exception | None = None) -> None:
+        self.ident = ident
+        self.error = error
+        self.paths: list[str] = []
+
+    def __call__(self, path):
+        self.paths.append(str(path))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(st_dev=self.ident[0], st_ino=self.ident[1])
+
+
+def _payload(**over) -> dict:
     base = {
         "text": "本文",
         "seconds": 5,
         "parent_argv": ["claude", "-p"],
-        "project_dir": str(tmp_path),
-        "parent_exe": str(exe),
-        "parent_exe_id": [found.st_dev, found.st_ino],
+        "project_dir": "/w/p",
+        "parent_exe": PARENT_EXE,
+        "parent_exe_id": list(PARENT_ID),
     }
     return {**base, **over}
 
 
-def test_main_writes_the_answer_of_one_call(tmp_path, monkeypatch, capsys):
-    _stdin(monkeypatch, _payload(tmp_path))
+@pytest.fixture
+def no_refusal(monkeypatch):
+    """実効の設定の確かめを通す（実の設定ファイルを読まない）。"""
     monkeypatch.setattr(rj, "endpoint_refusal", lambda *a, **k: None)
-    monkeypatch.setattr(rj, "classify", lambda *a, **k: {"kind": "wait", "calls": 1, "error": None})
-    assert rj.main() == 0
-    assert json.loads(capsys.readouterr().out) == {"kind": "wait", "calls": 1}
 
 
-def test_main_does_not_launch_when_the_endpoint_cannot_be_confirmed(tmp_path, monkeypatch, capsys):
+def test_main_launches_the_parent_executable_when_its_identity_matches(monkeypatch, capsys, no_refusal):
     call = FakeCall(answered("wait"))
-    _stdin(monkeypatch, _payload(tmp_path))
-    monkeypatch.setattr(rj, "endpoint_refusal", lambda *a, **k: "--settings")
-    monkeypatch.setattr(rj, "classify", lambda *a, **k: pytest.fail("理由があるのに打った"))
-    assert rj.main() == 0
+    stat = FakeStat()
+    _stdin(monkeypatch, _payload())
+    assert rj.main(stat=stat, call=call) == 0
+    assert json.loads(capsys.readouterr().out) == {"kind": "wait", "calls": 1}
+    assert stat.paths == [PARENT_EXE]
+    assert call.argv[0][0] == PARENT_EXE and claude.CLAUDE not in call.argv[0][:1]
+    assert call.options[0] == claude.LaunchOptions(slot_wait=0, new_group=False, cli_floor=False, ensure_training=False)
+
+
+@pytest.mark.parametrize("stat", [FakeStat(ident=[2049, 778]), FakeStat(error=FileNotFoundError(PARENT_EXE))])
+def test_main_does_not_launch_when_the_parent_executable_was_replaced(monkeypatch, capsys, no_refusal, stat):
+    call = FakeCall(answered("wait"))
+    _stdin(monkeypatch, _payload())
+    assert rj.main(stat=stat, call=call) == 0
     assert json.loads(capsys.readouterr().out) == {"failure": "endpoint", "calls": 0}
     assert call.argv == []
 
 
-def test_main_does_not_launch_when_the_endpoint_check_itself_breaks(tmp_path, monkeypatch, capsys):
-    _stdin(monkeypatch, _payload(tmp_path))
+def test_main_does_not_launch_when_the_endpoint_cannot_be_confirmed(monkeypatch, capsys):
+    call = FakeCall(answered("wait"))
+    _stdin(monkeypatch, _payload())
+    monkeypatch.setattr(rj, "endpoint_refusal", lambda *a, **k: "--settings")
+    assert rj.main(stat=FakeStat(), call=call) == 0
+    assert json.loads(capsys.readouterr().out) == {"failure": "endpoint", "calls": 0}
+    assert call.argv == []
+
+
+def test_main_does_not_launch_when_the_endpoint_check_itself_breaks(monkeypatch, capsys):
+    call = FakeCall(answered("wait"))
+    _stdin(monkeypatch, _payload())
     monkeypatch.setattr(rj, "endpoint_refusal", lambda *a, **k: 1 / 0)
-    monkeypatch.setattr(rj, "classify", lambda *a, **k: pytest.fail("確かめられないのに打った"))
-    assert rj.main() == 0
+    assert rj.main(stat=FakeStat(), call=call) == 0
     assert json.loads(capsys.readouterr().out) == {"failure": "endpoint", "calls": 0}
-
-
-def test_main_does_not_launch_when_the_parent_executable_was_replaced(tmp_path, monkeypatch, capsys):
-    _stdin(monkeypatch, _payload(tmp_path, parent_exe_id=[1, 2]))
-    monkeypatch.setattr(rj, "endpoint_refusal", lambda *a, **k: None)
-    monkeypatch.setattr(rj, "classify", lambda *a, **k: pytest.fail("実体が違うのに打った"))
-    assert rj.main() == 0
-    assert json.loads(capsys.readouterr().out) == {"failure": "endpoint", "calls": 0}
+    assert call.argv == []
 
 
 @pytest.mark.parametrize(
-    "over",
+    "over, missing",
     [
-        {"parent_exe": None},
-        {"parent_exe": "claude"},
-        {"parent_exe_id": [1]},
-        {"parent_exe_id": ["a", "b"]},
-        {"text": 1},
+        ({}, "parent_exe"),
+        ({}, "parent_exe_id"),
+        ({"parent_exe": "claude"}, None),
+        ({"parent_exe": 1}, None),
+        ({"parent_exe_id": [1]}, None),
+        ({"parent_exe_id": ["a", "b"]}, None),
+        ({"parent_exe_id": [True, 2]}, None),
+        ({"text": 1}, None),
     ],
 )
-def test_main_writes_shape_for_a_broken_input(tmp_path, monkeypatch, capsys, over):
-    payload = _payload(tmp_path, **over)
-    if over.get("parent_exe") is None:
-        del payload["parent_exe"]
+def test_main_writes_shape_for_a_broken_input(monkeypatch, capsys, no_refusal, over, missing):
+    call = FakeCall(answered("wait"))
+    stat = FakeStat()
+    payload = _payload(**over)
+    if missing is not None:
+        del payload[missing]
     _stdin(monkeypatch, payload)
-    monkeypatch.setattr(rj, "classify", lambda *a, **k: pytest.fail("形が違うのに打った"))
-    assert rj.main() == 0
+    assert rj.main(stat=stat, call=call) == 0
     assert json.loads(capsys.readouterr().out) == {"failure": "shape", "calls": 0}
+    assert call.argv == [] and stat.paths == []
 
 
 def test_main_writes_shape_when_the_input_is_not_json(monkeypatch, capsys):

@@ -1,7 +1,7 @@
 """軽いモデルへの判定のリクエスト（#4000 の決定 1・3・6・7・10・11）。
 
 hook の閉包の中にあるので、標準ライブラリと同じパッケージの `tables` だけを読む。軽いモデルの起動は hook の外の
-子プロセス（`ndf.adapters.reply_judge`）が行い、ここはその子を新しいプロセスの組で起動して秒の上限で待つ。
+子プロセス（`ndf.domains.hooks.judge_child`）が行い、ここはその子を新しいプロセスの組で起動して秒の上限で待つ。
 
 - `judge_text`: コードブロックの行と空行を除いた本文の末尾（設定の字数）を、質問へ渡す文にする（決定 7）
 - `parent_launch`: 送信先の確かめの hook の側。起動の形と、親の Claude Code の起動引数・実行ファイルの同一性を読む（決定 11）
@@ -32,7 +32,7 @@ from ndf.domains.hooks import tables
 from ndf.domains.relay import claude_options, signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
-CHILD_MODULE = "ndf.adapters.reply_judge"
+CHILD_MODULE = "ndf.domains.hooks.judge_child"
 # 休みのマーカーのファイルの名前（状態の保存先の hook の保存先）
 REST_NAME = "judge-rest.json"
 # 休みのマーカーの更新を直列にする錠のファイルの名前（`.` で始まる名前は `metrics.prune_state` が消さない）

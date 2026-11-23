@@ -1,6 +1,6 @@
 """判定の子（#4000 の決定 1・4・8・9・10・11）。
 
-hook の閉包の外で動く。hook の側（`ndf.domains.hooks.reply_judge`）が新しいプロセスの組でこのモジュールを
+hook の閉包の外で動く（hook の側はモジュール名の文字列で起動するだけで import しない）。hook の側（`ndf.domains.hooks.reply_judge`）が新しいプロセスの組でこのモジュールを
 起動し、標準入力に判定の入力を渡して、標準出力の 1 行の JSON（`{"kind"|"failure", "calls"}`）を読む。
 
 - `endpoint_refusal`: 送信先がセッション自身の Claude の API と同じかを、親の起動引数と実効の設定で確かめる（決定 11）
@@ -176,15 +176,19 @@ def _auth(raw: str) -> bool:
 # ---------------------------------------------------------------- 子のエントリポイント
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    """標準入力の判定の入力を読み、送信先を確かめてから 1 回打ち、1 行の JSON を標準出力へ書く。"""
+def main(argv: Optional[list[str]] = None, stat: Callable[[str], Any] = os.stat, call: Caller = claude.call_claude) -> int:
+    """標準入力の判定の入力を読み、送信先を確かめてから 1 回打ち、1 行の JSON を標準出力へ書く。
+
+    `claude` を起動する直前に `stat(parent_exe)` の `[st_dev, st_ino]` を `parent_exe_id` と比べ、同じときだけ
+    `parent_exe` を起動の実行ファイルとして使う（PATH で引き直さない。決定 11）。
+    """
     del argv  # 引数は取らない（hook の側は標準入力だけで渡す）
     got = _input(sys.stdin.read())
     if got is None:
         return _write({"failure": "shape", "calls": 0})
-    if _endpoint_broken(got) is not None:
+    if _endpoint_broken(got, stat) is not None:
         return _write({"failure": "endpoint", "calls": 0})
-    answer = classify(got["text"], float(got["seconds"]), got["parent_exe"])
+    answer = classify(got["text"], float(got["seconds"]), got["parent_exe"], call)
     return _write({k: v for k, v in answer.items() if k != "error"})
 
 
@@ -214,16 +218,17 @@ def _two_ints(value: Any) -> bool:
     return isinstance(value, list) and len(value) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in value)
 
 
-def _endpoint_broken(got: dict) -> Optional[str]:
+def _endpoint_broken(got: dict, stat: Callable[[str], Any]) -> Optional[str]:
     """送信先を確かめられない理由の項目名（確かめられれば None）。確かめ自体が落ちたときも確かめられないとみなす。
 
-    親の起動後に実行ファイルが差し替わっていないか（`[st_dev, st_ino]`）も、ここで一緒に見る。
+    実効の設定を見た後、起動の直前の最後の確かめとして、親の起動後に実行ファイルが差し替わっていないか
+    （`stat(parent_exe)` の `[st_dev, st_ino]` が `parent_exe_id` と同じか）を見る。消えていれば `stat` の例外で理由になる。
     """
     try:
         reason = endpoint_refusal(os.environ, got["parent_argv"], Path(got["project_dir"]))
         if reason is not None:
             return reason
-        found = os.stat(got["parent_exe"])
+        found = stat(got["parent_exe"])
     except Exception as exc:  # noqa: BLE001 ファイル: 想定外の失敗でも送信先を確かめられないので起動しない
         return type(exc).__name__
     return None if [found.st_dev, found.st_ino] == got["parent_exe_id"] else "parent_exe"

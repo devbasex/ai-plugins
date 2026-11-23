@@ -19,9 +19,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli, identity
-from ndf.adapters import reply_judge
 from ndf.contracts import causes, result
-from ndf.domains.hooks import budget, metrics, registration, tables
+from ndf.domains.hooks import budget, judge_child, metrics, registration, tables
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -116,15 +115,15 @@ def _render(check: bool) -> int:
 
 def _judge_cases(cases: Optional[str], rounds: Optional[int], run: Optional[Any] = None) -> int:
     """判定の例の組を実際の軽いモデルで確かめる。1 周でも外れた例があれば `stopped`（#4000 の決定 9）。"""
-    path = Path(cases) if cases else reply_judge.cases_path()
+    path = Path(cases) if cases else judge_child.cases_path()
     if run is None:
-        run = reply_judge.run_cases
+        run = judge_child.run_cases
     try:
-        times = int(rounds) if rounds is not None else int(reply_judge.setting("rounds"))
+        times = int(rounds) if rounds is not None else int(judge_child.setting("rounds"))
         got = run(path, times)
-    except reply_judge.JudgeRefused as exc:
+    except judge_child.JudgeRefused as exc:
         return result.emit(result.stopped(TOOL, "refused", exc.reason))
-    except (OSError, ValueError, reply_judge.JudgeSettingError) as exc:
+    except (OSError, ValueError, judge_child.JudgeSettingError) as exc:
         return _invalid(str(exc))
     missed, counts = got["items"], got["metrics"]
     if missed:

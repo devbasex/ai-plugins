@@ -1,7 +1,7 @@
 {
   "version": 1,
   "summary": "軽いモデルの判定の例の組（#4000 の決定 9・受け入れ条件 2）。expect は wait（人の回答を待って終えている）か report（それ以外）。ndf hooks judge-cases が各例を周の数だけ判定し、1 周でも外れた例を出す",
-  "owner": "#4000（ndf.adapters.reply_judge）",
+  "owner": "#4000（ndf.domains.hooks.judge_child）",
   "cases": [
     {
       "id": "miss-1",
