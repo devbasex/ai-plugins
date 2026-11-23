@@ -252,6 +252,16 @@ def test_final_result_incomplete_carries_the_gaps_the_step_left(two_steps):
     assert records.recorded_step_gaps(two_steps.state_dir) == {}
 
 
+def test_final_result_incomplete_names_the_missing_outputs_in_its_summary(two_steps):
+    # #3908: 工程の failed の理由はプランの停止結果の説明をそのまま載せるので、欠けの名前を説明の末尾に添える
+    left = [{"kind": "output", "name": n, "reason": "作業の結果ファイルの outputs に無い"} for n in ("worktree", "branch")]
+    records._keep_step_gaps(two_steps.state_dir, "a", left)
+    final = {"status": "stopped", "count": 1, "last": "a", "kind": "incomplete", "detail": "ステップ a が incomplete で止まった"}
+    out = runner.final_result(two_steps, final, "SUCCESS")
+    detail = "ステップ a が incomplete で止まった（欠け: branch, worktree）"
+    assert (out["summary"], out["cause"]["detail"], out["gaps"]) == (detail, detail, left) and result.errors(out) == []
+
+
 def test_final_result_incomplete_without_step_gaps_fills_one(two_steps):
     # 欠けの詳細を持たない incomplete（JSON を出さないステップなど）は、止まったステップの欠けを補って形に合わせる
     final = {"status": "stopped", "count": 1, "last": "a", "kind": "incomplete", "detail": "ステップ a が incomplete で止まった"}

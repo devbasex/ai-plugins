@@ -17,8 +17,9 @@ import pytest
 import strategy_fixture
 
 from ndf.contracts import result
-from ndf.core import durable, route
-from ndf.progress import command, definition, gate, invoke, run, store
+from ndf.core import durable, loop, route, worker_outcome
+from ndf.core.plan import records, runner, steps, transition_decide
+from ndf.progress import command, definition, gate, invoke, run, store, worker_kinds
 
 ISSUE = 3474
 BRANCH = "sprint/s1"
@@ -162,6 +163,70 @@ def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint
     assert out["summary"] == "工程 作業場所の用意 が失敗した: プランのテンプレート worktree が無い"
     assert out["metrics"]["stage"] == "作業場所の用意"
     assert [p["name"] for p in sprint.plans] == ["requirements"]
+
+
+def _worktree_plan(repo: Path, plan_path: Path, report: dict) -> dict:
+    """プラン worktree を同じプロセスで流した結果。worker のステップは `report` を書いた結果ファイルで差し替える。
+
+    `ndf worker run` の結果を組む関数（必須の名前は作業の定義の outputs）→ ステップの結果 → 状態の保存先の記録 →
+    遷移の判断 → プランの結果の順につなぐ（子のプロセスも耐久ワークフローも起動しない）。
+    """
+    inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
+    inv.state_dir.mkdir(parents=True, exist_ok=True)
+    checked, outputs = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
+    said = worker_outcome.outcome_of("worktree", repo / "result.json", checked, [], {"attempts": 1}, outputs=outputs)
+
+    def perform(act: transition_decide.RunStep) -> transition_decide.Outcome:
+        out = steps.outcome_of(inv.plan.step(act.step), result.code_for(said), result.dumps_line(said))
+        if out["outputs"]:
+            records._add_outputs(inv.state_dir, out["outputs"])
+        records._keep_step_gaps(inv.state_dir, act.step, out["gaps"])
+        return transition_decide.Outcome(out["status"], out["kind"], out["retry_after"])
+
+    decide = lambda state, done: transition_decide.decide(inv.plan, state, done)  # noqa: E731
+    final = loop.run(decide, perform, transition_decide.start_state(inv.plan, None))
+    ended = {"status": final.status, "kind": final.kind, "detail": final.detail, "last": final.last, "count": final.count}
+    return runner.final_result(inv, ended, "SUCCESS")
+
+
+def _run_to_worktree(repo, st, sprint, capsys, report: dict) -> tuple[dict, run.View]:
+    """light のスプリントを、工程「作業場所の用意」が終わるか止まるまで流す。プラン worktree だけ `_worktree_plan` で流す。"""
+
+    def invoker(r, cwd, work_dir, answer):
+        if r.name != "worktree":
+            return sprint.env.invoker(r, cwd, work_dir, answer)
+
+        def plan_runner(argv, cwd_, env):
+            out = _worktree_plan(repo, Path(argv[argv.index("next") + 1]), report)
+            return subprocess.CompletedProcess(argv, result.code_for(out), result.dumps_line(out) + "\n", "")
+
+        return invoke.invoke(r, cwd, work_dir, answer, runner=plan_runner)
+
+    env = replace(sprint.env, invoker=invoker)
+    tid = _new(capsys, "light")
+    for _ in range(MAX_TURNS):
+        out = _turn(st, tid, repo, env)
+        v = run.read(st, tid)
+        if out["status"] not in ("ok", "gate") or v.rows["作業場所の用意"].state == "finished":
+            return out, v
+    pytest.fail("工程「作業場所の用意」まで進まない")
+
+
+def test_worktree_plan_hands_the_outputs_of_the_result_file_to_its_stage(repo, st, sprint, capsys):
+    # #3908 の受け入れ条件 1: worker が結果ファイルの outputs に書いた作業場所とブランチが、工程の出力の検査を通って文脈へ届く
+    report = {"status": "ok", "summary": "用意した", "outputs": {"worktree": str(repo), "branch": BRANCH}}
+    out, v = _run_to_worktree(repo, st, sprint, capsys, report)
+    assert out["status"] in ("ok", "gate"), out
+    assert v.rows["作業場所の用意"].state == "finished"
+    assert {k: v.context()[k] for k in ("worktree", "branch")} == {"worktree": str(repo), "branch": BRANCH}
+
+
+def test_worktree_plan_without_the_outputs_stops_its_stage_naming_them(repo, st, sprint, capsys):
+    # 結果ファイルが outputs を持たない ok は、bad_report でなく欠けの名前付きの incomplete で工程を止める
+    out, v = _run_to_worktree(repo, st, sprint, capsys, {"status": "ok", "summary": "用意した"})
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "incomplete", out
+    assert out["summary"].startswith("工程 作業場所の用意 が失敗した: ") and out["summary"].endswith("（欠け: branch, worktree）")
+    assert v.rows["作業場所の用意"].state == "failed"
 
 
 # 工程「クリーンアップ」のプラン（merged.json）が今打つ引数（#3908 の受け入れ条件 5）
