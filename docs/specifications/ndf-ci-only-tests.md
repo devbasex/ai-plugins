@@ -33,7 +33,7 @@ CI（GitHub Actions）でテストが走るリポジトリでは、NDF は作業
 | マージ（`merge-when-green`） | テストのチェックがすべて現れて通ったときだけマージする |
 | hook（PreToolUse のシェルの Tool） | テストの suite の起動の形に当たるコマンドを拒む |
 | cross-refactoring | テストを走らせず、最終ゲートで CI の結果を 1 回だけ読む |
-| cross-review | 最終スイープの指示で、手元のテストではなく PR の CI の結果を読ませる |
+| cross-review | 最終スイープの指示で、手元のテストではなく PR の CI の結果を読ませる。修正担当への指示に、テストを手元で打たない文を足す |
 | worker の指示文・Skill・エージェント定義 | 「テストを手元で打たない。合否は PR の CI の結果で読む」を書く |
 
 宣言を読む側は、すべて `plugins/ndf/scripts/lib/test_strategy.py` の `declares_ci_only` と `ci_checks` を通す。
@@ -199,6 +199,25 @@ PR の head のテストのチェックを 1 回だけ読む。読み方は `mer
 
 項目ごとに CI を往復させないのは、1 往復約 15 分（このリポジトリの `pytest.yml` の壁時計 922 秒）が項目の数だけ掛かり、予算に収まらないためである。着手前のテストを走らせないため、既存失敗の見分けは着手時の head の CI の JUnit で行う。
 
+### cross-review の修正担当
+
+cross-review の修正担当は `claude -p --setting-sources ''` で起動するため hook が働かず、上の hook の拒否（I9）の外にいる（#4030）。
+そこで、修正担当の worktree の `.ndf/project.json` が `test.ci.only: true` のときだけ、修正担当への指示の「指摘の基準」の後に
+次の文を足す（`ndf.domains.crossreview.drive._fix_prompt` が `scoped.ci_only(declared.test_section(worktree))` で決める）。
+
+> このリポジトリはテストを CI に寄せる設定（`.ndf/project.json` の `test.ci.only`）が真なので、テストを手元で打たない（全体の suite だけでなく、個別のテスト・範囲を絞ったテストも打たない）。静的解析（lint などの検査）は打ってよく、テストの合否は PR の CI が決める。
+
+文の正は `plugins/ndf/contracts/data/review-criteria.json` の `fixer_ci_only` で、`criteria_decide.fixer_ci_only()` がそこから読む。
+偽か設定が無いときの指示は変わらない。`fix` の SKILL.md の「指摘の基準」の表と `cross-review` の SKILL.md は、同じ趣旨を人向けに書く。
+
+| 手段 | 採否 | 理由 |
+| --- | --- | --- |
+| 指示の文だけ（データの 1 文と分岐 1 か所） | 採る | 範囲テストを止めつつ静的解析は今どおり打てる。守るかはモデル次第で強制はしない |
+| `--disallowed-tools` で suite の Bash のパターンを断る | 採らない（#4032） | 前方一致なので言い換え（`env … uv run …`・`python -m pytest`・`cd x && …`）をすり抜けうる。`ClaudeCall` の権限の契約を広げる |
+| hook を読ませる（`--setting-sources` を変える） | 採らない | 利用者の設定・MCP・ほかのプラグインまで読み、最小構成の起動が崩れる |
+
+指示だけで足りないと分かったら、#4032 で `--disallowed-tools` の形を設計する。
+
 ### 静的解析
 
 静的解析は手元に残す。範囲を絞れば数秒で終わり、CI の往復（このリポジトリの静的解析のワークフローで 19〜113 秒）より速く、push の前に落とせるためである。範囲の静的解析（`lint-limited`）・`lint-all`・cross-refactoring の公開前の静的解析は手元で走らせる。
@@ -292,6 +311,7 @@ GitHub Actions は、条件で飛ばしたジョブを成功として報告し�
 | マージ（I7） | テストのチェックが現れない・1 件も載らない・落ちたときはマージしない。SKIPPED は通過である |
 | 宣言の無いリポジトリ（I8） | プラン・hook・cross-refactoring・cross-review の既存のテストがそのまま通る。検査のプランに `assess`・`refactor` が無く、`record` と差分の検査の `eval` に `--review` が付く |
 | hook（I9） | suite の `command`・パスを入れた `scope_command`・オプションを足した前置きを拒み、理由に CI の結果の見方が入る。静的解析の suite のコマンドと `test-run.py` は拒まない |
+| cross-review の修正担当 | 修正担当の worktree が `test.ci.only: true` なら修正担当への指示に `fixer_ci_only` の文が載り、設定が無い・`{}`・test のセクションが空・偽なら指示が変わらない（`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py` の `test_issue_4030_*`） |
 | 手元のテストを走らせないこと | `ci_only` の戦略で `verify_commands` がテストの suite を返さない。cross-refactoring の着手前のテスト・項目ごとの点検・足したテストの試走・テンプレートの試走がテストのコマンドを起動しない。cross-review の最終スイープの指示に手元のテストのコマンドが載らない |
 
 テストの全体に効く fixture（`plugins/ndf/scripts/tests/conftest.py` の `_refactor_route_on`）は `refactor_suspended` を常に偽へ差し替え、リファクタリングの道を確かめる既存のテストを通す。`suspended_refactor` の印のテストはこの差し替えを受けず、宣言の無いリポジトリの振る舞いを確かめる。
@@ -311,3 +331,4 @@ GitHub Actions は、条件で飛ばしたジョブを成功として報告し�
 - [cross-review-no-test-declaration-sweep.md](cross-review-no-test-declaration-sweep.md): cross-review の最終スイープの指示
 - GitHub Docs: [Control jobs with conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions) / [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
 - 課題: https://github.com/devbasex/ai-plugins/issues/3056
+- 課題: https://github.com/devbasex/ai-plugins/issues/4030（cross-review の修正担当。Pull Request https://github.com/devbasex/ai-plugins/pull/4033 ）

@@ -192,3 +192,4 @@ graph TD
 - [issue #2509](https://github.com/devbasex/ai-plugins/issues/2509) — 要求と受け入れ条件
 - [ndf-parallel-organizer.md](ndf-parallel-organizer.md) — 並列の計画のオーガナイザーの全体
 - [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) — `deps.require` の止まり方
+- [ndf-entrypoint-caller-env.md](ndf-entrypoint-caller-env.md) — 11 系のエントリポイントが同じ問題を扱う形（#4029）
