@@ -175,6 +175,7 @@ plugins/ndf/
 | `ctx.background_tasks` が空でない | 通す（`judge=skip:background`。ルールの判定は `report`） |
 | `ctx.runtime` が `claude` でない（Codex のセッション） | 通す（`judge=skip:runtime`） |
 | `svc.counter.pushback_left()` が偽 | 通す（`judge=skip:limit`）。ただし `svc.counter.model_waited()` が真なら変更要求を返す（dispatch が上限で通し、待ち通知を送る。設計の決定 5） |
+| `svc.decided` が真（表の前の guard（`unattended` など）が変更要求か拒否を既に返した。再開は決まっている） | 通す（`judge=skip:decided`）。モデルを呼ばない（`dispatch.run` が guard ごとに `GuardServices.decided` を入れる） |
 | `reply_judge.resting(svc.state_dir, 今)` が真（前の起動の失敗から休む間のうち） | 通す（`judge=skip:rest`） |
 | 上のどれでもなく、残りの秒（`svc.deadline − 余白 − 今` と設定の `seconds` の小さい方）が 0.5 秒を切る | 通す（`judge=skip:time`） |
 | 上のどれでもなく、`reply_judge.parent_launch(os.environ, os.getpid())` が None | 通す（`judge=skip:endpoint`） |

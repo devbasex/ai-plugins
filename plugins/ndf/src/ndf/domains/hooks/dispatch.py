@@ -75,6 +75,8 @@ class GuardServices:
     # 締め切りの絶対時刻（`time.monotonic()` の基準。余白を引いていない。SIGALRM と同じ起点）
     deadline: float
     params: dict = field(default_factory=dict)
+    # 表の前の guard が変更要求か拒否を既に返したか（`run` が guard ごとに入れる）。stop-wait はモデルの判定を省く
+    decided: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,7 +137,8 @@ def run(
             if not spec.fail_closed:
                 continue
         began = clock()
-        got, error = _call(spec, ctx, replace(svc, params=spec.params))
+        decided = any(v.kind in REASON_KINDS for v in verdicts)
+        got, error = _call(spec, ctx, replace(svc, params=spec.params, decided=decided))
         if got.kind == "deny" and _counted(spec) and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))

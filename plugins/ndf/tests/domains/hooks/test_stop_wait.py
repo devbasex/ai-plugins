@@ -90,9 +90,9 @@ def _ask_transcript(path: Path) -> str:
     return str(path)
 
 
-def _check(tmp_path, reply, counter=None, runtime="claude", deadline=DEADLINE, **payload):
+def _check(tmp_path, reply, counter=None, runtime="claude", deadline=DEADLINE, decided=False, **payload):
     ctx = context.HookContext(runtime, "Stop", {"last_assistant_message": reply, **payload})
-    svc = dispatch.GuardServices(tmp_path, counter or FakeCounter(), deadline)
+    svc = dispatch.GuardServices(tmp_path, counter or FakeCounter(), deadline, decided=decided)
     return stop_wait.check(ctx, svc)
 
 
@@ -184,8 +184,10 @@ def test_stop_wait_does_not_apply_the_rule_after_ask_user_question(tmp_path, mon
         (REPORT, {"background_tasks": [{"id": "b1"}]}, "skip:background"),
         (REPORT, {"counter": FakeCounter(left=False)}, "skip:limit"),
         (REPORT, {"runtime": "codex"}, "skip:runtime"),
+        # 表の前の guard が変更要求を既に返した Stop（再開は決まっている）
+        (REPORT, {"decided": True}, "skip:decided"),
     ],
-    ids=["empty", "code-only", "background", "limit", "codex"],
+    ids=["empty", "code-only", "background", "limit", "codex", "decided"],
 )
 def test_stop_wait_does_not_call_the_model_under_the_skip_conditions(tmp_path, monkeypatch, reply, kwargs, judged):
     judge = Judge(monkeypatch, kind="wait")

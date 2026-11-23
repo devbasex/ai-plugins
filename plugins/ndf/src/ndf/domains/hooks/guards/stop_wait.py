@@ -50,6 +50,8 @@ def _quick_skip(ctx, svc, text: str) -> Optional[str]:
         return "skip:runtime"
     if not svc.counter.pushback_left():
         return "skip:limit"
+    if svc.decided:
+        return "skip:decided"
     if reply_judge.resting(svc.state_dir, wall()):
         return "skip:rest"
     return None
