@@ -94,7 +94,8 @@
 GitHub が秒を返さなければ、`contracts/limits.json` の `cross-review.secondary-rate-limit` の `interval` から `factor` 倍ずつ
 延ばし（60・120・240 秒。`max_interval` で頭打ち）、回数の上限は同じ行の `attempts`。待ちの終わりはマシン全体の書き込みの
 順番の記録へ知らせ、ほかのプロセスの書き込みも待たせる。書き込みどうしの間隔はマシン全体で `github.write-spacing`、
-内容を作る書き込み（スレッド・レビュー・コメントの作成）どうしの間隔は `github.content-spacing` が持つ。
+内容を作る書き込み（スレッド・レビュー・コメントの作成）は、マシン全体で 1 分と 1 時間のウィンドウの件数を数え、
+上限（`github.content-window.minute`・`github.content-window.hour`）に達したときだけウィンドウが空くまで待つ。
 
 ## PR を巻き直す
 

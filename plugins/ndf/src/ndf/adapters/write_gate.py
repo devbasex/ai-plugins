@@ -3,10 +3,13 @@
 - 同じ OS のユーザーの NDF の書き込みは、1 つの記録（書き込みの順番の記録。`gate_path()`）で順番を取る。
   記録はホームの下に置き、環境変数（`NDF_STATE_HOME`・`XDG_STATE_HOME`・`HOME`）で場所を変えない（決定 1）
 - 予約は記録のロックの中で決めて書き、ロックの外で眠る（決定 2）。どの書き込みも前の書き込みから
-  `github.write-spacing` の秒、内容を作る書き込みは前の内容を作る書き込みから `github.content-spacing` の秒を
-  空ける（決定 3・I1・I2）
+  `github.write-spacing` の秒を空ける（決定 3・I1）。内容を作る書き込みは、記録の時刻の一覧（`content`）で
+  `github.content-window.minute`・`github.content-window.hour` のウィンドウの件数を数え、どちらかが上限に達して
+  いればウィンドウが空く時刻まで待つ（決定 11・I2）
 - 送る直前に送信のロックを取り、待ちの終わり（`block`）と最短の送信時刻を読み直す。待ちの終わりが延びていたら
-  予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りなければ待つ（I6）。送信のロックは応答まで持つ
+  予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りないか、自分の項目を除いた一覧でウィンドウが
+  空いていなければ待つ（I6）。送信のロックは応答まで持ち、送り終えたら自分の項目を送り終えた時刻へ置き換える
+- 一覧の自分の項目は予約の時刻で探す。壁時計の戻りでずれて見つからなければ、除かずに残す（数え過ぎる側に倒れる）
 - 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）。
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
 - 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを取った後の
@@ -23,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import functools
 import stat
 import json
@@ -32,6 +36,7 @@ import re
 import tempfile
 import threading
 import time
+from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager, nullcontext
@@ -49,9 +54,11 @@ from ndf.contracts import limits
 T = TypeVar("T")
 # 書き込みの種類: どの書き込みも空ける・内容を作る書き込み（REST の POST と create・add で始まる mutation）
 WRITE, CONTENT = "write", "content"
-# 間隔とロックの待ちの方針（contracts/limits.json）
+# 間隔・ウィンドウ・ロックの待ちの方針（contracts/limits.json）
 WRITE_SPACING = "github.write-spacing"
-CONTENT_SPACING = "github.content-spacing"
+CONTENT_MINUTE = "github.content-window.minute"
+CONTENT_HOUR = "github.content-window.hour"
+WINDOWS = (CONTENT_MINUTE, CONTENT_HOUR)
 SEND_LOCK = "github.write-send-lock"
 PR_LOCK = "github.pr-publish-lock"
 # 記録のロックを待つ上限の秒。ロックの中では読み・計算・書きだけを行う
@@ -65,9 +72,15 @@ SHARED_TMP = Path("/tmp")
 _FINISHER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndf-write-gate-finish")
 SEND_LOCK_FILE = "write-gate.send.lock"
 PR_LOCK_DIR = "pr"
-RECORD_VERSION = 1
-# 記録の時刻の欄（UNIX 時刻の秒）。`written_at` は別に持つ
-TIMES = ("next", "next_content", "sent_next", "sent_next_content", "blocked_until")
+RECORD_VERSION = 2
+# 前の形。`next`・`sent_next`・`blocked_until`・`written_at` を引き継ぎ、内容を作る書き込みの時刻の一覧を空として読む
+OLD_VERSION = 1
+# 記録の時刻の欄（UNIX 時刻の秒）。`written_at` と内容を作る書き込みの時刻の一覧（`CONTENT_TIMES`）は別に持つ
+TIMES = ("next", "sent_next", "blocked_until")
+# 一覧の欄の名前は内容を作る書き込みの種類の名前（`CONTENT`）と同じ
+CONTENT_TIMES = CONTENT
+# 記録の形: TIMES と `written_at` は秒、`CONTENT_TIMES` は昇順の秒の一覧
+Record = dict[str, Any]
 READS = ("GET", "HEAD")
 GRAPHQL_PATH = "/graphql"
 CONTENT_FIELDS = ("create", "add")
@@ -101,13 +114,20 @@ class Pause(NamedTuple):
 
 
 class Reservation(NamedTuple):
-    """予約までの秒・予約の時刻・種類・書く前の `next` と `next_content`・件数。"""
+    """予約までの秒・予約の時刻・種類・書く前の `next`・件数。`CONTENT` は一覧へ予約の時刻を件数だけ足している。"""
 
     wait: float
     at: float
     kind: str
-    before: tuple[float, float]
+    before: float
     count: int = 1
+
+
+class Turn(NamedTuple):
+    """送ってよくなった予約と送信のロック（取れなければ None。I5）。"""
+
+    reservation: Reservation
+    send: Optional[FileLock]
 
 
 class Busy(Exception):
@@ -173,66 +193,128 @@ def classified(request: httpx.Request) -> Optional[Writes]:
     return writes
 
 
-def _spacing(kind: str) -> tuple[float, float]:
-    """1 件の書き込みが後ろへ空ける (どの書き込みとの秒, 内容を作る書き込みとの秒)。`WRITE` は後者が 0。"""
-    write = limits.value(WRITE_SPACING, "interval")
-    return write, (limits.value(CONTENT_SPACING, "interval") if kind == CONTENT else 0.0)
+def _spacing() -> float:
+    """1 件の書き込みが後ろへ空ける秒。"""
+    return limits.value(WRITE_SPACING, "interval")
 
 
-def _empty() -> dict[str, float]:
-    return dict.fromkeys((*TIMES, "written_at"), 0.0)
+def _window(name: str) -> tuple[float, int]:
+    """ウィンドウの (長さの秒, 上限の件数)。"""
+    return limits.value(name, "seconds"), int(limits.value(name, "count"))
 
 
-def _valid(raw: object) -> bool:
-    if not isinstance(raw, dict) or raw.get("version") != RECORD_VERSION:
-        return False
-    values = [raw.get(k) for k in (*TIMES, "written_at")]
-    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+def _opens(content: list[float], now: float, count: int = 1) -> float:
+    """内容を作る書き込みを `count` 件足しても、どのウィンドウの件数も上限を越えない最も早い時刻（ウィンドウが空く時刻。決定 11）。
+
+    長さ L・上限 N のウィンドウで、一覧（昇順）に N - count 件より多くあれば、後ろから N - count + 1 番目の時刻 + L
+    （1 件なら後ろから N 番目 + L）。どちらのウィンドウも上限未満なら `now`。
+    """
+    at = now
+    for name in WINDOWS:
+        length, limit = _window(name)
+        room = max(limit - count, 0)
+        if len(content) > room:
+            at = max(at, content[-(room + 1)] + length)
+    return at
 
 
-def _rewound(record: dict[str, float], now: float) -> dict[str, float]:
-    """壁時計が戻っていたら、戻った秒だけ記録の時刻を手前へずらす（待ちの終わりの残りを保つ）。"""
+def _put(content: list[float], at: float, count: int) -> None:
+    """一覧へ `at` を `count` 件足す（昇順を保つ）。"""
+    for _ in range(count):
+        bisect.insort(content, at)
+
+
+def _take_out(content: list[float], at: float, count: int) -> None:
+    """一覧から `at` の項目を `count` 件まで除く。見つからなければ除かない（数え過ぎる側に倒れる）。"""
+    for _ in range(count):
+        place = bisect.bisect_left(content, at)
+        if place == len(content) or content[place] != at:
+            return
+        del content[place]
+
+
+def _joined(saved: list[float], memory: list[float]) -> list[float]:
+    """2 つの一覧を、どの時刻もどちらか多いほうの件数で重ねる（数え過ぎる側に倒れる）。"""
+    return sorted((Counter(saved) | Counter(memory)).elements())
+
+
+def _copy(record: Record) -> Record:
+    return {**record, CONTENT_TIMES: list(record[CONTENT_TIMES])}
+
+
+def _empty() -> Record:
+    return {**dict.fromkeys((*TIMES, "written_at"), 0.0), CONTENT_TIMES: []}
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _parsed(raw: object) -> Optional[Record]:
+    """記録の JSON を読む形にする。`OLD_VERSION` は一覧を空として読む。形が違えば None。"""
+    if not isinstance(raw, dict) or raw.get("version") not in (RECORD_VERSION, OLD_VERSION):
+        return None
+    content = raw.get(CONTENT_TIMES) if raw["version"] == RECORD_VERSION else []
+    keys = (*TIMES, "written_at")
+    if not isinstance(content, list) or not all(_number(v) for v in (*(raw.get(k) for k in keys), *content)):
+        return None
+    return {**{k: float(raw[k]) for k in keys}, CONTENT_TIMES: sorted(float(t) for t in content)}
+
+
+def _rewound(record: Record, now: float) -> Record:
+    """壁時計が戻っていたら、戻った秒だけ記録の時刻（一覧も）を手前へずらす（待ちの終わりの残りを保つ）。"""
     back = record["written_at"] - now
     if back > CLOCK_SLACK:
         for key in TIMES:
             record[key] -= back
+        record[CONTENT_TIMES] = [t - back for t in record[CONTENT_TIMES]]
     return record
 
 
-def _earliest_send(record: dict[str, float], kind: str) -> float:
-    """前の書き込みを送り終えた時刻から数えた、この種類を送ってよい最も早い時刻（I6）。"""
-    if kind == CONTENT:
-        return max(record["sent_next"], record["sent_next_content"])
-    return record["sent_next"]
+def _earliest_send(record: Record, reservation: Reservation, now: float) -> float:
+    """前の書き込みを送り終えた時刻から数えた、この予約を送ってよい最も早い時刻（I6）。
+
+    内容を作る書き込みは、自分の項目を除いた一覧から求めたウィンドウが空く時刻とも比べる。
+    """
+    if reservation.kind != CONTENT:
+        return record["sent_next"]
+    others = list(record[CONTENT_TIMES])
+    _take_out(others, reservation.at, reservation.count)
+    return max(record["sent_next"], _opens(others, now, reservation.count))
 
 
-def _advance(steps: Generator[Pause, None, Optional[FileLock]]) -> tuple[bool, Any]:
-    """手順を 1 つ進める。(終わったか, `Pause` または送信のロック)。StopIteration を Future へ渡さないために包む。"""
+def _drop_old(record: Record, now: float) -> None:
+    """長いほうのウィンドウより古い時刻を一覧から捨てる。"""
+    length = max(_window(name)[0] for name in WINDOWS)
+    record[CONTENT_TIMES] = [t for t in record[CONTENT_TIMES] if t > now - length]
+
+
+def _advance(steps: Generator[Pause, None, Turn]) -> tuple[bool, Any]:
+    """手順を 1 つ進める。(終わったか, `Pause` または `Turn`)。StopIteration を Future へ渡さないために包む。"""
     try:
         return False, next(steps)
     except StopIteration as done:
         return True, done.value
 
 
-def _abandon(steps: Generator[Pause, None, Optional[FileLock]], step: asyncio.Future) -> None:
+def _abandon(steps: Generator[Pause, None, Turn], step: asyncio.Future) -> None:
     """取り消された非同期の手順の後始末。スレッドが終えてから、持っている送信のロックを放す。"""
     if step.cancelled() or step.exception() is not None:
         return
     finished, value = step.result()
     if finished:
-        if value is not None:
-            value.release()
+        if value.send is not None:
+            value.send.release()
     else:
         steps.close()
 
 
-def _restore(record: dict[str, float], old: Reservation) -> None:
-    """`old` の書いた `next`（`CONTENT` なら `next_content` も）がそのままなら書く前へ戻す。後ろに別の予約があれば戻さない。"""
-    write, content = _spacing(old.kind)
-    if record["next"] == old.at + old.count * write:
-        record["next"] = old.before[0]
-    if old.kind == CONTENT and record["next_content"] == old.at + old.count * content:
-        record["next_content"] = old.before[1]
+def _restore(record: Record, old: Reservation) -> None:
+    """`old` の書いた `next` がそのままなら書く前へ戻す（後ろに別の予約があれば戻さない）。`CONTENT` なら一覧から自分の項目を除く。"""
+    if record["next"] == old.at + old.count * _spacing():
+        record["next"] = old.before
+    if old.kind == CONTENT:
+        _take_out(record[CONTENT_TIMES], old.at, old.count)
 
 
 @functools.cache
@@ -303,7 +385,7 @@ class WriteGate(BaseThrottler):
         self.clock = clock
         self.sleep = sleep
         # 記録を使えないときに間を空けるプロセスの中の記録（I5）。記録を書けたら写す
-        self._memory = _empty()
+        self._memory: Record = _empty()
         # プロセスの中の記録に、記録へ書けていない変更があるか
         self._unsaved = False
         # プロセスの中の記録だけを変えた回数。記録へ重ねた後に増えていれば、その変更を保存の結果で消さない
@@ -341,16 +423,16 @@ class WriteGate(BaseThrottler):
     @asynccontextmanager
     async def async_hold(self, kind: str, count: int = 1, remaining: Optional[Callable[[], float]] = None) -> AsyncGenerator[None, Any]:
         """`hold` の非同期の口。"""
-        send = await self._turn(kind, count, remaining)
+        turn = await self._turn(kind, count, remaining)
         try:
             yield
         finally:
             # 既定のスレッドプールは送信のロックを待つ手順で埋まりうるので、放す処理は専用のスレッドで進める。
             # 呼び出し元が取り消されても、投入済みの放す処理は取り消さない（shield）
-            finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, kind, send)
+            finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, *turn)
             await asyncio.shield(finishing)
 
-    async def _turn(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
+    async def _turn(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Turn:
         """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。
 
         眠る直前に `_due` で残りを読み直す（手順が眠りを出してからループが再開するまでの時間を引く）。予算に収まらなければ
@@ -394,16 +476,15 @@ class WriteGate(BaseThrottler):
         `remaining` があれば待ちを予算に収め、収まらなければ送らずに `Busy` を出す（出口の記録もしない）。
         """
         with closing(self._steps(kind, count, remaining)) as steps:
-            send = None
             try:
                 while True:
                     self.sleep(next(steps).seconds)
             except StopIteration as done:
-                send = done.value
+                turn: Turn = done.value
         try:
             yield
         finally:
-            self._finish(kind, send)
+            self._finish(*turn)
 
     def reserve(
         self,
@@ -418,23 +499,22 @@ class WriteGate(BaseThrottler):
         `Busy` を出す。`replacing` の戻しは `Busy` でも書く（ロックを取れなければ `withdraw` で試す）。
         """
 
-        def change(record: dict[str, float], now: float) -> Reservation | Busy:
+        def change(record: Record, now: float) -> Reservation | Busy:
             if replacing is not None:
                 _restore(record, replacing)
-            before = (record["next"], record["next_content"])
+            before = record["next"]
             at = max(now, record["next"], record["blocked_until"])
             if kind == CONTENT:
-                at = max(at, record["next_content"])
+                at = _opens(record[CONTENT_TIMES], at, count)
             try:
                 _within_budget(remaining, at - now)
             except Busy as busy:
                 if replacing is None:
                     raise
                 return busy
-            write, content = _spacing(kind)
-            record["next"] = at + count * write
+            record["next"] = at + count * _spacing()
             if kind == CONTENT:
-                record["next_content"] = at + count * content
+                _put(record[CONTENT_TIMES], at, count)
             return Reservation(at - now, at, kind, before, count)
 
         try:
@@ -448,7 +528,7 @@ class WriteGate(BaseThrottler):
         return made
 
     def withdraw(self, reservation: Reservation) -> None:
-        """送らなかった予約を取り消す。`next`（`CONTENT` なら `next_content` も）が自分の書いた値のままなら書く前へ戻す。
+        """送らなかった予約を取り消す。`next` が自分の書いた値のままなら書く前へ戻し、`CONTENT` なら一覧から自分の項目を除く。
 
         予算が切れた後に呼ぶので記録のロックを待たない。すぐ取れなければ何もせずに返り、予約は残る（時刻が過ぎれば効かない）。
         """
@@ -459,29 +539,28 @@ class WriteGate(BaseThrottler):
             return
         self._under(held, lambda record, _now: _restore(record, reservation))
 
-    def sent(self, kind: str) -> None:
-        """送り終えた時刻から、次の書き込みの時刻と最短の送信時刻を延ばす（I6）。"""
+    def sent(self, reservation: Reservation) -> None:
+        """送り終えた時刻から、次の書き込みの時刻と最短の送信時刻を延ばす（I6）。`CONTENT` なら一覧の自分の項目を送り終えた時刻へ置き換える。"""
 
-        def change(record: dict[str, float], now: float) -> None:
-            write, content = _spacing(kind)
+        def change(record: Record, now: float) -> None:
             for key in ("next", "sent_next"):
-                record[key] = max(record[key], now + write)
-            if kind == CONTENT:
-                for key in ("next_content", "sent_next_content"):
-                    record[key] = max(record[key], now + content)
+                record[key] = max(record[key], now + _spacing())
+            if reservation.kind == CONTENT:
+                _take_out(record[CONTENT_TIMES], reservation.at, reservation.count)
+                _put(record[CONTENT_TIMES], now, reservation.count)
 
         self._apply(change)
 
     def block(self, seconds: float) -> None:
         """待ちの終わりを `max(今の待ちの終わり, 今 + seconds)` へ延ばす（縮めない）。"""
 
-        def change(record: dict[str, float], now: float) -> None:
+        def change(record: Record, now: float) -> None:
             record["blocked_until"] = max(record["blocked_until"], now + seconds)
 
         self._apply(change)
 
-    def _steps(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, Optional[FileLock]]:
-        """眠る秒を順に出し、送ってよくなったら送信のロック（取れなければ None。I5）を返す。
+    def _steps(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, Turn]:
+        """眠る秒を順に出し、送ってよくなったら予約と送信のロック（取れなければ None。I5）を返す。
 
         予算の切れ（`Busy`）では、送信のロックを放し、書いた予約を `withdraw` で取り消してから出す。置き換えの `reserve` が
         `Busy` を出したときは、旧予約は `reserve` が戻しているので取り消さない。
@@ -493,9 +572,9 @@ class WriteGate(BaseThrottler):
                 wait = self._left(reservation, remaining)
                 if wait > 0:
                     yield Pause(wait, until=reservation.at)
-                blocked, send = yield from self._sendable(kind, remaining)
+                blocked, send = yield from self._sendable(reservation, remaining)
                 if not blocked:
-                    return send
+                    return Turn(reservation, send)
                 replaced, reservation = reservation, None
                 reservation = self.reserve(kind, replacing=replaced, count=count, remaining=remaining)
         except Busy:
@@ -523,11 +602,13 @@ class WriteGate(BaseThrottler):
             _within_budget(remaining, wait)
         return max(wait, 0.0)
 
-    def _sendable(self, kind: str, remaining: Optional[Callable[[], float]]) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
+    def _sendable(
+        self, reservation: Reservation, remaining: Optional[Callable[[], float]]
+    ) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
         """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(待ちの終わりが延びたか, 送信のロック)。延びたらロックを放して返す。"""
         send = self._send_lock(remaining)
         try:
-            blocked = yield from self._settle(kind, send is not None, remaining)
+            blocked = yield from self._settle(reservation, send is not None, remaining)
             if not blocked and remaining is not None and remaining() <= 0:
                 raise Busy(0.0)
         except BaseException:
@@ -538,10 +619,12 @@ class WriteGate(BaseThrottler):
             send.release()
         return blocked, (None if blocked else send)
 
-    def _settle(self, kind: str, holding: bool, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, bool]:
+    def _settle(
+        self, reservation: Reservation, holding: bool, remaining: Optional[Callable[[], float]] = None
+    ) -> Generator[Pause, None, bool]:
         """送信のロックを持ったまま（`holding`）最短の送信時刻まで眠る秒を出す。待ちの終わりが延びていたら真。"""
         while True:
-            seen = self._peek(kind, remaining)
+            seen = self._peek(reservation, remaining)
             if seen is None:
                 return False
             blocked, at = seen
@@ -554,14 +637,14 @@ class WriteGate(BaseThrottler):
             _within_budget(remaining, gap)
             yield Pause(gap, holding, at)
 
-    def _finish(self, kind: str, send: Optional[FileLock]) -> None:
+    def _finish(self, reservation: Reservation, send: Optional[FileLock]) -> None:
         try:
-            self.sent(kind)
+            self.sent(reservation)
         finally:
             if send is not None:
                 send.release()
 
-    def _peek(self, kind: str, remaining: Optional[Callable[[], float]] = None) -> Optional[tuple[bool, float]]:
+    def _peek(self, reservation: Reservation, remaining: Optional[Callable[[], float]] = None) -> Optional[tuple[bool, float]]:
         """(待ちの終わりが今より後か, 最短の送信時刻（時計の秒）)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
         held = self._record_lock(remaining)
         try:
@@ -571,19 +654,19 @@ class WriteGate(BaseThrottler):
                 record = self._memory_view(now)
             else:
                 record, _, now = self._with_unsaved(record)
-            return record["blocked_until"] > now, _earliest_send(record, kind)
+            return record["blocked_until"] > now, _earliest_send(record, reservation, now)
         finally:
             if held is not None:
                 held.release()
 
-    def _apply(self, change: Callable[[dict[str, float], float], T], remaining: Optional[Callable[[], float]] = None) -> T:
+    def _apply(self, change: Callable[[Record, float], T], remaining: Optional[Callable[[], float]] = None) -> T:
         """記録のロックの中で記録を変えて書く。使えなければプロセスの中の記録で変える（I5）。"""
         held = self._record_lock(remaining)
         if held is None:
             return self._in_process(change)
         return self._under(held, change)
 
-    def _under(self, held: FileLock, change: Callable[[dict[str, float], float], T]) -> T:
+    def _under(self, held: FileLock, change: Callable[[Record, float], T]) -> T:
         """取った記録のロック `held` の中で記録を変えて書き、ロックを放す。記録を読めなければプロセスの中の記録で変える。"""
         try:
             record = self._load()
@@ -596,21 +679,22 @@ class WriteGate(BaseThrottler):
         finally:
             held.release()
 
-    def _in_process(self, change: Callable[[dict[str, float], float], T]) -> T:
+    def _in_process(self, change: Callable[[Record, float], T]) -> T:
         with self._mutex:
             now = self.clock()
             result = change(self._memory, now)
+            _drop_old(self._memory, now)
             self._memory["written_at"] = now
             self._unsaved = True
             self._fallbacks += 1
             return result
 
-    def _memory_view(self, now: float) -> dict[str, float]:
+    def _memory_view(self, now: float) -> Record:
         with self._mutex:
-            memory = dict(self._memory)
+            memory = _copy(self._memory)
         return _rewound(memory, now)
 
-    def _with_unsaved(self, record: dict[str, float]) -> tuple[dict[str, float], int, float]:
+    def _with_unsaved(self, record: Record) -> tuple[Record, int, float]:
         """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。重ねた時点の変更の回数と基準の時刻も返す。
 
         基準の時刻はプロセスの中の記録の写しと同じ `_mutex` の中で取る。写しに入った変更はどれもこの時刻より前に
@@ -618,12 +702,13 @@ class WriteGate(BaseThrottler):
         """
         with self._mutex:
             now = self.clock()
-            unsaved, seen, memory = self._unsaved, self._fallbacks, dict(self._memory)
+            unsaved, seen, memory = self._unsaved, self._fallbacks, _copy(self._memory)
         record = _rewound(record, now)
         if unsaved:
             memory = _rewound(memory, now)
             for key in TIMES:
                 record[key] = max(record[key], memory[key])
+            record[CONTENT_TIMES] = _joined(record[CONTENT_TIMES], memory[CONTENT_TIMES])
         return record, seen, now
 
     def _record_lock_path(self) -> Path:
@@ -659,7 +744,7 @@ class WriteGate(BaseThrottler):
             return None
         return held
 
-    def _load(self) -> Optional[dict[str, float]]:
+    def _load(self) -> Optional[Record]:
         """記録を読む（時刻はそろえない。`_with_unsaved` がそろえる）。無ければ空、壊れていれば 1 行を出して空。読めない（OSError）なら 1 行を出して None。"""
         try:
             text = self.path.read_text(encoding="utf-8")
@@ -669,16 +754,17 @@ class WriteGate(BaseThrottler):
             diag(f"書き込みの順番の記録を読めない: {self.path}: {exc}", kind="write_gate")
             return None
         try:
-            raw = json.loads(text)
+            record = _parsed(json.loads(text))
         except ValueError:
-            raw = None
-        if not _valid(raw):
+            record = None
+        if record is None:
             diag(f"書き込みの順番の記録を読めない: {self.path}: 形が違う", kind="write_gate")
             return _empty()
-        return {k: float(raw[k]) for k in (*TIMES, "written_at")}
+        return record
 
-    def _store(self, record: dict[str, float], now: float, seen: int) -> None:
+    def _store(self, record: Record, now: float, seen: int) -> None:
         """記録を書き、プロセスの中の記録へ写す。`seen` の後にプロセスの中だけで変えた分は残し、未保存の変更も消さない。"""
+        _drop_old(record, now)
         record["written_at"] = now
         with self._mutex:
             self._memory = self._merged(record, seen)
@@ -693,17 +779,18 @@ class WriteGate(BaseThrottler):
             self._memory = self._merged(record, seen)
             self._unsaved = unsaved or self._fallbacks != seen
 
-    def _merged(self, record: dict[str, float], seen: int) -> dict[str, float]:
+    def _merged(self, record: Record, seen: int) -> Record:
         """（`_mutex` の中で呼ぶ）記録の写し。`seen` の後にプロセスの中だけで変えた時刻があれば遅い方を採る。
 
         その変更は保存を始めた時刻より後に入りうるので、両方を今の時刻へそろえてから重ね、書いた時刻も今にする。
         """
         if self._fallbacks == seen:
-            return dict(record)
+            return _copy(record)
         now = self.clock()
-        saved = _rewound(dict(record), now)
-        memory = _rewound(dict(self._memory), now)
-        return {**saved, **{key: max(saved[key], memory[key]) for key in TIMES}, "written_at": now}
+        saved = _rewound(_copy(record), now)
+        memory = _rewound(_copy(self._memory), now)
+        content = _joined(saved[CONTENT_TIMES], memory[CONTENT_TIMES])
+        return {**saved, **{key: max(saved[key], memory[key]) for key in TIMES}, CONTENT_TIMES: content, "written_at": now}
 
 
 class Within(BaseThrottler):

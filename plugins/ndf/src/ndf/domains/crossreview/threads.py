@@ -14,8 +14,9 @@
   書かずに状態ファイルの記録を PR から戻す（保存の前に落ちた打ち直しで二重に書かない。不変条件 I4）
 - 未解決の指摘: スレッドを開いたまま残す（次の実行が `prior_decide.carried` で引き継ぐ）
 - 収束の妨げにならない重さ（`minor`・`nit`）の指摘はスレッドにしない（記録のコメントの表にだけ載る。#3941）
-- 書く操作が GitHub の二次レート制限に当たったら待って打ち直す（`patient`）。書き込みの間隔はマシン全体の
-  `WriteGate`（`github.write-spacing`・`github.content-spacing`）が持つ
+- 書く操作が GitHub の二次レート制限に当たったら待って打ち直す（`patient`）。書き込みの間隔と、内容を作る書き込みを
+  数えるウィンドウの上限はマシン全体の `WriteGate`（`github.write-spacing`・`github.content-window.minute`・
+  `github.content-window.hour`）が持つ
 
 PR のコメントを読む口（`Reader`）も同じ実装（`GitHubPort`）が持つ: 相手役へ渡す既存のコメントと、引き継ぐスレッド（#3941）。
 """

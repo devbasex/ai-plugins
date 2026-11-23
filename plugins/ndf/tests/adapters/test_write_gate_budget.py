@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -18,7 +19,7 @@ from ndf import slot_pool
 from ndf.adapters import write_gate
 from ndf.adapters.write_gate import CONTENT, WRITE
 
-from .test_write_gate import NOW, PATCH, RECORD_LOCK, W, Clock, graphql, record, seed
+from .test_write_gate import HOUR, NOW, PATCH, RECORD_LOCK, W, Clock, graphql, record, seed
 
 
 @pytest.fixture
@@ -174,6 +175,7 @@ def test_within_stops_waiting_for_a_lock_at_the_budget_and_leaves_no_reservation
 
     assert _Held.waited == [left] and busy.value.seconds == left
     assert {k: record(path)[k] for k in write_gate.TIMES} == dict.fromkeys(write_gate.TIMES, 0.0)
+    assert record(path)["content"] == []
     assert "取れない" not in capsys.readouterr().err
 
 
@@ -192,6 +194,7 @@ def test_within_does_not_send_when_the_budget_is_gone_just_before_sending(gate, 
         _send(gate.within(budget))
 
     assert {k: record(path)[k] for k in write_gate.TIMES} == dict.fromkeys(write_gate.TIMES, 0.0)
+    assert record(path)["content"] == []
 
 
 def test_within_leaves_the_reservation_when_another_holds_the_record_lock(gate, path, clock, held):
@@ -205,6 +208,40 @@ def test_within_leaves_the_reservation_when_another_holds_the_record_lock(gate, 
     assert _Held.waited == [5, 0] and busy.value.seconds == 5
     held.discard(RECORD_LOCK)
     assert gate.reserve(WRITE).at == pytest.approx(NOW + 2 + W)
+
+
+def test_within_refuses_content_when_the_window_opens_beyond_the_budget(gate, path, clock):
+    # 1 時間のウィンドウが上限に達し、空くまでの 200 秒が予算に収まらない。送らず、一覧に自分の時刻を残さない
+    length, count = HOUR
+    times = [NOW - 3500 + i for i in range(count + 100)]
+    seed(path, content=times)
+    content = graphql("mutation { addComment(input: {}) { x } }")
+
+    with pytest.raises(write_gate.Busy) as busy:
+        _send(gate.within(_Budget(100)), content)
+
+    assert busy.value.seconds == pytest.approx(times[-count] + length - NOW)
+    assert record(path)["content"] == times and clock.slept == []
+
+
+def test_within_refuses_content_when_the_window_fills_before_sending(gate, path, clock):
+    # 予約の後、ほかのプロセスの項目が送り終えた時刻へ延びて 1 時間のウィンドウが埋まった。送る直前の読み直しで
+    # 空くまでの秒（約 98 秒）も予算で数え、送らずに自分の時刻を除く
+    _, count = HOUR
+    times = [NOW - 3500 + i for i in range(count - 1)]
+    seed(path, content=times, next=NOW + 2)
+
+    def fill() -> None:
+        saved = record(path)
+        saved["content"] = sorted([*saved["content"], NOW + 1])
+        path.write_text(json.dumps(saved), encoding="utf-8")
+
+    clock.on_sleep = fill
+    with pytest.raises(write_gate.Busy) as busy:
+        _send(gate.within(_Budget(50)), graphql("mutation { addComment(input: {}) { x } }"))
+
+    assert busy.value.seconds == pytest.approx(times[0] + 3600 - (NOW + 2))
+    assert record(path)["content"] == [*times, NOW + 1]
 
 
 def test_within_a_late_previous_send_over_the_budget_is_busy(gate, path, clock):
@@ -256,7 +293,7 @@ def test_within_replaced_reservation_is_given_back_when_the_budget_is_gone_befor
         _send(gate.within(budget), graphql("mutation { addComment(input: {}) { x } }"))
 
     assert clock.slept == [pytest.approx(2), pytest.approx(30)]
-    assert (record(path)["next"], record(path)["next_content"]) == (pytest.approx(NOW + 2), 0.0)
+    assert (record(path)["next"], record(path)["content"]) == (pytest.approx(NOW + 2), [])
 
 
 def test_within_replacement_over_the_budget_gives_back_the_old_reservation(gate, path, clock):
@@ -267,7 +304,7 @@ def test_within_replacement_over_the_budget_gives_back_the_old_reservation(gate,
         _send(gate.within(_Budget(10)), graphql("mutation { addComment(input: {}) { x } }"))
 
     assert busy.value.seconds == pytest.approx(30) and clock.slept == [pytest.approx(2)]
-    assert (record(path)["next"], record(path)["next_content"]) == (pytest.approx(NOW + 2), 0.0)
+    assert (record(path)["next"], record(path)["content"]) == (pytest.approx(NOW + 2), [])
     assert record(path)["sent_next"] == 0.0
 
 
@@ -312,7 +349,7 @@ def test_within_async_rereads_the_budget_right_before_sleeping(gate, path, clock
 
 def test_withdraw_gives_back_the_last_reservation_only_when_the_record_lock_is_free(gate, path, held):
     gate.withdraw(gate.reserve(CONTENT))
-    assert (record(path)["next"], record(path)["next_content"]) == (0.0, 0.0)
+    assert (record(path)["next"], record(path)["content"]) == (0.0, [])
 
     reservation = gate.reserve(WRITE)
     held.add(RECORD_LOCK)

@@ -32,7 +32,9 @@ def spacing(name: str) -> float:
 
 
 W = spacing(write_gate.WRITE_SPACING)
-C = spacing(write_gate.CONTENT_SPACING)
+# 内容を作る書き込みを数えるウィンドウの (長さの秒, 上限の件数)
+MINUTE = (limits.value(write_gate.CONTENT_MINUTE, "seconds"), limits.value(write_gate.CONTENT_MINUTE, "count"))
+HOUR = (limits.value(write_gate.CONTENT_HOUR, "seconds"), limits.value(write_gate.CONTENT_HOUR, "count"))
 
 
 class Clock:
@@ -94,11 +96,12 @@ def record(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def seed(path: Path, **times: float) -> None:
-    """記録を書いた形で置く（書いた時刻は今）。"""
+def seed(path: Path, **times: object) -> None:
+    """記録を書いた形で置く（書いた時刻は今。内容を作る書き込みの時刻の一覧は `content`）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     base = dict.fromkeys(write_gate.TIMES, 0.0)
-    path.write_text(json.dumps({"version": 1, **base, "written_at": NOW, **times}), encoding="utf-8")
+    record = {"version": write_gate.RECORD_VERSION, **base, "written_at": NOW, "content": [], **times}
+    path.write_text(json.dumps(record), encoding="utf-8")
 
 
 def graphql(query: str) -> httpx.Request:
@@ -161,20 +164,91 @@ def test_two_writes_in_a_row_are_spaced(gate):
     assert second.wait == pytest.approx(W)
 
 
-def test_content_after_content_waits_the_content_spacing(gate):
+def test_content_after_content_waits_only_the_write_spacing_under_the_limits(gate, path):
     gate.reserve(CONTENT)
 
-    assert gate.reserve(CONTENT).wait == pytest.approx(C)
-    assert gate.reserve(WRITE).wait == pytest.approx(C + W)
+    assert gate.reserve(CONTENT).wait == pytest.approx(W)
+    assert record(path)["content"] == [NOW, pytest.approx(NOW + W)]
+    assert gate.reserve(WRITE).wait == pytest.approx(2 * W)
 
 
 def test_a_reservation_at_exactly_now_does_not_wait(gate, path, clock):
-    seed(path, next=NOW, next_content=NOW)
+    seed(path, next=NOW)
 
     got = gate.reserve(CONTENT)
 
     assert got.wait == 0 and got.at == NOW
-    assert record(path)["next_content"] == pytest.approx(NOW + C)
+    assert record(path)["content"] == [NOW]
+
+
+def test_a_full_hour_window_pushes_content_until_the_500th_from_the_end_leaves(gate, path):
+    # 1 時間に 600 件。後ろから 500 番目（NOW - 3400）が 1 時間のウィンドウから出る時刻まで待つ
+    length, count = HOUR
+    times = [NOW - 3500 + i for i in range(count + 100)]
+    seed(path, content=times)
+
+    assert gate.reserve(WRITE).wait == 0
+    assert gate.reserve(CONTENT).at == pytest.approx(times[-count] + length)
+
+
+def test_a_full_minute_window_pushes_content_until_the_80th_from_the_end_leaves(gate, path):
+    length, count = MINUTE
+    times = [NOW - 50 + i * 0.5 for i in range(count)]
+    seed(path, content=times)
+
+    assert gate.reserve(CONTENT).at == pytest.approx(times[-count] + length)
+
+
+def test_the_send_replaces_its_own_time_with_when_it_finished(gate, path, clock):
+    seed(path, content=[NOW - 100])
+
+    with gate.hold(CONTENT):
+        clock.now += 5  # 応答に 5 秒かかる
+
+    assert record(path)["content"] == [NOW - 100, pytest.approx(NOW + 5)]
+
+
+def test_withdraw_and_replacing_take_out_only_their_own_time(gate, path):
+    seed(path, content=[NOW - 100])
+    gate.withdraw(gate.reserve(CONTENT))
+    assert record(path)["content"] == [NOW - 100]
+
+    old = gate.reserve(CONTENT)
+    got = gate.reserve(CONTENT, replacing=old)
+
+    assert got.at == NOW and record(path)["content"] == [NOW - 100, NOW]
+
+
+def test_times_older_than_the_hour_window_are_dropped(gate, path):
+    length, _ = HOUR
+    seed(path, content=[NOW - length - 1, NOW - length + 1])
+
+    gate.reserve(WRITE)
+
+    assert record(path)["content"] == [NOW - length + 1]
+
+
+def test_a_rewound_wall_clock_shifts_the_content_times(gate, path):
+    hour = 3600.0
+    seed(path, content=[NOW + hour - 600], written_at=NOW + hour)
+
+    gate.reserve(WRITE)
+
+    assert record(path)["content"] == [pytest.approx(NOW - 600)]
+
+
+def test_a_version_1_record_keeps_its_times_and_is_rewritten_as_version_2(gate, path):
+    path.parent.mkdir(parents=True)
+    old = {"next": NOW + 3, "next_content": NOW + 50, "sent_next": NOW + 2, "sent_next_content": NOW + 60, "blocked_until": NOW + 30}
+    path.write_text(json.dumps({"version": 1, **old, "written_at": NOW}), encoding="utf-8")
+
+    got = gate.reserve(CONTENT)
+
+    assert got.at == pytest.approx(NOW + 30)
+    saved = record(path)
+    assert saved["version"] == 2 and saved["content"] == [pytest.approx(NOW + 30)]
+    assert (saved["next"], saved["sent_next"], saved["blocked_until"]) == (pytest.approx(NOW + 30 + W), NOW + 2, NOW + 30)
+    assert "next_content" not in saved and "sent_next_content" not in saved
 
 
 def test_a_long_block_is_kept_and_waited(gate):
@@ -187,15 +261,16 @@ def test_a_reservation_behind_six_contents_is_kept(gate):
     for _ in range(6):
         gate.reserve(CONTENT)
 
-    assert gate.reserve(CONTENT).wait == pytest.approx(6 * C)
+    assert gate.reserve(CONTENT).wait == pytest.approx(6 * W)
 
 
-def test_hold_spaces_the_following_reservations_by_its_count(gate):
+def test_hold_spaces_the_following_reservations_by_its_count(gate, path):
     with gate.hold(CONTENT, 3):
         pass
 
-    assert gate.reserve(CONTENT).wait == pytest.approx(3 * C)
-    assert gate.reserve(WRITE).wait == pytest.approx(3 * C + W)
+    assert record(path)["content"] == [NOW] * 3
+    assert gate.reserve(CONTENT).wait == pytest.approx(3 * W)
+    assert gate.reserve(WRITE).wait == pytest.approx(4 * W)
 
 
 def test_a_rewound_wall_clock_shifts_the_record_and_keeps_the_remaining_block(gate, path):
@@ -526,8 +601,8 @@ def test_a_late_send_counts_from_when_the_previous_send_finished(gate, path, clo
     assert sent_at == pytest.approx(NOW + 5 + W)
 
 
-@pytest.mark.parametrize(("kind", "space"), [(WRITE, W), (CONTENT, C)])
-def test_a_slow_response_pushes_the_next_send(path, clock, kind, space):
+@pytest.mark.parametrize("kind", [WRITE, CONTENT])
+def test_a_slow_response_pushes_the_next_send(path, clock, kind):
     first = write_gate.WriteGate(path, clock, clock.sleep)
     second = write_gate.WriteGate(path, clock, clock.sleep)
     with first.hold(kind):
@@ -537,7 +612,7 @@ def test_a_slow_response_pushes_the_next_send(path, clock, kind, space):
     with second.hold(kind):
         sent_at = clock.now
 
-    assert sent_at >= finished + space - EPS
+    assert sent_at >= finished + W - EPS
 
 
 def test_without_the_record_lock_the_send_still_waits_the_spacing(gate, path, clock, failing_lock):
@@ -592,9 +667,9 @@ def test_replacing_gives_back_the_old_reservation_first(gate, path):
 
     got = gate.reserve(CONTENT, replacing=old)
 
-    assert got.at == NOW and got.before == (0.0, 0.0)
+    assert got.at == NOW and got.before == 0.0
     assert record(path)["next"] == pytest.approx(NOW + W)
-    assert record(path)["next_content"] == pytest.approx(NOW + C)
+    assert record(path)["content"] == [NOW]
 
 
 def test_replacing_keeps_the_old_reservation_when_another_is_behind_it(gate):
@@ -833,8 +908,7 @@ def test_async_acquire_holds_the_kind_of_the_request(gate, path):
     asyncio.run(write())
 
     assert record(path)["sent_next"] == pytest.approx(NOW + W)
-    assert record(path)["sent_next_content"] == pytest.approx(NOW + C)
-    assert record(path)["next_content"] == pytest.approx(NOW + C)
+    assert record(path)["content"] == [NOW]
 
 
 def test_async_acquire_records_and_releases_when_the_send_fails(gate, path):
@@ -855,9 +929,9 @@ def test_async_acquire_releases_once_on_the_finisher(gate, path, monkeypatch):
     finished = []
     real = gate._finish
 
-    def spy(kind, send):
-        finished.append((kind, send is not None))
-        real(kind, send)
+    def spy(reservation, send):
+        finished.append((reservation.kind, send is not None))
+        real(reservation, send)
 
     monkeypatch.setattr(gate, "_finish", spy)
 
