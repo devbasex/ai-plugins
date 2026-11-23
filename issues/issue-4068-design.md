@@ -4,7 +4,7 @@
 
 ## 今の姿
 
-要求と受け入れ条件は [issue-4068-requirements.md](./issue-4068-requirements.md)（正は課題 #4068 の本文）にある。この設計は #4049 の背景の作業の分け方（[issue-4049-design.md](./issue-4049-design.md)）と #3995 の判断開始の値（[issue-3995-design.md](./issue-3995-design.md)）の上に立ち、両方の実装の後に実装する。
+要求と受け入れ条件は [issue-4068-requirements.md](./issue-4068-requirements.md)（正は課題 #4068 の本文）にある。この設計は #4049 の背景の作業の分け方（[issue-4049-design.md](./issue-4049-design.md)）と #3995 の判断開始の値（[issue-3995-design.md](https://github.com/devbasex/ai-plugins/blob/e37fe7d5056c1f9231210a6912a780e5503c3c9e/issues/issue-3995-design.md)）の上に立ち、両方の実装の後に実装する。
 
 ```mermaid
 flowchart LR
