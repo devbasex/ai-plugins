@@ -160,17 +160,18 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 | 現行方式（`current`。既定） | 文脈 > 運用上限（200,000。`NDF_CONTEXT_LIMIT`） | 工程の切れ目ごとに `ndf-next` を出して切る |
 | 試行方式（`trial`） | 下の帯の表 | `ndf-next` を出さずに次の工程を起動し、hook の判定に任せる |
 
-**選び方と優先順位は CLI 引数 > 環境変数 > 設定 > 既定である。** チームで選ぶなら `.ndf/context.json`、
-個人で試すなら環境変数 `NDF_CONTEXT_POLICY=trial`（または `current`）にする。いま効いている方針と値と、
-値ごとの出所は `ndf relay context resolve` で見る。設定が壊れていれば
-現行方式で判定し、セッションの初めと最初の起動で 1 度だけ知らせる。
+**方針を選ぶ設定は廃止した（#3995）。** `.ndf/context.json` と環境変数 `NDF_CONTEXT_POLICY` は読まれず、
+置いても効かない。値は上限の設定（`contracts/limits.json`）の 2 つだけで、判断開始の値（`context.decide-from`。
+250,000）と運用上限（`context.limit`。500,000）である。変えられるのは運用上限だけで、環境変数
+`NDF_CONTEXT_LIMIT`（正の整数）で替える。判断開始の値がそれを上回れば、判断開始の値も同じ値へ下げる。
+正の整数でない値は無視して既定で動き、`resolve` の出所の `ignored` に変数名だけを出す。
 
-```json
-{"version": 1, "policy": "trial", "trial": {"decide_from": 200000, "limit": 400000}, "margin": 50000}
-```
+**旧い設定からの移り方。**
 
-`NDF_CONTEXT_LIMIT` は適用中の方針の運用上限を上書きする。試行方式で判断開始の値がそれを上回れば、判断開始の値も
-同じ値へ下げる。
+1. `.ndf/context.json` を消す（コミットしていればその削除もコミットする）
+2. 環境変数 `NDF_CONTEXT_POLICY` を外す
+3. 旧い設定で止めたかった値（`trial.limit` など）があれば、その値を `NDF_CONTEXT_LIMIT` に入れる
+4. `ndf relay context resolve` で、効いている 2 つの値と値ごとの出所（`default` か `env`）を確かめる
 
 **試行方式の帯（C は今の文脈）。** 判断開始の値 200,000・運用上限 400,000・容量の余白 50,000 は**比較実験の
 初期値である。品質が落ちる境目はまだ測っていない。** 設定で変えられる。
