@@ -12,13 +12,15 @@ plugins/ndf/
 ├── src/ndf/
 │   ├── domains/hooks/guards/relay_mark.py           Stop のたびに活動を書く
 │   ├── domains/relay/registry.py                    activity.json の読み書き
+│   ├── domains/relay/observe.py                     サブエージェントの会話の記録のパス
 │   ├── domains/relay/hub.py                         ndf relay ls の行に session_id・cwd
 │   ├── progress/lane/liveness.py                    Activity・Probes.activity・idle_conductor
 │   └── progress/plan/
 │       ├── run.py                                   活動を読む実装と、止まりの材料
-│       └── run_decide.py                            lane_stalled のリクエストに background
+│       └── run_decide.py                            lane_stalled のリクエストに moved・background
 └── tests/
     ├── domains/hooks/test_relay_mark.py *
+    ├── domains/relay/test_relay_observe.py
     ├── progress/test_lane_liveness.py
     └── progress/test_plan_run_stall.py *
 ```
@@ -31,12 +33,14 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/contracts/limits.json` | 変更 | 何もしていないとみなすまでの秒を持つ | 無し（データ） | `policies` | 無し |
 | `plugins/ndf/src/ndf/domains/relay/registry.py` | 変更 | ラッパーの保存先の `activity.json` を読み書きする | `ndf.domains.relay.signals` | モジュール `ndf.domains.relay.registry` | `write_activity`（新設）・`read_activity`（新設） |
-| `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop のたびに背景の作業の件数を書く | `ndf.domains.relay.registry`・`signals` | モジュール `ndf.domains.hooks.guards.relay_mark` | `check`（変更） |
+| `plugins/ndf/src/ndf/domains/relay/observe.py` | 変更 | 背景のサブエージェントの会話の記録のパスを組む | `ndf.domains.relay.signals`（今までどおり） | モジュール `ndf.domains.relay.observe` | `subagent_transcript_path`（新設） |
+| `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop のたびに背景の作業の一覧（`id`・`type`）を書く | `ndf.domains.relay.registry`・`signals` | モジュール `ndf.domains.hooks.guards.relay_mark` | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/relay/hub.py` | 変更 | ラッパーの一覧の行に会話の記録を組む材料を載せる | `ndf.domains.relay.registry` | モジュール `ndf.domains.relay.hub` | `listing`（変更） |
 | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | 活動の型と新しい判定を足す | `ndf.contracts.limits` | モジュール `ndf.progress.lane.liveness` | `Activity`（新設）・`idle_after`（新設）・`judge`（変更）・`judge_lanes`（変更）・`Probes`（変更） |
-| `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | 活動を読む実装と、止まりの材料に背景の件数を足す | `ndf.domains.relay.registry`・`observe`・`ndf.identity` | モジュール `ndf.progress.plan.run` | `lane_activity`（新設）・`probes`（変更）・`_judge`（変更） |
-| `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | 止まりの知らせに背景の作業の件数を載せる | 無し（新しい依存なし） | モジュール `ndf.progress.plan.run_decide` | `_stall_report`（変更）・`with_stalls`（変更） |
+| `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | 活動を読む実装（終わったサブエージェントを除いて数える）と、止まりの材料に背景の作業の数を足す | `ndf.domains.relay.registry`・`observe`・`ndf.identity` | モジュール `ndf.progress.plan.run` | `lane_activity`（新設）・`probes`（変更）・`_judge`（変更）。`run.py` の `Judged`（変更） |
+| `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | 止まりの知らせに、ISO 8601 へ直した最後に動いた時刻と背景の作業の数を載せる | 無し（標準ライブラリの `datetime` だけ） | モジュール `ndf.progress.plan.run_decide` | `Stall`（変更）・`_stall_report`（変更）・`with_stalls`（変更） |
 | `plugins/ndf/tests/domains/hooks/test_relay_mark.py` | 新設 | Stop の hook が活動を書く | `ndf.domains.hooks` | モジュール | テスト関数 |
+| `plugins/ndf/tests/domains/relay/test_relay_observe.py` | 変更 | サブエージェントの会話の記録のパスを組む | `ndf.domains.relay.observe` | モジュール | テスト関数 |
 | `plugins/ndf/tests/progress/test_lane_liveness.py` | 変更 | 新しい判定の条件と境目 | `ndf.progress.lane.liveness` | モジュール | テスト関数 |
 | `plugins/ndf/tests/progress/test_plan_run_stall.py` | 新設 | 止まりの知らせの中身 | `ndf.progress.plan` | モジュール | テスト関数 |
 
@@ -48,16 +52,16 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `write_activity` | `plugins/ndf/src/ndf/domains/relay/registry.py` | 新設 | `write_activity(directory: Path, background: int) -> bool` | ラッパーの保存先の `activity.json` に、書いた時刻と背景の作業の件数を置く。書けなければ偽 |
+| `write_activity` | `plugins/ndf/src/ndf/domains/relay/registry.py` | 新設 | `write_activity(directory: Path, tasks: Sequence[Any]) -> bool` | ラッパーの保存先の `activity.json` に、書いた時刻と背景の作業の一覧（要素ごとの `id`・`type`）を置く。書けなければ偽 |
 | `read_activity` | `plugins/ndf/src/ndf/domains/relay/registry.py` | 新設 | `read_activity(directory: Path) -> Optional[dict[str, Any]]` | `activity.json` を読む。無い・壊れていれば `None` |
 
 - `write_activity`
-  - 事前条件: `directory` はラッパーの保存先（`wrapper_dir` が返すディレクトリ）
-  - 事後条件: `activity.json` が設計文書の「データ構造」の形（`at`・`background`）で存在する。最後に書いた中身だけが残る
+  - 事前条件: `directory` はラッパーの保存先（`wrapper_dir` が返すディレクトリ）。`tasks` は Stop の hook の入力の `background_tasks`（`ctx.background_tasks`。リストでなければ空のリストになっている）
+  - 事後条件: `activity.json` が設計文書の「データ構造」の形（`at`・`tasks`）で存在する。`tasks` の要素は入力の要素と同じ数・同じ順で、`{"id": <文字列>, "type": <文字列>}` だけを持つ（`status`・`description` は写さない）。入力の要素が object でない・`id` か `type` が文字列でないときは、その値を空の文字列にして要素の数を保つ（読む側で「走っている」とみなす）。最後に書いた中身だけが残る
   - 副作用: ファイルの書き込み 1 つ（`signals.replace_json`。`write_state` と同じ置き換えの書き方）
 - `read_activity`
   - 事前条件: 無し
-  - 事後条件: 返る辞書は `at`（ISO 8601 の文字列）と `background`（整数）を持つ。どちらかが欠ける・形が違えば `None`
+  - 事後条件: 返る辞書は `at`（ISO 8601 の文字列）と `tasks`（要素が `id`・`type` の文字列を持つ object のリスト）を持つ。どちらかが欠ける・形が違えば `None`
   - 副作用: 無し（読み取りだけ）
 
 ### 異常系の処理
@@ -96,8 +100,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `write_activity` | 書いた後に `activity.json` が `at` と `background` を持つ | 背景の作業が 0 件でも書く | 書けないディレクトリで偽を返し、例外を上げない |
-| `read_activity` | 書いた中身をそのまま読める | `background` が 0 の記録を読める | ファイルが無い・JSON が壊れている・`background` が文字列のとき `None` |
+| `write_activity` | `subagent` と `shell` の 2 件を渡すと、`activity.json` が `at` と、`id`・`type` だけを持つ 2 要素の `tasks` を持つ | 背景の作業が 0 件でも書く（`tasks` が空のリスト）。`id` の無い要素も空の文字列の `id` で 1 要素として書く | 書けないディレクトリで偽を返し、例外を上げない |
+| `read_activity` | 書いた中身をそのまま読める | `tasks` が空のリストの記録を読める | ファイルが無い・JSON が壊れている・`tasks` がリストでない・要素の `id` が文字列でないとき `None` |
 
 ## Stop の hook が活動を書く（`relay-marker` guard）
 
@@ -107,14 +111,14 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | `check(ctx, svc) -> Verdict \| None`（変わらない） | 中継の下なら、まず活動（背景の作業の件数）を書く。次のセグメントのマーカーの判定は今までどおり |
+| `check` | `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | `check(ctx, svc) -> Verdict \| None`（変わらない） | 中継の下なら、まず活動（背景の作業の一覧）を書く。次のセグメントのマーカーの判定は今までどおり |
 
 - `check`
   - 事前条件: Stop の事象で呼ばれる（guard の表の行は変えない）
   - 事後条件: 中継の下（`signals.relay_dir` がディレクトリを返す）なら、戻り値によらず `activity.json` が書かれている
   - 副作用: 今までの副作用（次のセグメントのマーカーの書き込み）に、活動の記録の書き込みが 1 つ増える
 
-書く位置は `signals.relay_dir(ctx.env)` の判定の直後である。`ctx.last_reply` が空のときと次のセグメントのブロックが無いときの早い戻りより前に置き、Stop のたびに書く。背景の作業が残るときの変更要求（`pushback`）の前でもあるので、背景の作業が 1 件以上の記録も残る。
+書く位置は `signals.relay_dir(ctx.env)` の判定の直後である。`ctx.last_reply` が空のときと次のセグメントのブロックが無いときの早い戻りより前に置き、Stop のたびに書く。背景の作業が残るときの変更要求（`pushback`）の前でもあるので、背景の作業が 1 件以上の記録も残る。渡すのは `ctx.background_tasks`（`domains/hooks/context.py:609-611`。リストでなければ空のリスト）である。
 
 中継の下でラッパーの保存先を指すのは環境変数 `NDF_RELAY_DIR` である。`wrapper.py:740` が `signals.launch_env(self.dir, launch)` で渡し、`self.dir` は `registry.wrapper_dir(...)`（`wrapper.py:278`）である。設計文書の「未確認のまま残ること」の 3 番目（guard がラッパーの保存先を知っているか）は、この 2 行で足りる。
 
@@ -130,15 +134,15 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `check` | 中継の下でない | 何も書かずに `None` |
-| `check` | 中継の下・背景の作業が 1 件以上・次のセグメントのブロックがある | 活動（件数）を書き、今までどおり `pushback` |
-| `check` | 中継の下・背景の作業が 0 件・次のセグメントのブロックがある | 活動（0）を書き、今までどおり次のセグメントのマーカーを書いて `passing` |
+| `check` | 中継の下・背景の作業が 1 件以上・次のセグメントのブロックがある | 活動（その一覧）を書き、今までどおり `pushback` |
+| `check` | 中継の下・背景の作業が 0 件・次のセグメントのブロックがある | 活動（空の一覧）を書き、今までどおり次のセグメントのマーカーを書いて `passing` |
 | `check` | 中継の下・次のセグメントのブロックが無い | 活動を書いて `None` |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 背景の作業が 0 件の Stop で `activity.json` の `background` が 0 になる（決定 2） | 背景の作業が 1 件以上の Stop でも書かれ、`background` がその件数になる。次のセグメントのブロックが無い Stop でも書かれる | 書けない保存先でも例外を上げず、今までの判定をそのまま返す |
+| `check` | 背景の作業が 0 件の Stop で `activity.json` の `tasks` が空のリストになる（決定 2） | 背景の作業が `subagent` 1 件・`shell` 1 件の Stop でも書かれ、`tasks` が 2 件の `id`・`type` になる。次のセグメントのブロックが無い Stop・`last_reply` が空の Stop でも書かれる | 書けない保存先でも例外を上げず、今までの判定をそのまま返す |
 
 ## ラッパーの一覧の行（`ndf relay ls`）
 
@@ -175,15 +179,20 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Activity` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 新設 | `@dataclass(frozen=True) class Activity: turn_done: bool; moved: Optional[float]; background: Optional[int]` | 判定が使う活動の材料（設計文書の「データ構造」の 3 つ） |
+| `Activity` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 新設 | `@dataclass(frozen=True) class Activity: turn_done: bool; moved: Optional[float]; background: Optional[int]` | 判定が使う活動の材料（設計文書の「データ構造」の 3 つ）。`background` は終わったサブエージェントを除いた後の数で、`judge` は数え直さない |
 | `Probes` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | `activity: Callable[[str], Optional[Activity]] = lambda _: None` を足す | レーンの名前から活動を読む項目。既定は `None`（活動を読まない呼び手では今までどおりの判定になる） |
-| `lane_activity` | `plugins/ndf/src/ndf/progress/plan/run.py` | 新設 | `lane_activity(row: Optional[Mapping[str, Any]], state_dir: Path) -> Optional[liveness.Activity]` | ラッパーの一覧の行と保存先から、最後の応答が終わったか・その時刻・背景の作業の件数を読む |
+| `subagent_transcript_path` | `plugins/ndf/src/ndf/domains/relay/observe.py`（`transcript_path` の直後） | 新設 | `subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]` | セッションの会話の記録のパスと背景の作業の `id` から、サブエージェントの会話の記録のパス（`<記録から .jsonl を除いたもの>/subagents/agent-<id>.jsonl`）を組む。`id` がファイル名に使えない形なら `None` |
+| `lane_activity` | `plugins/ndf/src/ndf/progress/plan/run.py` | 新設 | `lane_activity(row: Optional[Mapping[str, Any]], state_dir: Path) -> Optional[liveness.Activity]` | ラッパーの一覧の行と保存先から、最後の応答が終わったか・その時刻・まだ走っているとみなす背景の作業の数を読む |
 | `probes` | `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | `probes(repo: str, plan: str) -> liveness.Probes`（変わらない） | `activity` の項目に `lane_activity` を結び付ける。ラッパーの一覧は今までどおり 1 回の読み直しで 1 度だけ読む |
 
+- `subagent_transcript_path`
+  - 事前条件: `transcript` は `transcript_path` が返すセッションの会話の記録のパス
+  - 事後条件: `agent_id` が空でなく英数字・`-`・`_` だけなら `transcript.with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"` を返す。それ以外（空・`/` や `.` を含む）は `None` を返し、記録の保存先の外を指すパスを組まない
+  - 副作用: 無し（ファイルを読まない）
 - `lane_activity`
-  - 事前条件: `row` は `ndf relay ls` の 1 行（`None` なら一覧に無い）。`state_dir` は NDF の状態の保存先（`identity.load().state_dir`）
-  - 事後条件: 返る `Activity` の `turn_done` は会話の記録の最後が終わった応答か、`moved` はその時刻（UNIX 時刻）、`background` は `activity.json` の件数。どれも読めなければ `None` を返す
-  - 副作用: ファイルの読み取り 2 つ（`activity.json` と会話の記録の末尾）。会話の記録は末尾だけを読む（`limits.json` の `hook.transcript-tail` の `count` バイト。決定 1 の代償）
+  - 事前条件: `row` は `ndf relay ls` の 1 行（`None` なら一覧に無い）。`state_dir` は NDF の状態の保存先（`identity.load().state_dir`）。会話の記録の保存先は、耐久ワークフローの環境変数（`os.environ`）から `transcript_path` が組む
+  - 事後条件: 返る `Activity` の `turn_done` は conductor の会話の記録の最後が終わった応答か、`moved` はその時刻（UNIX 時刻）。`background` は `activity.json` の `tasks` のうち、「終わったサブエージェント」を除いた数である。終わったサブエージェントとは、`type` が `subagent` で、`subagent_transcript_path` が返すパスの記録を `observe.turn_done` で読んで `(True, …)` が返るものをいう。`type` が `subagent` でないもの（`shell`・`monitor` など）と、記録を読めないサブエージェント（パスを組めない・ファイルが無い・壊れている・応答の途中）は「走っている」とみなして数える。conductor の会話の記録を読めなければ `None` を返す
+  - 副作用: ファイルの読み取り（`activity.json`・conductor の会話の記録の末尾・`type` が `subagent` の要素ごとにその会話の記録の末尾）。会話の記録はどれも末尾だけを読む（`limits.json` の `hook.transcript-tail` の `count` バイト。決定 1 の代償）
 
 ### 異常系の処理
 
@@ -193,17 +202,29 @@ plugins/ndf/
 | `lane_activity` | `session_id` か `cwd` が無い | 起動の途中・旧いラッパー | 行の値の取り出し | 既定値で続ける（`None`） | 判定は `alive`（決定 1 の「読めないとき」） | 次の読み直しで読める |
 | `lane_activity` | 会話の記録を読めない・壊れている | ファイルが無い・途中で切れている | `observe.turn_done` の返り（`None`） | 既定値で続ける（`None`） | 判定は `alive` | 次の読み直しで読める |
 | `lane_activity` | 活動の記録が無い | hook が呼ばれない実行（中継を使わない conductor） | `registry.read_activity` の返り（`None`） | 既定値で続ける（`Activity.background` を `None` にし、判定は新しい条件に当たらない） | 判定は `alive`（決定 2 の代償） | 後始末は無い |
+| `lane_activity` | サブエージェントの会話の記録を読めない | `id` がファイル名に使えない形・記録のファイルが無い・壊れている・`id` と記録の名前が一致しない（設計文書の「未確認のまま残ること」） | `subagent_transcript_path` の返り（`None`）・`observe.turn_done` の返り（`None`） | 既定値で続ける（その要素を「走っている」として数える） | 判定は `alive`（止まりと知らせる側へ倒さない） | 次の読み直しで読めれば除かれる |
+| `lane_activity` | サブエージェントが応答の途中 | 背景のサブエージェントがまだ動いている | `observe.turn_done` の返り（`(False, None)`） | その要素を「走っている」として数える（正常） | 判定は `alive` | 後始末は無い |
 | `lane_activity` | ラッパーの名前の形が違う | 一覧の行の名前が壊れている（`RegistryError`） | `registry.wrapper_dir` | 既定値で続ける（捕まえて `None`） | 判定は `alive` | 後始末は無い |
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `lane_activity` | 行がある・`session_id` と `cwd` がある・会話の記録を読める | `Activity(turn_done, moved, background)` |
-| `lane_activity` | 行はあるが会話の記録を読めない | `None` |
+| `lane_activity` | 行がある・`session_id` と `cwd` がある・会話の記録を読める・活動の記録がある | `Activity(turn_done, moved, background)`。`background` は次の 3 行で数える |
+| `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録の最後の応答が終わっている | その要素を数えない |
+| `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録を読めない・応答の途中 | その要素を数える |
+| `lane_activity` | `tasks` の要素の `type` が `subagent` でない（`shell` など） | その要素を数える（設計文書の決定 2 の代償） |
+| `lane_activity` | 行はあるが conductor の会話の記録を読めない | `None` |
 | `lane_activity` | 会話の記録は読めるが活動の記録が無い | `Activity(turn_done, moved, None)` |
 
-読むファイルはレーンごとに 2 つで、繰り返しはレーンの数（並列の上限は `relay.max-named` の 6）で終わる。会話の記録は末尾の決まった大きさだけを読むので、記録が伸びても読む量は増えない。
+手順は次の順である。
+
+1. `row` が `None`、または `session_id`・`cwd` が無ければ `None` を返す
+2. `observe.transcript_path(os.environ, Path(cwd), session_id)` を `observe.turn_done` で読む。`None` なら `None` を返す
+3. `registry.wrapper_dir` でラッパーの保存先を求め、`registry.read_activity` で活動の記録を読む。無ければ `Activity(turn_done, moved, None)` を返す
+4. `tasks` の要素ごとに、`type` が `subagent` なら手順 2 のパスと要素の `id` から `subagent_transcript_path` でパスを組み、`observe.turn_done` が `(True, …)` を返す要素だけを除く。残りの数を `background` にする
+
+読むファイルはレーンごとに 2 つと、`type` が `subagent` の要素の数である。繰り返しはレーンの数（並列の上限は `relay.max-named` の 6）と各レーンの `tasks` の要素の数で終わる。会話の記録は末尾の決まった大きさだけを読むので、記録が伸びても読む量は増えない。
 
 ### 既存の部品の再利用
 
@@ -211,6 +232,9 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `lane_activity` | `observe.turn_done`・`observe.transcript_path`（`src/ndf/domains/relay/observe.py:196,55`） | `grep -rn "turn_done\|transcript_path" plugins/ndf/src/ndf/`（`wrapper_stop.py:265`・`wrapper_guard.py:104-105` が同じ組で使っている） | 使う。最後の応答が終わったかとその時刻を返す関数はこれだけで、ラッパーが同じ組み合わせで呼んでいる |
 | `lane_activity` | `observe.tool_pending`（`observe.py:185`） | 同上 | 使えない。Tool の実行の途中かを返すだけで、背景の作業が残っているかとは別（決定 2 の採らなかった案） |
+| `subagent_transcript_path` | `context_report._subagents_dir`（`src/ndf/domains/relay/context_report.py:158-160`。会話の記録から `subagents` の保存先を組む） | `grep -rn "subagents" plugins/ndf/src/ndf/` | 使えない（名前が `_` で始まる `context_report.py` の中だけの関数で、`run.py` から読むと、生死の判定の材料が文脈の量の報告のモジュール（`records.usage` などを読む）に依存する）。同じ組み方（`.jsonl` を除いて `subagents` を足す）にそろえ、`observe` に置く。`context_report` をこの関数へ寄せるかは、この課題の範囲の外である |
+| `subagent_transcript_path` | `observe.transcript_path`（`observe.py:55-57`） | 同上 | 使う（引数の `transcript` はこの関数の返り）。サブエージェントの記録はセッションの記録の隣にあるので、`environ`・`cwd` から組み直さない |
+| `lane_activity` | `observe.turn_done` をサブエージェントの会話の記録に使う | 手元の `~/.claude/projects/<鍵>/<session_id>/subagents/agent-<id>.jsonl` の形を見た（2026-11-23） | 使う。`turn_done` は `user`・`assistant` の記録だけを読むので、サブエージェントの記録にもそのまま当たる |
 | `lane_activity` | `registry.read_activity`（この設計で新設）・`registry.wrapper_dir`（`registry.py:43`） | `grep -n "def wrapper_dir" -A 4 plugins/ndf/src/ndf/domains/relay/registry.py` | 使う |
 | `lane_activity` | `launch.wrappers`（`src/ndf/progress/lane/launch.py:352`） | `grep -n "def wrappers" -A 6 plugins/ndf/src/ndf/progress/lane/launch.py` | 使う（`probes` が渡す一覧を使い回す）。1 回の読み直しで `ndf relay ls` を 2 度打たない |
 | `Activity` | `liveness.Liveness`・`lane.LaneRow` | `grep -n "@dataclass" -A 3 plugins/ndf/src/ndf/progress/lane/liveness.py` | 使えない（持つ値が違う）。凍結した `dataclass` にする形だけそろえる |
@@ -219,7 +243,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻・`background` が件数 | 背景の作業が 0 件の記録で `background` が 0 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す |
+| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻。`tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば `background` が 0（lracct の事象の形。決定 2） | `tasks` が空で `background` が 0。`shell` 1 件で 1。`subagent` 1 件でその記録が応答の途中なら 1 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す。`subagent` の記録が無い・`id` が `../x` のときは、例外を上げずにその要素を数えて `background` が 1 |
+| `subagent_transcript_path` | `<d>/<sid>.jsonl` と `a1b2` から `<d>/<sid>/subagents/agent-a1b2.jsonl` | 英数字・`-`・`_` だけの `id` | 空の `id`・`/` か `.` を含む `id` で `None` |
 
 ## 何もしていない conductor の判定（`idle_conductor`）
 
@@ -232,7 +257,7 @@ plugins/ndf/
 | `idle_after` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 新設 | `idle_after() -> float` | 何もしていないとみなすまでの秒（`contracts/limits.json` の `parallel-run.idle`） |
 | `judge` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | `judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, Any]], listed: bool, activity: Optional[Activity] = None, now: Optional[float] = None) -> Liveness` | 順 5 と順 6 の間に新しい条件を置き、当たれば `idle_conductor` を返す |
 | `judge_lanes` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | `judge_lanes(lanes: Mapping[str, list[LaneRow]], probes: Probes, now: Optional[float] = None) -> dict[str, Liveness]` | 判定に要るレーンだけ `probes.activity` を呼び、`judge` へ渡す |
-| `Liveness` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | `moved_at: Optional[float] = None`・`background: Optional[int] = None` を足す | 判定が見た最後の応答の時刻と背景の作業の件数を、知らせを組む側へ渡す |
+| `Liveness` | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 変更 | `moved_at: Optional[float] = None`・`background: Optional[int] = None` を足す | 判定が見た最後の応答の時刻とまだ走っているとみなす背景の作業の数を、知らせを組む側へ渡す |
 
 - `idle_after`
   - 事前条件: 無し
@@ -255,8 +280,8 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `judge` | 順 1〜順 5 のどれかに当たる | 今までどおり（`idle`・`resuming`・`waiting_answer`・`unknown`・`stalled`） |
-| `judge` | ラッパーが動いている・活動が読める・`turn_done` が真・`background` が 0・`now - moved >= idle_after()` | `idle_conductor`（止まり） |
-| `judge` | ラッパーが動いている・`background` が 1 以上 | `alive`（受け入れ条件 2） |
+| `judge` | ラッパーが動いている・活動が読める・`turn_done` が真・`background` が 0・`now - moved >= idle_after()` | `idle_conductor`（止まり）。`background` が 0 には、`tasks` が空の場合と、`tasks` がすべて終わったサブエージェントの場合の両方が入る |
+| `judge` | ラッパーが動いている・`background` が 1 以上 | `alive`（受け入れ条件 2）。`shell` など、終わったかを確かめられない背景の作業が残る行もここに入る |
 | `judge` | ラッパーが動いている・`turn_done` が偽（応答の途中） | `alive` |
 | `judge` | ラッパーが動いている・`now - moved < idle_after()` | `alive` |
 | `judge` | ラッパーが動いていない | 今までどおり（`working`・`ended`） |
@@ -287,6 +312,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `judge` | 応答が終わり・背景 0 件・閾値を過ぎた行で `idle_conductor` になり、`stall` が真（受け入れ条件 1） | 閾値ちょうど（`now - moved == idle_after()`）で止まり、1 秒手前では `alive`。時刻はテストが渡す（時間で区切った試験を行わない） | 活動が `None`・`turn_done` が偽・`background` が 1 以上・`background` が `None` の 4 通りで `alive`（受け入れ条件 2・決定 1） |
 | `judge` | スプリントの待ちが `gate` の行と、回答の後の `next` 待ちの行は、閾値を過ぎても止まりにならない（受け入れ条件 3） | ラッパーが `stalled` の行は今までどおり `stalled`（決定 4） | — |
+| `judge`（`lane_activity` と組む） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっている行は、閾値を過ぎれば `idle_conductor`（決定 2。lracct の事象の形）。会話の記録は一時ディレクトリに置き、`now` はテストが渡す | `tasks` が `shell` 1 件の行は、閾値を過ぎても `alive`（決定 2 の代償） | `subagent` 1 件でその会話の記録が無い行は `alive`（読めないサブエージェントを走っているとみなす） |
 | `idle_after` | `limits.json` の値を返す | 設定を変えると判定の境目が変わる（受け入れ条件 5） | — |
 
 ## 止まりの知らせの中身（`lane_stalled`）
@@ -297,16 +323,18 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_judge` | `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | `_judge(rows, state, found, moved, spent=()) -> Judged`（変わらない） | 止まりの材料に背景の作業の件数を足し、`idle_conductor` では最後に動いた時刻を conductor の最後の応答の時刻にする |
-| `_stall_report` | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | `_stall_report(state: RunState, lane: str, key: str, reason: str, moved: Optional[str], row: str, background: Optional[int]) -> Report` | リクエストの中身に `background` を足す |
+| `_judge` | `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | `_judge(rows, state, found, moved, spent=()) -> Judged`（変わらない） | 止まりの材料に背景の作業の数を足し、`idle_conductor` では最後に動いた時刻を conductor の最後の応答の時刻（UNIX 時刻のまま）にする |
+| `Judged` | `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | `stalls: list[tuple[str, str, str, str \| float \| None, str, int \| None]]` | 止まりの組の型を 6 つに広げる |
+| `Stall` | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | `moved: Optional[str \| float]` に広げ、`background: Optional[int] = None` を足す | スナップショットの止まり 1 つ。既定の `None` は、変更の前に書かれた 5 つの組のスナップショットを読み直しの途中で包むためである |
+| `_stall_report` | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | `_stall_report(state: RunState, lane: str, key: str, reason: str, moved: Optional[str \| float], row: str, background: Optional[int] = None) -> Report` | `moved` が数（UNIX 時刻）なら ISO 8601 の文字列へ直し、リクエストの中身に `background` を足す |
 | `with_stalls` | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | 変更 | シグネチャは変わらない（`stalls: Sequence[Sequence[Any]]`） | 受ける止まりの組が 6 つになることを説明の文に書く |
 
 - `_judge`
   - 事前条件: 変わらない
-  - 事後条件: `Judged.stalls` の各要素が（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の件数）の 6 つになる。`idle_conductor` の行では、最後に動いた時刻が `Liveness.moved_at` を ISO 8601 にしたもの、件数が 0 になる。ほかの判定では今までどおりステートマシンの事象の時刻（`last_moved`）と `None`
+  - 事後条件: `Judged.stalls` の各要素が（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）の 6 つになる。`idle_conductor` の行では、最後に動いた時刻が `Liveness.moved_at`（UNIX 時刻の数のまま。スナップショットは JSON なので数として残る）、背景の作業の数が 0 になる。ほかの判定では今までどおりステートマシンの事象の時刻（`last_moved` の ISO 8601 の文字列）と `None`
   - 副作用: 無し
 - `_stall_report`
-  - 事後条件: `Report.facts` に `("background", <件数か None>)` が増える。`write_report`（`src/ndf/progress/plan/run.py:283-295`）が `facts` をそのままリクエストの中身へ入れるので、`lane_stalled` のリクエストに `background` が載る
+  - 事後条件: `moved` が数なら `datetime.fromtimestamp(moved, timezone.utc).isoformat()` で ISO 8601 の文字列へ直す（`last_moved` が返す事象の時刻と同じ UTC の形）。文字列と `None` はそのまま使う。本文の「最後に動いた時刻」と `Report.facts` の `("moved", …)` はどちらも直した後の文字列で、`("background", <数か None>)` が増える。`write_report`（`src/ndf/progress/plan/run.py:283-295`）が `facts` をそのままリクエストの中身へ入れるので、`lane_stalled` のリクエストに `background` が載る
   - 副作用: 無し
 
 ### 異常系の処理
@@ -314,27 +342,27 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_judge` | 最後に動いた時刻が無い | 活動も事象も読めない | 組を作るところ | 既定値で続ける（`None`。本文は今までどおり「最後に動いた時刻 不明」） | リクエストの `moved` が `null` | 後始末は無い |
-| `_stall_report` | 背景の作業の件数が無い | `idle_conductor` 以外の止まり（活動を見ずに決まる判定） | 組の 6 つ目 | 既定値で続ける（`None` をそのまま載せる） | リクエストの `background` が `null` | 後始末は無い |
+| `_stall_report` | 背景の作業の数が無い | `idle_conductor` 以外の止まり（活動を見ずに決まる判定） | 組の 6 つ目 | 既定値で続ける（`None` をそのまま載せる） | リクエストの `background` が `null` | 後始末は無い |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `_stall_report` | `lane_stalled` のリクエストの中身に `moved`（最後に動いた時刻）・`launches`・`last_launch` と `background`（背景の作業の件数） | 計画のステートマシンのリクエスト（`write_report`） | 会話の記録の中身。活動の記録のパス |
+| `_stall_report` | `lane_stalled` のリクエストの中身に `moved`（最後に動いた時刻。ISO 8601 の文字列）・`launches`・`last_launch` と `background`（まだ走っているとみなす背景の作業の数） | 計画のステートマシンのリクエスト（`write_report`） | 会話の記録の中身。活動の記録のパス |
 | `judge` | 判定の理由の文（`Liveness.reason`）と、`ndf lanes status` の行の `liveness`（`as_dict` に `moved_at`・`background` が増える） | 結果 JSON の `items` と `warnings` | 同上 |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| （新設する関数は無し。変える 3 つの関数だけ） | `Report.facts`（`src/ndf/progress/plan/run_decide.py:129-137`） | `grep -n "class Report" -A 10 plugins/ndf/src/ndf/progress/plan/run_decide.py` | 使う。リクエストの中身へ項目を足す仕組みが既にあり、`write_report` が `facts` をそのまま入れる |
+| （新設する関数は無し。変える関数と型だけ） | `Report.facts`（`src/ndf/progress/plan/run_decide.py:129-137`） | `grep -n "class Report" -A 10 plugins/ndf/src/ndf/progress/plan/run_decide.py` | 使う。リクエストの中身へ項目を足す仕組みが既にあり、`write_report` が `facts` をそのまま入れる |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_judge` | `idle_conductor` の行の組に、conductor の最後の応答の時刻と `0` が入る | ほかの止まり（`stalled`・`ended`）の行では今までどおりの時刻と `None` | 時刻が読めない行で `None` |
-| `_stall_report` | `lane_stalled` のリクエストに `moved` と `background` が載る（受け入れ条件 4） | `background` が `None` の止まりでも書ける | — |
+| `_judge` | `idle_conductor` の行の組に、conductor の最後の応答の時刻（UNIX 時刻）と `0` が入る | ほかの止まり（`stalled`・`ended`）の行では今までどおりの ISO 8601 の時刻と `None` | 時刻が読めない行で `None` |
+| `_stall_report` | `moved` に UNIX 時刻 `0.0` を渡すと、`lane_stalled` のリクエストの `moved` が `"1970-01-01T00:00:00+00:00"`・`background` が `0` になる（受け入れ条件 4） | `moved` が ISO 8601 の文字列ならそのまま載る。`background` が `None` の止まりでも書ける | 5 つの組のスナップショットを `Stall` で包んでも例外を上げず、`background` が `None` |
 
 ## 判定の値が増えることの当たり先
 
