@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from ndf.domains.relay import signals
@@ -19,6 +21,24 @@ def test_write_activity_keeps_only_id_and_type(tmp_path):
     got = signals.read_activity(tmp_path)
     assert got["session_id"] == "s1" and isinstance(got["at"], str)
     assert got["tasks"] == [{"id": SUBAGENT["id"], "type": "subagent"}, {"id": SHELL["id"], "type": "shell"}]
+
+
+def test_write_activity_keeps_the_reply_it_ended(tmp_path):
+    assert signals.write_activity(tmp_path, [], "s1", "r1")
+    assert signals.read_activity(tmp_path)["reply"] == "r1"
+
+
+def test_stop_writes_the_uuid_of_the_reply_it_ended(tmp_path, relay):
+    transcript = tmp_path / "t.jsonl"
+    row = {
+        "type": "assistant",
+        "uuid": "r1",
+        "timestamp": "2026-11-23T00:00:00.500Z",
+        "message": {"stop_reason": "end_turn", "content": []},
+    }
+    transcript.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    call_entry("claude", "Stop", stop(tmp_path, "終えた", background_tasks=[], transcript_path=str(transcript)))
+    assert signals.read_activity(relay)["reply"] == "r1"
 
 
 def test_write_activity_keeps_the_count_of_broken_elements(tmp_path):
@@ -56,6 +76,7 @@ def test_write_activity_returns_false_when_it_cannot_write(tmp_path):
         '{"at": "t", "session_id": "s1", "tasks": "x"}',
         '{"at": "t", "session_id": "s1", "tasks": [{"id": 1, "type": "shell"}]}',
         '{"at": "t", "session_id": 1, "tasks": []}',
+        '{"at": "t", "session_id": "s1", "reply": 1, "tasks": []}',
         "[]",
     ],
 )

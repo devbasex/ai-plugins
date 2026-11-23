@@ -684,8 +684,8 @@ def test_4036_a_running_row_carries_the_conductor_activity(ctx, tmp_path, monkey
     ended = {"type": "assistant", "timestamp": "2026-11-23T00:00:00Z", "message": {"stop_reason": "end_turn", "content": []}}
     transcript.write_text(json.dumps(ended) + "\n", encoding="utf-8")
     sizes = []
-    real = observe.turn_done
-    monkeypatch.setattr(observe, "turn_done", lambda path, size: sizes.append(size) or real(path, size))
+    real = observe._turn
+    monkeypatch.setattr(observe, "_turn", lambda path, size: sizes.append(size) or real(path, size))
     plain = hub.listing(ctx)[0]
     assert (plain["turn_done"], plain["moved"], plain["background"]) == (None, None, None) and sizes == []
     row = hub.listing(ctx, activity=True)[0]

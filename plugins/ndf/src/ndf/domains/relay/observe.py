@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 from dataclasses import dataclass
@@ -299,16 +298,33 @@ def tool_pending(path: Path, size: int) -> Optional[bool]:
 
 def turn_done(path: Path, size: int) -> Optional[tuple[bool, Optional[float]]]:
     """最後の会話の記録が終わった応答なら `(True, その時刻)`、途中なら `(False, None)`。読めない・壊れた・形が違えば None。"""
+    got = _turn(path, size)
+    return None if got is None else (got[0], got[1])
+
+
+def reply_id(path: Path, size: int) -> Optional[str]:
+    """最後の `assistant` の会話の記録の `uuid`（Stop の hook が `activity.json` に書き、読む側が今の応答かを照らす値）。
+
+    読めない・壊れた・`assistant` が無い・`uuid` が文字列でなければ None。
+    """
+    got = _turn(path, size)
+    return None if got is None else got[2]
+
+
+def _turn(path: Path, size: int) -> Optional[tuple[bool, Optional[float], Optional[str]]]:
+    """`turn_done` の 2 つと、最後の `assistant` の記録の `uuid`。読めない・壊れた・形が違えば None。"""
     try:
         rows = _talk(path, size)
     except _Unsure:  # noqa: NDF401 ファイル: 確定できない記録は止めてよい時点にしない（None）
         return None
     if not rows:
         return None
+    reply = next((r.get("uuid") for r in reversed(rows) if r["type"] == "assistant"), None)
+    reply = reply if isinstance(reply, str) else None
     last = rows[-1]
     if last["type"] != "assistant" or last["message"].get("stop_reason") not in ENDED or _pending(rows):
-        return (False, None)
-    return (True, _time(last.get("timestamp")))
+        return (False, None, reply)
+    return (True, _time(last.get("timestamp")), reply)
 
 
 def _time(value: Any) -> Optional[float]:
@@ -361,14 +377,14 @@ def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> d
     session, transcript, outputs = row.get("session_id"), row.get("transcript"), row.get("shell_outputs")
     if not isinstance(session, str) or not isinstance(transcript, str) or not isinstance(outputs, str):
         return dict(NO_ACTIVITY)
-    got = turn_done(Path(transcript), look.size)
+    got = _turn(Path(transcript), look.size)
     if got is None:
         return dict(NO_ACTIVITY)
-    done, at = got
+    done, at, reply = got
     if not done or at is None:
         return {"turn_done": done, "moved": at, "background": None}
     record = signals.read_activity(directory)
-    tasks = _tasks_of(record, session, at)
+    tasks = _tasks_of(record, session, reply)
     if record is None or tasks is None:
         return {"turn_done": True, "moved": at, "background": None}
     turn = _Turn(Path(transcript), Path(outputs), session, record["at"], at)
@@ -378,15 +394,15 @@ def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> d
     return {"turn_done": True, "moved": moved, "background": None if shells is None else running + shells[0]}
 
 
-def _tasks_of(record: Optional[Mapping[str, Any]], session: str, at: float) -> Optional[list[dict[str, str]]]:
+def _tasks_of(record: Optional[Mapping[str, Any]], session: str, reply: Optional[str]) -> Optional[list[dict[str, str]]]:
     """今の応答の Stop が書いた背景の作業の一覧。別のセッション・前の Stop の記録・観測できなかった一覧なら None。
 
-    `at` は秒で切り捨てて書かれる（`signals.now_iso`）ので、最後の応答の時刻も秒に切り捨ててから比べる。
+    今の応答かは、記録の `reply` と会話の記録の最後の `assistant` の `uuid`（`reply`）が同じかで確かめる。時刻で比べると、
+    同じ秒に入った前の Stop の記録も通る。どちらかが無ければ確かめられないので使わない。
     """
     if record is None or record.get("session_id") != session or record.get("tasks") is None:
         return None
-    written = _time(record["at"])
-    return record["tasks"] if written is not None and written >= math.floor(at) else None
+    return record["tasks"] if reply is not None and record.get("reply") == reply else None
 
 
 def _others(turn: _Turn, tasks: list[dict[str, str]], size: int) -> tuple[int, list[float]]:

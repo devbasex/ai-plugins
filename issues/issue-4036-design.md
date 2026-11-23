@@ -108,6 +108,7 @@ flowchart TB
 | --- | --- | --- |
 | `at` | string | 書いた時刻（ISO 8601）。conductor が応答を終えた時刻に当たる |
 | `session_id` | string / null | 書いた Stop の hook の入力の `session_id`。読む側はラッパーの一覧の行の `session_id` と同じときだけこの記録を使う |
+| `reply` | string / null | 書いた Stop が終えた応答。会話の記録の末尾から選んだ最後の `assistant` の記録の `uuid`（hook の `ctx.last_reply_id`）。読む側は conductor の会話の記録から同じ規則で選んだ `uuid`（`observe.reply_id`）と同じときだけこの記録を使う。会話の記録を読めなければ `null` |
 | `tasks` | array / null | その時点の背景の作業。要素は `{"id", "type"}`（hook の入力の `background_tasks` から写す）。入力に `background_tasks` が無い・リストでないときは `null`（背景の作業を観測できなかった印）で、空のリストと区別する |
 
 `contracts/limits.json` に足す方針:
@@ -126,7 +127,7 @@ flowchart TB
 | `moved` | float / None | 最後に動いた時刻（UNIX 時刻）。conductor の最後の応答の時刻と、終わったとみなして除いた背景の作業（サブエージェントの会話の記録の最後の応答・終わったシェルの出力のファイルの更新時刻）の時刻のうち、最も遅いもの。読めなければ `None` |
 | `background` | integer / None | まだ走っているとみなす背景の作業の数。サブエージェントは `activity.json` の `tasks` のうち会話の記録の最後の応答が終わっていないもの、シェルは conductor のプロセスの下で今も生きている Bash の Tool のシェルの数。`activity.json` が無い・`tasks` が `null`・記録が今の応答のものと確かめられないときは `None` |
 
-読めない（会話の記録が無い・`session_id` が取れない・`activity.json` が無い）ときは `None` を返し、判定は今までどおり `alive` にする。`activity.json` が別のセッションのもの、または書いた時刻（`at`）が conductor の最後の応答の時刻より前（今の応答の Stop で書けなかった）のときは、背景の作業の数を `None`（不明）にする。
+読めない（会話の記録が無い・`session_id` が取れない・`activity.json` が無い）ときは `None` を返し、判定は今までどおり `alive` にする。`activity.json` が別のセッションのもの、または `reply` が conductor の会話の記録の最後の `assistant` の記録の `uuid` と違う・どちらかが無い（今の応答の Stop で書けなかった）ときは、背景の作業の数を `None`（不明）にする。今の応答との対応は時刻で確かめない。`at` は秒で書かれるので、前の Stop と今の応答が同じ秒に入ると時刻では区別できず、前の Stop の空の一覧を今の応答のものとして使ってしまう。
 
 ## 入出力のコントラクト
 
@@ -151,7 +152,7 @@ sequenceDiagram
     participant D as 耐久ワークフロー
     participant J as liveness.judge
     C->>H: 応答を終える
-    H->>A: at と tasks を書く
+    H->>A: at・reply（最後の応答の uuid）・tasks を書く
     loop 読み直しの間隔
         D->>D: ndf relay ls（session_id・cwd つき）
         D->>A: activity.json を読む

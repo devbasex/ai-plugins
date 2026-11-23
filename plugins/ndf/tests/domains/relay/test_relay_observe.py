@@ -18,8 +18,9 @@ SIZE = 4096
 AT = "2026-11-22T01:02:03.000Z"
 
 
-def _assistant(stop, *blocks, at=AT):
-    return {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": stop, "content": list(blocks)}}
+def _assistant(stop, *blocks, at=AT, uuid=None):
+    row = {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": stop, "content": list(blocks)}}
+    return row if uuid is None else {**row, "uuid": uuid}
 
 
 def _tool_use(tid):
@@ -357,6 +358,7 @@ T0 = "2026-11-23T00:00:00.500Z"  # conductor の最後の応答（ミリ秒を�
 T0_S = observe.datetime.fromisoformat("2026-11-23T00:00:00.500+00:00").timestamp()
 LATER = "2026-11-23T00:01:00.000Z"
 NOW = T0_S + 3600
+REPLY = "r0"  # conductor の最後の応答の `uuid`
 
 
 class _Lane:
@@ -367,14 +369,15 @@ class _Lane:
         self.environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "CLAUDE_CODE_TMPDIR": str(tmp_path / "t")}
         self.transcript = observe.transcript_path(self.environ, CWD, SID)
         self.transcript.parent.mkdir(parents=True)
-        self.transcript.write_text(json.dumps(_assistant("end_turn", TEXT, at=T0)) + "\n", encoding="utf-8")
+        self.transcript.write_text(json.dumps(_assistant("end_turn", TEXT, at=T0, uuid=REPLY)) + "\n", encoding="utf-8")
         self.wrapper = tmp_path / "wrap"
         self.wrapper.mkdir()
         self.proc = tmp_path / "proc"
         self.proc.mkdir()
 
-    def activity(self, tasks, at="2026-11-23T00:00:00+00:00", session=SID):
-        (self.wrapper / "activity.json").write_text(json.dumps({"at": at, "session_id": session, "tasks": tasks}), encoding="utf-8")
+    def activity(self, tasks, at="2026-11-23T00:00:00+00:00", session=SID, reply=REPLY):
+        record = {"at": at, "session_id": session, "reply": reply, "tasks": tasks}
+        (self.wrapper / "activity.json").write_text(json.dumps(record), encoding="utf-8")
 
     def subagent(self, aid, *rows):
         path = observe.subagent_transcript_path(self.transcript, aid)
@@ -521,11 +524,11 @@ def test_4036_an_unreadable_proc_leaves_the_count_unknown_but_keeps_finished_sub
     [
         lambda lane: None,
         lambda lane: lane.activity([], session="other"),
-        lambda lane: lane.activity([], at="2026-11-22T23:59:59+00:00"),
+        lambda lane: lane.activity([], reply="r-prev"),
+        lambda lane: lane.activity([], reply=None),
         lambda lane: lane.activity(None),
-        lambda lane: lane.activity([], at="壊れた時刻"),
     ],
-    ids=["none", "other-session", "before-the-turn", "tasks-null", "broken-at"],
+    ids=["none", "other-session", "previous-reply", "no-reply", "tasks-null"],
 )
 def test_4036_an_activity_record_not_for_this_turn_leaves_the_count_unknown(tmp_path, write):
     """前の Stop の空の一覧・別のセッション・観測できなかった一覧は使わない。"""
@@ -535,12 +538,21 @@ def test_4036_an_activity_record_not_for_this_turn_leaves_the_count_unknown(tmp_
     assert lane.read() == _act(True, T0_S, None)
 
 
-def test_4036_an_activity_written_in_the_same_second_as_the_turn_is_used(tmp_path):
-    """`at` は秒で切り捨てて書かれ、最後の応答はミリ秒を持つ。同じ秒の記録は今の応答のものとして使う。"""
+def test_4036_a_previous_stop_in_the_same_second_is_not_used(tmp_path):
+    """前の Stop の記録が今の応答と同じ秒に書かれていても、応答の `uuid` が違えば使わない（時刻で照らさない）。"""
     lane = _Lane(tmp_path)
     lane.shells(0)
+    lane.activity([], at="2026-11-23T00:00:00+00:00", reply="r-prev")
+    assert lane.read()["background"] is None
     lane.activity([], at="2026-11-23T00:00:00+00:00")
     assert lane.read()["background"] == 0
+
+
+def test_4036_reply_id_is_the_uuid_of_the_last_assistant(tmp_path):
+    path = _write(tmp_path, [_assistant("tool_use", _tool_use("t1"), uuid="a1"), _tool_result("t1")])
+    assert observe.reply_id(path, SIZE) == "a1"
+    assert observe.reply_id(_write(tmp_path, [_assistant("end_turn", TEXT)]), SIZE) is None
+    assert observe.reply_id(tmp_path / "none.jsonl", SIZE) is None
 
 
 @pytest.mark.parametrize(

@@ -107,8 +107,9 @@ def test_lanes_status_shows_an_idle_conductor_through_the_run_probes(opened, mon
 # --- 実ファイルから読んだ活動で判定する（`observe.conductor_activity` → 一覧の行 → `lane_activity` → `judge`） -------
 
 
-def _said(at):
-    return {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": "end_turn", "content": []}}
+def _said(at, uuid=None):
+    row = {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": "end_turn", "content": []}}
+    return row if uuid is None else {**row, "uuid": uuid}
 
 
 def _jsonl(path, *rows):
@@ -123,12 +124,12 @@ def _stamp(text):
 CONDUCTOR_AT = "2026-11-23T00:00:00+00:00"
 
 
-def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_after=0.0, activity_at=CONDUCTOR_AT):
+def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_after=0.0, reply="r0"):
     """会話の記録・活動の記録・/proc を一時ディレクトリに組み、conductor の最後の応答から `now_after` 秒後に判定する。"""
     environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "CLAUDE_CODE_TMPDIR": str(tmp_path / "t")}
     cwd = Path("/w")
     transcript = observe.transcript_path(environ, cwd, "sid")
-    _jsonl(transcript, _said(CONDUCTOR_AT))
+    _jsonl(transcript, _said(CONDUCTOR_AT, "r0"))
     if subagent_at is not None:
         _jsonl(observe.subagent_transcript_path(transcript, "a1"), _said(subagent_at))
     if output_at is not None:
@@ -138,7 +139,9 @@ def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_af
         os.utime(out, (_stamp(output_at),) * 2)
     wrapper = tmp_path / "wrap"
     wrapper.mkdir()
-    (wrapper / "activity.json").write_text(json.dumps({"at": activity_at, "session_id": "sid", "tasks": tasks}), encoding="utf-8")
+    (wrapper / "activity.json").write_text(
+        json.dumps({"at": CONDUCTOR_AT, "session_id": "sid", "reply": reply, "tasks": tasks}), encoding="utf-8"
+    )
     proc = tmp_path / "proc"
     for pid, ppid, args in [(10, 1, ["ndf"]), (11, 10, ["claude"]), *((20 + n, 11, SHELL) for n in range(live))]:
         (proc / str(pid)).mkdir(parents=True)
@@ -182,7 +185,7 @@ def test_a_long_subagent_that_just_finished_is_not_a_stall(tmp_path):
     [
         {"tasks": SHELL_TASK, "live": 1},  # 生きているシェルが残る（受け入れ条件 2）
         {"tasks": SUBAGENT},  # 会話の記録を読めないサブエージェントは走っているとみなす
-        {"tasks": [], "activity_at": "2026-11-22T23:59:00+00:00"},  # 前の Stop の空の一覧だけ
+        {"tasks": [], "reply": "r-prev"},  # 前の Stop の空の一覧だけ（同じ秒に書かれていても応答が違う）
     ],
     ids=["live-shell", "unread-subagent", "previous-stop"],
 )

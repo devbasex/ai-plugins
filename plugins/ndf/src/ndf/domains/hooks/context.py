@@ -592,6 +592,12 @@ class HookContext:
         return text if isinstance(text, str) else _last_assistant_text(self.transcript_tail)
 
     @cached_property
+    def last_reply_id(self) -> Optional[str]:
+        """会話の記録の最後の `assistant` の記録の `uuid`。中継の活動の記録（`activity.json` の `reply`）に書き、読む側
+        （`observe.reply_id`。同じく最後の `assistant` の記録を選ぶ）が今の応答の記録かを照らす。読めなければ None。"""
+        return _last_assistant_uuid(self.transcript_tail)
+
+    @cached_property
     def reply_code_lines(self) -> list[bool]:
         from ndf.adapters import markdown
 
@@ -622,6 +628,15 @@ def _last_assistant_text(tail: str) -> str:
         if text is not None:
             return text
     return ""
+
+
+def _last_assistant_uuid(tail: str) -> Optional[str]:
+    for line in reversed(tail.splitlines()):
+        rec = tables.json_object(line) if '"assistant"' in line else None
+        if rec and rec.get("type") == "assistant":
+            uuid = rec.get("uuid")
+            return uuid if isinstance(uuid, str) else None
+    return None
 
 
 def _record_text(rec: dict[str, Any]) -> Optional[str]:
