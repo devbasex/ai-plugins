@@ -13,6 +13,7 @@ from githubkit import GitHub as Client
 
 from ndf import cli
 from ndf.adapters import github
+from ndf.contracts.internal import InternalError
 from ndf.domains.records import jsonl, usage
 from ndf.domains.records import usage_decide as ud
 
@@ -99,21 +100,43 @@ def _transcript(path: Path, lines: list[dict]) -> Path:
 def test_subagent_and_cli_rows_share_one_usage_log_and_second_stop_writes_the_delta(tmp_path: Path) -> None:
     env = {"NDF_USAGE_DIR": str(tmp_path / "usage")}
     tr = _transcript(tmp_path / "t.jsonl", [_line("m1", "2026-11-14T01:00:00Z", 4)])
-    first = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
+    first = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env, warnings=[])
     assert first is not None and first["usage"]["output_tokens"] == 4
     _transcript(tr, [_line("m1", "2026-11-14T01:00:00Z", 4), _line("m2", "2026-11-14T01:05:00Z", 6)])
-    second = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
+    second = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env, warnings=[])
     assert second is not None and second["usage"]["output_tokens"] == 6 and second["usage"]["input_tokens"] == 1
-    assert usage.record_cli({"output_tokens": 2}, {"run": "x"}, env) is not None
-    rows, broken = jsonl.read_rows(usage.usage_log_path(env))
-    assert [r["caller"] for r in rows] == [usage.SUBAGENT, usage.SUBAGENT, usage.CLAUDE_CLI] and broken == 0
+    assert usage.record_cli({"output_tokens": 2}, {"run_id": "x"}, env) is not None
+    rows, broken = jsonl.read_rows(usage.usage_log_path(env), kind="usage")
+    assert [r["caller"] for r in rows] == [usage.SUBAGENT, usage.SUBAGENT, usage.CLAUDE_CLI] and broken == []
 
 
 def test_unreadable_transcript_writes_unknown_without_raising(tmp_path: Path) -> None:
     env = {"NDF_USAGE_DIR": str(tmp_path)}
-    row = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tmp_path / "missing.jsonl")}, env)
+    row = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tmp_path / "missing.jsonl")}, env, warnings=[])
     assert row is not None and row["usage"] == ud.UNKNOWN
-    assert usage.record_subagent({}, env) is None
+    assert usage.record_subagent({}, env, warnings=[]) is None
+
+
+def test_a_row_that_does_not_fit_is_reported_and_a_newer_version_stops_the_write(tmp_path: Path) -> None:
+    env = {"NDF_USAGE_DIR": str(tmp_path)}
+    path = usage.usage_log_path(env)
+    path.write_text('{"at": "2026-11-14T01:00:00Z"}\n', encoding="utf-8")
+    payload = {"agent_id": "a", "agent_transcript_path": str(tmp_path / "missing.jsonl")}
+    warnings: list[dict] = []
+    assert usage.record_subagent(payload, env, warnings=warnings) is not None
+    assert warnings == [{"kind": "broken_rows", "path": str(path), "lines": [1]}]
+    assert usage.report(path, date(2026, 11, 14), date(2026, 11, 14), lambda q: 0)["broken_rows"] == 1
+    path.write_text('{"version": 2}\n', encoding="utf-8")
+    with pytest.raises(InternalError):
+        usage.record_subagent(payload, env, warnings=[])
+    assert path.read_text(encoding="utf-8") == '{"version": 2}\n'
+
+
+def test_the_meta_of_the_cli_row_takes_only_the_columns_of_the_schema(tmp_path: Path) -> None:
+    env = {"NDF_USAGE_DIR": str(tmp_path)}
+    with pytest.raises(InternalError):
+        usage.record_cli({"output_tokens": 2}, {"started_at": "2026-11-14T01:00:00Z"}, env)
+    assert not usage.usage_log_path(env).exists()
 
 
 def test_usage_log_path_defaults_to_the_state_dir(tmp_path: Path) -> None:
@@ -124,7 +147,7 @@ def test_usage_log_path_defaults_to_the_state_dir(tmp_path: Path) -> None:
 def test_report_counts_transcript_once_and_the_last_response_missed_by_the_hook(tmp_path: Path) -> None:
     env = {"NDF_USAGE_DIR": str(tmp_path)}
     tr = _transcript(tmp_path / "t.jsonl", [_line("m1", "2026-11-14T01:00:00Z", 4)])
-    usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
+    usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env, warnings=[])
     # 停止の hook の後に最後の応答が書かれた
     _transcript(tr, [_line("m1", "2026-11-14T01:00:00Z", 4), _line("m2", "2026-11-14T01:01:00Z", 6)])
     queries: list[str] = []

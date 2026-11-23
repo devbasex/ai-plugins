@@ -35,11 +35,11 @@ def test_signal_kinds_count_every_unknown_whatever_the_answer() -> None:
 
 
 def test_count_signals_dedupes_pairs_and_reads_only_the_current_version_and_repo() -> None:
-    row = {"repo": "/m", "version": 2, "kind": md.OVERRIDE_PASS, "state": "s", "gate": "g", "pr": 1}
-    rows = [row, dict(row), {**row, "pr": 2}, {**row, "version": 1, "pr": 3}, {**row, "repo": "/other", "pr": 4},
+    row = {"repo": "/m", "mvv_version": 2, "kind": md.OVERRIDE_PASS, "state": "s", "gate": "g", "pr": 1}
+    rows = [row, dict(row), {**row, "pr": 2}, {**row, "mvv_version": 1, "pr": 3}, {**row, "repo": "/other", "pr": 4},
             {**row, "kind": md.OVERRIDE_UNKNOWN_PASS, "pr": 5}]  # fmt: skip
     got = md.count_signals(rows, _decl(2, {"overrides": 2}), "/m")
-    assert (got.version, got.overrides, got.unknown_pass, got.unknown, got.revision_due) == (2, 2, 1, 0, True)
+    assert (got.mvv_version, got.overrides, got.unknown_pass, got.unknown, got.revision_due) == (2, 2, 1, 0, True)
     assert md.count_signals(rows, _decl(2), "/m").revision_due is False
 
 
@@ -101,16 +101,28 @@ def test_signals_count_with_the_base_branch_version_from_a_worktree(repo: Path) 
     assert mvv.record_answer(wt, {"verdict": md.FOLLOW, "approved": True}, 2) == []
     mvv.record_answer(repo, {"verdict": md.UNKNOWN, "approved": True, "pr": 9}, 2)
     mvv.record_answer(repo, {"verdict": md.UNKNOWN, "approved": False, "pr": 10}, 2)
-    got = mvv.signals(wt, "develop")
-    assert (got.version, got.overrides, got.unknown_pass, got.unknown) == (2, 2, 1, 2)
-    assert mvv.signals(repo, "main").overrides == 0
+    got = mvv.signals(wt, "develop", warnings=[])
+    assert (got.mvv_version, got.overrides, got.unknown_pass, got.unknown) == (2, 2, 1, 2)
+    assert mvv.signals(repo, "main", warnings=[]).overrides == 0
+
+
+def test_signals_count_the_rows_of_version_zero_and_report_the_rest(repo: Path) -> None:
+    # バージョン 0 の兆候の `version` は MVV の設定のバージョン（整数）
+    old = {"at": "2026-11-14T01:00:00+00:00", "kind": md.OVERRIDE_PASS, "version": 2, "repo": mvv.repo_key(repo), "pr": 1}
+    path = mvv.record_path("mvv-signals")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(old) + "\n[]\n", encoding="utf-8")
+    mvv.record_answer(repo, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 2}, 2)
+    warnings: list[dict] = []
+    assert mvv.signals(repo, "develop", warnings=warnings).overrides == 2
+    assert warnings == [{"kind": "broken_rows", "path": str(path), "lines": [2]}]
 
 
 def test_record_answer_without_a_version_takes_the_worktree_ndf_settings(repo: Path) -> None:
     wt = repo / ".worktrees" / "w"
     rows = mvv.record_answer(wt, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 1}, None)
-    assert [r["version"] for r in rows] == [2]
-    assert mvv.signals(wt, "develop").overrides == 1
+    assert [(r["version"], r["mvv_version"]) for r in rows] == [(1, 2)]
+    assert mvv.signals(wt, "develop", warnings=[]).overrides == 1
     (wt / ".ndf" / "mvv.json").unlink()
     with pytest.raises(mvv.MvvError):
         mvv.record_answer(wt, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 2}, None)
@@ -127,14 +139,16 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた\n", encoding="utf-8")
     inputs = {"sprint": "本文", "project": "MVV", "principles": "原則", "prompt": "指示"}
-    first = mvv.mvv_validate_sprint(repo, inputs, judge)
-    second = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge)
+    warnings: list[dict] = []
+    first = mvv.mvv_validate_sprint(repo, inputs, judge, warnings=warnings)
+    assert warnings == [{"kind": "broken_rows", "path": str(path), "lines": [1]}]
+    second = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge, warnings=[])
     assert len(calls) == 1 and second["reused_from"] == first["at"]
-    mvv.mvv_validate_sprint(repo, {**inputs, "sprint": "変えた"}, judge)
-    mvv.mvv_validate_sprint(repo, inputs, judge, reuse=False)
+    mvv.mvv_validate_sprint(repo, {**inputs, "sprint": "変えた"}, judge, warnings=[])
+    mvv.mvv_validate_sprint(repo, inputs, judge, reuse=False, warnings=[])
     assert len(calls) == 3
-    rows, broken = jsonl.read_rows(path)
-    assert len(rows) == 4 and broken == 1
+    rows, broken = jsonl.read_rows(path, kind="mvv-validation")
+    assert len(rows) == 4 and [b.line for b in broken] == [1]
 
 
 # 現状固定（I-011 の前）: 記録の保存先は NDF_MVV_STATE_DIR → 状態の保存先の順。状態の保存先を解けなければ IdentityError のまま

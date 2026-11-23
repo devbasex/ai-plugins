@@ -55,7 +55,7 @@ def signal_kinds(verdict: Optional[str], approved: bool) -> list[str]:
 class Signals:
     """改訂の兆候。`overrides` は覆し、`unknown_pass` は「判定できない」を人が通した数（覆しに数えない）。"""
 
-    version: Optional[int]
+    mvv_version: Optional[int]
     overrides: int
     unknown_pass: int
     unknown: int
@@ -118,7 +118,7 @@ def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], re
     `repo` はメインディレクトリのパスで、記録の `repo` がこれと同じ行だけを数える。
     """
     version = current_version(decl)
-    mine = [r for r in rows if r.get("repo") == repo and r.get("version") == version]
+    mine = [r for r in rows if r.get("repo") == repo and r.get("mvv_version") == version]
     pairs: dict[str, set[tuple[Any, Any, Any]]] = {k: set() for k in (*OVERRIDES, OVERRIDE_UNKNOWN_PASS, UNKNOWN)}
     for r in mine:
         kind = r.get("kind")

@@ -15,13 +15,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import llm, publish
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits
+from ndf.contracts.internal import InternalError
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -105,7 +106,9 @@ def _verdict(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"verdict": row["verdict"], **{k: row[k] for k in md.VERDICT_DETAILS if k in row}}
 
 
-def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Callable[[Path], GitHub], ask: Ask) -> dict[str, Any]:
+def _judged(
+    root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Callable[[Path], GitHub], ask: Ask, warnings: list[dict[str, Any]]
+) -> dict[str, Any]:
     facts, project = base_facts(root, inputs)
     why = refusals(facts)
     if why:
@@ -130,7 +133,8 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
         "変えたファイルと差分": mm.patch_material(rows),
     }
     text = mm.prompt(mm.redlines(shared, project), materials)
-    verdict = _verdict(mvv.mvv_validate_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
+    asked = {"gate": gate_name, "question": mm.SYSTEM, "material": text}
+    verdict = _verdict(mvv.mvv_validate_sprint(root, asked, judge_with(ask), warnings=warnings))
     skip, why = may_skip(facts, verdict)
     return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha))
 
@@ -153,16 +157,24 @@ def has_gate(mode: Any, gate_name: str) -> bool:
     return any(st.kind == "gate" and st.gate == gate_name for st in definition.load_definition(str(mode)).steps())
 
 
-def gate(root: Path, gate_name: str, inputs: Mapping[str, Any], hub: Callable[[Path], GitHub], ask: Ask = llm.ask) -> dict[str, Any]:
+def gate(
+    root: Path,
+    gate_name: str,
+    inputs: Mapping[str, Any],
+    hub: Callable[[Path], GitHub],
+    ask: Ask = llm.ask,
+    warnings: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """承認ゲートを省けるかを判定し、出力 `mvv_gate` の値を返す（`mm.gate_outcome`）。進め方が fast・auto でなければ判定しない。
 
     判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
+    MVV 判定の記録に読めない行があれば `warnings` へ足す。
     """
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.gate_outcome(gate_name, None, False, [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])
     if inputs.get("pace") not in MVV_PACES:
         return mm.gate_outcome(gate_name, None, False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない"])
     try:
-        return _judged(root, gate_name, inputs, hub, ask)
-    except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
+        return _judged(root, gate_name, inputs, hub, ask, [] if warnings is None else warnings)
+    except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, InternalError, OSError) as exc:
         return mm.gate_outcome(gate_name, None, False, [f"MVV 判定を打てない: {exc}"])

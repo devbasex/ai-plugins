@@ -10,6 +10,7 @@ import pytest
 
 from ndf import cli, identity
 from ndf.contracts import causes
+from ndf.contracts.internal import InternalError
 from ndf.domains.relay import accounts
 from ndf.testing import isolation
 
@@ -174,6 +175,19 @@ def test_uncaught_exception_ends_with_an_unknown_result(monkeypatch, capsys, las
     report = last_result(capsys.readouterr().out)
     assert (report["tool"], report["status"], report["cause"]["kind"]) == ("fake", "stopped", "unknown")
     assert "RuntimeError" in report["cause"]["detail"]
+
+
+@pytest.mark.parametrize("kind", ["invalid", "config_broken", "precondition"])
+def test_internal_data_error_ends_with_a_stopped_result_of_its_kind(monkeypatch, capsys, last_result, kind):
+    # #2339 の受け入れ条件 1: 内部データの形が違う・種類が無い・新しいバージョンは stopped で終わる
+    def refuse(argv):
+        raise InternalError(kind, "内部データの形が違う")
+
+    _fake_subcommand(monkeypatch, refuse)
+
+    assert cli.main(["fake"]) == causes.exit_code(kind)
+    report = last_result(capsys.readouterr().out)
+    assert (report["tool"], report["status"], report["cause"]) == ("fake", "stopped", {"kind": kind, "detail": "内部データの形が違う"})
 
 
 def test_usage_error_of_a_subcommand_ends_with_an_invalid_result(monkeypatch, capsys, last_result):

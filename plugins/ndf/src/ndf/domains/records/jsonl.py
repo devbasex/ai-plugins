@@ -1,6 +1,7 @@
-"""記録の JSONL を読む・排他つきで 1 行足す（使用量の使用量ログと MVV の記録が使う）。
+"""記録の JSONL を読む・1 行足す（使用量ログ・MVV の記録・文脈の切り替えの判定の記録が使う）。
 
-記録は追記だけで持つ。読むときは壊れた行（書きかけ・辞書でない）を数えて除き、その理由で止まらない。
+記録は追記だけで持つ。どの行も読み書きの核（`ndf.contracts.internal`）を種類つきで通す。読むときは、書きかけ・辞書でない・形の
+違う行を、行番号と理由つきで除いて止まらない（呼び手が結果に出す）。新しいバージョンの行と知らない種類は止める。
 """
 
 from __future__ import annotations
@@ -9,11 +10,11 @@ import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from filelock import FileLock
 
-from ndf.contracts import limits
+from ndf.contracts import internal, limits
 
 
 def now() -> str:
@@ -21,11 +22,44 @@ def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def read_rows(path: Path) -> tuple[list[dict[str, Any]], int]:
-    """行と、読めなかった行の数。ファイルが無ければ空。"""
+class Broken(NamedTuple):
+    """読めずに除いた行: 行番号（1 から）と理由。"""
+
+    line: int
+    reason: str
+
+
+def read_rows(path: Path, *, kind: str) -> tuple[list[dict[str, Any]], list[Broken]]:
+    """種類 `kind` の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。"""
+    rows: list[dict[str, Any]] = []
+    broken: list[Broken] = []
     if not path.is_file():
-        return [], 0
-    return parse_lines(path.read_text(encoding="utf-8").splitlines())
+        return rows, broken
+    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(_row(kind, line))
+        except internal.InternalError as exc:
+            if exc.kind != "invalid":
+                raise
+            broken.append(Broken(number, str(exc)))
+    return rows, broken
+
+
+def _row(kind: str, line: str) -> dict[str, Any]:
+    try:
+        raw = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise internal.InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
+    if not isinstance(raw, dict):
+        raise internal.InternalError("invalid", "辞書でない")
+    return internal.read_record(kind, raw)
+
+
+def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
+    """除いた行を結果 JSON の `items` に出す警告（除いた行が無ければ空）。"""
+    return [{"kind": "broken_rows", "path": str(path), "lines": [b.line for b in broken]}] if broken else []
 
 
 def parse_lines(lines: Iterable[str]) -> tuple[list[dict[str, Any]], int]:
@@ -53,13 +87,15 @@ def lock(path: Path) -> FileLock:
     return FileLock(str(path) + ".lock", timeout=limits.seconds("locks.append"))
 
 
-def append(path: Path, row: Mapping[str, Any]) -> None:
-    """1 行足す（錠は呼び手が持つ）。"""
+def append(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
+    """種類 `kind` の 1 行を核で確かめてから足し、書いた行を返す（錠は呼び手が持つ）。形が違えば書かずに `InternalError`。"""
+    out = internal.write_record(kind, row)
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        f.write(json.dumps(out, ensure_ascii=False) + "\n")
+    return out
 
 
-def append_locked(path: Path, row: Mapping[str, Any]) -> None:
-    """錠を取って 1 行足す。"""
+def append_locked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
+    """錠を取って 1 行足し、書いた行を返す。"""
     with lock(path):
-        append(path, row)
+        return append(path, row, kind=kind)

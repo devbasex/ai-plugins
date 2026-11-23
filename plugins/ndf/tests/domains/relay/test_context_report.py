@@ -10,6 +10,7 @@ import json
 import pytest
 
 from ndf import identity
+from ndf.contracts.internal import InternalError
 from ndf.domains.relay import cli, context_records, context_report, registry
 from ndf.domains.relay.context_thresholds import Thresholds
 
@@ -107,7 +108,7 @@ def test_usage_log_rows_go_to_the_ndf_bucket_and_missing_usage_log_is_empty(tmp_
     assert got["parts"]["ndf"]["calls"] == 1 and got["parts"]["ndf"]["inp"] == 5
     assert got["parts"]["conductor"]["calls"] == 2
     assert context_report.report("#1", rows, [{"usage": "unknown"}], None)["parts"]["ndf"]["calls"] == 0
-    assert context_report.load_usage_log({"NDF_USAGE_DIR": str(tmp_path / "none")}) == []
+    assert context_report.load_usage_log({"NDF_USAGE_DIR": str(tmp_path / "none")}) == ([], 0)
 
 
 def test_cost_uses_weights_and_read_rate():
@@ -123,7 +124,7 @@ def test_cli_report_rejects_bad_times(tmp_path, monkeypatch, capsys):
     assert cli.main(["context", "report", "--work", "#1", "--all"]) == 2
     capsys.readouterr()
     assert cli.main(["context", "report", "--all"]) == 0
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"] == {"works": 0, "skipped": 0}
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"] == {"works": 0, "skipped": 0, "usage_skipped": 0}
 
 
 def _session(tmp_path, first_user: str) -> str:
@@ -330,7 +331,17 @@ def test_append_and_read_skip_broken_lines(tmp_path):
     rows, skipped = context_records.read("o__r", env)
     assert [r["at"] for r in rows] == [early["at"], late["at"]]
     assert skipped == 1
+    assert {r["version"] for r in rows} == {1}
     assert rows[0]["verdict"] == "再起動" and rows[0]["reason"] == "手動" and rows[0]["limit"] == 500_000
+
+
+def test_append_refuses_a_row_outside_the_shape_and_writes_nothing(tmp_path):
+    env = {"NDF_CONTEXT_DIR": str(tmp_path)}
+    row = context_records.record_row("s1", "#1", APPLIED, None, "手動")
+    for bad in (row | {"created_at": row["at"]}, row | {"limit": "500000"}, {k: v for k, v in row.items() if k != "work"}):
+        with pytest.raises(InternalError):
+            context_records.append("o__r", bad, env)
+    assert not context_records.decisions_path("o__r", env).exists()
 
 
 def _calls_transcript(path, calls) -> str:
@@ -496,7 +507,15 @@ def test_estimate_stage_segments_current_behavior_edges(tmp_path):
 
 # --- 旧い行（消した方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の基準） ---
 
-_OLD = {"policy": "current", "margin": 50_000, "config_error": None}
+_OLD = {"schema": 1, "policy": "current", "margin": 50_000, "config_error": None}
+
+
+def _append_old(row: dict, env: dict) -> None:
+    """旧いプラグインと同じに、核を通さず判定の記録へ 1 行を足す（旧い行の列のうち `row` に無いものは新しい行の値）。"""
+    path = context_records.decisions_path("o__r", env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({**context_records.record_row(None, "", APPLIED, None, "手動"), **row, **_OLD}, ensure_ascii=False) + "\n")
 
 
 def test_report_parts_of_old_rows_only(tmp_path):
@@ -531,8 +550,8 @@ def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
         t = _calls_transcript(tmp_path / f"t{n}.jsonl", [("2026-11-15T01:00:00Z", 100 + n), ("2026-11-15T01:10:00Z", 200 + n)])
         restored = {"at": "2026-11-15T01:05:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_RESTORED}
         handoff = {"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF}
-        context_records.append("o__r", restored | _OLD, env)
-        context_records.append("o__r", handoff | _OLD, env)
+        _append_old(restored, env)
+        _append_old(handoff, env)
     body = context_records.calibrate(None, 30, 0.0, env)
     assert body["samples"]["restore"] == 3 and body["samples"]["handoff"] == 3
     assert (body["restore_context"], body["restore_calls"]) == (101.0, 1.0)
@@ -586,8 +605,11 @@ def test_calibrate_of_mixed_rows_equals_old_rows_only(tmp_path, monkeypatch):
             t = _calls_transcript(tmp_path / f"t{n}.jsonl", [("2026-11-15T01:00:00Z", 100 + n), ("2026-11-15T01:10:00Z", 200 + n)])
             restored = {"at": "2026-11-15T01:05:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_RESTORED}
             handoff = {"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF}
-            context_records.append("o__r", restored | _OLD, env)
-            context_records.append("o__r", handoff | _OLD if kind == "old" or n == 0 else _new(handoff), env)
+            _append_old(restored, env)
+            if kind == "old" or n == 0:
+                _append_old(handoff, env)
+            else:
+                context_records.append("o__r", context_records.record_row(None, "", APPLIED, handoff["event"], None) | handoff, env)
         body = context_records.calibrate(None, 30, 0.0, env)
         body.pop("at")
         bodies.append(body)

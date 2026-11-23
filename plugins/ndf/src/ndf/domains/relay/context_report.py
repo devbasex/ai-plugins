@@ -51,12 +51,13 @@ def busy_seconds(times: Iterable[Optional[float]]) -> float:
     return sum(min(b - a, IDLE_CAP) for a, b in zip(ts, ts[1:]))
 
 
-def load_usage_log(environ: Mapping[str, str]) -> list[dict[str, Any]]:
-    """新しいプラグインの使用量のジャーナルの行。読めなければ空の一覧（NDF が起動した分は会話の記録の分だけにする）。"""
+def load_usage_log(environ: Mapping[str, str]) -> tuple[list[dict[str, Any]], int]:
+    """使用量のジャーナルの行と、読めずに除いた行の数。ファイルを読めなければ空（NDF が起動した分は会話の記録の分だけにする）。"""
     try:
-        return jsonl.read_rows(usage.usage_log_path(environ))[0]
+        rows, broken = jsonl.read_rows(usage.usage_log_path(environ), kind="usage")
+        return rows, len(broken)
     except (LookupError, OSError, UnicodeDecodeError):
-        return []  # ジャーナルが読めなければ NDF が起動した分は会話の記録の分だけにする
+        return [], 0  # ジャーナルが読めなければ NDF が起動した分は会話の記録の分だけにする
 
 
 def _usage_sid(row: Mapping[str, Any]) -> Optional[str]:
@@ -271,11 +272,7 @@ def _restarts_by_reason(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _rework(rows: list[dict[str, Any]]) -> int | str:
     """「継続」の判定が 2 回以上ある工程の数（やり直し）。「継続」の判定が無ければ「不明」。"""
-    keep = Counter(
-        r["stage"]
-        for r in rows
-        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage")
-    )
+    keep = Counter(r["stage"] for r in rows if r.get("event") == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage"))
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
 

@@ -60,10 +60,13 @@ def transcript_usage(path: Path, since: Optional[datetime] = None, until: Option
     return ud.transcript_total(records, since, until)
 
 
-def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
+def record_subagent(
+    payload: Mapping[str, Any], env: Optional[Mapping[str, str]] = None, *, warnings: list[dict[str, Any]]
+) -> Optional[dict[str, Any]]:
     """終わったサブエージェント 1 回を使用量ログへ 1 行書き、書いた行を返す（書けなければ None）。
 
     同じ `agent_id` の 2 回目以降は、前までの行の合計との差を書く。会話の記録を読めなければ usage は unknown。
+    使用量ログに読めない行があれば `warnings` へ足す。新しいバージョンの行があれば書かずに `InternalError`。
     """
     agent = payload.get("agent_id")
     transcript = payload.get("agent_transcript_path")
@@ -74,26 +77,28 @@ def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]]
         path = usage_log_path(env)
         with jsonl.lock(path):
             total = transcript_usage(Path(transcript))
-            prior, _ = jsonl.read_rows(path)
+            prior, broken = jsonl.read_rows(path, kind="usage")
+            warnings += jsonl.broken_items(path, broken)
             usage: Any = ud.stop_delta(prior, agent, total).as_dict() if isinstance(total, ud.Usage) else ud.UNKNOWN
             row = {"at": jsonl.now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}
-            jsonl.append(path, row)
+            return jsonl.append(path, row, kind="usage")
     except (LookupError, OSError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
-    return row
 
 
 def record_cli(usage: Mapping[str, Any], meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
-    """`claude -p` の 1 回を、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None。"""
+    """`claude -p` の 1 回を、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None。
+
+    `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけ（ほかの欄は書かずに `InternalError`）。
+    """
     u = ud.usage_of(usage)
     row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
-        jsonl.append_locked(usage_log_path(env), row)
+        return jsonl.append_locked(usage_log_path(env), row, kind="usage")
     except (LookupError, OSError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
-    return row
 
 
 def _transcripts(rows: list[dict[str, Any]], since: datetime, until: datetime) -> dict[str, ud.Usage | str]:
@@ -107,14 +112,14 @@ def _transcripts(rows: list[dict[str, Any]], since: datetime, until: datetime) -
 def report(path: Path, since: date, until: date, closed: Callable[[str], int]) -> dict[str, Any]:
     """期間（JST の日付）の合計・読めなかった行・閉じた課題の数。`closed` は検索の条件から閉じた課題の数を返す。"""
     a, b = ud.jst_bounds(since, until)
-    rows, broken = jsonl.read_rows(path)
+    rows, broken = jsonl.read_rows(path, kind="usage")
     total, unknown = ud.reconcile(rows, _transcripts(rows, a, b), a, b)
     return {
         "since": a.isoformat(),
         "until": b.isoformat(),
         "usage": total.as_dict(),
         "unknown_rows": unknown,
-        "broken_rows": broken,
+        "broken_rows": len(broken),
         "closed_issues": closed(ud.closed_query(since, until)),
     }
 
