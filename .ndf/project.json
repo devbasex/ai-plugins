@@ -646,7 +646,7 @@
     "tests": 6000,
     "ci_jobs": 40,
     "unused_deps": 4,
-    "replaceable": 24,
+    "replaceable": 25,
     "dep_modules": {
       "markdown-it-py": "markdown_it",
       "python-dotenv": "dotenv",
