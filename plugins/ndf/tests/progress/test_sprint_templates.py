@@ -52,16 +52,26 @@ def st(repo):
 def sprint(repo, monkeypatch):
     """スプリントのブランチに居るリポジトリと、本物の `invoke.invoke` を呼ぶ作業。埋めたプランを `plans` に集める。"""
     subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
+    # 集めた時点（工程「実装」の出力 gathered）はスプリントブランチのコミット。コードレビューがつなぎ目の起点に確かめる（#3879）
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
+    gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    return _sprint(repo, monkeypatch, gathered)
+
+
+@pytest.fixture
+def early_sprint(repo, monkeypatch):
+    """工程「作業場所の用意」までを流す `sprint`。そこまでの工程はブランチもコミットも読まないので、Git を打たない。"""
+    return _sprint(repo, monkeypatch, "0" * 40)
+
+
+def _sprint(repo: Path, monkeypatch, gathered: str) -> SimpleNamespace:
     strategy_fixture.write(repo, "web-develop", PROJECT)
     held = route.params()
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    # 集めた時点（工程「実装」の出力 gathered）はスプリントブランチのコミット。コードレビューがつなぎ目の起点に確かめる（#3879）
-    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
-    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
-    gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0", "gathered": gathered}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
@@ -165,12 +175,14 @@ def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint
     assert [p["name"] for p in sprint.plans] == ["requirements"]
 
 
-def _worktree_plan(repo: Path, plan_path: Path, report: dict) -> dict:
+def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> dict:
     """プラン worktree を同じプロセスで流した結果。worker のステップは `report` を書いた結果ファイルで差し替える。
 
     `ndf worker run` の結果を組む関数（必須の名前は作業の定義の outputs）→ ステップの結果 → 状態の保存先の記録 →
     遷移の判断 → プランの結果の順につなぐ（子のプロセスも耐久ワークフローも起動しない）。
     """
+    # HEAD は回のキーに入るだけで、出力の伝搬と止まった理由に関わらない。git rev-parse を打たずに決まった値を返す
+    monkeypatch.setattr(runner, "_head", lambda plan: "0" * 40)
     inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
     checked, outputs = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
@@ -189,7 +201,7 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict) -> dict:
     return runner.final_result(inv, ended, "SUCCESS")
 
 
-def _run_to_worktree(repo, st, sprint, capsys, report: dict) -> tuple[dict, run.View]:
+def _run_to_worktree(repo, st, sprint, capsys, monkeypatch, report: dict) -> tuple[dict, run.View]:
     """light のスプリントを、工程「作業場所の用意」が終わるか止まるまで流す。プラン worktree だけ `_worktree_plan` で流す。"""
 
     def invoker(r, cwd, work_dir, answer):
@@ -197,7 +209,7 @@ def _run_to_worktree(repo, st, sprint, capsys, report: dict) -> tuple[dict, run.
             return sprint.env.invoker(r, cwd, work_dir, answer)
 
         def plan_runner(argv, cwd_, env):
-            out = _worktree_plan(repo, Path(argv[argv.index("next") + 1]), report)
+            out = _worktree_plan(repo, Path(argv[argv.index("next") + 1]), report, monkeypatch)
             return subprocess.CompletedProcess(argv, result.code_for(out), result.dumps_line(out) + "\n", "")
 
         return invoke.invoke(r, cwd, work_dir, answer, runner=plan_runner)
@@ -212,18 +224,18 @@ def _run_to_worktree(repo, st, sprint, capsys, report: dict) -> tuple[dict, run.
     pytest.fail("工程「作業場所の用意」まで進まない")
 
 
-def test_worktree_plan_hands_the_outputs_of_the_result_file_to_its_stage(repo, st, sprint, capsys):
+def test_worktree_plan_hands_the_outputs_of_the_result_file_to_its_stage(repo, st, early_sprint, capsys, monkeypatch):
     # #3908 の受け入れ条件 1: worker が結果ファイルの outputs に書いた作業場所とブランチが、工程の出力の検査を通って文脈へ届く
     report = {"status": "ok", "summary": "用意した", "outputs": {"worktree": str(repo), "branch": BRANCH}}
-    out, v = _run_to_worktree(repo, st, sprint, capsys, report)
+    out, v = _run_to_worktree(repo, st, early_sprint, capsys, monkeypatch, report)
     assert out["status"] in ("ok", "gate"), out
     assert v.rows["作業場所の用意"].state == "finished"
     assert {k: v.context()[k] for k in ("worktree", "branch")} == {"worktree": str(repo), "branch": BRANCH}
 
 
-def test_worktree_plan_without_the_outputs_stops_its_stage_naming_them(repo, st, sprint, capsys):
+def test_worktree_plan_without_the_outputs_stops_its_stage_naming_them(repo, st, early_sprint, capsys, monkeypatch):
     # 結果ファイルが outputs を持たない ok は、bad_report でなく欠けの名前付きの incomplete で工程を止める
-    out, v = _run_to_worktree(repo, st, sprint, capsys, {"status": "ok", "summary": "用意した"})
+    out, v = _run_to_worktree(repo, st, early_sprint, capsys, monkeypatch, {"status": "ok", "summary": "用意した"})
     assert out["status"] == "stopped" and out["cause"]["kind"] == "incomplete", out
     assert out["summary"].startswith("工程 作業場所の用意 が失敗した: ") and out["summary"].endswith("（欠け: branch, worktree）")
     assert v.rows["作業場所の用意"].state == "failed"
