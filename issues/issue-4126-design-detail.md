@@ -36,7 +36,7 @@ plugins/ndf/
 | `src/ndf/adapters/claude.py` | 変更 | 中継のマーカーの名前をキーで得る | `identity` | モジュール `claude` | `_inherited`（変更） |
 | `src/ndf/domains/hooks/guards/relay_busy.py`・`ask.py` | 変更（#4049） | `fail_closed` の guard の頭の判定が契約の誤りを例外にしない | `relay.signals`・`identity` | モジュール `relay_busy`・`ask` | `_target`（#4049 の新設）、`check`・`on_deadline`（変更） |
 | `src/ndf/domains/relay/account_login.py` | 変更 | ログインの子から外す名前を、子の環境を組む関数の中でキーから得る | `identity` | モジュール `account_login` | 定数 `AUTH_ENV`（削除）、子の環境を組む関数（変更） |
-| `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの起動の入口で 3 つのキーを解き、誤りを `config_broken` にする | `identity` | モジュール `cli` | ラッパーを起動する入口の関数（変更） |
+| `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの起動の入口で中継のキー（#4049 では 2 つ、#4062 から 3 つ）を解き、誤りを `config_broken` にする | `identity` | モジュール `cli` | ラッパーを起動する入口の関数（変更） |
 | `src/ndf/checks/facts.py` | 変更 | キーの重なりと、コードが呼ぶキーを確かめる | 既存のまま | モジュール `facts` | `env_key_findings`（新設）、`check`（変更） |
 
 ## 契約のキーの列（`env.json`）
@@ -108,7 +108,7 @@ plugins/ndf/
 | `ask.check`・`ask.on_deadline` | `src/ndf/domains/hooks/guards/ask.py` | 変更（#4049） | 変えない | 頭で、中継へ書く・オーガナイザーと通知へ転送する副作用の前に、`identity.env_name` で `relay-dir` と `relay-session` の両方を解く。どちらかで `EnvNameError` を受けたら、中継にもオーガナイザーにも通知にも書かずに通す（`check` は `passing(forwarded=[])`、`on_deadline` は None）。`relay-session` のキーだけを欠く契約では `relay_dir` が成功するので、`relay_dir` の呼び出しだけで受けない。#4061 の後は `relay_role` の `NESTED` に置き換わる |
 | `_inherited` | `src/ndf/adapters/claude.py` | 変更（#4049） | 変えない | `env.get(identity.env_name("relay-dir"))` で読む |
 | `AUTH_ENV` | `src/ndf/domains/relay/account_login.py` | 削除（#4049） | — | 最上位の組をやめ、今 `AUTH_ENV` を読む子の環境を組む関数の中で `(*facts.ids("env", child="account-drop"), "NDF_CLAUDE_ACCOUNT", identity.env_name("relay-dir"))` を組む。import の時に契約を読まない |
-| ラッパーの起動の入口 | `src/ndf/domains/relay/cli.py` | 変更（#4049） | 変えない | 子を起動する前に `identity.env_name` で `relay-dir`・`relay-session`（#4062 の後は `relay-launch` も）を解く。`EnvNameError` なら `result.stopped(TOOL, "config_broken", …)` を返し、`launch.json` を書かず子も起こさない |
+| ラッパーの起動の入口 | `src/ndf/domains/relay/cli.py` | 変更（#4049） | 変えない | 子を起動する前に `identity.env_name` で、#4049 の実装では `relay-dir`・`relay-session` の 2 つだけを解き（`relay-launch` の行は #4062 まで無いので必須にしない）、#4062 の実装から `relay-launch` を加えた 3 つを解く。各段階の PR のテストで、正常な契約のまま起動の入口が `config_broken` を返さず子を起こすことを確かめる。`EnvNameError` なら `result.stopped(TOOL, "config_broken", …)` を返し、`launch.json` を書かず子も起こさない |
 
 hook の経路は今も `signals` を通して `identity` を import しているので、import の閉包は変わらない。docstring とコメントの中の名前（`signals.py` の冒頭の表など）は説明の文として残してよい。受け入れ条件 3 の `git grep` は引用符を付けない名前で照らすので、当たりを実行に使う名前と説明の文に分けて読む。
 
