@@ -383,7 +383,7 @@ def verify(
     `key_overridden`。相対の `config_dir` は子と同じく `cwd` から解く（固定のファイルにもその絶対パスが入る。#4136）。
     """
     helper = key.command if key is not None else None
-    r = account_dir.effective_env(env, (cwd / config_dir).absolute(), cwd, argv, pin=helper is not None)
+    r = account_dir.effective_env(env, (cwd / config_dir).absolute(), cwd, argv, extra=account_dir.Extra(pin=helper is not None))
     if (expected.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX):  # noqa: NDF501 利用者の入力: 無い名前は登録簿のキーでない
         if not (helper is not None and r.helper == helper and r.helper_origin == "--settings" and _key_ok(r, expected)):
             return "key_overridden", r

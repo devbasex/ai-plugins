@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any, Optional
 
-from ndf.progress.run import ISSUE_SECTION, SECTION_END
+from ndf.progress.records import ISSUE_SECTION, SECTION_END
 
 # クリーンアップの工程の名前（進行のセクションの行）
 CLEANUP_STAGE = "クリーンアップ"

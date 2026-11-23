@@ -21,7 +21,7 @@
   リクエストを閉じたら、打ち直せば起動できる失敗のレーンを再起動する。起動したのに期限（`parallel-run.launch` の秒）までに
   行が実行中にならないレーンも、起動の失敗の 1 回として数える
 - 実行中の行を持つレーンの生死を読み直しのたびに判定し（`ndf.progress.lane.liveness`。材料はラッパーの一覧と
-  スプリントの待ち）、止まり（`stalled`・`ended`）を計画のステートマシンのリクエスト（中身の `kind` は `lane_stalled`）で知らせる。
+  スプリントの待ち）、止まり（`stalled`・`ended`・`idle_conductor`）を計画のステートマシンのリクエスト（中身の `kind` は `lane_stalled`）で知らせる。
   承認ゲートや質問の回答を待つ行は正常な待ちで知らせない。同じレーン・行・判定では 1 回だけ知らせる。知らせには
   最後に動いた時刻（レーンの行とスプリントのステートマシンの最後の事象の時刻）と起動の試みの回数・最後の結果を載せ、
   レーンが動き出したらリクエストを閉じる（#2585）
@@ -42,7 +42,7 @@ import functools
 import math
 import os
 import subprocess
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
@@ -120,23 +120,40 @@ def _conn(spec: dict[str, Any]) -> Iterator[Any]:
 def probes(repo: str, plan: str) -> liveness.Probes:
     """生死の判定の材料を、自分のサブコマンド（`ndf relay ls`・`ndf progress wait --timeout 0`）で読む口。
 
-    ラッパーの一覧は 1 回の読み直しの中で 1 度だけ読む（生死の判定と終わったレーンのラッパーの判定が同じ一覧を使う）。
+    ラッパーの一覧は 1 回の読み直しの中で 1 度だけ読む（生死の判定と終わったレーンのラッパーの判定と、conductor の
+    活動が同じ一覧を使う）。
     """
+    name = functools.partial(launch.wrapper_name, repo, plan)
+    table = functools.cache(lambda: launch.wrappers(activity=True))
+
+    def activity(lane_name: str) -> liveness.Activity | None:
+        rows = table()
+        return lane_activity(rows.get(name(lane_name)) if rows is not None else None)
+
     return liveness.Probes(
-        wrapper_name=functools.partial(launch.wrapper_name, repo, plan),
-        wrappers=functools.cache(lambda: launch.wrappers()),
-        sprint=launch.sprint_wait,
-        account_ok=lambda: launch.account_ok(),
+        wrapper_name=name, wrappers=table, sprint=launch.sprint_wait, account_ok=lambda: launch.account_ok(), activity=activity
     )
+
+
+def lane_activity(row: Mapping[str, Any] | None) -> liveness.Activity | None:
+    """ラッパーの一覧の行（`ndf relay ls`）に載った conductor の活動（#4036）。行が無い・活動を読めなければ None。
+
+    活動は `domains/relay` が読んで一覧の行に載せる（層の規則で `progress` は `domains` を読まない）。ここはコピーするだけである。
+    """
+    done = row.get("turn_done") if row is not None else None
+    if row is None or not isinstance(done, bool):
+        return None
+    return liveness.Activity(done, row.get("moved"), row.get("background"))
 
 
 @dataclass(frozen=True)
 class Judged:
-    """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行）、
+    """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行,
+    バックグラウンドの作業の数）。最後に動いた時刻は、`idle_conductor` では活動の UNIX 時刻、ほかでは記録の ISO 8601 の時刻。
     `unknown` は判定が unknown のレーン、`judged` は判定したか（計画が動いていない・材料の口が無ければ偽）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）`stalled` のレーンの（レーン, 行, スプリントの ID）。"""
 
-    stalls: list[tuple[str, str, str, str | None, str]]
+    stalls: list[tuple[str, str, str, str | float | None, str, int | None]]
     unknown: list[str]
     judged: bool
     relaunch: list[tuple[str, str, str]]
@@ -157,7 +174,14 @@ def _judge(
         return Judged([], [], False, [])
     verdicts = liveness.judge_lanes(rows, found)
     stalls = [
-        (name, liveness.notice_key(name, v), f"レーン {name} の行 {v.row}: {v.reason}", moved.get(name), str(v.row))
+        (
+            name,
+            liveness.notice_key(name, v),
+            f"レーン {name} の行 {v.row}: {v.reason}",
+            _moved(v, moved.get(name)),
+            str(v.row),
+            v.background,
+        )
         for name, v in verdicts.items()
         if v.stall
     ]
@@ -166,6 +190,11 @@ def _judge(
     ]
     relaunch = auth if auth and found.account_ok() else []
     return Judged(stalls, [name for name, v in verdicts.items() if v.kind == liveness.UNKNOWN], True, relaunch)
+
+
+def _moved(verdict: liveness.Liveness, recorded: str | None) -> str | float | None:
+    """止まりの最後に動いた時刻。`idle_conductor` は判定が見た活動の時刻、ほかは記録の時刻。"""
+    return verdict.moved_at if verdict.kind == liveness.IDLE_CONDUCTOR else recorded
 
 
 def last_moved(conn: Any, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]]) -> dict[str, str]:

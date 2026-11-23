@@ -349,9 +349,12 @@ def _probe(argv: list[str], run: Optional[Any]) -> Optional[dict[str, Any]]:
     return _last_json(done.stdout)
 
 
-def wrappers(run: Optional[Any] = None) -> Optional[dict[str, dict[str, Any]]]:
-    """ラッパーの一覧（`ndf relay ls`）を名前で引ける形で返す。一覧を読めなければ None（止まりと読まない）。"""
-    out = _probe(_entry("relay", "ls"), run)
+def wrappers(run: Optional[Any] = None, activity: bool = False) -> Optional[dict[str, dict[str, Any]]]:
+    """ラッパーの一覧（`ndf relay ls`）を名前で引ける形で返す。一覧を読めなければ None（止まりと読まない）。
+
+    `activity` が真なら `--activity` を付け、conductor の活動も読ませる（生死の判定だけが使う。#4036）。
+    """
+    out = _probe(_entry("relay", "ls", *(["--activity"] if activity else [])), run)
     if out is None or out.get("status") != result.OK or not isinstance(out.get("items"), list):
         return None
     return {str(r["name"]): r for r in out["items"] if isinstance(r, dict) and "name" in r}

@@ -70,9 +70,10 @@ from ndf.progress.gate.checks import (
     sections,
     well_formed,
 )
-from ndf.progress.gate.entry import WORK_KINDS, _cmd_work, ask, main, present, progress_main, work_argv
+from ndf.progress.gate.entry import _cmd_work, ask, main, present, progress_main, work_argv
 from ndf.progress.gate.records import answers, approved_head, record_answer, rejection_row, rejections, rejections_path
 from ndf.progress.gate.release import request_release, take_reply
+from ndf.contracts.worker_kinds import work_kinds
 
 __all__ = [
     "ACTORS",
@@ -81,7 +82,6 @@ __all__ = [
     "REJECTING",
     "RELEASE_KIND",
     "TOOL",
-    "WORK_KINDS",
     "Answer",
     "Changed",
     "DocsOnly",
@@ -133,5 +133,6 @@ __all__ = [
     "waiting",
     "well_formed",
     "work_argv",
+    "work_kinds",
     "write_material",
 ]

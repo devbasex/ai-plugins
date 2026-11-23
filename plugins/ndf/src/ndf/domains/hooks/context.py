@@ -1,8 +1,8 @@
 """hook の 1 回の事象の文脈（#3345 の決定 88・IH1）。
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
-ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`・
-`classify_reply`）だけが行い、`HookContext` はその結果を持つ。
+ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の
+待ちのルール（`reply_wait` の `prose_lines`・`read_prose`。#4000 の決定 1）だけが行い、`HookContext` はその結果を持つ。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.hooks.strict import _SHELLS
 
 # 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
@@ -30,16 +30,8 @@ _DYNAMIC_NODE = re.compile(r"(expansion|substitution)$")
 # ヒアドキュメントとヒアストリングのセクション
 _HEREDOC_NODES = frozenset({"heredoc_redirect", "herestring_redirect"})
 
-# 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
-_WAIT_RE = re.compile(
-    r"(よろしいですか|いかがですか|どうしますか|どちらにしますか|選んでください|お知らせください|教えてください|"
-    r"承認をお願いします|ご確認ください|ご判断ください|指示をください|お待ちしています|返答を待ちます|回答を待ちます)"
-    r"|[?？]\s*$"
-)
-# 別の場所（ほかのセッション・レーン・計画）の待ちを報告する言い回し（#2324）
-_ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
-# 本文の待ちを見る末尾の行数
-_TAIL_LINES = 4
+# 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
+_ASK_TOOL = "AskUserQuestion"
 
 
 class ShellCommand(NamedTuple):
@@ -48,7 +40,9 @@ class ShellCommand(NamedTuple):
     `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
     読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
-    （#3995。運用上限の guard が Bash と同じ値に読み直す）。
+    （#3995。運用上限の guard が Bash と同じ値に読み直す）。`body_source` は `body_argv` と位置をそろえた字面（#3877。
+    `rm` の guard が展開の効く位置を読む。ラッパーが無ければ `source` そのもの。`env -S` で分けた語は、env が文字にした部分を
+    単引用で囲み、env が展開する `${NAME}` を字面のまま置く）。
     """
 
     argv: tuple[str, ...]
@@ -57,6 +51,7 @@ class ShellCommand(NamedTuple):
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
     source: tuple[str, ...] = ()
+    body_source: tuple[str, ...] = ()
 
     @property
     def body_name(self) -> str:
@@ -127,7 +122,8 @@ def _walk(text: str) -> ShellScript:
         if node.type == "command":
             body, condition = _loop_position(node)
             argv, joined, source = _words(node)
-            commands.append(ShellCommand(argv, _in_background(node), body, condition, _strip_wrappers(joined), source))
+            stripped, stripped_source = _strip_wrappers(joined, source)
+            commands.append(ShellCommand(argv, _in_background(node), body, condition, stripped, source, stripped_source))
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -191,15 +187,137 @@ def _loop_position(node: Any) -> tuple[bool, bool]:
 
 
 def _inner_scripts(cmd: ShellCommand) -> list[str]:
-    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。"""
+    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。
+
+    外側のシェルが引用とエスケープを解いた後の値を返す（`bash -c "rm \\"\\$W\\""` の中身は `rm "$W"`）。
+    """
     body_argv, head = cmd.body_argv, cmd.body_name
     if head == "eval" and len(body_argv) > 1:
-        return [" ".join(body_argv[1:])]
+        return [" ".join(shell_value(text) for text in cmd.body_source[1:])]
     if head in _SHELLS:
         for i, word in enumerate(body_argv[1:-1], start=1):
             if word.startswith("-") and not word.startswith("--") and "c" in word:
-                return [body_argv[i + 1]]
+                return [shell_value(cmd.body_source[i + 1])]
     return []
+
+
+# ANSI-C 引用（`$'…'`）の中のエスケープ
+_ANSI_C_ESCAPES = {
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+}
+# 二重引用の中で `\\` が文字にする字（改行は行の継続として消える）。guards も同じ集まりを使う（`context_limit`）
+DQUOTE_ESCAPABLE = frozenset('$`"\\\n')
+
+
+# ANSI-C 引用の数値のエスケープ（字・桁の上限・基数）
+_ANSI_C_NUMBERS = {"x": (2, 16), "u": (4, 16), "U": (8, 16)}
+_OCTAL = "01234567"
+_HEX = "0123456789abcdefABCDEF"
+
+
+def ansi_c_escape(text: str, i: int) -> tuple[str, int]:
+    """`text[i]` の `\\` から読む ANSI-C 引用のエスケープの値と、読んだ字数（Bash の `$'…'` の規則）。
+
+    値が NUL（`\\0`・`\\x0` など）なら、Bash はそこで引用の値を打ち切る（呼び出し側が残りを捨てる）。Unicode の字にならない
+    値（サロゲート・`0x10FFFF` を超える値）は、例外にせず置換文字（U+FFFD）にする。
+    """
+    nx = text[i + 1]
+    if nx in _ANSI_C_NUMBERS:
+        width, base = _ANSI_C_NUMBERS[nx]
+        digits = _digits(text, i + 2, width, _HEX)
+        return (_code_point(int(digits, base)), 2 + len(digits)) if digits else ("\\" + nx, 2)
+    if nx in _OCTAL:
+        digits = _digits(text, i + 1, 3, _OCTAL)
+        return chr(int(digits, 8) & 0xFF), 1 + len(digits)
+    if nx == "c" and i + 2 < len(text):
+        return chr(ord(text[i + 2]) & 0x1F), 3
+    if nx in _ANSI_C_ESCAPES:
+        return _ANSI_C_ESCAPES[nx], 2
+    return "\\" + nx, 2
+
+
+def _code_point(value: int) -> str:
+    if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+        return "\ufffd"
+    return chr(value)
+
+
+def _digits(text: str, start: int, width: int, allowed: str) -> str:
+    end = start
+    while end < len(text) and end - start < width and text[end] in allowed:
+        end += 1
+    return text[start:end]
+
+
+# ANSI-C 引用の中で NUL を読んだ後（閉じる `'` まで値に足さない）
+_CUT = "$'\0"
+
+
+def shell_value(text: str) -> str:
+    """語の字面から、外側のシェルが引用とエスケープを解いた値。展開（`$NAME`・`$(…)`）は値が分からないので字面のまま残す。"""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        if quote == "'":
+            piece, quote, step = _single_step(text[i], quote)
+        elif quote in ("$'", _CUT):
+            piece, quote, step = _ansi_c_step(text, i, quote)
+        else:
+            piece, quote, step = _plain_step(text, i, quote)
+        out.append(piece)
+        i += step
+    return "".join(out)
+
+
+def _single_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """単引用の中の 1 字の値と、次の引用の状態と読んだ字数（`'` で引用が終わり、ほかの字はそのまま値になる）。"""
+    if ch == "'":
+        return "", "", 1
+    return ch, quote, 1
+
+
+def _ansi_c_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """ANSI-C 引用の中の 1 字の値と、次の引用の状態と読んだ字数（NUL の後は閉じる `'` まで値に足さない）。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx:
+        char, step = ansi_c_escape(text, i)
+        quote = _CUT if char == "\0" else quote
+        return ("" if quote == _CUT else char), quote, step
+    if ch == "'":
+        return "", "", 1
+    return ("" if quote == _CUT else ch), quote, 1
+
+
+def _plain_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """引用の外と二重引用の中の 1 字の値と、次の引用の状態と読んだ字数。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx and (quote == "" or nx in DQUOTE_ESCAPABLE):
+        return ("" if nx == "\n" else nx), quote, 2
+    if ch == "$" and nx == "'" and quote == "":
+        return "", "$'", 2
+    return _quote_step(ch, quote)
+
+
+def _quote_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """引用を開け閉てする字（`"` と引用の外の `'`）なら値を残さず状態を変え、ほかの字はそのまま値にする。"""
+    if ch == '"':
+        return "", ("" if quote == '"' else '"'), 1
+    if ch == "'" and quote == "":
+        return "", "'", 1
+    return ch, quote, 1
 
 
 class _Opts(NamedTuple):
@@ -287,12 +405,34 @@ _SPLIT_OK = "ok"
 _SPLIT_CUT = "cut"
 
 
-def _strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """先頭のラッパーのコマンドとその引数を外した語。読めない引数・コマンドを起動しない形なら空。"""
-    words: Optional[list[str]] = list(argv)
+class _Word(str):
+    """ラッパーを外す途中の語。値（`str`）と、位置をそろえた字面（`source`）を持つ。
+
+    `env -S` で分けた語の字面は、GNU env が文字にした部分を単引用で囲み、`${NAME}` を字面のまま残す。
+    """
+
+    source: str
+
+    def __new__(cls, value: str, source: str) -> "_Word":
+        word = super().__new__(cls, value)
+        word.source = source
+        return word
+
+
+def _strip_wrappers(argv: tuple[str, ...], source: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """先頭のラッパーのコマンドとその引数を外した語と、それに位置をそろえた字面。読めない引数・コマンドを起動しない形なら空。
+
+    先頭がラッパーでなければ、語と字面をそのまま返す。ラッパーの後ろの語は、外側のシェルが引用とエスケープを解いた値
+    （`shell_value`）で読む（`env -S "rm \\${D}"` の env が受け取るのは `rm ${D}`）。
+    """
+    if not argv or os.path.basename(argv[0]) not in _WRAPPER_ARGS:
+        return argv, source
+    words: Optional[list[str]] = [_Word(shell_value(text), text) for text in source]
     while words and os.path.basename(words[0]) in _WRAPPER_ARGS:
         words = _after_options(os.path.basename(words[0]), words[1:])
-    return tuple(words) if words else ()
+    if not words:
+        return (), ()
+    return tuple(str(word) for word in words), tuple(getattr(word, "source", word) for word in words)
 
 
 def _after_options(name: str, words: list[str]) -> Optional[list[str]]:
@@ -370,6 +510,8 @@ class _EnvSplit:
         self.quote = ""
         self.words: list[str] = []
         self.word: Optional[list[str]] = None
+        # 語の部分ごとの（値, 展開の字面）。文字のままの部分は展開の字面が None
+        self.parts: list[tuple[str, Optional[str]]] = []
 
     def run(self) -> Optional[tuple[str, ...]]:
         state: Optional[str] = _SPLIT_OK
@@ -380,14 +522,16 @@ class _EnvSplit:
         self._end()
         return tuple(self.words)
 
-    def _add(self, text: str) -> None:
+    def _add(self, text: str, expansion: Optional[str] = None) -> None:
+        """語へ `text` を足す。`expansion` は GNU env が展開する部分（`${NAME}`）の字面で、文字のままの部分は None。"""
         if self.word is None:
-            self.word = []
+            self.word, self.parts = [], []
         self.word.append(text)
+        self.parts.append((text, expansion))
 
     def _end(self) -> None:
         if self.word is not None:
-            self.words.append("".join(self.word))
+            self.words.append(_Word("".join(self.word), _quoted_source(self.parts)))
             self.word = None
 
     def _single(self) -> str:
@@ -445,9 +589,25 @@ class _EnvSplit:
         end = self.text.find("}", self.i)
         if not self.text.startswith("${", self.i) or end < 0:
             return None
-        self._add(self.text[self.i : end + 1])
+        expansion = self.text[self.i : end + 1]
+        self._add(expansion, expansion)
         self.i = end + 1
         return "ok"
+
+
+def _quoted_source(parts: list[tuple[str, Optional[str]]]) -> str:
+    """`env -S` で分けた 1 語の字面。続いた文字のままの部分を 1 つの単引用で囲み、展開の部分を字面のまま置く。"""
+    out: list[str] = []
+    literal: list[str] = []
+    for text, expansion in parts + [("", "")]:
+        if expansion is None:
+            literal.append(text)
+            continue
+        if literal:
+            out.append("'" + "".join(literal).replace("'", "'\\''") + "'")
+            literal = []
+        out.append(expansion)
+    return "".join(out)
 
 
 def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
@@ -458,18 +618,28 @@ def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]
     argv: list[str] = []
     joined: list[str] = []
     source: list[str] = []
+    previous_end: Optional[int] = None
     for child in node.children:
         target = child.children[0] if child.type == "command_name" and child.children else child
         if target.type not in _WORD_NODES:
+            previous_end = None
             continue
         text = target.text.decode("utf-8", "replace")
         word = _unquote(text, target.type)
-        argv.append(word)
-        source.append(text)
         if target.type == "concatenation":
-            joined.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+            part = "".join(_unquote(p.text.decode("utf-8", "replace"), p.type) for p in target.children)
         else:
-            joined.append(word)
+            part = word
+        if previous_end == child.start_byte:
+            # 隙間の無い 2 つのセクションは 1 つの語（tree-sitter-bash は `$W/$n.md.done` を `$W/$` と `n.md.done` に割る）
+            argv[-1] += word
+            joined[-1] += part
+            source[-1] += text
+        else:
+            argv.append(word)
+            joined.append(part)
+            source.append(text)
+        previous_end = child.end_byte
     return tuple(argv), tuple(joined), tuple(source)
 
 
@@ -503,22 +673,24 @@ def read_tail(path: str, size: int) -> str:
     return text.split("\n", 1)[1] if end > size and "\n" in text else text
 
 
-def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
-    """最後の応答の種類: `none`（空）・`elsewhere_wait`（別の場所の待ちの報告）・`prose_wait`（本文で人の回答を待つ）・`report`。
+def asked_since_prompt(tail: str) -> bool:
+    """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
 
-    `code_lines` は行ごとのコードブロックのマーカー（`ndf.adapters.markdown.code_lines`）。コードの中の行は見ない。
+    Tool の結果だけを持つ `user` の行と、Claude Code が書くメタの行（`isMeta` が真）は利用者の入力に数えない
+    （`ndf.domains.relay.context_records._user_text` と同じ条件）。末尾に利用者の入力が無ければ、読めた範囲で探す。
     """
-    lines = text.splitlines()
-    flags = code_lines if code_lines is not None and len(code_lines) == len(lines) else [False] * len(lines)
-    prose = [line for line, code in zip(lines, flags) if not code and line.strip()]
-    if not prose:
-        return "none"
-    tail = "\n".join(prose[-_TAIL_LINES:])
-    if _ELSEWHERE_RE.search(tail):
-        return "elsewhere_wait"
-    if any(_WAIT_RE.search(line.strip()) for line in prose[-_TAIL_LINES:]):
-        return "prose_wait"
-    return "report"
+    for line in reversed(tail.splitlines()):
+        if '"user"' not in line and _ASK_TOOL not in line:
+            continue
+        rec = tables.json_object(line)
+        if rec is None:
+            continue
+        content = _content(rec)
+        if _is_user_input(rec, content):
+            return False
+        if _asks(content):
+            return True
+    return False
 
 
 def context_tokens(tail: str) -> Optional[int]:
@@ -592,14 +764,44 @@ class HookContext:
         return text if isinstance(text, str) else _last_assistant_text(self.transcript_tail)
 
     @cached_property
+    def last_reply_id(self) -> Optional[str]:
+        """会話の記録の最後の `assistant` の記録の `uuid`。中継の活動の記録（`activity.json` の `reply`）に書き、読む側
+        （`observe.reply_id`。同じく最後の `assistant` の記録を選ぶ）が今の応答の記録かを突き合わせる。読めなければ None。"""
+        return _last_assistant_uuid(self.transcript_tail)
+
+    @cached_property
     def reply_code_lines(self) -> list[bool]:
         from ndf.adapters import markdown
 
         return markdown.code_lines(self.last_reply) if self.last_reply else []
 
     @cached_property
+    def reply_prose_lines(self) -> list[reply_wait.ProseLine]:
+        """最後の応答の本文の行（ルールの `prose_lines`）。`has_reply_prose` と `last_reply_kind` が同じ返りを読む。"""
+        return reply_wait.prose_lines(self.last_reply)
+
+    @cached_property
+    def has_reply_prose(self) -> bool:
+        """最後の応答に本文の行があるか。guard `stop-wait` の最初の確かめ。"""
+        return bool(self.reply_prose_lines)
+
+    @cached_property
+    def reply_reading(self) -> reply_wait.ProseReading:
+        """最後の応答の本文の判定（`reply_wait.read_prose`）。`last_reply_kind` と guard `stop-wait` が同じ返りを読む。"""
+        return reply_wait.read_prose(self.reply_prose_lines) if self.has_reply_prose else reply_wait.ProseReading("none")
+
+    @cached_property
     def last_reply_kind(self) -> str:
-        return classify_reply(self.last_reply, self.reply_code_lines)
+        """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`heading_wait`・`closing_report`・`report`）。ルールの判定（#4000 の決定 1）。
+
+        本文の行は `reply_prose_lines` を読み、抜き出し直さない（`reply_wait.reply_kind` を呼ばない）。
+        """
+        return self.reply_reading.kind
+
+    @cached_property
+    def asked_this_turn(self) -> bool:
+        """今の利用者の入力の後に `AskUserQuestion` で人へ問うたか。"""
+        return asked_since_prompt(self.transcript_tail)
 
     @property
     def stop_hook_active(self) -> bool:
@@ -624,13 +826,48 @@ def _last_assistant_text(tail: str) -> str:
     return ""
 
 
+def _last_assistant_uuid(tail: str) -> Optional[str]:
+    for line in reversed(tail.splitlines()):
+        rec = tables.json_object(line) if '"assistant"' in line else None
+        if rec and rec.get("type") == "assistant":
+            uuid = rec.get("uuid")
+            return uuid if isinstance(uuid, str) else None
+    return None
+
+
+def _content(rec: dict[str, Any]) -> Any:
+    """会話の記録の 1 レコードの content。`message` が無い・形が違えば None。"""
+    message = rec.get("message")
+    return message.get("content") if isinstance(message, dict) else None
+
+
+def _items(content: Any, kind: str) -> list[dict[str, Any]]:
+    """content の要素のうち type が `kind` の dict。content が list でなければ空。"""
+    if not isinstance(content, list):
+        return []
+    return [c for c in content if isinstance(c, dict) and c.get("type") == kind]
+
+
+def _is_prompt(content: Any) -> bool:
+    """利用者の入力の content か（文字列か text の要素を持つ）。Tool の結果だけを持つ行は偽。"""
+    if isinstance(content, str):
+        return True
+    return bool(_items(content, "text"))
+
+
+def _is_user_input(rec: dict[str, Any], content: Any) -> bool:
+    """利用者の入力のレコードか。`user` の行のうち、メタの行（`isMeta` が真）と Tool の結果だけを持つ行は偽。"""
+    return rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content)
+
+
+def _asks(content: Any) -> bool:
+    """`AskUserQuestion` の呼び出しを持つ content か。"""
+    return any(c.get("name") == _ASK_TOOL for c in _items(content, "tool_use"))
+
+
 def _record_text(rec: dict[str, Any]) -> Optional[str]:
     """会話の記録の 1 レコードの本文。text の要素が無ければ None（文字列でない text だけなら空文字）。"""
-    message = rec.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, list):
-        return None
-    texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    texts = [c.get("text") for c in _items(_content(rec), "text")]
     if not texts:
         return None
     return "\n".join(t for t in texts if isinstance(t, str))

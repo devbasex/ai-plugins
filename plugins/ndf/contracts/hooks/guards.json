@@ -85,6 +85,22 @@
       "fail_closed": false
     },
     {
+      "name": "rm-variable",
+      "summary": "rm の削除の対象に、展開が効く位置の空になりうる変数（$NAME・${NAME}）を含む語があれば止め、報告の保存先は ndf worker prepare で用意し、ほかの削除は \"${NAME:?}\" か固定のパスで打つよう勧める（#3877 の決定 4）",
+      "module": "ndf.domains.hooks.guards.rm_variable",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 26,
+      "strict": false,
+      "suggests": [
+        {"tool": "Bash", "input": {"command": "ndf worker prepare --dir /tmp/ndf-run/implement --name w-1"}}
+      ],
+      "deny_key": "none",
+      "limits": [],
+      "params": {},
+      "fail_closed": false
+    },
+    {
       "name": "sleep",
       "summary": "前景の while / until のループの本体の sleep（秒によらない）と、前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める。bash -c 系・eval の中身とラッパーのコマンドの後ろの sleep も見る（#3851）",
       "module": "ndf.domains.hooks.guards.sleep",
@@ -235,7 +251,7 @@
     },
     {
       "name": "stop-wait",
-      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の回答を待つなら変更要求、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）",
+      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の回答を待つなら変更要求、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）。ルールの判定を先に見て、本文で待つ（prose_wait）ならモデルを呼ばずに変更要求する。見出しで承認・選択を求める本文（heading_wait）とルールに当たらない本文は、呼べるなら軽いモデルへ渡し、wait なら変更要求、report なら通す。モデルを呼べない・回答しないときは、heading_wait なら変更要求し、ほかは通す（#4000）",
       "module": "ndf.domains.hooks.guards.stop_wait",
       "events": ["Stop"],
       "tools": [],
@@ -245,7 +261,7 @@
         {"tool": "AskUserQuestion", "input": {"questions": [{"question": "進めてよいか", "header": "承認", "options": [{"label": "進める", "description": "このまま進める"}, {"label": "止める", "description": "ここで止める"}], "multiSelect": false}]}}
       ],
       "deny_key": "none",
-      "limits": [],
+      "limits": ["hook.stop-wait.judge"],
       "params": {},
       "fail_closed": false
     }

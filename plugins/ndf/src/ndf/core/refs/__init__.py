@@ -360,8 +360,7 @@ def _unreadable(exc: github.GitHubError, what: str) -> Unreadable:
 
     状態が 0 でも届いていない失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は precondition。
     """
-    passing = exc.unreached or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
-    return Unreadable("transient" if passing else "precondition", f"{what}を読めない: {exc}")
+    return Unreadable("transient" if exc.passing else "precondition", f"{what}を読めない: {exc}")
 
 
 def _closing_numbers(issue: int, node: Mapping[str, Any]) -> list[int]:

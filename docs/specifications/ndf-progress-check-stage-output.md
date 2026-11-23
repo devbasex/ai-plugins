@@ -73,13 +73,15 @@ flowchart LR
 ndf progress check <machine_id> <stage> --output <ファイル> [--cwd <パス>]
 ```
 
-| 場合 | `status` | `cause.kind` | `metrics` | `warnings` |
-| --- | --- | --- | --- | --- |
-| 規約に合う | `ok` | — | `machine_id`・`stage`・`outputs`（その工程の定義のキーの一覧） | 定義に無い文脈のキー（`finish` が捨てるもの）ごとに 1 行 |
-| 規約に合わない | `stopped` | `refused` | 同上 | — |
-| ステートマシン・工程が無い・出力のファイルを読めない | `finish` と同じ | `finish` と同じ | — | — |
+| 場合 | `status` | `cause.kind` | `items` | `metrics` | `warnings` |
+| --- | --- | --- | --- | --- | --- |
+| 規約に合う | `ok` | — | — | `machine_id`・`stage`・`outputs`（その工程の定義のキーの一覧） | 定義に無い文脈のキー（`finish` が捨てるもの）ごとに 1 行 |
+| 規約に合わない | `stopped` | `refused` | 欠けた文脈のキーごとに `{"kind": "missing", "key": <キー>, "source": <取り場所>}`（工程の定義の `outputs` の順。取り場所が無いキーは `source` が `null`） | 同上 | — |
+| ステートマシン・工程が無い・出力のファイルを読めない | `finish` と同じ | `finish` と同じ | — | — | — |
 
 合わないときの `summary` は「<工程> の出力が規約に合わない: <誤り>」で、`finish` の文と同じである。
+欠けたキーの誤りは「outputs: 文脈のキー <キー> が無い」で、取り場所があれば末尾に「（取り場所: <取り場所>）」が付く。
+取り場所は文脈のスキーマ（`context.schema.json`）のキーの `x-source` の 1 行である。
 
 `outputs` のキーの扱いは 3 つに分かれ、`finish` と同じである。
 
@@ -94,6 +96,7 @@ ndf progress check <machine_id> <stage> --output <ファイル> [--cwd <パス>]
 ## データ・設定
 
 設定は持たない。`metrics.outputs` は `progress.result.schema.json` の `metrics` の欄で、`check` だけが出す。
+同じスキーマの `items` の `source`（`["string", "null"]`）も、欠けたキーの取り場所としては `check` だけが出す。
 `machine_id`・`stage` は既存の欄で、`warnings` は共通の `result.schema.json` が文字列の配列で受ける。
 
 ## 運用

@@ -178,7 +178,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "進捗記録の種類（resync）"
+            "description": "進捗記録の種類（resync）か、欠けた文脈のキーの行の missing（check）"
           },
           "number": {
             "type": "integer",
@@ -210,11 +210,14 @@
           },
           "key": {
             "type": "string",
-            "description": "文脈に足りない入力のキー（工程を始められずに止まったとき）"
+            "description": "文脈に足りない入力のキー（工程を始められずに止まったとき）か、出力に欠けた文脈のキー（check）"
           },
           "source": {
-            "type": "string",
-            "description": "足りない値の出所（同上）"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "足りない値の出所（同上）か、欠けたキーの値の取り場所（check。文脈のスキーマの x-source で、無ければ null）"
           }
         }
       }

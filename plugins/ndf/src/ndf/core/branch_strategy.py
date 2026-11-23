@@ -17,7 +17,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -199,6 +199,11 @@ def _check_files(files: dict[str, dict]) -> Strategy:
         where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
         raise StrategyError(f"`{PROJECT}` の `{SECTION}` がスキーマに落ちる: {where}", VIOLATION)
     return Strategy(project[SECTION])
+
+
+def of_project(project: Mapping[str, Any]) -> Strategy:
+    """読み込み済みの `.ndf/project.json` の中身のセクションを、`load` と同じ検査で型にする（ファイルを読まない。#3908）。"""
+    return _check_files({"project": dict(project)})
 
 
 def load(root: Path) -> Strategy:

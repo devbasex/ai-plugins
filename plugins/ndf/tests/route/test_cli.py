@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 
 import pytest
 import strategy_fixture
 
+from ndf.contracts import worker_kinds
 from ndf.core import route
+from ndf.core.plan import model
 
 from ._flow import git
 
@@ -90,6 +93,110 @@ def test_render_implement_takes_an_acceptance_of_several_issues_without_an_issue
     extra = [x for v in acceptance for x in ("--add", f"acceptance={v}")]
     assert route.main(["render", *args, *extra]) == 0
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
+
+
+def test_render_implement_with_the_default_worker_holds_the_values_for_answer_work(tmp_path):
+    """PR 4319 の指摘 r1-1・r2-2: 既定の worker（ndf answer work）で組む単発のプランは、それが読む値をプラン本体に持ち、
+    描画の時点の保存先へは書かない（実行が選ぶ保存先へ ndf plan next が書く）。"""
+    out = tmp_path / "impl.json"
+    args = _impl_args(out, tmp_path)
+    at = args.index("worker=ndf-worker")
+    del args[at - 1 : at + 1]
+    assert route.main(["render", *args]) == 0
+    assert _step(out, "work")["run"] == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "impl"]
+    held = json.loads(out.read_text())[worker_kinds.PLAN_KEY]
+    assert held["plan"] == "impl" and held["inputs"] == {}
+    assert held["values"]["branch"] == "u1" and held["values"]["worktree"] == str(tmp_path)
+    assert not (tmp_path / "impl.state").exists()
+
+
+def test_plan_values_go_to_the_state_dir_chosen_at_run_time(tmp_path):
+    """PR 4319 の指摘 r2-2: プランが持つ worker の入力は、実行の選んだ保存先（--state-dir で上書きした先）の values.json になる。"""
+    raw = {"name": "impl", worker_kinds.PLAN_KEY: worker_kinds.plan_values("impl", {"branch": "u1"}, False)}
+    assert worker_kinds.hand_plan_values(tmp_path / "elsewhere", raw)
+    held = worker_kinds.read_values(tmp_path / "elsewhere")
+    assert held is not None and held["plan"] == "impl" and held["values"] == {"branch": "u1"} and held["local_tests"] is False
+
+
+def test_a_plan_without_worker_values_leaves_the_state_dir_alone(tmp_path):
+    assert not worker_kinds.hand_plan_values(tmp_path / "s", {"name": "impl"})
+    assert not (tmp_path / "s").exists()
+
+
+def test_a_plan_with_malformed_worker_values_is_refused():
+    raw = {"name": "p", "steps": [{"id": "a", "run": ["true"]}], worker_kinds.PLAN_KEY: {"plan": "p"}}
+    with pytest.raises(model.PlanError, match=worker_kinds.PLAN_KEY):
+        model.parse(raw)
+
+
+def _requirements_args(out: Path, repo: Path, *extra: str) -> list[str]:
+    return ["requirements", "--out", str(out), "--set", f"repo={repo}", *extra]
+
+
+def test_render_requirements_takes_the_inputs_only_the_default_worker_reads(tmp_path):
+    """PR 4319 の指摘 r2-1: テンプレートの params に無い issues・mode も、既定の worker が読むなら --add・--set で渡せる。"""
+    out = tmp_path / "req.json"
+    extra = ["--add", "issues=12", "--add", "issues=34", "--set", "mode=standard"]
+    assert route.main(["render", *_requirements_args(out, tmp_path, *extra)]) == 0
+    plan = json.loads(out.read_text())
+    assert plan["steps"][0]["run"] == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "requirements"]
+    values = plan[worker_kinds.PLAN_KEY]["values"]
+    assert values["issues"] == ["12", "34"] and values["mode"] == "standard" and values["repo"] == str(tmp_path)
+
+
+def test_render_requirements_without_the_worker_inputs_names_them(tmp_path, capsys, last_result):
+    out = tmp_path / "req.json"
+    assert route.main(["render", *_requirements_args(out, tmp_path)]) == 2
+    detail = last_result(capsys.readouterr().out)["cause"]["detail"]
+    assert "issues" in detail and "mode" in detail
+    assert not out.exists()
+
+
+def test_render_refuses_worker_inputs_for_a_given_worker(tmp_path, capsys, last_result):
+    """渡した worker は values.json を読まないので、テンプレートに無い名前は今までどおり断る。"""
+    out = tmp_path / "req.json"
+    extra = ["--add", "worker=ndf-worker", "--set", "mode=standard"]
+    assert route.main(["render", *_requirements_args(out, tmp_path, *extra)]) == 2
+    assert "無い差し込み: mode" in last_result(capsys.readouterr().out)["cause"]["detail"]
+
+
+def test_render_implement_with_a_given_worker_holds_no_values(tmp_path):
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert worker_kinds.PLAN_KEY not in json.loads(out.read_text())
+    assert not (tmp_path / "impl.state").exists()
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_render_publishes_a_new_plan_readable_only_by_the_owner(tmp_path):
+    """PR 4319 の指摘 r3-1・r3-2: プランは worker の入力を含むので、所有者だけが読み書きできる 0600 で公開する。"""
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _mode(out) == 0o600
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".impl.json.")] == []
+
+
+def test_render_replaces_an_existing_0644_plan_with_a_0600_one(tmp_path):
+    out = tmp_path / "impl.json"
+    out.write_text("{}\n", encoding="utf-8")
+    out.chmod(0o644)
+    before = out.stat().st_ino
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _mode(out) == 0o600 and out.stat().st_ino != before
+    assert json.loads(out.read_text())["steps"]
+
+
+def test_render_does_not_write_through_an_existing_symlink(tmp_path):
+    target = tmp_path / "target.json"
+    target.write_text("keep\n", encoding="utf-8")
+    out = tmp_path / "impl.json"
+    out.symlink_to(target)
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert target.read_text(encoding="utf-8") == "keep\n"
+    assert not out.is_symlink() and _mode(out) == 0o600
 
 
 def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():

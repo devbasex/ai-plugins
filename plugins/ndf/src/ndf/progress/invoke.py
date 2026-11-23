@@ -31,22 +31,22 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, limits, result
+from ndf.contracts import facts, limits, result, worker_paths
+from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
-from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, model, stages
+from ndf.progress import definition, merge_pending, model, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -118,6 +118,19 @@ class TemplateValuesMissing(route.RouteError):
     def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
         listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
         super().__init__(f"テンプレート {template_name} の差し込みの値が無い: {listed}")
+        self.missing = dict(missing)
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return [{"key": n, "source": s} for n, s in self.missing.items()]
+
+
+class KindInputsMissing(route.RouteError):
+    """プランの作業（`{{worker}}` の後ろの名前）が読む入力か作業場所が決まらない。`missing` は名前 → 出所。"""
+
+    def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
+        listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
+        super().__init__(f"テンプレート {template_name} の作業の入力が無い: {listed}")
         self.missing = dict(missing)
 
     @property
@@ -384,32 +397,65 @@ def _project(location: Path) -> dict[str, Any]:
     return project
 
 
-def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
-    """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
+def _issue_numbers(run: StageRun) -> list[str]:
+    """工程の入力の課題の番号（小さい順。先頭が代表の課題）。入力に課題が無ければ空。"""
+    issues = run.inputs["issues"] if "issues" in run.inputs else None
+    return [str(n) for n in sorted(int(n) for n in issues)] if isinstance(issues, list) else []
 
-    題と本文は保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の回答・続き・
-    打ち直し）はその写しを使う。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
+
+def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
+    """代表の課題の題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つも無ければ空。
+
+    課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
+    PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を検証する（`route.launch_values`）。
+    題と本文は試行ごとに保存先へ初回に 1 度だけコピーし（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
+    （承認の回答・続き・プランの打ち直し）はそのコピーを使う。工程の新しい試行は `clear_values` がコピーを消し、課題と作成者の
+    権限を読み直す。同じ試行の中で読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
     届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
+
+    コピーは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読むコピーは呼んだ利用者が
+    持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
+    precondition にする）。作成者の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
+    書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
+    保存先のパスで返す（共有の領域のリンクを経ない）。PR を作るステップ（`gh pr create --body-file`）はこの名前を開き直すので、
+    返す前に、コピーの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
+    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめたコピーと別の本文を送らない）。
     """
-    issues = run.inputs["issues"] if "issues" in run.inputs else None
-    if not isinstance(issues, list) or len(issues) != 1:
+    issues = _issue_numbers(run)
+    if not issues:
         return {}
     number = int(issues[0])
-    out = work_dir / ISSUE_BODY_FILE.format(number=number)
-    copy = work_dir / ISSUE_TITLE_FILE.format(number=number)
-    held = plan_files.read_json(copy)
-    if held is not None and isinstance(held.get("title"), str) and out.is_file():
-        return {"title": held["title"], "body_file": str(out), "issue": str(number)}
-    found = issue_text(location, number)
-    if found is None:
-        return None
-    title, body = found
-    out.write_text(body, encoding="utf-8")
-    plan_files.write_json(copy, {"title": title})
+    out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
+    with worker_paths.open_or_create(work_dir) as wd:
+        out = wd.path / out_name
+        title = _held_title(wd, copy_name, out_name)
+        if title is None:
+            found = issue_text(location, number)
+            if found is None:
+                return None
+            title, body = found
+            worker_paths.write_file(wd, out_name, body, private=True)
+            worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
+        worker_paths.check_unshared(wd, out_name)
     return {"title": title, "body_file": str(out), "issue": str(number)}
+
+
+def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
+    """同じ試行がコピーした題。題のコピーと本文のコピーがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
+
+    私有でないコピー（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
+    """
+    text = worker_paths.read_file(wd, copy_name, owned=True)
+    if text is None or worker_paths.read_file(wd, body_name, owned=True) is None:
+        return None
+    try:
+        held = json.loads(text)
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れたコピーは無いものとして読み直す
+        return None
+    return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
 
 
 def _branch_of(run: StageRun) -> Optional[str]:
@@ -434,36 +480,102 @@ def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
     """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
-    （`route.derived`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から
-    組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
+    （`route.derived_locally`）→ 課題の題と本文（`_fill_from_issue`）→ マージの方式（`route.derived_merge_method`）→
+    起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から組むときだけの補い
+    （`_fill_review`）を通す。リファクタリングの起動（`_fill_refactor`）は、設定が無いときの既定を課題を読む前の欠けの検査
+    （`_require_before_issue`）に見せるため、打った場所の値のすぐ後に決める（#3908 の決定 7）。
+
+    課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりにコピーを消すので、先に読むと
+    手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と作成者の権限を読み直すためである（PR 4289 の指摘）。
+    同じ理由で、課題の前には手元で決まる打った場所の値（`route.derived_locally`）だけを決め、GitHub に問うマージの方式
+    （`route.derived_merge_method`）は課題を読んだ後に決める（課題を読めずに止まる試行で問い合わせを増やさない。PR 4289 の指摘）。
+    ただしマージの方式を決められずに止まった試行の打ち直し（目印 `merge_pending.PENDING_FILE` がある）では、方式を課題より
+    先に問うて、決まらなければ課題を読まずに止める（`_merge_method_first`）。方式を問う GitHub の失敗のうち打ち直せば
+    通りうるものは、方式が無いとせずに `github.GitHubError` を上げる（`merge_pending.ask`。PR 4289 の指摘）。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
     （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ設定（`_project`）で、CI に寄せるかの判定と
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    names, values, untrusted = _fill_from_sources(t, run, work_dir, cwd, project=project, local_tests=local_tests)
-    values = route.derived(t, values, cwd)
-    values, launched = route.launched(t, values)
+    names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
+    values = route.derived_locally(t, values, cwd)
+    route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
+    values = {**values, **_fill_refactor(t, values, run, work_dir, project=project)}
+    _require_before_issue(t.name, names, values)
+    pending = work_dir / merge_pending.PENDING_FILE
+    values = _merge_method_first(t, names, values, pending)
+    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
+    values = merge_pending.ask(t, {**values, **issued}, pending)
+    values, launched = route.launched(t, values, issues=_issue_numbers(run))
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
-    values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
+    if "merge_method" in missing:
+        merge_pending.mark(pending)
     if missing:
         raise TemplateValuesMissing(t.name, missing)
+    pending.unlink(missing_ok=True)
     return values
 
 
+def _merge_method_first(
+    t: route.Template, names: Sequence[str], values: Mapping[str, route.Value], pending: Path
+) -> dict[str, route.Value]:
+    """前の試行がマージの方式を決められずに止まっていれば（目印 `pending` がある）、課題を読む前に方式を問う。
+
+    目印に同じ値で決めた方式が記録してあれば問わずに使う（`merge_pending.held_method`。方式が決まった後で課題を読めずに
+    止まった打ち直し）。止まっている間に GitHub の許す方式が変わってもその場では問わず、GitHub がその方式でのマージを断った
+    ときに組み直す（`merge_pending.refused`。PR 4289 の指摘）。問うて決まらなければ課題を読まずに `TemplateValuesMissing`
+    （目印は残す）、決まれば方式を目印へ記録しておいて足した値を返す。目印が無ければ今の値のまま（方式は課題の後に問う）。
+    """
+    mark = merge_pending.read(pending)
+    if mark is None:
+        return dict(values)
+    held = merge_pending.held_method(mark, values)
+    if held is not None and "merge_method" in t.params and "merge_method" not in values:
+        return {**values, "merge_method": held}
+    out = merge_pending.ask(t, values, pending)
+    missing = _missing(names, out, FILL_SOURCES)
+    if "merge_method" in missing:
+        raise TemplateValuesMissing(t.name, {"merge_method": missing["merge_method"]})
+    merge_pending.remember(pending, values, out.get("merge_method"))
+    return out
+
+
 def _fill_from_sources(
-    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+    t: route.Template, run: StageRun, *, project: Mapping[str, Any], local_tests: bool
 ) -> tuple[tuple[str, ...], dict[str, route.Value], dict[str, str]]:
-    """工程の入力と出所の表（`FILL_SOURCES`）から埋めた値。プランが使う差し込みの名前・その値・出所の上書き
-    （書き手を信用しない課題の差し込み → `FROM_UNTRUSTED_ISSUE`）を返す。"""
+    """工程の入力と、出所の表（`FILL_SOURCES`）のうち課題を除く出所から埋めた値。プランが使う差し込みの名前・その値・
+    入力に無く出所の表から求める差し込み → 出所（課題の出所は呼び手が `_fill_from_issue` で後から埋める）を返す。"""
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
-    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
-    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
-    return names, values, untrusted
+    values = {**values, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    return names, {**values, **_fill_refs(t, values, run)}, wanted
+
+
+def _fill_refs(t: route.Template, values: Mapping[str, route.Value], run: StageRun) -> dict[str, route.Value]:
+    """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題からコピーする（#3908 の r2-2）。
+
+    スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、まとめた課題のうちコミットに出ない課題を
+    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文のコピー（`_issue_values`）には足さない。
+    """
+    if "refs" not in t.params or "refs" in values:
+        return {}
+    issues = _issue_numbers(run)
+    return {"refs": issues} if issues else {}
+
+
+# 課題を読んだ後に決まりうる差し込み（課題の出所と、`route.launched` が補う `review`・`acceptance`、課題の後に GitHub に問う
+# `merge_method`）
+AFTER_ISSUE = frozenset({*(n for n, s in FILL_SOURCES.items() if s == FROM_ISSUE), "review", "merge_method", *route.LAUNCH_SOURCES})
+
+
+def _require_before_issue(name: str, names: Sequence[str], values: Mapping[str, route.Value]) -> None:
+    """課題を読む前に、課題を読んでも決まらない差し込み（`AFTER_ISSUE` の外）が欠けていれば `TemplateValuesMissing`。"""
+    missing = {n: s for n, s in _missing(names, values, FILL_SOURCES).items() if n not in AFTER_ISSUE}
+    if missing:
+        raise TemplateValuesMissing(name, missing)
 
 
 # つなぎ目のレビューの起点にする文脈のキー（#3879 構成要素 5）
@@ -488,60 +600,12 @@ def _fill_review(
     return {"review": [*review, "--base", gathered]}
 
 
-REFACTOR_CANDIDATES = "refactor-candidates.md"
-PLAN_FILE = "issues/issue-{number}-plan.md"
-# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
-TIMING_HEADING = "リファクタリングの時機"
-SPRINT_END = "スプリントの終わり"
-NO_TARGET = "しない"
-
-
-def _cells(line: str) -> list[str]:
-    """Markdown の表の行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
-    return plan_inputs.split_row(line)
-
-
-def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
-    """実装計画の「リファクタリングの時機」の表（時機 | 対象 | 理由）の、スプリントの終わりの行の (対象, 理由)。
-
-    見出しが無ければ空。対象が「しない」の行は含めない。
-    """
-    lines = text.splitlines()
-    heading = next((i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == TIMING_HEADING), None)
-    if heading is None:
-        return []
-    found = []
-    for line in lines[heading + 1 :]:
-        if line.startswith("#"):
-            break
-        cells = _cells(line) if line.startswith("|") else []
-        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != NO_TARGET:
-            found.append((cells[1], cells[2]))
-    return found
-
-
-def _fill_refactor(t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path) -> dict[str, route.Value]:
-    """cross-refactoring なら、課題の実装計画のスプリントの終わりの候補を `state_dir` へ書き、`refactor` の後ろに `--candidates` を足す。
-
-    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、`refactor` は今のまま。
-    """
-    launch, worktree = values.get("refactor"), values.get("worktree")
+def _fill_refactor(
+    t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path, *, project: Mapping[str, Any]
+) -> dict[str, route.Value]:
+    """工程「リファクタリング」の `{{refactor}}`（既定の起動と候補。`refactor_values.fill`）。"""
     issues = run.inputs["issues"] if "issues" in run.inputs else []
-    if t.name != "cross-refactoring" or not isinstance(launch, list) or not isinstance(worktree, str):
-        return {}
-    lines = []
-    for number in issues:
-        plan = Path(worktree) / PLAN_FILE.format(number=number)
-        if plan.is_file():
-            lines += [
-                f"- #{number}: {target}" + (f"（理由: {why}）" if why else "")
-                for target, why in _sprint_end_rows(plan.read_text(encoding="utf-8"))
-            ]
-    if not lines:
-        return {}
-    out = state_dir / REFACTOR_CANDIDATES
-    out.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
-    return {"refactor": [*launch, "--candidates", str(out)]}
+    return refactor_values.fill(t, values, issues, state_dir, project=project)
 
 
 def _fill_from_issue(
@@ -581,22 +645,81 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
 
 
-def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
-    """テンプレートを入力の値で埋めたプランを実行の保存先へ書き、そのパスを返す。
+# 試行の始まりに消す、前の試行が保存先に残した課題の題・本文のコピー（差し込みの値 `VALUES_FILE` と一緒に消す）
+ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
 
-    差し込みのうち入力に無いものは出所の表（`FILL_SOURCES`）と、`ndf route render` と同じく打った場所から決め
-    （`template_values`）、それでも欠ければ `TemplateValuesMissing`（`route.RouteError`）。テンプレートが無ければ `model.Refused`。
+
+def clear_values(state_dirs: Iterable[Path]) -> None:
+    """渡された保存先から前の試行の値を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
+
+    差し込みの値（`VALUES_FILE`）と課題のコピー（`ISSUE_COPIES`）を消す。コピーは差し込みの値の有無によらず消す。残すと
+    `_issue_values` がコピーを優先し、新しい試行が GitHub で直した題・本文を使わず、作成者の権限も確かめ直さない
+    （前の試行の後で write 権限を失った作成者の本文を worker に読ませる。PR 4289 の指摘）。
+    マージの方式を決められずに止まった目印（`merge_pending.PENDING_FILE`）は消さない（打ち直しが方式を先に問うため）。
+    消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
+    """
+    for state_dir in state_dirs:
+        for pattern in ISSUE_COPIES:
+            for found in state_dir.glob(pattern):
+                found.unlink(missing_ok=True)
+        (state_dir / VALUES_FILE).unlink(missing_ok=True)
+
+
+class PreparedPlan(NamedTuple):
+    """組んだ差し込みと描画の条件（手元のテストのステップを含めるか）。"""
+
+    template: route.Template
+    values: dict[str, route.Value]
+    local_tests: bool
+
+
+def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+    """プランの差し込みを 1 回だけ組み、作業ごとの入力と作業場所を確かめて `values.json` に残す（#3908 の決定 2・4）。
+
+    設定は 1 回だけ読み、差し込みは `template_values` で組む。決まらなければ `TemplateValuesMissing`、`{{worker}}` の作業が読む
+    入力か作業場所が決まらなければ `KindInputsMissing` を上げ、どちらも `values.json` を書かない。テンプレートが無ければ `model.Refused`。
     """
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランのテンプレート {run.name} が無い")
+    work_dir.mkdir(parents=True, exist_ok=True)
     project = _project(work_location(run, cwd))
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
+    gaps: dict[str, str] = {}
+    for kind in route.kinds_of(t, local_tests):
+        gaps.update(kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
+    if gaps:
+        raise KindInputsMissing(t.name, gaps)
+    write_values(work_dir, run.name, values, run.inputs, local_tests)
+    return PreparedPlan(t, values, local_tests)
+
+
+def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+    """同じ保存先に同じプランの `values.json` があればその値、無い（か別のプランのもの）なら `prepare_plan` で組んだ値。"""
+    t, held = template(run.name), read_values(work_dir)
+    if t is not None and held is not None and held["plan"] == run.name:
+        return PreparedPlan(t, held["values"], held["local_tests"])
+    return prepare_plan(run, work_dir, cwd)
+
+
+def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
+    """テンプレートを差し込みの値で埋めたプランを実行の保存先へ書き、そのパスを返す。
+
+    差し込みは同じ試行で組んだ `values.json` の値を使い、無ければ `prepare_plan` で 1 回だけ組む（入力に無い値は出所の表
+    `FILL_SOURCES` と打った場所から決め、欠ければ `TemplateValuesMissing`）。テンプレートが無ければ `model.Refused`。
+
+    プランは `values.json` と同じく、開いた保存先の記述子から、ほかの利用者が書き込めないファイルとして公開する（リンクを
+    たどって別のファイルを上書きしない）。`ndf plan next` はこのパスを開き直すので、返す前に、名前と保存先から根までのどの
+    項目もほかの利用者が差し替えられないことを確かめる（`worker_paths.check_unshared`。書いたプランと別のプランを流さない）。
+    """
+    t, values, local_tests = _prepared(run, work_dir, cwd)
     plan = route.render(t, values, local_tests=local_tests)
-    out = work_dir / f"{run.name}.json"
-    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return out
+    name = f"{run.name}.json"
+    with worker_paths.open_or_create(work_dir) as wd:
+        worker_paths.write_file(wd, name, json.dumps(plan, ensure_ascii=False, indent=2) + "\n", private=True)
+        worker_paths.check_unshared(wd, name)
+        return wd.path / name
 
 
 def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
@@ -716,33 +839,77 @@ def _github_kind(exc: github.GitHubError) -> str:
     分け方は課題の参照の読み手（`ndf.core.refs` の `_unreadable`）と同じ。状態が 0 でも届いて断られた失敗（GraphQL の誤り・
     認証が無い）は precondition。
     """
-    passing = exc.unreached or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
-    return "transient" if passing else "precondition"
+    return "transient" if exc.passing else "precondition"
+
+
+# プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError)
+
+
+def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
+    """プラン `name` を組めなかった例外の `stopped` の結果 JSON。分類に無い例外は None（呼び手が上げ直す）。
+
+    差し込みと作業の入力の欠け（`TemplateValuesMissing`・`KindInputsMissing`）は値を足して打ち直せば通るので precondition に
+    し、名前と出所を `items` に並べる（決定 4）。ほかの分類は工程から呼ぶ経路（`_call_plan`）と起動の前の確かめ
+    （`progress.run._start`）で同じである。
+    """
+    if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
+        detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
+        return result.stopped(PLAN, "precondition", detail, items=exc.items)
+    if isinstance(exc, route.RouteError):
+        return result.stopped(PLAN, "invalid", f"プランのテンプレート {name} を埋められない: {exc}")
+    if isinstance(exc, GitError):
+        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} の省いた値を決められない: {exc}")
+    if isinstance(exc, FactUnknown):
+        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} のレビューの起点を決められない: {exc}")
+    if isinstance(exc, github.GitHubError):
+        detail = f"プランのテンプレート {name} の差し込みを GitHub から読めない: {exc}"
+        return result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after)
+    if isinstance(exc, OSError):
+        return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
+    if isinstance(exc, worker_paths.EntryError):
+        return result.stopped(
+            PLAN, "precondition", f"プラン {name} の保存先のファイル（{VALUES_FILE} など）を安全に読み書きできない: {exc}"
+        )
+    return None
+
+
+def _checked_dir(work_dir: Path) -> Path:
+    """プランの実行の保存先を開いて（無ければ作って）解いた、ほかの利用者が差し替えられないパス。
+
+    プランの実行は保存先をパスから開き直すので、リンクを経る元のパスでなくこのパスを渡す（リンクを置いた祖先は、解いた
+    パスの連鎖を確かめる `worker_paths.check_unshared` に入らず、後で別のディレクトリへ向けられうる）。保存先の中も、ほかの
+    利用者が名前を作れず、回の判定に読む状態（回の記録・打ち直しの数・結果のバックアップ）が私有のものであることを確かめる
+    （差し替えた前の結果で、流すべきプランを飛ばさない）。
+    """
+    with worker_paths.open_or_create(work_dir) as wd:
+        worker_paths.check_unshared(wd)
+        worker_paths.check_owned(wd, (plan_runner.RUN_FILE, ATTEMPT_FILE, plan_runner.RESULTS_DIR))
+        record = plan_files.read_json(wd.path / plan_runner.RUN_FILE)
+        if record is not None and (wd.path / plan_runner.RESULTS_DIR).is_dir():
+            with worker_paths.open_subdir(wd, plan_runner.RESULTS_DIR) as results:
+                worker_paths.check_owned(results, (plan_runner.result_path(wd.path, durable.run_name(record["key"])).name,))
+        return wd.path
 
 
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
         if template(run.name) is None:
             return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} が無い"), {})
-        work_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = _checked_dir(work_dir)  # 以後の読み書きと `--state-dir` は、プランと同じ確かめたディレクトリで行う
         ended = _no_route(run, work_dir, answer)
         if ended is not None:
             return ended
         argv = plan_argv(run, work_dir, answer, cwd)
-    except TemplateValuesMissing as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}", items=exc.items), {})
-    except route.RouteError as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}"), {})
-    except GitError as exc:
-        return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} の省いた値を決められない: {exc}"), {})
-    except FactUnknown as exc:
-        return StageResult(
-            result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} のレビューの起点を決められない: {exc}"), {}
-        )
-    except github.GitHubError as exc:
-        detail = f"プランのテンプレート {run.name} の差し込みを GitHub から読めない: {exc}"
-        return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})
-    return _from_process(run, runner(argv, cwd, run.env({})))
+    except PLAN_FAILURES as exc:
+        failed = plan_failure(run.name, exc)
+        if failed is None:
+            raise
+        return StageResult(failed, {})
+    got = _from_process(run, runner(argv, cwd, run.env({})))
+    if merge_pending.refused(got.report, run.inputs):
+        (work_dir / VALUES_FILE).unlink(missing_ok=True)  # 次の打ち直しが方式をもう一度問う
+    return got
 
 
 def script_argv(argv: Sequence[Any]) -> list[str]:

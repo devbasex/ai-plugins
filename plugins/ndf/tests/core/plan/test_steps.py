@@ -46,6 +46,15 @@ def test_outcome_of_a_gate_keeps_its_routes():
     assert steps.outcome_of(_step(), 10, line)["routes"] == {"approved": "x"}
 
 
+def test_outcome_of_a_stopped_step_keeps_its_gaps():
+    # PR 4307 の r8-2: worker が返した欠け（incomplete の詳細）をプランの停止結果へ渡す。ok の gaps は拾わない
+    gap = {"kind": "output", "name": "branch", "reason": "無い"}
+    line = json.dumps({"status": "stopped", "summary": "s", "cause": {"kind": "incomplete", "detail": "d"}, "gaps": [gap]})
+    assert steps.outcome_of(_step(), 6, line)["gaps"] == [gap]
+    assert steps.outcome_of(_step(), 0, json.dumps({"status": "ok", "summary": "s", "gaps": [gap]}))["gaps"] is None
+    assert steps.outcome_of(_step(), 0, "no json")["gaps"] is None
+
+
 def test_steps_after_the_worktree_is_removed_run_in_the_repo_root(repo, tmp_path):
     """マージで作業場所が消えた・登録が外れた後のステップはリポジトリの根で打つ（#2969・#3022・#3186・#1886）。"""
     wt = tmp_path / "wt"

@@ -1,4 +1,4 @@
-"""プランの回をまたぐ記録（状態の保存先の `prs.json`・`outputs.json`・`progress.jsonl`）の読み書き。
+"""プランの回をまたぐ記録（状態の保存先の `prs.json`・`outputs.json`・`step-gaps.json`・`progress.jsonl`）の読み書き。
 
 書くのは耐久ステップ（`runner.run_step`・`runner.record_choices`）で、読むのはプランの結果を組む `runner` である。
 """
@@ -18,6 +18,9 @@ PRS_FILE = "prs.json"
 # ステップの結果の outputs を回をまたいで重ねる記録（プランの結果の outputs へ載せる）
 OUTPUTS_FILE = "outputs.json"
 OUTPUTS_SCHEMA = result.SCHEMA + "#/$defs/outputs"
+# 止まったステップが結果 JSON に残した欠け（ステップの id → gaps）。プランの停止結果（incomplete）の詳細に載せる
+STEP_GAPS_FILE = "step-gaps.json"
+GAP_SCHEMA = result.SCHEMA + "#/$defs/gap"
 # 選択の記録を追記する進捗記録（追記だけ。書き換えない）
 PROGRESS_FILE = "progress.jsonl"
 
@@ -36,6 +39,26 @@ def recorded_outputs(state_dir: Path) -> tuple[Optional[dict[str, Any]], list[st
     if errs:
         return None, [f"ステップの outputs が結果 JSON の形に合わず載せなかった: {'; '.join(errs)}"]
     return found, []
+
+
+def _keep_step_gaps(state_dir: Path, step_id: str, gaps: Optional[list[Any]]) -> None:
+    """ステップ `step_id` の最後の回が残した欠けを記録する。欠けが無ければ前の回の記録を外す（打ち直しで通ったステップの欠けを残さない）。"""
+    found = read_json(state_dir / STEP_GAPS_FILE)
+    kept = {k: v for k, v in (found if isinstance(found, dict) else {}).items() if k != step_id}
+    if gaps:
+        kept[step_id] = gaps
+    if kept or found is not None:
+        write_json(state_dir / STEP_GAPS_FILE, kept)
+
+
+def recorded_step_gaps(state_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    """止まったステップごとの欠け。欠けの形（結果 JSON の gap）に合わない要素は載せない（停止結果の形を壊さない）。"""
+    found = read_json(state_dir / STEP_GAPS_FILE)
+    if not isinstance(found, dict):
+        return {}
+    return {
+        k: gaps for k, v in found.items() if isinstance(v, list) and (gaps := [g for g in v if not contracts.schema_errors(g, GAP_SCHEMA)])
+    }
 
 
 def recorded_choices(state_dir: Path) -> list[dict[str, Any]]:

@@ -58,6 +58,8 @@ _ADMIN_MERGE = (
     "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
     " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method}) { pullRequest { merged } } }"
 )
+# マージの方式が基底で許されていない断りの停止理由の種類（方式を渡した呼び手が、ほかの断りと分けて方式を決め直す）
+METHOD_REFUSED = "merge_method"
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
 # マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
@@ -140,6 +142,11 @@ class GitHubError(Exception):
         self.retry_after = retry_after
         self.quota = quota
         self.unreached = unreached
+
+    @property
+    def passing(self) -> bool:
+        """打ち直せば通りうる失敗（不達・5xx・上限）か。状態が 0 でも相手が受けて断った失敗（GraphQL の誤り・認証が無い）は偽。"""
+        return self.unreached or self.status >= 500 or self.retry_after is not None or self.status == 429
 
     @classmethod
     def of(cls, failure: github_limits.Failure) -> GitHubError:
@@ -319,10 +326,7 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
 
 
 class MergeOutcome(NamedTuple):
-    """マージの結果。断られたら `kind` に停止理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
-
-    マージキューへ入れて実際のマージを待つときは `ci_pending`（`MERGE_QUEUE_PENDING`）。
-    """
+    """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。"""
 
     merged: bool
     kind: Optional[str]
@@ -422,12 +426,8 @@ def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[
 def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
     """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
     want = method if method is not None else "（設定なし）"
-    return MergeOutcome(
-        False,
-        "refused",
-        f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）",
-        pull.head_sha,
-    )
+    detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
+    return MergeOutcome(False, METHOD_REFUSED, detail, pull.head_sha)
 
 
 def _response_body(resp: Any) -> Any:
