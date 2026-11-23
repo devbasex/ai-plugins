@@ -160,35 +160,38 @@ def _absent(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
     return [k for k in keys if k not in have]
 
 
-def missing_outputs(stage: stages.StageDef, obj: Any) -> list[str]:
-    """工程の出力に欠けた文脈のキー（工程の定義の `outputs` の順）。"""
-    return _absent(obj, "outputs", stage.outputs)
+def _missing_sources(obj: Any, part: str, keys: tuple[str, ...]) -> list[tuple[str, Optional[str]]]:
+    """欠けた文脈のキーと、その取り場所（`x-source`。無ければ None）の組（`keys` の順）。"""
+    return [(k, context_source(k)) for k in _absent(obj, part, keys)]
 
 
-def _missing_line(part: str, key: str) -> str:
+def _missing_line(part: str, key: str, source: Optional[str]) -> str:
     line = f"{part}: 文脈のキー {key} が無い"
-    source = context_source(key)
     return line if source is None else f"{line}（取り場所: {source}）"
 
 
-def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
-    return [_missing_line(part, k) for k in _absent(obj, part, keys)]
-
-
-def _validate_stage(stage: stages.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
+def _validate_stage(
+    stage: stages.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str
+) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
     if ref is None:
-        return [f"工程 {stage.name} に{what}の規約が無い"]
-    return validate_io(ref, obj) + _missing_keys(obj, part, keys)
+        return [f"工程 {stage.name} に{what}の規約が無い"], []
+    missing = _missing_sources(obj, part, keys)
+    return validate_io(ref, obj) + [_missing_line(part, k, s) for k, s in missing], missing
+
+
+def check_stage_output(stage: stages.StageDef, obj: Any) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
+    """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。"""
+    return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
 
 
 def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
     """工程の出力を、工程の出力の規約と、工程が書く文脈のキー（`outputs`）で確かめる。"""
-    return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
+    return check_stage_output(stage, obj)[0]
 
 
 def validate_stage_input(stage: stages.StageDef, obj: Any) -> list[str]:
     """工程の入力を、工程の入力の規約と、工程が読む文脈のキー（`inputs`）で確かめる。"""
-    return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")
+    return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")[0]
 
 
 # --- 文書の検査 --------------------------------------------------------------------------
@@ -209,6 +212,7 @@ def _ndf_meta(node: Mapping[str, Any]) -> Any:
     return dig(node, "metadata", NAMESPACE)
 
 
+@contracts.cached_reader
 def _context_properties() -> dict[str, Any]:
     return contracts.load_json(CONTEXT)["properties"]
 
