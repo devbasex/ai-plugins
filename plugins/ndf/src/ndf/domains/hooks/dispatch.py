@@ -147,7 +147,7 @@ def run(
     outcome.verdict = combine(verdicts)
     if outcome.verdict.kind == "pushback" and not counter.allow_pushback():
         outcome.limited = True
-        outcome.notes["limited_reason"] = outcome.verdict.reason[:200]
+        outcome.notes["limited_reason"] = outcome.verdict.recorded[:200]
         outcome.verdict = PASS
     return outcome
 
@@ -178,7 +178,11 @@ def combine(verdicts: list[Verdict]) -> Verdict:
     same = [v for v in verdicts if v.kind == kind]
     chosen = [v for v in same if v.sole] or same
     joined = "\n\n".join(v.text for v in chosen if v.text)
-    return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
+    if kind not in REASON_KINDS:
+        return advise(joined)
+    # 計測と待ちの知らせへ渡す文は、応答の本文を含まない `recorded` でつなぐ（会話へ入る文と同じなら持たない）
+    logged = "\n\n".join(v.recorded for v in chosen if v.recorded)
+    return Verdict(kind, reason=joined, logged=logged if logged != joined else "")
 
 
 def clip(text: str, limit: int, notes_dir: Path) -> str:

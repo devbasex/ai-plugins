@@ -362,3 +362,26 @@ def test_stop_wait_cuts_a_long_matched_sentence():
     long = "あ" * (stop_wait.MATCHED_CHARS * 2)
     shown = stop_wait.reason((long,))
     assert long not in shown and "あ" * (stop_wait.MATCHED_CHARS - 1) + "…" in shown
+
+
+# レビュー r1-1: 当たった文は会話へ返す文にだけ入れ、上限で通したときの計測と待ちの知らせへは本文を渡さない
+def test_stop_wait_keeps_the_matched_sentence_out_of_the_limited_reason(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    text = "作業を終えた。秘密の値 s3cr3t を入れてよいか決めていただければ進めます。"
+    spec = next(s for s in dispatch.load_specs() if s.name == "stop-wait")
+    ctx = context.HookContext("claude", "Stop", {"last_assistant_message": text})
+    with Counter.open("s-1", tmp_path) as counter:
+        counter.data["pushbacks"] = tables.policy_value("hook.pushback", "attempts")
+        out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
+    assert out.limited and "s3cr3t" not in out.notes["limited_reason"]
+    assert out.notes["limited_reason"] == stop_wait.LOGGED
+
+
+# レビュー r1-2: 質問の Tool が無いランタイムへは、その Tool で出し直す案内を返さない
+def test_stop_wait_does_not_ask_codex_to_use_a_missing_tool(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    claude = _check(tmp_path, MISSED[0])
+    codex = _check(tmp_path, MISSED[0], runtime="codex")
+    assert claude.kind == codex.kind == "pushback"
+    assert stop_wait.ASK["claude"] in claude.reason and stop_wait.ASK["claude"] not in codex.reason
+    assert stop_wait.ASK_WITHOUT_TOOL in codex.reason
