@@ -489,11 +489,12 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
     return review_launch(t.name, branch, base)
 
 
-def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
+def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> dict[str, Value]:
     """テンプレートが使う差し込みのうち値の無い `review`・`acceptance` の補い（単発の経路と工程から組む経路で共有する）。
 
     `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
-    決まらない差し込みは含めない。
+    課題を束ねた単位（`issues` が 2 つ以上）は、課題ごとの `--issue` を番号の順に並べる（#3908 の決定 7。代表の課題
+    （`issue`）だけでは残りの課題の条件を照らさない）。決まらない差し込みは含めない。
     """
     out: dict[str, Value] = {}
     if _omitted(t, values, "review"):
@@ -502,7 +503,8 @@ def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
             out["review"] = review
     issue = values.get("issue")
     if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
-        out["acceptance"] = [ACCEPTANCE_ISSUE, issue]
+        named = sorted({issue, *issues}, key=int) if len(issues) > 1 else [issue]
+        out["acceptance"] = [arg for n in named for arg in (ACCEPTANCE_ISSUE, n)]
     return out
 
 
@@ -521,13 +523,14 @@ def check_acceptance(values: Mapping[str, Value]) -> None:
             raise RouteError(f"acceptance の {arg} の後に値が無い: {' '.join(found)}")
 
 
-def launched(t: Template, values: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+def launched(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> tuple[dict[str, Value], dict[str, Value]]:
     """`values` に起動の補い（`launch_values`）を足して `acceptance` を検査（`check_acceptance`）した値と、補った値。
 
-    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。補った値は、
+    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。`issues` は工程の
+    入力の課題の並びで、束ねた単位の `acceptance` を課題ごとの `--issue` にする（#3908 の決定 7）。補った値は、
     `{{review}}` が既定の起動かを呼び手が見分けるために返す。検査に通らなければ `RouteError`。
     """
-    filled = launch_values(t, values)
+    filled = launch_values(t, values, issues=issues)
     out = {**values, **filled}
     check_acceptance(out)
     return out, filled

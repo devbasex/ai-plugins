@@ -208,6 +208,16 @@ def test_impl_acceptance_defaults_to_the_issue():
     assert step["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "12"]
 
 
+def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
+    # #3908 の決定 7: 課題を束ねた単位は、課題ごとの --issue で全部の課題の条件を照らす（代表の課題だけにしない）
+    t = route.choose("implement")
+    given = values("implement", issue="12")
+    del given["acceptance"]
+    got = route.launch_values(t, given, issues=["30", "12"])
+    assert got["acceptance"] == ["--issue", "12", "--issue", "30"]
+    route.check_acceptance(got)
+
+
 def test_impl_acceptance_takes_the_list_as_given():
     acceptance = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
     step = _impl_steps(acceptance=acceptance)["acceptance"]

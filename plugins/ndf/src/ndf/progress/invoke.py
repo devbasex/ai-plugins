@@ -45,9 +45,8 @@ from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
-from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, merge_pending, model, stages, worker_kinds
+from ndf.progress import definition, merge_pending, model, refactor_values, stages, worker_kinds
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -402,9 +401,17 @@ def _project(location: Path) -> dict[str, Any]:
     return project
 
 
-def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
-    """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
+def _issue_numbers(run: StageRun) -> list[str]:
+    """工程の入力の課題の番号（小さい順。先頭が代表の課題）。入力に課題が無ければ空。"""
+    issues = run.inputs["issues"] if "issues" in run.inputs else None
+    return [str(n) for n in sorted(int(n) for n in issues)] if isinstance(issues, list) else []
 
+
+def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
+    """代表の課題の題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つも無ければ空。
+
+    課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
+    PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を照らす（`route.launch_values`）。
     題と本文は試行ごとに保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
     （承認の回答・続き・プランの打ち直し）はその写しを使う。工程の新しい試行は `clear_values` が写しを消し、課題と書き手の
     権限を読み直す。同じ試行の中で読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
@@ -413,8 +420,8 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
     """
-    issues = run.inputs["issues"] if "issues" in run.inputs else None
-    if not isinstance(issues, list) or len(issues) != 1:
+    issues = _issue_numbers(run)
+    if not issues:
         return {}
     number = int(issues[0])
     out = work_dir / ISSUE_BODY_FILE.format(number=number)
@@ -455,7 +462,7 @@ def template_values(
     """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
     （`route.derived_locally`）→ 課題の題と本文（`_fill_from_issue`）→ マージの方式（`route.derived_merge_method`）→
     起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から組むときだけの補い
-    （`_fill_review`・`_fill_refactor`）を通す。
+    （`_fill_review`・`refactor_values.fill`）を通す。
 
     課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりに写しを消すので、先に読むと
     手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
@@ -478,9 +485,9 @@ def template_values(
     values = _merge_method_first(t, names, values, pending)
     issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
     values = merge_pending.ask(t, {**values, **issued}, pending)
-    values, launched = route.launched(t, values)
+    values, launched = route.launched(t, values, issues=_issue_numbers(run))
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
-    values = {**values, **_fill_refactor(t, values, run, work_dir)}
+    values = {**values, **refactor_values.fill(t, values, run.inputs["issues"] if "issues" in run.inputs else [], work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if "merge_method" in missing:
         merge_pending.mark(pending)
@@ -557,62 +564,6 @@ def _fill_review(
     if by_default and isinstance(branch, str):
         return {"review": route.review_launch(t.name, branch, gathered)}
     return {"review": [*review, "--base", gathered]}
-
-
-REFACTOR_CANDIDATES = "refactor-candidates.md"
-PLAN_FILE = "issues/issue-{number}-plan.md"
-# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
-TIMING_HEADING = "リファクタリングの時機"
-SPRINT_END = "スプリントの終わり"
-NO_TARGET = "しない"
-
-
-def _cells(line: str) -> list[str]:
-    """Markdown の表の行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
-    return plan_inputs.split_row(line)
-
-
-def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
-    """実装計画の「リファクタリングの時機」の表（時機 | 対象 | 理由）の、スプリントの終わりの行の (対象, 理由)。
-
-    見出しが無ければ空。対象が「しない」の行は含めない。
-    """
-    lines = text.splitlines()
-    heading = next((i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == TIMING_HEADING), None)
-    if heading is None:
-        return []
-    found = []
-    for line in lines[heading + 1 :]:
-        if line.startswith("#"):
-            break
-        cells = _cells(line) if line.startswith("|") else []
-        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != NO_TARGET:
-            found.append((cells[1], cells[2]))
-    return found
-
-
-def _fill_refactor(t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path) -> dict[str, route.Value]:
-    """cross-refactoring なら、課題の実装計画のスプリントの終わりの候補を `state_dir` へ書き、`refactor` の後ろに `--candidates` を足す。
-
-    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、`refactor` は今のまま。
-    """
-    launch, worktree = values.get("refactor"), values.get("worktree")
-    issues = run.inputs["issues"] if "issues" in run.inputs else []
-    if t.name != "cross-refactoring" or not isinstance(launch, list) or not isinstance(worktree, str):
-        return {}
-    lines = []
-    for number in issues:
-        plan = Path(worktree) / PLAN_FILE.format(number=number)
-        if plan.is_file():
-            lines += [
-                f"- #{number}: {target}" + (f"（理由: {why}）" if why else "")
-                for target, why in _sprint_end_rows(plan.read_text(encoding="utf-8"))
-            ]
-    if not lines:
-        return {}
-    out = state_dir / REFACTOR_CANDIDATES
-    out.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
-    return {"refactor": [*launch, "--candidates", str(out)]}
 
 
 def _fill_from_issue(
