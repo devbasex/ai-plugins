@@ -318,7 +318,7 @@ def test_a_uid_place_open_to_others_falls_back_to_a_private_dir(tmp_path, monkey
         got = write_gate.gate_path()
         assert got.is_relative_to(tmp_path / "private") and got == write_gate.gate_path()
         assert got.parents[3].stat().st_mode & 0o777 == 0o700
-        assert "持ち主か権限が違う" in capsys.readouterr().err
+        assert "オーナーか権限が違う" in capsys.readouterr().err
     finally:
         write_gate._private_home.cache_clear()
 

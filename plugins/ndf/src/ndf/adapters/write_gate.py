@@ -11,7 +11,7 @@
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
 - 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを放す
   `_finish` は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が既定のスレッドプールを埋めても放せるようにする
-- passwd に載らない UID は、環境に依らない UID ごとの置き場（`/tmp/ndf-github-<UID>`。持ち主と 0700 を確かめる）を使う
+- passwd に載らない UID は、環境に依らない UID ごとの保存先（`/tmp/ndf-github-<UID>`。オーナーと 0700 を確かめる）を使う
 
 ロックは取るたびに `slot_pool.lock` で作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
 再入として通るためである。
@@ -56,7 +56,7 @@ LOCK_SECONDS = 10.0
 # 記録を最後に書いた時刻が今よりこの秒を越えて先なら、壁時計が戻ったとみなす
 CLOCK_SLACK = 1.0
 GATE_FILE = "write-gate.json"
-# passwd に載らない UID の置き場の親。環境変数（TMPDIR）を読まない（決定 1）
+# passwd に載らない UID の保存先の親。環境変数（TMPDIR）を読まない（決定 1）
 SHARED_TMP = Path("/tmp")
 # 非同期の経路で送信のロックを放す専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
 _FINISHER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndf-write-gate-finish")
@@ -189,27 +189,27 @@ def _restore(record: dict[str, float], old: Reservation) -> None:
 
 @functools.cache
 def _private_home() -> Path:
-    """このプロセスだけが使う置き場（0700・名前を予測できない）。UID ごとの置き場を安全に使えないときだけ使う。"""
+    """このプロセスだけが使う保存先（0700・名前を予測できない）。UID ごとの保存先を安全に使えないときだけ使う。"""
     return Path(tempfile.mkdtemp(prefix="ndf-github-"))
 
 
 def _uid_home(uid: int) -> Optional[Path]:
-    """UID ごとの置き場 `SHARED_TMP/ndf-github-<UID>`。シンボリックリンク・ほかの持ち主・0700 でなければ None。"""
+    """UID ごとの保存先 `SHARED_TMP/ndf-github-<UID>`。シンボリックリンク・ほかのオーナー・0700 でなければ None。"""
     place = SHARED_TMP / f"ndf-github-{uid}"
     try:
         place.mkdir(mode=0o700, exist_ok=True)
         info = os.lstat(place)
     except OSError as exc:
-        diag(f"書き込みの順番の記録の置き場を作れない: {place}: {exc}", kind="write_gate")
+        diag(f"書き込みの順番の記録の保存先を作れない: {place}: {exc}", kind="write_gate")
         return None
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_mode & 0o077:
-        diag(f"書き込みの順番の記録の置き場を使えない（持ち主か権限が違う）: {place}", kind="write_gate")
+        diag(f"書き込みの順番の記録の保存先を使えない（オーナーか権限が違う）: {place}", kind="write_gate")
         return None
     return place
 
 
 def _home() -> Path:
-    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）は `HOME` を読まず UID ごとの置き場へ落とす。"""
+    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）は `HOME` を読まず UID ごとの保存先へ落とす。"""
     uid = os.getuid()
     try:
         return Path(pwd.getpwuid(uid).pw_dir)
@@ -492,7 +492,7 @@ class WriteGate(BaseThrottler):
         return {k: float(raw[k]) for k in (*TIMES, "written_at")}
 
     def _store(self, record: dict[str, float], now: float, seen: int) -> None:
-        """記録を書き、プロセスの中の記録へ写す。`seen` の後にプロセスの中だけで変えた分は残し、未保存の印も消さない。"""
+        """記録を書き、プロセスの中の記録へ写す。`seen` の後にプロセスの中だけで変えた分は残し、未保存の変更も消さない。"""
         record["written_at"] = now
         with self._mutex:
             self._memory = self._merged(record, seen)
