@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,8 @@ RULES_PATH = Path(__file__).with_name("rules.json")
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
+# シンボリックリンクをたどる回数の上限（輪になったリンクで止まらないため。Linux の MAXSYMLINKS と同じ）
+MAX_LINK_HOPS = 40
 
 
 class CheckError(Exception):
@@ -151,18 +154,56 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 def load_settings(repo_root: Path) -> dict[str, Any]:
     """リポジトリの設定（`.ndf/project.json`）の値。無ければ空の辞書、読めない・オブジェクトでなければ `CheckError`。
 
-    リンク先の種別を見る前に、シンボリックリンクを解いた先がリポジトリの内側にあることを確かめる。外を指せば、
-    リンク先が無い・ディレクトリでも `CheckError`（リポジトリの外のファイルの有無を結果に出さない）。
+    シンボリックリンクは 1 つずつたどり、途中でリポジトリの外へ出た時点で `CheckError` にする（`_resolve_inside`）。
+    外のパスは解決もしないので、外のファイル・リンクの有無は結果に出ない。
     """
     path = repo_root / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
-    if not path.resolve().is_relative_to(repo_root.resolve()):
-        raise CheckError(f"リポジトリの設定がリポジトリの外を指す: {path}")
+    path = _resolve_inside(repo_root, path)
     if not path.is_file():
         return {}
     data = read_json(path, "リポジトリの設定を読めない")
     if not isinstance(data, dict):
         raise CheckError(f"リポジトリの設定がオブジェクトでない: {path}")
     return data
+
+
+def _resolve_inside(repo_root: Path, path: Path) -> Path:
+    """`repo_root` の下の `path` のシンボリックリンクを 1 つずつ解いた実体のパス。
+
+    リンクの先・`..` がリポジトリの外へ出た時点で `CheckError` にし、外のパスは `lstat` もしない（`Path.resolve` は
+    外のリンクをたどってから内へ戻れば通すため、外のリンクの有無が結果に出る）。絶対パスのリンク先は、解決済みの根の
+    パスで始まるものだけを内側として扱う。
+    """
+    root = repo_root.resolve()
+    outside = CheckError(f"リポジトリの設定がリポジトリの外を指す: {path}")
+    pending = list(path.relative_to(repo_root).parts)
+    current = root
+    hops = 0
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if current == root:
+                raise outside
+            current = current.parent
+            continue
+        step = current / part
+        if not step.is_symlink():
+            current = step
+            continue
+        hops += 1
+        if hops > MAX_LINK_HOPS:
+            raise CheckError(f"リポジトリの設定のリンクが深すぎる: {path}")
+        target = Path(os.readlink(step))
+        if target.is_absolute():
+            if target.parts[: len(root.parts)] != root.parts:
+                raise outside
+            current = root
+            pending = list(target.parts[len(root.parts) :]) + pending
+        else:
+            pending = list(target.parts) + pending
+    return current
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
