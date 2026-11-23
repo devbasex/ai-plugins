@@ -97,10 +97,10 @@
 
 ### Task 8: 運用上限でも引継ぎに要る呼び出しを通す（U4）
 
-- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`src/ndf/domains/relay/switch_decide.py`・`contracts/hooks/guards.json`・`src/ndf/core/plan/cli.py`・`wait_decide.py`・`queue_run.py`・`contracts/schemas/io/plan.args.schema.json`・`plan.result.schema.json`・`docs/contracts/commands.md`（再生成）・`skills/development-workflow/references/context-window.md`・`parallel.md`・`tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_decide.py`・`tests/core/plan/` の `wait`・`next`・`queue` のテスト
-- **変更内容:** `_next_step` を `_passes` に置き換え、`_in_handoff`・`_ndf_args_pass` を足す。`guards.json` の `context-limit` に `params.pass_tools`（TaskStop）・`pass_ndf`（`records handoff check`・`relay context record` と許す引数）を足す。許すリダイレクトは詳細設計書の 2 つの形だけ。`HANDOVER_PROMPT` を詳細設計書の文にする（文が求める呼び出しを通すのと同じ単位で入れる。U1 の PR 4216 の cross-review r1-1）。文が従わせる「引継ぎの後の実行の確かめ」の手順を `context-window.md` の「判定と再起動を記録する」の後と `parallel.md` の「セッションの切り替え」に書き、手順が使う `ndf plan wait` の項目（`run`・`start`・`parent`・`owner`・止まりの `next`・承認ゲートの `routes`）・`ndf plan next --expect-run`・`ndf plan queue` の `queue.lock` を詳細設計書のとおり足す（文と参照先の手順と使うコマンドを同じ単位で届ける。PR 4216 の cross-review r4-8）
+- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`src/ndf/domains/relay/switch_decide.py`・`contracts/hooks/guards.json`・`tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_decide.py`
+- **変更内容:** `_next_step` を `_passes` に置き換え、`_in_handoff`・`_ndf_args_pass` を足す。`guards.json` の `context-limit` に `params.pass_tools`（TaskStop）・`pass_ndf`（`records handoff check`・`relay context record` と許す引数）を足す。許すリダイレクトは詳細設計書の 2 つの形だけ。`HANDOVER_PROMPT` を詳細設計書の文にする（文が求める呼び出しを通すのと同じ単位で入れる。U1 の PR 4216 の cross-review r1-1）
 - **満たす受け入れ条件:** `3995:6`（通す呼び出しの側）・`3995:7`（求める文の側）
-- **進め方:** 失敗するテスト（詳細設計書の `_passes` の行の通る例と止める例をすべて、`_ndf_args_pass` と CLI の更新先の行: 一時のメインディレクトリ・worktree・リンクの組で、真になった引数を `ndf records … handoff check --trim` で実際に打つと更新されたファイルがいつもメインディレクトリの `.ndf/handoff` の下にあり、`base` が `records/cli.py` の `_root` と等しい。`HANDOVER_PROMPT` が `wait` の行・`ndf records handoff check`・監視が子と一緒に止まったこと・打ったコマンドを引数ごと残すこと・次のセグメントで「引継ぎの後の実行の確かめ」の手順に従うことを含み、`ndf plan pending` を確かめに使わせず、supervisor・`ndf plan queue` が子と一緒に止まったとは書かない。詳細設計書の `_watched`・`--expect-run`・`queue.lock` の行。ロックはテストの中で同じファイルを別に開いて持ち、子のプロセスを起動しない）→ 通す最小実装 → 整理
+- **進め方:** 失敗するテスト（詳細設計書の `_passes` の行の通る例と止める例をすべて、`_ndf_args_pass` と CLI の更新先の行: 一時のメインディレクトリ・worktree・リンクの組で、真になった引数を `ndf records … handoff check --trim` で実際に打つと更新されたファイルがいつもメインディレクトリの `.ndf/handoff` の下にあり、`base` が `records/cli.py` の `_root` と等しい。`HANDOVER_PROMPT` が `wait` の行・`ndf records handoff check`・背景の作業が子と一緒に止まったことを含む）→ 通す最小実装 → 整理
 
 ### Task 9: 拒否の文に背景の作業の扱いと引継ぎの手順を書く（U4）
 
@@ -146,14 +146,14 @@
 
 ## レビューの単位
 
-課題を依存の向きで 7 つの単位に分ける。1 つの単位にしない理由は、見込みの差分が合わせて約 2,850 行で 1,000 行を超えるためである（guard の通す呼び出しの境界の例が多く、テストだけで約 1,000 行になる）。どの単位も単独で CI が通り、終えた後も guard とラッパーが動く。止め続ける（U5）は、引継ぎに要る呼び出しを通す（U4）の後に置き、引継ぎ文書を Read できないまま止め続ける状態をスプリントブランチに作らない。行数は `git diff --shortstat <ベース>...HEAD -- . ':(exclude)uv.lock' ':(exclude)plugins/ndf/docs/contracts' ':(exclude)docs/glossary.md'` で数える（`docs/contracts/*.md` は `ndf check --write-spec`、`docs/glossary.md` は `ndf records glossary render` の生成物）。
+課題を依存の向きで 7 つの単位に分ける。1 つの単位にしない理由は、見込みの差分が合わせて約 2,600 行で 1,000 行を超えるためである（guard の通す呼び出しの境界の例が多く、テストだけで約 1,000 行になる）。どの単位も単独で CI が通り、終えた後も guard とラッパーが動く。止め続ける（U5）は、引継ぎに要る呼び出しを通す（U4）の後に置き、引継ぎ文書を Read できないまま止め続ける状態をスプリントブランチに作らない。行数は `git diff --shortstat <ベース>...HEAD -- . ':(exclude)uv.lock' ':(exclude)plugins/ndf/docs/contracts' ':(exclude)docs/glossary.md'` で数える（`docs/contracts/*.md` は `ndf check --write-spec`、`docs/glossary.md` は `ndf records glossary render` の生成物）。
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
 | U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
 | U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | （実装の後に書き足す） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | （実装の後に書き足す） |
-| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 800（引継ぎの後の実行の確かめに使う `ndf plan` の変更と手順書の 2 つの節を含む） | （実装の後に書き足す） |
+| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | （実装の後に書き足す） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
 | U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
 | U7 手順書・README・用語集 | Task 13・14 | 3995:10・3995:11・3995:12・3995:13・3995:14 | 約 300 | （実装の後に書き足す） |
@@ -245,6 +245,6 @@ main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実�
 | `guards.json` の `context-limit` の `summary` は U5 で書き換える | 今の `summary` が消した `hook.context-limit` の名前を指す | U1 では消した名前の参照だけを「運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）」に直した。詳細設計書の文への書き換えは U5 のまま |
 | Task 1: ラッパーが同じセグメントで 2 度目の引継ぎを求めないことのテストが無ければ足す | 既にある（`test_relay_decide.py` の `test_context_over_the_limit_asks_for_a_handover_once`、`test_relay_wrapper_question.py` の `test_a_resume_in_the_same_section_keeps_the_handover_asked`） | 足さない |
 | Task 1: 移すテストは記録・較正・集計（`test_recorded_work_*`・`test_append_and_read_*`・`test_estimate_*`・`test_calibrate_*`・`test_cli_record_*`） | `test_context_dir_follows_the_legacy_state_root` も `context_policy` に依らない記録のテストで、U2 で `test_context_policy.py` を消すと失われる | U1 であわせて `test_context_report.py` へ移した |
-| Task 3: `HANDOVER_PROMPT` を詳細設計書の文にする | U1 の guard は運用上限以上で引継ぎ文書の Write/Edit しか通さず、文が求める `ndf records handoff check` の Bash と引継ぎ文書の Read を止める（PR 4216 の cross-review r1-1）。詳細設計書の文の「背景の作業は終わった」は、終わりを待たずに止めた supervisor の工程を済んだと読ませる（同 r1-2。止める前に待つのは #4049） | U1 では今の文のまま。文は Task 8（U4）で `_passes` と同じ単位に入れ、詳細設計書と設計書の文を「監視は子と一緒に止まった。工程は別のセッションで動き続けていることがあるので、打ち直す前に既存の実行の状態と保存済みの結果を確かめ、止まったと確かめた未完了の工程だけを打ち直す」に直した（PR 4216 の cross-review r2-1） |
+| Task 3: `HANDOVER_PROMPT` を詳細設計書の文にする | U1 の guard は運用上限以上で引継ぎ文書の Write/Edit しか通さず、文が求める `ndf records handoff check` の Bash と引継ぎ文書の Read を止める（PR 4216 の cross-review r1-1）。詳細設計書の文の「背景の作業は終わった」は、終わりを待たずに止めた supervisor の工程を済んだと読ませる（同 r1-2。止める前に待つのは #4049） | U1 では今の文のまま。文は Task 8（U4）で `_passes` と同じ単位に、詳細設計書の文のまま入れる。r1-2 は設計を変えない: 止める前に背景の作業の終わりを待つのは #4049 の範囲で、#4049 の設計が「#3995 の `HANDOVER_PROMPT` の「背景の作業は終わった」は #4049 の後にラッパーの振る舞いと合う」と書いている。cross-review の r2〜r5 が U4 の設計に足した `ndf plan` の実行の照らし方（`src/ndf/core/plan/*` を変える）は、承認済みの決定を変え touches の外なので取り込まない |
 | hook のテストは `NDF_CONTEXT_LIMIT` を流す人の値から切り離している | `tests/domains/hooks/_hooks.py` の `ENV_NAMES` に無い | U1 で `ENV_NAMES` に足した（境界のテストが手元の値で揺れないように） |
 | U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |
