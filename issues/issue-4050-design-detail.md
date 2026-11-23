@@ -83,11 +83,11 @@ plugins/ndf/
 
 ## #4091 へ分けたもの（範囲外）
 
-**待つ行のラッパーを止めて席を返し、待ちが解けたら上限の判定を通して席を取り直す仕組みは、#4091 へ分けた（設計文書の決定 15）。** この文書のうち、名前に「範囲外（#4091）」の印を付けた関数・欄・型と、節「席を返す手順（`park_lane`）」「`next` との競合」「席を返した行の回答と再開」は #4091 の設計の材料として残すもので、#4050 では作らない。#4050 で作るのは次の形である。
+**待つ行のレーンのラッパーを止めて席を返し、待ちが解けたら上限の判定を通して席を取り直す仕組みは、#4091 へ分けた（設計文書の決定 15）。** この文書のうち、名前に「範囲外（#4091）」の印を付けた関数・欄・型と、節「席を返す手順（`park_lane`）」「`next` との競合」「席を返した行の回答と再開」は #4091 の設計の材料として残すもので、#4050 では作らない。#4050 で作るのは次の形である。
 
 | 部品 | #4050 での形 |
 | --- | --- |
-| 実装の待ちの行のラッパー | 止めない。conductor は `held` を受けて応答を終え、ラッパーは今の承認待ちと同じく動いたまま枠を使う |
+| 実装の待ちの行のレーンのラッパー | 止めない。conductor は `held` を受けて応答を終え、ラッパーは今の承認待ちと同じく動いたまま枠を使う |
 | マシン全体の数（`lanes_of`・`held_seats`） | 変えない。実装の待ちの行・承認待ちの行も実行中として数える |
 | 生死の判定（`judge`） | 実装の待ちの行（`holding`）を `HELD`（`stall: false`）と読み、止まりとして知らせない |
 | 待ちの起動し直し | `phase_wait`（実装の待ちなら `implementation_wait`）が空になった `holding` の行へ、今の回答の後の next と同じ続きの手（`seated=True`）で起動し直す。キーは `next:<スプリント>:<held_seq>`、入力は `ndf progress next` → `ndf lanes row resumed <スプリント>`（`--answered` 無し） |
@@ -167,7 +167,7 @@ plugins/ndf/
 | `LaneRow.relaunchable` | `lane/types.py` | 新設 | `@property -> bool` | 続きの手で起動してよい行の唯一の条件。`idle_seq == 0`（`row_idle` を持たない行。今のとおり）か、`idle_seq > active_seq`（応答を終えたまま）か、`relaunching`。`awaiting_next`・`snapshot_of` の `released`・`claim_relaunch` がどれもここを読む |
 | `Claim` | `lane/types.py` | 新設（型） | `Literal["claimed", "untracked", "stale"]` | `claim_relaunch` の結果 |
 | `leave_phase` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, phase: str) -> Optional[int]` | そのフェーズの `row_entered` があり、その後に同じフェーズの `row_left` が無いときだけ `row_left`（`phase`）を書く |
-| `Env.delegate` | `run.py` | 新設 | `Callable[[StageDef, str], Optional[DelegateResult]]`（工程・フェーズ） | フェーズの表の `carrier` が `organizer` のフェーズ（検証・棚卸し）の最初の工程を始める手前で呼ぶ。計画の外は None（今のとおり行の conductor が流す）。リリースは今のリリースのリクエストのままで呼ばない |
+| `Env.delegate` | `run.py` | 新設 | `Callable[[StageDef, str], Optional[DelegateResult]]`（工程・フェーズ） | フェーズの表の `carrier` が `organizer` のフェーズ（検証・棚卸し）の最初の工程を始める手前で呼ぶ。計画の外は None（今のとおりスプリントの conductor が流す）。リリースは今のリリースのリクエストのままで呼ばない |
 | `delegate` | `lane/__init__.py` | 新設 | `(conn, sprint_id: str, phase: str, stages: list[str], version: Optional[str]) -> DelegateResult` | 計画の排他の中で、同じ行の同じフェーズの開いた委ねのリクエストが無ければ `request_opened`（`lane-verify` か `lane-backlog`）を書く。中身に、委ねる工程の並び `stages`（そのモードのそのフェーズの未完の工程すべて。`documentation` の検証なら体裁レビューとリリース後テスト）・版・検証の環境（`environment`。下の「検証の環境」）を載せる。開いたものがあれば書かずにそのキーを返す。失敗で閉じたものは数えない（打ち直しで新しく書く） |
 | `_start`（委ねの枝） | `run.py` | 変更 | 変えない | `Env.delegate` がキーを返したら、そのフェーズの工程を始めずに「委ねた」として記録する。検証は、委ねた工程の並びの先頭をステップの待ち（`waiting`、待つものは `delegated:<キー>`）にし、残りは未着手のまま置く。ほかの候補が無ければ `Env.idle("delegated", 工程)` を呼んで待ちを返す。棚卸しは委ねた工程をすべて `completed`（中身に委ねたリクエストのキー）にして次へ進む |
 | `_consume_delegated` | `run.py` | 新設 | `(v: View, s: StageDef, answer: DelegateAnswer) -> list[EventDraft]` | 委ねた回答（スプリントの事象 `delegate_answered`）を 1 回で消費する。`done` なら、回答のリクエストの `stages` の工程をすべて `completed` にし、リポートを文脈の `verification` へ写す。`failed` なら、同じ工程の並びの先頭を `failed`（`cause` に `delegate_failed` とリポートのパス）にし、残りは未着手のまま置く。どちらも同じトランザクションで書き、2 回目の消費は書き足さない |
@@ -194,7 +194,7 @@ plugins/ndf/
 7. 越えてよい待ちの工程があれば、定義の並びで最初のものの待ち（承認ゲートなら `GATE`。質問は書き足さず `gate_presented` も書き足さない。委ねた工程なら `DELEGATED`）。6 で書いたフェーズの待ちがあれば結果の `metrics.held` に添える。越えてよい待ちが無ければ 6 の待ち（`HELD`）
 8. 全部の工程が終わっていれば `COMPLETE`
 
-**質問を届けた後に続ける入口（計画の内外）。** 承認ゲートに着いた最初の `next`（`work`・`wait` の手の組み立ても同じ）は 3 で `GATE` を返し、CLI の入口の `gate/entry.py` の `present` が質問・承認資料（計画の行ならリリースのリクエスト）を作って、同じ呼び出しの中で `gate_presented`（質問の id）をスプリントへ書く。書いた後に `decide` を読み直し、`START` が返る（ほかに進める工程がある）なら、ゲートの結果に `next`（`ndf progress next <スプリント>`）と `metrics.continue: true` を足し、`summary` に「回答を待ちながら次の工程を進める」と書く。進める工程が無ければ今のゲートの結果のまま（`row_idle` は 7 の待ちとして書く）。計画の行の conductor は、質問がリクエストとしてオーガナイザーへ届くので、`next` を打って続ける。計画の外の conductor は、今のとおり回答ごとのルートで人に問い（`AskUserQuestion`）、人が答える前に続ける場合だけ `next` を打つ。答えが先に届けば 4 が消費を先に返すので、計画の外の並びは今と同じになる。`gate_presented` は同じ質問の id に 1 件で、変更要求の後に流し直した質問（id が変わる）は新しく書く。
+**質問を届けた後に続ける入口（計画の内外）。** 承認ゲートに着いた最初の `next`（`work`・`wait` の手の組み立ても同じ）は 3 で `GATE` を返し、CLI の入口の `gate/entry.py` の `present` が質問・承認資料（計画の行ならリリースのリクエスト）を作って、同じ呼び出しの中で `gate_presented`（質問の id）をスプリントへ書く。書いた後に `decide` を読み直し、`START` が返る（ほかに進める工程がある）なら、ゲートの結果に `next`（`ndf progress next <スプリント>`）と `metrics.continue: true` を足し、`summary` に「回答を待ちながら次の工程を進める」と書く。進める工程が無ければ今のゲートの結果のまま（`row_idle` は 7 の待ちとして書く）。計画の行のレーンの conductor は、質問がリクエストとしてオーガナイザーへ届くので、`next` を打って続ける。計画の外の conductor は、今のとおり回答ごとのルートで人に問い（`AskUserQuestion`）、人が答える前に続ける場合だけ `next` を打つ。答えが先に届けば 4 が消費を先に返すので、計画の外の並びは今と同じになる。`gate_presented` は同じ質問の id に 1 件で、変更要求の後に流し直した質問（id が変わる）は新しく書く。
 
 **確定仕様化が候補に入るときのデプロイの状態。** `standard`・`documentation`・`operation` の並び（クリーンアップ → デプロイ → 確定仕様化）では、確定仕様化が候補に入るのは、クリーンアップが完了か無効で、デプロイが未着手（このときデプロイが先の候補で、`organizer_batch` なので待たずに始まり、確定仕様化は始まらない）・リリース承認ゲートの質問を届けた後で回答が無い（越えてよい待ち）・完了か無効のどれかのときである。デプロイが動いている（ゲートの前の作業中・作業の待ち・質問を届ける前のゲート）間は 3 がデプロイを返し、回答が載った後は 4 がデプロイの消費を返すので、確定仕様化は始まらない。確定仕様化が動いている間に回答が載っても 3 が確定仕様化を返し、終えた後の `next` が 4 で消費する。
 
@@ -343,7 +343,7 @@ plugins/ndf/
 | `LaneRow.awaiting_review` | `lane/types.py` | 新設 | `@property -> bool` | `implementing and review and not drift_reviewed`。確認待ちの判定はこの 1 か所に置き、`begin_implementation` の手順 1・`lane_env` の `hold`・`peek` はどれもここを読む（`drift` の空・null で分けない） |
 | `LaneRow.parked`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設 | `@property -> bool` | `state == RUNNING and parked_seq > max(seated_seq, unparked_seq)`（席を返した行。回答が載っても `row_seated` まで真。`row_unparked` で偽に戻る） |
 | `LaneRow.unparked_seq`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設（欄） | `int` | 最後の `row_unparked` の番号。`seated_at_seq` には入れない |
-| `LaneRow.stopped_seq`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設（欄） | `int` | 最後の `row_stopped`（席を返した行のラッパーの停止を確かめた）の番号 |
+| `LaneRow.stopped_seq`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設（欄） | `int` | 最後の `row_stopped`（席を返した行のレーンのラッパーの停止を確かめた）の番号 |
 | `LaneRow.stop_pending`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設 | `@property -> bool` | `parked and park_stop and stopped_seq < parked_seq`。止める予定で席を返し、その `row_parked` の後に停止を確かめていない行。記録だけで決まり、`wrapper_table` が一覧を読むかの条件と `stopping` の前提に使う |
 | `LaneRow.park_seat`・`LaneRow.park_stop`・`LaneRow.park_reason`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設（欄） | `int`・`bool`・`Optional[str]` | 最後の `row_parked` の `seat`（席を返した着席の番号）・`stopped`（ラッパーを止める予定だったか）・`reason`。同じ着席の停止を再開する手がこれを読む |
 | `LaneRow.seat_launch`（範囲外（#4091）。決定 15） | `lane/types.py` | 新設（欄） | `Optional[str]` | 最後の `row_seated` の `launch`（今の着席を開いた続きの手の起動のキー） |
