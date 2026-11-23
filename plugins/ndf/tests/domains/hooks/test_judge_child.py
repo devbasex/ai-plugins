@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ndf import contracts
 from ndf.adapters import claude
 from ndf.domains.hooks import judge_child as rj
 from ndf.domains.relay import account_dir
@@ -568,7 +569,18 @@ def test_a_setting_is_read_without_validating_every_policy(monkeypatch):
         rj.setting("no-such")
 
 
-@pytest.mark.parametrize("change", [{"env_names": "ANTHROPIC_"}, {"keys": "apiKeyHelper"}, {"flags": None}])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"env_names": "ANTHROPIC_"},
+        {"keys": "apiKeyHelper"},
+        {"flags": None},
+        {"env_names": []},
+        {"keys": []},
+        {"flags": ["--settings"]},
+        {"script_hosts": []},
+    ],
+)
 def test_a_wrong_shape_of_the_endpoint_setting_refuses_the_judge(monkeypatch, change):
     broken = {**rj.setting("endpoint"), **change}
     monkeypatch.setattr(rj.tables, "policy_value", lambda name, key: broken)
@@ -576,3 +588,12 @@ def test_a_wrong_shape_of_the_endpoint_setting_refuses_the_judge(monkeypatch, ch
         rj.setting("endpoint")
     got = {"parent_argv": ["claude"], "project_dir": "/", "parent_exe": "/x", "parent_exe_id": [1, 2]}
     assert rj._endpoint_broken(got, lambda _: pytest.fail("起動の直前まで進んだ")) == "JudgeSettingError"
+
+
+def test_the_endpoint_setting_is_checked_without_checking_the_schema_itself(monkeypatch):
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("判定の子でスキーマ自体を確かめた")
+
+    contracts.use_dir(None)  # 検証器のキャッシュを捨てる
+    monkeypatch.setattr(contracts.Draft202012Validator, "check_schema", refuse)
+    assert "--settings" in rj.setting("endpoint")["flags"]

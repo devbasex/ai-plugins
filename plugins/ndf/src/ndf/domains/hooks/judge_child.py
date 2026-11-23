@@ -83,14 +83,14 @@ def setting(key: str) -> Any:
 
     方針の行を読む口はここ 1 つで、値をこのモジュールへ写さない。hook と同じ表の読み（1 プロセスに 1 回・全方針の
     スキーマの検証なし）を通し、Stop のたびに検証の時間を足さない。送信先の確かめの値だけは、形の誤りで確かめが緩まないように
-    その行のスキーマで確かめる（合わなければ `JudgeSettingError` で、判定を起動しない）。
+    スキーマの 1 部分で形と必須の値を確かめる（スキーマ自体は CI が確かめる。合わなければ `JudgeSettingError` で、判定を起動しない）。
     """
     try:
         got = tables.policy_value(POLICY, key)
     except tables.TableError as exc:
         raise JudgeSettingError(str(exc)) from exc
     if key == ENDPOINT:
-        contracts.require_schema(got, ENDPOINT_SCHEMA, JudgeSettingError, f"判定の設定 {POLICY} の {ENDPOINT}")
+        contracts.require_shipped(got, ENDPOINT_SCHEMA, JudgeSettingError, f"判定の設定 {POLICY} の {ENDPOINT}")
     return got
 
 

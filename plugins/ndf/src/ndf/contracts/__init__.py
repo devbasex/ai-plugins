@@ -102,31 +102,57 @@ def load_as(rel: str, error_cls: type[ContractError]) -> Any:
 
 
 @cached_reader
-def _schema_validator(rel: str) -> Draft202012Validator:
-    """`rel` の検証器。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
+def _schema_file(path: str) -> Any:
+    """スキーマのファイルを 1 プロセスに 1 回読む（同じファイルの一部と全体を使う読み手が共有する）。"""
+    return load_json(path)
+
+
+@cached_reader
+def _shipped_validator(rel: str) -> Draft202012Validator:
+    """`rel` の検証器（スキーマ自体は確かめない）。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
     path, _, pointer = rel.partition("#")
-    schema = load_json(path)
+    schema = _schema_file(path)
     if pointer:
         if "$defs" not in schema:
             raise ContractError(f"スキーマ {path} に $defs が無い（{rel} を引けない）")
         schema = {"$schema": schema.get("$schema"), "$defs": schema["$defs"], "$ref": f"#{pointer}"}
+    return Draft202012Validator(schema)
+
+
+@cached_reader
+def _schema_validator(rel: str) -> Draft202012Validator:
+    """`rel` の検証器。スキーマ自体も確かめる。"""
+    validator = _shipped_validator(rel)
     try:
-        Draft202012Validator.check_schema(schema)
+        Draft202012Validator.check_schema(validator.schema)
     except SchemaError as exc:
         raise ContractError(f"スキーマ {_dir / rel} がスキーマとして誤り: {exc.message}") from None
-    return Draft202012Validator(schema)
+    return validator
 
 
 def schema_errors(instance: Any, rel: str) -> list[str]:
     """`instance` を `contracts/<rel>` のスキーマで確かめ、誤りを `<場所>: <理由>` の並びで返す。空なら合う。"""
-    validator = _schema_validator(rel)
+    return _errors(_schema_validator(rel), instance)
+
+
+def _errors(validator: Draft202012Validator, instance: Any) -> list[str]:
     found = sorted(("/".join(str(p) for p in e.absolute_path) or "(最上位)", e.message) for e in validator.iter_errors(instance))
     return [f"{where}: {message}" for where, message in found]
 
 
 def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:
     """`instance` が `contracts/<rel>` のスキーマに合わなければ `error_cls`（`<label> の形が違う: <誤り>`）を投げる。"""
-    errs = schema_errors(instance, rel)
+    _refuse(schema_errors(instance, rel), error_cls, label)
+
+
+def require_shipped(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:
+    """`require_schema` と同じだが、プラグインのスキーマ自体は確かめ直さない（CI が確かめる。短い間に何度も起動する子が使う）。"""
+    with raised_as(error_cls):
+        errs = _errors(_shipped_validator(rel), instance)
+    _refuse(errs, error_cls, label)
+
+
+def _refuse(errs: list[str], error_cls: type[ContractError], label: str) -> None:
     if errs:
         raise error_cls(f"{label} の形が違う: {'; '.join(errs)}")
 

@@ -16,7 +16,8 @@ from __future__ import annotations
 import ast
 import re
 from collections import defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -31,6 +32,9 @@ from ndf.contracts import limits
 RULE = "limit-readers"
 HOLE = "{}"
 NO_NAMES: frozenset[str] = frozenset()
+COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+# 解かない式（組へ分けて入れた名前の値）
+UNKNOWN = ast.Constant(None)
 
 
 @dataclass(frozen=True)
@@ -158,8 +162,20 @@ class _Module:
 
 
 @dataclass(frozen=True)
+class _Bound:
+    """名前に入る式 1 つ。`many` はその式の要素 1 つずつ（`for` の変数）、`scopes` は式が書かれた所の囲み。"""
+
+    value: ast.expr
+    many: bool
+    scopes: tuple["_Scope", ...]
+
+
+@dataclass(frozen=True)
 class _Scope:
-    """関数かクラスの 1 つの囲み。`params` は関数の引数、`imported` はこの囲みの import が束ねる名前。"""
+    """関数・クラス・内包表記の 1 つの囲み。`params` は関数の引数、`imported` はこの囲みの import が束ねる名前。
+
+    内包表記の囲みの `name` は、それを書いた囲みの名前。
+    """
 
     node: ast.AST
     name: str
@@ -171,11 +187,15 @@ class _Scope:
     def local(self) -> Mapping[str, list[tuple[ast.expr, bool]]]:
         """この囲みで束ねる名前 → 入る式と、その式の要素 1 つずつ（`for` の変数）かどうか（1 回だけ歩く）。"""
         found: defaultdict[str, list[tuple[ast.expr, bool]]] = defaultdict(list)
-        for node in _within(self.node):
-            for target, value, many in _assigned(node):
-                if isinstance(target, ast.Name):
-                    found[target.id].append((value, many))
+        nodes = self.node.generators if isinstance(self.node, COMPREHENSIONS) else _within(self.node)
+        for node in nodes:
+            for name, value, many in _assigned(node):
+                found[name].append((value, many))
         return found
+
+    def outside(self, value: ast.expr) -> bool:
+        """式がこの囲みの外で解かれる（内包表記の最初の並び）。"""
+        return isinstance(self.node, COMPREHENSIONS) and value is self.node.generators[0].iter
 
     def binds(self, name: str) -> bool:
         return name in self.params or name in self.imported or name in self.local
@@ -213,21 +233,29 @@ def _default(node: ast.AST, arg: str) -> Optional[ast.expr]:
 
 
 def _within(scope: ast.AST) -> Iterator[ast.AST]:
-    """囲みの中の節点。内側の関数・クラス・lambda の中へは降りない。"""
+    """囲みの中の節点。内側の関数・クラス・lambda の中へは降りず、内包表記の変数（`comprehension`）は返さない。"""
     for node in ast.iter_child_nodes(scope):
-        yield node
+        if not isinstance(node, ast.comprehension):
+            yield node
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             yield from _within(node)
 
 
-def _assigned(node: ast.AST) -> Iterator[tuple[ast.expr, ast.expr, bool]]:
-    """節点が束ねる先と、入る式と、その式の要素 1 つずつかどうか。"""
+def _assigned(node: ast.AST) -> Iterator[tuple[str, ast.expr, bool]]:
+    """節点が束ねる名前と、入る式と、その式の要素 1 つずつかどうか。組へ分けて入れる名前の式は解かない（`UNKNOWN`）。"""
+    targets: list[ast.expr] = []
+    value: Optional[ast.expr] = None
     if isinstance(node, ast.Assign):
-        yield from ((t, node.value, False) for t in node.targets)
-    elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
-        yield node.target, node.value, False
+        targets, value = node.targets, node.value
+    elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+        targets, value = [node.target], node.value
     elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-        yield node.target, node.iter, True
+        targets, value = [node.target], node.iter
+    many = isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension))
+    for target in targets if value is not None else []:
+        for name in ast.walk(target):
+            if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store) and value is not None:
+                yield name.id, value if name is target else UNKNOWN, many
 
 
 class _Walker(ast.NodeVisitor):
@@ -238,7 +266,7 @@ class _Walker(ast.NodeVisitor):
         self.scopes: list[_Scope] = []
         self.called: set[int] = set()
         self.handed: set[int] = set()
-        self.resolving: set[str] = set()
+        self.resolving: set[tuple[int, ...]] = set()
         self.reads: list[Read] = []
 
     # ---------------------------------------------------------------- 名前を解く
@@ -292,7 +320,10 @@ class _Walker(ast.NodeVisitor):
         name = self.full_name(node)
         owner, _, attr = (name if name is not None else "").rpartition(".")
         found = self.modules[owner].consts.get(attr) if owner in self.modules else None
-        return self._constant(found) if owner == self.mod.name and isinstance(found, (ast.Name, ast.Attribute)) else found
+        if owner != self.mod.name or not isinstance(found, (ast.Name, ast.Attribute)):
+            return found
+        with self._written_in(()):
+            return self._constant(found)
 
     def names_of(self, node: ast.expr) -> Optional[frozenset[str]]:
         """式がとりうる方針の名前。解けなければ None。"""
@@ -302,23 +333,38 @@ class _Walker(ast.NodeVisitor):
             return self._elements(node.value)
         local = self._local(node.id) if isinstance(node, ast.Name) else []
         if isinstance(node, ast.Name) and local:
-            return self._names_of_local(node.id, local)
+            return self._names_of_local(local)
         return _literal(self._constant(node) if isinstance(node, (ast.Name, ast.Attribute)) else node)
 
-    def _local(self, name: str) -> list[tuple[ast.expr, bool]]:
+    def _local(self, name: str) -> list[_Bound]:
         """囲む関数の中で `name` に入る式。関数の中で束ねていない名前と引数は空。"""
         found = self._binder(name)
         if found is None or name in found.params or name in found.imported:
             return []
-        return found.local[name]
+        depth = next(i for i, s in enumerate(self.scopes) if s is found)
+        return [_Bound(v, many, tuple(self.scopes[: depth + (not found.outside(v))])) for v, many in found.local[name]]
 
-    def _names_of_local(self, name: str, local: list[tuple[ast.expr, bool]]) -> Optional[frozenset[str]]:
+    @contextmanager
+    def _written_in(self, scopes: Sequence[_Scope]) -> Iterator[None]:
+        """式を、それが書かれた所の囲み `scopes` で解く。"""
+        here, self.scopes = self.scopes, list(scopes)
+        try:
+            yield
+        finally:
+            self.scopes = here
+
+    def _names_of_bound(self, bound: _Bound) -> Optional[frozenset[str]]:
+        with self._written_in(bound.scopes):
+            return self._elements(bound.value) if bound.many else self.names_of(bound.value)
+
+    def _names_of_local(self, local: list[_Bound]) -> Optional[frozenset[str]]:
         """関数の中の名前に入る式の和。自分の値から作り直す名前（`x = x if x else "a.b"`）は解けない。"""
-        if name in self.resolving:
+        key = tuple(id(b.value) for b in local)
+        if key in self.resolving:
             return None
-        self.resolving.add(name)
-        found = _union([self._elements(e) if many else self.names_of(e) for e, many in local])
-        self.resolving.discard(name)
+        self.resolving.add(key)
+        found = _union([self._names_of_bound(b) for b in local])
+        self.resolving.discard(key)
         return found
 
     def _elements(self, node: ast.expr) -> Optional[frozenset[str]]:
@@ -328,7 +374,8 @@ class _Walker(ast.NodeVisitor):
             return None
         own = seq is node or seq in self.mod.consts.values()
         values = seq.values if isinstance(seq, ast.Dict) else seq.elts
-        return _union([self.names_of(v) if own else _literal(v) for v in values])
+        with self._written_in(self.scopes if seq is node else ()):
+            return _union([self.names_of(v) if own else _literal(v) for v in values])
 
     # ---------------------------------------------------------------- 受け手の型を解く
 
@@ -359,8 +406,11 @@ class _Walker(ast.NodeVisitor):
         scope = self._param_scope(node.id)
         if scope is not None:
             return self._annotated(self.mod, _annotation(scope.node, node.id))
-        bound = [e for e, many in self._local(node.id) if not many]
-        return self._returned(bound[0].func) if len(bound) == 1 and isinstance(bound[0], ast.Call) else None
+        bound = [b for b in self._local(node.id) if not b.many]
+        if len(bound) != 1 or not isinstance(bound[0].value, ast.Call):
+            return None
+        with self._written_in(bound[0].scopes):
+            return self._returned(bound[0].value.func)
 
     def _returned(self, func: ast.expr) -> Optional[str]:
         """呼び先がクラスならその名前、関数なら戻り値の注釈のクラス。"""
@@ -414,7 +464,12 @@ class _Walker(ast.NodeVisitor):
     def _dynamic_names(self, node: ast.expr) -> Optional[frozenset[str]]:
         """動的な読み口の指定が、この関数のこの式に当たるときの名前。当たる指定が無ければ None。"""
         local = self._local(node.id) if isinstance(node, ast.Name) else []
-        expr = local[0][0] if len(local) == 1 else node
+        if len(local) == 1:
+            with self._written_in(local[0].scopes):
+                return self._dynamic_of(local[0].value)
+        return self._dynamic_of(node)
+
+    def _dynamic_of(self, expr: ast.expr) -> Optional[frozenset[str]]:
         at = next((s.name for s in reversed(self.scopes) if not s.is_class), self.mod.name)
         rows = [d for d in self.conf.dynamic if d.at == at and self._is_assembly(expr, d)]
         return frozenset().union(*(d.names for d in rows)) if rows else None
@@ -496,6 +551,19 @@ class _Walker(ast.NodeVisitor):
             self._record_argument(default.lineno, default, reader)
         self.scopes.append(_Scope(node, full, params, is_class, self.mod.bindings(node)))
         self.generic_visit(node)
+        self.scopes.pop()
+
+    def generic_visit(self, node: ast.AST) -> None:
+        if not isinstance(node, COMPREHENSIONS):
+            super().generic_visit(node)
+            return
+        # 最初の並びは内包表記の外で、ほかは内包表記の囲みで読む
+        first = node.generators[0]
+        self.visit(first.iter)
+        self.scopes.append(_Scope(node, self.scopes[-1].name if self.scopes else self.mod.name, NO_NAMES))
+        for child in ast.iter_child_nodes(node):
+            for part in [first.target, *first.ifs] if child is first else [child]:
+                self.visit(part)
         self.scopes.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:

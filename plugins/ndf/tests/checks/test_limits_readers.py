@@ -159,6 +159,26 @@ def test_a_name_is_resolved_in_the_innermost_function_that_binds_it(tmp_path):
     assert got(tmp_path, {"m.py": closure}) == {"a.b": ["m"]}
 
 
+def test_the_value_of_an_outer_name_is_resolved_where_it_is_written(tmp_path):
+    text = IMPORT + "def f():\n    x = 'a.out'\n    name = x\n\n    def g():\n        x = 'a.in'\n        return x, limits.seconds(name)\n"
+    assert got(tmp_path, {"m.py": text}) == {"a.out": ["m"]}
+    const = (
+        IMPORT + "A = 'a.out'\nB = A\nALL = (A,)\n\ndef f():\n    A = 'a.in'\n    limits.seconds(B)\n    [limits.seconds(n) for n in ALL]\n"
+    )
+    assert got(tmp_path, {"m.py": const}) == {"a.out": ["m"]}
+
+
+def test_a_variable_of_a_comprehension_binds_only_inside_it(tmp_path):
+    head = IMPORT + "x = 'a.out'\n\ndef f():\n"
+    assert got(tmp_path, {"m.py": head + "    [x for x in ['a.in']]\n    limits.seconds(x)\n"}) == {"a.out": ["m"]}
+    assert got(tmp_path, {"m.py": head + "    return [limits.seconds(x) for x in ['a.in']]\n"}) == {"a.in": ["m"]}
+    # 最初の並びは内包表記の外の名前で解く
+    assert got(tmp_path, {"m.py": head + "    return [x for x in [limits.seconds(x)]]\n"}) == {"a.out": ["m"]}
+    # 組へ分けて入れる名前は、外の同じ名前で解かない
+    text = head + "    return [limits.seconds(x) for x, _ in []]\n"
+    assert got(tmp_path, {"m.py": text}) == {} and unresolved(tmp_path, {"m.py": text}) == [("m", 5)]
+
+
 def test_only_the_arm_that_hands_the_argument_over_is_passed_through(tmp_path):
     rules = rules_of({"ndf.low.cap": {"arg": "name", "index": 0}, "ndf.low.again": {"arg": "name", "index": 0}})
     text = IMPORT + 'def cap(name):\n    return limits.value(name if name else "a.fallback", "count")\n\n'
