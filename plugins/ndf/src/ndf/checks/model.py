@@ -9,7 +9,7 @@ import ast
 import json
 from dataclasses import dataclass, field
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ndf import identity
@@ -62,20 +62,38 @@ class Source:
 
 @dataclass
 class Scope:
-    """見る範囲。`sources` は `plugin_root` の下だけを持つ。`settings` はリポジトリの設定（`.ndf/project.json`）の値。"""
+    """見る範囲。`sources` は `plugin_root` の下だけを持つ。"""
 
     repo_root: Path
     plugin_root: Path
     plugin_name: str
     sources: list[Source] = field(default_factory=list)
-    settings: dict[str, Any] = field(default_factory=dict)
+
+    @cached_property
+    def settings(self) -> dict[str, Any]:
+        """リポジトリの設定（`.ndf/project.json`）の値。設定を使う規則が最初に読んだときに 1 回だけ読む。
+
+        設定を使わない規則だけを当てる検査は、設定のファイルが壊れていても止まらない。
+        """
+        return load_settings(self.repo_root)
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
 
     def repo_files(self, glob: str) -> list[Path]:
-        """`repo_root` からのグロブに当たるファイル（プラグインの外も引ける）。並びは昇順。"""
-        return sorted(p for p in self.repo_root.glob(glob) if p.is_file())
+        """`repo_root` からの相対のグロブに当たるファイル（プラグインの外も引ける）。並びは昇順。
+
+        グロブが絶対パス・`..` を含む・空なら `CheckError`。解決した先がリポジトリの外のもの（外を指すシンボリックリンク）は返さない。
+        """
+        pure = PurePosixPath(glob)
+        if not glob or pure.is_absolute() or Path(glob).is_absolute() or ".." in pure.parts:
+            raise CheckError(f"リポジトリの根からの相対のグロブでない: {glob!r}")
+        root = self.repo_root.resolve()
+        try:
+            matched = list(self.repo_root.glob(glob))
+        except (ValueError, NotImplementedError) as exc:
+            raise CheckError(f"グロブを解けない: {glob!r}: {exc}") from exc
+        return sorted(p for p in matched if p.is_file() and p.resolve().is_relative_to(root))
 
     def plugin_rel(self, src: Source) -> str:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""

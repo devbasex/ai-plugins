@@ -2177,12 +2177,17 @@
         "workflows": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/RepoRelativePath"
           },
           "description": "versions のバージョンを書いてよいワークフローのパス（リポジトリの根から）"
         }
       }
+    },
+    "RepoRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(.*/)?\\.\\.(/|$))",
+      "description": "リポジトリの根からの相対のパスかグロブ。/ や \\ やドライブ名で始まる絶対パスと、.. の区切りは書けない"
     },
     "Seeds": {
       "additionalProperties": false,
@@ -2556,9 +2561,8 @@
       "additionalProperties": false,
       "properties": {
         "workflows": {
-          "type": "string",
-          "minLength": 1,
-          "description": "検査が見るワークフローのグロブ（リポジトリの根から）。無ければワークフローを見ない"
+          "$ref": "#/$defs/RepoRelativePath",
+          "description": "検査が見るワークフローのグロブ（リポジトリの根からの相対。絶対パスと .. は書けない）。無ければワークフローを見ない"
         },
         "python_ci": {
           "type": "array",
@@ -2576,16 +2580,14 @@
         "plugin_pyprojects": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/RepoRelativePath"
           },
           "description": "requires-python を配るコントラクトの python.floor と突き合わせる pyproject.toml の一覧。無ければ突き合わせない"
         },
         "launchers": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/RepoRelativePath"
           },
           "description": "UV_VERSION=・UV_INSTALLER_SHA256= の行を配るコントラクトの uv の設定と突き合わせるランチャーの一覧。無ければ突き合わせない"
         }

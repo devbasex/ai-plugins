@@ -63,6 +63,9 @@ def test_every_key_of_toolchain_and_budget_is_optional() -> None:
         {"toolchain": {"launchers": "plugins/ndf/bin/ndf"}},
         {"budget": {"dep_modules": {"ruamel-yaml": 1}}},
         {"budget": {"dep_exempt": ["ruff"]}},
+        {"toolchain": {"workflows": "/etc/*.yml"}},
+        {"toolchain": {"workflows": "../other/.github/workflows/*.yml"}},
+        {"toolchain": {"launchers": ["plugins/../../bin/ndf"]}},
     ],
     ids=[
         "toolchain の未知のキー",
@@ -76,6 +79,9 @@ def test_every_key_of_toolchain_and_budget_is_optional() -> None:
         "パスの一覧が文字列",
         "import の名前が文字列でない",
         "除外が辞書でない",
+        "ワークフローのグロブが絶対パス",
+        "ワークフローのグロブがリポジトリの外へ出る",
+        "パスの一覧に .. の区切り",
     ],
 )
 def test_malformed_toolchain_or_budget_is_rejected(settings: dict[str, Any]) -> None:
@@ -96,8 +102,32 @@ def test_repo_files_finds_files_outside_the_plugin_in_sorted_order(tmp_path: Pat
     ]
 
 
+@pytest.mark.parametrize("glob", ["/etc/*", "../*", "a/../../*", ""], ids=["絶対パス", "親へ出る", "途中で親へ出る", "空"])
+def test_repo_files_rejects_a_glob_that_is_not_repository_relative(tmp_path: Path, glob: str) -> None:
+    with pytest.raises(CheckError, match="相対のグロブでない"):
+        Scope(tmp_path, tmp_path, "p").repo_files(glob)
+
+
+def test_repo_files_skips_a_symlink_that_resolves_outside_the_repository(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "w").mkdir(parents=True)
+    (tmp_path / "secret.yml").write_text("x\n", encoding="utf-8")
+    (repo / "w" / "out.yml").symlink_to(tmp_path / "secret.yml")
+    (repo / "w" / "in.yml").write_text("on: push\n", encoding="utf-8")
+    assert Scope(repo, repo, "p").repo_files("w/*.yml") == [repo / "w" / "in.yml"]
+
+
 def test_settings_default_to_an_empty_dict(tmp_path: Path) -> None:
     assert Scope(tmp_path, tmp_path, "p").settings == {}
+
+
+def test_settings_are_read_only_when_a_rule_uses_them(tmp_path: Path) -> None:
+    path = _settings_file(tmp_path)
+    path.parent.mkdir()
+    path.write_text("{", encoding="utf-8")
+    scope = Scope(tmp_path, tmp_path, "p")
+    with pytest.raises(CheckError, match="project.json"):
+        scope.settings
 
 
 def test_load_settings_reads_the_repository_settings(tmp_path: Path) -> None:
