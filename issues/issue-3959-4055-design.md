@@ -38,7 +38,7 @@ graph TD
 | --- | --- | --- |
 | MVV のコピー | `current(root, ref) -> Snapshot`。ベースブランチの承認済みの MVV のバージョン・sha256・コピーのパス・項目の一覧（`items`）・解決したコミット（`commit`）を返す。ベースの本文が承認の記録と合わなければ `MvvError`。CLI は `ndf records mvv current --base` | `records/mvv.py` |
 | 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py` |
-| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
+| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
 | 共通原則の本文 | `principles()` を `mvv_gate.py` から `mvv.py` へ移す | `records/mvv.py` |
 
 ## 文脈と制約
@@ -195,7 +195,7 @@ graph LR
 ### 決定 2: レッドラインの指摘が残る PR を人が見るため、承認ゲートの省略の条件に cross-review の記録を足す
 
 - **質問**: #4076 から移した「レビューの記録を読んで省かない」仕組みを、どの形で承認ゲートと承認資料に入れるか
-- **選んだ案**: #4076 の詳細設計で決まった規則（#3959 の本文の「#4076 の設計から移した仕組み」）をそのまま採る。`review_rows` が `mvv-validation.jsonl` の `mvv-review` の行と読めなかった行の数を返す。`review_holds` は対象の PR ごとに、`redline` の行が 1 行でもあるキーと、今のバージョンの `deferred` の後に同じキー・同じバージョンの `fixed` が無いキーを保留として返す。head で行を選ばない。保留は検査 7 として `refusals` に入り、承認資料の「MVV 判定」の欄と PR のコメントにも同じ結果が載る。記録を読めないときと読めない行があるときも保留にする。cross-review は `redline`・`deferred` の行を書けなければ `mvv_record_failed` で止まる
+- **選んだ案**: #4076 の詳細設計で決まった規則（#3959 の本文の「#4076 の設計から移した仕組み」）をそのまま採る（伏せた行を保留にする 3 つ目の規則は、後の #4090・#4099 の設計が足したもので、決定 11 で入れる）。`review_rows` が `mvv-validation.jsonl` の `mvv-review` の行と読めなかった行の数を返す。`review_holds` は対象の PR ごとに、`redline` の行が 1 行でもあるキーと、今のバージョンの `deferred` の後に同じキー・同じバージョンの `fixed` が無いキーを保留として返す。head で行を選ばない。保留は検査 7 として `refusals` に入り、承認資料の「MVV 判定」の欄と PR のコメントにも同じ結果が載る。記録を読めないときと読めない行があるときも保留にする。cross-review は `redline`・`deferred` の行を書けなければ `mvv_record_failed` で止まる
 - 採らなかった案: 承認資料に載せるだけで、`fast`・`auto` の省略の条件には足さない（人が資料を読まない `service:mvv` の承認で、レッドラインの指摘が残る PR が通る。#4076 の cross-review の指摘 r1-5 が critical とした危険が残る）
 - 採らなかった案: 判定の LLM の材料に cross-review の記録を足し、LLM に省くかを決めさせる（同じ記録でも判定が揺れ、記録を読めないときに省かない側へ倒す決まりを LLM に任せることになる）
 - 採らなかった案: 人がゲートで承認したら記録の保留を外す行を書く（承認を表す行の形・書き込み元・読み手が要り、#4076 の cross-review の指摘 r8-3・r8-8 が規則の穴を挙げた。余分な人の承認は許す側を選ぶ）
@@ -272,7 +272,7 @@ graph LR
 - 採らなかった案: プランの側を `stage-in` の形（`{"context": {...}}`）に変える（script と Skill のすべての作業の読み方が変わる。`stage-in` の形を読むコードは本番に無く、今動いている形を捨てることになる）
 - 採らなかった案: `ndf records mvv gate` が両方の形を受け、`context` があれば中を読む（入力の形が 2 つになり、コントラクトは食い違ったまま残る。ほかの作業は平らな形しか読まない）
 - 採らなかった案: `ndf records mvv gate` だけが平らな形を確かめ、コントラクトは別の Issue で直す（同じ規則が `validate_stage_input` と判定のエントリポイントの 2 か所に分かれ、コントラクトは本番で使われないまま残る）
-- **代償**: `stage-in` の `base`・`head`（入力の範囲の起点と終点）の説明が消える。どの書き込み元も作らず、本番のどの読み手も読まないので、振る舞いは変わらない。範囲は今どおりステップの `range` が持つ
+- **代償**: `stage-in` の `base`・`head`（入力の範囲の起点と終点）の説明が消える。どの書き込み元も作らず、本番のどの読み手も読まないので、振る舞いは変わらない（`grep -rn -E 'stage-in|validate_stage_input' plugins/ndf/src` は工程の定義の参照と関数の定義だけで、呼び出しは `tests/progress/test_definition.py` だけ。2026-11-23 に確かめた）。範囲は今どおりステップの `range` が持つ
 - 根拠: Value 7 / Value 11 / Value 15（MVV バージョン 11）
 
 ### 決定 11: #4076 の直しと食い違わない部品を作るため、#4090・#4099 の決定 16 の 5 点をこの設計に入れる
