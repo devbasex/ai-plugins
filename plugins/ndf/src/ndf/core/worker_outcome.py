@@ -41,15 +41,16 @@ def gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
     return [_gap_of(g) for g in (raw if isinstance(raw, list) else [raw])]
 
 
-def _output_gap(report: Mapping[str, Any], name: str) -> list[dict[str, str]]:
-    """必須の名前 `name` の欠け。結果ファイルの `outputs` に無いか、値が outputs の形に合わなければ 1 件、合えば空。"""
+def _output_gap(report: Mapping[str, Any], name: str) -> Optional[dict[str, str]]:
+    """必須の名前 `name` の欠け。結果ファイルの `outputs` に無いか、値が outputs の形に合わなければ欠け、合えば None。"""
     have = outputs if isinstance(outputs := report.get("outputs"), dict) else {}
     if name not in have:
-        return [{"kind": "output", "name": name, "reason": "作業の結果ファイルの outputs に無い"}]
-    errs = contracts.schema_errors({name: have[name]}, OUTPUTS_SCHEMA)
-    if errs:
-        return [{"kind": "output", "name": name, "reason": f"作業の結果ファイルの outputs の値の形が違う: {'; '.join(errs)}"}]
-    return []
+        reason = "作業の結果ファイルの outputs に無い"
+    elif errs := contracts.schema_errors({name: have[name]}, OUTPUTS_SCHEMA):
+        reason = f"作業の結果ファイルの outputs の値の形が違う: {'; '.join(errs)}"
+    else:
+        return None
+    return {"kind": "output", "name": name, "reason": reason}
 
 
 def require_outputs(report: Any, required: Sequence[str]) -> tuple[Any, Optional[dict[str, Any]]]:
@@ -61,7 +62,7 @@ def require_outputs(report: Any, required: Sequence[str]) -> tuple[Any, Optional
     """
     if not (isinstance(report, dict) and report.get("status") == OK and required):
         return report, None
-    missing = [g for name in required for g in _output_gap(report, name)]
+    missing = [g for name in required if (g := _output_gap(report, name))]
     if missing:
         return {**report, "gaps": gaps_of(report) + missing}, None
     return report, {name: report["outputs"][name] for name in required}
