@@ -448,7 +448,7 @@ def _darwin_acl_lib():  # noqa: ANN202 ctypes の CDLL
             libc.acl_set_fd_np,
             libc.acl_free,
         )
-    except (OSError, AttributeError):
+    except (OSError, AttributeError):  # noqa: NDF401 外部コマンド: libc の ACL の関数を引けない macOS では持つかを確かめられない扱いにする（置き換えない）
         return None
     get_fd.restype = init.restype = ctypes.c_void_p
     get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
