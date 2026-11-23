@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import json
 import subprocess
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -138,15 +137,8 @@ def test_cli_refuses_a_plan_file_that_names_a_removed_limit(repo, capsys, tmp_pa
     assert out["cause"]["kind"] == "invalid" and "plans" in out["summary"]
 
 
-def _refuse(what):
-    def refuse(*_a, **_k):
-        raise AssertionError(f"{what} を呼んだ（待たず、子のプロセスも起動しないテスト）")
-
-    return refuse
-
-
 @pytest.fixture
-def no_git(tmp_path, monkeypatch, detached):
+def no_git(tmp_path, monkeypatch, detached, no_wait_no_child):
     """Git も `ndf relay ls` も子のプロセスで打たない作業ディレクトリ（`git init` しない）。保存先とリポジトリの識別を固定の値にし、
     生死の材料をラッパーの無い一覧にする。待ちと子のプロセスの起動は、呼ばれたら落ちる偽にする。"""
     work = tmp_path / "work"
@@ -157,8 +149,6 @@ def no_git(tmp_path, monkeypatch, detached):
     monkeypatch.setattr(command, "repo_id", lambda _cwd, _root: "https://example.invalid/o/work")
     probes = lambda repo, name: liveness.Probes(functools.partial(launch.wrapper_name, repo, name), lambda: {}, lambda _sid: None)  # noqa: E731
     monkeypatch.setattr(plan_run, "probes", probes)
-    monkeypatch.setattr(time, "sleep", _refuse("time.sleep"))
-    monkeypatch.setattr(subprocess, "Popen", _refuse("subprocess.Popen"))
     yield work
     durable.release_store(root)
 

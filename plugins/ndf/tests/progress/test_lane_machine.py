@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-import time
 from collections import Counter
 from datetime import UTC, datetime
 
@@ -165,19 +164,6 @@ def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_doe
     assert seen == [("w-b", "w-c"), ("w-b", "w-c")]
 
 
-def _refuse(what):
-    def refuse(*_a, **_k):
-        raise AssertionError(f"{what} を呼んだ（待たず、子のプロセスも起動しないテスト）")
-
-    return refuse
-
-
-def _no_wait_no_child(monkeypatch):
-    """本物の時間の待ちと子のプロセスの起動を、呼ばれたら落ちる偽にする。"""
-    monkeypatch.setattr(time, "sleep", _refuse("time.sleep"))
-    monkeypatch.setattr(subprocess, "Popen", _refuse("subprocess.Popen"))
-
-
 def _lock(record, busy=False):
     """起動の排他（`machine.admit_lock`）の偽。オーナーがいる間（`busy` なら常に）入ろうとすると待たずに `LockBusy` を上げ、
     入れたら出入りを `record` へ `lock-in`・`lock-out` として積む。"""
@@ -201,11 +187,10 @@ def _lock(record, busy=False):
 PIDS = {"pa": "plan:w-a", "pb": "plan:w-b", "pc": "plan:w-c"}
 
 
-def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_cap(monkeypatch):
+def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_cap(monkeypatch, no_wait_no_child):
     """別の 2 つの計画の起動の許可が同時に求められても、一覧の取得・数え上げ・上限の判定・索引・起動の手を起動の排他の中で
     打つので、起動した後の稼働中の数が上限を超えない（#3989 の受け入れ条件 8・#4217）。A が排他を持つ間（A の起動の手の中）に
     B を打ち、B は数えずに lock で待つ。"""
-    _no_wait_no_child(monkeypatch)
     named_cap.write(identity.load().state_dir, 3)
     shared = {"o-a": _row()}
     calls, current, after, results = {}, [], {}, {}
@@ -272,9 +257,8 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
     assert calls["C"] == ["lock-in", "listed", "count", "over_cap", "lock-out"]
 
 
-def test_a_busy_lock_makes_the_admission_wait_without_counting(monkeypatch):
+def test_a_busy_lock_makes_the_admission_wait_without_counting(monkeypatch, no_wait_no_child):
     """起動の排他を取れなければ、上限も一覧も読まず、数えず、索引も起動の手も打たずに lock で待つ（#3989 の受け入れ条件 9・#4217）。"""
-    _no_wait_no_child(monkeypatch)
     hits = Counter()
 
     def counted(name, value=None):
