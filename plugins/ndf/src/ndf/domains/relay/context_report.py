@@ -274,9 +274,7 @@ def _rework(rows: list[dict[str, Any]]) -> int | str:
     keep = Counter(
         r["stage"]
         for r in rows
-        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION
-        and r.get("verdict") == ct.CONTINUE
-        and r.get("stage")
+        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage")
     )
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
