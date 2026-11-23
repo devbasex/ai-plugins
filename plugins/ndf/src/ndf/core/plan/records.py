@@ -56,8 +56,9 @@ def recorded_step_gaps(state_dir: Path) -> dict[str, list[dict[str, Any]]]:
     found = read_json(state_dir / STEP_GAPS_FILE)
     if not isinstance(found, dict):
         return {}
-    kept = {k: [g for g in v if not contracts.schema_errors(g, GAP_SCHEMA)] for k, v in found.items() if isinstance(v, list)}
-    return {k: v for k, v in kept.items() if v}
+    return {
+        k: gaps for k, v in found.items() if isinstance(v, list) and (gaps := [g for g in v if not contracts.schema_errors(g, GAP_SCHEMA)])
+    }
 
 
 def recorded_choices(state_dir: Path) -> list[dict[str, Any]]:
