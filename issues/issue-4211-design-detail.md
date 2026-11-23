@@ -31,11 +31,13 @@ flowchart LR
 | `src/ndf/progress/plan/wait_decide.py` | 変更 | `batch_closed` の `failed`・`aborted` を知らせる | — | モジュール | `NOTICE_KINDS`（変更） |
 | `src/ndf/progress/command.py`（`wait`） | 変更 | 委ねた検証の待ちを `status: gate` で返す | `run.py` | モジュール | `wait`（変更） |
 | `skills/development-workflow/SKILL.md` | 変更 | 引数 `--batch <id>` | — | — | — |
-| `src/ndf/progress/lane/fold.py`・`types.py` | 変更 | `batch_claimed`・`batch_revoked`・`batch_closed` を `PlanView` に畳む | — | `PlanView`・`Batch`（新設の型） | `fold_plan`（変更） |
+| `src/ndf/progress/lane/fold.py`・`types.py` | 変更 | `batch_claimed`・`batch_revoked`・`batch_closed`・`batch_seat_lent`・`batch_seat_returned` を `PlanView` に畳む | — | `PlanView`・`Batch`（新設の型） | `fold_plan`（変更） |
 | `src/ndf/progress/lane/launch.py` | 変更 | 種類 `batch` の行を始める・続ける・中止する入力を組む | `progress/command.py` | モジュール | `batch_commands`・`batch_of`・`BATCH_GOAL_END`（新設）、`start_commands`・`start_prompt`・`goal_prompt`・`_going_on`・`cancel_commands`・`_workflow_args`（変更） |
-| `src/ndf/progress/plan/run.py` | 変更 | 種類 `batch` の行を開発ループの行と同じく生死の判定へ渡し、担い手の行に要求元の席を貸し、取り消したまとめの担い手を起動しない | `lane/liveness.py`（変更なし） | モジュール | 生死の判定の呼び手・`first_input`・`launch_lane`（変更） |
+| `src/ndf/progress/plan/run.py` | 変更 | 種類 `batch` の行を開発ループの行と同じく生死の判定へ渡し、担い手の行に要求元の席を貸し、取り消したまとめの担い手を起動しない | `lane/liveness.py`（変更なし） | モジュール | 生死の判定の呼び手・`first_input`・`launch_lane`（変更）、`lend_seat`・`return_seat`（新設） |
+| `src/ndf/progress/lane/launch.py`（`Seat`・`replace`） | 変更 | 貸し出しの起動に、貸し出し元のラッパーの名前と席を載せる | `domains/relay/hub.py` | `Seat` | `Seat.lend`（新設の欄）・`replace`（変更） |
+| `src/ndf/domains/relay/hub.py` | 変更 | 貸し出しの起動（`--lend-from <名前> --lend-seat <席>`）で、貸し出し元の席を確かめて新しい担い手を起動し、担い手の席を登録する | `registry` | モジュール | `spawn`（変更）・`_lent_ok`（新設） |
 | `src/ndf/progress/command.py` | 変更 | `ndf progress new --batch <id>` で工程を持たない子のステートマシンを作る | — | モジュール | `new`（変更） |
-| `contracts/workflow/progress.json` | 変更 | 事象 `batch_claimed`・`batch_revoked`・`batch_closed`（計画）と `delegate_answered`（スプリント）、リクエストの種類 `lane-verify`・`lane-backlog` | — | — | — |
+| `contracts/workflow/progress.json` | 変更 | 事象 `batch_claimed`・`batch_revoked`・`batch_closed`・`batch_seat_lent`・`batch_seat_returned`（計画）と `delegate_answered`（スプリント）、リクエストの種類 `lane-verify`・`lane-backlog` | — | — | — |
 | `contracts/workflow/parallel-plan.schema.json` | 変更 | 行の入力 `kind: batch` | — | — | — |
 | `contracts/workflow/context.schema.json` | 変更 | 文脈のキー `verification` | — | — | — |
 | `contracts/schemas/io/lanes.args.schema.json`・`docs/contracts/commands.md` | 変更 | `lanes batch` の引数と説明 | — | — | — |
@@ -312,16 +314,27 @@ flowchart LR
 | `new` | `src/ndf/progress/command.py` | 変更 | 引数に `--batch <id>` | `--loop` と同じく工程を持たない子のステートマシンを作る。`--mode`・`--issues`・`--loop` と一緒には渡せない。`--parent` が要る |
 | 生死の判定の呼び手 | `src/ndf/progress/plan/run.py` | 変更 | 今のまま | 種類 `batch` の行を開発ループの行と同じく、子のステートマシンの ID で `judge` へ渡す（工程が無いので `ndf progress wait` は承認待ちを返さず、ラッパーの生死で決まる）。止まり（`STALLED`）の再起動は上の `goal_prompt` の続け方で `show` からやり直す |
 | 回答の後の入力 | `src/ndf/progress/lane/launch.py` | 変更なし | — | 種類 `batch` の行には回答を書かないので使わない |
-| 担い手の行の席 | `src/ndf/progress/plan/run.py`（`launch_lane`） | 変更 | 今のまま | 検証のまとめの担い手の行は、まとめた要求元の行のうち貸し出せるもの（下の「席の貸し出し」）が 1 つでもあれば、その席を借りて起動する（`continues` と同じく `seated=True` で、マシン全体の上限で待たせない）。貸し出せる要求元が無い（棚卸しのまとめ・要求元を中止した・要求元が待ちの間に別の工程を流している）ときは今の行の起動の上限の判定を通る |
+| 担い手の行の席 | `src/ndf/progress/plan/run.py`（`launch_lane`） | 変更 | 今のまま | 検証のまとめの担い手の行の最初の起動（`continues` でない）は、まとめた要求元の行のうち貸し出せるもの（下の「席の貸し出し」）が 1 つでもあれば、`lend_seat` で貸し出しを予約してから、貸し出しの起動（`launch.Seat(<担い手の席>, lend=(<要求元のラッパーの名前>, <要求元の席>))`）でマシン全体の上限で待たせずに起動する。貸し出せる要求元が無い（棚卸しのまとめ・要求元を中止した・要求元が待ちの間に別の工程を流している・ほかの担い手へ貸し出し中）ときは今の行の起動の上限の判定を通る。担い手の続きの起動（中止・`/goal` の入れ直し）は今のとおり `seated=True` で、ハブが貸し出しの起動で登録した担い手自身の席を確かめる |
+| `lend_seat` | `src/ndf/progress/plan/run.py` | 新設 | `(conn, plan_id: str, batch_id: str, borrower: tuple[str, str]) -> Optional[Lend]` | 計画の排他（`lane.lock_plan`）の 1 つのトランザクションで、担い手の行に有効な貸し出しがあればそれを返し（耐久ステップの打ち直し）、無ければ要求元を順に照らして最初に貸し出せるものへ `batch_seat_lent`（まとめの id・担い手のレーンと行・要求元のレーンと行・要求元の席）を書いてコミットし返す。無ければ None |
+| `return_seat` | `src/ndf/progress/plan/run.py` | 新設 | `(conn, plan_id: str, batch_id: str, reason: str) -> None` | 計画の排他の中で、そのまとめの有効な貸し出しに `batch_seat_returned`（理由）を書く。有効な貸し出しが無ければ書かない |
+| `_lent_ok` | `src/ndf/domains/relay/hub.py` | 新設 | `(entries, name: str, seat: str, lend: tuple[str, str]) -> Optional[Outcome]` | 貸し出しの起動の席の確かめ。登録簿の貸し出し元の名前の行の席が `lend` の席と同じで、ほかの行の `lent_from` がその名前を指していなければ None（本数を判定しない）。通ったら `spawn` は担い手の行を `seat`（担い手の席）・`lent_from`（貸し出し元の名前）付きで登録簿へ書く。違えば `refused`（「貸し出し元の席が登録簿に無い」）で、`launch_lane` は `return_seat` してから今の行の起動の上限の判定へ進む |
 
-**席の貸し出し。** 同時に作業する会話の数を上限の内に保つため、席を貸した要求元は担い手が終わるまで会話を動かさない。#4210 が先に入っても後に入っても、次の 2 つの条件で同じ上限を守る。
+**席の貸し出し。** 同時に作業する会話の数を上限の内に保つため、席を貸した要求元は担い手が終わるまで会話を動かさない。今のハブの `_seated_ok` は起動先の名前に同じ席が登録済みであることを求めるので、新設の `b<id>` も既存のレーンの名前も、要求元の席では通らない。そこで貸し出しは、計画の側の予約（`batch_seat_lent`）とハブの側の確かめ（`_lent_ok`）の 2 つで表す。#4210 が先に入っても後に入っても、次の条件で同じ上限を守る。
 
 | 条件 | 定め |
 | --- | --- |
-| 貸し出せる要求元 | 行が実行中で、`ndf progress wait --timeout 0` が委ねた検証の待ち（`status: gate`・`metrics.gate: "delegated"`）を返し、そのスプリントに進行中（`in_progress`）の工程が 1 つも無いこと。#4210 の後に委ねた待ちの間に確定仕様化などを流している要求元は、進行中の工程を持つので貸し出せない |
-| 貸し出し中の要求元 | 担い手の行の `row_started` に借りた席（要求元のレーンと行）を載せ、`batch_closed` が書かれるか担い手の行が終わるまでを貸し出し中とする。貸し出し中の要求元の起動（回答の後の入力・`/goal` の入れ直し・止まりからの再起動）は `seated=True` を使わず、今の行の起動の上限の判定を通る。#4210 が委ねた待ちの間に工程を始めるときも、貸し出し中なら始めず待ち（`status: gate`）を返す（#4210 の「越えてよい待ち」から、貸し出し中の委ねた待ちを外す） |
+| 貸し出せる要求元 | `lend_seat` が計画の排他の中で DB から読む: 行が実行中・そのスプリントの今の委ねのキーに `delegate_answered` が無い（委ねた検証の待ち。`ndf progress wait` を起動せず、同じ判定の関数を DB の読みに当てる）・進行中（`in_progress`）の工程が 1 つも無い・有効な貸し出しが無い。#4210 の後に委ねた待ちの間に確定仕様化などを流している要求元は、進行中の工程を持つので貸し出せない |
+| 有効な貸し出し | `batch_seat_lent` があり、同じまとめの `batch_seat_returned`・`batch_closed` が無く、担い手の行が終わっていない |
+| 貸し出し中の要求元 | 有効な貸し出しの要求元の起動（回答の後の入力・`/goal` の入れ直し・止まりからの再起動）は `seated=True` を使わず、今の行の起動の上限の判定を通る。#4210 が委ねた待ちの間に工程を始めるときは、工程を始める書き込みと同じトランザクションで計画の排他（`lock_plan`）を取って有効な貸し出しを照らし、あれば始めず待ち（`status: gate`）を返す（#4210 の「越えてよい待ち」から、貸し出し中の委ねた待ちを外す）。`lend_seat` と #4210 の工程の開始は同じ排他の中で照らして書くので、先にコミットした方だけが通る（貸し出しが先なら工程を始めず、工程が先なら貸し出さない） |
 
-担い手が `close` で回答を書くと貸し出しは終わり、要求元の回答の後の起動は今のとおり続きの起動（`seated=True`）に戻る（`close` は同じトランザクションで担い手の行を終えるので、同時に動く会話は 1 つのまま）。
+`launch_lane` の貸し出しの順序:
+
+1. `lend_seat` で予約を確定する（コミットまで済ませる。起動より前）
+2. 貸し出しの起動を打つ（`relay spawn --replace --seat <担い手の席> --lend-from <要求元のラッパーの名前> --lend-seat <要求元の席>`）
+3. 起動が失敗した（ハブが断った・起動できなかった）ら `return_seat`（理由に起動の失敗）を書き、今の行の起動の上限の判定へ進む
+4. 1 の後・3 の前に落ちたら、耐久ステップの打ち直しで `lend_seat` が同じ貸し出しを返し、2 から続ける（予約は重ならない）
+
+担い手が `close` で回答を書くと貸し出しは終わり（`batch_closed`）、要求元の回答の後の起動は今のとおり続きの起動（`seated=True`）に戻る（`close` は同じトランザクションで担い手の行を終えるので、同時に動く会話は 1 つのまま）。`abort` で担い手の行が終わったときも同じく終わる。
 
 `show` が返す担い手の手順（`release-verification` の手順と `parallel.md` の新しい節が持つ）。環境と観測した版に共通するセットアップと検証はまとめで 1 回、課題に固有の受け入れ条件だけを課題ごとに流す:
 
@@ -341,7 +354,8 @@ flowchart LR
 | `cancel_commands` | 種類 `batch` の行の中止の入力が `batch abort --self` の 1 つ | — | — |
 | `new` | `--batch` で工程の無い子ができる | — | `--batch` と `--mode` の組で断る。`--parent` 無しで断る |
 | 生死の判定の呼び手 | 担い手のラッパーが止まると今の `lane_stalled` が出る | — | — |
-| 担い手の行の席 | 上限 1 の計画で、要求元 1 行が委ねて回答を待つ間に担い手の行が席を借りて起動し、`close` の回答で要求元が振り返りへ進む（耐久ワークフローの判断の関数を、差し替えた観測で回す） | 要求元が実行中でない棚卸しのまとめは上限の判定を通り、埋まっていれば待つ。委ねた待ちの間に進行中の工程を持つ要求元からは借りず、上限の判定を通る。貸し出し中の要求元の止まりからの再起動は `seated` を使わず、上限 1 で担い手が動く間は起動を待つ | — |
+| 担い手の行の席 | 上限 1 の計画で、要求元 1 行が委ねて回答を待つ間に担い手の行が席を借りて起動し（新設の `b<id>` でも既存のレーンの名前でも）、`close` の回答で要求元が振り返りへ進む（耐久ワークフローの判断の関数を、差し替えた観測で回す） | 要求元が実行中でない棚卸しのまとめは上限の判定を通り、埋まっていれば待つ。委ねた待ちの間に進行中の工程を持つ要求元からは借りず、上限の判定を通る。貸し出し中の要求元の止まりからの再起動は `seated` を使わず、上限 1 で担い手が動く間は起動を待つ。`lend_seat` の打ち直しが同じ貸し出しを返す。差し替えた起動の失敗で `batch_seat_returned` が書かれる | `lend_seat` のコミットの後に差し込んだ #4210 の工程の開始が待ちを返し、工程の開始のコミットの後の `lend_seat` が貸し出さない |
+| `_lent_ok` | 登録簿の貸し出し元の行の席と同じ `--lend-seat` で、上限 1 でも担い手を起動し、担い手の席と `lent_from` を登録する。続く担い手の `--seated` が通る | — | 登録簿の席と違う `--lend-seat`・既にほかの担い手が `lent_from` で指す貸し出し元で断る |
 
 ## 手順書と契約
 
