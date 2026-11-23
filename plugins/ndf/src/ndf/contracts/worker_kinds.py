@@ -104,8 +104,7 @@ def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: 
     """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
-    base, fresh, anchor = worker_paths.resolve_existing(state_dir)
-    with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
+    with worker_paths.open_or_create(state_dir) as wd:
         worker_paths.write_file(wd, VALUES_FILE, json.dumps(held, ensure_ascii=False), private=True)
 
 

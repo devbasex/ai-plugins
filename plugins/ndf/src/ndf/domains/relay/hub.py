@@ -515,7 +515,7 @@ def listing(ctx: Context, activity: bool = False) -> list[dict[str, Any]]:
         listed = {**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False}
         session = _session(state, listed.get("cwd"))
         wrapper = registry.wrapper_dir(ctx.state_dir, name)
-        paths = {"transcript": (state or {}).get("transcript"), "shell_outputs": (state or {}).get("shell_outputs")}  # noqa: NDF501 ファイル: 状態が無ければ活動を読まない
+        paths = {"transcript": (state or {}).get("transcript")}  # noqa: NDF501 ファイル: 状態が無ければ活動を読まない
         seen = (
             observe.conductor_activity({**session, **paths}, wrapper, look)
             if look is not None and name in running
@@ -529,7 +529,7 @@ def _look() -> observe.Look:
     """活動を読む材料（#4036）。会話の記録は Stop の hook と同じ末尾の大きさ（`hook.transcript-tail`）だけ読む。
     会話の記録の場所はラッパーの状態の値を使うので、一覧を呼ぶ側の環境を渡さない。"""
     size = int(limits.value("hook.transcript-tail", "count"))
-    return observe.Look(time.time(), size, functools.cache(observe.process_parents))
+    return observe.Look(time.time(), size, functools.cache(observe.process_children))
 
 
 def _session(state: Optional[Mapping[str, Any]], cwd: Any) -> dict[str, Any]:

@@ -429,8 +429,7 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
         return {}
     number = int(issues[0])
     out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
-    base, fresh, anchor = worker_paths.resolve_existing(work_dir)
-    with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
+    with worker_paths.open_or_create(work_dir) as wd:
         out = wd.path / out_name
         title = _held_title(wd, copy_name, out_name)
         if title is None:
@@ -529,9 +528,10 @@ def _merge_method_first(
     ときに組み直す（`merge_pending.refused`。PR 4289 の指摘）。問うて決まらなければ課題を読まずに `TemplateValuesMissing`
     （目印は残す）、決まれば方式を目印へ記録しておいて足した値を返す。目印が無ければ今の値のまま（方式は課題の後に問う）。
     """
-    if not pending.is_file():
+    mark = merge_pending.read(pending)
+    if mark is None:
         return dict(values)
-    held = merge_pending.held_method(pending, values)
+    held = merge_pending.held_method(mark, values)
     if held is not None and "merge_method" in t.params and "merge_method" not in values:
         return {**values, "merge_method": held}
     out = merge_pending.ask(t, values, pending)
@@ -708,12 +708,18 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
 
     差し込みは同じ試行で組んだ `values.json` の値を使い、無ければ `prepare_plan` で 1 回だけ組む（入力に無い値は出所の表
     `FILL_SOURCES` と打った場所から決め、欠ければ `TemplateValuesMissing`）。テンプレートが無ければ `model.Refused`。
+
+    プランは `values.json` と同じく、開いた保存先の記述子から、ほかの利用者が書き込めないファイルとして公開する（リンクを
+    たどって別のファイルを上書きしない）。`ndf plan next` はこのパスを開き直すので、返す前に、名前と保存先から根までのどの
+    項目もほかの利用者が差し替えられないことを確かめる（`worker_paths.check_unshared`。書いたプランと別のプランを流さない）。
     """
     t, values, local_tests = _prepared(run, work_dir, cwd)
     plan = route.render(t, values, local_tests=local_tests)
-    out = work_dir / f"{run.name}.json"
-    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return out
+    name = f"{run.name}.json"
+    with worker_paths.open_or_create(work_dir) as wd:
+        worker_paths.write_file(wd, name, json.dumps(plan, ensure_ascii=False, indent=2) + "\n", private=True)
+        worker_paths.check_unshared(wd, name)
+        return wd.path / name
 
 
 def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
@@ -862,7 +868,9 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     if isinstance(exc, OSError):
         return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
     if isinstance(exc, worker_paths.EntryError):
-        return result.stopped(PLAN, "precondition", f"プラン {name} の差し込みの値（{VALUES_FILE}）を安全に読み書きできない: {exc}")
+        return result.stopped(
+            PLAN, "precondition", f"プラン {name} の保存先のファイル（{VALUES_FILE} など）を安全に読み書きできない: {exc}"
+        )
     return None
 
 

@@ -53,7 +53,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     SH["Stop の hook<br/>relay-marker guard"] -->|"背景の作業の一覧を書く"| AF[("&lt;ラッパーの保存先&gt;/activity.json")]
-    WJ[("wrapper.json<br/>session_id・transcript・shell_outputs・pid")] --> PR["Probes.activity（新設）"]
+    WJ[("wrapper.json<br/>session_id・transcript・pid")] --> PR["Probes.activity（新設）"]
     AF --> PR
     TR[("会話の記録<br/>&lt;session_id&gt;.jsonl")] -->|"observe.turn_done"| PR
     PR --> J["liveness.judge"]
@@ -124,7 +124,7 @@ flowchart TB
 | キー | 型 | 中身 |
 | --- | --- | --- |
 | `turn_done` | bool | 会話の記録の最後が、終わった応答か |
-| `moved` | float / None | 最後に動いた時刻（UNIX 時刻）。conductor の最後の応答の時刻と、終わったとみなして除いた背景の作業（サブエージェントの会話の記録の最後の応答・終わったシェルの出力のファイルの更新時刻）の時刻のうち、最も遅いもの。読めなければ `None` |
+| `moved` | float / None | 最後に動いた時刻（UNIX 時刻）。conductor の最後の応答の時刻と、終わったとみなして除いた背景の作業（サブエージェントの会話の記録の最後の応答・シェルの終わりを最初に確かめた時刻）の時刻のうち、最も遅いもの。読めなければ `None` |
 | `background` | integer / None | まだ走っているとみなす背景の作業の数。サブエージェントは `activity.json` の `tasks` のうち会話の記録の最後の応答が終わっていないもの、シェルは conductor のプロセスの下で今も生きている Bash の Tool のシェルの数。`activity.json` が無い・`tasks` が `null`・記録が今の応答のものと確かめられないときは `None` |
 
 会話の記録が無い・読めない・`session_id` が取れないときは `None` を返し、判定は今までどおり `alive` にする。会話の記録を読めたときは、`activity.json` が無くても `None` を返さず、会話の記録から得た `turn_done` と `moved` を持つ `Activity` を返し、`background` だけを `None`（不明）にする（判定は `alive`）。`activity.json` が別のセッションのもの、または `reply` が conductor の会話の記録の最後の `assistant` の記録の `uuid` と違う・どちらかが無い（今の応答の Stop で書けなかった）ときは、背景の作業の数を `None`（不明）にする。今の応答との対応は時刻で確かめない。`at` は秒で書かれるので、前の Stop と今の応答が同じ秒に入ると時刻では区別できず、前の Stop の空の一覧を今の応答のものとして使ってしまう。
@@ -276,7 +276,7 @@ sequenceDiagram
 | 決定 2（hook が書く） | Stop の hook が、入力の `background_tasks` の `id`・`type` と時刻を `activity.json` へ書く。書けなくても conductor の進行を止めない | 書き込みの失敗で guard が例外を上げると落ちる |
 | 決定 2（終わったサブエージェントを除く） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば、背景の作業は 0 件とみなし、閾値を過ぎれば `idle_conductor` になる（lracct の現象の形） | 会話の記録を読まずに件数だけで判定すると落ちる |
 | 決定 2（シェルが生きている） | `tasks` が `shell` 1 件で、conductor のプロセスの下に生きている Bash の Tool のシェルが 1 つあれば、閾値を過ぎても `alive` のまま（一覧が空でも生きているシェルがあれば同じ） | 生きているシェルを数えずに一覧だけで判定すると落ちる |
-| 決定 2（シェルが終わった） | `tasks` が `shell` 1 件で、生きているシェルが 0 なら、背景の作業は 0 件とみなし、その出力のファイルの更新時刻（`moved`）から閾値を過ぎれば `idle_conductor` になる。過ぎていなければ `alive` | 一覧に `shell` が残るだけで `alive` とすると落ちる。終わった時刻を `moved` に重ねないと落ちる |
+| 決定 2（シェルが終わった） | `tasks` が `shell` 1 件で、生きているシェルが 0 なら、背景の作業は 0 件とみなし、終わりを最初に確かめた時刻（`moved`）から閾値を過ぎれば `idle_conductor` になる。過ぎていなければ `alive` | 一覧に `shell` が残るだけで `alive` とすると落ちる。終わった時刻を `moved` に重ねないと落ちる |
 | 決定 2（シェルの生死を確かめられない） | `/proc` が読めない・ラッパーの `pid` が無いときは、一覧の `shell` の数によらず（空でも）`background` が `None` で、閾値を過ぎても `alive` のまま | 確かめられないシェルを 0 件と数えると落ちる |
 
 詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。

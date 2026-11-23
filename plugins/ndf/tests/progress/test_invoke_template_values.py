@@ -185,7 +185,7 @@ def _pending(tmp_path: Path) -> Path:
     """マージの方式を決められずに止まった試行の目印（前の試行が残したもの）。"""
     work = tmp_path / "w"
     work.mkdir(exist_ok=True)
-    (work / merge_pending.PENDING_FILE).write_text("{}", encoding="utf-8")
+    merge_pending.mark(work / merge_pending.PENDING_FILE)
     return work / merge_pending.PENDING_FILE
 
 

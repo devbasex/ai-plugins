@@ -678,7 +678,7 @@ def test_4036_a_running_row_carries_the_conductor_activity(ctx, tmp_path, monkey
 
     _spawned(ctx, "t1")
     transcript = tmp_path / "wrapper-cfg" / "projects" / "-w" / "s1.jsonl"
-    state = {"state": "running", "session_id": "s1", "cwd": "/w", "pid": 42, "transcript": str(transcript), "shell_outputs": str(tmp_path)}
+    state = {"state": "running", "session_id": "s1", "cwd": "/w", "pid": 42, "transcript": str(transcript)}
     registry.write_state(registry.wrapper_dir(ctx.state_dir, "t1"), state)
     transcript.parent.mkdir(parents=True)
     ended = {"type": "assistant", "timestamp": "2026-11-23T00:00:00Z", "message": {"stop_reason": "end_turn", "content": []}}

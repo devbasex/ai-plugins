@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -245,17 +244,6 @@ def test_4036_an_unsafe_subagent_id_builds_no_path(tmp_path, agent_id):
     assert observe.subagent_transcript_path(tmp_path / "sid.jsonl", agent_id) is None
 
 
-def test_4036_the_shell_output_path_follows_the_claude_temp_layout():
-    got = observe.shell_output_path({}, observe.Path("/tmp/m.x/work"), "sid", "b7prporwe")
-    assert got == observe.Path(f"/tmp/claude-{os.getuid()}/-tmp-m-x-work/sid/tasks/b7prporwe.output")
-    moved = observe.shell_output_path({"CLAUDE_CODE_TMPDIR": "/t"}, observe.Path("/w"), "sid", "b1")
-    assert moved == observe.Path(f"/t/claude-{os.getuid()}/-w/sid/tasks/b1.output")
-
-
-def test_4036_an_unsafe_shell_id_builds_no_path():
-    assert observe.shell_output_path({}, observe.Path("/w"), "sid", "../x") is None
-
-
 def _proc(root, pid, args, ppid=1, comm=None):
     (root / str(pid)).mkdir(parents=True)
     (root / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
@@ -271,7 +259,7 @@ def test_4036_live_shells_counts_the_bash_tool_shells_under_claude(tmp_path):
     _proc(tmp_path, 14, ["bash", "-c", "echo x"], ppid=11)
     _proc(tmp_path, 15, SHELL_ARGS, ppid=99)  # 別の claude のシェルは数えない
     (tmp_path / "self").mkdir()  # 数字でない項目は読まない
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) == 1
 
 
 def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
@@ -281,27 +269,27 @@ def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
     _proc(tmp_path, 11, ["claude"], ppid=10)
     _proc(tmp_path, 12, ["/bin/bash", "-c", f"source {account} 2>/dev/null || true && eval 'sleep 45' < /dev/null"], ppid=11)
     _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 2
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) == 2
 
 
 def test_4036_live_shells_reads_the_parent_past_a_command_name_with_parens(tmp_path):
     _proc(tmp_path, 10, ["ndf", "relay"], comm="a) S 7 (b")
     _proc(tmp_path, 11, ["claude"], ppid=10, comm="cl) 3 (x")
     _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) == 1
 
 
 def test_4036_live_shells_is_zero_without_children(tmp_path):
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["claude"], ppid=10)
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 0
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) == 0
 
 
 def test_4036_live_shells_is_none_without_the_wrapper_or_claude(tmp_path):
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) is None
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["tmux"], ppid=10)
-    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
+    assert observe.live_shells(10, observe.process_children(tmp_path), tmp_path) is None
 
 
 def _raising(monkeypatch, method, target, exc):
@@ -315,20 +303,20 @@ def _raising(monkeypatch, method, target, exc):
     monkeypatch.setattr(observe.Path, method, fake)
 
 
-def test_4036_process_parents_skips_a_pid_whose_stat_is_denied(tmp_path, monkeypatch):
+def test_4036_process_children_skips_a_pid_whose_stat_is_denied(tmp_path, monkeypatch):
     # hidepid=1 では他のユーザーの PID は見えても stat は読めない（proc(5)）。その PID だけを外して続ける
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["claude"], ppid=10)
     _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
     _proc(tmp_path, 50, ["other"])
     _raising(monkeypatch, "read_text", tmp_path / "50" / "stat", PermissionError("denied"))
-    parents = observe.process_parents(tmp_path)
-    assert 50 not in parents
-    assert observe.live_shells(10, parents, tmp_path) == 1
+    children = observe.process_children(tmp_path)
+    assert children == {1: [10], 10: [11], 11: [12]}
+    assert observe.live_shells(10, children, tmp_path) == 1
 
 
-def test_4036_process_parents_is_none_without_proc(tmp_path):
-    assert observe.process_parents(tmp_path / "missing") is None
+def test_4036_process_children_is_none_without_proc(tmp_path):
+    assert observe.process_children(tmp_path / "missing") is None
     assert observe.live_shells(10, None, tmp_path) is None
 
 
@@ -338,18 +326,18 @@ def test_4036_live_shells_skips_a_shell_that_ends_while_cmdline_is_read(tmp_path
     _proc(tmp_path, 11, ["claude"], ppid=10)
     _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
     _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
-    parents = observe.process_parents(tmp_path)
+    children = observe.process_children(tmp_path)
     _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", ProcessLookupError("gone"))
-    assert observe.live_shells(10, parents, tmp_path) == 1
+    assert observe.live_shells(10, children, tmp_path) == 1
 
 
 def test_4036_live_shells_is_none_when_cmdline_cannot_be_read(tmp_path, monkeypatch):
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["claude"], ppid=10)
     _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
-    parents = observe.process_parents(tmp_path)
+    children = observe.process_children(tmp_path)
     _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", PermissionError("denied"))
-    assert observe.live_shells(10, parents, tmp_path) is None
+    assert observe.live_shells(10, children, tmp_path) is None
 
 
 # conductor の活動（#4036 の「活動を読む」。`ndf relay ls` の行に載る）。時刻はテストが決め、本物の時間を待たない
@@ -366,7 +354,7 @@ class _Lane:
 
     def __init__(self, tmp_path):
         self.root = tmp_path
-        self.environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "CLAUDE_CODE_TMPDIR": str(tmp_path / "t")}
+        self.environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")}
         self.transcript = observe.transcript_path(self.environ, CWD, SID)
         self.transcript.parent.mkdir(parents=True)
         self.transcript.write_text(json.dumps(_assistant("end_turn", TEXT, at=T0, uuid=REPLY)) + "\n", encoding="utf-8")
@@ -390,15 +378,9 @@ class _Lane:
         for n in range(live):
             _proc(self.proc, 20 + n, SHELL_ARGS, ppid=11)
 
-    def output(self, task_id, mtime):
-        path = observe.shell_output_path(self.environ, CWD, SID, task_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("x", encoding="utf-8")
-        os.utime(path, (mtime, mtime))
-
     def read(self, pid=10, now=NOW, **row):
-        look = observe.Look(now, SIZE, lambda: observe.process_parents(self.proc), self.proc)
-        paths = {"transcript": str(self.transcript), "shell_outputs": str(observe.shell_output_dir(self.environ, CWD, SID))}
+        look = observe.Look(now, SIZE, lambda: observe.process_children(self.proc), self.proc)
+        paths = {"transcript": str(self.transcript)}
         return observe.conductor_activity({"session_id": SID, "pid": pid, **paths, **row}, self.wrapper, look)
 
 
@@ -454,23 +436,16 @@ def test_4036_live_shells_are_counted_even_when_not_listed(tmp_path, listed, liv
     assert lane.read() == _act(True, T0_S, count)
 
 
-def test_4036_a_finished_shell_moves_the_time_to_its_output(tmp_path):
-    lane = _Lane(tmp_path)
-    lane.shells(0)
-    lane.activity([{"id": "b1", "type": "shell"}])
-    lane.output("b1", T0_S + 120)
-    assert lane.read() == _act(True, T0_S + 120, 0)
-
-
-def test_4036_a_finished_shell_without_output_moves_the_time_to_now(tmp_path):
+def test_4036_a_finished_shell_moves_the_time_to_now(tmp_path):
+    """PR 4325 の r1-6: 出力のファイルの更新時刻は終わった時刻でないので使わず、終わりを最初に確かめた時刻にする。"""
     lane = _Lane(tmp_path)
     lane.shells(0)
     lane.activity([{"id": "b1", "type": "shell"}])
     assert lane.read() == _act(True, NOW, 0)
 
 
-def test_4036_a_finished_shell_without_output_keeps_the_time_it_was_first_seen(tmp_path):
-    """出力のファイルが消えたシェルは、同じ Stop の記録の間は最初に終わりを確かめた時刻のまま（読み直すたびに 0 へ戻さない）。"""
+def test_4036_a_finished_shell_keeps_the_time_it_was_first_seen(tmp_path):
+    """終わったシェルは、同じ Stop の記録の間は最初に終わりを確かめた時刻のまま（読み直すたびに 0 へ戻さない）。"""
     lane = _Lane(tmp_path)
     lane.shells(0)
     lane.activity([{"id": "b1", "type": "shell"}])
@@ -496,7 +471,7 @@ def test_4036_proc_is_not_scanned_while_the_conductor_is_answering(tmp_path):
     lane.transcript.write_text(json.dumps(_assistant("tool_use", _tool_use("t1"), at=T0)) + "\n", encoding="utf-8")
     calls = []
     look = observe.Look(NOW, SIZE, lambda: calls.append(1), lane.proc)
-    paths = {"transcript": str(lane.transcript), "shell_outputs": str(tmp_path)}
+    paths = {"transcript": str(lane.transcript)}
     assert observe.conductor_activity({"session_id": SID, "pid": 10, **paths}, lane.wrapper, look) == _act(False, None, None)
     assert calls == []
 
@@ -555,9 +530,7 @@ def test_4036_reply_id_is_the_uuid_of_the_last_assistant(tmp_path):
     assert observe.reply_id(tmp_path / "none.jsonl", SIZE) is None
 
 
-@pytest.mark.parametrize(
-    "row", [{"session_id": None}, {"transcript": None}, {"shell_outputs": None}], ids=["no-session", "no-transcript", "no-outputs"]
-)
+@pytest.mark.parametrize("row", [{"session_id": None}, {"transcript": None}], ids=["no-session", "no-transcript"])
 def test_4036_a_row_without_its_session_has_no_activity(tmp_path, row):
     lane = _Lane(tmp_path)
     assert lane.read(**row) == _act(None, None, None)

@@ -31,6 +31,7 @@ from ndf.contracts.worker_paths_open import (
     check_unshared,
     dir_id,
     held_dir_id,
+    open_or_create,
     open_resolved,
     open_subdir,
     open_workdir,
@@ -60,6 +61,8 @@ __all__ = [
     "entry_state",
     "held_dir_id",
     "names_a_directory",
+    "open_file",
+    "open_or_create",
     "open_resolved",
     "open_subdir",
     "open_workdir",
@@ -257,6 +260,20 @@ def entry_state(wd: WorkDir, name: str) -> Optional[os.stat_result]:
     return st
 
 
+def open_file(wd: WorkDir, name: str) -> Optional[int]:
+    """名前のファイルをリンクをたどらずに読み取りで開いた記述子。無ければ None。リンクなら `EntryUnsafe`、開けなければ `EntryUnreadable`。"""
+    _check_name(name)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        return os.open(name, flags, dir_fd=wd.fd)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 名前が無いことは None で呼ぶ側へ返す
+        return None
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise EntryUnsafe(name, "symlink") from None
+        raise EntryUnreadable(name, e.strerror or str(e)) from None
+
+
 def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
     """名前のファイルを UTF-8 で読む。無ければ None。
 
@@ -265,16 +282,9 @@ def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
     （`foreign`）で止める（共有の保存先で別の利用者が用意・書き換えできる中身を、呼んだ利用者の権限で使わないため）。
     書き込めるかはモードのビットと、開いた記述子の拡張 ACL で見る（`_others_may_write`）。
     """
-    _check_name(name)
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-    try:
-        fd = os.open(name, flags, dir_fd=wd.fd)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 名前が無いことは None で呼ぶ側へ返す
+    fd = open_file(wd, name)
+    if fd is None:
         return None
-    except OSError as e:
-        if e.errno == errno.ELOOP:
-            raise EntryUnsafe(name, "symlink") from None
-        raise EntryUnreadable(name, e.strerror or str(e)) from None
     try:
         st = os.fstat(fd)
         kind = _unsafe_kind(st)

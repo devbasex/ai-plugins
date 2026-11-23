@@ -848,7 +848,9 @@ def test_merge_as_admin_refuses_a_method_the_branch_does_not_allow() -> None:
     only_squash = {"allow_squash_merge": True, "allow_merge_commit": False, "allow_rebase_merge": False}
     server = Server({_PULL_PATH: [httpx.Response(200, json=_pull())], ("GET", f"/repos/{REPO}"): [httpx.Response(200, json=only_squash)]})
     out = _hub(server).merge_as_admin(7, HEAD, "merge")
-    assert out == github.MergeOutcome(False, "refused", "#7 のマージの方式 merge は develop で許されていない（許す方式: squash）", HEAD)
+    assert out == github.MergeOutcome(
+        False, "merge_method", "#7 のマージの方式 merge は develop で許されていない（許す方式: squash）", HEAD
+    )
     assert _graphql_sent(server) == []
 
 

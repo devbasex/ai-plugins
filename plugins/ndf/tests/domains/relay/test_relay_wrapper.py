@@ -354,9 +354,8 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
     got = registry.read_state(w.dir)
     assert got["at"] and isinstance(got["at"], str)
     del got["at"]
-    # #4036: 子の会話の記録と背景のシェルの出力の場所（子に渡した環境で組む）
+    # #4036: 子の会話の記録の場所（子に渡した環境で組む）
     assert got.pop("transcript").endswith(f"/{argv[2]}.jsonl")
-    assert got.pop("shell_outputs").endswith(f"/{argv[2]}/tasks")
     assert got == {
         "name": "t1",
         "version": VERSION,

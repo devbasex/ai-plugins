@@ -11,7 +11,7 @@ import pytest
 
 from ndf import identity
 from ndf.contracts import causes, worker_paths
-from ndf.core import worker
+from ndf.core import worker, worker_append
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -190,6 +190,32 @@ def test_append_makes_no_done_when_the_report_cannot_be_written(tmp_path, capsys
     _fail_on(monkeypatch, "write_file", "n.report.md")
     assert _invalid(*_append(capsys, monkeypatch, report, "本文\n", "--done"))
     assert not Path(f"{report}.done").exists()
+
+
+def test_append_reads_again_when_another_append_published_before_the_lock(tmp_path, capsys, monkeypatch):
+    # PR 4325 の r1-8: 開いてからロックを取るまでに別の追記が公開したら、開き直して先の追記の後ろへ足す
+    report = _prepared(tmp_path, capsys)
+    real, published = worker_append._try_lock, []
+
+    def lock_after_another(fd):
+        if not published:
+            published.append(True)
+            with worker_paths.open_workdir(report.parent) as wd:
+                worker_paths.write_file(wd, report.name, "先の追記\n")
+        return real(fd)
+
+    monkeypatch.setattr(worker_append, "_try_lock", lock_after_another)
+    code, _ = _append(capsys, monkeypatch, report, "後の追記\n", "--done")
+    assert code == 0 and report.read_text(encoding="utf-8") == "先の追記\n後の追記\n"
+
+
+def test_append_stops_without_writing_while_another_append_holds_the_report(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    monkeypatch.setattr(worker_append, "_try_lock", lambda fd: False)
+    monkeypatch.setattr(worker_append.durable_locks, "LOCK_WAIT_SECONDS", 0.0)
+    code, out = _append(capsys, monkeypatch, report, "本文\n", "--done")
+    assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
+    assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()
 
 
 def test_append_refuses_a_report_that_was_not_prepared(tmp_path, capsys, monkeypatch):

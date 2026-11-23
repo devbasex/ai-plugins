@@ -69,7 +69,7 @@ from ndf import cli, identity
 from ndf.adapters import claude, git
 from ndf.contracts import causes, exit_codes, result, worker_paths
 from ndf.contracts.exit_codes import OK
-from ndf.core import durable_locks
+from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.worker_outcome import outcome_of, require_outputs
@@ -858,17 +858,17 @@ def _check_held(wd: worker_paths.WorkDir, doing: str) -> None:
 
 
 def _cmd_append(a: argparse.Namespace) -> int:
-    """標準入力の本文を報告の末尾へ足す。`--done` なら続けて完了マーカーを作る（報告を書けなければ作らない）。"""
+    """標準入力の本文を報告の末尾へ足す。`--done` なら続けて完了マーカーを作る（報告を書けなければ作らない。排他は `worker_append`）。"""
     paths = _report_paths(a.report)
     body = sys.stdin.read()
     with _workdir(paths, "報告を書けない") as wd:
         _check_held(wd, "報告を書けない")
-        text = worker_paths.read_file(wd, paths.report.name)
-        if text is None:
-            raise WorkerError("precondition", f"報告 {paths.report} が無い（ndf worker prepare で用意してから書く）")
-        worker_paths.write_file(wd, paths.report.name, text + body)
-        if a.done:
-            worker_paths.write_file(wd, paths.done.name, "")
+        try:
+            found = worker_append.append(wd, paths, body, done=a.done)
+        except durable_locks.StoreInUse as exc:
+            raise WorkerError(exc.kind, f"報告 {paths.report} を書けない: {exc}") from None
+    if not found:
+        raise WorkerError("precondition", f"報告 {paths.report} が無い（ndf worker prepare で用意してから書く）")
     marked = f"・完了マーカー {paths.done} を作った" if a.done else ""
     return result.emit(result.result(TOOL, OK, f"報告 {paths.report} に本文を足した{marked}"))
 

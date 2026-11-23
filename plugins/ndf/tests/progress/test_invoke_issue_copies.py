@@ -9,6 +9,7 @@ import pytest
 from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf.contracts import worker_paths
+from ndf.core import route
 from ndf.progress import invoke
 
 PROJECT = {
@@ -72,3 +73,36 @@ def test_issue_body_in_a_directory_others_can_rename_in_is_not_handed_to_the_pr_
     finally:
         work.chmod(0o700)
     assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
+
+
+def _plan_path(tmp_path: Path, monkeypatch, work: Path) -> Path:
+    plan = {"name": "design", "steps": [{"id": "a", "run": ["true"]}]}
+    monkeypatch.setattr(route, "templates", lambda: {"design": route.Template("design", "design", "試験のテンプレート", (), plan)})
+    work.mkdir(exist_ok=True)
+    return invoke.plan_path(invoke.StageRun(invoke.PLAN, "design", {"issues": [1]}, (), "none", "design"), work, tmp_path)
+
+
+def test_plan_is_written_without_write_access_for_others_and_does_not_follow_a_link(tmp_path, monkeypatch):
+    # PR 4325 の r1-1: プランも values.json と同じ形で公開し、リンクの先を上書きしない
+    path = _plan_path(tmp_path, monkeypatch, tmp_path / "w")
+    assert path.stat().st_mode & 0o022 == 0
+    outside = tmp_path / "outside"
+    outside.write_text("利用者のファイル", encoding="utf-8")
+    path.unlink()
+    path.symlink_to(outside)
+    with pytest.raises(worker_paths.EntryUnsafe):
+        _plan_path(tmp_path, monkeypatch, tmp_path / "w")
+    assert outside.read_text(encoding="utf-8") == "利用者のファイル"
+
+
+def test_plan_in_a_directory_others_can_rename_in_is_not_handed_to_the_run(tmp_path, monkeypatch):
+    # PR 4325 の r1-1: `ndf plan next` は名前を開き直すので、ほかの利用者が差し替えられる保存先のプランを流さない
+    work = tmp_path / "w"
+    work.mkdir()
+    work.chmod(0o777)
+    try:
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            _plan_path(tmp_path, monkeypatch, work)
+    finally:
+        work.chmod(0o700)
+    assert e.value.kind == "shared"

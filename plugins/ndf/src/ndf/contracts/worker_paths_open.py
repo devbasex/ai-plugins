@@ -352,7 +352,9 @@ def check_unshared(wd: WorkDir, name: str) -> None:
 
     差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
     記述子で確かめた中身でも、名前かその祖先を差し替えられると、開き直した手は別のファイルを読むためである。祖先は開いた
-    記述子から `..` をカーネルに引かせてたどる（名前を解き直さない）。
+    記述子から `..` をカーネルに引かせてたどる（名前を解き直さない）。`..` がたどるのは今ある場所なので、最後に `wd.path` を
+    根から開き直して `wd` と同じディレクトリかを突き合わせ、開いた後に移されていれば `EntryUnsafe`（`replaced`）にする
+    （確かめた連鎖と、渡すパスの連鎖を同じにする。連鎖を差し替えられないと確かめた後なので、この後に移されることも無い）。
     """
     child = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
     cur = os.dup(wd.fd)
@@ -365,10 +367,15 @@ def check_unshared(wd: WorkDir, name: str) -> None:
             os.close(cur)
             cur = up
             if (here.st_dev, here.st_ino) == (above.st_dev, above.st_ino):
-                return
+                break
             child = here
     finally:
         os.close(cur)
+    try:
+        with open_workdir(wd.path) as again:
+            check_dir_id(again, dir_id(wd))
+    except FileNotFoundError:
+        raise EntryUnsafe(str(wd.path), "replaced") from None
 
 
 ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
@@ -479,6 +486,14 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
         yield WorkDir(path, fd, created)
     finally:
         os.close(fd)
+
+
+@contextlib.contextmanager
+def open_or_create(directory: Path) -> Iterator[WorkDir]:
+    """祖先のリンクを解いた保存先を、無い要素は作りながら 1 回だけ開く（`resolve_existing` の観測を `open_workdir` で突き合わせる）。"""
+    base, fresh, anchor = resolve_existing(directory)
+    with open_workdir(base, create=True, origin=Origin(fresh, anchor)) as wd:
+        yield wd
 
 
 def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:

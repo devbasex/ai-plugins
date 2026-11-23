@@ -683,3 +683,19 @@ def test_check_unshared_counts_group_write_only_for_a_group_others_are_in(tmp_pa
                 worker_paths.check_unshared(wd, "f")
         else:
             worker_paths.check_unshared(wd, "f")
+
+
+@pytest.mark.parametrize("remade", [False, True])
+def test_check_unshared_refuses_a_directory_moved_after_it_was_opened(tmp_path, remade):
+    # PR 4325 の r1-3: 確かめた連鎖（今ある場所）と、渡すパス（開いた時点の場所）が違えば渡さない
+    base = tmp_path / "w"
+    base.mkdir(mode=0o700)
+    with worker_paths.open_workdir(base) as wd:
+        worker_paths.write_file(wd, "f", "確かめた本文", private=True)
+        base.rename(tmp_path / "moved")
+        if remade:
+            base.mkdir(mode=0o700)
+            (base / "f").write_text("差し替えた本文", encoding="utf-8")
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            worker_paths.check_unshared(wd, "f")
+    assert e.value.kind == "replaced"

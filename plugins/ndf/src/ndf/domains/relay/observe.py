@@ -75,41 +75,23 @@ def subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]:
     return transcript.with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"
 
 
-def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, task_id: str) -> Optional[Path]:
-    """背景のシェルの出力のファイル（`<一時の保存先>/claude-<uid>/<作業ディレクトリのキー>/<session_id>/tasks/<id>.output`）。
+def process_children(proc: Path = Path("/proc")) -> Optional[dict[int, list[int]]]:
+    """`/proc` の親 PID ごとの子の PID（小さい順。`/proc/<pid>/stat`）。`/proc` を読めなければ None。
 
-    一時の保存先は `CLAUDE_CODE_TMPDIR`、無ければ `/tmp`（Claude Code 2.1.330 の実測）。`task_id` がファイル名に使えなければ None。
-    """
-    return shell_output_in(shell_output_dir(environ, cwd, session_id), task_id)
-
-
-def shell_output_dir(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    """背景のシェルの出力のファイルを置くディレクトリ（`shell_output_path` の `<id>.output` の親）。"""
-    root = Path(environ.get("CLAUDE_CODE_TMPDIR") or "/tmp")  # noqa: S108 Claude Code が置く場所を読むだけで、ここでは作らない
-    return root / f"claude-{os.getuid()}" / _cwd_key(cwd) / session_id / "tasks"
-
-
-def shell_output_in(directory: Path, task_id: str) -> Optional[Path]:
-    """`shell_output_dir` の返り `directory` の中の、背景のシェルの出力のファイル。`task_id` がファイル名に使えなければ None。"""
-    return directory / f"{task_id}.output" if TASK_ID.fullmatch(task_id) else None
-
-
-def process_parents(proc: Path = Path("/proc")) -> Optional[dict[int, int]]:
-    """`/proc` のプロセスごとの親 PID（`/proc/<pid>/stat`）。`/proc` を読めなければ None。
-
-    レーンの判定の読み直しごとに 1 度だけ組み、各レーンの `live_shells` で共有する（レーンごとに全体を読み直さない）。
+    レーンの判定の読み直しごとに 1 度だけ組み、各レーンの `live_shells` で共有する（レーンごとに全体を読み直さず、
+    全 PID を走査もせずに、要る子だけを引く）。
     走査の間に終わったプロセスと、`stat` を読めないプロセス（`hidepid=1` の他のユーザーのもの。proc(5)）は載せない。
     """
     try:
         entries = list(proc.iterdir())
     except OSError:  # noqa: NDF401 ファイル: /proc を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
         return None
-    parents: dict[int, int] = {}
-    for entry in entries:
-        ppid = _parent_of(entry) if entry.name.isdigit() else None
+    children: dict[int, list[int]] = {}
+    for entry in sorted((e for e in entries if e.name.isdigit()), key=lambda e: int(e.name)):
+        ppid = _parent_of(entry)
         if ppid is not None:
-            parents[int(entry.name)] = ppid
-    return parents
+            children.setdefault(ppid, []).append(int(entry.name))
+    return children
 
 
 def _parent_of(entry: Path) -> Optional[int]:
@@ -122,25 +104,25 @@ def _parent_of(entry: Path) -> Optional[int]:
     return int(fields[1]) if len(fields) >= 2 and fields[1].isdigit() else None
 
 
-def live_shells(wrapper_pid: int, parents: Optional[Mapping[int, int]], proc: Path = Path("/proc")) -> Optional[int]:
+def live_shells(wrapper_pid: int, children: Optional[Mapping[int, list[int]]], proc: Path = Path("/proc")) -> Optional[int]:
     """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。
 
-    `parents` は `process_parents` の返り（None なら None）。ラッパーか `claude` が見つからない・`cmdline` を読めなければ None。
+    `children` は `process_children` の返り（None なら None）。ラッパーか `claude` が見つからない・`cmdline` を読めなければ None。
     子は親 PID で絞る（`task/<tid>/children` は読む間に子が終わると、生きている別の子も欠け得る。proc_tid_children(5)）。
     """
-    if parents is None or wrapper_pid not in parents:
+    if children is None:
         return None
     try:
-        conductor = next((c for c in _children(parents, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
+        conductor = next((c for c in _children_of(children, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
         if conductor is None:
             return None
-        return sum(1 for c in _children(parents, conductor) if _is_shell(_args(proc, c)))
+        return sum(1 for c in _children_of(children, conductor) if _is_shell(_args(proc, c)))
     except OSError:  # noqa: NDF401 ファイル: cmdline を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
         return None
 
 
-def _children(parents: Mapping[int, int], pid: int) -> list[int]:
-    return sorted(c for c, p in parents.items() if p == pid)
+def _children_of(children: Mapping[int, list[int]], pid: int) -> list[int]:
+    return children[pid] if pid in children else []
 
 
 def _args(proc: Path, pid: int) -> list[str]:
@@ -343,42 +325,41 @@ def _time(value: Any) -> Optional[float]:
 SUBAGENT_TASK, SHELL_TASK = "subagent", "shell"
 # 活動を読めない行の値
 NO_ACTIVITY = {"turn_done": None, "moved": None, "background": None}
-# 出力のファイルを読めない、終わった背景のシェルを最初に確かめた時刻（ラッパーの保存先。`ndf relay ls --activity` が書く）
+# 終わった背景のシェルを最初に確かめた時刻（ラッパーの保存先。`ndf relay ls --activity` が書く）
 SHELLS_ENDED_FILE = "shells-ended.json"
 
 
 @dataclass(frozen=True)
 class Look:
     """1 回の `ndf relay ls --activity` で全行が共有する活動の材料。`now` は読む時刻、`size` は会話の記録の末尾を読む大きさ、
-    `parents` は `process_parents` の返りを返す口（シェルの生死を確かめる行に届いたときだけ呼ぶ。呼ぶ側が 1 回の一覧で
+    `children` は `process_children` の返りを返す口（シェルの生死を確かめる行に届いたときだけ呼ぶ。呼ぶ側が 1 回の一覧で
     1 度だけ組むように包む）。"""
 
     now: float
     size: int
-    parents: Callable[[], Optional[Mapping[int, int]]]
+    children: Callable[[], Optional[Mapping[int, list[int]]]]
     proc: Path = Path("/proc")
 
 
 class _Turn(NamedTuple):
-    """conductor の今の応答: 会話の記録のパス・背景のシェルの出力の保存先・セッション・Stop の記録の時刻・最後の応答の時刻。"""
+    """conductor の今の応答: 会話の記録のパス・セッション・Stop の記録の時刻・最後の応答の時刻。"""
 
     transcript: Path
-    outputs: Path
     session_id: str
     stop_at: str
     at: float
 
 
 def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> dict[str, Any]:
-    """ラッパーの状態の値（`session_id`・`transcript`・`shell_outputs`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
+    """ラッパーの状態の値（`session_id`・`transcript`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
 
-    会話の記録と出力の保存先はラッパーが子に渡した環境で組んで状態に書いた絶対パスを使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
+    会話の記録はラッパーが子に渡した環境で組んで状態に書いた絶対パスを使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
     返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。
     UNIX 時刻）・`background`（終わった背景の作業を除いた数。確かめられなければ None）。conductor の会話の記録を
     読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めない背景の作業は走っているとみなす。
     """
-    session, transcript, outputs = row.get("session_id"), row.get("transcript"), row.get("shell_outputs")
-    if not isinstance(session, str) or not isinstance(transcript, str) or not isinstance(outputs, str):
+    session, transcript = row.get("session_id"), row.get("transcript")
+    if not isinstance(session, str) or not isinstance(transcript, str):
         return dict(NO_ACTIVITY)
     got = _turn(Path(transcript), look.size)
     if got is None:
@@ -390,7 +371,7 @@ def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> d
     tasks = _tasks_of(record, session, reply)
     if record is None or tasks is None:
         return {"turn_done": True, "moved": at, "background": None}
-    turn = _Turn(Path(transcript), Path(outputs), session, record["at"], at)
+    turn = _Turn(Path(transcript), session, record["at"], at)
     running, times = _others(turn, tasks, look.size)
     shells = _shells(turn, directory, row.get("pid"), [t for t in tasks if t["type"] == SHELL_TASK], look)
     moved = max([at, *times, *(shells[1] if shells is not None else [])])
@@ -430,16 +411,16 @@ def _ended_subagent(transcript: Path, agent_id: str, size: int) -> Optional[floa
 def _shells(turn: _Turn, directory: Path, pid: Any, listed: list[dict[str, str]], look: Look) -> Optional[tuple[int, list[float]]]:
     """生きている背景のシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
 
-    `/proc` はここに届いた行で初めて読む（`look.parents`）。一覧より生きているシェルが少なければ、一覧のシェルの出力の
-    ファイルの更新時刻を終わった時刻とする。1 つも読めなければ、終わりを最初に確かめた時刻にする（`_first_seen`）。
+    `/proc` はここに届いた行で初めて読む（`look.children`）。一覧より生きているシェルが少なければ、終わりを最初に確かめた
+    時刻を終わった時刻とする（`_first_seen`）。出力のファイルの更新時刻は使わない。最後に出力した時刻であって、出力の後に
+    黙って動く作業では終わった時刻より古く、終わった直後のレーンを止まりと読むためである。
     """
-    live = live_shells(pid, look.parents(), look.proc) if isinstance(pid, int) and not isinstance(pid, bool) else None
+    live = live_shells(pid, look.children(), look.proc) if isinstance(pid, int) and not isinstance(pid, bool) else None
     if live is None:
         return None
     if live >= len(listed):
         return live, []
-    ended = [_mtime(shell_output_in(turn.outputs, t["id"])) for t in listed]
-    return live, [t for t in ended if t is not None] or [_first_seen(directory, turn, len(listed) - live, look.now)]
+    return live, [_first_seen(directory, turn, len(listed) - live, look.now)]
 
 
 def _first_seen(directory: Path, turn: _Turn, ended: int, now: float) -> float:
@@ -463,12 +444,3 @@ def _first_seen(directory: Path, turn: _Turn, ended: int, now: float) -> float:
     except OSError:  # 残せなければ読む時刻にする（次の読み直しが書き直す）
         return now
     return now
-
-
-def _mtime(path: Optional[Path]) -> Optional[float]:
-    if path is None:
-        return None
-    try:
-        return path.stat().st_mtime
-    except OSError:  # noqa: NDF401 ファイル: 出力のファイルを読めないシェルは終わった時刻が分からない（呼び手が最初に確かめた時刻にする）
-        return None

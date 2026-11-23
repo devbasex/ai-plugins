@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -124,19 +124,14 @@ def _stamp(text):
 CONDUCTOR_AT = "2026-11-23T00:00:00+00:00"
 
 
-def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_after=0.0, reply="r0"):
+def _judged(tmp_path, tasks, *, subagent_at=None, live=0, seen_at=None, now_after=0.0, reply="r0"):
     """会話の記録・活動の記録・/proc を一時ディレクトリに組み、conductor の最後の応答から `now_after` 秒後に判定する。"""
-    environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "CLAUDE_CODE_TMPDIR": str(tmp_path / "t")}
+    environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")}
     cwd = Path("/w")
     transcript = observe.transcript_path(environ, cwd, "sid")
     _jsonl(transcript, _said(CONDUCTOR_AT, "r0"))
     if subagent_at is not None:
         _jsonl(observe.subagent_transcript_path(transcript, "a1"), _said(subagent_at))
-    if output_at is not None:
-        out = observe.shell_output_path(environ, cwd, "sid", "b1")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("x", encoding="utf-8")
-        os.utime(out, (_stamp(output_at),) * 2)
     wrapper = tmp_path / "wrap"
     wrapper.mkdir()
     (wrapper / "activity.json").write_text(
@@ -148,9 +143,11 @@ def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_af
         (proc / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
         (proc / str(pid) / "stat").write_text(f"{pid} ({Path(args[0]).name}) S {ppid} 0", encoding="utf-8")
     now = _stamp(CONDUCTOR_AT) + now_after
-    look = observe.Look(now, 1 << 16, lambda: observe.process_parents(proc), proc)
+    look = observe.Look(now, 1 << 16, lambda: observe.process_children(proc), proc)
     row = {"name": "w", "running": True, "state": "running", "session_id": "sid", "cwd": str(cwd), "pid": 10}
-    paths = {"transcript": str(transcript), "shell_outputs": str(observe.shell_output_dir(environ, cwd, "sid"))}
+    paths = {"transcript": str(transcript)}
+    if seen_at is not None:  # 前の読み直し
+        observe.conductor_activity({**row, **paths}, wrapper, replace(look, now=_stamp(seen_at)))
     seen = observe.conductor_activity({**row, **paths}, wrapper, look)
     return liveness.judge(RUN_ROW, liveness.SPRINT_IDLE, row, True, run.lane_activity({**row, **seen}), now)
 
@@ -169,9 +166,14 @@ def test_a_conductor_idle_after_its_subagent_finished_is_a_stall(tmp_path):
 
 
 def test_a_conductor_idle_after_its_shell_finished_is_a_stall(tmp_path):
-    """背景のシェルが終わって出力のファイルの更新時刻から閾値を過ぎた（受け入れ条件 1 のシェルの取りこぼし）。"""
-    got = _judged(tmp_path, SHELL_TASK, output_at="2026-11-23T00:02:00+00:00", now_after=120 + liveness.idle_after())
+    """背景のシェルの終わりを最初に確かめた時刻から閾値を過ぎた（受け入れ条件 1 のシェルの取りこぼし）。"""
+    got = _judged(tmp_path, SHELL_TASK, seen_at="2026-11-23T00:02:00+00:00", now_after=120 + liveness.idle_after())
     assert got.kind == liveness.IDLE_CONDUCTOR
+
+
+def test_a_long_shell_that_just_finished_is_not_a_stall(tmp_path):
+    """conductor の最後の応答から閾値を過ぎていても、終わったばかりのシェルがあれば止まりにしない（PR 4325 の r1-6）。"""
+    assert _judged(tmp_path, SHELL_TASK, now_after=10 * liveness.idle_after()).kind == liveness.ALIVE
 
 
 def test_a_long_subagent_that_just_finished_is_not_a_stall(tmp_path):

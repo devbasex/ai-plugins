@@ -808,14 +808,15 @@ def _stopped_at(step: str, kind: str):
 @pytest.mark.parametrize(
     ("step", "kind", "inputs", "dropped"),
     [
-        ("merge", "refused", {"issues": [1]}, True),
-        ("merge", "refused", {"issues": [1], "merge_method": "squash"}, False),
+        ("merge", "merge_method", {"issues": [1]}, True),
+        ("merge", "merge_method", {"issues": [1], "merge_method": "squash"}, False),
+        ("merge", "refused", {"issues": [1]}, False),
         ("merge", "base_conflict", {"issues": [1]}, False),
-        ("a", "refused", {"issues": [1]}, False),
+        ("a", "merge_method", {"issues": [1]}, False),
     ],
 )
 def test_a_refused_merge_drops_the_values_only_when_the_method_was_asked(tmp_path, monkeypatch, step, kind, inputs, dropped):
-    # GitHub に問うて決めた方式でマージのステップが断られたときだけ、組み立て済みの値を捨てて次の打ち直しで方式をもう一度問う。
+    # GitHub に問うて決めた方式をマージのステップで断られたときだけ、組み立て済みの値を捨てて次の打ち直しで方式をもう一度問う。
     # 課題を読めずに止まった打ち直しは記録した方式を使うので、その間に許す方式が変わると捨てなければ断られ続ける（PR 4289 の指摘）
     _plan_template(monkeypatch)
     work = tmp_path / "w"

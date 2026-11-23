@@ -16,6 +16,7 @@
 - 終了コードが成功（終了コードの表の `ok`。結果 JSON なら `ok`）: 済んでいる。`run` を打たない
 - 終了コードが失敗（終了コードの表の `failed`。結果 JSON なら `not_applicable` で止まった）: まだ。`run` を打つ
 - ほか: 済んだかを確かめられない。`run` を打たずに、その種類（結果 JSON の種類か `exit_cause`、無ければ unknown）で止まる
+  （結果 JSON の `gaps` はそのまま運ぶ）
 
 見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
 
@@ -173,7 +174,8 @@ def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, A
     if found["kind"] == "not_applicable" or not_yet:
         return None
     kind = found["kind"] if found["kind"] is not None else "unknown"
-    return _stopped(kind, f"ステップ {step.id} の probe で済んだかを確かめられない: {found['summary']}")
+    out = _stopped(kind, f"ステップ {step.id} の probe で済んだかを確かめられない: {found['summary']}")
+    return {**out, "gaps": found["gaps"]}
 
 
 def _stopped(kind: str, summary: str) -> dict[str, Any]:

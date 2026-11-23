@@ -58,6 +58,8 @@ _ADMIN_MERGE = (
     "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
     " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method}) { pullRequest { merged } } }"
 )
+# マージの方式が基底で許されていない断りの停止理由の種類（方式を渡した呼び手が、ほかの断りと分けて方式を決め直す）
+METHOD_REFUSED = "merge_method"
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
 # マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
@@ -324,10 +326,7 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
 
 
 class MergeOutcome(NamedTuple):
-    """マージの結果。断られたら `kind` に停止理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
-
-    マージキューへ入れて実際のマージを待つときは `ci_pending`（`MERGE_QUEUE_PENDING`）。
-    """
+    """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。"""
 
     merged: bool
     kind: Optional[str]
@@ -428,7 +427,7 @@ def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Seq
     """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
     want = method if method is not None else "（設定なし）"
     detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
-    return MergeOutcome(False, "refused", detail, pull.head_sha)
+    return MergeOutcome(False, METHOD_REFUSED, detail, pull.head_sha)
 
 
 def _response_body(resp: Any) -> Any:
