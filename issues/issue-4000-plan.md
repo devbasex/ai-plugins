@@ -32,8 +32,8 @@
 ## タスク分解
 
 ### Task 1: スロットを待つ上限と組の選び方
-- **対象ファイル:** `adapters/launch_slot.py`・`adapters/claude.py` と `tests/adapters/test_launch_slot.py`・`test_claude.py`
-- **変更内容:** 詳細設計の「起動の前置きのスロットを待つ上限」。省けば今の振る舞いのまま
+- **対象ファイル:** `adapters/launch_slot.py`・`adapters/claude.py` と `tests/adapters/test_launch_slot.py`・`test_claude.py`・`tests/domains/relay/test_relay_plan_claude.py`（偽の `gate` の引数の追随）
+- **変更内容:** 詳細設計の「起動の前置きのスロットを待つ上限」と、CLI の下限の確かめを飛ばす指定（`cli_floor`。設計の決定 3 の「CLI の下限」）。どれも省けば今の振る舞いのまま
 - **満たす受け入れ条件:** 9（判定の子の起動の前置き。設計の決定 3・8）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -65,7 +65,7 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| u1 起動の前置き | Task 1 | 4000:9 | 約 150 | （実装の後に書き足す） |
+| u1 起動の前置き | Task 1 | 4000:9 | 約 150 | 281（`plugins/ndf` の下。追加 258・削除 23） |
 | u2 hook の文脈 | Task 2 | 4000:4 | 約 250 | |
 | u3 判定のリクエスト | Task 3 | 4000:1・4000:5・4000:6a・4000:9 | 約 400 | |
 | u4 判定の子 | Task 4 | 4000:2・4000:3・4000:9 | 約 450 | |
