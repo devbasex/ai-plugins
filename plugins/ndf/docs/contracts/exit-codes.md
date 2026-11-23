@@ -48,6 +48,7 @@
 | `push_rejected` | push 前の検査（pre-push の hook）が push を断った | validation | 1（failed） | step | — | — |
 | `refused` | 不変条件で操作を断った | validation | 1（failed） | human | — | — |
 | `restore_unsupported` | PostgreSQL の URL でステートマシンの DB の戻しを求めた。バックアップと戻しは DB の運用で行う | configuration | 3（precondition） | human | — | — |
+| `samples_mismatch` | 見本が本物の公開の記述と食い違う（相手の API の形が変わったか、見本が古い） | validation | 1（failed） | step | — | — |
 | `spin` | 中継のラッパーが再起動ループの検出（起動から間もないセグメントの続き）に当たり、次のセグメントを起動せずに止まった | runtime | 1（failed） | human | — | — |
 | `store_broken` | 記録の DB（ステートマシンの DB か DBOS のキーのファイル）が quick_check を通らない・ジャーナルに書けない。壊れたキーのファイルは broken/ へ移した。ステートマシンの DB は ndf progress restore でバックアップから戻す | runtime | 2（unreadable） | human | — | — |
 | `store_busy` | ステートマシンの DB（SQLite）の書き込みの待ちが busy_timeout を超えた | timeout | 75（infra_wait） | retry | cause.store-busy | step |

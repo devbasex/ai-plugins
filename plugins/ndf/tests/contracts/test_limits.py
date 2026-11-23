@@ -42,6 +42,9 @@ def test_scaled_follows_long_measurements():
         ("a.b.json", lambda _: {"summary": "x", "seconds": -1}),
         ("a.b.json", lambda _: {"summary": "x", "attempts": 1.5}),
         ("a.b.json", lambda _: {"summary": "x", "weird": 1}),
+        ("a.b.json", lambda _: {"summary": "x", "retries": -1}),
+        ("a.b.json", lambda _: {"summary": "x", "max_bytes": 0}),
+        ("a.b.json", lambda _: {"summary": "x", "peers": {"github": "2"}}),
         ("nodot.json", lambda _: {"summary": "x", "seconds": 1}),
         ("a.b.json", lambda _: {"summary": " ", "seconds": 1}),
     ],
@@ -88,9 +91,11 @@ _SCHEMA_VALUE_KEYS = (
     "rest_seconds",
     "lock_seconds",
     "rounds",
+    "retries",
+    "max_bytes",
 )
-# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint）。`limits.value` では引かない
-_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
+# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint と `samples.fetch` の peers）。`limits.value` では引かない
+_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint", "peers")
 
 
 def test_value_keys_match_policy_fields_and_schema():
@@ -133,10 +138,12 @@ def test_validate_builds_policies_with_name_and_absent_values_as_none():
 
 
 def test_table_keeps_every_policy_and_representative_values():
-    # #3687: 表を方針ごとのファイルへ分けても、読みの結果は分ける前と同じ件数と値を返す
+    # #3687: 表を方針ごとのファイルへ分けても、読みの結果は分ける前と同じ件数（と、その後に足した samples.fetch）と値を返す
     table = limits.table()
-    assert len(table) == 230
+    assert len(table) == 231
     assert limits.value("test-run.test", "seconds") == 900
     assert limits.value("test-run.test", "factor") == 3
     assert limits.value("launch.weight.test", "gib") == 14
+    fetch = limits.policy("samples.fetch")
+    assert (fetch.seconds, fetch.retries, fetch.max_bytes, fetch.peers) == (60, 0, 64 * 1024 * 1024, {"github": 2})
     assert table["test-run.test"].name == "test-run.test"
