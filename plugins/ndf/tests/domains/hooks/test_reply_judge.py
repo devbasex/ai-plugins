@@ -368,6 +368,16 @@ def test_parent_launch_takes_the_nearest_claude_code_not_the_shell() -> None:
     assert found is not None and found.argv == ["claude", "--settings=gw.json"]
 
 
+def test_parent_launch_keeps_empty_arguments_in_the_middle() -> None:
+    # 空の値を落とすと --settings が --system-prompt の値に読まれ、子が送信先を確かめられない起動を拒めない
+    tree = chain(1)
+    tree[HOOK_PID + 1] = tree[HOOK_PID + 1]._replace(cmdline=["claude", "--system-prompt", "", "--settings", "gw.json"])
+    found = launch_of(ENV, tree)
+    assert found is not None and found.argv == ["claude", "--system-prompt", "", "--settings", "gw.json"]
+    flagged = reply_judge.Launch(argv=["claude", "--settings", "gw.json"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
+    assert reply_judge.endpoint_scope(ENV, found) == reply_judge.endpoint_scope(ENV, flagged)
+
+
 def test_parent_launch_does_not_take_a_process_with_claude_in_its_arguments() -> None:
     tree = {
         HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3", "run.py"], comm="python3"),
@@ -441,6 +451,15 @@ def test_endpoint_rest_ignores_the_prompt_and_the_values() -> None:
     # 位置引数に書いた --settings はオプションではない
     quoted = reply_judge.Launch(argv=["claude", "-p", "--", "--settings"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
     assert reply_judge.endpoint_scope(ENV, quoted) == reply_judge.endpoint_scope(ENV, LAUNCH)
+
+
+def test_endpoint_rest_is_split_by_the_parent_executable(tmp_path: Path) -> None:
+    # 旧版のセッションが実行ファイルの差し替えを検出して書いた休みで、新版のセッションの判定を止めない
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, LAUNCH)
+    upgraded = LAUNCH._replace(exe="/home/u/.local/share/claude/versions/2.1.331", exe_id=[2049, 778])
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, upgraded) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH._replace(exe_id=[2049, 778])) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH) is True
 
 
 def test_endpoint_rest_is_split_by_the_config_dir() -> None:
