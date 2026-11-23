@@ -1,4 +1,5 @@
-"""PR へ書く操作が GitHub の二次レート制限に当たったときの待ちと、スレッドを続けて作るときの間隔（#3941・#4016 の決定 8）。"""
+"""PR へ書く操作が GitHub の二次レート制限に当たったときの待ち（#3941・#4016 の決定 8）。書き込みの間隔はマシン全体の
+`WriteGate` が持ち、スレッドを書く口は間を空けない。"""
 
 from __future__ import annotations
 
@@ -93,21 +94,29 @@ class _Publisher:
         return list(texts), {}
 
 
-def test_github_port_waits_on_the_limit_and_spaces_threads() -> None:
+def test_github_port_waits_only_on_the_limit_and_does_not_space_threads() -> None:
+    """#4016: 書き込みの間隔は `WriteGate` が持つので、口は二次レート制限の打ち直しの待ちだけ眠る。"""
     waits: list[float] = []
     blocked: list[float] = []
-    now = [100.0]
     hub = _Hub(limited=1)
-    pace = threads.Pace(waits.append, lambda: now[0])
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=pace, block=blocked.append)
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=waits.append, block=blocked.append)
     assert port.open_thread("a.py", None, HEAD, "一つ目") == 1
     assert waits == [limits.value(throttle_decide.POLICY, "interval")]
     # 打ち直しの待ちはマシン全体の待ちの終わりへも知らせる（PR 4265 の r1-1）
     assert blocked == waits
     port.open_thread("a.py", None, HEAD, "二つ目")
-    assert waits[-1] == limits.value(throttle_decide.SPACING, "interval")
     port.reply(1, "直した")
-    assert len(hub.posts) == 3
+    assert len(hub.posts) == 3 and len(waits) == 1
+
+
+def test_review_waits_on_the_limit_like_other_writes() -> None:
+    """レビューの作成も二次レート制限なら 60・120 秒と延ばして打ち直し、待ちを `block` へ知らせる（受け入れ条件 5）。"""
+    waits: list[float] = []
+    blocked: list[float] = []
+    hub = _Hub(limited=2)
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=waits.append, block=blocked.append)
+    assert port.open_review(HEAD, [threads.Placed("r1-1", "a.py", 3, "本文")]) == 1
+    assert waits == blocked == [60.0, 120.0] and hub.posts == ["/repos/o/r/pulls/7/reviews"]
 
 
 def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
@@ -115,7 +124,7 @@ def test_limit_on_a_line_comment_is_not_retried_as_a_file_comment() -> None:
     （投稿は attempts 回まで）。"""
     attempts = int(limits.value(throttle_decide.POLICY, "attempts"))
     hub = _Hub(limited=attempts * 2)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(lambda s: None, lambda: 0.0))
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, sleep=lambda s: None)
     with pytest.raises(_Limited):
         port.open_thread("a.py", 3, HEAD, "本文")
     assert hub.limited == attempts and hub.posts == []

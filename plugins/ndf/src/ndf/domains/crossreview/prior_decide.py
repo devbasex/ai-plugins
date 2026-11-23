@@ -42,7 +42,8 @@ class Remark(NamedTuple):
 
 class Thread(NamedTuple):
     """PR のレビューのスレッド 1 つ（最初のコメントの id と本文、resolve 済みか、付いた場所）。`trusted` は最初のコメントの
-    書き手が信頼できる（今の実行の認証の login と同じ）か。読む口は `MARKER` で始まるスレッドだけ確かめる。"""
+    書き手が信頼できる（今の実行の認証の login と同じ）か。読む口は `MARKER` で始まるスレッドだけ確かめる。`replies` は
+    信頼できるスレッドの最後の返信のうち、今の実行の認証の login が書いたものの本文（最初のコメントは除く。#4016）。"""
 
     comment: int
     body: str
@@ -50,6 +51,7 @@ class Thread(NamedTuple):
     path: Optional[str] = None
     line: Optional[int] = None
     trusted: bool = False
+    replies: tuple[str, ...] = ()
 
 
 class Carried(NamedTuple):

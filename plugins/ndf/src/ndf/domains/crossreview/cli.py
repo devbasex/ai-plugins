@@ -24,17 +24,18 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -55,12 +56,14 @@ class Hub(NamedTuple):
     """PR へ書く口と読む口。`comment(PR, 本文, 前に書いたコメントの URL)` は前のコメントがあれば書き換え、無ければ足して URL を返す。
     `reader` は PR のコメントとスレッドを読む口（#3941）。`threads` と `reader` は同じ PR に同じ口を返す（読んだスレッドの
     一覧を書く側で使い回す。PR 3944 の r6-8）。`clean` は書き先に応じた伏せ字（値の並びを 1 回で受ける。記録のコメントの
-    末尾の一覧の値を JSON にする前に通す。PR 3944 の r6-4）。"""
+    末尾の一覧の値を JSON にする前に通す。PR 3944 の r6-4）。`publishing` は同じ PR の公開のロック（`write_gate.pr_lock`。
+    同じ PR へ並んだ公開が同じ指摘を二重に書かない。#4016 の不変条件 I4）。"""
 
     comment: Callable[[int, str, Optional[str]], str]
     threads: Callable[[int], threads.Port]
     reader: Callable[[int], threads.Reader]
     clean: Callable[[Sequence[str]], Sequence[str]] = _redacted
+    publishing: Callable[[int], ContextManager[Any]] = lambda pr: contextlib.nullcontext()
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -93,7 +96,10 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     def clean(texts: Sequence[str]) -> list[str]:
         return [str(t) for t in publisher.guarded(*texts)[0]] if texts else []
 
-    return Hub(comment, port, port, clean)
+    def publishing(pr: int) -> ContextManager[Any]:
+        return write_gate.pr_lock(slug, pr)
+
+    return Hub(comment, port, port, clean, publishing)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -420,27 +426,37 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
     ref = store.state_pr(state_dir, pr)
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
+    try:
+        hub = hub_of()
+        # 同じ PR の公開のロックの中で状態ファイルを読み直す（後から取った公開は先の記録を見て二重に書かない。#4016）
+        with hub.publishing(ref.current_pr):
+            return _publish(ref, final, warnings, hub)
+    except Exception as exc:
+        raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
+
+
+def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub) -> tuple[str, list[str]]:
+    """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
-    try:
-        hub = hub_of()
-        notes = threads.sync(data, hub.threads(ref.current_pr))
+    if journal.with_occurrences(data):
+        # スレッドを作る前に、本文に入れる発生の値を残す（作った直後に落ちた打ち直しが同じ値で PR から戻す）
         store.write_object(ref.path, data)
-        body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes), hub.clean)
-        previous = data.get(report_decide.COMMENT_KEY)
-        url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
-        # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
-        data[report_decide.COMMENT_KEY] = url
-        # 公開できた状態を残す。スレッドを書き切れなかったときは残さず、打ち直しで書き直す（PR 3944 の r3-2）
-        if notes:
-            data.pop(report_decide.PUBLISHED_KEY, None)
-        else:
-            data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
-        store.write_object(ref.path, data)
-        return url, notes
-    except Exception as exc:
-        raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
+    notes = threads.sync(data, hub.threads(ref.current_pr))
+    store.write_object(ref.path, data)
+    body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes), hub.clean)
+    previous = data.get(report_decide.COMMENT_KEY)
+    url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
+    # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
+    data[report_decide.COMMENT_KEY] = url
+    # 公開できた状態を残す。スレッドを書き切れなかったときは残さず、打ち直しで書き直す（PR 3944 の r3-2）
+    if notes:
+        data.pop(report_decide.PUBLISHED_KEY, None)
+    else:
+        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
+    store.write_object(ref.path, data)
+    return url, notes
 
 
 def cmd_report(args: argparse.Namespace) -> int:
