@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
+from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core.plan import inputs_decide as inputs
 from ndf.domains.loop import acceptance
@@ -271,15 +273,19 @@ def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loo
 
 
 def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, loop):
-    # 束ねた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）
-    calls: list[list[int]] = []
+    # 束ねた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）。union の
+    # issueOrPullRequest の本文は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
+    queries: list[str] = []
 
-    class Hub:
-        def nodes(self, numbers, node, fields):
-            calls.append(sorted(numbers))
-            return {n: {"body": BODY} for n in numbers}
+    class Hub(github.GitHub):
+        def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+            queries.append(query)
+            aliases = re.findall(r"(\w+): issueOrPullRequest\(number: (\d+)\) \{ ", query)
+            return {"repository": {alias: {"body": BODY} for alias, _n in aliases}}
 
-    monkeypatch.setattr(acceptance, "_hub", lambda cwd: Hub())
+    monkeypatch.setattr(acceptance, "_hub", lambda cwd: Hub("o/r", None))
     monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: pytest.fail("課題ごとに読んだ"))
     got = loop("check", "--issue", "1", "--issue", "2")
-    assert calls == [[1, 2]] and [g["name"] for g in got["gaps"]][:1] == ["1:1"]
+    assert len(queries) == 1 and [g["name"] for g in got["gaps"]][:1] == ["1:1"]
+    for n in (1, 2):
+        assert f"issueOrPullRequest(number: {n}) {{ ... on Issue {{ body }} ... on PullRequest {{ body }} }}" in queries[0]

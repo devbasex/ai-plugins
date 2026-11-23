@@ -33,6 +33,8 @@ from ndf.domains.loop import acceptance_decide as acc
 TOOL = cli.tool_of(f"{__package__}.cli")
 # 書いた後の読み直しで自分の記録がそろわないときに当て直す回数
 REAPPLY_LIMIT = 3
+# `issueOrPullRequest`（union）から本文を選ぶ選択
+BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
 
 
 def _hub(cwd: Path) -> github.GitHub:
@@ -51,7 +53,8 @@ def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
     """
     if len(issues) == 1:
         return {issues[0]: read_body(cwd, issues[0])}
-    got = _hub(cwd).nodes(issues, "issueOrPullRequest", "body")
+    # issueOrPullRequest は union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
+    got = _hub(cwd).nodes(issues, "issueOrPullRequest", BODY_FIELDS)
     unread = sorted(n for n in issues if n not in got or not isinstance(got[n].get("body"), str))
     if unread:
         raise acc.AcceptanceError(f"課題 {', '.join(f'#{n}' for n in unread)} の本文を読めない")
