@@ -21,6 +21,17 @@ def _row(fid: str, text: str, round_no: int, outcome: str = fin.UNRESOLVED, reas
     }
 
 
+def _plain(rows) -> list[dict]:
+    """行から発生の値（乱数）を外す。新しい行と再発の行は 12 字の発生の値を持つ。"""
+    out = []
+    for row in rows:
+        row = dict(row)
+        occurrence = row.pop(journal_mod.OCCURRENCE, None)
+        assert occurrence is None or len(occurrence) == 12
+        out.append(row)
+    return out
+
+
 def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks() -> None:
     journal = drive.FindingJournal()
     raised = [
@@ -32,7 +43,8 @@ def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks(
     ]
     assert journal.enter(1, raised) == frozenset({"一つ目", "二つ目"})
     raised_rows = {"severity": "major", "raised_severity": None, "impact": IMPACT}
-    assert list(journal.rows.values()) == [
+    assert all(len(r[journal_mod.OCCURRENCE]) == 12 for r in journal.rows.values())
+    assert _plain(journal.rows.values()) == [
         {**_row("r1-1", "一つ目", 1, section="a.md#セクション"), **raised_rows},
         {**_row("r1-2", "二つ目", 1, by="kiro"), **raised_rows},
     ]
@@ -41,7 +53,9 @@ def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks(
 def test_enter_skips_deferred_findings_and_reopens_fixed_ones() -> None:
     journal = drive.FindingJournal([_row("r1-1", "直した", 1, fin.FIXED), _row("r1-2", "見送った", 1, fin.SKIPPED, "別で直す")])
     assert journal.enter(2, [{"text": "直した", "by": "kiro"}, {"text": "見送った", "by": "kiro"}]) == frozenset({"直した", "見送った"})
-    assert list(journal.rows.values()) == [_row("r1-1", "直した", 2), _row("r1-2", "見送った", 1, fin.SKIPPED, "別で直す")]
+    assert _plain(journal.rows.values()) == [_row("r1-1", "直した", 2), _row("r1-2", "見送った", 1, fin.SKIPPED, "別で直す")]
+    # 再発した指摘は新しい発生の値を持ち、見送り済みの行は書き換えない（#4016）
+    assert journal_mod.OCCURRENCE in journal.rows["r1-1"] and journal_mod.OCCURRENCE not in journal.rows["r1-2"]
     assert journal.skipped_texts() == ["見送った"]
 
 
@@ -68,7 +82,8 @@ def test_apply_fix_takes_decided_outcomes_and_ignores_unknown_ids() -> None:
     ]
     reported = journal.apply_fix(items, [fin.Handed("rebuild-1", "足す")], 2)
     assert reported == [items[0], items[2], items[3]]
-    assert list(journal.rows.values()) == [
+    assert len(journal.rows["rebuild-1"][journal_mod.OCCURRENCE]) == 12
+    assert _plain(journal.rows.values()) == [
         _row("r1-1", "a", 1, fin.FIXED),
         _row("r1-2", "b", 1),
         {
@@ -203,3 +218,23 @@ def test_issue_4014_carried_rows_are_not_rated_again() -> None:
     journal.enter(1, [{"text": "A", "severity": "major", "by": "codex"}])
     assert "raised_severity" not in row and "severity" not in row
     assert not criteria_decide.downgraded(row)
+
+
+def test_occurrence_is_new_for_each_raise_and_written_for_older_rows() -> None:
+    """#4016: 指摘を初めて記録するとき（`enter`・`carry`・`apply_fix`）と再発で発生の値を書き、前のバージョンの行には
+    `with_occurrences` が書く。同じ指摘の出し直し（直していない）は値を変えない。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A", "by": "codex"}, {"text": "B", "by": "codex"}])
+    first = journal.rows["r1-1"][journal_mod.OCCURRENCE]
+    assert first != journal.rows["r1-2"][journal_mod.OCCURRENCE]
+    journal.enter(2, [{"text": "A", "by": "kiro"}])
+    assert journal.rows["r1-1"][journal_mod.OCCURRENCE] == first
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(3, [{"text": "A", "by": "kiro"}])
+    assert journal.rows["r1-1"][journal_mod.OCCURRENCE] != first
+    journal.carry([prior_decide.Carried("t9", 9, "C", "codex", "major", "a.py", 1)])
+    assert len(journal.rows["t9"][journal_mod.OCCURRENCE]) == 12
+    data = {"findings": [_row("r1-1", "a", 1), {**_row("r1-2", "b", 1), journal_mod.OCCURRENCE: "kept00000000"}]}
+    assert journal_mod.with_occurrences(data)
+    assert len(data["findings"][0][journal_mod.OCCURRENCE]) == 12 and data["findings"][1][journal_mod.OCCURRENCE] == "kept00000000"
+    assert not journal_mod.with_occurrences(data)

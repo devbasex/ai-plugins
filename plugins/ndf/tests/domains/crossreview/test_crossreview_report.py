@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import report_decide, store, threads
+from ndf.domains.crossreview import journal, report_decide, store, threads
 
 from .conftest import FakePort
 from .test_crossreview_run import PR, Fake, _run
@@ -78,21 +78,35 @@ def test_location_uses_the_line_only_when_the_text_names_the_same_file() -> None
     assert threads.location({"section": "", "text": "a.py:12"}) == (None, None)
 
 
-def test_sync_opens_threads_replies_and_resolves_closed_findings_once() -> None:
+def test_sync_puts_the_closing_reason_in_the_first_comment_and_resolves_once() -> None:
+    """#4016 の受け入れ条件 2: この実行で閉じた指摘は、閉じた理由を最初のコメントへ入れて返信を 0 回にし、resolve する。"""
     data, port = _state(), FakePort()
+    assert journal.with_occurrences(data)
     assert threads.sync(data, port) == []
-    # 行に付けるのは本文の先頭がそのファイルを指すときだけ。スレッドはその指摘のラウンドの head に付ける
+    # 行に付けるのは本文の先頭がそのファイルを指すときだけ。スレッドはその指摘のラウンドの head に付ける。行の分かる指摘は
+    # レビューでまとめて書き、行の分からない指摘はファイルに 1 件ずつ付ける
     assert [(p, line, c) for p, line, c, _ in port.opened] == [("src/a.py", 12, HEAD1), ("src/b.py", None, HEAD1), ("doc.md", None, HEAD2)]
-    # 直した指摘は修正のコミットを、見送った指摘は理由を返信して resolve する。未解決は開いたまま
-    assert port.replies == [(1001, f"直した（修正のコミット {FIX1[:9]}）"), (1002, "見送った: 設計で決めた範囲の外")]
+    assert [(commit, [c.fid for c in comments]) for commit, comments in port.batches] == [(HEAD1, ["r1-1"])]
+    bodies = [body for _, _, _, body in port.opened]
+    assert f"直した（修正のコミット {FIX1[:9]}）" in bodies[0] and threads.CLOSED_HEAD in bodies[0]
+    assert "見送った: 設計で決めた範囲の外" in bodies[1] and threads.CLOSED_HEAD in bodies[1]
+    assert threads.CLOSED_HEAD not in bodies[2]
+    assert port.replies == []
     assert port.resolved == [1001, 1002]
+    assert {fid: (m["comment"], m["replied"]) for fid, m in data[threads.THREADS].items()} == {
+        "r1-1": (1001, True),
+        "r1-2": (1002, True),
+        "r2-1": (1003, False),
+    }
     # 打ち直しても同じものを書かない
     threads.sync(data, port)
-    assert (len(port.opened), len(port.replies), len(port.resolved)) == (3, 2, 2)
-    # 後のラウンドで未解決の指摘を直したら、そのときに返信して resolve する
+    assert (len(port.opened), len(port.replies), len(port.resolved)) == (3, 0, 2)
+    # 前の実行のスレッドを持つ指摘を後で直したら、そのスレッドへ発生の値を入れて返信し、resolve する
     data["findings"][2]["outcome"] = "fixed"
     threads.sync(data, port)
-    assert port.replies[-1] == (1003, "直した") and port.resolved[-1] == 1003
+    [(cid, body)] = port.replies
+    assert cid == 1003 and body.startswith("直した") and data["findings"][2]["occurrence"] in body
+    assert port.resolved[-1] == 1003
 
 
 class _Refused(Exception):
@@ -137,7 +151,7 @@ def test_sync_failure_is_a_warning_per_finding() -> None:
     notes = threads.sync(data, FakePort(fail=True))
     # スレッドを作れなかった指摘は注意に残し、済んだ記録を残さない（打ち直せば作り直す）
     assert len(notes) == 3 and all("スレッドを書けなかった" in n for n in notes)
-    assert data[threads.THREADS] == {"r1-1": {}, "r1-2": {}, "r2-1": {}}
+    assert data[threads.THREADS] == {}
 
 
 def test_run_posts_the_record_with_the_fix_and_returns_its_url(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -183,7 +197,7 @@ def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys,
     assert result.errors(got, code) == [] and code == 0
     [(slug, pr, body, previous)] = hub.comments
     assert (slug, pr, previous) == ("acme/repo", 7, None) and "ラウンドの上限で止まった" in body
-    assert len(hub.port.opened) == 3 and hub.port.resolved == [1001, 1002]
+    assert len(hub.port.opened) == 3 and hub.port.resolved == [1001, 1002] and hub.port.replies == []
     # 済んだスレッドは状態ファイルへ残り、打ち直しても二重に書かない。記録のコメントは前のコメントを書き換える
     cli.main(["report", "--state-dir", str(state_dir), "--pr", "7"])
     assert len(hub.port.opened) == 3
