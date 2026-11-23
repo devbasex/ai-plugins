@@ -270,7 +270,7 @@ def test_4036_live_shells_counts_the_bash_tool_shells_under_claude(tmp_path):
     _proc(tmp_path, 14, ["bash", "-c", "echo x"], ppid=11)
     _proc(tmp_path, 15, SHELL_ARGS, ppid=99)  # 別の claude のシェルは数えない
     (tmp_path / "self").mkdir()  # 数字でない項目は読まない
-    assert observe.live_shells(10, tmp_path) == 1
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
 
 
 def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
@@ -280,24 +280,72 @@ def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
     _proc(tmp_path, 11, ["claude"], ppid=10)
     _proc(tmp_path, 12, ["/bin/bash", "-c", f"source {account} 2>/dev/null || true && eval 'sleep 45' < /dev/null"], ppid=11)
     _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
-    assert observe.live_shells(10, tmp_path) == 2
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 2
 
 
 def test_4036_live_shells_reads_the_parent_past_a_command_name_with_parens(tmp_path):
     _proc(tmp_path, 10, ["ndf", "relay"], comm="a) S 7 (b")
     _proc(tmp_path, 11, ["claude"], ppid=10, comm="cl) 3 (x")
     _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
-    assert observe.live_shells(10, tmp_path) == 1
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 1
 
 
 def test_4036_live_shells_is_zero_without_children(tmp_path):
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["claude"], ppid=10)
-    assert observe.live_shells(10, tmp_path) == 0
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) == 0
 
 
 def test_4036_live_shells_is_none_without_the_wrapper_or_claude(tmp_path):
-    assert observe.live_shells(10, tmp_path) is None
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
     _proc(tmp_path, 10, ["ndf", "relay"])
     _proc(tmp_path, 11, ["tmux"], ppid=10)
-    assert observe.live_shells(10, tmp_path) is None
+    assert observe.live_shells(10, observe.process_parents(tmp_path), tmp_path) is None
+
+
+def _raising(monkeypatch, method, target, exc):
+    real = getattr(observe.Path, method)
+
+    def fake(self, *a, **k):
+        if self == target:
+            raise exc
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(observe.Path, method, fake)
+
+
+def test_4036_process_parents_skips_a_pid_whose_stat_is_denied(tmp_path, monkeypatch):
+    # hidepid=1 では他のユーザーの PID は見えても stat は読めない（proc(5)）。その PID だけを外して続ける
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 50, ["other"])
+    _raising(monkeypatch, "read_text", tmp_path / "50" / "stat", PermissionError("denied"))
+    parents = observe.process_parents(tmp_path)
+    assert 50 not in parents
+    assert observe.live_shells(10, parents, tmp_path) == 1
+
+
+def test_4036_process_parents_is_none_without_proc(tmp_path):
+    assert observe.process_parents(tmp_path / "missing") is None
+    assert observe.live_shells(10, None, tmp_path) is None
+
+
+def test_4036_live_shells_skips_a_shell_that_ends_while_cmdline_is_read(tmp_path, monkeypatch):
+    # 開いた後に子が消えると cmdline の読み取りは ESRCH（ProcessLookupError）になる。終わった子として数えない
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
+    parents = observe.process_parents(tmp_path)
+    _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", ProcessLookupError("gone"))
+    assert observe.live_shells(10, parents, tmp_path) == 1
+
+
+def test_4036_live_shells_is_none_when_cmdline_cannot_be_read(tmp_path, monkeypatch):
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    parents = observe.process_parents(tmp_path)
+    _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", PermissionError("denied"))
+    assert observe.live_shells(10, parents, tmp_path) is None

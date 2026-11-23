@@ -82,33 +82,23 @@ def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, ta
     return root / f"claude-{os.getuid()}" / key / session_id / "tasks" / f"{task_id}.output"
 
 
-def live_shells(wrapper_pid: int, proc: Path = Path("/proc")) -> Optional[int]:
-    """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。ラッパーか `claude` が見つからない・読めなければ None。
+def process_parents(proc: Path = Path("/proc")) -> Optional[dict[int, int]]:
+    """`/proc` のプロセスごとの親 PID（`/proc/<pid>/stat`）。`/proc` を読めなければ None。
 
-    子は `/proc/<pid>/stat` の親 PID で絞る（`task/<tid>/children` は読む間に子が終わると、生きている別の子も欠け得る。
-    proc_tid_children(5)）。
+    レーンの判定の読み直しごとに 1 度だけ組み、各レーンの `live_shells` で共有する（レーンごとに全体を読み直さない）。
+    走査の間に終わったプロセスと、`stat` を読めないプロセス（`hidepid=1` の他のユーザーのもの。proc(5)）は載せない。
     """
     try:
-        parents = _parents(proc)
+        entries = list(proc.iterdir())
     except OSError:  # noqa: NDF401 ファイル: /proc を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
         return None
-    if wrapper_pid not in parents:
-        return None
-    conductor = next((c for c in _children(parents, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
-    if conductor is None:
-        return None
-    return sum(1 for c in _children(parents, conductor) if _is_shell(_args(proc, c)))
-
-
-def _parents(proc: Path) -> dict[int, int]:
-    """`/proc` のプロセスごとの親 PID。走査の間に終わったプロセスは載せない。"""
     parents: dict[int, int] = {}
-    for entry in proc.iterdir():
+    for entry in entries:
         if not entry.name.isdigit():
             continue
         try:
             stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
-        except (FileNotFoundError, ProcessLookupError):  # 走査の間に終わったプロセスは数えない
+        except (FileNotFoundError, ProcessLookupError, PermissionError):  # 終わった・他のユーザーのプロセスは数えない
             continue
         fields = stat.rpartition(")")[2].split()  # `pid (comm) state ppid …`。comm は括弧や空白を含み得る
         if len(fields) >= 2 and fields[1].isdigit():
@@ -116,15 +106,32 @@ def _parents(proc: Path) -> dict[int, int]:
     return parents
 
 
+def live_shells(wrapper_pid: int, parents: Optional[Mapping[int, int]], proc: Path = Path("/proc")) -> Optional[int]:
+    """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。
+
+    `parents` は `process_parents` の返り（None なら None）。ラッパーか `claude` が見つからない・`cmdline` を読めなければ None。
+    子は親 PID で絞る（`task/<tid>/children` は読む間に子が終わると、生きている別の子も欠け得る。proc_tid_children(5)）。
+    """
+    if parents is None or wrapper_pid not in parents:
+        return None
+    try:
+        conductor = next((c for c in _children(parents, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
+        if conductor is None:
+            return None
+        return sum(1 for c in _children(parents, conductor) if _is_shell(_args(proc, c)))
+    except OSError:  # noqa: NDF401 ファイル: cmdline を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
+        return None
+
+
 def _children(parents: Mapping[int, int], pid: int) -> list[int]:
     return sorted(c for c, p in parents.items() if p == pid)
 
 
 def _args(proc: Path, pid: int) -> list[str]:
-    """`cmdline` の引数。読む前にプロセスが終わっていれば空。"""
+    """`cmdline` の引数。読む前か読む間にプロセスが終わっていれば空（後者は `ESRCH`）。"""
     try:
         raw = (proc / str(pid) / "cmdline").read_bytes()
-    except FileNotFoundError:  # 子を数える間に終わったプロセスは数えない
+    except (FileNotFoundError, ProcessLookupError):  # 子を数える間に終わったプロセスは数えない
         return []
     return raw.decode("utf-8", errors="replace").split("\0")[:-1]
 
