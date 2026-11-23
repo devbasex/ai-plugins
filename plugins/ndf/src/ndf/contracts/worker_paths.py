@@ -649,6 +649,22 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
     return True
 
 
+def reset_report(wd: WorkDir, paths: ReportPaths) -> tuple[str, str]:
+    """報告・完了マーカー・結果ファイルを初期化する（`ndf worker prepare` と `ndf answer work` が共有する）。
+
+    3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
+    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
+    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
+    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。どれかがリンクなら
+    リンクもリンクの先も変えずに `EntryUnsafe` を上げる。返りは完了マーカーと結果ファイルの `remove_file` の返り。
+    """
+    check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
+    done = remove_file(wd, paths.done.name)
+    removed = remove_file(wd, paths.result.name)
+    write_file(wd, paths.report.name, "")
+    return done, removed
+
+
 def remove_file(wd: WorkDir, name: str) -> Literal["absent", "removed"]:
     """確かめてから名前を消す。確かめの時点でリンクなら消さずに `EntryUnsafe`（リンクの先もリンクも残す）。
 

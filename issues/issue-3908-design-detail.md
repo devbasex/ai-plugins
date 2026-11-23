@@ -149,7 +149,8 @@ plugins/ndf/
 | `$workdir` | worker が動く作業場所の絶対パス（`work_dir_of` の返りか `--cwd`） |
 | `$steps` | 手順の抜粋（`kinds.json` の `excerpt` のファイルの中身。無ければ「手順の抜粋は無い」の 1 行） |
 | `$skills` | 読む Skill の名前と `SKILL.md` の絶対パス（無ければ「無し」） |
-| `$report`・`$done`・`$result` | 報告の保存先の 3 つの絶対パス（`contracts.worker_paths.report_paths`。#3877） |
+| `$report`・`$done`・`$result` | 報告の保存先の 3 つの絶対パス（`contracts.worker_paths.report_paths`。#3877）。表示に使う |
+| `$report_arg`・`$result_arg` | `$report`・`$result` をシェルで 1 つの引数になるよう引用した値（`shlex.quote`）。コマンドの見本（`ndf worker append --report`・`ndf contracts emit --out`）に使い、保存先のパスに空白や `$` があっても割れない |
 
 本文に書く 7 項目と規則 7 個の文面は、worker を起動指示で起動するときはこのファイルが、supervisor がサブエージェントで起動するときは `agent-layers.md` が持つ。どちらも同じ 7 項目と規則 7 個である。
 

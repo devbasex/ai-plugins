@@ -27,14 +27,14 @@ $skills
 
 $report
 
-長い出力と報告の写しは、1 回の `ndf worker append --report "$report" --done` で書く（本文はヒアドキュメントで渡す）。
+長い出力と報告の写しは、1 回の `ndf worker append --report $report_arg --done` で書く（本文はヒアドキュメントで渡す）。
 同じ呼び出しが完了マーカー（$done）も作る。`Write`・`Edit` の Tool とリダイレクトでこの 2 つを書かない。
 
 ## 作業の結果ファイル
 
 作業の結果ファイル: $result
 
-最後の応答の前に `ndf contracts emit --tool worker --status <ok|gate|stopped> --summary "<1 行>" --out $result` で書く。
+最後の応答の前に `ndf contracts emit --tool worker --status <ok|gate|stopped> --summary "<1 行>" --out $result_arg` で書く。
 `gate` は `--route retry -` を、`stopped` は `--cause work_stopped "<理由>"` を添える。作業の成否はこのファイルの
 `status` だけで決まるので、書かずに応答を終えない。
 

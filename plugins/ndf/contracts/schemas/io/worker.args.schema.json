@@ -183,6 +183,12 @@
         "--timeout": {
           "type": "number",
           "default": 3600.0
+        },
+        "--require-output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

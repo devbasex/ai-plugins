@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -55,6 +56,53 @@ def test_the_argv_requires_the_outputs_the_work_has_to_return(tmp_path):
     argv = gate.work_argv("worktree", tmp_path, Path("/r"))
     assert argv[-4:] == ["--require-output", "worktree", "--require-output", "branch"]
     assert "--require-output" not in gate.work_argv("requirements", tmp_path, Path("/r"))
+    # 受け側（`ndf worker run`）のパーサーが必須の出力の名前を受ける（拒まれて worker の起動前に止まらない）
+    assert worker._parser().parse_args(argv).require_output == ["worktree", "branch"]
+    assert worker._parser().parse_args(gate.work_argv("requirements", tmp_path, Path("/r"))).require_output == []
+
+
+def test_ndf_answer_work_resets_the_report_and_the_done_marker_before_each_launch(tmp_path):
+    # 起動指示が指す `ndf worker append --done` は報告が要り、前の完了マーカーが残ると今回の報告より先に見える
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    paths = worker_paths.report_paths(tmp_path, "fix", resolve=False)
+    paths.report.write_text("前の報告", encoding="utf-8")
+    paths.done.write_text("", encoding="utf-8")
+    paths.result.write_text("{}", encoding="utf-8")
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: None) == 0
+    assert paths.report.read_text(encoding="utf-8") == ""
+    assert not paths.done.exists() and not paths.result.exists()
+
+
+def test_a_result_file_that_is_a_link_stops_before_the_worker_and_keeps_its_target(tmp_path, capsys):
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    target = tmp_path / "利用者のファイル"
+    target.write_text("消さない", encoding="utf-8")
+    worker_paths.report_paths(tmp_path, "fix", resolve=False).result.symlink_to(target)
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: got.append(argv))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
+    assert target.read_text(encoding="utf-8") == "消さない"
+
+
+def test_a_relative_cwd_reaches_the_prompt_and_the_argv_as_the_same_absolute_path(tmp_path, monkeypatch):
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    (tmp_path / "rel").mkdir()
+    monkeypatch.chdir(tmp_path)
+    got: list[list[str]] = []
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "--cwd", "rel", "fix"], lambda exe, argv: got.append(argv)) == 0
+    want = str((tmp_path / "rel").resolve())
+    assert got[0][got[0].index("--cwd") + 1] == want
+    prompt = worker_paths.report_paths(tmp_path, "fix", resolve=False).prompt
+    assert f"\n- 作業場所: {want}\n" in prompt.read_text(encoding="utf-8")
+
+
+def test_the_command_samples_quote_a_state_dir_with_a_space(tmp_path):
+    state_dir = tmp_path / "保存 先"
+    paths = worker_paths.report_paths(state_dir, "worktree", resolve=False)
+    body = _prompt("worktree", _saved("worktree", {"repo": "/r"}, {"issues": [7]}), state_dir, "/r")
+    assert f"--report {shlex.quote(str(paths.report))} --done" in body
+    assert body.count(f"--out {shlex.quote(str(paths.result))}") == 2
 
 
 def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -128,13 +129,18 @@ def _steps_of(kind: str) -> str:
     return _text_of(identity.ROOT / rel, f"作業 {kind} の手順の抜粋")
 
 
+def _arg(value: Any) -> str:
+    """コマンドの見本に差し込む値。シェルで 1 つの引数になるよう引用する（空白・`$`・引用符を含むパスでも割れない）。"""
+    return shlex.quote(str(value))
+
+
 def _outputs_of(kind: str, result_file: Path) -> str:
     """結果ファイルに必ず入れる `outputs` のキーと `ndf contracts emit --outputs` の見本（無ければ「無し」の 1 行）。"""
     names = work_kinds()[kind]["outputs"]
     if not names:
         return "結果ファイルに必ず入れる outputs: 無し"
-    shown = json.dumps({n: "<値>" for n in names}, ensure_ascii=False)
-    sample = f"ndf contracts emit --tool worker --status ok --summary \"<1 行>\" --outputs '{shown}' --out {result_file}"
+    shown = _arg(json.dumps({n: "<値>" for n in names}, ensure_ascii=False))
+    sample = f'ndf contracts emit --tool worker --status ok --summary "<1 行>" --outputs {shown} --out {_arg(result_file)}'
     return f"結果ファイルに必ず入れる outputs: {'・'.join(names)}\n見本: {sample}"
 
 
@@ -142,7 +148,8 @@ def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worke
     """共通のテンプレート（`contracts/worker/prompt.md`）と作業の定義と `values.json` の中身から起動指示の本文を組む。
 
     差し込みの欠けは `substitute` が `KeyError` で止める（決定 6）。作業が読む値の内訳の欠けは 1 つの字面に隠れるので、
-    呼び手が `kind_gaps` で名前ごとに先に確かめる。
+    呼び手が `kind_gaps` で名前ごとに先に確かめる。表示に使うパス（`report`・`done`・`result`）と、コマンドの見本に
+    差し込む引用済みの値（`report_arg`・`result_arg`）を分ける。
     """
     spec = work_kinds()[kind]
     filled = {
@@ -156,6 +163,8 @@ def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worke
         "report": str(paths.report),
         "done": str(paths.done),
         "result": str(paths.result),
+        "report_arg": _arg(paths.report),
+        "result_arg": _arg(paths.result),
     }
     template = Template(_text_of(contracts.contracts_dir() / PROMPT_FILE, "起動指示のテンプレート"))
     try:
@@ -165,10 +174,18 @@ def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worke
 
 
 def _write_prompt(kind: str, state_dir: Path, saved: Mapping[str, Any], workdir: Path) -> Path:
-    """起動指示を `<保存先>/<作業名>.prompt.md` へ書く（既存のリンクをたどらない。#3877）。`workdir` は本文に入れるだけ。"""
+    """報告の保存先を初期化し、起動指示を `<保存先>/<作業名>.prompt.md` へ書く。`workdir` は本文に入れるだけ。
+
+    初期化は `ndf worker prepare` と同じ `worker_paths.reset_report`（空の報告を作り、前の完了マーカーと結果ファイルを
+    消す）で、起動ごとに行う。起動指示が指す `ndf worker append --done` は報告が無いと書けず、前の完了マーカーが
+    残ると今回の報告より先に見えるためである。どの名前もリンクをたどらず、リンクなら何も変えずに `EntryUnsafe`
+    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。
+    """
     paths = worker_paths.report_paths(state_dir, kind, resolve=False)
+    body = work_prompt(kind, saved, workdir, paths)
     with worker_paths.open_workdir(paths.prompt.parent) as wd:
-        worker_paths.write_file(wd, paths.prompt.name, work_prompt(kind, saved, workdir, paths))
+        worker_paths.reset_report(wd, paths)
+        worker_paths.write_file(wd, paths.prompt.name, body)
     return paths.prompt
 
 
@@ -205,13 +222,17 @@ WORK_STOP_TYPES = tuple(t for t, _ in WORK_STOPS)
 
 
 def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
-    """worker が動く作業場所。`--cwd` があればそれ、無ければ作業の定義の `cwd` が指す差し込みの値。"""
+    """worker が動く作業場所の絶対パス。`--cwd` があればそれ、無ければ作業の定義の `cwd` が指す差し込みの値。
+
+    `ndf worker run` と同じく呼び出し元の場所で解く（`.resolve()`）。起動指示と argv に同じ絶対パスを載せ、移動した
+    worker が相対パスを自分の場所から読み違えないようにする。
+    """
     if cwd is not None:
-        return Path(cwd)
+        return Path(cwd).resolve()
     found = work_dir_of(kind, saved["values"])
     if found is None:  # `kind_gaps` が空なら決まっているので、ここへは来ない
         raise WorkUnready(f"作業 {kind} の作業場所（差し込み {work_kinds()[kind]['cwd']}）が {invoke.VALUES_FILE} に無い")
-    return Path(found)
+    return Path(found).resolve()
 
 
 def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> list[str]:

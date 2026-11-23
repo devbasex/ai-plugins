@@ -754,25 +754,11 @@ def _workdir(
         raise WorkerError("invalid", f"{paths.report.parent} で{doing}: {exc.strerror or exc}") from None
 
 
-def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[str, str]:
-    """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
-
-    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
-    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
-    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
-    """
-    worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
-    done = worker_paths.remove_file(wd, paths.done.name)
-    removed = worker_paths.remove_file(wd, paths.result.name)
-    worker_paths.write_file(wd, paths.report.name, "")
-    return done, removed
-
-
 def _cmd_prepare(a: argparse.Namespace) -> int:
     """報告の保存先を用意し、3 つの絶対パスを `metrics.paths` に返す（#3877）。失敗のときはパスを返さない。"""
     paths, origin = _paths_of(a.dir, a.name)
     with _workdir(paths, "報告の保存先を用意できない", create=True, origin=origin) as wd:
-        done, removed = _reset(wd, paths)
+        done, removed = worker_paths.reset_report(wd, paths)
     items = [
         {"kind": "report", "path": str(paths.report), "action": "created"},
         {"kind": "done", "path": str(paths.done), "action": done},
@@ -819,6 +805,8 @@ def _add_run(sub: Any) -> None:
         rn.add_argument(name, required=True)
     rn.add_argument("--sources")
     rn.add_argument("--timeout", type=float, default=WORK_TIMEOUT)
+    # 結果ファイルの outputs に必ず入れる名前（`ndf answer work` が作業の定義の outputs から渡す。#3908）
+    rn.add_argument("--require-output", action="append", default=[])
     rn.set_defaults(fn=_cmd_run)
 
 
