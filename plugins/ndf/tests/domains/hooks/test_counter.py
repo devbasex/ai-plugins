@@ -98,3 +98,58 @@ def test_counter_that_cannot_read_does_not_count(tmp_path):
     assert path.read_text(encoding="utf-8") == "{broken"
     with Counter.open("../x", tmp_path) as c:
         assert not c.usable
+
+
+def test_remembered_value_is_taken_once_in_the_next_open(tmp_path):
+    # #3995 の Task 11: 覚えた値は次の Counter.open で取り出せ、取り出した後は None。違う item の値は互いに残る
+    with Counter.open("m-1", tmp_path) as c:
+        c.remember("k", "A", {"tokens": 1}, 16)
+        c.remember("k", "B", {"tokens": 2}, 16)
+    with Counter.open("m-1", tmp_path) as c:
+        assert c.take("k", "A")["tokens"] == 1
+        assert c.take("k", "A") is None
+    with Counter.open("m-1", tmp_path) as c:
+        assert c.take("k", "A") is None and c.take("k", "B")["tokens"] == 2
+
+
+def test_remember_drops_only_the_oldest_value_over_keep(tmp_path):
+    with Counter.open("m-2", tmp_path) as c:
+        for i in range(4):
+            c.remember("k", f"id{i}", {"tokens": i}, 3)
+        assert c.take("k", "id0") is None
+        assert [c.take("k", f"id{i}")["tokens"] for i in (1, 2, 3)] == [1, 2, 3]
+
+
+def test_remember_after_a_human_input_drops_the_values_of_the_previous_input(tmp_path):
+    with Counter.open("m-3", tmp_path) as c:
+        c.remember("k", "A", {"tokens": 1}, 16)
+        assert c.reset("relay") == "relay"
+        c.remember("k", "B", {"tokens": 2}, 16)
+        assert c.take("k", "A")["tokens"] == 1
+        c.remember("k", "C", {"tokens": 3}, 16)
+        assert c.reset("human") == "human"
+        c.remember("k", "D", {"tokens": 4}, 16)
+        assert c.take("k", "B") is None and c.take("k", "C") is None and c.take("k", "D")["tokens"] == 4
+
+
+def test_take_from_a_state_file_without_memo_is_none(tmp_path):
+    # memo を持たない今の状態のファイルも壊れたとして扱わない（memo は _fresh に足さない）
+    path = tmp_path / "hooks" / "sessions" / "m-4.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"turn": 2, "pushbacks": 0, "denies": {}, "counts": {}, "relay_mark": False}), encoding="utf-8")
+    with Counter.open("m-4", tmp_path) as c:
+        assert c.usable and c.take("k", "A") is None
+
+
+def test_remember_and_take_without_a_usable_counter(tmp_path):
+    c = Counter.unusable()
+    c.remember("k", "A", {"tokens": 1}, 16)
+    assert "memo" not in c.data and c.take("k", "A") is None
+
+
+def test_remember_rebuilds_a_memo_entry_that_is_not_a_table(tmp_path):
+    with Counter.open("m-5", tmp_path) as c:
+        c.data["memo"] = {"k": ["x"]}
+        assert c.take("k", "A") is None
+        c.remember("k", "A", {"tokens": 1}, 16)
+        assert c.take("k", "A")["tokens"] == 1
