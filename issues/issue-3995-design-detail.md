@@ -242,9 +242,28 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
-| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数。U4 で、引継ぎに要る呼び出しを通す `_passes` と同じ単位で入れる） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。背景の監視（ndf lanes wait・Monitor）は子と一緒に止まった。supervisor・ndf plan queue とその工程は別のプロセスで動き続けていることがある。工程を終えたものとも止まったものとも決めず、引継ぎ文書の「現在地」に、次のセグメントで打ち直す前に ndf plan pending と保存済みの結果で既存の実行の状態を確かめ、動いている実行は待ち、止まったと確かめた未完了の工程だけを打ち直す、と残す。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」（ラッパーの `_stop_child` が終わりを確かめるのは Claude の子だけで、`core/plan/steps.py` は工程を `start_new_session=True` で起動するので、工程は子を止めても残り得る。運用上限以上の会話は guard が状態の確かめの Bash を止めるので、確かめは次のセグメントで行う） |
+| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数。U4 で、引継ぎに要る呼び出しを通す `_passes` と同じ単位で入れる） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。背景の監視（ndf lanes wait・Monitor）は子と一緒に止まった。supervisor・ndf plan queue とその工程は別のプロセスで動き続けていることがある。工程を終えたものとも止まったものとも決めず、引継ぎ文書の「現在地」に、流していた実行ごとにプランのパス・状態ディレクトリ（--state-dir に渡した値。渡していなければ既定と書く）・会話に出た実行キー（run_id）・キューならキューのプランの並びと --queue-dir を残し、次のセグメントで「引継ぎの後の実行の確かめ」の手順に従う、と残す。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」（ラッパーの `_stop_child` が終わりを確かめるのは Claude の子だけで、`core/plan/steps.py` は工程を `start_new_session=True` で起動するので、工程は子を止めても残り得る。運用上限以上の会話は guard が状態の確かめの Bash を止めるので、確かめは次のセグメントで行う） |
 
 `relay.result.schema.json` は `items` の `policy`・`margin`・`config_error` と `metrics` の `no_policy_rows` を消し、`metrics` に `decide_from`（integer）を足す（`metrics` は追加の項目を許さない）。`relay.args.schema.json` は `context resolve` の `--root`・`--policy` を消す。
+
+#### 引継ぎの後の実行の確かめ（U4）
+
+`ndf plan pending` は DBOS の `PENDING`・`ENQUEUED`・`DELAYED` を並べるだけで、`ndf plan next`（親）が止まっても行が残るので、生きているかの確かめに使わない。親と工程の生死は今のコードが書く次の記録で照らす。
+
+| 記録 | 書く場所 | 中身 | 生死の照らし方 |
+| --- | --- | --- | --- |
+| 実行キー | `<状態ディレクトリ>/run.json` の `key` | 親が `_record_run` で書く | 引継ぎ文書の実行キーと違えば、別の回が始まっている。打ち直さずに利用者へ報告する |
+| 親のロック | `<状態ディレクトリ>/plan.lock` | 親が `runner.plan_lock` の間ずっと持つ。ファイルにホスト・pid・時刻（`durable_locks.write_owner`） | ホストが同じで pid が生きていれば（`kill -0`）親は動いている。ホストが違えば照らせないので打ち直さずに利用者へ報告する |
+| 工程の pid | `<状態ディレクトリ>/steps/<工程>.pid.json` | 工程を起動したときにホスト・pid・時刻を書き、終えたら消す（`steps._write_pid`） | 親が止まっていて残っていれば、工程の結果を受け取る親が無い（標準出力のパイプが切れている）ので、結果は保存されない |
+
+次のセグメントは、引継ぎ文書に残した実行ごとに次の順で確かめる。
+
+1. `ndf plan wait <プラン> --state-dir <状態ディレクトリ> --timeout 0` を打つ。保存済みの結果（`status` の終わり・止まり）か承認ゲートが返れば、それを今までどおり処理する
+2. 返らなければ `run.json` の `key` を引継ぎ文書の実行キーと照らし（上の表）、`plan.lock` のホスト・pid で親を照らす。親が動いていれば `ndf plan wait` で待つ
+3. 親が止まっていれば、同じ実行を `ndf plan next <プラン> --state-dir <状態ディレクトリ>`（`--fresh` を付けない。前の回と同じ `--set`）で続ける。`next` は `plan.lock` を取り、`run.json` の実行キーの DBOS の記録から回復し、未完了の工程を打つ前に `ensure_previous_stopped` で同じホストの残った工程の組を止める。工程の pid が別のホストなら `refused` で止まるので、利用者へ報告する
+4. キューは、並びのプランごとに 1・2 を行う。動いている親が 1 本でもあれば `ndf plan wait` でそのプランを待ち、どれも動いていなければ同じ並びで `ndf plan queue … --resume --queue-dir <キューの保存先>` を打つ（完了したプランは流さず、未完了のプランは子の `next` が 3 のとおり同じ実行を続ける）
+
+この手順は U4 で `context-window.md` の「判定と再起動を記録する」の後と `parallel.md` の「セッションの切り替え」に書く。`plan.lock` のロックは親が止まれば OS が外すので、3 の `next` は待たずに取れる（親が動いているのに打つと `LOCK_WAIT_SECONDS` の 300 秒を待って `store_in_use` で止まるので、2 で先に照らす）。
 
 ### 異常系の処理
 
