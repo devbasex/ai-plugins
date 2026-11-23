@@ -118,8 +118,8 @@ plugins/ndf/
 - `classify`
   - 起動の引数: `claude.claude_args(ClaudeCall(system=SYSTEM, permission=Permission.JUDGE, model=<設定の model>))`（最小構成・Tool なし・会話を残さない）。回答は `ClaudeReply.raw` の本文を空白を除いて読み、`wait` か `report` に完全に一致しなければ `shape`
   - 打つ秒: `seconds − 経過`。残りが 0.5 秒を切れば打たずに `failure="timeout"`
-  - スロットと組: `call_claude(..., slot_wait=0, new_group=False)`。`claude` を判定の子と同じプロセスの組で起動し、hook の側の組への送信が `claude` まで届くようにする（今の `_popen` は `start_new_session=True` で別の組に置く）。判定の子は中継の確かめ（`claude.register` の `relay_checks`）を登録しないので、起動は `_prefaced` → `_run_claude` の経路を通る
-  - 打つ秒の内訳: `claude --version`（`cli_floor` の下限。バージョンの記録はプロセスの中だけなので、子ごとに 1 回打つ。0.007〜0.009 秒）を含めて `seconds − 経過` に収める
+  - スロットと組と下限: `call_claude(..., slot_wait=0, new_group=False, cli_floor=False)`。`claude` を判定の子と同じプロセスの組で起動し、hook の側の組への送信が `claude` まで届くようにする（今の `_popen` は `start_new_session=True` で別の組に置く）。判定の子は中継の確かめ（`claude.register` の `relay_checks`）を登録しないので、起動は `_prefaced` → `_run_claude` の経路を通る。CLI の下限の確かめ（`claude --version`）は打たない（利用者の決定、2026-11-23。判定の対象は今動いている Claude Code 自身で、その親のセッションが動いている時点で下限は満たしている）
+  - 打つ秒の内訳: `claude -p` の 1 回だけを `seconds − 経過` に収める（下限の確かめを打たないので、起動するプロセスは判定の子の python と `claude -p` の 2 つである）
   - 失敗の対応付け: `ClaudeReply.failure` の `launch` / `timeout` / `refused` / `usage_limit` / `no_slot` をそのまま `failure` へ。`ok` が偽で `failure` が None のとき、`ClaudeReply.raw`（結果の行の本文か標準エラー）が設定の `auth_markers` のどれかを含めば `auth`、含まなければ `exit`（認証の失敗は今の `call_claude` では `failure` が None になる。設計の MEA8）
 - 質問の文（`SYSTEM` と `QUESTION`）はこのモジュールの定数に置く。`QUESTION` は設計の外部の調査の MEA6 の形にする。応答を書いた本人が人に判断・選択・承認を求め、その回答を待っていれば `wait`、質問が途中にあり後に報告が続いても `wait`、それ以外は `report` とし、`report` の例として「他人の質問を引用して経緯を説明している」「ほかのセッションやレーンの承認待ちを伝えている」「承認を求める資料を用意したことや作業の結果を報告している」の 3 つを並べ、1 語だけを返させる。本文は `<reply>` と `</reply>` で囲む
 - 判定の例の組の形: `{"version": 1, "cases": [{"id": "miss-1", "text": "…", "expect": "wait", "source": "#4000 の 1 回目"}, …]}`。要求の受け入れ条件 2 の文を持つ
@@ -222,9 +222,9 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `call_claude` | `adapters/claude.py` | 変更 | `call_claude(argv, prompt, timeout, cwd=None, slot_wait: Optional[float] = None, new_group: bool = True) -> ClaudeReply` | `slot_wait` と `new_group` を前置きへ渡す。`slot_wait` が None なら今の上限（`launch.wait.llm-cli`）。`new_group` が真なら今のとおり `claude` を新しい組で起動する |
-| `_accounted` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool` | 同上を `_prefaced` へ渡す |
-| `_prefaced` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool` | `launch_slot.gate(..., wait=slot_wait)`。`new_group` を `_run_claude` へ渡す（関所の起動 `_gated` は中継の経路だけで、今のまま） |
+| `call_claude` | `adapters/claude.py` | 変更 | `call_claude(argv, prompt, timeout, cwd=None, slot_wait: Optional[float] = None, new_group: bool = True, cli_floor: bool = True) -> ClaudeReply` | `slot_wait`・`new_group`・`cli_floor` を前置きへ渡す。`slot_wait` が None なら今の上限（`launch.wait.llm-cli`）。`new_group` が真なら今のとおり `claude` を新しい組で起動する。`cli_floor` が偽なら CLI の下限の確かめ（`claude --version`）を打たない（既定の真は今のとおり確かめる） |
+| `_accounted` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool`・`cli_floor: bool` | 同上を `_prefaced` へ渡す |
+| `_prefaced` | `adapters/claude.py` | 変更 | 末尾に `slot_wait: Optional[float]`・`new_group: bool`・`cli_floor: bool` | `launch_slot.gate(..., wait=slot_wait)`。`cli_floor` が偽なら下限の確かめを飛ばす。`new_group` を `_run_claude` へ渡す（関所の起動 `_gated` は中継の経路だけで、今のまま） |
 | `_run_claude` | `adapters/claude.py` | 変更 | 末尾に `new_group: bool = True` | `_popen` へ渡す |
 | `_popen` | `adapters/claude.py` | 変更 | 末尾に `new_group: bool = True` | `start_new_session=new_group`。偽なら呼び手の組に入り、`_talk` の時間切れの `_stop` は `process_group.stop_group` の「組が自分と同じなら `proc` へだけ送る」に従う |
 | `gate` | `adapters/launch_slot.py` | 変更 | `gate(agent, *, cwd=None, env=None, wait: Optional[float] = None)` | `held` へ渡す |
@@ -236,7 +236,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_wait_for` | `limit` を省くと今の上限で待つ | `limit=0` で空きが無ければ眠らずに `NoSlot` | — |
-| `call_claude` | `slot_wait=0` で空きが無ければ `Failure.NO_SLOT` を返す（起動しない） | — | — |
+| `call_claude` | `slot_wait=0` で空きが無ければ `Failure.NO_SLOT` を返す（起動しない）。`cli_floor=False` で下限の確かめ（`claude --version`）を打たず、省いた既定では今のとおり打つ | — | — |
 | `_popen` | 偽の `Popen` に `start_new_session=True` が渡る（既定） | `new_group=False` で `start_new_session=False` が渡る | — |
 
 ## 実効の設定で指定のキーを定義する層
