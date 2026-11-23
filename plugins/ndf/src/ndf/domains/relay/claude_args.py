@@ -54,11 +54,6 @@ class _Acc:
     unsupported: Optional[str] = None
 
 
-def _take(args: Sequence[str], i: int) -> tuple[_Option, int]:
-    """`args[i]` から 1 つのオプションを読み、次の位置を返す。"""
-    return claude_options.take(_table(), args, i)
-
-
 def options(args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
     """オプションの名前と値（値が無ければ None）を前から順に返す。位置引数と `--` より後は返さない。
 
@@ -78,7 +73,7 @@ def without(args: Sequence[str], name: str) -> list[str]:
             out.append(word)
             i += 1
             continue
-        opt, i = _take(args, i)
+        opt, i = claude_options.take(_table(), args, i)
         if opt.name != name:
             out += opt.words
     return out
@@ -130,7 +125,7 @@ def parse(args: Sequence[str], environ: Mapping[str, str], tty: bool) -> Parsed:
             acc.positionals.append(word)
             i += 1
             continue
-        opt, i = _take(args, i)
+        opt, i = claude_options.take(_table(), args, i)
         if opt.name in t["non_interactive"]:
             return Parsed(f"非対話の起動 {opt.name}")
         _place(acc, opt)
