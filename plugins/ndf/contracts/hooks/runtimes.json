@@ -12,7 +12,7 @@
         "PreToolUse": {
           "budget": "pre-tool-use",
           "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
-          "optional": ["transcript_path", "tool_use_id"],
+          "optional": ["transcript_path", "tool_use_id", "agent_id"],
           "outputs": {
             "deny": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "{reason}"}},
             "advise": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "{context}"}}
@@ -29,7 +29,7 @@
         "PostToolUse": {
           "budget": "post-tool-use",
           "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
-          "optional": ["transcript_path", "tool_response", "tool_use_id"],
+          "optional": ["transcript_path", "tool_response", "tool_use_id", "agent_id"],
           "outputs": {
             "advise": {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "{context}"}}
           }

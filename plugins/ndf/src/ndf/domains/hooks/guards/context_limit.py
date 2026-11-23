@@ -6,15 +6,64 @@
 続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
+
+サブエージェント（入力の `agent_id`）と、メインディレクトリに `.ndf` の無い会話は判定せず、会話の記録も読まない（#3995 の 3995:15）。
+メインディレクトリは `.git` と管理ディレクトリの `commondir` だけから求め、git のコマンドを起動しない。
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+from typing import Optional
+
+from ndf import identity
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.context import context_tokens
+from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import thresholds
 from ndf.domains.relay.signals import relay_dir
 from ndf.domains.hooks.verdict import Verdict, deny, passing
+
+
+def _gitdir(dot: Path) -> Optional[Path]:
+    """`gitdir: <X>` のファイルが指す管理ディレクトリの実パス（`X` は `.git` を持つディレクトリから解く）。"""
+    try:
+        line = dot.read_text(encoding="utf-8").strip()
+    except OSError:  # noqa: NDF401 ファイル: .git を読めなければメインディレクトリは求められない
+        return None
+    if not line.startswith("gitdir:"):
+        return None
+    return Path(os.path.realpath(dot.parent / line[len("gitdir:") :].strip()))
+
+
+def _main_of(root: Path) -> Optional[Path]:
+    """`.git` を持つ `root` のメインディレクトリ。共通の git のディレクトリの親はメインディレクトリとみなさない。"""
+    dot = root / ".git"
+    if dot.is_dir():
+        return root
+    gitdir = _gitdir(dot)
+    if gitdir is None:
+        return None
+    try:
+        text = (gitdir / "commondir").read_text(encoding="utf-8")
+    except FileNotFoundError:  # commondir が無いのは管理ディレクトリを外に保存するメインディレクトリ（--separate-git-dir）
+        return root
+    except OSError:  # noqa: NDF401 ファイル: commondir を読めなければメインディレクトリは求められない
+        return None
+    common = Path(os.path.realpath(gitdir / text.strip()))
+    parent = common.parent
+    candidate = parent / ".git"
+    if candidate.is_dir():
+        return parent if Path(os.path.realpath(candidate)) == common else None
+    return parent if candidate.is_file() and _gitdir(candidate) == common else None
+
+
+def _main(cwd: str) -> Optional[str]:
+    """`cwd` を含むリポジトリのメインディレクトリの実パス。求められないか `.ndf` のディレクトリが無ければ None。"""
+    root = _repo_root(Path(os.path.realpath(cwd)))
+    main = _main_of(root) if root is not None else None
+    return str(main) if main is not None and (main / identity.FIXED_WORDS["ndf_settings_dir"]).is_dir() else None
 
 
 def _next_step(ctx, handoff_dir: str) -> bool:
@@ -24,6 +73,8 @@ def _next_step(ctx, handoff_dir: str) -> bool:
 
 
 def check(ctx, svc) -> Verdict | None:
+    if "agent_id" in ctx.payload or _main(ctx.cwd) is None:
+        return None
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None

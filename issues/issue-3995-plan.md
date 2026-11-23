@@ -151,8 +151,8 @@
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
 | U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
-| U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | 20 files changed, 192 insertions(+), 390 deletions(-)（うち削除は `context_policy.py` 143 行・`context.schema.json` 76 行・`test_context_policy.py` 46 行） |
-| U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | （実装の後に書き足す） |
+| U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | 21 files changed, 205 insertions(+), 398 deletions(-)（cross-review の後）。実装の時点は 20 files changed, 192 insertions(+), 390 deletions(-)（うち削除は `context_policy.py` 143 行・`context.schema.json` 76 行・`test_context_policy.py` 46 行） |
+| U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | 4 files changed, 197 insertions(+), 5 deletions(-)（plugins の下） |
 | U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | （実装の後に書き足す） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
 | U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
@@ -247,6 +247,8 @@ main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実�
 | Task 1: 移すテストは記録・較正・集計（`test_recorded_work_*`・`test_append_and_read_*`・`test_estimate_*`・`test_calibrate_*`・`test_cli_record_*`） | `test_context_dir_follows_the_legacy_state_root` も `context_policy` に依らない記録のテストで、U2 で `test_context_policy.py` を消すと失われる | U1 であわせて `test_context_report.py` へ移した |
 | Task 3: `HANDOVER_PROMPT` を詳細設計書の文にする | U1 の guard は運用上限以上で引継ぎ文書の Write/Edit しか通さず、文が求める `ndf records handoff check` の Bash と引継ぎ文書の Read を止める（PR 4216 の cross-review r1-1）。設計書の「子を強制終了するので背景の作業が残らない」は事実と違い、`ndf plan queue` の工程は別のセッションで動き続けることがある（同 r1-2・r6-1・r6-2） | U1 では今の文のまま。文は Task 8（U4）で `_passes` と同じ単位に入れる。文から「（背景の作業は終わった）」を外し、設計書の前提の行を事実に直した（背景の作業の終わりについて文は何も書かない。背景の作業が残る子を止めないのは #4049）。cross-review の r2〜r5・r7・r8 が求めた、引継ぎの後に `ndf plan` の実行を照らす手順（`src/ndf/core/plan/*` の変更を含む）は、承認済みの決定 4 を広げ touches の外なので取り込まない |
 | hook のテストは `NDF_CONTEXT_LIMIT` を流す人の値から切り離している | `tests/domains/hooks/_hooks.py` の `ENV_NAMES` に無い | U1 で `ENV_NAMES` に足した（境界のテストが手元の値で揺れないように） |
+| Task 6: `check` の異常の列の「`agent_id` があれば 300,000 の PostToolUse も None」と、NDF の外の「300,000 の PostToolUse も None」 | guard の `events` は今も PreToolUse だけで、PostToolUse の判定は U6（Task 12）で足す | U3 では PreToolUse の行だけをテストにする。PostToolUse の行は U6 で `events` を広げるときに足す |
+| Task 6 の対象ファイルは `context_limit.py`・`runtimes.json`・`test_guards.py` | `test_context.py` の `test_bash_pre_tool_use_parses_payload_shell_and_transcript_once` が `.ndf` の無い `tmp_path` で `read_tail` 1 回を期待する。`runtimes.json` を変えると `docs/contracts/hooks.md` の生成し直しも要る | U3 でそのテストの `tmp_path` に `.git`・`.ndf` を作り、`hooks.md` を `ndf check --write-spec` で生成し直した |
 | U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |
 | Task 5: 消す `context` の行は `ndf-files.json` だけ（修正対象の表） | `contracts/domains/entrypoints.json`（`spec-ndf_settings` の `files`）と `contracts/domains/skill-io.json`（`development-workflow` の `ndf_settings`）も `context` を挙げる | U2 で両方から外した（消した行を指す参照。`ndf check` が通る） |
 | Task 4: `resolve` の結果の `metrics` に `decide_from` を足す | 結果のスキーマの `metrics.policy` の行は「適用する再起動の方針」 | U2 で `policy` を `decide_from` に置き換えた（`metrics` は追加の項目を許さない） |
