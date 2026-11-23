@@ -131,7 +131,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `main` | `endpoint_refusal` が例外 | `account_dir` の読みの想定外の失敗 | `Exception` | `{"failure": "endpoint", "calls": 0}`（確かめられないので呼ばない） | 0 で終わる | 無し |
 | `main` | 入力が JSON でない・`text` が無い・`parent_exe` が無いか絶対パスでない・`parent_exe_id` が整数 2 つでない | 呼び手の誤り | `json.loads` | `{"failure": "shape", "calls": 0}` を書く | 0 で終わる | 無し |
-| `run_cases` | 組のファイルが読めない | ファイルが無い・形が違う | 読み込み | 呼び手（CLI）へ例外 | `ndf hooks judge-cases` が `result.stopped(TOOL, "refused", <読めない理由>)`（`status` は `stopped`・`cause.kind` は `refused`）と停止理由の表の終了コード | 直して打ち直す |
+| `run_cases` | 組のファイルが読めない | ファイルが無い・形が違う | 読み込み | 呼び手（CLI）へ例外 | `ndf hooks judge-cases` が `result.stopped(TOOL, "invalid", <読めない理由>)`（`status` は `stopped`・`cause.kind` は `invalid`・終了コード 2。読めない・形の誤りは入力の誤りで、不変条件による拒否の `refused` とは分ける） | 直して打ち直す |
 | `run_cases` | 判定が `refused` で返る | 学習の設定の記録が無いか期限切れ（`ensure_training=False`）・下限より古い `claude`・中継の確かめ（`checks.begin`。`switch_account=False` でも打つ）が断った（認証を上書きする設定など） | `classify` の `failure` | 残りの例を打たずに `JudgeRefused(<classify の返りの error>)` を投げる（`error` が None なら理由は `refused`） | `ndf hooks judge-cases`（`_judge_cases`）が `JudgeRefused` を受け、`result.stopped(TOOL, "refused", <reason の文>)` を `result.emit` に渡す（`status` は `stopped`・`cause.kind` は `refused`・`cause.detail` が理由の文。終了コードは停止理由の表の `refused` の値）。`_judge_cases` は案内を足さない。対処は理由の文が出どころごとに持つ（学習の設定は `training_cache` の `ndf training check --runtime claude`、古い CLI は `cli_floor.TooOld` の「下限以上へ上げる」、中継は `AccountRefused.detail` の対処）ので、中継が断ったときに学習の設定や CLI の更新を案内しない | 理由の文が示す対処の後に打ち直す |
 
 ### 単体テストの観点
