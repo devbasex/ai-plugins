@@ -109,6 +109,33 @@ def test_a_url_with_a_query_is_a_report(text):
     assert reply_wait.reply_kind(text) == "report"
 
 
+def test_a_wait_here_after_a_clause_naming_another_lane_is_a_wait():
+    """レーン名の節と「待」の節が別なら、待っている主体はこちら（節をまたいで別の場所の待ちと読まない）。"""
+    assert _is_wait("別のレーンを止めて、こちらの変更は回答を待ちます。")
+
+
+def test_a_wait_elsewhere_with_a_comma_after_the_topic_is_not_a_wait_here():
+    assert reply_wait.reply_kind("p9 の作業を終えました。別のレーンは、承認を待っています。") == "elsewhere_wait"
+
+
+def test_an_angle_bracket_link_with_a_query_is_a_report():
+    assert reply_wait.reply_kind("[手順](<guide (v2).md?version=2>) に載せました。") == "report"
+
+
+def test_a_wait_word_inside_inline_code_is_a_report():
+    assert reply_wait.reply_kind("設定から `answer=回答を待つ` を削除しました。") == "report"
+
+
+def test_a_conditional_contact_note_is_a_report():
+    assert reply_wait.reply_kind("作業を終えました。ご質問があれば、ご連絡をお待ちしています。") == "report"
+
+
+def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
+    """guard は `has_prose` の結果を持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
+    for text in ("返答を待ちます。", "作業を終えました。", "p9 の作業を終えました。別のレーンは承認を待っています。"):
+        assert reply_wait.prose_kind(text) == reply_wait.reply_kind(text)
+
+
 def test_a_question_inside_a_code_block_is_not_a_wait():
     text = "手順を書きました。\n\n```\n進めてよいですか？\n```\n\nコミットは 1 件です。"
     assert not _is_wait(text)

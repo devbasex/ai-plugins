@@ -34,7 +34,10 @@ USER_WAIT_CONTAINS = (
     # 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）
     "返答を待",
     "回答を待",
-    "お待ちしています",
+    # 「お待ちしています」は回答・返事を待つ形に限る（「ご質問があれば、ご連絡をお待ちしています。」は連絡の案内）
+    "回答をお待ち",
+    "返事をお待ち",
+    "返答をお待ち",
 )
 # 条件つきのリクエスト（「…がある場合は…ください」）は、待たずに進む応答の添え書きとして待ちの文から外す
 CONDITIONAL_MARKERS = ("場合は", "あれば", "場合には", "際は")
@@ -76,12 +79,21 @@ OPERATION_VERBS = (
 REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビュー", "返事", "指示", "意見", "知らせ", "決め")
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
-# 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）
-_OPAQUE = re.compile(r"`[^`\n]+`|\]\([^)\s]+\)|https?://[^\s`()（）「」『』。、？！]+")
+# 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）。リンク先は山括弧で
+# 囲んだ形（空白を含められる）・1 段の丸括弧を含む形・タイトルつきの形まで 1 つの範囲にする
+_INLINE_CODE = r"`[^`\n]+`"
+_LINK_DEST = r"\]\(\s*(?:<[^<>\n]*>|[^\s()<>]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"
+_URL = r"https?://[^\s`()（）「」『』。、？！]+"
+_OPAQUE = re.compile(f"{_INLINE_CODE}|{_LINK_DEST}|{_URL}")
+# インラインコードの中身の置き換え。示した値（`answer=回答を待つ`）を待ちの語として読まない
+_CODE_PLACEHOLDER = "`_`"
 # 文の区切りの記号の、範囲の中での置き換え（判定の語にも末尾の形にも当たらない字）
 _OPAQUE_MARKS = str.maketrans({"。": "．", "？": "＿", "?": "_", "！": "＿", "!": "_"})
 # 別の場所の待ちの報告の後の、節のつなぎ（「…待っていますが、」の「っていますが、」）
 _CLAUSE_SEPARATORS = "、，, "
+# 節の区切り（読点の後で切る）。主題の「は」「も」で終わる節は次の節の主体なので、次の節とつなぐ（「別のレーンは、承認を待っています。」）
+_CLAUSE_END = re.compile(r"(?<=[、，,])")
+_TOPIC_ENDINGS = ("は", "も")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
 _DECORATION = "*_`~ 　"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
@@ -118,11 +130,19 @@ def _last_lines(lines: list[tuple[str, bool]]) -> list[str]:
     return [text for text, _ in lines[start:]]
 
 
+def _opaque(match: re.Match[str]) -> str:
+    """区切りに数えない範囲の置き換え。インラインコードは中身ごと伏せ、リンク先と URL は区切りの記号だけを替える。"""
+    text = match.group(0)
+    if text.startswith("`"):
+        return _CODE_PLACEHOLDER
+    return text.translate(_OPAQUE_MARKS)
+
+
 def _sentences(lines: list[str]) -> list[str]:
     """行の並びを、句点・疑問符・感嘆符で切った文の並びにする。"""
     out: list[str] = []
     for line in lines:
-        line = _OPAQUE.sub(lambda m: m.group(0).translate(_OPAQUE_MARKS), line)
+        line = _OPAQUE.sub(_opaque, line)
         for part in _SENTENCE_END.split(line):
             s = part.strip()
             if s:
@@ -195,14 +215,42 @@ def _unquoted(text: str) -> str:
     return text
 
 
-def _only_elsewhere(sentence: str) -> bool:
-    """文が別の場所の待ちの報告だけか。報告の前後の節に回答・承認を待つ問いが残れば偽。"""
-    found = ELSEWHERE_RE.search(sentence)
+def _clauses(sentence: str) -> list[str]:
+    """文を読点で節に分ける。主題（「…は、」「…も、」）だけの節は、その主題で述べる次の節とつなぐ。"""
+    out: list[str] = []
+    for part in _CLAUSE_END.split(sentence):
+        if not part:
+            continue
+        if out and out[-1].rstrip(_CLAUSE_SEPARATORS).endswith(_TOPIC_ENDINGS):
+            out[-1] += part
+        else:
+            out.append(part)
+    return out
+
+
+def _elsewhere_clause(clause: str) -> bool:
+    """節が別の場所の待ちの報告か。報告の前後（同じ節の中）に回答・承認を待つ問いが残れば偽。"""
+    found = ELSEWHERE_RE.search(clause)
     if found is None:
         return False
-    before = sentence[: found.start()].rstrip(_CLAUSE_SEPARATORS)
-    after = sentence[found.end() :]
+    before = clause[: found.start()].rstrip(_CLAUSE_SEPARATORS)
+    after = clause[found.end() :]
     return not any(part and _asks_reply(part) for part in (before, after))
+
+
+def _only_elsewhere(sentence: str) -> bool:
+    """文が別の場所の待ちの報告だけか。
+
+    節ごとに待っている主体を見る。別の場所の待ちと確かめられた節だけを外し、ほかの節に回答・承認を待つ問いが
+    残れば偽（「別のレーンを止めて、こちらの変更は回答を待ちます。」は、こちらの回答待ち）。
+    """
+    found = False
+    for clause in _clauses(sentence):
+        if _elsewhere_clause(clause):
+            found = True
+        elif _asks_reply(clause):
+            return False
+    return found
 
 
 def classify_reply_wait(text: str) -> str:
@@ -221,18 +269,26 @@ def has_prose(text: str) -> bool:
     return bool(_prose_lines(text))
 
 
-def reply_kind(text: str) -> str:
-    """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
+def prose_kind(text: str) -> str:
+    """本文の行がある（`has_prose` が真の）応答の種類。`report` / `elsewhere_wait` / `prose_wait`。
 
-    `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
-    待ちの報告だけで、同じ文の前後に本人への問いが無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。待ちの文は `classify_reply_wait` と同じ形で
-    探し、かぎ括弧の引用の中身は見ない。
+    `has_prose` を確かめ直さない。guard は `has_prose` の結果を持ったまま、本文の行がある Stop でだけこれを呼ぶ
+    （本文の全行の抜き出しを 1 回の Stop で 2 回しない）。待ちの文は `classify_reply_wait` と同じ形で探し、
+    かぎ括弧の引用の中身は見ない。
     """
-    if not has_prose(text):
-        return "none"
     waits = _waits(_unquoted(text))
     if not waits:
         return "report"
     if all(_only_elsewhere(s) for s in waits):
         return "elsewhere_wait"
     return "prose_wait"
+
+
+def reply_kind(text: str) -> str:
+    """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
+
+    `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
+    待ちの報告だけで、ほかの節に本人への問いが無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。
+    `has_prose` の結果を既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
+    """
+    return prose_kind(text) if has_prose(text) else "none"
