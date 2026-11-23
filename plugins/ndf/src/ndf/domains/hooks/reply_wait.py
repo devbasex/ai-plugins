@@ -26,19 +26,23 @@ USER_WAIT_CONTAINS = (
     "答えを待",
     "判断を待",
     "指示を待",
-    "ご指示をお待ち",
     "承認の指示",
     "ご意向を伺",
-    "ご判断をお待ち",
     "入力を待",
     # 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）
     "返答を待",
     "回答を待",
-    # 「お待ちしています」は回答・返事を待つ形に限る（「ご質問があれば、ご連絡をお待ちしています。」は連絡の案内）
     "回答をお待ち",
     "返事をお待ち",
     "返答をお待ち",
+    "確認をお待ち",
+    "承認をお待ち",
+    "指示をお待ち",
+    "判断をお待ち",
 )
+# 待つ相手を語で決めない「お待ちしています」（11.0.22 の `classify_reply` が拾う形）。条件の添え書き
+# （「ご質問があれば、ご連絡をお待ちしています。」）のときだけ待ちから外す
+GENERIC_USER_WAIT = ("お待ちしています", "お待ちしております")
 # 条件つきのリクエスト（「…がある場合は…ください」）は、待たずに進む応答の添え書きとして待ちの文から外す
 CONDITIONAL_MARKERS = ("場合は", "あれば", "場合には", "際は")
 BACKGROUND_WAIT_ENDINGS = ("待ちます", "待っています")
@@ -94,6 +98,8 @@ _CLAUSE_SEPARATORS = "、，, "
 # 句の区切り（読点の後で切る）。主題の「は」「も」で終わる句は次の句の主体なので、次の句とつなぐ（「別のレーンは、承認を待っています。」）
 _CLAUSE_END = re.compile(r"(?<=[、，,])")
 _TOPIC_ENDINGS = ("は", "も")
+# 句の主体（最初の「は」「が」「も」までの句頭。句の末尾の「…ますが、」のつなぎは主体に数えない）
+_CLAUSE_TOPIC = re.compile(r"^[^。]*?[はがも](?!$)")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
 _DECORATION = "*_`~ 　"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
@@ -101,7 +107,9 @@ _BULLET = re.compile(r"^(?:[-*+・]|\d+[.)])\s+")
 # かぎ括弧の引用（ほかの人の質問を引いて経緯を書いた文を、本人の質問と読まない）
 _QUOTED = re.compile(r"「[^「」]*」|『[^『』]*』")
 # 別の場所（ほかのセッション・レーン）の待ちを報告する文。11 系の `classify_reply` と同じ形（context.py もこれを読む）
-ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
+_ELSEWHERE_PLACES = r"(セッション|レーン|計画|オーガナイザー)"
+ELSEWHERE_RE = re.compile(rf"(別の|ほかの|他の)?{_ELSEWHERE_PLACES}[^\n]{{0,40}}(承認|回答|判断)[^\n]{{0,10}}待")
+_ELSEWHERE_PLACE = re.compile(_ELSEWHERE_PLACES)
 
 
 def _prose_lines(text: str) -> list[tuple[str, bool]]:
@@ -163,10 +171,17 @@ def _core(sentence: str) -> str:
     return s
 
 
+def _user_wait(core: str) -> bool:
+    """利用者の返事を待つと述べる文か。汎用の「お待ちしています」は、条件の添え書きでないときに限る。"""
+    if any(w in core for w in USER_WAIT_CONTAINS):
+        return True
+    return any(w in core for w in GENERIC_USER_WAIT) and not any(m in core for m in CONDITIONAL_MARKERS)
+
+
 def _is_wait(sentence: str) -> bool:
     """文が人の返事を待つ形か。"""
     core = _core(sentence)
-    if any(w in core for w in USER_WAIT_CONTAINS):
+    if _user_wait(core):
         return True
     if sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
         return True
@@ -191,7 +206,7 @@ def _asks_reply(sentence: str) -> bool:
         return False
     core = _core(sentence)
     ends_with_mark = sentence.rstrip(_DECORATION).endswith(("?", "？"))
-    if any(w in core for w in USER_WAIT_CONTAINS) or ends_with_mark or core.endswith(WAIT_ENDINGS):
+    if _user_wait(core) or ends_with_mark or core.endswith(WAIT_ENDINGS):
         return True
     hits = [w for w in WAIT_CONTAINS if w in core]
     if not set(hits) <= set(INSTRUCTION_ONLY):
@@ -242,13 +257,19 @@ def _only_elsewhere(sentence: str) -> bool:
     """文が別の場所の待ちの報告だけか。
 
     句ごとに待っている主体を見る。別の場所の待ちと確かめられた句だけを外し、ほかの句に回答・承認を待つ質問が
-    残れば偽（「別のレーンを止めて、こちらの変更は回答を待ちます。」は、こちらの回答待ち）。
+    残れば偽（「別のレーンを止めて、こちらの変更は回答を待ちます。」は、こちらの回答待ち）。主体を書かない句は
+    前の句の主体を引き継ぐ（「別のレーンはレビューを終え、承認を待っています。」は、別のレーンの承認待ち）。
     """
     found = False
+    subject = ""
     for clause in _clauses(sentence):
-        if _elsewhere_clause(clause):
+        topic = _CLAUSE_TOPIC.match(clause.rstrip(_CLAUSE_SEPARATORS))
+        if topic is not None:
+            subject = topic.group(0) if _ELSEWHERE_PLACE.search(topic.group(0)) else ""
+        text = clause if topic is not None else subject + clause
+        if _elsewhere_clause(text):
             found = True
-        elif _asks_reply(clause):
+        elif _asks_reply(text):
             return False
     return found
 

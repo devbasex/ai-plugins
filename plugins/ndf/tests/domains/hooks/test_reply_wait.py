@@ -90,7 +90,16 @@ def test_an_answer_wait_elsewhere_is_not_a_wait_here():
     assert reply_wait.reply_kind("p9 の作業を終えました。別のレーンは回答を待っています。") == "elsewhere_wait"
 
 
-@pytest.mark.parametrize("text", ["返答を待ちます。", "ご回答をお待ちしています。"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "返答を待ちます。",
+        "ご回答をお待ちしています。",
+        "ご指示をお待ちしています。",
+        "ご確認をお待ちしています。",
+        "承認をお待ちしています。",
+    ],
+)
 def test_the_own_waits_of_the_11_series_rule_are_waits(text):
     """11.0.22 の `classify_reply` が拾う本人の回答待ちは、モデルを呼ばずにルールが待ちと読む。"""
     assert _is_wait(text)
@@ -112,6 +121,11 @@ def test_a_url_with_a_query_is_a_report(text):
 def test_a_wait_here_after_a_clause_naming_another_lane_is_a_wait():
     """レーン名の句と「待」の句が別なら、待っている主体はこちら（句をまたいで別の場所の待ちと読まない）。"""
     assert _is_wait("別のレーンを止めて、こちらの変更は回答を待ちます。")
+
+
+def test_a_wait_elsewhere_after_an_action_of_the_same_lane_is_not_a_wait_here():
+    """主体を書かない句は前の句の主体（別のレーン）を引き継ぐ。"""
+    assert reply_wait.reply_kind("p9 の作業を終えました。別のレーンはレビューを終え、承認を待っています。") == "elsewhere_wait"
 
 
 def test_a_wait_elsewhere_with_a_comma_after_the_topic_is_not_a_wait_here():
