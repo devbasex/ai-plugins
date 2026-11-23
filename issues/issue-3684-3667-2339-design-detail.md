@@ -84,6 +84,8 @@ plugins/ndf/
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
 | `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `consts`（変更）・`dict_values`・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
 | `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`VERSION`（新設） |
+| `src/ndf/checks/spec_render.py` | 変更 | 設計レビューの項目の表から、項目ごとの行き先の並び（`review_items`）を組み立てる | `checks.spec_model` | モジュール | `review_items`（新設） |
+| `src/ndf/checks/spec_docs.py` | 変更 | 生成した `review_items` と `children.json` の差分と、行き先の無い項目を指摘にする | `checks.spec_render` | モジュール | `check`（変更） |
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
 | `src/ndf/core/worker.py` | 変更 | worker の上限を上限の設定の新しい方針 `supervise.worker-run`（3,600 秒。値は今の `WORK_TIMEOUT` と同じ）から読む | `ndf.contracts.limits` | モジュール | `WORK_TIMEOUT`（削除）・`work_timeout`（新設） |
 
@@ -525,6 +527,50 @@ plugins/ndf/
 | `check` | 対応表どおりなら 0 件 | 別の意味として載っている名前（0 件）・`where` にその種類が無い名前（1 件） | 内部データのスキーマが 1 つも無いとき 0 件 |
 
 テストのファイル: `tests/checks/test_internal_names.py`（新設）
+
+## 設計レビューの項目の行き先（規則 `review-items`）
+
+満たす決定: 決定 1（正本の使われ方を機械で確かめる）、受け入れ条件 #3684 の 7（対応表の 3395-2・要求 332）
+
+**#1142 の設計は「子の表のコピーの `review_items` は、項目の表と入力の Issue の本文から生成する（手で写さない）」と決めたが、11.0.0 では入らなかった。** 今の `src/ndf/checks/children.json` に `review_items` のキーは無く、規則も無い（`python3 -c` で読んで確かめた）。そのため、項目に行き先があるかを誰も確かめていない。
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `review_items` | `src/ndf/checks/spec_render.py` | 新設 | `review_items(root: Path) -> list[dict[str, Any]]` | 項目の表（`issues/issue-1142-design-review-routing.md`）の行から、項目ごとの行き先の並びを組み立てる |
+| `check` | `src/ndf/checks/spec_docs.py` | 変更 | `check(scope, rules, write_spec, written)`（変えない） | 生成した `review_items` と、`children.json` に書かれた中身の差分を指摘にする。行き先の無い項目も指摘にする |
+
+- `review_items`
+  - 事前条件: 項目の表が「列の読み方」の 6 列（項目・行き先の子・順番・新設か追補か・要求の行・版）を持つ
+  - 事後条件: 1 項目につき `{"id", "text_sha", "routed_to", "order", "kind", "requirement_line", "release"}` の 1 行。`routed_to` が空の項目は、値を空のまま返す（落とすのは `check` の役目）
+  - 副作用: 無し（表を読むだけ）
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `review_items` | 項目の表を読めない | ファイルが無い・列が足りない | `review_items` | 止める | `ndf check` が `stopped`・`config_broken`・終了コード 2 | 表を直してから打ち直す |
+| `check` | 行き先の無い項目がある | 表の「行き先の子」の列が空 | `spec_docs.check` | 違反にする（項目の番号を挙げる） | `ndf check` が `stopped`・`check_failed`・終了コード 1 | 表に行き先を書いてから打ち直す |
+| `check` | 生成物と `children.json` が食い違う | 手で写した・表を直して生成し直していない | 同上 | 違反にする | 同上 | `ndf check --write-spec` で生成し直す |
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `spec.review_items_source` | 設定値（項目の表のパス） | `src/ndf/checks/rules.json` | `issues/issue-1142-design-review-routing.md` |
+| `review_items` | データ（生成物） | `src/ndf/checks/children.json` | 生成する（手で書かない） |
+
+**項目の表はリリース対象の外（`issues/`）にあるため、検査の見る範囲（`NDF_PATHS`）へ足す。** 足さないと CI が表の変更で動かない。
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `review_items` | 合成した表から項目ごとの行を組み立てる | 行き先が 2 つ以上の項目（`・` で並ぶ。先頭が持ち主）・版が `11.x` の項目（行き先は対応表を指す） | 列が足りない表（止まる） |
+| `check` | 生成物と `children.json` が同じなら 0 件 | 行き先が空の項目 1 件（1 件の違反）・`children.json` に `review_items` が無い（1 件の違反） | 表を読めないとき（止まる） |
+
+テストのファイル: `tests/checks/test_review_items.py`（新設）
 
 ## 結果 JSON の `items` の欄
 
