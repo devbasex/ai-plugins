@@ -61,22 +61,6 @@ worktree・チーム・公開・[code-metrics.schema.json](../../contracts/schem
 
 例: `{"version": 1, "tools": {"python": "ruff-complexipy", "go": null}}`
 
-## `.ndf/context.json`（context）
-
-worktree・チーム・公開・[context.schema.json](../../contracts/schemas/ndf-settings/context.schema.json)。読む工程: `ndf hooks`（文脈の量の hook で再起動を判断するとき）
-
-文脈の量による再起動の方針（現行方式か試行方式）と、試行方式の値
-
-| キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
-| --- | --- | --- | --- | --- | --- |
-| `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `margin` | integer | `50000` | — | 任意 | 容量の余白（token）。試行方式だけに効く |
-| `policy` | string | `"current"` | `"current"`・`"trial"` | 任意 | current（現行方式）か trial（試行方式） |
-| `trial` | object | — | — | 任意 | 試行方式の値 |
-| `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
-
-例: `{"version": 1, "policy": "trial", "trial": {"decide_from": 200000, "limit": 400000}, "margin": 50000}`
-
 ## `.ndf/estimate.json`（estimate）
 
 worktree・チーム・公開・[estimate.schema.json](../../contracts/schemas/ndf-settings/estimate.schema.json)。読む工程: `ndf issues`（棚卸しの見積もりのとき）・`ndf refactor`（リファクタリングの予算を決めるとき）

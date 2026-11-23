@@ -37,7 +37,6 @@
     {"id": "backlog-journal", "location": "backlog-state", "path": "<repo>/journal.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "runtime-policy", "location": "ndf", "path": "runtimes.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["allowed"], "main_keys": ["allowed"]},
     {"id": "ask", "location": "ndf", "path": "ask.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["mode", "allow", "cost", "extra"]},
-    {"id": "context", "location": "ndf", "path": "context.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["policy", "trial", "margin"]},
     {"id": "estimate", "location": "ndf", "path": "estimate.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["records_dir", "size_unit_seconds", "scale", "allocation_minutes"]},
     {"id": "issue-items", "location": "ndf", "path": "issue-items.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["kinds", "last", "record_headings", "kind_labels", "items"]},
     {"id": "projects", "location": "ndf", "path": "projects.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["owner", "number", "fields"]},

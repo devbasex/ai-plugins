@@ -151,7 +151,7 @@
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
 | U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
-| U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | （実装の後に書き足す） |
+| U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | 21 files changed, 205 insertions(+), 398 deletions(-)（cross-review の後）。実装の時点は 20 files changed, 192 insertions(+), 390 deletions(-)（うち削除は `context_policy.py` 143 行・`context.schema.json` 76 行・`test_context_policy.py` 46 行） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | 4 files changed, 197 insertions(+), 5 deletions(-)（plugins の下） |
 | U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | （実装の後に書き足す） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
@@ -250,3 +250,6 @@ main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実�
 | Task 6: `check` の異常の列の「`agent_id` があれば 300,000 の PostToolUse も None」と、NDF の外の「300,000 の PostToolUse も None」 | guard の `events` は今も PreToolUse だけで、PostToolUse の判定は U6（Task 12）で足す | U3 では PreToolUse の行だけをテストにする。PostToolUse の行は U6 で `events` を広げるときに足す |
 | Task 6 の対象ファイルは `context_limit.py`・`runtimes.json`・`test_guards.py` | `test_context.py` の `test_bash_pre_tool_use_parses_payload_shell_and_transcript_once` が `.ndf` の無い `tmp_path` で `read_tail` 1 回を期待する。`runtimes.json` を変えると `docs/contracts/hooks.md` の生成し直しも要る | U3 でそのテストの `tmp_path` に `.git`・`.ndf` を作り、`hooks.md` を `ndf check --write-spec` で生成し直した |
 | U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |
+| Task 5: 消す `context` の行は `ndf-files.json` だけ（修正対象の表） | `contracts/domains/entrypoints.json`（`spec-ndf_settings` の `files`）と `contracts/domains/skill-io.json`（`development-workflow` の `ndf_settings`）も `context` を挙げる | U2 で両方から外した（消した行を指す参照。`ndf check` が通る） |
+| Task 4: `resolve` の結果の `metrics` に `decide_from` を足す | 結果のスキーマの `metrics.policy` の行は「適用する再起動の方針」 | U2 で `policy` を `decide_from` に置き換えた（`metrics` は追加の項目を許さない） |
+| U2 で手順書（`context-window.md`・`development-workflow/SKILL.md`）も消した設定の案内から直す（PR 4220 の cross-review r1-3 ほか） | 手順書の書き直しは U7（Task 13）。U2 の中で直すと、レビューが手順書の guard の振る舞いの記述から U4 の範囲（引継ぎ文書の Read を通す・`HANDOVER_PROMPT`）を U2 に足させた（r5〜r7） | U2 では手順書と hook を触らない（`.ndf/context.json`・`NDF_CONTEXT_POLICY` の案内はスプリントブランチの上で U7 まで残る。main への PR は U7 の後）。r1-3・r2-1・r2-2・r3-1〜r3-6・r4-1〜r4-4・r5〜r7 の手順書の論点は U7 の入力にする。r8 も同じ扱い。U7 では、廃止した設定の案内を消して従来の実効上限を `NDF_CONTEXT_LIMIT` へ移し `resolve` で確かめる手順（r8-1）、「遅くとも 20 万」を消して切る条件をカットポイントと運用上限にそろえること（r8-2）、拒否の範囲・再試行・`NDF_HOOK_OFF=context-limit`・拒否後に打てる操作を実際の guard に合わせること（r8-3・r8-7）、保存した引継ぎ文書のパスを再開ブロックと文書の「次に実行するコマンド」の両方に書くこと（r8-5）、`ndf-next` ごとの `calibrate` を外すこと（r8-6）を書く。U4 では、引継ぎ文書の Read を通し、保存に失敗したら再開ブロックを出さずに理由を伝えること（r8-4）と、拒否文を手順書が前提にする中身に合わせること（r8-7）を扱う |

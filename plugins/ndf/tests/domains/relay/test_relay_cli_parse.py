@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ndf.contracts import causes
-from ndf.domains.relay import cli, context_policy, context_records
+from ndf.domains.relay import cli, context_records, context_thresholds
 
 SEAT_NEEDS = "--seat は --replace を、--seated は --replace・--seat・--name をすべて要する"
 REPLACE_NEEDS = "--replace は --seat を要する"
@@ -75,8 +75,8 @@ def test_options_after_the_claude_args_are_not_checked():
 @pytest.mark.parametrize(
     "tail",
     [
-        ["--verdict", context_policy.RESTART],
-        ["--event", context_records.MARKS[0], "--reason", context_policy.REASONS[0]],
+        ["--verdict", context_thresholds.RESTART],
+        ["--event", context_records.MARKS[0], "--reason", context_thresholds.REASONS[0]],
     ],
 )
 def test_context_record_refuses_a_mismatched_reason(tail, capsys):
@@ -84,6 +84,15 @@ def test_context_record_refuses_a_mismatched_reason(tail, capsys):
         cli._parse(["context", "record", "--work", "w", *tail])
     assert exc.value.code == 2
     assert capsys.readouterr().err.rstrip("\n").endswith(f"error: {RECORD_NEEDS}")
+
+
+@pytest.mark.parametrize("tail", [["--policy", "current"], ["--root", "."]])
+def test_context_resolve_refuses_the_removed_options(tail, capsys):
+    # #3995 の 3995:3: 再起動の方針を消したので、resolve の --policy・--root は引数の誤り
+    with pytest.raises(SystemExit) as exc:
+        cli._parse(["context", "resolve", *tail])
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
