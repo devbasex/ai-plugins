@@ -290,7 +290,7 @@ def design_results(text: str) -> list[DesignResult]  # 「設計の結果」の�
 - **再計画で状態を引き継ぐ条件**: 指紋が違う（承認をやり直して計画が変わった）とき、状態が 1 つも無い（どの `orders.<k>.base_sha` も null で、`work_dir/units/` に記録が無い）ならそのまま `out` を消して組み立て直す。状態が 1 つでもあれば引き継がずに `precondition`（「単位の計画が変わったが、実行の記録 <パス> がある」）で止め、人に返す。`<seq>.json` は再採番した別の単位に当てない（`seq` は計画の組の中でだけ意味を持つ）
 
 ```json
-{"version": 1, "repo": "volareinc/ai-plugins", "sprint": "sprint-3702", "remote": "origin", "max": 3, "merge_method": "merge",
+{"version": 1, "repo": "devbasex/ai-plugins", "sprint": "sprint-3702", "remote": "origin", "max": 3, "merge_method": "merge",
  "queue": {"approved": false, "sprint": "sprint-3702", "method": "merge", "parallel": 3, "target_sha256": "<記録の SHA-256>", "answer_sha256": "<回答の SHA-256>"},
  "source": {"issues": [3702], "omitted": [], "queue": {"approved": false, "sprint": "sprint-3702", "method": "merge", "parallel": 3, "target_sha256": "<記録の SHA-256>", "answer_sha256": "<回答の SHA-256>"}, "files": {"issues/issue-3702-plan.units.json": "<blob の SHA>"}},
  "units": [{"seq": 1, "name": "契約と退行テスト", "file": "issues/issue-3702-plan.units.json", "order": 1, "merge": 1,
