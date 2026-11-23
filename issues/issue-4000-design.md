@@ -55,7 +55,7 @@ flowchart TB
   SK -->|当たる| FB[ルールの判定の結果で決める]
   SK -->|前に起動が失敗し休む間| FB
   SK -->|当たらない| HJ[reply_judge.ask（hook 側）<br/>子を起動し秒の上限で待つ]
-  HJ -->|python -P -m| CH[ndf.adapters.reply_judge（子）]
+  HJ -->|python -P -m| CH[ndf.domains.hooks.judge_child（子）]
   CH --> CL[call_claude<br/>haiku・思考を切る・スロットを待たない<br/>1 回だけ打つ]
   CL -->|wait| PB[変更を要求]
   CL -->|report| PS[通す]
@@ -64,7 +64,7 @@ flowchart TB
   FB -.->|上限に達し、前にモデルが wait| PB
 ```
 
-直した後は、`stop-wait` が本文の空と AskUserQuestion を見た後に 10 系から移したルール（`classify_reply_wait` の待ちの文から引用と別の場所の待ちの報告を外す `reply_kind`）を当て、待ちと見た本文は軽いモデルを呼ばずに変更を要求する。ルールに当たらない本文だけを、Stop ごとに 1 回、最後の応答の本文（コードブロックを除く）として軽いモデルへ渡し、`wait` の回答で変更を要求する。軽いモデルの起動は hook の外の子プロセス（`ndf.adapters.reply_judge`）が既存の `call_claude` で行い、hook の側は標準ライブラリだけで子を起動して秒の上限で待つ。`claude` は判定の子と同じプロセスの組で起動し、hook の側が組ごと止めて回収する。呼ぶのは Claude Code のセッションで、送り先がセッション自身の Claude の API と同じと確かめられる Stop だけである（決定 11）。回答が得られないときはルールの判定の結果（ここまで来た本文はルールが待ちと見なかったので通す）で決め、起動が続けて失敗する環境では休む間だけ呼ばない。呼ぶモデル・秒の上限・本文の字数の上限・休む間・確かめの周の数は `limits.json` の 1 行にある。質問の文を変えるときは、判定の例の組を実際のモデルで確かめる `ndf hooks judge-cases` を打つ。
+直した後は、`stop-wait` が本文の空と AskUserQuestion を見た後に 10 系から移したルール（`classify_reply_wait` の待ちの文から引用と別の場所の待ちの報告を外す `reply_kind`）を当て、待ちと見た本文は軽いモデルを呼ばずに変更を要求する。ルールに当たらない本文だけを、Stop ごとに 1 回、最後の応答の本文（コードブロックを除く）として軽いモデルへ渡し、`wait` の回答で変更を要求する。軽いモデルの起動は hook の外の子プロセス（`ndf.domains.hooks.judge_child`）が既存の `call_claude` で行い、hook の側は標準ライブラリだけで子を起動して秒の上限で待つ。`claude` は判定の子と同じプロセスの組で起動し、hook の側が組ごと止めて回収する。呼ぶのは Claude Code のセッションで、送り先がセッション自身の Claude の API と同じと確かめられる Stop だけである（決定 11）。回答が得られないときはルールの判定の結果（ここまで来た本文はルールが待ちと見なかったので通す）で決め、起動が続けて失敗する環境では休む間だけ呼ばない。呼ぶモデル・秒の上限・本文の字数の上限・休む間・確かめの周の数は `limits.json` の 1 行にある。質問の文を変えるときは、判定の例の組を実際のモデルで確かめる `ndf hooks judge-cases` を打つ。
 
 ## 構成要素
 
@@ -83,7 +83,7 @@ flowchart TB
 | ルールの判定（`ndf.domains.hooks.reply_wait`、新設。hook の閉包の中） | 10 系の `classify_reply_wait` を移したもの。本文を文に分け、文の終わりの形・依頼の語・条件の添え書き・操作の案内を見て、待ち（回答待ち・承認待ち）か否かを返す。guard が使う `reply_kind` は、かぎ括弧の引用の中身を見ずに待ちの文を探し、待ちの文がどれも別の場所の待ちの報告（`ELSEWHERE_RE`）なら `elsewhere_wait` を返す |
 | guard `stop-wait`（変更） | 本文が空・AskUserQuestion で既に問うた Stop を通した後にルールの判定を当て、待ちなら軽いモデルを呼ばずに変更要求を返し、別の場所の待ちだけなら通す。待ちでなければ呼ばない条件を見て、軽いモデルの判定かルールの判定の結果かを選び、変更要求か通過を返す。計測に判定の出所を残す |
 | 判定のリクエスト（`ndf.domains.hooks.reply_judge`、新設。hook の閉包の中） | 本文から質問に渡す文を作り、子を起動して秒の上限で待ち、回答を読む。時間切れ・割り込みでは子の組を止めて回収する |
-| 判定の子（`ndf.adapters.reply_judge`、新設。hook の閉包の外） | 質問の文を持ち、`call_claude` で軽いモデルを 1 回打ち、回答を 1 行の JSON で返す。認証の失敗に `auth` の種類を付ける。判定の例の組を確かめるコマンドの本体も持つ |
+| 判定の子（`ndf.domains.hooks.judge_child`、新設。hook の閉包の外） | 質問の文を持ち、`call_claude` で軽いモデルを 1 回打ち、回答を 1 行の JSON で返す。認証の失敗に `auth` の種類を付ける。判定の例の組を確かめるコマンドの本体も持つ |
 | 起動の前置き（`call_claude`・`launch_slot`、変更） | スロットを待つ上限と、`claude` を新しいプロセスの組で起動するかを呼び手が渡せるようにする（判定の子は 0 秒・呼び手と同じ組） |
 | 変更要求の数え手（`Counter`、変更） | 数えずに、上限の手前かだけを返す。今の入力の中でモデルが `wait` と回答したことを持つ（上限の後の待ち通知に使う） |
 | hook のエントリポイント（`main.py`）と dispatch（変更） | SIGALRM と同じ絶対時刻の締め切りを guard へ渡す |
@@ -159,10 +159,11 @@ sequenceDiagram
 ### 決定 3: hook の import の表を保つため、軽いモデルの起動を hook の外の子プロセスへ出す
 
 - **質問**: hook の閉包が禁じる `ndf.adapters.claude` を使わずに、どう `claude -p` を打つか
-- **選んだ案**: hook の側（`ndf.domains.hooks.reply_judge`）は標準ライブラリだけで子を起動する。起動は `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]` を新しいプロセスの組で行い、標準入力で本文を渡して上限の秒で待つ。子（`ndf.adapters.reply_judge`）が `ClaudeCall` と `call_claude` で打つ
+- **選んだ案**: hook の側（`ndf.domains.hooks.reply_judge`）は標準ライブラリだけで子を起動する。起動は `[sys.executable, "-P", "-m", "ndf.domains.hooks.judge_child"]` を新しいプロセスの組で行い、標準入力で本文を渡して上限の秒で待つ。子（`ndf.domains.hooks.judge_child`）が `ClaudeCall` と `call_claude` で打つ
 - 採らなかった案: import の表の禁止から `ndf.adapters.claude` を外す（hook の起動が `jsonschema`・`httpx` まで読み、すべてのイベントの hook が遅くなる。#3345 の決定 89 が、hook を軽く保つために禁じた形である）
 - 採らなかった案: hook から `claude -p` を直に打つ（学習に使わない設定の確かめ・スロット・CLI の下限の前置きを二重に持つか、飛ばすことになる）
 - 採らなかった案: 判定の子を省き、hook が `claude -p` を直接起動する（引数の組み立てと失敗の見分けを `call_claude` と二重に持つことになる）
+- 置き場: 判定の子は `ndf.domains.hooks.judge_child` に置く。子が `ndf.domains.relay.account_dir` を読むため、`ndf.adapters` に置くと層の規則（下の層が上の層を読まない）に反する（オーガナイザーの決定、2026-11-23）
 - **組の持ち方**: 判定の子は `call_claude` に新しい組を作らない指定（`new_group=False`）を渡し、`claude` を判定の子と同じ組で起動する。今の `call_claude` は `claude` を `start_new_session=True` で別の組に置くため、hook の側が判定の子の組だけを止めると `claude` が残る。同じ組に収めれば、hook の側の 1 回の組への送信で判定の子と `claude` の両方が止まる
 - **CLI の下限**: 判定の子は下限の確かめ（`claude --version`）を飛ばす指定（`cli_floor=False`）を渡す。判定の対象は今動いている Claude Code 自身で、その親のセッションが動いている時点で下限は満たしているためである（利用者の決定、2026-11-23）。`call_claude` は共用のまま保ち、既定の呼び手は今のとおり下限を確かめる
 - **代償**: 子の起動に 0.15〜0.2 秒かかる（MEA4）。hook の側は子の組を止めて回収する後始末を持つ。`call_claude` の起動の関数に、組を選ぶ引数と下限の確かめを飛ばす引数が増える
@@ -253,7 +254,7 @@ sequenceDiagram
     - `ndf hooks judge-cases` は親が無いので、PATH の `claude` を CLI の下限の確かめ付きで起動する
   - **判定の子・実効の設定**（子は `claude` を起動する前に見る。外れたら `claude` を起動せずに `failure="endpoint"` を返し、hook の側は休みのマーカーを書く）: 次をすべて満たす
     - 親の起動引数を `claude_args.options`（`account_dir` が `--settings` を読むのと同じ解き方）で読み、`endpoint.flags`（既定 `--settings`・`--setting-sources`）のどれも無い。`--settings <値>` と `--settings=<値>` のどちらの形も当たる。判定の子は `--setting-sources ""` で設定を読まないので、[設定の優先順位](https://code.claude.com/docs/en/settings#settings-precedence) で利用者とプロジェクトの設定より強い起動時の設定は子へ渡らない
-    - 既存の `account_dir.effective_env`（Claude Code が採用する実効値と出所を解く。中継が登録済みアカウントの起動の前に使う）を、子の環境・設定ディレクトリ・作業ディレクトリ `CLAUDE_PROJECT_DIR`・親の起動引数で打つ。これは管理者の設定（`managed-settings.json`・`managed-settings.d/*.json`・設定ディレクトリの `remote-settings.json`）・利用者の設定・プロジェクトの 2 つの設定を Claude Code と同じ順に重ねる。返りの `unresolved` が空で、`helper`（`apiKeyHelper`）が無く、`endpoint.keys`（既定 `awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）をどの層も定義せず、出所が設定の層（`子の環境` 以外）の変数に名前が `endpoint.env_names` で始まるもの（既定 `ANTHROPIC_`・`CLAUDE_CODE_USE_`・`CLAUDE_CONFIG_DIR`・`AWS_`・`GOOGLE_`・`CLOUD_ML_`・`VERTEX_`・`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`・`https_proxy`・`http_proxy`・`all_proxy`・`no_proxy`・`NODE_EXTRA_CA_CERTS`）が無い
+    - 既存の `account_dir.effective_env`（Claude Code が採用する実効値と出所を解く。中継が登録済みアカウントの起動の前に使う）を、子の環境・設定ディレクトリ・作業ディレクトリ `CLAUDE_PROJECT_DIR`・親の起動引数で打つ。これは管理者の設定（`managed-settings.json`・`managed-settings.d/*.json`・設定ディレクトリの `remote-settings.json`）・利用者の設定・プロジェクトの 2 つの設定を Claude Code と同じ順に重ねる。返りの `unresolved` が空で、`helper`（`apiKeyHelper`）が無く、`endpoint.keys`（既定 `awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）をどの層も定義せず、出所が設定の層（`子の環境` 以外）の変数に名前が `endpoint.env_names` で始まるもの（既定 `ANTHROPIC_`・`CLAUDE_CODE_USE_`・`CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES`・`AWS_`・`GOOGLE_`・`CLOUD_ML_`・`VERTEX_`・`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`・`https_proxy`・`http_proxy`・`all_proxy`・`no_proxy`・`NODE_EXTRA_CA_CERTS`）が無い
     - 設定の層の `env` の変数は、hook の環境へ受け継がれるかに依らず呼ばない理由にする。受け継ぎを 1 つの変数や 1 つの層で確かめても、ほかの変数とほかの層には及ばないので、この設計では外す手立てを置かない（外すなら層と変数ごとに確かめる別の設計にする）
   - ほかに: 判定の子へ渡す環境は hook の環境から環境変数の表の `child` が `drop` の行（`CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` など。接続と認証の変数を含まない）だけを外したもの。判定の子は中継の確かめ（`relay_checks`）を登録しないので、`call_claude` は利用上限で別のアカウントへ打ち直さない
   - 値（`entrypoints`・`ancestors`・`cli_exe`・`script_hosts`・`flags`・`keys`・`env_names`）は `limits.json` の判定の行の `endpoint` に置く
@@ -316,7 +317,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4000 | 実装する | — | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/reply_judge.py`（新設）、`plugins/ndf/src/ndf/adapters/reply_judge.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/main.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/src/ndf/domains/relay/account_dir.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/reply-judge-cases.json`（新設）、`plugins/ndf/hooks/claude.json`、`plugins/ndf/hooks/codex.json`、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_reply_judge.py`（新設）、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/hooks/test_counter.py`、`plugins/ndf/tests/domains/hooks/test_budget.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/adapters/test_launch_slot.py`、`plugins/ndf/tests/adapters/test_reply_judge_child.py`（新設）、`plugins/ndf/tests/domains/relay/test_account_dir.py` |
+| #4000 | 実装する | — | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/reply_judge.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/judge_child.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/main.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/src/ndf/domains/relay/account_dir.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/reply-judge-cases.json`（新設）、`plugins/ndf/hooks/claude.json`、`plugins/ndf/hooks/codex.json`、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_reply_judge.py`（新設）、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/hooks/test_counter.py`、`plugins/ndf/tests/domains/hooks/test_budget.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/adapters/test_launch_slot.py`、`plugins/ndf/tests/domains/hooks/test_judge_child.py`（新設）、`plugins/ndf/tests/domains/relay/test_account_dir.py` |
 
 ## 未確認のまま残ること
 

@@ -90,10 +90,11 @@
 | --- | --- |
 | `ndf hooks capture` | `runtime`（string・必須・位置）<br>`version`（string・必須・位置）<br>`event`（string・必須・位置） |
 | `ndf hooks check-budget` | 引数を受けない |
+| `ndf hooks judge-cases` | `--cases`（string・任意）: 判定の例の組のパス（省けばコントラクトの組）<br>`--rounds`（integer・任意）: 1 つの例を打つ周の数（省けば上限の設定の値） |
 | `ndf hooks render` | `--check`（boolean・任意）: 書かずに、作り直した結果と違えば stopped |
 | `ndf hooks stats` | `--days`（number・任意・既定 `14.0`） |
 
-結果の `metrics`: `days`（number）。`items` の要素: `events`（object）・`guards`（object）・`path`（string）
+結果の `metrics`: `calls`（integer）・`cases`（integer）・`days`（number）・`max_seconds`（number）・`min_seconds`（number）・`missed`（integer）。`items` の要素: `events`（object）・`expect`（string）・`got`（array of string）・`guards`（object）・`id`（string）・`path`（string）
 
 ## `ndf issues`
 

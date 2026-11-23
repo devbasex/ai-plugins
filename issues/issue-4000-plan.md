@@ -20,7 +20,7 @@
 | `plugins/ndf/src/ndf/domains/hooks/dispatch.py` | `GuardServices.deadline`・`run` の `deadline` |
 | `plugins/ndf/src/ndf/domains/hooks/main.py` | SIGALRM と同じ締め切りを `dispatch.run` へ渡す |
 | `plugins/ndf/src/ndf/domains/hooks/reply_judge.py`（新設） | `judge_text`・`parent_launch`・`Launch`・`ask`・`Judged`・`resting`・`mark_rest` |
-| `plugins/ndf/src/ndf/adapters/reply_judge.py`（新設） | `endpoint_refusal`・`classify`・`main`・`run_cases` と質問の文 |
+| `plugins/ndf/src/ndf/domains/hooks/judge_child.py`（新設。置き場はオーガナイザーの決定） | `endpoint_refusal`・`classify`・`main`・`run_cases` と質問の文 |
 | `plugins/ndf/src/ndf/domains/relay/account_dir.py` | `effective_env` の `keys`・`Resolved.key_origin` |
 | `plugins/ndf/src/ndf/domains/hooks/cli.py` | `ndf hooks judge-cases` |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 呼ばない条件と判定の選び方 |
@@ -51,7 +51,7 @@
 - **進め方:** 失敗するテスト（偽の `popen`・`killpg`・`/proc`）→ 通す最小実装 → 整理
 
 ### Task 4: 判定の子・判定の例の組・`ndf hooks judge-cases`
-- **対象ファイル:** `adapters/reply_judge.py`（新設）・`contracts/hooks/reply-judge-cases.json`（新設）・`domains/hooks/cli.py`・`domains/relay/account_dir.py` と対応するテスト
+- **対象ファイル:** `domains/hooks/judge_child.py`（新設）・`contracts/hooks/reply-judge-cases.json`（新設）・`domains/hooks/cli.py`・`domains/relay/account_dir.py` と対応するテスト
 - **変更内容:** 詳細設計の「判定の子」「実効の設定で指定のキーを定義する層」と `ndf hooks judge-cases`
 - **満たす受け入れ条件:** 2・3・9
 - **進め方:** 失敗するテスト（偽の `call`・偽の `resolve`）→ 通す最小実装 → 整理
