@@ -68,8 +68,10 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
         return []
     model = spec_model.load(root)
     rendered = spec_render.render(model)
+    # 表を読めない・リポジトリの外を指すときは、生成物を書く前に止める
+    children, routes = _review_items(scope, conf)
     if write_spec:
-        done = write({**rendered, CHILDREN_REL: _review_items(scope, conf)[1]}, root, conf["generated"])
+        done = write({**rendered, CHILDREN_REL: children}, root, conf["generated"])
         if written is not None:
             written += done
 
@@ -78,23 +80,27 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 
     found = decl_findings(model, scope.repo_root, rel) + io_findings(model, scope, rel) + skill_findings(model, scope, rel)
     found += public_findings(model, root, rel) + docs_findings(rendered, root, conf["generated"], rel)
-    return found + check_review_items(scope, rules)
+    return found + _children_findings(children, scope) + routes
 
 
 def check_review_items(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """規則 `review-items` の指摘。項目の表・対応表・`children.json` だけを読む（ほかの規則の入力を読まない）。"""
-    conf = rules["spec"]
-    items, text = _review_items(scope, conf)
-    found = docs_findings({CHILDREN_REL: text}, scope.plugin_root, [], lambda path: scope.rel(scope.plugin_root / path), REVIEW_ITEMS)
-    return found + review_findings(items, scope.repo_root, conf)
+    children, routes = _review_items(scope, rules["spec"])
+    return _children_findings(children, scope) + routes
 
 
-def _review_items(scope: Scope, conf: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
-    """項目の表から組み立てた `review_items` と、それを入れた `children.json` の本文。"""
+def _children_findings(children: str, scope: Scope) -> list[Finding]:
+    """コミットされた `children.json` と、生成し直した本文 `children` の違い。"""
+    root = scope.plugin_root
+    return docs_findings({CHILDREN_REL: children}, root, [], lambda path: scope.rel(root / path), REVIEW_ITEMS)
+
+
+def _review_items(scope: Scope, conf: dict[str, Any]) -> tuple[str, list[Finding]]:
+    """項目の表から組み立てた `review_items` を入れた `children.json` の本文と、ルートの指摘（対応表まで読む）。"""
     source = contained(scope.repo_root, conf["review_items_source"])
     items = spec_render.review_items(source, conf["review_items_columns"])
     held = read_json(contained(scope.plugin_root, CHILDREN_REL), "children.json を読めない")
-    return items, spec_render.children(held, items)
+    return spec_render.children(held, items), review_findings(items, scope.repo_root, conf)
 
 
 # --- spec-decl ---

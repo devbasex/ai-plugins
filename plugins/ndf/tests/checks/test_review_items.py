@@ -169,6 +169,16 @@ def test_write_spec_does_not_follow_a_symlink(copy, tmp_path, rel):
     assert outside.read_text(encoding="utf-8") == '{"summary": "外"}\n'
 
 
+def test_write_spec_writes_nothing_when_the_correspondence_is_refused(copy, tmp_path):
+    copy.write_items(("1-2", "後で解く", f"[表]({tmp_path / 'outside.md'})", "—", "—", "無し", "11.x"))
+    copy.write("docs/contracts/stale.md", "残り\n")
+    before = copy.path(child_deps.CHILDREN_REL).read_text(encoding="utf-8")
+    with pytest.raises(CheckError, match="外を指すか"):
+        copy.findings(write_spec=True)
+    assert copy.path(child_deps.CHILDREN_REL).read_text(encoding="utf-8") == before
+    assert copy.path("docs/contracts/stale.md").is_file()
+
+
 def test_only_review_items_reads_no_other_input(copy, monkeypatch):
     monkeypatch.setattr(run, "collect", lambda *_: pytest.fail("ほかの規則の入力を読んだ"))
     copy.write_items(ROUTED, ("1-2", "要旨", "—", *ROUTED[3:]))
