@@ -71,6 +71,8 @@ def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns()
         "claude の Stop の予算が limits.json に無い",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        # relay-marker の Stop は、claude では予算の行を消したので上の 1 行に、codex では hook.budget.stop.codex に当たる
+        "relay-marker の部品の上限 hook.counter-lock（99 秒）が codex の Stop の締め切り − 余白（2.0 秒）を超える",
         "turn の部品の上限 hook.counter-lock（99 秒）が claude の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
         "turn の部品の上限 hook.counter-lock（99 秒）が codex の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
     ]
