@@ -89,13 +89,15 @@ def check(ctx, svc) -> Verdict:
         return _result("none", "skip:empty", False)
     if ctx.asked_this_turn:
         return _result(None, "skip:asked", False)
+    # ルールだけで決まる判定: 本文の種類 → （`judge`, 変更要求か）
+    by_rule = {
+        "elsewhere_wait": ("skip:elsewhere", False),
+        "closing_report": ("skip:closing", False),
+        "prose_wait": ("rule", True),
+    }
     kind = ctx.last_reply_kind
-    if kind == "elsewhere_wait":
-        return _result(kind, "skip:elsewhere", False)
-    if kind == "closing_report":
-        return _result(kind, "skip:closing", False)
-    if kind == "prose_wait":
-        return _result(kind, "rule", True)
+    if kind in by_rule:
+        return _result(kind, *by_rule[kind])
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
     keep = ctx.reply_reading.delegated
