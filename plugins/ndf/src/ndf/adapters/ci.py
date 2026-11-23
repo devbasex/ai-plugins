@@ -171,15 +171,17 @@ class Reading(NamedTuple):
 
     @property
     def verdict(self) -> str:
-        """`test_failed`・`check_failed`・`pending`・`missing`・`stale`・`passed` のどれか（先の方を優先する）。"""
-        order = [
-            (Verdict.TEST_FAILED, self.failed_tests),
-            (Verdict.CHECK_FAILED, self.failed_other),
-            (Verdict.PENDING, self.running or self.queued or (self.missing and not self.settled)),
-            (Verdict.MISSING, self.missing),
-            (Verdict.STALE, self.stale),
-        ]
-        return next((name for name, hit in order if hit), Verdict.PASSED)
+        """当たる判定のうち、表（`VERDICTS`）の上の行のもの。"""
+        hits = {
+            Verdict.TEST_FAILED: self.failed_tests,
+            Verdict.CHECK_FAILED: self.failed_other,
+            Verdict.PENDING: self.running or self.queued or (self.missing and not self.settled),
+            Verdict.MISSING: self.missing,
+            Verdict.STALE: self.stale,
+        }
+        # 通ったのは、ほかのどの判定にも当たらないときだけ（表の行の位置によらない）
+        hits[Verdict.PASSED] = not any(hits.values())
+        return next(name for name in Verdict if hits[name])
 
     @property
     def only_queued(self) -> bool:
