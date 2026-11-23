@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import signal
@@ -23,6 +24,7 @@ JUDGE: dict[str, Any] = {
     "seconds": 5,
     "max_chars": 1600,
     "rest_seconds": 600,
+    "lock_seconds": 0.2,
     "rounds": 3,
     "auth_markers": ["Not logged in", "Invalid API key"],
     "endpoint": {
@@ -42,6 +44,8 @@ CLI_JS = "/opt/n/lib/node_modules/@anthropic-ai/claude-code/cli.js"
 ENV = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/w/p"}
 OTHER_ENV = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/w/other"}
 LAUNCH = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p")
+GATEWAY = reply_judge.Launch(argv=["claude", "--settings", "gw.json"], project_dir="/w/p")
+OTHER = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/other")
 
 
 @pytest.fixture(autouse=True)
@@ -260,6 +264,24 @@ def test_ask_stops_the_group_and_reraises_an_interrupt(monkeypatch: pytest.Monke
     assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
 
 
+def test_ask_kills_the_group_before_reaping_when_the_grace_is_interrupted(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 猶予の待ちの中で締め切りの SIGALRM が来ても、SIGKILL を送ってから回収する
+    log: list[tuple[Any, ...]] = []
+
+    def alarmed(seconds: float) -> None:
+        log.append(("sleep", seconds))
+        raise TimeoutError("締め切り")
+
+    monkeypatch.setattr(reply_judge, "_pause", alarmed)
+    proc = FakeProc(log, finished=False)
+    try:
+        with pytest.raises(TimeoutError):
+            reply_judge.ask("本文", 0.0, {}, LAUNCH, popen=Spawner(proc), killpg=Killer(log))
+    finally:
+        proc.close()
+    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+
+
 def test_ask_reports_a_launch_failure() -> None:
     judged, _, _, log = ask_with(error=OSError("python が無い"))
     assert judged.failure == "launch" and judged.calls == 0 and log == []
@@ -363,61 +385,84 @@ def test_parent_launch_returns_none_without_proc() -> None:
     assert reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink) is None
 
 
-# resting / mark_rest
+# resting / endpoint_resting / mark_rest
 
 
-@pytest.mark.parametrize("failure", ["launch", "refused", "usage_limit", "auth", "endpoint"])
+@pytest.mark.parametrize("failure", ["launch", "refused", "usage_limit", "auth"])
 def test_mark_rest_writes_for_launch_failures(tmp_path: Path, failure: str) -> None:
-    reply_judge.mark_rest(tmp_path, failure, 1000.0, ENV)
-    assert reply_judge.resting(tmp_path, 1000.0, ENV) is True
-    assert reply_judge.resting(tmp_path, 1500.0, ENV) is True
+    reply_judge.mark_rest(tmp_path, failure, 1000.0, ENV, LAUNCH)
+    assert reply_judge.resting(tmp_path, 1000.0) is True
+    assert reply_judge.resting(tmp_path, 1500.0) is True
 
 
 @pytest.mark.parametrize(("now", "wanted"), [(1599.0, True), (1600.0, False), (1601.0, False)])
 def test_resting_ends_when_the_rest_is_over(tmp_path: Path, now: float, wanted: bool) -> None:
-    reply_judge.mark_rest(tmp_path, "launch", 1000.0, ENV)
-    assert reply_judge.resting(tmp_path, now, ENV) is wanted
+    reply_judge.mark_rest(tmp_path, "launch", 1000.0, ENV, LAUNCH)
+    assert reply_judge.resting(tmp_path, now) is wanted
 
 
 def test_endpoint_rest_is_kept_to_its_own_target(tmp_path: Path) -> None:
-    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV)
-    assert reply_judge.resting(tmp_path, 1000.0, ENV) is True
-    assert reply_judge.resting(tmp_path, 1000.0, OTHER_ENV) is False
-    assert reply_judge.resting(tmp_path, 1000.0, {**ENV, "ANTHROPIC_BASE_URL": "https://gw.example"}) is False
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
+    assert reply_judge.resting(tmp_path, 1000.0) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, GATEWAY) is True
+    assert reply_judge.endpoint_resting(tmp_path, 1599.0, ENV, GATEWAY) is True
+    assert reply_judge.endpoint_resting(tmp_path, 1600.0, ENV, GATEWAY) is False
+    # 同じリポジトリの通常の起動・別のリポジトリ・別の接続先の変数は休まない
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, OTHER_ENV, OTHER) is False
+    gateway_env = {**ENV, "ANTHROPIC_BASE_URL": "https://gw.example"}
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, gateway_env, GATEWAY) is False
 
 
-def test_launch_rest_covers_every_target_and_keeps_the_endpoint_rest(tmp_path: Path) -> None:
-    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV)
-    reply_judge.mark_rest(tmp_path, "launch", 1700.0, OTHER_ENV)
-    assert reply_judge.resting(tmp_path, 1700.0, {"CLAUDE_PROJECT_DIR": "/w/third"}) is True
-    assert reply_judge.resting(tmp_path, 2300.0, ENV) is False
+def test_mark_rest_keeps_the_rests_already_written(tmp_path: Path) -> None:
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
+    reply_judge.mark_rest(tmp_path, "launch", 1100.0, OTHER_ENV, OTHER)
+    reply_judge.mark_rest(tmp_path, "endpoint", 1200.0, OTHER_ENV, OTHER)
+    assert reply_judge.endpoint_resting(tmp_path, 1300.0, ENV, GATEWAY) is True
+    assert reply_judge.resting(tmp_path, 1300.0) is True
+    assert reply_judge.endpoint_resting(tmp_path, 1300.0, OTHER_ENV, OTHER) is True
+
+
+def test_mark_rest_does_not_write_while_another_stop_holds_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 錠を取れなければ書かない（別のセッションの書き込みを古い中身で上書きしない）
+    monkeypatch.setattr(reply_judge, "_judge", {**JUDGE, "lock_seconds": 0}.__getitem__)
+    path = reply_judge.rest_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    with open(path.with_name(reply_judge.REST_LOCK_NAME), "w") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        reply_judge.mark_rest(tmp_path, "launch", 1000.0, ENV, LAUNCH)
+    assert path.exists() is False
 
 
 def test_mark_rest_does_not_write_secret_values(tmp_path: Path) -> None:
-    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, {**ENV, "ANTHROPIC_API_KEY": "sk-secret"})
-    assert "sk-secret" not in reply_judge.rest_path(tmp_path).read_text(encoding="utf-8")
+    gateway = reply_judge.Launch(argv=["claude", "--settings", '{"env": {"ANTHROPIC_API_KEY": "sk-arg"}}'], project_dir="/w/p")
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, {**ENV, "ANTHROPIC_API_KEY": "sk-secret"}, gateway)
+    text = reply_judge.rest_path(tmp_path).read_text(encoding="utf-8")
+    assert "sk-secret" not in text and "sk-arg" not in text
 
 
 @pytest.mark.parametrize("failure", ["timeout", "no_slot", "exit", "shape"])
 def test_mark_rest_ignores_the_other_failures(tmp_path: Path, failure: str) -> None:
-    reply_judge.mark_rest(tmp_path, failure, 1000.0, ENV)
+    reply_judge.mark_rest(tmp_path, failure, 1000.0, ENV, LAUNCH)
     assert reply_judge.rest_path(tmp_path).exists() is False
-    assert reply_judge.resting(tmp_path, 1000.0, ENV) is False
+    assert reply_judge.resting(tmp_path, 1000.0) is False
 
 
 def test_resting_is_false_without_a_marker(tmp_path: Path) -> None:
-    assert reply_judge.resting(tmp_path, 1000.0, ENV) is False
+    assert reply_judge.resting(tmp_path, 1000.0) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH) is False
 
 
 def test_resting_is_false_for_a_broken_marker(tmp_path: Path) -> None:
     path = reply_judge.rest_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("壊れた", encoding="utf-8")
-    assert reply_judge.resting(tmp_path, 1000.0, ENV) is False
+    assert reply_judge.resting(tmp_path, 1000.0) is False
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH) is False
 
 
 def test_mark_rest_does_not_raise_on_an_unwritable_state_dir(tmp_path: Path) -> None:
     blocked = tmp_path / "file"
     blocked.write_text("", encoding="utf-8")
-    reply_judge.mark_rest(blocked / "state", "launch", 1000.0, ENV)
-    assert reply_judge.resting(blocked / "state", 1000.0, ENV) is False
+    reply_judge.mark_rest(blocked / "state", "launch", 1000.0, ENV, LAUNCH)
+    assert reply_judge.resting(blocked / "state", 1000.0) is False

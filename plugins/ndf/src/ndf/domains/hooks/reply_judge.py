@@ -6,8 +6,9 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
 - `judge_text`: コードブロックの行と空行を除いた本文の末尾（設定の字数）を、質問へ渡す文にする（決定 7）
 - `parent_launch`: 送信先の確かめの hook の側。起動の形と親の Claude Code の起動引数を読む（決定 11）
 - `ask`: 判定の子を起動して待ち、どの終わり方でも組ごと止めてから回収する（決定 3・6）
-- `resting` / `mark_rest`: 起動が続けて失敗する環境で、休む間だけ子を起動しないためのファイル（決定 10）。
-  送信先の不一致（`endpoint`）は送信先の確かめの対象（`endpoint_scope`）ごとに分けて休む
+- `resting` / `endpoint_resting` / `mark_rest`: 起動が続けて失敗する環境で、休む間だけ子を起動しないためのファイル
+  （決定 10）。起動の失敗は親の探索の前に `resting` で、送信先の不一致（`endpoint`）は親の起動引数を含む確かめの
+  対象（`endpoint_scope`）ごとに親の探索の後で `endpoint_resting` で確かめる
 
 設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `_judge` が読む。
 """
@@ -28,11 +29,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
+from ndf.domains.relay import signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
 CHILD_MODULE = "ndf.adapters.reply_judge"
 # 休みのマーカーのファイルの名前（状態の保存先の hook の保存先）
 REST_NAME = "judge-rest.json"
+# 休みのマーカーの更新を直列にする錠のファイルの名前（`.` で始まる名前は `metrics.prune_state` が消さない）
+REST_LOCK_NAME = ".judge-rest.lock"
 # 組へ SIGTERM を送った後、SIGKILL までに待つ秒
 GROUP_GRACE = 0.2
 # 子の標準出力を 1 回に読む上限のバイト数
@@ -214,10 +218,13 @@ def _stop_group(proc: Any, killpg: Callable[[int, int], None], gentle: bool) -> 
     最後に組へ SIGKILL を送ってから回収する。
     """
     try:
-        if gentle:
-            _signal_group(proc.pid, signal.SIGTERM, killpg)
-            _pause(GROUP_GRACE)
-        _signal_group(proc.pid, signal.SIGKILL, killpg)
+        try:
+            if gentle:
+                _signal_group(proc.pid, signal.SIGTERM, killpg)
+                _pause(GROUP_GRACE)
+        finally:
+            # 猶予の待ちが締め切りの SIGALRM などで破られても、SIGKILL を送ってから回収する
+            _signal_group(proc.pid, signal.SIGKILL, killpg)
     finally:
         proc.wait()
 
@@ -351,15 +358,15 @@ def rest_path(state_dir: Path) -> Path:
     return tables.hooks_dir(state_dir) / REST_NAME
 
 
-def endpoint_scope(env: Mapping[str, str]) -> str:
-    """送信先の確かめの対象の名前。プロジェクトの根と、名前が `endpoint.env_names` に前方一致する環境変数の値から作る。
+def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
+    """送信先の確かめの対象の名前。親の起動引数・プロジェクトの根・名前が `endpoint.env_names` に前方一致する
+    環境変数の値から作る（判定の子の `endpoint_refusal` が見る材料と同じ）。
 
-    値に秘密（API キーなど）を含みうるので、ファイルへは SHA-256 の先頭 16 桁だけを書く。休みのマーカーは
-    `parent_launch` より前に読むので、親の起動引数は対象に入れない。
+    値に秘密（API キー・引数に書いた設定）を含みうるので、ファイルへは SHA-256 の先頭 16 桁だけを書く。
     """
     prefixes = tuple(_judge("endpoint")["env_names"])
     picked = sorted((name, value) for name, value in env.items() if name.startswith(prefixes))
-    source = json.dumps({"project_dir": env.get("CLAUDE_PROJECT_DIR"), "env": picked}, ensure_ascii=False)
+    source = json.dumps({"argv": list(launch.argv), "project_dir": launch.project_dir, "env": picked}, ensure_ascii=False)
     return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
 
 
@@ -376,46 +383,58 @@ def _within(at: Any, now: float) -> bool:
     return isinstance(at, (int, float)) and now - float(at) < float(_judge("rest_seconds"))
 
 
-def resting(state_dir: Path, now: float, env: Mapping[str, str]) -> bool:
-    """起動の失敗、またはこの対象（`endpoint_scope(env)`）の送信先の不一致から休む間が過ぎていなければ真。
-
-    マーカーが無い・読めないときは偽（決定 10）。
-    """
+def resting(state_dir: Path, now: float) -> bool:
+    """起動の失敗から休む間が過ぎていなければ真。親の探索の前に見る。マーカーが無い・読めないときは偽（決定 10）。"""
     marker = _rest_marker(state_dir)
     if marker is None:
         return False
     launch = marker.get("launch")
-    if isinstance(launch, dict) and _within(launch.get("at"), now):
-        return True
-    endpoints = marker.get("endpoint")
-    return isinstance(endpoints, dict) and _within(endpoints.get(endpoint_scope(env)), now)
+    return isinstance(launch, dict) and _within(launch.get("at"), now)
 
 
-def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str]) -> None:
-    """起動の失敗と送信先の不一致のときだけ休みのマーカーを書く。書けなくても例外を投げない（決定 10）。
-
-    起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む。送信先の不一致（`endpoint`）は
-    `endpoint_scope(env)` の対象だけが休む。休む間を過ぎた対象は書くときに外す。時間切れとスロットの空き待ちは書かない。
-    """
-    if failure not in ("launch", "refused", "usage_limit", "auth", "endpoint"):
-        return
+def endpoint_resting(state_dir: Path, now: float, env: Mapping[str, str], launch: Launch) -> bool:
+    """この対象（`endpoint_scope(env, launch)`）の送信先の不一致から休む間が過ぎていなければ真。親の探索の後に見る。"""
     marker = _rest_marker(state_dir)
     if marker is None:
-        marker = {}
+        return False
+    endpoints = marker.get("endpoint")
+    return isinstance(endpoints, dict) and _within(endpoints.get(endpoint_scope(env, launch)), now)
+
+
+def _rest_body(marker: dict[str, Any], failure: str, now: float, scope: str) -> dict[str, Any]:
+    """今のマーカーに 1 つの失敗を足した中身。休む間を過ぎた対象は外す。"""
     raw = marker.get("endpoint")
-    endpoints = {scope: at for scope, at in (raw.items() if isinstance(raw, dict) else ()) if _within(at, now)}
+    endpoints = {key: at for key, at in (raw.items() if isinstance(raw, dict) else ()) if _within(at, now)}
     launch = marker.get("launch")
     kept = launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
     if failure == "endpoint":
-        endpoints[endpoint_scope(env)] = now
+        endpoints[scope] = now
     else:
         kept = {"at": now, "failure": failure}
     body: dict[str, Any] = {"endpoint": endpoints}
     if kept is not None:
         body["launch"] = kept
+    return body
+
+
+def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str], launch: Launch) -> None:
+    """起動の失敗と送信先の不一致のときだけ休みのマーカーを書く。書けなくても例外を投げない（決定 10）。
+
+    起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む。送信先の不一致（`endpoint`）は
+    `endpoint_scope(env, launch)` の対象だけが休む。時間切れとスロットの空き待ちは書かない。
+    読んで足して書く間は錠で別のセッションの Stop と直列にし、読み手へは一時ファイルからの置き換えで渡す。
+    錠を `lock_seconds` で取れなければ書かない（次の失敗でまた書く）。
+    """
+    if failure not in ("launch", "refused", "usage_limit", "auth", "endpoint"):
+        return
     path = rest_path(state_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        with signals.held(path.with_name(REST_LOCK_NAME), float(_judge("lock_seconds"))) as got:
+            if not got:
+                return
+            marker = _rest_marker(state_dir)
+            body = _rest_body({} if marker is None else marker, failure, now, endpoint_scope(env, launch))
+            signals.replace_json(path, body)
     except OSError:  # noqa: S110 ファイル: マーカーを書けなくても判定は変えない
         pass

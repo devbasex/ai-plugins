@@ -35,7 +35,7 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`endpoint_scope`（新設）・`Judged`（新設の型） |
+| `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`endpoint_resting`（新設）・`endpoint_scope`（新設）・`Judged`（新設の型） |
 | `plugins/ndf/src/ndf/adapters/reply_judge.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む | 標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設） |
@@ -47,7 +47,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/adapters/launch_slot.py` | 変更 | スロットを待つ上限を呼び手が渡せる | `slot_pool` | モジュール | `gate`・`held`・`_wait_for`（シグネチャの変更） |
 | `plugins/ndf/src/ndf/domains/relay/account_dir.py` | 変更 | 実効の設定の解き方で、指定した最上位のキーを定義する最も強い層を返す | `claude_args`、`key_helper` | `Resolved` | `effective_env`（シグネチャの変更）・`Resolved`（欄を足す） |
 
-数え: 新設する関数 16（`judge_text`・`parent_launch`・`ask`・`resting`・`mark_rest`・`endpoint_scope`・`endpoint_refusal`・`classify`・`main`・`run_cases`・`asked_since_prompt`・`HookContext.asked_this_turn`・`Counter.pushback_left`・`Counter.mark_model_wait`・`Counter.model_waited`・`_judge_cases`）、シグネチャを変える関数 10（`call_claude`・`_accounted`・`_prefaced`・`_run_claude`・`_popen`・`gate`・`held`・`_wait_for`・`dispatch.run`・`account_dir.effective_env`）。
+数え: 新設する関数 17（`judge_text`・`parent_launch`・`ask`・`resting`・`endpoint_resting`・`mark_rest`・`endpoint_scope`・`endpoint_refusal`・`classify`・`main`・`run_cases`・`asked_since_prompt`・`HookContext.asked_this_turn`・`Counter.pushback_left`・`Counter.mark_model_wait`・`Counter.model_waited`・`_judge_cases`）、シグネチャを変える関数 10（`call_claude`・`_accounted`・`_prefaced`・`_run_claude`・`_popen`・`gate`・`held`・`_wait_for`・`dispatch.run`・`account_dir.effective_env`）。
 
 ## 判定のリクエスト（hook の側）
 
@@ -62,17 +62,18 @@ plugins/ndf/
 | `Launch` | `domains/hooks/reply_judge.py` | 新設 | `NamedTuple(argv: list[str], project_dir: str)` | 親の Claude Code の起動引数とプロジェクトの根。`ask` が子の標準入力へ渡す |
 | `ask` | `domains/hooks/reply_judge.py` | 新設 | `ask(text: str, seconds: float, env: Mapping[str, str], launch: Launch, popen: Callable[..., subprocess.Popen] = subprocess.Popen, killpg: Callable[[int, int], None] = os.killpg) -> Judged` | 判定の子を新しいプロセスの組で起動し、標準入力に `{"text", "seconds", "parent_argv", "project_dir"}` を渡し、`seconds` で待って回答を読む。どの終わり方でも組へ送ってから回収する |
 | `Judged` | `domains/hooks/reply_judge.py` | 新設 | `NamedTuple(kind: Optional[str], failure: Optional[str], ms: float, calls: int)` | 判定の結果。`kind` は `wait` / `report`、回答が得られなければ None と `failure` |
-| `resting` | `domains/hooks/reply_judge.py` | 新設 | `resting(state_dir: Path, now: float, env: Mapping[str, str]) -> bool` | 休みのマーカーを読み、起動の失敗、またはこの送信先の確かめの対象（`endpoint_scope(env)`）の送信先の不一致から休む間（設定）が過ぎていなければ真。マーカーが無い・読めないときは偽 |
-| `mark_rest` | `domains/hooks/reply_judge.py` | 新設 | `mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str]) -> None` | 起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む印を、送信先の不一致（`endpoint`）は `endpoint_scope(env)` の対象だけが休む印を書く。休む間を過ぎた印は書くときに外す。ほかの失敗では何もしない。書けなくても例外を投げない |
-| `endpoint_scope` | `domains/hooks/reply_judge.py` | 新設 | `endpoint_scope(env: Mapping[str, str]) -> str` | 送信先の確かめの対象の名前。`CLAUDE_PROJECT_DIR` と、名前が `endpoint.env_names` に前方一致する環境変数の値の SHA-256 の先頭 16 桁（値に秘密を含みうるので値そのものは書かない）。休みのマーカーは `parent_launch` より前に読むので、親の起動引数は入れない |
+| `resting` | `domains/hooks/reply_judge.py` | 新設 | `resting(state_dir: Path, now: float) -> bool` | 休みのマーカーを読み、起動の失敗から休む間（設定）が過ぎていなければ真。`parent_launch` より前に見る。マーカーが無い・読めないときは偽 |
+| `endpoint_resting` | `domains/hooks/reply_judge.py` | 新設 | `endpoint_resting(state_dir: Path, now: float, env: Mapping[str, str], launch: Launch) -> bool` | 休みのマーカーを読み、この送信先の確かめの対象（`endpoint_scope(env, launch)`）の送信先の不一致から休む間が過ぎていなければ真。`parent_launch` の後に見る。マーカーが無い・読めないときは偽 |
+| `mark_rest` | `domains/hooks/reply_judge.py` | 新設 | `mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str], launch: Launch) -> None` | 起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む時刻を、送信先の不一致（`endpoint`）は `endpoint_scope(env, launch)` の対象だけが休む時刻を書く。休む間を過ぎた対象は書くときに外す。読んで足して書く間は錠のファイル（`<状態の保存先>/hooks/.judge-rest.lock`）の `flock` で別のセッションの Stop と直列にし（`signals.held`。待つのは設定の `lock_seconds` まで、取れなければ書かない）、読み手へは一時ファイルからの置き換え（`signals.replace_json`）で渡す。ほかの失敗では何もしない。書けなくても例外を投げない |
+| `endpoint_scope` | `domains/hooks/reply_judge.py` | 新設 | `endpoint_scope(env: Mapping[str, str], launch: Launch) -> str` | 送信先の確かめの対象の名前。親の起動引数（`launch.argv`）・プロジェクトの根（`launch.project_dir`）・名前が `endpoint.env_names` に前方一致する環境変数の値（判定の子の `endpoint_refusal` が見る材料と同じ）の SHA-256 の先頭 16 桁（値に秘密を含みうるので値そのものは書かない）。同じリポジトリでも `--settings` 付きの起動と通常の起動は別の対象 |
 
 - `ask`
   - 事前条件: `seconds > 0`。`text` は `judge_text` の返り
   - 事後条件: どの終わり方でも子の組（判定の子と、同じ組で起動した `claude`）は止まって回収されている。`kind` が None なら `failure` は `timeout` / `launch` / `exit` / `shape` / `no_slot` / `refused` / `usage_limit` / `auth` / `endpoint` のどれか
   - 副作用: 子プロセスの起動（`[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]`、`start_new_session=True`、`PYTHONPATH` にプラグインの `src`、環境に `MAX_THINKING_TOKENS=0`）。`outbox.kick` と同じ起動の形
   - 子へ渡す環境: `env` から、環境変数の表（`contracts/domains/env.json`。hook の側は `tables.load` で `json` のまま読む）の `child` が `drop` の行の変数を外す。`relay/session_env.py` の `tool_env` と同じ行で、`CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` を含み、接続先と認証の変数を含まない（外す名前をコードに書かない）。そのうえで `PYTHONPATH` と `MAX_THINKING_TOKENS` を入れる
-  - 回答の読み: `communicate` は判定の子（組のリーダー）を回収してしまうので使わず、標準入力へ書いて閉じ、標準出力を終わりまで `selectors` で `seconds` まで読む。リーダーを回収するまでは組の番号が再利用されないので、組への送信は必ず回収の前に済ませる
-  - 組の止め方: 時間切れ・例外のときは組（`proc.pid`）へ SIGTERM を送って 0.2 秒おき、判定の子が先に終わっていても組に `claude` が残りうるので続けて SIGKILL を送り、それから `proc.wait()` で回収する。正常に終えたときも、組に残る者があれば止めるため SIGKILL を組へ送ってから回収する（`ProcessLookupError` は受け流す）。回答を読めたら終了コードは見ない（読んだ後の SIGKILL が終わりかけの子の終了コードになりうる）。判定の子は `claude` を同じ組で起動する（下の「判定の子」）ので、組への送信が `claude` まで届く
+  - 回答の読み: `communicate` は判定の子（組のリーダー）を回収してしまうので使わない。標準入力（書き込み）と標準出力（読み込み）を同じ `selectors` のループで扱い、書き込みも読み込みも起動から `seconds` の同じ期限の中で進める（書ける状態のときだけパイプの `PIPE_BUF` 以下を書くので、判定の子が入力を読まずに止まってもパイプの容量を超える書き込みで止まらない）。書き終えたら標準入力を閉じ、標準出力が終わりまで来たら回答とする。期限までに終わらなければ時間切れ。リーダーを回収するまでは組の番号が再利用されないので、組への送信は必ず回収の前に済ませる
+  - 組の止め方: 時間切れ・例外のときは組（`proc.pid`）へ SIGTERM を送って 0.2 秒おき、判定の子が先に終わっていても組に `claude` が残りうるので続けて SIGKILL を送り、それから `proc.wait()` で回収する。0.2 秒の待ちが締め切りの SIGALRM などの例外で破られても、SIGKILL を送ってから回収し、例外はその後に投げ直す。正常に終えたときも、組に残る者があれば止めるため SIGKILL を組へ送ってから回収する（`ProcessLookupError` は受け流す）。回答を読めたら終了コードは見ない（読んだ後の SIGKILL が終わりかけの子の終了コードになりうる）。判定の子は `claude` を同じ組で起動する（下の「判定の子」）ので、組への送信が `claude` まで届く
 
 ### 異常系の処理
 
@@ -88,10 +89,10 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "seconds": 5, "max_chars": 1600, "rest_seconds": 600, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint": {"entrypoints": ["cli", "sdk-cli"], "ancestors": 8, "cli_exe": ["*/claude/versions/*"], "cli_script": ["*/@anthropic-ai/claude-code/cli.js"], "flags": ["--settings", "--setting-sources"], "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"], "env_names": ["ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CONFIG_DIR", "AWS_", "GOOGLE_", "CLOUD_ML_", "VERTEX_", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS"]}}`（`rest_seconds` は起動が失敗した後に休む間（決定 10）、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint` は送信先が同じかの確かめに使う値（決定 11。`env_names` は前方一致で、設定の層が出所の変数だけに当てる。`apiKeyHelper` は `account_dir` の `helper` が見るので `keys` に入れない）） |
+| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "seconds": 5, "max_chars": 1600, "rest_seconds": 600, "lock_seconds": 0.2, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint": {"entrypoints": ["cli", "sdk-cli"], "ancestors": 8, "cli_exe": ["*/claude/versions/*"], "cli_script": ["*/@anthropic-ai/claude-code/cli.js"], "flags": ["--settings", "--setting-sources"], "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"], "env_names": ["ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CONFIG_DIR", "AWS_", "GOOGLE_", "CLOUD_ML_", "VERTEX_", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS"]}}`（`rest_seconds` は起動が失敗した後に休む間（決定 10）、`lock_seconds` は休みのマーカーの更新の錠を待つ上限、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint` は送信先が同じかの確かめに使う値（決定 11。`env_names` は前方一致で、設定の層が出所の変数だけに当てる。`apiKeyHelper` は `account_dir` の `helper` が見るので `keys` に入れない）） |
 | `hook.budget.stop` | 設定値 | `contracts/limits.json` | `p95_ms` 2500・`deadline` 7・`margin` 1.5・`timeout` 9（他のキーは今のまま） |
 | `CHILD_MODULE` | 定数 | `domains/hooks/reply_judge.py` | `"ndf.adapters.reply_judge"` |
-| 休みのマーカー | ファイル | `<状態の保存先>/hooks/judge-rest.json` | 無し（起動の失敗と送信先の不一致のときだけ `{"launch": {"at": <失敗した時刻>, "failure": "<種類>"}, "endpoint": {"<endpoint_scope>": <失敗した時刻>}}` を書く。`launch` はどの対象も休み、`endpoint` は対象ごとに休む。1 つのリポジトリの送信先の不一致で別のリポジトリのモデルの判定を止めない。`metrics.prune_state` が消す対象と同じ保存先） |
+| 休みのマーカー | ファイル | `<状態の保存先>/hooks/judge-rest.json` | 無し（起動の失敗と送信先の不一致のときだけ `{"launch": {"at": <失敗した時刻>, "failure": "<種類>"}, "endpoint": {"<endpoint_scope>": <失敗した時刻>}}` を書く。`launch` はどの対象も休み、`endpoint` は対象ごとに休む。1 つの起動の形（リポジトリ・`--settings`・接続先の変数）の送信先の不一致で、別の起動の形のモデルの判定を止めない。更新は `.judge-rest.lock` の錠の中で行い、一時ファイルからの置き換えで公開する。`metrics.prune_state` が消す対象と同じ保存先） |
 
 ### 単体テストの観点
 
@@ -100,7 +101,7 @@ plugins/ndf/
 | `judge_text` | 質問の後に 9 行の報告が続く本文で、質問の行が返りに入る | ちょうど `max_chars` 字と 1 字多い本文。コードブロックの中の質問が返りに入らない。U+2028 を含む行を 1 行と数える | `code_lines` の数が行の数と合わない → 空の文 |
 | `ask` | 偽の `popen`（実プロセスを起動しない。標準入出力は同じプロセスの中のパイプで、標準出力に `{"kind": "wait", "calls": 1}` の 1 行、終了コード 0）で `kind="wait"` と `calls`。標準入力の JSON に `launch` の `parent_argv` と `project_dir` が入る。`popen` に渡った引数が `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]`・`start_new_session=True` で、環境に `MAX_THINKING_TOKENS=0` があり `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が無く `ANTHROPIC_BASE_URL` が残る | 正常に終えた後も偽の `killpg` に組の番号と SIGKILL が渡り、それが `wait()` より前。SIGKILL で終わった終了コードでも読めた回答を使う | 標準出力が閉じないまま `seconds` が 0 → `timeout`、偽の `wait` がすぐ返る（判定の子だけが先に終わった）ときも SIGTERM・猶予の待ち（差し替え）・SIGKILL・`wait()` の順。読みの中で `KeyboardInterrupt` → 同じ順で送って回収し、例外を投げ直す。`popen` が `OSError` → `launch`。終了コード 1 → `exit`。形の違う出力 → `shape`。どれも実時間を待たない |
 | `parent_launch`（偽の `read`・`readlink` で `/proc` を差し替える。実の `/proc` は読まない） | エントリポイント `cli`・`CLAUDE_PROJECT_DIR` が絶対パス・親が実行ファイル `…/claude/versions/2.1.330` → その引数と根を返す。node の起動（実行ファイル `node`・2 つ目の引数が `…/@anthropic-ai/claude-code/cli.js`）も親と見分ける | 親が `ancestors` 代目 → 返す、その 1 代上 → None。近い順に `/bin/bash -c 'claude --settings x.json'`（実行ファイルが bash）・`claude`（`--settings=gw.json` 付き）・`claude`（フラグ無し）と並べると、2 つ目の引数を返す（シェルの文字列を親とせず、3 つ目の外側を見ない）。`CLAUDE_CONFIG_DIR` が絶対パス → 返す | エントリポイント `sdk-ts` → None。`CLAUDE_PROJECT_DIR` が無い・相対 → None。`CLAUDE_CONFIG_DIR` が相対（`./cfg`）→ None。`/proc` の読みが `OSError`（macOS の代わり）→ None。node の 2 つ目の引数が相対パス（その外側に `claude` がいても）→ None。引数の位置に `claude` を含むだけの python のプロセス → 親としない |
-| `resting` / `mark_rest` | `launch`・`auth`・`endpoint` を書いた直後は真、休む間を過ぎた時刻では偽。`launch` は別の対象でも真、`endpoint` は別のプロジェクトの根・別の接続先の変数では偽。API キーの値がファイルに入らない | 休む間のちょうどの時刻 | マーカーが無い・壊れたマーカー・書けない保存先で偽（例外を投げない）。`timeout`・`no_slot`・`exit` を渡すとマーカーを書かない |
+| `resting` / `endpoint_resting` / `mark_rest` | `launch`・`auth` を書いた直後は `resting` が真、`endpoint` を書いた直後は同じ対象の `endpoint_resting` が真、休む間を過ぎた時刻では偽。`endpoint` は `resting` を真にせず、同じリポジトリの `--settings` の無い起動・別のプロジェクトの根・別の接続先の変数では偽。先に書いた休みを後の書き込みが消さない。API キーの値と引数の中の値がファイルに入らない | 休む間のちょうどの時刻 | マーカーが無い・壊れたマーカー・書けない保存先で偽（例外を投げない）。`timeout`・`no_slot`・`exit` を渡すとマーカーを書かない。錠を別のセッションが持っていれば書かない |
 
 時刻はどれも引数（`now`）か偽の時計で渡し、実時間の経過と実プロセスの起動をテストの仕様にしない（tdd-cycle の「テストに書かないもの」）。
 
@@ -162,13 +163,14 @@ plugins/ndf/
 | `ctx.background_tasks` が空でない | 文字列の判定で決める（`judge=skip:background`） |
 | `ctx.runtime` が `claude` でない（Codex のセッション） | 文字列の判定で決める（`judge=skip:runtime`） |
 | `svc.counter.pushback_left()` が偽 | 文字列の判定で決める（`judge=skip:limit`）。ただし文字列の判定が `report` で `svc.counter.model_waited()` が真なら変更要求を返す（dispatch が上限で通し、待ち通知を送る。設計の決定 5） |
-| `reply_judge.resting(svc.state_dir, 今, os.environ)` が真（前の起動の失敗、またはこの対象の送信先の不一致から休む間のうち） | 文字列の判定で決める（`judge=skip:rest`） |
+| `reply_judge.resting(svc.state_dir, 今)` が真（前の起動の失敗から休む間のうち） | 文字列の判定で決める（`judge=skip:rest`） |
 | 上のどれでもなく、残りの秒（`svc.deadline − 余白 − 今` と設定の `seconds` の小さい方）が 0.5 秒を切る | 文字列の判定で決める（`judge=skip:time`） |
 | 上のどれでもなく、`reply_judge.parent_launch(os.environ, os.getpid())` が None | 文字列の判定で決める（`judge=skip:endpoint`） |
-| 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest(svc.state_dir, failure, 今, os.environ)` を呼んでから文字列の判定で決める（`judge=fallback:<failure>`） |
+| 上のどれでもなく、`reply_judge.endpoint_resting(svc.state_dir, 今, os.environ, <parent_launch の返り>)` が真（この起動の形の送信先の不一致から休む間のうち） | 文字列の判定で決める（`judge=skip:rest`） |
+| 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest(svc.state_dir, failure, 今, os.environ, <parent_launch の返り>)` を呼んでから文字列の判定で決める（`judge=fallback:<failure>`） |
 
 - 文字列の判定は今の `ctx.last_reply_kind`（`classify_reply`）をそのまま使う
-- 条件は表の上から順に見て、最初に当たった 1 つを `judge` に書く（複数が当たっても 1 つ）。`/proc` を読む `parent_launch` は休みのマーカーと残りの秒の後に置き、モデルを呼ばないと分かっている Stop では読まない。子が `endpoint` を返したら `judge=fallback:endpoint` で、休みのマーカーが次の Stop から休む間だけ、同じ送信先の確かめの対象（`endpoint_scope`）の子の起動を止める
+- 条件は表の上から順に見て、最初に当たった 1 つを `judge` に書く（複数が当たっても 1 つ）。`/proc` を読む `parent_launch` は起動の失敗の休み（`resting`）と残りの秒の後に置き、送信先の不一致の休み（`endpoint_resting`）は親の起動引数が要るので `parent_launch` の後に置く。`/proc` はモデルを呼ばないと分かっている Stop では読まない。子が `endpoint` を返したら `judge=fallback:endpoint` で、休みのマーカーが次の Stop から休む間だけ、同じ送信先の確かめの対象（`endpoint_scope`）の子の起動を止める
 - 変更要求の文面・上限・上限の後の待ちの知らせは変えない（dispatch と main が持つ）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである
 - `svc.state_dir` は `GuardServices` が今も持つ状態の保存先である
 - 残りの秒の余白は、ここで 1 回だけ引く。`svc.deadline` は余白を引いていない絶対時刻（SIGALRM と同じ。下の「hook の文脈・数え手・締め切り」）である
@@ -186,7 +188,7 @@ plugins/ndf/
 | `check` | 偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。#4000 の 2 回目の形の本文で `ask` に質問が渡る | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 7 秒・余白 1.5 秒・設定 5 秒のとき `ask` に渡る秒が 5（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに文字列の判定と同じ判定・`judge=fallback:<failure>` |
 | `check` の送信先と順序 | エントリポイント `cli` で親が見つかる → `ask` に `parent_launch` の返りが渡る | 休み中・残りの秒が足りない Stop で偽の `parent_launch` が呼ばれない（`judge=skip:rest`・`skip:time`）。Codex でも休み中でも、記録される `judge` は表で最初に当たった 1 つ | Codex で `skip:runtime`、`parent_launch` が None で `skip:endpoint`（どちらも `ask` を呼ばない）。`ask` が `endpoint` を返す → `judge=fallback:endpoint`・休みのマーカーが書かれる |
 | `check` の上限の後 | `model_waited()` が真の数え手で上限に達し、本文が文字列の判定で `report` → pushback（`ask` は呼ばない）。dispatch を通すと `limited` が真になる | `model_waited()` が偽 → 通す | — |
-| `check` の休みのマーカー | `ask` が `launch` を返した次の `check` で `ask` が呼ばれない（`judge=skip:rest`） | 休む間を過ぎた時刻の `check` で呼ばれる | `ask` が `timeout` を返した次の `check` では呼ばれる（マーカーを書かない） |
+| `check` の休みのマーカー | `ask` が `launch` を返した次の `check` で `parent_launch` も `ask` も呼ばれない（`judge=skip:rest`）。`ask` が `endpoint` を返した次の、同じ起動の形の `check` で `ask` が呼ばれない（`judge=skip:rest`）が、`--settings` の無い起動の `check` では呼ばれる | 休む間を過ぎた時刻の `check` で呼ばれる | `ask` が `timeout` を返した次の `check` では呼ばれる（マーカーを書かない） |
 
 ## hook の文脈・数え手・締め切り
 
