@@ -361,7 +361,7 @@ sequenceDiagram
 | passwd に無い UID | `/tmp/ndf-github-<UID>` の下（オーナーが同じ UID で 0700 のときだけ）。使えなければプロセスだけが使う一時ディレクトリ |
 | 形 | `{"version": 2, "next", "sent_next", "blocked_until", "written_at", "content": [時刻, ...]}`（どれも UNIX 時刻の秒。`content` は昇順） |
 | 前の形（`version` 1） | `next`・`sent_next`・`blocked_until`・`written_at` を引き継ぎ、`content` を空の一覧として読む（`next_content`・`sent_next_content` は捨てる）。次に書くとき `version` 2 で書く |
-| 記録のロック | 同じディレクトリの `write-gate.json.lock`。待つ上限は 10 秒（`LOCK_SECONDS`） |
+| 記録のロック | 同じディレクトリの `write-gate.json.lock`。待つ上限は 10 秒（上限の設定の `github.write-record-lock`） |
 | 送信のロック | 同じディレクトリの `write-gate.send.lock` |
 | 同じ PR の公開のロック | 同じディレクトリの `pr/<所有者>__<名前>__<番号>.lock`（リポジトリ名は小文字にそろえる） |
 

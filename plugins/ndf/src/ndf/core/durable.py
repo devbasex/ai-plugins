@@ -16,11 +16,11 @@ DBOS は起動するか記録を読むときに初めて import する（`_load`
   `application_name` で絞られるため、別のキーのプロセスがよそのキューを流さない
 - アプリのバージョンは形の番号とキーの名前 `format-<FORMAT>-<キーの名前>` に固定し、NDF のバージョンが上がっても途中の実行を回復する。
   DBOS の版名は DB 全体で一意のため、1 つの DB をキーごとに分ける URL でも衝突しないようキーの名前を入れる
-- 終わったキーのファイルは `dbos/retired/` へ、壊れたファイルは `dbos/broken/` へ移し、移してから `KEEP_DAYS` で消す。
-  URL では、実行の一覧のキーの実行がすべて終わって `KEEP_DAYS` を過ぎたときだけ消す（`sweep`・`sweep_url`）
+- 終わったキーのファイルは `dbos/retired/` へ、壊れたファイルは `dbos/broken/` へ移し、移してから `KEEP` の日数で消す。
+  URL では、実行の一覧のキーの実行がすべて終わって `KEEP` の日数を過ぎたときだけ消す（`sweep`・`sweep_url`）
 
 ロックを取る順序は `state.lock` → `run_lock` → `maint.lock` の 1 方向にする。`maint.lock` を持つ間は
-`run_lock` を待たずに試すだけにする。待つロックはすべて `LOCK_WAIT_SECONDS` を上限にし、当たればオーナー
+`run_lock` を待たずに試すだけにする。待つロックはすべて `durable_locks.LOCK_WAIT` を上限にし、当たればオーナー
 （排他で持ったプロセスがロックのファイルに書いたホスト・pid・時刻、PostgreSQL では接続の `application_name`）を
 添えて `StoreInUse` で止まる。PostgreSQL の接続は keepalive を持ち、NDF が開く接続は idle_session_timeout も持つ。
 
@@ -29,7 +29,7 @@ DBOS は起動するか記録を読むときに初めて import する（`_load`
 
 DBOS のバージョンと表のバージョン（SQLite の `dbos_migrations.version`）は、保存先の `format.json` に形の番号と並べて書く。
 表のバージョンが古いキーのファイルは、DBOS が一方向に移す前に `dbos/backup/<キーの名前>-schema<バージョン>.sqlite` へバックアップを取る。
-バックアップは `KEEP_DAYS` で消える。DBOS のバージョンを戻す手順:
+バックアップは `KEEP` の日数で消える。DBOS のバージョンを戻す手順:
 
 1. 戻すキーを使うプロセス（`ndf plan next`・`queue`）を止める。`ndf plan pending` で待ちを抱えたキーを確かめる
 2. `pyproject.toml` と `uv.lock` の DBOS を前のバージョンへ戻す
@@ -96,7 +96,6 @@ from ndf.core.durable_sweep import (
     DB_SUFFIX as DB_SUFFIX,
     DBOS_DIR as DBOS_DIR,
     FINISHED as FINISHED,
-    KEEP_DAYS as KEEP_DAYS,
     LOCK_SUFFIX as LOCK_SUFFIX,
     RETIRED_DIR as RETIRED_DIR,
     SIDE_SUFFIXES as SIDE_SUFFIXES,
@@ -106,6 +105,7 @@ from ndf.core.durable_sweep import (
     _free_name,
     _move_out,
     is_fresh as is_fresh,
+    keep_days as keep_days,
     touch_mark as touch_mark,
 )
 
@@ -140,8 +140,8 @@ PROGRESS_LOCK = "progress.sqlite.lock"
 # 旧い保存先を退避する前に取る錠（キーのロックとステートマシンの DB のロック）。保存先からの glob の形
 STORE_LEGACY_LOCKS = (f"{DBOS_DIR}/*{LOCK_SUFFIX}", PROGRESS_LOCK)
 WAITING = ("PENDING", "ENQUEUED", "DELAYED")
-# 保存先の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
-PREPARE_ATTEMPTS = 3
+# 保存先の退避で番号を読み直す回数の上限の方針（contracts/limits.json）
+PREPARE = "durable.prepare"
 # 保存先の format.json に並べる DBOS の記録のキー（B12）。記録の保存先（durable_sweep.DBOS_DIR）と同じ名前を使う
 FORMAT_DBOS_KEY = DBOS_DIR
 # 耐久の記録に書く値の serializer の名前。DBOS の既定（py_pickle）と別の名前にしないと、DBOS が既定の serializer を使う
@@ -543,7 +543,7 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
     while True:
         if _hold_if_current(root):
             return StoreReady(root, retired_to, pending_count)
-        if attempt >= PREPARE_ATTEMPTS:
+        if attempt >= limits.value(PREPARE, "attempts"):
             raise StoreInUse(f"保存先の形の番号をそろえられない（ほかのプロセスが使っている）: {root}", busy)
         attempt += 1
         try:

@@ -9,11 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.contracts import limits
 from ndf.domains.records import files, jsonfile
 from ndf.domains.records import glossary_decide as gd
 
-# 設定に max_lines が無いときの 1 ファイルの上限の行数（document_dir が無ければ索引のパスから拡張子を除いたディレクトリ）
-DEFAULT_MAX_LINES = 500
+# 設定に max_lines が無いときの 1 ファイルの上限の行数の方針（contracts/limits.json）
+MAX_LINES = "glossary.max-lines"
 
 
 class GlossaryError(ValueError):
@@ -33,9 +34,10 @@ def layout(root: Path) -> gd.Layout:
     if not isinstance(raw, dict) or not isinstance(raw.get("source"), str) or not isinstance(raw.get("document"), str):
         raise GlossaryError("用語集の設定に source と document が無い")
     document = raw["document"]
+    # document_dir が無ければ索引のパスから拡張子を除いたディレクトリ
     default_dir = str(Path(document).with_suffix(""))
     document_dir = raw["document_dir"] if isinstance(raw.get("document_dir"), str) else default_dir
-    max_lines = raw["max_lines"] if isinstance(raw.get("max_lines"), int) else DEFAULT_MAX_LINES
+    max_lines = raw["max_lines"] if isinstance(raw.get("max_lines"), int) else int(limits.value(MAX_LINES, "count"))
     return gd.Layout(raw["source"], document, document_dir, max_lines)
 
 
