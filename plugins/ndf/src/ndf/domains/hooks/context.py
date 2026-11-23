@@ -146,7 +146,7 @@ def _redirect(node: Any) -> Redirect:
 
 
 def _has_dynamic(node: Any) -> bool:
-    """`node` とその子孫に、値が実行時に決まる節（展開・置換など）があるか。"""
+    """`node` とその子孫に、値が実行時に決まる要素（展開・置換など）があるか。"""
     stack = [node]
     while stack:
         current = stack.pop()
@@ -452,7 +452,7 @@ class _EnvSplit:
 
 
 def _word_targets(node: Any) -> Iterator[Any]:
-    """単純コマンドの子の節を順に返す（`command_name` はその中の語の節に置き換える）。"""
+    """単純コマンドの子の要素を順に返す（`command_name` はその中の語の要素に置き換える）。"""
     for child in node.children:
         yield child.children[0] if child.type == "command_name" and child.children else child
 
