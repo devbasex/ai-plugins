@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts, identity
-from ndf.checks import budget, child_deps, lint, run, spec_model
-from ndf.checks.model import CheckError, Scope, load_rules
+from ndf.checks import budget, child_deps, lint, model, run, spec_model, toolchain
+from ndf.checks.model import CheckError, Scope, load_rules, read_workflow
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 NAME = "ndfdev"
@@ -121,21 +121,25 @@ def test_count_tests_ignores_unparsable_files_removed_first(tree):
 def test_count_jobs_sums_two_workflows(tree):
     a = tree.write_repo(".github/workflows/a.yml", "on: push\njobs:\n  x:\n    runs-on: u\n  y:\n    runs-on: u\n")
     b = tree.write_repo(".github/workflows/b.yml", "on: push\njobs:\n  z:\n    runs-on: u\n")
-    assert budget.count_jobs([a, b]) == 3
+    assert budget.count_jobs([read_workflow(a), read_workflow(b)]) == 3
 
 
 def test_count_jobs_counts_a_matrix_job_once(tree):
     text = "on: push\njobs:\n  x:\n    strategy:\n      matrix:\n        py: ['3.11', '3.13']\n    runs-on: u\n"
-    assert budget.count_jobs([tree.write_repo(".github/workflows/a.yml", text)]) == 1
+    assert budget.count_jobs([read_workflow(tree.write_repo(".github/workflows/a.yml", text))]) == 1
 
 
 def test_count_jobs_without_jobs_is_zero(tree):
-    assert budget.count_jobs([tree.write_repo(".github/workflows/a.yml", "on: push\n")]) == 0
+    assert budget.count_jobs([read_workflow(tree.write_repo(".github/workflows/a.yml", "on: push\n"))]) == 0
 
 
-def test_count_jobs_unreadable_yaml_stops(tree):
-    with pytest.raises(CheckError):
-        budget.count_jobs([tree.write_repo(".github/workflows/a.yml", "jobs: [\n")])
+def test_count_jobs_unreadable_yaml_stops_without_the_input(tree):
+    tree.write_repo(".github/workflows/a.yml", "env:\n  TOKEN: s3cr3t-old\n  TOKEN: s3cr3t-new\njobs: {}\n")
+    tree.settings({"toolchain": {"workflows": ".github/workflows/*.yml"}, "budget": {"ci_jobs": 1}})
+    with pytest.raises(CheckError) as caught:
+        budget.check_jobs(tree.scope(), load_rules())
+    assert "s3cr3t" not in str(caught.value)
+    assert ".github/workflows/a.yml:3:" in str(caught.value)
 
 
 # --- unused_deps
@@ -486,6 +490,18 @@ def test_ndf_check_only_ci_jobs_compares_the_jobs_without_collecting(entry, monk
         entry.settings({"toolchain": {"workflows": ".github/workflows/*.yml"}, "budget": {"ci_jobs": limit}})
         assert run.main(["--only", budget.JOBS_RULE]) == code
     assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == [budget.JOBS_RULE]
+
+
+def test_ndf_check_only_workflow_rules_read_each_workflow_once(entry, monkeypatch):
+    for name in ("a.yml", "b.yaml"):
+        entry.write_repo(f".github/workflows/{name}", "on: push\njobs:\n  x:\n    runs-on: u\n")
+    entry.settings({"toolchain": {"workflows": ".github/workflows/*.y*ml"}, "budget": {"ci_jobs": 1}})
+    read = []
+    monkeypatch.setattr(model, "read_workflow", lambda path: read.append(path.name) or read_workflow(path))
+    scope = Scope(entry.repo, entry.root, NAME)
+    found = run.select(scope, load_rules(), [toolchain.RULE, budget.JOBS_RULE])
+    assert [(f.rule, f.detail.split("（")[0]) for f in found] == [(budget.JOBS_RULE, "ci_jobs 2 件")]
+    assert read == ["a.yml", "b.yaml"]
 
 
 def test_ndf_check_reports_the_job_limit_once(entry, capsys, last_result):

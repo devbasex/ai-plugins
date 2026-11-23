@@ -23,11 +23,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
-
 from ndf import contracts, identity
-from ndf.checks.model import SRC_DIR, CheckError, Finding, Scope, Source
+from ndf.checks.model import SRC_DIR, CheckError, Finding, Scope, Source, Workflow
 from ndf.contracts import facts
 
 RULE = __name__.rsplit(".", 1)[-1]
@@ -142,17 +139,9 @@ def count_tests(scope: Scope) -> int:
     return total
 
 
-def count_jobs(paths: list[Path]) -> int:
-    """ワークフローの `jobs` のキーの数の合計。`jobs` が無いファイルは 0 件、YAML として読めなければ `CheckError`。"""
-    total = 0
-    for path in paths:
-        try:
-            doc = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, YAMLError) as exc:
-            raise CheckError(f"ワークフローを読めない: {path}: {exc}") from exc
-        jobs = doc["jobs"] if isinstance(doc, dict) and "jobs" in doc else None
-        total += len(jobs) if isinstance(jobs, dict) else 0
-    return total
+def count_jobs(workflows: list[Workflow]) -> int:
+    """ワークフローの `jobs` のキーの数の合計。`jobs` が無いファイルは 0 件。"""
+    return sum(len(wf.jobs) for wf in workflows)
 
 
 def _read_toml(path: Path, label: str) -> dict[str, Any]:
@@ -287,15 +276,9 @@ def replaceable_hits(scope: Scope) -> list[Finding]:
     return sorted(found, key=lambda f: (f.path, f.line, f.detail))
 
 
-def _jobs(scope: Scope) -> int:
-    """`toolchain.workflows` に当たるワークフローのジョブの数（キーが無ければ 0 件）。"""
-    toolchain = _section(scope, "toolchain")
-    return count_jobs(scope.repo_files(toolchain["workflows"])) if "workflows" in toolchain else 0
-
-
 def measure(scope: Scope) -> Counts:
     """4 つの件数と中身。`run.py` が 1 回だけ呼び、`check` と結果 JSON の `metrics.budget` へ渡す。"""
-    return Counts(count_tests(scope), _jobs(scope), unused_deps(scope), replaceable_hits(scope))
+    return Counts(count_tests(scope), count_jobs(scope.workflows), unused_deps(scope), replaceable_hits(scope))
 
 
 def _settings_line(scope: Scope, key: str) -> tuple[str, int]:
@@ -332,6 +315,6 @@ def check(scope: Scope, rules: dict[str, Any], counts: Counts | None = None) -> 
 def check_jobs(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """CI のジョブの数だけを設定の上限と比べる（プラグインのファイルを読まない）。上限が無ければワークフローも読まない。"""
     limits = _budget_settings(scope)
-    if "ci_jobs" not in limits or (count := _jobs(scope)) <= limits["ci_jobs"]:
+    if "ci_jobs" not in limits or (count := count_jobs(scope.workflows)) <= limits["ci_jobs"]:
         return []
     return [replace(_over(scope, rules, "ci_jobs", count, []), rule=JOBS_RULE)]

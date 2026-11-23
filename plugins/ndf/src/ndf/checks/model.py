@@ -13,6 +13,10 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import YAMLError
+
 from ndf import identity
 from ndf.checks import imports
 
@@ -63,6 +67,26 @@ class Source:
         return self.path.suffix == ".py"
 
 
+@dataclass(frozen=True)
+class Workflow:
+    """1 回だけ解析したワークフロー 1 本。`jobs` はジョブの名前 → 定義（`jobs` が無ければ空）。"""
+
+    path: Path
+    lines: list[str]
+    jobs: dict[str, Any]
+
+    @property
+    def steps(self) -> list[CommentedMap]:
+        """すべてのジョブのステップ。"""
+        return [
+            step
+            for job in self.jobs.values()
+            if isinstance(job, dict) and isinstance(job.get("steps"), list)
+            for step in job["steps"]
+            if isinstance(step, CommentedMap)
+        ]
+
+
 @dataclass
 class Scope:
     """見る範囲。`sources` は `plugin_root` の下だけを持つ。"""
@@ -79,6 +103,14 @@ class Scope:
         設定を使わない規則だけを当てる検査は、設定のファイルが壊れていても止まらない。
         """
         return load_settings(self.repo_root)
+
+    @cached_property
+    def workflows(self) -> list[Workflow]:
+        """設定の `toolchain.workflows` に当たるワークフロー（キーが無ければ空）。規則の数によらず、読みと解析は 1 ファイル 1 回だけ。"""
+        toolchain = self.settings.get("toolchain")
+        if not isinstance(toolchain, dict) or "workflows" not in toolchain:
+            return []
+        return [read_workflow(p) for p in self.repo_files(toolchain["workflows"])]
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
@@ -142,6 +174,24 @@ class Scope:
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
         return [s for s in self.sources if s.is_python]
+
+
+def read_workflow(path: Path) -> Workflow:
+    """ワークフローを読む。YAML として読めなければ `CheckError`。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+        doc = YAML(typ="rt").load(text)
+    except YAMLError as exc:
+        # 例外の文には入力の行の抜粋が載る（Git の外の設定ファイルも読みうる）。パスと位置だけを出す
+        mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+        where = f":{mark.line + 1}:{mark.column + 1}" if mark is not None else ""
+        raise CheckError(f"ワークフローを YAML として読めない: {path}{where}") from None
+    except UnicodeDecodeError as exc:
+        raise CheckError(f"ワークフローを UTF-8 として読めない: {path}: 位置 {exc.start}") from None
+    except OSError as exc:
+        raise CheckError(f"ワークフローを読めない: {path}: {exc.strerror}") from None
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    return Workflow(path, text.splitlines(), jobs if isinstance(jobs, dict) else {})
 
 
 def walk(top: Path) -> list[Path]:

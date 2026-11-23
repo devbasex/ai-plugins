@@ -622,7 +622,7 @@
     }
   },
   "toolchain": {
-    "workflows": ".github/workflows/*.yml",
+    "workflows": ".github/workflows/*.y*ml",
     "python_ci": [
       "3.11",
       "3.13"
