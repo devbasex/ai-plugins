@@ -648,6 +648,23 @@ def test_script_chain_still_stops_other_ndf_chains_below_the_limit(tmp_path):
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, f"ndf lanes status p1 && {check}"))) is not None
 
 
+def test_context_limit_keeps_denying_different_calls(tmp_path):
+    # #3995 の 3995:6・決定 6: 運用上限の拒否は数えず、同じ入力の中で違う呼び出しを 3 回続けても 3 回とも止める
+    _usage_transcript(tmp_path, 500_000)
+    read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / "README.md")})
+    for payload in (bash(tmp_path, "ls"), bash(tmp_path, "pwd"), read):
+        assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
+
+
+def test_hook_off_context_limit_neither_judges_nor_notifies(tmp_path, monkeypatch, counted_tail):
+    # #3995 の 3995:11・テスト設計の 11: NDF_HOOK_OFF=context-limit なら 600,000 でも判定も知らせもせず、会話の記録を読まない
+    monkeypatch.setenv("NDF_HOOK_OFF", "context-limit")
+    _usage_transcript(tmp_path, 600_000)
+    assert call_entry("claude", "PreToolUse", bash(tmp_path, "ls")) is None
+    assert call_entry("claude", "PostToolUse", sample("claude", "PostToolUse", tmp_path)) is None
+    assert counted_tail["n"] == 0
+
+
 def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
     # #3995 の 3995:8・テスト設計の 8: 監視を TaskStop で止め、supervisor を待ち、wait の行を残し、引継ぎ文書を書いて終える
     t = thresholds({}, tables.policy_value)
