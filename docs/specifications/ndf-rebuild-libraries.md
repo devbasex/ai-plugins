@@ -62,6 +62,7 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | Markdown の構造 | markdown-it-py（宣言にある mdit-py-plugins は今どこも import しない） | `ndf.adapters.markdown`・`ndf.domains.materials` | `md.py` |
 | Markdown の表 | tabulate | — | `mdtable.py` |
 | 形の検証 | jsonschema（NDF）・pydantic（根） | `ndf.contracts`・`ndf.checks` ほか | `schema.py` |
+| JSON Schema の参照の解決 | referencing | `ndf.domains.samples` | — |
 | プロセス | psutil | `ndf.domains.relay`・`ndf.testing` | `procs.py` |
 | ファイルロック | filelock | `ndf.slot_pool`・`ndf.adapters.launch_slot`・`ndf.domains.worktree` ほか | — |
 | シェルの構文 | tree-sitter・tree-sitter-bash | `ndf.domains.hooks.context`・`ndf.domains.worktree.write_target` | `shparse.py` |
