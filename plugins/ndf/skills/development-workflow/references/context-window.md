@@ -193,10 +193,17 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 **`.ndf/context.json` と `NDF_CONTEXT_POLICY` はもう読まれない**（#3995）。旧版の `ndf relay context resolve` が示した
 運用上限を保ちたいときだけ、次の順で移す。
 
-1. 更新の前に、旧版で `ndf relay context resolve` を打ち、`metrics.limit` をメモする（旧版が設定の検証と優先順位を当てた値）
-2. `NDF_CONTEXT_LIMIT` に正の整数を設定済みなら、そのまま残す（旧版でも設定より優先した）。未設定・空・正の整数で
-   ない値なら、メモした値を `NDF_CONTEXT_LIMIT` に設定する
-3. 更新の後に `ndf relay context resolve` を打ち、`limit` がメモした値で、`items[0].sources.limit` が `env` かを確かめる
+**旧設定はリポジトリごとに効いたが、環境変数は設定した環境から起動したものすべてに効く。** そのため値は、対象の
+リポジトリで claude（とラッパー）を起動する環境にだけ設定する。共通のシェル設定（`~/.bashrc` など）で export すると、
+同じ環境から起動する他のリポジトリの hook とラッパーも同じ上限になる。リポジトリごとに上限を分けていたなら、
+リポジトリごとに次の 1〜4 を行い、それぞれの起動環境へそれぞれの値を設定する。
+
+1. 更新の前に、対象のリポジトリで旧版の `ndf relay context resolve` を打ち、`metrics.limit` をメモする（旧版が設定の検証と優先順位を当てた値）
+2. その起動環境の `NDF_CONTEXT_LIMIT` に正の整数を設定済みなら、そのまま残す（旧版でも設定より優先した）。未設定・空・正の整数で
+   ない値なら、メモした値を、そのリポジトリで claude を起動する環境の `NDF_CONTEXT_LIMIT` に設定する
+3. 更新の後に、その起動環境のまま対象のリポジトリで `ndf relay context resolve` を打ち、`limit` がメモした値で、
+   `items[0].sources.limit` が `env` かを確かめる。共通の環境に置いた値が無いことは、他のリポジトリを起動する環境で
+   同じコマンドを打ち、`items[0].sources.limit` が `default`（か、そのリポジトリのために設定した値の `env`）であることで確かめる
 4. 確かめた後に `.ndf/context.json` を消し、`NDF_CONTEXT_POLICY` を外す
 
 ### 判定と再起動を記録する
@@ -205,7 +212,8 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 （`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の
 `decisions/<owner>__<repo>.decisions.jsonl` で、行はそのときの 2 つの値と出所（`decide_from`・`limit`・`sources`）を持つ。
 作業の識別子は課題番号の昇順の並び（`#829 #830`）である。conductor は `ndf-next` を出すたびに
-`ndf relay context record --verdict 再起動 --reason <理由> --work <作業の識別子>` で判定「再起動」を書く。
+`ndf relay context record --verdict 再起動 --reason <理由> --work "<作業の識別子>"` で判定「再起動」を書く。
+識別子は引用符で囲む（囲まないと Bash が `#829` から後ろをコメントとして読み、`--work` の値が無くなって記録されない）。
 
 **理由はカットポイント・運用上限・独立性・手動・待ちから選ぶ。** 運用上限は止められたときとラッパーに頼まれたとき、
 独立性は独立した視点が要るレビューを新しい文脈で始めたいとき、手動は利用者が切ると決めたとき、待ちは並列の計画の
@@ -253,9 +261,13 @@ NDF が起動した分・引継ぎの期間・復元の期間で、同じ呼び�
   それぞれの README が示す Skill の起動の書き方に読み替える
 - **今のセッションを `/goal` で始めていたときだけ、中身の先頭を `/goal ` にする**。次のセッションは作業の最初に、
   条件の先頭の Skill（`/ndf:development-workflow`）を Skill ツールで読み込む（[relay.md](relay.md) の付則「`/goal` を付けた場合」）
-- **引継ぎ文書を保存したときは、中身に文書のパスを入れる**（`/ndf:development-workflow .ndf/handoff/parallel-p1.md の続きから`）。
+- **引継ぎ文書を保存したときは、中身に文書のパスを入れる**（`/ndf:development-workflow .ndf/handoff/sprint-s1.md の続きから`）。
   名指しがあれば、新しい会話は一致の規則に頼らずその文書を読む（[handoff.md](handoff.md) の「読む」）。課題番号が文書の名
   （`issue-<N>`）と一致するだけのときは省いてよい
+- **並列の計画のオーガナイザーは、計画名と文書のパスの両方を入れる**
+  （`/goal /ndf:development-workflow --parallel p1 .ndf/handoff/parallel-p1.md の続きから -- 終わり: [ndf-parallel] finished p1 の行を出したとき`）。
+  `--parallel p1` が無いと新しい会話はオーガナイザーの手順に入らず、パスが無いと保存した `wait --after` を戻せない
+  （[parallel.md](parallel.md) の「セッションの切り替え」）
 - **3 層では、conductor がフェーズレポート（`## フェーズレポート`）を受け取った時点で出す**（supervisor は出さない）。
   フェーズの境がカットポイントに当たるためである。ただし報告が `結果: 承認ゲート` なら、承認ゲートの承認とマージ
   （設計 Pull Request のマージなど）が済んだ後に出す。**承認ゲートの承認より前には出さない。** 出すと、
