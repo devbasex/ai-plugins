@@ -57,14 +57,30 @@ def test_missing_directory_stops_with_its_path(tmp_path):
         ({"a.json": "{not json"}, "a.json"),
         ({"a.json": {"x": 1}, "b.JSON": {"x": 2}}, "b.JSON"),
         ({"a.json": {"x": 1}, "notes.txt": "memo"}, "notes.txt"),
-        ({"a.json": {"x": 1}, "A.json": {"x": 2}}, "A"),
         ({"a.json": [1, 2]}, "a.json"),
     ],
-    ids=["not-json", "upper-case-extension", "other-extension", "keys-differ-only-in-case", "not-an-object"],
+    ids=["not-json", "upper-case-extension", "other-extension", "not-an-object"],
 )
 def test_broken_item_files_stop_and_name_the_file_or_key(tmp_path, files, named):
     rel = _split_dir(tmp_path, files)
     with pytest.raises(contracts.ContractError, match=named):
+        contracts.load_split(rel)
+
+
+def test_keys_differing_only_in_case_stop_and_name_both(tmp_path, monkeypatch):
+    # 大小文字を区別しないファイルシステムでは `A.json` を書くと `a.json` を上書きするため、
+    # 実ファイルは 1 つだけ作り、ディレクトリの一覧に両方の名前を返させて衝突の判定を確かめる
+    rel = _split_dir(tmp_path, {"a.json": {"x": 1}})
+    items = tmp_path / REL
+    original = Path.iterdir
+
+    def iterdir(self: Path):
+        if self == items:
+            return iter([items / "a.json", items / "A.json"])
+        return original(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    with pytest.raises(contracts.ContractError, match="A, a"):
         contracts.load_split(rel)
 
 
