@@ -17,8 +17,9 @@ import ast
 import fnmatch
 import re
 import tomllib
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -26,10 +27,12 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from ndf import contracts, identity
-from ndf.checks.model import CheckError, Finding, Scope, Source
+from ndf.checks.model import SRC_DIR, CheckError, Finding, Scope, Source
 from ndf.contracts import facts
 
 RULE = __name__.rsplit(".", 1)[-1]
+# 規則 budget のうち、ワークフローと設定だけで決まる CI のジョブの上限だけを当てる名前（`--only` で選ぶ）
+JOBS_RULE = "budget-ci-jobs"
 # 置き換えの規則の分割した表（`contracts/` からの相対）と、1 規則の形
 REPLACEABLE = "replaceable"
 REPLACEABLE_SCHEMA = contracts.schema_path("replaceable")
@@ -194,10 +197,9 @@ def unused_deps(scope: Scope) -> list[str]:
     exempt = {normalize(k) for k in (settings["dep_exempt"] if "dep_exempt" in settings else {})}
     unused: set[str] = set()
     for rel in rels:
-        pyproject = scope.repo_root / rel
-        locked = _locked(pyproject.with_name(LOCK_NAME))
-        src_dir = pyproject.parent.resolve() / "src"
-        used = _imported([s for s in scope.python() if s.path.resolve().is_relative_to(src_dir)])
+        pyproject = scope.repo_file(rel, "依存の定義")
+        locked = _locked(scope.repo_file(scope.rel(pyproject.with_name(LOCK_NAME)), "依存の lock "))
+        used = _imported(scope.python_under(pyproject.parent / SRC_DIR))
         for name in _declared(pyproject):
             module = modules[name] if name in modules else name.replace("-", "_")
             if name in locked and name not in exempt and module not in used:
@@ -216,25 +218,23 @@ def _dotted(node: ast.expr) -> str:
     return ".".join([node.id, *reversed(parts)])
 
 
-def _calls(find: dict[str, Any]) -> Callable[[ast.AST], bool]:
-    return lambda n: isinstance(n, ast.Call) and _dotted(n.func) == find["name"]
+def _calls(find: dict[str, Any]) -> Callable[[Any], bool]:
+    return lambda n: _dotted(n.func) == find["name"]
 
 
-def _joins(find: dict[str, Any]) -> Callable[[ast.AST], bool]:
-    def hit(n: ast.AST) -> bool:
-        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "join"):
+def _joins(find: dict[str, Any]) -> Callable[[Any], bool]:
+    def hit(n: ast.Call) -> bool:
+        if not (isinstance(n.func, ast.Attribute) and n.func.attr == "join"):
             return False
         return isinstance(n.func.value, ast.Constant) and n.func.value.value == find["separator"]
 
     return hit
 
 
-def _loops(find: dict[str, Any]) -> Callable[[ast.AST], bool]:
+def _loops(find: dict[str, Any]) -> Callable[[Any], bool]:
     """本体に `try` と、名前の最後が `callee` の呼び出しを持つ繰り返し（自作の打ち直し）。"""
 
-    def hit(n: ast.AST) -> bool:
-        if not isinstance(n, (ast.For, ast.While)):
-            return False
+    def hit(n: ast.For | ast.While) -> bool:
         inner = [x for stmt in n.body for x in ast.walk(stmt)]
         waits = any(isinstance(x, ast.Call) and _dotted(x.func).rsplit(".", 1)[-1] == find["callee"] for x in inner)
         return waits and any(isinstance(x, ast.Try) for x in inner)
@@ -242,8 +242,12 @@ def _loops(find: dict[str, Any]) -> Callable[[ast.AST], bool]:
     return hit
 
 
-# `find.kind` → 構文木の 1 ノードが当たるかを決める関数を作る関数
-FINDERS: dict[str, Callable[[dict[str, Any]], Callable[[ast.AST], bool]]] = {"call": _calls, "join": _joins, "loop": _loops}
+# `find.kind` → 見る構文木のノードの型と、その型の 1 ノードが当たるかを決める関数を作る関数
+FINDERS: dict[str, tuple[tuple[type[ast.AST], ...], Callable[[dict[str, Any]], Callable[[Any], bool]]]] = {
+    "call": ((ast.Call,), _calls),
+    "join": ((ast.Call,), _joins),
+    "loop": ((ast.For, ast.While), _loops),
+}
 
 
 def replaceable_rules() -> list[ReplaceableRule]:
@@ -260,27 +264,38 @@ def replaceable_rules() -> list[ReplaceableRule]:
     return [ReplaceableRule(k, v["find"], v["replace_with"], frozenset(v["exempt"])) for k, v in table.items()]
 
 
-def _hits(src: Source, rule: ReplaceableRule) -> Iterator[int]:
-    match = FINDERS[rule.find["kind"]](rule.find)
-    yield from (n.lineno for n in ast.walk(src.tree) if isinstance(n, (ast.expr, ast.stmt)) and match(n))
-
-
 def replaceable_hits(scope: Scope) -> list[Finding]:
-    """置き換えの規則に当たった製品のコードの箇所（パスと行の順）。規則の `exempt` の保存先は数えない。"""
-    found = []
+    """置き換えの規則に当たった製品のコードの箇所（パスと行の順）。規則の `exempt` の保存先は数えない。
+
+    構文木は規則の数によらず 1 ファイル 1 回だけ走査し、ノードの型に合う規則だけを当てる。
+    """
+    by_type: dict[type[ast.AST], list[tuple[ReplaceableRule, Callable[[Any], bool]]]] = defaultdict(list)
     for rule in replaceable_rules():
-        for src in scope.code():
-            if scope.plugin_rel(src) in rule.exempt:
-                continue
-            found += [Finding(RULE, src.rel, line, f"{rule.key}: {rule.replace_with} で置き換えられる") for line in _hits(src, rule)]
+        types, make = FINDERS[rule.find["kind"]]
+        match = make(rule.find)
+        for node_type in types:
+            by_type[node_type].append((rule, match))
+    found = []
+    for src in scope.code():
+        rel = scope.plugin_rel(src)
+        for node in ast.walk(src.tree):
+            found += [
+                Finding(RULE, src.rel, node.lineno, f"{rule.key}: {rule.replace_with} で置き換えられる")
+                for rule, match in by_type[type(node)]
+                if rel not in rule.exempt and match(node)
+            ]
     return sorted(found, key=lambda f: (f.path, f.line, f.detail))
+
+
+def _jobs(scope: Scope) -> int:
+    """`toolchain.workflows` に当たるワークフローのジョブの数（キーが無ければ 0 件）。"""
+    toolchain = _section(scope, "toolchain")
+    return count_jobs(scope.repo_files(toolchain["workflows"])) if "workflows" in toolchain else 0
 
 
 def measure(scope: Scope) -> Counts:
     """4 つの件数と中身。`run.py` が 1 回だけ呼び、`check` と結果 JSON の `metrics.budget` へ渡す。"""
-    toolchain = _section(scope, "toolchain")
-    workflows = scope.repo_files(toolchain["workflows"]) if "workflows" in toolchain else []
-    return Counts(count_tests(scope), count_jobs(workflows), unused_deps(scope), replaceable_hits(scope))
+    return Counts(count_tests(scope), _jobs(scope), unused_deps(scope), replaceable_hits(scope))
 
 
 def _settings_line(scope: Scope, key: str) -> tuple[str, int]:
@@ -295,17 +310,28 @@ def _settings_line(scope: Scope, key: str) -> tuple[str, int]:
     return scope.rel(path), (text[:at].count("\n") + 1 if start >= 0 and at >= 0 else 1)
 
 
+def _over(scope: Scope, rules: dict[str, Any], key: str, count: int, head: list[str]) -> Finding:
+    """上限を超えた項目 1 つの指摘。"""
+    rel, line = _settings_line(scope, key)
+    detail = f"{key} {count} 件（上限 {scope.settings['budget'][key]}）。{rules[RULE]['summary']}"
+    return Finding(RULE, rel, line, detail + (f": {', '.join(head)}" if head else ""))
+
+
 def check(scope: Scope, rules: dict[str, Any], counts: Counts | None = None) -> list[Finding]:
     """件数（渡されなければ数える）を設定の上限と比べ、超えた項目ごとに 1 件の指摘にする。`budget` が無ければ空。"""
     limits = _budget_settings(scope)
     if counts is None:
         counts = measure(scope)
-    found = []
-    for key in LIMIT_KEYS:
-        if key not in limits or getattr(counts, key) <= limits[key]:
-            continue
-        head = counts.items(key)[:DETAIL_HEAD]
-        rel, line = _settings_line(scope, key)
-        detail = f"{key} {getattr(counts, key)} 件（上限 {limits[key]}）。{rules[RULE]['summary']}"
-        found.append(Finding(RULE, rel, line, detail + (f": {', '.join(head)}" if head else "")))
-    return found
+    return [
+        _over(scope, rules, key, getattr(counts, key), counts.items(key)[:DETAIL_HEAD])
+        for key in LIMIT_KEYS
+        if key in limits and getattr(counts, key) > limits[key]
+    ]
+
+
+def check_jobs(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
+    """CI のジョブの数だけを設定の上限と比べる（プラグインのファイルを読まない）。上限が無ければワークフローも読まない。"""
+    limits = _budget_settings(scope)
+    if "ci_jobs" not in limits or (count := _jobs(scope)) <= limits["ci_jobs"]:
+        return []
+    return [replace(_over(scope, rules, "ci_jobs", count, []), rule=JOBS_RULE)]

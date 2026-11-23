@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 from collections import Counter
@@ -33,7 +32,7 @@ from ndf.checks import (
     toolchain,
     words,
 )
-from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, walk
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -45,15 +44,8 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
 SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
-
-
-def _walk(plugin_root: Path) -> list[Path]:
-    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
-    found = []
-    for top, dirs, files in os.walk(plugin_root):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        found += [Path(top, name) for name in files]
-    return found
+# 規則の一部だけを当てる名前。全体の規則が同じ違反を出すので、`--only` に名前があるときだけ当てる
+PARTIAL_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {budget.JOBS_RULE: budget.check_jobs}
 
 
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
@@ -64,7 +56,7 @@ def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
     """
     root = repo_root.resolve()
     found = []
-    for path in sorted(_walk(plugin_root)):
+    for path in sorted(walk(plugin_root)):
         rel = path.relative_to(plugin_root)
         if not (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
             continue
@@ -140,6 +132,9 @@ def check(
     for name, rule in SETTINGS_RULES.items():
         if not only or name in only:
             found += rule(scope, rules)
+    for name, rule in PARTIAL_RULES.items():
+        if only and name in only:
+            found += rule(scope, rules)
     return sorted(found, key=_order)
 
 
@@ -153,11 +148,12 @@ def select(
 ) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。
 
-    `only` が設定を読む規則（`SETTINGS_RULES`）だけなら、プラグインのファイルを集めず、ほかの規則も当てない
-    （ワークフローだけを変えた Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
+    `only` がプラグインのファイルを読まない規則（`SETTINGS_RULES` と `PARTIAL_RULES`）だけなら、プラグインのファイルを集めず、
+    ほかの規則も当てない（ワークフローだけを変えた Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
     """
-    if only and set(only) <= SETTINGS_RULES.keys() and not write_spec:
-        return sorted((f for name in SETTINGS_RULES if name in only for f in SETTINGS_RULES[name](scope, rules)), key=_order)
+    light = {**SETTINGS_RULES, **PARTIAL_RULES}
+    if only and set(only) <= light.keys() and not write_spec:
+        return sorted((f for name in light if name in only for f in light[name](scope, rules)), key=_order)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written, only, metrics)
     return [f for f in found if not only or f.rule in only]

@@ -232,6 +232,49 @@ def test_unused_deps_unreadable_lock_stops(tree):
         budget.unused_deps(tree.scope())
 
 
+@pytest.mark.parametrize("rel", ["../outside/pyproject.toml", "/etc/pyproject.toml"])
+def test_unused_deps_refuses_a_path_outside_the_repository(tree, rel):
+    _write(tree.repo.parent / "outside" / "pyproject.toml", '[project]\ndependencies = ["secret"]\n')
+    tree.settings({"toolchain": {"plugin_pyprojects": [rel]}})
+    with pytest.raises(CheckError):
+        budget.unused_deps(tree.scope())
+
+
+@pytest.mark.parametrize("name", ["pyproject.toml", "uv.lock"])
+def test_unused_deps_refuses_a_symlink_to_the_outside(tree, name):
+    _deps(tree, ["tabulate"], ["tabulate"])
+    (tree.root / name).rename(tree.repo.parent / name)
+    (tree.root / name).symlink_to(tree.repo.parent / name)
+    with pytest.raises(CheckError):
+        budget.unused_deps(tree.scope())
+
+
+def _outer_project(tree) -> None:
+    tree.write_repo("tools/kit/pyproject.toml", '[project]\nname = "k"\ndependencies = ["httpx", "tabulate"]\n')
+    tree.write_repo("tools/kit/uv.lock", 'version = 1\n\n[[package]]\nname = "httpx"\n\n[[package]]\nname = "tabulate"\n')
+    tree.settings({"toolchain": {"plugin_pyprojects": ["tools/kit/pyproject.toml"]}})
+
+
+def test_unused_deps_reads_the_src_of_a_project_outside_the_plugin(tree):
+    _outer_project(tree)
+    tree.write_repo("tools/kit/src/kit/a.py", "import httpx\n")
+    assert budget.unused_deps(tree.scope()) == ["tabulate"]
+
+
+def test_unused_deps_does_not_follow_an_outer_src_out_of_the_repository(tree):
+    _outer_project(tree)
+    _write(tree.repo.parent / "away" / "a.py", "import httpx\n")
+    (tree.repo / "tools" / "kit" / "src").symlink_to(tree.repo.parent / "away")
+    assert budget.unused_deps(tree.scope()) == ["httpx", "tabulate"]
+
+
+def test_unused_deps_unparsable_file_outside_the_plugin_stops(tree):
+    _outer_project(tree)
+    tree.write_repo("tools/kit/src/kit/a.py", "def f(:\n")
+    with pytest.raises(CheckError):
+        budget.unused_deps(tree.scope())
+
+
 # --- replaceable_hits
 
 FLOCK = {"kind": "call", "name": "fcntl.flock"}
@@ -273,6 +316,18 @@ def test_replaceable_hits_counts_retry_loops(tree, replaceable):
         "    while True:\n        try:\n            return g()\n        except OSError:\n            pass\n",
     )
     assert [h.line for h in budget.replaceable_hits(tree.scope())] == [5]
+
+
+def test_replaceable_hits_walks_each_tree_once_whatever_the_number_of_rules(tree, replaceable, monkeypatch):
+    replaceable("fcntl-flock", FLOCK)
+    replaceable("markdown-table", {"kind": "join", "separator": " | "})
+    tree.write("src/ndf/a.py", 'def f(fcntl, x):\n    fcntl.flock(x)\n    return " | ".join(x)\n')
+    scope = tree.scope()
+    walked = []
+    real_walk = budget.ast.walk
+    monkeypatch.setattr(budget.ast, "walk", lambda node: walked.append(node) or real_walk(node))
+    assert [h.line for h in budget.replaceable_hits(scope)] == [2, 3]
+    assert len(walked) == len(scope.code())
 
 
 def test_replaceable_hits_unknown_find_kind_stops(tree, replaceable):
@@ -422,6 +477,22 @@ def test_ndf_check_over_the_limit_fails_and_keeps_the_metrics(entry, capsys, las
     assert [i["rule"] for i in report["items"]] == [budget.RULE]
     assert report["metrics"][budget.RULE]["tests"] == 2
     assert _schema_errors(report) == []
+
+
+def test_ndf_check_only_ci_jobs_compares_the_jobs_without_collecting(entry, monkeypatch, capsys, last_result):
+    monkeypatch.setattr(run, "collect", lambda *a: pytest.fail("ファイルを集めた"))
+    entry.write_repo(".github/workflows/a.yml", "on: push\njobs:\n  x:\n    runs-on: u\n  y:\n    runs-on: u\n")
+    for limit, code in ((2, 0), (1, 1)):
+        entry.settings({"toolchain": {"workflows": ".github/workflows/*.yml"}, "budget": {"ci_jobs": limit}})
+        assert run.main(["--only", budget.JOBS_RULE]) == code
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == [budget.JOBS_RULE]
+
+
+def test_ndf_check_reports_the_job_limit_once(entry, capsys, last_result):
+    entry.write_repo(".github/workflows/a.yml", "on: push\njobs:\n  x:\n    runs-on: u\n")
+    entry.settings({"toolchain": {"workflows": ".github/workflows/*.yml"}, "budget": {"ci_jobs": 0}})
+    assert run.main([]) == 1
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == [budget.RULE]
 
 
 def test_ndf_check_only_other_rule_does_not_measure(entry, capsys, last_result):

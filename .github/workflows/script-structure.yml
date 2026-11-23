@@ -20,7 +20,8 @@ name: Script structure
 # plugins/ndf/src/ndf/checks/README.md）と、lock・plugin.json・エントリポイントの構文・選べる値の検査を打つ。入れ替え（#3304）の
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
 # 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。規則 toolchain はワークフローを読むため、
-# 差分が NDF_PATHS に当たらず .github/workflows にだけ当たる PR では、ndf check を --only toolchain で打つ。差分は 1 回だけ取る。
+# 差分が NDF_PATHS に当たらず .github/workflows にだけ当たる PR では、ndf check を --only toolchain --only budget-ci-jobs
+# （CI のジョブの数の上限）で打つ。差分は 1 回だけ取る。
 # merge queue と push では常にすべてを打つ
 #
 # lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit）に
@@ -64,7 +65,8 @@ env:
   # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
   # ndf check は根の .ndf/*.json（宣言のスキーマ）と、.ndf/glossary.json の source の用語集（禁止語）も読む
   NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
-  # 規則 toolchain だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここにだけ当たれば、ndf check を toolchain に絞る
+  # 規則 toolchain と CI のジョブの数の上限だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここにだけ当たれば、
+  # ndf check をこの 2 つに絞る
   TOOLCHAIN_PATHS: .github/workflows
 
 jobs:
@@ -169,10 +171,10 @@ jobs:
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
-      # NDF の入力が変わらずワークフローだけが変わった PR は、ワークフローを読む規則 toolchain だけを打つ
-      - name: Check the toolchain pins in the workflows
+      # NDF の入力が変わらずワークフローだけが変わった PR は、ワークフローを読む規則 toolchain と CI のジョブの数の上限だけを打つ
+      - name: Check the toolchain pins and the job count of the workflows
         if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.toolchain == 'true'
-        run: plugins/ndf/bin/ndf check --only toolchain
+        run: plugins/ndf/bin/ndf check --only toolchain --only budget-ci-jobs
       # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
       - name: Check that the root lock matches its declaration
         if: steps.scope.outputs.lock_root == 'true'

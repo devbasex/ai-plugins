@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -97,6 +98,31 @@ class Scope:
             raise CheckError(f"グロブを解けない: {glob!r}: {exc}") from exc
         return sorted(p for p in matched if p.is_file() and p.resolve().is_relative_to(root))
 
+    def repo_file(self, rel: str, label: str) -> Path:
+        """`rel` に当たるただ 1 つのファイル。`repo_files` と同じ確かめをし、1 つに決まらなければ読む前に `CheckError`。"""
+        paths = self.repo_files(rel)
+        if len(paths) != 1:
+            raise CheckError(f"{label}が 1 つに決まらない（リポジトリの中のファイルだけを見る）: {rel}: {len(paths)} 件")
+        return paths[0]
+
+    def python_under(self, top: Path) -> list[Source]:
+        """`top` の下の `.py`。プラグインの中は集めた `sources` を使い、外のファイルだけを読む。解決した先がリポジトリの外のものは除く。
+
+        プラグインの外の `.py` が読めなければ `CheckError`（プラグインの中の構文の誤りは検査が違反にして見る範囲から外す）。
+        """
+        if top.is_relative_to(self.plugin_root):
+            return [s for s in self.python() if s.path.is_relative_to(top)]
+        root = self.repo_root.resolve()
+        if not top.resolve().is_relative_to(root):
+            return []
+        found = [s for s in self.python() if s.path.is_relative_to(top)]
+        for path in walk(top):
+            if path.suffix != ".py" or path.is_relative_to(self.plugin_root):
+                continue
+            if path.resolve().is_relative_to(root) and path.is_file():
+                found.append(_parsed(Source(path, self.rel(path))))
+        return found
+
     def plugin_rel(self, src: Source) -> str:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""
         return src.path.relative_to(self.plugin_root).as_posix()
@@ -116,6 +142,24 @@ class Scope:
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
         return [s for s in self.sources if s.is_python]
+
+
+def walk(top: Path) -> list[Path]:
+    """`top` の下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
+    found = []
+    for parent, dirs, files in os.walk(top):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        found += [Path(parent, name) for name in files]
+    return found
+
+
+def _parsed(src: Source) -> Source:
+    """構文木を作ったファイル。読めなければ `CheckError`。"""
+    try:
+        _ = src.tree
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise CheckError(f"Python のファイルを読めない: {src.rel}: {exc}") from exc
+    return src
 
 
 def module_name(scope: Scope, src: Source) -> str:

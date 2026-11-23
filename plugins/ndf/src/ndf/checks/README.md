@@ -31,7 +31,7 @@ plugins/ndf/bin/ndf check
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
 | リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフロー・`pyproject.toml`・ランチャー（プラグインの外も見る） | `toolchain`（Python と uv の指定が配る構成の設定 `contracts/data/toolchain.json` と合うか。設定に `toolchain` が無ければ何も見ない） |
-| テストのファイル・製品のコード・リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフローと `pyproject.toml`（プラグインの外も見る） | `budget`（テストの関数・CI のジョブ・使われない依存・置き換えの規則 `contracts/replaceable/` に当たる箇所を数え、設定の `budget` の上限と比べる。件数は違反の有無にかかわらず `metrics.budget` に出す。上限のキーが無い項目は比べない） |
+| テストのファイル・製品のコード・リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフローと `pyproject.toml`（プラグインの外も見る） | `budget`（テストの関数・CI のジョブ・使われない依存・置き換えの規則 `contracts/replaceable/` に当たる箇所を数え、設定の `budget` の上限と比べる。件数は違反の有無にかかわらず `metrics.budget` に出す。上限のキーが無い項目は比べない）。`--only budget-ci-jobs` は、プラグインのファイルを読まずに CI のジョブの上限だけを比べる |
 
 ## 兆候の規則
 
