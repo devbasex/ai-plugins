@@ -168,7 +168,7 @@ plugins/ndf/
 | `uv_installer_sha256` | `src/ndf/contracts/toolchain.py` | 新設 | `uv_installer_sha256() -> str` | uv のインストーラの照合値 |
 | `check` | `src/ndf/checks/toolchain.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 設定と指定箇所の食い違いを 1 か所 1 件の `Finding` にする |
 | `workflow_tools` | `src/ndf/checks/toolchain.py` | 新設 | `workflow_tools(path: Path) -> list[ToolUse]` | 1 本のワークフローから `setup-uv`・`setup-python` のステップを拾い、行番号と `with` の値を返す |
-| `pyproject_floor` | `src/ndf/checks/toolchain.py` | 新設 | `pyproject_floor(path: Path) -> tuple[tuple[int, int] \| None, int]` | `requires-python` の下限と、その行番号 |
+| `pyproject_floor` | `src/ndf/checks/toolchain.py` | 新設 | `pyproject_floor(path: Path) -> tuple[tuple[int, int, int] \| None, int]` | `requires-python`（PEP 440 の条件。プレリリース・ポストリリースの番号も含む）が許す最も古い Python 3 の正式リリース（メジャー・マイナー・パッチ）と、その行番号。下限が無い・どれも許さなければ `None` |
 
 - `check`
   - 事前条件: `scope.settings` にリポジトリの設定が入っている。設定の `toolchain` が無ければ何も突き合わせない（違反 0 件）。`workflows`・`plugin_pyprojects`・`launchers` はキーごとに独立で、在るキーの対象だけを突き合わせる（設計文書の「配る構成の設定と、リポジトリの設定」）
@@ -197,6 +197,8 @@ plugins/ndf/
 | `check` | `python-version` が `toolchain.python_compat` の `versions` に在り、ファイルが `workflows` に当たる | 違反 0 件 |
 | `check` | `setup-uv` の `version` が設定と違う、または無い | その行を違反にする |
 | `check` | `launchers` のファイルの `UV_VERSION=` か `UV_INSTALLER_SHA256=` が設定と違う | その行を違反にする |
+| `check` | `plugin_pyprojects` の `requires-python` が許す最も古い正式リリースが、Python の下限の `.0`（`3.11` なら `3.11.0`）と違う（`>=3.11.1` は 3.11.0 を除くので `3.11.1`、`>=3.11,!=3.11.*` は `3.12.0` で違反） | その行を違反にする（メジャーとマイナーだけでなくパッチまで比べる） |
+| `check` | `requires-python` が `>=3.11.0rc1,<4` のように、下限の `.0` を許す有効な条件 | 違反 0 件（プレリリースの番号の条件も PEP 440 どおりに評価する） |
 | `check` | `workflows` に当たるファイルの `run` の本文が `setup-uv` 以外の uv の導入（`UV_INSTALL_PATTERNS` のどれか）に当たる | その行を違反にする（uv を入れてよい経路は、`version` を設定と同じ値で持つ `setup-uv` だけ） |
 
 ### 内部のデータと定数

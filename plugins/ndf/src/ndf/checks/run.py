@@ -19,7 +19,20 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import budget, child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks import (
+    budget,
+    child_deps,
+    experimental,
+    facts,
+    invariants,
+    lint,
+    suppressions,
+    smells,
+    spec_docs,
+    structure,
+    toolchain,
+    words,
+)
 from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
@@ -31,7 +44,7 @@ TOOL = cli.tool_of(__name__)
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt", ".js", ".mjs", ".cjs"})
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
-SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {}
+SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
 
 
 def _walk(plugin_root: Path) -> list[Path]:
@@ -138,7 +151,13 @@ def select(
     written: list[str] | None = None,
     metrics: dict[str, Any] | None = None,
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。"""
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。
+
+    `only` が設定を読む規則（`SETTINGS_RULES`）だけなら、プラグインのファイルを集めず、ほかの規則も当てない
+    （ワークフローだけを変えた Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
+    """
+    if only and set(only) <= SETTINGS_RULES.keys() and not write_spec:
+        return sorted((f for name in SETTINGS_RULES if name in only for f in SETTINGS_RULES[name](scope, rules)), key=_order)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written, only, metrics)
     return [f for f in found if not only or f.rule in only]
