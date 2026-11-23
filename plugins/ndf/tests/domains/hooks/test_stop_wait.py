@@ -19,7 +19,7 @@ NOW = 100.0  # 偽の単調時計（締め切りの基準）
 # Claude Code の Stop の締め切りの時刻と、締め切りいっぱいで判定へ渡す秒（`hook.budget.stop` と `hook.stop-wait.judge` から読む）
 STOP = budget.budget_for("claude", "Stop")
 DEADLINE = NOW + STOP.deadline
-JUDGE_SECONDS = min(STOP.usable, reply_judge._judge("seconds"))
+JUDGE_SECONDS = min(STOP.usable, reply_judge.judge_setting("seconds"))
 WALL = 1000.0  # 偽の壁時計（休みのマーカーの時刻）
 CLAUDE_EXE = "/home/u/.local/share/claude/versions/2.1.330"
 PLAIN = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=[2049, 777])

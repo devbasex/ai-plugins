@@ -10,7 +10,7 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
   （決定 10）。起動の失敗は親の探索の前に `resting` で、送信先の不一致（`endpoint`）は親の起動引数を含む確かめの
   対象（`endpoint_scope`）ごとに親の探索の後で `endpoint_resting` で確かめる
 
-設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `_judge` が読む。
+設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `judge_setting` が読む。
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class Judged(NamedTuple):
     calls: int
 
 
-def _judge(key: str) -> Any:
+def judge_setting(key: str) -> Any:
     """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。"""
     return tables.policy_value("hook.stop-wait.judge", key)
 
@@ -190,7 +190,7 @@ def parent_launch(
     起動の形（`CLAUDE_CODE_ENTRYPOINT`）・`CLAUDE_PROJECT_DIR`・`CLAUDE_CONFIG_DIR` を見てから `/proc` をたどる。
     引数の中身（`--settings` など）はここでは見ない（判定の子の `endpoint_refusal` が実効の設定で確かめる）。
     """
-    endpoint = _judge("endpoint")
+    endpoint = judge_setting("endpoint")
     project_dir = env.get("CLAUDE_PROJECT_DIR")
     config_dir = env.get("CLAUDE_CONFIG_DIR")
     comparable = (
@@ -400,7 +400,7 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
     入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
     引数の読み方は `claude_args` と同じ（`claude_options`）。
     """
-    endpoint = _judge("endpoint")
+    endpoint = judge_setting("endpoint")
     table = claude_options.table_of(tables.load(claude_options.TABLE))
     flags = sorted({name for name, _ in claude_options.options(table, launch.argv[1:]) if name in endpoint["flags"]})
     names = sorted(name for name in env if name.startswith(tuple(endpoint["env_names"])))
@@ -429,7 +429,7 @@ def _rest_marker(state_dir: Path) -> Optional[dict[str, Any]]:
 
 
 def _within(at: Any, now: float) -> bool:
-    return isinstance(at, (int, float)) and now - float(at) < float(_judge("rest_seconds"))
+    return isinstance(at, (int, float)) and now - float(at) < float(judge_setting("rest_seconds"))
 
 
 def resting(state_dir: Path, now: float) -> bool:
@@ -480,7 +480,7 @@ def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str],
     path = rest_path(state_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with signals.held(path.with_name(REST_LOCK_NAME), float(_judge("lock_seconds"))) as got:
+        with signals.held(path.with_name(REST_LOCK_NAME), float(judge_setting("lock_seconds"))) as got:
             if not got:
                 return
             marker = _rest_marker(state_dir)

@@ -106,9 +106,9 @@ def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
     """プラグインの `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
     from ndf.domains.hooks import reply_judge
 
-    assert reply_judge._judge("model") == "haiku"
-    assert reply_judge._judge("max_chars") == 1600
-    assert reply_judge._judge("seconds") <= limits.value("hook.budget.stop", "deadline") - limits.value("hook.budget.stop", "margin")
+    assert reply_judge.judge_setting("model") == "haiku"
+    assert reply_judge.judge_setting("max_chars") == 1600
+    assert reply_judge.judge_setting("seconds") <= limits.value("hook.budget.stop", "deadline") - limits.value("hook.budget.stop", "margin")
     assert limits.policy("hook.stop-wait.judge").endpoint["entrypoints"] == ["cli", "sdk-cli"]
 
 

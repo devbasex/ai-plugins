@@ -506,8 +506,8 @@ def test_mark_rest_keeps_the_rests_already_written(tmp_path: Path) -> None:
 
 def test_mark_rest_does_not_write_while_another_stop_holds_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 錠を取れなければ書かない（別のセッションの書き込みを古い中身で上書きしない）
-    real = reply_judge._judge
-    monkeypatch.setattr(reply_judge, "_judge", lambda key: 0 if key == "lock_seconds" else real(key))
+    real = reply_judge.judge_setting
+    monkeypatch.setattr(reply_judge, "judge_setting", lambda key: 0 if key == "lock_seconds" else real(key))
     path = reply_judge.rest_path(tmp_path)
     path.parent.mkdir(parents=True)
     with open(path.with_name(reply_judge.REST_LOCK_NAME), "w") as held:
