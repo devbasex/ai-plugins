@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Iterator, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.strict import _SHELLS
@@ -446,11 +446,16 @@ class _EnvSplit:
         return "ok"
 
 
+def _word_targets(node: Any) -> Iterator[Any]:
+    """単純コマンドの子の節を順に返す（`command_name` はその中の語の節に置き換える）。"""
+    for child in node.children:
+        yield child.children[0] if child.type == "command_name" and child.children else child
+
+
 def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
     """単純コマンドの語。`joined` なら連結の語（`-S'a b'`）も部分ごとに引用を外す（ラッパーの引数を読むため）。"""
     words = []
-    for child in node.children:
-        target = child.children[0] if child.type == "command_name" and child.children else child
+    for target in _word_targets(node):
         if joined and target.type == "concatenation":
             words.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
         elif target.type in _WORD_NODES:
@@ -460,12 +465,7 @@ def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
 
 def _source(node: Any) -> tuple[str, ...]:
     """単純コマンドの語の字面（引用とエスケープを残す）。並びは `_argv` と同じ。"""
-    words = []
-    for child in node.children:
-        target = child.children[0] if child.type == "command_name" and child.children else child
-        if target.type in _WORD_NODES:
-            words.append(target.text.decode("utf-8", "replace"))
-    return tuple(words)
+    return tuple(target.text.decode("utf-8", "replace") for target in _word_targets(node) if target.type in _WORD_NODES)
 
 
 def _unquote(text: str, kind: str) -> str:
