@@ -440,7 +440,7 @@ def _publish(out: Path, plan: Mapping[str, Any]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             try:
                 os.fchmod(fh.fileno(), stat.S_IMODE(os.stat(out).st_mode))
-            except FileNotFoundError:
+            except FileNotFoundError:  # noqa: S110 ファイル: 置き換える前のプランが無ければ mkstemp の 0600 のまま公開する
                 pass
             fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp, out)
