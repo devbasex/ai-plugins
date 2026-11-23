@@ -432,36 +432,86 @@ def _has_acl(fd: int) -> bool:
 
 
 _ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
+_ACL_FIRST_ENTRY = 0
 
 
-def _has_acl_darwin(fd: int) -> bool:
-    """macOS で開いた記述子に拡張 ACL があるか（`acl_get_fd_np`）。確かめられなければ真（置き換えない側へ倒す）。
-
-    ACL の無いファイルは `ENOENT`、ACL に対応しないファイルシステムは `ENOTSUP`・`EOPNOTSUPP` で NULL を返す。
-    """
+def _darwin_acl_lib():  # noqa: ANN202 ctypes の CDLL
+    """macOS の libc の ACL 関数（`acl_get_fd_np`・`acl_get_entry`・`acl_init`・`acl_set_fd_np`・`acl_free`）。引けなければ None。"""
     import ctypes
 
     try:
         libc = ctypes.CDLL(None, use_errno=True)
-        get_fd, free = libc.acl_get_fd_np, libc.acl_free
+        get_fd, get_entry, init, set_fd, free = (
+            libc.acl_get_fd_np,
+            libc.acl_get_entry,
+            libc.acl_init,
+            libc.acl_set_fd_np,
+            libc.acl_free,
+        )
     except (OSError, AttributeError):
-        return True
-    get_fd.restype = ctypes.c_void_p
+        return None
+    get_fd.restype = init.restype = ctypes.c_void_p
     get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
+    get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    init.argtypes = [ctypes.c_int]
+    set_fd.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     free.argtypes = [ctypes.c_void_p]
-    acl = get_fd(fd, _ACL_TYPE_EXTENDED)
-    if acl:
-        free(acl)
+    return libc
+
+
+def _has_acl_darwin(fd: int) -> bool:
+    """macOS で開いた記述子に拡張 ACL の項目があるか（`acl_get_fd_np`）。確かめられなければ真（置き換えない側へ倒す）。
+
+    ACL の無いファイルは `ENOENT`、ACL に対応しないファイルシステムは `ENOTSUP`・`EOPNOTSUPP` で NULL を返す。
+    項目の無い空の ACL（`_drop_acl_darwin` が付けた）は持たないとみなす。
+    """
+    import ctypes
+
+    libc = _darwin_acl_lib()
+    if libc is None:
         return True
-    return ctypes.get_errno() not in (errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP)
+    acl = libc.acl_get_fd_np(fd, _ACL_TYPE_EXTENDED)
+    if not acl:
+        return ctypes.get_errno() not in (errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP)
+    try:
+        entry = ctypes.c_void_p()
+        return libc.acl_get_entry(acl, _ACL_FIRST_ENTRY, ctypes.byref(entry)) == 0
+    finally:
+        libc.acl_free(acl)
+
+
+def _drop_acl_darwin(fd: int, name: str) -> None:
+    """macOS で新しい一時ファイル `fd` が親から継いだ拡張 ACL を、空の ACL を付けて外す（`chmod -N` と同じ）。
+
+    継いだ許可の項目が残ると、置き換えの前に読めなかった利用者が新しい報告を読める。外した後に項目が残る・確かめられない・
+    外せないなら `EntryUnsafe`（`acl`）で公開しない。
+    """
+    if not _has_acl_darwin(fd):
+        return
+    libc = _darwin_acl_lib()
+    if libc is None:
+        raise EntryUnsafe(name, "acl")
+    empty = libc.acl_init(0)
+    if not empty:
+        raise EntryUnsafe(name, "acl")
+    try:
+        failed = libc.acl_set_fd_np(fd, empty, _ACL_TYPE_EXTENDED) != 0
+    finally:
+        libc.acl_free(empty)
+    if failed or _has_acl_darwin(fd):
+        raise EntryUnsafe(name, "acl")
 
 
 def _drop_inherited_acl(fd: int, name: str) -> None:
-    """新しい一時ファイル `fd` が親の既定の ACL から継いだ拡張 ACL を、公開の前に外す。外せなければ `EntryUnsafe`（`acl`）。
+    """新しい一時ファイル `fd` が親から継いだ拡張 ACL を、公開の前に外す。外せなければ `EntryUnsafe`（`acl`）。
 
-    継いだ名前付きの項目が、写したモードのグループのビットをマスクにして読めるようにならないためである。
-    ACL を外せない OS（`os.removexattr` が無い）と、ACL が無い・ACL に対応しないファイルシステムは何もしない。
+    継いだ名前付きの項目が、写したモードのグループのビットをマスクにして（macOS では許可の項目のまま）読めるように
+    ならないためである。Linux は `system.posix_acl_access` を `os.removexattr` で外し、macOS は `_drop_acl_darwin` で外す。
+    ACL が無い・ACL に対応しないファイルシステムと、どちらの手段も無い OS は何もしない。
     """
+    if sys.platform == "darwin":
+        _drop_acl_darwin(fd, name)
+        return
     if not hasattr(os, "removexattr"):
         return
     try:

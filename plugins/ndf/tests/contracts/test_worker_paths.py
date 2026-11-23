@@ -609,29 +609,76 @@ def test_write_file_replaces_a_file_without_an_acl_and_drops_the_inherited_one(w
     assert (d / "r").stat().st_mode & 0o777 == 0o640 and (d / "r").read_text(encoding="utf-8") == "後"
 
 
+def _as_macos(monkeypatch):
+    # macOS には O_PATH も os.getxattr も os.removexattr も無い
+    monkeypatch.delattr(os, "O_PATH", raising=False)
+    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
+
+
 def test_write_file_replaces_a_file_without_an_acl_on_macos(workdir, monkeypatch):
-    # macOS には O_PATH も os.getxattr も無い。書き込み専用で開いた記述子を acl_get_fd_np へ渡す経路で置き換える
+    # 書き込み専用で開いた既存のファイルの記述子を acl_get_fd_np へ渡す経路で置き換える
     d, _ = workdir
     (d / "r").write_text("前", encoding="utf-8")
     (d / "r").chmod(0o640)
-    monkeypatch.delattr(os, "O_PATH", raising=False)
-    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
+    _as_macos(monkeypatch)
     seen = []
     monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: seen.append(os.fstat(fd).st_ino) or False)
     before = (d / "r").stat().st_ino
     with worker_paths.open_workdir(d) as wd:
         worker_paths.write_file(wd, "r", "後")
-    assert seen == [before]
+    assert before in seen
     assert (d / "r").read_text(encoding="utf-8") == "後" and (d / "r").stat().st_mode & 0o777 == 0o640
 
 
 def test_write_file_refuses_on_macos_when_the_file_has_an_acl(workdir, monkeypatch):
     d, _ = workdir
     (d / "r").write_text("前", encoding="utf-8")
-    monkeypatch.delattr(os, "O_PATH", raising=False)
-    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
-    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: True)
+    before = (d / "r").stat().st_ino
+    _as_macos(monkeypatch)
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: os.fstat(fd).st_ino == before)
     with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
         worker_paths.write_file(wd, "r", "後")
     assert e.value.kind == "acl"
     assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+class _FakeDarwinAcl:
+    """一時ファイルが親から ACL を継いだ macOS の libc。`acl_set_fd_np` が成功すれば項目が消える。"""
+
+    def __init__(self, before: int, *, set_result: int) -> None:
+        self.before, self.set_result, self.set_on, self.dropped = before, set_result, [], False
+
+    def has_acl(self, fd: int) -> bool:
+        return os.fstat(fd).st_ino != self.before and not self.dropped
+
+    def acl_init(self, count: int) -> int:
+        return 1
+
+    def acl_set_fd_np(self, fd: int, acl: int, kind: int) -> int:
+        self.set_on.append(os.fstat(fd).st_ino)
+        self.dropped = self.set_result == 0
+        return self.set_result
+
+    def acl_free(self, acl: int) -> None:
+        pass
+
+
+@pytest.mark.parametrize("set_result", [0, -1])
+def test_write_file_drops_the_inherited_acl_on_macos_or_refuses_to_publish(workdir, monkeypatch, set_result):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    before = (d / "r").stat().st_ino
+    _as_macos(monkeypatch)
+    fake = _FakeDarwinAcl(before, set_result=set_result)
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", fake.has_acl)
+    monkeypatch.setattr(worker_paths, "_darwin_acl_lib", lambda: fake)
+    with worker_paths.open_workdir(d) as wd:
+        if set_result == 0:
+            worker_paths.write_file(wd, "r", "後")
+        else:
+            with pytest.raises(worker_paths.EntryUnsafe) as e:
+                worker_paths.write_file(wd, "r", "後")
+            assert e.value.kind == "acl"
+    assert fake.set_on and before not in fake.set_on  # 外すのは一時ファイルだけで、置き換える前のファイルに触れない
+    assert (d / "r").read_text(encoding="utf-8") == ("後" if set_result == 0 else "前")
+    assert [p.name for p in d.iterdir()] == ["r"]
