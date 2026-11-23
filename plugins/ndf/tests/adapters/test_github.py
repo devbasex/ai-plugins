@@ -752,7 +752,7 @@ def test_merge_refuses_a_declared_method_the_branch_does_not_allow() -> None:
         ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=rules)],
     })  # fmt: skip
     out = _hub(server).merge(7, method="merge")
-    assert (out.merged, out.kind) == (False, "refused") and "squash" in out.detail
+    assert (out.merged, out.kind) == (False, github.METHOD_REFUSED) and "squash" in out.detail
     assert server.sent("PUT") == []
 
 

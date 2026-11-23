@@ -278,6 +278,9 @@ def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, lo
     queries: list[str] = []
 
     class Hub(github.GitHub):
+        def __post_init__(self) -> None:
+            pass  # api を渡さないダミーなので、二次レート制限の待ちの知らせ先（api.config.throttler）も組まない
+
         def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
             queries.append(query)
             aliases = re.findall(r"(\w+): issueOrPullRequest\(number: (\d+)\) \{ ", query)
