@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -71,6 +72,31 @@ def test_ndf_answer_work_resets_the_report_and_the_done_marker_before_each_launc
     assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: None) == 0
     assert paths.report.read_text(encoding="utf-8") == ""
     assert not paths.done.exists() and not paths.result.exists()
+
+
+@pytest.mark.parametrize(
+    "blocked", ["link", pytest.param("read_only", marks=pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する"))]
+)
+def test_a_prompt_that_cannot_be_written_keeps_the_previous_report(tmp_path, capsys, blocked):
+    # 起動指示を書けずに止まるなら、前の報告・完了マーカー・結果ファイルを消さない
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    paths = worker_paths.report_paths(tmp_path, "fix", resolve=False)
+    paths.report.write_text("前の報告", encoding="utf-8")
+    paths.done.write_text("", encoding="utf-8")
+    paths.result.write_text("{}", encoding="utf-8")
+    if blocked == "link":
+        target = tmp_path / "利用者のファイル"
+        target.write_text("消さない", encoding="utf-8")
+        paths.prompt.symlink_to(target)
+    else:
+        paths.prompt.write_text("前の起動指示", encoding="utf-8")
+        paths.prompt.chmod(0o444)
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: got.append(argv))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
 
 
 def test_a_result_file_that_is_a_link_stops_before_the_worker_and_keeps_its_target(tmp_path, capsys):

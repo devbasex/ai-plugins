@@ -537,6 +537,17 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
         raise EntryUnreadable(name, str(e)) from None
 
 
+def check_writable(wd: WorkDir, name: str) -> None:
+    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。
+
+    無い名前は通す。リンク数が 1 の通常のファイルでなければ `EntryUnsafe`、呼んだ利用者が書き込めなければ
+    `PermissionError` を上げる。初期化の前に呼び、消してから書けずに止まる組を作らない。
+    """
+    _check_name(name)
+    if entry_state(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
+
+
 def write_file(wd: WorkDir, name: str, text: str) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
@@ -548,10 +559,8 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     """
-    _check_name(name)
+    check_writable(wd, name)
     data = text.encode("utf-8")
-    if entry_state(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
-        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
     tmp = f".{name}.{secrets.token_hex(8)}"
     os.mkdir(tmp, 0o700, dir_fd=wd.fd)
     # 開けなければ作ったディレクトリだと確かめる記述子が無いので、名前を消さずに上げる（差し替えられた別の手の
@@ -649,16 +658,20 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
     return True
 
 
-def reset_report(wd: WorkDir, paths: ReportPaths) -> tuple[str, str]:
+def reset_report(wd: WorkDir, paths: ReportPaths, keep: Iterable[str] = ()) -> tuple[str, str]:
     """報告・完了マーカー・結果ファイルを初期化する（`ndf worker prepare` と `ndf answer work` が共有する）。
 
     3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
     前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
     残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
     無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。どれかがリンクなら
-    リンクもリンクの先も変えずに `EntryUnsafe` を上げる。返りは完了マーカーと結果ファイルの `remove_file` の返り。
+    リンクもリンクの先も変えずに `EntryUnsafe` を上げる。報告を書き込めないときも、消す前に `PermissionError` で止める。
+    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、消す前に同じく書けるかを確かめる。
+    返りは完了マーカーと結果ファイルの `remove_file` の返り。
     """
     check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
+    for name in (paths.report.name, *keep):
+        check_writable(wd, name)
     done = remove_file(wd, paths.done.name)
     removed = remove_file(wd, paths.result.name)
     write_file(wd, paths.report.name, "")

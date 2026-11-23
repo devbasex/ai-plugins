@@ -601,12 +601,22 @@ def _gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
     return [_gap_of(g) for g in (raw if isinstance(raw, list) else [raw])]
 
 
-def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int) -> dict[str, Any]:
+def _missing_outputs(report: Mapping[str, Any], required: Sequence[str]) -> list[dict[str, str]]:
+    """結果ファイルの `outputs` に無い必須の名前を欠け（`kind` が `output`）にする。`outputs` が object でなければすべて欠け。"""
+    outputs = report.get("outputs")
+    have = outputs if isinstance(outputs, dict) else {}
+    return [{"kind": "output", "name": n, "reason": "作業の結果ファイルの outputs に無い"} for n in required if n not in have]
+
+
+def outcome_of(
+    kind: str, result_file: Path, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int, required: Sequence[str] = ()
+) -> dict[str, Any]:
     """worker が書いた結果ファイルの status を写した `worker run` の結果（#1682）。
 
     結果ファイルの status を読まずに ok を返すと、作業を残した worker の「判断が要る」「できなかった」が完了に
     化けるためである。gate（判断が要る）は承認ゲートの結果にし、stopped（できなかった）と欠け（gaps）の付いた ok は
-    欠けを付けた incomplete にする。読めないか形が違えば bad_report。
+    欠けを付けた incomplete にする。ok でも `required`（`--require-output`）の名前が結果ファイルの `outputs` に
+    無ければ、その名前を欠けにした incomplete にする（#3908）。読めないか形が違えば bad_report。
     """
     report = plan_files.read_json(result_file)
     status = report.get("status") if isinstance(report, dict) else None
@@ -615,7 +625,7 @@ def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metric
             TOOL, "bad_report", f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics
         )
     said = report.get("summary") if isinstance(report.get("summary"), str) and report["summary"] else "（要約なし）"
-    gaps = _gaps_of(report)
+    gaps = _gaps_of(report) + (_missing_outputs(report, required) if status == OK else [])
     if status == OK and not gaps:
         return result.result(TOOL, OK, f"作業 {kind} の worker が完了した（起動 {attempts} 回）: {said}", items, metrics)
     if status == GATE:
@@ -647,7 +657,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
     if done.cause is not None:
         out = result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics)
     else:
-        out = outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts)
+        out = outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts, a.require_output)
     if done.notice is not None:
         out.setdefault("warnings", []).append(done.notice)
     return result.emit(out)

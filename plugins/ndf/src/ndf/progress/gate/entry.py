@@ -179,12 +179,13 @@ def _write_prompt(kind: str, state_dir: Path, saved: Mapping[str, Any], workdir:
     初期化は `ndf worker prepare` と同じ `worker_paths.reset_report`（空の報告を作り、前の完了マーカーと結果ファイルを
     消す）で、起動ごとに行う。起動指示が指す `ndf worker append --done` は報告が無いと書けず、前の完了マーカーが
     残ると今回の報告より先に見えるためである。どの名前もリンクをたどらず、リンクなら何も変えずに `EntryUnsafe`
-    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。
+    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。起動指示と報告の種類と書き込み可否は
+    消す前に確かめ（`keep`）、書けずに止まるときは前の報告・完了マーカー・結果ファイルを残す。
     """
     paths = worker_paths.report_paths(state_dir, kind, resolve=False)
     body = work_prompt(kind, saved, workdir, paths)
     with worker_paths.open_workdir(paths.prompt.parent) as wd:
-        worker_paths.reset_report(wd, paths)
+        worker_paths.reset_report(wd, paths, keep=(paths.prompt.name,))
         worker_paths.write_file(wd, paths.prompt.name, body)
     return paths.prompt
 

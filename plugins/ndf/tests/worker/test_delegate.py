@@ -156,6 +156,32 @@ def test_a_worker_that_finished_returns_ok_and_an_unreadable_report_is_bad_repor
         assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
 
 
+def test_an_ok_report_without_a_required_output_is_incomplete(tmp_path):
+    # #3908: 工程「作業場所の用意」は worktree・branch を outputs で返す。欠けた ok を完了にしない
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"status": "ok", "summary": "済んだ", "outputs": {"worktree": "/r/.worktrees/b"}}), encoding="utf-8")
+    got = worker.outcome_of("worktree", path, [], {}, 1, ["worktree", "branch"])
+    assert result.errors(got) == [] and got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+    assert [(g["kind"], g["name"]) for g in got["gaps"]] == [("output", "branch")]
+    assert worker.outcome_of("worktree", path, [], {}, 1, ["worktree"])["status"] == "ok"
+    assert worker.outcome_of("worktree", path, [], {}, 1)["status"] == "ok"
+
+
+def test_run_checks_the_outputs_it_is_told_to_require(tmp_path, monkeypatch, capsys):
+    (tmp_path / "prompt.md").write_text("作る", encoding="utf-8")
+
+    def fake_delegate(handoff, system, root=None):
+        handoff.result_file.write_text('{"status": "ok", "summary": "済んだ"}', encoding="utf-8")
+        return worker.Delivery(attempts=1, session="s")
+
+    monkeypatch.setattr(worker, "delegate", fake_delegate)
+    monkeypatch.chdir(tmp_path)
+    args = ["run", "--kind", "worktree", "--prompt-file", "prompt.md", "--result-file", "out.json", "--cwd", ".", "--state-dir", "s"]
+    assert worker.main(args + ["--require-output", "worktree", "--require-output", "branch"]) != 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "incomplete" and [g["name"] for g in out["gaps"]] == ["worktree", "branch"]
+
+
 SEARCHED = {"terms": ["詳細設計"], "files": ["tests/test_stage_check.py"]}
 
 
