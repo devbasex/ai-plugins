@@ -70,7 +70,7 @@ plugins/ndf/
 | `src/ndf/checks/model.py` | 変更 | 見る範囲にリポジトリの設定を持たせる | 既存 | `Scope` | `settings`（新設の属性）・`repo_files`（新設） |
 | `src/ndf/checks/run.py` | 変更 | 規則 4 つを並びへ足し、`budget.measure` の件数を `metrics.budget` へ出す | 上の 4 モジュール | モジュール | `check`（変更）・`collect`（変更） |
 | `src/ndf/adapters/http.py` | 変更 | 本文の取得に本文の上限と転送の禁止を指定できるようにする | 既存 | モジュール | `fetch_body`（変更。`max_bytes`・`follow` の引数） |
-| `src/ndf/domains/samples/verify.py` | 新設 | 見本を本物の記述と突き合わせる | `ndf.contracts`・`ndf.adapters.http`・`jsonschema` | モジュール | `verify`・`fetch_document`・`definition_schema`・`compare`・`unknown_keys`・`added_keys`・`safe_path`・`describe` |
+| `src/ndf/domains/samples/verify.py` | 新設 | 見本を本物の記述と突き合わせる | `ndf.contracts`・`ndf.adapters.http`・`jsonschema` | モジュール | `verify`・`fetch_document`・`definition_target`・`compare`・`unknown_keys`・`added_keys`・`safe_path`・`describe` |
 | `src/ndf/domains/samples/cli.py` | 新設 | `ndf samples verify` のエントリポイント | `verify`・`ndf.contracts.result` | モジュール | `main` |
 | `src/ndf/domains/hooks/tables.py` | 変更 | 分割した表を標準ライブラリで読む | `json`・`pathlib` | モジュール | `load`（変更）・`load_split`（新設）・`policies`（変更）・`policy_value`（変更） |
 | `src/ndf/domains/hooks/budget.py` | 変更 | hook の起動ごとの予算の引き方を 1 項目の読みへ替える | `tables` | モジュール | `policy_name`・`budget_for`（変更。`limits` を渡さないときの中身） |
@@ -342,12 +342,12 @@ plugins/ndf/
 | `verify` | `src/ndf/domains/samples/verify.py` | 新設 | `verify(peer: str \| None = None, fetch: Callable[[str], Any] = fetch_document) -> VerifyResult` | 定義した見本を本物の記述と突き合わせ、見本ごとの結果（食い違い・取れない）と相手ごとの要求の数を返す |
 | `fetch_document` | `src/ndf/domains/samples/verify.py` | 新設 | `fetch_document(url: str) -> dict[str, Any]` | 公開の記述（OpenAPI 3.1 の bundled 形式）の文書の全体を 1 回の要求で取る。打ち直さない。`http.fetch_body(url, seconds, max_bytes=<samples.fetch の max_bytes>, follow=False)` で取り、本文を `json.loads` する |
 | `fetch_body` | `src/ndf/adapters/http.py` | 変更（引数を足す） | `fetch_body(url: str, timeout: float, transport: httpx.BaseTransport \| None = None, *, max_bytes: int \| None = None, follow: bool = True) -> bytes` | 既定の値（上限なし・転送を追う）では今までと同じ。`max_bytes` を渡すと、受け取った本文の合計がそれを超えた時点で読むのをやめて `FetchError`（「本文が <max_bytes> バイトを超えた」）。`follow=False` なら転送を追わず、3xx の応答は本文を読まずに `FetchError`（「HTTP <状態>（転送は追わない）」）で、要求は 1 回だけ送る |
-| `definition_schema` | `src/ndf/domains/samples/verify.py` | 新設 | `definition_schema(document: dict[str, Any], pointer: str) -> dict[str, Any]` | 文書の全体を根に持ったまま、ポインタの定義を指す検証用のスキーマ（`{"$schema": <2020-12>, "components": document["components"], "$ref": pointer}`。OpenAPI だけの語（`example`・`discriminator`）は 2020-12 の検証器が知らない語として無視する）を返す。切り出さないので、定義の中の `#/components/schemas/...` の参照は同じ文書の中で解ける |
-| `compare` | `src/ndf/domains/samples/verify.py` | 新設 | `compare(sample: Any, schema: dict[str, Any], absent: list[str]) -> list[str]` | `Draft202012Validator(schema)` の `iter_errors` の誤りを `describe` で値を含まない説明にし、`unknown_keys` と `added_keys` の結果と合わせて昇順で返す（`contracts.schema_errors` の整形は `ValidationError.message` を使い、見本の値を含みうるので使わない） |
-| `unknown_keys` | `src/ndf/domains/samples/verify.py` | 新設 | `unknown_keys(sample: Any, schema: dict[str, Any], document: dict[str, Any]) -> list[str]` | 見本の辞書のキーのうち、定義の `properties` に無いものを、位置ごとに `<パス>: 定義に無いキー <件数> 件` の形で返す（JSON Schema の検証とは別に定める判定。下の「未知のキーの判定」）。キーの名前は定義が決めた名前ではなく、見本（本物の応答）から来た文字列なので出さない |
-| `added_keys` | `src/ndf/domains/samples/verify.py` | 新設 | `added_keys(sample: Any, schema: dict[str, Any], absent: list[str]) -> list[str]` | 取った記述の定義の `properties` のキーのうち、基準の形（その位置の見本のキーと、定義の `absent_keys`）に無いものを `<パス>: 記述に足されたキー <キー>` の形で返す（下の「足されたキーの判定」）。キーの名前は記述の定義の語なので出す |
-| `safe_path` | `src/ndf/domains/samples/verify.py` | 新設 | `safe_path(path: Sequence[str \| int], schema: dict[str, Any]) -> str` | 見本の中の位置を、定義で確かめられる語だけで `/` 区切りにする（最上位は `(最上位)`）。各階層で、その位置の定義（`$ref` は文書の中で解いた先・`allOf` などの枝の和）の `properties` にある名前と配列の添字はそのまま出し、それ以外（`additionalProperties`・`patternProperties` で受けた辞書のキー、定義の無い位置のキー）は `*` に伏せる。`describe`・`unknown_keys`・`added_keys` のパスはすべてこれで作る |
-| `describe` | `src/ndf/domains/samples/verify.py` | 新設 | `describe(error: ValidationError) -> str` | 誤り 1 件を `<パス>: <検証の規則>`（`error.absolute_path` を `safe_path` で伏せたもの（`absolute_path` の生の並びは辞書のキーに見本の文字列を含みうるので出さない）と `error.validator`（`type`・`required`・`enum` など））で返す。`required` だけは足りないキーの名前を添える（キーの名前はスキーマの側の語で、応答の値ではない）。`error.message`・`error.instance` は使わない |
+| `definition_target` | `src/ndf/domains/samples/verify.py` | 新設 | `definition_target(document: dict[str, Any], pointer: str) -> Target` | 参照を解く文書の全体と、ポインタの定義を指す検証用のスキーマ（`{"$ref": pointer}`）の組（`Target`。OpenAPI だけの語（`example`・`discriminator`）は 2020-12 の検証器が知らない語として無視する）を返す。参照は文書の根から解くので、`components` のほか `paths` などを指す参照も同じ文書の中で解ける |
+| `compare` | `src/ndf/domains/samples/verify.py` | 新設 | `compare(sample: Any, target: Target, known: Known) -> list[str]` | 指した定義が `anyOf`・`oneOf` なら見本の型を受けるただ 1 つの枝へ絞り、検証器（外部取得をしない `referencing` の registry を渡す）の `iter_errors` の誤りを `describe` で値を含まない説明にし、`unknown_keys` と `added_keys` の結果と合わせて昇順で返す。見本の定義の `known_mismatches` に挙げた説明は除き、出なくなったものを `既知の食い違いが消えた: <説明>` で返す（`contracts.schema_errors` の整形は `ValidationError.message` を使い、見本の値を含みうるので使わない） |
+| `unknown_keys` | `src/ndf/domains/samples/verify.py` | 新設 | `unknown_keys(sample: Any, target: Target, extra: list[str]) -> list[str]` | 見本の辞書のキーのうち、定義の `properties` に無いものを、位置ごとに `<パス>: 定義に無いキー <件数> 件` の形で返す（JSON Schema の検証とは別に定める判定。下の「未知のキーの判定」）。キーの名前は定義が決めた名前ではなく、見本（本物の応答）から来た文字列なので出さない |
+| `added_keys` | `src/ndf/domains/samples/verify.py` | 新設 | `added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]` | 取った記述の定義の `properties` のキーのうち、基準の形（その位置の見本のキーと、定義の `absent_keys`）に無いものを `<パス>: 記述に足されたキー <キー>` の形で返す（下の「足されたキーの判定」）。キーの名前は記述の定義の語なので出す |
+| `safe_path` | `src/ndf/domains/samples/verify.py` | 新設 | `safe_path(path: Sequence[str \| int], target: Target) -> str` | 見本の中の位置を、定義で確かめられる語だけで `/` 区切りにする（最上位は `(最上位)`）。各階層で、その位置の定義（`$ref` は文書の中で解いた先・`allOf` などの枝の和）の `properties` にある名前と配列の添字はそのまま出し、それ以外（`additionalProperties`・`patternProperties` で受けた辞書のキー、定義の無い位置のキー）は `*` に伏せる。`describe`・`unknown_keys`・`added_keys` のパスはすべてこれで作る |
+| `describe` | `src/ndf/domains/samples/verify.py` | 新設 | `describe(error: ValidationError, target: Target) -> str` | 誤り 1 件を `<パス>: <検証の規則>`（`error.absolute_path` を `safe_path` で伏せたもの（`absolute_path` の生の並びは辞書のキーに見本の文字列を含みうるので出さない）と `error.validator`（`type`・`required`・`enum` など））で返す。`required` だけは足りないキーの名前を添える（キーの名前はスキーマの側の語で、応答の値ではない）。`error.message`・`error.instance` は使わない |
 | `main` | `src/ndf/domains/samples/cli.py` | 新設 | `main(argv: list[str]) -> int` | 引数を読み、`verify` を呼び、結果 JSON を出して終了コードを返す |
 
 - `verify`
@@ -359,6 +359,7 @@ plugins/ndf/
 - 未知のキーの判定（`unknown_keys`）
   - なぜ別に要るか: GitHub の記述の `issue` の定義は `additionalProperties` を書かない（2026-11-23 の記述で確認）。JSON Schema では書かないキーは何でも受けるため、検証だけでは見本にキーが 1 つ増えても通る
   - 判定: 見本の辞書ごとに、その位置の定義（`$ref` は文書の中で解いた先）の `properties` のキーの集合を求め、見本のキーのうち集合に無いものを未知のキーとする。`allOf` は各枝の `properties` の和を、`anyOf`・`oneOf` は見本がその枝の検証に通る枝の `properties` の和を使う（どの枝にも通らなければ検証の誤りが先に出るので、未知のキーは数えない）。定義が `additionalProperties` か `patternProperties` を明示していればそれに従い（`false` なら JSON Schema の検証が既に落とすので数えない、スキーマか `true` なら未知とみなさない）、`properties` を持たない定義（自由な辞書）は数えない。配列は `items` の定義で要素ごとに同じ判定を行う
+  - 既知の未知のキー（`extra_keys`）: 見本の定義の `extra_keys` に挙げたキー（パスの書き方は `absent_keys` と同じ）は、キー単位で照合して件数から除く。挙げたキーが未知のキーでなくなれば（記述の定義に載った、または見本から消えた）、`既知の、定義に無いキーが消えた: <件数> 件` を食い違いとして返す（キーの名前は出さない）。件数が同じでも、挙げたキーと別のキーが入れ替われば両方の食い違いが出る
   - 出力: `safe_path` のパスと件数だけ。値も、見本の側のキーの名前も出さない（見本の辞書のキーには利用者の識別情報が入りうる）
 - 足されたキーの判定（`added_keys`）
   - なぜ要るか: `unknown_keys` は見本にあって定義に無いキー（相手が消した・改名した）だけを見る。相手が応答にキーを足すと定義の `properties` が増えるが、`additionalProperties` を書かない定義では見本は検証に通り続け、`unknown_keys` も 0 件のままになる
@@ -366,9 +367,9 @@ plugins/ndf/
   - 判定: `unknown_keys` と同じ走査（`$ref` を解き、`allOf` は和、`anyOf`・`oneOf` は見本が通る枝の和、配列は `items` で要素ごと）で、見本の辞書の位置ごとに定義の `properties` のキーの集合を求め、基準の形に無いキーを足されたキーとする。配列は要素ごとに見て、どれか 1 つの要素の基準の形に無ければ数える（同じ位置の重なりは 1 件にまとめる）。`properties` を持たない定義（自由な辞書）と、`additionalProperties`・`patternProperties` で受けた位置は見ない。見本に無い位置（見本で null の入れ子の辞書など）の定義は、その位置の `absent_keys` の書き方（親のキーを書けば下は見ない）に従う
   - `absent_keys` の検証: 一覧のパスが取った記述の定義の `properties` に無ければ（相手がキーを消した）、`<パス>: 記述から消えたキー <キー>` を食い違いとして返す（名前は定義と記述の両方にある語なので出す）。古い一覧が残って、消えたキーを相手が戻したときに見逃すのを防ぐ
   - 出力: パスとキーの名前（記述の定義の語）だけ
-- `definition_schema`
+- `definition_target`
   - 事前条件: 文書の `openapi` が `3.1.` で始まる（3.0 の文書は `nullable` を持ち、2020-12 の検証器では null を受けられないため断る）
-  - 事後条件: 返りのスキーマを `Draft202012Validator.check_schema` に通せる。参照は文書の中（`#/components/...`）だけで解き、外の URL を取りに行かない（`referencing` の既定の取得は使わない）
+  - 事後条件: 返りの `schema` を `Draft202012Validator.check_schema` に通せる。参照は文書の中（`#/...`）だけで解き、外の URL を取りに行かない（外部取得をしない registry を検証器へ渡す）
 
 ### 異常系の処理
 
@@ -377,9 +378,9 @@ plugins/ndf/
 | `fetch_document` | 記述を取れない | ネットワーク・相手の障害 | `httpx` の例外と状態コード | その URL の見本を `unreachable` にして続ける | ほかに食い違いが無ければ `infra_wait` で 75。`items` に `kind: unreachable` の見本 | 再実行で直りうる（毎日のジョブは次の日に再び打つ） |
 | `fetch_document` | 転送（3xx）が返った | 相手が記述の保存先を移した | `fetch_body(follow=False)` の `FetchError` | 転送の先を取りに行かず、その URL の見本を `unreachable` にして続ける（要求は 1 回と数える） | 同上。`detail` に状態コード | 定義の URL を転送の先へ直して打ち直す |
 | `fetch_document` | 本文が上限を超えた | 記述が大きくなった、または別の物を返した | `fetch_body(max_bytes=...)` の `FetchError` | 読むのをやめ、その URL の見本を `unreachable` にして続ける | 同上。`detail` に上限のバイト数 | `samples.fetch` の `max_bytes` を見直して打ち直す |
-| `definition_schema` | 文書が 3.1 でない | 定義の URL の誤り（3.0 の `descriptions/` を指した） | `openapi` の値 | 止める（呼び出しの後だが見本を当てない） | `config_broken` で 2 | 定義の URL を直して打ち直す |
-| `definition_schema` | ポインタの先が無い | 相手の記述の形が変わった | 引いた値の有無 | 違反にする（食い違い 1 件） | `samples_mismatch` で 1。`items` に見本のパスとポインタ | 定義を直して打ち直す |
-| `compare` | 文書の中の参照が解けない | 相手の記述の形が変わった（参照先の定義が消えた） | `referencing` の `Unresolvable` | 違反にする（食い違い 1 件。例外で落とさない） | `samples_mismatch` で 1。`items` に解けなかった参照 | 見本と定義を直して打ち直す |
+| `definition_target` | 文書が 3.1 でない | 定義の URL の誤り（3.0 の `descriptions/` を指した） | `openapi` の値 | 止める（呼び出しの後だが見本を当てない） | `config_broken` で 2 | 定義の URL を直して打ち直す |
+| `definition_target` | ポインタの先が無い | 相手の記述の形が変わった | 引いた値の有無 | 違反にする（食い違い 1 件） | `samples_mismatch` で 1。`items` に見本のパスとポインタ | 定義を直して打ち直す |
+| `compare` | 文書の中の参照が解けない | 相手の記述の形が変わった（参照先の定義が消えた） | `referencing` の `Unresolvable` | 違反にする（食い違い 1 件。例外で落とさない） | `samples_mismatch` で 1。`items` に解けなかった参照（この文書の中の JSON ポインタと確かめられたときだけ。ほかは URL の認証情報や署名を出さないよう `(文書の外)` と伏せる） | 見本と定義を直して打ち直す |
 | `compare` | 見本が記述に合わない | 相手の API の形が変わった、または見本が古い | `jsonschema` の検証 | 違反にする | `samples_mismatch` で 1。`items` の `detail` に食い違ったパスと検証の規則（`describe`。値は出さない） | 見本を録り直して打ち直す |
 | `unknown_keys` | 見本に定義に無いキーがある | 相手がキーを消した・改名した、または見本が古い | `unknown_keys` の判定 | 違反にする | `samples_mismatch` で 1。`items` の `detail` に `safe_path` のパスと件数（キーの名前は出さない） | 見本を録り直して打ち直す |
 | `added_keys` | 記述の定義に基準の形に無いキーがある | 相手が応答にキーを足した | `added_keys` の判定 | 違反にする | `samples_mismatch` で 1。`items` の `detail` にパスと足されたキーの名前 | 見本を録り直し（足されたキーが応答に出なければ `absent_keys` へ足し）打ち直す |
@@ -422,7 +423,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `fetch_document` | `src/ndf/adapters/http.py` の `request_json`（転送を追わない・本文 1 MiB まで）と `fetch_body`（転送を追う・本文の上限なし・総経過時間の期限） | `sed -n '236,262p;485,560p' plugins/ndf/src/ndf/adapters/http.py` | どちらもそのままは使えない。`request_json` は 1 MiB の上限で GitHub の記述（14,395,662 バイト）を落とし、`fetch_body` は転送を追うので 1 URL 1 要求にならない。`fetch_body` へ `max_bytes` と `follow` の引数を足して使う（期限の仕組み（`_Fetch`・`_Watchdog`）はそのまま再利用し、既定の値の呼び出し元の振る舞いは変えない）。打ち直しはどちらも持たないので、`retries`＝0 は `verify` の要求の数の見積もりにだけ使う |
-| `compare` | `src/ndf/contracts/__init__.py` の `schema_errors`（116 行）・`_schema_validator`（101 行） | 同ファイルの読み | 使わない。`schema_errors` はコントラクトの下のファイルのパスを取り、`$defs` だけを持たせたコピーを作るため、取得した文書の `components` を解けない。誤りの整形も `ValidationError.message` を使い、型の誤りなどで見本の値を含むため、見本の検証の出力（値を出さない契約）に使えない。検証器は `definition_schema` の返りから作り（`_schema_validator` の「根を残して `$ref` で指す」作り方と同じ形）、整形は `describe` が `absolute_path` と `validator` だけから組み立てる |
+| `compare` | `src/ndf/contracts/__init__.py` の `schema_errors`（116 行）・`_schema_validator`（101 行） | 同ファイルの読み | 使わない。`schema_errors` はコントラクトの下のファイルのパスを取り、`$defs` だけを持たせたコピーを作るため、取得した文書の `components` を解けない。誤りの整形も `ValidationError.message` を使い、型の誤りなどで見本の値を含むため、見本の検証の出力（値を出さない契約）に使えない。検証器は `definition_target` の返りから作り（`_schema_validator` の「根を残して `$ref` で指す」作り方と同じ形）、整形は `describe` が `absolute_path` と `validator` だけから組み立てる |
 | `main` | `src/ndf/contracts/result.py` の `emit` | `git grep -n 'def emit' -- plugins/ndf/src` | 使う（結果 JSON の形とテストの差し替え（`conftest.py` の `_checked_emit`）に乗る） |
 
 ### 単体テストの観点
@@ -432,7 +433,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `verify` | 偽の取得で、見本が定義に合えば食い違い 0 件 | 定義 0 件で `ok`。`peer` の絞り込みで 1 件だけ当てる。同じ URL の見本 2 件で要求は 1 回 | 上の異常系の 7 行それぞれ。1 つの URL が取れず別の URL の見本が食い違う入力で `samples_mismatch` と両方の `items` |
-| `definition_schema` | 参照を含む定義でも、参照先の列の型の誤りを見つける（参照先を検証せずに通さない） | null を取る列に null の見本が通る | 3.0 の文書（`nullable` を持つ）を断る。ポインタの先が無い |
+| `definition_target` | 参照を含む定義でも、参照先の列の型の誤りを見つける（参照先を検証せずに通さない） | null を取る列に null の見本が通る | 3.0 の文書（`nullable` を持つ）を断る。ポインタの先が無い |
 | `compare` | 見本が定義に合えば 0 件 | 空の辞書の見本 | キーの型が違う見本で、そのキーのパスと `type` が説明に出て、見本の値（目印の文字列 `SECRET-VALUE-3687` を入れておく）は説明に出ない。`enum` の誤りでも値が出ない。**キーに入れた目印も出ない**: `additionalProperties` で受ける辞書（名前を定義が決めない位置）のキーを目印 `SECRET-KEY-3687` にし、その下の値の型を誤らせると、説明のパスはその階層が `*` で、目印は出ない。定義に無いキーの名前を目印 `SECRET-KEY-3687-B` にすると、`unknown_keys` の 1 件の説明に目印は出ない（どちらも `main` の結果 JSON の全体に目印の文字列が無いことで確かめる）。参照先の定義を消した文書で例外にならず食い違い 1 件 |
 | `unknown_keys` | 本物と同じく `additionalProperties` を書かない `issue` の定義で、定義どおりの見本は 0 件 | 入れ子（`user` の `simple-user`）と配列（`labels` の `label`）の中のキーも見る。`anyOf` の枝の `properties`。`additionalProperties` を明示した定義では数えない | 最上位にキーを 1 つ足した見本で 1 件（`additionalProperties` の無い定義でも落ちる）。`user` の中にキーを足しても 1 件。説明にそのキーの名前は出ない |
 | `added_keys` | 定義のキーが見本のキーと `absent_keys` の和と同じなら 0 件 | `absent_keys` に挙げたキーは見本に無くても数えない。配列（`labels`）の要素の定義へ足したキーも 1 件（要素の数に依らず 1 件） | **見本と定義を固定したまま、偽の記述の側だけを変える**: `issue` の定義の `properties` へキーを 1 つ足すと 1 件で、説明にそのキーの名前とパスが出る。`simple-user` の定義へ足しても `user` のパスで 1 件。`absent_keys` に挙げたキーを定義から消すと「記述から消えたキー」で 1 件 |

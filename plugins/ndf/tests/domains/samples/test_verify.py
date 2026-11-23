@@ -147,10 +147,17 @@ def test_compare_resolves_references_only_inside_the_document(wrap: Callable[[st
     monkeypatch.setattr("urllib.request.urlopen", lambda req, *a, **kw: sent.append(req))
     doc = {**document(), "x-free": {"type": "object", "additionalProperties": True}}
     got = {}
-    for ref in ("#/x-free", "#/x-gone", f"https://user:{SECRET_VALUE}@example.test/x.json"):
+    outside = [
+        f"https://user:{SECRET_VALUE}@example.test/x.json",
+        f"//user:{SECRET_VALUE}@example.test/x.json",
+        f"/x?sig={SECRET_VALUE}",
+        f"{Draft202012Validator.META_SCHEMA['$id']}#/{SECRET_VALUE}",
+    ]
+    for ref in ("#/x-free", "#/x-gone", *outside):
         properties(doc, "issue")["meta"] = wrap(ref)
         got[ref] = _compare(sample(), doc, ABSENT)
-    assert list(got.values()) == [[], ["記述に参照の先が無い: #/x-gone"], ["記述に参照の先が無い: (文書の外)"]]
+    hidden = [["記述に参照の先が無い: (文書の外)"]] * len(outside)
+    assert list(got.values()) == [[], ["記述に参照の先が無い: #/x-gone"], *hidden]
     assert sent == []
 
 

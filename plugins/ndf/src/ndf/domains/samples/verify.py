@@ -22,7 +22,7 @@ from urllib.parse import unquote
 from jsonschema import Draft202012Validator, validators
 from jsonschema.exceptions import UnknownType, ValidationError
 from referencing import Registry
-from referencing.exceptions import Unresolvable
+from referencing.exceptions import PointerToNowhere, Unresolvable
 
 from ndf import contracts
 from ndf.adapters import http
@@ -261,7 +261,7 @@ def compare(sample: Any, target: Target, known: Known) -> list[str]:
     except RefError as exc:
         return [ref_detail(str(exc))]
     except Unresolvable as exc:
-        return [ref_detail(f"#{exc.ref}" if exc.ref.startswith("/") else exc.ref)]
+        return [ref_detail(_local_ref(exc, target.document))]
     except (UnknownType, re.error):
         return ["記述の定義がスキーマとして読めない"]
     gone = {f"既知の食い違いが消えた: {line}" for line in known.mismatches if line not in found}
@@ -300,8 +300,20 @@ def _accepts_type(target: Target, branch: Any, sample: Any) -> bool:
 
 
 def ref_detail(ref: str) -> str:
-    """参照が解けない説明。文書の外を指す参照は文字列を伏せる。"""
-    return f"記述に参照の先が無い: {ref if ref.startswith('#') else OUTSIDE}"
+    """参照が解けない説明。文書の中の JSON ポインタ（`#/...`）でない参照は文字列を伏せる。"""
+    return f"記述に参照の先が無い: {ref if ref.startswith('#/') else OUTSIDE}"
+
+
+def _local_ref(exc: Unresolvable, document: dict[str, Any]) -> str:
+    """検証器が解けなかった参照。この文書の中のポインタと確かめられたときだけ `#/...` で返す（ほかは伏せる語）。
+
+    `PointerToNowhere` の `ref` は `#` を除いたポインタ、ほかの `Unresolvable` の `ref` は書かれたままの参照（`//host/...`・`/path?...`
+    を含む）で、`/` で始まるかでは区別できない。jsonschema は元の例外を包んで投げるので、その元を見る。
+    """
+    for inner in (exc, exc.__cause__):
+        if isinstance(inner, PointerToNowhere) and inner.resource.contents is document:
+            return f"#{inner.ref}"
+    return OUTSIDE
 
 
 def describe(error: ValidationError, target: Target) -> str:
