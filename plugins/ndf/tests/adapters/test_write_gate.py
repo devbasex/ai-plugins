@@ -114,6 +114,9 @@ def graphql(query: str) -> httpx.Request:
         (httpx.Request("GET", "https://api.github.com/repos/o/r/issues"), None),
         (httpx.Request("HEAD", "https://api.github.com/repos/o/r"), None),
         (httpx.Request("POST", "https://api.github.com/repos/o/r/issues", json={"title": "t"}), Writes(CONTENT, 1)),
+        # cross-review の返信（受け入れ条件 3）とまとめたレビューも、内容を作る書き込みとして間隔が当たる
+        (httpx.Request("POST", "https://api.github.com/repos/o/r/pulls/7/comments/11/replies", json={"body": "b"}), Writes(CONTENT, 1)),
+        (httpx.Request("POST", "https://api.github.com/repos/o/r/pulls/7/reviews", json={"comments": []}), Writes(CONTENT, 1)),
         (httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1", json={}), Writes(WRITE, 1)),
         (httpx.Request("PUT", "https://api.github.com/repos/o/r/pulls/1/merge"), Writes(WRITE, 1)),
         (httpx.Request("DELETE", "https://api.github.com/repos/o/r/labels/x"), Writes(WRITE, 1)),
