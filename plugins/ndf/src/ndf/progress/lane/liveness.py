@@ -15,11 +15,13 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 3. スプリントが承認ゲートや質問の回答を待っている → `waiting_answer`（正常な待ち。止まりとして知らせない）
 4. ラッパーの一覧を読めなかった・スプリントの待ちを読めなかった → `unknown`（一覧に無いことを止まりと読まない）
 5. ラッパーが動いていて状態が `stalled`（認証の失敗で `/goal` が外れた など） → `stalled`（ラッパーの理由を添える）
-6. ラッパーが動いている → `alive`
-7. スプリントの工程を流す作業が動いている → `working`（conductor が落ちても作業は続く。終わってから止まりになる）
-8. ほか（ラッパーが一覧に無い・止まっていて、スプリントは conductor の手を待つ） → `ended`
+6. ラッパーが動いていて、conductor が応答を終え、バックグラウンドの作業が無いまま `parallel-run.idle` の秒を過ぎた → `idle_conductor`
+   （#4036。活動（`Activity`）を読めなければ当たらない）
+7. ラッパーが動いている → `alive`
+8. スプリントの工程を流す作業が動いている → `working`（conductor が落ちても作業は続く。終わってから止まりになる）
+9. ほか（ラッパーが一覧に無い・止まっていて、スプリントは conductor の手を待つ） → `ended`
 
-止まりとして知らせるのは `stalled` と `ended` だけである（`STALL_KINDS`）。
+止まりとして知らせるのは `stalled`・`ended`・`idle_conductor` だけである（`STALL_KINDS`）。
 
 `stalled`（認証の失敗で `/goal` が外れた）のレーンは、子を起動するアカウントが使える（`Probes.account_ok`）なら、
 耐久ワークフローが `/goal` を入れた入力で再起動する（#3243）。使えなければ止まりとして知らせる。
@@ -27,11 +29,12 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ndf.contracts import causes, result
+from ndf.contracts import causes, limits, result
 from ndf.progress.lane.types import LaneRow
 
 # 判定の種類
@@ -45,8 +48,11 @@ IDLE, RESUMING, WAITING_ANSWER, UNKNOWN, STALLED, ALIVE, WORKING, ENDED = (
     "working",
     "ended",
 )
+IDLE_CONDUCTOR = "idle_conductor"
 # 止まりとして知らせる判定
-STALL_KINDS = (STALLED, ENDED)
+STALL_KINDS = (STALLED, ENDED, IDLE_CONDUCTOR)
+# 何もしていないとみなすまでの秒を持つ方針（`contracts/limits.json`）
+IDLE_POLICY = "parallel-run.idle"
 # スプリントのステートマシンの待ち（`sprint_wait` が `ndf progress wait` の結果から決める）
 SPRINT_GATE, SPRINT_WORKING, SPRINT_IDLE, SPRINT_UNKNOWN = "gate", "working", "idle", "unknown"
 # ラッパーの状態のうち、止まりと読むもの（`ndf relay ls` の `state`）
@@ -63,13 +69,47 @@ class Liveness:
     reason: str
     row: Optional[str] = None
     sprint_id: Optional[str] = None
+    # `idle_conductor` のときだけ入る: 最後に動いた時刻（UNIX 時刻）と、まだ走っているとみなすバックグラウンドの作業の数
+    moved_at: Optional[float] = None
+    background: Optional[int] = None
 
     @property
     def stall(self) -> bool:
         return self.kind in STALL_KINDS
 
     def as_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "reason": self.reason, "row": self.row, "sprint_id": self.sprint_id, "stall": self.stall}
+        return {
+            "kind": self.kind,
+            "reason": self.reason,
+            "row": self.row,
+            "sprint_id": self.sprint_id,
+            "stall": self.stall,
+            "moved_at": self.moved_at,
+            "background": self.background,
+        }
+
+
+@dataclass(frozen=True)
+class Activity:
+    """conductor の活動（#4036）。`turn_done` は最後の応答が終わったか、`moved` は最後の応答と終わったバックグラウンドの作業の
+    時刻のうち最も遅いもの（UNIX 時刻）、`background` は終わったバックグラウンドの作業を除いた数（確かめられなければ None）。"""
+
+    turn_done: bool
+    moved: Optional[float]
+    background: Optional[int]
+
+
+def idle_after() -> float:
+    """何もしていないとみなすまでの秒（`contracts/limits.json` の `parallel-run.idle`）。"""
+    return limits.seconds(IDLE_POLICY)
+
+
+def _idle_for(activity: Optional[Activity], now: float) -> Optional[float]:
+    """応答を終え、バックグラウンドの作業が無いまま閾値を過ぎていれば、最後に動いてからの秒。当たらなければ None。"""
+    if activity is None or not activity.turn_done or activity.background != 0 or activity.moved is None:
+        return None
+    quiet = now - activity.moved
+    return quiet if quiet >= idle_after() else None
 
 
 def sprint_wait(out: Optional[Mapping[str, Any]]) -> str:
@@ -89,9 +129,17 @@ def wrapper_running(row: Optional[Mapping[str, Any]]) -> bool:
     return bool(row and row.get("running"))
 
 
-def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, Any]], listed: bool) -> Liveness:
+def judge(
+    row: Optional[LaneRow],
+    sprint: str,
+    wrapper: Optional[Mapping[str, Any]],
+    listed: bool,
+    activity: Optional[Activity] = None,
+    now: Optional[float] = None,
+) -> Liveness:
     """1 本のレーンの生死を決める。`row` はレーンの実行中の行（無ければ None）、`sprint` は `sprint_wait` の値、
-    `wrapper` はラッパーの一覧の行（一覧に無ければ None）、`listed` は一覧を読めたか。"""
+    `wrapper` はラッパーの一覧の行（一覧に無ければ None）、`listed` は一覧を読めたか、`activity` は conductor の活動
+    （読まなければ None）、`now` は判定の時刻（省けば今の時刻）。"""
     if row is None:
         return Liveness(IDLE, "実行中の行が無い")
     key, sid = row.key, row.sprint_id
@@ -104,6 +152,10 @@ def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, An
     running = wrapper_running(wrapper)
     if running and wrapper is not None and wrapper.get("state") == WRAPPER_STALLED:
         return Liveness(STALLED, f"conductor のラッパーが止まっている: {wrapper.get('reason') or '理由の記録が無い'}", key, sid)
+    quiet = _idle_for(activity, time.time() if now is None else now) if running else None
+    if quiet is not None and activity is not None:
+        reason = f"conductor が応答を終えてから {int(quiet // 60)} 分、バックグラウンドの作業が無いまま動いていない"
+        return Liveness(IDLE_CONDUCTOR, reason, key, sid, activity.moved, activity.background)
     if running:
         return Liveness(ALIVE, "conductor のラッパーが動いている", key, sid)
     if sprint == SPRINT_WORKING:
@@ -125,16 +177,19 @@ def running_row(rows: list[LaneRow]) -> Optional[LaneRow]:
 class Probes:
     """判定の材料を読む口。`wrapper_name` はレーン名からラッパーの名前、`wrappers` はラッパーの一覧（読めなければ None）、
     `sprint` はスプリントの ID から `ndf progress wait --timeout 0` の結果（読めなければ None）、`account_ok` は
-    子を起動するアカウントが使えるか（`stalled` のレーンを再起動するか。#3243）。"""
+    子を起動するアカウントが使えるか（`stalled` のレーンを再起動するか。#3243）、`activity` はレーン名から conductor の
+    活動（読まなければ None。#4036）。"""
 
     wrapper_name: Callable[[str], str]
     wrappers: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]]
     sprint: Callable[[str], Optional[Mapping[str, Any]]]
     account_ok: Callable[[], bool] = lambda: False
+    activity: Callable[[str], Optional[Activity]] = lambda _: None
 
 
-def judge_lanes(lanes: Mapping[str, list[LaneRow]], probes: Probes) -> dict[str, Liveness]:
-    """全レーンの判定。材料（ラッパーの一覧・スプリントの待ち）は、判定に要るレーンがあるときだけ読む。"""
+def judge_lanes(lanes: Mapping[str, list[LaneRow]], probes: Probes, now: Optional[float] = None) -> dict[str, Liveness]:
+    """全レーンの判定。材料（ラッパーの一覧・スプリントの待ち）は、判定に要るレーンがあるときだけ読む。
+    活動は、活動を見ずに `alive` と決まるレーン（ラッパーが動いている）だけ読む。"""
     rows = {name: running_row(r) for name, r in lanes.items()}
     needs = [name for name, row in rows.items() if row is not None and not row.awaiting_next]
     table = probes.wrappers() if needs else {}
@@ -145,5 +200,6 @@ def judge_lanes(lanes: Mapping[str, list[LaneRow]], probes: Probes) -> dict[str,
             continue
         sprint = sprint_wait(probes.sprint(row.sprint_id))
         wrapper = table.get(probes.wrapper_name(name)) if table is not None else None
-        out[name] = judge(row, sprint, wrapper, table is not None)
+        verdict = judge(row, sprint, wrapper, table is not None)
+        out[name] = judge(row, sprint, wrapper, True, probes.activity(name), now) if verdict.kind == ALIVE else verdict
     return out

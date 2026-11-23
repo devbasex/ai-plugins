@@ -18,6 +18,7 @@
     {"id": "worktrees", "root": "repo", "path": ".worktrees", "tracked": false},
     {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
     {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
+    {"id": "state-root", "root": "state", "path": ".", "tracked": false},
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
     {"id": "google-workspace", "root": "state", "path": "gws", "tracked": false},
     {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false},

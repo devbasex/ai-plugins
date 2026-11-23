@@ -12,7 +12,7 @@ import pytest
 from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.records import cleanup_stage, gws
 from ndf.domains.records import close_decide as cd
-from ndf.progress.run import ISSUE_SECTION, SECTION_END
+from ndf.progress.records import ISSUE_SECTION, SECTION_END
 
 FAILED_ROW = {"number": 5, "result": "failed"}
 

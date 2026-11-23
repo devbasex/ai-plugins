@@ -27,13 +27,15 @@ ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモ
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import functools
 import json
 import subprocess
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
@@ -170,17 +172,52 @@ def _context_git_head(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     return Git(Path(context.get("worktree") or cwd)), str(context.get("branch") or "HEAD")
 
 
+# 工程の始まり（`base_refs_once` の中）で求めた起点: (作業場所, ベースブランチ) → 参照。範囲の外では None で、覚えない
+_BASE_REFS: contextvars.ContextVar[Optional[dict[tuple[Optional[Path], str], str]]] = contextvars.ContextVar("base_refs", default=None)
+
+
+@contextlib.contextmanager
+def base_refs_once() -> Iterator[None]:
+    """この中の `base_ref` は、同じ作業場所とベースブランチの起点を 1 回だけ求める（#3908 の r2-5）。
+
+    工程の始まりは条件 `code_in_diff` の判定と既定のリファクタリングの組み立てで同じ起点を使う。範囲を工程の始まりに
+    限り、設定（リモート名）が後で変わっても古い起点を使い続けない。
+    """
+    token = _BASE_REFS.set({})
+    try:
+        yield
+    finally:
+        _BASE_REFS.reset(token)
+
+
+def base_ref(git: Git, base: str) -> str:
+    """差分の起点の参照: 作業場所で `base` が読めればそのブランチ名、読めなければ `<リモート名>/<base>`（#3908）。
+
+    工程の条件 `code_in_diff`（`_sprint_range`）とリファクタリングの既定の起動（`refactor_values`）が同じ起点を使い、
+    `base_refs_once` の中では先に求めた起点を引き継ぐ（git を打ち直さない）。
+    """
+    held = _BASE_REFS.get()
+    key = (git.cwd.resolve() if git.cwd is not None else None, base)
+    if held is not None and key in held:
+        return held[key]
+    try:
+        git.rev_parse(base)
+        ref = base
+    except GitError:
+        # 手元に無いベースブランチは、取得し直したリモートの参照で見る
+        ref = f"{git.remote()}/{base}"
+    if held is not None:
+        held[key] = ref
+    return ref
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（ブランチ戦略の設定のスプリントの PR のマージ先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = strategy(cwd).pr_target("sprint")
     if base.startswith("-"):
         raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
     git, head = _context_git_head(context, cwd)
-    try:
-        git.rev_parse(base)
-        ref = base
-    except GitError:
-        ref = f"{git.remote()}/{base}"
+    ref = base_ref(git, base)
     return git, f"{git.merge_base(ref, head)}...{head}"
 
 
@@ -640,17 +677,18 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
         return _changed(a, st, "retry", None)
 
 
-def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str]]:
-    """`finish` と `check` の共通の前半。出力を読み、工程の定義を引き、規約に照らした誤りを返す。"""
+def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str], list[tuple[str, Optional[str]]]]:
+    """`finish` と `check` の共通の前半。出力を読み、工程の定義を引き、規約と突き合わせた誤りと欠けたキー・取り場所の組を返す。"""
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
         snap = read_current(conn, a.machine_id).snapshot
     stage = snap.stage(a.stage)
-    return output, stage, definition.validate_stage_output(stage, output)
+    errs, missing = definition.check_stage_output(stage, output)
+    return output, stage, errs, missing
 
 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    output, stage, errs = _read_stage_output(a, st)
+    output, stage, errs, _missing = _read_stage_output(a, st)
     if errs:
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}")
     dropped: list[str] = []
@@ -673,10 +711,11 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 def _cmd_check(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     """工程の出力を `finish` と同じ規則で確かめ、書かずに返す。`metrics.outputs` は工程の定義のキー、`warnings` は `finish` が捨てるキー。"""
-    output, stage, errs = _read_stage_output(a, st)
+    output, stage, errs, missing_keys = _read_stage_output(a, st)
     metrics = {"machine_id": a.machine_id, "stage": a.stage, "outputs": list(stage.outputs)}
     if errs:
-        return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics)
+        missing = [{"kind": "missing", "key": k, "source": source} for k, source in missing_keys]
+        return result.stopped(TOOL, "refused", f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}", metrics=metrics, items=missing)
     _, dropped = stages.keep_declared(stage.outputs, output["outputs"] if "outputs" in output else {})
     st.warnings.extend(f"工程 {a.stage} の定義の outputs に無いキーを finish が捨てる: {k}" for k in dropped)
     return result.result(TOOL, result.OK, f"{a.stage} の出力は規約に合う", metrics=metrics)

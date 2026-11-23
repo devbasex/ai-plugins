@@ -21,6 +21,15 @@ def sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
 
 
 def with_worker(monkeypatch) -> None:
-    """params.json の worker に既定を置く（params.json は既定を持たない）。"""
+    """params.json の worker の既定を偽の起動に替える（プランに載ったことを見分けるため）。"""
+    _set_worker(monkeypatch, ["ndf-worker"])
+
+
+def without_worker(monkeypatch) -> None:
+    """params.json の worker の既定を外す（差し込みがどの出所からも決まらない場合を作るため）。"""
+    _set_worker(monkeypatch, None)
+
+
+def _set_worker(monkeypatch, default: list[str] | None) -> None:
     held = route.params()
-    monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
+    monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=default)})

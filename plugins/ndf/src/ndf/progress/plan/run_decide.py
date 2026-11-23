@@ -10,7 +10,7 @@
   `halt` なら起動せずに、最後の行が終わったレーンのまだ動いているラッパーを止める（#3173）。`goal` があれば、認証の
   失敗で `/goal` が外れた（判定が `stalled`）レーンを、`/goal` を入れ直してそのスプリントを続ける入力で再起動する（#3243）
 - `Complete`: 全レーンの行が終わり、回答していないリクエストが無いので計画を完了にする（I16）
-- `Report`: 起動できなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`。`ndf.progress.lane.liveness`）を、
+- `Report`: 起動できなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`・`idle_conductor`。`ndf.progress.lane.liveness`）を、
   計画のステートマシンのリクエスト（`request_opened`）としてオーガナイザーへ知らせる
 - `Withdraw`: 止まりを知らせたリクエストのうち、レーンが動き出した（判定が止まりでなくなった）ものを閉じる（#2585）
 - `Sleep`: 次に読み直すまで待つ
@@ -57,6 +57,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields, replace
+from datetime import datetime, timezone
 from typing import Any, NamedTuple, Optional, Union
 
 from ndf.core import loop
@@ -215,13 +216,16 @@ class LaunchTry(NamedTuple):
 
 
 class Stall(NamedTuple):
-    """写しの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行）。写しでは JSON の list のまま持ち、読む所で包む。"""
+    """コピーの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, バックグラウンドの作業の数）。コピーでは JSON の list のまま持ち、
+    読む所で包む。最後に動いた時刻は ISO 8601 の文字列か UNIX 時刻の数。バックグラウンドの作業の数の既定の None は、#4036 の前に書かれた
+    5 つの組のコピーを読み直しの途中で包むためである。"""
 
     lane: str
     key: str
     reason: str
-    moved: Optional[str]
+    moved: Optional[str | float]
     row: str
+    background: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -283,7 +287,7 @@ def with_stalls(
     judged: bool = True,
     relaunch: Sequence[tuple[str, str, str]] = (),
 ) -> dict[str, Any]:
-    """写しへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行）、
+    """コピーへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, バックグラウンドの作業の数）、
     `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければリクエストを閉じない）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）止まったレーンの（レーン, 行, スプリントの ID）。"""
     judged_part = {"unknown": list(unknown), "judged": judged, "relaunch": [list(r) for r in relaunch]}
@@ -460,12 +464,19 @@ def _fail(state: RunState, act: Launch, detail: str, policy: Policy, final: bool
     return replace(state, unreported=(*state.unreported, Report(lane, key, error, kind)))
 
 
-def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Optional[str], row: str) -> Report:
-    """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。"""
-    tries = [h for h in state.history if h.lane == lane and h.row == row]
-    last = None if not tries else ("起動できた" if tries[-1].ok else f"起動できなかった: {tries[-1].detail}")
-    detail = f"{reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
-    return Report(lane, key, detail, LANE_STALLED, (("moved", moved), ("launches", len(tries)), ("last_launch", last)))
+def _stall_report(state: RunState, stall: Stall) -> Report:
+    """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。
+
+    最後に動いた時刻が UNIX 時刻の数なら ISO 8601 の文字列（UTC）へ直す。バックグラウンドの作業の数（#4036）も中身に載せる。"""
+    moved = stall.moved
+    if isinstance(moved, (int, float)):
+        moved = datetime.fromtimestamp(moved, timezone.utc).isoformat()
+    tries = [h for h in state.history if h.lane == stall.lane and h.row == stall.row]
+    latest = tries[-1] if tries else None
+    last = None if latest is None else ("起動できた" if latest.ok else f"起動できなかった: {latest.detail}")
+    detail = f"{stall.reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
+    facts = (("moved", moved), ("launches", len(tries)), ("last_launch", last), ("background", stall.background))
+    return Report(stall.lane, stall.key, detail, LANE_STALLED, facts)
 
 
 # 動いている行の続きの起動（回答の後の next・/goal の入れ直し）のキーの接頭辞
@@ -492,7 +503,7 @@ def _notice_stalls(state: RunState, policy: Policy, continued: frozenset[tuple[s
     fresh = [s for s in stalls if s.key not in state.noticed and s.lane not in relaunching and (s.lane, s.row) not in continued]
     if not fresh:
         return state
-    queued = tuple(_stall_report(state, *s) for s in fresh)
+    queued = tuple(_stall_report(state, s) for s in fresh)
     return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(s.key for s in fresh)))
 
 

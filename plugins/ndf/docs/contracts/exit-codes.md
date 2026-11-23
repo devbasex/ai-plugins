@@ -40,6 +40,7 @@
 | `input_missing` | 工程の入力のキーがスプリントの文脈に無く、工程を始めなかった | configuration | 3（precondition） | conductor | — | — |
 | `interrupted` | 期限・シグナル・遅れの見張りで打ち切った | timeout | 1（failed） | conductor | — | — |
 | `invalid` | 読めない・呼び出しの誤り・結果の形の誤り | validation | 2（unreadable） | conductor | — | — |
+| `merge_method` | マージの方式がマージ先のブランチで許されていない | configuration | 1（failed） | human | — | — |
 | `needs_human` | 判断の呼び出しの回答が 2 回とも形に合わなかった | runtime | 1（failed） | human | — | — |
 | `not_applicable` | 正常な否定の結果（立たない・変更なし・飛ばしてよい）。ルートはプランの on_cause が書く | validation | 3（precondition） | conductor | — | — |
 | `not_ci` | マージが CI 以外の理由（保護の規則・権限）で断られた | authorization | 1（failed） | human | — | — |
