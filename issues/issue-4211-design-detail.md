@@ -24,7 +24,7 @@ flowchart LR
 | `src/ndf/progress/run.py` | 変更 | 担い手 `organizer` のフェーズで `Env.delegate` を呼び、委ねた回答を消費する | `phases.json`（#4050） | `Env` | `Env.delegate`（新設の欄）・`_start`・`decide`・`_consume_delegated`（新設） |
 | `src/ndf/progress/gate/answering.py` | 変更 | 計画の行のスプリントでだけ `delegate` をつなぐ | `lane/delegate.py` | モジュール | `lane_env` |
 | `src/ndf/progress/plan/batch.py` | 新設 | まとめの 4 つの手を計画のトランザクションで行う | `batch_claims.py`・`lane/__init__.py`・`plan/__init__.py` | モジュール | `assign`・`show`・`close`・`abort`・`check_version`（新設） |
-| `src/ndf/progress/plan/batch_claims.py` | 新設 | マシン全体の取りかかりの記録の確認・確保・消去 | `lane/machine.py` | モジュール | `claim_slot`・`release_slot`・`slot_free`・`owner_of`・`batch_lock`（新設） |
+| `src/ndf/progress/plan/batch_claims.py` | 新設 | マシン全体の取りかかりの記録の確認・確保・消去 | `lane/machine.py` | モジュール | `claim_slot`・`release_slot`・`slot_free`・`owner_of`・`db_ref`・`batch_lock`（新設） |
 | `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes batch assign / show / close / abort` の引数と書き手の見分け | `plan/batch.py` | モジュール | `_batch_parser`・`_writer`（新設）、`_row_end`・`_row_cancel`（変更） |
 | `src/ndf/progress/plan/__init__.py` | 変更 | 委ねとまとめの事象の畳み込みと表示・委ねのリクエストの閉じ方・種類 `batch` の行を移さない | `lane/fold.py` | `PlanView` | `open_batches`・`failed_backlogs`（新設）、`status`・`close_request`・`move_row`・`stop_plan`（変更） |
 | `src/ndf/progress/lane/__init__.py` | 変更 | 種類 `batch` の行の終わりと中止を `batch.py` の経路だけに絞る | — | モジュール | `end_row`・`cancel_row`・`cancel_pending`（変更） |
@@ -206,6 +206,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | `assign` | 取りかかり中 | 同じ環境（棚卸しは同じリポジトリ）のまとめが動いている | `claim_slot` | 止める | `stopped`・`precondition`（持ち主の計画・id・経過時間）、終了コード 1 | 閉じた後に打ち直す。持ち主の計画が `paused` で担い手の行が実行中でなければ `abort --claim` してから |
 | `assign` | 持ち主を読めない | 持ち主の保存先の DB に一時的につながらない・読み取りの失敗 | `owner_of` | 枠を保ったまま止める | `stopped`・`transient` | そのまま打ち直せる |
+| `assign` | 持ち主の DB を特定できない | 呼び手の `NDF_PROGRESS_DB` が記録の DB の参照と違う・記録の SQLite のファイルが無い | `owner_of` | 枠を保ったまま止める | `stopped`・`precondition`（記録の DB の参照・計画・id） | 記録の DB を指す接続先で打ち直すか、持ち主が閉じるのを待つ |
 | `assign` | `batches.lock` を取れない | 別の `assign`・`close` が長く持つ | `batch_lock` | 呼び出し元へ返す | `stopped`・`transient` | そのまま打ち直せる |
 | `assign` | 記録を書いた後、計画のコミットの前に落ちた | プロセスの終わり | — | — | — | 計画には何も残らない。残った記録は次の `claim_slot` が残骸として空きとみなす |
 | `abort` | 担い手の停止を確かめられない | ラッパーの一覧を読めない・止めても動いている | 停止の確かめ | 何も書かずに止める | `stopped`・`transient`（ラッパーの名前） | 打ち直す。止まらなければ人がプロセスを止めてから打ち直す |
@@ -238,12 +239,22 @@ flowchart LR
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `batch_lock` | `src/ndf/progress/plan/batch_claims.py` | 新設 | `(seconds: float) -> ContextManager[None]` | `<状態の保存先>/parallel/batches/batches.lock` の flock（すべてのコマンドがこの 1 つのパスを開く。`locations.json` の行も同じパス）。`machine.admit_lock` と同じ待ち方で、取れなければ `LockBusy` |
-| `owner_of` | 同上 | 新設 | `(record: dict) -> SlotOwner` | 記録の保存先（`state_dir`）から持ち主の計画を開き、`SlotOwner`（計画の状態・その id の `batch_claimed` があるか・`batch_closed` があるか・担い手の行が実行中か）を返す。保存先は開けたが計画が無い（消された）なら `SlotOwner.gone`。DB につながらない・読み取りが失敗したなら `OwnerUnreadable` を投げる（空きとみなさない） |
+| `owner_of` | 同上 | 新設 | `(record: dict) -> SlotOwner` | 記録の DB の参照（`db`。下の「持ち主の DB の参照」）から持ち主の DB の URL を解き、`state_dir` の計画を開いて `SlotOwner`（計画の状態・その id の `batch_claimed` があるか・`batch_closed` があるか・担い手の行が実行中か）を返す。呼び手の `NDF_PROGRESS_DB` と `store.default_url` は、参照と同じ DB を指すと確かめられたときだけ使う。DB は開けたが計画が無い（消された）なら `SlotOwner.gone`。参照から DB を特定できない（呼び手の接続先が参照と違う・参照のファイルが無い）なら `OwnerUnresolved`、DB につながらない・読み取りが失敗したなら `OwnerUnreadable` を投げる（どちらも空きとみなさない） |
+| `db_ref` | 同上 | 新設 | `(url: str) -> str` | 記録に書く DB の参照を作る。SQLite は DB のファイルの絶対パス（`store.sqlite_path` の解決後）、ほかは `<ドライバー>://<ホスト>:<ポート>/<DB 名>`（利用者名・パスワード・問い合わせの引数を落とす）。認証情報を記録へ書かない |
 | `slot_free` | 同上 | 新設 | `(record: Optional[dict], owner: Optional[SlotOwner]) -> bool` | 記録が無い・持ち主が `gone`・持ち主にその id の `batch_claimed` が無い（`assign` の書きかけの残骸）・その id の `batch_closed` がある・持ち主の計画が終わり（`completed`・`cancelled`）かつ担い手の行が実行中でない、のどれかなら真。`paused` と `running` は、担い手の行の状態によらず偽 |
 | `claim_slot` | 同上 | 新設 | `(kind: str, key: str, own: SlotRef, write: bool) -> Optional[dict]` | `batch_lock` の中で呼ぶ。記録を読み、`owner_of` と `slot_free` が偽ならその記録を返す（`OwnerUnreadable` はそのまま上げる）。真で `write` なら自分の記録を書き、None を返す |
 | `release_slot` | 同上 | 新設 | `(kind: str, key: str, own: SlotRef) -> None` | `batch_lock` を取り、記録の持ち主の組が `own` と同じときだけ消す |
 
-`SlotRef` は記録の持ち主の組（状態の保存先 `state_dir`・計画の ID・まとめの id）で、記録の照合はいつもこの組で行う。まとめの id（`<計画>-<n>`）は計画の中でしか一意でなく、別の保存先に同じ名前の計画があれば同じ id になるためである。記録のファイル名は `<種類>-<キーの sha256 の頭 16 字>.json`（キーの字に依らない）。中身はキーの元の文字列と `SlotRef` を持つ。持ち主の計画は記録の `state_dir` から `machine.read_lanes` と同じ読み方で開く（今の `PlanLanes` は計画の状態と `batch_closed` を持たないので、`owner_of` の専用の戻り値 `SlotOwner` で読む）。
+`SlotRef` は記録の持ち主の組（持ち主の DB の参照 `db`・状態の保存先 `state_dir`・計画の ID・まとめの id）で、記録の照合はいつもこの組で行う。まとめの id（`<計画>-<n>`）は計画の中でしか一意でなく、別の保存先に同じ名前の計画があれば同じ id になるためである。記録のファイル名は `<種類>-<キーの sha256 の頭 16 字>.json`（キーの字に依らない）。中身はキーの元の文字列と `SlotRef` を持つ。持ち主の計画は `machine.read_lanes` と同じ読み方で開くが、接続先は呼び手の環境から決めず、記録の `db` から決める（今の `PlanLanes` は計画の状態と `batch_closed` を持たないので、`owner_of` の専用の戻り値 `SlotOwner` で読む）。
+
+**持ち主の DB の参照。** `claim_slot(write=True)` は、書き手が計画を開いた URL（`store.default_url` の結果）を `db_ref` に通して記録の `db` に書く。`owner_of` は次で接続先を決める。
+
+| 記録の `db` | 接続先 | 特定できないとき |
+| --- | --- | --- |
+| SQLite のファイルのパス | そのパスの SQLite（呼び手の `NDF_PROGRESS_DB` を見ない） | ファイルが無い: `OwnerUnresolved`（DB ごと消えたのか、別のマシンの記録か見分けられないため、空きとみなさない） |
+| サーバーの DB の参照 | 呼び手の `NDF_PROGRESS_DB` を `db_ref` に通した値が記録の `db` と同じなら、その URL（認証情報は呼び手のもの） | 呼び手に `NDF_PROGRESS_DB` が無いか違う DB を指す: `OwnerUnresolved` |
+
+`OwnerUnresolved` と `OwnerUnreadable` は、どちらも記録を上書きせず枠を保つ。`assign` は前者を `stopped`・`precondition`（記録の `db`・計画・まとめの id と「その DB を指す `NDF_PROGRESS_DB` で打ち直すか、持ち主の計画のオーガナイザーが閉じるのを待つ」）、後者を `stopped`・`transient` で返す。
 
 ### 並行と排他
 
@@ -259,7 +270,7 @@ flowchart LR
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `claim_slot` | 空きで書き、使用中で記録を返す | 持ち主の計画が `completed`・消された・`batch_closed` あり・その id の `batch_claimed` 無し（残骸）で空き。`cancelled` で担い手の行が終わっていれば空き | 別の保存先の 2 つの計画を差し替えた錠の待ち合わせで同時に打つと片方だけが書く。持ち主が `paused`、または `cancelled` で担い手の行が実行中なら使用中。差し替えた読みで DB の接続を失敗させると `transient` で、記録を上書きしない |
+| `claim_slot` | 空きで書き、使用中で記録を返す | 持ち主の計画が `completed`・消された・`batch_closed` あり・その id の `batch_claimed` 無し（残骸）で空き。`cancelled` で担い手の行が終わっていれば空き | 別の保存先の 2 つの計画を差し替えた錠の待ち合わせで同時に打つと片方だけが書く。持ち主が `paused`、または `cancelled` で担い手の行が実行中なら使用中。差し替えた読みで DB の接続を失敗させると `transient` で、記録を上書きしない。持ち主が SQLite の DB で書いた記録を、別の `NDF_PROGRESS_DB` を持つ呼び手が読んでも記録のパスの DB を開き、使用中と判定する。サーバーの DB の記録を、別のサーバーを指す呼び手が読むと `precondition` で記録を上書きしない。記録に利用者名とパスワードが載らない |
 | `release_slot` | 同じ持ち主の組で消す | 別の保存先の同じ名前の計画（同じまとめの id）の記録を消さない | — |
 
 ## 種類 `batch` の行（`launch`・`command`・`liveness`）
