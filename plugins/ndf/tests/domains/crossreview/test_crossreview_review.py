@@ -197,7 +197,6 @@ def test_position_refusal_is_read_from_every_reason(status, reasons, position, u
     assert threads.path_unresolved(status, reasons) is unresolved
 
 
-
 @pytest.mark.parametrize(
     ("status", "reasons", "position", "unresolved"),
     [
@@ -227,6 +226,7 @@ def test_position_refusal_ignores_case_and_any_refusal_reason(status, reasons, p
     # 理由は tuple でも読む
     assert threads.position_refused(status, tuple(reasons)) is position
     assert threads.path_unresolved(status, tuple(reasons)) is unresolved
+
 
 class _Refused(Exception):
     """`github.GitHubError` の形の偽物（状態・理由・二次レート制限でない）。"""
