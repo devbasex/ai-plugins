@@ -432,13 +432,18 @@ def _within(at: Any, now: float) -> bool:
     return isinstance(at, (int, float)) and now - float(at) < float(judge_setting("rest_seconds"))
 
 
+def _live_launch(marker: dict[str, Any], now: float) -> Optional[dict[str, Any]]:
+    """マーカーの起動の失敗の記録。休む間を過ぎた・形が違うときは None。"""
+    launch = marker.get("launch")
+    return launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
+
+
 def resting(state_dir: Path, now: float) -> bool:
     """起動の失敗から休む間が過ぎていなければ真。親の探索の前に見る。マーカーが無い・読めないときは偽（決定 10）。"""
     marker = _rest_marker(state_dir)
     if marker is None:
         return False
-    launch = marker.get("launch")
-    return isinstance(launch, dict) and _within(launch.get("at"), now)
+    return _live_launch(marker, now) is not None
 
 
 def endpoint_resting(state_dir: Path, now: float, env: Mapping[str, str], launch: Launch) -> bool:
@@ -454,8 +459,7 @@ def _rest_body(marker: dict[str, Any], failure: str, now: float, scope: str) -> 
     """今のマーカーに 1 つの失敗を足した中身。休む間を過ぎた対象は外す。"""
     raw = marker.get("endpoint")
     endpoints = {key: at for key, at in (raw.items() if isinstance(raw, dict) else ()) if _within(at, now)}
-    launch = marker.get("launch")
-    kept = launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
+    kept = _live_launch(marker, now)
     if failure == "endpoint":
         endpoints[scope] = now
     else:
