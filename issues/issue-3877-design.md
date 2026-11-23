@@ -32,7 +32,7 @@ flowchart LR
 
 - 確認ダイアログが開いている間、そのツールの呼び出しは結果を返さない。サブエージェントのコマンドでも確認はレーンの端末に出るため、worker へ移しても conductor へ移しても同じ画面で止まる
 - 報告の保存先のパスは supervisor が worker の起動指示へ書き写すため、コマンドが返すパスは絶対パスで、supervisor が読み取れる形でなければならない
-- worker の側の約束（報告コピーを書き、`<置く場所>.done` を作る）は変えない。worker は `ndf` のサブコマンドを持たない経路（サブエージェント）でも動く
+- worker の側の決まり（報告コピーを書き、`<置く場所>.done` を作る）は変えない。worker は `ndf` のサブコマンドを持たない経路（サブエージェント）でも動く
 - `ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打つ（hook の `script-chain` guard）。用意も 1 回の呼び出しで終わらなければならない
 - プランの経路（`ndf answer work`）は同じ保存先に `<作業名>-prompt.md`・`<作業名>-result.json` を置く。パスの決め方を 2 か所に分けない（#3908 の設計がこの決め方を使う）
 
@@ -150,7 +150,7 @@ sequenceDiagram
 - **質問**: 空かもしれない変数を使った `rm` を PreToolUse の guard で拒否するか（要求仕様の受け入れ条件 5）
 - **選んだ案**: `PreToolUse` の guard を足し、空かもしれない変数をパスに含む `rm` を `deny` して書き直しの形を返す。公式の文書が「`PreToolUse` hooks run before the permission prompt.」（STD1）と定めるため、guard は確認のダイアログより先に呼ばれる。実装の最初に実機で 1 回確かめる。先に働かなければ guard を外し、確かめた結果をこの設計文書の「未確認のまま残ること」の行へ書き戻して受け入れ条件 5 を落とす（要求仕様の受け入れ条件 5 の但し書きのとおり）
 - 採らなかった案:
-  - `PermissionRequest` の事象で拒否する（確認を出す直前に走る（STD2）ので遅くはないが、終了コード 2 が効かず `decision` の形でしか返せない。今ある 17 件の guard はどれもこの事象を使っておらず、実績が無い）
+  - `PermissionRequest` のイベントで拒否する（確認を出す直前に走る（STD2）ので遅くはないが、終了コード 2 が効かず `decision` の形でしか返せない。今ある 17 件の guard はどれもこのイベントを使っておらず、実績が無い）
   - guard を足さないと決める（手順書の外で supervisor が `rm` を書いたときの守りが無くなる。手順書の外の `rm`（作業ファイルの片付けなど）でも同じ形は書かれる。2026-11-23 の 2 回はその例である）
   - `permissionDecision` を `"allow"` にして確認を飛ばす（公式の文書が「Recognized `rm` and `rmdir` critical-path removals, which no allow rule or `PreToolUse` hook `"allow"` approves」（STD3）と定め、この確認は hook の承認では飛ばせない）
 - **代償**: 公式の文書は「`deny` のときにダイアログが出ない」とまでは書いていない（理由の宛先が Claude であることからの読み取りにとどまる）。実機の確認が要る
@@ -238,7 +238,7 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | hook と確認の順序 | NDF の `PreToolUse` の guard が、Claude Code の「Dangerous rm operation on possibly-empty variable path」の確認より先に働くかは、実機で打つまで分からない。公式の記述は外部の調査の STD の表にある。実装の最初に、guard を入れた Claude Code で、消えても困らない一時ディレクトリの中のパスに空の変数を混ぜた `rm -f` を 1 回打ち、確認のダイアログが出る前に guard の拒否が返るかを見る。結果はこの行へ書き戻す（決定 4） |
-| `PermissionRequest` の事象 | 事象の登録とコントラクト（`plugins/ndf/contracts/hooks/runtimes.json:21-27`）はあるが、使っている guard が 1 件も無く、呼ばれる時点の実績が無い |
+| `PermissionRequest` のイベント | イベントの登録とコントラクト（`plugins/ndf/contracts/hooks/runtimes.json:21-27`）はあるが、使っている guard が 1 件も無く、呼ばれる時点の実績が無い |
 
 ## 外部の調査
 

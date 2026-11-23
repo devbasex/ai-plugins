@@ -114,7 +114,7 @@ plugins/ndf/
 | `check` | `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | `check(ctx, svc) -> Verdict \| None`（変わらない） | 中継の下なら、まず活動（背景の作業の一覧）を書く。次のセグメントのマーカーの判定は今までどおり |
 
 - `check`
-  - 事前条件: Stop の事象で呼ばれる（guard の表の行は変えない）
+  - 事前条件: Stop のイベントで呼ばれる（guard の表の行は変えない）
   - 事後条件: 中継の下（`signals.relay_dir` がディレクトリを返す）なら、戻り値によらず `activity.json` が書かれている
   - 副作用: 今までの副作用（次のセグメントのマーカーの書き込み）に、活動の記録の書き込みが 1 つ増える
 
@@ -261,7 +261,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻。`tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば `background` が 0 で、`moved` が conductor の最後の応答とサブエージェントの最後の応答のうち遅い方（lracct の事象の形。決定 2）。conductor とサブエージェントのどちらの記録も、`observe.turn_done` を差し替えずに実関数で読み、`size` に `limits.json` の `hook.transcript-tail` の `count` が渡る | `tasks` が空で `background` が 0。`subagent` 1 件でその記録が応答の途中なら 1。`shell` 1 件で、差し替えた `/proc`（一時ディレクトリ）に生きているシェルが 1 つなら 1、0 なら 0 で `moved` が出力のファイルの更新時刻。`/proc` を読めなければ 1。一覧が空でも生きているシェルが 1 つなら 1 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す。`subagent` の記録が無い・`id` が `../x` のときは、例外を上げずにその要素を数えて `background` が 1。`activity.json` の `session_id` が行と違う・`at` が conductor の最後の応答より前（前の Stop の空の一覧）・`tasks` が `null` のとき、`background` が `None` |
+| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻。`tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば `background` が 0 で、`moved` が conductor の最後の応答とサブエージェントの最後の応答のうち遅い方（lracct の現象の形。決定 2）。conductor とサブエージェントのどちらの記録も、`observe.turn_done` を差し替えずに実関数で読み、`size` に `limits.json` の `hook.transcript-tail` の `count` が渡る | `tasks` が空で `background` が 0。`subagent` 1 件でその記録が応答の途中なら 1。`shell` 1 件で、差し替えた `/proc`（一時ディレクトリ）に生きているシェルが 1 つなら 1、0 なら 0 で `moved` が出力のファイルの更新時刻。`/proc` を読めなければ 1。一覧が空でも生きているシェルが 1 つなら 1 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す。`subagent` の記録が無い・`id` が `../x` のときは、例外を上げずにその要素を数えて `background` が 1。`activity.json` の `session_id` が行と違う・`at` が conductor の最後の応答より前（前の Stop の空の一覧）・`tasks` が `null` のとき、`background` が `None` |
 | `subagent_transcript_path` | `<d>/<sid>.jsonl` と `a1b2` から `<d>/<sid>/subagents/agent-a1b2.jsonl` | 英数字・`-`・`_` だけの `id` | 空の `id`・`/` か `.` を含む `id` で `None` |
 | `live_shells` | 一時ディレクトリに組んだ `/proc` の形（ラッパー → `claude` → `bash -c source …/.claude/shell-snapshots/snapshot-…`）で 1 | MCP のサーバーなどシェルでない子は数えない。子が無ければ 0 | ラッパーの `pid` のディレクトリが無い・子に `claude` が無いとき `None` |
 | `shell_output_path` | `cwd`・`session_id`・`id` から `tasks/<id>.output` のパス | — | `id` が `../x` で `None` |
@@ -332,7 +332,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `judge` | 応答が終わり・背景 0 件・閾値を過ぎた行で `idle_conductor` になり、`stall` が真（受け入れ条件 1） | 閾値ちょうど（`now - moved == idle_after()`）で止まり、1 秒手前では `alive`。時刻はテストが渡す（時間で区切った試験を行わない） | 活動が `None`・`turn_done` が偽・`background` が 1 以上・`background` が `None` の 4 通りで `alive`（受け入れ条件 2・決定 1） |
 | `judge` | スプリントの待ちが `gate` の行と、回答の後の `next` 待ちの行は、閾値を過ぎても止まりにならない（受け入れ条件 3） | ラッパーが `stalled` の行は今までどおり `stalled`（決定 4） | — |
-| `judge`（`lane_activity` と組む） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっている行は、サブエージェントの最後の応答から閾値を過ぎれば `idle_conductor`（決定 2。lracct の事象の形）。会話の記録は一時ディレクトリに置き、`now` はテストが渡す。`tasks` が `shell` 1 件で、差し替えた `/proc` に生きているシェルが無く、出力のファイルの更新時刻から閾値を過ぎた行も `idle_conductor`（受け入れ条件 1 のシェルの取りこぼし） | conductor の最後の応答が 30 分前・サブエージェントの最後の応答が 1 分前の行は、閾値が 10 分でも `alive`（長い背景の作業が終わった直後の誤りを防ぐ）。生きているシェルが 1 つある行は閾値を過ぎても `alive` | `subagent` 1 件でその会話の記録が無い行は `alive`（読めないサブエージェントを走っているとみなす）。前の Stop の空の一覧（`at` が今の応答より前）だけの行は閾値を過ぎても `alive` |
+| `judge`（`lane_activity` と組む） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっている行は、サブエージェントの最後の応答から閾値を過ぎれば `idle_conductor`（決定 2。lracct の現象の形）。会話の記録は一時ディレクトリに置き、`now` はテストが渡す。`tasks` が `shell` 1 件で、差し替えた `/proc` に生きているシェルが無く、出力のファイルの更新時刻から閾値を過ぎた行も `idle_conductor`（受け入れ条件 1 のシェルの取りこぼし） | conductor の最後の応答が 30 分前・サブエージェントの最後の応答が 1 分前の行は、閾値が 10 分でも `alive`（長い背景の作業が終わった直後の誤りを防ぐ）。生きているシェルが 1 つある行は閾値を過ぎても `alive` | `subagent` 1 件でその会話の記録が無い行は `alive`（読めないサブエージェントを走っているとみなす）。前の Stop の空の一覧（`at` が今の応答より前）だけの行は閾値を過ぎても `alive` |
 | `idle_after` | `limits.json` の値を返す | 設定を変えると判定の境目が変わる（受け入れ条件 5） | — |
 
 ## 止まりの知らせの中身（`lane_stalled`）
@@ -351,17 +351,17 @@ plugins/ndf/
 
 - `_judge`
   - 事前条件: 変わらない
-  - 事後条件: `Judged.stalls` の各要素が（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）の 6 つになる。`idle_conductor` の行では、最後に動いた時刻が `Liveness.moved_at`（UNIX 時刻の数のまま。スナップショットは JSON なので数として残る）、背景の作業の数が 0 になる。ほかの判定では今までどおりステートマシンの事象の時刻（`last_moved` の ISO 8601 の文字列）と `None`
+  - 事後条件: `Judged.stalls` の各要素が（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）の 6 つになる。`idle_conductor` の行では、最後に動いた時刻が `Liveness.moved_at`（UNIX 時刻の数のまま。スナップショットは JSON なので数として残る）、背景の作業の数が 0 になる。ほかの判定では今までどおりステートマシンの記録の時刻（`last_moved` の ISO 8601 の文字列）と `None`
   - 副作用: 無し
 - `_stall_report`
-  - 事後条件: `moved` が数なら `datetime.fromtimestamp(moved, timezone.utc).isoformat()` で ISO 8601 の文字列へ直す（`last_moved` が返す事象の時刻と同じ UTC の形）。文字列と `None` はそのまま使う。本文の「最後に動いた時刻」と `Report.facts` の `("moved", …)` はどちらも直した後の文字列で、`("background", <数か None>)` が増える。`write_report`（`src/ndf/progress/plan/run.py:283-295`）が `facts` をそのままリクエストの中身へ入れるので、`lane_stalled` のリクエストに `background` が載る
+  - 事後条件: `moved` が数なら `datetime.fromtimestamp(moved, timezone.utc).isoformat()` で ISO 8601 の文字列へ直す（`last_moved` が返す記録の時刻と同じ UTC の形）。文字列と `None` はそのまま使う。本文の「最後に動いた時刻」と `Report.facts` の `("moved", …)` はどちらも直した後の文字列で、`("background", <数か None>)` が増える。`write_report`（`src/ndf/progress/plan/run.py:283-295`）が `facts` をそのままリクエストの中身へ入れるので、`lane_stalled` のリクエストに `background` が載る
   - 副作用: 無し
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_judge` | 最後に動いた時刻が無い | 活動も事象も読めない | 組を作るところ | 既定値で続ける（`None`。本文は今までどおり「最後に動いた時刻 不明」） | リクエストの `moved` が `null` | 後始末は無い |
+| `_judge` | 最後に動いた時刻が無い | 活動も記録も読めない | 組を作るところ | 既定値で続ける（`None`。本文は今までどおり「最後に動いた時刻 不明」） | リクエストの `moved` が `null` | 後始末は無い |
 | `_stall_report` | 背景の作業の数が無い | `idle_conductor` 以外の止まり（活動を見ずに決まる判定） | 組の 6 つ目 | 既定値で続ける（`None` をそのまま載せる） | リクエストの `background` が `null` | 後始末は無い |
 
 ### ログと記録の出力

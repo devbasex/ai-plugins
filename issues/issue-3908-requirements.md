@@ -4,7 +4,7 @@
 
 ## 種類
 
-不具合（工程表が定義する工程のプランが、ステートマシンの既定の設定だけでは起動できない。工程のプランで工程を流すことは `development-workflow` の手順書と `ndf progress` のコントラクトが既に約束している）。
+不具合（工程表が定義する工程のプランが、ステートマシンの既定の設定だけでは起動できない。工程のプランで工程を流すことは `development-workflow` の手順書と `ndf progress` のコントラクトが既に決めている）。
 
 ## 今の姿
 
@@ -12,7 +12,7 @@
 
 差し込みの `worker` は、`plugins/ndf/contracts/templates/params.json` が「既定は持たない（作業のプロンプトを書く処理がまだ無いため、決まらなければ実行の前に止まる）」と定め、`FILL_SOURCES` は出所を `params.json` の既定（`FROM_DEFAULT`）だけにしている。そのため、`worker` を使うテンプレートを呼ぶ工程は、どの実行でも値が決まらず invalid で止まる。
 
-## 事象
+## 現象
 
 ```text
 プランのテンプレート <名前> を埋められない: テンプレート <名前> の差し込みの値が無い: worker（params.json の既定）
@@ -59,7 +59,7 @@
 
 ## なぜ困るか
 
-工程のステートマシンが `standard` の工程のほとんどで自動では流れず、毎回 failed の事象と手での `finish` が入る。工程の作業を conductor と supervisor が抱えるため、1 体が 6 工程を回して文脈が 29 万〜45 万まで伸びる（lagent・lupd・llimit・lctx・lcrfast の振り返りの実測）。デプロイの工程では、出力（`delivery`・`version`・`mvv_gate`）を conductor が手で組む。
+工程のステートマシンが `standard` の工程のほとんどで自動では流れず、毎回 failed の記録と手での `finish` が入る。工程の作業を conductor と supervisor が抱えるため、1 体が 6 工程を回して文脈が 29 万〜45 万まで伸びる（lagent・lupd・llimit・lctx・lcrfast の振り返りの実測）。デプロイの工程では、出力（`delivery`・`version`・`mvv_gate`）を conductor が手で組む。
 
 ## 目的
 
@@ -85,7 +85,7 @@
 
 - [ ] 1. `standard` のモードのステートマシンを作り、工程「要求と受け入れ条件」を `ndf progress next` で起動すると、`worker` の差し込みで invalid にならずにプランが起動する（テスト）
 - [ ] 2. 工程「実装」「リファクタリング」のプランでも、`worker`・`title`・`body_file`・`issue`・`acceptance`・`refactor` の差し込みが、工程の入力・ステートマシンの文脈・リポジトリの設定から決まる（テスト）
-- [ ] 3. 差し込みの値をどうしても決められない工程を起動したとき、ステートマシンに failed の事象を書かず、決まらない差し込みの名前と、その値の出所の候補を `ndf progress next` の結果に出す（テスト）
+- [ ] 3. 差し込みの値をどうしても決められない工程を起動したとき、ステートマシンに failed の記録を書かず、決まらない差し込みの名前と、その値の出所の候補を `ndf progress next` の結果に出す（テスト）
 - [ ] 4. `ndf progress check` が、出力に欠けた文脈のキーを示すとき、そのキーの値の取り場所も示す（例: `delivery` は `.ndf/project.json` の `branch_strategy.release.deliveries`、`mvv_gate` は `release-mvv` のステップの outputs）（テスト）
 - [ ] 5. （退行）今プランで流れている工程（クリーンアップ）が、この変更の後も同じ引数で流れる（テスト）
 
@@ -119,10 +119,11 @@
 >
 > 手で閉じるときの出力の値の取り場所（とくにデプロイの `delivery`・`version`・`mvv_gate`）を、`ndf progress finish` が受け付ける前に示す。キーの名前の欠けは `ndf progress check` が示す
 
-（書き手: 起票者、日付: 2026-11-20。スプリント lrelay-r2 の振り返りで起票され、以後のスプリントの振り返りで同じ失敗を書き足している）
+（書き込み元: 起票者、日付: 2026-11-20。スプリント lrelay-r2 の振り返りで起票され、以後のスプリントの振り返りで同じ失敗を書き足している）
 
 ## 関連
 
 - #3913（デプロイの工程がスプリントの PR へリリース承認ゲートを出す）
 - #3905（`ndf progress run` の工程「実装」に単位の展開とマージを足す。この課題が直った後に効く）
 - #4229（実装の工程が、消した設計の worktree を差し込みの値の出所にして `precondition` で落ちた）
+

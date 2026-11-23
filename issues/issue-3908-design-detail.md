@@ -17,7 +17,7 @@ plugins/ndf/
 ├── src/ndf/core/
 │   ├── worker.py                                    結果ファイルの outputs を検査して worker run の結果へ写す
 │   ├── plan/steps.py・transition_decide.py・runner.py  ステップの gaps をプランの停止結果へ渡す
-│   ├── branch_strategy.py                           読み込み済みの宣言からブランチ戦略を組む
+│   ├── branch_strategy.py                           読み込み済みの設定からブランチ戦略を組む
 │   └── route/__init__.py                            リファクタリングの既定の起動
 ├── src/ndf/progress/
 │   ├── worker_kinds.py *                            kinds.json を読み、作業ごとの入力の欠けを返す
@@ -379,7 +379,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `prepare_plan` | 差し込みのそろう工程で `values.json` を書いて返る | 手元のテストのステップを外す設定（`test.ci.only`）のとき、そこだけが使う差し込みを求めず、`local_tests` が偽で残る | 決まらない工程で `TemplateValuesMissing`。工程「要求と受け入れ条件」で工程の入力に `issues` が無いと `KindInputsMissing` で、`missing` に `issues` と出所が入る。どちらも `values.json` を書かない |
 | `_start` と `plan_path`（組んだ回数） | 工程「要求と受け入れ条件」を `ndf progress next` で起動し、そのステップを流すまでに、`template_values`・`_project`・`route.derived` を差し替えた見張りがそれぞれ 1 回だけ呼ばれる | 課題のコピー（`ISSUE_BODY_FILE`）を書く工程「実装」でも、課題の読み取りの見張りが 1 回 | — |
-| `_start` | 決められない工程を `ndf progress next` で起動すると、事象に `started` も `failed` も増えない（受け入れ条件 3） | 決まる工程では今までどおり `started` が 1 件増え、`step_dir` の保存先（新しい世代の保存先を含む）に `values.json` と課題のコピーがある | 結果が `stopped`（`precondition`）で、`items` に名前と出所が並ぶ。課題の読み取りを一時障害の `GitHubError` にすると、`started` を書かずに `transient` と `retry_after` が返る |
+| `_start` | 決められない工程を `ndf progress next` で起動すると、ステートマシンの記録に `started` も `failed` も増えない（受け入れ条件 3） | 決まる工程では今までどおり `started` が 1 件増え、`step_dir` の保存先（新しい世代の保存先を含む）に `values.json` と課題のコピーがある | 結果が `stopped`（`precondition`）で、`items` に名前と出所が並ぶ。課題の読み取りを一時障害の `GitHubError` にすると、`started` を書かずに `transient` と `retry_after` が返る |
 | `plan_failure` | 6 つの例外の型ごとに、今の `_call_plan` と同じ種類（差し込みの欠けだけ `precondition`） | 分類に無い例外で `None` | — |
 
 ## 作業が作った出力をプランの結果へ渡す（`ndf worker run` の `outputs`）
@@ -433,7 +433,7 @@ plugins/ndf/
 | 引数 | 出所 | 決める時点 |
 | --- | --- | --- |
 | `--branch` | 差し込み `branch`（工程の入力） | プランを組むとき |
-| `--base` | 差分の起点の参照（以下「起点」）。マージ先のブランチ名は、`prepare_plan` が読み込み済みの `.ndf/project.json` の中身から `branch_strategy.of_project(project).pr_target("sprint")` で決める（ファイルを読み直さない）。起点は、工程の条件 `code_in_diff` が使う `progress/command.py` の `_sprint_range`（`:173-184`）と同じ規則で決める。この規則を `command.base_ref(git, base) -> str` に切り出し、`_sprint_range` と `_fill_refactor` の両方が呼ぶ。規則は、作業場所の `git rev-parse <base>` が通ればそのブランチ名、通らなければ `<リモート>/<base>` である。リモートは `Git.remote()`（メインディレクトリの宣言の `remote`。テンプレートの差し込み `remote` と同じ出所） | プランを組むとき |
+| `--base` | 差分の起点の参照（以下「起点」）。マージ先のブランチ名は、`prepare_plan` が読み込み済みの `.ndf/project.json` の中身から `branch_strategy.of_project(project).pr_target("sprint")` で決める（ファイルを読み直さない）。起点は、工程の条件 `code_in_diff` が使う `progress/command.py` の `_sprint_range`（`:173-184`）と同じ規則で決める。この規則を `command.base_ref(git, base) -> str` に切り出し、`_sprint_range` と `_fill_refactor` の両方が呼ぶ。規則は、作業場所の `git rev-parse <base>` が通ればそのブランチ名、通らなければ `<リモート>/<base>` である。リモートは `Git.remote()`（メインディレクトリのブランチ戦略の設定の `remote`。テンプレートの差し込み `remote` と同じ出所） | プランを組むとき |
 | `--required` | `.ndf/project.json` の `ci.required_checks`（`prepare_plan` が 1 回読んだ設定。`FILL_SOURCES` の `required` と同じ場所） | プランを組むとき |
 | `--pr` | ブランチの PR の番号（`gh pr view <branch> --json number`）。`REVIEW_WITH_PR`（`core/route/__init__.py:95`）と同じく、打つ時点に読む | ステップを打つとき |
 | `--scope` | 起点からの差分のファイル（`git diff --name-only -z --diff-filter=d <起点>...HEAD --`。作業場所で打つ）。`-z` で NUL 区切りにし、Git の引用表記（`core.quotePath`）を通さずにパスをそのまま取る。`progress/command.py:193` の `_diff_names` と同じ取り方で、工程の条件 `code_in_diff` が見る差分と同じ起点・同じ範囲 | ステップを打つとき |
@@ -486,13 +486,13 @@ exec "$@" --pr "$n" --scope "${files[@]}"
 - `_fill_refactor`
   - 事前条件: `values` に `branch`・`repo`・`worktree` がある（`route.derived` の後）。`project` は `prepare_plan` が 1 回だけ読んだ設定
   - 事後条件: 設定に `workflow.refactor` があればそれを使い、無ければ既定の起動を返す。`ci.required_checks` が無い・空なら `refactor` を返さない（`_missing` が `refactor` を `FILL_SOURCES` の出所の文付きで挙げ、`prepare_plan` が `started` の前に止める）。ブランチ戦略の設定が検査に落ちれば `route.RouteError`（理由は `default_base` と同じ文。`plan_failure` が `invalid` にする）
-  - 副作用: 今までどおり（候補のファイルの書き込み）に、起点を決める `git rev-parse` が 1 回（と、手元に無いときの `Git.remote()` の `git worktree list` が 1 回）増える。宣言の読み取りとブランチ戦略の検査は増えない（`route.default_base` を呼ばず、`prepare_plan` が読んだ `project` を使う）。`refactor` を設定から決めたときはどれも打たない
+  - 副作用: 今までどおり（候補のファイルの書き込み）に、起点を決める `git rev-parse` が 1 回（と、手元に無いときの `Git.remote()` の `git worktree list` が 1 回）増える。設定の読み取りとブランチ戦略の検査は増えない（`route.default_base` を呼ばず、`prepare_plan` が読んだ `project` を使う）。`refactor` を設定から決めたときはどれも打たない
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_fill_refactor` | 必須のチェックが無い | `.ndf/project.json` に `ci.required_checks` が無い | 設定の値が空 | 既定を組まない（`refactor` が欠けとして残る） | `_start` が `stopped`（`precondition`）。`items` に `refactor` と出所。工程の条件 `ci_declared` が偽なら工程自体が飛ぶので、ここに来るのは宣言と設定が食い違うときだけ | 設定を足して打ち直せる |
+| `_fill_refactor` | 必須のチェックが無い | `.ndf/project.json` に `ci.required_checks` が無い | 設定の値が空 | 既定を組まない（`refactor` が欠けとして残る） | `_start` が `stopped`（`precondition`）。`items` に `refactor` と出所。工程の条件 `ci_declared` が偽なら工程自体が飛ぶので、ここに来るのは工程の条件と `ci.required_checks` の値が食い違うときだけ | 設定を足して打ち直せる |
 | `REFACTOR_WITH_PR` | PR が無い | 工程「実装」が PR を作る前に流した・PR を閉じた | `gh pr view` の終了コードと空の返り | `stopped`（`precondition`）の結果 JSON を出して終える（`--pr` を空で `ndf refactor run` を打たない） | プランのステップが `stopped`（`precondition`）。`summary` は「ブランチ \<branch\> の PR が無い（工程「実装」の PR を作ってから打ち直す）」 | PR を作って工程を打ち直せる |
 | `REFACTOR_WITH_PR` | 起点を読めない | プランを組んだ後に手元のブランチやリモートの追跡ブランチが消えた | `git rev-parse --verify` の失敗 | 同上（`stopped`（`precondition`）） | 「起点 \<起点\> を作業場所で読めない」 | 取得し直して打ち直せる |
 | `REFACTOR_WITH_PR` | 差分が空 | 起点と同じ内容 | `files` の要素が 0 | 同上（`stopped`（`precondition`）） | 「起点 \<起点\> からの差分のファイルが無い」 | 後始末は無い |
@@ -502,7 +502,7 @@ exec "$@" --pr "$n" --scope "${files[@]}"
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_fill_refactor`（`test_invoke_refactor.py`） | `.ndf/project.json` に `workflow` が無く `ci.required_checks` が `["test"]` のリポジトリで、`refactor` が `bash -c <REFACTOR_WITH_PR> <branch> <起点> ndf refactor run --branch <branch> --base <起点> --required test` になる（受け入れ条件 2） | 設定に `workflow.refactor` があればそれが勝つ。候補があれば既定の後ろに `--candidates` が付く。手元にマージ先のブランチが無く、宣言の `remote` が `upstream` のリポジトリでは、起点が `upstream/<base>` になり、工程の条件が使う `_sprint_range` の起点と一致する。`branch_strategy.load` を差し替えた見張りが 0 回呼ばれる（読み込み済みの `project` から決める） | `ci.required_checks` が無いと `prepare_plan` が `TemplateValuesMissing` で `refactor` を挙げる |
+| `_fill_refactor`（`test_invoke_refactor.py`） | `.ndf/project.json` に `workflow` が無く `ci.required_checks` が `["test"]` のリポジトリで、`refactor` が `bash -c <REFACTOR_WITH_PR> <branch> <起点> ndf refactor run --branch <branch> --base <起点> --required test` になる（受け入れ条件 2） | 設定に `workflow.refactor` があればそれが勝つ。候補があれば既定の後ろに `--candidates` が付く。手元にマージ先のブランチが無く、ブランチ戦略の設定の `remote` が `upstream` のリポジトリでは、起点が `upstream/<base>` になり、工程の条件が使う `_sprint_range` の起点と一致する。`branch_strategy.load` を差し替えた見張りが 0 回呼ばれる（読み込み済みの `project` から決める） | `ci.required_checks` が無いと `prepare_plan` が `TemplateValuesMissing` で `refactor` を挙げる |
 | `refactor_launch` | 返る argv の先頭が `bash`・`-c`・`REFACTOR_WITH_PR` で、続く位置引数が `branch`・`base_ref`、その後ろが `ndf refactor run --branch … --base <base_ref> --required …` | `required` が 2 件なら `--required` の後ろに 2 件並ぶ | — |
 | `base_ref` | 手元に `base` があればその名前 | 手元に無ければ `<リモート>/<base>` | — |
 | `of_project` | 正しい `branch_strategy` を持つ中身で `load` と同じ `Strategy` が返る | — | セクションが無い・スキーマに落ちる中身で、`load` と同じ理由の `StrategyError` |

@@ -208,7 +208,7 @@ sequenceDiagram
 ### 決定 4: 決められない差し込みは、工程を `running` にする前に見つける
 
 - **質問**: 差し込みを決められない工程をどう扱うか
-- **選んだ案**: テンプレートを埋められるかを `started` の事象の前に確かめ、埋められなければ行を `pending` のままにして `stopped`（`precondition`）で返す。決まらない差し込みの名前と出所の候補を `items` に並べる
+- **選んだ案**: テンプレートを埋められるかを `started` の記録の前に確かめ、埋められなければ行を `pending` のままにして `stopped`（`precondition`）で返す。決まらない差し込みの名前と出所の候補を `items` に並べる
 - 採らなかった案:
   - 今のまま `started` → `failed` を書く（ステートマシンの履歴が失敗で埋まり、`retry` を打たないと次へ進めない）
   - 既定の値で埋めて起動する（誤った値で worker が動き、何が足りなかったか分からなくなる）
@@ -243,10 +243,10 @@ sequenceDiagram
 - **選んだ案**:
   - 課題が 2 件以上なら、`_issue_values`（`progress/invoke.py:387-412`）が番号の最も小さい課題を代表の課題にして `title`・`body_file`・`issue` を写す。代表の課題の選び方は、実装のフェーズの単位の決まり（`agent-layers.md` の「実装のフェーズの単位」の「代表の課題」）と同じである
   - `acceptance` は、`route.launched` の補いを課題ごとの `--issue` の並び（`--issue <番号1> --issue <番号2> ...`）にする。今の補い（`--issue <issue>` の 1 つ）では代表の課題の条件しか照らさない
-  - `refactor` は、`review` が設定なしでも `review_launch` で組める（`route/__init__.py:461-466`）のと同じ形で、`route.refactor_launch` が `ndf refactor run --branch <branch> --base <起点> --required <必須のチェック>` を `bash -c` の包み（`REFACTOR_WITH_PR`。位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が実行の argv）で組み、`invoke._fill_refactor` が既定として差し込む。起点は、読み込み済みの宣言から決めたマージ先を、工程の条件 `code_in_diff` と同じ規則（`command.base_ref`。手元に無ければ宣言のリモートの `<リモート>/<base>`）で参照にしたもので、`--base` と差分の列挙の両方に同じ値を渡す。`--required` は `.ndf/project.json` の `ci.required_checks` から、プランを組むときに取る。`--pr` はブランチの PR の番号、`--scope` は起点からの差分のファイル（`git diff -z` で取り、1 ファイル 1 引数で渡す）で、どちらも前の工程の後でないと決まらないので、包みが打つ時点に読んで足す（`REVIEW_WITH_PR` と同じ）。PR が無い・差分が空なら `ndf refactor run` を打たずに `stopped`（`precondition`）を返す（2026-11-23 に `ndf refactor run --help` で必須の引数がこの 5 つであることを確かめた）。設定（`workflow.refactor`）は既定を変えたいときだけ置く。値の出所の表は詳細設計の「リファクタリングの既定の起動」にある
+  - `refactor` は、`review` が設定なしでも `review_launch` で組める（`route/__init__.py:461-466`）のと同じ形で、`route.refactor_launch` が `ndf refactor run --branch <branch> --base <起点> --required <必須のチェック>` を `bash -c` の包み（`REFACTOR_WITH_PR`。位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が実行の argv）で組み、`invoke._fill_refactor` が既定として差し込む。起点は、読み込み済みの設定から決めたマージ先を、工程の条件 `code_in_diff` と同じ規則（`command.base_ref`。手元に無ければブランチ戦略の設定のリモートの `<リモート>/<base>`）で参照にしたもので、`--base` と差分の列挙の両方に同じ値を渡す。`--required` は `.ndf/project.json` の `ci.required_checks` から、プランを組むときに取る。`--pr` はブランチの PR の番号、`--scope` は起点からの差分のファイル（`git diff -z` で取り、1 ファイル 1 引数で渡す）で、どちらも前の工程の後でないと決まらないので、包みが打つ時点に読んで足す（`REVIEW_WITH_PR` と同じ）。PR が無い・差分が空なら `ndf refactor run` を打たずに `stopped`（`precondition`）を返す（2026-11-23 に `ndf refactor run --help` で必須の引数がこの 5 つであることを確かめた）。設定（`workflow.refactor`）は既定を変えたいときだけ置く。値の出所の表は詳細設計の「リファクタリングの既定の起動」にある
 - 採らなかった案:
   - 課題が 2 件以上のときは差し込みを決めずに止める（決定 4 の止まり方になるが、`standard` のスプリントは課題を束ねることが多く、ほとんどの実装の工程が止まる）
-  - `.ndf/project.json` に `workflow.refactor` を足して、このリポジトリだけ埋める（ほかのリポジトリでは同じように止まる。リポジトリの設定が無ければ動かない形は、設定 1 つで同じ工程が使える約束に反する）
+  - `.ndf/project.json` に `workflow.refactor` を足して、このリポジトリだけ埋める（ほかのリポジトリでは同じように止まる。リポジトリの設定が無ければ動かない形は、設定 1 つで同じ工程が使える決まりに反する）
 - **代償**: PR の題と本文は代表の課題のものになる。ほかの課題は、PR の本文の `Closes` の行と実装の Pull Request の作り方（`pr` の工程）が拾う
 - 根拠: Value 4「テストのコマンド・起点のブランチ・配布の手段・言語・ランタイム・課題の置き場が違っても、設定か引数を渡せば同じ工程が使える」（MVV バージョン 1）
 
@@ -289,7 +289,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 1（要求と受け入れ条件が起動する） | `standard` のステートマシンで工程「要求と受け入れ条件」を起動すると、`worker` の差し込みで止まらずにプランが起動する | `params.json` の `worker` の既定を消すと落ちる |
 | 2（実装・リファクタリングの差し込み） | 課題が 1 件と 2 件以上の工程「実装」で `title`・`body_file`・`issue` が代表の課題から決まり、`acceptance` が課題ごとの `--issue` の並びになる。`.ndf/project.json` に `workflow` が無いリポジトリの工程「リファクタリング」で `refactor` が既定から決まる | 課題が 2 件以上のときに `acceptance` を代表の課題だけにすると落ちる。`refactor` の既定を消すと落ちる |
-| 3（failed を書かない） | 差し込みを決められない工程を `ndf progress next` で起動すると、ステートマシンの事象に `started` も `failed` も増えず、決まらない差し込みの名前と出所の候補が返る | 決まらないときに `started` を書くと落ちる |
+| 3（failed を書かない） | 差し込みを決められない工程を `ndf progress next` で起動すると、ステートマシンの記録に `started` も `failed` も増えず、決まらない差し込みの名前と出所の候補が返る | 決まらないときに `started` を書くと落ちる |
 | 4（取り場所を示す） | `ndf progress check` が、欠けた `delivery`・`mvv_gate` の行に `x-source` の文を添える | `x-source` を読まずにキーの名前だけを出すと落ちる |
 | 5（退行） | 工程「クリーンアップ」が、この変更の前と同じ引数でプランを起動する | `merged` のテンプレートに `worker` を足すと落ちる |
 | 決定 1（プロンプトを書く） | `ndf answer work <作業名>` が `<保存先>/<作業名>.prompt.md` を書いてから `ndf worker run` の argv へ置き換わる。プロンプトに、起動指示の 7 項目と規則 7 個の見出しがそろう | プロンプトを書かずに置き換わると落ちる |
