@@ -15,6 +15,8 @@ from ndf.domains.crossreview import journal, prior_decide, report_decide, store,
 from .conftest import FakePort
 
 HEAD1, HEAD2 = "a" * 40, "b" * 40
+# 収束の妨げになる重さの指摘が下げられないための 1 文（#4014）
+IMPACT = "保存が止まり、利用者の入力が消える"
 
 
 def _finding(fid: str, round_no: int, path: str, line=None, outcome: str = fin.UNRESOLVED, **extra) -> dict:
@@ -156,10 +158,10 @@ def test_threads_of_another_writer_or_occurrence_are_not_taken() -> None:
 def test_revived_finding_is_written_again_not_bound_to_the_old_thread() -> None:
     """再発した指摘（新しい発生の値）は、同じ番号の resolve 済みの古いスレッドに結び付かず新しく書かれる。"""
     rows = journal.FindingJournal()
-    rows.enter(1, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 3, "by": "codex"}])
+    rows.enter(1, [{"text": "A が止まる", "severity": "major", "impact": IMPACT, "path": "a.py", "line": 3, "by": "codex"}])
     old = threads.opening(rows.rows["r1-1"])
     rows.rows["r1-1"]["outcome"] = fin.FIXED
-    rows.enter(2, [{"text": "A が止まる", "severity": "major", "path": "a.py", "line": 5, "by": "codex"}])
+    rows.enter(2, [{"text": "A が止まる", "severity": "major", "impact": IMPACT, "path": "a.py", "line": 5, "by": "codex"}])
     port = FakePort()
     port.left = [prior_decide.Thread(77, old, True, "a.py", 3, True)]
     data = {"rounds": [{"round": 1, "head": HEAD1}, {"round": 2, "head": HEAD2}], "findings": list(rows.rows.values())}
