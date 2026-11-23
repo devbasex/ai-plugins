@@ -4,6 +4,7 @@
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）
     ndf hooks capture <ランタイム> <バージョン> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
     ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）をコントラクト表と予算から作り直す
+    ndf hooks judge-cases [--cases <パス>] [--rounds N]  # 判定の例の組を実際の軽いモデルで確かめる（#4000 の決定 9）
 
 hook の経路ではない（利用者と CI が打つ）。
 """
@@ -15,9 +16,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import cli, identity
+from ndf.adapters import reply_judge
 from ndf.contracts import causes, result
 from ndf.domains.hooks import budget, metrics, registration, tables
 
@@ -112,6 +114,26 @@ def _render(check: bool) -> int:
     )
 
 
+def _judge_cases(cases: Optional[str], rounds: Optional[int], run: Optional[Any] = None) -> int:
+    """判定の例の組を実際の軽いモデルで確かめる。1 周でも外れた例があれば `stopped`（#4000 の決定 9）。"""
+    path = Path(cases) if cases else reply_judge.cases_path()
+    if run is None:
+        run = reply_judge.run_cases
+    try:
+        times = int(rounds) if rounds is not None else int(reply_judge.setting("rounds"))
+        got = run(path, times)
+    except reply_judge.JudgeRefused as exc:
+        return result.emit(result.stopped(TOOL, "refused", exc.reason))
+    except (OSError, ValueError, reply_judge.JudgeSettingError) as exc:
+        return _invalid(str(exc))
+    missed, counts = got["items"], got["metrics"]
+    if missed:
+        detail = f"判定の例 {counts['cases']} 件のうち {counts['missed']} 件が {times} 周のどこかで外れた"
+        return result.emit(result.stopped(TOOL, "check_failed", detail, items=missed, metrics=counts))
+    summary = f"判定の例 {counts['cases']} 件が {times} 周とも期待どおり（打った回数 {counts['calls']}）"
+    return result.emit(result.result(TOOL, result.OK, summary, metrics=counts))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本・登録の生成")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -127,6 +149,10 @@ def main(argv: list[str]) -> int:
     ren = sub.add_parser("render", help="登録をコントラクト表と予算から作り直す")
     ren.add_argument("--check", action="store_true", help="書かずに、作り直した結果と違えば stopped")
     ren.set_defaults(run=lambda a: _render(a.check))
+    jc = sub.add_parser("judge-cases", help="判定の例の組を実際の軽いモデルで確かめる")
+    jc.add_argument("--cases", help="判定の例の組のパス（省けばコントラクトの組）")
+    jc.add_argument("--rounds", type=int, help="1 つの例を打つ周の数（省けば上限の設定の値）")
+    jc.set_defaults(run=lambda a: _judge_cases(a.cases, a.rounds))
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
