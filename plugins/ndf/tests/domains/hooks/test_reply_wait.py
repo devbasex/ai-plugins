@@ -144,6 +144,23 @@ def test_a_conditional_contact_note_is_a_report():
     assert reply_wait.reply_kind("作業を終えました。ご質問があれば、ご連絡をお待ちしています。") == "report"
 
 
+def test_an_approval_request_here_after_a_lane_subject_is_a_wait():
+    """主体を書かない句でも、こちらの操作への承認を求める句は別のレーンの主体を引き継がない。"""
+    assert _is_wait("別のレーンはレビューを終え、こちらの変更をマージしてよいかご承認をお待ちしています。")
+
+
+def test_a_confirmation_wait_elsewhere_is_not_a_wait_here():
+    assert reply_wait.reply_kind("別のレーンはレビューを終え、担当者の確認をお待ちしています。") == "elsewhere_wait"
+
+
+def test_waiting_for_ci_results_is_a_report():
+    assert reply_wait.reply_kind("CI の結果をお待ちしています。") == "report"
+
+
+def test_a_conditional_contact_note_with_a_specific_word_is_a_report():
+    assert reply_wait.reply_kind("修正は完了しました。問題があれば、ご指示をお待ちしています。") == "report"
+
+
 def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
     """guard は `has_prose` の結果を持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
     for text in ("返答を待ちます。", "作業を終えました。", "p9 の作業を終えました。別のレーンは承認を待っています。"):

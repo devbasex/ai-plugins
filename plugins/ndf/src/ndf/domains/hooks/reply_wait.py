@@ -109,7 +109,15 @@ _QUOTED = re.compile(r"「[^「」]*」|『[^『』]*』")
 # 別の場所（ほかのセッション・レーン）の待ちを報告する文。11 系の `classify_reply` と同じ形（context.py もこれを読む）
 _ELSEWHERE_PLACES = r"(セッション|レーン|計画|オーガナイザー)"
 ELSEWHERE_RE = re.compile(rf"(別の|ほかの|他の)?{_ELSEWHERE_PLACES}[^\n]{{0,40}}(承認|回答|判断)[^\n]{{0,10}}待")
+# 句の中の別の場所の待ちの報告。USER_WAIT_CONTAINS で待ちにした語（確認・指示・返事など）も報告として外す
+_ELSEWHERE_CLAUSE_RE = re.compile(
+    rf"(別の|ほかの|他の)?{_ELSEWHERE_PLACES}[^\n]{{0,40}}(承認|回答|判断|確認|指示|返事|返答|答え|入力|意向)[^\n]{{0,10}}待"
+)
 _ELSEWHERE_PLACE = re.compile(_ELSEWHERE_PLACES)
+# 主体を書かない句でも、こちらの操作への承認・回答を求める句と読む印（前の句の別の場所を引き継がない）
+_OWN_REQUEST_MARKERS = ("こちら", "私", "当方", "てよいか", "てよろしいか", "でよいか", "でよろしいか", "てもよいか")
+# 人の返事でないものを待つ「お待ちしています」（「CI の結果をお待ちしています。」）。待ちの文に数えない
+_NON_REPLY_WAIT = re.compile(r"(結果|完了|終了|終わり|処理|反映|実行|ビルド|デプロイ|ジョブ|テスト|CI)をお待ち")
 
 
 def _prose_lines(text: str) -> list[tuple[str, bool]]:
@@ -172,10 +180,17 @@ def _core(sentence: str) -> str:
 
 
 def _user_wait(core: str) -> bool:
-    """利用者の返事を待つと述べる文か。汎用の「お待ちしています」は、条件の添え書きでないときに限る。"""
-    if any(w in core for w in USER_WAIT_CONTAINS):
+    """利用者の返事を待つと述べる文か。
+    「お待ちしています」の形の連絡の案内は、条件の添え書き（「問題があれば、ご指示をお待ちしています。」）なら
+    具体的な待ちの語でも汎用の形でも外す（「…場合は、…ご意向を伺ってからにします。」は待ちに残す）。汎用の形は、
+    人の返事でないもの（結果・完了など）を待つときも外す。
+    """
+    conditional = any(m in core for m in CONDITIONAL_MARKERS)
+    if any(w in core for w in USER_WAIT_CONTAINS if not (conditional and "お待ち" in w)):
         return True
-    return any(w in core for w in GENERIC_USER_WAIT) and not any(m in core for m in CONDITIONAL_MARKERS)
+    if conditional:
+        return False
+    return any(w in core for w in GENERIC_USER_WAIT) and _NON_REPLY_WAIT.search(core) is None
 
 
 def _is_wait(sentence: str) -> bool:
@@ -245,7 +260,7 @@ def _clauses(sentence: str) -> list[str]:
 
 def _elsewhere_clause(clause: str) -> bool:
     """句が別の場所の待ちの報告か。報告の前後（同じ句の中）に回答・承認を待つ質問が残れば偽。"""
-    found = ELSEWHERE_RE.search(clause)
+    found = _ELSEWHERE_CLAUSE_RE.search(clause)
     if found is None:
         return False
     before = clause[: found.start()].rstrip(_CLAUSE_SEPARATORS)
@@ -259,6 +274,8 @@ def _only_elsewhere(sentence: str) -> bool:
     句ごとに待っている主体を見る。別の場所の待ちと確かめられた句だけを外し、ほかの句に回答・承認を待つ質問が
     残れば偽（「別のレーンを止めて、こちらの変更は回答を待ちます。」は、こちらの回答待ち）。主体を書かない句は
     前の句の主体を引き継ぐ（「別のレーンはレビューを終え、承認を待っています。」は、別のレーンの承認待ち）。
+    ただし、こちらの操作への承認・回答を求める句（「こちらの変更をマージしてよいかご承認をお待ちしています。」）は
+    引き継ぐ前に判定し、待ちに残す。
     """
     found = False
     subject = ""
@@ -266,6 +283,8 @@ def _only_elsewhere(sentence: str) -> bool:
         topic = _CLAUSE_TOPIC.match(clause.rstrip(_CLAUSE_SEPARATORS))
         if topic is not None:
             subject = topic.group(0) if _ELSEWHERE_PLACE.search(topic.group(0)) else ""
+        elif subject and any(m in clause for m in _OWN_REQUEST_MARKERS) and _asks_reply(clause):
+            return False
         text = clause if topic is not None else subject + clause
         if _elsewhere_clause(text):
             found = True
