@@ -330,6 +330,40 @@ def test_prepare_paths_keeps_a_place_observed_missing_after_dotdot_returns_to_it
     assert (target / "n.report.md.done").exists()
 
 
+def test_prepare_paths_refuses_a_link_back_to_a_place_observed_missing(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    target = tmp_path.resolve() / "new"
+    (tmp_path / "alias").symlink_to("new")
+    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # new が無いと観測した後、既存のディレクトリが new へ移される
+    with pytest.raises(worker_paths.EntryUnsafe) as e:
+        worker_paths.prepare_paths(tmp_path / "new" / ".." / "alias", "n")
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
+
+
+def test_prepare_paths_refuses_a_parent_swapped_before_an_absolute_link_is_followed(tmp_path, monkeypatch):
+    shared = tmp_path.resolve() / "shared"
+    (shared / "sub").mkdir(parents=True)
+    (shared / "alias").symlink_to(shared / "sub")
+    real_lookup = worker_paths._lookup
+    swapped = []
+
+    def lookup(parent, part):  # alias を読む直前に、shared を移して別の shared/sub を置く
+        if part == "alias" and not swapped:
+            swapped.append(True)
+            shared.rename(tmp_path / "moved")
+            (shared / "sub").mkdir(parents=True)
+            (shared / "sub" / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
+        return real_lookup(parent, part)
+
+    monkeypatch.setattr(worker_paths, "_lookup", lookup)
+    with pytest.raises(worker_paths.EntryUnsafe) as e:
+        worker_paths.prepare_paths(shared / "alias", "n")
+    assert e.value.kind == "replaced"
+    assert (shared / "sub" / "n.report.md").read_text(encoding="utf-8") == "別の作業の報告"
+
+
 def test_open_workdir_refuses_a_parent_swapped_after_the_paths_were_resolved(tmp_path):
     parent = tmp_path / "shared"
     parent.mkdir()

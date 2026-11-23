@@ -144,7 +144,9 @@ def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
 
     無い要素の後の `..` は無い要素を打ち消すだけにし、打ち消した後にまた要素が来れば、そこから確かめ直す。
     ただし一度無いと観測した場所（解いた親の下の名前）は、`..` の後に同じ場所へ戻っても無い要素として残す
-    （`new/../new` で、観測の後に既存のディレクトリが `new` へ移されても既存とみなさない）。
+    （`new/../new` で、観測の後に既存のディレクトリが `new` へ移されても既存とみなさない）。リンクの先として同じ場所へ
+    戻ったとき（`new/../alias` の `alias` が `new` を指す）は厳密にたどれないので `EntryUnsafe`（`replaced`）で拒む。
+    絶対パスのリンクなどで一度開いた場所を開き直したときは、前に開いたディレクトリと突き合わせ、違えば同じく拒む（`_Walk`）。
     `open_workdir` は `os.path.abspath` で `..` を畳むので、返すパスに `..` を残すと開く場所と食い違う。
     解いた要素はディレクトリであることを確かめ、通常のファイルなど（リンクの先を含む）なら次の `..` で
     その親へ進む前に `EntryUnsafe`（`other`）で拒む。
@@ -162,7 +164,6 @@ def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
 def _walk_parts(walk: "_Walk", parts: Iterable[str]) -> list[str]:
     """`parts` を `walk` の位置から順に解き、無いと観測した後の要素（`..` で打ち消した残り）を返す。"""
     missing: list[str] = []
-    absent: set[Path] = set()
     for part in parts:
         if part in ("", "."):
             continue
@@ -172,11 +173,8 @@ def _walk_parts(walk: "_Walk", parts: Iterable[str]) -> list[str]:
             else:  # 解いた位置はリンクを含まないので、持っている親の記述子へ戻るだけでよい
                 walk.up()
             continue
-        candidate = walk.path / part
-        if not missing and candidate not in absent and walk.enter(part, candidate, strict=False):
+        if not missing and walk.enter(part, walk.path / part, strict=False):
             continue
-        if not missing:
-            absent.add(candidate)
         missing.append(part)
     return missing
 
@@ -189,6 +187,9 @@ class _Walk:
     """`_resolve_existing` が解いている位置。`fds[i]` は根から `names[:i]` を開いた記述子で、抜けるまで開いたまま持つ。
 
     次の要素は `fds[-1]`（確かめた親）に対してだけ開き、`..` は 1 つ手前の記述子へ戻る。
+    `seen` は開いた場所ごとの `(st_dev, st_ino)`、`absent` は無いと観測した場所で、リンクの先を解くときも共有する。
+    絶対パスのリンクや `..` の後に同じ場所を開き直したとき、前に開いたディレクトリでなければ（間に親を差し替えられた）
+    `EntryUnsafe`（`replaced`）で拒み、無いと観測した場所をリンクの先として厳密にたどるときも同じく拒む。
     """
 
     def __init__(self, root: str) -> None:
@@ -196,6 +197,9 @@ class _Walk:
         self.fds = [os.open(root, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)]
         self.names: list[str] = []
         self.links = _MAX_LINKS
+        st = os.fstat(self.fds[0])
+        self.seen: dict[Path, tuple[int, int]] = {Path(root): (st.st_dev, st.st_ino)}
+        self.absent: set[Path] = set()
 
     @property
     def path(self) -> Path:
@@ -214,9 +218,16 @@ class _Walk:
     def enter(self, part: str, probe: Path, *, strict: bool) -> bool:
         """確かめた親の直下の `part` へ進む。リンクなら確かめた親から先を厳密に解く。
 
-        無ければ、`strict` なら `EntryUnsafe`（`symlink`。リンクの先が無い）、そうでなければ偽を返す。
+        無ければ、`strict` なら `EntryUnsafe`（`symlink`。リンクの先が無い）、そうでなければ偽を返し、無いと観測した場所に記録する。
+        記録した場所は後に現れても開かず、`strict` なら `EntryUnsafe`（`replaced`）、そうでなければ偽にする。
+        前に開いた場所を別のディレクトリとして開いたら `EntryUnsafe`（`replaced`）。
         ディレクトリでなければ（リンクの先を含む）`EntryUnsafe`（`other`）。
         """
+        key = self.path / part
+        if key in self.absent:
+            if strict:
+                raise EntryUnsafe(str(probe), "replaced")
+            return False
         parent = self.fds[-1]
         try:
             child = _lookup(parent, part)
@@ -230,9 +241,13 @@ class _Walk:
         if child is None:
             if strict:
                 raise EntryUnsafe(str(probe), "symlink")
+            self.absent.add(key)
             return False
         self.fds.append(child)
         self.names.append(part)
+        st = os.fstat(child)
+        if self.seen.setdefault(key, (st.st_dev, st.st_ino)) != (st.st_dev, st.st_ino):
+            raise EntryUnsafe(str(probe), "replaced")
         return True
 
     def _follow(self, target: str, probe: Path) -> None:
