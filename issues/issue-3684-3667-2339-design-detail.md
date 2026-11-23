@@ -18,7 +18,7 @@ plugins/ndf/
 │   │   └── stages/                           deploy.json（出力）・release-verification.json・layout-review.json（入力）の version を product_version へ
 │   └── schemas/
 │       ├── limits.schema.json                read_by を必須にする
-│       ├── result.schema.json                items の要素へ任意の欄を 4 つ
+│       ├── result.schema.json                items の要素へ任意の欄を 4 つ・任意の version・$defs/outputs の version を product_version へ
 │       └── internal/
 │           ├── common.schema.json           * 共通の欄（version・at・status）の $defs
 │           ├── usage.schema.json            * 使用量の記録の 1 行
@@ -64,7 +64,8 @@ plugins/ndf/
 │   ├── progress/plan/__init__.py             read_doc が今の版より大きい版で止まる
 │   ├── progress/command.py                   条件 release_record が product_version を見る・machine_context を compose_context へ・_prepare_new が version: 1 を書く
 │   ├── progress/run.py                       View.context を compose_context へ
-│   ├── progress/stages.py                    compose_context を新設
+│   ├── progress/stages.py                    compose_context を新設・snapshot_from の前に stage-snapshot の移行・snapshot_dict が版 1 で書く
+│   ├── domains/release/cli.py                assembled・cmd_record の outputs の version を product_version へ
 │   ├── progress/gate/asking.py               リリースのゲートが product_version を読む
 │   └── progress/invoke.py                    read_report・_call_skill が結果の版を見る
 ├── skills/refactoring/SKILL.md               値の置き場の基準
@@ -392,12 +393,29 @@ plugins/ndf/
 
 - **形の版は、作成の時点の値にだけ持たせる。** `_prepare_new`（`progress/command.py:539`）が `version: 1` を書く。`outputs_recorded` の `outputs` は宣言した出力の部分の辞書で、形の版を持たせない（`invoke.finished` の `value_errors`（`invoke.py:277`）に渡るのも部分の辞書で、そこへ版を足さない）
 - **重ねる入口を 1 つにする。** `progress/stages.py` に `compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]` を置き、`View.context` と `machine_context` の 2 つはこれを呼ぶ。`outputs_recorded` を書く 3 つの書き手（通常の実行と `ndf progress finish` が通る `stages.py:289`、ゲートの回答の `gate/answering.py:122・188・300`）はどれも同じ事象を書くので、読む側の 1 か所で受ければ全経路が通る
-- **`compose_context` の順序:** (1) 作成の時点の値の `version` が整数でなければ版 0 とし、文字列の `version` を `product_version` へ移す。(2) 各 `outputs` を古い順に重ねる前に、文字列の `version`（旧 `deploy` の出力）を `product_version` へ移す。(3) 最後に `version` を今の版（1）で置く（出力が形の版を上書きしない）。この順序なので、更新の前に出荷した既存のスプリントを再開しても `release_record` は `product_version` で真になる
+- **`compose_context` の順序:** (1) 作成の時点の値を `internal.read_record("context", initial)` に通す。版 0（`version` が無いか文字列）は文字列の `version` を `product_version` へ移して版 1 にし、今の版より大きい整数の版は `precondition` の `InternalError` で止める（新しい NDF が保存した文脈を古い NDF が版 1 として読んで工程を再開しない）。(2) 各 `outputs` を古い順に重ねる前に、文字列の `version`（旧 `deploy` の出力）を `product_version` へ移す。(3) 最後に `version` を (1) で確かめた版で置き直す（出力が形の版を上書きしない）。この順序なので、更新の前に出荷した既存のスプリントを再開しても `release_record` は `product_version` で真になる
+- **`precondition` の伝え方:** `compose_context` の `InternalError` は 2 つの呼び手（`View.context` と `machine_context`）のどちらも捕まえずに上へ通し、`ndf progress` の各サブコマンドの入口が今の例外の表で `stopped`・`precondition`・終了コード 3（「新しい版の文脈を古い NDF が読んだ。プラグインを更新する」）にする。2 つの呼び手に別々の受け方を書かない
+- **保存済みの工程の定義（スナップショット）も移す:** `read_current`（`progress/command.py:395`）は、作成の時点に保存した工程の定義を `stages.snapshot_from` で復元する。配布する `stages/*.json` を直しても、既存のスプリントの `StageDef` の `inputs`・`outputs` は `version` のまま残り、`release-verification` に文脈の形の版 `1` が渡る。そこでスナップショットを内部データの種類 `stage-snapshot` とし、`snapshot_from` の前に `read_record("stage-snapshot", raw)` を通す。スナップショット自身の `version` は工程の定義の文書の版の文字列（`"1.0.0"`。`definition.py:382`）なので、版 0 の見分けは文脈と同じ（整数でなければ版 0）。版 0 → 1 の移し方: スナップショットの文字列の `version` を `definition_version` へ移し、各工程の `inputs`・`outputs` の `"version"` を `"product_version"` に置き換え、`version: 1` を足す。`snapshot_dict` は版 1 の形で書く（`definition_version` と `version: 1`）
 - **工程の定義の `version` の点検:** `contracts/workflow/stages/*.json` の `metadata.ndf.inputs`・`outputs` の `version` を製品の版として `product_version` へ改名する。今あるのは `deploy.json`（出力）・`release-verification.json`（入力）・`layout-review.json`（入力）の 3 つ。各ファイルの先頭の `"version": "1.0.0"` は工程の定義の書式（Serverless Workflow の文書の版）で、別の意味なので変えない。コードで文脈の `version` を読む所（`progress/command.py:337` の `release_record`・`progress/gate/asking.py:219` のリリースのゲート）も `product_version` へ変える。点検の手段は `git grep -n '"version"' plugins/ndf/contracts/workflow/stages` と `git grep -n 'ctx.get("version")\|context\["version"\]\|"version" in context' plugins/ndf/src`
+
+### リリースの結果の製品の版（出力元から後の工程の入力まで）
+
+製品の版の改名は、文脈と工程の定義だけでなく、版を出す側と結果のスキーマにも当てる。どれかが旧い `version` のままだと、`invoke.finished` が工程の出力の宣言に無いキーを捨てる（または結果のスキーマが拒む）ので、出荷の後の工程へ版が渡らない。
+
+| 箇所 | 今 | 変えた後 |
+| --- | --- | --- |
+| `contracts/schemas/result.schema.json` の `$defs/outputs`（`additionalProperties: false`） | `version`（文字列）を持つ | `version` を消し、`product_version`（文字列）を持つ。残すと形の版と同じ名前になり、消さずに足すだけだと旧い名前の出力が通り続ける |
+| `domains/release/cli.py` の `assembled`（101 行）と `cmd_record`（199 行） | `outputs` に `"version"` を出す | `"product_version"` を出す |
+| `stages/deploy.json` の出力・`release-verification.json`・`layout-review.json` の入力 | `version` | `product_version`（上の「工程の文脈の版」） |
+| 保存済みのスナップショットの入出力 | `version` | `read_record("stage-snapshot", ...)` が移す（同上） |
+
+読む側は、旧い `version` を `outputs` に持つ結果を受けない（結果のスキーマが拒み、`bad_report` になる）。結果は、同じ NDF の中で子プロセスまたは Skill が出してすぐ読む 1 回限りの値で、出す側と読む側の版がそろうためである。旧い名前が残るのは保存済みの値（`outputs_recorded` と スナップショット）だけで、これは `compose_context` と `read_record("stage-snapshot", ...)` が移す。
+
+確かめ（単体テスト）: `cmd_record` の結果 → `invoke.finished`（`deploy` の出力の宣言で拾う）→ `outputs_recorded` → `compose_context` → `release-verification` の入力の解決、を 1 本の流れで通し、入力に `product_version` の文字列が渡ることを見る。旧いスナップショット（入力が `version`）と旧い `deploy` の出力を持つ、出荷済みのスプリントを再開した場合も同じ値が渡ることを見る。
 
 ### 結果の版と、形の違う結果
 
-- **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は元の `tool` が文字列ならそれ、無ければ `ndf`・`cause.kind` は `invalid`・`detail` に誤りの要約）を 1 行で出し、`invalid` の終了コードを返す。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
+- **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は元の `tool` が `^[a-z][a-z0-9-]*$` に合う文字列ならそれ、無ければ `ndf`・`cause.kind` は `invalid`）を 1 行で出し、`invalid` の終了コードを返す。**代わりの結果の `detail` には、確かめた値も `ValidationError.message` も入れない。** `schema_errors` の文は値やオブジェクト全体を含みうるので、それを標準出力へ移すと、元の結果を出さない措置が効かず、不正な結果に混ざった秘密や利用者のデータが工程や閲覧者へ渡る。`detail` は固定の文「結果 JSON の形が違う（<件数> 件）」に、誤りごとのスキーマの側の場所（`absolute_schema_path`。スキーマのキーと番号だけで値を含まない）と規則の名前（`validator`。例 `required`・`enum`）を足して組む。値を含む誤りの文は、今と同じく標準エラーにだけ書く。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
 - **読む側（`invoke.read_report`・`_call_skill`）:** 結果の `version` が無ければ版 1、1 なら今の版として `result.errors` で確かめる（今と同じ）。今の版より大きい版は形の違い（`bad_report`）と分け、`stopped`・`precondition`（「新しい版の結果を古い NDF が受け取った。プラグインを更新する」）の `StageResult` にする。整数でない `version` は形の違いとして今の `bad_report` に入れる
 
 ### 関数の仕様
@@ -467,7 +485,9 @@ plugins/ndf/
 | `migrate` | 合成した版 1 → 2 の移行で項目が移る（今の版は 1 なので、移行の経路は合成したスキーマで確かめる） | 移す項目が無い版（そのまま） | 新しい版（止まる） |
 | `jsonl.read_rows` | 合う行だけを返し、`Broken` が空 | 書きかけの最後の行（`Broken` 1 件・行番号つき）・項目の欠けた行（`Broken` 1 件・止まらない） | 今の版より新しい版の行（止まる） |
 | `compose_context` | 作成の時点の値に出力を重ね、`version` が 1 | 文字列の `version` を持つ旧い作成の時点の値と旧い `deploy` の出力（どちらも `product_version` へ移り、`release_record` が真）・出力に `version` が無い通常の工程（形の版が 1 のまま） | — |
-| `result.emit` | 合う結果をそのまま出す | — | 形の違う結果で、代わりの `stopped`（`invalid`）が 1 行出て終了コード 2 |
+| `result.emit` | 合う結果をそのまま出す | — | 形の違う結果で、代わりの `stopped`（`invalid`）が 1 行出て終了コード 2・形の違う値に秘密に見立てた文字列（`"sk-test-secret"`）を入れた結果で、標準出力の行にその文字列が無い |
+| `compose_context` の版 | — | — | 作成の時点の値が `version: 2`（`precondition` で止まり、`View.context` と `machine_context` のどちらも工程を再開しない） |
+| `read_record("stage-snapshot")` | 版 1 のスナップショットをそのまま返す | 入力が `version` の旧いスナップショット（`product_version` へ移り、文字列の `version` は `definition_version` へ） | `version: 2`（`precondition`） |
 | `invoke.read_report` | `version` の無い結果を版 1 として受ける | `version: 1` | `version: 2` の結果（`stopped`・`precondition`。`bad_report` にしない）・`version: "1"`（`bad_report`） |
 | `stamp`・`epoch` | `epoch(stamp(t)) == t`（マイクロ秒まで） | 同じ秒の 2 つの時刻の前後が保たれる | 時差つきの文字列を `epoch` に渡す（`InternalError`） |
 | 開発ループの再生 | 版 0 の事象だけの `record.jsonl` と、版 0 と版 1 が混ざった `record.jsonl` から、今と同じ状態（回答の時刻・停止の時刻・出した版）が再生できる | 出荷の事象の `product_version` が `released` に入る | — |
