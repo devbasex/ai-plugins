@@ -57,6 +57,13 @@ _CASES = [
         ("echo", "\\$HOME", "a\\ b"),
         id="escapes-kept",
     ),
+    pytest.param(
+        "rm $W/$n.md.done x",
+        ("rm", "$W/$n.md.done", "x"),
+        ("rm", "$W/$n.md.done", "x"),
+        ("rm", "$W/$n.md.done", "x"),
+        id="adjacent-sections-are-one-word",
+    ),
     pytest.param("cat <<EOF\nx\nEOF", ("cat",), ("cat",), ("cat",), id="heredoc"),
     pytest.param("echo $(date) `pwd`", ("echo",), ("echo",), ("echo",), id="command-substitution-skipped"),
 ]
@@ -73,3 +80,11 @@ def test_parse_shell_carries_the_words_into_the_command():
     assert cmd.argv == ("timeout", "590", "sleep", "600")
     assert cmd.source == ("timeout", "590", '"sleep"', "'600'")
     assert cmd.body_argv == ("sleep", "600")
+
+
+def test_body_source_lines_up_with_the_words_after_the_wrapper():
+    cmd = context.parse_shell("timeout 590 \"sleep\" '600'").commands[0]
+    assert cmd.body_source == ('"sleep"', "'600'")
+    split = context.parse_shell("env -S'rm -f' \"$W\"").commands[0]
+    assert split.body_argv == ("rm", "-f", "$W")
+    assert split.body_source == ("rm", "-f", '"$W"')

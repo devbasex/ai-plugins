@@ -1,7 +1,7 @@
 """空かもしれない変数の `rm` を止める guard（#3877 の決定 4）。
 
-展開が効く位置（引用の外か二重引用の中）の `$NAME`・`${NAME}` だけを見て止める。`${NAME:?}` と、
-引用やエスケープで文字のまま渡るドル記号は通す。
+展開が効く位置（引用の外か二重引用の中）の `$NAME`・`${NAME}` を、`rm` の削除の対象だけで見て止める。`${NAME:?}`・
+固定の既定値と代替値・引用やエスケープで文字のまま渡るドル記号・特殊パラメータは通す。
 """
 
 from __future__ import annotations
@@ -23,33 +23,62 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
     ("command", "word"),
     [
         ('rm -f "$W/$n.report.md.done"', '"$W/$n.report.md.done"'),
-        # 引用の無い 2 つめの変数の後ろで、parse_shell が語を 2 つに割る（`$W/$` と `n.md.done`）。先の語が `$W` を残す
-        (ORIGINAL, "$W/$"),
+        # tree-sitter-bash は引用の無い 2 つめの変数の前で語を割る（`$W/$` と `n.md.done`）。構文上の 1 語として読む
+        (ORIGINAL, "$W/$n.md.done"),
+        # ディレクトリの変数だけを直しても、名前の変数が空なら `${W:?}/.md.done` を消す
+        ("rm -f ${W:?}/$n.md.done", "${W:?}/$n.md.done"),
+        ("rm -f ${W:?}/${n:?}.md.done", None),
         ("rm -rf /tmp/x", None),
         ('rm -f "${W:?}/x"', None),
         ('rm -f "${W:-/tmp}/x"', None),
         ('rm -f "${W:+/tmp}/x"', None),
+        # 既定値・代替値の中の展開は評価される
+        ('rm -rf "${DIR:-$FALLBACK}/cache"', '"${DIR:-$FALLBACK}/cache"'),
+        ('rm -rf "${DIR:+$SUBDIR}/cache"', '"${DIR:+$SUBDIR}/cache"'),
+        ('rm -f "${W:-${F:?}}/x"', None),
         ("ls $W", None),
         ("rm -f 'cost$5.txt'", None),
         ("rm -f cost\\$5.txt", None),
         ('rm -f "cost\\$5.txt"', None),
         ("rm -f 'a$b'\"$X\"", "'a$b'\"$X\""),
         ('/bin/rm -f "$W/x"', '"$W/x"'),
+        # ラッパーの後ろと `bash -c` の中の rm
+        ('command rm -f "$W/x"', '"$W/x"'),
+        ('timeout 5 rm "$W"', '"$W"'),
+        ("bash -c 'rm -f \"$W/x\"'", '"$W/x"'),
+        # オプションの値は削除の対象でない。`--` の後は `-` で始まっても対象
+        ('rm --interactive="$mode" /tmp/x', None),
+        ('rm -- -"$W"', '-"$W"'),
+        # ANSI-C 引用の中の `\'` は引用を閉じない。`$$` は PID で、後ろの字は変数の名前でない
+        ("rm -f $'it\\'s$x'", None),
+        ('rm -f "$$NAME"', None),
         ("", None),
     ],
     ids=[
         "quoted-report",
         "original-unquoted",
+        "required-dir-only",
+        "required-both",
         "literal-path",
         "required",
         "default",
         "alternate",
+        "variable-default",
+        "variable-alternate",
+        "required-default",
         "not-rm",
         "single-quoted-dollar",
         "escaped-dollar",
         "escaped-dollar-in-quotes",
         "mixed-quotes",
         "rm-with-a-path",
+        "command-wrapper",
+        "timeout-wrapper",
+        "bash-c",
+        "option-value",
+        "after-double-dash",
+        "ansi-c-quote",
+        "pid",
         "empty",
     ],
 )
@@ -68,8 +97,23 @@ def test_risky_removal_returns_the_word_that_can_expand_to_nothing(command, word
         ("\"'$W'\"", ["$W"]),
         ("'a$b", []),
         ('"$W/$n"', ["$W", "$n"]),
+        ('"${D:-$F}"', ["${D:-$F}", "$F"]),
+        ("$'a\\'$b'$c", ["$c"]),
+        ('"$$N$1$c"', ["$c"]),
     ],
-    ids=["double-quoted", "braced", "single-quoted", "escaped", "escaped-in-quotes", "quote-char-in-quotes", "unclosed", "two"],
+    ids=[
+        "double-quoted",
+        "braced",
+        "single-quoted",
+        "escaped",
+        "escaped-in-quotes",
+        "quote-char-in-quotes",
+        "unclosed",
+        "two",
+        "default-operand",
+        "ansi-c",
+        "special-parameters",
+    ],
 )
 def test_expanded_variables_reads_the_word_from_the_left(word, found):
     assert rm_variable.expanded_variables(word) == found

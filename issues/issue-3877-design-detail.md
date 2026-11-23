@@ -287,15 +287,15 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `risky_removal` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `risky_removal(script: ShellScript) -> str \| None` | `rm` の削除の対象に、展開が効く位置（引用の外か二重引用の中）の空になりうる変数を含む語があれば、その語の字面を返す。無ければ `None` |
-| `expanded_variables` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `expanded_variables(word: str) -> list[str]` | 語の字面を左から 1 字ずつ読み、展開が効く位置の `$NAME`・`${…}` だけを返す。単引用の中・`\$` で逃がした `$`・`$'…'` の中は返さない |
+| `expanded_variables` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `expanded_variables(word: str) -> list[str]` | 語の字面を左から 1 字ずつ読み、展開が効く位置の名前付きの変数の展開（`$NAME`・`${…}`）だけを返す。`${NAME:-…}`・`${NAME:+…}` などの既定値・代替値の中の展開も続けて返す。単引用の中・`\$` で逃がした `$`・`$'…'` の中・特殊パラメータ（`$$`・`$1` など）は返さない |
 | `check` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `risky_removal` が語を返したら `deny` に書き直しの形を添えて返す。ほかは `None`（通す） |
 
 - `risky_removal`
-  - 事前条件: `script` は `ctx.shell`（`domains/hooks/context.py:579` の `ShellScript`）である。`commands` の各要素が語ごとの字面（`source`）を持つ
-  - 事後条件: 返った語は `script` の中の `rm` の引数のどれかの字面と一致する。判定は `source`（引用とエスケープを残した字面）を `expanded_variables` で読んだ結果だけで行い、値の展開はしない。ドル記号が字面にあっても、引用かエスケープで文字のまま渡る語は止めない
+  - 事前条件: `script` は `ctx.shell`（`domains/hooks/context.py` の `ShellScript`）である。`waits` の各要素がラッパーを外した語（`body_argv`）と位置をそろえた字面（`body_source`）を持つ。語は構文上の引数 1 つ（tree-sitter-bash が隙間なく割ったセクションはつないで 1 語にする）
+  - 事後条件: 返った語は `script.waits`（外側の単純コマンドと `bash -c` 系・`eval` の中身）のうち、ラッパー（`command`・`timeout` など）を外した後のコマンド名が `rm` のものの、削除の対象の字面と一致する。`--` より前の `-` で始まる語はオプションとして見ない。判定は `body_source`（引用とエスケープを残した字面）を `expanded_variables` で読んだ結果だけで行い、値の展開はしない。ドル記号が字面にあっても、引用かエスケープで文字のまま渡る語は止めない
 - `expanded_variables`
   - 事前条件: `word` は `ShellCommand.source` の 1 要素（引用とエスケープを残した字面）
-  - 事後条件: 状態は「引用の外」「単引用の中」「二重引用の中」の 3 つで、`'` は引用の外でだけ単引用を始め、単引用の中では次の `'` まで何も解かない。`\` は引用の外と二重引用の中で次の 1 字を文字にする（二重引用の中では `$`・`` ` ``・`"`・`\` の前でだけ）。`$NAME`・`${…}` は引用の外か二重引用の中で、逃がされていないときだけ返す
+  - 事後条件: 状態は「引用の外」「単引用の中」「ANSI-C 引用の中」「二重引用の中」の 4 つで、`'` は引用の外でだけ単引用を始め、単引用の中では次の `'` まで何も解かない。`$'` は引用の外でだけ ANSI-C 引用を始め、その中では `\` が次の 1 字を文字にする（`\'` は引用を閉じない）。`$` の後の 1 字が特殊パラメータの字（`$`・`#`・`?`・`!`・`-`・`@`・`*`・数字）なら 2 字を読み、名前付きの変数として返さない。`\` は引用の外と二重引用の中で次の 1 字を文字にする（二重引用の中では `$`・`` ` ``・`"`・`\` の前でだけ）。`$NAME`・`${…}` は引用の外か二重引用の中で、逃がされていないときだけ返す
   - 副作用: 無し
   - 副作用: 無し（文字列の判定だけ。シェルを起動しない）
 - `check`
@@ -307,21 +307,22 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `risky_removal` | コマンドを語に分けられない | `ctx.shell` が字面を持たない（読めないコマンド） | `script.commands` が空か `source` が空 | 既定値で続ける（`None` を返して通す） | 出力なし（Bash はそのまま走る） | 後始末は無い |
+| `risky_removal` | コマンドを語に分けられない | `ctx.shell` が字面を持たない（読めないコマンド・読めないラッパーの引数） | `script.waits` が空か `body_source` が空 | 既定値で続ける（`None` を返して通す） | 出力なし（Bash はそのまま走る） | 後始末は無い |
 | `check` | 判定の中の例外 | 想定しない形の入力 | guard のエントリポイント（`domains/hooks/dispatch`） | 既定で通す（`guards.json` の `fail_closed` は偽にする。報告の保存先の用意を hook の不具合で止めない） | 出力なし | 後始末は無い |
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `risky_removal` | コマンド名が `rm` でない | 見ない（`None`） |
+| `risky_removal` | ラッパーを外した後のコマンド名が `rm` でない | 見ない（`None`） |
+| `risky_removal` | `--` より前の `-` で始まる引数（`--interactive="$mode"` など）にだけ変数がある | `None`（オプションで、削除の対象でない） |
 | `risky_removal` | `rm` の引数が固定のパスだけ | `None`（通す） |
-| `risky_removal` | 引数の展開が効く位置（`expanded_variables` の返り）に `$NAME` か `${NAME}` があり、`${NAME:?…}`・`${NAME:-…}`・`${NAME:+…}` の形でない | その語を返す（止める） |
-| `risky_removal` | 展開が効く位置の変数が `${NAME:?}` の形だけ | `None`（空なら shell が止めるので、確認の条件に当たらない） |
-| `risky_removal` | `$` が単引用の中（`'a$b'`）・`\$` で逃がされている（`a\$b`・`"a\$b"`）だけ | `None`（ファイル名の文字で、展開されない） |
+| `risky_removal` | 引数の展開が効く位置（`expanded_variables` の返り）に `$NAME` か `${NAME}` があり、`${NAME:?…}`・`${NAME:-…}`・`${NAME:+…}` の形でない（既定値・代替値の中の `$NAME` も含む。`${DIR:-$FALLBACK}` は止める） | その語を返す（止める） |
+| `risky_removal` | 展開が効く位置の変数が `${NAME:?}` の形と、固定の既定値・代替値（`${NAME:-/tmp}`）だけ | `None`（空なら shell が止めるので、確認の条件に当たらない） |
+| `risky_removal` | `$` が単引用の中（`'a$b'`）・ANSI-C 引用の中（`$'it\'s$x'`）・`\$` で逃がされている（`a\$b`・`"a\$b"`）・特殊パラメータ（`"$$NAME"`）だけ | `None`（ファイル名の文字か、空にならない値で、名前付きの変数でない） |
 | `check` | `risky_removal` が語を返した | `deny("…空になりうる変数 … を含む `rm` を止めた。報告の保存先の用意は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` で打つ。ほかの削除は `${NAME:?}` の形か固定のパスにする")` |
 
-繰り返しは `script.commands` の数（1 回の Bash の呼び出しに現れる単純なコマンドの数）で終わる。計算量の注意は無い。
+繰り返しは `script.waits` の数（1 回の Bash の呼び出しに現れる単純なコマンドと、`bash -c` 系・`eval` の中のコマンドの数）で終わる。計算量の注意は無い。
 
 ### 内部のデータと定数
 

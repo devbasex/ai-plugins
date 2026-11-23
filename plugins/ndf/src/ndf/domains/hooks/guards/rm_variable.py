@@ -4,8 +4,10 @@ Claude Code は「Dangerous rm operation on possibly-empty variable path」の�
 その画面はモデルへ届かないのでレーンが止まる。`PreToolUse` の hook はその確認より先に働く（v2.1.330 で実測）ため、
 同じ形をここで止めて、書き直しの形をツールの結果として返す。
 
-- 止めるのは、`rm` の削除の対象に、展開が効く位置（引用の外か二重引用の中）の `$NAME`・`${NAME}` を含む語があるときだけ
-- `${NAME:?}`・`${NAME:-…}`・`${NAME:+…}` と、引用やエスケープで文字のまま渡るドル記号は通す（空にならないか、展開されない）
+- 止めるのは、`rm` の削除の対象に、展開が効く位置（引用の外か二重引用の中）の `$NAME`・`${NAME}` を含む語があるときだけ。
+  ラッパー（`command`・`timeout` など）の後ろと `bash -c` 系・`eval` の中の `rm` も見る。`--` より前のオプションは対象でない
+- `${NAME:?}` と、固定の既定値・代替値の `${NAME:-…}`・`${NAME:+…}` は通す。既定値・代替値の中の `$NAME` は止める
+- 単引用・ANSI-C 引用（`$'…'`）・エスケープで文字のまま渡るドル記号と、特殊パラメータ（`$$` など）は通す
 - 値は見ない。字面の形だけで判定し、シェルを起動しない
 """
 
@@ -22,6 +24,10 @@ _HEAD = re.compile(r"[A-Za-z_]")
 _TAIL = re.compile(r"[A-Za-z0-9_]")
 # 二重引用の中で `\` が文字にする字
 _ESCAPABLE = '$`"\\'
+# `$` の後の 1 字で決まる特殊パラメータ（名前付きの変数でない）
+_SPECIAL = "$#?!-@*0123456789"
+# `${NAME…}` の中身のうち、既定値・代替値として評価される部分を持つ形
+_OPERAND = re.compile(r"[A-Za-z_][A-Za-z0-9_]*:?[-=+](.*)", re.DOTALL)
 _HELP = (
     "報告の保存先の用意は ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前> で打つ。"
     'ほかの削除は "${NAME:?}" の形か固定のパスにする'
@@ -29,53 +35,107 @@ _HELP = (
 
 
 def expanded_variables(word: str) -> list[str]:
-    """語の字面の、展開が効く位置にある `$NAME`・`${…}` の字面。
+    """語の字面の、展開が効く位置にある名前付きの変数の展開（`$NAME`・`${…}`）の字面。
 
-    単引用の中・`\\$` で逃がした `$`・閉じていない `${` は返さない。状態は「引用の外」「単引用の中」「二重引用の中」の 3 つ。
+    `${NAME:-…}`・`${NAME:+…}` などの既定値・代替値の中で評価される展開も、外側の字面の後ろに続けて返す。
+    単引用・ANSI-C 引用（`$'…'`）の中・`\\$` で逃がした `$`・特殊パラメータ（`$$`・`$1` など）・閉じていない `${` は返さない。
+    状態は「引用の外」「単引用の中」「ANSI-C 引用の中」「二重引用の中」の 4 つ。
     """
     found: list[str] = []
     quote = ""
     i = 0
     while i < len(word):
         char = word[i]
-        if quote == "'":
+        if quote in ("'", "$'"):
+            if quote == "$'" and char == "\\":
+                i += 2
+                continue
             quote = "" if char == "'" else quote
             i += 1
         elif char == "\\" and (quote == "" or (i + 1 < len(word) and word[i + 1] in _ESCAPABLE)):
+            i += 2
+        elif char == "$" and quote == "" and word[i + 1 : i + 2] == "'":
+            quote = "$'"
             i += 2
         elif char in "'\"" and (quote == "" or quote == char):
             quote = char if quote == "" else ""
             i += 1
         elif char == "$":
-            expansion, i = _expansion(word, i)
-            if expansion:
-                found.append(expansion)
+            i = _expansion(word, i, found)
         else:
             i += 1
     return found
 
 
-def _expansion(word: str, start: int) -> tuple[str, int]:
-    """`start` の `$` から読んだ展開の字面と、次に読む位置。展開でなければ字面は空。"""
+def _expansion(word: str, start: int, found: list[str]) -> int:
+    """`start` の `$` から展開を読み、名前付きの変数の展開の字面を `found` へ足す。次に読む位置を返す。"""
     nxt = word[start + 1 : start + 2]
     if nxt == "{":
-        end = word.find("}", start + 2)
-        return ("", start + 2) if end < 0 else (word[start : end + 1], end + 1)
+        end = _closing_brace(word, start + 2)
+        if end < 0:
+            return start + 2
+        found.append(word[start : end + 1])
+        operand = _OPERAND.fullmatch(word[start + 2 : end])
+        if operand:
+            found.extend(expanded_variables(operand.group(1)))
+        return end + 1
+    if nxt and nxt in _SPECIAL:
+        return start + 2
     if not _HEAD.fullmatch(nxt):
-        return "", start + 1
+        return start + 1
     end = start + 2
     while end < len(word) and _TAIL.fullmatch(word[end]):
         end += 1
-    return word[start:end], end
+    found.append(word[start:end])
+    return end
+
+
+def _closing_brace(word: str, start: int) -> int:
+    """`${` の中身が始まる `start` から、対応する `}` の位置。入れ子の `${…}` を数える。無ければ -1。"""
+    depth = 1
+    i = start
+    while i < len(word):
+        if word[i] == "\\":
+            i += 2
+            continue
+        if word.startswith("${", i):
+            depth += 1
+            i += 2
+            continue
+        if word[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def _operands(argv: tuple[str, ...], source: tuple[str, ...]) -> list[str]:
+    """`rm` の引数のうち削除の対象の字面。`--` より前の `-` で始まる語（引用を外して見る）はオプションとして外す。"""
+    found: list[str] = []
+    options = True
+    for plain, text in zip(argv, source):
+        if options and plain == "--":
+            options = False
+        elif not (options and plain.startswith("-") and plain != "-"):
+            found.append(text)
+    return found
+
+
+def _risky(word: str) -> list[str]:
+    return [found for found in expanded_variables(word) if _VARIABLE.fullmatch(found)]
 
 
 def risky_removal(script) -> str | None:
-    """`rm` の削除の対象にある、空になりうる変数を含む語の字面。無ければ None。"""
-    for command in script.commands:
-        if not command.argv or command.argv[0].rsplit("/", 1)[-1] != "rm":
+    """`rm` の削除の対象にある、空になりうる変数を含む語の字面。無ければ None。
+
+    ラッパー（`command`・`timeout` など）を外した後の `rm` と、`bash -c` 系・`eval` の中の `rm` も見る（`ShellScript.waits`）。
+    """
+    for command in script.waits:
+        if command.body_name != "rm":
             continue
-        for word in command.source[1:]:
-            if any(_VARIABLE.fullmatch(found) for found in expanded_variables(word)):
+        for word in _operands(command.body_argv[1:], command.body_source[1:]):
+            if _risky(word):
                 return word
     return None
 
@@ -84,7 +144,7 @@ def check(ctx, svc) -> Verdict | None:
     word = risky_removal(ctx.shell)
     if word is None:
         return None
-    names = "・".join(found for found in expanded_variables(word) if _VARIABLE.fullmatch(found))
+    names = "・".join(_risky(word))
     return deny(
         f"空になりうる変数（{names}）をパスに含む rm を止めた。"
         f"変数が空だと別のパスを消すため、Claude Code が端末の画面で確認を出してレーンが止まる。{_HELP}"

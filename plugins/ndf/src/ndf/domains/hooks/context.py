@@ -48,7 +48,8 @@ class ShellCommand(NamedTuple):
     `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
     読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
-    （#3995。運用上限の guard が Bash と同じ値に読み直す）。
+    （#3995。運用上限の guard が Bash と同じ値に読み直す）。`body_source` は `body_argv` と位置をそろえた字面（#3877。
+    `rm` の guard が展開の効く位置を読む。`env -S` で分けた語は分けた語のまま）。
     """
 
     argv: tuple[str, ...]
@@ -57,6 +58,7 @@ class ShellCommand(NamedTuple):
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
     source: tuple[str, ...] = ()
+    body_source: tuple[str, ...] = ()
 
     @property
     def body_name(self) -> str:
@@ -127,7 +129,10 @@ def _walk(text: str) -> ShellScript:
         if node.type == "command":
             body, condition = _loop_position(node)
             argv, joined, source = _words(node)
-            commands.append(ShellCommand(argv, _in_background(node), body, condition, _strip_wrappers(joined), source))
+            stripped = _strip_wrappers(joined)
+            commands.append(
+                ShellCommand(argv, _in_background(node), body, condition, stripped, source, _body_source(joined, source, stripped))
+            )
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -458,19 +463,37 @@ def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]
     argv: list[str] = []
     joined: list[str] = []
     source: list[str] = []
+    previous_end: Optional[int] = None
     for child in node.children:
         target = child.children[0] if child.type == "command_name" and child.children else child
         if target.type not in _WORD_NODES:
+            previous_end = None
             continue
         text = target.text.decode("utf-8", "replace")
         word = _unquote(text, target.type)
-        argv.append(word)
-        source.append(text)
         if target.type == "concatenation":
-            joined.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+            part = "".join(_unquote(p.text.decode("utf-8", "replace"), p.type) for p in target.children)
         else:
-            joined.append(word)
+            part = word
+        if previous_end == child.start_byte:
+            # 隙間の無い 2 つのセクションは 1 つの語（tree-sitter-bash は `$W/$n.md.done` を `$W/$` と `n.md.done` に割る）
+            argv[-1] += word
+            joined[-1] += part
+            source[-1] += text
+        else:
+            argv.append(word)
+            joined.append(part)
+            source.append(text)
+        previous_end = child.end_byte
     return tuple(argv), tuple(joined), tuple(source)
+
+
+def _body_source(joined: tuple[str, ...], source: tuple[str, ...], body: tuple[str, ...]) -> tuple[str, ...]:
+    """`body`（ラッパーを外した語）に位置をそろえた字面。`env -S` で分けた語は字面が無いので、分けた語のまま置く。"""
+    common = 0
+    while common < min(len(joined), len(body)) and joined[-1 - common] == body[-1 - common]:
+        common += 1
+    return body[: len(body) - common] + source[len(source) - common :]
 
 
 def _unquote(text: str, kind: str) -> str:
