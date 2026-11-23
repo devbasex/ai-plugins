@@ -358,17 +358,42 @@ plugins/ndf/
 
 | 種類 | 核での種類の名前 | スキーマ | 書く入口 | 読む入口 |
 | --- | --- | --- | --- | --- |
-| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:110`・`domains/relay/context_report.py:57`） |
+| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読む）・`usage.py:110`・`domains/relay/context_report.py:57`） |
 | 記録（MVV の兆候・検証） | `mvv-signals`・`mvv-validation` | `internal/mvv-signals.schema.json`・`internal/mvv-validation.schema.json`（新設） | `jsonl.append_locked`（呼び手は `domains/records/mvv.py:122・142`） | `jsonl.read_rows`（`mvv.py:90・135`） |
 | 記録（文脈の記録） | `context-records` | `internal/context-records.schema.json`（新設） | 書き手のモジュール（実装の単位 4 で `jsonl` へ寄せる） | `jsonl.read_rows`（`domains/relay/context_records.py:168`） |
-| 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append` | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
-| 実行（工程の文脈） | `context` | `workflow/context.schema.json`（既存。`version` を形の版に、製品の版を `product_version` へ） | 工程の出力を文脈へ入れる所（`progress/invoke.py` の `value_errors` の前） | `progress/command.py` の `_prepare_new` が文脈を確かめる前 |
+| 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append`。`version-shipped` の事象を組む 2 か所（`control_decide.py:284` の出荷の取り込みと `:321` の明示の出荷）はどちらも `version=` を `product_version=` に変える。旧い欄 `version`（文字列）を `product_version` へ移すのは、既存の行を読む `migrate` だけで、書き手に読み替えを置かない | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
+| 実行（工程の文脈） | `context` | `workflow/context.schema.json`（既存。`version` を形の版に、製品の版を `product_version` へ） | 下の「工程の文脈の版」 | 同左 |
 | 実行（工程の入出力） | — | `workflow/stage-io.schema.json`（既存。`release-result` の `outputs.version` を `product_version` へ） | 版を足さない。工程の入出力は 1 回の実行の中で書いて読む値で、版をまたいで残らない | 同左 |
 | プラン | — | `workflow/parallel-plan.schema.json`（既存の `version: const 1`） | 人が書く | `progress/plan/__init__.py` の `read_doc`。今の版より大きい `version` は `precondition` で止める（今はスキーマの `const` で `invalid` になる） |
 | 工程の表 | — | `workflow/progress.schema.json`（既存の `version: const 1`） | 契約の一部（人が書く） | `progress/model.py` の `require_schema`（変えない） |
-| 結果 | — | `schemas/result.schema.json`（任意の `version` を足す） | `contracts/result.py` の `emit`（今も `errors` で確かめる） | NDF のコードは他のサブコマンドの結果を読み戻さない（結果は標準出力の 1 行で、読むのは呼び手の AI）ので、読む入口は持たない |
+| 結果 | `result` | `schemas/result.schema.json`（任意の `version` を足す） | `contracts/result.py` の `emit`（下の「結果の版と、形の違う結果」） | `progress/invoke.py` の `read_report`（子プロセスの標準出力の最後の行）と `_call_skill`（`invoke.py:780`。Skill の回答）。どちらも `result.errors` で確かめている入口で、版の扱いを下の項に置く |
 
-`jsonl` の 3 つの関数は種類（`kind`）を必須の引数に持つ。`jsonl.parse_lines` は種類を持たない行の分解だけを残し、`read_rows` が分解した行を 1 行ずつ `read_record` へ渡す。
+`jsonl` の 3 つの関数（`read_rows`・`append`・`append_locked`）は種類（`kind`）を必須の引数に持つ。表の呼び手はすべて種類を渡す（`usage.py:77` の読み戻しも `kind="usage"`）。`jsonl.parse_lines` は種類を持たない行の分解だけを残す。今の呼び手（`usage.py:51` の `transcript_usage` と `relay/context_records.py:267`）は Claude の会話ログ（外部の形）を読むので、核を通さない。
+
+**`read_rows` の不合格の行の扱い: 止めずに、理由つきで数えて返し、呼び手が結果に出す。** 追記だけの記録（使用量・MVV・文脈の記録）は、1 行の欠けで集計や判断の全体を止めると、これまで動いていた読み出しが止まる。一方、数えるだけで呼び手が捨てると、壊れた行が黙って欠ける。そこで次のように分ける。
+
+| 行の状態 | `read_rows` の扱い |
+| --- | --- |
+| JSON として壊れている・辞書でない（書きかけを含む） | 除いて、`Broken(line, reason)` を返す（今の `broken` の数を、行番号と理由の並びにする） |
+| `read_record` が `InternalError`（形に合わない・項目の欠け・時刻の書式） | 同上（理由は `InternalError` の文） |
+| `read_record` が `precondition`（今の版より新しい版） | 止める（呼び手へ伝える）。新しい NDF が書いた記録を古い NDF が部分的に読んで判断しない |
+| 知らない種類（`config_broken`） | 止める（呼び手の綴りの誤り） |
+
+`read_rows` の戻り値は `tuple[list[dict[str, Any]], list[Broken]]` にする。呼び手は、除いた行を結果 JSON に出す: 使用量の集計（`usage.py:110`）は今の `broken_rows` に数を、文脈の記録（`context_records.py:168`）は今の `skipped` に足し、MVV（`mvv.py:90・135`）と使用量の差分（`usage.py:77`）は今は捨てているので、結果の `items` の警告（`{"kind": "broken_rows", "path": ..., "lines": [...]}`）に出す。
+
+### 工程の文脈の版
+
+工程の文脈は 1 つのファイルではなく、作成の時点の値（ステートマシンの文書の `context`）に、最新の改訂の `outputs_recorded` の事象の `outputs` を順に重ねて作る。重ねる所が今 2 つある（`progress/run.py:105` の `View.context` と `progress/command.py:489` の `machine_context`）。
+
+- **形の版は、作成の時点の値にだけ持たせる。** `_prepare_new`（`progress/command.py:539`）が `version: 1` を書く。`outputs_recorded` の `outputs` は宣言した出力の部分の辞書で、形の版を持たせない（`invoke.finished` の `value_errors`（`invoke.py:277`）に渡るのも部分の辞書で、そこへ版を足さない）
+- **重ねる入口を 1 つにする。** `progress/stages.py` に `compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]` を置き、`View.context` と `machine_context` の 2 つはこれを呼ぶ。`outputs_recorded` を書く 3 つの書き手（通常の実行と `ndf progress finish` が通る `stages.py:289`、ゲートの回答の `gate/answering.py:122・188・300`）はどれも同じ事象を書くので、読む側の 1 か所で受ければ全経路が通る
+- **`compose_context` の順序:** (1) 作成の時点の値の `version` が整数でなければ版 0 とし、文字列の `version` を `product_version` へ移す。(2) 各 `outputs` を古い順に重ねる前に、文字列の `version`（旧 `deploy` の出力）を `product_version` へ移す。(3) 最後に `version` を今の版（1）で置く（出力が形の版を上書きしない）。この順序なので、更新の前に出荷した既存のスプリントを再開しても `release_record` は `product_version` で真になる
+- **工程の定義の `version` の点検:** `contracts/workflow/stages/*.json` の `metadata.ndf.inputs`・`outputs` の `version` を製品の版として `product_version` へ改名する。今あるのは `deploy.json`（出力）・`release-verification.json`（入力）・`layout-review.json`（入力）の 3 つ。各ファイルの先頭の `"version": "1.0.0"` は工程の定義の書式（Serverless Workflow の文書の版）で、別の意味なので変えない。コードで文脈の `version` を読む所（`progress/command.py:337` の `release_record`・`progress/gate/asking.py:219` のリリースのゲート）も `product_version` へ変える。点検の手段は `git grep -n '"version"' plugins/ndf/contracts/workflow/stages` と `git grep -n 'ctx.get("version")\|context\["version"\]\|"version" in context' plugins/ndf/src`
+
+### 結果の版と、形の違う結果
+
+- **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は元の `tool` が文字列ならそれ、無ければ `ndf`・`cause.kind` は `invalid`・`detail` に誤りの要約）を 1 行で出し、`invalid` の終了コードを返す。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
+- **読む側（`invoke.read_report`・`_call_skill`）:** 結果の `version` が無ければ版 1、1 なら今の版として `result.errors` で確かめる（今と同じ）。今の版より大きい版は形の違い（`bad_report`）と分け、`stopped`・`precondition`（「新しい版の結果を古い NDF が受け取った。プラグインを更新する」）の `StageResult` にする。整数でない `version` は形の違いとして今の `bad_report` に入れる
 
 ### 関数の仕様
 
