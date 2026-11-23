@@ -375,8 +375,11 @@ class WriteGate(BaseThrottler):
             try:
                 seconds = self._due(value, remaining)
             except Busy as busy:
-                # 手順は送信のロックを放し予約を取り消してから `busy` を出し直す（`_steps`）
-                await loop.run_in_executor(_FINISHER if holding else None, steps.throw, busy)
+                # 手順は送信のロックを放し予約を取り消してから `busy` を出し直す（`_steps`）。呼び出し元が取り消されても、
+                # 投入済みの後始末は取り消さない（shield）。取り消された後の結果（出し直しの Busy）はここで受け取る
+                throwing = loop.run_in_executor(_FINISHER if holding else None, steps.throw, busy)
+                throwing.add_done_callback(lambda done: done.cancelled() or done.exception())
+                await asyncio.shield(throwing)
                 raise
             try:
                 await asyncio.sleep(seconds)
@@ -541,13 +544,15 @@ class WriteGate(BaseThrottler):
             seen = self._peek(kind, remaining)
             if seen is None:
                 return False
-            blocked, gap = seen
+            blocked, at = seen
             if blocked:
                 return True
+            # 記録を読んだ後に過ぎた時間（ロックを放す・予算を読む）を引くため、最短の送信時刻から数え直す
+            gap = at - self.clock()
             if gap <= 0:
                 return False
             _within_budget(remaining, gap)
-            yield Pause(gap, holding, self.clock() + gap)
+            yield Pause(gap, holding, at)
 
     def _finish(self, kind: str, send: Optional[FileLock]) -> None:
         try:
@@ -557,7 +562,7 @@ class WriteGate(BaseThrottler):
                 send.release()
 
     def _peek(self, kind: str, remaining: Optional[Callable[[], float]] = None) -> Optional[tuple[bool, float]]:
-        """(待ちの終わりが今より後か, 最短の送信時刻までの秒)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
+        """(待ちの終わりが今より後か, 最短の送信時刻（時計の秒）)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
         held = self._record_lock(remaining)
         try:
             record = None if held is None else self._load()
@@ -566,7 +571,7 @@ class WriteGate(BaseThrottler):
                 record = self._memory_view(now)
             else:
                 record, _, now = self._with_unsaved(record)
-            return record["blocked_until"] > now, _earliest_send(record, kind) - now
+            return record["blocked_until"] > now, _earliest_send(record, kind)
         finally:
             if held is not None:
                 held.release()
