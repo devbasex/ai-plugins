@@ -28,7 +28,7 @@ guard `stop-wait`（#2324）は、Stop の hook で最後の応答の本文を�
 
 Stop の hook は登録の timeout が 6 秒、予算の締め切りが 3.5 秒（`plugins/ndf/contracts/limits.json` の `hook.budget.stop`）で、guard の判定は文字列だけなので数ミリ秒で終わる。
 
-## 事象
+## 現象
 
 ```bash
 uv run python -c 'from ndf.domains.hooks.context import classify_reply; print(classify_reply("どちらにするか決めていただければ進めます。"))'
@@ -43,7 +43,7 @@ uv run python -c 'from ndf.domains.hooks.context import classify_reply; print(cl
 
 ## 再現手順
 
-1. NDF 11.0.19 以降の worktree で上の「事象」のコマンドを打つ
+1. NDF 11.0.19 以降の worktree で上の「現象」のコマンドを打つ
 2. 同じく「何が起きたか」の表の各文を `classify_reply` に渡す
 
 ## 環境
@@ -141,22 +141,22 @@ NDF 11.0.13〜11.0.19（`classify_reply` は 11.0.21 でも同じ）・Claude Co
 
 > 軽いモデル（最小構成の `claude -p` や haiku など）での判断を入れた方がよさそう。文字列一致だけでは厳しい
 
-（書き手: 利用者、日付: 2026-11-22。課題の本文の「直し方の方針」が引用した文）
+（書き込み元: 利用者、日付: 2026-11-22。課題の本文の「直し方の方針」が引用した文）
 
 > AskUserQuestion で聞くべきでは？なぜ hook が効かない？
 
-（書き手: 利用者、日付: 2026-11-22。課題の本文の 2 回目のセクションが引用した文）
+（書き込み元: 利用者、日付: 2026-11-22。課題の本文の 2 回目のセクションが引用した文）
 
 > なぜ hook にひっかからない？ 承認ゲートじゃないよ
 
-（書き手: 利用者、日付: 2026-11-23。課題の本文の 4 回目のセクションが引用した文）
+（書き込み元: 利用者、日付: 2026-11-23。課題の本文の 4 回目のセクションが引用した文）
 
 > 課題: #4000（hook の guard `stop-wait` が、決まった言い回しに無い本文の質問・末尾 4 行の外の質問を見逃す。利用者の方針は軽いモデル（`claude -p` の最小構成・haiku など）で判定する形。本文は `gh issue view 4000` で全文を読む）
 
-（書き手: AI の起動指示（計画 p12 のレーン lctx の conductor）、日付: 2026-11-23）
+（書き込み元: AI の起動指示（計画 p12 のレーン lctx の conductor）、日付: 2026-11-23）
 
 <details>
-<summary>要求を書く前の課題の本文（書き手: 起票者、日付: 2026-11-21〜23）</summary>
+<summary>要求を書く前の課題の本文（書き込み元: 起票者、日付: 2026-11-21〜23）</summary>
 
 > 不具合（hook の guard `stop-wait` が、決まった言い回しに無い本文の問いかけを見逃し、AskUserQuestion を使わずに人の回答を待って終えた応答を通す）
 >
