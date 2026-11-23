@@ -194,10 +194,10 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
     B を打ち、B は数えずに lock で待つ。"""
     named_cap.write(identity.load().state_dir, 3)
     shared = {"o-a": _row()}
-    calls, current, after, results = {}, [], {}, {}
+    events_by_attempt, active_attempts, wrappers_after_attempt, results = {}, [], {}, {}
 
     def record(event):
-        calls[current[-1]].append(event)
+        events_by_attempt[active_attempts[-1]].append(event)
 
     def recorded(event, real):
         def call(*a, **k):
@@ -232,14 +232,14 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
                 inside()
             return {"ok": True, "detail": "起動した"}
 
-        current.append(label)
-        calls[label] = []
+        active_attempts.append(label)
+        events_by_attempt[label] = []
         try:
             pid = PIDS[plan_name]
             results[label] = machine.admitted(machine.PlanLanes(pid), wrapper, listed, go, machine.PlanPlace(pid, "/own", plan_name))
         finally:
-            current.pop()
-        after[label] = set(shared)
+            active_attempts.pop()
+        wrappers_after_attempt[label] = set(shared)
 
     attempt("A", "w-a", "pa", inside=lambda: attempt("B-first", "w-b", "pb"))
     attempt("B-again", "w-b", "pb")
@@ -247,17 +247,17 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
 
     # A が排他を持つ間の B は数えずに lock で待つ（一覧・数え上げ・上限の判定・索引・起動の手のどれも打たない）
     assert results["B-first"]["waiting"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
-    assert results["B-first"]["ok"] is False and calls["B-first"] == []
+    assert results["B-first"]["ok"] is False and events_by_attempt["B-first"] == []
     # 試行ごとの結果と、その試行を終えた直後の一覧。どの試行の後も上限 3 以下
-    assert after == {"B-first": {"o-a", "w-a"}, "A": {"o-a", "w-a"}, "B-again": {"o-a", "w-a", "w-b"}, "C": {"o-a", "w-a", "w-b"}}
-    assert all(len(names) <= 3 for names in after.values())
+    assert wrappers_after_attempt == {"B-first": {"o-a", "w-a"}, "A": {"o-a", "w-a"}, "B-again": {"o-a", "w-a", "w-b"}, "C": {"o-a", "w-a", "w-b"}}
+    assert all(len(names) <= 3 for names in wrappers_after_attempt.values())
     assert results["A"]["ok"] is True and results["B-again"]["ok"] is True
     assert results["C"]["waiting"] == {"reason": machine.RULE, "machine_lanes": 3, "cap": 3, "unreadable": []}
     assert {p.plan_id for p in machine.indexed()} == {"plan:w-a", "plan:w-b"}
     # 計画ごとの呼び出しの順。数え上げ・上限の判定・索引・起動の手が 1 つでも排他の外へ出れば順が変わる
     admitted_calls = ["lock-in", "listed", "count", "over_cap", "index", "go", "lock-out"]
-    assert calls["A"] == admitted_calls and calls["B-again"] == admitted_calls
-    assert calls["C"] == ["lock-in", "listed", "count", "over_cap", "lock-out"]
+    assert events_by_attempt["A"] == admitted_calls and events_by_attempt["B-again"] == admitted_calls
+    assert events_by_attempt["C"] == ["lock-in", "listed", "count", "over_cap", "lock-out"]
 
 
 def test_a_busy_lock_makes_the_admission_wait_without_counting(monkeypatch, no_wait_no_child):
