@@ -250,9 +250,9 @@ plugins/ndf/
 | `_write_prompt` | `values.json` が無い・読めない | 工程を通さずに手で打ったプラン・保存先が違う | `invoke.read_values` の返り | 呼び出し元へ返す（`model.Refused` に包む） | `stopped`（`precondition`）。`summary` に保存先のパスと理由を書く（決定 2） | 何も書いていない。工程から打ち直せる |
 | `_cmd_work` | 作業ごとの入力か作業場所が足りない | 作業の定義の `inputs`・`cwd` の名前が `values.json` の `values` にも `inputs` にも無い（工程の起動では `started` の前に `prepare_plan` が同じ `kind_gaps` で止めるので、ここに来るのは手で打ったときか定義を変えた後の打ち直しだけ） | `worker_kinds.kind_gaps` の返り | 呼び出し元へ返す（`model.Refused` に包む） | `stopped`（`precondition`）。足りない名前と出所を `summary` と `items` に書く | 何も書いていない。工程の入力か設定を足して打ち直せる |
 | `work_prompt` | 共通のテンプレートの差し込みが足りない | `prompt.md` に上の表に無い `$名前` がある（テンプレートの書き誤り） | `string.Template.substitute` の `KeyError` | 呼び出し元へ返す（`model.Refused` に包む） | `stopped`（`precondition`）。名前を `summary` に書く | 何も書いていない。テンプレートを直す |
-| `_write_prompt` | プロンプトのパスがリンクになっている | 作業ディレクトリの中の `<作業名>.prompt.md` が別の場所へのリンク | `worker_paths.write_file`（`O_NOFOLLOW`）の `EntryUnsafe`・`ELOOP` | 呼び出し元へ返す（`model.Refused` に包む） | `stopped`（`precondition`）。パスを書く | リンクの先を書き換えない。リンクを取り除けば打ち直せる |
+| `_write_prompt` | プロンプトのパスがリンクになっている | 作業ディレクトリの中の `<作業名>.prompt.md` が別の場所へのシンボリックリンクか、外のファイルのハードリンク | `worker_paths.write_file` の確かめ（`entry_state`）が上げる `EntryUnsafe` | 呼び出し元へ返す（`model.Refused` に包む） | `stopped`（`precondition`）。パスを書く | リンクの先を書き換えない。リンクを取り除けば打ち直せる |
 | `work_prompt` | 手順の抜粋を読めない | `kinds.json` の `excerpt` のパスが無い | 抜粋の読み取り | 呼び出し元へ返す（`model.Refused`） | `stopped`（`precondition`） | 手順を渡せない worker を起動しない（`core/worker.py` の既存の方針と同じ） |
-| `_cmd_work` | プロンプトを書けない | 保存先の権限・容量（`OSError`） | `Path.write_text` | 呼び出し元へ返す | `stopped`（`precondition`） | 置き換えの前に返るので、worker は起動しない |
+| `_cmd_work` | プロンプトを書けない | 保存先の権限・容量（`OSError`） | `worker_paths.write_file` | 呼び出し元へ返す | `stopped`（`precondition`） | 置き換えの前に返るので、worker は起動しない |
 
 ### 処理の手順
 
