@@ -13,13 +13,13 @@ from ndf.testing import weight
 
 from ._hooks import bash, call_entry, stop
 
-# 解析の関数（モジュールと名前）。本文の判定はルール（`reply_wait`）の `prose_lines`（行の抜き出し）・`prose_kind`
+# 解析の関数（モジュールと名前）。本文の判定はルール（`reply_wait`）の `prose_lines`（行の抜き出し）・`read_prose`
 _PARSERS = (
     (context, "parse_payload"),
     (context, "parse_shell"),
     (context, "read_tail"),
     (reply_wait, "prose_lines"),
-    (reply_wait, "prose_kind"),
+    (reply_wait, "read_prose"),
 )
 
 
@@ -58,8 +58,8 @@ def test_stop_classifies_the_last_reply_once(tmp_path, calls, monkeypatch):
     payload = stop(tmp_path, "x")
     del payload["last_assistant_message"]
     call_entry("claude", "Stop", payload)
-    # 本文の行の抜き出し（`prose_lines`）も 1 回の Stop で 1 回だけ。`prose_kind` は抜き出した行を受け、抜き出し直さない
-    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "prose_lines": 1, "prose_kind": 1})
+    # 本文の行の抜き出し（`prose_lines`）も 1 回の Stop で 1 回だけ。`read_prose` は抜き出した行を受け、抜き出し直さない（判定の返りは stop-wait も読む）
+    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "prose_lines": 1, "read_prose": 1})
 
 
 def test_shell_tree_reads_words_background_and_loops():

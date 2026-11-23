@@ -87,7 +87,7 @@ REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビ�
 ASKS = "asks"
 REQUESTS = "requests"
 UNSURE = "unsure"
-# モデルへ判定を委ねる見出し（`delegated_headings`）
+# モデルへ判定を委ねる見出し（`ProseReading.delegated`）
 _DELEGATED = (REQUESTS, UNSURE)
 # 見出しで利用者に承認・許可を求める形（「このままマージしてよいですか？」）。承認の語（「承認」「マージ」）の出現だけでは
 # 求めると読まない（「マージの承認は必要ですか？」は事実の質問）
@@ -118,6 +118,17 @@ _OPTION_ITEM = re.compile(r"^(?:案|選択肢|オプション|option|プラン|p
 _ANSWER_HEAD = re.compile(r"^(?:はい|いいえ|いえ|ええ|yes|no)(?:[、，,。.!！\s]|$)", re.IGNORECASE)
 # 見出しと直下の本文が同じ事柄を述べているかを見る語（漢字・カタカナ・英数字の 2 字以上の並び）
 _TERM = re.compile(r"[一-龥々ァ-ヶー]{2,}|[A-Za-z0-9]{2,}")
+# 見出しの質問への回答と読む、調べた結論を述べる末尾（「再起動は不要だと確認しました」）
+_CONCLUSION_ENDINGS = (
+    "と確認しました",
+    "ことを確認しました",
+    "と分かりました",
+    "ことが分かりました",
+    "とわかりました",
+    "ことがわかりました",
+    "と判明しました",
+    "ことが判明しました",
+)
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
 # 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）。リンク先は山括弧で
@@ -193,7 +204,7 @@ def prose_lines(text: str) -> list[ProseLine]:
     見出しは最後の 3 行にも完了の報告の文にも数えず、利用者への質問の見出し（`_heading_kind`）だけを待ちの
     候補にする（`_waits`）。
     コードのブロック（囲みの種類と長さ・インデントのコード）は CommonMark の解析（`markdown.code_lines`）で決める。
-    本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
+    本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`read_prose` へ渡す（1 回の Stop で 2 回しない）。
     """
     from ndf.adapters import markdown
 
@@ -228,25 +239,27 @@ def _heading_kind(lines: list[ProseLine], at: int) -> str | None:
 
     見出しが回答・承認を待つ文を持つときだけ質問の候補にする。後に本文の行が無い（「## このまま進めてよいですか？」で
     終える）ときは ASKS。後に本文が続く質問の見出しは、利用者への質問か章題かを語の形で決めきれないので、ルールで
-    待ちにはしない。そのうち、見出しで承認・選択を明示的に求める（`_requests`）ものは REQUESTS（モデルを使えない
-    Stop ではルールの待ちとして扱う）、直下の本文が答えを言い切っている（`_answered`）ものは章題（None）、残りは UNSURE。
-    REQUESTS と UNSURE はモデルの判定へ回す（`prose_kind`）。
+    待ちにはしない。そのうち、待ちの文がどれも別の場所の待ちの報告だけ（「## 別のレーンは承認を待っています」）の
+    見出しと、直下の本文が質問への回答を言い切っている（`_answered`）見出しは章題（None）。残りのうち、見出しで
+    承認・選択を明示的に求める（`_requests`）ものは REQUESTS（モデルを使えない Stop ではルールの待ちとして扱う）、
+    ほかは UNSURE。REQUESTS と UNSURE はモデルの判定へ回す（`read_prose`）。
     """
     asks = [s for s in _sentences([lines[at].text]) if _asks_reply(s)]
     if not asks:
         return None
     if not any(not line.heading for line in lines[at + 1 :]):
         return ASKS
+    asks = [s for s in asks if not _only_elsewhere(s)]
+    if not asks:
+        return None
     below: list[ProseLine] = []
     for line in lines[at + 1 :]:
         if line.heading:
             break
         below.append(line)
-    if _requests(asks, below):
-        return REQUESTS
     if _answered(lines[at].text, below):
         return None
-    return UNSURE
+    return REQUESTS if _requests(asks, below) else UNSURE
 
 
 def _requests(asks: list[str], below: list[ProseLine]) -> bool:
@@ -254,12 +267,13 @@ def _requests(asks: list[str], below: list[ProseLine]) -> bool:
 
     許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つリクエスト（「確認してください」）・
     申し出（「…ましょうか？」「このまま…ますか？」）・選択肢の箇条書きを従える選ばせる質問（「どちらの案で進めますか？」
-    の下に案）を求めると読む。直下が「はい」「いいえ」で答える FAQ（「はい、変更できます。」）は求めると読まない。
+    の下に、前置きの文があってもよい案の箇条書き）を求めると読む。直下が「はい」「いいえ」で答える FAQ
+    （「はい、変更できます。」）は求めると読まない。
     """
     first = _sentences([below[0].text])[:1] if below else []
     if first and _ANSWER_HEAD.match(_core(first[0])):
         return False
-    options = bool(below) and all(line.bullet for line in below)
+    bullets = [line for line in below if line.bullet]
     for sentence in asks:
         core = _core(sentence).rstrip("?？")
         if any(w in core for w in _PERMISSION_ASKS) or _user_wait(core):
@@ -268,17 +282,18 @@ def _requests(asks: list[str], below: list[ProseLine]) -> bool:
             return True
         if any(w in core for w in REPLY_WORDS + APPROVAL_WORDS) and any(w in core for w in WAIT_CONTAINS):
             return True
-        if options and _CHOICE_ASK.search(core):
+        if bullets and _CHOICE_ASK.search(core):
             return True
-    return options and len(below) >= 2 and all(_OPTION_ITEM.match(line.text) for line in below)
+    return sum(1 for line in bullets if _OPTION_ITEM.match(line.text)) >= 2
 
 
 def _answered(heading: str, below: list[ProseLine]) -> bool:
-    """見出しの質問に直下の本文が答えを言い切っているか（「## 再起動は必要ですか？」の下の「再起動は不要だと確認しました。」）。
+    """見出しの質問に直下の本文が回答を言い切っているか（「## 再起動は必要ですか？」の下の「再起動は不要だと確認しました。」）。
 
     直下（次の見出しまで）が箇条書きを含まず、末尾の定型の結びを外した文がどれも待ちの形でない丁寧の過去の言い切り
-    （`_REPORT_ENDINGS`）で、最初の文が見出しの語（`_TERM`）を含むときだけ真。見出しと別の事柄の報告
-    （「## 既存の設定を使いますか？」の下の「テストはすべて通りました。」）は答えと読まない。
+    （`_REPORT_ENDINGS`）で、最初の文が見出しの語（`_TERM`）を含み、調べた結論を述べる形（`_CONCLUSION_ENDINGS`。
+    「…と確認しました」「…ことを確認しました」）で終わるときだけ真。見出しと共通の語を持つだけの報告（「## 既存の設定を
+    使いますか？」の下の「既存の設定でテストはすべて通りました。」）は判断の材料かもしれないので回答と読まない。
     """
     if not below or any(line.bullet for line in below):
         return False
@@ -287,16 +302,8 @@ def _answered(heading: str, below: list[ProseLine]) -> bool:
         body.pop()
     if not body or not all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body):
         return False
-    return any(term in body[0] for term in _TERM.findall(_core(heading)))
-
-
-def delegated_headings(lines: list[ProseLine]) -> list[str]:
-    """モデルへ判定を委ねた見出し（REQUESTS・UNSURE）の文。かぎ括弧の引用は `prose_kind` と同じく外して見る。
-
-    guard は判定へ渡す本文が字数の上限で切られても、これを残す（`reply_judge.judge_text` の `keep`）。
-    """
-    unquoted = _unquoted_lines(lines)
-    return [line.text for i, line in enumerate(unquoted) if line.heading and _heading_kind(unquoted, i) in _DELEGATED]
+    first = _core(body[0])
+    return first.endswith(_CONCLUSION_ENDINGS) and any(term in first for term in _TERM.findall(_core(heading)))
 
 
 def _opaque(match: re.Match[str]) -> str:
@@ -386,9 +393,18 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
-def _waits(lines: list[ProseLine]) -> list[str]:
-    """本文の行（`prose_lines` の返り）の、利用者への質問の見出しと、見出しを除いた最後の行から、回答・承認を待つ文を取り出す。"""
-    headings = [line.text for i, line in enumerate(lines) if line.heading and _heading_kind(lines, i) == ASKS]
+def _heading_kinds(lines: list[ProseLine]) -> dict[int, str | None]:
+    """見出しの行の位置ごとの種類（`_heading_kind`）。1 回の判定で 1 回だけ求め、`_waits` と `_closing_report` へ渡す。"""
+    return {i: _heading_kind(lines, i) for i, line in enumerate(lines) if line.heading}
+
+
+def _waits(lines: list[ProseLine], kinds: dict[int, str | None] | None = None) -> list[str]:
+    """本文の行（`prose_lines` の返り）の、利用者への質問の見出しと、見出しを除いた最後の行から、回答・承認を待つ文を取り出す。
+
+    `kinds` は `_heading_kinds` の返り（無ければここで求める）。
+    """
+    kinds = _heading_kinds(lines) if kinds is None else kinds
+    headings = [lines[i].text for i, kind in kinds.items() if kind == ASKS]
     return [s for s in _sentences(headings + _last_lines(lines)) if _asks_reply(s)]
 
 
@@ -491,17 +507,17 @@ def _paren_wait(sentence: str) -> bool:
     return any(_is_wait(inner) for inner in _PAREN_INNER.findall(sentence))
 
 
-def _closing_report(lines: list[ProseLine]) -> bool:
+def _closing_report(lines: list[ProseLine], kinds: dict[int, str | None]) -> bool:
     """定型の結び（「引き続きよろしくお願いします。」）で終え、結びの前が完了の報告だけの本文か。
 
     本文の全部の文（引用を除いた行）を見る。末尾から定型の結びの文を外し、残りの文がどれも待ちの形でなく
     丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるときだけ真。結びの前に質問・承認のリクエスト・言い切らない文が
-    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。判断できない質問の見出し（`_heading_kind` の UNSURE）が
+    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。判定をモデルへ委ねた見出し（`kinds` の REQUESTS・UNSURE）が
     あっても偽。括弧書きの中に待ちの形の文（「（このままマージしてよいですか）」）
     があっても偽。最後の行の最後の文が定型の結びでなければ、本文全体を文に分けずに偽を返す。
     """
     # 判定をモデルへ委ねた見出し（REQUESTS・UNSURE）があれば、軽いモデルの判定へ回す
-    if any(line.heading and _heading_kind(lines, i) in _DELEGATED for i, line in enumerate(lines)):
+    if any(kind in _DELEGATED for kind in kinds.values()):
         return False
     # ほかの見出しは章題で、完了の報告の文に数えない（質問の見出しは `_waits` が先に待ちにする）
     lines = [line for line in lines if not line.heading]
@@ -522,29 +538,46 @@ def _closing_report(lines: list[ProseLine]) -> bool:
     return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
 
 
-def prose_kind(lines: list[ProseLine]) -> str:
-    """本文の行（`prose_lines` の空でない返り）を持つ応答の種類。`report` / `closing_report` / `elsewhere_wait` /
+class ProseReading(NamedTuple):
+    """本文の判定（`read_prose` の返り）。`kind` は応答の種類、`delegated` はモデルへ判定を委ねた見出しの文（REQUESTS・UNSURE）。
+
+    guard は判定へ渡す本文を字数の上限で切るときだけ `delegated` を使う（`reply_judge.judge_text` の `keep`）。
+    """
+
+    kind: str
+    delegated: tuple[str, ...] = ()
+
+
+def read_prose(lines: list[ProseLine]) -> ProseReading:
+    """本文の行（`prose_lines` の空でない返り）を持つ応答の判定。種類は `report` / `closing_report` / `elsewhere_wait` /
     `heading_wait` / `prose_wait`。
 
-    行を抜き出し直さない。guard は `prose_lines` の返りを持ったまま、本文の行がある Stop でだけこれを呼ぶ
-    （本文の全行の抜き出しを 1 回の Stop で 2 回しない）。待ちの文は `classify_reply_wait` と同じ形で探し、
-    かぎ括弧の引用の中身は見ない（行をまたぐ引用も外す）。本人への待ちの文があれば `prose_wait`。
+    行を抜き出し直さない。guard は `prose_lines` の返りを持ったまま、本文の行がある Stop でだけこれを 1 回呼ぶ
+    （本文の全行の抜き出し・引用の除去・見出しの判定を 1 回の Stop で 2 回しない）。待ちの文は `classify_reply_wait` と
+    同じ形で探し、かぎ括弧の引用の中身は見ない（行をまたぐ引用も外す）。本人への待ちの文があれば `prose_wait`。
     見出しで承認・選択を明示的に求め、後に本文が続く（REQUESTS）なら `heading_wait`（guard はモデルの判定に従い、
     モデルを使えない Stop では変更要求にする）。待ちの文がどれも別の場所の待ちの報告だけで、判定を委ねた見出しが
     無ければ `elsewhere_wait`。待ちの文が無く、定型の結びの前が完了の報告だけなら `closing_report`（guard は
     軽いモデルを呼ばずに通す）。
     """
     unquoted = _unquoted_lines(lines)
-    waits = _waits(unquoted)
+    kinds = _heading_kinds(unquoted)
+    delegated = tuple(unquoted[i].text for i, kind in kinds.items() if kind in _DELEGATED)
+    waits = _waits(unquoted, kinds)
     if waits and not all(_only_elsewhere(s) for s in waits):
-        return "prose_wait"
-    kinds = {_heading_kind(unquoted, i) for i, line in enumerate(unquoted) if line.heading}
-    if REQUESTS in kinds:
-        return "heading_wait"
+        return ProseReading("prose_wait", delegated)
+    found = set(kinds.values())
+    if REQUESTS in found:
+        return ProseReading("heading_wait", delegated)
     if waits:
         # 判断できない見出し（UNSURE）を残したまま、別の場所の待ちだけとして通さない
-        return "report" if UNSURE in kinds else "elsewhere_wait"
-    return "closing_report" if _closing_report(unquoted) else "report"
+        return ProseReading("report" if UNSURE in found else "elsewhere_wait", delegated)
+    return ProseReading("closing_report" if _closing_report(unquoted, kinds) else "report", delegated)
+
+
+def prose_kind(lines: list[ProseLine]) -> str:
+    """`read_prose` の種類だけ（テストと `reply_kind` が使う）。"""
+    return read_prose(lines).kind
 
 
 def reply_kind(text: str) -> str:
@@ -554,7 +587,7 @@ def reply_kind(text: str) -> str:
     待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`heading_wait`
     （見出しで承認・選択を明示的に求め、後に本文が続く。モデルの判定へ回す）・`closing_report`
     （定型の結びの前が完了の報告だけ）・`report`。
-    `prose_lines` の返りを既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
+    `prose_lines` の返りを既に持つ呼び手は、これでなく `read_prose` を呼ぶ。
     """
     lines = prose_lines(text)
     return prose_kind(lines) if lines else "none"

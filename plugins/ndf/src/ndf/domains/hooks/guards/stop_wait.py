@@ -18,7 +18,7 @@ import os
 import time
 from typing import Optional
 
-from ndf.domains.hooks import budget, reply_judge, reply_wait
+from ndf.domains.hooks import budget, reply_judge
 from ndf.domains.hooks.verdict import Verdict, passing
 
 REASON = (
@@ -98,7 +98,7 @@ def check(ctx, svc) -> Verdict:
         return _result(kind, "rule", True)
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
-    keep = reply_wait.delegated_headings(ctx.reply_prose_lines)
+    keep = ctx.reply_reading.delegated
     text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge._judge("max_chars")), keep)
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:

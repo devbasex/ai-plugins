@@ -209,6 +209,14 @@ def test_judge_text_keeps_the_delegated_heading_within_the_limit() -> None:
     assert len(out) == 1600 and out.startswith("## このままマージしてよいですか？\n") and text.endswith(out.splitlines()[1])
 
 
+def test_judge_text_keeps_a_heading_pushed_out_by_the_lead() -> None:
+    # 先頭に古い見出しを置いて末尾が縮んでも、当初の末尾にあった直近の見出しも残す
+    first, second = "最初の質問はどうしますか？", "二つ目の質問はどうしますか？"
+    text = f"## {first}\n" + "あ" * 500 + f"\n## {second}\n" + "い" * 1570
+    out = reply_judge.judge_text(text, [False] * 4, 1600, [first, second])
+    assert len(out) == 1600 and out.splitlines()[:2] == [f"## {first}", f"## {second}"]
+
+
 def test_judge_text_does_not_repeat_a_heading_already_in_the_tail() -> None:
     text = "あ" * 2000 + "\n## このままマージしてよいですか？\n以上。"
     out = reply_judge.judge_text(text, [False, False, False], 1600, ["このままマージしてよいですか？"])

@@ -2,7 +2,7 @@
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
 ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の
-待ちのルール（`reply_wait` の `prose_lines`・`prose_kind`。#4000 の決定 1）だけが行い、`HookContext` はその結果を持つ。
+待ちのルール（`reply_wait` の `prose_lines`・`read_prose`。#4000 の決定 1）だけが行い、`HookContext` はその結果を持つ。
 """
 
 from __future__ import annotations
@@ -602,12 +602,17 @@ class HookContext:
         return bool(self.reply_prose_lines)
 
     @cached_property
+    def reply_reading(self) -> reply_wait.ProseReading:
+        """最後の応答の本文の判定（`reply_wait.read_prose`）。`last_reply_kind` と guard `stop-wait` が同じ返りを読む。"""
+        return reply_wait.read_prose(self.reply_prose_lines) if self.has_reply_prose else reply_wait.ProseReading("none")
+
+    @cached_property
     def last_reply_kind(self) -> str:
         """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`heading_wait`・`closing_report`・`report`）。ルールの判定（#4000 の決定 1）。
 
         本文の行は `reply_prose_lines` を読み、抜き出し直さない（`reply_wait.reply_kind` を呼ばない）。
         """
-        return reply_wait.prose_kind(self.reply_prose_lines) if self.has_reply_prose else "none"
+        return self.reply_reading.kind
 
     @cached_property
     def asked_this_turn(self) -> bool:

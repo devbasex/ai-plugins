@@ -161,10 +161,10 @@ def test_a_conditional_contact_note_with_a_specific_word_is_a_report():
     assert reply_wait.reply_kind("修正は完了しました。問題があれば、ご指示をお待ちしています。") == "report"
 
 
-def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
-    """guard は `prose_lines` の返りを持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
+def test_read_prose_matches_reply_kind_for_a_reply_with_prose():
+    """guard は `prose_lines` の返りを持ったまま `read_prose` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
     for text in ("返答を待ちます。", "作業を終えました。", "p9 の作業を終えました。別のレーンは承認を待っています。"):
-        assert reply_wait.prose_kind(reply_wait.prose_lines(text)) == reply_wait.reply_kind(text)
+        assert reply_wait.read_prose(reply_wait.prose_lines(text)).kind == reply_wait.reply_kind(text)
 
 
 @pytest.mark.parametrize(
@@ -253,6 +253,10 @@ def test_a_question_in_a_heading_is_a_wait():
         ("## 実装結果\n対応が完了しました。\n引き続きよろしくお願いします。", "closing_report"),
         # 直下の本文が見出しの事柄を言い切って回答した質問の見出しは章題（定型の結びで通す）
         ("## 再起動は必要ですか？\n再起動は不要だと確認しました。\n以上です。", "closing_report"),
+        # 許可を求める形の FAQ でも、直下で回答を言い切っていれば章題
+        ("## 管理者権限なしで実行してもよいですか？\n管理者権限なしで実行できることを確認しました。\n以上です。", "closing_report"),
+        # 別の場所の待ちを報告する見出しは、本人への質問でない
+        ("## 別のレーンは承認を待っています\nこちらの作業は完了しました。\n以上です。", "closing_report"),
     ],
 )
 def test_a_heading_without_a_question_is_a_title(text, kind):
@@ -274,6 +278,8 @@ def test_a_heading_without_a_question_is_a_title(text, kind):
         "## 既存の設定を使いますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
         # 判断できない見出しを残したまま、別の場所の待ちだけとして通さない
         "## 既存の設定を使いますか？\n別のレーンは承認を待っています。",
+        # 見出しの語を含む報告でも、調べた結論でなければ判断の材料で、回答と読まない
+        "## 既存の設定を使いますか？\n既存の設定でテストはすべて通りました。\n以上です。",
     ],
 )
 def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
@@ -287,6 +293,8 @@ def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
     [
         # 見出しで選択・承認・確認を明示的に求め、下に選択肢・判断材料・結び（定型の結びでも通さない）
         "## どちらの案で進めますか？\n- 案 A\n- 案 B",
+        # 前置きの文の後に選択肢の箇条書き
+        "## どちらの案で進めますか？\nどちらもテスト済みです。\n- 案 A\n- 案 B",
         "## どう進めますか？\n- 案 A: 先に直す\n- 案 B: 後で直す",
         "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
         "## このままマージしますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
@@ -301,9 +309,9 @@ def test_a_heading_that_requests_the_user_is_a_heading_wait(text):
     assert reply_wait.reply_kind(text) == "heading_wait"
 
 
-def test_delegated_headings_lists_the_headings_left_to_the_model():
+def test_read_prose_lists_the_headings_left_to_the_model():
     lines = reply_wait.prose_lines("## 実装結果\n## このままマージしてよいですか？\nテストはすべて通りました。")
-    assert reply_wait.delegated_headings(lines) == ["このままマージしてよいですか？"]
+    assert reply_wait.read_prose(lines).delegated == ("このままマージしてよいですか？",)
 
 
 def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():
