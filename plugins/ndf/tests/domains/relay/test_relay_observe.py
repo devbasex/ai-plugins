@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -225,3 +226,59 @@ def test_4227_the_limit_line_drawn_by_cursor_moves_is_found():
 
 def test_4227_a_forward_move_keeps_words_apart():
     assert observe.plain(b"a\x1b[2Cb\x1b[3;1Hc") == "a b\nc"
+
+
+# 背景のサブエージェントの会話の記録と背景のシェル（#4036）。形は 2026-11-23 に Claude Code 2.1.330 で実測した
+SNAPSHOT = "/home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh"
+SHELL_ARGS = ["/bin/bash", "-c", f"source {SNAPSHOT} 2>/dev/null || true && eval 'sleep 45' < /dev/null"]
+
+
+def test_4036_the_subagent_transcript_sits_beside_the_session(tmp_path):
+    got = observe.subagent_transcript_path(tmp_path / "sid.jsonl", "a150335adf8797c51")
+    assert got == tmp_path / "sid" / "subagents" / "agent-a150335adf8797c51.jsonl"
+    assert observe.subagent_transcript_path(tmp_path / "sid.jsonl", "a-b_C9") == tmp_path / "sid" / "subagents" / "agent-a-b_C9.jsonl"
+
+
+@pytest.mark.parametrize("agent_id", ["", "../x", "a/b", "a.b"])
+def test_4036_an_unsafe_subagent_id_builds_no_path(tmp_path, agent_id):
+    assert observe.subagent_transcript_path(tmp_path / "sid.jsonl", agent_id) is None
+
+
+def test_4036_the_shell_output_path_follows_the_claude_temp_layout():
+    got = observe.shell_output_path({}, observe.Path("/tmp/m.x/work"), "sid", "b7prporwe")
+    assert got == observe.Path(f"/tmp/claude-{os.getuid()}/-tmp-m-x-work/sid/tasks/b7prporwe.output")
+    moved = observe.shell_output_path({"CLAUDE_CODE_TMPDIR": "/t"}, observe.Path("/w"), "sid", "b1")
+    assert moved == observe.Path(f"/t/claude-{os.getuid()}/-w/sid/tasks/b1.output")
+
+
+def test_4036_an_unsafe_shell_id_builds_no_path():
+    assert observe.shell_output_path({}, observe.Path("/w"), "sid", "../x") is None
+
+
+def _proc(root, pid, args, children=()):
+    task = root / str(pid) / "task" / str(pid)
+    task.mkdir(parents=True)
+    (root / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
+    (task / "children").write_text("".join(f"{c} " for c in children), encoding="utf-8")
+
+
+def test_4036_live_shells_counts_the_bash_tool_shells_under_claude(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"], [11])
+    _proc(tmp_path, 11, ["claude", "--session-id", "s"], [12, 13, 14])
+    _proc(tmp_path, 12, SHELL_ARGS)
+    _proc(tmp_path, 13, ["node", "mcp-server.js"])
+    _proc(tmp_path, 14, ["bash", "-c", "echo x"])
+    assert observe.live_shells(10, tmp_path) == 1
+
+
+def test_4036_live_shells_is_zero_without_children(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"], [11])
+    _proc(tmp_path, 11, ["claude"])
+    assert observe.live_shells(10, tmp_path) == 0
+
+
+def test_4036_live_shells_is_none_without_the_wrapper_or_claude(tmp_path):
+    assert observe.live_shells(10, tmp_path) is None
+    _proc(tmp_path, 10, ["ndf", "relay"], [11])
+    _proc(tmp_path, 11, ["tmux"])
+    assert observe.live_shells(10, tmp_path) is None
