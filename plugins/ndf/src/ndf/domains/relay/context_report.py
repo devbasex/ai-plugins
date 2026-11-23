@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, NamedTuple, Optional
 
@@ -265,20 +265,19 @@ def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], sc
 
 
 def _restarts_by_reason(rows: list[dict[str, Any]]) -> dict[str, int]:
-    restarts: dict[str, int] = defaultdict(int)
-    for r in rows:
-        if r.get("verdict") == ct.RESTART:
-            restarts[r["reason"] if r.get("reason") else cr.UNKNOWN] += 1
+    restarts = Counter(r["reason"] if r.get("reason") else cr.UNKNOWN for r in rows if r.get("verdict") == ct.RESTART)
     return dict(restarts)
 
 
 def _rework(rows: list[dict[str, Any]]) -> int | str:
     """「継続」の判定が 2 回以上ある工程の数（やり直し）。「継続」の判定が無ければ「不明」。"""
-    keep: dict[str, int] = defaultdict(int)
-    for r in rows:
-        event = r["event"] if "event" in r else cr.EVENT_DECISION
-        if event == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage"):
-            keep[r["stage"]] += 1
+    keep = Counter(
+        r["stage"]
+        for r in rows
+        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION
+        and r.get("verdict") == ct.CONTINUE
+        and r.get("stage")
+    )
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
 
