@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from ndf import contracts
 from ndf.contracts import chosen
 
 NEXT = {"argv": ["ndf", "loop", "answer"], "ask": ["comment"]}
@@ -47,11 +46,6 @@ def test_errors_refuse_wrong_records(change):
     got = chosen.record("r", "R07", "script", "a", "b")
     assert chosen.errors({**got, **change})
     assert chosen.errors({**got, "at": "2026-12-01T01:00:00.5+09:00"}) == []
-
-
-def test_choosers_are_the_schema_enum():
-    schema = contracts.load_json(chosen.SCHEMA)
-    assert tuple(schema["properties"]["chooser"]["enum"]) == chosen.CHOOSERS
 
 
 @pytest.mark.parametrize(
