@@ -84,15 +84,18 @@ jobs:
             done
             exit 0
           fi
-          # Pull Request の差分のファイルの一覧を 1 回だけ取り、下の条件はすべてこの一覧から決める
-          changed=$(git diff --name-only HEAD^1 HEAD)
+          # Pull Request の差分のファイルの一覧を 1 回だけ取り、下の条件はすべてこの一覧から決める。
+          # --no-renames でリネームを旧パスの削除と新パスの追加に分け（旧パスも一覧に残す）、-z で引用表記にしない実際のパスを
+          # NUL で区切って読む（日本語などの名前も比べられる）。git diff が失敗すればここで止める（プロセス置換は失敗を落とす）
+          git diff --name-only --no-renames -z HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          mapfile -d '' -t changed < "$RUNNER_TEMP/changed"
           # 引数のパス（ファイルかディレクトリ）のどれかに当たるファイルが差分にあれば true
           touched() {
             local p f
             for p in "$@"; do
-              while IFS= read -r f; do
+              for f in "${changed[@]}"; do
                 case "$f" in "$p" | "$p"/*) echo true; return ;; esac
-              done <<< "$changed"
+              done
             done
             echo false
           }

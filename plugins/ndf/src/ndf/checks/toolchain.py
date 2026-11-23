@@ -5,7 +5,8 @@
 
 - `workflows`: ワークフローの `setup-python` が `python-version` を書き（`python-version-file` の参照先は読まない）、その値が
   `python_ci`（下限を確かめるワークフローでは `python_compat.versions` も）に在り、`setup-uv` の `version` が uv のバージョンと同じで、
-  `run` のコマンドが `setup-uv` 以外で uv を入れない（シェルの語に分けて、コメント・`echo` の引数は見ず、行の継続はつなぐ）
+  `run` のコマンドが `setup-uv` 以外で uv を入れない（本文の全体を bash の構文木にし、制御構造の中のコマンドは見て、
+  ヒアドキュメント・コメント・`echo` の引数は見ない）
 - `plugin_pyprojects`: `requires-python` が許す最も古い Python が、Python の下限の `.0`（`3.11` なら `3.11.0`）と同じ
 - `launchers`: ランチャーの `UV_VERSION=`・`UV_INSTALLER_SHA256=` の行が uv のバージョンとインストーラの sha256と同じ
 
@@ -14,8 +15,8 @@
 
 from __future__ import annotations
 
+import functools
 import re
-import shlex
 import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -42,15 +43,19 @@ FETCH_COMMANDS = frozenset({"curl", "wget"})
 UV_INSTALLER_URL = re.compile(r"\bastral\.sh/uv\b")
 # コマンドの前に付いても中身を変えない語（環境変数の代入・sudo・env）
 COMMAND_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=.*|sudo|env)$")
-# シェルの区切り（`;`・`&&`・`||`・`|`・`&`・括弧）
-SHELL_PUNCTUATION = frozenset(";&|()")
 # ランチャーの行（`<名前>="<値>"`）
 LAUNCHER_LINE = re.compile(r'^(UV_VERSION|UV_INSTALLER_SHA256)=["\']?([^"\'\s]*)')
-# `requires-python` の 1 つの条件（演算子・リリースの番号・`==`/`!=` の `.*`）
-SPEC_CLAUSE = re.compile(r"^\s*(===|~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)(\.\*)?\s*$")
-# 許す最も古い Python を探す範囲（3.0.0 から順に）。3.0.0 を許せば下限は無いとみなす
-PROBE_MINORS = range(100)
-PROBE_PATCHES = range(50)
+# `requires-python` の 1 つの条件（PEP 440）: 演算子・リリースの番号・`==`/`!=` の `.*`・プレリリース・ポストリリース・開発版
+SPEC_CLAUSE = re.compile(
+    r"""^\s*(?P<op>===|~=|==|!=|<=|>=|<|>)\s*v?(?P<release>[0-9]+(?:\.[0-9]+)*)
+    (?:(?P<wild>\.\*)
+      |(?P<pre>[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?
+       (?P<post>-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?
+       (?P<dev>[-_.]?dev[-_.]?[0-9]*)?)\s*$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+# 正式リリースから見た条件の番号の位置: プレリリース・開発版は同じ番号の正式リリースの前、ポストリリースは後
+BEFORE, AT, AFTER = -1, 0, 1
 REQUIRES_PYTHON = re.compile(r"^\s*requires-python\s*=")
 
 
@@ -122,34 +127,41 @@ def workflow_tools(path: Path) -> list[ToolUse]:
     return _tools(_read_workflow(path))
 
 
-def _logical_lines(body: str) -> Iterator[tuple[int, str]]:
-    """`run` の本文の行を、行末の `\\` の継続をつないで返す（始まりの行の 0 始まりの位置と本文）。"""
-    start, parts = 0, []
-    for n, text in enumerate(body.splitlines()):
-        if not parts:
-            start = n
-        if text.rstrip().endswith("\\"):
-            parts.append(text.rstrip()[:-1])
-            continue
-        parts.append(text)
-        yield start, " ".join(parts)
-        parts = []
-    if parts:
-        yield start, " ".join(parts)
+@functools.cache
+def _bash() -> Any:
+    import tree_sitter
+    import tree_sitter_bash
+
+    return tree_sitter.Parser(tree_sitter.Language(tree_sitter_bash.language()))
 
 
-def _commands(line: str) -> Iterator[list[str]]:
-    """1 行をシェルの語に分け、区切りごとのコマンドの語の並びを返す（`#` からのコメントは捨てる）。"""
-    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    words: list[str] = []
-    for token in lexer:
-        if token and set(token) <= SHELL_PUNCTUATION:
-            yield words
-            words = []
-        else:
-            words.append(token)
-    yield words
+def _word(node: Any) -> str:
+    """シェルの 1 語の字（引用符を外す。展開はそのままの字で残す）。"""
+    text = node.text.decode("utf-8", "replace")
+    if node.type == "raw_string" or (node.type == "string" and len(text) >= 2):
+        return text[1:-1]
+    if node.type == "concatenation":
+        return "".join(_word(c) for c in node.children)
+    return text
+
+
+def _commands(body: str) -> Iterator[tuple[int, list[str]]]:
+    """`run` の本文の全体を bash の構文木にし、実行されるコマンドごとに（本文の 0 始まりの行, 語の並び）を返す。
+
+    `if`・`while` などの制御構造の中のコマンドも、`$(…)` の中のコマンドも拾う。ヒアドキュメントの本文・コメント・
+    引用符の中の字はコマンドにならない。環境変数の代入はコマンドの語に入れない。
+    """
+    stack = [_bash().parse(body.encode("utf-8")).root_node]
+    while stack:
+        node = stack.pop()
+        if node.type == "command":
+            words = [
+                _word(c.named_children[0] if c.type == "command_name" and c.named_children else c)
+                for c in node.named_children
+                if c.type not in ("variable_assignment", "file_redirect", "herestring_redirect", "comment")
+            ]
+            yield node.start_point[0], words
+        stack.extend(reversed(node.children))
 
 
 def _installs_uv(words: list[str]) -> bool:
@@ -172,14 +184,6 @@ def _installs_uv(words: list[str]) -> bool:
     return any(UV_REQUIREMENT.match(w) for w in args[args.index("install") + 1 :])
 
 
-def _line_installs_uv(line: str) -> bool:
-    try:
-        return any(_installs_uv(words) for words in _commands(line))
-    except ValueError:
-        # 閉じない引用符（行をまたぐ文字列）は語に分けられない。分けられた前までは見ずに、行の全体を 1 つの語の並びとして見る
-        return any(_installs_uv(words) for words in [line.split()])
-
-
 def _run_hits(wf: _Workflow) -> Iterator[int]:
     """`run` のコマンドが `setup-uv` 以外で uv を入れる行（1 ステップ 1 件）。"""
     for step in wf.steps:
@@ -187,52 +191,80 @@ def _run_hits(wf: _Workflow) -> Iterator[int]:
         if not isinstance(body, str):
             continue
         key_line = step.lc.key("run")[0] + 1
-        for start, line in _logical_lines(body):
-            if _line_installs_uv(line):
-                yield key_line + 1 + start if isinstance(body, LiteralScalarString) else key_line
-                break
+        row = next((row for row, words in _commands(body) if _installs_uv(words)), None)
+        if row is not None:
+            yield key_line + 1 + row if isinstance(body, LiteralScalarString) else key_line
 
 
-def _admits(clauses: list[tuple[str, tuple[int, ...], bool]], version: tuple[int, int, int]) -> bool:
-    """リリースの番号 `version` が条件のすべてを満たすか（PEP 440 の比較のうち、リリースの番号だけで決まる分）。"""
-    for op, want, wild in clauses:
-        width = max(len(want), len(version))
-        have, pad = version + (0,) * (width - len(version)), want + (0,) * (width - len(want))
-        if wild:
-            ok = version[: len(want)] == want
-            ok = ok if op == "==" else not ok
-        elif op == "~=":
-            ok = have >= pad and version[: len(want) - 1] == want[:-1]
+@dataclass(frozen=True)
+class _Clause:
+    op: str
+    release: tuple[int, ...]
+    wild: bool = False
+    # 同じリリースの番号の正式リリースから見た位置（BEFORE・AT・AFTER）
+    place: int = AT
+
+
+def _admits(clauses: list[_Clause], version: tuple[int, int, int]) -> bool:
+    """正式リリース `version` が条件のすべてを満たすか（PEP 440 の比較）。"""
+    for c in clauses:
+        width = max(len(c.release), len(version))
+        have = (*version, *(0,) * (width - len(version)), AT)
+        want = (*c.release, *(0,) * (width - len(c.release)), c.place)
+        prefix = version[: len(c.release)] == c.release
+        if c.wild:
+            ok = prefix if c.op == "==" else not prefix
+        elif c.op == "~=":
+            ok = have >= want and version[: len(c.release) - 1] == c.release[:-1]
         else:
             ok = {
-                "==": have == pad,
-                "===": have == pad,
-                "!=": have != pad,
-                ">=": have >= pad,
-                "<=": have <= pad,
-                ">": have > pad,
-                "<": have < pad,
-            }[op]
+                "==": have == want,
+                "===": have == want,
+                "!=": have != want,
+                ">=": have >= want,
+                "<=": have <= want,
+                ">": have > want,
+                "<": have < want,
+            }[c.op]
         if not ok:
             return False
     return True
 
 
-def _clauses(spec: str, path: Path) -> list[tuple[str, tuple[int, ...], bool]]:
+def _clauses(spec: str, path: Path, line: int) -> list[_Clause]:
     clauses = []
-    for clause in spec.split(","):
+    for n, clause in enumerate(spec.split(","), 1):
         m = SPEC_CLAUSE.match(clause)
-        if not m or (m[3] and m[1] not in ("==", "!=")) or (m[1] == "~=" and "." not in m[2]):
-            raise CheckError(f"requires-python の条件を読めない: {path}: {clause.strip()}")
-        clauses.append((m[1], tuple(int(x) for x in m[2].split(".")), bool(m[3])))
+        bad = not m or (m["wild"] and m["op"] not in ("==", "!=")) or (m["op"] == "~=" and "." not in m["release"])
+        if bad:
+            # 設定に誤って入った値（秘密を含みうる）を結果へ載せないよう、条件の字は引かずにファイルと位置で示す
+            raise CheckError(f"requires-python の {n} 番目の条件を PEP 440 の条件として読めない: {path}:{line}")
+        place = BEFORE if m["pre"] or (m["dev"] and not m["post"]) else AFTER if m["post"] else AT
+        clauses.append(_Clause(m["op"], tuple(int(x) for x in m["release"].split(".")), bool(m["wild"]), place))
     return clauses
 
 
+def _candidates(clauses: list[_Clause]) -> list[tuple[int, int, int]]:
+    """許す最も古い Python 3 の正式リリースになりうる番号（小さい順）。
+
+    許す番号の集まりは、条件ごとに許す区間の重なりで、その最小は 3.0.0 か、どれかの条件の区間の左の端に在る。
+    左の端は、条件の番号そのものか、その直後（パッチを 1 つ進める）か、`!=` の `.*` の外の最初の番号のどれか。
+    """
+    found = {(3, 0, 0)}
+    for c in clauses:
+        r = (*c.release[:3], *(0,) * (3 - len(c.release[:3])))
+        found |= {r, (r[0], r[1], r[2] + 1)}
+        if c.wild:
+            head = (*c.release[:-1], c.release[-1] + 1)[:3]
+            found.add((*head, *(0,) * (3 - len(head))))
+    return sorted(v for v in found if v[0] == 3)
+
+
 def pyproject_floor(path: Path) -> tuple[tuple[int, int, int] | None, int]:
-    """`requires-python` が許す最も古い Python 3 のリリースとその行。
+    """`requires-python` が許す最も古い Python 3 の正式リリースとその行。
 
     無い・3.0.0 を許す（下限が無い）・どれも許さなければ `None`（行は無ければ 1）。`>=3.11.1` は `(3, 11, 1)`、
-    `>=3.11,!=3.11.*` は `(3, 12, 0)` になる（比較の先頭だけでなく、条件の全体で決める）。
+    `>=3.11,!=3.11.*` は `(3, 12, 0)`、`>=3.11.0rc1,<4` は `(3, 11, 0)` になる（比較の先頭だけでなく、条件の全体で決める）。
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -243,8 +275,8 @@ def pyproject_floor(path: Path) -> tuple[tuple[int, int, int] | None, int]:
     spec = project.get("requires-python") if isinstance(project, dict) else None
     if not isinstance(spec, str):
         return None, line
-    clauses = _clauses(spec, path)
-    lowest = next(((3, m, p) for m in PROBE_MINORS for p in PROBE_PATCHES if _admits(clauses, (3, m, p))), None)
+    clauses = _clauses(spec, path, line)
+    lowest = next((v for v in _candidates(clauses) if _admits(clauses, v)), None)
     return (None if lowest == (3, 0, 0) else lowest), line
 
 
@@ -300,6 +332,9 @@ class _Checker:
             # python-version-file の参照先・指定なしの既定は許可の一覧と照らせないので、書いた値を求める
             return [self.finding(rel, tool.line, f"setup-python に python-version（{sorted(ok)} のどれか）が無い")]
         value, line = tool.values["python-version"]
+        if not value.split():
+            # 空・空白だけの値は setup-python の既定へ落ちる。書いていないのと同じに扱う
+            return [self.finding(rel, line, f"setup-python に python-version（{sorted(ok)} のどれか）が無い")]
         bad = [v for v in value.split() if v not in ok]
         return [self.finding(rel, line, f"python-version {' '.join(bad)} は {sorted(ok)} に無い")] if bad else []
 
