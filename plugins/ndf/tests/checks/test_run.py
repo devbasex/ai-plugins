@@ -165,3 +165,12 @@ def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path, las
     assert report["items"] == [] and report["metrics"] == {}
     assert report["cause"] == {"kind": "config_broken", "detail": report["summary"]}
     assert result.errors(report, exit_codes.unreadable_code()) == []
+
+
+def test_only_settings_rules_skip_collecting_and_the_other_rules(tmp_path, monkeypatch):
+    # ワークフローだけを変えた Pull Request の `--only toolchain` は、プラグインのファイルを集めずにその規則だけを当てる
+    monkeypatch.setitem(run.SETTINGS_RULES, "S1", lambda scope, rules: [model.Finding("S1", "x", 1, "d")])
+    monkeypatch.setattr(run, "collect", lambda *a: (_ for _ in ()).throw(AssertionError("ファイルを集めた")))
+    monkeypatch.setattr(run, "check", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ほかの規則を当てた")))
+    scope = model.Scope(tmp_path, tmp_path / "p", "p")
+    assert [f.rule for f in run.select(scope, {}, ["S1"])] == ["S1"]

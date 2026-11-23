@@ -138,6 +138,9 @@
   "experimental": {
     "summary": "既定で動くもの（プラグインの根の下で配るファイル）が実験版の保存先を参照する"
   },
+  "toolchain": {
+    "summary": "Python と uv の指定が、配る構成の設定とリポジトリの設定の toolchain に合わない"
+  },
   "spec": {
     "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
     "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]

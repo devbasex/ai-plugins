@@ -173,7 +173,18 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     data = read_json(path, "規則のデータを読めない")
     missing = [
         k
-        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "experimental")
+        for k in (
+            "smells",
+            "ruff",
+            "boundaries",
+            "exception_types",
+            "structure",
+            "facts",
+            "words",
+            "child_deps",
+            "experimental",
+            "toolchain",
+        )
         if k not in data
     ]
     if missing:

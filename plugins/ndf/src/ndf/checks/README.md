@@ -30,6 +30,7 @@ plugins/ndf/bin/ndf check
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
+| リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフロー・`pyproject.toml`・ランチャー（プラグインの外も見る） | `toolchain`（Python と uv の指定が配る構成の設定 `contracts/data/toolchain.json` と合うか。設定に `toolchain` が無ければ何も見ない） |
 
 ## 兆候の規則
 
