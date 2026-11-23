@@ -226,15 +226,6 @@ def _abandon(steps: Generator[Pause, None, Optional[FileLock]], step: asyncio.Fu
         steps.close()
 
 
-def _thrown(steps: Generator[Pause, None, Optional[FileLock]], exc: BaseException) -> None:
-    """眠る前に止めた手順へ `exc` を投げ込み、手順の後始末（送信のロックを放す・予約の取り消し）を進める。"""
-    try:
-        steps.throw(exc)
-    except Exception:  # noqa: NDF401 例外: 投げ込んだ `exc`（と後始末の失敗）は呼び手が `exc` を出し直す
-        return
-    steps.close()
-
-
 def _restore(record: dict[str, float], old: Reservation) -> None:
     """`old` の書いた `next`（`CONTENT` なら `next_content` も）がそのままなら書く前へ戻す。後ろに別の予約があれば戻さない。"""
     write, content = _spacing(old.kind)
@@ -384,7 +375,8 @@ class WriteGate(BaseThrottler):
             try:
                 seconds = self._due(value, remaining)
             except Busy as busy:
-                await loop.run_in_executor(_FINISHER if holding else None, _thrown, steps, busy)
+                # 手順は送信のロックを放し予約を取り消してから `busy` を出し直す（`_steps`）
+                await loop.run_in_executor(_FINISHER if holding else None, steps.throw, busy)
                 raise
             try:
                 await asyncio.sleep(seconds)
