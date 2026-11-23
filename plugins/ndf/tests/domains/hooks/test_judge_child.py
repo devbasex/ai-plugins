@@ -37,9 +37,10 @@ class FakeCall:
         self.prompts: list[str] = []
         self.options: list[claude.LaunchOptions] = []
         self.timeouts: list[float] = []
+        self.cwd_entries: list[list[str] | None] = []
 
     def __call__(self, argv, prompt, timeout, cwd=None, options=claude.DEFAULT_LAUNCH):
-        del cwd
+        self.cwd_entries.append(None if cwd is None else sorted(os.listdir(cwd)))
         self.argv.append(list(argv))
         self.prompts.append(prompt)
         self.options.append(options)
@@ -109,6 +110,13 @@ def test_classify_passes_the_minimal_arguments_and_the_model_of_the_setting(judg
     judge_settings["model"] = "sonnet"
     rj.classify("本文", 5.0, None, call)
     assert call.argv[1][call.argv[1].index("--model") + 1] == "sonnet"
+
+
+def test_classify_launches_in_an_empty_directory_so_no_project_instructions_are_read():
+    # プロジェクトの中で起動すると claude が CLAUDE.md を読み、回答が指示に引きずられる
+    call = FakeCall(answered("report"))
+    rj.classify("本文", 5.0, None, call)
+    assert call.cwd_entries == [[]]
 
 
 def test_classify_wraps_the_reply_in_the_tags():

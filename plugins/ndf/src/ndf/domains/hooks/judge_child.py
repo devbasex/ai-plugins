@@ -18,6 +18,7 @@ import contextlib
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, Sequence
@@ -150,7 +151,10 @@ def classify(
         return {"failure": "timeout", "calls": 0, "error": None}
     spec = claude.ClaudeCall(system=SYSTEM, permission=claude.Permission.JUDGE, model=setting("model"))
     argv = claude.claude_args(spec, base=(exe,)) if exe else claude.claude_args(spec)
-    reply = call(argv, _prompt(text), left, options=_options(exe))
+    # 空の作業ディレクトリで起動する。プロジェクトの中で起動すると、claude がそこから上の CLAUDE.md を読んで質問の前に
+    # 置き（`--setting-sources ''` でも読む）、回答がプロジェクトの指示に引きずられる（引用を待ちと読む）
+    with tempfile.TemporaryDirectory(prefix="ndf-judge-") as empty:
+        reply = call(argv, _prompt(text), left, cwd=Path(empty), options=_options(exe))
     return _read(reply)
 
 
