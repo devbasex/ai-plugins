@@ -333,3 +333,35 @@ def test_stop_wait_after_the_limit_is_passed_by_dispatch_as_limited(tmp_path, mo
         counter.mark_model_wait()
         out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
     assert out.limited and out.verdict.kind == "pass" and out.notes["judge"] == "skip:limit" and judge.asked == []
+
+
+# ルールだけで決まる 3 種類（I-009）。モデルを呼ぶ前の条件（上限・実行環境・決定済み・裏の作業・時間・親の不明）に
+# 関わらず、判定・理由・notes の全体が同じで、モデルも親の起動も呼ばず、wait のフラグも立てない
+_RULE_ONLY = [
+    ("別のレーンは承認を待っています。", "pass", {"reply": "elsewhere_wait", "judge": "skip:elsewhere"}),
+    ("作業を終えました。\n引き続きよろしくお願いします。", "pass", {"reply": "closing_report", "judge": "skip:closing"}),
+    (MISSED[0], "pushback", {"reply": "prose_wait", "judge": "rule"}),
+]
+_RULE_ONLY_CONDITIONS = {
+    "plain": {},
+    "limit-after-model-wait": {"counter": FakeCounter(left=False, waited=True)},
+    "codex": {"runtime": "codex"},
+    "decided": {"decided": True},
+    "background": {"background_tasks": [{"id": "b1"}]},
+    "short-time": {"deadline": NOW},
+}
+
+
+@pytest.mark.parametrize(("reply", "kind", "notes"), _RULE_ONLY, ids=["elsewhere", "closing", "prose"])
+@pytest.mark.parametrize("condition", list(_RULE_ONLY_CONDITIONS))
+def test_stop_wait_decides_the_rule_only_kinds_before_any_condition(tmp_path, monkeypatch, reply, kind, notes, condition):
+    judge = Judge(monkeypatch, kind="wait", launch=None)
+    kwargs = dict(_RULE_ONLY_CONDITIONS[condition])
+    counter = kwargs.pop("counter", FakeCounter())
+    before = counter.waited
+    got = _check(tmp_path, reply, counter, **kwargs)
+    assert got.kind == kind
+    assert got.notes == {**notes, "judge_ms": 0, "judge_calls": 0}
+    if kind == "pushback":
+        assert got.reason == stop_wait.REASON
+    assert judge.asked == [] and judge.parents == 0 and counter.waited == before
