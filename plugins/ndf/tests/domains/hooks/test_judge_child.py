@@ -579,6 +579,9 @@ def test_a_setting_is_read_without_validating_every_policy(monkeypatch):
         {"keys": []},
         {"flags": ["--settings"]},
         {"script_hosts": []},
+        {"cli_exe": ["*"]},
+        {"cli_exe": ["*/claude/versions/*", "*/node"]},
+        {"cli_exe": ["*[/claude/versions/]*"]},
     ],
 )
 def test_a_wrong_shape_of_the_endpoint_setting_refuses_the_judge(monkeypatch, change):

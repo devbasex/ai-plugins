@@ -25,7 +25,7 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf.domains.hooks import reply_wait, tables
@@ -138,6 +138,14 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
+def _is_cli(exe: str, patterns: Iterable[str]) -> bool:
+    """実行ファイルの実パスが Claude Code のパターンに当たる。
+
+    パスの要素ごとに右から突き合わせる。`fnmatch` の `*` は `/` にも当たり、導入先の下の階層の実行ファイルまで当たってしまう。
+    """
+    return any(PurePosixPath(exe).match(pattern) for pattern in patterns)
+
+
 def _found(current: int, exe: str, read: Callable[..., bytes], stat: Callable[..., os.stat_result]) -> Optional[Launch]:
     """Claude Code と分かった親の起動引数と実行ファイルの同一性。プロジェクトの根は呼び手が入れる。
 
@@ -169,10 +177,10 @@ def _claude_launch(
         for _ in range(int(endpoint["ancestors"])):
             current = _ppid(read, current)
             exe = readlink(_proc_file(current, "exe"))
-            if _matches(exe, endpoint["cli_exe"]):
-                return _found(current, exe, read, stat)
             if _matches(os.path.basename(exe), endpoint["script_hosts"]):
                 return None
+            if _is_cli(exe, endpoint["cli_exe"]):
+                return _found(current, exe, read, stat)
     except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
         return None
     return None
