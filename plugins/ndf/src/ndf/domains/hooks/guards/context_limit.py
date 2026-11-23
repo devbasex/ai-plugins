@@ -324,12 +324,12 @@ def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> st
     doc = shlex.quote(f"{handoff_dir.strip('/')}/<文書>.md")
     return (
         f"文脈の量が運用上限（{t.limit} token）を超えた。引継ぎ文書を書き、"
-        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、保存と検査が通ったときだけ{end}。"
+        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} で確かめ、保存と検査が通れば{end}。"
         "通らなければ理由を伝え、ブロックを出さない。"
-        "文書は --cwd の値の下のこのパスへ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。"
-        "書く前に、背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。"
+        "文書は --cwd の値の下へ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。"
+        "書く前に背景の監視（ndf lanes wait・Monitor）を TaskStop で止め、完了通知で確かめる。"
         "supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
-        "引継ぎ文書の「現在地」の wait の行をそのまま残す。"
+        "「現在地」の wait の行を残す。"
     )
 
 
