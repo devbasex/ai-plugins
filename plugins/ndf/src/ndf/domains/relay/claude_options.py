@@ -35,7 +35,6 @@ def take(table: Table, args: Sequence[str], i: int) -> tuple[Option, int]:
     if eq and name.startswith("--"):
         return Option(name, (word,), inline), i + 1
     nxt = args[i + 1] if i + 1 < len(args) else None
-    has_value = nxt is not None and not nxt.startswith("-")
     if word in table["flags"]:
         return Option(word, (word,), None), i + 1
     if word in table["variadic"]:
@@ -43,9 +42,14 @@ def take(table: Table, args: Sequence[str], i: int) -> tuple[Option, int]:
         while j < len(args) and not args[j].startswith("-"):
             j += 1
         return Option(word, tuple(args[i:j]), None), j
-    if nxt is not None and (has_value or word in table["value"]):
+    if nxt is not None and (not nxt.startswith("-") or word in table["value"]):
         return Option(word, (word, nxt), nxt), i + 2
     return Option(word, (word,), None), i + 1
+
+
+def is_option(word: str) -> bool:
+    """`word` がオプションの語か（`-` で始まり、`-` 1 文字でない）。`--` の判定は呼び手が先にする。"""
+    return word.startswith("-") and word != "-"
 
 
 def options(table: Table, args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
@@ -57,7 +61,7 @@ def options(table: Table, args: Sequence[str]) -> Iterator[tuple[str, Optional[s
         word = args[i]
         if word == "--":
             return
-        if not word.startswith("-") or word == "-":
+        if not is_option(word):
             i += 1
             continue
         opt, i = take(table, args, i)

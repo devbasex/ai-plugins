@@ -129,9 +129,8 @@ def _resolved_refusal(got: account_dir.Resolved, prefixes: tuple[str, ...]) -> O
     if got.helper:
         return "apiKeyHelper"
     if got.key_origin:
-        return sorted(got.key_origin)[0]
-    named = sorted(k for k, o in got.origin.items() if o != account_dir.CHILD_ENV and k.startswith(prefixes))
-    return named[0] if named else None
+        return min(got.key_origin)
+    return min((k for k, o in got.origin.items() if o != account_dir.CHILD_ENV and k.startswith(prefixes)), default=None)
 
 
 # ---------------------------------------------------------------- 1 回の判定（決定 1・4・8）
@@ -195,13 +194,14 @@ def _prompt(text: str) -> str:
 def _read(reply: claude.ClaudeReply) -> dict:
     """1 回の回答を判定の返りにする。回答の揺れ・失敗の種類の対応付けはここ 1 つが持つ。"""
     if reply.failure is not None:
-        return {"failure": str(reply.failure), "calls": 1, "error": reply.error}
-    if not reply.ok:
-        return {"failure": "auth" if _auth(reply.raw) else "exit", "calls": 1, "error": reply.error}
-    word = "".join(reply.raw.split())
-    if word not in ("wait", "report"):
-        return {"failure": "shape", "calls": 1, "error": reply.error}
-    return {"kind": word, "calls": 1}
+        failure = str(reply.failure)
+    elif not reply.ok:
+        failure = "auth" if _auth(reply.raw) else "exit"
+    elif (word := "".join(reply.raw.split())) in reply_judge.KINDS:
+        return {"kind": word, "calls": 1}
+    else:
+        failure = "shape"
+    return {"failure": failure, "calls": 1, "error": reply.error}
 
 
 def _auth(raw: str) -> bool:
@@ -294,7 +294,7 @@ def run_cases(path: Path, rounds: int, call: Caller = claude.call_claude) -> dic
             wrong = [word for word, _ in got if word != case["expect"]]
             if wrong:
                 missed.append({"id": case["id"], "expect": case["expect"], "got": wrong})
-    return {"items": missed, "metrics": _metrics(len(cases), len(missed), len(spent), spent)}
+    return {"items": missed, "metrics": _metrics(len(cases), len(missed), spent)}
 
 
 def positive_rounds(value: Any) -> bool:
@@ -316,12 +316,12 @@ def _outside_session(environ: MutableMapping[str, str]) -> Iterator[None]:
         environ.update(kept)
 
 
-def _metrics(cases: int, missed: int, calls: int, spent: list[float]) -> dict:
+def _metrics(cases: int, missed: int, spent: list[float]) -> dict:
     """件数・外れた例の件数・打った回数・秒の最小と最大。"""
     return {
         "cases": cases,
         "missed": missed,
-        "calls": calls,
+        "calls": len(spent),
         "min_seconds": round(min(spent), 3) if spent else 0.0,
         "max_seconds": round(max(spent), 3) if spent else 0.0,
     }

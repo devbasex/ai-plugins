@@ -10,7 +10,7 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
   （決定 10）。起動の失敗は親の探索の前に `resting` で、送信先の不一致（`endpoint`）は親の起動引数を含む確かめの
   対象（`endpoint_scope`）ごとに親の探索の後で `endpoint_resting` で確かめる
 
-設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `_judge` が読む。
+設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `judge_setting` が読む。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.relay import claude_options, signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
@@ -67,21 +67,9 @@ class Judged(NamedTuple):
     calls: int
 
 
-def _judge(key: str) -> Any:
+def judge_setting(key: str) -> Any:
     """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。"""
     return tables.policy_value("hook.stop-wait.judge", key)
-
-
-def _markdown_lines(text: str) -> list[str]:
-    """`ndf.adapters.markdown.code_lines` と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n` だけ。末尾の改行の後は行にしない）。
-
-    `str.splitlines` は U+2028 なども改行に数えるので使わない（行がずれるとコードの行を本文と取り違える）。
-    """
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if not normalized:
-        return []
-    lines = normalized.split("\n")
-    return lines[:-1] if normalized.endswith("\n") else lines
 
 
 def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
@@ -94,7 +82,7 @@ def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence
     見出しはどれも見て、外れた分を足す（見出しの文が後ろに引用されて末尾に残っても、その後の見出しを見落とさない）。
     `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
     """
-    lines = _markdown_lines(text)
+    lines = reply_wait._markdown_lines(text)
     if len(code_lines) != len(lines):
         return ""
     prose = "\n".join(line for line, code in zip(lines, code_lines) if not code and line.strip())
@@ -202,7 +190,7 @@ def parent_launch(
     起動の形（`CLAUDE_CODE_ENTRYPOINT`）・`CLAUDE_PROJECT_DIR`・`CLAUDE_CONFIG_DIR` を見てから `/proc` をたどる。
     引数の中身（`--settings` など）はここでは見ない（判定の子の `endpoint_refusal` が実効の設定で確かめる）。
     """
-    endpoint = _judge("endpoint")
+    endpoint = judge_setting("endpoint")
     project_dir = env.get("CLAUDE_PROJECT_DIR")
     config_dir = env.get("CLAUDE_CONFIG_DIR")
     comparable = (
@@ -319,8 +307,7 @@ def _judged(out: str, code: int, ms: float) -> Judged:
     answer = tables.json_object(out)
     if answer is None:
         return Judged(None, "exit" if code != 0 else "shape", ms, 0)
-    raw_calls = answer.get("calls")
-    calls = raw_calls if isinstance(raw_calls, int) else 0
+    calls = raw if isinstance(raw := answer.get("calls"), int) else 0
     failure = answer.get("failure")
     if isinstance(failure, str) and failure:
         return Judged(None, failure, ms, calls)
@@ -337,15 +324,14 @@ def _awaited(
 ) -> Judged:
     """子の回答を待つ。どの終わり方でも組を止めてから回収し、割り込みは投げ直す。"""
     try:
+        out: Optional[bytes] = None
         try:
             out = _exchange(proc, payload.encode("utf-8"), started + seconds)
-        except BaseException:
-            _stop_group(proc, killpg, gentle=True)
-            raise
+        finally:
+            # 割り込み・時間切れは回答が無いので穏やかに止め、正常に終わったときだけ即座に止める
+            _stop_group(proc, killpg, gentle=out is None)
         if out is None:
-            _stop_group(proc, killpg, gentle=True)
             return Judged(None, "timeout", _ms(started), 0)
-        _stop_group(proc, killpg, gentle=False)
     finally:
         for stream in (proc.stdin, proc.stdout):
             stream.close()
@@ -412,7 +398,7 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
     入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
     引数の読み方は `claude_args` と同じ（`claude_options`）。
     """
-    endpoint = _judge("endpoint")
+    endpoint = judge_setting("endpoint")
     table = claude_options.table_of(tables.load(claude_options.TABLE))
     flags = sorted({name for name, _ in claude_options.options(table, launch.argv[1:]) if name in endpoint["flags"]})
     names = sorted(name for name in env if name.startswith(tuple(endpoint["env_names"])))
@@ -441,7 +427,13 @@ def _rest_marker(state_dir: Path) -> Optional[dict[str, Any]]:
 
 
 def _within(at: Any, now: float) -> bool:
-    return isinstance(at, (int, float)) and now - float(at) < float(_judge("rest_seconds"))
+    return isinstance(at, (int, float)) and now - float(at) < float(judge_setting("rest_seconds"))
+
+
+def _live_launch(marker: dict[str, Any], now: float) -> Optional[dict[str, Any]]:
+    """マーカーの起動の失敗の記録。休む間を過ぎた・形が違うときは None。"""
+    launch = marker.get("launch")
+    return launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
 
 
 def resting(state_dir: Path, now: float) -> bool:
@@ -449,8 +441,7 @@ def resting(state_dir: Path, now: float) -> bool:
     marker = _rest_marker(state_dir)
     if marker is None:
         return False
-    launch = marker.get("launch")
-    return isinstance(launch, dict) and _within(launch.get("at"), now)
+    return _live_launch(marker, now) is not None
 
 
 def endpoint_resting(state_dir: Path, now: float, env: Mapping[str, str], launch: Launch) -> bool:
@@ -466,8 +457,7 @@ def _rest_body(marker: dict[str, Any], failure: str, now: float, scope: str) -> 
     """今のマーカーに 1 つの失敗を足した中身。休む間を過ぎた対象は外す。"""
     raw = marker.get("endpoint")
     endpoints = {key: at for key, at in (raw.items() if isinstance(raw, dict) else ()) if _within(at, now)}
-    launch = marker.get("launch")
-    kept = launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
+    kept = _live_launch(marker, now)
     if failure == "endpoint":
         endpoints[scope] = now
     else:
@@ -492,7 +482,7 @@ def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str],
     path = rest_path(state_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with signals.held(path.with_name(REST_LOCK_NAME), float(_judge("lock_seconds"))) as got:
+        with signals.held(path.with_name(REST_LOCK_NAME), float(judge_setting("lock_seconds"))) as got:
             if not got:
                 return
             marker = _rest_marker(state_dir)

@@ -188,7 +188,11 @@ _REPORT_ENDINGS = ("ました", "でした")
 
 
 def _markdown_lines(text: str) -> list[str]:
-    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
+    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n` だけ。末尾の改行の後は行にしない）。
+
+    `str.splitlines` は U+2028 なども改行に数えるので使わない（行がずれるとコードの行を本文と取り違える）。
+    `reply_judge.judge_text` も `markdown.code_lines` の返りと行を合わせるためにこれを使う。
+    """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     if not normalized:
         return []
@@ -306,7 +310,7 @@ def _answered(heading: str, below: list[ProseLine]) -> bool:
     body = _sentences([line.text for line in below])
     while body and _CLOSING.match(_core(body[-1])) and not _paren_wait(body[-1]):
         body.pop()
-    if not body or not all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body):
+    if not body or not _plain_reports(body):
         return False
     first = _core(body[0])
     return first.endswith(_CONCLUSION_ENDINGS) and any(term in first for term in _TERM.findall(_core(heading)))
@@ -359,6 +363,16 @@ def _user_wait(core: str) -> bool:
     return any(w in core for w in GENERIC_USER_WAIT) and _NON_REPLY_WAIT.search(core) is None
 
 
+def _ends_as_question(sentence: str, core: str) -> bool:
+    """文が疑問符か質問の語尾（WAIT_ENDINGS）で終わるか。`core` は `_core(sentence)`。"""
+    return sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS)
+
+
+def _wait_hits(core: str) -> list[str]:
+    """`core` に含まれるリクエストの語（WAIT_CONTAINS）を、列の順に返す。"""
+    return [w for w in WAIT_CONTAINS if w in core]
+
+
 def _is_wait(sentence: str) -> bool:
     """文が人の返事を待つ形か。"""
     core = _core(sentence)
@@ -366,11 +380,11 @@ def _is_wait(sentence: str) -> bool:
         return False
     if _user_wait(core):
         return True
-    if sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
+    if _ends_as_question(sentence, core):
         return True
     if core.endswith(BACKGROUND_WAIT_ENDINGS):
         return False
-    hits = [w for w in WAIT_CONTAINS if w in core]
+    hits = _wait_hits(core)
     if not hits:
         return False
     # 「…場合は…ください」だけの文は添え書き。許可を条件にする形（「進めてよければ」）は待ちに数える
@@ -388,10 +402,9 @@ def _asks_reply(sentence: str) -> bool:
     if not _is_wait(sentence):
         return False
     core = _core(sentence)
-    ends_with_mark = sentence.rstrip(_DECORATION).endswith(("?", "？"))
-    if _user_wait(core) or ends_with_mark or core.endswith(WAIT_ENDINGS):
+    if _user_wait(core) or _ends_as_question(sentence, core):
         return True
-    hits = [w for w in WAIT_CONTAINS if w in core]
+    hits = _wait_hits(core)
     if not set(hits) <= set(INSTRUCTION_ONLY):
         return True
     if not any(w in core for w in OPERATION_VERBS):
@@ -541,7 +554,12 @@ def _closing_report(lines: list[ProseLine], kinds: dict[int, str | None]) -> boo
         body.pop()
     if not body or len(body) == len(sentences):
         return False
-    return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
+    return _plain_reports(body)
+
+
+def _plain_reports(sentences: list[str]) -> bool:
+    """文がどれも待ちの形でなく（括弧書きの中も）、丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるか。"""
+    return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in sentences)
 
 
 class ProseReading(NamedTuple):

@@ -78,7 +78,7 @@ def _quick_skip(ctx, svc, text: str) -> Optional[str]:
         return "skip:no_prose"
     if ctx.background_tasks:
         return "skip:background"
-    if ctx.runtime not in reply_judge._judge("runtimes"):
+    if ctx.runtime not in reply_judge.judge_setting("runtimes"):
         return "skip:runtime"
     if not svc.counter.pushback_left():
         return "skip:limit"
@@ -94,7 +94,7 @@ def _seconds(ctx, svc) -> float:
     found = budget.budget_for(ctx.runtime, ctx.event)
     if found is None:
         return 0.0
-    return min(svc.deadline - found.margin - monotonic(), float(reply_judge._judge("seconds")))
+    return min(svc.deadline - found.margin - monotonic(), float(reply_judge.judge_setting("seconds")))
 
 
 def _ask(svc, text: str, seconds: float) -> tuple[str, bool, Optional[reply_judge.Judged]]:
@@ -119,20 +119,23 @@ def check(ctx, svc) -> Verdict:
         return _result("none", "skip:empty", False)
     if ctx.asked_this_turn:
         return _result(None, "skip:asked", False)
+    # ルールだけで決まる判定: 本文の種類 → （`judge`, 変更要求か）
+    by_rule = {
+        "elsewhere_wait": ("skip:elsewhere", False),
+        "closing_report": ("skip:closing", False),
+        "prose_wait": ("rule", True),
+    }
     kind = ctx.last_reply_kind
-    if kind == "elsewhere_wait":
-        return _result(kind, "skip:elsewhere", False)
-    if kind == "closing_report":
-        return _result(kind, "skip:closing", False)
     reading = ctx.reply_reading
-    if kind == "prose_wait":
-        return _result(kind, "rule", True, matched=reading.matched)
+    if kind in by_rule:
+        # ルールで止めたときだけ当たった文を添える
+        return _result(kind, *by_rule[kind], matched=reading.matched)
     # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
     rule_wait = kind == "heading_wait"
     # ルールの待ちとして止めるときだけ当たった見出しを添える（モデルの wait で止めたときは添えない）
     heading = reading.matched if rule_wait else ()
     keep = reading.delegated
-    text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge._judge("max_chars")), keep)
+    text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge.judge_setting("max_chars")), keep)
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:
         waited = skipped in _AFTER_LIMIT and not svc.counter.pushback_left() and svc.counter.model_waited()

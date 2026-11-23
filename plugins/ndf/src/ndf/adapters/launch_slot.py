@@ -87,6 +87,11 @@ def _no_slot_reason(agent: str, waited: float, read_memory: ReadMemory) -> str:
     return f"重い起動のスロットを {waited:.0f} 秒待っても {agent} の起動に空かなかった（使えるメモリ: {memory}）"
 
 
+def _lock_and_sleep(seconds: float, left: float, bounded: bool) -> float:
+    """排他を待つ秒・眠る秒 `seconds` を、呼び手が上限を決めたとき（`bounded`）だけ残りの `left` 秒に収める。"""
+    return min(seconds, left) if bounded else seconds
+
+
 def _wait_for(
     agent: str, directory: Path, lim: test_limits.Limits, read_memory: ReadMemory, limit: Optional[float] = None
 ) -> slot_pool.Taken:
@@ -102,7 +107,7 @@ def _wait_for(
     started = time.monotonic()
     while True:
         left = max(0.0, limit - (time.monotonic() - started))
-        lock_seconds = min(slot_pool.POOL_LOCK_SECONDS, left) if bounded else slot_pool.POOL_LOCK_SECONDS
+        lock_seconds = _lock_and_sleep(slot_pool.POOL_LOCK_SECONDS, left, bounded)
         taken = _take_once(directory, lim, owner, read_memory, lock_seconds)
         waited = time.monotonic() - started
         if taken is not None:
@@ -111,7 +116,7 @@ def _wait_for(
             return taken
         if waited >= limit:
             raise NoSlot(_no_slot_reason(agent, waited, read_memory))
-        time.sleep(min(poll, limit - waited) if bounded else poll)
+        time.sleep(_lock_and_sleep(poll, limit - waited, bounded))
 
 
 @contextmanager
@@ -173,15 +178,19 @@ def gate(
 
 
 def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]], ensure: bool = True) -> None:
+    why = _why(agent, env, ensure)
+    if why is not None:
+        raise NotLaunched(why)
+
+
+def _why(agent: str, env: Optional[Mapping[str, str]], ensure: bool) -> Optional[str]:
+    """起動を断る理由を返す。断らないなら None。"""
     verdict = training_cache.verdict(agent, env=env)
     if verdict.stale and not ensure:
-        why = verdict.why
-    elif verdict.stale:
+        return verdict.why
+    if verdict.stale:
         # バックアップが使えず確かめ直せば直りうるなら、その場で確かめて記録する（#3907）。httpx を読むのはこのときだけ
         from ndf.adapters import training
 
-        why = training.ensure(agent, env=env)
-    else:
-        why = training_cache.refusal(agent, env=env)
-    if why is not None:
-        raise NotLaunched(why)
+        return training.ensure(agent, env=env)
+    return training_cache.refusal(agent, env=env)

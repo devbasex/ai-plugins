@@ -197,3 +197,219 @@ def test_issue_4000_gate_without_ensure_refuses_a_stale_record(pool, monkeypatch
     with pytest.raises(launch_slot.NotLaunched, match="記録が無い"), launch_slot.gate("claude", ensure=False):
         pytest.fail("記録が無いのに起動した")
     assert slot_pool.held_mib(pool) == 0
+
+
+# ---------------------------------------------------------------- 起動を断る判定（`_refuse_if_needed`）の振る舞いの固定
+
+
+@pytest.fixture
+def refusal_calls(monkeypatch):
+    """`verdict`・`refusal`・`training.ensure` の呼び出しを残す偽物。返す値は `answers` のキーで差し替える。"""
+    from ndf.adapters import training
+
+    calls: list[tuple[str, str, object]] = []
+    answers: dict[str, object] = {"verdict": launch_slot.training_cache.Verdict(None), "refusal": None, "ensure": None}
+
+    def fake(name):
+        def call(agent, env=None):
+            calls.append((name, agent, env))
+            return answers[name]
+
+        return call
+
+    monkeypatch.setattr(launch_slot.training_cache, "verdict", fake("verdict"))
+    monkeypatch.setattr(launch_slot.training_cache, "refusal", fake("refusal"))
+    monkeypatch.setattr(training, "ensure", fake("ensure"))
+    return calls, answers
+
+
+ENV = {"NDF_TEST_MARK": "1"}
+
+
+def test_refuse_passes_a_fresh_record_after_reading_the_refusal(refusal_calls):
+    """バックアップが新しければ `refusal` を読み、None なら断らない（確かめ直さない）。`env` はそのまま渡る。"""
+    calls, _answers = refusal_calls
+
+    assert launch_slot._refuse_if_needed("claude", ENV) is None
+    assert calls == [("verdict", "claude", ENV), ("refusal", "claude", ENV)]
+
+
+def test_refuse_raises_the_refusal_of_a_fresh_record(refusal_calls):
+    """新しいバックアップが断れば、その理由の `NotLaunched`（種類は refused で `NoSlot` ではない）を送る。"""
+    calls, answers = refusal_calls
+    answers["refusal"] = "学習に使う設定"
+
+    with pytest.raises(launch_slot.NotLaunched) as caught:
+        launch_slot._refuse_if_needed("codex", None, ensure=False)
+    assert not isinstance(caught.value, launch_slot.NoSlot)
+    assert caught.value.kind == "refused" and caught.value.detail == "学習に使う設定"
+    assert [name for name, _agent, _env in calls] == ["verdict", "refusal"]
+
+
+def test_refuse_ignores_the_verdict_reason_of_a_fresh_record(refusal_calls):
+    """新しいバックアップでは `verdict.why` を使わず、`refusal` の回答で決める。"""
+    _calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("verdict の理由")
+
+    assert launch_slot._refuse_if_needed("claude", None) is None
+
+
+def test_refuse_ensures_a_stale_record_by_default(refusal_calls):
+    """`ensure` を省けば、古いバックアップはその場で確かめ直し（`refusal` は読まない）、None なら断らない。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("記録が無い", stale=True)
+
+    assert launch_slot._refuse_if_needed("claude", ENV) is None
+    assert calls == [("verdict", "claude", ENV), ("ensure", "claude", ENV)]
+
+
+def test_refuse_raises_what_ensure_answers(refusal_calls):
+    """確かめ直した回答が理由なら、`verdict.why` ではなくその理由で `NotLaunched` を送る。"""
+    _calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("記録が無い", stale=True)
+    answers["ensure"] = "確かめた結果は学習に使う"
+
+    with pytest.raises(launch_slot.NotLaunched) as caught:
+        launch_slot._refuse_if_needed("claude", None, ensure=True)
+    assert caught.value.detail == "確かめた結果は学習に使う"
+
+
+def test_refuse_without_ensure_uses_the_verdict_reason_only(refusal_calls):
+    """`ensure=False` で古いバックアップなら `verdict.why` だけで決め、`refusal` も `ensure` も呼ばない。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("期限切れ", stale=True)
+
+    with pytest.raises(launch_slot.NotLaunched, match="期限切れ"):
+        launch_slot._refuse_if_needed("claude", ENV, ensure=False)
+    assert calls == [("verdict", "claude", ENV)]
+
+    calls.clear()
+    answers["verdict"] = launch_slot.training_cache.Verdict(None, stale=True)
+    assert launch_slot._refuse_if_needed("claude", ENV, ensure=False) is None
+    assert calls == [("verdict", "claude", ENV)]
+
+
+def test_gate_checks_before_and_after_taking_the_slot(pool, refusal_calls, monkeypatch):
+    """`gate` はスロットを取る前と後に 1 度ずつ判定し、`ensure` を両方へ渡す。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict(None, stale=True)
+    monkeypatch.setattr(launch_slot.machine, "available_mib", lambda: PLENTY_MIB)
+
+    with launch_slot.gate("claude", ensure=False):
+        assert slot_pool.held_mib(pool) == slot_pool.weight_mib(launch_slot.KIND)
+    assert [name for name, _agent, _env in calls] == ["verdict", "verdict"]
+    assert slot_pool.held_mib(pool) == 0
+
+
+# ---------------------------------------------------------------- `_wait_for` の上限の有無による排他の秒と眠る秒の固定
+
+
+@pytest.fixture
+def busy_pool(pool, monkeypatch):
+    """取る判定の排他がいつも待ちきれない偽のプールと偽の時計。`seen` に排他を待つ秒を順に残す。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    seen: list[float] = []
+
+    def busy(directory, capacity, weight, owner, *, lock_seconds):
+        seen.append(lock_seconds)
+        raise launch_slot.Timeout(str(directory))
+
+    monkeypatch.setattr(launch_slot.slot_pool, "take", busy)
+    return pool, clock, seen, test_limits.load_limits(Path.cwd())
+
+
+def test_wait_without_a_limit_keeps_the_full_pool_lock_and_poll(busy_pool):
+    """上限を省けば、残りの秒にかかわらず排他は `POOL_LOCK_SECONDS`、眠る秒は間隔のまま（最後の周も削らない）。"""
+    pool, clock, seen, lim = busy_pool
+
+    with pytest.raises(launch_slot.NoSlot, match="空かなかった"):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
+
+    assert seen and set(seen) == {launch_slot.slot_pool.POOL_LOCK_SECONDS}
+    assert len(seen) == len(clock.slept) + 1
+    assert clock.slept == [0.05] * len(clock.slept)
+
+
+def test_wait_without_a_limit_does_not_trim_the_last_sleep(pool, monkeypatch):
+    """上限を省けば、間隔が残りの秒を越えても間隔どおり眠る（設定の上限 0.12・間隔 0.05 なら 0.05 を 3 回）。"""
+    monkeypatch.setattr(launch_slot, "wait_policy", lambda: (0.12, 0.05))
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: None)
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
+
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.05])
+
+
+def test_wait_with_a_limit_trims_the_last_sleep_to_what_is_left(pool, monkeypatch):
+    """上限を決めれば、眠る秒は間隔と残りの秒の小さい方（上限 0.12・間隔 0.05 なら 0.05・0.05・0.02）。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: None)
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0.12)
+
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.02])
+    assert clock.now == pytest.approx(0.12)
+
+
+def test_wait_with_a_limit_shrinks_the_pool_lock_each_round(busy_pool):
+    """上限を決めれば、排他を待つ秒は周ごとの残りの秒（上限 0.12 なら 0.12・0.07・0.02・0）。"""
+    pool, clock, seen, lim = busy_pool
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0.12)
+
+    assert seen == pytest.approx([0.12, 0.07, 0.02, 0.0])
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.02])
+
+
+def test_wait_with_a_large_limit_caps_the_pool_lock(busy_pool, monkeypatch):
+    """上限が `POOL_LOCK_SECONDS` より長ければ、排他を待つ秒は `POOL_LOCK_SECONDS` で頭打ちになる。"""
+    pool, _clock, seen, lim = busy_pool
+    monkeypatch.setattr(launch_slot, "wait_policy", lambda: (0.3, 5.0))
+    cap = launch_slot.slot_pool.POOL_LOCK_SECONDS
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=cap + 7.0)
+
+    assert seen[0] == cap and all(s <= cap for s in seen)
+    assert seen[-1] == pytest.approx(0.0)
+
+
+def test_wait_skips_taking_while_memory_is_below_the_floor(pool, monkeypatch):
+    """使えるメモリが下限を割る間はプールを取りに行かず、上限を決めていれば残りの秒に収めて眠る。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: pytest.fail("メモリが足りないのに取りに行った"))
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot, match="使えるメモリ: 0 MiB"):
+        launch_slot._wait_for("claude", pool, lim, lambda: 0, limit=0.07)
+
+    assert clock.slept == pytest.approx([0.05, 0.02])
+
+
+def test_wait_records_only_when_it_waited_at_least_one_poll(pool, monkeypatch):
+    """取れたとき、間隔以上待っていれば `launch_slot` を記録し、すぐ取れたなら記録しない。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    records: list[dict] = []
+    monkeypatch.setattr(launch_slot, "record", lambda event, **fields: records.append({"event": event, **fields}))
+    answers = iter([None, None, "taken"])
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: next(answers))
+    lim = test_limits.load_limits(Path.cwd())
+
+    assert launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=1.0) == "taken"
+    assert records == [{"event": "launch_slot", "agent": "claude", "waited_seconds": 0.1}]
+
+    records.clear()
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: "now")
+    assert launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB) == "now"
+    assert records == []

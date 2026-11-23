@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.hooks import budget, context, dispatch, reply_judge, tables
+from ndf.domains.hooks import budget, context, dispatch, reply_judge, reply_wait, tables
 from ndf.domains.hooks.counter import Counter
 from ndf.domains.hooks.guards import stop_wait
 
@@ -19,7 +19,7 @@ NOW = 100.0  # 偽の単調時計（締め切りの基準）
 # Claude Code の Stop の締め切りの時刻と、締め切りいっぱいで判定へ渡す秒（`hook.budget.stop` と `hook.stop-wait.judge` から読む）
 STOP = budget.budget_for("claude", "Stop")
 DEADLINE = NOW + STOP.deadline
-JUDGE_SECONDS = min(STOP.usable, reply_judge._judge("seconds"))
+JUDGE_SECONDS = min(STOP.usable, reply_judge.judge_setting("seconds"))
 WALL = 1000.0  # 偽の壁時計（休みのマーカーの時刻）
 CLAUDE_EXE = "/home/u/.local/share/claude/versions/2.1.330"
 PLAIN = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=[2049, 777])
@@ -375,3 +375,35 @@ def test_stop_wait_keeps_the_matched_sentence_out_of_the_limited_reason(tmp_path
         out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
     assert out.limited and "s3cr3t" not in out.notes["limited_reason"]
     assert out.notes["limited_reason"] == stop_wait.LOGGED
+
+
+# ルールだけで決まる 3 種類（I-009）。モデルを呼ぶ前の条件（上限・実行環境・決定済み・裏の作業・時間・親の不明）に
+# 関わらず、判定・理由・notes の全体が同じで、モデルも親の起動も呼ばず、wait のフラグも立てない
+_RULE_ONLY = [
+    ("別のレーンは承認を待っています。", "pass", {"reply": "elsewhere_wait", "judge": "skip:elsewhere"}),
+    ("作業を終えました。\n引き続きよろしくお願いします。", "pass", {"reply": "closing_report", "judge": "skip:closing"}),
+    (MISSED[0], "pushback", {"reply": "prose_wait", "judge": "rule"}),
+]
+_RULE_ONLY_CONDITIONS = {
+    "plain": {},
+    "limit-after-model-wait": {"counter": FakeCounter(left=False, waited=True)},
+    "codex": {"runtime": "codex"},
+    "decided": {"decided": True},
+    "background": {"background_tasks": [{"id": "b1"}]},
+    "short-time": {"deadline": NOW},
+}
+
+
+@pytest.mark.parametrize(("reply", "kind", "notes"), _RULE_ONLY, ids=["elsewhere", "closing", "prose"])
+@pytest.mark.parametrize("condition", list(_RULE_ONLY_CONDITIONS))
+def test_stop_wait_decides_the_rule_only_kinds_before_any_condition(tmp_path, monkeypatch, reply, kind, notes, condition):
+    judge = Judge(monkeypatch, kind="wait", launch=None)
+    kwargs = dict(_RULE_ONLY_CONDITIONS[condition])
+    counter = kwargs.pop("counter", FakeCounter())
+    before = counter.waited
+    got = _check(tmp_path, reply, counter, **kwargs)
+    assert got.kind == kind
+    assert got.notes == {**notes, "judge_ms": 0, "judge_calls": 0}
+    if kind == "pushback":
+        assert got.reason == stop_wait.reason(reply_wait.read_prose(reply_wait.prose_lines(reply)).matched)
+    assert judge.asked == [] and judge.parents == 0 and counter.waited == before
