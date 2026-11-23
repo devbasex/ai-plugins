@@ -48,6 +48,11 @@ def take(table: Table, args: Sequence[str], i: int) -> tuple[Option, int]:
     return Option(word, (word,), None), i + 1
 
 
+def is_option(word: str) -> bool:
+    """`word` がオプションの語か（`-` で始まり、`-` 1 文字でない）。`--` の判定は呼び手が先にする。"""
+    return word.startswith("-") and word != "-"
+
+
 def options(table: Table, args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
     """オプションの名前と値（値が無ければ None）を前から順に返す。位置引数と `--` より後は返さない。
 
@@ -57,7 +62,7 @@ def options(table: Table, args: Sequence[str]) -> Iterator[tuple[str, Optional[s
         word = args[i]
         if word == "--":
             return
-        if not word.startswith("-") or word == "-":
+        if not is_option(word):
             i += 1
             continue
         opt, i = take(table, args, i)

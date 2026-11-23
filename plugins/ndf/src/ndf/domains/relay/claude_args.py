@@ -124,7 +124,7 @@ def parse(args: Sequence[str], environ: Mapping[str, str], tty: bool) -> Parsed:
         if word == "--":
             acc.positionals += args[i + 1 :]
             break
-        if not word.startswith("-") or word == "-":
+        if not claude_options.is_option(word):
             if not acc.positionals and word in t["subcommands"]:  # 前に付いたオプション（alias の分）があっても最初の語で読む
                 return Parsed(f"サブコマンド {word}")
             acc.positionals.append(word)
