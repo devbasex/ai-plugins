@@ -128,6 +128,47 @@ def test_context_limit_reads_again_for_the_same_post_tool_use(tmp_path, counted_
     assert counted_tail["n"] == 1
 
 
+@pytest.fixture
+def counted_main(monkeypatch):
+    """メインディレクトリを探した回数（`n`）。"""
+    calls = {"n": 0}
+    real = context_limit._main
+
+    def counting(cwd):
+        calls["n"] += 1
+        return real(cwd)
+
+    monkeypatch.setattr(context_limit, "_main", counting)
+    return calls
+
+
+def test_context_limit_post_tool_use_reuses_the_pre_tool_use_check(tmp_path, counted_main):
+    # 同じ ID・同じ cwd の PreToolUse が覚えた値があれば PostToolUse はリポジトリを探さない。知らせ済みの後も探さない
+    usage_transcript(tmp_path, 200_000)
+    assert _tool(tmp_path, "PreToolUse") is None
+    counted_main["n"] = 0
+    assert _tool(tmp_path, "PostToolUse") is None
+    assert counted_main["n"] == 0
+    usage_transcript(tmp_path, 250_000)
+    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_B"))
+    counted_main["n"] = 0
+    for i in range(3):
+        assert _tool(tmp_path, "PostToolUse", f"toolu_{i}") is None
+    assert counted_main["n"] == 0
+
+
+def test_context_limit_post_tool_use_checks_again_for_another_cwd(tmp_path, counted_main):
+    # 覚えた値の cwd と違う PostToolUse は、その cwd のリポジトリを探し直して判定する
+    usage_transcript(tmp_path, 300_000)
+    assert _tool(tmp_path, "PreToolUse") is None
+    other = tmp_path / "sub"
+    other.mkdir()
+    payload = sample("claude", "PostToolUse", tmp_path, tool_name="Bash", tool_input={"command": "ls"}, tool_use_id="toolu_A")
+    counted_main["n"] = 0
+    assert _notice(call_entry("claude", "PostToolUse", {**payload, "cwd": str(other)}))
+    assert counted_main["n"] == 1
+
+
 def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
     # #3995 の 3995:5: 知らせた後の同じ入力の組は覚えた項目を増やさない。運用上限の判定は今のまま。利用者の入力の後は再び覚える
     usage_transcript(tmp_path, 250_000)

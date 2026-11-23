@@ -8,8 +8,9 @@
 案内へ下げずに止め続ける（表の `deny_key` が `none`。#3995 の決定 6）。
 
 PostToolUse では、文脈の量が判断開始の値（`decide_from`）以上・運用上限未満なら、超えたことと役ごとの切りどころを
-案内する（利用者の入力ごとに 1 度。数え手の `NOTICE_KEY`）。知らせ済みの入力と数え手が使えないときは会話の記録を読まない。
-文脈の量は同じ呼び出し（`tool_use_id`）の PreToolUse が数え手の `memo` に覚えた値を使い、読み直さない（#3995 の決定 3）。
+案内する（利用者の入力ごとに 1 度。数え手の `NOTICE_KEY`）。知らせ済みの入力と数え手が使えないときはリポジトリを探さず、
+会話の記録も読まない。文脈の量と判定の対象かどうかは、同じ呼び出し（`tool_use_id`）・同じ `cwd` の PreToolUse が数え手の
+`memo` に覚えた値を使い、読み直さない（#3995 の決定 3）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
 
@@ -361,39 +362,56 @@ def _tool_use_id(ctx) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
-def _tokens(ctx, svc, notified: bool) -> Optional[int]:
-    """文脈の量。PostToolUse は同じ呼び出しの PreToolUse が覚えた値を取り出して使い、無ければ会話の記録の末尾を読む。
+def _remembered(ctx, svc) -> Optional[int]:
+    """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
 
-    PreToolUse は読んだ値を、この入力の後にまだ知らせていなければ `tool_use_id` ごとに覚える（知らせ済みなら PostToolUse は
-    値を使わずに終わる）。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    PreToolUse は判定の対象（メインディレクトリに `.ndf` がある）と確かめた後にだけ覚えるので、値があれば対象の判定も済んでいる。
+    同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
     """
     item = _tool_use_id(ctx)
-    post = ctx.event == "PostToolUse"
-    got = svc.counter.take(MEMO_KEY, item) if post and item is not None else None
-    if got is not None and isinstance(got.get("tokens"), int):
-        return got["tokens"]
-    tokens = context_tokens(ctx.transcript_tail)
-    if not post and tokens is not None and item is not None and not notified:
-        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens}, MEMO_KEEP)
-    return tokens
+    got = svc.counter.take(MEMO_KEY, item) if item is not None else None
+    if got is None or got.get("cwd") != ctx.cwd or not isinstance(got.get("tokens"), int):
+        return None
+    return got["tokens"]
+
+
+def _post(ctx, svc) -> Verdict | None:
+    """PostToolUse: 判断開始の値以上・運用上限未満なら、利用者の入力ごとに 1 度知らせる。
+
+    知らせ済みか数え手が使えなければ、リポジトリを探さず会話の記録も読まずに終える。PreToolUse が覚えた値があれば
+    リポジトリを探し直さない。
+    """
+    if not svc.counter.usable or svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        return None
+    tokens = _remembered(ctx, svc)
+    if tokens is None:
+        if _main(ctx.cwd) is None:
+            return None
+        tokens = context_tokens(ctx.transcript_tail)
+        if tokens is None:
+            return None
+    t = thresholds(ctx.env, tables.policy_value)
+    if t.decide_from <= tokens < t.limit and svc.counter.bump(NOTICE_KEY) == 1:
+        return advise(_notice(tokens, t))
+    return passing(context_tokens=tokens)
 
 
 def check(ctx, svc) -> Verdict | None:
-    main = None if "agent_id" in ctx.payload else _main(ctx.cwd)
+    if "agent_id" in ctx.payload:
+        return None
+    if ctx.event == "PostToolUse":
+        return _post(ctx, svc)
+    main = _main(ctx.cwd)
     if main is None:
         return None
-    post = ctx.event == "PostToolUse"
-    notified = svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0  # noqa: NDF502 ファイル: 知らせる前は 0 回
-    if post and (not svc.counter.usable or notified):  # 知らせない呼び出しは会話の記録を読まずに終える
-        return None
-    tokens = _tokens(ctx, svc, notified)
+    tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None
+    item = _tool_use_id(ctx)
+    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd を覚える
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": ctx.cwd}, MEMO_KEEP)
     t = thresholds(ctx.env, tables.policy_value)
-    if post:
-        if t.decide_from <= tokens < t.limit and svc.counter.bump(NOTICE_KEY) == 1:
-            return advise(_notice(tokens, t))
-        return passing(context_tokens=tokens)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
