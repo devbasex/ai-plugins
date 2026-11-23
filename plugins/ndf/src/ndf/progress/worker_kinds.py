@@ -44,18 +44,29 @@ def work_dir_of(kind: str, values: Mapping[str, Any]) -> Optional[str]:
     return found if isinstance(found, str) and found else None
 
 
+NO_COVERS: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+
+
 def kind_gaps(
-    kind: str, values: Mapping[str, Any], inputs: Mapping[str, Any], *, sources: Mapping[str, str] = NO_SOURCES
+    kind: str,
+    values: Mapping[str, Any],
+    inputs: Mapping[str, Any],
+    *,
+    sources: Mapping[str, str] = NO_SOURCES,
+    covers: Mapping[str, tuple[str, ...]] = NO_COVERS,
 ) -> dict[str, str]:
     """作業の定義の `inputs` と `cwd` が指す値のうち、どちらにも無い（または空の）名前 → 出所の人が読む文。そろえば空。
 
     出所は `sources`（差し込みの名前 → 出所の文。呼び手が `invoke.FILL_SOURCES` を渡す）にあればその文、無ければ工程の入力。
+    `covers`（名前 → その値があれば要らない名前。呼び手が `route.LAUNCH_SOURCES` を渡す）の値がそろっていれば、
+    その元の名前は欠けとしない（`acceptance` を明示した複数課題の単位は、単独の `issue` を持たなくてよい）。
     """
     got = kind_values(kind, values, inputs)
+    spared = {n for name, names in covers.items() if _filled(got.get(name)) for n in names}
     gaps = {
         n: sources[n] if n in sources else f"工程の入力 {n}（工程の定義の metadata.ndf.inputs）"
         for n in work_kinds()[kind]["inputs"]
-        if not _filled(got.get(n))
+        if not _filled(got.get(n)) and n not in spared
     }
     if work_dir_of(kind, values) is None:
         cwd = work_kinds()[kind]["cwd"]

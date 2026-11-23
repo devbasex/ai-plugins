@@ -504,13 +504,16 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
 
 
 def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """試行の始まりに、前の試行の `values.json` を工程のすべてのステップの保存先から消し、次に流すステップがプランなら
-    その差し込みを組んで確かめる（#3908 の決定 2・4）。組めなければ `invoke.plan_failure` の結果、組めれば None。
+    """試行の始まりに、前の試行の値（`values.json` と課題の写し）を工程のすべてのステップの保存先から消し（消せなければ
+    precondition）、次に流すステップがプランならその差し込みを組んで確かめる（#3908 の決定 2・4）。組めなければ `invoke.plan_failure` の結果、組めれば None。
 
     次に流すステップは、出力の失敗で初めから流し直す（`redo`）なら最初のステップ、ほかは終わっていない最初のステップである。
     2 つ目以降のプランのステップは前のステップが作った値を差し込みに使うので、ここでは組まず、流すときに `plan_path` が組む。
     """
-    invoke.clear_values(step_dir(d, v, s, st) for st in s.steps)
+    try:
+        invoke.clear_values(step_dir(d, v, s, st) for st in s.steps)
+    except OSError as exc:
+        return result.stopped(invoke.PLAN, "precondition", f"前の試行の値を保存先から消せない: {exc}")
     prog = step_progress(v, s.name)
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:

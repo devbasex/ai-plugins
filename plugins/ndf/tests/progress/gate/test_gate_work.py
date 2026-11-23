@@ -120,6 +120,15 @@ def test_kind_gaps_names_the_template_value_by_its_source():
     assert got == {"branch": invoke.FILL_SOURCES["branch"]}
 
 
+def test_kind_gaps_spares_the_issue_when_the_acceptance_is_given_for_several_issues():
+    values = {"worktree": "/w", "branch": "b", "acceptance": ["--issue", "5", "--issue", "6"]}
+    assert worker_kinds.kind_gaps("impl", values, {}, covers=route.LAUNCH_SOURCES) == {}
+    assert set(worker_kinds.kind_gaps("impl", {**values, "acceptance": []}, {}, covers=route.LAUNCH_SOURCES)) == {
+        "issue",
+        "acceptance",
+    }
+
+
 def test_kind_gaps_names_the_empty_work_dir():
     values = {"worktree": "", "branch": "b", "issue": "5", "acceptance": "a.json"}
     assert worker_kinds.kind_gaps("impl", values, {}) == {"worktree": "作業 impl の作業場所（差し込み worktree）"}

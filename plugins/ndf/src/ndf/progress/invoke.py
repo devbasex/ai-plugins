@@ -405,8 +405,8 @@ def _project(location: Path) -> dict[str, Any]:
 def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
     """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
 
-    題と本文は保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の回答・続き・
-    打ち直し）はその写しを使う。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
+    題と本文は試行ごとに保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
+    （承認の回答・続き・プランの打ち直し）はその写しを使う。工程の新しい試行は `clear_values` が写しを消し、読み直す。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
     届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
@@ -617,10 +617,22 @@ def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
     return held
 
 
+# 試行の始まりに消す、前の試行が保存先に残した値（差し込みの値と、課題の題・本文の写し）
+TRIAL_FILES = (VALUES_FILE, ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
+
+
 def clear_values(state_dirs: Iterable[Path]) -> None:
-    """渡された保存先から `values.json` を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。"""
+    """渡された保存先から前の試行の値（`TRIAL_FILES`）を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
+
+    課題の写しも消すのは、残すと `_issue_values` が写しを優先し、新しい試行が GitHub で直した題・本文を取り込まないためである。
+    消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
+    """
     for state_dir in state_dirs:
-        (state_dir / VALUES_FILE).unlink(missing_ok=True)
+        if not state_dir.is_dir():
+            continue
+        for pattern in TRIAL_FILES:
+            for found in state_dir.glob(pattern):
+                found.unlink(missing_ok=True)
 
 
 class PreparedPlan(NamedTuple):
@@ -660,7 +672,7 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     gaps: dict[str, str] = {}
     for kind in dict.fromkeys(_work_names(route.expanded(t, local_tests=local_tests))):
-        gaps.update(worker_kinds.kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES))
+        gaps.update(worker_kinds.kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
     if gaps:
         raise KindInputsMissing(t.name, gaps)
     write_values(work_dir, run.name, values, run.inputs, local_tests)

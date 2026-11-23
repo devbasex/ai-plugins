@@ -847,6 +847,18 @@ def test_a_passing_github_failure_while_preparing_stops_as_transient_before_star
     assert _kinds(run.read(st, tid), "要求と受け入れ条件") == []
 
 
+def test_values_that_cannot_be_cleared_stop_as_precondition_before_started(repo, st, env, capsys, monkeypatch):
+    def fail(state_dirs):
+        raise PermissionError("読み取り専用")
+
+    monkeypatch.setattr(invoke, "clear_values", fail)
+    tid = _new(capsys)
+    out = run.advance(st, tid, repo, env.env)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+    assert "要求と受け入れ条件" in out["cause"]["detail"] and "読み取り専用" in out["cause"]["detail"]
+    assert _kinds(run.read(st, tid), "要求と受け入れ条件") == []
+
+
 def test_the_values_are_built_once_from_next_to_running_the_step(repo, st, env, capsys, monkeypatch):
     # _start で組んだ値を、そのステップを流す plan_path が読むだけにする（設定・打った場所・差し込みを読むのは 1 回）
     sprint_fixture.with_worker(monkeypatch)
@@ -880,9 +892,13 @@ def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs
     dirs = [_step_dir(st, tid, "design", step) for step in ("design", "design-review", "design-merge")]
     for d in dirs:
         invoke.write_values(d, "古い", {}, {}, True)
+    # 課題の写しも消す。残すと新しい試行が GitHub で直した題・本文を取り込まない
+    copies = [dirs[0] / invoke.ISSUE_BODY_FILE.format(number=ISSUE), dirs[0] / invoke.ISSUE_TITLE_FILE.format(number=ISSUE)]
+    for c in copies:
+        c.write_text("{}", encoding="utf-8")
     prepared = []
     recording = run.Env(**{**vars(env.env), "prepare": lambda r, work_dir, cwd: prepared.append((r.name, work_dir))})
     _main(capsys, command.main, "retry", tid, "設計", "--reason", "設定を直した")
     run.advance(st, tid, repo, recording)
-    assert [d for d in dirs if (d / invoke.VALUES_FILE).exists()] == []
+    assert [d for d in dirs if (d / invoke.VALUES_FILE).exists()] == [] and [c for c in copies if c.exists()] == []
     assert prepared == [("design-merge", dirs[2])]
