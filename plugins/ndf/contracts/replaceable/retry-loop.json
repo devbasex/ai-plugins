@@ -1,0 +1,6 @@
+{
+  "summary": "try と sleep を持つ繰り返しで自作した打ち直し。tenacity で置き換えられる",
+  "find": {"kind": "loop", "callee": "sleep"},
+  "replace_with": "tenacity",
+  "exempt": []
+}

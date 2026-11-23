@@ -22,7 +22,7 @@
 | --- | --- |
 | `ndf check` | `--only`（array of string・任意）: この規則の指摘だけを違反にする（繰り返せる）<br>`--write-spec`（boolean・任意）: 規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する |
 
-結果の `metrics`: `files`（integer）・`findings`（object）・`written`（integer）。`items` の要素: `detail`（string）・`line`（integer）・`path`（string）・`rule`（string）
+結果の `metrics`: `budget`（object）・`files`（integer）・`findings`（object）・`written`（integer）。`items` の要素: `detail`（string）・`line`（integer）・`path`（string）・`rule`（string）
 
 ## `ndf ci`
 

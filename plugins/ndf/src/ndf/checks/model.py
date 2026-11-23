@@ -7,10 +7,18 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import re
+import sys
+import warnings
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import YAMLError
 
 from ndf import identity
 from ndf.checks import imports
@@ -22,6 +30,8 @@ SCRIPT_PREFIXES = ("bin/", "hooks/")
 SRC_DIR = "src"
 # 見るファイルを集めるときに降りないディレクトリ（依存の環境・キャッシュ）
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
+# `ReusedAnchorWarning` の文の、2 つ目の定義の位置（行の抜粋は字下げされ、行頭の語に当たらない）
+REUSED_ANCHOR_AT = re.compile(r'^second occurrence\s+in "[^"\n]*", line (\d+), column (\d+)', re.MULTILINE)
 
 
 class CheckError(Exception):
@@ -62,6 +72,26 @@ class Source:
         return self.path.suffix == ".py"
 
 
+@dataclass(frozen=True)
+class Workflow:
+    """1 回だけ解析したワークフロー 1 本。`jobs` はジョブの名前 → 定義（`jobs` が無ければ空）。"""
+
+    path: Path
+    lines: list[str]
+    jobs: dict[str, Any]
+
+    @property
+    def steps(self) -> list[CommentedMap]:
+        """すべてのジョブのステップ。"""
+        return [
+            step
+            for job in self.jobs.values()
+            if isinstance(job, dict) and isinstance(job.get("steps"), list)
+            for step in job["steps"]
+            if isinstance(step, CommentedMap)
+        ]
+
+
 @dataclass
 class Scope:
     """見る範囲。`sources` は `plugin_root` の下だけを持つ。"""
@@ -78,6 +108,14 @@ class Scope:
         設定を使わない規則だけを当てる検査は、設定のファイルが壊れていても止まらない。
         """
         return load_settings(self.repo_root)
+
+    @cached_property
+    def workflows(self) -> list[Workflow]:
+        """設定の `toolchain.workflows` に当たるワークフロー（キーが無ければ空）。規則の数によらず、読みと解析は 1 ファイル 1 回だけ。"""
+        toolchain = self.settings.get("toolchain")
+        if not isinstance(toolchain, dict) or "workflows" not in toolchain:
+            return []
+        return [read_workflow(p) for p in self.repo_files(toolchain["workflows"])]
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
@@ -96,6 +134,31 @@ class Scope:
         except (ValueError, NotImplementedError) as exc:
             raise CheckError(f"グロブを解けない: {glob!r}: {exc}") from exc
         return sorted(p for p in matched if p.is_file() and p.resolve().is_relative_to(root))
+
+    def repo_file(self, rel: str, label: str) -> Path:
+        """`rel` に当たるただ 1 つのファイル。`repo_files` と同じ確かめをし、1 つに決まらなければ読む前に `CheckError`。"""
+        paths = self.repo_files(rel)
+        if len(paths) != 1:
+            raise CheckError(f"{label}が 1 つに決まらない（リポジトリの中のファイルだけを見る）: {rel}: {len(paths)} 件")
+        return paths[0]
+
+    def python_under(self, top: Path) -> list[Source]:
+        """`top` の下の `.py`。プラグインの中は集めた `sources` を使い、外のファイルだけを読む。解決した先がリポジトリの外のものは除く。
+
+        プラグインの外の `.py` が読めなければ `CheckError`（プラグインの中の構文の誤りは検査が違反にして見る範囲から外す）。
+        """
+        if top.is_relative_to(self.plugin_root):
+            return [s for s in self.python() if s.path.is_relative_to(top)]
+        root = self.repo_root.resolve()
+        if not top.resolve().is_relative_to(root):
+            return []
+        found = [s for s in self.python() if s.path.is_relative_to(top)]
+        for path in walk(top):
+            if path.suffix != ".py" or path.is_relative_to(self.plugin_root):
+                continue
+            if path.resolve().is_relative_to(root) and path.is_file():
+                found.append(_parsed(Source(path, self.rel(path))))
+        return found
 
     def plugin_rel(self, src: Source) -> str:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""
@@ -116,6 +179,57 @@ class Scope:
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
         return [s for s in self.sources if s.is_python]
+
+
+def _load_yaml(path: Path, text: str) -> Any:
+    """YAML の値。読み手の警告（同じ名前のアンカーなど）の文には入力の行の抜粋が載るので、標準エラーへはパスと位置だけを出す。"""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        doc = YAML(typ="rt").load(text)
+    for w in caught:
+        at = REUSED_ANCHOR_AT.search(str(w.message))
+        where = f":{at[1]}:{at[2]}" if at else ""
+        print(f"ワークフローの YAML の警告 {w.category.__name__}: {path}{where}", file=sys.stderr)
+    return doc
+
+
+def read_workflow(path: Path) -> Workflow:
+    """ワークフローを読む。YAML として読めなければ `CheckError`。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+        doc = _load_yaml(path, text)
+    except YAMLError as exc:
+        # 例外の文には入力の行の抜粋が載る（Git の外の設定ファイルも読みうる）。パスと位置だけを出す
+        mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+        where = f":{mark.line + 1}:{mark.column + 1}" if mark is not None else ""
+        raise CheckError(f"ワークフローを YAML として読めない: {path}{where}") from None
+    except UnicodeDecodeError as exc:
+        raise CheckError(f"ワークフローを UTF-8 として読めない: {path}: 位置 {exc.start}") from None
+    except (ValueError, LookupError, AttributeError):
+        # 型のタグ（`!!int` など）や日付の値を変換できないときの例外の文には、値がそのまま載る
+        raise CheckError(f"ワークフローの値を型のとおりに読めない: {path}") from None
+    except OSError as exc:
+        raise CheckError(f"ワークフローを読めない: {path}: {exc.strerror}") from None
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    return Workflow(path, text.splitlines(), jobs if isinstance(jobs, dict) else {})
+
+
+def walk(top: Path) -> list[Path]:
+    """`top` の下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
+    found = []
+    for parent, dirs, files in os.walk(top):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        found += [Path(parent, name) for name in files]
+    return found
+
+
+def _parsed(src: Source) -> Source:
+    """構文木を作ったファイル。読めなければ `CheckError`。"""
+    try:
+        _ = src.tree
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise CheckError(f"Python のファイルを読めない: {src.rel}: {exc}") from exc
+    return src
 
 
 def module_name(scope: Scope, src: Source) -> str:
@@ -184,6 +298,7 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
             "child_deps",
             "experimental",
             "toolchain",
+            "budget",
         )
         if k not in data
     ]

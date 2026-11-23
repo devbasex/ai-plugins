@@ -271,7 +271,7 @@ def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
     assert dest.read_text(encoding="utf-8") == "old\n"
 
 
-@pytest.mark.parametrize("rel", ["causes/unknown.json", "facts/exit-codes.json"])
+@pytest.mark.parametrize("rel", ["causes/invalid.json", "facts/exit-codes.json"])
 def test_unreadable_contracts_stop_with_config_broken(contracts_copy, capsys, rel):
     contracts_copy(rel, text="{")
     code, out, _ = _run_top(capsys, "no-such-command")

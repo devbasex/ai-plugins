@@ -4,11 +4,11 @@
 - `copy-mismatch`: 利用先の宣言の `$schema` が名指す Skill の下のスキーマ 4 本が、契約のスキーマ
   （`contracts/schemas/ndf-settings/<名前>.schema.json`）と 1 バイトでも違う（#3341 の決定 12。URL を変えずに済むよう
   中身をそろえる。どちらを正本にしてコピーを無くすかは #3518 の持ち物）
-- `limits-shape`・`limits-unknown`: 上限の設定（`contracts/limits/`）の方針のファイルが読めない・コードが文字列で引く
+- `limits-shape`・`limits-unknown`: 上限の設定（`contracts/limits/`）に方針のファイルが 1 つも無い・コードが文字列で引く
   方針のファイルが無い（`contracts_lib/limits_decl.py`。#2343）
 
 サブコマンドの引数・環境変数・設定のキー・受け渡しのファイル・公開する面と生成した規約のページは、NDF の検査の
-規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形は `ndf contracts check` が見る。
+規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形（上限の設定の中身を含む）は `ndf contracts check` が見る。
 
     python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [<ファイル>...]
 

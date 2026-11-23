@@ -160,7 +160,7 @@ flowchart LR
 // .ndf/project.json（配らない。このリポジトリの値。足すキーだけを書いた）
 {
   "toolchain": {
-    "workflows": ".github/workflows/*.yml",
+    "workflows": ".github/workflows/*.y*ml",
     "python_ci": ["3.11", "3.13"],
     "python_compat": {"versions": ["3.10"], "workflows": [".github/workflows/script-structure.yml"]},
     "plugin_pyprojects": ["plugins/ndf/pyproject.toml"],
@@ -179,7 +179,7 @@ flowchart LR
 | `toolchain.python.floor`（配る） | NDF が動く Python の下限 | 検査が `plugin_pyprojects` の `requires-python` と突き合わせる |
 | `toolchain.python.hook_floor`（配る） | 依存の環境が無いときに hook のエントリポイントが動くシステムの python3 の下限 | `plugins/ndf/src/ndf/domains/hooks/boot.py` が読む（今は `contracts/hooks/imports.json` の `boot.python` を読む） |
 | `toolchain.uv.version`・`installer_sha256`（配る） | 起動が入れる uv のバージョンと照合値 | 検査が `bin/ndf` の `UV_VERSION=`・`UV_INSTALLER_SHA256=` の行、ワークフローの `setup-uv` の `version` と突き合わせる |
-| `toolchain.workflows`（設定） | 検査が見るワークフローのグロブ。無ければワークフローを見ない | 検査 |
+| `toolchain.workflows`（設定） | 検査が見るワークフローのグロブ（`.yml` と `.yaml` の両方に当てる）。無ければワークフローを見ない | 検査 |
 | `toolchain.python_ci`（設定） | `setup-python` の `python-version` に書いてよい値の一覧（通常の CI のバージョン） | 検査 |
 | `toolchain.python_compat`（設定） | 対応の下限を確かめる手順だけに書いてよいバージョン（`versions`）と、それを書いてよいワークフロー（`workflows`）。このリポジトリでは根の `scripts/` を 3.10 で動かす確かめ（`script-structure.yml` の PATH の `python3`。ruff の `target-version = "py310"` と同じ下限）を残すために置く。`workflows` の外で `versions` のバージョンを書けば違反。無ければ `python_ci` だけを許す | 検査 |
 | `toolchain.plugin_pyprojects`（設定） | `requires-python` を `python.floor` と突き合わせる `pyproject.toml` の一覧。無ければ突き合わせない | 検査 |
