@@ -7,18 +7,21 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import git_sandbox
 import pytest
+import sprint_fixture
 import strategy_fixture
 from result_json import last_result
 
 from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
-from ndf.progress import command, definition, gate, invoke, model, run, stages, store
+from ndf.core import route
+from ndf.progress import command, definition, gate, invoke, model, records, run, stages, store
 
 ISSUE = 3092
 
@@ -88,6 +91,7 @@ def env(repo):
         facts=lambda words, ctx, cwd: {w: True for w in words},
         launch=lambda st_, tid, cwd: launched.append(tid),
         invoker=fake,
+        prepare=lambda r, work_dir, cwd: None,  # 作業が偽物なのでプランの差し込みも組まない
         records=lambda cwd: recs,
         sleep=slept.append,
     )
@@ -608,10 +612,10 @@ def test_records_failure_does_not_stop_the_work_and_resync_reports_it(repo, st, 
 
 def test_replace_section_is_idempotent_and_keeps_the_rest():
     body = "前\n\n## 進行\n\n古い\n<!-- ndf:section-end -->\n\n## 後\n"
-    once = run.replace_section(body, run.ISSUE_SECTION, "新しい")
+    once = records.replace_section(body, records.ISSUE_SECTION, "新しい")
     assert once == "前\n\n## 進行\n\n新しい\n<!-- ndf:section-end -->\n\n## 後\n"
-    assert run.replace_section(once, run.ISSUE_SECTION, "新しい") == once
-    assert run.replace_section("", run.PR_SECTION, "x") == "## 通した工程\n\nx\n<!-- ndf:section-end -->\n"
+    assert records.replace_section(once, records.ISSUE_SECTION, "新しい") == once
+    assert records.replace_section("", records.PR_SECTION, "x") == "## 通した工程\n\nx\n<!-- ndf:section-end -->\n"
 
 
 def test_retry_delay_follows_the_cause_table():
@@ -794,3 +798,91 @@ def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st,
     )
     assert later["cause"] == {"kind": "wait_timeout", "detail": f"ステートマシン {tid} を流す作業がまだ動いている（0.05 秒待った）"}
     assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1
+
+
+# --- 差し込みを started の前に組んで確かめる（#3908 の受け入れ条件 3） ------------------------------------------------------
+
+
+def _kinds(v: run.View, stage: str) -> list[str]:
+    """行のイベントのうち、開始と失敗の種類。"""
+    return [e.draft.kind for e in v.row_events(stage) if e.draft.kind in ("started", "failed")]
+
+
+def _step_dir(st, tid: str, stage_id: str, step: str, generation: int = 0) -> Path:
+    return run.work_root(st.root, tid) / stage_id / f"{step}-g{generation}"
+
+
+def test_a_stage_whose_values_cannot_be_decided_stops_before_started(repo, st, env, capsys):
+    # params.json の worker に既定が無い今は、工程「要求と受け入れ条件」の差し込み worker が決まらない
+    tid = _new(capsys)
+    real = run.Env(**{**vars(env.env), "prepare": invoke.prepare_plan})
+    out = run.advance(st, tid, repo, real)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+    assert out["items"] == [{"key": "worker", "source": invoke.FROM_DEFAULT}]
+    assert "要求と受け入れ条件" in out["cause"]["detail"] and "worker" in out["cause"]["detail"]
+    v = run.read(st, tid)
+    assert _kinds(v, "要求と受け入れ条件") == [] and _labels(st, tid)["要求と受け入れ条件"] == "pending"
+    assert env.launched == [] and env.fake.calls == []
+    assert not (_step_dir(st, tid, "requirements", "requirements") / invoke.VALUES_FILE).exists()
+
+
+def test_a_stage_whose_values_are_decided_starts_with_the_values_in_its_step_dir(repo, st, env, capsys, monkeypatch):
+    sprint_fixture.with_worker(monkeypatch)
+    tid = _new(capsys)
+    real = run.Env(**{**vars(env.env), "prepare": invoke.prepare_plan})
+    assert run.advance(st, tid, repo, real)["status"] == "ok"
+    assert _kinds(run.read(st, tid), "要求と受け入れ条件") == ["started"]
+    held = invoke.read_values(_step_dir(st, tid, "requirements", "requirements"))
+    assert held is not None and held["plan"] == "requirements" and held["inputs"] == {"issues": [ISSUE]}
+
+
+def test_a_passing_github_failure_while_preparing_stops_as_transient_before_started(repo, st, env, capsys, monkeypatch):
+    def fail(*a, **k):
+        raise GitHubError("届かない", 0, retry_after=30.0)
+
+    monkeypatch.setattr(invoke, "template_values", fail)
+    tid = _new(capsys)
+    out = run.advance(st, tid, repo, run.Env(**{**vars(env.env), "prepare": invoke.prepare_plan}))
+    assert out["cause"]["kind"] == "transient" and out["cause"]["retry_after"] == 30.0
+    assert _kinds(run.read(st, tid), "要求と受け入れ条件") == []
+
+
+def test_the_values_are_built_once_from_next_to_running_the_step(repo, st, env, capsys, monkeypatch):
+    # _start で組んだ値を、そのステップを流す plan_path が読むだけにする（設定・打った場所・差し込みを読むのは 1 回）
+    sprint_fixture.with_worker(monkeypatch)
+    calls = {"template_values": [], "_project": []}
+    for name, seen in calls.items():
+        held = getattr(invoke, name)
+        monkeypatch.setattr(invoke, name, lambda *a, _held=held, _seen=seen, **k: _seen.append(a) or _held(*a, **k))
+    derived, held_derived = [], route.derived
+    monkeypatch.setattr(route, "derived", lambda *a: derived.append(a) or held_derived(*a))
+    counted: list[tuple[int, int, int]] = []
+
+    def runner(argv, cwd, environ):
+        counted.append((len(calls["template_values"]), len(calls["_project"]), len(derived)))
+        out = result.stopped("plan", "test_failed", "ここで止める")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+
+    invoker = lambda r, cwd, work_dir, answer: invoke.invoke(r, cwd, work_dir, answer, runner=runner)  # noqa: E731
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, run.Env(**{**vars(env.env), "prepare": invoke.prepare_plan, "invoker": invoker}))
+    assert counted == [(1, 1, 1)]
+
+
+def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs_next(repo, st, env, capsys):
+    # 打ち直しは同じ世代の同じ保存先を使う。前の試行の values.json を残すと、後続のプランのステップが古い設定で描かれる
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    _approve(st, tid, "設計")
+    env.fake.script["design-merge"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
+    lanes.turn(st, tid, repo, env.env)
+    assert _labels(st, tid)["設計"] == "failed"
+    dirs = [_step_dir(st, tid, "design", step) for step in ("design", "design-review", "design-merge")]
+    for d in dirs:
+        invoke.write_values(d, "古い", {}, {}, True)
+    prepared = []
+    recording = run.Env(**{**vars(env.env), "prepare": lambda r, work_dir, cwd: prepared.append((r.name, work_dir))})
+    _main(capsys, command.main, "retry", tid, "設計", "--reason", "設定を直した")
+    run.advance(st, tid, repo, recording)
+    assert [d for d in dirs if (d / invoke.VALUES_FILE).exists()] == []
+    assert prepared == [("design-merge", dirs[2])]

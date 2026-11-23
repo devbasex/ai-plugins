@@ -224,11 +224,11 @@ def test_plan_gets_the_worktree_as_the_plans_location_and_not_as_a_set_value(tmp
     assert inv.plan.worktree == location and inv.values["worktree"] == location
 
 
-def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch):
-    # 差し込み worktree を受けるテンプレートに、作業場所も省いた作業場所を決めるブランチも無い
+def test_a_template_that_cannot_be_filled_stops_as_precondition(tmp_path, monkeypatch):
+    # 差し込み worktree を受けるテンプレートに、作業場所も省いた作業場所を決めるブランチも無い（#3908 の決定 4 で precondition）
     _plan_template(monkeypatch, params=("worktree",))
     got = invoke.invoke(_plan_run({"issues": [1]}), tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
-    assert got.status == "stopped" and got.cause["kind"] == "invalid" and "worktree" in got.cause["detail"]
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "worktree" in got.cause["detail"]
 
 
 PROJECT = {
@@ -259,14 +259,14 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
         ("design-merge", {"worker"}),
     ],
 )
-def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):
-    # PR 3464 の指摘（#3092）: テンプレートの必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に invalid で止まる。
+def test_template_values_missing_from_every_source_stop_as_precondition_by_name(tmp_path, monkeypatch, name, missing):
+    # PR 3464 の指摘（#3092）: テンプレートの必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に止まる（#3908 の決定 4 で precondition）。
     # 出所（課題・設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
-    assert got.status == "stopped" and got.cause["kind"] == "invalid"
+    assert got.status == "stopped" and got.cause["kind"] == "precondition"
     named = {i["key"]: i["source"] for i in got.report["items"]}
     assert set(named) >= missing and "branch" not in named
     assert all(n in got.cause["detail"] for n in missing)
@@ -550,7 +550,7 @@ def test_workflow_ndf_settings_out_of_shape_stops_as_invalid(tmp_path, workflow)
     assert got.status == "stopped" and got.cause["kind"] == "invalid" and "workflow" in got.cause["detail"]
 
 
-def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
+def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_precondition_by_name(tmp_path, monkeypatch):
     # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
@@ -559,7 +559,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
-    assert got.status == "stopped" and got.cause["kind"] == "invalid"
+    assert got.status == "stopped" and got.cause["kind"] == "precondition"
     named = {i["key"]: i["source"] for i in got.report["items"]}
     assert named["title"] == invoke.FROM_UNTRUSTED_ISSUE and named["body_file"] == invoke.FROM_UNTRUSTED_ISSUE
     assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()

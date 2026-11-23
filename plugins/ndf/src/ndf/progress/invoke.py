@@ -31,10 +31,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import claude, git, github
@@ -46,7 +47,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, model, stages
+from ndf.progress import definition, model, stages, worker_kinds
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -72,6 +73,10 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
+# プランを組んだ差し込みの値を、プランの実行の保存先に残すファイル（#3908 の決定 2）
+VALUES_FILE = "values.json"
+# values.json のキー → 値の型（形が違えば読まなかったものとして扱う）
+VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
 class StageInputError(Exception):
@@ -118,6 +123,19 @@ class TemplateValuesMissing(route.RouteError):
     def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
         listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
         super().__init__(f"テンプレート {template_name} の差し込みの値が無い: {listed}")
+        self.missing = dict(missing)
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return [{"key": n, "source": s} for n, s in self.missing.items()]
+
+
+class KindInputsMissing(route.RouteError):
+    """プランの作業（`{{worker}}` の後ろの名前）が読む入力か作業場所が決まらない。`missing` は名前 → 出所。"""
+
+    def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
+        listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
+        super().__init__(f"テンプレート {template_name} の作業の入力が無い: {listed}")
         self.missing = dict(missing)
 
     @property
@@ -581,18 +599,89 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
 
 
-def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
-    """テンプレートを入力の値で埋めたプランを実行の保存先へ書き、そのパスを返す。
+def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
+    """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
 
-    差し込みのうち入力に無いものは出所の表（`FILL_SOURCES`）と、`ndf route render` と同じく打った場所から決め
-    （`template_values`）、それでも欠ければ `TemplateValuesMissing`（`route.RouteError`）。テンプレートが無ければ `model.Refused`。
+    書けなければ `OSError` をそのまま上げる（呼び手の `plan_failure` が precondition にする）。
+    """
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
+    plan_files.write_json(state_dir / VALUES_FILE, held)
+
+
+def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
+    """`<保存先>/values.json`。無い・壊れている・キーか型が `VALUES_SHAPE` と違えば None。"""
+    held = plan_files.read_json(state_dir / VALUES_FILE)
+    if held is None or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
+        return None
+    return held
+
+
+def clear_values(state_dirs: Iterable[Path]) -> None:
+    """渡された保存先から `values.json` を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。"""
+    for state_dir in state_dirs:
+        (state_dir / VALUES_FILE).unlink(missing_ok=True)
+
+
+class PreparedPlan(NamedTuple):
+    """組んだ差し込みと描画の条件（手元のテストのステップを含めるか）。"""
+
+    template: route.Template
+    values: dict[str, route.Value]
+    local_tests: bool
+
+
+# テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
+WORKER_SLOT = "{{worker}}"
+
+
+def _work_names(plan: Any) -> list[str]:
+    """プランの形の中で `{{worker}}` の後ろに置かれた作業の名前（現れた順。重なりを含む）。"""
+    if isinstance(plan, dict):
+        return [n for v in plan.values() for n in _work_names(v)]
+    if not isinstance(plan, list):
+        return []
+    named = [str(plan[i + 1]) for i, v in enumerate(plan[:-1]) if v == WORKER_SLOT]
+    return named + [n for v in plan for n in _work_names(v)]
+
+
+def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+    """プランの差し込みを 1 回だけ組み、作業ごとの入力と作業場所を確かめて `values.json` に残す（#3908 の決定 2・4）。
+
+    設定は 1 回だけ読み、差し込みは `template_values` で組む。決まらなければ `TemplateValuesMissing`、`{{worker}}` の作業が読む
+    入力か作業場所が決まらなければ `KindInputsMissing` を上げ、どちらも `values.json` を書かない。テンプレートが無ければ `model.Refused`。
     """
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランのテンプレート {run.name} が無い")
+    work_dir.mkdir(parents=True, exist_ok=True)
     project = _project(work_location(run, cwd))
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
+    gaps: dict[str, str] = {}
+    for kind in dict.fromkeys(_work_names(route.expanded(t, local_tests=local_tests))):
+        gaps.update(worker_kinds.kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES))
+    if gaps:
+        raise KindInputsMissing(t.name, gaps)
+    write_values(work_dir, run.name, values, run.inputs, local_tests)
+    return PreparedPlan(t, values, local_tests)
+
+
+def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+    """同じ保存先に同じプランの `values.json` があればその値、無い（か別のプランのもの）なら `prepare_plan` で組んだ値。"""
+    t, held = template(run.name), read_values(work_dir)
+    if t is not None and held is not None and held["plan"] == run.name:
+        return PreparedPlan(t, held["values"], held["local_tests"])
+    return prepare_plan(run, work_dir, cwd)
+
+
+def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
+    """テンプレートを差し込みの値で埋めたプランを実行の保存先へ書き、そのパスを返す。
+
+    差し込みは同じ試行で組んだ `values.json` の値を使い、無ければ `prepare_plan` で 1 回だけ組む（入力に無い値は出所の表
+    `FILL_SOURCES` と打った場所から決め、欠ければ `TemplateValuesMissing`）。テンプレートが無ければ `model.Refused`。
+    """
+    t, values, local_tests = _prepared(run, work_dir, cwd)
     plan = route.render(t, values, local_tests=local_tests)
     out = work_dir / f"{run.name}.json"
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -720,28 +809,47 @@ def _github_kind(exc: github.GitHubError) -> str:
     return "transient" if passing else "precondition"
 
 
+# プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError)
+
+
+def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
+    """プラン `name` を組めなかった例外の `stopped` の結果 JSON。分類に無い例外は None（呼び手が上げ直す）。
+
+    差し込みと作業の入力の欠け（`TemplateValuesMissing`・`KindInputsMissing`）は値を足して打ち直せば通るので precondition に
+    し、名前と出所を `items` に並べる（決定 4）。ほかの分類は工程から呼ぶ経路（`_call_plan`）と起動の前の確かめ
+    （`progress.run._start`）で同じである。
+    """
+    if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
+        detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
+        return result.stopped(PLAN, "precondition", detail, items=exc.items)
+    if isinstance(exc, route.RouteError):
+        return result.stopped(PLAN, "invalid", f"プランのテンプレート {name} を埋められない: {exc}")
+    if isinstance(exc, GitError):
+        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} の省いた値を決められない: {exc}")
+    if isinstance(exc, FactUnknown):
+        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} のレビューの起点を決められない: {exc}")
+    if isinstance(exc, github.GitHubError):
+        detail = f"プランのテンプレート {name} の差し込みを GitHub から読めない: {exc}"
+        return result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after)
+    if isinstance(exc, OSError):
+        return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
+    return None
+
+
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
         if template(run.name) is None:
             return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} が無い"), {})
-        work_dir.mkdir(parents=True, exist_ok=True)
         ended = _no_route(run, work_dir, answer)
         if ended is not None:
             return ended
         argv = plan_argv(run, work_dir, answer, cwd)
-    except TemplateValuesMissing as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}", items=exc.items), {})
-    except route.RouteError as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}"), {})
-    except GitError as exc:
-        return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} の省いた値を決められない: {exc}"), {})
-    except FactUnknown as exc:
-        return StageResult(
-            result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} のレビューの起点を決められない: {exc}"), {}
-        )
-    except github.GitHubError as exc:
-        detail = f"プランのテンプレート {run.name} の差し込みを GitHub から読めない: {exc}"
-        return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})
+    except PLAN_FAILURES as exc:
+        failed = plan_failure(run.name, exc)
+        if failed is None:
+            raise
+        return StageResult(failed, {})
     return _from_process(run, runner(argv, cwd, run.env({})))
 
 
