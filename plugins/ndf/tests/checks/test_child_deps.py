@@ -112,8 +112,7 @@ def test_a_symlinked_table_is_not_read(plugin, rules, tmp_path):
     path = plugin.root / child_deps.CHILDREN_REL
     outside = path.rename(tmp_path / "outside.json")
     outside.write_text(json.dumps({"children": {"A": row(needs=["秘密"])}, "tables": {}}))
-    scope = plugin.scope()
     path.symlink_to(outside)
     with pytest.raises(CheckError, match="シンボリックリンク") as caught:
-        child_deps.apply(scope, rules)
+        child_deps.apply(plugin.scope(), rules)
     assert "秘密" not in str(caught.value)

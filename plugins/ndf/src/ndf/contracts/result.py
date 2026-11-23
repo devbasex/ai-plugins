@@ -172,15 +172,9 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
     return code
 
 
-def emit_without_tables(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
-    """コントラクトのファイルを 1 つも開かずに `stopped` の結果を 1 行で出す。終了コードは `UNREADABLE_FALLBACK`。"""
-    print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
-    return exit_codes.UNREADABLE_FALLBACK
-
-
 def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
     """コントラクトの表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
-    emit_without_tables(tool, kind, detail, items)
+    print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
     return exit_codes.unreadable_code()
 
 

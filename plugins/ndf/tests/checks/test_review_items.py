@@ -165,7 +165,7 @@ def test_write_spec_does_not_follow_a_symlink(copy, tmp_path, rel):
     outside.write_text('{"summary": "外"}\n', encoding="utf-8")
     path.symlink_to(outside)
     with pytest.raises(CheckError, match="シンボリックリンク"):
-        spec_docs.check(Scope(copy.repo, copy.root, "p"), load_rules(), write_spec=True)
+        copy.findings(write_spec=True)
     assert outside.read_text(encoding="utf-8") == '{"summary": "外"}\n'
 
 

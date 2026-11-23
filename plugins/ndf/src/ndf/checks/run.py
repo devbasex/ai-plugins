@@ -19,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, limits_readers, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, LinkRefused, Scope, Source, contained, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -30,18 +30,10 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 
 
 def _walk(plugin_root: Path) -> list[Path]:
-    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。
-
-    本文は読まない。ファイルかディレクトリのシンボリックリンク（参照切れを含む）があれば `LinkRefused`
-    （どの規則もリンク先の本文を読まないよう、読む前に止める）。
-    """
+    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
     found = []
     for top, dirs, files in os.walk(plugin_root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        paths = [Path(top, name) for name in [*dirs, *files] if name not in SKIP_DIRS]
-        linked = next((path for path in paths if path.is_symlink()), None)
-        if linked is not None:
-            raise LinkRefused(f"シンボリックリンクを通るパスは読み書きしない: {linked}")
         found += [Path(top, name) for name in files]
     return found
 
@@ -145,15 +137,11 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     written: list[str] | None = [] if args.write_spec else None
     try:
-        contained(identity.ROOT, identity.MANIFEST_REL)
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name)
         found = select(scope, rules, args.only, args.write_spec, written)
-    except LinkRefused as exc:
-        # 断ったリンクがコントラクトの表やスキーマを指すことがあるため、結果をコントラクトで確かめずに出す
-        return result.emit_without_tables(TOOL, "config_broken", str(exc))
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
     for f in found:
