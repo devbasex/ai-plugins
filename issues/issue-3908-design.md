@@ -1,6 +1,6 @@
 # 工程のプラン: 作業のプロンプトを仕組みが組み、工程が手を借りずに流れる（#3908）
 
-工程のプランは、worker を起動する argv（差し込み `worker`）の既定を持たない。そのため `standard` の 18 工程のうち 17 工程が起動のたびに invalid で止まり、conductor と supervisor が作業を抱えてきた。欠けているのは作業のプロンプトを書く処理だけである。プランの実行が差し込みの値を保存先へ残し、`ndf answer work` がその値と作業ごとの定義からプロンプトを組んで `ndf worker run` を起動する形にする。決められない差し込みは起動の前に見つけて失敗の記録を残さず、手で閉じるときの出力の取り場所は文脈のスキーマが持つ。採らなかった案は「決定の記録」にある。
+工程のプランは、worker を起動する argv（差し込み `worker`）の既定を持たない。そのため `standard` の 18 工程のうち 17 工程が起動のたびに invalid で止まり、conductor と supervisor が作業を抱えてきた。欠けているのは作業のプロンプトを書く処理だけである。工程がプランを組むときに差し込みの値を保存先へ残し、`ndf answer work` がその値と作業ごとの定義からプロンプトを組んで `ndf worker run` を起動する形にする。決められない差し込みは起動の前に見つけて失敗の記録を残さず、手で閉じるときの出力の取り場所は文脈のスキーマが持つ。採らなかった案は「決定の記録」にある。
 
 ## 今の姿
 
@@ -19,14 +19,14 @@ flowchart LR
 - `plugins/ndf/contracts/templates/params.json:16` の `worker` は「worker の起動の引数の並び」で、`default` を持たない。テンプレートはその後ろに作業の名前（`requirements` など）を 1 要素足して、プランのステップの `run`（argv）にする
 - `plugins/ndf/src/ndf/progress/invoke.py:313-325` の `FILL_SOURCES` は `worker` の出所を `FROM_DEFAULT`（`params.json` の既定）だけにしている。既定が無いので、どの経路でも値が決まらない
 - `worker` を使うテンプレートは 25 件中 23 件である（使わないのは `fix.json` と `merged.json`）。`standard` の 18 工程のうち 17 工程が当たり、当たらないのは `merged` を呼ぶクリーンアップだけである
-- `plugins/ndf/src/ndf/progress/gate/entry.py:81-105` の `ndf answer work <作業名>` は、作業の名前を `ndf worker run --kind <名前> --prompt-file <保存先>/<名前>-prompt.md --result-file <保存先>/<名前>-result.json ...` へ合わせて `os.execv` で置き換える。**プロンプトのファイルを書く処理だけが無く**、同じファイルの `:76-78` のコメントがそう明記している
+- `plugins/ndf/src/ndf/progress/gate/entry.py:81-105` の `ndf answer work <作業名>` は、作業の名前を `ndf worker run --kind <名前> --prompt-file <保存先>/<名前>-prompt.md --result-file <保存先>/<名前>-result.json ...` へ合わせて `os.execv` で置き換える。**プロンプトのファイルを書く処理だけが無く**、同じファイルの `:76-78` のコメントがそう明記している。この設計の後は、ファイル名の区切りを `.` にそろえる（`<名前>.prompt.md`・`<名前>.result.json`。#3877 の決定 7）
 - `worker` のほかに、工程「実装」は `title`・`body_file`・`issue`（課題が 2 件以上のとき）と `acceptance` が欠ける
 - 工程「リファクタリング」は `refactor` が欠ける（`.ndf/project.json` に `workflow` のキーが無いため）
 - 手で閉じるときの出力の値は、`plugins/ndf/contracts/workflow/context.schema.json` の `description` が「誰が書くか」を書くだけである。どこから取るかは `delivery` の 1 件しか書いていない
 
 ## 文脈と制約
 
-- プランのステップは argv をそのまま子プロセスで打つ。`worker` は argv の先頭部分で、テンプレートが後ろに作業の名前を 1 要素足す。この形は 24 件のテンプレートが共有しているので変えない
+- プランのステップは argv をそのまま子プロセスで打つ。`worker` は argv の先頭部分で、テンプレートが後ろに作業の名前を 1 要素足す。この形は 23 件のテンプレートが共有しているので変えない
 - 差し込みの既定の中に、実行のときの差し込み（`{state_dir}` など）を書ける。`plugins/ndf/src/ndf/core/route/__init__.py:94` の `REVIEW_STATE = "{state_dir}/cross-review"` が同じ形を使っている
 - `ndf answer work` が受け取れるのは `--state-dir`・`--cwd`・作業の名前の 3 つだけである（`entry.py:88-93`）。プロンプトの材料（課題の番号・作業場所・受け入れ条件）は、保存先から読めなければならない
 - プランの状態の保存先には今、`prs.json`・`outputs.json`・`progress.jsonl` がある（`plugins/ndf/src/ndf/core/plan/records.py:17-22`）。差し込みの値は残っていない
@@ -44,7 +44,7 @@ flowchart LR
     VJ --> AW
     K[("contracts/worker/kinds.json<br/>作業ごとの定義")] --> AW
     TP[("contracts/worker/prompt.md<br/>共通のテンプレート")] --> AW
-    AW -->|"&lt;保存先&gt;/&lt;作業名&gt;-prompt.md を書く"| PF[("プロンプト")]
+    AW -->|"&lt;保存先&gt;/&lt;作業名&gt;.prompt.md を書く"| PF[("プロンプト")]
     AW -->|"os.execv"| WR["ndf worker run"]
     PF --> WR
     WR --> C["claude -p"]
@@ -170,9 +170,9 @@ sequenceDiagram
 - **質問**: 工程のプランが worker を起動できるようにするために、プロンプトを誰が書くか
 - **選んだ案**: `ndf answer work` がプロンプトを組んで書き、そのまま `ndf worker run` へ置き換わる。`worker` の既定はこのコマンドの argv にする
 - 採らなかった案:
-  - テンプレートごとに `run` でプロンプトのファイルを渡す（24 件のテンプレートに同じ形を書き写すことになり、プロンプトの形を変えるたびに 24 か所を直す）
+  - テンプレートごとに `run` でプロンプトのファイルを渡す（23 件のテンプレートに同じ形を書き写すことになり、プロンプトの形を変えるたびに 23 か所を直す）
   - プランの実行がプロンプトを書く（プランの実行は工程と作業の規約を知らない層で、起動指示の 7 項目の規約が実行の層へ漏れる）
-  - 決まらない工程をステートマシンの定義から外す（`standard` の 20 工程が工程表から消え、工程の進行が記録されなくなる）
+  - 決まらない工程をステートマシンの定義から外す（`standard` の 17 工程が工程表から消え、工程の進行が記録されなくなる）
 - **代償**: `ndf answer work` が、プランの保存先の形（`values.json`）に依存する
 - 作り方: 自前で作る（既存の `ndf answer work` に処理を足す）
 - 比べた候補: 外部の調査の LIB の表（プロンプトのテンプレートを埋めるライブラリ）
@@ -183,7 +183,7 @@ sequenceDiagram
 - **質問**: `ndf answer work` は、課題の番号・作業場所・受け入れ条件をどこから読むか
 - **選んだ案**: 工程がプランを組む処理（`progress/invoke`）が、プランを書き出すときに差し込みの値を保存先の `values.json` へ書き、`ndf answer work` がそれを読む。プランの実行の層（`core/plan/runner`）には `acceptance`・`title`・`body_file` の補いが渡らないため、組んだ層が書く
 - 採らなかった案:
-  - `ndf answer work` の引数を増やしてテンプレートから渡す（24 件のテンプレートを直し、差し込みを足すたびに全件を直す）
+  - `ndf answer work` の引数を増やしてテンプレートから渡す（23 件のテンプレートを直し、差し込みを足すたびに全件を直す）
   - `ndf answer work` が自分でステートマシンとプランを読み直す（同じ値を 2 か所で組み立てることになり、プランが使った値と食い違いうる）
 - **代償**: 保存先にファイルが 1 つ増える。工程がプランを組むときに 1 回書き込みを行う。工程を通さない単発のプラン（`ndf plan` を手で打つ経路）では `values.json` が無く、`ndf answer work` は `precondition` で止まる
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
@@ -230,6 +230,19 @@ sequenceDiagram
 - 比べた候補: LIB1・LIB2・LIB3・LIB4
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
+### 決定 7: 課題が 2 件以上の工程は代表の課題から値を組み、`refactor` は既定の起動を持つ
+
+- **質問**: 受け入れ条件 2 の差し込み（`title`・`body_file`・`issue`・`acceptance`・`refactor`）を、課題が 2 件以上のスプリントと、`.ndf/project.json` に `workflow` のキーが無いリポジトリで、どこから決めるか
+- **選んだ案**:
+  - 課題が 2 件以上なら、`_issue_values`（`progress/invoke.py:387-412`）が番号の最も小さい課題を代表の課題にして `title`・`body_file`・`issue` を写す。代表の課題の選び方は、実装のフェーズの単位の決まり（`agent-layers.md` の「実装のフェーズの単位」の「代表の課題」）と同じである
+  - `acceptance` は、`route.launched` の補いを課題ごとの `--issue` の並び（`--issue <番号1> --issue <番号2> ...`）にする。今の補い（`--issue <issue>` の 1 つ）では代表の課題の条件しか照らさない
+  - `refactor` は、`review` が設定なしでも `review_launch` で組める（`route/__init__.py:461-466`）のと同じ形で、`route.launched` が `ndf refactor run --pr <PR> --branch <branch> --base <base> --scope <触るファイル> --required <必須のチェック>` を組む。`--scope` は設計の結果の触るファイル、`--required` は `.ndf/project.json` の `ci.required_checks` から取る（2026-11-23 に `ndf refactor run --help` で必須の引数がこの 5 つであることを確かめた）。設定（`workflow.refactor`）は既定を変えたいときだけ置く
+- 採らなかった案:
+  - 課題が 2 件以上のときは差し込みを決めずに止める（決定 4 の止まり方になるが、`standard` のスプリントは課題を束ねることが多く、ほとんどの実装の工程が止まる）
+  - `.ndf/project.json` に `workflow.refactor` を足して、このリポジトリだけ埋める（ほかのリポジトリでは同じように止まる。リポジトリの設定が無ければ動かない形は、設定 1 つで同じ工程が使える約束に反する）
+- **代償**: PR の題と本文は代表の課題のものになる。ほかの課題は、PR の本文の `Closes` の行と実装の Pull Request の作り方（`pr` の工程）が拾う
+- 根拠: Value 4「テストのコマンド・起点のブランチ・配布の手段・言語・ランタイム・課題の置き場が違っても、設定か引数を渡せば同じ工程が使える」（MVV バージョン 1）
+
 ## 影響と危険
 
 - **働く範囲**: `plugins/ndf` のリリース対象。利用先のリポジトリでも、工程のプランを使うすべてのスプリントに当たる
@@ -248,12 +261,12 @@ sequenceDiagram
 
 | 値 | 置く所 | 持つ Issue |
 | --- | --- | --- |
-| `.ndf/project.json` に `workflow` のキーが無く、`rebuild` と `refactor` が設定から埋まらない | `.ndf/project.json` | この設計で `workflow` のキーを足すかは実装で決める（設定の不足であって、仕組みの欠けではない） |
+| `.ndf/project.json` に `workflow` のキーが無い | `.ndf/project.json` | 無し。`refactor` は既定の起動を持つので埋まる（決定 7）。`rebuild` の既定は工程「ドキュメント再構成」を流すときに同じ形で足す |
 | `test.ci.only` が真で、手元のテストのステップを求めない | `.ndf/project.json` | 無し |
 
 危険:
 
-- `worker` の既定を入れると、今まで止まっていた 17 工程が一斉に走り出す。走り出した先の worker のプロンプトに作業の情報が足りないと、工程が意図しない作業をして進む。実装では、工程を 1 つずつ（まず要求と受け入れ条件）通して確かめる
+- `worker` の既定を入れると、今まで止まっていた 17 工程が一斉に走り出す。走り出した先の worker のプロンプトに作業の情報が足りないと、工程が意図しない作業をして進む。実装では、工程を 1 つずつ（まず要求と受け入れ条件）通して確かめる。リリースの後に工程が意図しない作業をしたときは、今と同じく conductor がその工程を `ndf progress` で止めて手で閉じる経路が残る。直しはその工程の `kinds.json` の行とテンプレートの文で行い、全体を戻すときは `params.json` の `worker` の既定を外す 1 行の revert で今の振る舞い（起動の前に止まる）へ戻る
 - `invoke.py` と `core/plan/runner` は、並行するほかのスプリント（#3905・#4229）も触りうる
 
 ## 用語
@@ -268,7 +281,7 @@ sequenceDiagram
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1（要求と受け入れ条件が起動する） | `standard` のステートマシンで工程「要求と受け入れ条件」を起動すると、`worker` の差し込みで止まらずにプランが起動する | `params.json` の `worker` の既定を消すと落ちる |
-| 2（実装・リファクタリングの差し込み） | 課題が 2 件以上の工程「実装」で `title`・`body_file`・`issue`・`acceptance` が決まり、工程「リファクタリング」で `refactor` が決まる | 課題が 2 件以上のときに `title` を空にすると落ちる |
+| 2（実装・リファクタリングの差し込み） | 課題が 1 件と 2 件以上の工程「実装」で `title`・`body_file`・`issue` が代表の課題から決まり、`acceptance` が課題ごとの `--issue` の並びになる。`.ndf/project.json` に `workflow` が無いリポジトリの工程「リファクタリング」で `refactor` が既定から決まる | 課題が 2 件以上のときに `acceptance` を代表の課題だけにすると落ちる。`refactor` の既定を消すと落ちる |
 | 3（failed を書かない） | 差し込みを決められない工程を `ndf progress next` で起動すると、ステートマシンの事象に `started` も `failed` も増えず、決まらない差し込みの名前と出所の候補が返る | 決まらないときに `started` を書くと落ちる |
 | 4（取り場所を示す） | `ndf progress check` が、欠けた `delivery`・`mvv_gate` の行に `x-source` の文を添える | `x-source` を読まずにキーの名前だけを出すと落ちる |
 | 5（退行） | 工程「クリーンアップ」が、この変更の前と同じ引数でプランを起動する | `merged` のテンプレートに `worker` を足すと落ちる |
@@ -290,7 +303,7 @@ sequenceDiagram
 | --- | --- |
 | プロンプトの中身が足りるか | 工程のプランが起動した worker が、組んだプロンプトだけで作業を終えられるかは、実際に流すまで分からない。実装では工程を 1 つずつ通し、足りなかった項目を `kinds.json` とテンプレートへ足す |
 | `ndf answer work` の今の振る舞い | プロンプトのファイルが無い状態で打ったときの終了コードと結果 JSON の形は、実測していない（調査の残リスク 4） |
-| `.ndf/project.json` の `workflow` のキー | このリポジトリに `rebuild`・`refactor` の設定を足すかは、工程「ドキュメント再構成」「リファクタリング」を実際に流してから決める |
+| `rebuild` の既定 | 工程「ドキュメント再構成」の `rebuild` は、`refactor` と同じく既定の起動を持たせる見込みだが、組み直しの起動の引数（`--out` を後ろに足す形）を実装で確かめてから決める |
 
 ## 外部の調査
 
@@ -333,7 +346,7 @@ sequenceDiagram
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| Cursor・Devin・LangGraph のプロンプトの組み立て | 試していない | 取得の試みの上限（30 回）に達したため着手していない |
+| Cursor・Devin・LangGraph のプロンプトの組み立て | 試していない | 3 課題の調査を合わせた取得の試みの上限（30 回）に達したため着手していない。この課題に使ったのは 11 回 |
 | LangChain `PromptTemplate` の、値が足りないときの振る舞いの原文 | PyPI の登録簿だけ取得 | バージョン・ライセンス・リリース日は確認したが、振る舞いの原文は未確認。理由: 上限 |
 | GitHub Copilot のカスタムエージェントの原文の直接の取得 | https://docs.github.com/en/copilot/concepts/agents/custom-agents を取得（404）→ 検索 1 回 | 404 のため検索結果の要約を経由した。原文の逐語の引用ではない。理由: 上限 |
 
