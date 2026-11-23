@@ -8,7 +8,6 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
-import shutil
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from urllib.request import url2pathname
@@ -19,39 +18,6 @@ from ndf.checks import run, spec_docs, spec_model, spec_render
 from ndf.checks.model import CheckError, Scope, Source, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-COPIED = ("contracts", "docs", "bin", "skills", "agents", "manifests")
-
-
-class Copy:
-    def __init__(self, tmp: Path) -> None:
-        self.repo = tmp / "repo"
-        self.root = self.repo / "plugins" / "p"
-        for name in COPIED:
-            shutil.copytree(PLUGIN_ROOT / name, self.root / name, ignore=shutil.ignore_patterns("__pycache__"))
-
-    def path(self, rel: str) -> Path:
-        return self.root / rel
-
-    def edit_json(self, rel: str, change) -> None:
-        path = self.path(rel)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        change(data)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    def write(self, rel: str, text: str) -> None:
-        path = self.path(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-
-    def findings(self, write_spec: bool = False):
-        scope = Scope(self.repo, self.root, "p")
-        scope.sources = run.collect(self.root, self.repo)
-        return spec_docs.check(scope, load_rules(), write_spec)
-
-
-@pytest.fixture
-def copy(tmp_path: Path) -> Copy:
-    return Copy(tmp_path)
 
 
 def _rows(found, rule):

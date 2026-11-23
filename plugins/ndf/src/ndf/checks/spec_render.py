@@ -1,15 +1,21 @@
 """規約の描画: 規約のモデルからコントラクトのページ（`docs/contracts/` の 8 ページ）と引数のスキーマの中身を作る（#3518）。
 
-純粋な処理で、ファイルを触らない。同じモデルから 1 字も違わない文字列を返す。行の並びは id の昇順で、日時・ホスト名・
+純粋な処理で、ファイルを触らない（設計レビューの項目の表だけは `table_rows` が読む。#3684）。同じモデルから 1 字も違わない文字列を返す。行の並びは id の昇順で、日時・ホスト名・
 プラグインの名前を入れない（入れ替えの後も同じ中身になる）。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from collections.abc import Mapping
+from itertools import takewhile
+from pathlib import Path
 from typing import Any
 
 from ndf import identity
+from ndf.checks.model import CheckError
 from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import (
     CALLER_FIRST,
@@ -509,3 +515,98 @@ def page_skills(model: SpecModel) -> str:
         md_table(["名前", "渡し先", "意味"], launchers),
     ]
     return _page("skills.md", intro, body)
+
+
+# --- 設計レビューの項目のルート（`children.json` の `review_items`）---
+
+# 数を持たない「順番」と「要求の行」の書き方
+NO_ORDER, NO_REQUIREMENT = NONE, "無し"
+TEXT_SHA_LENGTH = 12
+# ルートの区切り（先頭が項目を閉じるオーナー）
+ROUTE_SEPARATOR = "・"
+_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# 数と、直後の全角の括弧の注記（読み捨てる）
+_NUMBER = re.compile(r"(\d+)(?:（[^）]*）)?")
+
+
+def _cells(line: str) -> list[str]:
+    """表の 1 行のセル（逃がした `|` では分けない）。"""
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().removeprefix("|").removesuffix("|"))]
+
+
+def table_rows(source: Path, columns: Mapping[str, str]) -> list[dict[str, str]]:
+    """文書 `source` の、見出し `columns`（キー → 見出し）をすべて持つ最初の表の行（キー → セル）。
+
+    読めない・列が足りない・セルの数が違えば `CheckError`。
+    """
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CheckError(f"項目の表を読めない: {source}: {exc}") from exc
+    names = set(columns.values())
+    start = next((i for i, line in enumerate(lines) if line.startswith("|") and names <= set(_cells(line))), None)
+    if start is None:
+        raise CheckError(f"項目の表を読めない: {source}: 列 {'・'.join(columns.values())} を持つ表が無い")
+    header, rows = _cells(lines[start]), []
+    for line in takewhile(lambda row: row.startswith("|"), lines[start + 2 :]):
+        cells = _cells(line)
+        if len(cells) != len(header):
+            raise CheckError(f"項目の表を読めない: {source}: セルの数が列の数と違う行: {line}")
+        by_name = dict(zip(header, cells, strict=True))
+        rows.append({key: by_name[name] for key, name in columns.items()})
+    return rows
+
+
+def _number(row: Mapping[str, str], key: str, absent: str) -> int | None:
+    """数の列の値（`absent` なら None）。"""
+    found = _NUMBER.fullmatch(row[key])
+    if found is None and row[key] != absent:
+        raise CheckError(f"項目の表を読めない: 項目 {row['id']} の {key} が数でも {absent} でもない: {row[key]!r}")
+    return int(found.group(1)) if found is not None else None
+
+
+def _routes(cell: str) -> list[str]:
+    """ルートの並び。リンクはリンク先（対応表の文書）にする。空のセルは空の並び。"""
+    linked = _LINK.fullmatch(cell)
+    if linked is not None:
+        return [linked.group(1)]
+    return [word for part in cell.split(ROUTE_SEPARATOR) if (word := part.strip())]
+
+
+def review_items(source: Path, columns: Mapping[str, str]) -> list[dict[str, Any]]:
+    """項目の表の文書 `source` から、項目ごとのルートの並びを組み立てる。ルートの無い項目は空のまま返す。"""
+    return [
+        {
+            "id": row["id"],
+            "text_sha": hashlib.sha256(row["text"].encode("utf-8")).hexdigest()[:TEXT_SHA_LENGTH],
+            "routed_to": _routes(row["routed_to"]),
+            "order": _number(row, "order", NO_ORDER),
+            "kind": row["kind"],
+            "requirement_line": _number(row, "requirement_line", NO_REQUIREMENT),
+            "release": row["release"],
+        }
+        for row in table_rows(source, columns)
+    ]
+
+
+def children(data: Mapping[str, Any], items: list[dict[str, Any]]) -> str:
+    """子の表（`children.json`）の値に `items` を `review_items` として入れた本文。表と並びは 1 行に 1 件で書く。"""
+    blocks = {key: _block(value) for key, value in {**data, "review_items": items}.items()}
+    return _lines("{", [f"{_dump(key)}: {text}" for key, text in blocks.items()], "}", "") + "\n"
+
+
+def _dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _block(value: Any) -> str:
+    if isinstance(value, dict):
+        return _lines("{", [f"{_dump(k)}: {_dump(v)}" for k, v in value.items()], "}", "  ")
+    return _lines("[", [_dump(v) for v in value], "]", "  ") if isinstance(value, list) else _dump(value)
+
+
+def _lines(head: str, rows: list[str], tail: str, indent: str) -> str:
+    """1 行に 1 件ずつ並べた JSON の表か並び。空なら 1 行にまとめる。"""
+    if not rows:
+        return head + tail
+    return head + "\n" + ",\n".join(f"{indent}  {row}" for row in rows) + f"\n{indent}{tail}"

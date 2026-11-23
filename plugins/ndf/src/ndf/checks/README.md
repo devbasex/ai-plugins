@@ -30,6 +30,7 @@ plugins/ndf/bin/ndf check
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
+| 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
 
 ## 兆候の規則
 
@@ -135,11 +136,12 @@ plugins/ndf/bin/ndf check                     # 書かずに検査する（CI �
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `spec-docs` | コミットされた生成物が、生成し直した中身と違う・無い・読めない。生成物の保存先に生成されないファイルが残る |
+| `spec-docs` | コミットされた生成物（子の表 `children.json` の `review_items` を含む）が、生成し直した中身と違う・無い・読めない。生成物の保存先に生成されないファイルが残る |
 | `spec-decl` | 保存先の表（`contracts/domains/ndf-files.json`）の設定の行が、スキーマ（`contracts/schemas/ndf-settings/<id>.schema.json`）かセクションの表（`<id>.sections.json`）を持たない。スキーマの最上位の非推奨でないキーが表の `keys` と食い違う。`main_keys` が `keys` に無い。キーが型か説明を持たない。注釈 `x-ndf-location`・`x-ndf-read-by`・例が無い。検査を打つリポジトリの `.ndf/` の実物がスキーマに通らない（ファイルと JSON Pointer） |
 | `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
 | `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
 | `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
+| `review-items` | 設計レビューの項目の表に、ルートの空の項目がある。11.x へ回した項目が、ルートの指す対応表に無いか、対応表のルートが空である。表が無い・列が足りない・数の列が読めないときは検査を止める（`config_broken`）。見出しは `rules.json` の `spec.review_items_columns`・`spec.correspondence_columns` が持つ |
 
 サブコマンドの引数は、サブコマンドの `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果のコントラクトと結果のスキーマで確かめる。
 

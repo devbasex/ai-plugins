@@ -9,7 +9,8 @@
 | spec-io | サブコマンドが結果のスキーマを持つ・引数の出所が取り出しか手書きの表のどちらか一方・コードが名前で読む環境変数が環境変数の表にある・`bin/` のファイルが起動スクリプトの表にある |
 | spec-skill | 実体のある配る Skill が Skill の入出力の表に行を持つ・Skill の本文とエージェント定義に書かれた `ndf` の呼び出しが規約のサブコマンドと引数に当たる |
 | spec-public | 公開する面の表の行が規約の項目に当たる・規約の保存先の行が実在のディレクトリを指す |
-| spec-docs | コミットされた生成物が、生成し直した中身と 1 字も違わない |
+| spec-docs | コミットされた生成物（子の表 `children.json` の `review_items` を含む）が、生成し直した中身と 1 字も違わない |
+| review-items | 設計レビューの項目の表のどの項目もルートを持ち、11.x へ回した項目は 11.x の対応表にもルートのある行を持つ |
 
 コントラクトの保存先（`contracts/`）を持たないプラグインには当てない（検査のテストが作る小さなプラグイン）。
 """
@@ -27,13 +28,17 @@ from jsonschema import Draft202012Validator
 
 from ndf import identity
 from ndf.checks import spec_model, spec_render
-from ndf.checks.model import CheckError, Finding, Scope
+from ndf.checks.child_deps import CHILDREN_REL
+from ndf.checks.model import CheckError, Finding, Scope, read_json
 from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, NdfSettingsSpec, SpecModel, opt
 from ndf.contracts import facts
 from ndf.domains.settings import renames
 
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
+REVIEW_ITEMS = "review-items"
+# ルートを対応表が持つ項目の `release`
+ROUTED_ELSEWHERE = "11.x"
 # キーの型の語（どれか 1 つを持てば型がある）
 TYPE_WORDS = ("type", "$ref", "anyOf", "oneOf", "const", "enum")
 # 規約の保存先（公開する面の表の種類 spec の行が指す、プラグインの根からの相対パス）
@@ -53,7 +58,7 @@ def _table_rel(rel: Rel, name: str) -> str:
 
 
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
-    """規約の 5 つの規則の指摘を返す。`write_spec` なら生成物を書いてから比べ、書いたパスを `written` へ足す。"""
+    """規約の 5 つの規則と `review-items` の指摘を返す。`write_spec` なら生成物を書いてから比べ、書いたパスを `written` へ足す。"""
     if "spec" not in rules:
         raise CheckError("規則のデータにキー spec が無い")
     conf = rules["spec"]
@@ -61,7 +66,10 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     if not (root / CONTRACTS).is_dir():
         return []
     model = spec_model.load(root)
+    source = scope.repo_root / conf["review_items_source"]
+    items = spec_render.review_items(source, conf["review_items_columns"])
     rendered = spec_render.render(model)
+    rendered[CHILDREN_REL] = spec_render.children(read_json(root / CHILDREN_REL, "children.json を読めない"), items)
     if write_spec:
         done = write(rendered, root, conf["generated"])
         if written is not None:
@@ -72,7 +80,7 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 
     found = decl_findings(model, scope.repo_root, rel) + io_findings(model, scope, rel) + skill_findings(model, scope, rel)
     found += public_findings(model, root, rel) + docs_findings(rendered, root, conf["generated"], rel)
-    return found
+    return found + review_findings(items, source, conf["correspondence_columns"], scope.rel(source))
 
 
 # --- spec-decl ---
@@ -490,3 +498,22 @@ def write(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> l
     except OSError as exc:
         raise CheckError(f"生成物を書けない: {exc}") from exc
     return done
+
+
+# --- review-items ---
+
+
+def review_findings(items: list[dict[str, Any]], source: Path, columns: dict[str, str], rel: str) -> list[Finding]:
+    """ルートの無い項目（項目の番号を挙げる）。11.x へ回した項目は、ルートが指す対応表（見出し `columns`）のルートまで見る。"""
+    tables: dict[str, set[str]] = {}
+    found = []
+    for item in items:
+        if not item["routed_to"]:
+            found.append(Finding(REVIEW_ITEMS, rel, 1, f"項目 {item['id']} にルートが無い"))
+        elif item["release"] == ROUTED_ELSEWHERE:
+            table = item["routed_to"][0]
+            if table not in tables:
+                tables[table] = {row["id"] for row in spec_render.table_rows(source.parent / table, columns) if row["routed_to"]}
+            if item["id"] not in tables[table]:
+                found.append(Finding(REVIEW_ITEMS, rel, 1, f"項目 {item['id']} のルートが対応表 {table} に無い"))
+    return found
