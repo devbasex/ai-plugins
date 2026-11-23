@@ -1,7 +1,7 @@
 # stop-wait: 本文で人の回答を待って終えた応答を、ルールと軽いモデルで見分ける
 
 hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQuestion` を使わずに本文で人の回答を待って終えたら、
-変更を要求して `AskUserQuestion` で問わせる。判定は 2 段である。**先に 10 系から移したルール（`reply_wait`）を当て**、
+変更を要求して `AskUserQuestion` で問わせる。判定は 2 つの手順で行う。**先に 10 系から移したルール（`reply_wait`）を当て**、
 ルールが待ちと読んだ本文は軽いモデルを呼ばずに止める。ルールで決まらない本文だけを、Claude Code のセッションに限って
 軽いモデル（思考を切った haiku の最小構成の `claude -p`）に 1 回だけ問い、`wait` なら止め、`report` なら通す。
 
@@ -19,7 +19,7 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 
 | 何を読むか | 正本 |
 | --- | --- |
-| guard の宣言（イベント・順・`limits`・`summary`） | [`contracts/hooks/guards.json`](../../plugins/ndf/contracts/hooks/guards.json) の `stop-wait` |
+| guard の定義（イベント・順・`limits`・`summary`） | [`contracts/hooks/guards.json`](../../plugins/ndf/contracts/hooks/guards.json) の `stop-wait` |
 | 判定の順と変更要求の文 | [`guards/stop_wait.py`](../../plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py) の `check` と `REASON` |
 | ルールの語と文の分け方 | [`reply_wait.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_wait.py) の定数と `read_prose` |
 | 判定のリクエスト（hook の側）・送信先の確かめ・休みのマーカー | [`reply_judge.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_judge.py) |
@@ -70,7 +70,7 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 
 ### 構成要素
 
-| 要素 | 置き場 | 責務 |
+| 要素 | ファイル | 責務 |
 | --- | --- | --- |
 | ルールの判定 | `ndf.domains.hooks.reply_wait`（hook の閉包の中・標準ライブラリと `ndf.adapters.markdown` だけ） | 本文の行（`prose_lines`）を文に分け、文の終わりの形・依頼の語・条件の添え書き・操作の案内・見出しを見て、本文の種類（下の表）を返す |
 | guard `stop-wait` | `ndf.domains.hooks.guards.stop_wait` | 下の「判定の順」で変更要求か通過を返し、計測の notes を書く |
@@ -136,7 +136,7 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 
 安い順に見て、どこかで確かめられなければ呼ばない（決定 11）。値は `hook.stop-wait.judge` の `endpoint` にある。
 
-| 段 | 呼ぶ条件 |
+| 手順 | 呼ぶ条件 |
 | --- | --- |
 | hook の側・ランタイム | Claude Code のセッション |
 | hook の側・親の起動 | `CLAUDE_CODE_ENTRYPOINT` が `entrypoints`（`cli`・`sdk-cli`）のどれか。`CLAUDE_PROJECT_DIR` が絶対パス。`CLAUDE_CONFIG_DIR` が無いか絶対パス。hook のプロセスから `ancestors`（8）代のうちで最も近い Claude Code の実プロセス（`/proc/<pid>/exe` の実パスが `cli_exe` に当たる）が見つかり、その前に `script_hosts`（`node*`）の祖先が無く、実行ファイルのリンクの先が ` (deleted)` で終わらない。`/proc` が無い環境（macOS）では呼ばない |
@@ -223,7 +223,7 @@ ndf hooks judge-cases [--cases <パス>] [--rounds <周の数>]
 | モデルを呼ばない環境 | Codex のセッション・起動の引数や設定で接続を選ぶセッション・SDK に埋め込んだ起動・相対の `CLAUDE_CONFIG_DIR`・`/proc` の無い環境（macOS）・node で動く Claude Code（npm の導入）では、ルールの判定だけで決まる |
 | 回答の揺れ | 待ちでない応答を `wait` と読むことがある。そのとき AI は応答を 1 つ足し、2 回目の変更要求の後は上限で通る |
 | 末尾 1,600 字の外の質問 | 見出しで委ねたもの以外は見えない |
-| ルールの誤検出 | 225 件のうち待ちでない 146 件の 5 件をルールが待ちと読む。引用の記号を使わずに他人の質問を書き写した本文も待ちと読む |
+| ルールの誤検出 | 225 件のうち待ちでない 146 件の 5 件をルールが待ちと読む。引用の記号を使わずに他人の質問をそのまま載せた本文も待ちと読む |
 | 背景の作業が残る応答 | ルールの判定でしか見えない |
 | 認証の失敗の文言 | `auth_markers` の 2 つのほかは `exit` になり休まない。計測の `fallback:exit` の多さで分かる |
 | 見出しの問いのルール | `heading_wait` の見分け方の作り直しは [#4310](https://github.com/devbasex/ai-plugins/issues/4310) |
