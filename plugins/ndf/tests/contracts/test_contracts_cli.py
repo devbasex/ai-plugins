@@ -364,3 +364,14 @@ def test_emit_keeps_the_mode_of_an_existing_out(capsys, tmp_path):
     dest.chmod(0o644)
     code, _, _ = _emit(capsys, "ok", "--out", str(dest))
     assert code == 0 and dest.stat().st_mode & 0o777 == 0o644 and json.loads(dest.read_text(encoding="utf-8"))["status"] == "ok"
+
+
+@pytest.mark.parametrize("suffix", ["/", "/.", "/.."])
+def test_emit_refuses_an_out_written_as_a_directory_without_touching_the_file(capsys, tmp_path, suffix):
+    # #3877 r3: `Path` は末尾の `/`・`/.` を落とす。生の引数でディレクトリを指す形なら、同名のファイルを書き換えない
+    dest = tmp_path / "r.json"
+    dest.write_text("利用者のファイル\n", encoding="utf-8")
+    code, out, _ = _emit(capsys, "ok", "--out", str(dest) + suffix)
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert dest.read_text(encoding="utf-8") == "利用者のファイル\n"

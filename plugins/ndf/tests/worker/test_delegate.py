@@ -307,9 +307,9 @@ def test_run_refuses_a_result_file_that_links_outside_without_launching(tmp_path
 
 
 @pytest.mark.parametrize("result_file", ["link/out.json", "no-such/out.json"])
-def test_run_refuses_a_result_dir_that_is_a_link_or_missing_without_launching(tmp_path, monkeypatch, capsys, result_file):
+def test_run_refuses_a_result_dir_that_dangles_or_is_missing_without_launching(tmp_path, monkeypatch, capsys, result_file):
     work, _ = _outside(tmp_path)
-    (work / "real").mkdir()
+    # 祖先のリンクは解くので、拒むのは参照先の無いリンク（#3877 r3）
     (work / "link").symlink_to(work / "real")
     (work / "prompt.md").write_text("直す", encoding="utf-8")
     monkeypatch.chdir(work)
@@ -391,3 +391,22 @@ def test_the_launch_passes_the_opened_result_dir_only_while_it_runs(tmp_path, mo
     _delegate(h, call=fake)
     st = tmp_path.stat()
     assert seen == [f"{st.st_dev}:{st.st_ino}:{tmp_path}"] and identity.WORKER_RESULT_DIR_ENV not in os.environ
+
+
+def test_run_accepts_a_result_file_under_a_linked_ancestor(tmp_path, monkeypatch, capsys):
+    # #3877 r3: macOS の /var→/private/var のように祖先にリンクがある作業ディレクトリでも、解いたパスで起動する
+    real_dir = tmp_path / "real"
+    work = real_dir / "w"
+    work.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(real_dir)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    writer = _ok_writer(work, {"status": "ok", "summary": "済んだ"}, calls)
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=writer, **kw))
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", str(tmp_path / "link" / "w" / "out.json")]
+    assert worker.main(args + ["--cwd", ".", "--state-dir", "state"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    resolved = str(work.resolve() / "out.json")
+    assert got["status"] == "ok" and got["items"][0]["result_file"] == resolved and resolved in calls[0]

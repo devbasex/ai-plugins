@@ -32,8 +32,9 @@ class EntryError(ValueError):
 
 
 class EntryUnsafe(EntryError):
-    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced・acl。
+    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced・owner・acl。
 
+    `owner` は `write_file` が置き換える既存のファイルの所有者・所有グループを新しい inode で保てないこと（`_inherit_access`）。
     `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を新しい inode へ保てないこと（`_inherit_access`）。
 
     `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
@@ -110,6 +111,22 @@ def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, Origin]:
     _check_worker_name(name)
     base, missing, anchor = _resolve_existing(directory)
     return _paths_under(base, name), Origin(missing, anchor)
+
+
+def resolve_ancestors(path: Path) -> Path:
+    """ファイルのパス `path` の祖先のリンクを、ある要素まで厳密に解いた絶対パス。末尾の名前と無い残りの要素は解かずに足す。
+
+    利用者が渡した保存先（`ndf worker run --result-file`）を、リンクを経た作業ディレクトリ（macOS の `/var`→`/private/var`
+    など）でも `open_workdir` で開けるようにするため。worker へは解いたパスを渡すので、worker の
+    `ndf contracts emit --out` もリンクを経ずに開ける。末尾の名前がリンクでも解かない（開いた後の操作が拒む）。
+    `..` があれば、最初の `..` が打ち消す要素の手前までだけ解き、打ち消す要素から先は解かずに残す。打ち消す要素が
+    リンクか無いときに拒むのは `open_workdir`（`_open_dir_through_dotdot`）の確かめに任せる。
+    参照先の無いリンク・リンクの循環は `EntryUnsafe`（`symlink`）、ディレクトリでない要素は `EntryUnsafe`（`other`）
+    （`_resolve_existing`）。
+    """
+    parts = path.absolute().parts
+    cut = max(parts.index("..") - 1, 1) if ".." in parts else len(parts) - 1
+    return _resolve_existing(Path(*parts[:cut]))[0].joinpath(*parts[cut:])
 
 
 def _check_worker_name(name: str) -> None:
@@ -332,7 +349,7 @@ def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:
     引いた親が手前で開いた記述子と同じディレクトリでなければ（間に要素を移された）`EntryUnsafe`（`replaced`）。
     確かめた記述子から先だけを開くので、確かめてから開くまでの差し替えは起きない。
     打ち消す要素は `create` でも作らない。打ち消さない要素は `_open_dir_nofollow` と同じく `_open_child` で開く（作る）。
-    最後の位置は `O_RDONLY` で開き直す。開いた記述子と、無かった要素を作ったかを返す。
+    最後の位置も途中と同じ検索権限だけの記述子のまま返す（一覧の読み取り権限を求めない）。開いた記述子と、無かった要素を作ったかを返す。
     """
     parts = [p for p in probe.parts[1:] if p not in ("", ".")]
     cancelled: set[int] = set()
@@ -359,7 +376,7 @@ def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:
                 raise
             created = created or made
             fds.append(child)
-        return os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=fds[-1]), created
+        return fds.pop(), created
     finally:
         for fd in fds:
             os.close(fd)
@@ -392,7 +409,7 @@ def check_dir_id(wd: WorkDir, expected: tuple[int, int]) -> None:
         raise EntryUnsafe(str(wd.path), "replaced")
 
 
-# 途中の要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも開ける）。
+# 要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも、一覧を読めない書き込み用の保存先でも開ける）。
 # `O_PATH` の記述子は `*at` の `dir_fd` に使える。`O_PATH` の無い OS は `O_SEARCH`、それも無ければ `O_RDONLY` に落とす
 _SEARCH = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
 
@@ -400,7 +417,7 @@ _SEARCH = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
 def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Origin] = None) -> tuple[int, bool]:
     """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。
 
-    途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
+    どの要素も `_SEARCH` で開く（最後の要素も、名前を指定した作成・削除に要らない一覧の読み取り権限を求めない）。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
     `origin` があれば、末尾の `origin.fresh` 個の要素は呼ぶ側が解いた時点で無かったので、最初の `open` で開けても最初に
     無かった要素として扱い、その手前の要素（無ければ根）の記述子を `origin.anchor` と突き合わせる。
     `create` で作るのは末尾の `origin.fresh` 個だけで、その手前の解いた時点であった要素は作らずに開く。無くなっていれば
@@ -408,14 +425,13 @@ def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Ori
     開いた記述子と、最初の `open` に無かった要素を経たか（`WorkDir.created`）を返す。
     """
     parts = path.parts[1:]
-    fd = os.open(path.anchor, (_SEARCH if parts else os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC)
+    fd = os.open(path.anchor, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)
     created = False
     at = len(parts) - (origin.fresh if origin is not None else 0)
     try:
         _check_anchor(fd, origin, path, at=at, opened=0)
         for i, part in enumerate(parts):
-            mode = os.O_RDONLY if i == len(parts) - 1 else _SEARCH
-            flags = mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            flags = _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
             observed = None if origin is None else i < at  # 解いた時点であった要素は、アンカーと突き合わせる前に作らない
             child, made = _open_part(fd, part, flags, path, create=create, observed=observed)
             created = created or made
@@ -629,26 +645,31 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
     公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
-    拡張 ACL のあるファイルは ACL ごと写し、所有者・所有グループを保てないか ACL を写せなければ、既存のファイルを
-    置き換える前に `EntryUnsafe`（`acl`）を上げる（アクセスを広げない）。
+    所有者か所有グループを新しい inode で保てないときは、既存のファイルを置き換える前に `EntryUnsafe`（`owner`）を上げる
+    （所有者に与えていた権限を別の利用者へ、グループに与えていた権限を別のグループへ与えない）。拡張 ACL のある
+    ファイルは ACL ごと写し、ACL を写せなければ同じく `EntryUnsafe`（`acl`）を上げる（アクセスを広げない）。
     """
     with staged_write(wd, name, text):
         pass
 
 
 @contextlib.contextmanager
-def staged_write(wd: WorkDir, name: str, text: str) -> Iterator[None]:
-    """`write_file` の一時ファイルを作ってアクセス権・ACL まで設定してから本体を走らせ、本体が終えたら `name` へ公開する。
+def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = ()) -> Iterator[dict[str, str]]:
+    """`write_file` の一時ファイルを作ってアクセス権・ACL まで設定し、`retire` の名前を退けてから本体を走らせ、本体が終えたら `name` へ公開する。
 
-    置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`acl`）など）は本体の前に上がるので、本体で行う削除などは
-    置き換えられると分かった後にだけ起きる。本体が上げれば公開せず、一時ファイルを片付けて上げ直す。
+    置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`owner`・`acl`）など）は退ける前に上がる。`retire` の名前は
+    `remove_file` と同じく確かめてから私有の一時ディレクトリへ移し（リンク数が 1 の通常のファイルでなければ `EntryUnsafe`）、
+    公開できた後にだけ消す。退けた名前ごとの `absent`・`removed` を本体へ渡す（公開できたときの結果）。
+    本体か公開（sticky bit の所有者の制約などで `os.replace` が落ちる）が上げれば、退けた名前を元へ戻し、
+    一時ファイルを片付けて上げ直す。戻せなかった名前があれば一時ディレクトリを消さずに残す（中身を失わない）。
     """
     _check_name(name)
     data = text.encode("utf-8")
     existing = entry_state(wd, name)
     if existing is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
-    tmp = f".{name}.{secrets.token_hex(8)}"
+    # 名前の長さは出力名に依らない（出力名が上限に近くても作れる）
+    tmp = f".ndf-{secrets.token_hex(8)}"
     os.mkdir(tmp, 0o700, dir_fd=wd.fd)
     # 開けなければ作ったディレクトリだと確かめる記述子が無いので、名前を消さずに上げる（差し替えられた別の手の
     # 空のディレクトリを消さない）
@@ -656,6 +677,8 @@ def staged_write(wd: WorkDir, name: str, text: str) -> Iterator[None]:
     created = False
     private = False
     published = False
+    retired: list[tuple[str, str]] = []
+    kept = True
     st: Optional[os.stat_result] = None
     try:
         st = os.fstat(tmp_fd)
@@ -669,13 +692,55 @@ def staged_write(wd: WorkDir, name: str, text: str) -> Iterator[None]:
             if existing is not None:
                 _inherit_access(f.fileno(), name, existing, _access_acl(wd, name, existing))
             f.write(data)
-        yield
+        actions: dict[str, str] = {}
+        for entry in retire:
+            actions[entry] = _retire(wd, entry, tmp_fd, f"r{len(retired)}", retired)
+        yield actions
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
         published = True
     finally:
-        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
-        _clean_tmp(wd, tmp_fd, tmp, st if private else None, created=created, published=published)
+        if published:
+            _drop_retired(tmp_fd, retired)
+        else:
+            kept = _restore_retired(wd, tmp_fd, retired)
+        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする。
+        # 戻せなかった名前の中身を持つ一時ディレクトリも消さない
+        _clean_tmp(wd, tmp_fd, tmp, st if private and kept else None, created=created, published=published)
+
+
+def _retire(wd: WorkDir, name: str, tmp_fd: int, slot: str, retired: list[tuple[str, str]]) -> str:
+    """`name` を確かめてから一時ディレクトリの `slot` へ移し、`retired` に記録する。無ければ `absent`、移せば `removed`。
+
+    確かめの後に名前をリンクへ差し替えられても、`rename` はリンクをたどらずにリンク自体を移す。
+    """
+    _check_name(name)
+    if entry_state(wd, name) is None:
+        return "absent"
+    os.rename(name, slot, src_dir_fd=wd.fd, dst_dir_fd=tmp_fd)
+    retired.append((name, slot))
+    return "removed"
+
+
+def _drop_retired(tmp_fd: int, retired: list[tuple[str, str]]) -> None:
+    """公開できた後に、退けた名前を一時ディレクトリから消す。失敗は上げない（公開済み。残れば一時ディレクトリが残るだけ）。"""
+    for _, slot in retired:
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。消せなければ一時ディレクトリごと残す
+            os.unlink(slot, dir_fd=tmp_fd)
+
+
+def _restore_retired(wd: WorkDir, tmp_fd: int, retired: list[tuple[str, str]]) -> bool:
+    """公開できなかったときに、退けた名前を元へ戻す。すべて戻せれば真。
+
+    戻せなかった名前は一時ディレクトリに残し、元の失敗を上げるために、ここでは上げない。
+    """
+    ok = True
+    for name, slot in reversed(retired):
+        try:
+            os.rename(slot, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
+        except OSError:  # noqa: NDF401 ファイル: 戻せなければ一時ディレクトリに中身を残し、元の失敗を上げる
+            ok = False
+    return ok
 
 
 _ACL_ACCESS = "system.posix_acl_access"
@@ -717,27 +782,28 @@ def _access_acl(wd: WorkDir, name: str, existing: os.stat_result) -> "Optional[b
 def _inherit_access(fd: int, name: str, existing: os.stat_result, acl: "Optional[bytes] | _AclUnknown" = None) -> None:
     """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
 
-    グループは呼んだ利用者が属するときだけ変えられる。拡張 ACL の無いファイルでグループを変えられなければ、元のグループの
-    まま、グループのビットを 0 にして所有者とその他の権限だけを写す（グループの権限を、元と違うグループへ与えない）。
+    モードの所有者・グループのビットは所有者・所有グループに当たるので、写すのは新しいファイルの所有者と所有グループが
+    元と同じときだけである。所有者が違う（別の利用者のファイルをグループの書き込み権限で置き換える）か、グループを
+    変えられない（呼んだ利用者が属さない）ときは、公開する前に `EntryUnsafe`（`owner`）を上げる（元の所有者が読めなかった
+    内容を `group` の権限で読めるようにしない・グループの権限を元と違うグループへ与えない）。
     拡張 ACL の無いファイルでは、一時ファイルが親のデフォルト ACL から継いだ ACL を先に外す（継いだ名前付きの項目が
     元のグループのビットをマスクにして読めるようにならないため）。外せなければ `EntryUnsafe`（`acl`）。
-    既存のファイルに拡張 ACL（`acl`）があれば ACL ごと写す。`ACL_USER_OBJ`・`ACL_GROUP_OBJ` の適用先が変わらないよう、
-    写すのは新しいファイルの所有者と所有グループが元と同じときだけである。所有者・所有グループを保てない・ACL を
-    設定できない・ACL を確かめられなかったときは、公開する前に `EntryUnsafe`（`acl`）を上げる（元の ACL で拒まれていた
-    利用者へ `other` の権限を与えない）。
+    既存のファイルに拡張 ACL（`acl`）があれば ACL ごと写す。ACL を設定できない・確かめられなかったときは、公開する前に
+    `EntryUnsafe`（`acl`）を上げる（元の ACL で拒まれていた利用者へ `other` の権限を与えない）。
     """
-    group_kept = True
+    if os.fstat(fd).st_uid != existing.st_uid:
+        raise EntryUnsafe(name, "owner")
     if existing.st_gid != os.fstat(fd).st_gid:
         try:
             os.fchown(fd, -1, existing.st_gid)
         except PermissionError:  # 属さないグループへは変えられない
-            group_kept = False
+            raise EntryUnsafe(name, "owner") from None
     mode = stat.S_IMODE(existing.st_mode) & 0o777
     if acl is None:
         _drop_inherited_acl(fd, name)
-        os.fchmod(fd, mode if group_kept else mode & ~0o070)
+        os.fchmod(fd, mode)
         return
-    if not isinstance(acl, bytes) or not group_kept or os.fstat(fd).st_uid != existing.st_uid:
+    if not isinstance(acl, bytes):
         raise EntryUnsafe(name, "acl")
     os.fchmod(fd, mode)
     try:

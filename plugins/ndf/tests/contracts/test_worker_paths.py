@@ -741,7 +741,7 @@ def test_write_file_rejects_temp_dir_that_is_not_private(workdir, monkeypatch):
     with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe) as e:
         worker_paths.write_file(wd, "f", "新")
     assert e.value.kind == "other"
-    (kept,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    (kept,) = (p for p in d.iterdir() if p.name.startswith(".ndf-"))
     assert kept.is_dir()
     assert not (d / "f").exists()
 
@@ -775,7 +775,7 @@ def test_write_file_keeps_data_in_swapped_temp_dir_when_check_fails(workdir, mon
     monkeypatch.setattr(os, "mkdir", mkdir_then_swap)
     with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe):
         worker_paths.write_file(wd, "f", "新")
-    (swapped,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    (swapped,) = (p for p in d.iterdir() if p.name.startswith(".ndf-"))
     assert (swapped / "data").read_text(encoding="utf-8") == "別の手の中身"
     assert not (d / "f").exists()
 
@@ -818,7 +818,7 @@ def test_write_file_keeps_temp_dir_it_cannot_open(workdir, monkeypatch):
     real_open = os.open
 
     def fail_on_temp(path, flags, mode=0o777, *, dir_fd=None):
-        if str(path).startswith(".f."):
+        if str(path).startswith(".ndf-"):
             raise OSError(40, os.strerror(40))
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
@@ -827,7 +827,7 @@ def test_write_file_keeps_temp_dir_it_cannot_open(workdir, monkeypatch):
         worker_paths.write_file(wd, "f", "新")
     # 開けなければ作ったディレクトリだと確かめられないので、名前を消さずに残す（詳細設計の書き込みの手順 4）
     left = list(d.iterdir())
-    assert len(left) == 1 and left[0].name.startswith(".f.") and left[0].is_dir()
+    assert len(left) == 1 and left[0].name.startswith(".ndf-") and left[0].is_dir()
 
 
 def test_remove_file_removes_then_reports_absent(workdir):
@@ -1020,3 +1020,94 @@ def test_open_workdir_refuses_dotdot_that_cancels_a_directory_without_search_per
     finally:
         (d / "private").chmod(0o700)
     assert (d / "result.json").read_text(encoding="utf-8") == "前"
+
+
+# --- #3877 r3: 所有者を保てない置き換え・一覧を読めない保存先・長い名前・祖先のリンク --------------------------------
+
+
+@pytest.mark.parametrize("field", ["uid", "gid"])
+def test_write_file_stops_before_replacing_when_the_owner_or_group_cannot_be_kept(workdir, monkeypatch, field):
+    # 別の利用者のファイルをグループの書き込み権限で置き換えると、所有者の権限が別の利用者に当たる。公開する前に止める
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o620)
+    real_entry_state = worker_paths.entry_state
+
+    def other_owner(wd, name):
+        st = real_entry_state(wd, name)
+        if st is None or name != "r":
+            return st
+        values = list(st[:10])
+        values[4 if field == "uid" else 5] += 1
+        return os.stat_result(values)
+
+    def refuse(*args, **kwargs):
+        raise PermissionError(errno.EPERM, "refused")
+
+    monkeypatch.setattr(worker_paths, "entry_state", other_owner)
+    monkeypatch.setattr(worker_paths.os, "fchown", refuse)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "owner"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+@pytest.mark.parametrize("rel", ["", "real/.."])
+def test_open_workdir_writes_into_a_directory_whose_listing_cannot_be_read(workdir, rel):
+    # 名前を指定した作成・削除に要るのは書き込みと検索の権限だけ。一覧の読み取り権限は求めない
+    d, _ = workdir
+    (d / "real").mkdir()
+    (d / "f").write_text("前", encoding="utf-8")
+    d.chmod(0o300)
+    try:
+        with worker_paths.open_workdir(d / rel if rel else d) as wd:
+            worker_paths.write_file(wd, "f", "後")
+            worker_paths.write_file(wd, "g", "作った")
+            assert worker_paths.read_file(wd, "f") == "後"
+            assert worker_paths.remove_file(wd, "g") == "removed"
+    finally:
+        d.chmod(0o700)
+    assert sorted(p.name for p in d.iterdir()) == ["f", "real"]
+
+
+def test_write_file_accepts_a_name_at_the_length_limit(workdir):
+    # 一時ディレクトリの名前は出力名の長さに依らないので、上限ちょうどの名前も書ける
+    d, _ = workdir
+    name = "a" * os.pathconf(d, "PC_NAME_MAX")
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, name, "中身")
+    assert (d / name).read_text(encoding="utf-8") == "中身" and [p.name for p in d.iterdir()] == [name]
+
+
+def test_staged_write_restores_retired_names_when_publishing_fails(workdir, monkeypatch):
+    d, _ = workdir
+    for name, text in (("f", "前"), ("done", ""), ("result", "{}")):
+        (d / name).write_text(text, encoding="utf-8")
+
+    def fail(*args, **kwargs):
+        raise PermissionError(errno.EPERM, "sticky")
+
+    with worker_paths.open_workdir(d) as wd:
+        with worker_paths.staged_write(wd, "f", "", retire=("done", "result", "none")) as actions:
+            assert actions == {"done": "removed", "result": "removed", "none": "absent"}
+            assert not (d / "done").exists() and not (d / "result").exists()
+        assert sorted(p.name for p in d.iterdir()) == ["f"]
+        (d / "done").write_text("", encoding="utf-8")
+        (d / "result").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(os, "replace", fail)
+        with pytest.raises(PermissionError), worker_paths.staged_write(wd, "f", "後", retire=("done", "result")):
+            pass
+    assert (d / "f").read_text(encoding="utf-8") == "" and (d / "result").read_text(encoding="utf-8") == "{}"
+    assert sorted(p.name for p in d.iterdir()) == ["done", "f", "result"]
+
+
+def test_resolve_ancestors_resolves_links_before_the_name_and_before_a_cancelled_part(tmp_path):
+    real = tmp_path / "real"
+    (real / "w").mkdir(parents=True)
+    (tmp_path / "link").symlink_to(real)
+    (real / "w" / "out.json").symlink_to(tmp_path / "elsewhere.json")
+    base = real.resolve() / "w"
+    assert worker_paths.resolve_ancestors(tmp_path / "link" / "w" / "out.json") == base / "out.json"
+    # `..` が打ち消す要素から先は解かずに残し、open_workdir の確かめに任せる
+    assert worker_paths.resolve_ancestors(tmp_path / "link" / "w" / "alias" / ".." / "r") == base / "alias" / ".." / "r"

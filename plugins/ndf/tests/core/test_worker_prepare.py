@@ -90,10 +90,10 @@ def test_prepare_leaves_a_link_and_its_target_alone(tmp_path, capsys, entry, lin
 def _fail_on(monkeypatch, fn: str, name: str) -> None:
     real = getattr(worker_paths, fn)
 
-    def failing(wd, entry, *rest):
+    def failing(wd, entry, *rest, **kw):
         if entry == name:
             raise PermissionError(13, "Permission denied", entry)
-        return real(wd, entry, *rest)
+        return real(wd, entry, *rest, **kw)
 
     monkeypatch.setattr(worker_paths, fn, failing)
 
@@ -102,19 +102,37 @@ def test_prepare_keeps_the_previous_done_with_its_report_when_the_done_cannot_go
     d = tmp_path / "w"
     _previous(d)
     (d / "n.report.md.done").write_text("", encoding="utf-8")
-    _fail_on(monkeypatch, "remove_file", "n.report.md.done")
+    _fail_on(monkeypatch, "_retire", "n.report.md.done")
     assert _invalid(*_run(capsys, "prepare", "--dir", str(d), "--name", "n"))
     assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告" and (d / "n.report.md.done").exists()
 
 
-def test_prepare_removes_the_done_before_failing_on_the_result(tmp_path, monkeypatch, capsys):
+def test_prepare_restores_the_done_when_the_result_cannot_go(tmp_path, monkeypatch, capsys):
     d = tmp_path / "w"
     _previous(d)
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     (d / "n.result.json").write_text("{}", encoding="utf-8")
-    _fail_on(monkeypatch, "remove_file", "n.result.json")
+    _fail_on(monkeypatch, "_retire", "n.result.json")
     assert _invalid(*_run(capsys, "prepare", "--dir", str(d), "--name", "n"))
-    assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告" and not (d / "n.report.md.done").exists()
+    assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告" and (d / "n.report.md.done").exists()
+    assert sorted(p.name for p in d.iterdir()) == ["n.report.md", "n.report.md.done", "n.result.json"]
+
+
+def test_prepare_restores_the_done_and_result_when_the_report_cannot_be_published(tmp_path, monkeypatch, capsys):
+    # sticky bit の所有者の制約などで、一時ファイルを作れても最後の置き換えが落ちる。退けた完了マーカーと結果ファイルを戻す
+    d = tmp_path / "w"
+    _previous(d)
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    (d / "n.result.json").write_text("{}", encoding="utf-8")
+
+    def refuse(*args, **kwargs):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    assert _invalid(*_run(capsys, "prepare", "--dir", str(d), "--name", "n"))
+    assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告"
+    assert (d / "n.report.md.done").exists() and (d / "n.result.json").read_text(encoding="utf-8") == "{}"
+    assert sorted(p.name for p in d.iterdir()) == ["n.report.md", "n.report.md.done", "n.result.json"]
 
 
 def test_prepare_keeps_the_previous_report_done_and_result_when_the_report_cannot_be_staged(tmp_path, monkeypatch, capsys):

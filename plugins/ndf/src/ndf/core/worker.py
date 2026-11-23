@@ -675,13 +675,23 @@ def _deliver(handoff: Handoff, system: str, root: Path) -> tuple[Delivery, Any]:
             return done, None
 
 
+def _result_file(raw: str) -> Path:
+    """`--result-file` の祖先のリンクを解いた絶対パス（`worker_paths.resolve_ancestors`）。解けなければ `WorkerError`（invalid）。"""
+    path = Path(raw).absolute()
+    try:
+        return worker_paths.resolve_ancestors(path)
+    except (worker_paths.EntryError, OSError) as exc:  # 利用者の入力: 解けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"結果ファイルの保存先 {path.parent} を解けない: {exc}") from None
+
+
 def _cmd_run(a: argparse.Namespace) -> int:
     root = identity.load().root
     # 相対パスはこのサブコマンドを呼んだ場所で解く（worker は --cwd で動き、親の確かめと worker の書き込みが同じ場所を指すようにする）
+    # 祖先のリンク（macOS の /var→/private/var など）は解き、末尾の結果ファイルの名前は解かない（リンクなら delegate が拒む）
     handoff = Handoff(
         a.kind,
         _read_input(a.prompt_file, "作業の本文"),
-        Path(a.result_file).absolute(),
+        _result_file(a.result_file),
         Path(a.cwd).resolve(),
         Path(a.state_dir).resolve(),
         tuple(_load_sources(a.sources)),
@@ -805,19 +815,19 @@ def _workdir(
 
 
 def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[str, str]:
-    """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
+    """3 つの名前を先に確かめてから、完了マーカー → 結果ファイルを退け、報告を空にしてから退けたものを消す。
 
-    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
-    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
-    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
-    報告の一時ファイルは削除の前に作り、アクセス権・ACL の設定まで済ませる（`staged_write`）。置き換えを拒む条件
-    （所有者を保てない・ACL を写せないなど）では完了マーカーと結果ファイルを消さずに止まる。
+    前の報告が消えるのは完了マーカーと結果ファイルを退けた後だけなので、「前の完了マーカーが残るのに報告が空」の組は
+    起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で無かった保存先にどれかが
+    あれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
+    報告の一時ファイルは退ける前に作り、アクセス権・ACL の設定まで済ませる（`staged_write`）。置き換えを拒む条件
+    （所有者を保てない・ACL を写せないなど）では何も退けずに止まり、報告の公開が落ちたとき（sticky bit の所有者の
+    制約など）は退けた完了マーカーと結果ファイルを元へ戻して止まる。
     """
     worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
-    with worker_paths.staged_write(wd, paths.report.name, ""):
-        done = worker_paths.remove_file(wd, paths.done.name)
-        removed = worker_paths.remove_file(wd, paths.result.name)
-    return done, removed
+    with worker_paths.staged_write(wd, paths.report.name, "", retire=(paths.done.name, paths.result.name)) as actions:
+        pass
+    return actions[paths.done.name], actions[paths.result.name]
 
 
 def _cmd_prepare(a: argparse.Namespace) -> int:
