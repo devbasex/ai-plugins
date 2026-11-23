@@ -235,7 +235,7 @@
     },
     {
       "name": "stop-wait",
-      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の回答を待つなら変更要求、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）",
+      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の回答を待つなら変更要求、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）。ルールが待ちと読めばモデルを呼ばずに変更要求し、ルールに当たらない本文だけを軽いモデルへ問う。判定できなければ通す（#4000）",
       "module": "ndf.domains.hooks.guards.stop_wait",
       "events": ["Stop"],
       "tools": [],
@@ -245,7 +245,7 @@
         {"tool": "AskUserQuestion", "input": {"questions": [{"question": "進めてよいか", "header": "承認", "options": [{"label": "進める", "description": "このまま進める"}, {"label": "止める", "description": "ここで止める"}], "multiSelect": false}]}}
       ],
       "deny_key": "none",
-      "limits": [],
+      "limits": ["hook.stop-wait.judge"],
       "params": {},
       "fail_closed": false
     }

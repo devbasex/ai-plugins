@@ -161,10 +161,56 @@ def test_a_conditional_contact_note_with_a_specific_word_is_a_report():
     assert reply_wait.reply_kind("修正は完了しました。問題があれば、ご指示をお待ちしています。") == "report"
 
 
-def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
-    """guard は `has_prose` の結果を持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
+def test_read_prose_matches_reply_kind_for_a_reply_with_prose():
+    """guard は `prose_lines` の返りを持ったまま `read_prose` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
     for text in ("返答を待ちます。", "作業を終えました。", "p9 の作業を終えました。別のレーンは承認を待っています。"):
-        assert reply_wait.prose_kind(text) == reply_wait.reply_kind(text)
+        assert reply_wait.read_prose(reply_wait.prose_lines(text)).kind == reply_wait.reply_kind(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "対応が完了しました。引き続きよろしくお願いします。",
+        "修正を push しました。今後ともよろしくお願い申し上げます。",
+        "PR を作りました。テストも通りました。以上です。\n引き続きよろしくお願いします。",
+    ],
+)
+def test_a_completion_report_with_a_set_closing_is_settled_by_the_rule(text):
+    """定型の結びの前が完了の報告だけなら、ルールで `closing_report`（guard は軽いモデルを呼ばずに通す）。"""
+    assert reply_wait.reply_kind(text) == "closing_report"
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        # 結びだけで報告の文が無い・結びの前が言い切らない → ルールで決めず、軽いモデルへ渡す
+        ("以上です。よろしくお願いいたします。", "report"),
+        ("作業を終えました。どうしましょう。\n引き続きよろしくお願いします。", "report"),
+        ("作業を終えました。判断が必要です。引き続きよろしくお願いします。", "report"),
+        # 結びの前の承認のリクエスト・質問はルールの待ち
+        ("作業を終えました。マージしてよいですか。\n引き続きよろしくお願いします。", "prose_wait"),
+        ("作業を終えました。どちらにしますか？\n引き続きよろしくお願いします。", "prose_wait"),
+    ],
+)
+def test_a_set_closing_does_not_hide_what_comes_before_it(text, kind):
+    assert reply_wait.reply_kind(text) == kind
+
+
+def test_a_quote_over_several_lines_is_not_read_as_a_question():
+    """かぎ括弧の引用が行をまたいでも中身を判定に入れない。閉じない開きかっこは引用に数えない。"""
+    assert reply_wait.reply_kind("ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？』") == "report"
+    assert reply_wait.reply_kind("ログの抜粋です。\n「処理を止めました。\n「続けてもよいですか？」と出ました」") == "report"
+    assert reply_wait.reply_kind("ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？") == "prose_wait"
+
+
+def test_a_quote_over_several_lines_keeps_the_question_after_it():
+    text = "ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？』\nこちらは再開してよいですか？"
+    assert reply_wait.reply_kind(text) == "prose_wait"
+
+
+@pytest.mark.parametrize("text", ["修正を終えました。ご確認をよろしくお願いします。", "差分を載せました。承認をお願いします。"])
+def test_an_explicit_request_with_a_closing_is_still_a_wait(text):
+    assert _is_wait(text)
 
 
 def test_a_question_inside_a_code_block_is_not_a_wait():
@@ -179,3 +225,105 @@ def test_an_operation_guide_is_not_a_wait():
 def test_an_empty_reply_is_none():
     assert reply_wait.reply_kind("") == "none"
     assert reply_wait.reply_kind("```\nprint(1)\n```") == "none"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "例を載せました。\n\n    続けてもよいですか？\n\nコミットは 1 件です。",
+        "例を載せました。\n\n````markdown\n```\n続けてもよいですか？\n```\n````\n\nコミットは 1 件です。",
+    ],
+)
+def test_a_question_in_indented_or_long_fenced_code_is_not_a_wait(text):
+    """コードのブロックは CommonMark の解析で決める（インデントのコード・四連の囲みの中の質問を本文と読まない）。"""
+    assert reply_wait.reply_kind(text) == "report"
+
+
+def test_a_question_in_a_heading_is_a_wait():
+    assert reply_wait.reply_kind("## このまま進めてよいですか？") == "prose_wait"
+    assert reply_wait.reply_kind("作業を終えました。\n\n## このまま進めてよいですか？") == "prose_wait"
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        # 章題が最後の 3 行を使い、前の質問を押し出さない
+        ("このまま進めてよいですか？\n\n## 検証結果\nテストはすべて通りました。\n差分は確認済みです。", "prose_wait"),
+        # 章題は完了の報告の文に数えない
+        ("## 実装結果\n対応が完了しました。\n引き続きよろしくお願いします。", "closing_report"),
+        # 直下の本文が見出しの事柄を言い切って回答した質問の見出しは章題（定型の結びで通す）
+        ("## 再起動は必要ですか？\n再起動は不要だと確認しました。\n以上です。", "closing_report"),
+        # 別の場所の待ちを報告する見出しは、本人への質問でない
+        ("## 別のレーンは承認を待っています\nこちらの作業は完了しました。\n以上です。", "closing_report"),
+    ],
+)
+def test_a_heading_without_a_question_is_a_title(text, kind):
+    assert reply_wait.reply_kind(text) == kind
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # FAQ の質問の見出しに後の本文が回答している
+        "## よくある質問\n### どうやって設定しますか？\n環境変数で指定できます。",
+        "## マージの承認は必要ですか？\nこのリポジトリでは必須です。",
+        "## この設定は再起動後も残りますか？\n設定はディスクに保存されるため、再起動後も保持されます。",
+        # 手段の質問の下の手順
+        "## どうやって設定しますか？\n- 設定ファイルを開く\n- 値を書く",
+        "## どうやって移行を進めますか？\n- 設定を書き出す\n- 新しい環境へ読み込む",
+        # 見出しと別の事柄の報告と結び（回答と読まず、定型の結びでも通さない）
+        "## 既存の設定を使いますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        # 判断できない見出しを残したまま、別の場所の待ちだけとして通さない
+        "## 既存の設定を使いますか？\n別のレーンは承認を待っています。",
+        # 見出しの語を含む報告でも、調べた結論でなければ判断の材料で、回答と読まない
+        "## 既存の設定を使いますか？\n既存の設定でテストはすべて通りました。\n以上です。",
+        # 事実を尋ねる見出しの下のファイルの一覧は、選択肢でなく報告
+        "## どのファイルが変更されましたか？\n次のファイルを変更しました。\n- a.py\n- b.py",
+    ],
+)
+def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
+    # 後に本文が続く質問の見出しは、利用者への質問か章題かを語の形で決めず、ルールで待ちにも定型の結びにもしない
+    # （`report` は stop-wait が軽いモデルへ回す）
+    assert reply_wait.reply_kind(text) == "report"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 見出しで選択・承認・確認を明示的に求め、下に選択肢・判断材料・結び（定型の結びでも通さない）
+        "## どちらの案で進めますか？\n- 案 A\n- 案 B",
+        # 前置きの文の後に選択肢の箇条書き
+        "## どちらの案で進めますか？\nどちらもテスト済みです。\n- 案 A\n- 案 B",
+        "## どう進めますか？\n- 案 A: 先に直す\n- 案 B: 後で直す",
+        "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        "## このままマージしますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        "## 確認してください\n修正を反映しました。\n引き続きよろしくお願いします。",
+        "## このままマージしてよいですか？\nCI はすべて通過し、マージできます。",
+        # 本人への承認の質問に別の場所の待ちを併記しても、別の場所の待ちだけとして通さない
+        "## このままマージしてよいですか？\n別のレーンは承認を待っています。",
+        # 承認の質問の下で判断の材料を確認したと述べても、質問への回答と読まない
+        "## このままマージしてよいですか？\nマージ前のテストがすべて通ったことを確認しました。\n以上です。",
+        "## どの案を採用しますか？\n- A. 先に直す\n- B. 後で直す",
+        # 小文字の選択肢のラベル
+        "## どちらがよいですか？\n- a. 先に修正する\n- b. 後で修正する",
+        # 許可の質問の下の本文は、「はい、」で始まる回答に見えても判断の材料に見えてもルールで章題にしない（モデルへ回す）
+        "## 管理者権限なしで実行してもよいですか？\n管理者権限なしで実行できることを確認しました。\n以上です。",
+        "## 設定ファイルを変更してもよいですか？\nはい、変更できます。値は環境変数でも上書きできます。",
+        "## この変更をマージしてもよいですか？\nはい、テストはすべて通りました。",
+        "## 本番へデプロイしてよいですか？\nステージングへデプロイできることを確認しました。\n以上です。",
+        "## このままマージしてよいですか？\nマージできるかどうかは未確認だと分かりました。\n以上です。",
+    ],
+)
+def test_a_heading_that_requests_the_user_is_a_heading_wait(text):
+    # stop-wait はモデルの判定に従い、モデルを使えない Stop では変更を要求する
+    assert reply_wait.reply_kind(text) == "heading_wait"
+
+
+def test_read_prose_lists_the_headings_left_to_the_model():
+    lines = reply_wait.prose_lines("## 実装結果\n## このままマージしてよいですか？\nテストはすべて通りました。")
+    assert reply_wait.read_prose(lines).delegated == ("このままマージしてよいですか？",)
+
+
+def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():
+    text = "対応が完了しました。引き続きよろしくお願いします（このままマージしてよいですか）。"
+    assert reply_wait.reply_kind(text) != "closing_report"

@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf.domains.hooks import tables
 from ndf.domains.relay import claude_options, signals
@@ -84,16 +84,33 @@ def _markdown_lines(text: str) -> list[str]:
     return lines[:-1] if normalized.endswith("\n") else lines
 
 
-def judge_text(text: str, code_lines: list[bool], max_chars: int) -> str:
+def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
     """コードブロックの行と空行を除いた本文。`max_chars` を超えれば末尾の `max_chars` 字（決定 7）。
 
+    `keep` はモデルへ判定を委ねた見出しの文（`reply_wait.ProseReading.delegated`。本文の順）。本文が上限を超えて
+    切ったとき、最終的に残す末尾に無い見出しを「## 」を付けて先頭に置き、合わせて `max_chars` 字に収める。
+    先頭に置く見出しは本文の順に並べ、上限の半分までで、超えれば本文で後ろの見出しを残す。先頭に置いて末尾が縮むと、
+    縮めた末尾から外れた見出しも先頭へ足す（足す見出しが増えなくなるまで）。確定した欠けは探し直さず、末尾にある
+    見出しはどれも見て、外れた分を足す（見出しの文が後ろに引用されて末尾に残っても、その後の見出しを見落とさない）。
     `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
     """
     lines = _markdown_lines(text)
     if len(code_lines) != len(lines):
         return ""
     prose = "\n".join(line for line, code in zip(lines, code_lines) if not code and line.strip())
-    return prose if len(prose) <= max_chars else prose[-max_chars:]
+    if len(prose) <= max_chars:
+        return prose
+    tail = prose[-max_chars:]
+    # 末尾に無い見出し（確定した欠け）。確定した欠けは探し直さず、末尾にある見出しのうち外れた分だけを足す
+    missing = {heading for heading in keep if heading not in tail}
+    while missing:
+        lead = "".join(f"\n## {heading}" for heading in keep if heading in missing)[1:][-(max_chars // 2) :]
+        tail = prose[-(max_chars - len(lead) - 1) :]
+        dropped = {heading for heading in keep if heading not in missing and heading not in tail}
+        if not dropped:
+            return f"{lead}\n{tail}"
+        missing |= dropped
+    return tail
 
 
 def _proc_file(pid: int, name: str) -> Path:

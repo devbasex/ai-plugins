@@ -362,3 +362,23 @@ def test_the_entry_point_passes_the_alarm_deadline_to_the_guards(tmp_path, monke
     limit = budget.budget_for("claude", "PreToolUse").deadline
     assert seen == [100.0 + limit]
     assert timers[0] == pytest.approx(limit - 0.25) and timers[1:] == [0]
+
+
+def test_later_guards_see_that_an_earlier_guard_already_asked_for_a_change(tmp_path, fake_guards):
+    # #4000: 前の guard が変更要求か拒否を返した後の guard には `decided` が真で渡る（stop-wait はモデルを呼ばない）
+    seen: list[tuple[str, bool]] = []
+
+    def watch(name, verdict):
+        def check(c, s):
+            seen.append((name, s.decided))
+            return verdict
+
+        return fake_guards(name, check)
+
+    specs = [
+        _spec("first", watch("first", advise("案内"))),
+        _spec("second", watch("second", pushback("戻す"))),
+        _spec("third", watch("third", None)),
+    ]
+    _run(tmp_path, specs)
+    assert seen == [("first", False), ("second", False), ("third", True)]
