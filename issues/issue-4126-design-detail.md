@@ -62,13 +62,14 @@ plugins/ndf/
   - 事後条件: 返す名前は `env.json` の `key` が `key` の唯一の行の `id`
   - 副作用: 初回だけ `ROOT / "contracts/domains/env.json"` を読む
 - `_env_keys`
-  - 事後条件: `key` の列を持つ行だけを、表の順でキーごとに集める。`key` の無い行は返りに入らない。キーを持つ行の `id` が空でない文字列でなければ `EnvNameError`
+  - 事後条件: `key` の列を持つ行だけを、表の順でキーごとに集める。`key` の無い行は返りに入らない
+  - 型の約束（どれかに外れれば `EnvNameError`。`TypeError`・`KeyError`・`AttributeError` を外へ出さない）: 表の全体が辞書。`rows` があり、配列（`{"rows": null}` や辞書は外れる）。`rows` の各要素が辞書（キーを持たない行も含め、辞書でない要素が 1 つでもあれば外れる）。`key` を持つ行の `key` が空でない文字列（配列・数・空の文字列は外れる）。`key` を持つ行の `id` が空でない文字列。型は辞書を引く前に `isinstance` で確かめ、例外を変換する広い `except` に頼らない
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_env_keys` | 契約を読めない | ファイルが無い・読めない・JSON でない・`rows` が無い・キーを持つ行の `id` が空でない文字列でない | `read_text`・`json.loads`・`["rows"]` | `EnvNameError` を投げて呼び出し元へ返す | hook の経路は `relay_role` が受けて `NESTED` にする（中継とオーガナイザーの保存先へ書かない）。ラッパーと `relay status` へは届かない（`relay/cli.py` が import の時に読む `account_registry` などが `facts` で表を検証し、今のとおり `FactsError` で終わる。設計文書の決定 3） | 後始末なし。契約を直せば再実行できる |
+| `_env_keys` | 契約を読めない | ファイルが無い・読めない・JSON でない・表が辞書でない・`rows` が無いか配列でない・辞書でない行がある・`key` が空でない文字列でない・キーを持つ行の `id` が空でない文字列でない | `read_text`・`json.loads`・型の約束の `isinstance` | `EnvNameError` を投げて呼び出し元へ返す | hook の経路は `relay_role` が受けて `NESTED` にする（中継とオーガナイザーの保存先へ書かない）。ラッパーと `relay status` へは届かない（`relay/cli.py` が import の時に読む `account_registry` などが `facts` で表を検証し、今のとおり `FactsError` で終わる。設計文書の決定 3） | 後始末なし。契約を直せば再実行できる |
 | `env_name` | キーの行が 0 行 | キーの打ち間違い・行のキーの付け忘れ | `env_name` | `EnvNameError` を投げる（既定の名前へ戻さない） | hook の経路は上と同じ。ラッパーは起動の入口で `config_broken` で止まる。`relay status` は動く。ログインは子の環境を組む時点で誤りになる | 同上 |
 | `env_name` | キーの行が 2 行以上 | 同じキーを 2 つの行に置いた | `env_name` | `EnvNameError` を投げる（先の行を使わない） | 同上 | 同上 |
 
@@ -86,7 +87,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `env_name` | キーが 1 行に当たれば、その行の `id` | `key` の無い行が並ぶ表でも、キーを持つ行だけを見る | 0 行・2 行以上で `EnvNameError` |
-| `_env_keys` | 同じプロセスで 2 回呼んでもファイルを 1 回しか読まない | — | ファイルが無い・JSON でない・`rows` が無いで `EnvNameError` |
+| `_env_keys` | 同じプロセスで 2 回呼んでもファイルを 1 回しか読まない | — | ファイルが無い・JSON でない・表が配列・`rows` が無い・`{"rows": null}`・`rows` が辞書・行が文字列・`key` が配列・`key` が空の文字列・`id` が空で、どれも `EnvNameError`（ほかの例外の型でない） |
 
 テストは `ROOT` を差し替えた一時の保存先に表を置いて打ち、`_env_keys.cache_clear()` で呼ぶごとに読み直させる。
 
