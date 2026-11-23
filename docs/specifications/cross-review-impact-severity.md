@@ -157,6 +157,7 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 | 項目 | 内容 |
 | --- | --- |
 | 今より早く収束するラウンドがある | 相手役が利用者の経路への影響を書けない重い不具合を見つけたとき、その指摘は修正担当へ渡らずに表へ「軽い」で残る |
+| 基準 2 の重い指摘も下がる（#4045） | 駆動は指摘がどの基準に当たるかを知らないので、秘密の漏れ・認証認可・利用者のデータ・戻せない操作に触れる `critical`・`major` も、相手役が `impact` を書き忘れるか項目の形が崩れるだけで `minor` へ下がる。その指摘は修正担当へ渡らず、ラウンドは収束してマージへ進み得る。基準 2 に当たる指摘を下げずに渡す変更は [#4045](https://github.com/devbasex/ai-plugins/issues/4045) が扱い、この版の実装には入っていない |
 | 相手役が 1 文を書く割合 | codex・kiro が指示どおりに `impact` を書くか、書けない指摘を自分で `minor` にするかは、実際の実行の出力でしか分からない |
 
 リリースの後、5 回以上の実行の状態ファイルの `raised_severity`・`severity`・`impact` と相手役の出力（`round<n>-<相手役>.out`）を集計し、
@@ -182,6 +183,7 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 
 - [issue #4014](https://github.com/devbasex/ai-plugins/issues/4014) — 要求と受け入れ条件
 - [Pull Request #4023](https://github.com/devbasex/ai-plugins/pull/4023) — 実装
+- [issue #4045](https://github.com/devbasex/ai-plugins/issues/4045) — 1 文の欠けた基準 2 の重い指摘を下げずに修正担当へ渡す
 - [cross-review-evidence-based.md](cross-review-evidence-based.md) — 指摘の採否を根拠で決める枠組み
 - [cross-review-fixer-sessions.md](cross-review-fixer-sessions.md) — 同じ実測から起こした、修正担当の会話を続ける仕様（#4013）
 - Conventional Comments: https://conventionalcomments.org/

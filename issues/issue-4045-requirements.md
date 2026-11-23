@@ -4,7 +4,7 @@
 
 ## 何が起きたか
 
-#4014（重い指摘に起きることの 1 文を求める）の設計（PR #4017）と実装（PR #4023。スプリントブランチ `sprint/p12-lcrfast-r1` へマージ済み）は、相手役が `critical`・`major` を付けても、起きることの 1 文（`impact`）が無ければ無条件に `minor` へ下げる（[issue-4014-design-detail.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-4014-design-detail.md) の `effective_severity` の表）。下げた指摘は収束を止めず、修正担当へ渡らない。
+#4014（重い指摘に起きることの 1 文を求める）の設計（PR #4017）と実装（PR #4023。スプリントブランチ `sprint/p12-lcrfast-r1` へマージ済み）は、相手役が `critical`・`major` を付けても、起きることの 1 文（`impact`）が無ければ無条件に `minor` へ下げる（確定仕様 [cross-review-impact-severity.md](../docs/specifications/cross-review-impact-severity.md) の「取り込む重要度の規則」の表）。下げた指摘は収束を止めず、修正担当へ渡らない。
 
 指摘の基準 2（秘密・認証認可・利用者のデータ・戻せない操作に触れる）は、起きる確率によらず書く基準である。それでも相手役が `impact` を書き忘れたか、項目の形が崩れただけで、その指摘は直されないままマージへ進み得る。PR #4041 のクロスレビューの指摘 r1-7 がこれを見つけた。
 
