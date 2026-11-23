@@ -16,6 +16,10 @@ from ndf.domains.hooks.counter import Counter
 from ndf.domains.hooks.guards import stop_wait
 
 NOW = 100.0  # 偽の単調時計（締め切りの基準）
+# Claude Code の Stop の締め切りの時刻と、締め切りいっぱいで判定へ渡す秒（`hook.budget.stop` と `hook.stop-wait.judge` から読む）
+STOP = budget.budget_for("claude", "Stop")
+DEADLINE = NOW + STOP.deadline
+JUDGE_SECONDS = min(STOP.usable, reply_judge._judge("seconds"))
 WALL = 1000.0  # 偽の壁時計（休みのマーカーの時刻）
 CLAUDE_EXE = "/home/u/.local/share/claude/versions/2.1.330"
 PLAIN = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=[2049, 777])
@@ -86,7 +90,7 @@ def _ask_transcript(path: Path) -> str:
     return str(path)
 
 
-def _check(tmp_path, reply, counter=None, runtime="claude", deadline=NOW + 7, **payload):
+def _check(tmp_path, reply, counter=None, runtime="claude", deadline=DEADLINE, **payload):
     ctx = context.HookContext(runtime, "Stop", {"last_assistant_message": reply, **payload})
     svc = dispatch.GuardServices(tmp_path, counter or FakeCounter(), deadline)
     return stop_wait.check(ctx, svc)
@@ -107,7 +111,7 @@ def test_stop_wait_follows_the_model_when_the_rule_reads_a_report(tmp_path, monk
     got = _check(tmp_path, REPORT, counter)
     assert got.kind == "pushback" and counter.model_waited()
     assert got.notes == {"reply": "report", "judge": "model", "judge_ms": 12.5, "judge_calls": 1}
-    assert judge.asked == [(REPORT, 5, PLAIN)]
+    assert judge.asked == [(REPORT, JUDGE_SECONDS, PLAIN)]
     judge.kind = "report"
     got = _check(tmp_path, REPORT)
     assert got.kind == "pass" and got.notes["judge"] == "model"
@@ -128,7 +132,7 @@ def test_stop_wait_does_not_read_a_question_inside_a_code_block(tmp_path, monkey
     judge = Judge(monkeypatch)
     got = _check(tmp_path, "結果を出した。\n```\nどうしますか？\n```")
     assert got.kind == "pass" and got.notes["reply"] == "report"
-    assert judge.asked == [("結果を出した。", 5, PLAIN)]
+    assert judge.asked == [("結果を出した。", JUDGE_SECONDS, PLAIN)]
 
 
 def test_stop_wait_sends_a_quoted_question_to_the_model(tmp_path, monkeypatch):
@@ -208,9 +212,8 @@ def test_stop_wait_skips_the_model_when_the_time_is_short(tmp_path, monkeypatch)
 def test_stop_wait_subtracts_the_margin_once(tmp_path, monkeypatch):
     judge = Judge(monkeypatch)
     # 締め切りいっぱいなら、判定の上限（`hook.stop-wait.judge` の seconds）で打つ
-    stop = budget.budget_for("claude", "Stop")
-    _check(tmp_path, REPORT, deadline=NOW + stop.deadline)
-    assert [seconds for _, seconds, _ in judge.asked] == [min(stop.usable, reply_judge._judge("seconds"))]
+    _check(tmp_path, REPORT, deadline=DEADLINE)
+    assert [seconds for _, seconds, _ in judge.asked] == [JUDGE_SECONDS]
     judge.asked.clear()
     _check(tmp_path, REPORT, deadline=NOW + 1.5 + 2)
     assert [seconds for _, seconds, _ in judge.asked] == [2]
@@ -286,5 +289,5 @@ def test_stop_wait_after_the_limit_is_passed_by_dispatch_as_limited(tmp_path, mo
     with Counter.open("s-1", tmp_path) as counter:
         counter.data["pushbacks"] = tables.policy_value("hook.pushback", "attempts")
         counter.mark_model_wait()
-        out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, NOW + 7))
+        out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
     assert out.limited and out.verdict.kind == "pass" and out.notes["judge"] == "skip:limit" and judge.asked == []
