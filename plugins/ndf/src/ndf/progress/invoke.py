@@ -420,7 +420,9 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
     precondition にする）。書き手の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
     書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
-    保存先のパスで返す（共有の領域のリンクを経ない。後でパスから読む手順も、確かめた写しを読む）。
+    保存先のパスで返す（共有の領域のリンクを経ない）。PR を作るステップ（`gh pr create --body-file`）はこの名前を開き直すので、
+    返す前に、写しの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
+    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめた写しと別の本文を送らない）。
     """
     issues = _issue_numbers(run)
     if not issues:
@@ -431,14 +433,14 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
         out = wd.path / out_name
         title = _held_title(wd, copy_name, out_name)
-        if title is not None:
-            return {"title": title, "body_file": str(out), "issue": str(number)}
-        found = issue_text(location, number)
-        if found is None:
-            return None
-        title, body = found
-        worker_paths.write_file(wd, out_name, body, private=True)
-        worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
+        if title is None:
+            found = issue_text(location, number)
+            if found is None:
+                return None
+            title, body = found
+            worker_paths.write_file(wd, out_name, body, private=True)
+            worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
+        worker_paths.check_unshared(wd, out_name)
     return {"title": title, "body_file": str(out), "issue": str(number)}
 
 

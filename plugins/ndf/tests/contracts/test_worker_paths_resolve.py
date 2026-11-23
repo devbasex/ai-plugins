@@ -597,3 +597,89 @@ def test_open_resolved_follows_own_link_in_a_sticky_shared_directory(tmp_path):
             assert wd.path == real.resolve()
     finally:
         shared.chmod(0o755)
+
+
+def test_open_resolved_refuses_a_link_whose_parent_an_acl_lets_others_change_on_macos(tmp_path, monkeypatch):
+    # PR 4307 の r8-7: macOS の拡張 ACL はモードと別に項目の作成・削除を許せるので、書き込みのビットが無い親でも確かめる
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    (tmp_path.resolve() / "alias").symlink_to(real)
+    monkeypatch.setattr(worker_paths_open.sys, "platform", "darwin")
+    monkeypatch.setattr(worker_paths_open, "acl_lets_change_darwin", lambda fd: True)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_resolved(tmp_path / "alias"):
+        pass
+    assert e.value.kind == "symlink"
+    monkeypatch.setattr(worker_paths_open, "acl_lets_change_darwin", lambda fd: False)
+    with worker_paths.open_resolved(tmp_path / "alias") as wd:
+        assert wd.path == real
+
+
+class _FakeAclEntries:
+    """拡張 ACL の項目（許すか拒むか, 権限の並び）を持つ macOS の libc。"""
+
+    def __init__(self, entries: list[tuple[int, set[int]]]) -> None:
+        self.entries = entries
+
+    def acl_get_fd_np(self, fd: int, kind: int) -> int:
+        return 1
+
+    def acl_get_entry(self, acl: int, which: int, out) -> int:
+        self.at = 0 if which == worker_paths_open.ACL_FIRST_ENTRY else self.at + 1
+        if self.at >= len(self.entries):
+            return -1
+        out._obj.value = self.at + 1
+        return 0
+
+    def acl_get_tag_type(self, entry, out) -> int:
+        out._obj.value = self.entries[self.at][0]
+        return 0
+
+    def acl_get_permset(self, entry, out) -> int:
+        out._obj.value = self.at + 1
+        return 0
+
+    def acl_get_perm_np(self, perms, perm: int) -> int:
+        return int(perm in self.entries[self.at][1])
+
+    def acl_free(self, acl: int) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("entries", "changes"),
+    [
+        ([(2, {1 << 4, 1 << 6})], False),  # 拒む項目（ホームの group:everyone deny delete など）は数えない
+        ([(1, {1 << 1, 1 << 3})], False),  # 読む・検索するだけを許す項目
+        ([(1, {1 << 1}), (1, {1 << 6})], True),  # 項目の削除（ACL_DELETE_CHILD）を許す
+        ([(1, {1 << 2})], True),  # 項目の作成（ACL_ADD_FILE）を許す
+    ],
+)
+def test_acl_lets_change_darwin_counts_only_allow_entries_that_change_the_directory(monkeypatch, entries, changes):
+    monkeypatch.setattr(worker_paths_open, "darwin_acl_lib", lambda: _FakeAclEntries(entries))
+    assert worker_paths_open.acl_lets_change_darwin(0) is changes
+
+
+def test_acl_lets_change_darwin_is_true_when_it_cannot_tell(monkeypatch):
+    monkeypatch.setattr(worker_paths_open, "darwin_acl_lib", lambda: None)
+    assert worker_paths_open.acl_lets_change_darwin(0) is True
+
+
+@pytest.mark.parametrize(("group", "members", "shared"), [("me", [], False), ("devs", [], True), ("me", ["other"], True)])
+def test_check_unshared_counts_group_write_only_for_a_group_others_are_in(tmp_path, monkeypatch, group, members, shared):
+    # PR 4307 の r8-3: Ubuntu の既定（利用者と同名の個人グループ・umask 002）のグループの書き込みは差し替えの余地に数えない
+    from types import SimpleNamespace
+
+    work = tmp_path / "w"
+    work.mkdir()
+    work.chmod(0o775)
+    (work / "f").write_text("本文", encoding="utf-8")
+    gid = work.stat().st_gid
+    monkeypatch.setattr(worker_paths_open.os, "getegid", lambda: gid)
+    monkeypatch.setattr(worker_paths_open.pwd, "getpwall", lambda: [SimpleNamespace(pw_name="me", pw_uid=os.geteuid())])
+    monkeypatch.setattr(worker_paths_open.grp, "getgrall", lambda: [SimpleNamespace(gr_name=group, gr_gid=gid, gr_mem=members)])
+    with worker_paths.open_workdir(work) as wd:
+        if shared:
+            with pytest.raises(worker_paths.EntryUnsafe, match="shared"):
+                worker_paths.check_unshared(wd, "f")
+        else:
+            worker_paths.check_unshared(wd, "f")

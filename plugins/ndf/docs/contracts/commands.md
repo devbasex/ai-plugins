@@ -425,6 +425,7 @@
 | `ndf worker attention` | `progress`（string・必須・位置） |
 | `ndf worker closing-check` | `--base`（string・必須）<br>`--cwd`（string・任意・既定 `"."`） |
 | `ndf worker collect` | `--report`（string・必須） |
+| `ndf worker draft` | `--state-dir`（string・必須） |
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |

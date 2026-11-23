@@ -51,3 +51,24 @@ def test_issue_copies_are_written_without_write_access_for_others(tmp_path, monk
     for name in (invoke.ISSUE_TITLE_FILE, invoke.ISSUE_BODY_FILE):
         assert (work / name.format(number=3092)).stat().st_mode & 0o022 == 0
     assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
+
+
+def test_issue_body_in_a_directory_others_can_rename_in_is_not_handed_to_the_pr_step(tmp_path, monkeypatch):
+    # PR 4307 の r8-3: `gh pr create --body-file` は名前を開き直すので、ほかの利用者が名前を差し替えられる保存先の写しを渡さない
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    work.chmod(0o777)  # sticky bit の無い共有の保存先
+    try:
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+    finally:
+        work.chmod(0o700)
+    assert e.value.kind == "shared"
+    work.chmod(0o1777)  # sticky bit があれば、呼んだ利用者の写しはほかの利用者に消せない
+    try:
+        got = invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+    finally:
+        work.chmod(0o700)
+    assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"

@@ -19,14 +19,20 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
+from ndf.contracts.worker_paths_open import ACL_FIRST_ENTRY as _ACL_FIRST_ENTRY
+from ndf.contracts.worker_paths_open import ACL_TYPE_EXTENDED as _ACL_TYPE_EXTENDED
+from ndf.contracts.worker_paths_open import darwin_acl_lib as _darwin_acl_lib
 from ndf.contracts.worker_paths_open import (
     EntryError,
     EntryUnsafe,
     Origin,
     WorkDir,
     check_dir_id,
+    check_unshared,
     dir_id,
+    held_dir_id,
     open_resolved,
+    open_subdir,
     open_workdir,
     resolve_existing,
 )
@@ -48,11 +54,14 @@ __all__ = [
     "check_dir_id",
     "check_entries",
     "check_removable",
+    "check_unshared",
     "check_writable",
     "dir_id",
     "entry_state",
+    "held_dir_id",
     "names_a_directory",
     "open_resolved",
+    "open_subdir",
     "open_workdir",
     "prepare_paths",
     "read_file",
@@ -483,34 +492,6 @@ def _has_acl(fd: int) -> bool:
     except OSError as e:
         return e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP)
     return True
-
-
-_ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
-_ACL_FIRST_ENTRY = 0
-
-
-def _darwin_acl_lib():  # noqa: ANN202 ctypes の CDLL
-    """macOS の libc の ACL 関数（`acl_get_fd_np`・`acl_get_entry`・`acl_init`・`acl_set_fd_np`・`acl_free`）。引けなければ None。"""
-    import ctypes
-
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        get_fd, get_entry, init, set_fd, free = (
-            libc.acl_get_fd_np,
-            libc.acl_get_entry,
-            libc.acl_init,
-            libc.acl_set_fd_np,
-            libc.acl_free,
-        )
-    except (OSError, AttributeError):  # noqa: NDF401 外部コマンド: libc の ACL の関数を引けない macOS では持つかを確かめられない扱いにする（置き換えない）
-        return None
-    get_fd.restype = init.restype = ctypes.c_void_p
-    get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
-    get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
-    init.argtypes = [ctypes.c_int]
-    set_fd.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-    free.argtypes = [ctypes.c_void_p]
-    return libc
 
 
 def _has_acl_darwin(fd: int) -> bool:

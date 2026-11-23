@@ -12,12 +12,11 @@ from __future__ import annotations
 import argparse
 import io
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from ndf import cli, contracts, identity
+from ndf import cli, contracts
 from ndf.contracts import causes, facts, limits, result, version, worker_paths
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -127,19 +126,6 @@ def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def _expected_result_dir(directory: Path) -> Optional[tuple[int, int]]:
-    """`ndf worker run` が渡した結果の保存先（`identity.WORKER_RESULT_DIR_ENV`）が `directory` なら、その `(st_dev, st_ino)`。
-
-    worker の外か、別の場所へ書くとき・値の形が違うときは None（突き合わせない）。
-    """
-    raw = os.environ.get(identity.WORKER_RESULT_DIR_ENV, "")
-    dev, _, rest = raw.partition(":")
-    ino, _, path = rest.partition(":")
-    if not (dev.isdigit() and ino.isdigit() and path) or Path(path) != directory:
-        return None
-    return int(dev), int(ino)
-
-
 def _cmd_emit(a: argparse.Namespace) -> int:
     obj = _result_from_args(a)
     if a.out is None:
@@ -158,10 +144,11 @@ def _cmd_emit(a: argparse.Namespace) -> int:
     # `..` が打ち消す要素は open_workdir が確かめる
     try:
         with worker_paths.open_workdir(out.parent) as wd:
-            expected = _expected_result_dir(wd.path)
+            expected = worker_paths.held_dir_id(wd.path)
             if expected is not None:
                 worker_paths.check_dir_id(wd, expected)
-            worker_paths.write_file(wd, out.name, line)
+            # worker の結果ファイルは私有で書く（`ndf worker run` は共有の保存先で私有でない結果ファイルを受けない）
+            worker_paths.write_file(wd, out.name, line, private=expected is not None)
     except worker_paths.EntryUnsafe as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"--out {out} に書けない: {exc}"))
     sys.stdout.write(line)

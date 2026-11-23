@@ -34,7 +34,15 @@ from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
 from ndf.core.plan.files import read_json, write_json
-from ndf.core.plan.records import PROGRESS_FILE, _add_outputs, _add_prs, recorded_outputs, recorded_prs
+from ndf.core.plan.records import (
+    PROGRESS_FILE,
+    _add_outputs,
+    _add_prs,
+    _keep_step_gaps,
+    recorded_outputs,
+    recorded_prs,
+    recorded_step_gaps,
+)
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
 # 結果 JSON の tool の名前はサブコマンドの名前（サブコマンドの表から引く）
@@ -120,6 +128,7 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
         _add_outputs(ctx.state_dir, out["outputs"])
+    _keep_step_gaps(ctx.state_dir, step_id, out["gaps"])
     return out
 
 
@@ -384,12 +393,30 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class _FinalRecords:
-    """終わった回の結果に共通の値。`outputs` はステップの outputs（gaps の判断に使う）、`shared` は結果へそのまま載せる値。"""
+    """終わった回の結果に共通の値。`outputs` はステップの outputs（gaps の判断に使う）、`shared` は結果へそのまま載せる値。
+
+    `step_gaps` は止まったステップごとの欠け（ステップの結果 JSON の gaps）で、incomplete で止まった回の詳細に載せる。
+    """
 
     items: list[dict[str, Any]]
     metrics: dict[str, Any]
     outputs: Optional[dict[str, Any]]
     shared: dict[str, Any]
+    step_gaps: Mapping[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+
+def _stop_gaps(inv: Invocation, final: dict[str, Any], rec: _FinalRecords) -> Optional[list[dict[str, Any]]]:
+    """止まった回の欠け。incomplete でなければ None（結果 JSON は incomplete のときだけ gaps を持つ）。
+
+    最後のステップが残した欠けを引き継ぎ、欠けの詳細を持たない incomplete（JSON を出さないステップ・欠けを書かなかった
+    ステップ）には、止まったステップと理由の欠けを 1 件補う（gaps の無い incomplete は結果 JSON の形に合わない）。
+    """
+    if final["kind"] != "incomplete":
+        return None
+    last = final["last"]
+    if last in rec.step_gaps:
+        return list(rec.step_gaps[last])
+    return [{"kind": "step", "name": last or inv.plan.name, "reason": final["detail"] or "欠けの詳細が無い"}]
 
 
 def _finished_result(inv: Invocation, rec: _FinalRecords) -> dict[str, Any]:
@@ -412,7 +439,8 @@ def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optiona
     if final["status"] == STOPPED:
         items = [{**items[0], "step": final["last"]}, *items[1:]]
         again = result.command(TOOL, "next", *_with_start(inv.again, final["last"])) if final["last"] else None
-        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again, **shared)
+        gaps = _stop_gaps(inv, final, rec)
+        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again, gaps=gaps, **shared)
     after = inv.plan.following(final["last"])
     cont = result.command(TOOL, "next", *_with_start(inv.again, after)) if after else None
     return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None}, **shared)
@@ -424,7 +452,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
     metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
     outputs, warnings = recorded_outputs(inv.state_dir)
     shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
-    return _result_of(inv, final, status, _FinalRecords(items, metrics, outputs, shared))
+    return _result_of(inv, final, status, _FinalRecords(items, metrics, outputs, shared, recorded_step_gaps(inv.state_dir)))
 
 
 def _stored(inv: Invocation) -> dict[str, Any]:

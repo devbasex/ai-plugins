@@ -8,12 +8,18 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import errno
+import grp
 import os
+import pwd
 import stat
+import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple, Optional
+
+from ndf import identity
 
 
 class EntryError(ValueError):
@@ -27,6 +33,9 @@ class EntryUnsafe(EntryError):
 
     `owner` は `write_file` が置き換える既存のファイルの所有者・所有グループを新しい inode で保てないこと（`_inherit_access`）。
     `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を保てないので置き換えないこと（`_refuse_acl`。ACL の値は写さない）。
+
+    `shared` は名前か、その名前から根までのどこかのディレクトリの項目を、呼んだ利用者と root のほかが差し替えられること
+    （`check_unshared`。後でパスから開き直す手順へ渡す名前に使う）。
 
     `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
     または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_entries`）。
@@ -295,19 +304,136 @@ class _Walk:
 
 
 def _trusted_link(parent: int, part: str) -> bool:
-    """親 `parent` の直下のリンク `part` をたどってよいか。ほかの利用者が差し替えられないリンクだけをたどる。
+    """親 `parent` の直下のリンク `part` をたどってよいか。ほかの利用者が差し替えられないリンクだけをたどる（`_entry_fixed`）。
 
-    親が root か呼んだ利用者の持ち物で、グループとほかの利用者が書き込めないなら真（macOS の `/`→`/tmp`・`/var` など）。
-    書き込めても sticky bit があり（`/tmp` など）、リンク自体が root か呼んだ利用者の持ち物なら真（ほかの利用者は消せない）。
-    それ以外（共有の領域に置かれた保存先の名前）は偽。たどると、名前を差し替えた利用者が選んだ場所を呼んだ利用者の権限で開く。
+    macOS の `/`→`/tmp`・`/var` などはたどる。共有の領域に置かれた保存先の名前はたどらない。たどると、名前を差し替えた
+    利用者が選んだ場所を呼んだ利用者の権限で開く。
+    """
+    return _entry_fixed(parent, os.stat(part, dir_fd=parent, follow_symlinks=False))
+
+
+def _entry_fixed(parent: int, child: os.stat_result) -> bool:
+    """親 `parent` の直下の項目（stat が `child`）を、呼んだ利用者と root のほかが消す・差し替えることができないなら真。
+
+    親が root か呼んだ利用者の持ち物で、グループとほかの利用者が書き込めないなら真。グループの書き込みは、グループが呼んだ
+    利用者だけの個人グループ（`_private_group`。Ubuntu の既定の umask 002 で作ったディレクトリ）なら数えない。書き込めても sticky bit があり
+    （`/tmp` など）、項目が root か呼んだ利用者の持ち物なら真（ほかの利用者は消せない）。macOS の拡張 ACL はモードと別に
+    項目の作成・削除と ACL・所有者の変更を許せるので、それを許す項目が親にあるか、確かめられなければ偽にする
+    （`acl_lets_change_darwin`）。Linux の POSIX ACL は名前付きの項目の書き込みをマスク（モードのグループのビット）で
+    抑えるので、モードのビットで足りる。
     """
     me = os.geteuid()
     up = os.fstat(parent)
     if up.st_uid not in (0, me):
         return False
-    if not up.st_mode & 0o022:
+    if sys.platform == "darwin" and acl_lets_change_darwin(parent):
+        return False
+    others = up.st_mode & 0o002 or (up.st_mode & 0o020 and not _private_group(up.st_gid))
+    if not others:
         return True
-    return bool(up.st_mode & stat.S_ISVTX) and os.stat(part, dir_fd=parent, follow_symlinks=False).st_uid in (0, me)
+    return bool(up.st_mode & stat.S_ISVTX) and child.st_uid in (0, me)
+
+
+def _private_group(gid: int) -> bool:
+    """`gid` が呼んだ利用者だけの個人グループ（呼んだ利用者の主グループで、利用者と同じ名前で、ほかの利用者を項目に持たない）なら真。
+
+    引けない（名前の無い gid・利用者）なら偽（共有のグループとみなす）。macOS の `staff` のような共有の主グループは名前が違うので偽。
+    """
+    if gid != os.getegid():
+        return False
+    # 引けないことを例外にしないよう一覧から探す（ここへ来るのはグループの書き込みのある親だけなので、一覧を読むのはまれ）
+    names = [u.pw_name for u in pwd.getpwall() if u.pw_uid == os.geteuid()]
+    groups = [g for g in grp.getgrall() if g.gr_gid == gid]
+    return bool(names and groups) and groups[0].gr_name == names[0] and set(groups[0].gr_mem) <= {names[0]}
+
+
+def check_unshared(wd: WorkDir, name: str) -> None:
+    """`wd` の直下の `name` と、`wd` から根までの各ディレクトリの項目を、ほかの利用者が差し替えられないことを確かめる。
+
+    差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
+    記述子で確かめた中身でも、名前かその祖先を差し替えられると、開き直した手は別のファイルを読むためである。祖先は開いた
+    記述子から `..` をカーネルに引かせてたどる（名前を解き直さない）。
+    """
+    child = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    cur = os.dup(wd.fd)
+    try:
+        while True:
+            if not _entry_fixed(cur, child):
+                raise EntryUnsafe(str(wd.path / name), "shared")
+            up = os.open("..", _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=cur)
+            here, above = os.fstat(cur), os.fstat(up)
+            os.close(cur)
+            cur = up
+            if (here.st_dev, here.st_ino) == (above.st_dev, above.st_ino):
+                return
+            child = here
+    finally:
+        os.close(cur)
+
+
+ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
+ACL_FIRST_ENTRY = 0
+_ACL_NEXT_ENTRY = -1
+_ACL_EXTENDED_ALLOW = 1
+# 項目を足す・消す（ACL_ADD_FILE・ACL_ADD_SUBDIRECTORY・ACL_DELETE_CHILD）と、ACL・所有者を変える（ACL_WRITE_SECURITY・
+# ACL_CHANGE_OWNER）の権限（macOS の <sys/acl.h>）
+_ACL_CHANGE_PERMS = (1 << 2, 1 << 5, 1 << 6, 1 << 12, 1 << 13)
+
+
+def darwin_acl_lib():  # noqa: ANN201 ctypes の CDLL
+    """macOS の libc の ACL 関数（`acl_get_fd_np`・`acl_get_entry`・`acl_get_tag_type`・`acl_get_permset`・`acl_get_perm_np`・
+    `acl_init`・`acl_set_fd_np`・`acl_free`）。引けなければ None。"""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        get_fd, get_entry, get_tag, get_permset, get_perm, init, set_fd, free = (
+            libc.acl_get_fd_np,
+            libc.acl_get_entry,
+            libc.acl_get_tag_type,
+            libc.acl_get_permset,
+            libc.acl_get_perm_np,
+            libc.acl_init,
+            libc.acl_set_fd_np,
+            libc.acl_free,
+        )
+    except (OSError, AttributeError):  # noqa: NDF401 外部コマンド: libc の ACL の関数を引けない macOS では持つかを確かめられない扱いにする（置き換えない）
+        return None
+    get_fd.restype = init.restype = ctypes.c_void_p
+    get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
+    get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    get_tag.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+    get_permset.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    get_perm.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    init.argtypes = [ctypes.c_int]
+    set_fd.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    free.argtypes = [ctypes.c_void_p]
+    return libc
+
+
+def acl_lets_change_darwin(fd: int) -> bool:
+    """macOS で開いたディレクトリ `fd` の拡張 ACL に、項目の作成・削除か ACL・所有者の変更を許す項目があるか。
+
+    確かめられなければ真（たどらない・使わない側へ倒す）。許す相手が呼んだ利用者自身でも真にする（相手が誰かは見ない）。
+    拒む項目（`ACL_EXTENDED_DENY`。macOS のホームの `group:everyone deny delete` など）は数えない。ACL の無いファイルは
+    `ENOENT`、ACL に対応しないファイルシステムは `ENOTSUP`・`EOPNOTSUPP` で NULL を返す。
+    """
+    libc = darwin_acl_lib()
+    if libc is None:
+        return True
+    acl = libc.acl_get_fd_np(fd, ACL_TYPE_EXTENDED)
+    if not acl:
+        return ctypes.get_errno() not in (errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP)
+    try:
+        entry, which = ctypes.c_void_p(), ACL_FIRST_ENTRY
+        while libc.acl_get_entry(acl, which, ctypes.byref(entry)) == 0:
+            which = _ACL_NEXT_ENTRY
+            tag, perms = ctypes.c_int(), ctypes.c_void_p()
+            if libc.acl_get_tag_type(entry, ctypes.byref(tag)) != 0 or libc.acl_get_permset(entry, ctypes.byref(perms)) != 0:
+                return True
+            if tag.value == _ACL_EXTENDED_ALLOW and any(libc.acl_get_perm_np(perms, p) != 0 for p in _ACL_CHANGE_PERMS):
+                return True
+        return False
+    finally:
+        libc.acl_free(acl)
 
 
 def _lookup(parent: int, part: str) -> Optional[int]:
@@ -402,6 +528,36 @@ def check_dir_id(wd: WorkDir, expected: tuple[int, int]) -> None:
     """
     if dir_id(wd) != expected:
         raise EntryUnsafe(str(wd.path), "replaced")
+
+
+def held_dir_id(directory: Path) -> Optional[tuple[int, int]]:
+    """`ndf worker run` が渡した結果の保存先（`identity.WORKER_RESULT_DIR_ENV`）が `directory` なら、その `(st_dev, st_ino)`。
+
+    worker の中で保存先を開き直して書く手（`ndf contracts emit --out`・`ndf worker append`・`ndf worker draft`）が、開いた
+    場所を `check_dir_id` で突き合わせるのに使う。worker の外か、別の場所へ書くとき・値の形が違うときは None（突き合わせない）。
+    """
+    raw = os.environ.get(identity.WORKER_RESULT_DIR_ENV, "")
+    dev, _, rest = raw.partition(":")
+    ino, _, path = rest.partition(":")
+    if not (dev.isdigit() and ino.isdigit() and path) or Path(path) != directory:
+        return None
+    return int(dev), int(ino)
+
+
+@contextlib.contextmanager
+def open_subdir(wd: WorkDir, name: str, *, create: bool = False) -> Iterator[WorkDir]:
+    """開いた作業ディレクトリ `wd` の直下の `name` を、名前を根から解き直さずに `wd.fd` から開き、抜けるときに閉じる。
+
+    リンクはたどらない（`EntryUnsafe`（`symlink`））。`create` なら無ければ作る。開いたディレクトリが呼んだ利用者の持ち物で
+    なければ `EntryUnsafe`（`replaced`）。突き合わせた `wd` の中だけを書き、ほかの利用者が用意したディレクトリへ書かない。
+    """
+    path = wd.path / name
+    fd, made = _open_child(wd.fd, name, _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, path, create=create)
+    try:
+        _check_created(fd, path)
+        yield WorkDir(path, fd, made)
+    finally:
+        os.close(fd)
 
 
 # 要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも、一覧を読めない書き込み用の保存先でも開ける）。
