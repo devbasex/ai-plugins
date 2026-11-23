@@ -30,14 +30,15 @@ flowchart LR
 - `ndf answer work` が受け取れるのは `--state-dir`・`--cwd`・作業の名前の 3 つだけである（`entry.py:88-93`）。プロンプトの材料（課題の番号・作業場所・受け入れ条件）は、保存先から読めなければならない
 - プランの状態の保存先には今、`prs.json`・`outputs.json`・`progress.jsonl` がある（`plugins/ndf/src/ndf/core/plan/records.py:17-22`）。差し込みの値は残っていない
 - `ndf answer work` が受ける作業の名前は 7 件（`WORK_KINDS`）だが、`params.json` の説明が挙げる名前は 18 件である。唯一の基準を 1 つにする
-- 置き場所のパスの決め方は #3877 の `slot_paths` が持つ。この設計はその関数を使い、別の決め方を作らない
+- 置き場所のパスの決め方は #3877 の `report_paths`（`contracts/worker_paths.py`）が持つ。この設計はその関数を使い、別の決め方を作らない。プロンプトのファイル（`<名前>.prompt.md`）もこの関数が返す 4 つのパスの 1 つにする
 - worker（`ndf worker run`）は `claude -p` を起動する。プロンプトの中身は `plugins/ndf/skills/development-workflow/references/agent-layers.md` の「supervisor → worker」が定める 7 項目と規則 7 個である
 
 ## 解き方の全体像
 
 ```mermaid
 flowchart LR
-    R["プランの実行<br/>core/plan/runner"] -->|"差し込みの値を書く"| VJ[("values.json")]
+    I["工程がプランを組む<br/>progress/invoke"] -->|"差し込みの値を書く"| VJ[("values.json")]
+    I -->|"プランを書き出す"| R["プランの実行<br/>core/plan/runner"]
     R -->|"argv を打つ"| AW["ndf answer work &lt;作業名&gt;"]
     VJ --> AW
     K[("contracts/worker/kinds.json<br/>作業ごとの定義")] --> AW
@@ -57,8 +58,8 @@ flowchart LR
 | `contracts/templates/params.json` の `worker`（変更） | 既定 `["ndf", "answer", "work", "--state-dir", "{state_dir}", "--cwd", "{repo}"]` を持つ |
 | `contracts/worker/kinds.json`（新設） | 作業の名前ごとに、作業種別・作業の 1 行・読む Skill・手順の抜粋のパスを持つ。`WORK_KINDS` の唯一の基準になる |
 | `contracts/worker/prompt.md`（新設） | 起動指示の 7 項目と規則 7 個の共通の雛形。差し込みは `{{名前}}` |
-| プランの実行（`core/plan/runner`。変更） | ステップを打つ前に、差し込みの値を保存先の `values.json` へ書く |
-| `ndf answer work`（`progress/gate/entry.py`。変更） | `values.json`・`kinds.json`・`prompt.md` からプロンプトを組んで書き、`ndf worker run` へ置き換わる |
+| 工程がプランを組む処理（`progress/invoke`。変更） | プランを書き出すときに、組んだ差し込みの値を同じ保存先の `values.json` へ書く。`route.derived`・`route.launched` の補い（`acceptance`・`title`・`body_file` など）はこの層にしか無い |
+| `ndf answer work`（`progress/gate/entry.py`。変更） | `values.json`・`kinds.json`・`prompt.md` からプロンプトを組んで `report_paths` が返すパスへ書き、`ndf worker run` へ置き換わる |
 | `invoke.template_values`（変更） | 決められない差し込みを、工程を `running` にする前に見つけて返す |
 | `contracts/workflow/context.schema.json`（変更） | 文脈のキーごとに `x-source`（値の取り場所）を持つ |
 | `ndf progress check`（変更） | 欠けた文脈のキーの行に `x-source` を添える |
@@ -76,7 +77,7 @@ flowchart TB
         AW["progress/gate/entry.py"]
         IV["progress/invoke.py"]
         CK["progress の check"]
-        SL["core/worker.slot_paths（#3877）"]
+        SL["contracts/worker_paths.report_paths（#3877）"]
     end
     P --> IV
     K --> AW
@@ -88,12 +89,12 @@ flowchart TB
 
 ## データ構造
 
-`<保存先>/values.json`（プランの実行が書く）:
+`<保存先>/values.json`（工程がプランを組むときに書く）:
 
 | キー | 型 | 中身 |
 | --- | --- | --- |
 | `plan` | string | プランの名前（テンプレートの `template`） |
-| `values` | object | 差し込みの名前 → 値（文字列か文字列の配列）。`route.derived`・`route.launched` の補いも含んだ、ステップを組むのに使った値そのもの |
+| `values` | object | 差し込みの名前 → 値（文字列か文字列の配列）。`invoke.template_values` が組んだ値そのもの（`route.derived`・`route.launched` の補いを含む） |
 | `at` | string | 書いた時刻（ISO 8601） |
 
 `contracts/worker/kinds.json`:
@@ -151,8 +152,8 @@ sequenceDiagram
         N-->>N: started を書かずに stopped（precondition）
     else 埋まる
         I->>M: started
+        I->>I: values.json を書く
         I->>R: プランを起動
-        R->>R: values.json を書く
         R->>A: ndf answer work --state-dir … <作業名>
         A->>A: values.json・kinds.json・prompt.md からプロンプトを組む
         A->>A: <保存先>/<作業名>-prompt.md を書く
@@ -179,11 +180,11 @@ sequenceDiagram
 ### 決定 2: プロンプトの材料を保存先の `values.json` で渡す
 
 - **質問**: `ndf answer work` は、課題の番号・作業場所・受け入れ条件をどこから読むか
-- **選んだ案**: プランの実行が、ステップを打つ前に差し込みの値を保存先の `values.json` へ書き、`ndf answer work` がそれを読む
+- **選んだ案**: 工程がプランを組む処理（`progress/invoke`）が、プランを書き出すときに差し込みの値を保存先の `values.json` へ書き、`ndf answer work` がそれを読む。プランの実行の層（`core/plan/runner`）には `acceptance`・`title`・`body_file` の補いが渡らないため、組んだ層が書く
 - 採らなかった案:
   - `ndf answer work` の引数を増やしてテンプレートから渡す（24 件のテンプレートを直し、差し込みを足すたびに全件を直す）
   - `ndf answer work` が自分でステートマシンとプランを読み直す（同じ値を 2 か所で組み立てることになり、プランが使った値と食い違いうる）
-- **代償**: 保存先にファイルが 1 つ増える。プランの実行が、ステップの前に 1 回書き込みを行う
+- **代償**: 保存先にファイルが 1 つ増える。工程がプランを組むときに 1 回書き込みを行う。工程を通さない単発のプラン（`ndf plan` を手で打つ経路）では `values.json` が無く、`ndf answer work` は `precondition` で止まる
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
 ### 決定 3: 作業ごとの定義を `kinds.json` の 1 か所に置く
@@ -215,6 +216,18 @@ sequenceDiagram
   - `description` に書き足す（説明文と機械が読む値が混ざり、どこまでが取り場所か決まらない）
 - **代償**: JSON Schema に標準でないキー（`x-` の接頭辞）を 1 つ持つ
 - 根拠: Value 1「AI が決められないことは、理由と根拠を添えて人へ戻ってくる」・Value 3（MVV バージョン 1）
+
+### 決定 6: プロンプトの雛形の差し込みは `string.Template` の `$名前` にする
+
+- **質問**: 雛形の差し込みを何で埋めるか
+- **選んだ案**: Python 標準ライブラリの `string.Template` を使い、差し込みは `$名前`・`${名前}` の形にする。欠けた値は `substitute()` が `KeyError` を上げるので、決定 4 の「起動の前に止める」と合う（LIB1・LIB1a）
+- 採らなかった案:
+  - Jinja2（条件と繰り返しが要らず、依存が 1 つ増える。既定の `Undefined` は欠けた値を空で描画し、止めるには明示が要る。LIB2・LIB2a）
+  - `{{名前}}` の形を自前の置換で埋める（`string.Template` の `pattern` を上書きすれば合わせられるが、標準の形から外れる理由が無い）
+- **代償**: プロンプトの本文に `$` を書くときは `$$` で逃がす
+- 作り方: ライブラリを使う（Python 標準ライブラリ）
+- 比べた候補: LIB1・LIB2・LIB3・LIB4
+- 根拠: Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
 
 ## 影響と危険
 
@@ -262,11 +275,13 @@ sequenceDiagram
 | 決定 2（材料の受け渡し） | `values.json` が無い保存先で `ndf answer work` を打つと `stopped`（`precondition`）で、保存先のパスを `summary` に出す | 無いときに空のプロンプトで起動すると落ちる |
 | 決定 3（唯一の基準） | `kinds.json` に無い作業の名前は `stopped`（`invalid`）で断る。`kinds.json` のキーが、テンプレートが使う作業の名前をすべて含む | テンプレートが使う名前を `kinds.json` から 1 件落とすと落ちる |
 
+詳細設計は [issue-3908-design-detail.md](./issue-3908-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3908 | 実装する | — | `plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/worker/kinds.json`（新設）、`plugins/ndf/contracts/worker/prompt.md`（新設）、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/cli.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_work.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/core/test_plan_values.py`（新設） |
+| #3908 | 実装する | — | `plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/worker/kinds.json`（新設）、`plugins/ndf/contracts/worker/prompt.md`（新設）、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_work.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/core/test_plan_values.py`（新設） |
 
 ## 未確認のまま残ること
 

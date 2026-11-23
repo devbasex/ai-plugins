@@ -44,6 +44,8 @@ flowchart TB
 - 承認ゲート・質問の回答を待つ行は、今の判定の順 2・順 3 が先に拾う。新しい条件はその後ろに置けば、今までどおり止まりにしない
 - 時間で区切った試験は行わない。閾値の判定は、時刻を与えるテストで確かめる
 - 閾値は `contracts/limits.json` に置き、コードに同じ値を書かない
+- hook から見たラッパーの保存先は環境変数 `NDF_RELAY_DIR` で渡る（`domains/relay/wrapper.py:740` が `signals.launch_env(self.dir, …)` で渡し、`self.dir` は `registry.wrapper_dir(...)`。`wrapper.py:278`）。`activity.json` はこの保存先へ書く
+- 判定の口は `ndf lanes status` も同じ `run.probes` を通る（`progress/plan/cli.py:103`）ので、活動を読む項目を 1 か所に足せば両方に当たる
 
 ## 解き方の全体像
 
@@ -111,6 +113,8 @@ flowchart TB
 | 名前 | 値 | 説明 |
 | --- | --- | --- |
 | `parallel-run.idle` | `seconds: 600` | conductor が応答を終えて背景の作業を持たないまま、何もしていないとみなすまでの秒 |
+
+`judge` は時刻を引数（`now`）で受け取る。判定を純粋な関数のままにし、閾値の境目を時刻を与えるテストで確かめるためである。
 
 `Probes.activity(lane) -> Activity | None` が返す値:
 
@@ -255,7 +259,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4036 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/relay/registry.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/tests/progress/test_lane_liveness.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`、`plugins/ndf/tests/progress/test_plan_run_stall.py`（新設） |
+| #4036 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/relay/registry.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/tests/progress/test_lane_liveness.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設）、`plugins/ndf/tests/progress/test_plan_run_stall.py`（新設） |
 
 ## 未確認のまま残ること
 
@@ -263,7 +267,9 @@ sequenceDiagram
 | --- | --- |
 | 閾値の妥当さ | 10 分が短すぎて正常な行を止まりと知らせるか、長すぎて気づきが遅れるかは、知らせの実績を見るまで分からない。合わなければ `contracts/limits.json` の 1 行を直す |
 | Stop の hook が呼ばれる頻度 | conductor が応答を終えるたびに呼ばれると見ているが、背景の作業を持ったまま終えた応答でも呼ばれるかは実測していない。実装で 1 回確かめる |
-| `activity.json` を書く保存先 | `relay-marker` guard がラッパーの保存先のパスを知っているかは、実装で確かめる。知らなければ hook の入力の `cwd` と中継の登録簿から引く |
+
+
+詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
 
 ## 外部の調査
 
