@@ -97,6 +97,34 @@ def test_read_activity_returns_none_for_broken_records(tmp_path, data):
     assert signals.read_activity(tmp_path) is None
 
 
+@pytest.mark.parametrize("key", ["session_id", "reply"])
+@pytest.mark.parametrize("value", [0, False, True, 1.5, [], ["s1"], {}])
+def test_read_activity_rejects_a_session_or_reply_that_is_not_text(tmp_path, key, value):
+    data = {"at": "t", "session_id": "s1", "reply": "r1", "tasks": [], key: value}
+    (tmp_path / signals.ACTIVITY_FILE).write_text(json.dumps(data), encoding="utf-8")
+    assert signals.read_activity(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"session_id": "s1", "reply": "r1"},
+        {"session_id": None, "reply": "r1"},
+        {"session_id": "s1", "reply": None},
+        {"session_id": None, "reply": None},
+        {"session_id": "", "reply": ""},
+        {"session_id": "s1"},
+        {"reply": "r1"},
+        {},
+    ],
+)
+def test_read_activity_returns_text_null_or_missing_session_and_reply_as_written(tmp_path, fields):
+    # 更新前の hook の記録は `reply` を持たない。欠けたキーは補わずに返す
+    data = {"at": "t", "tasks": [], **fields}
+    (tmp_path / signals.ACTIVITY_FILE).write_text(json.dumps(data), encoding="utf-8")
+    assert signals.read_activity(tmp_path) == data
+
+
 def test_read_activity_returns_none_without_the_file(tmp_path):
     assert signals.read_activity(tmp_path) is None
 
