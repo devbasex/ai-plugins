@@ -129,9 +129,10 @@ def _resolved_refusal(got: account_dir.Resolved, prefixes: tuple[str, ...]) -> O
     if got.helper:
         return "apiKeyHelper"
     if got.key_origin:
-        return sorted(got.key_origin)[0]
-    named = sorted(k for k, o in got.origin.items() if o != account_dir.CHILD_ENV and k.startswith(prefixes))
-    return named[0] if named else None
+        return min(got.key_origin)
+    return min(
+        (k for k, o in got.origin.items() if o != account_dir.CHILD_ENV and k.startswith(prefixes)), default=None
+    )
 
 
 # ---------------------------------------------------------------- 1 回の判定（決定 1・4・8）
