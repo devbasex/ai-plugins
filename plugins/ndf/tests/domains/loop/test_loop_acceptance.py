@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
+from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core.plan import inputs_decide as inputs
 from ndf.domains.loop import acceptance
@@ -207,6 +209,7 @@ def issues(monkeypatch: pytest.MonkeyPatch) -> dict[int, str]:
     # 課題 1 は条件 1・2 に記録があり 3 に無い。課題 2 は記録が無い
     held = {1: acc.recorded_body(BODY, {1: "pytest"}, [2]), 2: BODY}
     monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: held[n])
+    monkeypatch.setattr(acceptance, "read_bodies", lambda cwd, ns: {n: held[n] for n in ns})
     return held
 
 
@@ -267,3 +270,25 @@ def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loo
     got = loop("record", "--issue", "7", "--pre-merge", "1=pytest", "--post-release", "2")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert [g["name"] for g in got["gaps"]] == ["7:1", "7:2"]
+
+
+def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, loop):
+    # まとめた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）。union の
+    # issueOrPullRequest の本文は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
+    queries: list[str] = []
+
+    class Hub(github.GitHub):
+        def __post_init__(self) -> None:
+            pass  # api を渡さないダミーなので、二次レート制限の待ちの知らせ先（api.config.throttler）も組まない
+
+        def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+            queries.append(query)
+            aliases = re.findall(r"(\w+): issueOrPullRequest\(number: (\d+)\) \{ ", query)
+            return {"repository": {alias: {"body": BODY} for alias, _n in aliases}}
+
+    monkeypatch.setattr(acceptance, "_hub", lambda cwd: Hub("o/r", None))
+    monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: pytest.fail("課題ごとに読んだ"))
+    got = loop("check", "--issue", "1", "--issue", "2")
+    assert len(queries) == 1 and [g["name"] for g in got["gaps"]][:1] == ["1:1"]
+    for n in (1, 2):
+        assert f"issueOrPullRequest(number: {n}) {{ ... on Issue {{ body }} ... on PullRequest {{ body }} }}" in queries[0]

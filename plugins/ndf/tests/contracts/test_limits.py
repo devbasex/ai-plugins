@@ -85,14 +85,31 @@ _SCHEMA_VALUE_KEYS = (
     "lock",
     "gate",
     "first",
+    "max_chars",
+    "rest_seconds",
+    "lock_seconds",
+    "rounds",
 )
+# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint）。`limits.value` では引かない
+_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
 
 
 def test_value_keys_match_policy_fields_and_schema():
     schema = contracts.load_json(limits.SCHEMA)
     declared = schema["properties"]["policies"]["additionalProperties"]["properties"]
-    assert set(declared) - {"summary"} == set(_SCHEMA_VALUE_KEYS)
-    assert set(limits.Policy._fields) - {"name", "summary"} == set(_SCHEMA_VALUE_KEYS)
+    assert set(declared) - {"summary"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
+    assert set(limits.Policy._fields) - {"name", "summary"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
+    assert set(limits.VALUE_KEYS) == set(_SCHEMA_VALUE_KEYS)
+
+
+def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
+    """プラグインの `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
+    from ndf.domains.hooks import reply_judge
+
+    assert reply_judge.judge_setting("model") == "haiku"
+    assert reply_judge.judge_setting("max_chars") == 1600
+    assert reply_judge.judge_setting("seconds") <= limits.value("hook.budget.stop", "deadline") - limits.value("hook.budget.stop", "margin")
+    assert limits.policy("hook.stop-wait.judge").endpoint["entrypoints"] == ["cli", "sdk-cli"]
 
 
 @pytest.mark.parametrize("key", _SCHEMA_VALUE_KEYS)
@@ -119,7 +136,7 @@ def test_validate_builds_policies_with_name_and_absent_values_as_none():
 def test_table_keeps_every_policy_and_representative_values():
     # #3687: 表を方針ごとのファイルへ分けても、読みの結果は分ける前と同じ件数と値を返す
     table = limits.table()
-    assert len(table) == 227
+    assert len(table) == 230
     assert limits.value("test-run.test", "seconds") == 900
     assert limits.value("test-run.test", "factor") == 3
     assert limits.value("launch.weight.test", "gib") == 14

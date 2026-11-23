@@ -9,7 +9,7 @@
 | --- | --- |
 | 利用者向けの案内（判断の順の表・質問の閉じ方の表・Stop の hook の扱い） | `plugins/ndf/skills/development-workflow/references/relay.md` の「承認ゲートを越えない守り」 |
 | ラッパーの判断の純粋な関数（質問以外の分岐） | `plugins/ndf/src/ndf/domains/relay/switch_decide.py` |
-| 本文で承認を待って終えた応答の差し戻し（`stop-wait`） | [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) |
+| 本文で人の回答を待って終えた応答への変更要求（`stop-wait`。ルールの前置きの後に軽いモデルで判定する） | [ndf-hook-stop-wait-judge.md](ndf-hook-stop-wait-judge.md)（10 系の差し戻しの経緯は [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md)） |
 | プラグインの更新と、同じ会話を起動し直す手の更新の扱い | [ndf-relay-plugin-update.md](ndf-relay-plugin-update.md) |
 
 [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)・[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) には、

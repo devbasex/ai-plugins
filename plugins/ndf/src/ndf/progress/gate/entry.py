@@ -7,20 +7,29 @@ ndf answer ask [--gate design|release]   # プランの中の承認ゲート（�
 ndf answer list <ステートマシン>                 # 書いた回答（選択肢・指摘・理由・回答した者・時刻）を古い順に返す
 ndf answer head <ステートマシン> [--gate release] # 承認で見た PR の head（マージの側が --expect-head へ渡して照らす。#2147）
 ndf answer work --state-dir <保存先> [--cwd <作業場所>] <作業名>
-                                         # 作業名を ndf worker run の必須の引数へ合わせて打つ（プロンプトは呼ぶ側が先に書く）
+                                         # 起動指示を <保存先>/<作業名>.prompt.md へ書いてから ndf worker run へ置き換わる。
+                                         # 材料は工程か ndf plan next が書いた <保存先>/values.json から取り、--cwd を省くと作業の定義の cwd で動く
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
+import shlex
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from string import Template
+from typing import Any, NamedTuple, Optional
 
+from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
+from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
+from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
 from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, question, write_material
@@ -72,39 +81,274 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     return result.result(TOOL, result.GATE, f"{label}の回答を待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
-# `ndf answer work` が受ける作業名（テンプレートの `["{{worker}}", "<作業名>"]` の末尾）。テンプレートの `{{worker}}` の既定にはしない
-# （`<保存先>/<作業名>-prompt.md` を書く処理がまだ無く、既定にすると worker のステップが必ず落ちる。PR 3496 の指摘）
-WORK_KINDS = ("impl", "fix", "ci-fix", "fix-base", "fix-push", "design", "plan-to-spec")
+log = logging.getLogger(__name__)
+
+# 起動指示の共通のテンプレート（コントラクトの保存先からの相対パス）。読む Skill と手順の抜粋はプラグインの根から引く
+PROMPT_FILE = "worker/prompt.md"
 
 
-def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
-    """作業名を `ndf worker run` の必須の引数へ合わせる。プロンプトは `<保存先>/<作業名>-prompt.md`（呼ぶ側が先に書く）、
-    結果は `<保存先>/<作業名>-result.json` に置く。"""
-    if kind not in WORK_KINDS:
-        raise model.Refused(f"作業名 {kind} はテンプレートの作業名（{', '.join(WORK_KINDS)}）のどれでもない")
-    files = ("--prompt-file", str(state_dir / f"{kind}-prompt.md"), "--result-file", str(state_dir / f"{kind}-result.json"))
-    return ["run", "--kind", kind, *files, "--cwd", str(cwd), "--state-dir", str(state_dir)]
+class WorkUnready(Exception):
+    """worker を起動する前に足りないもの（差し込みの値を渡す `values.json` が無い・読めない）。"""
+
+
+def _known(kind: str) -> dict[str, Any]:
+    """作業の定義（`contracts/worker/kinds.json`）の 1 件。定義に無い名前は `model.Refused`（`invalid`）。"""
+    # 受ける作業名は作業の定義のキーだけ（テンプレートの `["{{worker}}", "<作業名>"]` の末尾）
+    if kind not in work_kinds():
+        raise model.Refused(f"作業名 {kind} はテンプレートの作業名（{', '.join(work_kinds())}）のどれでもない")
+    return work_kinds()[kind]
+
+
+def _shown(value: Any) -> str:
+    """起動指示の入力の欄に載せる字面。JSON の値にし、値の中の改行や見出しが作業の指示の行にならないようにする。"""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _inputs_of(kind: str, saved: Mapping[str, Any]) -> str:
+    """作業が読む値（`kinds.json` の `inputs`）を 1 行 1 件で並べる。欠けは呼び手が `kind_gaps` で先に確かめる。"""
+    got = kind_values(kind, saved["values"], saved["inputs"])
+    return "\n".join(f"- {name}: {_shown(value)}" for name, value in got.items())
+
+
+def _skills_of(kind: str) -> str:
+    """読む Skill の名前と `SKILL.md` の絶対パス（無ければ「無し」）。"""
+    names = work_kinds()[kind]["skills"]
+    base = identity.ROOT / "skills"
+    return "\n".join(f"- {n}: {base / n / 'SKILL.md'}" for n in names) if names else "無し"
+
+
+def _text_of(path: Path, label: str) -> str:
+    """プラグインの中のファイルを読む。読めなければ `contracts.ContractError`（worker を起動しない）。"""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:  # ファイル: リリースの欠けは worker を起動せずに止める（`core/worker.py` と同じ方針）
+        raise contracts.ContractError(f"{label} {path} を読めない: {exc.strerror or exc}") from None
+
+
+def _steps_of(kind: str) -> str:
+    """手順の抜粋（`kinds.json` の `excerpt` のファイルの中身）。抜粋を持たない作業は 1 行で返す。"""
+    rel = work_kinds()[kind]["excerpt"]
+    if not rel:
+        return "手順の抜粋は無い。読む Skill と入力から判断して進める。"
+    return _text_of(identity.ROOT / rel, f"作業 {kind} の手順の抜粋")
+
+
+def _arg(value: Any) -> str:
+    """コマンドの見本に差し込む値。シェルで 1 つの引数になるよう引用する（空白・`$`・引用符を含むパスでも割れない）。"""
+    return shlex.quote(str(value))
+
+
+def _outputs_of(kind: str, result_file: Path) -> str:
+    """結果ファイルに必ず入れる `outputs` のキーと `ndf contracts emit --outputs` の見本（無ければ「無し」の 1 行）。"""
+    names = work_kinds()[kind]["outputs"]
+    if not names:
+        return "結果ファイルに必ず入れる outputs: 無し"
+    shown = _arg(json.dumps({n: "<値>" for n in names}, ensure_ascii=False))
+    sample = f'ndf contracts emit --tool worker --status ok --summary "<1 行>" --outputs {shown} --out {_arg(result_file)}'
+    return f"結果ファイルに必ず入れる outputs: {'・'.join(names)}\n見本: {sample}"
+
+
+def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worker_paths.ReportPaths) -> str:
+    """共通のテンプレート（`contracts/worker/prompt.md`）と作業の定義と `values.json` の中身から起動指示の本文を組む。
+
+    差し込みの欠けは `substitute` が `KeyError` で止める（決定 6）。作業が読む値の内訳の欠けは 1 つの字面に隠れるので、
+    呼び手が `kind_gaps` で名前ごとに先に確かめる。表示に使うパス（`report`・`done`・`result`）と、コマンドの見本に
+    差し込む引用済みの値（`report_arg`・`result_arg`）を分ける。
+    """
+    spec = work_kinds()[kind]
+    filled = {
+        "work": spec["work"],
+        "summary": spec["summary"],
+        "inputs": _inputs_of(kind, saved),
+        "outputs": _outputs_of(kind, paths.result),
+        "workdir": str(workdir),
+        "steps": _steps_of(kind),
+        "skills": _skills_of(kind),
+        "report": str(paths.report),
+        "done": str(paths.done),
+        "result": str(paths.result),
+        "report_arg": _arg(paths.report),
+        "result_arg": _arg(paths.result),
+    }
+    template = Template(_text_of(contracts.contracts_dir() / PROMPT_FILE, "起動指示のテンプレート"))
+    try:
+        return template.substitute(filled)
+    except (KeyError, ValueError) as exc:
+        raise contracts.ContractError(f"起動指示のテンプレート {PROMPT_FILE} の差し込みを埋められない: {exc}") from None
+
+
+def _write_prompt(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str) -> None:
+    """開いた保存先で報告の一式を初期化し、起動指示を `<保存先>/<作業名>.prompt.md` へ書く。
+
+    初期化は `ndf worker prepare` と同じ `worker_paths.reset_report`（空の報告を作り、前の完了マーカーと結果ファイルを
+    消す）で、起動ごとに行う。起動指示が指す `ndf worker append --done` は報告が無いと書けず、前の完了マーカーが
+    残ると今回の報告より先に見えるためである。どの名前もリンクをたどらず、リンクなら何も変えずに `EntryUnsafe`
+    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。起動指示は初期化と同じ置き換えの中で
+    報告より先に書き（`write`）、書けない・公開できないときは前の報告・完了マーカー・結果ファイルを残して止まる
+    （拡張 ACL・所有者を保てないなど、書き込み可否の確かめに無い理由でも）。
+    """
+    worker_paths.reset_report(wd, paths, write=((paths.prompt.name, body),))
+
+
+def work_argv(
+    kind: str,
+    state_dir: Path,
+    cwd: Path,
+    *,
+    prompt_file: Optional[str] = None,
+    result_dir_id: Optional[tuple[int, int]] = None,
+) -> list[str]:
+    """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。
+
+    `prompt_file` は起動指示を読む場所（`ndf answer work` は継いだ記述子の `/dev/fd/<番号>` を渡す。省くと保存先の起動指示）。
+    `result_dir_id` は開いた保存先の `(st_dev, st_ino)` で、`ndf worker run` が結果ファイルの保存先を開き直したときに突き合わせる。
+    """
+    spec = _known(kind)
+    try:
+        paths = worker_paths.report_paths(state_dir, kind, resolve=False)
+    except worker_paths.NameInvalid as exc:
+        raise model.Refused(str(exc)) from None
+    files = ("--prompt-file", prompt_file or str(paths.prompt), "--result-file", str(paths.result))
+    held = ("--result-dir-id", f"{result_dir_id[0]}:{result_dir_id[1]}") if result_dir_id is not None else ()
+    required = [arg for name in spec["outputs"] for arg in ("--require-output", name)]
+    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required]
 
 
 def work_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} work")
     ap.add_argument("--state-dir", required=True, help="プランの状態の保存先（テンプレートの {state_dir}）")
-    ap.add_argument("--cwd", default=".", help="worker が動く作業場所")
-    ap.add_argument("kind", help="作業名（" + "・".join(WORK_KINDS) + "）")
+    ap.add_argument("--cwd", help="worker が動く作業場所（省くと作業の定義の cwd が指す差し込みの値で動く）")
+    ap.add_argument("kind", help="作業名（" + "・".join(work_kinds()) + "）")
     return ap
 
 
+# `ndf answer work` が worker を起動する前に止まる型 → 停止理由の語（`KindInputsMissing` は `ContractError` より先に見る）
+WORK_STOPS: tuple[tuple[type[Exception], str], ...] = (
+    (model.Refused, "invalid"),
+    (invoke.KindInputsMissing, "precondition"),
+    (WorkUnready, "precondition"),
+    (contracts.ContractError, "precondition"),
+    (worker_paths.EntryError, "precondition"),
+    (OSError, "precondition"),
+)
+WORK_STOP_TYPES = tuple(t for t, _ in WORK_STOPS)
+
+
+def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
+    """worker が動く作業場所の絶対パス。`--cwd` があればそれ、無ければ作業の定義の `cwd` が指す差し込みの値。
+
+    `ndf worker run` と同じく呼び出し元の場所で解く（`.resolve()`）。起動指示と argv に同じ絶対パスを載せ、移動した
+    worker が相対パスを自分の場所から読み違えないようにする。
+    """
+    if cwd is not None:
+        return Path(cwd).resolve()
+    found = work_dir_of(kind, saved["values"])
+    if found is None:  # `kind_gaps` が空なら決まっているので、ここへは来ない
+        raise WorkUnready(f"作業 {kind} の作業場所（差し込み {work_kinds()[kind]['cwd']}）が {invoke.VALUES_FILE} に無い")
+    return Path(found).resolve()
+
+
+class WorkHandoff(NamedTuple):
+    """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。
+
+    `fd` は起動指示の本文を持つ継ぐ記述子（`_held_prompt`）で、閉じるのは受け取った側である。
+    """
+
+    kind: str
+    state_dir: Path
+    dir_id: tuple[int, int]
+    workdir: Path
+    prompt: str
+    fd: int
+
+
+def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
+    """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて、`ndf worker run` へ渡すものを返す。
+
+    保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
+    要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
+    行う。読んだ場所と書く場所が食い違わない。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
+    前の報告一式を残して止まる。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
+    `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
+    """
+    _known(kind)
+    worker_paths.report_paths(state_dir, kind, resolve=False)  # 名前の形を開く前に確かめる
+    with worker_paths.open_resolved(state_dir) as wd:
+        paths = worker_paths.report_paths(wd.path, kind, resolve=False)
+        saved = values_in(wd)
+        if saved is None:
+            raise WorkUnready(
+                f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程が組むか、ndf route render・run で組んだプランを"
+                " ndf plan next で流すと書く）"
+            )
+        gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
+        if gaps:
+            raise invoke.KindInputsMissing(saved["plan"], gaps)
+        workdir = _work_dir(kind, saved, cwd)
+        body = work_prompt(kind, saved, workdir, paths)
+        fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
+        try:
+            _write_prompt(wd, paths, body)
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd)
+        except BaseException:
+            os.close(fd)
+            raise
+
+
+def _anonymous_fd() -> int:
+    """名前の無い私有のファイルの記述子。`memfd_create` が無いか拒まれれば、名前をすぐ消す一時ファイルへ落とす。"""
+    if hasattr(os, "memfd_create"):
+        try:
+            return os.memfd_create("ndf-prompt", 0)
+        except OSError as exc:  # 環境: seccomp などで拒まれたら一時ファイルへ落とす（属性の有無では使えるか分からない）
+            log.info("memfd_create を使えないので一時ファイルで起動指示を渡す", extra={"error": str(exc)})
+    with tempfile.TemporaryFile() as f:
+        return os.dup(f.fileno())
+
+
+def _held_prompt(body: str) -> int:
+    """起動指示の本文を、名前の無い私有のファイルへ書いて先頭へ戻し、置き換えた先へ継ぐ記述子を返す。
+
+    `ndf worker run` は `--prompt-file /dev/fd/<番号>` でこれを読む。共有の保存先の起動指示を読み直さないので、書いた後に
+    別の利用者が起動指示を差し替えても、worker へ渡る指示は確かめた `values.json` から組んだ本文のままである。
+    Linux は `memfd_create`、ほかと、コンテナの seccomp などで `memfd_create` が拒まれる環境は作ってすぐ名前を消す
+    一時ファイル（`tempfile.TemporaryFile`）を使う。呼び手は前の報告一式を初期化する前にこれを呼ぶ。
+    """
+    fd = _anonymous_fd()
+    try:
+        view = memoryview(body.encode("utf-8"))
+        while view:
+            view = view[os.write(fd, view) :]
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.set_inheritable(fd, True)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv) -> int:
-    """`ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まず、サブコマンドのコントラクトだけを使う。IG1）。"""
+    """起動指示を書いてから `ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まない。IG1）。
+
+    起動指示の本文は継いだ記述子で渡し（`_held_prompt`）、結果ファイルの保存先は開いた保存先の識別子（`--result-dir-id`）で
+    `ndf worker run` に突き合わせさせる（共有の保存先を、確かめた後に差し替えられても別の指示・別の保存先で動かない）。
+    """
     a = work_parser().parse_args(argv)
     try:
-        args = work_argv(a.kind, Path(a.state_dir), Path(a.cwd))
-    except model.Refused as exc:
-        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
-    # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
-    # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
-    argv = invoke.ndf_command("worker", *args, keep_streams=True)
-    exec_(argv[0], argv)
+        handoff = _work_handoff(a.kind, Path(a.state_dir), a.cwd)
+    except WORK_STOP_TYPES as exc:
+        kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
+        items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
+        return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
+    fd = handoff.fd
+    try:
+        args = work_argv(handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id)
+        # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
+        # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
+        argv = invoke.ndf_command("worker", *args, keep_streams=True)
+        exec_(argv[0], argv)
+    finally:
+        os.close(fd)  # 置き換えに落ちたとき（と置き換えを差し替えたテスト）だけここへ来る
     return 0
 
 

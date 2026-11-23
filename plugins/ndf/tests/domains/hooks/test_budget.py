@@ -30,6 +30,25 @@ def test_runtime_specific_budget_is_read_first():
     assert budget.budget_for("codex", "SessionEnd").timeout <= tables.runtimes()["codex"]["events"]["SessionEnd"]["timeout_max"]
 
 
+def test_stop_budget_adds_the_judge_seconds_only_for_the_runtimes_that_judge():
+    """Codex の Stop はモデルを呼ばないので、判定の秒を足した Claude Code の予算でなく元の予算を読む（#4000）。"""
+    judge = tables.policies()["hook.stop-wait.judge"]
+    assert judge["runtimes"] == ["claude"]
+    assert budget.budget_for("codex", "Stop").policy == "hook.budget.stop.codex"
+    assert budget.budget_for("claude", "Stop").policy == "hook.budget.stop"
+    assert budget.budget_for("codex", "Stop").usable < judge["seconds"] <= budget.budget_for("claude", "Stop").usable
+
+
+def test_component_limit_is_compared_only_with_the_budgets_of_its_runtimes():
+    widened = copy.deepcopy(tables.policies())
+    widened["hook.stop-wait.judge"]["runtimes"] = ["claude", "codex"]
+    errors = budget.check_budget(widened, budget.budget_registrations())
+    seconds, usable = widened["hook.stop-wait.judge"]["seconds"], budget.budget_for("codex", "Stop").usable
+    assert [e for e in errors if "hook.stop-wait.judge" in e] == [
+        f"stop-wait の部品の上限 hook.stop-wait.judge（{seconds} 秒）が codex の Stop の締め切り − 余白（{usable} 秒）を超える"
+    ]
+
+
 def test_component_limit_longer_than_the_deadline_is_a_violation():
     broken = copy.deepcopy(tables.policies())
     broken["hook.ask-forward"]["seconds"] = 8
@@ -48,10 +67,12 @@ def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns()
         "ask-answered の部品の上限 hook.ask-forward が limits.json に無い",
         "ask-closed の部品の上限 hook.ask-forward が limits.json に無い",
         "ask-forward の部品の上限 hook.ask-forward が limits.json に無い",
+        # codex の Stop は hook.budget.stop.codex を読む（stop-wait のモデルの判定の秒を足さない。#4000）
         "claude の Stop の予算が limits.json に無い",
-        "codex の Stop の予算が limits.json に無い",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        # relay-marker の Stop は、claude では予算の行を消したので上の 1 行に、codex では hook.budget.stop.codex に当たる
+        "relay-marker の部品の上限 hook.counter-lock（99 秒）が codex の Stop の締め切り − 余白（2.0 秒）を超える",
         "turn の部品の上限 hook.counter-lock（99 秒）が claude の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
         "turn の部品の上限 hook.counter-lock（99 秒）が codex の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
     ]

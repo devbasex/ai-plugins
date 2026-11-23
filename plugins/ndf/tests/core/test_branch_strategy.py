@@ -88,6 +88,26 @@ def test_load_reads_each_kind(make_repo, kind):
     assert bs.load(root).section == section(kind)
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_of_project_reads_the_loaded_settings_without_a_file(make_repo, kind):
+    # #3908 の決定 7: 読み込み済みの `.ndf/project.json` の中身から、`load` と同じ検査で `Strategy` を返す
+    root = make_repo({"project.json": {"version": 1, "branch_strategy": section(kind)}})
+    project = json.loads((root / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    assert bs.of_project(project).section == bs.load(root).section
+
+
+def test_of_project_stops_with_the_same_reason_as_load(make_repo):
+    # 検査は `load` と 1 か所のまま: セクションが無い・スキーマに落ちる中身は同じ理由で断る
+    with pytest.raises(bs.StrategyError) as without:
+        bs.of_project({"version": 1})
+    assert "ndf project branch-strategy init" in without.value.reason and without.value.exit_id == bs.PRECONDITION
+    bad = section("docs")
+    bad["merge"]["method"] = "direct"
+    with pytest.raises(bs.StrategyError) as broken:
+        bs.of_project({"version": 1, "branch_strategy": bad})
+    assert "R2 `" in broken.value.reason and broken.value.exit_id == bs.VIOLATION
+
+
 def test_load_stops_without_section(make_repo):
     root = make_repo({"project.json": {"version": 1}})
     with pytest.raises(bs.StrategyError) as e:

@@ -24,7 +24,8 @@
       "stage": "要求と受け入れ条件",
       "phase": "design",
       "inputs": [
-        "issues"
+        "issues",
+        "mode"
       ]
     }
   },

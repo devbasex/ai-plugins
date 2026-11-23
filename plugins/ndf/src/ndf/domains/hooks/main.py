@@ -136,7 +136,8 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
     if found is None or state_dir is None:
         record["error"] = "no_budget" if found is None else "no_state"
         return ""
-    remaining = found.deadline - (time.monotonic() - run.started)
+    deadline = run.started + found.deadline  # SIGALRM と guard で同じ起点の絶対時刻を使う
+    remaining = deadline - time.monotonic()
     if remaining <= 0:
         record["error"] = "deadline"
         return _deadline_out(run)
@@ -151,7 +152,8 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
     if event == "SessionStart":
         _session_start(state_dir)
     with Counter.open(ctx.session_id, state_dir) as counter:
-        outcome = dispatch.run(ctx, dispatch.select(dispatch.load_specs(), ctx, off), found, counter, state_dir)
+        svc = dispatch.GuardServices(state_dir, counter, deadline)
+        outcome = dispatch.run(ctx, dispatch.select(dispatch.load_specs(), ctx, off), found, svc)
         record["pushbacks"] = counter.data["pushbacks"] if counter.usable else None
     _, out = dispatch.render(outcome, runtime, event, found, tables.hooks_dir(state_dir) / "notes")
     if outcome.limited:

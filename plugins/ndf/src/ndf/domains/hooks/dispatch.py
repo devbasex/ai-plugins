@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -68,11 +68,15 @@ class GuardSpec:
 
 @dataclass(frozen=True)
 class GuardServices:
-    """guard へ渡す部品。`params` は表の行の値。"""
+    """guard へ渡す部品。呼び手が `params` の無い形で作り、`run` が guard ごとに表の行の値を入れる。"""
 
     state_dir: Path
     counter: Counter
-    params: dict
+    # 締め切りの絶対時刻（`time.monotonic()` の基準。余白を引いていない。SIGALRM と同じ起点）
+    deadline: float
+    params: dict = field(default_factory=dict)
+    # 表の前の guard が変更要求か拒否を既に返したか（`run` が guard ごとに入れる）。stop-wait はモデルの判定を省く
+    decided: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,12 +123,12 @@ def run(
     ctx: HookContext,
     specs: list[GuardSpec],
     budget: Budget,
-    counter: Counter,
-    state_dir: Path,
+    svc: GuardServices,
     clock: Callable[[], float] = time.monotonic,
 ) -> Outcome:
-    """表の順に guard を呼び、判定を 1 つにまとめる。"""
+    """表の順に guard を呼び、判定を 1 つにまとめる。`svc` は呼び手が作った部品（`params` は guard ごとに入れる）。"""
     start = clock()
+    counter = svc.counter
     outcome = Outcome(PASS)
     verdicts: list[Verdict] = []
     for spec in specs:
@@ -133,7 +137,8 @@ def run(
             if not spec.fail_closed:
                 continue
         began = clock()
-        got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params))
+        decided = any(v.kind in REASON_KINDS for v in verdicts)
+        got, error = _call(spec, ctx, replace(svc, params=spec.params, decided=decided))
         if got.kind == "deny" and _counted(spec) and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))
@@ -142,7 +147,7 @@ def run(
     outcome.verdict = combine(verdicts)
     if outcome.verdict.kind == "pushback" and not counter.allow_pushback():
         outcome.limited = True
-        outcome.notes["limited_reason"] = outcome.verdict.reason[:200]
+        outcome.notes["limited_reason"] = outcome.verdict.recorded[:200]
         outcome.verdict = PASS
     return outcome
 
@@ -173,19 +178,27 @@ def combine(verdicts: list[Verdict]) -> Verdict:
     same = [v for v in verdicts if v.kind == kind]
     chosen = [v for v in same if v.sole] or same
     joined = "\n\n".join(v.text for v in chosen if v.text)
-    return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
+    if kind not in REASON_KINDS:
+        return advise(joined)
+    # 計測と待ちの知らせへ渡す文は、応答の本文を含まない `recorded` でつなぐ（会話へ入る文と同じなら持たない）
+    logged = "\n\n".join(v.recorded for v in chosen if v.recorded)
+    return Verdict(kind, reason=joined, logged=logged if logged != joined else "")
 
 
-def clip(text: str, limit: int, notes_dir: Path) -> str:
-    """注入の文を `limit` 字以下にする。超える分は全文をファイルへ書き、文には先頭とパスを入れる（IH8）。"""
+def clip(text: str, limit: int, notes_dir: Path, saved: str = "") -> str:
+    """注入の文を `limit` 字以下にする。超える分は全文をファイルへ書き、文には先頭とパスを入れる（IH8）。
+
+    `saved` があればファイルへはそれを書く（会話へ返す文が応答の本文の抜粋を含むとき、平文のファイルへ残さない）。
+    """
     if len(text) <= limit:
         return text
     if limit <= 0:
         return ""
+    kept = saved or text
     notes_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(kept.encode("utf-8")).hexdigest()[:12]
     path = notes_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{digest}.md"
-    path.write_text(text, encoding="utf-8")
+    path.write_text(kept, encoding="utf-8")
     suffix = f"…（全文: {path}）"
     if len(suffix) >= limit:
         return suffix[-limit:]
@@ -199,6 +212,7 @@ def render(outcome: Outcome, runtime: str, event: str, budget: Budget, notes_dir
     if not spec or kind not in spec["outputs"]:
         outcome.notes["inject_chars"] = 0
         return 0, ""
-    text = clip(outcome.verdict.text, budget.inject_chars, notes_dir)
+    # バックアップのファイルへは応答の本文を含まない `recorded` を書き、抜粋は会話へ返す文にだけ入れる
+    text = clip(outcome.verdict.text, budget.inject_chars, notes_dir, saved=outcome.verdict.recorded)
     outcome.notes["inject_chars"] = len(text)
     return 0, tables.output_for(runtime, event, kind, text)

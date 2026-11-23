@@ -54,10 +54,10 @@ def _ctx(tmp_path) -> HookContext:
     return HookContext("claude", "PreToolUse", bash(tmp_path, "ls"))
 
 
-def _run(tmp_path, specs, clock=time.monotonic):
+def _run(tmp_path, specs, clock=time.monotonic, deadline=0.0):
     found = budget.budget_for("claude", "PreToolUse")
     with Counter.open("s-1", tmp_path) as counter:
-        return dispatch.run(_ctx(tmp_path), specs, found, counter, tmp_path, clock)
+        return dispatch.run(_ctx(tmp_path), specs, found, dispatch.GuardServices(tmp_path, counter, deadline), clock)
 
 
 def test_guards_are_ordered_by_the_table():
@@ -160,6 +160,14 @@ def test_clip_keeps_short_text_and_drops_text_when_no_injection_is_allowed(tmp_p
     assert not list(tmp_path.glob("*.md"))
 
 
+def test_clip_saves_the_text_without_the_reply_excerpt(tmp_path):
+    # 会話へ返す文は抜粋を含んでよいが、平文のバックアップには本文を含まない文を書く
+    shown = dispatch.clip("抜粋 s3cr3t " + "x" * 400, 200, tmp_path, saved="固定の文")
+    notes = list(tmp_path.glob("*.md"))
+    assert len(notes) == 1 and notes[0].read_text(encoding="utf-8") == "固定の文"
+    assert "s3cr3t" in shown and len(shown) <= 200
+
+
 def test_entry_without_state_dir_still_answers(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_state_dir", lambda: None)
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None
@@ -188,7 +196,7 @@ def test_i7_fail_closed_deny_is_not_downgraded(tmp_path, fake_guards, monkeypatc
     kinds = [(_run(tmp_path, [closed]).verdict.kind, _run(tmp_path, [plain]).verdict.kind) for _ in range(5)]
     assert {k for k, _ in kinds} == {"deny"} and kinds[-1][1] == "advise"
     found = budget.budget_for("claude", "PreToolUse")
-    out = dispatch.run(_ctx(tmp_path), [closed, plain], found, Counter.unusable(), tmp_path)
+    out = dispatch.run(_ctx(tmp_path), [closed, plain], found, dispatch.GuardServices(tmp_path, Counter.unusable(), 0.0))
     assert [r.kind for r in out.runs] == ["deny", "advise"] and out.verdict.reason == "記録できない"
 
 
@@ -213,7 +221,8 @@ def test_only_ask_forward_is_fail_closed_in_the_table():
 
 
 def _run_on(tmp_path, ctx, specs, counter):
-    return dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), counter, tmp_path)
+    svc = dispatch.GuardServices(tmp_path, counter, 0.0)
+    return dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), svc)
 
 
 def test_deny_key_none_keeps_denying_without_counting(tmp_path, fake_guards):
@@ -274,7 +283,8 @@ def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkey
         now[0] = 0.0
         ctx = HookContext("claude", "PreToolUse", payload)
         specs = dispatch.select(dispatch.load_specs(), ctx, frozenset())
-        outs.append(dispatch.run(ctx, specs, found, Counter.unusable(), tmp_path, clock=lambda: now[0]))
+        svc = dispatch.GuardServices(tmp_path, Counter.unusable(), 0.0)
+        outs.append(dispatch.run(ctx, specs, found, svc, clock=lambda: now[0]))
     assert [[r.name for r in out.runs] for out in outs] == [["context-limit"], ["context-limit"]]
     assert outs[0].stopped == "deadline" and [out.verdict.kind for out in outs] == ["deny", "pass"]
 
@@ -333,3 +343,50 @@ def test_deadline_out_keeps_only_the_fail_closed_deny(tmp_path, monkeypatch):
     )
     assert deny_reason(json.loads(_deadline(payload))) == ask.QUESTION_NOT_RECORDED
     assert _deadline(bash(tmp_path, "ls")) == ""
+
+
+def test_run_passes_the_deadline_to_the_guards(tmp_path, fake_guards):
+    seen: list[float] = []
+    spec = _spec("deadline", fake_guards("deadline", lambda c, s: seen.append(s.deadline)))
+    _run(tmp_path, [spec], deadline=123.5)
+    assert seen == [123.5]
+
+
+def test_the_entry_point_passes_the_alarm_deadline_to_the_guards(tmp_path, monkeypatch):
+    # SIGALRM と guard が同じ起点の時刻（起動の時刻 ＋ 締め切り）を使う。起動は 100.0、タイマーを置くのは 100.25
+    ticks = iter([100.0])
+    monkeypatch.setattr(main, "time", types.SimpleNamespace(monotonic=lambda: next(ticks, 100.25)))
+    timers: list[float] = []
+    monkeypatch.setattr(main.signal, "setitimer", lambda which, seconds: timers.append(seconds))
+    seen: list[float] = []
+    real = dispatch.run
+
+    def capture(ctx, specs, found, svc, clock=time.monotonic):
+        seen.append(svc.deadline)
+        return real(ctx, specs, found, svc, clock)
+
+    monkeypatch.setattr(dispatch, "run", capture)
+    call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
+    limit = budget.budget_for("claude", "PreToolUse").deadline
+    assert seen == [100.0 + limit]
+    assert timers[0] == pytest.approx(limit - 0.25) and timers[1:] == [0]
+
+
+def test_later_guards_see_that_an_earlier_guard_already_asked_for_a_change(tmp_path, fake_guards):
+    # #4000: 前の guard が変更要求か拒否を返した後の guard には `decided` が真で渡る（stop-wait はモデルを呼ばない）
+    seen: list[tuple[str, bool]] = []
+
+    def watch(name, verdict):
+        def check(c, s):
+            seen.append((name, s.decided))
+            return verdict
+
+        return fake_guards(name, check)
+
+    specs = [
+        _spec("first", watch("first", advise("案内"))),
+        _spec("second", watch("second", pushback("戻す"))),
+        _spec("third", watch("third", None)),
+    ]
+    _run(tmp_path, specs)
+    assert seen == [("first", False), ("second", False), ("third", True)]

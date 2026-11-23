@@ -335,7 +335,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | --- | ---: | ---: | ---: | ---: | ---: |
 | PreToolUse・PermissionRequest・PostToolUse | 100 ms | 1 秒 | 0.5 秒 | 3 秒 | 600 字 |
 | UserPromptSubmit | 100 ms | 1 秒 | 0.5 秒 | 3 秒 | 2,000 字 |
-| Stop | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 2,000 字 |
+| Stop（この行は Codex。Claude Code は #4000 で stop-wait の軽いモデルの判定を収める 5,000 ms・10 秒・1.5 秒・12 秒へ上げた） | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 2,000 字 |
 | SubagentStop | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 800 字 |
 | SessionStart | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 1,500 字 |
 | SessionEnd・Notification・StopFailure | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 0 字 |

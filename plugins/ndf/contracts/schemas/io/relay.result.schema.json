@@ -238,7 +238,7 @@
               "string",
               "null"
             ],
-            "description": "記録したセッション（context record）"
+            "description": "記録したセッション（context record）・ラッパーの今のセグメントのセッション（hub ls）"
           },
           "transcript": {
             "type": [
@@ -472,6 +472,34 @@
           "expires_at": {
             "type": "string",
             "description": "登録の途中の状態の期限（account add）"
+          },
+          "pid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "ラッパーのプロセスの id（hub ls。状態のファイルが無ければ null）"
+          },
+          "turn_done": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "conductor の最後の応答が終わったか（hub ls --activity。求めていない・動いていない・会話の記録を読めなければ null）"
+          },
+          "moved": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "conductor の最後の応答と、終わったバックグラウンドの作業の時刻のうち最も遅いもの。UNIX 時刻（hub ls）"
+          },
+          "background": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "終わったバックグラウンドの作業を除いた、まだ走っているとみなすバックグラウンドの作業の数（hub ls。確かめられなければ null）"
           },
           "registered": {
             "type": "boolean",

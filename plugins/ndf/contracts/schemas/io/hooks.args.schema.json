@@ -50,6 +50,27 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "judge-cases",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cases": {
+          "type": "string",
+          "description": "判定の例の組のパス（省けばコントラクトの組）"
+        },
+        "--rounds": {
+          "type": "integer",
+          "description": "1 つの例を打つ周の数（省けば上限の設定の値）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "render",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

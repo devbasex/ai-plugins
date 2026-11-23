@@ -37,6 +37,7 @@ NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
 LAUNCH_FILE = "launch.json"
 LAUNCH_ENV = "NDF_RELAY_LAUNCH"
+ACTIVITY_FILE = "activity.json"
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -306,3 +307,44 @@ def drop_question(directory: Path, match: Optional[Mapping[str, Any]], wait: flo
 def drop(directory: Path, name: str) -> None:
     """読み終えたシグナルファイルを消す。"""
     (directory / name).unlink(missing_ok=True)
+
+
+def write_activity(directory: Path, tasks: Any, session_id: Optional[str], reply: Optional[str] = None) -> bool:
+    """`activity.json` に時刻・セッション・応答・バックグラウンドの作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
+
+    `tasks` は Stop の hook の入力の生の値。リストでなければ、観測できなかったことを表す `null` を書く（空のリストと分ける）。
+    `reply` はこの Stop が終えた応答（会話の記録の最後の `assistant` の `uuid`。`observe.reply_id`）。読む側はこの値で
+    今の応答の記録かを確かめる（時刻で比べると、同じ秒に入った前の Stop の記録と区別できない）。読めなければ `null`。
+    """
+    rows = [_task(t) for t in tasks] if isinstance(tasks, list) else None
+    try:
+        replace_json(directory / ACTIVITY_FILE, {"at": now_iso(), "session_id": session_id, "reply": reply, "tasks": rows})
+    except OSError:  # noqa: NDF401 ファイル: 活動の記録が書けなくても、次の Stop が書き直す
+        return False
+    return True
+
+
+def _task(item: Any) -> dict[str, str]:
+    """バックグラウンドの作業の要素の `id`・`type`。形が違う値は空の文字列にして要素の数を保つ（読む側で走っているとみなす）。"""
+    data = item if isinstance(item, dict) else {}
+    return {key: value if isinstance(value := data.get(key), str) else "" for key in ("id", "type")}
+
+
+def read_activity(directory: Path) -> Optional[dict[str, Any]]:
+    """`activity.json`。無い・壊れている・形が違えば None。`tasks` が `null` の記録はそのまま返す。"""
+    try:
+        data = json.loads((directory / ACTIVITY_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない活動の記録は無いものとして判定を今までどおりにする
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("at"), str):
+        return None
+    if not all(isinstance(data.get(key), (str, type(None))) for key in ("session_id", "reply")):
+        return None
+    tasks = data.get("tasks")
+    if tasks is not None and not (isinstance(tasks, list) and all(_is_task(t) for t in tasks)):
+        return None
+    return data
+
+
+def _is_task(item: Any) -> bool:
+    return isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("type"), str)
