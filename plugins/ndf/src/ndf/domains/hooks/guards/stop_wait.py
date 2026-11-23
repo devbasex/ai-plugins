@@ -21,18 +21,15 @@ from typing import Optional
 from ndf.domains.hooks import budget, reply_judge
 from ndf.domains.hooks.verdict import Verdict, passing
 
-# 変更要求の文（#4000 の受け入れ条件 11）。10 系の `relay_lib/mark.py` の `WAIT_REASON` を出発点にした。区分の一覧は写さず
-# `development-workflow` の `references/asking.md` を指す。区分の判定と出す経路（レーン・人のいない実行・ランタイム）の両方を asking.md に従わせ、
-# 経路をここで分けない。`{matched}` はルールで止めたときだけ当たった文を入れ、軽いモデルで
-# 止めたときは空にする
+# 変更要求の文（#4000 の受け入れ条件 11）。10 系の `relay_lib/mark.py` の `WAIT_REASON` を出発点にした。区分の一覧と実行の形
+# ごとの出し方は写さず `development-workflow` の `references/asking.md` を指し、経路をここで分けない。`{matched}` はルールで
+# 止めたときだけ当たった文を入れ、軽いモデルで止めたときは空にする
 REASON = (
     "本文で人の回答を待って終えた{matched}。本文の質問は中継とオーガナイザーへ届かず、待ちの知らせも出ず、/goal も止まらない。"
-    "人へ問えるのは development-workflow の references/asking.md の「区分」に当たる質問（承認ゲート ndf-gate:1・ndf-gate:2 を含む）"
-    "だけである。当たるなら、区分を付けて asking.md の示す経路で出し直す（材料は本文に書いてよい）。経路は実行の形で違う: "
-    "対話の Claude Code は AskUserQuestion の metadata.source、並列の計画のレーンは「並列の計画のレーン」のリクエスト"
-    "（設計の承認とリリースの承認は配布の方式ごとの経路）、人のいない実行（Factory）は「人のいない実行」のセグメントの報告、"
-    "ほかのランタイムは「ランタイムごとの扱い」に従う。"
-    "当たらなければ人へ回さず推奨の案で決め、決めたことと理由を報告に 1 行で書いて続ける。"
+    "人へ問えるのは承認ゲート（設計の承認は ndf-gate:1、本番系へ届く操作の承認は ndf-gate:2）と、development-workflow の "
+    "references/asking.md の「区分」に当たる質問だけである。当たるなら、AskUserQuestion の metadata.source に区分を付けて"
+    "出し直す（材料は本文に書いてよい。並列の計画のレーン・人のいない実行・AskUserQuestion の無いランタイムは asking.md の"
+    "その節の経路で出す）。当たらなければ人へ回さず推奨の案で決め、決めたことと理由を報告に 1 行で書いて続ける。"
     "質問を出した後も、回答を待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
     "質問の形の文を書き換えて終える。"
 )
