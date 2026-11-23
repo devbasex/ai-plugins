@@ -48,6 +48,8 @@ from ndf.domains.relay.account_sync import sync_config as sync_config
 
 LEGACY_CONFIG_FILE = reg.LEGACY_CONFIG_FILE
 REMOTE_SETTINGS = "remote-settings.json"  # 管理の設定をサーバーから取った写し
+# 実効値の出所の名札のうち、子が受け取った環境そのものを指すもの（設定の層が出所でない）
+CHILD_ENV = "子の環境"
 # アカウント固有の項目（symlink にしない）。前方一致は書き込みの一時ファイルと排他を含む
 LOCAL_PREFIXES = (reg.CRED_FILE, reg.CONFIG_FILE, ".oauth_refresh.lock")
 LOCAL_NAMES = (
@@ -148,6 +150,19 @@ class Resolved:
     dirs: dict[str, Optional[list[str]]] = field(default_factory=dict)
     hooks_off: bool = False
     managed_only: bool = False
+    # `Extra.keys` で求めたキーの名前 → 定義する最も強い層の出所の名札。値は持たない（I5）
+    key_origin: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Extra:
+    """`effective_env` に追加で求めるもの（省けば何も作らない）。引数の数の上限（6）に収めるため 1 つにまとめる。
+
+    `pin` はキーの子の検証に使う、確かめた設定への固定（`pins`・`dirs`）。`keys` はその最上位のキーを定義する
+    最も強い層の出所（`key_origin`。#4000 の決定 11）。"""
+
+    pin: bool = False
+    keys: Sequence[str] = ()
 
 
 class Launch(NamedTuple):
@@ -455,13 +470,14 @@ def effective_env(
     cwd: Path,
     argv: Sequence[str],
     user_settings: Optional[Path] = None,
-    pin: bool = False,
+    extra: Extra = Extra(),
 ) -> Resolved:
     """Claude Code が採用する実効値とその出所（詳細設計の「実効値の作り方」）。ファイルを読むだけで書かない。
 
     `env`・`argv`・`cwd` は子が実際に受け取る環境・起動引数・作業ディレクトリ。`user_settings` は利用者の設定の解けた先
-    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`pin` が真（キーの子の検証）の
-    ときだけ、確かめた設定への固定の `pins`・`dirs` を作る（ほかの子では SHA-256 を求めない）。"""
+    （省けば `<config_dir>/settings.json`）。管理の設定の保存先は `MANAGED_FILES`・`MANAGED_DIR`。`extra` は追加で求めるもので、
+    `pin` が真（キーの子の検証）のときだけ確かめた設定への固定の `pins`・`dirs` を作り（ほかの子では SHA-256 を求めない）、
+    `keys` に渡した最上位のキーの出所を `key_origin` に入れる。"""
     stamps: dict[str, Optional[tuple]] = {}
     unresolved: list[str] = []
     remote, files, picked = _managed(config_dir, MANAGED_FILES, MANAGED_DIR, stamps, unresolved)
@@ -470,29 +486,39 @@ def effective_env(
     user = _layer(user_settings or config_dir / "settings.json", "利用者の設定", stamps, None) if "user" in sources else None
     project = _layer(cwd / ".claude" / "settings.json", "プロジェクトの設定", stamps, None) if "project" in sources else None
     local = _layer(cwd / ".claude" / "settings.local.json", "プロジェクトのローカルの設定", stamps, None) if "local" in sources else None
-    values, origin = dict(env), dict.fromkeys(env, "子の環境")
+    values, origin = dict(env), dict.fromkeys(env, CHILD_ENV)
     for layer in (user, project, local, flag, *files, remote):  # 優先の低い順に重ねる
         for k, v in _env_of(layer).items():
             # プロジェクトとローカルの設定の env で Claude Code が無視する変数（STD8）は重ねない
             if (layer is project or layer is local) and k in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"):
                 continue
             values[k], origin[k] = v, layer.label
-    if remote.has_items:
-        helper, helper_origin = _helper_of([remote])
-    elif any(f.has_items for f in files):
-        helper, helper_origin = _helper_of(list(reversed(files)))
-    else:
-        helper, helper_origin = _helper_of([flag, local, project, user])
+    strongest = _strongest(remote, files, [flag, local, project, user])
+    helper, helper_origin = _helper_of(strongest)
     profile = _profile(values, cwd, stamps, unresolved)
     layers = [x for x in (user, project, local, flag, *files, remote) if x is not None]
     pins: dict[str, Optional[str]] = {}
     dirs: dict[str, Optional[list[str]]] = {}
-    if pin:
+    if extra.pin:
         pins = {str(x.path): None if x.broken else key_helper.view_sha(x.data) for x in layers if x.path is not None}
         dirs = {str(MANAGED_DIR): picked} if picked is not False else {}
     hooks_off = any(x.data.get("disableAllHooks") is True for x in layers)
     managed_only = any(x.data.get("allowManagedHooksOnly") is True for x in (*files, remote))
-    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, pins, dirs, hooks_off, managed_only)
+    keyed = _key_origins(strongest, extra.keys)
+    return Resolved(values, origin, helper, helper_origin, unresolved, stamps, profile, pins, dirs, hooks_off, managed_only, keyed)
+
+
+def _strongest(remote: _Layer, files: Sequence[_Layer], rest: Sequence[Optional[_Layer]]) -> list[Optional[_Layer]]:
+    """最上位のキーを定義する層を、優先の高い順に返す（サーバーから取ったコピー → 管理者の設定 → ほか）。"""
+    if remote.has_items:
+        return [remote]
+    return list(reversed(files)) if any(f.has_items for f in files) else list(rest)
+
+
+def _key_origins(layers: Sequence[Optional[_Layer]], keys: Sequence[str]) -> dict[str, str]:
+    """`keys` のそれぞれを定義する最も強い層の出所（名札だけ。値は持たない。I5）。"""
+    found = ((k, next((x.label for x in layers if x is not None and k in x.data), None)) for k in keys)
+    return {k: label for k, label in found if label is not None}
 
 
 def _judge(r: Resolved) -> tuple[Optional[str], list[str]]:
