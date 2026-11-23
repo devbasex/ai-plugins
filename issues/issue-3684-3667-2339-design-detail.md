@@ -229,11 +229,21 @@ plugins/ndf/
 
 満たす決定: 決定 7、受け入れ条件 #3667 の 1・2
 
-関数は足さず、5 個の定数の右辺を契約の読み手（`ndf.contracts.load_json` を通した 1 プロセス 1 回の読み込み）へ置き換える。
+5 個の定数の右辺を、スキーマの読み込みを共有する契約の読み手へ置き換える。
+
+**スキーマの読み込みは `ndf.contracts.load_schema` の 1 つに集め、定数の初期化と検証器が同じ読み込みを使う。** 今の `load_json` はキャッシュを持たず、`_schema_validator` は `@cached_reader` で検証器だけを 1 回作る。定数の初期化が `load_json` を直に呼ぶと、同じプロセスで `notice.schema.json` を 2 回読んで解析する（通知の解析では従来の 1 回から 2 回に増える）。次の 2 つを足す。
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `load_schema` | `src/ndf/contracts/__init__.py` | 新設 | `load_schema(path: str) -> Mapping[str, Any]` | スキーマのファイルを `@cached_reader` で 1 プロセス 1 回だけ読む。返す値は書き換えない（呼び手は写してから変える） |
+| `schema_enum` | 同上 | 新設 | `schema_enum(path: str, pointer: str) -> tuple[str, ...]` | `load_schema` の結果から JSON Pointer の先の `enum` を並びのまま返す |
+| `_schema_validator` | 同上 | 変更 | 変えない | 内側の `load_json(path)` を `load_schema(path)` に変える（`$defs` を引く形は今も新しい辞書を組むので、共有した値を書き換えない） |
+
+`src/ndf/domains/loop/cli.py:164` の `contracts.load_json(definition.CONTEXT)` も `load_schema` へ変える。
 
 | 定数 | 保存先 | 読む所 |
 | --- | --- | --- |
-| `KIND_LABELS` | `src/ndf/adapters/notify.py` | `contracts/schemas/notice.schema.json` の `properties.kind` の `enum`（辞書のキー） |
+| `KIND_LABELS` | `src/ndf/adapters/notify.py` | `contracts/schemas/notice.schema.json` の `properties.kind`。見出し（`回答待ち` など）はスキーマに無いので、`kind` を `enum` から `oneOf` の `{"const": "question", "title": "回答待ち"}` の並びへ変え、値と見出しを同じ行に持つ。`KIND_LABELS` は `{c["const"]: c["title"]}` で組む。見出しを持たない行（`title` の無い `const`）は値そのものを見出しにする（`Notice.text` の組み立て（`notify.py:135`）は `KIND_LABELS.get(kind, kind)` で引き、`KeyError` で止めない） |
 | `MVV_PACES` | `src/ndf/progress/model.py` | `contracts/workflow/context.schema.json` の `$defs/mvv_pace/enum`（下の項） |
 | `SIZES` | `src/ndf/domains/gws/thumbnails.py` | `contracts/schemas/io/gws.result.schema.json` の `metrics.size` の `enum` |
 | `INTERFACE_VALUES` | `src/ndf/domains/materials/collect.py` | `contracts/schemas/io/materials.result.schema.json` の `public_interface.value` の `enum` から `NOT_STATED`（`記載なし`）を除いたもの。書き出しで当てるので、長い順に並べる（`変わらない` を `変わる` より先に。今の並びと同じ） |
@@ -258,6 +268,8 @@ plugins/ndf/
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `MVV_PACES` | `("fast", "auto")` を `$defs/mvv_pace` から読む | `normal` を含まない・`closing_pace("normal")` が `normal`・`verify_needed("normal", True, True, True)` が偽 | — |
+| `KIND_LABELS` | 今の 3 つの見出し（`回答待ち`・`承認待ち`・`完了`）を `oneOf` の `title` から読む | 合成したスキーマへ `title` の無い `{"const": "later"}` を足すと、通知の本文の見出しが `later` になる（止まらない） | — |
+| `load_schema` | 同じスキーマを定数の初期化と検証で読んでも、ファイルの読み込みと解析が 1 回 | — | — |
 | `CHOOSERS` | スキーマの `chooser` の `enum` と同じ並び | 合成したスキーマへ値を 1 つ足すと `CHOOSERS` も増える | — |
 | `context.schema.json` | `pace` が `normal`・`fast`・`auto` の文脈が通る | — | `pace` が語彙の外（通らない） |
 
