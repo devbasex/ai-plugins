@@ -29,4 +29,6 @@ def test_boot_does_nothing_below_the_floor(monkeypatch):
     assert boot.run_boot(["boot.py", "claude", "PreToolUse"], io.StringIO("not json"), out) == 0
     assert out.getvalue() == ""
     # 下限の前で戻るので、入力を読まない（下限を満たせば input_shape になる入力）
-    assert "error" not in records()[-1] and "runtime" not in records()[-1]
+    # 計測の行のテンプレートは error を空・runtime を None で持つ。下限の前で戻れば、どちらも書き換わらない
+    last = records()[-1]
+    assert last["error"] == "" and last["runtime"] is None

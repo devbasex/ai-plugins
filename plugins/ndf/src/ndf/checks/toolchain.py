@@ -161,21 +161,26 @@ def _commands(body: str) -> Iterator[tuple[int, list[str]]]:
     while stack:
         node = stack.pop()
         if node.type == "command":
-            words: list[str] = []
-            end = None
-            for c in node.named_children:
-                if c.type in ("variable_assignment", "file_redirect", "herestring_redirect", "comment"):
-                    end = None
-                    continue
-                text = _word(c.named_children[0] if c.type == "command_name" and c.named_children else c)
-                # 構文木は引用符の外の行の継続（バックスラッシュと改行）で語を分けるが、bash は前後を 1 語につなぐ
-                if words and end is not None and LINE_CONTINUATION.fullmatch(source[end : c.start_byte]):
-                    words[-1] += text
-                else:
-                    words.append(text)
-                end = c.end_byte
-            yield node.start_point[0], words
+            yield node.start_point[0], _command_words(node, source)
         stack.extend(reversed(node.children))
+
+
+def _command_words(node: Any, source: bytes) -> list[str]:
+    """構文木の 1 つのコマンドの語の並び。環境変数の代入・リダイレクト・コメントは語に入れない。"""
+    words: list[str] = []
+    end = None
+    for c in node.named_children:
+        if c.type in ("variable_assignment", "file_redirect", "herestring_redirect", "comment"):
+            end = None
+            continue
+        text = _word(c.named_children[0] if c.type == "command_name" and c.named_children else c)
+        # 構文木は引用符の外の行の継続（バックスラッシュと改行）で語を分けるが、bash は前後を 1 語につなぐ
+        if words and end is not None and LINE_CONTINUATION.fullmatch(source[end : c.start_byte]):
+            words[-1] += text
+        else:
+            words.append(text)
+        end = c.end_byte
+    return words
 
 
 def _installs_uv(words: list[str]) -> bool:

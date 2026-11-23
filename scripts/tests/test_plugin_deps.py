@@ -2049,14 +2049,16 @@ def test_i1_script_structure_runs_age_on_every_event():
     assert "--base HEAD^1 --head HEAD" in run and "if" not in found[0]
     # r2-8: 差分はシェルで先に見ず、age の中の 1 回の git diff だけで決める
     assert "git " not in run and run.count("plugin-deps.py age") == 1
-    [setup] = [s for s in all_steps if s.get("id") == "py312"]
-    assert setup["uses"].startswith("actions/setup-python@") and setup["with"]["update-environment"] is False
-    assert int(str(setup["with"]["python-version"]).split(".")[1]) >= 11
     users = [s for s in all_steps if re.search(r"plugin-deps\.py (age|affected)", s.get("run", ""))]
     assert len(users) == 2
+    # 2 つの手順が同じ setup-python の手順の出力を指す（手順の id は Python のバージョンに合わせて変わってよい）
+    ids = {re.fullmatch(r"\$\{\{ steps\.(\w+)\.outputs\.python-path \}\}", s["env"]["PYTHON"]).group(1) for s in users}
+    assert len(ids) == 1
     for s in users:
         assert s["run"].startswith('"$PYTHON" scripts/plugin-deps.py') and "uv run" not in s["run"]
-        assert s["env"]["PYTHON"] == "${{ steps.py312.outputs.python-path }}"
+    [setup] = [s for s in all_steps if s.get("id") in ids]
+    assert setup["uses"].startswith("actions/setup-python@") and setup["with"]["update-environment"] is False
+    assert int(str(setup["with"]["python-version"]).split(".")[1]) >= 11
 
 
 def load_deps_weekly() -> dict:
