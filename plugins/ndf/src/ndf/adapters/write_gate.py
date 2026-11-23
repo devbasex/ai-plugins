@@ -7,7 +7,9 @@
   空ける（決定 3・I1・I2）
 - 送る直前に送信のロックを取り、待ちの終わり（`block`）と最短の送信時刻を読み直す。待ちの終わりが延びていたら
   予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りなければ待つ（I6）。送信のロックは応答まで持つ
-- 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）
+- 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）。
+  記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
+- 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める
 
 ロックは取るたびに `slot_pool.lock` で作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
 再入として通るためである。
@@ -20,6 +22,7 @@ import json
 import os
 import pwd
 import re
+import tempfile
 import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -146,6 +149,26 @@ def _earliest_send(record: dict[str, float], kind: str) -> float:
     return record["sent_next"]
 
 
+def _advance(steps: Generator[float, None, Optional[FileLock]]) -> tuple[bool, Any]:
+    """手順を 1 つ進める。(終わったか, 眠る秒または送信のロック)。StopIteration を Future へ渡さないために包む。"""
+    try:
+        return False, next(steps)
+    except StopIteration as done:
+        return True, done.value
+
+
+def _abandon(steps: Generator[float, None, Optional[FileLock]], step: asyncio.Future) -> None:
+    """取り消された非同期の手順の後始末。スレッドが終えてから、持っている送信のロックを放す。"""
+    if step.cancelled() or step.exception() is not None:
+        return
+    finished, value = step.result()
+    if finished:
+        if value is not None:
+            value.release()
+    else:
+        steps.close()
+
+
 def _restore(record: dict[str, float], old: Reservation) -> None:
     """`old` の書いた `next`（`CONTENT` なら `next_content` も）がそのままなら書く前へ戻す。後ろに別の予約があれば戻さない。"""
     write, content = _spacing(old.kind)
@@ -155,10 +178,21 @@ def _restore(record: dict[str, float], old: Reservation) -> None:
         record["next_content"] = old.before[1]
 
 
+def _home() -> Path:
+    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）だけ `HOME`、それも無ければ一時ディレクトリへ落とす。"""
+    uid = os.getuid()
+    try:
+        return Path(pwd.getpwuid(uid).pw_dir)
+    except KeyError:
+        home = os.path.expanduser("~")
+        fallback = Path(home) if os.path.isabs(home) else Path(tempfile.gettempdir()) / f"ndf-{uid}"
+        diag(f"UID {uid} が passwd に無い。書き込みの順番の記録を {fallback} の下に置く", kind="write_gate")
+        return fallback
+
+
 def gate_path() -> Path:
     """書き込みの順番の記録のパス。OS のユーザーのホームから引き、環境変数を読まない（決定 1）。"""
-    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
-    return home / ".local" / "state" / "ndf-github" / GATE_FILE
+    return _home() / ".local" / "state" / "ndf-github" / GATE_FILE
 
 
 def machine_gate() -> WriteGate:
@@ -167,8 +201,11 @@ def machine_gate() -> WriteGate:
 
 
 def pr_lock(repo: str, pr: int) -> FileLock:
-    """同じ PR の公開のロック。取るたびに別のインスタンスを作り、待つ上限は `github.pr-publish-lock` の秒。"""
-    name = f"{repo.replace('/', '__')}__{pr}.lock"
+    """同じ PR の公開のロック。取るたびに別のインスタンスを作り、待つ上限は `github.pr-publish-lock` の秒。
+
+    GitHub はリポジトリ名の大文字と小文字を区別しないので、小文字にそろえてからファイル名にする。
+    """
+    name = f"{repo.lower().replace('/', '__')}__{pr}.lock"
     held = slot_pool.lock(gate_path().parent / PR_LOCK_DIR / name)
     held.timeout = limits.value(PR_LOCK, "lock")
     return held
@@ -183,6 +220,8 @@ class WriteGate(BaseThrottler):
         self.sleep = sleep
         # 記録を使えないときに間を空けるプロセスの中の記録（I5）。記録を書けたら写す
         self._memory = _empty()
+        # プロセスの中の記録に、記録へ書けていない変更があるか
+        self._unsaved = False
         self._mutex = threading.Lock()
 
     @contextmanager
@@ -200,17 +239,29 @@ class WriteGate(BaseThrottler):
         if writes is None:
             yield
             return
-        with closing(self._steps(writes.kind, writes.count)) as steps:
-            send = None
-            try:
-                while True:
-                    await asyncio.sleep(next(steps))
-            except StopIteration as done:
-                send = done.value
+        send = await self._turn(writes.kind, writes.count)
         try:
             yield
         finally:
-            self._finish(writes.kind, send)
+            await asyncio.to_thread(self._finish, writes.kind, send)
+
+    async def _turn(self, kind: str, count: int) -> Optional[FileLock]:
+        """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。"""
+        steps = self._steps(kind, count)
+        while True:
+            step = asyncio.ensure_future(asyncio.to_thread(_advance, steps))
+            try:
+                finished, value = await asyncio.shield(step)
+            except asyncio.CancelledError:
+                step.add_done_callback(lambda done: _abandon(steps, done))
+                raise
+            if finished:
+                return value
+            try:
+                await asyncio.sleep(value)
+            except BaseException:
+                steps.close()
+                raise
 
     @contextmanager
     def hold(self, kind: str, count: int = 1) -> Generator[None, Any, Any]:
@@ -306,18 +357,16 @@ class WriteGate(BaseThrottler):
                 send.release()
 
     def _peek(self, kind: str) -> Optional[tuple[bool, float]]:
-        """(待ちの終わりが今より後か, 最短の送信時刻までの秒)。記録のロックを取れない・読めなければ None（読み直さずに通す。I5）。"""
+        """(待ちの終わりが今より後か, 最短の送信時刻までの秒)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
         held = self._record_lock()
-        if held is None:
-            return None
         try:
             now = self.clock()
-            record = self._load(now)
-            if record is None:
-                return None
+            record = None if held is None else self._load(now)
+            record = self._memory_view(now) if record is None else self._with_unsaved(record, now)
             return record["blocked_until"] > now, _earliest_send(record, kind) - now
         finally:
-            held.release()
+            if held is not None:
+                held.release()
 
     def _apply(self, change: Callable[[dict[str, float], float], T]) -> T:
         """記録のロックの中で記録を変えて書く。使えなければプロセスの中の記録で変える（I5）。"""
@@ -329,7 +378,7 @@ class WriteGate(BaseThrottler):
             record = self._load(now)
             if record is None:
                 return self._in_process(change)
-            result = change(record, now)
+            result = change(self._with_unsaved(record, now), now)
             self._store(record, now)
             return result
         finally:
@@ -340,7 +389,23 @@ class WriteGate(BaseThrottler):
             now = self.clock()
             result = change(self._memory, now)
             self._memory["written_at"] = now
+            self._unsaved = True
             return result
+
+    def _memory_view(self, now: float) -> dict[str, float]:
+        with self._mutex:
+            memory = dict(self._memory)
+        return _rewound(memory, now)
+
+    def _with_unsaved(self, record: dict[str, float], now: float) -> dict[str, float]:
+        """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。"""
+        with self._mutex:
+            unsaved = self._unsaved
+        if unsaved:
+            memory = self._memory_view(now)
+            for key in TIMES:
+                record[key] = max(record[key], memory[key])
+        return record
 
     def _record_lock(self) -> Optional[FileLock]:
         held = slot_pool.lock(self.path.with_name(self.path.name + ".lock"))
@@ -390,3 +455,8 @@ class WriteGate(BaseThrottler):
             slot_pool.write_json(self.path, {"version": RECORD_VERSION, **record})
         except OSError as exc:
             diag(f"書き込みの順番の記録を書けない: {self.path}: {exc}", kind="write_gate")
+            unsaved = True
+        else:
+            unsaved = False
+        with self._mutex:
+            self._unsaved = unsaved

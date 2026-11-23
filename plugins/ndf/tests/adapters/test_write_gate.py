@@ -5,18 +5,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
-import subprocess
-import sys
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
 import httpx
 import pytest
+from filelock import Timeout
 
 from ndf import slot_pool
 from ndf.adapters import write_gate
@@ -25,7 +23,6 @@ from ndf.contracts import limits
 
 NOW = 1_000_000.0
 EPS = 1e-6
-NDF_SRC = Path(write_gate.__file__).resolve().parents[2]
 
 
 def spacing(name: str) -> float:
@@ -61,7 +58,7 @@ def clock() -> Clock:
 
 @pytest.fixture
 def path(tmp_path) -> Path:
-    return tmp_path / "state" / write_gate.GATE_FILE
+    return tmp_path / "gate" / write_gate.GATE_FILE  # tmp_path/state は共通の fixture が XDG_STATE_HOME に使う
 
 
 @pytest.fixture
@@ -69,12 +66,26 @@ def gate(path, clock) -> write_gate.WriteGate:
     return write_gate.WriteGate(path, clock, clock.sleep)
 
 
+class _TimedOut:
+    """取ろうとするとすぐ Timeout を返すロック。"""
+
+    def __init__(self, path: Path) -> None:
+        self.lock_file = str(path)
+
+    def acquire(self, timeout: Optional[float] = None) -> None:
+        raise Timeout(self.lock_file)
+
+
 @pytest.fixture
-def short_locks(monkeypatch):
-    """記録のロックと送信のロックの待ちの上限を短くする。"""
-    monkeypatch.setattr(write_gate, "LOCK_SECONDS", 0.05)
-    real = limits.value
-    monkeypatch.setattr(limits, "value", lambda name, key: 0.05 if name == write_gate.SEND_LOCK else real(name, key))
+def failing_lock(monkeypatch):
+    """`fail(name)` の後は、ファイル名が `name` のロックの取得がすぐ Timeout になる。"""
+    failing: set[str] = set()
+    real = slot_pool.lock
+    monkeypatch.setattr(slot_pool, "lock", lambda path: _TimedOut(path) if Path(path).name in failing else real(path))
+    return failing.add
+
+
+RECORD_LOCK = write_gate.GATE_FILE + ".lock"
 
 
 def record(path: Path) -> dict:
@@ -86,12 +97,6 @@ def seed(path: Path, **times: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     base = dict.fromkeys(write_gate.TIMES, 0.0)
     path.write_text(json.dumps({"version": 1, **base, "written_at": NOW, **times}), encoding="utf-8")
-
-
-def held(path: Path):
-    lock = slot_pool.lock(path)
-    lock.acquire()
-    return lock
 
 
 def graphql(query: str) -> httpx.Request:
@@ -207,14 +212,10 @@ def test_a_broken_record_is_read_as_empty_and_rewritten(gate, path, capsys):
     assert record(path)["next"] == pytest.approx(NOW + W)
 
 
-def test_without_the_record_lock_it_spaces_within_the_process(gate, path, capsys, short_locks):
-    path.parent.mkdir(parents=True)
-    lock = held(path.with_name(path.name + ".lock"))
-    try:
-        first = gate.reserve(WRITE)
-        second = gate.reserve(WRITE)
-    finally:
-        lock.release()
+def test_without_the_record_lock_it_spaces_within_the_process(gate, path, capsys, failing_lock):
+    failing_lock(RECORD_LOCK)
+    first = gate.reserve(WRITE)
+    second = gate.reserve(WRITE)
 
     assert first.wait == 0
     assert second.wait == pytest.approx(W)
@@ -242,64 +243,70 @@ def test_eight_threads_get_distinct_spaced_reservations(path):
     assert all(b - a >= W - EPS for a, b in zip(ats, ats[1:]))
 
 
-CHILD = """
-import json, os, pwd, sys, time
-from pathlib import Path
+def test_two_gates_on_one_record_are_spaced(path, clock):
+    # 別のプロセスの WriteGate と同じく、プロセスの中の記録を共有しない 2 つが同じ記録で予約する
+    gates = [write_gate.WriteGate(path, clock, clock.sleep) for _ in range(2)]
+    start = threading.Barrier(2)
+    got: list[float] = []
 
-mode, where, go = sys.argv[1:4]
-if mode == "home":
-    class _Entry:
-        pw_dir = where
-    pwd.getpwuid = lambda uid: _Entry()
-from ndf.adapters import write_gate
+    def take(gate: write_gate.WriteGate) -> None:
+        start.wait()
+        got.append(gate.reserve(WRITE).at)
 
-gate = write_gate.WriteGate(Path(where)) if mode == "path" else write_gate.machine_gate()
-while not os.path.exists(go):
-    time.sleep(0.005)
-print(json.dumps({"at": gate.reserve(write_gate.WRITE).at, "path": str(gate.path)}))
-"""
+    threads = [threading.Thread(target=take, args=(g,)) for g in gates]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
-
-def run_children(tmp_path: Path, argvs: list[list[str]], envs: list[dict[str, str]]) -> list[dict]:
-    """子プロセスを並べて起動し、シグナルファイルで同時に予約させる。"""
-    go = tmp_path / "go"
-    children = [
-        subprocess.Popen(
-            [sys.executable, "-c", CHILD, *argv, str(go)],
-            env={**os.environ, "PYTHONPATH": str(NDF_SRC), **env},
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-        for argv, env in zip(argvs, envs)
-    ]
-    time.sleep(0.5)
-    go.touch()
-    outs = [child.communicate(timeout=60)[0] for child in children]
-    assert [child.returncode for child in children] == [0, 0]
-    return [json.loads(out) for out in outs]
+    assert abs(got[0] - got[1]) >= W - EPS
 
 
-def test_two_processes_on_one_record_are_spaced(tmp_path, path):
-    got = run_children(tmp_path, [["path", str(path)], ["path", str(path)]], [{}, {}])
+def test_the_record_lock_is_held_while_reserving(gate, path):
+    path.parent.mkdir(parents=True)
 
-    assert abs(got[0]["at"] - got[1]["at"]) >= W - EPS
+    def change(record: dict, now: float) -> None:
+        assert slot_pool.try_lock(path.with_name(RECORD_LOCK)) is None
+
+    gate._apply(change)
 
 
 # gate_path
 
 
-def test_gate_path_ignores_the_state_environment(tmp_path):
+class _Entry:
+    def __init__(self, pw_dir: str) -> None:
+        self.pw_dir = pw_dir
+
+
+def test_gate_path_ignores_the_state_environment(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    envs = [
-        {"NDF_STATE_HOME": str(tmp_path / f"ndf{i}"), "XDG_STATE_HOME": str(tmp_path / f"xdg{i}"), "HOME": str(tmp_path / f"h{i}")}
-        for i in (1, 2)
-    ]
+    monkeypatch.setattr(write_gate.pwd, "getpwuid", lambda uid: _Entry(str(home)))
+    for name in ("NDF_STATE_HOME", "XDG_STATE_HOME", "HOME"):
+        monkeypatch.setenv(name, str(tmp_path / name.lower()))
 
-    got = run_children(tmp_path, [["home", str(home)], ["home", str(home)]], envs)
+    assert write_gate.gate_path() == home / ".local" / "state" / "ndf-github" / write_gate.GATE_FILE
+    assert write_gate.machine_gate().path == write_gate.gate_path()
 
-    expected = str(home / ".local" / "state" / "ndf-github" / write_gate.GATE_FILE)
-    assert [g["path"] for g in got] == [expected, expected]
-    assert abs(got[0]["at"] - got[1]["at"]) >= W - EPS
+
+def _no_entry(uid: int):
+    raise KeyError(uid)
+
+
+def test_gate_path_falls_back_to_home_for_a_uid_outside_passwd(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(write_gate.pwd, "getpwuid", _no_entry)
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+
+    assert write_gate.gate_path() == tmp_path / "h" / ".local" / "state" / "ndf-github" / write_gate.GATE_FILE
+    assert "passwd に無い" in capsys.readouterr().err
+
+
+def test_gate_path_falls_back_to_the_temp_dir_without_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(write_gate.pwd, "getpwuid", _no_entry)
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setattr(write_gate.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    assert write_gate.gate_path().is_relative_to(tmp_path)
 
 
 def test_pr_lock_sits_beside_the_record_and_waits_the_publish_limit(tmp_path, monkeypatch):
@@ -310,6 +317,12 @@ def test_pr_lock_sits_beside_the_record_and_waits_the_publish_limit(tmp_path, mo
     assert Path(lock.lock_file) == tmp_path / "ndf-github" / "pr" / "o__r__12.lock"
     assert lock.timeout == limits.value(write_gate.PR_LOCK, "lock")
     assert lock is not write_gate.pr_lock("o/r", 12)
+
+
+def test_pr_lock_is_the_same_for_any_case_of_the_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(write_gate, "gate_path", lambda: tmp_path / "ndf-github" / write_gate.GATE_FILE)
+
+    assert write_gate.pr_lock("Owner/Repo", 1).lock_file == write_gate.pr_lock("owner/repo", 1).lock_file
 
 
 # block
@@ -329,7 +342,7 @@ def test_a_short_block_does_not_shorten_a_longer_one(gate, path):
 
 
 def test_block_on_an_unreadable_record_keeps_going_within_the_process(tmp_path, clock, capsys):
-    unreadable = tmp_path / "state"
+    unreadable = tmp_path / "unreadable"
     unreadable.mkdir()
     gate = write_gate.WriteGate(unreadable, clock, clock.sleep)
 
@@ -337,6 +350,52 @@ def test_block_on_an_unreadable_record_keeps_going_within_the_process(tmp_path, 
 
     assert "書き込みの順番の記録を読めない" in capsys.readouterr().err
     assert gate.reserve(WRITE).at >= NOW + 30
+
+
+@pytest.fixture
+def unwritable(monkeypatch):
+    """記録を読めるが置き換えられない（ディレクトリの権限の変更など）。"""
+
+    def fail(path, data):
+        raise OSError("書けない")
+
+    monkeypatch.setattr(slot_pool, "write_json", fail)
+
+
+def test_an_unwritable_record_keeps_the_block_and_the_spacing(gate, path, unwritable, capsys):
+    seed(path)
+
+    gate.block(30)
+    first = gate.reserve(WRITE)
+    second = gate.reserve(WRITE)
+
+    assert first.at >= NOW + 30
+    assert second.at - first.at >= W - EPS
+    assert "書き込みの順番の記録を書けない" in capsys.readouterr().err
+
+
+def test_an_unwritable_record_keeps_the_send_spacing(gate, path, clock, unwritable):
+    seed(path)
+    with gate.hold(WRITE):
+        clock.now += 5  # 応答に 5 秒かかる
+        finished = clock.now
+
+    with gate.hold(WRITE):
+        sent_at = clock.now
+
+    assert sent_at >= finished + W - EPS
+
+
+def test_the_record_written_again_carries_the_unsaved_changes(gate, path, monkeypatch):
+    seed(path)
+    real = slot_pool.write_json
+    monkeypatch.setattr(slot_pool, "write_json", lambda p, d: (_ for _ in ()).throw(OSError("書けない")))
+    gate.block(30)
+    monkeypatch.setattr(slot_pool, "write_json", real)
+
+    gate.reserve(WRITE)
+
+    assert record(path)["blocked_until"] == pytest.approx(NOW + 30)
 
 
 # acquire
@@ -418,22 +477,44 @@ def test_a_slow_response_pushes_the_next_send(path, clock, kind, space):
     assert sent_at >= finished + space - EPS
 
 
+def test_without_the_record_lock_the_send_still_waits_the_spacing(gate, path, clock, failing_lock):
+    # 先の書き込みの予約は過ぎているが、先の書き込みは今から 5 秒の応答の後に送り終えた（I6）
+    seed(path, next=NOW - 10, sent_next=NOW + 5 + W)
+    gate.reserve(WRITE)  # プロセスの中の記録へ写す
+    failing_lock(RECORD_LOCK)
+
+    with gate.hold(WRITE):
+        sent_at = clock.now
+
+    assert sent_at == pytest.approx(NOW + 5 + W)
+
+
 def test_no_other_send_starts_during_a_slow_response(path, clock):
     first = write_gate.WriteGate(path, clock, clock.sleep)
     second = write_gate.WriteGate(path, clock, clock.sleep)
     inside = threading.Event()
-    events: list[tuple[str, float]] = []
+    trying = threading.Event()
+    events: list[str] = []
+    real = second._send_lock
+
+    def send_lock():
+        # 先の書き込みが送信のロックを持つ間に、後の書き込みが取りに行く
+        events.append("second-tries" if slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE)) is None else "free")
+        trying.set()
+        return real()
+
+    second._send_lock = send_lock
 
     def slow() -> None:
         with first.hold(WRITE):
             inside.set()
-            time.sleep(0.5)
-            events.append(("first-end", time.monotonic()))
+            assert trying.wait(10)
+            events.append("first-end")
 
     def fast() -> None:
-        inside.wait()
+        assert inside.wait(10)
         with second.hold(WRITE):
-            events.append(("second-start", time.monotonic()))
+            events.append("second-start")
 
     threads = [threading.Thread(target=slow), threading.Thread(target=fast)]
     for t in threads:
@@ -441,7 +522,7 @@ def test_no_other_send_starts_during_a_slow_response(path, clock):
     for t in threads:
         t.join()
 
-    assert [name for name, _ in events] == ["first-end", "second-start"]
+    assert events == ["second-tries", "first-end", "second-start"]
 
 
 def test_a_block_during_the_sleep_replaces_the_reservation(gate, path, clock):
@@ -480,14 +561,10 @@ def test_replacing_keeps_the_old_reservation_when_another_is_behind_it(gate):
     assert gate.reserve(WRITE, replacing=old).at == pytest.approx(NOW + 2 * W)
 
 
-def test_without_the_send_lock_it_sends_and_says_so(gate, path, clock, capsys, short_locks):
-    path.parent.mkdir(parents=True)
-    lock = held(path.with_name(write_gate.SEND_LOCK_FILE))
-    try:
-        with gate.acquire(httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")):
-            sent = True
-    finally:
-        lock.release()
+def test_without_the_send_lock_it_sends_and_says_so(gate, path, clock, capsys, failing_lock):
+    failing_lock(write_gate.SEND_LOCK_FILE)
+    with gate.acquire(httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")):
+        sent = True
 
     assert sent
     assert "書き込みの送信のロックを取れない" in capsys.readouterr().err
@@ -502,3 +579,30 @@ def test_the_send_lock_is_released_when_the_send_fails(gate, path, clock):
     assert probe is not None
     probe.release()
     assert record(path)["sent_next"] == pytest.approx(NOW + W)
+
+
+# async_acquire
+
+
+def test_async_acquire_takes_the_locks_off_the_event_loop(gate, path, monkeypatch):
+    threads: list[int] = []
+    real = slot_pool.lock
+
+    def spy(lock_path):
+        threads.append(threading.get_ident())
+        return real(lock_path)
+
+    monkeypatch.setattr(slot_pool, "lock", spy)
+
+    async def write() -> int:
+        async with gate.async_acquire(httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")):
+            pass
+        return threading.get_ident()
+
+    loop_thread = asyncio.run(write())
+
+    assert threads and loop_thread not in threads
+    assert record(path)["sent_next"] == pytest.approx(NOW + W)
+    probe = slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE))
+    assert probe is not None
+    probe.release()
