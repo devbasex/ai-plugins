@@ -32,7 +32,7 @@
 | D1 | #4172 の決定 3 の `write_of` の形で作るか | **作る。** `write_gate.write_of(request) -> Optional[Writes]` を新設し、`kind_of` は作らない。`Writes` は `NamedTuple(kind: str, count: int)` で `write_gate.py` に置く。`WriteGate.acquire` は `with self.hold(w.kind, w.count):` で順番を取り、`hold(kind, count)` は予約の間隔を `count` 倍にする。件数は、この課題では GraphQL も REST も 1 を返す（最上位のフィールドの数え方 `mutation_write` と graphql-core の依存は #4059 の PR が足し、`write_rules.py` へ `Writes` を移すときは `write_gate` から読み直せるように名前を残す） | #4172 の設計が「#4016 の実装の PR は `write_of` の形で作る」と書く（`issue-4172-design.md` の影響と危険）。名前と返り値を先に合わせれば、#4059 は件数の数え方を足すだけで、#4016 のテストと呼び手を書き直さない。graphql-core と `write_rules.py` は今のリポジトリに無く、足すのは #4059 の範囲 |
 | D2 | 種類の決め方（件数を数えない間） | `/graphql` の POST は本文の JSON の `query` を先頭の空白とコメントを除いて読み、`mutation` で始まらなければ None、最初のフィールドの名前が `create`・`add` で始まれば `CONTENT`、ほかは `WRITE`。本文が JSON でない・`query` が文字列でなければ `Writes(WRITE, 1)` | 詳細設計の `kind_of` の事後条件のまま。#4172 の `write_of` の事後条件とも合う |
 | D3 | `github.write-send-lock`・`github.pr-publish-lock` の秒を置く欄 | `lock` の欄に置く（値は設計どおり 60 秒・900 秒） | `limits.schema.json` は `interval` を「問い合わせ・打ち直しの間隔の秒」、`lock` を「錠を待つ上限の秒」と定める。設計の値の意味はロックの待ちの上限で、`relay.key-helper` が同じ欄を使う |
-| D4 | `drive.py` の 3 つの関数（`_settle_resolved`・`_carry`・`_detach_revived`）が、`run` の途中で状態ファイルの `threads` の印をロックの外で書く | 変えない。不変条件 I4 の「同じ PR の公開のロックの中でだけ書く」は公開（`_post_report`）の中の書き込みの約束と読む | 3 つは `run` 自身の状態ファイルを書き、公開の重複（I4）を起こさない。同じ PR の `report` と並んだときの上書きは、この課題の書き込みの重複とは別の問題で、範囲外として起票する |
+| D4 | `drive.py` の 3 つの関数（`_settle_resolved`・`_carry`・`_detach_revived`）が、`run` の途中で状態ファイルの `threads` の印をロックの外で書く | 変えない。不変条件 I4 の「同じ PR の公開のロックの中でだけ書く」は公開（`_post_report`）の中の書き込みの約束と読む | 3 つは `run` 自身の状態ファイルを書き、公開の重複（I4）を起こさない。同じ PR の `report` と並んだときの上書きは、この課題の書き込みの重複とは別の問題で、範囲外として #4257 に起票した |
 
 ## 修正対象
 
