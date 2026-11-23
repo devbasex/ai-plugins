@@ -34,7 +34,7 @@ from ndf.checks import (
     words,
 )
 from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, walk
-from ndf.contracts import result
+from ndf.contracts import ContractError, result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -45,7 +45,8 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
 SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
-# プラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則
+# プラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則。
+# これだけを選んだ検査は、ほかの規則が読むコントラクトの表（停止理由の表など）が壊れていても止まらない
 SELECTED_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {
     contracts_split.RULE: contracts_split.check,
     experimental.RULE: experimental.check,
@@ -152,12 +153,16 @@ def select(
 ) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。
 
-    `only` がプラグインのファイルを読まない規則（`SETTINGS_RULES` と `PARTIAL_RULES`）だけなら、プラグインのファイルを集めず、
-    ほかの規則も当てない（ワークフローだけを変えた Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
+    `only` がほかの規則なしで当てられる規則（`SETTINGS_RULES`・`PARTIAL_RULES`・`SELECTED_RULES`）だけなら、ほかの規則を当てない。
+    そのうちプラグインのファイルを読まない規則（`SELECTED_RULES` のほか）だけなら、ファイルも集めない（ワークフローだけを変えた
+    Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
     """
-    light = {**SETTINGS_RULES, **PARTIAL_RULES}
-    if only and set(only) <= light.keys() and not write_spec:
-        return sorted((f for name in light if name in only for f in light[name](scope, rules)), key=_order)
+    alone = {**SETTINGS_RULES, **PARTIAL_RULES, **SELECTED_RULES}
+    if only and set(only) <= alone.keys() and not write_spec:
+        if set(only) & SELECTED_RULES.keys():
+            scope.sources = collect(scope.plugin_root, scope.repo_root)
+            unparsable(scope)
+        return sorted((f for name in alone if name in only for f in alone[name](scope, rules)), key=_order)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written, only, metrics)
     return [f for f in found if not only or f.rule in only]
@@ -174,11 +179,16 @@ def _repo_root(plugin_root: Path) -> Path:
 def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None) -> int:
     """結果 JSON を結果のコントラクト（`ndf.contracts.result`）で確かめて 1 行で出し、終了コードを返す。
 
-    `kind` が無ければ合格（ok）、あれば停止理由の種類を `cause` に持つ stopped にする。
+    `kind` が無ければ合格（ok）、あれば停止理由の種類を `cause` に持つ stopped にする。停止理由の表そのものが読めなければ、
+    表で確かめずに指摘（`items`）を持つ config_broken を出す（表が壊れたことの指摘を失わない）。
     """
     if kind is None:
         return result.emit(result.result(TOOL, result.OK, summary, items=items, metrics=metrics))
-    return result.emit(result.stopped(TOOL, kind, summary, items=items, metrics=metrics))
+    try:
+        return result.emit(result.stopped(TOOL, kind, summary, items=items, metrics=metrics))
+    except ContractError as exc:
+        # 表の誤りは出力の前に投げられるので、標準出力へ 2 行出ることは無い
+        return result.emit_unchecked(TOOL, "config_broken", f"{summary}（コントラクトのファイルが読めない: {exc}）", items)
 
 
 def main(argv: list[str]) -> int:

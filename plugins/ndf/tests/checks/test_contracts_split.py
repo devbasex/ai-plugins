@@ -12,6 +12,8 @@ import pytest
 from ndf import contracts
 from ndf.checks import contracts_split, lint, run
 from ndf.checks.model import Finding, Scope
+from ndf.contracts import exit_codes
+from ndf.identity import PluginIdentity
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 DIR = contracts.DEFAULT_DIR.name
@@ -19,6 +21,7 @@ LIST = f"{DIR}/{contracts.SPLIT_TABLES}"
 ITEM = f"{DIR}/limits/test-run.test.json"
 CAUSE = f"{DIR}/causes/ci_pending.json"
 SCHEMAS = [f"{DIR}/{contracts.schema_path(table)}" for table in ("limits", "causes")]
+RESULT_SCHEMA = f"{DIR}/{contracts.schema_path('result')}"
 
 
 @pytest.fixture
@@ -222,3 +225,25 @@ def test_the_check_command_applies_the_rule_only_when_selected(root, rules, monk
     found = run.select(_scope(root), rules, [only])
     assert len(calls) == applied
     assert _paths(root, found) == [f"{DIR}/limits.json"] * applied
+
+
+@pytest.fixture
+def own_contracts(root):
+    """検査の対象のプラグインの表を、結果 JSON を出す側のコントラクトの読み手にも読ませる。"""
+    contracts.use_dir(root / DIR)
+    yield root
+    contracts.use_dir(None)
+
+
+def test_the_command_reports_the_findings_when_the_table_of_causes_is_one_file_again(own_contracts, monkeypatch, capsys, last_result):
+    # 結果 JSON の cause を確かめる停止理由の表そのものが、分ける前の 1 ファイルに戻っている
+    root = own_contracts
+    shutil.copy(PLUGIN_ROOT / RESULT_SCHEMA, root / RESULT_SCHEMA)
+    _merge_back(root, "causes")
+    monkeypatch.setattr(run.identity, "load", lambda: PluginIdentity(root, "p", "P_", root))
+    monkeypatch.setattr(run, "_repo_root", lambda plugin_root: root.parents[1])
+    assert run.main(["--only", contracts_split.RULE]) == exit_codes.unreadable_code()
+    report = last_result(capsys.readouterr().out)
+    assert report["cause"]["kind"] == "config_broken"
+    paths = [(root.parents[1] / item["path"]).relative_to(root).as_posix() for item in report["items"]]
+    assert paths == [f"{DIR}/causes", f"{DIR}/causes.json"]
