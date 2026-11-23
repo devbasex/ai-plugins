@@ -1,6 +1,6 @@
-# 中継の環境変数の名前: 契約に載せたまま検査を通し、ラッパーが渡す名前と契約をテストで結ぶ（#4126）
+# 中継の環境変数の名前: 契約の 1 か所に持ち、hook の経路を含むコードが契約のキーから名前を引く（#4126）
 
-#4049 と #4062 の設計は中継の 3 つの環境変数の名前を `signals` の最上位の定数に持つと書くが、契約に行を足すと検査 `const-fact` がその定数を落とし、2 つの実装の PR が CI で落ちる。名前を写した定数を置かず、名前は使う所に字で書き、ラッパーが子へ渡す名前と契約の行は契約から引くテストで結ぶ（#4101 の決定 2 と同じ扱い）。直しは新しい PR を足さず、#4049 と #4062 の実装の PR がそれぞれ行を足すときに入れる。採らなかった案（契約の組の列から引く・検査の例外）は「決定の記録」に、2 つの設計の読み替えは決定 4 にある。
+#4049 と #4062 の設計は中継の 3 つの環境変数の名前を `signals` の最上位の定数に持つと書くが、契約に行を足すと検査 `const-fact` がその定数を落とし、2 つの実装の PR が CI で落ちる。名前は環境変数の契約の行にだけ置き、行にキー（新しい列 `key`）を持たせ、コードは `ndf.identity` の軽い読み手でキーから名前を引く。hook の経路が契約を読めないという制約は jsonschema の読み込みにだけ当たり、標準ライブラリで契約を読む増分は測りの揺れの内だった（決定 2）。採らなかった案（文字列リテラルとテスト・生成物・起動時に渡す）は「決定の記録」に、#4049・#4062・#4101 の設計の読み替えは決定 5、#4101 に及ぶかは決定 6 にある。
 
 ## 今の姿
 
@@ -8,20 +8,20 @@
 
 ```mermaid
 flowchart LR
-  subgraph C["contracts/domains/env.json（名前の正本）"]
+  subgraph C["contracts/domains/env.json（表の要約は名前の正本と書く）"]
     R1["NDF_RELAY_DIR（今ある）"]
     R2["NDF_RELAY_SESSION（#4049 が足す）"]
     R3["NDF_RELAY_LAUNCH（#4062 が足す）"]
   end
-  subgraph S["relay/signals.py（設計が書く形）"]
-    K1["DIR_ENV（#4062 の詳細設計）"]
+  subgraph S["コードが持つ名前の写し（設計が書く形を含む）"]
+    K1["DIR_ENV（#4062 の詳細設計）<br>文字列リテラル 4 か所（今）"]
     K2["SESSION_ENV（#4049 の詳細設計）"]
     K3["LAUNCH_ENV（今ある）"]
   end
   F["const-fact の table-str<br>表の id と同じ字の最上位の定数を落とす"]
-  R1 -. 同じ字 .- K1
-  R2 -. 同じ字 .- K2
-  R3 -. 同じ字 .- K3
+  R1 -. 同じ名前 .- K1
+  R2 -. 同じ名前 .- K2
+  R3 -. 同じ名前 .- K3
   K1 & K2 & K3 --> F
   F --> X["#4049・#4062 の実装の PR が ndf check で落ちる"]
 ```
@@ -30,182 +30,251 @@ flowchart LR
 
 | 部品 | 今の振る舞い | 場所 |
 | --- | --- | --- |
-| 名前の定数 | `LAUNCH_ENV = "NDF_RELAY_LAUNCH"` を最上位に置き、`launch_env` と `relay_launch` が使う。`NDF_RELAY_DIR` は `relay_dir` と `launch_env` に字で書く | `src/ndf/domains/relay/signals.py` |
-| 子の環境の組み立て | ラッパーの `_start` が `signals.launch_env(self.dir, launch)` の返りを子の環境に重ねる。#4049 の後は `launch_env(directory, launch, session_id)` が 3 つを返す | `src/ndf/domains/relay/wrapper.py` の 759 行目 |
-| 検査 `const-fact` | モジュールの最上位の、大文字の名前（`CONST` の形 `^_?[A-Z][A-Z0-9_]*$`）の定数を集める。値が事実の表の `id` と等しい字なら `table-str`、`id` を 2 つ以上含む字の集まりなら `table-set` で落とす。右辺を読む関数 `lit` は字・数・字だけの組しか読まず、`*` の展開を含む組は読まない。関数の中の値と、テスト（`tests/`）は見ない | `src/ndf/checks/facts.py` の `table_hits` |
-| 契約から名前を引く関数 | `facts.ids("env", child="drop")` のように列の値で絞った `id` を表の順で返す。`ndf.contracts` を import するので、hook の経路からは呼べない | `src/ndf/contracts/facts.py` の `ids` |
+| 名前の写し | 実行に使う写しは 4 つのファイルの 6 か所で、`bin`・シェル・hook の登録のコマンドには無い（`git grep -n -E 'NDF_RELAY_(DIR|LAUNCH|SESSION)\b' -- plugins/ndf/src plugins/ndf/bin plugins/ndf/hooks` の 13 件のうち 7 件は docstring の説明の文）。`LAUNCH_ENV = "NDF_RELAY_LAUNCH"` を最上位に置く。`"NDF_RELAY_DIR"` を `signals.py` の `relay_dir`・`launch_env`、`adapters/claude.py` の `_inherited`、`relay/account_login.py` の `AUTH_ENV` に文字列リテラルで書く | `src/ndf/domains/relay/signals.py` ほか |
+| 環境変数の契約 | 表の要約は「コードは名前をこの表から引き、表に無い名前を読まない」と書く。行の `id` が名前で、コードが行を引くキーの列は無い | `contracts/domains/env.json` |
+| 契約の読み手（検証つき） | `facts.ids("env", child="drop")` のように列の値で行を絞る。表を読むたびに jsonschema で形を確かめる。`ndf/contracts/__init__.py` が jsonschema を import するので、`ndf.contracts` の下はどのモジュールを import しても jsonschema が読まれる | `src/ndf/contracts/facts.py` |
+| 契約の読み手（hook の経路） | hook は `contracts/hooks/*.json` を標準ライブラリの `json` で直に読む（`hooks/tables.py`。形は CI が確かめる）。`signals.py` は標準ライブラリと `ndf.identity` だけを import する（決定 111） | `src/ndf/domains/hooks/tables.py`・`src/ndf/domains/relay/signals.py` |
+| 名前を 1 か所から引く前例 | `ndf.identity` はプラグイン名を `plugin.json` の `name` だけから求め、コードは自分の名前を文字列で持たない。標準ライブラリだけで書かれ、hook の経路・`ndf.contracts`・adapters のどれからも読まれる | `src/ndf/identity.py` |
+| 層の規則 | 層は `ndf.contracts` → `ndf.adapters` → `ndf.core` → `ndf.progress` → `ndf.domains` の向きで、下の層は上の層を import しない。`ndf.identity` は層の外にある。モジュールを新設すると、作り直しの子の表（`checks/children.json`。正本は #3347 の設計）に載せる必要がある | `src/ndf/checks/rules.json`・`children.json` |
 
-**根本原因**: 3 つの設計がそれぞれ「hook の経路は契約を import しないので、名前は `signals` の定数が持つ」と決め、`const-fact` が契約の `id` を定数へ写すことを禁じていることと突き合わせなかった。設計の工程に、設計の形をコードの写し（`origin/main` を一時の場所へ取り出したコピー）に当てて `ndf check` を打つ手順が無く、#4101 の設計で写しに当てて初めて見つかった。
+**根本原因**: 名前の事実をコードに写す設計（定数か文字列リテラル）を、3 つの設計がそれぞれ選んだ。理由は「hook の経路は契約を import しない」で、これを「契約を読めない」と読み、契約から名前を引く手を比べなかった。実際の制約は jsonschema の読み込みの時間だけである（決定 2）。
 
 ## 文脈と制約
 
-- hook の経路は `ndf.contracts` を import しない（`signals.py` の冒頭・決定 111）。hook が読む名前は字か定数でしか書けない
-- `const-fact` は変えない。#4101 の決定 2 が、同じ検査のまま名前を写した定数を外すと決めた
-- 実装の順は #4049 → #4061・#4062（3 課題の実装の 2 本の PR のうち 1 本目）→ #4101 で、それぞれの設計が決めている（#4062 の決定 8・#4101 の決定 8）。#4049 と #4062 の実装はまだ始まっていない（2026-11-22 に `gh pr list` と `git branch -r` で確かめた）
-- #4049・#4062 の設計文書は書き換えない（AI の起動指示、2026-11-22）。読み替えはこの文書に置く
+- hook は Tool の呼び出しのたびに起動する。1 回の起動に足す時間を増やさない（`ndf.contracts` を import すると 1 回に約 54〜64 ms 増える。決定 2）
+- `const-fact` は変えない
+- 実装の順は #4049 → #4061・#4062（3 課題の実装の 2 本の PR のうち 1 本目）→ #4101 で、それぞれの設計が決めている。#4049 と #4062 の実装はまだ始まっていない（2026-11-22 に `gh pr list` と `git branch -r` で確かめた）
+- #4049・#4062・#4101 の設計文書は書き換えない（AI の起動指示、2026-11-22・2026-11-23）。読み替えはこの文書に置く
 - 普及のフェーズの前で、互換の経路を持たない（MVV 版 11 の Value 4）
 
 ## 解き方の全体像
 
 ```mermaid
 flowchart LR
-  C["env.json<br>中継の 3 行（child: drop）"]
-  subgraph S["relay/signals.py（最上位の名前の定数は無い）"]
-    W["launch_env(directory, launch, session_id)<br>3 つの名前を字で書いた辞書を返す"]
-    RD["relay_dir・relay_launch・relay_session<br>同じ名前を字で読む"]
+  C["env.json<br>中継の 3 行に key の列<br>relay-dir・relay-launch・relay-session"]
+  I["ndf.identity.env_name(key)<br>標準ライブラリで env.json を 1 プロセスに 1 回読み、<br>キーの行の名前を返す（無い・2 行以上なら誤り）"]
+  subgraph U["名前を使う所（文字列リテラルを持たない）"]
+    S["relay/signals.py<br>relay_dir・relay_launch・relay_session・launch_env"]
+    A["adapters/claude.py"]
+    L["relay/account_login.py の AUTH_ENV"]
   end
-  T1["テスト: launch_env の鍵の集まり ＝<br>facts.ids(area=relay, set_by=ndf, child=drop)"]
-  T2["テスト: 読む関数が launch_env の返りから<br>渡した値を読み返す"]
-  C -- "契約から引く" --> T1
-  W --> T1
-  W --> T2
-  RD --> T2
-  E["#4101 の spec-env（後）<br>契約に無い名前の字を落とす"] -.-> S
+  H["hook の経路<br>（signals を経て呼ぶ。ndf.contracts を import しない）"]
+  C --> I --> S & A & L
+  S --> H
+  CK["ndf check の fact-table と env-key<br>env.json の形・キーの重なり・コードが呼ぶキーを CI で確かめる"] -.-> C & U
 ```
 
-- `child: drop` は契約の列の値で、「子へは受け継いだ値を渡さない（ラッパーが自分の値を入れ直す）」を表す
-- 名前の正本は `env.json` だけで、`signals.py` は中継の 3 つの名前を使う所に字で書く。名前を写した最上位の定数（`LAUNCH_ENV`・`SESSION_ENV`・`DIR_ENV`）も、名前を並べた最上位の組も無い
-- ラッパーが子へ渡す名前と契約の行は、契約から名前を引くテストで等しさを確かめる。hook が読む字とラッパーが書く字は、読み返しのテストで結ぶ。#4101 の後は、#4101 が足す検査 `spec-env`（コードが読み書きする環境変数の名前が契約にあるかを見る）が、契約に無い名前の字も落とす
+- 名前は `env.json` の行にだけある。中継の 3 行はキー（`key` の列）を持ち、コードは `identity.env_name("relay-dir")` のようにキーから名前を引く。名前を変えるときに直すのは `env.json` の 1 行だけである
+- 読み手は `ndf.identity` の 1 つで、hook の経路・adapters・domains のどこからも呼べる。`env.json` を標準ライブラリの `json` で 1 プロセスに 1 回読む。表の形は今のとおり CI の `ndf check`（`fact-table`）が jsonschema で確かめる
+- キーの誤り（無いキー・重なるキー・文字列リテラルでないキー）は、新しい規則 `env-key` が CI の `ndf check` で落とす。実行時に読み手が誤りになるのは、導入したプラグインの契約が壊れたときだけで、そのとき読み手は名前を推したり文字列リテラルへ戻したりせずに誤りを投げる。hook の経路はそれを「中継の子と確かめられない」として何も書かず、ラッパーは子を起動する前に止まる
 - 直しは #4049 と #4062 の実装の PR が、それぞれ行を足すときに入れる。この課題の実装の PR は無い
+
+## データ構造
+
+`contracts/domains/env.json` に列を 1 つ足す。ほかの列の意味は変えない。
+
+| 列 | 型 | 意味 |
+| --- | --- | --- |
+| `key`（新設・任意） | string | コードが名前を引くキー。表の中で 1 つの行だけが同じキーを持つ。キーを持つ行の名前は、コードが `identity.env_name` でキーから引き、文字列リテラルで書かない |
+
+| `id` | `key` | 足す PR |
+| --- | --- | --- |
+| `NDF_RELAY_DIR` | `relay-dir` | #4049 の実装（行は今ある。キーを足す） |
+| `NDF_RELAY_SESSION` | `relay-session` | #4049 の実装（行とキーを足す） |
+| `NDF_RELAY_LAUNCH` | `relay-launch` | #4061・#4062 の実装（行とキーを足す） |
+
+キーの形は `<area>-<役割>` の小文字と `-` で、名前の頭（`NDF_RELAY_`）を写さない。キーは名前でなく「コードがどの行を使うか」の識別子で、`facts.ids("env", child="drop")` の `drop` と同じく、列の値をコードが指す形である。
 
 ## 決定の記録
 
-### 決定 1: 名前の正本を契約の 1 か所にするため、中継の 3 つの名前は最上位の定数に置かず、使う所に字で書く
+### 決定 1: 名前の正本を契約の 1 か所にするため、行にキーの列 `key` を足し、コードはキーから名前を引く
 
-- **質問**: 契約に行を足すと `const-fact` で落ちる名前の定数（`LAUNCH_ENV`、#4049 の `SESSION_ENV`、#4062 の `DIR_ENV`）をどうするか
-- **選んだ案**: 定数を置かない。`launch_env` は `{"NDF_RELAY_DIR": …, "NDF_RELAY_LAUNCH": …, "NDF_RELAY_SESSION": …}` を返し、`relay_dir`・`relay_launch`・`relay_session` は `env.get("NDF_RELAY_…")` で読む。変えるのは名前の書き方だけで、空の値の扱いは今のまま（`relay_launch` と #4049 の `relay_session` は、無い・空のどちらも None を返す）。`NDF_RELAY_DIR` の今の書き方にそろえ、#4101 の決定 2 と同じ扱いにする。各名前の字は `signals.py` の中で 2 か所（書く `launch_env` と読む関数）に現れる。写しのツリーで 3 行を足してこの形にすると、`const-fact` は違反 0 件だった（「影響と危険」の実測の表）
-- 採らなかった案: 契約に組の列（#4101 の `group` に `relay-launch` などの値）を置き、`facts.ids` で名前を引く（`signals` は hook の経路で `ndf.contracts` を import できない。`launch_env` は 3 つの名前にそれぞれ別の値を入れるので、組を回しても名前と値の対応をコードが持つことになり、組から引いても字は消えない。#4101 の `group` は「コードが組で引く名前の集まり」で、引くコードの無い組を置くと列の意味が崩れる）
-- 採らなかった案: 組の列はテストの期待する集まりにだけ使う（hook の経路の import の制約には当たらない。ただし中継の、NDF が値を入れる、子へ受け継がない行を足して組の値を付け忘れると、テストが見逃す。決定 2 は今ある 3 列（`area`・`set_by`・`child`）から期待する集まりを導くので、付け忘れの余地が無い。#4101 の `group` は実行の時に名前の組をまとめて引くためのもので、こちらは名前ごとに別の値を入れる）
-- 採らなかった案: `env.json` を `shared_names` にする（`table-set` も外れ、どの名前の組もコードに写せるようになる。#4101 の決定 2 で採らなかった理由と同じ）
-- 採らなかった案: 定数の名前を変えて検査を避ける（`_LAUNCH_ENV` は `const-fact` の名前の形に当たり、写しで落ちた。小文字の名前やクラスの属性にすれば検査をすり抜けるが、契約の写しを持つことは変わらず、検査の意図を外す）
-- 採らなかった案: 名前の定数を `env.json` から生成するモジュールに置く（生成と検査の 2 つを保つことになり、hook の経路が生成物を import する。#4101 の決定 2 で採らなかった理由と同じ）
-- **代償**: 名前の字が `signals.py` の中で 2 か所に並ぶ。打ち間違いは決定 2 の読み返しのテストが落とす。#4101 の後は `spec-env` も契約に無い名前を落とすが、契約にある別の名前への打ち間違い（`NDF_RELAY_DIR` と `NDF_RELAY_SESSION` の取り違え）は落とさないので、主な守りは読み返しのテストである
-- 根拠: Value 8・Value 11（MVV 版 11）。名前という事実の正本は契約の 1 か所で、コードの字はその名前を使う所での参照である。参照の字が 2 か所に並んでも、名前の定義を 2 か所に持つことにはならない。Value 8「同じ事実を 2 か所に持たない」。Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」
+- **質問**: 中継の 3 つの名前を、コードがどこから得るか
+- **選んだ案**: `env.json` に任意の列 `key` を足し、中継の 3 行に `relay-dir`・`relay-launch`・`relay-session` を置く。`signals.py` の `relay_dir`・`relay_launch`・`relay_session`・`launch_env`・`relay_role`（#4061）と、`adapters/claude.py`・`relay/account_login.py` は `identity.env_name(<キー>)` で名前を得る。`plugins/ndf/src` に 3 つの名前の文字列リテラルは残らない。取り出した作業ツリーでこの形にすると、`ndf check` は違反 0 件で、関係するテスト 472 件が通った（「影響と危険」の実測の表）
+- 採らなかった案: 名前を使う所に文字列リテラルで書き、契約との一致をテストで確かめる（最初の設計。利用者が設計承認ゲートで差し戻した。名前の事実が契約とコードの 2 か所に分かれ、一致はテストが通る間しか保てない）
+- 採らなかった案: #4101 の `group` の列に 3 行を 1 つの組として置き、表の順で名前を受け取る（`dir, launch, session = ids(group=…)`）。3 つの名前にはそれぞれ別の値が入るので、表の行の順とコードの受け取る順の対応が隠れた約束になる。行を並べ替えると黙って取り違える
+- 採らなかった案: `id`（名前そのもの）で行を引く（引く引数が名前の文字列リテラルになり、写しが残る）
+- 採らなかった案: 名前の定数を `env.json` から生成したモジュールに置く（生成物と正本の 2 つを保つことになり、生成し直しを忘れた差を見る検査が要る。生成物の定数は `const-fact` に当たる）
+- **代償**: キーの文字列（`"relay-dir"` など）はコードに現れる。キーは契約の列の値で、名前の事実ではないので写しに当たらない。名前はラッパー・hook・子の claude が共有する外向きの事実で、変えることがある。キーは NDF の中だけで使う識別子で、外の誰とも共有せず、変える理由が無い。名前を変えるときに直すのは `env.json` の 1 行だけで、コードも検査も触らない（差し戻された形では、名前を変えるとコードの文字列リテラルとテストの両方を直す）。キーの打ち間違い・付け忘れ・重なりは、規則 `env-key` が CI で落とす（決定 3）。#4101 の規則 `spec-env` は、名前が式で決まる読み出しを追わないので、キーで引く読み出しは見ない（決定 6 の読み替えでキーを解くようにする）
+- 根拠: Value 8・Value 11（MVV 版 11）。Value 8「同じ事実を 2 か所に持たない」。Value 11「同じ規則・定数・処理は 1 か所にまとまり、ほかはそこを参照する」
 
-### 決定 2: ラッパーが渡す名前と契約の食い違いを落とすため、テストは契約から名前を引いて等しさを確かめ、読む関数の字は読み返しで結ぶ
+### 決定 2: hook の経路を遅くせずに契約を読むため、読み手を `ndf.identity` に置き、標準ライブラリで `env.json` を読む
 
-- **質問**: 定数を外した後、ラッパーの `launch_env` が返す名前の組と、契約の行と、hook が読む字の 3 つをどう結ぶか
-- **選んだ案**: テストを 2 つにする。(1) `set(signals.launch_env(d, "a" * 32, "s"))` が `set(facts.ids("env", area="relay", set_by="ndf", child="drop"))` と等しい（#4062 の決定 4 のテストのまま。期待する名前を字の集まりで書かず、契約から引く）。(2) `relay_dir`・`relay_launch`・`relay_session` に `launch_env(d, L, S)` の返りを渡すと、`d`・`L`・`S` が返る（今の `test_launch_env_passes_the_launch_id_and_the_hook_reads_it` を 3 つに広げる）。写しのツリーで (1) を打つと通った。名前と値の対応（`NDF_RELAY_LAUNCH` に起動の ID、`NDF_RELAY_SESSION` に会話の ID が入るか）は、#4062 の詳細設計の「ラッパーの `_start`」のテスト（差し替えた `spawn` が受けた環境の 3 つが、その起動の保存先・起動の ID・会話の ID と等しい）が確かめ、そのまま残す。書く側と読む側の両方で 2 つの名前を入れ替える取り違えは (1) と (2) を通るが、このテストで落ちる。このテストは差し替えた `spawn` が受けた環境で確かめるので、子の環境を組む関数が `_start` から `Wrapper._env_for` へ移った後（「未確認のまま残ること」）も同じ形で書ける
-- 採らなかった案: テストの中で期待する名前を字の集まり（`{"NDF_RELAY_DIR", …}`）で書く（`const-fact` はテストを見ないので検査は通るが、契約の写しがテストにできる。行を足しても消してもテストの字を直すまで食い違いが残る。#4101 の詳細設計の「名前の定数の外し方」と同じ理由）
-- 採らなかった案: 契約の行と照らすのを `spec-env`（#4101）に任せ、テストを置かない（`spec-env` は字が契約にあるかを見るだけで、ラッパーが入れ直さない `drop` の中継の行は落とせない。#4101 は #4062 の後に入る）
-- **代償**: 絞り込みの条件（`area`・`set_by`・`child` の 3 列）がテストに現れる。中継の、NDF が値を入れる、子へ受け継がない行を足すと、ラッパーが入れ直さない限りテストが落ちる（#4062 の決定 4 が意図した等しさ）
-- 根拠: Value 13・Value 8（MVV 版 11）。Value 13（載ったと言えるのは検査が確かめたときだけ）
+- **質問**: 「hook の経路は契約を import できない」は本当か。hook の経路へ契約の値を届けるにはどの手がよいか
+- **確かめたこと**: 制約は「`ndf.contracts` を import しない」で、理由は jsonschema の読み込みの時間である（`hooks/tables.py`・`signals.py` の冒頭）。契約のファイルを読むこと自体は禁じていない。`hooks/tables.py` は今も `contracts/hooks/*.json` を `json` で直に読む。新しいプロセスで 20 回ずつ打った中央値は次のとおり（2026-11-23）
 
-### 決定 3: 設計を直すために PR を増やさないため、直しは #4049 と #4062 の実装の PR が行を足すときに入れ、#4101 の順は変えない
+| 打ったもの | 中央値 | 最小 |
+| --- | ---: | ---: |
+| `signals` を import するだけ（今の hook の経路の頭） | 44.4 ms | 42.8 ms |
+| 上に加えて `json` で `env.json` を読み、行を絞る | 45.1 ms | 43.4 ms |
+| `ndf.contracts.facts` を import するだけ | 98.6 ms | 94.9 ms |
+| `facts.ids("env", area="relay")`（形の検証つき） | 108.2 ms | 104.1 ms |
+
+- **選んだ案**: `ndf.identity` に `env_name(key) -> str` と、`env.json` を 1 プロセスに 1 回読む内部の関数を足す。`identity` は層の外の標準ライブラリだけのモジュールで、`signals.py` が既に import しており、hook の経路の import は増えない。プラグイン名を `plugin.json` から引く同じ形の前例を持つ。コピーで今の形（文字列リテラル）と比べた中央値は 43.6 ms と 43.8 ms、別の時刻に打ち直すと最小値で 47.0 ms と 45.7 ms で、差は測りの揺れの内だった。ここでの測りは `signals` の import と読み手の呼び出しだけで、hook の入口（`hooks/entry.py`）から guard を選んで import するまでの全体ではない。実装の PR で、同じ Python・同じ入力で実際の PreToolUse の入口を変更の前後で交互に打って比べ、guard を呼んだ後に `ndf.contracts`・`jsonschema` が import されていないことも確かめる（テスト設計の受け入れ条件 6）
+- 採らなかった案: `ndf.contracts.facts` を hook の経路でも使う（1 回の起動に約 54〜64 ms 足す。hook は Tool の呼び出しのたびに動く）
+- 採らなかった案: `ndf.contracts` の jsonschema の読み込みを、形を確かめる時まで遅らせる（実行時の検証を残すかぎり、表を読む時点で jsonschema を読むので hook の時間は減らない）
+- 採らなかった案: `ndf.contracts` の実行時の形の検証を外す（すべての表の読み手の約束が変わり、この課題の範囲を越える）
+- 採らなかった案: 読み手を `hooks/tables.py` に置く（`adapters/claude.py` は adapters の層で、domains の `hooks` を import できない。読み手が 2 つになる）
+- 採らなかった案: 読み手を新しい最上位のモジュール（`ndf/env_names.py`）に置く（作り直しの子の表 `children.json` に載せる必要があり、その正本の #3347 の設計を先に直すことになる。コピーで `child-deps` が落ちた）
+- 採らなかった案: ラッパーが起動の時に名前を渡す（hook が値を読むにはまず変数の名前が要るので、名前を渡す変数の名前がまたコードに要る。3 つを 1 つの JSON の変数にまとめても、その 1 つの名前が写しとして残り、契約の 3 行の意味も変わる）
+- **代償**: 契約の表を読む仕組みは、検証つきの `facts` と、検証しない `identity.env_name`・`hooks.tables` に分かれたままになる（今の `hooks.tables` と同じ分け方）。環境変数の名前をキーから引く関数は `identity.env_name` の 1 つである。形の誤りは実行時でなく CI の `ndf check` が見つける
+- 根拠: Value 2・Value 12（MVV 版 11）。Value 2（安く使える。hook の 1 回の起動に費用を足さない）。Value 12（調べて分析したやり方で作る。前例の `identity` の形に寄せる）
+
+### 決定 3: 名前を取り違えず、契約の誤りで hook とラッパーを壊さないため、キーの誤りは CI で落とし、実行時の誤りは hook では「確かめられない」、ラッパーでは起動の前の停止にする
+
+- **質問**: キーの行が無い・2 行以上ある・`env.json` が読めないとき、読み手と、それを呼ぶ hook・ラッパー・ログインはどう振る舞うか
+- **選んだ案**: 4 つに分ける
+  - CI: 新しい規則 `env-key` が、`env.json` の `key` の値が重ならないことと、`plugins/ndf/src` の `identity.env_name(...)` の呼び出しがどれも 1 つの文字列リテラルの引数を持ち、そのキーの行がちょうど 1 行あることを確かめる。キーの打ち間違い・付け忘れ・重なりは、取り込む前に落ちる
+  - 読み手: 契約が読めない・`rows` が無い・キーの行の `id` が空でない文字列でない・キーの行が 1 行でないときは `identity.EnvNameError`（`LookupError` の子）を投げる。既定の名前へ戻さず、先の行も使わない。CI を通った後に起きるのは、導入したプラグインの契約が壊れたときだけである
+  - hook の経路: `signals.relay_role` は `EnvNameError` を受けたら `NESTED`（中継の保存先にもオーガナイザーの保存先にも書かない）を返す。#4061 の後は、中継へ書く 6 つの guard がどれも `relay_role` で頭を決め、`CHILD` のときだけ `relay_dir`・`relay_launch` を読むので、guard が例外を上げない。`relay-busy`（`fail_closed`・すべての PreToolUse に当たる）が契約の誤りで全 Tool を止めることは無い。`context-limit` の上限の判定は役割と別に今のとおり行い、案内の文だけが中継の外の文になる
+  - ラッパー: 子を起動する前（`ndf relay` の起動の入口）に 3 つのキーを解き、`EnvNameError` なら結果 JSON の `stopped`・`config_broken` で止まる。起動の副作用（`launch.json` を書く・子を起こす）の前に止まる
+  - ログイン: `relay/account_login.py` の最上位の `AUTH_ENV` を外し、ログインの子の環境を組む関数の中で名前を引く。`relay status` などログインと関係ない操作が、モジュールの import で契約の誤りに巻き込まれない
+- 採らなかった案: キーが無ければ None を返し、呼ぶ側が中継の外として扱う（契約の誤りが「中継の外」に化け、`ask-forward` がオーガナイザーの保存先へ書く。#4061 の入れ子の claude の見分けも黙って外れる）
+- 採らなかった案: hook の guard の例外としてそのまま上げる（`relay-busy` は `fail_closed` で Tool を問わず当たるので、契約の誤りで中継の外の `Read` まで止める）
+- 採らなかった案: 誤りを実行時だけで見つける（導入した後に初めて分かる）
+- **代償**: 規則 `env-key` が 1 つ増える。`relay_role` は誤りを受けたとき、本当の子の会話でも中継へ書かない（質問が中継へ回らない）。起きるのは壊れた導入だけである。導入の時点で壊れていればラッパーは起動の前に止まる。動いているラッパーの下でプラグインを壊れた版へ更新したときは、次のセグメントの hook が中継へ書かなくなり、質問は子の会話の画面に出るだけになる（ラッパーは止まらず、契約を直した版へ更新すれば戻る）
+- 根拠: Value 7・Value 13・Value 3（MVV 版 11）。Value 7（不具合は根本原因から直され、形を変えて戻らない）。Value 13（確かめたことだけが済んだとされる）。Value 3（判断の要らない確かめは仕組みが進める）
+
+### 決定 4: 設計を直すために PR を増やさないため、直しは #4049 と #4062 の実装の PR が行を足すときに入れ、#4101 の順は変えない
 
 - **質問**: 直しをどの PR に入れるか。#4062 の実装の PR か、その前の別の PR か。#4101 とどちらが先か
-- **選んだ案**: 行を足す PR が、その名前の書き方も持つ。#4049 の実装の PR は `NDF_RELAY_SESSION` の行を足し、`SESSION_ENV` を置かずに字で書く。#4061・#4062 の実装の PR（1 本目）は `NDF_RELAY_LAUNCH` の行を足し、`LAUNCH_ENV` を外して字で書き、`DIR_ENV` を置かない。#4101 の実装はその後のまま（#4101 の決定 8）で、`spec-env` は字になった 3 つの名前を見る
+- **選んだ案**: 先に入る #4049 の実装の PR が、キーの列・`identity.env_name`・`NDF_RELAY_DIR` のキーを足し、`NDF_RELAY_DIR` を使う 4 か所をキーで引く形にし、`NDF_RELAY_SESSION` の行をキーつきで足す。#4061・#4062 の実装の PR は `NDF_RELAY_LAUNCH` の行をキーつきで足し、`LAUNCH_ENV` を消す
 
-| 順 | PR | `const-fact` に当たる変更 | この課題の直し |
+| 順 | PR | 契約の変更 | この課題の直し |
 | --- | --- | --- | --- |
-| 1 | #4049 の実装 | `NDF_RELAY_SESSION` の行を足す | `SESSION_ENV` を置かない。`relay_session` と `launch_env` に字で書く |
-| 2 | #4061・#4062 の実装（1 本目） | `NDF_RELAY_LAUNCH` の行を足し、3 行を `child: drop` にする | `LAUNCH_ENV` を外す。`DIR_ENV` を置かない。決定 2 のテスト |
+| 1 | #4049 の実装 | 列 `key`。`NDF_RELAY_DIR` にキー。`NDF_RELAY_SESSION` の行（キーつき） | `identity.env_name` と規則 `env-key` を足す。`signals.py`・`adapters/claude.py`・`relay/account_login.py` の `NDF_RELAY_DIR` と、`relay_session`・`launch_env` の `NDF_RELAY_SESSION` をキーで引く。`AUTH_ENV` を関数の中へ移す。ラッパーの起動の入口でキーを解く。`SESSION_ENV` を置かない |
+| 2 | #4061・#4062 の実装（1 本目） | `NDF_RELAY_LAUNCH` の行（キーつき）。3 行を `child: drop` | `LAUNCH_ENV` を消し、`relay_launch`・`launch_env` をキーで引く。`relay_role` はキーで引き、`EnvNameError` を `NESTED` にする。`DIR_ENV` を置かない |
 | 3 | #4064 の実装（2 本目） | 無し | 無し |
-| 3 と並べてよい | #4101 の実装（lracct・#4049・#4062 のマージが前提。#4101 の決定 8） | ほかの行と `spec-env` | 無し（3 つの名前は 2 で字になっている） |
+| 3 と並べてよい | #4101 の実装（lracct・#4049・#4062 のマージが前提。#4101 の決定 8） | ほかの行と `spec-env` | 決定 6 の読み替えに従う |
 
-- 採らなかった案: #4049 の前に、`LAUNCH_ENV` を外すだけの PR を出す（行の無いうちは `LAUNCH_ENV` は落ちないので、外す理由が PR の中に無い。PR とレビューのラウンドが 1 本増え、#4049 と #4062 は `signals.py` を触るので rebase も増える）
-- 採らなかった案: 3 つの名前をすべて #4062 の実装の PR で直す（#4049 の実装の PR は `NDF_RELAY_SESSION` の行と `SESSION_ENV` を同時に足すので、#4049 の PR が先に落ちる）
-- **代償**: この課題を閉じるのは #4062 の実装の PR のマージの後になる。#4049 と #4062 の実装は、それぞれの設計に加えてこの文書の決定 4 の読み替えを読む必要がある
+- 採らなかった案: #4049 の前に、キーの列と読み手だけを足す PR を出す（その時点でキーで引けるのは `NDF_RELAY_DIR` だけで、#4049 が直後に同じ所を触る。PR とレビューのラウンドが 1 本増え、`signals.py` の rebase も増える）
+- 採らなかった案: 3 つの名前をすべて #4062 の実装の PR で直す（#4049 の実装の PR は `NDF_RELAY_SESSION` の行を足すので、#4049 の時点で名前の写しが要る形になる）
+- **代償**: この課題を閉じるのは #4062 の実装の PR のマージの後になる。#4049 の実装の PR の差分が、キーの列と読み手の分だけ増える
 - 根拠: Value 5・Value 2（MVV 版 11）。Value 5「並べられる作業は並べて進め、待つだけで止まらない」。Value 2（rebase と衝突の手直しに費用を使わない）
 
-### 決定 4: 3 つの設計を食い違わせないため、#4049 と #4062 の設計の該当する記述をこの文書の読み替えで上書きする
+### 決定 5: 3 つの設計を食い違わせないため、#4049・#4062 の設計の該当する記述をこの文書の読み替えで上書きする
 
 - **質問**: 設計文書を書き換えずに、実装する人がどちらに従うかをどう決めるか
-- **選んだ案**: 下の表の記述は、この文書の決定 1・2 で読み替える。2 つの設計のほかの記述（行の値・`child`・`relay_role`・テストの残り）は変えない。設計承認ゲートの後、conductor が #4049 と #4062 の課題の本文の「関連」にこの文書を足し、実装計画が読むようにする
+- **選んだ案**: 下の表の記述は、この文書の決定 1〜4 で読み替える。2 つの設計のほかの記述（行の値・`child`・`relay_role` の振る舞い・テストの残り）は変えない。設計承認ゲートの後、conductor が #4049・#4062・#4101 の課題の本文の「関連」にこの文書を足し、実装計画が読むようにする
 
 | 文書 | 節 | 元の記述 | 読み替え |
 | --- | --- | --- | --- |
-| `issue-4049-design-detail.md` | 「地図」の表の `relay/signals.py` の行 | 定数 `SESSION_ENV` を足す | 足さない。`relay_session` と `launch_env` は `"NDF_RELAY_SESSION"` を字で書く |
+| `issue-4049-design-detail.md` | 「地図」の表の `relay/signals.py` の行 | 定数 `SESSION_ENV` を足す | 足さない。`relay_session` と `launch_env` は `identity.env_name("relay-session")` で名前を得る |
 | `issue-4049-design-detail.md` | 「背景の作業の記録（`signals`）」の「内部のデータと定数」 | `SESSION_ENV` は `NDF_RELAY_SESSION` | 行ごと無い |
-| `issue-4061-4062-4064-design.md` | 「文脈と制約」の 2 つ目の項目 | 環境変数の名前は文字列の定数で持つ | 環境変数の名前は使う所に字で書く |
-| `issue-4061-4062-4064-design.md` | 決定 4 の「選んだ案」 | hook の経路は契約を import しないので、名前は `signals` の定数が持ち、テストで結ぶ | 名前は `signals.py` の使う所の字が持ち、決定 2 の 2 つのテストで結ぶ |
-| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「内部のデータと定数」 | `DIR_ENV` は `"NDF_RELAY_DIR"`（文字列を 1 か所に寄せる） | 行ごと無い。`relay_dir`・`launch_env`・`relay_role` は字で書く |
-| `issue-4061-4062-4064-design-detail.md` | 冒頭の段落（#4049 の実装を前提にする文） | `relay_session`・`SESSION_ENV`・`launch_env(directory, launch, session_id)` を前提にする | 前提から `SESSION_ENV` だけを外す。ほかの 2 つはそのまま |
-| `issue-4061-4062-4064-design.md` | 「テスト設計」の受け入れ条件 6・7 の行 | `launch_env` の鍵の集まりと契約の行の等しさ・`child_env` が 3 つを外すこと | 鍵の集まりの比べだけを読み替え、期待する名前は `facts.ids` で引く（決定 2）。読み返しのテストを足す。`child_env` の行と、詳細設計の「ラッパーの `_start`」のテストはそのまま |
+| `issue-4049-design-detail.md` | 「地図」の表の `contracts/domains/env.json` の行と、「guard `relay-busy`」の「内部のデータと定数」の後の `env.json` の段落 | `NDF_RELAY_SESSION` の行を足す | 行に `"key": "relay-session"` を足す。あわせて列 `key` と `NDF_RELAY_DIR` の `"key": "relay-dir"` を足す（決定 4） |
+| `issue-4049-design-detail.md` | 「guard `relay-busy`」の「関数の仕様」の `check` の事後条件（先に行う判定）と「異常系の処理」 | `_target` はファイルに触れず、先に行う判定は例外を上げない | `_target` は #4061 の後に `relay_role` へ移る。名前を引くために `env.json` を 1 プロセスに 1 回読む（`lru_cache`）。契約の誤りは `relay_role` が `NESTED` にするので、先に行う判定は今のとおり例外を上げない（決定 3） |
+| `issue-4061-4062-4064-design.md` | 「文脈と制約」の 2 つ目の項目 | 環境変数の名前は文字列の定数で持つ | 環境変数の名前は `identity.env_name` で契約のキーから引く |
+| `issue-4061-4062-4064-design.md` | 決定 4 の「選んだ案」 | hook の経路は契約を import しないので、名前は `signals` の定数が持ち、テストで結ぶ | 名前は契約の行にだけあり、`signals` はキーで引く。名前と契約を結ぶテストは置かない |
+| `issue-4061-4062-4064-design.md` | 「データ構造」の 3 行 | `NDF_RELAY_LAUNCH` の行の値 | 行に `"key": "relay-launch"` を足す |
+| `issue-4061-4062-4064-design.md` | 「テスト設計」の受け入れ条件 6・7 の行 | `launch_env` のキーの集まりと契約の行の等しさ・`child_env` が 3 つを外すこと | キーの集まりの等しさのテストは置かない（名前は契約から引く）。`child_env` の行と、詳細設計の「ラッパーの `_start`」のテスト（子の環境の 3 つの値）はそのまま |
+| `issue-4061-4062-4064-design-detail.md` | 冒頭の段落（#4049 の実装を前提にする文） | `relay_session`・`SESSION_ENV`・`launch_env(directory, launch, session_id)` を前提にする | 前提から `SESSION_ENV` を外し、`identity.env_name` を足す |
+| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「内部のデータと定数」 | `DIR_ENV` は `"NDF_RELAY_DIR"` | 行ごと無い。`relay_role` は `identity.env_name("relay-dir")`・`("relay-session")` で名前を得る |
+| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「関数の仕様」の事前条件・事後条件・副作用 | 例外を上げない。`env.get("NDF_RELAY_DIR")` で読む。ファイルに触れない | 例外を上げない（`EnvNameError` を受けたら `NESTED`）。名前はキーで引く。初回だけ `env.json` を読む（決定 3） |
+| `issue-4061-4062-4064-design-detail.md` | 「中継の変数の契約（`env.json`）」 | `NDF_RELAY_DIR` の行を直し、`NDF_RELAY_LAUNCH`・`NDF_RELAY_SESSION` を同じ形で並べる | #4049 が足した `NDF_RELAY_DIR`・`NDF_RELAY_SESSION` のキーを残し、`NDF_RELAY_LAUNCH` に `"key": "relay-launch"` を足して並べる |
+| `issue-4061-4062-4064-design-detail.md` | 「契約と `launch_env`」のテストの行 | `set(signals.launch_env(…))` が契約の行の `id` の集まりと等しい | 行ごと無い |
 
-- 採らなかった案: #4049・#4062 の設計文書を直す PR を出す（AI の起動指示が書き換えないと決めた。2 つは設計承認済みで、直すと承認した文と食い違う）
+- 採らなかった案: 3 つの設計文書を直す PR を出す（AI の起動指示が書き換えないと決めた。3 つは設計承認済みで、直すと承認した文と食い違う）
 - 採らなかった案: 読み替えを課題のコメントに書く（コメントは設計 PR のレビューと承認の外にあり、承認した内容として残らない）
-- **代償**: 実装する人は 2 本の文書を読む。定数を置く読み替えを見落とすと、`ndf check` が `const-fact` で落とすので、取り込まれる前に気付ける。テストの期待する名前を字の集まりで書く読み違いは検査を通るので、実装の PR のコードレビューで見る
+- **代償**: 実装する人は 2 本の文書を読む。名前の定数を置く読み違いは `ndf check` が `const-fact` で落とす。文字列リテラルで書く読み違いは、#4101 の `spec-env` が入るまでは検査に掛からないので、実装の PR のコードレビューと受け入れ条件 3 の `git grep` で見る
 - 根拠: Value 14・Value 3（MVV 版 11）。Value 14「判断の理由が残り、語がそろっている」。Value 3（判断の要らない確かめは仕組みが進める）
 
-### 決定 5: 利用者の全体の設計方針（#4069）に照らし、この設計は文脈とリソースの方針を変えず、手戻りを減らす側に働く
+### 決定 6: 同じ否定が #4101 にも及ぶため、#4101 の検査をキーで引く形に合わせ、17 個の名前の移し方は #4101 の判断として渡す
+
+- **質問**: 利用者の差し戻し（名前を文字列リテラルで書いて一致を検査やテストで縛る形を採らず、設定ファイルにまとめる）は、#4101 の決定 2（名前を写した定数を外し、使う所の文字列リテラルにする）にも及ぶか
+- **選んだ案**: 2 つに分けて及ぶ
+  - 中継の 3 つ（確定）: #4101 の規則 `spec-env` は、この課題の形（キーで引く）を前提に見る。下の表の読み替えがそのまま #4101 の実装に当たる
+  - #4101 の 17 個の名前（方向）: 名前の事実が契約とコードの 2 か所に分かれる形は、縛る手が検査でも同じで、利用者が否定した形に当たると判断する。差し戻しの文が対象にしたのは中継の 3 つで、17 個まで移すかの決定は #4101 の設計の判断として残す（conductor へ「#4101 に及ぶ」と知らせる）。移すなら、この課題の列 `key` と `identity.env_name` をそのまま使い、新しい仕組みを足さない
+
+| 文書 | 節 | 元の記述 | 読み替え |
+| --- | --- | --- | --- |
+| `issue-4101-design.md` | 決定 1 の (1) 読み出しの名前の解き方 | 名前を字・定数・組を回す変数から解く | 加えて、読み出しでも書き込み（子へ渡す辞書のキー）でも、`identity.env_name(<キーの文字列リテラル>)` の呼び出しを契約のキーの行の名前に解く |
+| `issue-4101-design.md` | 決定 1 の (2) `NDF_` の字 | 契約に無い `NDF_` の字を落とす | 加えて、キーを持つ行の名前の文字列リテラルを、Python（`NDF_` で始まらない名前を含む）とシェルの両方で落とす（キーで引くべき名前の写し） |
+| `issue-4101-design.md` | 決定 1 の (4) 逆向き | `NDF_` の行が (1)〜(3) のどこにも現れなければ落とす | キーを持つ行は、そのキーの文字列リテラルが `identity.env_name` の呼び出しに現れれば、現れたと数える |
+| `issue-4101-design.md` | 決定 7 の「選んだ案」と表の #4062 の行 | 新しい列は `group` だけにする。`signals.launch_env` の名前と契約を結ぶテスト | 新しい列は `group` と、この課題の `key` の 2 つになる。`launch_env` の名前と契約を結ぶテストは無い（決定 5） |
+| `issue-4101-design-detail.md` | 「規則 `spec-env`」の「処理の手順」と「単体テストの観点」 | 読み出しの名前を字・定数・組から解く | `identity.env_name` の呼び出しをキーで解く手順と、そのテスト（キーで引く読み出しが契約の名前に解ける・キーを持つ行の名前の文字列リテラルが落ちる）を足す。無いキー・重なるキーは規則 `env-key` が落とすので、`spec-env` では見ない |
+| `issue-4101-design-detail.md` | 「名前の定数の外し方」 | 定数を字にする | 17 個を移すと #4101 が決めたら、定数を外して行にキーを足し、`identity.env_name` で引く。`relay/signals.py` の `LAUNCH_ENV` は #4062 の実装が外す（今のまま） |
+
+- 採らなかった案: 及ばないとし、#4101 は文字列リテラルのまま進める（同じ契約の名前の持ち方が 2 通りになり、利用者が否定した形が 17 か所に残る）
+- 採らなかった案: この課題で 17 個の移し方まで決める（差し戻しの文の対象は中継の 3 つで、17 個のキーの値・`group` との関係・`testing/isolation.py` などの組の扱いは #4101 の設計の材料が要る）
+- **代償**: #4101 の規則 `spec-env` に、キーで引く呼び出しを解く見方と、キーを持つ名前の文字列リテラルを落とす見方が足される。17 個を移すなら、#4101 の実装の差分がキーの値の分だけ増える
+- 根拠: Value 8・Value 11（MVV 版 11）。同じ契約の名前の持ち方を 1 つにする
+
+### 決定 7: 利用者の全体の設計方針（#4069）に照らし、この設計は文脈とリソースの方針を変えず、手戻りを減らす側に働く
 
 - **質問**: #4069 の方針（文脈の再利用・最適な文脈量・キャッシュ・リソースを使い切る・処理待ちを作らない）に合うか
-- **選んだ案**: 合う。名前の書き方とテストだけを変え、文脈・キャッシュ・レーンの数に触れない。#4049 と #4062 の実装の PR が CI で落ちてから設計へ戻る手戻り（#4069 の配慮する事項 5）と、そのあいだ後ろの #4101 が待つ処理待ちを、実装の前に無くす。#4069 へ足す課題は無い
+- **選んだ案**: 合う。名前の持ち方だけを変え、文脈・キャッシュ・レーンの数に触れない。hook の 1 回の起動の時間も増やさない（決定 2）。#4049 と #4062 の実装の PR が CI で落ちてから設計へ戻る手戻り（#4069 の配慮する事項 5）と、そのあいだ後ろの #4101 が待つ処理待ちを、実装の前に無くす。#4069 へ足す課題は無い
 - 採らなかった案: 無し（照らし合わせだけの決定）
 - **代償**: 無し
 - 根拠: Value 2・Value 5（MVV 版 11）。#4069 の配慮する事項 5（手戻りの費用）
 
 ## 影響と危険
 
-- 働く範囲: NDF の開発（このリポジトリの `ndf check` と、#4049・#4062 の実装）。利用先のリポジトリでの振る舞いは変わらない（子へ渡す名前と値は同じ）
+- 働く範囲: NDF の開発（このリポジトリの `ndf check` と、#4049・#4062・#4101 の実装）。利用先のリポジトリでの振る舞いは変わらない（子へ渡す名前と値は同じ）
 - プロジェクトごとに違うものは無い。当たるモードは無い
-- 書きかけの文書・同じファイルを触る別の変更: #4049・#4061・#4062・#4064・#4068・#4101 が `relay/signals.py` か `env.json` を触る。順は決定 3 の表のとおりで、この課題は順を変えない
-- 範囲の外の現れ: `relay/account_login.py` の最上位の組 `AUTH_ENV` は、契約から引いた名前に `"NDF_RELAY_DIR"` の字を 1 つ足す（ログインの子を中継の外にするため）。3 つの名前の 1 つだけを含む組で、受け入れ条件 3 にも `const-fact` の `table-set` にも当たらないので、この課題は変えない（展開を含む組は `const-fact` の `lit` が読まない。範囲の外の発見として報告する）
-- 壊れうる箇所: 名前の字の打ち間違い（決定 2 の読み返しのテストが落とす）。テストの中で名前を字の集まりで書き戻す（検査は落とさない。コードレビューで見る）
+- 書きかけの文書・同じファイルを触る別の変更: #4049・#4061・#4062・#4064・#4068・#4101 が `relay/signals.py` か `env.json` を触る。順は決定 4 の表のとおりで、この課題は順を変えない
+- 壊れうる箇所: キーの打ち間違いは規則 `env-key` が CI で落とす。導入した契約が壊れたときの振る舞いは決定 3 のとおり
+- 版をまたぐ名前の変更: キーを持つ行の名前はラッパーと hook の間の約束で、ラッパーは起動した時の版の名前で値を渡し、hook は更新後の版の名前で読む。名前を変える変更は、中継の約束を変える変更と同じく、ラッパーの起動し直しを要する変更として扱う（`relay.md` の「変更が効く時点」）。この課題は名前を変えない
 
-写しのツリーで確かめた形（2026-11-22、`origin/main` の `ec8340675` を `git archive` で一時の場所へ取り出した写しで、`git init` して写しの `bin/ndf check --only const-fact` を打った。写しは確かめた後に消した）:
+取り出した作業ツリーで確かめた形（`origin/main` を `git archive` で一時の場所へ取り出したコピーで、`git init` してコピーの `bin/ndf check` を打った。コピーは確かめた後に消した）:
 
 | 当てた形 | 結果 |
 | --- | --- |
-| `NDF_RELAY_LAUNCH`・`NDF_RELAY_SESSION` の行を足す（`NDF_RELAY_DIR` を含む 3 行を `child: drop`） | 違反 1 件（`table-str: LAUNCH_ENV`） |
-| 行は今のまま、`DIR_ENV = "NDF_RELAY_DIR"` を足す | 違反 1 件（`table-str: DIR_ENV`） |
-| 行を足し、`SESSION_ENV = "NDF_RELAY_SESSION"` を足す | 違反 2 件（`LAUNCH_ENV`・`SESSION_ENV`） |
-| 行を足し、定数の名前を `_LAUNCH_ENV` にする | 違反 1 件（`table-str: _LAUNCH_ENV`） |
-| 行を足し、定数を外して字で書く（決定 1。`launch_env` は 3 つの名前の辞書を返す） | 違反 0 件 |
-| 上に加えて、最上位に 3 つの名前の組 `LAUNCH_NAMES` を置く | 違反 1 件（`table-set: LAUNCH_NAMES`） |
-| 決定 1 の形で、テストの最上位に 3 つの名前の字の集まりを置く | 違反 0 件（`const-fact` はテストを見ない） |
-| 決定 1 の形で、決定 2 の (1) のテストを足す | 違反 0 件。そのテストを pytest で打つと通った |
+| 中継の行を足すだけ（2026-11-22、`ec8340675`） | `const-fact` の違反 1 件（`table-str: LAUNCH_ENV`） |
+| 行は今のまま、`DIR_ENV = "NDF_RELAY_DIR"` を足す（同上） | 違反 1 件（`table-str: DIR_ENV`） |
+| 行を足し、`SESSION_ENV` を足す（同上） | 違反 2 件（`LAUNCH_ENV`・`SESSION_ENV`） |
+| 行を足し、定数の名前を `_LAUNCH_ENV` にする（同上） | 違反 1 件 |
+| 列 `key` と 3 行のキーを足し、読み手を新しい最上位のモジュールに置く（2026-11-23、`62431b5bc`） | `child-deps` の違反 1 件（作り直しの子の表に無いモジュール） |
+| 列 `key` と 3 行のキーを足し、読み手を `identity.env_name` に置き、3 つの名前を使う 4 つのファイルをキーで引く形にする（同上。生成文書は `--write-spec` で作り直した） | `ndf check` の違反 0 件。`src` の 3 つの名前の文字列リテラル 0 件。`test_relay_parts.py`・`test_guards.py`・`tests/identity`・`test_claude_args.py` と `account_login` を使う 3 本のテストの 472 件が通った |
 
 ### 代表のリポジトリでの振る舞い
 
 | 種類 | 直した後に起きること | この種類で扱えなくなること |
 | --- | --- | --- |
-| Web サービス | 中継の子へ渡る名前と値は今のとおり。名前の書き方だけが変わる | 無し |
+| Web サービス | 中継の子へ渡る名前と値は今のとおり。名前の持ち方だけが変わる | 無し |
 | モバイルアプリ | 同上 | 無し |
 | 業務文書だけ | 同上 | 無し |
 
 ### ai-plugins だけの事情
 
-- 無し（名前の書き方とテストは NDF のプラグインの中のもので、このリポジトリの運用の値を持たない）
+- 無し（名前の持ち方は NDF のプラグインの中のもので、このリポジトリの運用の値を持たない）
+
+## 用語
+
+| 用語 | 意味 | 反映 |
+| --- | --- | --- |
+| 環境変数のキー | 環境変数の契約の行の `key` の列の値。コードはこのキーから名前を引き、名前を文字列リテラルで書かない | 追加（用語集への反映は #4049 の実装の PR が行う） |
 
 ## テスト設計
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1 | #4049 の実装の PR の CI の `ndf check`（既存のジョブ） | `SESSION_ENV` を最上位に戻すと落ちる（この時点では `NDF_RELAY_LAUNCH` の行が無いので、`LAUNCH_ENV` は落ちない） |
-| 2 | #4061・#4062 の実装の PR の CI の `ndf check` | `LAUNCH_ENV` か `DIR_ENV` を最上位に戻す・3 つのうち 2 つ以上の名前の最上位の組を足すと落ちる |
-| 3 | 2 の PR の後に、`plugins/ndf/src` の 3 つの名前の字の現れをすべて挙げ、名前を値に持つ最上位の定数と、2 つ以上を含む最上位の組が無いことを読んで確かめる（実装の PR の完了判定。受け入れ条件 3 の `git grep` は 1 行の代入だけを拾う補助で、複数行の組と、`const-fact` の `lit` が読まない展開を含む組は、現れの一覧で見る） | — |
-| 4 | `set(signals.launch_env(d, "a" * 32, "s"))` が `set(facts.ids("env", area="relay", set_by="ndf", child="drop"))` と等しい | 行を消す・`child` を外す・`launch_env` に名前を足す・減らすと落ちる |
-| 5 | `relay_dir`・`relay_launch`・`relay_session` に `launch_env(d, L, S)` の返りを渡すと `d`・`L`・`S` が返る。空の `NDF_RELAY_SESSION` では `relay_session` が None（#4049 のテスト） | 書く側か読む側の字を打ち間違えると落ちる。2 つの名前を書く側と読む側の両方で入れ替える取り違えは、#4062 の「ラッパーの `_start`」のテストが落とす |
-| 6 | ドキュメントレビューで見る（文言を突き合わせるテストは書かない） | — |
+| 1 | #4049 の実装の PR の CI の `ndf check`（既存のジョブ） | `SESSION_ENV` を最上位に置くと落ちる |
+| 2 | #4061・#4062 の実装の PR の CI の `ndf check` | `LAUNCH_ENV` か `DIR_ENV` を最上位に置くと落ちる |
+| 3 | 2 の PR の後に、受け入れ条件 3 の `git grep`（引用符を付けない名前で `src`・`bin`・`hooks`）の当たりを、実行に使う名前と説明の文に分け、実行に使う名前が 0 件（実装の PR の完了判定で打つ） | — |
+| 4 | 実装の PR のコードレビュー（読み手が 1 つで、`identity` が `ndf.contracts` を import しない） | — |
+| 5 | `identity.env_name` の単体テスト: キーの行が 1 行なら名前を返す。0 行・2 行以上・契約のファイルが無い・JSON でない・`rows` が無い・キーの行の `id` が空のときは `EnvNameError`。規則 `env-key` のテスト: 無いキー・重なるキー・文字列リテラルでない引数を落とす。壊した契約を置いて hook の入口へ AskUserQuestion と `Read` の PreToolUse を流すと、中継の保存先とオーガナイザーの保存先に何も書かれず、`Read` は止められない。ラッパーの起動の入口は `stopped`・`config_broken` を返し、`launch.json` を書かない。`relay status` は契約が壊れていても動く | 既定の名前へ戻す・先の行を使う・`relay_role` が例外を上げる・ラッパーが起動の副作用の後に止まる・`AUTH_ENV` を import の時に組むと落ちる |
+| 6 | 実装の PR で、同じ Python・同じ入力（中継の内と外）で、hook の入口（`hooks/entry.py`）の PreToolUse を変更の前後で交互に打って時間の分布を比べ、guard を呼んだ後に `ndf.contracts`・`jsonschema` が import されていないことを確かめる（設計では決定 2 の実測） | — |
+| 7 | ドキュメントレビューで見る（文言を突き合わせるテストは書かない） | — |
+
+hook とラッパーの振る舞いのテスト（hook が読む値・`child_env` が 3 つを外すこと・ラッパーの `_start` が子へ渡す 3 つの値）は #4049・#4062 の設計のとおりに置く。名前と契約が一致することを確かめるテストは置かない（名前は契約から引くので、一致は構造で決まる）。
 
 ## どこを変えるか
 
-新設する関数 0・シグネチャを変える関数 0（`launch_env` のシグネチャの変更と `relay_session` の新設は #4049 の詳細設計が持つ）のため、詳細設計はここに畳む。
-
-| ファイル | 入れる PR | 変えること |
-| --- | --- | --- |
-| `src/ndf/domains/relay/signals.py` | #4049 の実装 | `relay_session` は `return env.get("NDF_RELAY_SESSION") or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う` で読む（無い・空は None。#4049 の詳細設計のとおり）。空の既定値へのフォールバックは `NDF501` が落とすので、既存の `relay_launch` と同じく利用者の入力の境界として抑制コメントを付ける。`launch_env` は `"NDF_RELAY_SESSION"` を字で返す。`SESSION_ENV` を置かない |
-| `src/ndf/domains/relay/signals.py` | #4061・#4062 の実装 | `LAUNCH_ENV` を消し、`launch_env` と `relay_launch` は `"NDF_RELAY_LAUNCH"` を字で書く。`relay_role` は `NDF_RELAY_DIR` を `relay_dir` と同じく字で読む。`DIR_ENV` を置かない |
-| `tests/domains/relay/test_relay_parts.py` | #4049 の実装 | 今の読み返しのテストに `relay_session` を足す（受け入れ条件 5） |
-| `tests/domains/relay/test_relay_parts.py` | #4061・#4062 の実装 | 契約と `launch_env` の等しさのテストを `facts.ids` で書く（受け入れ条件 4）。`LAUNCH_ENV` を使うテストがあれば字にする |
-
-異常系は無い（名前の書き方だけで、失敗の扱いは変えない）。
+詳細設計は [issue-4126-design-detail.md](./issue-4126-design-detail.md) にある（新設する関数 3（`identity.env_name`・`identity._env_keys`・規則 `env-key` の `checks.facts.env_key_findings`）のため）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4126 | 統合する（この課題の実装の PR は無い） | #4049 の実装の PR・#4061・#4062 の実装の PR | `plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py` |
+| #4126 | 統合する（この課題の実装の PR は無い） | #4049 の実装の PR・#4061・#4062 の実装の PR | `plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/relay/account_login.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/checks/facts.py`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/tests/identity/test_env_name.py`、`plugins/ndf/tests/checks/test_facts.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| #4049 の実装の形 | #4049 の実装はまだ始まっていない。`relay_session` の名前とシグネチャは #4049 の詳細設計のとおりと置いた。違う形で実装されたら、決定 2 の (2) のテストをその形で書く |
-| `launch_env` の呼び出し元 | #4049 の詳細設計は `Wrapper._start` で `launch_env(self.dir, launch, req.session_id)` を組むと書くが、中継のアカウントの切り替え（lracct。#3604・#3864）のマージの後の `main` では呼び出し元が `Wrapper._env_for`（`cli_floor.require` と `wrapper_launch.py` の 2 つの起動の経路が使う）に移っている。会話の ID をそこまで届ける形は #4049 の実装が決める（この課題の範囲の外。名前の書き方には関わらない） |
+| #4049 の実装の形 | #4049 の実装はまだ始まっていない。`relay_session` の名前とシグネチャは #4049 の詳細設計のとおりと置いた |
+| `launch_env` の呼び出し元 | #4049 の詳細設計は `Wrapper._start` で `launch_env(self.dir, launch, req.session_id)` を組むと書くが、中継のアカウントの切り替え（lracct。#3604・#3864）のマージの後の `main` では、呼び出し元が `Wrapper._env_for`（`cli_floor.require` と `wrapper_launch.py` の 2 つの起動の経路が使う）に移っている。会話の ID をそこまで届ける形は #4049 の実装が決める（この課題の範囲の外。名前の持ち方には関わらない） |
 
 ## 外部の調査
 
-省く: 外部の製品・標準に依らない内部の約束（NDF の検査 `const-fact` と環境変数の契約）の食い違いの直しで、比べる候補は #4101 の設計の外部の調査の表にある設定の読み込みのライブラリ（pydantic-settings・environs）と同じである
+省く: 外部の製品・標準に依らない内部の約束（NDF の環境変数の契約と、その読み手）の直しで、比べる候補は #4101 の設計の外部の調査の表にある設定の読み込みのライブラリ（pydantic-settings・environs）と同じである。どちらも hook の経路へ依存を足すことになり、名前を契約の 1 か所から引く機能は持たない
