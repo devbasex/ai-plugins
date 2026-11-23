@@ -282,6 +282,31 @@ def test_within_async_refuses_a_wait_over_the_budget(gate, path):
         asyncio.run(write())
 
 
+def test_within_async_rereads_the_budget_right_before_sleeping(gate, path, clock, monkeypatch):
+    # PR 4267 の r3-2: 手順が眠りを出してからループが再開するまでに予算が切れたら、眠らずに `Busy` を出して予約を取り消す
+    seed(path, next=NOW + 3)
+    budget = _Budget(5)
+    real = write_gate._advance
+
+    def advance(steps):
+        done = real(steps)
+        clock.now += 1
+        budget.left -= 3  # 予算は呼び手の数え方で減る（時計と同じとは限らない）
+        return done
+
+    monkeypatch.setattr(write_gate, "_advance", advance)
+
+    async def write() -> None:
+        async with gate.within(budget).async_acquire(PATCH):
+            pass
+
+    with pytest.raises(write_gate.Busy) as busy:
+        asyncio.run(write())
+
+    assert busy.value.seconds == pytest.approx(2)
+    assert record(path)["next"] == pytest.approx(NOW + 3)
+
+
 # withdraw・gate_of
 
 

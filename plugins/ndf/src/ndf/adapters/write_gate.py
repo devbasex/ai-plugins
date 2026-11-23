@@ -90,10 +90,14 @@ class Writes(NamedTuple):
 
 
 class Pause(NamedTuple):
-    """手順が眠る秒と、眠る間に送信のロックを持っているか（持っていれば非同期の経路は再開を `_FINISHER` で進める）。"""
+    """手順が眠る秒と、眠る間に送信のロックを持っているか（持っていれば非同期の経路は再開を `_FINISHER` で進める）。
+
+    `until` は眠りの終わりの時刻（時計の秒）。非同期の経路は眠る直前にここまでの残りを読み直す（`WriteGate._due`）。
+    """
 
     seconds: float
     holding: bool = False
+    until: Optional[float] = None
 
 
 class Reservation(NamedTuple):
@@ -220,6 +224,15 @@ def _abandon(steps: Generator[Pause, None, Optional[FileLock]], step: asyncio.Fu
             value.release()
     else:
         steps.close()
+
+
+def _thrown(steps: Generator[Pause, None, Optional[FileLock]], exc: BaseException) -> None:
+    """眠る前に止めた手順へ `exc` を投げ込み、手順の後始末（送信のロックを放す・予約の取り消し）を進める。"""
+    try:
+        steps.throw(exc)
+    except Exception:  # noqa: NDF401 例外: 投げ込んだ `exc`（と後始末の失敗）は呼び手が `exc` を出し直す
+        return
+    steps.close()
 
 
 def _restore(record: dict[str, float], old: Reservation) -> None:
@@ -349,6 +362,9 @@ class WriteGate(BaseThrottler):
     async def _turn(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
         """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。
 
+        眠る直前に `_due` で残りを読み直す（手順が眠りを出してからループが再開するまでの時間を引く）。予算に収まらなければ
+        手順へ `Busy` を投げ込み、送信のロックを放して予約を取り消してから出す（PR 4267 の r3-2）。
+
         送信のロックを持ったまま眠った手順の再開は `_FINISHER` で進める。既定のスレッドプールが送信のロックを待つ手順で
         埋まっても、ロックを持つ手順がその空きを待たない。
         """
@@ -366,7 +382,12 @@ class WriteGate(BaseThrottler):
                 return value
             holding = value.holding
             try:
-                await asyncio.sleep(value.seconds)
+                seconds = self._due(value, remaining)
+            except Busy as busy:
+                await loop.run_in_executor(_FINISHER if holding else None, _thrown, steps, busy)
+                raise
+            try:
+                await asyncio.sleep(seconds)
             except BaseException:
                 steps.close()
                 raise
@@ -476,7 +497,7 @@ class WriteGate(BaseThrottler):
             while True:
                 wait = self._left(reservation, remaining)
                 if wait > 0:
-                    yield Pause(wait)
+                    yield Pause(wait, until=reservation.at)
                 blocked, send = yield from self._sendable(kind, remaining)
                 if not blocked:
                     return send
@@ -496,6 +517,16 @@ class WriteGate(BaseThrottler):
         if wait > 0:
             _within_budget(remaining, wait)
         return wait
+
+    def _due(self, pause: Pause, remaining: Optional[Callable[[], float]]) -> float:
+        """眠る直前の秒。予算があれば `pause.until` までの残りを読み直し（`pause.seconds` より長くは眠らない）、
+        予算に収まらなければ `Busy`。"""
+        if remaining is None or pause.until is None:
+            return pause.seconds
+        wait = min(pause.seconds, pause.until - self.clock())
+        if wait > 0:
+            _within_budget(remaining, wait)
+        return max(wait, 0.0)
 
     def _sendable(self, kind: str, remaining: Optional[Callable[[], float]]) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
         """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(待ちの終わりが延びたか, 送信のロック)。延びたらロックを放して返す。"""
@@ -524,7 +555,7 @@ class WriteGate(BaseThrottler):
             if gap <= 0:
                 return False
             _within_budget(remaining, gap)
-            yield Pause(gap, holding)
+            yield Pause(gap, holding, self.clock() + gap)
 
     def _finish(self, kind: str, send: Optional[FileLock]) -> None:
         try:
