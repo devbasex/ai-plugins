@@ -147,7 +147,10 @@ def no_git(tmp_path, monkeypatch, detached, no_wait_no_child):
     root = tmp_path / "store"
     monkeypatch.setattr(command, "store_root_of", lambda _cwd: root)
     monkeypatch.setattr(command, "repo_id", lambda _cwd, _root: "https://example.invalid/o/work")
-    probes = lambda repo, name: liveness.Probes(functools.partial(launch.wrapper_name, repo, name), lambda: {}, lambda _sid: None)  # noqa: E731
+
+    def probes(repo, name):
+        return liveness.Probes(functools.partial(launch.wrapper_name, repo, name), lambda: {}, lambda _sid: None)
+
     monkeypatch.setattr(plan_run, "probes", probes)
     yield work
     durable.release_store(root)
