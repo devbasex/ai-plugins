@@ -59,9 +59,13 @@ def auth_failed(screen: str) -> bool:
     return AUTH_FAILED.search(screen) is not None
 
 
+def _cwd_key(cwd: Path) -> str:
+    """Claude Code が記録と出力の保存先に使う、作業ディレクトリのキー。"""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+
+
 def transcript_path(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
-    return signals.claude_config_root(environ) / "projects" / key / f"{session_id}.jsonl"
+    return signals.claude_config_root(environ) / "projects" / _cwd_key(cwd) / f"{session_id}.jsonl"
 
 
 def subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]:
@@ -81,9 +85,8 @@ def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, ta
 
 def shell_output_dir(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
     """背景のシェルの出力のファイルを置くディレクトリ（`shell_output_path` の `<id>.output` の親）。"""
-    key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     root = Path(environ.get("CLAUDE_CODE_TMPDIR") or "/tmp")  # noqa: S108 Claude Code が置く場所を読むだけで、ここでは作らない
-    return root / f"claude-{os.getuid()}" / key / session_id / "tasks"
+    return root / f"claude-{os.getuid()}" / _cwd_key(cwd) / session_id / "tasks"
 
 
 def shell_output_in(directory: Path, task_id: str) -> Optional[Path]:
