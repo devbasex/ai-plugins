@@ -249,8 +249,8 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `WriteGate.hold` | `adapters/write_gate.py` | 新設 | `hold(self, kind: str, count: int = 1) -> Generator[None, Any, Any]`（`@contextmanager`） | #4016 の `acquire` の書き込みの手順 (1)〜(5) を、要求でなく種類と件数で行う |
-| `WriteGate.reserve` | 同上 | 変更（#4016 の仕様を置き換える） | `reserve(self, kind: str, remaining=None, replacing=None, count: int = 1) -> Reservation` | 予約の後ろの間隔を件数の分だけ空ける |
-| `WriteGate.sent` | 同上 | 変更（同上） | `sent(self, kind: str, count: int = 1, started: Optional[float] = None) -> None` | 実際に送り始めた時刻から件数の分の間隔と、送り終えた時刻から間隔 1 つ分の遅いほうまで、最短の送信時刻を延ばす |
+| `WriteGate.reserve` | 同上 | 変更（#4016 の仕様を置き換える） | `reserve(self, kind: str, replacing=None, count: int = 1, remaining=None) -> Reservation` | 予約の後ろの間隔を件数の分だけ空け、`CONTENT` は件数の分をウィンドウに予約する |
+| `WriteGate.sent` | 同上 | 変更（同上） | `sent(self, reservation: Reservation, started: Optional[float] = None) -> None` | 一覧の自分の件数分の項目を送り終えた時刻へ置き換え、実際に送り始めた時刻から件数の分の間隔と、送り終えた時刻から間隔 1 つ分の遅いほうまで、最短の送信時刻を延ばす |
 | `WriteGate.acquire` | 同上 | 変更（同上） | #4016 のまま | `kind_of(request)` が None ならすぐ通し、ほかは `with self.hold(kind, 1):` で通す |
 | `within` の throttler の `hold`・`acquire` | 同上 | 変更（同上） | `hold(self, kind: str, count: int = 1)`・`acquire(self, request)` | #4016 の予算を持つ手順を `hold` に置き、`acquire` は件数 1 で `hold` を呼ぶだけ |
 | `Busy` | 同上 | 変更（同上） | `Busy(seconds: float, until: Optional[float] = None)` | `until` は次に送れる時刻（エポック秒）。分からなければ None |
@@ -259,14 +259,14 @@ import の重さ（2026-11-22 にこのマシンで `python -I -c` を 10 回走
 
 - `WriteGate.hold`
   - 事前条件: `kind` は `WRITE` か `CONTENT`。`count` は 1 以上の整数
-  - 事後条件: #4016 の `acquire` の書き込みの事後条件と同じ（送る時刻は待ちの終わり以後かつ最短の送信時刻以後で、送信のロックを持つほかの書き込みと重ならない）。予約は `reserve(kind, …, count=count)` で取る。文脈に入る直前（送信を許した時刻）を `started` として持ち、文脈を出ると `sent(kind, count, started)` を呼んで送信のロックを放す（例外でも放す）
-  - 件数の意味（決定 7）: 文脈の中で送られる書き込みを `count` 件と数える。文脈の中の要求どうしの間は空けない（本物の `gh` が続けて送る）。次の書き込みは、予約から `count` 件分の間隔の後（`reserve`）で、かつ実際に送り始めた時刻から `count` 件分の間隔の後（`sent`）に送る。予約を取った後に先の書き込みが長引いて実際の送信が後ろへずれても、件数の分の間隔は送る前に消化されない。後続の予約は、#4016 の手順 (3)・(4) で送信のロックの下で最短の送信時刻を読み直すので、予約の時刻が過ぎていてもこの値まで待つ
-  - 単体テストの観点: #4016 の `acquire` のテスト（I1〜I6・決定 10）は `hold` に対して同じ形で書き、`acquire` は読み取りを通すことと `hold` へ渡す種類と件数 1 だけを縛る。`hold(CONTENT, 3)` の後の `CONTENT` の予約が `github.content-spacing` の 3 倍の後、`WRITE` の予約が `github.write-spacing` の 3 倍の後になる。偽の時計で `hold(CONTENT, 20)` を予約し、続けて単件の `CONTENT` を予約し、両方の予約の時刻が過ぎてから 20 件の文脈が 1 秒で終わる → 単件の送信は 20 件の文脈に入った時刻 + 20 × `github.content-spacing` 以後（送り終えた時刻 + 7.2 秒ではない）
+  - 事後条件: #4016 の `acquire` の書き込みの事後条件と同じ（送る時刻は待ちの終わり以後かつ最短の送信時刻以後で、送信のロックを持つほかの書き込みと重ならない）。予約は `reserve(kind, …, count=count)` で取る。文脈に入る直前（送信を許した時刻）を `started` として持ち、文脈を出ると `sent(reservation, started)` を呼んで送信のロックを放す（例外でも放す）
+  - 件数の意味（決定 7）: 文脈の中で送られる書き込みを `count` 件と数える。文脈の中の要求どうしの間は空けない（本物の `gh` が続けて送る）。次の書き込みは、予約から `count` 件分の間隔の後（`reserve`）で、かつ実際に送り始めた時刻から `count` 件分の間隔の後（`sent`）に送る。予約を取った後に先の書き込みが長引いて実際の送信が後ろへずれても、件数の分の間隔は送る前に消化されない。後続の予約は、#4016 の送る直前の判定で送信のロックの下で最短の送信時刻を読み直すので、予約の時刻が過ぎていてもこの値まで待つ。`CONTENT` は `count` 件をウィンドウの件数に数える（`reserve`・送る直前の判定・`sent` のどれも同じ件数）
+  - 単体テストの観点: #4016 の `acquire` のテスト（I1〜I6・決定 10・11）は `hold` に対して同じ形で書き、`acquire` は読み取りを通すことと `hold` へ渡す種類と件数 1 だけを縛る。`hold(CONTENT, 3)` の後、一覧に送り終えた時刻が 3 件あり、`CONTENT` の予約が `github.write-spacing` の 3 倍の後、`WRITE` の予約が 4 倍の後になる。1 時間のウィンドウに 497 件がある記録で `hold(CONTENT, 4)` の予約は後ろから 497 番目の時刻 + 3,600 秒で `next` を進めず、`hold(CONTENT, 3)` は待たない。偽の時計で `hold(CONTENT, 20)` を予約し、続けて単件の `CONTENT` を予約し、両方の予約の時刻が過ぎてから 20 件の文脈が 1 秒で終わる → 単件の送信は 20 件の文脈に入った時刻 + 20 × `github.write-spacing` 以後（送り終えた時刻 + 1 秒ではない）
 - `WriteGate.reserve`
-  - 事後条件: 記録の `next` は `予約 + count × github.write-spacing の秒`、`CONTENT` なら `next_content` も `予約 + count × github.content-spacing の秒`。予約の時刻の決め方と置き換え（`replacing`）は #4016 のまま。`withdraw` は `before` へ戻すので件数に依らない
+  - 事後条件: 共通の順番 `T = max(今, next, blocked_until)`。`CONTENT` の予約の時刻は、時刻の一覧に `count` 件を足しても 1 分・1 時間のどちらのウィンドウの上限も越えない最も早い時刻と `T` の大きいほう（長さ L・上限 N のウィンドウで、一覧に `N - count` 件より多くあれば後ろから `N - count + 1` 番目の時刻 + L。`count` が N 以上なら一覧の最後の時刻 + L）で、一覧へ予約の時刻を `count` 件足す。予約の時刻が `T` なら記録の `next` は `予約 + count × github.write-spacing の秒`、`T` より後（ウィンドウの空きを待つ）なら `next` を変えず、`hold` は予約の時刻まで送信のロックの外で眠ってから予約を置き換えて順番を取り直す。置き換え（`replacing`）と `withdraw` は、一覧から自分の `count` 件を除き、`next` を進めた予約だけ `before` へ戻す
 - `WriteGate.sent`
-  - 事後条件: `started` が None なら（`acquire` の経路）#4016 のまま。`started` があれば、`sent_next` は `max(sent_next, 今 + github.write-spacing の秒, started + count × github.write-spacing の秒)`、`CONTENT` なら `sent_next_content` も `max(sent_next_content, 今 + github.content-spacing の秒, started + count × github.content-spacing の秒)`。`next`・`next_content` も同じ値以上へ延ばす（#4016 の `sent` が `next` を延ばすのと同じ）
-  - 保てる範囲（決定 7）: 文脈の中の `count` 件はまとめて送られるので、任意の 1 時間の窓での件数は保証しない。保てるのは、文脈の前後のほかの書き込みとの間隔と、長い時間で平均した 1 時間あたりの件数（`count` 件の文脈の後は `count` 件分の間隔が空く）である
+  - 事後条件: `CONTENT` なら一覧の予約の時刻の `count` 件を除き、送り終えた時刻（今）を `count` 件足す。`started` が None なら（`acquire` の経路）`sent_next`・`next` は #4016 のまま。`started` があれば、`sent_next` は `max(sent_next, 今 + github.write-spacing の秒, started + count × github.write-spacing の秒)`、`next` も同じ値以上へ延ばす（#4016 の `sent` が `next` を延ばすのと同じ）
+  - 保てる範囲（決定 7）: どの 1 分・1 時間のウィンドウでも、件数の見積もりの合計が上限を越える時刻には送らない。ただし `count` が上限そのものを越える文脈は、ウィンドウが空になってから 1 回でまとめて送るので上限を越える。文脈の中の要求どうしの間隔は保たない。保てるのは、文脈の前後のほかの書き込みとの間隔である
 - `Busy`
   - 事後条件: `until` は、待ちが予算に収まらないと分かった時点に次に送れる時刻が分かれば、その時刻を持つ。分かるのは、記録のロックの中で予約までの秒が `remaining()` 以上と決めたとき（`until` = 予約の時刻）と、(4) で最短の送信時刻までの秒が `remaining()` 以上と決めたとき（`until` = 最短の送信時刻と `blocked_until` の大きいほう）。上限を `remaining()` にした記録のロック・送信のロックの時間切れ、ロックを待つ前の予算の切れ、送る直前の予算の切れでは None（ほかのプロセスがいつロックを放すかは分からない）。上限が `LOCK_SECONDS`・`github.write-send-lock` だった時間切れは `Busy` にせず #4016 の I5 で送る（#4016 の「予算による打ち切り」のまま）。`seconds` は #4016 のまま
   - #4016 の `_translating` は今のとおり `seconds` を `retry_after` へ写し、`until` を使わない
