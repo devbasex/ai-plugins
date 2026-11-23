@@ -647,7 +647,7 @@ def clear_values(state_dirs: Iterable[Path]) -> None:
     """渡された保存先から前の試行の値を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
 
     差し込みの値（`VALUES_FILE`）と課題の写し（`ISSUE_COPIES`）を消す。写しは差し込みの値の有無によらず消す。残すと
-    `_issue_values` が写しを優先し、新しい試行が GitHub で直した題・本文を取り込まず、書き手の権限も確かめ直さない
+    `_issue_values` が写しを優先し、新しい試行が GitHub で直した題・本文を使わず、書き手の権限も確かめ直さない
     （前の試行の後で write 権限を失った書き手の本文を worker に読ませる。PR 4289 の指摘）。
     消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
     """

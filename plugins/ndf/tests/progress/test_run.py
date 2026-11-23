@@ -892,7 +892,7 @@ def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs
     dirs = [_step_dir(st, tid, "design", step) for step in ("design", "design-review", "design-merge")]
     for d in dirs:
         invoke.write_values(d, "古い", {}, {}, True)
-    # 課題の写しも消す。残すと新しい試行が GitHub で直した題・本文を取り込まない
+    # 課題の写しも消す。残すと新しい試行が GitHub で直した題・本文を使わない
     copies = [dirs[0] / invoke.ISSUE_BODY_FILE.format(number=ISSUE), dirs[0] / invoke.ISSUE_TITLE_FILE.format(number=ISSUE)]
     for c in copies:
         c.write_text("{}", encoding="utf-8")

@@ -254,14 +254,15 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
 @pytest.mark.parametrize(
     ("name", "missing"),
     [
-        ("design", {"title", "body_file", "worker", "rebuild", "required"}),
-        ("impl", {"title", "body_file", "issue", "test_command", "worker", "required"}),
+        ("design", {"worker", "rebuild", "required"}),
+        ("impl", {"test_command", "worker", "required"}),
         ("design-merge", {"worker"}),
     ],
 )
 def test_template_values_missing_from_every_source_stop_as_precondition_by_name(tmp_path, monkeypatch, name, missing):
     # PR 3464 の指摘（#3092）: テンプレートの必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に止まる（#3908 の決定 4 で precondition）。
-    # 出所（課題・設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
+    # 出所（設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる。課題に依存しない差し込みが欠ければ
+    # 課題を読む前に止まるので、課題の出所の差し込み（title・body_file・issue）はまだ挙げない（PR 4289 の r2-1）
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
@@ -269,8 +270,9 @@ def test_template_values_missing_from_every_source_stop_as_precondition_by_name(
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     named = {i["key"]: i["source"] for i in got.report["items"]}
     assert set(named) >= missing and "branch" not in named
+    assert not {"title", "body_file", "issue"} & set(named)
     assert all(n in got.cause["detail"] for n in missing)
-    assert named.get("worker") == invoke.FROM_DEFAULT and named.get("title", invoke.FROM_ISSUE) == invoke.FROM_ISSUE
+    assert named.get("worker") == invoke.FROM_DEFAULT
 
 
 def _filled_plan(tmp_path, monkeypatch, name):
@@ -303,14 +305,16 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
 
 
 def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
-    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）
-    repo = _sprint_repo(tmp_path)
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）。
+    # 課題に依存しない差し込み（設定と worker の既定）はそろえ、課題の出所の欠けまで進める
+    repo = _sprint_repo(tmp_path, PROJECT)
+    sprint_fixture.with_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     run = _stage_run_of("impl", repo, [3, 4])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
     with pytest.raises(invoke.TemplateValuesMissing) as got:
-        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project={}, local_tests=True)
+        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project=PROJECT, local_tests=True)
     assert "issue" not in got.value.missing and "title" in got.value.missing
 
 
@@ -514,6 +518,7 @@ def test_code_review_with_a_gathered_off_the_sprint_branch_stops_before_the_plan
     # unreviewed_range が判定できなければ、工程の条件と同じ理由（precondition）でプランを組まずに止まる
     repo, gathered = _gathered_repo(tmp_path)
     subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "other"], check=True)
+    sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない worker の欠けで先に止まらないようにする
     stage = _stage("コードレビュー", "standard")
     run_ = invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, _seam_context(repo, gathered)))
     got = invoke.invoke(run_, repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
@@ -554,6 +559,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
+    sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: None)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
@@ -599,6 +605,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
     # PR 3469 の指摘: 課題を読めない失敗を「題と本文が無い」（打ち直せない invalid）に変えず、理由を添えて
     # 打ち直せる失敗（不達・5xx・上限）は transient、ほか（認証が無い・リモートが無い）は precondition で止める
     repo = _sprint_repo(tmp_path, PROJECT)
+    sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
 
     def fail(location, n):
         raise error
