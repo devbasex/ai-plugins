@@ -249,6 +249,8 @@ def test_retry_within_counts_the_sixty_seconds_githubkit_sleeps_for_a_zero_wait(
     assert not github.RetryWithin(remaining=lambda: 0.0)(failed, 0).do_retry
     assert not github.RetryWithin(remaining=lambda: 59.0)(failed, 0).do_retry
     assert github.RetryWithin(remaining=lambda: 60.0)(failed, 0).do_retry
+    # r2-1: 見送った呼び手へ返す待ちも、予算と比べた 60 秒にそろえる（0 秒ならすぐ打ち直して同じ上限に当たる）
+    assert github_limits.failure_of(failed, "POST /issues", False, NOW).retry_after == github_limits.SDK_DEFAULT_SLEEP
 
 
 def test_a_secondary_limit_told_by_githubkit_is_shared_without_the_phrase() -> None:

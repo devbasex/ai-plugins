@@ -264,14 +264,15 @@ class RetryWithin:
                 share(self.gate, exc.response.raw_response, limit.seconds if limit.hinted else backoff(retry_count))
         option = RETRY_DEFAULT(exc, retry_count)
         if option.do_retry and isinstance(exc, RateLimitExceeded):
-            if sdk_sleep(option) > self.remaining():
+            if sdk_sleep(option.retry_after.total_seconds() if option.retry_after else 0.0) > self.remaining():
                 return RetryOption(False)
         return option
 
 
-def sdk_sleep(option: RetryOption) -> float:
-    """githubkit が打ち直しの前に実際に眠る秒。待ちの指定が無いか 0 秒（`Retry-After: 0`）なら 60 秒眠る（githubkit 0.17.1）。"""
-    seconds = option.retry_after.total_seconds() if option.retry_after else 0.0
+def sdk_sleep(seconds: float) -> float:
+    """githubkit が打ち直しの前に実際に眠る秒。待ちの指定が無いか 0 秒（`Retry-After: 0`）なら 60 秒眠る（githubkit 0.17.1）。
+
+    `RetryWithin` が予算と比べる秒で、打ち直しを見送った上限（`RateLimitExceeded`）の `retry_after` にも同じ秒を使う。"""
     return seconds or SDK_DEFAULT_SLEEP
 
 
@@ -295,14 +296,16 @@ def failure_of(exc: RequestFailed | RequestError | write_gate.Busy, label: str, 
         return Failure(f"GitHub へ届かない: {label}: {exc}", unreached=True)
     status, text = exc.response.status_code, exc.response.raw_response.text
     reasons, limit = reasons_of(text), limit_of_failure(exc, now)
+    limited = isinstance(exc, RateLimitExceeded)  # githubkit が打ち直しを判断した上限。待ちは `RetryWithin` と同じ秒にそろえる
     if limit is not None:  # 二次の上限は待てば戻る（#3941）
         detail = f"GitHub の上限（{quota_of(label)} のスロット・secondary rate limit）: {label}"
-        recorded = _recorded(exc.response.raw_response, limit.seconds)
+        seconds = sdk_sleep(limit.seconds) if limited else limit.seconds
+        recorded = _recorded(exc.response.raw_response, seconds)
         quota = quota_of(label)
-        return Failure(detail, status, limit.seconds, quota, secondary=True, hinted=limit.hinted, reasons=reasons, recorded=recorded)
-    if isinstance(exc, RateLimitExceeded):
+        return Failure(detail, status, seconds, quota, secondary=True, hinted=limit.hinted, reasons=reasons, recorded=recorded)
+    if limited:
         detail = f"GitHub の上限（{quota_of(label)} のスロット）: {label}"
-        return Failure(detail, status, exc.retry_after.total_seconds(), quota_of(label), reasons=reasons)
+        return Failure(detail, status, sdk_sleep(exc.retry_after.total_seconds()), quota_of(label), reasons=reasons)
     body = f": {text[:300]}" if detail_body else ""
     return Failure(f"GitHub が断った（{status}）: {label}{body}", status, reasons=reasons)
 
