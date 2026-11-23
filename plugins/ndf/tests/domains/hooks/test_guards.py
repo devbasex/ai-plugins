@@ -11,13 +11,13 @@ import git_sandbox
 import pytest
 
 from ndf import cli
-from ndf.domains.hooks import budget, context, counter, dispatch, strict, tables
+from ndf.domains.hooks import budget, context, dispatch, strict, tables
 from ndf.domains.hooks.guards import ask, context_limit, process_wait, sleep
 from ndf.domains.records import cli as records_cli
 from ndf.domains.relay import signals
 from ndf.domains.relay.context_thresholds import thresholds
 
-from ._hooks import advise_text, bash, call_entry, deny_reason, records, sample, state_dir, stop
+from ._hooks import advise_text, bash, call_entry, deny_reason, ndf_repo, records, sample, stop, usage_transcript
 
 FENCE = "```ndf-next\n/goal 次のセグメント\n```"
 
@@ -204,20 +204,8 @@ def test_script_chain_guard(tmp_path, command, denied):
     assert (deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, command))) is not None) is denied
 
 
-def _usage_transcript(tmp_path, tokens):
-    # 会話の記録を置く tmp_path を、NDF の引継ぎの規約を使うリポジトリ（メインディレクトリに .ndf）にする（#3995 の 3995:15）
-    _ndf_repo(tmp_path)
-    line = {"type": "assistant", "message": {"usage": {"input_tokens": tokens}}}
-    (tmp_path / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
-
-
-def _ndf_repo(root):
-    (root / ".git").mkdir(parents=True, exist_ok=True)
-    (root / ".ndf").mkdir(exist_ok=True)
-
-
 def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
-    _usage_transcript(tmp_path, 900000)
+    usage_transcript(tmp_path, 900000)
     reason = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
     assert reason is not None and ".ndf/handoff/" in reason
     assert records()[-1]["notes"]["under_relay"] is False
@@ -232,14 +220,14 @@ def test_context_limit_under_the_relay_asks_for_the_next_section(tmp_path, monke
     relay = tmp_path / "relay"
     relay.mkdir()
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
-    _usage_transcript(tmp_path, 900000)
+    usage_transcript(tmp_path, 900000)
     assert "次のセグメントのブロック" in deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
     assert records()[-1]["notes"]["under_relay"] is True
 
 
 def test_context_limit_does_not_record_relay_when_it_did_not_judge(tmp_path):
     # 判定しなかった行に under_relay を書かない（#2789）
-    _usage_transcript(tmp_path, 10)
+    usage_transcript(tmp_path, 10)
     call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
     assert "under_relay" not in records()[-1]["notes"] and records()[-1]["notes"]["context_tokens"] == 10
 
@@ -259,7 +247,7 @@ def test_context_limit_stops_at_the_operating_limit(tmp_path, monkeypatch, token
     # #3995 の 3995:4・3995:9: PreToolUse は運用上限（500,000。NDF_CONTEXT_LIMIT で替える）から止め、判断開始の値（250,000）では止めない
     if env is not None:
         monkeypatch.setenv("NDF_CONTEXT_LIMIT", env)
-    _usage_transcript(tmp_path, tokens)
+    usage_transcript(tmp_path, tokens)
     assert (deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None) is denied
 
 
@@ -268,9 +256,9 @@ def test_context_limit_reads_the_limit_from_the_limits_table(tmp_path, monkeypat
     real = tables.policy_value
     swapped = {"context.decide-from": 100_000, "context.limit": 200_000}
     monkeypatch.setattr(tables, "policy_value", lambda name, key: swapped[name] if name in swapped else real(name, key))
-    _usage_transcript(tmp_path, 199_999)
+    usage_transcript(tmp_path, 199_999)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is None
-    _usage_transcript(tmp_path, 200_000)
+    usage_transcript(tmp_path, 200_000)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
 
 
@@ -290,36 +278,22 @@ def _linked(common, worktree):
     (worktree / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
 
 
-@pytest.fixture
-def counted_tail(monkeypatch):
-    """会話の記録の末尾を読んだ回数。"""
-    got = {"n": 0}
-    real = context.read_tail
-
-    def wrapped(*args, **kw):
-        got["n"] += 1
-        return real(*args, **kw)
-
-    monkeypatch.setattr(context, "read_tail", wrapped)
-    return got
-
-
 def test_context_limit_skips_a_subagent(tmp_path):
     # #3995 の 3995:15: 入力に agent_id があれば（サブエージェント）運用上限を超えても判定しない
-    _usage_transcript(tmp_path, 600_000)
+    usage_transcript(tmp_path, 600_000)
     payload = {**bash(tmp_path, "ls"), "agent_id": "a0123", "agent_type": "ndf:worker"}
     assert call_entry("claude", "PreToolUse", payload) is None
 
 
 def test_context_limit_judges_with_only_the_agent_type(tmp_path):
     # #3995 の 3995:15: agent_type だけ（--agent で起動した主の会話）なら判定する
-    _usage_transcript(tmp_path, 600_000)
+    usage_transcript(tmp_path, 600_000)
     payload = {**bash(tmp_path, "ls"), "agent_type": "ndf:supervisor"}
     assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
 
 
 def test_context_limit_passes_without_usage(tmp_path):
-    _ndf_repo(tmp_path)
+    ndf_repo(tmp_path)
     (tmp_path / "transcript.jsonl").write_text(json.dumps({"type": "user", "message": {"content": "x"}}) + "\n", encoding="utf-8")
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "ls")) is None
 
@@ -426,7 +400,7 @@ def handoff_repos(tmp_path):
     (wt / ".ndf" / "handoff").mkdir(parents=True)
     (wt / "src").mkdir()
     other = tmp_path / "other"
-    _ndf_repo(other)
+    ndf_repo(other)
     (tmp_path / "link").symlink_to(main / ".ndf" / "handoff")
     (tmp_path / "sp ace").symlink_to(main / ".ndf" / "handoff")
     (tmp_path / "main-src").symlink_to(main / "src")
@@ -566,7 +540,7 @@ def test_passes_expands_a_quoted_tilde_like_the_cli(handoff_repos, monkeypatch):
 
 def test_handoff_bash_judges_once_per_tool_call(tmp_path, monkeypatch):
     # #3995: 運用上限で通す連結は context-limit と script-chain の両方が見るが、判定は同じ呼び出しの中で 1 回だけ
-    _usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 500_000)
     (tmp_path / ".ndf" / "handoff").mkdir()
     calls = []
     real = context_limit._handoff_bash
@@ -626,7 +600,7 @@ def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsy
 
 def test_context_limit_passes_the_handoff_calls_at_the_operating_limit(tmp_path):
     # #3995 の 3995:6: 運用上限で、引継ぎ文書の Read・TaskStop・引継ぎ文書の確かめは通り、ほかの呼び出しは止まる
-    _usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 500_000)
     (tmp_path / ".ndf" / "handoff").mkdir()
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": ".ndf/handoff/next.md"})
     stop_task = sample("claude", "PreToolUse", tmp_path, tool_name="TaskStop", tool_input={"task_id": "x"})
@@ -641,7 +615,7 @@ def test_context_limit_passes_the_handoff_calls_at_the_operating_limit(tmp_path)
 
 def test_script_chain_still_stops_other_ndf_chains_below_the_limit(tmp_path):
     # #3995: 引継ぎのコマンドだけの連結は運用上限の下でも通り、ほかの NDF のコマンドを混ぜた連結は script-chain が止める
-    _usage_transcript(tmp_path, 1)
+    usage_transcript(tmp_path, 1)
     (tmp_path / ".ndf" / "handoff").mkdir()
     check = "ndf records handoff check .ndf/handoff/next.md"
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, f"ndf relay context record --work 1 && {check}"))) is None
@@ -650,7 +624,7 @@ def test_script_chain_still_stops_other_ndf_chains_below_the_limit(tmp_path):
 
 def test_context_limit_keeps_denying_different_calls(tmp_path):
     # #3995 の 3995:6・決定 6: 運用上限の拒否は数えず、同じ入力の中で違う呼び出しを 3 回続けても 3 回とも止める
-    _usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 500_000)
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / "README.md")})
     for payload in (bash(tmp_path, "ls"), bash(tmp_path, "pwd"), read):
         assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
@@ -659,7 +633,7 @@ def test_context_limit_keeps_denying_different_calls(tmp_path):
 def test_hook_off_context_limit_neither_judges_nor_notifies(tmp_path, monkeypatch, counted_tail):
     # #3995 の 3995:11・テスト設計の 11: NDF_HOOK_OFF=context-limit なら 600,000 でも判定も知らせもせず、会話の記録を読まない
     monkeypatch.setenv("NDF_HOOK_OFF", "context-limit")
-    _usage_transcript(tmp_path, 600_000)
+    usage_transcript(tmp_path, 600_000)
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "ls")) is None
     assert call_entry("claude", "PostToolUse", sample("claude", "PostToolUse", tmp_path)) is None
     assert counted_tail["n"] == 0
@@ -691,7 +665,7 @@ def test_context_limit_reason_fits_the_budget_with_a_long_main_directory(tmp_pat
     main = tmp_path / "m"
     main = tmp_path / ("m" * (156 - len(os.path.realpath(main)) + 1))
     assert len(os.path.realpath(main)) == 156
-    _usage_transcript(main, 900000)
+    usage_transcript(main, 900000)
     reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, "ls")))
     assert "全文:" not in reason and len(reason) <= 600
     assert f"ndf records --cwd {os.path.realpath(main)} handoff check '.ndf/handoff/<文書>.md' " in reason
@@ -701,7 +675,7 @@ def test_context_limit_reason_fits_the_budget_with_a_long_main_directory(tmp_pat
 def test_context_limit_reason_comes_alone_when_script_chain_also_denies(tmp_path):
     # #3995（r4-1・r6-1）: 運用上限で script-chain も止める連結でも、引継ぎの手順だけを出し、230 字のメインディレクトリで wait の行まで切らない
     main = tmp_path / ("m" * (230 - len(os.path.realpath(tmp_path / "m")) + 1))
-    _usage_transcript(main, 900000)
+    usage_transcript(main, 900000)
     command = "ndf lanes status p1 && ndf records handoff check .ndf/handoff/next.md"
     reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, command)))
     assert "全文:" not in reason and len(reason) <= 600 and reason.endswith("wait の行を残す。")
@@ -712,7 +686,7 @@ def test_context_limit_reason_reaches_the_end_with_a_quoted_main_directory_outsi
     main = tmp_path / "a b"
     main = tmp_path / ("a b" + "m" * (243 - len(os.path.realpath(main))))
     assert len(os.path.realpath(main)) == 243
-    _usage_transcript(main, 900000)
+    usage_transcript(main, 900000)
     reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, "ls")))
     assert f"--cwd '{os.path.realpath(main)}' " in reason and "ndf-next" in reason
     assert "全文:" not in reason and len(reason) <= 600 and reason.endswith("wait の行を残す。")
@@ -720,173 +694,10 @@ def test_context_limit_reason_reaches_the_end_with_a_quoted_main_directory_outsi
 
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
     # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
-    _usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 500_000)
     first = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
-    _usage_transcript(tmp_path, 600_000)
+    usage_transcript(tmp_path, 600_000)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) == first
-
-
-def _tool(cwd, event, tool_use_id="toolu_A"):
-    """Bash の PreToolUse・PostToolUse を流した出力。`tool_use_id` が None なら入力に ID を置かない。"""
-    payload = sample("claude", event, cwd, tool_name="Bash", tool_input={"command": "ls"}, tool_use_id=tool_use_id)
-    if tool_use_id is None:
-        del payload["tool_use_id"]
-    return call_entry("claude", event, payload)
-
-
-def _notice(out):
-    text = advise_text(out)
-    return text is not None and "判断開始の値" in text
-
-
-def _user_input(cwd, relay=False):
-    """利用者の入力（`relay` なら中継が送った入力: マーカーを立ててから送る）。"""
-    if relay:
-        counter.mark_relay(sample("claude", "UserPromptSubmit", cwd)["session_id"], state_dir())
-    call_entry("claude", "UserPromptSubmit", sample("claude", "UserPromptSubmit", cwd))
-
-
-def _memo_size(cwd):
-    session = sample("claude", "PostToolUse", cwd)["session_id"]
-    data = json.loads((state_dir() / "hooks" / "sessions" / f"{session}.json").read_text(encoding="utf-8"))
-    return len(data.get("memo", {}).get(context_limit.MEMO_KEY, {}))
-
-
-@pytest.mark.parametrize(("tokens", "notified"), [(249_999, False), (250_000, True), (499_999, True), (500_000, False)])
-def test_context_limit_notices_from_the_decide_from_value_below_the_limit(tmp_path, tokens, notified):
-    # #3995 の 3995:5・3995:16: PostToolUse は判断開始の値（250,000）以上・運用上限（500,000）未満で知らせる
-    _usage_transcript(tmp_path, tokens)
-    out = _tool(tmp_path, "PostToolUse")
-    assert _notice(out) is notified
-    assert notified or out is None
-
-
-def test_context_limit_notices_once_per_user_input(tmp_path):
-    # #3995 の 3995:5: 同じ入力の 2 回目は知らせず、利用者の入力の後は知らせ、中継が送った入力の後は知らせない
-    _usage_transcript(tmp_path, 250_000)
-    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_1"))
-    assert _tool(tmp_path, "PostToolUse", "toolu_2") is None
-    _user_input(tmp_path)
-    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_3"))
-    _user_input(tmp_path, relay=True)
-    assert _tool(tmp_path, "PostToolUse", "toolu_4") is None
-
-
-def test_context_limit_does_not_notice_in_pre_tool_use(tmp_path):
-    _usage_transcript(tmp_path, 300_000)
-    assert _tool(tmp_path, "PreToolUse") is None
-
-
-def test_context_limit_reads_nothing_after_the_notice(tmp_path, counted_tail):
-    # #3995 の 3995:5: 知らせた後の同じ入力の PostToolUse は会話の記録を読まない
-    _usage_transcript(tmp_path, 250_000)
-    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_0"))
-    counted_tail["n"] = 0
-    for i in range(10):
-        assert _tool(tmp_path, "PostToolUse", f"toolu_{i + 1}") is None
-    assert counted_tail["n"] == 0
-
-
-def test_context_limit_neither_notices_nor_reads_without_a_usable_counter(tmp_path, counted_tail):
-    _usage_transcript(tmp_path, 250_000)
-    session = sample("claude", "PostToolUse", tmp_path)["session_id"]
-    path = state_dir() / "hooks" / "sessions" / f"{session}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{broken", encoding="utf-8")
-    assert _tool(tmp_path, "PostToolUse") is None
-    assert counted_tail["n"] == 0
-
-
-def test_context_limit_reads_once_per_tool_call_below_the_decide_from_value(tmp_path, counted_tail):
-    # #3995 の 3995:5: 同じ ID の PreToolUse と PostToolUse の組は PreToolUse だけが読む。続く応答の usage が 250,000 なら知らせる
-    _usage_transcript(tmp_path, 200_000)
-    for i in range(10):
-        assert _tool(tmp_path, "PreToolUse", f"toolu_{i}") is None
-        assert _tool(tmp_path, "PostToolUse", f"toolu_{i}") is None
-    assert counted_tail["n"] == 10
-    _usage_transcript(tmp_path, 250_000)
-    assert _tool(tmp_path, "PreToolUse", "toolu_next") is None
-    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_next"))
-    assert counted_tail["n"] == 11
-
-
-@pytest.mark.parametrize("calls", [2, 3])
-def test_context_limit_reads_once_per_parallel_call(tmp_path, counted_tail, calls):
-    # #3995 の 3995:5: 1 つの応答の並列の呼び出し（Pre(A) → Pre(B) → Post(A) → Post(B)）は ID ごとに覚え、読み取りは PreToolUse の回数
-    _usage_transcript(tmp_path, 200_000)
-    ids = [f"toolu_{i}" for i in range(calls)]
-    for event in ("PreToolUse", "PostToolUse"):
-        for i in ids:
-            assert _tool(tmp_path, event, i) is None
-    assert counted_tail["n"] == calls
-
-
-@pytest.mark.parametrize("tool_use_id", ["toolu_other", None])
-def test_context_limit_reads_for_a_post_tool_use_without_its_pre_tool_use(tmp_path, counted_tail, tool_use_id):
-    # PreToolUse の無い・ID の違う・ID の無い PostToolUse は 1 回読んで判定する
-    _usage_transcript(tmp_path, 250_000)
-    assert _tool(tmp_path, "PreToolUse", "toolu_A") is None
-    counted_tail["n"] = 0
-    assert _notice(_tool(tmp_path, "PostToolUse", tool_use_id))
-    assert counted_tail["n"] == 1
-
-
-def test_context_limit_reads_again_for_the_same_post_tool_use(tmp_path, counted_tail):
-    # 同じ ID の PostToolUse の 2 度目は覚えた値が消えているので 1 回読む
-    _usage_transcript(tmp_path, 200_000)
-    _tool(tmp_path, "PreToolUse")
-    _tool(tmp_path, "PostToolUse")
-    counted_tail["n"] = 0
-    assert _tool(tmp_path, "PostToolUse") is None
-    assert counted_tail["n"] == 1
-
-
-def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
-    # #3995 の 3995:5: 知らせた後の同じ入力の組は覚えた項目を増やさない。運用上限の判定は今のまま。利用者の入力の後は再び覚える
-    _usage_transcript(tmp_path, 250_000)
-    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_0"))
-    size = _memo_size(tmp_path)
-    _usage_transcript(tmp_path, 400_000)
-    for i in range(10):
-        assert _tool(tmp_path, "PreToolUse", f"toolu_{i + 1}") is None
-        assert _tool(tmp_path, "PostToolUse", f"toolu_{i + 1}") is None
-    assert _memo_size(tmp_path) == size
-    _usage_transcript(tmp_path, 500_000)
-    assert deny_reason(_tool(tmp_path, "PreToolUse", "toolu_x")) is not None
-    assert _memo_size(tmp_path) == size
-    _usage_transcript(tmp_path, 400_000)
-    _user_input(tmp_path)
-    _tool(tmp_path, "PreToolUse", "toolu_y")
-    assert _memo_size(tmp_path) == 1
-
-
-def test_context_limit_skips_the_post_tool_use_of_a_subagent(tmp_path, counted_tail):
-    # #3995 の 3995:15: agent_id があれば 300,000 の PostToolUse も知らせず、会話の記録を読まない
-    _usage_transcript(tmp_path, 300_000)
-    payload = {**sample("claude", "PostToolUse", tmp_path), "agent_id": "a0123"}
-    assert call_entry("claude", "PostToolUse", payload) is None
-    assert counted_tail["n"] == 0
-
-
-@pytest.mark.parametrize("repo", ["outside", "no-ndf"])
-def test_context_limit_skips_post_tool_use_outside_ndf_without_reading(tmp_path, counted_tail, repo):
-    cwd = tmp_path / "work"
-    cwd.mkdir()
-    if repo == "no-ndf":
-        (cwd / ".git").mkdir()
-    line = {"type": "assistant", "message": {"usage": {"input_tokens": 300_000}}}
-    (cwd / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
-    assert _tool(cwd, "PostToolUse") is None
-    assert counted_tail["n"] == 0
-
-
-def test_context_limit_notice_names_the_values_and_the_cut_points():
-    # #3995: 知らせの文は文脈の量・判断開始の値・運用上限と役ごとの切りどころを書き、注入の上限（600 字）以下
-    t = thresholds({}, tables.policy_value)
-    text = context_limit._notice(499_999, t)
-    for part in (str(t.decide_from), str(t.limit), "499999", "カットポイント", "wait"):
-        assert part in text
-    assert len(text) <= tables.policy_value("hook.budget.post-tool-use", "inject_chars")
 
 
 def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):
