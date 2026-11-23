@@ -148,3 +148,19 @@ def test_load_settings_stops_on_a_broken_settings_file(tmp_path: Path, text: str
     path.write_text(text, encoding="utf-8")
     with pytest.raises(CheckError, match="project.json"):
         load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("target", ["file", "dir"], ids=["設定のファイルが外を指す", ".ndf が外を指す"])
+def test_load_settings_stops_on_a_link_that_resolves_outside_the_repository(tmp_path: Path, target: str) -> None:
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    repo.mkdir()
+    (outside / identity.FIXED_WORDS["ndf_settings_dir"]).mkdir(parents=True)
+    (outside / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json").write_text("{}", encoding="utf-8")
+    path = _settings_file(repo)
+    if target == "file":
+        path.parent.mkdir()
+        path.symlink_to(outside / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json")
+    else:
+        path.parent.symlink_to(outside / identity.FIXED_WORDS["ndf_settings_dir"])
+    with pytest.raises(CheckError):
+        load_settings(repo)
