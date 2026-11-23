@@ -29,7 +29,7 @@ from typing import Optional
 
 from ndf import identity
 from ndf.domains.hooks import tables
-from ndf.domains.hooks.context import context_tokens
+from ndf.domains.hooks.context import DQUOTE_ESCAPABLE, context_tokens
 from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
@@ -40,8 +40,6 @@ from ndf.domains.hooks.verdict import Verdict, advise, deny, passing
 _SUBSTITUTION = re.compile(r"[$`]|[<>]\(")
 # 引用の外で展開や別の構文になる字（チルダ・グロブ・ブレース・extglob の括弧）。運用上限で通す Bash の語に許さない
 _UNQUOTED_SPECIAL = frozenset("~*?[{(")
-# 二重引用の中でバックスラッシュが外す字（ほかの字の前のバックスラッシュは残る）
-_DQUOTE_ESCAPES = frozenset('$`"\\\n')
 # この guard の名前（`guards.json` の行）
 _NAME = "context-limit"
 # 判断開始の値を知らせた回数を数える数え手の `counts` のキー（利用者の入力ごとに数え直す）
@@ -206,7 +204,7 @@ def _double_quoted(text: str, start: int) -> tuple[Optional[str], int]:
     while i < n and text[i] != '"':
         if text[i] in "$`":
             return None, i
-        if text[i] == "\\" and text[i + 1 : i + 2] in _DQUOTE_ESCAPES:
+        if text[i] == "\\" and text[i + 1 : i + 2] in DQUOTE_ESCAPABLE:
             i += 1
         out.append(text[i])
         i += 1
@@ -263,7 +261,7 @@ def _closing_quote(command: str, start: int) -> Optional[int]:
         if c == "\\":
             if command[i + 1 : i + 2] == "\n":
                 return None
-            i += 2 if command[i + 1 : i + 2] in _DQUOTE_ESCAPES else 1
+            i += 2 if command[i + 1 : i + 2] in DQUOTE_ESCAPABLE else 1
             continue
         i += 1
     return None

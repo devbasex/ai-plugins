@@ -225,8 +225,8 @@ _ANSI_C_ESCAPES = {
     "t": "\t",
     "v": "\v",
 }
-# 二重引用の中で `\\` が文字にする字（改行は行の継続として消える）
-_DQ_ESCAPABLE = '$`"\\\n'
+# 二重引用の中で `\\` が文字にする字（改行は行の継続として消える）。guards も同じ集まりを使う（`context_limit`）
+DQUOTE_ESCAPABLE = frozenset('$`"\\\n')
 
 
 # ANSI-C 引用の数値のエスケープ（字・桁の上限・基数）
@@ -251,7 +251,9 @@ def ansi_c_escape(text: str, i: int) -> tuple[str, int]:
         return chr(int(digits, 8) & 0xFF), 1 + len(digits)
     if nx == "c" and i + 2 < len(text):
         return chr(ord(text[i + 2]) & 0x1F), 3
-    return _ANSI_C_ESCAPES.get(nx, "\\" + nx), 2
+    if nx in _ANSI_C_ESCAPES:
+        return _ANSI_C_ESCAPES[nx], 2
+    return "\\" + nx, 2
 
 
 def _code_point(value: int) -> str:
@@ -277,33 +279,53 @@ def shell_value(text: str) -> str:
     quote = ""
     i = 0
     while i < len(text):
-        ch, nx = text[i], text[i + 1 : i + 2]
-        step = 1
         if quote == "'":
-            quote = "" if ch == "'" else quote
-            out.append("" if ch == "'" else ch)
+            piece, quote, step = _single_step(text[i], quote)
         elif quote in ("$'", _CUT):
-            if ch == "\\" and nx:
-                char, step = ansi_c_escape(text, i)
-                quote = _CUT if char == "\0" else quote
-                out.append("" if quote == _CUT else char)
-            elif ch == "'":
-                quote = ""
-            elif quote != _CUT:
-                out.append(ch)
-        elif ch == "\\" and nx and (quote == "" or nx in _DQ_ESCAPABLE):
-            out.append("" if nx == "\n" else nx)
-            step = 2
-        elif ch == "$" and nx == "'" and quote == "":
-            quote, step = "$'", 2
-        elif ch == '"':
-            quote = "" if quote == '"' else '"'
-        elif ch == "'" and quote == "":
-            quote = "'"
+            piece, quote, step = _ansi_c_step(text, i, quote)
         else:
-            out.append(ch)
+            piece, quote, step = _plain_step(text, i, quote)
+        out.append(piece)
         i += step
     return "".join(out)
+
+
+def _single_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """単引用の中の 1 字の値と、次の引用の状態と読んだ字数（`'` で引用が終わり、ほかの字はそのまま値になる）。"""
+    if ch == "'":
+        return "", "", 1
+    return ch, quote, 1
+
+
+def _ansi_c_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """ANSI-C 引用の中の 1 字の値と、次の引用の状態と読んだ字数（NUL の後は閉じる `'` まで値に足さない）。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx:
+        char, step = ansi_c_escape(text, i)
+        quote = _CUT if char == "\0" else quote
+        return ("" if quote == _CUT else char), quote, step
+    if ch == "'":
+        return "", "", 1
+    return ("" if quote == _CUT else ch), quote, 1
+
+
+def _plain_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """引用の外と二重引用の中の 1 字の値と、次の引用の状態と読んだ字数。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx and (quote == "" or nx in DQUOTE_ESCAPABLE):
+        return ("" if nx == "\n" else nx), quote, 2
+    if ch == "$" and nx == "'" and quote == "":
+        return "", "$'", 2
+    return _quote_step(ch, quote)
+
+
+def _quote_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """引用を開け閉てする字（`"` と引用の外の `'`）なら値を残さず状態を変え、ほかの字はそのまま値にする。"""
+    if ch == '"':
+        return "", ("" if quote == '"' else '"'), 1
+    if ch == "'" and quote == "":
+        return "", "'", 1
+    return ch, quote, 1
 
 
 class _Opts(NamedTuple):

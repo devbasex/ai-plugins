@@ -56,28 +56,41 @@ def _scan(word: str, quote: str = "") -> list[tuple[str, bool]]:
     found: list[tuple[str, bool]] = []
     i = 0
     while i < len(word):
-        char = word[i]
         if quote in ("'", "$'"):
-            if quote == "$'" and char == "\\":
-                i += 2
-                continue
-            quote = "" if char == "'" else quote
-            i += 1
-        elif char == "\\" and (quote in ("", _IN_DOUBLE) or word[i + 1 : i + 2] in _ESCAPABLE):
-            i += 2
-        elif quote == _IN_DOUBLE and char in "'\"":
-            i += 1
-        elif char == "$" and quote == "" and word[i + 1 : i + 2] == "'":
-            quote = "$'"
-            i += 2
-        elif char in "'\"" and (quote == "" or quote == char):
-            quote = char if quote == "" else ""
-            i += 1
-        elif char == "$":
-            i = _expansion(word, i, found, quote in ('"', _IN_DOUBLE))
+            quote, i = _literal_step(word, i, quote)
         else:
-            i += 1
+            quote, i = _scan_step(word, i, quote, found)
     return found
+
+
+def _literal_step(word: str, i: int, quote: str) -> tuple[str, int]:
+    """単引用・ANSI-C 引用の中の 1 字を読んだ後の引用の状態と位置（`$'…'` の `\\` は次の字も飛ばす）。"""
+    if quote == "$'" and word[i] == "\\":
+        return quote, i + 2
+    return ("" if word[i] == "'" else quote), i + 1
+
+
+def _scan_step(word: str, i: int, quote: str, found: list[tuple[str, bool]]) -> tuple[str, int]:
+    """引用の外・二重引用の中・既定値の中の 1 字を読んだ後の引用の状態と位置。展開は `found` へ足す。"""
+    char, nxt = word[i], word[i + 1 : i + 2]
+    if char == "\\" and (quote in ("", _IN_DOUBLE) or nxt in _ESCAPABLE):
+        return quote, i + 2
+    if char == "$":
+        if quote == "" and nxt == "'":
+            return "$'", i + 2
+        return quote, _expansion(word, i, found, quote in ('"', _IN_DOUBLE))
+    if char in "'\"":
+        return _quote_state(char, quote), i + 1
+    return quote, i + 1
+
+
+def _quote_state(char: str, quote: str) -> str:
+    """引用の字（`'`・`"`）を読んだ後の状態。既定値の中（`_IN_DOUBLE`）と、二重引用の中の `'` は字のままで変わらない。"""
+    if quote == _IN_DOUBLE:
+        return quote
+    if quote == "":
+        return char
+    return "" if quote == char else quote
 
 
 def _expansion(word: str, start: int, found: list[tuple[str, bool]], in_double: bool) -> int:
@@ -118,11 +131,15 @@ def _closing_brace(word: str, start: int, in_double: bool) -> int:
     while i < len(word):
         char = word[i]
         if quote in ("'", "$'"):
-            if quote == "$'" and char == "\\":
-                i += 2
-                continue
-            quote = "" if char == "'" else quote
-        elif char == "\\":
+            quote, i = _literal_step(word, i, quote)
+            continue
+        if char == "}" and (quote == "" or depth > opened):
+            depth -= 1
+            if depth == 0:
+                return i
+            i += 1
+            continue
+        if char == "\\":
             i += 1
         elif char == '"':
             quote, opened = ('"', depth) if quote == "" else ("", 0)
@@ -131,10 +148,6 @@ def _closing_brace(word: str, start: int, in_double: bool) -> int:
         elif word.startswith("${", i):
             depth += 1
             i += 1
-        elif char == "}" and (quote == "" or depth > opened):
-            depth -= 1
-            if depth == 0:
-                return i
         i += 1
     return -1
 
@@ -183,51 +196,76 @@ def _has_text(word: str, quote: str) -> bool:
     """
     i = 0
     while i < len(word):
-        char, nxt = word[i], word[i + 1 : i + 2]
-        if quote == "'" or (quote == "$'" and char not in "\\'"):
-            if char != "'":
-                return True
-            quote = ""
-            i += 1
-        elif quote == "$'":
-            if char == "'" or not nxt:
-                quote = "" if char == "'" else quote
-                i += 1
-                continue
-            value, step = ansi_c_escape(word, i)
-            if value != "\0":
-                return True
-            i, quote = _after_ansi_c(word, i + step), ""
-        elif char == "\\":
-            if nxt != "\n":
-                return True
-            i += 2
-        elif char == "$" and nxt in ("'", '"') and quote == "":
-            quote = "$'" if nxt == "'" else quote
-            i += 2 if nxt == "'" else 1
-        elif char == '"' and quote in ("", '"', _IN_DOUBLE):
-            quote = {"": '"', '"': ""}.get(quote, quote)
-            i += 1
-        elif char == "'" and quote == "":
-            quote = "'"
-            i += 1
-        elif word.startswith("$((", i):
-            return True
-        elif (char == "$" and nxt == "(") or char == "`":
-            i = _after_substitution(word, i)
-            if i < 0:
-                return False
-        elif char == "$" and (nxt == "{" or _HEAD.fullmatch(nxt) or (nxt and nxt in _SPECIAL)):
-            found: list[tuple[str, bool]] = []
-            end = _expansion(word, i, found, quote in ('"', _IN_DOUBLE))
-            if end == i + 2 and nxt in _SPECIAL:
-                found = [("$" + nxt, False)]
-            if found and not _may_be_empty(*found[0]):
-                return True
-            i = end
+        if quote in ("'", "$'"):
+            text, quote, i = _quoted_text(word, i, quote)
         else:
-            return True
+            text, quote, i = _plain_text(word, i, quote)
+        if text is not None:
+            return text
     return False
+
+
+def _quoted_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+    """単引用・ANSI-C 引用の中から読む 1 歩。字が残るか決まれば真偽を、続きを読むなら `None` を返す。"""
+    char, nxt = word[i], word[i + 1 : i + 2]
+    if char == "'":
+        return None, "", i + 1
+    if quote == "'" or char != "\\":
+        return True, quote, i
+    if not nxt:
+        return None, quote, i + 1
+    value, step = ansi_c_escape(word, i)
+    if value != "\0":
+        return True, quote, i
+    return None, "", _after_ansi_c(word, i + step)
+
+
+def _plain_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+    """引用の外・二重引用の中・既定値の中から読む 1 歩。字が残るか決まれば真偽を、続きを読むなら `None` を返す。"""
+    char, nxt = word[i], word[i + 1 : i + 2]
+    if char == "\\":
+        return (None, quote, i + 2) if nxt == "\n" else (True, quote, i)
+    if char == '"':
+        return None, _quote_state(char, quote), i + 1
+    if char == "'":
+        return (None, "'", i + 1) if quote == "" else (True, quote, i)
+    if char == "`":
+        return _substitution_text(word, i, quote)
+    if char == "$":
+        return _dollar_text(word, i, quote)
+    return True, quote, i
+
+
+def _dollar_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+    """`$` から読む 1 歩（引用の始まり・算術展開・コマンド置換・パラメータの展開）。"""
+    nxt = word[i + 1 : i + 2]
+    if quote == "" and nxt in ("'", '"'):
+        return None, ("$'" if nxt == "'" else quote), i + (2 if nxt == "'" else 1)
+    if word.startswith("$((", i):
+        return True, quote, i
+    if nxt == "(":
+        return _substitution_text(word, i, quote)
+    if nxt == "{" or _HEAD.fullmatch(nxt) or (nxt and nxt in _SPECIAL):
+        return _expansion_text(word, i, quote)
+    return True, quote, i
+
+
+def _substitution_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+    """コマンド置換の 1 歩。値が分からないので字に数えず、閉じていなければ偽にする。"""
+    end = _after_substitution(word, i)
+    return (False, quote, i) if end < 0 else (None, quote, end)
+
+
+def _expansion_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+    """パラメータの展開の 1 歩。空を返さない展開なら真、空を返しうるなら続きを読む。"""
+    nxt = word[i + 1 : i + 2]
+    found: list[tuple[str, bool]] = []
+    end = _expansion(word, i, found, quote in ('"', _IN_DOUBLE))
+    if end == i + 2 and nxt in _SPECIAL:
+        found = [("$" + nxt, False)]
+    if found and not _may_be_empty(*found[0]):
+        return True, quote, i
+    return None, quote, end
 
 
 def _after_ansi_c(word: str, start: int) -> int:
