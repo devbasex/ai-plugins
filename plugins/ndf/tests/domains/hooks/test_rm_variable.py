@@ -254,7 +254,8 @@ def test_the_table_row_is_not_counted_and_keeps_denying_after_the_limit(tmp_path
     kinds = []
     with Counter.open("s-3877", tmp_path) as counter:
         for _ in range(4):
-            got = dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), counter, tmp_path)
+            svc = dispatch.GuardServices(tmp_path, counter, 0.0)
+            got = dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), svc)
             kinds.append(got.verdict.kind)
         assert counter.data["denies"] == {}
     assert kinds == ["deny"] * 4

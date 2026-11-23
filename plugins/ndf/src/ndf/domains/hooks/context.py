@@ -1,8 +1,8 @@
 """hook の 1 回の事象の文脈（#3345 の決定 88・IH1）。
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
-ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`・
-`classify_reply`）だけが行い、`HookContext` はその結果を持つ。
+ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の
+待ちのルール（`reply_wait` の `prose_lines`・`read_prose`。#4000 の決定 1）だけが行い、`HookContext` はその結果を持つ。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.hooks.strict import _SHELLS
 
 # 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
@@ -30,16 +30,8 @@ _DYNAMIC_NODE = re.compile(r"(expansion|substitution)$")
 # ヒアドキュメントとヒアストリングのセクション
 _HEREDOC_NODES = frozenset({"heredoc_redirect", "herestring_redirect"})
 
-# 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
-_WAIT_RE = re.compile(
-    r"(よろしいですか|いかがですか|どうしますか|どちらにしますか|選んでください|お知らせください|教えてください|"
-    r"承認をお願いします|ご確認ください|ご判断ください|指示をください|お待ちしています|返答を待ちます|回答を待ちます)"
-    r"|[?？]\s*$"
-)
-# 別の場所（ほかのセッション・レーン・計画）の待ちを報告する言い回し（#2324）
-_ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
-# 本文の待ちを見る末尾の行数
-_TAIL_LINES = 4
+# 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
+_ASK_TOOL = "AskUserQuestion"
 
 
 class ShellCommand(NamedTuple):
@@ -681,22 +673,24 @@ def read_tail(path: str, size: int) -> str:
     return text.split("\n", 1)[1] if end > size and "\n" in text else text
 
 
-def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
-    """最後の応答の種類: `none`（空）・`elsewhere_wait`（別の場所の待ちの報告）・`prose_wait`（本文で人の回答を待つ）・`report`。
+def asked_since_prompt(tail: str) -> bool:
+    """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
 
-    `code_lines` は行ごとのコードブロックのマーカー（`ndf.adapters.markdown.code_lines`）。コードの中の行は見ない。
+    Tool の結果だけを持つ `user` の行と、Claude Code が書くメタの行（`isMeta` が真）は利用者の入力に数えない
+    （`ndf.domains.relay.context_records._user_text` と同じ条件）。末尾に利用者の入力が無ければ、読めた範囲で探す。
     """
-    lines = text.splitlines()
-    flags = code_lines if code_lines is not None and len(code_lines) == len(lines) else [False] * len(lines)
-    prose = [line for line, code in zip(lines, flags) if not code and line.strip()]
-    if not prose:
-        return "none"
-    tail = "\n".join(prose[-_TAIL_LINES:])
-    if _ELSEWHERE_RE.search(tail):
-        return "elsewhere_wait"
-    if any(_WAIT_RE.search(line.strip()) for line in prose[-_TAIL_LINES:]):
-        return "prose_wait"
-    return "report"
+    for line in reversed(tail.splitlines()):
+        if '"user"' not in line and _ASK_TOOL not in line:
+            continue
+        rec = tables.json_object(line)
+        if rec is None:
+            continue
+        content = _content(rec)
+        if _is_user_input(rec, content):
+            return False
+        if _asks(content):
+            return True
+    return False
 
 
 def context_tokens(tail: str) -> Optional[int]:
@@ -782,8 +776,32 @@ class HookContext:
         return markdown.code_lines(self.last_reply) if self.last_reply else []
 
     @cached_property
+    def reply_prose_lines(self) -> list[reply_wait.ProseLine]:
+        """最後の応答の本文の行（ルールの `prose_lines`）。`has_reply_prose` と `last_reply_kind` が同じ返りを読む。"""
+        return reply_wait.prose_lines(self.last_reply)
+
+    @cached_property
+    def has_reply_prose(self) -> bool:
+        """最後の応答に本文の行があるか。guard `stop-wait` の最初の確かめ。"""
+        return bool(self.reply_prose_lines)
+
+    @cached_property
+    def reply_reading(self) -> reply_wait.ProseReading:
+        """最後の応答の本文の判定（`reply_wait.read_prose`）。`last_reply_kind` と guard `stop-wait` が同じ返りを読む。"""
+        return reply_wait.read_prose(self.reply_prose_lines) if self.has_reply_prose else reply_wait.ProseReading("none")
+
+    @cached_property
     def last_reply_kind(self) -> str:
-        return classify_reply(self.last_reply, self.reply_code_lines)
+        """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`heading_wait`・`closing_report`・`report`）。ルールの判定（#4000 の決定 1）。
+
+        本文の行は `reply_prose_lines` を読み、抜き出し直さない（`reply_wait.reply_kind` を呼ばない）。
+        """
+        return self.reply_reading.kind
+
+    @cached_property
+    def asked_this_turn(self) -> bool:
+        """今の利用者の入力の後に `AskUserQuestion` で人へ問うたか。"""
+        return asked_since_prompt(self.transcript_tail)
 
     @property
     def stop_hook_active(self) -> bool:
@@ -817,13 +835,39 @@ def _last_assistant_uuid(tail: str) -> Optional[str]:
     return None
 
 
+def _content(rec: dict[str, Any]) -> Any:
+    """会話の記録の 1 レコードの content。`message` が無い・形が違えば None。"""
+    message = rec.get("message")
+    return message.get("content") if isinstance(message, dict) else None
+
+
+def _items(content: Any, kind: str) -> list[dict[str, Any]]:
+    """content の要素のうち type が `kind` の dict。content が list でなければ空。"""
+    if not isinstance(content, list):
+        return []
+    return [c for c in content if isinstance(c, dict) and c.get("type") == kind]
+
+
+def _is_prompt(content: Any) -> bool:
+    """利用者の入力の content か（文字列か text の要素を持つ）。Tool の結果だけを持つ行は偽。"""
+    if isinstance(content, str):
+        return True
+    return bool(_items(content, "text"))
+
+
+def _is_user_input(rec: dict[str, Any], content: Any) -> bool:
+    """利用者の入力のレコードか。`user` の行のうち、メタの行（`isMeta` が真）と Tool の結果だけを持つ行は偽。"""
+    return rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content)
+
+
+def _asks(content: Any) -> bool:
+    """`AskUserQuestion` の呼び出しを持つ content か。"""
+    return any(c.get("name") == _ASK_TOOL for c in _items(content, "tool_use"))
+
+
 def _record_text(rec: dict[str, Any]) -> Optional[str]:
     """会話の記録の 1 レコードの本文。text の要素が無ければ None（文字列でない text だけなら空文字）。"""
-    message = rec.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, list):
-        return None
-    texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    texts = [c.get("text") for c in _items(_content(rec), "text")]
     if not texts:
         return None
     return "\n".join(t for t in texts if isinstance(t, str))

@@ -21,6 +21,8 @@ class Verdict:
     - `context`: 案内の文（会話へ入る）
     - `key`: 同じ拒否を数える対象（読む範囲・コマンドの hash など）。空なら理由だけで数える
     - `notes`: 計測に残すマーカー（会話へ入れない）
+    - `logged`: 計測と待ちの知らせへ渡す理由。空なら `reason` を渡す（`reason` が応答の本文を含むときに、本文を含まない
+      固定の文を入れる）
     - `sole`: まとめる判定にこれがあれば、同じ種類のほかの文を入れずこの文だけを出す（ほかの指示より先に従う手順で、
       連結すると注入の上限で末尾が切れ得るもの。運用上限の引継ぎ）
     """
@@ -31,6 +33,7 @@ class Verdict:
     key: str = ""
     notes: dict = field(default_factory=dict)
     sole: bool = False
+    logged: str = ""
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
@@ -40,6 +43,11 @@ class Verdict:
     def text(self) -> str:
         """会話へ入る文。"""
         return self.reason if self.kind in REASON_KINDS else self.context
+
+    @property
+    def recorded(self) -> str:
+        """計測と待ちの知らせへ渡す文（応答の本文を含まない）。"""
+        return self.logged or self.text
 
 
 PASS = Verdict("pass")

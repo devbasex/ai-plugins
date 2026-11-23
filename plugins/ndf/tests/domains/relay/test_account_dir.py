@@ -682,3 +682,31 @@ def test_cr2_r2_2_a_nul_in_the_anthropic_config_dir_is_unresolved(tmp_path, iso)
     assert got == "auth_unresolved" and "Anthropic のプロファイル" in got.items
     inline = _check(w, argv=("claude", "--settings", json.dumps({"env": {"ANTHROPIC_CONFIG_DIR": "x\u0000y"}})))
     assert inline == "auth_unresolved" and not any("\0" in i for i in inline.items)
+
+
+# ---------------------------------------------------------------- 指定のキーを定義する層（#4000 の決定 11）
+
+
+def test_4000_11_the_strongest_layer_of_a_named_key_is_the_user_settings(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"awsCredentialExport": "echo x"})
+    extra = ad.Extra(keys=("awsCredentialExport", "gcpAuthRefresh"))
+    resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json", extra)
+    assert resolved.key_origin == {"awsCredentialExport": "利用者の設定"}
+
+
+def test_4000_11_without_the_keys_the_origin_table_is_empty(tmp_path, iso):
+    w = _world(tmp_path)
+    _json(w["shared"] / "settings.json", {"awsCredentialExport": "echo x"})
+    resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json")
+    assert resolved.key_origin == {}
+
+
+def test_4000_11_the_copy_of_the_managed_settings_wins_over_the_managed_directory(tmp_path, iso):
+    w = _world(tmp_path)
+    (iso / "managed-settings.d").mkdir()
+    _json(iso / "managed-settings.d" / "a.json", {"awsAuthRefresh": "echo a"})
+    _json(w["acc"] / ad.REMOTE_SETTINGS, {"awsAuthRefresh": "echo b"})
+    extra = ad.Extra(keys=("awsAuthRefresh",))
+    resolved = ad.effective_env({}, w["acc"], w["cwd"], ["claude"], w["shared"] / "settings.json", extra)
+    assert resolved.key_origin == {"awsAuthRefresh": f"管理の設定（{ad.REMOTE_SETTINGS}）"}
