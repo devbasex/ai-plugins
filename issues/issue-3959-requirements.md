@@ -40,7 +40,7 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | --- | --- | --- |
 | 承認ゲートの手前の判定 | `fast`・`auto` だけ。機械の検査が外れると判定しない | 進め方によらず、承認済みの MVV があり PR の材料がそろえば判定する。機械の検査は「省くか」だけを決める |
 | `normal` の承認ゲート | 判定の材料が無い | 判定・理由・レッドラインが PR のコメントと承認資料に載る。省かない |
-| 承認ゲートを省く条件 | 判定と機械の検査 6 つ | 設計承認ゲートは、加えて設計 PR の cross-review の記録にレッドラインか未解消の見送りが無いこと（記録を読めなければ省かない）。リリース承認ゲートは保留を読む範囲が決まるまで（#4105）省かない |
+| 承認ゲートを省く条件 | 判定と機械の検査 6 つ | 設計承認ゲートは、加えて設計 PR の cross-review の記録に、直っていないレッドラインと、利用者の判断が要る未解消の見送りが無いこと（記録を読めなければ省かない）。リリース承認ゲートは保留を読む範囲が決まるまで（#4105）省かない |
 | 即時修正 | 判定しない | 変えない（#4104 へ分けた） |
 | 承認資料の根拠の行 | 確かめない | 承認資料を出す前に、バージョンと番号を機械で確かめるコマンドを打ち、外れれば止まる |
 | プランの外の判定 | `NDF_STAGE_INPUT` を手で組む | ステートマシンの ID を渡せば、プランと同じ入力で判定する |
@@ -65,7 +65,7 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 ## 目的
 
 - どの進め方でも、承認ゲートの手前で MVV 判定が行われ、その結果を人が承認の場で読める
-- 承認ゲートを省いてよいのは今どおり `fast`・`auto` だけで、レッドラインの指摘か未解消の見送りが残る PR では省かない
+- 承認ゲートを省いてよいのは今どおり `fast`・`auto` だけで、直っていないレッドラインの指摘か、利用者の判断が要る未解消の見送りが残る PR では省かない
 - 承認資料が引く MVV のバージョンと項目の番号が、今の承認の記録と一致することを機械で確かめる
 
 ## 対象範囲
@@ -101,7 +101,7 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 - [ ] 1. `normal` のスプリントで `ndf records mvv gate --gate <design か release>` を打つと、承認済みの MVV があり PR の材料がそろえば、LLM の判定（従う・従わない・判定できない、理由、レッドライン）が出力の `mvv_gate.verdict` に載り、`skip` は偽のままで、判定の記録が PR のコメントに載る
 - [ ] 2. `fast`・`auto` で、MVV が承認済みでハッシュが一致するという前提の検査を除く機械の検査（スプリントの参照・モード・レッドラインのパス・MVV の設定の変更・出し直しの指摘への対応表）が外れても判定は打たれ、`skip` は偽で、外れた理由が `why` と PR のコメントに載る
 - [ ] 3. 承認資料の「MVV 判定」の欄に、`normal` でも判定と理由とレッドラインが載る
-- [ ] 4. `fast`・`auto` で、設計 PR の `mvv-review` の行にレッドラインの指摘か、今のバージョンの未解消の見送りがあると、設計承認ゲートは `service:mvv` で省かれず人へ問い、その保留（PR・項目・理由）が承認資料の「MVV 判定」の欄に載る。記録を読めない・読めない行があるときも省かない。リリース承認ゲートは保留を読む PR の範囲が決まるまで（#4105）、`fast`・`auto` でも省かない
+- [ ] 4. `fast`・`auto` で、設計 PR の `mvv-review` の行に、直っていないレッドラインの指摘（後に同じキーの `fixed` の行が無い `redline`）か、利用者の判断が要る今のバージョンの未解消の見送り（見送りの区分が `needs_user` か区分の無い `deferred`）があると、設計承認ゲートは `service:mvv` で省かれず人へ問い、その保留（PR・項目・理由）が承認資料の「MVV 判定」の欄に載る。記録を読めない・読めない行があるときも省かない。後に同じキーの `fixed` があるレッドラインと、区分が `filed`（範囲外を起票した）・`not_applicable`（基準に当たらない・意図どおり）の見送りでは、保留にならない。リリース承認ゲートは保留を読む PR の範囲が決まるまで（#4105）、`fast`・`auto` でも省かない
 - [ ] 5. cross-review が承認ゲートの判定に要る記録（`redline`・`deferred` の行）を書けなかったら、その起動は収束にせず `STOPPED`・`cause.kind: mvv_record_failed` で終わる
 - ~~[ ] 6. 即時修正のプランがマージの前に MVV 判定のステップを持ち、判定が「従う」でレッドラインが空で、機械の検査が外れていないときだけマージへ進む。ほかは止めて理由を添えて人へ戻す。承認済みの MVV が無いリポジトリでは今どおりマージへ進む~~ → #4104 へ移した（2026-11-22、conductor の判断）
 - [ ] 7. 承認資料が引く「MVV バージョン N」が今の承認の記録のバージョンと違うか、引いた Value・P・C の番号がそのバージョンに実在しなければ、承認資料を組む手順が出す前に打つ確かめのコマンドが止め（`refused`）、承認資料は確かめた結果の 1 行を持つ。`design` の `references/decisions.md` の例が「MVV バージョン 1」でなく今のバージョンを読んで書く形になっている（#4076 の実装で満たす）
@@ -120,7 +120,7 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | 対象 | 影響 |
 | --- | --- |
 | 公開インタフェース | 変わる。`ndf records mvv gate` に `--machine` が足され、`ndf records mvv cite` が足される。`NDF_STAGE_INPUT` の形が合わない入力は `invalid` で止まる。コントラクトの `stage-in` の形を、プランが渡している形に直す。プランが渡す入力と出力の形は変わらない |
-| データ | `mvv-validation.jsonl` の読み手が足される。行の形は変わらない |
+| データ | `mvv-validation.jsonl` の読み手が足される。`mvv-review` の `deferred` の行に、任意のキー `defer`（見送りの区分: `needs_user`・`filed`・`not_applicable`）が足される。区分の無い行は保留になる |
 | 既存の振る舞い | `normal` の承認ゲートで判定とコメントが増える。`fast`・`auto` でレビューの記録が残る設計 PR は省かれなくなり、リリース承認ゲートは #4105 まで省かれなくなる |
 
 ## 検証手段
@@ -159,6 +159,8 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 
 ## #4076 の設計から移した仕組み（2026-11-22）
 
+> 2026-11-23 の追記: #3959 の設計承認ゲートで、利用者が保留の規則を絞った（下の「レッドライン」「見送り」の規則と例は絞った後の形に直した）。今の規則では、redline の行が 1 行でもあるキーは直した後もずっと保留になり、今のバージョンの deferred が 1 件でも残れば保留になる。cross-review はほとんどの PR で何かを見送るので、事実上どの PR も承認ゲートを省けないためである。保留にするのは、直っていないレッドラインと、利用者の判断が要る見送りだけで、記録を読めないときは今どおり保留にする
+
 > 2026-11-22 の追記: 下の規則のうち、リリース承認ゲートでスプリントの単位の PR の行を読む部分は #4105 が持つ。それまでリリース承認ゲートは `fast`・`auto` でも省かない（受け入れ条件 4）。
 
 承認ゲートがレビューの記録（レッドラインの指摘・修正担当の見送り）を読み、それが残る PR では `fast`・`auto` でも承認ゲートを `service:mvv` で省かない仕組みを、#4076 の設計 PR（https://github.com/devbasex/ai-plugins/pull/4077 ）からこの Issue へ移した。#4076 の設計承認ゲートで、利用者が「仕組みを #3959 へ移す」を選んだ。承認ゲートの省略の条件と承認資料の「MVV 判定」の欄はこの Issue が持つためである。
@@ -182,9 +184,9 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | `MvvFacts` | `progress/gate/checks.py` | 変更 | 欄 `review_holds: tuple[str, ...] = ()` を足す | — |
 
 - `review_holds`: 各 PR の行を head によらずすべて読み、指摘のキーごとに記録の順（下の「最後」の決め方）に並べて、次の 2 つの規則で保留を決める。head で行を選ばない（記録の後に head が進んだ PR・別の `--state-dir` の起動が別のキーだけを書いた head でも、前の head の保留を落とさない）。承認依頼の「MVV 判定」の行も同じ規則の結果を使う
-  - レッドライン: キーに `redline` の行が 1 行でもあれば（どの head・どのバージョンでも）、そのキーは `redline` で保留する。記録の上で外す遷移は無い。後の行（`fixed`・`deferred`・`unresolved`。別の `--state-dir` の起動が同じキーを `Value` の指摘として直した `fixed` も含む）・行が無いこと・MVV のバージョンの更新のどれでも外さない。項目はそのキーの `redline` の行の `item` を `・` で分けた和を出た順に並べ、本文は最後の `redline` の行の `text` を使う。理由: ジャーナルは `P`・`C` を一度受けた行をレッドラインのままにする（上の節）ので、記録も同じ不変条件にする。外す記録を作ると、通常の修正担当の `fixed` とレッドラインの解除を区別する再判定の経路と、その根拠の記録が要るが、どちらもこの変更の範囲に無い
-  - 見送り: レッドラインでないキーで、バージョンが `mvv` と同じ `deferred` の行があり、それより後に同じキーでバージョンが `mvv` と同じ `fixed` の行が無ければ、`deferred` で保留する（理由は最後の `deferred` の行の `reason`）。外すのは同じキー・同じバージョンの後の `fixed` だけで、後の `unresolved`・別のキーの行・行が無いことでは外さない。古いバージョンの `deferred` は数えず、古いバージョンの `fixed` も解除に使わない（ベースで MVV が更新された後の古いバージョンの見送りは承認ゲートにも承認資料にも載せない。今回のバージョンで見送られた指摘は今回のバージョンで書き直されるので落ちない）
-  - 例: 同じ head・同じキーが `deferred` → `fixed` → `deferred` と記録されたら `deferred` で保留する。head A のキー K の `deferred` の後に head B で別のキー L の `fixed` だけが書かれても K は保留のまま。古いバージョンでキー K が `redline`、現行バージョンで K が `deferred`、さらに MVV が更新されたら K は `redline` で保留する
+  - レッドライン: キーに `redline` の行があり、そのキーの最後の `redline` の行より後に同じキーの `fixed` の行が無ければ（どの head・どのバージョンでも）、そのキーは `redline` で保留する。後の `fixed` があれば直ったとみなして外す。項目はそのキーの `redline` の行の `item` を `・` で分けた和を出た順に並べ、本文は最後の `redline` の行の `text` を使う
+  - 見送り: 保留していないキーで、バージョンが `mvv` と同じ `deferred` の行のうち、見送りの区分 `defer` が `needs_user`（利用者の判断が要る）か区分の無い行があり、それより後に同じキー・同じバージョンの `fixed` の行が無ければ、`deferred` で保留する。区分が `filed`（範囲外を起票した）・`not_applicable`（基準に当たらない・意図どおり）の見送りは保留にしない（理由は最後の `deferred` の行の `reason`）。外すのは同じキー・同じバージョンの後の `fixed` だけで、後の `unresolved`・別のキーの行・行が無いことでは外さない。古いバージョンの `deferred` は数えず、古いバージョンの `fixed` も解除に使わない。見送りの区分 `defer` は、修正担当が見送るときに `needs_user`・`filed`・`not_applicable` のどれかを書き、cross-review のジャーナルが理由とともに持ち、`record_review` が `mvv-review` の `deferred` の行に書く。区分が無い・知らない値の行は、記録を読めないときと同じく保留にする
+  - 例: 同じ head・同じキーが `deferred`（`needs_user`）→ `fixed` → `deferred`（`needs_user`）と記録されたら `deferred` で保留する。`deferred`（`filed`）だけなら保留にしない。`redline` の後に同じキーの `fixed` があれば外し、`fixed` の後にまた `redline` が記録されたら保留する
 - 人の承認との関係: ゲートで人が承認しても記録を書き換えず、承認を表す行も作らない。その PR を対象にする後のゲート（設計承認の後のリリース承認・同じゲートの打ち直し）は同じ保留を返し、`fast`・`auto` でも人に問う（必ず人の承認が要る操作を含む PR は、ゲートごとに人が見る。余分な人の承認は許す）。保留はその PR を対象にするゲートにだけ掛かる
 - 「最後」の決め方: キーごとの行の順は `at` の古い順で、`at` が同じ（`jsonl.now()` は秒精度）ときは `mvv-validation.jsonl` の追記順に従う。`record_review` の重ねない判定もこの順の最後の行を使う
 - 記録の欠落: `record_review` が `redline`・`deferred` の行（承認ゲートの判定に要る行）を書けなかったら、その起動は収束にせず止める（`STOPPED`・`cause.kind: mvv_record_failed`）。`fixed`・`unresolved` の行だけが書けなかったときは注意に留める
@@ -203,16 +205,16 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `review_holds` | キーの `redline`・`deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | `fixed` だけ → 空。同じキーに `P1` と後の `P1・C7` → `P1・C7` の 1 件。`deferred` の後に `redline` → `redline` の 1 件。同じ `at` の `deferred` と `fixed` → 追記順で後の方。同じ head・キーが `deferred` → `fixed` → `deferred` の順 → `deferred` を返す（`record_review` が 3 行目を書く）。head A のキー K の `deferred` の後に head B で別のキー L の `fixed` だけ → K を返す。後の head で同じキー・同じバージョンの `fixed` → 外す。`deferred` の後の `unresolved` → `deferred` のまま。古いバージョンの `deferred` だけ → 空。古いバージョンの `deferred` の後の古いバージョンの `fixed` は現行バージョンの `deferred` を外さない。`redline` の後の `fixed`（別の `--state-dir` の `Value` の指摘として直したもの）・`deferred`・`unresolved` → `redline` のまま。古いバージョンの `redline` → 現行バージョンの同じキーの `deferred` → MVV の更新 → `redline` を返す | 別の repo の行は読まない。`broken` が 1 以上 → 読めない行の件数を 1 件返す |
+| `review_holds` | 直っていない `redline`・区分が `needs_user` の `deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | `fixed` だけ → 空。`redline` の後に同じキーの `fixed`（別の head・別の `--state-dir` でも）→ 外す。`redline` → `fixed` → `redline` → 保留。同じキーに `P1` と後の `P1・C7` → `P1・C7` の 1 件。区分が `filed`・`not_applicable` の `deferred` だけ → 空。区分の無い `deferred`・知らない区分 → 保留。同じ `at` の `deferred` と `fixed` → 追記順で後の方。head A のキー K の `deferred`（`needs_user`）の後に head B で別のキー L の `fixed` だけ → K を返す。`deferred` の後の `unresolved` → `deferred` のまま。古いバージョンの `deferred` だけ → 空 | 別の repo の行は読まない。`broken` が 1 以上 → 読めない行の件数を 1 件返す |
 | `_summary`・`finish`・`cmd_run` | `record_review` が書ける → `mvv_record_failed` が None で、`finish` の普段の判定のまま | `mvv_unresolved` と書けない `redline` が重なる → `mvv_record_failed`（`summary` に `mvv_unresolved`）。`handed` の欠けと書けない `deferred` が重なる → `mvv_record_failed` で、`handed` の欠けが `gaps` に残る。直して打ち直す → `mvv_unresolved` で止まる | `redline` を書けない → 収束の判定でも `cmd_run` の結果 JSON と終了コードが `STOPPED`・`mvv_record_failed`（CLI が `finish` を打ち直しても成功に戻らない） |
 | `mvv_gate._judged` | 記録が読める → `review_holds` の結果 | 記録のファイルが無い → 空 | `review_rows` の `OSError` → 読めない理由の 1 件で `may_skip` が偽 |
 | `check_review_holds` | `review_holds` があれば理由を返し `may_skip` が偽 | 空 → None | — |
 
-- 受け入れ条件の形: 対象の PR の `mvv-review` に `redline` か未解消の `deferred` の行があると、`refusals` が理由を返し、承認ゲートが `service:mvv` で省かれない（壊し方: `fast`・`auto` で省かれる）
+- 受け入れ条件の形: 対象の PR の `mvv-review` に、直っていない `redline` か、区分が `needs_user`（または区分の無い）未解消の `deferred` の行があると、`refusals` が理由を返し、承認ゲートが `service:mvv` で省かれない（壊し方: `fast`・`auto` で省かれる。逆の壊し方: 直った `redline` や `filed`・`not_applicable` の見送りだけの PR が省かれない）
 
 ### 承認資料
 
-| `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所に、`review_holds` と同じ規則（その PR の全 head の行をキーごとに `at` の順、同じなら追記順に並べる。`redline` の行が 1 行でもあれば外さずに載せる。`deferred` はゲートの MVV のバージョンと同じもので、後に同じキー・同じバージョンの `fixed` が無いもの。読めない記録・読めない行はその旨）で選んだ保留を足す。設計承認ゲートは設計 PR の行、リリース承認ゲートはスプリントの単位の PR の行を、項目と、`deferred` は最後の `deferred` の行の `reason`、`redline` は最後の `redline` の行の `text` とともに載せる。人が承認しても後のゲートで同じ保留が載る |
+| `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所に、`review_holds` と同じ規則（その PR の全 head の行をキーごとに `at` の順、同じなら追記順に並べる。`redline` は後に同じキーの `fixed` が無いもの。`deferred` はゲートの MVV のバージョンと同じもので、区分が `needs_user` か区分が無く、後に同じキー・同じバージョンの `fixed` が無いもの。読めない記録・読めない行はその旨）で選んだ保留を足す。設計承認ゲートは設計 PR の行、リリース承認ゲートはスプリントの単位の PR の行を、項目と、`deferred` は最後の `deferred` の行の `reason`、`redline` は最後の `redline` の行の `text` とともに載せる |
 
 ## 由来
 

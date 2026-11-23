@@ -29,6 +29,8 @@
 | `plugins/ndf/src/ndf/adapters/publish.py` | `Publisher._private_refs`（秘密を含む参照を照会しない） |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | `Outcome`・`_summary` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | `finish(record_failed=…)` |
+| `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `apply_fix`（見送りの区分 `defer` を持つ） |
+| `plugins/ndf/contracts/data/review-criteria.json` | 見送りの区分の選び方 |
 | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | `cmd_run` |
 | `plugins/ndf/docs/contracts/commands.md` | `ndf records mvv gate` の `--machine` と入力の形、`ndf records mvv cite` |
 | `plugins/ndf/skills/development-workflow/references/pace.md`・`approval-request.md`・`agent-layers.md`・`project-mvv.md` | 詳細設計書の「手順書」の表のとおり |
@@ -69,8 +71,8 @@
 
 ### Task 5: レビューの保留を読み、記録の欠落で cross-review を止める
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`review_rows`・`ReviewWrite`・`record_review`）、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`（`check_review_holds`・`MvvFacts`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（保留の配線）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`（#4076 の実装が作る。無ければ新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
-- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は伏せた行（`withheld: true`）の 3 つ目の規則を含む（設計の決定 11）。`record_review` の重ねない判定は詳細設計書に書いた全項目（head・終わり方・バージョン・項目・理由・本文・`withheld`）と伏せた行の 2 つの規則のまま。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`review_rows`・`ReviewWrite`・`record_review`）、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`（`check_review_holds`・`MvvFacts`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（保留の配線）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`（#4076 の実装が作る。無ければ新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
+- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は、直っていないレッドラインと、見送りの区分が `needs_user`（または区分の無い）見送りだけを保留にし、伏せた行（`withheld: true`）の 3 つ目の規則を含む（設計の決定 2・11）。修正担当が見送るときに区分を書き（`drive.py` の結果の形・`review-criteria.json`）、ジャーナル（`journal.py`）が持ち、`record_review` が行に書く。`record_review` の重ねない判定は詳細設計書に書いた全項目（head・終わり方・バージョン・項目・理由・本文・`withheld`）と伏せた行の 2 つの規則のまま。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
 - **満たす受け入れ条件:** 4・5
 - **進め方:** 失敗するテスト（`fast` で保留があっても `skip: true`）→ 通す最小実装 → 整理
 
@@ -101,7 +103,7 @@
 | --- | --- | --- | --- | --- |
 | 1 工程の入力とプランの外のエントリポイント | Task 1・2・3 | 3959:8・3959:9 | 約 400 | （実装の後に書き足す） |
 | 2 判定を打つ条件と省く条件 | Task 4 | 3959:1・3959:2・3959:3 | 約 850（比較の API の 300 件の経路と差分の固定を含む） | |
-| 3 レビューの保留と記録の欠落 | Task 5 | 3959:4・3959:5 | 約 650 | |
+| 3 レビューの保留と記録の欠落 | Task 5 | 3959:4・3959:5 | 約 750（見送りの区分を含む） | |
 | 4 根拠の行の確かめ | Task 6 | 3959:7 | 約 350（伏せる処理の `publish.py` を含む） | |
 | 6 プランの承認資料 | Task 8 | 3959:3 | 約 250 | |
 | 5 手順書と用語集 | Task 7 | 3959:1・3959:3・3959:4・3959:7・3959:8 | 約 200 | |
@@ -125,7 +127,7 @@
 | --- | --- |
 | #4076 の実装が #4090・#4099 の直しと違う形で入る | 単位 2 を始める前に、#4076 の部品のシグネチャを詳細設計書の前提と突き合わせ、違えば設計の該当の行を直してから進める |
 | 計画 p9 のレーン lz1-contract（#3684）が `plugins/ndf/contracts/`・`plugins/ndf/src/` を同時に触る | 単位 1 を始める前に、そのレーンの触る場所と取り込みの衝突を確かめ、base-sync で解く |
-| 単位 2 の後・単位 3 の前の main では、`normal` でも判定を打つがレビューの保留を読まない | バージョンを上げるのは単位 1〜5 の後なので、利用者には届かない（決定 7） |
+| 単位 2 の後・単位 3 の前の main では、`normal` でも判定を打つがレビューの保留を読まない | バージョンを上げるのは単位 1〜6 の後なので、利用者の手元には出ない（決定 7） |
 
 ## 切り戻し手順
 

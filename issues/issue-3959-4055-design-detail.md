@@ -10,6 +10,7 @@
 plugins/ndf/
 ├── contracts/workflow/context.schema.json      … mvv_gate に holds・noted
 ├── contracts/workflow/stage-io.schema.json     … stage-in をプランが渡す平らな形に直す
+├── contracts/data/review-criteria.json         … 見送りの区分の選び方
 ├── src/ndf/progress/definition.py              … validate_stage_input を平らな形で確かめる
 ├── src/ndf/progress/invoke.py                  … resolve_inputs が validate_stage_input で確かめる
 ├── src/ndf/domains/records/
@@ -24,7 +25,8 @@ plugins/ndf/
 ├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・mvv_skip（リリース承認ゲートを省かない）
 ├── src/ndf/adapters/publish.py                  … 秘密を含む参照を公開範囲の照会へ送らず伏せる
 ├── src/ndf/domains/crossreview/
-│   ├── drive.py                                 … _summary が record_review の欠けた必須の行を Outcome へ
+│   ├── drive.py                                 … _summary が record_review の欠けた必須の行を Outcome へ・_fix_prompt に見送りの区分
+│   ├── journal.py                               … apply_fix が見送りの区分 defer を持つ
 │   ├── finish_decide.py                         … finish(record_failed=…)
 │   └── cli.py                                   … cmd_run が record_failed を渡す
 └── tests/
@@ -39,6 +41,7 @@ plugins/ndf/
     ├── progress/test_command_mvv_inputs.py *
     ├── progress/test_invoke.py
     ├── progress/test_definition.py
+    ├── domains/crossreview/test_crossreview_journal.py
     └── domains/crossreview/test_crossreview_finish.py
 ```
 
@@ -60,6 +63,8 @@ plugins/ndf/
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認ゲートの質問と承認資料 | — | モジュール | `mvv_lines`（新設）・`material`（変更） |
 | `src/ndf/adapters/publish.py` | 変更 | 書き先へ出す本文の検査 | `run_log` | `Publisher`（変更） | `Publisher._private_refs`（変更。秘密を含む参照を照会しない） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv` | `Outcome`（変更） | `_summary`（変更） |
+| `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | — | `Journal`（変更） | `apply_fix`（見送りの区分 `defer` を持つ） |
+| `contracts/data/review-criteria.json` | 変更 | 指摘の基準の文 | — | — | 見送りの区分の選び方 |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `finish`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `finish_decide` | モジュール | `cmd_run`（変更） |
 | `contracts/workflow/context.schema.json` | 変更 | 文脈の型 | — | — | `$defs.mvv_gate` に任意のキー `holds`・`noted` |
@@ -182,14 +187,18 @@ PR を読む前の失敗（`gate` が受ける）:
 | `validation_rows` | `records/mvv.py` | 新設 | `validation_rows(root: Path) -> tuple[list[dict[str, Any]], int]` | `mvv-validation.jsonl` を `jsonl.read_rows` で 1 回読み、すべての種類の行と読めなかった行の数を返す。ファイルが無ければ（`[]`, 0）。`OSError`・`UnicodeDecodeError` は呼び出し元へ返す |
 | `review_rows` | `records/mvv.py` | 新設（本文のシグネチャを変える） | `review_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]` | `validation_rows` の行から種類 `mvv-review` の行だけを返す純粋な関数。本文の `review_rows(root)` の読み取りを `validation_rows` へ移し、記録の読み取りを判定の再利用と共有する |
 | `mvv_validate_sprint` | `records/mvv.py` | 変更 | `mvv_validate_sprint(root, inputs, judge, reuse: bool = True, rows: Optional[Sequence[Mapping[str, Any]]] = None) -> tuple[dict[str, Any], Optional[str]]` | `reuse` が真なら再利用の候補を `rows` から選び、`rows` が None のときだけ今どおり記録を読む。`reuse` が偽なら記録を読まない（今は偽でも読む）。追記の `OSError` は外へ出さず、判定の行と原因を返す（書けたら原因は None）。呼び手は `mvv_gate._judged` だけ（ほかはテスト） |
-| `review_holds` | `records/mvv_decide.py` | 新設 | `review_holds(rows: Iterable[Mapping[str, Any]], broken: int, repo: str, prs: Iterable[int], mvv: tuple[str, str]) -> list[str]` | 本文の規則（`redline`・今のバージョンの解除されない `deferred`）に 3 つ目を足す: キーの最後の行（本文の「最後」の決め方）が今のバージョンの `withheld: true` の行なら、終わり方によらず「PR #N の <項目>（記録の自由記述が未完了）」で保留する（#4090・#4099 の決定 7・16）。承認資料には、伏せた行から来る理由・本文の代わりに `WITHHELD` の文を載せる |
+| `review_holds` | `records/mvv_decide.py` | 新設 | `review_holds(rows: Iterable[Mapping[str, Any]], broken: int, repo: str, prs: Iterable[int], mvv: tuple[str, str]) -> list[str]` | 本文の規則（2026-11-23 に絞った形）で保留を決める。(1) レッドライン: キーの最後の `redline` の行より後に同じキーの `fixed` が無ければ保留（後の `fixed` は head・`--state-dir`・バージョンによらず外す）。(2) 見送り: 今のバージョンの `deferred` のうち、`defer` が `needs_user`・区分が無い・知らない値の行があり、後に同じキー・同じバージョンの `fixed` が無ければ保留。`defer` が `filed`・`not_applicable` の行は保留にしない。(3) キーの最後の行が今のバージョンの `withheld: true` の行なら、終わり方によらず「PR #N の <項目>（記録の自由記述が未完了）」で保留する（#4090・#4099 の決定 7・16。記録を読めないときと同じ扱い）。承認資料には、伏せた行から来る理由・本文の代わりに `WITHHELD` の文を載せる。`deferred` の保留は「PR #N の <項目>（deferred・<区分>）: <理由>」の形にする |
 | `check_review_holds` | `progress/gate/checks.py` | 新設 | `check_review_holds(f: MvvFacts) -> Optional[str]` | `f.review_holds` が空でなければ「レビューの保留: <保留を / でつないだもの>」 |
 | `MvvFacts` | `progress/gate/checks.py` | 変更 | 欄 `review_holds: tuple[str, ...] = ()` | — |
+| `Journal.apply_fix` | `crossreview/journal.py` | 変更 | シグネチャは同じ | 修正担当の結果の `findings[]` の `defer`（`needs_user`・`filed`・`not_applicable`）を、`deferred` の行に `reason` とともに持つ。知らない値・無い値は置かない（`record_review` が区分の無い行として書き、`review_holds` が保留にする） |
+| `_fix_prompt`（結果の形の行） | `crossreview/drive.py` | 変更 | シグネチャは同じ | 修正担当へ渡す結果の形に `"defer": "needs_user|filed|not_applicable"`（`outcome` が `deferred` のときだけ）を足す |
+| `out_of_scope`・区分の説明 | `contracts/data/review-criteria.json` | 変更 | — | 見送るときの区分の選び方を書く。`needs_user`: 利用者の判断が要る（方針・範囲・レッドラインに当たる選択、書き込みの前に承認が要る起票）。`filed`: 範囲外として起票し、番号を理由に書いた。`not_applicable`: 指摘の前提が違う・基準に当たらない・意図どおり |
 | `finish` | `crossreview/finish_decide.py` | 変更 | `finish(review, handed, record_failed: Optional[Mapping[str, Any]] = None) -> Verdict` | 本文の規則のとおり（`mvv_record_failed` を最優先） |
 | `ReviewWrite` | `records/mvv.py` | 新設 | `NamedTuple(written: int, missing: tuple[Mapping[str, Any], ...], cause: Optional[str])` | `record_review` の結果。`missing` は書けなかったか試さなかった必須の行（`redline`・`deferred`）、`cause` は最初に失敗した書き込みの原因（失敗が無ければ None） |
 | `record_review` | `records/mvv.py` | 変更（#4076 の契約を変える） | `record_review(root, pr, head, snapshot, rows, mvv: str, clean: Optional[Callable[[Sequence[str]], Sequence[str]]]) -> ReviewWrite` | 引数 `mvv`・`clean` は #4090・#4099 の形のまま持ち、返り値だけを `ReviewWrite` にする。下の手順。伏せた行（`withheld: true`）の追記の失敗も、その行が必須の行なら `missing` に載せる |
 
 - 接ぎ目（`mvv_gate._judged` の手順 (5)。`review_prs`）: `prs` は `design` では判定する PR の 1 件。`release` では空で、保留を読まない。リリースに含まれる PR の範囲はブランチ戦略ごとに決め方が違い、承認資料と同じ確定した集合から読む仕組みは #4105 が持つ。それまでリリース承認ゲートは `fast`・`auto` でも省かない（`_judged` の手順 (8)、決定 3）ので、保留を読まなくても省かれる経路は無い。承認資料の「MVV 判定」の欄には「リリースの保留は #4105 まで読まない（省かない）」を載せる。API の呼び出しは増えない。`mvv` は `snap` の（`version` の文字列・`sha256`）。`repo` は `mvv.repo_key(root)`。`validation_rows` が `OSError` か `UnicodeDecodeError`（`jsonl.read_rows` が不正なバイトで投げる。`OSError` の子でない）を投げたら、保留を「MVV の記録（mvv-validation.jsonl）を読めない: <原因>」の 1 件にし、手順 (7) は記録を読まずに再利用を省いて判定する（#3959 の本文の異常系の `review_rows` の行の検出は、`validation_rows` のこの 2 つの例外と読む）。読めたときは、同じ行を `review_rows` → `review_holds` と手順 (7) の `mvv_validate_sprint(rows=…)` の両方へ渡す（記録のファイルを読むのは判定 1 回につき 1 回）。結果を `MvvFacts.review_holds` に入れ、`gate_outcome` の `holds` にも同じ値を渡す（承認資料と PR のコメントは同じ結果を読む）
+- `record_review` は `deferred` の行に、ジャーナルの行の `defer` を書く（無ければ書かない）。`defer` は自由記述でないので、伏せた行（`withheld: true`）にも書く
 - `record_review`（#3959 の本文の「記録の欠落」の書き込み元の契約。#4076 の `-> int` と `OSError` の契約を置き換える）: (1) 書く行を、必須の行（`redline`・`deferred`）を先に、ほか（`fixed`・`unresolved`）を後に並べる（同じ種類の中は今の順）。重ねない判定は #4076 と #4090・#4099 の規則のまま変えず、ここに全項目を書く: `mvv-validation.jsonl` は、同じ（repo・PR・key）の最後の行（#4076 の「最後」の決め方）と（head・終わり方・バージョン・`item`・`reason`・`text`・`withheld`）がすべて同じときだけ書かない（`reason`・`text` は持たない行どうしでは無いもの同士として同じとみなす。`withheld` は無い行を偽と読む）。この比べ方に、伏せた行の 2 つの規則を加える: (a) 書く行が伏せた行（`withheld: true`）で、最後の行が伏せていない行かつ（head・終わり方・バージョン）が同じなら書かない（分かっている理由を伏せた行で上書きしない）。(b) 書く行が伏せていない行で、最後の行が伏せた行なら、ほかの項目が同じでも書く（記録の復旧。これで `review_holds` の 3 つ目の規則の保留が解ける）。同じキーでもバージョンが違えば書く（前のバージョンの `deferred` の行は今のバージョンの保留にならないので、今のバージョンでも見送ったら今のバージョンの行が要る）。`mvv-signals.jsonl` は（repo・PR・key・バージョン）が同じ `review_disputed` の行があれば書かない（伏せたかによらない）。(2) 1 行ずつ追記し、`OSError` が出たらそこで止め、例外を外へ出さない。(3) 書けなかった行と後ろの試さなかった行のうち必須のものを `missing`、原因を `cause` にして返す。必須の行を先に書くので、通常の行の失敗は `missing` を作らない。`_summary` は `missing` が空でなければ `Outcome.mvv_record_failed` に `{"rows": [<key と outcome>], "cause": cause}` を入れ、空で `cause` があれば今どおり注意に留める。打ち直すと、重ねない判定で書けた行は飛ばし、欠けた行だけを書く
 - 保留は判定を止めない。LLM の判定の後の `may_skip` でだけ効く（決定 1）
 - 承認資料: 「MVV 判定」の欄の出所を、今回の判定の出力 `outputs.mvv_gate`（`verdict`・`why`・`holds`・`noted` と判定の中身）にする（下の「手順書」の「承認資料の出所」）。プランの経路はステップの承認資料の生成元 `progress/gate/asking.py` の `material` がこの欄を組み、supervisor の経路は `approval-request.md` の手順が同じ載せ方で組む。規則を手順書にコピーせず、出力の値を載せる
@@ -198,7 +207,7 @@ PR を読む前の失敗（`gate` が受ける）:
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `review_holds` | 本文の「テストで落とす壊し方」の表のとおり | 同 | 同 |
+| `review_holds` | 本文の「テストで落とす壊し方」の表のとおり（絞った後の形） | `redline` → `fixed` → 外す。`redline` → `fixed` → `redline` → 保留。`deferred`（`filed`）・`deferred`（`not_applicable`）だけ → 空。`deferred`（`needs_user`）→ 保留。区分の無い `deferred`・知らない区分 → 保留 | `broken` が 1 以上 → 読めない行の件数を 1 件 |
 | `_judged`（保留） | `design` は設計 PR の行を読む。`release` は保留を読まず、`fast`・`auto` でも `skip` は偽で `why` に #4105 の理由。保留があると `fast` で「従う」でも `skip` は偽、`why` と `holds` に載る。記録を読めるとき、`jsonl.read_rows` が判定 1 回で 1 回だけ呼ばれ、同じ材料の「従う」の行があれば LLM を呼ばない | 記録のファイルが無い → 保留は空 | `validation_rows` の `OSError` → 読めない理由の 1 件。不正なバイト（`b"\xff\xfe"` を含む行）を書いた実際のファイルで、`mvv_validate_sprint` をスタブにせず実物を通す → 例外で止まらず、LLM のスタブが 1 回呼ばれ（同じ材料の「従う」の行が記録にあっても再利用しない）、判定の行が追記され、`holds` と PR のコメントに読めない理由の 1 件、`fast` でも `skip` は偽。同じファイルで追記も `OSError` にする → `verdict` は判定のまま・`skip` 偽・`holds` に読めない理由・`why` に記録に書けない理由 |
 | `mvv_validate_sprint` | `rows` を渡すと記録を読まずにその行から再利用する | `reuse=False` → 記録を読まない（読めないファイルでも止まらない） | 追記の `OSError` → 例外を出さず、判定の行と原因を返す |
 | `record_review` | 全部書ける → `missing` 空・`cause` None | 渡した順が `fixed`・`redline` でも `redline` を先に書く。2 行目（通常の行）で失敗 → `missing` 空・`cause` あり。1 行目（必須の行）で失敗 → `missing` に失敗した行と後ろの試さなかった `deferred` | 失敗の後に打ち直す → 書けた行を重ねず、`missing` の行だけを書く |
@@ -258,7 +267,7 @@ PR を読む前の失敗（`gate` が受ける）:
 - 判定のステップの id（`design-mvv`・`release-mvv`）は工程の定義（`contracts/workflow/stages/design.json`・`deploy.json`）の値で、区分 → ステップの id の表は `progress/model.py` の `MVV_GATE_STEPS = {"design": "design-mvv", "release": "release-mvv"}` の 1 か所に置き、`mvv_gate.py` の `GATE_STEPS` はそれを読む（`progress` は `records` を読まないので、`asking.material` も同じ表を `model` から読む）。`mvv_gate.py` には 区分 → そのステップを持つ工程の文書の名前の表 `GATE_STAGES = {"design": "design", "release": "deploy"}` を置く。定義の id を変えたら表も変える（テストで、`GATE_STAGES` の工程の文書の中に `GATE_STEPS` の id のステップがあることを縛る）
 - 手順書: `agent-layers.md` の supervisor が守る規則に次の 2 つを足す。
   - 設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打ち、結果の `outputs.mvv_gate` を設計の工程の出力の `mvv_gate` へそのまま載せ、承認資料の「MVV 判定」の欄にも同じ値を載せる（下の「承認資料の出所」）
-  - リリース承認ゲート（プランを使わず、本番へ届く操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、`ndf records mvv gate --gate release --machine <ステートマシンの ID>` を打つ（文脈の `pr` がスプリントの PR）。結果の `outputs.mvv_gate` は承認資料の「MVV 判定」の欄にだけ載せ、工程の出力へは載せない（#4105 までリリース承認ゲートは省かないので、ゲートが読む出力が要らない）。結果が `ok` でないとき（ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`）は、欄に「判定できない: <結果の summary>」を載せて承認ゲートを返す（止まらずに人へ問う）。プランの経路（`release-mvv` を持つ本番のリリースプラン）では打たない（判定のステップが打つ）`pace.md` の「MVV 判定」の表から順 2（進め方）を外し、「進め方は省くかだけを決める」と `--machine` の行を足す。`project-mvv.md` の「工程での読み方」（#4076 が足す節）の承認ゲートの行から `pace.md` を指す
+  - リリース承認ゲート（プランを使わず、本番に反映される操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、`ndf records mvv gate --gate release --machine <ステートマシンの ID>` を打つ（文脈の `pr` がスプリントの PR）。結果の `outputs.mvv_gate` は承認資料の「MVV 判定」の欄にだけ載せ、工程の出力へは載せない（#4105 までリリース承認ゲートは省かないので、ゲートが読む出力が要らない）。結果が `ok` でないとき（ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`）は、欄に「判定できない: <結果の summary>」を載せて承認ゲートを返す（止まらずに人へ問う）。プランの経路（`release-mvv` を持つ本番のリリースプラン）では打たない（判定のステップが打つ）`pace.md` の「MVV 判定」の表から順 2（進め方）を外し、「進め方は省くかだけを決める」と `--machine` の行を足す。`project-mvv.md` の「工程での読み方」（#4076 が足す節）の承認ゲートの行から `pace.md` を指す
 
 ### 並行と排他
 
