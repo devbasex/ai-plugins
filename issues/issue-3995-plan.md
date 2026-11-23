@@ -150,7 +150,7 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4・3995:7 | 約 400 | （実装の後に書き足す） |
+| U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4・3995:7 | 約 400 | 15 files changed, 482 insertions(+), 203 deletions(-)（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
 | U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | （実装の後に書き足す） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | （実装の後に書き足す） |
 | U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:8 | 約 550 | （実装の後に書き足す） |
@@ -227,3 +227,23 @@ flowchart LR
 - [ ] 受け入れ条件 3995:1〜16 をすべて満たし、条件ごとに設計書の「テスト設計」の行のテストと結果（単位の PR の CI）が対応している。2 の `git grep`・10・11 の後半・12・13・14 は `git grep` とドキュメントレビューで見る
 - [ ] Task 12 の PostToolUse の所要時間の比べが U6 の PR の本文にある
 - [ ] `standard` の検証の段階（`quality-gates`）。単位ごとの cross-review の収束、スプリントの完了判定
+
+## 実装の前に今のコードと照らした結果（2026-11-23）
+
+main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実装の前に、計画と詳細設計書の前提（ファイル・関数・行番号）をスプリントブランチの `f5af5a8d5` と照らした。扱いの列の「U1 で」は U1 の PR に入れたもの。
+
+#4089（`last_context`）の実装はこのスプリントに入れない。U1〜U6 は `context_tokens` の呼び出し箇所を増やさない形で書く（#3995 の範囲を守るため）
+
+| 計画の前提 | 今のコード | 扱い |
+| --- | --- | --- |
+| `relay/cli.py` は 482 行で、`wrapper_settings` の `context_limit` の 1 行だけを触る | 487 行。`context_limit=int(limits.value("relay.context", "count"))` は 307 行目 | 行番号だけの違い。U1 で 307 行目を `context_thresholds.thresholds(environ, limits.value).limit` にした |
+| `statusline.sh` は `applied.json` を読む試行方式の分岐を消すだけ（U2） | lracct で費用・使用率の表示が足された | U1 では触らない。U2 で今の形に合わせて分岐だけを消す |
+| `context_tokens` の呼び出しは guard の `check` の中の 1 か所 | `hooks/guards/context_limit.py`（`check`）・`relay/wrapper.py`（`observe.context_tokens`）・`crossreview/drive.py`（`claude.context_tokens`）の 3 か所 | U1 は増やさない（guard の `check` の 1 か所のまま）。#4089 で置き換える |
+| `guards/context_limit.py` は 40 行 | 40 行（U1 の後は 42 行） | 違いは無い |
+| guard が `context_thresholds` を import すれば足りる（詳細設計書の地図の依存） | hook のエントリポイントから import でたどれるモジュールは `contracts/hooks/imports.json` の `entry.modules` に限られ、`ndf.domains.relay.context_thresholds` は無い（`test_imports.py` が落とす） | U1 で `entry.modules` に `ndf.domains.relay.context_thresholds` を足した。標準ライブラリ（`re`・`typing`）だけに依存する |
+| `context_thresholds.py` に定数 `ENV`（`NDF_CONTEXT_LIMIT`）を置く（詳細設計書の「内部のデータと定数」） | `ndf check` の `const-fact`（`table-str`）が、環境変数の表（`contracts/domains/env.json`）の `id` を最上位の定数へ写すことを落とす | U1 では `ENV` を置かず、`thresholds` の中で名前を字面で読む。名前の持ち主は環境変数の表のまま |
+| `guards.json` の `context-limit` の `summary` は U5 で書き換える | 今の `summary` が消した `hook.context-limit` の名前を指す | U1 では消した名前の参照だけを「運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）」に直した。詳細設計書の文への書き換えは U5 のまま |
+| Task 1: ラッパーが同じセグメントで 2 度目の引継ぎを求めないことのテストが無ければ足す | 既にある（`test_relay_decide.py` の `test_context_over_the_limit_asks_for_a_handover_once`、`test_relay_wrapper_question.py` の `test_a_resume_in_the_same_section_keeps_the_handover_asked`） | 足さない |
+| Task 1: 移すテストは記録・較正・集計（`test_recorded_work_*`・`test_append_and_read_*`・`test_estimate_*`・`test_calibrate_*`・`test_cli_record_*`） | `test_context_dir_follows_the_legacy_state_root` も `context_policy` に依らない記録のテストで、U2 で `test_context_policy.py` を消すと失われる | U1 であわせて `test_context_report.py` へ移した |
+| hook のテストは `NDF_CONTEXT_LIMIT` を流す人の値から切り離している | `tests/domains/hooks/_hooks.py` の `ENV_NAMES` に無い | U1 で `ENV_NAMES` に足した（境界のテストが手元の値で揺れないように） |
+| U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |
