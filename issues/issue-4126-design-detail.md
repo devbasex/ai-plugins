@@ -127,13 +127,13 @@ hook の経路は今も `signals` を通して `identity` を import してい�
 | `check` | 同上 | 変更 | 変えない | `env_key_findings` の結果を足す |
 
 - `env_key_findings`
-  - 事後条件: 次の 3 つを違反（規則 `env-key`）として返す。(a) `env.json` の `key` の値が 2 つ以上の行に現れる（`env.json` の行を指す）。(b) `scope.code()` の構文木で、`identity.env_name(...)`（`from ndf import identity` の `identity.env_name` と、`from ndf.identity import env_name` の `env_name`）の呼び出しの引数が 1 つの文字列リテラルでない。(c) その文字列リテラルのキーを持つ行が無い。(d) `identity.env_name` の呼び出しが 1 つ以上あるのに、`env.json` が無い・JSON として読めない・`rows` が配列でない（呼び出しごとに、その呼び出しの行を指す）。`facts._table_paths` は実在するファイルだけを並べるので、ファイルが無いとき `fact-table` は何も言わない。(d) はそれを埋める。読めない JSON は `fact-table` も指摘するが、(d) は呼び出しの側から見た違反として重ねて返す。呼び出しが 1 つも無いときは、`env.json` が無くても空を返す
+  - 事後条件: 次の 5 つを違反（規則 `env-key`）として返す。(a) `env.json` の `key` の値が 2 つ以上の行に現れる（`env.json` の行を指す）。(b) `scope.code()` の構文木で、`identity.env_name(...)`（`from ndf import identity` の `identity.env_name` と、`from ndf.identity import env_name` の `env_name`）の呼び出しの引数が 1 つの文字列リテラルでない。(c) その文字列リテラルのキーを持つ行が無い。(d) `identity.env_name` の呼び出しが 1 つ以上あるのに、`env.json` が無い・JSON として読めない・`rows` が配列でない（呼び出しごとに、その呼び出しの行を指す）。`facts._table_paths` は実在するファイルだけを並べるので、ファイルが無いとき `fact-table` は何も言わない。(d) はそれを埋める。読めない JSON は `fact-table` も指摘するが、(d) は呼び出しの側から見た違反として重ねて返す。呼び出しが 1 つも無いときは、`env.json` が無くても空を返す。(e) `key` を持つ行で、`key` が空でない文字列でない（空の文字列を含む）か、その行の `id` が空でない文字列でない（行ごとに、その行を指す）。`fact-table` は任意の文字列の列に空の文字列を許すので、`_env_keys` が表ごと `EnvNameError` にする型の約束（「キーの読み手」の型の約束）のうち行に関わるものを、ここで行ごとに落とす。(e) は呼び出しの有無によらず見る。必須のキーを残したまま別の行に `"key": ""` を足した契約が CI を通り、導入した後のラッパーが `config_broken` で止まるのを防ぐ
   - 副作用: 無い
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `env_key_findings` | キーが重ならず、呼び出しのキーがどれも 1 行に当たれば空。呼び出しが無く `env.json` も無ければ空 | 別名の import（`from ndf.identity import env_name as en`）も呼び出しとして数える | 重なるキー・無いキー・変数を渡す呼び出しで違反。`env.json` を消した保存先で呼び出しが 1 つあれば、その呼び出しの行に違反。`env.json` を JSON でない文字にした保存先でも同じ |
+| `env_key_findings` | キーが重ならず、呼び出しのキーがどれも 1 行に当たれば空。呼び出しが無く `env.json` も無ければ空 | 別名の import（`from ndf.identity import env_name as en`）も呼び出しとして数える | 重なるキー・無いキー・変数を渡す呼び出しで違反。`env.json` を消した保存先で呼び出しが 1 つあれば、その呼び出しの行に違反。`env.json` を JSON でない文字にした保存先でも同じ。必須のキーの行を残したまま別の行に `"key": ""` を足した表で、その行に違反（回帰）。`key` を持つ行の `id` が空の文字列の表でも、その行に違反 |
 
 `checks/README.md` の規則の表に `env-key` の行を足す。
