@@ -276,7 +276,10 @@ def test_a_busy_lock_makes_the_admission_wait_without_counting(monkeypatch, no_w
         monkeypatch.setattr(machine, name, counted(name))
     got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", counted("listed", {}), counted("go", {"ok": True}), _place())
     assert isinstance(got, dict)
-    assert {k: v for k, v in got.items() if k != "detail"} == {"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}}
+    assert {k: v for k, v in got.items() if k != "detail"} == {
+        "ok": False,
+        "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []},
+    }
     assert hits == Counter()
 
 
