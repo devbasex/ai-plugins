@@ -741,7 +741,7 @@ def _report_paths(report: str) -> worker_paths.ReportPaths:
 def _workdir(
     paths: worker_paths.ReportPaths, doing: str, *, create: bool = False, origin: Optional[worker_paths.Origin] = None
 ) -> Iterator[worker_paths.WorkDir]:
-    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`origin` は解いた時点の観測で、開くときに照合する）。
+    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`origin` は解いた時点の観測で、開くときに突き合わせする）。
 
     リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。
     """

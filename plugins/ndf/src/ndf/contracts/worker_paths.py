@@ -88,7 +88,7 @@ def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportP
 
 
 class Origin(NamedTuple):
-    """`prepare_paths` が解いた時点の観測。`open_workdir(origin=...)` へ渡し、開くときに照合する。
+    """`prepare_paths` が解いた時点の観測。`open_workdir(origin=...)` へ渡し、開くときに突き合わせる。
 
     `fresh` は解いた時点で無かった末尾の要素の数（0 なら保存先があった）。`anchor` はその手前の、解いた時点で
     あった最も深いディレクトリ（`fresh` が 0 なら保存先そのもの）の `(st_dev, st_ino)` である。
@@ -103,7 +103,7 @@ def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, Origin]:
 
     `prepare` はその観測を `open_workdir(origin=...)` へ渡す。解いてから開くまでに別の実ディレクトリが無かった場所へ
     現れると、開く側は最初の `open` で開けてしまい、無かったことを自分では知れないため。あった親が別の
-    ディレクトリへ差し替えられたことも、開く側は `anchor` との照合で知る。
+    ディレクトリへ差し替えられたことも、開く側は `anchor` との突き合わせで知る。
     """
     _check_worker_name(name)
     base, missing, anchor = _resolve_existing(directory)
@@ -137,7 +137,7 @@ def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
     根の側から確かめるのは、末尾の側から確かめると `parent/child` が無いと観測した後に別の利用者の `parent` が
     現れたとき、`parent` を既存とみなして無い要素から外してしまうためである。根の側からなら、ある要素は
     その子を確かめる前にあったと観測しており、無いと観測した要素はその後に現れても無い要素に残る。
-    解いた要素の `stat` はその子を確かめる前に取り、`open_workdir` が開いた記述子と照合する（解いた後に親を
+    解いた要素の `stat` はその子を確かめる前に取り、`open_workdir` が開いた記述子と突き合わせる（解いた後に親を
     差し替えられても、差し替え先で確かめた不在を差し替え前の親のものとみなさない）。
 
     無い要素の後の `..` は無い要素を打ち消すだけにし、打ち消した後にまた要素が来れば、そこから確かめ直す。
@@ -219,7 +219,7 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
     `origin` は呼ぶ側がパスを解いた時点の観測（`prepare_paths`）である。末尾の `origin.fresh` 個の要素は最初の `open` で
     開けても、開いた記述子を `_check_created` で確かめ、`WorkDir.created` を真にする（解いてから開くまでに現れた
     実ディレクトリを既存とみなさず、ほかの利用者の持ち物なら `EntryUnsafe`（`replaced`）で止める）。
-    その手前の要素は開いた記述子を `origin.anchor` と照合し、解いた時点のディレクトリでなければ `EntryUnsafe`（`replaced`）で止める。
+    その手前の要素は開いた記述子を `origin.anchor` と突き合わせし、解いた時点のディレクトリでなければ `EntryUnsafe`（`replaced`）で止める。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
     """
     path = Path(os.path.abspath(directory))
@@ -240,7 +240,7 @@ def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Ori
 
     途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
     `origin` があれば、末尾の `origin.fresh` 個の要素は呼ぶ側が解いた時点で無かったので、最初の `open` で開けても最初に
-    無かった要素として扱い、その手前の要素（無ければ根）の記述子を `origin.anchor` と照合する。
+    無かった要素として扱い、その手前の要素（無ければ根）の記述子を `origin.anchor` と突き合わせる。
     開いた記述子と、最初の `open` に無かった要素を経たか（`WorkDir.created`）を返す。
     """
     parts = path.parts[1:]
@@ -264,7 +264,7 @@ def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Ori
 
 
 def _check_anchor(fd: int, origin: Optional[Origin], path: Path, *, at: int, opened: int) -> None:
-    """根から `opened` 個の要素を開いた記述子が `origin.anchor` の位置（`at`）なら、解いた時点のディレクトリと照合する。
+    """根から `opened` 個の要素を開いた記述子が `origin.anchor` の位置（`at`）なら、解いた時点のディレクトリと突き合わせる。
 
     違えば `EntryUnsafe`（`replaced`）。解いてから開くまでに、あった親を別のディレクトリへ差し替えられると、
     無いと観測した子は差し替え先では既にあるかもしれず、そこへ報告の保存先を作らないため。
@@ -341,15 +341,22 @@ def check_entries(wd: WorkDir, names: Iterable[str]) -> None:
     """
     for name in names:
         _check_name(name)
-        try:
-            st = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
-        except FileNotFoundError:  # noqa: NDF401 ファイル: 無い名前は初期化してよい
+        st = _lstat_or_none(wd, name)
+        if st is None:
             continue
         if wd.created:
             raise EntryUnsafe(name, "replaced")
         kind = _unsafe_kind(st)
         if kind:
             raise EntryUnsafe(name, kind)
+
+
+def _lstat_or_none(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    """作業ディレクトリの直下の `name` をリンクをたどらずに `stat` する。無ければ None（初期化してよい）。"""
+    try:
+        return os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無い名前は初期化してよい
+        return None
 
 
 def _refused_kind(fd: int, part: str) -> str:
