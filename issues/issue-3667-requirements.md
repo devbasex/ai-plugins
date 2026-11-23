@@ -20,7 +20,7 @@
 
 | 項目 | 今の数と実例 | 数え方 |
 | --- | --- | --- |
-| スキーマの `enum` を写した定数 | 4 個。`KIND_LABELS`（`src/ndf/adapters/notify.py:114`）・`MVV_PACES`（`src/ndf/progress/model.py:27`）・`SIZES`（`src/ndf/domains/gws/thumbnails.py:30`）・`INTERFACE_VALUES`（`src/ndf/domains/materials/collect.py:32`） | 各ファイルを読んで位置を確かめた |
+| スキーマの `enum` を写した定数 | 5 個。`KIND_LABELS`（`src/ndf/adapters/notify.py:114`）・`MVV_PACES`（`src/ndf/progress/model.py:27`）・`SIZES`（`src/ndf/domains/gws/thumbnails.py:30`）・`INTERFACE_VALUES`（`src/ndf/domains/materials/collect.py:32`）・`CHOOSERS`（`src/ndf/contracts/chosen.py:21`。`contracts/schemas/route-chosen.schema.json` の `chooser` の `enum` と同じ並び） | 各ファイルを読んで位置を確かめた |
 | 一致を縛るテスト | 2 本。`tests/adapters/test_notify_sender.py:134`・`tests/contracts/test_chosen.py:54` | 同上 |
 | 名前が上限・回数・待ちを表す数の定数 | 53 個 | `src/` を AST で読み、最上位の大文字の名前への数の代入のうち、名前に `MAX`・`LIMIT`・`TIMEOUT`・`WAIT`・`RETRY`・`DAYS`・`SECONDS`・`INTERVAL`・`ATTEMPT`・`GRACE`・`KEEP`・`BUDGET`・`CAP` を含むものを数えた |
 | `StrEnum` | 15 クラス（11 ファイル） | `grep -rn "class .*StrEnum" src/ndf` |
@@ -32,7 +32,7 @@
 
 | | 今 | 足した後 |
 | --- | --- | --- |
-| スキーマの `enum` の写し | 4 個の定数がスキーマの `enum` と同じ文字列の並びを持ち、2 本のテストが一致を縛る | 定数はスキーマ（か事実の表）から組み立て、一致を縛るテストは無い |
+| スキーマの `enum` の写し | 5 個の定数がスキーマの `enum` と同じ文字列の並びを持ち、2 本のテストが一致を縛る | 定数はスキーマ（か事実の表）から組み立て、一致を縛るテストは無い |
 | 方針の閾値 | 20 個前後がコードに直に書かれる | `contracts/limits.json` の項目になり、コードは上限の設定から読む |
 | `const-fact` の照合 | 事実の表の `id` だけ・辞書はキーだけ | 手書きのスキーマの `enum`・上限の設定の数・辞書の値も照合する |
 | 値の置き場の基準 | 書かれていない | 事実・方針はデータ、語の集まりは `StrEnum`、外部の仕様と実装の都合は定数、と開発の規約の 1 か所に書かれる |
@@ -53,7 +53,7 @@
 含む:
 - 値の置き場の基準を、NDF の開発の規約（Skill の `refactoring` の「分岐をデータ化」か、`plugins/ndf/` の開発ガイド）の 1 か所に書く
 - 語の集まりの文字列の定数を `StrEnum` へ置き換える。値がスキーマか事実の表にあるものは、そこから組み立てる
-- スキーマの `enum` を写した 4 個の定数を、スキーマ（か事実の表）から読む形へ変え、一致を縛るテスト 2 本を消す
+- スキーマの `enum` を写した 5 個の定数を、スキーマ（か事実の表）から読む形へ変え、一致を縛るテスト 2 本を消す
 - 方針の閾値を `contracts/limits.json` へ移し、コードはそこから読む。`WORK_TIMEOUT` と `supervise.worker-step` が同じ事実かを確かめ、同じなら 1 つにする
 - `const-fact` の照合の相手に、手書きのスキーマの `enum`・上限の設定の数・辞書の値を加える
 
@@ -65,10 +65,11 @@
 ## 前提
 
 - 前提 1: 値の置き場の基準（今の姿の「4. 置き場の基準」）は、2026-11-16 に利用者と決めた方向として起票者が書いたものであり、この要求はその基準に従う
+- 前提 2: `WORK_TIMEOUT`（3,600 秒）と上限の設定の `supervise.worker-step`（1,800 秒）は別の事実である。前者は worker 1 本の全体の上限、後者は worker のステップ 1 つの上限で、読み手も違う（後者には読み手が無い）。この要求は値を変えず、`WORK_TIMEOUT` を上限の設定の新しい項目（3,600 秒）として移す
 
 ## 受け入れ条件
 
-- [ ] 1. スキーマの `enum` を写した定数（11 系で残る 4 個: `KIND_LABELS`・`MVV_PACES`・`SIZES`・`INTERFACE_VALUES`）がコードの文字列の並びを持たず、スキーマか事実の表から読む
+- [ ] 1. スキーマの `enum` を写した定数 5 個（`KIND_LABELS`・`MVV_PACES`・`SIZES`・`INTERFACE_VALUES`・`CHOOSERS`）がコードの文字列の並びを持たず、スキーマか事実の表から読む
 - [ ] 2. `tests/adapters/test_notify_sender.py` と `tests/contracts/test_chosen.py` の、定数とスキーマの一致を縛るアサーションが無い
 - [ ] 3. 方針の閾値と分けた定数が `contracts/limits.json` の項目になり、コードは上限の設定から読む。どれを方針の閾値と分けたかの一覧を PR の本文に載せる
 - [ ] 4. `const-fact` が、手書きのスキーマの `enum` と同じ集まり（か部分集合）の定数を指摘する。合成した最小のスキーマと定数で、指摘が出るときと出ないときの両方をテストで確かめる
@@ -82,7 +83,7 @@
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わらない（閾値の値は同じまま置き場が変わる。`WORK_TIMEOUT` を 1 つにするときは値が変わりうる） |
+| 公開インタフェース | 変わらない（閾値の値は同じまま置き場が変わる。`WORK_TIMEOUT` の値は前提 2 のとおり変えない） |
 | データ | `contracts/limits.json` に閾値の項目が増える |
 | 既存の振る舞い | `const-fact` の指摘が増える。閾値を変えるときに触るのが上限の設定の 1 か所になる。語の集まりが `StrEnum` になり、打ち間違いを型で止められる |
 

@@ -49,18 +49,20 @@ plugins/ndf/
 └── tests/                                    下の「単体テストの観点」の表のファイル
 ```
 
-依存の向き: 新しい規則（`checks/`）は `ndf.contracts` の読み手と `checks/model.py` の `Finding` だけを読み、互いを読まない。`ratchet.py` は規則を読まず、規則の名前と件数だけを受け取る。内部データの核（`contracts/internal.py`）は `ndf.contracts` の層にあり、`domains/` の書き手がそれを読む。層の向きは下から `ndf.contracts`・`ndf.adapters`・`ndf.core`・`ndf.progress`・`ndf.domains` で、規則 `layer` が守る。型の関係は設計文書の「構成要素」の表にあり、ここでは描き直さない。
+依存の向き: 新しい規則（`checks/`）は `ndf.contracts` の読み手と `checks/model.py` の `Finding` だけを読み、互いを読まない。
+
+**規則のモジュールが持つ入口の関数は、既にある規則と同じ `check(scope, rules)` にそろえる。** 既存の `structure.py:76`・`facts.py:231` と同じ形で、`run.py` が規則ごとに同じ形で呼ぶ。この同名は役割が同じことを示すものなので、規則 `copy-dup` の対象から外す（`rules.json` の `copy_dup.allow_names` に `check` を置く）。`ratchet.py` は規則を読まず、規則の名前と件数だけを受け取る。内部データの核（`contracts/internal.py`）は `ndf.contracts` の層にあり、`domains/` の書き手がそれを読む。層の向きは下から `ndf.contracts`・`ndf.adapters`・`ndf.core`・`ndf.progress`・`ndf.domains` で、規則 `layer` が守る。型の関係は設計文書の「構成要素」の表にあり、ここでは描き直さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/checks/limits_readers.py` | 新設 | 上限の設定の読み手の宣言と、実際に方針を引く import を突き合わせる | `ndf.contracts.limits`、`checks.model` | モジュール | `declared`・`actual`・`findings`（新設） |
-| `src/ndf/checks/copy_dup.py` | 新設 | 2 つ以上のファイルの同じ名前の最上位の関数と、4 つ以上のファイルに出る文字列を数える | `checks.model` | モジュール | `top_functions`・`repeated_strings`・`findings`（新設） |
-| `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`findings`（新設） |
+| `src/ndf/checks/limits_readers.py` | 新設 | 上限の設定の読み手の宣言と、実際に方針を引く import を突き合わせる | `ndf.contracts.limits`、`checks.model` | モジュール | `declared`・`actual`・`check`（新設） |
+| `src/ndf/checks/copy_dup.py` | 新設 | 2 つ以上のファイルの同じ名前の最上位の関数と、4 つ以上のファイルに出る文字列を数える | `checks.model` | モジュール | `top_functions`・`repeated_strings`・`check`（新設） |
+| `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`check`（新設） |
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
 | `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `lit`（変更）・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
 | `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`VERSION`（新設） |
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
-| `src/ndf/core/worker.py` | 変更 | worker の上限を上限の設定から読む | `ndf.contracts.limits` | モジュール | `WORK_TIMEOUT`（削除）・`work_timeout`（新設） |
+| `src/ndf/core/worker.py` | 変更 | worker の上限を上限の設定の新しい方針 `supervise.worker-run`（3,600 秒。値は今の `WORK_TIMEOUT` と同じ）から読む | `ndf.contracts.limits` | モジュール | `WORK_TIMEOUT`（削除）・`work_timeout`（新設） |
 
 ## 上限の設定の読み手の宣言（規則 `limit-readers`）
 
@@ -72,14 +74,14 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `declared` | `src/ndf/checks/limits_readers.py` | 新設 | `declared() -> dict[str, frozenset[str]]` | 上限の設定の方針ごとの、宣言された読み手のモジュールの名前 |
 | `actual` | `src/ndf/checks/limits_readers.py` | 新設 | `actual(trees: Mapping[str, ast.Module]) -> dict[str, frozenset[str]]` | 構文木から、方針の名前を引く呼び出しを探し、方針ごとに引いたモジュールの名前を集める |
-| `findings` | `src/ndf/checks/limits_readers.py` | 新設 | `findings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 宣言と実際の食い違いを指摘にする |
+| `check` | `src/ndf/checks/limits_readers.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 宣言と実際の食い違いを指摘にする（既存の規則と同じ入口の形） |
 
 - `actual`
   - 事前条件: `trees` のキーはプラグインの根からの相対パスで、`src/` の下の `.py` だけを含む
   - 事後条件: 返す名前はモジュールの名前（`src/ndf/core/worker.py` → `ndf.core.worker`）である。方針の名前を文字列で渡した呼び出しと、接頭辞を組み立てて渡した呼び出しの両方を含む
   - 接頭辞の読み方: 呼び出しの引数が定数の文字列の連結（`f"hook.budget.{event}"` を含む）のとき、その定数の部分を接頭辞として読む。接頭辞で始まる方針をすべて引いたものとして数える
   - 副作用: 無し（構文木を読むだけ）
-- `findings`
+- `check`
   - 事後条件: 指摘は 2 種類で、宣言した読み手が引いていない方針（`unread`）と、宣言の無い方針を引いているモジュール（`undeclared`）。どちらも方針の名前とモジュールの名前を理由に含む
 
 ### 異常系の処理
@@ -93,9 +95,9 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `findings` | 宣言した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
-| `findings` | あるモジュールが方針を引くが、その方針の `read_by` にそのモジュールが無い | `undeclared` の指摘（保存先は呼び出しの行） |
-| `findings` | 宣言と実際が一致する | 指摘なし |
+| `check` | 宣言した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
+| `check` | あるモジュールが方針を引くが、その方針の `read_by` にそのモジュールが無い | `undeclared` の指摘（保存先は呼び出しの行） |
+| `check` | 宣言と実際が一致する | 指摘なし |
 
 - 繰り返しの終わる条件: 方針の数（223）× 読み手の数で有限
 - 計算量の注意: 接頭辞の照合は方針の名前を辞書順に並べて二分探索する。方針ごとに全ファイルを走査しない
@@ -120,7 +122,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `declared` | 方針ごとに宣言の集まりを返す | `read_by` が 1 つだけの方針 | 上限の設定を読めないときに `LimitsError` |
 | `actual` | 文字列で渡した方針・接頭辞を組み立てて渡した方針の両方を集める | 接頭辞がほかの方針の名前の前方一致になる場合（`hook.budget` と `hook.budget.stop`） | 構文の誤りで木が無いファイルは渡されない |
-| `findings` | 一致すれば 0 件 | 宣言が 1 つで実際が 0 件（`unread` 1 件） | 宣言の無い方針を引くモジュール（`undeclared` 1 件） |
+| `check` | 一致すれば 0 件 | 宣言が 1 つで実際が 0 件（`unread` 1 件） | 宣言の無い方針を引くモジュール（`undeclared` 1 件） |
 
 テストのファイル: `tests/checks/test_limits_readers.py`（新設）
 
@@ -134,7 +136,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `top_functions` | `src/ndf/checks/copy_dup.py` | 新設 | `top_functions(trees: Mapping[str, ast.Module]) -> list[Finding]` | 2 つ以上のファイルに同じ名前の最上位の関数がある組を指摘にする |
 | `repeated_strings` | `src/ndf/checks/copy_dup.py` | 新設 | `repeated_strings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 4 つ以上のファイルに出る 8〜80 字の文字列を指摘にする |
-| `findings` | `src/ndf/checks/copy_dup.py` | 新設 | `findings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 上の 2 つを並べて返す |
+| `check` | `src/ndf/checks/copy_dup.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 上の 2 つを並べて返す（既存の規則と同じ入口の形） |
 | `baseline` | `src/ndf/checks/ratchet.py` | 新設 | `baseline() -> dict[str, int]` | 規則ごとの基準の数 |
 | `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int]) -> list[str]` | 基準を超えた規則の名前と数を文にする（空なら通る） |
 | `lower` | `src/ndf/checks/ratchet.py` | 新設 | `lower(counts: Mapping[str, int], commit: str, day: str) -> list[str]` | 基準を下回った規則の基準を書き直し、書いた規則の名前を返す |
@@ -146,7 +148,7 @@ plugins/ndf/
 - `repeated_strings`
   - 事後条件: docstring を除く。4 ファイル以上に出る文字列 1 つにつき 1 件
 - `lower`
-  - 事前条件: `ndf check --write-spec` のときだけ呼ばれる（検査だけのときは基準を書き換えない）
+  - 事前条件: `ndf check --write-spec` のときだけ呼ばれる（検査だけのときは基準を書き換えない）。CI は `--write-spec` を付けずに打つため、基準が下がるのは手元で打ち直して生成物をコミットしたときである。減らした変更がそのまま通るのは `verdicts` が基準以下を通すためで、基準の数が下がるのは次に `--write-spec` を打ったときになる
   - 事後条件: 書き直した `ratchet.json` は、下回った規則の `max` を今の件数にし、`measured` と `commit` を渡された値にする
   - 副作用: `src/ndf/checks/ratchet.json` を書く
 
@@ -156,6 +158,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `baseline` | 基準のファイルを読めない | ファイルが無い・JSON が壊れている・`version` が知らない値 | `ratchet.baseline` | 止める | `ndf check` が `stopped`・`config_broken`・終了コード 2 | 直してから打ち直す |
 | `verdicts` | 基準に無い規則の件数が来た | 規則を足して基準を書き忘れた | `ratchet.verdicts` | 止める（基準の無い規則をラチェットで通さない） | 同上 | 基準を足してから打ち直す |
+
+**`counts` に渡すのは、ラチェットを当てる規則の件数だけである**（今は `copy-dup` の 1 つ）。0 件を保つ規則の件数は渡さず、`run.py` が規則の名前で分ける。
 | `lower` | 基準のファイルを書けない | 権限・ディスク | `ratchet.lower` | 呼び出し元へ返す | `ndf check` が `stopped`・`failed`・終了コード 1 | 権限を直してから打ち直す |
 
 ### 内部のデータと定数
@@ -164,6 +168,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `copy_dup.min_files` | 設定値（文字列が何ファイルに出たら数えるか） | `src/ndf/checks/rules.json` | 4 |
 | `copy_dup.min_chars`・`max_chars` | 設定値（数える文字列の長さ） | 同上 | 8・80 |
+| `copy_dup.allow_names` | 設定値（同名でも数えない関数の名前） | 同上 | `["check", "main"]`（規則の入口と、サブコマンドの入口） |
 | `ratchet.rules` | データ（規則ごとの基準の数） | `src/ndf/checks/ratchet.json` | 実装の単位 3 の最後に測る |
 
 ### 単体テストの観点
@@ -220,7 +225,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `lit` | 辞書の定数で値の集まりも返す | 値に数が混ざる辞書（キーだけ） | キーが `None` を含む辞書（`None` を返す。今のまま） |
 | `_enum_dups` | `enum` と同じ集まりの定数で 1 件、部分集合で 1 件 | 要素 2 つの `enum`（照合する）・1 つ（照合しない）・関係の無い集まり（0 件） | スキーマを読めないときに例外 |
-| `_limit_dups` | 上限の設定の 1,800 と同じ `WORK_TIMEOUT` で 1 件 | 名前が当たらない定数（0 件）・同じ数の表示の行数（0 件） | 上限の設定を読めないときに例外 |
+| `_limit_dups` | 合成した上限の設定の方針の数（例: 1,800）と同じ値を持つ、名前が上限を表す定数で 1 件 | 名前が当たらない定数（0 件）・同じ数の表示の行数（0 件） | 上限の設定を読めないときに例外 |
 
 テストのファイル: `tests/checks/test_facts_enum.py`・`test_facts_limits.py`・`test_facts_dict.py`（新設）
 
@@ -260,7 +265,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `read_record` | `version` が無い | 版 1 として `migrate` を通す |
 | `read_record` | `version` が今の版 | そのままスキーマで確かめる |
-| `read_record` | `version` が今の版より小さい | `migrate` を通してから確かめる |
+| `read_record` | `version` が今の版より小さい | `migrate` を通してから確かめる（今の版は 1 なので、この経路は版 2 を足したときに初めて通る。合成したスキーマでテストする） |
 | `read_record` | `version` が今の版より大きい | `precondition` で止める |
 
 ### 内部のデータと定数
@@ -275,9 +280,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `read_record` | 今の版の行をそのまま返す | `version` の無い行（版 1 として移行）・今の版 − 1 の行 | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
+| `read_record` | 今の版の行をそのまま返す | `version` の無い行（版 1 として読む） | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
 | `write_record` | `version` と `at` を埋めて返す | `at` を呼び出し元が渡した行（上書きしない） | 対応表に無い名前を持つ行（書かずに `InternalError`）・時差の無い時刻 |
-| `migrate` | 版 1 の行を今の形へ移す | 移す項目が無い版（そのまま） | 新しい版（止まる） |
+| `migrate` | 合成した版 1 → 2 の移行で項目が移る（今の版は 1 なので、移行の経路は合成したスキーマで確かめる） | 移す項目が無い版（そのまま） | 新しい版（止まる） |
 
 テストのファイル: `tests/contracts/test_internal.py`（新設）
 
@@ -290,9 +295,9 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `allowed` | `src/ndf/checks/internal_names.py` | 新設 | `allowed() -> dict[str, frozenset[str]]` | 種類ごとに、使ってよい名前の集まり |
-| `findings` | `src/ndf/checks/internal_names.py` | 新設 | `findings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 内部データのスキーマと書き手が、対応表に無い別名を使っていれば指摘にする |
+| `check` | `src/ndf/checks/internal_names.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 内部データのスキーマと書き手が、対応表に無い別名を使っていれば指摘にする（既存の規則と同じ入口の形） |
 
-- `findings`
+- `check`
   - 事前条件: 見るのは内部データのスキーマ（`contracts/schemas/internal/`）と、`write_record` を呼ぶモジュール
   - 事後条件: 対応表の `where` にその種類が無い名前だけを指摘する（意味の違う名前は、対応表に別の意味の行として載せる）
   - 副作用: 無し
@@ -308,7 +313,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `allowed` | 種類ごとの名前の集まりを返す | `where` が 1 つの種類だけの名前 | 対応表を読めないときに例外 |
-| `findings` | 対応表どおりなら 0 件 | 別の意味として載っている名前（0 件）・`where` にその種類が無い名前（1 件） | 内部データのスキーマが 1 つも無いとき 0 件 |
+| `check` | 対応表どおりなら 0 件 | 別の意味として載っている名前（0 件）・`where` にその種類が無い名前（1 件） | 内部データのスキーマが 1 つも無いとき 0 件 |
 
 テストのファイル: `tests/checks/test_internal_names.py`（新設）
 
