@@ -51,9 +51,14 @@ def policies() -> dict[str, dict[str, Any]]:
     return load("limits.json")["policies"]
 
 
+def policy_row(name: str) -> Optional[dict[str, Any]]:
+    """方針の 1 行。無ければ None。"""
+    return policies().get(name)
+
+
 def policy_value(name: str, key: str) -> Any:
     """方針の 1 つの値。無ければ `TableError`。"""
-    row = policies().get(name)
+    row = policy_row(name)
     if row is None or key not in row:
         raise TableError(f"上限の設定の方針 {name} に {key} が無い")
     return row[key]

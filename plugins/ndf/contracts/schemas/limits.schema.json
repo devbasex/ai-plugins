@@ -50,22 +50,25 @@
           "lock_seconds": {"type": "number", "minimum": 0, "description": "休みのマーカーの錠を待つ上限の秒（hook.stop-wait.judge）"},
           "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
           "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
-          "endpoint": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["entrypoints", "ancestors", "cli_exe", "script_hosts", "flags", "keys", "env_names"],
-            "description": "送信先が同じかの確かめの値（hook.stop-wait.judge）",
-            "properties": {
-              "entrypoints": {"type": "array", "items": {"type": "string"}},
-              "ancestors": {"type": "integer", "minimum": 1},
-              "cli_exe": {"type": "array", "items": {"type": "string"}},
-              "script_hosts": {"type": "array", "items": {"type": "string"}},
-              "flags": {"type": "array", "items": {"type": "string"}},
-              "keys": {"type": "array", "items": {"type": "string"}},
-              "env_names": {"type": "array", "items": {"type": "string"}}
-            }
-          }
+          "endpoint": {"$ref": "#/$defs/endpoint"}
         }
+      }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoints", "ancestors", "cli_exe", "script_hosts", "flags", "keys", "env_names"],
+      "description": "送信先が同じかの確かめの値（hook.stop-wait.judge）",
+      "properties": {
+        "entrypoints": {"type": "array", "items": {"type": "string"}},
+        "ancestors": {"type": "integer", "minimum": 1},
+        "cli_exe": {"type": "array", "items": {"type": "string"}},
+        "script_hosts": {"type": "array", "items": {"type": "string"}},
+        "flags": {"type": "array", "items": {"type": "string"}},
+        "keys": {"type": "array", "items": {"type": "string"}},
+        "env_names": {"type": "array", "items": {"type": "string"}}
       }
     }
   }

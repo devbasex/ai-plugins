@@ -145,6 +145,20 @@ def test_the_class_of_the_receiver_is_resolved(tmp_path, text):
     assert got(tmp_path, {"hub.py": hub, "use.py": "from ndf import hub as h\n" + text}, rules) == {"a.b": ["use"]}
 
 
+def test_a_name_is_resolved_in_the_innermost_function_that_binds_it(tmp_path):
+    rules = rules_of({"ndf.hub.Hub.nodes": {"arg": "batch", "index": 1}})
+    hub = "class Hub:\n    def nodes(self, items, batch):\n        pass\n"
+    text = (
+        IMPORT
+        + "from ndf.hub import Hub\n\ndef f():\n    hub = Hub()\n    name = 'a.out'\n\n    def g():\n        hub = Hub()\n        name = 'a.in'\n"
+    )
+    text += "        hub.nodes([1], 'c.in')\n        limits.seconds(name)\n\n    hub.nodes([1], 'c.out')\n    limits.value(name, 'count')\n"
+    assert got(tmp_path, {"hub.py": hub, "use.py": text}, rules) == {n: ["use"] for n in ("a.in", "a.out", "c.in", "c.out")}
+    # 内側の関数は、束ねていない名前を外側の関数から引く
+    closure = IMPORT + "def f():\n    name = 'a.b'\n    return lambda: limits.seconds(name)\n"
+    assert got(tmp_path, {"m.py": closure}) == {"a.b": ["m"]}
+
+
 def test_only_the_arm_that_hands_the_argument_over_is_passed_through(tmp_path):
     rules = rules_of({"ndf.low.cap": {"arg": "name", "index": 0}, "ndf.low.again": {"arg": "name", "index": 0}})
     text = IMPORT + 'def cap(name):\n    return limits.value(name if name else "a.fallback", "count")\n\n'
@@ -212,12 +226,18 @@ def test_a_dynamic_reader_that_does_not_match_its_row_is_not_resolved(tmp_path, 
     assert ("budget", 5) in unresolved(tmp_path, {"budget.py": text}, rules_of(dynamic=DYNAMIC))
 
 
-def test_a_dynamic_reader_of_the_whole_table_matches_the_expressions_of_its_function(tmp_path):
+def test_a_dynamic_reader_of_the_elements_of_a_sequence(tmp_path):
     (tmp_path / "r.json").write_text(json.dumps(BUDGETS))
-    rules = rules_of(dynamic=[{**DYNAMIC[0], "table": "ndf.contracts.limits.table"}])
-    text = IMPORT + 'def f(event):\n    return f"hook.budget.{event}"\n\ndef row(event):\n    return limits.table()[f(event)]\n'
-    assert got(tmp_path, {"budget.py": text}, rules) == {"hook.budget.stop": ["budget"], "hook.budget.end": ["budget"]}
-    assert unresolved(tmp_path, {"budget.py": text.replace("hook.budget", "hook.budgets")}, rules) == [("budget", 6)]
+    rules = rules_of(dynamic=[{**BUDGET, "expr": 'guard["limits"]', "template": "{}"}])
+    text = IMPORT + 'def f(guard):\n    return [limits.seconds(n) for n in guard["limits"]]\n'
+    assert got(tmp_path, {"budget.py": text}, rules) == {"stop": ["budget"], "end": ["budget"]}
+    assert unresolved(tmp_path, {"budget.py": text.replace('"limits"', '"names"')}, rules) == [("budget", 3)]
+
+
+def test_a_dynamic_row_does_not_cover_the_whole_table(tmp_path):
+    (tmp_path / "r.json").write_text(json.dumps(BUDGETS))
+    text = BUDGET_CODE + '\ndef row():\n    return limits.table()["a.other"]\n'
+    assert unresolved(tmp_path, {"budget.py": text}, rules_of(dynamic=DYNAMIC)) == [("budget", 8)]
 
 
 @pytest.mark.parametrize("vocabulary", ["missing.json#/a", "r.json#/nope", "r.json#/runtimes/claude/events/Stop/budget/x"])

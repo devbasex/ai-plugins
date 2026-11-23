@@ -13,7 +13,7 @@ from ._hooks import call_entry, sample
 
 def test_declared_budgets_keep_the_order():
     # CI の検査: 部品の上限 ≤ 締め切り − 余白、締め切り ≤ 登録の timeout ≤ ランタイムの上限
-    assert budget.check_budget(tables.policies(), budget.budget_registrations()) == []
+    assert budget.check_budget(budget.budget_registrations()) == []
 
 
 def test_every_runtime_event_has_a_budget_with_all_values():
@@ -39,30 +39,33 @@ def test_stop_budget_adds_the_judge_seconds_only_for_the_runtimes_that_judge():
     assert budget.budget_for("codex", "Stop").usable < judge["seconds"] <= budget.budget_for("claude", "Stop").usable
 
 
-def test_component_limit_is_compared_only_with_the_budgets_of_its_runtimes():
+def test_component_limit_is_compared_only_with_the_budgets_of_its_runtimes(monkeypatch):
     widened = copy.deepcopy(tables.policies())
     widened["hook.stop-wait.judge"]["runtimes"] = ["claude", "codex"]
-    errors = budget.check_budget(widened, budget.budget_registrations())
+    monkeypatch.setattr(tables, "policies", lambda: widened)
+    errors = budget.check_budget(budget.budget_registrations())
     seconds, usable = widened["hook.stop-wait.judge"]["seconds"], budget.budget_for("codex", "Stop").usable
     assert [e for e in errors if "hook.stop-wait.judge" in e] == [
         f"stop-wait の部品の上限 hook.stop-wait.judge（{seconds} 秒）が codex の Stop の締め切り − 余白（{usable} 秒）を超える"
     ]
 
 
-def test_component_limit_longer_than_the_deadline_is_a_violation():
+def test_component_limit_longer_than_the_deadline_is_a_violation(monkeypatch):
     broken = copy.deepcopy(tables.policies())
     broken["hook.ask-forward"]["seconds"] = 8
-    errors = budget.check_budget(broken, budget.budget_registrations())
+    monkeypatch.setattr(tables, "policies", lambda: broken)
+    errors = budget.check_budget(budget.budget_registrations())
     assert any("hook.ask-forward" in e and "PreToolUse" in e for e in errors)
 
 
-def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns():
+def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns(monkeypatch):
     # 現状固定: 予算の行の欠落・部品の上限の欠落・締め切り − 余白の超過の文と、重複を除いて並べた順
     broken = copy.deepcopy(tables.policies())
     del broken["hook.budget.stop"]
     del broken["hook.ask-forward"]
     broken["hook.counter-lock"]["seconds"] = 99
-    assert budget.check_budget(broken, []) == [
+    monkeypatch.setattr(tables, "policies", lambda: broken)
+    assert budget.check_budget([]) == [
         # ask-answered・ask-closed は ask-forward と同じ上限 hook.ask-forward を使う（#3814）
         "ask-answered の部品の上限 hook.ask-forward が limits.json に無い",
         "ask-closed の部品の上限 hook.ask-forward が limits.json に無い",
@@ -85,7 +88,7 @@ def test_registration_without_timeout_or_shorter_than_the_deadline_is_a_violatio
         {"runtime": "codex", "event": "SessionEnd", "timeout": 10},
         {"runtime": "claude", "event": "Nope", "timeout": 3},
     ]
-    errors = budget.check_budget(tables.policies(), regs)
+    errors = budget.check_budget(regs)
     assert len(errors) == 4
     assert any("timeout が無い" in e for e in errors) and any("上限 3" in e for e in errors)
 

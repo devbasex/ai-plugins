@@ -566,3 +566,13 @@ def test_a_setting_is_read_without_validating_every_policy(monkeypatch):
     assert rj.setting("model") == "haiku"
     with pytest.raises(rj.JudgeSettingError, match="no-such が無い"):
         rj.setting("no-such")
+
+
+@pytest.mark.parametrize("change", [{"env_names": "ANTHROPIC_"}, {"keys": "apiKeyHelper"}, {"flags": None}])
+def test_a_wrong_shape_of_the_endpoint_setting_refuses_the_judge(monkeypatch, change):
+    broken = {**rj.setting("endpoint"), **change}
+    monkeypatch.setattr(rj.tables, "policy_value", lambda name, key: broken)
+    with pytest.raises(rj.JudgeSettingError, match="形が違う"):
+        rj.setting("endpoint")
+    got = {"parent_argv": ["claude"], "project_dir": "/", "parent_exe": "/x", "parent_exe_id": [1, 2]}
+    assert rj._endpoint_broken(got, lambda _: pytest.fail("起動の直前まで進んだ")) == "JudgeSettingError"

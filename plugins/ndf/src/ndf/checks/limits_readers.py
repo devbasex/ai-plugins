@@ -7,7 +7,8 @@
 - `tables`・`whole`: 方針の表を丸ごと返す名前と、表を受け取るだけで方針を引かないモジュール
 - `dynamic`: 名前を実行時に組み立てる読み手。関数 `at` の中の式 `expr` が、`vocabulary`（コントラクトのファイルと JSON Pointer。
   `*` は辞書か並びのすべて）の値を `template` の `{}` に、`*` が当たったキー（左から 1 番目が `{1}`）を `{1}` に入れた名前を引く。
-  式の綴りか組み立ての形が実際のコードと違えば、その読み口は解けない。`table` があれば、その表を参照する読みに当てる
+  `expr` は読み口の引数の式で、引数が関数の中の名前なら、その名前に入る式（`for` の変数なら並びの式）。式の綴りか組み立ての形が
+  実際のコードと違えば、その読み口は解けない。表を丸ごと参照する読みには当てない（1 行ずつ読む読み口を使う）
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Optional
 
@@ -48,7 +50,6 @@ class Dynamic:
     expr: str
     shape: str
     names: frozenset[str]
-    table: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,11 @@ class Settings:
     tables: frozenset[str]
     whole: frozenset[str]
     dynamic: tuple[Dynamic, ...]
+
+    @cached_property
+    def methods(self) -> frozenset[str]:
+        """読み口に並べたメソッドの名前。"""
+        return frozenset(full.rpartition(".")[2] for full in self.readers if _is_class(full.rpartition(".")[0]))
 
 
 @dataclass(frozen=True)
@@ -113,7 +119,7 @@ def dynamic_names(row: Mapping[str, str], data: Any) -> frozenset[str]:
 def _dynamic(row: Mapping[str, str], data: Any) -> Dynamic:
     expr = ast.unparse(ast.parse(row["expr"], mode="eval"))
     shape = re.sub(r"\{\d+\}", HOLE, row["template"])
-    return Dynamic(row["at"], expr, shape, dynamic_names(row, data), row.get("table"))
+    return Dynamic(row["at"], expr, shape, dynamic_names(row, data))
 
 
 def settings(rules: dict[str, Any], contracts_dir: Path) -> Settings:
@@ -161,6 +167,19 @@ class _Scope:
     is_class: bool = False
     imported: Mapping[str, str] = field(default_factory=dict)
 
+    @cached_property
+    def local(self) -> Mapping[str, list[tuple[ast.expr, bool]]]:
+        """この囲みで束ねる名前 → 入る式と、その式の要素 1 つずつ（`for` の変数）かどうか（1 回だけ歩く）。"""
+        found: defaultdict[str, list[tuple[ast.expr, bool]]] = defaultdict(list)
+        for node in _within(self.node):
+            for target, value, many in _assigned(node):
+                if isinstance(target, ast.Name):
+                    found[target.id].append((value, many))
+        return found
+
+    def binds(self, name: str) -> bool:
+        return name in self.params or name in self.imported or name in self.local
+
 
 def _params(args: ast.arguments) -> frozenset[str]:
     rest = [a for a in (args.vararg, args.kwarg) if a is not None]
@@ -193,13 +212,22 @@ def _default(node: ast.AST, arg: str) -> Optional[ast.expr]:
     return defaults.get(arg)
 
 
-def _bound_to(node: ast.AST, name: str) -> Iterator[tuple[ast.expr, bool]]:
-    """関数の中で `name` に入る式と、その式の要素 1 つずつ（`for` の変数）かどうか。"""
-    for n in ast.walk(node):
-        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
-            yield n.value, False
-        elif isinstance(n, (ast.For, ast.comprehension)) and isinstance(n.target, ast.Name) and n.target.id == name:
-            yield n.iter, True
+def _within(scope: ast.AST) -> Iterator[ast.AST]:
+    """囲みの中の節点。内側の関数・クラス・lambda の中へは降りない。"""
+    for node in ast.iter_child_nodes(scope):
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            yield from _within(node)
+
+
+def _assigned(node: ast.AST) -> Iterator[tuple[ast.expr, ast.expr, bool]]:
+    """節点が束ねる先と、入る式と、その式の要素 1 つずつかどうか。"""
+    if isinstance(node, ast.Assign):
+        yield from ((t, node.value, False) for t in node.targets)
+    elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+        yield node.target, node.value, False
+    elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        yield node.target, node.iter, True
 
 
 class _Walker(ast.NodeVisitor):
@@ -222,19 +250,20 @@ class _Walker(ast.NodeVisitor):
             return self.modules[owner].imported[attr]
         return name
 
-    def _visible(self) -> list[_Scope]:
-        """名前を引ける囲み（内側から。クラスの囲みは、その直下の式からだけ引ける）。"""
-        return [s for i, s in enumerate(reversed(self.scopes)) if i == 0 or not s.is_class]
+    def _binder(self, name: str) -> Optional[_Scope]:
+        """名前を束ねる、いちばん内側の囲み（クラスの囲みは、その直下の式からだけ引ける）。モジュールの名前は None。"""
+        visible = (s for i, s in enumerate(reversed(self.scopes)) if i == 0 or not s.is_class)
+        return next((s for s in visible if s.binds(name)), None)
 
     def _param_scope(self, name: str) -> Optional[_Scope]:
-        """名前を引数に持つ囲み。それより内側の import が同じ名前を束ねていれば None。"""
-        found = next((s for s in self._visible() if name in s.params or name in s.imported), None)
+        """名前を引数に持つ囲み。それより内側の囲みが同じ名前を束ねていれば None。"""
+        found = self._binder(name)
         return found if found is not None and name in found.params else None
 
     def _imported(self, name: str) -> Optional[str]:
         """名前が指す import の先の完全な名前（内側の囲みから解く）。"""
-        tables = [*(s.imported for s in self._visible()), self.mod.imported]
-        return next((t[name] for t in tables if name in t), None)
+        found = self._binder(name)
+        return (found.imported if found is not None else self.mod.imported).get(name)
 
     def _method(self, name: str) -> Optional[str]:
         owner = next((s for s in reversed(self.scopes) if s.is_class), None)
@@ -255,7 +284,8 @@ class _Walker(ast.NodeVisitor):
         imported = self._imported(node.id)
         if imported is not None:
             return self._canonical(imported)
-        return f"{self.mod.name}.{node.id}" if node.id in self.mod.defs or node.id in self.mod.consts else None
+        at_module = self._binder(node.id) is None and (node.id in self.mod.defs or node.id in self.mod.consts)
+        return f"{self.mod.name}.{node.id}" if at_module else None
 
     def _constant(self, node: ast.expr) -> Optional[ast.expr]:
         """名前か属性が指す、モジュールの最上位の代入の右辺（import の先は 1 階層だけ）。"""
@@ -277,10 +307,10 @@ class _Walker(ast.NodeVisitor):
 
     def _local(self, name: str) -> list[tuple[ast.expr, bool]]:
         """囲む関数の中で `name` に入る式。関数の中で束ねていない名前と引数は空。"""
-        functions = [s for s in self.scopes if not s.is_class]
-        if not functions or self._param_scope(name) is not None:
+        found = self._binder(name)
+        if found is None or name in found.params or name in found.imported:
             return []
-        return list(_bound_to(functions[0].node, name))
+        return found.local[name]
 
     def _names_of_local(self, name: str, local: list[tuple[ast.expr, bool]]) -> Optional[frozenset[str]]:
         """関数の中の名前に入る式の和。自分の値から作り直す名前（`x = x if x else "a.b"`）は解けない。"""
@@ -346,9 +376,10 @@ class _Walker(ast.NodeVisitor):
 
     def _reader_of(self, call: ast.Call) -> Optional[Reader]:
         name = self.full_name(call.func)
-        if name is None or name not in self.conf.readers:
-            owner = self._type_of(call.func.value) if isinstance(call.func, ast.Attribute) else None
-            name = f"{owner}.{call.func.attr}" if owner is not None and isinstance(call.func, ast.Attribute) else None
+        # 受け手の型は、読み口に並べたメソッドの名前の呼び出しだけで解く
+        if name not in self.conf.readers and isinstance(call.func, ast.Attribute) and call.func.attr in self.conf.methods:
+            owner = self._type_of(call.func.value)
+            name = f"{owner}.{call.func.attr}" if owner is not None else None
         return self.conf.readers[name] if name is not None and name in self.conf.readers else None
 
     def _assembled(self, node: ast.expr) -> tuple[str, list[ast.expr]]:
@@ -367,7 +398,7 @@ class _Walker(ast.NodeVisitor):
         if isinstance(node, ast.Name):
             scope = self._param_scope(node.id)
             reader = self.conf.readers.get(scope.name) if scope is not None else None
-            rebound = scope is not None and any(True for _ in _bound_to(scope.node, node.id))
+            rebound = scope is not None and node.id in scope.local
             return reader if reader is not None and reader.arg == node.id and not rebound else None
         if not isinstance(node, ast.Attribute):
             return None
@@ -383,9 +414,9 @@ class _Walker(ast.NodeVisitor):
     def _dynamic_names(self, node: ast.expr) -> Optional[frozenset[str]]:
         """動的な読み口の指定が、この関数のこの式に当たるときの名前。当たる指定が無ければ None。"""
         local = self._local(node.id) if isinstance(node, ast.Name) else []
-        expr = local[0][0] if len(local) == 1 and not local[0][1] else node
+        expr = local[0][0] if len(local) == 1 else node
         at = next((s.name for s in reversed(self.scopes) if not s.is_class), self.mod.name)
-        rows = [d for d in self.conf.dynamic if d.table is None and d.at == at and self._is_assembly(expr, d)]
+        rows = [d for d in self.conf.dynamic if d.at == at and self._is_assembly(expr, d)]
         return frozenset().union(*(d.names for d in rows)) if rows else None
 
     def _is_assembly(self, node: ast.expr, row: Dynamic) -> bool:
@@ -406,17 +437,6 @@ class _Walker(ast.NodeVisitor):
 
     def _record(self, line: int, names: Optional[frozenset[str]], dynamic: bool = False) -> None:
         self.reads.append(Read(self.mod.name, self.mod.rel, line, names, dynamic))
-
-    def _table_names(self, table: str) -> Optional[frozenset[str]]:
-        """表 `table` を参照するモジュールの動的な読み口の名前。指定が無いか、指定の式が関数に無ければ None。"""
-        rows = [d for d in self.conf.dynamic if d.table == table and d.at.rpartition(".")[0] == self.mod.name]
-        return _union([d.names if self._assembles(d) else None for d in rows]) if rows else None
-
-    def _assembles(self, row: Dynamic) -> bool:
-        """指定した関数の中に、指定した式がある。"""
-        name = row.at.rpartition(".")[2]
-        found = list(ast.walk(self.mod.defs[name])) if name in self.mod.defs else []
-        return any(isinstance(n, ast.expr) and self._is_assembly(n, row) for n in found)
 
     def _starred(self, node: ast.Starred, offset: int) -> Optional[ast.expr]:
         """星付きの引数の `offset` 番目の要素。"""
@@ -455,9 +475,7 @@ class _Walker(ast.NodeVisitor):
         if name is None or owner == self.mod.name or self.mod.name in self.conf.whole:
             return
         is_reader = name in self.conf.readers and not _is_class(name) and id(node) not in self.called | self.handed
-        if name in self.conf.tables:
-            self._record(node.lineno, self._table_names(name), dynamic=True)
-        elif is_reader:
+        if name in self.conf.tables or is_reader:
             self._record(node.lineno, None)
 
     def visit_Name(self, node: ast.Name) -> None:
