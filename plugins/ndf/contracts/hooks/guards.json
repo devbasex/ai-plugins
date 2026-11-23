@@ -47,9 +47,9 @@
     },
     {
       "name": "context-limit",
-      "summary": "PreToolUse で、文脈の量が運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）以上の呼び出しを、引継ぎに要るものを除いて止め続ける（拒否を数えない。SF12・#3995）",
+      "summary": "PostToolUse で判断開始の値（上限の設定の context.decide-from）を超えたことを利用者の入力ごとに 1 度知らせ、PreToolUse で、文脈の量が運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）以上の呼び出しを、引継ぎに要るものを除いて止め続ける（拒否を数えない。SF12・#3995）",
       "module": "ndf.domains.hooks.guards.context_limit",
-      "events": ["PreToolUse"],
+      "events": ["PreToolUse", "PostToolUse"],
       "tools": [],
       "order": 20,
       "strict": false,

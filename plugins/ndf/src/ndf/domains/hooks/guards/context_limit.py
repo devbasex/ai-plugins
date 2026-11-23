@@ -7,6 +7,10 @@
 引継ぎ文書の確かめ方と終え方（中継の下は次のセグメントのブロック、外は ndf-next）を、後に背景の監視の止め方を書き、文脈の量を入れない。拒否は数えず、
 案内へ下げずに止め続ける（表の `deny_key` が `none`。#3995 の決定 6）。
 
+PostToolUse では、文脈の量が判断開始の値（`decide_from`）以上・運用上限未満なら、超えたことと役ごとの切りどころを
+案内する（利用者の入力ごとに 1 度。数え手の `NOTICE_KEY`）。知らせ済みの入力と数え手が使えないときは会話の記録を読まない。
+文脈の量は同じ呼び出し（`tool_use_id`）の PreToolUse が数え手の `memo` に覚えた値を使い、読み直さない（#3995 の決定 3）。
+
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
 
 サブエージェント（入力の `agent_id`）と、メインディレクトリに `.ndf` の無い会話は判定せず、会話の記録も読まない（#3995 の 3995:15）。
@@ -28,7 +32,7 @@ from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
 from ndf.domains.relay.signals import relay_dir
-from ndf.domains.hooks.verdict import Verdict, deny, passing
+from ndf.domains.hooks.verdict import Verdict, advise, deny, passing
 
 # 運用上限で通す Bash に許さない形: 変数の展開・コマンド置換（`$`・バッククォート）とプロセス置換
 _SUBSTITUTION = re.compile(r"[$`]|[<>]\(")
@@ -38,6 +42,12 @@ _UNQUOTED_SPECIAL = frozenset("~*?[{(")
 _DQUOTE_ESCAPES = frozenset('$`"\\\n')
 # この guard の名前（`guards.json` の行）
 _NAME = "context-limit"
+# 判断開始の値を知らせた回数を数える数え手の `counts` のキー（利用者の入力ごとに数え直す）
+NOTICE_KEY = "context-limit:notice"
+# PreToolUse が読んだ文脈の量を `tool_use_id` ごとに覚える数え手の `memo` のキー
+MEMO_KEY = "context-limit:tokens"
+# 同じ入力の中で覚えておく `tool_use_id` の数の上限（1 つの応答の並列の呼び出しの数より大きく取る）
+MEMO_KEEP = 16
 # ファイルへ書かないリダイレクト（演算子と先を空白でつないだ字面）: 記述子の複製（先が数字か -）と、/dev/null へ向ける形
 _SAFE_REDIRECT = re.compile(r"[<>]& (?:-|[0-9]+)|&?>>? /dev/null")
 # Bash が引用の外で語を区切る空白（字句の blank。ほかの Unicode の空白は語の一部になる）
@@ -334,14 +344,56 @@ def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> st
     )
 
 
+def _notice(tokens: int, t: Thresholds) -> str:
+    """判断開始の値を超えたことと、役ごとの切りどころを書いた案内の文。"""
+    return (
+        f"文脈の量が判断開始の値（{t.decide_from} token）を超えた（今 {tokens} token。運用上限は {t.limit} token）。"
+        "工程の途中の Tool は止めないので、次の切りどころで引継ぎ文書を書いて切り替える。"
+        "レーンの conductor は次のカットポイント（ドキュメントレビューのマージの後・リファクタリングとコードレビューの前後・"
+        "スプリントの Pull Request を出した後・マージのフェーズを終えた後）で、"
+        "オーガナイザーはこの知らせを処理し終えて次の wait を張る前か、利用者への報告を終えた時点で切る。"
+        "運用上限に達すると、引継ぎに要る呼び出しのほかは止まる。"
+    )
+
+
+def _tool_use_id(ctx) -> Optional[str]:
+    value = ctx.payload.get("tool_use_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _tokens(ctx, svc, notified: bool) -> Optional[int]:
+    """文脈の量。PostToolUse は同じ呼び出しの PreToolUse が覚えた値を取り出して使い、無ければ会話の記録の末尾を読む。
+
+    PreToolUse は読んだ値を、この入力の後にまだ知らせていなければ `tool_use_id` ごとに覚える（知らせ済みなら PostToolUse は
+    値を使わずに終わる）。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    """
+    item = _tool_use_id(ctx)
+    post = ctx.event == "PostToolUse"
+    got = svc.counter.take(MEMO_KEY, item) if post and item is not None else None
+    if got is not None and isinstance(got.get("tokens"), int):
+        return got["tokens"]
+    tokens = context_tokens(ctx.transcript_tail)
+    if not post and tokens is not None and item is not None and not notified:
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens}, MEMO_KEEP)
+    return tokens
+
+
 def check(ctx, svc) -> Verdict | None:
     main = None if "agent_id" in ctx.payload else _main(ctx.cwd)
     if main is None:
         return None
-    tokens = context_tokens(ctx.transcript_tail)
+    post = ctx.event == "PostToolUse"
+    notified = svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0  # noqa: NDF502 ファイル: 知らせる前は 0 回
+    if post and (not svc.counter.usable or notified):  # 知らせない呼び出しは会話の記録を読まずに終える
+        return None
+    tokens = _tokens(ctx, svc, notified)
     if tokens is None:
         return None
     t = thresholds(ctx.env, tables.policy_value)
+    if post:
+        if t.decide_from <= tokens < t.limit and svc.counter.bump(NOTICE_KEY) == 1:
+            return advise(_notice(tokens, t))
+        return passing(context_tokens=tokens)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
