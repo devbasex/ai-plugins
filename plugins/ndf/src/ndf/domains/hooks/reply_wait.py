@@ -412,18 +412,47 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
-def line_asks(text: str) -> tuple[str, list[str]]:
-    """1 行の、かぎ括弧の引用を外した文と、その中の回答・承認を待つ文（`read_prose` の `matched` と同じ形）。
+def _masked(match: re.Match[str]) -> str:
+    """`_opaque` の字数を保つ形。インラインコードは中身を `_` で埋め、リンク先と URL は区切りの記号だけを替える。"""
+    text = match.group(0)
+    if text.startswith("`"):
+        return "`" + "_" * (len(text) - 2) + "`"
+    return text.translate(_OPAQUE_MARKS)
 
-    guard `stop-wait` が区分を先頭に書いた行の質問を、ルールの待ちの文と照らすのに使う。
+
+def _space_quote(match: re.Match[str]) -> str:
+    """かぎ括弧の引用 1 つを、改行を残して同じ字数の空白にする（行の中の位置を変えない）。"""
+    return re.sub(r"[^\n]", " ", match.group(0))
+
+
+class LineQuestions(NamedTuple):
+    """本文の 1 行の質問（`line_questions` の返り）。`masked` と `unquoted` は元の行と同じ字数で、位置で照らせる。"""
+
+    # インラインコード・リンク先・URL を伏せた行
+    masked: str
+    # `masked` のかぎ括弧の引用（行をまたぐものも）を空白にした行
+    unquoted: str
+    # 引用の外の、本人への回答・承認を待つ文（別の場所の待ちの報告だけの文は除く）
+    asks: list[str]
+
+
+def line_questions(lines: list[ProseLine]) -> list[LineQuestions]:
+    """本文の行（`prose_lines` の返り）ごとの質問。行の並びと数は `lines` と同じ。
+
+    引用は `read_prose` と同じく行をまたいで追い、見出しを含むすべての行を見る（最後の 3 行に限らない）。guard
+    `stop-wait` が、区分を先頭に書いた行の質問か区分の無い質問かを、質問が現れた行で決めるのに使う。
     """
+    masked = [_OPAQUE.sub(_masked, line.text) for line in lines]
+    joined = "\n".join(masked)
     prev = None
-    unquoted = _OPAQUE.sub(_opaque, text)
-    while prev != unquoted:
-        prev = unquoted
-        unquoted = _QUOTED.sub(_blank_quote, unquoted)
-    unquoted = unquoted.strip()
-    return unquoted, [s for s in _sentences([unquoted]) if _asks_reply(s)]
+    while prev != joined:
+        prev = joined
+        joined = _QUOTED.sub(_space_quote, joined)
+    out: list[LineQuestions] = []
+    for text, unquoted in zip(masked, joined.split("\n")):
+        asks = [s for s in _sentences([unquoted]) if _asks_reply(s) and not _only_elsewhere(s)]
+        out.append(LineQuestions(text, unquoted, asks))
+    return out
 
 
 def _heading_kinds(lines: list[ProseLine]) -> dict[int, str | None]:

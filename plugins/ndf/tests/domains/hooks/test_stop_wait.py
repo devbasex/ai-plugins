@@ -464,3 +464,56 @@ def test_stop_wait_takes_a_category_declared_in_the_project_extra_as_asked(tmp_p
     got = _check(tmp_path, "- ndf-ask:design この方針で進めてよいですか。", runtime="codex", cwd=str(tmp_path / "sub"))
     assert got.kind == "pass" and got.notes["judge"] == "skip:asked"
     assert judge.asked == [] and judge.parents == 0
+
+
+# 区分と質問は文面の一致でなく、質問が現れた行で対応付ける（区分の無い行の質問は見出し・最後の 3 行より前も見る）
+UNCATEGORIZED_ELSEWHERE = [
+    "- ndf-gate:1 設計 Pull Request をマージしてよいですか。\n\nライブラリは A でよいですか？\n\n"
+    "テストを足しました。\n\n文書を直しました。\n\n差分を確かめました。",
+    "- ndf-gate:1 設計 Pull Request をマージしてよいですか。\n\n設計 Pull Request をマージしてよいですか。",
+    "## ライブラリは A を採用してよいですか？\n\n比較の材料は上に書いた。\n\n- ndf-gate:1 設計 Pull Request をマージしてよいですか。",
+    "ログの抜粋です。\n\n『ndf-gate:1 設計 Pull Request をマージしてよいですか？\n回答を待ちます。』\n\n確認を終えました。",
+    "「ndf-gate:1」の件は済んだ。ライブラリは A でよいですか？",
+]
+
+
+@pytest.mark.parametrize("reply", UNCATEGORIZED_ELSEWHERE, ids=["before-last-lines", "repeated", "heading", "quoted", "quoted-name"])
+def test_stop_wait_does_not_take_a_question_outside_its_category_line_as_asked(tmp_path, monkeypatch, reply):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, reply, runtime="codex", cwd=str(tmp_path))
+    assert got.notes["judge"] != "skip:asked"
+
+
+def test_stop_wait_takes_a_colon_after_the_category_as_the_separator(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, "- ndf-gate:1: 設計 Pull Request をマージしてよいですか。", runtime="codex", cwd=str(tmp_path))
+    assert got.kind == "pass" and got.notes["judge"] == "skip:asked"
+
+
+# 区分の宣言は、組み込みに無い `ndf-ask:<名前>` の質問の行があるときだけ読む
+@pytest.mark.parametrize(
+    ("reply", "reads"),
+    [
+        ("- ndf-gate:1 設計 Pull Request をマージしてよいですか。", []),
+        ("- ndf-ask:redline:C1 この変更を入れてよいですか。", []),
+        ("- ndf-ask:cost この費用で進めてよいですか。", ["builtin"]),
+    ],
+    ids=["gate", "redline", "builtin"],
+)
+def test_stop_wait_reads_the_declared_categories_only_when_needed(tmp_path, monkeypatch, reply, reads):
+    Judge(monkeypatch, kind="report")
+    read: list[str] = []
+    builtin = stop_wait.builtin_names
+
+    def builtin_names():
+        read.append("builtin")
+        return builtin()
+
+    def extra_names(cwd):
+        read.append("extra")
+        return frozenset()
+
+    monkeypatch.setattr(stop_wait, "builtin_names", builtin_names)
+    monkeypatch.setattr(stop_wait, "extra_names", extra_names)
+    got = _check(tmp_path, reply, runtime="codex", cwd=str(tmp_path))
+    assert got.notes["judge"] == "skip:asked" and read == reads

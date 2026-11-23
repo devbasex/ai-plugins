@@ -12,9 +12,8 @@
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
 
 人へ問う Tool の無いランタイム（コントラクト表の `ask_tool` が null。Codex）では、区分の名前を先頭に書いた本文の質問が
-問い合わせの経路である（`asking.md` の「ランタイムごとの扱い」）。認める区分（組み込みと `.ndf/ask.json` の `extra`）で
-始まる行の中に質問があり、ルールが待ちと読んだ文がどれもその行の中にある応答を問うた応答として通し、変更要求の文も
-その形での出し直しを求める。
+問い合わせの経路である（`asking.md` の「ランタイムごとの扱い」）。引用を除いた本文で質問のある行がどれも認める区分
+（組み込みと `.ndf/ask.json` の `extra`）で始まる応答を問うた応答として通し、変更要求の文もその形での出し直しを求める。
 """
 
 from __future__ import annotations
@@ -41,18 +40,17 @@ REASON = (
 ROUTE_TOOL = " {tool}（metadata.source に区分）で出し直し"
 ROUTE_PROSE = "、区分の名前（ndf-gate:1・ndf-ask:cost など）を先頭に書いた本文の質問で出し直して終え"
 # 本文の質問の先頭の区分（`asking.md` の「区分」の表の名前）。行頭の強調・コード・括弧と「区分:」の前置きを許す。
-# 名前はトークン全体で照らす（`ndf-gate:10` を `ndf-gate:1` と読まない）。形は `docs/specifications/ndf-ask-guard.md` の
-# 区分の表で、`ndf-ask:<名前>` の名前は組み込みの区分と `.ndf/ask.json` の `extra` にあるものだけを認める（`categorized`）
+# 名前はトークン全体で照らす（`ndf-gate:10`・`ndf-ask:redline:C9` を認めない）。後ろに空白か行末が続く半角コロンは
+# 質問との区切りとして認める（`ndf-gate:1: マージしてよいですか？`）。形は `docs/specifications/ndf-ask-guard.md` の
+# 区分の表で、`ndf-ask:<名前>` の名前は組み込みの区分と `.ndf/ask.json` の `extra` にあるものだけを認める（`allowed`）
 CATEGORY = re.compile(
     r"^[\s*_`\[(（「【]*(?:区分\s*[:：]\s*[*_`]*)?"
-    r"(?:ndf-gate:[12]|ndf-ask:redline:(?:C[1-8]|P[0-9]+|R[0-9]+)|ndf-ask:(?P<name>[a-z0-9][a-z0-9-]*))"
-    r"(?![A-Za-z0-9:_-])"
+    r"(?P<token>ndf-gate:[12]|ndf-ask:redline:(?:C[1-8]|P[0-9]+|R[0-9]+)|ndf-ask:(?P<name>[a-z0-9][a-z0-9-]*))"
+    r"(?![A-Za-z0-9_-]|:(?!\s|$))"
 )
 # 組み込みの `ndf-ask:<名前>` の区分の SSOT（`allow` の既定値）と、設定 `.ndf/ask.json` の保存先の行
 ASK_SCHEMA = "schemas/ndf-settings/ask.schema.json"
 ASK_FILE = "ask"
-# ルールの判定のうち、待ちの文（`matched`）を区分の行の質問と照らす種類
-_WAIT_KINDS = ("prose_wait", "heading_wait")
 # 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
 LOGGED = "本文で人の回答を待って終えた（stop-wait）"
 # 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
@@ -116,38 +114,45 @@ def extra_names(cwd: str) -> frozenset[str]:
     return frozenset(e["name"] for e in extra if isinstance(e, dict) and isinstance(e.get("name"), str))
 
 
-def categorized(text: str, names: Optional[frozenset[str]] = None) -> bool:
-    """行が認める区分の名前で始まるか。`names` は `ndf-ask:<名前>` に認める名前（組み込みと `extra`）。"""
-    found = CATEGORY.match(text)
-    if found is None:
+def allowed(names: set[str], cwd: str) -> bool:
+    """`ndf-ask:<名前>` の名前がどれも認める区分か。組み込みに無い名前があるときだけ `.ndf/ask.json` を読む。"""
+    if not names:
+        return True
+    if "redline" in names:
         return False
-    name = found.group("name")
-    return name is None or (name != "redline" and name in (names or frozenset()))
+    rest = names - builtin_names()
+    return not rest or rest <= extra_names(cwd)
 
 
 def asked_in_prose(ctx) -> bool:
     """人へ問う Tool の無いランタイムで、区分付きの本文の質問で問うたか。
 
-    区分の名前で始まる行の中に質問の文があり、ルールが待ちと読んだ文（`reply_reading.matched`）がどれもその行の中に
-    ある応答だけを問うた応答とする。区分だけの行の後に別の行で問う・区分の無い質問を添えた応答は、ルールの判定へ回す。
+    かぎ括弧の引用を除いた行ごとに質問の文を探し（`reply_wait.line_questions`）、質問のある行がどれも認める区分の
+    名前で始まる（名前が引用の中に無い）応答だけを問うた応答とする。区分の無い行の質問（見出し・最後の 3 行より前を
+    含む）・区分だけの行の後に別の行で問う・未宣言の区分の応答は、ルールの判定へ回す。区分の宣言は、組み込みに無い
+    `ndf-ask:<名前>` の質問の行があるときだけ読む。
     """
     if ask_tool(ctx.runtime):
         return False
-    lines = [line.text for line in ctx.reply_prose_lines if CATEGORY.match(line.text)]
-    if not lines:
+    lines = ctx.reply_prose_lines
+    found = [CATEGORY.match(line.text) for line in lines]
+    if not any(found):
         return False
-    names = builtin_names() | extra_names(ctx.cwd)
-    texts: set[str] = set()
-    asks: set[str] = set()
-    for text in lines:
-        if categorized(text, names):
-            unquoted, found = reply_wait.line_asks(text)
-            texts.add(unquoted)
-            asks.update(found)
-    if not asks:
-        return False
-    reading = ctx.reply_reading
-    return reading.kind not in _WAIT_KINDS or all(s in asks or s in texts for s in reading.matched)
+    asked = False
+    names: set[str] = set()
+    for got, line in zip(found, reply_wait.line_questions(lines)):
+        if not line.asks:
+            continue
+        asked = True
+        if got is None:
+            return False
+        start, end = got.span("token")
+        if line.unquoted[start:end] != line.masked[start:end]:
+            # 区分の名前が引用の中にある（「ndf-gate:1」の件…）行は、区分の無い行の質問とする
+            return False
+        if got.group("name") is not None:
+            names.add(got.group("name"))
+    return asked and allowed(names, ctx.cwd)
 
 
 def _result(
