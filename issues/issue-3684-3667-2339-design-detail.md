@@ -59,7 +59,7 @@ plugins/ndf/
 | `src/ndf/checks/copy_dup.py` | 新設 | 2 つ以上のファイルの同じ名前の最上位の関数と、4 つ以上のファイルに出る文字列を数える | `checks.model` | モジュール | `top_functions`・`repeated_strings`・`check`（新設） |
 | `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`check`（新設） |
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
-| `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `lit`（変更）・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
+| `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `consts`（変更）・`dict_values`・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
 | `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`VERSION`（新設） |
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
 | `src/ndf/core/worker.py` | 変更 | worker の上限を上限の設定の新しい方針 `supervise.worker-run`（3,600 秒。値は今の `WORK_TIMEOUT` と同じ）から読む | `ndf.contracts.limits` | モジュール | `WORK_TIMEOUT`（削除）・`work_timeout`（新設） |
@@ -216,14 +216,17 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `lit` | `src/ndf/checks/facts.py` | 変更 | `lit(node: ast.expr) -> object`（変えない） | 辞書の定数で、キーだけでなく値の集まりも読む |
+| `lit` | `src/ndf/checks/facts.py` | 変えない | `lit(node: ast.expr) -> object` | 辞書の定数はキーの集まり（`frozenset`）を返す。今のまま |
+| `dict_values` | `src/ndf/checks/facts.py` | 新設 | `dict_values(node: ast.expr) -> frozenset[str] \| None` | 辞書の定数の値の集まり。値がすべて文字列で 2 つ以上のときだけ返す |
+| `consts` | `src/ndf/checks/facts.py` | 変更 | `consts(tree: ast.Module, rel: str) -> list[Const]`（変えない） | 辞書の定数から、キーの `Const` に加えて値の `Const` も作る |
 | `enum_sets` | `src/ndf/checks/facts.py` | 新設 | `enum_sets() -> dict[str, frozenset[str]]` | 手書きのスキーマの `enum` の集まり（スキーマのパスと JSON Pointer をキーにする） |
 | `limit_numbers` | `src/ndf/checks/facts.py` | 新設 | `limit_numbers() -> dict[float, list[str]]` | 上限の設定の数と、その数を持つ方針の名前 |
 | `_enum_dups` | `src/ndf/checks/facts.py` | 新設 | `_enum_dups(sets: list[Const]) -> list[Finding]` | スキーマの `enum` と同じか部分集合の定数を指摘にする |
 | `_limit_dups` | `src/ndf/checks/facts.py` | 新設 | `_limit_dups(nums: list[Const]) -> list[Finding]` | 上限の設定の数と同じで、名前が上限・回数・待ちを表す定数を指摘にする |
 
-- `lit`
-  - 事後条件: 辞書の定数は、キーの集まりと値の集まりの両方を返す（`frozenset` の組）。値に文字列でない要素が混ざる辞書はキーだけを返す（今の振る舞い）
+- `lit`・`consts`
+  - 方針: `Const.value` に組を載せない。既存の `groups`（`same-set`・`subset`・`member`）と `table_hits`（`table-set`）は `isinstance(c.value, frozenset)` で集まりを拾うので、組を載せるとキーの検査まで消える
+  - 事後条件（`consts`）: 辞書の定数 `NAME = {...}` は、キーの集まりを持つ `Const(name="NAME")`（今のまま）と、`dict_values` が返す値の集まりを持つ `Const(name="NAME.values")` の 2 つになる。どちらも `frozenset` なので、既存の集合の照合へそのまま入る。値に文字列でない要素が混ざる辞書は値の `Const` を作らない（キーの `Const` だけ。今の振る舞い）
 - `enum_sets`
   - 事前条件: 生成されるスキーマ（`*.args.schema.json`）を除く
   - 事後条件: 要素が 2 つ以上の `enum` だけを返す（1 つの `enum` は定数と重なっても事実の重複と言えない）
@@ -271,7 +274,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `lit` | 辞書の定数で値の集まりも返す | 値に数が混ざる辞書（キーだけ） | キーが `None` を含む辞書（`None` を返す。今のまま） |
+| `consts`・`dict_values` | 辞書の定数から、キーの `Const` と `NAME.values` の `Const` の 2 つができる | 値に数が混ざる辞書（キーの `Const` だけ） | キーが `None` を含む辞書（キーの `Const` を作らない。今のまま） |
+| `groups`・`table_hits`（変えない関数の退行） | 辞書のキーを別のファイルの集まりへ写した定数に、今までどおり `same-set` と `table-set` の指摘が出る | 辞書の値だけが別のファイルの集まりと同じ（`same-set` 1 件。名前は `NAME.values`） | — |
 | `_enum_dups` | `enum` と同じ集まりの定数で 1 件、部分集合で 1 件 | 要素 2 つの `enum`（照合する）・1 つ（照合しない）・関係の無い集まり（0 件） | スキーマを読めないときに例外 |
 | `_limit_dups` | 合成した上限の設定の方針の `seconds`（例: 1,800）と同じ値を持つ `X_TIMEOUT` で 1 件 | 名前が当たらない定数（0 件）・同じ数の表示の行数（0 件）・語に対応しないキーだけが同じ値（`ATTEMPTS = 3` と `seconds: 3`。0 件）・実例の組 `POLL_INTERVAL = 0.1` と `procs.stop-tree`・`procs.stop-test` の `interval: 0.1` を `facts.limit_constants` に載せた設定（0 件）・同じ組で除外を消した設定（1 件） | 上限の設定を読めないときに例外・除外の行の定数が無い（`stale` 1 件）・`reason` が空の除外（設定の検証で止まる） |
 
