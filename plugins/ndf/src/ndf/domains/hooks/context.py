@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
+from ndf.domains.hooks.reply_wait import ELSEWHERE_RE
 from ndf.domains.hooks.strict import _SHELLS
 
 # 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
@@ -37,7 +38,7 @@ _WAIT_RE = re.compile(
     r"|[?？]\s*$"
 )
 # 別の場所（ほかのセッション・レーン・計画）の待ちを報告する言い回し（#2324）
-_ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
+_ELSEWHERE_RE = ELSEWHERE_RE
 # 本文の待ちを見る末尾の行数
 _TAIL_LINES = 4
 # 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
