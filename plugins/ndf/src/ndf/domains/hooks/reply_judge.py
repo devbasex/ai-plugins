@@ -307,8 +307,7 @@ def _judged(out: str, code: int, ms: float) -> Judged:
     answer = tables.json_object(out)
     if answer is None:
         return Judged(None, "exit" if code != 0 else "shape", ms, 0)
-    raw_calls = answer.get("calls")
-    calls = raw_calls if isinstance(raw_calls, int) else 0
+    calls = raw if isinstance(raw := answer.get("calls"), int) else 0
     failure = answer.get("failure")
     if isinstance(failure, str) and failure:
         return Judged(None, failure, ms, calls)
