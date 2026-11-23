@@ -364,7 +364,7 @@ def _user_wait(core: str) -> bool:
 
 
 def _ends_as_question(sentence: str, core: str) -> bool:
-    """文が疑問符か問いの語尾（WAIT_ENDINGS）で終わるか。`core` は `_core(sentence)`。"""
+    """文が疑問符か質問の語尾（WAIT_ENDINGS）で終わるか。`core` は `_core(sentence)`。"""
     return sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS)
 
 

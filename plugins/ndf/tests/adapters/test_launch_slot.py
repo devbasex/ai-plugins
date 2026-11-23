@@ -204,7 +204,7 @@ def test_issue_4000_gate_without_ensure_refuses_a_stale_record(pool, monkeypatch
 
 @pytest.fixture
 def refusal_calls(monkeypatch):
-    """`verdict`・`refusal`・`training.ensure` の呼び出しを残す偽物。返す値は `answers` の鍵で差し替える。"""
+    """`verdict`・`refusal`・`training.ensure` の呼び出しを残す偽物。返す値は `answers` のキーで差し替える。"""
     from ndf.adapters import training
 
     calls: list[tuple[str, str, object]] = []
@@ -247,7 +247,7 @@ def test_refuse_raises_the_refusal_of_a_fresh_record(refusal_calls):
 
 
 def test_refuse_ignores_the_verdict_reason_of_a_fresh_record(refusal_calls):
-    """新しいバックアップでは `verdict.why` を使わず、`refusal` の答えで決める。"""
+    """新しいバックアップでは `verdict.why` を使わず、`refusal` の回答で決める。"""
     _calls, answers = refusal_calls
     answers["verdict"] = launch_slot.training_cache.Verdict("verdict の理由")
 
@@ -264,7 +264,7 @@ def test_refuse_ensures_a_stale_record_by_default(refusal_calls):
 
 
 def test_refuse_raises_what_ensure_answers(refusal_calls):
-    """確かめ直した答えが理由なら、`verdict.why` ではなくその理由で `NotLaunched` を送る。"""
+    """確かめ直した回答が理由なら、`verdict.why` ではなくその理由で `NotLaunched` を送る。"""
     _calls, answers = refusal_calls
     answers["verdict"] = launch_slot.training_cache.Verdict("記録が無い", stale=True)
     answers["ensure"] = "確かめた結果は学習に使う"
