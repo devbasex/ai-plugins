@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 
 import pytest
 
-from ndf.domains.hooks import budget, dispatch, tables
-from ndf.domains.hooks.guards import ask, process_wait, sleep
+from ndf.domains.hooks import budget, context, dispatch, tables
+from ndf.domains.hooks.guards import ask, context_limit, process_wait, sleep
 from ndf.domains.relay import signals
 
 from ._hooks import advise_text, bash, call_entry, deny_reason, records, sample, stop
@@ -199,8 +200,15 @@ def test_script_chain_guard(tmp_path, command, denied):
 
 
 def _usage_transcript(tmp_path, tokens):
+    # 会話の記録を置く tmp_path を、NDF の引継ぎの規約を使うリポジトリ（メインディレクトリに .ndf）にする（#3995 の 3995:15）
+    _ndf_repo(tmp_path)
     line = {"type": "assistant", "message": {"usage": {"input_tokens": tokens}}}
     (tmp_path / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+
+
+def _ndf_repo(root):
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / ".ndf").mkdir(exist_ok=True)
 
 
 def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
@@ -259,6 +267,137 @@ def test_context_limit_reads_the_limit_from_the_limits_table(tmp_path, monkeypat
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is None
     _usage_transcript(tmp_path, 200_000)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
+
+
+def _separate(main, meta):
+    """管理ディレクトリ `meta` を外に置いたメインディレクトリ（`git init --separate-git-dir` の .git のファイル）。"""
+    main.mkdir(parents=True, exist_ok=True)
+    meta.mkdir(parents=True)
+    (main / ".git").write_text(f"gitdir: {meta}\n", encoding="utf-8")
+
+
+def _linked(common, worktree):
+    """共通の git のディレクトリ `common` に結んだ linked worktree（`git worktree add` が書く .git と commondir）。"""
+    admin = common / "worktrees" / worktree.name
+    admin.mkdir(parents=True)
+    (admin / "commondir").write_text("../..\n", encoding="utf-8")
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+
+
+@pytest.fixture
+def counted_tail(monkeypatch):
+    """会話の記録の末尾を読んだ回数。"""
+    got = {"n": 0}
+    real = context.read_tail
+
+    def wrapped(*args, **kw):
+        got["n"] += 1
+        return real(*args, **kw)
+
+    monkeypatch.setattr(context, "read_tail", wrapped)
+    return got
+
+
+def test_context_limit_skips_a_subagent(tmp_path):
+    # #3995 の 3995:15: 入力に agent_id があれば（サブエージェント）運用上限を超えても判定しない
+    _usage_transcript(tmp_path, 600_000)
+    payload = {**bash(tmp_path, "ls"), "agent_id": "a0123", "agent_type": "ndf:worker"}
+    assert call_entry("claude", "PreToolUse", payload) is None
+
+
+def test_context_limit_judges_with_only_the_agent_type(tmp_path):
+    # #3995 の 3995:15: agent_type だけ（--agent で起動した主の会話）なら判定する
+    _usage_transcript(tmp_path, 600_000)
+    payload = {**bash(tmp_path, "ls"), "agent_type": "ndf:supervisor"}
+    assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
+
+
+def test_context_limit_passes_without_usage(tmp_path):
+    _ndf_repo(tmp_path)
+    (tmp_path / "transcript.jsonl").write_text(json.dumps({"type": "user", "message": {"content": "x"}}) + "\n", encoding="utf-8")
+    assert call_entry("claude", "PreToolUse", bash(tmp_path, "ls")) is None
+
+
+@pytest.mark.parametrize("repo", ["outside", "no-ndf"])
+def test_context_limit_skips_conversations_outside_ndf_without_reading(tmp_path, counted_tail, repo):
+    # #3995 の 3995:15: Git の管理の外と .ndf の無いリポジトリでは、運用上限を超えても判定せず会話の記録を読まない
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    if repo == "no-ndf":
+        (cwd / ".git").mkdir()
+    line = {"type": "assistant", "message": {"usage": {"input_tokens": 600_000}}}
+    (cwd / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+    assert call_entry("claude", "PreToolUse", bash(cwd, "ls")) is None
+    assert counted_tail["n"] == 0
+
+
+def test_context_limit_judges_a_worktree_by_the_main_directory(tmp_path):
+    # #3995 の 3995:15: worktree に .ndf が無くても、メインディレクトリに .ndf があれば判定する
+    main = tmp_path / "main"
+    (main / ".git").mkdir(parents=True)
+    (main / ".ndf").mkdir()
+    worktree = tmp_path / "wt"
+    _linked(main / ".git", worktree)
+    assert not (worktree / ".ndf").exists()
+    line = {"type": "assistant", "message": {"usage": {"input_tokens": 600_000}}}
+    (worktree / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(worktree, "ls"))) is not None
+
+
+def test_main_finds_the_main_directory_from_the_main_and_its_worktrees(tmp_path):
+    main = tmp_path / "main"
+    (main / "src").mkdir(parents=True)
+    (main / ".git").mkdir()
+    (main / ".ndf").mkdir()
+    worktree = tmp_path / "wt"
+    _linked(main / ".git", worktree)
+    (worktree / "src").mkdir()
+    want = os.path.realpath(main)
+    for cwd in (main, main / "src", worktree, worktree / "src"):
+        assert context_limit._main(str(cwd)) == want
+
+
+def test_main_of_a_separate_git_dir_is_not_the_parent_of_the_git_dir(tmp_path):
+    # 管理ディレクトリを外に置いたメインディレクトリは、管理ディレクトリの親でなくメインディレクトリそのもの
+    main = tmp_path / "main"
+    meta = tmp_path / "outside" / "meta.git"
+    _separate(main, meta)
+    (main / "src").mkdir()
+    (main / ".ndf").mkdir()
+    want = os.path.realpath(main)
+    assert context_limit._main(str(main)) == want
+    assert context_limit._main(str(main / "src")) == want
+
+
+def test_main_skips_a_worktree_of_a_separate_git_dir(tmp_path):
+    # 管理ディレクトリを外に置いたリポジトリの linked worktree は主 worktree を特定できないので、親の .ndf を検査しない
+    main = tmp_path / "main"
+    meta = tmp_path / "outside" / "meta.git"
+    _separate(main, meta)
+    (main / ".ndf").mkdir()
+    (meta.parent / ".ndf").mkdir()
+    worktree = tmp_path / "wt"
+    _linked(meta, worktree)
+    assert context_limit._main(str(main)) == os.path.realpath(main)
+    assert context_limit._main(str(worktree)) is None
+
+
+def test_main_is_none_when_ndf_is_a_file(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".ndf").write_text("x", encoding="utf-8")
+    assert context_limit._main(str(tmp_path)) is None
+
+
+@pytest.mark.parametrize("dot_git", [None, "dir", "not-gitdir"])
+def test_main_is_none_outside_an_ndf_repository(tmp_path, dot_git):
+    # Git の管理の外・.ndf の無いリポジトリ・gitdir: で始まらない .git のファイル
+    if dot_git == "dir":
+        (tmp_path / ".git").mkdir()
+    elif dot_git == "not-gitdir":
+        (tmp_path / ".git").write_text("x\n", encoding="utf-8")
+        (tmp_path / ".ndf").mkdir()
+    assert context_limit._main(str(tmp_path)) is None
 
 
 def test_ask_writes_signals_without_waiting(tmp_path, monkeypatch):
