@@ -1,10 +1,11 @@
-"""上限の宣言（`plugins/ndf/contracts/limits.json`）とコードが引く方針の名前の対応（#2343 の決定 13）。
+"""上限の設定（`plugins/ndf/contracts/limits/`）とコードが引く方針の名前の対応（#2343 の決定 13）。
 
-- 宣言の形はプラグインの読み手（`ndf.contracts.limits.validate`）と `ndf contracts check` が確かめる。ここでは
-  方針の表（`policies`）を読めるかだけを見る（規則を 2 つに分けない）
-- 上限の読み手（`from ndf.contracts import limits` か `import limits` で束ねた名前）の `.policy("<名前>")`・
+- 設定は 1 方針 1 ファイルで、`_` で始まらない `<方針の名前>.json` が方針 1 つである。形はプラグインの読み手
+  （`ndf.contracts.limits.validate`）と `ndf contracts check` が確かめる。ここではどのファイルもオブジェクトとして
+  読めるかだけを見る（規則を 2 つに分けない）
+- 上限の読み手（`from ndf.contracts import limits` か `import limits` で import した名前）の `.policy("<名前>")`・
   `.seconds("<名前>")`・`.value("<名前>", …)` を構文木で集め、文字列（かモジュールの最上位で文字列を代入した定数）で
-  書いた名前が宣言に無ければ落とす。新しいプラグインは名前を引数や組み立てで渡す箇所を持つため、名前を静的に
+  書いた名前のファイルが無ければ落とす。新しいプラグインは名前を引数や組み立てで渡す箇所を持つため、名前を静的に
   決められない呼び出しと、どこからも引かれない方針は数えない
 """
 
@@ -14,7 +15,7 @@ import ast
 import json
 from pathlib import Path
 
-DECL = "plugins/ndf/contracts/limits.json"
+DECL = "plugins/ndf/contracts/limits"
 CODE = "plugins/ndf/src"
 CALLS = ("policy", "seconds", "value")
 READER_NAMES = ("limits", "ndf.contracts.limits")
@@ -25,17 +26,32 @@ def code_files(root: Path) -> list[str]:
     return [f.relative_to(root).as_posix() for f in sorted((root / CODE).rglob("*.py")) if "__pycache__" not in f.parts]
 
 
-def load_policies(root: Path) -> tuple[dict, str | None]:
-    """宣言の方針の表と、読めないときの理由。"""
-    path = root / DECL
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return {}, f"上限の宣言 {DECL} を読めない: {exc}"
-    policies = doc.get("policies") if isinstance(doc, dict) else None
-    if not isinstance(policies, dict):
-        return {}, f"上限の宣言 {DECL} に方針の表 policies が無い"
-    return policies, None
+def policy_path(name: str) -> str:
+    """方針 `name` のファイルの、リポジトリの根からの相対パス。"""
+    return f"{DECL}/{name}.json"
+
+
+def load_policies(root: Path) -> tuple[set[str], list[tuple[str, str]]]:
+    """方針の名前と、読めないもの（パス・理由）。"""
+    if not (root / DECL).is_dir():
+        return set(), [(DECL, f"上限の設定のディレクトリ {DECL} が無い")]
+    names, broken = set(), []
+    for path in sorted((root / DECL).iterdir()):
+        if path.name.startswith("_"):
+            continue
+        why = None if path.suffix == ".json" else "拡張子が .json でない"
+        try:
+            if why is None and not isinstance(json.loads(path.read_text(encoding="utf-8")), dict):
+                why = "オブジェクトでない"
+        except (OSError, ValueError) as exc:
+            why = str(exc)
+        if why is not None:
+            rel = f"{DECL}/{path.name}"
+            broken.append((rel, f"上限の設定 {rel} を読めない: {why}"))
+        names.add(path.stem)
+    if not names:
+        return set(), [(DECL, f"上限の設定 {DECL} に方針が 1 つも無い")]
+    return names, broken
 
 
 def _aliases(tree: ast.Module) -> set[str]:
@@ -93,11 +109,11 @@ def references(root: Path, files: list[str]) -> dict[str, list[str]]:
 
 def violations(root: Path, files: list[str]) -> list[tuple[str, str, str, str]]:
     """`(種類, パス, 名前, 理由)` の並び。種類は limits-shape・limits-unknown。"""
-    policies, why = load_policies(root)
-    if why:
-        return [("limits-shape", DECL, "", why)]
+    policies, broken = load_policies(root)
+    if broken:
+        return [("limits-shape", path, "", why) for path, why in broken]
     out = []
     for name, wheres in sorted(references(root, files).items()):
         if name not in policies:
-            out += [("limits-unknown", w.rsplit(":", 1)[0], name, f"上限の宣言 {DECL} に無い方針を引く（{w}）") for w in wheres]
+            out += [("limits-unknown", w.rsplit(":", 1)[0], name, f"上限の設定 {DECL}/ に無い方針を引く（{w}）") for w in wheres]
     return out

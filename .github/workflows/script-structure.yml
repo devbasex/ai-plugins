@@ -5,7 +5,7 @@ name: Script structure
 # （hook-deps）を見る。NDF（plugins/ndf/）の中の構造は NDF 自身の検査（下の ndf check）が見る（#3304）。
 #
 # 同じワークフローの ndf-contracts-check は、Skill の下のスキーマが契約のスキーマ（plugins/ndf/contracts/schemas/ndf-settings/）の
-# 写しと同じかと、コードが引く上限の方針の名前が plugins/ndf/contracts/limits.json にあるかを確かめる。
+# コピーと同じかと、コードが引く上限の方針が plugins/ndf/contracts/limits/ にあるかを確かめる。
 #
 # script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
 # 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
