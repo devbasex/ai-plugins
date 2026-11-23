@@ -1,26 +1,60 @@
-"""`ndf answer work`: 作業名を `ndf worker run` の必須の引数へ合わせる（#3295）。"""
+"""`ndf answer work`: 起動指示を組んで書き、作業名を `ndf worker run` の必須の引数へ合わせる（#3295・#3908）。"""
 
 from __future__ import annotations
 
 import json
+import re
+import shutil
 from pathlib import Path
 
 import pytest
 
-from ndf import cli
-from ndf.contracts import causes, result
+from ndf import cli, contracts, identity
+from ndf.contracts import causes, result, worker_paths
 from ndf.core import route, worker
 from ndf.progress import gate, invoke, model, worker_kinds
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
+# `agent-layers.md` の「supervisor → worker」が定める起動指示の 7 項目（見出しでそろう）
+PROMPT_ITEMS = ("作業", "入力", "手順", "読む Skill", "返す形", "置く場所", "作業の結果ファイル")
+
+
+def _saved(plan: str, values: dict, inputs: dict) -> dict:
+    """`invoke.read_values` が返す形（プランの名前・差し込みの値・工程の入力）。"""
+    return {"plan": plan, "values": values, "inputs": inputs, "local_tests": True, "at": "2026-11-23T00:00:00+00:00"}
+
+
+def _prompt(kind: str, saved: dict, tmp_path: Path, workdir: str = "/w") -> str:
+    return entry.work_prompt(kind, saved, Path(workdir), worker_paths.report_paths(tmp_path, kind, resolve=False))
+
+
+def test_the_prompt_holds_the_seven_items_and_the_seven_rules(tmp_path):
+    body = _prompt("requirements", _saved("requirements", {"repo": "/r"}, {"issues": [12, 34]}), tmp_path, "/r")
+    assert [h for h in PROMPT_ITEMS if f"\n## {h}\n" in body] == list(PROMPT_ITEMS)
+    assert re.findall(r"^(\d+)\. ", body, re.M) == [str(n) for n in range(1, 8)]
+
+
+def test_the_prompt_takes_the_stage_input_the_template_params_drop(tmp_path):
+    # `requirements.json` の params に issues が無くても、工程の入力の課題 2 件が入力の欄に載る（決定 2）
+    body = _prompt("requirements", _saved("requirements", {"repo": "/r"}, {"issues": [12, 34]}), tmp_path, "/r")
+    assert re.search(r"^- issues: 12, 34$", body, re.M)
+    assert "$" not in body
 
 
 def test_the_work_name_becomes_the_required_arguments_of_worker_run(tmp_path):
     argv = gate.work_argv("impl", tmp_path, Path("/w"))
     a = worker._parser().parse_args(argv)
     assert (a.kind, a.cwd, a.state_dir) == ("impl", "/w", str(tmp_path))
-    assert a.prompt_file == str(tmp_path / "impl-prompt.md") and a.result_file == str(tmp_path / "impl-result.json")
+    paths = worker_paths.report_paths(tmp_path, "impl", resolve=False)
+    assert (a.prompt_file, a.result_file) == (str(paths.prompt), str(paths.result))
+
+
+def test_the_argv_requires_the_outputs_the_work_has_to_return(tmp_path):
+    # 工程「作業場所の用意」は worktree・branch を結果の outputs で返す（`kinds.json` の outputs）
+    argv = gate.work_argv("worktree", tmp_path, Path("/r"))
+    assert argv[-4:] == ["--require-output", "worktree", "--require-output", "branch"]
+    assert "--require-output" not in gate.work_argv("requirements", tmp_path, Path("/r"))
 
 
 def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):
@@ -30,12 +64,33 @@ def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
 
 
-def test_ndf_answer_work_hands_the_arguments_to_worker_run():
+def test_ndf_answer_work_writes_the_prompt_then_hands_the_arguments_to_worker_run(tmp_path):
+    invoke.write_values(tmp_path, "fix", {"worktree": str(tmp_path), "branch": "b"}, {}, True)
     got: list[list[str]] = []
-    code = gate._cmd_work(["--state-dir", "/s", "--cwd", "/w", "fix"], lambda exe, argv: got.append(argv))
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "--cwd", "/w", "fix"], lambda exe, argv: got.append(argv))
     # #4029: src は置き換えた先の argv（sys.path）で渡す。PYTHONPATH には入れない。標準出力の文字コードは今のものを写す
-    want = cli.ndf_command("worker", *gate.work_argv("fix", Path("/s"), Path("/w")), keep_streams=True)
+    want = cli.ndf_command("worker", *gate.work_argv("fix", tmp_path, Path("/w")), keep_streams=True)
     assert code == 0 and got[0] == want
+    prompt = worker_paths.report_paths(tmp_path, "fix", resolve=False).prompt
+    assert "\n- 作業場所: /w\n" in prompt.read_text(encoding="utf-8")
+
+
+def test_ndf_answer_work_rewrites_the_prompt_when_it_is_run_again(tmp_path):
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w1", "branch": "b"}, {}, True)
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: None) == 0
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w2", "branch": "b"}, {}, True)
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: None) == 0
+    prompt = worker_paths.report_paths(tmp_path, "fix", resolve=False).prompt
+    assert "/w2" in prompt.read_text(encoding="utf-8") and "/w1" not in prompt.read_text(encoding="utf-8")
+
+
+def test_the_work_runs_in_the_worktree_or_the_repo_by_its_definition(tmp_path):
+    values = {"repo": "/r", "worktree": "/r/.worktrees/b", "branch": "b", "issue": "5", "acceptance": "a.json", "issues": [5]}
+    invoke.write_values(tmp_path, "impl", values, {"issues": [5]}, True)
+    got: list[list[str]] = []
+    for kind in ("impl", "worktree", "requirements"):
+        assert gate._cmd_work(["--state-dir", str(tmp_path), kind], lambda exe, argv: got.append(argv)) == 0
+    assert [a[a.index("--cwd") + 1] for a in got] == ["/r/.worktrees/b", "/r", "/r"]
 
 
 def test_the_template_worker_has_no_default_until_prompts_are_written():
@@ -94,8 +149,68 @@ def test_templates_using_a_work_in_the_worktree_take_the_worktree():
 
 
 def test_every_work_name_in_the_definition_becomes_worker_run_arguments(tmp_path):
-    argv = gate.work_argv("requirements", tmp_path, tmp_path)
-    assert worker._parser().parse_args(argv).kind == "requirements"
+    for kind in worker_kinds.work_kinds():
+        argv = gate.work_argv(kind, tmp_path, tmp_path)
+        assert argv[:4] == ["run", "--kind", kind, "--prompt-file"], kind
+    assert worker._parser().parse_args(gate.work_argv("requirements", tmp_path, tmp_path)).kind == "requirements"
+
+
+def test_a_work_without_skills_or_an_excerpt_leaves_the_sections_empty(tmp_path):
+    body = _prompt("fix-push", _saved("fix-push", {"branch": "b", "remote": "origin"}, {}), tmp_path)
+    assert re.search(r"^## 読む Skill\n+無し$", body, re.M)
+    assert str(identity.ROOT / "skills") not in body
+
+
+def test_the_prompt_carries_the_excerpt_and_the_skill_paths_of_the_work(tmp_path):
+    saved = _saved("plan-to-spec", {"branch": "b", "pr": "1"}, {"issues": [7]})
+    body = _prompt("plan-to-spec", saved, tmp_path)
+    spec = worker_kinds.work_kinds()["plan-to-spec"]
+    assert (identity.ROOT / spec["excerpt"]).read_text(encoding="utf-8").strip() in body
+    assert all(str(identity.ROOT / "skills" / n / "SKILL.md") in body for n in spec["skills"])
+
+
+def test_the_prompt_of_the_worktree_work_shows_the_outputs_it_must_return(tmp_path):
+    body = _prompt("worktree", _saved("worktree", {"repo": "/r"}, {"issues": [7]}), tmp_path, "/r")
+    assert "worktree・branch" in body and '--outputs \'{"worktree": "<値>", "branch": "<値>"}\'' in body
+    assert str(worker_paths.report_paths(tmp_path, "worktree", resolve=False).result) in body
+
+
+@pytest.fixture
+def contracts_copy(tmp_path):
+    """コントラクトの写しを保存先にする（起動指示のテンプレートを差し替えて確かめる）。"""
+    root = tmp_path / "contracts"
+    shutil.copytree(contracts.DEFAULT_DIR, root)
+    contracts.use_dir(root)
+    yield root
+    contracts.use_dir(None)
+
+
+def test_the_template_escapes_a_dollar_and_refuses_an_unknown_placeholder(contracts_copy, tmp_path):
+    saved = _saved("fix", {"branch": "b"}, {})
+    (contracts_copy / entry.PROMPT_FILE).write_text("## 作業\n$work\n見本 $$HOME\n", encoding="utf-8")
+    assert "見本 $HOME" in _prompt("fix", saved, tmp_path)
+    (contracts_copy / entry.PROMPT_FILE).write_text("$work $nowhere\n", encoding="utf-8")
+    with pytest.raises(contracts.ContractError, match="nowhere"):
+        _prompt("fix", saved, tmp_path)
+
+
+def test_a_state_dir_without_the_values_stops_before_the_worker(tmp_path, capsys):
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: got.append(argv))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == causes.exit_code("precondition") and got == []
+    assert out["cause"]["kind"] == "precondition" and str(tmp_path) in out["summary"]
+    assert not worker_paths.report_paths(tmp_path, "fix", resolve=False).prompt.exists()
+
+
+def test_a_missing_stage_input_stops_with_the_name_and_its_source(tmp_path, capsys):
+    invoke.write_values(tmp_path, "requirements", {"repo": "/r"}, {}, True)
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "requirements"], lambda exe, argv: got.append(argv))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == causes.exit_code("precondition") and got == []
+    assert [i["key"] for i in out["items"]] == ["issues"] and "metadata.ndf.inputs" in out["items"][0]["source"]
+    assert not worker_paths.report_paths(tmp_path, "requirements", resolve=False).prompt.exists()
 
 
 def test_kind_gaps_is_empty_when_the_stage_input_holds_the_value():
