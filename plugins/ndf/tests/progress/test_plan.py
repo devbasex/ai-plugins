@@ -157,7 +157,9 @@ def no_git(tmp_path, monkeypatch, detached, no_wait_no_child):
 
 
 @pytest.mark.parametrize(
-    "argv", [["limits", "p6", "--max-lanes", "7", "--reason", "x"], ["set", "p6", "a", "--plans", "2", "--reason", "x"]]
+    "argv",
+    [["limits", "p6", "--max-lanes", "7", "--reason", "x"], ["set", "p6", "a", "--plans", "2", "--reason", "x"]],
+    ids=["limits-subcommand", "set-plans-option"],
 )
 def test_cli_has_no_limits_subcommand_and_no_plans_option(no_git, capsys, tmp_path, argv):
     # #3989 の受け入れ条件 1（#4217 で、子のプロセスを起動しない形に戻した）
