@@ -20,7 +20,7 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 - conductor がプランを書き換えるときは、前の中身をバックアップ、差分と理由をプランの進捗記録へ残す（`edit_plan`。#3111）
 - 進捗ログの注意は `state` の値だけで決め、本文の語（「止まった」など）では決めない（`needs_attention`。#1984）
 
-サブコマンド `worker`:
+サブコマンド `worker`（結果 JSON を標準出力へ 1 行で出す）:
 
 ndf worker run --kind <種類> --prompt-file <本文> --result-file <結果> --cwd <作業場所> --state-dir <保存先> [--sources <JSON>] [--timeout <秒>]
     worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する
@@ -40,8 +40,6 @@ ndf worker plan-edits <plan.json>... [--state-dir <保存先>]
     プランの書き換えの記録を時刻の順に並べる
 ndf worker attention <progress.jsonl>
     進捗ログのうち、注意の要る state の行を並べる
-
-結果 JSON を標準出力へ 1 行で出す。
 """
 
 from __future__ import annotations
@@ -67,7 +65,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.adapters import claude, git
-from ndf.contracts import causes, exit_codes, result, worker_paths
+from ndf.contracts import causes, exit_codes, limits, result, worker_paths
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
@@ -85,8 +83,6 @@ RESUME_PROMPT = (
 )
 # 作業の本文の後ろへ足す、結果ファイルの保存先の行
 RESULT_FILE_LINE = "結果ファイル（応答を終える前にここへ書く）: {result_file}"
-# worker の起動 1 回の期限の既定（秒）
-WORK_TIMEOUT = 3600.0
 # PR 本文の下書きの保存先（状態の保存先から）
 PR_BODY_DRAFT = Path("work") / "pr_body.md"
 # 作業種別 → 届ける手順の Skill（plugin の skills/<名前>/SKILL.md）
@@ -278,6 +274,11 @@ _FAILURE_CAUSES: dict[claude.Failure, str] = {
 }
 
 
+def work_timeout() -> float:
+    """worker の起動 1 回の期限の既定（秒）。"""
+    return limits.seconds("supervise.worker-run")
+
+
 @dataclass(frozen=True)
 class Handoff:
     """worker へ渡す作業 1 つ。`prompt` は作業の本文、`result_file` は worker が書く結果ファイル。
@@ -293,7 +294,7 @@ class Handoff:
     cwd: Path
     state_dir: Path
     sources: tuple[Source, ...] = ()
-    timeout: float = WORK_TIMEOUT
+    timeout: float = field(default_factory=work_timeout)
     # 結果ファイルを呼んだ利用者の私有のファイル（オーナーが自分で、グループとほかの利用者が書き込めない）だけ読むか
     owned: bool = False
 
@@ -707,11 +708,10 @@ def _cmd_run(a: argparse.Namespace) -> int:
             Path(a.cwd).resolve(),
             _state_dir(a.state_dir, a.result_dir_id),
             tuple(_load_sources(a.sources)),
-            a.timeout,
+            a.timeout if a.timeout is not None else work_timeout(),
             owned=a.result_dir_id is not None,
         )
-        system = system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources)
-        done, report = _deliver(handoff, system, root, wd)
+        done, report = _deliver(handoff, system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources), root, wd)
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:
         metrics[SEARCH_RECORD] = search_record(report)
@@ -914,7 +914,7 @@ def _add_run(sub: Any) -> None:
     for name in ("--kind", "--prompt-file", "--result-file", "--cwd", "--state-dir"):
         rn.add_argument(name, required=True)
     rn.add_argument("--sources")
-    rn.add_argument("--timeout", type=float, default=WORK_TIMEOUT)
+    rn.add_argument("--timeout", type=float)
     # 結果ファイルの保存先の <st_dev>:<st_ino>（`ndf answer work` が開いた保存先。開き直した保存先と突き合わせる）
     rn.add_argument("--result-dir-id")
     # 結果ファイルの outputs に必ず入れる名前（`ndf answer work` が作業の定義の outputs から渡す。#3908）

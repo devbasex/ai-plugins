@@ -251,7 +251,7 @@
 | --- | --- |
 | `ndf project branch-strategy` | `verb`（string・必須・位置・値 `init`・`measure`・`write`・`migrate`・`remove`）: init・measure・write・migrate・remove<br>`--kind`（string・任意・値 `web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`）: 代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）<br>`--answers`（string・任意）: 質問への回答（セクションの JSON Pointer → 値）<br>`--result`（string・任意）: write の基盤にする measure の結果（省けば今のセクション、無ければ測り直す）<br>`--digest`（string・任意）: 示した差分のハッシュ。合うときだけ書く<br>`--dry-run`（boolean・任意）: init で書かずに差分とハッシュだけを示す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project check` | `--force`（boolean・任意）: 新しくても古いと判定する（手動の再解析）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
-| `ndf project measure` | `--out`（string・必須）: 測定の結果の保存先（リポジトリの外の一時ディレクトリ）<br>`--budget`（number・任意・既定 `120.0`）: 締め切りの秒（既定 120）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
+| `ndf project measure` | `--out`（string・必須）: 測定の結果の保存先（リポジトリの外の一時ディレクトリ）<br>`--budget`（number・任意）: 締め切りの秒（省けば上限の設定の project.measure）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project schema` | `--out`（string・任意）: 書く先。省けば標準出力 |
 | `ndf project write` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--answers`（string・任意）: 質問の項目への回答（キー → {value} か {unknown}）<br>`--dry-run`（boolean・任意）: 書かずに差分だけを出す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 
@@ -430,7 +430,7 @@
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
-| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意・既定 `3600.0`）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
+| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 

@@ -15,10 +15,17 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["summary"],
-        "minProperties": 2,
+        "required": ["summary", "read_by"],
+        "minProperties": 3,
         "properties": {
           "summary": {"type": "string", "pattern": "\\S"},
+          "read_by": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^ndf(\\.[a-z_][a-z0-9_]*)+$"},
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "読み手の指定: この方針を引くモジュールの名前。実際の読み手との食い違いは規則 limit-readers が落とす"
+          },
           "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
           "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
           "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
