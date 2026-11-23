@@ -438,6 +438,9 @@ def test_endpoint_rest_is_split_by_the_anthropic_profile_dir() -> None:
     broken = {**ENV, "ANTHROPIC_CONFIG_DIR": "/home/u/.anthropic-broken"}
     fixed = {**ENV, "ANTHROPIC_CONFIG_DIR": "/home/u/.anthropic"}
     assert reply_judge.endpoint_scope(broken, LAUNCH) != reply_judge.endpoint_scope(fixed, LAUNCH)
+    # endpoint.flags があれば子はプロファイルを読む前に拒むので、保存先で対象を分けない
+    flagged = reply_judge.Launch(argv=["claude", "--settings", "a.json"], project_dir="/w/p")
+    assert reply_judge.endpoint_scope(broken, flagged) == reply_judge.endpoint_scope(fixed, flagged)
 
 
 def test_mark_rest_writes_the_marker_for_the_owner_only(tmp_path: Path) -> None:

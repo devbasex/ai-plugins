@@ -363,7 +363,8 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
 
     材料は、親の起動引数のうち `endpoint.flags` に当たるオプションの名前（子はこの名前があれば値によらず拒む
     ので値は入れない）・プロジェクトの根・`CLAUDE_CONFIG_DIR`（設定の層の保存先）・`ANTHROPIC_CONFIG_DIR`（子の
-    `account_dir.effective_env` がプロファイルを読む保存先。相対パスはプロジェクトの根から解くので値のまま）・名前が
+    `account_dir.effective_env` がプロファイルを読む保存先。相対パスはプロジェクトの根から解くので値のまま。`endpoint.flags`
+    のオプションがあれば子はプロファイルを読む前に拒むので入れない）・名前が
     `endpoint.env_names` に前方一致する環境変数の名前（値は入れない）。プロンプトなどの位置引数とほかのオプション、API キーなどの値は
     入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
     引数の読み方は `claude_args` と同じ（`claude_options`）。
@@ -377,7 +378,7 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
             "flags": flags,
             "project_dir": launch.project_dir,
             "config_dir": env.get("CLAUDE_CONFIG_DIR"),
-            "profile_dir": env.get("ANTHROPIC_CONFIG_DIR"),
+            "profile_dir": None if flags else env.get("ANTHROPIC_CONFIG_DIR"),
             "env": names,
         },
         ensure_ascii=False,
