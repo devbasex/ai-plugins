@@ -31,7 +31,7 @@ JUDGE: dict[str, Any] = {
         "entrypoints": ["cli", "sdk-cli"],
         "ancestors": 8,
         "cli_exe": ["*/claude/versions/*"],
-        "cli_script": ["*/@anthropic-ai/claude-code/cli.js"],
+        "script_hosts": ["node*"],
         "flags": ["--settings", "--setting-sources"],
         "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"],
         "env_names": ["ANTHROPIC_", "CLAUDE_CONFIG_DIR"],
@@ -41,11 +41,13 @@ JUDGE: dict[str, Any] = {
 HOOK_PID = 100
 CLAUDE_EXE = "/home/u/.local/share/claude/versions/2.1.330"
 CLI_JS = "/opt/n/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+# 偽の `stat` が返す実行ファイルの [st_dev, st_ino]
+EXE_ID = [2049, 777]
 ENV = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/w/p"}
 OTHER_ENV = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/w/other"}
-LAUNCH = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p")
-GATEWAY = reply_judge.Launch(argv=["claude", "--settings", "gw.json"], project_dir="/w/p")
-OTHER = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/other")
+LAUNCH = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
+GATEWAY = reply_judge.Launch(argv=["claude", "--settings", "gw.json"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
+OTHER = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/other", exe=CLAUDE_EXE, exe_id=EXE_ID)
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +66,9 @@ class Proc(NamedTuple):
 
 
 def fake_proc(tree: dict[int, Proc]):
-    """偽の `/proc` の読み手（`read`・`readlink`）。実の `/proc` は読まない。"""
+    """偽の `/proc` の読み手（`read`・`readlink`・`stat`）。実の `/proc` は読まない。読んだパスを `seen` に残す。"""
+
+    seen: list[str] = []
 
     def entry(path: Path) -> Proc:
         found = tree.get(int(path.parent.name))
@@ -73,6 +77,7 @@ def fake_proc(tree: dict[int, Proc]):
         return found
 
     def read(path: Path) -> bytes:
+        seen.append(str(path))
         proc = entry(path)
         if path.name == "stat":
             return f"{path.parent.name} ({proc.comm}) S {proc.ppid} 1 1 0 -1".encode()
@@ -81,7 +86,17 @@ def fake_proc(tree: dict[int, Proc]):
     def readlink(path: Path) -> str:
         return entry(path).exe
 
-    return read, readlink
+    def stat(path: Path) -> os.stat_result:
+        entry(path)
+        return os.stat_result((0o100755, EXE_ID[1], EXE_ID[0], 1, 0, 0, 0, 0, 0, 0))
+
+    return {"read": read, "readlink": readlink, "stat": stat}, seen
+
+
+def launch_of(env: dict[str, str], tree: dict[int, Proc]) -> Optional[reply_judge.Launch]:
+    """偽の `/proc` で `parent_launch` を 1 回打つ。"""
+    readers, _ = fake_proc(tree)
+    return reply_judge.parent_launch(env, HOOK_PID, **readers)
 
 
 def chain(depth: int) -> dict[int, Proc]:
@@ -103,6 +118,7 @@ class FakeProc:
         self.stdin = os.fdopen(in_write, "wb")
         self.stdout = os.fdopen(out_read, "rb")
         self._sent = os.fdopen(in_read, "rb")
+        self._received: Optional[bytes] = None
         os.write(out_write, out.encode("utf-8"))
         # finished が偽なら標準出力を閉じない（子が回答しないまま残る）
         self._out_write: Optional[int] = None if finished else out_write
@@ -110,14 +126,19 @@ class FakeProc:
             os.close(out_write)
 
     def sent(self) -> dict[str, Any]:
-        """子の標準入力に渡った JSON。"""
-        return json.loads(self._sent.read().decode("utf-8"))
+        """子の標準入力に渡った JSON。`close` の後も読めるよう、読んだ中身を残す。"""
+        if self._received is None:
+            self._received = self._sent.read()
+        return json.loads(self._received.decode("utf-8"))
 
     def wait(self, timeout: Optional[float] = None) -> int:
         self.log.append(("wait", timeout))
         return self.returncode
 
     def close(self) -> None:
+        if self._received is None and self.stdin.closed:
+            # 書き手（ask）が標準入力を閉じた後なので、終わりまで読んでも止まらない
+            self._received = self._sent.read()
         self._sent.close()
         if self._out_write is not None:
             os.close(self._out_write)
@@ -217,6 +238,7 @@ def test_ask_reads_the_answer_and_passes_the_parent_launch() -> None:
     sent = proc.sent()
     assert judged.kind == "wait" and judged.failure is None and judged.calls == 1
     assert sent["parent_argv"] == ["claude", "-p"] and sent["project_dir"] == "/w/p" and sent["seconds"] == 5.0
+    assert sent["parent_exe"] == CLAUDE_EXE and sent["parent_exe_id"] == EXE_ID
     (args, kwargs) = spawner.seen[0]
     assert args == [sys.executable, "-P", "-m", reply_judge.CHILD_MODULE] and kwargs["start_new_session"] is True
 
@@ -305,34 +327,35 @@ def test_ask_maps_the_failures(out: str, code: int, failure: str) -> None:
 
 
 def test_parent_launch_finds_the_native_claude_code() -> None:
-    read, readlink = fake_proc(chain(1))
-    found = reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink)
-    assert found == reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p")
+    found = launch_of(ENV, chain(1))
+    assert found == reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
 
 
-def test_parent_launch_finds_the_node_launch() -> None:
-    tree = {HOOK_PID: Proc(ppid=101, exe="/bin/bash", cmdline=["/bin/bash"], comm="bash")}
-    tree[101] = Proc(ppid=1, exe="/usr/bin/node", cmdline=["node", CLI_JS, "-p"], comm="node")
-    read, readlink = fake_proc(tree)
-    found = reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink)
-    assert found is not None and found.argv == ["node", CLI_JS, "-p"]
+@pytest.mark.parametrize("script", [CLI_JS, "node_modules/@anthropic-ai/claude-code/cli.js", "/usr/local/bin/claude"])
+def test_parent_launch_stops_at_a_node_launch(script: str) -> None:
+    # node の上の Claude Code は起動引数からも読み込んだスクリプトからも確証できないので、親と認めず外側も見ない
+    tree = {
+        HOOK_PID: Proc(ppid=101, exe="/bin/bash", cmdline=["/bin/bash"], comm="bash"),
+        101: Proc(ppid=102, exe="/usr/bin/node", cmdline=["node", script, "-p"], comm="node"),
+        102: Proc(ppid=1, exe=CLAUDE_EXE, cmdline=["claude"]),
+    }
+    readers, seen = fake_proc(tree)
+    assert reply_judge.parent_launch(ENV, HOOK_PID, **readers) is None
+    # node の起動引数は読まない
+    assert "/proc/101/cmdline" not in seen
 
 
 @pytest.mark.parametrize(("depth", "wanted"), [(8, ["claude", "-p"]), (9, None)])
 def test_parent_launch_stops_at_the_generation_limit(depth: int, wanted: Optional[list[str]]) -> None:
-    read, readlink = fake_proc(chain(depth))
-    found = reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink)
+    found = launch_of(ENV, chain(depth))
     assert (found.argv if found else None) == wanted
 
 
-def test_parent_launch_stops_at_a_node_launch_with_a_relative_script() -> None:
-    # 相対パスは起動した時の作業ディレクトリが分からないので、外側の Claude Code の引数を採らない
-    tree = {
-        HOOK_PID: Proc(ppid=101, exe="/usr/bin/node", cmdline=["node", "cli.js", "--settings=gw.json"], comm="node"),
-        101: Proc(ppid=1, exe=CLAUDE_EXE, cmdline=["claude"]),
-    }
-    read, readlink = fake_proc(tree)
-    assert reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink) is None
+def test_parent_launch_refuses_a_deleted_executable() -> None:
+    # 親の起動後に実行ファイルが消えたか置き換わったので、親が読み込んだ実体を確かめられない
+    tree = chain(1)
+    tree[HOOK_PID + 1] = tree[HOOK_PID + 1]._replace(exe=f"{CLAUDE_EXE} (deleted)")
+    assert launch_of(ENV, tree) is None
 
 
 def test_parent_launch_takes_the_nearest_claude_code_not_the_shell() -> None:
@@ -341,8 +364,7 @@ def test_parent_launch_takes_the_nearest_claude_code_not_the_shell() -> None:
         101: Proc(ppid=102, exe=CLAUDE_EXE, cmdline=["claude", "--settings=gw.json"]),
         102: Proc(ppid=1, exe=CLAUDE_EXE, cmdline=["claude"]),
     }
-    read, readlink = fake_proc(tree)
-    found = reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink)
+    found = launch_of(ENV, tree)
     assert found is not None and found.argv == ["claude", "--settings=gw.json"]
 
 
@@ -351,8 +373,7 @@ def test_parent_launch_does_not_take_a_process_with_claude_in_its_arguments() ->
         HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3", "run.py"], comm="python3"),
         101: Proc(ppid=1, exe="/usr/bin/python3", cmdline=["python3", "x.py", "claude"], comm="python3"),
     }
-    read, readlink = fake_proc(tree)
-    assert reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink) is None
+    assert launch_of(ENV, tree) is None
 
 
 @pytest.mark.parametrize(
@@ -365,24 +386,18 @@ def test_parent_launch_does_not_take_a_process_with_claude_in_its_arguments() ->
     ],
 )
 def test_parent_launch_refuses_launches_it_cannot_compare(env: dict[str, str]) -> None:
-    read, readlink = fake_proc(chain(1))
-    assert reply_judge.parent_launch(env, HOOK_PID, read=read, readlink=readlink) is None
+    assert launch_of(env, chain(1)) is None
 
 
 def test_parent_launch_accepts_an_absolute_config_dir() -> None:
-    read, readlink = fake_proc(chain(1))
-    env = {**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude"}
-    assert reply_judge.parent_launch(env, HOOK_PID, read=read, readlink=readlink) is not None
+    assert launch_of({**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude"}, chain(1)) is not None
 
 
 def test_parent_launch_returns_none_without_proc() -> None:
-    def read(path: Path) -> bytes:
+    def missing(path: Path) -> Any:
         raise FileNotFoundError(str(path))
 
-    def readlink(path: Path) -> str:
-        raise FileNotFoundError(str(path))
-
-    assert reply_judge.parent_launch(ENV, HOOK_PID, read=read, readlink=readlink) is None
+    assert reply_judge.parent_launch(ENV, HOOK_PID, read=missing, readlink=missing, stat=missing) is None
 
 
 # resting / endpoint_resting / mark_rest
@@ -416,13 +431,15 @@ def test_endpoint_rest_is_kept_to_its_own_target(tmp_path: Path) -> None:
 
 def test_endpoint_rest_ignores_the_prompt_and_the_values() -> None:
     # 子は endpoint.flags の名前があれば値によらず拒むので、プロンプトと値は対象を分けない
-    first = reply_judge.Launch(argv=["claude", "-p", "最初の質問", "--settings", "a.json"], project_dir="/w/p")
-    second = reply_judge.Launch(argv=["claude", "--settings=b.json", "-p", "次の質問"], project_dir="/w/p")
+    first = reply_judge.Launch(
+        argv=["claude", "-p", "最初の質問", "--settings", "a.json"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID
+    )
+    second = reply_judge.Launch(argv=["claude", "--settings=b.json", "-p", "次の質問"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
     assert reply_judge.endpoint_scope(ENV, first) == reply_judge.endpoint_scope(ENV, second)
     keyed = {**ENV, "ANTHROPIC_API_KEY": "sk-1"}
     assert reply_judge.endpoint_scope(keyed, first) == reply_judge.endpoint_scope({**ENV, "ANTHROPIC_API_KEY": "sk-2"}, first)
     # 位置引数に書いた --settings はオプションではない
-    quoted = reply_judge.Launch(argv=["claude", "-p", "--", "--settings"], project_dir="/w/p")
+    quoted = reply_judge.Launch(argv=["claude", "-p", "--", "--settings"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
     assert reply_judge.endpoint_scope(ENV, quoted) == reply_judge.endpoint_scope(ENV, LAUNCH)
 
 
@@ -439,7 +456,7 @@ def test_endpoint_rest_is_split_by_the_anthropic_profile_dir() -> None:
     fixed = {**ENV, "ANTHROPIC_CONFIG_DIR": "/home/u/.anthropic"}
     assert reply_judge.endpoint_scope(broken, LAUNCH) != reply_judge.endpoint_scope(fixed, LAUNCH)
     # endpoint.flags があれば子はプロファイルを読む前に拒むので、保存先で対象を分けない
-    flagged = reply_judge.Launch(argv=["claude", "--settings", "a.json"], project_dir="/w/p")
+    flagged = reply_judge.Launch(argv=["claude", "--settings", "a.json"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
     assert reply_judge.endpoint_scope(broken, flagged) == reply_judge.endpoint_scope(fixed, flagged)
 
 
@@ -469,7 +486,9 @@ def test_mark_rest_does_not_write_while_another_stop_holds_the_lock(tmp_path: Pa
 
 
 def test_mark_rest_does_not_write_secret_values(tmp_path: Path) -> None:
-    gateway = reply_judge.Launch(argv=["claude", "--settings", '{"env": {"ANTHROPIC_API_KEY": "sk-arg"}}'], project_dir="/w/p")
+    gateway = reply_judge.Launch(
+        argv=["claude", "--settings", '{"env": {"ANTHROPIC_API_KEY": "sk-arg"}}'], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID
+    )
     reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, {**ENV, "ANTHROPIC_API_KEY": "sk-secret"}, gateway)
     text = reply_judge.rest_path(tmp_path).read_text(encoding="utf-8")
     assert "sk-secret" not in text and "sk-arg" not in text

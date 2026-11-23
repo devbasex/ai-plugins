@@ -4,7 +4,7 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
 子プロセス（`ndf.adapters.reply_judge`）が行い、ここはその子を新しいプロセスの組で起動して秒の上限で待つ。
 
 - `judge_text`: コードブロックの行と空行を除いた本文の末尾（設定の字数）を、質問へ渡す文にする（決定 7）
-- `parent_launch`: 送信先の確かめの hook の側。起動の形と親の Claude Code の起動引数を読む（決定 11）
+- `parent_launch`: 送信先の確かめの hook の側。起動の形と、親の Claude Code の起動引数・実行ファイルの同一性を読む（決定 11）
 - `ask`: 判定の子を起動して待ち、どの終わり方でも組ごと止めてから回収する（決定 3・6）
 - `resting` / `endpoint_resting` / `mark_rest`: 起動が続けて失敗する環境で、休む間だけ子を起動しないためのファイル
   （決定 10）。起動の失敗は親の探索の前に `resting` で、送信先の不一致（`endpoint`）は親の起動引数を含む確かめの
@@ -48,10 +48,12 @@ KINDS = ("wait", "report")
 
 
 class Launch(NamedTuple):
-    """親の Claude Code の起動引数とプロジェクトの根。`ask` が子の標準入力へ渡す。"""
+    """親の Claude Code の起動引数・プロジェクトの根・実行ファイルの実パスと `[st_dev, st_ino]`。`ask` が子へ渡す。"""
 
     argv: list[str]
     project_dir: str
+    exe: str
+    exe_id: list[int]
 
 
 class Judged(NamedTuple):
@@ -123,38 +125,43 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
-def _is_claude(exe: str, cmdline: list[str], endpoint: Mapping[str, Any]) -> Optional[bool]:
-    """Claude Code の実プロセスか。実行ファイルと起動の形だけで決め、引数の中身では決めない（決定 11）。
+def _found(current: int, exe: str, read: Callable[..., bytes], stat: Callable[..., os.stat_result]) -> Optional[Launch]:
+    """Claude Code と分かった親の起動引数と実行ファイルの同一性。プロジェクトの根は呼び手が入れる。
 
-    node の 2 つ目の引数が相対パスなら None（確かめられない）。起動した時の作業ディレクトリは後から移せるので、
-    今の作業ディレクトリでは解決しない。
+    実行ファイルが消えたか置き換わった（` (deleted)`）なら、親が読み込んだ実体を確かめられないので None。
     """
-    if _matches(exe, endpoint["cli_exe"]):
-        return True
-    if not os.path.basename(exe).startswith("node") or len(cmdline) < 2:
-        return False
-    if not os.path.isabs(cmdline[1]):
+    # `/proc/<pid>/exe` の読みは、親の起動後に実行ファイルが消えたか置き換わると末尾に ` (deleted)` が付く
+    if exe.endswith(" (deleted)"):
         return None
-    return _matches(os.path.realpath(cmdline[1]), endpoint["cli_script"])
+    # stat は /proc/<pid>/exe のリンクの先のパスでなく、親が読み込んだ実体を返す
+    found = stat(_proc_file(current, "exe"))
+    return Launch(argv=_cmdline(read, current), project_dir="", exe=exe, exe_id=[found.st_dev, found.st_ino])
 
 
-def _claude_argv(pid: int, endpoint: Mapping[str, Any], read: Callable[..., bytes], readlink: Callable[..., str]) -> Optional[list[str]]:
-    """hook のプロセスの親からたどり、最も近い Claude Code の起動引数を返す。
+def _claude_launch(
+    pid: int,
+    endpoint: Mapping[str, Any],
+    read: Callable[..., bytes],
+    readlink: Callable[..., str],
+    stat: Callable[..., os.stat_result],
+) -> Optional[Launch]:
+    """hook のプロセスの親からたどり、最も近い Claude Code の実プロセスを返す（決定 11）。
 
-    見つからない・Claude Code か確かめられない親に当たった（そこより外側の Claude Code を採らない）ときは None。
+    Claude Code かは実行ファイルの実パスだけで決め、引数の中身では決めない。node などスクリプトを動かす実行ファイル
+    （`endpoint.script_hosts`）に当たったら、起動引数を見ずにそこで止める（node の上の Claude Code は起動引数からも
+    読み込んだスクリプトからも確証できず、そこより外側の Claude Code も採らない）。見つからなければ None。
     """
     current = pid
-    for _ in range(int(endpoint["ancestors"])):
-        try:
+    try:
+        for _ in range(int(endpoint["ancestors"])):
             current = _ppid(read, current)
-            cmdline = _cmdline(read, current)
-            found = _is_claude(readlink(_proc_file(current, "exe")), cmdline, endpoint)
-        except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
-            return None
-        if found is None:
-            return None
-        if found:
-            return cmdline
+            exe = readlink(_proc_file(current, "exe"))
+            if _matches(exe, endpoint["cli_exe"]):
+                return _found(current, exe, read, stat)
+            if _matches(os.path.basename(exe), endpoint["script_hosts"]):
+                return None
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
+        return None
     return None
 
 
@@ -163,8 +170,9 @@ def parent_launch(
     pid: int,
     read: Callable[..., bytes] = _read_bytes,
     readlink: Callable[..., str] = _readlink,
+    stat: Callable[..., os.stat_result] = os.stat,
 ) -> Optional[Launch]:
-    """送信先の確かめの hook の側（決定 11）。親の Claude Code の起動引数とプロジェクトの根、確かめられなければ None。
+    """送信先の確かめの hook の側（決定 11）。親の Claude Code の起動の形とプロジェクトの根、確かめられなければ None。
 
     起動の形（`CLAUDE_CODE_ENTRYPOINT`）・`CLAUDE_PROJECT_DIR`・`CLAUDE_CONFIG_DIR` を見てから `/proc` をたどる。
     引数の中身（`--settings` など）はここでは見ない（判定の子の `endpoint_refusal` が実効の設定で確かめる）。
@@ -180,8 +188,8 @@ def parent_launch(
     )
     if not comparable:
         return None
-    argv = _claude_argv(pid, endpoint, read, readlink)
-    return Launch(argv=argv, project_dir=str(project_dir)) if argv else None
+    found = _claude_launch(pid, endpoint, read, readlink, stat)
+    return found._replace(project_dir=str(project_dir)) if found and found.argv else None
 
 
 def _child_env(env: Mapping[str, str]) -> dict[str, str]:
@@ -334,7 +342,14 @@ def ask(
     """
     started = time.monotonic()
     payload = json.dumps(
-        {"text": text, "seconds": seconds, "parent_argv": list(launch.argv), "project_dir": launch.project_dir},
+        {
+            "text": text,
+            "seconds": seconds,
+            "parent_argv": list(launch.argv),
+            "project_dir": launch.project_dir,
+            "parent_exe": launch.exe,
+            "parent_exe_id": list(launch.exe_id),
+        },
         ensure_ascii=False,
     )
     try:
