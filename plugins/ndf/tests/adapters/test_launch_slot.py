@@ -197,3 +197,105 @@ def test_issue_4000_gate_without_ensure_refuses_a_stale_record(pool, monkeypatch
     with pytest.raises(launch_slot.NotLaunched, match="記録が無い"), launch_slot.gate("claude", ensure=False):
         pytest.fail("記録が無いのに起動した")
     assert slot_pool.held_mib(pool) == 0
+
+
+# ---------------------------------------------------------------- 起動を断る判定（`_refuse_if_needed`）の振る舞いの固定
+
+
+@pytest.fixture
+def refusal_calls(monkeypatch):
+    """`verdict`・`refusal`・`training.ensure` の呼び出しを残す偽物。返す値は `answers` の鍵で差し替える。"""
+    from ndf.adapters import training
+
+    calls: list[tuple[str, str, object]] = []
+    answers: dict[str, object] = {"verdict": launch_slot.training_cache.Verdict(None), "refusal": None, "ensure": None}
+
+    def fake(name):
+        def call(agent, env=None):
+            calls.append((name, agent, env))
+            return answers[name]
+
+        return call
+
+    monkeypatch.setattr(launch_slot.training_cache, "verdict", fake("verdict"))
+    monkeypatch.setattr(launch_slot.training_cache, "refusal", fake("refusal"))
+    monkeypatch.setattr(training, "ensure", fake("ensure"))
+    return calls, answers
+
+
+ENV = {"NDF_TEST_MARK": "1"}
+
+
+def test_refuse_passes_a_fresh_record_after_reading_the_refusal(refusal_calls):
+    """バックアップが新しければ `refusal` を読み、None なら断らない（確かめ直さない）。`env` はそのまま渡る。"""
+    calls, _answers = refusal_calls
+
+    assert launch_slot._refuse_if_needed("claude", ENV) is None
+    assert calls == [("verdict", "claude", ENV), ("refusal", "claude", ENV)]
+
+
+def test_refuse_raises_the_refusal_of_a_fresh_record(refusal_calls):
+    """新しいバックアップが断れば、その理由の `NotLaunched`（種類は refused で `NoSlot` ではない）を送る。"""
+    calls, answers = refusal_calls
+    answers["refusal"] = "学習に使う設定"
+
+    with pytest.raises(launch_slot.NotLaunched) as caught:
+        launch_slot._refuse_if_needed("codex", None, ensure=False)
+    assert not isinstance(caught.value, launch_slot.NoSlot)
+    assert caught.value.kind == "refused" and caught.value.detail == "学習に使う設定"
+    assert [name for name, _agent, _env in calls] == ["verdict", "refusal"]
+
+
+def test_refuse_ignores_the_verdict_reason_of_a_fresh_record(refusal_calls):
+    """新しいバックアップでは `verdict.why` を使わず、`refusal` の答えで決める。"""
+    _calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("verdict の理由")
+
+    assert launch_slot._refuse_if_needed("claude", None) is None
+
+
+def test_refuse_ensures_a_stale_record_by_default(refusal_calls):
+    """`ensure` を省けば、古いバックアップはその場で確かめ直し（`refusal` は読まない）、None なら断らない。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("記録が無い", stale=True)
+
+    assert launch_slot._refuse_if_needed("claude", ENV) is None
+    assert calls == [("verdict", "claude", ENV), ("ensure", "claude", ENV)]
+
+
+def test_refuse_raises_what_ensure_answers(refusal_calls):
+    """確かめ直した答えが理由なら、`verdict.why` ではなくその理由で `NotLaunched` を送る。"""
+    _calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("記録が無い", stale=True)
+    answers["ensure"] = "確かめた結果は学習に使う"
+
+    with pytest.raises(launch_slot.NotLaunched) as caught:
+        launch_slot._refuse_if_needed("claude", None, ensure=True)
+    assert caught.value.detail == "確かめた結果は学習に使う"
+
+
+def test_refuse_without_ensure_uses_the_verdict_reason_only(refusal_calls):
+    """`ensure=False` で古いバックアップなら `verdict.why` だけで決め、`refusal` も `ensure` も呼ばない。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict("期限切れ", stale=True)
+
+    with pytest.raises(launch_slot.NotLaunched, match="期限切れ"):
+        launch_slot._refuse_if_needed("claude", ENV, ensure=False)
+    assert calls == [("verdict", "claude", ENV)]
+
+    calls.clear()
+    answers["verdict"] = launch_slot.training_cache.Verdict(None, stale=True)
+    assert launch_slot._refuse_if_needed("claude", ENV, ensure=False) is None
+    assert calls == [("verdict", "claude", ENV)]
+
+
+def test_gate_checks_before_and_after_taking_the_slot(pool, refusal_calls, monkeypatch):
+    """`gate` はスロットを取る前と後に 1 度ずつ判定し、`ensure` を両方へ渡す。"""
+    calls, answers = refusal_calls
+    answers["verdict"] = launch_slot.training_cache.Verdict(None, stale=True)
+    monkeypatch.setattr(launch_slot.machine, "available_mib", lambda: PLENTY_MIB)
+
+    with launch_slot.gate("claude", ensure=False):
+        assert slot_pool.held_mib(pool) == slot_pool.weight_mib(launch_slot.KIND)
+    assert [name for name, _agent, _env in calls] == ["verdict", "verdict"]
+    assert slot_pool.held_mib(pool) == 0
