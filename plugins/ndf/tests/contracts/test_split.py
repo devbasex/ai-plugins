@@ -104,8 +104,10 @@ def test_keys_differing_only_in_case_stop_and_name_both(reader, tmp_path, monkey
         (lambda: causes.exit_code("unknown"), ["causes/unknown.json"]),
         (lambda: causes.policy_of("ci_pending"), ["causes/ci_pending.json", "limits/cause.ci-pending.json"]),
         (lambda: causes.errors({"kind": "no_such", "detail": "x"}), []),
+        # 一覧（規約のページ）は再試行の方針の名前だけを使い、方針のファイルを読まない（PR 4335 の r1-3）
+        (causes.rows, sorted(f"causes/{p.name}" for p in (contracts.DEFAULT_DIR / "causes").iterdir())),
     ],
-    ids=["limits.value", "causes.exit_code", "causes.policy_of", "causes.errors"],
+    ids=["limits.value", "causes.exit_code", "causes.policy_of", "causes.errors", "causes.rows"],
 )
 def test_reading_one_item_reads_only_its_files(monkeypatch, read, files):
     # 1 項目の参照で表の全件を読むと、CLI の起動ごとの読みが項目の数だけ増える（PR 4335 の r1-4）

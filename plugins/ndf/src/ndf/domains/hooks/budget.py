@@ -39,14 +39,19 @@ class Budget:
         return self.deadline - self.margin
 
 
+def _policy_names(spec: dict[str, Any], runtime: str) -> tuple[str, str]:
+    """事象のコントラクトの予算の方針の名前（ランタイム固有・共通）。"""
+    return f"hook.budget.{spec['budget']}.{runtime}", f"hook.budget.{spec['budget']}"
+
+
 def policy_name(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[str]:
     """事象の予算の方針の名前。コントラクト表に無い事象は None。"""
     spec = tables.event_spec(runtime, event)
     if spec is None:
         return None
-    specific = f"hook.budget.{spec['budget']}.{runtime}"
-    found = tables.has_policy(specific) if limits is None else specific in limits
-    return specific if found else f"hook.budget.{spec['budget']}"
+    specific, common = _policy_names(spec, runtime)
+    found = tables.policy(specific) is not None if limits is None else specific in limits
+    return specific if found else common
 
 
 def budget_for(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[Budget]:
@@ -100,6 +105,12 @@ def _file_registrations(runtime: str, path: Path) -> list[dict[str, Any]]:
         for g in groups
         for h in g["hooks"]
     ]
+
+
+def checked_policies() -> dict[str, dict[str, Any]]:
+    """`check_budget` が照らす方針（名前 → 値）。ランタイムの事象の予算と、guard の部品の上限のファイルだけを読む。"""
+    budgets = {n for name, rt in tables.runtimes().items() for spec in rt["events"].values() for n in _policy_names(spec, name)}
+    return tables.policies(budgets | {n for guard in tables.guards() for n in guard["limits"]})
 
 
 def check_budget(limits: dict, registrations: list[dict[str, Any]]) -> list[str]:

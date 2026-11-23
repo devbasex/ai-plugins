@@ -17,7 +17,7 @@ from ._hooks import bash, call_entry, records, sample, stop
 
 def test_declared_budgets_keep_the_order():
     # CI の検査: 部品の上限 ≤ 締め切り − 余白、締め切り ≤ 登録の timeout ≤ ランタイムの上限
-    assert budget.check_budget(tables.policies(), budget.budget_registrations()) == []
+    assert budget.check_budget(budget.checked_policies(), budget.budget_registrations()) == []
 
 
 def test_every_runtime_event_has_a_budget_with_all_values():
@@ -36,7 +36,7 @@ def test_runtime_specific_budget_is_read_first():
 
 def test_stop_budget_adds_the_judge_seconds_only_for_the_runtimes_that_judge():
     """Codex の Stop はモデルを呼ばないので、判定の秒を足した Claude Code の予算でなく元の予算を読む（#4000）。"""
-    judge = tables.policies()["hook.stop-wait.judge"]
+    judge = budget.checked_policies()["hook.stop-wait.judge"]
     assert judge["runtimes"] == ["claude"]
     assert budget.budget_for("codex", "Stop").policy == "hook.budget.stop.codex"
     assert budget.budget_for("claude", "Stop").policy == "hook.budget.stop"
@@ -44,7 +44,7 @@ def test_stop_budget_adds_the_judge_seconds_only_for_the_runtimes_that_judge():
 
 
 def test_component_limit_is_compared_only_with_the_budgets_of_its_runtimes():
-    widened = copy.deepcopy(tables.policies())
+    widened = copy.deepcopy(budget.checked_policies())
     widened["hook.stop-wait.judge"]["runtimes"] = ["claude", "codex"]
     errors = budget.check_budget(widened, budget.budget_registrations())
     seconds, usable = widened["hook.stop-wait.judge"]["seconds"], budget.budget_for("codex", "Stop").usable
@@ -54,7 +54,7 @@ def test_component_limit_is_compared_only_with_the_budgets_of_its_runtimes():
 
 
 def test_component_limit_longer_than_the_deadline_is_a_violation():
-    broken = copy.deepcopy(tables.policies())
+    broken = copy.deepcopy(budget.checked_policies())
     broken["hook.ask-forward"]["seconds"] = 8
     errors = budget.check_budget(broken, budget.budget_registrations())
     assert any("hook.ask-forward" in e and "PreToolUse" in e for e in errors)
@@ -62,7 +62,7 @@ def test_component_limit_longer_than_the_deadline_is_a_violation():
 
 def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns():
     # 現状固定: 予算の行の欠落・部品の上限の欠落・締め切り − 余白の超過の文と、重複を除いて並べた順
-    broken = copy.deepcopy(tables.policies())
+    broken = copy.deepcopy(budget.checked_policies())
     del broken["hook.budget.stop"]
     del broken["hook.ask-forward"]
     broken["hook.counter-lock"]["seconds"] = 99
@@ -89,7 +89,7 @@ def test_registration_without_timeout_or_shorter_than_the_deadline_is_a_violatio
         {"runtime": "codex", "event": "SessionEnd", "timeout": 10},
         {"runtime": "claude", "event": "Nope", "timeout": 3},
     ]
-    errors = budget.check_budget(tables.policies(), regs)
+    errors = budget.check_budget(budget.checked_policies(), regs)
     assert len(errors) == 4
     assert any("timeout が無い" in e for e in errors) and any("上限 3" in e for e in errors)
 
@@ -143,9 +143,9 @@ def test_registration_file_without_a_hooks_object_has_no_rows(tmp_path):
 
 
 def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
-    broken = copy.deepcopy(tables.policies())
+    broken = copy.deepcopy(budget.checked_policies())
     broken["hook.counter-lock"]["seconds"] = 30
-    monkeypatch.setattr(tables, "policies", lambda prefix: {k: v for k, v in broken.items() if k.startswith(prefix)})
+    monkeypatch.setattr(budget, "checked_policies", lambda: broken)
     out = call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
     assert "予算の検査で破れ" in out["hookSpecificOutput"]["additionalContext"]
     monkeypatch.undo()
@@ -154,7 +154,7 @@ def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
 
 def test_hook_budget_policies_pass_the_limits_schema():
     # 予算のキーは上限の設定の形（D1）で読める
-    for name in tables.policies():
+    for name in budget.checked_policies():
         if name.startswith("hook.budget."):
             assert limits.value(name, "timeout") >= limits.value(name, "deadline")
 
@@ -176,6 +176,11 @@ def test_hook_off_all_and_named_switch_guards_off(tmp_path, monkeypatch):
     assert call_entry("claude", "PreToolUse", payload) is None
 
 
+def _forget_tables():
+    tables.load.cache_clear()
+    tables.policy.cache_clear()
+
+
 @pytest.fixture
 def read_limits(monkeypatch):
     """`contracts/limits/` から読んだファイルの名前（読んだ順）。1 プロセス 1 回のキャッシュは空から始める。"""
@@ -183,14 +188,15 @@ def read_limits(monkeypatch):
     real = tables._read_json
 
     def spy(path):
+        data = real(path)
         if path.parent == tables.LIMITS_DIR:
             got.append(path.name)
-        return real(path)
+        return data
 
     monkeypatch.setattr(tables, "_read_json", spy)
-    tables.load.cache_clear()
+    _forget_tables()
     yield got
-    tables.load.cache_clear()
+    _forget_tables()
 
 
 def _read_until_denied(tmp_path):
@@ -215,14 +221,14 @@ def _stop_of_unattended_run(tmp_path):
         ("PreToolUse", "read-repeat", _read_until_denied, 6),
         ("PreToolUse", "sleep", lambda p: bash(p, "sleep 999"), 6),
         ("Stop", "unattended", _stop_of_unattended_run, 6),
-        ("SessionStart", "session", lambda p: sample("claude", "SessionStart", p), 26),
+        ("SessionStart", "session", lambda p: sample("claude", "SessionStart", p), 20),
     ],
 )
 def test_one_hook_run_reads_only_the_policies_it_uses(tmp_path, monkeypatch, read_limits, event, guard, payload_of, cap):
     # #3687: 1 方針 1 ファイルなので、起動のたびに全件を読むと 200 を超えるファイルを読む。予算の解決から guard までの 1 起動分を数える
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
     payload = payload_of(tmp_path)
-    tables.load.cache_clear()
+    _forget_tables()
     read_limits.clear()
     call_entry("claude", event, payload)
     record = records()[-1]
@@ -235,21 +241,39 @@ def test_one_hook_run_reads_only_the_policies_it_uses(tmp_path, monkeypatch, rea
     ("runtime", "checked"),
     [("codex", ["hook.budget.stop.codex.json"]), ("claude", ["hook.budget.stop.claude.json", "hook.budget.stop.json"])],
 )
-def test_budget_lookup_checks_each_policy_file_once(monkeypatch, runtime, checked):
-    """予算の選択と読み込みが、方針のファイルの有無の結果を分け合う。"""
-    got: list[str] = []
-    real = Path.is_file
+def test_budget_lookup_tries_each_policy_file_once(monkeypatch, runtime, checked):
+    """予算の選択と読み込みが、方針のファイルの有無を照会せず、1 回の読みの結果を分け合う。"""
+    tried: list[str] = []
+    stats: list[str] = []
+    real_read, real_is_file = tables._read_json, Path.is_file
 
-    def spy(path):
+    def spy_read(path):
         if path.parent == tables.LIMITS_DIR:
-            got.append(path.name)
-        return real(path)
+            tried.append(path.name)
+        return real_read(path)
 
-    monkeypatch.setattr(Path, "is_file", spy)
-    tables.has_policy.cache_clear()
+    def spy_is_file(path):
+        if path.parent == tables.LIMITS_DIR:
+            stats.append(path.name)
+        return real_is_file(path)
+
+    monkeypatch.setattr(tables, "_read_json", spy_read)
+    monkeypatch.setattr(Path, "is_file", spy_is_file)
+    _forget_tables()
     for _ in range(2):
         assert budget.budget_for(runtime, "Stop") is not None
-    assert got == checked
+    assert tried == checked
+    assert stats == []
+
+
+def test_budget_check_reads_only_the_policies_it_compares(read_limits):
+    # 予算の検査で比べない hook の方針（hook.sleep など）を読まない（PR 4335 の r1-1）
+    used = {p.policy for rt, spec in tables.runtimes().items() for ev in spec["events"] if (p := budget.budget_for(rt, ev)) is not None}
+    used |= {name for guard in tables.guards() for name in guard["limits"]}
+    _forget_tables()
+    read_limits.clear()
+    assert set(budget.checked_policies()) == used
+    assert sorted(read_limits) == sorted(f"{name}.json" for name in used)
 
 
 def test_policy_value_reads_its_own_file_once(read_limits):
