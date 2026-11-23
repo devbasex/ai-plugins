@@ -341,13 +341,19 @@ class WriteGate(BaseThrottler):
         if writes is None:
             yield
             return
-        send = await self._turn(writes.kind, writes.count, remaining)
+        async with self.async_hold(writes.kind, writes.count, remaining):
+            yield
+
+    @asynccontextmanager
+    async def async_hold(self, kind: str, count: int = 1, remaining: Optional[Callable[[], float]] = None) -> AsyncGenerator[None, Any]:
+        """`hold` の非同期の口。"""
+        send = await self._turn(kind, count, remaining)
         try:
             yield
         finally:
             # 既定のスレッドプールは送信のロックを待つ手順で埋まりうるので、放す処理は専用のスレッドで進める。
             # 呼び出し元が取り消されても、投入済みの放す処理は取り消さない（shield）
-            finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, writes.kind, send)
+            finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, kind, send)
             await asyncio.shield(finishing)
 
     async def _turn(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
