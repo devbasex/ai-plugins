@@ -238,7 +238,10 @@ class _Guard:
 def test_open_review_guards_every_body_once_and_posts_one_review() -> None:
     hub, guard = _Hub(), _Guard()
     port = threads.GitHubPort(hub, guard, 7, _Refused, sleep=lambda s: None)
-    placed = [threads.Placed("r1-1", "a.py", 3, "ghp_secret を出す"), threads.Placed("r1-2", "a.py", 9, f"本文\n{threads.CLOSED_HEAD}\n\nghp_secret")]
+    placed = [
+        threads.Placed("r1-1", "a.py", 3, "ghp_secret を出す"),
+        threads.Placed("r1-2", "a.py", 9, f"本文\n{threads.CLOSED_HEAD}\n\nghp_secret"),
+    ]
     assert port.open_review(HEAD1, placed) == 1
     [(path, payload)] = hub.posts
     assert path == "/repos/o/r/pulls/7/reviews" and guard.calls == 1
@@ -280,8 +283,19 @@ def test_open_threads_keep_only_our_replies_other_than_the_first_comment() -> No
     class Hub(_Hub):
         def repository(self, query, variables):
             first = {"databaseId": 1, "body": threads.opening(_finding("r1-1", 1, "a.py")), "author": {"login": "bot"}}
-            replies = [first, {"databaseId": 2, "body": "直した", "author": {"login": "bot"}}, {"databaseId": 3, "body": "人", "author": {"login": "alice"}}]
-            node = {"id": "T1", "isResolved": False, "path": "a.py", "line": 3, "comments": {"nodes": [first]}, "replies": {"nodes": replies}}
+            replies = [
+                first,
+                {"databaseId": 2, "body": "直した", "author": {"login": "bot"}},
+                {"databaseId": 3, "body": "人", "author": {"login": "alice"}},
+            ]
+            node = {
+                "id": "T1",
+                "isResolved": False,
+                "path": "a.py",
+                "line": 3,
+                "comments": {"nodes": [first]},
+                "replies": {"nodes": replies},
+            }
             return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [node]}}}
 
         def graphql(self, query, variables):
