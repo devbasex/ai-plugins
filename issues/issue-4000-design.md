@@ -115,7 +115,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 性能・拡張性 | 軽いモデルを呼ぶ Stop の待ちは秒の上限を超えない | 判定の上限 5 秒を、SIGALRM と同じ絶対時刻の締め切り（起動の時刻 ＋ 7 秒）から余白 1.5 秒を 1 回だけ引いた残りの内に置き、hook の側が子を上限で打ち切る。モデルを呼ぶ Stop が起動するプロセスは 3 つ（判定の子の python・`claude --version`・`claude -p`）。CLI の下限の確かめ（`cli_floor`）の版の記録はプロセスの中にしか無く、判定の子は Stop ごとに新しいので毎回 `claude --version` を 1 回打つ。実測は子の起動 0.15〜0.2 秒 ＋ `claude --version` 0.007〜0.009 秒 ＋ 1 回 0.73〜1.51 秒（MEA3・MEA4・MEA7）で、打つのは 1 回である（決定 4） |
 | 運用・保守性 | 直すのは質問の文と判定の例の組の 2 つ | 質問の文は子のモジュールの定数、組はコントラクトのファイルにあり、`ndf hooks judge-cases` が各例を 3 周打って組を確かめる |
-| セキュリティ | 学習に使わない設定を通らない起動をしない。本文を送る先はセッション自身が使う Claude の API と同じ | 子は `call_claude` の前置き（学習の設定の確かめ）をそのまま通す。送り先が同じと確かめられる Stop（Claude Code のセッションで、接続を設定ファイルで切り替えていない）だけで呼び、Codex のセッションと確かめられない Stop は文字列の判定で決める（決定 11） |
+| セキュリティ | 学習に使わない設定を通らない起動をしない。本文を送る先はセッション自身が使う Claude の API と同じ | 子は `call_claude` の前置き（学習の設定の確かめ）をそのまま通す。送り先が同じと確かめられる Stop（Claude Code のセッションで、起動の引数・設定ファイルのキー・設定の `env` のどれでも接続を切り替えていないと確かめられる）だけで呼び、Codex のセッションと確かめられない Stop は文字列の判定で決める（決定 11） |
 
 ## 決定の記録
 
@@ -227,15 +227,20 @@ sequenceDiagram
   - ランタイムが Claude Code（`ctx.runtime == "claude"`）。Codex のセッションの応答は Claude の API へ送らない（Codex のセッションは Claude を使っていない）
   - 判定の子へ渡す環境は hook の環境（Claude Code がセッションの環境で起動する）から、環境変数の表の `child` が `drop` の行（`CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` など。接続と認証の変数を含まない）だけを外したもの。接続先と認証の変数（`ANTHROPIC_BASE_URL`・提供元の選択・API キー・`CLAUDE_CONFIG_DIR`）はそのまま渡る
   - 判定の子は中継の確かめ（`relay_checks`）を登録しないので、`call_claude` は利用上限で別のアカウントへ打ち直さない
-  - `--setting-sources ""` が読まなくなる設定で接続を選んでいない: セッションが読む設定ファイル（`$CLAUDE_CONFIG_DIR/settings.json`（無ければ `~/.claude/settings.json`）・`<cwd>/.claude/settings.json`・`<cwd>/.claude/settings.local.json`）のどれにも、接続や認証を決めるキー（`limits.json` の判定の行の `endpoint_keys`。既定 `apiKeyHelper`・`awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）が無い。読めないファイルがあれば確かめられないとして呼ばない
+  - 親の Claude Code の起動時の設定を確かめられ、接続を選ぶ起動の引数が無い: 判定の子は `--setting-sources ""` で設定を読まないので、親が起動の引数で読んだ設定（[設定の優先順位](https://code.claude.com/docs/en/settings#settings-precedence) で利用者とプロジェクトの設定より強い `--settings` のインライン JSON や別ファイル）は子へ渡らない。hook のプロセスから親をたどり（`/proc/<pid>/stat` の親の番号、最大 `ancestors` 代）、起動の引数（`/proc/<pid>/cmdline`）が `parent_argv` に当たる最初のプロセスを親の Claude Code とする。その引数に `flags`（既定 `--settings`・`--setting-sources`）が 1 つでもあれば呼ばない。親が見つからない・`/proc` が読めない（macOS を含む）なら確かめられないとして呼ばない
+  - プロジェクトの設定は、親が読んだプロジェクトの根を基準にする: Stop の入力の `cwd` はセッション中の `cd` や worktree への移動で変わるので使わない。Claude Code が hook へ渡す `CLAUDE_PROJECT_DIR`（[hook のパスの解き方](https://code.claude.com/docs/en/hooks#reference-scripts-by-path)。セッションのプロジェクトの根）の `.claude/settings.json`・`.claude/settings.local.json` を読む。`CLAUDE_PROJECT_DIR` が無いなら確かめられないとして呼ばない
+  - 設定ファイルで接続も認証も選んでいない: 親が読む設定ファイル（管理者の設定 `managed`・`$CLAUDE_CONFIG_DIR/settings.json`（無ければ `~/.claude/settings.json`）・上のプロジェクトの 2 つ）のどれにも、(a) 接続や認証を決める最上位のキー（`keys`。既定 `apiKeyHelper`・`awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）が無く、(b) `env` に接続や認証の変数（名前が `env_prefixes` で始まる。既定 `ANTHROPIC_`・`CLAUDE_CODE_USE_`・`CLAUDE_CONFIG_DIR`・`AWS_`・`GOOGLE_`・`CLOUD_ML_`・`VERTEX_`）が無い。読めない・JSON でないファイルがあれば確かめられないとして呼ばない。(b) は「設定の `env` が hook の環境に入る」ことがまだ確かめられていないための安全側の決まりで、確かめが済めば `env_prefixes` を空にして外せる（コードは変えない）
+  - 値（`ancestors`・`parent_argv`・`flags`・`managed`・`keys`・`env_prefixes`）は `limits.json` の判定の行の `endpoint` に置く
 - 採らなかった案: Codex でも `claude` が使えれば呼ぶ（Codex の応答の本文が、そのセッションと別に設定された Claude の接続先へ送られる）
-- 採らなかった案: 最小構成をやめて設定ファイルを読ませる（hook・MCP・プラグインまで読み、遅くなるうえ判定の子が hook を起こす）
-- **代償**: Codex のセッションと、設定ファイルで接続を選ぶ Claude Code のセッションでは、今の見逃しがそのまま残る。Stop ごとに設定ファイルを最大 3 つ読む
+- 採らなかった案: 最小構成をやめて設定ファイルを読ませる（hook・MCP・プラグインまで読み、遅くなるうえ判定の子が hook を起こす。`--settings` の起動時の設定はそれでも渡らない）
+- 採らなかった案: Stop の入力の `cwd` からプロジェクトの設定を探す（セッション中に移った先の設定を読み、親が読んだ設定を見落とす）
+- 採らなかった案: macOS では `ps` で親の引数を読む（Stop ごとに外部コマンドを 1 つ起動し増やす）
+- **代償**: Codex のセッション・起動の引数や設定ファイルで接続を選ぶ Claude Code のセッション・`/proc` の無い環境（macOS）・`CLAUDE_PROJECT_DIR` を渡さない版では、今の見逃しがそのまま残る。設定の `env` に `AWS_` などの変数を置くだけで、接続に関わらなくても呼ばなくなる（確かめが済むまで）。Stop ごとに `/proc` の数ファイルと設定ファイルを最大 4 つ読む（どれも 1 ms に満たない）
 - 根拠: Value 7（不具合が根本原因から直される）（MVV バージョン 11）。要求仕様の非機能（セキュリティ）
 
 ## 影響と危険
 
-- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code のセッションの Stop（送信先が同じと確かめられるもの。決定 11）。Codex のセッションはモデルを呼ばず、今の文字列の判定のまま動く
+- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code のセッションの Stop（送信先が同じと確かめられるもの。決定 11。`/proc` の無い macOS は確かめられないので含まない）。Codex のセッションと確かめられない Stop はモデルを呼ばず、今の文字列の判定のまま動く
 - **プロジェクトごとに違うもの**: 無い。モデル・秒・字数は NDF のコントラクト（`limits.json`）に置き、プロジェクトの設定にしない。guard を止めたいプロジェクトは、今ある guard の切り方（環境変数 `NDF_HOOK_OFF` に guard の名前をカンマで並べると、その guard を呼ばない。`tables.off_names`・`tables.is_off`）で止める
 - **当たるモード**: モードに依らない（hook はすべてのセッションで動く）
 - **利用者から見た振る舞いの変化**: 会話の終わりが約 1〜1.7 秒遅くなり、Stop ごとに費用がかかる。入出力の約束（guard の名前・変更要求の文面・hook の登録の事象）は変わらないが、使う人には遅れと費用として見える
@@ -265,7 +270,7 @@ sequenceDiagram
 | 3. 実際のモデルで組を確かめる | `ndf hooks judge-cases` が各例を設定の周の数だけ打ち、1 周でも外れた例を出して終了コード 1。偽の判定器で 3 周のうち 1 周だけ外すと、その例が外れとして出て 1 で終わる | 外れを数えずに 0 で終わると落ちる。周を 1 回しか打たないと、1 周だけ外す偽の判定器で通ってしまい落ちる |
 | 4. 呼ばない条件 | 本文が空・AskUserQuestion を使った・背景の作業が残る・上限に達した、の 4 つで判定器が呼ばれない。どれでもない Stop で 1 回呼ばれる | 条件の 1 つを外すと、その場合で判定器が呼ばれて落ちる |
 | 決定 5. 上限の後も待ち通知が届く | 同じ入力の中で前の Stop の判定器が `wait` を返し、上限に達した Stop の本文が文字列の判定で `report` のとき、変更要求を返して dispatch が上限で通し、待ち通知が送信待ちに入る。前に `wait` が無ければ通すだけ | 印を見ずに文字列の判定だけで決めると、通知が入らずに落ちる |
-| 決定 11. 送信先が同じときだけ呼ぶ | Codex のセッション・設定ファイルに `endpoint_keys` のキーがある・設定ファイルが読めない、のどれでも判定器が呼ばれず `judge=skip:endpoint`。判定の子へ渡す環境から `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が外れ、`ANTHROPIC_BASE_URL` などは残る | ランタイムを見ずに呼ぶと Codex の例で落ちる。環境を外しすぎ・外し漏れで落ちる |
+| 決定 11. 送信先が同じときだけ呼ぶ | Codex のセッション・親の Claude Code の引数に `--settings` がある・親が見つからない（`/proc` が読めない）・`CLAUDE_PROJECT_DIR` が無い・設定ファイルに `keys` のキーがある・設定の `env` に `ANTHROPIC_BASE_URL` などがある・設定ファイルが読めない、のどれでも判定器が呼ばれず `judge=skip:endpoint`。Stop の `cwd` がプロジェクトの根の下へ移っても、読むのは `CLAUDE_PROJECT_DIR` の設定である。判定の子へ渡す環境から `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が外れ、`ANTHROPIC_BASE_URL` などは残る | ランタイムを見ずに呼ぶと Codex の例で落ちる。環境を外しすぎ・外し漏れで落ちる |
 | 5. 回答が得られないときは文字列の判定 | 判定器が時間切れ・起動の失敗・認証の失敗・形の違う回答を返すと、文字列の判定と同じ結果になる。偽の Popen が時間切れを起こすと、組へ SIGTERM と SIGKILL が送られて回収（`wait`）される | 失敗を通過や変更要求に倒すと落ちる。組へ送らずに戻ると落ちる |
 | 5. 割り込みでも回収する | 偽の Popen の待ちの中で例外（割り込みの代わり）が上がっても、組へ送って回収してから投げ直す | 割り込みで後始末を飛ばすと落ちる |
 | 決定 4. 1 回で決める | 1 つの Stop で判定器が 1 回だけ呼ばれる | 同じ Stop で 2 回打つと落ちる |
@@ -290,7 +295,9 @@ sequenceDiagram
 | --- | --- |
 | Bedrock・Vertex での `haiku` の別名 | この環境（2026-11-23、Claude Code 2.1.330）では `--model haiku` が解けた。別の提供元の環境で別名が解けないときは起動の失敗として文字列の判定へ戻る。リリース後テストで、利用者の環境の計測に出所 `model` が出ることで分かる |
 | 実際の会話での揺れの割合 | 実測は判定の例の組の 9 件（MEA6 で 54 回すべて期待どおり）だけで、実際の会話の本文は形がもっと多い。リリース後、計測の出所と変更要求の数を `ndf hooks stats` で数えて分かる |
-| 設定の `env` の接続の変数が hook の環境に入るか | 決定 11 は、設定ファイルの `env` で選んだ接続（`ANTHROPIC_BASE_URL` など）が Claude Code の環境に入り、hook がそれを受け継ぐことを前提にする。実装の PR で、設定の `env` だけで接続を選んだセッションの hook の環境を見て確かめる。入らなければ、設定ファイルの `env` に接続の変数がある場合も `endpoint_keys` に足して呼ばない |
+| 設定の `env` の接続の変数が hook の環境に入るか | 確かめるまでは、設定の `env` に接続や認証の変数があれば呼ばない（決定 11 の (b)）。実装の PR で、設定の `env` だけで接続を選んだセッションの hook の環境を見て確かめ、入ると分かれば `endpoint.env_prefixes` を空にする |
+| `CLAUDE_PROJECT_DIR` が親の読んだプロジェクトの設定の場所と同じか | 決定 11 は、hook へ渡る `CLAUDE_PROJECT_DIR` を親が設定を読んだプロジェクトの根とみなす。worktree やサブディレクトリから起動したセッションで、親が読んだ `.claude/settings*.json` の場所と一致するかを実装の PR で確かめる。食い違えば、一致を確かめられる形に替えるまで呼ばない |
+| macOS で呼べない | `/proc` が無いので決定 11 で呼ばない。macOS の利用者の割合と、計測の `skip:endpoint` の数でリリース後に分かる |
 | 認証の失敗のほかの文言 | MEA8 で見た 2 つの文言（ログインしていない・無効な API キー）のほかに、OAuth の期限切れなどの文言は確かめていない。外れた文言は `exit` になって休まない。リリース後、計測の `fallback:exit` の多い環境の標準エラーを見て `auth_markers` へ足す |
 | 質問の文へ例を足し続けることになるか | 決定 4 は通すべき報告の形を例として置く。形が増え続けるなら、言い回しの列と同じ形を足す作業に戻る。判定の例の組の件数の増え方で、次のバージョンで分かる |
 
@@ -332,5 +339,6 @@ sequenceDiagram
 | MEA6 | 質問の文の report の例に「承認を求める資料を用意したことや作業の結果を報告している」を足し、見逃しの 5 文・引用・別の場所の待ち・作業の報告・承認資料の報告の 9 例を 6 周ずつ判定 | **54 回すべて期待どおり**（外れ 0）。合計 0.0032 USD（続けて打つとプロンプトのキャッシュが効き、1 回あたり 0.00006 USD まで下がる） |
 | MEA7 | CLI の下限の確かめが打つ `claude --version` を新しいプロセスから 6 回 | 0.007〜0.009 秒 |
 | MEA8 | 空の設定ディレクトリで認証の変数を外した `claude -p --output-format json`、無効な API キーを渡した同じ起動 | どちらも終了コード 1・`is_error: true`。本文は「Not logged in · Please run /login」（`api_error_status` null）と「Invalid API key · Fix external API key」（401・`authentication_error`）。今の `call_claude` では `failure` の無い失敗になる |
+| MEA9 | Claude Code の Bash の中の python から `/proc/<pid>/stat` の親の番号をたどり `/proc/<pid>/cmdline` を読む（Linux） | 2 代上（間に `/bin/bash -c`）で `claude -p --output-format …` の起動引数が読めた。入れ子のセッションでは最初に当たる `claude` が hook を動かすセッションである（決定 11） |
 
 調べた量: 候補 4 件・取得の試み 3 回。

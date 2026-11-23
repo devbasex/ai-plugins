@@ -57,7 +57,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `judge_text` | `domains/hooks/reply_judge.py` | 新設 | `judge_text(text: str, code_lines: list[bool], max_chars: int) -> str` | コードブロックの行と空行を除いた本文を改行でつなぎ、`max_chars` を超えれば末尾の `max_chars` 字を返す |
-| `same_endpoint` | `domains/hooks/reply_judge.py` | 新設 | `same_endpoint(runtime: str, env: Mapping[str, str], cwd: str, read: Callable[[Path], str] = <ファイルの読み>) -> bool` | 送信先がセッション自身の Claude の API と同じと確かめられれば真（設計の決定 11）。ランタイムが `claude` で、セッションが読む設定ファイル（`$CLAUDE_CONFIG_DIR/settings.json`（無ければ `~/.claude/settings.json`）・`<cwd>/.claude/settings.json`・`<cwd>/.claude/settings.local.json`）のどれにも設定の `endpoint_keys` の最上位のキーが無いとき真。無いファイルは飛ばし、読めない・JSON でないファイルがあれば偽 |
+| `same_endpoint` | `domains/hooks/reply_judge.py` | 新設 | `same_endpoint(runtime: str, env: Mapping[str, str], pid: int, read: Callable[[Path], bytes] = <ファイルの読み>) -> bool` | 送信先がセッション自身の Claude の API と同じと確かめられれば真（設計の決定 11）。次をすべて満たすときだけ真、ほかは偽。(1) `runtime == "claude"`。(2) `pid`（hook のプロセス）から `/proc/<pid>/stat` の親の番号をたどり、`endpoint.ancestors` 代のうちに `/proc/<pid>/cmdline` が `endpoint.parent_argv` に当たる（引数の 1 つの basename か末尾が一致する）プロセスがあり、その引数に `endpoint.flags` のどれも無い。(3) `env` に `CLAUDE_PROJECT_DIR` がある（Stop の入力の `cwd` は使わない）。(4) 設定ファイル（`endpoint.managed` のパス・`$CLAUDE_CONFIG_DIR/settings.json`（無ければ `~/.claude/settings.json`）・`$CLAUDE_PROJECT_DIR/.claude/settings.json`・`$CLAUDE_PROJECT_DIR/.claude/settings.local.json`）のどれにも `endpoint.keys` の最上位のキーが無く、`env` のオブジェクトに名前が `endpoint.env_prefixes` で始まる変数が無い。無い設定ファイルは飛ばし、`/proc` や設定ファイルが読めない（`OSError`）・JSON でないときは偽 |
 | `ask` | `domains/hooks/reply_judge.py` | 新設 | `ask(text: str, seconds: float, env: Mapping[str, str], popen: Callable[..., subprocess.Popen] = subprocess.Popen, killpg: Callable[[int, int], None] = os.killpg) -> Judged` | 判定の子を新しいプロセスの組で起動し、標準入力に `{"text", "seconds"}` を渡し、`seconds` で待って回答を読む。どの終わり方でも組へ送って回収する |
 | `Judged` | `domains/hooks/reply_judge.py` | 新設 | `NamedTuple(kind: Optional[str], failure: Optional[str], ms: float, calls: int)` | 判定の結果。`kind` は `wait` / `report`、回答が得られなければ None と `failure` |
 | `resting` | `domains/hooks/reply_judge.py` | 新設 | `resting(state_dir: Path, now: float) -> bool` | 休みのマーカーを読み、起動の失敗から休む間（設定）が過ぎていなければ真。マーカーが無い・読めないときは偽 |
@@ -84,7 +84,7 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "seconds": 5, "max_chars": 6000, "rest_seconds": 600, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint_keys": ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"]}`（`rest_seconds` は起動が失敗した後に休む間（決定 10）、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint_keys` は接続を設定ファイルで選ぶキー（決定 11）） |
+| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "seconds": 5, "max_chars": 6000, "rest_seconds": 600, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint": {"ancestors": 8, "parent_argv": ["claude", "@anthropic-ai/claude-code/cli.js"], "flags": ["--settings", "--setting-sources"], "managed": ["/etc/claude-code/managed-settings.json"], "keys": ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"], "env_prefixes": ["ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CONFIG_DIR", "AWS_", "GOOGLE_", "CLOUD_ML_", "VERTEX_"]}}`（`rest_seconds` は起動が失敗した後に休む間（決定 10）、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint` は送信先が同じかの確かめに使う値（決定 11。`env_prefixes` は設定の `env` が hook の環境に入ると確かめるまでの安全側の決まりで、確かめが済めば空にする）） |
 | `hook.budget.stop` | 設定値 | `contracts/limits.json` | `p95_ms` 2500・`deadline` 7・`margin` 1.5・`timeout` 9（他のキーは今のまま） |
 | `CHILD_MODULE` | 定数 | `domains/hooks/reply_judge.py` | `"ndf.adapters.reply_judge"` |
 | 休みのマーカー | ファイル | `<状態の保存先>/hooks/judge-rest.json` | 無し（起動が失敗したときだけ `{"at": <失敗した時刻>, "failure": "<種類>"}` を書く。`metrics.prune_state` が消す対象と同じ保存先） |
@@ -95,7 +95,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `judge_text` | 質問の後に 9 行の報告が続く本文で、質問の行が返りに入る | ちょうど `max_chars` 字と 1 字多い本文。コードブロックの中の質問が返りに入らない | — |
 | `ask` | 偽の `popen`（実プロセスを起動しない。`communicate` が `{"kind": "wait", "calls": 1}` の 1 行と終了コード 0 を返す）で `kind="wait"` と `calls`。`popen` に渡った引数が `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]`・`start_new_session=True` で、環境に `MAX_THINKING_TOKENS=0` があり `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が無く `ANTHROPIC_BASE_URL` が残る。`communicate` に渡った `timeout` が `seconds` | 正常に終えた後も偽の `killpg` に組の番号と SIGKILL が渡る | 偽の `communicate` が `TimeoutExpired` を上げる → `timeout`、偽の `killpg` に SIGTERM、偽の `wait(timeout=0.2)` が `TimeoutExpired` なら続けて SIGKILL、最後に `wait()` が呼ばれる。偽の `communicate` が `KeyboardInterrupt` を上げる → 同じ順で送って回収し、例外を投げ直す。`popen` が `OSError` → `launch`。終了コード 1 → `exit`。形の違う出力 → `shape`。どれも実時間を待たない |
-| `same_endpoint` | ランタイム `claude` で設定ファイルにキーが無い → 真 | 設定ファイルが 1 つも無い → 真 | ランタイム `codex` → 偽。どれかのファイルに `apiKeyHelper` → 偽。JSON でない・読めない（偽の `read` が `OSError`）→ 偽 |
+| `same_endpoint`（偽の `read` で `/proc` と設定ファイルを差し替える。実の `/proc` もファイルも読まない） | ランタイム `claude`・親の引数が `claude -p …`（`--settings` 無し）・`CLAUDE_PROJECT_DIR` あり・設定ファイルにキーも接続の `env` も無い → 真 | 設定ファイルが 1 つも無い → 真。親が `ancestors` 代目にいる → 真、その 1 代上 → 偽。設定の `env` が接続に関わらない名前（`FOO`）だけ → 真 | ランタイム `codex` → 偽。親の引数に `--settings '{"apiKeyHelper":…}'` または `--settings /path/a.json` → 偽。`/proc` の読みが `OSError`（macOS の代わり）→ 偽。`CLAUDE_PROJECT_DIR` が無い → 偽。`cwd` を別の所（プロジェクトの根の下のサブディレクトリ・別の worktree）にしても `$CLAUDE_PROJECT_DIR/.claude/settings.local.json` の `apiKeyHelper` で偽（`cwd` の側の設定は読まれない）。管理者の設定・利用者の設定に `apiKeyHelper` → 偽。設定の `env` に `ANTHROPIC_BASE_URL`・`CLAUDE_CODE_USE_BEDROCK`・`AWS_PROFILE` → 偽。`env_prefixes` を空にした設定では `ANTHROPIC_BASE_URL` があっても真。JSON でない・読めない設定ファイル → 偽 |
 | `resting` / `mark_rest` | `launch`・`auth` を書いた直後は真、休む間を過ぎた時刻では偽 | 休む間のちょうどの時刻 | マーカーが無い・壊れたマーカー・書けない保存先で偽（例外を投げない）。`timeout`・`no_slot`・`exit` を渡すとマーカーを書かない |
 
 時刻はどれも引数（`now`）か偽の時計で渡し、実時間の経過と実プロセスの起動をテストの仕様にしない（tdd-cycle の「テストに書かないもの」）。
@@ -154,7 +154,7 @@ plugins/ndf/
 | `ctx.asked_this_turn` が真 | 文字列の判定で決める（`judge=skip:asked`） |
 | `ctx.background_tasks` が空でない | 文字列の判定で決める（`judge=skip:background`） |
 | `svc.counter.pushback_left()` が偽 | 文字列の判定で決める（`judge=skip:limit`）。ただし文字列の判定が `report` で `svc.counter.model_waited()` が真なら変更要求を返す（dispatch が上限で通し、待ち通知を送る。設計の決定 5） |
-| `reply_judge.same_endpoint(ctx.runtime, os.environ, ctx.cwd)` が偽（Codex のセッション・設定ファイルで接続を選ぶ・確かめられない） | 文字列の判定で決める（`judge=skip:endpoint`） |
+| `reply_judge.same_endpoint(ctx.runtime, os.environ, os.getpid())` が偽（Codex のセッション・起動の引数や設定ファイルで接続を選ぶ・確かめられない） | 文字列の判定で決める（`judge=skip:endpoint`） |
 | `reply_judge.resting(svc.state_dir, 今)` が真（前の起動の失敗から休む間のうち） | 文字列の判定で決める（`judge=skip:rest`） |
 | 上のどれでもなく、残りの秒（`svc.deadline − 余白 − 今` と設定の `seconds` の小さい方）が 0.5 秒を切る | 文字列の判定で決める（`judge=skip:time`） |
 | 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest` を呼んでから文字列の判定で決める（`judge=fallback:<failure>`） |
@@ -235,7 +235,7 @@ plugins/ndf/
 
 満たす決定: 決定 2、受け入れ条件 7・8
 
-- `contracts/limits.json`: 上の「内部のデータと定数」の 2 行。`hook.stop-wait.judge` の `seconds`（5）≤ `hook.budget.stop` の締め切り − 余白（7 − 1.5 = 5.5）。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint_keys` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
+- `contracts/limits.json`: 上の「内部のデータと定数」の 2 行。`hook.stop-wait.judge` の `seconds`（5）≤ `hook.budget.stop` の締め切り − 余白（7 − 1.5 = 5.5）。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
 - `contracts/hooks/guards.json`: `stop-wait` の `limits` を `["hook.stop-wait.judge"]` にし、`summary` に軽いモデルの判定と戻り方を足す
 - `hooks/claude.json`・`hooks/codex.json`: `ndf hooks render` で作り直す（Stop の timeout 6 → 9）。手で書かない
 - `ndf hooks judge-cases [--cases <パス>] [--rounds <周の数>]`: 既定のパスは `contracts/hooks/reply-judge-cases.json`、既定の周の数は設定の `rounds`（3）。各例を周の数だけ打ち、1 周でも外れた例を結果 JSON の `items` に `id`・`expect`・外れた周の `got` で出す。`metrics` に件数・外れた例の件数・打った回数・秒の最小と最大。外れがあれば `status` は `stopped`（終了コード 1）
