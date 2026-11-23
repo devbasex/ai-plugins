@@ -153,3 +153,31 @@ def test_remember_rebuilds_a_memo_entry_that_is_not_a_table(tmp_path):
         assert c.take("k", "A") is None
         c.remember("k", "A", {"tokens": 1}, 16)
         assert c.take("k", "A")["tokens"] == 1
+
+
+def test_pushback_left_is_true_until_the_limit_and_does_not_count(tmp_path):
+    with Counter.open("l-1", tmp_path) as c:
+        assert c.pushback_left() and c.pushback_left() and c.data["pushbacks"] == 0
+        assert c.allow_pushback() and c.pushback_left()
+        assert c.allow_pushback() and not c.pushback_left()  # 上限ちょうど
+    assert Counter.unusable().pushback_left() is False
+
+
+def test_model_wait_is_kept_for_the_current_input(tmp_path):
+    with Counter.open("l-2", tmp_path) as c:
+        assert c.model_waited() is False
+        c.mark_model_wait()
+        assert c.model_waited() is True
+        c.reset("relay")  # 中継が送った入力は数え直さない
+        assert c.model_waited() is True
+    with Counter.open("l-2", tmp_path) as c:
+        assert c.usable and c.model_waited() is True
+        c.reset("human")
+    with Counter.open("l-2", tmp_path) as c:
+        assert c.model_waited() is False
+
+
+def test_model_wait_without_a_usable_counter(tmp_path):
+    c = Counter.unusable()
+    c.mark_model_wait()
+    assert c.model_waited() is False and "model_wait" not in c.data
