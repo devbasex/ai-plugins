@@ -5,8 +5,9 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
 
 - `judge_text`: コードブロックの行と空行を除いた本文の末尾（設定の字数）を、質問へ渡す文にする（決定 7）
 - `parent_launch`: 送信先の確かめの hook の側。起動の形と親の Claude Code の起動引数を読む（決定 11）
-- `ask`: 判定の子を起動して待ち、どの終わり方でも組ごと止めて回収する（決定 3・6）
-- `resting` / `mark_rest`: 起動が続けて失敗する環境で、休む間だけ子を起動しないためのファイル（決定 10）
+- `ask`: 判定の子を起動して待ち、どの終わり方でも組ごと止めてから回収する（決定 3・6）
+- `resting` / `mark_rest`: 起動が続けて失敗する環境で、休む間だけ子を起動しないためのファイル（決定 10）。
+  送信先の不一致（`endpoint`）は送信先の確かめの対象（`endpoint_scope`）ごとに分けて休む
 
 設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `_judge` が読む。
 """
@@ -14,8 +15,11 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
+import select
+import selectors
 import signal
 import subprocess
 import sys
@@ -31,6 +35,10 @@ CHILD_MODULE = "ndf.adapters.reply_judge"
 REST_NAME = "judge-rest.json"
 # 組へ SIGTERM を送った後、SIGKILL までに待つ秒
 GROUP_GRACE = 0.2
+# 子の標準出力を 1 回に読む上限のバイト数
+READ_CHUNK = 65536
+# 子の標準入力へ 1 回に書くバイト数（書ける状態と分かった後なら止まらない上限）
+WRITE_CHUNK = int(getattr(select, "PIPE_BUF", 512))
 # 子が返してよい判定
 KINDS = ("wait", "report")
 
@@ -56,11 +64,27 @@ def _judge(key: str) -> Any:
     return tables.policy_value("hook.stop-wait.judge", key)
 
 
+def _markdown_lines(text: str) -> list[str]:
+    """`ndf.adapters.markdown.code_lines` と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n` だけ。末尾の改行の後は行にしない）。
+
+    `str.splitlines` は U+2028 なども改行に数えるので使わない（行がずれるとコードの行を本文と取り違える）。
+    """
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not normalized:
+        return []
+    lines = normalized.split("\n")
+    return lines[:-1] if normalized.endswith("\n") else lines
+
+
 def judge_text(text: str, code_lines: list[bool], max_chars: int) -> str:
-    """コードブロックの行と空行を除いた本文。`max_chars` を超えれば末尾の `max_chars` 字（決定 7）。"""
-    lines = text.splitlines()
-    flags = code_lines if len(code_lines) == len(lines) else [False] * len(lines)
-    prose = "\n".join(line for line, code in zip(lines, flags) if not code and line.strip())
+    """コードブロックの行と空行を除いた本文。`max_chars` を超えれば末尾の `max_chars` 字（決定 7）。
+
+    `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
+    """
+    lines = _markdown_lines(text)
+    if len(code_lines) != len(lines):
+        return ""
+    prose = "\n".join(line for line, code in zip(lines, code_lines) if not code and line.strip())
     return prose if len(prose) <= max_chars else prose[-max_chars:]
 
 
@@ -95,17 +119,26 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
-def _is_claude(exe: str, cmdline: list[str], endpoint: Mapping[str, Any]) -> bool:
-    """Claude Code の実プロセスか。実行ファイルと起動の形だけで決め、引数の中身では決めない（決定 11）。"""
+def _is_claude(exe: str, cmdline: list[str], endpoint: Mapping[str, Any]) -> Optional[bool]:
+    """Claude Code の実プロセスか。実行ファイルと起動の形だけで決め、引数の中身では決めない（決定 11）。
+
+    node の 2 つ目の引数が相対パスなら None（確かめられない）。起動した時の作業ディレクトリは後から移せるので、
+    今の作業ディレクトリでは解決しない。
+    """
     if _matches(exe, endpoint["cli_exe"]):
         return True
     if not os.path.basename(exe).startswith("node") or len(cmdline) < 2:
         return False
+    if not os.path.isabs(cmdline[1]):
+        return None
     return _matches(os.path.realpath(cmdline[1]), endpoint["cli_script"])
 
 
 def _claude_argv(pid: int, endpoint: Mapping[str, Any], read: Callable[..., bytes], readlink: Callable[..., str]) -> Optional[list[str]]:
-    """hook のプロセスの親からたどり、最も近い Claude Code の起動引数を返す。見つからなければ None。"""
+    """hook のプロセスの親からたどり、最も近い Claude Code の起動引数を返す。
+
+    見つからない・Claude Code か確かめられない親に当たった（そこより外側の Claude Code を採らない）ときは None。
+    """
     current = pid
     for _ in range(int(endpoint["ancestors"])):
         try:
@@ -113,6 +146,8 @@ def _claude_argv(pid: int, endpoint: Mapping[str, Any], read: Callable[..., byte
             cmdline = _cmdline(read, current)
             found = _is_claude(readlink(_proc_file(current, "exe")), cmdline, endpoint)
         except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
+            return None
+        if found is None:
             return None
         if found:
             return cmdline
@@ -166,23 +201,84 @@ def _signal_group(pid: int, sig: int, killpg: Callable[[int, int], None]) -> Non
         pass
 
 
-def _stop_group(proc: Any, killpg: Callable[[int, int], None]) -> None:
-    """組へ SIGTERM を送り、`GROUP_GRACE` 秒で終わらなければ SIGKILL を送って回収する。"""
-    _signal_group(proc.pid, signal.SIGTERM, killpg)
+def _pause(seconds: float) -> None:
+    """SIGTERM の後の猶予を待つ（テストは差し替えて実時間を待たない）。"""
+    time.sleep(seconds)
+
+
+def _stop_group(proc: Any, killpg: Callable[[int, int], None], gentle: bool) -> None:
+    """組を止めてから組のリーダー（判定の子）を回収する。
+
+    リーダーを回収するまでは組の番号が再利用されないので、組への送信は必ず回収の前に済ませる。リーダーが先に
+    終わっても組に `claude` が残りうるため、`gentle` なら SIGTERM の後に `GROUP_GRACE` 秒おき、どの経路でも
+    最後に組へ SIGKILL を送ってから回収する。
+    """
     try:
-        proc.wait(timeout=GROUP_GRACE)
-    except subprocess.TimeoutExpired:
+        if gentle:
+            _signal_group(proc.pid, signal.SIGTERM, killpg)
+            _pause(GROUP_GRACE)
         _signal_group(proc.pid, signal.SIGKILL, killpg)
+    finally:
         proc.wait()
 
 
+def _write_some(selector: selectors.BaseSelector, proc: Any, fd: int, pending: memoryview) -> memoryview:
+    """標準入力へ書ける分を書き、残りを返す。書き終えたら待ちから外して閉じる。子が読まずに終われば残りを捨てる。"""
+    try:
+        rest = pending[os.write(fd, pending[:WRITE_CHUNK]) :]
+    except BrokenPipeError:
+        # 外部コマンド: 子が読まずに終わった。回答の無い終わりとして読む
+        rest = pending[len(pending) :]
+    if not rest:
+        selector.unregister(proc.stdin)
+        proc.stdin.close()
+    return rest
+
+
+def _step(
+    selector: selectors.BaseSelector, proc: Any, pending: memoryview, chunks: list[bytes], remaining: float
+) -> tuple[memoryview, bool]:
+    """1 回の待ちで用意できた分を書いて読む。書き残しと、標準出力が終わりまで来たかを返す。"""
+    # 子は標準入力を読み終えてから回答を書くので、両方が同時に用意できたら書く方を先にする
+    for key, _ in sorted(selector.select(remaining), key=lambda event: event[0].fileobj is proc.stdout):
+        if key.fileobj is proc.stdin:
+            pending = _write_some(selector, proc, key.fd, pending)
+        elif data := os.read(key.fd, READ_CHUNK):
+            chunks.append(data)
+        else:
+            return pending, True
+    return pending, False
+
+
+def _exchange(proc: Any, payload: bytes, deadline: float) -> Optional[bytes]:
+    """子の標準入力へ `payload` を書いて閉じ、標準出力を終わりまで読む。`deadline` までに終わらなければ None。
+
+    `communicate` はリーダーを回収してしまうので使わない（回収の前に組を止めるため、`_stop_group`）。
+    """
+    pending = memoryview(payload)
+    chunks: list[bytes] = []
+    with selectors.DefaultSelector() as selector:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        if pending:
+            selector.register(proc.stdin, selectors.EVENT_WRITE)
+        else:
+            proc.stdin.close()
+        while (remaining := deadline - time.monotonic()) > 0:
+            pending, done = _step(selector, proc, pending, chunks, remaining)
+            if done:
+                return b"".join(chunks)
+    return None
+
+
 def _judged(out: str, code: int, ms: float) -> Judged:
-    """子の 1 行の JSON を判定の結果にする。形が違えば `shape`。"""
-    if code != 0:
-        return Judged(None, "exit", ms, 0)
+    """子の 1 行の JSON を判定の結果にする。
+
+    回答を読めたら終了コードは見ない（読んだ後に組へ送る SIGKILL が、終わりかけの子の終了コードになりうる）。
+    読めなければ、終了コードが 0 以外で `exit`、0 で `shape`。
+    """
     answer = tables.json_object(out)
     if answer is None:
-        return Judged(None, "shape", ms, 0)
+        return Judged(None, "exit" if code != 0 else "shape", ms, 0)
     raw_calls = answer.get("calls")
     calls = raw_calls if isinstance(raw_calls, int) else 0
     failure = answer.get("failure")
@@ -192,18 +288,28 @@ def _judged(out: str, code: int, ms: float) -> Judged:
     return Judged(kind, None, ms, calls) if kind in KINDS else Judged(None, "shape", ms, calls)
 
 
-def _awaited(proc: Any, payload: str, seconds: float, started: float, killpg: Callable[[int, int], None]) -> Judged:
-    """子の回答を待つ。どの終わり方でも組を止めて回収し、割り込みは投げ直す。"""
+def _awaited(
+    proc: Any,
+    payload: str,
+    seconds: float,
+    started: float,
+    killpg: Callable[[int, int], None],
+) -> Judged:
+    """子の回答を待つ。どの終わり方でも組を止めてから回収し、割り込みは投げ直す。"""
     try:
-        out, _ = proc.communicate(payload, timeout=seconds)
-    except subprocess.TimeoutExpired:
-        _stop_group(proc, killpg)
-        return Judged(None, "timeout", _ms(started), 0)
-    except BaseException:
-        _stop_group(proc, killpg)
-        raise
-    _signal_group(proc.pid, signal.SIGKILL, killpg)
-    return _judged(out, proc.returncode, _ms(started))
+        try:
+            out = _exchange(proc, payload.encode("utf-8"), started + seconds)
+        except BaseException:
+            _stop_group(proc, killpg, gentle=True)
+            raise
+        if out is None:
+            _stop_group(proc, killpg, gentle=True)
+            return Judged(None, "timeout", _ms(started), 0)
+        _stop_group(proc, killpg, gentle=False)
+    finally:
+        for stream in (proc.stdin, proc.stdout):
+            stream.close()
+    return _judged(out.decode("utf-8", "replace"), proc.returncode, _ms(started))
 
 
 def ask(
@@ -217,7 +323,7 @@ def ask(
     """判定の子を新しいプロセスの組で起動し、`seconds` で待って回答を読む（決定 3）。
 
     子は `claude` を同じ組で起動するので、組への送信が `claude` まで届く。時間切れ・割り込み・正常な終わりの
-    どれでも組を止めて回収する。回答が得られなければ `kind` が None の `Judged` を返す（決定 6）。
+    どれでも組を止めてから回収する。回答が得られなければ `kind` が None の `Judged` を返す（決定 6）。
     """
     started = time.monotonic()
     payload = json.dumps(
@@ -233,7 +339,6 @@ def ask(
             start_new_session=True,
             env=_child_env(env),
             cwd=str(tables.PLUGIN_ROOT),
-            text=True,
         )
     except OSError:
         # 外部コマンド: 子を起動できない環境では文字列の判定へ戻す（決定 6）
@@ -246,29 +351,71 @@ def rest_path(state_dir: Path) -> Path:
     return tables.hooks_dir(state_dir) / REST_NAME
 
 
-def resting(state_dir: Path, now: float) -> bool:
-    """起動の失敗から休む間が過ぎていなければ真。マーカーが無い・読めないときは偽（決定 10）。"""
+def endpoint_scope(env: Mapping[str, str]) -> str:
+    """送信先の確かめの対象の名前。プロジェクトの根と、名前が `endpoint.env_names` に前方一致する環境変数の値から作る。
+
+    値に秘密（API キーなど）を含みうるので、ファイルへは SHA-256 の先頭 16 桁だけを書く。休みのマーカーは
+    `parent_launch` より前に読むので、親の起動引数は対象に入れない。
+    """
+    prefixes = tuple(_judge("endpoint")["env_names"])
+    picked = sorted((name, value) for name, value in env.items() if name.startswith(prefixes))
+    source = json.dumps({"project_dir": env.get("CLAUDE_PROJECT_DIR"), "env": picked}, ensure_ascii=False)
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+
+
+def _rest_marker(state_dir: Path) -> Optional[dict[str, Any]]:
+    """休みのマーカーの中身。無い・読めない・形が違うときは None。"""
     try:
-        marker = tables.json_object(rest_path(state_dir).read_text(encoding="utf-8"))
+        text = rest_path(state_dir).read_text(encoding="utf-8")
     except OSError:  # noqa: NDF401 ファイル: マーカーが無い・読めないときは休まない
-        return False
+        return None
+    return tables.json_object(text)
+
+
+def _within(at: Any, now: float) -> bool:
+    return isinstance(at, (int, float)) and now - float(at) < float(_judge("rest_seconds"))
+
+
+def resting(state_dir: Path, now: float, env: Mapping[str, str]) -> bool:
+    """起動の失敗、またはこの対象（`endpoint_scope(env)`）の送信先の不一致から休む間が過ぎていなければ真。
+
+    マーカーが無い・読めないときは偽（決定 10）。
+    """
+    marker = _rest_marker(state_dir)
     if marker is None:
         return False
-    at = marker.get("at")
-    if not isinstance(at, (int, float)):
-        return False
-    return now - float(at) < float(_judge("rest_seconds"))
+    launch = marker.get("launch")
+    if isinstance(launch, dict) and _within(launch.get("at"), now):
+        return True
+    endpoints = marker.get("endpoint")
+    return isinstance(endpoints, dict) and _within(endpoints.get(endpoint_scope(env)), now)
 
 
-def mark_rest(state_dir: Path, failure: str, now: float) -> None:
-    """起動の失敗と送信先の不一致のときだけ休みのマーカーを書く。書けなくても例外を投げない（決定 10）。"""
-    # 起動の失敗（launch・refused・usage_limit・auth）と送信先の不一致（endpoint）。時間切れとスロットの空き待ちは書かない
-    rest_failures = ("launch", "refused", "usage_limit", "auth", "endpoint")
-    if failure not in rest_failures:
+def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str]) -> None:
+    """起動の失敗と送信先の不一致のときだけ休みのマーカーを書く。書けなくても例外を投げない（決定 10）。
+
+    起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む。送信先の不一致（`endpoint`）は
+    `endpoint_scope(env)` の対象だけが休む。休む間を過ぎた対象は書くときに外す。時間切れとスロットの空き待ちは書かない。
+    """
+    if failure not in ("launch", "refused", "usage_limit", "auth", "endpoint"):
         return
+    marker = _rest_marker(state_dir)
+    if marker is None:
+        marker = {}
+    raw = marker.get("endpoint")
+    endpoints = {scope: at for scope, at in (raw.items() if isinstance(raw, dict) else ()) if _within(at, now)}
+    launch = marker.get("launch")
+    kept = launch if isinstance(launch, dict) and _within(launch.get("at"), now) else None
+    if failure == "endpoint":
+        endpoints[endpoint_scope(env)] = now
+    else:
+        kept = {"at": now, "failure": failure}
+    body: dict[str, Any] = {"endpoint": endpoints}
+    if kept is not None:
+        body["launch"] = kept
     path = rest_path(state_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"at": now, "failure": failure}), encoding="utf-8")
+        path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     except OSError:  # noqa: S110 ファイル: マーカーを書けなくても判定は変えない
         pass
