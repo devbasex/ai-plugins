@@ -452,17 +452,23 @@ def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
     """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
-    （`route.derived`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から
-    組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
+    （`route.derived`）→ 課題の題と本文（`_fill_from_issue`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の
+    経路と共有）の順に決め、最後に工程から組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
+
+    課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりに写しを消すので、先に読むと
+    手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
     （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ設定（`_project`）で、CI に寄せるかの判定と
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    names, values, untrusted = _fill_from_sources(t, run, work_dir, cwd, project=project, local_tests=local_tests)
+    names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
     values = route.derived(t, values, cwd)
-    values, launched = route.launched(t, values)
+    route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
+    _require_before_issue(t.name, names, values)
+    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
+    values, launched = route.launched(t, {**values, **issued})
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
@@ -472,16 +478,26 @@ def template_values(
 
 
 def _fill_from_sources(
-    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+    t: route.Template, run: StageRun, *, project: Mapping[str, Any], local_tests: bool
 ) -> tuple[tuple[str, ...], dict[str, route.Value], dict[str, str]]:
-    """工程の入力と出所の表（`FILL_SOURCES`）から埋めた値。プランが使う差し込みの名前・その値・出所の上書き
-    （書き手を信用しない課題の差し込み → `FROM_UNTRUSTED_ISSUE`）を返す。"""
+    """工程の入力と、出所の表（`FILL_SOURCES`）のうち課題を除く出所から埋めた値。プランが使う差し込みの名前・その値・
+    入力に無く出所の表から求める差し込み → 出所（課題の出所は呼び手が `_fill_from_issue` で後から埋める）を返す。"""
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
-    issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
-    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
-    return names, values, untrusted
+    values = {**values, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    return names, values, wanted
+
+
+# 課題を読んだ後に決まりうる差し込み（課題の出所と、`route.launched` が補う `review`・`acceptance`）
+AFTER_ISSUE = frozenset({*(n for n, s in FILL_SOURCES.items() if s == FROM_ISSUE), "review", *route.LAUNCH_SOURCES})
+
+
+def _require_before_issue(name: str, names: Sequence[str], values: Mapping[str, route.Value]) -> None:
+    """課題を読む前に、課題を読んでも決まらない差し込み（`AFTER_ISSUE` の外）が欠けていれば `TemplateValuesMissing`。"""
+    missing = {n: s for n, s in _missing(names, values, FILL_SOURCES).items() if n not in AFTER_ISSUE}
+    if missing:
+        raise TemplateValuesMissing(name, missing)
 
 
 # つなぎ目のレビューの起点にする文脈のキー（#3879 構成要素 5）

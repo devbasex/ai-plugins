@@ -109,3 +109,16 @@ def test_a_valid_acceptance_of_several_issues_reaches_the_missing_values_check(t
         _values(tmp_path, _impl_run(repo, [3, 4], acceptance=["--issue", "3", "--issue", "4"]), repo)
     assert set(got.value.missing) == {"title", "body_file"}
     assert got.value.missing["title"] == invoke.FROM_ISSUE
+
+
+def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled):
+    # 課題に依存しない差し込み（設定の required）が欠ければ、課題の題・本文と書き手の権限を GitHub から読む前に止まる。
+    # 試行の始まりに写しを消すので、読んでから止まると打ち直すたびに読み直す（PR 4289 の指摘）
+    repo = _sprint_repo(tmp_path)
+    work = tmp_path / "w"
+    work.mkdir()
+    project = {"test": PROJECT["test"]}
+    with pytest.raises(invoke.TemplateValuesMissing) as got:
+        invoke.template_values(route.choose("implement"), _impl_run(repo, [3092]), work, repo, project=project, local_tests=True)
+    assert got.value.missing == {"required": invoke.FROM_PROJECT}
+    assert filled == []
