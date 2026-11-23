@@ -38,7 +38,7 @@
 - **対象ファイル:** `plugins/ndf/tests/progress/test_lane_machine.py`
 - **変更内容:** 偽の錠を足す。偽の錠は持ち主がいるかを持ち、持ち主がいる間に入ろうとすると `machine.LockBusy` を上げる（待たない）。入った時刻・出た時刻の代わりに、出入りを呼び出しの記録へ `lock-in`・`lock-out` として積む。`monkeypatch.setattr(machine, "admit_lock", <偽>)` で差し替える。
   - **共有のラッパーの一覧:** テストの中に辞書を 1 つ持ち（名前 → 行。最初は動いている `o-a` の 1 本）、`listed` の偽はこの辞書の写しを返す。`go` の偽は記録へ `go` を積み、**起動したラッパー（`w-a` など）を動いている行として辞書へ足してから、足した後の本数が上限 3 以下であることを確かめ**（起動前の本数では確かめない。3 本の状態で起動を許す誤りは足した後の 4 本で落ちる）、`{"ok": True}` を返す。A の `go` だけは、この確かめの後に初回の B を打つ。これで B の打ち直しと C は、A・B を足した後の一覧を読む
-  - **実処理へ委ねる薄いラッパー:** `machine.count`・`machine.over_cap`・`machine.index_plan` を、記録へ `count`・`over_cap`・`index` を積んでから元の関数を呼んで返す関数に差し替える（`monkeypatch.setattr` の前に元の関数を変数へ取っておく）。記録専用の偽にはしない。数え上げと上限の判定は本物が行い、索引は本物が保存先（`identity.load().state_dir` の下。既存テストと同じ分離された場所）へ書く
+  - **実処理へ委ねる薄いラッパー:** `machine.count`・`machine.over_cap`・`machine.index_plan` を、記録へ `count`・`over_cap`・`index` を積んでから元の関数を呼ぶ関数に差し替える。元の関数は `monkeypatch.setattr` の前に変数へ取っておく。記録専用の偽にはしない。数え上げと上限の判定は本物が行い、索引は本物が保存先（`identity.load().state_dir` の下。既存テストと同じ分離された場所）へ書く
   - 上限 3（`named_cap.write`）・動いている `o-a` 1 本の状態で次を順に打つ
   1. 計画 A（`plan:w-a`）の起動の許可を打つ。A の `go` の中（A が排他を持つ間）で、計画 B（`plan:w-b`）の起動の許可を打つ
   2. B の結果が `reason: lock` の待ちで、B の `listed`・`count`・`over_cap`・`index`・`go` が 1 度も呼ばれていないことを確かめる
@@ -57,7 +57,7 @@
   - `time.sleep` を、呼ばれたら失敗する偽に差し替えておく（待たないことを確かめる）
   - **索引の計画を読む処理も差し替える。** A を索引に書いた後、B の打ち直しと C の `machine_plans` は索引の計画を `machine.read_lanes` で読みに行き、その中の `command.store_root_of` が `git rev-parse` を子のプロセスで打つ。そこで `machine.read_lanes` を、`skip` に入った計画は None を返し、それ以外はレーンの無い読める `PlanLanes` を返す偽にする（本数は共有の一覧のラッパーで数える）。あわせて `subprocess.Popen` を呼ばれたら必ず失敗する偽にし、差し替えの漏れで子のプロセスが起動すれば落ちるようにする
 - **満たす受け入れ条件:** 1（期待する結果の 1）
-- **進め方:** テストを書いて通す。**このテストが退行を捕まえることを、プロダクションのコードを 1 度だけ壊して確かめる。** 壊し方は、**排他を 2 つに割り、数え上げと上限の判定だけをその間（排他の外）へ出す**。1 つ目の `with machine.admit_lock(...)` の中に `cap()`・`listed()`・`machine_plans` を残し、それを抜けた後で `count`・`over_cap` を打ち、収まれば 2 つ目の `with machine.admit_lock(...)` の中で `index_plan`・`go` を打つ。`go` が排他の中に残るので、A の `go` の中の初回の B は排他を取れず、手順 2 と手順 4 の初回の B の確かめは通ったままになる。落ちるのが**手順 5 の記録の確かめ**（記録が `["lock-in", "listed", "lock-out", "count", "over_cap", "lock-in", "index", "go", "lock-out"]` になる）であることを、pytest の出力の落ちた `assert` の行で個別に確かめる。別の確かめで落ちた場合は、この退行の確かめとして採らない。見てから、コードを元へ戻す（戻した状態をコミットする）。一覧の取得の位置を変えずに数え上げと判定だけを外へ出す退行を、手順 5 が捕まえることの確かめである。確かめた手順と出力は Pull Request の本文へ書く
+- **進め方:** テストを書いて通す。**このテストが退行を捕まえることを、プロダクションのコードを 1 度だけ壊して確かめる。** 壊し方は、**排他を 2 つに割り、数え上げと上限の判定だけをその間（排他の外）へ出す**。1 つ目の `with machine.admit_lock(...)` の中に `cap()`・`listed()`・`machine_plans` を残す。それを抜けた後で `count`・`over_cap` を打ち、収まれば 2 つ目の `with machine.admit_lock(...)` の中で `index_plan`・`go` を打つ。`go` が排他の中に残るので、A の `go` の中の初回の B は排他を取れず、手順 2 と手順 4 の初回の B の確かめは通ったままになる。このとき記録は `["lock-in", "listed", "lock-out", "count", "over_cap", "lock-in", "index", "go", "lock-out"]` になる。落ちるのが**手順 5 の記録の確かめ**であることを、pytest の出力の落ちた `assert` の行で個別に確かめる。別の確かめで落ちた場合は、この退行の確かめとして採らない。見てから、コードを元へ戻す（戻した状態をコミットする）。一覧の取得の位置を変えずに数え上げと判定だけを外へ出す退行を、手順 5 が捕まえることの確かめである。確かめた手順と出力は Pull Request の本文へ書く
 
 ### Task 2: 排他を取れないとき数えずに lock の待ちを返すことを確かめる
 
@@ -70,7 +70,7 @@
 
 - **対象ファイル:** `plugins/ndf/tests/progress/test_plan.py`
 - **変更内容:** 79b02ac21 で消えた `test_cli_has_no_limits_subcommand_and_no_plans_option` と同じ 2 つの引数の並びで、パラメータ化したテストを足す。受け入れ条件 1 は子のプロセスを起動しないことを求めるので、**`git init` を打つ既存の `repo` の fixture は使わず**、Git の子のプロセスを打たない fixture をこのファイルに足す。CLI は `plan_cli.main` で同じプロセスから呼ぶ。`start` の切り離しの起動は既存の `detached` の fixture が偽にする
-  - **Git を呼ばない fixture:** `tmp_path` の下に作業ディレクトリを作って `monkeypatch.chdir` で移る（`git init` はしない）。`start`・`status` が Git を呼ぶのは、保存先を求める `command.store_root_of`（`durable.store_root` の `git rev-parse`）と、リポジトリの識別を求める `command.repo_id`（`Git(cwd).remote_url()`）の 2 か所なので、`command.store_root_of` を `tmp_path` の下の固定の保存先を返す偽に、`command.repo_id` を固定の識別の文字列を返す偽に差し替える。後片付けは、偽が返すのと同じ保存先のパスを fixture が変数に持ち、`durable.release_store(<そのパス>)` で放す（`git rev-parse` を打たない）。`plan/run.py` の `record_dir` も Git を呼ぶが、呼び手は `detach` だけで、`detached` が偽にするので通らない
+  - **Git を呼ばない fixture:** `tmp_path` の下に作業ディレクトリを作って `monkeypatch.chdir` で移る（`git init` はしない）。`start`・`status` が Git を呼ぶのは 2 か所である。保存先を求める `command.store_root_of`（`durable.store_root` の `git rev-parse`）と、リポジトリの識別を求める `command.repo_id`（`Git(cwd).remote_url()`）である。前者を `tmp_path` の下の固定の保存先を返す偽に、後者を固定の識別の文字列を返す偽に差し替える。後片付けは、偽が返すのと同じ保存先のパスを fixture が変数に持ち、`durable.release_store(<そのパス>)` で放す（`git rev-parse` を打たない）。`plan/run.py` の `record_dir` も Git を呼ぶが、呼び手は `detach` だけで、`detached` が偽にするので通らない
   - `plan_run.probes` を、ラッパーの一覧が空・スプリントの結果が None の `liveness.Probes` を返す偽にする（`ndf relay ls` の子のプロセスを打たせない）
   - `subprocess.Popen` を、**呼ばれたら必ず失敗する偽**にする（`git` も通さない）。`subprocess.run` は中で `Popen` を使うので、上の 2 つの差し替えに漏れがあって Git が呼ばれても、ここで落ちて分かる
   - `time.sleep` を、呼ばれたら失敗する偽にする
