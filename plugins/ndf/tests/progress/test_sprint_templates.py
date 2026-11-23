@@ -181,7 +181,7 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> di
     `ndf worker run` の結果を組む関数（必須の名前は作業の定義の outputs）→ ステップの結果 → 状態の保存先の記録 →
     遷移の判断 → プランの結果の順につなぐ（子のプロセスも耐久ワークフローも起動しない）。
     """
-    # HEAD は回のキーに入るだけで、出力の伝搬と止まった理由に関わらない。git rev-parse を打たずに決まった値を返す
+    # HEAD は回のキーに入るだけで、出力の伝搬と停止理由に関わらない。git rev-parse を打たずに決まった値を返す
     monkeypatch.setattr(runner, "_head", lambda plan: "0" * 40)
     inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
