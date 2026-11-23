@@ -38,6 +38,8 @@ JUDGE = {
             "ANTHROPIC_",
             "CLAUDE_CODE_USE_",
             "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_SCOPES",
             "AWS_",
             "GOOGLE_",
             "CLOUD_ML_",
@@ -288,6 +290,19 @@ def test_endpoint_refusal_with_the_real_resolver_names_a_key_of_the_user_setting
     settings = isolated.home / ".claude" / "settings.json"
     settings.write_text(json.dumps({"awsCredentialExport": "echo x"}), encoding="utf-8")
     assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == "awsCredentialExport"
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"])
+def test_endpoint_refusal_with_the_real_resolver_names_an_oauth_variable_of_the_user_settings(isolated, name):
+    settings = isolated.home / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"env": {name: "x"}}), encoding="utf-8")
+    assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == name
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"])
+def test_endpoint_refusal_with_the_real_resolver_names_an_oauth_variable_of_the_managed_settings(isolated, name):
+    account_dir.MANAGED_FILES[0].write_text(json.dumps({"env": {name: "x"}}), encoding="utf-8")
+    assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == name
 
 
 # ---------------------------------------------------------------- main（子のエントリポイント）
