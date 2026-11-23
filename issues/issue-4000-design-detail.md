@@ -221,8 +221,8 @@ plugins/ndf/
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
 | `Counter.mark_model_wait` | `counter.py` | 新設 | `mark_model_wait(self) -> None` | 今の入力の記録に `model_wait: true` を置く（入力が変わると記録ごと初期化される）。`usable` が偽なら何もしない |
 | `Counter.model_waited` | `counter.py` | 新設 | `model_waited(self) -> bool` | 今の入力の記録の `model_wait`。無ければ偽 |
-| `GuardServices` | `dispatch.py` | 変更 | 欄 `deadline: float`（`time.monotonic()` の基準の締め切りの絶対時刻。余白を引かない）を足し、`params` を既定が空の最後の欄にする | guard が残りの秒を求める。呼び手は `params` 無しで作り、`run` が guard ごとに表の行の値を入れる |
-| `run` | `dispatch.py` | 変更 | 引数 `counter`・`state_dir` を締め切りと合わせて 1 つの `svc: GuardServices` にまとめる（`clock` の前）。`run(ctx, specs, budget, svc, clock)` | 受け取った `svc` に guard ごとの `params` を入れた写しを渡す（引数の数の上限 6 を超えないため、締め切りを引数で足さずに `svc` へまとめる）。今の guard を打ち切る判定（`clock() - start > budget.usable`）は変えない |
+| `GuardServices` | `dispatch.py` | 変更 | 欄 `deadline: float`（`time.monotonic()` の基準の締め切りの絶対時刻。余白を引かない）を足し、その後に `params`（既定が空）と、最後の欄 `decided: bool = False`（表の前の guard が変更要求か拒否を既に返したか）を置く | guard が残りの秒を求める。`stop-wait` は `decided` が真ならモデルを呼ばない（`judge=skip:decided`）。呼び手は `params` と `decided` 無しで作り、`run` が guard ごとに両方を入れる |
+| `run` | `dispatch.py` | 変更 | 引数 `counter`・`state_dir` を締め切りと合わせて 1 つの `svc: GuardServices` にまとめる（`clock` の前）。`run(ctx, specs, budget, svc, clock)` | 受け取った `svc` に guard ごとの `params` と `decided`（その guard より前に呼んだ guard の判定に、案内へ下げた後の種類で `deny` か `pushback` が 1 つでもあれば真）を入れた写しを渡す（引数の数の上限 6 を超えないため、締め切りを引数で足さずに `svc` へまとめる）。今の guard を打ち切る判定（`clock() - start > budget.usable`）は変えない |
 | `_guards` | `main.py` | 変更（中身だけ） | 変えない | SIGALRM に使う `run.started + found.deadline` を `GuardServices` の `deadline` に入れて `dispatch.run` へ渡す（SIGALRM と guard が同じ起点の時刻を使う） |
 
 - `asked_since_prompt` の境: tool_result だけを持つ `user` の行（Tool の結果）と、`isMeta` が真の `user` の行（Claude Code が書くメタの行。`context_records._user_text` と同じ条件）は利用者の入力に数えない。末尾に利用者の入力が無ければ、読めた範囲で探す
