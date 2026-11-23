@@ -78,7 +78,7 @@ flowchart LR
 
 `documentation` の検証は、体裁レビューとリリース後テストを 1 件の `lane-verify`（`stages` に 2 つ）で委ね、1 件の回答で 2 つとも消費する。モードが持たない工程は `stages` に入らない。
 
-**版を出さない変更。** 文脈に `version` が無い（デプロイの `delivery.versioned` が偽・デプロイの工程を持たないリポジトリ・今回の変更では版を出さない）検証は止めずに、`version: null` のリクエストで委ねる。そのリクエストは版の照合（`check_version`）の対象にならず、担い手は今の環境でその行の受け入れ条件（`documentation` なら体裁レビュー）だけを確かめる。確かめる ref は版のタグでなく、`delegate` がリクエストに書く `target_ref`（委ねた時点のその行の作業場所の `git rev-parse HEAD`。検証のフェーズは基のブランチへ入った後なので、今回の変更を含むコミットを指す）で、`show` がリクエストごとに返す。版のあるリクエストの `target_ref` は null で、確かめる ref は導入した版のタグ（下の「`show` が返す担い手の手順」）。版の無いことで止めるのは、文脈の `delivery.versioned` が真なのに `version` が無いとき（デプロイの出力の欠け）だけである。
+**版を出さない変更。** 文脈に `version` が無い（デプロイの `delivery.versioned` が偽・デプロイの工程を持たないリポジトリ・今回の変更では版を出さない）検証は止めずに、`version: null` のリクエストで委ねる。そのリクエストは版の照合（`check_version`）の対象にならず、担い手は今の環境でその行の受け入れ条件（`documentation` なら体裁レビュー）だけを確かめる。確かめる ref は版のタグでなく、`delegate` がリクエストに書く `target_ref` で、`show` がリクエストごとに返す。`target_ref` はその行の変更が基のブランチに入ったコミットで、行の作業場所（feature ブランチの worktree。#4050 はマージの直後に片付ける）からは読まない。squash のマージや merge queue では、マージ後のコミットが feature ブランチの `HEAD` に含まれないためである。`delegate` は文脈の `pr` の PR を GitHub から読み（`adapters.github` の `merged`・`merge_sha`。worktree の片付けと同じ読み方）、マージ済みならそのマージコミットを `target_ref` にする。文脈に `pr` が無い行は、リポジトリの根（主の作業ディレクトリ）で `git ls-remote origin refs/heads/<基のブランチ>` が返すコミットにする。決めた値はリクエストの中身（計画の DB）に保存するので、worktree を片付けた後も `show` と担い手が読める。版のあるリクエストの `target_ref` は null で、確かめる ref は導入した版のタグ（下の「`show` が返す担い手の手順」）。版の無いことで止めるのは、文脈の `delivery.versioned` が真なのに `version` が無いとき（デプロイの出力の欠け）だけである。
 
 **委ねた待ちと生死の判定。** 委ねた検証の待ちは、承認ゲートの回答待ちと同じ形でつなぐ。
 
@@ -88,14 +88,15 @@ flowchart LR
 | 生死の判定（`liveness.judge`） | `sprint_wait` が `SPRINT_GATE` と読み、`WAITING_ANSWER`。ラッパーが消えていても止まりにも再起動の対象にもならない | 今のとおり `awaiting_next` の `RESUMING` で、耐久ワークフローが回答の後の入力（`resume_commands`）で起こす |
 | `/goal` の終わりの条件 | 承認ゲートと同じく応答を終える（終わりの条件の文に「`status: gate` が返ったら応答を終える」を足す。承認ゲートの今の扱いと同じ文） | 今のとおり |
 
-**棚卸しの範囲。** 差分の棚卸しは、振り返りの範囲の始まり（`ndf issues candidates --since-ref` に渡す、前のリリースのタグ）より後に起票した課題を扱う。`delegate` は棚卸しのリクエストに、その行が自分で流したなら渡したはずの `since_ref`（行の作業場所で `git describe --tags --abbrev=0` が返す、基のブランチから届く最新のタグ。タグが無ければ null で、全件が対象）と、行のスプリントの課題 `issues` を書く。まとめでは各リクエストの範囲の和集合を処理する: `since_ref` のうち最も古いコミットのもの（1 つでも null なら null）を `--since-ref` に渡し、各リクエストの `issues` を `--add` に渡す。
+**棚卸しの範囲。** 差分の棚卸しは、振り返りの範囲の始まり（`ndf issues candidates --since-ref` に渡す、前のリリースのタグ）より後に起票した課題を扱う。`delegate` は棚卸しのリクエストに、その行が自分で流したなら渡したはずの `since_ref`（片付けた後の作業場所を読まないよう、リポジトリの根で `git describe --tags --abbrev=0 origin/<基のブランチ>` が返す、基のブランチから届く最新のタグ。タグが無ければ null で、全件が対象）と、行のスプリントの課題 `issues` を書く。まとめでは各リクエストの範囲の和集合を処理する: `since_ref` のうち最も古いコミットのもの（1 つでも null なら null）を `--since-ref` に渡し、各リクエストの `issues` を `--add` に渡す。
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 検証の版が無い | 文脈の `delivery.versioned` が真なのに、デプロイの出力に `version` が無い | 文脈の `version` を読む所 | 止める | `stopped`・`precondition`（「版を出すデプロイなのに検証する版が文脈に無い」） | デプロイを直してから `next` を打ち直す。リクエストは書かれない。`versioned` が偽か `delivery` が無いときは止めず、`version: null` で委ねる |
-| `delegate` | 棚卸しの範囲か検証対象の ref を読めない | 作業場所が無い・git が失敗する | `since_ref`・`target_ref` を読む所 | 止める | `stopped`・`transient` | そのまま打ち直せる |
+| `delegate` | 棚卸しの範囲か検証対象の ref を読めない | GitHub の読み取り・git が失敗する | `since_ref`・`target_ref` を読む所 | 止める | `stopped`・`transient` | そのまま打ち直せる |
+| `delegate` | 文脈の `pr` がマージされていない | マージの工程の前に検証へ進んだ（工程の定義の誤り） | `target_ref` を読む所 | 止める | `stopped`・`precondition`（PR と状態） | マージしてから `next` を打ち直す。リクエストは書かれない |
 | `environment_of` | `.ndf/project.json` が読めない・形が違う | 利用者の設定の誤り | 読み込み | 止める | `stopped`・`precondition`（ファイルと誤り） | 設定を直して `next` を打ち直す |
 | `delegate` | 計画の排他を取れない | 別の書き手が長く持つ | `lock_plan` | 呼び出し元へ返す | `stopped`・`transient` | そのまま打ち直せる（キーで冪等） |
 | `_consume_delegated` | 回答のリポートが空 | 担い手の誤り（`close` が断るので起きない） | — | 既定値で続ける | 無し | — |
@@ -104,7 +105,7 @@ flowchart LR
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `delegate`・`_start` | 計画の行の検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・行が完了 | 打ち直しで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` の行は `version: null` と作業場所の `HEAD` の `target_ref` で委ね、版の無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真で版の無い文脈で `precondition` |
+| `delegate`・`_start` | 計画の行の検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・行が完了 | 打ち直しで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` の行は `version: null` と、差し替えた GitHub の読みが返す squash のマージコミット（feature ブランチの `HEAD` と別）の `target_ref` で委ね（作業場所を消した後でも同じ）、版の無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真で版の無い文脈で `precondition` |
 | `wait`・`liveness.judge` | 回答の前の委ねた待ちで `progress wait --timeout 0` が `gate` を返し、ラッパーの無い行の判定が `WAITING_ANSWER` | 回答の後は `RESUMING` | — |
 | `_consume_delegated` | `done` で委ねた工程がすべて完了し `verification` にその行のリポート・要求の版・導入した版が載る。`documentation` で 2 工程とも完了 | 古い委ねのキーの回答を読まない。リポートに不合格や `not_run` の条件があっても `done` なら完了し振り返りへ進む | `failed` で先頭が `failed`・`decide` が `FAILED` |
 | `environment_of` | 宣言があればその名前 | `verify: null`・キー無し・空の文字列でリポジトリの名前 | 形の違う設定で `precondition` |
