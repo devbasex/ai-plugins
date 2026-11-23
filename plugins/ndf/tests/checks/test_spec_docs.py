@@ -44,6 +44,16 @@ def test_hand_edit_of_a_page_is_caught_and_write_spec_restores_it(copy):
     assert not copy.path("docs/contracts/stale.md").exists()
 
 
+def test_issue_3684_one_changed_character_of_a_page_is_caught(copy):
+    """#3684 の受け入れ条件 3: コントラクトのページの 1 文字を置き換えると、そのページと行を挙げて落とす。"""
+    page = copy.path("docs/contracts/env.md")
+    text = page.read_text(encoding="utf-8")
+    at = len(text) // 2
+    page.write_text(text[:at] + ("い" if text[at] == "あ" else "あ") + text[at + 1 :], encoding="utf-8")
+    found = [(f.rule, f.path.rsplit("/", 1)[-1], f.line) for f in copy.findings()]
+    assert found == [(spec_docs.DOCS, "env.md", text[:at].count("\n") + 1)]
+
+
 def test_a_key_only_in_the_files_table_names_the_ndf_settings_and_key(copy):
     copy.edit_json("contracts/domains/ndf-files.json", lambda d: _row(d, "review")["keys"].append("zzz"))
     assert any("review" in d and "zzz" in d for d in _rows(copy.findings(), spec_docs.DECL))
