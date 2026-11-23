@@ -26,7 +26,7 @@
 
 | 関数 | 入力 | 返り・失敗の扱い |
 | --- | --- | --- |
-| `machine.admitted(own, lane_wrapper, listed, go, where)`（確定仕様の語では「起動の許可」） | 自分の計画のレーン・起動するラッパーの名前・ラッパーの一覧を読む関数・起動の手・計画の所在 | `admit_lock` の中で `cap()`・`listed()`・数える・`index_plan`・`go` の順に打つ。収まらなければ `waiting(RULE か OBSERVE, …)`。`admit_lock` が `LockBusy` を上げれば、どれも打たずに `waiting(LOCK, None, None)`（`{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}, "detail": …}`） |
+| `machine.admitted(own, lane_wrapper, listed, go, where)`（確定仕様の語では「起動の許可」） | 自分の計画のレーン・起動するラッパーの名前・ラッパーの一覧を読む関数・起動の手・計画の所在 | `admit_lock` の中で `cap()`・`listed()`・`count`（数え上げ）・`over_cap`（上限の判定）・`index_plan`・`go` の順に打つ（`count`・`over_cap`・`index_plan` はモジュールの名前で呼ぶので `monkeypatch.setattr(machine, …)` の差し替えが効く）。収まらなければ `waiting(RULE か OBSERVE, …)`。`admit_lock` が `LockBusy` を上げれば、どれも打たずに `waiting(LOCK, None, None)`（`{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}, "detail": …}`） |
 | `plan_cli.main(argv)` | `["limits", …]`・`["set", …, "--plans", …]` | 引数の誤りとして `causes.exit_code("invalid")` を返す（例外を上げない） |
 | `plan_run.probes(repo, plan)` | `status` が呼ぶ、生死の材料を読む関数の組 | 既定は `ndf relay ls` と `ndf progress wait` を子のプロセスで打つ。テストは差し替える |
 
@@ -35,20 +35,23 @@
 ### Task 1: 2 つの計画が同時に起動を求めても上限を超えないことを確かめる
 
 - **対象ファイル:** `plugins/ndf/tests/progress/test_lane_machine.py`
-- **変更内容:** 偽の錠を足す。偽の錠は持ち主がいるかを持ち、持ち主がいる間に入ろうとすると `machine.LockBusy` を上げる（待たない）。入った時刻・出た時刻の代わりに、出入りを呼び出しの記録へ `lock-in`・`lock-out` として積む。`monkeypatch.setattr(machine, "admit_lock", <偽>)` で差し替える。上限 3、ほかの動いているラッパー 1 本（`o-a`）の状態で次を順に打つ
+- **変更内容:** 偽の錠を足す。偽の錠は持ち主がいるかを持ち、持ち主がいる間に入ろうとすると `machine.LockBusy` を上げる（待たない）。入った時刻・出た時刻の代わりに、出入りを呼び出しの記録へ `lock-in`・`lock-out` として積む。`monkeypatch.setattr(machine, "admit_lock", <偽>)` で差し替える。
+  - **共有のラッパーの一覧:** テストの中に辞書を 1 つ持ち（名前 → 行。最初は動いている `o-a` の 1 本）、`listed` の偽はこの辞書の写しを返す。`go` の偽は記録へ `go` を積み、その時点の一覧の本数が上限 3 以下であることを確かめてから、**起動したラッパー（`w-a` など）を動いている行として辞書へ足し**、`{"ok": True}` を返す。これで B の打ち直しと C は、A・B を足した後の一覧を読む
+  - **実処理へ委ねる薄いラッパー:** `machine.count`・`machine.over_cap`・`machine.index_plan` を、記録へ `count`・`over_cap`・`index` を積んでから元の関数を呼んで返す関数に差し替える（`monkeypatch.setattr` の前に元の関数を変数へ取っておく）。記録専用の偽にはしない。数え上げと上限の判定は本物が行い、索引は本物が保存先（`identity.load().state_dir` の下。既存テストと同じ分離された場所）へ書く
+  - 上限 3（`named_cap.write`）・動いている `o-a` 1 本の状態で次を順に打つ
   1. 計画 A（`plan:w-a`）の起動の許可を打つ。A の `go` の中（A が排他を持つ間）で、計画 B（`plan:w-b`）の起動の許可を打つ
-  2. B の結果が `reason: lock` の待ちで、B の数える処理（`listed`）と起動の手（`go`）が 1 度も呼ばれていないことを確かめる
-  3. A の結果が `ok` のあと、B を打ち直すと `ok`、続けて計画 C（`plan:w-c`）を打つと `reason: machine-lanes`・`machine_lanes: 3`・`cap: 3` の待ちになる
-  4. 起動の手が呼ばれるたびに、その時点の一覧の本数が上限 3 以下であること、索引（`machine.indexed()`）が A と B だけであることを確かめる
-  5. **呼び出しの記録が `["lock-in", "listed", "index", "go", "lock-out"]` の順であることを確かめる**（`listed`・`machine.index_plan`・`go` の偽が、呼ばれるたびに記録へ名前を積む）。数える処理・索引・起動の手が 1 つでも排他の外へ出れば、記録の順が変わって落ちる
+  2. B の結果が `reason: lock` の待ちで、B の `listed`・`count`・`over_cap`・`index`・`go` が 1 度も呼ばれていないことを確かめる
+  3. A の結果が `ok` のあと、B を打ち直すと `ok`、続けて計画 C（`plan:w-c`）を打つと `reason: machine-lanes`・`machine_lanes: 3`・`cap: 3` の待ちになる（一覧は `o-a`・`w-a`・`w-b` の 3 本）
+  4. 索引（`machine.indexed()`）の計画 ID が A と B の 2 つだけである（C は書かれない）ことを確かめる
+  5. **計画ごとの呼び出しの記録を確かめる。** A と B の打ち直しは `["lock-in", "listed", "count", "over_cap", "index", "go", "lock-out"]`、C は `["lock-in", "listed", "count", "over_cap", "lock-out"]`。数え上げ・上限の判定・索引・起動の手が 1 つでも排他の外へ出れば、記録の順が変わって落ちる
   - `time.sleep` を、呼ばれたら失敗する偽に差し替えておく（待たないことを確かめる）
 - **満たす受け入れ条件:** 1（期待する結果の 1）
-- **進め方:** テストを書いて通す。**このテストが退行を捕まえることを、プロダクションのコードを 1 度だけ壊して確かめる。** `admitted` の数える処理（`listed()` から `over_cap` まで）を `with machine.admit_lock(...)` の前へ出し、手順 5 の記録の順が `["listed", "lock-in", …]` になってテストが落ちることを見てから、コードを元へ戻す（戻した状態をコミットする）。確かめた手順と出力は Pull Request の本文へ書く
+- **進め方:** テストを書いて通す。**このテストが退行を捕まえることを、プロダクションのコードを 1 度だけ壊して確かめる。** `admitted` の `cap()`・`listed()`・`machine_plans` は `with machine.admit_lock(...)` の中に残し、`count` と `over_cap` から後（索引と `go` を含む）を `with` を抜けた後へ移す。手順 5 の記録が `["lock-in", "listed", "lock-out", "count", "over_cap", …]` になってテストが落ちることを見てから、コードを元へ戻す（戻した状態をコミットする）。一覧の取得の位置を変えずに数え上げと判定だけを外へ出す退行を捕まえることの確かめである。確かめた手順と出力は Pull Request の本文へ書く
 
 ### Task 2: 排他を取れないとき数えずに lock の待ちを返すことを確かめる
 
 - **対象ファイル:** `plugins/ndf/tests/progress/test_lane_machine.py`
-- **変更内容:** 入ると必ず `machine.LockBusy` を上げる偽の錠に差し替え、`machine.cap`・`listed`・`machine.index_plan`・`go` を呼ばれた回数を数える偽にする。`admitted` の結果が `{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}}`（`detail` は除いて比べる）で、4 つがどれも 0 回であることを確かめる
+- **変更内容:** 入ると必ず `machine.LockBusy` を上げる偽の錠に差し替え、`machine.cap`・`listed`・`machine.count`・`machine.over_cap`・`machine.index_plan`・`go` を呼ばれた回数を数える偽にする。`admitted` の結果が `{"ok": False, "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}}`（`detail` は除いて比べる）で、6 つがどれも 0 回であることを確かめる
 - **満たす受け入れ条件:** 1（期待する結果の 2）
 - **進め方:** テストを書いて通す。退行を捕まえることは、`admitted` の `except LockBusy` を一時的に `pass` へ変えるとテストが落ちることで 1 度だけ確かめ、コードを元へ戻す
 
@@ -57,10 +60,11 @@
 - **対象ファイル:** `plugins/ndf/tests/progress/test_plan.py`
 - **変更内容:** 79b02ac21 で消えた `test_cli_has_no_limits_subcommand_and_no_plans_option` と同じ 2 つの引数の並びで、パラメータ化したテストを足す。`repo` の fixture の後に、次を差し替える。`git init` は基盤のツールなので本物でよく、`start` の切り離しの起動は `detached` の fixture が偽にする
   - `plan_run.probes` を、ラッパーの一覧が空・スプリントの結果が None の `liveness.Probes` を返す偽にする（`ndf relay ls` の子のプロセスを打たせない）
-  - `subprocess.Popen` と `time.sleep` を、呼ばれたら失敗する偽にする
-  - `start` → 消した引数の並びで `plan_cli.main` が `causes.exit_code("invalid")` を返す → `status` の `metrics` に `max_lanes`・`max_plans` が無く、レーンの行に `plans` が無いことを確かめる
+  - `subprocess.Popen` を、**基盤の Git の呼び出しだけを通す監視**にする。元の `Popen` を変数へ取っておき、引数の並びの先頭が `git` なら元の `Popen` へ渡し、それ以外（`ndf` や `sys.executable` など NDF の子のプロセス）は引数を記録して失敗させる。`subprocess.run` は中で `Popen` を使うので、`start`・`status` が保存先を求める `durable.store_root()` の `git rev-parse` と、`repo` の fixture の後片付け（`monkeypatch` の戻しより先に走る）の `git rev-parse` はこれで通る。一律に失敗させる偽にはしない
+  - `time.sleep` を、呼ばれたら失敗する偽にする
+  - `start` → 消した引数の並びで `plan_cli.main` が `causes.exit_code("invalid")` を返す → `status` の `metrics` に `max_lanes`・`max_plans` が無く、レーンの行に `plans` が無いことを確かめる → 監視が記録した `git` 以外の起動が空であることを確かめる
 - **満たす受け入れ条件:** 1（期待する結果の 3）
-- **進め方:** Task 1 と同じ。差し替えの漏れで子のプロセスが起動すれば `Popen` の偽が落とす
+- **進め方:** Task 1 と同じ。差し替えの漏れで NDF の子のプロセスが起動すれば `Popen` の監視が落とす
 
 ### Task 4: 確定仕様のテスト観点をテストにそろえる
 
@@ -96,9 +100,9 @@
 
 | リスク | 対処 |
 | --- | --- |
-| 偽の錠は本物の `flock` の排他そのものを確かめない | 確かめる対象は「数える処理・索引・起動の手が排他の中で起き、排他を取れなければどれも起きない」という作りで、Task 1 の手順 5 の呼び出しの順の記録がこれを縛る。`flock` が本当に排他するかは確定仕様の既知の限界（ネットワークのファイルシステム）に残す。本物の錠を待たないのは受け入れ条件 1 の求めである |
+| 偽の錠は本物の `flock` の排他そのものを確かめない | 確かめる対象は「一覧の取得・数え上げ・上限の判定・索引・起動の手が排他の中で起き、排他を取れなければどれも起きない」という作りで、Task 1 の手順 5 の呼び出しの順の記録がこれを縛る。`flock` が本当に排他するかは確定仕様の既知の限界（ネットワークのファイルシステム）に残す。本物の錠を待たないのは受け入れ条件 1 の求めである |
 | 偽物を使うテストは、偽物を壊しても落ちるので、退行を捕まえる証明にならない | Task 1・2 の進め方で、プロダクションのコードを 1 度だけ壊してテストが落ちることを確かめ、確かめた手順と出力を Pull Request の本文へ書く |
-| `status` が `probes` の外で子のプロセスを打つ経路が残る | Task 3 で `subprocess.Popen` を失敗する偽にするので、残れば落ちて分かる |
+| `status` が `probes` の外で子のプロセスを打つ経路が残る | Task 3 で `subprocess.Popen` を `git` 以外を失敗させる監視にするので、残れば落ちて分かる |
 
 ## 完了の定義
 
