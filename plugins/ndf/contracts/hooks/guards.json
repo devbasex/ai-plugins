@@ -47,7 +47,7 @@
     },
     {
       "name": "context-limit",
-      "summary": "文脈の量が hook.context-limit を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
+      "summary": "文脈の量が運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）以上なら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
       "module": "ndf.domains.hooks.guards.context_limit",
       "events": ["PreToolUse"],
       "tools": [],

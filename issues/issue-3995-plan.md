@@ -20,7 +20,7 @@
 | `src/ndf/domains/hooks/dispatch.py` | `run` が `deny_key` が `none` の拒否を数えず、案内へ下げない | U5 |
 | `src/ndf/domains/hooks/counter.py` | `remember`・`take` | U6 |
 | `src/ndf/domains/relay/cli.py` | `wrapper_settings` の `context_limit` を `thresholds(...).limit` に | U1 |
-| `src/ndf/domains/relay/switch_decide.py` | `HANDOVER_PROMPT` の文 | U1 |
+| `src/ndf/domains/relay/switch_decide.py` | `HANDOVER_PROMPT` の文（求める `ndf records handoff check` を guard が通すのと同じ単位にする） | U4 |
 | `src/ndf/domains/relay/cli_context.py` | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（`--root`・`--policy` を消す） | U2 |
 | `src/ndf/domains/relay/context_records.py` | `record_row(session_id, work, applied: Thresholds, event, reason)`。語を `context_thresholds` から引く | U2 |
 | `src/ndf/domains/relay/context_report.py` | `no_policy_rows` を消す。語を `context_thresholds` から引く | U2 |
@@ -37,7 +37,7 @@
 | `README.md` | hook の表の `context-limit` の行 | U7 |
 | `skills/development-workflow/references/context-window.md`・`parallel.md`・`relay.md`・`glossary.md`・`work-vessels.md`、`skills/development-workflow/SKILL.md`、`skills/statusline/SKILL.md` | 詳細設計書の「契約と手順書」の行のとおり | U7 |
 | `docs/glossary/glossary.json`・`docs/glossary.md`（再生成） | 設計書の「用語」の表（意味の変更 2・廃止 4） | U7 |
-| `tests/domains/relay/test_context_thresholds.py`（新設）・`test_context_policy.py`（消す）・`test_relay_decide.py`・`test_relay_cli_parse.py`・`test_context_report.py` | 各単位のテスト | U1・U2 |
+| `tests/domains/relay/test_context_thresholds.py`（新設）・`test_context_policy.py`（消す）・`test_relay_decide.py`・`test_relay_cli_parse.py`・`test_context_report.py` | 各単位のテスト | U1・U2・U4 |
 | `tests/domains/hooks/test_guards.py`・`test_dispatch.py`・`test_context.py`・`test_counter.py` | 各単位のテスト | U1・U3〜U6 |
 
 ## タスク分解
@@ -62,10 +62,10 @@
 
 ### Task 3: guard とラッパーが 2 つの値を読む（U1）
 
-- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`src/ndf/domains/relay/cli.py`・`src/ndf/domains/relay/switch_decide.py`・`contracts/limits.json`・`contracts/domains/env.json`・`docs/contracts/env.md`（再生成）・`tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_decide.py`
-- **変更内容:** guard の運用上限を `thresholds(ctx.env, tables.policy_value).limit` に、`wrapper_settings` の `context_limit` を `thresholds(dict(os.environ), limits.value).limit` にし、`limits.json` から `hook.context-limit`・`relay.context` を消す。`HANDOVER_PROMPT` を詳細設計書の文にする。`env.json` の `NDF_CONTEXT_LIMIT` の説明と `area` を直して `ndf check --write-spec` で `env.md` を再生成する。guard の止め方（数えて 3 回目に案内へ下がる・通すのは引継ぎ文書の Write/Edit だけ）は U3〜U5 まで今のまま
-- **満たす受け入れ条件:** `3995:4`・`3995:7`、`3995:1`・`3995:9` の guard とラッパーの側
-- **進め方:** 失敗するテスト（設計書のテスト設計の 7 の行と 4・9 の guard の行: PreToolUse の 249,999・250,000・499,999 で止めず 500,000 で止める、`NDF_CONTEXT_LIMIT=300000` で 300,000 で止め 299,999 で止めない。ラッパーは 500,000 で `handover`・499,999 で `wait`・`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定で 300,000 / 299,999、求める文が `wait` の行と `ndf records handoff check` を含む。上限の設定の 2 つの値を差し替えると guard とラッパーの判定が差し替えた値を使う）→ 通す最小実装 → 整理
+- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`src/ndf/domains/relay/cli.py`・`contracts/limits.json`・`contracts/domains/env.json`・`docs/contracts/env.md`（再生成）・`tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_decide.py`
+- **変更内容:** guard の運用上限を `thresholds(ctx.env, tables.policy_value).limit` に、`wrapper_settings` の `context_limit` を `thresholds(dict(os.environ), limits.value).limit` にし、`limits.json` から `hook.context-limit`・`relay.context` を消す。`HANDOVER_PROMPT` は今の文のまま（新しい文が求める `ndf records handoff check` と引継ぎ文書の Read は U1 の guard が止めるので、通す Task 8 と同じ単位で変える）。`env.json` の `NDF_CONTEXT_LIMIT` の説明と `area` を直して `ndf check --write-spec` で `env.md` を再生成する。guard の止め方（数えて 3 回目に案内へ下がる・通すのは引継ぎ文書の Write/Edit だけ）は U3〜U5 まで今のまま
+- **満たす受け入れ条件:** `3995:4`、`3995:7` の判定の側（求める文の側は Task 8）、`3995:1`・`3995:9` の guard とラッパーの側
+- **進め方:** 失敗するテスト（設計書のテスト設計の 7 の行と 4・9 の guard の行: PreToolUse の 249,999・250,000・499,999 で止めず 500,000 で止める、`NDF_CONTEXT_LIMIT=300000` で 300,000 で止め 299,999 で止めない。ラッパーは 500,000 で `handover`・499,999 で `wait`・`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定で 300,000 / 299,999。上限の設定の 2 つの値を差し替えると guard とラッパーの判定が差し替えた値を使う）→ 通す最小実装 → 整理
 
 ### Task 4: `ndf relay context` の resolve・record・report を 2 つの値へ（U2）
 
@@ -97,10 +97,10 @@
 
 ### Task 8: 運用上限でも引継ぎに要る呼び出しを通す（U4）
 
-- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`contracts/hooks/guards.json`・`tests/domains/hooks/test_guards.py`
-- **変更内容:** `_next_step` を `_passes` に置き換え、`_in_handoff`・`_ndf_args_pass` を足す。`guards.json` の `context-limit` に `params.pass_tools`（TaskStop）・`pass_ndf`（`records handoff check`・`relay context record` と許す引数）を足す。許すリダイレクトは詳細設計書の 2 つの形だけ
-- **満たす受け入れ条件:** `3995:6`（通す呼び出しの側）
-- **進め方:** 失敗するテスト（詳細設計書の `_passes` の行の通る例と止める例をすべて、`_ndf_args_pass` と CLI の更新先の行: 一時のメインディレクトリ・worktree・リンクの組で、真になった引数を `ndf records … handoff check --trim` で実際に打つと更新されたファイルがいつもメインディレクトリの `.ndf/handoff` の下にあり、`base` が `records/cli.py` の `_root` と等しい）→ 通す最小実装 → 整理
+- **対象ファイル:** `src/ndf/domains/hooks/guards/context_limit.py`・`src/ndf/domains/relay/switch_decide.py`・`contracts/hooks/guards.json`・`tests/domains/hooks/test_guards.py`・`tests/domains/relay/test_relay_decide.py`
+- **変更内容:** `_next_step` を `_passes` に置き換え、`_in_handoff`・`_ndf_args_pass` を足す。`guards.json` の `context-limit` に `params.pass_tools`（TaskStop）・`pass_ndf`（`records handoff check`・`relay context record` と許す引数）を足す。許すリダイレクトは詳細設計書の 2 つの形だけ。`HANDOVER_PROMPT` を詳細設計書の文にする（文が求める呼び出しを通すのと同じ単位で入れる。U1 の PR 4216 の cross-review r1-1）
+- **満たす受け入れ条件:** `3995:6`（通す呼び出しの側）・`3995:7`（求める文の側）
+- **進め方:** 失敗するテスト（詳細設計書の `_passes` の行の通る例と止める例をすべて、`_ndf_args_pass` と CLI の更新先の行: 一時のメインディレクトリ・worktree・リンクの組で、真になった引数を `ndf records … handoff check --trim` で実際に打つと更新されたファイルがいつもメインディレクトリの `.ndf/handoff` の下にあり、`base` が `records/cli.py` の `_root` と等しい。`HANDOVER_PROMPT` が `wait` の行と `ndf records handoff check` を含み、背景の作業の終わりについて書かない）→ 通す最小実装 → 整理
 
 ### Task 9: 拒否の文に背景の作業の扱いと引継ぎの手順を書く（U4）
 
@@ -150,15 +150,15 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4・3995:7 | 約 400 | （実装の後に書き足す） |
+| U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
 | U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | （実装の後に書き足す） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | （実装の後に書き足す） |
-| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:8 | 約 550 | （実装の後に書き足す） |
+| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | （実装の後に書き足す） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
 | U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
 | U7 手順書・README・用語集 | Task 13・14 | 3995:10・3995:11・3995:12・3995:13・3995:14 | 約 300 | （実装の後に書き足す） |
 
-U2 は 400 行を超えるが、大半は `context_policy.py`・`test_context_policy.py`・`context.schema.json` の削除で、振る舞いを足す差分は約 300 行である。U4 は 400 行を超える見込みで、600 行を越えたら Task 7（`ShellScript`）を先の単位へ分け直す。単位の PR の acceptance には、その単位で初めてそろう条件だけを渡す。またがる条件は後の単位の側で渡す（`3995:1`・`3995:9` は U1 で guard とラッパー、U2 で `resolve` がそろう。`3995:6` は U4 で通す呼び出しと文、U5 で止め続ける振る舞いがそろう。`3995:10`・`3995:11` は U2 で契約、U7 で手順書がそろう。`3995:16` は U1〜U6 の境界のテストが U6 でそろう）。
+U2 は 400 行を超えるが、大半は `context_policy.py`・`test_context_policy.py`・`context.schema.json` の削除で、振る舞いを足す差分は約 300 行である。U4 は 400 行を超える見込みで、600 行を越えたら Task 7（`ShellScript`）を先の単位へ分け直す。単位の PR の acceptance には、その単位で初めてそろう条件だけを渡す。またがる条件は後の単位の側で渡す（`3995:1`・`3995:9` は U1 で guard とラッパー、U2 で `resolve` がそろう。`3995:6` は U4 で通す呼び出しと文、U5 で止め続ける振る舞いがそろう。`3995:7` は U1 で引継ぎを求める判定、U4 で求める文がそろう。`3995:10`・`3995:11` は U2 で契約、U7 で手順書がそろう。`3995:16` は U1〜U6 の境界のテストが U6 でそろう）。
 
 ### 単位ごとの touches の候補
 
@@ -166,10 +166,10 @@ U2 は 400 行を超えるが、大半は `context_policy.py`・`test_context_po
 
 | 単位 | touches の候補 |
 | --- | --- |
-| U1 | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`（U3・U4・U6）・`plugins/ndf/src/ndf/domains/relay/cli.py`・`plugins/ndf/src/ndf/domains/relay/switch_decide.py`・`plugins/ndf/contracts/limits.json`・`plugins/ndf/contracts/domains/env.json`（U2）・`plugins/ndf/docs/contracts/*.md`（U2）・`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（U2）・`plugins/ndf/tests/domains/relay/test_context_policy.py`（U2）・`plugins/ndf/tests/domains/relay/test_context_report.py`（U2）・`plugins/ndf/tests/domains/relay/test_relay_decide.py`・`plugins/ndf/tests/domains/hooks/test_guards.py`（U3〜U6） |
+| U1 | `plugins/ndf/src/ndf/domains/relay/context_thresholds.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`（U3・U4・U6）・`plugins/ndf/src/ndf/domains/relay/cli.py`・`plugins/ndf/contracts/limits.json`・`plugins/ndf/contracts/domains/env.json`（U2）・`plugins/ndf/docs/contracts/*.md`（U2）・`plugins/ndf/tests/domains/relay/test_context_thresholds.py`（U2）・`plugins/ndf/tests/domains/relay/test_context_policy.py`（U2）・`plugins/ndf/tests/domains/relay/test_context_report.py`（U2）・`plugins/ndf/tests/domains/relay/test_relay_decide.py`（U4）・`plugins/ndf/tests/domains/hooks/test_guards.py`（U3〜U6） |
 | U2 | `plugins/ndf/src/ndf/domains/relay/context_*.py`（`context_policy.py` の削除・`context_thresholds.py`・`context_records.py`・`context_report.py`）・`plugins/ndf/src/ndf/domains/relay/cli_context.py`・`plugins/ndf/src/ndf/domains/statusline/statusline.sh`・`plugins/ndf/src/ndf/checks/children.json`・`plugins/ndf/contracts/domains/env.json`・`plugins/ndf/contracts/domains/ndf-files.json`・`plugins/ndf/contracts/schemas/ndf-settings/context.schema.json`・`plugins/ndf/contracts/schemas/io/relay.*.schema.json`・`plugins/ndf/docs/contracts/*.md`・`plugins/ndf/tests/domains/relay/test_context_*.py`・`plugins/ndf/tests/domains/relay/test_relay_cli_parse.py` |
 | U3 | `plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/contracts/hooks/runtimes.json`・`plugins/ndf/tests/domains/hooks/test_guards.py` |
-| U4 | `plugins/ndf/src/ndf/domains/hooks/context.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/contracts/hooks/guards.json`（U5・U6）・`plugins/ndf/tests/domains/hooks/test_context.py`・`plugins/ndf/tests/domains/hooks/test_guards.py` |
+| U4 | `plugins/ndf/src/ndf/domains/hooks/context.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/src/ndf/domains/relay/switch_decide.py`・`plugins/ndf/contracts/hooks/guards.json`（U5・U6）・`plugins/ndf/tests/domains/hooks/test_context.py`・`plugins/ndf/tests/domains/hooks/test_guards.py`・`plugins/ndf/tests/domains/relay/test_relay_decide.py` |
 | U5 | `plugins/ndf/src/ndf/domains/hooks/dispatch.py`・`plugins/ndf/contracts/hooks/guards.json`・`plugins/ndf/tests/domains/hooks/test_dispatch.py`・`plugins/ndf/tests/domains/hooks/test_guards.py` |
 | U6 | `plugins/ndf/src/ndf/domains/hooks/counter.py`・`plugins/ndf/src/ndf/domains/hooks/guards/context_limit.py`・`plugins/ndf/contracts/hooks/guards.json`・`plugins/ndf/tests/domains/hooks/test_counter.py`・`plugins/ndf/tests/domains/hooks/test_guards.py` |
 | U7 | `plugins/ndf/README.md`・`plugins/ndf/skills/development-workflow/SKILL.md`・`plugins/ndf/skills/development-workflow/references/{context-window,parallel,relay,glossary,work-vessels}.md`・`plugins/ndf/skills/statusline/SKILL.md`・`docs/glossary/glossary.json`・`docs/glossary.md` |
@@ -227,3 +227,24 @@ flowchart LR
 - [ ] 受け入れ条件 3995:1〜16 をすべて満たし、条件ごとに設計書の「テスト設計」の行のテストと結果（単位の PR の CI）が対応している。2 の `git grep`・10・11 の後半・12・13・14 は `git grep` とドキュメントレビューで見る
 - [ ] Task 12 の PostToolUse の所要時間の比べが U6 の PR の本文にある
 - [ ] `standard` の検証の段階（`quality-gates`）。単位ごとの cross-review の収束、スプリントの完了判定
+
+## 実装の前に今のコードと照らした結果（2026-11-23）
+
+main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実装の前に、計画と詳細設計書の前提（ファイル・関数・行番号）をスプリントブランチの `f5af5a8d5` と照らした。扱いの列の「U1 で」は U1 の PR に入れたもの。
+
+#4089（`last_context`）の実装はこのスプリントに入れない。U1〜U6 は `context_tokens` の呼び出し箇所を増やさない形で書く（#3995 の範囲を守るため）
+
+| 計画の前提 | 今のコード | 扱い |
+| --- | --- | --- |
+| `relay/cli.py` は 482 行で、`wrapper_settings` の `context_limit` の 1 行だけを触る | 487 行。`context_limit=int(limits.value("relay.context", "count"))` は 307 行目 | 行番号だけの違い。U1 で 307 行目を `context_thresholds.thresholds(environ, limits.value).limit` にした |
+| `statusline.sh` は `applied.json` を読む試行方式の分岐を消すだけ（U2） | lracct で費用・使用率の表示が足された | U1 では触らない。U2 で今の形に合わせて分岐だけを消す |
+| `context_tokens` の呼び出しは guard の `check` の中の 1 か所 | `hooks/guards/context_limit.py`（`check`）・`relay/wrapper.py`（`observe.context_tokens`）・`crossreview/drive.py`（`claude.context_tokens`）の 3 か所 | U1 は増やさない（guard の `check` の 1 か所のまま）。#4089 で置き換える |
+| `guards/context_limit.py` は 40 行 | 40 行（U1 の後は 42 行） | 違いは無い |
+| guard が `context_thresholds` を import すれば足りる（詳細設計書の地図の依存） | hook のエントリポイントから import でたどれるモジュールは `contracts/hooks/imports.json` の `entry.modules` に限られ、`ndf.domains.relay.context_thresholds` は無い（`test_imports.py` が落とす） | U1 で `entry.modules` に `ndf.domains.relay.context_thresholds` を足した。標準ライブラリ（`re`・`typing`）だけに依存する |
+| `context_thresholds.py` に定数 `ENV`（`NDF_CONTEXT_LIMIT`）を置く（詳細設計書の「内部のデータと定数」） | `ndf check` の `const-fact`（`table-str`）が、環境変数の表（`contracts/domains/env.json`）の `id` を最上位の定数へ写すことを落とす | U1 では `ENV` を置かず、`thresholds` の中で名前を字面で読む。名前の持ち主は環境変数の表のまま |
+| `guards.json` の `context-limit` の `summary` は U5 で書き換える | 今の `summary` が消した `hook.context-limit` の名前を指す | U1 では消した名前の参照だけを「運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）」に直した。詳細設計書の文への書き換えは U5 のまま |
+| Task 1: ラッパーが同じセグメントで 2 度目の引継ぎを求めないことのテストが無ければ足す | 既にある（`test_relay_decide.py` の `test_context_over_the_limit_asks_for_a_handover_once`、`test_relay_wrapper_question.py` の `test_a_resume_in_the_same_section_keeps_the_handover_asked`） | 足さない |
+| Task 1: 移すテストは記録・較正・集計（`test_recorded_work_*`・`test_append_and_read_*`・`test_estimate_*`・`test_calibrate_*`・`test_cli_record_*`） | `test_context_dir_follows_the_legacy_state_root` も `context_policy` に依らない記録のテストで、U2 で `test_context_policy.py` を消すと失われる | U1 であわせて `test_context_report.py` へ移した |
+| Task 3: `HANDOVER_PROMPT` を詳細設計書の文にする | U1 の guard は運用上限以上で引継ぎ文書の Write/Edit しか通さず、文が求める `ndf records handoff check` の Bash と引継ぎ文書の Read を止める（PR 4216 の cross-review r1-1）。設計書の「子を強制終了するので背景の作業が残らない」は事実と違い、`ndf plan queue` の工程は別のセッションで動き続けることがある（同 r1-2・r6-1・r6-2） | U1 では今の文のまま。文は Task 8（U4）で `_passes` と同じ単位に入れる。文から「（背景の作業は終わった）」を外し、設計書の前提の行を事実に直した（背景の作業の終わりについて文は何も書かない。背景の作業が残る子を止めないのは #4049）。cross-review の r2〜r5・r7・r8 が求めた、引継ぎの後に `ndf plan` の実行を照らす手順（`src/ndf/core/plan/*` の変更を含む）は、承認済みの決定 4 を広げ touches の外なので取り込まない |
+| hook のテストは `NDF_CONTEXT_LIMIT` を流す人の値から切り離している | `tests/domains/hooks/_hooks.py` の `ENV_NAMES` に無い | U1 で `ENV_NAMES` に足した（境界のテストが手元の値で揺れないように） |
+| U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |

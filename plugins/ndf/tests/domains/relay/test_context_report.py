@@ -1,10 +1,29 @@
-"""作業ごとの集計（`ndf relay context report`。#3569）。"""
+"""作業ごとの集計・判定の記録・見込みの較正（`ndf relay context report`・`record`・`calibrate`。#3569）。
+
+記録の語（「継続」「再起動」）は記録に残ったデータの値なので、方針のモジュールに依らず字面で書く（#3995 の Task 1）。
+"""
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from ndf.domains.relay import cli, context_records, context_report
+import pytest
+
+from ndf import identity
+from ndf.domains.relay import cli, context_records, context_report, registry
+
+CONTINUE = "継続"
+
+
+class _Applied:
+    """`record_row` に渡す適用値の代わり（`as_dict` だけを使う）。方針のモジュールに依らない。"""
+
+    def __init__(self, values: dict[str, Any]) -> None:
+        self._values = values
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self._values)
 
 
 def _call(i: int, ts: str, inp: int = 100, out: int = 10, mid: str | None = None) -> dict:
@@ -287,3 +306,236 @@ def test_take_current_behavior_plain_first_user_and_unreadable(tmp_path):
     assert context_records.read_calls(t) == ([_take_call(_T0, 100)], [], False)
     assert context_records.read_calls(None) == ([], None, False)
     assert context_records.read_calls(str(tmp_path / "missing.jsonl")) == ([], None, False)
+
+
+# --- 判定の記録・見込みの較正・record（#3995 の Task 1 で test_context_policy から移した） ---
+
+
+def test_context_dir_follows_the_legacy_state_root(tmp_path):
+    assert context_records.context_dir({"NDF_CONTEXT_DIR": str(tmp_path)}) == tmp_path
+    env = {"NDF_STATE_HOME": str(tmp_path / "s")}
+    assert context_records.context_dir(env) == tmp_path / "s" / "context"
+    assert registry.legacy_root(env) == identity.legacy_state_root(env) / "relay"
+    assert identity.legacy_state_root({"XDG_STATE_HOME": str(tmp_path)}) == tmp_path / "ndf"
+
+
+def test_recorded_work_normalizes_issue_numbers():
+    assert context_records.recorded_work("#830 と #829（2026-11-15・v1.2.3）", None) == "#829 #830"
+    assert context_records.recorded_work("設計", "sid") == ""
+    assert context_records.recorded_work("設計", None) == "設計"
+
+
+def test_append_and_read_skip_broken_lines(tmp_path):
+    env = {"NDF_CONTEXT_DIR": str(tmp_path)}
+    applied = _Applied({"decide_from": 250_000, "limit": 500_000, "sources": {"decide_from": "default", "limit": "default"}})
+    late = context_records.record_row("s1", "#1", applied, context_records.MARK_HANDOFF, None) | {"at": "2026-11-15T02:00:00+00:00"}
+    early = context_records.record_row("s1", "#1", applied, None, "手動") | {"at": "2026-11-15T01:00:00+00:00"}
+    path = context_records.append("o__r", late, env)
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"cut\n')
+    context_records.append("o__r", early, env)
+    rows, skipped = context_records.read("o__r", env)
+    assert [r["at"] for r in rows] == [early["at"], late["at"]]
+    assert skipped == 1
+    assert rows[0]["verdict"] == "再起動" and rows[0]["reason"] == "手動" and rows[0]["limit"] == 500_000
+
+
+def _calls_transcript(path, calls) -> str:
+    lines = [{"type": "user", "message": {"content": "続きは .ndf/handoff/a.md から"}}]
+    for i, (ts, ctx) in enumerate(calls):
+        usage = {"input_tokens": ctx, "output_tokens": 10, "cache_read_input_tokens": 0}
+        lines.append({"type": "assistant", "timestamp": ts, "message": {"id": f"m{i}", "model": "x", "usage": usage}})
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_estimate_counts_samples_and_needs_three(tmp_path):
+    rows = []
+    for n in range(3):
+        t = _calls_transcript(tmp_path / f"t{n}.jsonl", [("2026-11-15T01:00:00Z", 100 + n), ("2026-11-15T01:10:00Z", 200 + n)])
+        rows.append({"at": "2026-11-15T01:05:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_RESTORED})
+        rows.append({"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF})
+    got = context_records.estimate(rows, None)
+    assert got["samples"]["restore"] == 3 and got["samples"]["handoff"] == 3
+    assert got["restore_context"] == 101.0 and got["restore_calls"] == 1.0
+    assert got["handoff_calls"] == 1.0 and got["handoff_output"] == 10.0
+    assert context_records.estimate(rows[:4], None)["restore_context"] is None
+
+
+def test_calibrate_writes_estimates_and_keeps_old_on_failure(tmp_path, monkeypatch):
+    env = {"NDF_CONTEXT_DIR": str(tmp_path)}
+    monkeypatch.setattr(context_records, "repo_key", lambda root: "o__r")
+    body = context_records.calibrate(None, 30, 0.0, env)
+    path = context_records.estimates_path("o__r", env)
+    assert json.loads(path.read_text(encoding="utf-8"))["samples"] == body["samples"]
+    path.parent.chmod(0o500)
+    try:
+        with pytest.raises(OSError):
+            context_records.calibrate(None, 30, 0.0, env)
+    finally:
+        path.parent.chmod(0o700)
+    assert path.is_file()
+
+
+def _last(capsys) -> dict:
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_cli_record_rejects_a_reason_outside_the_table(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("NDF_CONTEXT_DIR", str(tmp_path))
+    assert cli.main(["context", "record", "--verdict", "再起動", "--reason", "気分", "--work", "#1"]) == 2
+    assert cli.main(["context", "record", "--verdict", "再起動", "--work", "#1"]) == 2
+    assert cli.main(["context", "record", "--event", "引継ぎ開始", "--reason", "手動", "--work", "#1"]) == 2
+    capsys.readouterr()
+    assert cli.main(["context", "record", "--event", "引継ぎ開始", "--work", "#1"]) == 0
+    assert _last(capsys)["items"][0]["event"] == "引継ぎ開始"
+
+
+def test_cli_record_fails_when_it_cannot_write(tmp_path, monkeypatch, capsys):
+    blocked = tmp_path / "file"
+    blocked.write_text("", encoding="utf-8")
+    monkeypatch.setenv("NDF_CONTEXT_DIR", str(blocked))
+    assert cli.main(["context", "record", "--event", "引継ぎ開始", "--work", "#1"]) == 1
+    assert _last(capsys)["status"] == "stopped"
+
+
+def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
+    """現状固定（I-005）: 復元・引継ぎ・工程のセグメントの標本の集め方と、見込みの値の形。"""
+    calls = ["2026-11-15T01:00:00Z", "2026-11-15T01:10:00Z", "2026-11-15T01:20:00Z", "2026-11-15T03:00:00Z"]
+    rows = []
+    for n in range(3):
+        sid = f"s{n}"
+        t = _calls_transcript(tmp_path / f"t{n}.jsonl", [(ts, 100 + n) for ts in calls])
+        rows += [
+            {"at": "2026-11-15T00:59:00Z", "session_id": sid, "transcript": t, "stage": "design", "verdict": CONTINUE},
+            {"at": "2026-11-15T01:05:00Z", "session_id": sid, "event": context_records.MARK_RESTORED},
+            {"at": "2026-11-15T01:12:00Z", "session_id": sid, "event": context_records.MARK_HANDOFF},
+            {"at": "2026-11-15T01:15:00Z", "session_id": sid, "stage": "impl", "verdict": CONTINUE},
+            {"at": "2026-11-15T05:00:00Z", "session_id": sid, "stage": "review", "verdict": CONTINUE},
+        ]
+    plain = tmp_path / "plain.jsonl"
+    plain.write_text(json.dumps({"type": "user", "message": {"content": "始める"}}) + "\n", encoding="utf-8")
+    rows += [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s9", "transcript": str(plain)},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s9", "event": context_records.MARK_RESTORED},
+    ]
+    rows.sort(key=lambda r: r["at"])
+    got = context_records.estimate(rows, None)
+    got.pop("at")
+    assert got == {
+        "restore_context": 101.0,
+        "restore_calls": 1.0,
+        "handoff_calls": 2.0,
+        "handoff_output": 20.0,
+        "stage_calls": {"design": 2.0, "*": 2.0, "impl": 2.0},
+        "stage_expiries": {"design": 0.0, "*": 0.5, "impl": 1.0},
+        "samples": {"restore": 3, "handoff": 3, "stage:design": 3, "stage:*": 6, "stage:impl": 3},
+    }
+    late = context_records.estimate(rows, context_records.parse_ts("2026-11-15T06:00:00Z"))
+    late.pop("at")
+    assert late == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {},
+        "stage_expiries": {},
+        "samples": {"restore": 0, "handoff": 0},
+    }
+
+
+def test_estimate_stage_segments_current_behavior_edges(tmp_path):
+    """現状固定（I-026）: 工程の期間の切り方の端。根拠は仕様ではなく今の出力。
+
+    - 区切りは工程つきの「継続」の行だけ（工程の無い行・別の判定・読めない時刻は区切らない）。行の並びは時刻で並べ直す
+    - 期間は [始まり, 次の区切り) で、始まりちょうどの呼び出しは入る。時刻の無い呼び出しは数えない
+    - 間隔がちょうど 1 時間はキャッシュ切れに数えず、1 秒でも超えれば数える
+    - 呼び出しの無い期間と最後の期間は標本にしない。同じ工程の期間は別の標本として足す
+    """
+    calls = [
+        "2026-11-15T01:00:00Z",
+        "2026-11-15T01:10:00Z",
+        "2026-11-15T02:10:00Z",
+        "2026-11-15T03:10:00Z",
+        "2026-11-15T04:10:01Z",
+        None,
+        "2026-11-15T04:20:00Z",
+        "2026-11-15T06:00:00Z",
+    ]
+    lines: list[dict] = [{"type": "user", "message": {"content": "始める"}}]
+    for i, ts in enumerate(calls):
+        usage = {"input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": 0}
+        entry: dict = {"type": "assistant", "message": {"id": f"m{i}", "model": "x", "usage": usage}}
+        if ts is not None:
+            entry["timestamp"] = ts
+        lines.append(entry)
+    t = tmp_path / "t.jsonl"
+    t.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    go = CONTINUE
+    rows = [
+        {"at": "2026-11-15T04:30:00Z", "session_id": "s", "stage": "empty", "verdict": go},
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": str(t), "stage": "a", "verdict": go},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s", "verdict": go},
+        {"at": "2026-11-15T01:06:00Z", "session_id": "s", "stage": "x", "verdict": "再起動"},
+        {"at": "not a time", "session_id": "s", "stage": "y", "verdict": go},
+        {"at": "2026-11-15T02:10:00Z", "session_id": "s", "stage": "b", "verdict": go},
+        {"at": "2026-11-15T04:40:00Z", "session_id": "s", "stage": "a", "verdict": go},
+        {"at": "2026-11-15T07:00:00Z", "session_id": "s", "stage": "last", "verdict": go},
+    ]
+    got = context_records.estimate(rows, None)
+    got.pop("at")
+    # 期間: a=[00:59,02:10) 2 呼び出し・切れ 0 / b=[02:10,04:30) 4 呼び出し・切れ 1 / empty は空 / a=[04:40,07:00) 1 呼び出し / last は最後
+    assert got == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {"a": 1.5, "*": 2.0, "b": 4.0},
+        "stage_expiries": {"a": 0.0, "*": 0.0, "b": 1.0},
+        "samples": {"restore": 0, "handoff": 0, "stage:a": 2, "stage:*": 3, "stage:b": 1},
+    }
+
+
+# --- 旧い行（再起動の方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の基準） ---
+
+_OLD = {"policy": "current", "margin": 50_000, "config_error": None}
+
+
+def test_report_parts_of_old_rows_only(tmp_path):
+    # 方針の列を持つ旧い行だけの記録で、区分・再起動・自動圧縮の数え方を縛る（U2 で新しい行と混ぜても同じであることの基準）
+    t = _transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": "始める"}},
+            _call(0, "2026-11-15T01:00:00Z"),
+            _call(1, "2026-11-15T01:00:00Z", out=20, mid="m0"),
+            _call(2, "2026-11-15T01:10:00Z"),
+            {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}},
+        ],
+    )
+    rows = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1", **_OLD},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s", "work": "#1", "event": context_records.MARK_HANDOFF, **_OLD},
+        {"at": "2026-11-15T01:20:00Z", "session_id": "s", "work": "#1", "verdict": "再起動", "reason": "手動", **_OLD},
+    ]
+    got = context_report.report("#1", rows, [], None)
+    assert got["sessions"] == 1
+    assert (got["parts"]["conductor"]["calls"], got["parts"]["conductor"]["out"], got["parts"]["handoff"]["calls"]) == (1, 20, 1)
+    assert got["restarts"] == {"手動": 1} and got["restart_count"] == 1
+    assert got["auto_compacts"] == 1
+
+
+def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
+    # 方針の列を持つ旧い行だけの記録から較正した見込みを縛る（U2 で新しい行と混ぜても同じであることの基準）
+    env = {"NDF_CONTEXT_DIR": str(tmp_path / "ctx")}
+    monkeypatch.setattr(context_records, "repo_key", lambda root: "o__r")
+    for n in range(3):
+        t = _calls_transcript(tmp_path / f"t{n}.jsonl", [("2026-11-15T01:00:00Z", 100 + n), ("2026-11-15T01:10:00Z", 200 + n)])
+        restored = {"at": "2026-11-15T01:05:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_RESTORED}
+        handoff = {"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF}
+        context_records.append("o__r", restored | _OLD, env)
+        context_records.append("o__r", handoff | _OLD, env)
+    body = context_records.calibrate(None, 30, 0.0, env)
+    assert body["samples"]["restore"] == 3 and body["samples"]["handoff"] == 3
+    assert (body["restore_context"], body["restore_calls"]) == (101.0, 1.0)
+    assert (body["handoff_calls"], body["handoff_output"]) == (1.0, 10.0)
