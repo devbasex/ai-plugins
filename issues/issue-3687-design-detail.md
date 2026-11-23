@@ -168,7 +168,7 @@ plugins/ndf/
 | `uv_installer_sha256` | `src/ndf/contracts/toolchain.py` | 新設 | `uv_installer_sha256() -> str` | uv のインストーラの照合値 |
 | `check` | `src/ndf/checks/toolchain.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 宣言と置き場の食い違いを 1 か所 1 件の `Finding` にする |
 | `workflow_tools` | `src/ndf/checks/toolchain.py` | 新設 | `workflow_tools(path: Path) -> list[ToolUse]` | 1 本のワークフローから `setup-uv`・`setup-python` のステップを拾い、行番号と `with` の値を返す |
-| `pyproject_floor` | `src/ndf/checks/toolchain.py` | 新設 | `pyproject_floor(path: Path) -> tuple[tuple[int, int] | None, int]` | `requires-python` の下限と、その行番号 |
+| `pyproject_floor` | `src/ndf/checks/toolchain.py` | 新設 | `pyproject_floor(path: Path) -> tuple[tuple[int, int] \| None, int]` | `requires-python` の下限と、その行番号 |
 
 - `check`
   - 事前条件: `scope.settings` にリポジトリの設定が入っている。設定の `toolchain` が無ければ何も照らさない（違反 0 件）。`workflows`・`plugin_pyprojects`・`launchers` はキーごとに独立で、在るキーの対象だけを照らす（設計文書の「配る構成の宣言と、リポジトリの設定」）
