@@ -327,6 +327,104 @@ def test_ask_maps_the_failures(out: str, code: int, failure: str) -> None:
     assert judged.kind is None and judged.failure == failure
 
 
+# _awaited
+
+
+class StreamProc(FakeProc):
+    """回収の時点で標準入出力が開いているかを `log` に残す偽の子プロセス。"""
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        self.log.append(("wait", timeout, self.stdin.closed, self.stdout.closed))
+        return self.returncode
+
+
+WAIT_OPEN = ("wait", None, False, False)
+
+
+def awaited_with(monkeypatch: pytest.MonkeyPatch, exchange: Any, killpg: Any = None, code: int = 0):
+    """`_exchange` を差し替えて `_awaited` を 1 回打ち、結果（または投げた例外）・偽のプロセス・順・`_exchange` の引数を返す。"""
+    log: list[tuple[Any, ...]] = []
+    seen: list[tuple[bytes, float]] = []
+
+    def fake_exchange(_proc: Any, payload: bytes, deadline: float) -> Optional[bytes]:
+        seen.append((payload, deadline))
+        return exchange()
+
+    monkeypatch.setattr(reply_judge, "_exchange", fake_exchange)
+    monkeypatch.setattr(reply_judge, "_pause", lambda s: log.append(("sleep", s)))
+    proc = StreamProc(log, code=code)
+    try:
+        try:
+            result: Any = reply_judge._awaited(proc, "本文", 5.0, 100.0, killpg if killpg is not None else Killer(log))
+        except BaseException as error:  # noqa: BLE001 投げた例外も結果として比べる
+            result = error
+    finally:
+        proc.close()
+    return result, proc, log, seen
+
+
+def test_awaited_passes_the_payload_and_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, _, seen = awaited_with(monkeypatch, lambda: b'{"kind": "report", "calls": 1}')
+    assert seen == [("本文".encode("utf-8"), 105.0)]
+
+
+def test_awaited_kills_without_grace_after_an_answer_and_closes_the_streams_after_reaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    judged, proc, log, _ = awaited_with(monkeypatch, lambda: b'{"kind": "wait", "calls": 2}', code=-signal.SIGKILL)
+    assert isinstance(judged, reply_judge.Judged) and (judged.kind, judged.failure, judged.calls) == ("wait", None, 2)
+    assert log == [KILL, WAIT_OPEN] and proc.stdin.closed and proc.stdout.closed
+
+
+def test_awaited_reads_the_exit_code_after_reaping(monkeypatch: pytest.MonkeyPatch) -> None:
+    judged, _, _, _ = awaited_with(monkeypatch, lambda: b"", code=1)
+    assert isinstance(judged, reply_judge.Judged) and judged.failure == "exit"
+
+
+def test_awaited_decodes_a_broken_answer_as_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    judged, _, _, _ = awaited_with(monkeypatch, lambda: b"\xff\xfe")
+    assert isinstance(judged, reply_judge.Judged) and judged.failure == "shape"
+
+
+def test_awaited_stops_gently_on_timeout_and_closes_the_streams_after_reaping(monkeypatch: pytest.MonkeyPatch) -> None:
+    judged, proc, log, _ = awaited_with(monkeypatch, lambda: None, code=-signal.SIGTERM)
+    assert isinstance(judged, reply_judge.Judged)
+    assert (judged.kind, judged.failure, judged.calls) == (None, "timeout", 0) and judged.ms >= 0
+    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert proc.stdin.closed and proc.stdout.closed
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), OSError("読めない"), TimeoutError("締め切り")])
+def test_awaited_stops_gently_and_reraises_the_same_error(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    def broken() -> Optional[bytes]:
+        raise error
+
+    raised, proc, log, _ = awaited_with(monkeypatch, broken)
+    assert raised is error
+    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert proc.stdin.closed and proc.stdout.closed
+
+
+@pytest.mark.parametrize("answer", [b'{"kind": "report", "calls": 1}', None])
+def test_awaited_reaps_and_closes_the_streams_when_the_kill_fails(monkeypatch: pytest.MonkeyPatch, answer: Optional[bytes]) -> None:
+    # 組の番号が無い・権限が無いの他の失敗は投げ直すが、回収と標準入出力を閉じることは済ませる
+    def refused(pid: int, sig: int) -> None:
+        raise RuntimeError(sig)
+
+    raised, proc, log, _ = awaited_with(monkeypatch, lambda: answer, killpg=refused)
+    assert isinstance(raised, RuntimeError) and raised.args == (signal.SIGKILL,)
+    assert log[-1] == WAIT_OPEN and proc.stdin.closed and proc.stdout.closed
+
+
+@pytest.mark.parametrize("gone", [ProcessLookupError, PermissionError])
+def test_awaited_returns_the_answer_when_the_group_is_already_gone(monkeypatch: pytest.MonkeyPatch, gone: type[BaseException]) -> None:
+    def missing(pid: int, sig: int) -> None:
+        raise gone
+
+    judged, _, log, _ = awaited_with(monkeypatch, lambda: b'{"kind": "report", "calls": 1}', killpg=missing)
+    assert isinstance(judged, reply_judge.Judged) and judged.kind == "report" and log == [WAIT_OPEN]
+
+
 # parent_launch
 
 
