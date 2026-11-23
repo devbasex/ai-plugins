@@ -29,7 +29,6 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | `scripts/lib/ndf_wrappers.py` | 根の `scripts/` の `require(<グループ>...)`。根の uv の環境へ 1 回だけ起動し直す |
 | `scripts/lib/` のアダプター（`md.py`・`mdtable.py`・`schema.py`・`procs.py`・`shparse.py`・`versions.py`・`pathmatch.py`・`yamlio.py`） | 根の `scripts/` が外部ライブラリを呼ぶ 1 か所 |
 | `scripts/check-script-structure.py` | 根の `scripts/` の検査。`require-groups`（エントリポイントが届く依存のグループを `require` が並べているか）と `hook-deps`（hook の command が `uv run` を挟まないか） |
-| `plugins/mcp/mcp-serena/` の `pyproject.toml`・`uv.lock`・`scripts/serena_lsp/env.py` | mcp-serena の自分の宣言と環境。NDF を import しない |
 
 ## 用語
 
@@ -84,7 +83,6 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | NDF のプラグイン | `plugins/ndf/pyproject.toml` の `dependencies` の 1 つの一覧と `uv.lock` | `bin/ndf` が `<キャッシュのホーム>/ndf/venv/<バージョン>` に `UV_PROJECT_ENVIRONMENT` で用意する | 結果 JSON の `stopped`・`deps_missing` と、終了コードの表の `deps_missing` の値（[ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md)） |
 | NDF の hook | 同じ一覧 | SessionStart が用意した環境の python。無ければシステムの `python3` で `hooks/boot.py` を起動し、本体を読めなければ出力なし・終了コード 0 | Tool の呼び出しを止めない（`ndf-rebuild.md` の決定 89・91） |
 | 根の `scripts/` | 根の `pyproject.toml` の `[project.optional-dependencies]` のグループと `uv.lock`。グループの名前は `ndf_wrappers.GROUPS` と同じ | `require(...)` が根の `.venv` へ 1 回だけ起動し直す。全体テストの中ではそのまま戻る | uv が無ければ NDF と同じ版の uv を入れ、入れられなければ終了コード 69 |
-| mcp-serena | 自分の `pyproject.toml` と `uv.lock` | SessionStart が `~/.cache/mcp-serena/venv/<版>` を用意し、目印 `~/.cache/mcp-serena/roots<根>` を張る | PreToolUse は判定をせず終了コード 0 |
 
 - 外部パッケージを足す・版を上げるのは、宣言と lock を同じ PR で変えるときだけである
 - 版の選び方は `ndf-rebuild.md` の決定 106、依存の更新の仕組みは `ndf-rebuild-review-scope.md` の決定 118 にある
@@ -268,14 +266,11 @@ import できないとみなして止まる。`require("md", "versions")` のよ
 claude-agent-sdk は呼び出しの形を満たしたが、既定のままでは子の CLI が会話タイトルを作る呼び出しを足して費用が 2.77 倍になり、
 止める手段は文書に無い環境変数だけだった。置き換えで消える自作は約 130 行で、SDK だけが持つ機能を今の使い方で使わない。
 
-### 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する
+### 決定 25: （廃止）mcp-serena の hook の環境
 
-mcp-serena の PreToolUse の hook は、Tool の呼び出しのたびに `.serena/project.yml` を ruamel.yaml で読む。SessionStart の
-`serena-lsp.py hook session-start` が `~/.cache/mcp-serena/venv/<版>` を用意して目印を張り、PreToolUse の command は
-`sh -c '[ -x "$0" ] || exit 0; exec "$0" "$@"'` で目印の python を起動する。環境が無ければ判定をせず終了コード 0 で通る。
-NDF の hook と起動の形を 1 つにそろえる。NDF のコードは import しない（mcp-serena だけを入れた利用者の手元に NDF は無い）。
-
-採らなかった案: 呼ぶたびに `uv run` で起動し直す（Tool の呼び出しのたびに 0.12〜0.18 秒増える）
+mcp-serena は Serena 2.1.0 向けの作り直しで自前の hook・`pyproject.toml`・`uv.lock` を捨て、公式の `serena-hooks` を
+`uvx --from serena-agent==2.1.0` で起動するようになった。用意済みの環境の python を直に起動する仕組みは無くなった
+（[mcp-serena-serena-2-1.md](mcp-serena-serena-2-1.md)）。
 
 ### 決定 29: 触るファイルの重なる組は止めずに待たせて直列にする
 
@@ -373,7 +368,6 @@ DBOS を開かない副命令は import しない。
 - 根のエントリポイントが届く依存のグループを `require` が並べていなければ `require-groups` が落とし、hook の command が `uv run` を挟めば `hook-deps` が落とすこと（決定 20 を引き継ぐ `ndf-rebuild.md` の決定 89、決定 23）
 - GitHub の読み直しが ETag 付きの REST で行われ、片方の枠が上限のときに代われる読み取りがもう片方の枠で行われること。`pulls` は `github.rest-fallback` を超える件数では REST へ読み替えず、`pull` は読み替え先も上限なら REST へ戻らないこと（決定 16）
 - `remaining` を渡さない `github.client()` が上限を待たずに返し、渡したときは解除が残りを越える上限を待たずに `retry_after` 付きで返すこと（決定 16・30）
-- mcp-serena の PreToolUse の hook が、環境が無いときに判定をせず終了コード 0 で終わること（決定 25）
 
 ## 関連リンク
 

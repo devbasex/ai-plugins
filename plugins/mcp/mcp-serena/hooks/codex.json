@@ -2,25 +2,26 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook session-start --client codex; fi; exit 0'",
-            "timeout": 10,
-            "statusMessage": "Checking Serena language servers"
+            "command": "uvx --from serena-agent==2.1.0 serena-hooks activate --client=codex",
+            "statusMessage": "Activating Serena project",
+            "timeout": 5
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|shell|exec_command|local_shell|mcp__.*serena.*",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/mcp-serena/roots$PLUGIN_ROOT/bin/python\" \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook pre-tool-use --client codex",
-            "timeout": 5,
-            "statusMessage": "Counting non-symbolic code reads"
+            "command": "uvx --from serena-agent==2.1.0 serena-hooks remind --client=codex",
+            "statusMessage": "Checking Serena tool usage",
+            "timeout": 5
           }
         ]
       }

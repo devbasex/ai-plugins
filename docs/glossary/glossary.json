@@ -112,11 +112,6 @@
       "meaning": "worktree の設定・セッション開始 hook・テスト環境の割り当ての語"
     },
     {
-      "id": "mcp-serena",
-      "name": "mcp-serena",
-      "meaning": "mcp-serena が言語サーバーを選び、インストールを確かめるときの語"
-    },
-    {
       "id": "playwright-kit",
       "name": "playwright-kit のテスト計画",
       "meaning": "探索的テストとテスト設計技法の語。page role・oracle・HTSM など業界の定訳をそのまま使う"
@@ -1098,15 +1093,6 @@
       "source": "docs/specifications/doc-consistency-checks.md",
       "deprecated": [
         "正本"
-      ]
-    },
-    {
-      "term": "インストールチェック",
-      "context": "mcp-serena",
-      "meaning": "公式 LSP プラグイン・本体・追加のチェックが揃っているかを見ること（check）",
-      "source": "docs/specifications/mcp-serena-language-servers.md",
-      "deprecated": [
-        "導入のチェック"
       ]
     },
     {
