@@ -474,7 +474,7 @@ plugins/ndf/
 | `VERSION` | 定数（今の版） | `src/ndf/contracts/internal.py` | 1 |
 | 書式の検査器 | 関数（`date-time` の検査。`datetime.fromisoformat` で読めて時差が 0） | `src/ndf/contracts/internal.py` | `jsonschema.FormatChecker()` に登録し、核の検証器だけに渡す（`ndf.contracts.schema_errors` は変えない） |
 | 読める版 | データ | `contracts/schemas/internal/<種類>.schema.json` の `properties.version.enum` | `[1]` |
-| 名前の対応表 | データ | `contracts/data/internal-names.json` | 時刻は `at`、結果は `status`、形の版は `version`、製品の版は `product_version`、期限は `until`（別の意味） |
+| 名前の対応表 | データ | `contracts/data/internal-names.json` | 時刻は `at`、結果は `status`、形の版は `version`、製品の版は `product_version`、工程の定義の文書の版は `definition_version`（別の意味）、期限は `until`（別の意味） |
 
 ### 単体テストの観点
 
