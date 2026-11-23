@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.checks import experimental, run
 from ndf.checks.model import CheckError, Scope
 
@@ -44,6 +45,11 @@ def test_reference_from_src_is_a_finding(plugin, rules, table, where):
 def test_reference_from_bin_script_is_a_finding(plugin, rules, table, where):
     plugin.write("bin/ndf", f"#!/bin/sh\nexec python3 {_needle()}/x.py\n")
     assert where(_check(plugin, rules)) == [("ndf", 2)]
+
+
+def test_reference_from_skill_javascript_is_a_finding(plugin, rules, table, where):
+    plugin.write("skills/release/assets/slides/build-deck.js", f"require('../../../../{_needle()}/x.js');\n")
+    assert where(_check(plugin, rules)) == [("build-deck.js", 1)]
 
 
 def test_reference_from_plugin_manifest_is_a_finding(plugin, rules, table, where):
@@ -96,11 +102,16 @@ def test_unreadable_table_stops_the_check(plugin, rules, table):
         _check(plugin, rules)
 
 
-def test_link_to_outside_the_repository_is_not_read(plugin, rules, table, tmp_path):
+def test_link_to_outside_the_repository_is_not_read(plugin, tmp_path, monkeypatch, capsys, last_result):
+    """CLI の通常の経路（`ndf check`）で、外を指すリンクの本文をどの規則も読まない（構文の確かめで本文が出ない）。"""
     outside = tmp_path / "outside.py"
-    outside.write_text(f"X = '{_needle()}'\n", encoding="utf-8")
+    outside.write_text("SECRET_IN_OUTSIDE = (\n", encoding="utf-8")
     (plugin.root / "link.py").symlink_to(outside)
-    assert _check(plugin, rules) == []
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    run.main([])
+    out = capsys.readouterr()
+    assert last_result(out.out)["status"] == "ok"
+    assert "SECRET_IN_OUTSIDE" not in out.out + out.err and "link.py" not in out.out + out.err
 
 
 def test_table_linked_to_outside_the_repository_is_not_read(plugin, rules, table, tmp_path):
@@ -108,6 +119,7 @@ def test_table_linked_to_outside_the_repository_is_not_read(plugin, rules, table
     outside.write_text("{", encoding="utf-8")
     table.unlink()
     table.symlink_to(outside)
+    assert all(s.path != table for s in plugin.scope().sources)
     assert _check(plugin, rules) == []
 
 

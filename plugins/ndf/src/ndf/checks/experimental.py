@@ -41,12 +41,6 @@ EXEMPT_VALUES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _inside(scope: Scope) -> list[Source]:
-    """見るファイル（検査が集めた `scope.sources`）のうち、解決した先がリポジトリの中のもの。外を指すリンクの本文は読まない。"""
-    root = scope.repo_root.resolve()
-    return [s for s in scope.sources if s.path.resolve().is_relative_to(root)]
-
-
 def _needle(sources: list[Source], table: Path) -> str | None:
     """保存先の表の、実験版の行の保存先。表かその行が無ければ `None`、表が読めなければ `CheckError`。"""
     src = next((s for s in sources if s.path == table), None)
@@ -101,9 +95,10 @@ def _allowed(rel: str) -> bool:
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """既定で動くもの（プラグインの根の下の見るファイル）から実験版の保存先への参照を違反にする。
 
-    ファイルの列挙と本文は検査が集めた `scope.sources` を使い、ここで列挙し直さない。
+    ファイルの列挙と本文は検査が集めた `scope.sources` を使い、ここで列挙し直さない（リポジトリの外を指すリンクは
+    集める時点で除かれている）。
     """
-    sources = _inside(scope)
+    sources = scope.sources
     needle = _needle(sources, scope.plugin_root / table_rel())
     if needle is None:
         return []
