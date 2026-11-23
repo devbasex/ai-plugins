@@ -13,12 +13,12 @@ from ndf.testing import weight
 
 from ._hooks import bash, call_entry, stop
 
-# 解析の関数（モジュールと名前）。本文の判定はルール（`reply_wait`）の `has_prose`・`prose_kind`
+# 解析の関数（モジュールと名前）。本文の判定はルール（`reply_wait`）の `prose_lines`（行の抜き出し）・`prose_kind`
 _PARSERS = (
     (context, "parse_payload"),
     (context, "parse_shell"),
     (context, "read_tail"),
-    (reply_wait, "has_prose"),
+    (reply_wait, "prose_lines"),
     (reply_wait, "prose_kind"),
 )
 
@@ -58,8 +58,8 @@ def test_stop_classifies_the_last_reply_once(tmp_path, calls, monkeypatch):
     payload = stop(tmp_path, "x")
     del payload["last_assistant_message"]
     call_entry("claude", "Stop", payload)
-    # 本文の行の抜き出し（`has_prose`）も 1 回の Stop で 1 回だけ
-    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "has_prose": 1, "prose_kind": 1})
+    # 本文の行の抜き出し（`prose_lines`）も 1 回の Stop で 1 回だけ。`prose_kind` は抜き出した行を受け、抜き出し直さない
+    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "prose_lines": 1, "prose_kind": 1})
 
 
 def test_shell_tree_reads_words_background_and_loops():
@@ -287,13 +287,18 @@ def test_last_reply_kind_ignores_code_lines():
 
 
 def test_last_reply_kind_does_not_read_the_prose_lines_twice(monkeypatch):
-    # `has_reply_prose` の結果を使い、`reply_kind`（`has_prose` をもう一度打つ）を呼ばない
-    def twice(text):
-        raise AssertionError("reply_kind を呼んだ")
+    # `has_reply_prose` と `last_reply_kind` が同じ行を読み、`prose_lines`（行の抜き出し）を 1 回だけ打つ
+    real = reply_wait.prose_lines
+    extracted: list[str] = []
 
-    monkeypatch.setattr(reply_wait, "reply_kind", twice)
+    def counted(text):
+        extracted.append(text)
+        return real(text)
+
+    monkeypatch.setattr(reply_wait, "prose_lines", counted)
     ctx = context.HookContext("claude", "Stop", {"last_assistant_message": "どちらにしますか？"})
     assert ctx.has_reply_prose and ctx.last_reply_kind == "prose_wait"
+    assert extracted == ["どちらにしますか？"]
 
 
 def test_read_tail_drops_the_partial_first_line(tmp_path):

@@ -162,9 +162,27 @@ def test_a_conditional_contact_note_with_a_specific_word_is_a_report():
 
 
 def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
-    """guard は `has_prose` の結果を持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
+    """guard は `prose_lines` の返りを持ったまま `prose_kind` を呼ぶ。本文のある応答では `reply_kind` と同じ種類を返す。"""
     for text in ("返答を待ちます。", "作業を終えました。", "p9 の作業を終えました。別のレーンは承認を待っています。"):
-        assert reply_wait.prose_kind(text) == reply_wait.reply_kind(text)
+        assert reply_wait.prose_kind(reply_wait.prose_lines(text)) == reply_wait.reply_kind(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "対応が完了しました。引き続きよろしくお願いします。",
+        "以上です。よろしくお願いいたします。",
+        "修正を push しました。今後ともよろしくお願い申し上げます。",
+    ],
+)
+def test_a_set_closing_is_a_report(text):
+    """回答・承認を求めない定型の結びは待ちに数えない（変更要求を返さない）。"""
+    assert reply_wait.reply_kind(text) == "report"
+
+
+@pytest.mark.parametrize("text", ["修正を終えました。ご確認をよろしくお願いします。", "差分を載せました。承認をお願いします。"])
+def test_an_explicit_request_with_a_closing_is_still_a_wait(text):
+    assert _is_wait(text)
 
 
 def test_a_question_inside_a_code_block_is_not_a_wait():

@@ -37,7 +37,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、`relay.claude_options`、`relay.signals`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`endpoint_resting`（新設）・`endpoint_scope`（新設）・`Judged`（新設の型） |
-| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列は 10 系に 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard が使う形は、かぎ括弧の引用の中身を見ず、待ちの文がどれも別の場所の待ちの報告だけ（同じ文の前後の節に本人への問いが無い）の本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設）・`has_prose`（新設。本文の行があるかだけを見る）・`prose_kind`（新設。`has_prose` が真の本文の `elsewhere_wait` / `prose_wait` / `report`。`has_prose` を確かめ直さない）・`reply_kind`（新設。`has_prose` が偽なら `none`、真なら `prose_kind`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
+| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列は 10 系に 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard が使う形は、かぎ括弧の引用の中身を見ず、待ちの文がどれも別の場所の待ちの報告だけ（同じ文の前後の節に本人への問いが無い）の本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設）・`prose_lines`（新設。本文の行の抜き出し。1 回の Stop で 1 回だけ打つ）・`prose_kind`（新設。`prose_lines` の空でない返りを受け、`elsewhere_wait` / `prose_wait` / `report`。行を抜き出し直さず、かぎ括弧の引用は行ごとに外す。回答・承認を求めない定型の結び（「引き続きよろしくお願いします。」）だけの文は待ちに数えない）・`reply_kind`（新設。`prose_lines` が空なら `none`、あれば `prose_kind`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
 | `plugins/ndf/src/ndf/domains/hooks/judge_child.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む。最後の応答の種類をルールの判定から返す | `reply_wait`、標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設）・`HookContext.has_reply_prose`（新設）・`HookContext.last_reply_kind`（変更）・`classify_reply`（削除） |
@@ -165,9 +165,9 @@ plugins/ndf/
 
 | 条件の組み合わせ | 結果 |
 | --- | --- |
-| `ctx.has_reply_prose`（`reply_wait.has_prose(ctx.last_reply)`）が偽（本文が空。文の判定はせず、`ctx.last_reply_kind` はまだ評価しない） | 通す（`reply=none`・`judge=skip:empty`） |
+| `ctx.has_reply_prose`（`ctx.reply_prose_lines` が空でないか）が偽（本文が空。文の判定はせず、`ctx.last_reply_kind` はまだ評価しない） | 通す（`reply=none`・`judge=skip:empty`） |
 | `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない（`ctx.last_reply_kind` を評価しない）。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
-| ここで初めて `ctx.last_reply_kind`（`reply_wait.prose_kind` の本文の判定。1 行目で持った `ctx.has_reply_prose` を使い、本文の行の有無を確かめ直さない）を評価し、ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告だけ） | 通す（`judge=skip:elsewhere`） |
+| ここで初めて `ctx.last_reply_kind`（`reply_wait.prose_kind` の本文の判定。1 行目で持った `ctx.reply_prose_lines` を使い、本文の行を抜き出し直さない）を評価し、ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告だけ） | 通す（`judge=skip:elsewhere`） |
 | ルールの判定が `prose_wait` | 変更要求（今の文面。`judge=rule`）。軽いモデルを呼ばない。上限に達していても返す（dispatch が上限で通し、待ち通知を送る） |
 | 上のどれでもなく、`judge_text(...)`（質問へ渡す本文）が空（コードブロックの行と空行だけの応答・`code_lines` の数が行の数と合わない応答。U+2028 を改行と数えるルールの判定は `report` などを返しうる） | 通す（`judge=skip:no_prose`。空の本文で子と `claude` を起動しない）。ただし `svc.counter.pushback_left()` が偽で `svc.counter.model_waited()` が真なら変更要求を返す（上限の後の待ちの知らせ） |
 | `ctx.background_tasks` が空でない | 通す（`judge=skip:background`。ルールの判定は `report`） |
@@ -179,7 +179,7 @@ plugins/ndf/
 | 上のどれでもなく、`reply_judge.endpoint_resting(svc.state_dir, 今, os.environ, <parent_launch の返り>)` が真（この起動の形の送信先の不一致から休む間のうち） | 通す（`judge=skip:rest`） |
 | 上のどれでもない | `reply_judge.ask(<judge_text の空でない返り>, 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest(svc.state_dir, failure, 今, os.environ, <parent_launch の返り>)` を呼んでから通す（`judge=fallback:<failure>`） |
 
-- ルールの判定は `ctx.last_reply_kind` で、評価するのは 3 行目（空と AskUserQuestion の確認の後）が最初である。AskUserQuestion 済みの Stop と本文が空の Stop では本文の判定を走らせない。`HookContext.last_reply_kind` は 1 行目と同じ `self.has_reply_prose` を読み、偽なら `none`、真なら `reply_wait.prose_kind(self.last_reply)` を返す（下の「hook の文脈・数え手・締め切り」）。本文の行の抜き出し（`has_prose`）は 1 回の Stop で 1 回だけ打つ（`reply_wait.reply_kind` を呼ぶと `has_prose` をもう一度打つので、guard の経路では呼ばない）。11.0.22 の `classify_reply`（言い回しの列と末尾 4 行）は使わない
+- ルールの判定は `ctx.last_reply_kind` で、評価するのは 3 行目（空と AskUserQuestion の確認の後）が最初である。AskUserQuestion 済みの Stop と本文が空の Stop では本文の判定を走らせない。`HookContext.last_reply_kind` は 1 行目と同じ `self.reply_prose_lines` を読み、空なら `none`、あれば `reply_wait.prose_kind(self.reply_prose_lines)` を返す（下の「hook の文脈・数え手・締め切り」）。本文の行の抜き出し（`prose_lines`）は 1 回の Stop で 1 回だけ打つ（`reply_wait.reply_kind` を呼ぶと `prose_lines` をもう一度打つので、guard の経路では呼ばない）。11.0.22 の `classify_reply`（言い回しの列と末尾 4 行）は使わない
 - 「ルールの判定で決める」は、`prose_wait` を 4 行目で既に変更要求にしているので、5 行目より下ではいつも通過になる（`judge=skip:limit` で `model_waited()` が真のときだけ変更要求）。モデルを呼べない Stop・モデルが回答しない Stop の結果は通過である（要求仕様の受け入れ条件 5・6a）
 - 条件は表の上から順に見て、最初に当たった 1 つを `judge` に書く（複数が当たっても 1 つ）。`/proc` を読む `parent_launch` は起動の失敗の休み（`resting`）と残りの秒の後に置き、送信先の不一致の休み（`endpoint_resting`）は親の起動引数が要るので `parent_launch` の後に置く。`/proc` はモデルを呼ばないと分かっている Stop では読まない。子が `endpoint` を返したら `judge=fallback:endpoint` で、休みのマーカーが次の Stop から休む間だけ、同じ送信先の確かめの対象（`endpoint_scope`）の子の起動を止める
 - 変更要求の文面・上限・上限の後の待ちの知らせは変えない（dispatch と main が持つ）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである
@@ -212,8 +212,9 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `asked_since_prompt` | `context.py` | 新設 | `asked_since_prompt(tail: str) -> bool` | 会話の記録の末尾を後ろから読み、利用者の入力（`type` が `user` で `isMeta` が真でなく、`content` が文字列か text の要素を持つ行）に当たる前に、`name` が `AskUserQuestion` の `tool_use` があれば真 |
 | `HookContext.asked_this_turn` | `context.py` | 新設 | `cached_property -> bool` | `asked_since_prompt(self.transcript_tail)` |
-| `HookContext.has_reply_prose` | `context.py` | 新設 | `cached_property -> bool` | `reply_wait.has_prose(self.last_reply)`。guard `stop-wait` の 1 行目と `last_reply_kind` が同じ結果を読む |
-| `HookContext.last_reply_kind` | `context.py` | 変更 | `cached_property -> str`（変えない） | `self.has_reply_prose` が偽なら `none`、真なら `reply_wait.prose_kind(self.last_reply)`（`reply_wait.reply_kind` は呼ばない。本文の行の有無を 2 回確かめない）。11.0.22 の `classify_reply`・`_WAIT_RE`・`_TAIL_LINES` は消す（別の場所の待ちの正規表現は `reply_wait.ELSEWHERE_RE` の 1 つだけ） |
+| `HookContext.reply_prose_lines` | `context.py` | 新設 | `cached_property -> list[tuple[str, bool]]` | `reply_wait.prose_lines(self.last_reply)`。`has_reply_prose` と `last_reply_kind` が同じ返りを読む |
+| `HookContext.has_reply_prose` | `context.py` | 新設 | `cached_property -> bool` | `bool(self.reply_prose_lines)`。guard `stop-wait` の 1 行目 |
+| `HookContext.last_reply_kind` | `context.py` | 変更 | `cached_property -> str`（変えない） | `self.has_reply_prose` が偽なら `none`、真なら `reply_wait.prose_kind(self.reply_prose_lines)`（`reply_wait.reply_kind` は呼ばない。本文の行を 2 回抜き出さない）。11.0.22 の `classify_reply`・`_WAIT_RE`・`_TAIL_LINES` は消す（別の場所の待ちの正規表現は `reply_wait.ELSEWHERE_RE` の 1 つだけ） |
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
 | `Counter.mark_model_wait` | `counter.py` | 新設 | `mark_model_wait(self) -> None` | 今の入力の記録に `model_wait: true` を置く（入力が変わると記録ごと初期化される）。`usable` が偽なら何もしない |
 | `Counter.model_waited` | `counter.py` | 新設 | `model_waited(self) -> bool` | 今の入力の記録の `model_wait`。無ければ偽 |

@@ -118,10 +118,19 @@ _ELSEWHERE_PLACE = re.compile(_ELSEWHERE_PLACES)
 _OWN_REQUEST_MARKERS = ("こちら", "私", "当方", "てよいか", "てよろしいか", "でよいか", "でよろしいか", "てもよいか")
 # 人の返事でないものを待つ「お待ちしています」（「CI の結果をお待ちしています。」）。待ちの文に数えない
 _NON_REPLY_WAIT = re.compile(r"(結果|完了|終了|終わり|処理|反映|実行|ビルド|デプロイ|ジョブ|テスト|CI)をお待ち")
+# 回答・承認を求めない定型の結び（「引き続きよろしくお願いします。」）。文がこれだけなら待ちの文に数えない。
+# 求めるものを書いた依頼（「ご確認をよろしくお願いします。」）は当たらず、待ちに残る
+_CLOSING = re.compile(
+    r"^(?:(?:引き続き|今後とも|今後も|どうぞ|何卒|なにとぞ|以上です|以上)[、，,\s]*)*"
+    r"よろしくお願い(?:します|いたします|致します|申し上げます)$"
+)
 
 
-def _prose_lines(text: str) -> list[tuple[str, bool]]:
-    """コードのブロック・引用・表・見出しを除いた、空でない行と、箇条書きの項目かどうか。"""
+def prose_lines(text: str) -> list[tuple[str, bool]]:
+    """コードのブロック・引用・表・見出しを除いた、空でない行と、箇条書きの項目かどうか。
+
+    本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
+    """
     out: list[tuple[str, bool]] = []
     in_code = False
     for raw in text.splitlines():
@@ -196,6 +205,8 @@ def _user_wait(core: str) -> bool:
 def _is_wait(sentence: str) -> bool:
     """文が人の返事を待つ形か。"""
     core = _core(sentence)
+    if _CLOSING.match(core):
+        return False
     if _user_wait(core):
         return True
     if sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
@@ -231,13 +242,13 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
-def _waits(text: str) -> list[str]:
-    """本文の最後の行から、回答・承認を待つ文を取り出す。"""
-    return [s for s in _sentences(_last_lines(_prose_lines(text))) if _asks_reply(s)]
+def _waits(lines: list[tuple[str, bool]]) -> list[str]:
+    """本文の行（`prose_lines` の返り）の最後の行から、回答・承認を待つ文を取り出す。"""
+    return [s for s in _sentences(_last_lines(lines)) if _asks_reply(s)]
 
 
 def _unquoted(text: str) -> str:
-    """かぎ括弧の引用の中身を除いた本文（入れ子は内側から外す）。"""
+    """かぎ括弧の引用の中身を除いた文（入れ子は内側から外す）。"""
     prev = None
     while prev != text:
         prev = text
@@ -298,25 +309,30 @@ def classify_reply_wait(text: str) -> str:
 
     操作の案内のリクエストの形（「更新を終えました。アプリを再起動してください。」）は待ちに数えない。
     """
-    waits = _waits(text)
+    waits = _waits(prose_lines(text))
     if not waits:
         return NONE
     return APPROVAL if any(any(w in s for w in APPROVAL_WORDS) for s in waits) else ANSWER
 
 
-def has_prose(text: str) -> bool:
-    """コードのブロック・引用・表・見出しのほかに本文の行があるか。文の判定はしない（`reply_kind` の `none` の否定）。"""
-    return bool(_prose_lines(text))
+def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
+    """行ごとにかぎ括弧の引用の中身を除き、空になった行を落とす（行を抜き出し直さない）。"""
+    out: list[tuple[str, bool]] = []
+    for text, bullet in lines:
+        rest = _unquoted(text).strip()
+        if rest:
+            out.append((rest, bullet))
+    return out
 
 
-def prose_kind(text: str) -> str:
-    """本文の行がある（`has_prose` が真の）応答の種類。`report` / `elsewhere_wait` / `prose_wait`。
+def prose_kind(lines: list[tuple[str, bool]]) -> str:
+    """本文の行（`prose_lines` の空でない返り）を持つ応答の種類。`report` / `elsewhere_wait` / `prose_wait`。
 
-    `has_prose` を確かめ直さない。guard は `has_prose` の結果を持ったまま、本文の行がある Stop でだけこれを呼ぶ
+    行を抜き出し直さない。guard は `prose_lines` の返りを持ったまま、本文の行がある Stop でだけこれを呼ぶ
     （本文の全行の抜き出しを 1 回の Stop で 2 回しない）。待ちの文は `classify_reply_wait` と同じ形で探し、
-    かぎ括弧の引用の中身は見ない。
+    かぎ括弧の引用の中身は行ごとに見ない（行をまたぐ引用は外さない）。
     """
-    waits = _waits(_unquoted(text))
+    waits = _waits(_unquoted_lines(lines))
     if not waits:
         return "report"
     if all(_only_elsewhere(s) for s in waits):
@@ -329,6 +345,7 @@ def reply_kind(text: str) -> str:
 
     `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
     待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。
-    `has_prose` の結果を既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
+    `prose_lines` の返りを既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
     """
-    return prose_kind(text) if has_prose(text) else "none"
+    lines = prose_lines(text)
+    return prose_kind(lines) if lines else "none"
