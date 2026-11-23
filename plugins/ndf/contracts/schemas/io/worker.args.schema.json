@@ -9,6 +9,26 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "append",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--report": {
+          "type": "string"
+        },
+        "--done": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--report"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "attention",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -41,6 +61,23 @@
       "required": [
         "subcommand",
         "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "collect",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--report": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--report"
       ]
     },
     {
@@ -94,6 +131,27 @@
       "required": [
         "subcommand",
         "plans"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "prepare",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--dir": {
+          "type": "string"
+        },
+        "--name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--dir",
+        "--name"
       ]
     },
     {

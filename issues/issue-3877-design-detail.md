@@ -30,7 +30,7 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | 作業ディレクトリと名前から、worker の 4 つのファイルのパスを組み、既存のリンクと既存の inode をたどらずに読み・書き・消す | `contextlib`・`os`・`pathlib`・`re`・`secrets`・`stat`・`typing` | モジュール `ndf.contracts.worker_paths` | `ReportPaths`（新設）・`NameInvalid`（新設）・`EntryError`（新設）・`EntryUnsafe`（新設）・`EntryUnreadable`（新設）・`WorkDir`（新設）・`report_paths`（新設）・`report_name`（新設）・`open_workdir`（新設）・`entry_state`（新設）・`read_file`（新設）・`write_file`（新設）・`remove_file`（新設） |
+| `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | 作業ディレクトリと名前から、worker の 4 つのファイルのパスを組み、既存のリンクと既存の inode をたどらずに読み・書き・消す | `contextlib`・`os`・`pathlib`・`re`・`secrets`・`stat`・`typing` | モジュール `ndf.contracts.worker_paths` | `ReportPaths`（新設）・`NameInvalid`（新設）・`EntryError`（新設）・`EntryUnsafe`（新設）・`EntryUnreadable`（新設）・`WorkDir`（新設）・`report_paths`（新設）・`report_name`（新設）・`open_workdir`（新設）・`check_fresh`（新設）・`entry_state`（新設）・`read_file`（新設）・`write_file`（新設）・`remove_file`（新設） |
 | `plugins/ndf/src/ndf/contracts/cli.py` | 変更 | `ndf contracts emit --out` の書き込みを `write_file` にする | `ndf.contracts.worker_paths` | モジュール `ndf.contracts.cli` | `_cmd_emit`（変更） |
 | `plugins/ndf/src/ndf/core/worker.py` | 変更 | 報告の保存先を用意し、報告を追記・読み取るサブコマンドを足し、`worker run` の結果ファイルをリンクをたどらずに扱う | `ndf.contracts.worker_paths`・`ndf.contracts.result` | モジュール `ndf.core.worker` | `_cmd_prepare`（新設）・`_add_prepare`（新設）・`_cmd_append`（新設）・`_add_append`（新設）・`_cmd_collect`（新設）・`_add_collect`（新設）・`_parser`（変更）・`_cmd_run`（変更）・`delegate`（変更）・`_written`（変更）・`_read_result`（新設）・`search_record`（変更）・`_missing_record`（変更）・`_stopped_detail`（変更）・`outcome_of`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | 空かもしれない変数をパスに含む `rm` を止める guard | `re`・`ndf.domains.hooks.verdict` | モジュール `ndf.domains.hooks.guards.rm_variable` | `risky_removal`（新設）・`expanded_variables`（新設）・`check`（新設） |
@@ -53,12 +53,12 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `ReportPaths` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `class ReportPaths(NamedTuple): prompt: Path; report: Path; done: Path; result: Path` | 1 人の worker が読み書きする 4 つのファイルのパス |
 | `NameInvalid` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `class NameInvalid(ValueError)` | worker の名前の形が合わないことを呼び出し元へ伝える |
-| `report_paths` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `report_paths(directory: Path, name: str) -> ReportPaths` | 作業ディレクトリと worker の名前から、プロンプト・報告・完了マーカー・作業の結果ファイルの 4 つの絶対パスを組む |
+| `report_paths` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportPaths` | 作業ディレクトリと worker の名前から、プロンプト・報告・完了マーカー・作業の結果ファイルの 4 つの絶対パスを組む |
 
 - `report_paths`
   - 事前条件: 無し（名前の形は呼ぶ側でなくこの関数が確かめる）
   - 事後条件: 返る 4 つはすべて絶対パスで、同じ親ディレクトリ（`directory` を絶対パスにしたもの）の直下にある。ファイルの有無は見ない
-  - 副作用: 無し。`Path.resolve()`（`strict=False`）を当てるのは `directory` だけで、名前を足した後の 4 つのパスには当てない（作業ディレクトリの中の名前がリンクでも、リンクの先へ解かない）。ファイルを作らず、書き換えない
+  - 副作用: 無し。`resolve` が真（`ndf worker prepare` が利用者の `--dir` を受けるとき）なら解くのは `directory` だけで、名前を足した後の 4 つのパスには当てない（作業ディレクトリの中の名前がリンクでも、リンクの先へ解かない）。解き方は、`os.path.lexists` で存在する最も深い要素（リンク自体を含む）を探してそこまでを `Path.resolve(strict=True)` で解き、無い残りの要素を解かずに足す。存在するディレクトリへのリンクは受け入れ、参照先の無いリンク・リンクの循環は作る前に `EntryUnsafe`（`symlink`）で拒む（`strict=False` の `resolve` は参照先の無いリンクを先のパスへ解き、`open_workdir(create=True)` がリンクの先を新しく作ってしまうため）。無い要素の後の `..` は無い要素を 1 つ打ち消すだけにし、打ち消した後に存在する要素が来れば、そこから同じ手で解き直す。解いた要素（最初に解く存在する最も深い要素と、解き直した要素）は `os.stat` でディレクトリであることを確かめ、通常のファイル（リンクの先を含む）などなら、続く `..` でその親へ進む前に `EntryUnsafe`（`other`）で拒む（解いた後は `base.parent` で上がるので、確かめないとリンクの先のファイルの親にある別の作業の報告を初期化してしまう）（返すパスに `..` を残さない。`open_workdir` は `os.path.abspath` で `..` を畳むので、残すと開く場所が返したパスと食い違い、その先の存在するディレクトリへのリンクを拒んでしまう）。`_cmd_prepare` はこれを `WorkerError("invalid", …)` に包む。`resolve` が偽（`ndf worker append`・`collect` が `prepare` の返した解決済みの置く場所を受けるときと、`ndf answer work` が状態の保存先を受けるとき）なら `directory` も解かず、`os.path.abspath` で絶対パスにするだけである（準備の後に親をリンクへ差し替えられても、解き直してリンクの先のパスを `open_workdir` へ渡さない）。ファイルを作らず、書き換えない
 
 4 つのうち `prompt` を使うのは `ndf answer work`（#3908）だけで、`ndf worker prepare` は残りの 3 つを返す。名前の区切りはすべて `.` でそろえる（`<名前>.prompt.md`・`<名前>.report.md`・`<名前>.report.md.done`・`<名前>.result.json`）。
 
@@ -96,7 +96,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `report_paths` | `(Path("/w"), "n")` が `/w/n.prompt.md`・`/w/n.report.md`・`/w/n.report.md.done`・`/w/n.result.json` を返す | 名前が 1 文字と 64 文字は通る。65 文字は断る。相対パスの `directory` でも絶対パスで返る。`<d>/n.result.json` が作業ディレクトリの外へのリンクでも、返る `result` は `<d>/n.result.json` のまま | 名前が空文字・`../x`・`a/b`・`日本語` は `NameInvalid` で、例外の前後でファイルシステムが変わらない |
+| `report_paths` | `(Path("/w"), "n")` が `/w/n.prompt.md`・`/w/n.report.md`・`/w/n.report.md.done`・`/w/n.result.json` を返す | 名前が 1 文字と 64 文字は通る。65 文字は断る。相対パスの `directory` でも絶対パスで返る。`<d>/n.result.json` が作業ディレクトリの外へのリンクでも、返る `result` は `<d>/n.result.json` のまま | 名前が空文字・`../x`・`a/b`・`日本語` は `NameInvalid` で、例外の前後でファイルシステムが変わらない。`<無い要素>/../<通常のファイルへのリンク>/..` は `EntryUnsafe`（`other`）で、リンク先のファイルの親にある同名の報告が変わらない |
 ## リンクをたどらない読み書き（`open_workdir`・`entry_state`・`read_file`・`write_file`・`remove_file`）
 
 満たす決定: 決定 3、決定 7、受け入れ条件 4
@@ -108,10 +108,11 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `EntryError` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `class EntryError(ValueError)` | 下の 2 つの共通の親。呼び出し元は読み書きの失敗をこの 1 つで受けて結果 JSON にする |
-| `EntryUnsafe` | 同上 | 新設 | `class EntryUnsafe(EntryError)` | 名前がリンクか、リンク数が 1 の通常のファイルでないことを伝える（名前と見つけた種類を持つ。種類は `symlink`・`hardlink`・`directory`・`other`） |
+| `EntryUnsafe` | 同上 | 新設 | `class EntryUnsafe(EntryError)` | 名前がリンクか、リンク数が 1 の通常のファイルでないことを伝える（名前と見つけた種類を持つ。種類は `symlink`・`hardlink`・`directory`・`other`・`replaced`。`replaced` は `open_workdir` が最初に無かった要素を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、または `check_fresh` が最初に無かった要素を経て開いた作業ディレクトリに初期化する名前を見つけたこと） |
 | `EntryUnreadable` | 同上 | 新設 | `class EntryUnreadable(EntryError)` | 通常のファイルを読めない・UTF-8 として解けないことを伝える（名前と理由を持つ。理由は `OSError` の `strerror` か `UnicodeDecodeError` の文） |
-| `WorkDir` | 同上 | 新設 | `class WorkDir(NamedTuple): path: Path; fd: int` | 開いた作業ディレクトリ。`path` は表示と結果 JSON のパスを組むためだけに使い、操作には使わない |
-| `open_workdir` | 同上 | 新設 | `open_workdir(directory: Path) -> ContextManager[WorkDir]` | `os.open(directory.resolve(), O_RDONLY \| O_DIRECTORY \| O_CLOEXEC)` で 1 回だけ開き、抜けるときに閉じる。リンクを解くのはこの 1 回だけで、開いた後に名前を差し替えられても記述子は開いた時点のディレクトリを指す |
+| `WorkDir` | 同上 | 新設 | `class WorkDir(NamedTuple): path: Path; fd: int; created: bool = False` | 開いた作業ディレクトリ。`path` は表示と結果 JSON のパスを組むためだけに使い、操作には使わない。`created` は、根からたどる途中で最初の `os.open` に無かった要素（`mkdir` で作った・間に現れた）を経て開いたこと |
+| `open_workdir` | 同上 | 新設 | `open_workdir(directory: Path, *, create: bool = False) -> ContextManager[WorkDir]` | リンクを解かない。`directory` は解決済みのパス（`report_paths` が `resolve` 付きで解いた親）を受け、`os.path.abspath` で絶対パスにするだけにする。根から 1 要素ずつ `os.open(要素, … \| O_DIRECTORY \| O_NOFOLLOW \| O_CLOEXEC, dir_fd=親の記述子)` で開く。途中の要素は検索権限だけで開ける `O_PATH`（無い OS は `O_SEARCH`、それも無ければ `O_RDONLY`）、最後の要素だけ `O_RDONLY` で開く（祖先の読み取り権限を求めない）。要素がリンクなら（Linux は `O_DIRECTORY \| O_NOFOLLOW` で `ENOTDIR` を返すので、`os.stat(要素, dir_fd=親, follow_symlinks=False)` で見分ける）`EntryUnsafe`（`symlink`）、ディレクトリでなければ `EntryUnsafe`（`other`）。`create` が真なら、無い要素を親の記述子に対する `os.mkdir(要素, dir_fd=親)` で作ってから同じ手で開く（リンクの先に作らない）。最初の `os.open` で無かった要素は、`mkdir` で作れたときも `mkdir` が `FileExistsError` を返したとき（間に別の手が作った）も、開いた記述子を `os.fstat` で確かめる。ディレクトリでないこと・オーナーが `os.geteuid()` でないことは、それぞれ単独で `EntryUnsafe`（`replaced`）にして初期化せずに止める（作ってから開くまでに、共有の親を書き換えられる手が名前を別の実ディレクトリへ差し替えられ、`O_NOFOLLOW` は実ディレクトリを拒まないため。最初に無かった名前は既存と確かめられていないので、`FileExistsError` でもこの確かめを省かない）。オーナーの確かめが止めるのは、ほかの利用者が持ち込んだディレクトリだけである。オーナーが一致しても同一とは言えない（sticky bit の無い共有の親では、別の利用者が呼んだ利用者の既存のディレクトリを同じ親の中でこの名前へ改名でき、オーナーは変わらない）。中身があるかどうかも同一性の根拠にしない（同じ保存先を同じ利用者が別々の worker の名前で並行して準備すると、先に終えた呼び出しの報告が置かれた正規のディレクトリを開くため）。そのため最初に無かった要素を 1 つでも経て開いたら `WorkDir.created` を真にして返し、初期化する側が書き換える前に `check_fresh` で、新しく作ったディレクトリには無いはずの名前（自分の worker の名前のファイル）が無いことを確かめる。抜けるときに閉じる。開いた後に名前を差し替えられても記述子は開いた時点のディレクトリを指す |
+| `check_fresh` | 同上 | 新設 | `check_fresh(wd: WorkDir, names: Iterable[str]) -> None` | `wd.created` が偽なら何もしない。真なら `names` を 1 つずつ `os.stat(name, dir_fd=wd.fd, follow_symlinks=False)` で引き、どれかが（種類によらず）あれば `EntryUnsafe`（`replaced`）で止める。最初に無かった要素を経て開いたディレクトリは、空で作られた後に、この呼び出しか同じ利用者の並行した準備が別の名前を足したものしか持たないはずで（worker の名前は稼働中の worker と重ねない）、初期化する名前が既にあれば既存のディレクトリへ差し替えられたとみなす。並行した準備が別の名前を置いたディレクトリは受ける |
 | `entry_state` | 同上 | 新設 | `entry_state(wd: WorkDir, name: str) -> Optional[os.stat_result]` | `os.stat(name, dir_fd=wd.fd, follow_symlinks=False)` で、無ければ `None`、リンク数（`st_nlink`）が 1 の通常のファイルならその `stat_result` を返す。シンボリックリンク・リンク数が 2 以上の通常のファイル（ハードリンク）・ディレクトリ・ほかの種類は `EntryUnsafe`。大きさの判定（`st_size`）はこの返りで行い、中身を読まない |
 | `read_file` | 同上 | 新設 | `read_file(wd: WorkDir, name: str) -> Optional[str]` | `os.open(name, O_RDONLY \| O_NOFOLLOW \| O_NONBLOCK \| O_CLOEXEC, dir_fd=wd.fd)` で開き、開いた記述子を `os.fstat` で確かめて（通常のファイルで `st_nlink` が 1）、同じ記述子から読んで UTF-8 で解く。無ければ `None`。最後の要素がシンボリックリンク（`ELOOP`）・確かめに落ちる記述子は読まずに閉じて `EntryUnsafe`。開けない（`ENOENT` のほかの `OSError`）・読めない・解けない（`UnicodeDecodeError`）は `EntryUnreadable` に包む |
 | `write_file` | 同上 | 新設 | `write_file(wd: WorkDir, name: str, text: str) -> None` | 下の「書き込みの手順」で、私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない |
@@ -128,7 +129,7 @@ plugins/ndf/
 7. 成否によらず、手順 5 で作って公開していない `data` だけを `os.unlink(…, dir_fd=一時ディレクトリ)` で消し（手順 4 の確かめに落ちたときは消さない）、一時ディレクトリの名前を片付けてから記述子を閉じる。記述子は下の照合と `rmdir` が終わるまで閉じない（開いている間は inode が解放されないので、閉じた後に一時ディレクトリが消され、同じ inode 番号を再利用した別のディレクトリが照合を通ることが無い）。照合は、作業ディレクトリの直下の 1 要素の名前について `os.stat(…, dir_fd=wd.fd, follow_symlinks=False)` が開いた記述子と同じ inode（`st_dev`・`st_ino`）を返すかを見て、通った名前だけを `os.rmdir(…, dir_fd=wd.fd)` で消す（差し替え先のディレクトリを消さない）。手順 4 の確かめに落ちたときは照合も `rmdir` もせずに記述子を閉じるだけにする（照合で確かめられるのは開いた対象と今の名前の一致までで、`mkdir` で作った対象かどうかは確かめられないため。共有の作業ディレクトリで差し替えた別の利用者の空のディレクトリを消さない）。まず作った名前を照合する。作った名前が照合に落ちたとき（無い・別の inode）だけ、記述子が指すディレクトリの今の名前を `os.readlink(f"/proc/self/fd/{記述子}")` の最後の要素で引き、作った名前と違えばその名前を照合する（共有の作業ディレクトリでは別の利用者が一時ディレクトリを同じ親の別名へ移せ、作った名前だけを見ると移された先が残るため。移されていない通常の書き込みでは `readlink` を呼ばない。引けない環境と ` (deleted)` で終わるときは今の名前を見ない）。手順 6 より前の失敗は後始末の後に `OSError` を上げ直す（名前は前のまま）。手順 6 で公開した後の後始末（照合と `rmdir`）の失敗は上げず、中身の無い一時ディレクトリを残して正常に返す（名前は既に新しい inode を指しており、上げると呼び出し側は書き込みが起きなかったと読み違えるため）。したがって `write_file` が例外を上げたときは名前が前のままで、正常に返ったときは名前が新しい中身を指す
 
 - `entry_state`・`read_file`・`write_file`・`remove_file` は入口で、作業ディレクトリの直下の 1 要素でない名前（空・`.`・`..`・区切りを含む名前。絶対パスを含む）を `EntryUnsafe`（`other`）で拒む。`dir_fd` は絶対パスを制限せず、`O_NOFOLLOW` と `follow_symlinks=False` は途中の要素のリンクに効かないため
-- 5 つとも、`report_paths` の返したパスに `resolve()` を当てない。リンクを解いてよいのは `open_workdir` が作業ディレクトリを開く 1 回だけである（作業ディレクトリそのものは supervisor が選んだ場所である）
+- 5 つとも、`report_paths` の返したパスに `resolve()` を当てない。リンクを解いてよいのは `ndf worker prepare` が利用者の `--dir` を `report_paths`（`resolve` が真）で解く 1 回だけである（作業ディレクトリそのものは supervisor が選んだ場所である）。`ndf answer work` は `report_paths(Path(--state-dir), 作業名, resolve=False)` で組む（`--state-dir` は利用者の入力でなく、supervise.py がゲートのテンプレートの `{state_dir}` に入れるプランの状態の保存先である）。プロンプトの保存先の親にリンクがあれば、たどらずに `open_workdir` が `EntryUnsafe`（`symlink`）で拒む。`open_workdir` は解決済みのパスを各要素でリンクを拒みながら開き、パスを組んだ後に差し替えられたリンクをたどらない
 - 検査と操作の間に名前を差し替えられる競合は次のように塞ぐ
   - 親: 検査と操作は同じ `wd.fd` に対する相対の操作なので、検査の後に作業ディレクトリの名前を別のディレクトリへのリンクへ差し替えても、操作は開いた時点のディレクトリに当たる。差し替え先の同名のファイルは読まず、書かず、消さない
   - 書く側: 公開する inode は、手順 5 で作った inode だけである。一時ディレクトリは呼んだ利用者だけが書き込める（`0o700`）ので、ほかの利用者は `data` の名前を差し替えられない。`os.replace` は名前を一時ディレクトリの記述子から引くので、一時ディレクトリの名前を差し替えられても公開する inode は変わらない。置き換えられる側がシンボリックリンクでもハードリンクでも、その先や共有する inode を書き換えない
@@ -141,10 +142,10 @@ plugins/ndf/
 
 | 使う所 | 今の書き方 | 変えた後 |
 | --- | --- | --- |
-| `ndf worker prepare`（`_cmd_prepare`） | この設計で新設 | 作業ディレクトリを作った後に `open_workdir` で 1 回開き、その `wd` で 3 つの名前を `entry_state` でまとめて確かめてから、完了マーカーと結果ファイルを `remove_file`、報告を `write_file(wd, 報告の名前, "")` にする（次の節の「処理の手順」） |
+| `ndf worker prepare`（`_cmd_prepare`） | この設計で新設 | `open_workdir(…, create=True)` で無い要素を記述子に対する `mkdir` で作りながら 1 回開き（`Path.mkdir(parents=True)` を先に打たない）、その `wd` で 3 つの名前を `check_fresh` と `entry_state` でまとめて確かめてから、完了マーカーと結果ファイルを `remove_file`、報告を `write_file(wd, 報告の名前, "")` にする（次の節の「処理の手順」） |
 | worker の報告の追記と完了マーカー（`ndf worker append`。下の節） | 起動指示が `Write` で報告を書き、`: > "<置く場所>.done"` で完了マーカーを作る（どちらもリンクをたどり、既存の inode を書き換える） | `read_file` で今の中身を読み、標準入力の本文を足して `write_file` で置き換える。`--done` のときは続けて `write_file(wd, 完了マーカーの名前, "")` |
 | supervisor の報告の読み取り（`ndf worker collect`。下の節） | `Read` で `置く場所` を読む（リンクをたどる） | `entry_state(wd, 完了マーカーの名前)` で完了マーカーを確かめ、`read_file(wd, 報告の名前)` で読んだ中身から最後の `## 作業の報告` を返す |
-| `ndf answer work`（#3908 の `_write_prompt`） | `Path.write_text` の予定 | `open_workdir(paths.prompt.parent)` の中で `write_file(wd, paths.prompt.name, 本文)`。`EntryUnsafe` なら `model.Refused`（`stopped`（`precondition`））に包む |
+| `ndf answer work`（#3908 の `_write_prompt`） | `Path.write_text` の予定 | `paths = report_paths(Path(a.state_dir), 作業名, resolve=False)`（`--state-dir` は supervise.py がテンプレートの `{state_dir}` に入れるプランの状態の保存先で、解かない）を組み、`open_workdir(paths.prompt.parent)` の中で `write_file(wd, paths.prompt.name, 本文)`。`EntryUnsafe` なら `model.Refused`（`stopped`（`precondition`））に包む |
 | `ndf worker run` の起動前（`_cmd_run`・`delegate`。`src/ndf/core/worker.py:623,385`） | `Path(a.result_file).resolve()` で解いてから、`delegate` の先頭で `unlink(missing_ok=True)` | `_cmd_run` は `Path(a.result_file).absolute()` にする（リンクを解かない）。worker を起動する前に `open_workdir(結果ファイルの親)` で開き、`delegate` と結果の読み取りが終わるまで同じ `wd` を使う（`delegate(…, wd: WorkDir)` を足す）。`delegate` の先頭の削除は `remove_file(wd, 結果ファイルの名前)` にし、`EntryError` なら worker を起動せずに `stopped`（`invalid`）で返す |
 | `ndf worker run` の委譲中の判定（`_written`・`_missing_record`・`_stopped_detail`。`src/ndf/core/worker.py:295,322,365`） | `_written` は `path.stat()`（リンクをたどる）で大きさを見る。`_missing_record` は `plan_files.read_json` と `search_record` で 2 回読む | `_written(wd, name)` は `entry_state` の返りの `st_size > 0` で決め、中身を読まない（今と同じくサイズだけを見る）。`_missing_record(handoff, wd)` は作業種別が `RECORD_KINDS` のときだけ、`_read_result(wd, name)`（`read_file` を 1 回呼んで `json.loads` する。JSON として解けなければ `None`）の 1 回の読み取りから `status` と探した記録の両方を見る。`EntryError`（`EntryUnsafe`・`EntryUnreadable`）は上げ直し、`delegate` はそれを受けて再起動をやめ、`cause` を `bad_report`・`detail` を名前と見つけた種類か理由にした `Delivery` を返す（結果 JSON を返す前に例外で止まらない） |
 | `ndf worker run` の結果の読み取り（`outcome_of`・`search_record`。`src/ndf/core/worker.py:593,306`） | `_cmd_run` が `search_record` で 1 回、`outcome_of` が `plan_files.read_json` でもう 1 回読む（どちらもリンクをたどる） | `_cmd_run` が `delegate` の後に `_read_result(wd, name)` で 1 回だけ読み、解いた中身を `search_record(report: Any)`（パスでなく解いた中身を受ける）と `outcome_of(kind, result_file, report, items, metrics, attempts)`（`report` を足す）の両方へ渡す。`EntryError` なら `stopped`（`bad_report`。`summary` にパスと見つけた種類か理由）にし、結果ファイルの `summary` も `outputs` も探した記録も載せない |
@@ -154,7 +155,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `open_workdir` | 開いた記述子でディレクトリの中の名前を引ける。抜けると記述子が閉じる | 作業ディレクトリへのシンボリックリンクを渡すと、リンクの先のディレクトリを開く（開くときの 1 回だけ解く） | 開いた後に作業ディレクトリの名前を別のディレクトリへのリンクへ差し替えても、`entry_state`・`read_file`・`write_file`・`remove_file` は開いた時点のディレクトリに当たり、差し替え先の同名のファイルの中身が変わらず消えもしない |
+| `check_fresh` | `created` が偽なら名前があっても止めない。`created` が真でも、同じ利用者の並行した準備が別の名前を置いたディレクトリは受ける | 作った直後（`mkdir` の後）と `mkdir` の前（`FileExistsError`）の両方で、呼んだ利用者の既存のディレクトリを同じ親の中で作る名前へ改名しても `open_workdir` は開け（`created` が真）、`check_fresh` が `EntryUnsafe`（`replaced`）で止め、そのディレクトリの完了マーカーが残る | `ndf worker prepare` で同じ差し替えを起こすと `stopped`（`invalid`）で、差し替えたディレクトリの報告の中身・完了マーカー・結果ファイルが残る |
+| `open_workdir` | 開いた記述子でディレクトリの中の名前を引ける。抜けると記述子が閉じる。`create=True` なら無いディレクトリを作って開く | 読み取り権限の無い（検索権限だけの）祖先の配下でも開ける。作業ディレクトリへのシンボリックリンクを渡すと、最後の要素でも途中の要素でも `EntryUnsafe`（`symlink`）で、`create=True` でもリンクの先に作らない | 開いた後に作業ディレクトリの名前を別のディレクトリへのリンクへ差し替えても、`entry_state`・`read_file`・`write_file`・`remove_file` は開いた時点のディレクトリに当たり、差し替え先の同名のファイルの中身が変わらず消えもしない |
 | `entry_state` | 無い名前で `None`、リンク数 1 の通常のファイルで `stat_result` | 0 バイトのファイルで `st_size` が 0 の `stat_result` | シンボリックリンク（先が有っても無くても）・作業ディレクトリの外のファイルのハードリンク・ディレクトリで `EntryUnsafe`。リンクの先のファイルを読まない |
 | `read_file` | 通常のファイルの中身を返す。無ければ `None` | 0 バイトで空の文字列 | シンボリックリンク・ハードリンクで `EntryUnsafe`、リンクの先の中身を返さない。不正な UTF-8 で `EntryUnreadable`。開いた後に名前を外のファイルへのリンクへ差し替えても（`os.fstat` を差し替えた見張りの中で差し替える）、返るのは開いた inode の中身 |
 | `write_file` | 無い名前に中身を書いて作る。通常のファイルを中身で置き換え、置き換えの後の inode 番号が前と違う | 空の文字列で 0 バイトになる。一時ディレクトリが作業ディレクトリに残らない | シンボリックリンク・ハードリンクの名前で `EntryUnsafe` になり、リンクの先のファイルの中身と更新時刻が変わらない。確かめの後に名前をリンクへ差し替えても（`entry_state` を差し替えて競合を作る）、リンクの先は変わらず、名前が新しいファイルになる。一時ディレクトリの `data` を書いた後に差し替えようとしても（`os.replace` の前に見張りを置く）、公開されるのは書いた inode の中身である。読み取り専用（`0o444`）の既存のファイルは `PermissionError` で、中身も inode も変わらない。書き込みを失敗させると一時ディレクトリが残らず（書き込みの手順 4 で一時ディレクトリを開けなかったときと、開いた一時ディレクトリが所有者・モードの確かめに落ちたときは名前を消さずに残す）、元のファイルの中身が残る。公開の後に一時ディレクトリの `rmdir` を失敗させると、例外を上げずに返り、名前が新しい中身を指し、中身の無い一時ディレクトリが 1 つ残る |
@@ -167,15 +169,15 @@ plugins/ndf/
 
 満たす決定: 決定 3、受け入れ条件 4
 
-準備の後に報告と完了マーカーを書くのは worker、報告を読むのは supervisor である。どちらも `Write`・`Read` の Tool とシェルのリダイレクトを使うとリンクをたどるので、この 2 つのサブコマンドで上の関数を通す。呼び出しの回数は増えない（worker は `Write` と `: >` の 2 回が `ndf worker append --done` の 1 回に、supervisor は `Read` の 1 回が `ndf worker collect` の 1 回になる）。
+準備の後に報告と完了マーカーを書くのは worker、報告を読むのは supervisor である。どちらも `Write`・`Read` の Tool とシェルのリダイレクトを使うとリンクをたどるので、この 2 つのサブコマンドで上の関数を通す。呼び出しの回数は増えない（worker は `Write` と `: >` の 2 回が `ndf worker append --done` の 1 回に、supervisor が中間通知の後に報告コピーを読む `Read` の 1 回が `ndf worker collect` の 1 回になる）。Tool の呼び出しの回数は変わらないが、`ndf` の起動（Python の起動）は worker 1 件につき、通常の完了通知（最後の応答で報告を受け取る）では `prepare` と `append --done` の 2 回増える。`collect` を打つのは中間通知を受けて完了マーカーを待ち、報告コピーを回収するときだけで（`waiting.md` の「中間通知を受けたとき」）、そのときは `collect` を含む 3 回になる。通常の完了通知で `collect` を打たない。これはリンクをたどらずに読み書きするための設計上のコストで、長い出力も報告と同じ 1 回の `append --done` にまとめて、これより増やさない（長い出力を分けて先に書くと 1 回増える）。
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `report_name` | `plugins/ndf/src/ndf/contracts/worker_paths.py` | 新設 | `report_name(report: Path) -> tuple[Path, str]` | 起動指示の `置く場所`（報告の絶対パス）から、作業ディレクトリと worker の名前を取り出す。最後の要素が `REPORT_SUFFIX` で終わり、残りが `NAME_RE` に合うことを確かめ、合わなければ `NameInvalid` |
-| `_cmd_append` | `plugins/ndf/src/ndf/core/worker.py` | 新設 | `_cmd_append(a: argparse.Namespace) -> int` | `--report <置く場所>` の作業ディレクトリを `open_workdir` で開き、報告を `read_file` で読んで標準入力の本文を末尾へ足し、`write_file` で置き換える。`--done` があれば続けて完了マーカーを `write_file(wd, 完了マーカーの名前, "")` で作る。報告が無ければ（`None`）準備されていないとして `stopped`（`precondition`） |
-| `_cmd_collect` | `plugins/ndf/src/ndf/core/worker.py` | 新設 | `_cmd_collect(a: argparse.Namespace) -> int` | `--report <置く場所>` の作業ディレクトリを開き、完了マーカーを `entry_state` で確かめ（無ければ `stopped`（`precondition`））、報告を `read_file` で読んで、最後の `## 作業の報告` から末尾までを `metrics.report` に入れた結果 JSON を 1 行出す |
+| `_cmd_append` | `plugins/ndf/src/ndf/core/worker.py` | 新設 | `_cmd_append(a: argparse.Namespace) -> int` | `--report <置く場所>` から `report_paths(…, resolve=False)` で親を解き直さずにパスを組み、作業ディレクトリを `open_workdir` で開き、報告を `read_file` で読んで標準入力の本文を末尾へ足し、`write_file` で置き換える。`--done` があれば続けて完了マーカーを `write_file(wd, 完了マーカーの名前, "")` で作る。報告が無ければ（`None`）準備されていないとして `stopped`（`precondition`） |
+| `_cmd_collect` | `plugins/ndf/src/ndf/core/worker.py` | 新設 | `_cmd_collect(a: argparse.Namespace) -> int` | `--report <置く場所>` から `report_paths(…, resolve=False)` で親を解き直さずにパスを組み、作業ディレクトリを `open_workdir` で開き、完了マーカーを `entry_state` で確かめ（無ければ `stopped`（`precondition`））、報告を `read_file` で読んで、最後の `## 作業の報告` から末尾までを `metrics.report` に入れた結果 JSON を 1 行出す |
 | `_add_append`・`_add_collect` | `plugins/ndf/src/ndf/core/worker.py` | 新設 | `_add_append(sub: Any) -> None`・`_add_collect(sub: Any) -> None` | `--report`（必須）と、`append` だけ `--done` を登録し、`fn` を置く。`_parser` の並びに足す |
 
 - 本文は標準入力から受ける。起動指示は引用符で囲んだ区切りのヒアドキュメント（`<<'NDF_REPORT'`）で渡す形を書く。囲んだ区切りなので `heredoc` guard（`guards/heredoc.py`）に止められず、本文の `$` も展開されない
@@ -195,8 +197,8 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_cmd_append` | 空の報告に本文を足し、`--done` で完了マーカーが 0 バイトで現れる | 2 回足すと 2 つの本文が順に残る。`--done` 無しでは完了マーカーを作らない | 報告・完了マーカーが外のファイルへのシンボリックリンクかハードリンクのとき `stopped`（`invalid`）で、リンクの先の中身が変わらない（完了マーカーのリンクの先が空にならない）。報告の書き込みを失敗させると完了マーカーが無い |
-| `_cmd_collect` | 最後の `## 作業の報告` から末尾までを `metrics.report` に返す | 見出しが 2 つあれば後ろだけを返す | 報告が外のファイルへのリンクのとき `stopped`（`invalid`）で、リンクの先の中身を返さない。完了マーカーが無いとき `stopped`（`precondition`） |
+| `_cmd_append` | 空の報告に本文を足し、`--done` で完了マーカーが 0 バイトで現れる | 2 回足すと 2 つの本文が順に残る。`--done` 無しでは完了マーカーを作らない | 報告・完了マーカーが外のファイルへのシンボリックリンクかハードリンクのとき `stopped`（`invalid`）で、リンクの先の中身が変わらない（完了マーカーのリンクの先が空にならない）。報告の書き込みを失敗させると完了マーカーが無い。準備の後に置く場所の親を別のディレクトリへのリンクへ差し替えると `stopped`（`invalid`）で、差し替え先の同名の報告と完了マーカーが変わらない |
+| `_cmd_collect` | 最後の `## 作業の報告` から末尾までを `metrics.report` に返す | 見出しが 2 つあれば後ろだけを返す | 報告が外のファイルへのリンクのとき `stopped`（`invalid`）で、リンクの先の中身を返さない。完了マーカーが無いとき `stopped`（`precondition`）。準備の後に置く場所の親を別のディレクトリへのリンクへ差し替えると `stopped`（`invalid`）で、差し替え先の同名の報告を返さない |
 
 ## 報告の保存先を用意するサブコマンド（`ndf worker prepare`）
 
@@ -213,7 +215,7 @@ plugins/ndf/
 - `_cmd_prepare`
   - 事前条件: `a.dir` と `a.name` が文字列で入っている（`argparse` が必須にする）
   - 事後条件: `<作業ディレクトリ>` が存在し、報告のファイルが 0 バイトで存在し、完了マーカーと結果ファイルが存在しない。結果 JSON の `metrics.paths` に `report`・`done`・`result` の 3 つの絶対パスが入っている
-  - 副作用: ファイルシステム（ディレクトリの作成・ファイルの作成と削除）と標準出力（結果 JSON 1 行）。外部コマンドとネットワークは使わない。作業ディレクトリを作った直後に `open_workdir` で 1 回開き、確かめ・書く・消すはすべてその `wd` に対する `entry_state`・`write_file`・`remove_file`（リンクをたどらない）を通す
+  - 副作用: ファイルシステム（ディレクトリの作成・ファイルの作成と削除）と標準出力（結果 JSON 1 行）。外部コマンドとネットワークは使わない。作業ディレクトリは `open_workdir(…, create=True)` が記述子に対する `mkdir` で作りながら 1 回開き（途中の親がリンクに差し替わっていれば作らずに止まる）、確かめ・書く・消すはすべてその `wd` に対する `entry_state`・`write_file`・`remove_file`（リンクをたどらない）を通す
   - 途中で失敗したときの決まり: 前の報告が消えるのは、完了マーカーと結果ファイルが消えた後だけである。そのため、どこで止まっても「前の完了マーカーが残っているのに報告が空」という組は起きない。止まった時点の状態は次の「異常系の処理」の表のとおりで、どの行も supervisor は `status` が `ok` でない返りからパスを読まず、そのパスで待たない
 
 プロンプトのパス（`ReportPaths.prompt`）は返りに載せない。supervisor がサブエージェントで起動する経路は、プロンプトをファイルでなく起動指示の本文で渡すためである。
@@ -240,6 +242,7 @@ plugins/ndf/
 | `_cmd_prepare` | 作業ディレクトリが無い | 親ごと作る（`parents=True`） |
 | `_cmd_prepare` | 作業ディレクトリがある | 何もしない（`exist_ok=True`） |
 | `_cmd_prepare` | 3 つのどれかがリンク・ディレクトリ・ほかの種類 | 何も変えずに `stopped`（`invalid`） |
+| `_cmd_prepare` | 最初に無かった要素を経て開いた（`WorkDir.created`）作業ディレクトリに、3 つのどれかがある | 既存のディレクトリへ差し替えられたとみなし、何も変えずに `stopped`（`invalid`。`check_fresh` の `EntryUnsafe`（`replaced`）） |
 | `_cmd_prepare` | 完了マーカーが無い / ある | 無ければ何もしない（`absent`）/ あれば消す（`removed`）。作らない |
 | `_cmd_prepare` | 結果ファイルが無い / ある | 無ければ何もしない（`absent`）/ あれば消す（`removed`）。作らない |
 | `_cmd_prepare` | 報告のファイルが無い / ある | どちらも 0 バイトの新しいファイルで置き換える（前の報告の名前は新しい inode を指す。前の inode を切り詰めない。`items` の `action` は `created`） |

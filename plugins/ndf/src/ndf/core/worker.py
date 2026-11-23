@@ -24,6 +24,12 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 
 ndf worker run --kind <種類> --prompt-file <本文> --result-file <結果> --cwd <作業場所> --state-dir <保存先> [--sources <JSON>] [--timeout <秒>]
     worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する
+ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>
+    報告の保存先を用意する。前の完了マーカーと結果ファイルを消し、報告を空にして 3 つの絶対パスを metrics.paths に返す
+ndf worker append --report <置く場所> [--done]
+    標準入力の本文を報告の末尾へ足す。--done なら続けて完了マーカーを作る
+ndf worker collect --report <置く場所>
+    完了マーカーを確かめ、報告の最後の「## 作業の報告」から末尾までを metrics.report に返す
 ndf worker closing-check --base <参照> [--cwd <作業場所>]
     `<参照>..HEAD` のコミットに closing keywords があれば refused で止める（push の前に打つ）
 ndf worker plan-edit <plan.json> --new <新しい中身> --reason <理由> [--state-dir <保存先>]
@@ -47,6 +53,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -57,7 +64,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.adapters import claude, git
-from ndf.contracts import causes, exit_codes, result
+from ndf.contracts import causes, exit_codes, result, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable_locks
 from ndf.core.plan import files as plan_files
@@ -152,6 +159,10 @@ RECORD_PROMPT = (
     f"結果ファイルの metrics.{SEARCH_RECORD} に、期待値の直書きを探した語（terms）と見つけたテストのファイル（files）が無い。"
     "探して結果ファイルを書き直してから応答を終える"
 )
+
+
+# 報告の見出し。`collect` は行全体がこの見出しの最後の行から末尾までを返す（`## 作業の報告の補足` は選ばない）
+REPORT_HEADING = re.compile(r"^## 作業の報告[ \t]*\r?$", re.MULTILINE)
 
 
 class WorkerError(Exception):
@@ -699,6 +710,109 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
+def _paths_of(directory: str, name: str, *, resolve: bool = True) -> tuple[worker_paths.ReportPaths, Optional[worker_paths.Origin]]:
+    """パスと、解いた時点の観測（`resolve` が偽なら None）を組で返す。"""
+    try:
+        if resolve:
+            return worker_paths.prepare_paths(Path(directory), name)
+        return worker_paths.report_paths(Path(directory), name, resolve=False), None
+    except worker_paths.NameInvalid as exc:
+        raise WorkerError("invalid", str(exc)) from None
+    except worker_paths.EntryError as exc:  # 参照先の無いリンク・リンクの循環は作る前に拒む
+        raise WorkerError("invalid", f"{directory} を解けない: {exc}") from None
+    except OSError as exc:  # 利用者の入力: 解けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"{directory} を解けない: {exc.strerror or exc}") from None
+
+
+def _report_paths(report: str) -> worker_paths.ReportPaths:
+    """`--report <置く場所>` から報告の保存先のパスを組む。形が違えば `WorkerError`（invalid）。
+
+    置く場所は `prepare` が解決済みで返したパスなので、親を解き直さない（準備の後に親をリンクへ差し替えられても
+    `open_workdir` がリンクを拒む）。
+    """
+    try:
+        directory, name = worker_paths.report_name(Path(report))
+    except worker_paths.NameInvalid as exc:
+        raise WorkerError("invalid", str(exc)) from None
+    return _paths_of(str(directory), name, resolve=False)[0]
+
+
+@contextlib.contextmanager
+def _workdir(
+    paths: worker_paths.ReportPaths, doing: str, *, create: bool = False, origin: Optional[worker_paths.Origin] = None
+) -> Iterator[worker_paths.WorkDir]:
+    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る。`origin` は解いた時点の観測で、開くときに突き合わせする）。
+
+    リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。
+    """
+    try:
+        with worker_paths.open_workdir(paths.report.parent, create=create, origin=origin) as wd:
+            yield wd
+    except worker_paths.EntryError as exc:
+        raise WorkerError("invalid", f"{paths.report.parent} で{doing}: {exc}") from None
+    except OSError as exc:  # 利用者の入力: 作れない・消せない・書けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"{paths.report.parent} で{doing}: {exc.strerror or exc}") from None
+
+
+def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[str, str]:
+    """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
+
+    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
+    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
+    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
+    """
+    worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
+    done = worker_paths.remove_file(wd, paths.done.name)
+    removed = worker_paths.remove_file(wd, paths.result.name)
+    worker_paths.write_file(wd, paths.report.name, "")
+    return done, removed
+
+
+def _cmd_prepare(a: argparse.Namespace) -> int:
+    """報告の保存先を用意し、3 つの絶対パスを `metrics.paths` に返す（#3877）。失敗のときはパスを返さない。"""
+    paths, origin = _paths_of(a.dir, a.name)
+    with _workdir(paths, "報告の保存先を用意できない", create=True, origin=origin) as wd:
+        done, removed = _reset(wd, paths)
+    items = [
+        {"kind": "report", "path": str(paths.report), "action": "created"},
+        {"kind": "done", "path": str(paths.done), "action": done},
+        {"kind": "result", "path": str(paths.result), "action": removed},
+    ]
+    shown = {"report": str(paths.report), "done": str(paths.done), "result": str(paths.result)}
+    summary = f"報告の保存先を用意した（報告 {paths.report}・完了マーカー {paths.done}・結果 {paths.result}）"
+    return result.emit(result.result(TOOL, OK, summary, items, {"paths": shown}))
+
+
+def _cmd_append(a: argparse.Namespace) -> int:
+    """標準入力の本文を報告の末尾へ足す。`--done` なら続けて完了マーカーを作る（報告を書けなければ作らない）。"""
+    paths = _report_paths(a.report)
+    body = sys.stdin.read()
+    with _workdir(paths, "報告を書けない") as wd:
+        text = worker_paths.read_file(wd, paths.report.name)
+        if text is None:
+            raise WorkerError("precondition", f"報告 {paths.report} が無い（ndf worker prepare で用意してから書く）")
+        worker_paths.write_file(wd, paths.report.name, text + body)
+        if a.done:
+            worker_paths.write_file(wd, paths.done.name, "")
+    marked = f"・完了マーカー {paths.done} を作った" if a.done else ""
+    return result.emit(result.result(TOOL, OK, f"報告 {paths.report} に本文を足した{marked}"))
+
+
+def _cmd_collect(a: argparse.Namespace) -> int:
+    """完了マーカーを確かめ、報告の最後の `## 作業の報告` から末尾までを `metrics.report` に返す。"""
+    paths = _report_paths(a.report)
+    with _workdir(paths, "報告を読めない") as wd:
+        if worker_paths.entry_state(wd, paths.done.name) is None:
+            raise WorkerError("precondition", f"完了マーカー {paths.done} が無い（worker が終えていない）")
+        text = worker_paths.read_file(wd, paths.report.name)
+    if text is None:
+        raise WorkerError("precondition", f"報告 {paths.report} が無い（ndf worker prepare で用意していない）")
+    heads = [m.start() for m in REPORT_HEADING.finditer(text)]
+    if not heads:
+        raise WorkerError("precondition", f"報告 {paths.report} に「## 作業の報告」が無い")
+    return result.emit(result.result(TOOL, OK, f"報告 {paths.report} を読んだ", metrics={"report": text[heads[-1] :]}))
+
+
 def _add_run(sub: Any) -> None:
     rn = sub.add_parser("run", help="worker を起動し、結果ファイルが書かれるまで再起動する")
     for name in ("--kind", "--prompt-file", "--result-file", "--cwd", "--state-dir"):
@@ -737,10 +851,30 @@ def _add_attention(sub: Any) -> None:
     at.set_defaults(fn=_cmd_attention)
 
 
+def _add_prepare(sub: Any) -> None:
+    pr = sub.add_parser("prepare", help="報告の保存先を用意し、前の完了マーカーと結果ファイルを消す")
+    pr.add_argument("--dir", required=True)
+    pr.add_argument("--name", required=True)
+    pr.set_defaults(fn=_cmd_prepare)
+
+
+def _add_append(sub: Any) -> None:
+    ap = sub.add_parser("append", help="標準入力の本文を報告へ足す（--done で完了マーカーも作る）")
+    ap.add_argument("--report", required=True)
+    ap.add_argument("--done", action="store_true")
+    ap.set_defaults(fn=_cmd_append)
+
+
+def _add_collect(sub: Any) -> None:
+    co = sub.add_parser("collect", help="完了マーカーを確かめ、報告の最後の「## 作業の報告」を返す")
+    co.add_argument("--report", required=True)
+    co.set_defaults(fn=_cmd_collect)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=TOOL, description="worker の規則文と受け渡し")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for add in (_add_run, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention):
+    for add in (_add_run, _add_prepare, _add_append, _add_collect, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention):
         add(sub)
     return p
 

@@ -41,6 +41,34 @@
         "attention": {
           "type": "integer",
           "description": "注意の要る報告の数（attention）"
+        },
+        "paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "report",
+            "done",
+            "result"
+          ],
+          "properties": {
+            "report": {
+              "type": "string",
+              "description": "報告の絶対パス（起動指示の「置く場所」）"
+            },
+            "done": {
+              "type": "string",
+              "description": "完了マーカーの絶対パス（supervisor が待つパス）"
+            },
+            "result": {
+              "type": "string",
+              "description": "作業の結果ファイルの絶対パス（起動指示の「作業の結果ファイル」）"
+            }
+          },
+          "description": "報告の保存先の 3 つの絶対パス（prepare。成功したときだけ）"
+        },
+        "report": {
+          "type": "string",
+          "description": "報告の最後の「## 作業の報告」から末尾まで（collect）"
         }
       }
     },
@@ -57,7 +85,10 @@
               "session",
               "closing_commit",
               "plan_edit",
-              "attention"
+              "attention",
+              "report",
+              "done",
+              "result"
             ],
             "description": "項目の種類"
           },
@@ -121,6 +152,19 @@
           },
           "text": {
             "description": "報告の本文（attention。進捗ログの値のまま）"
+          },
+          "path": {
+            "type": "string",
+            "description": "触ったファイルの絶対パス（prepare の report・done・result）"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "removed",
+              "absent"
+            ],
+            "description": "ファイルへの操作（prepare。created は 0 バイトで作った・removed は消した・absent は無かった）"
           }
         },
         "required": [
