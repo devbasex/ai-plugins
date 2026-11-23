@@ -167,18 +167,19 @@ def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_doe
 def _lock(record, busy=False):
     """起動の排他（`machine.admit_lock`）の偽。オーナーがいる間（`busy` なら常に）入ろうとすると待たずに `LockBusy` を上げ、
     入れたら出入りを `record` へ `lock-in`・`lock-out` として積む。"""
-    state = {"held": False}
+    held = False
 
     @contextlib.contextmanager
     def admit_lock(_seconds, clock=None):
-        if busy or state["held"]:
+        nonlocal held
+        if busy or held:
             raise machine.LockBusy("偽の錠にオーナーがいる")
-        state["held"] = True
+        held = True
         record("lock-in")
         try:
             yield
         finally:
-            state["held"] = False
+            held = False
             record("lock-out")
 
     return admit_lock
