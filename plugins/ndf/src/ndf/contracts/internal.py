@@ -65,11 +65,20 @@ def _decision_v1(row: Row) -> Row:
     return {"event": "判定", **kept}
 
 
+def _loop_event_v1(row: Row) -> Row:
+    """`at` は UNIX 時刻の秒で、文字列の `version` はリリースした製品のバージョンだった。"""
+    out = {"product_version" if k == "version" and isinstance(v, str) else k: v for k, v in row.items()}
+    if "at" in out and type(out["at"]) in (int, float):
+        out["at"] = stamp(out["at"])
+    return out
+
+
 KINDS: dict[str, Kind] = {
     "usage": Kind(contracts.schema_path("internal/usage"), (dict,)),
     "mvv-signals": Kind(contracts.schema_path("internal/mvv-signals"), (_signal_v1,), marker="mvv_version"),
     "mvv-validation": Kind(contracts.schema_path("internal/mvv-validation"), (_time_to_at,)),
     "context-records": Kind(contracts.schema_path("internal/context-records"), (_decision_v1,)),
+    "loop-event": Kind(contracts.schema_path("internal/loop-event"), (_loop_event_v1,)),
 }
 
 

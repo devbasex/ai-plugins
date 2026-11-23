@@ -1,7 +1,9 @@
 """開発ループの記録: 事象の語彙と、事象の列から今の状態を求める畳み込み。
 
 記録は事象を追記するだけで、今の値は事象の列を畳んで求める（書き換えない）。事象 1 件は辞書で、`kind` と
-`at`（UNIX 秒）と種類ごとのキーを持つ。周（ループの 1 回）は `lap-opened` で始まり `lap-closed` で締まる。
+`at`（書いた時刻。UTC の文字列）と種類ごとのキーを持つ。キーの型は `contracts/schemas/internal/loop-event.schema.json` が持つ。
+時刻は秒（UNIX 時刻）で比べ、文字列との行き来は `event`（書く）と `_at`（読む）だけで行う。期限 `until` は秒のまま持つ。
+周（ループの 1 回）は `lap-opened` で始まり `lap-closed` で締まる。
 
 | 事象 | キー | 意味 |
 | --- | --- | --- |
@@ -13,7 +15,7 @@
 | `issues-created` | `lap`・`issues` | 周の中で起票した課題（#2132） |
 | `gate-shown` | `lap`・`pr`・`head` | 設計承認ゲートを出した時点の PR の HEAD |
 | `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの回答。`request_changes` は変更要求として残る（#2400） |
-| `version-shipped` | `lap`・`version` | その周でバージョンをリリースした |
+| `version-shipped` | `lap`・`product_version` | その周でバージョンをリリースした |
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
 | `stop-requested` | `by`・`reason` | 止める要求。キーは返さない（#2820） |
 | `loop-halted` | `by`・`reason` | ループを止めた状態にした（`--now` か、要求の後の周の境。#2435） |
@@ -26,6 +28,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
+from ndf.contracts import internal
 from ndf.domains.release.approval_decide import APPROVED
 
 # 事象の種類
@@ -162,7 +165,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ISSUES_CREATED: ("lap", "issues"),
     GATE_SHOWN: ("lap", "pr", "head"),
     GATE_ANSWERED: ("lap", "pr", "answer", "head", "note"),
-    VERSION_SHIPPED: ("lap", "version"),
+    VERSION_SHIPPED: ("lap", "product_version"),
     LAP_CLOSED: ("lap", "outcome", "reason"),
     STOP_REQUESTED: ("by", "reason"),
     LOOP_HALTED: ("by", "reason"),
@@ -171,10 +174,15 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 
 
 def event(kind: str, at: float, **keys: Any) -> dict[str, Any]:
-    """事象 1 件を組む。種類が語彙に無いか、要るキーが欠ければ `RecordError`。"""
-    out = {"kind": kind, "at": at, **keys}
+    """事象 1 件を組む（`at` は秒）。種類が語彙に無いか、要るキーが欠ければ `RecordError`。"""
+    out = {"kind": kind, "at": internal.stamp(at), **keys}
     check(out)
     return out
+
+
+def _at(ev: Mapping[str, Any]) -> float:
+    """事象を書いた時刻（秒）。"""
+    return internal.epoch(ev["at"])
 
 
 def check(ev: Mapping[str, Any]) -> None:
@@ -218,10 +226,10 @@ def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     if kind == GATE_SHOWN:
         return _with_lap(state, n, gates=(*lap.gates, (int(ev["pr"]), ev["head"])))
     if kind == GATE_ANSWERED:
-        got = Answer(int(ev["pr"]), ev["answer"], ev["head"], ev["note"], float(ev["at"]))
+        got = Answer(int(ev["pr"]), ev["answer"], ev["head"], ev["note"], _at(ev))
         return _with_lap(state, n, answers=(*lap.answers, got))
     if kind == VERSION_SHIPPED:
-        return _with_lap(state, n, released=(*lap.released, str(ev["version"])))
+        return _with_lap(state, n, released=(*lap.released, str(ev["product_version"])))
     return _with_lap(state, n, outcome=ev["outcome"], reason=ev["reason"])
 
 
@@ -237,9 +245,9 @@ def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
         lap = Lap(number=int(ev["lap"]), issues=tuple(int(i) for i in ev["issues"]))
         return replace(state, laps=(*state.laps, lap))
     if kind == STOP_REQUESTED:
-        return replace(state, requested=Stop(ev["by"], ev["reason"], float(ev["at"])))
+        return replace(state, requested=Stop(ev["by"], ev["reason"], _at(ev)))
     if kind == LOOP_HALTED:
-        return replace(state, stopped=Stop(ev["by"], ev["reason"], float(ev["at"])))
+        return replace(state, stopped=Stop(ev["by"], ev["reason"], _at(ev)))
     if kind == ROW_BOUND:
         return replace(state, row=str(ev["table"]))
     return _apply_lap(state, ev)

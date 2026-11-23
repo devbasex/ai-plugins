@@ -21,6 +21,8 @@ USAGE = {"at": AT, "caller": usage.SUBAGENT, "agent_id": "a", "transcript": "/t.
 SIGNAL = {"at": AT, "kind": md.OVERRIDE_PASS, "repo": "/m", "state": "s", "gate": "g", "pr": 1}
 VALIDATION = md.judged_row("k", md.FOLLOW, AT, "/m", {"usd": None, "reasons": ["r"], "boundary": [], "basis": ["Value 1"]})
 DECISION = {**cr.record_row("s1", "#1", APPLIED, cr.MARK_HANDOFF, None), "at": AT}
+ANSWERED = {"kind": "gate-answered", "lap": 2, "pr": 4301, "answer": "approved", "head": "abc", "note": ""}
+LEASE = {"kind": "lease-taken", "session": "s1", "until": 1795400600.0}
 # 旧いプラグインの hook が書いた行（バージョン 0）
 OLD_DECISION = {
     **DECISION,
@@ -68,6 +70,14 @@ def kind_of(exc: pytest.ExceptionInfo[internal.InternalError]) -> str:
         ),
         ("context-records", OLD_DECISION, {k: v for k, v in OLD_DECISION.items() if k not in OLD_COLUMNS}),
         ("context-records", {k: v for k, v in DECISION.items() if k != "event"}, {**DECISION, "event": cr.EVENT_DECISION}),
+        ("loop-event", {"at": 1795400000.123456, **ANSWERED}, {"at": "2026-11-23T02:13:20.123456+00:00", **ANSWERED}),
+        ("loop-event", {"at": 1795400000, **LEASE}, {"at": "2026-11-23T02:13:20.000000+00:00", **LEASE}),
+        # バージョン 0 の出荷のイベントの `version` は製品のバージョン（文字列）で、形のバージョンではない
+        (
+            "loop-event",
+            {"at": 1795400000.0, "kind": "version-shipped", "lap": 2, "version": "11.0.23"},
+            {"at": "2026-11-23T02:13:20.000000+00:00", "kind": "version-shipped", "lap": 2, "product_version": "11.0.23"},
+        ),
     ],
 )
 def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
