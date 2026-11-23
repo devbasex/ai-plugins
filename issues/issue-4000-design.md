@@ -1,6 +1,6 @@
 # stop-wait: 本文で人の回答を待って終えた応答を、言い回しと位置によらず軽いモデルで見分ける（#4000）
 
-hook の guard `stop-wait` は、決まった言い回しの列と末尾 4 行だけで本文の待ちを見る。そのため、列に無い言い回しと、質問の後に報告が続く応答を 4 回見逃し、質問の引用を 1 回誤って止めた。直した後は、Stop の hook が最後の応答の本文全体を軽いモデル（思考を切った haiku の最小構成の `claude -p`）に渡す。モデルが「人の回答を待って終えている」と 2 回続けて回答したときだけ変更を要求し、モデルが回答しないときと呼ばない条件に当たる Stop は今の文字列の判定で決める。採らなかった案（Claude Code の prompt 型の hook・背景から再開させる hook・列を足す）は「決定の記録」に、実測は「外部の調査」にある。
+hook の guard `stop-wait` は、決まった言い回しの列と末尾 4 行だけで本文の待ちを見る。そのため、列に無い言い回しと、質問の後に報告が続く応答を 4 回見逃し、質問の引用を 1 回誤って止めた。直した後は、Stop の hook が最後の応答の本文全体を軽いモデル（思考を切った haiku の最小構成の `claude -p`）に渡す。Stop ごとに 1 回だけ打ち、モデルが「人の回答を待って終えている」（`wait`）と回答したら変更を要求する（同じ文を打ち直さない。決定 4）。モデルが回答しないときと呼ばない条件に当たる Stop（Codex のセッションなど送信先がセッション自身と同じと確かめられない Stop を含む）は今の文字列の判定で決める。採らなかった案（Claude Code の prompt 型の hook・背景から再開させる hook・列を足す）は「決定の記録」に、実測は「外部の調査」にある。
 
 ## 今の姿
 
@@ -46,7 +46,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  SW[stop-wait] --> SK{呼ばない条件<br/>本文が空・AskUserQuestion を使った<br/>背景の作業・上限に達した}
+  SW[stop-wait] --> SK{呼ばない条件<br/>本文が空・AskUserQuestion を使った<br/>背景の作業・上限に達した<br/>送信先が同じと確かめられない}
   SK -->|当たる| FB[今の文字列の判定]
   SK -->|前に起動が失敗し休む間| FB
   SK -->|当たらない| HJ[reply_judge.ask（hook 側）<br/>子を起動し秒の上限で待つ]
@@ -58,7 +58,7 @@ flowchart TB
   FB --> V[今のとおりの判定]
 ```
 
-直した後は、`stop-wait` が Stop ごとに 1 回、最後の応答の本文（コードブロックを除く）を軽いモデルへ渡し、`wait` の回答で変更を要求する。軽いモデルの起動は hook の外の子プロセス（`ndf.adapters.reply_judge`）が既存の `call_claude` で行い、hook の側は標準ライブラリだけで子を起動して秒の上限で待つ。回答が得られないときは今の文字列の判定へ戻り、起動が続けて失敗する環境では休む間だけ呼ばない。呼ぶモデル・秒の上限・本文の字数の上限・休む間・確かめの周の数は `limits.json` の 1 行にある。質問の文を変えるときは、判定の例の組を実際のモデルで確かめる `ndf hooks judge-cases` を打つ。
+直した後は、`stop-wait` が Stop ごとに 1 回、最後の応答の本文（コードブロックを除く）を軽いモデルへ渡し、`wait` の回答で変更を要求する。軽いモデルの起動は hook の外の子プロセス（`ndf.adapters.reply_judge`）が既存の `call_claude` で行い、hook の側は標準ライブラリだけで子を起動して秒の上限で待つ。`claude` は判定の子と同じプロセスの組で起動し、hook の側が組ごと止めて回収する。呼ぶのは Claude Code のセッションで、送り先がセッション自身の Claude の API と同じと確かめられる Stop だけである（決定 11）。回答が得られないときは今の文字列の判定へ戻り、起動が続けて失敗する環境では休む間だけ呼ばない。呼ぶモデル・秒の上限・本文の字数の上限・休む間・確かめの周の数は `limits.json` の 1 行にある。質問の文を変えるときは、判定の例の組を実際のモデルで確かめる `ndf hooks judge-cases` を打つ。
 
 ## 構成要素
 
@@ -74,9 +74,10 @@ flowchart TB
 | --- | --- |
 | guard `stop-wait`（変更） | 呼ばない条件を見て、軽いモデルの判定か今の文字列の判定かを選び、判定から変更要求か通過を返す。計測に判定の出所を残す |
 | 判定のリクエスト（`ndf.domains.hooks.reply_judge`、新設。hook の閉包の中） | 本文から質問に渡す文を作り、子を起動して秒の上限で待ち、回答を読む。時間切れ・割り込みでは子の組を止めて回収する |
-| 判定の子（`ndf.adapters.reply_judge`、新設。hook の閉包の外） | 質問の文を持ち、`call_claude` で軽いモデルを 1 回打ち、回答を 1 行の JSON で返す。判定の例の組を確かめるコマンドの本体も持つ |
-| 起動の前置き（`call_claude`・`launch_slot`、変更） | スロットを待つ上限を呼び手が渡せるようにする（判定の子は 0 秒） |
-| 変更要求の数え手（`Counter`、変更） | 数えずに、上限の手前かだけを返す |
+| 判定の子（`ndf.adapters.reply_judge`、新設。hook の閉包の外） | 質問の文を持ち、`call_claude` で軽いモデルを 1 回打ち、回答を 1 行の JSON で返す。認証の失敗を `auth` に写す。判定の例の組を確かめるコマンドの本体も持つ |
+| 起動の前置き（`call_claude`・`launch_slot`、変更） | スロットを待つ上限と、`claude` を新しいプロセスの組で起動するかを呼び手が渡せるようにする（判定の子は 0 秒・呼び手と同じ組） |
+| 変更要求の数え手（`Counter`、変更） | 数えずに、上限の手前かだけを返す。今の入力の中でモデルが `wait` と回答したことを持つ（上限の後の待ち通知に使う） |
+| hook のエントリポイント（`main.py`）と dispatch（変更） | SIGALRM と同じ絶対時刻の締め切りを guard へ渡す |
 | hook の文脈（`HookContext`、変更） | 最後の利用者の入力の後に AskUserQuestion を使ったかを会話の記録の末尾から読む |
 | 休みのマーカー（状態の保存先のファイル、新設） | 起動が失敗した時刻を持ち、休む間のうちは子を起動させない（決定 10） |
 | 設定（`limits.json`・`guards.json`・`hooks/*.json`、変更） | 判定の行を足し、Stop の予算を上げ、登録の timeout を作り直す |
@@ -97,23 +98,24 @@ sequenceDiagram
   G->>G: 呼ばない条件と休みのマーカーを見る
   G->>J: 本文・残りの秒
   J->>C: 起動（新しいプロセスの組）。標準入力に本文
-  C->>L: 1 回だけ打つ
+  C->>C: claude --version（CLI の下限。子ごとに 1 回）
+  C->>L: 1 回だけ打つ（子と同じ組）
   L-->>C: wait
   C-->>J: {"kind": "wait", "calls": 1}
   J-->>G: Judged(kind=wait, source=model)
   G-->>M: pushback（今の文面）
-  Note over J,C: 時間切れ・割り込みでは J が子の組を止めて回収し、G は今の文字列の判定へ戻る。起動の失敗では休みのマーカーを書く
+  Note over J,C: 時間切れ・割り込みでは J が子の組（claude を含む）を止めて回収し、G は今の文字列の判定へ戻る。起動・認証の失敗では休みのマーカーを書く
 ```
 
-図の「呼ばない条件と休みのマーカーを見る」は、hook の文脈（AskUserQuestion を使ったか・背景の作業）・変更要求の数え手（上限の手前か）・休みのマーカー（前の起動の失敗の時刻）を読む。子の `call_claude` はスロットを待たない前置きを通る。設定・判定の例の組・`ndf hooks judge-cases` は Stop の流れに乗らないので図に含めない。
+図の「呼ばない条件と休みのマーカーを見る」は、hook の文脈（ランタイム・AskUserQuestion を使ったか・背景の作業）・送信先の確かめ（決定 11）・変更要求の数え手（上限の手前か）・休みのマーカー（前の起動の失敗の時刻）を読む。子の `call_claude` はスロットを待たない前置きを通る。設定・判定の例の組・`ndf hooks judge-cases` は Stop の流れに乗らないので図に含めない。
 
 ## 非機能の実現方式
 
 | 大項目 | 条件（要求） | 実現方式 |
 | --- | --- | --- |
-| 性能・拡張性 | 軽いモデルを呼ぶ Stop の待ちは秒の上限を超えない | 判定の上限 5 秒を Stop の締め切り 7 秒 − 余白 1.5 秒の内に置き、hook の側が子を上限で打ち切る。実測は子の起動 0.15〜0.2 秒 ＋ 1 回 0.73〜1.51 秒（MEA3・MEA4）で、打つのは 1 回である（決定 4） |
+| 性能・拡張性 | 軽いモデルを呼ぶ Stop の待ちは秒の上限を超えない | 判定の上限 5 秒を、SIGALRM と同じ絶対時刻の締め切り（起動の時刻 ＋ 7 秒）から余白 1.5 秒を 1 回だけ引いた残りの内に置き、hook の側が子を上限で打ち切る。モデルを呼ぶ Stop が起動するプロセスは 3 つ（判定の子の python・`claude --version`・`claude -p`）。CLI の下限の確かめ（`cli_floor`）の版の記録はプロセスの中にしか無く、判定の子は Stop ごとに新しいので毎回 `claude --version` を 1 回打つ。実測は子の起動 0.15〜0.2 秒 ＋ `claude --version` 0.007〜0.009 秒 ＋ 1 回 0.73〜1.51 秒（MEA3・MEA4・MEA7）で、打つのは 1 回である（決定 4） |
 | 運用・保守性 | 直すのは質問の文と判定の例の組の 2 つ | 質問の文は子のモジュールの定数、組はコントラクトのファイルにあり、`ndf hooks judge-cases` が各例を 3 周打って組を確かめる |
-| セキュリティ | 学習に使わない設定を通らない起動をしない | 子は `call_claude` の前置き（学習の設定の確かめ）をそのまま通す。送る先はセッション自身と同じ Claude の API |
+| セキュリティ | 学習に使わない設定を通らない起動をしない。本文を送る先はセッション自身が使う Claude の API と同じ | 子は `call_claude` の前置き（学習の設定の確かめ）をそのまま通す。送り先が同じと確かめられる Stop（Claude Code のセッションで、接続を設定ファイルで切り替えていない）だけで呼び、Codex のセッションと確かめられない Stop は文字列の判定で決める（決定 11） |
 
 ## 決定の記録
 
@@ -136,7 +138,7 @@ sequenceDiagram
 - **選んだ案**: 今の Stop の hook の `stop-wait` の中で判定を待つ。Stop の予算は締め切り 3.5 → 7 秒・登録の timeout 6 → 9 秒・p95 300 → 2,500 ms に上げる
 - 採らなかった案: Claude Code の prompt 型の hook（`type: "prompt"`）を Stop に登録する（呼ばない条件・変更要求の上限・上限の後の待ちの知らせ・計測が使えず、毎回の Stop で呼ばれる。Codex に同じ仕組みが無い）
 - 採らなかった案: 背景で走り、終了コード 2 で Claude を再開させる hook（`asyncRewake`）にする（待ちは消えるが、Claude が止まった後に再開させる。その間に利用者が打った入力や、中継（セッションを継いで動かす仕組み）の次のセグメントと競る。変更要求の上限を 1 つの数え手で数えられず、Codex に同じ仕組みも無い）
-- **代償**: 軽いモデルを呼ぶ Stop では会話の終わりが約 1〜1.7 秒遅れる（子の起動 0.15〜0.2 秒 ＋ モデルの回答 0.73〜1.51 秒）。上限の 5 秒に当たる Stop は 5 秒遅れる
+- **代償**: 軽いモデルを呼ぶ Stop では会話の終わりが約 1〜1.7 秒遅れ、プロセスを 3 つ起動する（子の起動 0.15〜0.2 秒 ＋ CLI の下限の確かめの `claude --version` 0.007〜0.009 秒 ＋ モデルの回答 0.73〜1.51 秒）。上限の 5 秒に当たる Stop は 5 秒遅れる
 - 作り方: 自前で作る・ライブラリやサービスを使う
 - 比べた候補: PRD1 / PRD2 / LIB1
 - 根拠: Value 3（同じ手順は毎回同じ結果になる）・Value 4（どのプロジェクトでもそのまま使える）（MVV バージョン 11）
@@ -147,7 +149,8 @@ sequenceDiagram
 - **選んだ案**: hook の側（`ndf.domains.hooks.reply_judge`）は標準ライブラリだけで子を起動する。起動は `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]` を新しいプロセスの組で行い、標準入力で本文を渡して上限の秒で待つ。子（`ndf.adapters.reply_judge`）が `ClaudeCall` と `call_claude` で打つ
 - 採らなかった案: import の表の禁止から `ndf.adapters.claude` を外す（hook の起動が `jsonschema`・`httpx` まで読み、すべての事象の hook が遅くなる。#3345 の決定 89 が、hook を軽く保つために禁じた形である）
 - 採らなかった案: hook から `claude -p` を直に打つ（学習に使わない設定の確かめ・スロット・CLI の下限の前置きを二重に持つか、飛ばすことになる）
-- **代償**: 子の起動に 0.15〜0.2 秒かかる（MEA4）。hook の側は子の組を止めて回収する後始末を持つ
+- **組の持ち方**: 判定の子は `call_claude` に新しい組を作らない指定（`new_group=False`）を渡し、`claude` を判定の子と同じ組で起動する。今の `call_claude` は `claude` を `start_new_session=True` で別の組に置くため、hook の側が判定の子の組だけを止めると `claude` が残る。同じ組に収めれば、hook の側の 1 回の組への送信で判定の子と `claude` の両方が止まる。`claude --version`（`cli_floor`）は今のとおり別の組だが、版を出して 0.01 秒ほどで自ら終わり、子孫を持たない
+- **代償**: 子の起動に 0.15〜0.2 秒かかる（MEA4）。hook の側は子の組を止めて回収する後始末を持つ。`call_claude` の起動の関数に組を選ぶ引数が 1 つ増える
 - 根拠: Value 3（同じ手順は毎回同じ結果になる）・Value 8（正しいデータ構造で作られる）（MVV バージョン 11）
 
 ### 決定 4: 揺れる回答で誤って止めないため、同じ文を打ち直さず、通すべき報告の例を質問の文に置く
@@ -166,7 +169,8 @@ sequenceDiagram
 - **選んだ案**: 本文が空・最後の利用者の入力の後に AskUserQuestion を使った・背景の作業（Stop の入力の `background_tasks`。終わると会話を再開させる処理）が残る・その入力の後の変更要求が上限に達した、の 4 つでは呼ばない。呼ばないときは今の文字列の判定で決める（本文が空なら通す）
 - 採らなかった案: 呼ばないときは判定せずに通す（今の振る舞いより見逃しが増える）
 - 採らなかった案: いつも呼ぶ（AskUserQuestion で既に問うた応答・背景の作業が再開させる応答・上限で通すだけの応答に費用を使う）
-- **代償**: 背景の作業が残る応答の本文の質問は、今と同じく文字列の判定でしか見えない。**Codex のセッションは `background_tasks` を渡さない**（コントラクトの表のとおり）ため、この条件に当たらず、Codex では背景の作業が残る応答でも軽いモデルを呼ぶ。Codex には背景の作業の仕組みが無いので、呼ぶ回数は増えない
+- **上限の後の待ち通知**: 上限に達した Stop はモデルを呼ばないので、モデルでしか見えない質問が本文に残っても文字列の判定は `report` になり、待ち通知（dispatch が上限で通した変更要求に送る）が届かない。そこで、モデルが `wait` と回答したら数え手にその印を置き（今の入力の間だけ。入力が変わると数え手と一緒に消える）、上限に達した Stop で文字列の判定が `report` でも印があれば変更要求を返す。dispatch はそれを上限で通し、今のとおり待ち通知を送る。上限に達する前の変更要求はモデルの `wait` か文字列の判定の待ちから来るので、上限に達した Stop の多くはこの印を持つ
+- **代償**: 背景の作業が残る応答の本文の質問は、今と同じく文字列の判定でしか見えない。上限の後に本当の報告で終えた応答でも、同じ入力の中で前にモデルが `wait` と答えていれば待ち通知が届く（届きすぎは利用者が読み捨てられ、見逃しより軽い）。Codex のセッションは決定 11 でモデルを呼ばないので、`background_tasks` を渡さないことは呼ぶ回数に効かない
 - 根拠: Value 2（安く使える）（MVV バージョン 11）
 
 ### 決定 6: hook を止めないため、回答が得られないときは止める側にも通す側にも倒さず、今の文字列の判定へ戻す
@@ -209,21 +213,35 @@ sequenceDiagram
 ### 決定 10: 使えない環境で毎回起動し直さないため、続けて失敗したら一定の間だけ呼ばない
 
 - **質問**: `claude` を起動できない環境（認証が切れている・CLI が無い）で、Stop のたびに子を起動して失敗し続けるのをどう避けるか
-- **選んだ案**: 判定が起動の失敗（`launch`・`refused`・`usage_limit`）で終わったら、状態の保存先に失敗した時刻を書く。次からは、その時刻から**休む間**（`limits.json` の判定の行。既定 600 秒）が過ぎるまで子を起動せず、文字列の判定で決める。時間切れ（`timeout`）とスロットの空き待ち（`no_slot`）は書かない（環境でなくその時の混み具合で起きるため）
+- **選んだ案**: 判定が起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）で終わったら、状態の保存先に失敗した時刻を書く。`auth`（認証の失敗）は判定の子が写す。今の `call_claude` は認証の失敗に `failure` を付けず（`ok` が偽で `failure` が None）、そのままでは `exit` になって休まないためである。実測（MEA8）では認証の無い `claude -p` は終了コード 1 で、結果の行の本文が「Not logged in · Please run /login」か「Invalid API key · Fix external API key」になる。判定の子は、`failure` が None の失敗の本文が設定（`limits.json` の判定の行の `auth_markers`）の文字列を含めば `auth` にする。次からは、その時刻から**休む間**（`limits.json` の判定の行。既定 600 秒）が過ぎるまで子を起動せず、文字列の判定で決める。時間切れ（`timeout`）とスロットの空き待ち（`no_slot`）は書かない（環境でなくその時の混み具合で起きるため）
 - 採らなかった案: 毎回起動して失敗する（1 日 299〜822 回、子のプロセスの起動と `claude` の起動の試みを無駄に重ねる）
 - 採らなかった案: 失敗を数えて一定回数で永久に止める（認証が戻っても判定が戻らず、利用者が気づけない）
-- **代償**: 認証が戻った直後の最大 600 秒は、判定が働かず文字列の判定のままになる
+- 採らなかった案: `adapters/claude.py` の `Failure` に認証の失敗を足す（`Failure` を読むほかの呼び手すべての扱いに効き、この課題の外へ広がる）
+- **代償**: 認証が戻った直後の最大 600 秒は、判定が働かず文字列の判定のままになる。認証の失敗の文言が `claude` の版で変わると `exit` に戻り、休まずに毎回起動する（計測の `judge=fallback:exit` の多さで分かる）
 - 根拠: Value 2（安く使える）・Value 6（使うほど散らからない）（MVV バージョン 11）
+
+### 決定 11: 利用者のデータをセッションの外の接続先へ送らないため、送信先がセッション自身の Claude の API と同じと確かめられる Stop だけでモデルを呼ぶ
+
+- **質問**: 応答の本文をどの接続先へ送ってよいか。同じと確かめられないときはどうするか
+- **選んだ案**: 次をすべて満たす Stop だけでモデルを呼び、満たさなければ文字列の判定で決める（`judge=skip:endpoint`）
+  - ランタイムが Claude Code（`ctx.runtime == "claude"`）。Codex のセッションの応答は Claude の API へ送らない（Codex のセッションは Claude を使っていない）
+  - 判定の子へ渡す環境は hook の環境（Claude Code がセッションの環境で起動する）から、環境変数の表の `child` が `drop` の行（`CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` など。接続と認証の変数を含まない）だけを外したもの。接続先と認証の変数（`ANTHROPIC_BASE_URL`・提供元の選択・API キー・`CLAUDE_CONFIG_DIR`）はそのまま渡る
+  - 判定の子は中継の確かめ（`relay_checks`）を登録しないので、`call_claude` は利用上限で別のアカウントへ打ち直さない
+  - `--setting-sources ""` が読まなくなる設定で接続を選んでいない: セッションが読む設定ファイル（`$CLAUDE_CONFIG_DIR/settings.json`（無ければ `~/.claude/settings.json`）・`<cwd>/.claude/settings.json`・`<cwd>/.claude/settings.local.json`）のどれにも、接続や認証を決めるキー（`limits.json` の判定の行の `endpoint_keys`。既定 `apiKeyHelper`・`awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）が無い。読めないファイルがあれば確かめられないとして呼ばない
+- 採らなかった案: Codex でも `claude` が使えれば呼ぶ（Codex の応答の本文が、そのセッションと別に設定された Claude の接続先へ送られる）
+- 採らなかった案: 最小構成をやめて設定ファイルを読ませる（hook・MCP・プラグインまで読み、遅くなるうえ判定の子が hook を起こす）
+- **代償**: Codex のセッションと、設定ファイルで接続を選ぶ Claude Code のセッションでは、今の見逃しがそのまま残る。Stop ごとに設定ファイルを最大 3 つ読む
+- 根拠: Value 7（不具合が根本原因から直される）（MVV バージョン 11）。要求仕様の非機能（セキュリティ）
 
 ## 影響と危険
 
-- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code と Codex のセッションの Stop。Codex のセッションでも、`claude` が使えれば同じ判定が働き、使えなければ今の文字列の判定のまま動く
-- **プロジェクトごとに違うもの**: 無い。モデル・秒・字数は NDF のコントラクト（`limits.json`）に置き、プロジェクトの設定にしない。guard を止めたいプロジェクトは、今ある guard の切り方（環境変数 `NDF_HOOKS_OFF` に guard の名前を並べると、その guard を呼ばない。`tables.is_off`）で止める
+- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code のセッションの Stop（送信先が同じと確かめられるもの。決定 11）。Codex のセッションはモデルを呼ばず、今の文字列の判定のまま動く
+- **プロジェクトごとに違うもの**: 無い。モデル・秒・字数は NDF のコントラクト（`limits.json`）に置き、プロジェクトの設定にしない。guard を止めたいプロジェクトは、今ある guard の切り方（環境変数 `NDF_HOOK_OFF` に guard の名前をカンマで並べると、その guard を呼ばない。`tables.off_names`・`tables.is_off`）で止める
 - **当たるモード**: モードに依らない（hook はすべてのセッションで動く）
 - **利用者から見た振る舞いの変化**: 会話の終わりが約 1〜1.7 秒遅くなり、Stop ごとに費用がかかる。入出力の約束（guard の名前・変更要求の文面・hook の登録の事象）は変わらないが、使う人には遅れと費用として見える
 - **書きかけの文書と同じファイルを触る別の変更**: `limits.json`・`guards.json`・`hooks/claude.json`・`hooks/codex.json` は多くの課題が触る。実装の PR はスプリントブランチの最新から切り、`ndf hooks render` で登録を作り直す
-- **壊れうる箇所**: 判定の子が `claude` の子孫を残すと、会話の終わりごとにプロセスが積もる。hook の側が新しいプロセスの組で起動し、時間切れ・割り込み（SIGALRM）のどちらでも組ごと止めて回収する。テストで縛る
-- **費用**: この環境の Stop は 1 日 299〜822 回である。**安全側に寄せた見積として、呼ばない条件に当たる分を引かず、全部の Stop で 1 回ずつ呼ぶとして数える**（決定 4 で打ち直しをやめたので、1 回の Stop が打つのは 1 回である）。1 回 0.00006〜0.0008 USD（MEA3・MEA6。質問の文が同じなので、続けて打つとプロンプトのキャッシュが効いて安くなる）から、1 日 0.02〜0.7 USD を見込む。代わりの案（列を足す・prompt 型の hook）は決定 1・決定 2 にある
+- **壊れうる箇所**: 判定の子が `claude` の子孫を残すと、会話の終わりごとにプロセスが積もる。hook の側が新しいプロセスの組で起動し、`claude` もその組に置き（決定 3）、時間切れ・割り込み（SIGALRM）・正常な終わりのどれでも組ごと止めて回収する。組への送信と回収の呼び出しを、偽の Popen と時計を差し込んだ単体テストで縛る
+- **費用**: この環境の Stop は 1 日 299〜822 回である。**安全側に寄せた見積として、呼ばない条件に当たる分を引かず、全部の Stop で 1 回ずつ呼ぶとして数える**（決定 4 で打ち直しをやめたので、1 回の Stop が打つのは 1 回である）。起動するプロセスは Stop ごとに 3 つ（判定の子の python・`claude --version`・`claude -p`）で、1 日 900〜2,466 回になる。`claude --version` は 1 回 0.007〜0.009 秒（MEA7）で、待ちへの寄与は 0.01 秒に収まる。1 回 0.00006〜0.0008 USD（MEA3・MEA6。質問の文が同じなので、続けて打つとプロンプトのキャッシュが効いて安くなる）から、1 日 0.02〜0.7 USD を見込む。代わりの案（列を足す・prompt 型の hook）は決定 1・決定 2 にある
 
 ### 代表のリポジトリでの振る舞い
 
@@ -246,23 +264,25 @@ sequenceDiagram
 | 2. 判定の例の組 | 組のファイルが要求の 5 文・引用の文・別の場所の待ち・作業の報告・承認資料の報告を持ち、期待が `wait` / `report` のどちらかである | 組から見逃しの文を消すと落ちる |
 | 3. 実際のモデルで組を確かめる | `ndf hooks judge-cases` が各例を設定の周の数だけ打ち、1 周でも外れた例を出して終了コード 1。偽の判定器で 3 周のうち 1 周だけ外すと、その例が外れとして出て 1 で終わる | 外れを数えずに 0 で終わると落ちる。周を 1 回しか打たないと、1 周だけ外す偽の判定器で通ってしまい落ちる |
 | 4. 呼ばない条件 | 本文が空・AskUserQuestion を使った・背景の作業が残る・上限に達した、の 4 つで判定器が呼ばれない。どれでもない Stop で 1 回呼ばれる | 条件の 1 つを外すと、その場合で判定器が呼ばれて落ちる |
-| 5. 回答が得られないときは文字列の判定 | 判定器が時間切れ・起動の失敗・認証の失敗・形の違う回答を返すと、文字列の判定と同じ結果になる。上限を超えた子は組ごと止まり、子孫が残らない | 失敗を通過や変更要求に倒すと落ちる。子の組を止めずに戻ると落ちる |
-| 5. 割り込みでも回収する | 子を待つ間に締め切りの割り込みが来ても、子の組が止まる | 割り込みで後始末を飛ばすと落ちる |
+| 決定 5. 上限の後も待ち通知が届く | 同じ入力の中で前の Stop の判定器が `wait` を返し、上限に達した Stop の本文が文字列の判定で `report` のとき、変更要求を返して dispatch が上限で通し、待ち通知が送信待ちに入る。前に `wait` が無ければ通すだけ | 印を見ずに文字列の判定だけで決めると、通知が入らずに落ちる |
+| 決定 11. 送信先が同じときだけ呼ぶ | Codex のセッション・設定ファイルに `endpoint_keys` のキーがある・設定ファイルが読めない、のどれでも判定器が呼ばれず `judge=skip:endpoint`。判定の子へ渡す環境から `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が外れ、`ANTHROPIC_BASE_URL` などは残る | ランタイムを見ずに呼ぶと Codex の例で落ちる。環境を外しすぎ・外し漏れで落ちる |
+| 5. 回答が得られないときは文字列の判定 | 判定器が時間切れ・起動の失敗・認証の失敗・形の違う回答を返すと、文字列の判定と同じ結果になる。偽の Popen が時間切れを起こすと、組へ SIGTERM と SIGKILL が送られて回収（`wait`）される | 失敗を通過や変更要求に倒すと落ちる。組へ送らずに戻ると落ちる |
+| 5. 割り込みでも回収する | 偽の Popen の待ちの中で例外（割り込みの代わり）が上がっても、組へ送って回収してから投げ直す | 割り込みで後始末を飛ばすと落ちる |
 | 決定 4. 1 回で決める | 1 つの Stop で判定器が 1 回だけ呼ばれる | 同じ Stop で 2 回打つと落ちる |
-| 6a・決定 10. 続けて失敗したら休む | 起動の失敗（`launch`・`refused`・`usage_limit`）の後、休む間のうちは判定器が呼ばれず、間が過ぎると呼ばれる。時間切れとスロットの空き待ちでは休まない | 失敗の時刻を書かずに毎回呼ぶと落ちる。時間切れで休むと落ちる |
+| 6a・決定 10. 続けて失敗したら休む | 起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）の後、休む間のうちは判定器が呼ばれず、間が過ぎると呼ばれる。時間切れとスロットの空き待ちでは休まない。判定の子は、`failure` の無い失敗の本文が `auth_markers` を含めば `auth` を返す | 失敗の時刻を書かずに毎回呼ぶと落ちる。時間切れで休むと落ちる。認証の失敗を `exit` に写すと落ちる |
 | 6. 計測に出所が残る | 計測の行の stop-wait の記録に、出所（`model` / `fallback`）・失敗の種類・判定の秒・呼んだ回数が入る | 出所を書かないと落ちる |
 | 7. 設定の 1 か所 | モデル・秒・字数を `limits.json` の値を替えて読むと、子の起動の引数と渡す字数が替わる | コードに値を書くと、設定を替えても変わらずに落ちる |
 | 8. 予算の順序 | `ndf hooks check-budget` が通り、登録の timeout が予算から作り直されている | 判定の上限を締め切り − 余白より大きくすると検査が落ちる |
 | 9. 最小構成で hook が動かない | 子の起動の引数が最小構成（`--setting-sources ""`・`--strict-mcp-config`・`--tools ""`）で、`MAX_THINKING_TOKENS=0` を渡す | 最小構成の引数を外すと落ちる |
 | 10. 退行しない | 既存の `plugins/ndf/tests/domains/hooks/` が通る。hook の import の表の検査が通る | 判定のリクエストから `ndf.adapters.claude` を import すると表の検査が落ちる |
 
-関数ごとの仕様と異常系は詳細設計 [issue-4000-design-detail.md](./issue-4000-design-detail.md) にある。別ファイルにしたのは、新設する関数 11・シグネチャを変える関数 6 のためである。
+関数ごとの仕様と異常系は詳細設計 [issue-4000-design-detail.md](./issue-4000-design-detail.md) にある。別ファイルにしたのは、新設する関数 14・シグネチャを変える関数 9 のためである。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4000 | 実装する | — | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/reply_judge.py`（新設）、`plugins/ndf/src/ndf/adapters/reply_judge.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/reply-judge-cases.json`（新設）、`plugins/ndf/hooks/claude.json`、`plugins/ndf/hooks/codex.json`、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_reply_judge.py`（新設）、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/hooks/test_counter.py`、`plugins/ndf/tests/domains/hooks/test_budget.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/adapters/test_launch_slot.py`、`plugins/ndf/tests/adapters/test_reply_judge_child.py`（新設） |
+| #4000 | 実装する | — | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/reply_judge.py`（新設）、`plugins/ndf/src/ndf/adapters/reply_judge.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/main.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_slot.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/reply-judge-cases.json`（新設）、`plugins/ndf/hooks/claude.json`、`plugins/ndf/hooks/codex.json`、`plugins/ndf/tests/domains/hooks/test_guards.py`、`plugins/ndf/tests/domains/hooks/test_reply_judge.py`（新設）、`plugins/ndf/tests/domains/hooks/test_context.py`、`plugins/ndf/tests/domains/hooks/test_counter.py`、`plugins/ndf/tests/domains/hooks/test_budget.py`、`plugins/ndf/tests/domains/hooks/test_dispatch.py`、`plugins/ndf/tests/adapters/test_launch_slot.py`、`plugins/ndf/tests/adapters/test_reply_judge_child.py`（新設） |
 
 ## 未確認のまま残ること
 
@@ -270,6 +290,8 @@ sequenceDiagram
 | --- | --- |
 | Bedrock・Vertex での `haiku` の別名 | この環境（2026-11-23、Claude Code 2.1.330）では `--model haiku` が解けた。別の提供元の環境で別名が解けないときは起動の失敗として文字列の判定へ戻る。リリース後テストで、利用者の環境の計測に出所 `model` が出ることで分かる |
 | 実際の会話での揺れの割合 | 実測は判定の例の組の 9 件（MEA6 で 54 回すべて期待どおり）だけで、実際の会話の本文は形がもっと多い。リリース後、計測の出所と変更要求の数を `ndf hooks stats` で数えて分かる |
+| 設定の `env` の接続の変数が hook の環境に入るか | 決定 11 は、設定ファイルの `env` で選んだ接続（`ANTHROPIC_BASE_URL` など）が Claude Code の環境に入り、hook がそれを受け継ぐことを前提にする。実装の PR で、設定の `env` だけで接続を選んだセッションの hook の環境を見て確かめる。入らなければ、設定ファイルの `env` に接続の変数がある場合も `endpoint_keys` に足して呼ばない |
+| 認証の失敗のほかの文言 | MEA8 で見た 2 つの文言（ログインしていない・無効な API キー）のほかに、OAuth の期限切れなどの文言は確かめていない。外れた文言は `exit` になって休まない。リリース後、計測の `fallback:exit` の多い環境の標準エラーを見て `auth_markers` へ足す |
 | 質問の文へ例を足し続けることになるか | 決定 4 は通すべき報告の形を例として置く。形が増え続けるなら、言い回しの列と同じ形を足す作業に戻る。判定の例の組の件数の増え方で、次のバージョンで分かる |
 
 ## 外部の調査
@@ -308,5 +330,7 @@ sequenceDiagram
 | MEA4 | 子の import（`ndf.adapters.claude`・`ndf.adapters.launch_slot`） | 152〜205 ms |
 | MEA5 | MEA3 で外れた例を切り分け、通すべき 4 例を 6 周ずつ判定 | 外れたのは「設計 PR を出しました。承認ゲートの承認資料は /tmp/a.md にあります。」だけで 6 回中 1 回。**同じ文を 2 回打って 2 回とも `wait` のときだけ待ちとする形**を 12 組試しても外れは 12 組中 2 組で、1 回打ち（6 回中 1 回）から減らなかった。回答の揺れは独立でなく、文が境目にあるために起きる（決定 4） |
 | MEA6 | 質問の文の report の例に「承認を求める資料を用意したことや作業の結果を報告している」を足し、見逃しの 5 文・引用・別の場所の待ち・作業の報告・承認資料の報告の 9 例を 6 周ずつ判定 | **54 回すべて期待どおり**（外れ 0）。合計 0.0032 USD（続けて打つとプロンプトのキャッシュが効き、1 回あたり 0.00006 USD まで下がる） |
+| MEA7 | CLI の下限の確かめが打つ `claude --version` を新しいプロセスから 6 回 | 0.007〜0.009 秒 |
+| MEA8 | 空の設定ディレクトリで認証の変数を外した `claude -p --output-format json`、無効な API キーを渡した同じ起動 | どちらも終了コード 1・`is_error: true`。本文は「Not logged in · Please run /login」（`api_error_status` null）と「Invalid API key · Fix external API key」（401・`authentication_error`）。今の `call_claude` では `failure` の無い失敗になる |
 
 調べた量: 候補 4 件・取得の試み 3 回。
