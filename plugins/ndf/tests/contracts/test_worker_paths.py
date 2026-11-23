@@ -402,7 +402,7 @@ def test_file_operations_reject_absolute_path(workdir):
     assert outside.read_text(encoding="utf-8") == "利用者の中身"
 
 
-def test_write_file_removes_temp_dir_it_cannot_open(workdir, monkeypatch):
+def test_write_file_keeps_temp_dir_it_cannot_open(workdir, monkeypatch):
     d, _ = workdir
     real_open = os.open
 
@@ -414,7 +414,9 @@ def test_write_file_removes_temp_dir_it_cannot_open(workdir, monkeypatch):
     monkeypatch.setattr(os, "open", fail_on_temp)
     with worker_paths.open_workdir(d) as wd, pytest.raises(OSError):
         worker_paths.write_file(wd, "f", "新")
-    assert list(d.iterdir()) == []
+    # 開けなければ作ったディレクトリだと確かめられないので、名前を消さずに残す（詳細設計の書き込みの手順 4）
+    left = list(d.iterdir())
+    assert len(left) == 1 and left[0].name.startswith(".f.") and left[0].is_dir()
 
 
 def test_remove_file_removes_then_reports_absent(workdir):
