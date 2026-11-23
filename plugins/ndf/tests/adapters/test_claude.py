@@ -113,3 +113,16 @@ def test_issue_4000_call_claude_can_skip_the_cli_floor(launches):
     got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(cli_floor=False))
 
     assert got.ok and launches.floor == [] and len(launches.popen) == 1
+
+
+def test_issue_4000_call_claude_without_ensure_training_refuses_a_stale_record(launches, monkeypatch):
+    """#4000: `ensure_training=False` なら学習の設定の記録が無いとき確かめ直さず `Failure.REFUSED` を返し、起動しない。"""
+    from ndf.adapters import training
+
+    monkeypatch.setattr(
+        launch_slot.training_cache, "verdict", lambda agent, env=None: launch_slot.training_cache.Verdict("記録が無い", stale=True)
+    )
+    monkeypatch.setattr(training, "ensure", lambda agent, env=None: pytest.fail("確かめ直した"))
+    got = claude.call_claude(["claude"], "q", 30, options=claude.LaunchOptions(ensure_training=False))
+
+    assert got.failure is claude.Failure.REFUSED and not got.ok and launches.popen == []

@@ -543,11 +543,14 @@ class LaunchOptions:
     - `slot_wait`: 重い起動のスロットを待つ上限の秒。None なら設定の上限（`launch.wait.llm-cli`）、0 なら待たずに `Failure.NO_SLOT`
     - `new_group`: claude を専用のプロセスの組で起動するか。偽なら呼び手の組に入り、呼び手の 1 回の組への送信で claude も止まる
     - `cli_floor`: CLI の下限（`claude --version`）を確かめるか。偽なら確かめずに起動する（今動いている claude を打つ子など、下限を満たすと分かっている起動）
+    - `ensure_training`: 学習に使わない設定の記録が無いか期限切れのとき、その場で確かめて記録するか（`training.ensure`）。
+      偽なら確かめ直さずに `Failure.REFUSED`（アカウントの設定の API を呼ばず、設定も変えない）
     """
 
     slot_wait: Optional[float] = None
     new_group: bool = True
     cli_floor: bool = True
+    ensure_training: bool = True
 
 
 # 選び方を省いた起動（今までどおり）
@@ -616,7 +619,9 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
     """
     launched = False
     try:
-        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait) as slot_env:
+        with launch_slot.gate(
+            "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
+        ) as slot_env:
             run = run._replace(env={**run.env, **slot_env})
             refused = run.recheck() if run.recheck is not None else None
             if refused is not None:

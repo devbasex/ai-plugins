@@ -58,9 +58,9 @@ def _memory_ok(read_memory: ReadMemory, floor_mib: int) -> bool:
     return available is None or available >= floor_mib
 
 
-def _try_take(directory: Path, capacity: int, owner: Mapping[str, object]) -> Optional[slot_pool.Taken]:
+def _try_take(directory: Path, capacity: int, owner: Mapping[str, object], lock_seconds: float) -> Optional[slot_pool.Taken]:
     try:
-        return slot_pool.take(directory, capacity, slot_pool.weight_mib(KIND), owner)
+        return slot_pool.take(directory, capacity, slot_pool.weight_mib(KIND), owner, lock_seconds=lock_seconds)
     except Timeout:  # noqa: NDF401 ファイル: 取る判定の排他を待ちきれなければ、空いていないとして次の周で見直す
         return None
     except OSError as exc:
@@ -72,11 +72,13 @@ def wait_policy() -> tuple[float, float]:
     return limits.seconds(WAIT_POLICY), limits.value(WAIT_POLICY, "interval")
 
 
-def _take_once(directory: Path, lim: test_limits.Limits, owner: Mapping[str, object], read_memory: ReadMemory) -> Optional[slot_pool.Taken]:
-    """使えるメモリが下限を割っていなければスロットを 1 度取りに行く。取れなければ None。"""
+def _take_once(
+    directory: Path, lim: test_limits.Limits, owner: Mapping[str, object], read_memory: ReadMemory, lock_seconds: float
+) -> Optional[slot_pool.Taken]:
+    """使えるメモリが下限を割っていなければスロットを 1 度取りに行く（プールの排他は `lock_seconds` 秒まで待つ）。取れなければ None。"""
     if not _memory_ok(read_memory, lim.memory_floor_mib):
         return None
-    return _try_take(directory, lim.capacity_mib, owner)
+    return _try_take(directory, lim.capacity_mib, owner, lock_seconds)
 
 
 def _no_slot_reason(agent: str, waited: float, read_memory: ReadMemory) -> str:
@@ -88,14 +90,20 @@ def _no_slot_reason(agent: str, waited: float, read_memory: ReadMemory) -> str:
 def _wait_for(
     agent: str, directory: Path, lim: test_limits.Limits, read_memory: ReadMemory, limit: Optional[float] = None
 ) -> slot_pool.Taken:
-    """スロットを `limit` 秒まで待って取る（None なら設定の上限、0 なら 1 度だけ取りに行き、取れなければ `NoSlot`）。"""
+    """スロットを `limit` 秒まで待って取る（None なら設定の上限、0 なら 1 度だけ取りに行き、取れなければ `NoSlot`）。
+
+    呼び手が上限を決めたときは、プールの排他を待つ秒と眠る秒も残りの秒に収める（#4000 の決定 8。上限 0 なら排他も待たない）。
+    """
     policy_limit, poll = wait_policy()
+    bounded = limit is not None
     if limit is None:
         limit = policy_limit
     owner = {"pid": os.getpid(), "kind": KIND, "agent": agent}
     started = time.monotonic()
     while True:
-        taken = _take_once(directory, lim, owner, read_memory)
+        left = max(0.0, limit - (time.monotonic() - started))
+        lock_seconds = min(slot_pool.POOL_LOCK_SECONDS, left) if bounded else slot_pool.POOL_LOCK_SECONDS
+        taken = _take_once(directory, lim, owner, read_memory, lock_seconds)
         waited = time.monotonic() - started
         if taken is not None:
             if waited >= poll:
@@ -103,7 +111,7 @@ def _wait_for(
             return taken
         if waited >= limit:
             raise NoSlot(_no_slot_reason(agent, waited, read_memory))
-        time.sleep(poll)
+        time.sleep(min(poll, limit - waited) if bounded else poll)
 
 
 @contextmanager
@@ -141,7 +149,12 @@ def held(
 
 @contextmanager
 def gate(
-    agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None, wait: Optional[float] = None
+    agent: str,
+    *,
+    cwd: Optional[Path] = None,
+    env: Optional[Mapping[str, str]] = None,
+    wait: Optional[float] = None,
+    ensure: bool = True,
 ) -> Iterator[dict[str, str]]:
     """起動の前置き: 学習に使わない設定のスナップショットを読み、重い起動のスロットを取る。起動しないときは `NotLaunched`。
 
@@ -149,16 +162,21 @@ def gate(
     `wait` はスロットを待つ上限の秒（None なら設定の上限、0 なら待たずに `NoSlot`）。
     バックアップはスロットを待つ前と、取った後の起動の直前に読む（待つ間にバックアップが期限を過ぎるか、拒否へ変わることがある）。
     バックアップが無いか期限切れ・取り消し済み・認証の文脈が違うなら、断らずにその場で確かめて記録する（`training.ensure`。#3907）。
+    `ensure` が偽なら確かめ直さず（アカウントの設定の API を呼ばず、設定も変えない）、その場合は `NotLaunched` を送る
+    （#4000 の Stop の判定など、記録が有効なときだけ起動する呼び手）。
     取った後に拒否へ変われば、スロットを返して `NotLaunched` を送る。
     """
-    _refuse_if_needed(agent, env)
+    _refuse_if_needed(agent, env, ensure)
     with held(agent, cwd=cwd, environ=env, wait=wait) as slot_env:
-        _refuse_if_needed(agent, env)
+        _refuse_if_needed(agent, env, ensure)
         yield slot_env
 
 
-def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]]) -> None:
-    if training_cache.verdict(agent, env=env).stale:
+def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]], ensure: bool = True) -> None:
+    verdict = training_cache.verdict(agent, env=env)
+    if verdict.stale and not ensure:
+        why = verdict.why
+    elif verdict.stale:
         # バックアップが使えず確かめ直せば直りうるなら、その場で確かめて記録する（#3907）。httpx を読むのはこのときだけ
         from ndf.adapters import training
 

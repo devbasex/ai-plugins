@@ -12,7 +12,8 @@
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `plugins/ndf/src/ndf/adapters/launch_slot.py` | `gate`・`held`・`_wait_for` にスロットを待つ上限 |
+| `plugins/ndf/src/ndf/adapters/launch_slot.py` | `gate`・`held`・`_wait_for` にスロットを待つ上限（プールの排他と眠る秒も収める）と、学習の設定の記録を確かめ直さない選び方 |
+| `plugins/ndf/src/ndf/slot_pool.py` | `take` にプールの排他を待つ上限 |
 | `plugins/ndf/src/ndf/adapters/claude.py` | `call_claude`・`_accounted`・`_prefaced`・`_run_claude`・`_popen` にスロットを待つ上限と組の選び方 |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | `asked_since_prompt`・`HookContext.asked_this_turn` |
 | `plugins/ndf/src/ndf/domains/hooks/counter.py` | `pushback_left`・`mark_model_wait`・`model_waited` |
@@ -32,7 +33,7 @@
 ## タスク分解
 
 ### Task 1: スロットを待つ上限と組の選び方
-- **対象ファイル:** `adapters/launch_slot.py`・`adapters/claude.py` と `tests/adapters/test_launch_slot.py`・`test_claude.py`・`tests/domains/relay/test_relay_plan_claude.py`（偽の `gate` の引数の追随）
+- **対象ファイル:** `adapters/launch_slot.py`・`adapters/claude.py`・`slot_pool.py` と `tests/adapters/test_launch_slot.py`・`test_claude.py`・`tests/domains/relay/test_relay_plan_claude.py`（偽の `gate` の引数の追随）
 - **変更内容:** 詳細設計の「起動の前置きのスロットを待つ上限」と、CLI の下限の確かめを飛ばす指定（`cli_floor`。設計の決定 3 の「CLI の下限」）。どれも省けば今の振る舞いのまま
 - **満たす受け入れ条件:** 9（判定の子の起動の前置き。設計の決定 3・8）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
