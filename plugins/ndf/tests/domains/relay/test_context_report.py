@@ -1,29 +1,23 @@
 """作業ごとの集計・判定の記録・見込みの較正（`ndf relay context report`・`record`・`calibrate`。#3569）。
 
-記録の語（「継続」「再起動」）は記録に残ったデータの値なので、方針のモジュールに依らず字面で書く（#3995 の Task 1）。
+記録の語（「継続」「再起動」）は記録に残ったデータの値なので、字面で書く（#3995 の Task 1）。
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
 from ndf import identity
 from ndf.domains.relay import cli, context_records, context_report, registry
+from ndf.domains.relay.context_thresholds import Thresholds
 
 CONTINUE = "継続"
-
-
-class _Applied:
-    """`record_row` に渡す適用値の代わり（`as_dict` だけを使う）。方針のモジュールに依らない。"""
-
-    def __init__(self, values: dict[str, Any]) -> None:
-        self._values = values
-
-    def as_dict(self) -> dict[str, Any]:
-        return dict(self._values)
+# record_row に渡す 2 つの値（#3995 の決定 1）
+APPLIED = Thresholds(250_000, 500_000, {"decide_from": "default", "limit": "default"})
+# 再起動の方針を消す前の行だけが持つ列（#3995 の決定 1）
+POLICY_COLUMNS = ("policy", "margin", "config_error")
 
 
 def _call(i: int, ts: str, inp: int = 100, out: int = 10, mid: str | None = None) -> dict:
@@ -58,7 +52,7 @@ def test_buckets_split_by_handoff_mark_and_dedupe_message_ids(tmp_path):
     assert got["parts"]["handoff"]["calls"] == 1
     assert got["restarts"] == {"手動": 1} and got["restart_count"] == 1
     assert got["auto_compacts"] == 1
-    assert got["no_policy_rows"] == 1
+    assert "no_policy_rows" not in got  # 方針の列を数えない（#3995 の決定 1）
     assert got["quality"]["rework"] == context_records.UNKNOWN
 
 
@@ -129,7 +123,7 @@ def test_cli_report_rejects_bad_times(tmp_path, monkeypatch, capsys):
     assert cli.main(["context", "report", "--work", "#1", "--all"]) == 2
     capsys.readouterr()
     assert cli.main(["context", "report", "--all"]) == 0
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["works"] == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"] == {"works": 0, "skipped": 0}
 
 
 def _session(tmp_path, first_user: str) -> str:
@@ -327,9 +321,8 @@ def test_recorded_work_normalizes_issue_numbers():
 
 def test_append_and_read_skip_broken_lines(tmp_path):
     env = {"NDF_CONTEXT_DIR": str(tmp_path)}
-    applied = _Applied({"decide_from": 250_000, "limit": 500_000, "sources": {"decide_from": "default", "limit": "default"}})
-    late = context_records.record_row("s1", "#1", applied, context_records.MARK_HANDOFF, None) | {"at": "2026-11-15T02:00:00+00:00"}
-    early = context_records.record_row("s1", "#1", applied, None, "手動") | {"at": "2026-11-15T01:00:00+00:00"}
+    late = context_records.record_row("s1", "#1", APPLIED, context_records.MARK_HANDOFF, None) | {"at": "2026-11-15T02:00:00+00:00"}
+    early = context_records.record_row("s1", "#1", APPLIED, None, "手動") | {"at": "2026-11-15T01:00:00+00:00"}
     path = context_records.append("o__r", late, env)
     with path.open("a", encoding="utf-8") as f:
         f.write('{"cut\n')
@@ -387,8 +380,13 @@ def test_cli_record_rejects_a_reason_outside_the_table(tmp_path, monkeypatch, ca
     assert cli.main(["context", "record", "--verdict", "再起動", "--work", "#1"]) == 2
     assert cli.main(["context", "record", "--event", "引継ぎ開始", "--reason", "手動", "--work", "#1"]) == 2
     capsys.readouterr()
+    monkeypatch.setenv("NDF_CONTEXT_LIMIT", "300000")
     assert cli.main(["context", "record", "--event", "引継ぎ開始", "--work", "#1"]) == 0
-    assert _last(capsys)["items"][0]["event"] == "引継ぎ開始"
+    row = _last(capsys)["items"][0]
+    assert row["event"] == "引継ぎ開始"
+    # record は resolve と同じ 2 つの値を行に書く（#3995 の決定 1）
+    assert (row["decide_from"], row["limit"], row["sources"]["limit"]) == (250_000, 300_000, "env")
+    assert not set(POLICY_COLUMNS) & set(row)
 
 
 def test_cli_record_fails_when_it_cannot_write(tmp_path, monkeypatch, capsys):
@@ -539,3 +537,59 @@ def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
     assert body["samples"]["restore"] == 3 and body["samples"]["handoff"] == 3
     assert (body["restore_context"], body["restore_calls"]) == (101.0, 1.0)
     assert (body["handoff_calls"], body["handoff_output"]) == (1.0, 10.0)
+
+
+# --- 新しい行（2 つの値だけを持つ）と旧い行を混ぜた記録（#3995 の Task 4。決定 1 の代償） ---
+
+
+@pytest.mark.parametrize(("event", "reason"), [(context_records.MARK_HANDOFF, None), (None, "手動")])
+def test_record_row_writes_the_two_values_without_the_policy_columns(event, reason):
+    row = context_records.record_row("s1", "#1", APPLIED, event, reason)
+    assert (row["decide_from"], row["limit"], row["sources"]) == (250_000, 500_000, APPLIED.sources)
+    assert not set(POLICY_COLUMNS) & set(row)
+
+
+def _new(row: dict) -> dict:
+    """旧い行の方針の列を外し、新しい行の 2 つの値を足した行。"""
+    kept = {k: v for k, v in row.items() if k not in POLICY_COLUMNS}
+    return kept | APPLIED.as_dict()
+
+
+def test_report_of_mixed_rows_equals_old_rows_only(tmp_path):
+    # 旧い行と新しい行を混ぜても、区分・再起動・自動圧縮は旧い行だけのとき（test_report_parts_of_old_rows_only）と同じ
+    t = _transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": "始める"}},
+            _call(0, "2026-11-15T01:00:00Z"),
+            _call(1, "2026-11-15T01:00:00Z", out=20, mid="m0"),
+            _call(2, "2026-11-15T01:10:00Z"),
+            {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}},
+        ],
+    )
+    old = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1", **_OLD},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s", "work": "#1", "event": context_records.MARK_HANDOFF, **_OLD},
+        {"at": "2026-11-15T01:20:00Z", "session_id": "s", "work": "#1", "verdict": "再起動", "reason": "手動", **_OLD},
+    ]
+    mixed = [old[0], _new(old[1]), _new(old[2])]
+    assert context_report.report("#1", mixed, [], None) == context_report.report("#1", old, [], None)
+
+
+def test_calibrate_of_mixed_rows_equals_old_rows_only(tmp_path, monkeypatch):
+    # 旧い行と新しい行を混ぜても、較正した見込みは旧い行だけのとき（test_calibrate_estimates_of_old_rows_only）と同じ
+    monkeypatch.setattr(context_records, "repo_key", lambda root: "o__r")
+    bodies = []
+    for kind in ("old", "mixed"):
+        env = {"NDF_CONTEXT_DIR": str(tmp_path / kind)}
+        for n in range(3):
+            t = _calls_transcript(tmp_path / f"t{n}.jsonl", [("2026-11-15T01:00:00Z", 100 + n), ("2026-11-15T01:10:00Z", 200 + n)])
+            restored = {"at": "2026-11-15T01:05:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_RESTORED}
+            handoff = {"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF}
+            context_records.append("o__r", restored | _OLD, env)
+            context_records.append("o__r", handoff | _OLD if kind == "old" or n == 0 else _new(handoff), env)
+        body = context_records.calibrate(None, 30, 0.0, env)
+        body.pop("at")
+        bodies.append(body)
+    assert bodies[0] == bodies[1]
+    assert bodies[1]["samples"]["handoff"] == 3

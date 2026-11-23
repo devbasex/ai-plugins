@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
+from pathlib import Path
+
 import pytest
 
 from ndf.contracts import limits
 from ndf.domains.hooks import tables
-from ndf.domains.relay import context_thresholds
+from ndf.domains.relay import cli, context_thresholds
 from ndf.domains.relay.context_thresholds import thresholds
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _value(decide_from: int, limit: int):
@@ -72,3 +78,58 @@ def test_missing_table_row_is_raised_to_the_caller():
 
     with pytest.raises(tables.TableError):
         thresholds({}, value)
+
+
+# --- ndf relay context resolve（#3995 の Task 4。3995:1・3995:3・3995:9 の resolve の側） ---
+
+
+def _resolve(monkeypatch, capsys, env: str | None) -> dict:
+    """`ndf relay context resolve` の結果 JSON。`env` は NDF_CONTEXT_LIMIT（None なら無し）。形は conftest が結果のスキーマで確かめる。"""
+    if env is None:
+        monkeypatch.delenv("NDF_CONTEXT_LIMIT", raising=False)
+    else:
+        monkeypatch.setenv("NDF_CONTEXT_LIMIT", env)
+    assert cli.main(["context", "resolve"]) == 0
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_resolve_returns_the_two_defaults(monkeypatch, capsys):
+    # 設定も環境変数も無ければ、判断開始の値 250,000・運用上限 500,000・出所 default
+    got = _resolve(monkeypatch, capsys, None)
+    assert got["items"] == [{"decide_from": 250_000, "limit": 500_000, "sources": {"decide_from": "default", "limit": "default"}}]
+    assert got["metrics"] == {"decide_from": 250_000, "limit": 500_000}
+
+
+@pytest.mark.parametrize(("raw", "decide_from", "limit"), [("300000", 250_000, 300_000), ("200000", 200_000, 200_000)])
+def test_resolve_reads_the_env_limit(monkeypatch, capsys, raw, decide_from, limit):
+    # NDF_CONTEXT_LIMIT は resolve の運用上限も替え、判断開始の値を同じ値まで下げる
+    got = _resolve(monkeypatch, capsys, raw)
+    assert (got["items"][0]["decide_from"], got["items"][0]["limit"]) == (decide_from, limit)
+    assert got["items"][0]["sources"]["limit"] == "env"
+    assert got["metrics"] == {"decide_from": decide_from, "limit": limit}
+
+
+def test_resolve_follows_the_limits_table(monkeypatch, capsys):
+    # 上限の設定の 2 つの値を差し替えると、resolve は差し替えた値を返す（定数や別の行を読まない）
+    real = limits.value
+    swapped = {context_thresholds.DECIDE_FROM: 100_000, context_thresholds.LIMIT: 200_000}
+    monkeypatch.setattr(limits, "value", lambda name, key: swapped[name] if name in swapped else real(name, key))
+    got = _resolve(monkeypatch, capsys, None)
+    assert got["metrics"] == {"decide_from": 100_000, "limit": 200_000}
+
+
+# --- 再起動の方針と設定の形を消した（#3995 の Task 5。3995:2・3995:10 の契約の側） ---
+
+
+@pytest.mark.parametrize("name", ["hook.context-limit", "relay.context"])
+def test_the_limits_table_has_no_old_rows(name):
+    with pytest.raises(limits.LimitsError):
+        limits.value(name, "count")
+
+
+def test_the_restart_policy_module_is_gone():
+    assert importlib.util.find_spec("ndf.domains.relay.context_policy") is None
+
+
+def test_the_restart_policy_setting_schema_is_gone():
+    assert not (PLUGIN_ROOT / "contracts" / "schemas" / "ndf-settings" / "context.schema.json").exists()
