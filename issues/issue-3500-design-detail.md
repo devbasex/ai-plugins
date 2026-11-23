@@ -227,7 +227,7 @@ plugins/ndf/
   - 副作用: DB への 1 トランザクション（今の事象の追記と同じ経路・同じ排他）
 - `show`: 事後条件: `seq` が無ければ最後の `handoff_written`、あれば `seq` の版。本文は `read_handoff` の 1 件だけを読み、過去の版の本文もほかの事象も読まない。`history` のときだけ、続けて `read_handoff_histories(upto=<返す版の seq>)` で履歴の差分だけを読む。読むだけ
 - `listing`: `ndf_progress_machines` の `repo` がこのリポジトリのものに絞り、各ステートマシンの最後の `handoff_written`（番号と時刻だけ。本文は読まない。無ければ空）と今の状態を返す。`with_handoff` が真なら `handoff_written` を持つものだけを返す。`open_only` の「閉じていない」は階層ごとに決める: `sprint`・`plan` は `model.table_state` が `model.is_terminal` でない。`lane`（全体の状態を持たない）は、`model` で畳んだ行の状態のうち `is_terminal` でないものが 1 つ以上ある（行がまだ無いレーンは開いている）。すべての行が `completed`・`cancelled` のレーンは閉じている
-- 再開の候補の絞り込み（手順 0、`block-next`）: `listing(open_only=True)` のうち、名前が入力に完全一致するものだけを候補にする（スプリントは課題番号から `machine_id` と同じ計算で作った名前、ループは「未確認のまま残ること」の 2 で決める ID）。部分一致や課題番号を含むだけの名前は候補にしない。閉じたステートマシンは候補にしない
+- 再開の候補の絞り込み（手順 0、`block-next`）: `listing(open_only=True)` のうち、名前が入力に完全一致するものだけを候補にする（スプリントは課題番号から `machine_id` と同じ計算で作った名前、ループは「未確認のまま残ること」の 2 で決める ID）。部分一致や課題番号を含むだけの名前は候補にしない。閉じたステートマシンは候補にしない。`list --open` は DB に引継ぎがある対象だけを返すので、候補が 0 件なら、入力から求めた ID で `show` を打って前の版の文書を確かめてから「引継ぎなし」とする（下の「切り替えの間の再開」）
 
 ### 異常系の処理
 
@@ -249,7 +249,8 @@ plugins/ndf/
 | 事象の決まりの行 | 設定値 | `contracts/workflow/progress.json` | `{"level": "<sprint・lane・plan>", "kind": "handoff_written", "actors": ["conductor", "organizer"], "scope": "table"}` の 3 行 |
 | 再試行の回数 | 設定値 | `contracts/limits.json` の `handoff.conflict_retries` | 3 |
 | 上限 | 設定値 | `contracts/limits.json` | 今の `handoff.lines` 300・`handoff.bytes` 16,000 |
-| `HANDOFF_SHOW` | 定数 | `relay/context_records.py` | `ndf handoff show` の語の正規表現 |
+| `HANDOFF_SHOW` | 定数 | `relay/context_records.py` | `ndf handoff show` の語の正規表現（切り替えの間は前の版の `.ndf/handoff/<名>.md` の語も） |
+| `LEGACY_NAMES` | 定数 | `domains/handoff/record.py` | 旧ファイル名の前置き（`issue-`・`sprint-`・`parallel-`・無し）と移し先の階層の表（「旧ファイル名と移し先」） |
 
 ### ログと記録の出力
 
@@ -266,7 +267,7 @@ plugins/ndf/
 | `show` | 最後の版・`--seq` の版・`--history` | 版が 1 つ・通常の `show` が過去の版の本文を読まない（`read_handoff` の SQL が 1 行） | 引継ぎが無い・無い `--seq` |
 | `listing` | 引継ぎを持つものだけ・`--open` | 0 件・行がすべて `completed` のレーンは `--open` に出ない・行の無いレーンは出る | 別のリポジトリのステートマシンを含めない |
 | `read_events` | `handoff_written` の `payload` が `None` で、ほかの事象は今のまま | — | — |
-| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く・閉じたステートマシンと無いステートマシンの文書は書かずに動く | 履歴のファイルが無い・新方式の版が既にある対象は書かずに動く・本文だけ動いた後の再実行で履歴だけが動き版が増えない・引継ぎを持たない閉じていないステートマシンが行き先に選ばれる | 書いた版の読み直しが違うと動かさない・`../x`・`a/b` の名前・外を指す symlink の本文と履歴・同じ名前の閉じていないステートマシンが 2 つ |
+| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く・閉じたステートマシンと無いステートマシンの文書は書かずに動く | 履歴のファイルが無い・新方式の版が既にある対象は書かずに動く・本文だけ動いた後の再実行で履歴だけが動き版が増えない・引継ぎを持たない閉じていないステートマシンが行き先に選ばれる・`issue-<番号>`・`sprint-<名>`・`parallel-<名>` の旧ファイル名がそれぞれのステートマシンへ移る・`show sprint:<名>` が `sprint-<名>.md` を `outputs.legacy` に返す・`list --open` が 0 件でも旧文書だけの対象は手順 0 の `show` で見つかる | 書いた版の読み直しが違うと動かさない・`sprint-<名>` が同じ名前の閉じていないスプリントとレーンの両方に当たると終了コード 2・`../x`・`a/b` の名前・外を指す symlink の本文と履歴・同じ名前の閉じていないステートマシンが 2 つ |
 
 ### 前の版の引継ぎ文書の移し替え（子の課題 3）
 
@@ -280,7 +281,7 @@ plugins/ndf/
   3. `outside_folder`: 本文と履歴の親の実体（`realpath`）が旧フォルダの実体と同じでない
   - 読むときは `os.open(..., O_RDONLY | O_NOFOLLOW)` で開き、開いた記述子の `fstat` が `lstat` と同じ inode であることを確かめる（検査と読み取りの間に差し替えられたものを読まない）。退避の `rename` の前にも同じ `lstat` をもう一度取り、inode が変わっていれば動かさない
 - 行き先の選定（引継ぎの事象の有無に依らず、ステートマシンの状態で決める）
-  - `--to <ID>` があればその ID。無ければ `listing(open_only=True, with_handoff=False)` のうち、名前が `<名>` に完全一致するもの（手順 0 と同じ一致の規則）。1 つならそこへ書く。2 つ以上なら止める（終了コード 2 と候補）
+  - `--to <ID>` があればその ID。無ければ下の「旧ファイル名と移し先」で `<名>` から求めた（階層, 名前）の組に、階層と名前の両方が完全一致する `listing(open_only=True, with_handoff=False)` の項目。1 つならそこへ書く。2 つ以上なら止める（終了コード 2 と候補）
   - 0 なら書かずに退避だけする（閉じたステートマシンの文書と、ステートマシンの無い 10 系の対象の文書。14 日の間は戻せる）。`--drop` の選択肢は無くし、AI が稼働中かを判断しない
 - 書く（行き先があるとき）: 先に `read_handoff_sources` で行き先の版を読む
   - 新版を優先: `source` を持たない `handoff_written`（`ndf handoff write` が書いた版）が 1 つでもあれば、前の版の文書を書かずに退避だけし、`outputs.superseded = true` を返す（`show` の最新版を古い内容で上書きしない）
@@ -289,7 +290,19 @@ plugins/ndf/
 - 退避: `places.retired_slot(cwd, now)`（下の「残骸の退避」の、実行ごとに衝突しない退避先）の下の `main/.ndf/handoff/` へ、本文、履歴の順に `rename` する（行き先に同じ名前があれば上書きせずに止める）
 - 再開: 退避の途中で止まった後の再実行は、DB の移し済みの版の `source_sha256` を正とする。旧フォルダに残っているファイルのうち、SHA-256 がその版の記録と一致するものだけを退避し、版は足さない。本文が既に退避済みで履歴だけが残る場合も、履歴の SHA-256 で同じ版の残りと分かるので退避できる。一致しないファイルは動かさず終了コード 1（移した後に人が書き足した内容を失わない）
 - `.ndf/handoff` のフォルダは `retired` の値 `empty-dir` の行で、`sweep`（子の課題 4）は中が空になるまで動かさない。移していない文書が残る間は `items[]` に `not_empty` と残りの数が出る
-- 切り替えの間の再開: 手順 0 は、`ndf handoff show <ID>` が「まだ引継ぎが無い」（終了コード 2）を返し、`outputs.legacy` に旧フォルダの同名の文書の名前があるときは、結果 JSON の `outputs.next`（`ndf handoff import <名> --to <ID>`）を打ってから `show` をやり直す。`show` は旧フォルダの名前を `<ID>` の名前の部分から作って有無だけを `lstat` で確かめ、読まない
+- 旧ファイル名と移し先: 前の版の手順書は、ステートマシンの名前と違うファイル名で文書を書いた（ai-plugins の実物は `issue-<番号>`・`sprint-<名>`・`parallel-<計画>` と、それ以外の名前）。名前と ID の対応は `domains/handoff/record.py` の定数 `LEGACY_NAMES` 1 か所が持ち、`import_file` の行き先の選定と `show` の旧文書の確かめが同じ表を両方向に使う
+
+  | 旧ファイル名（`.md` を除く） | 移し先の候補（階層, 名前） | ID から旧ファイル名を作る向き（`show`） |
+  | --- | --- | --- |
+  | `issue-<番号>` | (`sprint`, 課題番号から `machine_id` と同じ計算で作ったスプリントの名前) | `sprint` の ID の名前が課題番号から作った形なら `issue-<番号>` |
+  | `sprint-<名>` | (`sprint`, `<名>`)・(`lane`, `<名>`) | `sprint`・`lane` の ID なら `sprint-<名>` |
+  | `parallel-<名>` | (`plan`, `<名>`) | `plan` の ID なら `parallel-<名>` |
+  | それ以外 | (`sprint`, `<名>`)・(`lane`, `<名>`)・(`plan`, `<名>`) | どの ID でも `<名>`（ID の名前の部分そのまま） |
+
+  候補のどれにも当たらなければ行き先は 0（退避だけ）、2 つ以上に当たれば終了コード 2 と候補（`--to` で選ぶ）
+- 切り替えの間の再開: 手順 0 は、次のどの入口でも「引継ぎなし」と判断する前に前の版の文書を確かめる
+  - 入力に ID がある・`list --open` が 0 件で入力から ID を求めた: `ndf handoff show <ID>` が「まだ引継ぎが無い」（終了コード 2）を返し、`outputs.legacy` に旧フォルダの文書の名前があるときは、結果 JSON の `outputs.next`（`ndf handoff import <名> --to <ID>`）を打ってから `show` をやり直す。`show` は上の表の右の列で ID から旧ファイル名を作り（2 つ以上あれば全部）、有無だけを `lstat` で確かめ、読まない。ステートマシンがまだ DB に無い ID でも旧文書の有無は返す（`next` は付けず、`import` は退避だけになる）
+  - 再開コマンドが前の版のパス（`.ndf/handoff/<名>.md`）を含む: 手順 0 はパスから `<名>` だけを取り出して `ndf handoff import <名>` を打ち、結果 JSON の `outputs.to`（行き先の ID）で `show` を読む。行き先が 0 なら文書は退避だけされ、手順 0 は「引継ぎなし」として状態の確かめから始める（閉じた対象の文書）。復元の検出（`HANDOFF_SHOW`）は、切り替えの間は前の版のパスの語も検出する
 
 ## 残骸の退避（子の課題 4）
 
