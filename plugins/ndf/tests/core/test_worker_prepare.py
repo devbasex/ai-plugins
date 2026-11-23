@@ -416,7 +416,7 @@ def test_append_checks_the_result_dir_handed_by_worker_run(tmp_path, capsys, mon
 
 @pytest.mark.parametrize("same", [True, False])
 def test_draft_writes_the_pr_body_only_into_the_result_dir_worker_run_opened(tmp_path, capsys, monkeypatch, same):
-    # PR 4307 の r8-4: PR 本文の下書きは、照らした保存先を開いた記述子から書く
+    # PR 4307 の r8-4: PR 本文の下書きは、検証した保存先を開いた記述子から書く
     state = tmp_path / "state"
     state.mkdir()
     st = (state if same else tmp_path).stat()

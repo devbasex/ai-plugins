@@ -1,4 +1,4 @@
-"""Stop の hook が活動（背景の作業の一覧とセッション）を書く（#4036）と、`activity.json` の読み書き。"""
+"""Stop の hook が活動（バックグラウンドの作業の一覧とセッション）を書く（#4036）と、`activity.json` の読み書き。"""
 
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ def test_read_activity_returns_none_without_the_file(tmp_path):
 
 
 def test_stop_without_background_tasks_writes_an_empty_list(tmp_path, relay):
-    # 背景の作業が 0 件の Stop（入力が明示の空のリスト）は、空のリストと入力のセッションを書く（決定 2）
+    # バックグラウンドの作業が 0 件の Stop（入力が明示の空のリスト）は、空のリストと入力のセッションを書く（決定 2）
     call_entry("claude", "Stop", stop(tmp_path, f"終えた。\n\n{FENCE}", background_tasks=[]))
     got = signals.read_activity(relay)
     assert got["tasks"] == [] and got["session_id"] == SID

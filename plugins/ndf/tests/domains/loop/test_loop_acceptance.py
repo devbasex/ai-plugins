@@ -273,7 +273,7 @@ def test_record_stops_as_incomplete_when_the_row_keeps_being_reverted(issue, loo
 
 
 def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, loop):
-    # 束ねた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）。union の
+    # まとめた課題の本文は 1 回のクエリで読み、課題ごとに REST を呼ばない（#3908 の r1-8）。union の
     # issueOrPullRequest の本文は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
     queries: list[str] = []
 

@@ -228,7 +228,7 @@ def test_4227_a_forward_move_keeps_words_apart():
     assert observe.plain(b"a\x1b[2Cb\x1b[3;1Hc") == "a b\nc"
 
 
-# 背景のサブエージェントの会話の記録と背景のシェル（#4036）。形は 2026-11-23 に Claude Code 2.1.330 で実測した
+# バックグラウンドのサブエージェントの会話の記録とバックグラウンドのシェル（#4036）。形は 2026-11-23 に Claude Code 2.1.330 で実測した
 SNAPSHOT = "/home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh"
 SHELL_ARGS = ["/bin/bash", "-c", f"source {SNAPSHOT} 2>/dev/null || true && eval 'sleep 45' < /dev/null"]
 
@@ -389,7 +389,7 @@ def _act(turn_done, moved, background):
 
 
 def test_4036_a_finished_subagent_is_left_out_and_moves_the_time(tmp_path):
-    """lracct の形: 背景のサブエージェントが終わって通知を受けた後、conductor は何もしていない（決定 2）。"""
+    """lracct の形: バックグラウンドのサブエージェントが終わって通知を受けた後、conductor は何もしていない（決定 2）。"""
     lane = _Lane(tmp_path)
     lane.shells(0)
     lane.activity([{"id": "a1", "type": "subagent"}])
@@ -514,7 +514,7 @@ def test_4036_an_activity_record_not_for_this_turn_leaves_the_count_unknown(tmp_
 
 
 def test_4036_a_previous_stop_in_the_same_second_is_not_used(tmp_path):
-    """前の Stop の記録が今の応答と同じ秒に書かれていても、応答の `uuid` が違えば使わない（時刻で照らさない）。"""
+    """前の Stop の記録が今の応答と同じ秒に書かれていても、応答の `uuid` が違えば使わない（時刻で突き合わせない）。"""
     lane = _Lane(tmp_path)
     lane.shells(0)
     lane.activity([], at="2026-11-23T00:00:00+00:00", reply="r-prev")

@@ -690,7 +690,7 @@ def test_4036_a_running_row_carries_the_conductor_activity(ctx, tmp_path, monkey
     assert (plain["turn_done"], plain["moved"], plain["background"]) == (None, None, None) and sizes == []
     row = hub.listing(ctx, activity=True)[0]
     assert row["turn_done"] is True and row["moved"] == observe._time("2026-11-23T00:00:00Z")
-    # 活動の記録が無いので背景の作業の数は確かめられない
+    # 活動の記録が無いのでバックグラウンドの作業の数は確かめられない
     assert row["background"] is None
     assert sizes == [int(limits.value("hook.transcript-tail", "count"))]
 

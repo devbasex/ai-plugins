@@ -678,7 +678,7 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 
 
 def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str], list[tuple[str, Optional[str]]]]:
-    """`finish` と `check` の共通の前半。出力を読み、工程の定義を引き、規約に照らした誤りと欠けたキー・取り場所の組を返す。"""
+    """`finish` と `check` の共通の前半。出力を読み、工程の定義を引き、規約と突き合わせた誤りと欠けたキー・取り場所の組を返す。"""
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
         snap = read_current(conn, a.machine_id).snapshot

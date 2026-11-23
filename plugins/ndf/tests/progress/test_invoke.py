@@ -306,7 +306,7 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
 
 
 def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
-    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない。
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題をまとめた単位でも issue を求めない。
     # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
@@ -588,7 +588,7 @@ def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_
 
 
 def test_the_sprint_pr_refers_to_every_bundled_issue(tmp_path):
-    # #3908 の r2-2: スプリントの PR（`pr` のテンプレート）の本文へ、束ねたすべての課題を `Refs #<番号>` で載せる
+    # #3908 の r2-2: スプリントの PR（`pr` のテンプレート）の本文へ、まとめたすべての課題を `Refs #<番号>` で載せる
     run = invoke.StageRun(invoke.PLAN, "pr", {"issues": [4211, 3908]}, (), "none", "pr")
     pr = route.templates()["pr"]
     assert invoke._fill_refs(pr, {}, run) == {"refs": ["3908", "4211"]}

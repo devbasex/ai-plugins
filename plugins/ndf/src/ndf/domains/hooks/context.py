@@ -766,7 +766,7 @@ class HookContext:
     @cached_property
     def last_reply_id(self) -> Optional[str]:
         """会話の記録の最後の `assistant` の記録の `uuid`。中継の活動の記録（`activity.json` の `reply`）に書き、読む側
-        （`observe.reply_id`。同じく最後の `assistant` の記録を選ぶ）が今の応答の記録かを照らす。読めなければ None。"""
+        （`observe.reply_id`。同じく最後の `assistant` の記録を選ぶ）が今の応答の記録かを突き合わせる。読めなければ None。"""
         return _last_assistant_uuid(self.transcript_tail)
 
     @cached_property

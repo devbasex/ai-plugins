@@ -417,7 +417,7 @@ def test_run_reads_the_result_once_during_and_once_after_the_delegation(tmp_path
 
 
 def test_run_refuses_a_result_path_whose_dotdot_cancels_a_link_without_launching(tmp_path, monkeypatch, capsys):
-    # #3877 r1: `alias/..` を字面で畳んだ別の場所の結果ファイルを消さず、worker も起動しない
+    # #3877 r1: `alias/..` を文字列の上で正規化した別の場所の結果ファイルを消さず、worker も起動しない
     work, outside = _outside(tmp_path)
     (tmp_path / "far" / "inner").mkdir(parents=True)
     (work / "alias").symlink_to(tmp_path / "far" / "inner")
@@ -524,7 +524,7 @@ def test_run_refuses_a_result_dir_other_than_the_one_answer_work_opened(tmp_path
 
 
 def test_run_refuses_a_state_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
-    # PR 4307 の r7-2: 照らした保存先（`--result-dir-id`）と別の場所に PR 本文の下書きを書かない
+    # PR 4307 の r7-2: 検証した保存先（`--result-dir-id`）と別の場所に PR 本文の下書きを書かない
     work, _ = _outside(tmp_path)
     (work / "prompt.md").write_text("直す", encoding="utf-8")
     (work / "elsewhere").mkdir()

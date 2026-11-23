@@ -407,7 +407,7 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     """代表の課題の題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つも無ければ空。
 
     課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
-    PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を照らす（`route.launch_values`）。
+    PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を検証する（`route.launch_values`）。
     題と本文は試行ごとに保存先へ初回に 1 度だけコピーし（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
     （承認の回答・続き・プランの打ち直し）はそのコピーを使う。工程の新しい試行は `clear_values` がコピーを消し、課題と作成者の
     権限を読み直す。同じ試行の中で読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
@@ -557,7 +557,7 @@ def _fill_from_sources(
 def _fill_refs(t: route.Template, values: Mapping[str, route.Value], run: StageRun) -> dict[str, route.Value]:
     """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題からコピーする（#3908 の r2-2）。
 
-    スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、束ねた課題のうちコミットに出ない課題を
+    スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、まとめた課題のうちコミットに出ない課題を
     「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文のコピー（`_issue_values`）には足さない。
     """
     if "refs" not in t.params or "refs" in values:

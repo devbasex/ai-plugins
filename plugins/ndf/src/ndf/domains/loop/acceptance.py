@@ -49,7 +49,7 @@ def read_body(cwd: Path, issue: int) -> str:
 def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
     """課題ごとの本文。1 件は `read_body`、2 件以上は 1 回の GraphQL のクエリ（`github.graphql-batch` 件ごと）でまとめて読む。
 
-    束ねた課題の数だけ GitHub を呼ばない（#3908 の r1-8）。読めない課題があれば `AcceptanceError`。
+    まとめた課題の数だけ GitHub を呼ばない（#3908 の r1-8）。読めない課題があれば `AcceptanceError`。
     """
     if len(issues) == 1:
         return {issues[0]: read_body(cwd, issues[0])}
@@ -161,7 +161,7 @@ def parse_criteria(values: list[str], issues: list[int]) -> dict[int, set[int]]:
 
 
 def _check_one(body: str, issue: int, wanted: set[int]) -> tuple[list[acc.Criterion], list[acc.Criterion], dict[int, acc.Check]]:
-    """1 つの課題（本文 `body`）の (照らす条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを照らし、
+    """1 つの課題（本文 `body`）の (検証する条件, 記録の無い条件, 記録)。`wanted` が空なら本文の条件のすべてを検証し、
     空でなければ 3 つとも `wanted` の番号に絞る。"""
     found = acc.criteria(body)
     missing = sorted(wanted - {c.number for c in found})

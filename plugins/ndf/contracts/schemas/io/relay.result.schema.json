@@ -492,14 +492,14 @@
               "number",
               "null"
             ],
-            "description": "conductor の最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。UNIX 時刻（hub ls）"
+            "description": "conductor の最後の応答と、終わったバックグラウンドの作業の時刻のうち最も遅いもの。UNIX 時刻（hub ls）"
           },
           "background": {
             "type": [
               "integer",
               "null"
             ],
-            "description": "終わった背景の作業を除いた、まだ走っているとみなす背景の作業の数（hub ls。確かめられなければ null）"
+            "description": "終わったバックグラウンドの作業を除いた、まだ走っているとみなすバックグラウンドの作業の数（hub ls。確かめられなければ null）"
           },
           "registered": {
             "type": "boolean",

@@ -149,7 +149,7 @@ def lane_activity(row: Mapping[str, Any] | None) -> liveness.Activity | None:
 @dataclass(frozen=True)
 class Judged:
     """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行,
-    背景の作業の数）。最後に動いた時刻は、`idle_conductor` では活動の UNIX 時刻、ほかでは記録の ISO 8601 の時刻。
+    バックグラウンドの作業の数）。最後に動いた時刻は、`idle_conductor` では活動の UNIX 時刻、ほかでは記録の ISO 8601 の時刻。
     `unknown` は判定が unknown のレーン、`judged` は判定したか（計画が動いていない・材料の口が無ければ偽）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）`stalled` のレーンの（レーン, 行, スプリントの ID）。"""
 

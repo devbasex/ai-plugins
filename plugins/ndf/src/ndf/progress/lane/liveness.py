@@ -15,7 +15,7 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 3. スプリントが承認ゲートや質問の回答を待っている → `waiting_answer`（正常な待ち。止まりとして知らせない）
 4. ラッパーの一覧を読めなかった・スプリントの待ちを読めなかった → `unknown`（一覧に無いことを止まりと読まない）
 5. ラッパーが動いていて状態が `stalled`（認証の失敗で `/goal` が外れた など） → `stalled`（ラッパーの理由を添える）
-6. ラッパーが動いていて、conductor が応答を終え、背景の作業が無いまま `parallel-run.idle` の秒を過ぎた → `idle_conductor`
+6. ラッパーが動いていて、conductor が応答を終え、バックグラウンドの作業が無いまま `parallel-run.idle` の秒を過ぎた → `idle_conductor`
    （#4036。活動（`Activity`）を読めなければ当たらない）
 7. ラッパーが動いている → `alive`
 8. スプリントの工程を流す作業が動いている → `working`（conductor が落ちても作業は続く。終わってから止まりになる）
@@ -69,7 +69,7 @@ class Liveness:
     reason: str
     row: Optional[str] = None
     sprint_id: Optional[str] = None
-    # `idle_conductor` のときだけ入る: 最後に動いた時刻（UNIX 時刻）と、まだ走っているとみなす背景の作業の数
+    # `idle_conductor` のときだけ入る: 最後に動いた時刻（UNIX 時刻）と、まだ走っているとみなすバックグラウンドの作業の数
     moved_at: Optional[float] = None
     background: Optional[int] = None
 
@@ -91,8 +91,8 @@ class Liveness:
 
 @dataclass(frozen=True)
 class Activity:
-    """conductor の活動（#4036）。`turn_done` は最後の応答が終わったか、`moved` は最後の応答と終わった背景の作業の
-    時刻のうち最も遅いもの（UNIX 時刻）、`background` は終わった背景の作業を除いた数（確かめられなければ None）。"""
+    """conductor の活動（#4036）。`turn_done` は最後の応答が終わったか、`moved` は最後の応答と終わったバックグラウンドの作業の
+    時刻のうち最も遅いもの（UNIX 時刻）、`background` は終わったバックグラウンドの作業を除いた数（確かめられなければ None）。"""
 
     turn_done: bool
     moved: Optional[float]
@@ -105,7 +105,7 @@ def idle_after() -> float:
 
 
 def _idle_for(activity: Optional[Activity], now: float) -> Optional[float]:
-    """応答を終え、背景の作業が無いまま閾値を過ぎていれば、最後に動いてからの秒。当たらなければ None。"""
+    """応答を終え、バックグラウンドの作業が無いまま閾値を過ぎていれば、最後に動いてからの秒。当たらなければ None。"""
     if activity is None or not activity.turn_done or activity.background != 0 or activity.moved is None:
         return None
     quiet = now - activity.moved
@@ -154,7 +154,7 @@ def judge(
         return Liveness(STALLED, f"conductor のラッパーが止まっている: {wrapper.get('reason') or '理由の記録が無い'}", key, sid)
     quiet = _idle_for(activity, time.time() if now is None else now) if running else None
     if quiet is not None and activity is not None:
-        reason = f"conductor が応答を終えてから {int(quiet // 60)} 分、背景の作業が無いまま動いていない"
+        reason = f"conductor が応答を終えてから {int(quiet // 60)} 分、バックグラウンドの作業が無いまま動いていない"
         return Liveness(IDLE_CONDUCTOR, reason, key, sid, activity.moved, activity.background)
     if running:
         return Liveness(ALIVE, "conductor のラッパーが動いている", key, sid)

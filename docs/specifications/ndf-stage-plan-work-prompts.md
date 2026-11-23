@@ -189,7 +189,7 @@ flowchart TD
 | 差し込み | 決め方 |
 | --- | --- |
 | `title`・`body_file`・`issue` | 代表の課題（番号の最も小さい課題）から取る。題と本文は試行ごとに保存先へ 1 度だけコピーし、同じ試行の以後の呼び出しはそのコピーを使う |
-| `acceptance` | 工程の入力の課題が 2 件以上なら、課題ごとの `--issue <番号>` を番号の順に並べる（代表の課題だけでは残りの課題の条件を照らさない） |
+| `acceptance` | 工程の入力の課題が 2 件以上なら、課題ごとの `--issue <番号>` を番号の順に並べる（代表の課題だけでは残りの課題の条件を検証しない） |
 | `refs` | 工程の入力のすべての課題の番号。テンプレート `pr` の Pull Request を作るステップが、本文の末尾へ課題ごとの `Refs #<番号>` を並べる |
 
 `refs` が空なら本文はコミットから作る（`gh pr create --fill`）。既にある Pull Request の本文は書き換えず、`Refs` の行が無い課題があれば欠けに並べて `incomplete` で止める。この行は「スプリントを閉じる」が本文から課題を拾う形（[ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md) の「参照の読み方の境界」）に合う。

@@ -107,7 +107,7 @@ def test_a_prompt_that_cannot_be_written_keeps_the_previous_report(tmp_path, cap
 
 
 def test_a_state_dir_through_a_link_and_dotdot_stops_before_reading_or_resetting(tmp_path, capsys):
-    # `alias/../state` の `alias` が別の場所を指すと、字面で畳んだ `state` とカーネルが引く先が食い違う。読む前に止め、
+    # `alias/../state` の `alias` が別の場所を指すと、文字列の上で正規化した `state` とカーネルが引く先が食い違う。読む前に止め、
     # どちらの保存先の報告一式も変えない（PR 4307 の r5-1）
     elsewhere = tmp_path / "elsewhere" / "inner"
     elsewhere.mkdir(parents=True)

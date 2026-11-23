@@ -11,7 +11,7 @@
     "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは acceptance を省けば、worker の後にこの課題の受け入れ条件の確認の区分をすべて照らす（ndf loop acceptance check --issue <issue>）"},
     "acceptance": {"summary": "受け入れ条件の確かめ（ndf loop acceptance check）の引数の並び。既定は --issue <issue>（issue はこの既定を組むときだけ要る）。渡すときは --issue を必ず含め、--criteria <課題>:<条件> は値 1 つごとに繰り返す（例 --issue 1 --criteria 1:1 --criteria 1:2）。課題を束ねた単位は課題ごとの --issue", "list": true},
     "issues": {"summary": "作業の課題の番号の並び（工程の入力 issues から写す。課題が 2 つ以上のスプリントでも決まる）。完了判定は、この課題の設計文書に名前の出るテストが HEAD にあるかを判定する（ndf loop design-tests）", "list": true},
-    "refs": {"summary": "PR の本文の末尾に Refs #<番号> で載せる課題の番号の並び。ndf progress の工程から組むときは工程の入力 issues のすべてをコピーする（束ねた課題を「スプリントを閉じる」が本文から拾えるように）。空なら本文をコミットから作る（gh pr create --fill）", "list": true, "default": []},
+    "refs": {"summary": "PR の本文の末尾に Refs #<番号> で載せる課題の番号の並び。ndf progress の工程から組むときは工程の入力 issues のすべてをコピーする（まとめた課題を「スプリントを閉じる」が本文から拾えるように）。空なら本文をコミットから作る（gh pr create --fill）", "list": true, "default": []},
     "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちの確かめ直しには使わない（落ちたテストを持つ suite の scope_command で打つ）"},
     "whole_test_command": {"summary": "全体テストのシェルのコマンド 1 つ"},
     "worker": {"summary": "worker の起動の引数の並び。最後に作業の名前を足して打つ。作業の名前の唯一の基準は contracts/worker/kinds.json のキーで、ndf answer work がその行から起動指示のプロンプトを組み、作業場所（kinds.json の cwd）で worker を起動する。ndf answer work が読む values.json は、工程から組むプランなら ndf progress が書く。単発のプラン（ndf route render・run）なら描画がプランの work_values に持たせ、ndf plan next が実行の保存先（--state-dir を含む）へ回ごとに書く。作業が読む値のうちテンプレートの差し込みに無いもの（requirements の issues・mode など）は、既定の worker のときだけ --set・--add で渡せる。既定の並びに --cwd を置かない", "list": true, "default": ["ndf", "answer", "work", "--state-dir", "{state_dir}"]},

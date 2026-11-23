@@ -253,7 +253,7 @@ def _quiet(background=0, turn_done=True):
 
 
 def test_a_conductor_idle_past_the_threshold_is_a_stall():
-    """応答が終わり、背景の作業が無く、閾値を過ぎたら止まり（受け入れ条件 1）。"""
+    """応答が終わり、バックグラウンドの作業が無く、閾値を過ぎたら止まり（受け入れ条件 1）。"""
     verdict = liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, _quiet(), 1000.0 + liveness.idle_after() + 60)
     assert verdict.kind == liveness.IDLE_CONDUCTOR and verdict.stall
     assert verdict.moved_at == 1000.0 and verdict.background == 0
@@ -271,7 +271,7 @@ def test_the_threshold_itself_is_a_stall_and_one_second_before_is_not(past, kind
     [None, _quiet(turn_done=False), _quiet(background=1), _quiet(background=None), liveness.Activity(True, None, 0)],
 )
 def test_a_conductor_with_work_or_unread_activity_stays_alive(activity):
-    """活動を読めない・応答の途中・背景の作業が残る・数を確かめられない行は止まりにしない（受け入れ条件 2・決定 1）。"""
+    """活動を読めない・応答の途中・バックグラウンドの作業が残る・数を確かめられない行は止まりにしない（受け入れ条件 2・決定 1）。"""
     verdict = liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, activity, 10**9)
     assert verdict.kind == liveness.ALIVE and not verdict.stall
 

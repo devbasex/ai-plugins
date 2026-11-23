@@ -330,7 +330,7 @@ def test_emit_keeps_a_read_only_out(capsys, tmp_path):
 
 
 def test_emit_refuses_an_out_whose_dotdot_cancels_a_link(capsys, tmp_path, monkeypatch):
-    # #3877 r1: `alias/..` を字面で畳まない。alias の先の親でも、字面で畳んだ場所でもなく、書く前に断る
+    # #3877 r1: `alias/..` を文字列の上で正規化しない。alias の先の親でも、文字列の上で正規化した場所でもなく、書く前に断る
     (tmp_path / "far" / "inner").mkdir(parents=True)
     work = tmp_path / "w"
     work.mkdir()

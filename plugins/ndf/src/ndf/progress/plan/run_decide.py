@@ -216,8 +216,8 @@ class LaunchTry(NamedTuple):
 
 
 class Stall(NamedTuple):
-    """コピーの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）。コピーでは JSON の list のまま持ち、
-    読む所で包む。最後に動いた時刻は ISO 8601 の文字列か UNIX 時刻の数。背景の作業の数の既定の None は、#4036 の前に書かれた
+    """コピーの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, バックグラウンドの作業の数）。コピーでは JSON の list のまま持ち、
+    読む所で包む。最後に動いた時刻は ISO 8601 の文字列か UNIX 時刻の数。バックグラウンドの作業の数の既定の None は、#4036 の前に書かれた
     5 つの組のコピーを読み直しの途中で包むためである。"""
 
     lane: str
@@ -287,7 +287,7 @@ def with_stalls(
     judged: bool = True,
     relaunch: Sequence[tuple[str, str, str]] = (),
 ) -> dict[str, Any]:
-    """コピーへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）、
+    """コピーへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, バックグラウンドの作業の数）、
     `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければリクエストを閉じない）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）止まったレーンの（レーン, 行, スプリントの ID）。"""
     judged_part = {"unknown": list(unknown), "judged": judged, "relaunch": [list(r) for r in relaunch]}
@@ -467,7 +467,7 @@ def _fail(state: RunState, act: Launch, detail: str, policy: Policy, final: bool
 def _stall_report(state: RunState, stall: Stall) -> Report:
     """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。
 
-    最後に動いた時刻が UNIX 時刻の数なら ISO 8601 の文字列（UTC）へ直す。背景の作業の数（#4036）も中身に載せる。"""
+    最後に動いた時刻が UNIX 時刻の数なら ISO 8601 の文字列（UTC）へ直す。バックグラウンドの作業の数（#4036）も中身に載せる。"""
     moved = stall.moved
     if isinstance(moved, (int, float)):
         moved = datetime.fromtimestamp(moved, timezone.utc).isoformat()

@@ -36,10 +36,10 @@ CURSOR_FORWARD = re.compile(r"\x1b\[[0-9]*C")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
 LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
-# 背景の作業の `id` がファイル名に使える形（記録の保存先の外を指すパスを組まない。#4036）
+# バックグラウンドの作業の `id` がファイル名に使える形（記録の保存先の外を指すパスを組まない。#4036）
 TASK_ID = re.compile(r"[A-Za-z0-9_-]+")
 # Bash の Tool のシェルの `cmdline` が持つ目印（`claude` の直接の子の `bash -c source <設定ディレクトリ>/shell-snapshots/snapshot-…`。
-# Claude Code 2.1.330 で背景の呼び出しも同じ形と実測した。#4036）。設定ディレクトリは既定の `~/.claude` のほか、
+# Claude Code 2.1.330 でバックグラウンドの呼び出しも同じ形と実測した。#4036）。設定ディレクトリは既定の `~/.claude` のほか、
 # 登録済みアカウントの子では NDF が渡す `CLAUDE_CONFIG_DIR` なので、ディレクトリ名に依存しない
 SHELL_SNAPSHOT = "/shell-snapshots/snapshot-"
 ENDED = ("end_turn", "stop_sequence")  # 応答が終わった `stop_reason`
@@ -69,7 +69,7 @@ def transcript_path(environ: Mapping[str, str], cwd: Path, session_id: str) -> P
 
 
 def subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]:
-    """セッションの会話の記録の隣の、背景のサブエージェントの会話の記録。`agent_id` がファイル名に使えなければ None。"""
+    """セッションの会話の記録の隣の、バックグラウンドのサブエージェントの会話の記録。`agent_id` がファイル名に使えなければ None。"""
     if not TASK_ID.fullmatch(agent_id):
         return None
     return transcript.with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"
@@ -288,7 +288,7 @@ def turn_done(path: Path, size: int) -> Optional[tuple[bool, Optional[float]]]:
 
 
 def reply_id(path: Path, size: int) -> Optional[str]:
-    """最後の `assistant` の会話の記録の `uuid`（Stop の hook が `activity.json` に書き、読む側が今の応答かを照らす値）。
+    """最後の `assistant` の会話の記録の `uuid`（Stop の hook が `activity.json` に書き、読む側が今の応答かを突き合わせる値）。
 
     読めない・壊れた・`assistant` が無い・`uuid` が文字列でなければ None。
     """
@@ -325,14 +325,14 @@ def _time(value: Any) -> Optional[float]:
 SUBAGENT_TASK, SHELL_TASK = "subagent", "shell"
 # 活動を読めない行の値
 NO_ACTIVITY = {"turn_done": None, "moved": None, "background": None}
-# 終わった背景のシェルを最初に確かめた時刻（ラッパーの保存先。`ndf relay ls --activity` が書く）
+# 終わったバックグラウンドのシェルを最初に確かめた時刻（ラッパーの保存先。`ndf relay ls --activity` が書く）
 SHELLS_ENDED_FILE = "shells-ended.json"
 
 
 @dataclass(frozen=True)
 class Look:
     """1 回の `ndf relay ls --activity` で全行が共有する活動の材料。`now` は読む時刻、`size` は会話の記録の末尾を読む大きさ、
-    `children` は `process_children` の返りを返す口（シェルの生死を確かめる行まで進んだときだけ呼ぶ。呼ぶ側が 1 回の一覧で
+    `children` は `process_children` の返り値を返す関数（シェルの生死を確かめる行まで進んだときだけ呼ぶ。呼ぶ側が 1 回の一覧で
     1 度だけ組むように包む）。"""
 
     now: float
@@ -354,9 +354,9 @@ def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> d
     """ラッパーの状態の値（`session_id`・`transcript`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
 
     会話の記録はラッパーが子に渡した環境で組んで状態に書いた絶対パスを使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
-    返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。
-    UNIX 時刻）・`background`（終わった背景の作業を除いた数。確かめられなければ None）。conductor の会話の記録を
-    読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めない背景の作業は走っているとみなす。
+    返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わったバックグラウンドの作業の時刻のうち最も遅いもの。
+    UNIX 時刻）・`background`（終わったバックグラウンドの作業を除いた数。確かめられなければ None）。conductor の会話の記録を
+    読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めないバックグラウンドの作業は走っているとみなす。
     """
     session, transcript = row.get("session_id"), row.get("transcript")
     if not isinstance(session, str) or not isinstance(transcript, str):
@@ -379,7 +379,7 @@ def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> d
 
 
 def _tasks_of(record: Optional[Mapping[str, Any]], session: str, reply: Optional[str]) -> Optional[list[dict[str, str]]]:
-    """今の応答の Stop が書いた背景の作業の一覧。別のセッション・前の Stop の記録・観測できなかった一覧なら None。
+    """今の応答の Stop が書いたバックグラウンドの作業の一覧。別のセッション・前の Stop の記録・観測できなかった一覧なら None。
 
     今の応答かは、記録の `reply` と会話の記録の最後の `assistant` の `uuid`（`reply`）が同じかで確かめる。時刻で比べると、
     同じ秒に入った前の Stop の記録も通る。どちらかが無ければ確かめられないので使わない。
@@ -390,7 +390,7 @@ def _tasks_of(record: Optional[Mapping[str, Any]], session: str, reply: Optional
 
 
 def _others(turn: _Turn, tasks: list[dict[str, str]], size: int) -> tuple[int, list[float]]:
-    """シェルでない背景の作業の、走っているとみなす数と、終わったサブエージェントの最後の応答の時刻。"""
+    """シェルでないバックグラウンドの作業の、走っているとみなす数と、終わったサブエージェントの最後の応答の時刻。"""
     running, times = 0, []
     for task in (t for t in tasks if t["type"] != SHELL_TASK):
         ended = _ended_subagent(turn.transcript, task["id"], size) if task["type"] == SUBAGENT_TASK else None
@@ -409,7 +409,7 @@ def _ended_subagent(transcript: Path, agent_id: str, size: int) -> Optional[floa
 
 
 def _shells(turn: _Turn, directory: Path, pid: Any, listed: list[dict[str, str]], look: Look) -> Optional[tuple[int, list[float]]]:
-    """生きている背景のシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
+    """生きているバックグラウンドのシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
 
     `/proc` はここまで進んだ行で初めて読む（`look.children`）。一覧より生きているシェルが少なければ、終わりを最初に確かめた
     時刻を終わった時刻とする（`_first_seen`）。出力のファイルの更新時刻は使わない。最後に出力した時刻であって、出力の後に

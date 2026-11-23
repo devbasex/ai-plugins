@@ -159,14 +159,14 @@ SHELL_TASK = [{"id": "b1", "type": "shell"}]
 
 
 def test_a_conductor_idle_after_its_subagent_finished_is_a_stall(tmp_path):
-    """lracct の形: 背景のサブエージェントが終わり、そこから閾値を過ぎた（受け入れ条件 1・決定 2）。"""
+    """lracct の形: バックグラウンドのサブエージェントが終わり、そこから閾値を過ぎた（受け入れ条件 1・決定 2）。"""
     later = "2026-11-23T00:01:00+00:00"
     got = _judged(tmp_path, SUBAGENT, subagent_at=later, now_after=60 + liveness.idle_after())
     assert got.kind == liveness.IDLE_CONDUCTOR and got.moved_at == _stamp(later)
 
 
 def test_a_conductor_idle_after_its_shell_finished_is_a_stall(tmp_path):
-    """背景のシェルの終わりを最初に確かめた時刻から閾値を過ぎた（受け入れ条件 1 のシェルの取りこぼし）。"""
+    """バックグラウンドのシェルの終わりを最初に確かめた時刻から閾値を過ぎた（受け入れ条件 1 のシェルの取りこぼし）。"""
     got = _judged(tmp_path, SHELL_TASK, seen_at="2026-11-23T00:02:00+00:00", now_after=120 + liveness.idle_after())
     assert got.kind == liveness.IDLE_CONDUCTOR
 

@@ -217,7 +217,7 @@ def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
 
 
 def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
-    # #3908 の決定 7: 課題を束ねた単位は、課題ごとの --issue で全部の課題の条件を照らす（代表の課題だけにしない）
+    # #3908 の決定 7: 課題をまとめた単位は、課題ごとの --issue で全部の課題の条件を検証する（代表の課題だけにしない）
     t = route.choose("implement")
     given = values("implement", issue="12")
     del given["acceptance"]

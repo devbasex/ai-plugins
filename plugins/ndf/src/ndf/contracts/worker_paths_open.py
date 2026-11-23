@@ -173,7 +173,7 @@ def resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
     （`new/../new` で、観測の後に既存のディレクトリが `new` へ移されても既存とみなさない）。リンクの先として同じ場所へ
     戻ったとき（`new/../alias` の `alias` が `new` を指す）は厳密にたどれないので `EntryUnsafe`（`replaced`）で拒む。
     絶対パスのリンクなどで一度開いた場所を開き直したときは、前に開いたディレクトリと突き合わせ、違えば同じく拒む（`_Walk`）。
-    `open_workdir` は `os.path.abspath` で `..` を畳むので、返すパスに `..` を残すと開く場所と食い違う。
+    `open_workdir` は `os.path.abspath` で `..` を正規化するので、返すパスに `..` を残すと開く場所と食い違う。
     解いた要素はディレクトリであることを確かめ、通常のファイルなど（リンクの先を含む）なら次の `..` で
     その親へ進む前に `EntryUnsafe`（`other`）で拒む。
     リンクは `open_resolved` と同じく信頼できる祖先のものだけをたどり、共有の領域のリンクは `EntryUnsafe`（`symlink`）で拒む。
@@ -497,7 +497,7 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
     その手前の要素は作らずに開き、開いた記述子を `origin.anchor` と突き合わせし、無くなっているか解いた時点のディレクトリで
     なければ `EntryUnsafe`（`replaced`）で止める。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
-    `directory` に `..` があれば、字面で畳まずに `_open_dir_through_dotdot` で一度の走査で開く（利用者の `--out` などを受けるとき）。
+    `directory` に `..` があれば、文字列の上で正規化せずに `_open_dir_through_dotdot` で一度の走査で開く（利用者の `--out` などを受けるとき）。
     `origin` は `..` を含まないパス（`prepare_paths` が返したもの）にだけ渡す。
     """
     probe = Path(directory).absolute()
@@ -525,8 +525,8 @@ def open_or_create(directory: Path) -> Iterator[WorkDir]:
 def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:
     """`..` を含む絶対パスを、根から 1 要素ずつ確かめた親の記述子に対して開き、`..` もその記述子から引いて一度で開く。
 
-    `os.path.abspath` は `alias/..` を字面で畳むが、カーネルは `alias` の指す先の親へ進み、検索権限の無い `private/..` では
-    止まる。字面で畳んだ場所を開くと利用者のパスが指す先とは別の既存のファイルを書き換えるので、打ち消す要素も
+    `os.path.abspath` は `alias/..` を文字列の上で正規化するが、カーネルは `alias` の指す先の親へ進み、検索権限の無い `private/..` では
+    止まる。文字列の上で正規化した場所を開くと利用者のパスが指す先とは別の既存のファイルを書き換えるので、打ち消す要素も
     リンクをたどらずに開き（リンクなら `symlink`、無い・ディレクトリでなければ `other` の `EntryUnsafe`）、`..` は開いた
     記述子に対する `openat` で引く。カーネルがその要素の検索権限を確かめ、無ければ `PermissionError` で止まる。
     引いた親が手前で開いた記述子と同じディレクトリでなければ（間に要素を移された）`EntryUnsafe`（`replaced`）。

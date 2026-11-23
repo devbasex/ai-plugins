@@ -103,7 +103,7 @@ def test_a_stage_with_an_acceptance_without_an_issue_stops_as_invalid_without_ru
 
 
 def test_several_issues_fill_the_acceptance_with_an_issue_flag_for_each_issue(tmp_path, filled):
-    # #3908 の決定 7・受け入れ条件 2: 課題を束ねた単位は、代表の課題（#3）から title をコピーし、acceptance で全部の課題を照らす
+    # #3908 の決定 7・受け入れ条件 2: 課題をまとめた単位は、代表の課題（#3）から title をコピーし、acceptance で全部の課題を検証する
     repo = _sprint_repo(tmp_path)
     got = _values(tmp_path, _impl_run(repo, [4, 3]), repo)
     assert got["issue"] == "3" and got["title"] == "#3 の題"

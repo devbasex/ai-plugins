@@ -310,7 +310,7 @@ def drop(directory: Path, name: str) -> None:
 
 
 def write_activity(directory: Path, tasks: Any, session_id: Optional[str], reply: Optional[str] = None) -> bool:
-    """`activity.json` に時刻・セッション・応答・背景の作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
+    """`activity.json` に時刻・セッション・応答・バックグラウンドの作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
 
     `tasks` は Stop の hook の入力の生の値。リストでなければ、観測できなかったことを表す `null` を書く（空のリストと分ける）。
     `reply` はこの Stop が終えた応答（会話の記録の最後の `assistant` の `uuid`。`observe.reply_id`）。読む側はこの値で
@@ -325,7 +325,7 @@ def write_activity(directory: Path, tasks: Any, session_id: Optional[str], reply
 
 
 def _task(item: Any) -> dict[str, str]:
-    """背景の作業の要素の `id`・`type`。形が違う値は空の文字列にして要素の数を保つ（読む側で走っているとみなす）。"""
+    """バックグラウンドの作業の要素の `id`・`type`。形が違う値は空の文字列にして要素の数を保つ（読む側で走っているとみなす）。"""
     data = item if isinstance(item, dict) else {}
     return {key: value if isinstance(value := data.get(key), str) else "" for key in ("id", "type")}
 

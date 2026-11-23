@@ -211,6 +211,6 @@
 | [ndf-github-write-gate.md](ndf-github-write-gate.md) | GitHub への書き込みの二次レート制限への備え。マシン全体の書き込みの順番（1 秒の間隔・内容を作る書き込みを 1 分 80 件・1 時間 500 件のウィンドウで数える上限・送信のロック・待ちの終わりの共有・待ちの予算）、二次レート制限の見分けと指数的な打ち直し、cross-review の指摘をコミットごとのレビューにまとめ、クローズの理由を最初のコメントへ入れる書き方（#4016） |
 | [ndf-worker-report-prepare.md](ndf-worker-report-prepare.md) | worker の報告の保存先。supervisor が `ndf worker prepare` の 1 回の呼び出しでパスを決めて前の完了マーカーと結果ファイルを始末し、報告の書き込みと読み取りを `ndf worker append --done`・`ndf worker collect` に寄せ、空になりうる変数を渡す `rm` を guard が止めること（保存先を開けないときの `invalid`・追記の排他・置き換えのアクセス権）（#3877） |
 | [ndf-stage-plan-work-prompts.md](ndf-stage-plan-work-prompts.md) | 工程のプランが worker の起動指示を組んで流れる仕組み。差し込み `worker` の既定・作業ごとの定義（`contracts/worker/kinds.json`）と共通のテンプレート・作業が読む値の受け渡し（`values.json` と単発のプランの `work_values`）・決められない差し込みで工程を始めずに返すこと・必須の出力（`--require-output`）と欠け（`step-gaps.json`）の受け渡し・欠けた文脈のキーの取り場所（`x-source`）（#3908） |
-| [ndf-lane-idle-conductor.md](ndf-lane-idle-conductor.md) | レーンの生死の判定に足した「conductor が応答を終え、背景の作業が 0 件のまま 10 分が過ぎた」止まり（`idle_conductor`）。Stop の hook が書く活動の記録と `ndf relay ls --activity` での観測、`lane_stalled` のリクエストへ載せる最後に動いた時刻と背景の作業の数（#4036） |
+| [ndf-lane-idle-conductor.md](ndf-lane-idle-conductor.md) | レーンの生死の判定に足した「conductor が応答を終え、バックグラウンドの作業が 0 件のまま 10 分が過ぎた」止まり（`idle_conductor`）。Stop の hook が書く活動の記録と `ndf relay ls --activity` での観測、`lane_stalled` のリクエストへ載せる最後に動いた時刻とバックグラウンドの作業の数（#4036） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

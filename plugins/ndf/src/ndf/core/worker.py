@@ -669,10 +669,10 @@ def _result_dir(raw: str, held: Optional[str] = None) -> Iterator[tuple[worker_p
 def _state_dir(raw: str, held: Optional[str]) -> Path:
     """規則文に載せる保存先（PR 本文の下書きを書く場所の親）。
 
-    `held`（`--result-dir-id`。`ndf answer work` が照らした保存先）が無ければ従来どおり `Path.resolve()` で解く。あれば、
-    `_result_dir` と同じく信頼できる祖先のリンクだけを解きながら 1 回だけ開き（`open_resolved`）、照らした保存先と同じ
+    `held`（`--result-dir-id`。`ndf answer work` が検証した保存先）が無ければ従来どおり `Path.resolve()` で解く。あれば、
+    `_result_dir` と同じく信頼できる祖先のリンクだけを解きながら 1 回だけ開き（`open_resolved`）、検証した保存先と同じ
     ディレクトリかを突き合わせ、開いて解いた場所を返す。名前を解き直さないので、突き合わせの後に名前を差し替えられても
-    下書きは照らした保存先に書かれ、共有の領域のリンクを経ない（違えば起動せずに `WorkerError`（precondition））。
+    下書きは検証した保存先に書かれ、共有の領域のリンクを経ない（違えば起動せずに `WorkerError`（precondition））。
     """
     if held is None:
         return Path(raw).resolve()
