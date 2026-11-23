@@ -265,7 +265,7 @@ def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], sc
 
 
 def _restarts_by_reason(rows: list[dict[str, Any]]) -> dict[str, int]:
-    restarts = Counter(r["reason"] if r.get("reason") else cr.UNKNOWN for r in rows if r.get("verdict") == ct.RESTART)
+    restarts = Counter(r["reason"] if r.get("reason") else cr.UNKNOWN for r in rows if r.get("verdict") == ct.Verdict.RESTART)
     return dict(restarts)
 
 
@@ -274,7 +274,9 @@ def _rework(rows: list[dict[str, Any]]) -> int | str:
     keep = Counter(
         r["stage"]
         for r in rows
-        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage")
+        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION
+        and r.get("verdict") == ct.Verdict.CONTINUE
+        and r.get("stage")
     )
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
@@ -305,7 +307,7 @@ def report(work: str, rows: list[dict[str, Any]], usage_log: list[dict[str, Any]
         s["transcript"] = s["transcript"] or known[sid]["transcript"]
     scope = _Scope(usage_log, excluded, set(), windows)
     by_session = cr.attach_markers([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, scope))
-    restarted = {r.get("session_id") for r in mine if r.get("verdict") == ct.RESTART}
+    restarted = {r.get("session_id") for r in mine if r.get("verdict") == ct.Verdict.RESTART}
     summed = _sum_sessions(sessions, by_session, scope, restarted)
     restarts = _restarts_by_reason(mine)
     compacts = summed["compacts"]

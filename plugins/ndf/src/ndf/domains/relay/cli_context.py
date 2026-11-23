@@ -112,9 +112,9 @@ def parser(sub: Any, help_text: str) -> None:
     ctx_sub = ctx.add_subparsers(dest="context_action", required=True)
     p = {name: ctx_sub.add_parser(name, help=text, description=text) for name, text in CONTEXT_COMMANDS.items()}
     kind = p["record"].add_mutually_exclusive_group(required=True)
-    kind.add_argument("--verdict", choices=(context_thresholds.RESTART,), help="再起動の行を書く（--reason と組む）")
+    kind.add_argument("--verdict", choices=(context_thresholds.Verdict.RESTART.value,), help="再起動の行を書く（--reason と組む）")
     kind.add_argument("--event", choices=context_records.MARKS, help="マーカーの行を書く")
-    p["record"].add_argument("--reason", choices=context_thresholds.REASONS, help="再起動の理由")
+    p["record"].add_argument("--reason", choices=[r.value for r in context_thresholds.Reason], help="再起動の理由")
     p["record"].add_argument("--work", required=True, help="作業の識別子（課題番号の並び）")
     p["calibrate"].add_argument("--days", type=int, default=30, help="較正に使う直近の日数")
     target = p["report"].add_mutually_exclusive_group(required=True)
