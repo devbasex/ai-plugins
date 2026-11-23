@@ -310,7 +310,7 @@ def _answered(heading: str, below: list[ProseLine]) -> bool:
     body = _sentences([line.text for line in below])
     while body and _CLOSING.match(_core(body[-1])) and not _paren_wait(body[-1]):
         body.pop()
-    if not body or not all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body):
+    if not body or not _plain_reports(body):
         return False
     first = _core(body[0])
     return first.endswith(_CONCLUSION_ENDINGS) and any(term in first for term in _TERM.findall(_core(heading)))
@@ -545,7 +545,12 @@ def _closing_report(lines: list[ProseLine], kinds: dict[int, str | None]) -> boo
         body.pop()
     if not body or len(body) == len(sentences):
         return False
-    return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
+    return _plain_reports(body)
+
+
+def _plain_reports(sentences: list[str]) -> bool:
+    """文がどれも待ちの形でなく（括弧書きの中も）、丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるか。"""
+    return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in sentences)
 
 
 class ProseReading(NamedTuple):
