@@ -116,7 +116,7 @@ try:
     from version_pattern import VERSION, VERSION_VALUE
 except ImportError as exc:  # pragma: no cover - 読み込めないこと自体がチェックの前提の崩れ
     raise SystemExit(f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}")
-from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（docs/specifications/ndf-rebuild-libraries.md の決定 19）
 
 require("md", "versions")
 import md  # noqa: E402  節と囲みは lib/md.py（markdown-it-py）で読む

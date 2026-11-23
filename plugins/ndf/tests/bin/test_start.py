@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -70,22 +68,60 @@ def test_a_whole_environment_is_checked_once_until_the_lock_changes(start, monke
     assert len(calls) == 2
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る（CI は setup-uv で入れる）")
-def test_the_entrypoint_stops_when_a_file_of_the_environment_is_gone(tmp_path):
-    cache = tmp_path / "cache"
-    env = {**os.environ, "XDG_CACHE_HOME": str(cache), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")}
-    first = subprocess.run([str(ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False, timeout=300)
-    assert first.returncode == 0, first.stderr
-    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    venv = cache / manifest["name"] / "venv" / manifest["version"]
-    stamp = venv / ".deps-checked"
-    assert stamp.exists()
-    victim = next(venv.glob("lib/python*/site-packages/tabulate/__init__.py"))
-    victim.unlink()
-    stamp.unlink()
+# --- 呼び出し元の環境へ戻す（#4029） ---
 
-    done = subprocess.run([str(ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False, timeout=300)
+# bin/ndf と uv run が NDF の子孫へ足す変数（呼び出し元の値へ戻す）
+ADDED = ("CLAUDE_PLUGIN_ROOT", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH")
 
-    assert done.returncode == causes.exit_code("deps_missing")
-    report = json.loads(done.stdout.strip().splitlines()[-1])
-    assert report["cause"]["kind"] == "deps_missing" and "tabulate" in report["cause"]["detail"]
+
+def test_the_callers_values_come_back_and_the_held_copies_go(start):
+    # bin/ndf が写した形: あった値（空も）は NDF_CALLER_<名前>、無かった値は写し無し。CLAUDE_PLUGIN_ROOT だけは空で「無かった」
+    env = {
+        "CLAUDE_PLUGIN_ROOT": "/ndf",
+        "NDF_CALLER_PLUGIN_ROOT": "",
+        "UV_PROJECT_ENVIRONMENT": "/ndf-venv",
+        "NDF_CALLER_UV_PROJECT_ENVIRONMENT": "/caller-venv",
+        "VIRTUAL_ENV": "/ndf-venv",
+        "UV_RUN_RECURSION_DEPTH": "1",
+        "NDF_CALLER_UV_RUN_RECURSION_DEPTH": "",
+        "PATH": "/ndf-venv/bin:/usr/bin",
+        "NDF_CALLER_PATH": "/usr/bin",
+        "PYTHONPATH": "/ndf/src",
+        "NDF_CALLER_PYTHONPATH": "/caller-pp",
+        "HOME": "/home/x",
+    }
+
+    start.restore_caller_env(env)
+
+    assert env == {
+        "UV_PROJECT_ENVIRONMENT": "/caller-venv",
+        "UV_RUN_RECURSION_DEPTH": "",
+        "PATH": "/usr/bin",
+        "PYTHONPATH": "/caller-pp",
+        "HOME": "/home/x",
+    }
+
+
+def test_another_plugins_root_comes_back_as_the_callers_value(start):
+    env = {"CLAUDE_PLUGIN_ROOT": "/ndf", "NDF_CALLER_PLUGIN_ROOT": "/other-plugin", "PATH": "/b", "NDF_CALLER_PATH": "/a"}
+    start.restore_caller_env(env)
+    assert env == {"CLAUDE_PLUGIN_ROOT": "/other-plugin", "PATH": "/a"}
+
+
+def test_a_start_not_through_the_entrypoint_keeps_the_environment(start):
+    # 写しが 1 つも無い（bin/ndf を通らずに start.py を打った）ときは何も変えない
+    env = {"UV_PROJECT_ENVIRONMENT": "/v", "VIRTUAL_ENV": "/v", "PATH": "/v/bin", "PYTHONPATH": "/src"}
+    start.restore_caller_env(env)
+    assert env == {"UV_PROJECT_ENVIRONMENT": "/v", "VIRTUAL_ENV": "/v", "PATH": "/v/bin", "PYTHONPATH": "/src"}
+
+
+def test_the_package_runs_after_the_environment_is_restored(start, monkeypatch):
+    monkeypatch.setattr(start.metadata, "distributions", lambda: [])
+    for name in ADDED:  # 戻した後に monkeypatch がテストの前の値へ戻すよう、触る変数を記録させる
+        if name in os.environ:
+            monkeypatch.setenv(name, os.environ[name])
+    monkeypatch.setenv("NDF_CALLER_PATH", "/caller")
+    seen = []
+    monkeypatch.setattr(start.runpy, "run_module", lambda *a, **k: seen.append(os.environ["PATH"]))
+    assert start.main() == 0
+    assert seen == ["/caller"] and "NDF_CALLER_PATH" not in os.environ

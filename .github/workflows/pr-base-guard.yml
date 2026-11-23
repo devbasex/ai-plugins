@@ -14,13 +14,13 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # release/v* の head がベースブランチの祖先か（release_branch ではスプリントブランチの祖先か）を
           # git merge-base で判定するため、履歴をすべて取る
           fetch-depth: 0
       # 宛先のブランチの宣言を読む部品（NDF の core/branch_strategy.py）は NDF の依存を uv の環境で読む
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: github.base_ref == github.event.repository.default_branch
         with:
           enable-cache: true

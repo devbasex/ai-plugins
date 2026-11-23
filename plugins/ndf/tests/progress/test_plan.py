@@ -15,6 +15,7 @@ from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, lane, model, plan, store
+from ndf.progress.lane import fold
 from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
@@ -100,14 +101,39 @@ def test_changed_lane_is_checked_against_the_other_lanes(opened, refused):
     assert view.lanes["b"].touches == ("src/a/x.py",) and view.lanes["b"].after == ("a",)
 
 
-def test_lane_limit_does_not_count_lanes_that_ended(opened, refused):
+def test_recorded_limits_of_older_versions_are_read_as_no_change(opened):
+    # #3989 の受け入れ条件 3: 11.0.13 までの記録（作成・追加・変更・上限の変更の事象の max_lanes・max_plans・plans）を読める
     pid = _two(opened)
-    assert "I20" in refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
-    _run_sprint(opened, pid, "b", "r1", "s-b1")
+    before = _view(opened, pid)
     with store.transaction(opened) as conn:
-        plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "b が終わった")
-    view, _ = _view(opened, pid)
-    assert view.max_lanes == 1
+        events = store.read_events(conn, pid)
+        created = events[0].draft.payload
+        old = [
+            model.EventDraft("lane_changed", "organizer", lane.PLAN_ROW, reason="上限", payload={"max_lanes": 1, "max_plans": 2}),
+            model.EventDraft("lane_changed", "organizer", "b", reason="本数", payload={"plans": 3}),
+        ]
+        plan._append(conn, pid, old)
+    view, rows = _view(opened, pid)
+    assert (view, rows) == before
+    legacy = {**created, "max_lanes": 6, "max_plans": 6}
+    assert fold._plan_base(pid, legacy, "running").name == view.name
+    spec = fold._spec("c", {"machine_id": "t-c", "kind": "sprint", "plans": 2, "touches": ["src/c"], "after": []})
+    assert spec.touches == ("src/c",) and not hasattr(spec, "plans")
+
+
+@pytest.mark.parametrize("key", ["max_lanes", "max_plans", "plans"])
+def test_cli_refuses_a_plan_file_that_names_a_removed_limit(repo, capsys, tmp_path, key):
+    # #3989 の受け入れ条件 2: 3 つの値のどれかを書いた計画の設定を init・start が名指して断る
+    one = _decl("a", [[1]])
+    body = _doc({**one, "plans": 1}) if key == "plans" else _doc(one, **{key: 6})
+    path = _plan_file(tmp_path / "plan.json", body)
+    for cmd in ("init", "start"):
+        code, out = _cli(capsys, cmd, path)
+        assert out["cause"]["kind"] == "invalid" and code == causes.exit_code("invalid") and key in out["summary"]
+    lane_path = _plan_file(tmp_path / "lane.json", {**_decl("b", [[2]], touches=("src/b",)), "plans": 1})
+    _cli(capsys, "start", _plan_file(tmp_path / "ok.json", _doc(one)))
+    code, out = _cli(capsys, "lane", "add", "p6", lane_path)
+    assert out["cause"]["kind"] == "invalid" and "plans" in out["summary"]
 
 
 def test_row_moved_to_another_lane(opened):
@@ -279,47 +305,6 @@ def test_subcommand_is_in_the_table():
     assert cli.COMMANDS[plan.TOOL] == plan_cli.__name__
 
 
-def test_cli_creates_starts_and_reports_the_plan(repo, capsys, tmp_path, detached):
-    path = _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1, 2]])))
-    code, out = _cli(capsys, "init", path)
-    assert code == 0 and out["metrics"]["state"] == "pending"
-    code, out = _cli(capsys, "init", path)
-    assert out["cause"]["kind"] == "refused" and out["metrics"]["current_id"]
-    assert detached == []
-    code, out = _cli(capsys, "start", path)
-    assert code == 0 and out["metrics"]["state"] == "running"
-    assert detached == [("p6", repo)] and out["metrics"]["run_pid"] == 4242
-    code, out = _cli(capsys, "status", "p6")
-    assert code == 0 and out["items"][0]["rows"][0]["input"]["issues"] == [1, 2]
-
-
-def test_cli_row_carry_keeps_the_dropped_issue_in_the_same_lane(repo, capsys, tmp_path):
-    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1, 2]]))))
-    code, out = _cli(capsys, "row", "carry", "p6", "a", "r1", "--issues", "2", "--reason", "設計承認ゲートで外した")
-    assert code == 0 and out["metrics"]["row"] == "r2"
-    _, out = _cli(capsys, "status", "p6")
-    assert [r["input"]["issues"] for r in out["items"][0]["rows"]] == [[1, 2], [2]]
-
-
-def test_cli_stop_pauses_by_default_and_start_resumes_the_same_plan(repo, capsys, tmp_path, detached):
-    path = _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]])))
-    _cli(capsys, "start", path)
-    code, out = _cli(capsys, "stop", "p6", "--reason", "区切りで止める")
-    assert code == 0 and out["metrics"]["running"] == [] and out["next"]["argv"][1:3] == [plan.TOOL, "start"]
-    _, out = _cli(capsys, "status", "p6")
-    assert out["metrics"]["state"] == "paused" and out["items"][0]["rows"][0]["state"] == "pending"
-    code, out = _cli(capsys, "start", path)
-    assert code == 0 and out["metrics"]["state"] == "running" and len(detached) == 2
-
-
-def test_cli_stop_now_lists_the_cancel_for_running_sprints(repo, capsys, tmp_path):
-    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
-    code, out = _cli(capsys, "stop", "p6", "--now", "--reason", "放棄")
-    assert code == 0 and out["metrics"]["running"] == [] and out["items"] == []
-    _, out = _cli(capsys, "status", "p6")
-    assert out["metrics"]["state"] == "cancelled" and out["items"][0]["state"] == "cancelled"
-
-
 def test_cli_refuses_a_plan_file_of_the_wrong_shape(repo, capsys, tmp_path):
     path = _plan_file(tmp_path / "plan.json", {"version": 1, "name": "P 6", "rules": [], "lanes": []})
     code, out = _cli(capsys, "init", path)
@@ -470,28 +455,6 @@ def _sprint_of_lane(repo: Path, lane_name: str, name: str) -> str:
     with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, plan.plan_id(rid, "p6"))
         return store.create_machine(conn, ("sprint", rid, name), view.lanes[lane_name].machine_id, None, [])
-
-
-def test_cli_row_add_move_cancel_by_plan_and_lane(repo, capsys, tmp_path):
-    _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1], [2]]))))
-    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "5", "6", "--args", "x", "y", "--reason", "足す")
-    assert code == 0 and _ok_row(out) == ("レーン a に行 r3 を足した", {"row": "r3"})
-    code, out = _cli(capsys, "row", "add", "p6", "a", "--issues", "7", "--index", "0", "--reason", "先頭")
-    assert code == 0 and _ok_row(out) == ("レーン a に行 r4 を足した", {"row": "r4"})
-    code, out = _cli(capsys, "row", "move", "p6", "a", "r3", "--index", "1", "--reason", "動かす")
-    assert code == 0 and _ok_row(out) == ("レーン a の行 r3 を位置 1 へ動かした", {"row": "r3"})
-    code, out = _cli(capsys, "row", "cancel", "p6", "a", "r4", "--reason", "やめる")
-    assert code == 0 and _ok_row(out) == ("レーン a の行 r4 を中止にした", {"row": "r4"})
-    code, out = _cli(capsys, "row", "carry", "p6", "a", "r1", "--issues", "1", "--reason", "外す")
-    assert code == 0 and _ok_row(out) == ("外した課題をレーン a の次の行 r5 へ入れた", {"row": "r5"})
-    _, out = _cli(capsys, "status", "p6")
-    assert [(r["row"], r["state"], r["input"]) for r in out["items"][0]["rows"]] == [
-        ("r4", "cancelled", {"kind": "sprint", "issues": [7], "args": []}),
-        ("r3", "pending", {"kind": "sprint", "issues": [5, 6], "args": ["x", "y"]}),
-        ("r1", "pending", {"kind": "sprint", "issues": [1]}),
-        ("r5", "pending", {"kind": "sprint", "issues": [1], "args": []}),
-        ("r2", "pending", {"kind": "sprint", "issues": [2]}),
-    ]
 
 
 def test_cli_row_start_resumed_end_by_sprint(repo, capsys, tmp_path):

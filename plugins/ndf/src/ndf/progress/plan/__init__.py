@@ -24,7 +24,8 @@ import sqlalchemy as sa
 
 from ndf import cli as top
 from ndf import contracts
-from ndf.contracts import limits, result
+from ndf.contracts import result
+from ndf.contracts import named_cap
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -34,8 +35,6 @@ TOOL = top.tool_of(f"{__name__}.cli")
 # 計画の設定とレーンの設定の形（レーンは同じファイルの $defs）
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
-# 同時に動くレーンの上限とレーンごとのプランの本数の上限の既定（計画の設定の max_lanes・max_plans で変える）
-LIMIT_POLICY = machine.CAP_POLICY
 # 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
 ANSWER_NEXT_GRACE_SECONDS = 600
 # リクエストの行のキーの接頭辞（request-1・request-2…）
@@ -72,25 +71,18 @@ def _lane_kind(decl: dict[str, Any]) -> str:
 
 def lane_payload(decl: dict[str, Any], machine_id: str) -> dict[str, Any]:
     """計画のステートマシンのレーンの行（`lane_added` の値）。"""
-    body = {"machine_id": machine_id, "kind": _lane_kind(decl), "plans": decl["plans"], "touches": decl["touches"]}
+    body = {"machine_id": machine_id, "kind": _lane_kind(decl), "touches": decl["touches"]}
     body["after"] = list(decl["after"]) if "after" in decl else []
     if "repo" in decl:
         body["repo"] = decl["repo"]
     return body
 
 
-def _default_limit() -> int:
-    return int(limits.value(*LIMIT_POLICY))
-
-
 def plan_payload(doc: dict[str, Any]) -> dict[str, Any]:
-    """計画そのものの行（規則・上限・形の番号・NDF のバージョン）。"""
-    default = _default_limit()
+    """計画そのものの行（規則・形の番号・NDF のバージョン）。"""
     return {
         "name": doc["name"],
         "rules": doc["rules"],
-        "max_lanes": doc["max_lanes"] if "max_lanes" in doc else default,
-        "max_plans": doc["max_plans"] if "max_plans" in doc else default,
         "formats": lane.current_formats(),
         "ndf_version": lane.ndf_version(),
     }
@@ -182,10 +174,10 @@ def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optio
 
 
 def change_lane(conn: sa.Connection, pid: str, name: str, changes: dict[str, Any], reason: str, request: Optional[str] = None) -> None:
-    """レーンの触る場所・プランの本数・after を変える（name が計画の行なら上限を変える）。決まりで新しく当たれば断る。"""
+    """レーンの触る場所・after を変える。決まりで新しく当たれば断る。"""
     lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
-    if name != lane.PLAN_ROW and name not in view.lanes:
+    if name not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {name} は無い")
     if not changes:
         raise model.Refused("変える値が無い")
@@ -367,25 +359,37 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     return item
 
 
-def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], listed: Any) -> dict[str, dict[str, Any]]:
-    """起動できる行を持つレーンのうち、マシンのプランの本数の上限で起動を待つもの（レーン → 待ちの理由と数。#2999）。
+def machine_waits(
+    view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], listed: Any, free: bool
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """起動できる行を持つのに起動を待つレーン（レーン → 待ちの理由と数）と、マシンの集計（#2999・#3989 の決定 5）。
 
-    `listed` はラッパーの一覧（読めなければ None で、待ちを出さない）。
+    `listed` はラッパーの一覧（読めなければ None）、`free` はマシンの起動の排他を今取れたか。ほかの計画のステートマシンは、
+    起動できるレーンがあるときだけ 1 回読み、集計とレーンごとの判定が同じ読み取りを使う。上限を読めなければ待ちを載せず、
+    集計の `cap` を null・`error` に文を載せる（`status` を止めない）。
     """
     wakeable = lane.wakeable_lanes(view, rows)
-    if not wakeable or listed is None:
-        return {}
-    # 他の計画のレーンはレーンに依らないので、ループの前に 1 回だけ読む
-    found = machine.machine_plans(machine.lanes_of(view, rows), listed)
-    limit = machine.cap()
+    own = machine.lanes_of(view, rows)
+    table = listed if listed is not None else {}
+    # ほかの計画を読むのは、起動できるレーンがあり、一覧を読めたときだけ（読まなければ集計は自分の計画と一覧で数える）
+    others = bool(wakeable) and listed is not None
+    found = machine.machine_plans(own, table) if others else [own]
+    total = machine.count(found, table, "")
+    summary: dict[str, Any] = {"lanes": total.total, "cap": None, "unreadable": list(total.unreadable), "others": others}
+    try:
+        limit = machine.cap()
+    except named_cap.NamedCapError as exc:
+        return {}, {**summary, "error": str(exc)}
+    summary = {**summary, "cap": limit, "error": None}
+    if not free:
+        return {name: machine.waiting(machine.LOCK, None, None)["waiting"] for name, _ in wakeable}, summary
     out = {}
     for name, _ in wakeable:
-        wrapper = launch.wrapper_name(str(view.repo), view.name, name)
-        got = machine.count(found, listed, wrapper)
-        plans = view.lanes[name].plans
-        if not machine.admit(got.total, plans, limit):
-            out[name] = machine.waiting(machine.RULE, got, plans, limit)["waiting"]
-    return out
+        got = machine.count(found, table, launch.wrapper_name(str(view.repo), view.name, name))
+        held = machine.over_cap(got, limit, listed is not None)
+        if held is not None:
+            out[name] = held["waiting"]
+    return out, summary
 
 
 def _lane_items(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], now: datetime) -> list[dict[str, Any]]:
@@ -413,14 +417,14 @@ def _stall_warnings(items: list[dict[str, Any]], verdicts: dict[str, Any]) -> li
     return stalls
 
 
-def _plan_metrics(pid: str, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], stalls: list[str]) -> dict[str, Any]:
-    """計画全体の集計（結果 JSON の metrics）。"""
-    return {
+def _plan_metrics(
+    pid: str, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], stalls: list[str], machine_sum: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    """計画全体の集計（結果 JSON の metrics）。`machine_sum` はマシンの稼働中の数と上限（生死を読んだときだけ）。"""
+    body = {
         "plan_id": pid,
         "plan": view.name,
         "state": view.state,
-        "max_lanes": view.max_lanes,
-        "max_plans": view.max_plans,
         "wakeable": [list(w) for w in lane.wakeable_lanes(view, rows)],
         "open_requests": [{"request": r.key, "lane": r.lane, "reason": r.reason} for r in view.open_requests()],
         "closed_requests": closed_requests(view),
@@ -428,14 +432,17 @@ def _plan_metrics(pid: str, view: lane.PlanView, rows: dict[str, list[lane.LaneR
         "stalled": len(stalls),
         "releases": release_counts(view),
     }
+    if machine_sum is not None:
+        body["machine"] = machine_sum
+    return body
 
 
 def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
     """計画の状態を、計画のステートマシンとレーンのステートマシンの 2 つから作る（受け入れ条件 4）。閉じたリクエストの回答も載せる（#3128）。
 
     `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
-    足す。承認ゲートや質問の回答を待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
-    レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
+    足す。承認ゲートや質問の回答を待つ行は正常な待ちで、止まりにしない。起動できるのに待つレーンには
+    `machine_wait`（理由・数えた稼働中の数・上限）を、集計には `machine`（マシンの稼働中の数・上限）を載せる（#2999・#3989）。
 
     生死の材料は同じステートマシンの DB を開くサブコマンドを打つので、`probes` を渡すのはトランザクションの外で読む
     `status_of` を使う呼び手だけにする（CLI はステートマシンを読んでトランザクションを閉じてから `status_of` を呼ぶ）。
@@ -453,7 +460,7 @@ def status_of(
 ) -> dict[str, Any]:
     """読んだ計画とレーンのステートマシンから状態を作る（`status` の本体。生死とマシンの上限は `probes` で観測する）。"""
     verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
-    waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
+    waits, machine_sum = machine_waits(view, rows, probes.wrappers(), machine.lock_free()) if probes is not None else ({}, None)
     items = _lane_items(view, rows, now)
     for item in items:
         name = item["lane"]
@@ -462,6 +469,6 @@ def status_of(
         if name in waits:
             item["machine_wait"] = waits[name]
     stalls = _stall_warnings(items, verdicts)
-    metrics = _plan_metrics(pid, view, rows, stalls)
+    metrics = _plan_metrics(pid, view, rows, stalls, machine_sum)
     summary = f"計画 {view.name} は{model.label(view.state)}（レーン {len(items)}・止まり {len(stalls)}）"
     return result.result(TOOL, result.OK, summary, items=items, metrics=metrics, warnings=stalls)

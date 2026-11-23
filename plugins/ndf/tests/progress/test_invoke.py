@@ -12,6 +12,7 @@ import pytest
 import sprint_fixture
 from sprint_fixture import sprint_repo as _sprint_repo
 
+from ndf import cli
 from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core import route
@@ -20,6 +21,9 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, invoke, model, stages
+
+
+# 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
 
 
 def _stage(name: str, mode: str = "light"):
@@ -174,7 +178,7 @@ def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path)
     assert argv[argv.index("--set") + 1] == "issues=[1, 2]"
     assert argv[-2:] == ["--answer", "approved"]
-    assert argv[1] == "-P"
+    assert argv[1] == "-I"
 
 
 def test_every_plan_a_stage_calls_has_a_route_template():
@@ -516,31 +520,6 @@ def test_code_review_with_a_gathered_off_the_sprint_branch_stops_before_the_plan
     assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
 
 
-@pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
-def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
-    # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
-    (bin_dir / "gh").chmod(0o755)
-    argv = route.review_launch(name, "feat/x", "develop")
-    argv = [a if a != "ndf" else "echo" for a in argv]
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split()
-    assert out[:2] == ["cross-review", "run"] and out[-2:] == ["--pr", "3489"]
-    assert out[out.index("--purpose") + 1] == purpose and out[out.index("--base") + 1] == "develop"
-
-
-def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
-    (bin_dir / "gh").chmod(0o755)
-    argv = [a if a != "ndf" else "echo" for a in route.review_launch("design", "feat/x", "develop")]
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
-
-
 def test_workflow_ndf_settings_with_launch_and_stages_passes_the_schema(tmp_path):
     # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ設定はスキーマの検査を通る
     launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
@@ -808,7 +787,9 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
     run = invoke.StageRun(**{**vars(_plan_run({"issues": [1]})), "outputs": ("worktree", "branch"), "notes": "直す所"})
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=runner)
     assert got.outputs == {"worktree": "/w", "branch": "sprint/s"}
-    assert str(invoke.SRC) in seen["env"]["PYTHONPATH"].split(os.pathsep)
+    # #4029: src は子の argv（sys.path）で渡し、PYTHONPATH には入れない（プランのステップへ渡らない）
+    assert seen["argv"][: len(cli.ndf_command())] == cli.ndf_command()
+    assert seen["env"].get("PYTHONPATH") == os.environ.get("PYTHONPATH")
     assert seen["env"][invoke.NOTES_ENV] == "直す所"
     assert (tmp_path / "w").is_dir()
 

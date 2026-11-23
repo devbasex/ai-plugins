@@ -90,6 +90,8 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
 
 手順は [references/characterization-tests.md](references/characterization-tests.md)。
 **現状の出力を正解として記録する**テストであり、正しさを主張しない点が通常のテストと違う。
+固定テストも本物の時間を待たず、子のプロセスを起動しない。時刻と起動の手を差し替えて固定する（`tdd-cycle` の
+「テストに書かないもの」）。
 
 ### 3. 現状の振る舞いが妥当かを判断する
 

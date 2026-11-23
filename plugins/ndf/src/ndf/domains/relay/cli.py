@@ -5,7 +5,8 @@
     ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
                                                               # アカウントと従量の接続の登録（旧い保存先と同じ。#3569）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
-    ndf relay spawn [--name <名前>] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
+    ndf relay spawn [--name <名前>] [--replace --seat <席> [--seated] [--held <名前>]...] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
+    ndf relay cap [--named <数> | --clear]                    # 同時に動かす数の上限（マシンの設定。#3989）
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
     ndf relay context resolve | record | calibrate | report   # 再起動の方針の適用値・判定の記録・見込み・作業ごとの集計
@@ -30,8 +31,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ndf import cli, identity
+from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
 from ndf.contracts import causes, facts, limits, result
+from ndf.contracts import named_cap
 from ndf.domains.relay import (
     account_decide,
     accounts,
@@ -69,6 +72,7 @@ COMMANDS = {
     "restart": "名前つきのラッパーを再起動する（止める前に上限を判定する）",
     "stop": "名前つきのラッパーを止める（--all ですべて）",
     "ls": "名前つきのラッパーの一覧と状態",
+    "cap": "同時に動かすラッパーとレーンの数の上限（マシンの設定）を出す・書く（--named）・消す（--clear）",
     "pending": "再起動の前に、待ちを抱えた実行の一覧を出す",
     "mark": "子へ入力を送る前に中継のマーカーを立てる",
     "decide": "セグメントの状態の JSON（標準入力）から次の手を出す",
@@ -155,8 +159,6 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         version=plugin_version(ident.root),
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
-        max_named=int(limits.from_env(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
-        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
         stop_wait=hub.Wait(
             limits.from_env(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
@@ -181,12 +183,31 @@ def _hub(args: argparse.Namespace) -> int:
         return result.emit(result.result(TOOL, result.OK, f"名前つきのラッパー: {len(rows)} 本", items=rows))
     if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
-        req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
+        # 置き換えは旧版のハブが通常の起動として処理できない種別で頼む（旧版は断り、頼む側が対応版のハブへ送り直す。hub.submit）
+        req = {"kind": hub.REPLACE if args.replace else "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan}
+        req["args"] = args.rest
+        if args.replace:
+            req.update({"seat": args.seat, "seated": args.seated, "held": args.held})
     elif args.action == "stop" and args.all:
         return _stop_all(ctx)
     else:
         req = {"kind": args.action, "name": args.name}
     return _outcome(hub.submit(ctx, req))
+
+
+def _cap(args: argparse.Namespace) -> int:
+    """`ndf relay cap [--named <数> | --clear]`: マシンの設定の上限を書く・消す。引数なしなら今の値と出所を出す（#3989 の決定 4）。"""
+    state_dir = identity.load().state_dir
+    if args.named is not None:
+        if args.named < 1:
+            return result.emit(result.stopped(TOOL, "invalid", f"上限は 1 以上の整数にする: {args.named}"))
+        named_cap.write(state_dir, args.named)
+    elif args.clear:
+        named_cap.write(state_dir, None)
+    got = named_cap.read(os.environ, state_dir)
+    verb = "書いた" if args.named is not None else "消した" if args.clear else "読んだ"
+    summary = f"同時に動かす数の上限 {got.value}（出所 {got.source}）を{verb}"
+    return result.emit(result.result(TOOL, result.OK, summary, metrics={"value": got.value, "source": got.source}))
 
 
 def _stop_all(ctx: hub.Context) -> int:
@@ -282,13 +303,18 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        spin=hub.spin_of(environ),
         context_limit=int(limits.value("relay.context", "count")),
-        usage_threshold=limits.value("relay.usage-guard", "count"),
+        guards=account_decide.Guards(
+            limits.value("relay.five-hour-guard", "count"),
+            limits.value("relay.weekly-prefer", "count"),
+            limits.value("relay.weekly-guard", "count"),
+        ),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
         confirm=updater.confirm,
+        fetch=accounts.fetch_usage,
     )
 
 
@@ -297,8 +323,9 @@ def _passthrough(rest: list[str], parsed: claude_args.Parsed) -> int:
     if parsed.notice:
         print(f"ndf-relay: ラッパーを始めない（{parsed.passthrough}）。claude をそのまま起動する", file=sys.stderr)
     try:
+        cli_floor.require("claude", CLAUDE)
         os.execvp(CLAUDE, [CLAUDE, *rest])
-    except OSError as exc:
+    except (cli_floor.TooOld, OSError) as exc:
         print(f"ndf-relay: claude を起動できない（{exc}）", file=sys.stderr)
         return 127
 
@@ -327,12 +354,13 @@ def _ended(ended: wrapper.Ended) -> int:
     """ラッパーの終わりを伝える。人が端末で打った claude の終わりなので、結果 JSON は出さない。
 
     普通に終わったとき（子が次のセグメントを頼まずに終わった）は何も出さず 0 を返す（claude を直接打ったときと同じ）。
-    止まったときは `ndf-relay:` の 1 行で理由を標準エラーへ出し、停止理由の種類の終了コードを返す。
+    止まったときは `ndf-relay:` の 1 行で理由を標準エラーへ出し、終了コード（`code`。再起動ループの検出で子が終わった後に
+    止まったときの子の終了コード）か、無ければ停止理由の種類の終了コードを返す。
     """
     if not ended.cause:
         return 0
     print(f"ndf-relay: {ended.reason}", file=sys.stderr)
-    return causes.exit_code(ended.cause)
+    return ended.code if ended.code is not None else causes.exit_code(ended.cause)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -346,8 +374,19 @@ def _parser() -> argparse.ArgumentParser:
         p[name].add_argument("--name")
         p[name].add_argument("rest", nargs=argparse.REMAINDER)
     p["run"].add_argument("--prompt")
-    for opt in ("--cwd", "--role", "--plan"):
+    for opt in ("--cwd", "--role", "--plan", "--seat"):
         p["spawn"].add_argument(opt)
+    p["spawn"].add_argument(
+        "--held",
+        action="append",
+        default=[],
+        help="起動の許可が数えた、実行中の行を持つレーンの名前（ラッパーの生死を問わない。ハブも数える）",
+    )
+    p["spawn"].add_argument("--replace", action="store_true", help="同じ名前のラッパーを、上限を判定してから止めて置き換える")
+    p["spawn"].add_argument("--seated", action="store_true", help="行を始めた起動の席を使う続きの起動（本数を判定しない）")
+    cap = p["cap"].add_mutually_exclusive_group()
+    cap.add_argument("--named", type=int, help="マシンの設定の上限を書く（1 以上の整数）")
+    cap.add_argument("--clear", action="store_true", help="マシンの設定を消す（環境変数 → 上限の設定に戻る）")
     p["restart"].add_argument("name")
     stop = p["stop"].add_mutually_exclusive_group(required=True)
     stop.add_argument("name", nargs="?", help="止めるラッパーの名前")
@@ -356,7 +395,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan")}
+OWN_OPTIONS = {"run": ("--name", "--prompt"), "spawn": ("--name", "--cwd", "--role", "--plan", "--seat", "--held")}
+# 値を取らない spawn のオプション（claude の引数との区切りを読むときに 1 語として飛ばす）
+OWN_FLAGS = {"run": (), "spawn": ("--replace", "--seated")}
 
 
 def _split_claude_args(argv: list[str]) -> list[str]:
@@ -371,7 +412,9 @@ def _split_claude_args(argv: list[str]) -> list[str]:
         word = argv[i]
         if word in ("-h", "--help", "--"):
             return argv
-        if word in own:
+        if word in OWN_FLAGS[argv[0]]:
+            i += 1
+        elif word in own:
             i += 2
         elif word.split("=", 1)[0] in own:
             i += 1
@@ -380,10 +423,24 @@ def _split_claude_args(argv: list[str]) -> list[str]:
     return argv[:i] + ["--"] + argv[i:] if i < len(argv) else argv
 
 
+def _spawn_flags_error(args: argparse.Namespace) -> str | None:
+    """spawn の --seat・--seated・--replace の組み合わせが足りなければ理由の文を返す（足りていれば None）。"""
+    if args.seat and not args.replace or args.seated and not (args.replace and args.seat and args.name):
+        return "--seat は --replace を、--seated は --replace・--seat・--name をすべて要する"
+    if args.replace and not args.seat:
+        return "--replace は --seat を要する"
+    if args.held and not args.replace:
+        return "--held は --replace を要する"
+    return None
+
+
 def _parse(argv: list[str]) -> argparse.Namespace:
-    args = _parser().parse_args(_split_claude_args(argv))
+    parser = _parser()
+    args = parser.parse_args(_split_claude_args(argv))
     if args.action == "context" and args.context_action == "record" and (args.verdict is not None) != (args.reason is not None):
-        _parser().error("--verdict 再起動 には --reason を、--event には --reason を付けない")
+        parser.error("--verdict 再起動 には --reason を、--event には --reason を付けない")
+    if args.action == "spawn" and (reason := _spawn_flags_error(args)):
+        parser.error(reason)
     if getattr(args, "rest", None) and args.rest[0] == "--":
         args.rest = args.rest[1:]
     return args
@@ -399,6 +456,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "restart": _hub,
     "stop": _hub,
     "ls": _hub,
+    "cap": _cap,
     "pending": lambda a: _pending(),
     "mark": lambda a: _mark(a.session_id),
     "decide": lambda a: _decide(),
@@ -418,5 +476,12 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, account_registry.AccountError, markers.MarkerError, registry.RegistryError, limits.EnvError) as exc:
+    except (
+        accounts.AccountError,
+        account_registry.AccountError,
+        markers.MarkerError,
+        registry.RegistryError,
+        limits.EnvError,
+        named_cap.NamedCapError,
+    ) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

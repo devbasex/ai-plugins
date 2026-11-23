@@ -16,8 +16,8 @@
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| DBOS 3.5.0 の wheel（`dbos/_sys_db.py:5224-5265` ほか。[issue-1142-design-next.md](issue-1142-design-next.md) の外部の調査 LIB10） | 外部の一次情報 | キューの取り出しは `executor_id` で絞らず、アプリの版は設定が無ければソースの hash で決まる |
-| 前の設計の決定 26・I17・決定 28（[issue-1142-design-dbos.md](issue-1142-design-dbos.md)） | 設計 | 同じ理由で、鍵ごとの記録と NDF の版から切り離した版を採っていた |
+| DBOS 3.5.0 の wheel（`dbos/_sys_db.py:5224-5265` ほか。[issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) の外部の調査 LIB10） | 外部の一次情報 | キューの取り出しは `executor_id` で絞らず、アプリの版は設定が無ければソースの hash で決まる |
+| 前の設計の決定 26・I17・決定 28（[issue-1142-design-dbos.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-dbos.md)） | 設計 | 同じ理由で、鍵ごとの記録と NDF の版から切り離した版を採っていた |
 | `.git/ndf/state/dbos` の大きさ（`ls \| wc -l`・`du -sh`、2026-11-14） | 実測 | 2,279 ファイル・687MB |
 | p6 の並列の計画で 10.27.59 と 10.27.60 のレーンが同時に動いた（#3344 の本文） | 実測 | 版の違うレーンが 1 台で同時に動く |
 | 利用者の指示（`.ndf/handoff/sprint-lr-design.md`）: DBOS は 3.5.0 で設計する | 利用者の指示 | 依存は最新の安定版を使う |
@@ -28,9 +28,9 @@
 
 | 直した文書 | 直した所 |
 | --- | --- |
-| [issue-1142-design-next.md](issue-1142-design-next.md) | 人へ残す判断 (f)・(g)・集約・不変条件 I5〜I13・イベント EN2・EN3・用語・外部の調査・節「DBOS の記録と進行表の置き場（#3344）」（受け入れ条件との対応表）・決定 77 の帯・決定 81〜87・テスト設計・未確認のまま残ること |
-| [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) | 子 C1+・ファイル配置・関数の構造と仕様・異常系・定数・並行と排他・ログ・単体テストの観点・節「#3344 で子へ足す受け入れ条件」 |
-| [issue-1142-design-dbos.md](issue-1142-design-dbos.md) | 決定 26・決定 28 の帯、I17 の引き継ぎ先 |
+| [issue-1142-design-next.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next.md) | 人へ残す判断 (f)・(g)・集約・不変条件 I5〜I13・イベント EN2・EN3・用語・外部の調査・節「DBOS の記録と進行表の置き場（#3344）」（受け入れ条件との対応表）・決定 77 の帯・決定 81〜87・テスト設計・未確認のまま残ること |
+| [issue-1142-design-next-design-detail.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-next-design-detail.md) | 子 C1+・ファイル配置・関数の構造と仕様・異常系・定数・並行と排他・ログ・単体テストの観点・節「#3344 で子へ足す受け入れ条件」 |
+| [issue-1142-design-dbos.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-1142-design-dbos.md) | 決定 26・決定 28 の帯、I17 の引き継ぎ先 |
 
 **文書に出る子の記号**（#1142 の作り直しの子 Issue。詳細設計の「実装計画」の表）:
 

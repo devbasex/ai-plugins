@@ -44,6 +44,10 @@ class Policy(NamedTuple):
     inject_chars: Optional[int] = None
     # 重い起動のスロットの重み
     gib: Optional[float] = None
+    # API キーの helper（`relay.key-helper`）だけが持つ値
+    lock: Optional[float] = None
+    gate: Optional[float] = None
+    first: Optional[float] = None
 
 
 # 方針の値の名前（名前と説明を除いた Policy の項目）

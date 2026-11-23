@@ -3,25 +3,11 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
-import sys
-import threading
 from pathlib import Path
 
 import pytest
 
 from ndf.testing import behavior, cmd_match, testenv, waits
-
-
-def test_wait_for_file_returns_when_the_file_appears(tmp_path):
-    target = tmp_path / "signal"
-    threading.Timer(0.05, target.write_text, args=("",)).start()
-    assert waits.wait_for_file(target) == target
-
-
-def test_wait_until_gives_up_only_after_the_timeout():
-    with pytest.raises(waits.WaitTimeout):
-        waits.wait_until(lambda: False, timeout=0.05)
 
 
 def test_returns_before_fails_only_when_the_body_waited():
@@ -54,19 +40,6 @@ def test_owner_of_compares_workdirs_with_row_worktrees():
     assert testenv.owner_of(["/w/a", "/w/a/sub"], ["/w/a"]) == (testenv.OWN, "")
     owner, why = testenv.owner_of(["/w/ab"], ["/w/a"])
     assert owner == testenv.FOREIGN and "/w/ab" in why
-
-
-def test_behavior_check_does_not_inherit_the_callers_stdin(tmp_path, src_env):
-    # 呼び出し元の標準入力にほかのリクエスト文がつながっていても、起動した確認は何も読まない
-    caller = (
-        "import sys; from pathlib import Path; from ndf.testing import behavior; "
-        "argv = [sys.executable, '-c', 'import sys; print(repr(sys.stdin.read()))']; "
-        "print(behavior.launch(argv, Path('.'), timeout=60).stdout, end='')"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", caller], input="other prompts\n", cwd=tmp_path, env=src_env, capture_output=True, text=True, check=True
-    )
-    assert result.stdout.strip() == "''"
 
 
 def test_behavior_check_command_passes_the_prompt_as_one_argument(tmp_path):

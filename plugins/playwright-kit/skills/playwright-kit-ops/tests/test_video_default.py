@@ -13,7 +13,7 @@ import textwrap
 def test_pwk_no_video_option_registered(pytester):
     """--pwk-no-video が pytest -h に出ること。"""
     pytester.makepyfile("def test_dummy(): pass\n")
-    res = pytester.runpytest("--help")
+    res = pytester.runpytest_subprocess("--help")
     out = res.stdout.str()
     assert "--pwk-no-video" in out
 
@@ -29,7 +29,7 @@ def test_video_default_on(pytester):
             """
         )
     )
-    res = pytester.runpytest("-q")
+    res = pytester.runpytest_subprocess("-q")
     res.assert_outcomes(passed=1)
 
 
@@ -44,7 +44,7 @@ def test_pwk_no_video_sets_off(pytester):
             """
         )
     )
-    res = pytester.runpytest("-q", "--pwk-no-video")
+    res = pytester.runpytest_subprocess("-q", "--pwk-no-video")
     res.assert_outcomes(passed=1)
 
 
@@ -59,5 +59,5 @@ def test_explicit_video_flag_takes_precedence(pytester):
             """
         )
     )
-    res = pytester.runpytest("-q", "--video=retain-on-failure")
+    res = pytester.runpytest_subprocess("-q", "--video=retain-on-failure")
     res.assert_outcomes(passed=1)

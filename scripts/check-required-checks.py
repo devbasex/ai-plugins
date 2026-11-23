@@ -35,7 +35,7 @@ from typing import NamedTuple
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（docs/specifications/ndf-rebuild-libraries.md の決定 19）
 
 require("yamlio")
 import ci_workflows  # noqa: E402  必須の一覧の取り出しは解析と共有する（#653 の決定 6）

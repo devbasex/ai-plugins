@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from ndf.adapters import agents, claude, training
+from ndf.adapters import claude, training
 
 NOW = time.time()
 EXPIRED = "2000-01-01T00:00:00+00:00"
@@ -83,17 +83,6 @@ def test_ensure_passes_runtimes_without_a_check():
     _backup(None)
 
     assert training.ensure("kiro", now=NOW, read=_reads(True)) is None
-
-
-def test_run_agent_checks_on_the_spot_and_launches_without_backup(marker_launch, monkeypatch):
-    training.cache_path().unlink()
-    monkeypatch.setattr(training, "_read_now", _reads(False))
-    marker, _, spec = marker_launch("codex")
-
-    status = agents.run_agent(spec, poll=0.05)
-
-    assert status.state == agents.AgentState.DONE and marker.exists()
-    assert json.loads(training.cache_path().read_text(encoding="utf-8"))["codex"]["training"] is False
 
 
 def test_call_claude_refuses_when_the_check_on_the_spot_cannot_tell(marker_launch, monkeypatch):

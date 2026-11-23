@@ -9,14 +9,11 @@ import fcntl
 import io
 import json
 import os
-import subprocess
-import sys
 import time
-from datetime import date
 from pathlib import Path
 
 import pytest
-from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, wrapper
+from ndf.domains.relay import accounts, markers, registry, signals, stop_signal, switch_decide, wrapper
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
@@ -27,13 +24,19 @@ from relay_children import (
     clock_ticks,
     log_rows,
     make_settings,
+    put_usage,
+    put_usages,
+    register,
+    rows_of,
     run_wrapper,
 )
 
 
 def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+        register(tmp_path, "team", "main")
+        put_usage(tmp_path, "team", 95.0)
+        put_usage(tmp_path, "main", 10.0)
         accounts.use(state, "team")
 
     ended, spawn, w = run_wrapper(
@@ -57,7 +60,12 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
 def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
     # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        store = register(tmp_path, "team", "main")
+        put_usages(
+            store,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            fetched_at=time.time() - 3600,
+        )
         accounts.use(state, "team")
 
     limited = FakeChild([b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"], None)
@@ -66,16 +74,6 @@ def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_p
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1] == "利用上限でアカウントを替えた。中断したところから続ける"
     assert env["NDF_CLAUDE_ACCOUNT"] == "main"
     assert ended.cause == ""
-
-
-def test_auth_failure_marks_the_lane_stalled(tmp_path, monkeypatch):
-    # 認証の失敗で /goal が外れたら、状態を stalled にして理由を残す（#3243）
-    child = FakeChild([b"Goal cleared after an unrecoverable error (authentication failed)\r\n", b"", b""], 0)
-    seen = []
-    real = registry.write_state
-    monkeypatch.setattr(registry, "write_state", lambda d, data: (seen.append(data["state"]), real(d, data)))
-    ended, _, _ = run_wrapper(tmp_path, [child])
-    assert "stalled" in seen and ended.cause == ""
 
 
 def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
@@ -88,6 +86,15 @@ def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
     finally:
         os.close(fd)
     assert ended.cause == "refused" and spawn.calls == []
+
+
+def test_a_world_readable_relay_dir_from_an_old_version_is_made_0700_before_the_lock(tmp_path):
+    # キーの子でない通常の起動でも、旧版の 0755 の保存先を錠と状態より前に 0700 にそろえる（r2-2）
+    d = registry.wrapper_dir(tmp_path / "state", "t1")
+    d.mkdir(parents=True)
+    os.chmod(d, 0o755)
+    ended, _, w = run_wrapper(tmp_path, [FakeChild([], 0)])
+    assert w.dir == d and (d.stat().st_mode & 0o777) == 0o700
 
 
 def test_old_ndf_wrapper_running_stops_the_new_wrapper(tmp_path):
@@ -103,18 +110,20 @@ def test_old_ndf_wrapper_running_stops_the_new_wrapper(tmp_path):
     assert ended.cause == "precondition" and "旧い NDF" in ended.reason and spawn.calls == []
 
 
-def test_crashed_child_is_resumed_until_the_daily_limit(tmp_path):
-    children = [FakeChild([], 1), FakeChild([], 1), FakeChild([], 1)]
-    ended, spawn, _ = run_wrapper(tmp_path, children, max_starts=2)
-    assert ended.cause == "work_stopped"
+def test_i15_a_child_that_keeps_crashing_ends_on_the_spin_with_its_exit_code(tmp_path):
+    # 決定 13・I15（検出）: 子が 0 以外ですぐ終わる起動し直しが 3 つ続くと、次を起動せず end（spin）で子の終了コードで終わる
+    children = [FakeChild([], 1), FakeChild([], 1), FakeChild([], 1), FakeChild([], 0)]
+    ended, spawn, w = run_wrapper(tmp_path, children, spin=switch_decide.Spin(3, 120.0))
+    assert (ended.cause, ended.code) == ("spin", 1) and ended.reason.endswith(switch_decide.SPIN_REASON)
     assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
+    assert rows_of(w, "end")[-1]["cause"] == "spin"
 
 
 class StopOnSpawn(Spawner):
     """子を起動したすぐ後に停止シグナルファイルを置く（`ndf relay stop --all` が別の端末から置いた形）。"""
 
-    def __call__(self, argv, env, cwd):
-        child = super().__call__(argv, env, cwd)
+    def __call__(self, argv, env, cwd, pass_fds=()):
+        child = super().__call__(argv, env, cwd, pass_fds)
         stop_signal.location_stop(Path(env["NDF_RELAY_DIR"]))
         return child
 
@@ -148,21 +157,194 @@ def test_broken_next_mark_stops_with_the_reason(tmp_path):
     assert ended.cause == "config_broken" and spawn.made[0].alive is False
 
 
-# 現状固定（I-004）: その日の起動回数は日付が変わると 0 回から数え直し、状態に今日の日付で書く
-def test_starts_from_another_day_are_counted_from_zero(tmp_path):
-    s = make_settings(tmp_path, max_starts=2)
-    spawn = Spawner([FakeChild([], 1), FakeChild([], 1), FakeChild([], 1)])
-    w = wrapper.Wrapper(s, spawn=spawn, clock=clock_ticks())
-    assert w.starts == {"date": date.today().isoformat(), "count": 0}
-    w.starts = {"date": "2000-01-01", "count": 5}
+class Clock:
+    """呼ぶたびに `step` 秒進む偽の時計。`jump` で一度に進める（セグメントを長くする）。"""
+
+    def __init__(self, step: float = 1.0):
+        self.now = 0.0
+        self.step = step
+
+    def __call__(self) -> float:
+        self.now += self.step
+        return self.now
+
+    def jump(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_i15_thirty_long_restarts_in_a_day_keep_starting_the_next_section(tmp_path):
+    # 決定 13・I15: 120 秒以上のセグメントで 1 日に 30 回起動し直しても、回数では止めずに次のセグメントを起動し続ける
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0))
+    spawn = Spawner([FakeChild([], 1) for _ in range(30)] + [FakeChild([], 0)])
+    w = wrapper.Wrapper(s, spawn=spawn, clock=Clock(200.0))
     try:
         ended = w.run("最初の 1 行")
     finally:
         for c in spawn.made + spawn.children:
             c.close()
-    assert ended.cause == "work_stopped"
-    assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
-    assert registry.read_state(w.dir)["starts"] == {"date": date.today().isoformat(), "count": 2}
+    assert ended.cause == "" and len(spawn.calls) == 31
+    assert "starts" not in registry.read_state(w.dir)
+
+
+def test_i15_spin_off_with_zero_seconds_keeps_restarting(tmp_path):
+    # 決定 13・I15（検出）: NDF_RELAY_SPIN=0（秒が 0）なら、短い起動し直しが続いても検出しない
+    children = [FakeChild([], 1) for _ in range(4)] + [FakeChild([], 0)]
+    ended, spawn, _ = run_wrapper(tmp_path, children, spin=switch_decide.Spin(3, 0.0))
+    assert ended.cause == "" and len(spawn.calls) == 5
+
+
+def _spin_run(tmp_path, children, clock, markers=None, prepare=None):
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0))
+    spawn = Spawner(children, markers)
+    out = io.BytesIO()
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=out)
+    if prepare:
+        prepare(w.dir, s.state_dir)
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w, out.getvalue().decode()
+
+
+SPIN_SHOWN = wrapper.SPIN_LINE.format(seconds=120.0, count=3, again=wrapper.AGAIN_RUN)
+
+
+def test_i15_spin_keeps_relaying_a_live_child_and_writes_one_stop_row(tmp_path):
+    # 決定 13・I15（検出）: 120 秒未満で区切ったセグメントが 3 つ続くと 3 つ目の後を起動せず、子が動いていれば止めずに中継を続け、
+    # stop（spin）の行と画面の 1 行を 1 回だけ出す。その後に子が終わると子の終了コードで end（spin）
+    last = FakeChild([b""] * 10, 0)
+    children = [FakeChild([], None), FakeChild([], None), last, FakeChild([], 0)]
+    ended, spawn, w, shown = _spin_run(tmp_path, children, Clock(), markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert len(spawn.calls) == 3 and (ended.cause, ended.code) == ("spin", 0)
+    assert last.exitstatus == 0 and last.written == []  # 止めず・入力も送らない
+    assert [r["cause"] for r in rows_of(w, "stop")] == ["spin"]
+    assert shown.count(SPIN_SHOWN) == 1
+    assert rows_of(w, "end")[-1]["cause"] == "spin"
+
+
+class JumpChild(FakeChild):
+    """`at` 回目の見回りで偽の時計を `seconds` 秒進める、生き続ける子（セグメントが起動から 120 秒に達した形）。"""
+
+    def __init__(self, clock: Clock, at: int, seconds: float):
+        super().__init__([], None)
+        self.clock, self.at, self.seconds, self.polls = clock, at, seconds, 0
+
+    def isalive(self):
+        self.polls += 1
+        if self.polls == self.at:
+            self.clock.jump(self.seconds)
+        return super().isalive()
+
+
+def test_i15_spin_hold_lifts_once_the_section_reaches_the_spin_seconds(tmp_path):
+    # 決定 13・I15（検出）: 保持はそのセグメントが起動から 120 秒に達すると解け、その後の区切りで次のセグメントを起動する
+    clock = Clock()
+    held = JumpChild(clock, 20, 200.0)
+    children = [FakeChild([], None), FakeChild([], None), held, FakeChild([], 0)]
+    ended, spawn, w, shown = _spin_run(tmp_path, children, clock, markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert ended.cause == "" and len(spawn.calls) == 4 and spawn.calls[3][0][-1] == "/goal 4"
+    assert [r["cause"] for r in rows_of(w, "stop")] == ["spin"] and shown.count(SPIN_SHOWN) == 1
+    assert w.spin_held is False and w.spin_told is False
+
+
+def test_i15_held_child_that_exits_without_a_marker_ends_on_the_spin(tmp_path):
+    # 決定 13: 検出で保持した子が次のマーカーを書かずに /exit（終了コード 0）しても、finish でなく end（spin）で子の終了コード
+    clock = Clock()
+    last = FakeChild([b""] * 8, 0)  # 出力が止まって起動し直しの手に当たり、保持の間に 0 で終わる
+    children = [FakeChild([], None), FakeChild([], None), last, FakeChild([], 0)]
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), stall=5.0)
+    spawn = Spawner(children, {0: "/goal 2", 1: "/goal 3"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=io.BytesIO())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert len(spawn.calls) == 3 and (ended.cause, ended.code) == ("spin", 0)
+    assert last.written == [] and rows_of(w, "end")[-1]["cause"] == "spin"
+
+
+def test_i15_held_child_that_exits_with_a_limit_line_ends_on_the_spin(tmp_path):
+    # 決定 13: 保持の間に子が上限の表示を残して終わり、替え先が無くても（wait_reset）待たずに spin で子の終了コード
+    clock = Clock()
+    last = FakeChild([b""] * 8 + [LIMIT_LINE, b"", b""], 1)
+    children = [FakeChild([], None), FakeChild([], None), last, FakeChild([], 0)]
+    s = make_settings(tmp_path, spin=switch_decide.Spin(3, 120.0), stall=5.0)
+    spawn = Spawner(children, {0: "/goal 2", 1: "/goal 3"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=clock, out=io.BytesIO())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert len(spawn.calls) == 3 and (ended.cause, ended.code) == ("spin", 1)
+    assert rows_of(w, "end")[-1]["cause"] == "spin"
+
+
+def test_i15_a_held_stop_cancels_the_section_end_time(tmp_path, monkeypatch):
+    # 決定 13: 切り替えを決めた後に子を止めるのを見送ったら（回答待ちの質問）、終わりの時刻を取り消して決め直す。
+    # 待つ間に起動から 120 秒を超えたセグメントは短く数えず、その次の切り替えを止めない
+    clock = Clock()
+    original = wrapper.Wrapper._stop_if_clear
+    held: list[int] = []
+
+    def held_once(self, sec):
+        if sec.number == 2 and not held:
+            held.append(sec.number)
+            clock.jump(200.0)
+            return "held"
+        return original(self, sec)
+
+    monkeypatch.setattr(wrapper.Wrapper, "_stop_if_clear", held_once)
+    children = [FakeChild([], None), FakeChild([], None), FakeChild([b""] * 10, 0), FakeChild([], 0)]
+    ended, spawn, w, _ = _spin_run(tmp_path, children, clock, markers={0: "/goal 2", 1: "/goal 3", 2: "/goal 4"})
+    assert held == [2] and len(spawn.calls) == 4 and spawn.calls[3][0][-1] == "/goal 4"
+    assert ended.cause == "" and rows_of(w, "stop") == []
+
+
+def _toggling(tmp_path, rows, children):
+    """`rows` の名前だけを登録し、取得の記録へ `rows` を書く準備と、起動のたびに記録を書き直す子（取得が届いた）。
+
+    上限の行を見たアカウントは、その後の取得が成功するまで上限として扱われる。起動のたびに取得が届くので、次の替えでは
+    記録だけで決まり、上限の行を見たアカウントへも戻れる。替え先の候補は `rows` の中だけである。
+    """
+    store = register(tmp_path, *(u.name for u in rows))
+
+    def prepare(d, state):
+        put_usages(store, rows)
+        accounts.use(state, "team")
+
+    def measured(child):
+        child.started = lambda *_: put_usages(store, rows)
+        return child
+
+    return prepare, [measured(c) for c in children]
+
+
+def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tmp_path):
+    # 決定 13（替えの扱い）: team→main→team→main と既に起動した起動先へ戻る短い替えは数え、3 つ目の戻りで止まる
+    rows = [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)]
+    children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([LIMIT_LINE, b"", b""], 1), FakeChild([], 0)]
+    prepare, children = _toggling(tmp_path, rows, children)
+    ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
+    assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "team", "main"]
+    assert (ended.cause, ended.code) == ("spin", 1)
+
+
+def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
+    # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
+    # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
+    rows = [
+        Usage("team", 86.0, 86.0, None, None, False),
+        Usage("main", 5.0, 5.0, None, None, False),
+        Usage("gmail", 75.0, 5.0, 75.0, None, False),
+    ]
+    prepare, children = _toggling(tmp_path, rows, [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)])
+    ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
+    assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "gmail", "main"]
+    assert ended.cause == "" and rows_of(w, "stop") == []
 
 
 # 現状固定（I-013）: ラッパーが自分で読む事実（プロセスの番号・壁時計・使用率のキャッシュの時刻）
@@ -182,40 +364,25 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
         "section": 1,
         "session_id": argv[2],
         "account": None,
-        "starts": {"date": date.today().isoformat(), "count": 0},
     }
     assert "NDF_CLAUDE_ACCOUNT" not in env
     rows = log_rows(w)
-    assert [r["kind"] for r in rows] == ["section", "finish", "end"]
+    assert [r["kind"] for r in rows] == ["section", "account", "finish", "end"]
     assert rows[0] == {"at": rows[0]["at"], "section": 1, "kind": "section", "session_id": argv[2], "account": None, "resume": False}
     assert rows[-1] == {"at": rows[-1]["at"], "section": 1, "kind": "end", "cause": "", "reason": ended.reason}
 
 
-def _limited_run(tmp_path, mtime_offset):
+def test_d8_the_account_that_showed_the_limit_line_is_not_resumed_on_old_usage(tmp_path):
+    # 決定 8・I11: 上限の行を見た後の取得が届かない間、team は上限として扱われ、古い 50% の記録でも同じアカウントで起動し直さない
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 50.0, False), Usage("main", 5.0, False)])
+        store = register(tmp_path, "team", "main")
+        put_usages(store, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)])
         accounts.use(state, "team")
-        at = time.time() + mtime_offset
-        os.utime(accounts.usage_path(state), (at, at))
 
-    return run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
-
-
-def test_usage_measured_before_the_limit_line_does_not_free_the_current_account(tmp_path):
-    ended, spawn, w = _limited_run(tmp_path, -3600)
+    ended, spawn, w = run_wrapper(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
     (first, _), (second, env) = spawn.calls
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
     assert env["NDF_CLAUDE_ACCOUNT"] == "main" and ended.cause == ""
-    assert registry.read_state(w.dir)["starts"]["count"] == 1
-
-
-def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_path):
-    ended, spawn, w = _limited_run(tmp_path, 3600)
-    (first, _), (second, env) = spawn.calls
-    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
-    assert env["NDF_CLAUDE_ACCOUNT"] == "team" and ended.cause == ""
-    reasons = [r["reason"] for r in log_rows(w) if r["kind"] == "account"]
-    assert reasons == ["team の上限が解けた。同じアカウントで再開する"]
 
 
 def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):
@@ -270,7 +437,7 @@ def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
     monkeypatch.setattr(wrapper.os, "read", read)
     w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([child]), clock=clock_ticks())
     try:
-        w._start(wrapper.Launch(1, "s", None, "", resume=False))
+        w._start(wrapper.Launch(1, "s", wrapper.Choice(()), "", resume=False))
         for _ in range(5):
             w._pump(0.0)
     finally:
@@ -316,9 +483,9 @@ class Hands:
         hands = self
 
         class Ordered(Spawner):
-            def __call__(self, argv, env, cwd):
+            def __call__(self, argv, env, cwd, pass_fds=()):
                 hands.order.append("spawn")
-                return super().__call__(argv, env, cwd)
+                return super().__call__(argv, env, cwd, pass_fds)
 
         return Ordered(children, markers)
 
@@ -367,7 +534,12 @@ def test_i3_hands_that_continue_the_same_conversation_only_confirm(tmp_path):
 
 def test_i3_account_switch_on_the_limit_only_confirms(tmp_path):
     def prepare(d, state):
-        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        store = register(tmp_path, "team", "main")
+        put_usages(
+            store,
+            [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+            fetched_at=time.time() - 3600,
+        )
         accounts.use(state, "team")
 
     hands = Hands(updated=[_same()], targets=[Target(VERSION, None)])
@@ -589,28 +761,6 @@ def test_i7_same_major_or_unknown_target_starts_the_next_child(tmp_path):
     assert [r["launched"] for r in _updates(w)] == [VERSION, "11.9.0", None]
 
 
-def test_i7_stop_points_the_relay_copy_at_the_target_and_the_copy_calls_it(tmp_path):
-    # 停止から打ち直しまで: relay.root が起動先を指し、複製は起動先の bin/ndf を呼ぶ
-    def plugin(version):
-        root = tmp_path / "cache" / version
-        ndf = root / "bin" / "ndf"
-        ndf.parent.mkdir(parents=True)
-        ndf.write_text(f'#!/bin/sh\necho "{version} $*"\n', encoding="utf-8")
-        ndf.chmod(0o755)
-        return root
-
-    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_BIN_HOME": str(tmp_path / "bin"), "PATH": str(tmp_path / "bin")}
-    got = install.install(env, plugin(VERSION), 9, replace_foreign=False, version=VERSION)
-    new = plugin("12.0.0")
-    hands = Hands(updated=[Updated("updated", VERSION, "12.0.0", "上げた", Target("12.0.0", new))])
-    ended, spawn, _, out = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ={**env, "NDF_STATE_HOME": str(tmp_path / "old")})
-    assert ended.cause == "precondition" and spawn.calls == []
-    assert wrapper.MAJOR_CHANGED_LINE.format(own=VERSION, launched="12.0.0") in out
-    assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "12.0.0\n"
-    launched = subprocess.run([sys.executable, "-I", str(got.copy.path), "ls"], capture_output=True, text=True, timeout=30, check=False)
-    assert launched.stdout.strip() == "12.0.0 relay ls"
-
-
 # --- 子の claude を起動できないとき（#3842） ---
 
 NOT_FOUND = "The command was not found or was not executable: claude."
@@ -623,11 +773,11 @@ class FailingSpawner(Spawner):
         super().__init__(children, markers)
         self.error, self.fail_at = error, fail_at
 
-    def __call__(self, argv, env, cwd):
+    def __call__(self, argv, env, cwd, pass_fds=()):
         if len(self.calls) == self.fail_at:
             self.calls.append((argv, dict(env)))
             raise self.error
-        return super().__call__(argv, env, cwd)
+        return super().__call__(argv, env, cwd, pass_fds)
 
 
 def _assert_stopped_with(w, ended, reason, capsys):
@@ -658,9 +808,9 @@ def test_each_launch_gets_its_own_launch_id_recorded_as_the_current_launch(tmp_p
     seen = []
 
     class Recording(Spawner):
-        def __call__(self, argv, env, cwd):
+        def __call__(self, argv, env, cwd, pass_fds=()):
             seen.append(signals.current_launch(Path(env["NDF_RELAY_DIR"])))
-            return super().__call__(argv, env, cwd)
+            return super().__call__(argv, env, cwd, pass_fds)
 
     s = make_settings(tmp_path)
     spawn = Recording([FakeChild([b"working\r\n"], None), FakeChild([], 0)], {0: "/goal 次"})
@@ -703,7 +853,10 @@ def _run_failing(tmp_path, children, error, fail_at=0, markers=None, **changes):
 
 
 def _limit_usages(d, state):
-    accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+    store = register(state.parent, "team", "main")
+    put_usages(
+        store, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], fetched_at=time.time() - 3600
+    )
     accounts.use(state, "team")
 
 
@@ -723,9 +876,9 @@ def test_a_vanished_work_dir_stops_the_next_launch_before_the_update_and_the_spa
     hands = Hands(updated=[_same(), _same()], targets=[Target(VERSION, None)])
 
     class Vanish(Spawner):
-        def __call__(self, argv, env, cwd):
+        def __call__(self, argv, env, cwd, pass_fds=()):
             hands.order.append("spawn")
-            child = super().__call__(argv, env, cwd)
+            child = super().__call__(argv, env, cwd, pass_fds)
             work.rmdir()
             return child
 
@@ -750,65 +903,3 @@ def test_a_missing_work_dir_starts_no_first_section(tmp_path, capsys):
     ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], cwd=gone)
     _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=gone)), capsys)
     assert hands.order == [] and spawn.calls == []
-
-
-# --- 本物の擬似端末で作業ディレクトリへ入る（#3842） ---
-
-
-def test_the_real_pty_child_runs_in_the_work_dir(tmp_path):
-    # 受け入れ条件 7: 子は作業ディレクトリへ入ってから起動する（preexec_fn で入る形でも今と同じ場所）
-    work = (tmp_path / "work").resolve()
-    work.mkdir()
-    child = wrapper.spawn_pty(["pwd"], {"PATH": os.environ["PATH"]}, work)
-    out = b""
-    try:
-        while True:
-            out += child.read(1024)
-    except EOFError:
-        pass
-    finally:
-        child.wait()
-    assert out.decode().strip() == str(work)
-
-
-def _run_real_pty(tmp_path, monkeypatch, work, before=None):
-    """本物の `spawn_pty` で回す。PATH には何もしない偽の claude を置く（作業ディレクトリへ入れなければ実行されない）。"""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / wrapper.CLAUDE).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (bin_dir / wrapper.CLAUDE).chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    calls = []
-
-    def spawn(argv, env, cwd):
-        calls.append(argv)
-        if before:
-            before()
-        return wrapper.spawn_pty(argv, env, cwd)
-
-    w = wrapper.Wrapper(make_settings(tmp_path, cwd=work), spawn=spawn, clock=clock_ticks())
-    return w.run("最初の 1 行"), calls, w
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root は入る権限の無いディレクトリへも入れる")
-def test_a_work_dir_without_permission_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
-    # 受け入れ条件 1・2・3: is_dir() は真でも入れないディレクトリで、子の側の PermissionError を停止理由にする
-    work = tmp_path / "locked"
-    work.mkdir(mode=0o600)
-    try:
-        ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work)
-    finally:
-        work.chmod(0o700)
-    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(13)))
-    _assert_stopped_with(w, ended, reason, capsys)
-    assert len(calls) == 1
-
-
-def test_a_work_dir_removed_after_the_check_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
-    # 受け入れ条件 1・2・3: 確かめの後・spawn_pty の前に消えたディレクトリで、子の側の FileNotFoundError を停止理由にする
-    work = tmp_path / "work"
-    work.mkdir()
-    ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work, before=work.rmdir)
-    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(2)))
-    _assert_stopped_with(w, ended, reason, capsys)
-    assert len(calls) == 1

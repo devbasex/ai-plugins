@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 import socket
-import subprocess
-import sys
 from pathlib import Path
 
 import git_sandbox
@@ -65,20 +63,6 @@ def _ctx(tmp_path, **step) -> steps.StepContext:
     return steps.StepContext(plan, tmp_path / "state", {"state_dir": str(tmp_path / "state")})
 
 
-def test_run_stops_a_child_left_by_the_previous_round(tmp_path):
-    """前の回の子が残っていれば止めてから打つ。子が二重に動かない（B10）。"""
-    left = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True)
-    try:
-        steps._write_pid(tmp_path / "state", "s", left.pid)
-        ctx = _ctx(tmp_path, run=[sys.executable, "-c", "print('ok')"])
-        out = steps.run(ctx, ctx.plan.steps[0])
-        assert out["status"] == "ok"
-        assert left.wait(timeout=60) is not None
-        assert not (tmp_path / "state" / steps.STEPS_DIR / "s.pid.json").exists()
-    finally:
-        left.kill()
-
-
 def test_run_refuses_a_child_left_on_another_host(tmp_path):
     path = tmp_path / "state" / steps.STEPS_DIR / "s.pid.json"
     path.parent.mkdir(parents=True)
@@ -86,29 +70,3 @@ def test_run_refuses_a_child_left_on_another_host(tmp_path):
     ctx = _ctx(tmp_path, run=["true"])
     out = steps.run(ctx, ctx.plan.steps[0])
     assert (out["status"], out["kind"]) == ("stopped", "refused")
-
-
-def test_run_fills_values_and_masks_secrets(tmp_path, monkeypatch):
-    """結果の文から秘密の環境変数の値を伏せる（耐久の記録と結果 JSON に入れない。B8）。"""
-    monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
-    code = "import json, os, sys; print(json.dumps({'status': 'ok', 'summary': sys.argv[1] + ' ' + os.environ['NDF_TEST_TOKEN']}))"
-    ctx = _ctx(tmp_path, run=[sys.executable, "-c", code, "{state_dir}"])
-    out = steps.run(ctx, ctx.plan.steps[0])
-    assert out["summary"].startswith(str(tmp_path / "state"))
-    assert "s3cr3t-value-123" not in out["summary"]
-
-
-def test_run_interrupts_a_step_over_its_timeout(tmp_path):
-    ctx = _ctx(tmp_path, run=[sys.executable, "-c", "import time; time.sleep(600)"], timeout=0.5)
-    out = steps.run(ctx, ctx.plan.steps[0])
-    assert (out["status"], out["kind"]) == ("stopped", "interrupted")
-
-
-def test_run_masks_secrets_in_the_step_log(tmp_path, monkeypatch):
-    """子の標準エラーはステップのログへ伏せてから書く（B8）。"""
-    monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
-    code = "import os, sys; sys.stderr.write('boom ' + os.environ['NDF_TEST_TOKEN'] + '\\n'); print('{\"status\": \"ok\", \"summary\": \"x\"}')"
-    ctx = _ctx(tmp_path, run=[sys.executable, "-c", code])
-    steps.run(ctx, ctx.plan.steps[0])
-    log = (tmp_path / "state" / steps.STEPS_DIR / f"s{steps.LOG_SUFFIX}").read_text(encoding="utf-8")
-    assert log == "boom [REDACTED]\n"

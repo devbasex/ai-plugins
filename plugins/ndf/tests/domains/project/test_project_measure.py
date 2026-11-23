@@ -338,13 +338,6 @@ def test_gh_raw_current_behavior_past_deadline_does_not_start(tmp_path, monkeypa
     assert not log.exists()
 
 
-def test_gh_raw_current_behavior_times_out_at_the_deadline(tmp_path, monkeypatch):
-    _fake_gh(tmp_path, monkeypatch, f"exec {shutil.which('sleep')} 5\n")
-    with pytest.raises(measure_ci.GhUnavailable) as got:
-        measure_ci.Gh(tmp_path, "o/r", time.monotonic() + 0.3).raw("x")
-    assert str(got.value) == "時間切れ"
-
-
 def test_gh_raw_current_behavior_without_gh(tmp_path, monkeypatch):
     empty = tmp_path / "empty"
     empty.mkdir()

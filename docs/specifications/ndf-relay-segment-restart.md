@@ -184,7 +184,7 @@ graph TB
 `run` は上から順に見る。パススルーは下の「本物の claude」の絶対パスを `os.execve` に渡し、引数を
 そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。** ただし、リレーハブが tmux で起動した印
 `NDF_RELAY_SPAWNED` を持つ `run` は、下の表を見る前に親のセッションの環境（`relay_lib/session_env.py` の `drop_parent_env`）を外す。
-そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で起動する（[リレーハブの仕様](ndf-relay-multi-session-supervisor.md)）。
+そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で起動する（[リレーハブの仕様](ndf-relay-multi-session-supervisor.md)）。**パススルー（`relay/cli.py` の `_passthrough`）と子の起動（`relay/wrapper.py`）の前に、claude のバージョンを下限と比べる。** `cli_floor.require("claude", …)` が起動する実行ファイルに `--version` を 5 秒の期限で 1 回打ち、`plugins/ndf/contracts/domains/cli-floors.json` の `min_version` と比べるため、`claude --version` もそのまま exec される前に 1 回打たれる。下限より古ければ claude を起動せず、パススルーは `ndf-relay: claude を起動できない（<名前> <見つけたバージョン>（<実パス>）は下限 <下限> より古い。…）` で終了コード 127、子の起動は `ndf-relay: 子の claude を起動できない（<理由>）` で停止理由 `precondition` になる。バージョンを読めなければ比べずに起動する（[依存の更新の仕様](dependency-updates-renovate-and-supply-chain.md)の「外部 CLI の下限」）。
 
 | # | 条件 | すること |
 | ---: | --- | --- |

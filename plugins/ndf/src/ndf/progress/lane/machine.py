@@ -1,55 +1,60 @@
-"""マシン全体のプランの本数の上限（#3097・#2999）: 同じマシンで動いているレーンのプランの本数を数え、上限を超える起動を待たせる。
+"""マシン全体の稼働中のレーンの数の上限（#3097・#2999・#3989）: 同じマシンで稼働中のレーンと名前つきのラッパーを 1 本ずつ数え、上限を超える起動を待たせる。
 
-計画ごとの上限（I2・I20。`ndf.progress.lane.rules`）に加えて数える。別のリポジトリの計画が動いていても、同じマシンで
-同時に流すプランの本数の合計が上限を超えないようにする。
+同時実行の制御は 2 つの層である。セッションの数（このモジュール。稼働中のレーンとラッパーの数）と、重い処理（テストのスロット
+`ndf.testing.slots`）。計画とレーンは同時実行の値を持たない（#3989 の決定 1）。
 
-- 数える計画は、同じマシンのラッパーの登録簿（`ndf relay ls`。利用者単位で共通）に conductor の役で載る計画と、自分の計画。
-  計画の設定は、登録簿の行の作業ディレクトリのチェックアウトのステートマシンから読む（`read_lanes`）
-- 動いているレーンは、実行中の行を持つ（承認ゲートや質問の回答を待つ行を含む）か、ラッパーが動いているレーンで、
-  設定の `plans` を数える。同じラッパーは 1 回だけ数え、起動しようとしているレーン自身のラッパーは数えない
-- ステートマシンを読めない計画と、どの計画の設定にも無い conductor のラッパーは、動いているラッパー 1 本を 1 本として数え、
-  読めない計画を `unreadable` に載せる
-- 数えてから起動するまでを、マシンの起動の排他（`<状態の保存先>/parallel/admit.lock`。#2999 の決定 4）の中で行う。
-  起動の排他を `parallel-machine.admit-lock` の秒の間に取れなければ、その読み直しでは起動せずに待たせる
+- 数えるのは 2 つの和集合で、同じラッパーは 1 回、起動しようとしているレーン自身のラッパーは数えない（#3989 の決定 3）
+  1. マシンの計画の稼働中のレーン（実行中の行を持つ。承認ゲートや質問の回答を待つ行を含む）のラッパー
+  2. ラッパーの一覧（`ndf relay ls`）で動いているラッパー（役に依らない。リレーハブが数えるラッパーを含む）
+- マシンの計画は、自分の計画・一覧に conductor の役で載る計画・マシンの計画の索引（`<状態の保存先>/parallel/plans/`）の計画の和で、
+  1 計画 1 回読む。索引は起動の許可が通ったときに排他の中で書き、耐久ワークフローが終わるときに消す。ラッパーがすべて止まって
+  登録簿から消えた計画も、実行中の行を持つ間は索引から見つかる
+- ステートマシンを読めない計画は `unreadable` に載せる（そのラッパーは一覧で動いていれば 2 で数える）
+- 数えてから起動するまでを、マシンの起動の排他（`<状態の保存先>/parallel/admit.lock`）の中で行う。起動の排他を
+  `parallel-machine.admit-lock` の秒の間に取れなければ、その読み直しでは起動せずに待たせる
 - ラッパーの一覧を読めなければ、ほかの計画を数えられないので、自分の計画の実行中の行だけで決める
-- 合計が 0 なら上限を見ずに起動する（待ち続けて計画が終わらない状態を作らない。#2999 の受け入れ条件 7）
-- 上限は計画の上限の既定と同じ設定（`CAP_POLICY`）から読み、どのリポジトリでも同じ値になる。リレーハブと同じく環境変数
-  `NDF_RELAY_MAX_NAMED` があればそれで替える。保存せず、判定のたびに数え直す
+- 上限は判定のたびに `ndf.contracts.named_cap.read`（マシンの設定 → `NDF_RELAY_MAX_NAMED` → 上限の設定）で読む。リレーハブと同じ値である
 
-`count`・`admit`・`waiting` は純粋な関数で、DB もプロセスも読まない。
+`count`・`admit`・`waiting`・`over_cap` は純粋な関数で、DB もプロセスも読まない。
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import json
 import os
 import subprocess
+import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters.git import GitError
 from ndf.contracts import limits
+from ndf.contracts import named_cap
 from ndf.core import durable
 from ndf.core import durable_locks as locks
 from ndf.progress import command, model, store
 from ndf.progress.lane import PlanView, launch, liveness, read_view
 from ndf.progress.lane.types import LaneRow, RUNNING
 
-# マシンの上限の設定（計画の上限の既定と同じ。`ndf.progress.plan.LIMIT_POLICY`）と、起動の排他を待つ上限の設定
-CAP_POLICY = ("relay.max-named", "count")
+# マシンの上限の設定（`ndf.contracts.named_cap` と同じ値）と、起動の排他を待つ上限の設定
+CAP_POLICY = named_cap.POLICY
 LOCK_POLICY = "parallel-machine.admit-lock"
 # 起動の排他のファイル（状態の保存先からの相対パス。#2999 の決定 4）と、取り直す間隔の秒
 LOCK_PATH = Path("parallel") / "admit.lock"
 LOCK_POLL_SECONDS = 0.2
+# マシンの計画の索引の保存先（状態の保存先からの相対パス。#3989 の決定 3）
+INDEX_PATH = Path("parallel") / "plans"
+INDEX_VERSION = 1
 # 待たせた理由: 上限に当たった・起動の排他を取れなかった・ラッパーの一覧を読めなかった
-RULE, LOCK, OBSERVE = "machine-plans", "lock", "observe"
+RULE, LOCK, OBSERVE = launch.MACHINE_LANES, "lock", "observe"
 # 計画のステートマシンを読めないときに飛ばす例外
 _UNREADABLE = (
     model.Refused,
@@ -65,20 +70,28 @@ _UNREADABLE = (
 @dataclass(frozen=True)
 class PlanLanes:
     """1 つの計画のレーン。`key` は計画の所在（ステートマシンの ID か、読めなければ `<作業ディレクトリ>:<計画>`）、
-    `lanes` は（ラッパーの名前, 設定のプランの本数, 実行中の行を持つか）、`readable` はステートマシンを読めたか。"""
+    `lanes` は（ラッパーの名前, 実行中の行を持つか）、`readable` はステートマシンを読めたか。"""
 
     key: str
-    lanes: tuple[tuple[str, int, bool], ...] = ()
+    lanes: tuple[tuple[str, bool], ...] = ()
     readable: bool = True
 
 
 @dataclass(frozen=True)
 class Count:
-    """マシンの数え方の結果。`total` はプランの本数の合計、`lanes` は数えたラッパー、`unreadable` は読めない計画。"""
+    """マシンの数え方の結果。`total` は数えたラッパーの数、`lanes` は数えたラッパー、`unreadable` は読めない計画。"""
 
     total: int
     lanes: tuple[str, ...]
     unreadable: tuple[str, ...]
+
+
+class PlanPlace(NamedTuple):
+    """マシンの計画の索引の 1 件（計画のステートマシンの ID・作業ディレクトリ・計画の名前）。"""
+
+    plan_id: str
+    cwd: str
+    plan: str
 
 
 def entry_key(row: Mapping[str, Any]) -> str:
@@ -90,73 +103,53 @@ def _conductor(row: Mapping[str, Any]) -> bool:
     return row.get("role") == launch.ROLE and bool(row.get("plan")) and bool(row.get("cwd"))
 
 
-def _declared_total(plans: Sequence[PlanLanes], running: set[str], skip: str) -> tuple[int, set[str]]:
-    """読めた計画の設定から、動いているレーンの `plans` を重み付きで数える（計画の順に、同じラッパーは最初の設定だけ）。"""
-    seen: set[str] = set()
-    total = 0
-    for p in plans:
-        for name, n, live in p.lanes if p.readable else ():
-            if name != skip and name not in seen and (live or name in running):
-                seen.add(name)
-                total += n
-    return total, seen
-
-
 def count(plans: Sequence[PlanLanes], listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
-    """動いているレーンのプランの本数を数える。`listed` はラッパーの一覧（名前 → 行）、`skip` は起動しようとしている
-    レーンのラッパー（数えない）。"""
+    """稼働中のレーンと動いているラッパーを 1 本ずつ数える。`listed` はラッパーの一覧（名前 → 行）、`skip` は起動しようとしている
+    レーンのラッパー（数えない。空なら今動いている分のすべて）。"""
+    live = {name for p in plans if p.readable for name, running_row in p.lanes if running_row}
     running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
-    total, seen = _declared_total(plans, running, skip)
-    declared = {name for p in plans for name, _, _ in p.lanes}
+    seen = (live | running) - {skip}
     unreadable = tuple(sorted({p.key for p in plans if not p.readable}))
-    for name, row in listed.items():
-        # 読めない計画のラッパーと、どの設定にも無い conductor のラッパーは 1 本と数える
-        if name in running and name != skip and name not in seen and name not in declared and _conductor(row):
-            seen.add(name)
-            total += 1
-    return Count(total, tuple(sorted(seen)), unreadable)
+    return Count(len(seen), tuple(sorted(seen)), unreadable)
 
 
-def admit(total: int, plans: int, cap: int) -> bool:
-    """起動してよいか。動いているレーンが無ければ上限を見ない（受け入れ条件 7）。"""
-    return total == 0 or total + plans <= cap
+def admit(total: int, cap: int) -> bool:
+    """起動してよいか（数えた本数にこの 1 本を足して上限以内）。"""
+    return total + 1 <= cap
 
 
-def waiting(reason: str, got: Optional[Count], plans: int, cap: int) -> dict[str, Any]:
-    """起動せずに待たせた起動の結果（耐久ワークフローは失敗に数えない）。"""
+def waiting(reason: str, got: Optional[Count], cap: Optional[int]) -> dict[str, Any]:
+    """起動せずに待たせた起動の結果（耐久ワークフローは失敗に数えない）。排他の待ちは数えていないので数と上限が null。"""
     total = got.total if got is not None else None
-    body = {
-        "reason": reason,
-        "machine_plans": total,
-        "plans": plans,
-        "max_plans": cap,
-        "unreadable": list(got.unreadable) if got is not None else [],
-    }
+    body = {"reason": reason, "machine_lanes": total, "cap": cap, "unreadable": list(got.unreadable) if got is not None else []}
     detail = {
-        RULE: f"マシンで動いているプランの本数 {total} とこのレーンの {plans} 本の合計が上限 {cap} を超えるので起動を待つ",
+        RULE: f"マシンで稼働中のレーンとラッパー {total} 本にこのレーンを足すと上限 {cap} を超えるので起動を待つ",
         LOCK: "マシンの起動の排他を取れないので、次の読み直しまで起動を待つ",
-        OBSERVE: f"ラッパーの一覧を読めず、自分の計画で動いているプランの本数 {total} とこのレーンの {plans} 本の合計が上限 {cap} を超えるので起動を待つ",
+        OBSERVE: f"ラッパーの一覧を読めず、自分の計画の稼働中のレーン {total} 本にこのレーンを足すと上限 {cap} を超えるので起動を待つ",
     }[reason]
     return {"ok": False, "waiting": body, "detail": detail}
 
 
-def cap(environ: Optional[Mapping[str, str]] = None) -> int:
-    """マシン全体の本数の上限。リレーハブと同じく `NDF_RELAY_MAX_NAMED` があればそれ、無ければ設定の値。
+def over_cap(got: Count, limit: int, observed: bool) -> Optional[dict[str, Any]]:
+    """数えた結果 `got` と上限 `limit` から待たせるかを決める。収まれば None、超えれば待たせた起動の結果（`waiting`）。
+    `observed` はラッパーの一覧を読めたか（読めなければ待ちの理由を `OBSERVE` にする）。"""
+    if admit(got.total, limit):
+        return None
+    return waiting(RULE if observed else OBSERVE, got, limit)
 
-    環境変数は `ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ（名前の SSOT は表 env）。
-    """
-    return int(limits.from_env(os.environ if environ is None else environ, "NDF_RELAY_MAX_NAMED", *CAP_POLICY))
+
+def cap(environ: Optional[Mapping[str, str]] = None, state_dir: Optional[Path] = None) -> int:
+    """マシン全体の稼働中の数の上限（`named_cap.read`。判定のたびに読み直す）。壊れた値は `NamedCapError`。"""
+    where = identity.load().state_dir if state_dir is None else state_dir
+    return named_cap.read(os.environ if environ is None else environ, where).value
 
 
 # --- 読み取り（ステートマシン・登録簿）と排他 --------------------------------------------------------------
 
 
 def lanes_of(view: PlanView, rows: Mapping[str, list[LaneRow]]) -> PlanLanes:
-    """読んだ計画のレーン（ラッパーの名前・設定のプランの本数・実行中の行を持つか）。"""
-    lanes = tuple(
-        (launch.wrapper_name(str(view.repo), view.name, name), spec.plans, any(r.state == RUNNING for r in rows[name]))
-        for name, spec in view.lanes.items()
-    )
+    """読んだ計画のレーン（ラッパーの名前・実行中の行を持つか）。"""
+    lanes = tuple((launch.view_wrapper(view, name), any(r.state == RUNNING for r in rows[name])) for name in view.lanes)
     return PlanLanes(view.machine_id, lanes)
 
 
@@ -166,9 +159,9 @@ def discover(listed: Mapping[str, Mapping[str, Any]]) -> list[tuple[Path, str]]:
     return [(Path(cwd), plan) for cwd, plan in sorted(found)]
 
 
-def read_lanes(cwd: Path, plan: str, skip: Sequence[str] = ()) -> Optional[PlanLanes]:
+def read_lanes(cwd: Path, plan: str, skip: Collection[str] = ()) -> Optional[PlanLanes]:
     """作業ディレクトリ `cwd` のチェックアウトのステートマシンから計画 `plan` のレーンを読む。計画のステートマシンの ID が `skip` に
-    あれば None（呼び手が読んである）。読めなければ `readable` が偽の行。"""
+    あれば、ステートマシンを読まずに None（呼び手が読んである）。読めなければ `readable` が偽の行。"""
     key = f"{cwd}:{plan}"
     try:
         root = command.store_root_of(cwd)
@@ -188,21 +181,82 @@ def read_lanes(cwd: Path, plan: str, skip: Sequence[str] = ()) -> Optional[PlanL
         return PlanLanes(key, readable=False)
 
 
-def machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]]) -> list[PlanLanes]:
-    """自分の計画（読んである）と、登録簿の計画のレーン。計画の所在で重複を除く（最初の 1 件を残し、順を保つ）。
+def _index_dir() -> Path:
+    return identity.load().state_dir / INDEX_PATH
 
-    レーンに依らないので、レーンごとに数える呼び手はこれを 1 回だけ読んで `count` へ渡す。
+
+def _index_file(plan_id: str) -> Path:
+    """計画の索引のファイル（計画 ID の / と : を _ にした名前）。"""
+    return _index_dir() / f"{plan_id.replace('/', '_').replace(':', '_')}.json"
+
+
+def index_plan(where: PlanPlace) -> None:
+    """マシンの計画の索引に計画の所在を書く（一時ファイルからの改名。同じ中身なら書かない）。書けなければ OSError。"""
+    path = _index_file(where.plan_id)
+    body = {"version": INDEX_VERSION, "plan_id": where.plan_id, "cwd": where.cwd, "plan": where.plan}
+    if _read_index(path) == body:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def unindex_plan(plan_id: str) -> None:
+    """マシンの計画の索引から計画を消す（無くてもよい）。"""
+    _index_file(plan_id).unlink(missing_ok=True)
+
+
+def indexed() -> list[PlanPlace]:
+    """マシンの計画の索引に載る計画の所在。読めないファイルは飛ばす。"""
+    root = _index_dir()
+    found = [_read_index(path) for path in sorted(root.glob("*.json"))] if root.is_dir() else []
+    return [PlanPlace(str(d["plan_id"]), str(d["cwd"]), str(d["plan"])) for d in found if d is not None]
+
+
+def _read_index(path: Path) -> Optional[dict[str, Any]]:
+    """索引のファイル 1 本。無い・読めない・形が違えば None（異常終了の残りは数えない・書き直す）。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 無い・壊れた索引は読めないとして呼び手が飛ばす
+        return None
+    ok = isinstance(data, dict) and all(isinstance(data.get(k), str) for k in ("plan_id", "cwd", "plan"))
+    return data if ok else None
+
+
+def machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], places: Optional[Sequence[PlanPlace]] = None) -> list[PlanLanes]:
+    """自分の計画（読んである）と、登録簿の conductor の行の計画と、索引の計画のレーン。1 計画 1 回読む。
+
+    同じ計画が別の作業ディレクトリ（別の worktree から再開した計画の、旧い登録簿の行と索引）に載っても、計画のステートマシンの ID を
+    解いた段階で読んだ計画を飛ばすので、ステートマシンは 1 回だけ読む。索引の行は ID を持つので、読んだ計画なら所在も解かない。
+    レーンに依らないので、レーンごとに数える呼び手はこれを 1 回だけ読んで `count` へ渡す。`places` を省けば索引を読む。
     """
-    others = [read_lanes(cwd, plan, (own.key,)) for cwd, plan in discover(listed)]
-    uniq: dict[str, PlanLanes] = {}
-    for p in (own, *(p for p in others if p is not None)):
-        uniq.setdefault(p.key, p)
-    return list(uniq.values())
+    known = {(p.cwd, p.plan): p.plan_id for p in (indexed() if places is None else places)}
+    found = {(str(cwd), plan) for cwd, plan in discover(listed)} | set(known)
+    seen = {own.key}
+    out = [own]
+    for cwd, plan in sorted(found):
+        if known.get((cwd, plan)) in seen:
+            continue
+        got = read_lanes(Path(cwd), plan, seen)
+        if got is not None and got.key not in seen:
+            seen.add(got.key)
+            out.append(got)
+    return out
 
 
 def machine_count(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
-    """自分の計画（読んである）と、登録簿の計画の動いているレーンを数える。"""
+    """自分の計画（読んである）と、マシンの計画の稼働中のレーンと、動いているラッパーを数える。"""
     return count(machine_plans(own, listed), listed, skip)
+
+
+def held_seats(plans: Sequence[PlanLanes], skip: str) -> tuple[str, ...]:
+    """数えた計画のうち実行中の行を持つレーンのラッパーの名前（`skip` を除く）。ラッパーの生死は見ない。
+
+    許可の後・ハブの判定の前にラッパーだけが止まっても、ハブはこの名前と自分が見る動いているラッパーの和集合を数えるので、
+    その稼働中のレーンを数え落とさない（#3989 の決定 3・7）。"""
+    return tuple(sorted({name for p in plans if p.readable for name, running_row in p.lanes if running_row} - {skip}))
 
 
 def lock_path() -> Path:
@@ -228,22 +282,48 @@ def admit_lock(seconds: float, clock: Callable[[], float] = time.monotonic) -> I
         handle.close()
 
 
+def lock_free() -> bool:
+    """マシンの起動の排他を待たずに 1 回だけ取り、取れたらすぐ放して真を返す（`ndf lanes status` が待ちの理由を読む）。"""
+    try:
+        handle = durable.open_lock_file(lock_path())
+    except OSError:  # noqa: NDF401 ファイル: 開けない排他は取れないとして待ちの理由を lock にする
+        return False
+    try:
+        return locks.try_flock(handle, fcntl.LOCK_EX)
+    finally:
+        handle.close()
+
+
 def admitted(
     own: PlanLanes,
     lane_wrapper: str,
-    plans: int,
     listed: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]],
-    go: Callable[[], dict[str, Any]],
+    go: Callable[[tuple[str, ...]], dict[str, Any]],
+    where: PlanPlace,
 ) -> dict[str, Any]:
-    """マシンの起動の排他の中で数え、上限に収まれば `go`（ラッパーを止めて起動する）を打つ。収まらなければ待たせる。"""
-    limit = cap()
+    """マシンの起動の排他の中で上限を読んで数え、収まれば計画を索引に書いてから `go`（ラッパーを置き換えて起動する）を打つ。
+    収まらなければ待たせる。上限の値が壊れていれば打ち直しても同じなので `final` の失敗にする。
+
+    `go` には、数えた計画のうち実行中の行を持つレーンの名前を、ラッパーの生死にかかわらず渡す（`held_seats`）。リレーハブはそれと
+    自分が見る動いているラッパーの和集合を数えて最終の判定をする（許可の後・ハブの判定の前にラッパーだけが止まり、許可を通らない
+    起動が空きに入っても、和集合が上限を超えない。#3989 の決定 3・7）。"""
     try:
         with admit_lock(limits.seconds(LOCK_POLICY)):
+            try:
+                limit = cap()
+            except named_cap.NamedCapError as exc:
+                return {"ok": False, "final": True, "detail": str(exc)}
             table = listed()
-            # 一覧を読めなければ、ほかの計画を数えられないので自分の計画の実行中の行だけで決める（計画ごとの上限と同じ）
-            got = machine_count(own, table, lane_wrapper) if table is not None else count([own], {}, lane_wrapper)
-            if not admit(got.total, plans, limit):
-                return waiting(RULE if table is not None else OBSERVE, got, plans, limit)
-            return go()
+            # 一覧を読めなければ、ほかの計画を数えられないので自分の計画の実行中の行だけで決める
+            plans, seen = (machine_plans(own, table), table) if table is not None else ([own], {})
+            got = count(plans, seen, lane_wrapper)
+            held = over_cap(got, limit, table is not None)
+            if held is not None:
+                return held
+            try:
+                index_plan(where)
+            except OSError as exc:
+                return {"ok": False, "detail": f"マシンの計画の索引を書けない: {exc}"}
+            return go(held_seats(plans, lane_wrapper))
     except LockBusy:
-        return waiting(LOCK, None, plans, limit)
+        return waiting(LOCK, None, None)

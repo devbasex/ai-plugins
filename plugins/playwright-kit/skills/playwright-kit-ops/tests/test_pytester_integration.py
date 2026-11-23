@@ -121,7 +121,7 @@ def test_auth_cache_hit_miss_via_pytester(pytester, tmp_path: Path):
             """
         )
     )
-    res = pytester.runpytest("-v", "-s", f"--pwk-config={cfg_path}")
+    res = pytester.runpytest_subprocess("-v", "-s", f"--pwk-config={cfg_path}")
     # 両方 passed であることを確認
     res.assert_outcomes(passed=2)
     # call_count が 1 であることを stdout から確認 (cache hit 証明)
@@ -212,7 +212,7 @@ def test_makereport_populates_artifact_paths_in_report(pytester, tmp_path: Path)
         )
     )
 
-    res = pytester.runpytest("-v", "--pwk-out-dir", str(out_dir))
+    res = pytester.runpytest_subprocess("-v", "--pwk-out-dir", str(out_dir))
     # 1 件 FAIL であることを確認
     res.assert_outcomes(failed=1)
 
@@ -291,7 +291,7 @@ def test_artifact_propagation_call_to_teardown(pytester, tmp_path: Path):
         )
     )
 
-    res = pytester.runpytest("-v", "--pwk-out-dir", str(out_dir))
+    res = pytester.runpytest_subprocess("-v", "--pwk-out-dir", str(out_dir))
     res.assert_outcomes(failed=1)
 
     report_files = list(out_dir.glob("report.md"))

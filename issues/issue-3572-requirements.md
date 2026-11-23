@@ -104,7 +104,7 @@ NDF 10.27.66〜10.27.67（一時レーン p6-rel14）、Claude Code、Linux。20
 - merge queue と、承認した head の一致の確認・キューで落ちた PR の扱い・バージョン上げの PR の関係
 - main の ruleset へ merge queue を足す操作を「人へ残す判断」に載せること（実行は実装のとき、人の承認の後）
 - `AGENTS.md` の「版とリリースの方針」と `docs/versioning-and-distribution.md`（バージョンの扱いの正本）の書き直し
-- #3119 の設計（`issues/issue-3119-design.md`・`issues/issue-3119-design-detail.md`）の決定 21 の置き換えの見直し（同じ設計 PR に載せる）
+- #3119 の設計（[`issues/issue-3119-design.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3119-design.md)・[`issues/issue-3119-design-detail.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3119-design-detail.md)）の決定 21 の置き換えの見直し（同じ設計 PR に載せる）
 - 決定の記録で、置き換える決定を superseded として残し、新しい決定を書くこと
 - #3576 の扱いと、#3587 を閉じずにどう直すかの決定
 - `CHANGELOG.md` の扱いの得失を承認資料に示すこと（決めるのは設計承認ゲートの利用者。未決 1）
@@ -144,7 +144,7 @@ E5 と E6 の間に push が割り込んでも、head の一致の確認でマ�
 
 - ~~1. 同じ設計 PR に、#3119 の設計を前提 5 の構想（常設のリリースブランチ）に合わせて直す差分が載っている~~ → 受け入れ条件 1a へ置き換え（2026-11-15 21:0x JST、利用者の「方針の転換」）
 - ~~1a. 同じ設計 PR に、#3119 の設計の決定 21 を GitHub flow で置き換える差分が載っている。#3572 の設計の決定 5〜7・9 も同じく置き換わる~~ → 受け入れ条件 1b へ置き換え（2026-11-16 01:1x JST、利用者の「設計のやり直し」(1)）
-- [ ] 1b. 同じ設計 PR に、#3119 の設計（`issues/issue-3119-design.md`・`issues/issue-3119-design-detail.md`）の決定 21 の置き換えを見直した差分が載っている。置き換え後の決定 21 は「ai-plugins の設定ファイルは `github-flow` の行を選び、取り込み方の表は `promote-whole`・`promote-selected` を残す」と読める。#3572 の決定 1・2 と人のマージの検知（決定 4）は残っている
+- [ ] 1b. 同じ設計 PR に、#3119 の設計（[`issues/issue-3119-design.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3119-design.md)・[`issues/issue-3119-design-detail.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-3119-design-detail.md)）の決定 21 の置き換えを見直した差分が載っている。置き換え後の決定 21 は「ai-plugins の設定ファイルは `github-flow` の行を選び、取り込み方の表は `promote-whole`・`promote-selected` を残す」と読める。#3572 の決定 1・2 と人のマージの検知（決定 4）は残っている
 - [ ] 1c. 決定の記録（`issues/issue-3572-design-decisions.md`）で、置き換える決定（決定 5 と決定 14 の「表から 2 行を外す」部分、ほかに置き換えるもの）が superseded と記され、置き換えた先の新しい決定の番号が添えてある。新しい決定には理由と比べた候補がある
 - [ ] 2. 設計に、ndf-next で本番の PR を流すプランと、そのプランが承認の後に通るステップの一覧が書かれている（前提 2 の特定）。マージの方式ごと（`merge-queue`・`strict`）に書かれている
 - [ ] 2a. 設計に、`github-flow` の行の 5 項目（ブランチ戦略・リリース・バージョン・マージの前の検証・同期の PR）が、それぞれ 1 つの決定として理由つきで書かれている

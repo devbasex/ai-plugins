@@ -1,4 +1,4 @@
-"""Markdown の構造の読み取りの包み（#1142 の決定 19・種類 3）。markdown-it-py を呼ぶのはこのモジュールだけである。
+"""Markdown の構造の読み取りの包み（docs/specifications/ndf-rebuild-libraries.md の決定 19・「採ったライブラリと置き場」）。markdown-it-py を呼ぶのはこのモジュールだけである。
 
 11.0.0 の入れ替え（#3304）で 10 系のプラグインから根へ移した。根の検査（`check-markdown-links.py`・
 `check-doc-staleness.py`・`check-skill-shell-vars.py`）が使う囲み・見出し・節・リンクとアンカーの読み取りだけを持つ。
@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import unicodedata
+from bisect import bisect_left
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import unquote
@@ -43,23 +44,69 @@ class Link(NamedTuple):
     href: str
     text: str
     line: int
+    raw: str  # markdown-it-py が符号化したままの宛先（`?`・`#` と `%3F`・`%23` を区別できる）
 
 
 class HtmlFragment(NamedTuple):
-    line: int  # HTML ブロックの行、インライン HTML は親の段落などの行（0 始まり）
+    line: int  # 断片が始まる行（0 始まり）
     html: str
 
 
-@lru_cache(maxsize=1)
-def _md_parser() -> MarkdownIt:
+_POS = "pos"  # インラインのトークンの `meta` に置く、`Token.content` の中の開始位置
+
+
+def _mark_positions(state, silent: bool) -> bool:
+    """インラインの規則の先頭で、直前の位置から積まれたトークンへその位置を付ける（一致は返さない）。
+
+    markdown-it-py はインラインのトークンに位置を持たせないため、改行を含むコードスパンや HTML の後ろで
+    行の番号がずれる（#3412 の r2-3）。最後のトークンは `_flush_positions` が付ける。
+    位置の要る呼び出し（`located=True`）の解析器だけに入れ、既定の解析を重くしない（r3-3）。
+    """
+    if not silent:
+        _flush_positions(state)
+        state._ndf_mark = (state.pos, len(state.tokens))
+    return False
+
+
+def _flush_positions(state) -> None:
+    pos, start = getattr(state, "_ndf_mark", (0, 0))
+    for token in state.tokens[start:]:
+        token.meta.setdefault(_POS, pos)
+
+
+class _Lines:
+    """インラインのトークンの中の位置を元の文書の行（0 始まり）へ写す。改行の位置は段落ごとに 1 回だけ数える（r3-3）。"""
+
+    def __init__(self, inline: Token) -> None:
+        assert inline.map is not None
+        self.first = inline.map[0]
+        self.newlines = [i for i, ch in enumerate(inline.content) if ch == "\n"]
+
+    def of(self, node: Token) -> int:
+        """`node` が始まる行。`content` の 1 行は元の 1 行に当たる。"""
+        return self.first + bisect_left(self.newlines, node.meta.get(_POS, 0))
+
+
+@lru_cache(maxsize=2)
+def _md_parser(located: bool = False) -> MarkdownIt:
     from markdown_it import MarkdownIt
 
-    return MarkdownIt("commonmark").enable("table")
+    parser = MarkdownIt("commonmark").enable("table")
+    if located:
+        parser.inline.ruler.before("text", "ndf_positions", _mark_positions)
+        parser.inline.ruler2.before("balance_pairs", "ndf_positions", _flush_positions)
+    return parser
+
+
+def _tokens(text: str, located: bool = False) -> tuple[Token, ...]:
+    # lru_cache は `f(t)` と `f(t, False)` を別のキーにする。呼び方によらず同じ文書の解析を
+    # 共有するため、キャッシュする側へは常に 2 つを位置引数で渡す（r4-1）。
+    return _parsed(text, bool(located))
 
 
 @lru_cache(maxsize=16)
-def _tokens(text: str) -> tuple[Token, ...]:
-    return tuple(_md_parser().parse(text))
+def _parsed(text: str, located: bool) -> tuple[Token, ...]:
+    return tuple(_md_parser(located).parse(text))
 
 
 def md_tokens(text: str) -> list[Token]:
@@ -90,15 +137,26 @@ def blockquote_lines(text: str) -> set[int]:
     return lines
 
 
-def html_fragments(text: str) -> list[HtmlFragment]:
-    """HTML ブロックとインライン HTML の断片を、トークンの順に返す（コードスパン・囲みの中は HTML のトークンにならない）。"""
+def html_fragments(text: str, *, located: bool = False) -> list[HtmlFragment]:
+    """HTML ブロックとインライン HTML の断片を、トークンの順に返す（コードスパン・囲みの中は HTML のトークンにならない）。
+
+    インライン HTML の `line` は、既定では親の段落などの行、`located` なら断片が始まる行。
+    """
     out: list[HtmlFragment] = []
-    for t in _tokens(text):
+    for t in _tokens(text, located):
         if not t.map:
             continue
-        for node in (t.children or []) if t.type == "inline" else [t]:
-            if node.type in ("html_block", "html_inline"):
-                out.append(HtmlFragment(t.map[0], node.content))
+        if t.type != "inline":
+            if t.type == "html_block":
+                out.append(HtmlFragment(t.map[0], t.content))
+            continue
+        lines: _Lines | None = None
+        for node in t.children or []:
+            if node.type != "html_inline":
+                continue
+            if located and lines is None:
+                lines = _Lines(t)
+            out.append(HtmlFragment(lines.of(node) if lines else t.map[0], node.content))
     return out
 
 
@@ -164,23 +222,29 @@ def section_named(text: str, title: str, level: int | None = None) -> Section | 
     return None
 
 
-def links(text: str) -> list[Link]:
+def links(text: str, *, located: bool = False) -> list[Link]:
     """インラインのリンク（`[文字列](先)` と参照の形。自動リンクを含む）。画像は含めない。
 
-    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`line` はリンクのある行。
+    `href` は markdown-it-py が符号化した `%xx` を戻した字面、`raw` は戻す前の字面。`line` は、既定では改行の
+    トークンを数えた行（改行を含むコードスパンや HTML の後ろではずれる）、`located` ならリンクが始まる行。
     """
     out: list[Link] = []
-    for t in _tokens(text):
+    for t in _tokens(text, located):
         if t.type != "inline" or not t.map:
             continue
         line = t.map[0]
+        lines: _Lines | None = None
         kids = t.children or []
         for k, c in enumerate(kids):
             if c.type in ("softbreak", "hardbreak"):
                 line += 1
             if c.type != "link_open":
                 continue
-            out.append(Link(unquote(str(c.attrs.get("href", ""))), _link_label(kids, k), line))
+            if located:
+                lines = lines or _Lines(t)
+                line = lines.of(c)
+            raw = str(c.attrs.get("href", ""))
+            out.append(Link(unquote(raw), _link_label(kids, k), line, raw))
     return out
 
 

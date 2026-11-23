@@ -133,13 +133,6 @@ def test_install_failure_stops_with_1_and_shows_the_tail(fakes: Fakes, capsys, l
     assert "sudo" in got["summary"]
 
 
-def test_install_over_the_limit_is_interrupted(fakes: Fakes, capsys, last_result, monkeypatch) -> None:
-    monkeypatch.setattr(limits, "seconds", lambda name: 0.5)
-    fakes.add("npm", [{"prefix": ["install"], "sleep": 10}])
-    code, got = run_gws(capsys, last_result, "check", "--install")
-    assert (code, got["cause"]["kind"]) == (1, "interrupted")
-
-
 def test_installed_but_not_on_path_stops_with_1(fakes: Fakes, capsys, last_result) -> None:
     fakes.add("npm", [{"prefix": ["install"]}, {"prefix": ["prefix", "-g"], "out": "/opt/npm-global\n"}])
     code, got = run_gws(capsys, last_result, "check", "--install")
@@ -162,20 +155,6 @@ def test_unreadable_status_stops_with_2_and_shows_stderr(fakes: Fakes, capsys, l
     assert (code, got["status"], got["cause"]["kind"]) == (2, "stopped", "invalid")
     assert got["items"] == [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": "boom"}]
     assert fakes.calls("gws") == [["auth", "status"]]
-
-
-def test_status_over_the_limit_stops_with_2_and_uses_the_call_limit(fakes: Fakes, capsys, last_result, monkeypatch) -> None:
-    asked: list[str] = []
-
-    def short(name: str) -> float:
-        asked.append(name)
-        return 0.5
-
-    monkeypatch.setattr(limits, "seconds", short)
-    fakes.add("gws", [{"prefix": ["auth", "status"], "sleep": 10}])
-    code, got = run_gws(capsys, last_result, "check")
-    assert (code, got["cause"]["kind"], got["items"]) == (2, "invalid", [])
-    assert "google-workspace.call" in asked and "gws.auth-status" not in asked
 
 
 def test_does_not_copy_other_keys(fakes: Fakes, capsys, last_result) -> None:

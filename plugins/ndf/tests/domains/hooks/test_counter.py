@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
-import os
 
 from ndf import identity
 from ndf.domains.hooks import counter as counter_mod
@@ -91,20 +89,12 @@ def test_counter_reset_and_limits(tmp_path):
     assert data["turn"] == 1
 
 
-def test_counter_that_cannot_lock_or_read_does_not_count(tmp_path):
+def test_counter_that_cannot_read_does_not_count(tmp_path):
     path = tmp_path / "hooks" / "sessions" / "s-2.json"
     path.parent.mkdir(parents=True)
     path.write_text("{broken", encoding="utf-8")
     with Counter.open("s-2", tmp_path) as c:
         assert not c.usable and not c.allow_pushback() and not c.allow_deny("k") and c.bump("x") == 0
     assert path.read_text(encoding="utf-8") == "{broken"
-    path.write_text("{}", encoding="utf-8")
-    fd = os.open(path, os.O_RDWR)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        with Counter.open("s-2", tmp_path, wait=0.05) as c:
-            assert not c.usable
-    finally:
-        os.close(fd)
     with Counter.open("../x", tmp_path) as c:
         assert not c.usable

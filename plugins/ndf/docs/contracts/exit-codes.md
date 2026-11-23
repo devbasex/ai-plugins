@@ -24,6 +24,7 @@
 
 | 種類 | 意味 | 標準の型 | 終了コード | ルート | 再試行の方針 | 尽きたとき |
 | --- | --- | --- | --- | --- | --- | --- |
+| `account_unavailable` | 中継のラッパーが、上限か認証の失敗の後に替え先も今のアカウントも用意できず、子を起動せずに会話を送らずに止まった | configuration | 3（precondition） | human | — | — |
 | `bad_report` | 呼んだ作業が結果 JSON を返さなかった・形が違った | validation | 2（unreadable） | conductor | — | — |
 | `base_conflict` | ベースブランチと衝突 | runtime | 4（base_conflict） | step | — | — |
 | `check_failed` | テスト以外のチェック（静的解析・文書の検査・PR の本文の検査）が落ちた | validation | 1（failed） | step | — | — |
@@ -46,6 +47,7 @@
 | `push_rejected` | push 前の検査（pre-push の hook）が push を断った | validation | 1（failed） | step | — | — |
 | `refused` | 不変条件で操作を断った | validation | 1（failed） | human | — | — |
 | `restore_unsupported` | PostgreSQL の URL でステートマシンの DB の戻しを求めた。バックアップと戻しは DB の運用で行う | configuration | 3（precondition） | human | — | — |
+| `spin` | 中継のラッパーが再起動ループの検出（起動から間もないセグメントの続き）に当たり、次のセグメントを起動せずに止まった | runtime | 1（failed） | human | — | — |
 | `store_broken` | 記録の DB（ステートマシンの DB か DBOS のキーのファイル）が quick_check を通らない・ジャーナルに書けない。壊れたキーのファイルは broken/ へ移した。ステートマシンの DB は ndf progress restore でバックアップから戻す | runtime | 2（unreadable） | human | — | — |
 | `store_busy` | ステートマシンの DB（SQLite）の書き込みの待ちが busy_timeout を超えた | timeout | 75（infra_wait） | retry | cause.store-busy | step |
 | `store_in_use` | 排他が要る操作（保存先の退避・ステートマシンの DB の戻し・実行のキーのロック）で、ほかのプロセスが保存先か DB かキーを持っていた。何も変えていない（待ちの上限に当たったときはオーナーのホスト・pid・時刻を添える） | runtime | 3（precondition） | human | — | — |

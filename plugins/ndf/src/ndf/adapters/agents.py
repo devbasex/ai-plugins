@@ -4,6 +4,7 @@
   早期の警告は種類ごとに 1 回ずつ出す（#2059）
 - kiro: 起動の前後でworktree の `.amazonq/cli-agents` を写して戻し、起動の間に増えた `.bak` を消す（#2448）
 - 起動の前: 学習に使わない設定のスナップショットを読み（`training.refusal`。#3391）、重い起動のスロットを取る（`launch_slot.held`。#3368）。2 つは `launch_slot.gate` の 1 か所が持つ
+- 起動の直前: CLI のバージョンを下限と比べる（`cli_floor.require`。#3691）
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
 from ndf import process_group
-from ndf.adapters import launch_slot
-from ndf.adapters.run_log import child_process_env, diag, record
+from ndf.adapters import cli_floor, launch_slot
+from ndf.adapters.run_log import child_process_env, diag, record, record_cost_file
 from ndf.contracts import limits
 
 # ---------------------------------------------------------------- サンドボックス（#3893）
@@ -69,7 +70,7 @@ CLAUDE_USAGE_LIMIT_JSON = re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.M
 # （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない
 USAGE_LIMIT_LINES = (
     re.compile(r"^(?:ERROR:\s*)?(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b", re.MULTILINE),
+    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ -]+ )?(?:limit|budget)\b", re.MULTILINE),  # 「5-hour limit」のハイフンも通す
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?Monthly request limit reached", re.MULTILINE),
     CLAUDE_USAGE_LIMIT_JSON,
@@ -194,7 +195,7 @@ class AgentState(StrEnum):
     USAGE_LIMIT = "usage_limit"
     STALLED = "stalled"
     TIMEOUT = "timeout"
-    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）
+    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）か、CLI が下限より古い
     REFUSED = "refused"
     # 起動しなかった: 重い起動のスロットが待ちの上限までに空かなかった
     NO_SLOT = "no_slot"
@@ -307,7 +308,7 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。
 
     学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動のスロットが空かなければ
-    `AgentState.NO_SLOT` を返す。
+    `AgentState.NO_SLOT` を返す。2 つを通った後、CLI が下限より古ければ起動せず `AgentState.REFUSED`（`cli_floor`）。
     """
     try:
         with launch_slot.gate(spec.agent, cwd=spec.cwd, env=child_process_env(spec.env)) as slot_env:
@@ -317,9 +318,15 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
 
 
 def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
+    try:
+        cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd)
+    except cli_floor.TooOld as exc:
+        return _not_started(spec, AgentState.REFUSED, str(exc))
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)
+    if spec.agent == "claude":
+        record_cost_file(spec.paths.out)
     record("agent", agent=spec.agent, state=status.state, exit=status.exit_code, warnings=list(status.warnings))
     return status._replace(restore=kept.get("restore"))
 

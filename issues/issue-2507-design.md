@@ -22,7 +22,7 @@
 | `lib/sprint_loop_select.py` の `exclusion_reason`（106〜110 行） | 既存の規則（コード） | 承認済みでも設計 PR が `MERGED` になるまで課題を外す。マージする手順はどこからも呼ばれていない |
 | `merged-steps.py merge-when-green` の `--expect-head`・`--match-head-commit`（`merged_lib/merge.py` の `_merge_pr`） | 既存の部品 | 先端を照合し、緑を確かめた先端だけをマージする部品が既にある |
 
-要求と受け入れ条件は #2507 の本文にある（コピーは `issues/issue-2507-requirements.md`）。この文書は「どう作るか」だけを扱う。
+要求と受け入れ条件は #2507 の本文にある（コピーは [`issues/issue-2507-requirements.md`](https://github.com/devbasex/ai-plugins/blob/759d2a3858fa0b384e555da8edf25763dccd2bd3/issues/issue-2507-requirements.md)）。この文書は「どう作るか」だけを扱う。
 
 この文書での呼び方は次のとおりにする。
 

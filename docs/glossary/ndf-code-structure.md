@@ -6,7 +6,7 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
-| 固定する理由（依存のバージョンの） | — | 依存を上げる先へ上げずに今のバージョンに止める理由と、止めさせている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。依存の更新の仕組み（Renovate）の依存ごとの規則に、理由の文として書く（#3370 の決定 5） | — | — | — |
+| 固定する理由（依存のバージョンの） | — | 依存を上げる先へ上げずに今のバージョンに止める理由。種類・相手・制約・見直す日・理由の欄を持ち、依存の更新の仕組み（Renovate）の依存ごとの規則の description に行で書く（#3370 #3691 の決定 5） | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
 | 安定版（依存の） | — | 依存のパッケージのバージョンのうち、PEP 440 の pre-release でも developmental release でもないバージョン。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う | — | — | — |
 | ライブラリ | `library` | 2 つ以上のスクリプトが使う関数とクラスの保存先。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「重点領域」（点数を重くする領域）とは別 | — | — | — |
 | エントリポイント | `entry_point` | Skill・プラン・hook・設定・利用者が呼ぶスクリプトのパスとサブコマンドと引数と出力の形 | 入口 | — | — |
@@ -47,7 +47,9 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む設定・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
 | 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
 | 手書きの引数の表 | — | argparse を使わないサブコマンドの呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
-| 上げる先（依存のバージョンの） | — | #3347 の決定 106 の規則で選んだ依存のバージョンのうち、最初のアップロードから 7 日たったもの | — | — | — |
-| 遅れ（依存のバージョンの） | — | 設定のバージョンが上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | — |
-| 依存の更新の仕組み | — | 依存のバージョンの遅れを知らせ、バージョンを上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | — |
-| 依存の一覧の Issue | — | 依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる | — | — | — |
+| 上げる先（依存のバージョンの） | — | #3347 の決定 106 の規則で選んだ依存のバージョンのうち、最初のアップロードから 7 日たったもの | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 遅れ（依存のバージョンの） | — | 設定のバージョンが上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 依存の更新の仕組み | — | 依存のバージョンの遅れを知らせ、バージョンを上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 依存の一覧の Issue | — | 依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 推移的な依存 | — | 定義に書かず、定義した依存が求めるために lock に入るパッケージ。依存の更新の仕組みは lock の作り直しで上げる | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 脆弱性の知らせ | — | 週 1 回のサプライチェーンの検査が、対象の lock の既知の脆弱性と解いてよくなった固定をまとめる 1 件の Issue。依存の一覧の Issue とは別に置く | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |

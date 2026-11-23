@@ -153,9 +153,11 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
 `name` は継続的統合のジョブ id と同じにし、最終ゲートの記録と継続的統合のチェックの名前を同じ語で読めるようにする。`runner` は呼ぶスクリプトの
 名前（拡張子を除く）で、判定には使わない。`ci_jobs` の識別子は、同じファイルのジョブの扱いが分かれるときにジョブの単位で書く。
 
-`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 7 件（`glossary.yml`・`pr-base-guard.yml`・
-`pr-body-decisions.yml`・`runtime-plugin-authenticated-smoke.yml`・`runtime-plugin-smoke.yml`・
-`runtime-plugin-smoke-latest.yml`・`runtime-plugin-validate.yml#required-checks-check`）を理由とともに持つ。
+`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 10 件（`deps-affected-comment.yml`・`deps-weekly.yml`・
+`glossary.yml`・`pr-base-guard.yml`・`renovate.yml`・`renovate-gate.yml`・`runtime-plugin-authenticated-smoke.yml`・
+`runtime-plugin-smoke.yml`・`runtime-plugin-smoke-latest.yml`・`runtime-plugin-validate.yml#required-checks-check`）を理由とともに持つ。
+依存の更新の 4 本（`deps-*`・`renovate*`）は定時・`workflow_run`・GitHub の API で動き、項目のコミットだけでは判定が決まらない
+（[依存の更新の仕様](dependency-updates-renovate-and-supply-chain.md)）。
 `runtime-plugin-smoke-latest.yml` はジョブが 1 件だけなのでファイルの単位で書き、`required-checks-check` は同じファイルに suite にするジョブが
 あるのでジョブの単位で書く。
 

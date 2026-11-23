@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 from ndf.checks import invariants
 from ndf.checks.model import CheckError
+
+# 入れた依存の対応表（`packages_distributions()`）は導入済みのパッケージをすべて読み、1 回 0.1 秒ほどかかる。テストの間は変わらないので 1 回だけ読む
+_packages = functools.cache(invariants.metadata.packages_distributions)
+
+
+@pytest.fixture(autouse=True)
+def _read_packages_once(monkeypatch):
+    monkeypatch.setattr(invariants.metadata, "packages_distributions", _packages)
 
 
 def test_own_name_in_code_fails(plugin, where):

@@ -104,18 +104,6 @@ def test_answer_without_tool_use_id_leaves_even_a_broken_question_for_the_stop(r
     assert not _present(relay)
 
 
-def test_answer_while_the_lock_is_held_leaves_the_question_for_the_stop(relay, tmp_path):
-    # 受け入れ条件 4・I5: 回答の hook がロックを待ちきれなければ消さずに通し、続く Stop で消える
-    _ask(relay, "toolu_A")
-    with signals.held(relay / f"{signals.QUESTION_FILE}.lock", 0) as got:
-        assert got
-        assert call_entry("claude", "PostToolUse", _answered(tmp_path)) is None
-    assert _present(relay)
-    assert records()[-1]["notes"]["cleared"] == "busy"
-    call_entry("claude", "Stop", _closed("Stop", tmp_path))
-    assert not _present(relay)
-
-
 def test_question_that_cannot_be_unlinked_is_left_and_noted(relay, tmp_path):
     # 受け入れ条件 4: 消せない（question.json がディレクトリ）なら例外を出さずに通し、notes に failed が残る
     (relay / signals.QUESTION_FILE).mkdir()

@@ -105,6 +105,19 @@ def test_the_real_ndf_settings_is_checked_with_a_json_pointer(copy):
     assert found[0].detail.startswith("/focus:")
 
 
+def test_issue_4013_fixer_sessions_is_accepted_only_in_version_1(copy):
+    """#4013: スキーマは version 1 の `fixer_sessions` を通し、version 2・3 の `fixer_sessions` を `/fixer_sessions` の誤りにする。"""
+    decl = copy.repo / ".ndf" / "review.json"
+    decl.parent.mkdir()
+    decl.write_text(json.dumps({"version": 1, "focus": [], "fixer_sessions": True}), encoding="utf-8")
+    assert [f for f in copy.findings() if f.rule == spec_docs.DECL] == []
+    for version in (2, 3):
+        decl.write_text(json.dumps({"version": version, "focus": [], "fixer_sessions": True}), encoding="utf-8")
+        found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
+        assert [f.path for f in found] == [".ndf/review.json"], version
+        assert found[0].detail.startswith("/fixer_sessions"), found[0].detail
+
+
 def test_result_schemas_reach_the_result_contract_from_their_own_file():
     """結果のスキーマの `$id` はファイルの保存先から解いて自分を指し、結果のコントラクトへの `$ref` は実在のファイルへ解ける。"""
     paths = sorted((PLUGIN_ROOT / "contracts" / spec_model.IO_SCHEMA_DIR).glob(f"*.result{spec_model.SCHEMA_SUFFIX}"))

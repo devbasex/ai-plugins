@@ -1,6 +1,6 @@
 ---
 name: tdd-cycle
-description: "Write a failing test first, then the smallest implementation that passes. Use when adding behavior or fixing a bug（テスト駆動・先にテスト・再現テスト）."
+description: "Write a failing test first, then the smallest implementation that passes, and keep tests free of real waits and child processes. Use when adding behavior, fixing a bug, or writing, fixing or reviewing a test（テスト駆動・先にテスト・再現テスト・テストを書く・テストを直す・遅いテスト）."
 ---
 
 # テスト駆動のサイクル
@@ -32,6 +32,25 @@ description: "Write a failing test first, then the smallest implementation that 
 | 依存パッケージの版更新のみ | 既存テストを実行する |
 
 判断に迷う場合は「この変更で壊れうる振る舞いがあるか」で決める。あるなら適用する。
+
+## テストに書かないもの
+
+**テストを書く・直す・レビューするときは、サイクルの外でもこのセクションと [references/test-quality.md](references/test-quality.md) に従う。**
+
+- **本物の時間を待たない。** `sleep`・ポーリング（上限つきでも）・timeout・錠の待ちを本物の時間で確かめない。判断を
+  純粋な関数へ寄せ、時計と結果を差し替えて確かめる（例 5）
+- **子のプロセスを起動して確かめない。** エントリポイントの関数を同じプロセスで呼び、起動の手は偽物に差し替える（例 9。git のような基盤の道具を本物で使うのは当たらない）
+- 実装の呼び出し手順・`.md` の文言を固定しない（例 1・8）
+
+遅いテストは、待つか子のプロセスを起動しているかをまず疑う。
+
+このセクションは次の考え方に基づく。名前で調べれば詳しい説明に当たれる。
+
+| 名前 | 中身 |
+| --- | --- |
+| Small テスト（Google のテストのサイズ） | 1 つのプロセス・1 つのスレッドで動き、sleep・I/O・ブロックする呼び出しを持たないテスト。テストの大半をこれにする |
+| Humble Object（Meszaros『xUnit Test Patterns』） | 時間・OS に触れる外側を薄くして判断を持たせず、判断はテストできる側へ移す |
+| Functional Core, Imperative Shell（Gary Bernhardt） | 判断は副作用の無い純粋な核に、待ちと I/O は外側の殻に置く |
 
 ## 事前調査（サイクルに入る前に 1 度だけ）
 
@@ -162,6 +181,6 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 
 ## 参照
 
-- [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
+- [references/test-quality.md](references/test-quality.md) — 脆いテスト・本物の時間を待つテスト・子のプロセスを起動するテストの例と代替
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・コントラクト・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断

@@ -1,0 +1,54 @@
+{
+  "summary": "NDF が起動する外部 CLI のバージョンの下限（#3691 の決定 11）。NDF は起動の前に `ndf.adapters.cli_floor.require` でこの表と比べ、下限より古い CLI を起動しない。Kiro と agy は下限を持たない（行が無い名前は比べない）",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "executable": {"type": "string", "summary": "実行ファイルの名前。claude・codex は domains/runtimes.json の executable と同じ値"},
+    "version_args": {"type": "array", "summary": "バージョンを出す引数（実行ファイルの後ろ）"},
+    "version_pattern": {"type": "string", "summary": "出力からバージョン（接尾辞を含む）を 1 番目の組で取り出す正規表現。比べは semver で行い、下限と同じ数字のプレリリースは下限に満たない"},
+    "min_version": {"type": "string", "summary": "下限。NDF が使う引数・サブコマンドがすべて入った最初のバージョン（各 CLI の変更履歴で決めた。根拠は #3691 の単位 8 の PR 本文）"},
+    "help": {"type": "array", "items": "object", "summary": "--help の照らし合わせの見本（scripts/plugin-deps.py の cli-help が毎日の最新の CLI で照らす）。各要素は {\"args\": [--help を打つ引数], \"flags\": [その出力にあるべき引数とサブコマンドの名前]} か、flags の代わりに {\"table\": \"data/<名前>.json\"}（その表の value・optional・variadic・flags・subcommands を照らす）。src/ndf が渡すサブコマンドとフラグはすべてここにある（scripts/tests/test_plugin_deps.py が縛る）"}
+  },
+  "rows": [
+    {
+      "id": "gh",
+      "executable": "gh",
+      "version_args": ["--version"],
+      "version_pattern": "gh version (\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)",
+      "min_version": "2.17.0",
+      "help": [
+        {"args": ["--help"], "flags": ["api", "auth"]},
+        {"args": ["api", "--help"], "flags": ["--method"]},
+        {"args": ["auth", "--help"], "flags": ["token"]}
+      ]
+    },
+    {
+      "id": "claude",
+      "executable": "claude",
+      "version_args": ["--version"],
+      "version_pattern": "(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?) \\(Claude Code\\)",
+      "min_version": "2.1.268",
+      "help": [
+        {"args": ["--help"], "table": "data/claude-cli.json"},
+        {"args": ["auth", "--help"], "flags": ["login", "logout", "status"]},
+        {"args": ["auth", "status", "--help"], "flags": ["--json"]},
+        {"args": ["plugin", "--help"], "flags": ["list", "marketplace", "update"]},
+        {"args": ["plugin", "list", "--help"], "flags": ["--json"]},
+        {"args": ["plugin", "marketplace", "--help"], "flags": ["update"]},
+        {"args": ["plugin", "marketplace", "update", "--help"], "flags": ["--json"]},
+        {"args": ["plugin", "update", "--help"], "flags": ["-y", "--json", "--scope"]}
+      ]
+    },
+    {
+      "id": "codex",
+      "executable": "codex",
+      "version_args": ["--version"],
+      "version_pattern": "codex-cli (\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)",
+      "min_version": "0.122.0",
+      "help": [
+        {"args": ["--help"], "flags": ["exec", "login"]},
+        {"args": ["exec", "--help"], "flags": ["--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "--dangerously-bypass-approvals-and-sandbox"]},
+        {"args": ["login", "--help"], "flags": ["status"]}
+      ]
+    }
+  ]
+}

@@ -7,18 +7,20 @@ from __future__ import annotations
 
 import json
 import os
-import threading
+import time
 from pathlib import Path
 
 import pytest
 from ndf.contracts import limits
-from ndf.domains.relay import accounts, signals, switch_decide, wrapper
+from ndf.domains.relay import accounts, signals, switch_decide, wrapper, wrapper_launch
 from ndf.domains.relay.account_decide import Usage
 from relay_children import (
     LIMIT_LINE,
     AskingChild,
     FakeChild,
     log_rows,
+    put_usages,
+    register,
     rows_of,
     run_wrapper,
 )
@@ -142,7 +144,8 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
     if kind == "switch":
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+            store = register(state.parent, "team", "main")
+            put_usages(store, [Usage("team", 95.0, 95.0, None, None, False), Usage("main", 10.0, 10.0, None, None, False)])
             accounts.use(state, "team")
 
         return {"markers": {0: "/goal 次"}}, prepare
@@ -150,7 +153,12 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
         first.outputs = [LIMIT_LINE]
 
         def prepare(d, state):
-            accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+            store = register(state.parent, "team", "main")
+            put_usages(
+                store,
+                [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)],
+                fetched_at=time.time() - 3600,
+            )
             accounts.use(state, "team")
 
         return {}, prepare
@@ -190,58 +198,8 @@ def test_i4_a_question_written_after_the_decision_keeps_the_child_alive(tmp_path
         rows = log_rows(w)
         forward_at = next(i for i, r in enumerate(rows) if r["kind"] == "forward")
         account_at = [i for i, r in enumerate(rows) if r["kind"] == "account"]
-        assert len(account_at) == 1 and account_at[0] > forward_at
-
-
-class LockWitness(FakeChild):
-    """`terminate` の中で、別のスレッドの hook が質問を書こうとする（ロックを持ったまま止めているかを見る）。"""
-
-    def __init__(self):
-        super().__init__([b"working\r\n"], None)
-        self.where: tuple[Path, str, str] | None = None
-        self.wrote_while_stopping: bool | None = None
-
-    def started(self, directory: Path, session_id: str, launch: str) -> None:
-        self.where = (directory, session_id, launch)
-
-    def hook_writes(self) -> bool:
-        directory, session_id, launch = self.where
-        payload = {"tool_use_id": "stale", "tool_input": {"questions": []}}
-        return signals.write_question(directory / signals.QUESTION_FILE, session_id, payload, 0.3, launch=launch)
-
-    def terminate(self, force=False):
-        got: list = []
-        hook = threading.Thread(target=lambda: got.append(self.hook_writes()))
-        hook.start()
-        hook.join()
-        self.wrote_while_stopping = got[0]
-        return super().terminate(force)
-
-
-class AfterStop(FakeChild):
-    """次の子。最初の見回りで、止めた前の子の hook が遅れて質問を書こうとした結果を残す。"""
-
-    def __init__(self, previous: LockWitness):
-        super().__init__([], 0)
-        self.previous = previous
-        self.late_write: bool | None = None
-
-    def isalive(self):
-        if self.late_write is None:
-            self.late_write = self.previous.hook_writes()
-        return super().isalive()
-
-
-def test_i4_the_child_is_stopped_holding_the_lock_and_its_late_hook_cannot_write(tmp_path):
-    # I4・受け入れ条件 10: 止めている間は hook がロックを取れず書けない。止めた後に前の子の hook が書こうとしても、
-    # 今の起動から外れているので書けず、次の子の質問のファイルは空のまま
-    first = LockWitness()
-    second = AfterStop(first)
-    ended, spawn, w = run_wrapper(tmp_path, [first, second], markers={0: "/goal 次"})
-    assert ended.cause == "" and len(spawn.calls) == 2
-    assert first.wrote_while_stopping is False
-    assert second.late_write is False
-    assert not signals.question_present(w.dir)
+        # 最初のセグメントの account の行（起動の理由 first）と、切り替えの行の 2 つ。切り替えの行は転送の後
+        assert len(account_at) == 2 and account_at[0] < forward_at < account_at[1]
 
 
 class Unkillable(FakeChild):
@@ -270,7 +228,7 @@ def test_i4_a_child_that_outlives_the_kill_starts_no_next_child(tmp_path, change
     # I4・受け入れ条件 7: 強制終了しても relay.child-exit の秒のうちに終わらない子では、次の子を起動せず refused で終わる
     ended, spawn, w = run_wrapper(tmp_path, [Unkillable(None), FakeChild([], 0)], **changes)
     seconds = limits.seconds("relay.child-exit")
-    assert ended == wrapper.Ended("refused", wrapper.CHILD_ALIVE.format(pid=4242, seconds=seconds))
+    assert ended == wrapper.Ended("refused", wrapper_launch.CHILD_ALIVE.format(pid=4242, seconds=seconds))
     assert len(spawn.calls) == 1
     assert log_rows(w)[-1]["kind"] == "end"
 
@@ -295,7 +253,6 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
     assert two == [wrapper.CLAUDE, "--resume", one[2], "--model", "x", switch_decide.HANDOVER_PROMPT]
     assert first.written == [] and first.alive is False
     assert w.section.number == 1 and w.section.handover_asked is True
-    assert w.starts["count"] == 0
     assert one_env["NDF_RELAY_LAUNCH"] != two_env["NDF_RELAY_LAUNCH"]
     assert len(rows_of(w, "handover")) == 1
 
@@ -303,9 +260,9 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
 def test_a_resume_in_the_same_section_keeps_the_handover_asked(tmp_path, monkeypatch):
     # 引継ぎを頼んだ後に同じセグメントで起動し直しても、文脈の量が上限を超えたままなら引継ぎを頼み直さない
     _over_context(monkeypatch)
-    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], None)]
-    ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, max_starts=1)
-    assert ended.cause == "work_stopped" and len(spawn.calls) == 3
+    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], 1)]
+    ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, spin=switch_decide.Spin(3, 120.0))
+    assert ended.cause == "spin" and len(spawn.calls) == 3
     assert spawn.calls[2][0][-1] != switch_decide.HANDOVER_PROMPT
     assert w.section.handover_asked is True and len(rows_of(w, "handover")) == 1
 

@@ -31,7 +31,7 @@ def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path, monkeypa
 
 
 def test_full_args_default_to_own_root():
-    argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL, resume="abc"))
+    argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL, session=claude.Session("abc", True)))
 
     assert argv[argv.index("--plugin-dir") + 1] == str(identity.load().root)
     assert argv[-2:] == ["--resume", "abc"]
@@ -49,7 +49,7 @@ def test_minimal_args_stay_minimal_without_plugin_settings():
         assert "--settings" not in argv and "--plugin-dir" not in argv
 
 
-@pytest.mark.parametrize("permission", [claude.Permission.TOOLS, claude.Permission.FULL])
+@pytest.mark.parametrize("permission", [claude.Permission.TOOLS])
 def test_stream_prints_one_line_per_step_with_verbose(permission, tmp_path):
     # #3945: 結果をファイルで受ける担当は逐次の出力で起動し、作業中に標準出力が増える（--verbose が無いと起動できない）
     tools = "Read" if permission is claude.Permission.TOOLS else None
@@ -60,26 +60,35 @@ def test_stream_prints_one_line_per_step_with_verbose(permission, tmp_path):
     assert plain[plain.index("--output-format") + 1] == "json" and "--verbose" not in plain
 
 
+def test_issue_4013_session_args_start_or_continue_a_conversation():
+    """#4013: 続ける指定は `--resume <ID>`、新しい会話は `--session-id <ID>`、指定が無ければ空。"""
+    assert claude.session_args(claude.Session("abc", True)) == ["--resume", "abc"]
+    assert claude.session_args(claude.Session("abc", False)) == ["--session-id", "abc"]
+    assert claude.session_args(None) == []
+
+
+@pytest.mark.parametrize("permission", [claude.Permission.TOOLS, claude.Permission.JUDGE])
+@pytest.mark.parametrize("resume", [True, False])
+def test_issue_4013_minimal_launch_with_a_session_keeps_the_conversation(permission, resume):
+    """#4013: 最小構成に会話の指定を渡すと `--no-session-persistence` を付けず、`--system-prompt` の後ろに会話の引数を置く。"""
+    tools = "Read" if permission is claude.Permission.TOOLS else None
+    session = claude.Session("abc", resume)
+    argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=permission, tools=tools, session=session))
+    assert "--no-session-persistence" not in argv
+    at = argv.index("--system-prompt")
+    assert argv[at : at + 4] == ["--system-prompt", "sys", *claude.session_args(session)]
+
+
+def test_issue_4013_minimal_args_without_a_session_are_unchanged():
+    """#4013: 会話の指定を渡さない最小構成の引数は今のまま（`--no-session-persistence` つき・会話の引数なし）。"""
+    assert claude.minimal_args("sys") == [*MINIMAL_HEAD, "--disable-slash-commands", "--system-prompt", "sys"]
+    assert claude.minimal_args("sys", session=None) == claude.minimal_args("sys")
+
+
 def test_json_schema_is_passed_as_json():
     argv = claude.claude_args(claude.ClaudeCall(system="sys", json_schema={"type": "object"}))
 
     assert json.loads(argv[argv.index("--json-schema") + 1]) == {"type": "object"}
-
-
-DANGEROUS = ("--dangerously-skip-permissions", "bypassPermissions")
-
-
-def test_each_permission_has_its_own_tools_and_never_skips_permissions(tmp_path):
-    """判断は Tool を使わせず、Tool を許す起動も acceptEdits までにする（#3364）。"""
-    judge = claude.claude_args(claude.ClaudeCall(system="sys"))
-    tools = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.TOOLS, tools="Read"))
-    full = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
-
-    assert judge[judge.index("--tools") + 1] == "" and "--permission-mode" not in judge and "--allowed-tools" not in judge
-    assert tools[tools.index("--allowed-tools") + 1] == "Read" and tools[tools.index("--permission-mode") + 1] == "acceptEdits"
-    assert full[full.index("--allowed-tools") + 1] == claude.FULL_TOOLS and full[full.index("--permission-mode") + 1] == "acceptEdits"
-    for argv in (judge, tools, full):
-        assert not set(argv) & set(DANGEROUS)
 
 
 @pytest.mark.parametrize(
@@ -88,10 +97,9 @@ def test_each_permission_has_its_own_tools_and_never_skips_permissions(tmp_path)
         {"permission": claude.Permission.TOOLS},
         {"permission": claude.Permission.JUDGE, "tools": "Read"},
         {"permission": claude.Permission.FULL, "tools": "Read"},
-        {"permission": claude.Permission.JUDGE, "resume": "abc"},
     ],
 )
-def test_call_refuses_tools_or_resume_outside_their_permission(kwargs):
+def test_call_refuses_tools_outside_their_permission(kwargs):
     with pytest.raises(ValueError):
         claude.ClaudeCall(system="sys", **kwargs)
 

@@ -82,6 +82,9 @@ _SCHEMA_VALUE_KEYS = (
     "timeout",
     "inject_chars",
     "gib",
+    "lock",
+    "gate",
+    "first",
 )
 
 

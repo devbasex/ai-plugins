@@ -1,84 +1,15 @@
-"""サブコマンド `plan queue` を子プロセスで流す: ステップと `--then`・承認ゲートを届けるステップ・作業場所のクリーンアップ・`--resume`（#2876・#1886）。"""
+"""サブコマンド `plan queue` の本体（`queue_run.run`）を同じプロセスで流す: 波の分け方・並列の上限・承認ゲート・`--resume`。"""
 
 from __future__ import annotations
 
 import json
-import sys
 import threading
 from pathlib import Path
 
-import git_sandbox
 import pytest
 
+from ndf.cli import ndf_command
 from ndf.core.plan import model, queue_run
-
-from . import _plan_helpers as H
-
-
-_WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
-
-
-def _gate_with_pr(sid: str, number: int) -> dict:
-    """承認の回答のルートを持たずに承認ゲートで終わり、PR の番号を items に載せるステップ（開発版の提示）。"""
-    line = json.dumps({"tool": "t", "status": "gate", "summary": "本番の提示", "items": [{"kind": "pr", "number": number}]})
-    return H.py_step(sid, f"print({line!r})")
-
-
-def test_a_gate_handing_stage_runs_and_fills_queue_prs(repo, tmp_path):
-    """#2876 の再現: 開発版のプランが本番の提示の承認ゲートで終わっても、承認ゲートを届けるステップ（リリースのリクエスト）が流れ、
-    `{queue_prs}` が前のステップの PR で埋まる。キュー全体は承認ゲートで待つ。"""
-    seen = tmp_path / "seen"
-    dev = H.write_plan(repo, "dev", [_gate_with_pr("present", 11)], touches=["a.py"])
-    ask = H.write_plan(
-        repo,
-        "ask",
-        [{"id": "ask", "run": [sys.executable, "-c", _WRITE, str(seen), "{queue_prs}"]}],
-        touches=["b.py"],
-        accepts_gate=True,
-    )
-    code, out = H.ndf(repo, "queue", dev, "--then", ask)
-    assert out["status"] == "gate", out
-    assert seen.read_text() == "11"
-    assert [i["status"] for i in out["items"]] == ["gate", "ok"]
-
-
-def test_a_stage_without_the_gate_role_waits_for_the_gate(repo, tmp_path):
-    """承認ゲートを届ける役でないステップは、前のステップの承認ゲートの待ちを越えて流さない。"""
-    dev = H.write_plan(repo, "dev", [_gate_with_pr("present", 11)], touches=["a.py"])
-    after = H.write_plan(repo, "after", [H.count_step("s", tmp_path / "after")], touches=["b.py"])
-    out = H.ndf(repo, "queue", dev, "--then", after)[1]
-    assert out["status"] == "gate"
-    assert H.count(tmp_path / "after") == 0
-
-
-def test_a_queue_started_in_a_removed_worktree_runs_the_next_stage(repo, tmp_path):
-    """#1886 の再現: 作業場所から起動したキューで、前のステップのプランが作業場所をクリーンアップで消しても、--then のステップが流れる。"""
-    wt = tmp_path / "wt"
-    git_sandbox.sh(repo, "worktree", "add", "-q", str(wt), "-b", "feat", identity=True)
-    remove = {"id": "cleanup", "run": ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt)], "in": "repo"}
-    first = H.write_plan(repo, "merge", [remove], touches=["a.py"])
-    second = H.write_plan(repo, "close", [H.count_step("s", tmp_path / "close")], touches=["b.py"])
-    code, out = H.ndf(wt, "queue", str(repo / first), "--then", str(repo / second))
-    assert (code, out["status"]) == (H.OK, "ok"), out
-    assert not wt.exists()
-    assert H.count(tmp_path / "close") == 1
-
-
-def test_resume_skips_the_finished_plans(repo, tmp_path):
-    """結果の next（`--resume`）は前の回で完了したプランを流さずに、止まったプランの止まったステップから続ける。"""
-    mark = tmp_path / "mark"
-    fail_once = "import pathlib, sys; m = pathlib.Path(sys.argv[1]); first = not m.exists(); m.touch(); sys.exit(1 if first else 0)"
-    a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")], touches=["a.py"])
-    b = H.write_plan(
-        repo, "b", [{"id": "s", "run": [sys.executable, "-c", fail_once, str(mark)], "exit_cause": {"1": "check_failed"}}], touches=["b.py"]
-    )
-    out = H.ndf(repo, "queue", a, "--then", b)[1]
-    assert out["cause"]["kind"] == "check_failed"
-    args = out["next"]["argv"]
-    assert "--resume" in args and "b=s" in args
-    code, out = H.ndf(repo, *args[2:])
-    assert (code, out["status"]) == (H.OK, "ok"), out
-    assert H.count(tmp_path / "a") == 1
 
 
 # --- 現状固定テスト: `queue_run.run` を同じプロセスで流す（子の `ndf plan next` を偽の Popen に置き換える） ---
@@ -92,12 +23,14 @@ class _FakeChildren:
         self.log: list[tuple[str, str]] = []
         self.args: dict[str, list[str]] = {}
         self.cwds: dict[str, object] = {}
+        self.envs: dict[str, dict] = {}
 
-    def __call__(self, args, cwd=None, **_kw):
-        name = Path(args[5]).stem
+    def __call__(self, args, cwd=None, env=None, **_kw):
+        name = Path(args[args.index("next") + 1]).stem
         self.log.append(("start", name))
         self.args[name] = list(args)
         self.cwds[name] = cwd
+        self.envs[name] = env
         return _FakeProc(self, name)
 
 
@@ -276,7 +209,8 @@ def test_run_fills_queue_prs_from_the_prior_stage(tmp_path, children):
     outs = queue_run.run([[a, r], [b]], tmp_path / "q", tmp_path, queue_run.QueueOptions())
     assert [o.status for o in outs] == ["ok", "ok", "ok"]
     assert fake.args["b"][-2:] == ["--set", "queue_prs=11 12"]
-    assert fake.args["a"] == [sys.executable, "-m", "ndf", "plan", "next", str(tmp_path / "a.json")]
+    assert fake.args["a"] == ndf_command("plan", "next", str(tmp_path / "a.json"))
+    assert fake.envs["a"] is None  # 環境は呼び出し元のまま（src を PYTHONPATH へ入れない。#4029）
 
 
 def test_run_stops_a_queue_prs_plan_without_prs(tmp_path, children):

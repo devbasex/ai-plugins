@@ -50,6 +50,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `project` | `ndf` repo:.ndf | `project.json` | ndf_settings | 追跡 | 人と解析（M7） | kept | 内部（予告なく変えてよい） |
 | `project-measured` | `measured` state:measured | `<repo>/project.json` | measured | — | 解析とテストの実行（M7） | replaced | 内部（予告なく変えてよい） |
 | `projects` | `ndf` repo:.ndf | `projects.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
+| `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-copy-launcher` | `relay-copy` config:ndf | `relay.py` | exchange | — | 人（ndf relay install） | replaced | 内部（予告なく変えてよい） |
 | `relay-copy-root` | `relay-copy` config:ndf | `relay.root` | exchange | — | 中継（M3b）・SessionStart hook（更新後の向け直し） | replaced | 内部（予告なく変えてよい） |
 | `relay-hub-log` | `relay-hub` state:relay/hub | `hub-log.jsonl` | record | — | 中継のリレーハブ（M3） | cleanup | 内部（予告なく変えてよい） |
@@ -62,7 +63,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | ndf_settings | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |
 | `relay-question` | `relay-wrappers` state:relay/wrappers | `<名前>/question.json` | exchange | — | PreToolUse の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-stop` | `relay-wrappers` state:relay/wrappers | `<名前>/stop` | exchange | — | ndf relay stop（M3b）と人（touch） | run | 内部（予告なく変えてよい） |
-| `relay-usage` | `relay-accounts` state:relay/accounts | `usage.json` | measured | — | 使用率のセンサー（M3a） | replaced | 内部（予告なく変えてよい） |
+| `relay-usage-fetch` | `relay-account-store` config:ndf/accounts（NDF_ACCOUNTS_DIR で差し替え） | `.usage-fetch/<名前>/<世代>.json` | measured | — | 中継のラッパー（使用率の API の取得） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper` | `relay-wrappers` state:relay/wrappers | `<名前>/wrapper.json` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper-lock` | `relay-wrappers` state:relay/wrappers | `<名前>/relay.lock` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper-log` | `relay-wrappers` state:relay/wrappers | `<名前>/log.jsonl` | record | — | 中継のラッパー（M3b） | cleanup | 内部（予告なく変えてよい） |

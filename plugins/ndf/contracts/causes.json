@@ -19,6 +19,8 @@
     {"kind": "invalid", "meaning": "読めない・呼び出しの誤り・結果の形の誤り", "std_type": "validation", "exit": "unreadable", "route": "conductor", "retry": null},
     {"kind": "deps_missing", "meaning": "依存の欠け", "std_type": "configuration", "exit": "deps_missing", "route": "human", "retry": null},
     {"kind": "refused", "meaning": "不変条件で操作を断った", "std_type": "validation", "exit": "failed", "route": "human", "retry": null},
+    {"kind": "account_unavailable", "meaning": "中継のラッパーが、上限か認証の失敗の後に替え先も今のアカウントも用意できず、子を起動せずに会話を送らずに止まった", "std_type": "configuration", "exit": "precondition", "route": "human", "retry": null},
+    {"kind": "spin", "meaning": "中継のラッパーが再起動ループの検出（起動から間もないセグメントの続き）に当たり、次のセグメントを起動せずに止まった", "std_type": "runtime", "exit": "failed", "route": "human", "retry": null},
     {"kind": "not_ci", "meaning": "マージが CI 以外の理由（保護の規則・権限）で断られた", "std_type": "authorization", "exit": "failed", "route": "human", "retry": null},
     {"kind": "wait_timeout", "meaning": "待ちの上限に達しただけで、待つ相手は動いている。conductor は結果の next の同じ待ちを打つ", "std_type": "timeout", "exit": "precondition", "route": "conductor", "retry": null},
     {"kind": "interrupted", "meaning": "期限・シグナル・遅れの見張りで打ち切った", "std_type": "timeout", "exit": "failed", "route": "conductor", "retry": null},

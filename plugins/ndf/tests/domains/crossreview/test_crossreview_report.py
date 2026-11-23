@@ -130,19 +130,6 @@ class _Publisher:
         return list(texts), {}
 
 
-def test_github_port_falls_back_to_the_file_and_resolves_the_thread() -> None:
-    hub = _RestHub()
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
-    assert port.open_thread("src/a.py", 12, HEAD1, "本文") == 55
-    # PR の差分に無いファイルにはスレッドを作らない（書かずに None）
-    assert port.open_thread("issues/design.md", None, HEAD1, "本文") is None
-    assert hub.posts == [("/repos/o/r/pulls/7/comments", {"body": "本文", "commit_id": HEAD1, "path": "src/a.py", "subject_type": "file"})]
-    port.reply(55, "直した")
-    port.resolve(55)
-    assert hub.posts[-1] == ("/repos/o/r/pulls/7/comments/55/replies", {"body": "直した"})
-    assert hub.mutations == [{"id": "T1"}]
-
-
 def test_sync_failure_is_a_warning_per_finding() -> None:
     data = _state()
     notes = threads.sync(data, FakePort(fail=True))
@@ -160,6 +147,15 @@ def test_run_posts_the_record_with_the_fix_and_returns_its_url(wt: Path, tmp_pat
     fix = store.read_object(store.state_pr(fake.state_dir, PR).path)["rounds"][0]["fix"]
     assert f"`{fix['commit'][:9]}` | 送った | r1-1 |" in body
     assert {"kind": "comment", "number": PR, "url": f"https://github.com/{slug}/pull/{PR}#issuecomment-1"} in got["items"]
+
+
+def test_issue_4014_downgraded_finding_is_a_light_row_without_a_thread(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """#4014: 1 文の無い major は記録のコメントの表に minor と「軽い（直さずに残した）」で出て、スレッドを作らない。"""
+    fake = Fake(tmp_path / "st", {"codex": [[{"text": "A が止まる", "severity": "major", "path": "doc.md", "line": 2}]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert f"| r1-1 | codex | minor | doc.md:2 | A が止まる | {report_decide.LIGHT_LABEL} | — |" in hub.comments[-1][2]
+    assert hub.port.opened == []
 
 
 def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -224,36 +220,6 @@ def test_github_port_marks_only_threads_written_by_the_viewer() -> None:
     assert [(t.comment, t.trusted) for t in port.open_threads()] == [(1, True), (2, False), (3, False)]
     port.open_threads()
     assert hub.viewer_reads == 1
-
-
-class _MovedHub(_RestHub):
-    """指摘のラウンドの head ではパスを解決できず（422）、PR の今の head では付けられる。"""
-
-    def __init__(self):
-        super().__init__()
-        self.commits: list[str] = []
-
-    def rest(self, method, path, payload=None, params=None):
-        if method == "GET" and path.endswith("/pulls/7"):
-            return {"head": {"sha": HEAD2}}
-        if method == "GET":
-            return [{"filename": "src/a.py"}]
-        self.commits.append(payload["commit_id"])
-        if payload["commit_id"] == HEAD1:
-            raise _Refused('GitHub が断った（422）: {"message":"pull_request_review_thread.path could not be resolved"}')
-        self.posts.append((path, payload))
-        return {"id": 56}
-
-
-def test_github_port_reposts_on_the_pr_head_when_the_path_is_not_resolved() -> None:
-    """PR 3944 の書き足しで見つけた: 指摘のラウンドの head でパスを解決できなければ、PR の今の head のコミットで付け直す。
-    行の位置を断られたとは扱わない（ファイルへ落とさず、同じ行に付ける）。"""
-    hub = _MovedHub()
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
-    assert port.open_thread("src/a.py", 12, HEAD1, "本文") == 56
-    assert hub.commits == [HEAD1, HEAD2]
-    assert hub.posts[-1][1]["line"] == 12
-    assert threads.path_unresolved(422, "x could not be resolved") and not threads.path_unresolved(422, "line must be part of the diff")
 
 
 def test_rewound_pr_opens_threads_only_for_open_findings() -> None:
