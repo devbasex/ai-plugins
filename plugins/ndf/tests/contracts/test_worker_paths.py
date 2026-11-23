@@ -607,3 +607,31 @@ def test_write_file_replaces_a_file_without_an_acl_and_drops_the_inherited_one(w
         os.getxattr(d / "r", "system.posix_acl_access")
     assert e.value.errno == errno.ENODATA
     assert (d / "r").stat().st_mode & 0o777 == 0o640 and (d / "r").read_text(encoding="utf-8") == "後"
+
+
+def test_write_file_replaces_a_file_without_an_acl_on_macos(workdir, monkeypatch):
+    # macOS には O_PATH も os.getxattr も無い。書き込み専用で開いた記述子を acl_get_fd_np へ渡す経路で置き換える
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    monkeypatch.delattr(os, "O_PATH", raising=False)
+    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
+    seen = []
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: seen.append(os.fstat(fd).st_ino) or False)
+    before = (d / "r").stat().st_ino
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert seen == [before]
+    assert (d / "r").read_text(encoding="utf-8") == "後" and (d / "r").stat().st_mode & 0o777 == 0o640
+
+
+def test_write_file_refuses_on_macos_when_the_file_has_an_acl(workdir, monkeypatch):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    monkeypatch.delattr(os, "O_PATH", raising=False)
+    monkeypatch.setattr(worker_paths.sys, "platform", "darwin")
+    monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: True)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+    assert e.value.kind == "acl"
+    assert (d / "r").read_text(encoding="utf-8") == "前" and [p.name for p in d.iterdir()] == ["r"]

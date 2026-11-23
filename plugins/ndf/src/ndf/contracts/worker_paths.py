@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import stat
+import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
@@ -393,24 +394,29 @@ _ACL_ACCESS = "system.posix_acl_access"
 
 
 def _refuse_acl(wd: WorkDir, name: str, existing: os.stat_result) -> None:
-    """置き換える既存のファイルが拡張 ACL（`system.posix_acl_access`）を持つ・持つかを確かめられないなら `EntryUnsafe`（`acl`）。
+    """置き換える既存のファイルが拡張 ACL を持つ・持つかを確かめられないなら `EntryUnsafe`（`acl`）。
 
     拡張 ACL のあるファイルでは、モードのグループのビットは所有グループの権限ではなく ACL のマスクなので、
-    `_inherit_access` がモードのビットだけを写すと、置き換えの後に読める人が広がりうる。ACL の値は写さず、
-    置き換えないことで広がらないようにする。
-    リンクをたどらずに `O_PATH` で開いた記述子を `/proc/self/fd` から引き、確かめた inode（`existing`）でなければ
-    `EntryUnsafe`（`replaced`）。拡張 ACL の無いファイル（`ENODATA`）と、ACL に対応しないファイルシステム
-    （`ENOTSUP`・`EOPNOTSUPP`）は置き換える。POSIX ACL を引けない OS（`O_PATH` か `os.getxattr` が無い）と、
-    それ以外の失敗は持つかを確かめられないので置き換えない。
+    `_inherit_access` がモードのビットだけを写すと、置き換えの後に読める人が広がりうる（macOS の ACL は拒否の項目も
+    持つので、外すと読める人が広がる）。ACL の値は写さず、置き換えないことで広がらないようにする。
+    リンクをたどらずに開いた記述子を確かめた inode（`existing`）と突き合わせ、違えば `EntryUnsafe`（`replaced`）。
+    Linux は `O_PATH` の記述子を `/proc/self/fd` から引いて `system.posix_acl_access` を見る（`_has_acl`）。
+    macOS は書き込めることを確かめ済みの既存のファイルを書き込み専用で（切り詰めずに）開き、`acl_get_fd_np` で
+    拡張 ACL を見る（`_has_acl_darwin`）。拡張 ACL の無いファイルと、ACL に対応しないファイルシステムは置き換える。
+    どちらの手段も無い OS と、それ以外の失敗は持つかを確かめられないので置き換えない。
     """
-    if not hasattr(os, "O_PATH") or not hasattr(os, "getxattr"):
+    if hasattr(os, "O_PATH") and hasattr(os, "getxattr"):
+        flags, check = os.O_PATH, _has_acl
+    elif sys.platform == "darwin":
+        flags, check = os.O_WRONLY | os.O_NONBLOCK, _has_acl_darwin
+    else:
         raise EntryUnsafe(name, "acl")
-    fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
     try:
         st = os.fstat(fd)
         if (st.st_dev, st.st_ino) != (existing.st_dev, existing.st_ino):
             raise EntryUnsafe(name, "replaced")
-        if _has_acl(fd):
+        if check(fd):
             raise EntryUnsafe(name, "acl")
     finally:
         os.close(fd)
@@ -423,6 +429,31 @@ def _has_acl(fd: int) -> bool:
     except OSError as e:
         return e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP)
     return True
+
+
+_ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
+
+
+def _has_acl_darwin(fd: int) -> bool:
+    """macOS で開いた記述子に拡張 ACL があるか（`acl_get_fd_np`）。確かめられなければ真（置き換えない側へ倒す）。
+
+    ACL の無いファイルは `ENOENT`、ACL に対応しないファイルシステムは `ENOTSUP`・`EOPNOTSUPP` で NULL を返す。
+    """
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        get_fd, free = libc.acl_get_fd_np, libc.acl_free
+    except (OSError, AttributeError):
+        return True
+    get_fd.restype = ctypes.c_void_p
+    get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
+    free.argtypes = [ctypes.c_void_p]
+    acl = get_fd(fd, _ACL_TYPE_EXTENDED)
+    if acl:
+        free(acl)
+        return True
+    return ctypes.get_errno() not in (errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP)
 
 
 def _drop_inherited_acl(fd: int, name: str) -> None:
