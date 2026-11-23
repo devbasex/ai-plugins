@@ -79,6 +79,50 @@ def test_open_workdir_refuses_a_link_in_the_path_instead_of_resolving_it(tmp_pat
     assert e.value.kind == "symlink"
 
 
+def test_report_paths_without_resolve_keeps_a_link_in_the_directory(tmp_path, workdir):
+    d, _ = workdir
+    link = tmp_path / "link"
+    link.symlink_to(d)
+    assert worker_paths.report_paths(link, "n", resolve=False).report == link.absolute() / "n.report.md"
+
+
+def test_open_workdir_refuses_a_link_in_the_middle_of_the_path_as_symlink(tmp_path, workdir):
+    d, _ = workdir
+    (d / "inner").mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(d)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(link / "inner"):
+        pass
+    assert e.value.kind == "symlink"
+
+
+def test_open_workdir_creates_missing_directories_when_asked(tmp_path):
+    target = tmp_path / "a" / "b"
+    with worker_paths.open_workdir(target, create=True) as wd:
+        assert wd.path == target.absolute()
+    assert target.is_dir()
+
+
+def test_open_workdir_does_not_create_under_a_link(tmp_path, workdir):
+    d, _ = workdir
+    link = tmp_path / "link"
+    link.symlink_to(d)
+    with pytest.raises(worker_paths.EntryUnsafe), worker_paths.open_workdir(link / "new", create=True):
+        pass
+    assert not (d / "new").exists()
+
+
+def test_open_workdir_needs_only_search_permission_on_ancestors(tmp_path):
+    shared = tmp_path / "shared"
+    (shared / "mine").mkdir(parents=True)
+    shared.chmod(0o311)
+    try:
+        with worker_paths.open_workdir(shared / "mine") as wd:
+            assert os.stat(".", dir_fd=wd.fd).st_ino == (shared / "mine").stat().st_ino
+    finally:
+        shared.chmod(0o755)
+
+
 def test_open_workdir_refuses_a_parent_swapped_to_a_link_after_the_paths_were_built(tmp_path):
     parent = tmp_path / "shared"
     (parent / "d").mkdir(parents=True)

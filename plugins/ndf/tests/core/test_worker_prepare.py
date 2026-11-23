@@ -231,8 +231,8 @@ def test_prepare_does_not_reset_another_directory_when_the_parent_is_swapped(tmp
     (other / "d" / "n.result.json").write_text("{}", encoding="utf-8")
     built = worker_paths.report_paths
 
-    def swap_after_building(directory, name):
-        paths = built(directory, name)
+    def swap_after_building(directory, name, **kw):
+        paths = built(directory, name, **kw)
         shared.rename(tmp_path / "moved")
         shared.symlink_to(other)
         return paths
@@ -249,3 +249,39 @@ def test_collect_skips_a_heading_that_only_starts_like_the_report_heading(tmp_pa
     _append(capsys, monkeypatch, report, body, "--done")
     code, out = _run(capsys, "collect", "--report", str(report))
     assert code == 0 and out["metrics"]["report"] == body
+
+
+def test_append_and_collect_refuse_a_prepared_parent_swapped_to_a_link(tmp_path, capsys, monkeypatch):
+    shared = tmp_path.resolve() / "shared"
+    report = _prepared(shared, capsys)
+    other = tmp_path / "other"
+    (other / report.parent.relative_to(shared)).mkdir(parents=True)
+    copied = other / report.relative_to(shared)
+    copied.write_text("## 作業の報告\n別の場所の報告\n", encoding="utf-8")
+    (copied.parent / (copied.name + ".done")).write_text("", encoding="utf-8")
+    shared.rename(tmp_path / "moved")
+    shared.symlink_to(other)
+    monkeypatch.setattr("sys.stdin", io.StringIO("## 作業の報告\n書き換え\n"))
+    code, out = _run(capsys, "append", "--report", str(report), "--done")
+    assert _invalid(code, out)
+    code, out = _run(capsys, "collect", "--report", str(report))
+    assert _invalid(code, out) and "別の場所の報告" not in json.dumps(out, ensure_ascii=False)
+    assert copied.read_text(encoding="utf-8") == "## 作業の報告\n別の場所の報告\n"
+
+
+def test_prepare_does_not_create_directories_under_a_parent_swapped_to_a_link(tmp_path, capsys, monkeypatch):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    built = worker_paths.report_paths
+
+    def swap_after_building(directory, name, **kw):
+        paths = built(directory, name, **kw)
+        shared.rename(tmp_path / "moved")
+        shared.symlink_to(other)
+        return paths
+
+    monkeypatch.setattr(worker_paths, "report_paths", swap_after_building)
+    code, out = _run(capsys, "prepare", "--dir", str(shared / "new" / "d"), "--name", "n")
+    assert _invalid(code, out) and list(other.iterdir()) == []

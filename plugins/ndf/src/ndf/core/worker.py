@@ -710,27 +710,34 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
-def _paths_of(directory: str, name: str) -> worker_paths.ReportPaths:
+def _paths_of(directory: str, name: str, *, resolve: bool = True) -> worker_paths.ReportPaths:
     try:
-        return worker_paths.report_paths(Path(directory), name)
+        return worker_paths.report_paths(Path(directory), name, resolve=resolve)
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
 
 
 def _report_paths(report: str) -> worker_paths.ReportPaths:
-    """`--report <置く場所>` から報告の保存先のパスを組む。形が違えば `WorkerError`（invalid）。"""
+    """`--report <置く場所>` から報告の保存先のパスを組む。形が違えば `WorkerError`（invalid）。
+
+    置く場所は `prepare` が解決済みで返したパスなので、親を解き直さない（準備の後に親をリンクへ差し替えられても
+    `open_workdir` がリンクを拒む）。
+    """
     try:
         directory, name = worker_paths.report_name(Path(report))
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
-    return _paths_of(str(directory), name)
+    return _paths_of(str(directory), name, resolve=False)
 
 
 @contextlib.contextmanager
-def _workdir(paths: worker_paths.ReportPaths, doing: str) -> Iterator[worker_paths.WorkDir]:
-    """報告の保存先を開く。リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。"""
+def _workdir(paths: worker_paths.ReportPaths, doing: str, *, create: bool = False) -> Iterator[worker_paths.WorkDir]:
+    """報告の保存先を開く（`create` なら無い要素をリンクをたどらずに作る）。
+
+    リンク・読めない名前と、作れない・消せない・書けない保存先は `WorkerError`（invalid）にする。
+    """
     try:
-        with worker_paths.open_workdir(paths.report.parent) as wd:
+        with worker_paths.open_workdir(paths.report.parent, create=create) as wd:
             yield wd
     except worker_paths.EntryError as exc:
         raise WorkerError("invalid", f"{paths.report.parent} で{doing}: {exc}") from None
@@ -755,11 +762,7 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
 def _cmd_prepare(a: argparse.Namespace) -> int:
     """報告の保存先を用意し、3 つの絶対パスを `metrics.paths` に返す（#3877）。失敗のときはパスを返さない。"""
     paths = _paths_of(a.dir, a.name)
-    try:
-        Path(a.dir).mkdir(parents=True, exist_ok=True)
-    except OSError as exc:  # 利用者の入力: 作れない作業ディレクトリは呼び出しの誤り
-        raise WorkerError("invalid", f"作業ディレクトリ {a.dir} を作れない: {exc.strerror or exc}") from None
-    with _workdir(paths, "報告の保存先を用意できない") as wd:
+    with _workdir(paths, "報告の保存先を用意できない", create=True) as wd:
         done, removed = _reset(wd, paths)
     items = [
         {"kind": "report", "path": str(paths.report), "action": "created"},

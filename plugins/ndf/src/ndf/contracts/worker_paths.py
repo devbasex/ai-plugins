@@ -65,14 +65,15 @@ class ReportPaths(NamedTuple):
     result: Path
 
 
-def report_paths(directory: Path, name: str) -> ReportPaths:
+def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportPaths:
     """作業ディレクトリと worker の名前から 4 つの絶対パスを組む。ファイルの有無は見ない。
 
-    リンクを解くのは `directory` だけで、名前を足した後のパスには当てない。
+    `resolve` が真ならリンクを解くのは `directory` だけで、名前を足した後のパスには当てない（`prepare` が利用者の入力を受けるとき）。
+    偽なら `directory` も解かずに絶対パスにするだけである（`prepare` が返した解決済みのパスを受ける `append`・`collect`）。
     """
     if not NAME_RE.fullmatch(name):
         raise NameInvalid(f"worker の名前は [A-Za-z0-9._-] の 1〜64 文字にする: {name!r}")
-    base = directory.resolve()
+    base = directory.resolve() if resolve else Path(os.path.abspath(directory))
     report = base / f"{name}{REPORT_SUFFIX}"
     return ReportPaths(
         prompt=base / f"{name}{PROMPT_SUFFIX}",
@@ -91,41 +92,69 @@ def report_name(report: Path) -> tuple[Path, str]:
 
 
 @contextlib.contextmanager
-def open_workdir(directory: Path) -> Iterator[WorkDir]:
+def open_workdir(directory: Path, *, create: bool = False) -> Iterator[WorkDir]:
     """作業ディレクトリを 1 回だけ開き、抜けるときに閉じる。`WorkDir.path` は開いた場所そのものである。
 
-    リンクは解かない。`directory` は `report_paths` が解いた後のパスを渡す。根から 1 要素ずつリンクをたどらずに開くので、
+    リンクは解かない。`directory` は `prepare` が利用者の入力を `report_paths` で解いた後のパスを渡す。根から 1 要素ずつリンクをたどらずに開くので、
     パスを組んだ後に途中の要素をリンクへ差し替えられると、別の場所を開かずに `EntryUnsafe`（`symlink`）で止まる。
+    `create` が真なら、無い要素は開いた親の記述子に対する `mkdir` で作ってから開く（リンクの先に作らない）。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
     """
     path = Path(os.path.abspath(directory))
-    fd = _open_dir_nofollow(path)
+    fd = _open_dir_nofollow(path, create=create)
     try:
         yield WorkDir(path, fd)
     finally:
         os.close(fd)
 
 
-def _open_dir_nofollow(path: Path) -> int:
-    """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。"""
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+# 途中の要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも開ける）。
+# `O_PATH` の記述子は `*at` の `dir_fd` に使える。`O_PATH` の無い OS は `O_SEARCH`、それも無ければ `O_RDONLY` に落とす
+_SEARCH = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
+
+
+def _open_dir_nofollow(path: Path, *, create: bool = False) -> int:
+    """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。
+
+    途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
+    """
+    parts = path.parts[1:]
+    fd = os.open(path.anchor, (_SEARCH if parts else os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        for part in path.parts[1:]:
-            try:
-                child = os.open(part, flags, dir_fd=fd)
-            except OSError as e:
-                if e.errno == errno.ELOOP:
-                    raise EntryUnsafe(str(path), "symlink") from None
-                if e.errno == errno.ENOTDIR:
-                    raise EntryUnsafe(str(path), "other") from None
-                raise
+        for i, part in enumerate(parts):
+            mode = os.O_RDONLY if i == len(parts) - 1 else _SEARCH
+            child = _open_child(fd, part, mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, path, create=create)
             os.close(fd)
             fd = child
     except BaseException:
         os.close(fd)
         raise
     return fd
+
+
+def _open_child(fd: int, part: str, flags: int, path: Path, *, create: bool) -> int:
+    """`fd` の直下の `part` をリンクをたどらずに開く。`create` が真で無ければ `fd` に対する `mkdir` で作ってから開く。"""
+    try:
+        return os.open(part, flags, dir_fd=fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+    except OSError as e:
+        if e.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise EntryUnsafe(str(path), _refused_kind(fd, part)) from None
+        raise
+    with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 間に作られたなら作らずに開く（開くときにリンクを拒む）
+        os.mkdir(part, dir_fd=fd)
+    return _open_child(fd, part, flags, path, create=False)
+
+
+def _refused_kind(fd: int, part: str) -> str:
+    """開けなかった要素の種類。Linux は `O_DIRECTORY | O_NOFOLLOW` でリンクを開くと `ENOTDIR` を返すので、`lstat` で見分ける。"""
+    try:
+        st = os.stat(part, dir_fd=fd, follow_symlinks=False)
+    except OSError:  # noqa: NDF401 ファイル: 見分けられなければリンクでもディレクトリでもない要素として拒む
+        return "other"
+    return "symlink" if stat.S_ISLNK(st.st_mode) else "other"
 
 
 def _unsafe_kind(st: os.stat_result) -> Optional[str]:
