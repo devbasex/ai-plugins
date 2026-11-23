@@ -43,7 +43,7 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 | `deps.require` が依存を用意できずに止まる 3 つの経路の終了コード（NDF のエントリポイントと、`scripts/lib/ndf_wrappers.py` を通す根の `scripts/`） | 終了コード 3 の「前提が無い」と「正常な否定の結果」の、共通の契約での分離 |
 | 共通の終了コードの表と `step_result.code_matches` | assess の「飛ばしてよい」の値（3）と、supervise の `skip_code` の既定（3） |
 | supervise の run のステップと `実行の条件` が 69 を飛ばさないこと | 依存の入れ方（uv の入れ方・環境の置き場所） |
-| ラッパー（ndf-relay）の環境が無いときの終了コードを 3 のまま保つこと | `deps.require` を呼ばない hook とラッパー、mcp-serena の `serena_lsp/env.py`、実験版の `deps-trial.py`・`hook-trial.py`（どれも依存の欠けを 3 で返す別の実装） |
+| ラッパー（ndf-relay）の環境が無いときの終了コードを 3 のまま保つこと | `deps.require` を呼ばない hook とラッパー、実験版の `deps-trial.py`・`hook-trial.py`（どれも依存の欠けを 3 で返す別の実装） |
 
 ## 背景
 

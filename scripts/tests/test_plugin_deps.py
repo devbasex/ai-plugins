@@ -35,7 +35,6 @@ PROJECTS = {
     ".": "lock_root",
     "plugins/ndf": "lock_ndf",
     "plugins/playwright-kit/skills/playwright-kit-ops": "lock_playwright",
-    "plugins/mcp/mcp-serena": "lock_serena",
 }
 # 7 日の規則の正（不変条件 I6）
 SOURCE_OF_TRUTH = "plugins/ndf"

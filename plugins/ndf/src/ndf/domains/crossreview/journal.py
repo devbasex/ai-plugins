@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from typing import Any, Optional
 
 from ndf.core.converge import oscillation
-from ndf.domains.crossreview import criteria_decide, prior_decide
+from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 
 
@@ -22,9 +23,39 @@ def _text(value: object) -> Optional[str]:
 # --- ジャーナル -------------------------------------------------------------------------------
 
 
+# 指摘の発生の値の欄。番号は別の状態ファイルでも再発でも使い回されるので、PR のスレッドは番号とこの値の両方で
+# 指摘に結び付ける（#4016 の不変条件 I4）
+OCCURRENCE = "occurrence"
+
+
+def new_occurrence() -> str:
+    """指摘の新しい発生の値（`uuid4` の 16 進の先頭 12 字）。"""
+    return uuid.uuid4().hex[:12]
+
+
 def _journal_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
-    """ジャーナルの 1 行（未解決で始まる）。"""
-    return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
+    """ジャーナルの 1 行（未解決で始まり、新しい発生の値を持つ）。新しい行を作る `enter`・`carry`・`apply_fix` がそろって使う。"""
+    return {
+        "id": fid,
+        "key": key,
+        "text": text,
+        "section": section,
+        "round": round_no,
+        "outcome": fin.UNRESOLVED,
+        "reason": None,
+        "by": by,
+        OCCURRENCE: new_occurrence(),
+    }
+
+
+def with_occurrences(data: dict[str, Any]) -> bool:
+    """状態ファイルの指摘のうち発生の値の無いもの（前のバージョンが書いた指摘）へ新しい値を書く。書いたら真。"""
+    wrote = False
+    for row in store.list_of(data, store.FINDINGS):
+        if isinstance(row, dict) and not (isinstance(row.get(OCCURRENCE), str) and row[OCCURRENCE]):
+            row[OCCURRENCE] = new_occurrence()
+            wrote = True
+    return wrote
 
 
 def _located(item: dict[str, Any]) -> dict[str, Any]:
@@ -111,8 +142,9 @@ class FindingJournal:
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
-        """直した指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。"""
-        known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
+        """直した指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
+        resolve 済みの古いスレッドへ結び付けない（#4016）。"""
+        known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
