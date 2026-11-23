@@ -199,7 +199,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | #4000 の表の 1〜5 の本文 → pushback・`judge=rule`・`ask` を呼ばない。偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。ルールが `report` を返す長文（「どちらにするかの指示をください。」の後に箇条書きでない報告の行が 9 行）で `ask` に質問の行が渡る（表の 3 回目の箇条書き 9 行はルールで止まるので、受け渡しの確かめに使わない） | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 7 秒・余白 1.5 秒・設定 5 秒のとき `ask` に渡る秒が 5（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに通過・`judge=fallback:<failure>` |
+| `check` | #4000 の表の 1〜5 の本文 → pushback・`judge=rule`・`ask` を呼ばない。偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。ルールが `report` を返す長文（「どちらにするかの指示をください。」の後に箇条書きでない報告の行が 9 行）で `ask` に質問の行が渡る（表の 3 回目の箇条書き 9 行はルールで止まるので、受け渡しの確かめに使わない） | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 10 秒・余白 1.5 秒・設定 8 秒のとき `ask` に渡る秒が 8（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに通過・`judge=fallback:<failure>` |
 | `check` の送信先と順序 | エントリポイント `cli` で親が見つかる → `ask` に `parent_launch` の返りが渡る | 起動の失敗の休み中（`resting` が真）・残りの秒が足りない Stop で偽の `parent_launch` が呼ばれない（`judge=skip:rest`・`skip:time`）。送信先の不一致の休み中は `parent_launch` が呼ばれ、その返りで `endpoint_resting` が真なら `ask` が呼ばれない（`judge=skip:rest`）。Codex でも休み中でも、記録される `judge` は表で最初に当たった 1 つ | Codex で `skip:runtime`、`parent_launch` が None で `skip:endpoint`（どちらも `ask` を呼ばない）。`ask` が `endpoint` を返す → `judge=fallback:endpoint`・休みのマーカーが書かれる |
 | `check` の上限の後 | `model_waited()` が真の数え手で上限に達し、本文がルールの判定で `report` → pushback（`ask` は呼ばない）。上限に達した数え手でルールの判定が `prose_wait` → pushback（`judge=rule`）。dispatch を通すと `limited` が真になる | `model_waited()` が偽 → 通す | — |
 | `check` の通す順序 | 引用の誤検出の例（「このレーンは「どちらにするかの指示をください」と書いた後に…こちらでは何も待っていません。」）→ ルールが `report`、偽の `ask` の `report` で通過。「別のレーンは承認を待っています。」→ 通過・`judge=skip:elsewhere`・`ask` を呼ばない | AskUserQuestion を使ったターン（`asked_this_turn` が真）の「選択肢から選んでください。」（ルールは `prose_wait`）→ 通過・`judge=skip:asked`・`ask` を呼ばない | 「別のレーンは承認を待っています。こちらは #4217 を載せてよいですか。」→ pushback・`judge=rule` |
@@ -285,7 +285,7 @@ plugins/ndf/
 
 満たす決定: 決定 2、受け入れ条件 7・8
 
-- `contracts/limits.json`: 上の「内部のデータと定数」の 3 行。`hook.stop-wait.judge` の `seconds`（5）≤ `hook.budget.stop` の締め切り − 余白（7 − 1.5 = 5.5）。この比較は `runtimes` のランタイム（Claude Code）の予算とだけ行い、`hook.budget.stop.codex` とは比べない。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
+- `contracts/limits.json`: 上の「内部のデータと定数」の 3 行。`hook.stop-wait.judge` の `seconds`（8）≤ `hook.budget.stop` の締め切り − 余白（10 − 1.5 = 8.5）。この比較は `runtimes` のランタイム（Claude Code）の予算とだけ行い、`hook.budget.stop.codex` とは比べない。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
 - `contracts/hooks/guards.json`: `stop-wait` の `limits` を `["hook.stop-wait.judge"]` にし、`summary` に軽いモデルの判定と戻り方を足す
 - `hooks/claude.json`・`hooks/codex.json`: `ndf hooks render` で作り直す（Claude Code の Stop の timeout 6 → 12。Codex の Stop は 6 のまま）。手で書かない
 - `ndf hooks judge-cases [--cases <パス>] [--rounds <周の数>]`: 既定のパスは `contracts/hooks/reply-judge-cases.json`、既定の周の数は設定の `rounds`（3）。各例を周の数だけ打ち、1 周でも外れた例を結果 JSON の `items` に `id`・`expect`・外れた周の `got` で出す。`metrics` に件数・外れた例の件数・打った回数・秒の最小と最大。外れがあれば `status` は `stopped`（終了コード 1）
