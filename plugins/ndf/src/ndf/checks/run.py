@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks import budget, child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
 from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
@@ -99,11 +99,17 @@ def _order(f: Finding) -> tuple[str, int, str, str]:
 
 
 def check(
-    scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None, only: list[str] | None = None
+    scope: Scope,
+    rules: dict[str, Any],
+    write_spec: bool = False,
+    written: list[str] | None = None,
+    only: list[str] | None = None,
+    metrics: dict[str, Any] | None = None,
 ) -> list[Finding]:
     """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
 
-    設定を読む規則（`SETTINGS_RULES`）と規則 experimental は、`only` が無いか `only` に名前があるときだけ当てる。
+    設定を読む規則（`SETTINGS_RULES` と規則 budget）と規則 experimental は、`only` が無いか `only` に名前があるときだけ当てる。
+    規則 budget を当てたときは、件数を違反の有無にかかわらず `metrics` の `budget` へ入れる。
     """
     found = unparsable(scope)
     found += smell_findings(scope, rules)
@@ -113,6 +119,11 @@ def check(
     found += spec_docs.check(scope, rules, write_spec, written)
     if not only or experimental.RULE in only:
         found += experimental.check(scope, rules)
+    if not only or budget.RULE in only:
+        counts = budget.measure(scope)
+        found += budget.check(scope, rules, counts)
+        if metrics is not None:
+            metrics[budget.RULE] = counts.as_metrics()
     for name, rule in SETTINGS_RULES.items():
         if not only or name in only:
             found += rule(scope, rules)
@@ -120,11 +131,16 @@ def check(
 
 
 def select(
-    scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
+    scope: Scope,
+    rules: dict[str, Any],
+    only: list[str] | None,
+    write_spec: bool = False,
+    written: list[str] | None = None,
+    metrics: dict[str, Any] | None = None,
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。"""
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    found = check(scope, rules, write_spec, written, only)
+    found = check(scope, rules, write_spec, written, only, metrics)
     return [f for f in found if not only or f.rule in only]
 
 
@@ -154,18 +170,19 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
     written: list[str] | None = [] if args.write_spec else None
+    measured: dict[str, Any] = {}
     try:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name)
-        found = select(scope, rules, args.only, args.write_spec, written)
+        found = select(scope, rules, args.only, args.write_spec, written, measured)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
     for f in found:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
-    metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule}
+    metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule, **measured}
     if written is not None:
         metrics["written"] = len(written)
     if not found:

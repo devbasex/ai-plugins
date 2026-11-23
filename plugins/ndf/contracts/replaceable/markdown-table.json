@@ -1,0 +1,6 @@
+{
+  "summary": "Markdown のテーブルの列を \" | \" の join で組み立てる。tabulate で置き換えられる",
+  "find": {"kind": "join", "separator": " | "},
+  "replace_with": "tabulate",
+  "exempt": []
+}

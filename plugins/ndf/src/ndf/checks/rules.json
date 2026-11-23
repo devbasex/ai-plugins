@@ -138,6 +138,9 @@
   "experimental": {
     "summary": "既定で動くもの（プラグインの根の下で配るファイル）が実験版の保存先を参照する"
   },
+  "budget": {
+    "summary": "テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数が、リポジトリの設定の budget の上限を超えた"
+  },
   "spec": {
     "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
     "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]

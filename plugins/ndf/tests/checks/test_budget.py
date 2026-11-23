@@ -13,13 +13,12 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts, identity
-from ndf.checks import budget, child_deps, lint, run
+from ndf.checks import budget, child_deps, lint, run, spec_model
 from ndf.checks.model import CheckError, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 NAME = "ndfdev"
 SETTINGS_REL = f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json"
-CHECK_RESULT_SCHEMA = "schemas/io/check.result.schema.json"
 
 
 @dataclass
@@ -57,6 +56,7 @@ def tree(tmp_path: Path) -> Repo:
     root = repo / "plugins" / "ndf-dev"
     _write(root / ".claude-plugin" / "plugin.json", json.dumps({"name": NAME, "version": "0"}))
     _write(root / "src" / "ndf" / "__init__.py", '"""p"""\n')
+    shutil.copy(PLUGIN_ROOT / "pyproject.toml", root / "pyproject.toml")
     child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
     _write(root / child_deps.CHILDREN_REL, json.dumps({"children": {"X": child}, "tables": {}}))
     return Repo(repo, root)
@@ -102,7 +102,7 @@ def test_count_tests_skips_nested_functions(tree):
 
 def test_count_tests_skips_files_that_are_not_tests(tree):
     tree.write("src/ndf/b.py", "def test_like():\n    pass\n")
-    tree.write("tests/conftest.py", "def test_helper():\n    pass\n")
+    tree.write("helpers/conftest.py", "def test_helper():\n    pass\n")
     tree.write("tests/test_a.py", "def test_a():\n    pass\n")
     assert budget.count_tests(tree.scope()) == 1
 
@@ -146,7 +146,9 @@ PYPROJECT = 'requires-python = ">=3.11"\n'
 def _deps(tree, deps: list[str], locked: list[str], dev: list[str] | None = None, budget_settings: dict | None = None) -> None:
     lines = "".join(f'    "{d}",\n' for d in deps)
     groups = "".join(f'    "{d}",\n' for d in dev) if dev else ""
-    tree.write("pyproject.toml", f'[project]\nname = "x"\n{PYPROJECT}dependencies = [\n{lines}]\n\n[dependency-groups]\ndev = [\n{groups}]\n')
+    tree.write(
+        "pyproject.toml", f'[project]\nname = "x"\n{PYPROJECT}dependencies = [\n{lines}]\n\n[dependency-groups]\ndev = [\n{groups}]\n'
+    )
     tree.write("uv.lock", "version = 1\n" + "".join(f'\n[[package]]\nname = "{n}"\nversion = "1"\n' for n in locked))
     settings: dict = {"toolchain": {"plugin_pyprojects": ["plugins/ndf-dev/pyproject.toml"]}}
     if budget_settings is not None:
@@ -173,9 +175,12 @@ def test_unused_deps_normalizes_names(tree):
 
 
 def test_unused_deps_reads_import_names_from_dep_modules(tree):
-    _deps(tree, ["python-dotenv==1.2.4", "markdown-it-py==4.3.0"], ["python-dotenv", "markdown-it-py"], budget_settings={
-        "dep_modules": {"python-dotenv": "dotenv", "markdown-it-py": "markdown_it"}
-    })
+    _deps(
+        tree,
+        ["python-dotenv==1.2.4", "markdown-it-py==4.3.0"],
+        ["python-dotenv", "markdown-it-py"],
+        budget_settings={"dep_modules": {"python-dotenv": "dotenv", "markdown-it-py": "markdown_it"}},
+    )
     tree.write("src/ndf/a.py", "import dotenv\nfrom markdown_it import MarkdownIt\n")
     assert budget.unused_deps(tree.scope()) == []
 
@@ -383,6 +388,13 @@ def test_measure_as_metrics_has_the_four_counts(tree):
 # --- run.py
 
 
+def _schema_errors(report: dict) -> list[str]:
+    """`ndf check` の結果のスキーマ（`check.result.schema.json`）の誤り。"""
+    validator = spec_model.result_validator(run.TOOL)
+    assert validator is not None
+    return [e.message for e in validator.iter_errors(report)]
+
+
 @pytest.fixture
 def entry(tree, monkeypatch):
     """`ndf check` を git と Ruff を起動せずに打てるようにする。"""
@@ -399,7 +411,7 @@ def test_ndf_check_reports_budget_metrics_without_findings(entry, capsys, last_r
     assert run.main([]) == 0
     report = last_result(capsys.readouterr().out)
     assert report["metrics"][budget.RULE] == {"tests": 1, "ci_jobs": 0, "unused_deps": 0, "replaceable": 0}
-    assert contracts.schema_errors(report, CHECK_RESULT_SCHEMA) == []
+    assert _schema_errors(report) == []
 
 
 def test_ndf_check_over_the_limit_fails_and_keeps_the_metrics(entry, capsys, last_result):
@@ -409,7 +421,7 @@ def test_ndf_check_over_the_limit_fails_and_keeps_the_metrics(entry, capsys, las
     report = last_result(capsys.readouterr().out)
     assert [i["rule"] for i in report["items"]] == [budget.RULE]
     assert report["metrics"][budget.RULE]["tests"] == 2
-    assert contracts.schema_errors(report, CHECK_RESULT_SCHEMA) == []
+    assert _schema_errors(report) == []
 
 
 def test_ndf_check_only_other_rule_does_not_measure(entry, capsys, last_result):
@@ -426,4 +438,4 @@ def test_check_result_schema_refuses_extra_budget_keys():
         "items": [],
         "metrics": {budget.RULE: {"tests": 1, "ci_jobs": 0, "unused_deps": 0, "replaceable": 0, "other": 1}},
     }
-    assert contracts.schema_errors(report, CHECK_RESULT_SCHEMA) != []
+    assert _schema_errors(report) != []
