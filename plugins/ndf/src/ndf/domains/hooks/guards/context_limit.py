@@ -381,17 +381,22 @@ def _remembered(ctx, svc) -> Optional[int]:
     return got["tokens"]
 
 
+def _noticed(svc) -> bool:
+    """この入力の後に知らせ済みか、数え手が使えないなら真。"""
+    return not svc.counter.usable or svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0  # noqa: NDF502 ファイル: 知らせる前は 0 回
+
+
 def _post(ctx, svc) -> Verdict | None:
     """PostToolUse: 判断開始の値以上・運用上限未満で、判定の対象なら、利用者の入力ごとに 1 度知らせる。
 
     知らせ済みか数え手が使えなければ、リポジトリを探さず会話の記録も読まずに終える。PreToolUse が覚えた値があれば
     会話の記録を読み直さず、リポジトリは知らせる直前にだけ探す。
     """
-    if not svc.counter.usable or svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+    if _noticed(svc):
         return None
     tokens = _remembered(ctx, svc)
     checked = tokens is None
-    if tokens is None:
+    if checked:
         if _main(ctx.cwd) is None:
             return None
         tokens = context_tokens(ctx.transcript_tail)

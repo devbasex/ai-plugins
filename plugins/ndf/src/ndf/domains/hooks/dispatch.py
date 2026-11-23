@@ -171,8 +171,8 @@ def combine(verdicts: list[Verdict]) -> Verdict:
     if kind == "pass":
         return PASS
     same = [v for v in verdicts if v.kind == kind]
-    texts = [v.text for v in ([v for v in same if v.sole] or same) if v.text]
-    joined = "\n\n".join(texts)
+    chosen = [v for v in same if v.sole] or same
+    joined = "\n\n".join(v.text for v in chosen if v.text)
     return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
 
 

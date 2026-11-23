@@ -32,6 +32,13 @@ class Thresholds(NamedTuple):
         return self._asdict()
 
 
+def _positive_int(raw: str | None) -> int | None:
+    """`raw` が正の整数（ASCII の数字だけ）ならその値、そうでなければ None。"""
+    if raw and re.fullmatch("[0-9]+", raw) and int(raw) > 0:
+        return int(raw)
+    return None
+
+
 def thresholds(environ: Mapping[str, str], value: Callable[[str, str], Any]) -> Thresholds:
     """上限の設定の 2 つの値に `NDF_CONTEXT_LIMIT` を重ね、判断開始の値 ≤ 運用上限にそろえて返す。
 
@@ -42,8 +49,9 @@ def thresholds(environ: Mapping[str, str], value: Callable[[str, str], Any]) -> 
     decide_from, limit = int(value(DECIDE_FROM, "count")), int(value(LIMIT, "count"))
     sources = {"decide_from": DEFAULT, "limit": DEFAULT}
     raw = environ.get("NDF_CONTEXT_LIMIT")  # 名前は環境変数の表（contracts/domains/env.json）が持つので定数に写さない
-    if raw and re.fullmatch("[0-9]+", raw) and int(raw) > 0:
-        limit, sources["limit"] = int(raw), FROM_ENV
+    env_limit = _positive_int(raw)
+    if env_limit is not None:
+        limit, sources["limit"] = env_limit, FROM_ENV
     elif raw:
         sources["ignored"] = "NDF_CONTEXT_LIMIT"
     if decide_from > limit:
