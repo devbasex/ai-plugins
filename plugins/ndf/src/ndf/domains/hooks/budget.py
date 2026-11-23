@@ -113,13 +113,21 @@ def _pair_errors(guard: dict[str, Any], runtime: str, event: str, limits: dict) 
     found = budget_for(runtime, event, limits)
     if found is None:
         return [f"{runtime} の {event} の予算が limits.json に無い"] if tables.event_spec(runtime, event) is not None else []
-    return [_component_error(guard["name"], name, limits, found, f"{runtime} の {event}") for name in guard["limits"]]
+    return [_component_error(guard["name"], name, limits, found, runtime, event) for name in guard["limits"]]
 
 
-def _component_error(guard: str, name: str, limits: dict, found: Budget, where: str) -> str:
-    """部品の上限が締め切り − 余白を超えれば破れの文。守れていれば空。"""
+def _component_error(guard: str, name: str, limits: dict, found: Budget, runtime: str, event: str) -> str:
+    """部品の上限が締め切り − 余白を超えれば破れの文。守れていれば空。
+
+    部品の行が `runtimes` を持てば、そのランタイムの予算とだけ比べる（ほかのランタイムでは部品を使わない。
+    `hook.stop-wait.judge` は Claude Code だけでモデルを呼ぶ）。
+    """
     if name not in limits:
         return f"{guard} の部品の上限 {name} が limits.json に無い"
+    runtimes = limits[name].get("runtimes")
+    if runtimes is not None and runtime not in runtimes:
+        return ""
+    where = f"{runtime} の {event}"
     seconds = limits[name].get("seconds")
     if seconds is not None and seconds > found.usable:
         return f"{guard} の部品の上限 {name}（{seconds} 秒）が {where} の締め切り − 余白（{found.usable} 秒）を超える"

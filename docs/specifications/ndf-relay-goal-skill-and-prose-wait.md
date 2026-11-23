@@ -18,6 +18,18 @@
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・境界・データの形・既知の限界・テスト観点）を残す。
 **手順・振る舞いの説明・入出力の契約の正は Skill・スクリプト・本体の確定仕様にある。**
 
+## 11 系での扱い
+
+**上の例と、この文書の「決定と理由」以下は 10 系（`ndf--v10.27.77` まで）の仕組みの記録である。** 11 系では次のとおり
+置き換わった。食い違うときは右の列の文書が正である。
+
+| 10 系の仕組み | 11 系の振る舞い | 正 |
+| --- | --- | --- |
+| `UserPromptSubmit` の hook（`hook.py goal-skill`）が条件の Skill を読み込む案内を足す | 案内の hook は無い。Claude Code が作業の最初の Tool の呼び出しで条件の Skill を読み込む（11.0.4 で確かめた。#3817） | [`relay.md`](../../plugins/ndf/skills/development-workflow/references/relay.md) の「付則: `/goal` を付けた場合」 |
+| ラッパーの直接の子の Stop だけを `relay.py mark` が差し戻し、`wait-held.json` で同じ区間に 2 度続けて止めない。判定は `classify_reply_wait` だけ | hook の guard `stop-wait` が中継の内外を問わずすべての Stop を見る。**先に 10 系の `classify_reply_wait` を移したルール（引用の中身と別の場所の待ちの報告を外す）を当て**、待ちと読んだ本文はそのまま変更を要求する。ルールで決まらない本文だけを、Claude Code のセッションで送信先が同じと確かめられるとき軽いモデル（haiku）に 1 回問う。止める回数は `wait-held.json` でなく、利用者の入力ごとの変更要求の上限（2 回）が抑え、上限の後は通して待ちの知らせを書く | [ndf-hook-stop-wait-judge.md](ndf-hook-stop-wait-judge.md) |
+| 差し戻しの文 `WAIT_REASON`（`AskUserQuestion` で出し直し、`metadata.source` に区分を付ける） | `stop_wait.REASON`。`WAIT_REASON` を出発点に、本文の質問が届かない理由・承認ゲートと `asking.md` の区分に当たれば出し直すこと・当たらなければ推奨の案で決めて続けることを持ち、ルールで止めたときは当たった文を添える | 同上 |
+| `log.jsonl` の `prose_wait` の行 | 中継の記録には書かない。hook の計測の行の `stop-wait` の notes（`reply`・`judge`・`judge_ms`・`judge_calls`）に残る | 同上 |
+
 | 何を読むか | 正本 |
 | --- | --- |
 | 利用者向けの説明（付則「`/goal` を付けた場合」・「承認ゲートを越えない守り」・「記録の読み方」の `prose_wait`） | [`development-workflow` の `references/relay.md`](../../plugins/ndf/skills/development-workflow/references/relay.md) |

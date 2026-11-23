@@ -8,25 +8,32 @@ from collections import Counter
 
 import pytest
 
-from ndf.domains.hooks import context
+from ndf.domains.hooks import context, reply_wait
 from ndf.testing import weight
 
 from ._hooks import bash, call_entry, stop
 
-_PARSERS = ("parse_payload", "parse_shell", "read_tail", "classify_reply")
+# 解析の関数（モジュールと名前）。本文の判定はルール（`reply_wait`）の `prose_lines`（行の抜き出し）・`read_prose`
+_PARSERS = (
+    (context, "parse_payload"),
+    (context, "parse_shell"),
+    (context, "read_tail"),
+    (reply_wait, "prose_lines"),
+    (reply_wait, "read_prose"),
+)
 
 
 @pytest.fixture
 def calls(monkeypatch):
     counted: Counter = Counter()
-    for name in _PARSERS:
-        real = getattr(context, name)
+    for module, name in _PARSERS:
+        real = getattr(module, name)
 
         def wrapped(*args, _real=real, _name=name, **kw):
             counted[_name] += 1
             return _real(*args, **kw)
 
-        monkeypatch.setattr(context, name, wrapped)
+        monkeypatch.setattr(module, name, wrapped)
     return counted
 
 
@@ -51,7 +58,8 @@ def test_stop_classifies_the_last_reply_once(tmp_path, calls, monkeypatch):
     payload = stop(tmp_path, "x")
     del payload["last_assistant_message"]
     call_entry("claude", "Stop", payload)
-    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "classify_reply": 1})
+    # 本文の行の抜き出し（`prose_lines`）も 1 回の Stop で 1 回だけ。`read_prose` は抜き出した行を受け、抜き出し直さない（判定の返りは stop-wait も読む）
+    assert calls == Counter({"parse_payload": 1, "read_tail": 1, "prose_lines": 1, "read_prose": 1})
 
 
 def test_shell_tree_reads_words_background_and_loops():
@@ -268,13 +276,29 @@ def test_split_env_string_follows_the_gnu_env_rules(text, words):
         ("別のセッションが人の回答を待っている", "elsewhere_wait"),
     ],
 )
-def test_classify_reply(text, kind):
-    assert context.classify_reply(text) == kind
+def test_last_reply_kind_follows_the_rule(text, kind):
+    ctx = context.HookContext("claude", "Stop", {"last_assistant_message": text})
+    assert ctx.last_reply_kind == kind and ctx.has_reply_prose is (kind != "none")
 
 
-def test_classify_reply_ignores_code_lines():
-    text = "結果を出した。\n```\nどうしますか？\n```"
-    assert context.classify_reply(text, [False, False, True, True]) == "report"
+def test_last_reply_kind_ignores_code_lines():
+    ctx = context.HookContext("claude", "Stop", {"last_assistant_message": "結果を出した。\n```\nどうしますか？\n```"})
+    assert ctx.last_reply_kind == "report"
+
+
+def test_last_reply_kind_does_not_read_the_prose_lines_twice(monkeypatch):
+    # `has_reply_prose` と `last_reply_kind` が同じ行を読み、`prose_lines`（行の抜き出し）を 1 回だけ打つ
+    real = reply_wait.prose_lines
+    extracted: list[str] = []
+
+    def counted(text):
+        extracted.append(text)
+        return real(text)
+
+    monkeypatch.setattr(reply_wait, "prose_lines", counted)
+    ctx = context.HookContext("claude", "Stop", {"last_assistant_message": "どちらにしますか？"})
+    assert ctx.has_reply_prose and ctx.last_reply_kind == "prose_wait"
+    assert extracted == ["どちらにしますか？"]
 
 
 def test_read_tail_drops_the_partial_first_line(tmp_path):
@@ -339,3 +363,49 @@ def test_last_reply_prefers_the_payload_message_over_the_transcript(tmp_path):
     payload["last_assistant_message"] = 1
     assert context.HookContext("claude", "Stop", payload).last_reply == "どうしますか？"
     assert context.HookContext("claude", "Stop", {}).last_reply == ""
+
+
+def _user(content) -> str:
+    return json.dumps({"type": "user", "message": {"content": content}})
+
+
+_PROMPT = _user([{"type": "text", "text": "進めて"}])
+_ASK = _assistant([{"type": "tool_use", "name": "AskUserQuestion", "input": {}}])
+_BASH = _assistant([{"type": "tool_use", "name": "Bash", "input": {}}])
+_RESULT = _user([{"type": "tool_result", "tool_use_id": "t1", "content": "1 つ目"}])
+_REPLY = _assistant([{"type": "text", "text": "本文"}])
+_META = json.dumps({"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "メタ"}]}})
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        # 入力 → AskUserQuestion → 結果 → 本文（Tool の結果の user の行を入力と読まない）
+        ([_PROMPT, _ASK, _RESULT, _REPLY], True),
+        ([_PROMPT, _ASK, _RESULT], True),
+        # 入力 → Bash → 本文
+        ([_PROMPT, _BASH, _RESULT, _REPLY], False),
+        # 前の入力の前にだけ AskUserQuestion がある
+        ([_PROMPT, _ASK, _RESULT, _PROMPT, _BASH, _REPLY], False),
+        # content が文字列の user の行も入力
+        ([_ASK, _user("進めて"), _REPLY], False),
+        # AskUserQuestion の後のメタの行（isMeta が真）は入力に数えない
+        ([_PROMPT, _ASK, _RESULT, _META, _REPLY], True),
+        # 末尾に利用者の入力が無ければ読めた範囲で探す
+        ([_ASK, _REPLY], True),
+        ([], False),
+        # 壊れた行・オブジェクトでない行が混じっても読める行で決める
+        ([_PROMPT, '{"type": "user", "mess', _ASK, json.dumps(["user"]), _REPLY], True),
+    ],
+)
+def test_asked_since_prompt_looks_back_to_the_last_user_input(lines, expected):
+    assert context.asked_since_prompt("\n".join(lines)) is expected
+
+
+def test_asked_this_turn_reads_the_transcript_tail(tmp_path):
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("\n".join([_PROMPT, _ASK, _RESULT, _REPLY]) + "\n", encoding="utf-8")
+    assert context.HookContext("claude", "Stop", {"transcript_path": str(path)}).asked_this_turn is True
+    path.write_text("\n".join([_PROMPT, _BASH, _REPLY]) + "\n", encoding="utf-8")
+    assert context.HookContext("claude", "Stop", {"transcript_path": str(path)}).asked_this_turn is False
+    assert context.HookContext("claude", "Stop", {}).asked_this_turn is False
