@@ -229,7 +229,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `work_prompt` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 新設 | `work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worker_paths.ReportPaths) -> str` | 共通のテンプレート（`contracts/worker/prompt.md`）と作業の定義と `values.json` の中身（`saved`）から、起動指示の本文を組む |
-| `_write_prompt` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 新設 | `_write_prompt(kind: str, state_dir: Path, saved: Mapping[str, Any], workdir: Path) -> Path` | `work_prompt` を呼び、`report_paths(...).prompt`（`<作業名>.prompt.md`）へ `worker_paths.write_file`（既存のリンクをたどらない。#3877）で書いてそのパスを返す |
+| `_write_prompt` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 新設 | `_write_prompt(kind: str, state_dir: Path, saved: Mapping[str, Any], workdir: Path) -> Path` | `work_prompt` を呼び、`report_paths(...).prompt`（`<作業名>.prompt.md`）へ、`worker_paths.open_workdir(workdir)` で開いた作業ディレクトリの記述子に対する `worker_paths.write_file(wd, 名前, 本文)`（既存のリンクをたどらない。#3877）で書いてそのパスを返す |
 | `work_argv` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 変更 | `work_argv(kind: str, state_dir: Path, workdir: Path) -> list[str]` | 作業の名前を `work_kinds()` で確かめ、プロンプトと結果ファイルのパスを `worker_paths.report_paths` から取り（`WORK_KINDS` の定数と `<作業名>-prompt.md`・`<作業名>-result.json` の字面をやめる）、`--cwd <workdir>` と、`kinds.json` の `outputs` の名前ごとの `--require-output <名前>` を足す |
 | `work_parser` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 変更 | `work_parser() -> argparse.ArgumentParser`（変わらない） | 作業の名前の説明を `work_kinds()` のキーから組む。`--cwd` を省けるようにする（省くと作業の定義の `cwd` と `values.json` から決める） |
 | `_cmd_work` | `plugins/ndf/src/ndf/progress/gate/entry.py` | 変更 | `_cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv) -> int` | プロンプトを書いてから `ndf worker run` へ置き換わる |
