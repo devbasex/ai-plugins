@@ -58,7 +58,14 @@
       ],
       "deny_key": "reason",
       "limits": [],
-      "params": {"handoff_dir": ".ndf/handoff/"},
+      "params": {
+        "handoff_dir": ".ndf/handoff/",
+        "pass_tools": ["TaskStop"],
+        "pass_ndf": {
+          "records handoff check": {"positional": 1, "flags": ["--trim"], "options": ["--history"], "paths": ["positional", "--history"]},
+          "relay context record": {"positional": 0, "flags": [], "options": ["--work", "--event", "--verdict", "--reason"], "paths": []}
+        }
+      },
       "fail_closed": false
     },
     {
