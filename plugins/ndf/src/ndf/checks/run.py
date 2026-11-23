@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks import child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, toolchain, words
 from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
@@ -31,7 +31,7 @@ TOOL = cli.tool_of(__name__)
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt", ".js", ".mjs", ".cjs"})
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
-SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {}
+SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
 
 
 def _walk(plugin_root: Path) -> list[Path]:

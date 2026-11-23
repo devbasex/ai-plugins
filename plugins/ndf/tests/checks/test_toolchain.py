@@ -42,7 +42,7 @@ def _py(version: str) -> str:
 def _launcher(version: str | None = None, digest: str | None = None) -> str:
     version = table.uv_version() if version is None else version
     digest = table.uv_installer_sha256() if digest is None else digest
-    return f'#!/usr/bin/env bash\nset -eu\nUV_VERSION="{version}"\n# 照合値\nUV_INSTALLER_SHA256="{digest}"\n'
+    return f'#!/usr/bin/env bash\nset -eu\nUV_VERSION="{version}"\n# インストーラの sha256\nUV_INSTALLER_SHA256="{digest}"\n'
 
 
 class Repo:
