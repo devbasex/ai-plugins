@@ -96,16 +96,23 @@ REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ]
 # 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
 # （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
 # （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
-# 差分を読めないか（起点が無いなど）は `git diff` 自身の終了コード（`wait $!`）で見て、空の差分と分ける（#3908 の r2-5）。
-# `mapfile -d ''` で NUL 区切りのパスを 1 つずつの引数へ写すので、包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
+# 差分を読めないか（起点が無いなど）は `git diff` 自身の終了コードで見て、空の差分と分ける（#3908 の r2-5）。
+# macOS 標準の Bash 3.2 でも動くよう `mapfile`・`wait $!`（プロセス置換の終了コード）を使わない（#3908 の r2-1）。
+# NUL 区切りのパスをプロセス置換から `read -d ''` で 1 つずつ読み、パスの後ろに空の区切り（パスは空にならない）と
+# `git diff` の終了コードを流して受け取る。配列を使うので包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
 # オプションと取り違えないよう、パスには `./` を前置して渡す（`ndf refactor run` がリポジトリ相対へ戻す。#3908 の r2-4）
 REFACTOR_WITH_PR = """ref=$1; shift
 if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
   exec "$1" contracts emit --tool refactor --status stopped \\
     --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
 fi
-mapfile -d '' -t files < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --)
-if ! wait $!; then
+files=() rc=1 end=
+while IFS= read -r -d '' f; do
+  if [ -n "$end" ]; then rc=$f
+  elif [ -z "$f" ]; then end=1
+  else files+=("./$f"); fi
+done < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --; printf '\\0%s\\0' "$?")
+if [ "$rc" != 0 ]; then
   exec "$1" contracts emit --tool refactor --status stopped \\
     --summary "起点 $ref からの差分を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "git diff が失敗"
 fi
@@ -113,7 +120,7 @@ if [ "${#files[@]}" -eq 0 ]; then
   exec "$1" contracts emit --tool refactor --status stopped \\
     --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
 fi
-exec "$@" --pr "$n" --scope "${files[@]/#/./}"
+exec "$@" --pr "$n" --scope "${files[@]}"
 """
 
 Value = Union[str, list[str]]

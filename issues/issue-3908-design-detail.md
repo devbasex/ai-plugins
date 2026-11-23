@@ -442,7 +442,7 @@ plugins/ndf/
 
 PR の番号と差分は、前の工程（実装の PR の作成・push）が終わってからでないと決まらないので、`REVIEW_WITH_PR` と同じく包みのシェルが打つ時点に読んで足す。工程の並びでは工程「実装」が単位の PR を作る（`impl.json` の `pr` のステップ）ので、工程「リファクタリング」の時点ではふつう PR がある。
 
-包みのシェルは `bash -c` にする（`testing/command.py:142` と同じ）。NUL 区切りのパスを 1 つずつの引数へ写す `mapfile -d ''` が POSIX の `sh` に無いためである。位置引数と本文は次のとおりである（`refactor_launch` が組む argv の 4 つ目以降が位置引数になる）。
+包みのシェルは `bash -c` にする（`testing/command.py:142` と同じ）。NUL 区切りのパスを 1 つずつの引数へ写す配列と `read -d ''` が POSIX の `sh` に無いためである。macOS 標準の Bash 3.2 でも動くよう、`mapfile` と `wait $!`（プロセス置換の終了コード）は使わず、パスの後ろに空の区切りと `git diff` の終了コードを流して受け取る。位置引数と本文は次のとおりである（`refactor_launch` が組む argv の 4 つ目以降が位置引数になる）。
 
 | 位置 | 中身 |
 | --- | --- |
@@ -456,11 +456,16 @@ if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
   exec "$1" contracts emit --tool refactor --status stopped \
     --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
 fi
-if ! git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+files=() rc=1 end=
+while IFS= read -r -d '' f; do
+  if [ -n "$end" ]; then rc=$f
+  elif [ -z "$f" ]; then end=1
+  else files+=("./$f"); fi
+done < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --; printf '\0%s\0' "$?")
+if [ "$rc" != 0 ]; then
   exec "$1" contracts emit --tool refactor --status stopped \
-    --summary "起点 $ref を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "起点が無い"
+    --summary "起点 $ref からの差分を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "git diff が失敗"
 fi
-mapfile -d '' -t files < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --)
 if [ "${#files[@]}" -eq 0 ]; then
   exec "$1" contracts emit --tool refactor --status stopped \
     --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
