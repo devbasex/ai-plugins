@@ -406,7 +406,8 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
 
     題と本文は試行ごとに保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
-    （承認の回答・続き・プランの打ち直し）はその写しを使う。工程の新しい試行は `clear_values` が写しを消し、読み直す。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
+    （承認の回答・続き・プランの打ち直し）はその写しを使う。工程の新しい試行は `clear_values` が写しを消し、読み直す
+    （前の試行が差し込みを組み終える前に止まっていれば、写しを残して読み直さない）。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
     届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
@@ -460,6 +461,7 @@ def template_values(
     手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
     同じ理由で、課題の前には手元で決まる打った場所の値（`route.derived_locally`）だけを決め、GitHub に問うマージの方式
     （`route.derived_merge_method`）は課題を読んだ後に決める（課題を読めずに止まる試行で問い合わせを増やさない。PR 4289 の指摘）。
+    マージの方式を決められずに止まった試行の課題の写しは、次の試行の始まりで `clear_values` が残すので、打ち直しで読み直さない。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -638,22 +640,27 @@ def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
     return held
 
 
-# 試行の始まりに消す、前の試行が保存先に残した値（差し込みの値と、課題の題・本文の写し）
-TRIAL_FILES = (VALUES_FILE, ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
+# 試行の始まりに消す、前の試行が保存先に残した課題の題・本文の写し（差し込みの値 `VALUES_FILE` と一緒に消す）
+ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
 
 
 def clear_values(state_dirs: Iterable[Path]) -> None:
-    """渡された保存先から前の試行の値（`TRIAL_FILES`）を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
+    """渡された保存先から前の試行の値を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
 
-    課題の写しも消すのは、残すと `_issue_values` が写しを優先し、新しい試行が GitHub で直した題・本文を取り込まないためである。
+    差し込みの値（`VALUES_FILE`）があれば、それと課題の写し（`ISSUE_COPIES`）を消す。写しも消すのは、残すと `_issue_values` が
+    写しを優先し、新しい試行が GitHub で直した題・本文を取り込まないためである。差し込みの値が無い保存先（前の試行が
+    差し込みを組み終える前に止まった。例: マージの方式を決められない）の写しは、その止まった試行が読んだばかりの課題なので
+    残し、打ち直しで GitHub の課題と書き手の権限を読み直さない（PR 4289 の指摘）。
     消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
     """
     for state_dir in state_dirs:
-        if not state_dir.is_dir():
+        held = state_dir / VALUES_FILE
+        if not held.is_file():
             continue
-        for pattern in TRIAL_FILES:
+        for pattern in ISSUE_COPIES:
             for found in state_dir.glob(pattern):
                 found.unlink(missing_ok=True)
+        held.unlink(missing_ok=True)
 
 
 class PreparedPlan(NamedTuple):

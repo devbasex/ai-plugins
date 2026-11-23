@@ -127,6 +127,19 @@ def test_clear_values_removes_the_file_from_each_dir_and_skips_dirs_without_it(t
     assert not (held / invoke.VALUES_FILE).exists() and not bare.exists()
 
 
+def test_clear_values_removes_the_issue_copies_only_with_the_values(tmp_path):
+    # 差し込みを組み終えた試行の写しは消し、組み終える前に止まった試行の写しは残す（PR 4289 の指摘）
+    done, stopped = tmp_path / "a", tmp_path / "b"
+    for d in (done, stopped):
+        d.mkdir()
+        (d / invoke.ISSUE_BODY_FILE.format(number=7)).write_text("本文", encoding="utf-8")
+        (d / invoke.ISSUE_TITLE_FILE.format(number=7)).write_text("{}", encoding="utf-8")
+    invoke.write_values(done, "close", {}, {}, True)
+    invoke.clear_values([done, stopped])
+    assert sorted(f.name for f in done.iterdir()) == []
+    assert len(list(stopped.iterdir())) == 2
+
+
 def _counting(monkeypatch, name: str) -> list:
     """`invoke.<name>` を、呼ばれた回数を数えて元へ渡す見張りにする。"""
     held, calls = getattr(invoke, name), []

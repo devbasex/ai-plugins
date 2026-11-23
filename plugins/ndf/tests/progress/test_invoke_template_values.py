@@ -57,7 +57,7 @@ def test_one_issue_fills_the_acceptance_of_the_issue_and_the_default_review(tmp_
     # 課題が 1 つなら、課題から写した issue で acceptance を --issue <issue> に補い、review は <リモート>/<base> から組む
     repo = _sprint_repo(tmp_path)
     got = _values(tmp_path, _impl_run(repo, [3092]), repo)
-    assert filled == [3092, "merge_method"]
+    assert filled == [3092]
     assert got["issue"] == "3092" and got["acceptance"] == ["--issue", "3092"]
     assert got["review"] == route.review_launch("impl", "sprint/s1", "origin/develop")
 
@@ -124,6 +124,21 @@ def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled
     assert filled == []
 
 
+def _close(tmp_path: Path, repo: Path) -> dict:
+    """課題とマージの方式の両方を使う閉じのテンプレート（`close`）の差し込み。"""
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    run = invoke.StageRun(invoke.PLAN, "close", {"issues": [3092], "worktree": str(repo)}, (), "none", "close")
+    return invoke.template_values(route.choose("close"), run, work, repo, project=PROJECT, local_tests=True)
+
+
+def test_close_reads_the_issue_before_asking_github_for_the_merge_method(tmp_path, filled):
+    repo = _sprint_repo(tmp_path)
+    got = _close(tmp_path, repo)
+    assert filled == [3092, "merge_method"]
+    assert got["title"] == "#3092 の題" and got["merge_method"] == "squash"
+
+
 def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, monkeypatch):
     # マージの方式は課題を読んだ後に GitHub に問う。課題を読めずに止まる試行では問い合わせない（PR 4289 の指摘）
     def fail(location, n):
@@ -132,5 +147,17 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
     monkeypatch.setattr(invoke, "issue_text", fail)
     repo = _sprint_repo(tmp_path)
     with pytest.raises(invoke.github.GitHubError):
-        _values(tmp_path, _impl_run(repo, [3092]), repo)
+        _close(tmp_path, repo)
     assert filled == []
+
+
+def test_a_retry_after_an_unknown_merge_method_does_not_read_the_issue_again(tmp_path, filled, monkeypatch):
+    # マージの方式を決められずに止まった試行の課題の写しは、次の試行の始まり（clear_values）で消さない（PR 4289 の指摘）
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: filled.append("merge_method"))
+    repo = _sprint_repo(tmp_path)
+    for _ in range(2):
+        with pytest.raises(invoke.TemplateValuesMissing) as got:
+            _close(tmp_path, repo)
+        assert set(got.value.missing) == {"merge_method"}
+        invoke.clear_values([tmp_path / "w"])
+    assert filled == [3092, "merge_method", "merge_method"]
