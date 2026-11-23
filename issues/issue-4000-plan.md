@@ -56,6 +56,12 @@
 - **満たす受け入れ条件:** 2・3・9
 - **進め方:** 失敗するテスト（偽の `call`・偽の `resolve`）→ 通す最小実装 → 整理
 
+### Task 6: ルールの前置き（10 系の判定を移す）
+- **対象ファイル:** `domains/hooks/reply_wait.py`（新設）・`tests/domains/hooks/test_reply_wait.py`（新設）・`tests/domains/hooks/fixtures/wait-corpus.json`（新設）
+- **変更内容:** 10 系（`ndf--v10.27.77`）の `classify_reply_wait` と例の組 225 件を移す。利用者の決定（2026-11-23）で、軽いモデルの前にルールを置く
+- **満たす受け入れ条件:** 0
+- **進め方:** 判定は自分で書き直さずに移し、例の組で 10 系と同じ正誤を縛るテストを足す
+
 ### Task 5: stop-wait の配線と設定
 - **対象ファイル:** `domains/hooks/guards/stop_wait.py`・`contracts/limits.json`・`contracts/hooks/guards.json`・`hooks/claude.json`・`hooks/codex.json` と `tests/domains/hooks/test_guards.py`・`test_budget.py`
 - **変更内容:** 詳細設計の「guard `stop-wait`」と「設定と登録」
@@ -67,12 +73,13 @@
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
 | u1 起動の前置き | Task 1 | 4000:9 | 約 150 | 305（`plugins/ndf` の下。追加 275・削除 30） |
-| u2 hook の文脈 | Task 2 | 4000:4 | 約 250 | |
-| u3 判定のリクエスト | Task 3 | 4000:1・4000:5・4000:6a・4000:9 | 約 400 | |
+| u2 hook の文脈 | Task 2 | 4000:4 | 約 250 | 202（`plugins/ndf` の下。PR 4263） |
+| u3 判定のリクエスト | Task 3 | 4000:1・4000:5・4000:6a・4000:9 | 約 400 | 1,141（`plugins/ndf` の下。PR 4264。cross-review の 7 ラウンドで送信先の確かめと休みの扱いが増え、見込みを超えた） |
 | u4 判定の子 | Task 4 | 4000:2・4000:3・4000:9 | 約 450 | |
-| u5 stop-wait の配線と設定 | Task 5 | 4000:1・4000:4・4000:5・4000:6・4000:7・4000:8・4000:10 | 約 300 | |
+| u6 ルールの前置き | Task 6 | 4000:0 | 約 250 | 256（`plugins/ndf` の下。例の組 `wait-corpus.json` は 10 系から移した入力なので数えない） |
+| u5 stop-wait の配線と設定 | Task 5 | 4000:0・4000:1・4000:4・4000:5・4000:6・4000:7・4000:8・4000:10 | 約 300 | |
 
-u1・u2 は互いに依存しない。u3 は u2 の締め切りを使わず単独で通る。u5 は u2・u3 の後に切る。`limits.json` と `children.json` は別のレーンの課題（#4016）が使っている間は変えず、u3・u4・u5 の登録と設定の行はその課題が main に入った後に足す。
+u1・u2 は互いに依存しない。u3 は u2 の締め切りを使わず単独で通る。u6 は単独で通る。u5 は u2・u3・u4・u6 の後に切る。`limits.json` と `children.json` は別のレーンの課題（#4016）が使っている間は変えず、u3・u4・u5 の登録と設定の行はその課題が main に入った後に足す。
 
 ## リファクタリングの時機
 
