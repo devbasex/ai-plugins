@@ -25,6 +25,8 @@ plugins/ndf/
 
 依存の向き: `hooks/guards/relay_mark.py` → `domains/relay/registry.py`（書く側）、`progress/plan/run.py` → `domains/relay/registry.py`・`domains/relay/observe.py`（読む側）→ `progress/lane/liveness.py`（判定）→ `progress/plan/run_decide.py`（知らせ）の一方向である。`liveness.py` は `relay` を読まず、材料は今までどおり `Probes` の呼び出しが集める。`registry.py` は `hooks` を読まない。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
+設計文書の触るファイルのうち `plugins/ndf/src/ndf/progress/plan/cli.py` は、活動を読む項目を `run.probes` に足すだけで `ndf lanes status` にも当たるため、変える行が無い（`cli.py:103` が `run.probes(where.repo, a.plan)` を渡す今の形のまま）。この経路の確かめは最後の「判定の値が増えることの当たり先」にある。
+
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/contracts/limits.json` | 変更 | 何もしていないとみなすまでの秒を持つ | 無し（データ） | `policies` | 無し |
@@ -347,4 +349,5 @@ plugins/ndf/
 | `liveness.STALL_KINDS` を読む側（`Liveness.stall`・`run.py` の `_judge`・`plan/__init__.py` の `_stall_warnings`） | `grep -rn "STALL_KINDS\|\.stall\b" plugins/ndf/src/ndf/progress/` | 値の名前を書かずに `STALL_KINDS` で判定するので、定数に足すだけで当たる |
 | 知らせのキー（`liveness.notice_key`） | `grep -n "def notice_key" -A 3 plugins/ndf/src/ndf/progress/lane/liveness.py` | キーに判定の種類を含むので、`stalled` の知らせと `idle_conductor` の知らせが別のキーになる。変えない |
 | リクエストを書く側（`run.write_report`・`NOTICE_FIELDS`） | `grep -n "NOTICE_FIELDS\|def write_report" plugins/ndf/src/ndf/progress/plan/run.py` | リクエストの種類は `lane_stalled` のままで、判定の種類は理由の文に入る。変えない |
-| `ndf lanes status`（`plan/__init__.py:462` の `judge_lanes`） | `grep -rn "judge_lanes" plugins/ndf/src/ndf/` | 判定の値で分岐せず `as_dict()` を行に載せるだけ。`run.probes` を使うので活動を読む項目も付く。変えない |
+| `ndf lanes status`（`plan/__init__.py:462` の `judge_lanes`） | `grep -rn "judge_lanes" plugins/ndf/src/ndf/` | 判定の値で分岐せず `as_dict()` を行に載せるだけ。変えない |
+| `ndf lanes status` のサブコマンド（`plan/cli.py:103` の `_cmd_status`） | `grep -rn "probes(" plugins/ndf/src/ndf/progress/plan/cli.py` | `run.probes(where.repo, a.plan)` を渡すだけなので、活動を読む項目を `run.probes` に足せば当たる。`judge_lanes` の `now` は省いたときに今の時刻にするので、ここも変えない。実装では、新しい判定が出たレーンで `ndf lanes status` の行に `liveness.kind` が `idle_conductor` と出ることを 1 回確かめる |
