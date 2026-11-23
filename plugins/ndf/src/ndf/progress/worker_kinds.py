@@ -91,7 +91,9 @@ VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool
 def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
     """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
 
-    保存先は祖先のリンクを解きながら 1 回だけ開き（`worker_paths.open_resolved`。macOS の `/tmp`・`/var` も通る）、その記述子の
+    保存先はあった要素までを祖先のリンクを解きながら確かめ（`worker_paths.resolve_existing`。macOS の `/tmp`・`/var` も通る）、
+    無い残りの要素はリンクをたどらずに作って 1 回だけ開く（`worker_paths.open_workdir(create=True)`。解いた時点の観測と開いた
+    記述子を突き合わせ、解いた後に現れた・差し替えられたディレクトリは `EntryUnsafe`（`replaced`）で止める）。その記述子の
     直下の私有の一時ディレクトリへ排他的に作った新しいファイルに、グループとほかの利用者の書き込み権限を外してから中身を書き、
     `values.json` へ公開する（`worker_paths.write_file(private=True)`）。固定名の一時ファイルを開かず、公開した後にパスを引き
     直さないので、共有の保存先で名前をリンクへ差し替えられても、呼んだ利用者の別のファイルを切り詰めることもアクセス権を
@@ -100,7 +102,8 @@ def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: 
     """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
-    with worker_paths.open_resolved(state_dir) as wd:
+    base, fresh, anchor = worker_paths.resolve_existing(state_dir)
+    with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
         worker_paths.write_file(wd, VALUES_FILE, json.dumps(held, ensure_ascii=False), private=True)
 
 

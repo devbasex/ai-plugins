@@ -170,7 +170,7 @@ plugins/ndf/
 - `write_values`
   - 事前条件: `state_dir` が存在する（呼ぶのは `prepare_plan` だけで、`prepare_plan` が先に `work_dir.mkdir(parents=True, exist_ok=True)` を済ませる。今 `_call_plan` が `src/ndf/progress/invoke.py:727` で行っている作成をここへ移す）
   - 事後条件: `<保存先>/values.json` が設計文書の「データ構造」の形で存在する。同じ工程を打ち直しても最後の中身になる。公開したファイルは、umask（グループ書き込みが有効なものも）や前のファイルのアクセス権によらず、呼んだ利用者が持ち、グループとほかの利用者が書き込めず、親から継いだ拡張 ACL を持たない（`read_values` と `_cmd_work` の `read_file(owned=True)` を通る）
-  - 手順: 保存先を `worker_paths.open_resolved` で祖先のリンクを解きながら 1 回だけ開き、その記述子で `worker_paths.write_file(wd, VALUES_FILE, 本文, private=True)` を呼ぶ。`write_file` は保存先の直下の私有の一時ディレクトリへ `O_EXCL` で新しいファイルを作り、継いだ拡張 ACL を外し、同じ記述子で `fchmod` してグループとほかの利用者の書き込みのビットを外してから、ディレクトリの記述子に対する `os.replace` で公開する。固定名の一時ファイル（`files.write_json` の `values.tmp`）を開かず、公開した後にパスを引き直して `stat`・`chmod` しない（共有の保存先で名前をリンクへ差し替えられても、呼んだ利用者の別のファイルを切り詰めない・アクセス権を変えない）
+  - 手順: 保存先のあった要素までを `worker_paths.resolve_existing` で祖先のリンクを解きながら確かめ、無い残りの要素は `worker_paths.open_workdir(create=True, origin=...)` でリンクをたどらずに作って 1 回だけ開き（保存先がまだ無い最初の試行でも書ける）、その記述子で `worker_paths.write_file(wd, VALUES_FILE, 本文, private=True)` を呼ぶ。`write_file` は保存先の直下の私有の一時ディレクトリへ `O_EXCL` で新しいファイルを作り、継いだ拡張 ACL を外し、同じ記述子で `fchmod` してグループとほかの利用者の書き込みのビットを外してから、ディレクトリの記述子に対する `os.replace` で公開する。固定名の一時ファイル（`files.write_json` の `values.tmp`）を開かず、公開した後にパスを引き直して `stat`・`chmod` しない（共有の保存先で名前をリンクへ差し替えられても、呼んだ利用者の別のファイルを切り詰めない・アクセス権を変えない）
   - 副作用: ファイルの書き込み 1 つ
 - `read_values`
   - 事前条件: 無し
@@ -214,7 +214,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `write_values`・`read_values` | `ndf.core.plan.files.write_json`・`read_json`（`invoke.py` が `plan_files` として既に読んでいる） | `grep -n "plan_files\|def write_json\|def read_json" plugins/ndf/src/ndf/progress/invoke.py plugins/ndf/src/ndf/core/plan/files.py` | 使えない。固定名の `values.tmp` をリンクをたどって開き、所有者・書き込み権限を確かめずに読むので、共有の保存先で `_cmd_work` が読む値の条件を満たせない（PR 4307 の r6-1〜r6-3） |
-| `write_values`・`read_values` | `ndf.contracts.worker_paths.open_resolved`・`write_file`・`read_file`（#3877） | `grep -n "^def open_resolved\|^def write_file\|^def read_file" plugins/ndf/src/ndf/contracts/worker_paths*.py` | 使う。記述子に対する排他的な作成と公開・所有者と書き込み権限の確かめを既に持ち、`ndf answer work` と同じ関数で読み書きする |
+| `write_values`・`read_values` | `ndf.contracts.worker_paths.open_resolved`・`resolve_existing`・`open_workdir`・`write_file`・`read_file`（#3877） | `grep -n "^def open_resolved\|^def resolve_existing\|^def open_workdir\|^def write_file\|^def read_file" plugins/ndf/src/ndf/contracts/worker_paths*.py` | 使う（`read_values` は `open_resolved`、作って書く `write_values` は `resolve_existing` と `open_workdir(create=True)`）。記述子に対する排他的な作成と公開・所有者と書き込み権限の確かめを既に持ち、`ndf answer work` と同じ関数で読み書きする |
 | `write_values`・`read_values` | `ndf.core.plan.records`（`prs.json`・`outputs.json` の読み書き。`src/ndf/core/plan/records.py:17-22`） | `grep -n "^def \|^[A-Z_]* = " plugins/ndf/src/ndf/core/plan/records.py` | 使えない。プランの実行の層が回をまたいで書く記録で、工程がプランを組むときの値を持たない（決定 2 で書き込み元を工程の層にした） |
 | `write_values` | `invoke._issue_values` がコピーを置く形（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE` を同じ `work_dir` へ書く。`invoke.py:386-412`） | `grep -n "ISSUE_BODY_FILE\|ISSUE_TITLE_FILE" plugins/ndf/src/ndf/progress/invoke.py` | 使う（置き方を踏襲する）。工程の保存先へ材料を残す形が既にある |
 
