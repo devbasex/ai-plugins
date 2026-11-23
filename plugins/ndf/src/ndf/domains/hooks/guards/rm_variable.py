@@ -317,20 +317,19 @@ def _substitution_end(word: str, double: bool, start: int) -> int | None:
     """既定値の字面 `word` の `start` から始まるコマンド置換（`$(…)`・`` `…` ``）の次の位置。確定しなければ None。
 
     `case` の `)`・コメントの中の `)`・`$((:); :)` を括弧の数では決められないので、tree-sitter-bash の構文木から取る。
-    走査が置換に着いたときだけ読み、境界が取れるまで次の順に読む（どの読み方も既定値ごとに 1 回で、結果は使い回す）。
+    走査が置換に着いたときだけ読み、境界が取れるまで次の順に読む（置換 1 つにつき 2 回まで、結果は使い回す）。
 
-    1. 元の `${…}` の文脈（`double` は二重引用の中か）で既定値全体。`$(` を含まない（`` ` `` の置換だけの）既定値は
-       読まない（`${…}` の中の `` `…` `` を置換と読まない）
-    2. 既定値だけを元の引用の文脈で全体
-    3. 置換から後ろだけを二重引用の中で（`$(true)(x)` の `(x)` のような、全体では誤りになる後ろの字を字として読む）
+    1. 元の `${…}` の文脈（`double` は二重引用の中か）で既定値全体（既定値ごとに 1 回）。`$(` を含まない（`` ` `` の
+       置換だけの）既定値は読まない（`${…}` の中の `` `…` `` を置換と読まない）
+    2. 置換から後ろだけを二重引用の中で。置換の中は引用の状態が改まるので、`start` での引用の状態によらず先頭の
+       置換の境界は同じに取れる。前の字の誤りを読まず、`$(true)(x)` の `(x)` のような全体では誤りになる後ろの字も
+       二重引用の中の字として読む
 
     誤りを含む置換と、その中の置換は境界にしない（確定しない置換は空になりうると判定される）。
     """
-    quote = '"' if double else ""
-    contexts = [(f": {quote}${{_:-", f"}}{quote}")] if "$(" in word else []
-    contexts.append((f": {quote}", quote))
-    for prefix, suffix in contexts:
-        end = _boundaries(word, prefix, suffix).get(start)
+    if "$(" in word:
+        quote = '"' if double else ""
+        end = _boundaries(word, f": {quote}${{_:-", f"}}{quote}").get(start)
         if end is not None:
             return end
     end = _boundaries(word[start:], ': "', '"').get(0)
