@@ -47,7 +47,7 @@ def _main_of(root: Path) -> Optional[Path]:
         return None
     try:
         text = (gitdir / "commondir").read_text(encoding="utf-8")
-    except FileNotFoundError:  # noqa: NDF401 ファイル: commondir が無いのは管理ディレクトリを外に保存するメインディレクトリ（--separate-git-dir）
+    except FileNotFoundError:  # commondir が無いのは管理ディレクトリを外に保存するメインディレクトリ（--separate-git-dir）
         return root
     except OSError:  # noqa: NDF401 ファイル: commondir を読めなければメインディレクトリは求められない
         return None
