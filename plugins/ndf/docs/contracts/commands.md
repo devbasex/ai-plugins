@@ -372,6 +372,16 @@
 
 結果の `metrics`: `exit_code`（integer）・`failed_runs`（integer）・`failed_tests`（array of string）・`runs`（integer）・`same_cause`（integer）・`streak`（integer）・`templates`（integer）。`items` の要素: `command`（string）・`exit_code`（integer）・`kind`（string）・`name`（string）・`params`（array of string）・`passed`（boolean）・`path`（string）・`purpose`（string）・`suite`（string）
 
+## `ndf samples`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/samples.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/samples.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf samples verify` | `--peer`（string・任意）: この相手の見本だけを突き合わせる |
+
+結果の `metrics`: `calls`（object）・`samples`（integer）。`items` の要素: `detail`（string）・`kind`（string）・`peer`（string）・`sample`（string）
+
 ## `ndf settings`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/settings.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/settings.result.schema.json)

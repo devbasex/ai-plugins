@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "live-sample.schema.json",
+  "title": "見本の定義 1 つ",
+  "description": "contracts/live-samples/<名前>.json の形。読み手は ndf.domains.samples.verify で、見本を source の公開の記述と突き合わせる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "peer",
+    "sample",
+    "source",
+    "absent_keys"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "相手。呼び出しの数は相手ごとに数え、上限は contracts/limits/samples.fetch.json の peers が持つ"
+    },
+    "sample": {
+      "type": "string",
+      "pattern": "^tests/samples/([a-z0-9][a-z0-9_-]*/)+[a-z0-9][a-z0-9_-]*\\.json$",
+      "description": "見本のファイル（プラグインの根からの相対）"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "pointer"
+      ],
+      "description": "本物の取り方",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "pattern": "^https://",
+          "description": "公開の記述（OpenAPI 3.1 の bundled 形式）の URL"
+        },
+        "pointer": {
+          "type": "string",
+          "pattern": "^#/components/",
+          "description": "記述の中の定義を指す JSON ポインタ"
+        }
+      }
+    },
+    "absent_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "見本を録った時点の記述の定義にあり、見本（本物の応答）に無かったキー。見本の根からのパスで、辞書のキーを / で区切り、配列の要素は * で書く。親のキーを書けば下は書かない"
+    }
+  }
+}
