@@ -114,7 +114,7 @@
     },
     {
       "id": "T6",
-      "title": "配る構成の宣言と規則 toolchain",
+      "title": "配る構成の設定と規則 toolchain",
       "files": [
         "plugins/ndf/contracts/data/toolchain.json",
         "plugins/ndf/contracts/schemas/toolchain.schema.json",
@@ -189,7 +189,7 @@
     },
     {
       "id": "T9",
-      "title": "実験版の置き場と規則 experimental",
+      "title": "実験版の保存先と規則 experimental",
       "files": [
         "plugins/ndf/contracts/domains/locations.json",
         "plugins/ndf/src/ndf/checks/experimental.py",
@@ -210,7 +210,7 @@
     },
     {
       "id": "T10",
-      "title": "見本の宣言と ndf samples verify",
+      "title": "見本の定義と ndf samples verify",
       "files": [
         "plugins/ndf/contracts/live-samples/",
         "plugins/ndf/contracts/causes/samples_mismatch.json",
@@ -290,7 +290,7 @@
       ]
     },
     {
-      "name": "設定と検査の土台",
+      "name": "設定と検査の基盤",
       "tasks": [
         "T3",
         "T5"
@@ -303,14 +303,14 @@
       ]
     },
     {
-      "name": "配る構成の宣言と CI の固定",
+      "name": "配る構成の設定と CI の固定",
       "tasks": [
         "T6",
         "T8"
       ],
       "after": [
         {
-          "unit": "設定と検査の土台",
+          "unit": "設定と検査の基盤",
           "reason": "T6 が T3 の Scope.settings と repo_files、T5 が足した規則の並びを使う。T8 は T6 の規則が必須チェックで有効になる同じ Pull Request で既存のワークフローの違反を直す（分けると規則の Pull Request が落ちる）"
         }
       ]
@@ -322,7 +322,7 @@
       ],
       "after": [
         {
-          "unit": "設定と検査の土台",
+          "unit": "設定と検査の基盤",
           "reason": "T7 が T3 の設定の budget のキーと repo_files を読む"
         }
       ]
@@ -334,7 +334,7 @@
       ],
       "after": [
         {
-          "unit": "設定と検査の土台",
+          "unit": "設定と検査の基盤",
           "reason": "T9 が T5 の足した規則の並びと同じ run.py・rules.json を触る"
         }
       ]
