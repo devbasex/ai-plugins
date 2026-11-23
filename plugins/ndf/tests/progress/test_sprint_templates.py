@@ -61,7 +61,7 @@ def sprint(repo, monkeypatch):
 
 @pytest.fixture
 def early_sprint(repo, monkeypatch):
-    """工程「作業場所の用意」までを流す `sprint`。そこまでの工程はブランチもコミットも読まないので、Git を打たない。"""
+    """工程「作業場所の用意」で止まるまでを流す `sprint`。そこまでの工程はブランチもコミットも読まないので、Git を打たない。"""
     return _sprint(repo, monkeypatch, "0" * 40)
 
 
@@ -224,10 +224,11 @@ def _run_to_worktree(repo, st, sprint, capsys, monkeypatch, report: dict) -> tup
     pytest.fail("工程「作業場所の用意」まで進まない")
 
 
-def test_worktree_plan_hands_the_outputs_of_the_result_file_to_its_stage(repo, st, early_sprint, capsys, monkeypatch):
+def test_worktree_plan_hands_the_outputs_of_the_result_file_to_its_stage(repo, st, sprint, capsys, monkeypatch):
     # #3908 の受け入れ条件 1: worker が結果ファイルの outputs に書いた作業場所とブランチが、工程の出力の検査を通って文脈へ届く
+    # 工程「作業場所の用意」を終えた手は工程「コードレビュー」まで進み、つなぎ目の起点に gathered を読むので `sprint` を使う
     report = {"status": "ok", "summary": "用意した", "outputs": {"worktree": str(repo), "branch": BRANCH}}
-    out, v = _run_to_worktree(repo, st, early_sprint, capsys, monkeypatch, report)
+    out, v = _run_to_worktree(repo, st, sprint, capsys, monkeypatch, report)
     assert out["status"] in ("ok", "gate"), out
     assert v.rows["作業場所の用意"].state == "finished"
     assert {k: v.context()[k] for k in ("worktree", "branch")} == {"worktree": str(repo), "branch": BRANCH}
