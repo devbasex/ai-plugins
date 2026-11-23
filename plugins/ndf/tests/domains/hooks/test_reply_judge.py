@@ -462,6 +462,13 @@ def test_endpoint_rest_is_split_by_the_parent_executable(tmp_path: Path) -> None
     assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, LAUNCH) is True
 
 
+def test_endpoint_rest_with_flags_is_not_split_by_the_parent_executable(tmp_path: Path) -> None:
+    # endpoint.flags があれば子は実行ファイルの同一性によらず拒むので、更新の後も同じ休みで子を起動しない
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
+    upgraded = GATEWAY._replace(exe="/home/u/.local/share/claude/versions/2.1.331", exe_id=[2049, 778])
+    assert reply_judge.endpoint_resting(tmp_path, 1000.0, ENV, upgraded) is True
+
+
 def test_endpoint_rest_is_split_by_the_config_dir() -> None:
     other = {**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude-b"}
     assert reply_judge.endpoint_scope({**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude-a"}, LAUNCH) != reply_judge.endpoint_scope(

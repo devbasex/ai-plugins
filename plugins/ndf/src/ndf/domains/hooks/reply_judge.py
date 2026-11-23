@@ -387,7 +387,8 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
     `account_dir.effective_env` がプロファイルを読む保存先。相対パスはプロジェクトの根から解くので値のまま。`endpoint.flags`
     のオプションがあれば子はプロファイルを読む前に拒むので入れない）・名前が
     `endpoint.env_names` に前方一致する環境変数の名前（値は入れない）・親の実行ファイルの実パスと `[st_dev, st_ino]`
-    （子は同一性が合わなければ `endpoint` を返すので、差し替えを検出した旧版の休みで新版の判定を止めない）。
+    （子は同一性が合わなければ `endpoint` を返すので、差し替えを検出した旧版の休みで新版の判定を止めない。`endpoint.flags`
+    のオプションがあれば子は同一性によらず拒むので入れず、更新の後も同じ拒否のために子を起動し直さない）。
     プロンプトなどの位置引数とほかのオプション、API キーなどの値は
     入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
     引数の読み方は `claude_args` と同じ（`claude_options`）。
@@ -403,8 +404,8 @@ def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
             "config_dir": env.get("CLAUDE_CONFIG_DIR"),
             "profile_dir": None if flags else env.get("ANTHROPIC_CONFIG_DIR"),
             "env": names,
-            "exe": launch.exe,
-            "exe_id": list(launch.exe_id),
+            "exe": None if flags else launch.exe,
+            "exe_id": None if flags else list(launch.exe_id),
         },
         ensure_ascii=False,
     )
