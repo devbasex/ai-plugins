@@ -41,7 +41,7 @@ flowchart LR
 | `contracts/schemas/io/lanes.args.schema.json`・`docs/contracts/commands.md` | 変更 | `lanes batch` の引数と説明 | — | — | — |
 | `contracts/domains/locations.json` | 変更 | 状態の保存先の行 `parallel/batches/` | — | — | — |
 | `skills/development-workflow/schemas/project.schema.json` | 変更 | `branch_strategy.verify.environment`（文字列） | — | — | — |
-| `skills/development-workflow/references/parallel.md`・`skills/release-verification/SKILL.md`・`skills/backlog-refinement/SKILL.md` | 変更 | オーガナイザーのまとめの手順と、担い手の手順（版を前後で読む・`batch close`） | — | — | — |
+| `skills/development-workflow/references/parallel.md`・`skills/release-verification/SKILL.md`・`skills/backlog-refinement/SKILL.md` | 変更 | オーガナイザーのまとめの手順と、担い手の手順（配布の版を前後で読み、導入した版で確かめる・`batch close`） | — | — | — |
 
 ## 委ねの口（`run`・`answering`・`delegate`）
 
@@ -104,7 +104,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `delegate`・`_start` | 計画の行の検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・行が完了 | 打ち直しで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` の行は `version: null` と作業場所の `HEAD` の `target_ref` で委ね、版の無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真で版の無い文脈で `precondition` |
 | `wait`・`liveness.judge` | 回答の前の委ねた待ちで `progress wait --timeout 0` が `gate` を返し、ラッパーの無い行の判定が `WAITING_ANSWER` | 回答の後は `RESUMING` | — |
-| `_consume_delegated` | `done` で委ねた工程がすべて完了し `verification` にその行のリポート・要求の版・読んだ版が載る。`documentation` で 2 工程とも完了 | 古い委ねのキーの回答を読まない。リポートに不合格や `not_run` の条件があっても `done` なら完了し振り返りへ進む | `failed` で先頭が `failed`・`decide` が `FAILED` |
+| `_consume_delegated` | `done` で委ねた工程がすべて完了し `verification` にその行のリポート・要求の版・導入した版が載る。`documentation` で 2 工程とも完了 | 古い委ねのキーの回答を読まない。リポートに不合格や `not_run` の条件があっても `done` なら完了し振り返りへ進む | `failed` で先頭が `failed`・`decide` が `FAILED` |
 | `environment_of` | 宣言があればその名前 | `verify: null`・キー無し・空の文字列でリポジトリの名前 | 形の違う設定で `precondition` |
 
 ## まとめのコマンド（`plan/batch`・`plan/cli`）
@@ -117,9 +117,9 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `assign` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd: Path, plan: str, requests: list[str], lane: Optional[str], reason: str) -> dict` | `batch_lock` を取り、計画の排他（`lock_plan`）の中の 1 つのトランザクションで、リクエストとレーンを確かめ直し、開いたまとめの打ち直しかを決め、`claim_slot` で取りかかりの記録を書き、`batch_claimed` と担い手の行（名指したレーンへ `add_row`、無ければ `add_lane` で `b<id>`）を書いてコミットする（下の「`assign` の書き込み」） |
 | `show` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id) -> dict` | まとめの中身と、担い手が打つ `close` の雛形（`--observed-version` の並びとリポートの形）を返す。取りかかりの記録がこのまとめ（保存先・計画・id の組）を指していないか、まとめに `batch_revoked` か `batch_closed` があれば `stopped`・`precondition` で手順を返さない（担い手は作業を始めず、オーガナイザーが `abort` する）。書かない |
-| `close` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id, result: str, report: Path, observed: dict[str, tuple[str, str]], cause: Optional[str], reason: str, caller: Writer) -> dict` | 書き手・版・リポートの形を確かめ、1 つのトランザクションで `batch_closed`・リクエストの閉じ・回答・担い手の行の終わりを書き、コミットの後に `release_slot` |
+| `close` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id, result: str, report: Path, observed: dict[str, Observed], cause: Optional[str], reason: str, caller: Writer) -> dict` | 書き手・版・リポートの形を確かめ、1 つのトランザクションで `batch_closed`・リクエストの閉じ・回答・担い手の行の終わりを書き、コミットの後に `release_slot` |
 | `abort` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, target: BatchRef, reason, caller: Writer) -> dict` | 下の「`abort` の手順」。`plan` は呼び手自身の計画（`cwd` の保存先から開く）、`target` は自分の計画のまとめの id か、別の計画の取りかかり（`--claim <種類>:<キー>`）。担い手の行が実行中なら、そのラッパーを止めて止まったことを確かめてから書き、確かめられなければ何も書かずに枠を保つ |
-| `check_version` | `src/ndf/progress/plan/batch.py` | 新設 | `(batch: Batch, result: str, observed: dict[str, tuple[str, str]], cause: Optional[str]) -> Optional[str]` | 検証の `done` に、版のあるリクエストを持つリポジトリの読んだ版の前後の一致と要求の版以上を求め、`failed` には原因を求める。版がすべて null のリポジトリは照らさない。誤りの文を返す |
+| `check_version` | `src/ndf/progress/plan/batch.py` | 新設 | `(batch: Batch, result: str, observed: dict[str, Observed], cause: Optional[str]) -> Optional[str]` | 検証の `done` に、版のあるリクエストを持つリポジトリの配布の版の前後の一致・導入した版と配布の版の一致・導入した版が要求の版以上を求め（`Observed` は配布の前・配布の後・導入した版の組。下の「版の読み分け」）、`failed` には原因を求める。版がすべて null のリポジトリは照らさない。誤りの文を返す |
 | `check_report` | `src/ndf/progress/plan/batch.py` | 新設 | `(batch: Batch, report: dict) -> Optional[str]` | 検証のリポートが、まとめのすべてのリクエストの節（条件ごとの `pass`・`fail`・`not_run` と証跡を書いた PR）を持つかを確かめる。誤りの文を返す |
 | `_writer` | `src/ndf/progress/plan/cli.py` | 新設 | `(environ: Mapping[str, str]) -> Writer` | `NDF_RELAY_PLAN` が無ければ `organizer`、あれば `conductor`（計画の名前とラッパーの名前 `NDF_RELAY_NAME` を持つ） |
 | `lane.end_row`・`lane.cancel_row`・`plan.move_row`・`lane.cancel_pending` | `src/ndf/progress/lane/__init__.py`・`src/ndf/progress/plan/__init__.py` | 変更 | `end_row`・`cancel_row` に `by_batch: bool = False` を足す | 種類 `batch` の行の変更を、呼び口でなく書き込みの共通の経路で断る: `end_row`・`cancel_row` は `by_batch` が偽なら `Refused`（`batch close` か `batch abort` を案内する）。`move_row` は種類 `batch` の行を移さない。`ndf lanes row end`・`row cancel`・`ndf progress cancel`（子を経由する `end_row`）・`ndf lanes move` はすべてこの経路で断られる。`cancel_pending`（`ndf lanes stop --now`）は未着手の種類 `batch` の行を中止にするとき、同じトランザクションで `batch_closed`（`aborted`・理由は計画の中止）を書き、コミットの後に `release_slot` する |
@@ -207,17 +207,20 @@ flowchart LR
 
 リポート（`--report` のファイル）は JSON で、`{"common": <環境と版のセットアップの結果>, "requests": {"<リクエストのキー>": {"criteria": [{"issue", "id", "verdict": "pass"|"fail"|"not_run", "evidence"}], "evidence_pr": <証跡を書いた PR か null>}}}`。`check_report` が、検証の `done` でまとめのすべてのリクエストの節があることを確かめる。各行の `delegate_answered` には、その行の節と `common` だけを載せる。
 
+**版の読み分け。** 担い手は 2 種の版を区別して読む。配布の版は配布チャネル（`.ndf/release.json` の検証コマンドが読む取得元。プラグインなら marketplace の版）が今出している版で、検証の間に変わらなかったことを監視するためだけに前後で読む。導入した版は、手順 2 で導入し直した後の実際の検証対象（ランタイムの一覧が示す導入物の版）から読む版で、受け入れ条件・証跡・確かめる ref（`v<導入した版>` のタグ）はすべてこの導入物に結び付ける。手元に前から入っていた版は読まない（日常の更新確認で手元が旧版でも、導入し直した後の版で確かめる）。
+
 `check_version`（検証だけ。棚卸しは見ない）:
 
 | 結果 | 条件 | 判定 |
 | --- | --- | --- |
 | `done` | まとめのそのリポジトリのリクエストの版がすべて null（版を出さない変更だけ） | 照らさない（`--observed-version` は要らない）。版のあるリクエストが 1 つでもあれば、下の行で版のあるものだけと照らす |
 | `done` | まとめのリポジトリの `--observed-version` が無い | 断る |
-| `done` | 前と後が違う | 断る（`failed --cause version_changed` で閉じる） |
-| `done` | 前と後が同じで、まとめのそのリポジトリのどれかのリクエストの版より古い（semver） | 断る（`failed --cause version_mismatch` で閉じる） |
-| `done` | 前と後が同じで、どのリクエストの版以上 | 受ける |
+| `done` | 配布の前と後が違う | 断る（`failed --cause version_changed` で閉じる） |
+| `done` | 配布の前と後が同じで、導入した版がそれと違う | 断る（`failed --cause install_mismatch` で閉じる。条件と証跡が配布の版と違う導入物を見たため） |
+| `done` | 3 つが同じで、まとめのそのリポジトリのどれかのリクエストの版より古い（semver） | 断る（`failed --cause version_mismatch` で閉じる） |
+| `done` | 3 つが同じで、どのリクエストの版以上 | 受ける |
 | `failed` | `--cause` が無い | `work_failed` を入れて受ける |
-| `failed` | `--cause` が `version_changed`・`version_mismatch` で、`--observed-version` が無い | 断る（原因の根拠が無い） |
+| `failed` | `--cause` が `version_changed`・`install_mismatch`・`version_mismatch` で、`--observed-version` が無い | 断る（原因の根拠が無い） |
 
 ### 異常系の処理
 
@@ -243,7 +246,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `assign` | `--lane C` で C に種類 `batch` の行が 1 つ増え、名指さなければ `b<id>` のレーンが増える。どちらも次の読み直しで行の起動（下の「担い手の行の席」）で始まる | 計画のコミットの直後に落とした（差し替えたコミットの後の処理で例外）状態で、別の保存先の計画の同じ環境の `assign` が断られ、元の担い手の行の `show` が手順を返す。記録を書いた後・コミットの前に落とした状態では、別の計画の `assign` が通り、元の計画に行が無い。同じリクエストの打ち直しが同じ id を返す。`--lane C` の打ち直し（C に最初の割り当ての担い手の行が未着手か実行中で残る）も断られずに同じ id を返し、行を足さない | 混ざったリクエスト・実行中の行のあるレーン・conductor の書き手・取りかかり中で断る。`lock_plan` を取る前に差し替えた読みでリクエストを閉じる・名指したレーンへ行を足すと、排他の中の確かめで断る |
 | `close` | 検証の `done` で 2 行に回答（各行に自分の節）、担い手の行が完了、記録が消える | 閉じた後の打ち直しが何も書かない。3 行のうち 1 行目の後に落とすと何も残らない。1 行の条件が `fail`・もう 1 行が `pass` の `done` で両方が振り返りへ進む | 別のレーンの conductor で断る。リクエストの節の欠けたリポートで断る。2 行のうち 1 行の要求元を中止した後の検証の `done` は、中止した行へ回答を書かずにリクエストを閉じ、もう 1 行へ回答を書く（契約の違反でロールバックしない） |
-| `check_version` | 前後が同じで要求以上を受ける | 要求と同じ版を受ける・要求より新しい版を受ける・版がすべて null のまとめは読んだ版無しで受ける | 前後の違い・要求より古い・読んだ版の無い `done`（版のあるリクエストを含む）を断る |
+| `check_version` | 配布の前後と導入した版が同じで要求以上を受ける | 要求と同じ版を受ける・要求より新しい版を受ける・版がすべて null のまとめは読んだ版無しで受ける。手元の旧版 1.4.0・配布 1.4.1 で導入し直した 1.4.1 の組（1.4.1,1.4.1,1.4.1）を受ける | 配布の前後の違い・導入した版と配布の版の違い（1.4.1,1.4.1,1.4.0）・要求より古い・読んだ版の無い `done`（版のあるリクエストを含む）を断る |
 | `abort` | 持ち主のオーガナイザーで担い手の行が中止、リクエストは開いたまま、回答は無い。持ち主の計画が動いていても通る | 別の計画（`--claim`）で持ち主が `paused`・担い手の行が未着手なら通る。計画の中止の入力の `--self` が行を中止し記録を消す | 持ち主が `running`、または `paused` でも担い手の行が実行中の別の計画で断る。差し替えたラッパーの一覧が「動いている」を返すと `batch_revoked` のほかは書かず記録が残る。停止の確かめの直前に耐久ワークフローの前に決めた起動（`launch_lane`）を差し込むと、起動されないか、起動された担い手の `show` が断る。`batch_revoked` の後の `close` を断る |
 | `end_row`・`cancel_row`・`move_row` | スプリントの行は今のとおり | `stop --now` で未着手の担い手の行が中止になり、同じトランザクションで `batch_closed`（`aborted`）が書かれ記録が消える | 種類 `batch` の行への `row end`・`row cancel`・`progress cancel`（子）・`lanes move` を断る |
 | `close_request` | まとめに入っていない `lane-verify` を閉じると要求元に `failed`（`delegate_withdrawn`）の回答が載る | `lane-backlog` はそのまま閉じる。要求元の行を中止した後の `lane-verify` は回答を書かずに閉じる | 開いたまとめに入ったリクエストで断る |
@@ -324,7 +327,7 @@ flowchart LR
 
 | フェーズ | 手順 |
 | --- | --- |
-| 検証 | 1. 環境の版を読む（前。読むだけで、導入し直さない）→ 2. まとめで 1 回だけ、`release-verification` の環境の用意（導入し直し・`.ndf/release.json` の検証コマンド）を流し、結果をリポートの `common` に書く（版がすべて null のまとめは導入し直さない）→ 3. リクエストごとに、その課題に固有の受け入れ条件だけを確かめる（`documentation` の行は先に `layout-review`）。確かめる ref は読んだ版（前）のタグ、証跡はそのリクエストの `release_pr`（無ければ書かず、リポートだけに残す）へ、要求の版・読んだ版・課題を添えて書く → 4. 環境の版を読む（後。読むだけ）→ 5. `ndf lanes batch close … --observed-version <リポジトリ>=<前>,<後> --report <ファイル>` |
+| 検証 | 1. 配布の版を読む（前。配布チャネルから読むだけで、導入しない）→ 2. まとめで 1 回だけ、`release-verification` の環境の用意（配布チャネルからの導入し直し・`.ndf/release.json` の検証コマンド）を流し、導入した版を導入物から読み、結果をリポートの `common` に書く（版がすべて null のまとめは導入し直さない）→ 3. リクエストごとに、その課題に固有の受け入れ条件だけを、2 で導入した導入物で確かめる（`documentation` の行は先に `layout-review`）。確かめる ref は、版のあるリクエストは導入した版のタグ、版が null のリクエストは `show` が返す `target_ref`。証跡はそのリクエストの `release_pr`（無ければ書かず、リポートだけに残す）へ、要求の版・導入した版・課題を添えて書く → 4. 配布の版を読む（後。読むだけ）→ 5. `ndf lanes batch close … --observed-version <リポジトリ>=<配布の前>,<配布の後>,<導入した版> --report <ファイル>` |
 | 棚卸し | 各リクエストの範囲の和集合（上の「棚卸しの範囲」: 最も古い `since_ref` と、各リクエストの `issues` の `--add`）で `backlog-refinement` の差分の棚卸しを 1 回流す → `ndf lanes batch close` |
 
 `show` はリクエストごとに、レーン・行・課題・工程・要求の版・確かめる対象（版があれば「導入した版のタグ」、版が null なら `target_ref` のコミット）・`release_pr`・`since_ref` を返す。
@@ -346,7 +349,7 @@ flowchart LR
 | --- | --- |
 | `skills/development-workflow/references/parallel.md` | 「まとめたリリース」の後ろに節「まとめた検証と棚卸し」: `lane-verify`・`lane-backlog` の知らせを受けたら、同じ環境（棚卸しは計画）のリクエストを `ndf lanes batch assign` で束ね、空いたレーンがあれば `--lane` で名指す。断られたら `ndf lanes status` の取りかかり中のまとめを見て待つ。担い手の止まりは `lane_stalled`・`launch_failed` で受け、`batch abort` から打ち直す。`abort` が担い手の停止を確かめられないときの復旧（打ち直し、止まらなければプロセスを確かめて止める）。`ndf lanes wait` が知らせる `batch_closed` の `failed`・`aborted` を受けたら、`assign` で割り当て直すか、リクエストを閉じる（検証のリクエストを閉じると要求元へ失敗の回答が載る）。検証の `failed` の行は直した後に `ndf progress retry` を打つか行を中止する |
 | `skills/development-workflow/SKILL.md` | 引数 `--batch <id>`: `ndf lanes batch show` の手順を流して `batch close` を打つ（担い手の行の `/goal` の再起動の入口） |
-| `skills/release-verification/SKILL.md` | 並列の計画の担い手として呼ばれたとき、`show` の手順（版を前後で読むだけ・環境の用意はまとめで 1 回・課題ごとには固有の受け入れ条件だけ・証跡はリクエストごとの `release_pr` へ）で流し、条件ごとの合否をリポートの形で `batch close` に渡すこと |
+| `skills/release-verification/SKILL.md` | 並列の計画の担い手として呼ばれたとき、`show` の手順（配布の版を前後で読むだけ・環境の用意はまとめで 1 回で導入した版を導入物から読む・条件と証跡と ref は導入した版に結び付ける・課題ごとには固有の受け入れ条件だけ・証跡はリクエストごとの `release_pr` へ）で流し、条件ごとの合否をリポートの形で `batch close` に渡すこと |
 | `skills/backlog-refinement/SKILL.md` | 並列の計画の担い手として呼ばれたとき、`show` の範囲の和集合（最も古い `since_ref` と各リクエストの課題）で差分の棚卸しを 1 回流し、`batch close` で閉じること |
 | `docs/contracts/commands.md`・`contracts/schemas/io/lanes.args.schema.json` | `lanes batch` の 4 つの手 |
 | `contracts/domains/locations.json` | 状態の保存先の行 `parallel/batches/`（起点 `state`）。#3500 の子の課題が一覧を作り直した後ならその形で足す |
