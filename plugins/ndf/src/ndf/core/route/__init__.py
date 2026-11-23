@@ -51,6 +51,8 @@ import copy
 import json
 import os
 import re
+import stat
+import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -425,11 +427,22 @@ def work_values(t: Template, given: Collection[str], values: Mapping[str, Value]
 
 
 def _publish(out: Path, plan: Mapping[str, Any]) -> None:
-    """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。"""
+    """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
+
+    一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
+    書き換えない。作成時のモードは 0600 で、worker の入力（`work_values`）を含む新規のプランを他のユーザーに読ませない。
+    既存のプランを置き換えるときは、そのアクセス権を公開前に引き継ぐ（PR 4319 の指摘 r3-1・r3-2）。
+    """
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+    fd, name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(name)
     try:
-        tmp.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            try:
+                os.fchmod(fh.fileno(), stat.S_IMODE(os.stat(out).st_mode))
+            except FileNotFoundError:
+                pass
+            fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp, out)
     finally:
         tmp.unlink(missing_ok=True)
