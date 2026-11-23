@@ -25,7 +25,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from ndf.checks.model import CheckError, Finding, Scope, module_name, module_rel, read_contract
+from ndf.checks.model import CheckError, Finding, Scope, Source, module_name, module_rel
 from ndf.contracts import limits
 from ndf.contracts.facts import FACTS_DIR, SCHEMA_FILE, TABLE_DIRS
 from ndf.contracts.facts import row_schema as contract_row_schema
@@ -258,13 +258,19 @@ def _enums(node: Any, pointer: str) -> Iterator[tuple[str, frozenset[str]]]:
         yield from _enums(child, f"{pointer}/{key}")
 
 
-def enum_sets(contracts_dir: Path, generated: list[str]) -> dict[str, frozenset[str]]:
+def _schemas(scope: Scope, contracts_dir: Path) -> Iterator[tuple[str, Source]]:
+    """見る範囲のうち `contracts_dir` の下のスキーマ（そこからの相対パスとファイル）。"""
+    for src in scope.sources:
+        if src.path.name.endswith(".schema.json") and src.path.is_relative_to(contracts_dir):
+            yield src.path.relative_to(contracts_dir).as_posix(), src
+
+
+def enum_sets(scope: Scope, contracts_dir: Path, generated: list[str]) -> dict[str, frozenset[str]]:
     """手書きのスキーマの `enum` の集まり（`<スキーマ>#<JSON Pointer>` → 値）。`generated` の形のスキーマ（生成物）は除く。"""
     found: dict[str, frozenset[str]] = {}
-    for path in sorted(contracts_dir.rglob("*.schema.json")):
-        rel = path.relative_to(contracts_dir).as_posix()
+    for rel, src in _schemas(scope, contracts_dir):
         if not any(fnmatch(rel, pattern) for pattern in generated):
-            found.update({f"{rel}#{ptr}": values for ptr, values in _enums(read_contract(path, "スキーマを読めない")[1], "")})
+            found.update({f"{rel}#{ptr}": values for ptr, values in _enums(src.contract("スキーマを読めない"), "")})
     return found
 
 
@@ -279,13 +285,8 @@ def _enum_dups(sets: list[Const], enums: Mapping[str, frozenset[str]]) -> list[F
     return found
 
 
-def limit_numbers(path: Path) -> dict[tuple[str, float], list[str]]:
-    """上限の設定の値のキーと数 → その数を持つ方針の名前。読めない・形が違えば `CheckError`。"""
-    raw = read_contract(path, "上限の設定を読めない")[1]
-    try:
-        policies = limits.validate(raw)
-    except limits.LimitsError as exc:
-        raise CheckError(str(exc)) from exc
+def limit_numbers(policies: Mapping[str, limits.Policy]) -> dict[tuple[str, float], list[str]]:
+    """上限の設定の値のキーと数 → その数を持つ方針の名前。"""
     found: dict[tuple[str, float], list[str]] = defaultdict(list)
     for name, policy in policies.items():
         for key in limits.VALUE_KEYS:
@@ -340,13 +341,12 @@ def _contract_dups(scope: Scope, conf: dict[str, Any], by_source: Mapping[str, l
     """スキーマの `enum` と上限の設定の写し。上限の設定を持たないプラグインには `_limit_dups` を当てない。"""
     contracts_dir = scope.plugin_root / conf["contracts_dir"]
     sets = [c for cs in by_source.values() for c in cs if isinstance(c.value, frozenset)]
-    found = _enum_dups(sets, enum_sets(contracts_dir, conf["generated_schemas"]))
-    path = contracts_dir / limits.NDF_SETTINGS
-    if not path.is_file():
+    found = _enum_dups(sets, enum_sets(scope, contracts_dir, conf["generated_schemas"]))
+    if scope.limit_settings is None:
         return found
     nums = {f"{module}.{c.name}": c for module, cs in by_source.items() for c in cs if isinstance(c.value, (int, float))}
     rules_rel = scope.rel(scope.plugin_root / module_rel(f"{__package__}.rules", ".json"))
-    return found + _limit_dups(nums, limit_numbers(path), conf, rules_rel)
+    return found + _limit_dups(nums, limit_numbers(scope.limit_settings.policies), conf, rules_rel)
 
 
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:

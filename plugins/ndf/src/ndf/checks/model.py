@@ -1,25 +1,30 @@
 """検査が共有する型: 指摘・見る範囲・1 回だけ解析するファイル・規則のデータ。
 
 構文木は `Source.tree` が 1 ファイルにつき 1 回だけ作り、すべての規則が同じ木を読む（RF3）。規則は木を書き換えない。
+コントラクトの値（`Source.contract`）と検証済みの上限の設定（`Scope.limit_settings`）も同じく 1 回だけ作り、規則は書き換えない。
 """
 
 from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import contracts
 from ndf.checks import imports
+from ndf.contracts import limits
 
 RULES_PATH = Path(__file__).with_name("rules.json")
 # スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
+# プラグインの根からのコントラクトの保存先（`ndf.contracts` の既定の保存先の名前）
+CONTRACTS = contracts.DEFAULT_DIR.name
 
 
 class CheckError(Exception):
@@ -55,9 +60,28 @@ class Source:
         """構文の誤りは `SyntaxError` のまま送出する（検査のエントリポイントが `syntax` の違反にする）。"""
         return ast.parse(self.text, filename=self.rel)
 
+    @cached_property
+    def _contract(self) -> Any:
+        return contracts.parse_json(self.path, self.text)
+
+    def contract(self, unreadable: str) -> Any:
+        """コントラクトのファイルの値。実行時の読み手と同じく同じキーが 2 つあれば断る。断るときは `CheckError`。"""
+        try:
+            return self._contract
+        except (OSError, contracts.ContractError, UnicodeDecodeError) as exc:
+            raise CheckError(f"{unreadable}: {exc}") from exc
+
     @property
     def is_python(self) -> bool:
         return self.path.suffix == ".py"
+
+
+@dataclass(frozen=True)
+class Limits:
+    """プラグインの上限の設定のファイルと、スキーマで確かめた方針。"""
+
+    source: Source
+    policies: Mapping[str, limits.Policy]
 
 
 @dataclass
@@ -75,6 +99,23 @@ class Scope:
     def plugin_rel(self, src: Source) -> str:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""
         return src.path.relative_to(self.plugin_root).as_posix()
+
+    def source(self, path: Path) -> Source:
+        """`path` のファイル。見る範囲にあれば、すべての規則が共有する `Source` を返す。"""
+        return next((s for s in self.sources if s.path == path), None) or Source(path, self.rel(path))
+
+    @cached_property
+    def limit_settings(self) -> Optional[Limits]:
+        """上限の設定。持たないプラグインは `None`、読めない・形が違えば `CheckError`。"""
+        path = self.plugin_root / CONTRACTS / limits.NDF_SETTINGS
+        if not path.is_file():
+            return None
+        source = self.source(path)
+        raw = source.contract("上限の設定を読めない")
+        try:
+            return Limits(source, limits.validate(raw))
+        except limits.LimitsError as exc:
+            raise CheckError(str(exc)) from exc
 
     def code(self) -> list[Source]:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
@@ -123,14 +164,6 @@ def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
 def read_json(path: Path | str, unreadable: str) -> Any:
     """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
     return read_json_text(path, unreadable)[1]
-
-
-def read_contract(path: Path, unreadable: str) -> tuple[str, Any]:
-    """コントラクトのファイルの本文と値。実行時の読み手と同じく、同じキーが 2 つあれば断る。"""
-    try:
-        return contracts.read_text_json(path)
-    except (contracts.ContractError, UnicodeDecodeError) as exc:
-        raise CheckError(f"{unreadable}: {exc}") from exc
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:

@@ -186,8 +186,7 @@
     },
     "tables": ["ndf.contracts.limits.table", "ndf.contracts.limits.NDF_SETTINGS", "ndf.domains.hooks.tables.policies"],
     "whole": [
-      {"module": "ndf.checks.limits_readers", "reason": "この規則そのもの。方針の読み手の指定だけを読む"},
-      {"module": "ndf.checks.facts", "reason": "規則 const-fact。定数と比べる数の一覧だけを読む"},
+      {"module": "ndf.checks.model", "reason": "検査が共有する上限の設定。規則 limit-readers は読み手の指定だけ、規則 const-fact は定数と比べる数の一覧だけを読む"},
       {"module": "ndf.contracts.cli", "reason": "事実の表が指す方針の名前の有無だけを確かめる"}
     ],
     "dynamic": [
