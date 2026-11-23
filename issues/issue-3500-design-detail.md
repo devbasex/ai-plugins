@@ -142,7 +142,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `clear_results` | 退避できない・コミットできない・退避を消せない | git の錠・権限 | `rename`・`git commit`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
+| `clear_results` | 退避できない・コミットできない | git の錠・権限 | `rename`・`git commit` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
 | `adopt_legacy` | 移し替え先に同じ名前がある・前の版の `detach` の子が worktree を `cwd` にしているか中のファイルを開いている・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`/proc/*/cwd` と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、理由が `writer_open`・`writer_unverifiable`・`symlink`・`os_error` のときその worktree を外さない。`exists` は外す（前の置き場は無視したファイルの退避に入る） | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
 | `_check_location` | `.worktrees` を作れない | 権限 | `prepare` | 止める | 終了コード 1 | 再実行可 |
 
@@ -200,9 +200,11 @@ plugins/ndf/
 `git rm --cached` の後に `git commit -- <パス>` を打つと、パスを指定した `git commit` は索引でなく作業ツリーの中身を読むので削除にならない（[git commit の仕様](https://git-scm.com/docs/git-commit#_description) ）。そこで作業ツリーから先に退かし、索引には触れずにパスを指定してコミットする。
 
 1. `git ls-files -z -- .cross_refactoring` が空なら 4 へ進む
-2. `.cross_refactoring/` を、作業場所の外で同じファイルシステムの一時フォルダ（`scratch`。呼び手は `rf<PR>/logs` を渡す。その下に `tempfile.mkdtemp` で作る）へ `rename` で退避する
+2. `.cross_refactoring/` を、作業場所の外で同じファイルシステムの一時フォルダ（`scratch`。呼び手は `rf<PR>/logs` を渡す。その下に `tempfile.mkdtemp(prefix="cross_refactoring-")` で作る）へ `rename` で退避する
 3. `git commit -q --no-verify -m <固定の題> -- .cross_refactoring` を打つ。作業ツリーにファイルが無いので、追跡されていたファイルの削除だけが 1 つのコミットに入り、ほかのステージ済みの変更は索引に残ってコミットに入らない（2026-11-23 に一時のリポジトリで確かめた）。失敗したら退避したフォルダを元へ戻して止める
-4. 退避したフォルダ（あれば）と、残っている `.cross_refactoring/` を消し、`places.prepare("cross-refactoring", work, root=work)` で作り直す
+4. 退避したフォルダは消さずに `scratch` の下に残す。1 から来たときも、残っている `.cross_refactoring/` が空でなければ同じく `scratch` の下の新しい一時フォルダへ `rename` で退避し、消さない。そのうえで `places.prepare("cross-refactoring", work, root=work)` で作り直す
+
+退避を消さないのは、`.cross_refactoring/` の中の追跡ファイルへのコミットしていない編集と、同居する未追跡のファイルを、削除のコミットからは戻せないため。中身が前の担当の作業結果だけか、利用者の変更を含むかはコードで見分けられないので、どちらも戻せる形で残す。退避先は実行の `logs` の下なので、担当の出力と同じく実行の作業場所と一緒に片付き、作業場所の外なので担当の起動とコミットには入らない。退避したパスは結果 JSON の `outputs.cleared`（無ければ空）に出す
 
 工程の起点（`_record_phase` の HEAD、最後の修正の `before`）はこの後に読むので、NDF のコミットは起点より前にある。範囲の検査・フレーキーの直しの検査と集計は、起点から HEAD までの担当のコミットだけを見る。起点は今のまま実行の状態（`phases`）に保存されるので、NDF のコミットの SHA を別に保存して渡す必要は無い。
 
