@@ -17,11 +17,12 @@ import argparse
 import json
 import os
 import shlex
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from string import Template
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
@@ -33,7 +34,7 @@ from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, qu
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
-from ndf.progress.worker_kinds import kind_gaps, kind_values, work_dir_of, work_kinds
+from ndf.progress.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 
 
 def present(
@@ -186,31 +187,28 @@ def _write_prompt(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, bod
     worker_paths.reset_report(wd, paths, write=((paths.prompt.name, body),))
 
 
-def _saved_in(wd: worker_paths.WorkDir) -> Optional[dict[str, Any]]:
-    """開いた保存先の `values.json`。無い・壊れている・形が違えば None。
+def work_argv(
+    kind: str,
+    state_dir: Path,
+    cwd: Path,
+    *,
+    prompt_file: Optional[str] = None,
+    result_dir_id: Optional[tuple[int, int]] = None,
+) -> list[str]:
+    """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。
 
-    呼んだ利用者が持ち、グループとほかの利用者が書き込めないリンク数 1 の通常のファイルだけを読み、ほかは
-    `EntryUnsafe`（`foreign` など）で止める（共有の保存先で別の利用者が置いた値を worker の指示と作業場所に使わない）。
+    `prompt_file` は起動指示を読む場所（`ndf answer work` は継いだ記述子の `/dev/fd/<番号>` を渡す。省くと保存先の起動指示）。
+    `result_dir_id` は開いた保存先の `(st_dev, st_ino)` で、`ndf worker run` が結果ファイルの保存先を開き直したときに突き合わせる。
     """
-    text = worker_paths.read_file(wd, invoke.VALUES_FILE, owned=True)
-    if text is None:
-        return None
-    try:
-        return invoke.values_of(json.loads(text))
-    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れた値は無いものとして扱う（`read_values` と同じ）
-        return None
-
-
-def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
-    """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。"""
     spec = _known(kind)
     try:
         paths = worker_paths.report_paths(state_dir, kind, resolve=False)
     except worker_paths.NameInvalid as exc:
         raise model.Refused(str(exc)) from None
-    files = ("--prompt-file", str(paths.prompt), "--result-file", str(paths.result))
+    files = ("--prompt-file", prompt_file or str(paths.prompt), "--result-file", str(paths.result))
+    held = ("--result-dir-id", f"{result_dir_id[0]}:{result_dir_id[1]}") if result_dir_id is not None else ()
     required = [arg for name in spec["outputs"] for arg in ("--require-output", name)]
-    return ["run", "--kind", kind, *files, "--cwd", str(cwd), "--state-dir", str(state_dir), *required]
+    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required]
 
 
 def work_parser() -> argparse.ArgumentParser:
@@ -247,39 +245,86 @@ def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
     return Path(found).resolve()
 
 
-def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> list[str]:
-    """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて `ndf worker run` の引数を返す。
+class WorkHandoff(NamedTuple):
+    """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。"""
 
-    保存先は渡されたパスのまま 1 回だけ開き（`open_workdir` が `..` も字面で畳まずに 1 要素ずつリンクを拒んで開く）、
-    `values.json` の読み取りと報告の初期化・起動指示の書き込みを同じ記述子で行う。読んだ場所と書く場所が食い違わない。
+    kind: str
+    state_dir: Path
+    dir_id: tuple[int, int]
+    workdir: Path
+    prompt: str
+
+
+def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
+    """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて、`ndf worker run` へ渡すものを返す。
+
+    保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
+    要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
+    行う。読んだ場所と書く場所が食い違わない。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
+    `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
     """
     _known(kind)
-    paths = worker_paths.report_paths(state_dir, kind, resolve=False)
-    with worker_paths.open_workdir(state_dir) as wd:
-        saved = _saved_in(wd)
+    worker_paths.report_paths(state_dir, kind, resolve=False)  # 名前の形を開く前に確かめる
+    with worker_paths.open_resolved(state_dir) as wd:
+        paths = worker_paths.report_paths(wd.path, kind, resolve=False)
+        saved = values_in(wd)
         if saved is None:
             raise WorkUnready(f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程から起動すると書かれる）")
         gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)
         workdir = _work_dir(kind, saved, cwd)
-        _write_prompt(wd, paths, work_prompt(kind, saved, workdir, paths))
-    return work_argv(kind, state_dir, workdir)
+        body = work_prompt(kind, saved, workdir, paths)
+        _write_prompt(wd, paths, body)
+        return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body)
+
+
+def _held_prompt(body: str) -> int:
+    """起動指示の本文を、名前の無い私有のファイルへ書いて先頭へ戻し、置き換えた先へ継ぐ記述子を返す。
+
+    `ndf worker run` は `--prompt-file /dev/fd/<番号>` でこれを読む。共有の保存先の起動指示を読み直さないので、書いた後に
+    別の利用者が起動指示を差し替えても、worker へ渡る指示は確かめた `values.json` から組んだ本文のままである。
+    Linux は `memfd_create`、ほかは作ってすぐ名前を消す一時ファイル（`tempfile.TemporaryFile`）を使う。
+    """
+    if hasattr(os, "memfd_create"):
+        fd = os.memfd_create("ndf-prompt", 0)
+    else:
+        with tempfile.TemporaryFile() as f:
+            fd = os.dup(f.fileno())
+    try:
+        view = memoryview(body.encode("utf-8"))
+        while view:
+            view = view[os.write(fd, view) :]
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.set_inheritable(fd, True)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv) -> int:
-    """起動指示を書いてから `ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まない。IG1）。"""
+    """起動指示を書いてから `ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まない。IG1）。
+
+    起動指示の本文は継いだ記述子で渡し（`_held_prompt`）、結果ファイルの保存先は開いた保存先の識別子（`--result-dir-id`）で
+    `ndf worker run` に突き合わせさせる（共有の保存先を、確かめた後に差し替えられても別の指示・別の保存先で動かない）。
+    """
     a = work_parser().parse_args(argv)
     try:
-        args = _work_handoff(a.kind, Path(a.state_dir), a.cwd)
+        handoff = _work_handoff(a.kind, Path(a.state_dir), a.cwd)
+        fd = _held_prompt(handoff.prompt)
     except WORK_STOP_TYPES as exc:
         kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
         items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
-    # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
-    # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
-    argv = invoke.ndf_command("worker", *args, keep_streams=True)
-    exec_(argv[0], argv)
+    try:
+        args = work_argv(handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id)
+        # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
+        # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
+        argv = invoke.ndf_command("worker", *args, keep_streams=True)
+        exec_(argv[0], argv)
+    finally:
+        os.close(fd)  # 置き換えに落ちたとき（と置き換えを差し替えたテスト）だけここへ来る
     return 0
 
 

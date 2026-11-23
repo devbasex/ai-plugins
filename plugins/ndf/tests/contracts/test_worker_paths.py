@@ -771,3 +771,16 @@ def test_write_file_drops_the_inherited_acl_on_macos_or_refuses_to_publish(workd
     assert fake.set_on and before not in fake.set_on  # 外すのは一時ファイルだけで、置き換える前のファイルに触れない
     assert (d / "r").read_text(encoding="utf-8") == ("後" if set_result == 0 else "前")
     assert [p.name for p in d.iterdir()] == ["r"]
+
+
+def test_read_file_owned_refuses_a_file_with_an_extended_acl_on_macos(tmp_path, monkeypatch):
+    # PR 4307 の r6-5: macOS の拡張 ACL はモードと別にほかの利用者へ書き込みを許せるので、開いた記述子で確かめる
+    (tmp_path / "v").write_text("値", encoding="utf-8")
+    (tmp_path / "v").chmod(0o644)
+    before = (tmp_path / "v").stat().st_ino
+    with worker_paths.open_workdir(tmp_path) as wd:
+        _as_macos(monkeypatch)
+        monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: os.fstat(fd).st_ino == before)
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
+        assert worker_paths.read_file(wd, "v") == "値"

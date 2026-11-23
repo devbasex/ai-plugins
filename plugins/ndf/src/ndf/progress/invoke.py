@@ -33,7 +33,6 @@ import os
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -41,13 +40,14 @@ from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, limits, result
+from ndf.contracts import facts, limits, result, worker_paths
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, merge_pending, model, stages, worker_kinds
+from ndf.progress.worker_kinds import VALUES_FILE, read_values, write_values
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -73,10 +73,6 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
-# プランを組んだ差し込みの値を、プランの実行の保存先に残すファイル（#3908 の決定 2）
-VALUES_FILE = "values.json"
-# values.json のキー → 値の型（形が違えば読まなかったものとして扱う）
-VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
 class StageInputError(Exception):
@@ -652,31 +648,6 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
 
 
-def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
-    """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
-
-    グループとほかの利用者の書き込み権限は外す（`ndf answer work` は書き込めるファイルを第三者の値として読まない）。
-    書けなければ `OSError` をそのまま上げる（呼び手の `plan_failure` が precondition にする）。
-    """
-    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
-    path = state_dir / VALUES_FILE
-    plan_files.write_json(path, held)
-    os.chmod(path, os.stat(path).st_mode & 0o755)
-
-
-def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
-    """`<保存先>/values.json`。無い・壊れている・キーか型が `VALUES_SHAPE` と違えば None。"""
-    return values_of(plan_files.read_json(state_dir / VALUES_FILE))
-
-
-def values_of(held: Any) -> Optional[dict[str, Any]]:
-    """`values.json` の中身を読んだ値。辞書でない・キーか型が `VALUES_SHAPE` と違えば None。"""
-    if not isinstance(held, dict) or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
-        return None
-    return held
-
-
 # 試行の始まりに消す、前の試行が保存先に残した課題の題・本文の写し（差し込みの値 `VALUES_FILE` と一緒に消す）
 ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
 
@@ -883,7 +854,7 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
-PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError)
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -907,6 +878,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
         return result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after)
     if isinstance(exc, OSError):
         return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
+    if isinstance(exc, worker_paths.EntryError):
+        return result.stopped(PLAN, "precondition", f"プラン {name} の差し込みの値（{VALUES_FILE}）を安全に読み書きできない: {exc}")
     return None
 
 

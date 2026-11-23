@@ -475,3 +475,20 @@ def test_run_keeps_using_the_resolved_result_dir_when_it_is_swapped_before_launc
     worker.main(args + ["--cwd", ".", "--state-dir", "state"])
     assert (work / "out.json").read_text(encoding="utf-8") == "差し替え先のファイル"
     assert not (tmp_path / "moved" / "out.json").exists()
+
+
+def test_run_refuses_a_result_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r6-4: `ndf answer work` が起動指示を書いた保存先（`--result-dir-id`）と、開き直した保存先が違えば起動しない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "out.json").write_text("前の結果", encoding="utf-8")
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    other = tmp_path.stat()
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    worker.main(args + ["--result-dir-id", f"{other.st_dev}:{other.st_ino}", "--cwd", ".", "--state-dir", "state"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and calls == []
+    assert (work / "out.json").read_text(encoding="utf-8") == "前の結果"

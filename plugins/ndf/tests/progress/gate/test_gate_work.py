@@ -176,14 +176,50 @@ def test_an_unknown_work_name_stops_as_invalid(tmp_path, capsys):
 
 
 def test_ndf_answer_work_writes_the_prompt_then_hands_the_arguments_to_worker_run(tmp_path):
-    invoke.write_values(tmp_path, "fix", {"worktree": str(tmp_path), "branch": "b"}, {}, True)
-    got: list[list[str]] = []
-    code = gate._cmd_work(["--state-dir", str(tmp_path), "--cwd", "/w", "fix"], lambda exe, argv: got.append(argv))
+    state = tmp_path.resolve()
+    invoke.write_values(state, "fix", {"worktree": str(state), "branch": "b"}, {}, True)
+    prompt = worker_paths.report_paths(state, "fix", resolve=False).prompt
+    got: list[tuple[list[str], str]] = []
+
+    def exec_(exe, argv):
+        # PR 4307 の r6-4: 書いた後に共有の起動指示を差し替えられても、worker へ渡るのは組んだ本文（継いだ記述子）のまま
+        written = prompt.read_text(encoding="utf-8")
+        prompt.unlink()
+        prompt.write_text("別の指示", encoding="utf-8")
+        got.append((argv, Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")))
+        assert got[-1][1] == written
+
+    code = gate._cmd_work(["--state-dir", str(state), "--cwd", "/w", "fix"], exec_)
+    argv, handed = got[0]
+    held = argv[argv.index("--prompt-file") + 1]
+    st = state.stat()
     # #4029: src は置き換えた先の argv（sys.path）で渡す。PYTHONPATH には入れない。標準出力の文字コードは今のものを写す
-    want = cli.ndf_command("worker", *gate.work_argv("fix", tmp_path, Path("/w")), keep_streams=True)
-    assert code == 0 and got[0] == want
+    want = gate.work_argv("fix", state, Path("/w"), prompt_file=held, result_dir_id=(st.st_dev, st.st_ino))
+    assert code == 0 and held.startswith("/dev/fd/") and argv == cli.ndf_command("worker", *want, keep_streams=True)
+    assert "\n- 作業場所: /w\n" in handed and "別の指示" not in handed
+
+
+def test_a_state_dir_under_a_linked_ancestor_reaches_the_worker_as_the_resolved_path(tmp_path):
+    # PR 4307 の r6-6: macOS の /tmp・/var のように祖先にリンクがある保存先でも起動し、解いた場所を渡す
+    real = tmp_path / "real" / "state"
+    real.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    invoke.write_values(tmp_path / "link" / "state", "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path / "link" / "state"), "fix"], lambda exe, argv: got.append(argv))
+    resolved = str(real.resolve())
+    assert code == 0 and got[0][got[0].index("--state-dir") + 1] == resolved
+    assert got[0][got[0].index("--result-file") + 1].startswith(resolved + os.sep)
+
+
+def test_the_prompt_drops_the_group_write_of_the_previous_prompt(tmp_path):
+    # PR 4307 の r6-4: 前の起動指示のグループ書き込み権限を継がない
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
     prompt = worker_paths.report_paths(tmp_path, "fix", resolve=False).prompt
-    assert "\n- 作業場所: /w\n" in prompt.read_text(encoding="utf-8")
+    prompt.write_text("前の起動指示", encoding="utf-8")
+    prompt.chmod(0o664)
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: None) == 0
+    assert prompt.stat().st_mode & 0o022 == 0
 
 
 def test_ndf_answer_work_rewrites_the_prompt_when_it_is_run_again(tmp_path):

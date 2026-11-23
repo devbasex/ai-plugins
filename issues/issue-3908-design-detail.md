@@ -43,7 +43,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/contracts/templates/params.json` | 変更 | 差し込み `worker` に既定を持たせる | 無し（データ） | `params` | 無し |
 | `plugins/ndf/contracts/worker/kinds.json` | 新設 | 作業の名前 → 作業種別・作業の 1 行・読む Skill・手順の抜粋・読む値・作業場所・必須の出力 | 無し（データ） | `kinds` | 無し |
-| `plugins/ndf/src/ndf/progress/worker_kinds.py` | 新設 | 作業の定義を読み、作業ごとの入力と作業場所の欠けを名前と出所で返す | `ndf.contracts` | モジュール `ndf.progress.worker_kinds` | `work_kinds`（新設）・`kind_gaps`（新設）・`work_dir_of`（新設）・`kind_values`（新設） |
+| `plugins/ndf/src/ndf/progress/worker_kinds.py` | 新設 | 作業の定義を読み、作業ごとの入力と作業場所の欠けを名前と出所で返す。工程から作業へ値を渡す `values.json` を保存先の記述子で読み書きする（`invoke.py` と `entry.py` の両方が読む） | `ndf.contracts`・`ndf.contracts.worker_paths` | モジュール `ndf.progress.worker_kinds` | `work_kinds`（新設）・`kind_gaps`（新設）・`work_dir_of`（新設）・`kind_values`（新設）・`VALUES_FILE`・`VALUES_SHAPE`・`write_values`・`read_values`・`values_in`・`values_of`（新設。`invoke.py` は `VALUES_FILE`・`write_values`・`read_values` を読み込んで使う） |
 | `plugins/ndf/contracts/worker/prompt.md` | 新設 | 起動指示の 7 項目と規則 7 個の共通のテンプレート | 無し（データ） | 無し | 無し |
 | `plugins/ndf/contracts/workflow/context.schema.json` | 変更 | 文脈のキーごとに値の取り場所（`x-source`）を持つ | 無し（データ） | `properties` | 無し |
 | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | 差し込みを 1 回だけ組んで `values.json` に残し、プランを書き出すときはそれを使う。止まりの分類を 1 か所にする | `ndf.core.route`・`ndf.core.plan.files`・`ndf.progress.worker_kinds` | モジュール `ndf.progress.invoke` | `PreparedPlan`（新設）・`KindInputsMissing`（新設）・`prepare_plan`（新設）・`plan_failure`（新設）・`write_values`（新設）・`read_values`（新設）・`clear_values`（新設）・`plan_path`（変更）・`_call_plan`（変更）・`_fill_refactor`（変更） |
@@ -162,18 +162,20 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `write_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None` | プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く |
-| `read_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `read_values(state_dir: Path) -> Optional[dict[str, Any]]` | `<保存先>/values.json` を読む。無い・壊れていれば `None` |
+| `write_values` | `plugins/ndf/src/ndf/progress/worker_kinds.py` | 新設 | `write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None` | プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く |
+| `read_values` | `plugins/ndf/src/ndf/progress/worker_kinds.py` | 新設 | `read_values(state_dir: Path) -> Optional[dict[str, Any]]` | `<保存先>/values.json` を読む。無い・壊れていれば `None` |
 | `clear_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `clear_values(state_dirs: Iterable[Path]) -> None` | 渡された保存先から `values.json` を消す（無ければ何もしない。`unlink(missing_ok=True)`。保存先は NDF の状態の保存先の下で、利用者のファイルを指さない） |
 | `plan_path` | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | `plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path`（変わらない） | 同じ保存先に同じプランの `values.json` があればその値と描画の条件（`local_tests`）でプランを描く。無ければ `prepare_plan` で組んでから描く。差し込みを組むのはどちらの経路でも 1 回だけである |
 
 - `write_values`
   - 事前条件: `state_dir` が存在する（呼ぶのは `prepare_plan` だけで、`prepare_plan` が先に `work_dir.mkdir(parents=True, exist_ok=True)` を済ませる。今 `_call_plan` が `src/ndf/progress/invoke.py:727` で行っている作成をここへ移す）
-  - 事後条件: `<保存先>/values.json` が設計文書の「データ構造」の形で存在する。同じ工程を打ち直しても最後の中身になる
+  - 事後条件: `<保存先>/values.json` が設計文書の「データ構造」の形で存在する。同じ工程を打ち直しても最後の中身になる。公開したファイルは、umask（グループ書き込みが有効なものも）や前のファイルのアクセス権によらず、呼んだ利用者が持ち、グループとほかの利用者が書き込めず、親から継いだ拡張 ACL を持たない（`read_values` と `_cmd_work` の `read_file(owned=True)` を通る）
+  - 手順: 保存先を `worker_paths.open_resolved` で祖先のリンクを解きながら 1 回だけ開き、その記述子で `worker_paths.write_file(wd, VALUES_FILE, 本文, private=True)` を呼ぶ。`write_file` は保存先の直下の私有の一時ディレクトリへ `O_EXCL` で新しいファイルを作り、継いだ拡張 ACL を外し、同じ記述子で `fchmod` してグループとほかの利用者の書き込みのビットを外してから、ディレクトリの記述子に対する `os.replace` で公開する。固定名の一時ファイル（`files.write_json` の `values.tmp`）を開かず、公開した後にパスを引き直して `stat`・`chmod` しない（共有の保存先で名前をリンクへ差し替えられても、呼んだ利用者の別のファイルを切り詰めない・アクセス権を変えない）
   - 副作用: ファイルの書き込み 1 つ
 - `read_values`
   - 事前条件: 無し
-  - 事後条件: 返る辞書は `plan`・`values`・`inputs`・`local_tests`・`at` を持つ。形が違えば `None`
+  - 手順: 保存先を `open_resolved` で開き、`values_in(wd)`（`_cmd_work` と共有）で `read_file(wd, VALUES_FILE, owned=True)` を読んで `values_of` で形を確かめる。保存先が無ければ `None`
+  - 事後条件: 返る辞書は `plan`・`values`・`inputs`・`local_tests`・`at` を持つ。形が違えば `None`。呼んだ利用者が持たないか、ほかの利用者が書き込める（モードのビットか macOS の拡張 ACL）ファイルは `worker_paths.EntryUnsafe`（`foreign`）を上げ、工程の描画（`_prepared`）にも使わない
   - 副作用: 無し（読み取りだけ）
 - `plan_path`
   - 事後条件: 書き出したプランの `{state_dir}`（= `work_dir`）に `values.json` があり、その `values` がそのプランを組むのに使った値と一致する
@@ -187,15 +189,16 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `write_values` | 書けない | 保存先の権限・容量（`OSError`） | `files.write_json` | 呼び出し元へ返す（`OSError` をそのまま上げる） | `_start` の中なら `plan_failure` が `stopped`（`precondition`）にし、`started` を書かない。`plan_path` の中なら `_call_plan` が同じ分類で返す | プランを起動していないので後始末は無い。打ち直せる |
+| `write_values` | 書けない | 保存先の権限・容量（`OSError`）・`values.json` がリンクか、置き換えると所有者・ACL を保てない（`worker_paths.EntryError`） | `worker_paths.write_file` | 呼び出し元へ返す（どちらもそのまま上げる。`PLAN_FAILURES` に `worker_paths.EntryError` を含める） | `_start` の中なら `plan_failure` が `stopped`（`precondition`）にし、`started` を書かない。`plan_path` の中なら `_call_plan` が同じ分類で返す | プランを起動していないので後始末は無い。打ち直せる |
 | `plan_path` | `values.json` が別のプランのもの | 同じ保存先を別のテンプレートが使った（工程の定義を書き換えた後の打ち直し） | 読んだ `plan` とテンプレートの名前の違い | 既定値で続ける（読まなかったものとして `prepare_plan` を呼ぶ） | 出力なし | 後始末は無い |
-| `read_values` | 読めない・形が違う | ファイルが無い（工程を通さずに手で打ったプラン）・JSON が壊れている | `files.read_json` の返り | 既定値で続ける（`None` を返す） | 呼び手（`_cmd_work`）が `stopped`（`precondition`）にする | 後始末は無い |
+| `read_values` | 読めない・形が違う | ファイルが無い（工程を通さずに手で打ったプラン）・JSON が壊れている | `values_in` の返り | 既定値で続ける（`None` を返す） | 呼び手（`_cmd_work`）が `stopped`（`precondition`）にする | 後始末は無い |
+| `read_values` | ほかの利用者が用意・書き換えできる | 共有の保存先で別の利用者が置いた・書き込める `values.json` | `read_file(owned=True)` が上げる `worker_paths.EntryUnsafe`（`foreign`） | 呼び出し元へ返す | `plan_failure` が `stopped`（`precondition`）にする | 何も書いていない。ファイルを取り除けば打ち直せる |
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `VALUES_FILE` | 定数 | `plugins/ndf/src/ndf/progress/invoke.py` | `"values.json"` |
+| `VALUES_FILE` | 定数 | `plugins/ndf/src/ndf/progress/worker_kinds.py` | `"values.json"` |
 
 `values` に入るのは `template_values` が返す差し込みの値そのものである。テンプレートの `params` にある工程の入力・課題の題と本文・リポジトリの設定・打った場所（`route.derived`）・起動の補い（`route.launched`。`acceptance` など）をすべて含む。`inputs` には工程の入力（`StageRun.inputs`）をそのまま入れる。テンプレートの `params` に無い工程の入力（工程「要求と受け入れ条件」の `issues` など）は `values` から落ちるので、作業ごとの入力（`kinds.json` の `inputs`）はこちらから取る。`local_tests` は描画の条件（`ci_only` の判定の返り）で、`plan_path` が設定を読み直さずに同じ条件で描くために残す。
 
@@ -210,7 +213,8 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `write_values`・`read_values` | `ndf.core.plan.files.write_json`・`read_json`（`invoke.py` が `plan_files` として既に読んでいる） | `grep -n "plan_files\|def write_json\|def read_json" plugins/ndf/src/ndf/progress/invoke.py plugins/ndf/src/ndf/core/plan/files.py` | 使う。保存先の JSON を読み書きする既存の関数で、`invoke.py` に新しい依存を足さない |
+| `write_values`・`read_values` | `ndf.core.plan.files.write_json`・`read_json`（`invoke.py` が `plan_files` として既に読んでいる） | `grep -n "plan_files\|def write_json\|def read_json" plugins/ndf/src/ndf/progress/invoke.py plugins/ndf/src/ndf/core/plan/files.py` | 使えない。固定名の `values.tmp` をリンクをたどって開き、所有者・書き込み権限を確かめずに読むので、共有の保存先で `_cmd_work` が読む値の条件を満たせない（PR 4307 の r6-1〜r6-3） |
+| `write_values`・`read_values` | `ndf.contracts.worker_paths.open_resolved`・`write_file`・`read_file`（#3877） | `grep -n "^def open_resolved\|^def write_file\|^def read_file" plugins/ndf/src/ndf/contracts/worker_paths*.py` | 使う。記述子に対する排他的な作成と公開・所有者と書き込み権限の確かめを既に持ち、`ndf answer work` と同じ関数で読み書きする |
 | `write_values`・`read_values` | `ndf.core.plan.records`（`prs.json`・`outputs.json` の読み書き。`src/ndf/core/plan/records.py:17-22`） | `grep -n "^def \|^[A-Z_]* = " plugins/ndf/src/ndf/core/plan/records.py` | 使えない。プランの実行の層が回をまたいで書く記録で、工程がプランを組むときの値を持たない（決定 2 で書き込み元を工程の層にした） |
 | `write_values` | `invoke._issue_values` がコピーを置く形（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE` を同じ `work_dir` へ書く。`invoke.py:386-412`） | `grep -n "ISSUE_BODY_FILE\|ISSUE_TITLE_FILE" plugins/ndf/src/ndf/progress/invoke.py` | 使う（置き方を踏襲する）。工程の保存先へ材料を残す形が既にある |
 
@@ -245,11 +249,11 @@ plugins/ndf/
   - 副作用: ファイルの読み取り 1 つと書き込み 1 つ
 - `_cmd_work`
   - 事前条件: `--state-dir` と作業の名前がある。`--cwd` は省ける
-  - 手順: (1) 作業の名前を確かめる → (2) 渡された保存先のパスを `open_workdir` で 1 回だけ開き、`values.json` を `read_file(owned=True)`（呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけ）で読んで `values_of` で形を確かめる。以後の初期化と書き込みも同じ記述子で行う → (3) `kind_gaps` が空かを確かめる → (4) 作業場所を決める（`--cwd` があればそれ、無ければ `work_dir_of(kind, saved["values"])`。工程から起動するときは `--cwd` を渡さないので、作業ごとの `cwd` が効く）→ (5) プロンプトを書く → (6) `work_argv` で `ndf worker run --cwd <作業場所> …` へ置き換わる
-  - 事後条件: プロンプトのファイルが書かれた後に、プロセスが `ndf worker run` へ置き換わる。置き換わる前に戻る経路は失敗のときだけ。作業の定義の `cwd` が `"worktree"` の作業は、`values.json` の `worktree`（プランの `worktree` と同じ値）で worker が動き、リポジトリの根（`repo`）では動かない
+  - 手順: (1) 作業の名前を確かめる → (2) 渡された保存先のパスを `open_resolved` で祖先のリンクを解きながら 1 回だけ開き（macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す要素がリンクなら止める）、`values.json` を `worker_kinds.values_in`（`read_values` と共有。`read_file(owned=True)` で、呼んだ利用者が持ち、グループとほかの利用者がモードのビットでも macOS の拡張 ACL でも書き込めないファイルだけ）で読んで `values_of` で形を確かめる。以後の初期化と書き込みも同じ記述子で行い、パスは解いた場所で組む → (3) `kind_gaps` が空かを確かめる → (4) 作業場所を決める（`--cwd` があればそれ、無ければ `work_dir_of(kind, saved["values"])`。工程から起動するときは `--cwd` を渡さないので、作業ごとの `cwd` が効く）→ (5) プロンプトを `write_file(private=True)` で書く（前の起動指示のグループ書き込み権限を継がない）→ (6) 組んだ本文を名前の無い私有のファイル（Linux は `memfd_create`）へ書いて置き換えた先へ継ぎ、`work_argv(..., prompt_file="/dev/fd/<番号>", result_dir_id=<開いた保存先の (st_dev, st_ino)>)` で `ndf worker run --cwd <作業場所> …` へ置き換わる。`ndf worker run` は共有の保存先の起動指示を読み直さず、`--result-dir-id` で結果ファイルの保存先を開き直した場所と突き合わせ、違えば起動せずに `precondition` で止まる
+  - 事後条件: プロンプトのファイルが書かれた後に、プロセスが `ndf worker run` へ置き換わる。worker へ渡る指示は、確かめた `values.json` から組んだ本文そのものである。置き換わる前に戻る経路は失敗のときだけ。作業の定義の `cwd` が `"worktree"` の作業は、`values.json` の `worktree`（プランの `worktree` と同じ値）で worker が動き、リポジトリの根（`repo`）では動かない
   - 副作用: ファイルの書き込みとプロセスの置き換え（`os.execv`）
 
-引数は `--cwd` を省けるようになるだけで、ほかは変わらない。作業の名前の説明が `work_kinds()` のキーから組まれるため、サブコマンドの仕様の文書（`plugins/ndf/docs/contracts/commands.md`）の `ndf answer work` の節が変わる。この節は `ndf check --write-spec` が生成する。
+`ndf answer work` の引数は `--cwd` を省けるようになるだけで、ほかは変わらない。`ndf worker run` は開いた保存先の識別子を受ける `--result-dir-id <st_dev>:<st_ino>` を足す（省くと突き合わせない）。作業の名前の説明が `work_kinds()` のキーから組まれるため、サブコマンドの仕様の文書（`plugins/ndf/docs/contracts/commands.md`）の `ndf answer work` の節が変わる。この節は `ndf check --write-spec` が生成する。
 
 ### 異常系の処理
 

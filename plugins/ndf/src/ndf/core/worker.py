@@ -686,22 +686,40 @@ def _deliver(handoff: Handoff, system: str, root: Path, wd: worker_paths.WorkDir
 
 
 @contextlib.contextmanager
-def _result_dir(raw: str) -> Iterator[tuple[worker_paths.WorkDir, Path]]:
+def _result_dir(raw: str, held: Optional[str] = None) -> Iterator[tuple[worker_paths.WorkDir, Path]]:
     """`--result-file` の保存先を祖先のリンクを解きながら 1 回だけ開き、開いた保存先と解いた結果ファイルのパスを返す。
 
     生の引数がディレクトリを指す形（末尾の `/`・`/.`・`/..`。`Path` はこれを落とす）か、保存先を開けなければ、
     起動せずに `WorkerError`（invalid）。解くときに開いた記述子をそのまま使うので（`worker_paths.open_resolved`）、
     解いてから起動前の削除までに保存先を別の実ディレクトリへ差し替えられても、差し替え先の同名のファイルを消さない。
+    `held`（`--result-dir-id` の `<st_dev>:<st_ino>`。`ndf answer work` が開いた保存先）があれば、開いた保存先と突き合わせ、
+    違えば起動せずに `WorkerError`（precondition）。起動指示を書いた保存先と別の場所の結果ファイルを扱わない。
     """
     if worker_paths.names_a_directory(raw):
         raise WorkerError("invalid", f"--result-file {raw} はディレクトリを指す（ファイルのパスを渡す）")
+    expected = _dir_id_of(held) if held is not None else None
     path = Path(raw).absolute()
     with contextlib.ExitStack() as stack:
         try:
             wd = stack.enter_context(worker_paths.open_resolved(path.parent))
         except (worker_paths.EntryError, OSError) as exc:  # 利用者の入力: 開けない結果の保存先は呼び出しの誤り
             raise WorkerError("invalid", f"結果ファイルの保存先 {path.parent} を開けない: {exc}") from None
+        if expected is not None:
+            try:
+                worker_paths.check_dir_id(wd, expected)
+            except worker_paths.EntryUnsafe:
+                raise WorkerError(
+                    "precondition", f"結果ファイルの保存先 {wd.path} が起動指示を書いた保存先と違う（差し替えられた）"
+                ) from None
         yield wd, wd.path / path.name
+
+
+def _dir_id_of(raw: str) -> tuple[int, int]:
+    """`--result-dir-id` の `<st_dev>:<st_ino>`。形が違えば `WorkerError`（invalid）。"""
+    dev, sep, ino = raw.partition(":")
+    if not (sep and dev.isdigit() and ino.isdigit()):
+        raise WorkerError("invalid", f"--result-dir-id {raw} は <st_dev>:<st_ino> の形にする")
+    return int(dev), int(ino)
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
@@ -709,7 +727,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
     prompt = _read_input(a.prompt_file, "作業の本文")
     # 相対パスはこのサブコマンドを呼んだ場所で解く（worker は --cwd で動き、親の確かめと worker の書き込みが同じ場所を指すようにする）
     # 祖先のリンク（macOS の /var→/private/var など）は解き、末尾の結果ファイルの名前は解かない（リンクなら delegate が拒む）
-    with _result_dir(a.result_file) as (wd, result_file):
+    with _result_dir(a.result_file, a.result_dir_id) as (wd, result_file):
         handoff = Handoff(
             a.kind,
             prompt,
@@ -888,6 +906,8 @@ def _add_run(sub: Any) -> None:
         rn.add_argument(name, required=True)
     rn.add_argument("--sources")
     rn.add_argument("--timeout", type=float, default=WORK_TIMEOUT)
+    # 結果ファイルの保存先の <st_dev>:<st_ino>（`ndf answer work` が開いた保存先。開き直した保存先と突き合わせる）
+    rn.add_argument("--result-dir-id")
     # 結果ファイルの outputs に必ず入れる名前（`ndf answer work` が作業の定義の outputs から渡す。#3908）
     rn.add_argument("--require-output", action="append", default=[])
     rn.set_defaults(fn=_cmd_run)
