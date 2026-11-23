@@ -429,6 +429,22 @@ def test_a_fallback_change_later_in_the_save_is_not_read_as_a_rewound_clock(gate
     assert gate.reserve(WRITE).at == pytest.approx(NOW + 5 + 30)
 
 
+def test_a_fallback_change_while_loading_is_not_read_as_a_rewound_clock(gate, path, clock, monkeypatch):
+    # 記録を読む途中で CLOCK_SLACK を越えて時計が進み、プロセスの中だけの変更が入る（壁時計は正しく進む）
+    seed(path)
+    real = gate._load
+
+    def load() -> Optional[dict]:
+        clock.now += 5
+        gate._in_process(lambda memory, now: memory.__setitem__("blocked_until", now + 30))
+        return real()
+
+    monkeypatch.setattr(gate, "_load", load)
+    gate.block(1)
+
+    assert record(path)["blocked_until"] == pytest.approx(NOW + 5 + 30)
+
+
 def test_the_record_written_again_carries_the_unsaved_changes(gate, path, monkeypatch):
     seed(path)
     real = slot_pool.write_json

@@ -394,9 +394,12 @@ class WriteGate(BaseThrottler):
         """(待ちの終わりが今より後か, 最短の送信時刻までの秒)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
         held = self._record_lock()
         try:
-            now = self.clock()
-            record = None if held is None else self._load(now)
-            record = self._memory_view(now) if record is None else self._with_unsaved(record, now)[0]
+            record = None if held is None else self._load()
+            if record is None:
+                now = self.clock()
+                record = self._memory_view(now)
+            else:
+                record, _, now = self._with_unsaved(record)
             return record["blocked_until"] > now, _earliest_send(record, kind) - now
         finally:
             if held is not None:
@@ -408,11 +411,10 @@ class WriteGate(BaseThrottler):
         if held is None:
             return self._in_process(change)
         try:
-            now = self.clock()
-            record = self._load(now)
+            record = self._load()
             if record is None:
                 return self._in_process(change)
-            record, seen = self._with_unsaved(record, now)
+            record, seen, now = self._with_unsaved(record)
             result = change(record, now)
             self._store(record, now, seen)
             return result
@@ -433,15 +435,21 @@ class WriteGate(BaseThrottler):
             memory = dict(self._memory)
         return _rewound(memory, now)
 
-    def _with_unsaved(self, record: dict[str, float], now: float) -> tuple[dict[str, float], int]:
-        """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。重ねた時点の変更の回数も返す。"""
+    def _with_unsaved(self, record: dict[str, float]) -> tuple[dict[str, float], int, float]:
+        """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。重ねた時点の変更の回数と基準の時刻も返す。
+
+        基準の時刻はプロセスの中の記録の写しと同じ `_mutex` の中で取る。写しに入った変更はどれもこの時刻より前に
+        書かれているので、正常に進む時計で `_rewound` が待ちを縮めない。読んだ記録もこの時刻へそろえる。
+        """
         with self._mutex:
+            now = self.clock()
             unsaved, seen, memory = self._unsaved, self._fallbacks, dict(self._memory)
+        record = _rewound(record, now)
         if unsaved:
             memory = _rewound(memory, now)
             for key in TIMES:
                 record[key] = max(record[key], memory[key])
-        return record, seen
+        return record, seen, now
 
     def _record_lock(self) -> Optional[FileLock]:
         held = slot_pool.lock(self.path.with_name(self.path.name + ".lock"))
@@ -465,8 +473,8 @@ class WriteGate(BaseThrottler):
             return None
         return held
 
-    def _load(self, now: float) -> Optional[dict[str, float]]:
-        """記録を読む。無ければ空、壊れていれば 1 行を出して空。読めない（OSError）なら 1 行を出して None。"""
+    def _load(self) -> Optional[dict[str, float]]:
+        """記録を読む（時刻はそろえない。`_with_unsaved` がそろえる）。無ければ空、壊れていれば 1 行を出して空。読めない（OSError）なら 1 行を出して None。"""
         try:
             text = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -481,7 +489,7 @@ class WriteGate(BaseThrottler):
         if not _valid(raw):
             diag(f"書き込みの順番の記録を読めない: {self.path}: 形が違う", kind="write_gate")
             return _empty()
-        return _rewound({k: float(raw[k]) for k in (*TIMES, "written_at")}, now)
+        return {k: float(raw[k]) for k in (*TIMES, "written_at")}
 
     def _store(self, record: dict[str, float], now: float, seen: int) -> None:
         """記録を書き、プロセスの中の記録へ写す。`seen` の後にプロセスの中だけで変えた分は残し、未保存の印も消さない。"""
