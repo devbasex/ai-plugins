@@ -14,7 +14,7 @@ import pytest
 import strategy_fixture
 
 from ndf.core import route
-from ndf.progress import invoke
+from ndf.progress import invoke, merge_pending
 
 # 設定（`.ndf/project.json`）のうち、実装のプランの差し込みを埋める値（review の起動は持たない。既定の起動を補わせる）
 PROJECT = {
@@ -160,7 +160,7 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
 
 
 def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_issue(tmp_path, filled, local, monkeypatch):
-    # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問い、決まらなければ課題を読まずに止める。
+    # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問うて、決まらなければ課題を読まずに止める。
     # 決まった試行で課題と書き手の権限を読み直す（写しは clear_values が消している。PR 4289 の指摘）
     answers = iter([None, None, "squash"])
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: filled.append("merge_method") or next(answers))
@@ -171,20 +171,20 @@ def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_
         invoke.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
     assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
-    assert got["merge_method"] == "squash" and not (tmp_path / "w" / invoke.MERGE_PENDING_FILE).exists()
+    assert got["merge_method"] == "squash" and not (tmp_path / "w" / merge_pending.PENDING_FILE).exists()
 
 
 def _pending(tmp_path: Path) -> Path:
-    """マージの方式を決められずに止まった試行の印（前の試行が残したもの）。"""
+    """マージの方式を決められずに止まった試行の目印（前の試行が残したもの）。"""
     work = tmp_path / "w"
     work.mkdir(exist_ok=True)
-    (work / invoke.MERGE_PENDING_FILE).write_text("{}", encoding="utf-8")
-    return work / invoke.MERGE_PENDING_FILE
+    (work / merge_pending.PENDING_FILE).write_text("{}", encoding="utf-8")
+    return work / merge_pending.PENDING_FILE
 
 
 def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_again(tmp_path, filled, local, monkeypatch):
-    # 印のある打ち直しで方式が決まった後に課題を読めずに止まっても、方式は印に控え、次の打ち直しは問い直さない。
-    # 課題を読めた試行が印を消す（PR 4289 の指摘）
+    # 目印のある打ち直しで方式が決まった後に課題を読めずに止まっても、方式は目印に記録しておき、次の打ち直しは
+    # 問い合わせ直さない。課題を読めた試行が目印を消す（PR 4289 の指摘）
     pending = _pending(tmp_path)
 
     def fail(location, n):
@@ -201,8 +201,8 @@ def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_a
 
 
 def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_path, filled, local, monkeypatch):
-    # 印のある打ち直しで方式を問う GitHub が上限に当たれば、方式が無いとせずに待ち時間付きの transient で止まり、
-    # 課題を読まずに印を残す（PR 4289 の指摘）
+    # 目印のある打ち直しで方式を問う GitHub が上限に当たれば、方式が無いとせずに待ち時間付きの transient で止まり、
+    # 課題を読まずに目印を残す（PR 4289 の指摘）
     pending = _pending(tmp_path)
 
     def limited(repo, base, remote=None, *, raise_passing=False):
