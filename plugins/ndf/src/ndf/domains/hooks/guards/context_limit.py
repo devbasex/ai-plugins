@@ -317,13 +317,15 @@ def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> st
 
     注入の上限で切られても検査のコマンドと終え方が残るよう、それらを先頭に置き、メインディレクトリは `--cwd` の 1 回だけ書く
     （文書はその根から解く相対パス。CLI と `_ndf_args_pass` は相対パスを `--cwd` の worktree の根から解く）。
-    `--cwd` の値と文書は、空白を含んでも Bash の 1 引数になるよう引用する。
+    `--cwd` の値と文書は、空白を含んでも Bash の 1 引数になるよう引用する。保存か検査が失敗したら理由を伝えてブロックを出さない
+    （今回の引継ぎが渡らないままセグメントを終えない）。
     """
     end = "応答の最後に次のセグメントのブロックを書いて終える" if under_relay else "ndf-next のブロックを出して新しいセッションで続ける"
     doc = shlex.quote(f"{handoff_dir.strip('/')}/<文書>.md")
     return (
         f"文脈の量が運用上限（{t.limit} token）を超えた。引継ぎ文書を書き、"
-        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、{end}。"
+        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、保存と検査が通ったときだけ{end}。"
+        "通らなければ理由を伝え、ブロックを出さない。"
         "文書は --cwd の値の下のこのパスへ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。"
         "書く前に、背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。"
         "supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
