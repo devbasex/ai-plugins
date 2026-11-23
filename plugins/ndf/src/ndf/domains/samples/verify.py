@@ -6,7 +6,8 @@
 - 説明に出すのは、記述か見本の定義が名前を決めた語（`properties` のキー・検証の規則の名前・参照）と配列の添字と件数だけである。
   見本の値と、見本の側の辞書のキーの名前は出さない（見本は本物の応答で、値とキーに利用者の識別情報が入りうる）
 - 参照（`$ref`）は文書の中（`#/...`）だけで、文書の根から解く。検証器には取得を持たない registry を渡し、外の URL を取りに行かない
-- 本物の応答と記述の既知の食い違いは、見本の定義の `known_mismatches` に挙げたものだけを除く。出なくなれば食い違いにする
+- 本物の応答と記述の既知の食い違いは、見本の定義の `known_mismatches` と `extra_keys` に挙げたものだけを除く。出なくなれば食い違いにする
+- 文書の外を指す参照は、URL に認証情報や署名が入りうるので、文字列を説明に出さない
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ FETCH_POLICY = "samples.fetch"
 # パスで、定義が名前を決めない辞書のキーと、`absent_keys` の配列の要素を表す語
 ANY = "*"
 TOP = "(最上位)"
+OUTSIDE = "(文書の外)"
 # 受ける記述のバージョンの頭（3.0 は null を取る列を nullable で書き、2020-12 の検証器では受けられない）
 OPENAPI_PREFIX = "3.1."
 
@@ -109,6 +111,14 @@ class VerifyResult(NamedTuple):
     calls: dict[str, int]
 
 
+class Known(NamedTuple):
+    """見本の定義が挙げる既知の食い違い（`absent_keys`・`extra_keys`・`known_mismatches`）。"""
+
+    absent: list[str]
+    extra: list[str]
+    mismatches: list[str]
+
+
 class Definition(NamedTuple):
     """見本の定義 1 つ。"""
 
@@ -116,8 +126,7 @@ class Definition(NamedTuple):
     peer: str
     url: str
     pointer: str
-    absent: list[str]
-    known: list[str]
+    known: Known
     name: str
 
 
@@ -183,8 +192,8 @@ def _definitions() -> list[Definition]:
         if places:
             raise DefinitionError(f"見本の定義 {DEFINITIONS}/{name}.json の形が {DEFINITION_SCHEMA} と違う: {', '.join(places)}")
         source = raw["source"]
-        keys = (raw["absent_keys"], raw["known_mismatches"])
-        out.append(Definition(raw["sample"], raw["peer"], source["schema"], source["pointer"], *keys, name))
+        known = Known(raw["absent_keys"], raw["extra_keys"], raw["known_mismatches"])
+        out.append(Definition(raw["sample"], raw["peer"], source["schema"], source["pointer"], known, name))
     return sorted(out)
 
 
@@ -228,7 +237,7 @@ def _mismatches(definition: Definition, documents: _Documents) -> list[str]:
         raise VerifyError("config_broken", f"{exc}: {DEFINITIONS}/{definition.name}.json") from exc
     except RefError as exc:
         return [ref_detail(str(exc))]
-    return compare(sample, target, definition.absent, definition.known)
+    return compare(sample, target, definition.known)
 
 
 def definition_target(document: dict[str, Any], pointer: str) -> Target:
@@ -243,25 +252,56 @@ def definition_target(document: dict[str, Any], pointer: str) -> Target:
     return Target(document, {"$ref": pointer})
 
 
-def compare(sample: Any, target: Target, absent: list[str], known: Sequence[str] = ()) -> list[str]:
-    """見本と定義の食い違いの説明を昇順で返す。空なら合う。
-
-    `absent` と `known` は見本の定義の `absent_keys` と `known_mismatches`。`known` の説明は除き、出なくなったものを食い違いにする。
-    """
+def compare(sample: Any, target: Target, known: Known) -> list[str]:
+    """見本と定義の食い違いの説明を昇順で返す。空なら合う。`known` の説明は除き、出なくなったものを食い違いにする。"""
     try:
+        target = _narrow(sample, target)
         found = {describe(error, target) for error in _validator(target).iter_errors(sample)}
-        found.update(unknown_keys(sample, target), added_keys(sample, target, absent))
+        found.update(unknown_keys(sample, target, known.extra), added_keys(sample, target, known.absent))
     except RefError as exc:
         return [ref_detail(str(exc))]
     except Unresolvable as exc:
         return [ref_detail(f"#{exc.ref}" if exc.ref.startswith("/") else exc.ref)]
     except (UnknownType, re.error):
         return ["記述の定義がスキーマとして読めない"]
-    return sorted(found.difference(known) | {f"既知の食い違いが消えた: {line}" for line in known if line not in found})
+    gone = {f"既知の食い違いが消えた: {line}" for line in known.mismatches if line not in found}
+    return sorted(found.difference(known.mismatches) | gone)
+
+
+def _narrow(sample: Any, target: Target) -> Target:
+    """指した定義が `anyOf`・`oneOf` で、見本の型を受ける枝が 1 つだけなら、その枝へ絞る（枝の順に依らず、食い違いを枝の中の位置で出す）。"""
+    node = _followed(target, target.schema)
+    for word in ("oneOf", "anyOf"):
+        if not isinstance(node, dict) or word not in node:
+            continue
+        fit = [branch for branch in node[word] if _accepts_type(target, branch, sample)]
+        if len(fit) == 1:
+            rest = {key: value for key, value in node.items() if key not in (word, "allOf")}
+            both = [*(node["allOf"] if "allOf" in node else []), *fit]
+            return Target(target.document, {**rest, "allOf": both})
+    return target
+
+
+def _followed(target: Target, node: Any) -> Any:
+    """`$ref` だけで別の定義を指す定義の、たどった先。"""
+    seen: list[Any] = []
+    while isinstance(node, dict) and set(node) == {"$ref"} and node["$ref"] not in seen:
+        seen.append(node["$ref"])
+        node = _resolve(target.document, node["$ref"])
+    return node
+
+
+def _accepts_type(target: Target, branch: Any, sample: Any) -> bool:
+    """枝の `type` が見本の型を受けるか（`type` を書かない枝は受ける）。"""
+    node = _followed(target, branch)
+    if not isinstance(node, dict) or "type" not in node:
+        return True
+    return Draft202012Validator({"type": node["type"]}).is_valid(sample)
 
 
 def ref_detail(ref: str) -> str:
-    return f"記述に参照の先が無い: {ref}"
+    """参照が解けない説明。文書の外を指す参照は文字列を伏せる。"""
+    return f"記述に参照の先が無い: {ref if ref.startswith('#') else OUTSIDE}"
 
 
 def describe(error: ValidationError, target: Target) -> str:
@@ -275,20 +315,24 @@ def describe(error: ValidationError, target: Target) -> str:
     return f"{safe_path(list(error.absolute_path), target)}: {rule}"
 
 
-def unknown_keys(sample: Any, target: Target) -> list[str]:
+def unknown_keys(sample: Any, target: Target, extra: list[str]) -> list[str]:
     """見本の辞書のキーのうち、定義の `properties` に無いものの件数を位置ごとに返す。
 
     `additionalProperties`・`patternProperties` を書く定義と、`properties` を持たない定義（自由な辞書）は数えない。
+    `extra`（見本の定義の `extra_keys`）に挙げたキーは数えず、そのうち定義に無いキーでなくなったものの件数を返す。
     """
     out = []
+    left = set(extra)
     for at in _positions(sample, target):
-        if any(_is_open(node) for node in at.layers.nodes) or not at.layers.matched:
-            continue
         names = _names(at.layers.nodes)
-        count = sum(1 for key in at.value if key not in names)
-        if names and count:
+        if not names or any(_is_open(node) for node in at.layers.nodes) or not at.layers.matched:
+            continue
+        unknown = {"/".join((*_base(at.path), key)) for key in at.value if key not in names}
+        left -= unknown
+        count = len(unknown.difference(extra))
+        if count:
             out.append(f"{safe_path(at.path, target)}: 定義に無いキー {count} 件")
-    return sorted(out)
+    return sorted(out + ([f"既知の、定義に無いキーが消えた: {len(left)} 件"] if left else []))
 
 
 def added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]:
@@ -298,10 +342,15 @@ def added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]:
     for at in _positions(sample, target):
         if at.dynamic or not at.layers.matched:
             continue
-        base = tuple(ANY if isinstance(part, int) else part for part in at.path)
+        base = _base(at.path)
         new = {key for key in _names(at.layers.nodes) - set(at.value) if "/".join((*base, key)) not in known}
         found |= {f"{safe_path(base, target)}: 記述に足されたキー {key}" for key in new}
     return sorted(found | {line for entry in absent for line in _gone(entry, target)})
+
+
+def _base(path: _Place) -> tuple[str, ...]:
+    """見本の定義のパスの書き方（配列の添字を `*` にする）。"""
+    return tuple(ANY if isinstance(part, int) else part for part in path)
 
 
 def safe_path(path: Sequence[str | int], target: Target) -> str:

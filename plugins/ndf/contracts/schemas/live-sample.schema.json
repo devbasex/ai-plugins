@@ -11,6 +11,7 @@
     "sample",
     "source",
     "absent_keys",
+    "extra_keys",
     "known_mismatches"
   ],
   "properties": {
@@ -57,6 +58,15 @@
         "minLength": 1
       },
       "description": "見本を録った時点の記述の定義にあり、見本（本物の応答）に無かったキー。見本の根からのパスで、辞書のキーを / で区切り、配列の要素は * で書く。親のキーを書けば下は書かない"
+    },
+    "extra_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "見本（本物の応答）にあり、記述の定義に無いと分かっているキー。書き方は absent_keys と同じ。このキーだけを除き、定義に載るか見本から消えれば食い違いにする"
     },
     "known_mismatches": {
       "type": "array",

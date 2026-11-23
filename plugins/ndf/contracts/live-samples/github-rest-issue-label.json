@@ -4,11 +4,13 @@
   "sample": "tests/samples/github/rest/issue_label.json",
   "source": {
     "schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json",
-    "pointer": "#/components/schemas/issue/properties/labels/items/oneOf/1"
+    "pointer": "#/components/schemas/issue/properties/labels/items"
   },
   "absent_keys": [],
+  "extra_keys": [
+    "archived_at"
+  ],
   "known_mismatches": [
-    "(最上位): 定義に無いキー 1 件",
     "archived_by: type"
   ]
 }

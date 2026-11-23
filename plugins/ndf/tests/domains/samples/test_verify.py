@@ -22,7 +22,7 @@ OTHER_URL = "https://example.test/other.json"
 
 
 def _compare(data: Any, doc: dict[str, Any], absent: list[str]) -> list[str]:
-    return verify.compare(data, verify.definition_target(doc, POINTER), absent)
+    return verify.compare(data, verify.definition_target(doc, POINTER), verify.Known(absent, [], []))
 
 
 def test_compare_accepts_the_recorded_shape() -> None:
@@ -68,7 +68,7 @@ def test_compare_reports_a_changed_sample_without_its_values_and_keys(change: Ch
 
 
 def test_compare_reports_an_empty_sample() -> None:
-    got = verify.compare({}, verify.definition_target(document(), POINTER), list(properties(document(), "issue")))
+    got = _compare({}, document(), list(properties(document(), "issue")))
     assert got == ["(最上位): required labels, number, user"]
 
 
@@ -99,9 +99,9 @@ def test_compare_reports_an_empty_sample() -> None:
             ["記述に参照の先が無い: #/components/schemas/label"],
         ),
         (
-            lambda d: properties(d, "issue").update(number={"$ref": "https://example.test/x.json"}),
+            lambda d: properties(d, "issue").update(number={"$ref": f"https://example.test/x.json?sig={SECRET_VALUE}"}),
             ABSENT,
-            ["記述に参照の先が無い: https://example.test/x.json"],
+            ["記述に参照の先が無い: (文書の外)"],
         ),
         (lambda d: properties(d, "issue").update(number={"type": "no-such-type"}), ABSENT, ["記述の定義がスキーマとして読めない"]),
         (lambda d: properties(d, "issue")["state_reason"].update(pattern="("), ABSENT, ["記述の定義がスキーマとして読めない"]),
@@ -142,16 +142,15 @@ def test_safe_path_shows_only_names_the_definition_decides(path: list[str | int]
     ids=["unevaluated-ref", "unevaluated-dynamic-ref", "nested-schema", "other-dialect"],
 )
 def test_compare_resolves_references_only_inside_the_document(wrap: Callable[[str], Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    """jsonschema が registry で参照を解く経路でも、文書の中の参照は解き、外の URL は取りに行かずに食い違いにする。"""
+    """jsonschema が registry で参照を解く経路でも、文書の中の参照は解き、外の URL は取りに行かず、値を出さずに食い違いにする。"""
     sent: list[Any] = []
     monkeypatch.setattr("urllib.request.urlopen", lambda req, *a, **kw: sent.append(req))
     doc = {**document(), "x-free": {"type": "object", "additionalProperties": True}}
     got = {}
-    for ref in ("#/x-free", "#/x-gone", "https://example.test/x.json"):
+    for ref in ("#/x-free", "#/x-gone", f"https://user:{SECRET_VALUE}@example.test/x.json"):
         properties(doc, "issue")["meta"] = wrap(ref)
         got[ref] = _compare(sample(), doc, ABSENT)
-    gone = [f"記述に参照の先が無い: {ref}" for ref in got]
-    assert list(got.values()) == [[], gone[1:2], gone[2:]]
+    assert list(got.values()) == [[], ["記述に参照の先が無い: #/x-gone"], ["記述に参照の先が無い: (文書の外)"]]
     assert sent == []
 
 
@@ -176,7 +175,38 @@ def test_compare_resolves_references_from_the_document_root(pointer: str) -> Non
 )
 def test_compare_excludes_only_the_known_mismatches(changes: dict[str, Any], known: list[str], expected: list[str]) -> None:
     target = verify.definition_target(document(), POINTER)
-    assert verify.compare({**sample(), **changes}, target, ABSENT, known) == expected
+    assert verify.compare({**sample(), **changes}, target, verify.Known(ABSENT, [], known)) == expected
+
+
+@pytest.mark.parametrize(
+    ("change", "extra", "expected"),
+    [
+        (lambda d: None, ["labels/*/name"], ["既知の、定義に無いキーが消えた: 1 件"]),
+        (lambda d: properties(d, "label").pop("name"), ["labels/*/name"], ["meta/*: 定義に無いキー 1 件"]),
+        (lambda d: properties(d, "label").pop("name"), ["labels/*/name", "meta/any/name"], []),
+        # 定義に無いキーの件数が同じでも、挙げたキーと入れ替われば食い違い
+        (
+            lambda d: properties(d, "simple-user").pop("id"),
+            ["user/id", "creator/login"],
+            ["creator: 定義に無いキー 1 件", "既知の、定義に無いキーが消えた: 1 件"],
+        ),
+    ],
+)
+def test_compare_excludes_only_the_listed_extra_keys(change: Change, extra: list[str], expected: list[str]) -> None:
+    doc = document()
+    change(doc)
+    assert verify.compare(sample(), verify.definition_target(doc, POINTER), verify.Known(ABSENT, extra, [])) == expected
+
+
+@pytest.mark.parametrize("word", ["oneOf", "anyOf"])
+@pytest.mark.parametrize("turn", [1, -1])
+def test_compare_narrows_to_the_branch_of_the_sample_type(word: str, turn: int) -> None:
+    """枝の順に依らず、見本の型を受けるただ 1 つの枝で突き合わせ、食い違いを枝の中の位置で出す。"""
+    doc = document()
+    branches = [{"type": "string"}, {"$ref": "#/components/schemas/label"}]
+    doc["components"]["schemas"]["issue"] = {"description": "x", word: branches[::turn]}
+    assert _compare({"name": "bug"}, doc, ["archived_at"]) == []
+    assert _compare({"name": 1}, doc, ["archived_at"]) == ["name: type"]
 
 
 @pytest.mark.parametrize(

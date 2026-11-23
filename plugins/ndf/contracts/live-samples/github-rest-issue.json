@@ -23,5 +23,6 @@
     "user/name",
     "user/starred_at"
   ],
+  "extra_keys": [],
   "known_mismatches": []
 }
