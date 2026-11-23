@@ -1,4 +1,4 @@
-"""GitHub の上限の見分けと待ちの秒（#4016 の決定 7・8。`github.py` から分けた）。
+"""GitHub の上限の見分けと待ちの秒（#4016 の決定 7・8・10。`github.py` から分けた）。
 
 - 二次レート制限の見分けと待ちの秒は `limit_of` の 1 か所で決める。REST の 403・429 の応答も、GraphQL の HTTP 200 の誤りも
   ここを通す。GitHub が待ちの秒（`retry-after`、または一次の残量 0 と `x-ratelimit-reset`）を示したときだけ `hinted` を真にし、
@@ -42,6 +42,8 @@ GRAPHQL_PHRASES = ("secondary rate limit", "submitted too quickly")
 REASON_KEYS = ("message", "code", "field", "resource")
 # 同じ応答について `WriteGate.block` へ知らせた待ちの秒を残す、httpx の応答の `extensions` のキー
 BLOCKED = "ndf.blocked"
+# githubkit が待ちの指定の無い（0 秒の `timedelta` も含む）打ち直しの前に眠る秒（githubkit 0.17.1 の core.py）
+SDK_DEFAULT_SLEEP = 60.0
 
 
 class Failure(NamedTuple):
@@ -99,6 +101,8 @@ def limit_of(status: int, headers: Mapping[str, str], message: str, now: float, 
     `message`（JSON の `message`。`rest_message` が取り出す）に `secondary rate` があるもの（一次の残量が正で `retry-after` の
     無い通常の `RequestFailed` も）。GraphQL は HTTP 200 の誤りの `message` に `secondary rate limit` か `submitted too quickly` が
     あるもの。`x-ratelimit-reset` だけでは `hinted` を真にしない（GitHub は一次の上限の情報としてほぼすべての応答に付ける）。
+    示された待ちが 0 秒なら githubkit が眠る秒（`sdk_sleep`）に読み替える。応答のフック・`RetryWithin`・`failure_of` が
+    同じ秒を使い、同じ応答について記録を書き直さない（PR 4267 の r3-1）。
     """
     text = message.lower()
     if status in LIMIT_STATUSES:
@@ -108,7 +112,7 @@ def limit_of(status: int, headers: Mapping[str, str], message: str, now: float, 
     if not limited:
         return None
     hint = _hint(headers, now)
-    return Limit(hint, True) if hint is not None else Limit(backoff(0), False)
+    return Limit(sdk_sleep(hint), True) if hint is not None else Limit(backoff(0), False)
 
 
 def _parsed(text: str) -> Any:
@@ -228,18 +232,24 @@ def async_watcher(gate: WriteGate) -> Callable[[httpx.Response], Awaitable[None]
     return watch
 
 
-def hooks(gate: Optional[WriteGate]) -> dict[str, Any]:
-    """githubkit のクライアントへ渡す応答のフック（`gate` が無ければ空）。"""
+def client_options(gate: Optional[WriteGate], remaining: Optional[Callable[[], float]] = None) -> dict[str, Any]:
+    """githubkit のクライアントへ渡す throttler と応答のフック（`gate` が無ければ空）。
+
+    `remaining`（待ちの予算）があれば、throttler は順番の待ちをその中に収める `gate.within(remaining)` にする（決定 10）。
+    """
     if gate is None:
         return {}
-    return {"event_hooks": {"response": [watcher(gate)]}, "async_event_hooks": {"response": [async_watcher(gate)]}}
+    throttler = gate if remaining is None else gate.within(remaining)
+    hooks = {"event_hooks": {"response": [watcher(gate)]}, "async_event_hooks": {"response": [async_watcher(gate)]}}
+    return {"throttler": throttler, **hooks}
 
 
 class RetryWithin:
     """githubkit の再試行の判断（既定の判断に、上限の待ちの残りを足す）。
 
     githubkit の既定は上限（rate limit）の解除の時刻まで同期で眠るため、待ちの予算を持つ呼び手（CI の監視）が
-    数十分戻らない。解除が `remaining`（呼んだ時点で待ちに使える残りの秒）を越える上限は再試行せず、
+    数十分戻らない。githubkit が実際に眠る秒（`sdk_sleep`。`Retry-After: 0` なら 60 秒）が `remaining`（呼んだ時点で
+    待ちに使える残りの秒）を越える上限（一次も二次も）は再試行せず、
     `GitHubError` の `retry_after` で呼び手へ返す。残りは呼び手が自分の予算の数え方で返す（`Watch.remaining` は
     ランナーの割り当ての待ちを予算に数えない）。サーバーの誤り（5xx）の再試行は既定のまま。
     二次レート制限なら、打ち直すかに依らず `gate.block` で待ちの終わりをマシン全体へ知らせる（決定 7）。
@@ -256,9 +266,16 @@ class RetryWithin:
                 share(self.gate, exc.response.raw_response, limit.seconds if limit.hinted else backoff(retry_count))
         option = RETRY_DEFAULT(exc, retry_count)
         if option.do_retry and isinstance(exc, RateLimitExceeded):
-            if exc.retry_after.total_seconds() > self.remaining():
+            if sdk_sleep(option.retry_after.total_seconds() if option.retry_after else 0.0) > self.remaining():
                 return RetryOption(False)
         return option
+
+
+def sdk_sleep(seconds: float) -> float:
+    """githubkit が打ち直しの前に実際に眠る秒。待ちの指定が無いか 0 秒（`Retry-After: 0`）なら 60 秒眠る（githubkit 0.17.1）。
+
+    `RetryWithin` が予算と比べる秒で、打ち直しを見送った上限（`RateLimitExceeded`）の `retry_after` にも同じ秒を使う。"""
+    return seconds or SDK_DEFAULT_SLEEP
 
 
 def no_wait() -> float:
@@ -271,21 +288,24 @@ def quota_of(label: str) -> str:
     return GRAPHQL if label == GRAPHQL else REST
 
 
-def failure_of(exc: RequestFailed | RequestError, label: str, detail_body: bool, now: float) -> Failure:
+def failure_of(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool, now: float) -> Failure:
     """githubkit の失敗の写し。上限（`RateLimitExceeded`）と二次レート制限（本文で見分けた通常の 403 も）は回復までの秒を、
-    HTTP の拒否は状態を添える。`detail_body` なら拒否の文へ応答の本文の先頭 300 字を足す。理由の全文は `reasons` が持つ。"""
+    HTTP の拒否は状態を添える。`detail_body` なら拒否の文へ応答の本文の先頭 300 字を足す。理由の全文は `reasons` が持つ。
+    順番の待ちが予算に収まらない（`write_gate.Busy`）なら、送っていないので `busy_failure` で写す（決定 10）。"""
+    if isinstance(exc, write_gate.Busy):
+        return busy_failure(exc.seconds, label)
     if not isinstance(exc, RequestFailed):
         return Failure(f"GitHub へ届かない: {label}: {exc}", unreached=True)
     status, text = exc.response.status_code, exc.response.raw_response.text
     reasons, limit = reasons_of(text), limit_of_failure(exc, now)
-    if limit is not None:  # 二次の上限は待てば戻る（#3941）
+    if limit is not None:  # 二次の上限は待てば戻る（#3941）。0 秒の待ちは `limit_of` が読み替え済み
         detail = f"GitHub の上限（{quota_of(label)} のスロット・secondary rate limit）: {label}"
         recorded = _recorded(exc.response.raw_response, limit.seconds)
         quota = quota_of(label)
         return Failure(detail, status, limit.seconds, quota, secondary=True, hinted=limit.hinted, reasons=reasons, recorded=recorded)
-    if isinstance(exc, RateLimitExceeded):
+    if isinstance(exc, RateLimitExceeded):  # 一次の上限。待ちは `RetryWithin` が予算と比べた秒にそろえる
         detail = f"GitHub の上限（{quota_of(label)} のスロット）: {label}"
-        return Failure(detail, status, exc.retry_after.total_seconds(), quota_of(label), reasons=reasons)
+        return Failure(detail, status, sdk_sleep(exc.retry_after.total_seconds()), quota_of(label), reasons=reasons)
     body = f": {text[:300]}" if detail_body else ""
     return Failure(f"GitHub が断った（{status}）: {label}{body}", status, reasons=reasons)
 
@@ -307,6 +327,11 @@ def graphql_limited(exc: RateLimitExceeded) -> Optional[Failure]:
     messages = "; ".join(e.message for e in exc.response.parsed_data.errors)
     failure = graphql_failure(messages, exc.response.raw_response)
     return failure if failure.secondary else None
+
+
+def busy_failure(seconds: float, label: str) -> Failure:
+    """順番の待ちが予算に収まらない（`write_gate.Busy`）の写し。上限の待ちが予算を越えたときと同じく `retry_after` を持つ。"""
+    return Failure(f"書き込みの順番の待ち（{seconds:.1f} 秒）が予算に収まらない: {label}", 0, seconds, quota_of(label))
 
 
 def tell(gate: Optional[WriteGate], secondary: bool, retry_after: Optional[float], recorded: bool = False) -> None:

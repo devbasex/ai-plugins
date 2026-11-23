@@ -1,4 +1,4 @@
-"""GitHub の二次レート制限の見分けと、待ちの終わりの共有（#4016 の決定 7・8。`github_limits` と `github` の口）。
+"""GitHub の二次レート制限の見分けと、待ちの終わりの共有（#4016 の決定 7・8・10。`github_limits` と `github` の口）。
 
 githubkit へ `httpx.MockTransport` を渡し、ネットワークへ出ない。書き込みの順番の記録は `tmp_path` に置き、本物のホームの下
 （`~/.local/state/ndf-github/`）を書かない（`transport` を渡す `client()` は `gate` を省けば順番を取らない）。
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from githubkit.exception import RequestFailed, SecondaryRateLimitExceeded
+from githubkit.exception import RateLimitExceeded, RequestFailed, SecondaryRateLimitExceeded
 from githubkit.response import Response
 from githubkit.throttling import LocalThrottler
 
@@ -53,6 +53,8 @@ class _Gate:
         (403, {"x-ratelimit-remaining": "12", "x-ratelimit-reset": str(int(NOW) + 45)}, SECONDARY, Limit(FIRST_WAIT, False)),
         (429, {}, SECONDARY, Limit(FIRST_WAIT, False)),
         (403, {"retry-after": "soon"}, SECONDARY, Limit(FIRST_WAIT, False)),
+        # PR 4267 の r3-1: 0 秒の待ちは githubkit が眠る秒に読み替え、フックと失敗の写しが同じ秒を使う
+        (403, {"retry-after": "0"}, SECONDARY, Limit(github_limits.SDK_DEFAULT_SLEEP, True)),
     ],
 )
 def test_limit_of_tells_the_secondary_limit_and_its_wait(status, headers, message, expected) -> None:
@@ -104,11 +106,33 @@ def test_client_with_a_transport_takes_no_gate_unless_given(tmp_path: Path) -> N
     api = github.client(auth="t", transport=transport, gate=gate)
     assert api.config.throttler is gate and github.GitHub(REPO, api).gate is gate
 
+    budgeted = github.client(auth="t", transport=transport, remaining=lambda: 5.0, gate=gate)
+    assert isinstance(budgeted.config.throttler, write_gate.Within) and github.GitHub(REPO, budgeted).gate is gate
+
 
 def test_client_without_a_transport_uses_the_machine_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     gate = write_gate.WriteGate(tmp_path / write_gate.GATE_FILE)
     monkeypatch.setattr(write_gate, "machine_gate", lambda: gate)
     assert github.client(auth="t").config.throttler is gate
+
+
+def test_a_write_over_the_budget_is_not_sent_and_carries_the_wait(tmp_path: Path) -> None:
+    """決定 10: 待ちの予算（3 秒）に順番の待ち（60 秒）が収まらなければ、送らずに `retry_after` 付きで返す。"""
+    path = tmp_path / write_gate.GATE_FILE
+    write_gate.WriteGate(path).block(60)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    gate = write_gate.WriteGate(path)
+    api = github.client(auth="t", transport=httpx.MockTransport(handler), remaining=lambda: 3.0, gate=gate)
+    with pytest.raises(github.GitHubError) as err:
+        github.GitHub(REPO, api).rest("PATCH", f"/repos/{REPO}/issues/1", {"body": "b"})
+
+    assert seen == [] and err.value.retry_after is not None and err.value.retry_after > 3
+    assert err.value.quota == github.REST and not err.value.secondary
 
 
 # _translated（GitHub.rest）
@@ -215,6 +239,30 @@ def test_retry_within_shares_the_secondary_limit_even_when_it_gives_up() -> None
     # 本文だけで見分けた 403（githubkit は打ち直さない）。待ちの秒は打ち直しの回数で延ばす
     assert not decide(_failed(403, {"x-ratelimit-remaining": "12"}, SECONDARY, False), 1).do_retry
     assert gate.blocked == [30.0, github_limits.backoff(1)]
+
+
+@pytest.mark.parametrize("secondary", [True, False])
+def test_retry_within_counts_the_sixty_seconds_githubkit_sleeps_for_a_zero_wait(secondary: bool) -> None:
+    # PR 4267 の r1-3: githubkit 0.17.1 は 0 秒の待ちを指定なしとして 60 秒眠る。残り 0 秒では打ち直さず、60 秒あれば打ち直す
+    request = httpx.Request("POST", f"https://api.github.com/repos/{REPO}/issues")
+    response = Response(httpx.Response(403, json={"message": SECONDARY}, headers={"retry-after": "0"}, request=request), object)
+    kind = SecondaryRateLimitExceeded if secondary else RateLimitExceeded
+    failed = kind(response, timedelta(seconds=0))
+    assert not github.RetryWithin(remaining=lambda: 0.0)(failed, 0).do_retry
+    assert not github.RetryWithin(remaining=lambda: 59.0)(failed, 0).do_retry
+    assert github.RetryWithin(remaining=lambda: 60.0)(failed, 0).do_retry
+    # r2-1: 見送った呼び手へ返す待ちも、予算と比べた 60 秒にそろえる（0 秒ならすぐ打ち直して同じ上限に当たる）
+    assert github_limits.failure_of(failed, "POST /issues", False, NOW).retry_after == github_limits.SDK_DEFAULT_SLEEP
+
+
+def test_a_zero_wait_recorded_by_the_hook_is_not_told_again() -> None:
+    # PR 4267 の r3-1: フックが記録した 0 秒の待ち（60 秒に読み替え済み）を、失敗の写しは同じ応答について知らせ直さない
+    gate = _Gate()
+    failed = _failed(403, {"retry-after": "0"}, SECONDARY, True)
+    github_limits._record(gate, failed.response.raw_response)  # type: ignore[arg-type]
+    error = github.GitHubError.of(github_limits.failure_of(failed, "POST /issues", False, NOW))
+    github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)  # type: ignore[arg-type]
+    assert gate.blocked == [github_limits.SDK_DEFAULT_SLEEP]
 
 
 def test_a_secondary_limit_told_by_githubkit_is_shared_without_the_phrase() -> None:

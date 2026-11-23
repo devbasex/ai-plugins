@@ -13,6 +13,8 @@
   手順（最短の送信時刻を待った後の読み直しと、放す `_finish`）は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が
   既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする
 - passwd に載らない UID は、環境に依らない UID ごとの保存先（`/tmp/ndf-github-<UID>`。オーナーと 0700 を確かめる）を使う
+- 待ちの予算を持つ呼び手（`within(remaining)`）は、どのロックの待ちも眠りも `remaining()` に収め、収まらなければ送らずに
+  `Busy` を出す。予約を書いた後なら `withdraw` で取り消す。予算で縛ったロックの時間切れは I5 へ落とさない（決定 10）
 
 ロックは取るたびに `slot_pool.lock` で作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
 再入として通るためである。
@@ -88,10 +90,14 @@ class Writes(NamedTuple):
 
 
 class Pause(NamedTuple):
-    """手順が眠る秒と、眠る間に送信のロックを持っているか（持っていれば非同期の経路は再開を `_FINISHER` で進める）。"""
+    """手順が眠る秒と、眠る間に送信のロックを持っているか（持っていれば非同期の経路は再開を `_FINISHER` で進める）。
+
+    `until` は眠りの終わりの時刻（時計の秒）。非同期の経路は眠る直前にここまでの残りを読み直す（`WriteGate._due`）。
+    """
 
     seconds: float
     holding: bool = False
+    until: Optional[float] = None
 
 
 class Reservation(NamedTuple):
@@ -102,6 +108,30 @@ class Reservation(NamedTuple):
     kind: str
     before: tuple[float, float]
     count: int = 1
+
+
+class Busy(Exception):
+    """順番の待ちが呼び手の予算に収まらない。`seconds` は収まらなかった待ちの秒（ロックを待つ前に予算が切れていれば 0）。"""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"書き込みの順番の待ち {seconds:.1f} 秒が待ちの予算に収まらない")
+        self.seconds = seconds
+
+
+def _bounded(remaining: Optional[Callable[[], float]], cap: float) -> tuple[float, bool]:
+    """ロックを待つ秒と、それが予算で縛られたか。予算が 0 以下ならロックを待たずに `Busy`（負の秒は無期限の待ちになる）。"""
+    if remaining is None:
+        return cap, False
+    left = remaining()
+    if left <= 0:
+        raise Busy(0.0)
+    return (left, True) if left < cap else (cap, False)
+
+
+def _within_budget(remaining: Optional[Callable[[], float]], wait: float) -> None:
+    """待ちが予算以上なら `Busy`（待ち終えた時点で残りが 0 になり、送れないため等しいときも出す）。"""
+    if remaining is not None and wait >= remaining():
+        raise Busy(wait)
 
 
 def _mutation_kind(document: str) -> Optional[str]:
@@ -247,6 +277,13 @@ def machine_gate() -> WriteGate:
     return WriteGate(gate_path())
 
 
+def gate_of(throttler: BaseThrottler) -> Optional[WriteGate]:
+    """githubkit のクライアントの throttler が使う `WriteGate`（`within` の throttler ならその元）。ほかの throttler は None。"""
+    if isinstance(throttler, WriteGate):
+        return throttler
+    return throttler.gate if isinstance(throttler, Within) else None
+
+
 def pr_lock(repo: str, pr: int) -> FileLock:
     """同じ PR の公開のロック。取るたびに別のインスタンスを作り、待つ上限は `github.pr-publish-lock` の秒。
 
@@ -275,20 +312,36 @@ class WriteGate(BaseThrottler):
 
     @contextmanager
     def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
-        writes = classified(request)
-        if writes is None:
-            yield
-            return
-        with self.hold(writes.kind, writes.count):
+        with self.passing(request):
             yield
 
     @asynccontextmanager
     async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
+        async with self.async_passing(request):
+            yield
+
+    def within(self, remaining: Callable[[], float]) -> Within:
+        """同じ記録を使い、どのロックの待ちも眠りも `remaining()` に収める throttler（決定 10）。"""
+        return Within(self, remaining)
+
+    @contextmanager
+    def passing(self, request: httpx.Request, remaining: Optional[Callable[[], float]] = None) -> Generator[None, Any, Any]:
+        """書き込みなら順番を取ってから通す（`remaining` があれば予算の中で。収まらなければ `Busy`）。読み取りはすぐ通す。"""
         writes = classified(request)
         if writes is None:
             yield
             return
-        send = await self._turn(writes.kind, writes.count)
+        with self.hold(writes.kind, writes.count, remaining):
+            yield
+
+    @asynccontextmanager
+    async def async_passing(self, request: httpx.Request, remaining: Optional[Callable[[], float]] = None) -> AsyncGenerator[None, Any]:
+        """`passing` の非同期の口。"""
+        writes = classified(request)
+        if writes is None:
+            yield
+            return
+        send = await self._turn(writes.kind, writes.count, remaining)
         try:
             yield
         finally:
@@ -297,13 +350,16 @@ class WriteGate(BaseThrottler):
             finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, writes.kind, send)
             await asyncio.shield(finishing)
 
-    async def _turn(self, kind: str, count: int) -> Optional[FileLock]:
+    async def _turn(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
         """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。
+
+        眠る直前に `_due` で残りを読み直す（手順が眠りを出してからループが再開するまでの時間を引く）。予算に収まらなければ
+        手順へ `Busy` を投げ込み、送信のロックを放して予約を取り消してから出す（PR 4267 の r3-2）。
 
         送信のロックを持ったまま眠った手順の再開は `_FINISHER` で進める。既定のスレッドプールが送信のロックを待つ手順で
         埋まっても、ロックを持つ手順がその空きを待たない。
         """
-        steps = self._steps(kind, count)
+        steps = self._steps(kind, count, remaining)
         loop = asyncio.get_running_loop()
         holding = False
         while True:
@@ -317,15 +373,27 @@ class WriteGate(BaseThrottler):
                 return value
             holding = value.holding
             try:
-                await asyncio.sleep(value.seconds)
+                seconds = self._due(value, remaining)
+            except Busy as busy:
+                # 手順は送信のロックを放し予約を取り消してから `busy` を出し直す（`_steps`）。呼び出し元が取り消されても、
+                # 投入済みの後始末は取り消さない（shield）。取り消された後の結果（出し直しの Busy）はここで受け取る
+                throwing = loop.run_in_executor(_FINISHER if holding else None, steps.throw, busy)
+                throwing.add_done_callback(lambda done: done.cancelled() or done.exception())
+                await asyncio.shield(throwing)
+                raise
+            try:
+                await asyncio.sleep(seconds)
             except BaseException:
                 steps.close()
                 raise
 
     @contextmanager
-    def hold(self, kind: str, count: int = 1) -> Generator[None, Any, Any]:
-        """種類と件数で順番を取り、文脈の中で送らせる。出口で送り終えた時刻を記録し、送信のロックを放す（例外でも）。"""
-        with closing(self._steps(kind, count)) as steps:
+    def hold(self, kind: str, count: int = 1, remaining: Optional[Callable[[], float]] = None) -> Generator[None, Any, Any]:
+        """種類と件数で順番を取り、文脈の中で送らせる。出口で送り終えた時刻を記録し、送信のロックを放す（例外でも）。
+
+        `remaining` があれば待ちを予算に収め、収まらなければ送らずに `Busy` を出す（出口の記録もしない）。
+        """
+        with closing(self._steps(kind, count, remaining)) as steps:
             send = None
             try:
                 while True:
@@ -337,23 +405,59 @@ class WriteGate(BaseThrottler):
         finally:
             self._finish(kind, send)
 
-    def reserve(self, kind: str, replacing: Optional[Reservation] = None, count: int = 1) -> Reservation:
-        """記録のロックの中で予約を決めて書く。`replacing` は同じロックの中で書く前へ戻してから決める（I3 の待ち直し）。"""
+    def reserve(
+        self,
+        kind: str,
+        replacing: Optional[Reservation] = None,
+        count: int = 1,
+        remaining: Optional[Callable[[], float]] = None,
+    ) -> Reservation:
+        """記録のロックの中で予約を決めて書く。`replacing` は同じロックの中で書く前へ戻してから決める（I3 の待ち直し）。
 
-        def change(record: dict[str, float], now: float) -> Reservation:
+        `remaining` があれば記録のロックの待ちを予算で縛り、予約までの秒が `remaining()` 以上なら新しい予約を書かずに
+        `Busy` を出す。`replacing` の戻しは `Busy` でも書く（ロックを取れなければ `withdraw` で試す）。
+        """
+
+        def change(record: dict[str, float], now: float) -> Reservation | Busy:
             if replacing is not None:
                 _restore(record, replacing)
             before = (record["next"], record["next_content"])
             at = max(now, record["next"], record["blocked_until"])
             if kind == CONTENT:
                 at = max(at, record["next_content"])
+            try:
+                _within_budget(remaining, at - now)
+            except Busy as busy:
+                if replacing is None:
+                    raise
+                return busy
             write, content = _spacing(kind)
             record["next"] = at + count * write
             if kind == CONTENT:
                 record["next_content"] = at + count * content
             return Reservation(at - now, at, kind, before, count)
 
-        return self._apply(change)
+        try:
+            made = self._apply(change, remaining)
+        except Busy:
+            if replacing is not None:
+                self.withdraw(replacing)
+            raise
+        if isinstance(made, Busy):
+            raise made
+        return made
+
+    def withdraw(self, reservation: Reservation) -> None:
+        """送らなかった予約を取り消す。`next`（`CONTENT` なら `next_content` も）が自分の書いた値のままなら書く前へ戻す。
+
+        予算が切れた後に呼ぶので記録のロックを待たない。すぐ取れなければ何もせずに返り、予約は残る（時刻が過ぎれば効かない）。
+        """
+        held = slot_pool.lock(self._record_lock_path())
+        try:
+            held.acquire(timeout=0)
+        except OSError:  # noqa: NDF401 ファイル: 取り消しは待たない。予約は時刻が過ぎれば効かない（Timeout を含む）
+            return
+        self._under(held, lambda record, _now: _restore(record, reservation))
 
     def sent(self, kind: str) -> None:
         """送り終えた時刻から、次の書き込みの時刻と最短の送信時刻を延ばす（I6）。"""
@@ -376,37 +480,79 @@ class WriteGate(BaseThrottler):
 
         self._apply(change)
 
-    def _steps(self, kind: str, count: int) -> Generator[Pause, None, Optional[FileLock]]:
-        """眠る秒を順に出し、送ってよくなったら送信のロック（取れなければ None。I5）を返す。"""
-        reservation = self.reserve(kind, count=count)
-        while True:
-            if reservation.wait > 0:
-                yield Pause(reservation.wait)
-            send = self._send_lock()
-            try:
-                blocked = yield from self._settle(kind, send is not None)
-            except BaseException:
-                if send is not None:
-                    send.release()
-                raise
-            if not blocked:
-                return send
+    def _steps(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, Optional[FileLock]]:
+        """眠る秒を順に出し、送ってよくなったら送信のロック（取れなければ None。I5）を返す。
+
+        予算の切れ（`Busy`）では、送信のロックを放し、書いた予約を `withdraw` で取り消してから出す。置き換えの `reserve` が
+        `Busy` を出したときは、旧予約は `reserve` が戻しているので取り消さない。
+        """
+        reservation: Optional[Reservation] = None
+        try:
+            reservation = self.reserve(kind, count=count, remaining=remaining)
+            while True:
+                wait = self._left(reservation, remaining)
+                if wait > 0:
+                    yield Pause(wait, until=reservation.at)
+                blocked, send = yield from self._sendable(kind, remaining)
+                if not blocked:
+                    return send
+                replaced, reservation = reservation, None
+                reservation = self.reserve(kind, replacing=replaced, count=count, remaining=remaining)
+        except Busy:
+            if reservation is not None:
+                self.withdraw(reservation)
+            raise
+
+    def _left(self, reservation: Reservation, remaining: Optional[Callable[[], float]]) -> float:
+        """眠る直前の、予約の時刻までの秒。予算があれば、予約を書いた後に過ぎた時間（記録の保存・非同期の再開）を引いて
+        読み直し、予算に収まらなければ `Busy`（`_steps` が予約を取り消す）。時計が戻っても予約の時の秒より長くは眠らない。"""
+        if remaining is None:
+            return reservation.wait
+        wait = min(reservation.wait, reservation.at - self.clock())
+        if wait > 0:
+            _within_budget(remaining, wait)
+        return wait
+
+    def _due(self, pause: Pause, remaining: Optional[Callable[[], float]]) -> float:
+        """眠る直前の秒。予算があれば `pause.until` までの残りを読み直し（`pause.seconds` より長くは眠らない）、
+        予算に収まらなければ `Busy`。"""
+        if remaining is None or pause.until is None:
+            return pause.seconds
+        wait = min(pause.seconds, pause.until - self.clock())
+        if wait > 0:
+            _within_budget(remaining, wait)
+        return max(wait, 0.0)
+
+    def _sendable(self, kind: str, remaining: Optional[Callable[[], float]]) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
+        """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(待ちの終わりが延びたか, 送信のロック)。延びたらロックを放して返す。"""
+        send = self._send_lock(remaining)
+        try:
+            blocked = yield from self._settle(kind, send is not None, remaining)
+            if not blocked and remaining is not None and remaining() <= 0:
+                raise Busy(0.0)
+        except BaseException:
             if send is not None:
                 send.release()
-            reservation = self.reserve(kind, replacing=reservation, count=count)
+            raise
+        if blocked and send is not None:
+            send.release()
+        return blocked, (None if blocked else send)
 
-    def _settle(self, kind: str, holding: bool) -> Generator[Pause, None, bool]:
+    def _settle(self, kind: str, holding: bool, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, bool]:
         """送信のロックを持ったまま（`holding`）最短の送信時刻まで眠る秒を出す。待ちの終わりが延びていたら真。"""
         while True:
-            seen = self._peek(kind)
+            seen = self._peek(kind, remaining)
             if seen is None:
                 return False
-            blocked, gap = seen
+            blocked, at = seen
             if blocked:
                 return True
+            # 記録を読んだ後に過ぎた時間（ロックを放す・予算を読む）を引くため、最短の送信時刻から数え直す
+            gap = at - self.clock()
             if gap <= 0:
                 return False
-            yield Pause(gap, holding)
+            _within_budget(remaining, gap)
+            yield Pause(gap, holding, at)
 
     def _finish(self, kind: str, send: Optional[FileLock]) -> None:
         try:
@@ -415,9 +561,9 @@ class WriteGate(BaseThrottler):
             if send is not None:
                 send.release()
 
-    def _peek(self, kind: str) -> Optional[tuple[bool, float]]:
-        """(待ちの終わりが今より後か, 最短の送信時刻までの秒)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
-        held = self._record_lock()
+    def _peek(self, kind: str, remaining: Optional[Callable[[], float]] = None) -> Optional[tuple[bool, float]]:
+        """(待ちの終わりが今より後か, 最短の送信時刻（時計の秒）)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
+        held = self._record_lock(remaining)
         try:
             record = None if held is None else self._load()
             if record is None:
@@ -425,16 +571,20 @@ class WriteGate(BaseThrottler):
                 record = self._memory_view(now)
             else:
                 record, _, now = self._with_unsaved(record)
-            return record["blocked_until"] > now, _earliest_send(record, kind) - now
+            return record["blocked_until"] > now, _earliest_send(record, kind)
         finally:
             if held is not None:
                 held.release()
 
-    def _apply(self, change: Callable[[dict[str, float], float], T]) -> T:
+    def _apply(self, change: Callable[[dict[str, float], float], T], remaining: Optional[Callable[[], float]] = None) -> T:
         """記録のロックの中で記録を変えて書く。使えなければプロセスの中の記録で変える（I5）。"""
-        held = self._record_lock()
+        held = self._record_lock(remaining)
         if held is None:
             return self._in_process(change)
+        return self._under(held, change)
+
+    def _under(self, held: FileLock, change: Callable[[dict[str, float], float], T]) -> T:
+        """取った記録のロック `held` の中で記録を変えて書き、ロックを放す。記録を読めなければプロセスの中の記録で変える。"""
         try:
             record = self._load()
             if record is None:
@@ -476,11 +626,18 @@ class WriteGate(BaseThrottler):
                 record[key] = max(record[key], memory[key])
         return record, seen, now
 
-    def _record_lock(self) -> Optional[FileLock]:
-        held = slot_pool.lock(self.path.with_name(self.path.name + ".lock"))
+    def _record_lock_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".lock")
+
+    def _record_lock(self, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
+        """記録のロック。`LOCK_SECONDS` の時間切れは None（I5）、予算で縛った待ちの時間切れは `Busy`。"""
+        wait, budgeted = _bounded(remaining, LOCK_SECONDS)
+        held = slot_pool.lock(self._record_lock_path())
         try:
-            held.acquire(timeout=LOCK_SECONDS)
+            held.acquire(timeout=wait)
         except Timeout:
+            if budgeted:
+                raise Busy(wait) from None
             diag(f"書き込みの順番の記録のロックを取れない: {self.path}", kind="write_gate")
             return None
         except OSError as exc:
@@ -488,12 +645,16 @@ class WriteGate(BaseThrottler):
             return None
         return held
 
-    def _send_lock(self) -> Optional[FileLock]:
+    def _send_lock(self, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
+        """送信のロック。`github.write-send-lock` の時間切れは None（I5）、予算で縛った待ちの時間切れは `Busy`。"""
+        wait, budgeted = _bounded(remaining, limits.value(SEND_LOCK, "lock"))
         path = self.path.with_name(SEND_LOCK_FILE)
         held = slot_pool.lock(path)
         try:
-            held.acquire(timeout=limits.value(SEND_LOCK, "lock"))
-        except OSError:  # Timeout を含む
+            held.acquire(timeout=wait)
+        except OSError as exc:  # Timeout を含む
+            if budgeted and isinstance(exc, Timeout):
+                raise Busy(wait) from None
             diag(f"書き込みの送信のロックを取れない: {path}", kind="write_gate")
             return None
         return held
@@ -543,3 +704,21 @@ class WriteGate(BaseThrottler):
         saved = _rewound(dict(record), now)
         memory = _rewound(dict(self._memory), now)
         return {**saved, **{key: max(saved[key], memory[key]) for key in TIMES}, "written_at": now}
+
+
+class Within(BaseThrottler):
+    """`WriteGate` の記録を使い、順番の待ちを呼び手の予算（`remaining`）に収める throttler（決定 10）。"""
+
+    def __init__(self, gate: WriteGate, remaining: Callable[[], float]) -> None:
+        self.gate = gate
+        self.remaining = remaining
+
+    @contextmanager
+    def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
+        with self.gate.passing(request, self.remaining):
+            yield
+
+    @asynccontextmanager
+    async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
+        async with self.gate.async_passing(request, self.remaining):
+            yield

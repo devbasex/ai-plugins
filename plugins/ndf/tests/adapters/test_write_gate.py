@@ -490,9 +490,9 @@ def test_acquire_holds_the_kind_of_the_request_with_count_one(gate, monkeypatch)
     calls = []
     real = gate.hold
 
-    def spy(kind, count=1):
+    def spy(kind, count=1, remaining=None):
         calls.append((kind, count))
-        return real(kind, count)
+        return real(kind, count, remaining)
 
     monkeypatch.setattr(gate, "hold", spy)
     with gate.acquire(graphql("mutation { addComment(input: {}) { x } }")):
