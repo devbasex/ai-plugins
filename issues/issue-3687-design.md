@@ -202,7 +202,8 @@ flowchart LR
   "summary": "GitHub の REST の課題 1 件の応答の形",
   "peer": "github",
   "sample": "tests/samples/github/rest/issue.json",
-  "source": {"schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json", "pointer": "#/components/schemas/issue"}
+  "source": {"schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json", "pointer": "#/components/schemas/issue"},
+  "absent_keys": ["body_html", "body_text", "user/starred_at"]
 }
 ```
 
@@ -211,8 +212,9 @@ flowchart LR
 | `peer` | 相手（この変更では `github` だけ）。呼び出しの数は相手ごとに数える |
 | `sample` | 見本のファイル（プラグインの根からの相対）。テストダブルはこのファイルだけから応答を組み立てる |
 | `source` | 本物の取り方。`schema`（公開の記述の URL と JSON ポインタ）。記述は OpenAPI 3.1 の bundled 版（`descriptions-next/`）を取る。3.1 のスキーマは JSON Schema 2020-12 と同じ書き方で、null を取る列は `type` の配列で書かれる（3.0 の `nullable` を持たない） |
+| `absent_keys` | 見本を録った時点の記述の定義にあり、見本（本物の応答）には無かったキーの一覧。見本の根からのパス（辞書のキーを `/` で区切り、配列の要素は `*`）で書く。見本のキーとこの一覧を合わせたものが「録った時点の形」（基準の形）で、取った記述の定義がこれより多いキーを持てば、相手がキーを足したとして落とす（詳細設計書の「足されたキーの判定」）。見本を録り直すときは、定義のキーから見本のキーを引いた残りを書き直す |
 
-比べ方は 1 通り（見本が記述の定義に合うか）で、宣言に比べ方のキーは置かない。記述の無い相手（ランタイムの CLI）を本物と当てる仕事は、既にある毎日のジョブの `cli-help`（`--help` を `contracts/domains/cli-floors.json` と突き合わせる）が持ち続ける。同じ `--help` を見本の側でも打つと、毎日の CLI の起動がランタイムごとに 1 回増えるためである。
+比べ方は 2 つの向きで 1 通りに決め、宣言に比べ方のキーは置かない。(1) 見本が記述の定義に合うか（見本のキーが定義に無ければ、相手がキーを消したか改名した）。(2) 記述の定義のキーが基準の形（見本のキー + `absent_keys`）に収まるか（収まらなければ、相手がキーを足した）。GitHub の定義は `additionalProperties` を書かないため、(1) だけでは相手の応答にキーが足されても見本は通り続ける。記述の無い相手（ランタイムの CLI）を本物と当てる仕事は、既にある毎日のジョブの `cli-help`（`--help` を `contracts/domains/cli-floors.json` と突き合わせる）が持ち続ける。同じ `--help` を見本の側でも打つと、毎日の CLI の起動がランタイムごとに 1 回増えるためである。
 
 **呼び出しの数は宣言の自己申告にしない。** 相手ごとの上限は上限の表の 1 項目（`contracts/limits/samples.fetch.json` の `peers`。`{"github": 2}`）に置く。`ndf samples verify` は宣言から相手ごとの異なる URL の数を求め、1 つの URL を 1 回だけ取る（同じ記述を指す見本が増えても呼び出しは増えない）。打ち直しは持たない（`retries` は 0。失敗は次の日のジョブに任せる）。取得は転送を追わない（3xx は取れないものとして扱い、転送の先へ要求を足さない）ので、1 URL は必ず 1 要求である。記述は大きい（GitHub は 2026-11-23 の実測で 14,395,662 バイト）ため、本文の上限は同じ項目の `max_bytes`（64 MiB）に置く。最悪の呼び出しの数（異なる URL の数 ×（1 + 打ち直し））が上限を超える宣言では、1 回も呼ばずに止まる。実際に送った要求の数を相手ごとに数え、結果 JSON の `metrics.calls` に出す。
 
@@ -355,7 +357,7 @@ flowchart TB
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1 見本を本物に当てる毎日のジョブ | 偽の `fetch`（応答を返すスクリプト）を使い、見本と同じ形なら 0、キーを 1 つ増やした応答なら 1 でそのキーと見本のパスが `items` に出る（偽の記述は本物と同じく `additionalProperties` を書かず、JSON Schema の検証とは別の未知のキーの判定で落とす。型の誤りでも見本の値は `items` に出ない） | 食い違いを数えずに 0 を返すようにすると落ちる |
+| 1 見本を本物に当てる毎日のジョブ | 偽の `fetch`（記述を返す関数）を使い、見本と同じ形なら 0。**見本を固定したまま取得した記述の側だけを変え**、定義の `properties` へキーを 1 つ足すと 1 で、そのキーと見本のパスが `items` に出る（足されたキーの判定）。記述を固定して見本へキーを 1 つ足しても 1（未知のキーの判定。偽の記述は本物と同じく `additionalProperties` を書かないので、どちらも JSON Schema の検証とは別の判定で落とす）。型の誤りでも見本の値は `items` に出ず、見本の動的なキー（定義が名前を決めない辞書のキーと、定義に無いキー）の名前も出ない | 食い違いを数えずに 0 を返す・記述の側の足しを見ないようにすると落ちる |
 | 1 の呼び出しの予算 | 相手ごとの最悪の呼び出しの数（異なる URL の数 ×（1 + 打ち直し））が `samples.fetch` の `peers` の上限を超える宣言では、本物を呼ばずに止まる。同じ URL の見本が 2 件あっても要求は 1 回 | 予算を読まずに全部呼ぶ・見本ごとに取り直すと落ちる |
 | 1 の取得の障害と食い違いの同時 | ある見本が取れず、別の見本が食い違うと、結果は `samples_mismatch`（1）で `items` に両方が載る | 取得の障害で `infra_wait` を返して食い違いを隠すと落ちる |
 | 2 コントラクトは 1 項目 1 ファイル | 分けた表の 1 ファイルを 2 項目へ戻すと `contracts-split` が落ち、ディレクトリの全ファイルを読んで元の 1 ファイルと同じ辞書になる | 読み手がディレクトリを読まず 1 ファイルだけを読むと、読めない項目が出て落ちる |
