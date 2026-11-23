@@ -163,16 +163,15 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
     置き換えを許すのは、呼んだ利用者が書き込める既存のファイルだけである（読み取り専用なら `PermissionError`）。
-    別の利用者がこの利用者の作った名前を変えられる作業ディレクトリでは、何も作らずに `PermissionError` を上げる。
-    一時ディレクトリの後始末は名前で引く `rmdir` なので、名前を差し替えられない場所でだけ、この呼び出しが作った
-    ディレクトリに当たると言えるためである。
+    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は名前で引く
+    `rmdir` で、照合の後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
+    リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
+    その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     """
     _check_name(name)
     data = text.encode("utf-8")
     if entry_state(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
-    if _others_can_rename(os.fstat(wd.fd)):
-        raise PermissionError(errno.EPERM, "別の利用者が名前を変えられる作業ディレクトリには書かない", str(wd.path))
     tmp = f".{name}.{secrets.token_hex(8)}"
     os.mkdir(tmp, 0o700, dir_fd=wd.fd)
     try:
@@ -205,17 +204,6 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
             os.close(tmp_fd)
         if st is not None:
             _remove_opened_dir(wd, tmp, st, quiet=not private)
-
-
-def _others_can_rename(st: os.stat_result) -> bool:
-    """呼んだ利用者と root のほかに、このディレクトリの中の呼んだ利用者の名前を変えられる利用者がいるか。
-
-    持ち主はいつでも権限を足せるので、持ち主が呼んだ利用者か root でなければいる。sticky bit が無ければ、
-    グループかその他の利用者に書き込みの権限（ACL があればグループの権限はその上限を表す）があるといる。
-    """
-    if st.st_uid not in (os.geteuid(), 0):
-        return True
-    return not st.st_mode & stat.S_ISVTX and bool(st.st_mode & (stat.S_IWGRP | stat.S_IWOTH))
 
 
 def _remove_opened_dir(wd: WorkDir, name: str, opened: os.stat_result, *, quiet: bool) -> None:
