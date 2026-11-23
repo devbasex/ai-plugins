@@ -208,3 +208,20 @@ def test_3864_6_an_unreadable_record_is_none_so_it_is_read_again(tmp_path):
     finally:
         path.chmod(0o600)
     assert observe.credential_failure(path, SIZE, SINCE) is True
+
+
+# Claude Code 2.1 の TUI が上限で出したバイト列（2026-11-23 に `script -f` で記録した実物の抜粋。#4227）
+TUI_LIMIT = (
+    b";3H\x1b[?25h\x1b[?25l\x1b[H\r\x1b[7B\x1b[38;5;246m  \xe2\x8e\xbf \xc2\xa0\x1b[38;5;211mYou've hit your 5-hour limit"
+    b" \xc2\xb7 resets 5:40am (UTC)\r\x1b[5C\x1b[1B\x1b[38;5;246m/usage-credits to finish what you\xe2\x80\x99re working on."
+    b"\r\x1b[35B\x1b[39m\x1b[K\r\x1b[3B\xe2\x9d\xaf\xc2\xa0\r\x1b"
+)
+
+
+def test_4227_the_limit_line_drawn_by_cursor_moves_is_found():
+    # 応答の行は改行でなくカーソルの移動で描かれる。生の出力のまま照らしても上限の行が当たる
+    assert observe.limit_line(observe.plain(TUI_LIMIT)) == "You've hit your 5-hour limit · resets 5:40am (UTC)"
+
+
+def test_4227_a_forward_move_keeps_words_apart():
+    assert observe.plain(b"a\x1b[2Cb\x1b[3;1Hc") == "a b\nc"
