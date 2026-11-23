@@ -715,6 +715,10 @@ def _paths_of(directory: str, name: str, *, resolve: bool = True) -> worker_path
         return worker_paths.report_paths(Path(directory), name, resolve=resolve)
     except worker_paths.NameInvalid as exc:
         raise WorkerError("invalid", str(exc)) from None
+    except worker_paths.EntryError as exc:  # 参照先の無いリンク・リンクの循環は作る前に拒む
+        raise WorkerError("invalid", f"{directory} を解けない: {exc}") from None
+    except OSError as exc:  # 利用者の入力: 解けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"{directory} を解けない: {exc.strerror or exc}") from None
 
 
 def _report_paths(report: str) -> worker_paths.ReportPaths:

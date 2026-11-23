@@ -50,6 +50,24 @@ def test_report_paths_rejects_bad_names_without_touching_files(tmp_path, name):
     assert _tree(tmp_path) == before
 
 
+def test_report_paths_resolves_a_link_to_an_existing_directory_and_keeps_missing_rest(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    assert worker_paths.report_paths(tmp_path / "link" / "new", "n").report == real.resolve() / "new" / "n.report.md"
+
+
+@pytest.mark.parametrize("under", [False, True])
+def test_report_paths_refuses_a_dangling_link_before_anything_is_created(tmp_path, under):
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "target")
+    before = _tree(tmp_path)
+    with pytest.raises(worker_paths.EntryUnsafe) as e:
+        worker_paths.report_paths(link / "new" if under else link, "n")
+    assert e.value.kind == "symlink"
+    assert _tree(tmp_path) == before and not (tmp_path / "target").exists()
+
+
 @pytest.fixture
 def workdir(tmp_path):
     """作業ディレクトリ（`d`）と、その外にある利用者のファイル（`outside`）。"""
@@ -110,6 +128,25 @@ def test_open_workdir_does_not_create_under_a_link(tmp_path, workdir):
     with pytest.raises(worker_paths.EntryUnsafe), worker_paths.open_workdir(link / "new", create=True):
         pass
     assert not (d / "new").exists()
+
+
+def test_open_workdir_refuses_a_created_directory_swapped_for_another_real_one(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    target = tmp_path / "new"
+    real_mkdir = os.mkdir
+
+    def swap(part, *args, dir_fd=None, **kw):  # 作った直後に名前を前の報告の残る実ディレクトリへ差し替える
+        real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+        if part == "new":
+            os.rmdir(part, dir_fd=dir_fd)
+            os.rename(d, target)
+
+    monkeypatch.setattr(worker_paths.os, "mkdir", swap)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(target, create=True):
+        pass
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
 
 
 def test_open_workdir_needs_only_search_permission_on_ancestors(tmp_path):
