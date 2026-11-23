@@ -26,7 +26,7 @@ plugins/ndf/
     └── gate/test_gate_work.py                       プロンプトの組み立て
 ```
 
-依存の向き: `contracts/`（データ）→ `progress/invoke.py`（工程がプランを組む層）→ `progress/gate/entry.py`（プランのステップが打つサブコマンド）の一方向で、逆向きの import は足さない。`progress/gate/entry.py` は `values.json` の読み手として `progress/invoke.py` を読み（今も `from ndf.progress import command, invoke, model, run, store` で読んでいる）、パスは `ndf.contracts.worker_paths.report_paths`（#3877）で組む。`core/plan`（プランの実行の層）は触らない。`progress/run.py` は `progress/invoke.py` を呼ぶ既存の向きのままである。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
+依存の向き: `contracts/`（データ）→ `progress/invoke.py`（工程がプランを組む層）→ `progress/gate/entry.py`（プランのステップが打つサブコマンド）の一方向である。逆向きの import は足さない。`progress/gate/entry.py` は `values.json` を読む側として `progress/invoke.py` を読む（今も `from ndf.progress import command, invoke, model, run, store` で読んでいる）。パスは `ndf.contracts.worker_paths.report_paths`（#3877）で組む。`core/plan`（プランの実行の層）は触らない。`progress/run.py` は `progress/invoke.py` を呼ぶ既存の向きのままである。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -46,13 +46,13 @@ plugins/ndf/
 
 満たす決定: 決定 1、受け入れ条件 1、受け入れ条件 5
 
-関数を持たない構成要素である。`params.json` の `worker` に `"default": ["ndf", "answer", "work", "--state-dir", "{state_dir}", "--cwd", "{repo}"]` を足し、`summary` から「既定は持たない」の但し書きと作業の名前の列挙を外して、作業の名前の唯一の基準が `contracts/worker/kinds.json` であることを書く。
+関数を持たない構成要素である。`params.json` の `worker` に `"default": ["ndf", "answer", "work", "--state-dir", "{state_dir}", "--cwd", "{repo}"]` を足す。`summary` からは「既定は持たない」の但し書きと作業の名前の列挙を外し、作業の名前の唯一の基準が `contracts/worker/kinds.json` であることを書く。
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `worker` | 差し込みの定義 | `plugins/ndf/contracts/templates/params.json` | `["ndf", "answer", "work", "--state-dir", "{state_dir}", "--cwd", "{repo}"]`（`list` が真） |
 
-`{state_dir}` と `{repo}` はプランの実行が埋める決まった名前の値で、`core/plan/runner.py:242-250` の `_base_values` が持つ（このファイルは触らない）。既定を持つ差し込みは `invoke._missing`（`src/ndf/progress/invoke.py:578-582`）が「決まらない」に数えないので、`FILL_SOURCES` の `worker` の行は残したまま、17 工程が差し込みで止まらなくなる。`merged.json` と `fix.json` は `worker` を使わないため、クリーンアップの工程は引数が変わらない（受け入れ条件 5）。
+`{state_dir}` と `{repo}` はプランの実行が埋める決まった名前の値で、`core/plan/runner.py:242-250` の `_base_values` が持つ（このファイルは触らない）。既定を持つ差し込みは `invoke._missing`（`src/ndf/progress/invoke.py:578-582`）が「決まらない」に数えない。そのため `FILL_SOURCES` の `worker` の行は残したまま、17 工程が差し込みで止まらなくなる。`merged.json` と `fix.json` は `worker` を使わないため、クリーンアップの工程は引数が変わらない（受け入れ条件 5）。
 
 ### 単体テストの観点
 
@@ -108,7 +108,7 @@ plugins/ndf/
 
 満たす決定: 決定 1、決定 3、決定 6
 
-関数を持たない構成要素である。`agent-layers.md` の「supervisor → worker」が定める 7 項目（作業・入力・手順・読む Skill・返す形・置く場所・作業の結果ファイル）の見出しと、worker が守る規則 7 個を本文に持ち、差し込みだけを `string.Template` の形（`$名前`・`${名前}`）にする。本文に `$` の字を書くときは `$$` で逃がす（決定 6 の代償）。
+関数を持たない構成要素である。`agent-layers.md` の「supervisor → worker」が定める 7 項目（作業・入力・手順・読む Skill・返す形・置く場所・作業の結果ファイル）の見出しと、worker が守る規則 7 個を本文に持つ。差し込みだけを `string.Template` の形（`$名前`・`${名前}`）にする。本文に `$` の字を書くときは `$$` で逃がす（決定 6 の代償）。
 
 | 差し込み | 入る値 |
 | --- | --- |
@@ -161,7 +161,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `VALUES_FILE` | 定数 | `plugins/ndf/src/ndf/progress/invoke.py` | `"values.json"` |
 
-`values` に入るのは `template_values` が返す差し込みの値そのもので、工程の入力・課題の題と本文・リポジトリの設定・打った場所（`route.derived`）・起動の補い（`route.launched`。`acceptance` など）をすべて含む。
+`values` に入るのは `template_values` が返す差し込みの値そのものである。工程の入力・課題の題と本文・リポジトリの設定・打った場所（`route.derived`）・起動の補い（`route.launched`。`acceptance` など）をすべて含む。
 
 ### 並行と排他
 
@@ -212,7 +212,7 @@ plugins/ndf/
   - 事後条件: プロンプトのファイルが書かれた後に、プロセスが `ndf worker run` へ置き換わる。置き換わる前に戻る経路は失敗のときだけ
   - 副作用: ファイルの書き込みとプロセスの置き換え（`os.execv`）
 
-引数は変わらないが、作業の名前の説明が `work_kinds()` のキーから組まれるため、サブコマンドの仕様の文書（`plugins/ndf/docs/contracts/commands.md`）の `ndf answer work` の節が変わる。この節は `ndf check --write-spec` が生成する。
+引数は変わらない。作業の名前の説明が `work_kinds()` のキーから組まれるため、サブコマンドの仕様の文書（`plugins/ndf/docs/contracts/commands.md`）の `ndf answer work` の節が変わる。この節は `ndf check --write-spec` が生成する。
 
 ### 異常系の処理
 

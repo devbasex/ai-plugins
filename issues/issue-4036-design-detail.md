@@ -23,9 +23,9 @@ plugins/ndf/
     └── progress/test_plan_run_stall.py *
 ```
 
-依存の向き: `hooks/guards/relay_mark.py` → `domains/relay/registry.py`（書く側）、`progress/plan/run.py` → `domains/relay/registry.py`・`domains/relay/observe.py`（読む側）→ `progress/lane/liveness.py`（判定）→ `progress/plan/run_decide.py`（知らせ）の一方向である。`liveness.py` は `relay` を読まず、材料は今までどおり `Probes` の呼び出しが集める。`registry.py` は `hooks` を読まない。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
+依存の向き: 書く側は `hooks/guards/relay_mark.py` → `domains/relay/registry.py` である。読む側は `progress/plan/run.py` → `domains/relay/registry.py`・`domains/relay/observe.py` である。そこから `progress/lane/liveness.py`（判定）→ `progress/plan/run_decide.py`（知らせ）へ続き、いずれも一方向である。`liveness.py` は `relay` を読まず、材料は今までどおり `Probes` の呼び出しが集める。`registry.py` は `hooks` を読まない。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
-設計文書の触るファイルのうち `plugins/ndf/src/ndf/progress/plan/cli.py` は、活動を読む項目を `run.probes` に足すだけで `ndf lanes status` にも当たるため、変える行が無い（`cli.py:103` が `run.probes(where.repo, a.plan)` を渡す今の形のまま）。この経路の確かめは最後の「判定の値が増えることの当たり先」にある。
+設計文書の触るファイルのうち `plugins/ndf/src/ndf/progress/plan/cli.py` は、変える行が無い。活動を読む項目を `run.probes` に足すだけで `ndf lanes status` にも当たるためで、`cli.py:103` が `run.probes(where.repo, a.plan)` を渡す今の形のままにする。この経路の確かめは最後の「判定の値が増えることの当たり先」にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| conductor の Stop の hook（書く）と、耐久ワークフローの読み直し・`ndf lanes status`（読む） | `<ラッパーの保存先>/activity.json` | 取らない。書きは `signals.replace_json`（一時ファイルを作って置き換える）で、読み手は中途半端な中身を読まない | 同じ Stop で 2 回呼ばれても最後の中身になる。書けなかった回は次の Stop が書き直す |
+| conductor の Stop の hook（書く）と、耐久ワークフローの読み直し・`ndf lanes status`（読む） | `<ラッパーの保存先>/activity.json` | 取らない。書きは `signals.replace_json`（一時ファイルを作って置き換える）で、読む側は中途半端な中身を読まない | 同じ Stop で 2 回呼ばれても最後の中身になる。書けなかった回は次の Stop が書き直す |
 | 1 つのラッパーの中の複数のセッション | 同上 | ラッパー 1 つにつき conductor は 1 つなので、書き込み元は 1 つ | 前のセグメントの記録は上書きされる（最後の応答だけを見る） |
 
 ### 既存の部品の再利用
@@ -114,9 +114,9 @@ plugins/ndf/
   - 事後条件: 中継の下（`signals.relay_dir` がディレクトリを返す）なら、戻り値によらず `activity.json` が書かれている
   - 副作用: 今までの副作用（次のセグメントのマーカーの書き込み）に、活動の記録の書き込みが 1 つ増える
 
-書く位置は `signals.relay_dir(ctx.env)` の判定の直後で、`ctx.last_reply` が空のときと次のセグメントのブロックが無いときの早い戻りより前である（Stop のたびに書く）。背景の作業が残るときの変更要求（`pushback`）の前でもあるので、背景の作業が 1 件以上の記録も残る。
+書く位置は `signals.relay_dir(ctx.env)` の判定の直後である。`ctx.last_reply` が空のときと次のセグメントのブロックが無いときの早い戻りより前に置き、Stop のたびに書く。背景の作業が残るときの変更要求（`pushback`）の前でもあるので、背景の作業が 1 件以上の記録も残る。
 
-中継の下でラッパーの保存先を指すのは環境変数 `NDF_RELAY_DIR` で、`wrapper.py:740` が `signals.launch_env(self.dir, launch)` で渡し、`self.dir` は `registry.wrapper_dir(...)`（`wrapper.py:278`）である。設計文書の「未確認のまま残ること」の 3 番目（guard がラッパーの保存先を知っているか）は、この 2 行で足りる。
+中継の下でラッパーの保存先を指すのは環境変数 `NDF_RELAY_DIR` である。`wrapper.py:740` が `signals.launch_env(self.dir, launch)` で渡し、`self.dir` は `registry.wrapper_dir(...)`（`wrapper.py:278`）である。設計文書の「未確認のまま残ること」の 3 番目（guard がラッパーの保存先を知っているか）は、この 2 行で足りる。
 
 ### 異常系の処理
 
@@ -237,7 +237,7 @@ plugins/ndf/
 - `idle_after`
   - 事前条件: 無し
   - 事後条件: `contracts/limits.json` の `parallel-run.idle` の `seconds` を返す。コードに秒の値を書かない（受け入れ条件 5）
-  - 副作用: コントラクトの表を 1 度読む（`limits` の読み手が持つ）
+  - 副作用: コントラクトの表を 1 度読む（`limits` を読む側が持つ）
 - `judge`
   - 事前条件: `now` を省くと今の時刻（`time.time()`）を使う。テストは時刻を渡す（時間で区切った試験を行わない）
   - 事後条件: 返る `Liveness` の `kind` は 9 つのどれか。`idle_conductor` のときだけ `moved_at` と `background` が入る

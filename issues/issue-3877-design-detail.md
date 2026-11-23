@@ -23,7 +23,7 @@ plugins/ndf/
     └── domains/hooks/test_rm_variable.py *
 ```
 
-依存の向き: `contracts/worker_paths.py` は標準ライブラリ（`pathlib`・`re`・`typing`）だけに依存し、`core` も `progress` も読まない。`core/worker.py`（`ndf worker prepare`）と `progress/gate/entry.py`（`ndf answer work`。#3908）がそれを読む一方向で、`progress/gate/entry.py:95` の「worker の層は読まず、サブコマンドのコントラクトだけを使う」（IG1）に触れない（決定 7）。guard（`domains/hooks/guards/rm_variable.py`）は `domains/hooks/verdict` と `re` だけを読み、`contracts/worker_paths.py` も `core/worker.py` も読まない。手順書はコマンドの字面を書くだけで、コードから参照されない。循環は無い。型の関係は設計文書の「構成要素」のモジュールの図にある。
+依存の向き: `contracts/worker_paths.py` は標準ライブラリ（`pathlib`・`re`・`typing`）だけに依存し、`core` も `progress` も読まない。`core/worker.py`（`ndf worker prepare`）と `progress/gate/entry.py`（`ndf answer work`。#3908）がそれを読む一方向で、`progress/gate/entry.py:95` の「worker の層は読まず、サブコマンドのコントラクトだけを使う」（IG1）に触れない（決定 7）。guard（`domains/hooks/guards/rm_variable.py`）は `domains/hooks/verdict` と `re` だけを読む。`contracts/worker_paths.py` も `core/worker.py` も読まない。手順書はコマンドの字面を書くだけで、コードから参照されない。循環は無い。型の関係は設計文書の「構成要素」のモジュールの図にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -69,7 +69,7 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `NAME_RE` | 定数（`re.Pattern`） | `plugins/ndf/src/ndf/contracts/worker_paths.py` | `re.compile(r"[A-Za-z0-9._-]{1,64}\Z")`（`fullmatch` で照らす） |
+| `NAME_RE` | 定数（`re.Pattern`） | `plugins/ndf/src/ndf/contracts/worker_paths.py` | `re.compile(r"[A-Za-z0-9._-]{1,64}\Z")`（`fullmatch` で確かめる） |
 | `PROMPT_SUFFIX` | 定数 | 同上 | `".prompt.md"` |
 | `REPORT_SUFFIX` | 定数 | 同上 | `".report.md"` |
 | `DONE_SUFFIX` | 定数 | 同上 | `".done"`（報告のパスの後ろに付ける） |
@@ -143,7 +143,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_cmd_prepare` | `metrics.paths` に `report`・`done`・`result` の 3 つの絶対パス。`items` に触ったパスを `{"kind": "report" / "done" / "result", "path": <絶対パス>, "action": "created" / "removed" / "absent"}` で 3 件。`summary` は「置き場所を用意した（報告 …・完了マーカー …・結果 …）」 | 結果 JSON（標準出力 1 行） | 報告のファイルの中身。前の作業の結果ファイルの中身。ログの出力は足さない（ファイルの始末だけの処理で、記録する状態を持たない） |
 
-結果 JSON の `outputs` は使わない（決定 5）。`outputs` は工程の文脈のキーの閉じた語彙で、`contracts/schemas/result.schema.json` の `$defs/outputs` が `additionalProperties: false` を持ち、`result.emit`（`src/ndf/contracts/result.py:144-156`）がそれで検査する。`metrics` は自由な形（`result.schema.json` の `metrics` は型だけを決める）なので、スキーマを触らずに 3 つのパスを渡せる。
+結果 JSON の `outputs` は使わない（決定 5）。`outputs` は工程の文脈のキーの閉じた語彙である。`contracts/schemas/result.schema.json` の `$defs/outputs` が `additionalProperties: false` を持つ。`result.emit`（`src/ndf/contracts/result.py:144-156`）がそれで検査する。`metrics` は自由な形（`result.schema.json` の `metrics` は型だけを決める）なので、スキーマを触らずに 3 つのパスを渡せる。
 
 ### 既存の部品の再利用
 
@@ -176,7 +176,7 @@ plugins/ndf/
 | `check` | `plugins/ndf/src/ndf/domains/hooks/guards/rm_variable.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | `risky_removal` が語を返したら `deny` に書き直しの形を添えて返す。ほかは `None`（通す） |
 
 - `risky_removal`
-  - 事前条件: `script` は `ctx.shell`（`domains/hooks/context.py:579` の `ShellScript`）で、`commands` の各要素が語ごとの字面（`source`）を持つ
+  - 事前条件: `script` は `ctx.shell`（`domains/hooks/context.py:579` の `ShellScript`）である。`commands` の各要素が語ごとの字面（`source`）を持つ
   - 事後条件: 返った語は `script` の中の `rm` の引数のどれかの字面と一致する。判定は `source`（引用とエスケープを残した字面）だけで行い、値の展開はしない
   - 副作用: 無し（文字列の判定だけ。シェルを起動しない）
 - `check`
@@ -237,4 +237,4 @@ plugins/ndf/
 | `plugins/ndf/skills/development-workflow/references/agent-layers.md:235` | 起動指示の「置く場所」の欄が `: > <置く場所>; rm -f <置く場所>.done` を書く | supervisor は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` を 1 回打ち、結果 JSON の `metrics.paths.report` を「置く場所」に、`metrics.paths.result` を「作業の結果ファイル」に書き写す。待つのは `metrics.paths.done` である、とだけ書く |
 | `plugins/ndf/skills/development-workflow/references/waiting.md:229` | 「中間通知を受けたとき」が同じ 2 つのコマンドを書く | 同じ 1 行のコマンドへ書き換え、待つパスは `metrics.paths.done` から取ると書く |
 
-どちらの行にも、置き場所のパスを組み立てるシェルの変数と `rm` を残さない（受け入れ条件 1・2）。この 2 行が変わったことは、実装で 2 つのファイルを読んで確かめる。`.md` の文言を照合する自動テストは置かない（文言を固定しても振る舞いを保証しないため。`AGENTS.md` の「DON'T」）。
+どちらの行にも、置き場所のパスを組み立てるシェルの変数と `rm` を残さない（受け入れ条件 1・2）。この 2 行が変わったことは、実装で 2 つのファイルを読んで確かめる。`.md` の文言を突き合わせる自動テストは置かない（文言を固定しても振る舞いを保証しないため。`AGENTS.md` の「DON'T」）。

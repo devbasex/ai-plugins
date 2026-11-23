@@ -1,6 +1,6 @@
 # レーンの生死: 何もしていない conductor を止まりとして知らせる（#4036）
 
-レーンの生死は conductor のラッパーのプロセスが動いているかだけで決まるため、背景の作業を持たないまま来ない通知を待つ conductor が「動いている」と判定され、約 3 時間が誰にも気づかれなかった。ラッパーの状態ファイルから会話の記録をたどって最後の応答の時刻を測り、背景の作業の件数を Stop の hook が書き残す形にして、両方がそろったときだけ止まりとする。閾値は `contracts/limits.json` に置く。採らなかった案は「決定の記録」にある。
+レーンの生死は conductor のラッパーのプロセスが動いているかだけで決まる。そのため、背景の作業を持たないまま来ない通知を待つ conductor が「動いている」と判定され、約 3 時間が誰にも気づかれなかった。ラッパーの状態ファイルから会話の記録をたどって最後の応答の時刻を測り、背景の作業の件数を Stop の hook が書き残す形にして、両方がそろったときだけ止まりとする。閾値は `contracts/limits.json` に置く。採らなかった案は「決定の記録」にある。
 
 ## 今の姿
 
@@ -19,9 +19,9 @@ flowchart TB
     Q7 -->|いいえ| EN["ended（止まり）"]
 ```
 
-- 判定は 8 つの値（`idle`・`resuming`・`waiting_answer`・`unknown`・`stalled`・`alive`・`working`・`ended`）を返し、止まりとして知らせるのは `stalled` と `ended` の 2 つだけである（`liveness.py:38-49`）
+- 判定は 8 つの値（`idle`・`resuming`・`waiting_answer`・`unknown`・`stalled`・`alive`・`working`・`ended`）を返す。止まりとして知らせるのは `stalled` と `ended` の 2 つだけである（`liveness.py:38-49`）
 - 順 6 の `alive` は `ndf relay ls` の行の `running` だけを見る（`liveness.py:87-89`）。conductor が何をしているかは見ない
-- 材料を読む口は `Probes` の 4 つ（`wrapper_name`・`wrappers`・`sprint`・`account_ok`。`liveness.py:124-133`）で、実装は `progress/plan/run.py:120-130` にある
+- 材料を読むインターフェースは `Probes` の 4 つ（`wrapper_name`・`wrappers`・`sprint`・`account_ok`。`liveness.py:124-133`）で、実装は `progress/plan/run.py:120-130` にある
 - `liveness.py` は `contracts/limits.json` を 1 つも読んでいない。判定はすべて状態の値だけで決まる
 - `lane_stalled` のリクエストの `moved`（最後に動いた時刻）は、ステートマシンの事象の時刻である（`progress/plan/run.py:171-181`）。**conductor の会話の動きは見ていない**ため、工程が進まない間はこの値も更新されない
 
@@ -44,8 +44,8 @@ flowchart TB
 - 承認ゲート・質問の回答を待つ行は、今の判定の順 2・順 3 が先に拾う。新しい条件はその後ろに置けば、今までどおり止まりにしない
 - 時間で区切った試験は行わない。閾値の判定は、時刻を与えるテストで確かめる
 - 閾値は `contracts/limits.json` に置き、コードに同じ値を書かない
-- hook から見たラッパーの保存先は環境変数 `NDF_RELAY_DIR` で渡る（`domains/relay/wrapper.py:740` が `signals.launch_env(self.dir, …)` で渡し、`self.dir` は `registry.wrapper_dir(...)`。`wrapper.py:278`）。`activity.json` はこの保存先へ書く
-- 判定の口は `ndf lanes status` も同じ `run.probes` を通る（`progress/plan/cli.py:103`）ので、活動を読む項目を 1 か所に足せば両方に当たる
+- hook から見たラッパーの保存先は環境変数 `NDF_RELAY_DIR` で渡る。`domains/relay/wrapper.py:740` が `signals.launch_env(self.dir, …)` で渡し、`self.dir` は `registry.wrapper_dir(...)` である（`wrapper.py:278`）。`activity.json` はこの保存先へ書く
+- `ndf lanes status` も判定を同じ `run.probes` を通して呼ぶ（`progress/plan/cli.py:103`）ので、活動を読む項目を 1 か所に足せば両方に当たる
 
 ## 解き方の全体像
 
@@ -69,7 +69,7 @@ Stop の hook が、conductor が応答を終えた時点の背景の作業の�
 | --- | --- |
 | `activity.json`（新設。ラッパーの保存先） | conductor が応答を終えた時点の、背景の作業の件数と書いた時刻 |
 | `relay-marker` guard（`domains/hooks/guards/relay_mark.py`。変更） | Stop のたびに `activity.json` を書く |
-| `Probes.activity`（新設。`progress/lane/liveness.py` の口と `progress/plan/run.py` の実装） | レーンの名前から、最後の応答が終わっているか・その時刻・背景の作業の件数を返す |
+| `Probes.activity`（新設。`progress/lane/liveness.py` のインターフェースと `progress/plan/run.py` の実装） | レーンの名前から、最後の応答が終わっているか・その時刻・背景の作業の件数を返す |
 | `liveness.judge`（変更） | 順 6 の前に、新しい条件を置いて `idle_conductor` を返す |
 | `contracts/limits.json`（変更） | `parallel-run.idle` の閾値 |
 | `_stall_report`（`progress/plan/run_decide.py:463-468`。変更） | `lane_stalled` のリクエストに `moved` と `background` を載せる |
@@ -188,7 +188,7 @@ sequenceDiagram
 - 採らなかった案:
   - 会話の記録から読む（`observe.tool_pending` は「Tool の実行の途中か」を返すだけで、背景の作業が残っているかとは別である）
   - conductor の子プロセスを数える（サブエージェントは同じプロセスの中で動くので、プロセスの数に現れない）
-  - 背景の作業を見ずに、時間だけで止まりとする（受け入れ条件 2 を満たさず、長い cross-review を回している間に誤って止まりとする）
+  - 背景の作業を見ずに、時間だけで止まりとする（受け入れ条件 2 を満たさず、長い cross-review を回している間の行まで止まりとして知らせる）
 - **代償**: hook が呼ばれない実行（中継を使わない conductor）では `activity.json` が無く、判定は今までどおり `alive` になる
 - 作り方: 自前で作る（既存の guard に書き込みを足す）
 - 比べた候補: PRD1・PRD2・PRD3
@@ -233,7 +233,9 @@ sequenceDiagram
 
 危険:
 
-- 判定の値を 8 から 9 に増やすため、値ごとに分岐する既存の規則が新しい値に当てはまるかを 1 つずつ見る。集めるのは 2 つの経路で、`liveness` の値の名前で `plugins/ndf` を検索する経路と、値を名指さずすべての判定に当たる規則（`STALL_KINDS` を読む側、知らせのキーを組む `notice_key`、リクエストを書く `write_report`）を読む経路である。当てはまらない規則は実装で変える
+- 判定の値を 8 から 9 に増やすため、値ごとに分岐する既存の規則が新しい値に当てはまるかを 1 つずつ見る。当てはまらない規則は実装で変える。集める経路は次の 2 つである
+  - `liveness` の値の名前で `plugins/ndf` を検索する
+  - 値を名指さずすべての判定に当たる規則（`STALL_KINDS` を読む側、知らせのキーを組む `notice_key`、リクエストを書く `write_report`）を読む
 - `activity.json` を書くのは Stop の hook で、hook が落ちても conductor の進行は止めない（今の guard と同じ。書けなければ判定は `alive` のままになる）
 - `relay_mark.py` と `hub.py` は中継の本流で、並行するほかのスプリントも触りうる
 
@@ -255,6 +257,8 @@ sequenceDiagram
 | 決定 1（読めないとき） | 会話の記録を読めない・`session_id` が取れない行は、今までどおり `alive` になる | 読めないときに止まりとすると落ちる |
 | 決定 2（hook が書く） | Stop の hook が、入力の `background_tasks` の件数と時刻を `activity.json` へ書く。書けなくても conductor の進行を止めない | 書き込みの失敗で guard が例外を上げると落ちる |
 
+詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
@@ -267,9 +271,6 @@ sequenceDiagram
 | --- | --- |
 | 閾値の妥当さ | 10 分が短すぎて正常な行を止まりと知らせるか、長すぎて気づきが遅れるかは、知らせの実績を見るまで分からない。合わなければ `contracts/limits.json` の 1 行を直す |
 | Stop の hook が呼ばれる頻度 | conductor が応答を終えるたびに呼ばれると見ているが、背景の作業を持ったまま終えた応答でも呼ばれるかは実測していない。実装で 1 回確かめる |
-
-
-詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
 
 ## 外部の調査
 
@@ -284,13 +285,13 @@ sequenceDiagram
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | Kubernetes の Probe（liveness / readiness / startup の分離） | 「Liveness probes determine when to restart a container.」「Readiness probes determine when a container is ready to accept traffic.」。生きているかと仕事を受けられるかを別の probe で測り、失敗時の処置も再起動と切り離しで分ける。`periodSeconds` の既定は 10 秒 | 決定 4。既存の `stalled`（ラッパーの異常）と新しい `idle_conductor`（何もしていない）を別の値にする根拠 | https://kubernetes.io/docs/concepts/workloads/pods/probes/ （2026-11-23） |
-| STD2 | systemd の `WatchdogSec=` | サービス自身が `WATCHDOG=1` を打ち続け、間隔が設定を超えたら失敗とする。既定は 0 で無効 | 決定 1・決定 3。プロセスが居ることでなく「合図が来続けること」を測る形の実績。既定を無効にせず置く理由は決定 3 にある | https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html （2026-11-23） |
+| STD2 | systemd の `WatchdogSec=` | サービス自身が `WATCHDOG=1` を打ち続け、間隔が設定を超えたら失敗とする。既定は 0 で無効 | 決定 1・決定 3。プロセスが居ることでなく「ハートビートが来続けること」を測る形の実績。既定を無効にせず置く理由は決定 3 にある | https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html （2026-11-23） |
 
 ### 主要な製品
 
 | # | 製品 | どう解いているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| PRD1 | Temporal（Activity の heartbeat） | 「Each ping informs the Temporal Service that the Activity Execution is making progress and the Worker has not crashed.」。閾値（Heartbeat Timeout）に既定は無く、未設定は無効。送信の絞りは 30 秒・60 秒 | 決定 1。進んでいるかを合図で測る形。既定を持たない形は採らない（決定 3） | https://docs.temporal.io/encyclopedia/detecting-activity-failures （2026-11-23） |
+| PRD1 | Temporal（Activity の heartbeat） | 「Each ping informs the Temporal Service that the Activity Execution is making progress and the Worker has not crashed.」。閾値（Heartbeat Timeout）に既定は無く、未設定は無効。送信の絞りは 30 秒・60 秒 | 決定 1。進んでいるかをハートビートで測る形。既定を持たない形は採らない（決定 3） | https://docs.temporal.io/encyclopedia/detecting-activity-failures （2026-11-23） |
 | PRD2 | GitHub Actions・Buildkite | 時間の上限だけを持ち、出力の停止は測らない。GitHub Actions のジョブの `timeout-minutes` の既定は 360 分 | 決定 1。時間の上限だけでは、長い作業をしている行と何もしていない行を分けられない | https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax （2026-11-23）、https://buildkite.com/docs/pipelines/configure/build-timeouts （2026-11-23） |
 | PRD3 | CircleCI（`no_output_timeout`） | 「Elapsed time the command can run without output.」で「The default is 10 minutes」。出力が止まったことを直接測る | 決定 3。閾値を 10 分にする根拠。出力の停止を測る仕組みの一次情報はこの 1 件だけだった | https://circleci.com/docs/reference/configuration-reference/ （2026-11-23） |
 

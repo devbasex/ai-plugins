@@ -13,7 +13,7 @@ supervisor が worker へ作業を出すときの置き場所の用意は、手�
 | `plugins/ndf/skills/development-workflow/references/agent-layers.md:235` | 起動指示の「置く場所」の欄。`: > <置く場所>; rm -f <置く場所>.done` を書く唯一の行 |
 | `plugins/ndf/skills/development-workflow/references/waiting.md:229` | 待ち方の手順。同じ 2 つのコマンドを書く |
 
-エージェントの定義（`plugins/ndf/agents/`）と hook には同じ形が無く、`rm` を見る guard も無い（`plugins/ndf/contracts/hooks/guards.json` の 17 件に `rm` を扱うものは無い）。
+エージェントの定義（`plugins/ndf/agents/`）と hook には同じ形が無い。`rm` を見る guard も無い（`plugins/ndf/contracts/hooks/guards.json` の 17 件に `rm` を扱うものは無い）。
 
 ```mermaid
 flowchart LR
@@ -22,17 +22,17 @@ flowchart LR
     D -.->|レーンの端末に出る| H[人の Yes を待つ]
     D -->|Yes の後| F[(作業ディレクトリ)]
     S -->|3. 起動指示にパスを書く| W[worker]
-    W -->|報告のコピーと .done| F
+    W -->|報告コピーと .done| F
     S -->|4. .done を待つ| F
 ```
 
-止まるのは 2 の行である。supervisor は worker ごとの置き場所をまとめて用意するため、2 つのコマンドをシェルの変数とループで書き、Claude Code の「空かもしれない変数のパスへの `rm`」の確認に当たる。確認はレーンの端末に出る画面で、モデルには届かない。
+止まるのは 2 の行である。supervisor は worker ごとの置き場所をまとめて用意するため、2 つのコマンドをシェルの変数とループで書く。その形が Claude Code の「空かもしれない変数のパスへの `rm`」の確認に当たる。確認はレーンの端末に出る画面で、モデルには届かない。
 
 ## 文脈と制約
 
 - 確認ダイアログが開いている間、そのツールの呼び出しは結果を返さない。サブエージェントのコマンドでも確認はレーンの端末に出るため、worker へ移しても conductor へ移しても同じ画面で止まる
 - 置き場所のパスは supervisor が worker の起動指示へ書き写すため、コマンドが返すパスは絶対パスで、supervisor が読み取れる形でなければならない
-- worker の側の約束（報告のコピーを書き、`<置く場所>.done` を作る）は変えない。worker は `ndf` のサブコマンドを持たない経路（サブエージェント）でも動く
+- worker の側の約束（報告コピーを書き、`<置く場所>.done` を作る）は変えない。worker は `ndf` のサブコマンドを持たない経路（サブエージェント）でも動く
 - `ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打つ（hook の `script-chain` guard）。用意も 1 回の呼び出しで終わらなければならない
 - プランの経路（`ndf answer work`）は同じ保存先に `<作業名>-prompt.md`・`<作業名>-result.json` を置く。パスの決め方を 2 か所に分けない（#3908 の設計がこの決め方を使う）
 
@@ -44,26 +44,28 @@ flowchart LR
     C -->|空のファイルを作り古いマーカーを消す| F[(作業ディレクトリ)]
     C -->|metrics.paths に 3 つの絶対パス| S
     S -->|起動指示にパスを書き写す| W[worker]
-    W -->|報告のコピーと .done と結果 JSON| F
+    W -->|報告コピーと .done と結果 JSON| F
     S -->|.done を待つ| F
 ```
 
-supervisor は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` を 1 回打つ。コマンドは作業ディレクトリを作り、報告の置き場所を空のファイルとして作り、前の完了マーカーと前の作業の結果ファイルを消し、3 つの絶対パス（`report`・`done`・`result`）を結果の `metrics.paths` に返す。supervisor はその 3 つを起動指示の「置く場所」「作業の結果ファイル」に書き写す。手順書からはパスを組み立てる変数と `rm` が消える。
+supervisor は `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` を 1 回打つ。コマンドは作業ディレクトリを作り、報告の置き場所を空のファイルとして作り、前の完了マーカーと前の作業の結果ファイルを消す。そのうえで 3 つの絶対パス（`report`・`done`・`result`）を結果の `metrics.paths` に返す。supervisor はその 3 つを起動指示の「置く場所」「作業の結果ファイル」に書き写す。手順書からはパスを組み立てる変数と `rm` が消える。
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
-| `ndf worker prepare`（新設のサブコマンド） | 作業ディレクトリと worker の名前から 3 つのパスを決め、置き場所を空で作り、古い完了マーカーと結果ファイルを消し、絶対パスを返す |
-| `report_paths`（新設の関数） | 作業ディレクトリと名前から 3 つのパスを組む。ファイルを触らない純粋な処理。`ndf answer work` もこの関数を使う（#3908） |
+| `ndf worker prepare`（新設のサブコマンド） | 作業ディレクトリと worker の名前からパスを決め、報告の置き場所を空で作り、古い完了マーカーと結果ファイルを消し、3 つの絶対パスを返す |
+| `report_paths`（新設の関数。`contracts/worker_paths.py`） | 作業ディレクトリと名前から 4 つのパス（プロンプト・報告・完了マーカー・結果ファイル）を組む。ファイルを触らない純粋な処理。`ndf answer work` もこの関数を使う（#3908） |
 | `agent-layers.md` の「置く場所」「作業の結果ファイル」の欄（変更） | コマンド 1 行と、返りの 3 つのパスの読み方だけを書く |
 | `waiting.md` の「中間通知を受けたとき」（変更） | 同じコマンド 1 行を書く |
 
 ```mermaid
 flowchart TB
+    subgraph co["contracts（plugins/ndf/src/ndf/contracts/worker_paths.py）"]
+        paths["report_paths（新設）"]
+    end
     subgraph ndf["ndf worker（plugins/ndf/src/ndf/core/worker.py）"]
         prep["_cmd_prepare（新設）"]
-        paths["report_paths（新設）"]
         run["run（既存）"]
     end
     prep --> paths
@@ -92,7 +94,7 @@ ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>
 
 `items` には触ったパスを `{"kind": "report" / "done" / "result", "path": <絶対パス>, "action": "created" / "removed" / "absent"}` で並べる。作業ディレクトリを作れない・名前が形に合わないときは `stopped`（`invalid`）で、`summary` に理由を書く。
 
-**返りに結果 JSON の `outputs` を使わない。** `outputs` は工程の文脈のキー（`worktree`・`design_pr` など）の閉じた語彙で、`plugins/ndf/contracts/schemas/result.schema.json` の `$defs/outputs` が `additionalProperties: false` を持つ（決定 5）。
+**返りに結果 JSON の `outputs` を使わない。** `outputs` は工程の文脈のキー（`worktree`・`design_pr` など）の閉じた語彙である。`plugins/ndf/contracts/schemas/result.schema.json` の `$defs/outputs` が `additionalProperties: false` を持つ（決定 5）。
 
 ## 処理の流れ
 
@@ -110,7 +112,7 @@ sequenceDiagram
     C-->>S: metrics.paths に report・done・result の絶対パス
 ```
 
-同じ名前で 2 回打つと、1 回目の報告のコピーは空に上書きされ、1 回目の完了マーカーと結果ファイルは消える。supervisor が 2 回目の `.done` を待つとき、1 回目のマーカーを完了と読むことはない（受け入れ条件 3）。
+同じ名前で 2 回打つと、1 回目の報告コピーは空に上書きされ、1 回目の完了マーカーと結果ファイルは消える。supervisor が 2 回目の `.done` を待つとき、1 回目のマーカーを完了と読むことはない（受け入れ条件 3）。
 
 ## 決定の記録
 
@@ -168,15 +170,17 @@ sequenceDiagram
 
 - **質問**: サブコマンドを何と呼ぶか
 - **選んだ案**: `ndf worker prepare`
-- 採らなかった案: `ndf worker slot`（`slot` は同時実行数のスロット（`plugins/ndf/src/ndf/slot_pool.py`・`ndf test-slot`）で既に使っている語で、1 つの語が 2 つの対象を指す）・`ndf worker paths`（ファイルを作って消す副作用があるのに、読み取りに見える）
+- 採らなかった案:
+  - `ndf worker slot`（`slot` は同時実行数のスロット（`plugins/ndf/src/ndf/slot_pool.py`・`ndf test-slot`）で既に使っている語で、1 つの語が 2 つの対象を指す）
+  - `ndf worker paths`（ファイルを作って消す副作用があるのに、読み取りに見える）
 - **代償**: 無し
 - 根拠: 1 語 1 意味にする決まり（利用者の 2026-10-17 の指摘）
 
 ### 決定 7: パスを決める関数を `contracts` の層に置く
 
 - **質問**: `report_paths` をどのモジュールに置くか
-- **選んだ案**: `plugins/ndf/src/ndf/contracts/worker_paths.py`（新設）に置き、`ndf worker prepare`（`core/worker.py`）と `ndf answer work`（`progress/gate/entry.py`）の両方が読む
-- 採らなかった案: `core/worker.py` に置く（`progress/gate/entry.py:95` が「worker の層は読まず、サブコマンドのコントラクトだけを使う（IG1）」と定めており、worker の層を読むことになる）
+- **選んだ案**: `plugins/ndf/src/ndf/contracts/worker_paths.py`（新設）に置く。`ndf worker prepare`（`core/worker.py`）と `ndf answer work`（`progress/gate/entry.py`）の両方が読む
+- 採らなかった案: `core/worker.py` に置く（`progress/gate/entry.py:95` は「worker の層は読まず、サブコマンドのコントラクトだけを使う（IG1）」と定める。この案はその worker の層を読むことになる）
 - **代償**: 新しいモジュールが 1 つ増える
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」・cross 系の共通の役割を 1 か所に置く決まり（MVV バージョン 1）
 
@@ -207,7 +211,7 @@ sequenceDiagram
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 置き場所 | supervisor が worker へ渡す、報告のコピー・完了マーカー・作業の結果ファイルの 3 つのパスの組 | 追加 |
+| 置き場所 | supervisor が worker へ渡す、報告コピー・完了マーカー・作業の結果ファイルの 3 つのパスの組 | 追加 |
 
 ## テスト設計
 
