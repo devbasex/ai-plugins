@@ -13,11 +13,11 @@ plugins/ndf/
 │   ├── domains/ndf-files.json          # design・document の行、scratch の行の移し替え、main_keys
 │   └── workflow/progress.json          # 事象 handoff_written の 3 行
 └── src/ndf/
-    ├── core/places.py *                # resolve・prepare・main_dir・sweep
+    ├── core/places.py *                # resolve・prepare・main_dir・adopt_legacy・retired_slot・sweep
     ├── core/places_cli.py *            # ndf places path / sweep
     ├── domains/handoff/__init__.py *
     ├── domains/handoff/record.py *     # write・show・listing・import_file
-    ├── progress/store.py               # read_handoffs・read_events の本文の除外
+    ├── progress/store.py               # read_handoff・read_handoff_histories・read_handoff_sources・read_events の本文の除外
     ├── domains/handoff/cli.py *        # ndf handoff write / show / list
     ├── domains/records/handoff.py      # 形の検査（今のまま使う。ファイルの読み書きを外す）
     ├── domains/records/cli.py          # handoff check を消す
@@ -28,7 +28,8 @@ plugins/ndf/
     ├── core/converge/location.py       # main_dir・main_worktree を places へ
     ├── domains/worktree/repo.py・create.py・setup.py・ndf_settings.py
     ├── domains/release/cli.py
-    ├── domains/crossrefactor/launch.py・workspace.py・final_gate.py・final_gate_decide.py
+    ├── domains/worktree/removal.py         # 外す前に前の版の計画の記録を移す
+    ├── domains/crossrefactor/launch.py・workspace.py・drive.py・final_gate.py
     └── checks/places_check.py *        # 起点を自分で決める形を落とす
 ```
 
@@ -36,19 +37,20 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `plugins/ndf/src/ndf/core/places.py` | 新設 | 置き場の名前から起点どおりのパスを求め、作って無視させ、残骸を退避する | `contracts.facts`・`adapters.git` | モジュール | `resolve`・`prepare`・`main_dir`・`sweep`・`_locate`（新設）、`PlaceError`（新設） |
+| `plugins/ndf/src/ndf/core/places.py` | 新設 | 置き場の名前から起点どおりのパスを求め、作って無視させ、前の版の置き場から移し、残骸を退避する | `contracts.facts`・`adapters.git` | モジュール | `resolve`・`prepare`・`main_dir`・`adopt_legacy`・`retired_slot`・`sweep`・`_locate`（新設）、`PlaceError`（新設） |
 | `plugins/ndf/src/ndf/core/places_cli.py` | 新設 | `ndf places path`・`ndf places sweep` | `core.places`・`contracts` | モジュール | `register`・`_path`・`_sweep`（新設） |
 | `plugins/ndf/src/ndf/domains/handoff/record.py` | 新設 | 引継ぎの事象の追記と読み出し | `progress.store`・`progress.model`・`domains.records.handoff` | モジュール | `write`・`show`・`listing`・`import_file`（新設） |
 | `plugins/ndf/src/ndf/domains/handoff/cli.py` | 新設 | `ndf handoff write / show / list` | `domains.handoff.record` | モジュール | `register`（新設） |
-| `plugins/ndf/src/ndf/progress/store.py` | 変更 | 引継ぎの本文を通常の読み出しから外す | — | モジュール | `read_handoffs`（新設）・`read_events`（変更） |
+| `plugins/ndf/src/ndf/progress/store.py` | 変更 | 引継ぎの本文を通常の読み出しから外す | — | モジュール | `read_handoff`・`read_handoff_histories`・`read_handoff_sources`（新設）・`read_events`（変更） |
 | `plugins/ndf/src/ndf/domains/records/handoff.py` | 変更 | 本文の文字列を検査する形にする | — | モジュール | `check_text`・`trim_text`（変更。今の `check_file`・`trim_file` から読み書きを外す） |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | 変更 | `handoff check` を消す | — | モジュール | `_handoff`・`_add_handoff`（削除） |
 | `plugins/ndf/src/ndf/domains/relay/context_records.py` | 変更 | 最初の発言の `ndf handoff show` で復元を見つける | — | モジュール | `HANDOFF_PATH` → `HANDOFF_SHOW`（変更） |
-| `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | 計画の記録を `places.prepare("ndf-parallel")` の下に置き、前の版の記録を移す | `core.places` | モジュール | `record_dir`（変更。シグネチャは同じ） |
+| `plugins/ndf/src/ndf/progress/plan/run.py` | 変更 | 計画の記録を `places.prepare("ndf-parallel")` の下に置く（前の版の記録の移し替えは `places.adopt_legacy` を `worktree/removal.py` が呼ぶ） | `core.places` | モジュール | `record_dir`（変更。シグネチャは同じ） |
 | `plugins/ndf/src/ndf/domains/backlog/state.py`・`depth.py`・`progress/command.py` | 変更 | `main_dir` を `places` へ寄せ、設定のパスを `places` で求める | `core.places` | モジュール | `main_dir`（削除）・`state_dir`・`ndf_settings_path`（変更）・`PROJECT_FILE`・`MVV_FILE`（値の変更） |
 | `plugins/ndf/src/ndf/core/converge/location.py` | 変更 | 作業場所の親を `places.resolve("ndf-work")` にする | `core.places` | モジュール | `default_base`・`work_root`（変更）、`main_dir`・`main_worktree`（削除。`places.main_dir` へ移す） |
 | `plugins/ndf/src/ndf/domains/worktree/repo.py`・`create.py`・`setup.py` | 変更 | `.worktrees` を `prepare` で作り、登録を求めない。`.ndf/.gitignore` の行を `prepare` に任せる | `core.places` | モジュール | `locate`・`worktrees_dir`・`_check_location`・`init`（変更） |
-| `plugins/ndf/src/ndf/domains/crossrefactor/launch.py`・`workspace.py` | 変更 | 起動の前に `.cross_refactoring/` を作り直す。`info/exclude` をやめる | `core.places` | モジュール | `run`（変更）・`_exclude_results`（削除）。`final_gate_decide.verify_final_fix`（変更。NDF のコミットを範囲の検査から外す） |
+| `plugins/ndf/src/ndf/domains/crossrefactor/launch.py`・`workspace.py`・`drive.py`・`final_gate.py` | 変更 | コードを書く工程の起点を取る前に `.cross_refactoring/` を作り直す。`info/exclude` をやめる | `core.places` | モジュール | `clear_results`（新設）・`_exclude_results`（削除）・`drive._record_phase`・`final_gate.run_gate`（変更）。`launch.run`・`final_gate_decide.verify_final_fix` は変えない |
+| `plugins/ndf/src/ndf/domains/worktree/removal.py` | 変更 | worktree を外す前に、その worktree に前の版が書いた計画の記録をメインディレクトリへ移す | `core.places` | モジュール | `remove_evacuating`（変更） |
 | `plugins/ndf/src/ndf/checks/places_check.py` | 新設 | 起点を自分で決める形と、一覧に無い置き場の id を落とす | `contracts.facts` | モジュール | `check`（新設） |
 
 ## 置き場の求め方（子の課題 1）
@@ -60,7 +62,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `resolve` | `core/places.py` | 新設 | `resolve(place: str, cwd: Path, environ: Mapping[str, str] = os.environ, *, allow_retired: bool = False) -> Path` | 一覧の行の起点と path からパスを返す。作らない |
-| `prepare` | `core/places.py` | 新設 | `prepare(place: str, cwd: Path, environ: Mapping[str, str] = os.environ) -> Path` | `resolve` のパスを作り、追跡しない行なら無視させて返す |
+| `prepare` | `core/places.py` | 新設 | `prepare(place: str, cwd: Path, environ: Mapping[str, str] = os.environ, *, root: Optional[Path] = None) -> Path` | `resolve` のパスを作り、追跡しない行なら無視させて返す。`root` は起点 `worktree` の行で呼び手が worktree の根を既に持つときに渡し、渡すと起点を求める git を打たない（起点 `worktree` 以外の行に渡すと `PlaceError`（`invalid`）） |
 | `main_dir` | `core/places.py` | 新設 | `main_dir(cwd: Path) -> Path` | メインディレクトリ（`git worktree list` の先頭）を返す |
 | `_path` | `core/places_cli.py` | 新設 | `_path(args: argparse.Namespace) -> dict[str, Any]` | `ndf places path <id> [--prepare]` の結果 JSON を作る |
 
@@ -118,7 +120,8 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `record_dir` | `progress/plan/run.py` | 変更 | `record_dir(cwd: Path, plan: str) -> Path`（同じ） | `places.prepare("ndf-parallel", cwd)` の下の `<計画>` を返す。今の worktree の根の `.ndf/parallel/<計画>/`（前の版が書いた所）があれば移し替える（下の「計画の記録の移し替え」。子の課題 1） |
+| `record_dir` | `progress/plan/run.py` | 変更 | `record_dir(cwd: Path, plan: str) -> Path`（同じ） | `places.prepare("ndf-parallel", cwd)` の下の `<計画>` を返す。移し替えはしない（下の「計画の記録の移し替え」の `adopt_legacy` が持つ） |
+| `adopt_legacy` | `core/places.py` | 新設 | `adopt_legacy(place: str, worktree: Path, cwd: Path) -> Adopted` | 起点 `main` の行について、前の版が `worktree` の根から数えて書いた所（`worktree / <path>`）の中身を、新しい置き場へ移す。`Adopted` は `moved`（移したパス）・`kept`（移さなかったパスと理由）を持つ（下の「計画の記録の移し替え」。子の課題 1） |
 | `state_dir` | `domains/backlog/state.py` | 変更 | 同じ | 引数 `arg` があれば今のまま `mkdir` だけ（利用者の指定なので `.gitignore` を書かない）。無ければ `places.prepare("backlog-state", cwd)` の下に `repo_key(repo)` を `mkdir` する。環境変数 `NDF_UPKEEP_STATE_DIR` は `prepare` が列 `env` として読み、その先には `.gitignore` を書かない（`prepare` の条件 (2)）。既定先には `.ndf/backlog/state/.gitignore`（`*`）ができる。`main_dir` を呼ぶ今の分岐と `mkdir` だけの既定の分岐は消す |
 | `ndf_settings_path` | `progress/command.py` | 変更 | `ndf_settings_path(cwd: Path, name: str) -> Path`（`name` の意味を「根からの相対パス」から「`.ndf/` の中のファイル名」に変える） | `places.resolve("ndf", cwd) / name` にする。同じ PR で渡す値を変える: `PROJECT_FILE` を `"project.json"`、`MVV_FILE` を `"mvv.json"` にし（`.ndf/` の前置きを外す）、呼び元の `command.ndf_settings`（`command.py` の `docs.behavior`・`project`・`ci_declared`・`mvv` の 4 か所）・`command.py` の `PROJECT_FILE` を読む所・`progress/invoke.py` の `ndf_settings(location, PROJECT_FILE)` はそのまま新しい値を渡す。`invoke.py` が `PROJECT_FILE` を利用者向けの文（`FROM_PROJECT` と `workflow` の検査の文）に使う 2 か所は、`.ndf/` を付けた表示の名前 `PROJECT_LABEL`（`command.py` に新設）に替える。`progress/plan/run.py` の `ndf_settings_path(cwd, <ndf-parallel の path>)` は `record_dir` の置き換えで消える。`git grep -n 'ndf_settings_path\|ndf_settings(' -- plugins/ndf/src` が示す呼び元はこれで全部 |
 | `ndf_settings_path` | `domains/backlog/depth.py` | 変更 | `ndf_settings_path(cwd: Path) -> Path`（同じ） | `places.resolve(<backlog の location>, cwd) / <backlog の path>` にする（呼び元は `backlog/cli_input.py` の 1 か所で変えない） |
@@ -126,8 +129,11 @@ plugins/ndf/
 | `_check_location` | `domains/worktree/create.py` | 変更 | 同じ | `check-ignore` で止めるのをやめ、`places.prepare("worktrees")` を呼ぶ（子の課題 2） |
 | `init` | `domains/worktree/setup.py` | 変更 | 同じ | `.ndf/.gitignore` を自分で作るのをやめ、`places.prepare("ndf-local")` を呼ぶ |
 | `default_base`・`work_root` | `core/converge/location.py` | 変更 | `default_base(cwd: Path) -> Path`（引数をメインディレクトリから `cwd` へ） | `places.resolve("ndf-work")` を返す（子の課題 2。「未確認のまま残ること」の 1 で戻すときは行の起点だけを変える） |
-| `run` | `domains/crossrefactor/launch.py` | 変更 | 同じ | 読み取りの工程（`launch_decide.read_only_phases()`。結果は標準出力で回収し、担当はコミットしない）では何もしない（git の追加の呼び出しは 0）。コミットする工程では、担当を起動する前に、担当が動くディレクトリで `git ls-files -z -- .cross_refactoring` が空でなければ `git rm -r -q --cached -- .cross_refactoring` と `git commit -q --no-verify -m <固定の題> -- .cross_refactoring` で NDF 自身のコミットにし、その SHA を返す。フォルダを消し、`places.prepare("cross-refactoring", <担当のディレクトリ>)` で作り直す。担当の索引には削除が残らないので、削除は担当のコミットに入らない（子の課題 2） |
-| `verify_final_fix`・`changed_by_commit` | `domains/crossrefactor/final_gate_decide.py`・`final_gate.py` | 変更 | `verify_final_fix(changed_by_commit, target_scope, prepared: frozenset[str] = frozenset())` | 範囲の検査から、起動の前に `run` が作った NDF のコミット（返した SHA の集まり `prepared`）だけを外す。担当のコミットが `.cross_refactoring/` を消していれば今までどおり範囲外として扱う（子の課題 2） |
+| `clear_results` | `domains/crossrefactor/launch.py` | 新設 | `clear_results(work: Path, scratch: Path) -> bool` | `work`（担当がコミットする作業場所の根）の `.cross_refactoring/` を作り直す。追跡されていたら削除だけの NDF のコミットを作って真を返す。手順は下の「起動の前の作り直し」（子の課題 2） |
+| `run` | `domains/crossrefactor/launch.py` | 変えない | `run(req, dirs, launcher) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]`（同じ） | 作り直しは呼ばない。SHA も返さない |
+| `_record_phase` | `domains/crossrefactor/drive.py` | 変更 | 同じ | 工程がコードを書く工程（`launch_decide.coding_phases()`）なら、HEAD を起点として読む前に `launch.clear_results(run.ws.work, run.ws.logs)` を呼ぶ。読み取りの工程（`plan` など）では呼ばない |
+| `run_gate` | `domains/crossrefactor/final_gate.py` | 変更 | `run_gate(g, hub, cfg, fix, sleep, ci_port=None, ready: Callable[[], None] = lambda: None)` | 直しの周ごとに `before = g.rev_parse("HEAD")` の直前で `ready()` を呼ぶ。`drive._final` は `ready` に `lambda: _record_phase(run, "final-fix")` を渡し、`fix` の中の `_record_phase` を消す |
+| `verify_final_fix`・`changed_by_commit`・`flaky_decide.violations`・`flaky_decide.results` | `final_gate_decide.py`・`final_gate.py`・`flaky_decide.py` | 変えない | 同じ | NDF のコミットは起点（`before`・`base`）より前にあるので、`before..HEAD`・`base..HEAD` には担当のコミットだけが入る。担当のコミットが `.cross_refactoring/` を消したり足したりしていれば、今までどおり範囲外・違反として扱う |
 | `_exclude_results` | `domains/crossrefactor/workspace.py` | 削除 | — | `info/exclude` への書き足しをやめる |
 | 錠のパス | `domains/worktree/mainlock.py`・`domains/project/strategy_write.py`・`domains/loop/acceptance.py` | 変更 | 同じ | `places.resolve("ndf-locks")` の下へ（子の課題 2） |
 | 設定の読み方 | `domains/worktree/ndf_settings.py`・`domains/release/cli.py` | 変更 | 同じ | ファイル全体をメインディレクトリから読むのをやめ、`ndf-files.json` の `main_keys`（`worktree` は `guard`・`remote`、`release` は全キー）だけをメインディレクトリから読む（子の課題 2） |
@@ -136,9 +142,9 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `run`（launch） | 索引から外せない・フォルダを消せない | git の錠・権限 | `git rm`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | 何も起動していない。再実行可 |
+| `clear_results` | 退避できない・コミットできない・退避を消せない | git の錠・権限 | `rename`・`git commit`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
+| `adopt_legacy` | 移し替え先に同じ名前がある・書き手が開いたまま別のファイルシステムにある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・権限 | 移す前の `exists`・`st_dev` の比較と `/proc/*/fd` の走査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
 | `_check_location` | `.worktrees` を作れない | 権限 | `prepare` | 止める | 終了コード 1 | 再実行可 |
-| `record_dir` | 移し替え先に同じ名前の計画がある | 前の版と今の版が別々に書いた | 移す前の `exists` | 移さない。新しい置き場を使い、前の置き場のパスを結果 JSON の `warnings` に `legacy_plan_record` として出す（前の置き場は消さない） | 終了コード 0 と警告 | 人が中身を見て片付ける。再実行しても同じ警告 |
 
 ### 並行と排他
 
@@ -150,15 +156,22 @@ plugins/ndf/
 
 ### 計画の記録の移し替え（子の課題 1）
 
-`record_dir(cwd, plan)` は、新しい置き場（メインディレクトリの `.ndf/parallel/<計画>/`）を返す前に、今の worktree の根の `.ndf/parallel/<計画>/`（前の版が linked worktree に書いた所）を見る。今の worktree がメインディレクトリならこの確かめはしない。
+前の版は計画の記録を linked worktree の根の `.ndf/parallel/<計画>/` に書いた。この記録が失われるのは worktree を外すときなので、移し替えは worktree を外す共通の手順に置く。計画を再始動する必要は無い。
 
-| 前の置き場 | 新しい置き場 | 扱い |
-| --- | --- | --- |
-| ある | 無い | 前の置き場を新しい置き場へ `rename`（別のファイルシステムなら複写してから消す）。動いている `detach` の子が前の `run.log` を開いていても、`rename` は開いたファイルを保つので書き足しは新しい置き場へ届く |
-| ある | ある | 移さない。新しい置き場を読み書きし、前の置き場を `warnings` の `legacy_plan_record` に出す（上の異常系） |
-| 無い | どちらでも | 何もしない |
+- 入口: `domains/worktree/removal.remove_evacuating` が、テスト環境を閉じた後、無視したファイルを退避する前に `places.adopt_legacy("ndf-parallel", item.path, cwd)` を呼ぶ。`ndf worktree merged`・`ndf worktree cleanup` はどちらもこの手順を通るので、利用者が worktree を外す普通の経路で必ず移る。`kept` が 1 つでもあれば、その worktree は外さない（`Removal` の `refused` に `legacy_plan_record` を入れる）
+- 結果 JSON: `merged`・`cleanup` の結果 JSON の `outputs.adopted[]` に移したパス（前と後）、`warnings[]` に `{"code": "legacy_plan_record", "path": <前の置き場>, "reason": <kept の理由>}` を出す
+- `record_dir` と `detach` は移し替えをしない（計画の起動の経路に移し替えの git とファイル操作を足さない）
 
-確かめは `record_dir` を呼ぶ worktree の分だけで、ほかの linked worktree は見ない（その worktree から計画を読むときに移る）。worktree を消す前に記録を残したいときは、その worktree で計画のコマンドを 1 回打てば移る。
+`adopt_legacy` は前の置き場の下の計画ごと（`<worktree>/.ndf/parallel/<計画>/`）に次の扱いをする。`worktree` がメインディレクトリなら何もしない。
+
+| 前の置き場 | 新しい置き場 | 同じファイルシステムか（`st_dev`） | 扱い |
+| --- | --- | --- | --- |
+| ある | 無い | 同じ | `rename` で移す。動いている `detach` の子が前の `run.log` を開いていても、`rename` は開いたファイルを保つので書き足しは新しい置き場へ届く |
+| ある | 無い | 違う | `/proc/*/fd` を走査し、前の置き場の下のファイルの inode を開いているプロセスがあれば移さない（`writer_open`）。`/proc` が無い環境は確かめられないので移さない（`writer_unverifiable`）。開いているプロセスが無いときだけ、新しい置き場の隣の一時フォルダへ複写し、`rename` で新しい置き場にしてから前の置き場を消す。書き手が開いたまま複写すると、複写の後の書き足しは前のファイルにだけ届き、前を消すと失われるため |
+| ある | ある | どちらでも | 移さない（`exists`）。新しい置き場を読み書きし、前の置き場は消さない |
+| 無い | どちらでも | — | 何もしない |
+
+`writer_open` で外さなかった worktree は、書き手（`detach` で切り離した `ndf lanes run`）が終わった後の次の `merged`・`cleanup` で移ってから外れる。
 
 ### 起動ごとの git の呼び出し数
 
@@ -168,7 +181,22 @@ plugins/ndf/
 | `resolve`・`prepare`（起点 `main`） | `worktree list --porcelain` 1 回と、今の `main_worktree` の確かめに要る `rev-parse` | 同上 |
 | `resolve`・`prepare`（起点 `git`） | `rev-parse --git-common-dir` 1 回 | 同上 |
 | cross-refactoring の読み取りの工程の起動 | 0 | — |
-| cross-refactoring のコミットする工程の起動 | `ls-files` 1 回と、担当のディレクトリの起点 1 回（同じプロセスで同じディレクトリなら 0）。追跡されていたときだけ `rm --cached` と `commit` の 2 回 | 索引の確かめは起動ごとに打つ（前の担当が新しく追跡したかは起動ごとに変わる） |
+| cross-refactoring の作業場所の用意（`workspace.prepare`、1 回の実行に 1 回） | −1（`_exclude_results` の `rev-parse --git-path info/exclude` が無くなる） | — |
+| cross-refactoring のコードを書く工程の起動（`clear_results`） | `ls-files` 1 回。追跡されていたときだけ `commit` 1 回。起点は `run.ws.work` を `prepare(..., root=)` に渡すので 0 | 下の「起動ごとの索引の確かめ」 |
+| `adopt_legacy`（worktree を外すとき） | 0（ファイルの `stat` と `rename` だけ） | — |
+
+起動ごとの索引の確かめ: `ls-files` は、コードを書く工程の起動の数（1 回の実行で、項目ごとの `add-tests` と `implement`、フレーキーの直しの起動、最後の修正の周の数の和）だけ打つ。項目が 10 の実行なら約 20〜25 回で、1 回は数ミリ秒（担当の起動は 1 回が数分）。前の担当が `git add -f` で作業ファイルを新しく追跡したかは起動ごとに変わり、前の起動のコミットを調べる（`diff-tree`）のも git を 1 回打つので、`ls-files` を起動ごとに 1 回打つのが最小である。読み取りの工程では打たない。
+
+### 起動の前の作り直し（`clear_results`、子の課題 2）
+
+`git rm --cached` の後に `git commit -- <パス>` を打つと、パスを指定した `git commit` は索引でなく作業ツリーの中身を読むので削除にならない（[git commit の仕様](https://git-scm.com/docs/git-commit#_description) ）。そこで作業ツリーから先に退かし、索引には触れずにパスを指定してコミットする。
+
+1. `git ls-files -z -- .cross_refactoring` が空なら 4 へ進む
+2. `.cross_refactoring/` を、作業場所の外で同じファイルシステムの一時フォルダ（`scratch`。呼び手は `rf<PR>/logs` を渡す。その下に `tempfile.mkdtemp` で作る）へ `rename` で退避する
+3. `git commit -q --no-verify -m <固定の題> -- .cross_refactoring` を打つ。作業ツリーにファイルが無いので、追跡されていたファイルの削除だけが 1 つのコミットに入り、ほかのステージ済みの変更は索引に残ってコミットに入らない（2026-11-23 に一時のリポジトリで確かめた）。失敗したら退避したフォルダを元へ戻して止める
+4. 退避したフォルダ（あれば）と、残っている `.cross_refactoring/` を消し、`places.prepare("cross-refactoring", work, root=work)` で作り直す
+
+工程の起点（`_record_phase` の HEAD、最後の修正の `before`）はこの後に読むので、NDF のコミットは起点より前にある。範囲の検査・フレーキーの直しの検査と集計は、起点から HEAD までの担当のコミットだけを見る。起点は今のまま実行の状態（`phases`）に保存されるので、NDF のコミットの SHA を別に保存して渡す必要は無い。
 
 `prepare` の無視の処理（`.gitignore` の有無と `.ndf/.gitignore` の行の確かめ）はファイルの読み取りだけで、git を打たない。
 
@@ -182,9 +210,11 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `write` | `domains/handoff/record.py` | 新設 | `write(target: str, body: str, cwd: Path, *, trim: bool = False, actor: str = "conductor") -> Written` | 形を検査し、通れば事象 `handoff_written` を 1 件追記する |
 | `show` | `domains/handoff/record.py` | 新設 | `show(target: str, cwd: Path, *, seq: Optional[int] = None, history: bool = False) -> Handoff` | 最後の（か `seq` の）引継ぎを返す。`history` なら、その版までの全版の `history` の差分を古い順につないだものを返す |
-| `listing` | `domains/handoff/record.py` | 新設 | `listing(cwd: Path, *, open_only: bool = False) -> list[HandoffSummary]` | このリポジトリのステートマシンで引継ぎを持つものを並べる |
-| `import_file` | `domains/handoff/record.py` | 新設（子の課題 4） | `import_file(name: str, cwd: Path, *, to: Optional[str], now: datetime) -> Imported` | 前の版の `.ndf/handoff/<名>.md` と `<名>-history.md` を移す（下の「前の版の引継ぎ文書の移し替え」） |
-| `read_handoffs` | `progress/store.py` | 新設 | `read_handoffs(conn, machine_id, *, upto: Optional[int] = None) -> list[model.Event]` | `handoff_written` の事象だけを `payload` つきで読む。引継ぎのコマンドだけが使う |
+| `listing` | `domains/handoff/record.py` | 新設 | `listing(cwd: Path, *, open_only: bool = False, with_handoff: bool = True) -> list[HandoffSummary]` | このリポジトリのステートマシンを並べる。`with_handoff` が真なら引継ぎを持つものだけ（`ndf handoff list`）、偽なら引継ぎの有無によらない（`import_file` の行き先の選定） |
+| `import_file` | `domains/handoff/record.py` | 新設 | `import_file(name: str, cwd: Path, *, to: Optional[str], now: datetime) -> Imported` | 前の版の `.ndf/handoff/<名>.md` と `<名>-history.md` を移す（下の「前の版の引継ぎ文書の移し替え」） |
+| `read_handoff` | `progress/store.py` | 新設 | `read_handoff(conn, machine_id, *, seq: Optional[int] = None) -> Optional[model.Event]` | `handoff_written` の 1 件を `payload` つきで読む。`seq` が無ければ `ORDER BY seq DESC LIMIT 1`、あれば `seq = :seq` の完全一致。引継ぎのコマンドだけが使う |
+| `read_handoff_histories` | `progress/store.py` | 新設 | `read_handoff_histories(conn, machine_id, *, upto: int) -> list[str]` | `seq <= upto` の `handoff_written` の `payload` の `history` だけを古い順に読む（本文を転送しない。SQLAlchemy の JSON の添字 `sa.type_coerce(payload, sa.JSON)["history"].as_string()` で SQLite と PostgreSQL の差を吸収する）。`show --history` だけが使う |
+| `read_handoff_sources` | `progress/store.py` | 新設 | `read_handoff_sources(conn, machine_id) -> list[tuple[int, Optional[str], Optional[dict[str, str]]]]` | 各 `handoff_written` の `seq`・`payload` の `source`・`source_sha256` だけを読む（本文を転送しない）。`import_file` の再開と新版の判定が使う |
 | `read_events` | `progress/store.py` | 変更 | 同じ | `handoff_written` の行は `payload` を SQL の `CASE` で `NULL` にして返す（本文と履歴を転送しない）。状態の畳み込み・`append_events` の確かめ・`progress/command.py` の `history`（`Event.as_dict()`）はこの形を使うので、本文が出ない |
 | `check_text`・`trim_text` | `domains/records/handoff.py` | 変更 | `check_text(body: str, root: Path, limits: Limits) -> Report`・`trim_text(body: str) -> tuple[str, str]` | 今の検査と退避を文字列で行う。`root` は今の `check_file` の `root` と同じ役で、パスの存在の確かめ（`missing_path`）の相対パスの起点。`write` は `places.main_dir(cwd)` を渡すので、どの worktree・サブディレクトリから打っても同じ基準になる |
 | `register` | `domains/handoff/cli.py` | 新設 | `register(sub: argparse._SubParsersAction) -> None` | 3 つのサブコマンドを足す |
@@ -195,8 +225,8 @@ plugins/ndf/
   - 手順（1 トランザクション。今の `store.transaction`）: (1) `read_machine` で階層を得る。(2) 階層が `sprint` なら `read_definition` で今の定義の改訂 `rev` を得て下書きに入れる（`lane`・`plan` は `rev` を入れない）。(3) `read_events` で末尾の番号 `last`（事象が無ければ 0）を得る。(4) `append_events(conn, machine_id, [draft], expect_seq=last)`
   - 競合: 進行の更新やスプリントの書き込みが (3) と (4) の間に事象を足すと `Conflict` になる。`handoff_written` は状態を変えないので、トランザクションを捨てて (1) から読み直し、`rev` も読み直して最大 3 回やり直す。3 回とも `Conflict` なら書かずに `store_busy` で止める（終了コードは今の `store_busy`）。スプリントの定義が改訂されていれば新しい `rev` で書く
   - 副作用: DB への 1 トランザクション（今の事象の追記と同じ経路・同じ排他）
-- `show`: 事後条件: `seq` が無ければ最後の `handoff_written`。`read_handoffs` で `handoff_written` だけを読み、ほかの事象の本文は読まない。読むだけ
-- `listing`: `ndf_progress_machines` の `repo` がこのリポジトリのものに絞り、各ステートマシンの最後の `handoff_written`（番号と時刻だけ。本文は読まない）と今の状態を返す。`open_only` の「閉じていない」は階層ごとに決める: `sprint`・`plan` は `model.table_state` が `model.is_terminal` でない。`lane`（全体の状態を持たない）は、`model` で畳んだ行の状態のうち `is_terminal` でないものが 1 つ以上ある（行がまだ無いレーンは開いている）。すべての行が `completed`・`cancelled` のレーンは閉じている
+- `show`: 事後条件: `seq` が無ければ最後の `handoff_written`、あれば `seq` の版。本文は `read_handoff` の 1 件だけを読み、過去の版の本文もほかの事象も読まない。`history` のときだけ、続けて `read_handoff_histories(upto=<返す版の seq>)` で履歴の差分だけを読む。読むだけ
+- `listing`: `ndf_progress_machines` の `repo` がこのリポジトリのものに絞り、各ステートマシンの最後の `handoff_written`（番号と時刻だけ。本文は読まない。無ければ空）と今の状態を返す。`with_handoff` が真なら `handoff_written` を持つものだけを返す。`open_only` の「閉じていない」は階層ごとに決める: `sprint`・`plan` は `model.table_state` が `model.is_terminal` でない。`lane`（全体の状態を持たない）は、`model` で畳んだ行の状態のうち `is_terminal` でないものが 1 つ以上ある（行がまだ無いレーンは開いている）。すべての行が `completed`・`cancelled` のレーンは閉じている
 - 再開の候補の絞り込み（手順 0、`block-next`）: `listing(open_only=True)` のうち、名前が入力に完全一致するものだけを候補にする（スプリントは課題番号から `machine_id` と同じ計算で作った名前、ループは「未確認のまま残ること」の 2 で決める ID）。部分一致や課題番号を含むだけの名前は候補にしない。閉じたステートマシンは候補にしない
 
 ### 異常系の処理
@@ -207,7 +237,10 @@ plugins/ndf/
 | `write`・`show` | ステートマシンが無い・まだ引継ぎが無い | ID の誤り・対象の選び違い | `MACHINES` の引き当て | 止める | 終了コード 2 | 再実行可 |
 | `write`・`show`・`listing` | DB に繋げない・取り合い | `NDF_PROGRESS_DB`・SQLite の錠 | `progress.store` | 今の `store_unreachable`・`store_busy` のまま | 今の終了コード | 再実行可（`store_busy` は今の再試行） |
 | `write` | 末尾の番号がずれた | 進行の更新・スプリントの書き込みと同時 | `append_events` の `Conflict` | 読み直して最大 3 回やり直し、尽きたら止める | 尽きたら `store_busy` の終了コード | 書いていない。再実行可 |
-| `import_file` | 書いた版を読み直すと本文か履歴が違う | DB の取り合い・文字コード | 書いた後の `read_handoffs` | ファイルを動かさずに止める | 終了コード 1 と理由 | ファイルは元の所にある。再実行可（書いた事象は残るが、`source` と SHA-256 が同じ版は 2 回目に足さない） |
+| `import_file` | 書いた版を読み直すと本文か履歴が違う | DB の取り合い・文字コード | 書いた後の `read_handoff` | ファイルを動かさずに止める | 終了コード 1 と理由 | ファイルは元の所にある。再実行可（書いた事象は残るが、`source` と SHA-256 が同じ版は 2 回目に足さない） |
+| `import_file` | 名前が単一のファイル名でない・本文か履歴が旧フォルダの中の通常のファイルでない | 入力の誤り・symlink・別の種類のファイル | 読む前の名前の検査と `lstat`・`realpath` | 読まずに止める | 終了コード 2 と理由（`invalid_name`・`not_regular_file`・`outside_folder`） | 何もしていない。再実行可 |
+| `import_file` | 行き先を 1 つに決められない | 名前に完全一致する閉じていないステートマシンが 2 つ以上 | 行き先の選定 | 書かずに止める | 終了コード 2 と候補の ID | 何もしていない。`--to <ID>` で再実行 |
+| `import_file` | 退避の途中で失敗した | 権限・ディスク | `rename` | 止める | 終了コード 1 と、動かしたファイルと残ったファイル | 再実行で残りだけを動かす（下の「再開」） |
 
 ### 内部のデータと定数
 
@@ -230,18 +263,33 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `write` | 書いて `show` で同じ本文・スプリントに今の `rev` で書く | 300 行ちょうど・16,000 バイトちょうど・`--trim` で移すセクションが無い・`--trim` の後に通常の `write` を挟んでも `show --history` が前の履歴を返す | 301 行・無い ID・DB に繋げない・`append_events` の `Conflict` を 1 回差し込むとやり直して書ける・3 回で `store_busy` |
-| `show` | 最後の版・`--seq` の版・`--history` | 版が 1 つ | 引継ぎが無い |
+| `show` | 最後の版・`--seq` の版・`--history` | 版が 1 つ・通常の `show` が過去の版の本文を読まない（`read_handoff` の SQL が 1 行） | 引継ぎが無い・無い `--seq` |
 | `listing` | 引継ぎを持つものだけ・`--open` | 0 件・行がすべて `completed` のレーンは `--open` に出ない・行の無いレーンは出る | 別のリポジトリのステートマシンを含めない |
 | `read_events` | `handoff_written` の `payload` が `None` で、ほかの事象は今のまま | — | — |
-| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く | 履歴のファイルが無い・`--drop` | 書いた版の読み直しが違うと動かさない |
+| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く・閉じたステートマシンと無いステートマシンの文書は書かずに動く | 履歴のファイルが無い・新方式の版が既にある対象は書かずに動く・本文だけ動いた後の再実行で履歴だけが動き版が増えない・引継ぎを持たない閉じていないステートマシンが行き先に選ばれる | 書いた版の読み直しが違うと動かさない・`../x`・`a/b` の名前・外を指す symlink の本文と履歴・同じ名前の閉じていないステートマシンが 2 つ |
 
-### 前の版の引継ぎ文書の移し替え（子の課題 4）
+### 前の版の引継ぎ文書の移し替え（子の課題 3）
 
-`ndf handoff import <名> (--to <ID> | --drop)` が `import_file` を呼ぶ。読むのは `places.resolve("retired-handoff", cwd, allow_retired=True)`（メインディレクトリの `.ndf/handoff`）の下の `<名>.md` と `<名>-history.md`（無ければ空）で、AI はパスを渡さず名前だけを渡す。
+再開の読み先を DB に切り替える子の課題 3 の PR に、移し替えも入れる。切り替えた版を入れた時点で、前の版の文書から DB へ移す手段がそろっている。
 
-- `--to <ID>`: 本文を `check_text` に通し、`write` と同じ手順で `payload = {"body": <本文>, "history": <履歴のファイルの中身>, "lines", "bytes", "source": ".ndf/handoff/<名>.md", "source_sha256": {"body": ..., "history": ...}}` の 1 件を足す。同じトランザクションの後で `read_handoffs` で読み直し、本文・履歴・SHA-256 が一致したときだけ、2 つのファイルを `.git/ndf/retired/<now>/main/.ndf/handoff/` へ動かす（`sweep` と同じ並び）。動いている対象（`listing --open` に出るもの）の文書は conductor が `--to` で移す
-- `--drop`: 終わった対象・ステートマシンの無い 10 系の対象の文書を、DB に書かずに同じ退避先へ動かす（14 日の間は戻せる）。どちらにするかは conductor が `listing --open` を見て決める
-- `.ndf/handoff` のフォルダは `retired` の値 `empty-dir` の行で、`sweep` は中が空になるまで動かさない。移していない文書が残る間は `items[]` に `not_empty` と残りの数が出る
+`ndf handoff import <名> [--to <ID>]` が `import_file` を呼ぶ。読むのは `places.resolve("retired-handoff", cwd, allow_retired=True)`（メインディレクトリの `.ndf/handoff`）の下の `<名>.md` と `<名>-history.md`（無ければ空）で、AI はパスを渡さず名前だけを渡す（一覧の `retired-handoff` の行は子の課題 3 で足す。`sweep` は子の課題 4 まで無い）。
+
+- 読む前の検査（1 つでも当たれば読まず・書かず・動かさずに終了コード 2）
+  1. `invalid_name`: `<名>` が `^[A-Za-z0-9][A-Za-z0-9._-]*$` に一致しない、`..` を含む、`-history` で終わる（区切り文字・親ディレクトリ・絶対パスを受けない）
+  2. `not_regular_file`: 本文と（あれば）履歴を `lstat` して、通常のファイルでない（symlink・ディレクトリ・FIFO など）
+  3. `outside_folder`: 本文と履歴の親の実体（`realpath`）が旧フォルダの実体と同じでない
+  - 読むときは `os.open(..., O_RDONLY | O_NOFOLLOW)` で開き、開いた記述子の `fstat` が `lstat` と同じ inode であることを確かめる（検査と読み取りの間に差し替えられたものを読まない）。退避の `rename` の前にも同じ `lstat` をもう一度取り、inode が変わっていれば動かさない
+- 行き先の選定（引継ぎの事象の有無に依らず、ステートマシンの状態で決める）
+  - `--to <ID>` があればその ID。無ければ `listing(open_only=True, with_handoff=False)` のうち、名前が `<名>` に完全一致するもの（手順 0 と同じ一致の規則）。1 つならそこへ書く。2 つ以上なら止める（終了コード 2 と候補）
+  - 0 なら書かずに退避だけする（閉じたステートマシンの文書と、ステートマシンの無い 10 系の対象の文書。14 日の間は戻せる）。`--drop` の選択肢は無くし、AI が稼働中かを判断しない
+- 書く（行き先があるとき）: 先に `read_handoff_sources` で行き先の版を読む
+  - 新版を優先: `source` を持たない `handoff_written`（`ndf handoff write` が書いた版）が 1 つでもあれば、前の版の文書を書かずに退避だけし、`outputs.superseded = true` を返す（`show` の最新版を古い内容で上書きしない）
+  - 移し済み: `source` が `.ndf/handoff/<名>.md` の版があれば書かない（下の「再開」）
+  - どちらでもなければ、本文を `check_text` に通し、`write` と同じ手順で `payload = {"body": <本文>, "history": <履歴のファイルの中身>, "lines", "bytes", "source": ".ndf/handoff/<名>.md", "source_sha256": {"body": ..., "history": ...}}` の 1 件を足す。トランザクションの後で `read_handoff(seq=<書いた seq>)` で読み直し、本文・履歴・SHA-256 が一致したときだけ退避へ進む
+- 退避: `places.retired_slot(cwd, now)`（下の「残骸の退避」の、実行ごとに衝突しない退避先）の下の `main/.ndf/handoff/` へ、本文、履歴の順に `rename` する（行き先に同じ名前があれば上書きせずに止める）
+- 再開: 退避の途中で止まった後の再実行は、DB の移し済みの版の `source_sha256` を正とする。旧フォルダに残っているファイルのうち、SHA-256 がその版の記録と一致するものだけを退避し、版は足さない。本文が既に退避済みで履歴だけが残る場合も、履歴の SHA-256 で同じ版の残りと分かるので退避できる。一致しないファイルは動かさず終了コード 1（移した後に人が書き足した内容を失わない）
+- `.ndf/handoff` のフォルダは `retired` の値 `empty-dir` の行で、`sweep`（子の課題 4）は中が空になるまで動かさない。移していない文書が残る間は `items[]` に `not_empty` と残りの数が出る
+- 切り替えの間の再開: 手順 0 は、`ndf handoff show <ID>` が「まだ引継ぎが無い」（終了コード 2）を返し、`outputs.legacy` に旧フォルダの同名の文書の名前があるときは、結果 JSON の `outputs.next`（`ndf handoff import <名> --to <ID>`）を打ってから `show` をやり直す。`show` は旧フォルダの名前を `<ID>` の名前の部分から作って有無だけを `lstat` で確かめ、読まない
 
 ## 残骸の退避（子の課題 4）
 
@@ -252,6 +300,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `sweep` | `core/places.py` | 新設 | `sweep(cwd: Path, *, now: datetime, keep_days: int, environ: Mapping[str, str] = os.environ) -> SweepResult` | `retired` の行のパスを、行の前提条件と移す前の検査を通ったものだけ退避し、`keep_days` を過ぎた退避を消す |
+| `retired_slot` | `core/places.py` | 新設 | `retired_slot(cwd: Path, now: datetime) -> Path` | 実行ごとに衝突しない退避先を `.git/ndf/retired/` の下に作って返す（`sweep` と `import_file` が使う。子の課題 3 で足す） |
 | `_sweep` | `core/places_cli.py` | 新設 | `_sweep(args: argparse.Namespace) -> dict[str, Any]` | `ndf places sweep` の結果 JSON |
 
 - `sweep`
@@ -263,16 +312,24 @@ plugins/ndf/
   - 行の前提条件（`retired` の値）
     - `plain`: 上の検査だけ
     - `flock`（錠のファイル）: 今のコードと同じ `fcntl.flock(fd, LOCK_EX | LOCK_NB)` で取る（`lockf`・`fcntl(F_SETLK)` は使わない。シェルの `flock` と今の `mainlock` の排他は `flock` 同士でしか見えない）。取れなければ `lock_held`。取れたら、`/proc/*/fd` を走査して同じ inode を開いているほかのプロセス（旧版の持ち主と、`flock` で待っている取得者。待つ取得者はファイルを開いている）が無いことを確かめ、あれば `lock_open_elsewhere` で動かさない。無ければ錠を持ったまま `rename` し、もう一度走査する。`rename` の間に開いたプロセスが現れたら、元の名前にファイルが無いときだけ元へ戻して `lock_reopened` とする。`/proc` が無い環境（macOS など）は確かめられないので動かさず `lock_unverifiable`
-    - `worktree-parent`（`.worktrees/.ndf`）: `git worktree list --porcelain` で候補の下に登録された worktree を並べ、ロックの無いものを `git worktree remove`（`--force` を付けない）で外す。外した後にもう一度並べ、登録された worktree が 1 つでも残っていれば（ロック中・未コミットの変更で Git が削除を拒んだもの）親を動かさず `registered_worktrees_remain` と残りのパスを出す。残りが 0 のときだけ親を `rename` する
+    - `worktree-parent`（`.worktrees/.ndf`）: `git worktree remove` は戻せない（無視されたファイルは黙って消え、detached HEAD にしかないコミットはどの参照にも残らない）。そこで、`git worktree list --porcelain` で候補の下に登録された worktree を並べ、次をすべて満たすものだけを `git worktree remove`（`--force` を付けない）で外す。1 つでも満たさない worktree は外さずに理由を出す
+      1. NDF の終わった作業場所である: パスが cross 系の作業場所の並び（`<候補>/rf<番号>/work`・`<候補>/rf<番号>/read/<ランタイム>`）に一致し、ロックが無い（NDF は動いている作業場所に `lock_review_worktree` でロックを掛け、片付けで外す）。違えば `not_ndf_workspace`・`locked`
+      2. 最近使われていない: その worktree の管理ディレクトリ（`.git/worktrees/<名>/`）の `HEAD`・`index` の更新時刻が `places.recent_hours`（`contracts/limits.json`、既定 24 時間）より前。違えば `recently_used`
+      3. 固有のコミットが無い: HEAD が `git for-each-ref --count=1 --contains <HEAD> refs/heads refs/remotes refs/tags` で 1 つ以上の参照から届く（`rev-list --all` は他の worktree の HEAD を含むので使わない）。届かなければ `unreachable_commits`
+      4. 失うファイルが無い: `git -C <worktree> status --porcelain --ignored --untracked-files=all` が空（変更・未追跡・無視されたファイルが無い）。空でなければ `local_files`（`.cross_refactoring/` の結果が残る作業場所もここで残る。`prepare` が置いた `.cross_refactoring/.gitignore` だけのものは数えない）
+
+      外した後にもう一度並べ、登録された worktree が 1 つでも残っていれば親を動かさず `registered_worktrees_remain` と残りのパスと理由を出す。残りが 0 のときだけ親を `rename` で退避する。外した worktree で失われるのは、参照から届くコミットと同じ中身の作業ツリーと Git の登録だけである
     - `empty-dir`（`.ndf/handoff`）: 中にファイルが 1 つでもあれば `not_empty`。前の版の文書は `ndf handoff import` が 1 件ずつ移す（「前の版の引継ぎ文書の移し替え」）
-  - 事後条件: 検査と前提条件を通った候補が `.git/ndf/retired/<now の UTC の YYYYMMDDTHHMMSS>/<起点>/<path>` に移っている。移したパスと移せなかったパス（理由つき）を返す。`.git/ndf/retired/` の下で名前の日時が `keep_days` より古いディレクトリは消えている
-  - 副作用: 同じファイルシステムの中の `rename`（別のファイルシステムなら複写してから消す）と、`worktree-parent` の `git worktree remove`
+  - 退避先（`places.retired_slot(cwd, now) -> Path`。`sweep` と `import_file` が使う）: 実行ごとに `.git/ndf/retired/` の下へ `tempfile.mkdtemp(prefix="<now の UTC の YYYYMMDDTHHMMSS>-")` で新しいフォルダを作って返す。名前の後ろの乱数で、同じリポジトリの別の worktree から同じ秒に打っても行き先が重ならない。1 回の実行の中では、候補ごとに `<退避先>/<起点>/<path>` が違う（起点と path の組は一覧で一意）
+  - 上書きしない: `rename` の前に行き先の親を作り、行き先が既にあれば動かさず `dest_exists` とする（`rename` はファイルや空のディレクトリを黙って置き換えるため）。`sweep` も `import_file` も既存の退避を上書きしない
+  - 事後条件: 検査と前提条件を通った候補が `<退避先>/<起点>/<path>` に移っている。移したパスと移せなかったパス（理由つき）を返す。`.git/ndf/retired/` の下で名前の先頭の日時が `keep_days` より古いディレクトリは消えている
+  - 副作用: 同じファイルシステムの中の `rename`（別のファイルシステムなら複写してから消す。残骸の候補には書き手がいないので、計画の記録のような開いたままの書き手の扱いは要らない。錠は `flock` の前提条件で開いた者がいないことを確かめてある）と、`worktree-parent` の上の 4 条件を満たした worktree の `git worktree remove`
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `sweep` | 移せない | 権限・移す前の検査・行の前提条件 | `rename`・上の検査 | そのパスを飛ばして続ける | 結果 JSON の `items[]` に理由（`in_use`・`symlink`・`tracked`・`lock_held`・`lock_open_elsewhere`・`lock_reopened`・`lock_unverifiable`・`registered_worktrees_remain`・`not_empty`・`os_error`）。全体は終了コード 0（`warnings` あり） | 次の `sweep` で再試行 |
+| `sweep` | 移せない | 権限・移す前の検査・行の前提条件 | `rename`・上の検査 | そのパスを飛ばして続ける | 結果 JSON の `items[]` に理由（`in_use`・`symlink`・`tracked`・`lock_held`・`lock_open_elsewhere`・`lock_reopened`・`lock_unverifiable`・`not_ndf_workspace`・`locked`・`recently_used`・`unreachable_commits`・`local_files`・`registered_worktrees_remain`・`not_empty`・`dest_exists`・`os_error`）。全体は終了コード 0（`warnings` あり） | 次の `sweep` で再試行 |
 | `sweep` | 古い退避を消せない | 権限 | `rmtree` | 飛ばして続ける | 同上 | 同上 |
 
 ### 内部のデータと定数
@@ -280,9 +337,10 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `KEEP_DAYS` | 設定値 | `contracts/limits.json` の `places.retired_days` | 14 |
+| 最近使った作業場所の時間 | 設定値 | `contracts/limits.json` の `places.recent_hours` | 24 |
 | `retired` の行 | 設定値 | `locations.json` | 下の表 |
 
-`retired` の行は、すべて子の課題 4 の PR で `locations.json` に足す。子の課題 4 は子の課題 2・3 と #4237 の後に出す（設計文書の「子の課題の分け方と順番」）ので、「〜の後」という条件を一覧の値で表す必要は無い。`.ndf/loop` の行は、#4237 が閉じる前に子の課題 4 を出すなら足さない。
+`retired` の行は、`retired-handoff`（子の課題 3 の `import_file` が読む）を除いて子の課題 4 の PR で `locations.json` に足す。子の課題 4 は子の課題 2・3 と #4237 の後に出す（設計文書の「子の課題の分け方と順番」）ので、「〜の後」という条件を一覧の値で表す必要は無い。`.ndf/loop` の行は、#4237 が閉じる前に子の課題 4 を出すなら足さない。
 
 表の id は行の束の名前で、`locations.json` の id は path の名前を後ろに付けて行ごとに分ける（例 `retired-locks-main`、`retired-sprint-records-glob`）。
 
@@ -301,4 +359,4 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `sweep` | `retired` のパスが退避先へ移り、結果に並ぶ | 13 日前と 15 日前の退避・`glob` の 0 件・2 回目の `sweep`（何もしない）・ロックの無い worktree だけの `.worktrees/.ndf` は外してから動く | 取れない錠（別のスレッドで `flock` を持つ）・同じ錠をほかの記述子で開いたまま・書けない退避先・`retired` でないパスを動かさない・`ndf-work` が `.worktrees/.ndf` を指すと動かさない・ロック中の worktree が残ると親を動かさない・`.ndf` が外を指す symlink・追跡されたファイルを含む `.ndf/sprint-*`・中に文書が残る `.ndf/handoff` |
+| `sweep` | `retired` のパスが退避先へ移り、結果に並ぶ | 13 日前と 15 日前の退避・`glob` の 0 件・2 回目の `sweep`（何もしない）・4 条件を満たす worktree だけの `.worktrees/.ndf` は外してから動く | 取れない錠（別のスレッドで `flock` を持つ）・同じ錠をほかの記述子で開いたまま・書けない退避先・`retired` でないパスを動かさない・`ndf-work` が `.worktrees/.ndf` を指すと動かさない・ロック中の worktree が残ると親を動かさない・detached HEAD にしかないコミットを持つ worktree・無視されたファイル（`.cross_refactoring/` の結果）が残る worktree・24 時間以内に使った worktree・NDF の並びでない worktree は外さない・同じ秒に 2 回打っても退避先が重ならず、行き先が既にあれば上書きしない・`.ndf` が外を指す symlink・追跡されたファイルを含む `.ndf/sprint-*`・中に文書が残る `.ndf/handoff` |
