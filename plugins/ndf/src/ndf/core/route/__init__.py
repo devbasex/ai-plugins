@@ -535,6 +535,11 @@ def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
     """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない。
     `base` はブランチ戦略の設定から決め、決まらなければ `RouteError`）。"""
+    return derived_merge_method(t, derived_locally(t, given, cwd))
+
+
+def derived_locally(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
+    """`derived` のうち手元（git と設定ファイル）だけで決まる `repo`・`remote`・`worktree`・`base` を足す。GitHub を呼ばない。"""
     out = dict(given)
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
@@ -544,6 +549,12 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:
         out["base"] = default_base(Path(str(out["repo"])))
+    return out
+
+
+def derived_merge_method(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
+    """省いた `merge_method` を `base` のブランチで許された方式から決めて足す（GitHub を呼ぶ。読めなければ足さない）。"""
+    out = dict(given)
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
         method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
         if method is not None:

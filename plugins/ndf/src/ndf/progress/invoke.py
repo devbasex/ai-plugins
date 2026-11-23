@@ -452,11 +452,14 @@ def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
     """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
-    （`route.derived`）→ 課題の題と本文（`_fill_from_issue`）→ 起動の補いと受け入れ条件の検査（`route.launched`。単発の
-    経路と共有）の順に決め、最後に工程から組むときだけの補い（`_fill_review`・`_fill_refactor`）を通す。
+    （`route.derived_locally`）→ 課題の題と本文（`_fill_from_issue`）→ マージの方式（`route.derived_merge_method`）→
+    起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から組むときだけの補い
+    （`_fill_review`・`_fill_refactor`）を通す。
 
     課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりに写しを消すので、先に読むと
     手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
+    同じ理由で、課題の前には手元で決まる打った場所の値（`route.derived_locally`）だけを決め、GitHub に問うマージの方式
+    （`route.derived_merge_method`）は課題を読んだ後に決める（課題を読めずに止まる試行で問い合わせを増やさない。PR 4289 の指摘）。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
@@ -464,11 +467,12 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
-    values = route.derived(t, values, cwd)
+    values = route.derived_locally(t, values, cwd)
     route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
     _require_before_issue(t.name, names, values)
     issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
-    values, launched = route.launched(t, {**values, **issued})
+    values = route.derived_merge_method(t, {**values, **issued})
+    values, launched = route.launched(t, values)
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     values = {**values, **_fill_refactor(t, values, run, work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
@@ -489,8 +493,9 @@ def _fill_from_sources(
     return names, values, wanted
 
 
-# 課題を読んだ後に決まりうる差し込み（課題の出所と、`route.launched` が補う `review`・`acceptance`）
-AFTER_ISSUE = frozenset({*(n for n, s in FILL_SOURCES.items() if s == FROM_ISSUE), "review", *route.LAUNCH_SOURCES})
+# 課題を読んだ後に決まりうる差し込み（課題の出所と、`route.launched` が補う `review`・`acceptance`、課題の後に GitHub に問う
+# `merge_method`）
+AFTER_ISSUE = frozenset({*(n for n, s in FILL_SOURCES.items() if s == FROM_ISSUE), "review", "merge_method", *route.LAUNCH_SOURCES})
 
 
 def _require_before_issue(name: str, names: Sequence[str], values: Mapping[str, route.Value]) -> None:

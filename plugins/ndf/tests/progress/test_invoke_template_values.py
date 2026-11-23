@@ -1,7 +1,7 @@
 """工程から組むプランの差し込み（`invoke.template_values`）の、起動の補いと受け入れ条件の検査の現状固定。
 
 単発の経路（`ndf route render` の `_write_plan`）と同じ補い（`route.launch_values`）と検査（`route.check_acceptance`）を、
-出所の表・打った場所（`route.derived`）で埋めた後、つなぎ目のレビュー・リファクタリングの補いと欠けの検査より前に通す。
+出所の表・打った場所（`route.derived_locally`）・課題・マージの方式で埋めた後、つなぎ目のレビュー・リファクタリングの補いと欠けの検査より前に通す。
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def filled(monkeypatch):
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: read.append("merge_method") or "squash")
     return read
 
 
@@ -57,7 +57,7 @@ def test_one_issue_fills_the_acceptance_of_the_issue_and_the_default_review(tmp_
     # 課題が 1 つなら、課題から写した issue で acceptance を --issue <issue> に補い、review は <リモート>/<base> から組む
     repo = _sprint_repo(tmp_path)
     got = _values(tmp_path, _impl_run(repo, [3092]), repo)
-    assert filled == [3092]
+    assert filled == [3092, "merge_method"]
     assert got["issue"] == "3092" and got["acceptance"] == ["--issue", "3092"]
     assert got["review"] == route.review_launch("impl", "sprint/s1", "origin/develop")
 
@@ -121,4 +121,16 @@ def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled
     with pytest.raises(invoke.TemplateValuesMissing) as got:
         invoke.template_values(route.choose("implement"), _impl_run(repo, [3092]), work, repo, project=project, local_tests=True)
     assert got.value.missing == {"required": invoke.FROM_PROJECT}
+    assert filled == []
+
+
+def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, monkeypatch):
+    # マージの方式は課題を読んだ後に GitHub に問う。課題を読めずに止まる試行では問い合わせない（PR 4289 の指摘）
+    def fail(location, n):
+        raise invoke.github.GitHubError("読めない")
+
+    monkeypatch.setattr(invoke, "issue_text", fail)
+    repo = _sprint_repo(tmp_path)
+    with pytest.raises(invoke.github.GitHubError):
+        _values(tmp_path, _impl_run(repo, [3092]), repo)
     assert filled == []

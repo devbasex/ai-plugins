@@ -866,8 +866,8 @@ def test_the_values_are_built_once_from_next_to_running_the_step(repo, st, env, 
     for name, seen in calls.items():
         held = getattr(invoke, name)
         monkeypatch.setattr(invoke, name, lambda *a, _held=held, _seen=seen, **k: _seen.append(a) or _held(*a, **k))
-    derived, held_derived = [], route.derived
-    monkeypatch.setattr(route, "derived", lambda *a: derived.append(a) or held_derived(*a))
+    derived, held_derived = [], route.derived_locally
+    monkeypatch.setattr(route, "derived_locally", lambda *a: derived.append(a) or held_derived(*a))
     counted: list[tuple[int, int, int]] = []
 
     def runner(argv, cwd, environ):
