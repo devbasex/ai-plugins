@@ -57,15 +57,15 @@
 - **進め方:** 失敗するテスト（偽の `call`・偽の `resolve`）→ 通す最小実装 → 整理
 
 ### Task 6: ルールの前置き（10 系の判定を移す）
-- **対象ファイル:** `domains/hooks/reply_wait.py`（新設）・`tests/domains/hooks/test_reply_wait.py`（新設）・`tests/domains/hooks/fixtures/wait-corpus.json`（新設）
-- **変更内容:** 10 系（`ndf--v10.27.77`）の `classify_reply_wait` と例の組 225 件を移す。利用者の決定（2026-11-23）で、軽いモデルの前にルールを置く
+- **対象ファイル:** `domains/hooks/reply_wait.py`（新設）・`domains/hooks/context.py`（別の場所の待ちの正規表現を `reply_wait` から読む）・`tests/domains/hooks/test_reply_wait.py`（新設）・`tests/domains/hooks/fixtures/wait-corpus.json`（新設）
+- **変更内容:** 10 系（`ndf--v10.27.77`）の `classify_reply_wait` と例の組 225 件を移す（例の組の認証情報の保管先などは架空の値に置き換える）。guard が使う `reply_kind` は、かぎ括弧の引用の中身を見ず、別の場所の待ちの報告だけの本文を `elsewhere_wait` にする。利用者の決定（2026-11-23）で、軽いモデルの前にルールを置く
 - **満たす受け入れ条件:** 0
 - **進め方:** 判定は自分で書き直さずに移し、例の組で 10 系と同じ正誤を縛るテストを足す
 
 ### Task 5: stop-wait の配線と設定
-- **対象ファイル:** `domains/hooks/guards/stop_wait.py`・`contracts/limits.json`・`contracts/hooks/guards.json`・`hooks/claude.json`・`hooks/codex.json` と `tests/domains/hooks/test_guards.py`・`test_budget.py`
+- **対象ファイル:** `domains/hooks/guards/stop_wait.py`・`domains/hooks/context.py`（`last_reply_kind` を `reply_wait.reply_kind` へ替え、`classify_reply` を消す）・`contracts/limits.json`・`contracts/hooks/guards.json`・`hooks/claude.json`・`hooks/codex.json` と `tests/domains/hooks/test_guards.py`・`test_budget.py`
 - **変更内容:** 詳細設計の「guard `stop-wait`」と「設定と登録」
-- **満たす受け入れ条件:** 1・4・5・6・7・8・10
+- **満たす受け入れ条件:** 0（guard の通す順序: 本文の空・AskUserQuestion・別の場所の待ち・ルールの待ち）・1・4・5・6・7・8・10
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ## レビューの単位

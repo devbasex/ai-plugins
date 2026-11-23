@@ -23,7 +23,7 @@ plugins/ndf/
     │   └── reply_judge.py *            判定の子（hook の閉包の外）
     └── domains/hooks/
         ├── reply_judge.py *            判定のリクエスト（hook の閉包の中・標準ライブラリだけ）
-        ├── reply_wait.py *             ルールの前置き（10 系の classify_reply_wait を移したもの。標準ライブラリだけ）
+        ├── reply_wait.py *             ルールの前置き（10 系の classify_reply_wait を移し、引用と別の場所の待ちを外す reply_kind。標準ライブラリだけ）
         ├── guards/stop_wait.py         判定の選び方
         ├── context.py                  AskUserQuestion を使ったか
         ├── counter.py                  上限の手前か・モデルの wait のフラグ
@@ -37,10 +37,10 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`Judged`（新設の型） |
-| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列と文の分け方は 10 系と同じ | 標準ライブラリ | モジュール | `classify_reply_wait`（新設。10 系と同じ） |
+| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列と文の分け方は 10 系と同じ。guard が使う形は、かぎ括弧の引用の中身を見ず、別の場所の待ちの報告だけの本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設。10 系と同じ）・`reply_kind`（新設。`none` / `elsewhere_wait` / `prose_wait` / `report`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
 | `plugins/ndf/src/ndf/adapters/reply_judge.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
-| `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む | 標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設） |
+| `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む。最後の応答の種類をルールの判定から返す | `reply_wait`、標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設）・`HookContext.last_reply_kind`（変更）・`classify_reply`（削除） |
 | `plugins/ndf/src/ndf/domains/hooks/counter.py` | 変更 | 変更要求が上限の手前かを数えずに返す。今の入力の中でモデルが `wait` と回答したフラグを持つ | `tables` | `Counter` | `pushback_left`（新設）・`mark_model_wait`（新設）・`model_waited`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/dispatch.py` | 変更 | guard へ締め切りの時刻を渡す | — | `GuardServices` | `GuardServices`（欄を足す）・`run`（シグネチャの変更） |
 | `plugins/ndf/src/ndf/domains/hooks/main.py` | 変更 | SIGALRM に使う締め切りの絶対時刻を `dispatch.run` へ渡す | `dispatch` | モジュール | `_guards`（中身だけ変える） |
@@ -148,29 +148,32 @@ plugins/ndf/
 
 ## guard `stop-wait`
 
-満たす決定: 決定 1・4・5・6・10・11、受け入れ条件 1・4・5・6
+満たす決定: 決定 1・4・5・6・10・11、受け入れ条件 0・1・4・5・6・6a
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `guards/stop_wait.py` | 変更 | `check(ctx, svc) -> Verdict`（変えない） | 呼ばない条件を見て、軽いモデルの判定か文字列の判定かを選び、変更要求か通過を返す |
+| `check` | `guards/stop_wait.py` | 変更 | `check(ctx, svc) -> Verdict`（変えない） | 本文の空と AskUserQuestion を見た後にルールの判定を当て、待ちならモデルを呼ばずに変更要求を返す。待ちでなければ呼ばない条件を見て、軽いモデルの判定かルールの判定の結果かを選ぶ |
 
 ### 処理の手順
 
 | 条件の組み合わせ | 結果 |
 | --- | --- |
-| 文字列の判定が `none`（本文が空） | 通す（`reply=none`・`judge=skip:empty`） |
-| `ctx.asked_this_turn` が真 | 文字列の判定で決める（`judge=skip:asked`） |
-| `ctx.background_tasks` が空でない | 文字列の判定で決める（`judge=skip:background`） |
-| `ctx.runtime` が `claude` でない（Codex のセッション） | 文字列の判定で決める（`judge=skip:runtime`） |
-| `svc.counter.pushback_left()` が偽 | 文字列の判定で決める（`judge=skip:limit`）。ただし文字列の判定が `report` で `svc.counter.model_waited()` が真なら変更要求を返す（dispatch が上限で通し、待ち通知を送る。設計の決定 5） |
-| `reply_judge.resting(svc.state_dir, 今)` が真（前の起動の失敗から休む間のうち） | 文字列の判定で決める（`judge=skip:rest`） |
-| 上のどれでもなく、残りの秒（`svc.deadline − 余白 − 今` と設定の `seconds` の小さい方）が 0.5 秒を切る | 文字列の判定で決める（`judge=skip:time`） |
-| 上のどれでもなく、`reply_judge.parent_launch(os.environ, os.getpid())` が None | 文字列の判定で決める（`judge=skip:endpoint`） |
-| 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest` を呼んでから文字列の判定で決める（`judge=fallback:<failure>`） |
+| `ctx.last_reply_kind`（ルールの判定。下の注記）が `none`（本文が空） | 通す（`reply=none`・`judge=skip:empty`） |
+| `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
+| ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告） | 通す（`judge=skip:elsewhere`） |
+| ルールの判定が `prose_wait` | 変更要求（今の文面。`judge=rule`）。軽いモデルを呼ばない。上限に達していても返す（dispatch が上限で通し、待ち通知を送る） |
+| `ctx.background_tasks` が空でない | 通す（`judge=skip:background`。ルールの判定は `report`） |
+| `ctx.runtime` が `claude` でない（Codex のセッション） | 通す（`judge=skip:runtime`） |
+| `svc.counter.pushback_left()` が偽 | 通す（`judge=skip:limit`）。ただし `svc.counter.model_waited()` が真なら変更要求を返す（dispatch が上限で通し、待ち通知を送る。設計の決定 5） |
+| `reply_judge.resting(svc.state_dir, 今)` が真（前の起動の失敗から休む間のうち） | 通す（`judge=skip:rest`） |
+| 上のどれでもなく、残りの秒（`svc.deadline − 余白 − 今` と設定の `seconds` の小さい方）が 0.5 秒を切る | 通す（`judge=skip:time`） |
+| 上のどれでもなく、`reply_judge.parent_launch(os.environ, os.getpid())` が None | 通す（`judge=skip:endpoint`） |
+| 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest` を呼んでから通す（`judge=fallback:<failure>`） |
 
-- 文字列の判定は今の `ctx.last_reply_kind`（`classify_reply`）をそのまま使う
+- ルールの判定は `ctx.last_reply_kind` で、`HookContext.last_reply_kind` は `reply_wait.reply_kind(self.last_reply)` を返す（下の「hook の文脈・数え手・締め切り」）。11.0.22 の `classify_reply`（言い回しの列と末尾 4 行）は使わない
+- 「ルールの判定で決める」は、`prose_wait` を 4 行目で既に変更要求にしているので、5 行目より下ではいつも通過になる（`judge=skip:limit` で `model_waited()` が真のときだけ変更要求）。モデルを呼べない Stop・モデルが回答しない Stop の結果は通過である（要求仕様の受け入れ条件 5・6a）
 - 条件は表の上から順に見て、最初に当たった 1 つを `judge` に書く（複数が当たっても 1 つ）。`/proc` を読む `parent_launch` は休みのマーカーと残りの秒の後に置き、モデルを呼ばないと分かっている Stop では読まない。子が `endpoint` を返したら `judge=fallback:endpoint` で、休みのマーカーが次の Stop から休む間だけ子の起動を止める
 - 変更要求の文面・上限・上限の後の待ちの知らせは変えない（dispatch と main が持つ）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである
 - `svc.state_dir` は `GuardServices` が今も持つ状態の保存先である
@@ -180,20 +183,21 @@ plugins/ndf/
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `check` | 判定の notes: `reply`（`prose_wait` / `report` / `elsewhere_wait` / `none`）・`judge`（`model` / `fallback:<failure>` / `skip:<理由>`）・`judge_ms`・`judge_calls` | hook の計測の行（`<状態の保存先>/hooks/<日付>.jsonl`） | 本文 |
+| `check` | 判定の notes: `reply`（ルールの判定。`prose_wait` / `report` / `elsewhere_wait` / `none`）・`judge`（`rule` / `model` / `fallback:<failure>` / `skip:<理由>`）・`judge_ms`・`judge_calls` | hook の計測の行（`<状態の保存先>/hooks/<日付>.jsonl`） | 本文 |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。#4000 の 2 回目の形の本文で `ask` に質問が渡る | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 7 秒・余白 1.5 秒・設定 5 秒のとき `ask` に渡る秒が 5（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに文字列の判定と同じ判定・`judge=fallback:<failure>` |
+| `check` | #4000 の表の 1〜5 の本文 → pushback・`judge=rule`・`ask` を呼ばない。偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。ルールが `report` を返す長文（「どちらにするかの指示をください。」の後に箇条書きでない報告の行が 9 行）で `ask` に質問の行が渡る（表の 3 回目の箇条書き 9 行はルールで止まるので、受け渡しの確かめに使わない） | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 7 秒・余白 1.5 秒・設定 5 秒のとき `ask` に渡る秒が 5（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに通過・`judge=fallback:<failure>` |
 | `check` の送信先と順序 | エントリポイント `cli` で親が見つかる → `ask` に `parent_launch` の返りが渡る | 休み中・残りの秒が足りない Stop で偽の `parent_launch` が呼ばれない（`judge=skip:rest`・`skip:time`）。Codex でも休み中でも、記録される `judge` は表で最初に当たった 1 つ | Codex で `skip:runtime`、`parent_launch` が None で `skip:endpoint`（どちらも `ask` を呼ばない）。`ask` が `endpoint` を返す → `judge=fallback:endpoint`・休みのマーカーが書かれる |
-| `check` の上限の後 | `model_waited()` が真の数え手で上限に達し、本文が文字列の判定で `report` → pushback（`ask` は呼ばない）。dispatch を通すと `limited` が真になる | `model_waited()` が偽 → 通す | — |
+| `check` の上限の後 | `model_waited()` が真の数え手で上限に達し、本文がルールの判定で `report` → pushback（`ask` は呼ばない）。上限に達した数え手でルールの判定が `prose_wait` → pushback（`judge=rule`）。dispatch を通すと `limited` が真になる | `model_waited()` が偽 → 通す | — |
+| `check` の通す順序 | 引用の誤検出の例（「このレーンは「どちらにするかの指示をください」と書いた後に…こちらでは何も待っていません。」）→ ルールが `report`、偽の `ask` の `report` で通過。「別のレーンは承認を待っています。」→ 通過・`judge=skip:elsewhere`・`ask` を呼ばない | AskUserQuestion を使ったターン（`asked_this_turn` が真）の「選択肢から選んでください。」（ルールは `prose_wait`）→ 通過・`judge=skip:asked`・`ask` を呼ばない | 「別のレーンは承認を待っています。こちらは #4217 を載せてよいですか。」→ pushback・`judge=rule` |
 | `check` の休みのマーカー | `ask` が `launch` を返した次の `check` で `ask` が呼ばれない（`judge=skip:rest`） | 休む間を過ぎた時刻の `check` で呼ばれる | `ask` が `timeout` を返した次の `check` では呼ばれる（マーカーを書かない） |
 
 ## hook の文脈・数え手・締め切り
 
-満たす決定: 決定 5、受け入れ条件 4
+満たす決定: 決定 1・5、受け入れ条件 0・4
 
 ### 関数の仕様
 
@@ -201,6 +205,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `asked_since_prompt` | `context.py` | 新設 | `asked_since_prompt(tail: str) -> bool` | 会話の記録の末尾を後ろから読み、利用者の入力（`type` が `user` で `isMeta` が真でなく、`content` が文字列か text の要素を持つ行）に当たる前に、`name` が `AskUserQuestion` の `tool_use` があれば真 |
 | `HookContext.asked_this_turn` | `context.py` | 新設 | `cached_property -> bool` | `asked_since_prompt(self.transcript_tail)` |
+| `HookContext.last_reply_kind` | `context.py` | 変更 | `cached_property -> str`（変えない） | `reply_wait.reply_kind(self.last_reply)`。11.0.22 の `classify_reply`・`_WAIT_RE`・`_TAIL_LINES` は消す（別の場所の待ちの正規表現は `reply_wait.ELSEWHERE_RE` の 1 つだけ） |
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
 | `Counter.mark_model_wait` | `counter.py` | 新設 | `mark_model_wait(self) -> None` | 今の入力の記録に `model_wait: true` を置く（入力が変わると記録ごと初期化される）。`usable` が偽なら何もしない |
 | `Counter.model_waited` | `counter.py` | 新設 | `model_waited(self) -> bool` | 今の入力の記録の `model_wait`。無ければ偽 |
