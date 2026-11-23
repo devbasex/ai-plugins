@@ -325,15 +325,14 @@ def _awaited(
 ) -> Judged:
     """子の回答を待つ。どの終わり方でも組を止めてから回収し、割り込みは投げ直す。"""
     try:
+        out: Optional[bytes] = None
         try:
             out = _exchange(proc, payload.encode("utf-8"), started + seconds)
-        except BaseException:
-            _stop_group(proc, killpg, gentle=True)
-            raise
+        finally:
+            # 割り込み・時間切れは回答が無いので穏やかに止め、正常に終わったときだけ即座に止める
+            _stop_group(proc, killpg, gentle=out is None)
         if out is None:
-            _stop_group(proc, killpg, gentle=True)
             return Judged(None, "timeout", _ms(started), 0)
-        _stop_group(proc, killpg, gentle=False)
     finally:
         for stream in (proc.stdin, proc.stdout):
             stream.close()
