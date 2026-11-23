@@ -73,16 +73,10 @@ class Permission(StrEnum):
     FULL = "full"
 
 
-class Failure(StrEnum):
-    """`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）。"""
-
-    LAUNCH = "launch"
-    TIMEOUT = "timeout"
-    USAGE_LIMIT = "usage_limit"
-    # 学習に使わない設定と確かめられていないか、claude が下限より古いので起動しなかった
-    REFUSED = "refused"
-    # 重い起動のスロットが待ちの上限までに空かなかった
-    NO_SLOT = "no_slot"
+# `claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）。語彙・意味・呼び手ごとの停止理由は表が持つ
+# （members の名前は id の大文字）
+FAILURES = "claude-failures"
+Failure = StrEnum("Failure", [(i.upper(), i) for i in facts.ids(FAILURES)])
 
 
 class Session(NamedTuple):

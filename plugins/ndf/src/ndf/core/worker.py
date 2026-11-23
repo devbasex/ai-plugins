@@ -65,7 +65,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.adapters import claude, git
-from ndf.contracts import causes, exit_codes, limits, result, worker_paths
+from ndf.contracts import causes, exit_codes, facts, limits, result, worker_paths
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
@@ -264,15 +264,6 @@ def sources_of(raw: Any) -> list[Source]:
 
 Caller = Callable[[list[str], str, float, Optional[Path]], claude.ClaudeReply]
 
-# 起動の失敗 → 停止理由の種類
-_FAILURE_CAUSES: dict[claude.Failure, str] = {
-    claude.Failure.LAUNCH: "precondition",
-    claude.Failure.TIMEOUT: "interrupted",
-    claude.Failure.USAGE_LIMIT: "usage_limit",
-    claude.Failure.REFUSED: "refused",
-    claude.Failure.NO_SLOT: "infra_wait",
-}
-
 
 def work_timeout() -> float:
     """worker の起動 1 回の期限の既定（秒）。"""
@@ -363,7 +354,7 @@ def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
     """再起動しても直らない失敗なら理由を `out` へ置いて真。"""
     if reply.failure is None:
         return False
-    out.cause = _FAILURE_CAUSES[reply.failure]
+    out.cause = facts.value(claude.FAILURES, reply.failure, "work_cause")
     out.detail = reply.error or str(reply.failure)
     return True
 

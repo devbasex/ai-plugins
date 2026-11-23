@@ -33,7 +33,7 @@ REDIRECTED_ENV = {
     "XDG_CACHE_HOME": "cache",
     "XDG_CONFIG_HOME": "config",
     "XDG_DATA_HOME": "data",
-    slots.SLOTS_DIR_ENV: "test-slots",
+    slots.SLOTS_DIR_ENV: slots.SLOTS_DIR_NAME,
 }
 # テストの間は外す環境変数（ほかのプラグインの根・状態の保存先の根の指定・実行中の工程の識別子）
 REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", "NDF_CALLER_PLUGIN_ROOT", "NDF_STATE_HOME", slots.HELD_ENV, slot_pool.PARENT_ENV)

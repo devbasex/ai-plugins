@@ -127,7 +127,7 @@ class FactUnknown(Exception):
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
 # 差分の語（`diff_kinds` のキー）
-DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
+DIFF_WORDS = contracts.schema_enum(model.NDF_SCHEMA, "/$defs/diff_word")
 
 
 def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:

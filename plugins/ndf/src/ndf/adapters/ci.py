@@ -41,17 +41,9 @@ class State(StrEnum):
     STALE = "stale"  # 終わった時刻があるのに結論が無い
 
 
-class Verdict(StrEnum):
-    """読んだ結果（`Reading.verdict`）。先の方を優先する。"""
-
-    TEST_FAILED = "test_failed"
-    CHECK_FAILED = "check_failed"
-    PENDING = "pending"  # まだ結論が出ていない
-    MISSING = "missing"
-    STALE = "stale"
-    PASSED = "passed"  # 必須のチェックがすべて通った
-
-
+# 読んだ結果（`Reading.verdict`）。語彙・優先する順・停止理由の種類は表が持つ（members の名前は id の大文字）
+VERDICTS = "ci-verdicts"
+Verdict = StrEnum("Verdict", [(i.upper(), i) for i in facts.ids(VERDICTS)])
 # 通過として読む結論（SKIPPED・NEUTRAL を通す）。ほかの結論で終わったチェックは落ちたと数える。表は contracts/domains/ci-outcomes.json
 PASSING = frozenset(facts.ids("ci-outcomes", outcome="passed"))
 # ランナーの割り当てを待つ状態（ランナーの待ちは呼ぶ側の待ちの予算に数えない。#2719）。待つ状態のうち実行中と結果の届いていない状態を除く
@@ -60,14 +52,6 @@ QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_pr
 UNRESOLVED_SHOWN = 3
 # 分割ジョブの名前の末尾（`pytest (0/2)`）
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
-# 読んだ結果（`Reading.verdict`）→ 停止理由の種類。`passed` は通常 None、マージの後なら `not_ci`
-_VERDICT_KINDS = {
-    Verdict.TEST_FAILED: "test_failed",
-    Verdict.CHECK_FAILED: "check_failed",
-    Verdict.PENDING: "ci_pending",
-    Verdict.MISSING: "precondition",
-    Verdict.STALE: "infra_wait",
-}
 
 
 class Check(NamedTuple):
@@ -258,7 +242,7 @@ class Classifier(NamedTuple):
             return "check_failed"
         if verdict == Verdict.PASSED:
             return "not_ci" if after_merge else None
-        return _VERDICT_KINDS[verdict]
+        return str(facts.value(VERDICTS, verdict, "cause"))
 
 
 def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:

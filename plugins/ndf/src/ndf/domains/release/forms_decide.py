@@ -11,11 +11,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import facts
+from ndf.domains.release import version_decide
 
 # リリースの形の表
 TABLE = "release-forms"
-# 承認資料のチャネル → 設定の届け先の行の `channel`（`null` の行はどのチャネルにも当たる）
-_DELIVERY_CHANNEL = {"production": "production", "dev": "base"}
 
 
 class FormUnsupported(Exception):
@@ -64,7 +63,8 @@ class Delivery(NamedTuple):
 
 def deliveries_of(rows: Sequence[Mapping[str, Any]], channel: str) -> tuple[Delivery, ...]:
     """設定の届け先の行のうち、承認資料のチャネル（`production`・`dev`）に当たる行（`channel` が `null` の行を含む）。"""
-    want = _DELIVERY_CHANNEL[channel]
+    # 開発版はベースブランチから届く（届け先の行の channel の語は base）。`null` の行はどのチャネルにも当たる
+    want = "base" if channel == version_decide.DEV else channel
     return tuple(Delivery(r["target"], r["kind"], r["trigger"]) for r in rows if r.get("channel") in (None, want))
 
 
