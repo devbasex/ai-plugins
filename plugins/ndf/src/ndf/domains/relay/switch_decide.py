@@ -13,7 +13,11 @@ from typing import NamedTuple, Optional
 from ndf.domains.relay.account_decide import Pick
 
 # 文脈の量が上限を超えたときに中継が子へ送る 1 行（#2595。hook の外でも判定の機会を作る）
-HANDOVER_PROMPT = "文脈の量が上限を超えた。引継ぎ文書を更新し、次のセグメントのブロック（ndf-next）を出してセグメントを終える"
+HANDOVER_PROMPT = (
+    "文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した（背景の作業は終わった）。"
+    "オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。"
+    "引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える"
+)
 # 上限で替えた先のアカウントで再開するときに送る 1 行（#3337）
 RESUME_PROMPT = "利用上限でアカウントを替えた。中断したところから続ける"
 # 見回りで閾値を越えて替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 11）

@@ -1,0 +1,44 @@
+"""文脈の切り替えの 2 つの値（判断開始の値・運用上限）を 1 つの規則で解く（#3995 の決定 1・5）。
+
+値は上限の設定（`contracts/limits.json` の `context.decide-from`・`context.limit`）の 1 か所に置き、環境変数
+`NDF_CONTEXT_LIMIT` が運用上限を替える。判断開始の値が運用上限を上回れば同じ値へ下げる。上限の設定の引き方は
+呼び出し元が渡す（hook の経路は `hooks.tables.policy_value`、CLI は `ndf.contracts.limits.value`）。標準ライブラリだけに依存する。
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Callable, Mapping, NamedTuple
+
+DECIDE_FROM = "context.decide-from"  # 上限の設定の方針の名前（判断開始の値）
+LIMIT = "context.limit"  # 上限の設定の方針の名前（運用上限）
+DEFAULT, FROM_ENV = "default", "env"
+
+
+class Thresholds(NamedTuple):
+    """そのセッションで効く 2 つの値。`sources` は値ごとの出所（default・env）と、無視した環境変数（ignored）。"""
+
+    decide_from: int
+    limit: int
+    sources: dict[str, str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return self._asdict()
+
+
+def thresholds(environ: Mapping[str, str], value: Callable[[str, str], Any]) -> Thresholds:
+    """上限の設定の 2 つの値に `NDF_CONTEXT_LIMIT` を重ね、判断開始の値 ≤ 運用上限にそろえて返す。
+
+    環境変数が正の整数（ASCII の数字だけ）でなければ既定のまま、出所に `ignored` を書く。上限の設定に行が無ければ
+    `value` の例外をそのまま上げる。
+    """
+    decide_from, limit = int(value(DECIDE_FROM, "count")), int(value(LIMIT, "count"))
+    sources = {"decide_from": DEFAULT, "limit": DEFAULT}
+    raw = environ.get("NDF_CONTEXT_LIMIT")  # 名前は環境変数の表（contracts/domains/env.json）が持つので定数に写さない
+    if raw and re.fullmatch("[0-9]+", raw) and int(raw) > 0:
+        limit, sources["limit"] = int(raw), FROM_ENV
+    elif raw:
+        sources["ignored"] = f"NDF_CONTEXT_LIMIT={raw}"
+    if decide_from > limit:
+        decide_from, sources["decide_from"] = limit, sources["limit"]
+    return Thresholds(decide_from, limit, sources)

@@ -1,6 +1,7 @@
 """文脈の量の guard（SF12・#2595・#2789）。
 
-会話の記録の末尾の最後の応答の文脈の量（token）が `hook.context-limit` を超えたら、次の 1 手だけを残して止める。
+会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
+`context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、次の 1 手だけを残して止める。
 中継の下では応答の最後に次のセグメントのブロックを書いてセグメントを切り替え、外では引き継ぎの文書を書いて新しいセッションで
 続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.context import context_tokens
+from ndf.domains.relay.context_thresholds import thresholds
 from ndf.domains.relay.signals import relay_dir
 from ndf.domains.hooks.verdict import Verdict, deny, passing
 
@@ -25,7 +27,7 @@ def check(ctx, svc) -> Verdict | None:
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None
-    limit = int(tables.policy_value("hook.context-limit", "count"))
+    limit = thresholds(ctx.env, tables.policy_value).limit
     if tokens < limit:
         return passing(context_tokens=tokens)
     handoff_dir = svc.params["handoff_dir"]

@@ -496,7 +496,7 @@ def test_estimate_stage_segments_current_behavior_edges(tmp_path):
     }
 
 
-# --- 旧い行（再起動の方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の土台） ---
+# --- 旧い行（再起動の方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の基準） ---
 
 _OLD = {"policy": "current", "margin": 50_000, "config_error": None}
 

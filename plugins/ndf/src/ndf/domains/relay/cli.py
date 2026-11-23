@@ -39,6 +39,7 @@ from ndf.domains.relay import (
     account_decide,
     accounts,
     claude_args,
+    context_thresholds,
     hub,
     install,
     lane_question,
@@ -304,7 +305,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
         spin=hub.spin_of(environ),
-        context_limit=int(limits.value("relay.context", "count")),
+        context_limit=context_thresholds.thresholds(environ, limits.value).limit,
         guards=account_decide.Guards(
             limits.value("relay.five-hour-guard", "count"),
             limits.value("relay.weekly-prefer", "count"),
