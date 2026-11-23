@@ -37,9 +37,10 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
 # 背景の作業の `id` がファイル名に使える形（記録の保存先の外を指すパスを組まない。#4036）
 TASK_ID = re.compile(r"[A-Za-z0-9_-]+")
-# Bash の Tool のシェルの `cmdline` が持つ目印（`claude` の直接の子の `bash -c source <HOME>/.claude/shell-snapshots/snapshot-…`。
-# Claude Code 2.1.330 で背景の呼び出しも同じ形と実測した。#4036）
-SHELL_SNAPSHOT = "/.claude/shell-snapshots/snapshot-"
+# Bash の Tool のシェルの `cmdline` が持つ目印（`claude` の直接の子の `bash -c source <設定ディレクトリ>/shell-snapshots/snapshot-…`。
+# Claude Code 2.1.330 で背景の呼び出しも同じ形と実測した。#4036）。設定ディレクトリは既定の `~/.claude` のほか、
+# 登録済みアカウントの子では NDF が渡す `CLAUDE_CONFIG_DIR` なので、ディレクトリ名に依存しない
+SHELL_SNAPSHOT = "/shell-snapshots/snapshot-"
 ENDED = ("end_turn", "stop_sequence")  # 応答が終わった `stop_reason`
 USAGE_KEYS = claude.CONTEXT_FIELDS
 
@@ -82,19 +83,41 @@ def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, ta
 
 
 def live_shells(wrapper_pid: int, proc: Path = Path("/proc")) -> Optional[int]:
-    """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。ラッパーか `claude` が見つからない・読めなければ None。"""
+    """ラッパーの子の `claude` の子のうち、Bash の Tool のシェルの数。ラッパーか `claude` が見つからない・読めなければ None。
+
+    子は `/proc/<pid>/stat` の親 PID で絞る（`task/<tid>/children` は読む間に子が終わると、生きている別の子も欠け得る。
+    proc_tid_children(5)）。
+    """
     try:
-        conductor = next((c for c in _children(proc, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
-        if conductor is None:
-            return None
-        return sum(1 for c in _children(proc, conductor) if _is_shell(_args(proc, c)))
+        parents = _parents(proc)
     except OSError:  # noqa: NDF401 ファイル: /proc を読めなければシェルの生死を確かめられない（呼び手が一覧のシェルを数える）
         return None
+    if wrapper_pid not in parents:
+        return None
+    conductor = next((c for c in _children(parents, wrapper_pid) if _name(_args(proc, c)) == "claude"), None)
+    if conductor is None:
+        return None
+    return sum(1 for c in _children(parents, conductor) if _is_shell(_args(proc, c)))
 
 
-def _children(proc: Path, pid: int) -> list[int]:
-    tasks = sorted((proc / str(pid) / "task").iterdir())
-    return [int(c) for t in tasks for c in (t / "children").read_text(encoding="utf-8").split()]
+def _parents(proc: Path) -> dict[int, int]:
+    """`/proc` のプロセスごとの親 PID。走査の間に終わったプロセスは載せない。"""
+    parents: dict[int, int] = {}
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+        except (FileNotFoundError, ProcessLookupError):  # 走査の間に終わったプロセスは数えない
+            continue
+        fields = stat.rpartition(")")[2].split()  # `pid (comm) state ppid …`。comm は括弧や空白を含み得る
+        if len(fields) >= 2 and fields[1].isdigit():
+            parents[int(entry.name)] = int(fields[1])
+    return parents
+
+
+def _children(parents: Mapping[int, int], pid: int) -> list[int]:
+    return sorted(c for c, p in parents.items() if p == pid)
 
 
 def _args(proc: Path, pid: int) -> list[str]:

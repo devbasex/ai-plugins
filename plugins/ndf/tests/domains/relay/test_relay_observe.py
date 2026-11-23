@@ -255,30 +255,49 @@ def test_4036_an_unsafe_shell_id_builds_no_path():
     assert observe.shell_output_path({}, observe.Path("/w"), "sid", "../x") is None
 
 
-def _proc(root, pid, args, children=()):
-    task = root / str(pid) / "task" / str(pid)
-    task.mkdir(parents=True)
+def _proc(root, pid, args, ppid=1, comm=None):
+    (root / str(pid)).mkdir(parents=True)
     (root / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
-    (task / "children").write_text("".join(f"{c} " for c in children), encoding="utf-8")
+    name = comm if comm is not None else observe.Path(args[0]).name
+    (root / str(pid) / "stat").write_text(f"{pid} ({name}) S {ppid} {pid} {pid} 0", encoding="utf-8")
 
 
 def test_4036_live_shells_counts_the_bash_tool_shells_under_claude(tmp_path):
-    _proc(tmp_path, 10, ["ndf", "relay"], [11])
-    _proc(tmp_path, 11, ["claude", "--session-id", "s"], [12, 13, 14])
-    _proc(tmp_path, 12, SHELL_ARGS)
-    _proc(tmp_path, 13, ["node", "mcp-server.js"])
-    _proc(tmp_path, 14, ["bash", "-c", "echo x"])
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude", "--session-id", "s"], ppid=10)
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
+    _proc(tmp_path, 13, ["node", "mcp-server.js"], ppid=11)
+    _proc(tmp_path, 14, ["bash", "-c", "echo x"], ppid=11)
+    _proc(tmp_path, 15, SHELL_ARGS, ppid=99)  # 別の claude のシェルは数えない
+    (tmp_path / "self").mkdir()  # 数字でない項目は読まない
+    assert observe.live_shells(10, tmp_path) == 1
+
+
+def test_4036_live_shells_counts_the_shells_of_an_account_config_dir(tmp_path):
+    # 登録済みアカウントの子は NDF が渡す CLAUDE_CONFIG_DIR の直下に shell-snapshots を置く
+    account = "/home/u/.ndf/accounts/a1/shell-snapshots/snapshot-bash-2-y.sh"
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
+    _proc(tmp_path, 12, ["/bin/bash", "-c", f"source {account} 2>/dev/null || true && eval 'sleep 45' < /dev/null"], ppid=11)
+    _proc(tmp_path, 13, SHELL_ARGS, ppid=11)
+    assert observe.live_shells(10, tmp_path) == 2
+
+
+def test_4036_live_shells_reads_the_parent_past_a_command_name_with_parens(tmp_path):
+    _proc(tmp_path, 10, ["ndf", "relay"], comm="a) S 7 (b")
+    _proc(tmp_path, 11, ["claude"], ppid=10, comm="cl) 3 (x")
+    _proc(tmp_path, 12, SHELL_ARGS, ppid=11)
     assert observe.live_shells(10, tmp_path) == 1
 
 
 def test_4036_live_shells_is_zero_without_children(tmp_path):
-    _proc(tmp_path, 10, ["ndf", "relay"], [11])
-    _proc(tmp_path, 11, ["claude"])
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["claude"], ppid=10)
     assert observe.live_shells(10, tmp_path) == 0
 
 
 def test_4036_live_shells_is_none_without_the_wrapper_or_claude(tmp_path):
     assert observe.live_shells(10, tmp_path) is None
-    _proc(tmp_path, 10, ["ndf", "relay"], [11])
-    _proc(tmp_path, 11, ["tmux"])
+    _proc(tmp_path, 10, ["ndf", "relay"])
+    _proc(tmp_path, 11, ["tmux"], ppid=10)
     assert observe.live_shells(10, tmp_path) is None
