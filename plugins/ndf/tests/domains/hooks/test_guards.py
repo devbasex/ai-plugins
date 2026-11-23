@@ -690,6 +690,17 @@ def test_context_limit_reason_comes_alone_when_script_chain_also_denies(tmp_path
     assert "全文:" not in reason and len(reason) <= 600 and reason.endswith("wait の行を残す。")
 
 
+def test_context_limit_reason_reaches_the_end_with_a_quoted_main_directory_outside_the_relay(tmp_path):
+    # #3995（r7-1）: 中継の外で空白を含む 243 字のメインディレクトリ（引用で 2 字増える）でも、wait の行まで切らない
+    main = tmp_path / "a b"
+    main = tmp_path / ("a b" + "m" * (243 - len(os.path.realpath(main))))
+    assert len(os.path.realpath(main)) == 243
+    _usage_transcript(main, 900000)
+    reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, "ls")))
+    assert f"--cwd '{os.path.realpath(main)}' " in reason and "ndf-next" in reason
+    assert "全文:" not in reason and len(reason) <= 600 and reason.endswith("wait の行を残す。")
+
+
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
     # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
     _usage_transcript(tmp_path, 500_000)
