@@ -118,8 +118,10 @@ class Counter:
         if not isinstance(memo, dict):
             memo = self.data["memo"] = {}
         table = memo.get(key)
+        if not isinstance(table, dict):
+            table = {}
         turn = self.data["turn"]
-        kept = {k: v for k, v in table.items() if isinstance(v, dict) and v.get("turn") == turn} if isinstance(table, dict) else {}
+        kept = _this_turn(table, turn)
         kept.pop(item, None)
         kept[item] = {**value, "turn": turn}
         memo[key] = dict(list(kept.items())[-keep:])
@@ -151,6 +153,11 @@ def mark_relay(session_id: str, state_dir: Path) -> bool:
             return False
         counter.mark_relay()
         return True
+
+
+def _this_turn(table: dict, turn: int) -> dict:
+    """`table` のうち、今の入力の番号 `turn` を持つ値だけを残した写しを返す。"""
+    return {k: v for k, v in table.items() if isinstance(v, dict) and v.get("turn") == turn}
 
 
 def _read(fd: int) -> Optional[dict[str, Any]]:
