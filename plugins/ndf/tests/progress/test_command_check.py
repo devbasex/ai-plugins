@@ -9,7 +9,7 @@ import json
 import pytest
 
 from ndf.checks import spec_model
-from ndf.progress import command
+from ndf.progress import command, definition
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
@@ -129,6 +129,29 @@ def test_check_of_an_unreadable_output_stops_like_finish(repo, capsys, tmp_path,
     _, checked = _run(capsys, last_result, "check", tid, "実装", "--output", str(bad))
     _, finished = _run(capsys, last_result, "finish", tid, "実装", "--output", str(bad), "--reason", "手で")
     assert checked["status"] == "stopped" and checked["cause"] == finished["cause"]
+
+
+def test_check_lists_the_missing_keys_with_where_to_take_them(repo, capsys, tmp_path, last_result):
+    """受け入れ条件 4（#3908）。欠けた mvv_gate には取り場所が、取り場所の無い design_pr には null が載る。"""
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    code, out = _check(capsys, last_result, tmp_path, tid, "設計", {"steps": [], "summary": "x", "outputs": {}})
+    assert code == 1 and out["cause"]["kind"] == "refused"
+    assert out["items"] == [
+        {"kind": "missing", "key": "design_pr", "source": None},
+        {"kind": "missing", "key": "mvv_gate", "source": definition.context_source("mvv_gate")},
+    ]
+    assert f"（取り場所: {definition.context_source('mvv_gate')}）" in out["summary"]
+    _check_result_fits_the_schema(out)
+
+
+def test_check_without_missing_keys_has_no_items(repo, capsys, tmp_path, last_result):
+    _, made = _new(capsys, last_result)
+    tid = made["metrics"]["machine_id"]
+    _, refused = _check(capsys, last_result, tmp_path, tid, "設計", {"steps": [], "outputs": DESIGN_OUTPUT["outputs"]})
+    _, fitting = _check(capsys, last_result, tmp_path, tid, "設計", DESIGN_OUTPUT)
+    assert refused["status"] == "stopped" and refused["items"] == []
+    assert fitting["status"] == "ok" and fitting["items"] == []
 
 
 # --- check と finish が共有する前半の振る舞い（I-018 の切り出しの前に固定する） ----------------------

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from ndf import cli, identity
@@ -82,7 +82,8 @@ def run_config(a: argparse.Namespace) -> drive.RunConfig:
         a.pr,
         a.branch,
         a.base,
-        scope=tuple(a.scope),
+        # 既定の起動は先頭がハイフンのパスをオプションと分けるため `./` を前置して渡す。リポジトリ相対へ戻す（#3908 の r2-4）
+        scope=tuple(PurePosixPath(p).as_posix() for p in a.scope),
         required=tuple(a.required),
         tests=tuple(a.ci_test),
         symbols=tuple(a.symbols),

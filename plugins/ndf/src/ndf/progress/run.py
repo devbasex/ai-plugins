@@ -479,6 +479,13 @@ def _when_off(d: Drive, v: View, s: stages.StageDef) -> Optional[str]:
 
 def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
     """未着手の行を始める。条件が偽なら無効として飛ばし、入力が欠けるか形が違えば始めずに止まる。"""
+    with command.base_refs_once():
+        # 条件の判定と差し込みの組み立てが同じ起点を使う。求めるのは 1 回だけにする（#3908 の r2-5）
+        return _start_once(d, v, s)
+
+
+def _start_once(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
+    """`_start` の本体（起点を 1 回だけ求める範囲の中で打つ）。"""
     m = Move(Action.START, s)
     try:
         off = _when_off(d, v, s)

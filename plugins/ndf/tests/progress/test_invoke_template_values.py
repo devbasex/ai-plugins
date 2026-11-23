@@ -102,13 +102,20 @@ def test_a_stage_with_an_acceptance_without_an_issue_stops_as_invalid_without_ru
     assert "--issue" in got.cause["detail"] and not got.report.get("items")
 
 
-def test_a_valid_acceptance_of_several_issues_reaches_the_missing_values_check(tmp_path, filled):
-    # 形の合う acceptance なら検査を通り、その後の欠けの検査が課題から決まらない title・body_file を挙げる
+def test_several_issues_fill_the_acceptance_with_an_issue_flag_for_each_issue(tmp_path, filled):
+    # #3908 の決定 7・受け入れ条件 2: 課題を束ねた単位は、代表の課題（#3）から title を写し、acceptance で全部の課題を照らす
     repo = _sprint_repo(tmp_path)
-    with pytest.raises(invoke.TemplateValuesMissing) as got:
-        _values(tmp_path, _impl_run(repo, [3, 4], acceptance=["--issue", "3", "--issue", "4"]), repo)
-    assert set(got.value.missing) == {"title", "body_file"}
-    assert got.value.missing["title"] == invoke.FROM_ISSUE
+    got = _values(tmp_path, _impl_run(repo, [4, 3]), repo)
+    assert got["issue"] == "3" and got["title"] == "#3 の題"
+    assert got["acceptance"] == ["--issue", "3", "--issue", "4"]
+
+
+def test_a_valid_acceptance_of_several_issues_fills_the_title_from_the_representative_issue(tmp_path, filled):
+    # #3908 の決定 7: 形の合う acceptance なら検査を通り、title・body_file は代表の課題（番号の最も小さい #3）から決まる
+    repo = _sprint_repo(tmp_path)
+    got = _values(tmp_path, _impl_run(repo, [4, 3], acceptance=["--issue", "3", "--issue", "4"]), repo)
+    assert filled == [3] and got["title"] == "#3 の題"
+    assert got["acceptance"] == ["--issue", "3", "--issue", "4"]
 
 
 def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled):

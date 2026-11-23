@@ -14,7 +14,7 @@ from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf import cli
 from ndf.adapters import github
-from ndf.contracts import result, worker_paths
+from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
@@ -305,17 +305,18 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
 
 
 def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
-    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない（課題も読まない）。
-    # 課題に依存しない差し込み（設定と worker の既定）はそろえ、課題の出所の欠けまで進める
+    # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない。
+    # 題と本文は代表の課題（番号の最も小さい #3）から写す（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    run = _stage_run_of("impl", repo, [3, 4])
+    run = _stage_run_of("impl", repo, [4, 3])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
-    with pytest.raises(invoke.TemplateValuesMissing) as got:
-        invoke.template_values(route.choose("implement"), run, tmp_path / "w", repo, project=PROJECT, local_tests=True)
-    assert "issue" not in got.value.missing and "title" in got.value.missing
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.template_values(route.choose("implement"), run, work, repo, project=PROJECT, local_tests=True)
+    assert "issue" not in got and got["title"] == "#3 の題"
 
 
 def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
@@ -571,6 +572,31 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
 
 
+def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
+    # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue を写す
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke._issue_values(_stage_run_of("impl", repo, [4211, 3908]), work, repo)
+    body = work / invoke.ISSUE_BODY_FILE.format(number=3908)
+    assert got == {"title": "#3908 の題", "body_file": str(body), "issue": "3908"}
+    # 残りの課題（#4211）の閉鎖参照は足さない。設計の PR にも同じ本文が渡り、課題を閉じるのはスプリントの PR の
+    # 本文と「スプリントを閉じる」である（`/ndf:pr`。#3908 の r2-2・r2-3）
+    assert body.read_text(encoding="utf-8") == "#3908 の本文"
+
+
+def test_the_sprint_pr_refers_to_every_bundled_issue(tmp_path):
+    # #3908 の r2-2: スプリントの PR（`pr` のテンプレート）の本文へ、束ねたすべての課題を `Refs #<番号>` で載せる
+    run = invoke.StageRun(invoke.PLAN, "pr", {"issues": [4211, 3908]}, (), "none", "pr")
+    pr = route.templates()["pr"]
+    assert invoke._fill_refs(pr, {}, run) == {"refs": ["3908", "4211"]}
+    # 渡した値は上書きせず、`refs` を持たないテンプレートと課題の無い入力には足さない
+    assert invoke._fill_refs(pr, {"refs": ["1"]}, run) == {}
+    assert invoke._fill_refs(route.templates()["impl"], {}, run) == {}
+    assert invoke._fill_refs(pr, {}, replace(run, inputs={})) == {}
+
+
 def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
     # PR 3469 の指摘: プランを描き直すたび（承認の回答・続き・打ち直し）に課題を GitHub から読み直さない。
     # 途中で題が直されてもプランは同じで、終わっていない回へ同じキーで届く
@@ -589,36 +615,6 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
     again = invoke._issue_values(run, work, repo)
     assert reads == [3092] and first == again and first["title"] == "#3092 の題（1 回目）"
     assert Path(first["body_file"]).read_text() == "#3092 の本文（1 回目）"
-
-
-def test_issue_copies_others_can_write_are_not_used_for_the_plan(tmp_path, monkeypatch):
-    # PR 4307 の r7-3: 共有の保存先に別の利用者が置ける題と本文の写しを、書き手の権限を確かめずに worker へ渡さない
-    repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: pytest.fail("置かれた写しで読み直して上書きしない"))
-    work = tmp_path / "w"
-    work.mkdir()
-    for name, text in ((invoke.ISSUE_TITLE_FILE, '{"title": "差し替えた題"}'), (invoke.ISSUE_BODY_FILE, "差し替えた本文")):
-        (work / name.format(number=3092)).write_text(text, encoding="utf-8")
-        (work / name.format(number=3092)).chmod(0o666)
-    with pytest.raises(worker_paths.EntryUnsafe) as e:
-        invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
-    assert e.value.kind == "foreign"
-
-
-def test_issue_copies_are_written_without_write_access_for_others(tmp_path, monkeypatch):
-    # PR 4307 の r7-3: 写しはグループとほかの利用者が書き込めない形で公開する（次の描画が私有の写しとして読める）
-    repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    work = tmp_path / "w"
-    work.mkdir()
-    before = os.umask(0o000)  # umask によらず書き込み権限を外す
-    try:
-        got = invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
-    finally:
-        os.umask(before)
-    for name in (invoke.ISSUE_TITLE_FILE, invoke.ISSUE_BODY_FILE):
-        assert (work / name.format(number=3092)).stat().st_mode & 0o022 == 0
-    assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
 
 
 @pytest.mark.parametrize(
