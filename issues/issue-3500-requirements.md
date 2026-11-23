@@ -24,7 +24,8 @@ NDF がリポジトリの中に作る追跡しない置き場は、置き場の�
 | --- | --- |
 | `.cross_refactoring`（cross-refactoring の作業ファイル） | cross-refactoring が共通の git ディレクトリの `info/exclude` に足す。追跡済みのファイルには効かない |
 | `.worktrees` | worktree の Skill の手順 2-2 のシェルが根の `.gitignore` に足し、`ndf worktree create` が無ければ止まる |
-| `.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state` | NDF は何もしない。利用者の根の `.gitignore` 次第（ai-plugins では手で書いた `.ndf/.gitignore` の行と根の `tmp/` が当たる） |
+| `.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/backlog/state` | NDF は何もしない。利用者の根の `.gitignore` 次第（ai-plugins では手で書いた `.ndf/.gitignore` の行と根の `tmp/` が当たる） |
+| `.ndf/loop` | 置き場の表にはあるが、今のコードは作業ツリーでなく git の共通ディレクトリの中（`<共通ディレクトリ>/ndf/state`）に書く。無視は要らない |
 | `.ndf/worktree.local.json`（個人設定） | `ndf worktree init` が `.ndf/.gitignore` を無いときだけ作って 1 行書く |
 
 除外は追跡済みのファイルに効かない（gitignore の文書「Files already tracked by Git are not affected」）。除外の下でも `git add -f` で入る。2026-11-22 の実測は次のとおりである。
@@ -64,7 +65,8 @@ NDF がリポジトリの中に作る追跡しない置き場は、置き場の�
 ## 対象範囲
 
 含む:
-- 置き場の表の追跡しないフォルダ（`.worktrees`・`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state`）と `.cross_refactoring` を、NDF のコードが作るときに中へ `*` だけの `.gitignore` を置くこと
+- 置き場の表の追跡しないフォルダ（`.worktrees`・`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/backlog/state`）と `.cross_refactoring` を、NDF のコードが置き場の単位（worktree ごとに 1 つか、メインディレクトリに 1 つ）のパスに作り、作るときに中へ `*` だけの `.gitignore` を置くこと
+- 置き場の表の `root` を実体に合わせること（`.worktrees`・`.ndf/handoff` はメインディレクトリに 1 つ。`.ndf/loop` は作業ツリーに置かない）
 - `.ndf/` の中の追跡しないファイル（`.ndf/worktree.local.json`）の行を、NDF が `.ndf/.gitignore` に書くこと
 - cross-refactoring が `info/exclude` へ書くのをやめ、`ndf worktree create` が根の `.gitignore` の登録を求めるのをやめること
 - 事例 1: 担当の起動の前に、担当が動くディレクトリの `.cross_refactoring/` を作り直すこと（前の作業ファイルを消し、追跡されていれば索引からも外す）
@@ -83,8 +85,8 @@ NDF がリポジトリの中に作る追跡しない置き場は、置き場の�
 
 ## 受け入れ条件
 
-- [ ] 1. 置き場の表の追跡しないフォルダと `.cross_refactoring` のどれも、NDF のコードが作るときに中へ `*` だけの `.gitignore` が置かれる。既にある `.gitignore` は書き換えない
-- [ ] 2. `.ndf/` の中の追跡しないファイル（`.ndf/worktree.local.json`）は、NDF がその置き場を用意するときに `.ndf/.gitignore` に行がある（無ければ足し、既にあれば足さず、既存の行は消さない）
+- [ ] 1. 置き場の表の追跡しないフォルダと `.cross_refactoring` のどれも、NDF のコードがその置き場の単位のパス（worktree 単位なら今の worktree の根、メインディレクトリ単位ならメインディレクトリ）に作り、作るときに中へ `*` だけの `.gitignore` が置かれる。メインディレクトリと linked worktree の両方の `git status` に、置き場の中のファイルが出ない。既にある `.gitignore` は書き換えない
+- [ ] 2. `.ndf/` の中の追跡しないファイル（メインディレクトリに 1 つの `.ndf/worktree.local.json`）は、NDF がその置き場を用意するときに、メインディレクトリの `.ndf/.gitignore` に行がある（無ければ足し、既にあれば足さず、既存の行は消さない）
 - [ ] 3. 根の `.gitignore` と `info/exclude` に登録が無いリポジトリでも、上の置き場の中のファイル（中の `.gitignore` 自身を含む）は `git add -A` で入らない。NDF は根の `.gitignore` を書かず、登録の欠けで止まらない（`ndf worktree create` を含む）
 - [ ] 4. `.worktrees/` の中の `.gitignore` は、作った worktree の中のファイルの無視に影響しない（worktree の中で足したファイルは `git add -A` で入る）
 - [ ] 5. 事例 1: どの工程でも、担当を起動する直前に、担当が動くディレクトリの `.cross_refactoring/` には前の起動の作業ファイルが無く、`*` だけの `.gitignore` がある。前に追跡されていたファイルは索引から外れていて（`git ls-files .cross_refactoring` が空）、担当の次のコミットで追跡から外れる
@@ -201,4 +203,8 @@ NDF がリポジトリの中に作る追跡しない置き場は、置き場の�
 > 補足（3 回目の回答の続き）: `.ndf/` の中のファイルは `.ndf/.gitignore` に書けばよい。NDF がそのファイルを作るときに `.ndf/.gitignore` へ行を書く形にし、根の `.gitignore` と `ndf worktree init` の登録に頼らない。登録の仕組みは、フォルダは作る側が中へ `*` だけの `.gitignore` を置く、`.ndf/` の中のファイルは作る側が `.ndf/.gitignore` へ行を書く、の 2 つだけにする
 
 （書き手: 利用者（オーガナイザーと conductor が伝えた。引用の文は要約を含む）、日付: 2026-11-23）
+
+> 設計承認ゲートの回答（4 回目）: 「直してから」。「無視するフォルダが worktree 単位なのかルートディレクトリ単位なのかが不明。例えば .cross_refactoring は worktree 単位、.ndf/handoff はルートディレクトリで 1 つのはず」
+
+（書き手: 利用者（conductor が伝えた）、日付: 2026-11-23）
 
