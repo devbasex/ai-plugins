@@ -160,7 +160,7 @@ plugins/ndf/
 | `repeated_strings` | `src/ndf/checks/copy_dup.py` | 新設 | `repeated_strings(trees: Mapping[str, ast.Module]) -> list[Finding]` | 4 つ以上のファイルに出る 8〜80 字の文字列を指摘にする |
 | `check` | `src/ndf/checks/copy_dup.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 上の 2 つを並べて返す（既存の規則と同じ入口の形） |
 | `baseline` | `src/ndf/checks/ratchet.py` | 新設 | `baseline() -> dict[str, int]` | 規則ごとの基準の数 |
-| `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int]) -> list[str]` | 基準を超えた規則の名前と数を文にする（空なら通る） |
+| `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int], base: Mapping[str, int] \| None) -> list[str]` | 今の件数が基準と違う規則と、基準を宣言の前より上げた規則を文にする（空なら通る） |
 | `lower` | `src/ndf/checks/ratchet.py` | 新設 | `lower(counts: Mapping[str, int], commit: str, day: str) -> list[str]` | 基準を下回った規則の基準を書き直し、書いた規則の名前を返す |
 
 - `top_functions`
@@ -169,8 +169,12 @@ plugins/ndf/
   - 副作用: 無し
 - `repeated_strings`
   - 事後条件: docstring を除く。4 ファイル以上に出る文字列 1 つにつき 1 件
+- `verdicts`
+  - 事後条件: 3 つの場合を違反にする。(1) 今の件数が基準の `max` を超える（増やした）。(2) 今の件数が基準の `max` を下回る（減らしたのに基準を据え置いた。理由に「`ndf check --write-spec` で基準を下げてコミットする」を出す）。(3) `base`（変更の前の `ratchet.json` の `max`）があり、今の `max` がそれを上回る（基準を引き上げた）。つまり CI を通るのは「件数 = 基準 ≤ 変更の前の基準」のときだけで、重複を減らす PR は基準の更新を同じ PR に含めることになり、基準を上げて増加を通す PR は落ちる
+  - `base` の出所: CI のジョブ `script-structure-check` は 2 世代を取っている（`HEAD^1` が宛先の先頭）。`ndf check --ratchet-base HEAD^1` を打ち、`git show HEAD^1:plugins/ndf/src/ndf/checks/ratchet.json` を読む（git の呼び出しは 1 回）。宛先に `ratchet.json` が無い（規則を足す PR 自身）ときと、手元で `--ratchet-base` を付けないときは `base` を `None` にし、(3) だけを見ない
+  - 基準を上げる経路は持たない（決定 4。規則の数え方を変えて件数が増えるときは、数え方を変える PR で重複も減らすか、規則の `rules.json` の除外を足す）
 - `lower`
-  - 事前条件: `ndf check --write-spec` のときだけ呼ばれる（検査だけのときは基準を書き換えない）。CI は `--write-spec` を付けずに打つため、基準が下がるのは手元で打ち直して生成物をコミットしたときである。減らした変更がそのまま通るのは `verdicts` が基準以下を通すためで、基準の数が下がるのは次に `--write-spec` を打ったときになる
+  - 事前条件: `ndf check --write-spec` のときだけ呼ばれる（検査だけのときは基準を書き換えない）。CI は `--write-spec` を付けずに打ち、基準を据え置いた PR は `verdicts` の (2) で落ちるので、重複を減らした人は手元で `--write-spec` を打って `ratchet.json` を同じ PR にコミットする
   - 事後条件: 書き直した `ratchet.json` は、下回った規則の `max` を今の件数にし、`measured` と `commit` を渡された値にする
   - 副作用: `src/ndf/checks/ratchet.json` を書く
 
@@ -199,7 +203,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `top_functions` | 同じ名前の関数が 2 ファイルにあれば 1 件 | 同じファイルの中の 2 つの同名（入れ子の関数。数えない） | 木が空のとき 0 件 |
 | `repeated_strings` | 4 ファイルに出る 20 字の文字列で 1 件 | 3 ファイル（0 件）・4 ファイル（1 件）・7 字（0 件）・8 字（1 件）・81 字（0 件） | docstring だけのファイル（0 件） |
-| `verdicts` | 基準と同じ件数なら通る | 基準 + 1（落ちる）・基準 − 1（通る） | 基準に無い規則の件数（止まる） |
+| `verdicts` | 基準と同じ件数なら通る | 基準 + 1（落ちる）・基準 − 1 で基準を据え置き（落ちる）・基準 − 1 で基準も − 1（通る）・`base` より `max` を + 1 した基準と同じ件数（落ちる）・`base` が `None`（(3) を見ない） | 基準に無い規則の件数（止まる） |
 | `lower` | 下回った規則の基準が今の件数になる | 下回った規則が 0 個（書かない） | 書けないときに例外 |
 
 テストのファイル: `tests/checks/test_copy_dup.py`・`tests/checks/test_ratchet.py`（新設）
