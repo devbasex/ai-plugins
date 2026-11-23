@@ -350,6 +350,7 @@ _ASK = _assistant([{"type": "tool_use", "name": "AskUserQuestion", "input": {}}]
 _BASH = _assistant([{"type": "tool_use", "name": "Bash", "input": {}}])
 _RESULT = _user([{"type": "tool_result", "tool_use_id": "t1", "content": "1 つ目"}])
 _REPLY = _assistant([{"type": "text", "text": "本文"}])
+_META = json.dumps({"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "メタ"}]}})
 
 
 @pytest.mark.parametrize(
@@ -364,6 +365,8 @@ _REPLY = _assistant([{"type": "text", "text": "本文"}])
         ([_PROMPT, _ASK, _RESULT, _PROMPT, _BASH, _REPLY], False),
         # content が文字列の user の行も入力
         ([_ASK, _user("進めて"), _REPLY], False),
+        # AskUserQuestion の後のメタの行（isMeta が真）は入力に数えない
+        ([_PROMPT, _ASK, _RESULT, _META, _REPLY], True),
         # 末尾に利用者の入力が無ければ読めた範囲で探す
         ([_ASK, _REPLY], True),
         ([], False),

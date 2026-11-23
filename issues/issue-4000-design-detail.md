@@ -194,7 +194,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `asked_since_prompt` | `context.py` | 新設 | `asked_since_prompt(tail: str) -> bool` | 会話の記録の末尾を後ろから読み、利用者の入力（`type` が `user` で `content` が文字列か text の要素を持つ行）に当たる前に、`name` が `AskUserQuestion` の `tool_use` があれば真 |
+| `asked_since_prompt` | `context.py` | 新設 | `asked_since_prompt(tail: str) -> bool` | 会話の記録の末尾を後ろから読み、利用者の入力（`type` が `user` で `isMeta` が真でなく、`content` が文字列か text の要素を持つ行）に当たる前に、`name` が `AskUserQuestion` の `tool_use` があれば真 |
 | `HookContext.asked_this_turn` | `context.py` | 新設 | `cached_property -> bool` | `asked_since_prompt(self.transcript_tail)` |
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
 | `Counter.mark_model_wait` | `counter.py` | 新設 | `mark_model_wait(self) -> None` | 今の入力の記録に `model_wait: true` を置く（入力が変わると記録ごと初期化される）。`usable` が偽なら何もしない |
@@ -203,13 +203,13 @@ plugins/ndf/
 | `run` | `dispatch.py` | 変更 | 引数 `counter`・`state_dir` を締め切りと合わせて 1 つの `svc: GuardServices` にまとめる（`clock` の前）。`run(ctx, specs, budget, svc, clock)` | 受け取った `svc` に guard ごとの `params` を入れた写しを渡す（引数の数の上限 6 を超えないため、締め切りを引数で足さずに `svc` へまとめる）。今の guard を打ち切る判定（`clock() - start > budget.usable`）は変えない |
 | `_guards` | `main.py` | 変更（中身だけ） | 変えない | SIGALRM に使う `run.started + found.deadline` を `GuardServices` の `deadline` に入れて `dispatch.run` へ渡す（SIGALRM と guard が同じ起点の時刻を使う） |
 
-- `asked_since_prompt` の境: tool_result だけを持つ `user` の行（Tool の結果）は利用者の入力に数えない。末尾に利用者の入力が無ければ、読めた範囲で探す
+- `asked_since_prompt` の境: tool_result だけを持つ `user` の行（Tool の結果）と、`isMeta` が真の `user` の行（Claude Code が書くメタの行。`context_records._user_text` と同じ条件）は利用者の入力に数えない。末尾に利用者の入力が無ければ、読めた範囲で探す
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `asked_since_prompt` | 入力 → AskUserQuestion → 結果 → 本文 で真。入力 → Bash → 本文 で偽 | 前の入力の前にだけ AskUserQuestion がある → 偽。Tool の結果の `user` の行を入力と読まない | 壊れた行が混じっても読める行で決める |
+| `asked_since_prompt` | 入力 → AskUserQuestion → 結果 → 本文 で真。入力 → Bash → 本文 で偽 | 前の入力の前にだけ AskUserQuestion がある → 偽。Tool の結果の `user` の行と、AskUserQuestion の後に挟まるメタの行（`isMeta` が真）を入力と読まない | 壊れた行が混じっても読める行で決める |
 | `pushback_left` | 0 回・上限−1 回で真 | 上限ちょうどで偽 | 数えない数え手で偽。呼んでも回数が増えない |
 | `mark_model_wait` / `model_waited` | 置いた後に真 | 新しい入力で開き直した数え手で偽 | 数えない数え手で置いても偽 |
 | `run` | 渡した `svc` の `deadline` が guard の `svc.deadline` に届く | — | — |

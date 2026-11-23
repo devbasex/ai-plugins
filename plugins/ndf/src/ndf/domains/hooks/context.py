@@ -526,7 +526,8 @@ def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
 def asked_since_prompt(tail: str) -> bool:
     """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
 
-    Tool の結果だけを持つ `user` の行は利用者の入力に数えない。末尾に利用者の入力が無ければ、読めた範囲で探す。
+    Tool の結果だけを持つ `user` の行と、Claude Code が書くメタの行（`isMeta` が真）は利用者の入力に数えない
+    （`ndf.domains.relay.context_records._user_text` と同じ条件）。末尾に利用者の入力が無ければ、読めた範囲で探す。
     """
     for line in reversed(tail.splitlines()):
         if '"user"' not in line and _ASK_TOOL not in line:
@@ -535,7 +536,7 @@ def asked_since_prompt(tail: str) -> bool:
         if rec is None:
             continue
         content = _content(rec)
-        if rec.get("type") == "user" and _is_prompt(content):
+        if rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content):
             return False
         if _asks(content):
             return True
