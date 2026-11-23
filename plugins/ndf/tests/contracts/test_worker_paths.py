@@ -415,3 +415,20 @@ def test_remove_file_removes_link_name_swapped_after_check(workdir, monkeypatch)
         assert worker_paths.remove_file(wd, "f") == "removed"
     assert not os.path.lexists(d / "f")
     assert outside.read_text(encoding="utf-8") == "利用者の中身"
+
+
+def test_write_file_refuses_directory_others_can_rename_in(workdir):
+    d, _ = workdir
+    d.chmod(0o777)
+    with worker_paths.open_workdir(d) as wd, pytest.raises(PermissionError):
+        worker_paths.write_file(wd, "f", "新")
+    assert list(d.iterdir()) == []
+
+
+def test_write_file_accepts_shared_directory_with_sticky_bit(workdir):
+    d, _ = workdir
+    d.chmod(0o1777)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "f", "新")
+    assert (d / "f").read_text(encoding="utf-8") == "新"
+    assert [p.name for p in d.iterdir()] == ["f"]
