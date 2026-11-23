@@ -21,17 +21,13 @@ from typing import Optional
 from ndf.domains.hooks import budget, reply_judge
 from ndf.domains.hooks.verdict import Verdict, passing
 
-# 変更要求の文（#4000 の受け入れ条件 11）。10 系の `relay_lib/mark.py` の `WAIT_REASON` を出発点にした。区分の一覧と実行の形
-# ごとの出し方は写さず `development-workflow` の `references/asking.md` を指し、経路をここで分けない。`{matched}` はルールで
-# 止めたときだけ当たった文を入れ、軽いモデルで止めたときは空にする
+# 変更要求の文（#4000 の受け入れ条件 11）。Stop で差し戻すたびに会話へ入るので、その場で要る動作と参照だけにし、理由
+# （本文の質問が届かない先・区分の一覧・実行の形ごとの経路）は `development-workflow` の `references/asking.md` に置く。
+# `{matched}` はルールで止めたときだけ当たった文を入れ、軽いモデルで止めたときは空にする
 REASON = (
-    "本文で人の回答を待って終えた{matched}。本文の質問は中継とオーガナイザーへ届かず、待ちの知らせも出ず、/goal も止まらない。"
-    "人へ問えるのは承認ゲート（設計の承認は ndf-gate:1、本番系へ届く操作の承認は ndf-gate:2）と、development-workflow の "
-    "references/asking.md の「区分」に当たる質問だけである。当たるなら、AskUserQuestion の metadata.source に区分を付けて"
-    "出し直す（材料は本文に書いてよい。並列の計画のレーン・人のいない実行・AskUserQuestion の無いランタイムは asking.md の"
-    "そのセクションの経路で出す）。当たらなければ人へ回さず推奨の案で決め、決めたことと理由を報告に 1 行で書いて続ける。"
-    "質問を出した後も、回答を待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
-    "質問の形の文を書き換えて終える。"
+    "本文で人の回答を待って終えた{matched}。development-workflow の references/asking.md の「区分」に当たるなら"
+    " AskUserQuestion（metadata.source に区分）で出し直し、当たらなければ推奨の案で決めて理由を報告に 1 行で書き、続ける。"
+    "待っていない（引用・ほかの場所の待ちの報告）なら質問の形の文を書き換えて終える。"
 )
 # 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
 LOGGED = "本文で人の回答を待って終えた（stop-wait）"
