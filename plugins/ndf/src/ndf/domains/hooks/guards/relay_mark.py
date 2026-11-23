@@ -3,18 +3,24 @@
 中継の下で最後の応答が次のセグメントのブロック（囲みの名前は表の `params.fence`）を持てば、次のセグメントのマーカー
 （`next.json`）を書く。`/goal` の続き（`stop_hook_active` が真）でも同じに書く。背景の作業が残る間はマーカーを書かずに
 変更要求、終わるのを待たせる（変更要求はセッションの数え手が利用者の入力ごとに数える）。
+
+中継の下では、どの戻りより前に活動（背景の作業の一覧とセッション）を `activity.json` へ書く（#4036）。入力の
+`background_tasks` は正規化の前の値を渡し、明示の空のリストと観測できなかった値を分けて残す。
 """
 
 from __future__ import annotations
 
 from ndf.domains.hooks import tables
-from ndf.domains.relay import blocks, signals
+from ndf.domains.relay import blocks, registry, signals
 from ndf.domains.hooks.verdict import Verdict, passing, pushback
 
 
 def check(ctx, svc) -> Verdict | None:
     directory = signals.relay_dir(ctx.env)
-    if directory is None or not ctx.last_reply:
+    if directory is None:
+        return None
+    registry.write_activity(directory, ctx.payload.get("background_tasks"), ctx.payload.get("session_id"))
+    if not ctx.last_reply:
         return None
     block = blocks.last_block(ctx.last_reply, svc.params["fence"])
     if block is None:
