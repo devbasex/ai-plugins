@@ -86,7 +86,7 @@ flowchart LR
 | 死活監視（`liveness.judge`） | `sprint_wait` が `SPRINT_GATE` と読み、`WAITING_ANSWER`。ラッパーが消えていても停止にも再起動の対象にもならない | 今のとおり `awaiting_next` の `RESUMING` で、耐久ワークフローが回答の後の入力（`resume_commands`）で再開する |
 | `/goal` の終わりの条件 | 承認ゲートと同じく応答を終える（終わりの条件の文に「`status: gate` が返ったら応答を終える」を追加する。承認ゲートの今の扱いと同じ文） | 今のとおり |
 
-**棚卸しの範囲。** 差分の棚卸しは、振り返りの範囲の始まり（`ndf issues candidates --since-ref` に渡す、前のリリースのタグ）より後に起票した課題を扱う。`delegate` は棚卸しのリクエストに、そのスプリントが自分で流したなら渡したはずの `since_ref`（クリーンアップした後の作業場所を読まないよう、リポジトリのルートで `git describe --tags --abbrev=0 origin/<基のブランチ>` が返す、基のブランチから届く最新のタグ。タグが無ければ null で、全件が対象）と、スプリントの課題 `issues` を書く。バッチでは各リクエストの範囲の和集合を処理する: `since_ref` のうち最も古いコミットのもの（1 つでも null なら null）を `--since-ref` に渡し、各リクエストの `issues` を `--add` に渡す。
+**棚卸しの範囲。** 差分の棚卸しは、振り返りの範囲の始まり（`ndf issues candidates --since-ref` に渡す、前のリリースのタグ）より後に起票した課題を扱う。`delegate` は棚卸しのリクエストに、そのスプリントが自分で流したなら渡したはずの `since_ref`（クリーンアップした後の作業場所を読まないよう、リポジトリのルートで `git describe --tags --abbrev=0 origin/<基のブランチ>` が返す、基のブランチから到達できる最新のタグ。タグが無ければ null で、全件が対象）と、スプリントの課題 `issues` を書く。バッチでは各リクエストの範囲の和集合を処理する: `since_ref` のうち最も古いコミットのもの（1 つでも null なら null）を `--since-ref` に渡し、各リクエストの `issues` を `--add` に渡す。
 
 ### 異常系の処理
 
@@ -105,7 +105,7 @@ flowchart LR
 | `delegate`・`_start` | 計画のスプリントの検証の境で `lane-verify` が 1 件・結果が `status: gate`。棚卸しの境で `lane-backlog` が 1 件（`since_ref` と `issues` を持つ）・棚卸しの工程が `completed`・スプリントが完了 | リトライで増えない。`retry` の後は試みの進んだ新しいキーで 1 件。`versioned` が偽の `documentation` のスプリントは `version: null` で委譲し、バージョンの無い `done` の回答で 2 工程とも完了する | 計画の外では書かない。`versioned` が真でバージョンの無い文脈で `precondition` |
 | `wait`・`liveness.judge` | 回答の前の委譲した待ちで `progress wait --timeout 0` が `gate` を返し、ラッパーの無いスプリントの判定が `WAITING_ANSWER` | 回答の後は `RESUMING` | — |
 | `_consume_delegated` | `done` で委譲した工程がすべて完了し `verification` にそのスプリントのレポート・要求のバージョン・読んだバージョンが載る。`documentation` で 2 工程とも完了 | 古い委譲のキーの回答を読まない。レポートに不合格や `not_run` の条件があっても `done` なら完了し振り返りへ進む | `failed` で先頭が `failed`・`decide` が `FAILED` |
-| `environment_of` | 宣言があればその名前 | `verify: null`・キー無し・空の文字列でリポジトリの名前 | 形の違う設定で `precondition` |
+| `environment_of` | 設定があればその名前 | `verify: null`・キー無し・空の文字列でリポジトリの名前 | 形の違う設定で `precondition` |
 
 ## バッチのコマンド（`plan/batch`・`plan/cli`）
 
