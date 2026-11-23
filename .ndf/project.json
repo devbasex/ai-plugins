@@ -643,7 +643,7 @@
     ]
   },
   "budget": {
-    "tests": 4650,
+    "tests": 6000,
     "ci_jobs": 40,
     "unused_deps": 4,
     "replaceable": 24,
