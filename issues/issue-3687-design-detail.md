@@ -440,12 +440,12 @@ plugins/ndf/
 
 ### 関数の仕様
 
-`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）と、新設の `truthy`（`UV_NO_SYNC`・`UV_NO_ENV_FILE` を uv と同じに 1・true・yes・y・on・t で真と読む）を使う。
+`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）と、新設の `truthy`（`UV_NO_SYNC`・`UV_NO_ENV_FILE` を uv と同じに 1・true・yes・y・on・t で、大文字小文字を問わず真と読む。外部コマンドを起動せずシェルの `case` で比べる）を使う。uv を入れた直後の起動も、既にある uv を使う起動と同じ `UV_NO_SYNC` の判定を通る。
 
 | 箇所 | 種類 | 変える中身 |
 | --- | --- | --- |
-| `bin/ndf` の 98 行の直前 | 変更 | `"$uv_bin" sync --frozen --no-dev --quiet --project "$root"` を打ち、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <uv の error: の行。無ければ最終行>"` を呼ぶ |
-| 同じ箇所（`UV_NO_SYNC` が真のとき） | 変更 | 上の同期の代わりに `"$uv_bin" sync --frozen --no-dev --check --quiet --project "$root"` を打ち、0 以外（環境が無い・lock どおりでない）なら `stop_deps_missing` を呼ぶ。理由に `UV_NO_SYNC` を外す直し方を載せる |
+| `bin/ndf` の 98 行の直前 | 変更 | `"$uv_bin" sync --frozen --no-dev --inexact --quiet --project "$root"` を打ち（`--inexact`: 今の `uv run` と同じに、lock に無い追加のパッケージを消さない）、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <uv の error: の行。無ければ最終行>"` を呼ぶ |
+| 同じ箇所（`UV_NO_SYNC` が真のとき） | 変更 | 上の同期の代わりに `"$uv_bin" sync --frozen --no-dev --inexact --check --offline --no-python-downloads --quiet --project "$root"` を打ち（ネットワークに出ず、合う Python が無くても取って入れない。追加のパッケージは食い違いに数えない）、0 以外（環境が無い・lock どおりでない）なら `stop_deps_missing` を呼ぶ。理由に `UV_NO_SYNC` を外す直し方を載せる |
 | `bin/ndf` の 98 行 | 変更 | `exec "$uv_bin" run --frozen ...` をやめ、`VIRTUAL_ENV` を `UV_PROJECT_ENVIRONMENT` に、PATH の先頭へ `$UV_PROJECT_ENVIRONMENT/bin` を入れてから `exec "$UV_PROJECT_ENVIRONMENT/bin/python" -P "$root/bin/start.py"` を呼ぶ（呼び出し元の値は既にある `NDF_CALLER_<名前>` の写しから start.py が戻す） |
 | 同じ箇所（`UV_ENV_FILE` があり `UV_NO_ENV_FILE` が真でないとき） | 変更 | 環境ファイルの読み込みを uv に任せ、`exec "$uv_bin" run --no-sync --no-dev --quiet --project "$root" python -P "$root/bin/start.py"` で渡す |
 

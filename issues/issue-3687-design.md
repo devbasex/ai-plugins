@@ -291,10 +291,11 @@ flowchart TB
   S["bin/ndf 起動"] --> U{"uv がある"}
   U -->|無い| I["入れる（curl → sha256 照合）"]
   I -->|失敗| E["結果 JSON + deps_missing 69"]
-  U -->|ある| Y["uv sync --frozen --no-dev"]
-  I -->|成功| Y
+  U -->|ある| N{"UV_NO_SYNC が真"}
+  I -->|成功| N
+  N -->|偽| Y["uv sync --frozen --no-dev --inexact"]
   Y -->|失敗| E
-  U -->|ある・UV_NO_SYNC| C["uv sync --frozen --no-dev --check"]
+  N -->|真| C["uv sync --frozen --no-dev --inexact --check --offline --no-python-downloads"]
   C -->|失敗| E
   C -->|成功| X
   Y -->|成功| X["exec 環境の python … start.py<br/>（UV_ENV_FILE のときだけ exec uv run --no-sync）"]
