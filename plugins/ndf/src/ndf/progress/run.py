@@ -22,24 +22,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
-from datetime import timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Optional
 
-from ndf import identity, process_group
-from ndf.adapters.git import Git, GitError
-from ndf.adapters.github import GitHub, GitHubError, client
+from ndf import process_group
 from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, definition, invoke, model, stages, store
+from ndf.progress.records import Records, github_records, sync_records
 
 TOOL = __package__.rpartition(".")[2]
 ACTOR = invoke.ACTOR
@@ -374,107 +371,14 @@ def report(v: View, m: Move) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", v.machine_id))
 
 
-# --- 進捗記録（受け入れ条件 6・3377-9）: 課題の工程表とスプリント PR の「通した工程」を終了のマーカーから書き直す ---
-# 本文のセクション（見出しから終わりのマーカーまで）だけを書き直すので、何度打っても同じ本文になる。
-
-# 進捗記録のセクションの見出しと終わりのマーカー、時刻の表示の時間帯（JST）
-ISSUE_SECTION = "## 進行"
-PR_SECTION = "## 通した工程"
-SECTION_END = f"<!-- {identity.FINAL_NAME}:section-end -->"
-JST = timezone(timedelta(hours=9))
-
-
-class Records(Protocol):
-    """課題と PR の本文の読み書き。"""
-
-    def read(self, number: int) -> str: ...
-
-    def write(self, number: int, body: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class GitHubRecords:
-    hub: GitHub
-
-    def read(self, number: int) -> str:
-        return self.hub.issue_body(number).body
-
-    def write(self, number: int, body: str) -> None:
-        self.hub.rest("PATCH", f"/repos/{self.hub.repo}/issues/{int(number)}", {"body": body})
-
-
-def github_records(cwd: Path) -> Records:
-    return GitHubRecords(GitHub(Git(cwd).remote_repo(), client()))
-
-
-def _record_line(name: str, row: Optional[model.RowState]) -> str:
-    if row is not None and row.state == FINISHED and row.at is not None:
-        return f"- [x] {name} — {row.at.astimezone(JST):%Y-%m-%d %H:%M}"
-    if row is not None and row.state in ("disabled", "cancelled"):
-        why = f"（{row.reason}）" if row.reason else ""
-        return f"- [ ] {name} — {model.label(row.state)}{why}"
-    return f"- [ ] {name}"
-
-
-def issue_section(v: View) -> str:
-    """課題の工程表（セクション「進行」の中身）。全工程を並べ、終了のマーカーが付いた行だけにマーカーと時刻を付ける。"""
-    rows = v.rows
-    lines = [f"モード: {v.snap.mode}", ""] + [_record_line(s.name, rows.get(s.name)) for s in v.snap.stages]
-    return "\n".join(lines)
-
-
-def pr_section(v: View) -> str:
-    """スプリント PR の「通した工程」。終了のマーカーが付いた行だけを並べる。"""
-    rows = v.rows
-    done = [_record_line(s.name, rows[s.name]) for s in v.snap.stages if s.name in rows and rows[s.name].state == FINISHED]
-    return "\n".join(line.replace("- [x] ", "- ", 1) for line in done)
-
-
-def replace_section(body: str, heading: str, content: str) -> str:
-    """本文のセクション（見出しから終わりのマーカーまで）を書き直す。無ければ末尾へ足す。何度打っても同じ本文になる。"""
-    block = f"{heading}\n\n{content}\n{SECTION_END}\n"
-    pattern = re.compile(rf"^{re.escape(heading)}\n.*?^{re.escape(SECTION_END)}\n?", re.MULTILINE | re.DOTALL)
-    if pattern.search(body):
-        return pattern.sub(lambda _m: block, body, count=1)
-    return f"{body.rstrip(chr(10))}\n\n{block}" if body.strip() else block
-
-
-def _targets(v: View) -> list[tuple[str, int, str, str]]:
-    ctx = v.context()
-    out = [("issue", int(n), ISSUE_SECTION, issue_section(v)) for n in ctx["issues"]]
-    if "pr" in ctx:
-        out.append(("pr", int(ctx["pr"]), PR_SECTION, pr_section(v)))
-    return out
-
-
-def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[list[dict[str, Any]], list[str]]:
-    """課題と PR の本文の進捗のセクションを、ステートマシンの終了のマーカーから書き直す。書けなかった保存先は誤りに載せる。
-
-    `make` は保存先を作る（`run.Env.records`）。
-    """
-    try:
-        records = make(cwd)
-    except (GitError, GitHubError) as exc:
-        return [], [f"進捗記録を書けない: {exc}"]
-    items, errors = [], []
-    for kind, number, heading, content in _targets(v):
-        try:
-            body = records.read(number)
-            new = replace_section(body, heading, content)
-            if new != body:
-                records.write(number, new)
-            items.append({"kind": kind, "number": number, "changed": new != body})
-        except GitHubError as exc:
-            errors.append(f"{kind} #{number} の進捗記録を書けない: {exc}")
-    return items, errors
-
-
 # --- 依存（テストが差し替える） ------------------------------------------------------------
 
 
 Facts = Callable[[tuple[str, ...], Mapping[str, Any], Path], Mapping[str, bool]]
 Launch = Callable[[store.Store, str, Path], Optional[int]]
 Invoker = Callable[[invoke.StageRun, Path, Path, Optional[str]], invoke.StageResult]
+# プランの差し込みを組んで保存先へ残す（呼び出し・保存先・打った場所）。上げた例外は `invoke.plan_failure` が分ける
+Prepare = Callable[[invoke.StageRun, Path, Path], object]
 
 
 def launch_worker(st: store.Store, machine_id: str, cwd: Path) -> Optional[int]:
@@ -500,6 +404,7 @@ class Env:
     facts: Facts
     launch: Launch = launch_worker
     invoker: Invoker = _invoke
+    prepare: Prepare = invoke.prepare_plan
     records: Callable[[Path], Records] = github_records
     sleep: Callable[[float], None] = time.sleep
     ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
@@ -587,8 +492,43 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return result.stopped(TOOL, exc.kind, str(exc), items=exc.items, metrics=_metrics(v, m))
+    failed = _prepare(d, v, s, inputs)
+    if failed is not None:
+        cause = failed["cause"]
+        wait = cause["retry_after"] if "retry_after" in cause else None
+        items = failed["items"] if "items" in failed else []
+        detail = f"工程 {s.name} の{cause['detail']}"
+        return result.stopped(TOOL, cause["kind"], detail, retry_after=wait, items=items, metrics=_metrics(v, m))
     d.write(model.EventDraft(STARTED, ACTOR, s.name, payload={"inputs": inputs}, rev=v.rev))
     return None if d.inline else _launched(d, v, m)
+
+
+def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """試行の始まりに、前の試行の値（`values.json` と課題の写し）を工程のすべてのステップの保存先から消し（消せなければ
+    precondition）、次に流すステップがプランならその差し込みを組んで確かめる（#3908 の決定 2・4）。組めなければ `invoke.plan_failure` の結果、組めれば None。
+
+    次に流すステップは、出力の失敗で初めから流し直す（`redo`）なら最初のステップ、ほかは終わっていない最初のステップである。
+    2 つ目以降のプランのステップは前のステップが作った値を差し込みに使うので、ここでは組まず、流すときに `plan_path` が組む。
+    """
+    try:
+        invoke.clear_values(step_dir(d, v, s, st) for st in s.steps)
+    except OSError as exc:
+        return result.stopped(invoke.PLAN, "precondition", f"前の試行の値を保存先から消せない: {exc}")
+    prog = step_progress(v, s.name)
+    step = s.steps[0] if prog.redo else prog.next_step(s)
+    if step is None or invoke.kind_of(step) != invoke.PLAN:
+        return None
+    run = invoke.stage_run(s, step, inputs)
+    if invoke.template(run.name) is None:
+        return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
+    try:
+        d.env.prepare(run, step_dir(d, v, s, step), d.cwd)
+    except invoke.PLAN_FAILURES as exc:
+        failed = invoke.plan_failure(run.name, exc)
+        if failed is None:
+            raise
+        return failed
+    return None
 
 
 def launch_path(root: Path, machine_id: str) -> Path:
@@ -848,6 +788,11 @@ def step_location(step: str, prog: StepProgress) -> str:
     return f"{step}-g{prog.generation}"
 
 
+def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Path:
+    """ステップのプランの実行の保存先。`_start` と `_run_step` が同じ世代の同じ保存先を得る。"""
+    return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
+
+
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
     """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。"""
     prog = step_progress(v, s.name)
@@ -858,7 +803,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
-    work_dir = work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, prog)
+    work_dir = step_dir(d, v, s, step)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 

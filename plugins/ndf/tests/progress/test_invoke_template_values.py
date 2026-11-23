@@ -1,7 +1,7 @@
 """工程から組むプランの差し込み（`invoke.template_values`）の、起動の補いと受け入れ条件の検査の現状固定。
 
 単発の経路（`ndf route render` の `_write_plan`）と同じ補い（`route.launch_values`）と検査（`route.check_acceptance`）を、
-出所の表・打った場所（`route.derived`）で埋めた後、つなぎ目のレビュー・リファクタリングの補いと欠けの検査より前に通す。
+出所の表・打った場所（`route.derived_locally`）・課題・マージの方式で埋めた後、つなぎ目のレビュー・リファクタリングの補いと欠けの検査より前に通す。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import pytest
 import strategy_fixture
 
 from ndf.core import route
-from ndf.progress import invoke
+from ndf.progress import invoke, merge_pending
 
 # 設定（`.ndf/project.json`）のうち、実装のプランの差し込みを埋める値（review の起動は持たない。既定の起動を補わせる）
 PROJECT = {
@@ -43,7 +43,7 @@ def filled(monkeypatch):
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: read.append("merge_method") or "squash")
     return read
 
 
@@ -109,3 +109,110 @@ def test_a_valid_acceptance_of_several_issues_reaches_the_missing_values_check(t
         _values(tmp_path, _impl_run(repo, [3, 4], acceptance=["--issue", "3", "--issue", "4"]), repo)
     assert set(got.value.missing) == {"title", "body_file"}
     assert got.value.missing["title"] == invoke.FROM_ISSUE
+
+
+def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled):
+    # 課題に依存しない差し込み（設定の required）が欠ければ、課題の題・本文と書き手の権限を GitHub から読む前に止まる。
+    # 試行の始まりに写しを消すので、読んでから止まると打ち直すたびに読み直す（PR 4289 の指摘）
+    repo = _sprint_repo(tmp_path)
+    work = tmp_path / "w"
+    work.mkdir()
+    project = {"test": PROJECT["test"]}
+    with pytest.raises(invoke.TemplateValuesMissing) as got:
+        invoke.template_values(route.choose("implement"), _impl_run(repo, [3092]), work, repo, project=project, local_tests=True)
+    assert got.value.missing == {"required": invoke.FROM_PROJECT}
+    assert filled == []
+
+
+@pytest.fixture
+def local(tmp_path, monkeypatch):
+    """手元（git と設定ファイル）で決まる値を差し替えた作業場所（git を起動しない）。ブランチは sprint/s1、マージ先は develop。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(invoke, "_branch_of", lambda run: "sprint/s1")
+    monkeypatch.setattr(route, "derived_locally", lambda t, given, cwd: {"repo": str(repo), "remote": "origin", "base": "develop", **given})
+    return repo
+
+
+def _close(tmp_path: Path, repo: Path) -> dict:
+    """課題とマージの方式の両方を使う閉じのテンプレート（`close`）の差し込み。"""
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    run = invoke.StageRun(invoke.PLAN, "close", {"issues": [3092], "worktree": str(repo)}, (), "none", "close")
+    return invoke.template_values(route.choose("close"), run, work, repo, project=PROJECT, local_tests=True)
+
+
+def test_close_reads_the_issue_before_asking_github_for_the_merge_method(tmp_path, filled, local):
+    got = _close(tmp_path, local)
+    assert filled == [3092, "merge_method"]
+    assert got["title"] == "#3092 の題" and got["merge_method"] == "squash"
+
+
+def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, local, monkeypatch):
+    # マージの方式は課題を読んだ後に GitHub に問う。課題を読めずに止まる試行では問い合わせない（PR 4289 の指摘）
+    def fail(location, n):
+        raise invoke.github.GitHubError("読めない")
+
+    monkeypatch.setattr(invoke, "issue_text", fail)
+    with pytest.raises(invoke.github.GitHubError):
+        _close(tmp_path, local)
+    assert filled == []
+
+
+def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_issue(tmp_path, filled, local, monkeypatch):
+    # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問うて、決まらなければ課題を読まずに止める。
+    # 決まった試行で課題と書き手の権限を読み直す（写しは clear_values が消している。PR 4289 の指摘）
+    answers = iter([None, None, "squash"])
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: filled.append("merge_method") or next(answers))
+    for _ in range(2):
+        with pytest.raises(invoke.TemplateValuesMissing) as got:
+            _close(tmp_path, local)
+        assert set(got.value.missing) == {"merge_method"}
+        invoke.clear_values([tmp_path / "w"])
+    got = _close(tmp_path, local)
+    assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
+    assert got["merge_method"] == "squash" and not (tmp_path / "w" / merge_pending.PENDING_FILE).exists()
+
+
+def _pending(tmp_path: Path) -> Path:
+    """マージの方式を決められずに止まった試行の目印（前の試行が残したもの）。"""
+    work = tmp_path / "w"
+    work.mkdir(exist_ok=True)
+    (work / merge_pending.PENDING_FILE).write_text("{}", encoding="utf-8")
+    return work / merge_pending.PENDING_FILE
+
+
+def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_again(tmp_path, filled, local, monkeypatch):
+    # 目印のある打ち直しで方式が決まった後に課題を読めずに止まっても、方式は目印に記録しておき、次の打ち直しは
+    # 問い合わせ直さない。許す方式の変化には、GitHub がマージを断ったときに値を捨てて追う。課題を読めた試行が
+    # 目印を消す（PR 4289 の指摘）
+    pending = _pending(tmp_path)
+
+    def fail(location, n):
+        raise invoke.github.GitHubError("読めない", status=502)
+
+    with monkeypatch.context() as m:
+        m.setattr(invoke, "issue_text", fail)
+        with pytest.raises(invoke.github.GitHubError):
+            _close(tmp_path, local)
+    invoke.clear_values([tmp_path / "w"])
+    got = _close(tmp_path, local)
+    assert filled == ["merge_method", 3092]
+    assert got["merge_method"] == "squash" and not pending.exists()
+
+
+def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_path, filled, local, monkeypatch):
+    # 目印のある打ち直しで方式を問う GitHub が上限に当たれば、方式が無いとせずに待ち時間付きの transient で止まり、
+    # 課題を読まずに目印を残す（PR 4289 の指摘）
+    pending = _pending(tmp_path)
+
+    def limited(repo, base, remote=None, *, raise_passing=False):
+        assert raise_passing
+        raise invoke.github.GitHubError("上限", status=403, retry_after=60.0, quota="rest")
+
+    monkeypatch.setattr(route, "default_merge_method", limited)
+    with pytest.raises(invoke.github.GitHubError) as got:
+        _close(tmp_path, local)
+    stopped = invoke.plan_failure("close", got.value)
+    assert stopped["cause"]["kind"] == "transient" and stopped["cause"]["retry_after"] == 60.0
+    assert filled == [] and pending.exists()

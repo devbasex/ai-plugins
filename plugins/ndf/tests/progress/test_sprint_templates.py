@@ -55,7 +55,7 @@ def sprint(repo, monkeypatch):
     held = route.params()
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     # 集めた時点（工程「実装」の出力 gathered）はスプリントブランチのコミット。コードレビューがつなぎ目の起点に確かめる（#3879）
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
@@ -181,7 +181,7 @@ def planned(repo, monkeypatch):
     held = route.params()
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     return repo
 

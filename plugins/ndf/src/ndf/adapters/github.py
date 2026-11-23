@@ -136,6 +136,11 @@ class GitHubError(Exception):
         self.quota = quota
         self.unreached = unreached
 
+    @property
+    def passing(self) -> bool:
+        """打ち直せば通りうる失敗（不達・5xx・上限）か。状態が 0 でも届いて断られた失敗（GraphQL の誤り・認証が無い）は偽。"""
+        return self.unreached or self.status >= 500 or self.retry_after is not None or self.status == 429
+
 
 def token() -> str:
     """認証の値。環境変数を先に読み、無ければ `gh auth token`。得られなければ `GitHubError`。"""
@@ -427,12 +432,8 @@ def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[
 def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
     """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
     want = method if method is not None else "（設定なし）"
-    return MergeOutcome(
-        False,
-        "refused",
-        f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）",
-        pull.head_sha,
-    )
+    detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
+    return MergeOutcome(False, "refused", detail, pull.head_sha)
 
 
 def _response_body(resp: Any) -> Any:
@@ -474,9 +475,8 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     if isinstance(exc, RateLimitExceeded):
         quota = GRAPHQL if label == GRAPHQL else REST
         kind = "・secondary rate limit" if isinstance(exc, SecondaryRateLimitExceeded) else ""  # 二次の上限は待てば戻る（#3941）
-        return GitHubError(
-            f"GitHub の上限（{quota} のスロット{kind}）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
-        )
+        detail = f"GitHub の上限（{quota} のスロット{kind}）: {label}"
+        return GitHubError(detail, exc.response.status_code, exc.retry_after.total_seconds(), quota)
     if isinstance(exc, RequestFailed):
         status = exc.response.status_code
         body = f": {exc.response.text[:300]}" if detail_body else ""
