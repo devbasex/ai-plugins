@@ -536,18 +536,30 @@ def _close_streams(proc: subprocess.Popen) -> None:
             pass
 
 
-def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
+def call_claude(
+    argv: Sequence[str],
+    prompt: str,
+    timeout: float,
+    cwd: Optional[Path] = None,
+    slot_wait: Optional[float] = None,
+    new_group: bool = True,
+    cli_floor: bool = True,
+) -> ClaudeReply:
     """`claude` を起動し、質問を標準入力で渡して回答を読む。起動の失敗・期限切れは `ok` が偽の回答にする。
 
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
-    `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
+    `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
     環境と起動引数でこの前置きを打つ。
+
+    `slot_wait` は重い起動のスロットを待つ上限の秒（None なら設定の上限 `launch.wait.llm-cli`、0 なら待たない。#4000 の決定 8）。
+    `new_group` が真なら専用のプロセスの組で起動し、偽なら呼び手の組に入れる（呼び手が 1 回の送信で claude ごと止められる。#4000 の決定 3）。
+    `cli_floor` が偽なら下限の確かめ（`claude --version`）を打たずに起動する（親のセッションが動いている時点で下限を満たす子の起動）。
     """
     env = child_process_env()
     if relay_checks is None or not _inherited(env):
-        return _prefaced(AccountRun(env, list(argv)), prompt, timeout, cwd)
-    return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env)
+        return _prefaced(AccountRun(env, list(argv)), prompt, timeout, cwd, slot_wait, new_group, cli_floor)
+    return _accounted(relay_checks, list(argv), prompt, timeout, cwd, env, slot_wait, new_group, cli_floor)
 
 
 def _inherited(env: Mapping[str, str]) -> bool:
@@ -555,7 +567,17 @@ def _inherited(env: Mapping[str, str]) -> bool:
     return bool(env.get("NDF_CLAUDE_ACCOUNT")) and bool(env.get("NDF_RELAY_DIR"))
 
 
-def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
+def _accounted(
+    checks: RelayChecks,
+    argv: list[str],
+    prompt: str,
+    timeout: float,
+    cwd: Optional[Path],
+    env: dict[str, str],
+    slot_wait: Optional[float],
+    new_group: bool,
+    check_floor: bool,
+) -> ClaudeReply:
     """起動先を継いだ起動。中継の確かめに通れば起動し、登録済みアカウントの上限なら替え先で 1 回だけ打ち直す（決定 9）。
 
     確かめ（キーを渡せない形の `key_gate` を含む）は前置きより先に打ち、前置きは確かめが確定した環境で打つ。
@@ -565,29 +587,36 @@ def _accounted(checks: RelayChecks, argv: list[str], prompt: str, timeout: float
     got = checks.begin(argv, env, where, keys)
     if isinstance(got, AccountRefused):
         return ClaudeReply.failed("", got.detail, failure=got.failure)
-    reply = _prefaced(got, prompt, timeout, cwd)
+    reply = _prefaced(got, prompt, timeout, cwd, slot_wait, new_group, check_floor)
     if reply.failure is not Failure.USAGE_LIMIT:
         return reply
     again = checks.retry(argv, env, where, keys)
-    return reply if again is None else _prefaced(again, prompt, timeout, cwd)
+    return reply if again is None else _prefaced(again, prompt, timeout, cwd, slot_wait, new_group, check_floor)
 
 
-def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
-    """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。"""
+def _prefaced(
+    run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], slot_wait: Optional[float], new_group: bool, check_floor: bool
+) -> ClaudeReply:
+    """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。
+
+    `slot_wait` はスロットを待つ上限、`new_group` は claude を新しいプロセスの組に置くか（関所の起動は今までどおり新しい組）。
+    `check_floor` が偽なら CLI の下限を確かめない（`call_claude` の `cli_floor`）。
+    """
     launched = False
     try:
-        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd)) as slot_env:
+        with launch_slot.gate("claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=slot_wait) as slot_env:
             run = run._replace(env={**run.env, **slot_env})
             refused = run.recheck() if run.recheck is not None else None
             if refused is not None:
                 return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
             try:
-                cli_floor.require("claude", run.argv[0], run.env, cwd)
+                if check_floor:
+                    cli_floor.require("claude", run.argv[0], run.env, cwd)
             except cli_floor.TooOld as exc:
                 return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
             if run.gate is None:
                 launched = True
-                return _run_claude(run.argv, prompt, timeout, cwd, run.env)
+                return _run_claude(run.argv, prompt, timeout, cwd, run.env, new_group)
             proc = _gated(run, cwd)
             if isinstance(proc, ClaudeReply):
                 return proc
@@ -679,15 +708,22 @@ def _stop(proc: subprocess.Popen) -> None:
     _close_streams(proc)
 
 
-def _popen(argv: Sequence[str], cwd: Optional[Path], env: dict[str, str], fds: tuple[int, ...] = ()) -> subprocess.Popen:
+def _popen(
+    argv: Sequence[str], cwd: Optional[Path], env: dict[str, str], fds: tuple[int, ...] = (), new_group: bool = True
+) -> subprocess.Popen:
+    """子を起動する。`new_group` が偽なら新しいプロセスの組を作らず、呼び手の組のままにする（#4000 の決定 3）。"""
     pipe = subprocess.PIPE
     extra = {"pass_fds": fds} if fds else {}
-    return subprocess.Popen(list(argv), stdin=pipe, stdout=pipe, stderr=pipe, text=True, cwd=cwd, env=env, start_new_session=True, **extra)
+    return subprocess.Popen(
+        list(argv), stdin=pipe, stdout=pipe, stderr=pipe, text=True, cwd=cwd, env=env, start_new_session=new_group, **extra
+    )
 
 
-def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str]) -> ClaudeReply:
+def _run_claude(
+    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str], new_group: bool = True
+) -> ClaudeReply:
     try:
-        proc = _popen(argv, cwd, env)
+        proc = _popen(argv, cwd, env, new_group=new_group)
     except OSError as exc:
         return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
     return _talk(proc, prompt, timeout)

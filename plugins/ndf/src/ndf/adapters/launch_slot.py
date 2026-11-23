@@ -85,8 +85,13 @@ def _no_slot_reason(agent: str, waited: float, read_memory: ReadMemory) -> str:
     return f"重い起動のスロットを {waited:.0f} 秒待っても {agent} の起動に空かなかった（使えるメモリ: {memory}）"
 
 
-def _wait_for(agent: str, directory: Path, lim: test_limits.Limits, read_memory: ReadMemory) -> slot_pool.Taken:
-    limit, poll = wait_policy()
+def _wait_for(
+    agent: str, directory: Path, lim: test_limits.Limits, read_memory: ReadMemory, limit: Optional[float] = None
+) -> slot_pool.Taken:
+    """スロットを `limit` 秒まで待って取る（None なら設定の上限、0 なら 1 度だけ取りに行き、取れなければ `NoSlot`）。"""
+    policy_limit, poll = wait_policy()
+    if limit is None:
+        limit = policy_limit
     owner = {"pid": os.getpid(), "kind": KIND, "agent": agent}
     started = time.monotonic()
     while True:
@@ -108,9 +113,11 @@ def held(
     cwd: Optional[Path] = None,
     environ: Optional[Mapping[str, str]] = None,
     read_memory: Optional[ReadMemory] = None,
+    wait: Optional[float] = None,
 ) -> Iterator[dict[str, str]]:
     """`agent` の起動 1 本のスロットを取って持ち、抜けるときに返す。取れなければ `NoSlot`。`read_memory` の既定は作業マシンの値。
 
+    `wait` は待つ上限の秒（None なら設定の上限、0 なら待たない）。親のスロットを受け継ぐときは今までどおり待たない。
     子へ足す環境変数（親のスロットを受け継がせる。スロットを取らなかったときは空）を渡す。
     """
     env = os.environ if environ is None else environ
@@ -123,7 +130,7 @@ def held(
         directory.mkdir(parents=True, exist_ok=True)
     except (test_limits.SlotConfigError, identity.IdentityError, OSError) as exc:
         raise NoSlot(f"重い起動のスロットを用意できない: {exc}") from exc
-    taken = _wait_for(agent, directory, lim, read_memory if read_memory is not None else machine.available_mib)
+    taken = _wait_for(agent, directory, lim, read_memory if read_memory is not None else machine.available_mib, wait)
     try:
         yield slot_pool.parent_env(directory, taken.index)
     except BaseException:
@@ -133,16 +140,19 @@ def held(
 
 
 @contextmanager
-def gate(agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None) -> Iterator[dict[str, str]]:
+def gate(
+    agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None, wait: Optional[float] = None
+) -> Iterator[dict[str, str]]:
     """起動の前置き: 学習に使わない設定のスナップショットを読み、重い起動のスロットを取る。起動しないときは `NotLaunched`。
 
     `env` は起動先へ渡す環境（既定は今の環境）で、バックアップを確かめた認証の文脈と照らす。子へ足す環境変数を渡す。
+    `wait` はスロットを待つ上限の秒（None なら設定の上限、0 なら待たずに `NoSlot`）。
     バックアップはスロットを待つ前と、取った後の起動の直前に読む（待つ間にバックアップが期限を過ぎるか、拒否へ変わることがある）。
     バックアップが無いか期限切れ・取り消し済み・認証の文脈が違うなら、断らずにその場で確かめて記録する（`training.ensure`。#3907）。
     取った後に拒否へ変われば、スロットを返して `NotLaunched` を送る。
     """
     _refuse_if_needed(agent, env)
-    with held(agent, cwd=cwd, environ=env) as slot_env:
+    with held(agent, cwd=cwd, environ=env, wait=wait) as slot_env:
         _refuse_if_needed(agent, env)
         yield slot_env
 

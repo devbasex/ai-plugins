@@ -30,6 +30,21 @@ def pool(tmp_path, monkeypatch) -> Path:
     return directory
 
 
+class FakeClock:
+    """眠った分だけ進む偽の時計（実時間を経たせない）。`slept` に眠った秒を順に残す。"""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
 def fill(directory: Path) -> slot_pool.Taken:
     directory.mkdir(parents=True, exist_ok=True)
     taken = slot_pool.take(directory, PLENTY_MIB, test_limits.test_weight_mib(), {"pid": 0})
@@ -86,3 +101,62 @@ def test_gate_rechecks_the_cache_after_taking_the_slot(pool, monkeypatch):
     with pytest.raises(launch_slot.NotLaunched, match="学習に使う"), launch_slot.gate("codex"):
         pytest.fail("拒否へ変わった後に起動した")
     assert slot_pool.held_mib(pool) == 0
+
+
+# ---------------------------------------------------------------- #4000 の決定 8: 待つ上限を呼び手が決める
+
+
+def test_issue_4000_waits_the_configured_limit_without_a_limit(pool, monkeypatch):
+    """#4000: 上限を省けば今までどおり設定の上限（`launch.wait.llm-cli`）まで、設定の間隔で待つ。"""
+    taken = fill(pool)
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    lim = test_limits.load_limits(Path.cwd())
+    try:
+        with pytest.raises(launch_slot.NoSlot, match="空かなかった"):
+            launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
+    finally:
+        taken.release()
+
+    assert clock.slept and set(clock.slept) == {0.05} and clock.now >= 0.3
+
+
+def test_issue_4000_a_zero_limit_gives_up_without_sleeping(pool, monkeypatch):
+    """#4000: 上限 0 なら 1 度だけ取りに行き、取れなければ眠らずに `NoSlot`。"""
+    taken = fill(pool)
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    lim = test_limits.load_limits(Path.cwd())
+    try:
+        with pytest.raises(launch_slot.NoSlot, match="空かなかった"):
+            launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0)
+    finally:
+        taken.release()
+
+    assert clock.slept == []
+
+
+def test_issue_4000_a_zero_limit_still_takes_a_free_slot(pool, monkeypatch):
+    """#4000: 上限 0 でも空きがあればその場で取る。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    lim = test_limits.load_limits(Path.cwd())
+
+    taken = launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0)
+
+    assert slot_pool.held_mib(pool) == slot_pool.weight_mib(launch_slot.KIND) and clock.slept == []
+    taken.release()
+
+
+def test_issue_4000_held_passes_the_wait_down(pool, monkeypatch):
+    """#4000: `held` の `wait` が待つ上限として届く（空きが無ければ眠らずに `NoSlot`）。"""
+    taken = fill(pool)
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    try:
+        with pytest.raises(launch_slot.NoSlot), launch_slot.held("claude", read_memory=lambda: PLENTY_MIB, wait=0):
+            pytest.fail("空きが無いのにスロットを持った")
+    finally:
+        taken.release()
+
+    assert clock.slept == []
