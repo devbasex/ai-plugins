@@ -90,7 +90,8 @@ def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence
     `keep` はモデルへ判定を委ねた見出しの文（`reply_wait.ProseReading.delegated`。本文の順）。本文が上限を超えて
     切ったとき、最終的に残す末尾に無い見出しを「## 」を付けて先頭に置き、合わせて `max_chars` 字に収める。
     先頭に置く見出しは上限の半分までで、超えれば新しい（後ろの）見出しを残す。先頭に置いて末尾が縮むと、縮めた末尾から
-    外れた見出しも先頭へ足す（足す見出しが増えなくなるまで。見出しの数の回だけ回る）。
+    外れた見出しも先頭へ足す（足す見出しが増えなくなるまで）。確定した欠けは探し直さず、末尾にある見出しを前から見て、
+    新しく外れた分だけを足す（末尾は前から縮むので、外れるのは本文の前の側の見出しから）。
     `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
     """
     lines = _markdown_lines(text)
@@ -100,14 +101,21 @@ def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence
     if len(prose) <= max_chars:
         return prose
     tail = prose[-max_chars:]
-    lead = ""
-    while True:
-        missing = "\n".join(f"## {heading}" for heading in keep if heading not in tail)
-        grown = missing[-(max_chars // 2) :] if missing else ""
-        if grown == lead:
-            return f"{lead}\n{tail}" if lead else tail
-        lead = grown
+    # 末尾に無い見出し（確定した欠け）と、末尾にある見出し（本文の順）。末尾は前から縮むので、確定した欠けは
+    # 探し直さず、末尾にある見出しを前から見て、外れた分だけを欠けの後ろへ足す
+    missing = "".join(f"\n## {heading}" for heading in keep if heading not in tail)
+    present = [heading for heading in keep if heading in tail]
+    while missing:
+        lead = missing[1:][-(max_chars // 2) :]
         tail = prose[-(max_chars - len(lead) - 1) :]
+        dropped = 0
+        while dropped < len(present) and present[dropped] not in tail:
+            dropped += 1
+        if not dropped:
+            return f"{lead}\n{tail}"
+        missing += "".join(f"\n## {heading}" for heading in present[:dropped])
+        present = present[dropped:]
+    return tail
 
 
 def _proc_file(pid: int, name: str) -> Path:

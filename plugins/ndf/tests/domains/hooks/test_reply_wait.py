@@ -280,6 +280,8 @@ def test_a_heading_without_a_question_is_a_title(text, kind):
         "## 既存の設定を使いますか？\n別のレーンは承認を待っています。",
         # 見出しの語を含む報告でも、調べた結論でなければ判断の材料で、回答と読まない
         "## 既存の設定を使いますか？\n既存の設定でテストはすべて通りました。\n以上です。",
+        # 事実を尋ねる見出しの下のファイルの一覧は、選択肢でなく報告
+        "## どのファイルが変更されましたか？\n次のファイルを変更しました。\n- a.py\n- b.py",
     ],
 )
 def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
@@ -302,6 +304,9 @@ def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
         "## このままマージしてよいですか？\nCI はすべて通過し、マージできます。",
         # 本人への承認の質問に別の場所の待ちを併記しても、別の場所の待ちだけとして通さない
         "## このままマージしてよいですか？\n別のレーンは承認を待っています。",
+        # 承認の質問の下で判断の材料を確認したと述べても、質問への回答と読まない
+        "## このままマージしてよいですか？\nマージ前のテストがすべて通ったことを確認しました。\n以上です。",
+        "## どの案を採用しますか？\n- A. 先に直す\n- B. 後で直す",
     ],
 )
 def test_a_heading_that_requests_the_user_is_a_heading_wait(text):

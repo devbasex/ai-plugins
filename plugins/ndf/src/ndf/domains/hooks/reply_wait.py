@@ -112,8 +112,16 @@ _PERMISSION_ASKS = (
 )
 # 見出しで選択肢から選ばせる語（「どちらの案で進めますか？」）。手段を問う「どのように」は数えない
 _CHOICE_ASK = re.compile(r"どちら|どっち|どれ|いずれ|選|どの(?!よう|程度|くらい|ぐらい)")
-# 箇条書きの項目が選択肢であることを示す頭（「案 A: …」「A. …」「選択肢 1」「Option B」）
-_OPTION_ITEM = re.compile(r"^(?:案|選択肢|オプション|option|プラン|plan)\s*\S|^[A-ZＡ-Ｚ]\s*[:：.)）]", re.IGNORECASE)
+# 見出しが項目から選ぶ行為を求める語（「どちらの案で進めますか？」「どれにしますか？」）。事実を尋ねる
+# 「どのファイルが変更されましたか？」は当たらず、下の箇条書きは選択肢でなく報告の一覧
+_PICK_ACT = re.compile(r"選|進め|にしますか|にしましょうか|決め|採用|採り")
+# 許可を求める質問への回答と読む、許可を求めた行為の言い切り（「実行できる」「マージして問題ない」）
+_PERMITTED_FORMS = ("でき", "可能", "して問題", "しても問題", "して構わ", "しても構わ", "してかまわ", "してもかまわ")
+# 箇条書きの項目が選択肢であることを示す頭（「案 A: …」「A. …」「選択肢 1」「Option B」）。1 字の頭は大文字だけで、
+# 「.」は後に空白か行末が続くときだけ数える（ファイル名の「a.py」を案と読まない）
+_OPTION_ITEM = re.compile(
+    r"^(?:案|選択肢|オプション|option|プラン|plan)\s*\S|^(?-i:[A-ZＡ-Ｚ])\s*(?:[:：)）]|\.(?=\s|$))", re.IGNORECASE
+)
 # 見出しの許可の質問に直下の本文が答えている頭（FAQ の「はい、変更できます。」）
 _ANSWER_HEAD = re.compile(r"^(?:はい|いいえ|いえ|ええ|yes|no)(?:[、，,。.!！\s]|$)", re.IGNORECASE)
 # 見出しと直下の本文が同じ事柄を述べているかを見る語（漢字・カタカナ・英数字の 2 字以上の並び）
@@ -257,17 +265,19 @@ def _heading_kind(lines: list[ProseLine], at: int) -> str | None:
         if line.heading:
             break
         below.append(line)
-    if _answered(lines[at].text, below):
-        return None
-    return REQUESTS if _requests(asks, below) else UNSURE
+    if _requests(asks, below):
+        # 明示的なリクエストは、許可を求めた行為そのものに直下で回答したときだけ章題にする
+        return None if _answers_permission(asks, lines[at].text, below) else REQUESTS
+    return None if _answered(lines[at].text, below) else UNSURE
 
 
 def _requests(asks: list[str], below: list[ProseLine]) -> bool:
     """見出しの質問が、利用者に承認・選択を明示的に求めているか。
 
     許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つリクエスト（「確認してください」）・
-    申し出（「…ましょうか？」「このまま…ますか？」）・選択肢の箇条書きを従える選ばせる質問（「どちらの案で進めますか？」
-    の下に、前置きの文があってもよい案の箇条書き）を求めると読む。直下が「はい」「いいえ」で答える FAQ
+    申し出（「…ましょうか？」「このまま…ますか？」）・箇条書きを従え、選ぶ行為（`_PICK_ACT`）を求めるか項目が案の形
+    （`_OPTION_ITEM`）の選ばせる質問（「どちらの案で進めますか？」の下に、前置きの文があってもよい案の箇条書き）を
+    求めると読む。直下が「はい」「いいえ」で答える FAQ
     （「はい、変更できます。」）は求めると読まない。
     """
     first = _sentences([below[0].text])[:1] if below else []
@@ -282,9 +292,37 @@ def _requests(asks: list[str], below: list[ProseLine]) -> bool:
             return True
         if any(w in core for w in REPLY_WORDS + APPROVAL_WORDS) and any(w in core for w in WAIT_CONTAINS):
             return True
-        if bullets and _CHOICE_ASK.search(core):
+        options = any(_OPTION_ITEM.match(line.text) for line in bullets)
+        if bullets and _CHOICE_ASK.search(core) and (_PICK_ACT.search(core) or options):
             return True
     return sum(1 for line in bullets if _OPTION_ITEM.match(line.text)) >= 2
+
+
+def _permission_action(core: str) -> str | None:
+    """許可を求める質問（`_PERMISSION_ASKS`）の、許可を求めた行為の語（「管理者権限なしで実行してもよいか」の「実行」）。
+
+    許可の形の前の最後の語（`_TERM`）。許可の形が無いか、前に語が無ければ None。
+    """
+    found = [core.find(w) for w in _PERMISSION_ASKS if w in core]
+    if not found:
+        return None
+    terms = _TERM.findall(core[: min(found)])
+    return terms[-1] if terms else None
+
+
+def _answers_permission(asks: list[str], heading: str, below: list[ProseLine]) -> bool:
+    """明示的なリクエストの見出しに、直下が質問そのものへの回答を言い切っているか。
+
+    リクエストがどれも許可を求める形で、直下が回答を言い切り（`_answered`）、最初の文が許可を求めた行為の語に
+    できる・問題ないの言い切り（`_PERMITTED_FORMS`）を続けるときだけ真（「## 管理者権限なしで実行してもよいですか？」の
+    下の「管理者権限なしで実行できることを確認しました。」）。判断の材料（「## このままマージしてよいですか？」の下の
+    「マージ前のテストがすべて通ったことを確認しました。」）・選ばせる質問・確認のリクエストは回答と読まない。
+    """
+    actions = [_permission_action(_core(s).rstrip("?？")) for s in asks]
+    if not actions or None in actions or not _answered(heading, below):
+        return False
+    first = _core(_sentences([below[0].text])[0])
+    return all(any(f"{action}{form}" in first for form in _PERMITTED_FORMS) for action in actions)
 
 
 def _answered(heading: str, below: list[ProseLine]) -> bool:
