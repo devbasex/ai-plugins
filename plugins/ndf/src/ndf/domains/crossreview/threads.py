@@ -671,19 +671,29 @@ POSITION_PHRASES = ("must be part of the diff", _PATH_UNRESOLVED, "diff_hunk", "
 REFUSAL_PHRASES = ("too quickly", "rate limit", "spam")
 
 
+def _mentions(reasons: Sequence[str], phrases: Sequence[str]) -> bool:
+    """理由のどれかが語のどれかを含むか（理由ごとに 1 回だけ小文字にする）。"""
+    return any(p in low for low in (r.lower() for r in reasons) for p in phrases)
+
+
 def _refused(reasons: Sequence[str]) -> bool:
-    return any(p in r.lower() for r in reasons for p in REFUSAL_PHRASES)
+    return _mentions(reasons, REFUSAL_PHRASES)
+
+
+def _unprocessable(status: int, reasons: Sequence[str], phrases: Sequence[str]) -> bool:
+    """422 で、理由のどれかが `phrases` の語を含み、どれもスパム・二次レート制限の語を含まないか。"""
+    return status == POSITION_REFUSED and _mentions(reasons, phrases) and not _refused(reasons)
 
 
 def position_refused(status: int, reasons: Sequence[str]) -> bool:
     """書き込みが行の位置の誤りだけで断られたか（422 で、理由のどれかが位置の語を含み、どれもスパム・二次レート制限の語を
     含まない）。`reasons` は `GitHubError.reasons`（表示用に切り詰める前の理由のすべて）で、表示の文は見ない。"""
-    return status == POSITION_REFUSED and any(p in r.lower() for r in reasons for p in POSITION_PHRASES) and not _refused(reasons)
+    return _unprocessable(status, reasons, POSITION_PHRASES)
 
 
 def path_unresolved(status: int, reasons: Sequence[str]) -> bool:
     """スレッドの作成が、そのコミットでパスを解決できないと断られたか（422。スパム・二次レート制限の理由が並べば偽）。"""
-    return status == POSITION_REFUSED and any(_PATH_UNRESOLVED in r.lower() for r in reasons) and not _refused(reasons)
+    return _unprocessable(status, reasons, (_PATH_UNRESOLVED,))
 
 
 # 今の実行の認証の login
