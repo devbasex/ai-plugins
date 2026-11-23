@@ -80,11 +80,12 @@ def setting(key: str) -> Any:
 
     方針の行を `ndf.contracts` から読む口はここ 1 つで、値をこのモジュールへ写さない。
     """
-    policies = contracts.load_as(limits.NDF_SETTINGS, JudgeSettingError)["policies"]
-    row = policies.get(POLICY) if isinstance(policies, dict) else None
-    if not isinstance(row, dict) or key not in row:
+    with contracts.raised_as(JudgeSettingError):
+        row = limits.policy(POLICY)._asdict()
+    got = row.get(key)
+    if got is None:
         raise JudgeSettingError(f"上限の設定の方針 {POLICY} に {key} が無い")
-    return row[key]
+    return got
 
 
 def cases_path() -> Path:
