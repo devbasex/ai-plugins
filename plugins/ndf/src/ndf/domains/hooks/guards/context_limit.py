@@ -3,8 +3,8 @@
 会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
 `context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、引継ぎに要る呼び出し（メインディレクトリの引継ぎ文書の Read・Write・Edit、
 `params.pass_tools`、`params.pass_ndf` の `ndf` のコマンドだけの前景の Bash）を除いて止める。`pass_ndf` だけの連結は
-`script-chain` の guard も `handoff_bash` で通す。拒否の文は背景の監視の止め方・メインディレクトリの絶対パスの引継ぎ文書と
-その確かめ方・終え方（中継の下は次のセグメントのブロック、外は ndf-next）を書き、文脈の量を入れない。拒否は同じ理由で数えられ、続けば案内へ下がる
+`script-chain` の guard も `handoff_bash` で通す。拒否の文は、注入の上限で切られないよう先頭に `--cwd <メインディレクトリ>` での
+引継ぎ文書の確かめ方と終え方（中継の下は次のセグメントのブロック、外は ndf-next）を、後に背景の監視の止め方を書き、文脈の量を入れない。拒否は同じ理由で数えられ、続けば案内へ下がる
 （#3345 の決定 92）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
@@ -40,8 +40,10 @@ _DQUOTE_ESCAPES = frozenset('$`"\\\n')
 _NAME = "context-limit"
 # ファイルへ書かないリダイレクト（演算子と先を空白でつないだ字面）: 記述子の複製（先が数字か -）と、/dev/null へ向ける形
 _SAFE_REDIRECT = re.compile(r"[<>]& (?:-|[0-9]+)|&?>>? /dev/null")
-# 引用の外の語の途中の行の継続（前後とも空白でない）。Bash は 1 語につなぐが、構文木は 2 語に分ける
-_WORD_CONTINUATION = re.compile(r"\S\\\n\S")
+# Bash が引用の外で語を区切る空白（字句の blank。ほかの Unicode の空白は語の一部になる）
+_BLANKS = frozenset(" \t")
+# 引用の外で語を区切る字（Bash のメタ文字）。この後の `#` は語の先頭なのでコメントになる
+_METACHARS = frozenset(" \t\n;&|()<>")
 
 
 def _gitdir(dot: Path) -> Optional[Path]:
@@ -193,6 +195,60 @@ def _static_word(text: str) -> Optional[str]:
     return "".join(out)
 
 
+def _continuations_between_words(command: str) -> bool:
+    """`command` の行の継続（`\\<改行>`）がどれも、Bash の引用・エスケープの規則で引数の間にあるか。
+
+    引用の外で、直前の字がエスケープされていない空白かタブ（字句の blank）のときだけ引数の間とみなす。Bash は継続を消して
+    前後を 1 語につなぐので、それ以外（語の途中・引用の中・行の先頭・演算子の後）は構文木の語の切れ目と合う保証が無く偽。
+    コメントの中の字は継続にならないので読み飛ばす。引用が閉じなければ偽。`$`・バッククォートを含まないこと（呼び手が先に止める）を前提にする。
+    """
+    blank = False  # 直前の字が引用の外のエスケープされていない blank か
+    start = True  # 次の字が語の先頭か（行の先頭か、直前の字が引用の外のエスケープされていないメタ文字）
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if c == "\\":
+            if command[i + 1 : i + 2] == "\n":
+                if not blank:
+                    return False
+            else:
+                blank = start = False
+            i += 2
+            continue
+        if c in "'\"":
+            end = _closing_quote(command, i)
+            if end is None:
+                return False
+            i, blank, start = end + 1, False, False
+            continue
+        if c == "#" and start:
+            nl = command.find("\n", i)
+            i = n if nl < 0 else nl
+            continue
+        blank, start = c in _BLANKS, c in _METACHARS
+        i += 1
+    return True
+
+
+def _closing_quote(command: str, start: int) -> Optional[int]:
+    """`start` の引用符を閉じる位置。引用の中の行の継続（語の途中）があるか、閉じなければ None。"""
+    if command[start] == "'":
+        end = command.find("'", start + 1)
+        return None if end < 0 or "\\\n" in command[start:end] else end
+    i = start + 1
+    while i < len(command):
+        c = command[i]
+        if c == '"':
+            return i
+        if c == "\\":
+            if command[i + 1 : i + 2] == "\n":
+                return None
+            i += 2 if command[i + 1 : i + 2] in _DQUOTE_ESCAPES else 1
+            continue
+        i += 1
+    return None
+
+
 def _redirect_ok(r) -> bool:
     """ファイルへ書かないリダイレクト（記述子の複製か /dev/null）か。"""
     return not r.dynamic and _SAFE_REDIRECT.fullmatch(f"{r.op} {r.target}") is not None
@@ -216,7 +272,8 @@ def params() -> dict:
 def handoff_bash(ctx, params: dict) -> bool:
     """`pass_ndf` のコマンドだけを前景で打つ Bash か（連結は単純なコマンドを 1 つずつ照らす）。
 
-    Tool の背景起動（`run_in_background`）・語の中の行の継続（構文木の語の切れ目が Bash と違う）は止める。引数の間の継続は通す。
+    Tool の背景起動（`run_in_background`）と、Bash の引用・エスケープの規則で引数の間と確かめられない行の継続（構文木の語の
+    切れ目が Bash と違い得る）は止める。
     判定は `ctx.memo` に置き、同じ Tool の呼び出しの `script-chain` の guard と分け合う。
     """
     if _NAME not in ctx.memo:
@@ -226,11 +283,13 @@ def handoff_bash(ctx, params: dict) -> bool:
 
 def _handoff_bash(ctx, params: dict) -> bool:
     shell = ctx.shell
-    if background_call(ctx.tool_input) or _WORD_CONTINUATION.search(ctx.command):
+    if background_call(ctx.tool_input):
         return False
     if not shell.commands or shell.assignments or shell.heredocs or len(shell.waits) > len(shell.commands):
         return False
-    if _SUBSTITUTION.search(ctx.command) or not all(_redirect_ok(r) for r in shell.redirects):
+    if _SUBSTITUTION.search(ctx.command) or not _continuations_between_words(ctx.command):
+        return False
+    if not all(_redirect_ok(r) for r in shell.redirects):
         return False
     return all(_command_ok(c, ctx.cwd, params) for c in shell.commands)
 
@@ -248,17 +307,19 @@ def _passes(ctx, params: dict) -> bool:
 def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> str:
     """運用上限の拒否の文（背景の監視の扱い・メインディレクトリ `main` の引継ぎ文書と確かめ方・終え方）。文脈の量は入れない。
 
-    `--cwd` の値と文書の絶対パスは、空白を含んでも Bash の 1 引数になるよう引用する。
+    注入の上限で切られても検査のコマンドと終え方が残るよう、それらを先頭に置き、メインディレクトリは `--cwd` の 1 回だけ書く
+    （文書はその根から解く相対パス。CLI と `_ndf_args_pass` は相対パスを `--cwd` の作業ツリーの根から解く）。
+    `--cwd` の値と文書は、空白を含んでも Bash の 1 引数になるよう引用する。
     """
     end = "応答の最後に次のセグメントのブロックを書いて終える" if under_relay else "ndf-next のブロックを出して新しいセッションで続ける"
-    docs = os.path.join(main, handoff_dir.strip("/"))
-    doc = shlex.quote(f"{docs}/<文書>.md")
+    doc = shlex.quote(f"{handoff_dir.strip('/')}/<文書>.md")
     return (
-        f"文脈の量が運用上限（{t.limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて"
-        "完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
+        f"文脈の量が運用上限（{t.limit} token）を超えた。引継ぎ文書を書き、"
+        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、{end}。"
+        "文書は --cwd の値の下のこのパスへ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。"
+        "書く前に、背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。"
+        "supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
         "引継ぎ文書の「現在地」の wait の行をそのまま残す。"
-        "引継ぎ文書（オーガナイザーは <文書> を parallel-<計画>）を次の検査の絶対パスで書き、"
-        f"前景で ndf records --cwd {shlex.quote(main)} handoff check {doc} を打って確かめ、{end}"
     )
 
 

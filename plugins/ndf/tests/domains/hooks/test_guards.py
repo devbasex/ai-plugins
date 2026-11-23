@@ -504,6 +504,12 @@ _CHECK = "ndf records handoff check .ndf/handoff/x.md"
         ("main", "ndf records handoff check .ndf/handoff/x.md\\\n.md", False),
         ("main", "ndf records handoff check \\\n  .ndf/handoff/x.md \\\n  --trim --history .ndf/handoff/h.md", True),
         ("main", 'ndf records handoff check ".ndf/handoff/x\\\n.md"', False),
+        ("main", "ndf records handoff check\t\\\n.ndf/handoff/x.md", True),
+        ("main", "ndf records handoff check .ndf/handoff/x.md\\ \\\n.md", False),
+        ("main", "ndf records handoff check .ndf/handoff/x.md\u00a0\\\n.md", False),
+        ("main", "ndf records handoff check '.ndf/handoff/x.md'\\\n--trim --history .ndf/handoff/h.md", False),
+        ("main", "ndf records handoff check '.ndf/handoff/x.md '\\\n.md", False),
+        ("main", f"{_CHECK};\\\n{_CHECK}", False),
         ("main", f"{_CHECK} --trim --history /home/u/notes.md", False),
         ("main", f"{_CHECK} --trim --history .ndf/handoff/../x.md", False),
         ("main", _CHECK + " --trim --history {wt}/.ndf/handoff/h.md", False),
@@ -647,7 +653,7 @@ def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
     t = thresholds({}, tables.policy_value)
     for under, end in ((True, "次のセグメントのブロック"), (False, "ndf-next")):
         text = context_limit._reason(t, under, "/work/repo", ".ndf/handoff/")
-        parts = ("parallel-<計画>", "ndf records --cwd /work/repo handoff check '/work/repo/.ndf/handoff/<文書>.md' ")
+        parts = ("parallel-<計画>", "ndf records --cwd /work/repo handoff check '.ndf/handoff/<文書>.md' ")
         for part in ("TaskStop", "supervisor", "wait の行", *parts, end):
             assert part in text
         assert len(text) <= 600
@@ -656,7 +662,23 @@ def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
 def test_context_limit_reason_quotes_a_main_directory_with_spaces():
     # #3995: 空白を含むメインディレクトリでも、案内のコマンドを Bash がそのまま打てる（--cwd と文書がそれぞれ 1 引数）
     text = context_limit._reason(thresholds({}, tables.policy_value), False, "/work/my repo", ".ndf/handoff/")
-    assert "ndf records --cwd '/work/my repo' handoff check '/work/my repo/.ndf/handoff/<文書>.md' " in text
+    assert "ndf records --cwd '/work/my repo' handoff check '.ndf/handoff/<文書>.md' " in text
+
+
+@pytest.mark.parametrize("under", [False, True])
+def test_context_limit_reason_fits_the_budget_with_a_long_main_directory(tmp_path, monkeypatch, under):
+    # #3995（r3-2）: 156 字のメインディレクトリでも、実際の拒否の文が注入の上限で切られず、検査のコマンドと終え方を全文で伝える
+    if under:
+        (tmp_path / "relay").mkdir()
+        monkeypatch.setenv("NDF_RELAY_DIR", str(tmp_path / "relay"))
+    main = tmp_path / "m"
+    main = tmp_path / ("m" * (156 - len(os.path.realpath(main)) + 1))
+    assert len(os.path.realpath(main)) == 156
+    _usage_transcript(main, 900000)
+    reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, "ls")))
+    assert "全文:" not in reason and len(reason) <= 600
+    assert f"ndf records --cwd {os.path.realpath(main)} handoff check '.ndf/handoff/<文書>.md' " in reason
+    assert ("次のセグメントのブロック" if under else "ndf-next") in reason and "wait の行" in reason
 
 
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
