@@ -212,6 +212,11 @@ def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
         "claude", "PreToolUse", tmp_path, tool_name="Write", tool_input={"file_path": str(tmp_path / ".ndf/handoff/a.md"), "content": "x"}
     )
     assert call_entry("claude", "PreToolUse", handoff) is None
+    # 既存の文書の Edit / Write は同じ会話での Read を前提にするので、引継ぎ文書の Read も通す（PR 4220 の r6-1）
+    read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / ".ndf/handoff/a.md")})
+    assert call_entry("claude", "PreToolUse", read) is None
+    other = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / "README.md")})
+    assert deny_reason(call_entry("claude", "PreToolUse", other)) is not None
 
 
 def test_context_limit_under_the_relay_asks_for_the_next_section(tmp_path, monkeypatch):

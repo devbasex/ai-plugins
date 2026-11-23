@@ -427,9 +427,9 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 | 項目 | 内容 |
 | --- | --- |
 | 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（guard `context-limit`）。カットポイントでは必ず `ndf-next` を出して切る（方針は 1 つ。`context-window.md` の「再起動の方針」）。カットポイントの外では独立性・手動のときだけ自分で切る |
-| 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。情報文字列が `ndf-next` のコードブロック 1 つで出す |
+| 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。引継ぎ文書を保存したときは、そのパスを `.ndf/handoff/<名>.md の続きから` の形で含め、文書の「次に実行するコマンド」にも同じ中身を書く。情報文字列が `ndf-next` のコードブロック 1 つで出す |
 | 3 層で出す時点 | conductor がフェーズレポート（`## フェーズレポート`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 承認ゲート` なら、承認ゲートの承認とマージの後 |
-| 出す前に行うこと | 自分で切るとき（カットポイント・独立性・手動）は、書き始める前に `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"` を打ち、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。hook に止められた後は Bash が拒否されるので記録を打たず、引継ぎ文書は `Write` / `Edit` だけで書く（この再起動は記録に残らない。`context-window.md` の「上限を超えたら hook が止める」）。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
+| 出す前に行うこと | 自分で切るとき（カットポイント・独立性・手動）は、書き始める前に `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"` を打ち、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。hook に止められた後は Bash が拒否されるので記録を打たず、引継ぎ文書は `Read`（この会話で未読の既存の文書だけ）と `Write` / `Edit` だけで書き、保存できなければブロックを出さずに理由を伝える（この再起動は記録に残らない。`context-window.md` の「上限を超えたら hook が止める」）。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
 
 出す時点・アナウンス・新しい会話が状態を戻す手順は、`context-window.md` の「新しい会話で戻す」にある。
 
