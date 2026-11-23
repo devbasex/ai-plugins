@@ -7,6 +7,9 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | スタックしたチェック | — | 実行が終わったのに pending のまま残った CI のチェック | 取り残されたチェック | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| テストダブル | — | テストが本物の代わりに差し込む偽の相手 | — | — | — |
+| 見本 | — | 本物の相手の入出力を記録した JSON。テストダブルはこれだけから応答を組み立てる | — | — | — |
+| テストと CI の予算 | — | テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数の上限 | — | — | — |
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを検証するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | suite の種別 | `kind` | テストの設定（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test | — | — | — |

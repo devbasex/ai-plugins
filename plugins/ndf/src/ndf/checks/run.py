@@ -19,15 +19,16 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks import child_deps, experimental, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks.model import SCRIPT_PREFIXES, SKIP_DIRS, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
-SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
-TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
+# 文字のファイルの拡張子。Skill が配る JavaScript（`skills/release/assets/slides/build-deck.js` など）も既定で動くコードとして見る。
+# TypeScript はビルドしてから動くため、そのまま配る形に無い
+TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt", ".js", ".mjs", ".cjs"})
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
 SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {}
@@ -43,11 +44,19 @@ def _walk(plugin_root: Path) -> list[Path]:
 
 
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
-    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。"""
+    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。
+
+    取得した他人のリポジトリを検査する経路があるため、解決した先がリポジトリの外のもの（外を指すシンボリックリンク）は
+    集めない。どの規則も本文を読む前に（構文の確かめ `unparsable` を含む）外のファイルを見る範囲から除く。
+    """
+    root = repo_root.resolve()
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
-        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
+        if not (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
+            continue
+        # 名前と配置で候補に絞ってから、候補だけを解決してリポジトリの外を除く
+        if path.resolve().is_relative_to(root) and path.is_file():
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
@@ -94,7 +103,7 @@ def check(
 ) -> list[Finding]:
     """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
 
-    設定を読む規則（`SETTINGS_RULES`）は、`only` が無いか `only` に名前があるときだけ当てる。
+    設定を読む規則（`SETTINGS_RULES`）と規則 experimental は、`only` が無いか `only` に名前があるときだけ当てる。
     """
     found = unparsable(scope)
     found += smell_findings(scope, rules)
@@ -102,6 +111,8 @@ def check(
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
+    if not only or experimental.RULE in only:
+        found += experimental.check(scope, rules)
     for name, rule in SETTINGS_RULES.items():
         if not only or name in only:
             found += rule(scope, rules)

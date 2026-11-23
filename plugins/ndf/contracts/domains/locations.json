@@ -16,6 +16,7 @@
     {"id": "ndf-loop", "root": "main", "path": ".ndf/loop", "tracked": false},
     {"id": "backlog-state", "root": "main", "path": ".ndf/backlog/state", "tracked": false, "env": "NDF_UPKEEP_STATE_DIR"},
     {"id": "worktrees", "root": "repo", "path": ".worktrees", "tracked": false},
+    {"id": "experimental", "root": "repo", "path": "experimental/ndf", "tracked": true},
     {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
     {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
