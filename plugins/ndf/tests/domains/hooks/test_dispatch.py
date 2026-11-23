@@ -345,15 +345,20 @@ def test_run_passes_the_deadline_to_the_guards(tmp_path, fake_guards):
 
 
 def test_the_entry_point_passes_the_alarm_deadline_to_the_guards(tmp_path, monkeypatch):
-    # SIGALRM と guard が同じ起点の時刻（起動の時刻 ＋ 締め切り）を使う
-    seen: dict = {}
+    # SIGALRM と guard が同じ起点の時刻（起動の時刻 ＋ 締め切り）を使う。起動は 100.0、タイマーを置くのは 100.25
+    ticks = iter([100.0])
+    monkeypatch.setattr(main, "time", types.SimpleNamespace(monotonic=lambda: next(ticks, 100.25)))
+    timers: list[float] = []
+    monkeypatch.setattr(main.signal, "setitimer", lambda which, seconds: timers.append(seconds))
+    seen: list[float] = []
     real = dispatch.run
 
     def capture(ctx, specs, found, svc, clock=time.monotonic):
-        seen["deadline"], seen["budget"] = svc.deadline, found.deadline
+        seen.append(svc.deadline)
         return real(ctx, specs, found, svc, clock)
 
     monkeypatch.setattr(dispatch, "run", capture)
     call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
-    now = time.monotonic()
-    assert now < seen["deadline"] <= now + seen["budget"]
+    limit = budget.budget_for("claude", "PreToolUse").deadline
+    assert seen == [100.0 + limit]
+    assert timers[0] == pytest.approx(limit - 0.25) and timers[1:] == [0]
