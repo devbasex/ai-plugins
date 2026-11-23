@@ -31,11 +31,11 @@ flowchart LR
 | `src/ndf/progress/plan/wait_decide.py` | 変更 | `batch_closed` の `failed`・`aborted` を知らせる | — | モジュール | `NOTICE_KINDS`（変更） |
 | `src/ndf/progress/command.py`（`wait`） | 変更 | 委ねた検証の待ちを `status: gate` で返す | `run.py` | モジュール | `wait`（変更） |
 | `skills/development-workflow/SKILL.md` | 変更 | 引数 `--batch <id>` | — | — | — |
-| `src/ndf/progress/lane/fold.py`・`types.py` | 変更 | `batch_claimed`・`batch_closed` を `PlanView` に畳む | — | `PlanView`・`Batch`（新設の型） | `fold_plan`（変更） |
+| `src/ndf/progress/lane/fold.py`・`types.py` | 変更 | `batch_claimed`・`batch_revoked`・`batch_closed` を `PlanView` に畳む | — | `PlanView`・`Batch`（新設の型） | `fold_plan`（変更） |
 | `src/ndf/progress/lane/launch.py` | 変更 | 種類 `batch` の行を始める・続ける・中止する入力を組む | `progress/command.py` | モジュール | `batch_commands`・`batch_of`・`BATCH_GOAL_END`（新設）、`start_commands`・`start_prompt`・`goal_prompt`・`_going_on`・`cancel_commands`・`_workflow_args`（変更） |
-| `src/ndf/progress/plan/run.py` | 変更 | 種類 `batch` の行を開発ループの行と同じく生死の判定へ渡し、担い手の行に要求元の席を貸す | `lane/liveness.py`（変更なし） | モジュール | 生死の判定の呼び手・`first_input`・`launch_lane`（変更） |
+| `src/ndf/progress/plan/run.py` | 変更 | 種類 `batch` の行を開発ループの行と同じく生死の判定へ渡し、担い手の行に要求元の席を貸し、取り消したまとめの担い手を起動しない | `lane/liveness.py`（変更なし） | モジュール | 生死の判定の呼び手・`first_input`・`launch_lane`（変更） |
 | `src/ndf/progress/command.py` | 変更 | `ndf progress new --batch <id>` で工程を持たない子のステートマシンを作る | — | モジュール | `new`（変更） |
-| `contracts/workflow/progress.json` | 変更 | 事象 `batch_claimed`・`batch_closed`（計画）と `delegate_answered`（スプリント）、リクエストの種類 `lane-verify`・`lane-backlog` | — | — | — |
+| `contracts/workflow/progress.json` | 変更 | 事象 `batch_claimed`・`batch_revoked`・`batch_closed`（計画）と `delegate_answered`（スプリント）、リクエストの種類 `lane-verify`・`lane-backlog` | — | — | — |
 | `contracts/workflow/parallel-plan.schema.json` | 変更 | 行の入力 `kind: batch` | — | — | — |
 | `contracts/workflow/context.schema.json` | 変更 | 文脈のキー `verification` | — | — | — |
 | `contracts/schemas/io/lanes.args.schema.json`・`docs/contracts/commands.md` | 変更 | `lanes batch` の引数と説明 | — | — | — |
@@ -116,7 +116,7 @@ flowchart LR
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `assign` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd: Path, plan: str, requests: list[str], lane: Optional[str], reason: str) -> dict` | `batch_lock` を取り、計画の排他（`lock_plan`）の中の 1 つのトランザクションで、リクエストとレーンを確かめ直し、開いたまとめの打ち直しかを決め、`claim_slot` で取りかかりの記録を書き、`batch_claimed` と担い手の行（名指したレーンへ `add_row`、無ければ `add_lane` で `b<id>`）を書いてコミットする（下の「`assign` の書き込み」） |
-| `show` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id) -> dict` | まとめの中身と、担い手が打つ `close` の雛形（`--observed-version` の並びとリポートの形）を返す。取りかかりの記録がこのまとめ（保存先・計画・id の組）を指していなければ `stopped`・`precondition` で手順を返さない（担い手は作業を始めず、オーガナイザーが `abort` する）。書かない |
+| `show` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id) -> dict` | まとめの中身と、担い手が打つ `close` の雛形（`--observed-version` の並びとリポートの形）を返す。取りかかりの記録がこのまとめ（保存先・計画・id の組）を指していないか、まとめに `batch_revoked` か `batch_closed` があれば `stopped`・`precondition` で手順を返さない（担い手は作業を始めず、オーガナイザーが `abort` する）。書かない |
 | `close` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, batch_id, result: str, report: Path, observed: dict[str, tuple[str, str]], cause: Optional[str], reason: str, caller: Writer) -> dict` | 書き手・版・リポートの形を確かめ、1 つのトランザクションで `batch_closed`・リクエストの閉じ・回答・担い手の行の終わりを書き、コミットの後に `release_slot` |
 | `abort` | `src/ndf/progress/plan/batch.py` | 新設 | `(cwd, plan, target: BatchRef, reason, caller: Writer) -> dict` | 下の「`abort` の手順」。`plan` は呼び手自身の計画（`cwd` の保存先から開く）、`target` は自分の計画のまとめの id か、別の計画の取りかかり（`--claim <種類>:<キー>`）。担い手の行が実行中なら、そのラッパーを止めて止まったことを確かめてから書き、確かめられなければ何も書かずに枠を保つ |
 | `check_version` | `src/ndf/progress/plan/batch.py` | 新設 | `(batch: Batch, result: str, observed: dict[str, tuple[str, str]], cause: Optional[str]) -> Optional[str]` | 検証の `done` に、版のあるリクエストを持つリポジトリの読んだ版の前後の一致と要求の版以上を求め、`failed` には原因を求める。版がすべて null のリポジトリは照らさない。誤りの文を返す |
@@ -153,11 +153,21 @@ flowchart LR
 
 | 呼び手と対象 | 通す条件 | 書くもの |
 | --- | --- | --- |
-| 持ち主の計画のオーガナイザー（`<計画> <id>`） | 計画の状態を問わない | 下の停止の確かめの後、1 つのトランザクションで担い手の行の中止（未着手なら `cancel_row`、実行中なら子のステートマシンの `end_row` の `cancelled`。どちらも `by_batch`）と、計画が終わっていなければ `batch_closed`（`aborted`）。コミットの後に `release_slot` |
-| 別の計画のオーガナイザー（`<自分の計画> --claim <種類>:<キー>`） | 取りかかりの記録の持ち主の計画（記録の保存先から開く）が `running` でなく、担い手の行が実行中でない（未着手か終わっている） | 持ち主の計画を記録の保存先で開き、上と同じものを書く。担い手の行が実行中なら断る（`paused` の計画は実行中の行を流し続けるため） |
+| 持ち主の計画のオーガナイザー（`<計画> <id>`） | 計画の状態を問わない | 下の起動の取り消しと停止の確かめの後、1 つのトランザクションで担い手の行の中止（未着手なら `cancel_row`、実行中なら子のステートマシンの `end_row` の `cancelled`。どちらも `by_batch`）と、計画が終わっていなければ `batch_closed`（`aborted`）。コミットの後に `release_slot` |
+| 別の計画のオーガナイザー（`<自分の計画> --claim <種類>:<キー>`） | 取りかかりの記録の持ち主の計画（記録の保存先から開く）が `running` でなく、担い手の行が実行中でない（未着手か終わっている） | 持ち主の計画を記録の保存先で開き、上と同じもの（起動の取り消しを含む）を書く。担い手の行が実行中なら断る（`paused` の計画は実行中の行を流し続けるため） |
 | 担い手の行の conductor（`<計画> <id> --self`） | ラッパーの名前がまとめの担い手のレーンと合う・計画が中止された（`cancelled`） | 呼び手自身が担い手なので停止の確かめを省き、行の中止と子の中止を書く。計画は終わっているので `batch_closed` は書かず、コミットの後に `release_slot` |
 
-停止の確かめ（担い手の行が実行中で、呼び手が担い手でないとき）: 今のラッパーを止める口（`launch.stop`）で担い手のレーンのラッパーを止め、ラッパーの一覧（`launch.wrappers`）でそのラッパーが動いていないことを確かめてから書く。一覧を読めない・まだ動いているときは何も書かずに `stopped`・`transient` を返し、取りかかりの記録は残す（枠を空けない）。復旧はそのまま `abort` を打ち直すことで、繰り返し止まらないときは人がラッパーの一覧で残ったプロセスを確かめて止めてから打ち直す（手順は `parallel.md` の新しい節に書く）。
+**起動の取り消し。** 呼び手が担い手でない `abort`（上の表の 1 行目と 2 行目）は、停止の確かめより前に、持ち主の計画の排他の中で計画の事象 `batch_revoked`（id・理由）を書いてコミットする（既にあれば書かない。打ち直しはここから進む）。これがそのまとめの担い手の起動を無効にする印で、次の 3 か所がそれぞれの読みの中で確かめる。
+
+| 確かめる所 | 印か `batch_closed` があるとき |
+| --- | --- |
+| `plan/run.py` の `launch_lane`（行の起動・回答の後の起動・`/goal` の入れ直し・止まりからの再起動。耐久ワークフローが前に決めた起動も、このステップの中の読み直しで確かめる） | 起動せず `{"ok": False, "final": True}`（理由に取り消し）。中止の入力（`cancel_commands`・`--self`）だけは通す |
+| `show` | `stopped`・`precondition` で手順を返さない。担い手は作業を始めない |
+| `close` | `stopped`・`precondition`（`abort` が先に決まったので結果を書かない） |
+
+順序の保証: 印のコミットより後に始まった担い手は、`show` で断られて作業を始めない。印のコミットより前に `show` を通った担い手は、その時点でラッパーが動いているので、続く停止の確かめで止まったことを確かめられる（耐久ワークフローがその間に同じ名前のラッパーを置き換えても、新しいラッパーは印の後に `show` を読むので作業を始めない）。したがって停止を確かめた後に枠を空けても、次のまとめと同じ環境を触る担い手は残らない。
+
+停止の確かめ（担い手の行が実行中で、呼び手が担い手でないとき。上の取り消しの後）: 今のラッパーを止める口（`launch.stop`）で担い手のレーンのラッパーを止め、ラッパーの一覧（`launch.wrappers`）でそのラッパーが動いていないことを確かめてから書く。一覧を読めない・まだ動いているときは何も書かずに `stopped`・`transient` を返し、取りかかりの記録は残す（枠を空けない）。復旧はそのまま `abort` を打ち直すことで、繰り返し止まらないときは人がラッパーの一覧で残ったプロセスを確かめて止めてから打ち直す（手順は `parallel.md` の新しい節に書く）。
 
 **委ねのリクエストを単独で閉じる**（`ndf lanes request close`）:
 
@@ -209,7 +219,7 @@ flowchart LR
 | `assign` | 持ち主の DB を特定できない | 呼び手の `NDF_PROGRESS_DB` が記録の DB の参照と違う・記録の SQLite のファイルが無い | `owner_of` | 枠を保ったまま止める | `stopped`・`precondition`（記録の DB の参照・計画・id） | 記録の DB を指す接続先で打ち直すか、持ち主が閉じるのを待つ |
 | `assign` | `batches.lock` を取れない | 別の `assign`・`close` が長く持つ | `batch_lock` | 呼び出し元へ返す | `stopped`・`transient` | そのまま打ち直せる |
 | `assign` | 記録を書いた後、計画のコミットの前に落ちた | プロセスの終わり | — | — | — | 計画には何も残らない。残った記録は次の `claim_slot` が残骸として空きとみなす |
-| `abort` | 担い手の停止を確かめられない | ラッパーの一覧を読めない・止めても動いている | 停止の確かめ | 何も書かずに止める | `stopped`・`transient`（ラッパーの名前） | 打ち直す。止まらなければ人がプロセスを止めてから打ち直す |
+| `abort` | 担い手の停止を確かめられない | ラッパーの一覧を読めない・止めても動いている | 停止の確かめ | 起動の取り消し（`batch_revoked`）のほかは書かずに止める | `stopped`・`transient`（ラッパーの名前） | 打ち直す（取り消しは残っているので、その間に担い手が起動し直しても作業を始めない）。止まらなければ人がプロセスを止めてから打ち直す |
 | `show` | 取りかかりの記録が別のまとめを指す | 記録の残骸を別の計画が空きとみなして書き換えた | `show` | 止める | `stopped`・`precondition` | 担い手は作業を始めない。オーガナイザーが `abort` する |
 | `close` | 版の照合に落ちた | 検証の途中のリリース・環境の巻き戻り | `check_version` | 止める | `stopped`・`precondition`（照合の表のどの行か） | `failed` と原因で閉じ直す |
 | `close` | 書き手が違う | 別のレーンの conductor | `_writer` | 止める | `stopped`・`precondition` | — |
@@ -225,7 +235,7 @@ flowchart LR
 | `assign` | `--lane C` で C に種類 `batch` の行が 1 つ増え、名指さなければ `b<id>` のレーンが増える。どちらも次の読み直しで行の起動（下の「担い手の行の席」）で始まる | 計画のコミットの直後に落とした（差し替えたコミットの後の処理で例外）状態で、別の保存先の計画の同じ環境の `assign` が断られ、元の担い手の行の `show` が手順を返す。記録を書いた後・コミットの前に落とした状態では、別の計画の `assign` が通り、元の計画に行が無い。同じリクエストの打ち直しが同じ id を返す。`--lane C` の打ち直し（C に最初の割り当ての担い手の行が未着手か実行中で残る）も断られずに同じ id を返し、行を足さない | 混ざったリクエスト・実行中の行のあるレーン・conductor の書き手・取りかかり中で断る。`lock_plan` を取る前に差し替えた読みでリクエストを閉じる・名指したレーンへ行を足すと、排他の中の確かめで断る |
 | `close` | 検証の `done` で 2 行に回答（各行に自分の節）、担い手の行が完了、記録が消える | 閉じた後の打ち直しが何も書かない。3 行のうち 1 行目の後に落とすと何も残らない。1 行の条件が `fail`・もう 1 行が `pass` の `done` で両方が振り返りへ進む | 別のレーンの conductor で断る。リクエストの節の欠けたリポートで断る |
 | `check_version` | 前後が同じで要求以上を受ける | 要求と同じ版を受ける・要求より新しい版を受ける・版がすべて null のまとめは読んだ版無しで受ける | 前後の違い・要求より古い・読んだ版の無い `done`（版のあるリクエストを含む）を断る |
-| `abort` | 持ち主のオーガナイザーで担い手の行が中止、リクエストは開いたまま、回答は無い。持ち主の計画が動いていても通る | 別の計画（`--claim`）で持ち主が `paused`・担い手の行が未着手なら通る。計画の中止の入力の `--self` が行を中止し記録を消す | 持ち主が `running`、または `paused` でも担い手の行が実行中の別の計画で断る。差し替えたラッパーの一覧が「動いている」を返すと何も書かず記録が残る |
+| `abort` | 持ち主のオーガナイザーで担い手の行が中止、リクエストは開いたまま、回答は無い。持ち主の計画が動いていても通る | 別の計画（`--claim`）で持ち主が `paused`・担い手の行が未着手なら通る。計画の中止の入力の `--self` が行を中止し記録を消す | 持ち主が `running`、または `paused` でも担い手の行が実行中の別の計画で断る。差し替えたラッパーの一覧が「動いている」を返すと `batch_revoked` のほかは書かず記録が残る。停止の確かめの直前に耐久ワークフローの前に決めた起動（`launch_lane`）を差し込むと、起動されないか、起動された担い手の `show` が断る。`batch_revoked` の後の `close` を断る |
 | `end_row`・`cancel_row`・`move_row` | スプリントの行は今のとおり | `stop --now` で未着手の担い手の行が中止になり、同じトランザクションで `batch_closed`（`aborted`）が書かれ記録が消える | 種類 `batch` の行への `row end`・`row cancel`・`progress cancel`（子）・`lanes move` を断る |
 | `close_request` | まとめに入っていない `lane-verify` を閉じると要求元に `failed`（`delegate_withdrawn`）の回答が載る | `lane-backlog` はそのまま閉じる | 開いたまとめに入ったリクエストで断る |
 | `NOTICE_KINDS` | `failed`・`aborted` の `batch_closed` を `ndf lanes wait` が知らせる | `done` は知らせない | — |
