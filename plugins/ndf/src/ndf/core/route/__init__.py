@@ -62,8 +62,9 @@ from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
 from ndf.core import branch_strategy
 from ndf.core.route import local_tests
+from ndf.core.plan import assemble_decide, model, steps
 from ndf.core.plan import cli as plan_cli
-from ndf.core.plan import model, steps
+from ndf.progress import worker_kinds
 from ndf.testing import declared, scoped
 
 TOOL = cli.tool_of(__name__)
@@ -358,6 +359,42 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     except model.PlanError as exc:
         raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
     return plan
+
+
+# テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
+WORKER_SLOT = "{{worker}}"
+
+
+def work_names(plan: Any) -> list[str]:
+    """プランの形（`expanded` の戻り値）の中で `{{worker}}` の後ろに置かれた作業の名前（現れた順。重なりを含む）。"""
+    if isinstance(plan, dict):
+        return [n for v in plan.values() for n in work_names(v)]
+    if not isinstance(plan, list):
+        return []
+    named = [str(plan[i + 1]) for i, v in enumerate(plan[:-1]) if v == WORKER_SLOT]
+    return named + [n for v in plan for n in work_names(v)]
+
+
+def _write_work_values(
+    t: Template, given: Mapping[str, Value], values: Mapping[str, Value], plan: Mapping[str, Any], out: Path, local_tests: bool
+) -> None:
+    """単発のプランが既定の worker（`ndf answer work`）を使うなら、それが読む `values.json` をプランの状態の保存先へ書く。
+
+    工程から組む経路（`ndf.progress.invoke.prepare_plan`）と同じ `write_values` で書き、作業が読む値か作業場所が欠ければ
+    書かずに `RouteError`（実行の途中の worker で止まらず、組む時点で `--set`・`--add` を求める）。`worker` を渡したときは書かない。
+    保存先はプランの実行が `--state-dir` を省いたときに使う場所（`plan_cli` と同じ `state_dir_for`）である。
+    """
+    if "worker" in given or "worker" not in needed(t, local_tests=local_tests, given=given):
+        return
+    gaps: dict[str, str] = {}
+    for kind in dict.fromkeys(work_names(expanded(t, local_tests=local_tests))):
+        found = worker_kinds.kind_gaps(kind, values, {}, covers=LAUNCH_SOURCES)
+        gaps.update({n: f"差し込み {n}（--set か --add で渡す）" for n in found})
+    if gaps:
+        raise RouteError(f"テンプレート {t.name} の worker が読む値が無い: {', '.join(f'{n}: {s}' for n, s in gaps.items())}")
+    held = plan.get("state_dir")
+    state_dir = assemble_decide.state_dir_for(str(out), held if isinstance(held, str) else None, str(Path.cwd().resolve()))
+    worker_kinds.write_values(Path(state_dir), t.name, values, {}, local_tests)
 
 
 # --- テンプレートの検査 -----------------------------------------------------------------------
@@ -656,8 +693,10 @@ def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     given = _pairs(a.sets, a.adds)
     values, _ = launched(t, derived(t, given, Path.cwd()))
     _check_worktree(t, given, values)
-    plan = render(t, values, local_tests=not _declared_ci_only(values))
+    local = not _declared_ci_only(values)
+    plan = render(t, values, local_tests=local)
     out = Path(a.out)
+    _write_work_values(t, given, values, plan, out, local)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return t, out

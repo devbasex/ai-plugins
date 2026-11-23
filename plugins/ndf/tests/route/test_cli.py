@@ -92,6 +92,25 @@ def test_render_implement_takes_an_acceptance_of_several_issues_without_an_issue
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
 
 
+def test_render_implement_with_the_default_worker_writes_the_values_for_answer_work(tmp_path):
+    """PR 4319 の指摘 r1-1: 既定の worker（ndf answer work）で組む単発のプランは、それが読む values.json を状態の保存先へ書く。"""
+    out = tmp_path / "impl.json"
+    args = _impl_args(out, tmp_path)
+    at = args.index("worker=ndf-worker")
+    del args[at - 1 : at + 1]
+    assert route.main(["render", *args]) == 0
+    assert _step(out, "work")["run"] == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "impl"]
+    held = route.worker_kinds.read_values(tmp_path / "impl.state")
+    assert held is not None and held["plan"] == "impl"
+    assert held["values"]["branch"] == "u1" and held["values"]["worktree"] == str(tmp_path)
+
+
+def test_render_implement_with_a_given_worker_writes_no_values(tmp_path):
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert not (tmp_path / "impl.state").exists()
+
+
 def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():
     t = route.choose("implement")
     assert "issue" in route.needed(t)

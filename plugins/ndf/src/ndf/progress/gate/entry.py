@@ -277,7 +277,9 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         paths = worker_paths.report_paths(wd.path, kind, resolve=False)
         saved = values_in(wd)
         if saved is None:
-            raise WorkUnready(f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程から起動すると書かれる）")
+            raise WorkUnready(
+                f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程と ndf route render・run が組むと書く）"
+            )
         gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)
