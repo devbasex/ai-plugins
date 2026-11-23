@@ -221,3 +221,23 @@ def test_collect_needs_the_report_itself(tmp_path, capsys, monkeypatch):
     report.unlink()
     _, out = _run(capsys, "collect", "--report", str(report))
     assert out["cause"]["kind"] == "precondition" and "作業の報告" not in out["summary"]
+
+
+def test_prepare_does_not_reset_another_directory_when_the_parent_is_swapped(tmp_path, capsys, monkeypatch):
+    shared = tmp_path / "shared"
+    (shared / "d").mkdir(parents=True)
+    other = tmp_path / "other"
+    (other / "d").mkdir(parents=True)
+    (other / "d" / "n.result.json").write_text("{}", encoding="utf-8")
+    built = worker_paths.report_paths
+
+    def swap_after_building(directory, name):
+        paths = built(directory, name)
+        shared.rename(tmp_path / "moved")
+        shared.symlink_to(other)
+        return paths
+
+    monkeypatch.setattr(worker_paths, "report_paths", swap_after_building)
+    code, out = _run(capsys, "prepare", "--dir", str(shared / "d"), "--name", "n")
+    assert _invalid(code, out) and "paths" not in out.get("metrics", {})
+    assert (other / "d" / "n.result.json").read_text(encoding="utf-8") == "{}"

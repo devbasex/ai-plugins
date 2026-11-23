@@ -92,13 +92,40 @@ def report_name(report: Path) -> tuple[Path, str]:
 
 @contextlib.contextmanager
 def open_workdir(directory: Path) -> Iterator[WorkDir]:
-    """作業ディレクトリを 1 回だけ開く。リンクを解くのはこの 1 回で、抜けるときに閉じる。"""
-    path = directory.resolve()
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    """作業ディレクトリを 1 回だけ開き、抜けるときに閉じる。`WorkDir.path` は開いた場所そのものである。
+
+    リンクは解かない。`directory` は `report_paths` が解いた後のパスを渡す。根から 1 要素ずつリンクをたどらずに開くので、
+    パスを組んだ後に途中の要素をリンクへ差し替えられると、別の場所を開かずに `EntryUnsafe`（`symlink`）で止まる。
+    組んだパスと開いた場所が食い違ったまま操作することは無い。
+    """
+    path = Path(os.path.abspath(directory))
+    fd = _open_dir_nofollow(path)
     try:
         yield WorkDir(path, fd)
     finally:
         os.close(fd)
+
+
+def _open_dir_nofollow(path: Path) -> int:
+    """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。"""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for part in path.parts[1:]:
+            try:
+                child = os.open(part, flags, dir_fd=fd)
+            except OSError as e:
+                if e.errno == errno.ELOOP:
+                    raise EntryUnsafe(str(path), "symlink") from None
+                if e.errno == errno.ENOTDIR:
+                    raise EntryUnsafe(str(path), "other") from None
+                raise
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _unsafe_kind(st: os.stat_result) -> Optional[str]:

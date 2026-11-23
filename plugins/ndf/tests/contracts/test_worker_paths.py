@@ -70,11 +70,33 @@ def test_open_workdir_gives_fd_for_names_and_closes_on_exit(workdir):
         os.fstat(wd.fd)
 
 
-def test_open_workdir_resolves_link_to_directory_once(tmp_path, workdir):
+def test_open_workdir_refuses_a_link_in_the_path_instead_of_resolving_it(tmp_path, workdir):
     d, _ = workdir
     link = tmp_path / "link"
     link.symlink_to(d)
-    with worker_paths.open_workdir(link) as wd:
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(link):
+        pass
+    assert e.value.kind == "symlink"
+
+
+def test_open_workdir_refuses_a_parent_swapped_to_a_link_after_the_paths_were_built(tmp_path):
+    parent = tmp_path / "shared"
+    (parent / "d").mkdir(parents=True)
+    paths = worker_paths.report_paths(parent / "d", "n")
+    other = tmp_path / "other"
+    (other / "d").mkdir(parents=True)
+    (other / "d" / "n.result.json").write_text("{}", encoding="utf-8")
+    parent.rename(tmp_path / "moved")
+    parent.symlink_to(other)
+    with pytest.raises(worker_paths.EntryUnsafe), worker_paths.open_workdir(paths.report.parent):
+        pass
+    assert (other / "d" / "n.result.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_open_workdir_path_is_the_opened_directory(workdir):
+    d, _ = workdir
+    with worker_paths.open_workdir(d.resolve()) as wd:
+        assert wd.path == d.resolve()
         assert os.fstat(wd.fd).st_ino == d.stat().st_ino
 
 
