@@ -67,9 +67,13 @@ def refused(report: Mapping[str, Any], inputs: Mapping[str, Any]) -> bool:
     cause = report.get("cause")
     if report.get("status") != result.STOPPED or not isinstance(cause, dict) or cause.get("kind") != "refused":
         return False
+    return _stopped_at_merge(report) and "merge_method" not in inputs
+
+
+def _stopped_at_merge(report: Mapping[str, Any]) -> bool:
+    """プランの結果 `report` の items の回の行（`kind` が `plan`）に、マージのステップで止まったものがあるか。"""
     items = report["items"] if isinstance(report.get("items"), list) else []
-    stopped_at_merge = any(isinstance(i, dict) and i.get("kind") == "plan" and i.get("step") == "merge" for i in items)
-    return stopped_at_merge and "merge_method" not in inputs
+    return any(isinstance(i, dict) and i.get("kind") == "plan" and i.get("step") == "merge" for i in items)
 
 
 def _key(values: Mapping[str, route.Value]) -> list[Any]:
