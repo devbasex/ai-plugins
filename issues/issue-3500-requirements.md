@@ -1,96 +1,80 @@
 ## 何が起きたか
 
-2026-11-14 に PR #3491 で cross-refactoring を流したとき、検証の失敗を直すコミット（項目 I-011、修正担当は codex）に、cross-refactoring 自身の作業ファイル 2 件（`.cross_refactoring/codex-fix-rf3491-progress.log` と `-result.json`）が入った。2 件はコミットの時点で `.gitignore` の無視の対象だった。cross-refactoring の最終ゲートは通り、続く cross-review の round 1 で kiro が見つけて、別のコミット（3dd9fe9b6）で外した。
-
-2026-11-22 に 11 系の今のコード（main 5c2c1e62d）で経路を確かめ直した。同じことは今も起こりうる（「今の姿」）。
-
-## 種類
-
-不具合（作業ファイルを差分に入れないという約束が、今のコードの説明（`workspace.py`・`launch_decide.py` の docstring）にあるため）
-
-## 今の姿
-
-コードを書く工程（テストの追加・実装・修正・最終ゲートの直し・フレーキーなテストの直し。工程の表 `plugins/ndf/contracts/domains/loop-phases.json` で coding が真の 5 工程）では、修正担当（NDF 11.x では claude。`participants.FIXER`）が書き込み用の作業ディレクトリで動く。修正担当は結果ファイルと進捗のファイルを、そのディレクトリの `.cross_refactoring/` に書く（`plugins/ndf/src/ndf/domains/crossrefactor/launch_decide.py` の `result_location`）。オーケストレーターは起動の後に結果ファイルを回収先へ移すが、進捗のファイルは作業ディレクトリに残る（`launch.py` の `_collect_file`）。
-
-約束は「`.cross_refactoring/` を git の除外へ足し、差分に入れない」である（`workspace.py` の `_exclude_results` が共通の git ディレクトリの `info/exclude` へ `.cross_refactoring/` を足す）。除外は `git add` の既定の振る舞いを変えるだけで、追跡に入るのを止めはしない。2026-11-22 の実測（git 2.53.0）は次のとおりである。
-
-| 修正担当の操作 | `.cross_refactoring/` の下のファイル |
-| --- | --- |
-| `git add -A` | 入らない |
-| `git add .cross_refactoring/<ファイル>` | 入らない（終了コード 1 で「無視の対象」と出る） |
-| `git add -f .cross_refactoring/<ファイル>` | **入る** |
-| 一度入った後の `git add -A`・`git commit -a` | **入り続ける**（追跡済みのファイルに除外は効かない） |
-
-オーケストレーターがコミットの中身を見るのは 2 か所だけで、どちらも作業ファイルを見分けない。
-
-- フレーキーなテストの直し（`flaky_decide.violations`）: テスト以外のファイルの変更を違反に数える。作業ファイルが入ると、正しい直しも取り消される
-- 最終ゲートの直し（`final_gate_decide.verify_final_fix`）: 対象範囲の外の変更を `refused` で止め、人へ渡す。作業ファイルが入ると、直しそのものが正しくても止まる
-
-テストの追加・実装・修正の 3 工程のコミットは何も検査されない。修正の手順書（`plugins/ndf/skills/cross-refactoring/prompts/fix.md`）は「`Item-Id` の欠けたコミットは打ち消される」と書くが、`Item-Id` を読むコードは 11 系に無い（`git grep -n "Item-Id" -- plugins/ndf/src` は 0 件）。
-
-## 事象
-
-観測の時点（NDF 10.27.64）のコミット:
+**きっかけ（事例 1）**: 2026-11-14 に PR #3491 で cross-refactoring を流したとき、検証の失敗を直すコミット（項目 I-011、修正担当は codex）に、cross-refactoring 自身の作業ファイル 2 件（`.cross_refactoring/codex-fix-rf3491-progress.log` と `-result.json`）が入った。2 件はコミットの時点で `.gitignore` の無視の対象だった（`git show c9436c319:.gitignore` の 49 行目）。cross-refactoring の最終ゲートは通り、続く cross-review の round 1 で kiro が見つけて、別のコミット（3dd9fe9b6）で外した。
 
 ```text
 c9436c319 Fix: 検証の失敗を直す — plugins/ndf-next/src/ndf/domains/loop/sprint_decide.py#prod_version
  .cross_refactoring/codex-fix-rf3491-progress.log  | 5 +++++
  .cross_refactoring/codex-fix-rf3491-result.json   | 1 +
- plugins/ndf-next/src/ndf/domains/loop/sprint_decide.py         | 7 +++++++
- plugins/ndf-next/tests/domains/loop/test_loop_sprint_decide.py | 5 +++++
 ```
 
-コミットの時点の `.gitignore` の 49 行目は `.cross_refactoring/` だった（`git show c9436c319:.gitignore`）。
+2026-11-22 に 11.x の今のコード（main 5c2c1e62d、git 2.53.0）で確かめ直すと、同じことは今も起こりうる。除外の下でも `git add -f` で入り、一度入ると以後のコミットにも入り続ける。
 
-11 系の作業場所の形での再現（2026-11-22、git 2.53.0。linked worktree の共通の `info/exclude` に `.cross_refactoring/` を足した状態）:
+**主題**: 調べると、NDF がリポジトリの中に作る追跡しないフォルダとファイルの無視の仕方が、置き場ごとにばらばらだった（「今の姿」）。2026-11-23 の設計承認ゲートで、利用者がこの課題を、NDF が作るリポジトリ管理外のファイルの ignore の仕方をそろえる上位の課題にした。
 
-```text
-$ git add -f .cross_refactoring/claude-fix-I-001-progress.log && git commit -m "B ..."
-$ git show --stat --format= HEAD
- .cross_refactoring/claude-fix-I-001-progress.log | 1 +
- a.py                                             | 1 +
-```
+## 種類
 
-## 期待する結果
+改善（無視の仕方の約束を 1 つにそろえる。cross-refactoring の作業ファイルの件は不具合で、その事例として扱う）
 
-担当の起動のたびに、前の起動の作業ファイルが作業ディレクトリと git の追跡から消え、作業ファイルが追跡されたまま次のコミットへ持ち越されない。`.cross_refactoring/` と、NDF がリポジトリの中に置く追跡しない一時のフォルダ（`.ndf/tmp` など）は、worktree の初期化（`ndf worktree init`）が対象のリポジトリの `.gitignore` に登録し、通常の `git add` では入らない。
+## 今の姿
 
-2026-11-23 の設計承認ゲートで、利用者がこの形を選んだ（「#3500 は難しく考えすぎ」。登録は `.gitignore` で、作業場所の `info/exclude` だけの形は採らない。登録は `/ndf:development-workflow` の初期化へ寄せる）。担当が `git add -f` で入れる経路は、この課題では塞がない（「対象範囲」）。
+NDF がリポジトリの中に作る追跡しない置き場は、置き場の表（`plugins/ndf/contracts/domains/locations.json` の `root` が `repo` か `main` で `tracked` が偽の行）と、工程が書くファイルの表（`plugins/ndf/contracts/domains/ndf-files.json` の `location` が `ndf` で `tracked` が偽の行）と、cross-refactoring の作業ファイルの置き場である。無視の仕方は置き場ごとに違う。
 
-## 再現手順
+| 置き場 | 今の無視の仕方 |
+| --- | --- |
+| `.cross_refactoring`（cross-refactoring の作業ファイル） | cross-refactoring が共通の git ディレクトリの `info/exclude` に足す。追跡済みのファイルには効かない |
+| `.worktrees` | worktree の Skill の手順 2-2 のシェルが根の `.gitignore` に足し、`ndf worktree create` が無ければ止まる |
+| `.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state` | NDF は何もしない。利用者の根の `.gitignore` 次第（ai-plugins では手で書いた `.ndf/.gitignore` の行と根の `tmp/` が当たる） |
+| `.ndf/worktree.local.json`（個人設定） | `ndf worktree init` が `.ndf/.gitignore` を無いときだけ作って 1 行書く |
 
-再現は観測の 1 回（PR #3491 の cross-refactoring、項目 I-011、2026-11-14）。同じ形の再発は見ていない。11 系の作業場所の形では、上の「事象」の 2 つ目のとおり手で再現できる。
+除外は追跡済みのファイルに効かない（gitignore の文書「Files already tracked by Git are not affected」）。除外の下でも `git add -f` で入る。2026-11-22 の実測は次のとおりである。
 
-1. cross-refactoring を流し、コードを書く工程の担当を起動する
-2. 担当が作業ディレクトリで `git add -f .cross_refactoring/<作業ファイル>` を含むコミットを作る
-3. オーケストレーターはそのコミットを検査せずに残す。修正の工程なら検証を通って公開され、最終ゲートの直しなら範囲外として止まる
+| 修正担当の操作 | `.cross_refactoring/` の下のファイル |
+| --- | --- |
+| `git add -A` | 入らない |
+| `git add -f .cross_refactoring/<ファイル>` | **入る** |
+| 一度入った後の `git add -A`・`git commit -a` | **入り続ける** |
 
-## 環境
+## 何を足すか・変えるか
 
-- 観測: NDF 10.27.64、修正担当は codex（Impl-Model: default）、対象は devbasex/ai-plugins の PR #3491
-- 確かめ直し: main 5c2c1e62d（ndf 11.0.16 の後）、修正担当は claude、git 2.53.0、Linux
+| | 今 | 変えた後 |
+| --- | --- | --- |
+| NDF が作るフォルダの無視 | 置き場ごとに `info/exclude`・根の `.gitignore`・何もしない、が混ざる | 作る側が作るときに、中へ `*` だけの `.gitignore` を置く |
+| `.ndf/` の中の追跡しないファイルの無視 | `.ndf/.gitignore` を無いときだけ作る | 作る側が `.ndf/.gitignore` へ行を書く（既にあれば足さない） |
+| 根の `.gitignore` | `.worktrees/` の登録を求める | NDF は書かず、求めない |
+| cross-refactoring の作業ファイル（事例 1） | 一度入ると追跡され続ける | 担当の起動の前に作り直し、追跡されていれば索引から外す |
+
+## 今の利用者への影響と互換
+
+- `ndf worktree create` は、根の `.gitignore` に `.worktrees/` が無くても止まらなくなる
+- 利用者のリポジトリに出る差分は、`.ndf/.gitignore` に行が無いときのその 1 行だけになる。フォルダの中の `.gitignore` は自身も無視されるので差分に出ない
+- 利用者が根の `.gitignore` に書いた既存の行は消さない
 
 ## なぜ困るか
 
-作業ファイルが Pull Request の差分に入り、レビューで見つからなければ開発の本流へ残る。見つかっても、外すために修正のラウンドを 1 回使う（#3491 のとき）。最終ゲートの直しで起きると、正しい直しが範囲外として止まり人へ渡る。フレーキーなテストの直しで起きると、正しい直しが取り消される。
+無視の仕方がばらばらだと、置き場ごとに漏れ方が違い、利用者のリポジトリの設定次第で NDF の記録や作業ファイルが Pull Request の差分に入る。事例 1 では作業ファイルが Pull Request に入り、修正のラウンドを 1 回使った。最終ゲートの直しで起きると正しい直しが範囲外として止まり、フレーキーなテストの直しで起きると正しい直しが取り消される。
 
 ## 目的
 
-- 作業ファイルが追跡され続けて cross-refactoring のコミットへ持ち越されることを、担当の起動の前の片付けで止める
-- NDF がリポジトリの中に置く追跡しないフォルダの `.gitignore` への登録を、worktree の初期化の 1 か所にまとめる
+- NDF が作る追跡しないフォルダとファイルの無視を、次の 2 つの仕組みにそろえる。根の `.gitignore` と `ndf worktree init`・`check` の登録に頼らない
+  1. フォルダは、作る側が作るときに中へ `*` だけの `.gitignore` を置く
+  2. `.ndf/` の中のファイルは、作る側が作るときに `.ndf/.gitignore` へ行を書く（既にあれば足さない）
+- 事例 1: cross-refactoring の作業ファイルが追跡されたまま次のコミットへ持ち越されることを、担当の起動の前の片付けで止める
 
 ## 対象範囲
 
 含む:
-- コードを書く 5 工程（テストの追加・実装・修正・最終ゲートの直し・フレーキーなテストの直し）の担当の起動の前に、作業ディレクトリの `.cross_refactoring/` を消し、追跡されていれば索引からも外すこと
-- worktree の初期化（`ndf worktree init`）が、`.cross_refactoring/`・`.worktrees/` と、`.ndf` の下の追跡しない置き場（`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state`）と個人設定（`.ndf/worktree.local.json`）を `.gitignore` に登録すること。`ndf worktree check` が登録の欠けを示すこと
-- cross-refactoring が、`.cross_refactoring/` が無視の対象でない作業場所で担当を起動しないこと
+- 置き場の表の追跡しないフォルダ（`.worktrees`・`.ndf/tmp`・`.ndf/handoff`・`.ndf/sprints`・`.ndf/parallel`・`.ndf/loop`・`.ndf/backlog/state`）と `.cross_refactoring` を、NDF のコードが作るときに中へ `*` だけの `.gitignore` を置くこと
+- `.ndf/` の中の追跡しないファイル（`.ndf/worktree.local.json`）の行を、NDF が `.ndf/.gitignore` に書くこと
+- cross-refactoring が `info/exclude` へ書くのをやめ、`ndf worktree create` が根の `.gitignore` の登録を求めるのをやめること
+- 事例 1: 担当の起動の前に、担当が動くディレクトリの `.cross_refactoring/` を作り直すこと（前の作業ファイルを消し、追跡されていれば索引からも外す）
 
 含まない:
 - 担当が `git add -f` で入れた作業ファイルを、その起動のコミットから除くこと（コミットの作り直しはしない。最後の起動で入れたものは、次の起動が無ければ残る）
-- 書き足した `.gitignore` のコミットの経路（今の worktree の手順のまま）
+- 根の `.gitignore` を NDF が書くこと。`ndf worktree init`・`check` が登録の欠けを検査すること
+- 利用者が根の `.gitignore` に書いた既存の行を消すこと
 - 手順書の `Item-Id` の検査がコードに無いこと（#4195 に起票した）
-- 作業ファイル以外の、無視の対象のファイル（生成物・`.env` など）
+- NDF が作らない、無視の対象のファイル（生成物・`.env` など）
 - cross-review の作業ファイル。cross-review は状態の保存先をレビューする worktree の外に置き、中なら `precondition` で止める（`plugins/ndf/skills/cross-review/SKILL.md` の `--state-dir`）ため、同じ経路が無い
 
 ## 前提
@@ -99,21 +83,20 @@ $ git show --stat --format= HEAD
 
 ## 受け入れ条件
 
-- [ ] 1. コードを書く 5 工程のどれでも、担当を起動する直前に、作業ディレクトリに `.cross_refactoring/` が無い
-- [ ] 2. 起動の前に `.cross_refactoring/` の下のファイルが追跡されていれば、担当を起動する直前に索引から外れている（`git ls-files .cross_refactoring` が空）。担当が次のコミットを作ると、そのコミットで追跡から外れる
-- [ ] 3. `ndf worktree init` を打つと、無視の対象でない置き場だけが登録される。根の置き場（`.cross_refactoring/`・`.worktrees/`）は根の `.gitignore` へ、`.ndf` の下の置き場は `.ndf/.gitignore` へ足す。設定が既にあっても足し、既にある行は消さず、2 回打っても行が増えない
-- [ ] 4. `ndf worktree check` は、登録の欠けた置き場を結果に出し、ファイルを書かない
-- [ ] 5. `.cross_refactoring/` が無視の対象でない作業場所では、cross-refactoring は担当を起動する前に `precondition` で止まり、`ndf worktree init` を打って登録をコミットするよう示す
-- [ ] 6. 片付けは作業ディレクトリの `.cross_refactoring/` だけに効き、ほかのファイル・未コミットの変更・コミットは変わらない。読み取りの工程の起動の前には片付けない
+- [ ] 1. 置き場の表の追跡しないフォルダと `.cross_refactoring` のどれも、NDF のコードが作るときに中へ `*` だけの `.gitignore` が置かれる。既にある `.gitignore` は書き換えない
+- [ ] 2. `.ndf/` の中の追跡しないファイル（`.ndf/worktree.local.json`）は、NDF がその置き場を用意するときに `.ndf/.gitignore` に行がある（無ければ足し、既にあれば足さず、既存の行は消さない）
+- [ ] 3. 根の `.gitignore` と `info/exclude` に登録が無いリポジトリでも、上の置き場の中のファイル（中の `.gitignore` 自身を含む）は `git add -A` で入らない。NDF は根の `.gitignore` を書かず、登録の欠けで止まらない（`ndf worktree create` を含む）
+- [ ] 4. `.worktrees/` の中の `.gitignore` は、作った worktree の中のファイルの無視に影響しない（worktree の中で足したファイルは `git add -A` で入る）
+- [ ] 5. 事例 1: どの工程でも、担当を起動する直前に、担当が動くディレクトリの `.cross_refactoring/` には前の起動の作業ファイルが無く、`*` だけの `.gitignore` がある。前に追跡されていたファイルは索引から外れていて（`git ls-files .cross_refactoring` が空）、担当の次のコミットで追跡から外れる
+- [ ] 6. 事例 1 の片付けは `.cross_refactoring/` だけに効き、作業ディレクトリのほかのファイル・未コミットの変更・コミットは変わらない
 
 ## 影響
 
 | 対象 | 影響 |
 | --- | --- |
-| 公開インタフェース | 変わる（互換あり）。`ndf worktree init` は設定が既にあっても `.gitignore` の登録を足し、`ndf worktree check` の結果に登録の欠けの項目が増える。`ndf refactor run` は登録の無い作業場所で `precondition` で止まる |
-| 重さ | 作業ファイルが Pull Request に入り、レビューで見つからなければ本流に残る。最終ゲートの直しでは正しい直しが止まり人へ渡る。回避は、レビューで見つけて手で外すことだけ |
+| 公開インタフェース | 変わる（互換あり）。`ndf worktree create` は `.worktrees/` の登録が無くても止まらない |
 | データ | 変わらない（状態ファイルの形は同じ） |
-| 既存の振る舞い | 初期化を打つと、利用者のリポジトリの `.gitignore` と `.ndf/.gitignore` に行が足される（1 回だけ）。担当の起動の前に、前の起動の進捗のファイルが消える。作業ファイルが追跡されていたときは、次のコミットに削除が入る |
+| 既存の振る舞い | NDF が作るフォルダの中に `.gitignore` が 1 つずつ増える（無視されるので差分に出ない）。利用者のリポジトリに出る差分は `.ndf/.gitignore` の行（無いときだけ）。事例 1 では、担当の起動の前に前の起動の進捗のファイルが消え、作業ファイルが追跡されていたときは次のコミットに削除が入る |
 
 ## 検証手段
 
@@ -129,7 +112,8 @@ $ git show --stat --format= HEAD
 | S1 | 修正担当が `git add -f` など無視の規則を越える追加をした | コミットの時点の `.gitignore` に `.cross_refactoring/` があり、通常の `git add` では入らないこと。担当が打ったコマンドの記録は見ていない | 前提として採る。2026-11-22 の実測で、除外の下で入る経路は `git add -f`（と、一度入った後の追跡）だけと確かめた（「今の姿」の表） |
 | S2 | 直す場所は、修正担当への指示（`prompts/fix.md`）より、オーケストレーターのコミットの検査が適する | 推した出所: `prompts/fix.md` の「コミットの規約」が、規約から外れたコミットを打ち消す仕組みを持つこと | 採らない。2026-11-23 の設計承認ゲートで、利用者がコミットの検査と作り直しをやめ、起動の前の片付けだけにすると決めた。推した出所の「打ち消す仕組み」も 11.x のコードに無い（「今の姿」） |
 | S3 | 入ったときは、トレーラーの欠けと同じようにオーケストレーターがそのコミットを差し戻す | 期待する結果の 2 行目 | 採らない。同じ設計承認ゲートの決定による（起動の前の片付けだけにする） |
-| S4 | 11 系でも同じことが起きる | 2026-11-19 の棚卸しの「11 系での確かめ」 | 確かめた（「事象」の 2 つ目）。課題は閉じない |
+| S4 | 11 系でも同じことが起きる | 2026-11-19 の棚卸しの「11 系での確かめ」 | 確かめた（「何が起きたか」の 11.x での再現）。課題は閉じない |
+| S5 | 課題の主題を、NDF が作る追跡しないフォルダとファイル全体の無視の仕方へ広げる | 2026-11-23 の設計承認ゲートの回答と、オーガナイザーが変えた題 | 採る（利用者の指示。「目的」「受け入れ条件」） |
 
 ## リクエスト（原文）
 
@@ -209,4 +193,12 @@ $ git show --stat --format= HEAD
 > 設計承認ゲートの回答（2 回目）: info/exclude の形は「マージしない」。方針は「作業の前に .cross_refactoring/ があれば削除し（追跡済みなら追跡からも外す）、.gitignore に入れる」のまま。`.gitignore` への登録は `/ndf:development-workflow` の初期化（`ndf worktree check`・worktree の setup.py が `.ndf/.gitignore` を作る所・create.py の `.worktrees/` の確かめ）へ、`.cross_refactoring/` と `.ndf` の一時フォルダ（`.ndf/tmp` など要るもの）の登録を寄せる
 
 （書き手: 利用者（conductor とオーガナイザーが設計承認ゲートの回答として伝えた。引用の文は conductor の要約を含む）、日付: 2026-11-23）
+
+> 設計承認ゲートの回答（3 回目）: 「直してから」。「.cross_refactoring/ を作成する際、必ず同時に .cross_refactoring/.gitignore を作るのではだめなのですか？」
+
+（書き手: 利用者（conductor が設計承認ゲートの回答として伝えた）、日付: 2026-11-23）
+
+> 補足（3 回目の回答の続き）: `.ndf/` の中のファイルは `.ndf/.gitignore` に書けばよい。NDF がそのファイルを作るときに `.ndf/.gitignore` へ行を書く形にし、根の `.gitignore` と `ndf worktree init` の登録に頼らない。登録の仕組みは、フォルダは作る側が中へ `*` だけの `.gitignore` を置く、`.ndf/` の中のファイルは作る側が `.ndf/.gitignore` へ行を書く、の 2 つだけにする
+
+（書き手: 利用者（オーガナイザーと conductor が伝えた。引用の文は要約を含む）、日付: 2026-11-23）
 
