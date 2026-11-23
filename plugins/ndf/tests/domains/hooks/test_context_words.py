@@ -87,4 +87,35 @@ def test_body_source_lines_up_with_the_words_after_the_wrapper():
     assert cmd.body_source == ('"sleep"', "'600'")
     split = context.parse_shell("env -S'rm -f' \"$W\"").commands[0]
     assert split.body_argv == ("rm", "-f", "$W")
-    assert split.body_source == ("rm", "-f", '"$W"')
+    # `env -S` で分けた語は、文字のままの部分を単引用で囲んだ字面になる
+    assert split.body_source == ("'rm'", "'-f'", '"$W"')
+    plain = context.parse_shell('rm -f "$W"').commands[0]
+    assert plain.body_source is plain.source
+
+
+@pytest.mark.parametrize(
+    ("text", "source"),
+    [
+        ("rm \\${D}/c", ("'rm'", "'${D}/c'")),
+        ("${E}x", ("${E}'x'",)),
+        ('""', ("''",)),
+        ("it\\'s", ("'it'\\''s'",)),
+    ],
+)
+def test_split_env_string_keeps_which_parts_env_expands(text, source):
+    assert tuple(word.source for word in context._split_env_string(text)) == source
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ('"rm -f \\"\\$W/x\\""', 'rm -f "$W/x"'),
+        ("'a\\b'", "a\\b"),
+        ("a\\ b", "a b"),
+        ('"a\\b"', "a\\b"),
+        ("$'it\\'s'", "it's"),
+        ('"$W"', "$W"),
+    ],
+)
+def test_shell_value_undoes_the_outer_quotes_and_escapes(text, value):
+    assert context.shell_value(text) == value

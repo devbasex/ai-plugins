@@ -49,7 +49,8 @@ class ShellCommand(NamedTuple):
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
     読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
     （#3995。運用上限の guard が Bash と同じ値に読み直す）。`body_source` は `body_argv` と位置をそろえた字面（#3877。
-    `rm` の guard が展開の効く位置を読む。`env -S` で分けた語は分けた語のまま）。
+    `rm` の guard が展開の効く位置を読む。ラッパーが無ければ `source` そのもの。`env -S` で分けた語は、env が文字にした部分を
+    単引用で囲み、env が展開する `${NAME}` を字面のまま置く）。
     """
 
     argv: tuple[str, ...]
@@ -129,10 +130,8 @@ def _walk(text: str) -> ShellScript:
         if node.type == "command":
             body, condition = _loop_position(node)
             argv, joined, source = _words(node)
-            stripped = _strip_wrappers(joined)
-            commands.append(
-                ShellCommand(argv, _in_background(node), body, condition, stripped, source, _body_source(joined, source, stripped))
-            )
+            stripped, stripped_source = _strip_wrappers(joined, source)
+            commands.append(ShellCommand(argv, _in_background(node), body, condition, stripped, source, stripped_source))
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -196,15 +195,72 @@ def _loop_position(node: Any) -> tuple[bool, bool]:
 
 
 def _inner_scripts(cmd: ShellCommand) -> list[str]:
-    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。"""
+    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。
+
+    外側のシェルが引用とエスケープを解いた後の値を返す（`bash -c "rm \\"\\$W\\""` の中身は `rm "$W"`）。
+    """
     body_argv, head = cmd.body_argv, cmd.body_name
     if head == "eval" and len(body_argv) > 1:
-        return [" ".join(body_argv[1:])]
+        return [" ".join(shell_value(text) for text in cmd.body_source[1:])]
     if head in _SHELLS:
         for i, word in enumerate(body_argv[1:-1], start=1):
             if word.startswith("-") and not word.startswith("--") and "c" in word:
-                return [body_argv[i + 1]]
+                return [shell_value(cmd.body_source[i + 1])]
     return []
+
+
+# ANSI-C 引用（`$'…'`）の中のエスケープ
+_ANSI_C_ESCAPES = {
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+}
+# 二重引用の中で `\\` が文字にする字（改行は行の継続として消える）
+_DQ_ESCAPABLE = '$`"\\\n'
+
+
+def shell_value(text: str) -> str:
+    """語の字面から、外側のシェルが引用とエスケープを解いた値。展開（`$NAME`・`$(…)`）は値が分からないので字面のまま残す。"""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch, nx = text[i], text[i + 1 : i + 2]
+        step = 1
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+            out.append("" if ch == "'" else ch)
+        elif quote == "$'":
+            if ch == "\\" and nx:
+                out.append(_ANSI_C_ESCAPES.get(nx, ch + nx))
+                step = 2
+            elif ch == "'":
+                quote = ""
+            else:
+                out.append(ch)
+        elif ch == "\\" and nx and (quote == "" or nx in _DQ_ESCAPABLE):
+            out.append("" if nx == "\n" else nx)
+            step = 2
+        elif ch == "$" and nx == "'" and quote == "":
+            quote, step = "$'", 2
+        elif ch == '"':
+            quote = "" if quote == '"' else '"'
+        elif ch == "'" and quote == "":
+            quote = "'"
+        else:
+            out.append(ch)
+        i += step
+    return "".join(out)
 
 
 class _Opts(NamedTuple):
@@ -292,12 +348,33 @@ _SPLIT_OK = "ok"
 _SPLIT_CUT = "cut"
 
 
-def _strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """先頭のラッパーのコマンドとその引数を外した語。読めない引数・コマンドを起動しない形なら空。"""
-    words: Optional[list[str]] = list(argv)
+class _Word(str):
+    """ラッパーを外す途中の語。値（`str`）と、位置をそろえた字面（`source`）を持つ。
+
+    `env -S` で分けた語の字面は、GNU env が文字にした部分を単引用で囲み、`${NAME}` を字面のまま残す。
+    """
+
+    source: str
+
+    def __new__(cls, value: str, source: str) -> "_Word":
+        word = super().__new__(cls, value)
+        word.source = source
+        return word
+
+
+def _strip_wrappers(argv: tuple[str, ...], source: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """先頭のラッパーのコマンドとその引数を外した語と、それに位置をそろえた字面。読めない引数・コマンドを起動しない形なら空。
+
+    先頭がラッパーでなければ、語と字面をそのまま返す。
+    """
+    if not argv or os.path.basename(argv[0]) not in _WRAPPER_ARGS:
+        return argv, source
+    words: Optional[list[str]] = [_Word(word, text) for word, text in zip(argv, source)]
     while words and os.path.basename(words[0]) in _WRAPPER_ARGS:
         words = _after_options(os.path.basename(words[0]), words[1:])
-    return tuple(words) if words else ()
+    if not words:
+        return (), ()
+    return tuple(str(word) for word in words), tuple(getattr(word, "source", word) for word in words)
 
 
 def _after_options(name: str, words: list[str]) -> Optional[list[str]]:
@@ -375,6 +452,8 @@ class _EnvSplit:
         self.quote = ""
         self.words: list[str] = []
         self.word: Optional[list[str]] = None
+        # 語の部分ごとの（値, 展開の字面）。文字のままの部分は展開の字面が None
+        self.parts: list[tuple[str, Optional[str]]] = []
 
     def run(self) -> Optional[tuple[str, ...]]:
         state: Optional[str] = _SPLIT_OK
@@ -385,14 +464,16 @@ class _EnvSplit:
         self._end()
         return tuple(self.words)
 
-    def _add(self, text: str) -> None:
+    def _add(self, text: str, expansion: Optional[str] = None) -> None:
+        """語へ `text` を足す。`expansion` は GNU env が展開する部分（`${NAME}`）の字面で、文字のままの部分は None。"""
         if self.word is None:
-            self.word = []
+            self.word, self.parts = [], []
         self.word.append(text)
+        self.parts.append((text, expansion))
 
     def _end(self) -> None:
         if self.word is not None:
-            self.words.append("".join(self.word))
+            self.words.append(_Word("".join(self.word), _quoted_source(self.parts)))
             self.word = None
 
     def _single(self) -> str:
@@ -450,9 +531,25 @@ class _EnvSplit:
         end = self.text.find("}", self.i)
         if not self.text.startswith("${", self.i) or end < 0:
             return None
-        self._add(self.text[self.i : end + 1])
+        expansion = self.text[self.i : end + 1]
+        self._add(expansion, expansion)
         self.i = end + 1
         return "ok"
+
+
+def _quoted_source(parts: list[tuple[str, Optional[str]]]) -> str:
+    """`env -S` で分けた 1 語の字面。続いた文字のままの部分を 1 つの単引用で囲み、展開の部分を字面のまま置く。"""
+    out: list[str] = []
+    literal: list[str] = []
+    for text, expansion in parts + [("", "")]:
+        if expansion is None:
+            literal.append(text)
+            continue
+        if literal:
+            out.append("'" + "".join(literal).replace("'", "'\\''") + "'")
+            literal = []
+        out.append(expansion)
+    return "".join(out)
 
 
 def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
@@ -486,14 +583,6 @@ def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]
             source.append(text)
         previous_end = child.end_byte
     return tuple(argv), tuple(joined), tuple(source)
-
-
-def _body_source(joined: tuple[str, ...], source: tuple[str, ...], body: tuple[str, ...]) -> tuple[str, ...]:
-    """`body`（ラッパーを外した語）に位置をそろえた字面。`env -S` で分けた語は字面が無いので、分けた語のまま置く。"""
-    common = 0
-    while common < min(len(joined), len(body)) and joined[-1 - common] == body[-1 - common]:
-        common += 1
-    return body[: len(body) - common] + source[len(source) - common :]
 
 
 def _unquote(text: str, kind: str) -> str:
