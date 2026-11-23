@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -413,6 +414,21 @@ def test_a_fallback_change_while_saving_is_kept_and_written_later(gate, path):
     assert record(path)["blocked_until"] == pytest.approx(NOW + 30)
 
 
+def test_a_fallback_change_later_in_the_save_is_not_read_as_a_rewound_clock(gate, path, clock):
+    # 保存を始めてから CLOCK_SLACK を越えて後に、プロセスの中だけの変更が入る（壁時計は正しく進む）
+    seed(path)
+
+    def change(record: dict, now: float) -> None:
+        clock.now += 5
+        gate._in_process(lambda memory, now: memory.__setitem__("blocked_until", now + 30))
+
+    gate._apply(change)
+
+    assert gate._memory["blocked_until"] == pytest.approx(NOW + 5 + 30)
+    assert gate._memory["written_at"] == pytest.approx(NOW + 5)
+    assert gate.reserve(WRITE).at == pytest.approx(NOW + 5 + 30)
+
+
 def test_the_record_written_again_carries_the_unsaved_changes(gate, path, monkeypatch):
     seed(path)
     real = slot_pool.write_json
@@ -635,45 +651,97 @@ def test_async_acquire_takes_the_locks_off_the_event_loop(gate, path, monkeypatc
     probe.release()
 
 
-def test_async_release_runs_while_the_default_pool_waits_for_the_send_lock(gate, path, clock):
-    # 既定のスレッドプールを 1 本にし、後の書き込みが送信のロックを待ってその 1 本を埋める
-    released = threading.Event()
-    on_loop: dict = {}
-    real_finish, real_send = gate._finish, gate._send_lock
-    calls: list[int] = []
+class _Executor(ThreadPoolExecutor):
+    """スレッドを使わない実行器。`frozen` の間は受けた処理を進めず `pending` に積む（埋まったプールの代わり）。"""
 
-    def finish(kind, send):
-        real_finish(kind, send)
-        clock.now += W  # 送り終えてから間隔が過ぎた（後の書き込みを本物の時間で眠らせない）
-        released.set()
+    def __init__(self) -> None:
+        super().__init__(max_workers=1)
+        self.frozen = False
+        self.pending: list[tuple[Future, Callable]] = []
+        self.ran: list[Callable] = []
 
-    def send_lock():
-        calls.append(1)
-        if len(calls) == 2:
-            on_loop["loop"].call_soon_threadsafe(on_loop["waiting"].set)
-            assert released.wait(10)
-        return real_send()
+    def submit(self, fn, /, *args, **kwargs) -> Future:
+        future: Future = Future()
+        self.pending.append((future, functools.partial(fn, *args, **kwargs)))
+        if not self.frozen:
+            self.drain()
+        return future
 
-    gate._finish, gate._send_lock = finish, send_lock
-    request = httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")
+    def drain(self) -> None:
+        while self.pending:
+            future, fn = self.pending.pop(0)
+            if not future.set_running_or_notify_cancel():
+                continue
+            self.ran.append(fn)
+            try:
+                future.set_result(fn())
+            except BaseException as exc:
+                future.set_exception(exc)
 
-    async def second() -> None:
-        async with gate.async_acquire(request):
+
+async def _settled(task: asyncio.Future, turns: int = 50) -> bool:
+    """本物の時間を待たずにイベントループを回し、`task` が終わったかを返す。"""
+    for _ in range(turns):
+        if task.done():
+            return True
+        await asyncio.sleep(0)
+    return task.done()
+
+
+def _send_lock_is_free(path: Path) -> bool:
+    probe = slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE))
+    if probe is None:
+        return False
+    probe.release()
+    return True
+
+
+PATCH = httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")
+
+
+def test_async_release_runs_while_the_default_pool_is_stuck(gate, path, monkeypatch):
+    # 送信のロックを待つ手順が既定のスレッドプールを埋めた状態を、処理を進めない既定の実行器で作る
+    default, finisher = _Executor(), _Executor()
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
+
+    async def write() -> None:
+        async with gate.async_acquire(PATCH):
+            default.frozen = True
+
+    async def main() -> bool:
+        asyncio.get_running_loop().set_default_executor(default)
+        return await _settled(asyncio.ensure_future(write()))
+
+    assert asyncio.run(main())
+    assert default.pending == [] and len(finisher.ran) == 1
+    assert _send_lock_is_free(path)
+    assert record(path)["sent_next"] == pytest.approx(NOW + W)
+
+
+def test_a_cancelled_caller_still_releases_the_send_lock(gate, path, monkeypatch):
+    # 専用の実行器が埋まっている間に呼び出し元が取り消されても、投入済みの放す処理は後で進む
+    default, finisher = _Executor(), _Executor()
+    finisher.frozen = True
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
+
+    async def write() -> None:
+        async with gate.async_acquire(PATCH):
             pass
 
     async def main() -> None:
-        on_loop["loop"] = asyncio.get_running_loop()
-        on_loop["loop"].set_default_executor(ThreadPoolExecutor(max_workers=1))
-        on_loop["waiting"] = asyncio.Event()
-        async with gate.async_acquire(request):
-            clock.now += W  # 後の書き込みの予約を今にする
-            later = asyncio.ensure_future(second())
-            await on_loop["waiting"].wait()
-        await asyncio.wait_for(later, 10)
+        asyncio.get_running_loop().set_default_executor(default)
+        task = asyncio.ensure_future(write())
+        for _ in range(50):
+            if finisher.pending:
+                break
+            await asyncio.sleep(0)
+        assert len(finisher.pending) == 1 and not _send_lock_is_free(path)
+        task.cancel()
+        assert await _settled(task) and task.cancelled()
+        finisher.drain()
 
     asyncio.run(main())
 
-    assert released.is_set() and len(calls) == 2
-    probe = slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE))
-    assert probe is not None
-    probe.release()
+    assert len(finisher.ran) == 1
+    assert _send_lock_is_free(path)
+    assert record(path)["sent_next"] == pytest.approx(NOW + W)

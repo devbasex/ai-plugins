@@ -274,8 +274,10 @@ class WriteGate(BaseThrottler):
         try:
             yield
         finally:
-            # 既定のスレッドプールは送信のロックを待つ手順で埋まりうるので、放す処理は専用のスレッドで進める
-            await asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, writes.kind, send)
+            # 既定のスレッドプールは送信のロックを待つ手順で埋まりうるので、放す処理は専用のスレッドで進める。
+            # 呼び出し元が取り消されても、投入済みの放す処理は取り消さない（shield）
+            finishing = asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, writes.kind, send)
+            await asyncio.shield(finishing)
 
     async def _turn(self, kind: str, count: int) -> Optional[FileLock]:
         """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。"""
@@ -498,8 +500,13 @@ class WriteGate(BaseThrottler):
             self._unsaved = unsaved or self._fallbacks != seen
 
     def _merged(self, record: dict[str, float], seen: int) -> dict[str, float]:
-        """（`_mutex` の中で呼ぶ）記録の写し。`seen` の後にプロセスの中だけで変えた時刻があれば遅い方を採る。"""
+        """（`_mutex` の中で呼ぶ）記録の写し。`seen` の後にプロセスの中だけで変えた時刻があれば遅い方を採る。
+
+        その変更は保存を始めた時刻より後に入りうるので、両方を今の時刻へそろえてから重ね、書いた時刻も今にする。
+        """
         if self._fallbacks == seen:
             return dict(record)
-        memory = _rewound(dict(self._memory), record["written_at"])
-        return {**record, **{key: max(record[key], memory[key]) for key in TIMES}}
+        now = self.clock()
+        saved = _rewound(dict(record), now)
+        memory = _rewound(dict(self._memory), now)
+        return {**saved, **{key: max(saved[key], memory[key]) for key in TIMES}, "written_at": now}
