@@ -126,9 +126,10 @@ class GitHubError(Exception):
     """GitHub の要求が失敗した。`status` は HTTP の状態（届かなければ 0）、`retry_after` は上限の回復までの秒、
     `quota` は上限に当たったスロット（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかったマーカーで、
     状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。
-    `secondary` は二次レート制限か、`hinted` は GitHub が待ちの秒を示したか、`reasons` は拒否の理由の全文（切り詰めない。`of` が書く）。"""
+    `secondary` は二次レート制限か、`hinted` は GitHub が待ちの秒を示したか、`reasons` は拒否の理由の全文（切り詰めない。`of` が書く）。
+    `recorded` は同じ応答について待ちの終わりを知らせ済みか（`_translating` が知らせ直さない）。"""
 
-    secondary = hinted = False
+    secondary = hinted = recorded = False
     reasons: tuple[str, ...] = ()
 
     def __init__(
@@ -144,7 +145,7 @@ class GitHubError(Exception):
     def of(cls, failure: github_limits.Failure) -> GitHubError:
         """`github_limits` の写した失敗から作る。"""
         made = cls(failure.detail, failure.status, failure.retry_after, failure.quota, failure.unreached)
-        made.secondary, made.hinted, made.reasons = failure.secondary, failure.hinted, failure.reasons
+        made.secondary, made.hinted, made.reasons, made.recorded = failure.secondary, failure.hinted, failure.reasons, failure.recorded
         return made
 
 
@@ -485,15 +486,15 @@ class _Counted(NamedTuple):
 @contextmanager
 def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
     """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限なら `gate.block` で
-    待ちの終わりを知らせる（githubkit の打ち直しを通らない失敗も）。"""
+    待ちの終わりを知らせる（githubkit の打ち直しを通らない失敗も。応答のフックか打ち直しの判断が知らせ済みなら知らせ直さない）。"""
     try:
         yield
     except (RateLimitExceeded, RequestFailed, RequestError) as exc:
         error = _translated(exc, label, detail_body)
-        github_limits.tell(gate, error.secondary, error.retry_after)
+        github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
         raise error from None
     except GitHubError as error:
-        github_limits.tell(gate, error.secondary, error.retry_after)
+        github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
         raise
 
 
@@ -521,7 +522,8 @@ class GitHub:
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。
-        HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（`_translating` が `block` する。A6）。"""
+        HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（mutation は応答のフック、読み取りは `_translating` が
+        `block` する。A6）。"""
         with _translating(GRAPHQL, gate=self.gate):
             resp = self.api.graphql._request(query, variables)  # 誤りの写しへ応答のヘッダー（`Retry-After`）を渡す
             try:
@@ -530,7 +532,7 @@ class GitHub:
                 if _only_not_found(exc) and exc.response.data is not None:
                     return exc.response.data
                 messages = "; ".join(e.message for e in exc.response.errors)
-                raise GitHubError.of(github_limits.graphql_failure(messages, resp.headers)) from None
+                raise GitHubError.of(github_limits.graphql_failure(messages, resp.raw_response)) from None
             except PrimaryRateLimitExceeded as exc:
                 limited = github_limits.graphql_limited(exc)
                 if limited is None:

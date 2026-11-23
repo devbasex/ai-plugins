@@ -292,4 +292,28 @@ def test_the_wait_is_recorded_before_the_send_lock_is_released(tmp_path: Path, p
             github.GitHub(REPO, api).graphql("mutation { addComment(input: {}) { x } }", {})
         else:
             github.GitHub(REPO, api).rest("POST", path, {"title": "t"})
-    assert gate.held_at_block[0] is True
+    # フック・打ち直しの判断・失敗の写しが同じ応答の待ちを書き直さない（PR 4265 の r2-2）
+    assert gate.held_at_block == [True]
+
+
+def test_a_graphql_read_is_shared_by_the_translation_not_the_hook(tmp_path: Path) -> None:
+    # PR 4265 の r2-1: フックは送信のロックを持たない読み取りの 200 の本文を読まない。待ちは失敗の写しが 1 回だけ知らせる
+    gate = _Watching(tmp_path / write_gate.GATE_FILE)
+    answer = {"data": None, "errors": [{"type": "FORBIDDEN", "message": SECONDARY}]}
+    api = github.client(auth="t", transport=httpx.MockTransport(lambda request: httpx.Response(200, json=answer)), gate=gate)
+    with pytest.raises(github.GitHubError) as err:
+        github.GitHub(REPO, api).graphql("query { viewer { login } }", {})
+    assert err.value.secondary and gate.held_at_block == [False]
+
+
+def test_a_retry_shares_again_only_when_the_backoff_grows() -> None:
+    # PR 4265 の r2-2: フックが知らせた待ちより長くなる打ち直しの回数だけ、同じ応答について知らせ直す
+    gate = _Gate()
+    decide = github.RetryWithin(remaining=lambda: 0.0, gate=gate)  # type: ignore[arg-type]
+    failed = _failed(403, {"x-ratelimit-remaining": "12"}, SECONDARY, False)
+    github_limits.share(gate, failed.response.raw_response, FIRST_WAIT)  # type: ignore[arg-type]
+    decide(failed, 0)
+    decide(failed, 1)
+    assert gate.blocked == [FIRST_WAIT, github_limits.backoff(1)]
+    error = github.GitHubError.of(github_limits.failure_of(failed, "POST /issues", False, time.time()))
+    assert error.recorded

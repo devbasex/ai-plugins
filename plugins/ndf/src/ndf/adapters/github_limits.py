@@ -4,9 +4,12 @@
   ここを通す。GitHub が待ちの秒（`retry-after`、または一次の残量 0 と `x-ratelimit-reset`）を示したときだけ `hinted` を真にし、
   示さなければ `cross-review.secondary-rate-limit` の指数的な待ち（`routing.backoff`）の 1 回目の秒にする
 - 応答のフック（`watcher`）は、httpx が応答を返す前（送信のロックを放す前）に二次レート制限を見分けて待ちの終わりを
-  記録する。後続の書き込みが古い記録を読んで送らない（HTTP 200 の GraphQL の誤りも）
+  記録する。後続の書き込みが古い記録を読んで送らない。HTTP 200 の本文を読むのは送信のロックを持つ mutation だけで、
+  GraphQL の読み取りの誤りは `GitHub.graphql` の写しが知らせる（本文を二重に解析しない。PR 4265 の r2-1）
 - githubkit の打ち直しの判断（`RetryWithin`）は、二次レート制限なら打ち直すかに依らず（最後の試行でも）待ちの終わりを
   `WriteGate.block` でマシン全体へ知らせる
+- 同じ応答について知らせた秒は応答（`extensions` の `BLOCKED`）に残し、それより長く待つとき（打ち直しの回数で延ばした
+  待ち）だけ知らせ直す。フック・打ち直しの判断・失敗の写しが同じ待ちで記録を書き直さない（PR 4265 の r2-2）
 - 拒否の理由（`reasons_of`）は応答の本文の全体から読み、切り詰めない
 """
 
@@ -37,6 +40,8 @@ REST_PHRASES = ("secondary rate",)
 GRAPHQL_PHRASES = ("secondary rate limit", "submitted too quickly")
 # `errors[]` の辞書から理由の文へつなぐ欄
 REASON_KEYS = ("message", "code", "field", "resource")
+# 同じ応答について `WriteGate.block` へ知らせた待ちの秒を残す、httpx の応答の `extensions` の鍵
+BLOCKED = "ndf.blocked"
 
 
 class Failure(NamedTuple):
@@ -50,6 +55,7 @@ class Failure(NamedTuple):
     secondary: bool = False
     hinted: bool = False
     reasons: tuple[str, ...] = ()
+    recorded: bool = False  # `retry_after` 以上の待ちを同じ応答について知らせ済み（`tell` が知らせ直さない）
 
 
 class Limit(NamedTuple):
@@ -147,6 +153,20 @@ def graphql_messages(text: str) -> str:
     return "; ".join(str(e["message"]) for e in errors if isinstance(e, dict) and e.get("message") is not None)
 
 
+def _recorded(response: httpx.Response, seconds: float) -> bool:
+    """同じ応答について `seconds` 以上の待ちを知らせ済みか。"""
+    blocked = response.extensions.get(BLOCKED)
+    return blocked is not None and blocked >= seconds
+
+
+def share(gate: WriteGate, response: httpx.Response, seconds: float) -> None:
+    """待ちの終わりを `gate` へ知らせる。同じ応答について `seconds` 以上を知らせ済みなら知らせ直さない（r2-2）。"""
+    if _recorded(response, seconds):
+        return
+    gate.block(seconds)
+    response.extensions[BLOCKED] = seconds
+
+
 def limit_of_failure(exc: RequestFailed, now: float) -> Optional[Limit]:
     """githubkit の失敗（`SecondaryRateLimitExceeded` も通常の `RequestFailed` も）の二次レート制限。"""
     response = exc.response
@@ -167,17 +187,22 @@ def limit_of_response(response: httpx.Response, now: float) -> Optional[Limit]:
 
 
 def _watched(response: httpx.Response) -> bool:
-    """本文を読んで見分ける応答か（REST の 403・429 と、GraphQL への POST の 200）。"""
+    """本文を読んで見分ける応答か（REST の 403・429 と、送信のロックを持つ GraphQL の mutation の 200）。
+
+    GraphQL の読み取りの 200 は読まない。成功した一括の読み取りの本文を githubkit の前に解析し直さない（r2-1）。
+    """
     request = response.request
     if response.status_code in LIMIT_STATUSES:
         return True
-    return response.status_code == HTTPStatus.OK and request.method == "POST" and request.url.path == write_gate.GRAPHQL_PATH
+    if response.status_code != HTTPStatus.OK or request.method != "POST" or request.url.path != write_gate.GRAPHQL_PATH:
+        return False
+    return write_gate.write_of(request) is not None
 
 
 def _record(gate: WriteGate, response: httpx.Response) -> None:
     limit = limit_of_response(response, time.time())
     if limit is not None:
-        gate.block(limit.seconds)
+        share(gate, response, limit.seconds)
 
 
 def watcher(gate: WriteGate) -> Callable[[httpx.Response], None]:
@@ -227,7 +252,7 @@ class RetryWithin:
         if self.gate is not None and isinstance(exc, RequestFailed):
             limit = limit_of_failure(exc, time.time())
             if limit is not None:
-                self.gate.block(limit.seconds if limit.hinted else backoff(retry_count))
+                share(self.gate, exc.response.raw_response, limit.seconds if limit.hinted else backoff(retry_count))
         option = RETRY_DEFAULT(exc, retry_count)
         if option.do_retry and isinstance(exc, RateLimitExceeded):
             if exc.retry_after.total_seconds() > self.remaining():
@@ -254,7 +279,9 @@ def failure_of(exc: RequestFailed | RequestError, label: str, detail_body: bool,
     reasons, limit = reasons_of(text), limit_of_failure(exc, now)
     if limit is not None:  # 二次の上限は待てば戻る（#3941）
         detail = f"GitHub の上限（{quota_of(label)} のスロット・secondary rate limit）: {label}"
-        return Failure(detail, status, limit.seconds, quota_of(label), secondary=True, hinted=limit.hinted, reasons=reasons)
+        recorded = _recorded(exc.response.raw_response, limit.seconds)
+        quota = quota_of(label)
+        return Failure(detail, status, limit.seconds, quota, secondary=True, hinted=limit.hinted, reasons=reasons, recorded=recorded)
     if isinstance(exc, RateLimitExceeded):
         detail = f"GitHub の上限（{quota_of(label)} のスロット）: {label}"
         return Failure(detail, status, exc.retry_after.total_seconds(), quota_of(label), reasons=reasons)
@@ -262,13 +289,14 @@ def failure_of(exc: RequestFailed | RequestError, label: str, detail_body: bool,
     return Failure(f"GitHub が断った（{status}）: {label}{body}", status, reasons=reasons)
 
 
-def graphql_failure(messages: str, headers: Mapping[str, str]) -> Failure:
+def graphql_failure(messages: str, response: httpx.Response) -> Failure:
     """GraphQL の HTTP 200 の誤り（`messages` は誤りの `message` を `; ` でつないだ文）の写し。二次レート制限なら上限として写す。"""
-    limit = limit_of(HTTPStatus.OK, headers, messages, time.time())
+    limit = limit_of(HTTPStatus.OK, response.headers, messages, time.time())
     if limit is None:
         return Failure(f"GraphQL の誤り: {messages}")
     detail = f"GitHub の上限（{GRAPHQL} のスロット・secondary rate limit）: {GRAPHQL}: {messages}"
-    return Failure(detail, 0, limit.seconds, GRAPHQL, secondary=True, hinted=limit.hinted, reasons=(messages,))
+    recorded = _recorded(response, limit.seconds)
+    return Failure(detail, 0, limit.seconds, GRAPHQL, secondary=True, hinted=limit.hinted, reasons=(messages,), recorded=recorded)
 
 
 def graphql_limited(exc: RateLimitExceeded) -> Optional[Failure]:
@@ -276,11 +304,11 @@ def graphql_limited(exc: RateLimitExceeded) -> Optional[Failure]:
     if exc.response.status_code != HTTPStatus.OK:
         return None
     messages = "; ".join(e.message for e in exc.response.parsed_data.errors)
-    failure = graphql_failure(messages, exc.response.headers)
+    failure = graphql_failure(messages, exc.response.raw_response)
     return failure if failure.secondary else None
 
 
-def tell(gate: Optional[WriteGate], secondary: bool, retry_after: Optional[float]) -> None:
-    """二次レート制限なら、待ちの終わりを `gate` へ知らせる（決定 7）。"""
-    if secondary and retry_after is not None and gate is not None:
+def tell(gate: Optional[WriteGate], secondary: bool, retry_after: Optional[float], recorded: bool = False) -> None:
+    """二次レート制限なら、待ちの終わりを `gate` へ知らせる（決定 7）。`recorded`（同じ応答について知らせ済み）なら知らせ直さない。"""
+    if secondary and retry_after is not None and gate is not None and not recorded:
         gate.block(retry_after)
