@@ -171,17 +171,28 @@ def _open(finding: Mapping[str, Any], rounds: Sequence[Mapping[str, Any]], port:
     return port.open_thread(path, line, commit, opening(finding))
 
 
-def patient(call: Callable[[], T], errors: type[Exception], sleep: Callable[[float], None] = time.sleep) -> T:
-    """`call` を打つ。GitHub の二次レート制限（`errors` の失敗のうち `throttle_decide.secondary_limited`）なら待って打ち直す。"""
+def patient(
+    call: Callable[[], T],
+    errors: type[Exception],
+    sleep: Callable[[float], None] = time.sleep,
+    block: Optional[Callable[[float], None]] = None,
+) -> T:
+    """`call` を打つ。GitHub の二次レート制限（`errors` の失敗の `secondary` が真）なら待って打ち直す。
+
+    待つ前に、待ちの秒を `block`（`WriteGate.block`）へ知らせ、ほかのプロセスの書き込みも止める（#4016 の決定 7）。
+    `errors` の失敗は `github.GitHubError` の属性（`secondary`・`hinted`・`retry_after`）を持つ。
+    """
     attempt = 1
     while True:
         try:
             return call()
         except errors as exc:
-            limited = throttle_decide.secondary_limited(int(getattr(exc, "status", 0)), str(exc))
-            wait = throttle_decide.wait_before_retry(limited, attempt, getattr(exc, "retry_after", None))
+            failed: Any = exc
+            wait = throttle_decide.wait_before_retry(failed.secondary, attempt, failed.retry_after, failed.hinted)
             if wait is None:
                 raise
+            if block is not None:
+                block(wait)
             sleep(wait)
             attempt += 1
 

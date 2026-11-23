@@ -67,18 +67,21 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     """対象のリポジトリ（`repo.resolve_target_repo` の順で決める）の GitHub へ書く口。書く本文は `publish.Publisher` を通す。"""
     slug = repo.resolve_target_repo(repo_arg, state_repo, cwd).slug
     gh = load_github()
-    from ndf.adapters import publish
+    from ndf.adapters import publish, write_gate
 
-    hub = gh.GitHub(slug, gh.client())
+    # 書き込みの順番と二次レート制限の待ちの終わりを、マシンの 1 つの記録で共有する（#4016）
+    gate = write_gate.machine_gate()
+    hub = gh.GitHub(slug, gh.client(gate=gate), gate=gate)
     publisher = publish.Publisher(hub)
     ports: dict[int, threads.GitHubPort] = {}
 
     def comment(pr: int, body: str, previous: Optional[str]) -> str:
         cid = report_decide.comment_id(previous)
         if cid is None:
-            return str(threads.patient(lambda: publisher.comment(pr, body), gh.GitHubError).url)
+            return str(threads.patient(lambda: publisher.comment(pr, body), gh.GitHubError, block=gate.block).url)
         (safe,), _ = publisher.guarded(body)
-        patched = threads.patient(lambda: hub.rest("PATCH", f"/repos/{slug}/issues/comments/{cid}", {"body": safe}), gh.GitHubError)
+        path = f"/repos/{slug}/issues/comments/{cid}"
+        patched = threads.patient(lambda: hub.rest("PATCH", path, {"body": safe}), gh.GitHubError, block=gate.block)
         return str(patched["html_url"])
 
     def port(pr: int) -> threads.GitHubPort:

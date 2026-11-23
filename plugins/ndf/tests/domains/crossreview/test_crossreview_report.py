@@ -96,7 +96,9 @@ def test_sync_opens_threads_replies_and_resolves_closed_findings_once() -> None:
 
 
 class _Refused(Exception):
-    status = 422
+    """`github.GitHubError` の形の偽物（行の位置の 422。二次レート制限でない）。"""
+
+    status, retry_after, secondary, hinted, reasons = 422, None, False, False, ()
 
 
 class _RestHub:
@@ -328,13 +330,16 @@ def test_threads_read_at_the_start_are_reused_to_resolve() -> None:
     assert hub.lists == 1 and hub.mutations == [{"id": "T1"}]
 
 
-def test_reader_and_writer_share_one_port_per_pr(monkeypatch) -> None:
+def test_reader_and_writer_share_one_port_per_pr(monkeypatch, tmp_path: Path) -> None:
     """PR 3944 の r6-8: 同じ PR の読む口と書く口は同じ口（読んだスレッドの一覧を共有する）。"""
     import types
 
+    from ndf.adapters import write_gate
     from ndf.domains.crossreview import cli, repo
 
-    gh = types.SimpleNamespace(GitHub=lambda slug, client: _RestHub(), client=lambda: None, GitHubError=_Refused)
+    # 書き込みの順番の記録を本物のホームの下へ置かない
+    monkeypatch.setattr(write_gate, "gate_path", lambda: tmp_path / "write-gate.json")
+    gh = types.SimpleNamespace(GitHub=lambda slug, client, gate=None: _RestHub(), client=lambda **_: None, GitHubError=_Refused)
     monkeypatch.setattr(cli, "load_github", lambda: gh)
     monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
     made = cli._github_hub(None, None, Path("."))

@@ -207,7 +207,7 @@
     "cross-review.fixer.resume-margin": {"summary": "cross-review の修正担当が前のラウンドの会話を続けるときの、モデルの文脈の窓の手前の余白（トークン）。前の会話の最後の文脈 + その起動の 1 ラウンドの増分の最大 + この余白が窓を超えたら新しい会話で始める", "count": 50000},
     "cross-review.remark-chars": {"summary": "cross-review が相手役へ渡す既存の PR のコメント 1 件の本文の上限（字）。超えた分は切る", "count": 600},
     "cross-review.remarks-total": {"summary": "cross-review が相手役へ渡す既存の PR のコメント全体の上限（字）。超えたら古いものから省く（履歴の長い PR でプロンプトと CLI の引数が伸びない）", "count": 8000},
-    "cross-review.secondary-rate-limit": {"summary": "cross-review が PR へ書く操作が GitHub の二次レート制限（403・429）に当たったときの打ち直し。attempts は最初の 1 回を含む回数、interval は GitHub が待ちの秒を返さないときの待ち", "attempts": 3, "interval": 60},
+    "cross-review.secondary-rate-limit": {"summary": "GitHub の二次レート制限（403・429・GraphQL の誤り）に当たったときの打ち直しと、ほかのプロセスへ知らせる待ちの終わり。attempts は最初の 1 回を含む回数。GitHub が待ちの秒を返さないときの待ちは interval × factor^(回数 - 1) で、max_interval で頭打ち", "attempts": 4, "interval": 60, "factor": 2, "max_interval": 600},
     "cross-review.thread-spacing": {"summary": "cross-review が指摘のスレッドを続けて作るときの間隔（GitHub は内容を作る要求の間を 1 秒空けるよう求める）", "interval": 1},
     "cross-review.verify": {"summary": "指摘の確かめのコマンドの上限", "seconds": 300},
     "google-workspace.call": {"summary": "gws のコマンドの上限", "seconds": 120},
