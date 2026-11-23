@@ -7,14 +7,15 @@ NDF の子孫（cross-review の修正担当・プランの worker・レーン�
 NDF の共有の venv を同期し直さない（#4029）。NDF が自分のサブコマンドを子で打つときは、自分の `src` を環境変数ではなく argv で子の
 `sys.path` にだけ渡す。
 
-**例: cross-review の修正担当が、利用先のリポジトリで `uv run --project . pytest` を打つ。**
+**例: cross-review の修正担当が、利用先のリポジトリで `uv run --project . pytest` を打つ。** NDF を呼んだ側は `UV_PROJECT_ENVIRONMENT` を
+指定していないとする。指定していれば、子孫の `uv run` はその値が指す環境を同期する（NDF は呼び出し元の値を戻すだけで、`.venv` に決めない）。
 
 | | 直す前 | 今 |
 | --- | --- | --- |
 | 修正担当が受け継ぐ `UV_PROJECT_ENVIRONMENT` | NDF の venv（`<キャッシュのホーム>/ndf/venv/<版>`） | 呼び出し元の値（無ければ無い） |
 | 修正担当が受け継ぐ `VIRTUAL_ENV`・`PATH` の先頭 | NDF の venv と、その `bin` | 呼び出し元の値 |
 | 修正担当が受け継ぐ `PYTHONPATH` | NDF の `src` を頭に足した値 | 呼び出し元の値 |
-| `uv run --project .` の結果 | NDF の venv を利用先の依存で同期し直し、NDF の extras が消える | 利用先の `.venv` を使い、NDF の venv は変わらない |
+| `uv run --project .` の結果 | NDF の venv を利用先の依存で同期し直し、NDF の extras が消える | 利用先の `.venv`（呼び出し元が `UV_PROJECT_ENVIRONMENT` を指定していればその環境）を同期して使い、NDF の venv は変わらない |
 
 子が `ndf ...` を打てば `bin/ndf` が毎回 NDF の venv を指し直すので、NDF のコマンドは今と同じく NDF の venv で動く。
 
