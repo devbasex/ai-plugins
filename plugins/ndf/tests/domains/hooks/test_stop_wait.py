@@ -207,8 +207,10 @@ def test_stop_wait_skips_the_model_when_the_time_is_short(tmp_path, monkeypatch)
 
 def test_stop_wait_subtracts_the_margin_once(tmp_path, monkeypatch):
     judge = Judge(monkeypatch)
-    _check(tmp_path, REPORT, deadline=NOW + 7)
-    assert [seconds for _, seconds, _ in judge.asked] == [5]
+    # 締め切りいっぱいなら、判定の上限（`hook.stop-wait.judge` の seconds）で打つ
+    stop = budget.budget_for("claude", "Stop")
+    _check(tmp_path, REPORT, deadline=NOW + stop.deadline)
+    assert [seconds for _, seconds, _ in judge.asked] == [min(stop.usable, reply_judge._judge("seconds"))]
     judge.asked.clear()
     _check(tmp_path, REPORT, deadline=NOW + 1.5 + 2)
     assert [seconds for _, seconds, _ in judge.asked] == [2]
