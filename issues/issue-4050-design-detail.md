@@ -72,6 +72,15 @@ plugins/ndf/
 | `src/ndf/domains/relay/signals.py` | 変更 | 質問のファイル（`question.json`）に AskUserQuestion の `metadata` を写す | — | — | 質問を書く関数（変更） |
 | `src/ndf/progress/plan/cli.py` | 変更 | `ndf lanes idle refresh / set / show`・`ndf lanes batch` と呼び出し元の役割 | `idle`・`plan` | — | `_cmd_idle`・`_cmd_batch`・`caller_actor`（新設） |
 
+## #4210・#4211 へ分けたもの（範囲外）
+
+**設計文書の決定 21 で分けた。** 次の関数・欄・節は #4210・#4211 の設計の材料として残すもので、#4050 では作らない。#4050 での形は設計文書の節「解き方の全体像」の表にある。
+
+| 課題 | この文書の中の該当 |
+| --- | --- |
+| #4210（回答の待ちを越えて同じ行の工程を流す） | `decide` の手順の「越えてよい待ち」、`asking.pending`、`Env.idle`・`Env.busy`・`mark_idle`・`mark_active`・`row_idle`・`row_active`・`LaneRow.idle`・`awaiting_next` の変更・`claim_relaunch`、回答の消費の直前の再検証 |
+| #4211（検証と棚卸しの委ねとまとめ） | `Env.delegate`・`delegate`・`_start` の委ねの枝・`_consume_delegated`・`delegate_answered`、節「まとめた検証と棚卸し」（`batch claim / close / abort`・検証の環境・版の照合・リリースとの相互排他）、`request_opened` の `lane-verify`・`lane-backlog` |
+
 ## #4091 へ分けたもの（範囲外）
 
 **待つ行のラッパーを止めて席を返し、待ちが解けたら上限の判定を通して席を取り直す仕組みは、#4091 へ分けた（設計文書の決定 15）。** この文書のうち、名前に「範囲外（#4091）」の印を付けた関数・欄・型と、節「席を返す手順（`park_lane`）」「`next` との競合」「席を返した行の回答と再開」は #4091 の設計の材料として残すもので、#4050 では作らない。#4050 で作るのは次の形である。
