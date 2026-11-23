@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.contracts import causes, worker_paths
 from ndf.core import worker
 
@@ -324,3 +325,43 @@ def test_prepare_does_not_create_directories_under_a_parent_swapped_to_a_link(tm
     _swap_after_resolving(monkeypatch, shared, tmp_path / "moved", other)
     code, out = _run(capsys, "prepare", "--dir", str(shared / "new" / "d"), "--name", "n")
     assert _invalid(code, out) and list(other.iterdir()) == []
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_append_checks_the_result_dir_handed_by_worker_run(tmp_path, capsys, monkeypatch, same):
+    # PR 4307 の r8-5: worker run が開いた保存先と違うディレクトリ（同名への差し替え）へ報告と完了マーカーを書かない
+    report = _prepared(tmp_path, capsys)
+    st = (report.parent if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{report.parent}")
+    code, out = _append(capsys, monkeypatch, report, "## 作業の報告\n終えた\n", "--done")
+    if same:
+        assert code == 0 and out["status"] == "ok" and Path(f"{report}.done").exists()
+    else:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+        assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_draft_writes_the_pr_body_only_into_the_result_dir_worker_run_opened(tmp_path, capsys, monkeypatch, same):
+    # PR 4307 の r8-4: PR 本文の下書きは、照らした保存先を開いた記述子から書く
+    state = tmp_path / "state"
+    state.mkdir()
+    st = (state if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+    monkeypatch.setattr("sys.stdin", io.StringIO("## 概要\n直した\n"))
+    code, out = _run(capsys, "draft", "--state-dir", str(state))
+    draft = worker.pr_body_draft(state)
+    if same:
+        assert code == 0 and draft.read_text(encoding="utf-8") == "## 概要\n直した\n"
+    else:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition") and not draft.exists()
+
+
+def test_draft_refuses_a_draft_dir_that_is_a_link(tmp_path, capsys, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "far").mkdir()
+    (state / "work").symlink_to(tmp_path / "far")
+    monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
+    code, out = _run(capsys, "draft", "--state-dir", str(state))
+    assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []

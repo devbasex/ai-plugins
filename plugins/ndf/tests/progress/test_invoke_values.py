@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import sprint_fixture
 from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf.adapters import github
+from ndf.contracts import worker_paths
 from ndf.core import route
 from ndf.progress import definition, invoke
 
@@ -118,6 +120,42 @@ def test_read_values_is_none_without_a_whole_file(tmp_path, text):
     if text is not None:
         (tmp_path / invoke.VALUES_FILE).write_text(text, encoding="utf-8")
     assert invoke.read_values(tmp_path) is None
+
+
+def test_values_are_written_without_others_write_under_a_group_writable_umask(tmp_path):
+    # PR 4307 の r6-2・r6-7: umask によらず書き込み権限を外して公開し、同じ工程が作った値を `ndf answer work` が拒まない
+    before = os.umask(0o002)
+    try:
+        invoke.write_values(tmp_path, "design", {}, {}, True)
+    finally:
+        os.umask(before)
+    assert (tmp_path / invoke.VALUES_FILE).stat().st_mode & 0o022 == 0 and invoke.read_values(tmp_path) is not None
+
+
+@pytest.mark.parametrize("planted", ["values.tmp", invoke.VALUES_FILE])
+def test_writing_values_leaves_the_target_of_a_planted_link_alone(tmp_path, planted):
+    # PR 4307 の r6-1・r6-2: 共有の保存先に置かれたリンクの先を切り詰めず、アクセス権も変えない
+    target = tmp_path / "利用者のファイル"
+    target.write_text("消さない", encoding="utf-8")
+    target.chmod(0o664)
+    (tmp_path / planted).symlink_to(target)
+    if planted == invoke.VALUES_FILE:
+        with pytest.raises(worker_paths.EntryUnsafe):  # リンクの名前は置き換えずに止める（`plan_failure` が precondition にする）
+            invoke.write_values(tmp_path, "design", {}, {}, True)
+    else:
+        invoke.write_values(tmp_path, "design", {}, {}, True)
+        assert invoke.read_values(tmp_path) is not None
+    assert target.read_text(encoding="utf-8") == "消さない" and target.stat().st_mode & 0o777 == 0o664
+
+
+def test_values_others_can_write_are_refused_on_the_stage_path_too(tmp_path):
+    # PR 4307 の r6-3: 工程の描画（`_prepared` が読む `read_values`）も、ほかの利用者が書き換えられる値を使わない
+    invoke.write_values(tmp_path, "design", {}, {}, True)
+    (tmp_path / invoke.VALUES_FILE).chmod(0o666)
+    with pytest.raises(worker_paths.EntryUnsafe) as caught:
+        invoke.read_values(tmp_path)
+    failed = invoke.plan_failure("design", caught.value)
+    assert failed is not None and failed["cause"]["kind"] == "precondition"
 
 
 def test_clear_values_removes_the_file_from_each_dir_and_skips_dirs_without_it(tmp_path):

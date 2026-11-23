@@ -33,7 +33,6 @@ import os
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -41,12 +40,13 @@ from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, limits, result
+from ndf.contracts import facts, limits, result, worker_paths
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, merge_pending, model, refactor_values, stages, worker_kinds
+from ndf.progress.worker_kinds import VALUES_FILE, read_values, write_values
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -72,10 +72,6 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
-# プランを組んだ差し込みの値を、プランの実行の保存先に残すファイル（#3908 の決定 2）
-VALUES_FILE = "values.json"
-# values.json のキー → 値の型（形が違えば読まなかったものとして扱う）
-VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
 class StageInputError(Exception):
@@ -419,23 +415,48 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
+
+    写しは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読む写しは呼んだ利用者が
+    持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
+    precondition にする）。書き手の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
+    書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
+    保存先のパスで返す（共有の領域のリンクを経ない）。PR を作るステップ（`gh pr create --body-file`）はこの名前を開き直すので、
+    返す前に、写しの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
+    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめた写しと別の本文を送らない）。
     """
     issues = _issue_numbers(run)
     if not issues:
         return {}
     number = int(issues[0])
-    out = work_dir / ISSUE_BODY_FILE.format(number=number)
-    copy = work_dir / ISSUE_TITLE_FILE.format(number=number)
-    held = plan_files.read_json(copy)
-    if held is not None and isinstance(held.get("title"), str) and out.is_file():
-        return {"title": held["title"], "body_file": str(out), "issue": str(number)}
-    found = issue_text(location, number)
-    if found is None:
-        return None
-    title, body = found
-    out.write_text(body, encoding="utf-8")
-    plan_files.write_json(copy, {"title": title})
+    out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
+    base, fresh, anchor = worker_paths.resolve_existing(work_dir)
+    with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
+        out = wd.path / out_name
+        title = _held_title(wd, copy_name, out_name)
+        if title is None:
+            found = issue_text(location, number)
+            if found is None:
+                return None
+            title, body = found
+            worker_paths.write_file(wd, out_name, body, private=True)
+            worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
+        worker_paths.check_unshared(wd, out_name)
     return {"title": title, "body_file": str(out), "issue": str(number)}
+
+
+def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
+    """同じ試行が写した題。題の写しと本文の写しがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
+
+    私有でない写し（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
+    """
+    text = worker_paths.read_file(wd, copy_name, owned=True)
+    if text is None or worker_paths.read_file(wd, body_name, owned=True) is None:
+        return None
+    try:
+        held = json.loads(text)
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れた写しは無いものとして読み直す
+        return None
+    return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
 
 
 def _branch_of(run: StageRun) -> Optional[str]:
@@ -622,24 +643,6 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     """プランが使う差し込み `names` のうち、既定も無く決まらないもの → 出所（出所の表に無ければ工程の入力）。"""
     defs = route.params()
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
-
-
-def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
-    """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
-
-    書けなければ `OSError` をそのまま上げる（呼び手の `plan_failure` が precondition にする）。
-    """
-    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
-    plan_files.write_json(state_dir / VALUES_FILE, held)
-
-
-def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
-    """`<保存先>/values.json`。無い・壊れている・キーか型が `VALUES_SHAPE` と違えば None。"""
-    held = plan_files.read_json(state_dir / VALUES_FILE)
-    if held is None or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
-        return None
-    return held
 
 
 # 試行の始まりに消す、前の試行が保存先に残した課題の題・本文の写し（差し込みの値 `VALUES_FILE` と一緒に消す）
@@ -848,7 +851,7 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
-PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError)
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -872,6 +875,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
         return result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after)
     if isinstance(exc, OSError):
         return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
+    if isinstance(exc, worker_paths.EntryError):
+        return result.stopped(PLAN, "precondition", f"プラン {name} の差し込みの値（{VALUES_FILE}）を安全に読み書きできない: {exc}")
     return None
 
 

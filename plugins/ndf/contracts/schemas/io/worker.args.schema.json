@@ -85,6 +85,23 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "draft",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--state-dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--state-dir"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "plan-edit",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -183,6 +200,15 @@
         "--timeout": {
           "type": "number",
           "default": 3600.0
+        },
+        "--result-dir-id": {
+          "type": "string"
+        },
+        "--require-output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

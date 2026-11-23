@@ -241,6 +241,26 @@ def test_final_result_stopped_points_next_at_the_last_step(two_steps):
     assert out["next"] == {"argv": ["ndf", "plan", "next", str(two_steps.plan_path), "--from", "a"]}
 
 
+def test_final_result_incomplete_carries_the_gaps_the_step_left(two_steps):
+    # PR 4307 の r8-2: worker が必須の出力を書き忘れて止まった回は、欠けたキーを停止結果の gaps に持つ
+    gap = {"kind": "output", "name": "branch", "reason": "作業の結果ファイルの outputs に無い"}
+    records._keep_step_gaps(two_steps.state_dir, "a", [gap])
+    final = {"status": "stopped", "count": 1, "last": "a", "kind": "incomplete", "detail": "ステップ a が incomplete で止まった"}
+    out = runner.final_result(two_steps, final, "SUCCESS")
+    assert out["cause"]["kind"] == "incomplete" and out["gaps"] == [gap] and result.errors(out) == []
+    records._keep_step_gaps(two_steps.state_dir, "a", None)  # 打ち直しで通ったステップの欠けは残さない
+    assert records.recorded_step_gaps(two_steps.state_dir) == {}
+
+
+def test_final_result_incomplete_without_step_gaps_fills_one(two_steps):
+    # 欠けの詳細を持たない incomplete（JSON を出さないステップなど）は、止まったステップの欠けを補って形に合わせる
+    final = {"status": "stopped", "count": 1, "last": "a", "kind": "incomplete", "detail": "ステップ a が incomplete で止まった"}
+    out = runner.final_result(two_steps, final, "SUCCESS")
+    assert out["gaps"] == [{"kind": "step", "name": "a", "reason": "ステップ a が incomplete で止まった"}]
+    assert result.errors(out) == []
+    assert "gaps" not in runner.final_result(two_steps, {**final, "kind": "work_stopped"}, "SUCCESS")
+
+
 def test_final_result_stopped_without_a_last_step_has_no_next(two_steps):
     final = {"status": "stopped", "count": 0, "last": None, "kind": "work_stopped", "detail": "落ちた"}
     out = runner.final_result(two_steps, final, "SUCCESS")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -375,3 +376,17 @@ def test_emit_refuses_an_out_written_as_a_directory_without_touching_the_file(ca
     got = json.loads(out)
     assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
     assert dest.read_text(encoding="utf-8") == "利用者のファイル\n"
+
+
+def test_emit_writes_the_worker_result_without_write_access_for_others(capsys, tmp_path, monkeypatch):
+    # PR 4307 の r8-6: worker の結果ファイルは私有で書く（`ndf worker run` が共有の保存先で私有の結果だけを受ける）
+    work = tmp_path / "w"
+    work.mkdir()
+    st = work.stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{work}")
+    before = os.umask(0o000)
+    try:
+        code, _, _ = _emit(capsys, "ok", "--out", str(work / "r.json"))
+    finally:
+        os.umask(before)
+    assert code == 0 and (work / "r.json").stat().st_mode & 0o022 == 0

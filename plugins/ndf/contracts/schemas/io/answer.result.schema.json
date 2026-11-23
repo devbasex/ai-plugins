@@ -154,6 +154,14 @@
           "by": {
             "type": "string",
             "description": "回答した者（list）"
+          },
+          "key": {
+            "type": "string",
+            "description": "作業が読む値のうち足りない名前（work で worker を起動せずに止まったとき）"
+          },
+          "source": {
+            "type": "string",
+            "description": "足りない値の出所（同上）"
           }
         }
       }

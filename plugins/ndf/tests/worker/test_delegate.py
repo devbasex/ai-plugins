@@ -10,7 +10,7 @@ import pytest
 from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import causes, result, worker_paths
-from ndf.core import worker
+from ndf.core import worker, worker_outcome
 
 
 @pytest.fixture(autouse=True)
@@ -124,7 +124,7 @@ def _outcome(tmp_path, report):
     if report is not None:
         path.write_text(report if isinstance(report, str) else json.dumps(report, ensure_ascii=False), encoding="utf-8")
     with worker_paths.open_workdir(tmp_path) as wd:
-        got = worker.outcome_of("impl", path, worker._read_result(wd, path.name), [], {}, 1)
+        got = worker_outcome.outcome_of("impl", path, worker._read_result(wd, path.name), [], {"attempts": 1})
     assert result.errors(got) == []
     return got
 
@@ -161,6 +161,63 @@ def test_a_worker_that_finished_returns_ok_and_an_unreadable_report_is_bad_repor
         location.mkdir()
         got = _outcome(location, bad)
         assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
+
+
+def test_an_ok_report_without_a_required_output_is_incomplete(tmp_path):
+    # #3908: 工程「作業場所の用意」は worktree・branch を outputs で返す。欠けた ok を完了にしない
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"status": "ok", "summary": "済んだ", "outputs": {"worktree": "/r/.worktrees/b"}}), encoding="utf-8")
+    with worker_paths.open_workdir(tmp_path) as wd:
+        report = worker._read_result(wd, path.name)
+    checked, outputs = worker_outcome.require_outputs(report, ["worktree", "branch"])
+    got = worker_outcome.outcome_of("worktree", path, checked, [], {"attempts": 1}, outputs=outputs)
+    assert result.errors(got) == [] and got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+    assert [(g["kind"], g["name"]) for g in got["gaps"]] == [("output", "branch")] and outputs is None
+    checked, outputs = worker_outcome.require_outputs(report, ["worktree"])
+    got = worker_outcome.outcome_of("worktree", path, checked, [], {"attempts": 1}, outputs=outputs)
+    assert got["status"] == "ok" and got["outputs"] == {"worktree": "/r/.worktrees/b"}
+    assert "outputs" not in worker_outcome.outcome_of("worktree", path, report, [], {"attempts": 1})
+
+
+def test_an_ok_report_with_a_malformed_required_output_is_incomplete(tmp_path):
+    # PR 4307 の r8-1: 必須の名前があっても、値が結果 JSON の outputs の形に合わなければ欠けにして渡さない
+    report = {"status": "ok", "summary": "済んだ", "outputs": {"worktree": "", "branch": 3}}
+    checked, outputs = worker_outcome.require_outputs(report, ["worktree", "branch"])
+    got = worker_outcome.outcome_of("worktree", tmp_path / "r.json", checked, [], {"attempts": 1}, outputs=outputs)
+    assert result.errors(got) == [] and got["cause"]["kind"] == "incomplete" and outputs is None
+    assert [(g["kind"], g["name"]) for g in got["gaps"]] == [("output", "worktree"), ("output", "branch")]
+
+
+def test_run_passes_the_checked_outputs_on_to_the_plan(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r8-1: 確かめた必須の outputs を ok の結果に載せる（プランのステップが標準出力から読む）
+    (tmp_path / "prompt.md").write_text("作る", encoding="utf-8")
+    body = {"status": "ok", "summary": "済んだ", "outputs": {"worktree": "/r/w", "branch": "feat/x", "pr": 9}}
+
+    def fake_delegate(handoff, system, root=None, wd=None):
+        handoff.result_file.write_text(json.dumps(body), encoding="utf-8")
+        return worker.Delivery(attempts=1, session="s")
+
+    monkeypatch.setattr(worker, "delegate", fake_delegate)
+    monkeypatch.chdir(tmp_path)
+    args = ["run", "--kind", "worktree", "--prompt-file", "prompt.md", "--result-file", "out.json", "--cwd", ".", "--state-dir", "s"]
+    assert worker.main(args + ["--require-output", "worktree", "--require-output", "branch"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["outputs"] == {"worktree": "/r/w", "branch": "feat/x"}  # 確かめていない pr は渡さない
+
+
+def test_run_checks_the_outputs_it_is_told_to_require(tmp_path, monkeypatch, capsys):
+    (tmp_path / "prompt.md").write_text("作る", encoding="utf-8")
+
+    def fake_delegate(handoff, system, root=None, wd=None):
+        handoff.result_file.write_text('{"status": "ok", "summary": "済んだ"}', encoding="utf-8")
+        return worker.Delivery(attempts=1, session="s")
+
+    monkeypatch.setattr(worker, "delegate", fake_delegate)
+    monkeypatch.chdir(tmp_path)
+    args = ["run", "--kind", "worktree", "--prompt-file", "prompt.md", "--result-file", "out.json", "--cwd", ".", "--state-dir", "s"]
+    assert worker.main(args + ["--require-output", "worktree", "--require-output", "branch"]) != 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["cause"]["kind"] == "incomplete" and [g["name"] for g in out["gaps"]] == ["worktree", "branch"]
 
 
 SEARCHED = {"terms": ["詳細設計"], "files": ["tests/test_stage_check.py"]}
@@ -353,7 +410,7 @@ def test_run_stops_as_bad_report_on_a_result_that_is_not_utf8(tmp_path, monkeypa
 def test_run_reads_the_result_once_during_and_once_after_the_delegation(tmp_path, monkeypatch, capsys, kind, reads):
     counted = []
     real_read = worker_paths.read_file
-    monkeypatch.setattr(worker_paths, "read_file", lambda wd, name: counted.append(name) or real_read(wd, name))
+    monkeypatch.setattr(worker_paths, "read_file", lambda wd, name, **kw: counted.append(name) or real_read(wd, name, **kw))
     body = {"status": "ok", "summary": "済んだ", "metrics": {worker.SEARCH_RECORD: SEARCHED}}
     assert _run_with(tmp_path, monkeypatch, _ok_writer(tmp_path, body, []), kind=kind) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok" and counted == ["out.json"] * reads
@@ -447,3 +504,57 @@ def test_run_keeps_using_the_resolved_result_dir_when_it_is_swapped_before_launc
     worker.main(args + ["--cwd", ".", "--state-dir", "state"])
     assert (work / "out.json").read_text(encoding="utf-8") == "差し替え先のファイル"
     assert not (tmp_path / "moved" / "out.json").exists()
+
+
+def test_run_refuses_a_result_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r6-4: `ndf answer work` が起動指示を書いた保存先（`--result-dir-id`）と、開き直した保存先が違えば起動しない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "out.json").write_text("前の結果", encoding="utf-8")
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    other = tmp_path.stat()
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    worker.main(args + ["--result-dir-id", f"{other.st_dev}:{other.st_ino}", "--cwd", ".", "--state-dir", "state"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and calls == []
+    assert (work / "out.json").read_text(encoding="utf-8") == "前の結果"
+
+
+def test_run_refuses_a_state_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r7-2: 照らした保存先（`--result-dir-id`）と別の場所に PR 本文の下書きを書かない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "elsewhere").mkdir()
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    held = work.stat()
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    worker.main(args + ["--result-dir-id", f"{held.st_dev}:{held.st_ino}", "--cwd", ".", "--state-dir", "elsewhere"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and calls == []
+
+
+@pytest.mark.parametrize(("mode", "kind"), [(0o600, "ok"), (0o666, "bad_report")])
+def test_run_from_answer_work_takes_only_a_private_result_file(tmp_path, monkeypatch, capsys, mode, kind):
+    # PR 4307 の r8-6: 共有の保存先に別の利用者が書ける結果ファイルを、worker が完了した結果として受けない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    monkeypatch.chdir(work)
+    real = worker.delegate
+
+    def writer(argv, prompt, timeout, cwd):
+        (work / "out.json").write_text(json.dumps({"status": "ok", "summary": "済んだ"}), encoding="utf-8")
+        (work / "out.json").chmod(mode)
+        return claude.ClaudeReply(True, None, "終えた", 0.5)
+
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=writer, **kw))
+    held = work.stat()
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    worker.main(args + ["--result-dir-id", f"{held.st_dev}:{held.st_ino}", "--cwd", ".", "--state-dir", "."])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["cause"]["kind"] if got["status"] == "stopped" else got["status"]) == kind

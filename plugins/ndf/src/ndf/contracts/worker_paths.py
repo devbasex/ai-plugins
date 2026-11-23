@@ -19,14 +19,20 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
+from ndf.contracts.worker_paths_open import ACL_FIRST_ENTRY as _ACL_FIRST_ENTRY
+from ndf.contracts.worker_paths_open import ACL_TYPE_EXTENDED as _ACL_TYPE_EXTENDED
+from ndf.contracts.worker_paths_open import darwin_acl_lib as _darwin_acl_lib
 from ndf.contracts.worker_paths_open import (
     EntryError,
     EntryUnsafe,
     Origin,
     WorkDir,
     check_dir_id,
+    check_unshared,
     dir_id,
+    held_dir_id,
     open_resolved,
+    open_subdir,
     open_workdir,
     resolve_existing,
 )
@@ -47,16 +53,22 @@ __all__ = [
     "WorkDir",
     "check_dir_id",
     "check_entries",
+    "check_removable",
+    "check_unshared",
+    "check_writable",
     "dir_id",
     "entry_state",
+    "held_dir_id",
     "names_a_directory",
     "open_resolved",
+    "open_subdir",
     "open_workdir",
     "prepare_paths",
     "read_file",
     "remove_file",
     "report_name",
     "report_paths",
+    "reset_report",
     "resolve_existing",
     "staged_write",
     "write_file",
@@ -245,10 +257,13 @@ def entry_state(wd: WorkDir, name: str) -> Optional[os.stat_result]:
     return st
 
 
-def read_file(wd: WorkDir, name: str) -> Optional[str]:
+def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
     """名前のファイルを UTF-8 で読む。無ければ None。
 
     開いた記述子を確かめ、同じ記述子から読むので、確かめの後に名前を差し替えられても読むのは確かめた inode である。
+    `owned` なら、呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけを読み、ほかは `EntryUnsafe`
+    （`foreign`）で止める（共有の保存先で別の利用者が用意・書き換えできる中身を、呼んだ利用者の権限で使わないため）。
+    書き込めるかはモードのビットと、開いた記述子の拡張 ACL で見る（`_others_may_write`）。
     """
     _check_name(name)
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -261,9 +276,12 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
             raise EntryUnsafe(name, "symlink") from None
         raise EntryUnreadable(name, e.strerror or str(e)) from None
     try:
-        kind = _unsafe_kind(os.fstat(fd))
+        st = os.fstat(fd)
+        kind = _unsafe_kind(st)
         if kind:
             raise EntryUnsafe(name, kind)
+        if owned and (st.st_uid != os.geteuid() or _others_may_write(fd, st)):
+            raise EntryUnsafe(name, "foreign")
         with os.fdopen(fd, "rb", closefd=False) as f:
             data = f.read()
     except OSError as e:
@@ -276,11 +294,62 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
         raise EntryUnreadable(name, str(e)) from None
 
 
-def write_file(wd: WorkDir, name: str, text: str) -> None:
+def _others_may_write(fd: int, st: os.stat_result) -> bool:
+    """開いたファイル `fd` へ、呼んだ利用者のほかが書き込めうるなら真。
+
+    モードのグループとほかの利用者の書き込みのビットを見る。Linux の POSIX ACL は名前付きの項目の書き込みをマスク（モードの
+    グループのビット）で抑えるので、モードのビットで足りる。macOS の拡張 ACL はモードと別に書き込みを許せるので、拡張 ACL の
+    項目があるか確かめられないときも書き込めうるとみなす（`_has_acl_darwin`。`_refuse_acl` と同じく置き換えない側へ倒す）。
+    `write_file` が書いたファイルは親から継いだ拡張 ACL を外しているので、ここで拒まれない。
+    """
+    if st.st_mode & 0o022:
+        return True
+    return sys.platform == "darwin" and _has_acl_darwin(fd)
+
+
+def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    """`name` を消せるか（置き換えも同じ権限が要る）を、何も変えずに確かめる。名前があればその stat を返す。
+
+    リンク数が 1 の通常のファイルでなければ `EntryUnsafe` を上げる。見るのは、作業ディレクトリへ書き込んで入れること
+    （名前が無くても要る）と、sticky bit の付いた作業ディレクトリでは既存のファイルか作業ディレクトリを呼んだ利用者が
+    持つこと（ほかの利用者のファイルは、グループで書き込めても消すことと置き換えることを拒まれる）で、無ければ
+    `PermissionError` を上げる。
+    """
+    _check_name(name)
+    st = entry_state(wd, name)
+    if not os.access(".", os.W_OK | os.X_OK, dir_fd=wd.fd):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path))
+    if st is None:
+        return None
+    euid = os.geteuid()
+    parent = os.fstat(wd.fd)
+    if parent.st_mode & stat.S_ISVTX and euid != 0 and euid not in (st.st_uid, parent.st_uid):
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), str(wd.path / name))
+    return st
+
+
+def check_writable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。置き換える既存のファイルがあればその stat を返す。
+
+    `check_removable`（一時ディレクトリの `mkdir` と `os.replace` に要る作業ディレクトリ側の権限）に加えて、既存の
+    ファイルへ書き込めることを見て、無ければ `PermissionError` を上げる。初期化の前に呼び、消してから書けずに止まる組を作らない。
+    """
+    existing = check_removable(wd, name)
+    if existing is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
+    return existing
+
+
+def write_file(wd: WorkDir, name: str, text: str, *, private: bool = False) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
+    `private` なら、公開する前に新しい inode からグループとほかの利用者の書き込み権限を外す（既存のファイルから写した
+    モードにも当てる）。`read_file(owned=True)` で読み直す値（`values.json`）と起動指示を、umask や前のファイルの
+    アクセス権によらず、書き換えられない状態で公開するため。
+
     置き換えを許すのは、呼んだ利用者が書き込める既存のファイルだけである（読み取り専用なら `PermissionError`）。
-    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は、作った名前で先に
+    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）だけでは拒まず、置き換えを拒まれる組（`check_writable`）を
+    書き始める前に拒む。一時ディレクトリの後始末は、作った名前で先に
     一致を確かめ、それで片付けられないとき（同じ親の別名へ移されたとき）だけ開いた記述子から今の名前を引いて、作業
     ディレクトリの直下で開いた記述子と同じ inode の名前だけを消す。記述子は後始末が終わるまで閉じない。開けなかった一時ディレクトリと、開いても所有者・モードの確かめに落ちた一時ディレクトリは作ったものだと確かめられないので消さない。消すのは名前で引く
     `rmdir` で、確かめた後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
@@ -295,12 +364,12 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     だけを写して置き換えると読める人が広がりうるためである（拡張 ACL のあるファイルでは、モードのグループのビットは
     所有グループの権限ではなく ACL のマスクである）。
     """
-    with staged_write(wd, name, text):
+    with staged_write(wd, name, text, private=private):
         pass
 
 
 @contextlib.contextmanager
-def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = ()) -> Iterator[dict[str, str]]:
+def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (), private: bool = False) -> Iterator[dict[str, str]]:
     """`write_file` の一時ファイルを作ってアクセス権まで設定し、`retire` の名前を退けてから本体を走らせ、本体が終えたら `name` へ公開する。
 
     置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`owner`・`acl`）など）は退ける前に上がる。`retire` の名前は
@@ -309,11 +378,10 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     退けている途中・本体・公開（sticky bit の所有者の制約などで `os.replace` が落ちる）のどれかが上げれば、退けた名前を
     元の名前が空いているときだけ元へ戻し（`_restore_retired`）、一時ファイルを片付けて上げ直す。元の名前が埋まっている
     （退けた後に別の手が同じ名前へ書いた）などで戻せなかった名前があれば、上書きせずに一時ディレクトリごと残し、
-    元の例外を原因にした `RetiredKept`（回収先のパスを持つ）を上げる。
+    元の例外を原因にした `RetiredKept`（回収先のパスを持つ）を上げる。`private` は `write_file` と同じ。
     """
-    _check_name(name)
+    existing = check_writable(wd, name)
     data = text.encode("utf-8")
-    existing = _check_replaceable(wd, name)
     tmp, tmp_fd = _make_tmp_dir(wd)
     created = False
     published = False
@@ -325,7 +393,7 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
         owned = _tmp_owned(tmp, tmp_fd)
         fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
         created = True
-        _fill_data(wd, fd, name, data, existing)
+        _fill_data(wd, fd, name, data, existing, private=private)
         yield _retire_all(wd, tmp_fd, retire, retired)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
@@ -349,14 +417,6 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
                 _clean_tmp(wd, tmp_fd, tmp, None, created=created, published=False)
 
 
-def _check_replaceable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
-    """置き換える既存のファイルの `stat`。無ければ None。呼んだ利用者が書き込めなければ `PermissionError`。"""
-    existing = entry_state(wd, name)
-    if existing is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
-        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
-    return existing
-
-
 def _make_tmp_dir(wd: WorkDir) -> tuple[str, int]:
     """作業ディレクトリの直下に私有の一時ディレクトリを作って開き、名前と記述子を返す。
 
@@ -377,16 +437,19 @@ def _tmp_owned(tmp: str, tmp_fd: int) -> os.stat_result:
     return st
 
 
-def _fill_data(wd: WorkDir, fd: int, name: str, data: bytes, existing: Optional[os.stat_result]) -> None:
+def _fill_data(wd: WorkDir, fd: int, name: str, data: bytes, existing: Optional[os.stat_result], *, private: bool = False) -> None:
     """開いた一時ファイル `fd` から継いだ拡張 ACL を外し、置き換える既存のファイルのアクセス権を写してから中身を書き、閉じる。
 
     置き換える既存のファイルが拡張 ACL を持つなら、何も退けない・公開しないうちに `EntryUnsafe`（`acl`）で止まる。
+    `private` なら、写した後のモードからグループとほかの利用者の書き込みのビットを外す（同じ記述子に対する `fchmod`）。
     """
     with os.fdopen(fd, "wb") as f:
         _drop_inherited_acl(f.fileno(), name)  # 無い名前へ作るときも親の既定の ACL を継ぐ
         if existing is not None:
             _refuse_acl(wd, name, existing)
             _inherit_access(f.fileno(), name, existing)
+        if private:
+            os.fchmod(f.fileno(), stat.S_IMODE(os.fstat(f.fileno()).st_mode) & 0o755)
         f.write(data)
 
 
@@ -429,34 +492,6 @@ def _has_acl(fd: int) -> bool:
     except OSError as e:
         return e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP)
     return True
-
-
-_ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
-_ACL_FIRST_ENTRY = 0
-
-
-def _darwin_acl_lib():  # noqa: ANN202 ctypes の CDLL
-    """macOS の libc の ACL 関数（`acl_get_fd_np`・`acl_get_entry`・`acl_init`・`acl_set_fd_np`・`acl_free`）。引けなければ None。"""
-    import ctypes
-
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        get_fd, get_entry, init, set_fd, free = (
-            libc.acl_get_fd_np,
-            libc.acl_get_entry,
-            libc.acl_init,
-            libc.acl_set_fd_np,
-            libc.acl_free,
-        )
-    except (OSError, AttributeError):  # noqa: NDF401 外部コマンド: libc の ACL の関数を引けない macOS では持つかを確かめられない扱いにする（置き換えない）
-        return None
-    get_fd.restype = init.restype = ctypes.c_void_p
-    get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
-    get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
-    init.argtypes = [ctypes.c_int]
-    set_fd.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-    free.argtypes = [ctypes.c_void_p]
-    return libc
 
 
 def _has_acl_darwin(fd: int) -> bool:
@@ -673,6 +708,32 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
         return False
     os.rmdir(name, dir_fd=wd.fd)
     return True
+
+
+def reset_report(wd: WorkDir, paths: ReportPaths, write: Iterable[tuple[str, str]] = ()) -> tuple[str, str]:
+    """報告・完了マーカー・結果ファイルを初期化する（`ndf worker prepare` と `ndf answer work` が共有する）。
+
+    3 つの名前を先に確かめてから、完了マーカー → 結果ファイルを退け、報告を空にしてから退けたものを消す。
+    前の報告が消えるのは完了マーカーと結果ファイルを退けた後だけなので、「前の完了マーカーが残るのに報告が空」の組は
+    起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で無かった保存先にどれかが
+    あれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
+    報告の一時ファイルは退ける前に作り、アクセス権（モードのビットとグループ）の設定まで済ませる（`staged_write`）。
+    置き換えを拒む条件（報告を書き込めない・所有者を保てない・前の報告が拡張 ACL を持つなど）では何も退けずに止まり、
+    退けるか報告の公開が落ちたとき（sticky bit の所有者の制約など）は退けた完了マーカーと結果ファイルを元へ戻して止まる。
+    `write` の名前と中身の組（`ndf answer work` の起動指示）は、何かを変える前に書けるかを確かめ（`check_writable`）、完了マーカーと
+    結果ファイルを退けた後・空の報告を公開する前に `write_file(private=True)` で書く（前のファイルのグループ書き込み権限を継がない）。確かめに無い理由（拡張 ACL・所有者を保てないなど）で
+    書けない・公開できないときも、報告はまだ置き換えておらず、退けた完了マーカーと結果ファイルは元へ戻る（前の報告一式を残す）。
+    書けた後に報告の公開が落ちたときは、`write` の名前だけが新しく、前の報告一式は戻る。
+    返りは完了マーカーと結果ファイルの `absent`・`removed`。
+    """
+    check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
+    extra = tuple(write)
+    for name, _ in extra:
+        check_writable(wd, name)
+    with staged_write(wd, paths.report.name, "", retire=(paths.done.name, paths.result.name)) as actions:
+        for name, text in extra:
+            write_file(wd, name, text, private=True)
+    return actions[paths.done.name], actions[paths.result.name]
 
 
 def remove_file(wd: WorkDir, name: str) -> Literal["absent", "removed"]:

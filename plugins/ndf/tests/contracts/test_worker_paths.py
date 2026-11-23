@@ -422,6 +422,95 @@ def test_write_file_accepts_shared_directory_with_sticky_bit(workdir):
     assert [p.name for p in d.iterdir()] == ["f"]
 
 
+def test_reset_keeps_the_previous_report_when_a_sticky_directory_refuses_the_prompt(tmp_path, monkeypatch):
+    # sticky bit の共有の保存先では、ほかの利用者のファイルはグループで書き込めても置き換えを拒まれる。
+    # 消す前に止まり、前の報告・完了マーカー・結果ファイルを残す（PR 4307 の r3-1）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}"), (paths.prompt, "前の起動指示")):
+        path.write_text(text, encoding="utf-8")
+    d.chmod(0o1755)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.check_writable(wd, paths.prompt.name)  # 自分のファイルは sticky でも置き換えられる
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)  # ほかの利用者として確かめる
+        with pytest.raises(PermissionError):
+            worker_paths.reset_report(wd, paths, write=((paths.prompt.name, "新しい起動指示"),))
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+def test_reset_restores_the_previous_report_when_the_prompt_is_refused_after_the_checks(tmp_path, monkeypatch):
+    # 書き込み可否の確かめを通っても、拡張 ACL のある起動指示は置き換えを拒まれる。退けた完了マーカーと結果ファイルを
+    # 元へ戻し、報告も置き換えない（PR 4307 の r5-2）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}"), (paths.prompt, "前の起動指示")):
+        path.write_text(text, encoding="utf-8")
+    real_refuse = worker_paths._refuse_acl
+
+    def refuse_prompt(wd, name, existing):
+        if name == paths.prompt.name:
+            raise worker_paths.EntryUnsafe(name, "acl")
+        return real_refuse(wd, name, existing)
+
+    monkeypatch.setattr(worker_paths, "_refuse_acl", refuse_prompt)
+    with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe):
+        worker_paths.reset_report(wd, paths, write=((paths.prompt.name, "新しい起動指示"),))
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+    assert paths.prompt.read_text(encoding="utf-8") == "前の起動指示"
+    assert sorted(p.name for p in d.iterdir()) == sorted(p.name for p in paths)
+
+
+def test_read_file_owned_refuses_a_file_others_can_write(tmp_path, monkeypatch):
+    (tmp_path / "v").write_text("値", encoding="utf-8")
+    (tmp_path / "v").chmod(0o664)
+    with worker_paths.open_workdir(tmp_path) as wd:
+        assert worker_paths.read_file(wd, "v") == "値"
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
+        (tmp_path / "v").chmod(0o644)
+        assert worker_paths.read_file(wd, "v", owned=True) == "値"
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(tmp_path / "v").st_uid + 1)  # ほかの利用者が置いたファイル
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
+
+
+def test_check_writable_passes_another_users_file_in_a_directory_without_the_sticky_bit(tmp_path, monkeypatch):
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "w.prompt.md").write_text("", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)
+        worker_paths.check_writable(wd, "w.prompt.md")
+
+
+def test_reset_restores_the_done_marker_when_the_result_cannot_be_retired(tmp_path, monkeypatch):
+    # sticky bit の保存先で結果ファイルだけをほかの利用者が持つと、結果ファイルを退けられない。退けた完了マーカーを
+    # 元へ戻して止まり、前の報告を残す（PR 4307 の r4-1）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}")):
+        path.write_text(text, encoding="utf-8")
+    real_rename = os.rename
+
+    def refuse_result(src, dst, **kwargs):
+        if src == paths.result.name:
+            raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+        return real_rename(src, dst, **kwargs)
+
+    with worker_paths.open_workdir(d) as wd:
+        monkeypatch.setattr(os, "rename", refuse_result)
+        with pytest.raises(PermissionError):
+            worker_paths.reset_report(wd, paths)
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert sorted(p.name for p in d.iterdir()) == sorted(p.name for p in (paths.report, paths.done, paths.result))
+
+
 # --- #3877 r1: 置き換えたファイルのアクセス権 ---------------------------------------------------------
 
 
@@ -682,3 +771,16 @@ def test_write_file_drops_the_inherited_acl_on_macos_or_refuses_to_publish(workd
     assert fake.set_on and before not in fake.set_on  # 外すのは一時ファイルだけで、置き換える前のファイルに触れない
     assert (d / "r").read_text(encoding="utf-8") == ("後" if set_result == 0 else "前")
     assert [p.name for p in d.iterdir()] == ["r"]
+
+
+def test_read_file_owned_refuses_a_file_with_an_extended_acl_on_macos(tmp_path, monkeypatch):
+    # PR 4307 の r6-5: macOS の拡張 ACL はモードと別にほかの利用者へ書き込みを許せるので、開いた記述子で確かめる
+    (tmp_path / "v").write_text("値", encoding="utf-8")
+    (tmp_path / "v").chmod(0o644)
+    before = (tmp_path / "v").stat().st_ino
+    with worker_paths.open_workdir(tmp_path) as wd:
+        _as_macos(monkeypatch)
+        monkeypatch.setattr(worker_paths, "_has_acl_darwin", lambda fd: os.fstat(fd).st_ino == before)
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
+        assert worker_paths.read_file(wd, "v") == "値"

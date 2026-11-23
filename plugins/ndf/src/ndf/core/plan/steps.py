@@ -7,6 +7,7 @@
 - 結果に載せる文は、秘密の環境変数の値とトークンの形を伏せてから返す（耐久の記録と結果 JSON へ秘密を入れない）
 - 結果 JSON の items の `{"kind": "pr", "number": <番号>}` を拾い、プランの結果とキューの `{queue_prs}` へ渡す
 - 結果 JSON の `outputs`（工程どうしで渡す値）を拾い、プランの結果の `outputs` へ渡す
+- 結果 JSON の `gaps`（止まったステップが残した欠け。`incomplete` の詳細）を拾い、プランの停止結果へ渡す
 
 外部への操作（push・PR の作成・マージ・Issue を閉じる・ラベル・コメント・リリース）のステップは、`probe` に相手の状態を
 読むコマンドを持つ（B9）。`run` の前に毎回打ち、済んでいれば `run` を打たずに ok を返す。操作の直後にプロセスが落ちて
@@ -130,11 +131,12 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
         "code": code,
         "prs": [],
         "outputs": None,
+        "gaps": None,
     }
 
 
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
-    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`）。"""
+    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`・`gaps`）。"""
     found = last_json(stdout)
     if found is None:
         if code == exit_codes.code_of("ok"):
@@ -143,6 +145,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         return _plain(STOPPED, kind, f"終了コード {code}", code)
     cause = found.get("cause") if isinstance(found.get("cause"), dict) else None
     outputs = found.get("outputs")
+    gaps = found.get("gaps")
     return {
         "status": found["status"],
         "kind": cause.get("kind") if cause else None,
@@ -152,6 +155,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "code": code,
         "prs": _prs(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
+        "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
     }
 
 
