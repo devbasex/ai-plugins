@@ -505,6 +505,25 @@ def test_run_cases_hides_the_session_variables_from_the_launch_and_puts_them_bac
     assert os.environ["CLAUDECODE"] == "1" and os.environ["CLAUDE_CODE_SESSION_ID"] == "s-1"
 
 
+@pytest.mark.parametrize("before", [None, "4000"])
+def test_run_cases_turns_thinking_off_like_the_stop_and_puts_the_value_back(tmp_path, monkeypatch, before):
+    """確かめは Stop の判定と同じ形（思考を切る）で打つ。打った後は呼び手の値へ戻す。"""
+    if before is None:
+        monkeypatch.delenv("MAX_THINKING_TOKENS", raising=False)
+    else:
+        monkeypatch.setenv("MAX_THINKING_TOKENS", before)
+    seen: list = []
+
+    def call(argv, prompt, timeout, cwd=None, options=claude.DEFAULT_LAUNCH):
+        del argv, prompt, timeout, cwd, options
+        seen.append(os.environ.get("MAX_THINKING_TOKENS"))
+        return answered("wait")
+
+    rj.run_cases(_cases_file(tmp_path, ROWS[:1]), 1, call)
+    assert seen == ["0"]
+    assert os.environ.get("MAX_THINKING_TOKENS") == before
+
+
 @pytest.mark.parametrize("rounds", [0, -1, True])
 def test_run_cases_refuses_rounds_that_are_not_a_positive_integer(tmp_path, rounds):
     call = FakeCall(answered("wait"))

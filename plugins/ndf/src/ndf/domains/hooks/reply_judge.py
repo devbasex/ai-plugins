@@ -33,6 +33,8 @@ from ndf.domains.relay import claude_options, signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
 CHILD_MODULE = "ndf.domains.hooks.judge_child"
+# 軽いモデルの思考を切る環境（#4000 の決定 4・MEA3）。Stop の判定と judge-cases の確かめが同じ値で打つ
+THINKING_OFF = {"MAX_THINKING_TOKENS": "0"}
 # 休みのマーカーのファイルの名前（状態の保存先の hook の保存先）
 REST_NAME = "judge-rest.json"
 # 休みのマーカーの更新を直列にする錠のファイルの名前（`.` で始まる名前は `metrics.prune_state` が消さない）
@@ -203,7 +205,7 @@ def _child_env(env: Mapping[str, str]) -> dict[str, str]:
     drop = {row["id"] for row in tables.load("domains/env.json")["rows"] if row.get("child") == "drop"}
     child = {name: value for name, value in env.items() if name not in drop}
     child["PYTHONPATH"] = str(tables.PLUGIN_ROOT / "src")
-    child["MAX_THINKING_TOKENS"] = "0"
+    child.update(THINKING_OFF)
     return child
 
 

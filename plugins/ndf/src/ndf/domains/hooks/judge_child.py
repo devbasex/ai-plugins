@@ -25,6 +25,7 @@ from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, S
 from ndf import contracts
 from ndf.adapters import claude
 from ndf.contracts import facts, limits
+from ndf.domains.hooks import reply_judge
 from ndf.domains.relay import account_dir, claude_args
 
 # 判定の設定の方針の名前（`contracts/limits.json`）
@@ -277,11 +278,15 @@ def positive_rounds(value: Any) -> bool:
 
 @contextlib.contextmanager
 def _outside_session(environ: MutableMapping[str, str]) -> Iterator[None]:
-    """環境変数の表の `child` が `drop` の変数を `environ` から外し、抜けるときに元の値へ戻す。"""
-    kept = {name: environ.pop(name) for name in facts.ids("env", child="drop") if name in environ}
+    """環境変数の表の `child` が `drop` の変数を外し、Stop の判定と同じく思考を切る。抜けるときに元の値へ戻す。"""
+    names = [*facts.ids("env", child="drop"), *reply_judge.THINKING_OFF]
+    kept = {name: environ.pop(name) for name in names if name in environ}
+    environ.update(reply_judge.THINKING_OFF)
     try:
         yield
     finally:
+        for name in reply_judge.THINKING_OFF:
+            environ.pop(name, None)
         environ.update(kept)
 
 
