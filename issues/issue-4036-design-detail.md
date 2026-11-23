@@ -196,9 +196,9 @@ plugins/ndf/
   - 事前条件: `row` は `ndf relay ls` の 1 行（`None` なら一覧に無い）。`state_dir` は NDF の状態の保存先（`identity.load().state_dir`）。会話の記録の保存先は、耐久ワークフローの環境変数（`os.environ`）から `transcript_path` が組む
   - 事後条件: 返る `Activity` の `turn_done` は conductor の会話の記録の最後が終わった応答か。`activity.json` は、`session_id` が行の `session_id` と同じで、`at` が conductor の最後の応答の時刻以上のときだけ使う（前の Stop の記録と今の応答を組み合わせない）。使えないとき・`tasks` が `None` のときは `background` を `None` にする。`background` は次の和である
     - `type` が `subagent` の要素のうち、終わっていないもの。終わったサブエージェントとは、`subagent_transcript_path` が返すパスの記録を `observe.turn_done` で読んで `(True, t)` が返るものをいう。記録を読めないもの（パスを組めない・ファイルが無い・壊れている・応答の途中）は走っているとみなす
-    - シェル: `live_shells(row["pid"], parents)` が数を返せばその数（Stop の一覧に載っていないシェルも数える）。`None` なら、一覧の `shell` の数によらず `background` 全体を `None` にする（生死を確かめられないので止まりの根拠にしない。一覧が空でも、一覧に載っていないシェルが走っていることがある）
+    - シェル: 行の `pid`（`row.get("pid")`）が整数なら `live_shells(pid, parents)` で数え、数が返ればその数（Stop の一覧に載っていないシェルも数える）。`pid` が無い・整数でない（`None` を含む）ときは `live_shells` を呼ばず、`live_shells` が `None` を返したときと同じに扱う。どちらも一覧の `shell` の数によらず `background` 全体を `None` にする（生死を確かめられないので止まりの根拠にしない。一覧が空でも、一覧に載っていないシェルが走っていることがある）
     - `subagent`・`shell` 以外の `type`（`monitor` など）の要素の数（走っているとみなす）
-  - `moved` は、conductor の最後の応答の時刻と、除いた背景の作業の終わった時刻のうち最も遅いものである。終わったサブエージェントはその記録の最後の応答の時刻 `t`、終わったシェル（一覧に載り、`live_shells` が数を返し、生きているシェルより一覧のシェルが多いとき）は一覧のシェルごとの `shell_output_path` の更新時刻の最大を使う。終わったシェルの出力のファイルを 1 つも読めないときは、終わった時刻を確かめられないので `moved` を `now`（読み直しの時刻）にする（閾値が過ぎるまで待ち直す側へ倒す）。conductor の会話の記録を読めなければ `None` を返す
+  - `moved` は、conductor の最後の応答の時刻と、除いた背景の作業の終わった時刻のうち最も遅いものである。終わったサブエージェントはその記録の最後の応答の時刻 `t`、終わったシェル（一覧に載り、`live_shells` が数を返し、生きているシェルより一覧のシェルが多いとき）は一覧のシェルごとの `shell_output_path` の更新時刻の最大を使う。終わったシェルの出力のファイルを 1 つも読めないときは、終わった時刻を確かめられないので `moved` を `now`（読み直しの時刻）にする（閾値が過ぎるまで待ち直す側へ倒す）。シェルの生死を確かめられず `background` が `None` になるときも、`moved` には手順 4 で集めた終わったサブエージェントの時刻を重ねる（`activity.json` を使えないときは除いた作業が無いので、conductor の最後の応答の時刻になる）。conductor の会話の記録を読めなければ `None` を返す
   - 副作用: ファイルの読み取り（`activity.json`・conductor の会話の記録の末尾・`type` が `subagent` の要素ごとにその会話の記録の末尾・`/proc` の conductor の子の `cmdline`・終わったシェルの出力のファイルの更新時刻）。会話の記録はどれも末尾だけを読む（`limits.json` の `hook.transcript-tail` の `count` バイト。決定 1 の代償）
 - `live_shells`
   - 事前条件: `wrapper_pid` はラッパーの状態ファイルの `pid`（`wrapper.py:961`）。`claude` はラッパーが擬似端末で起動した直接の子である（`wrapper.py:236-253`）
@@ -230,7 +230,7 @@ plugins/ndf/
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録の最後の応答が終わっている | その要素を数えない |
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録を読めない・応答の途中 | その要素を数える |
 | `lane_activity` | シェル・`live_shells` が数を返す | 一覧によらずその数を数える。一覧のシェルより少なければ、終わったシェルの出力のファイルの更新時刻を `moved` に重ねる |
-| `lane_activity` | `live_shells` が `None`（一覧の `shell` の数によらない） | `Activity(turn_done, moved, None)` |
+| `lane_activity` | 行に `pid` が無い（`live_shells` を呼ばない）・`live_shells` が `None`（どちらも一覧の `shell` の数によらない） | `Activity(turn_done, moved, None)`。`moved` は手順 2 の時刻と手順 4 で集めた時刻の最大 |
 | `lane_activity` | `tasks` の要素の `type` が `subagent` でも `shell` でもない（`monitor` など） | その要素を数える |
 | `lane_activity` | 行はあるが conductor の会話の記録を読めない | `None` |
 | `lane_activity` | 会話の記録は読めるが活動の記録が無い・別のセッション・`at` が最後の応答より前・`tasks` が `null` | `Activity(turn_done, moved, None)` |
@@ -241,8 +241,8 @@ plugins/ndf/
 2. `observe.transcript_path(os.environ, Path(cwd), session_id)` を `observe.turn_done` で読む。`None` なら `None` を返す
 3. `registry.wrapper_dir` でラッパーの保存先を求め、`registry.read_activity` で活動の記録を読む。無い・`session_id` が行と違う・`at` が手順 2 の時刻より前・`tasks` が `None` なら `Activity(turn_done, moved, None)` を返す
 4. `tasks` の要素ごとに、`type` が `subagent` なら手順 2 のパスと要素の `id` から `subagent_transcript_path` でパスを組み、`observe.turn_done` が `(True, t)` を返す要素だけを除いて `t` を集める
-5. `live_shells(row["pid"], parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `shell_output_path` の更新時刻を集める（1 つも読めなければ `now` を集める）。`None` なら、一覧の `shell` の数によらず（空でも）`Activity(turn_done, moved, None)` を返す
-6. 残りの数の和を `background` に、手順 2 の時刻と手順 4・5 で集めた時刻の最大を `moved` にする
+5. 行の `pid`（`row.get("pid")`。`row["pid"]` で引かない）が整数なら `live_shells(pid, parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `shell_output_path` の更新時刻を集める（1 つも読めなければ `now` を集める）。`pid` が無い・整数でないとき（`live_shells` を呼ばない）と `live_shells` が `None` を返したときは、一覧の `shell` の数によらず（空でも）シェルの生死を確かめられない印を立てて手順 6 へ進む（ここで return しない）
+6. 手順 2 の時刻と手順 4・5 で集めた時刻の最大を `moved` にする。手順 5 で確かめられない印が立っていれば `Activity(turn_done, moved, None)` を、そうでなければ残りの数の和を `background` にして返す
 
 読むファイルはレーンごとに 2 つと、`type` が `subagent` の要素の数と、`/proc` の conductor の子の数（`cmdline`）と、終わったシェルの出力のファイルの数である。繰り返しはレーンの数（並列の上限は `relay.max-named` の 6）と各レーンの `tasks` の要素の数で終わる。会話の記録は末尾の決まった大きさだけを読むので、記録が伸びても読む量は増えない。`/proc/<pid>/stat` は見えているプロセスの数だけ、読み直しごとに 1 度だけ読む（レーンの数を掛けない）。
 
