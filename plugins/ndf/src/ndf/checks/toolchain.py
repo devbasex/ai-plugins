@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import VERSION_PATTERN, Version
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
@@ -39,23 +41,17 @@ SETUP_PYTHON = "actions/setup-python"
 PIP_COMMANDS = frozenset({"pip", "pip3", "pipx"})
 PYTHON_COMMAND = re.compile(r"^python[0-9.]*$")
 UV_REQUIREMENT = re.compile(r"^uv(?:\[[^\]]*\])?(?:\s*[=<>!~].*)?$")
-FETCH_COMMANDS = frozenset({"curl", "wget"})
+FETCH_COMMAND = re.compile(r"^(?:curl|wget)$")
 UV_INSTALLER_URL = re.compile(r"\bastral\.sh/uv\b")
+# bash のエスケープ: 引用符の外はどの字も、二重引用符の中は `$`・`` ` ``・`"`・`\`・改行だけを字のまま残す
+UNQUOTED_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+QUOTED_ESCAPE = re.compile(r'\\([$`"\\\n])')
 # コマンドの前に付いても中身を変えない語（環境変数の代入・sudo・env）
 COMMAND_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=.*|sudo|env)$")
 # ランチャーの行（`<名前>="<値>"`）
 LAUNCHER_LINE = re.compile(r'^(UV_VERSION|UV_INSTALLER_SHA256)=["\']?([^"\'\s]*)')
-# `requires-python` の 1 つの条件（PEP 440）: 演算子・リリースの番号・`==`/`!=` の `.*`・プレリリース・ポストリリース・開発版
-SPEC_CLAUSE = re.compile(
-    r"""^\s*(?P<op>===|~=|==|!=|<=|>=|<|>)\s*v?(?P<release>[0-9]+(?:\.[0-9]+)*)
-    (?:(?P<wild>\.\*)
-      |(?P<pre>[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?
-       (?P<post>-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?
-       (?P<dev>[-_.]?dev[-_.]?[0-9]*)?)\s*$""",
-    re.IGNORECASE | re.VERBOSE,
-)
-# 正式リリースから見た条件の番号の位置: プレリリース・開発版は同じ番号の正式リリースの前、ポストリリースは後
-BEFORE, AT, AFTER = -1, 0, 1
+# PEP 440 のバージョンの字（`packaging` の `Version` が受ける形）
+PEP440_VERSION = re.compile(rf"^\s*{VERSION_PATTERN}\s*$", re.VERBOSE | re.IGNORECASE)
 REQUIRES_PYTHON = re.compile(r"^\s*requires-python\s*=")
 
 
@@ -135,14 +131,21 @@ def _bash() -> Any:
     return tree_sitter.Parser(tree_sitter.Language(tree_sitter_bash.language()))
 
 
+def _unescape(pattern: re.Pattern[str], text: str) -> str:
+    # バックスラッシュと改行の組は行の継続で、字として残らない
+    return pattern.sub(lambda m: "" if m[1] == "\n" else m[1], text)
+
+
 def _word(node: Any) -> str:
-    """シェルの 1 語の字（引用符を外す。展開はそのままの字で残す）。"""
+    """シェルの 1 語の字（引用符とエスケープを bash と同じに外す。展開はそのままの字で残す）。"""
     text = node.text.decode("utf-8", "replace")
-    if node.type == "raw_string" or (node.type == "string" and len(text) >= 2):
+    if node.type == "raw_string":
         return text[1:-1]
+    if node.type == "string" and len(text) >= 2:
+        return _unescape(QUOTED_ESCAPE, text[1:-1])
     if node.type == "concatenation":
         return "".join(_word(c) for c in node.children)
-    return text
+    return _unescape(UNQUOTED_ESCAPE, text)
 
 
 def _commands(body: str) -> Iterator[tuple[int, list[str]]]:
@@ -171,7 +174,7 @@ def _installs_uv(words: list[str]) -> bool:
     if not words:
         return False
     name = words[0].rsplit("/", 1)[-1]
-    if name in FETCH_COMMANDS:
+    if FETCH_COMMAND.match(name):
         return any(UV_INSTALLER_URL.search(w) for w in words[1:])
     if PYTHON_COMMAND.match(name) and words[1:3] == ["-m", "pip"]:
         args = words[3:]
@@ -196,68 +199,47 @@ def _run_hits(wf: _Workflow) -> Iterator[int]:
             yield key_line + 1 + row if isinstance(body, LiteralScalarString) else key_line
 
 
-@dataclass(frozen=True)
-class _Clause:
-    op: str
-    release: tuple[int, ...]
-    wild: bool = False
-    # 同じリリースの番号の正式リリースから見た位置（BEFORE・AT・AFTER）
-    place: int = AT
+def _specifiers(spec: str, path: Path, line: int) -> SpecifierSet:
+    try:
+        return SpecifierSet(spec)
+    except InvalidSpecifier:
+        # 設定に誤って入った値（秘密を含みうる）を結果へ載せないよう、条件の字は引かずにファイルと位置で示す
+        raise CheckError(f"requires-python を PEP 440 の条件として読めない: {path}:{line}") from None
 
 
-def _admits(clauses: list[_Clause], version: tuple[int, int, int]) -> bool:
-    """正式リリース `version` が条件のすべてを満たすか（PEP 440 の比較）。"""
-    for c in clauses:
-        width = max(len(c.release), len(version))
-        have = (*version, *(0,) * (width - len(version)), AT)
-        want = (*c.release, *(0,) * (width - len(c.release)), c.place)
-        prefix = version[: len(c.release)] == c.release
-        if c.wild:
-            ok = prefix if c.op == "==" else not prefix
-        elif c.op == "~=":
-            ok = have >= want and version[: len(c.release) - 1] == c.release[:-1]
-        else:
-            ok = {
-                "==": have == want,
-                "===": have == want,
-                "!=": have != want,
-                ">=": have >= want,
-                "<=": have <= want,
-                ">": have > want,
-                "<": have < want,
-            }[c.op]
-        if not ok:
-            return False
-    return True
+def _pad(release: tuple[int, ...]) -> tuple[int, int, int]:
+    major, minor, micro = (*release, 0, 0)[:3]
+    return major, minor, micro
 
 
-def _clauses(spec: str, path: Path, line: int) -> list[_Clause]:
-    clauses = []
-    for n, clause in enumerate(spec.split(","), 1):
-        m = SPEC_CLAUSE.match(clause)
-        bad = not m or (m["wild"] and m["op"] not in ("==", "!=")) or (m["op"] == "~=" and "." not in m["release"])
-        if bad:
-            # 設定に誤って入った値（秘密を含みうる）を結果へ載せないよう、条件の字は引かずにファイルと位置で示す
-            raise CheckError(f"requires-python の {n} 番目の条件を PEP 440 の条件として読めない: {path}:{line}")
-        place = BEFORE if m["pre"] or (m["dev"] and not m["post"]) else AFTER if m["post"] else AT
-        clauses.append(_Clause(m["op"], tuple(int(x) for x in m["release"].split(".")), bool(m["wild"]), place))
-    return clauses
+def _release(text: str) -> tuple[int, ...] | None:
+    """条件の番号のリリースの部分。`===` の任意の字のようにバージョンとして読めなければ `None`。"""
+    return Version(text).release if PEP440_VERSION.match(text) else None
 
 
-def _candidates(clauses: list[_Clause]) -> list[tuple[int, int, int]]:
+def _candidates(specs: SpecifierSet) -> list[tuple[int, int, int]]:
     """許す最も古い Python 3 の正式リリースになりうる番号（小さい順）。
 
-    許す番号の集まりは、条件ごとに許す区間の重なりで、その最小は 3.0.0 か、どれかの条件の区間の左の端に在る。
-    左の端は、条件の番号そのものか、その直後（パッチを 1 つ進める）か、`!=` の `.*` の外の最初の番号のどれか。
+    許す番号の集まりは、条件ごとに許す範囲の重なりで、その最小は 3.0.0 か、どれかの条件の範囲の下の端に在る。
+    下の端は、条件の番号そのものか、その直後（パッチを 1 つ進める）か、`!=` の `.*` の外の最初の番号のどれか。
+    `===` の字がバージョンとして読めなければ、どの正式リリースの字とも一致しないので下の端を足さない。
     """
     found = {(3, 0, 0)}
-    for c in clauses:
-        r = (*c.release[:3], *(0,) * (3 - len(c.release[:3])))
+    for s in specs:
+        wild = s.version.endswith(".*")
+        release = _release(s.version.removesuffix(".*"))
+        if release is None:
+            continue
+        r = _pad(release)
         found |= {r, (r[0], r[1], r[2] + 1)}
-        if c.wild:
-            head = (*c.release[:-1], c.release[-1] + 1)[:3]
-            found.add((*head, *(0,) * (3 - len(head))))
+        if wild:
+            found.add(_pad((*release[:-1], release[-1] + 1)))
     return sorted(v for v in found if v[0] == 3)
+
+
+def _admits(specs: SpecifierSet, version: tuple[int, int, int]) -> bool:
+    """正式リリース `version` を `3.11.0` の形の字で条件のすべてに照らす（`===` は字の一致で比べる）。"""
+    return specs.contains(".".join(map(str, version)))
 
 
 def pyproject_floor(path: Path) -> tuple[tuple[int, int, int] | None, int]:
@@ -275,8 +257,8 @@ def pyproject_floor(path: Path) -> tuple[tuple[int, int, int] | None, int]:
     spec = project.get("requires-python") if isinstance(project, dict) else None
     if not isinstance(spec, str):
         return None, line
-    clauses = _clauses(spec, path, line)
-    lowest = next((v for v in _candidates(clauses) if _admits(clauses, v)), None)
+    specs = _specifiers(spec, path, line)
+    lowest = next((v for v in _candidates(specs) if _admits(specs, v)), None)
     return (None if lowest == (3, 0, 0) else lowest), line
 
 
@@ -329,7 +311,7 @@ class _Checker:
             value, line = tool.values["version"]
             return [] if value == self.uv else [self.finding(rel, line, f"setup-uv の version {value} が {self.uv} と違う")]
         if "python-version" not in tool.values:
-            # python-version-file の参照先・指定なしの既定は許可の一覧と照らせないので、書いた値を求める
+            # python-version-file の参照先・指定なしの既定は python_ci の値と比べられないので、書いた値を求める
             return [self.finding(rel, tool.line, f"setup-python に python-version（{sorted(ok)} のどれか）が無い")]
         value, line = tool.values["python-version"]
         if not value.split():

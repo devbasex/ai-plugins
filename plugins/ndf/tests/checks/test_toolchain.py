@@ -139,7 +139,7 @@ def test_unquoted_version_is_read_as_written(repo, rules):
     ["", '\n        with:\n          python-version-file: ".python-version"', "\n        with:\n          cache: pip"],
 )
 def test_setup_python_without_python_version_is_a_finding(repo, rules, with_):
-    # python-version-file の参照先・既定の Python は許可の一覧と照らせない
+    # python-version-file の参照先・既定の Python は python_ci の値と比べられない
     repo.file(".github/workflows/ci.yml", _workflow(_uv(), f"- uses: {PY}{with_}"))
     assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 12)]
 
@@ -168,6 +168,9 @@ def test_setup_uv_without_or_with_another_version_is_a_finding(repo, rules, step
         "python3 -m pip install --upgrade uv",
         "pip3 install uv==0.5.0",
         "pipx install uv",
+        # 引用符の外のエスケープは bash が外す（`uv<0.9`・`uv` になる）
+        r"pip install uv\<0.9",
+        r"pip install \uv",
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
     ],
 )
@@ -277,6 +280,13 @@ def test_workflow_tools_stops_on_broken_yaml(tmp_path):
         ('[project]\nrequires-python = ">=3.11,!=3.11.*"\n', ((3, 12, 0), 2)),
         ('[project]\nrequires-python = ">3.10"\n', ((3, 10, 1), 2)),
         ('[project]\nrequires-python = "~=3.11"\n', ((3, 11, 0), 2)),
+        # プレリリースを下限にした条件は同じ番号の正式リリースを許す
+        ('[project]\nrequires-python = ">=3.11a"\n', ((3, 11, 0), 2)),
+        # 末尾のカンマは PEP 440 で有効
+        ('[project]\nrequires-python = ">=3.11,"\n', ((3, 11, 0), 2)),
+        # `===` は字の一致で、`3.11` は正式リリースの `3.11.0` と一致しない
+        ('[project]\nrequires-python = "===3.11"\n', (None, 2)),
+        ('[project]\nrequires-python = "===3.11.0"\n', ((3, 11, 0), 2)),
         ('[project]\nrequires-python = "<4"\n', (None, 2)),
         ('[project]\nname = "x"\n', (None, 1)),
     ],
@@ -302,8 +312,9 @@ def test_pyproject_floor_that_differs_or_is_missing_is_a_finding(repo, rules, te
     assert _lines(repo.check(rules)) == [(PYPROJECT, line)]
 
 
-def test_unreadable_requires_python_stops(repo, rules):
-    repo.file(PYPROJECT, '[project]\nrequires-python = ">=3.11a"\n')
+@pytest.mark.parametrize("spec", ["=>3.11", ">=3.11x", "~=3"])
+def test_unreadable_requires_python_stops(repo, rules, spec):
+    repo.file(PYPROJECT, f'[project]\nrequires-python = "{spec}"\n')
     with pytest.raises(CheckError, match="requires-python"):
         repo.check(rules)
 
