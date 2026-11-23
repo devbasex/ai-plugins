@@ -82,6 +82,31 @@ OPERATION_VERBS = (
 )
 # 回答・判断を求める語。操作の動詞と並んでも待ちに残す
 REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビュー", "返事", "指示", "意見", "知らせ", "決め")
+# 見出しの問いを利用者への承認・許可の依頼と読む形（「このままマージしてよいですか？」）。承認の語（「承認」「マージ」）の
+# 出現だけでは依頼にしない（「マージの承認は必要ですか？」は事実を問う章題）
+_PERMISSION_ASKS = (
+    "てよいですか",
+    "てよろしいですか",
+    "てもよいですか",
+    "てもよろしいですか",
+    "てもいいですか",
+    "ていいですか",
+    "でよいですか",
+    "でよろしいですか",
+    "でよろしいでしょうか",
+    "でいいですか",
+    "てよいか",
+    "てもよいか",
+    "でよいか",
+    "てよければ",
+    "でよければ",
+    "よろしければ",
+    "問題なければ",
+)
+# 利用者に何かをしてもらう問いの形（「ご確認いただけますか？」）。回答・承認の語と並ぶときだけ依頼にする
+_FAVOR_ASKS = ("いただけますか", "いただけませんか", "もらえますか", "もらえませんか", "くれますか", "くれませんか")
+# 見出しの問いを選択肢から選ばせる問いと読む語（「どちらの案で進めますか？」）。手段を問う「どのように」は数えない
+_CHOICE_ASK = re.compile(r"どちら|どっち|どれ|いずれ|選|どの(?!よう|程度|くらい|ぐらい)")
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
 # 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）。リンク先は山括弧で
@@ -191,12 +216,13 @@ def _directed_heading(lines: list[ProseLine], at: int) -> bool:
     """`at` の見出しが利用者への問いか（章題でないか）。
 
     見出しが回答・承認を待つ文を持ち、次のどれかに当たれば問い: 後に本文の行が無い（「## このまま進めてよいですか？」で
-    終える）・承認の語を含む（「## このままマージしてよいですか？」の下に検証結果と結び）・次の見出しまでの行が
-    どれも箇条書き（「## どちらの案で進めますか？」の下に選択肢）。後の本文が問いに答える章題（「### どうやって
-    設定しますか？」の下の説明）は問いにしない。
+    終える）・利用者への依頼（`_requests_user`。「## このままマージしてよいですか？」「## 確認してください」の下に
+    報告と結び）・選択肢を選ばせる問いで、次の見出しまでの行がどれも箇条書き（「## どちらの案で進めますか？」の下に
+    選択肢）。承認の語の出現や箇条書きの有無だけでは問いにしない。後の本文が問いに答える章題（「### どうやって
+    設定しますか？」の下の説明や手順の箇条書き・「## マージの承認は必要ですか？」の下の説明）は問いにしない。
     """
-    text = lines[at].text
-    if not any(_asks_reply(s) for s in _sentences([text])):
+    asks = [s for s in _sentences([lines[at].text]) if _asks_reply(s)]
+    if not asks:
         return False
     below: list[ProseLine] = []
     for line in lines[at + 1 :]:
@@ -205,9 +231,23 @@ def _directed_heading(lines: list[ProseLine], at: int) -> bool:
         below.append(line)
     if not any(not line.heading for line in lines[at + 1 :]):
         return True
-    if any(w in text for w in APPROVAL_WORDS):
+    if any(_requests_user(s) for s in asks):
         return True
-    return bool(below) and all(line.bullet for line in below)
+    return bool(below) and all(line.bullet for line in below) and any(_CHOICE_ASK.search(s) for s in asks)
+
+
+def _requests_user(sentence: str) -> bool:
+    """文が利用者に承認・回答を直接求める依頼か（事実や手段を問う文でないか）。
+
+    許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つ依頼（「確認してください」
+    「ご承認をお願いします」「ご確認いただけますか？」）を依頼にする。
+    """
+    core = _core(sentence)
+    if any(w in core for w in _PERMISSION_ASKS) or _user_wait(core):
+        return True
+    if not any(w in core for w in REPLY_WORDS + APPROVAL_WORDS):
+        return False
+    return any(w in core for w in WAIT_CONTAINS + _FAVOR_ASKS)
 
 
 def _opaque(match: re.Match[str]) -> str:

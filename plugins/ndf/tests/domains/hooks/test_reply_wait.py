@@ -253,6 +253,10 @@ def test_a_question_in_a_heading_is_a_wait():
         ("このまま進めてよいですか？\n\n## 検証結果\nテストはすべて通りました。\n差分は確認済みです。", "prose_wait"),
         # 章題は完了の報告の文に数えない
         ("## 実装結果\n対応が完了しました。\n引き続きよろしくお願いします。", "closing_report"),
+        # 承認の語を含む事実の問いに、後の本文が答えている
+        ("## マージの承認は必要ですか？\nこのリポジトリでは必須です。", "report"),
+        # 手段の問いの下の箇条書きは選択肢でなく手順
+        ("## どうやって設定しますか？\n- 設定ファイルを開く\n- 値を書く", "report"),
     ],
 )
 def test_a_heading_followed_by_prose_is_a_title(text, kind):
@@ -266,6 +270,8 @@ def test_a_heading_followed_by_prose_is_a_title(text, kind):
         "## どちらの案で進めますか？\n- 案 A\n- 案 B",
         # 見出しで承認を求め、下に検証結果と結び
         "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        # 見出しで確認を求め、下に報告と結び
+        "## 確認してください\n修正を反映しました。\n引き続きよろしくお願いします。",
     ],
 )
 def test_a_heading_that_asks_the_user_is_a_wait(text):
