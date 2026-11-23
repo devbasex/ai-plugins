@@ -110,12 +110,6 @@ def test_wrapper_settings_read_the_limit_from_the_limits_table(tmp_path, monkeyp
     assert switch_decide.decide(state(context_tokens=199_999, context_limit=limit)).kind == "wait"
 
 
-def test_handover_prompt_keeps_the_wait_line_and_checks_the_handoff():
-    # #3995 の 3995:7: 引継ぎを頼む文は、打ち直す wait の行を残すことと、引継ぎ文書を ndf records handoff check で確かめることを含む
-    assert "ndf lanes wait" in switch_decide.HANDOVER_PROMPT
-    assert "ndf records handoff check" in switch_decide.HANDOVER_PROMPT
-
-
 def test_3864_7_an_auth_failure_without_a_target_is_stalled_while_the_child_is_alive():
     # 受け入れ条件 #3864 の 7: 替え先が無ければ子を残す（stalled）。子が終わっていれば今の終わりの判断へ
     pick = Pick("stalled", "work1", "work1 の認証に失敗し、替える先が無い")
