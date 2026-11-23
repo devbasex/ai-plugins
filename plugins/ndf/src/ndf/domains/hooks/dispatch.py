@@ -158,13 +158,14 @@ def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdic
 
 
 def combine(verdicts: list[Verdict]) -> Verdict:
-    """最も強い判定の種類で 1 つにまとめる。同じ種類の文は順につなぐ。"""
+    """最も強い判定の種類で 1 つにまとめる。同じ種類の文は順につなぐ（`sole` の判定があればその文だけ）。"""
     if not verdicts:
         return PASS
     kind = min((v.kind for v in verdicts), key=strength)
     if kind == "pass":
         return PASS
-    texts = [v.text for v in verdicts if v.kind == kind and v.text]
+    same = [v for v in verdicts if v.kind == kind]
+    texts = [v.text for v in ([v for v in same if v.sole] or same) if v.text]
     joined = "\n\n".join(texts)
     return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
 

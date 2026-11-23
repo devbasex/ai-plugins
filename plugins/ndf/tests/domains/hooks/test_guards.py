@@ -681,6 +681,15 @@ def test_context_limit_reason_fits_the_budget_with_a_long_main_directory(tmp_pat
     assert ("次のセグメントのブロック" if under else "ndf-next") in reason and "wait の行" in reason
 
 
+def test_context_limit_reason_comes_alone_when_script_chain_also_denies(tmp_path):
+    # #3995（r4-1）: 運用上限で script-chain も止める連結でも、引継ぎの手順だけを出し、156 字のメインディレクトリで wait の行まで切らない
+    main = tmp_path / ("m" * (156 - len(os.path.realpath(tmp_path / "m")) + 1))
+    _usage_transcript(main, 900000)
+    command = "ndf lanes status p1 && ndf records handoff check .ndf/handoff/next.md"
+    reason = deny_reason(call_entry("claude", "PreToolUse", bash(main, command)))
+    assert "全文:" not in reason and len(reason) <= 600 and reason.endswith("wait の行をそのまま残す。")
+
+
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
     # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
     _usage_transcript(tmp_path, 500_000)

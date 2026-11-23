@@ -21,6 +21,8 @@ class Verdict:
     - `context`: 案内の文（会話へ入る）
     - `key`: 同じ拒否を数える対象（読む範囲・コマンドの hash など）。空なら理由だけで数える
     - `notes`: 計測に残すマーカー（会話へ入れない）
+    - `sole`: まとめる判定にこれがあれば、同じ種類のほかの文を入れずこの文だけを出す（ほかの指示より先に従う手順で、
+      連結すると注入の上限で末尾が切れ得るもの。運用上限の引継ぎ）
     """
 
     kind: str
@@ -28,6 +30,7 @@ class Verdict:
     context: str = ""
     key: str = ""
     notes: dict = field(default_factory=dict)
+    sole: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
@@ -47,8 +50,8 @@ def passing(**notes: object) -> Verdict:
     return Verdict("pass", notes=notes)
 
 
-def deny(reason: str, key: str = "", notes: Optional[dict] = None) -> Verdict:
-    return Verdict("deny", reason=reason, key=key, notes=notes if notes is not None else {})
+def deny(reason: str, key: str = "", notes: Optional[dict] = None, sole: bool = False) -> Verdict:
+    return Verdict("deny", reason=reason, key=key, notes=notes if notes is not None else {}, sole=sole)
 
 
 def pushback(reason: str) -> Verdict:

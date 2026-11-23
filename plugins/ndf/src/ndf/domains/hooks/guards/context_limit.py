@@ -334,4 +334,6 @@ def check(ctx, svc) -> Verdict | None:
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
-    return deny(_reason(t, under, main, svc.params["handoff_dir"]), notes={"context_tokens": tokens, "under_relay": under})
+    # 引継ぎの手順はほかの guard の拒否より先に従い、連結で末尾（wait の行の扱い）が切れないよう単独で出す
+    reason = _reason(t, under, main, svc.params["handoff_dir"])
+    return deny(reason, notes={"context_tokens": tokens, "under_relay": under}, sole=True)
