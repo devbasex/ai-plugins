@@ -15,17 +15,20 @@ plugins/ndf/
 │   └── workflow/context.schema.json                 文脈のキーごとの x-source
 ├── docs/contracts/commands.md                       サブコマンドの仕様（生成物）
 ├── src/ndf/core/
-│   ├── worker.py                                    結果ファイルの outputs を worker run の結果へ写す
+│   ├── worker.py                                    結果ファイルの outputs を検査して worker run の結果へ写す
+│   ├── plan/steps.py・transition_decide.py・runner.py  ステップの gaps をプランの停止結果へ渡す
+│   ├── branch_strategy.py                           読み込み済みの宣言からブランチ戦略を組む
 │   └── route/__init__.py                            リファクタリングの既定の起動
 ├── src/ndf/progress/
 │   ├── worker_kinds.py *                            kinds.json を読み、作業ごとの入力の欠けを返す
 │   ├── invoke.py                                    差し込みを 1 回だけ組んで values.json に残す・止まりの分類
 │   ├── run.py                                       started の前に組んで確かめて止まる
-│   ├── command.py                                   ndf progress check の結果
+│   ├── command.py                                   ndf progress check の結果・差分の起点の規則（base_ref）
 │   ├── definition.py                                欠けた文脈のキーに取り場所を添える
 │   └── gate/entry.py                                プロンプトを組んで書き、worker へ置き換わる
 └── tests/
     ├── core/test_worker_outcome.py *                結果ファイルの outputs の受け渡し
+    ├── core/plan/test_steps.py・test_runner.py       ステップの gaps をプランの停止結果へ
     └── progress/
         ├── test_invoke.py                           values.json と決められない差し込み・1 回だけ組む
         ├── test_invoke_refactor.py                  リファクタリングの既定の起動
@@ -34,7 +37,7 @@ plugins/ndf/
         └── gate/test_gate_work.py                   プロンプトの組み立て・作業場所
 ```
 
-依存の向き: `contracts/`（データ）→ `progress/worker_kinds.py`（作業の定義を読む）→ `progress/invoke.py`（工程がプランを組む層）→ `progress/gate/entry.py`（プランのステップが打つサブコマンド）の一方向である。`invoke.py` は `entry.py` を読めない（`entry.py` が `invoke.py` を読む）ので、作業の定義を読む関数は両方から読める `worker_kinds.py` に置く。`core/worker.py`（`ndf worker run`）は作業の定義を読まず、必須の出力の名前を引数で受ける。逆向きの import は足さない。`progress/gate/entry.py` は `values.json` を読む側として `progress/invoke.py` を読む（今も `from ndf.progress import command, invoke, model, run, store` で読んでいる）。パスは `ndf.contracts.worker_paths.report_paths`（#3877）で組む。`core/plan`（プランの実行の層）は触らない。ステップの結果 JSON の `outputs` をプランの結果へ重ねる処理は `core/plan/runner.py:121-122`・`:425-426`（`outputs.json`）に既にある。`progress/run.py` は `progress/invoke.py` を呼ぶ既存の向きのままである。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
+依存の向き: `contracts/`（データ）→ `progress/worker_kinds.py`（作業の定義を読む）→ `progress/invoke.py`（工程がプランを組む層）→ `progress/gate/entry.py`（プランのステップが打つサブコマンド）の一方向である。`invoke.py` は `entry.py` を読めない（`entry.py` が `invoke.py` を読む）ので、作業の定義を読む関数は両方から読める `worker_kinds.py` に置く。`core/worker.py`（`ndf worker run`）は作業の定義を読まず、必須の出力の名前を引数で受ける。逆向きの import は足さない。`progress/gate/entry.py` は `values.json` を読む側として `progress/invoke.py` を読む（今も `from ndf.progress import command, invoke, model, run, store` で読んでいる）。パスは `ndf.contracts.worker_paths.report_paths`（#3877）で組む。`core/plan`（プランの実行の層）は、ステップの結果の `gaps` をプランの停止結果へ渡す 3 か所（`steps.outcome_of`・`transition_decide`・`runner`）だけを触り、`progress` を読む向きの import は足さない。ステップの結果 JSON の `outputs` をプランの結果へ重ねる処理は `core/plan/runner.py:121-122`・`:425-426`（`outputs.json`）に既にある。`progress/run.py` は `progress/invoke.py` を呼ぶ既存の向きのままである。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -43,16 +46,19 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/progress/worker_kinds.py` | 新設 | 作業の定義を読み、作業ごとの入力と作業場所の欠けを名前と出所で返す | `ndf.contracts` | モジュール `ndf.progress.worker_kinds` | `work_kinds`（新設）・`kind_gaps`（新設）・`work_dir_of`（新設）・`kind_values`（新設） |
 | `plugins/ndf/contracts/worker/prompt.md` | 新設 | 起動指示の 7 項目と規則 7 個の共通のテンプレート | 無し（データ） | 無し | 無し |
 | `plugins/ndf/contracts/workflow/context.schema.json` | 変更 | 文脈のキーごとに値の取り場所（`x-source`）を持つ | 無し（データ） | `properties` | 無し |
-| `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | 差し込みを 1 回だけ組んで `values.json` に残し、プランを書き出すときはそれを使う。止まりの分類を 1 か所にする | `ndf.core.route`・`ndf.core.plan.files`・`ndf.progress.worker_kinds` | モジュール `ndf.progress.invoke` | `PreparedPlan`（新設）・`KindInputsMissing`（新設）・`prepare_plan`（新設）・`plan_failure`（新設）・`write_values`（新設）・`read_values`（新設）・`plan_path`（変更）・`_call_plan`（変更）・`_fill_refactor`（変更） |
+| `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | 差し込みを 1 回だけ組んで `values.json` に残し、プランを書き出すときはそれを使う。止まりの分類を 1 か所にする | `ndf.core.route`・`ndf.core.plan.files`・`ndf.progress.worker_kinds` | モジュール `ndf.progress.invoke` | `PreparedPlan`（新設）・`KindInputsMissing`（新設）・`prepare_plan`（新設）・`plan_failure`（新設）・`write_values`（新設）・`read_values`（新設）・`clear_values`（新設）・`plan_path`（変更）・`_call_plan`（変更）・`_fill_refactor`（変更） |
 | `plugins/ndf/src/ndf/progress/run.py` | 変更 | `started` を書く前に最初のプランの差し込みを組んで確かめる | `ndf.progress.invoke` | モジュール `ndf.progress.run` | `step_dir`（新設）・`_start`（変更）・`_run_step`（変更） |
-| `plugins/ndf/src/ndf/core/worker.py` | 変更 | 結果ファイルの `outputs` を `ndf worker run` の結果 JSON へ写し、必須の出力の欠けを返す | `ndf.contracts.result` | モジュール `ndf.core.worker` | `outcome_of`（変更）・`_add_run`（変更）・`_cmd_run`（変更） |
-| `plugins/ndf/src/ndf/core/route/__init__.py` | 変更 | リファクタリングの既定の起動の argv を組む | `ndf.core.git` | モジュール `ndf.core.route` | `REFACTOR_WITH_PR`（新設）・`refactor_launch`（新設） |
+| `plugins/ndf/src/ndf/core/worker.py` | 変更 | 結果ファイルの `outputs` を検査してから `ndf worker run` の結果 JSON へ写し、必須の出力の欠けを返す | `ndf.contracts.result` | モジュール `ndf.core.worker` | `outcome_of`（変更）・`_add_run`（変更）・`_cmd_run`（変更） |
+| `plugins/ndf/src/ndf/core/plan/steps.py`・`transition_decide.py`・`runner.py` | 変更 | ステップの結果の `gaps` をプランの停止結果まで渡す | `ndf.contracts.result` | モジュール `ndf.core.plan.*` | `steps.outcome_of`（変更）・`transition_decide.Outcome`・`StepState`・`_after_stop`（変更）・`runner.plan_workflow`・`_result_of`（変更） |
+| `plugins/ndf/src/ndf/core/branch_strategy.py` | 変更 | 読み込み済みの `.ndf/project.json` の中身から、ファイルを読み直さずにブランチ戦略を検証して組む | 無し（今の依存のまま） | モジュール `ndf.core.branch_strategy` | `of_project`（新設） |
+| `plugins/ndf/src/ndf/core/route/__init__.py` | 変更 | リファクタリングの既定の起動の argv を組む | `ndf.core.branch_strategy` | モジュール `ndf.core.route` | `REFACTOR_WITH_PR`（新設）・`refactor_launch`（新設） |
 | `plugins/ndf/src/ndf/progress/definition.py` | 変更 | 欠けた文脈のキーの行に取り場所を添える | `ndf.contracts` | モジュール `ndf.progress.definition` | `context_source`（新設）・`_missing_keys`（変更） |
-| `plugins/ndf/src/ndf/progress/command.py` | 変更 | `ndf progress check` の結果に取り場所の付いた行を出す | `ndf.progress.definition` | モジュール `ndf.progress.command` | `_cmd_check`（変更） |
+| `plugins/ndf/src/ndf/progress/command.py` | 変更 | `ndf progress check` の結果に取り場所の付いた行を出す。差分の起点の規則を工程の条件とリファクタリングの既定で共有する | `ndf.progress.definition`・`ndf.adapters.git` | モジュール `ndf.progress.command` | `_cmd_check`（変更）・`base_ref`（新設）・`_sprint_range`（変更） |
 | `plugins/ndf/src/ndf/progress/gate/entry.py` | 変更 | プロンプトを組んで書き、`ndf worker run` へ置き換わる | `ndf.progress.invoke`・`ndf.progress.worker_kinds`・`ndf.contracts.worker_paths`・`ndf.contracts`・`string` | モジュール `ndf.progress.gate.entry` | `work_prompt`（新設）・`_write_prompt`（新設）・`work_argv`（変更）・`work_parser`（変更）・`_cmd_work`（変更） |
 | `plugins/ndf/docs/contracts/commands.md` | 変更 | `ndf answer work` の節（生成物） | 無し（生成物） | 無し | 無し |
 | `plugins/ndf/tests/progress/test_invoke.py`・`test_invoke_refactor.py`・`test_run.py`・`test_sprint_templates.py`・`gate/test_gate_work.py` | 変更 | 差し込みの既定・`values.json`・1 回だけ組むこと・決められない工程・リファクタリングの既定・プロンプトの組み立てと作業場所 | `ndf.progress` | モジュール | テスト関数 |
 | `plugins/ndf/tests/core/test_worker_outcome.py` | 新設 | 結果ファイルの `outputs` の受け渡しと必須の出力の欠け | `ndf.core.worker` | モジュール | テスト関数 |
+| `plugins/ndf/tests/core/plan/test_steps.py`・`test_runner.py` | 変更 | ステップの `gaps` がプランの停止結果まで届くこと | `ndf.core.plan` | モジュール | テスト関数 |
 
 ## worker の起動の引数の既定（`params.json`）
 
@@ -157,6 +163,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `write_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None` | プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く |
 | `read_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `read_values(state_dir: Path) -> Optional[dict[str, Any]]` | `<保存先>/values.json` を読む。無い・壊れていれば `None` |
+| `clear_values` | `plugins/ndf/src/ndf/progress/invoke.py` | 新設 | `clear_values(state_dirs: Iterable[Path]) -> None` | 渡された保存先から `values.json` を消す（無ければ何もしない。`unlink(missing_ok=True)`。保存先は NDF の状態の保存先の下で、利用者のファイルを指さない） |
 | `plan_path` | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | `plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path`（変わらない） | 同じ保存先に同じプランの `values.json` があればその値と描画の条件（`local_tests`）でプランを描く。無ければ `prepare_plan` で組んでから描く。差し込みを組むのはどちらの経路でも 1 回だけである |
 
 - `write_values`
@@ -171,7 +178,9 @@ plugins/ndf/
   - 事後条件: 書き出したプランの `{state_dir}`（= `work_dir`）に `values.json` があり、その `values` がそのプランを組むのに使った値と一致する
   - 副作用: `values.json` が無い（または別のプランの）ときだけ `prepare_plan` を呼ぶ（課題の題と本文の書き出し・候補の書き出し・`git` と GitHub の読み取りが 1 回）。あれば読み取り 1 つだけで、`template_values` を呼ばない
 
-`values.json` を書くのは `prepare_plan` だけで、`_start`（工程の最初のプランのステップ。`started` の前）か `plan_path`（それ以外のプランのステップ。そのステップを流すとき）のどちらかが 1 回だけ呼ぶ。`plan_path` は `values.json` の値をそのまま描くので、プランと値が食い違うことがない。
+`values.json` を書くのは `prepare_plan` だけで、`_start`（その試行で次に流すプランのステップ。`started` の前）か `plan_path`（それ以外のプランのステップ。そのステップを流すとき）のどちらかが 1 回だけ呼ぶ。`plan_path` は `values.json` の値をそのまま描くので、プランと値が食い違うことがない。
+
+準備した値を引き渡す範囲は 1 回の試行（工程の行の `started` 1 件から、その行の `failed`・`completed` まで）である。工程の初回の開始も、失敗の後の打ち直しも `ndf progress next` が `_start` を通す（`progress/run.py:292-293` の `decide` が `failed` の行に `START` を返し、`StepProgress._started` が `retries` を数える）。打ち直しのステップは同じ世代の同じ保存先（`step_location` の `<ステップ>-g<世代>`）を使うので、保存先とプラン名だけで再利用を決めると、前の試行の差し込みが残る。そこで、`_start` は試行の始まりに、その工程の今の世代の保存先（工程のすべてのステップの `step_dir`）から `values.json` を消してから（`clear_values`）、次に流すステップの分だけを組む。同じ試行の中では `_start` が書いた値をそのステップの `plan_path` が使い、後続のプランのステップは最初に流すときの `plan_path` が組んだ値を、承認の回答の後や `_retrying` の打ち直しでも使い続ける。新しい試行では、どのステップも設定・課題・工程の入力を取り直す。
 
 ### 異常系の処理
 
@@ -193,7 +202,7 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じ工程の `ndf progress next`（打ち直し・承認の回答） | `<保存先>/values.json` | 取らない（工程の行の排他（`store.run_lock`）の中で 1 つの駆動だけがプランを組む） | 同じ工程・同じ入力なら中身は同じで、何度書いても結果が変わらない |
+| 同じ工程の `ndf progress next`（打ち直し・承認の回答） | `<保存先>/values.json` | 取らない（工程の行の排他（`store.run_lock`）の中で 1 つの駆動だけがプランを組む） | 承認の回答は同じ試行なので書き直さずに読む。打ち直しは `_start` が先に消すので、新しい試行の値で書き直す |
 | プランのステップ（`ndf answer work`） | 同上 | 排他を取らずに読むだけ | 読み取りだけで、読めなければ `stopped`（`precondition`）で止まる |
 
 ### 既存の部品の再利用
@@ -208,7 +217,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `plan_path` | プランを書き出した保存先に `values.json` があり、`plan`・`values`・`inputs`・`local_tests`・`at` を持つ。`values` に `acceptance`・`title`・`body_file` の補いが入る。工程「要求と受け入れ条件」で `inputs` に `issues` が入る | 同じ保存先に `values.json` があるとき、`template_values` を差し替えた見張りが 0 回呼ばれ（`_start` で組んだ値を使う）、無いときは 1 回呼ばれる | 保存先が読み取り専用のとき `OSError` が上がり、プランを起動しない。別のプランの `values.json` は使わずに組み直す |
+| `plan_path` | プランを書き出した保存先に `values.json` があり、`plan`・`values`・`inputs`・`local_tests`・`at` を持つ。`values` に `acceptance`・`title`・`body_file` の補いが入る。工程「要求と受け入れ条件」で `inputs` に `issues` が入る | 同じ保存先に `values.json` があるとき、`template_values` を差し替えた見張りが 0 回呼ばれ（`_start` で組んだ値を使う）、無いときは 1 回呼ばれる。工程「設計」の後続のプランのステップ（`cross-review`）が止まった後に `.ndf/project.json` を書き換えて打ち直すと、そのステップのプランが書き換えた後の設定で描かれる（`_start` が前の試行の `values.json` を消す）。承認の回答の後の同じ試行では組み直さない | 保存先が読み取り専用のとき `OSError` が上がり、プランを起動しない。別のプランの `values.json` は使わずに組み直す |
 | `read_values` | 書いた中身をそのまま読める | 打ち直した工程でも最後の値を読める | ファイルが無い・壊れている・`inputs` が無いとき `None` |
 
 ## 作業のプロンプトを組んで worker を起動する（`ndf answer work`）
@@ -303,7 +312,7 @@ plugins/ndf/
 
 満たす決定: 決定 2、決定 4、受け入れ条件 3
 
-工程を起動するとき、`_start`（`started` を書く前）が工程の最初のプランのステップの差し込みを組み、確かめ、`values.json` まで書く。`_start` の後、作業は別のプロセス（`d.env.launch`。`src/ndf/progress/run.py:602`）で流れるので、組んだ値はメモリでなく `values.json` で渡す。そのステップを流すとき、`plan_path` は `values.json` を読んで描くだけで、差し込みを組み直さない。差し込みを組む処理（設定の読み取り・`route.derived` の `git` の呼び出し・課題の題と本文の書き出し・GitHub の読み取り）は、プラン 1 つにつき 1 回だけ走る。
+工程を起動するとき（初回の開始と失敗の後の打ち直し）、`_start`（`started` を書く前）が前の試行の `values.json` を消し、その試行で次に流すプランのステップの差し込みを組み、確かめ、`values.json` まで書く（引き渡しの範囲は「差し込みの値の受け渡し」の節の試行）。`_start` の後、作業は別のプロセス（`d.env.launch`。`src/ndf/progress/run.py:602`）で流れるので、組んだ値はメモリでなく `values.json` で渡す。そのステップを流すとき、`plan_path` は `values.json` を読んで描くだけで、差し込みを組み直さない。差し込みを組む処理（設定の読み取り・`route.derived` の `git` の呼び出し・課題の題と本文の書き出し・GitHub の読み取り）は、試行 1 回のプラン 1 つにつき 1 回だけ走る。
 
 ### 関数の仕様
 
@@ -316,7 +325,7 @@ plugins/ndf/
 | `plan_path` | 同上 | 変更 | `plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path`（変わらない） | 同じプランの `values.json` があればそれで描き、無ければ `prepare_plan` を呼んでから描く |
 | `_call_plan` | 同上 | 変更 | シグネチャは変わらない | 例外の分類を `plan_failure` へ移し、保存先の作成を `prepare_plan` へ移す |
 | `step_dir` | `plugins/ndf/src/ndf/progress/run.py` | 新設 | `step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Path` | ステップのプランの実行の保存先（`work_root(...) / s.id / step_location(step.id, prog)`）。今 `_run_step`（`:861`）が組んでいる式を移し、`_start` と `_run_step` が同じ関数で同じ世代の保存先を得る |
-| `_start` | `plugins/ndf/src/ndf/progress/run.py` | 変更 | `_start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]`（変わらない） | 入力の検査（`invoke.resolve_inputs`）の後、`started` を書く前に、工程の最初のステップがプランなら `step_dir` の保存先で `prepare_plan` を呼ぶ。止まれば `plan_failure` の結果を返し、`started` を書かない |
+| `_start` | `plugins/ndf/src/ndf/progress/run.py` | 変更 | `_start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]`（変わらない） | 入力の検査（`invoke.resolve_inputs`）の後、`started` を書く前に、工程のすべてのステップの `step_dir` へ `invoke.clear_values` を当て、この試行で次に流すステップ（初回は最初のステップ。打ち直しは `StepProgress.next_step` が返すステップで、`redo` が真なら最初のステップ）がプランなら、その `step_dir` の保存先で `prepare_plan` を呼ぶ。止まれば `plan_failure` の結果を返し、`started` を書かない |
 | `_run_step` | `plugins/ndf/src/ndf/progress/run.py` | 変更 | シグネチャは変わらない | 保存先を `step_dir` から得る |
 
 - `prepare_plan`
@@ -345,11 +354,12 @@ plugins/ndf/
 | --- | --- | --- |
 | `_start` | 工程の条件が偽 | 今までどおり `skipped` を書く |
 | `_start` | 工程の入力が欠ける・形が違う | 今までどおり `stopped`（入力の種類） |
-| `_start` | 最初のステップがプランで、`prepare_plan` が上げる | `started` を書かずに `plan_failure` の結果を返す |
-| `_start` | 最初のステップがプランで、`prepare_plan` が通る | `started` を書いて起動する。そのステップの `plan_path` は `values.json` を読むだけ |
-| `_start` | 最初のステップがプランでない（`deploy` の `ndf.script` など） | 今までどおり `started` を書いて起動する |
-| `plan_path` | 同じ保存先に同じプランの `values.json` がある | それで描く（`template_values` を呼ばない） |
-| `plan_path` | 無い（工程の 2 つ目以降のプランのステップ・`values.json` を消した打ち直し） | そのステップを流す時点で `prepare_plan` を呼んでから描く（1 回） |
+| `_start` | 条件と入力が通る（初回の開始・失敗の後の打ち直しのどちらも） | 先に工程の今の世代のすべての `step_dir` から `values.json` を消す（前の試行の差し込みを残さない） |
+| `_start` | 次に流すステップがプランで、`prepare_plan` が上げる | `started` を書かずに `plan_failure` の結果を返す |
+| `_start` | 次に流すステップがプランで、`prepare_plan` が通る | `started` を書いて起動する。そのステップの `plan_path` は `values.json` を読むだけ |
+| `_start` | 次に流すステップがプランでない（`deploy` の `ndf.script` など） | 今までどおり `started` を書いて起動する |
+| `plan_path` | 同じ保存先に同じプランの `values.json` がある（同じ試行で `_start` か前の `plan_path` が書いた） | それで描く（`template_values` を呼ばない） |
+| `plan_path` | 無い（同じ試行で初めて流す後続のプランのステップ。前の試行の分は `_start` が消している） | そのステップを流す時点で `prepare_plan` を呼んでから描く（1 回） |
 
 工程の 2 つ目以降のプランのステップ（工程「設計」の `cross-review`・`design-merge`、工程「Pull Request」の `merge` など）は、前のステップが作った push やレビューの範囲を差し込みに使うので、`_start` の時点では組まない（先に組むと古い値で描くことになる）。それらの差し込みと作業ごとの入力の欠けは、そのステップを流すときに同じ `prepare_plan` と `plan_failure` で見つかり、今までどおり `failed` になる。`worker` の既定が入るので、`worker` の欠けで止まることはもう無い。工程ごとのプランのステップの数（多くて 3 件）だけ繰り返す。計算量の注意は無い。
 
@@ -385,24 +395,34 @@ plugins/ndf/
 | `outcome_of` | `plugins/ndf/src/ndf/core/worker.py` | 変更 | `outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int, required: Sequence[str] = ()) -> dict[str, Any]` | `status` が `ok` のとき、結果ファイルの `outputs`（object）を返りの `outputs` へ写す。`required` の名前が `outputs` に無ければ、その名前を欠け（`gaps`）にした `incomplete` にする |
 | `_add_run` | 同上 | 変更 | シグネチャは変わらない | `--require-output <名前>`（`action="append"`。省ける）を足す |
 | `_cmd_run` | 同上 | 変更 | シグネチャは変わらない | `a.require_output` を `outcome_of` へ渡す |
+| `outcome_of`（ステップの結果） | `plugins/ndf/src/ndf/core/plan/steps.py` | 変更 | `outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]`（変わらない） | 返りに `gaps` を足す（結果 JSON のトップレベルの `gaps` が並びならそのまま、無ければ `None`） |
+| `Outcome`・`StepState`・`_after_stop` | `plugins/ndf/src/ndf/core/plan/transition_decide.py` | 変更 | `Outcome` と `StepState` に `gaps: tuple[dict[str, Any], ...] = ()` を足す | 止まったステップの結果の `gaps` を `Outcome` から受け、`_finish`（`STOPPED`）で終わりの状態へ残す |
+| `plan_workflow`・`_result_of` | `plugins/ndf/src/ndf/core/plan/runner.py` | 変更 | シグネチャは変わらない | `plan_workflow` の返りに `gaps` を足し、`_result_of` の `STOPPED` の分かれで `result.stopped(..., gaps=...)` に渡す |
 
-- `outcome_of`
-  - 事後条件: 返りの `outputs` は結果ファイルの `outputs` と同じ中身で、`result.result` が結果 JSON のスキーマ（`contracts/schemas/result.schema.json` の `$defs/outputs`。閉じた語彙）で検査する。`ndf worker run` は作業の定義を読まず、必須の名前は `ndf answer work` が `--require-output` で渡す（`kinds.json` の `outputs`）
+- `outcome_of`（`core/worker.py`）
+  - 事後条件: `status` が `ok` のとき、写す前に結果ファイルの `outputs` を明示的に検査する。返りの候補（`result.result(TOOL, OK, …, outputs=report["outputs"])`）に `result.errors`（`contracts/schemas/result.schema.json` の `$defs/outputs` の閉じた語彙と型を含む、`result.emit` と同じ検査）を当て、誤りがあれば候補を捨てて `stopped`（`bad_report`）を返す。`summary` は結果ファイルのパスと、誤りの位置（`outputs/worktree` などのパス）と理由を並べた文にする。こうして返りは必ずスキーマに合い、`_cmd_run` の `result.emit` で落ちて結果 JSON が出ない経路を残さない。`ndf worker run` は作業の定義を読まず、必須の名前は `ndf answer work` が `--require-output` で渡す（`kinds.json` の `outputs`）
   - 副作用: 無し（読むのは今までどおり結果ファイル 1 つ）
+- プランの停止結果の `gaps`（`core/plan`）
+  - 事後条件: ステップの結果 JSON が `gaps` を持って止まった（`incomplete`）とき、プランの結果（`ndf plan` の結果 JSON）は同じ `gaps` を持つ `stopped`（`incomplete`）になる。ステップの結果に `gaps` が無いまま `incomplete` で止まった（終了コードだけのステップなど）ときは、`[{"kind": "step", "name": <ステップ>, "reason": <detail>}]` を補い、スキーマが `incomplete` に求める `gaps` を欠かさない。`summary` の末尾に欠けの名前を「（欠け: branch, worktree）」の形で添え、工程の `failed` の理由（プランの `summary` をそのまま載せる今の経路）で名前が見える
+  - 副作用: 無し（耐久ワークフローの状態に `gaps` の並びが増えるだけ）
+
+この節は `core/plan` のうち、ステップの結果からプランの停止結果へ `gaps` を渡す 3 か所だけを触る（地図の「`core/plan` は触らない」の例外）。
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `outcome_of` | `outputs` の形が違う | object でない・語彙に無いキー・値の型の違い（`worktree` が空の文字列など） | スキーマの検査 | 結果を `bad_report` にする | `stopped`（`bad_report`）。`summary` に結果ファイルのパスと検査の誤りを書く | worker の結果ファイルを直すか作業を打ち直す |
-| `outcome_of` | 必須の出力が無い | worker が `--outputs` を付けずに `ok` を書いた | `required` と `outputs` のキーの差 | `incomplete` にする（欠けは `{"kind": "output", "name": <名前>, "reason": "作業の結果ファイルの outputs に無い"}`） | `stopped`（`incomplete`） | 打ち直せる。工程は `bad_report` でなく欠けの名前付きで止まる |
+| `outcome_of` | `outputs` の形が違う | object でない・語彙に無いキー・値の型の違い（`worktree` が空の文字列など） | 写す前の `result.errors`（`outcome_of` の中。`result.emit` まで持ち越さない） | 結果を `bad_report` にする | `stopped`（`bad_report`）の結果 JSON が必ず出る。`summary` に結果ファイルのパスと、誤りの位置と理由を書く | worker の結果ファイルを直すか作業を打ち直す |
+| `outcome_of` | 必須の出力が無い | worker が `--outputs` を付けずに `ok` を書いた | `required` と `outputs` のキーの差 | `incomplete` にする（欠けは `{"kind": "output", "name": <名前>, "reason": "作業の結果ファイルの outputs に無い"}`） | `stopped`（`incomplete`）。プランの結果と工程の `failed` の理由まで欠けの名前が届く（上の「プランの停止結果の `gaps`」） | 打ち直せる。工程は `bad_report` でなく欠けの名前付きで止まる |
+| `_result_of`（`core/plan/runner.py`） | 止まったステップが `gaps` を持たない `incomplete` | 終了コードだけのステップ・`gaps` を出さないコマンド | `final["gaps"]` が空 | ステップの名前と `detail` で 1 件を補う | `stopped`（`incomplete`）。規約に合う結果 JSON が出る | 打ち直せる |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `outcome_of` | 結果ファイルが `status: ok` と `outputs: {"worktree": "/r/.worktrees/b", "branch": "b"}` を持つとき、返りの `outputs` が同じ中身になる | `required` が空で `outputs` の無い結果ファイルは今までどおり `ok`。`gate`・`stopped` の結果ファイルの `outputs` は写さない | `required` が `worktree`・`branch` で結果ファイルに `branch` が無いと `incomplete` で、欠けに `branch` が入る。`outputs` が語彙に無いキーを持つと `bad_report` |
-| プランの結果まで（`test_sprint_templates.py`） | プラン `worktree` の worker のステップを、`outputs` を書く結果ファイルで差し替えて流すと、プランの結果の `outputs` に `worktree`・`branch` が載り、工程「作業場所の用意」の出力の検査（`_stage_output` → `stages.keep_declared`）を通る | — | 結果ファイルが `outputs` を持たないと、工程は `bad_report` でなく `incomplete` で `branch`・`worktree` の欠けを返す |
+| `outcome_of` | 結果ファイルが `status: ok` と `outputs: {"worktree": "/r/.worktrees/b", "branch": "b"}` を持つとき、返りの `outputs` が同じ中身になる | `required` が空で `outputs` の無い結果ファイルは今までどおり `ok`。`gate`・`stopped` の結果ファイルの `outputs` は写さない | `required` が `worktree`・`branch` で結果ファイルに `branch` が無いと `incomplete` で、欠けに `branch` が入る。`outputs` が語彙に無いキーを持つ・`worktree` が数値のとき、返りが `bad_report` で、`result.errors(返り)` が空（そのまま `result.emit` できる）で、`summary` に `outputs/worktree` の位置が入る |
+| `steps.outcome_of`・`_result_of`（`tests/core/plan/test_steps.py`・`test_runner.py`） | `gaps` を持つ `incomplete` の結果 JSON を出すステップで、ステップの結果とプランの結果の両方に同じ `gaps` が載る | `gaps` の無い `incomplete` のステップで、プランの結果に補った 1 件が載り、`result.errors` が空 | — |
+| プランの結果まで（`test_sprint_templates.py`） | プラン `worktree` の worker のステップを、`outputs` を書く結果ファイルで差し替えて流すと、プランの結果の `outputs` に `worktree`・`branch` が載り、工程「作業場所の用意」の出力の検査（`_stage_output` → `stages.keep_declared`）を通る | — | 結果ファイルが `outputs` を持たないと、プランの結果が `incomplete` で `gaps` に `branch`・`worktree` を持ち、工程の `failed` の理由に 2 つの名前が載る（`bad_report` にならない） |
 
 ## リファクタリングの既定の起動（`refactor`）
 
@@ -413,25 +433,60 @@ plugins/ndf/
 | 引数 | 出所 | 決める時点 |
 | --- | --- | --- |
 | `--branch` | 差し込み `branch`（工程の入力） | プランを組むとき |
-| `--base` | `route.default_base(repo)`（ブランチ戦略の設定）。`_review_value` がテンプレートに `base` が無いときに使う決め方と同じ（`core/route/__init__.py:476-478`） | プランを組むとき |
+| `--base` | 差分の起点の参照（以下「起点」）。マージ先のブランチ名は、`prepare_plan` が読み込み済みの `.ndf/project.json` の中身から `branch_strategy.of_project(project).pr_target("sprint")` で決める（ファイルを読み直さない）。起点は、工程の条件 `code_in_diff` が使う `progress/command.py` の `_sprint_range`（`:173-184`）と同じ規則で決める。この規則を `command.base_ref(git, base) -> str` に切り出し、`_sprint_range` と `_fill_refactor` の両方が呼ぶ。規則は、作業場所の `git rev-parse <base>` が通ればそのブランチ名、通らなければ `<リモート>/<base>` である。リモートは `Git.remote()`（メインディレクトリの宣言の `remote`。テンプレートの差し込み `remote` と同じ出所） | プランを組むとき |
 | `--required` | `.ndf/project.json` の `ci.required_checks`（`prepare_plan` が 1 回読んだ設定。`FILL_SOURCES` の `required` と同じ場所） | プランを組むとき |
 | `--pr` | ブランチの PR の番号（`gh pr view <branch> --json number`）。`REVIEW_WITH_PR`（`core/route/__init__.py:95`）と同じく、打つ時点に読む | ステップを打つとき |
-| `--scope` | マージ先からの差分のファイル（`git diff --name-only --diff-filter=d <remote>/<base>...HEAD`。作業場所で打つ）。工程の条件 `code_in_diff` が見る差分と同じ範囲 | ステップを打つとき |
+| `--scope` | 起点からの差分のファイル（`git diff --name-only -z --diff-filter=d <起点>...HEAD --`。作業場所で打つ）。`-z` で NUL 区切りにし、Git の引用表記（`core.quotePath`）を通さずにパスをそのまま取る。`progress/command.py:193` の `_diff_names` と同じ取り方で、工程の条件 `code_in_diff` が見る差分と同じ起点・同じ範囲 | ステップを打つとき |
 
-PR の番号と差分は、前の工程（実装の PR の作成・push）が終わってからでないと決まらないので、`REVIEW_WITH_PR` と同じく `sh -c` の包みが打つ時点に読んで足す。工程の並びでは工程「実装」が単位の PR を作る（`impl.json` の `pr` のステップ）ので、工程「リファクタリング」の時点ではふつう PR がある。
+起点は 1 つの値として、差分の列挙（`--scope`）と `ndf refactor run` の `--base`（`scope.touched_or_explicit` が差分の起点に使う）の両方へ同じ文字列で渡す。工程の条件・差分の列挙・refactor の内部が別の起点に解決されることはない。
+
+PR の番号と差分は、前の工程（実装の PR の作成・push）が終わってからでないと決まらないので、`REVIEW_WITH_PR` と同じく包みのシェルが打つ時点に読んで足す。工程の並びでは工程「実装」が単位の PR を作る（`impl.json` の `pr` のステップ）ので、工程「リファクタリング」の時点ではふつう PR がある。
+
+包みのシェルは `bash -c` にする（`testing/command.py:142` と同じ）。NUL 区切りのパスを 1 つずつの引数へ写す `mapfile -d ''` が POSIX の `sh` に無いためである。位置引数と本文は次のとおりである（`refactor_launch` が組む argv の 4 つ目以降が位置引数になる）。
+
+| 位置 | 中身 |
+| --- | --- |
+| `$0` | ブランチ（`branch`） |
+| `$1` | 起点（`base_ref` の返り。`main` か `origin/main` の形） |
+| `$2` 以降 | 実行する argv（`<entry> refactor run --branch … --base <起点> --required …`）。本文の先頭の `shift` の後は `"$@"` がちょうどこれになり、`$1` が `<entry>`（`identity.FIXED_WORDS["entrypoint"]`）になる |
+
+```bash
+ref=$1; shift
+if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
+fi
+if ! git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+  exec "$1" contracts emit --tool refactor --status stopped \
+    --summary "起点 $ref を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "起点が無い"
+fi
+mapfile -d '' -t files < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --)
+if [ "${#files[@]}" -eq 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \
+    --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
+fi
+exec "$@" --pr "$n" --scope "${files[@]}"
+```
+
+- `shift` は本文の先頭で 1 回だけ打つ。`$0` は `shift` で動かないので、ブランチは最後まで `$0` で読む
+- 停止の結果は `ndf contracts emit` で出し、必須の `--summary` に利用者向けの要約を、`--cause precondition <理由>` に停止理由の組（種類と短い理由）を渡す。`--cause` は要約を兼ねない
+- `--scope` には `"${files[@]}"` を渡し、空白・改行・日本語を含むパスも 1 つのパスが引数 1 つになる。単語分割と Git の引用表記を通る経路（`$(git diff --name-only …)` を引用無しで展開する形）を使わない
+- 本文の文字列は `REFACTOR_WITH_PR` の定数が唯一の保存先で、ここの見本は実装の文字列の形を決めるためのものである
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `REFACTOR_WITH_PR` | `plugins/ndf/src/ndf/core/route/__init__.py` | 新設 | 定数（`sh -c` の本文） | `$0` のブランチの PR の番号と、`$1` のマージ先からの差分のファイルを読み、`"$@" --pr <番号> --scope <ファイル>…` を `exec` する。PR が無い・差分が空なら、`ndf contracts emit --tool refactor --status stopped --cause precondition "<理由>"` を出して終わる |
-| `refactor_launch` | 同上 | 新設 | `refactor_launch(branch: str, base: str, required: Sequence[str]) -> list[str]` | `["sh", "-c", REFACTOR_WITH_PR, branch, base, <entry>, "refactor", "run", "--branch", branch, "--base", base, "--required", *required]` を返す。`review_launch`（`:461-466`）と同じ形 |
-| `_fill_refactor` | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | `_fill_refactor(t, values, run, state_dir, *, project: Mapping[str, Any]) -> dict[str, route.Value]` | テンプレートが `cross-refactoring` で、`refactor` が設定（`workflow.refactor`）から決まっていなければ、`refactor_launch` で既定を組む。そのあと今までどおり候補を書いて `--candidates` を足す |
+| `REFACTOR_WITH_PR` | `plugins/ndf/src/ndf/core/route/__init__.py` | 新設 | 定数（`bash -c` の本文。上の見本の形） | 先頭で `$1`（起点）を取り出して `shift` し、`$0` のブランチの PR の番号と、起点からの差分のファイル（`-z`）を読み、`exec "$@" --pr <番号> --scope <ファイル>…` を打つ。PR が無い・起点を読めない・差分が空なら、`<entry> contracts emit --tool refactor --status stopped --summary <要約> --cause precondition <理由>` を `exec` して終わる |
+| `refactor_launch` | 同上 | 新設 | `refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]` | `["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, <entry>, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]` を返す。位置引数の並びは `$0`=`branch`・`$1`=`base_ref`・`$2` 以降=実行の argv。`review_launch`（`:461-466`）の形に、起点の位置引数 1 つと本文の `shift` を足したもの |
+| `base_ref` | `plugins/ndf/src/ndf/progress/command.py` | 新設 | `base_ref(git: Git, base: str) -> str` | `_sprint_range` の起点の規則（手元の `base` が読めればそれ、無ければ `<git.remote()>/<base>`）を切り出したもの。`_sprint_range` もこれを呼ぶ |
+| `of_project` | `plugins/ndf/src/ndf/core/branch_strategy.py` | 新設 | `of_project(project: Mapping[str, Any]) -> Strategy` | 読み込み済みの `.ndf/project.json` の中身に、`load` と同じ検査（`_check_files({"project": project})`。セクションの有無・旧いキー・スキーマ）を当てて `Strategy` を返す。ファイルを読まない。`load` は読み取りの後にこれと同じ `_check_files` を呼ぶので、検査は 1 か所のまま |
+| `_fill_refactor` | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | `_fill_refactor(t, values, run, state_dir, *, project: Mapping[str, Any]) -> dict[str, route.Value]` | テンプレートが `cross-refactoring` で、`refactor` が設定（`workflow.refactor`）から決まっていなければ、`of_project(project)` でマージ先を、`base_ref` で起点を決め、`refactor_launch` で既定を組む。そのあと今までどおり候補を書いて `--candidates` を足す |
 
 - `_fill_refactor`
-  - 事前条件: `values` に `branch` と `repo` がある（`route.derived` の後）。`project` は `prepare_plan` が 1 回だけ読んだ設定
-  - 事後条件: 設定に `workflow.refactor` があればそれを使い、無ければ既定の起動を返す。`ci.required_checks` が無い・空なら `refactor` を返さない（`_missing` が `refactor` を `FILL_SOURCES` の出所の文付きで挙げ、`prepare_plan` が `started` の前に止める）
-  - 副作用: 今までどおり（候補のファイルの書き込み）。`default_base` の設定の読み取りが 1 回増える（`refactor` を設定から決めたときは読まない）
+  - 事前条件: `values` に `branch`・`repo`・`worktree` がある（`route.derived` の後）。`project` は `prepare_plan` が 1 回だけ読んだ設定
+  - 事後条件: 設定に `workflow.refactor` があればそれを使い、無ければ既定の起動を返す。`ci.required_checks` が無い・空なら `refactor` を返さない（`_missing` が `refactor` を `FILL_SOURCES` の出所の文付きで挙げ、`prepare_plan` が `started` の前に止める）。ブランチ戦略の設定が検査に落ちれば `route.RouteError`（理由は `default_base` と同じ文。`plan_failure` が `invalid` にする）
+  - 副作用: 今までどおり（候補のファイルの書き込み）に、起点を決める `git rev-parse` が 1 回（と、手元に無いときの `Git.remote()` の `git worktree list` が 1 回）増える。宣言の読み取りとブランチ戦略の検査は増えない（`route.default_base` を呼ばず、`prepare_plan` が読んだ `project` を使う）。`refactor` を設定から決めたときはどれも打たない
 
 ### 異常系の処理
 
@@ -439,17 +494,20 @@ PR の番号と差分は、前の工程（実装の PR の作成・push）が終
 | --- | --- | --- | --- | --- | --- | --- |
 | `_fill_refactor` | 必須のチェックが無い | `.ndf/project.json` に `ci.required_checks` が無い | 設定の値が空 | 既定を組まない（`refactor` が欠けとして残る） | `_start` が `stopped`（`precondition`）。`items` に `refactor` と出所。工程の条件 `ci_declared` が偽なら工程自体が飛ぶので、ここに来るのは宣言と設定が食い違うときだけ | 設定を足して打ち直せる |
 | `REFACTOR_WITH_PR` | PR が無い | 工程「実装」が PR を作る前に流した・PR を閉じた | `gh pr view` の終了コードと空の返り | `stopped`（`precondition`）の結果 JSON を出して終える（`--pr` を空で `ndf refactor run` を打たない） | プランのステップが `stopped`（`precondition`）。`summary` は「ブランチ \<branch\> の PR が無い（工程「実装」の PR を作ってから打ち直す）」 | PR を作って工程を打ち直せる |
-| `REFACTOR_WITH_PR` | 差分が空 | マージ先と同じ内容 | `git diff` の返りが空 | 同上（`stopped`（`precondition`）） | 「マージ先 \<base\> からの差分のファイルが無い」 | 後始末は無い |
+| `REFACTOR_WITH_PR` | 起点を読めない | プランを組んだ後に手元のブランチやリモートの追跡ブランチが消えた | `git rev-parse --verify` の失敗 | 同上（`stopped`（`precondition`）） | 「起点 \<起点\> を作業場所で読めない」 | 取得し直して打ち直せる |
+| `REFACTOR_WITH_PR` | 差分が空 | 起点と同じ内容 | `files` の要素が 0 | 同上（`stopped`（`precondition`）） | 「起点 \<起点\> からの差分のファイルが無い」 | 後始末は無い |
 | `REFACTOR_WITH_PR` | GitHub に届かない | 不達・認証 | `gh pr view` の失敗 | PR が無いときと分けず、`gh` の標準エラーを理由に添えて `stopped`（`precondition`） | 同上 | 打ち直せる |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_fill_refactor`（`test_invoke_refactor.py`） | `.ndf/project.json` に `workflow` が無く `ci.required_checks` が `["test"]` のリポジトリで、`refactor` が `sh -c <REFACTOR_WITH_PR> <branch> <base> ndf refactor run --branch <branch> --base <base> --required test` になる（受け入れ条件 2） | 設定に `workflow.refactor` があればそれが勝つ。候補があれば既定の後ろに `--candidates` が付く | `ci.required_checks` が無いと `prepare_plan` が `TemplateValuesMissing` で `refactor` を挙げる |
-| `refactor_launch` | 返る argv の先頭が `sh`・`-c`・`REFACTOR_WITH_PR` で、続く位置引数が `branch`・`base`、その後ろが `ndf refactor run --branch … --base … --required …` | `required` が 2 件なら `--required` の後ろに 2 件並ぶ | — |
+| `_fill_refactor`（`test_invoke_refactor.py`） | `.ndf/project.json` に `workflow` が無く `ci.required_checks` が `["test"]` のリポジトリで、`refactor` が `bash -c <REFACTOR_WITH_PR> <branch> <起点> ndf refactor run --branch <branch> --base <起点> --required test` になる（受け入れ条件 2） | 設定に `workflow.refactor` があればそれが勝つ。候補があれば既定の後ろに `--candidates` が付く。手元にマージ先のブランチが無く、宣言の `remote` が `upstream` のリポジトリでは、起点が `upstream/<base>` になり、工程の条件が使う `_sprint_range` の起点と一致する。`branch_strategy.load` を差し替えた見張りが 0 回呼ばれる（読み込み済みの `project` から決める） | `ci.required_checks` が無いと `prepare_plan` が `TemplateValuesMissing` で `refactor` を挙げる |
+| `refactor_launch` | 返る argv の先頭が `bash`・`-c`・`REFACTOR_WITH_PR` で、続く位置引数が `branch`・`base_ref`、その後ろが `ndf refactor run --branch … --base <base_ref> --required …` | `required` が 2 件なら `--required` の後ろに 2 件並ぶ | — |
+| `base_ref` | 手元に `base` があればその名前 | 手元に無ければ `<リモート>/<base>` | — |
+| `of_project` | 正しい `branch_strategy` を持つ中身で `load` と同じ `Strategy` が返る | — | セクションが無い・スキーマに落ちる中身で、`load` と同じ理由の `StrategyError` |
 
-`REFACTOR_WITH_PR` の本文（PR が無いとき・差分が空のときの分かれ）は、子のプロセスを起動して確かめるテストを足さない（`tdd-cycle` の「テストに書かないもの」）。`REVIEW_WITH_PR` と同じく、実装の最後に工程「リファクタリング」を 1 回流して確かめ、Pull Request に残す。
+`REFACTOR_WITH_PR` の本文（PR が無いとき・起点を読めないとき・差分が空のときの分かれ、`shift` の後の `"$@"`、空白と日本語を含むパスの受け渡し）は、子のプロセスを起動して確かめるテストを足さない（`tdd-cycle` の「テストに書かないもの」）。`REVIEW_WITH_PR` と同じく、実装の最後に工程「リファクタリング」を 1 回流して確かめ、Pull Request に残す。そのとき、名前に空白と日本語を含むファイルを差分に入れ、`ndf refactor run` の `--scope` に 1 ファイル 1 引数で渡ったことを結果に残す。
 
 ## 出力の値の取り場所（`x-source`）
 

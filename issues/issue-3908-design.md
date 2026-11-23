@@ -50,7 +50,7 @@ flowchart LR
     WR --> C["claude -p"]
 ```
 
-`worker` の既定を `["ndf", "answer", "work", "--state-dir", "{state_dir}"]` にする。worker が動く作業場所は作業ごとに違う（コードを編集する作業は作業場所 `worktree`、作業場所をこれから作る作業や要求の作業はリポジトリの根 `repo`）ので、既定の argv に `--cwd` を置かず、`kinds.json` の `cwd` が持つ。工程がプランを組む処理は、差し込みの値と工程の入力を 1 回だけ組んで保存先の `values.json` へ残し、プランを書き出すときはそれを使う。工程の最初のプランは `started` の前に組む。`ndf answer work <作業名>` は、その値と作業ごとの定義（`kinds.json`）と共通のテンプレート（`prompt.md`）からプロンプトを組み、作業場所を決める。worker が結果ファイルに書いた `outputs` は `ndf worker run` の結果を通ってプランの結果へ届く。書き出す先は `report_paths` が返すプロンプトのパス（`<保存先>/<作業名>.prompt.md`）で、書き終えたら `ndf worker run` へ置き換わる。差し込みを決められない工程は、起動する前に見つけて失敗の記録を残さずに返す。手で閉じるときの出力の取り場所は、文脈のスキーマの `x-source` が持ち、`ndf progress check` が欠けたキーの行に添える。
+`worker` の既定を `["ndf", "answer", "work", "--state-dir", "{state_dir}"]` にする。worker が動く作業場所は作業ごとに違う（コードを編集する作業は作業場所 `worktree`、作業場所をこれから作る作業や要求の作業はリポジトリの根 `repo`）ので、既定の argv に `--cwd` を置かず、`kinds.json` の `cwd` が持つ。工程がプランを組む処理は、差し込みの値と工程の入力を 1 回だけ組んで保存先の `values.json` へ残し、プランを書き出すときはそれを使う。工程の最初のプランは `started` の前に組む。準備した値を使い回すのは同じ試行の中だけで、打ち直しでは設定と入力を取り直す。`ndf answer work <作業名>` は、その値と作業ごとの定義（`kinds.json`）と共通のテンプレート（`prompt.md`）からプロンプトを組み、作業場所を決める。worker が結果ファイルに書いた `outputs` は `ndf worker run` の結果を通ってプランの結果へ届く。書き出す先は `report_paths` が返すプロンプトのパス（`<保存先>/<作業名>.prompt.md`）で、書き終えたら `ndf worker run` へ置き換わる。差し込みを決められない工程は、起動する前に見つけて失敗の記録を残さずに返す。手で閉じるときの出力の取り場所は、文脈のスキーマの `x-source` が持ち、`ndf progress check` が欠けたキーの行に添える。
 
 ## 構成要素
 
@@ -61,7 +61,7 @@ flowchart LR
 | `contracts/worker/prompt.md`（新設） | 起動指示の 7 項目と規則 7 個の共通のテンプレート。差し込みは `string.Template` の `$名前`・`${名前}`（決定 6） |
 | 工程がプランを組む処理（`progress/invoke`。変更） | プランを書き出すときに、組んだ差し込みの値を同じ保存先の `values.json` へ書く。`route.derived`・`route.launched` の補い（`acceptance`・`title`・`body_file` など）はこの層にしか無い |
 | `ndf answer work`（`progress/gate/entry.py`。変更） | `values.json`・`kinds.json`・`prompt.md` からプロンプトを組んで `report_paths` が返すパスへ書き、`ndf worker run` へ置き換わる |
-| `invoke.prepare_plan`（新設）と `progress/run` の `_start`（変更） | 工程の最初のプランの差し込みと作業ごとの入力を `started` の前に 1 回だけ組んで確かめ、`values.json` へ残す。決められなければ工程を `running` にせずに返す。止まりの分類は `_call_plan` と 1 か所で共有する |
+| `invoke.prepare_plan`（新設）と `progress/run` の `_start`（変更） | 試行（初回の開始と失敗の後の打ち直し）の始まりに前の試行の `values.json` を消し、その試行で次に流すプランの差し込みと作業ごとの入力を `started` の前に 1 回だけ組んで確かめ、`values.json` へ残す。決められなければ工程を `running` にせずに返す。止まりの分類は `_call_plan` と 1 か所で共有する |
 | `ndf worker run`（`core/worker.py`。変更） | 結果ファイルの `outputs` を結果 JSON へ写し、必須の出力の欠けを返す |
 | `route.refactor_launch`（新設） | `workflow.refactor` が無いリポジトリのリファクタリングの既定の起動を組む |
 | `contracts/workflow/context.schema.json`（変更） | 文脈のキーごとに `x-source`（値の取り場所）を持つ |
@@ -243,7 +243,7 @@ sequenceDiagram
 - **選んだ案**:
   - 課題が 2 件以上なら、`_issue_values`（`progress/invoke.py:387-412`）が番号の最も小さい課題を代表の課題にして `title`・`body_file`・`issue` を写す。代表の課題の選び方は、実装のフェーズの単位の決まり（`agent-layers.md` の「実装のフェーズの単位」の「代表の課題」）と同じである
   - `acceptance` は、`route.launched` の補いを課題ごとの `--issue` の並び（`--issue <番号1> --issue <番号2> ...`）にする。今の補い（`--issue <issue>` の 1 つ）では代表の課題の条件しか照らさない
-  - `refactor` は、`review` が設定なしでも `review_launch` で組める（`route/__init__.py:461-466`）のと同じ形で、`route.refactor_launch` が `ndf refactor run --branch <branch> --base <base> --required <必須のチェック>` を `sh -c` の包み（`REFACTOR_WITH_PR`）で組み、`invoke._fill_refactor` が既定として差し込む。`--base` は `route.default_base(repo)`、`--required` は `.ndf/project.json` の `ci.required_checks` から、プランを組むときに取る。`--pr` はブランチの PR の番号、`--scope` はマージ先からの差分のファイルで、どちらも前の工程の後でないと決まらないので、包みが打つ時点に読んで足す（`REVIEW_WITH_PR` と同じ）。PR が無い・差分が空なら `ndf refactor run` を打たずに `stopped`（`precondition`）を返す（2026-11-23 に `ndf refactor run --help` で必須の引数がこの 5 つであることを確かめた）。設定（`workflow.refactor`）は既定を変えたいときだけ置く。値の出所の表は詳細設計の「リファクタリングの既定の起動」にある
+  - `refactor` は、`review` が設定なしでも `review_launch` で組める（`route/__init__.py:461-466`）のと同じ形で、`route.refactor_launch` が `ndf refactor run --branch <branch> --base <起点> --required <必須のチェック>` を `bash -c` の包み（`REFACTOR_WITH_PR`。位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が実行の argv）で組み、`invoke._fill_refactor` が既定として差し込む。起点は、読み込み済みの宣言から決めたマージ先を、工程の条件 `code_in_diff` と同じ規則（`command.base_ref`。手元に無ければ宣言のリモートの `<リモート>/<base>`）で参照にしたもので、`--base` と差分の列挙の両方に同じ値を渡す。`--required` は `.ndf/project.json` の `ci.required_checks` から、プランを組むときに取る。`--pr` はブランチの PR の番号、`--scope` は起点からの差分のファイル（`git diff -z` で取り、1 ファイル 1 引数で渡す）で、どちらも前の工程の後でないと決まらないので、包みが打つ時点に読んで足す（`REVIEW_WITH_PR` と同じ）。PR が無い・差分が空なら `ndf refactor run` を打たずに `stopped`（`precondition`）を返す（2026-11-23 に `ndf refactor run --help` で必須の引数がこの 5 つであることを確かめた）。設定（`workflow.refactor`）は既定を変えたいときだけ置く。値の出所の表は詳細設計の「リファクタリングの既定の起動」にある
 - 採らなかった案:
   - 課題が 2 件以上のときは差し込みを決めずに止める（決定 4 の止まり方になるが、`standard` のスプリントは課題を束ねることが多く、ほとんどの実装の工程が止まる）
   - `.ndf/project.json` に `workflow.refactor` を足して、このリポジトリだけ埋める（ほかのリポジトリでは同じように止まる。リポジトリの設定が無ければ動かない形は、設定 1 つで同じ工程が使える約束に反する）
