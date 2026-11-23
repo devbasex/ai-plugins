@@ -114,3 +114,13 @@ def test_validate_builds_policies_with_name_and_absent_values_as_none():
     got = limits.validate({"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}}})
     assert got == {"a.b": limits.Policy(name="a.b", summary="x", seconds=1.5, attempts=2)}
     assert got["a.b"].interval is None
+
+
+def test_table_keeps_every_policy_and_representative_values():
+    # #3687: 表を方針ごとのファイルへ分けても、読みの結果は分ける前と同じ件数と値を返す
+    table = limits.table()
+    assert len(table) == 227
+    assert limits.value("test-run.test", "seconds") == 900
+    assert limits.value("test-run.test", "factor") == 3
+    assert limits.value("launch.weight.test", "gib") == 14
+    assert table["test-run.test"].name == "test-run.test"

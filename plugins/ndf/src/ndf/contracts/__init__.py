@@ -23,6 +23,10 @@ from ndf.identity import ROOT
 
 DEFAULT_DIR = ROOT / "contracts"
 SCHEMAS = "schemas"
+# 分けた表のディレクトリで、この文字で始まるファイルは項目でなく表そのものの値（`_meta.json` など）
+META_PREFIX = "_"
+# 分ける表の一覧（事実の表。表の名前 → 項目の単位とキーの出所）
+SPLIT_TABLES = "domains/split-tables.json"
 T = TypeVar("T")
 
 _dir = DEFAULT_DIR
@@ -78,6 +82,43 @@ def load_json(rel: str) -> Any:
         raise ContractError(f"コントラクト {path}: {exc}") from None
     except ValueError as exc:
         raise ContractError(f"コントラクト {path} が JSON として壊れている: {exc}") from None
+
+
+def load_split(rel: str) -> dict[str, Any]:
+    """`contracts/<rel>/` の項目のファイルを読み、ファイル名（拡張子 `.json` を除く）→ 中身の辞書を返す（ファイル名の昇順）。
+
+    `META_PREFIX` で始まるファイルは項目でないので読まない。ほかのファイルは拡張子が小文字の `.json` でなければ断る
+    （黙って飛ばすと、書いたつもりの項目が表から消える）。大小文字だけが違うキーは、大小文字を区別しないファイルシステムで
+    1 つに潰れるため重なりとして断る。
+    """
+    root = _dir / rel
+    if not root.is_dir():
+        raise ContractError(f"分けた表のディレクトリ {root} が無い")
+    paths = sorted(p for p in root.iterdir() if not p.name.startswith(META_PREFIX))
+    odd = [p.name for p in paths if p.suffix != ".json"]
+    if odd:
+        raise ContractError(f"分けた表 {root} に拡張子が .json でないファイルがある: {', '.join(odd)}")
+    keys = [p.stem for p in paths]
+    folded = set(duplicates(k.casefold() for k in keys))
+    if folded:
+        clash = [k for k in keys if k.casefold() in folded]
+        raise ContractError(f"分けた表 {root} に大小文字だけが違うキーがある: {', '.join(clash)}")
+    out: dict[str, Any] = {}
+    for key, path in zip(keys, paths):
+        item = load_json(f"{rel}/{path.name}")
+        if not isinstance(item, dict):
+            raise ContractError(f"分けた表の項目 {path} がオブジェクトでない（{type(item).__name__}）")
+        out[key] = item
+    return out
+
+
+def split_tables() -> dict[str, dict[str, str]]:
+    """分ける表の一覧（`contracts/domains/split-tables.json`）の、表の名前 → 項目の単位・キーの出所・もとのキー名の列。
+
+    事実の表の読み手（`ndf.contracts.facts`）はこのモジュールを import するため、ここでは JSON として読むだけにする
+    （import の輪を作らない）。表の形は事実の表として `ndf check` の `fact-table` と `facts.table` が確かめる。
+    """
+    return {r["id"]: {c: v for c, v in r.items() if c != "id"} for r in load_json(SPLIT_TABLES)["rows"]}
 
 
 @contextmanager
