@@ -42,6 +42,8 @@ GRAPHQL_PHRASES = ("secondary rate limit", "submitted too quickly")
 REASON_KEYS = ("message", "code", "field", "resource")
 # 同じ応答について `WriteGate.block` へ知らせた待ちの秒を残す、httpx の応答の `extensions` のキー
 BLOCKED = "ndf.blocked"
+# githubkit が待ちの指定の無い（0 秒の `timedelta` も含む）打ち直しの前に眠る秒（githubkit 0.17.1 の core.py）
+SDK_DEFAULT_SLEEP = 60.0
 
 
 class Failure(NamedTuple):
@@ -244,7 +246,8 @@ class RetryWithin:
     """githubkit の再試行の判断（既定の判断に、上限の待ちの残りを足す）。
 
     githubkit の既定は上限（rate limit）の解除の時刻まで同期で眠るため、待ちの予算を持つ呼び手（CI の監視）が
-    数十分戻らない。解除が `remaining`（呼んだ時点で待ちに使える残りの秒）を越える上限は再試行せず、
+    数十分戻らない。githubkit が実際に眠る秒（`sdk_sleep`。`Retry-After: 0` なら 60 秒）が `remaining`（呼んだ時点で
+    待ちに使える残りの秒）を越える上限（一次も二次も）は再試行せず、
     `GitHubError` の `retry_after` で呼び手へ返す。残りは呼び手が自分の予算の数え方で返す（`Watch.remaining` は
     ランナーの割り当ての待ちを予算に数えない）。サーバーの誤り（5xx）の再試行は既定のまま。
     二次レート制限なら、打ち直すかに依らず `gate.block` で待ちの終わりをマシン全体へ知らせる（決定 7）。
@@ -261,9 +264,15 @@ class RetryWithin:
                 share(self.gate, exc.response.raw_response, limit.seconds if limit.hinted else backoff(retry_count))
         option = RETRY_DEFAULT(exc, retry_count)
         if option.do_retry and isinstance(exc, RateLimitExceeded):
-            if exc.retry_after.total_seconds() > self.remaining():
+            if sdk_sleep(option) > self.remaining():
                 return RetryOption(False)
         return option
+
+
+def sdk_sleep(option: RetryOption) -> float:
+    """githubkit が打ち直しの前に実際に眠る秒。待ちの指定が無いか 0 秒（`Retry-After: 0`）なら 60 秒眠る（githubkit 0.17.1）。"""
+    seconds = option.retry_after.total_seconds() if option.retry_after else 0.0
+    return seconds or SDK_DEFAULT_SLEEP
 
 
 def no_wait() -> float:

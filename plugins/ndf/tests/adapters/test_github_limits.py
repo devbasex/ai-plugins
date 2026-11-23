@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from githubkit.exception import RequestFailed, SecondaryRateLimitExceeded
+from githubkit.exception import RateLimitExceeded, RequestFailed, SecondaryRateLimitExceeded
 from githubkit.response import Response
 from githubkit.throttling import LocalThrottler
 
@@ -237,6 +237,18 @@ def test_retry_within_shares_the_secondary_limit_even_when_it_gives_up() -> None
     # 本文だけで見分けた 403（githubkit は打ち直さない）。待ちの秒は打ち直しの回数で延ばす
     assert not decide(_failed(403, {"x-ratelimit-remaining": "12"}, SECONDARY, False), 1).do_retry
     assert gate.blocked == [30.0, github_limits.backoff(1)]
+
+
+@pytest.mark.parametrize("secondary", [True, False])
+def test_retry_within_counts_the_sixty_seconds_githubkit_sleeps_for_a_zero_wait(secondary: bool) -> None:
+    # PR 4267 の r1-3: githubkit 0.17.1 は 0 秒の待ちを指定なしとして 60 秒眠る。残り 0 秒では打ち直さず、60 秒あれば打ち直す
+    request = httpx.Request("POST", f"https://api.github.com/repos/{REPO}/issues")
+    response = Response(httpx.Response(403, json={"message": SECONDARY}, headers={"retry-after": "0"}, request=request), object)
+    kind = SecondaryRateLimitExceeded if secondary else RateLimitExceeded
+    failed = kind(response, timedelta(seconds=0))
+    assert not github.RetryWithin(remaining=lambda: 0.0)(failed, 0).do_retry
+    assert not github.RetryWithin(remaining=lambda: 59.0)(failed, 0).do_retry
+    assert github.RetryWithin(remaining=lambda: 60.0)(failed, 0).do_retry
 
 
 def test_a_secondary_limit_told_by_githubkit_is_shared_without_the_phrase() -> None:
