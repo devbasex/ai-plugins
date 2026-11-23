@@ -155,7 +155,7 @@ def test_a_stall_names_the_last_move_and_the_launch_attempts_of_the_row():
     act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
     assert isinstance(act, Report) and act.kind == run_decide.LANE_STALLED
     assert "2026-11-05T12:56:00+00:00" in act.detail and "2 回" in act.detail and "起動できた" in act.detail
-    assert dict(act.facts) == {"moved": "2026-11-05T12:56:00+00:00", "launches": 2, "last_launch": "起動できた"}
+    assert dict(act.facts) == {"moved": "2026-11-05T12:56:00+00:00", "launches": 2, "last_launch": "起動できた", "background": None}
 
 
 def test_a_stall_request_is_withdrawn_once_the_lane_moves_and_noticed_again_if_it_stalls_again():

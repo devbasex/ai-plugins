@@ -132,11 +132,12 @@ def probes(repo: str, plan: str) -> liveness.Probes:
 
 @dataclass(frozen=True)
 class Judged:
-    """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行）、
+    """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行,
+    背景の作業の数）。最後に動いた時刻は、`idle_conductor` では活動の UNIX 時刻、ほかでは記録の ISO 8601 の時刻。
     `unknown` は判定が unknown のレーン、`judged` は判定したか（計画が動いていない・材料の口が無ければ偽）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）`stalled` のレーンの（レーン, 行, スプリントの ID）。"""
 
-    stalls: list[tuple[str, str, str, str | None, str]]
+    stalls: list[tuple[str, str, str, str | float | None, str, int | None]]
     unknown: list[str]
     judged: bool
     relaunch: list[tuple[str, str, str]]
@@ -157,7 +158,14 @@ def _judge(
         return Judged([], [], False, [])
     verdicts = liveness.judge_lanes(rows, found)
     stalls = [
-        (name, liveness.notice_key(name, v), f"レーン {name} の行 {v.row}: {v.reason}", moved.get(name), str(v.row))
+        (
+            name,
+            liveness.notice_key(name, v),
+            f"レーン {name} の行 {v.row}: {v.reason}",
+            _moved(v, moved.get(name)),
+            str(v.row),
+            v.background,
+        )
         for name, v in verdicts.items()
         if v.stall
     ]
@@ -166,6 +174,11 @@ def _judge(
     ]
     relaunch = auth if auth and found.account_ok() else []
     return Judged(stalls, [name for name, v in verdicts.items() if v.kind == liveness.UNKNOWN], True, relaunch)
+
+
+def _moved(verdict: liveness.Liveness, recorded: str | None) -> str | float | None:
+    """止まりの最後に動いた時刻。`idle_conductor` は判定が見た活動の時刻、ほかは記録の時刻。"""
+    return verdict.moved_at if verdict.kind == liveness.IDLE_CONDUCTOR else recorded
 
 
 def last_moved(conn: Any, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]]) -> dict[str, str]:
