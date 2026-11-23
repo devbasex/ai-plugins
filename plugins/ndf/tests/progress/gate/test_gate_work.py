@@ -395,3 +395,45 @@ def test_kind_gaps_names_the_empty_work_dir():
     values = {"worktree": "", "branch": "b", "issue": "5", "acceptance": "a.json"}
     assert worker_kinds.kind_gaps("impl", values, {}) == {"worktree": "作業 impl の作業場所（差し込み worktree）"}
     assert worker_kinds.work_dir_of("impl", values) is None
+
+
+def _previous_report(state: Path) -> worker_paths.ReportPaths:
+    invoke.write_values(state, "fix", {"worktree": "/w", "branch": "b"}, {}, True)
+    paths = worker_paths.report_paths(state, "fix", resolve=False)
+    paths.report.write_text("前の報告", encoding="utf-8")
+    paths.done.write_text("", encoding="utf-8")
+    paths.result.write_text("{}", encoding="utf-8")
+    return paths
+
+
+def test_a_refused_memfd_create_falls_back_to_an_anonymous_temporary_file(tmp_path, monkeypatch):
+    # PR 4307 の r7-4: seccomp などで memfd_create が拒まれても、無名の一時ファイルで起動指示を渡す
+    _previous_report(tmp_path)
+
+    def refused(*_args):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "memfd_create", refused, raising=False)
+    handed: list[str] = []
+
+    def exec_(exe, argv):
+        handed.append(Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8"))
+
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "fix"], exec_)
+    assert code == 0 and "\n- 作業場所: /w\n" in handed[0]
+
+
+def test_a_handoff_file_that_cannot_be_made_keeps_the_previous_report(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r7-4: 引き継ぎ用のファイルは初期化より先に用意し、用意できなければ前の報告一式を消さない
+    paths = _previous_report(tmp_path)
+
+    def unavailable():
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(entry, "_anonymous_fd", unavailable)
+    got: list[list[str]] = []
+    code = gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: got.append(argv))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"

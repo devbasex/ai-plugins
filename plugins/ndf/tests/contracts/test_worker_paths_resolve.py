@@ -567,3 +567,33 @@ def test_open_resolved_refuses_dotdot_in_a_link_target_through_a_directory_witho
             pass
     finally:
         (d / "private").chmod(0o700)
+
+
+def test_open_resolved_refuses_a_link_placed_in_a_shared_directory(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "state").symlink_to(real)
+    shared.chmod(0o777)  # ほかの利用者も保存先の名前を差し替えられる共有の領域
+    try:
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            with worker_paths.open_resolved(shared / "state"):
+                pass
+    finally:
+        shared.chmod(0o755)
+    assert e.value.kind == "symlink"
+
+
+def test_open_resolved_follows_own_link_in_a_sticky_shared_directory(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "state").symlink_to(real)
+    shared.chmod(0o1777)  # /tmp と同じ: 自分のリンクはほかの利用者に消されない
+    try:
+        with worker_paths.open_resolved(shared / "state") as wd:
+            assert wd.path == real.resolve()
+    finally:
+        shared.chmod(0o755)

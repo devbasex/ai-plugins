@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shlex
 import tempfile
@@ -79,6 +80,8 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     out: dict[str, Any] = {a: None for a in (run.APPROVED, run.REJECTED)}
     return result.result(TOOL, result.GATE, f"{label}の回答を待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
+
+log = logging.getLogger(__name__)
 
 # 起動指示の共通のテンプレート（コントラクトの保存先からの相対パス）。読む Skill と手順の抜粋はプラグインの根から引く
 PROMPT_FILE = "worker/prompt.md"
@@ -246,13 +249,17 @@ def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
 
 
 class WorkHandoff(NamedTuple):
-    """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。"""
+    """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。
+
+    `fd` は起動指示の本文を持つ継ぐ記述子（`_held_prompt`）で、閉じるのは受け取った側である。
+    """
 
     kind: str
     state_dir: Path
     dir_id: tuple[int, int]
     workdir: Path
     prompt: str
+    fd: int
 
 
 def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
@@ -260,7 +267,8 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
 
     保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
     要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
-    行う。読んだ場所と書く場所が食い違わない。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
+    行う。読んだ場所と書く場所が食い違わない。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
+    前の報告一式を残して止まる。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
     `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
     """
     _known(kind)
@@ -275,8 +283,24 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
             raise invoke.KindInputsMissing(saved["plan"], gaps)
         workdir = _work_dir(kind, saved, cwd)
         body = work_prompt(kind, saved, workdir, paths)
-        _write_prompt(wd, paths, body)
-        return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body)
+        fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
+        try:
+            _write_prompt(wd, paths, body)
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd)
+        except BaseException:
+            os.close(fd)
+            raise
+
+
+def _anonymous_fd() -> int:
+    """名前の無い私有のファイルの記述子。`memfd_create` が無いか拒まれれば、名前をすぐ消す一時ファイルへ落とす。"""
+    if hasattr(os, "memfd_create"):
+        try:
+            return os.memfd_create("ndf-prompt", 0)
+        except OSError as exc:  # 環境: seccomp などで拒まれたら一時ファイルへ落とす（属性の有無では使えるか分からない）
+            log.info("memfd_create を使えないので一時ファイルで起動指示を渡す", extra={"error": str(exc)})
+    with tempfile.TemporaryFile() as f:
+        return os.dup(f.fileno())
 
 
 def _held_prompt(body: str) -> int:
@@ -284,13 +308,10 @@ def _held_prompt(body: str) -> int:
 
     `ndf worker run` は `--prompt-file /dev/fd/<番号>` でこれを読む。共有の保存先の起動指示を読み直さないので、書いた後に
     別の利用者が起動指示を差し替えても、worker へ渡る指示は確かめた `values.json` から組んだ本文のままである。
-    Linux は `memfd_create`、ほかは作ってすぐ名前を消す一時ファイル（`tempfile.TemporaryFile`）を使う。
+    Linux は `memfd_create`、ほかと、コンテナの seccomp などで `memfd_create` が拒まれる環境は作ってすぐ名前を消す
+    一時ファイル（`tempfile.TemporaryFile`）を使う。呼び手は前の報告一式を初期化する前にこれを呼ぶ。
     """
-    if hasattr(os, "memfd_create"):
-        fd = os.memfd_create("ndf-prompt", 0)
-    else:
-        with tempfile.TemporaryFile() as f:
-            fd = os.dup(f.fileno())
+    fd = _anonymous_fd()
     try:
         view = memoryview(body.encode("utf-8"))
         while view:
@@ -312,11 +333,11 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
     a = work_parser().parse_args(argv)
     try:
         handoff = _work_handoff(a.kind, Path(a.state_dir), a.cwd)
-        fd = _held_prompt(handoff.prompt)
     except WORK_STOP_TYPES as exc:
         kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
         items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
+    fd = handoff.fd
     try:
         args = work_argv(handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id)
         # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む

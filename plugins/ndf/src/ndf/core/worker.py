@@ -714,6 +714,26 @@ def _result_dir(raw: str, held: Optional[str] = None) -> Iterator[tuple[worker_p
         yield wd, wd.path / path.name
 
 
+def _state_dir(raw: str, held: Optional[str]) -> Path:
+    """規則文に載せる保存先（PR 本文の下書きの置き場の親）。
+
+    `held`（`--result-dir-id`。`ndf answer work` が照らした保存先）が無ければ従来どおり `Path.resolve()` で解く。あれば、
+    `_result_dir` と同じく信頼できる祖先のリンクだけを解きながら 1 回だけ開き（`open_resolved`）、照らした保存先と同じ
+    ディレクトリかを突き合わせ、開いて解いた場所を返す。名前を解き直さないので、照合の後に保存先の名前を差し替えられても
+    下書きの置き場は照らした保存先のままで、共有の領域のリンクを経ない（違えば起動せずに `WorkerError`（precondition））。
+    """
+    if held is None:
+        return Path(raw).resolve()
+    try:
+        with worker_paths.open_resolved(Path(raw)) as wd:
+            worker_paths.check_dir_id(wd, _dir_id_of(held))
+            return wd.path
+    except worker_paths.EntryError as exc:
+        raise WorkerError("precondition", f"保存先 {raw} が起動指示を書いた保存先と違う（差し替えられた）: {exc}") from None
+    except OSError as exc:  # 利用者の入力: 開けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"保存先 {raw} を開けない: {exc.strerror or exc}") from None
+
+
 def _dir_id_of(raw: str) -> tuple[int, int]:
     """`--result-dir-id` の `<st_dev>:<st_ino>`。形が違えば `WorkerError`（invalid）。"""
     dev, sep, ino = raw.partition(":")
@@ -733,7 +753,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
             prompt,
             result_file,
             Path(a.cwd).resolve(),
-            Path(a.state_dir).resolve(),
+            _state_dir(a.state_dir, a.result_dir_id),
             tuple(_load_sources(a.sources)),
             a.timeout,
         )

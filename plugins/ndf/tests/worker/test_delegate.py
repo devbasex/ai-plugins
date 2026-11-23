@@ -492,3 +492,19 @@ def test_run_refuses_a_result_dir_other_than_the_one_answer_work_opened(tmp_path
     got = json.loads(capsys.readouterr().out)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and calls == []
     assert (work / "out.json").read_text(encoding="utf-8") == "前の結果"
+
+
+def test_run_refuses_a_state_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
+    # PR 4307 の r7-2: 照らした保存先（`--result-dir-id`）と別の場所を PR 本文の下書きの置き場にしない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "elsewhere").mkdir()
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    held = work.stat()
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    worker.main(args + ["--result-dir-id", f"{held.st_dev}:{held.st_ino}", "--cwd", ".", "--state-dir", "elsewhere"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition") and calls == []

@@ -408,23 +408,46 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
+
+    写しは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読む写しは呼んだ利用者が
+    持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
+    precondition にする）。書き手の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
+    書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
+    保存先のパスで返す（共有の領域のリンクを経ない。後でパスから読む手順も、確かめた写しを読む）。
     """
     issues = run.inputs["issues"] if "issues" in run.inputs else None
     if not isinstance(issues, list) or len(issues) != 1:
         return {}
     number = int(issues[0])
-    out = work_dir / ISSUE_BODY_FILE.format(number=number)
-    copy = work_dir / ISSUE_TITLE_FILE.format(number=number)
-    held = plan_files.read_json(copy)
-    if held is not None and isinstance(held.get("title"), str) and out.is_file():
-        return {"title": held["title"], "body_file": str(out), "issue": str(number)}
-    found = issue_text(location, number)
-    if found is None:
-        return None
-    title, body = found
-    out.write_text(body, encoding="utf-8")
-    plan_files.write_json(copy, {"title": title})
+    out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
+    base, fresh, anchor = worker_paths.resolve_existing(work_dir)
+    with worker_paths.open_workdir(base, create=True, origin=worker_paths.Origin(fresh, anchor)) as wd:
+        out = wd.path / out_name
+        title = _held_title(wd, copy_name, out_name)
+        if title is not None:
+            return {"title": title, "body_file": str(out), "issue": str(number)}
+        found = issue_text(location, number)
+        if found is None:
+            return None
+        title, body = found
+        worker_paths.write_file(wd, out_name, body, private=True)
+        worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
     return {"title": title, "body_file": str(out), "issue": str(number)}
+
+
+def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
+    """同じ試行が写した題。題の写しと本文の写しがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
+
+    私有でない写し（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
+    """
+    text = worker_paths.read_file(wd, copy_name, owned=True)
+    if text is None or worker_paths.read_file(wd, body_name, owned=True) is None:
+        return None
+    try:
+        held = json.loads(text)
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れた写しは無いものとして読み直す
+        return None
+    return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
 
 
 def _branch_of(run: StageRun) -> Optional[str]:

@@ -73,6 +73,8 @@ def open_resolved(directory: Path) -> Iterator[WorkDir]:
     そのように解き、打ち消す要素から先は `_open_dir_through_dotdot` と同じくリンクをたどらずに開く（打ち消す要素がリンクなら
     `EntryUnsafe`（`symlink`）、無い・ディレクトリでなければ `EntryUnsafe`（`other`））。作らない。無い要素は `FileNotFoundError`。
     参照先の無いリンク・リンクの循環は `EntryUnsafe`（`symlink`）、ディレクトリでない要素は `EntryUnsafe`（`other`）。
+    たどるのは信頼できる祖先のリンクだけで（`_trusted_link`）、ほかの利用者が書き込める共有の領域に置かれたリンクは
+    `EntryUnsafe`（`symlink`）で拒む（共有の領域の保存先の名前を差し替えたリンクの先を、呼んだ利用者の権限で開かない）。
     """
     probe = Path(directory).absolute()
     parts = probe.parts
@@ -165,6 +167,7 @@ def resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
     `open_workdir` は `os.path.abspath` で `..` を畳むので、返すパスに `..` を残すと開く場所と食い違う。
     解いた要素はディレクトリであることを確かめ、通常のファイルなど（リンクの先を含む）なら次の `..` で
     その親へ進む前に `EntryUnsafe`（`other`）で拒む。
+    リンクは `open_resolved` と同じく信頼できる祖先のものだけをたどり、共有の領域のリンクは `EntryUnsafe`（`symlink`）で拒む。
     """
     probe = directory.absolute()
     walk = _Walk(probe.anchor)
@@ -259,6 +262,8 @@ class _Walk:
                 raise
             if _refused_kind(parent, part) != "symlink":
                 raise EntryUnsafe(str(probe), "other") from None
+            if not _trusted_link(parent, part):
+                raise EntryUnsafe(str(probe), "symlink") from None
             self._follow(os.readlink(part, dir_fd=parent), probe)
             return True
         if child is None:
@@ -287,6 +292,22 @@ class _Walk:
                 self.up()
                 continue
             self.enter(part, probe, strict=True)
+
+
+def _trusted_link(parent: int, part: str) -> bool:
+    """親 `parent` の直下のリンク `part` をたどってよいか。ほかの利用者が差し替えられないリンクだけをたどる。
+
+    親が root か呼んだ利用者の持ち物で、グループとほかの利用者が書き込めないなら真（macOS の `/`→`/tmp`・`/var` など）。
+    書き込めても sticky bit があり（`/tmp` など）、リンク自体が root か呼んだ利用者の持ち物なら真（ほかの利用者は消せない）。
+    それ以外（共有の領域に置かれた保存先の名前）は偽。たどると、名前を差し替えた利用者が選んだ場所を呼んだ利用者の権限で開く。
+    """
+    me = os.geteuid()
+    up = os.fstat(parent)
+    if up.st_uid not in (0, me):
+        return False
+    if not up.st_mode & 0o022:
+        return True
+    return bool(up.st_mode & stat.S_ISVTX) and os.stat(part, dir_fd=parent, follow_symlinks=False).st_uid in (0, me)
 
 
 def _lookup(parent: int, part: str) -> Optional[int]:

@@ -14,7 +14,7 @@ from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf import cli
 from ndf.adapters import github
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
 from ndf.core import route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
@@ -589,6 +589,36 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
     again = invoke._issue_values(run, work, repo)
     assert reads == [3092] and first == again and first["title"] == "#3092 の題（1 回目）"
     assert Path(first["body_file"]).read_text() == "#3092 の本文（1 回目）"
+
+
+def test_issue_copies_others_can_write_are_not_used_for_the_plan(tmp_path, monkeypatch):
+    # PR 4307 の r7-3: 共有の保存先に別の利用者が置ける題と本文の写しを、書き手の権限を確かめずに worker へ渡さない
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: pytest.fail("置かれた写しで読み直して上書きしない"))
+    work = tmp_path / "w"
+    work.mkdir()
+    for name, text in ((invoke.ISSUE_TITLE_FILE, '{"title": "差し替えた題"}'), (invoke.ISSUE_BODY_FILE, "差し替えた本文")):
+        (work / name.format(number=3092)).write_text(text, encoding="utf-8")
+        (work / name.format(number=3092)).chmod(0o666)
+    with pytest.raises(worker_paths.EntryUnsafe) as e:
+        invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+    assert e.value.kind == "foreign"
+
+
+def test_issue_copies_are_written_without_write_access_for_others(tmp_path, monkeypatch):
+    # PR 4307 の r7-3: 写しはグループとほかの利用者が書き込めない形で公開する（次の描画が私有の写しとして読める）
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    before = os.umask(0o000)  # umask によらず書き込み権限を外す
+    try:
+        got = invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+    finally:
+        os.umask(before)
+    for name in (invoke.ISSUE_TITLE_FILE, invoke.ISSUE_BODY_FILE):
+        assert (work / name.format(number=3092)).stat().st_mode & 0o022 == 0
+    assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
 
 
 @pytest.mark.parametrize(
