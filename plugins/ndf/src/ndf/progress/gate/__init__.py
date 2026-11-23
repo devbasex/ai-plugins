@@ -73,7 +73,7 @@ from ndf.progress.gate.checks import (
 from ndf.progress.gate.entry import _cmd_work, ask, main, present, progress_main, work_argv
 from ndf.progress.gate.records import answers, approved_head, record_answer, rejection_row, rejections, rejections_path
 from ndf.progress.gate.release import request_release, take_reply
-from ndf.progress.worker_kinds import work_kinds
+from ndf.contracts.worker_kinds import work_kinds
 
 __all__ = [
     "ACTORS",

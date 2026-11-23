@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from ndf import cli, contracts, identity
-from ndf.contracts import causes, result, worker_paths
+from ndf.contracts import causes, result, worker_kinds, worker_paths
 from ndf.core import route, worker
-from ndf.progress import gate, invoke, model, worker_kinds
+from ndf.progress import gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}

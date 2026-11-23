@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 import strategy_fixture
 
+from ndf.contracts import worker_kinds
 from ndf.core import route
+from ndf.core.plan import model
 
 from ._flow import git
 
@@ -92,22 +94,75 @@ def test_render_implement_takes_an_acceptance_of_several_issues_without_an_issue
     assert _step(out, "acceptance")["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
 
 
-def test_render_implement_with_the_default_worker_writes_the_values_for_answer_work(tmp_path):
-    """PR 4319 の指摘 r1-1: 既定の worker（ndf answer work）で組む単発のプランは、それが読む values.json を状態の保存先へ書く。"""
+def test_render_implement_with_the_default_worker_holds_the_values_for_answer_work(tmp_path):
+    """PR 4319 の指摘 r1-1・r2-2: 既定の worker（ndf answer work）で組む単発のプランは、それが読む値をプラン本体に持ち、
+    描画の時点の保存先へは書かない（実行が選ぶ保存先へ ndf plan next が書く）。"""
     out = tmp_path / "impl.json"
     args = _impl_args(out, tmp_path)
     at = args.index("worker=ndf-worker")
     del args[at - 1 : at + 1]
     assert route.main(["render", *args]) == 0
     assert _step(out, "work")["run"] == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "impl"]
-    held = route.worker_kinds.read_values(tmp_path / "impl.state")
-    assert held is not None and held["plan"] == "impl"
+    held = json.loads(out.read_text())[worker_kinds.PLAN_KEY]
+    assert held["plan"] == "impl" and held["inputs"] == {}
     assert held["values"]["branch"] == "u1" and held["values"]["worktree"] == str(tmp_path)
+    assert not (tmp_path / "impl.state").exists()
 
 
-def test_render_implement_with_a_given_worker_writes_no_values(tmp_path):
+def test_plan_values_go_to_the_state_dir_chosen_at_run_time(tmp_path):
+    """PR 4319 の指摘 r2-2: プランが持つ worker の入力は、実行の選んだ保存先（--state-dir で上書きした先）の values.json になる。"""
+    raw = {"name": "impl", worker_kinds.PLAN_KEY: worker_kinds.plan_values("impl", {"branch": "u1"}, False)}
+    assert worker_kinds.hand_plan_values(tmp_path / "elsewhere", raw)
+    held = worker_kinds.read_values(tmp_path / "elsewhere")
+    assert held is not None and held["plan"] == "impl" and held["values"] == {"branch": "u1"} and held["local_tests"] is False
+
+
+def test_a_plan_without_worker_values_leaves_the_state_dir_alone(tmp_path):
+    assert not worker_kinds.hand_plan_values(tmp_path / "s", {"name": "impl"})
+    assert not (tmp_path / "s").exists()
+
+
+def test_a_plan_with_malformed_worker_values_is_refused():
+    raw = {"name": "p", "steps": [{"id": "a", "run": ["true"]}], worker_kinds.PLAN_KEY: {"plan": "p"}}
+    with pytest.raises(model.PlanError, match=worker_kinds.PLAN_KEY):
+        model.parse(raw)
+
+
+def _requirements_args(out: Path, repo: Path, *extra: str) -> list[str]:
+    return ["requirements", "--out", str(out), "--set", f"repo={repo}", *extra]
+
+
+def test_render_requirements_takes_the_inputs_only_the_default_worker_reads(tmp_path):
+    """PR 4319 の指摘 r2-1: テンプレートの params に無い issues・mode も、既定の worker が読むなら --add・--set で渡せる。"""
+    out = tmp_path / "req.json"
+    extra = ["--add", "issues=12", "--add", "issues=34", "--set", "mode=standard"]
+    assert route.main(["render", *_requirements_args(out, tmp_path, *extra)]) == 0
+    plan = json.loads(out.read_text())
+    assert plan["steps"][0]["run"] == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "requirements"]
+    values = plan[worker_kinds.PLAN_KEY]["values"]
+    assert values["issues"] == ["12", "34"] and values["mode"] == "standard" and values["repo"] == str(tmp_path)
+
+
+def test_render_requirements_without_the_worker_inputs_names_them(tmp_path, capsys, last_result):
+    out = tmp_path / "req.json"
+    assert route.main(["render", *_requirements_args(out, tmp_path)]) == 2
+    detail = last_result(capsys.readouterr().out)["cause"]["detail"]
+    assert "issues" in detail and "mode" in detail
+    assert not out.exists()
+
+
+def test_render_refuses_worker_inputs_for_a_given_worker(tmp_path, capsys, last_result):
+    """渡した worker は values.json を読まないので、テンプレートに無い名前は今までどおり断る。"""
+    out = tmp_path / "req.json"
+    extra = ["--add", "worker=ndf-worker", "--set", "mode=standard"]
+    assert route.main(["render", *_requirements_args(out, tmp_path, *extra)]) == 2
+    assert "無い差し込み: mode" in last_result(capsys.readouterr().out)["cause"]["detail"]
+
+
+def test_render_implement_with_a_given_worker_holds_no_values(tmp_path):
     out = tmp_path / "impl.json"
     assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert worker_kinds.PLAN_KEY not in json.loads(out.read_text())
     assert not (tmp_path / "impl.state").exists()
 
 

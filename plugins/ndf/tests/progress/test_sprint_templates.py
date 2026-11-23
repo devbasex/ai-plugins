@@ -16,10 +16,10 @@ from types import SimpleNamespace
 import pytest
 import strategy_fixture
 
-from ndf.contracts import result
+from ndf.contracts import result, worker_kinds
 from ndf.core import durable, loop, route, worker_outcome
 from ndf.core.plan import records, runner, steps, transition_decide
-from ndf.progress import command, definition, gate, invoke, run, store, worker_kinds
+from ndf.progress import command, definition, gate, invoke, run, store
 
 ISSUE = 3474
 BRANCH = "sprint/s1"

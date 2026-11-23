@@ -1,11 +1,12 @@
 """worker の作業の定義（`contracts/worker/kinds.json`）を読み、作業ごとの入力と作業場所の欠けを返す（#3908 の決定 3）。
 
-作業の名前の唯一の基準は `kinds.json` のキーである。`progress.invoke`（工程がプランを組む層）と `progress.gate.entry`
-（`ndf answer work`）の両方から読むので、どちらも読まずに `ndf.contracts` だけを読む。差し込みの出所の文
-（`invoke.FILL_SOURCES`）は呼び手が `sources` で渡す。
+作業の名前の唯一の基準は `kinds.json` のキーである。`progress.invoke`（工程がプランを組む層）・`progress.gate.entry`
+（`ndf answer work`）・`core.route`（単発のプランの描画）・`core.plan.runner`（プランの実行）から読むので、どれも読まずに
+`ndf.contracts` だけを読む。差し込みの出所の文（`invoke.FILL_SOURCES`）は呼び手が `sources` で渡す。
 
-作業が読む値の受け渡し（工程が組んだ差し込みの値を残す `values.json`。#3908 の決定 2）の読み書きもここに置く。書くのは
-工程（`invoke.prepare_plan`）、読むのは工程の描画（`invoke._prepared`）と `ndf answer work` で、どちらも保存先を記述子で
+作業が読む値の受け渡し（組んだ差し込みの値を残す `values.json`。#3908 の決定 2）の読み書きもここに置く。書くのは工程
+（`invoke.prepare_plan`）と、単発のプランを流す `ndf plan next`（プランが持つ `PLAN_KEY` の値を、実行が選んだ保存先へ回ごとに
+書く。PR 4319 の指摘 r2-2・r2-3）。読むのは工程の描画（`invoke._prepared`）と `ndf answer work` で、どちらも保存先を記述子で
 開き、共有の保存先で別の利用者が置いた・書き換えられる値を使わない。
 """
 
@@ -141,3 +142,38 @@ def values_of(held: Any) -> Optional[dict[str, Any]]:
     if not isinstance(held, dict) or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
         return None
     return held
+
+
+# 単発のプラン（`ndf route render・run`）が既定の worker の入力を持つ、プランの最上位のキー（PR 4319 の指摘 r2-2・r2-3）
+PLAN_KEY = "work_values"
+# プランに持たせる入力の形（`VALUES_SHAPE` から書いた時刻を除いたもの。時刻は `ndf plan next` が書くときに足す）
+PLAN_SHAPE = {k: t for k, t in VALUES_SHAPE.items() if k != "at"}
+
+
+def plan_values(plan: str, values: Mapping[str, Any], local_tests: bool) -> dict[str, Any]:
+    """単発のプランに `PLAN_KEY` で持たせる入力（単発のプランは工程の入力を持たないので `inputs` は空）。"""
+    return {"plan": plan, "values": dict(values), "inputs": {}, "local_tests": local_tests}
+
+
+def plan_values_error(raw: Mapping[str, Any]) -> Optional[str]:
+    """プランの `PLAN_KEY` の形の誤り。無いか形が合えば None（`core.plan.model.parse` が `PlanError` にする）。"""
+    if PLAN_KEY not in raw:
+        return None
+    held = raw[PLAN_KEY]
+    if isinstance(held, dict) and all(isinstance(held.get(k), t) for k, t in PLAN_SHAPE.items()):
+        return None
+    return f"{PLAN_KEY} は {', '.join(PLAN_SHAPE)} を持つ辞書にする"
+
+
+def hand_plan_values(state_dir: Path, raw: Mapping[str, Any]) -> bool:
+    """プランが `PLAN_KEY` を持てば、その値を実行の保存先の `values.json` へ書いて真を返す。持たなければ何もせず偽。
+
+    `ndf plan next` が回を始める・続けるたびに、実行が選んだ保存先（`--state-dir` を含む）へ、流すプランそのものが持つ値を
+    書く。描画の時点の保存先へは書かないので、保存先を上書きして流しても worker が値を見つけ、プラン本体と値が別々に
+    書き替わって食い違うことも無い。書けなければ `write_values` と同じく `OSError`・`worker_paths.EntryError` を上げる。
+    """
+    if PLAN_KEY not in raw:
+        return False
+    held = raw[PLAN_KEY]
+    write_values(state_dir, held["plan"], held["values"], held["inputs"], held["local_tests"])
+    return True

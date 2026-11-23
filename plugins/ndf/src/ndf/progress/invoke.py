@@ -41,12 +41,12 @@ from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, limits, result, worker_paths
+from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, merge_pending, model, refactor_values, stages, worker_kinds
-from ndf.progress.worker_kinds import VALUES_FILE, read_values, write_values
+from ndf.progress import definition, merge_pending, model, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -688,7 +688,7 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     gaps: dict[str, str] = {}
     for kind in dict.fromkeys(route.work_names(route.expanded(t, local_tests=local_tests))):
-        gaps.update(worker_kinds.kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
+        gaps.update(kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
     if gaps:
         raise KindInputsMissing(t.name, gaps)
     write_values(work_dir, run.name, values, run.inputs, local_tests)

@@ -29,7 +29,7 @@ from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git
-from ndf.contracts import chosen, limits, result, routing
+from ndf.contracts import chosen, limits, result, routing, worker_kinds, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
@@ -482,10 +482,16 @@ def advance(
     """回を始めるか続け、終わるか承認の回答を待つ所まで進める。
 
     待つ所に来たら `on_gate(結果)` を DBOS を開いたまま呼ぶ。`on_gate` は結果を出してプロセスを抜ける（戻らない）。
-    終わった回（retired/）なら流さずにバックアップの結果を返す（B4）。
+    終わった回（retired/）なら流さずにバックアップの結果を返す（B4）。プランが worker の入力（`worker_kinds.PLAN_KEY`）を
+    持てば、流す前にこの回の保存先の `values.json` へ書く（書けなければ流さずに precondition）。
     """
     if _finished(root, inv.key):
         return _stored(inv)
+    try:
+        worker_kinds.hand_plan_values(inv.state_dir, inv.plan.raw)
+    except (OSError, worker_paths.EntryError) as exc:
+        detail = f"{inv.plan.name} の worker の入力を保存先 {inv.state_dir} の {worker_kinds.VALUES_FILE} へ書けない: {exc}"
+        return result.stopped(TOOL, "precondition", detail)
     _record_run(inv)
     with durable.session(root, inv.key, url):
         status = durable.status(inv.workflow_id)
