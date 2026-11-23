@@ -96,8 +96,8 @@ def _known(kind: str) -> dict[str, Any]:
 
 
 def _shown(value: Any) -> str:
-    """起動指示の入力の欄に載せる字面（配列は要素を `, ` でつなぐ）。"""
-    return ", ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+    """起動指示の入力の欄に載せる字面。JSON の値にし、値の中の改行や見出しが作業の指示の行にならないようにする。"""
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _inputs_of(kind: str, saved: Mapping[str, Any]) -> str:
@@ -173,21 +173,32 @@ def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worke
         raise contracts.ContractError(f"起動指示のテンプレート {PROMPT_FILE} の差し込みを埋められない: {exc}") from None
 
 
-def _write_prompt(kind: str, state_dir: Path, saved: Mapping[str, Any], workdir: Path) -> Path:
-    """報告の保存先を初期化し、起動指示を `<保存先>/<作業名>.prompt.md` へ書く。`workdir` は本文に入れるだけ。
+def _write_prompt(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str) -> None:
+    """開いた保存先で報告の一式を初期化し、起動指示を `<保存先>/<作業名>.prompt.md` へ書く。
 
     初期化は `ndf worker prepare` と同じ `worker_paths.reset_report`（空の報告を作り、前の完了マーカーと結果ファイルを
     消す）で、起動ごとに行う。起動指示が指す `ndf worker append --done` は報告が無いと書けず、前の完了マーカーが
     残ると今回の報告より先に見えるためである。どの名前もリンクをたどらず、リンクなら何も変えずに `EntryUnsafe`
-    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。起動指示と報告の種類と書き込み可否は
-    消す前に確かめ（`keep`）、書けずに止まるときは前の報告・完了マーカー・結果ファイルを残す。
+    で止める（`ndf worker run` が結果ファイルのリンクの先を消さない。#3877）。起動指示は初期化と同じ置き換えの中で
+    報告より先に書き（`write`）、書けない・公開できないときは前の報告・完了マーカー・結果ファイルを残して止まる
+    （拡張 ACL・所有者を保てないなど、書き込み可否の確かめに無い理由でも）。
     """
-    paths = worker_paths.report_paths(state_dir, kind, resolve=False)
-    body = work_prompt(kind, saved, workdir, paths)
-    with worker_paths.open_workdir(paths.prompt.parent) as wd:
-        worker_paths.reset_report(wd, paths, keep=(paths.prompt.name,))
-        worker_paths.write_file(wd, paths.prompt.name, body)
-    return paths.prompt
+    worker_paths.reset_report(wd, paths, write=((paths.prompt.name, body),))
+
+
+def _saved_in(wd: worker_paths.WorkDir) -> Optional[dict[str, Any]]:
+    """開いた保存先の `values.json`。無い・壊れている・形が違えば None。
+
+    呼んだ利用者が持ち、グループとほかの利用者が書き込めないリンク数 1 の通常のファイルだけを読み、ほかは
+    `EntryUnsafe`（`foreign` など）で止める（共有の保存先で別の利用者が置いた値を worker の指示と作業場所に使わない）。
+    """
+    text = worker_paths.read_file(wd, invoke.VALUES_FILE, owned=True)
+    if text is None:
+        return None
+    try:
+        return invoke.values_of(json.loads(text))
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れた値は無いものとして扱う（`read_values` と同じ）
+        return None
 
 
 def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
@@ -237,16 +248,22 @@ def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
 
 
 def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> list[str]:
-    """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて `ndf worker run` の引数を返す。"""
+    """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて `ndf worker run` の引数を返す。
+
+    保存先は渡されたパスのまま 1 回だけ開き（`open_workdir` が `..` も字面で畳まずに 1 要素ずつリンクを拒んで開く）、
+    `values.json` の読み取りと報告の初期化・起動指示の書き込みを同じ記述子で行う。読んだ場所と書く場所が食い違わない。
+    """
     _known(kind)
-    saved = invoke.read_values(state_dir)
-    if saved is None:
-        raise WorkUnready(f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程から起動すると書かれる）")
-    gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
-    if gaps:
-        raise invoke.KindInputsMissing(saved["plan"], gaps)
-    workdir = _work_dir(kind, saved, cwd)
-    _write_prompt(kind, state_dir, saved, workdir)
+    paths = worker_paths.report_paths(state_dir, kind, resolve=False)
+    with worker_paths.open_workdir(state_dir) as wd:
+        saved = _saved_in(wd)
+        if saved is None:
+            raise WorkUnready(f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程から起動すると書かれる）")
+        gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
+        if gaps:
+            raise invoke.KindInputsMissing(saved["plan"], gaps)
+        workdir = _work_dir(kind, saved, cwd)
+        _write_prompt(wd, paths, work_prompt(kind, saved, workdir, paths))
     return work_argv(kind, state_dir, workdir)
 
 

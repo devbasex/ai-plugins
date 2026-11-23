@@ -21,7 +21,9 @@ class EntryError(ValueError):
 
 
 class EntryUnsafe(EntryError):
-    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced・owner・acl。
+    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced・owner・acl・foreign。
+
+    `foreign` は `read_file(owned=True)` が読むファイルを呼んだ利用者が持たないか、グループかほかの利用者が書き込めること。
 
     `owner` は `write_file` が置き換える既存のファイルの所有者・所有グループを新しい inode で保てないこと（`_inherit_access`）。
     `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を保てないので置き換えないこと（`_refuse_acl`。ACL の値は写さない）。

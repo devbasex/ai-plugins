@@ -655,17 +655,24 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
 def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
     """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
 
+    グループとほかの利用者の書き込み権限は外す（`ndf answer work` は書き込めるファイルを第三者の値として読まない）。
     書けなければ `OSError` をそのまま上げる（呼び手の `plan_failure` が precondition にする）。
     """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
-    plan_files.write_json(state_dir / VALUES_FILE, held)
+    path = state_dir / VALUES_FILE
+    plan_files.write_json(path, held)
+    os.chmod(path, os.stat(path).st_mode & 0o755)
 
 
 def read_values(state_dir: Path) -> Optional[dict[str, Any]]:
     """`<保存先>/values.json`。無い・壊れている・キーか型が `VALUES_SHAPE` と違えば None。"""
-    held = plan_files.read_json(state_dir / VALUES_FILE)
-    if held is None or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
+    return values_of(plan_files.read_json(state_dir / VALUES_FILE))
+
+
+def values_of(held: Any) -> Optional[dict[str, Any]]:
+    """`values.json` の中身を読んだ値。辞書でない・キーか型が `VALUES_SHAPE` と違えば None。"""
+    if not isinstance(held, dict) or any(not isinstance(held.get(k), t) for k, t in VALUES_SHAPE.items()):
         return None
     return held
 

@@ -435,9 +435,47 @@ def test_reset_keeps_the_previous_report_when_a_sticky_directory_refuses_the_pro
         worker_paths.check_writable(wd, paths.prompt.name)  # 自分のファイルは sticky でも置き換えられる
         monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)  # ほかの利用者として確かめる
         with pytest.raises(PermissionError):
-            worker_paths.reset_report(wd, paths, keep=(paths.prompt.name,))
+            worker_paths.reset_report(wd, paths, write=((paths.prompt.name, "新しい起動指示"),))
     assert paths.report.read_text(encoding="utf-8") == "前の報告"
     assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+def test_reset_restores_the_previous_report_when_the_prompt_is_refused_after_the_checks(tmp_path, monkeypatch):
+    # 書き込み可否の確かめを通っても、拡張 ACL のある起動指示は置き換えを拒まれる。退けた完了マーカーと結果ファイルを
+    # 元へ戻し、報告も置き換えない（PR 4307 の r5-2）
+    d = tmp_path / "shared"
+    d.mkdir()
+    paths = worker_paths.report_paths(d, "w", resolve=False)
+    for path, text in ((paths.report, "前の報告"), (paths.done, ""), (paths.result, "{}"), (paths.prompt, "前の起動指示")):
+        path.write_text(text, encoding="utf-8")
+    real_refuse = worker_paths._refuse_acl
+
+    def refuse_prompt(wd, name, existing):
+        if name == paths.prompt.name:
+            raise worker_paths.EntryUnsafe(name, "acl")
+        return real_refuse(wd, name, existing)
+
+    monkeypatch.setattr(worker_paths, "_refuse_acl", refuse_prompt)
+    with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe):
+        worker_paths.reset_report(wd, paths, write=((paths.prompt.name, "新しい起動指示"),))
+    assert paths.report.read_text(encoding="utf-8") == "前の報告"
+    assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+    assert paths.prompt.read_text(encoding="utf-8") == "前の起動指示"
+    assert sorted(p.name for p in d.iterdir()) == sorted(p.name for p in paths)
+
+
+def test_read_file_owned_refuses_a_file_others_can_write(tmp_path, monkeypatch):
+    (tmp_path / "v").write_text("値", encoding="utf-8")
+    (tmp_path / "v").chmod(0o664)
+    with worker_paths.open_workdir(tmp_path) as wd:
+        assert worker_paths.read_file(wd, "v") == "値"
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
+        (tmp_path / "v").chmod(0o644)
+        assert worker_paths.read_file(wd, "v", owned=True) == "値"
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(tmp_path / "v").st_uid + 1)  # ほかの利用者が置いたファイル
+        with pytest.raises(worker_paths.EntryUnsafe, match="foreign"):
+            worker_paths.read_file(wd, "v", owned=True)
 
 
 def test_check_writable_passes_another_users_file_in_a_directory_without_the_sticky_bit(tmp_path, monkeypatch):

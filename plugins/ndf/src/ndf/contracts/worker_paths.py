@@ -248,10 +248,12 @@ def entry_state(wd: WorkDir, name: str) -> Optional[os.stat_result]:
     return st
 
 
-def read_file(wd: WorkDir, name: str) -> Optional[str]:
+def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
     """名前のファイルを UTF-8 で読む。無ければ None。
 
     開いた記述子を確かめ、同じ記述子から読むので、確かめの後に名前を差し替えられても読むのは確かめた inode である。
+    `owned` なら、呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけを読み、ほかは `EntryUnsafe`
+    （`foreign`）で止める（共有の保存先で別の利用者が用意・書き換えできる中身を、呼んだ利用者の権限で使わないため）。
     """
     _check_name(name)
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -264,9 +266,12 @@ def read_file(wd: WorkDir, name: str) -> Optional[str]:
             raise EntryUnsafe(name, "symlink") from None
         raise EntryUnreadable(name, e.strerror or str(e)) from None
     try:
-        kind = _unsafe_kind(os.fstat(fd))
+        st = os.fstat(fd)
+        kind = _unsafe_kind(st)
         if kind:
             raise EntryUnsafe(name, kind)
+        if owned and (st.st_uid != os.geteuid() or st.st_mode & 0o022):
+            raise EntryUnsafe(name, "foreign")
         with os.fdopen(fd, "rb", closefd=False) as f:
             data = f.read()
     except OSError as e:
@@ -703,7 +708,7 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
     return True
 
 
-def reset_report(wd: WorkDir, paths: ReportPaths, keep: Iterable[str] = ()) -> tuple[str, str]:
+def reset_report(wd: WorkDir, paths: ReportPaths, write: Iterable[tuple[str, str]] = ()) -> tuple[str, str]:
     """報告・完了マーカー・結果ファイルを初期化する（`ndf worker prepare` と `ndf answer work` が共有する）。
 
     3 つの名前を先に確かめてから、完了マーカー → 結果ファイルを退け、報告を空にしてから退けたものを消す。
@@ -713,14 +718,19 @@ def reset_report(wd: WorkDir, paths: ReportPaths, keep: Iterable[str] = ()) -> t
     報告の一時ファイルは退ける前に作り、アクセス権（モードのビットとグループ）の設定まで済ませる（`staged_write`）。
     置き換えを拒む条件（報告を書き込めない・所有者を保てない・前の報告が拡張 ACL を持つなど）では何も退けずに止まり、
     退けるか報告の公開が落ちたとき（sticky bit の所有者の制約など）は退けた完了マーカーと結果ファイルを元へ戻して止まる。
-    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、何かを変える前に書けるかを確かめる（`check_writable`）。
+    `write` の名前と中身の組（`ndf answer work` の起動指示）は、何かを変える前に書けるかを確かめ（`check_writable`）、完了マーカーと
+    結果ファイルを退けた後・空の報告を公開する前に `write_file` で書く。確かめに無い理由（拡張 ACL・所有者を保てないなど）で
+    書けない・公開できないときも、報告はまだ置き換えておらず、退けた完了マーカーと結果ファイルは元へ戻る（前の報告一式を残す）。
+    書けた後に報告の公開が落ちたときは、`write` の名前だけが新しく、前の報告一式は戻る。
     返りは完了マーカーと結果ファイルの `absent`・`removed`。
     """
     check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
-    for name in keep:
+    extra = tuple(write)
+    for name, _ in extra:
         check_writable(wd, name)
     with staged_write(wd, paths.report.name, "", retire=(paths.done.name, paths.result.name)) as actions:
-        pass
+        for name, text in extra:
+            write_file(wd, name, text)
     return actions[paths.done.name], actions[paths.result.name]
 
 

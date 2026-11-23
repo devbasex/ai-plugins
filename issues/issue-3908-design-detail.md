@@ -245,7 +245,7 @@ plugins/ndf/
   - 副作用: ファイルの読み取り 1 つと書き込み 1 つ
 - `_cmd_work`
   - 事前条件: `--state-dir` と作業の名前がある。`--cwd` は省ける
-  - 手順: (1) 作業の名前を確かめる → (2) `read_values` → (3) `kind_gaps` が空かを確かめる → (4) 作業場所を決める（`--cwd` があればそれ、無ければ `work_dir_of(kind, saved["values"])`。工程から起動するときは `--cwd` を渡さないので、作業ごとの `cwd` が効く）→ (5) プロンプトを書く → (6) `work_argv` で `ndf worker run --cwd <作業場所> …` へ置き換わる
+  - 手順: (1) 作業の名前を確かめる → (2) 渡された保存先のパスを `open_workdir` で 1 回だけ開き、`values.json` を `read_file(owned=True)`（呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけ）で読んで `values_of` で形を確かめる。以後の初期化と書き込みも同じ記述子で行う → (3) `kind_gaps` が空かを確かめる → (4) 作業場所を決める（`--cwd` があればそれ、無ければ `work_dir_of(kind, saved["values"])`。工程から起動するときは `--cwd` を渡さないので、作業ごとの `cwd` が効く）→ (5) プロンプトを書く → (6) `work_argv` で `ndf worker run --cwd <作業場所> …` へ置き換わる
   - 事後条件: プロンプトのファイルが書かれた後に、プロセスが `ndf worker run` へ置き換わる。置き換わる前に戻る経路は失敗のときだけ。作業の定義の `cwd` が `"worktree"` の作業は、`values.json` の `worktree`（プランの `worktree` と同じ値）で worker が動き、リポジトリの根（`repo`）では動かない
   - 副作用: ファイルの書き込みとプロセスの置き換え（`os.execv`）
 
