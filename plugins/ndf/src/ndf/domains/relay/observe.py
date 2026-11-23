@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Iterator, Mapping, NamedTuple, Optional
 
 from ndf.adapters import agents, claude
 from ndf.domains.relay import signals
@@ -305,4 +307,114 @@ def _time(value: Any) -> Optional[float]:
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
     except ValueError:  # noqa: NDF401 ファイル: 時刻の読めない記録は時刻を持たない
+        return None
+
+
+# --- conductor の活動（#4036）。`ndf relay ls` の行に載せ、計画の実行が「何もしていない conductor」を判定する ------------
+
+# Stop の hook の入力の `background_tasks` の要素の `type`
+SUBAGENT_TASK, SHELL_TASK = "subagent", "shell"
+# 活動を読めない行の値
+NO_ACTIVITY = {"turn_done": None, "moved": None, "background": None}
+
+
+@dataclass(frozen=True)
+class Look:
+    """1 回の `ndf relay ls` で全行が共有する活動の材料。`now` は読む時刻、`size` は会話の記録の末尾を読む大きさ、
+    `parents` は `process_parents` の返り（1 回の一覧で 1 度だけ組む）。"""
+
+    environ: Mapping[str, str]
+    now: float
+    size: int
+    parents: Optional[Mapping[int, int]]
+    proc: Path = Path("/proc")
+
+
+class _Turn(NamedTuple):
+    """conductor の今の応答: 会話の記録のパス・起動した場所・セッション・最後の応答の時刻。"""
+
+    transcript: Path
+    cwd: Path
+    session_id: str
+    at: float
+
+
+def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> dict[str, Any]:
+    """一覧の行（`session_id`・`cwd`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
+
+    返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。
+    UNIX 時刻）・`background`（終わった背景の作業を除いた数。確かめられなければ None）。conductor の会話の記録を
+    読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めない背景の作業は走っているとみなす。
+    """
+    session, cwd = row.get("session_id"), row.get("cwd")
+    if not isinstance(session, str) or not isinstance(cwd, str):
+        return dict(NO_ACTIVITY)
+    transcript = transcript_path(look.environ, Path(cwd), session)
+    got = turn_done(transcript, look.size)
+    if got is None:
+        return dict(NO_ACTIVITY)
+    done, at = got
+    if not done or at is None:
+        return {"turn_done": done, "moved": at, "background": None}
+    tasks = _tasks_of(signals.read_activity(directory), session, at)
+    if tasks is None:
+        return {"turn_done": True, "moved": at, "background": None}
+    turn = _Turn(transcript, Path(cwd), session, at)
+    running, times = _others(turn, tasks, look.size)
+    shells = _shells(turn, row.get("pid"), [t for t in tasks if t["type"] == SHELL_TASK], look)
+    moved = max([at, *times, *(shells[1] if shells is not None else [])])
+    return {"turn_done": True, "moved": moved, "background": None if shells is None else running + shells[0]}
+
+
+def _tasks_of(record: Optional[Mapping[str, Any]], session: str, at: float) -> Optional[list[dict[str, str]]]:
+    """今の応答の Stop が書いた背景の作業の一覧。別のセッション・前の Stop の記録・観測できなかった一覧なら None。
+
+    `at` は秒で切り捨てて書かれる（`signals.now_iso`）ので、最後の応答の時刻も秒に切り捨ててから比べる。
+    """
+    if record is None or record.get("session_id") != session or record.get("tasks") is None:
+        return None
+    written = _time(record["at"])
+    return record["tasks"] if written is not None and written >= math.floor(at) else None
+
+
+def _others(turn: _Turn, tasks: list[dict[str, str]], size: int) -> tuple[int, list[float]]:
+    """シェルでない背景の作業の、走っているとみなす数と、終わったサブエージェントの最後の応答の時刻。"""
+    running, times = 0, []
+    for task in (t for t in tasks if t["type"] != SHELL_TASK):
+        ended = _ended_subagent(turn.transcript, task["id"], size) if task["type"] == SUBAGENT_TASK else None
+        if ended is None:
+            running += 1
+        else:
+            times.append(ended)
+    return running, times
+
+
+def _ended_subagent(transcript: Path, agent_id: str, size: int) -> Optional[float]:
+    """サブエージェントの最後の応答が終わっていればその時刻。記録を読めない・応答の途中なら None（走っているとみなす）。"""
+    path = subagent_transcript_path(transcript, agent_id)
+    got = turn_done(path, size) if path is not None else None
+    return got[1] if got is not None and got[0] else None
+
+
+def _shells(turn: _Turn, pid: Any, listed: list[dict[str, str]], look: Look) -> Optional[tuple[int, list[float]]]:
+    """生きている背景のシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
+
+    一覧より生きているシェルが少なければ、一覧のシェルの出力のファイルの更新時刻を終わった時刻とする。1 つも読めなければ
+    読む時刻にする（閾値が過ぎるまで待ち直す側へ倒す）。
+    """
+    live = live_shells(pid, look.parents, look.proc) if isinstance(pid, int) and not isinstance(pid, bool) else None
+    if live is None:
+        return None
+    if live >= len(listed):
+        return live, []
+    ended = [_mtime(shell_output_path(look.environ, turn.cwd, turn.session_id, t["id"])) for t in listed]
+    return live, [t for t in ended if t is not None] or [look.now]
+
+
+def _mtime(path: Optional[Path]) -> Optional[float]:
+    if path is None:
+        return None
+    try:
+        return path.stat().st_mtime
+    except OSError:  # noqa: NDF401 ファイル: 出力のファイルを読めないシェルは終わった時刻が分からない（呼び手が読む時刻にする）
         return None

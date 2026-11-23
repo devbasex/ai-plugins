@@ -38,7 +38,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
 
 from ndf import identity
 from ndf.contracts import facts, limits, named_cap
-from ndf.domains.relay import hub_decide, registry, session_env, signals, switch_decide
+from ndf.domains.relay import hub_decide, observe, registry, session_env, signals, switch_decide
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
@@ -496,9 +496,14 @@ def _confirm(ctx: Context, name: str) -> Outcome:
 
 
 def listing(ctx: Context) -> list[dict[str, Any]]:
-    """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。"""
+    """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。
+
+    動いている行には conductor の活動（`turn_done`・`moved`・`background`。#4036）も載せる。/proc の親の一覧は
+    1 回の一覧で 1 度だけ読み、全行で共有する。
+    """
     running = set(registry.busy_names(ctx.state_dir))
     entries = registry.read_registry(hub_dir(ctx.state_dir))
+    look = _look(ctx) if running else None
     out = []
     # 登録簿の行と、登録簿に無く錠を持つラッパー（ハブが数えるラッパーをすべて載せる。#3989 の決定 3）
     for name in sorted(set(entries) | set(running)):
@@ -506,8 +511,17 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
         row = {"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason")}  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
         listed = {**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False}
-        out.append({**listed, **_session(state, listed.get("cwd"))})
+        session = _session(state, listed.get("cwd"))
+        wrapper = registry.wrapper_dir(ctx.state_dir, name)
+        seen = observe.conductor_activity(session, wrapper, look) if look is not None and name in running else dict(observe.NO_ACTIVITY)
+        out.append({**listed, **session, **seen})
     return out
+
+
+def _look(ctx: Context) -> observe.Look:
+    """活動を読む材料（#4036）。会話の記録は Stop の hook と同じ末尾の大きさ（`hook.transcript-tail`）だけ読む。"""
+    size = int(limits.value("hook.transcript-tail", "count"))
+    return observe.Look(ctx.environ, time.time(), size, observe.process_parents())
 
 
 def _session(state: Optional[Mapping[str, Any]], cwd: Any) -> dict[str, Any]:

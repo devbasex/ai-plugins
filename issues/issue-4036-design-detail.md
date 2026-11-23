@@ -27,6 +27,8 @@ plugins/ndf/
 
 依存の向き: 書く側は `hooks/guards/relay_mark.py` → `domains/relay/signals.py` だけである。保存先は環境変数 `NDF_RELAY_DIR` から得るので `registry.py` を読まない（`registry.py` は `facts` 経由で `jsonschema` を読み込み、hook の許可 import の表にも無い）。読む側は `progress/plan/run.py` → `domains/relay/registry.py`（保存先の解決に `wrapper_dir`）・`domains/relay/signals.py`（活動の読み取りに `read_activity`）・`domains/relay/observe.py` である。そこから `progress/lane/liveness.py`（判定）→ `progress/plan/run_decide.py`（知らせ）へ続き、いずれも一方向である。`liveness.py` は `relay` を読まず、材料は今までどおり `Probes` の呼び出しが集める。`registry.py` は `hooks` を読まない。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
+**実装で置き場を変えたこと（4036-u2-judge）:** 活動を読む処理（下の「活動を読む」の手順 1〜6）は、`progress/plan/run.py` ではなく `domains/relay/observe.py` の `conductor_activity` に置いた。`domains/relay/hub.py` の `listing` が動いている行ごとにこれを呼び、`ndf relay ls` の行に `turn_done`・`moved`・`background` を載せる（結果のスキーマは `relay.result.schema.json`）。`progress/plan/run.py` の `lane_activity` は、`launch.wrappers` が読んだ一覧の行の 3 つの値を `liveness.Activity` へ写すだけである。理由は 2 つある。層の規則（`checks/rules.json` の `layers`。`contracts → adapters → core → progress → domains`）では `progress` から `domains` を読めない。また子の表（`checks/children.json`）で P3（`ndf.progress.plan`）の先に要るものに M3b（`ndf.domains.relay`）が無い（規則 child-deps の IG1）。`progress` は今もラッパーの一覧を `ndf relay ls` の出力で読んでいるので、同じ経路に載せた。/proc の親の一覧（`process_parents`）は 1 回の `ndf relay ls` の中で 1 度だけ読み、全行で共有する。判定の条件・閾値・知らせの中身は変えていない。
+
 設計文書の触るファイルのうち `plugins/ndf/src/ndf/progress/plan/cli.py` は、変える行が無い。活動を読む項目を `run.probes` に足すだけで `ndf lanes status` にも当たるためで、`cli.py:103` が `run.probes(where.repo, a.plan)` を渡す今の形のままにする。この経路の確かめは最後の「判定の値が増えることの当たり先」にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
@@ -174,6 +176,8 @@ plugins/ndf/
 ## 活動を読む（`Probes.activity`）
 
 満たす決定: 決定 1、決定 2、受け入れ条件 1
+
+**置き場の変更（4036-u2-judge）:** この節の `lane_activity` の手順 1〜6 は `observe.conductor_activity(row, directory, look)` が行い、`hub.listing` が `ndf relay ls` の行へ載せる。`look`（`observe.Look`）は環境・読む時刻・会話の記録の末尾の大きさ（`hook.transcript-tail`）・親 PID の一覧・`/proc` の場所を持ち、1 回の一覧で全行が共有する。`run.lane_activity(row)` は行の `turn_done` が真偽値のときだけ `Activity(turn_done, moved, background)` を返し、ほかは `None` を返す。応答の途中（`turn_done` が偽）と最後の応答の時刻を読めないときは、背景の作業を数えない（`background` は `None`）。どちらも判定は `alive` で変わらない。手順 3 の「`at` が手順 2 の時刻より前」は、手順 2 の時刻を秒に切り捨ててから比べる。`at` は `signals.now_iso` が秒で切り捨てて書き、会話の記録の時刻はミリ秒を持つためである。切り捨てずに比べると、同じ秒に書いた今の Stop の記録も弾かれる。理由は地図の「実装で置き場を変えたこと」にある。
 
 ### 関数の仕様
 
