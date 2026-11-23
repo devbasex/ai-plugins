@@ -53,7 +53,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     SH["Stop の hook<br/>relay-marker guard"] -->|"背景の作業の一覧を書く"| AF[("&lt;ラッパーの保存先&gt;/activity.json")]
-    WJ[("wrapper.json<br/>session_id・cwd")] --> PR["Probes.activity（新設）"]
+    WJ[("wrapper.json<br/>session_id・transcript・shell_outputs・pid")] --> PR["Probes.activity（新設）"]
     AF --> PR
     TR[("会話の記録<br/>&lt;session_id&gt;.jsonl")] -->|"observe.turn_done"| PR
     PR --> J["liveness.judge"]
@@ -62,7 +62,7 @@ flowchart LR
     S --> RQ["lane_stalled のリクエスト<br/>moved・background を載せる"]
 ```
 
-Stop の hook が、conductor が応答を終えた時点の背景の作業の一覧（`id` と `type`）をラッパーの保存先へ書く。生死の判定は、ラッパーの状態ファイルから `session_id` と `cwd` を取って会話の記録をたどり、最後の応答が終わっているかとその時刻を読む。一覧のうちサブエージェントは、その会話の記録が終わっていれば除く。応答が終わっていて、残った背景の作業が 0 件で、最後の応答から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
+Stop の hook が、conductor が応答を終えた時点の背景の作業の一覧（`id` と `type`）をラッパーの保存先へ書く。生死の判定は、`ndf relay ls --activity` がラッパーの状態ファイルに保存された会話の記録のパス（`transcript`）から、最後の応答が終わっているかとその時刻・最後の `assistant` の `uuid` を先に読む。`activity.json` はその後に読み、`session_id` と `uuid` が一致したときだけ背景の作業を数える。一覧のうちサブエージェントは、その会話の記録が終わっていれば除く。応答が終わっていて、残った背景の作業が 0 件で、最後の応答から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
 
 ## 構成要素
 
@@ -108,7 +108,7 @@ flowchart TB
 | --- | --- | --- |
 | `at` | string | 書いた時刻（ISO 8601）。conductor が応答を終えた時刻に当たる |
 | `session_id` | string / null | 書いた Stop の hook の入力の `session_id`。読む側はラッパーの一覧の行の `session_id` と同じときだけこの記録を使う |
-| `reply` | string / null | 書いた Stop が終えた応答。会話の記録の末尾から選んだ最後の `assistant` の記録の `uuid`（hook の `ctx.last_reply_id`）。読む側は conductor の会話の記録から同じ規則で選んだ `uuid`（`observe.reply_id`）と同じときだけこの記録を使う。会話の記録を読めなければ `null` |
+| `reply` | string / null | 書いた Stop が終えた応答。会話の記録の末尾から選んだ最後の `assistant` の記録の `uuid`（hook の `ctx.last_reply_id`）。読む側は conductor の会話の記録から同じ規則で選んだ `uuid`（`observe.reply_id`）と同じときだけこの記録を使う。会話の記録を読めない・`tasks` が `null` のとき（読む側が使わないので会話の記録を開かない）は `null` |
 | `tasks` | array / null | その時点の背景の作業。要素は `{"id", "type"}`（hook の入力の `background_tasks` から写す）。入力に `background_tasks` が無い・リストでないときは `null`（背景の作業を観測できなかった印）で、空のリストと区別する |
 
 `contracts/limits.json` に足す方針:
@@ -140,7 +140,7 @@ flowchart TB
 | `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは無活動の判定に使った最後の活動の時刻を入れる。conductor の最後の応答の時刻だけでなく、終わったとみなして除いた背景の作業の時刻も含めた最も遅いもの（上の `Activity.moved`。`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す） |
 | `background` | integer / null | 背景の作業の件数。`idle_conductor` のときは 0 |
 
-`ndf relay ls` の行に `session_id` と `cwd` を足す（会話の記録のパスを組むため）。既存のキーは変えない。
+`ndf relay ls --activity` の行に `turn_done`・`moved`・`background` を足す（読み方は詳細設計の「活動を読む」の手順 1〜6。会話の記録のパスは `wrapper.json` に保存された `transcript` を使い、一覧の側で組み直さない）。既存のキーは変えない。
 
 ## 処理の流れ
 
@@ -153,11 +153,22 @@ sequenceDiagram
     participant J as liveness.judge
     C->>H: 応答を終える
     H->>A: at・reply（最後の応答の uuid）・tasks を書く
+    participant L as ndf relay ls --activity
     loop 読み直しの間隔
-        D->>D: ndf relay ls（session_id・cwd つき）
-        D->>A: activity.json を読む
-        D->>D: subagent の tasks の会話の記録を turn_done で読み、終わったものを除く
-        D->>D: 会話の記録を turn_done で読む
+        D->>L: ラッパーの一覧を活動つきで求める
+        L->>L: wrapper.json の transcript（ラッパーが保存したパス）から conductor の会話の記録を 1 回読み、応答が終わったか・時刻・最後の assistant の uuid を得る
+        alt 応答が終わり・時刻がある
+            L->>A: activity.json を読む
+            alt session_id と reply（uuid）が一致し・tasks がリスト
+                L->>L: subagent の tasks の会話の記録を turn_done で読み、終わったものを除く
+                L->>L: 生きている Bash の Tool のシェルを数える
+            else ほか
+                L->>L: 背景の作業の数は null（数えない）
+            end
+        else 応答の途中・時刻が無い
+            L->>L: activity.json を読まず、背景の作業の数は null
+        end
+        L-->>D: 行ごとの turn_done・moved・background
         D->>J: 行・スプリントの待ち・ラッパー・活動
         alt 応答が終わり・background が 0・閾値を過ぎた
             J-->>D: idle_conductor（止まり）
@@ -175,7 +186,7 @@ sequenceDiagram
 ### 決定 1: 最後の動きは、会話の記録の最後の応答の時刻で測る
 
 - **質問**: conductor の「最後の動き」を何で測るか
-- **選んだ案**: ラッパーの状態ファイルの `session_id` と `cwd` から会話の記録のパスを組み、`observe.turn_done` が返す最後の応答の時刻を使う
+- **選んだ案**: ラッパーが起動時に組んで状態ファイル（`wrapper.json`）に保存した会話の記録のパス（`transcript`）を `ndf relay ls --activity` が読み、`observe.turn_done` が返す最後の応答の時刻を使う。読む側の環境や `session_id`・`cwd` からパスを組み直さない
 - 採らなかった案:
   - ラッパーの状態ファイルの `at`（同じ状態では書き直さないため、動いていても古いままになる）
   - ステートマシンの記録の時刻（今の `moved` がこれで、工程が進まない間は更新されない。まさに #4036 が見落とした値）
