@@ -321,7 +321,7 @@
 | `ndf relay context resolve` | 引数を受けない |
 | `ndf relay decide` | 引数を受けない |
 | `ndf relay install` | `--replace-old`（boolean・任意）: 旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る） |
-| `ndf relay ls` | 引数を受けない |
+| `ndf relay ls` | `--activity`（boolean・任意）: 動いている行に conductor の活動（turn_done・moved・background）も載せる |
 | `ndf relay mark` | `session_id`（string・必須・位置） |
 | `ndf relay notice` | 引数を受けない |
 | `ndf relay pending` | 引数を受けない |

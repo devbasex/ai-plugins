@@ -965,6 +965,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
                 "section": sec.number if sec else None,
                 "session_id": sec.session_id if sec else None,
                 "account": sec.account if sec else None,
+                # 会話の記録と背景のシェルの出力の場所は、ラッパーの環境で組んだもの（一覧を呼ぶ側の環境に依らない。#4036）
+                "transcript": str(observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)) if sec else None,
+                "shell_outputs": str(observe.shell_output_dir(self.s.environ, self.s.cwd, sec.session_id)) if sec else None,
             },
         )
 

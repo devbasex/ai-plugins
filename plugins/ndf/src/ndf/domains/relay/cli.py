@@ -180,7 +180,7 @@ def _outcome(got: hub.Outcome) -> int:
 def _hub(args: argparse.Namespace) -> int:
     ctx = hub_context(os.environ)
     if args.action == "ls":
-        rows = hub.listing(ctx)
+        rows = hub.listing(ctx, activity=args.activity)
         return result.emit(result.result(TOOL, result.OK, f"名前つきのラッパー: {len(rows)} 本", items=rows))
     if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
@@ -388,6 +388,7 @@ def _parser() -> argparse.ArgumentParser:
     cap = p["cap"].add_mutually_exclusive_group()
     cap.add_argument("--named", type=int, help="マシンの設定の上限を書く（1 以上の整数）")
     cap.add_argument("--clear", action="store_true", help="マシンの設定を消す（環境変数 → 上限の設定に戻る）")
+    p["ls"].add_argument("--activity", action="store_true", help="動いている行に conductor の活動（turn_done・moved・background）も載せる")
     p["restart"].add_argument("name")
     stop = p["stop"].add_mutually_exclusive_group(required=True)
     stop.add_argument("name", nargs="?", help="止めるラッパーの名前")

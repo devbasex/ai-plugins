@@ -393,9 +393,10 @@ class _Lane:
         path.write_text("x", encoding="utf-8")
         os.utime(path, (mtime, mtime))
 
-    def read(self, pid=10, **row):
-        look = observe.Look(self.environ, NOW, SIZE, observe.process_parents(self.proc), self.proc)
-        return observe.conductor_activity({"session_id": SID, "cwd": str(CWD), "pid": pid, **row}, self.wrapper, look)
+    def read(self, pid=10, now=NOW, **row):
+        look = observe.Look(now, SIZE, lambda: observe.process_parents(self.proc), self.proc)
+        paths = {"transcript": str(self.transcript), "shell_outputs": str(observe.shell_output_dir(self.environ, CWD, SID))}
+        return observe.conductor_activity({"session_id": SID, "pid": pid, **paths, **row}, self.wrapper, look)
 
 
 def _act(turn_done, moved, background):
@@ -465,6 +466,38 @@ def test_4036_a_finished_shell_without_output_moves_the_time_to_now(tmp_path):
     assert lane.read() == _act(True, NOW, 0)
 
 
+def test_4036_a_finished_shell_without_output_keeps_the_time_it_was_first_seen(tmp_path):
+    """出力のファイルが消えたシェルは、同じ Stop の記録の間は最初に終わりを確かめた時刻のまま（読み直すたびに 0 へ戻さない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "b1", "type": "shell"}])
+    assert lane.read(now=NOW)["moved"] == NOW
+    assert lane.read(now=NOW + 900) == _act(True, NOW, 0)
+    lane.activity([{"id": "b1", "type": "shell"}], at="2026-11-23T00:30:00+00:00")  # 次の Stop の記録では確かめ直す
+    assert lane.read(now=NOW + 1800)["moved"] == NOW + 1800
+
+
+def test_4036_a_second_shell_ending_is_seen_afresh(tmp_path):
+    """終わったシェルの数が増えたら、前のシェルの終わりの時刻を使わない（長いシェルが終わった直後を止まりと読まない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(1)
+    lane.activity([{"id": "b1", "type": "shell"}, {"id": "b2", "type": "shell"}])
+    assert lane.read(now=NOW) == _act(True, NOW, 1)
+    (lane.proc / "20").rename(lane.proc / "gone")
+    assert lane.read(now=NOW + 900) == _act(True, NOW + 900, 0)
+
+
+def test_4036_proc_is_not_scanned_while_the_conductor_is_answering(tmp_path):
+    """シェルの生死を確かめる行に届かなければ /proc を読まない。"""
+    lane = _Lane(tmp_path)
+    lane.transcript.write_text(json.dumps(_assistant("tool_use", _tool_use("t1"), at=T0)) + "\n", encoding="utf-8")
+    calls = []
+    look = observe.Look(NOW, SIZE, lambda: calls.append(1), lane.proc)
+    paths = {"transcript": str(lane.transcript), "shell_outputs": str(tmp_path)}
+    assert observe.conductor_activity({"session_id": SID, "pid": 10, **paths}, lane.wrapper, look) == _act(False, None, None)
+    assert calls == []
+
+
 @pytest.mark.parametrize("pid", [None, "10", 99], ids=["no-pid", "not-int", "no-claude"])
 def test_4036_shells_that_cannot_be_checked_leave_the_count_unknown(tmp_path, pid):
     """シェルの生死を確かめられなければ、一覧が空でも数を None にする（止まりの根拠にしない）。"""
@@ -510,7 +543,9 @@ def test_4036_an_activity_written_in_the_same_second_as_the_turn_is_used(tmp_pat
     assert lane.read()["background"] == 0
 
 
-@pytest.mark.parametrize("row", [{"session_id": None}, {"cwd": None}], ids=["no-session", "no-cwd"])
+@pytest.mark.parametrize(
+    "row", [{"session_id": None}, {"transcript": None}, {"shell_outputs": None}], ids=["no-session", "no-transcript", "no-outputs"]
+)
 def test_4036_a_row_without_its_session_has_no_activity(tmp_path, row):
     lane = _Lane(tmp_path)
     assert lane.read(**row) == _act(None, None, None)

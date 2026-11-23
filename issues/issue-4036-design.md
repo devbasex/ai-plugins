@@ -136,7 +136,7 @@ flowchart TB
 
 | キー | 型 | 中身 |
 | --- | --- | --- |
-| `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは conductor の最後の応答の時刻（`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す）を入れる |
+| `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは無活動の判定に使った最後の活動の時刻を入れる。conductor の最後の応答の時刻だけでなく、終わったとみなして除いた背景の作業の時刻も含めた最も遅いもの（上の `Activity.moved`。`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す） |
 | `background` | integer / null | 背景の作業の件数。`idle_conductor` のときは 0 |
 
 `ndf relay ls` の行に `session_id` と `cwd` を足す（会話の記録のパスを組むため）。既存のキーは変えない。

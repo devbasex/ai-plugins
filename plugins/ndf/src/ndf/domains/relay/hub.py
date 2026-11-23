@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import os
 import time
@@ -495,15 +496,16 @@ def _confirm(ctx: Context, name: str) -> Outcome:
     return Outcome(got.ok, got.reason, "" if got.ok else "precondition", [{"name": name}])
 
 
-def listing(ctx: Context) -> list[dict[str, Any]]:
+def listing(ctx: Context, activity: bool = False) -> list[dict[str, Any]]:
     """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。
 
-    動いている行には conductor の活動（`turn_done`・`moved`・`background`。#4036）も載せる。/proc の親の一覧は
-    1 回の一覧で 1 度だけ読み、全行で共有する。
+    `activity` が真（`ndf relay ls --activity`）なら、動いている行に conductor の活動（`turn_done`・`moved`・`background`。
+    #4036）も載せる。偽なら活動を読まず 3 つとも None。/proc の親の一覧はシェルの生死を確かめる行に届いたときに 1 度だけ読み、
+    全行で共有する。
     """
     running = set(registry.busy_names(ctx.state_dir))
     entries = registry.read_registry(hub_dir(ctx.state_dir))
-    look = _look(ctx) if running else None
+    look = _look() if activity and running else None
     out = []
     # 登録簿の行と、登録簿に無く錠を持つラッパー（ハブが数えるラッパーをすべて載せる。#3989 の決定 3）
     for name in sorted(set(entries) | set(running)):
@@ -513,15 +515,21 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
         listed = {**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False}
         session = _session(state, listed.get("cwd"))
         wrapper = registry.wrapper_dir(ctx.state_dir, name)
-        seen = observe.conductor_activity(session, wrapper, look) if look is not None and name in running else dict(observe.NO_ACTIVITY)
+        paths = {"transcript": (state or {}).get("transcript"), "shell_outputs": (state or {}).get("shell_outputs")}  # noqa: NDF501 ファイル: 状態が無ければ活動を読まない
+        seen = (
+            observe.conductor_activity({**session, **paths}, wrapper, look)
+            if look is not None and name in running
+            else dict(observe.NO_ACTIVITY)
+        )
         out.append({**listed, **session, **seen})
     return out
 
 
-def _look(ctx: Context) -> observe.Look:
-    """活動を読む材料（#4036）。会話の記録は Stop の hook と同じ末尾の大きさ（`hook.transcript-tail`）だけ読む。"""
+def _look() -> observe.Look:
+    """活動を読む材料（#4036）。会話の記録は Stop の hook と同じ末尾の大きさ（`hook.transcript-tail`）だけ読む。
+    会話の記録の場所はラッパーの状態の値を使うので、一覧を呼ぶ側の環境を渡さない。"""
     size = int(limits.value("hook.transcript-tail", "count"))
-    return observe.Look(ctx.environ, time.time(), size, observe.process_parents())
+    return observe.Look(time.time(), size, functools.cache(observe.process_parents))
 
 
 def _session(state: Optional[Mapping[str, Any]], cwd: Any) -> dict[str, Any]:

@@ -9,6 +9,7 @@
 | `log.jsonl` | セグメントの切り替えと、切り替えない理由が変わったときの 1 行 |
 | `next.json`・`question.json` | hook が書くシグナルファイル（`signals`） |
 | `activity.json` | Stop の hook が書く、最後の応答の時刻・セッション・背景の作業の一覧（`id`・`type`。観測できなければ `null`。`signals`） |
+| `shells-ended.json` | `ndf relay ls --activity` が書く、出力のファイルを読めない背景のシェルの終わりを最初に確かめた時刻（`observe`） |
 
 旧い NDF（10.x）のラッパーは `<旧い状態の根>/relay/<作業ディレクトリ>/relay.lock` を持つ。旧い状態の根は
 `NDF_STATE_HOME` → `$XDG_STATE_HOME/ndf` → `~/.local/state/ndf` の順で決まる（旧い NDF と同じ規則）。

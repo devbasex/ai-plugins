@@ -29,7 +29,7 @@ def _snap(state="running", complete=False, wakeable=(), running=(), reported=(),
 @pytest.fixture(autouse=True)
 def _no_liveness_probes(monkeypatch):
     """生死の判定の材料（`ndf relay ls`・`ndf progress wait`）を打たない。読めない材料は判定を unknown にし、止まりにしない。"""
-    monkeypatch.setattr(launch, "wrappers", lambda run=None: None)
+    monkeypatch.setattr(launch, "wrappers", lambda run=None, activity=False: None)
     monkeypatch.setattr(launch, "sprint_wait", lambda sprint_id, run=None: None)
 
 

@@ -95,7 +95,7 @@ def test_lanes_status_shows_an_idle_conductor_through_the_run_probes(opened, mon
         sid = store.create_machine(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].machine_id, None, [])
         lane.start_row(conn, pid, "a", "r1", sid)
     name = launch.wrapper_name(REPO, view.name, "a")
-    monkeypatch.setattr(launch, "wrappers", lambda run=None: {name: {**_row(moved=0.0), "name": name}})
+    monkeypatch.setattr(launch, "wrappers", lambda run=None, activity=False: {name: {**_row(moved=0.0), "name": name}})
     monkeypatch.setattr(launch, "sprint_wait", lambda sprint_id, run=None: IDLE_WAIT)
     with store.transaction(opened) as conn:
         out = plan.status(conn, pid, datetime.now(UTC), run.probes(REPO, view.name))
@@ -145,9 +145,10 @@ def _judged(tmp_path, tasks, *, subagent_at=None, live=0, output_at=None, now_af
         (proc / str(pid) / "cmdline").write_bytes(b"\0".join(a.encode() for a in args) + b"\0")
         (proc / str(pid) / "stat").write_text(f"{pid} ({Path(args[0]).name}) S {ppid} 0", encoding="utf-8")
     now = _stamp(CONDUCTOR_AT) + now_after
-    look = observe.Look(environ, now, 1 << 16, observe.process_parents(proc), proc)
+    look = observe.Look(now, 1 << 16, lambda: observe.process_parents(proc), proc)
     row = {"name": "w", "running": True, "state": "running", "session_id": "sid", "cwd": str(cwd), "pid": 10}
-    seen = observe.conductor_activity(row, wrapper, look)
+    paths = {"transcript": str(transcript), "shell_outputs": str(observe.shell_output_dir(environ, cwd, "sid"))}
+    seen = observe.conductor_activity({**row, **paths}, wrapper, look)
     return liveness.judge(RUN_ROW, liveness.SPRINT_IDLE, row, True, run.lane_activity({**row, **seen}), now)
 
 

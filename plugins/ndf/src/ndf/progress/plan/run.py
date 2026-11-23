@@ -124,7 +124,7 @@ def probes(repo: str, plan: str) -> liveness.Probes:
     活動が同じ一覧を使う）。
     """
     name = functools.partial(launch.wrapper_name, repo, plan)
-    table = functools.cache(lambda: launch.wrappers())
+    table = functools.cache(lambda: launch.wrappers(activity=True))
 
     def activity(lane_name: str) -> liveness.Activity | None:
         rows = table()

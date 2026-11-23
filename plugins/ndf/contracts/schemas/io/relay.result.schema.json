@@ -485,7 +485,7 @@
               "boolean",
               "null"
             ],
-            "description": "conductor の最後の応答が終わったか（hub ls。動いていない・会話の記録を読めなければ null）"
+            "description": "conductor の最後の応答が終わったか（hub ls --activity。求めていない・動いていない・会話の記録を読めなければ null）"
           },
           "moved": {
             "type": [
