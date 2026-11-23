@@ -131,8 +131,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `main` | `endpoint_refusal` が例外 | `account_dir` の読みの想定外の失敗 | `Exception` | `{"failure": "endpoint", "calls": 0}`（確かめられないので呼ばない） | 0 で終わる | 無し |
 | `main` | 入力が JSON でない・`text` が無い・`parent_exe` が無いか絶対パスでない・`parent_exe_id` が整数 2 つでない | 呼び手の誤り | `json.loads` | `{"failure": "shape", "calls": 0}` を書く | 0 で終わる | 無し |
-| `run_cases` | 組のファイルが読めない | ファイルが無い・形が違う | 読み込み | 呼び手（CLI）へ例外 | `ndf hooks judge-cases` が `refused` の結果 JSON と終了コード 1 | 直して打ち直す |
-| `run_cases` | 判定が `refused` で返る | 学習の設定の記録が無いか期限切れ（`ensure_training=False`）・下限より古い `claude` | `classify` の `failure` | 残りの例を打たずに `JudgeRefused(<classify の返りの error>)` を投げる（`error` が None なら理由は `refused`） | `ndf hooks judge-cases`（`_judge_cases`）が `JudgeRefused` を受け、`status` が `refused` の結果 JSON の `summary` に `reason` の文と案内（`ndf training check` か `claude` の更新）を載せて終了コード 1 | `ndf training check` か `claude` の更新の後に打ち直す |
+| `run_cases` | 組のファイルが読めない | ファイルが無い・形が違う | 読み込み | 呼び手（CLI）へ例外 | `ndf hooks judge-cases` が `result.stopped(TOOL, "refused", <読めない理由>)`（`status` は `stopped`・`cause.kind` は `refused`）と停止理由の表の終了コード | 直して打ち直す |
+| `run_cases` | 判定が `refused` で返る | 学習の設定の記録が無いか期限切れ（`ensure_training=False`）・下限より古い `claude`・中継の確かめ（`checks.begin`。`switch_account=False` でも打つ）が断った（認証を上書きする設定など） | `classify` の `failure` | 残りの例を打たずに `JudgeRefused(<classify の返りの error>)` を投げる（`error` が None なら理由は `refused`） | `ndf hooks judge-cases`（`_judge_cases`）が `JudgeRefused` を受け、`result.stopped(TOOL, "refused", <reason の文>)` を `result.emit` に渡す（`status` は `stopped`・`cause.kind` は `refused`・`cause.detail` が理由の文。終了コードは停止理由の表の `refused` の値）。`_judge_cases` は案内を足さない。対処は理由の文が出どころごとに持つ（学習の設定は `training_cache` の `ndf training check --runtime claude`、古い CLI は `cli_floor.TooOld` の「下限以上へ上げる」、中継は `AccountRefused.detail` の対処）ので、中継が断ったときに学習の設定や CLI の更新を案内しない | 理由の文が示す対処の後に打ち直す |
 
 ### 単体テストの観点
 
@@ -142,6 +142,7 @@ plugins/ndf/
 | `endpoint_refusal`（偽の `resolve` か一時ディレクトリの設定ファイル。実の `/etc` と利用者の設定は読まない） | 引数に接続の引数が無く、偽の `resolve` の返りが空 → None。子の環境の `ANTHROPIC_BASE_URL`（出所 `子の環境`）→ None | 設定の層の `env` に `FOO` だけ → None | `claude --settings x.json`・`claude --settings=x.json`・`claude --setting-sources=user`・`claude --setting-sources user` → 理由。偽の `resolve` に `keys` が渡り、返りの `unresolved` がある・`helper` がある・`key_origin` に `awsCredentialExport` がある・出所が `利用者の設定` の `ANTHROPIC_BASE_URL`・`HTTPS_PROXY`・`https_proxy`・`NO_PROXY` がある → 理由。`main` は理由があると偽の `call` を呼ばずに `endpoint` を書く。`parent_exe` の無い入力・相対パスの入力では偽の `call` を呼ばずに `shape` を書く。一時ディレクトリのファイルを `parent_exe` にし、`parent_exe_id` をその `[st_dev, st_ino]` と違う値にする（同じパスへ別のファイルを置き換えた形）と、偽の `call` を呼ばずに `endpoint` を書く |
 | `classify` の引数 | 起動の引数に `--setting-sources ""`・`--strict-mcp-config`・`--tools ""`・`--model <設定の値>` が入る | 設定の model を替えると引数が替わる | — |
 | `run_cases` | 偽の `call` で全件当たり → 外れ 0、打った回数は 件数 × `rounds`。偽の `call` に渡る起動の引数の先頭が既定の `claude` で、`options` が `LaunchOptions(ensure_training=False, switch_account=False)` | `rounds=1` で 1 周だけ打つ | 3 周のうち 1 周だけ外す偽の `call` → その例が外れとして出る。2 件目で `failure="refused"`・`error="学習の設定の記録が期限切れ"` を返す偽の `call` → 3 件目を打たずに `JudgeRefused` が上がり、`reason` がその文 |
+| `_judge_cases` | 偽の `run_cases` が外れ 0 → `status` が `ok` | — | 偽の `run_cases` が `JudgeRefused("…中継の理由…")` を投げる → `status` が `stopped`・`cause.kind` が `refused`・`cause.detail` がその文のまま（`ndf training check` などの案内を足さない） |
 
 ## guard `stop-wait`
 
