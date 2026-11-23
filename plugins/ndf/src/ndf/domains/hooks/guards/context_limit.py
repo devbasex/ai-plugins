@@ -2,52 +2,25 @@
 
 会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
 `context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、次の 1 手だけを残して止める。
-中継の内外とも、引き継ぎの文書を Write / Edit で書いてから（既存の文書は Edit / Write の前に Read が要るので Read も通す）応答の最後に次のセグメントのブロックを書く。中継の下では
-中継がセグメントを切り替え、外では人が新しいセッションで続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
+中継の下では応答の最後に次のセグメントのブロックを書いてセグメントを切り替え、外では引き継ぎの文書を書いて新しいセッションで
+続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
-from ndf.domains.hooks import strict, tables
+from ndf.domains.hooks import tables
 from ndf.domains.hooks.context import context_tokens
 from ndf.domains.relay.context_thresholds import thresholds
 from ndf.domains.relay.signals import relay_dir
 from ndf.domains.hooks.verdict import Verdict, deny, passing
 
 
-def _in_handoff(path: str, cwd: str, handoff_dir: str) -> bool:
-    """解決した読み取り先が、`cwd` を含むリポジトリのメインディレクトリの引継ぎディレクトリの直下か（PR 4220 の r7-1）。
-
-    `..` やシンボリックリンク（最後の要素も含む）は `realpath` で解く。メインディレクトリは共通の git ディレクトリの親で、
-    git のコマンドは起動しない。リポジトリの外なら偽。
-    """
-    root = strict._repo_root(Path(cwd))
-    if root is None:
-        return False
-    git_dir = strict._git_dir(root)
-    main = git_dir.parent if git_dir is not None else root
-    real = os.path.realpath(os.path.join(cwd, path))
-    want = os.path.join(os.path.realpath(main), handoff_dir.strip("/"))
-    return os.path.dirname(real) == want and os.path.basename(real) != ""
-
-
 def _next_step(ctx, handoff_dir: str) -> bool:
-    """引き継ぎの文書を読む・書く Tool の呼び出しか（既存の文書の Edit / Write は同じ会話での Read を前提にする）。
-
-    Read は解決後の読み取り先がメインディレクトリの引継ぎディレクトリの直下のときだけ通す（認証情報などを読ませない）。
-    Write / Edit の実パスでの判定は #3995 の後の単位で入れる（今は文字列を含むかだけを見る）。
-    """
+    """引き継ぎの文書を書く Tool の呼び出しか。"""
     path = ctx.tool_input.get("file_path")
-    if not isinstance(path, str):
-        return False
-    if ctx.tool == "Read":
-        return _in_handoff(path, ctx.cwd, handoff_dir)
-    return ctx.tool in ("Write", "Edit") and handoff_dir in path
+    return ctx.tool in ("Write", "Edit") and isinstance(path, str) and handoff_dir in path
 
 
 def check(ctx, svc) -> Verdict | None:
@@ -61,13 +34,9 @@ def check(ctx, svc) -> Verdict | None:
     if _next_step(ctx, handoff_dir):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
-    write = (
-        f"引き継ぎの文書を {handoff_dir} の下へ Write で書くか Edit で更新し（既存の文書をこの会話で読んでいなければ先に Read する。"
-        "handoff check は打たない。保存できなければブロックを出さずに理由を伝える）"
-    )
     if under:
-        step = f"{write}、応答の最後に次のセグメントのブロックを書いて終える（中継が新しいセッションで続ける）"
+        step = "Tool を呼ばずに、応答の最後に次のセグメントのブロックを書いて終える（中継が新しいセッションで続ける）"
     else:
-        step = f"{write}、次のセグメントのブロックを書いて新しいセッションで続ける"
+        step = f"引き継ぎの文書を {handoff_dir} の下へ Write で書き、新しいセッションで続ける"
     reason = f"文脈の量が上限（{limit} token）を超えた。次の 1 手: {step}"
     return deny(reason, notes={"context_tokens": tokens, "under_relay": under})
