@@ -655,50 +655,54 @@ def outcome_of(
     return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
 
 
-def _deliver(handoff: Handoff, system: str, root: Path) -> tuple[Delivery, Any]:
-    """結果の保存先をリンクをたどらずに 1 回開いて worker へ渡し、委譲の後に結果ファイルを 1 回だけ読む。
+def _deliver(handoff: Handoff, system: str, root: Path, wd: worker_paths.WorkDir) -> tuple[Delivery, Any]:
+    """開いた結果の保存先 `wd` を worker へ渡し、委譲の後に結果ファイルを 1 回だけ読む。読めなければ `bad_report` にして中身を返さない。"""
+    done = delegate(handoff, system, root=root, wd=wd)
+    if done.cause is not None:
+        return done, None
+    try:
+        return done, _read_result(wd, handoff.result_file.name)
+    except worker_paths.EntryError as exc:
+        done.cause, done.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
+        return done, None
 
-    保存先を開けなければ起動せずに `WorkerError`（invalid）。読めなければ `bad_report` にして中身を返さない。
+
+@contextlib.contextmanager
+def _result_dir(raw: str) -> Iterator[tuple[worker_paths.WorkDir, Path]]:
+    """`--result-file` の保存先を祖先のリンクを解きながら 1 回だけ開き、開いた保存先と解いた結果ファイルのパスを返す。
+
+    生の引数がディレクトリを指す形（末尾の `/`・`/.`・`/..`。`Path` はこれを落とす）か、保存先を開けなければ、
+    起動せずに `WorkerError`（invalid）。解くときに開いた記述子をそのまま使うので（`worker_paths.open_resolved`）、
+    解いてから起動前の削除までに保存先を別の実ディレクトリへ差し替えられても、差し替え先の同名のファイルを消さない。
     """
+    if worker_paths.names_a_directory(raw):
+        raise WorkerError("invalid", f"--result-file {raw} はディレクトリを指す（ファイルのパスを渡す）")
+    path = Path(raw).absolute()
     with contextlib.ExitStack() as stack:
         try:
-            wd = stack.enter_context(worker_paths.open_workdir(handoff.result_file.parent))
+            wd = stack.enter_context(worker_paths.open_resolved(path.parent))
         except (worker_paths.EntryError, OSError) as exc:  # 利用者の入力: 開けない結果の保存先は呼び出しの誤り
-            raise WorkerError("invalid", f"結果ファイルの保存先 {handoff.result_file.parent} を開けない: {exc}") from None
-        done = delegate(handoff, system, root=root, wd=wd)
-        if done.cause is not None:
-            return done, None
-        try:
-            return done, _read_result(wd, handoff.result_file.name)
-        except worker_paths.EntryError as exc:
-            done.cause, done.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
-            return done, None
-
-
-def _result_file(raw: str) -> Path:
-    """`--result-file` の祖先のリンクを解いた絶対パス（`worker_paths.resolve_ancestors`）。解けなければ `WorkerError`（invalid）。"""
-    path = Path(raw).absolute()
-    try:
-        return worker_paths.resolve_ancestors(path)
-    except (worker_paths.EntryError, OSError) as exc:  # 利用者の入力: 解けない保存先は呼び出しの誤り
-        raise WorkerError("invalid", f"結果ファイルの保存先 {path.parent} を解けない: {exc}") from None
+            raise WorkerError("invalid", f"結果ファイルの保存先 {path.parent} を開けない: {exc}") from None
+        yield wd, wd.path / path.name
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
     root = identity.load().root
+    prompt = _read_input(a.prompt_file, "作業の本文")
     # 相対パスはこのサブコマンドを呼んだ場所で解く（worker は --cwd で動き、親の確かめと worker の書き込みが同じ場所を指すようにする）
     # 祖先のリンク（macOS の /var→/private/var など）は解き、末尾の結果ファイルの名前は解かない（リンクなら delegate が拒む）
-    handoff = Handoff(
-        a.kind,
-        _read_input(a.prompt_file, "作業の本文"),
-        _result_file(a.result_file),
-        Path(a.cwd).resolve(),
-        Path(a.state_dir).resolve(),
-        tuple(_load_sources(a.sources)),
-        a.timeout,
-    )
-    system = system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources)
-    done, report = _deliver(handoff, system, root)
+    with _result_dir(a.result_file) as (wd, result_file):
+        handoff = Handoff(
+            a.kind,
+            prompt,
+            result_file,
+            Path(a.cwd).resolve(),
+            Path(a.state_dir).resolve(),
+            tuple(_load_sources(a.sources)),
+            a.timeout,
+        )
+        system = system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources)
+        done, report = _deliver(handoff, system, root, wd)
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:
         metrics[SEARCH_RECORD] = search_record(report)

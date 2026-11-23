@@ -1102,12 +1102,48 @@ def test_staged_write_restores_retired_names_when_publishing_fails(workdir, monk
     assert sorted(p.name for p in d.iterdir()) == ["done", "f", "result"]
 
 
-def test_resolve_ancestors_resolves_links_before_the_name_and_before_a_cancelled_part(tmp_path):
+def test_open_resolved_resolves_ancestor_links_and_leaves_a_cancelled_part_to_the_check(tmp_path):
     real = tmp_path / "real"
-    (real / "w").mkdir(parents=True)
+    (real / "w" / "sub").mkdir(parents=True)
     (tmp_path / "link").symlink_to(real)
-    (real / "w" / "out.json").symlink_to(tmp_path / "elsewhere.json")
+    (real / "w" / "alias").symlink_to(real / "w" / "sub")
     base = real.resolve() / "w"
-    assert worker_paths.resolve_ancestors(tmp_path / "link" / "w" / "out.json") == base / "out.json"
-    # `..` が打ち消す要素から先は解かずに残し、open_workdir の確かめに任せる
-    assert worker_paths.resolve_ancestors(tmp_path / "link" / "w" / "alias" / ".." / "r") == base / "alias" / ".." / "r"
+    with worker_paths.open_resolved(tmp_path / "link" / "w") as wd:
+        assert wd.path == base and worker_paths.dir_id(wd) == (base.stat().st_dev, base.stat().st_ino)
+    with worker_paths.open_resolved(tmp_path / "link" / "w" / "sub" / "..") as wd:
+        assert wd.path == base and worker_paths.dir_id(wd) == (base.stat().st_dev, base.stat().st_ino)
+    # `..` が打ち消す要素から先はリンクをたどらずに開く
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_resolved(tmp_path / "link" / "w" / "alias" / ".."):
+        pass
+    assert e.value.kind == "symlink"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+def test_open_resolved_refuses_dotdot_in_a_link_target_through_a_directory_without_search_permission(workdir):
+    # #3877 r4: リンクの先の `..` も記述子からカーネルに引かせる。検索権限の無いディレクトリは `..` で通れない
+    d, _ = workdir
+    (d / "private").mkdir()
+    (d / "via").symlink_to("private/..")
+    (d / "private").chmod(0o600)
+    try:
+        with pytest.raises(PermissionError), worker_paths.open_resolved(d / "via"):
+            pass
+    finally:
+        (d / "private").chmod(0o700)
+
+
+def test_staged_write_keeps_a_retired_name_whose_place_was_taken(workdir):
+    # #3877 r4: 退けた後に別の手が同じ名前へ書いたら、古いもので上書きせずに回収先を知らせる
+    d, _ = workdir
+    (d / "f").write_text("前", encoding="utf-8")
+    (d / "done").write_text("古い", encoding="utf-8")
+    (d / "result").write_text("{}", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with pytest.raises(worker_paths.RetiredKept) as e, worker_paths.staged_write(wd, "f", "", retire=("done", "result")):
+            (d / "done").write_text("新しい", encoding="utf-8")
+            raise OSError(28, os.strerror(28))
+    assert isinstance(e.value.__cause__, OSError)
+    ((name, kept),) = e.value.left
+    assert name == "done" and kept.read_text(encoding="utf-8") == "古い" and str(kept) in str(e.value)
+    assert (d / "done").read_text(encoding="utf-8") == "新しい" and (d / "result").read_text(encoding="utf-8") == "{}"
+    assert (d / "f").read_text(encoding="utf-8") == "前"

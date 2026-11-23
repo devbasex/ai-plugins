@@ -410,3 +410,40 @@ def test_run_accepts_a_result_file_under_a_linked_ancestor(tmp_path, monkeypatch
     got = json.loads(capsys.readouterr().out)
     resolved = str(work.resolve() / "out.json")
     assert got["status"] == "ok" and got["items"][0]["result_file"] == resolved and resolved in calls[0]
+
+
+def test_run_refuses_a_result_file_written_as_a_directory_without_removing_the_file(tmp_path, monkeypatch, capsys):
+    # #3877 r4: `Path` は末尾の `/` を落とす。生の引数でディレクトリを指す形なら、同名の既存のファイルを消さない
+    work, _ = _outside(tmp_path)
+    (work / "saved.json").write_text("利用者のファイル", encoding="utf-8")
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "saved.json/"]
+    worker.main(args + ["--cwd", ".", "--state-dir", "state"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid") and calls == []
+    assert (work / "saved.json").read_text(encoding="utf-8") == "利用者のファイル"
+
+
+def test_run_keeps_using_the_resolved_result_dir_when_it_is_swapped_before_launch(tmp_path, monkeypatch, capsys):
+    # #3877 r4: 解いた後に保存先を別の実ディレクトリへ差し替えられても、起動前の削除は差し替え先の同名のファイルに当たらない
+    work, _ = _outside(tmp_path)
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "out.json").write_text("前の結果", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    real = worker.delegate
+
+    def swap_then_delegate(h, s, **kw):
+        work.rename(tmp_path / "moved")
+        work.mkdir()
+        (work / "out.json").write_text("差し替え先のファイル", encoding="utf-8")
+        return real(h, s, call=lambda *args: claude.ClaudeReply(True, None, "終えた", 0.5), **kw)
+
+    monkeypatch.setattr(worker, "delegate", swap_then_delegate)
+    args = ["run", "--kind", "impl", "--prompt-file", "w/prompt.md", "--result-file", "w/out.json"]
+    worker.main(args + ["--cwd", ".", "--state-dir", "state"])
+    assert (work / "out.json").read_text(encoding="utf-8") == "差し替え先のファイル"
+    assert not (tmp_path / "moved" / "out.json").exists()

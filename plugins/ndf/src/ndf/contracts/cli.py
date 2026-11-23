@@ -140,15 +140,6 @@ def _expected_result_dir(directory: Path) -> Optional[tuple[int, int]]:
     return int(dev), int(ino)
 
 
-def _names_a_directory(raw: str) -> bool:
-    """`--out` の生の引数がディレクトリを指す形（空・末尾の区切り・末尾の `.`・`..`）なら真。"""
-    seps = (os.sep, os.altsep) if os.altsep else (os.sep,)
-    last = raw
-    for sep in seps:
-        last = last.rsplit(sep, 1)[-1]
-    return last in ("", ".", "..")
-
-
 def _cmd_emit(a: argparse.Namespace) -> int:
     obj = _result_from_args(a)
     if a.out is None:
@@ -160,7 +151,7 @@ def _cmd_emit(a: argparse.Namespace) -> int:
     if not line:
         return code
     # `Path` は末尾の `/`・`/.` を落とすので、ディレクトリとして指定された生の引数をファイルの書き込み先にしない
-    if _names_a_directory(a.out):
+    if worker_paths.names_a_directory(a.out):
         return result.emit(result.stopped(TOOL, "invalid", f"--out {a.out} はディレクトリを指す（ファイルのパスを渡す）"))
     out = Path(a.out).absolute()
     # リンクをたどらずに新しい inode として書く（worker の起動後に結果パスをリンクへ差し替えられても、指示先の外を書き換えない）。

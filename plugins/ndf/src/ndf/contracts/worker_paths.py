@@ -47,6 +47,15 @@ class EntryUnsafe(EntryError):
         self.kind = kind
 
 
+class RetiredKept(EntryError):
+    """`staged_write` が退けた名前を、公開に落ちた後に元へ戻せなかった。`left` は名前と回収先のパスの組の並び。"""
+
+    def __init__(self, left: list[tuple[str, Path]]) -> None:
+        shown = "・".join(f"{name} は {path}" for name, path in left)
+        super().__init__(f"退けた名前を元へ戻せなかった（元の名前が埋まっているなど。上書きせずに残した: {shown}）")
+        self.left = left
+
+
 class EntryUnreadable(EntryError):
     """通常のファイルを読めない、または UTF-8 として解けない。"""
 
@@ -113,20 +122,76 @@ def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, Origin]:
     return _paths_under(base, name), Origin(missing, anchor)
 
 
-def resolve_ancestors(path: Path) -> Path:
-    """ファイルのパス `path` の祖先のリンクを、ある要素まで厳密に解いた絶対パス。末尾の名前と無い残りの要素は解かずに足す。
+def names_a_directory(raw: str) -> bool:
+    """利用者が渡したファイルのパスの生の文字列が、ディレクトリを指す形（空・末尾の区切り・末尾の `.`・`..`）なら真。
 
-    利用者が渡した保存先（`ndf worker run --result-file`）を、リンクを経た作業ディレクトリ（macOS の `/var`→`/private/var`
-    など）でも `open_workdir` で開けるようにするため。worker へは解いたパスを渡すので、worker の
-    `ndf contracts emit --out` もリンクを経ずに開ける。末尾の名前がリンクでも解かない（開いた後の操作が拒む）。
-    `..` があれば、最初の `..` が打ち消す要素の手前までだけ解き、打ち消す要素から先は解かずに残す。打ち消す要素が
-    リンクか無いときに拒むのは `open_workdir`（`_open_dir_through_dotdot`）の確かめに任せる。
-    参照先の無いリンク・リンクの循環は `EntryUnsafe`（`symlink`）、ディレクトリでない要素は `EntryUnsafe`（`other`）
-    （`_resolve_existing`）。
+    `Path` は末尾の `/`・`/.` を落とすので、`Path` にした後では `saved.json/` と `saved.json` を見分けられない。
     """
-    parts = path.absolute().parts
-    cut = max(parts.index("..") - 1, 1) if ".." in parts else len(parts) - 1
-    return _resolve_existing(Path(*parts[:cut]))[0].joinpath(*parts[cut:])
+    last = raw
+    for sep in (os.sep, os.altsep):
+        if sep:
+            last = last.rsplit(sep, 1)[-1]
+    return last in ("", ".", "..")
+
+
+@contextlib.contextmanager
+def open_resolved(directory: Path) -> Iterator[WorkDir]:
+    """祖先のリンクを解きながら作業ディレクトリを 1 回だけ開き、抜けるときに閉じる。`WorkDir.path` は解いた場所である。
+
+    利用者が渡した保存先（`ndf worker run --result-file` の親）を、リンクを経た作業ディレクトリ（macOS の `/var`→`/private/var`
+    など）でも開くため。解くときに開いた記述子をそのまま返すので、解いてから開き直すまでに名前を別の実ディレクトリへ
+    差し替えられても差し替え先には当たらない。worker へは `WorkDir.path` を渡すので、worker の `ndf contracts emit --out`
+    もリンクを経ずに開け、`check_dir_id` で同じディレクトリかを突き合わせられる。
+    リンクとリンクの先の `..` は `_resolve_existing` と同じく確かめた親の記述子から 1 要素ずつ厳密に解き、`..` は記述子から
+    カーネルに引かせる（検索権限の無いディレクトリを `..` で通れない）。`..` があれば、最初の `..` が打ち消す要素の手前までを
+    そのように解き、打ち消す要素から先は `_open_dir_through_dotdot` と同じくリンクをたどらずに開く（打ち消す要素がリンクなら
+    `EntryUnsafe`（`symlink`）、無い・ディレクトリでなければ `EntryUnsafe`（`other`））。作らない。無い要素は `FileNotFoundError`。
+    参照先の無いリンク・リンクの循環は `EntryUnsafe`（`symlink`）、ディレクトリでない要素は `EntryUnsafe`（`other`）。
+    """
+    probe = Path(directory).absolute()
+    parts = probe.parts
+    cut = max(parts.index("..") - 1, 1) if ".." in parts else len(parts)
+    walk = _Walk(probe.anchor)
+    try:
+        for part in parts[1:cut]:
+            if part not in ("", ".") and not walk.enter(part, probe, strict=False):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(walk.path / part))
+        path = Path(os.path.abspath(walk.path.joinpath(*parts[cut:])))
+        rest = [p for p in parts[cut:] if p not in ("", ".")]
+        cancelled = _cancelled(rest)
+        fds = walk.fds
+        for i, part in enumerate(rest):
+            if part == "..":
+                if len(fds) > 1:
+                    _leave_dir(fds, probe)
+                continue
+            flags = _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            try:
+                child, _ = _open_child(fds[-1], part, flags, probe, create=False)
+            except FileNotFoundError:
+                if i in cancelled:
+                    raise EntryUnsafe(str(probe), "other") from None
+                raise
+            fds.append(child)
+        fd = fds.pop()
+    finally:
+        walk.close()
+    try:
+        yield WorkDir(path, fd)
+    finally:
+        os.close(fd)
+
+
+def _cancelled(parts: list[str]) -> set[int]:
+    """`parts` のうち、後の `..` が打ち消す要素の位置。"""
+    cancelled: set[int] = set()
+    stack: list[int] = []
+    for i, part in enumerate(parts):
+        if part != "..":
+            stack.append(i)
+        elif stack:  # 根の親は根
+            cancelled.add(stack.pop())
+    return cancelled
 
 
 def _check_worker_name(name: str) -> None:
@@ -189,7 +254,7 @@ def _walk_parts(walk: "_Walk", parts: Iterable[str]) -> list[str]:
         if part == "..":
             if missing:
                 missing.pop()
-            else:  # 解いた位置はリンクを含まないので、持っている親の記述子へ戻るだけでよい
+            else:  # 解いた位置はリンクを含まないので、記述子から引いた `..` が持っている親と同じかを確かめて戻る
                 walk.up()
             continue
         if not missing and walk.enter(part, walk.path / part, strict=False):
@@ -225,7 +290,15 @@ class _Walk:
         return Path(self.root).joinpath(*self.names)
 
     def up(self) -> None:
+        """`..` で 1 つ手前へ戻る。`..` は今の記述子からカーネルに引かせ（検索権限が無ければ `PermissionError`）、
+        手前の記述子と同じディレクトリでなければ `EntryUnsafe`（`replaced`）（`_leave_dir`）。"""
         if self.names:  # 根の親は根
+            _leave_dir(self.fds, self.path)
+            self.names.pop()
+
+    def to_root(self) -> None:
+        """絶対パスのリンクの先を解く前に根へ戻る（カーネルも `..` を通らずに根から引き直す）。"""
+        while self.names:
             os.close(self.fds.pop())
             self.names.pop()
 
@@ -275,8 +348,7 @@ class _Walk:
         if self.links < 0:
             raise EntryUnsafe(str(probe), "symlink")
         if target.startswith("/"):
-            while self.names:
-                self.up()
+            self.to_root()
         for part in target.split("/"):
             if part in ("", "."):
                 continue
@@ -352,13 +424,7 @@ def _open_dir_through_dotdot(probe: Path, *, create: bool) -> tuple[int, bool]:
     最後の位置も途中と同じ検索権限だけの記述子のまま返す（一覧の読み取り権限を求めない）。開いた記述子と、無かった要素を作ったかを返す。
     """
     parts = [p for p in probe.parts[1:] if p not in ("", ".")]
-    cancelled: set[int] = set()
-    stack: list[int] = []
-    for i, part in enumerate(parts):
-        if part != "..":
-            stack.append(i)
-        elif stack:  # 根の親は根
-            cancelled.add(stack.pop())
+    cancelled = _cancelled(parts)
     fds = [os.open(probe.anchor, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)]
     created = False
     try:
@@ -660,8 +726,10 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`owner`・`acl`）など）は退ける前に上がる。`retire` の名前は
     `remove_file` と同じく確かめてから私有の一時ディレクトリへ移し（リンク数が 1 の通常のファイルでなければ `EntryUnsafe`）、
     公開できた後にだけ消す。退けた名前ごとの `absent`・`removed` を本体へ渡す（公開できたときの結果）。
-    本体か公開（sticky bit の所有者の制約などで `os.replace` が落ちる）が上げれば、退けた名前を元へ戻し、
-    一時ファイルを片付けて上げ直す。戻せなかった名前があれば一時ディレクトリを消さずに残す（中身を失わない）。
+    退けている途中・本体・公開（sticky bit の所有者の制約などで `os.replace` が落ちる）のどれかが上げれば、退けた名前を
+    元の名前が空いているときだけ元へ戻し（`_restore_retired`）、一時ファイルを片付けて上げ直す。元の名前が埋まっている
+    （退けた後に別の手が同じ名前へ書いた）などで戻せなかった名前があれば、上書きせずに一時ディレクトリごと残し、
+    元の例外を原因にした `RetiredKept`（回収先のパスを持つ）を上げる。
     """
     _check_name(name)
     data = text.encode("utf-8")
@@ -680,6 +748,7 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     retired: list[tuple[str, str]] = []
     kept = True
     st: Optional[os.stat_result] = None
+    tmp_path = wd.path / tmp
     try:
         st = os.fstat(tmp_fd)
         # setgid のディレクトリの下では 0o2700 になるので、権限は所有者のほかに与えていないことだけを見る
@@ -699,11 +768,14 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
         published = True
+    except BaseException as exc:
+        left, kept = _restore_retired(wd, tmp_fd, tmp_path, retired)
+        if left:
+            raise RetiredKept(left) from exc
+        raise
     finally:
         if published:
             _drop_retired(tmp_fd, retired)
-        else:
-            kept = _restore_retired(wd, tmp_fd, retired)
         # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする。
         # 戻せなかった名前の中身を持つ一時ディレクトリも消さない
         _clean_tmp(wd, tmp_fd, tmp, st if private and kept else None, created=created, published=published)
@@ -729,18 +801,29 @@ def _drop_retired(tmp_fd: int, retired: list[tuple[str, str]]) -> None:
             os.unlink(slot, dir_fd=tmp_fd)
 
 
-def _restore_retired(wd: WorkDir, tmp_fd: int, retired: list[tuple[str, str]]) -> bool:
-    """公開できなかったときに、退けた名前を元へ戻す。すべて戻せれば真。
+def _restore_retired(wd: WorkDir, tmp_fd: int, tmp_path: Path, retired: list[tuple[str, str]]) -> tuple[list[tuple[str, Path]], bool]:
+    """公開できなかったときに、退けた名前を元の名前が空いているときだけ戻す。
 
-    戻せなかった名前は一時ディレクトリに残し、元の失敗を上げるために、ここでは上げない。
+    `os.link` は名前が埋まっていれば `FileExistsError` で失敗するので、空いているかの確かめと戻すことが 1 回の
+    呼び出しで済む（`rename` は埋まった名前を黙って上書きする）。リンクをたどらない（退けた後にリンクへ差し替えられても
+    リンク自体を戻す）。戻せた名前は一時ディレクトリの側の名前を消す。
+    戻せなかった名前と回収先のパスの組の並びと、一時ディレクトリを消してよいか（中身が残っていなければ真）を返す。
+    元の失敗を上げるため、ここでは上げない。
     """
-    ok = True
+    left: list[tuple[str, Path]] = []
+    empty = True
     for name, slot in reversed(retired):
         try:
-            os.rename(slot, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
-        except OSError:  # noqa: NDF401 ファイル: 戻せなければ一時ディレクトリに中身を残し、元の失敗を上げる
-            ok = False
-    return ok
+            os.link(slot, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
+        except OSError:  # noqa: NDF401 ファイル: 戻せなければ一時ディレクトリに中身を残し、回収先を知らせる
+            left.append((name, tmp_path / slot))
+            empty = False
+            continue
+        try:
+            os.unlink(slot, dir_fd=tmp_fd)
+        except OSError:  # noqa: NDF401 ファイル: 元の名前へは戻せた。残った側の名前ごと一時ディレクトリを残す
+            empty = False
+    return left, empty
 
 
 _ACL_ACCESS = "system.posix_acl_access"
