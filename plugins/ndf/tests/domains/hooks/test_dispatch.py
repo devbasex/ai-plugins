@@ -104,6 +104,42 @@ def test_combine_shows_only_the_sole_texts_of_the_strongest_kind():
     assert dispatch.combine([deny("x"), advise("h"), Verdict("advise", context="s", sole=True)]).reason == "x"
 
 
+def test_combine_joins_every_sole_text_in_order():
+    got = dispatch.combine([deny("x"), deny("h1", sole=True), deny("y"), deny("h2", sole=True)])
+    assert got.kind == "deny" and got.reason == "h1\n\nh2"
+
+
+def test_combine_skips_empty_texts_when_joining():
+    assert dispatch.combine([deny(""), deny("x"), deny(""), deny("y")]).reason == "x\n\ny"
+    assert dispatch.combine([advise(""), advise("a")]).context == "a"
+
+
+def test_combine_with_an_empty_sole_text_drops_the_other_texts():
+    # 今の振る舞い: `sole` の判定を選んでから空の文を外すので、`sole` の文が空なら結果の文も空になる
+    got = dispatch.combine([deny("x"), deny("", sole=True)])
+    assert got.kind == "deny" and got.reason == ""
+
+
+def test_combine_keeps_pushback_as_a_reason_kind():
+    got = dispatch.combine([advise("a"), pushback("p"), pushback("q"), Verdict("pass")])
+    assert got.kind == "pushback" and got.reason == "p\n\nq" and got.context == ""
+
+
+def test_combine_of_advises_puts_the_text_in_context():
+    got = dispatch.combine([Verdict("pass"), advise("a"), Verdict("advise", context="b", sole=True)])
+    assert got.kind == "advise" and got.context == "b" and got.reason == ""
+
+
+def test_combine_of_only_passes_is_the_plain_pass():
+    got = dispatch.combine([Verdict("pass", notes={"n": 1}), Verdict("pass")])
+    assert got is dispatch.PASS
+
+
+def test_combine_does_not_carry_key_notes_or_sole():
+    got = dispatch.combine([deny("x", key="k", notes={"n": 1}, sole=True)])
+    assert got == Verdict("deny", reason="x")
+
+
 def test_long_injection_is_written_to_a_file_and_replaced_by_its_path(tmp_path, fake_guards, monkeypatch):
     # M3-H5・IH8: 注入の上限（PreToolUse は 600 字）を超える文はファイルへ書き、パスと先頭を入れる
     long_text = "長い案内。" * 400
