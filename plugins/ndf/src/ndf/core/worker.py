@@ -67,7 +67,6 @@ from ndf.adapters import claude, git
 from ndf.contracts import causes, exit_codes, result, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable_locks
-from ndf.core.plan import files as plan_files
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
 
@@ -303,33 +302,39 @@ class Delivery:
     notice: Optional[str] = None
 
 
-def _written(path: Path) -> bool:
+def _written(wd: worker_paths.WorkDir, name: str) -> bool:
+    """結果ファイルが空でなければ真。大きさだけを見て中身を読まない。リンクなら `EntryUnsafe` を上げる。"""
+    st = worker_paths.entry_state(wd, name)
+    return st is not None and st.st_size > 0
+
+
+def _read_result(wd: worker_paths.WorkDir, name: str) -> Any:
+    """結果ファイルをリンクをたどらずに 1 回読んで解く。無いか JSON でなければ None。読めなければ `EntryError` を上げる。"""
+    text = worker_paths.read_file(wd, name)
+    if text is None:
+        return None
     try:
-        return path.stat().st_size > 0
-    except OSError:  # noqa: NDF401 ファイル: 無い結果ファイルは書かれていないとして再起動する
-        return False
+        return json.loads(text)
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: JSON でない結果ファイルは形の違う報告として None で返す
+        return None
 
 
 def _strings(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
-def search_record(path: Path) -> Optional[dict[str, list[str]]]:
-    """結果ファイルの、期待値の直書きを探した記録（探した語 `terms` と見つけたテストのファイル `files`）。
+def search_record(report: Any) -> Optional[dict[str, list[str]]]:
+    """解いた結果ファイル `report` の、期待値の直書きを探した記録（探した語 `terms` と見つけたテストのファイル `files`）。
 
-    形が違う・結果ファイルを読めなければ None（探していないとみなす）。変えた定義が無い修正は語を空の並びで書く。"""
-    try:
-        got = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない結果ファイルは記録が無いとして再起動する
-        return None
-    metrics = got.get("metrics") if isinstance(got, dict) else None
+    形が違えば None（探していないとみなす）。変えた定義が無い修正は語を空の並びで書く。"""
+    metrics = report.get("metrics") if isinstance(report, dict) else None
     record = metrics.get(SEARCH_RECORD) if isinstance(metrics, dict) else None
     if not isinstance(record, dict) or not all(_strings(record.get(k)) for k in ("terms", "files")):
         return None
     return {"terms": record["terms"], "files": record["files"]}
 
 
-def _missing_record(handoff: Handoff) -> bool:
+def _missing_record(handoff: Handoff, wd: worker_paths.WorkDir) -> bool:
     """手順に探した記録を持つ作業種別の済んだ（status が ok の）結果ファイルに、その記録が無ければ真。
 
     判断が要る（gate）・できなかった（stopped）結果は再起動せずに `outcome_of` へ渡す。再起動すると worker の書いた
@@ -337,8 +342,8 @@ def _missing_record(handoff: Handoff) -> bool:
     """
     if handoff.kind not in RECORD_KINDS:
         return False
-    report = plan_files.read_json(handoff.result_file)
-    return isinstance(report, dict) and report.get("status") == OK and search_record(handoff.result_file) is None
+    report = _read_result(wd, handoff.result_file.name)
+    return isinstance(report, dict) and report.get("status") == OK and search_record(report) is None
 
 
 def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
@@ -373,9 +378,9 @@ def _args_for(system: str, root: Optional[Path], cwd: Path) -> claude.PluginArgs
     return claude.claude_launch(claude.ClaudeCall(system, claude.Permission.FULL), root, cwd=cwd)
 
 
-def _stopped_detail(handoff: Handoff) -> str:
+def _stopped_detail(handoff: Handoff, wd: worker_paths.WorkDir) -> str:
     """再起動しても結果ファイル（か探した記録）が書かれなかったときの説明。"""
-    lacks = f"に探した記録（metrics.{SEARCH_RECORD}）" if _written(handoff.result_file) else ""
+    lacks = f"に探した記録（metrics.{SEARCH_RECORD}）" if _written(wd, handoff.result_file.name) else ""
     return f"作業 {handoff.kind} の worker が {RESUMES} 回再起動しても結果ファイル {handoff.result_file} {lacks}を書かなかった"
 
 
@@ -383,18 +388,34 @@ def delegate(
     handoff: Handoff,
     system: str,
     *,
+    wd: worker_paths.WorkDir,
     root: Optional[Path] = None,
     call: Caller = claude.call_claude,
     session: Optional[str] = None,
 ) -> Delivery:
     """worker を起動し、結果ファイルが書かれるまで同じ会話を `RESUMES` 回まで再起動する。
 
-    前の試行の結果ファイルは起動の前に消す。結果ファイルがあれば `cause` が None、再起動しても無ければ
-    `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。
+    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは起動の前に
+    消し、消せない（リンクなど）なら起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても
+    無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
+    リンクになったか読めなければ、再起動せずに `bad_report` にする。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
-    handoff.result_file.unlink(missing_ok=True)
+    try:
+        worker_paths.remove_file(wd, handoff.result_file.name)
+    except worker_paths.EntryError as exc:
+        out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
+        return out
     base, out.notice = _args_for(system, root, handoff.cwd)
+    try:
+        _resume_until_written(handoff, wd, out, base, call)
+    except worker_paths.EntryError as exc:
+        out.cause, out.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
+    return out
+
+
+def _resume_until_written(handoff: Handoff, wd: worker_paths.WorkDir, out: Delivery, base: list[str], call: Caller) -> None:
+    """`delegate` の起動と再起動。結果ファイルがリンクになったか読めなければ `EntryError` を上げる。"""
     argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
@@ -402,14 +423,13 @@ def delegate(
             reply = call(argv, prompt, handoff.timeout, handoff.cwd)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])
-        written = _written(handoff.result_file)
-        if (written and not _missing_record(handoff)) or _reply_failed(reply, out):
-            return out
+        written = _written(wd, handoff.result_file.name)
+        if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
+            return
         argv = base + ["--resume", out.session]
         prompt = RECORD_PROMPT if written else RESUME_PROMPT
     out.cause = "work_stopped"
-    out.detail = _stopped_detail(handoff)
-    return out
+    out.detail = _stopped_detail(handoff, wd)
 
 
 # --- closing keywords ------------------------------------------------------------------------
@@ -601,14 +621,15 @@ def _gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
     return [_gap_of(g) for g in (raw if isinstance(raw, list) else [raw])]
 
 
-def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int) -> dict[str, Any]:
+def outcome_of(
+    kind: str, result_file: Path, report: Any, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int
+) -> dict[str, Any]:
     """worker が書いた結果ファイルの status を写した `worker run` の結果（#1682）。
 
     結果ファイルの status を読まずに ok を返すと、作業を残した worker の「判断が要る」「できなかった」が完了に
     化けるためである。gate（判断が要る）は承認ゲートの結果にし、stopped（できなかった）と欠け（gaps）の付いた ok は
-    欠けを付けた incomplete にする。読めないか形が違えば bad_report。
+    欠けを付けた incomplete にする。`report` は委譲の後に 1 回だけ読んで解いた結果ファイルで、無いか形が違えば bad_report。
     """
-    report = plan_files.read_json(result_file)
     status = report.get("status") if isinstance(report, dict) else None
     if not isinstance(report, dict) or status not in (OK, GATE, STOPPED):
         return result.stopped(
@@ -625,29 +646,49 @@ def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metric
     return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
 
 
+def _deliver(handoff: Handoff, system: str, root: Path) -> tuple[Delivery, Any]:
+    """結果の保存先をリンクをたどらずに 1 回開いて worker へ渡し、委譲の後に結果ファイルを 1 回だけ読む。
+
+    保存先を開けなければ起動せずに `WorkerError`（invalid）。読めなければ `bad_report` にして中身を返さない。
+    """
+    with contextlib.ExitStack() as stack:
+        try:
+            wd = stack.enter_context(worker_paths.open_workdir(handoff.result_file.parent))
+        except (worker_paths.EntryError, OSError) as exc:  # 利用者の入力: 開けない結果の保存先は呼び出しの誤り
+            raise WorkerError("invalid", f"結果ファイルの保存先 {handoff.result_file.parent} を開けない: {exc}") from None
+        done = delegate(handoff, system, root=root, wd=wd)
+        if done.cause is not None:
+            return done, None
+        try:
+            return done, _read_result(wd, handoff.result_file.name)
+        except worker_paths.EntryError as exc:
+            done.cause, done.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
+            return done, None
+
+
 def _cmd_run(a: argparse.Namespace) -> int:
     root = identity.load().root
     # 相対パスはこのサブコマンドを呼んだ場所で解く（worker は --cwd で動き、親の確かめと worker の書き込みが同じ場所を指すようにする）
     handoff = Handoff(
         a.kind,
         _read_input(a.prompt_file, "作業の本文"),
-        Path(a.result_file).resolve(),
+        Path(a.result_file).absolute(),
         Path(a.cwd).resolve(),
         Path(a.state_dir).resolve(),
         tuple(_load_sources(a.sources)),
         a.timeout,
     )
     system = system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources)
-    done = delegate(handoff, system, root=root)
+    done, report = _deliver(handoff, system, root)
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:
-        metrics[SEARCH_RECORD] = search_record(handoff.result_file)
+        metrics[SEARCH_RECORD] = search_record(report)
     items = [{"kind": "session", "session": done.session, "result_file": str(handoff.result_file)}]
     log.info("worker の受け渡しを終えた", extra={"kind": handoff.kind, "attempts": done.attempts, "cause": done.cause})
     if done.cause is not None:
         out = result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics)
     else:
-        out = outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts)
+        out = outcome_of(handoff.kind, handoff.result_file, report, items, metrics, done.attempts)
     if done.notice is not None:
         out.setdefault("warnings", []).append(done.notice)
     return result.emit(out)

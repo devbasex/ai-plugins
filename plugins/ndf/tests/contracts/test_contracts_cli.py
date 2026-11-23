@@ -281,11 +281,17 @@ def test_unreadable_fallback_matches_the_table():
     assert exit_codes.UNREADABLE_FALLBACK == exit_codes.code_of("unreadable")
 
 
-@pytest.mark.parametrize("rel", ["no-such/r.json", "."])
-def test_emit_unwritable_out_is_invalid(capsys, tmp_path, rel):
-    code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / rel))
+def test_emit_unwritable_out_is_invalid(capsys, tmp_path):
+    code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / "no-such" / "r.json"))
     assert (code, out) == (2, "")
     assert err.startswith("contracts: ") and err.count("\n") == 1
+
+
+def test_emit_refuses_an_out_that_is_a_directory(capsys, tmp_path):
+    # #3877: 通常のファイルでない --out はリンクと同じく stopped（invalid）の結果 JSON で断る
+    code, out, _ = _emit(capsys, "ok", "--out", str(tmp_path / "."))
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (2, "stopped", "invalid") and "directory" in got["summary"]
 
 
 @pytest.mark.parametrize("metrics", ["1", "[]", '"s"', "null"])
@@ -295,3 +301,28 @@ def test_emit_non_object_metrics_is_invalid(capsys, last_result, metrics):
     assert code == causes.exit_code("invalid")
     assert last_result(out)["cause"]["kind"] == "invalid"
     assert "JSON のオブジェクトでない" in err
+
+
+# #3877: --out はリンクをたどらずに書く。リンクの先も、共有する inode も書き換えない
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_emit_refuses_an_out_that_links_outside(capsys, tmp_path, link):
+    outside = tmp_path / "outside.json"
+    outside.write_text("利用者のファイル\n", encoding="utf-8")
+    work = tmp_path / "w"
+    work.mkdir()
+    dest = work / "r.json"
+    dest.symlink_to(outside) if link == "symlink" else dest.hardlink_to(outside)
+    code, out, _ = _emit(capsys, "ok", "--out", str(dest))
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert str(dest) in got["summary"] and link in got["summary"]
+    assert outside.read_text(encoding="utf-8") == "利用者のファイル\n"
+
+
+def test_emit_keeps_a_read_only_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    dest.write_text("old\n", encoding="utf-8")
+    dest.chmod(0o444)
+    code, out, err = _emit(capsys, "ok", "--out", str(dest))
+    assert (code, out) == (causes.exit_code("invalid"), "") and err.startswith("contracts: ")
+    assert dest.read_text(encoding="utf-8") == "old\n"
