@@ -36,6 +36,16 @@ class ContractsCopy:
 
 
 @pytest.fixture
+def workdir(tmp_path: Path) -> tuple[Path, Path]:
+    """`worker_paths` のテストが使う作業ディレクトリ（`d`）と、その外にある利用者のファイル（`outside`）。"""
+    d = tmp_path / "d"
+    d.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("利用者の中身", encoding="utf-8")
+    return d, outside
+
+
+@pytest.fixture
 def contracts_copy(tmp_path: Path) -> ContractsCopy:
     """プラグインのコントラクトを一時の保存先へ写して読み先にし、`edit(rel, fn)` で 1 ファイルを書き換える。"""
     root = tmp_path / "contracts"

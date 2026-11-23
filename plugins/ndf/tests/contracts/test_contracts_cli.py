@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.contracts import causes
 from ndf.contracts import cli as contracts_cli
 from ndf.contracts import exit_codes
@@ -281,11 +281,17 @@ def test_unreadable_fallback_matches_the_table():
     assert exit_codes.UNREADABLE_FALLBACK == exit_codes.code_of("unreadable")
 
 
-@pytest.mark.parametrize("rel", ["no-such/r.json", "."])
-def test_emit_unwritable_out_is_invalid(capsys, tmp_path, rel):
-    code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / rel))
+def test_emit_unwritable_out_is_invalid(capsys, tmp_path):
+    code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / "no-such" / "r.json"))
     assert (code, out) == (2, "")
     assert err.startswith("contracts: ") and err.count("\n") == 1
+
+
+def test_emit_refuses_an_out_that_is_a_directory(capsys, tmp_path):
+    # #3877: 通常のファイルでない --out はリンクと同じく stopped（invalid）の結果 JSON で断る
+    code, out, _ = _emit(capsys, "ok", "--out", str(tmp_path / "."))
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (2, "stopped", "invalid") and "directory" in got["summary"]
 
 
 @pytest.mark.parametrize("metrics", ["1", "[]", '"s"', "null"])
@@ -295,3 +301,77 @@ def test_emit_non_object_metrics_is_invalid(capsys, last_result, metrics):
     assert code == causes.exit_code("invalid")
     assert last_result(out)["cause"]["kind"] == "invalid"
     assert "JSON のオブジェクトでない" in err
+
+
+# #3877: --out はリンクをたどらずに書く。リンクの先も、共有する inode も書き換えない
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_emit_refuses_an_out_that_links_outside(capsys, tmp_path, link):
+    outside = tmp_path / "outside.json"
+    outside.write_text("利用者のファイル\n", encoding="utf-8")
+    work = tmp_path / "w"
+    work.mkdir()
+    dest = work / "r.json"
+    dest.symlink_to(outside) if link == "symlink" else dest.hardlink_to(outside)
+    code, out, _ = _emit(capsys, "ok", "--out", str(dest))
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert str(dest) in got["summary"] and link in got["summary"]
+    assert outside.read_text(encoding="utf-8") == "利用者のファイル\n"
+
+
+def test_emit_keeps_a_read_only_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    dest.write_text("old\n", encoding="utf-8")
+    dest.chmod(0o444)
+    code, out, err = _emit(capsys, "ok", "--out", str(dest))
+    assert (code, out) == (causes.exit_code("invalid"), "") and err.startswith("contracts: ")
+    assert dest.read_text(encoding="utf-8") == "old\n"
+
+
+def test_emit_refuses_an_out_whose_dotdot_cancels_a_link(capsys, tmp_path, monkeypatch):
+    # #3877 r1: `alias/..` を字面で畳まない。alias の先の親でも、字面で畳んだ場所でもなく、書く前に断る
+    (tmp_path / "far" / "inner").mkdir(parents=True)
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "alias").symlink_to(tmp_path / "far" / "inner")
+    (work / "r.json").write_text("利用者のファイル\n", encoding="utf-8")
+    monkeypatch.chdir(work)
+    code, out, _ = _emit(capsys, "ok", "--out", "alias/../r.json")
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert (work / "r.json").read_text(encoding="utf-8") == "利用者のファイル\n" and not (tmp_path / "far" / "r.json").exists()
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_emit_checks_the_result_dir_handed_by_worker_run(capsys, tmp_path, monkeypatch, same):
+    # #3877 r1: worker run が開いた保存先と違うディレクトリ（同名への差し替え）へは書かない
+    work = tmp_path / "w"
+    work.mkdir()
+    st = (work if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{work}")
+    code, out, _ = _emit(capsys, "ok", "--out", str(work / "r.json"))
+    got = json.loads(out)
+    if same:
+        assert (code, got["status"]) == (0, "ok") and (work / "r.json").exists()
+    else:
+        assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid") and "replaced" in got["summary"]
+        assert not (work / "r.json").exists()
+
+
+def test_emit_keeps_the_mode_of_an_existing_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    dest.write_text("old\n", encoding="utf-8")
+    dest.chmod(0o644)
+    code, _, _ = _emit(capsys, "ok", "--out", str(dest))
+    assert code == 0 and dest.stat().st_mode & 0o777 == 0o644 and json.loads(dest.read_text(encoding="utf-8"))["status"] == "ok"
+
+
+@pytest.mark.parametrize("suffix", ["/", "/.", "/.."])
+def test_emit_refuses_an_out_written_as_a_directory_without_touching_the_file(capsys, tmp_path, suffix):
+    # #3877 r3: `Path` は末尾の `/`・`/.` を落とす。生の引数でディレクトリを指す形なら、同名のファイルを書き換えない
+    dest = tmp_path / "r.json"
+    dest.write_text("利用者のファイル\n", encoding="utf-8")
+    code, out, _ = _emit(capsys, "ok", "--out", str(dest) + suffix)
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert dest.read_text(encoding="utf-8") == "利用者のファイル\n"

@@ -2,6 +2,8 @@
 
 4 つのファイル（プロンプト・報告・完了マーカー・作業の結果ファイル）の名前の形と接尾辞は
 このモジュールだけが持つ。手順書・テスト・使う側のサブコマンドは字面を持たずに `report_paths` を呼ぶ。
+作業ディレクトリを解いて開くところは `worker_paths_open` にあり、その公開の名前はここから引く
+（使う側は `worker_paths` だけを読み込めばよい）。
 """
 
 from __future__ import annotations
@@ -12,14 +14,70 @@ import os
 import re
 import secrets
 import stat
+import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
+from ndf.contracts.worker_paths_open import (
+    EntryError,
+    EntryUnsafe,
+    Origin,
+    WorkDir,
+    check_dir_id,
+    dir_id,
+    open_resolved,
+    open_workdir,
+    resolve_existing,
+)
+
+__all__ = [
+    "DONE_SUFFIX",
+    "EntryError",
+    "EntryUnreadable",
+    "EntryUnsafe",
+    "NAME_RE",
+    "NameInvalid",
+    "Origin",
+    "PROMPT_SUFFIX",
+    "REPORT_SUFFIX",
+    "RESULT_SUFFIX",
+    "ReportPaths",
+    "RetiredKept",
+    "WorkDir",
+    "check_dir_id",
+    "check_entries",
+    "check_removable",
+    "check_writable",
+    "dir_id",
+    "entry_state",
+    "names_a_directory",
+    "open_resolved",
+    "open_workdir",
+    "prepare_paths",
+    "read_file",
+    "remove_file",
+    "report_name",
+    "report_paths",
+    "reset_report",
+    "resolve_existing",
+    "staged_write",
+    "write_file",
+]
+
+
 NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+
+
 PROMPT_SUFFIX = ".prompt.md"
+
+
 REPORT_SUFFIX = ".report.md"
+
+
 DONE_SUFFIX = ".done"
+
+
 RESULT_SUFFIX = ".result.json"
 
 
@@ -27,21 +85,18 @@ class NameInvalid(ValueError):
     """worker の名前が `[A-Za-z0-9._-]` の 1〜64 文字でない。"""
 
 
-class EntryError(ValueError):
-    """作業ディレクトリの中の名前を安全に読み書きできない（`EntryUnsafe`・`EntryUnreadable` の親）。"""
+class RetiredKept(EntryError):
+    """`staged_write` が退けた名前を、公開に落ちた後に元へ戻せなかった。`left` は名前と回収先のパスの組の並び。
 
-
-class EntryUnsafe(EntryError):
-    """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced。
-
-    `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
-    または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_entries`）。
+    回収先は一時ディレクトリの記述子から引いた今の場所で、その場所が開いた一時ディレクトリと同じ inode だと確かめられた
+    ものだけを載せる（一時ディレクトリや親が改名・差し替えされていれば、作った時点のパスは別の場所を指しうる）。
+    確かめられなければ None にし、回収先を確かめられないと書く。
     """
 
-    def __init__(self, name: str, kind: str) -> None:
-        super().__init__(f"{name} はリンク数が 1 の通常のファイルでない（{kind}）")
-        self.name = name
-        self.kind = kind
+    def __init__(self, left: list[tuple[str, Optional[Path]]]) -> None:
+        shown = "・".join(f"{name} は {path}" if path is not None else f"{name} は回収先を確かめられない" for name, path in left)
+        super().__init__(f"退けた名前を元へ戻せなかった（元の名前が埋まっているなど。上書きせずに残した: {shown}）")
+        self.left = left
 
 
 class EntryUnreadable(EntryError):
@@ -51,17 +106,6 @@ class EntryUnreadable(EntryError):
         super().__init__(f"{name} を読めない: {reason}")
         self.name = name
         self.reason = reason
-
-
-class WorkDir(NamedTuple):
-    """開いた作業ディレクトリ。`path` は表示とパスを組むためだけに使い、操作は `fd` に対する相対で行う。
-
-    `created` は、根からたどる途中で最初の `open` に無かった要素（作った・間に現れた）を経て開いたこと。
-    """
-
-    path: Path
-    fd: int
-    created: bool = False
 
 
 class ReportPaths(NamedTuple):
@@ -77,7 +121,7 @@ def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportP
     """作業ディレクトリと worker の名前から 4 つの絶対パスを組む。ファイルの有無は見ない。
 
     `resolve` が真ならリンクを解くのは `directory` だけで、名前を足した後のパスには当てない（`prepare` が利用者の入力を受けるとき）。
-    解くのは存在する要素までで、参照先の無いリンクは解かずに `EntryUnsafe`（`symlink`）で拒む（`_resolve_existing`）。
+    解くのは存在する要素までで、参照先の無いリンクは解かずに `EntryUnsafe`（`symlink`）で拒む（`resolve_existing`）。
     偽なら `directory` も解かずに絶対パスにするだけである（`prepare` が返した解決済みのパスを受ける `append`・`collect`、
     supervise.py が選んだ状態の保存先を受ける `ndf answer work`）。
     """
@@ -85,17 +129,6 @@ def report_paths(directory: Path, name: str, *, resolve: bool = True) -> ReportP
         _check_worker_name(name)
         return _paths_under(Path(os.path.abspath(directory)), name)
     return prepare_paths(directory, name)[0]
-
-
-class Origin(NamedTuple):
-    """`prepare_paths` が解いた時点の観測。`open_workdir(origin=...)` へ渡し、開くときに突き合わせる。
-
-    `fresh` は解いた時点で無かった末尾の要素の数（0 なら保存先があった）。`anchor` はその手前の、解いた時点で
-    あった最も深いディレクトリ（`fresh` が 0 なら保存先そのもの）の `(st_dev, st_ino)` である。
-    """
-
-    fresh: int
-    anchor: tuple[int, int]
 
 
 def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, Origin]:
@@ -106,8 +139,20 @@ def prepare_paths(directory: Path, name: str) -> tuple[ReportPaths, Origin]:
     ディレクトリへ差し替えられたことも、開く側は `anchor` との突き合わせで知る。
     """
     _check_worker_name(name)
-    base, missing, anchor = _resolve_existing(directory)
+    base, missing, anchor = resolve_existing(directory)
     return _paths_under(base, name), Origin(missing, anchor)
+
+
+def names_a_directory(raw: str) -> bool:
+    """利用者が渡したファイルのパスの生の文字列が、ディレクトリを指す形（空・末尾の区切り・末尾の `.`・`..`）なら真。
+
+    `Path` は末尾の `/`・`/.` を落とすので、`Path` にした後では `saved.json/` と `saved.json` を見分けられない。
+    """
+    last = raw
+    for sep in (os.sep, os.altsep):
+        if sep:
+            last = last.rsplit(sep, 1)[-1]
+    return last in ("", ".", "..")
 
 
 def _check_worker_name(name: str) -> None:
@@ -125,306 +170,12 @@ def _paths_under(base: Path, name: str) -> ReportPaths:
     )
 
 
-def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
-    """根の側から 1 要素ずつ、確かめた親の記述子に対して次の要素だけを開いて解き、無い要素からは解かずに足す。
-
-    残った無い要素の数と、その手前の解いた最も深いディレクトリの `(st_dev, st_ino)` を組で返す。
-    `Path.resolve()`（`strict=False`）は参照先の無いリンクも先のパスへ解くので、`create=True` の `open_workdir` が
-    リンクの先にディレクトリを作ってしまう。ある要素（リンク自体を含む）を厳密に解き、解けなければ
-    （参照先の無いリンク・リンクの循環）作る前に `EntryUnsafe`（`symlink`）で拒む。無い残りの要素は `open_workdir` が
-    リンクを拒みながら作る。
-
-    根の側から確かめるのは、末尾の側から確かめると `parent/child` が無いと観測した後に別の利用者の `parent` が
-    現れたとき、`parent` を既存とみなして無い要素から外してしまうためである。根の側からなら、ある要素は
-    その子を確かめる前にあったと観測しており、無いと観測した要素はその後に現れても無い要素に残る。
-    各要素は確かめた親の記述子に対する `openat` で開き、絶対パスから解き直さない（`_Walk`）。解いている間に親を
-    差し替えられても、子の観測は確かめた親のものになり、差し替え先で得た識別子を `anchor` に記録しない。
-    返す `anchor` は最も深い記述子の `fstat` で、`open_workdir` が開いた記述子と突き合わせる。
-    1 要素につき親の記述子に対する呼び出しだけで済むので、深さ d の保存先で調べる要素は d 個である。
-
-    無い要素の後の `..` は無い要素を打ち消すだけにし、打ち消した後にまた要素が来れば、そこから確かめ直す。
-    ただし一度無いと観測した場所（解いた親の下の名前）は、`..` の後に同じ場所へ戻っても無い要素として残す
-    （`new/../new` で、観測の後に既存のディレクトリが `new` へ移されても既存とみなさない）。リンクの先として同じ場所へ
-    戻ったとき（`new/../alias` の `alias` が `new` を指す）は厳密にたどれないので `EntryUnsafe`（`replaced`）で拒む。
-    絶対パスのリンクなどで一度開いた場所を開き直したときは、前に開いたディレクトリと突き合わせ、違えば同じく拒む（`_Walk`）。
-    `open_workdir` は `os.path.abspath` で `..` を畳むので、返すパスに `..` を残すと開く場所と食い違う。
-    解いた要素はディレクトリであることを確かめ、通常のファイルなど（リンクの先を含む）なら次の `..` で
-    その親へ進む前に `EntryUnsafe`（`other`）で拒む。
-    """
-    probe = directory.absolute()
-    walk = _Walk(probe.anchor)
-    try:
-        missing = _walk_parts(walk, probe.parts[1:])
-        st = os.fstat(walk.fds[-1])
-        return walk.path.joinpath(*missing), len(missing), (st.st_dev, st.st_ino)
-    finally:
-        walk.close()
-
-
-def _walk_parts(walk: "_Walk", parts: Iterable[str]) -> list[str]:
-    """`parts` を `walk` の位置から順に解き、無いと観測した後の要素（`..` で打ち消した残り）を返す。"""
-    missing: list[str] = []
-    for part in parts:
-        if part in ("", "."):
-            continue
-        if part == "..":
-            if missing:
-                missing.pop()
-            else:  # 解いた位置はリンクを含まないので、持っている親の記述子へ戻るだけでよい
-                walk.up()
-            continue
-        if not missing and walk.enter(part, walk.path / part, strict=False):
-            continue
-        missing.append(part)
-    return missing
-
-
-# リンクをたどる回数の上限（Linux の MAXSYMLINKS と同じ）。超えたらリンクの循環とみなす
-_MAX_LINKS = 40
-
-
-class _Walk:
-    """`_resolve_existing` が解いている位置。`fds[i]` は根から `names[:i]` を開いた記述子で、抜けるまで開いたまま持つ。
-
-    次の要素は `fds[-1]`（確かめた親）に対してだけ開き、`..` は 1 つ手前の記述子へ戻る。
-    `seen` は開いた場所ごとの `(st_dev, st_ino)`、`absent` は無いと観測した場所で、リンクの先を解くときも共有する。
-    絶対パスのリンクや `..` の後に同じ場所を開き直したとき、前に開いたディレクトリでなければ（間に親を差し替えられた）
-    `EntryUnsafe`（`replaced`）で拒み、無いと観測した場所をリンクの先として厳密にたどるときも同じく拒む。
-    """
-
-    def __init__(self, root: str) -> None:
-        self.root = root
-        self.fds = [os.open(root, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)]
-        self.names: list[str] = []
-        self.links = _MAX_LINKS
-        st = os.fstat(self.fds[0])
-        self.seen: dict[Path, tuple[int, int]] = {Path(root): (st.st_dev, st.st_ino)}
-        self.absent: set[Path] = set()
-
-    @property
-    def path(self) -> Path:
-        return Path(self.root).joinpath(*self.names)
-
-    def up(self) -> None:
-        if self.names:  # 根の親は根
-            os.close(self.fds.pop())
-            self.names.pop()
-
-    def close(self) -> None:
-        for fd in self.fds:
-            os.close(fd)
-        self.fds.clear()
-
-    def enter(self, part: str, probe: Path, *, strict: bool) -> bool:
-        """確かめた親の直下の `part` へ進む。リンクなら確かめた親から先を厳密に解く。
-
-        無ければ、`strict` なら `EntryUnsafe`（`symlink`。リンクの先が無い）、そうでなければ偽を返し、無いと観測した場所に記録する。
-        記録した場所は後に現れても開かず、`strict` なら `EntryUnsafe`（`replaced`）、そうでなければ偽にする。
-        前に開いた場所を別のディレクトリとして開いたら `EntryUnsafe`（`replaced`）。
-        ディレクトリでなければ（リンクの先を含む）`EntryUnsafe`（`other`）。
-        """
-        key = self.path / part
-        if key in self.absent:
-            if strict:
-                raise EntryUnsafe(str(probe), "replaced")
-            return False
-        parent = self.fds[-1]
-        try:
-            child = _lookup(parent, part)
-        except OSError as e:
-            if e.errno not in (errno.ELOOP, errno.ENOTDIR):
-                raise
-            if _refused_kind(parent, part) != "symlink":
-                raise EntryUnsafe(str(probe), "other") from None
-            self._follow(os.readlink(part, dir_fd=parent), probe)
-            return True
-        if child is None:
-            if strict:
-                raise EntryUnsafe(str(probe), "symlink")
-            self.absent.add(key)
-            return False
-        self.fds.append(child)
-        self.names.append(part)
-        st = os.fstat(child)
-        if self.seen.setdefault(key, (st.st_dev, st.st_ino)) != (st.st_dev, st.st_ino):
-            raise EntryUnsafe(str(probe), "replaced")
-        return True
-
-    def _follow(self, target: str, probe: Path) -> None:
-        """リンクの中身 `target` を、リンクのある親（絶対なら根）から 1 要素ずつ厳密に解く。"""
-        self.links -= 1
-        if self.links < 0:
-            raise EntryUnsafe(str(probe), "symlink")
-        if target.startswith("/"):
-            while self.names:
-                self.up()
-        for part in target.split("/"):
-            if part in ("", "."):
-                continue
-            if part == "..":
-                self.up()
-                continue
-            self.enter(part, probe, strict=True)
-
-
-def _lookup(parent: int, part: str) -> Optional[int]:
-    """確かめた親 `parent` の直下の `part` を、リンクをたどらずにディレクトリとして開く。無ければ None。
-
-    リンクか、ディレクトリでなければ `OSError`（`ELOOP`・`ENOTDIR`）を上げる。
-    """
-    try:
-        return os.open(part, _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 無い要素は無い要素として残す
-        return None
-
-
 def report_name(report: Path) -> tuple[Path, str]:
     """起動指示の「置く場所」（`<名前>.report.md`）から、作業ディレクトリと worker の名前を取り出す。形が違えば `NameInvalid`。"""
     name = report.name.removesuffix(REPORT_SUFFIX)
     if name == report.name or not NAME_RE.fullmatch(name):
         raise NameInvalid(f"置く場所は <[A-Za-z0-9._-] の 1〜64 文字>{REPORT_SUFFIX} の形にする: {str(report)!r}")
     return report.parent, name
-
-
-@contextlib.contextmanager
-def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Origin] = None) -> Iterator[WorkDir]:
-    """作業ディレクトリを 1 回だけ開き、抜けるときに閉じる。`WorkDir.path` は開いた場所そのものである。
-
-    リンクは解かない。`directory` は `prepare` が利用者の入力を `report_paths` で解いた後のパスを渡す。根から 1 要素ずつリンクをたどらずに開くので、
-    パスを組んだ後に途中の要素をリンクへ差し替えられると、別の場所を開かずに `EntryUnsafe`（`symlink`）で止まる。
-    `create` が真なら、無い要素は開いた親の記述子に対する `mkdir` で作ってから開く（リンクの先に作らない）。
-    最初に無かった要素が開くまでに呼んだ利用者の持ち物でないディレクトリになっていれば `EntryUnsafe`（`replaced`）で止める。
-    最初に無かった要素を経て開いたときは `WorkDir.created` を真にする。オーナーは同じ利用者の既存のディレクトリへの
-    差し替え（sticky bit の無い共有の親では、別の利用者も同じ親の中で改名できる）を見分けないので、初期化する側は
-    書き換える前に `check_entries` で、新しく作ったディレクトリには無いはずの名前が無いことを確かめる。
-    `origin` は呼ぶ側がパスを解いた時点の観測（`prepare_paths`）である。末尾の `origin.fresh` 個の要素は最初の `open` で
-    開けても、開いた記述子を `_check_created` で確かめ、`WorkDir.created` を真にする（解いてから開くまでに現れた
-    実ディレクトリを既存とみなさず、ほかの利用者の持ち物なら `EntryUnsafe`（`replaced`）で止める）。
-    その手前の要素は作らずに開き、開いた記述子を `origin.anchor` と突き合わせし、無くなっているか解いた時点のディレクトリで
-    なければ `EntryUnsafe`（`replaced`）で止める。
-    組んだパスと開いた場所が食い違ったまま操作することは無い。
-    """
-    path = Path(os.path.abspath(directory))
-    fd, created = _open_dir_nofollow(path, create=create, origin=origin)
-    try:
-        yield WorkDir(path, fd, created)
-    finally:
-        os.close(fd)
-
-
-# 途中の要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも開ける）。
-# `O_PATH` の記述子は `*at` の `dir_fd` に使える。`O_PATH` の無い OS は `O_SEARCH`、それも無ければ `O_RDONLY` に落とす
-_SEARCH = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
-
-
-def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Origin] = None) -> tuple[int, bool]:
-    """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。
-
-    途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
-    `origin` があれば、末尾の `origin.fresh` 個の要素は呼ぶ側が解いた時点で無かったので、最初の `open` で開けても最初に
-    無かった要素として扱い、その手前の要素（無ければ根）の記述子を `origin.anchor` と突き合わせる。
-    `create` で作るのは末尾の `origin.fresh` 個だけで、その手前の解いた時点であった要素は作らずに開く。無くなっていれば
-    `EntryUnsafe`（`replaced`）で止める（移された親の元の名前に空のディレクトリを作らない）。
-    開いた記述子と、最初の `open` に無かった要素を経たか（`WorkDir.created`）を返す。
-    """
-    parts = path.parts[1:]
-    fd = os.open(path.anchor, (_SEARCH if parts else os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC)
-    created = False
-    at = len(parts) - (origin.fresh if origin is not None else 0)
-    try:
-        _check_anchor(fd, origin, path, at=at, opened=0)
-        for i, part in enumerate(parts):
-            mode = os.O_RDONLY if i == len(parts) - 1 else _SEARCH
-            flags = mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-            observed = None if origin is None else i < at  # 解いた時点であった要素は、アンカーと突き合わせる前に作らない
-            child, made = _open_part(fd, part, flags, path, create=create, observed=observed)
-            created = created or made
-            os.close(fd)
-            fd = child
-            _check_anchor(fd, origin, path, at=at, opened=i + 1)
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd, created
-
-
-def _open_part(fd: int, part: str, flags: int, path: Path, *, create: bool, observed: Optional[bool]) -> tuple[int, bool]:
-    """`_open_child` で開く。`observed` は解いた時点であった（真）・無かった（偽、`fresh`）・観測が無い（None）である。
-
-    あった要素は作らず、無ければ `EntryUnsafe`（`replaced`）にする。
-    """
-    try:
-        return _open_child(fd, part, flags, path, create=create and not observed, fresh=observed is False)
-    except FileNotFoundError:
-        if observed:  # 解いた時点であった要素が無い: 移された・差し替えられた
-            raise EntryUnsafe(str(path), "replaced") from None
-        raise
-
-
-def _check_anchor(fd: int, origin: Optional[Origin], path: Path, *, at: int, opened: int) -> None:
-    """根から `opened` 個の要素を開いた記述子が `origin.anchor` の位置（`at`）なら、解いた時点のディレクトリと突き合わせる。
-
-    違えば `EntryUnsafe`（`replaced`）。解いてから開くまでに、あった親を別のディレクトリへ差し替えられると、
-    無いと観測した子は差し替え先では既にあるかもしれず、そこへ報告の保存先を作らないため。
-    """
-    if origin is None or opened != at:
-        return
-    st = os.fstat(fd)
-    if (st.st_dev, st.st_ino) != origin.anchor:
-        raise EntryUnsafe(str(path), "replaced")
-
-
-def _open_child(fd: int, part: str, flags: int, path: Path, *, create: bool, fresh: bool = False) -> tuple[int, bool]:
-    """`fd` の直下の `part` をリンクをたどらずに開く。`create` が真で無ければ `fd` に対する `mkdir` で作ってから開く。
-
-    作ってから開き直すまでに、共有の親を書き換えられる手が名前を別の実ディレクトリへ差し替えられる（`O_NOFOLLOW` は
-    実ディレクトリを拒まない）。最初に開けなかった名前は既存と確かめられていないので、`mkdir` で作れたときも、間に
-    現れた（`FileExistsError`）ときも、開いた記述子を `_check_created` で確かめ、落ちれば初期化せずに
-    `EntryUnsafe`（`replaced`）で止める。`fresh`（呼ぶ側が解いた時点で無かった）なら最初に開けたときも同じく確かめる。
-    最初に開けた既存の要素なら偽、作った・間に現れた・`fresh` なら真を記述子と組で返す。
-    """
-    try:
-        child = os.open(part, flags, dir_fd=fd)
-    except FileNotFoundError:
-        if not create:
-            raise
-    except OSError as e:
-        if e.errno in (errno.ELOOP, errno.ENOTDIR):
-            raise EntryUnsafe(str(path), _refused_kind(fd, part)) from None
-        raise
-    else:
-        if not fresh:
-            return child, False
-        return _checked(child, path), True
-    with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 間に現れた名前も下の確かめを通す
-        os.mkdir(part, dir_fd=fd)
-    child, _ = _open_child(fd, part, flags, path, create=False)
-    return _checked(child, path), True
-
-
-def _checked(child: int, path: Path) -> int:
-    """`_check_created` を通った記述子を返す。落ちれば閉じてから上げる。"""
-    try:
-        _check_created(child, path)
-    except BaseException:
-        os.close(child)
-        raise
-    return child
-
-
-def _check_created(fd: int, path: Path) -> None:
-    """最初に無かった名前で開いたディレクトリが、呼んだ利用者の持ち物であることを確かめる。違えば `EntryUnsafe`（`replaced`）。
-
-    ここで止まるのは、ほかの利用者が持ち込んだディレクトリである（ほかの利用者は呼んだ利用者がオーナーのディレクトリを作れない）。
-    オーナーが一致しても同一とは言えない。sticky bit の無い共有の親では、別の利用者が呼んだ利用者の既存のディレクトリを
-    同じ親の中でこの名前へ改名でき、オーナーは変わらない。中身の有無も根拠にしない（同じ保存先を同じ利用者が別々の
-    worker の名前で並行して準備すると、先に終えた呼び出しの報告が置かれた正規のディレクトリを開く）。そのため経たことを
-    `WorkDir.created` で返し、初期化する側が `check_entries` で自分の名前が無いことを確かめる。
-    以後の操作はこの記述子に対する相対なので、確かめた後に名前を差し替えられても差し替え先には当たらない。
-    """
-    st = os.fstat(fd)
-    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
-        raise EntryUnsafe(str(path), "replaced")
 
 
 def check_entries(wd: WorkDir, names: Iterable[str]) -> None:
@@ -455,15 +206,6 @@ def _lstat_or_none(wd: WorkDir, name: str) -> Optional[os.stat_result]:
         return os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 無い名前は初期化してよい
         return None
-
-
-def _refused_kind(fd: int, part: str) -> str:
-    """開けなかった要素の種類。Linux は `O_DIRECTORY | O_NOFOLLOW` でリンクを開くと `ENOTDIR` を返すので、`lstat` で見分ける。"""
-    try:
-        st = os.stat(part, dir_fd=fd, follow_symlinks=False)
-    except OSError:  # noqa: NDF401 ファイル: 見分けられなければリンクでもディレクトリでもない要素として拒む
-        return "other"
-    return "symlink" if stat.S_ISLNK(st.st_mode) else "other"
 
 
 def _unsafe_kind(st: os.stat_result) -> Optional[str]:
@@ -558,14 +300,16 @@ def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
     return st
 
 
-def check_writable(wd: WorkDir, name: str) -> None:
-    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。
+def check_writable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    """`write_file` が `name` を置き換えられるかを、何も変えずに確かめる。置き換える既存のファイルがあればその stat を返す。
 
     `check_removable`（一時ディレクトリの `mkdir` と `os.replace` に要る作業ディレクトリ側の権限）に加えて、既存の
     ファイルへ書き込めることを見て、無ければ `PermissionError` を上げる。初期化の前に呼び、消してから書けずに止まる組を作らない。
     """
-    if check_removable(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+    existing = check_removable(wd, name)
+    if existing is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
+    return existing
 
 
 def write_file(wd: WorkDir, name: str, text: str) -> None:
@@ -579,34 +323,299 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     `rmdir` で、確かめた後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
+    既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
+    公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
+    所有者か所有グループを新しい inode で保てないときは、既存のファイルを置き換える前に `EntryUnsafe`（`owner`）を上げる
+    （所有者に与えていた権限を別の利用者へ、グループに与えていた権限を別のグループへ与えない）。
+    拡張 ACL のあるファイルは ACL の値を写さずに、置き換える前に `EntryUnsafe`（`acl`）を上げる（`_refuse_acl`）。
+    新しい inode が親の既定の ACL から継いだ ACL は、公開の前に外す（`_drop_inherited_acl`）。どちらも、モードのビット
+    だけを写して置き換えると読める人が広がりうるためである（拡張 ACL のあるファイルでは、モードのグループのビットは
+    所有グループの権限ではなく ACL のマスクである）。
     """
-    check_writable(wd, name)
+    with staged_write(wd, name, text):
+        pass
+
+
+@contextlib.contextmanager
+def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = ()) -> Iterator[dict[str, str]]:
+    """`write_file` の一時ファイルを作ってアクセス権まで設定し、`retire` の名前を退けてから本体を走らせ、本体が終えたら `name` へ公開する。
+
+    置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`owner`・`acl`）など）は退ける前に上がる。`retire` の名前は
+    `remove_file` と同じく確かめてから私有の一時ディレクトリへ移し（リンク数が 1 の通常のファイルでなければ `EntryUnsafe`）、
+    公開できた後にだけ消す。退けた名前ごとの `absent`・`removed` を本体へ渡す（公開できたときの結果）。
+    退けている途中・本体・公開（sticky bit の所有者の制約などで `os.replace` が落ちる）のどれかが上げれば、退けた名前を
+    元の名前が空いているときだけ元へ戻し（`_restore_retired`）、一時ファイルを片付けて上げ直す。元の名前が埋まっている
+    （退けた後に別の手が同じ名前へ書いた）などで戻せなかった名前があれば、上書きせずに一時ディレクトリごと残し、
+    元の例外を原因にした `RetiredKept`（回収先のパスを持つ）を上げる。
+    """
+    existing = check_writable(wd, name)
     data = text.encode("utf-8")
-    tmp = f".{name}.{secrets.token_hex(8)}"
-    os.mkdir(tmp, 0o700, dir_fd=wd.fd)
-    # 開けなければ作ったディレクトリだと確かめる記述子が無いので、名前を消さずに上げる（差し替えられた別の手の
-    # 空のディレクトリを消さない）
-    tmp_fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+    tmp, tmp_fd = _make_tmp_dir(wd)
     created = False
-    private = False
     published = False
-    st: Optional[os.stat_result] = None
+    retired: list[tuple[str, str]] = []
+    kept = True
+    owned: Optional[os.stat_result] = None
+    kept_error: Optional[RetiredKept] = None
     try:
-        st = os.fstat(tmp_fd)
-        # setgid のディレクトリの下では 0o2700 になるので、権限は所有者のほかに与えていないことだけを見る
-        private = stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid() and not st.st_mode & 0o077
-        if not private:
-            raise EntryUnsafe(tmp, "other")
+        owned = _tmp_owned(tmp, tmp_fd)
         fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
         created = True
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
+        _fill_data(wd, fd, name, data, existing)
+        yield _retire_all(wd, tmp_fd, retire, retired)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
         published = True
+    except BaseException as exc:
+        left, kept = _restore_retired(wd, tmp_fd, retired)
+        if left:
+            kept_error = RetiredKept(left)
+            raise kept_error from exc
+        raise
     finally:
-        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
-        _clean_tmp(wd, tmp_fd, tmp, st if private else None, created=created, published=published)
+        if published:
+            _drop_retired(tmp_fd, retired)
+        # 所有者・モードの確かめに落ちた記述子（`owned` が None）は作ったディレクトリだと確かめられないので、名前を消さずに
+        # 閉じるだけにする。戻せなかった名前の中身を持つ一時ディレクトリも消さない
+        if kept_error is None:
+            _clean_tmp(wd, tmp_fd, tmp, owned if kept else None, created=created, published=published)
+        else:
+            # 回収先を持つ例外を、後始末（一時ファイルの削除）の失敗で覆わない。記述子は `_clean_tmp` の finally が閉じる
+            with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 回収先を知らせる RetiredKept を上げるため
+                _clean_tmp(wd, tmp_fd, tmp, None, created=created, published=False)
+
+
+def _make_tmp_dir(wd: WorkDir) -> tuple[str, int]:
+    """作業ディレクトリの直下に私有の一時ディレクトリを作って開き、名前と記述子を返す。
+
+    名前の長さは出力名に依らない（出力名が上限に近くても作れる）。開けなければ作ったディレクトリだと確かめる
+    記述子が無いので、名前を消さずに上げる（差し替えられた別の手の空のディレクトリを消さない）。
+    """
+    tmp = f".ndf-{secrets.token_hex(8)}"
+    os.mkdir(tmp, 0o700, dir_fd=wd.fd)
+    return tmp, os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+
+
+def _tmp_owned(tmp: str, tmp_fd: int) -> os.stat_result:
+    """開いた一時ディレクトリが呼んだ利用者だけの持ち物であることを確かめ、その `stat` を返す。違えば `EntryUnsafe`（`other`）。"""
+    st = os.fstat(tmp_fd)
+    # setgid のディレクトリの下では 0o2700 になるので、権限は所有者のほかに与えていないことだけを見る
+    if not (stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid() and not st.st_mode & 0o077):
+        raise EntryUnsafe(tmp, "other")
+    return st
+
+
+def _fill_data(wd: WorkDir, fd: int, name: str, data: bytes, existing: Optional[os.stat_result]) -> None:
+    """開いた一時ファイル `fd` から継いだ拡張 ACL を外し、置き換える既存のファイルのアクセス権を写してから中身を書き、閉じる。
+
+    置き換える既存のファイルが拡張 ACL を持つなら、何も退けない・公開しないうちに `EntryUnsafe`（`acl`）で止まる。
+    """
+    with os.fdopen(fd, "wb") as f:
+        _drop_inherited_acl(f.fileno(), name)  # 無い名前へ作るときも親の既定の ACL を継ぐ
+        if existing is not None:
+            _refuse_acl(wd, name, existing)
+            _inherit_access(f.fileno(), name, existing)
+        f.write(data)
+
+
+_ACL_ACCESS = "system.posix_acl_access"
+
+
+def _refuse_acl(wd: WorkDir, name: str, existing: os.stat_result) -> None:
+    """置き換える既存のファイルが拡張 ACL を持つ・持つかを確かめられないなら `EntryUnsafe`（`acl`）。
+
+    拡張 ACL のあるファイルでは、モードのグループのビットは所有グループの権限ではなく ACL のマスクなので、
+    `_inherit_access` がモードのビットだけを写すと、置き換えの後に読める人が広がりうる（macOS の ACL は拒否の項目も
+    持つので、外すと読める人が広がる）。ACL の値は写さず、置き換えないことで広がらないようにする。
+    リンクをたどらずに開いた記述子を確かめた inode（`existing`）と突き合わせ、違えば `EntryUnsafe`（`replaced`）。
+    Linux は `O_PATH` の記述子を `/proc/self/fd` から引いて `system.posix_acl_access` を見る（`_has_acl`）。
+    macOS は書き込めることを確かめ済みの既存のファイルを書き込み専用で（切り詰めずに）開き、`acl_get_fd_np` で
+    拡張 ACL を見る（`_has_acl_darwin`）。拡張 ACL の無いファイルと、ACL に対応しないファイルシステムは置き換える。
+    どちらの手段も無い OS と、それ以外の失敗は持つかを確かめられないので置き換えない。
+    """
+    if hasattr(os, "O_PATH") and hasattr(os, "getxattr"):
+        flags, check = os.O_PATH, _has_acl
+    elif sys.platform == "darwin":
+        flags, check = os.O_WRONLY | os.O_NONBLOCK, _has_acl_darwin
+    else:
+        raise EntryUnsafe(name, "acl")
+    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+    try:
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) != (existing.st_dev, existing.st_ino):
+            raise EntryUnsafe(name, "replaced")
+        if check(fd):
+            raise EntryUnsafe(name, "acl")
+    finally:
+        os.close(fd)
+
+
+def _has_acl(fd: int) -> bool:
+    """`O_PATH` で開いた記述子（`/proc/self/fd` 経由）に拡張 ACL があるか。確かめられなければ真（置き換えない側へ倒す）。"""
+    try:
+        os.getxattr(f"/proc/self/fd/{fd}", _ACL_ACCESS)
+    except OSError as e:
+        return e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP)
+    return True
+
+
+_ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>
+_ACL_FIRST_ENTRY = 0
+
+
+def _darwin_acl_lib():  # noqa: ANN202 ctypes の CDLL
+    """macOS の libc の ACL 関数（`acl_get_fd_np`・`acl_get_entry`・`acl_init`・`acl_set_fd_np`・`acl_free`）。引けなければ None。"""
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        get_fd, get_entry, init, set_fd, free = (
+            libc.acl_get_fd_np,
+            libc.acl_get_entry,
+            libc.acl_init,
+            libc.acl_set_fd_np,
+            libc.acl_free,
+        )
+    except (OSError, AttributeError):  # noqa: NDF401 外部コマンド: libc の ACL の関数を引けない macOS では持つかを確かめられない扱いにする（置き換えない）
+        return None
+    get_fd.restype = init.restype = ctypes.c_void_p
+    get_fd.argtypes = [ctypes.c_int, ctypes.c_int]
+    get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    init.argtypes = [ctypes.c_int]
+    set_fd.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    free.argtypes = [ctypes.c_void_p]
+    return libc
+
+
+def _has_acl_darwin(fd: int) -> bool:
+    """macOS で開いた記述子に拡張 ACL の項目があるか（`acl_get_fd_np`）。確かめられなければ真（置き換えない側へ倒す）。
+
+    ACL の無いファイルは `ENOENT`、ACL に対応しないファイルシステムは `ENOTSUP`・`EOPNOTSUPP` で NULL を返す。
+    項目の無い空の ACL（`_drop_acl_darwin` が付けた）は持たないとみなす。
+    """
+    import ctypes
+
+    libc = _darwin_acl_lib()
+    if libc is None:
+        return True
+    acl = libc.acl_get_fd_np(fd, _ACL_TYPE_EXTENDED)
+    if not acl:
+        return ctypes.get_errno() not in (errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP)
+    try:
+        entry = ctypes.c_void_p()
+        return libc.acl_get_entry(acl, _ACL_FIRST_ENTRY, ctypes.byref(entry)) == 0
+    finally:
+        libc.acl_free(acl)
+
+
+def _drop_acl_darwin(fd: int, name: str) -> None:
+    """macOS で新しい一時ファイル `fd` が親から継いだ拡張 ACL を、空の ACL を付けて外す（`chmod -N` と同じ）。
+
+    継いだ許可の項目が残ると、置き換えの前に読めなかった利用者が新しい報告を読める。外した後に項目が残る・確かめられない・
+    外せないなら `EntryUnsafe`（`acl`）で公開しない。
+    """
+    if not _has_acl_darwin(fd):
+        return
+    libc = _darwin_acl_lib()
+    if libc is None:
+        raise EntryUnsafe(name, "acl")
+    empty = libc.acl_init(0)
+    if not empty:
+        raise EntryUnsafe(name, "acl")
+    try:
+        failed = libc.acl_set_fd_np(fd, empty, _ACL_TYPE_EXTENDED) != 0
+    finally:
+        libc.acl_free(empty)
+    if failed or _has_acl_darwin(fd):
+        raise EntryUnsafe(name, "acl")
+
+
+def _drop_inherited_acl(fd: int, name: str) -> None:
+    """新しい一時ファイル `fd` が親から継いだ拡張 ACL を、公開の前に外す。外せなければ `EntryUnsafe`（`acl`）。
+
+    継いだ名前付きの項目が、写したモードのグループのビットをマスクにして（macOS では許可の項目のまま）読めるように
+    ならないためである。Linux は `system.posix_acl_access` を `os.removexattr` で外し、macOS は `_drop_acl_darwin` で外す。
+    ACL が無い・ACL に対応しないファイルシステムと、どちらの手段も無い OS は何もしない。
+    """
+    if sys.platform == "darwin":
+        _drop_acl_darwin(fd, name)
+        return
+    if not hasattr(os, "removexattr"):
+        return
+    try:
+        os.removexattr(fd, _ACL_ACCESS)
+    except OSError as e:
+        if e.errno not in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP):
+            raise EntryUnsafe(name, "acl") from None
+
+
+def _retire_all(wd: WorkDir, tmp_fd: int, retire: Iterable[str], retired: list[tuple[str, str]]) -> dict[str, str]:
+    """`retire` の名前を順に退け、名前ごとの `absent`・`removed` を返す（`_retire`）。"""
+    return {entry: _retire(wd, entry, tmp_fd, f"r{len(retired)}", retired) for entry in retire}
+
+
+def _retire(wd: WorkDir, name: str, tmp_fd: int, slot: str, retired: list[tuple[str, str]]) -> str:
+    """`name` を確かめてから一時ディレクトリの `slot` へ移し、`retired` に記録する。無ければ `absent`、移せば `removed`。
+
+    確かめの後に名前をリンクへ差し替えられても、`rename` はリンクをたどらずにリンク自体を移す。
+    """
+    _check_name(name)
+    if entry_state(wd, name) is None:
+        return "absent"
+    os.rename(name, slot, src_dir_fd=wd.fd, dst_dir_fd=tmp_fd)
+    retired.append((name, slot))
+    return "removed"
+
+
+def _drop_retired(tmp_fd: int, retired: list[tuple[str, str]]) -> None:
+    """公開できた後に、退けた名前を一時ディレクトリから消す。失敗は上げない（公開済み。残れば一時ディレクトリが残るだけ）。"""
+    for _, slot in retired:
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。消せなければ一時ディレクトリごと残す
+            os.unlink(slot, dir_fd=tmp_fd)
+
+
+def _restore_retired(wd: WorkDir, tmp_fd: int, retired: list[tuple[str, str]]) -> tuple[list[tuple[str, Optional[Path]]], bool]:
+    """公開できなかったときに、退けた名前を元の名前が空いているときだけ戻す。
+
+    `os.link` は名前が埋まっていれば `FileExistsError` で失敗するので、空いているかの確かめと戻すことが 1 回の
+    呼び出しで済む（`rename` は埋まった名前を黙って上書きする）。リンクをたどらない（退けた後にリンクへ差し替えられても
+    リンク自体を戻す）。戻せた名前は一時ディレクトリの側の名前を消す。
+    戻せなかった名前と回収先のパス（`_tmp_location` で確かめられなければ None）の組の並びと、一時ディレクトリを
+    消してよいか（中身が残っていなければ真）を返す。元の失敗を上げるため、ここでは上げない。
+    """
+    left: list[tuple[str, Optional[Path]]] = []
+    empty = True
+    for name, slot in reversed(retired):
+        try:
+            os.link(slot, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
+        except OSError:  # 戻せなければ一時ディレクトリに中身を残し、回収先を知らせる
+            where = _tmp_location(tmp_fd)
+            left.append((name, where / slot if where is not None else None))
+            empty = False
+            continue
+        try:
+            os.unlink(slot, dir_fd=tmp_fd)
+        except OSError:  # 元の名前へは戻せた。残った側の名前ごと一時ディレクトリを残す
+            empty = False
+    return left, empty
+
+
+def _inherit_access(fd: int, name: str, existing: os.stat_result) -> None:
+    """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
+
+    モードの所有者・グループのビットは所有者・所有グループに当たるので、写すのは新しいファイルの所有者と所有グループが
+    元と同じときだけである。所有者が違う（別の利用者のファイルをグループの書き込み権限で置き換える）か、グループを
+    変えられない（呼んだ利用者が属さない）ときは、公開する前に `EntryUnsafe`（`owner`）を上げる（元の所有者が読めなかった
+    内容を `group` の権限で読めるようにしない・グループの権限を元と違うグループへ与えない）。
+    """
+    if os.fstat(fd).st_uid != existing.st_uid:
+        raise EntryUnsafe(name, "owner")
+    if existing.st_gid != os.fstat(fd).st_gid:
+        try:
+            os.fchown(fd, -1, existing.st_gid)
+        except PermissionError:  # 属さないグループへは変えられない
+            raise EntryUnsafe(name, "owner") from None
+    os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
 
 
 def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_result], *, created: bool, published: bool) -> None:
@@ -636,6 +645,21 @@ def _drop_tmp_dir(wd: WorkDir, tmp_fd: int, tmp: str, owned: os.stat_result, *, 
         return
     with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。空の一時ディレクトリを残して書き込みは成功として返す
         _remove_opened_dir(wd, tmp_fd, tmp, owned)
+
+
+def _tmp_location(fd: int) -> Optional[Path]:
+    """開いた一時ディレクトリの今の絶対パス。記述子から引き（Linux の `/proc/self/fd`）、そのパスが同じ inode を指すと確かめられたときだけ返す。
+
+    作った時点のパスは、一時ディレクトリや作業ディレクトリが改名されると、無い名前か差し替え先を指す。
+    引けない・消された（` (deleted)`）・別の inode を指すときは None。
+    """
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 確かめられなければ None（回収先を確かめられないと知らせる）
+        where = os.readlink(f"/proc/self/fd/{fd}")
+        if where.startswith("/") and not where.endswith(" (deleted)"):
+            now, opened = os.stat(where, follow_symlinks=False), os.fstat(fd)
+            if (now.st_dev, now.st_ino) == (opened.st_dev, opened.st_ino):
+                return Path(where)
+    return None
 
 
 def _current_name(fd: int, original: str) -> Optional[str]:
@@ -682,24 +706,22 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
 def reset_report(wd: WorkDir, paths: ReportPaths, keep: Iterable[str] = ()) -> tuple[str, str]:
     """報告・完了マーカー・結果ファイルを初期化する（`ndf worker prepare` と `ndf answer work` が共有する）。
 
-    3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
-    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
-    残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
-    無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。どれかがリンクなら
-    リンクもリンクの先も変えずに `EntryUnsafe` を上げる。報告を書き込めないときも、消す前に `PermissionError` で止める。
-    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、消す前に同じく書けるかを確かめる。完了マーカーと結果
-    ファイルは、どちらかを消す前に両方を消せるか（`check_removable`）を確かめ、片方だけ消えて止まる組を作らない。
-    返りは完了マーカーと結果ファイルの `remove_file` の返り。
+    3 つの名前を先に確かめてから、完了マーカー → 結果ファイルを退け、報告を空にしてから退けたものを消す。
+    前の報告が消えるのは完了マーカーと結果ファイルを退けた後だけなので、「前の完了マーカーが残るのに報告が空」の組は
+    起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で無かった保存先にどれかが
+    あれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
+    報告の一時ファイルは退ける前に作り、アクセス権（モードのビットとグループ）の設定まで済ませる（`staged_write`）。
+    置き換えを拒む条件（報告を書き込めない・所有者を保てない・前の報告が拡張 ACL を持つなど）では何も退けずに止まり、
+    退けるか報告の公開が落ちたとき（sticky bit の所有者の制約など）は退けた完了マーカーと結果ファイルを元へ戻して止まる。
+    `keep` の名前（`ndf answer work` が続けて書く起動指示）も、何かを変える前に書けるかを確かめる（`check_writable`）。
+    返りは完了マーカーと結果ファイルの `absent`・`removed`。
     """
     check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
-    for name in (paths.report.name, *keep):
+    for name in keep:
         check_writable(wd, name)
-    for name in (paths.done.name, paths.result.name):
-        check_removable(wd, name)
-    done = remove_file(wd, paths.done.name)
-    removed = remove_file(wd, paths.result.name)
-    write_file(wd, paths.report.name, "")
-    return done, removed
+    with staged_write(wd, paths.report.name, "", retire=(paths.done.name, paths.result.name)) as actions:
+        pass
+    return actions[paths.done.name], actions[paths.result.name]
 
 
 def remove_file(wd: WorkDir, name: str) -> Literal["absent", "removed"]:
