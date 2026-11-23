@@ -25,7 +25,7 @@ plugins/ndf/
         ├── reply_judge.py *            判定のリクエスト（hook の閉包の中・標準ライブラリだけ）
         ├── guards/stop_wait.py         判定の選び方
         ├── context.py                  AskUserQuestion を使ったか
-        ├── counter.py                  上限の手前か・モデルの wait の印
+        ├── counter.py                  上限の手前か・モデルの wait のフラグ
         ├── dispatch.py                 GuardServices に締め切り
         ├── main.py                     SIGALRM と同じ締め切りを dispatch へ
         └── cli.py                      ndf hooks judge-cases
@@ -39,7 +39,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/adapters/reply_judge.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む | 標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設） |
-| `plugins/ndf/src/ndf/domains/hooks/counter.py` | 変更 | 変更要求が上限の手前かを数えずに返す。今の入力の中でモデルが `wait` と回答した印を持つ | `tables` | `Counter` | `pushback_left`（新設）・`mark_model_wait`（新設）・`model_waited`（新設） |
+| `plugins/ndf/src/ndf/domains/hooks/counter.py` | 変更 | 変更要求が上限の手前かを数えずに返す。今の入力の中でモデルが `wait` と回答したフラグを持つ | `tables` | `Counter` | `pushback_left`（新設）・`mark_model_wait`（新設）・`model_waited`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/dispatch.py` | 変更 | guard へ締め切りの時刻を渡す | — | `GuardServices` | `GuardServices`（欄を足す）・`run`（シグネチャの変更） |
 | `plugins/ndf/src/ndf/domains/hooks/main.py` | 変更 | SIGALRM に使う締め切りの絶対時刻を `dispatch.run` へ渡す | `dispatch` | モジュール | `_guards`（中身だけ変える） |
 | `plugins/ndf/src/ndf/domains/hooks/cli.py` | 変更 | `ndf hooks judge-cases` を足す | `adapters.reply_judge` | モジュール | `_judge_cases`（新設） |
@@ -97,7 +97,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `judge_text` | 質問の後に 9 行の報告が続く本文で、質問の行が返りに入る | ちょうど `max_chars` 字と 1 字多い本文。コードブロックの中の質問が返りに入らない | — |
 | `ask` | 偽の `popen`（実プロセスを起動しない。`communicate` が `{"kind": "wait", "calls": 1}` の 1 行と終了コード 0 を返す）で `kind="wait"` と `calls`。標準入力の JSON に `launch` の `parent_argv` と `project_dir` が入る。`popen` に渡った引数が `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]`・`start_new_session=True` で、環境に `MAX_THINKING_TOKENS=0` があり `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が無く `ANTHROPIC_BASE_URL` が残る。`communicate` に渡った `timeout` が `seconds` | 正常に終えた後も偽の `killpg` に組の番号と SIGKILL が渡る | 偽の `communicate` が `TimeoutExpired` を上げる → `timeout`、偽の `killpg` に SIGTERM、偽の `wait(timeout=0.2)` が `TimeoutExpired` なら続けて SIGKILL、最後に `wait()` が呼ばれる。偽の `communicate` が `KeyboardInterrupt` を上げる → 同じ順で送って回収し、例外を投げ直す。`popen` が `OSError` → `launch`。終了コード 1 → `exit`。形の違う出力 → `shape`。どれも実時間を待たない |
-| `parent_launch`（偽の `read`・`readlink` で `/proc` を差し替える。実の `/proc` は読まない） | 入口 `cli`・`CLAUDE_PROJECT_DIR` が絶対パス・親が実行ファイル `…/claude/versions/2.1.330` → その引数と根を返す。node の起動（実行ファイル `node`・2 つ目の引数が `…/@anthropic-ai/claude-code/cli.js`）も親と見分ける | 親が `ancestors` 代目 → 返す、その 1 代上 → None。近い順に `/bin/bash -c 'claude --settings x.json'`（実行ファイルが bash）・`claude`（`--settings=gw.json` 付き）・`claude`（フラグ無し）と並べると、2 つ目の引数を返す（シェルの文字列を親とせず、3 つ目の外側を見ない）。`CLAUDE_CONFIG_DIR` が絶対パス → 返す | 入口 `sdk-ts` → None。`CLAUDE_PROJECT_DIR` が無い・相対 → None。`CLAUDE_CONFIG_DIR` が相対（`./cfg`）→ None。`/proc` の読みが `OSError`（macOS の代わり）→ None。引数の位置に `claude` を含むだけの python のプロセス → 親としない |
+| `parent_launch`（偽の `read`・`readlink` で `/proc` を差し替える。実の `/proc` は読まない） | エントリポイント `cli`・`CLAUDE_PROJECT_DIR` が絶対パス・親が実行ファイル `…/claude/versions/2.1.330` → その引数と根を返す。node の起動（実行ファイル `node`・2 つ目の引数が `…/@anthropic-ai/claude-code/cli.js`）も親と見分ける | 親が `ancestors` 代目 → 返す、その 1 代上 → None。近い順に `/bin/bash -c 'claude --settings x.json'`（実行ファイルが bash）・`claude`（`--settings=gw.json` 付き）・`claude`（フラグ無し）と並べると、2 つ目の引数を返す（シェルの文字列を親とせず、3 つ目の外側を見ない）。`CLAUDE_CONFIG_DIR` が絶対パス → 返す | エントリポイント `sdk-ts` → None。`CLAUDE_PROJECT_DIR` が無い・相対 → None。`CLAUDE_CONFIG_DIR` が相対（`./cfg`）→ None。`/proc` の読みが `OSError`（macOS の代わり）→ None。引数の位置に `claude` を含むだけの python のプロセス → 親としない |
 | `resting` / `mark_rest` | `launch`・`auth`・`endpoint` を書いた直後は真、休む間を過ぎた時刻では偽 | 休む間のちょうどの時刻 | マーカーが無い・壊れたマーカー・書けない保存先で偽（例外を投げない）。`timeout`・`no_slot`・`exit` を渡すとマーカーを書かない |
 
 時刻はどれも引数（`now`）か偽の時計で渡し、実時間の経過と実プロセスの起動をテストの仕様にしない（tdd-cycle の「テストに書かないもの」）。
@@ -119,9 +119,9 @@ plugins/ndf/
   - 起動の引数: `claude.claude_args(ClaudeCall(system=SYSTEM, permission=Permission.JUDGE, model=<設定の model>))`（最小構成・Tool なし・会話を残さない）。回答は `ClaudeReply.raw` の本文を空白を除いて読み、`wait` か `report` に完全に一致しなければ `shape`
   - 打つ秒: `seconds − 経過`。残りが 0.5 秒を切れば打たずに `failure="timeout"`
   - スロットと組: `call_claude(..., slot_wait=0, new_group=False)`。`claude` を判定の子と同じプロセスの組で起動し、hook の側の組への送信が `claude` まで届くようにする（今の `_popen` は `start_new_session=True` で別の組に置く）。判定の子は中継の確かめ（`claude.register` の `relay_checks`）を登録しないので、起動は `_prefaced` → `_run_claude` の経路を通る
-  - 打つ秒の内訳: `claude --version`（`cli_floor` の下限。版の記録はプロセスの中だけなので、子ごとに 1 回打つ。0.007〜0.009 秒）を含めて `seconds − 経過` に収める
-  - 失敗の写し: `ClaudeReply.failure` の `launch` / `timeout` / `refused` / `usage_limit` / `no_slot` をそのまま `failure` へ。`ok` が偽で `failure` が None のとき、`ClaudeReply.raw`（結果の行の本文か標準エラー）が設定の `auth_markers` のどれかを含めば `auth`、含まなければ `exit`（認証の失敗は今の `call_claude` では `failure` が None になる。設計の MEA8）
-- 質問の文（`SYSTEM` と `QUESTION`）はこのモジュールの定数に置く。`QUESTION` は設計の外部の調査の MEA6 の形にする。書き手自身が人に判断・選択・承認を求め、その回答を待っていれば `wait`、質問が途中にあり後に報告が続いても `wait`、それ以外は `report` とし、`report` の例として「他人の質問を引用して経緯を説明している」「ほかのセッションやレーンの承認待ちを伝えている」「承認を求める資料を用意したことや作業の結果を報告している」の 3 つを並べ、1 語だけを返させる。本文は `<reply>` と `</reply>` で囲む
+  - 打つ秒の内訳: `claude --version`（`cli_floor` の下限。バージョンの記録はプロセスの中だけなので、子ごとに 1 回打つ。0.007〜0.009 秒）を含めて `seconds − 経過` に収める
+  - 失敗の対応付け: `ClaudeReply.failure` の `launch` / `timeout` / `refused` / `usage_limit` / `no_slot` をそのまま `failure` へ。`ok` が偽で `failure` が None のとき、`ClaudeReply.raw`（結果の行の本文か標準エラー）が設定の `auth_markers` のどれかを含めば `auth`、含まなければ `exit`（認証の失敗は今の `call_claude` では `failure` が None になる。設計の MEA8）
+- 質問の文（`SYSTEM` と `QUESTION`）はこのモジュールの定数に置く。`QUESTION` は設計の外部の調査の MEA6 の形にする。応答を書いた本人が人に判断・選択・承認を求め、その回答を待っていれば `wait`、質問が途中にあり後に報告が続いても `wait`、それ以外は `report` とし、`report` の例として「他人の質問を引用して経緯を説明している」「ほかのセッションやレーンの承認待ちを伝えている」「承認を求める資料を用意したことや作業の結果を報告している」の 3 つを並べ、1 語だけを返させる。本文は `<reply>` と `</reply>` で囲む
 - 判定の例の組の形: `{"version": 1, "cases": [{"id": "miss-1", "text": "…", "expect": "wait", "source": "#4000 の 1 回目"}, …]}`。要求の受け入れ条件 2 の文を持つ
 
 ### 異常系の処理
@@ -182,7 +182,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `check` | 偽の `ask` が `wait` → pushback と `model_waited()` が真、`report` → 通過。#4000 の 2 回目の形の本文で `ask` に質問が渡る | 残りの秒が 0.5 秒を切る → `ask` を呼ばない。`svc.deadline` が今 ＋ 7 秒・余白 1.5 秒・設定 5 秒のとき `ask` に渡る秒が 5（余白を 2 回引かない） | 呼ばない条件 4 つと送信先の条件でそれぞれ `ask` が呼ばれない。`ask` の失敗の種類ごとに文字列の判定と同じ判定・`judge=fallback:<failure>` |
-| `check` の送信先と順序 | 入口 `cli` で親が見つかる → `ask` に `parent_launch` の返りが渡る | 休み中・残りの秒が足りない Stop で偽の `parent_launch` が呼ばれない（`judge=skip:rest`・`skip:time`）。Codex でも休み中でも、記録される `judge` は表で最初に当たった 1 つ | Codex で `skip:runtime`、`parent_launch` が None で `skip:endpoint`（どちらも `ask` を呼ばない）。`ask` が `endpoint` を返す → `judge=fallback:endpoint`・休みのマーカーが書かれる |
+| `check` の送信先と順序 | エントリポイント `cli` で親が見つかる → `ask` に `parent_launch` の返りが渡る | 休み中・残りの秒が足りない Stop で偽の `parent_launch` が呼ばれない（`judge=skip:rest`・`skip:time`）。Codex でも休み中でも、記録される `judge` は表で最初に当たった 1 つ | Codex で `skip:runtime`、`parent_launch` が None で `skip:endpoint`（どちらも `ask` を呼ばない）。`ask` が `endpoint` を返す → `judge=fallback:endpoint`・休みのマーカーが書かれる |
 | `check` の上限の後 | `model_waited()` が真の数え手で上限に達し、本文が文字列の判定で `report` → pushback（`ask` は呼ばない）。dispatch を通すと `limited` が真になる | `model_waited()` が偽 → 通す | — |
 | `check` の休みのマーカー | `ask` が `launch` を返した次の `check` で `ask` が呼ばれない（`judge=skip:rest`） | 休む間を過ぎた時刻の `check` で呼ばれる | `ask` が `timeout` を返した次の `check` では呼ばれる（マーカーを書かない） |
 
@@ -247,14 +247,14 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `effective_env` | `domains/relay/account_dir.py` | 変更 | 末尾に `keys: Sequence[str] = ()` | `keys` のそれぞれについて、定義する最も強い層の出所を `Resolved.key_origin` に入れる。強さは今の `helper` の決め方と同じ（サーバーから取った写しに項目があればそれ、無ければ管理者の設定のファイル（`managed-settings.json` と `managed-settings.d/*.json`）、無ければ `--settings`・ローカル・プロジェクト・利用者の順）。省けば今のまま |
+| `effective_env` | `domains/relay/account_dir.py` | 変更 | 末尾に `keys: Sequence[str] = ()` | `keys` のそれぞれについて、定義する最も強い層の出所を `Resolved.key_origin` に入れる。強さは今の `helper` の決め方と同じ（サーバーから取ったコピーに項目があればそれ、無ければ管理者の設定のファイル（`managed-settings.json` と `managed-settings.d/*.json`）、無ければ `--settings`・ローカル・プロジェクト・利用者の順）。省けば今のまま |
 | `Resolved` | `domains/relay/account_dir.py` | 変更 | 欄 `key_origin: dict[str, str]`（既定は空）を足す | キーの名前 → 出所の名札。値は持たない（I5） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `effective_env` の `keys` | 利用者の設定の `awsCredentialExport` → `key_origin` に `利用者の設定` | `keys` を省くと `key_origin` が空。`managed-settings.d/a.json` と `remote-settings.json` に同じキー → 出所は写しの方 | 壊れた設定ファイルは今のとおり `unresolved` に入る |
+| `effective_env` の `keys` | 利用者の設定の `awsCredentialExport` → `key_origin` に `利用者の設定` | `keys` を省くと `key_origin` が空。`managed-settings.d/a.json` と `remote-settings.json` に同じキー → 出所はコピーの方 | 壊れた設定ファイルは今のとおり `unresolved` に入る |
 
 ## 設定と登録
 
