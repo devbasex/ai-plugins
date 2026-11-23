@@ -73,6 +73,8 @@ class GuardServices:
     state_dir: Path
     counter: Counter
     params: dict
+    # 締め切りの絶対時刻（`time.monotonic()` の基準。余白を引いていない。SIGALRM と同じ起点）
+    deadline: float
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,7 @@ def run(
     budget: Budget,
     counter: Counter,
     state_dir: Path,
+    deadline: float,
     clock: Callable[[], float] = time.monotonic,
 ) -> Outcome:
     """表の順に guard を呼び、判定を 1 つにまとめる。"""
@@ -133,7 +136,7 @@ def run(
             if not spec.fail_closed:
                 continue
         began = clock()
-        got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params))
+        got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params, deadline))
         if got.kind == "deny" and _counted(spec) and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))

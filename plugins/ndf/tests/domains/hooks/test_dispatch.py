@@ -54,10 +54,10 @@ def _ctx(tmp_path) -> HookContext:
     return HookContext("claude", "PreToolUse", bash(tmp_path, "ls"))
 
 
-def _run(tmp_path, specs, clock=time.monotonic):
+def _run(tmp_path, specs, clock=time.monotonic, deadline=0.0):
     found = budget.budget_for("claude", "PreToolUse")
     with Counter.open("s-1", tmp_path) as counter:
-        return dispatch.run(_ctx(tmp_path), specs, found, counter, tmp_path, clock)
+        return dispatch.run(_ctx(tmp_path), specs, found, counter, tmp_path, deadline, clock)
 
 
 def test_guards_are_ordered_by_the_table():
@@ -188,7 +188,7 @@ def test_i7_fail_closed_deny_is_not_downgraded(tmp_path, fake_guards, monkeypatc
     kinds = [(_run(tmp_path, [closed]).verdict.kind, _run(tmp_path, [plain]).verdict.kind) for _ in range(5)]
     assert {k for k, _ in kinds} == {"deny"} and kinds[-1][1] == "advise"
     found = budget.budget_for("claude", "PreToolUse")
-    out = dispatch.run(_ctx(tmp_path), [closed, plain], found, Counter.unusable(), tmp_path)
+    out = dispatch.run(_ctx(tmp_path), [closed, plain], found, Counter.unusable(), tmp_path, 0.0)
     assert [r.kind for r in out.runs] == ["deny", "advise"] and out.verdict.reason == "記録できない"
 
 
@@ -213,7 +213,7 @@ def test_only_ask_forward_is_fail_closed_in_the_table():
 
 
 def _run_on(tmp_path, ctx, specs, counter):
-    return dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), counter, tmp_path)
+    return dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), counter, tmp_path, 0.0)
 
 
 def test_deny_key_none_keeps_denying_without_counting(tmp_path, fake_guards):
@@ -274,7 +274,7 @@ def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkey
         now[0] = 0.0
         ctx = HookContext("claude", "PreToolUse", payload)
         specs = dispatch.select(dispatch.load_specs(), ctx, frozenset())
-        outs.append(dispatch.run(ctx, specs, found, Counter.unusable(), tmp_path, clock=lambda: now[0]))
+        outs.append(dispatch.run(ctx, specs, found, Counter.unusable(), tmp_path, 0.0, clock=lambda: now[0]))
     assert [[r.name for r in out.runs] for out in outs] == [["context-limit"], ["context-limit"]]
     assert outs[0].stopped == "deadline" and [out.verdict.kind for out in outs] == ["deny", "pass"]
 
@@ -333,3 +333,25 @@ def test_deadline_out_keeps_only_the_fail_closed_deny(tmp_path, monkeypatch):
     )
     assert deny_reason(json.loads(_deadline(payload))) == ask.QUESTION_NOT_RECORDED
     assert _deadline(bash(tmp_path, "ls")) == ""
+
+
+def test_run_passes_the_deadline_to_the_guards(tmp_path, fake_guards):
+    seen: list[float] = []
+    spec = _spec("deadline", fake_guards("deadline", lambda c, s: seen.append(s.deadline)))
+    _run(tmp_path, [spec], deadline=123.5)
+    assert seen == [123.5]
+
+
+def test_the_entry_point_passes_the_alarm_deadline_to_the_guards(tmp_path, monkeypatch):
+    # SIGALRM と guard が同じ起点の時刻（起動の時刻 ＋ 締め切り）を使う
+    seen: dict = {}
+    real = dispatch.run
+
+    def capture(ctx, specs, found, counter, state_dir, deadline, clock=time.monotonic):
+        seen["deadline"], seen["budget"] = deadline, found.deadline
+        return real(ctx, specs, found, counter, state_dir, deadline, clock)
+
+    monkeypatch.setattr(dispatch, "run", capture)
+    call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))
+    now = time.monotonic()
+    assert now < seen["deadline"] <= now + seen["budget"]
