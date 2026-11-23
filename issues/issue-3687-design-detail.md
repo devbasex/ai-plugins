@@ -113,7 +113,7 @@ plugins/ndf/
   | PreToolUse（Read）で `read_repeat` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.read-repeat`。断るときは `hook.deny-repeat`・`hook.counter-lock` を足す | 3〜5 ファイル（40〜67 マイクロ秒） | 6 ファイル・分割の前の 188 マイクロ秒を超えない |
   | PreToolUse（Bash）で `sleep` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.sleep` | 3 ファイル | 同上 |
   | Stop で `unattended` に届く | `hook.transcript-tail`・予算の 1 項目・`hook.unattended-mark`・`hook.pushback`・`hook.counter-lock` | 5 ファイル | 同上 |
-  | SessionStart（予算の検査） | 上に加えて `policies(prefix="hook.")` の 23 項目 | 25 ファイル程度（約 800 マイクロ秒） | 1 セッションに 1 回だけなので、分割の前より 1 ミリ秒までの増えを許す |
+  | SessionStart（予算の検査） | 上に加えて `policies(prefix="hook.")` の 23 項目 | 25 ファイル程度（約 800 マイクロ秒） | 26 ファイル（1 セッションに 1 回だけなので、所要は分割の前より 1 ミリ秒までの増えを許す） |
 
   - 読み込みの回数は 1 起動につき 1 回から 3〜5 回へ増えるが、1 回あたりが小さくなるため、SessionStart を除く事象の所要は分割の前より短い。読む回数を増やさないための同じ名前の控え（`cached_reader`）は、同じ方針を 2 回引くときにだけ効く。違う方針を引く回数は上の表のとおりに抑える
   - 縛り方: 単体テストで、上の 4 つの事象それぞれについて、hook の 1 起動の入口 `main.run_entry(["<名前>", <ランタイム>, <事象>], stdin=io.StringIO(<入力>), stdout=io.StringIO())` をプロセスの中で呼ぶ（子のプロセスを起動しない。状態の置き場は既存の `tests/domains/hooks/_hooks.py` の一時ディレクトリの用意を使う）。個々の guard から始めないのは、`main.py` が guard の前に読む `budget.budget_for` の予算と `hook.transcript-tail` を計測の外にしないためである。`tables` が `contracts/limits/` の下のファイルを読む関数を、読んだパスを記録して元の関数へ渡す関数に差し替え（1 プロセス 1 回の控えは各テストの前に空にする）、1 起動で読んだ `contracts/limits/` のファイルの数が「許す上限」の列以下であることを確かめる。`run_entry` は失敗を飲み込んで 0 を返すため、読みの数が少ないだけで通らないよう、同じテストで metrics の記録に `error` が無く、その事象の guard（`read_repeat`・`sleep`・`unattended`・SessionStart の予算の検査）が `guards` に載っていること（1 起動が guard まで届いたこと）も確かめる。`budget_for` が `policies()` で全件（223 ファイル）を組み立てる形へ戻すと、どの事象のテストも落ちる。所要は Task 4 の測定の手順で同じ形に測り、単位の Pull Request の本文に書く（時間で合否を決めるテストは書かない）
