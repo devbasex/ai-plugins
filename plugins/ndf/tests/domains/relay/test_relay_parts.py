@@ -307,9 +307,9 @@ AWS_KEYS = {"AWS_ACCESS_KEY_ID": "AKIATEST", "AWS_SECRET_ACCESS_KEY": "secret-te
 
 
 def _account_child(tmp_path, parent):
-    """`work1` の登録済みアカウントの子の環境（用意の済んだ設定ディレクトリと使用率の書き先を渡す）。"""
+    """`work1` の登録済みアカウントの子の環境（用意の済んだ設定ディレクトリと起動を確かめた世代を渡す）。"""
     env = session_env.child_env(parent, tmp_path, "work1", decided=True)
-    return session_env.account_env(env, tmp_path / "store" / "work1", tmp_path / "usage" / "work1" / "g1.json")
+    return session_env.account_env(env, tmp_path / "store" / "work1", "g1")
 
 
 def test_3604_2_i4_account_child_has_no_auth_variables_and_gets_the_account_values(tmp_path):
@@ -321,7 +321,7 @@ def test_3604_2_i4_account_child_has_no_auth_variables_and_gets_the_account_valu
     assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "store" / "work1")
     assert got["NDF_SHARED_CONFIG_DIR"] == str(tmp_path / "shared")
     assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
-    assert got["NDF_ACCOUNT_USAGE_FILE"] == str(tmp_path / "usage" / "work1" / "g1.json")
+    assert got["NDF_ACCOUNT_GENERATION"] == "g1"
     assert got["NDF_CLAUDE_ACCOUNT"] == "work1" and got["PATH"] == "/bin"
     assert {k: got[k] for k in AWS_KEYS} == AWS_KEYS  # 提供元の秘密の変数は登録済みアカウントの子では親のまま
 
@@ -351,7 +351,7 @@ def test_account_env_fails_when_the_table_names_a_variable_without_a_value(tmp_p
 
     monkeypatch.setattr(session_env.facts, "ids", ids)
     with pytest.raises(KeyError):
-        session_env.account_env({}, tmp_path / "work1", tmp_path / "u.json")
+        session_env.account_env({}, tmp_path / "work1", "g1")
 
 
 def test_3604_3_default_login_child_is_unchanged_and_a_fallen_back_child_has_no_account(tmp_path):
@@ -377,7 +377,7 @@ def _account_parent(tmp_path):
         "PATH": "/bin",
         "CLAUDE_CONFIG_DIR": str(tmp_path / "store" / "work1"),
         "NDF_SHARED_CONFIG_DIR": str(tmp_path / "shared"),
-        "NDF_ACCOUNT_USAGE_FILE": str(tmp_path / "usage" / "work1" / "g1.json"),
+        "NDF_ACCOUNT_GENERATION": "g1",
         "CLAUDE_CODE_PLUGIN_CACHE_DIR": str(tmp_path / "shared" / "plugins"),
         **AUTH_13,
         **AWS_KEYS,
@@ -390,7 +390,7 @@ def test_3604_2_i9_metered_child_uses_the_shared_dir_and_has_no_auth_variables(t
     env = session_env.child_env(_account_parent(tmp_path), tmp_path, "metered", decided=True)
     got = session_env.metered_env(env, extra, saved=True)
     assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "metered"
-    assert "NDF_SHARED_CONFIG_DIR" not in got and "NDF_ACCOUNT_USAGE_FILE" not in got
+    assert "NDF_SHARED_CONFIG_DIR" not in got and "NDF_ACCOUNT_GENERATION" not in got
     assert not (set(AUTH_13) - set(extra)) & set(got) and not set(account_registry.SECRET_ENV) & set(got)
     assert {k: got[k] for k in extra} == extra
     assert got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")  # 親の値のまま
@@ -442,12 +442,12 @@ def test_i9_metered_env_values_fixed_by_the_wrapper_do_not_follow_the_declaratio
         "CLAUDE_CODE_USE_BEDROCK": "1",
         "CLAUDE_CONFIG_DIR": "/elsewhere",
         "NDF_CLAUDE_ACCOUNT": "work9",
-        "NDF_ACCOUNT_USAGE_FILE": "/x.json",
+        "NDF_ACCOUNT_GENERATION": "g9",
         "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/other",
     }
     got = session_env.metered_env(env, extra, saved=False)
     assert got["CLAUDE_CONFIG_DIR"] == str(tmp_path / "shared") and got["NDF_CLAUDE_ACCOUNT"] == "metered"
-    assert "NDF_ACCOUNT_USAGE_FILE" not in got and got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
+    assert "NDF_ACCOUNT_GENERATION" not in got and got["CLAUDE_CODE_PLUGIN_CACHE_DIR"] == str(tmp_path / "shared" / "plugins")
     assert "CLAUDE_CONFIG_DIR" in session_env.METERED_FIXED and "NDF_CLAUDE_ACCOUNT" in session_env.METERED_FIXED
 
 
@@ -584,7 +584,6 @@ def test_relay_locations_match_the_declared_paths():
         assert path == state / facts.value("locations", location, "path"), location
     assert registry.wrapper_dir(state, "t1") == Path("/s/relay/wrappers/t1")
     assert accounts.pin_path(state) == Path("/s/relay/accounts/pinned.json")
-    assert accounts.usage_path(state, "work1", "g1") == Path("/s/relay/accounts/usage/work1/g1.json")
     assert markers.marker_path(state, "s1") == Path("/s/relay/markers/s1.json")
     declared = {r["path"] for r in facts.rows("ndf-files", location="relay-hub")}
     assert {hub.STATE_FILE, registry.REGISTRY_FILE, hub.LOG_FILE} <= declared

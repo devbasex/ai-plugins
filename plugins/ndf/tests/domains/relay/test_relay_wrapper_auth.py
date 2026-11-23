@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 import pytest
 from ndf.contracts import limits
 from ndf.domains.relay import account_dir, accounts, observe, switch_decide, wrapper, wrapper_auth
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, log_rows, make_settings, put_usage, register, rows_of
+from ndf.domains.relay import account_registry as reg
+from ndf.domains.relay.account_decide import Usage
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, log_rows, make_settings, put_usage, put_usages, register, rows_of
 
 # 端末に出た行（不正な API キー・OAuth の失敗・U1 の本物の状態の本文）
 API_KEY_SCREEN = (
@@ -41,6 +43,12 @@ class Hooked(FakeChild):
     def started(self, directory, session_id, launch):
         if self.on_start is not None:
             self.on_start(session_id)
+
+
+def _lifted(tmp_path) -> None:
+    """上限を見た後に取った記録が、work1 の上限が解けたと返した形（取得の時刻は上限を見るより後）。"""
+    store = reg.store_dir({"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")})
+    put_usages(store, [Usage("work1", 10.0, 10.0, None, None, False)], fetched_at=time.time() + 600)
 
 
 def _iso(at: float) -> str:
@@ -194,7 +202,7 @@ def test_3864_11_a_default_login_limit_moves_to_the_one_registered_account(tmp_p
 
 def test_3864_11_without_registrations_a_default_login_limit_waits_and_keeps_the_child(tmp_path):
     # 受け入れ条件 #3864 の 11: 登録が 0 で従量の接続の設定も無ければ、上限で替えずにリセットを待ち（wait_reset）、
-    # 利用者が入力し直すと同じ子（既定のログイン）のまま続ける。起動し直さず、上限の観測も書かない
+    # 利用者が入力し直すと同じ子（既定のログイン）のまま続ける。起動し直さない
     stdin_r, stdin_w = os.pipe()
 
     class Resent(FakeChild):
@@ -218,7 +226,6 @@ def test_3864_11_without_registrations_a_default_login_limit_waits_and_keeps_the
         os.close(stdin_w)
     assert _envs(spawn) == [None] and ended.cause == ""
     assert rows_of(w, "wait_reset") and "続けて\r".encode() in b"".join(child.written)
-    assert not accounts.limits_path(tmp_path / "state").exists()
 
 
 @pytest.mark.parametrize(
@@ -330,8 +337,7 @@ def test_3864_7_the_fix_line_follows_the_login_form():
 @pytest.mark.parametrize("screen", [OAUTH_SCREEN, LIMIT_LINE.decode() + OAUTH_SCREEN], ids=["auth", "limit-and-auth"])
 def test_3864_6_when_the_target_cannot_be_prepared_it_stops_without_the_failed_account(tmp_path, monkeypatch, screen):
     # 替え先 work2 が事前の確かめを通った後の用意で落ちれば、認証に失敗した work1 へも既定のログインへも落とさず
-    # account_unavailable で止まる（上限の手が選んだ替え先でも同じ）
-    monkeypatch.setattr(accounts, "limit_until", lambda line, windows, seen_at, tz: (seen_at - 1, None, None))
+    # account_unavailable で止まる（上限の手が選んだ替え先でも同じ。上限を見た後の記録は上限が解けたと返す）
     attached = []
     real = account_dir.attach
 
@@ -341,7 +347,7 @@ def test_3864_6_when_the_target_cannot_be_prepared_it_stops_without_the_failed_a
 
     monkeypatch.setattr(account_dir, "attach", attach)
     first, prepare = _failing(tmp_path, screen, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)])
-    ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    ended, spawn, _, _ = _run(tmp_path, [first, FakeChild([], 0)], lambda state: (prepare(state), _lifted(tmp_path)))
     assert attached == ["work1", "work2"] and ended.cause == "account_unavailable"
     assert _envs(spawn) == ["work1", "work2"]  # work2 は関所の子で落ちた。3 回目の起動は無い
 
@@ -352,22 +358,19 @@ def test_3864_6_a_lifted_limit_does_not_restart_the_account_whose_auth_failed(tm
         raise OSError("書けない: held.json")
 
     monkeypatch.setattr(accounts, "hold", hold)
-    monkeypatch.setattr(accounts, "limit_until", lambda line, windows, seen_at, tz: (seen_at - 1, None, None))
     rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
     first, prepare = _failing(tmp_path, LIMIT_LINE.decode() + OAUTH_SCREEN, rows)
-    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], lambda state: (prepare(state), _lifted(tmp_path)))
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert [r["reason"] for r in rows_of(w, "account") if "from" in r][-1] == "limit"
 
 
 @pytest.mark.parametrize("lifted", [True, False], ids=["limit-lifted", "limit-active"])
-def test_3864_7_a_limit_with_an_auth_failure_and_no_target_shows_the_auth_fix(tmp_path, monkeypatch, lifted):
+def test_3864_7_a_limit_with_an_auth_failure_and_no_target_shows_the_auth_fix(tmp_path, lifted):
     # 上限と認証の失敗が同じ見回りで確定し替え先が無ければ、リセットを待つ（wait_reset）と出し続けず、認証の stalled と直し方の 1 行を出す
-    if lifted:
-        monkeypatch.setattr(accounts, "limit_until", lambda line, windows, seen_at, tz: (seen_at - 1, None, None))
     rows = lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)]  # noqa: E731
     first, prepare = _failing(tmp_path, LIMIT_LINE.decode() + OAUTH_SCREEN, rows, names=("work1",), exit_code=0, tail=[b""] * 6)
-    ended, spawn, w, shown = _run(tmp_path, [first], prepare)
+    ended, spawn, w, shown = _run(tmp_path, [first], lambda state: (prepare(state), lifted and _lifted(tmp_path)))
     assert _envs(spawn) == ["work1"] and ended.cause == ""
     assert rows_of(w, "stalled") and not rows_of(w, "wait_reset")
     assert shown.count("ndf relay account add work1 で登録し直す") == 1

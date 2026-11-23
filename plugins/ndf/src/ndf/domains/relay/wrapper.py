@@ -161,7 +161,6 @@ class Section:
     `started_at`・`ended_at` は子を起動した時刻と、次のセグメントを起動する手を初めて決めた時刻（どちらも `clock`）。
     `input_at` はラッパーが子へ最後に入力（利用者の入力の転送・起動の引数の 1 行）を送った時刻（壁時計）。
     `choice`・`choice_reason` は子を止める前に確定した次の起動順とその起動の理由（`guard`・`limit`・`auth`）。
-    `limit_lost` は上限の観測を書けなかったこと（そのセグメントでは今のアカウントを上限として扱う）。
     `wall_started` は起動を始めた時刻（壁時計）、`auth_at`・`auth_told` は認証の失敗を確かめた時刻・直し方の 1 行を出したか。
     """
 
@@ -185,7 +184,6 @@ class Section:
     input_at: Optional[float] = None
     choice: Optional[Choice] = None
     choice_reason: str = "limit"
-    limit_lost: bool = False
     wall_started: float = 0.0
     auth_at: Optional[float] = None
     auth_told: bool = False
@@ -298,10 +296,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         self.reader = launch_inputs.Reader(self.store, settings.state_dir, settings.environ, settings.cwd, [CLAUDE, *settings.args])
         self.last_skip = ""
         self.memo = None  # 替え先の判断のキャッシュ（`GuardSteps._confirm`）
-        self.fetcher = None if settings.fetch is None else wrapper_fetch.Fetcher(settings.state_dir, settings.fetch)
-        # 上限の観測の until（名前 → (登録の世代, until)。解けた後も、過ぎた後の取得の判定を 1 回終えるまで残し、
-        # 世代が変われば捨てる）と、取得の判定の結果の再利用（名前 → (世代・2 つの記録のスタンプ・tried・until, 次に `due` が真になる時刻)）
-        self.limit_untils: dict[str, tuple[str, float]] = {}
+        self.fetcher = None if settings.fetch is None else wrapper_fetch.Fetcher(settings.fetch)
+        # 取得の判定の結果の再利用（名前 → (世代・取得の記録のスタンプ・tried, 取り直してよい最初の時刻)）
         self.due_memo: dict[str, tuple[tuple, float]] = {}
         # この続きで認証に失敗した従量の接続と API キー（ラッパーの終わりで消える）と、キーの子の記録の読みの結果（決定 12）
         self.tried: set[str] = set()
@@ -418,43 +414,28 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
     def _queue_fetch(self, now: float) -> None:
         """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
 
-        最後にキューへ入れた後 `relay.usage-fetch` の中で、使用率のキャッシュの `valid_until`（どのリセットもまだ来ていない）より
-        前なら `due` を読まない（見回りごとに取得の記録を開かない）。キューへ入れなかった名前は、2 つの記録のスタンプが同じで
-        次に判定が変わる時刻（`accounts.due_at`）の前なら判定を再利用する（別のラッパーが先に取った名前を毎回開き直さない）。
-        上限の観測の until は過ぎるとキャッシュから落ちるので、過ぎた後の判定を 1 回終えるまで `limit_untils` に残して渡す。
-        登録の世代は使用率のキャッシュが観測と一緒に読んだもの（登録簿を走査し直さない）、`tried` も同じ世代のものだけを使う。
+        取り直すのは、最後に試した時刻から `relay.usage-fetch` を過ぎたか、その後のリセットを過ぎたとき（`accounts.due_at`）。
+        取得の記録のスタンプと `tried` が同じ間は、その時刻を再利用する（見回りごとに取得の記録を開かない）。
         """
         f = self.fetcher
         usage = self._inputs(now, False).usage if f is not None else None
         if f is None or usage is None:
             return
         interval = limits.seconds("relay.usage-fetch")
-        gens, seen = usage.generations, usage.limited_until
-        for n in [n for n, (g, u) in self.limit_untils.items() if gens.get(n) != g or (n not in seen and u > now)]:
-            # 期限の前に窓で解けた観測は残さない（過ぎた時刻で取り直さない）。登録し直した名前は旧い世代の until を捨てる
-            del self.limit_untils[n]
-        self.limit_untils.update({n: (gens[n], u) for n, u in seen.items() if n in gens})
-        for name, gen in gens.items():
-            held = self.limit_untils.get(name)
-            until = held[1] if held is not None else None
-            passed = until is not None and until <= now
+        for name, gen in usage.generations.items():
             last = f.tried.get(name)
             tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
-            quiet = not passed and tried is not None and now - tried < interval and now < usage.valid_until
-            if name in f.busy or quiet:
+            if name in f.busy:
                 continue
-            paths = (accounts.usage_path(self.s.state_dir, name, gen), accounts.fetch_path(self.store, name, gen))
-            key = (gen, launch_inputs.stamp(paths[0]), launch_inputs.stamp(paths[1]), tried, until)
+            path = accounts.fetch_path(self.store, name, gen)
+            key = (gen, launch_inputs.stamp(path), tried)
             memo = self.due_memo.get(name)
-            if memo is None or memo[0] != key or now >= memo[1]:
-                at = accounts.due_at(*paths, interval, until, tried)
-                if at <= now:
-                    f.put(accounts.FetchTarget(self.store, name, gen), now, until)
-                    self.due_memo.pop(name, None)
-                else:
-                    self.due_memo[name] = (key, at)
-            if passed:
-                del self.limit_untils[name]  # 過ぎた until はこの判定で取り直したか、その後に試していた
+            at = memo[1] if memo is not None and memo[0] == key else accounts.due_at(path, interval, tried)
+            if at <= now:
+                f.put(accounts.FetchTarget(self.store, name, gen), now)
+                self.due_memo.pop(name, None)
+            else:
+                self.due_memo[name] = (key, at)
 
     def _drain_fetch(self) -> None:
         """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""

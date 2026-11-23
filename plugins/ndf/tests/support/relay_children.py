@@ -207,27 +207,23 @@ def register(tmp_path: Path, *names: str, generation: str = "g1") -> Path:
 
 
 def put_usage(tmp_path: Path, name: str, five: float, seven: float | None = None, generation: str = "g1") -> None:
-    """`name` の使用率のキャッシュ（新しい形。`usage/<名前>/<世代>.json`）を 1 時間後に解ける窓で書く。"""
-    now = time.time()
-    windows = {"five_hour": (five, now + 3600)}
-    if seven is not None:
-        windows["seven_day"] = (seven, now + 86400)
-    accounts.write_usage(accounts.usage_path(tmp_path / "state", name, generation), windows, now)
+    """`name` の取得の記録（`<登録簿>/.usage-fetch/<名前>/<世代>.json`）を、今取れた 1 時間後に解ける窓で書く。"""
+    store = reg.store_dir({"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")})
+    put_usages(store, [account_decide.Usage(name, five, five, seven, None, False)], generation=generation)
 
 
-def put_usages(state: Path, rows: list[account_decide.Usage], measured_at: float | None = None, generation: str = "g1") -> None:
-    """status line の書く形（名前・世代別の記録）で `rows` を書く。上限の行は 5 時間の窓を 100% にする。
+def put_usages(store: Path, rows: list[account_decide.Usage], fetched_at: float | None = None, generation: str = "g1") -> None:
+    """成功した取得の記録の形で `rows` を登録簿 `store` の下へ書く。上限の行は 5 時間の窓を 100% にする。
 
-    `measured_at` を渡せば、記録の mtime をその時刻にする（上限の判断は上限の観測で決まり、mtime を読まない）。
+    `fetched_at`（無ければ今）を取得の成功の時刻と最後に試した時刻（`at`）にする。
     """
     now = time.time()
+    at = now if fetched_at is None else fetched_at
     for u in rows:
         windows = {}
         if u.five is not None or u.limited:
-            windows["five_hour"] = (accounts.FULL if u.limited else float(u.five), now + 3600)
+            windows["five_hour"] = {"percent": accounts.FULL if u.limited else float(u.five), "resets_at": now + 3600}
         if u.seven is not None:
-            windows["seven_day"] = (u.seven, now + 86400)
-        path = accounts.usage_path(state, u.name, generation)
-        accounts.write_usage(path, windows, now)
-        if measured_at is not None:
-            os.utime(path, (measured_at, measured_at))
+            windows["seven_day"] = {"percent": u.seven, "resets_at": now + 86400}
+        row = {"at": at, "fetched_at": at, "error": None, "spend_limit_reached": None, "windows": windows}
+        _json(accounts.fetch_path(store, u.name, generation), row)

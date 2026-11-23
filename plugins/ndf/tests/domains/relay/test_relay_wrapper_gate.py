@@ -4,7 +4,7 @@
 - 関所の子が claude になれなかった名前（`execvp` の失敗・知らせが来ない・`attach` の失敗）は飛ばして次の候補へ進む
 - 関所の失敗の後は子の終わりを確かめてから届けを解除し、確かめられなければ届けを残す
 - 同じ会話を続ける起動し直し・引継ぎは今の起動先に固定し、用意できなければ既定のログインへ落とさずに止まる
-- 上限の後の判断は名前・世代別の記録（status line の書く形）を読む
+- 上限の後の判断は名前・世代別の取得の記録を読む
 値はすべて偽の値で、実のアカウントを使わない。
 """
 
@@ -166,7 +166,8 @@ def test_gate_failures_of_the_limit_target_and_the_current_account_stop_without_
     monkeypatch.setattr(account_dir, "attach", attach)
 
     def setup(state):
-        put_usages(state, [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)], time.time() - 3600)
+        rows = [Usage("team", 50.0, 50.0, None, None, False), Usage("main", 5.0, 5.0, None, None, False)]
+        put_usages(store, rows, fetched_at=time.time() - 3600)
         accounts.use(state, "team")
 
     children = [FakeChild([LIMIT_LINE], None), FakeChild([], 0), FakeChild([], 0)]
@@ -307,11 +308,11 @@ def test_an_env_account_that_fails_to_prepare_falls_to_the_pin(tmp_path, monkeyp
     assert _envs(spawn) == ["work2"] and rows_of(w, "account")[0]["skipped"] == ["work1"]
 
 
-# ---------------------------------------------------------------- 上限の後は今の世代の記録で決める（r1-4）
+# ---------------------------------------------------------------- 上限の後は今の世代の取得の記録で決める（r1-4）
 
 
 def test_a_limited_candidate_in_the_generation_records_is_not_picked_after_the_limit(tmp_path):
-    register(tmp_path, "team", "main", "gmail")
+    store = register(tmp_path, "team", "main", "gmail")
     rows = [
         Usage("team", 50.0, 50.0, None, None, False),
         Usage("main", 100.0, 100.0, None, None, True),
@@ -319,7 +320,7 @@ def test_a_limited_candidate_in_the_generation_records_is_not_picked_after_the_l
     ]
 
     def setup(state):
-        put_usages(state, rows, time.time() - 3600)
+        put_usages(store, rows, fetched_at=time.time() - 3600)
         accounts.use(state, "team")
 
     ended, spawn, w, _ = _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], setup)

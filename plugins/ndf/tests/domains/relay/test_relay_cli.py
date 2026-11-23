@@ -33,7 +33,8 @@ def test_help_lists_every_subcommand(capsys):
     assert cli.main(["fly"]) != 0
 
 
-def test_account_use_show_clear(capsys, last_result):
+def test_account_use_show_clear(capsys, last_result, monkeypatch):
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)  # 中継の中で走らせても、指定より環境変数が先に立たない
     assert cli.main(["account", "use", "work"]) == 0
     assert accounts.pinned(identity.load().state_dir) == "work"
     assert cli.main(["account", "show"]) == 0
@@ -518,7 +519,13 @@ def _registered(store, name: str, generation: str) -> None:
     (d / account_registry.ACCOUNT_FILE).write_text(json.dumps(row), encoding="utf-8")
 
 
-def test_account_list_reads_the_cache_of_the_current_generation(tmp_path, monkeypatch, capsys, last_result):
+def _fetched(store, name: str, generation: str, percent: float, resets: float, now: float) -> None:
+    from ndf.adapters import claude_usage
+
+    accounts.write_fetch(accounts.fetch_path(store, name, generation), claude_usage.Usage(fetched_at=now, five_hour=(percent, resets)), now)
+
+
+def test_account_list_reads_the_fetch_record_of_the_current_generation(tmp_path, monkeypatch, capsys, last_result):
     import time
 
     store = tmp_path / "store"
@@ -527,10 +534,9 @@ def test_account_list_reads_the_cache_of_the_current_generation(tmp_path, monkey
     _registered(store, "work2", "g2")
     (store / "work3").mkdir()
     (store / "work3" / "account.json").write_text("{", encoding="utf-8")  # 壊れた登録は一覧の警告に回り、止めない
-    state = identity.load().state_dir
     later = time.time() + 3600
-    accounts.write_usage(accounts.usage_path(state, "work1", "g1"), {"five_hour": (42.0, later)}, time.time())
-    accounts.write_usage(accounts.usage_path(state, "work2", "old"), {"five_hour": (99.0, later)}, time.time())
+    _fetched(store, "work1", "g1", 42.0, later, time.time())
+    _fetched(store, "work2", "old", 99.0, later, time.time())
     assert cli.main(["account", "list"]) == 0
     by = {r["name"]: r for r in last_result(capsys.readouterr().out)["items"]}
     assert by["work1"]["percent"] == 42.0 and by["work1"]["state"] == "使える"
@@ -569,30 +575,26 @@ def test_i8_add_and_remove_forget_the_old_generation(tmp_path, monkeypatch, caps
     assert cli.main(["account", "add", "work1", "--code", "c"]) == 0
     first = account_registry.generation(store, "work1")
     assert account_registry.GEN_RE.fullmatch(first)
-    # 前の世代の外した間・キャッシュと、ほかの登録簿（同じ状態の保存先を共有する）の同じ名前の世代の記録
+    # 前の世代の外した間・取得の記録と、別の世代（ほかの登録簿が同じ状態の保存先を共有する）の記録
     for g in (first, "other"):
         accounts.hold(state, "work1", g, 4_000_000_000.0, 1.0)
-        accounts.write_usage(accounts.usage_path(state, "work1", g), {"five_hour": (10.0, 4_000_000_000.0)}, 1.0)
+        _fetched(store, "work1", g, 10.0, 4_000_000_000.0, 1.0)
     assert cli.main(["account", "add", "work1", "--code", "c"]) == 0  # 同じ名前の登録し直し
     second = account_registry.generation(store, "work1")
     assert second != first and "warnings" not in last_result(capsys.readouterr().out)
     assert accounts.held(state, 1.0, {"work1": first}) == {} and accounts.held(state, 1.0, {"work1": second}) == {}
     assert accounts.held(state, 1.0, {"work1": "other"}) == {"work1": 4_000_000_000.0}
-    # 登録し直す前の子の遅れた書き込みは前の世代のファイルへ入り、今の世代の記録にならない
-    accounts.write_usage(accounts.usage_path(state, "work1", first), {"five_hour": (99.0, 4_000_000_000.0)}, 1.0)
-    assert accounts.usages(state, store, 1.0, {"work1": second}) == []
+    assert not accounts.fetch_path(store, "work1", first).exists() and accounts.fetch_path(store, "work1", "other").exists()
+    # 登録し直す前の遅れた書き込みは前の世代のファイルへ入り、今の世代の記録にならない
+    _fetched(store, "work1", first, 99.0, 4_000_000_000.0, 1.0)
+    assert accounts.usages(store, 1.0, {"work1": second}) == []
     accounts.hold(state, "work1", second, 4_000_000_000.0, 1.0)
     monkeypatch.setattr(cli_account.shutil, "which", lambda _: None)
     monkeypatch.setattr(account_login, "logout", lambda *a: True)
     assert cli.main(["account", "remove", "work1"]) == 0
     assert accounts.held(state, 1.0, {"work1": second}) == {}
     assert accounts.held(state, 1.0, {"work1": "other"}) == {"work1": 4_000_000_000.0}
-    assert sorted(p.name for p in accounts.usage_path(state, "work1", "other").parent.iterdir()) == [
-        f"{first}.json",
-        f"{first}.json.lock",
-        "other.json",
-        "other.json.lock",
-    ]
+    assert sorted(p.name for p in accounts.fetch_path(store, "work1", "other").parent.iterdir()) == [f"{first}.json", "other.json"]
 
 
 def test_i8_cleanup_failures_are_warnings_after_the_account_operation(tmp_path, monkeypatch, capsys, last_result):

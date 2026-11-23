@@ -157,7 +157,7 @@
 | [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |
 | [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) | 一時レーンの起動とレーンの再起動を耐久ワークフローが打ち、オーガナイザーは問いと終わりだけで起きる |
 | [ndf-scripts-import-cycles.md](ndf-scripts-import-cycles.md) | スクリプトの import の向き（結果を出す層と cross-refactoring の台帳の輪をほどく） |
-| [ndf-relay-account-switching.md](ndf-relay-account-switching.md) | 中継のアカウントの切り替え（使用率の API と status line による使用率の記録・閾値 A・B・C と選ぶ順の組・見回りと止めてよい時点・上限の観測と最後の砦・認証の失敗と外した間・指定の読み直し・1 日の起動の上限の撤廃と再起動ループの検出）の常に成り立つ条件・決定と理由（#3864） |
+| [ndf-relay-account-switching.md](ndf-relay-account-switching.md) | 中継のアカウントの切り替え（使用率の API の取得の記録・閾値 A・B・C と選ぶ順の組・見回りと止めてよい時点・上限の後と最後の砦・認証の失敗と外した間・指定の読み直し・1 日の起動の上限の撤廃と再起動ループの検出）の常に成り立つ条件・決定と理由（#3864） |
 | [ndf-relay-plan-claude-accounts.md](ndf-relay-plan-claude-accounts.md) | `ndf plan` の `claude -p` が中継の子と同じ起動先で動く確かめ（認証の上書き・使用の届け・従量の接続の照合）と、上限のときに替え先で 1 回打ち直す仕組み（#3604 の受け入れ条件 11・#3864 の決定 9） |
 | [ndf-parallel-organizer-long-wait.md](ndf-parallel-organizer-long-wait.md) | 並列の計画のオーガナイザーの長い待ち（wait の上限 1800 秒の状況報告・metrics.switch の切り替えの判定と費用の式・再起動の理由「待ち」）の常に成り立つ条件・出力の契約・決定と理由（#3006）。手順は development-workflow の references/parallel.md が正 |
 | [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) | supervise の queue の重なりの組（同じファイルを宣言したプランだけを直列にする・ディレクトリの宣言を判定に使わない） |

@@ -128,7 +128,7 @@
 
 `metered_env` は、`CLAUDE_CONFIG_DIR` を共有の設定ディレクトリへ戻し（親に `NDF_SHARED_CONFIG_DIR` があり空でなければその値、
 空なら外す。親に `NDF_SHARED_CONFIG_DIR` が無ければ親の `CLAUDE_CONFIG_DIR` をそのまま保つ）、`NDF_SHARED_CONFIG_DIR`・
-`NDF_ACCOUNT_USAGE_FILE` と認証の 13 変数を外す。保存した設定と API キーの宣言では、照合する変数（`METERED_CHECKED`）を秘密の
+`NDF_ACCOUNT_GENERATION` と認証の 13 変数を外す。保存した設定と API キーの宣言では、照合する変数（`METERED_CHECKED`）を秘密の
 変数に限らずすべて親から外す（期待値をこの出力から作るので、保存した設定に無い親の `AWS_PROFILE`・接続先・地域を期待値に入れず、
 起動の前の照合を別の資格情報や宛先のまま通さない）。API キーの宣言では宣言の `ANTHROPIC_API_KEY` を重ねない（helper で渡す）。続けて設定を重ね、最後に
 `NDF_CLAUDE_ACCOUNT=metered` と決めた `CLAUDE_CONFIG_DIR` を入れ直す。

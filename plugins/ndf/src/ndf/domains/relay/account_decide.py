@@ -7,8 +7,8 @@
 - 見回り（`guard`）: 今が使い切りの組で、閾値の内側（組 0〜2）の候補があれば替える（I12）
 - 上限の後（`after_limit`）: 背景の待ちが残っていても替える。替え先は使い切りの組も入れ、無ければ従量の接続、それも
   無ければ `wait_reset`。上限が解けた今のアカウントが最良の候補より悪い組でなければ同じアカウントで再開する。
-  今のアカウントの行が無いとき（上限の観測の期限を過ぎ、窓も分からない）も解けたとして扱う（呼ぶ側は、上限の観測を
-  書けなかったときに上限の行を足して渡す）
+  今のアカウントの行が無いとき（取得の記録に窓が無い）も解けたとして扱う（呼ぶ側は、上限を見た後の取得がまだ
+  成功していなければ今のアカウントを上限の行で渡す）
 - 認証の失敗の後（`after_auth`）: 順の先頭、無ければ従量の接続、それも無ければ `stalled`
 
 `candidates` は呼ぶ側が渡す起動できる登録済みアカウントの名前で、判断の関数は候補の外の名前を返さない。
@@ -152,7 +152,7 @@ def _fallback(current: Optional[str], fallbacks: list[str]) -> Optional[str]:
 def after_limit(current: Optional[str], rows: list[Usage], candidates: list[str], fallbacks: list[str], g: Guards) -> Pick:
     """上限に当たった後に替えるか（#3337・決定 8）。背景の待ちが残っていても替える。
 
-    今のアカウントの行が無ければ、上限の観測の期限を過ぎて解けた（使用率の分からないもの）として扱う。
+    今のアカウントの行が無ければ、解けた（使用率の分からないもの）として扱う。
     """
     ranked = order(current, rows, candidates, g)
     now = next((u for u in rows if u.name == current), None)

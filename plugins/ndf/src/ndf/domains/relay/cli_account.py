@@ -259,7 +259,7 @@ def _acc_list(store: Path, a: argparse.Namespace) -> int:
     state_dir = identity.load().state_dir
     now = time.time()
     rows, warnings = account_registry.list_rows(
-        store, os.environ, accounts.pinned(state_dir), lambda generations: accounts.usages(state_dir, store, now, generations)
+        store, os.environ, accounts.pinned(state_dir), lambda generations: accounts.usages(store, now, generations)
     )
     metrics = {"accounts": sum(r["kind"] == "oauth" for r in rows), "keys": sum(r["kind"] == "api_key" for r in rows)}
     summary = f"登録: アカウント {metrics['accounts']} 件・API キー {metrics['keys']} 件" if rows else "登録済みのアカウントは無い"

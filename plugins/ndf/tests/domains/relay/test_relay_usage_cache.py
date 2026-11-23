@@ -1,11 +1,11 @@
-"""中継のアカウントの使用率のキャッシュ・認証の失敗で外した間・上限の観測（#3864 の 1〜3・6・11、I6・I7・I8・I11）。"""
+"""中継のアカウントの使用率の読み取り（取得の記録）と認証の失敗で外した間（#3864 の 3・6、I6・I7・I8）。"""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
+import pytest
 from ndf.domains.relay import accounts
 from ndf.domains.relay.account_decide import Usage
 
@@ -13,106 +13,60 @@ NOW = 1_795_000_000.0
 LATER = NOW + 3600
 
 
-def _cache(state: Path, name: str, generation: str, windows: dict) -> Path:
-    path = accounts.usage_path(state, name, generation)
+def _record(store: Path, name: str, generation: str, windows: dict, **extra) -> Path:
+    """取得の記録を書く（`write_fetch` が書く形）。"""
+    path = accounts.fetch_path(store, name, generation)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"windows": windows, "recorded_at": NOW}), encoding="utf-8")
+    path.write_text(json.dumps({"at": NOW, "fetched_at": NOW, "error": None, "windows": windows, **extra}), encoding="utf-8")
     return path
 
 
-def _windows(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))["windows"]
-
-
-def test_3864_1_write_usage_keeps_the_newer_value_per_window(tmp_path):
-    path = accounts.usage_path(tmp_path, "work1", "g1")
-    assert path == tmp_path / "relay" / "accounts" / "usage" / "work1" / "g1.json"
-    assert accounts.usage_path(tmp_path, "work1", "") == path.with_name("_.json")
-    accounts.write_usage(path, {"five_hour": (100.0, LATER), "seven_day": (30.0, LATER + 86400)}, NOW)
-    assert _windows(path) == {
-        "five_hour": {"percent": 100.0, "resets_at": LATER},
-        "seven_day": {"percent": 30.0, "resets_at": LATER + 86400},
-    }
-    # 同じ窓の古い入力（同じ resets_at で小さい使用率）・resets_at の古い入力・既に失効した入力では下げない
-    accounts.write_usage(path, {"five_hour": (40.0, LATER)}, NOW)
-    accounts.write_usage(path, {"five_hour": (10.0, LATER - 60)}, NOW)
-    accounts.write_usage(path, {"five_hour": (5.0, NOW - 1)}, NOW)
-    assert _windows(path)["five_hour"] == {"percent": 100.0, "resets_at": LATER}
-    # 新しい窓は使用率が小さくても採る。入力に無い窓とモデル別の窓は前の値を残す
-    scoped = {"claude-opus-4": {"percent": 31.0, "resets_at": LATER}}
-    data = json.loads(path.read_text(encoding="utf-8"))
-    data["windows"]["seven_day_scoped"] = scoped
-    path.write_text(json.dumps(data), encoding="utf-8")
-    accounts.write_usage(path, {"five_hour": (3.0, LATER + 18000)}, NOW)
-    got = _windows(path)
-    assert got["five_hour"] == {"percent": 3.0, "resets_at": LATER + 18000}
-    assert got["seven_day"]["percent"] == 30.0 and got["seven_day_scoped"] == scoped
-    # 前の窓が失効した後に、それより古い resets_at の入力を書いても前の値のまま
-    accounts.write_usage(path, {"five_hour": (50.0, LATER + 100)}, LATER + 20000)
-    assert _windows(path)["five_hour"] == {"percent": 3.0, "resets_at": LATER + 18000}
-
-
-def test_write_usage_skips_while_locked_and_never_takes_a_held_lock(tmp_path, hold_lock):
-    path = accounts.usage_path(tmp_path, "work1", "g1")
-    lock = path.with_name(path.name + ".lock")
-    fd = hold_lock(lock)
-    os.utime(lock, (NOW - 3600, NOW - 3600))  # 古い錠のファイルでも、オーナーが生きている間は奪わない
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert not path.exists()
-    os.close(fd)
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert _windows(path) == {"five_hour": {"percent": 10.0, "resets_at": LATER}}
-    before = path.stat().st_mtime_ns
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)  # 同じ窓なら書かない
-    assert path.stat().st_mtime_ns == before
-
-
-def test_write_usage_never_removes_a_directory_at_the_lock_path(tmp_path):
-    path = accounts.usage_path(tmp_path, "work1", "g1")
-    lock = path.with_name(path.name + ".lock")
-    lock.mkdir(parents=True)  # 空のディレクトリでも、ほかの書き手のものかもしれないので消さずにその回は書かない
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert not path.exists() and lock.is_dir()
-
-
-def test_usage_paths_stay_inside_the_cache(tmp_path):
-    import pytest
-
+def test_fetch_paths_stay_inside_the_store(tmp_path):
+    assert accounts.fetch_path(tmp_path, "work1", "g1") == tmp_path / ".usage-fetch" / "work1" / "g1.json"
+    assert accounts.fetch_path(tmp_path, "work1", "").name == "_.json"
     for name in ("..", "a/../b", "/abs", "a/b"):
         with pytest.raises(accounts.AccountError):
-            accounts.usage_path(tmp_path, name, "g1")
+            accounts.fetch_path(tmp_path, name, "g1")
     for generation in ("..", "../x", "/abs", "a/b", ".hidden"):
         with pytest.raises(accounts.AccountError):
-            accounts.usage_path(tmp_path, "work1", generation)
+            accounts.fetch_path(tmp_path, "work1", generation)
         with pytest.raises(accounts.AccountError):
-            accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": generation})
+            accounts.usages(tmp_path, NOW, {"work1": generation})
 
 
-def test_i6_one_account_record_leaves_the_other_files_alone(tmp_path):
-    a = accounts.usage_path(tmp_path, "work1", "g1")
-    b = accounts.usage_path(tmp_path, "work2", "g2")
-    accounts.write_usage(a, {"five_hour": (10.0, LATER)}, NOW)
-    accounts.write_usage(b, {"five_hour": (20.0, LATER)}, NOW)
-    accounts.write_usage(a, {"five_hour": (15.0, LATER)}, NOW)
-    assert _windows(b) == {"five_hour": {"percent": 20.0, "resets_at": LATER}}
-    got = accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1", "work2": "g2"})
+def test_i6_each_account_reads_its_own_record(tmp_path):
+    _record(tmp_path, "work1", "g1", {"five_hour": {"percent": 15.0, "resets_at": LATER}})
+    _record(tmp_path, "work2", "g2", {"five_hour": {"percent": 20.0, "resets_at": LATER}})
+    got = accounts.usages(tmp_path, NOW, {"work1": "g1", "work2": "g2"})
     assert got == [Usage("work1", 15.0, 15.0, None, None, False), Usage("work2", 20.0, 20.0, None, None, False)]
+    assert accounts.windows_of(tmp_path, "work1", "g1") == {"five_hour": (15.0, LATER)}
 
 
-def test_3864_3_reset_windows_read_as_zero_and_not_limited(tmp_path):
+def test_an_account_seen_at_the_limit_is_limited_until_a_later_fetch(tmp_path):
+    # 上限を見た後の取得がまだ成功していなければ、記録の窓が 55% でも上限として読む（同じ読みの fetched_at で決める）
+    _record(tmp_path, "team", "g1", {"five_hour": {"percent": 55.0, "resets_at": LATER}})
+    gens = {"team": "g1"}
+    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g1", NOW + 1)})[0] == [Usage("team", 55.0, 55.0, None, None, True)]
+    # 見た時刻より後の取得が届けば、記録だけで決める
+    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g1", NOW - 1)})[0] == [Usage("team", 55.0, 55.0, None, None, False)]
+    # 違う世代で見た上限は効かせない
+    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g0", NOW + 1)})[0] == [Usage("team", 55.0, 55.0, None, None, False)]
+    # 記録が無ければ、使用率の分からない上限の行で返す
+    assert accounts.usage_rows(tmp_path, NOW, {"work9": "g9"}, {"work9": ("g9", NOW)})[0] == [Usage("work9", None, None, None, None, True)]
+
+
+def test_3864_3_reset_windows_read_as_zero_and_full_windows_are_limited(tmp_path):
     gens = {"work1": "g1", "work2": "g2", "work3": "g3", "work4": "g4", "work5": "g5"}
-    _cache(
-        tmp_path, "work1", "g1", {"five_hour": {"percent": 100.0, "resets_at": NOW - 1}, "seven_day": {"percent": 40.0, "resets_at": NOW}}
-    )
-    _cache(
-        tmp_path, "work2", "g2", {"seven_day": {"percent": 100.0, "resets_at": LATER}, "five_hour": {"percent": 20.0, "resets_at": LATER}}
-    )
-    _cache(tmp_path, "work3", "g3", {})  # 窓を持たない記録は未観測
-    _cache(tmp_path, "work4", "old", {"five_hour": {"percent": 5.0, "resets_at": LATER}})  # 旧い世代は読まない
+    past = {"five_hour": {"percent": 100.0, "resets_at": NOW - 1}, "seven_day": {"percent": 40.0, "resets_at": NOW}}
+    _record(tmp_path, "work1", "g1", past)
+    full = {"seven_day": {"percent": 100.0, "resets_at": LATER}, "five_hour": {"percent": 20.0, "resets_at": LATER}}
+    _record(tmp_path, "work2", "g2", full)
+    _record(tmp_path, "work3", "g3", {})  # 窓を持たない記録は未観測
+    _record(tmp_path, "work4", "old", {"five_hour": {"percent": 5.0, "resets_at": LATER}})  # 旧い世代は読まない
     scoped = {"claude-opus-4": {"percent": 70.0, "resets_at": LATER}, "x": {"percent": 100.0, "resets_at": NOW - 5}}
-    _cache(tmp_path, "work5", "g5", {"seven_day": {"percent": 10.0, "resets_at": LATER}, "seven_day_scoped": scoped})
-    _cache(tmp_path, "other", "g", {"five_hour": {"percent": 1.0, "resets_at": LATER}})  # 登録の無い名前は返さない
-    got = accounts.usages(tmp_path, tmp_path / "store", NOW, gens)
+    _record(tmp_path, "work5", "g5", {"seven_day": {"percent": 10.0, "resets_at": LATER}, "seven_day_scoped": scoped})
+    _record(tmp_path, "other", "g", {"five_hour": {"percent": 1.0, "resets_at": LATER}})  # 登録の無い名前は返さない
+    got = accounts.usages(tmp_path, NOW, gens)
     # 窓ごとの値: 過ぎた窓は 0% で 7 日のリセットは分からない。7 日はモデル別のスロットのうち過ぎていないものの最大と比べる
     assert got == [
         Usage("work1", 0.0, 0.0, 0.0, None, False),
@@ -121,15 +75,38 @@ def test_3864_3_reset_windows_read_as_zero_and_not_limited(tmp_path):
     ]
 
 
-def test_i7_unreadable_usage_files_read_as_unknown(tmp_path):
-    path = accounts.usage_path(tmp_path, "work1", "g1")
+def test_the_last_fetch_decides_without_merging(tmp_path):
+    """resets_at が早まった新しい応答でも、最後の取得の値をそのまま読む（合わせ込みで 55% に止まった不具合）。"""
+    path = accounts.fetch_path(tmp_path, "team", "g1")
+    from ndf.adapters import claude_usage
+
+    accounts.write_fetch(path, claude_usage.Usage(fetched_at=NOW, five_hour=(55.0, LATER)), NOW)
+    accounts.write_fetch(path, claude_usage.Usage(fetched_at=NOW + 60, five_hour=(100.0, LATER - 0.6)), NOW + 60)
+    assert accounts.usages(tmp_path, NOW + 60, {"team": "g1"}) == [Usage("team", 100.0, 100.0, None, None, True)]
+
+
+def test_spend_limit_reached_is_limited(tmp_path):
+    gens = {"work1": "g1", "work2": "g2", "work3": "g3"}
+    _record(tmp_path, "work1", "g1", {"five_hour": {"percent": 30.0, "resets_at": LATER}}, spend_limit_reached=True)
+    _record(tmp_path, "work2", "g2", {}, spend_limit_reached=True)  # 窓が無くても使用率の分からない上限の行
+    _record(tmp_path, "work3", "g3", {"five_hour": {"percent": 30.0, "resets_at": LATER}}, spend_limit_reached=False)
+    rows, spent = accounts.usage_rows(tmp_path, NOW, gens, {})
+    assert rows == [
+        Usage("work1", 30.0, 30.0, None, None, True),
+        Usage("work2", None, None, None, None, True),
+        Usage("work3", 30.0, 30.0, None, None, False),
+    ]
+    assert spent == frozenset({"work1", "work2"})
+    # 世代の違う記録の上限の到達は読まない
+    assert accounts.usage_rows(tmp_path, NOW, {"work1": "g9"}, {}) == ([], frozenset())
+
+
+def test_i7_unreadable_records_read_as_unknown(tmp_path):
+    path = accounts.fetch_path(tmp_path, "work1", "g1")
     path.parent.mkdir(parents=True)
     for text in ("{", "[]", '{"windows": [1]}', '{"windows": {"five_hour": {"percent": "x", "resets_at": 1}}}'):
         path.write_text(text, encoding="utf-8")
-        assert accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1"}) == []
-    # 壊れた記録へも次の書き込みは通る
-    accounts.write_usage(path, {"five_hour": (10.0, LATER)}, NOW)
-    assert accounts.usages(tmp_path, tmp_path / "store", NOW, {"work1": "g1"}) == [Usage("work1", 10.0, 10.0, None, None, False)]
+        assert accounts.usages(tmp_path, NOW, {"work1": "g1"}) == []
 
 
 def test_i8_held_accounts_until_the_end_and_unhold(tmp_path):
@@ -160,108 +137,16 @@ def test_i8_hold_keeps_the_new_generation_in_either_order(tmp_path):
     assert accounts.held(tmp_path, NOW, {"work1": "new"}) == {"work1": NOW + 5}
 
 
-def test_i11_a_seen_limit_holds_until_until_or_a_new_window(tmp_path):
-    gens = {"work1": "g1"}
-    store = tmp_path / "store"
-    assert accounts.limits_path(tmp_path) == tmp_path / "relay" / "accounts" / "limited.json"
-    _cache(
-        tmp_path,
-        "work1",
-        "g1",
-        {"five_hour": {"percent": 92.0, "resets_at": LATER}, "seven_day": {"percent": 50.0, "resets_at": LATER + 86400}},
-    )
-    accounts.see_limit(tmp_path, "work1", "g1", NOW, (LATER, "five_hour", LATER))
-    assert accounts.usages(tmp_path, store, NOW, gens) == [Usage("work1", 92.0, 92.0, 50.0, LATER + 86400, True)]  # 古い 92% の記録でも上限
-    # 同じ窓の値の増加・上限より前の入力では解かない
-    accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (93.0, LATER)}, NOW)
-    accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (10.0, LATER - 600)}, NOW)
-    assert accounts.usages(tmp_path, store, NOW + 60, gens)[0].limited
-    # 観測の時刻のキャッシュが古く（window_resets_at が前の窓）、上限より前の今の窓（resets_at が until 以下）が遅れて届いても解かない
-    accounts.see_limit(tmp_path, "work1", "g1", NOW, (LATER, "five_hour", LATER - 18000))
-    accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (60.0, LATER)}, NOW)
-    assert accounts.usages(tmp_path, store, NOW + 60, gens)[0].limited
-    # 観測の窓が新しい窓（resets_at が window_resets_at と until より後で 100 未満）に替われば until の前でも解く
-    accounts.write_usage(accounts.usage_path(tmp_path, "work1", "g1"), {"five_hour": (4.0, LATER + 18000)}, NOW)
-    assert accounts.usages(tmp_path, store, NOW + 60, gens) == [Usage("work1", 50.0, 4.0, 50.0, LATER + 86400, False)]
-
-
-def test_i11_estimated_and_weekly_limits_are_not_released_by_another_window(tmp_path):
-    store = tmp_path / "store"
-    gens = {"work1": "g1", "work2": "g2"}
-    _cache(tmp_path, "work1", "g1", {"five_hour": {"percent": 92.0, "resets_at": LATER + 18000}})
-    _cache(
-        tmp_path,
-        "work2",
-        "g2",
-        {"five_hour": {"percent": 92.0, "resets_at": LATER + 18000}, "seven_day": {"percent": 95.0, "resets_at": LATER + 86400}},
-    )
-    accounts.see_limit(tmp_path, "work1", "g1", NOW, (LATER, None, None))  # (4) の推定で窓が null
-    accounts.see_limit(tmp_path, "work2", "g2", NOW, (LATER + 86400, "seven_day", LATER + 86400))
-    windows = {
-        "work1": {"five_hour": (92.0, LATER + 18000)},
-        "work2": {"five_hour": (5.0, LATER + 36000), "seven_day": (95.0, LATER + 86400)},
-    }
-    assert set(accounts.limits_seen(tmp_path, NOW, gens, windows)) == {"work1", "work2"}
-    assert set(accounts.limits_seen(tmp_path, LATER, gens, windows)) == {"work2"}  # until を過ぎれば解く
-    assert accounts.limits_seen(tmp_path, NOW, {"work1": "g9"}, windows) == {}  # 旧い世代の観測は読まない
-    # 使用率のファイルが無い名前に観測だけがあると、使用率の分からない上限の行になる
-    accounts.see_limit(tmp_path, "work3", "g3", NOW, (LATER, None, None))
-    rows = accounts.usages(tmp_path, store, NOW, {"work3": "g3"})
-    assert rows == [Usage("work3", None, None, None, None, True)]
-    assert accounts.usages(tmp_path, store, LATER, {"work3": "g3"}) == []
-    accounts.limits_path(tmp_path).write_text("{", encoding="utf-8")
-    assert accounts.limits_seen(tmp_path, NOW, gens, windows) == {}
-
-
-def test_i11_see_limit_keeps_the_new_generation_in_either_order(tmp_path):
-    for first, second in (("old", "new"), ("new", "old")):
-        accounts.limits_path(tmp_path).unlink(missing_ok=True)
-        accounts.see_limit(tmp_path, "work1", first, NOW, (LATER, None, None))
-        accounts.see_limit(tmp_path, "work1", second, NOW, (LATER, None, None))
-        assert accounts.limits_seen(tmp_path, NOW, {"work1": "new"}, {}) == {"work1": (NOW, LATER)}
-
-
-def test_limit_until_follows_the_rules_in_order():
-    from datetime import datetime, timezone
-    from zoneinfo import ZoneInfo
-
-    tokyo = ZoneInfo("Asia/Tokyo")
-    seen = datetime(2026, 11, 21, 13, 0, tzinfo=tokyo).timestamp()
-    three = datetime(2026, 11, 21, 15, 0, tzinfo=tokyo).timestamp()
-    five = {"five_hour": (80.0, three), "seven_day": (90.0, seen + 86400)}
-    # (1) 行のリセットの時刻。窓は行の語、無ければ同じ時と分の窓
-    assert accounts.limit_until("You've hit your session limit · resets 3pm (Asia/Tokyo)", five, seen, timezone.utc) == (
-        three,
-        "five_hour",
-        three,
-    )
-    assert accounts.limit_until("Limit reached · resets 3pm", five, seen, tokyo) == (three, "five_hour", three)
-    assert accounts.limit_until("Limit reached · resets 12:30pm", {}, seen, tokyo)[0] == three - 9000 + 86400  # 見た時刻より後で最も近い
-    # (2) 窓の語だけ
-    assert accounts.limit_until("weekly limit reached", five, seen, tokyo) == (seen + 86400, "seven_day", seen + 86400)
-    assert accounts.limit_until("You've hit your 5-hour limit", five, seen, tokyo) == (three, "five_hour", three)
-    # (3) 100 以上の窓のうち遅いほう
-    full = {"five_hour": (100.0, three), "seven_day": (100.0, seen + 86400)}
-    assert accounts.limit_until("limit reached", full, seen, tokyo) == (seen + 86400, "seven_day", seen + 86400)
-    # (4) 推定: 5 時間の窓、無ければ見た時刻 + relay.limit-unknown。窓は null
-    assert accounts.limit_until("limit reached", five, seen, tokyo) == (three, None, None)
-    assert accounts.limit_until("limit reached · resets soon", {}, seen, tokyo) == (seen + 18000, None, None)
-
-
 def test_forget_drops_only_the_given_generation(tmp_path):
     store = tmp_path / "store"
     for g in ("old", "new"):
-        accounts.write_usage(accounts.usage_path(tmp_path, "work1", g), {"five_hour": (10.0, LATER)}, NOW)
+        _record(store, "work1", g, {"five_hour": {"percent": 10.0, "resets_at": LATER}})
         accounts.hold(tmp_path, "work1", g, LATER, NOW)
-        accounts.see_limit(tmp_path, "work1", g, NOW, (LATER, None, None))
     accounts.hold(tmp_path, "work2", "g2", LATER, NOW)
     accounts.forget(tmp_path, store, "work1", "old")
-    assert sorted(p.name for p in accounts.usage_path(tmp_path, "work1", "new").parent.iterdir()) == ["new.json", "new.json.lock"]
+    assert sorted(p.name for p in accounts.fetch_path(store, "work1", "new").parent.iterdir()) == ["new.json"]
     assert accounts.held(tmp_path, NOW, {"work1": "old", "work2": "g2"}) == {"work2": LATER}
     assert accounts.held(tmp_path, NOW, {"work1": "new"}) == {"work1": LATER}
-    assert accounts.limits_seen(tmp_path, NOW, {"work1": "old"}, {}) == {}
-    assert accounts.limits_seen(tmp_path, NOW, {"work1": "new"}, {}) == {"work1": (NOW, LATER)}
     accounts.forget(tmp_path, store, "work1", "new")
-    assert not accounts.usage_path(tmp_path, "work1", "new").parent.exists()
+    assert not accounts.fetch_path(store, "work1", "new").parent.exists()
     assert accounts.held(tmp_path, NOW, {"work1": "new", "work2": "g2"}) == {"work2": LATER}
-    assert accounts.limits_seen(tmp_path, NOW, {"work1": "new"}, {}) == {}

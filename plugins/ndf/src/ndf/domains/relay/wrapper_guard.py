@@ -2,8 +2,10 @@
 
 `Wrapper` の基底クラス `GuardSteps` が、見回りごとに次を判断の関数へ渡す値にする。
 
-- 上限（`_limit_pick`）: 画面の上限の行か、今の窓の実測値が 100 以上で子が静かなときに、上限の観測を 1 回書いて
-  `after_limit` を呼ぶ。使用率の API の上限の到達だけで検出したときは観測を書かず、API の解除に任せる。一度検出した上限は `Section.limit_at` で引き継ぎ、解けた後も子が静かな間は再開先を判断する
+- 上限（`_limit_pick`）: 画面の上限の行か、今の窓の実測値が 100 以上か API の上限の到達で子が静かなときに `after_limit` を
+  呼ぶ。上限を初めて見たら今のアカウントをすぐ取り直し、その後の取得が成功するまでは上限として読む（`Reader.seen`。
+  セグメントをまたいで持ち、ファイルには書かない。解けたかは取得の記録だけで決める）。一度検出した上限は `Section.limit_at` で引き継ぎ、解けた後も
+  子が静かな間は再開先を判断する
 - 見回り（`_guard_pick`）: 今が使い切りの組か従量の接続のときに `guard` を呼ぶ
 - 止めてよい時点（`_safe_point`）: 静かな時間・回答待ちの質問が無い・会話の記録の最後が終わった応答で、最後の入力より後
 
@@ -13,7 +15,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -35,37 +36,33 @@ class GuardSteps:
     wall: Any
     reader: launch_inputs.Reader
     memo: Optional[tuple[Any, Optional[Pick], Optional[Choice], str]]
+    fetcher: Any  # `wrapper_fetch.Fetcher`（取らないラッパーは None）
     _log: Callable[..., None]
     _inputs: Callable[[float, bool], launch_inputs.Inputs]
     _pinned_or: Callable[[Optional[str], str, Optional[str], float], Optional[str]]
     _spins: Callable[[Optional[str], Optional[str]], bool]
 
     def _limit_pick(self, sec: Section, screen: str) -> Optional[Pick]:
-        """上限の後の判断。上限を初めて見た見回りで上限の観測を書く（決定 8）。上限でなければ None。"""
-        line = observe.limit_line(screen)
+        """上限の後の判断。上限を初めて見た見回りで今のアカウントを取り直す（決定 8）。上限でなければ None。"""
         now = self.wall.now()
-        spent: Optional[str] = None
-        if line is None:
+        if observe.limit_line(screen) is None:
             # 上限の行が無い: 前に検出した上限（解けた後の再開先の判断）か、窓の実測値が 100 以上か API の上限の到達で、
             # 子が静かな間だけ上限として扱う
             quiet = self.clock() - sec.last_output >= self.s.quiet
-            spent = self._spent(sec, now) if quiet and sec.limit_at is None else None
-            if not quiet or (sec.limit_at is None and spent is None):
-                sec.limit_at, sec.limit_lost = None, False  # 子がまた動き出した。次に上限を見たら観測を書き直す
+            if not quiet or (sec.limit_at is None and not self._spent(sec, now)):
+                sec.limit_at = None  # 子がまた動き出した。次に上限を見たら取り直す
                 return None
-            line = ""  # 窓が 100 以上で静かな子は上限の行を持たない（窓から until を決める）
         if sec.limit_at is None:
             sec.limit_at = now
-            # API だけで検出した上限は観測を書かない。API が次の取得で解除を返すと今の行の上限が落ち、`after_limit` が再開する
-            sec.limit_lost = spent != "api" and not self._see_limit(sec, line, now)
+            t = sec.target
+            if t is not None and t.account is not None and t.lease is not None:
+                # 上限を見た後の取得が成功するまで上限として読み（`Reader.seen`。セグメントをまたぐ）、すぐ取り直す
+                self.reader.seen[t.account] = (t.generation, now)
+                if self.fetcher is not None:
+                    self.fetcher.put(accounts.FetchTarget(self.store, t.account, t.generation), now, force=True)
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            if sec.limit_lost and sec.account is not None:  # 観測を書けなかったセグメントでは、今のアカウントを上限として扱う
-                mine = account_decide.Usage(sec.account, None, None, None, None, True)
-                rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
-                rows += [] if any(r.name == sec.account for r in rows) else [mine]
-            # 観測を書いたのに今の行が無ければ、観測の until を過ぎて解けた（窓が分からないまま）。`after_limit` が同じアカウントで再開する。
             # 認証の失敗を確かめたセグメントでは、外した間を書けたかによらず今のアカウントを候補から除く（解けても同じアカウントで再開しない）
             candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
             return account_decide.after_limit(sec.account, rows, candidates, inputs.fallbacks(), self.s.guards)
@@ -74,41 +71,18 @@ class GuardSteps:
         # 認証に失敗したアカウントはリセットを待っても再開できない。替え先が無ければ認証の判断（stalled と直し方の 1 行）へ進める
         return None if sec.auth_at is not None and pick.kind != "switch" else pick
 
-    def _spent(self, sec: Section, now: float) -> Optional[str]:
-        """今の登録済みアカウントの過ぎていない窓の実測値が 100 以上なら `window`、使用率の API が上限の到達を返したなら
-        `api`、どちらでもなければ None（上限の行の文言の変化と、上限の行を出さない子に備える）。
+    def _spent(self, sec: Section, now: float) -> bool:
+        """今の登録済みアカウントが取得の記録で上限か（過ぎていない窓が 100 以上か、API が上限の到達を返した）。
 
-        別のレーンが書いた上限の観測（`Usage.limited`）では検出しない（静かなだけの子を止めない）。観測は替え先の除外に使う。
-        API の上限の到達は、使用率のキャッシュが行と同じ取得の記録から取った `spent` を読む（見回りごとに記録を開かない）。
+        上限の行の文言の変化と、上限の行を出さない子に備える。世代が今の起動と違う記録では検出しない。上限を見た後の
+        取得の待ち（`Reader.seen`）で上限と読む行では検出しない（替え先が無く同じアカウントで起動し直した子を止め続けない）。
         """
         t = sec.target
-        if t is None or t.lease is None or t.account is None:
-            return None
         usage = self._inputs(now, False).usage
-        if usage is None:
-            return None
-        mine = next((u for u in usage.rows if u.name == sec.account), None)
-        if mine is None or not mine.limited:
-            return None
-        if mine.percent is not None and mine.percent >= accounts.FULL:
-            return "window"
-        return "api" if t.account in usage.spent and usage.generations.get(t.account) == t.generation else None
-
-    def _see_limit(self, sec: Section, line: str, now: float) -> bool:
-        """今の登録済みアカウントの上限の観測を書く。書けた（か書かない起動先）なら真、錠を取れない・書けなければ偽。"""
-        t = sec.target
-        if t is None or t.account is None or t.lease is None:
-            return True  # 従量の接続・既定のログインは書かない
-        windows = accounts.read_windows(
-            accounts.usage_path(self.s.state_dir, t.account, t.generation), accounts.fetch_path(self.store, t.account, t.generation)
-        )
-        tz = datetime.now().astimezone().tzinfo
-        try:
-            accounts.see_limit(self.s.state_dir, t.account, t.generation, now, accounts.limit_until(line, windows, now, tz))
-        except OSError as exc:  # 書けなければ記録せず判断を続ける（`log.jsonl` に 1 行）
-            self._log({"kind": "limit_seen", "account": t.account, "reason": f"上限の観測を書けない: {exc}"})
+        if t is None or t.lease is None or t.account is None or usage is None or usage.generations.get(t.account) != t.generation:
             return False
-        return True
+        mine = next((u for u in usage.rows if u.name == sec.account), None)
+        return mine is not None and ((mine.percent is not None and mine.percent >= accounts.FULL) or t.account in usage.spent)
 
     def _guard_pick(self, sec: Section, now: float) -> Optional[Pick]:
         """見回りの判断。今が使い切りの組か従量の接続のときだけ候補を読み、`guard` を呼ぶ（決定 11・I12）。"""
@@ -189,8 +163,8 @@ class GuardSteps:
             return [str(pick.account)]
         rows = inputs.usage.rows if inputs.usage is not None else []
         first = self._pinned_or(pick.account, reason, sec.account, now)
-        if (sec.limit_lost or sec.auth_at is not None) and first == sec.account:
-            first = pick.account  # 観測を書けず上限として扱う・認証に失敗した今のアカウントを、指定で先頭へ戻さない
+        if (any(r.name == sec.account and r.limited for r in rows) or sec.auth_at is not None) and first == sec.account:
+            first = pick.account  # 上限として読む・認証に失敗した今のアカウントを、指定で先頭へ戻さない
         rest = account_decide.order(sec.account, rows, inputs.candidates(), self.s.guards)
         if reason == "guard":
             by = {u.name: u for u in rows}

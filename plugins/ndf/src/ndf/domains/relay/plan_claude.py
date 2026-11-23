@@ -79,10 +79,10 @@ def _account(argv: list[str], env: Mapping[str, str], cwd: Path) -> Union[Accoun
     """登録済みアカウントの親からの起動（認証の上書きの確かめと、worker 自身の使用の届け）。"""
     name, store = env["NDF_CLAUDE_ACCOUNT"], reg.store_dir(env)
     config = env.get("CLAUDE_CONFIG_DIR")
-    gen = account_choice.inherited_generation(env, name, identity.load().state_dir)
+    gen = account_choice.inherited_generation(env)
     if not config or gen is None:
         return AccountRefused(
-            Failure.LAUNCH, LEASE_LINE.format(name=name, why="CLAUDE_CONFIG_DIR か NDF_ACCOUNT_USAGE_FILE が無いか形が違う")
+            Failure.LAUNCH, LEASE_LINE.format(name=name, why="CLAUDE_CONFIG_DIR か NDF_ACCOUNT_GENERATION が無いか形が違う")
         )
     where = cwd / config  # 子は相対の設定ディレクトリを `Popen(cwd=…)` から解く（絶対パスならそのまま）
     refused = _overridden(name, env, where, cwd, argv)

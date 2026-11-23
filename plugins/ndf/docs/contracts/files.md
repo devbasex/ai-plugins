@@ -58,13 +58,11 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-hub-request` | `relay-hub` state:relay/hub | `requests-v2/<id>.json` | exchange | — | 中継の頼む側（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-result` | `relay-hub` state:relay/hub | `results/<id>.json` | exchange | — | 中継のリレーハブ（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-state` | `relay-hub` state:relay/hub | `hub.json` | exchange | — | 中継（M3） | replaced | 内部（予告なく変えてよい） |
-| `relay-limit-seen` | `relay-accounts` state:relay/accounts | `limited.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-marker` | `relay-markers` state:relay/markers | `<id>.json` | exchange | — | 中継のラッパー（M3b） | run | 内部（予告なく変えてよい） |
 | `relay-next` | `relay-wrappers` state:relay/wrappers | `<名前>/next.json` | exchange | — | Stop の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | ndf_settings | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |
 | `relay-question` | `relay-wrappers` state:relay/wrappers | `<名前>/question.json` | exchange | — | PreToolUse の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-stop` | `relay-wrappers` state:relay/wrappers | `<名前>/stop` | exchange | — | ndf relay stop（M3b）と人（touch） | run | 内部（予告なく変えてよい） |
-| `relay-usage` | `relay-accounts` state:relay/accounts | `usage/<名前>/<世代>.json` | measured | — | NDF の status line（statusline.sh） | replaced | 内部（予告なく変えてよい） |
 | `relay-usage-fetch` | `relay-account-store` config:ndf/accounts（NDF_ACCOUNTS_DIR で差し替え） | `.usage-fetch/<名前>/<世代>.json` | measured | — | 中継のラッパー（使用率の API の取得） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper` | `relay-wrappers` state:relay/wrappers | `<名前>/wrapper.json` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper-lock` | `relay-wrappers` state:relay/wrappers | `<名前>/relay.lock` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |

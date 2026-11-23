@@ -22,16 +22,14 @@ LSTAT = " (lstat)"  # `account_dir.ready` のスタンプのキーの末尾（�
 
 
 class UsageCache(NamedTuple):
-    """使用率と上限の観測を重ねた行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間・上限の観測の終わりの最小。
+    """取得の記録から読んだ使用率の行。`stamp` は読んだ源のスタンプ、`valid_until` は窓のリセット・外した間の終わりの最小。
 
-    `limited_until` は上限の観測が続く名前とその `until`（取得の `due` に渡す）。`spent` は使用率の API が上限の到達を
-    返した名前（行と同じ取得の記録から取る）。`generations` は読んだ登録の世代（名前 → 世代。観測と組で使う）。
+    `spent` は使用率の API が上限の到達を返した名前（行と同じ取得の記録から取る）。`generations` は読んだ登録の世代（名前 → 世代）。
     """
 
     stamp: tuple
     valid_until: float
     rows: list[account_decide.Usage]
-    limited_until: Mapping[str, float]
     spent: frozenset[str]
     generations: Mapping[str, str]
 
@@ -106,23 +104,17 @@ def unchanged(stamps: Mapping[str, Optional[tuple]]) -> bool:
 
 
 def _usage_sources(state_dir: Path, store: Path, generations: Mapping[str, str]) -> list[Path]:
-    files = [accounts.held_path(state_dir), accounts.limits_path(state_dir)]
-    for n, g in sorted(generations.items()):
-        files += [accounts.usage_path(state_dir, n, g), accounts.fetch_path(store, n, g)]
-    return files
+    return [accounts.held_path(state_dir), *(accounts.fetch_path(store, n, g) for n, g in sorted(generations.items()))]
 
 
-def _usage(state_dir: Path, store: Path, now: float, generations: Mapping[str, str], stamp: tuple) -> UsageCache:
-    """使用率を読み直す。`valid_until` は過ぎていない窓のリセット・外した間・上限の観測の終わりの最小。"""
-    windows = {
-        n: accounts.read_windows(accounts.usage_path(state_dir, n, g), accounts.fetch_path(store, n, g)) for n, g in generations.items()
-    }
-    ends = [r for w in windows.values() for _, r in w.values() if r > now]
+def _usage(
+    state_dir: Path, store: Path, now: float, generations: Mapping[str, str], stamp: tuple, seen: Mapping[str, tuple[str, float]]
+) -> UsageCache:
+    """使用率を読み直す。`valid_until` は過ぎていない窓のリセット・外した間の終わりの最小。`seen` は `Reader.seen`。"""
+    ends = [r for n, g in generations.items() for _, r in accounts.windows_of(store, n, g).values() if r > now]
     ends += list(accounts.held(state_dir, now, generations).values())
-    seen = {n: until for n, (_, until) in accounts.limits_seen(state_dir, now, generations, windows).items()}
-    ends += list(seen.values())
-    rows, spent = accounts.usage_rows(state_dir, store, now, generations)
-    return UsageCache(stamp, min(ends, default=math.inf), rows, seen, spent, dict(generations))
+    rows, spent = accounts.usage_rows(store, now, generations, seen)
+    return UsageCache(stamp, min(ends, default=math.inf), rows, spent, dict(generations))
 
 
 class Reader:
@@ -132,6 +124,8 @@ class Reader:
         self.store, self.state_dir, self.environ, self.cwd, self.argv = store, state_dir, environ, cwd, list(argv)
         self.inputs = Inputs()
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
+        # 上限を見た登録済みアカウント（名前 → (世代, 見た時刻)）。その後の取得が成功するまで上限として読む。セグメントをまたいで持つ
+        self.seen: dict[str, tuple[str, float]] = {}
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
         # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
@@ -197,10 +191,13 @@ class Reader:
         """
         accs = self._registered()
         generations = {n: a.generation for n, a in accs.items()}
-        stamp = tuple((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations))
+        stamp = (
+            *((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations)),
+            tuple(sorted(self.seen.items())),
+        )
         old = self.inputs.usage
         if old is None or old.stamp != stamp or now >= old.valid_until:
-            self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp)
+            self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp, self.seen)
         if need_candidates:
             held = self._held_until(generations, now)
             usable = {n: a for n, a in accs.items() if not a.needs_relogin and n not in held}

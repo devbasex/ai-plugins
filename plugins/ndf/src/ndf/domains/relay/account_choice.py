@@ -122,9 +122,8 @@ def launch_of(
     env: Mapping[str, str], store: Path, state_dir: Path, account: reg.Account, cwd: Path, argv: Sequence[str]
 ) -> account_dir.Launch:
     """登録済みアカウントの子が受け取る環境・作業ディレクトリ・起動引数。`env` は `child_env` の出力。"""
-    usage = accounts.usage_path(state_dir, account.name, account.generation)
     config = Path(reg.account_dir(store, account.name)).absolute()
-    return account_dir.Launch(session_env.account_env(env, config, usage), cwd, list(argv))
+    return account_dir.Launch(session_env.account_env(env, config, account.generation), cwd, list(argv))
 
 
 def candidates(env: Mapping[str, str], store: Path, state_dir: Path, now: float, cwd: Path, argv: list[str]) -> list[str]:
@@ -712,8 +711,7 @@ def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path
     prepared = account_dir.prepare(store, target, env, launch_of(env, store, state_dir, acc, cwd, argv))
     if not prepared.ok:
         return str(prepared.reason)
-    usage = accounts.usage_path(state_dir, target, prepared.generation)
-    return Built(session_env.account_env(env, prepared.config_dir, usage), list(argv), prepared, prepared.resolved)
+    return Built(session_env.account_env(env, prepared.config_dir, prepared.generation), list(argv), prepared, prepared.resolved)
 
 
 def reverify(built: Built, cwd: Path) -> Optional[str]:
@@ -735,31 +733,17 @@ def guards() -> account_decide.Guards:
     )
 
 
-def _limited_rows(env: Mapping[str, str], state_dir: Path, now: float, name: str, gen: str) -> list[account_decide.Usage]:
-    """上限の観測を `gen` の世代へ書き（`until` は「上限の観測」の (4) の推定。書けなければ 1 行を出して続ける）、今のアカウントを上限とした使用率の行を返す。"""
-    store = reg.store_dir(env)
-    windows = accounts.read_windows(accounts.usage_path(state_dir, name, gen), accounts.fetch_path(store, name, gen))
-    try:
-        accounts.see_limit(state_dir, name, gen, now, accounts.estimated_until(windows, now))
-    except OSError as exc:  # ファイル: 書けなくても、今のアカウントを上限として替え先を選ぶ
-        print(f"ndf plan: アカウント {name} の上限の観測を書けない: {type(exc).__name__}", file=sys.stderr)
-    rows, _ = accounts.usage_rows(state_dir, store, now, {n: a.generation for n, a in registered(store).items()})
+def _limited_rows(store: Path, now: float, name: str) -> list[account_decide.Usage]:
+    """今のアカウントを上限とした使用率の行（上限を見た直後で、取得の記録はまだ上限を写していないことがある）。"""
+    rows, _ = accounts.usage_rows(store, now, {n: a.generation for n, a in registered(store).items()}, {})
     mine = account_decide.Usage(name, None, None, None, None, True)
     return [r._replace(limited=True) if r.name == name else r for r in rows] + ([] if any(r.name == name for r in rows) else [mine])
 
 
-def inherited_generation(env: Mapping[str, str], name: str, state_dir: Path) -> Optional[str]:
-    """親が渡した `NDF_ACCOUNT_USAGE_FILE` の世代（`usage/<名前>/<世代>.json`。`_` は空）。形が違えば None。"""
-    raw = env.get("NDF_ACCOUNT_USAGE_FILE")
-    if not raw:
-        return None
-    stem = Path(raw).name.removesuffix(".json")
-    gen = "" if stem == "_" else stem
-    try:
-        same = accounts.usage_path(state_dir, name, gen) == Path(raw)
-    except accounts.AccountError:  # noqa: NDF401 利用者の入力: 世代の形でなければ継いだ世代として使わない
-        return None
-    return gen if same else None
+def inherited_generation(env: Mapping[str, str]) -> Optional[str]:
+    """親が渡した `NDF_ACCOUNT_GENERATION`（起動を確かめた登録の世代。空文字は世代の無い登録）。無い・形が違えば None。"""
+    gen = env.get("NDF_ACCOUNT_GENERATION")
+    return gen if gen is not None and (gen == "" or reg.GEN_RE.fullmatch(gen)) else None
 
 
 def retry_env(
@@ -767,17 +751,16 @@ def retry_env(
 ) -> Optional[tuple[Built, str]]:
     """`ndf plan` の上限での打ち直しの替え先（決定 9）。返りは（`target_env` の `Built`、替え先の名前）か None。
 
-    `env` の `NDF_CLAUDE_ACCOUNT` の上限の観測を `see_limit` で書き、`after_limit` が `switch` なら `target_env` を打つ。`keys` が偽なら
+    `env` の `NDF_CLAUDE_ACCOUNT` を上限として `after_limit` を呼び、`switch` なら `target_env` を打つ。`keys` が偽なら
     キーの子（API キーの設定の従量の接続と登録簿の API キー）を替え先にしない（`call_claude` の起動の形がキーを渡せないとき）。
     登録済みアカウントの名前でない・`wait_reset`・`target_env` が理由の符号を返したら None（符号は標準エラーの 1 行）。
-    上限の観測は、最初の起動が確かめた世代（`inherited_generation`）へ書く（その後に同じ名前を登録し直されても新しい世代へ書かない）。
     """
     store = reg.store_dir(env)
     account = registered(store).get(env.get("NDF_CLAUDE_ACCOUNT") or "")  # noqa: NDF501 利用者の入力: 名前の無い環境は打ち直さない
-    gen = inherited_generation(env, account.name, state_dir) if account is not None else None
+    gen = inherited_generation(env) if account is not None else None
     if account is None or gen is None:
         return None
-    rows = _limited_rows(env, state_dir, now, account.name, gen)
+    rows = _limited_rows(store, now, account.name)
     read = read_before(store)._replace(keys=keys)
     decl = metered_decl(store, env)
     probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
