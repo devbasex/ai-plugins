@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -228,6 +229,27 @@ def test_one_hook_run_reads_only_the_policies_it_uses(tmp_path, monkeypatch, rea
     assert record["event"] == event and not record["error"]
     assert guard in [g["name"] for g in record["guards"]]
     assert 1 < len(read_limits) <= cap, read_limits
+
+
+@pytest.mark.parametrize(
+    ("runtime", "checked"),
+    [("codex", ["hook.budget.stop.codex.json"]), ("claude", ["hook.budget.stop.claude.json", "hook.budget.stop.json"])],
+)
+def test_budget_lookup_checks_each_policy_file_once(monkeypatch, runtime, checked):
+    """予算の選択と読み込みが、方針のファイルの有無の結果を分け合う。"""
+    got: list[str] = []
+    real = Path.is_file
+
+    def spy(path):
+        if path.parent == tables.LIMITS_DIR:
+            got.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(Path, "is_file", spy)
+    tables.has_policy.cache_clear()
+    for _ in range(2):
+        assert budget.budget_for(runtime, "Stop") is not None
+    assert got == checked
 
 
 def test_policy_value_reads_its_own_file_once(read_limits):

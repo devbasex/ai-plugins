@@ -120,11 +120,19 @@ def test_names_that_cannot_be_read_statically_and_unused_policies_pass(tmp_path:
     assert run(root)[0] == 0
 
 
-@pytest.mark.parametrize(("name", "text"), [(f"{POLICY}.json", "{"), (f"{POLICY}.json", "[]"), ("notes.txt", "{}")])
-def test_unreadable_limits_settings_fail_and_count_in_the_scope_of_the_file(tmp_path: Path, name: str, text: str):
+def test_policy_bodies_are_left_to_the_contracts_check(tmp_path: Path):
+    """参照先の検査はファイル名だけを見る。中身は `ndf contracts check` が確かめる。"""
     root = _tree(tmp_path)
-    _write(root / LIMITS / name, text)
-    assert _in_scope(root, f"{LIMITS}/{name}") == [("limits-shape", f"{LIMITS}/{name}", "")]
+    _write(root / LIMITS / f"{POLICY}.json", "{")
+    assert ck.find(root) == []
+
+
+def test_files_that_are_not_policies_do_not_satisfy_a_reference(tmp_path: Path):
+    root = _tree(tmp_path)
+    for name in ("_meta.json", "never.used.json", "no.such.txt"):
+        _write(root / LIMITS / name, "{}")
+    _write(root / CODE, "from ndf.contracts import limits\nlimits.policy('_meta')\nlimits.policy('no.such')\n")
+    assert sorted(_kinds({"items": ck.find(root)})) == [("limits-unknown", CODE, "_meta"), ("limits-unknown", CODE, "no.such")]
 
 
 def test_removed_policy_fails_in_the_scope_of_its_file_and_an_empty_table_fails(tmp_path: Path):

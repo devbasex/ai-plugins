@@ -103,8 +103,9 @@ def policy_path(name: str) -> str:
     return f"{CONTRACTS.name}/{LIMITS_DIR.name}/{name}.json"
 
 
+@lru_cache(maxsize=None)
 def has_policy(name: str) -> bool:
-    """方針があるか。ファイルの有無だけを見て読まない。"""
+    """方針があるか。ファイルの有無だけを 1 プロセスに 1 回見て、読まない。"""
     return (LIMITS_DIR / f"{name}.json").is_file()
 
 
