@@ -412,6 +412,20 @@ def _asks_reply(sentence: str) -> bool:
     return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
+def line_asks(text: str) -> tuple[str, list[str]]:
+    """1 行の、かぎ括弧の引用を外した文と、その中の回答・承認を待つ文（`read_prose` の `matched` と同じ形）。
+
+    guard `stop-wait` が区分を先頭に書いた行の質問を、ルールの待ちの文と照らすのに使う。
+    """
+    prev = None
+    unquoted = _OPAQUE.sub(_opaque, text)
+    while prev != unquoted:
+        prev = unquoted
+        unquoted = _QUOTED.sub(_blank_quote, unquoted)
+    unquoted = unquoted.strip()
+    return unquoted, [s for s in _sentences([unquoted]) if _asks_reply(s)]
+
+
 def _heading_kinds(lines: list[ProseLine]) -> dict[int, str | None]:
     """見出しの行の位置ごとの種類（`_heading_kind`）。1 回の判定で 1 回だけ求め、`_waits` と `_closing_report` へ渡す。"""
     return {i: _heading_kind(lines, i) for i, line in enumerate(lines) if line.heading}

@@ -6,14 +6,14 @@
 
 ## `.ndf/ask.json`（ask）
 
-worktree・チーム・公開・[ask.schema.json](../../contracts/schemas/ndf-settings/ask.schema.json)。読む工程: `ndf hooks`（人への質問の hook（PreToolUse）で区分を照らすとき）
+worktree・チーム・公開・[ask.schema.json](../../contracts/schemas/ndf-settings/ask.schema.json)。読む工程: `ndf hooks`（人への質問の hook（PreToolUse）で区分を照らすとき）・`ndf hooks`（人へ問う Tool の無いランタイムの Stop（stop-wait）で、本文の質問の区分を照らすとき（extra の name））
 
 人へ問う区分（AskUserQuestion の守り）と費用の閾値
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `allow` | array of string | — | — | 任意 | 許す区分（既定は cost・irreversible・human-action・legal） |
+| `allow` | array of string | `["cost", "irreversible", "human-action", "legal"]` | — | 任意 | 許す区分（既定は組み込みの cost・irreversible・human-action・legal） |
 | `cost` | object | — | — | 任意 | 費用の区分 |
 | `extra` | array of object | — | — | 任意 | 足す区分 |
 | `mode` | string | `"enforce"` | `"enforce"`・`"advise"`・`"off"` | 任意 | 区分の無い質問の扱い。enforce は断る、advise は案内する、off は見ない |

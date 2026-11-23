@@ -32,10 +32,16 @@
     },
     "allow": {
       "type": "array",
-      "description": "許す区分（既定は cost・irreversible・human-action・legal）",
+      "description": "許す区分（既定は組み込みの cost・irreversible・human-action・legal）",
       "items": {
         "type": "string"
-      }
+      },
+      "default": [
+        "cost",
+        "irreversible",
+        "human-action",
+        "legal"
+      ]
     },
     "cost": {
       "type": "object",
@@ -79,6 +85,10 @@
     {
       "by": "ndf hooks",
       "when": "人への質問の hook（PreToolUse）で区分を照らすとき"
+    },
+    {
+      "by": "ndf hooks",
+      "when": "人へ問う Tool の無いランタイムの Stop（stop-wait）で、本文の質問の区分を照らすとき（extra の name）"
     }
   ],
   "examples": [

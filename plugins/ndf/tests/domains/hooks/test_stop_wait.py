@@ -431,3 +431,36 @@ def test_stop_wait_routes_the_pushback_to_the_prose_question_on_a_runtime_withou
     Judge(monkeypatch, kind="report")
     got = _check(tmp_path, MISSED[0], runtime="codex")
     assert got.kind == "pushback" and "AskUserQuestion" not in got.reason and "先頭に書いた本文の質問" in got.reason
+
+
+# 区分は、その区分を先頭に書いた行の質問にだけ結び付ける（区分だけの行・区分の無い質問を添えた応答は問うたと読まない）
+UNBOUND = [
+    "区分: ndf-gate:1（設計承認ゲートは完了しました）\n\nこのまま進めてよいですか？",
+    "- ndf-gate:1 設計 Pull Request をマージしてよいですか。\n\nあわせて、ライブラリは A でよいですか？",
+]
+
+
+@pytest.mark.parametrize("reply", UNBOUND)
+def test_stop_wait_pushes_back_a_question_not_bound_to_its_category(tmp_path, monkeypatch, reply):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, reply, runtime="codex", cwd=str(tmp_path))
+    assert got.kind == "pushback" and got.notes["judge"] == "rule"
+
+
+# 区分の名前はトークン全体で照らし、組み込みと `.ndf/ask.json` の `extra` にある名前だけを認める
+@pytest.mark.parametrize("category", ["ndf-gate:10", "ndf-ask:design", "ndf-ask:redline", "ndf-ask:redline:C9"])
+def test_stop_wait_does_not_take_an_unknown_category_as_asked(tmp_path, monkeypatch, category):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, f"- {category} この方針で進めてよいですか。", runtime="codex", cwd=str(tmp_path))
+    assert got.kind == "pushback" and got.notes["judge"] == "rule"
+
+
+def test_stop_wait_takes_a_category_declared_in_the_project_extra_as_asked(tmp_path, monkeypatch):
+    judge = Judge(monkeypatch, kind="wait")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".ndf").mkdir()
+    declared = {"version": 1, "extra": [{"name": "design", "description": "設計の方針の選択"}]}
+    (tmp_path / ".ndf" / "ask.json").write_text(json.dumps(declared), encoding="utf-8")
+    got = _check(tmp_path, "- ndf-ask:design この方針で進めてよいですか。", runtime="codex", cwd=str(tmp_path / "sub"))
+    assert got.kind == "pass" and got.notes["judge"] == "skip:asked"
+    assert judge.asked == [] and judge.parents == 0

@@ -12,7 +12,8 @@
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
 
 人へ問う Tool の無いランタイム（コントラクト表の `ask_tool` が null。Codex）では、区分の名前を先頭に書いた本文の質問が
-問い合わせの経路である（`asking.md` の「ランタイムごとの扱い」）。その質問のある応答は問うた応答として通し、変更要求の文も
+問い合わせの経路である（`asking.md` の「ランタイムごとの扱い」）。認める区分（組み込みと `.ndf/ask.json` の `extra`）で
+始まる行の中に質問があり、ルールが待ちと読んだ文がどれもその行の中にある応答を問うた応答として通し、変更要求の文も
 その形での出し直しを求める。
 """
 
@@ -21,9 +22,11 @@ from __future__ import annotations
 import os
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
-from ndf.domains.hooks import budget, reply_judge, tables
+from ndf.domains.hooks import budget, reply_judge, reply_wait, tables
+from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.hooks.verdict import Verdict, passing
 
 # 変更要求の文（#4000 の受け入れ条件 11）。Stop で差し戻すたびに会話へ入るので、その場で要る動作と参照だけにし、理由
@@ -37,8 +40,19 @@ REASON = (
 # 区分に当たる質問の出し直し先。`{tool}` はランタイムの `ask_tool`。Tool の無いランタイムは本文の質問で出す
 ROUTE_TOOL = " {tool}（metadata.source に区分）で出し直し"
 ROUTE_PROSE = "、区分の名前（ndf-gate:1・ndf-ask:cost など）を先頭に書いた本文の質問で出し直して終え"
-# 本文の質問の先頭の区分（`asking.md` の「区分」の表の名前）。行頭の強調・コード・括弧と「区分:」の前置きを許す
-CATEGORY = re.compile(r"^[\s*_`\[(（「【]*(?:区分\s*[:：]\s*[*_`]*)?(?:ndf-gate:[12]|ndf-ask:[a-z0-9][a-z0-9:-]*)")
+# 本文の質問の先頭の区分（`asking.md` の「区分」の表の名前）。行頭の強調・コード・括弧と「区分:」の前置きを許す。
+# 名前はトークン全体で照らす（`ndf-gate:10` を `ndf-gate:1` と読まない）。形は `docs/specifications/ndf-ask-guard.md` の
+# 区分の表で、`ndf-ask:<名前>` の名前は組み込みの区分と `.ndf/ask.json` の `extra` にあるものだけを認める（`categorized`）
+CATEGORY = re.compile(
+    r"^[\s*_`\[(（「【]*(?:区分\s*[:：]\s*[*_`]*)?"
+    r"(?:ndf-gate:[12]|ndf-ask:redline:(?:C[1-8]|P[0-9]+|R[0-9]+)|ndf-ask:(?P<name>[a-z0-9][a-z0-9-]*))"
+    r"(?![A-Za-z0-9:_-])"
+)
+# 組み込みの `ndf-ask:<名前>` の区分の SSOT（`allow` の既定値）と、設定 `.ndf/ask.json` の保存先の行
+ASK_SCHEMA = "schemas/ndf-settings/ask.schema.json"
+ASK_FILE = "ask"
+# ルールの判定のうち、待ちの文（`matched`）を区分の行の質問と照らす種類
+_WAIT_KINDS = ("prose_wait", "heading_wait")
 # 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
 LOGGED = "本文で人の回答を待って終えた（stop-wait）"
 # 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
@@ -72,11 +86,68 @@ def reason(matched: tuple[str, ...] = (), runtime: str = "claude") -> str:
     return REASON.format(matched=f"（当たった文:「{first}」）", route=route)
 
 
+def builtin_names() -> frozenset[str]:
+    """組み込みの `ndf-ask:<名前>` の区分の名前（設定のスキーマの `allow` の既定値）。"""
+    return frozenset(tables.load(ASK_SCHEMA)["properties"]["allow"]["default"])
+
+
+def _ask_path(cwd: str) -> Optional[Path]:
+    """作業ディレクトリのリポジトリの設定 `.ndf/ask.json`。リポジトリの根が無ければ None（git を起動しない）。"""
+    root = _repo_root(Path(cwd))
+    if root is None:
+        return None
+    row = next(r for r in tables.load("domains/ndf-files.json")["rows"] if r["id"] == ASK_FILE)
+    location = next(r for r in tables.load("domains/locations.json")["rows"] if r["id"] == row["location"])
+    return root / location["path"] / row["path"]
+
+
+def extra_names(cwd: str) -> frozenset[str]:
+    """設定 `.ndf/ask.json` の `extra` の名前。設定が無い・読めない・形が違えば空（足す区分は無い）。"""
+    path = _ask_path(cwd)
+    if path is None or not path.is_file():
+        return frozenset()
+    try:
+        got = tables.json_object(path.read_text(encoding="utf-8"))
+    except OSError:  # 読めない設定は足す区分が無いものとして扱う
+        return frozenset()
+    extra = got.get("extra") if got else None
+    if not isinstance(extra, list):
+        return frozenset()
+    return frozenset(e["name"] for e in extra if isinstance(e, dict) and isinstance(e.get("name"), str))
+
+
+def categorized(text: str, names: Optional[frozenset[str]] = None) -> bool:
+    """行が認める区分の名前で始まるか。`names` は `ndf-ask:<名前>` に認める名前（組み込みと `extra`）。"""
+    found = CATEGORY.match(text)
+    if found is None:
+        return False
+    name = found.group("name")
+    return name is None or (name != "redline" and name in (names or frozenset()))
+
+
 def asked_in_prose(ctx) -> bool:
-    """人へ問う Tool の無いランタイムで、本文の行のどれかが区分の名前で始まる（区分付きの本文の質問で問うた）か。"""
+    """人へ問う Tool の無いランタイムで、区分付きの本文の質問で問うたか。
+
+    区分の名前で始まる行の中に質問の文があり、ルールが待ちと読んだ文（`reply_reading.matched`）がどれもその行の中に
+    ある応答だけを問うた応答とする。区分だけの行の後に別の行で問う・区分の無い質問を添えた応答は、ルールの判定へ回す。
+    """
     if ask_tool(ctx.runtime):
         return False
-    return any(CATEGORY.match(line.text) for line in ctx.reply_prose_lines)
+    lines = [line.text for line in ctx.reply_prose_lines if CATEGORY.match(line.text)]
+    if not lines:
+        return False
+    names = builtin_names() | extra_names(ctx.cwd)
+    texts: set[str] = set()
+    asks: set[str] = set()
+    for text in lines:
+        if categorized(text, names):
+            unquoted, found = reply_wait.line_asks(text)
+            texts.add(unquoted)
+            asks.update(found)
+    if not asks:
+        return False
+    reading = ctx.reply_reading
+    return reading.kind not in _WAIT_KINDS or all(s in asks or s in texts for s in reading.matched)
 
 
 def _result(
