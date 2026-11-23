@@ -12,6 +12,8 @@ plugins/ndf/
 │   ├── limits.json                           方針へ read_by を足す・supervise.worker-run（3,600 秒）を足し supervise.worker-step を消す
 │   ├── data/
 │   │   └── internal-names.json              * 名前の対応表
+│   ├── workflow/
+│   │   └── context.schema.json               pace を $defs の plain_pace と mvv_pace の 2 つに分ける
 │   └── schemas/
 │       ├── limits.schema.json                read_by を必須にする
 │       ├── result.schema.json                items の要素へ任意の欄を 4 つ
@@ -30,9 +32,11 @@ plugins/ndf/
 │   │   ├── run.py                            新しい規則を並びへ足す
 │   │   └── README.md                         規則の表とラチェットの節
 │   ├── contracts/
-│   │   └── internal.py                      * 内部データの読み書きの核
+│   │   ├── internal.py                      * 内部データの読み書きの核
+│   │   └── chosen.py                         CHOOSERS をスキーマから
 │   ├── adapters/notify.py                    KIND_LABELS をスキーマから
-│   ├── progress/model.py                     MVV_PACES をスキーマから
+│   ├── progress/model.py                     MVV_PACES をスキーマの $defs/mvv_pace から
+│   ├── domains/loop/cli.py                   pace の選択肢を $defs の 2 つから組み立てる
 │   ├── core/worker.py                        WORK_TIMEOUT を上限の設定から
 │   ├── core/plan/model.py                    LIMIT_PER_STEP を上限の設定から
 │   ├── core/plan/runner.py                   ANSWER_WAIT_SECONDS を上限の設定から
@@ -207,6 +211,44 @@ plugins/ndf/
 | `lower` | 下回った規則の基準が今の件数になる | 下回った規則が 0 個（書かない） | 書けないときに例外 |
 
 テストのファイル: `tests/checks/test_copy_dup.py`・`tests/checks/test_ratchet.py`（新設）
+
+## スキーマから組み立てる定数（5 個）
+
+満たす決定: 決定 7、受け入れ条件 #3667 の 1・2
+
+関数は足さず、5 個の定数の右辺を契約の読み手（`ndf.contracts.load_json` を通した 1 プロセス 1 回の読み込み）へ置き換える。
+
+| 定数 | 保存先 | 読む所 |
+| --- | --- | --- |
+| `KIND_LABELS` | `src/ndf/adapters/notify.py` | `contracts/schemas/notice.schema.json` の `properties.kind` の `enum`（辞書のキー） |
+| `MVV_PACES` | `src/ndf/progress/model.py` | `contracts/workflow/context.schema.json` の `$defs/mvv_pace/enum`（下の項） |
+| `SIZES` | `src/ndf/domains/gws/thumbnails.py` | `contracts/schemas/io/gws.result.schema.json` の `metrics.size` の `enum` |
+| `INTERFACE_VALUES` | `src/ndf/domains/materials/collect.py` | `contracts/schemas/io/materials.result.schema.json` の `public_interface.value` の `enum` から `NOT_STATED`（`記載なし`）を除いたもの。書き出しで当てるので、長い順に並べる（`変わらない` を `変わる` より先に。今の並びと同じ） |
+| `CHOOSERS` | `src/ndf/contracts/chosen.py` | `contracts/schemas/route-chosen.schema.json` の `chooser` の `enum`。`SCRIPT`・`CONDUCTOR`・`HUMAN` の 3 つの名前は `StrEnum` の members にする（決定 7）。`tests/contracts/test_chosen.py:54` の一致の縛りは、写しが無くなるので消す |
+
+**`MVV_PACES` は `pace` の語彙の部分集合で、`pace` の `enum` 全体からは作らない。** `MVV_PACES` は「承認ゲートを MVV 判定で省ける進め方」（`fast`・`auto`）で、`normal` は含まない（`sprint_decide.closing_pace` と `verify_needed` が読む）。部分集合を契約で 1 か所に持つため、`context.schema.json` の `pace` を次の形に変える。
+
+```json
+{
+  "$defs": {
+    "plain_pace": {"enum": ["normal"], "description": "利用者の承認でゲートを通る進め方"},
+    "mvv_pace": {"enum": ["fast", "auto"], "description": "承認ゲートを MVV 判定で省ける進め方"}
+  },
+  "properties": {
+    "pace": {"anyOf": [{"$ref": "#/$defs/plain_pace"}, {"$ref": "#/$defs/mvv_pace"}], "description": "進め方。モード判定が書く"}
+  }
+}
+```
+
+`pace` の語彙全体を読む `src/ndf/domains/loop/cli.py:164`（`["properties"]["pace"]["enum"]`）は、`$defs` の 2 つの `enum` をつないだ並びへ変える。
+
+| 対象 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `MVV_PACES` | `("fast", "auto")` を `$defs/mvv_pace` から読む | `normal` を含まない・`closing_pace("normal")` が `normal`・`verify_needed("normal", True, True, True)` が偽 | — |
+| `CHOOSERS` | スキーマの `chooser` の `enum` と同じ並び | 合成したスキーマへ値を 1 つ足すと `CHOOSERS` も増える | — |
+| `context.schema.json` | `pace` が `normal`・`fast`・`auto` の文脈が通る | — | `pace` が語彙の外（通らない） |
+
+テストのファイル: `tests/contracts/test_chosen.py`（一致の縛りを消し、スキーマだけを触るテストへ）・`tests/domains/loop/test_loop_sprint_decide.py`（`normal` の 2 件を足す）・`tests/adapters/test_notify_sender.py`
 
 ## `const-fact` の照合の拡張
 
