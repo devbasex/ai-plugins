@@ -69,7 +69,7 @@ def launch_allowed(monkeypatch):
     """起動の口（学習に使わない設定の確かめと重い起動のスロット）を通す。アカウントごとの認証の文脈で確かめ直さない（ネットワークを使わない）。"""
 
     @contextlib.contextmanager
-    def gate(agent, *, cwd=None, env=None, wait=None):
+    def gate(agent, *, cwd=None, env=None, wait=None, ensure=True):
         yield {}
 
     monkeypatch.setattr(launch_slot, "gate", gate)
@@ -487,7 +487,7 @@ def preface(monkeypatch):
     monkeypatch.setattr(
         launch_slot,
         "_refuse_if_needed",
-        lambda agent, env: seen.append(("training", env.get("NDF_CLAUDE_ACCOUNT"), env.get("CLAUDE_CONFIG_DIR"))),
+        lambda agent, env, ensure=True: seen.append(("training", env.get("NDF_CLAUDE_ACCOUNT"), env.get("CLAUDE_CONFIG_DIR"))),
     )
     real = cli_floor.require
 
@@ -565,7 +565,7 @@ def _helper_while_waiting(fake: Fake, monkeypatch, on: int, data: Optional[dict]
     entered = []
 
     @contextlib.contextmanager
-    def gate(agent, *, cwd=None, env=None, wait=None):
+    def gate(agent, *, cwd=None, env=None, wait=None, ensure=True):
         entered.append(True)
         if len(entered) == on:
             _project_settings(fake, {"apiKeyHelper": "echo fake"} if data is None else data)
