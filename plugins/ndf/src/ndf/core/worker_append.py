@@ -1,7 +1,8 @@
-"""報告への追記（`ndf worker append`）の排他。報告の読み取り・公開と完了マーカーの作成を、同じ報告の追記どうしで直列にする。
+"""報告への追記（`ndf worker append`）の排他。報告の読み取り・公開と完了マーカーの作成を、呼んだ利用者の追記どうしで直列にする。
 
-ロックは報告の隣の、追記する利用者だけが開けるファイル（`LOCK_SUFFIX`）で取る。報告そのものを持つと、報告を読めるだけの
-利用者も排他のロックを取って追記を止められ、公開のたびに inode が替わる。
+ロックは利用者ごとの状態の保存先（`PluginIdentity.state_dir`）の 1 つのファイル（`LOCK_FILE`）で取る。報告そのものを持つと、
+報告を読めるだけの利用者も排他のロックを取って追記を止められ、公開のたびに inode が替わる。報告の隣に置くと、共有の保存先
+（グループが書き込めるディレクトリにも報告を書ける）では、ほかの利用者がロックの名前を消せる。追記は短いので、報告ごとに分けない。
 """
 
 from __future__ import annotations
@@ -12,10 +13,11 @@ import os
 import time
 from collections.abc import Iterator
 
+from ndf import identity
 from ndf.contracts import worker_paths
 from ndf.core import durable_locks
 
-LOCK_SUFFIX = ".append-lock"
+LOCK_FILE = "worker-append.lock"
 
 
 def append(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str, *, done: bool) -> bool:
@@ -25,7 +27,7 @@ def append(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str,
     """
     if worker_paths.entry_state(wd, paths.report.name) is None:
         return False
-    with _held(wd, paths):
+    with _held(paths):
         text = worker_paths.read_file(wd, paths.report.name)
         if text is None:
             return False
@@ -36,9 +38,11 @@ def append(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str,
 
 
 @contextlib.contextmanager
-def _held(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> Iterator[None]:
-    """報告のロックを排他で持つ。上限まで待っても取れなければ `StoreInUse`。"""
-    fd = worker_paths.open_lock(wd, paths.report.name + LOCK_SUFFIX)
+def _held(paths: worker_paths.ReportPaths) -> Iterator[None]:
+    """追記のロックを排他で持つ。上限まで待っても取れなければ `StoreInUse`、ロックの名前をほかの利用者が消せるなら `EntryUnsafe`。"""
+    with worker_paths.open_or_create(identity.load().state_dir) as state:
+        worker_paths.check_unshared(state)
+        fd = worker_paths.open_lock(state, LOCK_FILE)
     try:
         deadline = time.monotonic() + durable_locks.LOCK_WAIT_SECONDS
         while not _try_lock(fd):

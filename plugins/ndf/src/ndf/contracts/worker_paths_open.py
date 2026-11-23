@@ -312,7 +312,7 @@ def _trusted_link(parent: int, part: str) -> bool:
     return _entry_fixed(parent, os.stat(part, dir_fd=parent, follow_symlinks=False))
 
 
-def _entry_fixed(parent: int, child: os.stat_result) -> bool:
+def _entry_fixed(parent: int, child: Optional[os.stat_result]) -> bool:
     """親 `parent` の直下の項目（stat が `child`）を、呼んだ利用者と root のほかが消す・差し替えることができないなら真。
 
     親が root か呼んだ利用者の持ち物で、グループとほかの利用者が書き込めないなら真。グループの書き込みは、グループが呼んだ
@@ -320,7 +320,7 @@ def _entry_fixed(parent: int, child: os.stat_result) -> bool:
     （`/tmp` など）、項目が root か呼んだ利用者の持ち物なら真（ほかの利用者は消せない）。macOS の拡張 ACL はモードと別に
     項目の作成・削除と ACL・所有者の変更を許せるので、それを許す項目が親にあるか、確かめられなければ偽にする
     （`acl_lets_change_darwin`）。Linux の POSIX ACL は名前付きの項目の書き込みをマスク（モードのグループのビット）で
-    抑えるので、モードのビットで足りる。
+    抑えるので、モードのビットで足りる。`child` が None なら、まだ無い名前を含むどの項目もとみなし、sticky bit では真にしない。
     """
     me = os.geteuid()
     up = os.fstat(parent)
@@ -328,10 +328,14 @@ def _entry_fixed(parent: int, child: os.stat_result) -> bool:
         return False
     if sys.platform == "darwin" and acl_lets_change_darwin(parent):
         return False
-    others = up.st_mode & 0o002 or (up.st_mode & 0o020 and not _private_group(up.st_gid))
-    if not others:
+    if not _others_write(up):
         return True
-    return bool(up.st_mode & stat.S_ISVTX) and child.st_uid in (0, me)
+    return child is not None and bool(up.st_mode & stat.S_ISVTX) and child.st_uid in (0, me)
+
+
+def _others_write(st: os.stat_result) -> bool:
+    """モードが、呼んだ利用者だけの個人グループ（`_private_group`）を除くグループかほかの利用者に書き込みを許すか。"""
+    return bool(st.st_mode & 0o002 or (st.st_mode & 0o020 and not _private_group(st.st_gid)))
 
 
 def _private_group(gid: int) -> bool:
@@ -350,7 +354,8 @@ def _private_group(gid: int) -> bool:
 def check_unshared(wd: WorkDir, name: Optional[str] = None) -> None:
     """`wd` の直下の `name` と、`wd` から根までの各ディレクトリの項目を、ほかの利用者が差し替えられないことを確かめる。
 
-    `name` が None なら、`wd` の中の名前は見ずに `wd` から根までの項目だけを確かめる。差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
+    `name` が None なら、`wd` の中のどの名前も（まだ無い名前を含む）ほかの利用者が作る・差し替えることができないことを確かめる。
+    差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
     記述子で確かめた中身でも、名前かその祖先を差し替えられると、開き直した手は別のファイルを読むためである。祖先は開いた
     記述子から `..` をカーネルに引かせてたどる（名前を解き直さない）。`..` がたどるのは今ある場所なので、最後に `wd.path` を
     根から開き直して `wd` と同じディレクトリかを突き合わせ、開いた後に移されていれば `EntryUnsafe`（`replaced`）にする
@@ -360,7 +365,7 @@ def check_unshared(wd: WorkDir, name: Optional[str] = None) -> None:
     cur = os.dup(wd.fd)
     try:
         while True:
-            if child is not None and not _entry_fixed(cur, child):
+            if not _entry_fixed(cur, child):
                 raise EntryUnsafe(str(wd.path / name if name is not None else wd.path), "shared")
             up = os.open("..", _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=cur)
             here, above = os.fstat(cur), os.fstat(up)
@@ -376,6 +381,27 @@ def check_unshared(wd: WorkDir, name: Optional[str] = None) -> None:
             check_dir_id(again, dir_id(wd))
     except FileNotFoundError:
         raise EntryUnsafe(str(wd.path), "replaced") from None
+
+
+def check_owned(wd: WorkDir, names: Iterable[str]) -> None:
+    """`wd` の直下の `names` のうちあるものが、呼んだ利用者（か root）の持ち物で、ほかの利用者が書き込めず、リンクでないことを確かめる。
+
+    違えば `EntryUnsafe`（`foreign`・`symlink`）。パスで読む状態のファイルとディレクトリに使う（前に書き込めた利用者が置いた
+    ものを使わない）。無い名前は通す（後で作られないことは `check_unshared(wd)` が確かめる）。
+    """
+    for name in names:
+        st = _lstat(wd, name)
+        if st is not None and stat.S_ISLNK(st.st_mode):
+            raise EntryUnsafe(name, "symlink")
+        if st is not None and (st.st_uid not in (0, os.geteuid()) or _others_write(st)):
+            raise EntryUnsafe(name, "foreign")
+
+
+def _lstat(wd: WorkDir, name: str) -> Optional[os.stat_result]:
+    try:
+        return os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無い名前は確かめるものが無い
+        return None
 
 
 ACL_TYPE_EXTENDED = 0x00000100  # macOS の <sys/acl.h>

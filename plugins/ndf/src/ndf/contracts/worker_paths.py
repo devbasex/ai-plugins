@@ -28,6 +28,7 @@ from ndf.contracts.worker_paths_open import (
     Origin,
     WorkDir,
     check_dir_id,
+    check_owned,
     check_unshared,
     dir_id,
     held_dir_id,
@@ -54,6 +55,7 @@ __all__ = [
     "WorkDir",
     "check_dir_id",
     "check_entries",
+    "check_owned",
     "check_removable",
     "check_unshared",
     "check_writable",
@@ -307,41 +309,57 @@ def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
 def open_lock(wd: WorkDir, name: str) -> int:
     """呼んだ利用者だけが開けるロックのファイルを開く（無ければ空で作る）。置き換えないので、inode は消されるまで同じである。
 
-    読めるだけの利用者も `flock` で排他のロックを取れるので、グループとほかの利用者に何も許さないファイルだけを使う。
-    作ったときは親から継いだ拡張 ACL を外す。既にある名前が、リンク数 1 の通常のファイルでない・呼んだ利用者の持ち物でない・
-    ほかの利用者が開けるなら `EntryUnsafe`。
+    読めるだけの利用者も `flock` で排他のロックを取れるので、グループとほかの利用者に何も許さないファイルだけを使う。既にある
+    名前が、通常のファイルでない・呼んだ利用者の持ち物でない・ほかの利用者が開けるなら `EntryUnsafe`。名前をほかの利用者が
+    消せないことは、呼び手が `check_unshared` で確かめる。
     """
     _check_name(name)
-    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-    made = False
+    if _lstat_or_none(wd, name) is None:
+        _publish_lock(wd, name)
     try:
-        fd = os.open(name, flags, dir_fd=wd.fd)
-    except FileNotFoundError:
-        try:
-            fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=wd.fd)
-            made = True
-        except FileExistsError:  # 間に別の追記が作った
-            fd = os.open(name, flags, dir_fd=wd.fd)
+        fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=wd.fd)
     except OSError as e:
         if e.errno == errno.ELOOP:
             raise EntryUnsafe(name, "symlink") from None
         raise
     try:
-        _check_lock(fd, name, made=made)
+        _check_lock(fd, name)
     except BaseException:
         os.close(fd)
         raise
     return fd
 
 
-def _check_lock(fd: int, name: str, *, made: bool) -> None:
-    """開いたロックのファイル `fd` を呼んだ利用者だけが開けることを確かめる（`open_lock`）。"""
-    if made:
-        _drop_inherited_acl(fd, name)
+def _publish_lock(wd: WorkDir, name: str) -> None:
+    """空のロックのファイルを私有の一時ディレクトリに作り、`name` が無いときだけ公開する（あれば何もしない）。
+
+    一時ディレクトリが親から継いだ拡張 ACL を先に外し、その中に作る。最終名で作ってから外すと、外すまでに ACL の権限で開いた
+    記述子が残り、公開した inode のロックを取れるためである。
+    """
+    tmp, tmp_fd = _make_tmp_dir(wd)
+    owned: Optional[os.stat_result] = None
+    created = False
+    try:
+        owned = _tmp_owned(tmp, tmp_fd)
+        _drop_inherited_acl(tmp_fd, tmp)
+        fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
+        created = True
+        with os.fdopen(fd, "wb"):
+            _drop_inherited_acl(fd, name)
+        with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 間に別の追記が公開したロックを使う
+            os.link("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
+    finally:
+        _clean_tmp(wd, tmp_fd, tmp, owned, created=created, published=True)
+
+
+def _check_lock(fd: int, name: str) -> None:
+    """開いたロックのファイル `fd` を呼んだ利用者だけが開けることを確かめる（`open_lock`）。
+
+    リンク数は見ない（公開の `link` から一時の名前を消すまでの間は 2 で、ロックは中身を読み書きしない）。
+    """
     st = os.fstat(fd)
-    kind = _unsafe_kind(st)
-    if kind:
-        raise EntryUnsafe(name, kind)
+    if not stat.S_ISREG(st.st_mode):
+        raise EntryUnsafe(name, "other")
     if st.st_uid != os.geteuid() or st.st_mode & 0o077 or _others_may_write(fd, st):
         raise EntryUnsafe(name, "foreign")
 

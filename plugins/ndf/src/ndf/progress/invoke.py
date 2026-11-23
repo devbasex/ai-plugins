@@ -878,10 +878,17 @@ def _checked_dir(work_dir: Path) -> Path:
     """プランの実行の保存先を開いて（無ければ作って）解いた、ほかの利用者が差し替えられないパス。
 
     プランの実行は保存先をパスから開き直すので、リンクを経る元のパスでなくこのパスを渡す（リンクを置いた祖先は、解いた
-    パスの連鎖を確かめる `worker_paths.check_unshared` に入らず、後で別のディレクトリへ向けられうる）。
+    パスの連鎖を確かめる `worker_paths.check_unshared` に入らず、後で別のディレクトリへ向けられうる）。保存先の中も、ほかの
+    利用者が名前を作れず、回の判定に読む状態（回の記録・打ち直しの数・結果のバックアップ）が私有のものであることを確かめる
+    （差し替えた前の結果で、流すべきプランを飛ばさない）。
     """
     with worker_paths.open_or_create(work_dir) as wd:
         worker_paths.check_unshared(wd)
+        worker_paths.check_owned(wd, (plan_runner.RUN_FILE, ATTEMPT_FILE, plan_runner.RESULTS_DIR))
+        record = plan_files.read_json(wd.path / plan_runner.RUN_FILE)
+        if record is not None and (wd.path / plan_runner.RESULTS_DIR).is_dir():
+            with worker_paths.open_subdir(wd, plan_runner.RESULTS_DIR) as results:
+                worker_paths.check_owned(results, (plan_runner.result_path(wd.path, durable.run_name(record["key"])).name,))
         return wd.path
 
 

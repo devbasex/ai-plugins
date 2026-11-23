@@ -16,12 +16,12 @@
 | `plugins/ndf/src/ndf/domains/relay/signals.py` | `activity.json` の読み書き（`write_activity`・`read_activity`・`ACTIVITY_FILE`） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py` | Stop のたびに背景の作業の一覧とセッションを書く |
 | `plugins/ndf/src/ndf/domains/relay/hub.py` | `ndf relay ls` の行に `session_id`・`cwd`・`pid` |
-| `plugins/ndf/src/ndf/domains/relay/observe.py` | `subagent_transcript_path`・`live_shells`・`shell_output_path` |
+| `plugins/ndf/src/ndf/domains/relay/observe.py` | `subagent_transcript_path`・`process_children`・`live_shells`・`conductor_activity` |
 | `plugins/ndf/src/ndf/progress/lane/liveness.py` | `Activity`・`Probes.activity`・`idle_after`・`judge`・`judge_lanes`・`Liveness`・定数 |
 | `plugins/ndf/src/ndf/progress/plan/run.py` | `lane_activity`・`probes`・`_judge`・`Judged` |
 | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | `Stall`・`_stall_report`・`with_stalls` |
 | `plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設） | Stop の hook が活動を書く・`activity.json` の読み書き |
-| `plugins/ndf/tests/domains/relay/test_relay_observe.py` | サブエージェントの会話の記録のパス・生きているシェル・出力のファイルのパス |
+| `plugins/ndf/tests/domains/relay/test_relay_observe.py` | サブエージェントの会話の記録のパス・生きているシェル・conductor の活動 |
 | `plugins/ndf/tests/progress/test_lane_liveness.py` | 新しい判定の条件と境目 |
 | `plugins/ndf/tests/progress/test_plan_run_stall.py`（新設） | 活動を読む関数と止まりの知らせの中身 |
 
@@ -56,10 +56,10 @@
 
 ### Task 4: 会話の記録を組む材料（`ndf relay ls` の行と `observe` のパス）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/relay/hub.py`（`listing`）、`plugins/ndf/src/ndf/domains/relay/observe.py`（`subagent_transcript_path`・`live_shells`・`shell_output_path`）、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_observe.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/relay/hub.py`（`listing`）、`plugins/ndf/src/ndf/domains/relay/observe.py`（`subagent_transcript_path`・`process_children`・`live_shells`・`conductor_activity`）、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_observe.py`
 - **変更内容:** 一覧の行に `session_id`・`cwd`・`pid` を足し、3 つのパスと数の関数を足す。`test_relay_hub.py` は地図に無いが、`listing` を覆う既存のテスト（48 件）がここにあるので足す
 - **満たす受け入れ条件:** 1
-- **進め方:** 失敗するテスト（詳細設計の単体テストの観点の `listing`・`subagent_transcript_path`・`live_shells`・`shell_output_path` の 4 行。`/proc` は一時ディレクトリに組む）→ 通す最小実装 → 整理
+- **進め方:** 失敗するテスト（詳細設計の単体テストの観点の `listing`・`subagent_transcript_path`・`process_children`・`live_shells` の 4 行。`/proc` は一時ディレクトリに組む）→ 通す最小実装 → 整理
 
 ### Task 5: 何もしていない conductor の判定（`idle_conductor`）
 

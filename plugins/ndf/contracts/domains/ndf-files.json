@@ -50,6 +50,7 @@
     {"id": "design-detail", "location": "issues", "path": "issue-<n>-design-detail.md", "kind": "document", "tracked": true, "writer": "詳細設計の工程", "ends": "archived"},
     {"id": "approval", "location": "issues", "path": "approval-<id>.md", "kind": "document", "tracked": false, "writer": "承認ゲート（P2）", "ends": "cleanup"},
     {"id": "archived-docs", "location": "issues-old", "path": "<name>.md", "kind": "document", "tracked": true, "writer": "クリーンアップの工程", "ends": "kept"},
+    {"id": "worker-append-lock", "location": "state-root", "path": "worker-append.lock", "kind": "exchange", "tracked": false, "writer": "worker の報告の追記（C5）", "ends": "kept"},
     {"id": "relay-hub-state", "location": "relay-hub", "path": "hub.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-registry", "location": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-request", "location": "relay-hub", "path": "requests-v2/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継の頼む側（M3）", "ends": "run"},

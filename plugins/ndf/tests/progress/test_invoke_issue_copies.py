@@ -11,7 +11,8 @@ import pytest
 from sprint_fixture import sprint_repo as _sprint_repo
 
 from ndf.contracts import result, worker_paths
-from ndf.core import route
+from ndf.core import durable, route
+from ndf.core.plan import runner as plan_runner
 from ndf.progress import invoke
 
 PROJECT = {
@@ -127,3 +128,33 @@ def test_the_run_gets_the_checked_directory_for_the_plan_and_the_state(tmp_path,
     argv = seen[0]
     assert argv[argv.index("next") + 1] == str(real / "w" / "design.json")
     assert argv[argv.index("--state-dir") + 1] == str(real / "w")
+
+
+def _forged(work: Path) -> Path:
+    """承認ゲートで終わった前の回の記録と結果のバックアップを置き、結果のパスを返す。"""
+    (work / plan_runner.RESULTS_DIR).mkdir(parents=True)
+    (work / plan_runner.RUN_FILE).write_text(json.dumps({"key": "k"}), encoding="utf-8")
+    path = plan_runner.result_path(work, durable.run_name("k"))
+    path.write_text(json.dumps(result.result("plan", "gate", "待つ", routes={"approved": None})), encoding="utf-8")
+    for p in (work, work / plan_runner.RESULTS_DIR):
+        p.chmod(0o700)
+    for p in (work / plan_runner.RUN_FILE, path):
+        p.chmod(0o600)
+    return path
+
+
+@pytest.mark.parametrize("which", ["dir", "run", "results", "result"])
+def test_a_stored_result_others_can_replace_does_not_skip_the_run(tmp_path, monkeypatch, which):
+    # PR 4325 の r3-3: ほかの利用者が差し替えられる前の結果で、流すべきプランを飛ばして成功にしない
+    work = tmp_path / "w"
+    stored = _forged(work)
+    target = {"dir": work, "run": work / plan_runner.RUN_FILE, "results": stored.parent, "result": stored}[which]
+    plan = {"name": "design", "steps": [{"id": "a", "run": ["true"]}]}
+    monkeypatch.setattr(route, "templates", lambda: {"design": route.Template("design", "design", "試験のテンプレート", (), plan)})
+    run = invoke.StageRun(invoke.PLAN, "design", {"issues": [1]}, (), "none", "design")
+    never = lambda *a: pytest.fail("打たない")  # noqa: E731
+    assert invoke.invoke(run, tmp_path, work, "approved", runner=never).status == "ok"
+    target.chmod(target.stat().st_mode | 0o002)
+    got = invoke.invoke(run, tmp_path, work, "approved", runner=never)
+    target.chmod(0o700)
+    assert got.status == "stopped" and got.cause["kind"] == "precondition"

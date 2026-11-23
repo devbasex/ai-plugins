@@ -218,20 +218,26 @@ def test_append_stops_without_writing_while_another_append_holds_the_report(tmp_
     assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()
 
 
-def test_append_locks_a_file_only_the_writer_can_open(tmp_path, capsys, monkeypatch):
-    # PR 4325 の r2-2: 報告を読めるだけの利用者が追記を止められない。ロックの inode は公開をまたいで同じ
+def _lock_file() -> Path:
+    return identity.load().state_dir / worker_append.LOCK_FILE
+
+
+def test_append_locks_a_private_file_outside_the_report_directory(tmp_path, capsys, monkeypatch):
+    # PR 4325 の r2-2・r3-2: 報告の保存先を書き込める利用者もロックを開けず消せない。ロックの inode は公開をまたいで同じ
     report = _prepared(tmp_path, capsys)
-    report.chmod(0o644)
-    lock = Path(f"{report}{worker_append.LOCK_SUFFIX}")
+    report.parent.chmod(0o777)
     _append(capsys, monkeypatch, report, "1 つ目\n")
-    first = lock.stat()
-    _append(capsys, monkeypatch, report, "2 つ目\n", "--done")
-    assert first.st_mode & 0o077 == 0 and lock.stat().st_ino == first.st_ino
+    first = _lock_file().stat()
+    code, _ = _append(capsys, monkeypatch, report, "2 つ目\n", "--done")
+    assert code == 0 and report.read_text(encoding="utf-8") == "1 つ目\n2 つ目\n"
+    assert first.st_mode & 0o077 == 0 and first.st_nlink == 1 and _lock_file().stat().st_ino == first.st_ino
+    assert not list(report.parent.glob("*lock*")) and not list(_lock_file().parent.glob(".ndf-*"))
 
 
 def test_append_refuses_a_lock_others_can_open_or_a_link(tmp_path, capsys, monkeypatch):
     report = _prepared(tmp_path, capsys)
-    lock = Path(f"{report}{worker_append.LOCK_SUFFIX}")
+    lock = _lock_file()
+    lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text("", encoding="utf-8")
     lock.chmod(0o644)
     assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
@@ -239,6 +245,24 @@ def test_append_refuses_a_lock_others_can_open_or_a_link(tmp_path, capsys, monke
     lock.symlink_to(tmp_path / "outside")
     assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
     assert report.read_text(encoding="utf-8") == "" and not (tmp_path / "outside").exists()
+
+
+def test_append_refuses_a_lock_others_can_remove(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    state = _lock_file().parent
+    state.mkdir(parents=True, exist_ok=True)
+    state.chmod(0o777)
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
+    assert report.read_text(encoding="utf-8") == ""
+
+
+def test_an_already_published_lock_is_not_replaced(tmp_path):
+    # PR 4325 の r3-1: 間に別の追記が公開した名前を上書きしない
+    with worker_paths.open_workdir(tmp_path) as wd:
+        os.close(worker_paths.open_lock(wd, "lock"))
+        first = (tmp_path / "lock").stat().st_ino
+        worker_paths._publish_lock(wd, "lock")
+    assert (tmp_path / "lock").stat().st_ino == first
 
 
 def test_append_refuses_a_report_that_was_not_prepared(tmp_path, capsys, monkeypatch):
