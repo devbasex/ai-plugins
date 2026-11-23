@@ -75,6 +75,8 @@ _IGNORED = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\\n])*"|#[^\n\r]*')
 _PARENS = re.compile(r"\([^()]*\)")
 _MUTATION = re.compile(r"[\s,﻿]*mutation(?![_0-9A-Za-z])")
 # 最初の選択の最初のフィールドの名前（別名 `a: field` なら field）
+# 送信前の分類（`write_of` の結果）を残す、httpx の要求の `extensions` の鍵
+WRITES = "ndf.writes"
 _FIRST_FIELD = re.compile(r"[^{]*\{[\s,]*(?:[_A-Za-z][_0-9A-Za-z]*[\s,]*:[\s,]*)?([_A-Za-z][_0-9A-Za-z]*)")
 
 
@@ -131,6 +133,14 @@ def write_of(request: httpx.Request) -> Optional[Writes]:
         return Writes(WRITE, 1)
     kind = _mutation_kind(body["query"])
     return None if kind is None else Writes(kind, 1)
+
+
+def classified(request: httpx.Request) -> Optional[Writes]:
+    """`write_of` の結果を `request.extensions` に残して返す。送信前の分類を応答のフックで再利用する（PR 4265 の r3-1）。"""
+    if WRITES in request.extensions:
+        return request.extensions[WRITES]
+    writes = request.extensions[WRITES] = write_of(request)
+    return writes
 
 
 def _spacing(kind: str) -> tuple[float, float]:
@@ -265,7 +275,7 @@ class WriteGate(BaseThrottler):
 
     @contextmanager
     def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
-        writes = write_of(request)
+        writes = classified(request)
         if writes is None:
             yield
             return
@@ -274,7 +284,7 @@ class WriteGate(BaseThrottler):
 
     @asynccontextmanager
     async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
-        writes = write_of(request)
+        writes = classified(request)
         if writes is None:
             yield
             return

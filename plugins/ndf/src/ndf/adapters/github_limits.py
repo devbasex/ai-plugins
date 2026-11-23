@@ -190,13 +190,14 @@ def _watched(response: httpx.Response) -> bool:
     """本文を読んで見分ける応答か（REST の 403・429 と、送信のロックを持つ GraphQL の mutation の 200）。
 
     GraphQL の読み取りの 200 は読まない。成功した一括の読み取りの本文を githubkit の前に解析し直さない（r2-1）。
+    分類は `WriteGate` が送信前に残した結果を使い、要求の JSON を解析し直さない（r3-1）。
     """
     request = response.request
     if response.status_code in LIMIT_STATUSES:
         return True
     if response.status_code != HTTPStatus.OK or request.method != "POST" or request.url.path != write_gate.GRAPHQL_PATH:
         return False
-    return write_gate.write_of(request) is not None
+    return write_gate.classified(request) is not None
 
 
 def _record(gate: WriteGate, response: httpx.Response) -> None:

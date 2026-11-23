@@ -306,6 +306,18 @@ def test_a_graphql_read_is_shared_by_the_translation_not_the_hook(tmp_path: Path
     assert err.value.secondary and gate.held_at_block == [False]
 
 
+def test_the_hook_reuses_the_classification_made_before_sending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # PR 4265 の r3-1: 成功した GraphQL の要求の分類（要求の JSON の解析）は送信前の 1 回だけ
+    seen: list[str] = []
+    classify = write_gate.write_of
+    monkeypatch.setattr(write_gate, "write_of", lambda request: seen.append(request.method) or classify(request))
+    gate = write_gate.WriteGate(tmp_path / write_gate.GATE_FILE, lambda: NOW, lambda seconds: None)
+    answer = {"data": {"viewer": {"login": "x"}}}
+    api = github.client(auth="t", transport=httpx.MockTransport(lambda request: httpx.Response(200, json=answer)), gate=gate)
+    github.GitHub(REPO, api).graphql("query { viewer { login } }", {})
+    assert seen == ["POST"]
+
+
 def test_a_retry_shares_again_only_when_the_backoff_grows() -> None:
     # PR 4265 の r2-2: フックが知らせた待ちより長くなる打ち直しの回数だけ、同じ応答について知らせ直す
     gate = _Gate()
