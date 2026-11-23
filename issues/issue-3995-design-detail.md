@@ -14,7 +14,8 @@ plugins/ndf/
 │       ├── hooks/
 │       │   ├── context.py                ShellScript にリダイレクト・ヒアドキュメント・変数の代入の列を足す
 │       │   ├── counter.py                tool_use_id ごとの値を覚える remember・取り出す take を足す
-│       │   ├── dispatch.py               deny_key が none の拒否を数えず、案内へ下げない
+│       │   ├── dispatch.py               deny_key が none の拒否を数えず、案内へ下げない。sole の拒否の文だけを採る
+│       │   ├── verdict.py                Verdict と deny に sole を足す
 │       │   └── guards/context_limit.py   PostToolUse で知らせ、PreToolUse で止め続ける。サブエージェントを外す
 │       ├── relay/
 │       │   ├── context_thresholds.py *   2 つの値を読む 1 つの関数と、判定の記録の語
@@ -51,7 +52,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | `src/ndf/domains/relay/context_policy.py` | 削除 | — | — | — | `resolve`・`read_setting`・`parse_setting`・`setting_id`・`is_positive_int`・`Resolved` ほかすべて |
 | `src/ndf/domains/hooks/guards/context_limit.py` | 変更 | 文脈の量で知らせ、止める | `tables`・`context`・`context_thresholds`・`signals`（`relay_dir` で中継の下かを見る。今のまま）・`strict` | モジュール | `check`（変更）・`_passes`（`_next_step` を置き換える）・`_in_handoff`・`_ndf_args_pass`・`_notice`・`_reason`（新設） |
 | `src/ndf/domains/hooks/context.py` | 変更 | Bash の構文木を読む | — | `ShellScript` | `ShellScript` に `redirects`・`heredocs`・`assignments` を足す。`_walk` が集める（変更） |
-| `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`（変更） |
+| `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`・`combine`（変更） |
+| `src/ndf/domains/hooks/verdict.py` | 変更 | guard の判定の値 | — | `Verdict` | `deny`（変更） |
 | `src/ndf/domains/hooks/counter.py` | 変更 | セッションごとの数え手 | — | `Counter` | `remember`・`take`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの設定を組む | `context_thresholds`・`limits` | モジュール | `wrapper_settings`（変更） |
 | `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`tables` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
@@ -133,6 +135,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | `remember` | `src/ndf/domains/hooks/counter.py` | 新設 | `remember(self, key: str, item: str, value: dict, keep: int) -> None` | 状態のファイルの `memo[key]`（`item` から値への表）に、今の入力の番号（`turn`）を添えて `item` の値を置く。置く前に `turn` の違う値を消し、置いた後に `keep` を超えた分を古い順（置いた順）に消す。数え手が使えなければ何もしない |
 | `take` | 同上 | 新設 | `take(self, key: str, item: str) -> dict \| None` | `memo[key]` の `item` の値を取り出して消す（消費する）。無い・数え手が使えない・形が違えば None |
 | `run` | `src/ndf/domains/hooks/dispatch.py` | 変更 | 変えない | `spec.deny_key == "none"` の行の拒否は `counter.allow_deny` を呼ばず、案内へ下げない |
+| `combine` | 同上 | 変更 | 変えない（`combine(verdicts: list[Verdict]) -> Verdict`） | 最も強い判定の種類で 1 つにまとめる。その種類の判定に `sole` が真のものがあれば、その文だけを採り（ほかの同じ種類の文はつながない）、無ければ今のまま順に `\n\n` でつなぐ |
+| `deny` | `src/ndf/domains/hooks/verdict.py` | 変更 | `deny(reason: str, key: str = "", notes: dict \| None = None, sole: bool = False) -> Verdict` | `Verdict` に `sole: bool`（既定は偽）を足し、`deny` の引数で渡す |
 
 締め切りの経路との順序: `dispatch.run` の締め切り（`clock() - start > budget.usable` で `fail_closed` でない guard を飛ばす）は `run` の始めからの経過で見る。PreToolUse で `dispatch.select` が返す行のうち `context-limit`（`order` 20）は先頭で（`order` 0 の `merge-production` は `strict` で `select` に入らない）、その前に予算を使う guard が無いので、この締め切りで飛ばされることは無い。`guards.json` の PreToolUse の `strict` でない行に `order` が 20 より小さい行を足すと、この前提が崩れるので、テストで縛る（下の `run` の行）。プロセス全体の締め切り（`main.py` の `SIGALRM`。起動から `hook.budget.pre-tool-use` の `deadline` 1 秒）を過ぎた呼び出しは、`_deadline_out` が `dispatch.run` の結果を引き継がず、`fail_closed` の guard の `on_deadline` だけから出力を組み立て直すので、`fail_closed` でない guard の判定はすべて失われる。`context-limit` に限らず、`dispatch.run` が既に返した `full-test`・`heredoc` などの拒否も、出力の前に締め切りに達すれば失われる（今もそうで、この変更は締め切りの扱いを変えない）。締め切りの後に残る判定は、`fail_closed` の guard（PreToolUse では `ask-forward` だけ）の `on_deadline` が返す拒否だけである。たとえば中継の下の AskUserQuestion は、`ask-forward` が質問を記録し終える前に締め切りを過ぎると、`ask-forward.on_deadline` が質問を拒否する。それに当たらない呼び出し（通常の Tool・引継ぎ用の Tool・中継の外の AskUserQuestion）は、どの guard が拒否を返していても通る。これは決定 6 の代償で、判定が失われるのは締め切りを過ぎたその 1 回だけである。次の呼び出しは改めて判定するので、止め続ける振る舞いは締め切りを過ぎない呼び出しで保たれる
 
@@ -177,7 +181,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `usage` が読めない | None |
 | PreToolUse・`tokens < limit` | `passing(context_tokens=tokens)` |
 | PreToolUse・`tokens ≥ limit`・`_passes` が真 | `passing(context_tokens=tokens)` |
-| PreToolUse・`tokens ≥ limit`・`_passes` が偽 | `deny(_reason(t, under, main, handoff_dir))`（`main` は `_main(ctx.cwd)`）。notes は `context_tokens`・`under_relay` |
+| PreToolUse・`tokens ≥ limit`・`_passes` が偽 | `deny(_reason(t, under, main, handoff_dir), sole=True)`（`main` は `_main(ctx.cwd)`）。notes は `context_tokens`・`under_relay`。`sole=True` は、同じ呼び出しで `script-chain` などほかの guard も `deny` を返したとき、`dispatch.combine` がこの文だけを出すための印（下の「拒否の集約」） |
 | PostToolUse・`decide_from ≤ tokens < limit`・この入力の後で 1 回目 | `advise(_notice(tokens, t))` |
 | PostToolUse・ほか | `passing(context_tokens=tokens)` |
 
@@ -202,7 +206,9 @@ docs/glossary/glossary.json・docs/glossary.md
 
 `HookContext` の変更: `memo: dict[str, Any]`（既定は空の表）を足す。1 回の事象の guard どうしで判定を分け合う置き場で、`handoff_bash` が `context-limit` のキーで判定を置き、`script-chain` の guard は同じ値を読む（語の読み直し・リポジトリの探索・パスの解決を 1 回にする）。
 
-`_reason` の文（中継の下）: 「文脈の量が運用上限（{limit} token）を超えた。引継ぎ文書を書き、前景で ndf records --cwd {main} handoff check {handoff_dir}<文書>.md を打って確かめ、応答の最後に次のセグメントのブロックを書いて終える。文書は --cwd の値の下のこのパスへ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。書く前に、背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の wait の行をそのまま残す。」。中継の外は終え方を「ndf-next のブロックを出して新しいセッションで続ける」にする。`{main}` は `_main(ctx.cwd)`（メインディレクトリの実パス）で、文書は `--cwd` の作業ツリーの根から解く相対パス（CLI と `_ndf_args_pass` の解き方）にし、メインディレクトリは 1 回だけ書く。注入の上限（600 字）で切られても検査のコマンドと終え方が残るよう、それらを文の先頭に置く（上限を超えた後の Read は引継ぎディレクトリの直下に限るので、hooks の notes へ退避した全文は読めない）。156 字のメインディレクトリでも全文が上限に収まる。`--cwd` の値と文書は `shlex.quote` で引用し、空白を含むメインディレクトリでもそれぞれ Bash の 1 引数にする。
+`_reason` の文（中継の下）: 「文脈の量が運用上限（{limit} token）を超えた。引継ぎ文書を書き、前景で ndf records --cwd {main} handoff check {handoff_dir}<文書>.md を打って確かめ、応答の最後に次のセグメントのブロックを書いて終える。文書は --cwd の値の下のこのパスへ絶対パスで書く（オーガナイザーは <文書> を parallel-<計画>）。書く前に、背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、引継ぎ文書の「現在地」の wait の行をそのまま残す。」。中継の外は終え方を「ndf-next のブロックを出して新しいセッションで続ける」にする。`{main}` は `_main(ctx.cwd)`（メインディレクトリの実パス）で、文書は `--cwd` の作業ツリーの根から解く相対パス（CLI と `_ndf_args_pass` の解き方）にし、メインディレクトリは 1 回だけ書く。注入の上限（600 字）で切られても検査のコマンドと終え方が残るよう、それらを文の先頭に置く（上限を超えた後の Read は引継ぎディレクトリの直下に限るので、hooks の notes へ退避した全文は読めない）。156 字のメインディレクトリでも全文が上限に収まる。終え方の前に「保存と検査が通ったときだけ」を置き、続けて「通らなければ理由を伝え、ブロックを出さない。」と書く（今回の引継ぎが渡らないままセグメントを終えない）。中継のラッパーが子を起動し直すときの文（`switch_decide.HANDOVER_PROMPT`）も同じ条件を書く。
+
+拒否の集約: 運用上限の拒否は `sole=True` で返す。同じ呼び出しで `script-chain` も拒否すると（例: `ndf lanes status p1 && ndf records handoff check …`）、両方の文をつなげば 600 字の上限で末尾の wait の行の扱いが切れるので、`dispatch.combine` は同じ強さ（`deny`）の判定のうち `sole` の文だけを採る。より強い種類の判定があればそちらが勝つ（`sole` は同じ種類の中の選び方だけを変える）。`--cwd` の値と文書は `shlex.quote` で引用し、空白を含むメインディレクトリでもそれぞれ Bash の 1 引数にする。
 
 ### 内部のデータと定数
 
