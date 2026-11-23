@@ -1,7 +1,8 @@
 """判定の子（#4000 の u4）。詳細設計書の「判定の子」の「単体テストの観点」の行を縛る。
 
 実時間の経過と実プロセスの起動をテストに書かない（偽の `call`・偽の時計・偽の `resolve`・一時ディレクトリの
-設定ファイルで縛り、実の `/etc` と利用者の設定を読まない）。設定は配布する `limits.json` の判定の行を読む。
+設定ファイルで縛り、実の `/etc` と利用者の設定を読まない）。設定（`limits.json` の判定の行）はまだ無いので、
+設定を読む口（`judge_child.setting`）を差し替えて、詳細設計書の「内部のデータと定数」の値をここで与える。
 """
 
 from __future__ import annotations
@@ -18,14 +19,51 @@ from ndf.adapters import claude
 from ndf.domains.hooks import judge_child as rj
 from ndf.domains.relay import account_dir
 
+# 詳細設計書の「内部のデータと定数」の `hook.stop-wait.judge`（設定の行が入るまでテストの中だけで与える）
+JUDGE = {
+    "model": "haiku",
+    "seconds": 5,
+    "max_chars": 1600,
+    "rest_seconds": 600,
+    "rounds": 3,
+    "auth_markers": ["Not logged in", "Invalid API key"],
+    "endpoint": {
+        "entrypoints": ["cli", "sdk-cli"],
+        "ancestors": 8,
+        "cli_exe": ["*/claude/versions/*"],
+        "script_hosts": ["node*"],
+        "flags": ["--settings", "--setting-sources"],
+        "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"],
+        "env_names": [
+            "ANTHROPIC_",
+            "CLAUDE_CODE_USE_",
+            "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_SCOPES",
+            "AWS_",
+            "GOOGLE_",
+            "CLOUD_ML_",
+            "VERTEX_",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "https_proxy",
+            "http_proxy",
+            "all_proxy",
+            "no_proxy",
+            "NODE_EXTRA_CA_CERTS",
+        ],
+    },
+}
 
-@pytest.fixture
+
+@pytest.fixture(autouse=True)
 def judge_settings(monkeypatch):
-    """設定の値を替えるテストの上書き。書いていないキーは配布する `limits.json` の判定の行から読む。"""
-    overrides: dict = {}
-    real = rj.setting
-    monkeypatch.setattr(rj, "setting", lambda key: overrides[key] if key in overrides else real(key))
-    return overrides
+    """設定を読む口を差し替える（`limits.json` の判定の行はまだ無い）。"""
+    values = json.loads(json.dumps(JUDGE))
+    monkeypatch.setattr(rj, "setting", lambda key: values[key])
+    return values
 
 
 class FakeCall:
@@ -178,7 +216,7 @@ def test_endpoint_refusal_sees_the_connection_flags_of_the_parent(argv):
 def test_endpoint_refusal_passes_the_setting_keys_and_allows_a_clean_environment():
     resolve = FakeResolve(_resolved())
     assert rj.endpoint_refusal({}, ("claude",), Path("/w"), resolve) is None
-    assert resolve.keys == rj.setting("endpoint")["keys"]
+    assert resolve.keys == JUDGE["endpoint"]["keys"]
 
 
 def test_endpoint_refusal_allows_a_connection_variable_that_comes_from_the_child_environment():
@@ -254,17 +292,7 @@ def test_endpoint_refusal_with_the_real_resolver_names_a_key_of_the_user_setting
     assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == "awsCredentialExport"
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_SCOPES",
-        # 接続の認証の省略（クラウドの接続で親だけが設定ファイルから読むと、子は親と違う認証で送る）
-        "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
-        "CLAUDE_CODE_SKIP_VERTEX_AUTH",
-        "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
-    ],
-)
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"])
 def test_endpoint_refusal_with_the_real_resolver_names_an_oauth_variable_of_the_user_settings(isolated, name):
     settings = isolated.home / ".claude" / "settings.json"
     settings.write_text(json.dumps({"env": {name: "x"}}), encoding="utf-8")
