@@ -468,14 +468,15 @@ def _stall_report(state: RunState, stall: Stall) -> Report:
     """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。
 
     最後に動いた時刻が UNIX 時刻の数なら ISO 8601 の文字列（UTC）へ直す。背景の作業の数（#4036）も中身に載せる。"""
-    lane, key, reason, moved, row, background = stall
+    moved = stall.moved
     if isinstance(moved, (int, float)):
         moved = datetime.fromtimestamp(moved, timezone.utc).isoformat()
-    tries = [h for h in state.history if h.lane == lane and h.row == row]
-    last = None if not tries else ("起動できた" if tries[-1].ok else f"起動できなかった: {tries[-1].detail}")
-    detail = f"{reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
-    facts = (("moved", moved), ("launches", len(tries)), ("last_launch", last), ("background", background))
-    return Report(lane, key, detail, LANE_STALLED, facts)
+    tries = [h for h in state.history if h.lane == stall.lane and h.row == stall.row]
+    latest = tries[-1] if tries else None
+    last = None if latest is None else ("起動できた" if latest.ok else f"起動できなかった: {latest.detail}")
+    detail = f"{stall.reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
+    facts = (("moved", moved), ("launches", len(tries)), ("last_launch", last), ("background", stall.background))
+    return Report(stall.lane, stall.key, detail, LANE_STALLED, facts)
 
 
 # 動いている行の続きの起動（回答の後の next・/goal の入れ直し）のキーの接頭辞
