@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossrefactor import budget_decide, flaky_decide, judge_decide, report_decide
+from ndf.contracts import result
+from ndf.domains.crossrefactor import budget_decide, flaky_decide, items_decide, judge_decide, report_decide
+from ndf.domains.crossrefactor.symbols_decide import Touched
 
 
 def _item(n: int, tier: str, test: float, impl: float, by: int = 1) -> dict:
@@ -17,6 +19,13 @@ def _item(n: int, tier: str, test: float, impl: float, by: int = 1) -> dict:
         "estimate": {"test": test, "implement": impl},
         "by": ["x"] * by,
     }
+
+
+def test_plan_items_keep_only_the_asked_fields_so_the_state_stays_a_valid_result() -> None:
+    planned = {"path": "a.py", "symbol": "f", "title": "t", "reason": "r", "tier": "high", "technique": "inline", "tests": False}
+    items, skipped = items_decide.plan_items([{**planned, "severity": "high", "acceptance": "全部"}], Touched({"a.py": frozenset({"f"})}))
+    assert items == [{**planned, "id": "I-001", "status": "open"}] and skipped == []
+    assert result.errors(result.result("refactor", result.OK, "s", items=[{"kind": "item", **items[0]}]), 0) == []
 
 
 def test_budget_skips_a_large_item_and_still_takes_the_smaller_ones_after_it() -> None:
