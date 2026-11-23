@@ -91,6 +91,30 @@ def test_compare_reports_an_empty_sample() -> None:
             ["creator: 定義に無いキー 1 件", "user: 記述から消えたキー starred_at"],
         ),
         (lambda d: properties(d, "label").pop("archived_at"), ABSENT, ["labels/*: 記述から消えたキー archived_at"]),
+        # 最後のキーが消えて `properties` が空になっても、自由な辞書とみなさない
+        (
+            lambda d: properties(d, "label").clear(),
+            ABSENT,
+            [
+                "labels/*: 記述から消えたキー archived_at",
+                "labels/0: 定義に無いキー 1 件",
+                "labels/1: 定義に無いキー 1 件",
+                "meta/*: 定義に無いキー 1 件",
+            ],
+        ),
+        # 見本が通らない枝に同じ名前のキーが残っていても、通る枝から消えれば食い違い
+        (
+            lambda d: (
+                properties(d, "issue")["user"]["anyOf"].append(
+                    {"type": "object", "required": ["company"], "properties": {"starred_at": {"type": "string"}}}
+                ),
+                properties(d, "simple-user").pop("starred_at"),
+            ),
+            ABSENT,
+            ["creator: 定義に無いキー 1 件", "user: 記述から消えたキー starred_at"],
+        ),
+        # 見本で null の位置は、どの枝のキーも在るとみなす
+        (lambda d: None, [*ABSENT, "assignee/starred_at"], []),
         (lambda d: properties(d, "issue").pop("body"), ABSENT, ["(最上位): 定義に無いキー 1 件"]),
         (lambda d: properties(d, "issue")["body"].update(type="string"), ABSENT, ["body: type"]),
         (

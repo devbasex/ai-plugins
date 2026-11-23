@@ -330,14 +330,18 @@ def describe(error: ValidationError, target: Target) -> str:
 def unknown_keys(sample: Any, target: Target, extra: list[str]) -> list[str]:
     """見本の辞書のキーのうち、定義の `properties` に無いものの件数を位置ごとに返す。
 
-    `additionalProperties`・`patternProperties` を書く定義と、`properties` を持たない定義（自由な辞書）は数えない。
+    `additionalProperties`・`patternProperties` を書く定義と、`properties` を書かない定義（自由な辞書）は数えない（空の `properties` は書いた定義として数える）。
     `extra`（見本の定義の `extra_keys`）に挙げたキーは数えず、そのうち定義に無いキーでなくなったものの件数を返す。
     """
     out = []
     left = set(extra)
     for at in _positions(sample, target):
         names = _names(at.layers.nodes)
-        if not names or any(_is_open(node) for node in at.layers.nodes) or not at.layers.matched:
+        if (
+            not any("properties" in node for node in at.layers.nodes)
+            or any(_is_open(node) for node in at.layers.nodes)
+            or not at.layers.matched
+        ):
             continue
         unknown = {"/".join((*_base(at.path), key)) for key in at.value if key not in names}
         left -= unknown
@@ -351,13 +355,17 @@ def added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]:
     """記述の定義のキーのうち基準の形（見本のキーと `absent`）に無いものと、`absent` のうち記述から消えたものを返す。"""
     known = set(absent)
     found = set()
+    applied: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for at in _positions(sample, target):
-        if at.dynamic or not at.layers.matched:
+        if not at.layers.matched:
             continue
         base = _base(at.path)
+        applied.setdefault(base, []).extend(at.layers.nodes)
+        if at.dynamic:
+            continue
         new = {key for key in _names(at.layers.nodes) - set(at.value) if "/".join((*base, key)) not in known}
         found |= {f"{safe_path(base, target)}: 記述に足されたキー {key}" for key in new}
-    return sorted(found | {line for entry in absent for line in _gone(entry, target)})
+    return sorted(found | {line for entry in absent for line in _gone(entry, target, applied)})
 
 
 def _base(path: _Place) -> tuple[str, ...]:
@@ -377,13 +385,21 @@ def safe_path(path: Sequence[str | int], target: Target) -> str:
     return "/".join(labels) if labels else TOP
 
 
-def _gone(entry: str, target: Target) -> list[str]:
-    """`absent_keys` の 1 つが、記述の定義の `properties` に無ければその説明。"""
+def _gone(entry: str, target: Target, applied: dict[tuple[str, ...], list[dict[str, Any]]]) -> list[str]:
+    """`absent_keys` の 1 つが、記述の定義の `properties` に無ければその説明。
+
+    見本に辞書がある位置は `applied`（見本が通る枝の定義）で、無い位置（見本で null の辞書など）はどの枝も見る。
+    """
     *parents, key = entry.split("/")
-    nodes = [target.schema]
-    for part in parents:
-        nodes = [child for node in _layers(nodes, target.document, _every).nodes for child in _children(node, part)]
-    if key in _names(_layers(nodes, target.document, _every).nodes):
+
+    def layers(depth: int, nodes: list[Any]) -> list[dict[str, Any]]:
+        base = tuple(parents[:depth])
+        return applied[base] if base in applied else _layers(nodes, target.document, _every).nodes
+
+    nodes: list[Any] = [target.schema]
+    for depth, part in enumerate(parents):
+        nodes = [child for node in layers(depth, nodes) for child in _children(node, part)]
+    if key in _names(layers(len(parents), nodes)):
         return []
     return [f"{safe_path(parents, target)}: 記述から消えたキー {key}"]
 
