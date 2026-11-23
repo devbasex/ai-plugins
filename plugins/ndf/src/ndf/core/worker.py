@@ -356,17 +356,26 @@ def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
 
 
 @contextlib.contextmanager
-def _worker_env(kind: str) -> Iterator[None]:
-    """起動の間だけ、子へ作業種別（`identity.WORKER_KIND_ENV`）を渡す。hook の guard が worker の中かを見分ける（#3112）。"""
-    before = os.environ.get(identity.WORKER_KIND_ENV)
-    os.environ[identity.WORKER_KIND_ENV] = kind
+def _worker_env(kind: str, result_dir: Optional[worker_paths.WorkDir] = None) -> Iterator[None]:
+    """起動の間だけ、子へ作業種別（`identity.WORKER_KIND_ENV`）を渡す。hook の guard が worker の中かを見分ける（#3112）。
+
+    `result_dir` があれば、開いた結果の保存先の識別子とパス（`identity.WORKER_RESULT_DIR_ENV`）も渡す。worker は
+    `ndf contracts emit --out` で保存先を開き直すので、同名の別の実ディレクトリへの差し替えを子の側で突き合わせて拒む。
+    """
+    values = {identity.WORKER_KIND_ENV: kind}
+    if result_dir is not None:
+        dev, ino = worker_paths.dir_id(result_dir)
+        values[identity.WORKER_RESULT_DIR_ENV] = f"{dev}:{ino}:{result_dir.path}"
+    before = {key: os.environ.get(key) for key in values}
+    os.environ.update(values)
     try:
         yield
     finally:
-        if before is None:
-            os.environ.pop(identity.WORKER_KIND_ENV, None)
-        else:
-            os.environ[identity.WORKER_KIND_ENV] = before
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _args_for(system: str, root: Optional[Path], cwd: Path) -> claude.PluginArgs:
@@ -419,7 +428,7 @@ def _resume_until_written(handoff: Handoff, wd: worker_paths.WorkDir, out: Deliv
     argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
-        with _worker_env(handoff.kind):
+        with _worker_env(handoff.kind, wd):
             reply = call(argv, prompt, handoff.timeout, handoff.cwd)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])

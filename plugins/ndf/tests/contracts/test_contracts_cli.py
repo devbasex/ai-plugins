@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.contracts import causes
 from ndf.contracts import cli as contracts_cli
 from ndf.contracts import exit_codes
@@ -326,3 +326,41 @@ def test_emit_keeps_a_read_only_out(capsys, tmp_path):
     code, out, err = _emit(capsys, "ok", "--out", str(dest))
     assert (code, out) == (causes.exit_code("invalid"), "") and err.startswith("contracts: ")
     assert dest.read_text(encoding="utf-8") == "old\n"
+
+
+def test_emit_refuses_an_out_whose_dotdot_cancels_a_link(capsys, tmp_path, monkeypatch):
+    # #3877 r1: `alias/..` を字面で畳まない。alias の先の親でも、字面で畳んだ場所でもなく、書く前に断る
+    (tmp_path / "far" / "inner").mkdir(parents=True)
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "alias").symlink_to(tmp_path / "far" / "inner")
+    (work / "r.json").write_text("利用者のファイル\n", encoding="utf-8")
+    monkeypatch.chdir(work)
+    code, out, _ = _emit(capsys, "ok", "--out", "alias/../r.json")
+    got = json.loads(out)
+    assert (code, got["status"], got["cause"]["kind"]) == (causes.exit_code("invalid"), "stopped", "invalid")
+    assert (work / "r.json").read_text(encoding="utf-8") == "利用者のファイル\n" and not (tmp_path / "far" / "r.json").exists()
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_emit_checks_the_result_dir_handed_by_worker_run(capsys, tmp_path, monkeypatch, same):
+    # #3877 r1: worker run が開いた保存先と違うディレクトリ（同名への差し替え）へは書かない
+    work = tmp_path / "w"
+    work.mkdir()
+    st = (work if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{work}")
+    code, out, _ = _emit(capsys, "ok", "--out", str(work / "r.json"))
+    got = json.loads(out)
+    if same:
+        assert (code, got["status"]) == (0, "ok") and (work / "r.json").exists()
+    else:
+        assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid") and "replaced" in got["summary"]
+        assert not (work / "r.json").exists()
+
+
+def test_emit_keeps_the_mode_of_an_existing_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    dest.write_text("old\n", encoding="utf-8")
+    dest.chmod(0o644)
+    code, _, _ = _emit(capsys, "ok", "--out", str(dest))
+    assert code == 0 and dest.stat().st_mode & 0o777 == 0o644 and json.loads(dest.read_text(encoding="utf-8"))["status"] == "ok"

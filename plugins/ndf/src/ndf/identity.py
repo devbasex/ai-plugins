@@ -53,6 +53,9 @@ ROOT = Path(__file__).resolve().parents[2]
 FINAL_NAME = "ndf"
 # worker（`ndf worker run`）が起動する子へ作業種別を渡す環境変数。hook の guard はこれで worker の中かを見分ける（#3112）
 WORKER_KIND_ENV = "NDF_WORKER_KIND"
+# worker（`ndf worker run`）が開いた結果の保存先を、子の `ndf contracts emit --out` へ渡す環境変数（`<st_dev>:<st_ino>:<絶対パス>`）。
+# 子は同じパスを開き直したとき、開いたディレクトリが親の保持しているものかを突き合わせる（#3877）
+WORKER_RESULT_DIR_ENV = "NDF_WORKER_RESULT_DIR"
 # プラグイン名から求めない固定の語の表（#3347 の決定 101）。I1 はこの表の定義の行だけを通し、コードはここから引く
 FIXED_WORDS = {
     # 利用先のリポジトリの設定の保存先（`.ndf/project.json` など）

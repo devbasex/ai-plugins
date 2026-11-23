@@ -303,13 +303,60 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
     その手前の要素は作らずに開き、開いた記述子を `origin.anchor` と突き合わせし、無くなっているか解いた時点のディレクトリで
     なければ `EntryUnsafe`（`replaced`）で止める。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
+    `directory` に `..` があれば、畳む前に `_check_cancelled` で打ち消す要素を確かめる（利用者の `--out` などを受けるとき）。
     """
+    _check_cancelled(directory)
     path = Path(os.path.abspath(directory))
     fd, created = _open_dir_nofollow(path, create=create, origin=origin)
     try:
         yield WorkDir(path, fd, created)
     finally:
         os.close(fd)
+
+
+def _check_cancelled(directory: Path) -> None:
+    """`..` が打ち消す要素が、リンクでない既存のディレクトリであることを確かめる。違えば `EntryUnsafe`。
+
+    `os.path.abspath` は `alias/..` を字面で畳むが、カーネルは `alias` の指す先の親へ進む。字面で畳んだ場所を開くと、
+    利用者のパスが指す先とは別の既存のファイルを書き換えるので、打ち消す要素がリンク（`symlink`）・無い・
+    ディレクトリでない（`other`）なら書き込む前に拒む。打ち消さない要素のリンクは `_open_dir_nofollow` が拒む。
+    打ち消す要素は手前の要素から `lstat` するので、手前の要素がリンクでもその要素自身を打ち消すときに拒む。
+    """
+    probe = Path(directory).absolute()
+    kept: list[str] = []
+    for part in probe.parts[1:]:
+        if part in ("", "."):
+            continue
+        if part != "..":
+            kept.append(part)
+            continue
+        if not kept:  # 根の親は根
+            continue
+        at = Path(probe.anchor).joinpath(*kept)
+        try:
+            st = os.lstat(at)
+        except (FileNotFoundError, NotADirectoryError):
+            raise EntryUnsafe(str(at), "other") from None
+        if stat.S_ISLNK(st.st_mode):
+            raise EntryUnsafe(str(at), "symlink")
+        if not stat.S_ISDIR(st.st_mode):
+            raise EntryUnsafe(str(at), "other")
+        kept.pop()
+
+
+def dir_id(wd: WorkDir) -> tuple[int, int]:
+    """開いた作業ディレクトリの `(st_dev, st_ino)`。書き込む別のプロセスへ渡し、開き直した場所と突き合わせる。"""
+    st = os.fstat(wd.fd)
+    return st.st_dev, st.st_ino
+
+
+def check_dir_id(wd: WorkDir, expected: tuple[int, int]) -> None:
+    """開いた作業ディレクトリが `expected` のディレクトリでなければ `EntryUnsafe`（`replaced`）。
+
+    渡した側が保持している保存先を、名前が同じ別の実ディレクトリへ差し替えられたことを書き込む前に知るため。
+    """
+    if dir_id(wd) != expected:
+        raise EntryUnsafe(str(wd.path), "replaced")
 
 
 # 途中の要素は検索権限だけで開ける記述子にする（読み取り権限の無い共有ディレクトリの配下でも開ける）。
@@ -547,10 +594,13 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     `rmdir` で、確かめた後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
+    既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
+    公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
     """
     _check_name(name)
     data = text.encode("utf-8")
-    if entry_state(wd, name) is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
+    existing = entry_state(wd, name)
+    if existing is not None and not os.access(name, os.W_OK, dir_fd=wd.fd, follow_symlinks=False):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(wd.path / name))
     tmp = f".{name}.{secrets.token_hex(8)}"
     os.mkdir(tmp, 0o700, dir_fd=wd.fd)
@@ -570,6 +620,8 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
         created = True
         with os.fdopen(fd, "wb") as f:
+            if existing is not None:
+                _inherit_access(f.fileno(), existing)
             f.write(data)
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
@@ -577,6 +629,22 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     finally:
         # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
         _clean_tmp(wd, tmp_fd, tmp, st if private else None, created=created, published=published)
+
+
+def _inherit_access(fd: int, existing: os.stat_result) -> None:
+    """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
+
+    グループは呼んだ利用者が属するときだけ変えられる。変えられなければ元のグループのまま、モードだけを写す
+    （グループの権限を、元と違うグループへ与えない）。
+    """
+    group_kept = True
+    if existing.st_gid != os.fstat(fd).st_gid:
+        try:
+            os.fchown(fd, -1, existing.st_gid)
+        except PermissionError:  # 属さないグループへは変えられない。グループの権限を写さずに続ける
+            group_kept = False
+    mode = stat.S_IMODE(existing.st_mode) & 0o777
+    os.fchmod(fd, mode if group_kept else mode & ~0o070)
 
 
 def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_result], *, created: bool, published: bool) -> None:

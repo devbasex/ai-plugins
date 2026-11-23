@@ -871,3 +871,48 @@ def test_write_file_accepts_shared_directory_with_sticky_bit(workdir):
         worker_paths.write_file(wd, "f", "新")
     assert (d / "f").read_text(encoding="utf-8") == "新"
     assert [p.name for p in d.iterdir()] == ["f"]
+
+
+# --- #3877 r1: `..` が打ち消す要素・保存先の識別子・置き換えたファイルのアクセス権 ---------------------------------
+
+
+def test_open_workdir_refuses_dotdot_that_cancels_a_link_or_a_missing_part(tmp_path, workdir):
+    d, _ = workdir
+    elsewhere = tmp_path / "elsewhere" / "inner"
+    elsewhere.mkdir(parents=True)
+    (d / "alias").symlink_to(elsewhere)
+    (d / "file").write_text("x", encoding="utf-8")
+    for rel, kind in [("alias/..", "symlink"), ("no-such/..", "other"), ("file/..", "other")]:
+        with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(d / rel):
+            pass
+        assert e.value.kind == kind, rel
+
+
+def test_open_workdir_accepts_dotdot_that_cancels_a_real_directory(workdir):
+    d, _ = workdir
+    (d / "real").mkdir()
+    with worker_paths.open_workdir(d / "real" / "..") as wd:
+        assert wd.path == d
+
+
+def test_check_dir_id_refuses_another_directory(workdir):
+    d, _ = workdir
+    (d / "other").mkdir()
+    with worker_paths.open_workdir(d) as wd, worker_paths.open_workdir(d / "other") as other:
+        worker_paths.check_dir_id(wd, worker_paths.dir_id(wd))
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            worker_paths.check_dir_id(wd, worker_paths.dir_id(other))
+    assert e.value.kind == "replaced"
+
+
+def test_write_file_keeps_the_mode_and_group_of_a_replaced_file(workdir):
+    d, _ = workdir
+    (d / "r").write_text("前", encoding="utf-8")
+    (d / "r").chmod(0o640)
+    before = (d / "r").stat()
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "r", "後")
+        worker_paths.write_file(wd, "new", "作った")
+    after = (d / "r").stat()
+    assert (after.st_mode & 0o7777, after.st_gid) == (0o640, before.st_gid) and after.st_ino != before.st_ino
+    assert (d / "new").stat().st_mode & 0o777 == 0o600

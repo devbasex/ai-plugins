@@ -357,3 +357,37 @@ def test_run_reads_the_result_once_during_and_once_after_the_delegation(tmp_path
     body = {"status": "ok", "summary": "済んだ", "metrics": {worker.SEARCH_RECORD: SEARCHED}}
     assert _run_with(tmp_path, monkeypatch, _ok_writer(tmp_path, body, []), kind=kind) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok" and counted == ["out.json"] * reads
+
+
+def test_run_refuses_a_result_path_whose_dotdot_cancels_a_link_without_launching(tmp_path, monkeypatch, capsys):
+    # #3877 r1: `alias/..` を字面で畳んだ別の場所の結果ファイルを消さず、worker も起動しない
+    work, outside = _outside(tmp_path)
+    (tmp_path / "far" / "inner").mkdir(parents=True)
+    (work / "alias").symlink_to(tmp_path / "far" / "inner")
+    (work / "prompt.md").write_text("直す", encoding="utf-8")
+    (work / "out.json").write_text("前の結果", encoding="utf-8")
+    monkeypatch.chdir(work)
+    calls = []
+    real = worker.delegate
+    monkeypatch.setattr(worker, "delegate", lambda h, s, **kw: real(h, s, call=_ok_writer(work, {}, calls), **kw))
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "alias/../out.json"]
+    worker.main(args + ["--cwd", ".", "--state-dir", "state"])
+    got = json.loads(capsys.readouterr().out)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid") and calls == []
+    assert (work / "out.json").read_text(encoding="utf-8") == "前の結果"
+
+
+def test_the_launch_passes_the_opened_result_dir_only_while_it_runs(tmp_path, monkeypatch):
+    # #3877 r1: worker の `contracts emit --out` が開き直した保存先を突き合わせられるよう、開いた保存先の識別子を渡す
+    monkeypatch.delenv(identity.WORKER_RESULT_DIR_ENV, raising=False)
+    h = _handoff(tmp_path)
+    seen = []
+
+    def fake(argv, prompt, timeout, cwd):
+        seen.append(os.environ.get(identity.WORKER_RESULT_DIR_ENV))
+        h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
+        return claude.ClaudeReply(True, None, "終えた", 0.5)
+
+    _delegate(h, call=fake)
+    st = tmp_path.stat()
+    assert seen == [f"{st.st_dev}:{st.st_ino}:{tmp_path}"] and identity.WORKER_RESULT_DIR_ENV not in os.environ
