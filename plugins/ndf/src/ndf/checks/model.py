@@ -151,13 +151,14 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 def load_settings(repo_root: Path) -> dict[str, Any]:
     """リポジトリの設定（`.ndf/project.json`）の値。無ければ空の辞書、読めない・オブジェクトでなければ `CheckError`。
 
-    本文を読む前に、シンボリックリンクを解いた先がリポジトリの内側にあることを確かめる（外なら `CheckError`）。
+    リンク先の種別を見る前に、シンボリックリンクを解いた先がリポジトリの内側にあることを確かめる。外を指せば、
+    リンク先が無い・ディレクトリでも `CheckError`（リポジトリの外のファイルの有無を結果に出さない）。
     """
     path = repo_root / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
-    if not path.is_file():
-        return {}
     if not path.resolve().is_relative_to(repo_root.resolve()):
         raise CheckError(f"リポジトリの設定がリポジトリの外を指す: {path}")
+    if not path.is_file():
+        return {}
     data = read_json(path, "リポジトリの設定を読めない")
     if not isinstance(data, dict):
         raise CheckError(f"リポジトリの設定がオブジェクトでない: {path}")

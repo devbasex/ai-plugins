@@ -141,10 +141,14 @@ def test_load_settings_is_empty_without_the_settings_file(tmp_path: Path) -> Non
     assert load_settings(tmp_path) == {}
 
 
-def test_load_settings_stops_on_a_settings_file_that_resolves_outside_the_repository(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ["file", "missing", "dir"], ids=["ファイル", "無い", "ディレクトリ"])
+def test_load_settings_stops_on_a_settings_file_that_resolves_outside_the_repository(tmp_path: Path, kind: str) -> None:
     repo = tmp_path / "repo"
     outside = tmp_path / "outside.json"
-    outside.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    if kind == "file":
+        outside.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    elif kind == "dir":
+        outside.mkdir()
     path = _settings_file(repo)
     path.parent.mkdir(parents=True)
     path.symlink_to(outside)
