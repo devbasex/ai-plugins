@@ -338,11 +338,9 @@ def read_activity(directory: Path) -> Optional[dict[str, Any]]:
         return None
     if not isinstance(data, dict) or not isinstance(data.get("at"), str):
         return None
-    session, reply, tasks = data.get("session_id"), data.get("reply"), data.get("tasks")
-    if session is not None and not isinstance(session, str):
+    if not all(isinstance(data.get(key), (str, type(None))) for key in ("session_id", "reply")):
         return None
-    if reply is not None and not isinstance(reply, str):
-        return None
+    tasks = data.get("tasks")
     if tasks is not None and not (isinstance(tasks, list) and all(_is_task(t) for t in tasks)):
         return None
     return data
