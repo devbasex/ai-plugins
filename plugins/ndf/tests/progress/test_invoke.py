@@ -586,6 +586,17 @@ def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_
     assert body.read_text(encoding="utf-8") == "#3908 の本文"
 
 
+def test_the_sprint_pr_refers_to_every_bundled_issue(tmp_path):
+    # #3908 の r2-2: スプリントの PR（`pr` のテンプレート）の本文へ、束ねたすべての課題を `Refs #<番号>` で載せる
+    run = invoke.StageRun(invoke.PLAN, "pr", {"issues": [4211, 3908]}, (), "none", "pr")
+    pr = route.templates()["pr"]
+    assert invoke._fill_refs(pr, {}, run) == {"refs": ["3908", "4211"]}
+    # 渡した値は上書きせず、`refs` を持たないテンプレートと課題の無い入力には足さない
+    assert invoke._fill_refs(pr, {"refs": ["1"]}, run) == {}
+    assert invoke._fill_refs(route.templates()["impl"], {}, run) == {}
+    assert invoke._fill_refs(pr, {}, replace(run, inputs={})) == {}
+
+
 def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
     # PR 3469 の指摘: プランを描き直すたび（承認の回答・続き・打ち直し）に課題を GitHub から読み直さない。
     # 途中で題が直されてもプランは同じで、終わっていない回へ同じキーで届く

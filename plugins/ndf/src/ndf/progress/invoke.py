@@ -530,7 +530,19 @@ def _fill_from_sources(
     names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     values = {**values, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
-    return names, values, wanted
+    return names, {**values, **_fill_refs(t, values, run)}, wanted
+
+
+def _fill_refs(t: route.Template, values: Mapping[str, route.Value], run: StageRun) -> dict[str, route.Value]:
+    """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題から写す（#3908 の r2-2）。
+
+    スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、束ねた課題のうちコミットに出ない課題を
+    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文の写し（`_issue_values`）には足さない。
+    """
+    if "refs" not in t.params or "refs" in values:
+        return {}
+    issues = _issue_numbers(run)
+    return {"refs": issues} if issues else {}
 
 
 # 課題を読んだ後に決まりうる差し込み（課題の出所と、`route.launched` が補う `review`・`acceptance`、課題の後に GitHub に問う

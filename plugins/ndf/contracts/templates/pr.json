@@ -1,15 +1,15 @@
 {
   "template": "pr",
   "purpose": "pull_request",
-  "summary": "Pull Request: push → PR（題と本文はコミットから。既にあれば作らずにその番号を返す）。結果の outputs に PR の番号（pr）を返す",
-  "params": ["repo", "worktree", "branch", "remote", "base", "worker"],
+  "summary": "Pull Request: push → PR（題と本文はコミットから。refs があれば本文をコミットの件名の並びにし、末尾へ課題ごとの Refs #<番号> を足す。既にあれば作らずにその番号を返す）。結果の outputs に PR の番号（pr）を返す",
+  "params": ["repo", "worktree", "branch", "remote", "base", "refs", "worker"],
   "plan": {
     "name": "pr-{{branch}}",
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
       {"use": "push", "on_fail": "fix-push"},
-      {"id": "pr", "run": ["sh", "-c", "gh pr create --base \"$1\" --head \"$0\" --fill >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}", "{{base}}"], "probe": ["sh", "-c", "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}"], "next": "end"},
+      {"id": "pr", "run": ["sh", "-c", "h=$0 b=$1 r=$2; shift 2; if [ $# -gt 0 ]; then c=$(git log --reverse --format='- %s' \"$r/$b..HEAD\" -- 2>/dev/null); f=$(printf 'Refs #%s\\n' \"$@\"); gh pr create --base \"$b\" --head \"$h\" --fill --body \"$(printf '%s\\n\\n%s\\n' \"$c\" \"$f\")\"; else gh pr create --base \"$b\" --head \"$h\" --fill; fi >&2 || exit 1; n=$(gh pr view \"$h\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}", "{{base}}", "{{remote}}", "{{refs}}"], "probe": ["sh", "-c", "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}"], "next": "end"},
       {"use": "fix-push"}
     ]
   }
