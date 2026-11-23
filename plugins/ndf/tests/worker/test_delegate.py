@@ -495,7 +495,7 @@ def test_run_refuses_a_result_dir_other_than_the_one_answer_work_opened(tmp_path
 
 
 def test_run_refuses_a_state_dir_other_than_the_one_answer_work_opened(tmp_path, monkeypatch, capsys):
-    # PR 4307 の r7-2: 照らした保存先（`--result-dir-id`）と別の場所を PR 本文の下書きの置き場にしない
+    # PR 4307 の r7-2: 照らした保存先（`--result-dir-id`）と別の場所に PR 本文の下書きを書かない
     work, _ = _outside(tmp_path)
     (work / "prompt.md").write_text("直す", encoding="utf-8")
     (work / "elsewhere").mkdir()

@@ -632,8 +632,7 @@ def _gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
 
 def _missing_outputs(report: Mapping[str, Any], required: Sequence[str]) -> list[dict[str, str]]:
     """結果ファイルの `outputs` に無い必須の名前を欠け（`kind` が `output`）にする。`outputs` が object でなければすべて欠け。"""
-    outputs = report.get("outputs")
-    have = outputs if isinstance(outputs, dict) else {}
+    have = outputs if isinstance(outputs := report.get("outputs"), dict) else {}
     return [{"kind": "output", "name": n, "reason": "作業の結果ファイルの outputs に無い"} for n in required if n not in have]
 
 
@@ -715,12 +714,12 @@ def _result_dir(raw: str, held: Optional[str] = None) -> Iterator[tuple[worker_p
 
 
 def _state_dir(raw: str, held: Optional[str]) -> Path:
-    """規則文に載せる保存先（PR 本文の下書きの置き場の親）。
+    """規則文に載せる保存先（PR 本文の下書きを書く場所の親）。
 
     `held`（`--result-dir-id`。`ndf answer work` が照らした保存先）が無ければ従来どおり `Path.resolve()` で解く。あれば、
     `_result_dir` と同じく信頼できる祖先のリンクだけを解きながら 1 回だけ開き（`open_resolved`）、照らした保存先と同じ
-    ディレクトリかを突き合わせ、開いて解いた場所を返す。名前を解き直さないので、照合の後に保存先の名前を差し替えられても
-    下書きの置き場は照らした保存先のままで、共有の領域のリンクを経ない（違えば起動せずに `WorkerError`（precondition））。
+    ディレクトリかを突き合わせ、開いて解いた場所を返す。名前を解き直さないので、突き合わせの後に名前を差し替えられても
+    下書きは照らした保存先に書かれ、共有の領域のリンクを経ない（違えば起動せずに `WorkerError`（precondition））。
     """
     if held is None:
         return Path(raw).resolve()
