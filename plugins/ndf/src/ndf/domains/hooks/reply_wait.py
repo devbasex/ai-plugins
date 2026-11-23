@@ -115,9 +115,6 @@ _CHOICE_ASK = re.compile(r"どちら|どっち|どれ|いずれ|選|どの(?!よ
 # 見出しが項目から選ぶ行為を求める語（「どちらの案で進めますか？」「どれにしますか？」）。事実を尋ねる
 # 「どのファイルが変更されましたか？」は当たらず、下の箇条書きは選択肢でなく報告の一覧
 _PICK_ACT = re.compile(r"選|進め|にしますか|にしましょうか|決め|採用|採り")
-# 許可を求める質問への回答と読む、許可を求めた行為の肯定の言い切り（「実行できる」「デプロイは可能だ」「マージして問題ない」）。
-# 行為の語との間に助詞（は・が・も）を挟んでよい。「できるかどうか」「できない」は当たらない
-_PERMITTED_FORM = r"(?:は|が|も)?(?:できる|可能(?:だ|である|な)?|しても?問題(?:は|が)?ない|しても?(?:構わ|かまわ)ない)"
 # 箇条書きの項目が選択肢であることを示す頭（「案 A: …」「A. …」「a. …」「選択肢 1」「Option B」）。1 字の頭の
 # 「:」「)」は大文字だけで、「.」は大文字・小文字とも後に空白か行末が続くときだけ数える（ファイル名の「a.py」を案と読まない）
 _OPTION_ITEM = re.compile(
@@ -251,9 +248,10 @@ def _heading_kind(lines: list[ProseLine], at: int) -> str | None:
     見出しが回答・承認を待つ文を持つときだけ質問の候補にする。後に本文の行が無い（「## このまま進めてよいですか？」で
     終える）ときは ASKS。後に本文が続く質問の見出しは、利用者への質問か章題かを語の形で決めきれないので、ルールで
     待ちにはしない。そのうち、待ちの文がどれも別の場所の待ちの報告だけ（「## 別のレーンは承認を待っています」）の
-    見出しと、直下の本文が質問への回答を言い切っている（`_answered`）見出しは章題（None）。残りのうち、見出しで
-    承認・選択を明示的に求める（`_requests`）ものは REQUESTS（モデルを使えない Stop ではルールの待ちとして扱う）、
-    ほかは UNSURE。REQUESTS と UNSURE はモデルの判定へ回す（`read_prose`）。
+    見出しは章題（None）。残りのうち、見出しで承認・選択を明示的に求める（`_requests`）ものは、直下の本文に
+    関わらず REQUESTS（モデルを使えない Stop ではルールの待ちとして扱う）。直下の本文が回答か判断の材料かを語の形で
+    分けると場合分けが尽きないためである。ほかは、直下の本文が質問への回答を言い切っている（`_answered`）なら章題、
+    残りは UNSURE。REQUESTS と UNSURE はモデルの判定へ回す（`read_prose`）。
     """
     asks = [s for s in _sentences([lines[at].text]) if _asks_reply(s)]
     if not asks:
@@ -269,8 +267,8 @@ def _heading_kind(lines: list[ProseLine], at: int) -> str | None:
             break
         below.append(line)
     if _requests(asks, below):
-        # 明示的なリクエストは、許可を求めた行為そのものに直下で回答したときだけ章題にする
-        return None if _answers_permission(asks, lines[at].text, below) else REQUESTS
+        # 明示的なリクエストは、直下の本文が回答に見えても章題にしない（回答か判断の材料かはルールで決めず、モデルへ回す）
+        return REQUESTS
     return None if _answered(lines[at].text, below) else UNSURE
 
 
@@ -299,35 +297,6 @@ def _requests(asks: list[str], below: list[ProseLine]) -> bool:
         if bullets and _CHOICE_ASK.search(core) and (_PICK_ACT.search(core) or options):
             return True
     return sum(1 for line in bullets if _OPTION_ITEM.match(line.text)) >= 2
-
-
-def _permission_terms(core: str) -> list[str]:
-    """許可を求める質問（`_PERMISSION_ASKS`）の、許可の形の前の語（`_TERM`。「本番へデプロイしてよいか」の「本番」「デプロイ」）。
-
-    最後の語が許可を求めた行為、その前の語が行為の対象・条件。許可の形が無ければ空。
-    """
-    found = [core.find(w) for w in _PERMISSION_ASKS if w in core]
-    return _TERM.findall(core[: min(found)]) if found else []
-
-
-def _answers_permission(asks: list[str], heading: str, below: list[ProseLine]) -> bool:
-    """明示的なリクエストの見出しに、直下が質問そのものへの回答を言い切っているか。
-
-    リクエストがどれも許可を求める形で、直下が回答を言い切り（`_answered`）、最初の文が、許可を求めた行為の語に
-    肯定の言い切り（`_PERMITTED_FORM`。助詞を挟んでよい）と結論の末尾（`_CONCLUSION_ENDINGS`）だけを続けて終わり、
-    見出しの行為の対象・条件の語もすべて含むときだけ真（「## 管理者権限なしで実行してもよいですか？」の下の
-    「管理者権限なしで実行できることを確認しました。」、「## デプロイしてよいですか？」の下の「デプロイは可能だと
-    確認しました。」）。判断の材料（「## このままマージしてよいですか？」の下の「マージ前のテストがすべて通ったことを
-    確認しました。」）・別の対象への結論（「## 本番へデプロイしてよいですか？」の下の「ステージングへデプロイできる
-    ことを確認しました。」）・結論の出ていない文（「マージできるかどうかは未確認だと分かりました。」）・選ばせる質問・
-    確認のリクエストは回答と読まない。
-    """
-    terms = [_permission_terms(_core(s).rstrip("?？")) for s in asks]
-    if not terms or not all(terms) or not _answered(heading, below):
-        return False
-    first = _core(_sentences([below[0].text])[0])
-    endings = "|".join(map(re.escape, _CONCLUSION_ENDINGS))
-    return all(re.search(rf"{re.escape(t[-1])}{_PERMITTED_FORM}(?:{endings})$", first) and all(term in first for term in t) for t in terms)
 
 
 def _answered(heading: str, below: list[ProseLine]) -> bool:
