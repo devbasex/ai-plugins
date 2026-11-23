@@ -199,6 +199,73 @@ def test_a_full_minute_window_pushes_content_until_the_80th_from_the_end_leaves(
     assert gate.reserve(CONTENT).at == pytest.approx(times[-count] + length)
 
 
+def test_content_waiting_for_the_window_does_not_push_the_other_writes(gate, path):
+    # PR 4273 の r1-2: ウィンドウの空きを待つ予約は共通の `next` を進めない
+    length, count = HOUR
+    times = [NOW - 500 + i * 0.1 for i in range(count)]
+    seed(path, content=times)
+
+    waiting = gate.reserve(CONTENT)
+
+    assert waiting.at == pytest.approx(times[0] + length) and not waiting.spaced
+    assert record(path)["next"] == 0.0
+    assert gate.reserve(WRITE).wait == 0
+
+
+def test_content_waiting_for_the_window_takes_its_turn_again_when_the_window_opens(gate, path, clock):
+    length, count = HOUR
+    times = [NOW - 500 + i * 0.1 for i in range(count)]
+    seed(path, content=times)
+
+    with gate.hold(CONTENT):
+        sent_at = clock.now
+
+    assert sent_at == pytest.approx(times[0] + length)
+    assert clock.slept == [pytest.approx(times[0] + length - NOW)]
+    assert record(path)["next"] == pytest.approx(sent_at + W)
+
+
+def test_a_later_reservation_waiting_for_the_window_does_not_hold_back_an_earlier_send(gate, path, clock):
+    # PR 4273 の r1-1: 送った 499 件の後、先の予約が眠る間に後ろの予約がウィンドウの空きを待つ時刻を取っても、
+    # 先の予約は後ろの予約を数えずに送る
+    length, count = HOUR
+    times = [NOW - 500 + i * 0.1 for i in range(count - 1)]
+    seed(path, next=NOW + W, content=times)
+    other = write_gate.WriteGate(path, clock, clock.sleep)
+    later = []
+    clock.on_sleep = lambda: later.append(other.reserve(CONTENT)) if not later else None
+
+    with gate.hold(CONTENT):
+        sent_at = clock.now
+
+    assert sent_at == pytest.approx(NOW + W) and clock.slept == [pytest.approx(W)]
+    assert later[0].at == pytest.approx(times[0] + length) and not later[0].spaced
+
+
+def test_a_send_waits_for_the_window_outside_the_send_lock(gate, path, clock):
+    # PR 4273 の r1-1: 送る直前にウィンドウが空いていなければ、送信のロックを放して予約を取り直す
+    length, count = HOUR
+    times = [NOW - 500 + i * 0.1 for i in range(count - 1)]
+    seed(path, next=NOW + W, content=times)
+    free = []
+
+    def crowd() -> None:
+        if not free:  # 予約の後、記録の外で送られた 1 件（I5 の重ね）が一覧に入る
+            saved = record(path)
+            saved["content"] = sorted([*saved["content"], NOW])
+            path.write_text(json.dumps(saved), encoding="utf-8")
+        free.append(_send_lock_is_free(path))
+
+    clock.on_sleep = crowd
+    with gate.hold(CONTENT):
+        sent_at = clock.now
+
+    opens = times[0] + length
+    assert sent_at == pytest.approx(opens)
+    assert clock.slept == [pytest.approx(W), pytest.approx(opens - NOW - W)]
+    assert free == [True, True]  # ウィンドウの空きを待つ眠りの間、送信のロックを持たない
+
+
 def test_the_send_replaces_its_own_time_with_when_it_finished(gate, path, clock):
     seed(path, content=[NOW - 100])
 
@@ -820,6 +887,76 @@ def test_a_cancelled_caller_still_releases_the_send_lock(gate, path, monkeypatch
     assert len(finisher.ran) == 1
     assert _send_lock_is_free(path)
     assert record(path)["sent_next"] == pytest.approx(NOW + W)
+
+
+COMMENT = graphql("mutation { addComment(input: {}) { x } }")
+
+
+def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, monkeypatch):
+    # PR 4273 の r1-3: 予約の時刻を待つ間に取り消されたら、送らなかった予約を一覧と共通の `next` から除く
+    seed(path, next=NOW + 3)
+    monkeypatch.setattr(write_gate, "_FINISHER", _Executor())
+    real_sleep = asyncio.sleep
+    sleeping = asyncio.Event()
+
+    async def sleep(seconds: float) -> None:
+        sleeping.set()
+        await asyncio.Event().wait()  # 取り消されるまで返らない
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+
+    async def write() -> None:
+        async with gate.async_acquire(COMMENT):
+            pass
+
+    async def main() -> bool:
+        asyncio.get_running_loop().set_default_executor(_Executor())
+        task = asyncio.ensure_future(write())
+        for _ in range(50):
+            if sleeping.is_set():
+                break
+            await real_sleep(0)
+        assert sleeping.is_set() and record(path)["content"] == [NOW + 3]
+        task.cancel()
+        for _ in range(50):
+            if task.done():
+                break
+            await real_sleep(0)
+        return task.cancelled()
+
+    assert asyncio.run(main())
+    assert (record(path)["next"], record(path)["content"]) == (pytest.approx(NOW + 3), [])
+    assert _send_lock_is_free(path)
+
+
+def test_a_caller_cancelled_just_as_the_send_is_allowed_withdraws_the_reservation(gate, path):
+    # PR 4273 の r1-3: 送ってよくなった手順の結果を受け取る前に取り消されたら、送信のロックを放し、予約も取り消す
+    default = _Executor()
+    default.frozen = True
+
+    async def write() -> None:
+        async with gate.async_acquire(COMMENT):
+            pass
+
+    async def main() -> bool:
+        asyncio.get_running_loop().set_default_executor(default)
+        task = asyncio.ensure_future(write())
+        for _ in range(50):
+            if default.pending:
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        cancelled = await _settled(task) and task.cancelled()
+        default.drain()  # 取り消しの後に、送ってよくなった手順が終わる
+        for _ in range(50):
+            if _send_lock_is_free(path):
+                break
+            await asyncio.sleep(0)
+        return cancelled
+
+    assert asyncio.run(main())
+    assert _send_lock_is_free(path)
+    assert (record(path)["next"], record(path)["sent_next"], record(path)["content"]) == (0.0, 0.0, [])
 
 
 def test_async_steps_holding_the_send_lock_resume_on_the_finisher(gate, path, clock, monkeypatch):

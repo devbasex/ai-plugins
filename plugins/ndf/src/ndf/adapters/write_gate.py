@@ -5,10 +5,13 @@
 - 予約は記録のロックの中で決めて書き、ロックの外で眠る（決定 2）。どの書き込みも前の書き込みから
   `github.write-spacing` の秒を空ける（決定 3・I1）。内容を作る書き込みは、記録の時刻の一覧（`content`）で
   `github.content-window.minute`・`github.content-window.hour` のウィンドウの件数を数え、どちらかが上限に達して
-  いればウィンドウが空く時刻まで待つ（決定 11・I2）
-- 送る直前に送信のロックを取り、待ちの終わり（`block`）と最短の送信時刻を読み直す。待ちの終わりが延びていたら
-  予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りないか、自分の項目を除いた一覧でウィンドウが
-  空いていなければ待つ（I6）。送信のロックは応答まで持ち、送り終えたら自分の項目を送り終えた時刻へ置き換える
+  いればウィンドウが空く時刻まで待つ（決定 11・I2）。ウィンドウの空きを待つ予約は共通の `next` を進めず、
+  送信のロックの外で眠り、予約の時刻に順番を取り直す
+- 送る直前に送信のロックを取り、待ちの終わり（`block`）と最短の送信時刻を読み直す。待ちの終わりが延びていたか、
+  今より後の予約と自分の項目を除いた一覧でウィンドウが空いていなければ、送信のロックを放して予約を置き換える（I3・I2）。
+  前の書き込みを送り終えた時刻から間隔が足りなければロックを持ったまま待つ（I6）。送信のロックは応答まで持ち、
+  送り終えたら自分の項目を送り終えた時刻へ置き換える
+- 送らずに終わった予約（予算の切れ・呼び手の取り消し・送ってよくなった直後の取り消し）は `withdraw` で取り消す
 - 一覧の自分の項目は予約の時刻で探す。壁時計の戻りでずれて見つからなければ、除かずに残す（数え過ぎる側に倒れる）
 - 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）。
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
@@ -114,13 +117,18 @@ class Pause(NamedTuple):
 
 
 class Reservation(NamedTuple):
-    """予約までの秒・予約の時刻・種類・書く前の `next`・件数。`CONTENT` は一覧へ予約の時刻を件数だけ足している。"""
+    """予約までの秒・予約の時刻・種類・書く前の `next`・件数・共通の `next` を進めたか。
+
+    `CONTENT` は一覧へ予約の時刻を件数だけ足している。ウィンドウの空きを待つ予約（`spaced` が偽）は共通の `next` を
+    進めず、予約の時刻に順番を取り直す。
+    """
 
     wait: float
     at: float
     kind: str
     before: float
     count: int = 1
+    spaced: bool = True
 
 
 class Turn(NamedTuple):
@@ -271,16 +279,17 @@ def _rewound(record: Record, now: float) -> Record:
     return record
 
 
-def _earliest_send(record: Record, reservation: Reservation, now: float) -> float:
-    """前の書き込みを送り終えた時刻から数えた、この予約を送ってよい最も早い時刻（I6）。
+def _closed(record: Record, reservation: Reservation, now: float) -> bool:
+    """内容を作る書き込みを今送ると、どちらかのウィンドウの上限を越えるか（I2）。
 
-    内容を作る書き込みは、自分の項目を除いた一覧から求めたウィンドウが空く時刻とも比べる。
+    一覧から今より後の時刻（まだ送られていない後ろの予約）と自分の項目を除いて数える。後ろの予約を数えると、
+    ウィンドウの空きを待つ後ろの予約に、先に送れる書き込みが待たされる。
     """
     if reservation.kind != CONTENT:
-        return record["sent_next"]
-    others = list(record[CONTENT_TIMES])
-    _take_out(others, reservation.at, reservation.count)
-    return max(record["sent_next"], _opens(others, now, reservation.count))
+        return False
+    past = [t for t in record[CONTENT_TIMES] if t <= now]
+    _take_out(past, reservation.at, reservation.count)
+    return _opens(past, now, reservation.count) > now
 
 
 def _drop_old(record: Record, now: float) -> None:
@@ -297,21 +306,28 @@ def _advance(steps: Generator[Pause, None, Turn]) -> tuple[bool, Any]:
         return True, done.value
 
 
-def _abandon(steps: Generator[Pause, None, Turn], step: asyncio.Future) -> None:
-    """取り消された非同期の手順の後始末。スレッドが終えてから、持っている送信のロックを放す。"""
+def _abandon(gate: WriteGate, steps: Generator[Pause, None, Turn], step: asyncio.Future) -> None:
+    """取り消された非同期の手順の後始末。スレッドが終えてから、送らなかった予約を取り消し、持っている送信のロックを放す。
+
+    送ってよくなった直後に取り消されたときも、予約は送られていないので取り消す。途中の手順は `close` で閉じ、`_steps` が取り消す。
+    """
     if step.cancelled() or step.exception() is not None:
         return
     finished, value = step.result()
-    if finished:
+    if not finished:
+        steps.close()
+        return
+    try:
+        gate.withdraw(value.reservation)
+    finally:
         if value.send is not None:
             value.send.release()
-    else:
-        steps.close()
 
 
 def _restore(record: Record, old: Reservation) -> None:
-    """`old` の書いた `next` がそのままなら書く前へ戻す（後ろに別の予約があれば戻さない）。`CONTENT` なら一覧から自分の項目を除く。"""
-    if record["next"] == old.at + old.count * _spacing():
+    """`old` の書いた `next` がそのままなら書く前へ戻す（後ろに別の予約があれば戻さない。共通の `next` を進めていない予約は戻さない）。
+    `CONTENT` なら一覧から自分の項目を除く。"""
+    if old.spaced and record["next"] == old.at + old.count * _spacing():
         record["next"] = old.before
     if old.kind == CONTENT:
         _take_out(record[CONTENT_TIMES], old.at, old.count)
@@ -449,7 +465,7 @@ class WriteGate(BaseThrottler):
             try:
                 finished, value = await asyncio.shield(step)
             except asyncio.CancelledError:
-                step.add_done_callback(lambda done: _abandon(steps, done))
+                step.add_done_callback(lambda done: _abandon(self, steps, done))
                 raise
             if finished:
                 return value
@@ -466,7 +482,7 @@ class WriteGate(BaseThrottler):
             try:
                 await asyncio.sleep(seconds)
             except BaseException:
-                steps.close()
+                steps.close()  # `_steps` が送信のロックを放し、送らなかった予約を取り消す
                 raise
 
     @contextmanager
@@ -497,25 +513,29 @@ class WriteGate(BaseThrottler):
 
         `remaining` があれば記録のロックの待ちを予算で縛り、予約までの秒が `remaining()` 以上なら新しい予約を書かずに
         `Busy` を出す。`replacing` の戻しは `Busy` でも書く（ロックを取れなければ `withdraw` で試す）。
+
+        内容を作る書き込みがウィンドウの空きを待つ予約は、共通の `next` を進めない（`spaced` が偽）。ほかの書き込みは
+        この予約の後ろへ並ばず、この予約は予約の時刻に順番を取り直す（`_steps`）。
         """
 
         def change(record: Record, now: float) -> Reservation | Busy:
             if replacing is not None:
                 _restore(record, replacing)
             before = record["next"]
-            at = max(now, record["next"], record["blocked_until"])
-            if kind == CONTENT:
-                at = _opens(record[CONTENT_TIMES], at, count)
+            turn = max(now, record["next"], record["blocked_until"])
+            at = _opens(record[CONTENT_TIMES], turn, count) if kind == CONTENT else turn
             try:
                 _within_budget(remaining, at - now)
             except Busy as busy:
                 if replacing is None:
                     raise
                 return busy
-            record["next"] = at + count * _spacing()
+            spaced = at <= turn
+            if spaced:
+                record["next"] = at + count * _spacing()
             if kind == CONTENT:
                 _put(record[CONTENT_TIMES], at, count)
-            return Reservation(at - now, at, kind, before, count)
+            return Reservation(at - now, at, kind, before, count, spaced)
 
         try:
             made = self._apply(change, remaining)
@@ -562,8 +582,11 @@ class WriteGate(BaseThrottler):
     def _steps(self, kind: str, count: int, remaining: Optional[Callable[[], float]] = None) -> Generator[Pause, None, Turn]:
         """眠る秒を順に出し、送ってよくなったら予約と送信のロック（取れなければ None。I5）を返す。
 
-        予算の切れ（`Busy`）では、送信のロックを放し、書いた予約を `withdraw` で取り消してから出す。置き換えの `reserve` が
-        `Busy` を出したときは、旧予約は `reserve` が戻しているので取り消さない。
+        ウィンドウの空きを待つ予約（`spaced` が偽）は、予約の時刻まで送信のロックの外で眠ってから順番を取り直す。
+        送る直前に待ちの終わりが延びていた・ウィンドウが空いていなかったときも、送信のロックを放して取り直す。
+
+        予算の切れ（`Busy`）と中断（呼び手の取り消しによる `close`・ほかの例外）では、送信のロックを放し、書いた予約を
+        `withdraw` で取り消してから出す。置き換えの `reserve` が `Busy` を出したときは、旧予約は `reserve` が戻しているので取り消さない。
         """
         reservation: Optional[Reservation] = None
         try:
@@ -572,12 +595,13 @@ class WriteGate(BaseThrottler):
                 wait = self._left(reservation, remaining)
                 if wait > 0:
                     yield Pause(wait, until=reservation.at)
-                blocked, send = yield from self._sendable(reservation, remaining)
-                if not blocked:
-                    return Turn(reservation, send)
+                if reservation.spaced:
+                    again, send = yield from self._sendable(reservation, remaining)
+                    if not again:
+                        return Turn(reservation, send)
                 replaced, reservation = reservation, None
                 reservation = self.reserve(kind, replacing=replaced, count=count, remaining=remaining)
-        except Busy:
+        except BaseException:
             if reservation is not None:
                 self.withdraw(reservation)
             raise
@@ -605,7 +629,10 @@ class WriteGate(BaseThrottler):
     def _sendable(
         self, reservation: Reservation, remaining: Optional[Callable[[], float]]
     ) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
-        """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(待ちの終わりが延びたか, 送信のロック)。延びたらロックを放して返す。"""
+        """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(取り直すか, 送信のロック)。
+
+        待ちの終わりが延びた・ウィンドウが空いていなければ、ロックを放して取り直しを返す（ウィンドウの待ちをロックの中でしない）。
+        """
         send = self._send_lock(remaining)
         try:
             blocked = yield from self._settle(reservation, send is not None, remaining)
@@ -622,7 +649,7 @@ class WriteGate(BaseThrottler):
     def _settle(
         self, reservation: Reservation, holding: bool, remaining: Optional[Callable[[], float]] = None
     ) -> Generator[Pause, None, bool]:
-        """送信のロックを持ったまま（`holding`）最短の送信時刻まで眠る秒を出す。待ちの終わりが延びていたら真。"""
+        """送信のロックを持ったまま（`holding`）最短の送信時刻まで眠る秒を出す。取り直すなら（待ちの終わりが延びた・ウィンドウが空いていない）真。"""
         while True:
             seen = self._peek(reservation, remaining)
             if seen is None:
@@ -645,7 +672,9 @@ class WriteGate(BaseThrottler):
                 send.release()
 
     def _peek(self, reservation: Reservation, remaining: Optional[Callable[[], float]] = None) -> Optional[tuple[bool, float]]:
-        """(待ちの終わりが今より後か, 最短の送信時刻（時計の秒）)。記録のロックを取れない・読めなければプロセスの中の記録で読む（I5）。"""
+        """(取り直すか, 最短の送信時刻（時計の秒）)。待ちの終わりが今より後か、内容を作る書き込みでウィンドウが空いていなければ
+        取り直す（`_closed`）。最短の送信時刻は前の書き込みを送り終えた時刻から数える（I6）。記録のロックを取れない・読めなければ
+        プロセスの中の記録で読む（I5）。"""
         held = self._record_lock(remaining)
         try:
             record = None if held is None else self._load()
@@ -654,7 +683,7 @@ class WriteGate(BaseThrottler):
                 record = self._memory_view(now)
             else:
                 record, _, now = self._with_unsaved(record)
-            return record["blocked_until"] > now, _earliest_send(record, reservation, now)
+            return record["blocked_until"] > now or _closed(record, reservation, now), record["sent_next"]
         finally:
             if held is not None:
                 held.release()

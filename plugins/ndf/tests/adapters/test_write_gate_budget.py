@@ -226,7 +226,7 @@ def test_within_refuses_content_when_the_window_opens_beyond_the_budget(gate, pa
 
 def test_within_refuses_content_when_the_window_fills_before_sending(gate, path, clock):
     # 予約の後、ほかのプロセスの項目が送り終えた時刻へ延びて 1 時間のウィンドウが埋まった。送る直前の読み直しで
-    # 空くまでの秒（約 98 秒）も予算で数え、送らずに自分の時刻を除く
+    # 送信のロックを放して予約を取り直し、空くまでの秒（約 98 秒）を予算で数え、送らずに自分の時刻を除く
     _, count = HOUR
     times = [NOW - 3500 + i for i in range(count - 1)]
     seed(path, content=times, next=NOW + 2)
