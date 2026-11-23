@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
-from ndf.domains.relay import signals
+from ndf.domains.relay import claude_options, signals
 
 # 判定の子のモジュール（hook の閉包の外。import しない）
 CHILD_MODULE = "ndf.adapters.reply_judge"
@@ -359,14 +359,22 @@ def rest_path(state_dir: Path) -> Path:
 
 
 def endpoint_scope(env: Mapping[str, str], launch: Launch) -> str:
-    """送信先の確かめの対象の名前。親の起動引数・プロジェクトの根・名前が `endpoint.env_names` に前方一致する
-    環境変数の値から作る（判定の子の `endpoint_refusal` が見る材料と同じ）。
+    """送信先の確かめの対象の名前。判定の子の `endpoint_refusal` の結果を変える材料だけから作る。
 
-    値に秘密（API キー・引数に書いた設定）を含みうるので、ファイルへは SHA-256 の先頭 16 桁だけを書く。
+    材料は、親の起動引数のうち `endpoint.flags` に当たるオプションの名前（子はこの名前があれば値によらず拒む
+    ので値は入れない）・プロジェクトの根・`CLAUDE_CONFIG_DIR`（設定の層の保存先）・名前が `endpoint.env_names` に
+    前方一致する環境変数の名前（値は入れない）。プロンプトなどの位置引数とほかのオプション、API キーなどの値は
+    入れないので、同じ起動の形でプロンプトだけが違う `claude -p` は同じ対象になり、マーカーに秘密の材料が残らない。
+    引数の読み方は `claude_args` と同じ（`claude_options`）。
     """
-    prefixes = tuple(_judge("endpoint")["env_names"])
-    picked = sorted((name, value) for name, value in env.items() if name.startswith(prefixes))
-    source = json.dumps({"argv": list(launch.argv), "project_dir": launch.project_dir, "env": picked}, ensure_ascii=False)
+    endpoint = _judge("endpoint")
+    table = claude_options.table_of(tables.load(claude_options.TABLE))
+    flags = sorted({name for name, _ in claude_options.options(table, launch.argv[1:]) if name in endpoint["flags"]})
+    names = sorted(name for name in env if name.startswith(tuple(endpoint["env_names"])))
+    source = json.dumps(
+        {"flags": flags, "project_dir": launch.project_dir, "config_dir": env.get("CLAUDE_CONFIG_DIR"), "env": names},
+        ensure_ascii=False,
+    )
     return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
 
 
@@ -422,7 +430,8 @@ def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str],
 
     起動の失敗（`launch`・`refused`・`usage_limit`・`auth`）はどの対象も休む。送信先の不一致（`endpoint`）は
     `endpoint_scope(env, launch)` の対象だけが休む。時間切れとスロットの空き待ちは書かない。
-    読んで足して書く間は錠で別のセッションの Stop と直列にし、読み手へは一時ファイルからの置き換えで渡す。
+    読んで足して書く間は錠で別のセッションの Stop と直列にし、読み手へは一時ファイルからの置き換えで渡す
+    （ファイルは所有者だけが読める 0600）。
     錠を `lock_seconds` で取れなければ書かない（次の失敗でまた書く）。
     """
     if failure not in ("launch", "refused", "usage_limit", "auth", "endpoint"):
@@ -435,6 +444,6 @@ def mark_rest(state_dir: Path, failure: str, now: float, env: Mapping[str, str],
                 return
             marker = _rest_marker(state_dir)
             body = _rest_body({} if marker is None else marker, failure, now, endpoint_scope(env, launch))
-            signals.replace_json(path, body)
+            signals.replace_text(path, json.dumps(body, ensure_ascii=False), mode=0o600)
     except OSError:  # noqa: S110 ファイル: マーカーを書けなくても判定は変えない
         pass

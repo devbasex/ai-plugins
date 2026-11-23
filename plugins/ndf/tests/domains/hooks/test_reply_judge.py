@@ -414,6 +414,30 @@ def test_endpoint_rest_is_kept_to_its_own_target(tmp_path: Path) -> None:
     assert reply_judge.endpoint_resting(tmp_path, 1000.0, gateway_env, GATEWAY) is False
 
 
+def test_endpoint_rest_ignores_the_prompt_and_the_values() -> None:
+    # 子は endpoint.flags の名前があれば値によらず拒むので、プロンプトと値は対象を分けない
+    first = reply_judge.Launch(argv=["claude", "-p", "最初の質問", "--settings", "a.json"], project_dir="/w/p")
+    second = reply_judge.Launch(argv=["claude", "--settings=b.json", "-p", "次の質問"], project_dir="/w/p")
+    assert reply_judge.endpoint_scope(ENV, first) == reply_judge.endpoint_scope(ENV, second)
+    keyed = {**ENV, "ANTHROPIC_API_KEY": "sk-1"}
+    assert reply_judge.endpoint_scope(keyed, first) == reply_judge.endpoint_scope({**ENV, "ANTHROPIC_API_KEY": "sk-2"}, first)
+    # 位置引数に書いた --settings はオプションではない
+    quoted = reply_judge.Launch(argv=["claude", "-p", "--", "--settings"], project_dir="/w/p")
+    assert reply_judge.endpoint_scope(ENV, quoted) == reply_judge.endpoint_scope(ENV, LAUNCH)
+
+
+def test_endpoint_rest_is_split_by_the_config_dir() -> None:
+    other = {**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude-b"}
+    assert reply_judge.endpoint_scope({**ENV, "CLAUDE_CONFIG_DIR": "/home/u/.claude-a"}, LAUNCH) != reply_judge.endpoint_scope(
+        other, LAUNCH
+    )
+
+
+def test_mark_rest_writes_the_marker_for_the_owner_only(tmp_path: Path) -> None:
+    reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
+    assert reply_judge.rest_path(tmp_path).stat().st_mode & 0o777 == 0o600
+
+
 def test_mark_rest_keeps_the_rests_already_written(tmp_path: Path) -> None:
     reply_judge.mark_rest(tmp_path, "endpoint", 1000.0, ENV, GATEWAY)
     reply_judge.mark_rest(tmp_path, "launch", 1100.0, OTHER_ENV, OTHER)
