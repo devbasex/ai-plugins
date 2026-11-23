@@ -508,7 +508,7 @@ def asked_since_prompt(tail: str) -> bool:
         if rec is None:
             continue
         content = _content(rec)
-        if rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content):
+        if _is_user_input(rec, content):
             return False
         if _asks(content):
             return True
@@ -660,6 +660,11 @@ def _is_prompt(content: Any) -> bool:
     if isinstance(content, str):
         return True
     return bool(_items(content, "text"))
+
+
+def _is_user_input(rec: dict[str, Any], content: Any) -> bool:
+    """利用者の入力のレコードか。`user` の行のうち、メタの行（`isMeta` が真）と Tool の結果だけを持つ行は偽。"""
+    return rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content)
 
 
 def _asks(content: Any) -> bool:
