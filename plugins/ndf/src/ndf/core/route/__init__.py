@@ -381,7 +381,8 @@ def _default_worker(t: Template, given: Collection[str], local_tests: bool) -> b
     return "worker" not in given and "worker" in needed(t, local_tests=local_tests, given=given)
 
 
-def _kinds_of(t: Template, local_tests: bool) -> list[str]:
+def kinds_of(t: Template, local_tests: bool) -> list[str]:
+    """組むプランの作業の名前（現れた順。重なりを除く）。"""
     return list(dict.fromkeys(work_names(expanded(t, local_tests=local_tests))))
 
 
@@ -391,7 +392,7 @@ def worker_only_names(t: Template, *, local_tests: bool = True) -> set[str]:
     要求・設計などの単発のプランは、描画に使わない `issues`・`mode` を worker にだけ渡す（PR 4319 の指摘 r2-1）。
     """
     kinds = worker_kinds.work_kinds()
-    return {n for k in _kinds_of(t, local_tests) for n in (*kinds[k]["inputs"], kinds[k]["cwd"])} - set(t.params)
+    return {n for k in kinds_of(t, local_tests) for n in (*kinds[k]["inputs"], kinds[k]["cwd"])} - set(t.params)
 
 
 def _split_worker_only(t: Template, pairs: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
@@ -417,7 +418,7 @@ def work_values(t: Template, given: Collection[str], values: Mapping[str, Value]
     if not _default_worker(t, given, local_tests):
         return None
     gaps: dict[str, str] = {}
-    for kind in _kinds_of(t, local_tests):
+    for kind in kinds_of(t, local_tests):
         found = worker_kinds.kind_gaps(kind, values, {}, covers=LAUNCH_SOURCES)
         gaps.update({n: f"差し込み {n}（--set か --add で渡す）" for n in found})
     if gaps:

@@ -687,7 +687,7 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     gaps: dict[str, str] = {}
-    for kind in dict.fromkeys(route.work_names(route.expanded(t, local_tests=local_tests))):
+    for kind in route.kinds_of(t, local_tests):
         gaps.update(kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
     if gaps:
         raise KindInputsMissing(t.name, gaps)
