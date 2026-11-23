@@ -100,6 +100,7 @@ _CLAUSE_END = re.compile(r"(?<=[、，,])")
 _TOPIC_ENDINGS = ("は", "も")
 # 句の主体（最初の「は」「が」「も」までの句頭。句の末尾の「…ますが、」のつなぎは主体に数えない）
 _CLAUSE_TOPIC = re.compile(r"^[^。]*?[はがも](?!$)")
+_PAREN_INNER = re.compile(r"[（(]([^（）()]*)[）)]")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
 _DECORATION = "*_`~ 　"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
@@ -329,9 +330,10 @@ def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
 
     引用の開閉は行をまたいで追う（「ログの抜粋です。」の後の、2 行にわたる『…続けてもよいですか？』を本人の質問と
     読まない）。行を改行でつないだ 1 つの文字に `_QUOTED` を当て、引用の中の改行だけを残して行の位置を保つ。
-    閉じない開きかっこは、これまでどおり引用に数えない。
+    閉じない開きかっこは、これまでどおり引用に数えない。インラインコード・リンク先・URL は引用の開閉を追う前に
+    伏せる（`「` を説明する行どうしで、かぎ括弧が対応して間の質問を消さない）。
     """
-    joined = "\n".join(text for text, _ in lines)
+    joined = "\n".join(_OPAQUE.sub(_opaque, text) for text, _ in lines)
     prev = None
     while prev != joined:
         prev = joined
@@ -344,20 +346,31 @@ def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
     return out
 
 
+def _paren_wait(sentence: str) -> bool:
+    """文の中の括弧書きに、待ちの形の文があるか（`_core` が落とす文末の括弧書きの中の質問・承認の依頼を見る）。"""
+    return any(_is_wait(inner) for inner in _PAREN_INNER.findall(sentence))
+
+
 def _closing_report(lines: list[tuple[str, bool]]) -> bool:
     """定型の結び（「引き続きよろしくお願いします。」）で終え、結びの前が完了の報告だけの本文か。
 
     本文の全部の文（引用を除いた行）を見る。末尾から定型の結びの文を外し、残りの文がどれも待ちの形でなく
     丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるときだけ真。結びの前に質問・承認の依頼・言い切らない文が
-    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。
+    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。括弧書きの中に待ちの形の文（「（このままマージしてよいですか）」）
+    があっても偽。最後の行の最後の文が定型の結びでなければ、本文全体を文に分けずに偽を返す。
     """
+    if not lines:
+        return False
+    tail = _sentences([lines[-1][0]])
+    if not tail or not _CLOSING.match(_core(tail[-1])):
+        return False
     sentences = _sentences([text for text, _ in lines])
     body = list(sentences)
     while body and _CLOSING.match(_core(body[-1])):
         body.pop()
     if not body or len(body) == len(sentences):
         return False
-    return all(not _is_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
+    return all(not _is_wait(s) and not _paren_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
 
 
 def prose_kind(lines: list[tuple[str, bool]]) -> str:
