@@ -159,13 +159,16 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
     assert filled == []
 
 
-def test_a_retry_after_an_unknown_merge_method_reads_the_issue_again(tmp_path, filled, local, monkeypatch):
-    # マージの方式を決められずに止まった試行の課題の写しも、次の試行の始まり（clear_values）で消し、課題と書き手の権限を
-    # 読み直す（PR 4289 の指摘）
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: filled.append("merge_method"))
+def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_issue(tmp_path, filled, local, monkeypatch):
+    # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問い、決まらなければ課題を読まずに止める。
+    # 決まった試行で課題と書き手の権限を読み直す（写しは clear_values が消している。PR 4289 の指摘）
+    answers = iter([None, None, "squash"])
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: filled.append("merge_method") or next(answers))
     for _ in range(2):
         with pytest.raises(invoke.TemplateValuesMissing) as got:
             _close(tmp_path, local)
         assert set(got.value.missing) == {"merge_method"}
         invoke.clear_values([tmp_path / "w"])
-    assert filled == [3092, "merge_method", 3092, "merge_method"]
+    got = _close(tmp_path, local)
+    assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
+    assert got["merge_method"] == "squash" and not (tmp_path / "w" / invoke.MERGE_PENDING_FILE).exists()
