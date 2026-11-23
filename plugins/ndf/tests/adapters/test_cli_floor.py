@@ -64,6 +64,7 @@ GUARDS = {
     "require",
     "refuse_old",  # adapters/cli_floor.py: 古ければ起動の箇所の例外へ直す
     "require_claude",  # relay/account_login.py: 古い claude を LoginError("precondition") に直す
+    "_precheck",  # adapters/claude.py: 起動の直前の確かめ（recheck の後に require_claude）
 }
 # 表の実行ファイルを起動するが比べを持たない関数と、その理由
 EXEMPT = {

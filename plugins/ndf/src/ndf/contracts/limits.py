@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, get_type_hints
 
 from ndf import contracts
 
@@ -48,10 +48,20 @@ class Policy(NamedTuple):
     lock: Optional[float] = None
     gate: Optional[float] = None
     first: Optional[float] = None
+    # 本文の待ちの判定（`hook.stop-wait.judge`。#4000）だけが持つ値
+    max_chars: Optional[int] = None
+    rest_seconds: Optional[float] = None
+    lock_seconds: Optional[float] = None
+    rounds: Optional[int] = None
+    model: Optional[str] = None
+    runtimes: Optional[list[str]] = None
+    auth_markers: Optional[list[str]] = None
+    endpoint: Optional[dict[str, Any]] = None
 
 
-# 方針の値の名前（名前と説明を除いた Policy の項目）
-VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
+# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ）は
+# `value` で引かず、判定の子と hook の表が行から読む
+VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 
 def validate(raw: object) -> dict[str, Policy]:

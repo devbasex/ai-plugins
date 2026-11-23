@@ -430,7 +430,7 @@ def test_i9_config_gate_of_a_nested_plan_refuses_without_a_row(tmp_path, monkeyp
 def test_i9_effective_env_keeps_the_gate_view_of_each_settings_file(tmp_path):
     # `Resolved.pins`: 読んだか探した設定ファイルごとに比べる範囲の SHA-256（無いファイルは空の object と同じ）
     _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "BASH_DEFAULT_TIMEOUT_MS": "1"}, "model": "x"})
-    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], pin=True)
+    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], extra=account_dir.Extra(pin=True))
     user = str(tmp_path / "claude" / "settings.json")
     assert r.pins[user] == key_helper.view_sha({"env": {"ANTHROPIC_BASE_URL": "https://a.example.com"}})
     assert r.pins[str(tmp_path / ".claude" / "settings.json")] == key_helper.view_sha({})
@@ -456,7 +456,7 @@ def test_i9_the_pinned_listing_is_the_one_the_settings_were_read_from(tmp_path, 
         return real(path)
 
     monkeypatch.setattr(key_helper, "listing", listing)
-    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], pin=True)
+    r = account_dir.effective_env({}, tmp_path / "claude", tmp_path, ["claude"], extra=account_dir.Extra(pin=True))
     assert r.dirs == {str(d): ["a.json"]} and calls == [d]
 
 

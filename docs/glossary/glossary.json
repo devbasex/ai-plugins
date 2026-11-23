@@ -1565,7 +1565,7 @@
     {
       "term": "報告コピー",
       "context": "ndf-workflow",
-      "meaning": "worker が起動指示の置く場所のファイルの末尾へ書く作業の報告のセクション。最後の応答の報告と同じ中身",
+      "meaning": "worker が起動指示の保存先のファイルの末尾へ書く作業の報告のセクション。最後の応答の報告と同じ中身",
       "source": "docs/specifications/ndf-token-waits-and-context-cut.md",
       "deprecated": [
         "報告のコピー"

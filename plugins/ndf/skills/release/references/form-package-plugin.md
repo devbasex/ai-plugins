@@ -200,7 +200,7 @@ CODEX_HOME="$ISO/codex" codex plugin marketplace add <owner>/<repo> --ref <ref>
 CODEX_HOME="$ISO/codex" codex plugin add <名前>@<マーケットプレイス名>
 CODEX_HOME="$ISO/codex" codex plugin list
 
-rm -rf "$ISO"
+rm -rf "${ISO:?}"
 ```
 
 - **`CODEX_HOME` は先に作る。** 存在しないパスを渡すと落ちる

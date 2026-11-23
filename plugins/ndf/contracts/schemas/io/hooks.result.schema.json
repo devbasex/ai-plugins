@@ -20,6 +20,26 @@
         "days": {
           "type": "number",
           "description": "計測を読んだ日数（stats）"
+        },
+        "cases": {
+          "type": "integer",
+          "description": "判定した例の件数（judge-cases）"
+        },
+        "missed": {
+          "type": "integer",
+          "description": "1 周でも外れた例の件数（judge-cases）"
+        },
+        "calls": {
+          "type": "integer",
+          "description": "軽いモデルを打った回数（judge-cases）"
+        },
+        "min_seconds": {
+          "type": "number",
+          "description": "1 回の判定に掛かった秒の最小（judge-cases）"
+        },
+        "max_seconds": {
+          "type": "number",
+          "description": "1 回の判定に掛かった秒の最大（judge-cases）"
         }
       }
     },
@@ -41,6 +61,21 @@
           "guards": {
             "type": "object",
             "description": "guard ごとの計測（stats）"
+          },
+          "id": {
+            "type": "string",
+            "description": "外れた判定の例の名前（judge-cases）"
+          },
+          "expect": {
+            "type": "string",
+            "description": "その例の期待する判定（judge-cases）"
+          },
+          "got": {
+            "type": "array",
+            "description": "外れた周の回答か失敗の種類（judge-cases）",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

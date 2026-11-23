@@ -39,6 +39,7 @@ def env(repo):
         facts=lambda words, ctx, cwd: {w: True for w in words},
         launch=lambda st_, tid, cwd: None,
         invoker=lambda r, cwd, work_dir, answer: lanes.ok_result(r, values),
+        prepare=lambda r, work_dir, cwd: None,  # 作業が偽物なのでプランの差し込みも組まない
         records=lambda cwd: lanes._NoRecords(),
         sleep=lambda _s: None,
     )

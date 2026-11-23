@@ -440,7 +440,7 @@ def _plan_metrics(
 def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
     """計画の状態を、計画のステートマシンとレーンのステートマシンの 2 つから作る（受け入れ条件 4）。閉じたリクエストの回答も載せる（#3128）。
 
-    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
+    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`・`idle_conductor`）を `warnings` に
     足す。承認ゲートや質問の回答を待つ行は正常な待ちで、止まりにしない。起動できるのに待つレーンには
     `machine_wait`（理由・数えた稼働中の数・上限）を、集計には `machine`（マシンの稼働中の数・上限）を載せる（#2999・#3989）。
 
