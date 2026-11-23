@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
@@ -122,3 +123,101 @@ def test_prepare_keeps_the_previous_report_when_it_cannot_be_emptied(tmp_path, m
     _fail_on(monkeypatch, "write_file", "n.report.md")
     assert _invalid(*_run(capsys, "prepare", "--dir", str(d), "--name", "n"))
     assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告"
+
+
+def _prepared(tmp_path, capsys) -> Path:
+    _, out = _run(capsys, "prepare", "--dir", str(tmp_path / "w"), "--name", "n")
+    return Path(out["metrics"]["paths"]["report"])
+
+
+def _append(capsys, monkeypatch, report: Path, body: str, *flags: str) -> tuple[int, dict]:
+    monkeypatch.setattr("sys.stdin", io.StringIO(body))
+    return _run(capsys, "append", "--report", str(report), *flags)
+
+
+def test_append_adds_the_body_and_makes_an_empty_done(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    code, out = _append(capsys, monkeypatch, report, "## 作業の報告\n終えた\n", "--done")
+    assert code == 0 and out["status"] == "ok"
+    assert report.read_text(encoding="utf-8") == "## 作業の報告\n終えた\n"
+    assert Path(f"{report}.done").stat().st_size == 0
+
+
+def test_append_keeps_both_bodies_in_order_without_a_done(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "1 つ目\n")
+    _append(capsys, monkeypatch, report, "2 つ目\n")
+    assert report.read_text(encoding="utf-8") == "1 つ目\n2 つ目\n"
+    assert not Path(f"{report}.done").exists()
+
+
+@pytest.mark.parametrize("entry", ["n.report.md", "n.report.md.done"])
+@pytest.mark.parametrize("link", [os.symlink, os.link])
+def test_append_leaves_a_link_target_alone(tmp_path, capsys, monkeypatch, entry, link):
+    report = _prepared(tmp_path, capsys)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("利用者のファイル", encoding="utf-8")
+    (report.parent / entry).unlink(missing_ok=True)
+    link(outside, report.parent / entry)
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n", "--done"))
+    assert outside.read_text(encoding="utf-8") == "利用者のファイル"
+
+
+def test_append_makes_no_done_when_the_report_cannot_be_written(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _fail_on(monkeypatch, "write_file", "n.report.md")
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n", "--done"))
+    assert not Path(f"{report}.done").exists()
+
+
+def test_append_refuses_a_report_that_was_not_prepared(tmp_path, capsys, monkeypatch):
+    code, out = _append(capsys, monkeypatch, tmp_path / "n.report.md", "本文\n", "--done")
+    assert out["cause"]["kind"] == "precondition" and code == causes.exit_code("precondition")
+    assert not (tmp_path / "n.report.md.done").exists()
+
+
+@pytest.mark.parametrize("cmd", ["append", "collect"])
+def test_report_path_must_end_with_the_report_suffix(tmp_path, capsys, monkeypatch, cmd):
+    monkeypatch.setattr("sys.stdin", io.StringIO("本文\n"))
+    assert _invalid(*_run(capsys, cmd, "--report", str(tmp_path / "n.txt")))
+
+
+def test_collect_returns_the_last_report_section(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "長い出力\n## 作業の報告\n古い\n## 作業の報告\n- 結果: 完了\n", "--done")
+    code, out = _run(capsys, "collect", "--report", str(report))
+    assert code == 0 and out["status"] == "ok"
+    assert out["metrics"]["report"] == "## 作業の報告\n- 結果: 完了\n"
+
+
+def test_collect_waits_for_the_done(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "## 作業の報告\n途中\n")
+    code, out = _run(capsys, "collect", "--report", str(report))
+    assert out["cause"]["kind"] == "precondition" and code == causes.exit_code("precondition")
+
+
+def test_collect_needs_the_report_heading(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "見出しの無い本文\n", "--done")
+    _, out = _run(capsys, "collect", "--report", str(report))
+    assert out["cause"]["kind"] == "precondition"
+
+
+def test_collect_does_not_read_through_a_link(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "", "--done")
+    outside = tmp_path / "outside.md"
+    outside.write_text("## 作業の報告\n利用者の秘密\n", encoding="utf-8")
+    report.unlink()
+    report.symlink_to(outside)
+    code, out = _run(capsys, "collect", "--report", str(report))
+    assert _invalid(code, out) and "利用者の秘密" not in json.dumps(out, ensure_ascii=False)
+
+
+def test_collect_needs_the_report_itself(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "## 作業の報告\n終えた\n", "--done")
+    report.unlink()
+    _, out = _run(capsys, "collect", "--report", str(report))
+    assert out["cause"]["kind"] == "precondition" and "作業の報告" not in out["summary"]

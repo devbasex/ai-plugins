@@ -65,6 +65,10 @@
             }
           },
           "description": "報告の保存先の 3 つの絶対パス（prepare。成功したときだけ）"
+        },
+        "report": {
+          "type": "string",
+          "description": "報告の最後の「## 作業の報告」から末尾まで（collect）"
         }
       }
     },

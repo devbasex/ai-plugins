@@ -82,6 +82,14 @@ def report_paths(directory: Path, name: str) -> ReportPaths:
     )
 
 
+def report_name(report: Path) -> tuple[Path, str]:
+    """起動指示の「置く場所」（`<名前>.report.md`）から、作業ディレクトリと worker の名前を取り出す。形が違えば `NameInvalid`。"""
+    name = report.name.removesuffix(REPORT_SUFFIX)
+    if name == report.name or not NAME_RE.fullmatch(name):
+        raise NameInvalid(f"置く場所は <[A-Za-z0-9._-] の 1〜64 文字>{REPORT_SUFFIX} の形にする: {str(report)!r}")
+    return report.parent, name
+
+
 @contextlib.contextmanager
 def open_workdir(directory: Path) -> Iterator[WorkDir]:
     """作業ディレクトリを 1 回だけ開く。リンクを解くのはこの 1 回で、抜けるときに閉じる。"""
