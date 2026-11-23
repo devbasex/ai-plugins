@@ -125,3 +125,15 @@ def test_the_package_runs_after_the_environment_is_restored(start, monkeypatch):
     monkeypatch.setattr(start.runpy, "run_module", lambda *a, **k: seen.append(os.environ["PATH"]))
     assert start.main() == 0
     assert seen == ["/caller"] and "NDF_CALLER_PATH" not in os.environ
+
+
+@pytest.mark.parametrize("line", ["error: Failed to download `ruff==0.17.5`", ""])
+def test_a_failed_sync_stops_with_one_result_line_and_deps_missing(start, capsys, line):
+    # #3687: bin/ndf は exec の前の uv sync が落ちたら、uv の error の行（無ければ最終行。空もある）を添えてここを呼ぶ
+    detail = f"依存を用意できない（ネットワークを確かめる）: {line}"
+    code = start.emit_deps_missing(detail)
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1
+    report = json.loads(out[0])
+    assert (report["status"], report["summary"], report["cause"]) == ("stopped", detail, {"kind": "deps_missing", "detail": detail})
+    assert code == causes.exit_code("deps_missing") == 69
