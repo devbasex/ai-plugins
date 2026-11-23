@@ -202,13 +202,14 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         created = False
         published = True
     finally:
-        _clean_tmp(wd, tmp_fd, tmp, st, created=created, private=private, published=published)
+        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
+        _clean_tmp(wd, tmp_fd, tmp, st if private else None, created=created, published=published)
 
 
-def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result], *, created: bool, private: bool, published: bool) -> None:
+def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_result], *, created: bool, published: bool) -> None:
     """`write_file` の一時ディレクトリを片付け、最後に記述子を閉じる。
 
-    片付けるのは所有者・モードの確かめを通った（`private`）一時ディレクトリだけである。照合で確かめられるのは
+    片付けるのは所有者・モードの確かめを通った（`owned` が `None` でない）一時ディレクトリだけである。突き合わせで確かめられるのは
     開いた対象と今の名前の一致までで、`mkdir` で作った対象かどうかは確かめられないため。
     記述子は inode の突き合わせと `rmdir` が終わるまで閉じない。開いている間は inode が解放されず、同じ番号を
     別のディレクトリが再利用して突き合わせを通ることが無い。
@@ -219,15 +220,19 @@ def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result],
         if created:
             with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 公開できなかった一時ファイルの後始末。元の失敗を上げる
                 os.unlink("data", dir_fd=tmp_fd)
-        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
-        if st is not None and private:
-            if published:
-                with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。空の一時ディレクトリを残して書き込みは成功として返す
-                    _remove_opened_dir(wd, tmp_fd, tmp, st)
-            else:
-                _remove_opened_dir(wd, tmp_fd, tmp, st)
+        if owned is not None:
+            _drop_tmp_dir(wd, tmp_fd, tmp, owned, published=published)
     finally:
         os.close(tmp_fd)
+
+
+def _drop_tmp_dir(wd: WorkDir, tmp_fd: int, tmp: str, owned: os.stat_result, *, published: bool) -> None:
+    """確かめを通った一時ディレクトリの名前を消す。公開した後の失敗は上げない（`_clean_tmp` の docstring）。"""
+    if not published:
+        _remove_opened_dir(wd, tmp_fd, tmp, owned)
+        return
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 公開済み。空の一時ディレクトリを残して書き込みは成功として返す
+        _remove_opened_dir(wd, tmp_fd, tmp, owned)
 
 
 def _current_name(fd: int, original: str) -> Optional[str]:
