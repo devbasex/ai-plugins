@@ -10,17 +10,44 @@
 
 from __future__ import annotations
 
-from ndf.domains.hooks import tables
+import os
+from pathlib import Path
+
+from ndf.domains.hooks import strict, tables
 from ndf.domains.hooks.context import context_tokens
 from ndf.domains.relay.context_thresholds import thresholds
 from ndf.domains.relay.signals import relay_dir
 from ndf.domains.hooks.verdict import Verdict, deny, passing
 
 
+def _in_handoff(path: str, cwd: str, handoff_dir: str) -> bool:
+    """解決した読み取り先が、`cwd` を含むリポジトリのメインディレクトリの引継ぎディレクトリの直下か（PR 4220 の r7-1）。
+
+    `..` やシンボリックリンク（最後の要素も含む）は `realpath` で解く。メインディレクトリは共通の git ディレクトリの親で、
+    git のコマンドは起動しない。リポジトリの外なら偽。
+    """
+    root = strict._repo_root(Path(cwd))
+    if root is None:
+        return False
+    git_dir = strict._git_dir(root)
+    main = git_dir.parent if git_dir is not None else root
+    real = os.path.realpath(os.path.join(cwd, path))
+    want = os.path.join(os.path.realpath(main), handoff_dir.strip("/"))
+    return os.path.dirname(real) == want and os.path.basename(real) != ""
+
+
 def _next_step(ctx, handoff_dir: str) -> bool:
-    """引き継ぎの文書を読む・書く Tool の呼び出しか（既存の文書の Edit / Write は同じ会話での Read を前提にする）。"""
+    """引き継ぎの文書を読む・書く Tool の呼び出しか（既存の文書の Edit / Write は同じ会話での Read を前提にする）。
+
+    Read は解決後の読み取り先がメインディレクトリの引継ぎディレクトリの直下のときだけ通す（認証情報などを読ませない）。
+    Write / Edit の実パスでの判定は #3995 の後の単位で入れる（今は文字列を含むかだけを見る）。
+    """
     path = ctx.tool_input.get("file_path")
-    return ctx.tool in ("Read", "Write", "Edit") and isinstance(path, str) and handoff_dir in path
+    if not isinstance(path, str):
+        return False
+    if ctx.tool == "Read":
+        return _in_handoff(path, ctx.cwd, handoff_dir)
+    return ctx.tool in ("Write", "Edit") and handoff_dir in path
 
 
 def check(ctx, svc) -> Verdict | None:

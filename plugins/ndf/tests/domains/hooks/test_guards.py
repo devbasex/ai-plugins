@@ -213,10 +213,17 @@ def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
     )
     assert call_entry("claude", "PreToolUse", handoff) is None
     # 既存の文書の Edit / Write は同じ会話での Read を前提にするので、引継ぎ文書の Read も通す（PR 4220 の r6-1）
+    (tmp_path / ".git").mkdir()
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / ".ndf/handoff/a.md")})
     assert call_entry("claude", "PreToolUse", read) is None
     other = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / "README.md")})
     assert deny_reason(call_entry("claude", "PreToolUse", other)) is not None
+    # Read は解決後の読み取り先で照らす。`..` で引継ぎディレクトリの外を指す Read は止める（PR 4220 の r7-1）
+    (tmp_path / ".ndf/handoff").mkdir(parents=True)
+    (tmp_path / ".ndf/handoff/link.md").symlink_to(tmp_path / "secret")
+    for outside in (".ndf/handoff/../../secret", ".ndf/handoff/sub/a.md", ".ndf/handoff/link.md"):
+        escape = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / outside)})
+        assert call_entry("claude", "PreToolUse", escape) is not None  # 拒否（続けば案内へ下がる）で、黙って通さない
 
 
 def test_context_limit_under_the_relay_asks_for_the_next_section(tmp_path, monkeypatch):
