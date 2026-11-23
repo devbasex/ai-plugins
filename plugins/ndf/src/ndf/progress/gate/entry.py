@@ -27,6 +27,7 @@ from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, qu
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
+from ndf.progress.worker_kinds import work_kinds
 
 
 def present(
@@ -72,16 +73,12 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     return result.result(TOOL, result.GATE, f"{label}の回答を待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
-# `ndf answer work` が受ける作業名（テンプレートの `["{{worker}}", "<作業名>"]` の末尾）。テンプレートの `{{worker}}` の既定にはしない
-# （`<保存先>/<作業名>-prompt.md` を書く処理がまだ無く、既定にすると worker のステップが必ず落ちる。PR 3496 の指摘）
-WORK_KINDS = ("impl", "fix", "ci-fix", "fix-base", "fix-push", "design", "plan-to-spec")
-
-
 def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
     """作業名を `ndf worker run` の必須の引数へ合わせる。プロンプトは `<保存先>/<作業名>-prompt.md`（呼ぶ側が先に書く）、
     結果は `<保存先>/<作業名>-result.json` に置く。"""
-    if kind not in WORK_KINDS:
-        raise model.Refused(f"作業名 {kind} はテンプレートの作業名（{', '.join(WORK_KINDS)}）のどれでもない")
+    # 受ける作業名は作業の定義（`contracts/worker/kinds.json`）のキーだけ（テンプレートの `["{{worker}}", "<作業名>"]` の末尾）
+    if kind not in work_kinds():
+        raise model.Refused(f"作業名 {kind} はテンプレートの作業名（{', '.join(work_kinds())}）のどれでもない")
     files = ("--prompt-file", str(state_dir / f"{kind}-prompt.md"), "--result-file", str(state_dir / f"{kind}-result.json"))
     return ["run", "--kind", kind, *files, "--cwd", str(cwd), "--state-dir", str(state_dir)]
 
@@ -90,7 +87,7 @@ def work_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} work")
     ap.add_argument("--state-dir", required=True, help="プランの状態の保存先（テンプレートの {state_dir}）")
     ap.add_argument("--cwd", default=".", help="worker が動く作業場所")
-    ap.add_argument("kind", help="作業名（" + "・".join(WORK_KINDS) + "）")
+    ap.add_argument("kind", help="作業名（" + "・".join(work_kinds()) + "）")
     return ap
 
 
