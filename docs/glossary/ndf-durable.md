@@ -62,6 +62,6 @@
 | 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起動しない実行器になる | — | — | — |
 | 実行の一覧 | `durable_runs` | PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 工程の出力の確かめ | — | 工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check） | — | — | `docs/specifications/ndf-progress-check-stage-output.md` |
-| 書き込みの順番の記録 | `write-gate` | NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・次の内容を作る書き込みの時刻・待ちの終わりを持つ | — | — | `docs/specifications/ndf-github-write-gate.md` |
-| 内容を作る書き込み | `content` | REST の POST と、GraphQL の create・add で始まる mutation。前の内容を作る書き込みから github.content-spacing の秒を空ける | — | — | `docs/specifications/ndf-github-write-gate.md` |
+| 書き込みの順番の記録 | `write-gate` | NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・内容を作る書き込みの時刻の一覧・待ちの終わりを持つ | — | — | `docs/specifications/ndf-github-write-gate.md` |
+| 内容を作る書き込み | `content` | REST の POST と、GraphQL の create・add で始まる mutation。マシン全体で 1 分 80 件・1 時間 500 件のウィンドウで数え（github.content-window.minute・github.content-window.hour）、上限に達したときだけウィンドウが空くまで待つ | — | — | `docs/specifications/ndf-github-write-gate.md` |
 | 二次レート制限 | — | GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る | — | — | `docs/specifications/ndf-github-write-gate.md` |

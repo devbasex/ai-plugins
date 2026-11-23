@@ -8719,14 +8719,14 @@
     {
       "term": "書き込みの順番の記録",
       "context": "ndf-durable",
-      "meaning": "NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・次の内容を作る書き込みの時刻・待ちの終わりを持つ",
+      "meaning": "NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・内容を作る書き込みの時刻の一覧・待ちの終わりを持つ",
       "code": "write-gate",
       "source": "docs/specifications/ndf-github-write-gate.md"
     },
     {
       "term": "内容を作る書き込み",
       "context": "ndf-durable",
-      "meaning": "REST の POST と、GraphQL の create・add で始まる mutation。前の内容を作る書き込みから github.content-spacing の秒を空ける",
+      "meaning": "REST の POST と、GraphQL の create・add で始まる mutation。マシン全体で 1 分 80 件・1 時間 500 件のウィンドウで数え（github.content-window.minute・github.content-window.hour）、上限に達したときだけウィンドウが空くまで待つ",
       "code": "content",
       "source": "docs/specifications/ndf-github-write-gate.md"
     },
