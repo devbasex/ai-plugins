@@ -41,6 +41,18 @@ def test_stop_writes_the_uuid_of_the_reply_it_ended(tmp_path, relay):
     assert signals.read_activity(relay)["reply"] == "r1"
 
 
+def test_stop_without_a_task_list_does_not_read_the_reply_uuid(tmp_path, relay):
+    # 一覧を観測できない記録は読む側が使わないので、会話の記録があっても uuid を読まず `reply` を null にする
+    transcript = tmp_path / "t.jsonl"
+    row = {"type": "assistant", "uuid": "r1", "message": {"stop_reason": "end_turn", "content": []}}
+    transcript.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    payload = stop(tmp_path, "終えた", transcript_path=str(transcript))
+    del payload["background_tasks"]
+    call_entry("claude", "Stop", payload)
+    got = signals.read_activity(relay)
+    assert got["tasks"] is None and got["reply"] is None
+
+
 def test_write_activity_keeps_the_count_of_broken_elements(tmp_path):
     assert signals.write_activity(tmp_path, [{"type": "shell"}, "x", {"id": 3, "type": None}], None)
     got = signals.read_activity(tmp_path)
