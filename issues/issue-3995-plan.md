@@ -153,8 +153,8 @@
 | U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
 | U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | 21 files changed, 205 insertions(+), 398 deletions(-)（cross-review の後）。実装の時点は 20 files changed, 192 insertions(+), 390 deletions(-)（うち削除は `context_policy.py` 143 行・`context.schema.json` 76 行・`test_context_policy.py` 46 行） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | 4 files changed, 197 insertions(+), 5 deletions(-)（plugins の下） |
-| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | 8 files changed, 421 insertions(+), 33 deletions(-)（`issues/issue-3995-plan.md` の 4 行を含む） |
-| U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
+| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | 13 files changed, 729 insertions(+), 49 deletions(-)（cross-review の後。600 行の目安を越えたのは cross-review の直し。実装の時点は 8 files changed, 421 insertions(+), 33 deletions(-)） |
+| U5 止め続ける | Task 10 | 3995:6 | 約 150 | 6 files changed, 160 insertions(+), 9 deletions(-)（`issues/issue-3995-plan.md` の行を含む） |
 | U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
 | U7 手順書・README・用語集 | Task 13・14 | 3995:10・3995:11・3995:12・3995:13・3995:14 | 約 300 | （実装の後に書き足す） |
 
@@ -253,6 +253,7 @@ main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実�
 | Task 7: `Redirect` の `op` は演算子の子の字面、`target` は先の節の字面 | tree-sitter-bash では `2>&-` の演算子の子が `>&-` の 1 つで先（`destination`）の節が無く、`1<>f` は `<` と `ERROR`（`>`）の子に分かれる | U4 で `>&-`・`<&-` は演算子 `>&`・`<&` と先 `-` に分けた（詳細設計書の許すリダイレクトの「先が `-`」と同じ意味）。`<>` は記述子と先を除いた子をつないだ字面で読み、許さない形として止まる。先が実行時に決まるかは、節の種類が `expansion`・`substitution` で終わるか（算術の展開も含む）で読む（`ndf check` の `const-fact` が、詳細設計書の 4 つの種類の集まりを `worktree/write_target.py` の集まりとの重なりとして落とすため） |
 | Task 8: コマンド置換は `ShellScript` の語で見分ける | 語の外に立つ `$(...)`・バッククォート・プロセス置換は `_argv` の語に入らず（`_WORD_NODES` に無い）、中のコマンドは別の単純コマンドとして `commands` に入る。中身が許可対象の `ndf` なら照らしをすり抜ける | U4 で、Bash の文の字面に `$`・バッククォート・`<(`・`>(` があれば止める形にした（変数の展開もここで止まる）。語のチルダ・グロブ・ブレースは語ごとに見る |
 | Task 8: `guards.json` の `context-limit` の `summary` | 「次の 1 手だけを通して止める」のまま | U4 では変えない。詳細設計書の文への書き換えは U5（計画の Task 10）のまま |
+| Task 10: `context-limit` の `summary` を詳細設計書の文にする | 詳細設計書の文は PostToolUse の知らせ（U6 の Task 12）も書くが、U5 の時点の `events` は PreToolUse だけ | U5 では PreToolUse で止め続ける側だけを書いた。知らせの側は U6 で `events` に PostToolUse を足すときに書き足す |
 | Task 5: 消す `context` の行は `ndf-files.json` だけ（修正対象の表） | `contracts/domains/entrypoints.json`（`spec-ndf_settings` の `files`）と `contracts/domains/skill-io.json`（`development-workflow` の `ndf_settings`）も `context` を挙げる | U2 で両方から外した（消した行を指す参照。`ndf check` が通る） |
 | Task 4: `resolve` の結果の `metrics` に `decide_from` を足す | 結果のスキーマの `metrics.policy` の行は「適用する再起動の方針」 | U2 で `policy` を `decide_from` に置き換えた（`metrics` は追加の項目を許さない） |
 | U2 で手順書（`context-window.md`・`development-workflow/SKILL.md`）も消した設定の案内から直す（PR 4220 の cross-review r1-3 ほか） | 手順書の書き直しは U7（Task 13）。U2 の中で直すと、レビューが手順書の guard の振る舞いの記述から U4 の範囲（引継ぎ文書の Read を通す・`HANDOVER_PROMPT`）を U2 に足させた（r5〜r7） | U2 では手順書と hook を触らない（`.ndf/context.json`・`NDF_CONTEXT_POLICY` の案内はスプリントブランチの上で U7 まで残る。main への PR は U7 の後）。r1-3・r2-1・r2-2・r3-1〜r3-6・r4-1〜r4-4・r5〜r7 の手順書の論点は U7 の入力にする。r8 も同じ扱い。U7 では、廃止した設定の案内を消して従来の実効上限を `NDF_CONTEXT_LIMIT` へ移し `resolve` で確かめる手順（r8-1）、「遅くとも 20 万」を消して切る条件をカットポイントと運用上限にそろえること（r8-2）、拒否の範囲・再試行・`NDF_HOOK_OFF=context-limit`・拒否後に打てる操作を実際の guard に合わせること（r8-3・r8-7）、保存した引継ぎ文書のパスを再開ブロックと文書の「次に実行するコマンド」の両方に書くこと（r8-5）、`ndf-next` ごとの `calibrate` を外すこと（r8-6）を書く。U4 では、引継ぎ文書の Read を通し、保存に失敗したら再開ブロックを出さずに理由を伝えること（r8-4）と、拒否文を手順書が前提にする中身に合わせること（r8-7）を扱う |
