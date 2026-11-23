@@ -553,3 +553,16 @@ def test_the_shipped_cases_cover_the_acceptance_condition():
     assert sum(1 for r in rows if r["expect"] == "report") >= 3
     assert len({r["id"] for r in rows}) == len(rows)
     assert all(isinstance(r["text"], str) and r["text"] for r in rows)
+
+
+# ---------------------------------------------------------------- 設定の読み
+
+
+def test_a_setting_is_read_without_validating_every_policy(monkeypatch):
+    def refuse(*_):
+        raise AssertionError("Stop の判定で全方針のスキーマを検証した")
+
+    monkeypatch.setattr(rj.contracts, "schema_errors", refuse)
+    assert rj.setting("model") == "haiku"
+    with pytest.raises(rj.JudgeSettingError, match="no-such が無い"):
+        rj.setting("no-such")

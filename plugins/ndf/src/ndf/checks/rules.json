@@ -171,12 +171,13 @@
       {"module": "ndf.domains.hooks.guards.session", "reason": "表を hook の予算の検査（ndf.domains.hooks.budget）へ渡すだけ"}
     ],
     "dynamic": [
-      {"module": "ndf.adapters.agents", "template": "monitor.stall.{}", "vocabulary": "domains/runtimes.json#/rows/*/id", "reason": "担当の CLI ごとの無進捗の許容を、担当の名前から引く"},
-      {"module": "ndf.contracts.causes", "template": "{}", "vocabulary": "causes.json#/causes/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
-      {"module": "ndf.domains.crossrefactor.launch", "template": "monitor.phase.{}", "vocabulary": "domains/loop-phases.json#/rows/*/id", "reason": "工程の監視の上限を、工程の名前から引く"},
-      {"module": "ndf.domains.hooks.budget", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
-      {"module": "ndf.domains.hooks.budget", "template": "hook.budget.{}.{1}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "ランタイムで違う事象の予算を、予算のキーとランタイムの名前から引く"},
-      {"module": "ndf.domains.hooks.budget", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
+      {"at": "ndf.adapters.agents.stall_seconds", "expr": "f\"monitor.stall.{agent}\"", "template": "monitor.stall.{}", "vocabulary": "domains/runtimes.json#/rows/*/id", "reason": "担当の CLI ごとの無進捗の許容を、担当の名前から引く"},
+      {"at": "ndf.contracts.causes._policy_errors", "expr": "row.retry", "template": "{}", "vocabulary": "causes.json#/causes/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.contracts.causes.policy_of", "expr": "row(kind).retry", "template": "{}", "vocabulary": "causes.json#/causes/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.domains.crossrefactor.launch.phase_limit", "expr": "f\"monitor.phase.{phase}\"", "template": "monitor.phase.{}", "vocabulary": "domains/loop-phases.json#/rows/*/id", "reason": "工程の監視の上限を、工程の名前から引く"},
+      {"at": "ndf.domains.hooks.budget.policy_name", "table": "ndf.domains.hooks.tables.policies", "expr": "f\"hook.budget.{spec['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
+      {"at": "ndf.domains.hooks.budget.policy_name", "table": "ndf.domains.hooks.tables.policies", "expr": "f\"hook.budget.{spec['budget']}.{runtime}\"", "template": "hook.budget.{}.{1}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "ランタイムで違う事象の予算を、予算のキーとランタイムの名前から引く"},
+      {"at": "ndf.domains.hooks.budget._component_error", "table": "ndf.domains.hooks.tables.policies", "expr": "limits[name]", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
     ]
   },
   "child_deps": {

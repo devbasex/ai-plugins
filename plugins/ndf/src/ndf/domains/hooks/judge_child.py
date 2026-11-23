@@ -25,8 +25,8 @@ from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, S
 
 from ndf import contracts
 from ndf.adapters import claude
-from ndf.contracts import facts, limits
-from ndf.domains.hooks import reply_judge
+from ndf.contracts import facts
+from ndf.domains.hooks import reply_judge, tables
 from ndf.domains.relay import account_dir, claude_args
 
 # 判定の設定の方針の名前（`contracts/limits.json`）
@@ -78,14 +78,13 @@ class JudgeRefused(RuntimeError):
 def setting(key: str) -> Any:
     """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。
 
-    方針の行を `ndf.contracts` から読む口はここ 1 つで、値をこのモジュールへ写さない。
+    方針の行を読む口はここ 1 つで、値をこのモジュールへ写さない。hook と同じ表の読み（1 プロセスに 1 回・全方針の
+    スキーマの検証なし）を通し、Stop のたびに検証の時間を足さない。
     """
-    with contracts.raised_as(JudgeSettingError):
-        row = limits.policy(POLICY)._asdict()
-    got = row.get(key)
-    if got is None:
-        raise JudgeSettingError(f"上限の設定の方針 {POLICY} に {key} が無い")
-    return got
+    try:
+        return tables.policy_value(POLICY, key)
+    except tables.TableError as exc:
+        raise JudgeSettingError(str(exc)) from exc
 
 
 def cases_path() -> Path:

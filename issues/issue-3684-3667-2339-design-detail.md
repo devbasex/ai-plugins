@@ -97,7 +97,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `declared` | `src/ndf/checks/limits_readers.py` | 新設 | `declared() -> dict[str, frozenset[str]]` | 上限の設定の方針ごとの、指定された読み手のモジュールの名前 |
+| `declared` | `src/ndf/checks/limits_readers.py` | 新設 | `declared(raw: object) -> dict[str, frozenset[str]]` | 上限の設定の方針ごとの、指定された読み手のモジュールの名前 |
 | `actual` | `src/ndf/checks/limits_readers.py` | 新設 | `actual(trees: Mapping[str, ast.Module]) -> dict[str, frozenset[str]]` | 構文木から、方針の名前を引く呼び出しを探し、方針ごとに引いたモジュールの名前を集める |
 | `check` | `src/ndf/checks/limits_readers.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 指定と実際の食い違いを指摘にする（既存の規則と同じ入口の形） |
 
@@ -122,7 +122,7 @@ plugins/ndf/
     3. 星付きの名前（`*POLICY`）: 最上位の代入の右辺が組（`("relay.max-named", "count")`）のとき、表の引数の位置の要素を 1. で解く
     4. 属性（`machine.CAP_POLICY`）・import した名前: import の先のモジュールの最上位の代入を 2.・3. で解く（1 階層だけ。先がさらに別のモジュールを指すときは解けないものにする）
     5. 上のどれでも解けない（引数・関数の戻り値・f 文字列）: 「動的な読み口」の指定で解く（次の項）
-  - 動的な読み口: 名前を実行時に組み立てる読み手は、`rules.json` の `limits.dynamic` に `{"module": "<モジュール>", "template": "<名前の型>", "vocabulary": "<契約のファイル>#<JSON Pointer>", "reason": "<理由>"}` を指定する。`template` の `{}` に `vocabulary` の値を 1 つずつ入れた名前だけを引いたものとして数える（接頭辞で始まる方針をすべて数えることはしない）。今の実例は `ndf.domains.hooks.budget` の 2 つの型で、`hook.budget.{}` の語彙は `contracts/hooks/runtimes.json` の各ランタイムの `events.*.budget`、`hook.budget.{}.{}` は同じ語彙とランタイムの名前の組である。`budget.py` は `tables.policies()` の辞書を名前で引くので、上の表の関数を通らない
+  - 動的な読み口: 名前を実行時に組み立てる読み手は、`rules.json` の `limits.dynamic` に `{"at": "<関数の完全な名前>", "expr": "<名前を組み立てる式の綴り>", "template": "<名前の型>", "vocabulary": "<契約のファイル>#<JSON Pointer>", "reason": "<理由>"}` を指定する（表を丸ごと参照する読み手は `"table": "<表の名前>"` も書く）。関数 `at` の式が `expr` か `template` の形と違えば、その読み口は解けないものにする。`template` の `{}` に `vocabulary` の値を 1 つずつ入れた名前だけを引いたものとして数える（接頭辞で始まる方針をすべて数えることはしない）。今の実例は `ndf.domains.hooks.budget` の 2 つの型で、`hook.budget.{}` の語彙は `contracts/hooks/runtimes.json` の各ランタイムの `events.*.budget`、`hook.budget.{}.{}` は同じ語彙とランタイムの名前の組である。`budget.py` は `tables.policies()` の辞書を名前で引くので、上の表の関数を通らない
   - 解けない読み口: 指定の無い動的な読み口は `unresolved` の指摘にする（保存先は呼び出しの行）。黙って数えない・黙って捨てる、のどちらもしない
   - 副作用: 無し（構文木を読むだけ）
 - `check`
@@ -141,7 +141,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `check` | 指定した読み手が、その方針を引く呼び出しを持たない | `unread` の指摘（保存先は上限の設定のその方針の行） |
 | `check` | あるモジュールが方針を引くが、その方針の `read_by` にそのモジュールが無い | `undeclared` の指摘（保存先は呼び出しの行） |
-| `check` | 読み口の引数が解けず、`limits.dynamic` にそのモジュールの指定も無い | `unresolved` の指摘（保存先は呼び出しの行） |
+| `check` | 読み口の引数が解けず、`limits.dynamic` にその関数の式の指定も無い | `unresolved` の指摘（保存先は呼び出しの行） |
 | `check` | 指定と実際が一致する | 指摘なし |
 
 - 繰り返しの終わる条件: 方針の数（223）× 読み手の数で有限
