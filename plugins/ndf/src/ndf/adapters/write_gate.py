@@ -34,7 +34,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, closing, contextmanager
+from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, TypeVar
 
@@ -310,15 +310,11 @@ class WriteGate(BaseThrottler):
         self._fallbacks = 0
         self._mutex = threading.Lock()
 
-    @contextmanager
-    def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
-        with self.passing(request):
-            yield
+    def acquire(self, request: httpx.Request) -> AbstractContextManager[None]:
+        return self.passing(request)
 
-    @asynccontextmanager
-    async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
-        async with self.async_passing(request):
-            yield
+    def async_acquire(self, request: httpx.Request) -> AbstractAsyncContextManager[None]:
+        return self.async_passing(request)
 
     def within(self, remaining: Callable[[], float]) -> Within:
         """同じ記録を使い、どのロックの待ちも眠りも `remaining()` に収める throttler（決定 10）。"""
@@ -719,12 +715,8 @@ class Within(BaseThrottler):
         self.gate = gate
         self.remaining = remaining
 
-    @contextmanager
-    def acquire(self, request: httpx.Request) -> Generator[None, Any, Any]:
-        with self.gate.passing(request, self.remaining):
-            yield
+    def acquire(self, request: httpx.Request) -> AbstractContextManager[None]:
+        return self.gate.passing(request, self.remaining)
 
-    @asynccontextmanager
-    async def async_acquire(self, request: httpx.Request) -> AsyncGenerator[None, Any]:
-        async with self.gate.async_passing(request, self.remaining):
-            yield
+    def async_acquire(self, request: httpx.Request) -> AbstractAsyncContextManager[None]:
+        return self.gate.async_passing(request, self.remaining)
