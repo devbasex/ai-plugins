@@ -66,10 +66,10 @@ flowchart TB
 | プラン | `ndf plan` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`ndf route render implement` / `check` / `release` / `sprint` / `close` | `ndf plan` の docstring |
 | ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`ndf plan next <プラン> --from <ステップの id>` | `ndf plan` の docstring |
 | キュー | プランを空いたスロットへ順に流すサブコマンド | `ndf plan queue <plan.json>... --then <plan.json>...` | `ndf plan` の docstring |
-| パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
+| パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next」 |
 | ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
 | セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: セグメント 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
-| context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | [context-window.md](context-window.md) の「用語」 |
+| context window | 1 回の会話が保持する文脈の全体と、その量 | 判断開始の値（既定 250,000）・運用上限（既定 500,000。`NDF_CONTEXT_LIMIT`） | [context-window.md](context-window.md) の「用語」と「運用上限で hook が止める」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
 | スイッチポイント | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | 報告の `結果: スイッチポイント`、`NDF_SUPERVISOR_CUT_RATIO` | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
 | リリース差分 | バージョンとバージョンの間（タグからタグまで）の変更 | `ndf--v10.17.10..ndf--v10.17.18` | [pace.md](pace.md) の「具体例」 |

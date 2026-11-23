@@ -119,7 +119,7 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
     """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
     列は旧い `context_decisions.boundary_row` と同じで、2 つの値（`decide_from`・`limit`・`sources`）を `applied` から書く。
-    再起動の方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
+    消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
     row: dict[str, Any] = {
         "schema": SCHEMA,
         "at": jsonl.now(),
