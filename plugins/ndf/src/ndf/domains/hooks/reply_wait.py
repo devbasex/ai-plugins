@@ -122,8 +122,6 @@ _OPTION_ITEM = re.compile(
     r"|^(?-i:[a-zａ-ｚ])\.(?=\s|$)",
     re.IGNORECASE,
 )
-# 見出しの許可の質問に直下の本文が答えている頭（FAQ の「はい、変更できます。」）
-_ANSWER_HEAD = re.compile(r"^(?:はい|いいえ|いえ|ええ|yes|no)(?:[、，,。.!！\s]|$)", re.IGNORECASE)
 # 見出しと直下の本文が同じ事柄を述べているかを見る語（漢字・カタカナ・英数字の 2 字以上の並び）
 _TERM = re.compile(r"[一-龥々ァ-ヶー]{2,}|[A-Za-z0-9]{2,}")
 # 見出しの質問への回答と読む、調べた結論を述べる末尾（「再起動は不要だと確認しました」）
@@ -278,12 +276,8 @@ def _requests(asks: list[str], below: list[ProseLine]) -> bool:
     許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つリクエスト（「確認してください」）・
     申し出（「…ましょうか？」「このまま…ますか？」）・箇条書きを従え、選ぶ行為（`_PICK_ACT`）を求めるか項目が案の形
     （`_OPTION_ITEM`）の選ばせる質問（「どちらの案で進めますか？」の下に、前置きの文があってもよい案の箇条書き）を
-    求めると読む。直下が「はい」「いいえ」で答える FAQ
-    （「はい、変更できます。」）は求めると読まない。
+    求めると読む。直下の本文は見ない（「はい、」で始まる FAQ の回答か判断の材料かは、語の形で決めずモデルへ回す）。
     """
-    first = _sentences([below[0].text])[:1] if below else []
-    if first and _ANSWER_HEAD.match(_core(first[0])):
-        return False
     bullets = [line for line in below if line.bullet]
     for sentence in asks:
         core = _core(sentence).rstrip("?？")
