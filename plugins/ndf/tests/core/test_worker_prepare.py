@@ -223,21 +223,26 @@ def test_collect_needs_the_report_itself(tmp_path, capsys, monkeypatch):
     assert out["cause"]["kind"] == "precondition" and "作業の報告" not in out["summary"]
 
 
+def _swap_after_resolving(monkeypatch, shared, moved, other):
+    """`prepare` が `--dir` を解いた直後に、あった親 `shared` を `other` へのリンクへ差し替える。"""
+    resolved = worker_paths.prepare_paths
+
+    def swap(directory, name):
+        out = resolved(directory, name)
+        shared.rename(moved)
+        shared.symlink_to(other)
+        return out
+
+    monkeypatch.setattr(worker_paths, "prepare_paths", swap)
+
+
 def test_prepare_does_not_reset_another_directory_when_the_parent_is_swapped(tmp_path, capsys, monkeypatch):
     shared = tmp_path / "shared"
     (shared / "d").mkdir(parents=True)
     other = tmp_path / "other"
     (other / "d").mkdir(parents=True)
     (other / "d" / "n.result.json").write_text("{}", encoding="utf-8")
-    built = worker_paths.report_paths
-
-    def swap_after_building(directory, name, **kw):
-        paths = built(directory, name, **kw)
-        shared.rename(tmp_path / "moved")
-        shared.symlink_to(other)
-        return paths
-
-    monkeypatch.setattr(worker_paths, "report_paths", swap_after_building)
+    _swap_after_resolving(monkeypatch, shared, tmp_path / "moved", other)
     code, out = _run(capsys, "prepare", "--dir", str(shared / "d"), "--name", "n")
     assert _invalid(code, out) and "paths" not in out.get("metrics", {})
     assert (other / "d" / "n.result.json").read_text(encoding="utf-8") == "{}"
@@ -295,14 +300,6 @@ def test_prepare_does_not_create_directories_under_a_parent_swapped_to_a_link(tm
     shared.mkdir()
     other = tmp_path / "other"
     other.mkdir()
-    built = worker_paths.report_paths
-
-    def swap_after_building(directory, name, **kw):
-        paths = built(directory, name, **kw)
-        shared.rename(tmp_path / "moved")
-        shared.symlink_to(other)
-        return paths
-
-    monkeypatch.setattr(worker_paths, "report_paths", swap_after_building)
+    _swap_after_resolving(monkeypatch, shared, tmp_path / "moved", other)
     code, out = _run(capsys, "prepare", "--dir", str(shared / "new" / "d"), "--name", "n")
     assert _invalid(code, out) and list(other.iterdir()) == []
