@@ -242,6 +242,24 @@ def test_a_later_reservation_waiting_for_the_window_does_not_hold_back_an_earlie
     assert later[0].at == pytest.approx(times[0] + length) and not later[0].spaced
 
 
+def test_a_later_reservation_waiting_for_the_window_does_not_push_back_an_earlier_one_taking_its_turn_again(gate, path, clock):
+    # PR 4273 の r2-1: 先の予約が 10 秒後・後ろの予約が 200 秒後にウィンドウの空きを待つ。10 秒後に送った履歴が 499 件へ
+    # 減ったら、先の予約は取り直しで後ろの予約を数えず、90 秒の予算の中で送る
+    length, count = HOUR
+    times = [NOW + 10 - length, NOW + 200 - length, *(NOW - 3000 + i * 0.1 for i in range(count - 2))]
+    seed(path, content=times)
+    other = write_gate.WriteGate(path, clock, clock.sleep)
+    later = []
+    clock.on_sleep = lambda: later.append(other.reserve(CONTENT)) if not later else None
+
+    with gate.hold(CONTENT, remaining=lambda: NOW + 90 - clock.now):
+        sent_at = clock.now
+
+    assert sent_at == pytest.approx(NOW + 10) and clock.slept == [pytest.approx(10)]
+    assert later[0].at == pytest.approx(NOW + 200) and not later[0].spaced
+    assert NOW + 200 in record(path)["content"]  # 後ろの予約は残り、送る直前の判定で自分の番を確かめる
+
+
 def test_a_send_waits_for_the_window_outside_the_send_lock(gate, path, clock):
     # PR 4273 の r1-1: 送る直前にウィンドウが空いていなければ、送信のロックを放して予約を取り直す
     length, count = HOUR
@@ -896,6 +914,7 @@ def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, 
     # PR 4273 の r1-3: 予約の時刻を待つ間に取り消されたら、送らなかった予約を一覧と共通の `next` から除く
     seed(path, next=NOW + 3)
     monkeypatch.setattr(write_gate, "_FINISHER", _Executor())
+    default = _Executor()
     real_sleep = asyncio.sleep
     sleeping = asyncio.Event()
 
@@ -910,7 +929,7 @@ def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, 
             pass
 
     async def main() -> bool:
-        asyncio.get_running_loop().set_default_executor(_Executor())
+        asyncio.get_running_loop().set_default_executor(default)
         task = asyncio.ensure_future(write())
         for _ in range(50):
             if sleeping.is_set():
@@ -927,12 +946,15 @@ def test_a_caller_cancelled_while_waiting_withdraws_the_reservation(gate, path, 
     assert asyncio.run(main())
     assert (record(path)["next"], record(path)["content"]) == (pytest.approx(NOW + 3), [])
     assert _send_lock_is_free(path)
+    # PR 4273 の r2-2: 取り消しの後始末（手順の close）はイベントループの上でなく実行器で進む
+    assert [fn.func.__name__ for fn in default.ran][-1] == "close"
 
 
-def test_a_caller_cancelled_just_as_the_send_is_allowed_withdraws_the_reservation(gate, path):
+def test_a_caller_cancelled_just_as_the_send_is_allowed_withdraws_the_reservation(gate, path, monkeypatch):
     # PR 4273 の r1-3: 送ってよくなった手順の結果を受け取る前に取り消されたら、送信のロックを放し、予約も取り消す
-    default = _Executor()
+    default, finisher = _Executor(), _Executor()
     default.frozen = True
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
 
     async def write() -> None:
         async with gate.async_acquire(COMMENT):
@@ -957,6 +979,8 @@ def test_a_caller_cancelled_just_as_the_send_is_allowed_withdraws_the_reservatio
     assert asyncio.run(main())
     assert _send_lock_is_free(path)
     assert (record(path)["next"], record(path)["sent_next"], record(path)["content"]) == (0.0, 0.0, [])
+    # PR 4273 の r2-2: 送信のロックを持つ後始末はイベントループの上でなく専用の実行器で進む
+    assert [fn.func.__name__ for fn in finisher.ran] == ["_give_back"]
 
 
 def test_async_steps_holding_the_send_lock_resume_on_the_finisher(gate, path, clock, monkeypatch):

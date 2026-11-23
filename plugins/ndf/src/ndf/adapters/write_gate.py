@@ -17,7 +17,8 @@
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
 - 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを取った後の
   手順（最短の送信時刻を待った後の読み直しと、放す `_finish`）は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が
-  既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする
+  既定のスレッドプールを埋めても、ロックを持つ手順が進めるようにする。取り消しの後始末（`withdraw` と手順の `close`）も
+  ループの外で進め、送信のロックを持つときは `_FINISHER` を使う
 - passwd に載らない UID は、環境に依らない UID ごとの保存先（`/tmp/ndf-github-<UID>`。オーナーと 0700 を確かめる）を使う
 - 待ちの予算を持つ呼び手（`within(remaining)`）は、どのロックの待ちも眠りも `remaining()` に収め、収まらなければ送らずに
   `Busy` を出す。予約を書いた後なら `withdraw` で取り消す。予算で縛ったロックの時間切れは I5 へ落とさない（決定 10）
@@ -292,6 +293,18 @@ def _closed(record: Record, reservation: Reservation, now: float) -> bool:
     return _opens(past, now, reservation.count) > now
 
 
+def _ahead(content: list[float], turn: float, replacing: Optional[Reservation]) -> list[float]:
+    """予約の時刻を決めるときに数える一覧。取り直し（`replacing`）では、順番の時刻 `turn` と旧予約の時刻の遅いほうより
+    後ろの項目（旧予約の後に、より後ろの時刻を取った後続の予約）を除く。後続の予約が先の予約を押し戻さないためである。
+
+    新しい予約は一覧をすべて数える（先にウィンドウの空きを待つ予約の枠を奪わない）。
+    """
+    if replacing is None:
+        return content
+    cut = max(turn, replacing.at)
+    return content[: bisect.bisect_right(content, cut)]
+
+
 def _drop_old(record: Record, now: float) -> None:
     """長いほうのウィンドウより古い時刻を一覧から捨てる。"""
     length = max(_window(name)[0] for name in WINDOWS)
@@ -306,22 +319,51 @@ def _advance(steps: Generator[Pause, None, Turn]) -> tuple[bool, Any]:
         return True, done.value
 
 
-def _abandon(gate: WriteGate, steps: Generator[Pause, None, Turn], step: asyncio.Future) -> None:
+def _consume(done: asyncio.Future) -> None:
+    """投げっぱなしの後始末の結果（例外）を受け取る（取り残された例外の警告を出さない）。"""
+    if not done.cancelled():
+        done.exception()
+
+
+def _off_loop(loop: asyncio.AbstractEventLoop, holding: bool, fn: Callable[..., Any], *args: Any) -> asyncio.Future:
+    """後始末（記録の読み書きを含む）をイベントループの外で進める。送信のロックを持つなら `_FINISHER` で進める。
+
+    ループが閉じかけて実行器へ渡せなければ、ほかに進める要求は無いのでその場で進める。
+    """
+    try:
+        future = loop.run_in_executor(_FINISHER if holding else None, fn, *args)
+    except RuntimeError:  # ループの終わり: 待たせる相手がいないのでその場で後始末する
+        future = loop.create_future()
+        try:
+            future.set_result(fn(*args))
+        except Exception as exc:  # 後始末の失敗は呼び手の結果を変えない（`_consume` が受け取る）
+            future.set_exception(exc)
+    future.add_done_callback(_consume)
+    return future
+
+
+def _give_back(gate: WriteGate, turn: Turn) -> None:
+    """送ってよくなった後に送らなかった予約を取り消し、持っている送信のロックを放す。"""
+    try:
+        gate.withdraw(turn.reservation)
+    finally:
+        if turn.send is not None:
+            turn.send.release()
+
+
+def _abandon(gate: WriteGate, steps: Generator[Pause, None, Turn], loop: asyncio.AbstractEventLoop, step: asyncio.Future) -> None:
     """取り消された非同期の手順の後始末。スレッドが終えてから、送らなかった予約を取り消し、持っている送信のロックを放す。
 
     送ってよくなった直後に取り消されたときも、予約は送られていないので取り消す。途中の手順は `close` で閉じ、`_steps` が取り消す。
+    どちらも記録を読み書きするので、イベントループの外（送信のロックを持てば `_FINISHER`）で進める。
     """
     if step.cancelled() or step.exception() is not None:
         return
     finished, value = step.result()
     if not finished:
-        steps.close()
+        _off_loop(loop, value.holding, steps.close)
         return
-    try:
-        gate.withdraw(value.reservation)
-    finally:
-        if value.send is not None:
-            value.send.release()
+    _off_loop(loop, value.send is not None, _give_back, gate, value)
 
 
 def _restore(record: Record, old: Reservation) -> None:
@@ -465,7 +507,7 @@ class WriteGate(BaseThrottler):
             try:
                 finished, value = await asyncio.shield(step)
             except asyncio.CancelledError:
-                step.add_done_callback(lambda done: _abandon(self, steps, done))
+                step.add_done_callback(functools.partial(_abandon, self, steps, loop))
                 raise
             if finished:
                 return value
@@ -482,7 +524,9 @@ class WriteGate(BaseThrottler):
             try:
                 await asyncio.sleep(seconds)
             except BaseException:
-                steps.close()  # `_steps` が送信のロックを放し、送らなかった予約を取り消す
+                # `_steps` が送信のロックを放し、送らなかった予約を取り消す。記録の読み書きをループの上で進めないため、
+                # 閉じる処理はループの外（送信のロックを持てば `_FINISHER`）で進め、投入済みの処理は取り消さない（shield）
+                await asyncio.shield(_off_loop(loop, holding, steps.close))
                 raise
 
     @contextmanager
@@ -515,7 +559,8 @@ class WriteGate(BaseThrottler):
         `Busy` を出す。`replacing` の戻しは `Busy` でも書く（ロックを取れなければ `withdraw` で試す）。
 
         内容を作る書き込みがウィンドウの空きを待つ予約は、共通の `next` を進めない（`spaced` が偽）。ほかの書き込みは
-        この予約の後ろへ並ばず、この予約は予約の時刻に順番を取り直す（`_steps`）。
+        この予約の後ろへ並ばず、この予約は予約の時刻に順番を取り直す（`_steps`）。取り直しでは、自分の予約の時刻より
+        後ろの後続の予約を数えない（`_ahead`。後続の予約に先の枠を奪わせない。送る直前の `_closed` は残す）。
         """
 
         def change(record: Record, now: float) -> Reservation | Busy:
@@ -523,7 +568,7 @@ class WriteGate(BaseThrottler):
                 _restore(record, replacing)
             before = record["next"]
             turn = max(now, record["next"], record["blocked_until"])
-            at = _opens(record[CONTENT_TIMES], turn, count) if kind == CONTENT else turn
+            at = _opens(_ahead(record[CONTENT_TIMES], turn, replacing), turn, count) if kind == CONTENT else turn
             try:
                 _within_budget(remaining, at - now)
             except Busy as busy:
