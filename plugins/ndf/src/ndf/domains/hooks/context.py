@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.strict import _SHELLS
@@ -126,9 +126,8 @@ def _walk(text: str) -> ShellScript:
         assignments += node.type == "variable_assignment"
         if node.type == "command":
             body, condition = _loop_position(node)
-            commands.append(
-                ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True)), _source(node))
-            )
+            argv, joined, source = _words(node)
+            commands.append(ShellCommand(argv, _in_background(node), body, condition, _strip_wrappers(joined), source))
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -451,26 +450,27 @@ class _EnvSplit:
         return "ok"
 
 
-def _word_targets(node: Any) -> Iterator[Any]:
-    """単純コマンドの子の要素を順に返す（`command_name` はその中の語の要素に置き換える）。"""
+def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """単純コマンドの語を子の 1 回の走査で読む: 引用を外した語・連結の語（`-S'a b'`）も部分ごとに引用を外した語（ラッパーの引数を読むため）・字面（引用とエスケープを残す）。
+
+    `command_name` はその中の語の要素に置き換える。3 つの並びは同じ長さで、位置ごとに同じ語を指す。
+    """
+    argv: list[str] = []
+    joined: list[str] = []
+    source: list[str] = []
     for child in node.children:
-        yield child.children[0] if child.type == "command_name" and child.children else child
-
-
-def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
-    """単純コマンドの語。`joined` なら連結の語（`-S'a b'`）も部分ごとに引用を外す（ラッパーの引数を読むため）。"""
-    words = []
-    for target in _word_targets(node):
-        if joined and target.type == "concatenation":
-            words.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
-        elif target.type in _WORD_NODES:
-            words.append(_unquote(target.text.decode("utf-8", "replace"), target.type))
-    return tuple(words)
-
-
-def _source(node: Any) -> tuple[str, ...]:
-    """単純コマンドの語の字面（引用とエスケープを残す）。並びは `_argv` と同じ。"""
-    return tuple(target.text.decode("utf-8", "replace") for target in _word_targets(node) if target.type in _WORD_NODES)
+        target = child.children[0] if child.type == "command_name" and child.children else child
+        if target.type not in _WORD_NODES:
+            continue
+        text = target.text.decode("utf-8", "replace")
+        word = _unquote(text, target.type)
+        argv.append(word)
+        source.append(text)
+        if target.type == "concatenation":
+            joined.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+        else:
+            joined.append(word)
+    return tuple(argv), tuple(joined), tuple(source)
 
 
 def _unquote(text: str, kind: str) -> str:
