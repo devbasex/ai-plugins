@@ -12,7 +12,7 @@ import os
 import re
 import secrets
 import stat
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
@@ -34,7 +34,8 @@ class EntryError(ValueError):
 class EntryUnsafe(EntryError):
     """名前がリンクか、リンク数が 1 の通常のファイルでない。`kind` は symlink・hardlink・directory・other・replaced。
 
-    `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと。
+    `replaced` は `open_workdir(create=True)` が最初に無かった名前を開いたとき、呼んだ利用者の持ち物でないディレクトリが現れたこと、
+    または最初に無かった要素を経て開いた作業ディレクトリに、新しく作ったディレクトリには無いはずの名前があったこと（`check_fresh`）。
     """
 
     def __init__(self, name: str, kind: str) -> None:
@@ -53,10 +54,14 @@ class EntryUnreadable(EntryError):
 
 
 class WorkDir(NamedTuple):
-    """開いた作業ディレクトリ。`path` は表示とパスを組むためだけに使い、操作は `fd` に対する相対で行う。"""
+    """開いた作業ディレクトリ。`path` は表示とパスを組むためだけに使い、操作は `fd` に対する相対で行う。
+
+    `created` は、根からたどる途中で最初の `open` に無かった要素（作った・間に現れた）を経て開いたこと。
+    """
 
     path: Path
     fd: int
+    created: bool = False
 
 
 class ReportPaths(NamedTuple):
@@ -98,13 +103,15 @@ def _resolve_existing(directory: Path) -> Path:
 
     無い要素の後の `..` は無い要素を打ち消すだけにし、打ち消した後にまた存在する要素が来れば、そこからリンクを解き直す。
     `open_workdir` は `os.path.abspath` で `..` を畳むので、返すパスに `..` を残すと開く場所と食い違う。
+    解いた要素はディレクトリであることを確かめ、通常のファイルなど（リンクの先を含む）なら次の `..` で
+    その親へ進む前に `EntryUnsafe`（`other`）で拒む。
     """
     probe = directory.absolute()
     rest: list[str] = []
     while not os.path.lexists(probe) and probe != probe.parent:
         rest.append(probe.name)
         probe = probe.parent
-    base = _resolve_strict(probe)
+    base = _resolve_dir(probe)
     missing: list[str] = []
     for part in reversed(rest):
         if part in ("", "."):
@@ -116,10 +123,21 @@ def _resolve_existing(directory: Path) -> Path:
                 base = base.parent
             continue
         if not missing and os.path.lexists(base / part):
-            base = _resolve_strict(base / part)
+            base = _resolve_dir(base / part)
         else:
             missing.append(part)
     return base.joinpath(*missing)
+
+
+def _resolve_dir(probe: Path) -> Path:
+    """`_resolve_strict` で解き、解いた先がディレクトリでなければ `EntryUnsafe`（`other`）で拒む。
+
+    解いた後のパスはリンクを含まないので、続く `..` は `base.parent` で上がる。ファイルの親へ上がらないよう、ここで止める。
+    """
+    resolved = _resolve_strict(probe)
+    if not stat.S_ISDIR(os.stat(resolved).st_mode):
+        raise EntryUnsafe(str(probe), "other")
+    return resolved
 
 
 def _resolve_strict(probe: Path) -> Path:
@@ -152,12 +170,15 @@ def open_workdir(directory: Path, *, create: bool = False) -> Iterator[WorkDir]:
     パスを組んだ後に途中の要素をリンクへ差し替えられると、別の場所を開かずに `EntryUnsafe`（`symlink`）で止まる。
     `create` が真なら、無い要素は開いた親の記述子に対する `mkdir` で作ってから開く（リンクの先に作らない）。
     最初に無かった要素が開くまでに呼んだ利用者の持ち物でないディレクトリになっていれば `EntryUnsafe`（`replaced`）で止める。
+    最初に無かった要素を経て開いたときは `WorkDir.created` を真にする。オーナーは同じ利用者の既存のディレクトリへの
+    差し替え（sticky bit の無い共有の親では、別の利用者も同じ親の中で改名できる）を見分けないので、初期化する側は
+    書き換える前に `check_fresh` で、新しく作ったディレクトリには無いはずの名前が無いことを確かめる。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
     """
     path = Path(os.path.abspath(directory))
-    fd = _open_dir_nofollow(path, create=create)
+    fd, created = _open_dir_nofollow(path, create=create)
     try:
-        yield WorkDir(path, fd)
+        yield WorkDir(path, fd, created)
     finally:
         os.close(fd)
 
@@ -167,35 +188,38 @@ def open_workdir(directory: Path, *, create: bool = False) -> Iterator[WorkDir]:
 _SEARCH = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
 
 
-def _open_dir_nofollow(path: Path, *, create: bool = False) -> int:
+def _open_dir_nofollow(path: Path, *, create: bool = False) -> tuple[int, bool]:
     """絶対パスのディレクトリを根から 1 要素ずつ `O_NOFOLLOW` で開く。リンクか、ディレクトリでない要素は `EntryUnsafe`。
 
     途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
+    開いた記述子と、最初の `open` に無かった要素を経たか（`WorkDir.created`）を返す。
     """
     parts = path.parts[1:]
     fd = os.open(path.anchor, (_SEARCH if parts else os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC)
+    created = False
     try:
         for i, part in enumerate(parts):
             mode = os.O_RDONLY if i == len(parts) - 1 else _SEARCH
-            child = _open_child(fd, part, mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, path, create=create)
+            child, made = _open_child(fd, part, mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, path, create=create)
+            created = created or made
             os.close(fd)
             fd = child
     except BaseException:
         os.close(fd)
         raise
-    return fd
+    return fd, created
 
 
-def _open_child(fd: int, part: str, flags: int, path: Path, *, create: bool) -> int:
+def _open_child(fd: int, part: str, flags: int, path: Path, *, create: bool) -> tuple[int, bool]:
     """`fd` の直下の `part` をリンクをたどらずに開く。`create` が真で無ければ `fd` に対する `mkdir` で作ってから開く。
 
     作ってから開き直すまでに、共有の親を書き換えられる手が名前を別の実ディレクトリへ差し替えられる（`O_NOFOLLOW` は
     実ディレクトリを拒まない）。最初に開けなかった名前は既存と確かめられていないので、`mkdir` で作れたときも、間に
     現れた（`FileExistsError`）ときも、開いた記述子を `_check_created` で確かめ、落ちれば初期化せずに
-    `EntryUnsafe`（`replaced`）で止める。
+    `EntryUnsafe`（`replaced`）で止める。最初に開けたら偽、作った・間に現れたら真を記述子と組で返す。
     """
     try:
-        return os.open(part, flags, dir_fd=fd)
+        return os.open(part, flags, dir_fd=fd), False
     except FileNotFoundError:
         if not create:
             raise
@@ -205,26 +229,44 @@ def _open_child(fd: int, part: str, flags: int, path: Path, *, create: bool) -> 
         raise
     with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 間に現れた名前も下の確かめを通す
         os.mkdir(part, dir_fd=fd)
-    child = _open_child(fd, part, flags, path, create=False)
+    child, _ = _open_child(fd, part, flags, path, create=False)
     try:
         _check_created(child, path)
     except BaseException:
         os.close(child)
         raise
-    return child
+    return child, True
 
 
 def _check_created(fd: int, path: Path) -> None:
     """最初に無かった名前で開いたディレクトリが、呼んだ利用者の持ち物であることを確かめる。違えば `EntryUnsafe`（`replaced`）。
 
-    同一性の根拠はオーナーだけにする。呼んだ利用者のディレクトリは、この呼び出しか、同じ利用者の別の呼び出し（同じ保存先を
-    並行して準備した `prepare`）が作ったもので、中身があっても同じ利用者が置いたものなので受ける（空かどうかは見ない）。
-    ほかの利用者は呼んだ利用者がオーナーのディレクトリを作れないので、別の手が持ち込んだディレクトリはここで止まる。
+    ここで止まるのは、ほかの利用者が持ち込んだディレクトリである（ほかの利用者は呼んだ利用者がオーナーのディレクトリを作れない）。
+    オーナーが一致しても同一とは言えない。sticky bit の無い共有の親では、別の利用者が呼んだ利用者の既存のディレクトリを
+    同じ親の中でこの名前へ改名でき、オーナーは変わらない。中身の有無も根拠にしない（同じ保存先を同じ利用者が別々の
+    worker の名前で並行して準備すると、先に終えた呼び出しの報告が置かれた正規のディレクトリを開く）。そのため経たことを
+    `WorkDir.created` で返し、初期化する側が `check_fresh` で自分の名前が無いことを確かめる。
     以後の操作はこの記述子に対する相対なので、確かめた後に名前を差し替えられても差し替え先には当たらない。
     """
     st = os.fstat(fd)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
         raise EntryUnsafe(str(path), "replaced")
+
+
+def check_fresh(wd: WorkDir, names: Iterable[str]) -> None:
+    """`wd.created` なら、`names` のどれかがあれば書き換える前に `EntryUnsafe`（`replaced`）で止める。偽なら何もしない。
+
+    最初に無かった要素を経て開いたディレクトリは、空で作られた後に、この呼び出しか同じ利用者の並行した準備が別の名前を
+    足したものしか持たないはずである。この呼び出しが初期化する名前（worker の名前は稼働中の worker と重ねない）が既にあれば、
+    既存のディレクトリへ差し替えられたとみなし、その中の報告・完了マーカー・結果ファイルを空にも削除もしない。
+    """
+    if not wd.created:
+        return
+    for name in names:
+        _check_name(name)
+        with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 無いことが新しく作ったディレクトリである条件
+            os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+            raise EntryUnsafe(name, "replaced")
 
 
 def _refused_kind(fd: int, part: str) -> str:

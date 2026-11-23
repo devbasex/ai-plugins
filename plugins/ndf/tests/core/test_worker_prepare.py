@@ -251,6 +251,27 @@ def test_collect_skips_a_heading_that_only_starts_like_the_report_heading(tmp_pa
     assert code == 0 and out["metrics"]["report"] == body
 
 
+def test_prepare_does_not_reset_own_directory_renamed_over_a_created_name(tmp_path, capsys, monkeypatch):
+    old = tmp_path / "old"
+    old.mkdir()
+    for name, text in (("n.report.md", "別の作業の報告"), ("n.report.md.done", ""), ("n.result.json", "{}")):
+        (old / name).write_text(text, encoding="utf-8")
+    real_mkdir = worker_paths.os.mkdir
+
+    def swap(part, *args, dir_fd=None, **kw):  # 作った直後に、同じ親の中で既存のディレクトリを同じ名前へ改名する
+        real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+        if part == "new":
+            os.rmdir(part, dir_fd=dir_fd)
+            old.rename(tmp_path / "new")
+
+    monkeypatch.setattr(worker_paths.os, "mkdir", swap)
+    code, out = _run(capsys, "prepare", "--dir", str(tmp_path / "new"), "--name", "n")
+    assert _invalid(code, out) and "paths" not in out.get("metrics", {})
+    moved = tmp_path / "new"
+    assert (moved / "n.report.md").read_text(encoding="utf-8") == "別の作業の報告"
+    assert (moved / "n.report.md.done").exists() and (moved / "n.result.json").exists()
+
+
 def test_append_and_collect_refuse_a_prepared_parent_swapped_to_a_link(tmp_path, capsys, monkeypatch):
     shared = tmp_path.resolve() / "shared"
     report = _prepared(shared, capsys)

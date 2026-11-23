@@ -753,8 +753,11 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
     """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
 
     前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
-    残るのに報告が空」の組は起きない。
+    残るのに報告が空」の組は起きない。最初に無かった要素を経て開いた保存先に 3 つの名前のどれかがあれば、
+    既存のディレクトリへ差し替えられたとみなして何も変えない（`check_fresh`）。
     """
+    names = (paths.report.name, paths.done.name, paths.result.name)
+    worker_paths.check_fresh(wd, names)
     for entry in (paths.report, paths.done, paths.result):
         worker_paths.entry_state(wd, entry.name)
     done = worker_paths.remove_file(wd, paths.done.name)

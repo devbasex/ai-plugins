@@ -212,6 +212,55 @@ def test_open_workdir_accepts_own_directory_filled_by_a_concurrent_prepare(tmp_p
     monkeypatch.setattr(worker_paths.os, "mkdir", concurrent)
     with worker_paths.open_workdir(target, create=True) as wd:
         assert worker_paths.entry_state(wd, "other.report.md") is not None
+        assert wd.created
+        worker_paths.check_fresh(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+
+
+@pytest.mark.parametrize("before_mkdir", [False, True])
+def test_check_fresh_refuses_own_existing_directory_renamed_over_a_created_name(tmp_path, workdir, monkeypatch, before_mkdir):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    target = tmp_path / "new"
+    real_mkdir = os.mkdir
+
+    def swap(part, *args, dir_fd=None, **kw):  # 同じ親の中で、呼んだ利用者の既存のディレクトリを作った名前へ改名する
+        if part != "new":
+            return real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+        if not before_mkdir:
+            real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+            os.rmdir(part, dir_fd=dir_fd)
+        os.rename(d, target)
+        if before_mkdir:
+            raise FileExistsError(part)
+
+    monkeypatch.setattr(worker_paths.os, "mkdir", swap)
+    with worker_paths.open_workdir(target, create=True) as wd:
+        assert wd.created
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            worker_paths.check_fresh(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
+
+
+def test_check_fresh_accepts_names_in_a_directory_that_existed(workdir):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    with worker_paths.open_workdir(d, create=True) as wd:
+        assert not wd.created
+        worker_paths.check_fresh(wd, ["n.report.md.done"])
+
+
+def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "file").write_text("x", encoding="utf-8")
+    (victim / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
+    (tmp_path / "link").symlink_to(victim / "file")
+    before = _tree(tmp_path)
+    with pytest.raises(worker_paths.EntryUnsafe) as e:
+        worker_paths.report_paths(tmp_path / "missing" / ".." / "link" / "..", "n")
+    assert e.value.kind == "other"
+    assert _tree(tmp_path) == before
 
 
 def test_open_workdir_needs_only_search_permission_on_ancestors(tmp_path):
