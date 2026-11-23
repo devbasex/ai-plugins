@@ -170,7 +170,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     置き換えを許すのは、呼んだ利用者が書き込める既存のファイルだけである（読み取り専用なら `PermissionError`）。
     作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は、作った名前で先に
     一致を確かめ、それで片付けられないとき（同じ親の別名へ移されたとき）だけ開いた記述子から今の名前を引いて、作業
-    ディレクトリの直下で開いた記述子と同じ inode の名前だけを消す。記述子は後始末が終わるまで閉じない。開けなかった一時ディレクトリは確かめられないので消さない。消すのは名前で引く
+    ディレクトリの直下で開いた記述子と同じ inode の名前だけを消す。記述子は後始末が終わるまで閉じない。開けなかった一時ディレクトリと、開いても所有者・モードの確かめに落ちた一時ディレクトリは作ったものだと確かめられないので消さない。消すのは名前で引く
     `rmdir` で、確かめた後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
@@ -206,6 +206,8 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
 def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result], *, created: bool, private: bool) -> None:
     """`write_file` の一時ディレクトリを片付け、最後に記述子を閉じる。
 
+    片付けるのは所有者・モードの確かめを通った（`private`）一時ディレクトリだけである。照合で確かめられるのは
+    開いた対象と今の名前の一致までで、`mkdir` で作った対象かどうかは確かめられないため。
     記述子は inode の突き合わせと `rmdir` が終わるまで閉じない。開いている間は inode が解放されず、同じ番号を
     別のディレクトリが再利用して突き合わせを通ることが無い。
     """
@@ -213,8 +215,9 @@ def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, st: Optional[os.stat_result],
         if created:
             with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 公開できなかった一時ファイルの後始末。元の失敗を上げる
                 os.unlink("data", dir_fd=tmp_fd)
-        if st is not None:
-            _remove_opened_dir(wd, tmp_fd, tmp, st, quiet=not private)
+        # 所有者・モードの確かめに落ちた記述子は作ったディレクトリだと確かめられないので、名前を消さずに閉じるだけにする
+        if st is not None and private:
+            _remove_opened_dir(wd, tmp_fd, tmp, st)
     finally:
         os.close(tmp_fd)
 
@@ -232,21 +235,21 @@ def _current_name(fd: int, original: str) -> Optional[str]:
     return None
 
 
-def _remove_opened_dir(wd: WorkDir, fd: int, original: str, opened: os.stat_result, *, quiet: bool) -> None:
+def _remove_opened_dir(wd: WorkDir, fd: int, original: str, opened: os.stat_result) -> None:
     """作業ディレクトリの直下で、開いたディレクトリ（`fd`）と同じ inode の名前を 1 つ `rmdir` する。
 
     作った名前で先に inode を突き合わせ、同じでなければ（移された・消されたとき）だけ記述子から今の名前を引いて突き合わせる。
-    `quiet` なら失敗を飲む（元の例外を残す）。名前が開いたディレクトリでなければ消さない（差し替え先を消さない）。
+    名前が開いたディレクトリでなければ消さない（差し替え先を消さない）。
     呼ぶ側は `fd` をこの関数が終わるまで閉じない。
     """
-    if _remove_if_same(wd, original, opened, quiet=quiet):
+    if _remove_if_same(wd, original, opened):
         return
     current = _current_name(fd, original)
     if current is not None:
-        _remove_if_same(wd, current, opened, quiet=quiet)
+        _remove_if_same(wd, current, opened)
 
 
-def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result, *, quiet: bool) -> bool:
+def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result) -> bool:
     """名前が開いたディレクトリと同じ inode なら `rmdir` して真を返す。同じでなければ偽。"""
     if not _is_entry_name(name):
         return False
@@ -256,11 +259,7 @@ def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result, *, quiet: bo
         return False
     if (now.st_dev, now.st_ino) != (opened.st_dev, opened.st_ino):
         return False
-    try:
-        os.rmdir(name, dir_fd=wd.fd)
-    except OSError:
-        if not quiet:
-            raise
+    os.rmdir(name, dir_fd=wd.fd)
     return True
 
 

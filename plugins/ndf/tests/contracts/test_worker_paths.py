@@ -332,7 +332,9 @@ def test_write_file_rejects_temp_dir_that_is_not_private(workdir, monkeypatch):
     with worker_paths.open_workdir(d) as wd, pytest.raises(worker_paths.EntryUnsafe) as e:
         worker_paths.write_file(wd, "f", "新")
     assert e.value.kind == "other"
-    assert list(d.iterdir()) == []
+    (kept,) = (p for p in d.iterdir() if p.name.startswith(".f."))
+    assert kept.is_dir()
+    assert not (d / "f").exists()
 
 
 def test_write_file_accepts_temp_dir_inheriting_setgid(workdir, monkeypatch):
