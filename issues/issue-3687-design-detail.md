@@ -172,7 +172,9 @@ plugins/ndf/
 | `check` | 設定に `toolchain` が無い | 何も照らさない（違反 0 件。利用先のリポジトリは新しいキーを置くまで今までどおり） |
 | `check` | 設定に `toolchain` は在るが、`workflows`・`plugin_pyprojects`・`launchers` の一部だけが在る | 在るキーの対象だけを照らす（無いキーの対象は見ない） |
 | `check` | 設定に `toolchain.workflows` が在り、当たるファイルが 0 件 | 違反 0 件（グロブの誤りは検査しない。設定の責任） |
-| `check` | `setup-python` の `python-version` が `toolchain.python_ci` に無い | その行を違反にする |
+| `check` | `setup-python` の `python-version` が `toolchain.python_ci` に無く、`toolchain.python_compat` の `workflows` に当たるファイルで `versions` にも無い | その行を違反にする |
+| `check` | `python-version` が `toolchain.python_compat` の `versions` に在るが、ファイルが `python_compat` の `workflows` に当たらない | その行を違反にする（下限の版は下限を確かめる手順にだけ書く） |
+| `check` | `python-version` が `toolchain.python_compat` の `versions` に在り、ファイルが `workflows` に当たる | 違反 0 件 |
 | `check` | `setup-uv` の `version` が宣言と違う、または無い | その行を違反にする |
 | `check` | `launchers` のファイルの `UV_VERSION=` か `UV_INSTALLER_SHA256=` が宣言と違う | その行を違反にする |
 | `check` | `workflows` に当たるファイルの `run` の本文が `setup-uv` 以外の uv の導入（`UV_INSTALL_PATTERNS` のどれか）に当たる | その行を違反にする（uv を入れてよい経路は、`version` を宣言と同じ値で持つ `setup-uv` だけ） |
@@ -187,7 +189,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 宣言と 3 つの置き場がそろっていれば 0 件 | 設定に `toolchain` が無いとき 0 件で何も読まない。`plugin_pyprojects` だけが在るとき、ワークフローとランチャーを見ない | 上の異常系の 5 行それぞれ。`setup-uv` を持つワークフローに `pip install --upgrade uv` の手順を足すと 1 件 |
+| `check` | 宣言と 3 つの置き場がそろっていれば 0 件。`script-structure.yml` の `3.10` は `python_compat` で 0 件 | 設定に `toolchain` が無いとき 0 件で何も読まない。`plugin_pyprojects` だけが在るとき、ワークフローとランチャーを見ない | 上の異常系の 5 行それぞれ。`setup-uv` を持つワークフローに `pip install --upgrade uv` の手順を足すと 1 件。`python_compat` の `workflows` の外（`pytest.yml`）に `3.10` を書くと 1 件 |
 | `workflow_tools` | `uses` が `astral-sh/setup-uv@<sha> # v10.3.3` の形でも Action の名前で拾える | `with` が無いステップ | YAML が壊れている |
 | `pyproject_floor` | `>=3.11` から `(3, 11)` | `>=3.11,<4` のような複合の指定 | `requires-python` が無い |
 
