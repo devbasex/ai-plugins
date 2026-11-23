@@ -3,9 +3,9 @@
 工程の試行がマージの方式を決められずに止まると、プランの実行の保存先へ目印のファイル（`PENDING_FILE`）を書く。
 次の打ち直しは目印を見て、方式を課題より先に GitHub に問う（`ask`）。方式が決まるまで打ち直しのたびに課題と
 書き手の権限を読み直さないためである（PR 4289 の指摘）。決まった方式は目印へ記録しておき（`remember`）、その後で
-課題を読めずに止まった打ち直しは課題より先には問い合わせ直さない（`held_method`）。記録した方式はプランへ入れず、
-課題を読んだ後に問い直す（止まっている間に GitHub の許す方式が変わりうるため。PR 4289 の指摘）。目印は差し込みがそろった試行が消す
-（`invoke.clear_values` は消さない）。
+課題を読めずに止まった打ち直しは問い合わせ直さない（`held_method`）。止まっている間に GitHub の許す方式が変わって
+マージが断られたら、組み立て済みの値を捨てて方式をもう一度問う（`refused`。PR 4289 の指摘）。目印は差し込みが
+そろった試行が消す（`invoke.clear_values` は消さない）。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import github
+from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import files as plan_files
 
@@ -53,6 +54,22 @@ def ask(t: route.Template, values: Mapping[str, route.Value], pending: Path) -> 
     except github.GitHubError:
         mark(pending)
         raise
+
+
+def refused(report: Mapping[str, Any], inputs: Mapping[str, Any]) -> bool:
+    """プランの結果 `report` がマージのステップで断られて止まり、その方式が工程の入力 `inputs` で渡されずに問うて決めたものか。
+
+    真なら呼び手（`invoke._call_plan`）が組み立て済みの値を捨て、次の打ち直しが方式をもう一度 GitHub に問う。方式は
+    課題を読めずに止まった打ち直しで記録した値を使い回す（`held_method`）ので、その間に GitHub の許す方式が変わると、
+    捨てなければ同じ試行の打ち直しが断られる方式を使い続ける（PR 4289 の指摘）。方式を問うのは断られたときだけである。
+    マージのステップはテンプレートの部品 `merge`、止まったステップはプランの結果の items の回の行（`kind` が `plan`）にある。
+    """
+    cause = report.get("cause")
+    if report.get("status") != result.STOPPED or not isinstance(cause, dict) or cause.get("kind") != "refused":
+        return False
+    items = report["items"] if isinstance(report.get("items"), list) else []
+    stopped_at_merge = any(isinstance(i, dict) and i.get("kind") == "plan" and i.get("step") == "merge" for i in items)
+    return stopped_at_merge and "merge_method" not in inputs
 
 
 def _key(values: Mapping[str, route.Value]) -> list[Any]:

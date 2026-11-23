@@ -182,13 +182,11 @@ def _pending(tmp_path: Path) -> Path:
     return work / merge_pending.PENDING_FILE
 
 
-def test_a_retry_whose_issue_read_fails_after_the_merge_method_asks_it_again_only_after_the_issue(tmp_path, filled, local, monkeypatch):
-    # 目印のある打ち直しで方式が決まった後に課題を読めずに止まれば、次の打ち直しは課題より先には問い合わせ直さず、
-    # 課題を読んだ後に問い直す。止まっている間に許す方式が変われば、今の方式をプランへ入れる。課題を読めた試行が
+def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_again(tmp_path, filled, local, monkeypatch):
+    # 目印のある打ち直しで方式が決まった後に課題を読めずに止まっても、方式は目印に記録しておき、次の打ち直しは
+    # 問い合わせ直さない。許す方式の変化には、GitHub がマージを断ったときに値を捨てて追う。課題を読めた試行が
     # 目印を消す（PR 4289 の指摘）
     pending = _pending(tmp_path)
-    answers = iter(["squash", "rebase"])
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: filled.append("merge_method") or next(answers))
 
     def fail(location, n):
         raise invoke.github.GitHubError("読めない", status=502)
@@ -199,8 +197,8 @@ def test_a_retry_whose_issue_read_fails_after_the_merge_method_asks_it_again_onl
             _close(tmp_path, local)
     invoke.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
-    assert filled == ["merge_method", 3092, "merge_method"]
-    assert got["merge_method"] == "rebase" and not pending.exists()
+    assert filled == ["merge_method", 3092]
+    assert got["merge_method"] == "squash" and not pending.exists()
 
 
 def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_path, filled, local, monkeypatch):

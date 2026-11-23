@@ -772,6 +772,31 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
     assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"version": "11.0.0"}))
 
 
+def _stopped_at(step: str, kind: str):
+    """プランがステップ `step` で `kind` の理由で止まった結果を返す runner。"""
+    out = result.stopped("plan", kind, "断られた", items=[{"kind": "plan", "name": "design", "step": step}])
+    return lambda argv, cwd, env: subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+
+
+@pytest.mark.parametrize(
+    ("step", "kind", "inputs", "dropped"),
+    [
+        ("merge", "refused", {"issues": [1]}, True),
+        ("merge", "refused", {"issues": [1], "merge_method": "squash"}, False),
+        ("merge", "base_conflict", {"issues": [1]}, False),
+        ("a", "refused", {"issues": [1]}, False),
+    ],
+)
+def test_a_refused_merge_drops_the_values_only_when_the_method_was_asked(tmp_path, monkeypatch, step, kind, inputs, dropped):
+    # GitHub に問うて決めた方式でマージのステップが断られたときだけ、組み立て済みの値を捨てて次の打ち直しで方式をもう一度問う。
+    # 課題を読めずに止まった打ち直しは記録した方式を使うので、その間に許す方式が変わると捨てなければ断られ続ける（PR 4289 の指摘）
+    _plan_template(monkeypatch)
+    work = tmp_path / "w"
+    got = invoke.invoke(_plan_run(inputs), tmp_path, work, runner=_stopped_at(step, kind))
+    assert got.status == "stopped" and got.cause["kind"] == kind
+    assert (work / invoke.VALUES_FILE).exists() is not dropped
+
+
 def test_plan_without_a_template_stops_as_precondition(tmp_path, monkeypatch):
     # 作業場所の用意の with.plan（worktree）に当たるテンプレートが無い
     monkeypatch.setattr(route, "templates", lambda: {})
