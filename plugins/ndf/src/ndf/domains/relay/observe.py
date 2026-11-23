@@ -26,6 +26,11 @@ AUTH_FAILED = re.compile(r"Failed to authenticate|Invalid API key|Login expired|
 # 資格情報そのものの失敗を示す API の失敗の記録の欄（`error`・`apiErrorStatus`。403 の権限の制限は当てない。#3864 の決定 6）
 CREDENTIAL_ERROR = "authentication_failed"
 CREDENTIAL_STATUS = 401
+# 行を替えるカーソルの移動と復帰（`CSI … A/B/E/F/H/d/f`・`\r`）。Claude Code は応答の行を改行でなくこれで描くので、
+# 外す前に改行へ置き換える（置き換えないと上限の行が行頭に来ず、`^` で照らす文言に当たらない。#4227）
+CURSOR_LINE = re.compile(r"\x1b\[[0-9;]*[ABEFHdf]|\r")
+# 右へのカーソルの移動（`CSI … C`）。字の間を空けるのに使うので空白 1 つにする
+CURSOR_FORWARD = re.compile(r"\x1b\[[0-9]*C")
 # 画面の制御の列（色・カーソル）。文言を探す前に外す
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
@@ -35,7 +40,8 @@ USAGE_KEYS = claude.CONTEXT_FIELDS
 
 
 def plain(raw: bytes) -> str:
-    return ANSI.sub("", raw.decode("utf-8", errors="replace"))
+    text = raw.decode("utf-8", errors="replace")
+    return ANSI.sub("", CURSOR_FORWARD.sub(" ", CURSOR_LINE.sub("\n", text)))
 
 
 def limit_line(screen: str) -> Optional[str]:
