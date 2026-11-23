@@ -37,7 +37,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`Judged`（新設の型） |
-| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列と文の分け方は 10 系と同じ。guard が使う形は、かぎ括弧の引用の中身を見ず、別の場所の待ちの報告だけの本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設。10 系と同じ）・`reply_kind`（新設。`none` / `elsewhere_wait` / `prose_wait` / `report`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
+| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列は 10 系に 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard が使う形は、かぎ括弧の引用の中身を見ず、待ちの文がどれも別の場所の待ちの報告だけ（同じ文の前後の節に本人への問いが無い）の本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設）・`has_prose`（新設。本文の行があるかだけを見る）・`reply_kind`（新設。`none` / `elsewhere_wait` / `prose_wait` / `report`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
 | `plugins/ndf/src/ndf/adapters/reply_judge.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む。最後の応答の種類をルールの判定から返す | `reply_wait`、標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設）・`HookContext.last_reply_kind`（変更）・`classify_reply`（削除） |
@@ -160,9 +160,9 @@ plugins/ndf/
 
 | 条件の組み合わせ | 結果 |
 | --- | --- |
-| `ctx.last_reply_kind`（ルールの判定。下の注記）が `none`（本文が空） | 通す（`reply=none`・`judge=skip:empty`） |
-| `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
-| ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告） | 通す（`judge=skip:elsewhere`） |
+| `reply_wait.has_prose(ctx.last_reply)` が偽（本文が空。文の判定はせず、`ctx.last_reply_kind` はまだ評価しない） | 通す（`reply=none`・`judge=skip:empty`） |
+| `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない（`ctx.last_reply_kind` を評価しない）。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
+| ここで初めて `ctx.last_reply_kind`（`reply_wait.reply_kind` の本文の判定）を評価し、ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告だけ） | 通す（`judge=skip:elsewhere`） |
 | ルールの判定が `prose_wait` | 変更要求（今の文面。`judge=rule`）。軽いモデルを呼ばない。上限に達していても返す（dispatch が上限で通し、待ち通知を送る） |
 | `ctx.background_tasks` が空でない | 通す（`judge=skip:background`。ルールの判定は `report`） |
 | `ctx.runtime` が `claude` でない（Codex のセッション） | 通す（`judge=skip:runtime`） |
@@ -172,7 +172,7 @@ plugins/ndf/
 | 上のどれでもなく、`reply_judge.parent_launch(os.environ, os.getpid())` が None | 通す（`judge=skip:endpoint`） |
 | 上のどれでもない | `reply_judge.ask(judge_text(...), 残りの秒, os.environ, <parent_launch の返り>)`。`kind="wait"` なら `svc.counter.mark_model_wait()` を呼んで変更要求（今の文面）、`report` なら通す。`kind` が None なら `mark_rest` を呼んでから通す（`judge=fallback:<failure>`） |
 
-- ルールの判定は `ctx.last_reply_kind` で、`HookContext.last_reply_kind` は `reply_wait.reply_kind(self.last_reply)` を返す（下の「hook の文脈・数え手・締め切り」）。11.0.22 の `classify_reply`（言い回しの列と末尾 4 行）は使わない
+- ルールの判定は `ctx.last_reply_kind` で、評価するのは 3 行目（空と AskUserQuestion の確認の後）が最初である。AskUserQuestion 済みの Stop と本文が空の Stop では本文の判定を走らせない。`HookContext.last_reply_kind` は `reply_wait.reply_kind(self.last_reply)` を返す（下の「hook の文脈・数え手・締め切り」）。11.0.22 の `classify_reply`（言い回しの列と末尾 4 行）は使わない
 - 「ルールの判定で決める」は、`prose_wait` を 4 行目で既に変更要求にしているので、5 行目より下ではいつも通過になる（`judge=skip:limit` で `model_waited()` が真のときだけ変更要求）。モデルを呼べない Stop・モデルが回答しない Stop の結果は通過である（要求仕様の受け入れ条件 5・6a）
 - 条件は表の上から順に見て、最初に当たった 1 つを `judge` に書く（複数が当たっても 1 つ）。`/proc` を読む `parent_launch` は休みのマーカーと残りの秒の後に置き、モデルを呼ばないと分かっている Stop では読まない。子が `endpoint` を返したら `judge=fallback:endpoint` で、休みのマーカーが次の Stop から休む間だけ子の起動を止める
 - 変更要求の文面・上限・上限の後の待ちの知らせは変えない（dispatch と main が持つ）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである

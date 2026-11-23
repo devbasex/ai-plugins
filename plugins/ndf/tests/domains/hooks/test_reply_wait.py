@@ -82,6 +82,33 @@ def test_a_wait_elsewhere_with_a_question_here_is_a_wait():
     assert _is_wait("別のレーンは承認を待っています。こちらは #4217 を載せてよいですか。")
 
 
+def test_a_question_after_a_wait_elsewhere_in_the_same_sentence_is_a_wait():
+    assert _is_wait("別のレーンは承認を待っていますが、こちらの変更はマージしてよいですか。")
+
+
+def test_an_answer_wait_elsewhere_is_not_a_wait_here():
+    assert reply_wait.reply_kind("p9 の作業を終えました。別のレーンは回答を待っています。") == "elsewhere_wait"
+
+
+@pytest.mark.parametrize("text", ["返答を待ちます。", "ご回答をお待ちしています。"])
+def test_the_own_waits_of_the_11_series_rule_are_waits(text):
+    """11.0.22 の `classify_reply` が拾う本人の回答待ちは、モデルを呼ばずにルールが待ちと読む。"""
+    assert _is_wait(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "URL は `https://example.com/?a=1` です。",
+        "https://example.com/?a=1 を開いて確かめました。",
+        "[一覧](https://example.com/list?page=2) に載せました。",
+    ],
+    ids=["inline-code", "bare-url", "link"],
+)
+def test_a_url_with_a_query_is_a_report(text):
+    assert reply_wait.reply_kind(text) == "report"
+
+
 def test_a_question_inside_a_code_block_is_not_a_wait():
     text = "手順を書きました。\n\n```\n進めてよいですか？\n```\n\nコミットは 1 件です。"
     assert not _is_wait(text)
