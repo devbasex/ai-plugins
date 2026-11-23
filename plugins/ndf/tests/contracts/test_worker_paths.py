@@ -57,6 +57,17 @@ def test_report_paths_resolves_a_link_to_an_existing_directory_and_keeps_missing
     assert worker_paths.report_paths(tmp_path / "link" / "new", "n").report == real.resolve() / "new" / "n.report.md"
 
 
+def test_report_paths_resolves_a_link_after_a_missing_part_cancelled_by_dotdot(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    paths = worker_paths.report_paths(tmp_path / "missing" / ".." / "link", "n")
+    assert paths.report == real.resolve() / "n.report.md"
+    with worker_paths.open_workdir(paths.report.parent, create=True) as wd:
+        assert wd.path == real.resolve()
+    assert not (tmp_path / "missing").exists()
+
+
 @pytest.mark.parametrize("under", [False, True])
 def test_report_paths_refuses_a_dangling_link_before_anything_is_created(tmp_path, under):
     link = tmp_path / "link"
@@ -130,13 +141,30 @@ def test_open_workdir_does_not_create_under_a_link(tmp_path, workdir):
     assert not (d / "new").exists()
 
 
-def test_open_workdir_refuses_a_created_directory_swapped_for_another_real_one(tmp_path, workdir, monkeypatch):
+def _foreign(monkeypatch, foreign: Path) -> None:
+    """`foreign` の inode だけを別の利用者の持ち物に見せる（テストは別の利用者を作れないため）。"""
+    ino = foreign.stat().st_ino
+    real_fstat = os.fstat
+
+    def fstat(fd):
+        st = real_fstat(fd)
+        if st.st_ino != ino:
+            return st
+        fields = list(st)
+        fields[4] = os.geteuid() + 1  # st_uid
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(worker_paths.os, "fstat", fstat)
+
+
+def test_open_workdir_refuses_a_created_directory_swapped_for_another_users_one(tmp_path, workdir, monkeypatch):
     d, _ = workdir
     (d / "n.report.md.done").write_text("", encoding="utf-8")
+    _foreign(monkeypatch, d)
     target = tmp_path / "new"
     real_mkdir = os.mkdir
 
-    def swap(part, *args, dir_fd=None, **kw):  # 作った直後に名前を前の報告の残る実ディレクトリへ差し替える
+    def swap(part, *args, dir_fd=None, **kw):  # 作った直後に名前を前の報告の残る別の利用者のディレクトリへ差し替える
         real_mkdir(part, *args, dir_fd=dir_fd, **kw)
         if part == "new":
             os.rmdir(part, dir_fd=dir_fd)
@@ -147,6 +175,43 @@ def test_open_workdir_refuses_a_created_directory_swapped_for_another_real_one(t
         pass
     assert e.value.kind == "replaced"
     assert (target / "n.report.md.done").exists()
+
+
+def test_open_workdir_refuses_another_users_directory_that_appears_before_mkdir(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    _foreign(monkeypatch, d)
+    target = tmp_path / "new"
+
+    def appear(part, *args, dir_fd=None, **kw):  # 最初の open の後、mkdir の前に別の利用者のディレクトリが現れる
+        if part == "new":
+            os.rename(d, target)
+        raise FileExistsError(part)
+
+    monkeypatch.setattr(worker_paths.os, "mkdir", appear)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(target, create=True):
+        pass
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
+
+
+@pytest.mark.parametrize("before_mkdir", [False, True])
+def test_open_workdir_accepts_own_directory_filled_by_a_concurrent_prepare(tmp_path, monkeypatch, before_mkdir):
+    target = tmp_path / "new"
+    real_mkdir = os.mkdir
+
+    def concurrent(part, *args, dir_fd=None, **kw):  # 同じ利用者の別の prepare が先に作って報告を置く
+        if part == "new" and before_mkdir:
+            real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+            (target / "other.report.md").write_text("", encoding="utf-8")
+            raise FileExistsError(part)
+        real_mkdir(part, *args, dir_fd=dir_fd, **kw)
+        if part == "new":
+            (target / "other.report.md").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(worker_paths.os, "mkdir", concurrent)
+    with worker_paths.open_workdir(target, create=True) as wd:
+        assert worker_paths.entry_state(wd, "other.report.md") is not None
 
 
 def test_open_workdir_needs_only_search_permission_on_ancestors(tmp_path):
