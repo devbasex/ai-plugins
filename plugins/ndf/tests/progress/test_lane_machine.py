@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
+from collections import Counter
 from datetime import UTC, datetime
 
 import pytest
@@ -160,6 +162,130 @@ def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_doe
     assert machine.admitted(own, "w-a", lambda: listed, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
     assert machine.admitted(own, "w-a", lambda: None, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
     assert seen == [("w-b", "w-c"), ("w-b", "w-c")]
+
+
+def _lock(record, busy=False):
+    """起動の排他（`machine.admit_lock`）の偽。オーナーがいる間（`busy` なら常に）入ろうとすると待たずに `LockBusy` を上げ、
+    入れたら出入りを `record` へ `lock-in`・`lock-out` として積む。"""
+    held = False
+
+    @contextlib.contextmanager
+    def admit_lock(_seconds, clock=None):
+        nonlocal held
+        if busy or held:
+            raise machine.LockBusy("偽の錠にオーナーがいる")
+        held = True
+        record("lock-in")
+        try:
+            yield
+        finally:
+            held = False
+            record("lock-out")
+
+    return admit_lock
+
+
+PIDS = {"pa": "plan:w-a", "pb": "plan:w-b", "pc": "plan:w-c"}
+
+
+def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_cap(monkeypatch, no_wait_no_child):
+    """別の 2 つの計画の起動の許可が同時に求められても、一覧の取得・数え上げ・上限の判定・索引・起動の手を起動の排他の中で
+    打つので、起動した後の稼働中の数が上限を超えない（#3989 の受け入れ条件 8・#4217）。A が排他を持つ間（A の起動の手の中）に
+    B を打ち、B は数えずに lock で待つ。"""
+    named_cap.write(identity.load().state_dir, 3)
+    shared = {"o-a": _row()}
+    events_by_attempt, active_attempts, wrappers_after_attempt, results = {}, [], {}, {}
+
+    def record(event):
+        events_by_attempt[active_attempts[-1]].append(event)
+
+    def recorded(event, real):
+        def call(*a, **k):
+            record(event)
+            return real(*a, **k)
+
+        return call
+
+    monkeypatch.setattr(machine, "admit_lock", _lock(record))
+    for event, name in (("count", "count"), ("over_cap", "over_cap"), ("index", "index_plan")):
+        monkeypatch.setattr(machine, name, recorded(event, getattr(machine, name)))
+
+    # 索引の計画を読むと Git を子のプロセスで打つので、レーンの無い読める計画にする（本数は共有の一覧のラッパーで数える）
+    def read_lanes(cwd, plan, skip=()):
+        if PIDS.get(plan) in skip:
+            return None
+        return machine.PlanLanes(PIDS.get(plan, f"{cwd}:{plan}"))
+
+    monkeypatch.setattr(machine, "read_lanes", read_lanes)
+
+    def attempt(label, wrapper, plan_name, inside=None):
+        def listed():
+            record("listed")
+            return dict(shared)
+
+        def go(_held):
+            record("go")
+            shared[wrapper] = _row(plan_name=plan_name, cwd="/own")
+            # 起動したラッパーを足した後の本数で確かめる（3 本の状態で起動を許す誤りは 4 本で落ちる）
+            assert len(shared) <= 3, sorted(shared)
+            if inside is not None:
+                inside()
+            return {"ok": True, "detail": "起動した"}
+
+        active_attempts.append(label)
+        events_by_attempt[label] = []
+        try:
+            pid = PIDS[plan_name]
+            results[label] = machine.admitted(machine.PlanLanes(pid), wrapper, listed, go, machine.PlanPlace(pid, "/own", plan_name))
+        finally:
+            active_attempts.pop()
+        wrappers_after_attempt[label] = set(shared)
+
+    attempt("A", "w-a", "pa", inside=lambda: attempt("B-first", "w-b", "pb"))
+    attempt("B-again", "w-b", "pb")
+    attempt("C", "w-c", "pc")
+
+    # A が排他を持つ間の B は数えずに lock で待つ（一覧・数え上げ・上限の判定・索引・起動の手のどれも打たない）
+    assert results["B-first"]["waiting"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
+    assert results["B-first"]["ok"] is False and events_by_attempt["B-first"] == []
+    # 試行ごとの結果と、その試行を終えた直後の一覧。どの試行の後も上限 3 以下
+    assert wrappers_after_attempt == {
+        "B-first": {"o-a", "w-a"},
+        "A": {"o-a", "w-a"},
+        "B-again": {"o-a", "w-a", "w-b"},
+        "C": {"o-a", "w-a", "w-b"},
+    }
+    assert all(len(names) <= 3 for names in wrappers_after_attempt.values())
+    assert results["A"]["ok"] is True and results["B-again"]["ok"] is True
+    assert results["C"]["waiting"] == {"reason": machine.RULE, "machine_lanes": 3, "cap": 3, "unreadable": []}
+    assert {p.plan_id for p in machine.indexed()} == {"plan:w-a", "plan:w-b"}
+    # 計画ごとの呼び出しの順。数え上げ・上限の判定・索引・起動の手が 1 つでも排他の外へ出れば順が変わる
+    admitted_calls = ["lock-in", "listed", "count", "over_cap", "index", "go", "lock-out"]
+    assert events_by_attempt["A"] == admitted_calls and events_by_attempt["B-again"] == admitted_calls
+    assert events_by_attempt["C"] == ["lock-in", "listed", "count", "over_cap", "lock-out"]
+
+
+def test_a_busy_lock_makes_the_admission_wait_without_counting(monkeypatch, no_wait_no_child):
+    """起動の排他を取れなければ、上限も一覧も読まず、数えず、索引も起動の手も打たずに lock で待つ（#3989 の受け入れ条件 9・#4217）。"""
+    hits = Counter()
+
+    def counted(name, value=None):
+        def call(*_a, **_k):
+            hits[name] += 1
+            return value
+
+        return call
+
+    monkeypatch.setattr(machine, "admit_lock", _lock(lambda _event: None, busy=True))
+    for name in ("cap", "count", "over_cap", "index_plan"):
+        monkeypatch.setattr(machine, name, counted(name))
+    got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", counted("listed", {}), counted("go", {"ok": True}), _place())
+    assert isinstance(got, dict)
+    assert {k: v for k, v in got.items() if k != "detail"} == {
+        "ok": False,
+        "waiting": {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []},
+    }
+    assert hits == Counter()
 
 
 def test_an_unreadable_list_decides_by_the_own_plan_alone(monkeypatch):

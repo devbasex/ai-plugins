@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import subprocess
+import time
 import uuid
 
 import pytest
@@ -50,6 +51,20 @@ def pg_url(pg_server):
 def _no_progress_db(monkeypatch):
     """実行した人の `NDF_PROGRESS_DB` を読まない。"""
     monkeypatch.delenv("NDF_PROGRESS_DB", raising=False)
+
+
+def _refuse(what):
+    def refuse(*_a, **_k):
+        raise AssertionError(f"{what} を呼んだ（待たず、子のプロセスも起動しないテスト）")
+
+    return refuse
+
+
+@pytest.fixture
+def no_wait_no_child(monkeypatch):
+    """本物の時間の待ちと子のプロセスの起動を、呼ばれたら落ちる偽にする。"""
+    monkeypatch.setattr(time, "sleep", _refuse("time.sleep"))
+    monkeypatch.setattr(subprocess, "Popen", _refuse("subprocess.Popen"))
 
 
 @pytest.fixture

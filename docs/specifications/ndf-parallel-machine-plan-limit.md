@@ -260,7 +260,7 @@ jq 'del(.max_lanes, .max_plans) | .lanes |= map(del(.plans))' plan.json > plan.j
 
 ## テスト観点
 
-- 計画の状態と `ndf lanes status` に 3 つの値が無く、`ndf lanes limits` と `ndf lanes set --plans` が引数の誤りで断り、検査の誤りに I20・I2 が出ないこと（`tests/progress/test_plan.py`）
+- 計画の状態と `ndf lanes status` に 3 つの値が無く、`ndf lanes limits` と `ndf lanes set --plans` が引数の誤りで断り、検査の誤りに I20・I2 が出ないこと（`tests/progress/test_plan.py`・`tests/progress/test_lane.py`）
 - 3 つの値のどれかを書いた計画の設定・レーンの設定を `ndf lanes init`・`lane add` に渡すと、誤りの文にその名前が出て断り、消した設定は通ること
 - 計画の作成・レーンの追加・レーンの変更・上限の変更の事象に 3 つの値を持つ記録を畳み込むと計画の状態を読め、値だけの事象が状態を変えないこと
 - `after` で直列にした未着手のレーン 3 本の計画が、上限 1 でも `ndf lanes init` を通ること（`tests/progress/test_lane.py`）
@@ -268,16 +268,16 @@ jq 'del(.max_lanes, .max_plans) | .lanes |= map(del(.plans))' plan.json > plan.j
 - 待ちのレーンが 2 本あり、稼働中のレーンが終わって 1 本分の空きができた周で、計画の並び順の先のレーンだけを起動すること
 - 計画に無く conductor でもない役の動いているラッパーと、登録簿に無く錠を持つラッパーを、起動の許可が 1 本ずつ数えること。マシンの設定が無く、耐久ワークフローの環境が `NDF_RELAY_MAX_NAMED=8`・ハブを兼ねるプロセスの環境に変数が無いとき、6 本が動く間に許可した起動をハブが通すこと
 - 起動の許可の後、ハブの判定の前に別の `ndf relay spawn` が残りの枠を使う（か上限が下がる）と、`spawn --replace` が元のラッパーを止めずに断り、起動の手が `waiting` を返すこと（`tests/progress/test_lane_launch.py`・`tests/domains/relay/test_relay_hub.py`）
-- 3 本が動く間に上限を 2 へ下げると、中止・回答の後の next・`/goal` の入れ直しのそれぞれが待たずに通り、元のラッパーを止めてから起動して 3 本のままで、中止した計画が中止の処理を終えること。同じ状態で別のレーンの行を始める起動は待つこと
+- 3 本が動く間に上限を 2 へ下げると、中止・回答の後の next・`/goal` の入れ直しのそれぞれが待たずに通り、元のラッパーを止めてから起動して 3 本のままで、中止した計画が中止の処理を終えること。同じ状態で別のレーンの行を始める起動は待つこと（#4221）
 - 前のバージョンが `starts` を書いた登録簿の行でも `spawn --replace`・`restart` が回数で断らず、書き戻した行と一覧に `starts` が無いこと（#3864 の決定 13）
 - 登録簿に行の無い名前・席の違う `--seated` が `refused` で起動せず、席を書く前のバージョンの行は役と計画が同じなら通ること。`--seated` で `--replace`・`--seat`・`--name` のどれかが無ければ引数の誤りになること（`tests/domains/relay/test_relay_cli_parse.py`）
-- 別の 2 つの計画の起動の許可を同時に走らせても、起動した後の稼働中の数が上限を超えないこと。上限 1 で計画 A が回答待ちの行を持ち、A のラッパーがすべて止まって登録簿から消えても、計画 B の起動が待つこと（A は索引から見つかる）
-- 起動できるレーンに、上限で待つときは `machine-lanes`、一覧を読めないときは `observe`、排他が取られているときは `lock`（`machine_lanes`・`cap` が null）の `machine_wait` が載り、`metrics.machine` に稼働中の数と上限が載ること。起動できるレーンが無い `status` がほかの計画のステートマシンを開かず、ある `status` がレーンの数に依らず 1 計画 1 回だけ開くこと。壊れた `cap.json` でも `status` が計画とレーンを出し、`metrics.machine.error` に文が載ること
+- 別の 2 つの計画の起動の許可を同時に走らせても、起動した後の稼働中の数が上限を超えないこと。上限 1 で計画 A が回答待ちの行を持ち、A のラッパーがすべて止まって登録簿から消えても、計画 B の起動が待つこと（A は索引から見つかる）（`tests/progress/test_lane_machine.py`）
+- 起動できるレーンに、上限で待つときは `machine-lanes`、一覧を読めないときは `observe`、排他が取られているときは `lock`（`machine_lanes`・`cap` が null）の `machine_wait` が載り、`metrics.machine` に稼働中の数と上限が載ること。起動できるレーンが無い `status` がほかの計画のステートマシンを開かず、ある `status` がレーンの数に依らず 1 計画 1 回だけ開くこと。壊れた `cap.json` でも `status` が計画とレーンを出し、`metrics.machine.error` に文が載ること。起動の許可も、排他を取れなければ数えずに `lock` の待ちを返すこと（`tests/progress/test_lane_machine.py`）
 - `ndf relay cap --named` で書いた値を、同じプロセスの次の判定（起動の許可・ハブ・`status`）が使い、環境変数より先に読むこと。`--clear` の後は環境変数 → 上限の設定に戻ること。3 つの出所のどれでも `1` は通り、`0`・`0.5`・`1.5`・`inf`・`nan`・`-1`・数でない値が `NamedCapError` で断られること（`tests/contracts/test_named_cap.py`・`tests/domains/relay/test_relay_cli.py`）
 - マシンの設定が 6・頼む側の環境が `NDF_RELAY_MAX_NAMED=2` で、3 本が動く間に `spawn` の要求を書き、ハブの `drain` の前に `ndf relay cap --clear` を済ませると、ハブが 2 で判定して断り、要求の `cap` の `source` が `env` で値が 2 であること
 - 壊れた `cap.json` で、ハブの `spawn` の要求が `invalid` になり、同じ `drain` の後ろの `stop` の要求も処理されること。引数なしの `ndf relay cap` が `invalid`（終了コード 2）の結果 JSON を出し、耐久ワークフローの起動の手が `final` の失敗を返すこと
-- テストのスロット（`plugins/ndf/src/ndf/testing/` とそのテスト）が変わらないこと
-- どのテストも事象の数・回数・状態で判定し、時間で区切らないこと
+- テストのスロット（`plugins/ndf/src/ndf/testing/` とそのテスト）が変わらないこと（#4222）
+- どのテストも事象の数・回数・状態で判定し、時間で区切らないこと（#4222）
 
 テストのパスは `plugins/ndf/` からの相対で、ほかに `tests/progress/test_plan_run.py`・`tests/support/plan_decls.py` がある。
 
