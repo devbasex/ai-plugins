@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import pwd
@@ -178,14 +179,20 @@ def _restore(record: dict[str, float], old: Reservation) -> None:
         record["next_content"] = old.before[1]
 
 
+@functools.cache
+def _private_home() -> Path:
+    """このプロセスだけが使う置き場（0700・名前を予測できない）。共有の一時ディレクトリに決まった名前を置かない。"""
+    return Path(tempfile.mkdtemp(prefix="ndf-github-"))
+
+
 def _home() -> Path:
-    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）だけ `HOME`、それも無ければ一時ディレクトリへ落とす。"""
+    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）だけ `HOME`、それも無ければプロセスの中の置き場へ落とす。"""
     uid = os.getuid()
     try:
         return Path(pwd.getpwuid(uid).pw_dir)
     except KeyError:
         home = os.path.expanduser("~")
-        fallback = Path(home) if os.path.isabs(home) else Path(tempfile.gettempdir()) / f"ndf-{uid}"
+        fallback = Path(home) if os.path.isabs(home) else _private_home()
         diag(f"UID {uid} が passwd に無い。書き込みの順番の記録を {fallback} の下に置く", kind="write_gate")
         return fallback
 

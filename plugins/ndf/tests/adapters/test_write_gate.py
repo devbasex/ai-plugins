@@ -304,9 +304,15 @@ def test_gate_path_falls_back_to_home_for_a_uid_outside_passwd(tmp_path, monkeyp
 def test_gate_path_falls_back_to_the_temp_dir_without_home(tmp_path, monkeypatch):
     monkeypatch.setattr(write_gate.pwd, "getpwuid", _no_entry)
     monkeypatch.delenv("HOME", raising=False)
-    monkeypatch.setattr(write_gate.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(write_gate.tempfile, "tempdir", str(tmp_path))
+    write_gate._private_home.cache_clear()
 
-    assert write_gate.gate_path().is_relative_to(tmp_path)
+    try:
+        got = write_gate.gate_path()
+        assert got.is_relative_to(tmp_path) and got == write_gate.gate_path()
+        assert got.parents[3].stat().st_mode & 0o777 == 0o700
+    finally:
+        write_gate._private_home.cache_clear()
 
 
 def test_pr_lock_sits_beside_the_record_and_waits_the_publish_limit(tmp_path, monkeypatch):
