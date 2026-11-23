@@ -129,9 +129,15 @@ class Counter:
     def take(self, key: str, item: str) -> Optional[dict]:
         """`memo[key]` の `item` の値を取り出して消す。無い・数えない数え手・形が違えば None。"""
         memo = self.data.get("memo")
-        table = memo.get(key) if self.usable and isinstance(memo, dict) else None
-        value = table.pop(item, None) if isinstance(table, dict) else None
-        return value if isinstance(value, dict) else None
+        if not self.usable or not isinstance(memo, dict):
+            return None
+        table = memo.get(key)
+        if not isinstance(table, dict):
+            return None
+        value = table.pop(item, None)
+        if not isinstance(value, dict):
+            return None
+        return value
 
     def reset(self, source: str = "human") -> str:
         """入力を受けた。中継のマーカーがあるか中継の入力ならマーカーを消すだけ。人の入力なら数え直す。消したほうを返す。"""
