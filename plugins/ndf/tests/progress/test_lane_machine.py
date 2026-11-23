@@ -179,7 +179,7 @@ def _no_wait_no_child(monkeypatch):
 
 
 def _lock(record, busy=False):
-    """起動の排他（`machine.admit_lock`）の偽。持ち主がいる間（`busy` なら常に）入ろうとすると待たずに `LockBusy` を上げ、
+    """起動の排他（`machine.admit_lock`）の偽。オーナーがいる間（`busy` なら常に）入ろうとすると待たずに `LockBusy` を上げ、
     入れたら出入りを `record` へ `lock-in`・`lock-out` として積む。"""
     state = {"held": False}
 
