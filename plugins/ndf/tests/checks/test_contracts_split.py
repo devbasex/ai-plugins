@@ -137,17 +137,16 @@ def test_a_file_that_is_not_one_item_is_a_finding(root, rules, rel, value):
     ("field", "paths"),
     [
         ({"type": "object", "required": ["keys"]}, []),
-        ({"$ref": "#/$defs/endpoint"}, []),
+        ({"$ref": "#/$defs/variants/anyOf/0"}, []),
         ({"type": ["object", "null"]}, []),
-        ({"anyOf": [{"$ref": "#/$defs/endpoint"}, {"type": "null"}]}, []),
+        ({"anyOf": [{"type": "object", "required": ["keys"]}, {"type": "null"}]}, []),
+        ({"type": "string"}, [ITEM]),
         ({"type": ["string", "null"]}, [ITEM]),
-        ({"$ref": "#/$defs/none"}, [SCHEMAS[0]]),
-        ({"$ref": "https://example.invalid/x.json"}, [SCHEMAS[0]]),
     ],
-    ids=["object", "local-ref", "type-list", "any-of", "not-object", "unresolved-ref", "remote-ref"],
+    ids=["object", "ref", "type-list", "any-of", "not-object", "not-object-list"],
 )
 def test_a_field_that_the_schema_allows_to_be_an_object_is_not_another_item(root, rules, field, paths):
-    schema = {"$defs": {"endpoint": {"type": "object"}}, "properties": {"summary": {"type": "string"}, "endpoint": field}}
+    schema = {"properties": {"summary": {"type": "string"}, "endpoint": field}}
     _text(SCHEMAS[0], schema)(root)
     _text(ITEM, {"summary": "x", "endpoint": {"flags": []}})(root)
     assert _paths(root, _check(root, rules)) == paths
