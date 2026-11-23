@@ -10,7 +10,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from ndf import contracts, identity
-from ndf.checks.model import CheckError, Scope, load_settings
+from ndf.checks.model import CheckError, Scope, load_settings, read_workflow
 
 SCHEMA = "schemas/ndf-settings/project.schema.json"
 
@@ -164,3 +164,21 @@ def test_load_settings_stops_on_a_link_that_resolves_outside_the_repository(tmp_
         path.parent.symlink_to(outside / identity.FIXED_WORDS["ndf_settings_dir"])
     with pytest.raises(CheckError):
         load_settings(repo)
+
+
+def test_read_workflow_warns_of_a_reused_anchor_without_the_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "w.yml"
+    path.write_text("env:\n  A: &k s3cr3t-old\n  B: &k s3cr3t-new\njobs:\n  x: {}\n", encoding="utf-8")
+    assert list(read_workflow(path).jobs) == ["x"]
+    err = capsys.readouterr().err
+    assert "s3cr3t" not in err
+    assert f"{path}:3:6" in err
+
+
+@pytest.mark.parametrize("value", ["!!int s3cr3t", "!!bool s3cr3t", "!!omap s3cr3t", "2026-13-45"])
+def test_read_workflow_stops_on_an_unconvertible_value_without_the_input(tmp_path: Path, value: str) -> None:
+    path = tmp_path / "w.yml"
+    path.write_text(f"env:\n  A: {value}\njobs: {{}}\n", encoding="utf-8")
+    with pytest.raises(CheckError, match="w.yml") as caught:
+        read_workflow(path)
+    assert "s3cr3t" not in str(caught.value)
