@@ -43,7 +43,7 @@ plugins/ndf/
 docs/glossary/glossary.json・docs/glossary.md
 ```
 
-依存の向き: `relay/context_thresholds.py` は標準ライブラリだけに依存し、上限の設定の引き方を引数で受ける。持ち主は M3b（`ndf.domains.relay` の既定の持ち主）で、S1e の個別の列挙には載せない。guard（M3a の hook の経路）は `hooks/tables.policy_value` を、`relay/cli.py`・`cli_context.py` は `ndf.contracts.limits.value` を渡す。`context_records.py`・`context_report.py` は `context_thresholds` の語と型だけを引く。hook の経路から `ndf.contracts` へは依存しない。循環は無い。
+依存の向き: `relay/context_thresholds.py` は標準ライブラリだけに依存し、上限の設定の引き方を引数で受ける。持ち主は M3b（`ndf.domains.relay` の既定の持ち主）で、S1e の個別の列挙には載せない。guard（M3a の hook の経路）と `relay/cli_context.py`（`ndf relay context` の `resolve`・`record`）は検証を通さず直に読む `hooks/tables.policy_value` を、中継のラッパー（`relay/cli.py` の `wrapper_settings`）は `ndf.contracts.limits.value` を渡す。`resolve`・`record` は上限の設定の形を確かめない（形は `ndf check` と CI が確かめる）。`context_records.py`・`context_report.py` は `context_thresholds` の語と型だけを引く。hook の経路から `ndf.contracts` へは依存しない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -238,8 +238,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `wrapper_settings` | `src/ndf/domains/relay/cli.py` | 変更 | 変えない | `context_limit` を `thresholds(environ, limits.value).limit` にする（`environ` は今と同じ `dict(os.environ)`） |
-| `_context_resolve` | `src/ndf/domains/relay/cli_context.py` | 変更 | 変えない | `thresholds(os.environ, limits.value)` を返す。結果は `items=[{"decide_from", "limit", "sources"}]`・`metrics={"decide_from", "limit"}`、`summary` は「判断開始の値 {d} / 運用上限 {l}」。`--root`・`--policy` を引数から消す |
-| `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
+| `_context_resolve` | `src/ndf/domains/relay/cli_context.py` | 変更 | 変えない | `thresholds(os.environ, tables.policy_value)` を返す（上限の設定の形を確かめない。PR 4220 の cross-review r1-1）。結果は `items=[{"decide_from", "limit", "sources"}]`・`metrics={"decide_from", "limit"}`、`summary` は「判断開始の値 {d} / 運用上限 {l}」。`--root`・`--policy` を引数から消す |
+| `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, tables.policy_value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
 | `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」 |
