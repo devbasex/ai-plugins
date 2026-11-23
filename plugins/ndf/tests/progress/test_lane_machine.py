@@ -249,7 +249,12 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
     assert results["B-first"]["waiting"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
     assert results["B-first"]["ok"] is False and events_by_attempt["B-first"] == []
     # 試行ごとの結果と、その試行を終えた直後の一覧。どの試行の後も上限 3 以下
-    assert wrappers_after_attempt == {"B-first": {"o-a", "w-a"}, "A": {"o-a", "w-a"}, "B-again": {"o-a", "w-a", "w-b"}, "C": {"o-a", "w-a", "w-b"}}
+    assert wrappers_after_attempt == {
+        "B-first": {"o-a", "w-a"},
+        "A": {"o-a", "w-a"},
+        "B-again": {"o-a", "w-a", "w-b"},
+        "C": {"o-a", "w-a", "w-b"},
+    }
     assert all(len(names) <= 3 for names in wrappers_after_attempt.values())
     assert results["A"]["ok"] is True and results["B-again"]["ok"] is True
     assert results["C"]["waiting"] == {"reason": machine.RULE, "machine_lanes": 3, "cap": 3, "unreadable": []}
