@@ -333,3 +333,32 @@ def test_stop_wait_after_the_limit_is_passed_by_dispatch_as_limited(tmp_path, mo
         counter.mark_model_wait()
         out = dispatch.run(ctx, [spec], budget.budget_for("claude", "Stop"), dispatch.GuardServices(tmp_path, counter, DEADLINE))
     assert out.limited and out.verdict.kind == "pass" and out.notes["judge"] == "skip:limit" and judge.asked == []
+
+
+# 受け入れ条件 11 の (f)。文言は照らさず、当たった文が変更要求に載るか・載らないかだけを見る
+def test_stop_wait_shows_the_sentence_the_rule_matched(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    text = "作業を終えた。どちらにするか決めていただければ進めます。"
+    got = _check(tmp_path, text)
+    assert got.notes["judge"] == "rule" and "どちらにするか決めていただければ進めます。" in got.reason
+
+
+def test_stop_wait_shows_the_heading_when_the_rule_stops_a_heading_wait(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, HEADING_ASK, runtime="codex")
+    assert got.kind == "pushback" and "どちらの案で進めますか？" in got.reason
+
+
+def test_stop_wait_does_not_quote_the_reply_when_the_model_stopped_it(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind="wait")
+    plain = _check(tmp_path, REPORT)
+    heading = _check(tmp_path, HEADING_ASK)
+    assert plain.kind == heading.kind == "pushback"
+    assert REPORT not in plain.reason and "どちらの案で進めますか" not in heading.reason
+    assert plain.reason == heading.reason == stop_wait.reason()
+
+
+def test_stop_wait_cuts_a_long_matched_sentence():
+    long = "あ" * (stop_wait.MATCHED_CHARS * 2)
+    shown = stop_wait.reason((long,))
+    assert long not in shown and "あ" * (stop_wait.MATCHED_CHARS - 1) + "…" in shown
