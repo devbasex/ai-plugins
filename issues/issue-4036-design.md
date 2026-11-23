@@ -62,7 +62,7 @@ flowchart LR
     S --> RQ["lane_stalled のリクエスト<br/>moved・background を載せる"]
 ```
 
-Stop の hook が、conductor が応答を終えた時点の背景の作業の件数をラッパーの保存先へ書く。生死の判定は、ラッパーの状態ファイルから `session_id` と `cwd` を取って会話の記録をたどり、最後の応答が終わっているかとその時刻を読む。応答が終わっていて、背景の作業が 0 件で、最後の応答から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
+Stop の hook が、conductor が応答を終えた時点の背景の作業の一覧（`id` と `type`）をラッパーの保存先へ書く。生死の判定は、ラッパーの状態ファイルから `session_id` と `cwd` を取って会話の記録をたどり、最後の応答が終わっているかとその時刻を読む。一覧のうちサブエージェントは、その会話の記録が終わっていれば除く。応答が終わっていて、残った背景の作業が 0 件で、最後の応答から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
 
 ## 構成要素
 
@@ -70,7 +70,7 @@ Stop の hook が、conductor が応答を終えた時点の背景の作業の�
 | --- | --- |
 | `activity.json`（新設。ラッパーの保存先） | conductor が応答を終えた時点の、背景の作業の一覧（`id`・`type`）と書いた時刻 |
 | `relay-marker` guard（`domains/hooks/guards/relay_mark.py`。変更） | Stop のたびに `activity.json` を書く |
-| `Probes.activity`（新設。`progress/lane/liveness.py` のインターフェースと `progress/plan/run.py` の実装） | レーンの名前から、最後の応答が終わっているか・その時刻・背景の作業の件数を返す |
+| `Probes.activity`（新設。`progress/lane/liveness.py` のインターフェースと `progress/plan/run.py` の実装） | レーンの名前から、最後の応答が終わっているか・その時刻・まだ走っているとみなす背景の作業の数（終わったサブエージェントを除いた数）を返す |
 | `liveness.judge`（変更） | 順 6 の前に、新しい条件を置いて `idle_conductor` を返す |
 | `contracts/limits.json`（変更） | `parallel-run.idle` の閾値 |
 | `_stall_report`（`progress/plan/run_decide.py:463-468`。変更） | `lane_stalled` のリクエストに `moved` と `background` を載せる |
@@ -247,7 +247,7 @@ sequenceDiagram
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 活動 | conductor が最後に応答を終えた時刻と、その時点の背景の作業の件数の組 | 追加 |
+| 活動 | conductor が最後に応答を終えた時刻と、その時点の背景の作業の一覧の組 | 追加 |
 
 ## テスト設計
 
@@ -269,7 +269,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4036 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/relay/registry.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/tests/progress/test_lane_liveness.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設）、`plugins/ndf/tests/progress/test_plan_run_stall.py`（新設） |
+| #4036 | 実装する | — | `plugins/ndf/contracts/limits.json`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_mark.py`、`plugins/ndf/src/ndf/domains/relay/registry.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/observe.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/tests/progress/test_lane_liveness.py`、`plugins/ndf/tests/domains/hooks/test_relay_mark.py`（新設）、`plugins/ndf/tests/progress/test_plan_run_stall.py`（新設）、`plugins/ndf/tests/domains/relay/test_relay_observe.py` |
 
 ## 未確認のまま残ること
 
