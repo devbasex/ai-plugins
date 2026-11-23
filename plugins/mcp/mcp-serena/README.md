@@ -1,61 +1,31 @@
 # mcp-serena
 
-Serena MCP サーバを提供するプラグインです。シンボル単位の読み書き（定義・参照・シンボル単位の
-置換）と、言語サーバの診断を Claude Code・Codex で使えるようにします。
+Serena MCP サーバ（`serena-agent==2.1.0`）を Claude Code・Codex で使えるようにするプラグインです。
+シンボル単位の読み書き（定義・参照・シンボル単位の置換）を、Serena の REPL から行います。
 
-## 最初に: 言語サーバの設定はプロジェクトごとに行う
+## 使い方
 
-**プラグインを入れただけでは、どのリポジトリでも言語サーバは設定されません。** 言語の設定
-（`.serena/project.yml`）はリポジトリごとに持つため、使うリポジトリごとに 1 度、導入の Skill を
-実行します。利用者（マシン・コンテナ）単位で 1 回打てば済むものではありません。
+Serena 2.1.0 の既定のインタフェースは REPL で、MCP のツールは 2 つだけです。
 
-```text
-/mcp-serena:language-servers
-```
+1. **コードの作業の前に `initial_instructions` を呼ぶ。** 手引きと、`serena_repl` に渡す `session` の ID が返る
+2. **`serena_repl` に Python を渡して操作する**（例 `s.lsp.find_symbol("Foo", depth=1)`）。使い方は `s.info("lsp")` で引く
 
-Skill は次を行います。
-
-1. 追跡しているファイルの拡張子を数え、10 ファイル以上かつ 5% 以上の言語を採る
-2. `.serena/project.yml` の `language_servers` を書き、1 言語ずつ `serena project health-check` で起動を確かめる。失敗した言語は外し、理由を `mcp_serena_excluded` に残す
-3. Claude Code の公式 LSP プラグインと言語サーバの本体の導入をチェックし、欠けを導入のコマンドとともに示す（入れるのは利用者の確認を取ってから）
-
-`project.yml` を追跡すれば、同じリポジトリの他の利用者は打たずに同じ設定を使えます（言語サーバの
-本体は各自に要ります）。設定していないリポジトリでは、セッションの開始時に 1 度だけ未設定を
-知らせ、誘導の hook は何も数えません。
-
-## 役割の分担（Claude Code）
-
-| 目的 | 担うもの |
-| --- | --- |
-| 編集の後の診断 | 公式 LSP プラグイン（`pyright-lsp` など。次の手番に自動で届く） |
-| シンボルの把握・参照・編集 | Serena |
-| Bash の診断 | Serena（bash-language-server + shellcheck。公式の Bash 向け LSP プラグインが無い） |
-
-Codex には公式 LSP プラグインが無いため、診断も Serena の `get_diagnostics_for_file` で取ります。
+詳細は [docs/serena-guide.md](docs/serena-guide.md) にあります。
 
 ## インストール
 
-### Claude Code
-
 ```bash
+# Claude Code
 /plugin install mcp-serena@ai-plugins
-```
 
-### Codex
-
-```bash
+# Codex
 codex plugin add mcp-serena@ai-plugins
 ```
 
-Codex では `--context codex` で起動します（`.codex.mcp.json`）。
+**Codex では、プラグインの hook は信頼するまで動きません。** 対話の Codex で `/hooks` を開き、mcp-serena の hook を信頼してください。
 
-**Codex では、プラグインの hook は信頼するまで動きません**（Codex 0.156 で実測。何も表示されずに走らないだけになる）。対話の Codex で `/hooks` を開き、mcp-serena の hook を信頼してください。起動時に出る「Review hooks」の案内からも信頼できます。
-
-### 前提
-
-- `uv`（`uvx`）。Serena は `uvx --from serena-agent==1.7.0` で起動します
-- Serena 側の言語サーバは Serena が `.serena/language_servers/` へ自分で入れます
-- Claude Code の LSP プラグインと本体は利用者が入れます（Skill がコマンドを示します）
+前提は `uv`（`uvx`）です。Serena と hook はどちらも `uvx --from serena-agent==2.1.0` で起動します。
+言語サーバの設定（`.serena/project.yml`）は Serena がプロジェクトごとに自動で作ります。
 
 ### 更新
 
@@ -69,20 +39,6 @@ codex plugin marketplace upgrade ai-plugins
 codex plugin add mcp-serena@ai-plugins
 ```
 
-## 公式の `serena` プラグインと併用しない
-
-公式マーケットプレイスにも `serena` があります。両方を入れると Serena が 2 つ起動し、同じ
-ツールが 2 組並びます。どちらか一方にしてください。
-
-| 項目 | mcp-serena（このプラグイン） | 公式の `serena` |
-| --- | --- | --- |
-| 版 | `serena-agent==1.7.0` に固定 | 最新を取得 |
-| プロジェクトの有効化 | `--project-from-cwd` で自動 | `activate_project` を呼ぶ |
-| memory・onboarding | 使わない（`no-memories` / `no-onboarding`） | 使う |
-| 言語の設定 | `/mcp-serena:language-servers` が検出して書く | 自動の推定 |
-| 誘導の hook | 設定した言語のファイルだけを数える | 固定の拡張子の一覧で数える |
-| Codex | `--context codex` の定義と hook を持つ | — |
-
 ## 起動の定義
 
 | ランタイム | 定義 | 文脈 |
@@ -90,20 +46,32 @@ codex plugin add mcp-serena@ai-plugins
 | Claude Code | `.mcp.json` | `claude-code` |
 | Codex | `.codex.mcp.json` | `codex` |
 
-どちらも `SERENA_HOME=.serena`（起動したディレクトリからの相対）で動きます。worktree ごとに
-`.serena/language_servers/` を持つため、worktree での初回は言語サーバの取得が走ります。
+どちらも `--project-from-cwd` で起動したディレクトリのプロジェクトを有効にし、`no-memories`・`no-onboarding` で動きます。
 
 ## hook
 
-| イベント | 振る舞い |
-| --- | --- |
-| SessionStart | 検出した言語と設定の食い違い、導入の欠けがあるときだけ知らせる。未設定のリポジトリでは未設定を知らせる |
-| PreToolUse | 設定した言語のファイルの grep・読み込みが続くと 1 度だけ止め、シンボル単位の手順を示す。Claude Code の許可のモードが `acceptEdits` / `auto` のとき、Serena のツールを自動で許可する |
+Serena 公式の `serena-hooks` だけを、[公式の手引き](https://oraios.github.io/serena/02-usage/030_clients.html)どおりに置きます。
+
+| ランタイム | イベント | コマンド |
+| --- | --- | --- |
+| Claude Code | SessionStart | `activate`（プロジェクトの有効化と手引きを読むよう促す） |
+| Claude Code | PreToolUse（全ツール） | `remind`（grep・読み込みが続くと 1 度止めて Serena を促す。Serena を呼ぶと数が戻る） |
+| Claude Code | SessionEnd | `cleanup`（セッションの記録を消す） |
+| Codex | SessionStart（`startup\|resume`） | `activate` |
+| Codex | PreToolUse（`Bash`） | `remind` |
+
+**Serena の呼び出しを自動で許可する hook（公式の `auto-approve`）は置きません。** REPL からは
+`s.shell.execute_shell_command` でシェルのコマンドを実行できるため、自動で許可すると Claude Code の
+Bash の許可と NDF の Bash の guard を通らずにコマンドが走ります。
+
+## 公式の `serena` プラグインと併用しない
+
+公式マーケットプレイスにも `serena` があります。両方を入れると Serena が 2 つ起動するため、どちらか一方にしてください。
 
 ## 注意事項
 
+- `serena_repl` は Serena の公式で BETA です
 - Serena の memory は使いません。知識は `docs/` に、手順は `skills/` に置いてください
-- 使い方の詳細は `docs/serena-guide.md` を参照してください
 
 ## 更新情報
 

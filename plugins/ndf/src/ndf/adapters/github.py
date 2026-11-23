@@ -6,7 +6,8 @@
   githubkit の再試行が回復の時刻まで待ってから打ち直し、待ちの残りを越えるなら `retry_after` で呼び手へ返す（不足 g）
 - 件数と一覧は `totalCount` とページ送りで読み切り、既定の件数で黙って切らない（#3393）
 - 本文には書き手と `author_association` を添え、write 以上の権限の無い書き手の本文を信用しない区分で返す（#3364）
-- 失敗は `GitHubError`（HTTP の状態・上限の回復までの秒・上限に当たったスロット）で返し、黙って空を返さない
+- 失敗は `GitHubError`（HTTP の状態・上限の回復までの秒・上限に当たったスロット）で返し、黙って空を返さない。書き込みはマシン全体の
+  順番（`write_gate`）を取り、二次レート制限の見分けと待ちの終わりの共有は `github_limits` が持つ（#4016）
 - 認証は環境変数 `GH_TOKEN`・`GITHUB_TOKEN` か `gh auth token` の値を渡す（値はログにも結果にも出さない）
 
 Issue・コメント・PR の本文を書く操作は、公開範囲を読むエントリポイント（`ndf.adapters.publish.Publisher`）を通す（#3391）。
@@ -18,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -27,10 +29,10 @@ from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub as Client
-from githubkit.exception import GitHubException, GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed, SecondaryRateLimitExceeded
-from githubkit.retry import RETRY_DEFAULT, RetryOption
+from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLimitExceeded, RequestError, RequestFailed
 
-from ndf.adapters import cli_floor, git
+from ndf.adapters import cli_floor, git, github_limits, write_gate
+from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
 from ndf.contracts import limits
 
 T = TypeVar("T")
@@ -48,8 +50,6 @@ PER_PAGE = 100
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
-# 上限に当たったスロット（`GitHubError.quota`）
-REST, GRAPHQL = "rest", "graphql"
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: HEAD が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
 # PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、HEAD を添えて打つ。#3506 の決定 5）
@@ -125,7 +125,12 @@ _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 class GitHubError(Exception):
     """GitHub の要求が失敗した。`status` は HTTP の状態（届かなければ 0）、`retry_after` は上限の回復までの秒、
     `quota` は上限に当たったスロット（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかったマーカーで、
-    状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。"""
+    状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。
+    `secondary` は二次レート制限か、`hinted` は GitHub が待ちの秒を示したか、`reasons` は拒否の理由の全文（切り詰めない。`of` が書く）。
+    `recorded` は同じ応答について待ちの終わりを知らせ済みか（`_translating` が知らせ直さない）。"""
+
+    secondary = hinted = recorded = False
+    reasons: tuple[str, ...] = ()
 
     def __init__(
         self, detail: str, status: int = 0, retry_after: Optional[float] = None, quota: Optional[str] = None, unreached: bool = False
@@ -135,6 +140,13 @@ class GitHubError(Exception):
         self.retry_after = retry_after
         self.quota = quota
         self.unreached = unreached
+
+    @classmethod
+    def of(cls, failure: github_limits.Failure) -> GitHubError:
+        """`github_limits` の写した失敗から作る。"""
+        made = cls(failure.detail, failure.status, failure.retry_after, failure.quota, failure.unreached)
+        made.secondary, made.hinted, made.reasons, made.recorded = failure.secondary, failure.hinted, failure.reasons, failure.recorded
+        return made
 
 
 def token() -> str:
@@ -152,42 +164,25 @@ def token() -> str:
     return done.stdout.strip()
 
 
-class RetryWithin:
-    """githubkit の再試行の判断（既定の判断に、上限の待ちの残りを足す）。
-
-    githubkit の既定は上限（rate limit）の解除の時刻まで同期で眠るため、待ちの予算を持つ呼び手（CI の監視）が
-    数十分戻らない。解除が `remaining`（呼んだ時点で待ちに使える残りの秒）を越える上限は再試行せず、
-    `GitHubError` の `retry_after` で呼び手へ返す。残りは呼び手が自分の予算の数え方で返す（`Watch.remaining` は
-    ランナーの割り当ての待ちを予算に数えない）。サーバーの誤り（5xx）の再試行は既定のまま。
-    """
-
-    def __init__(self, remaining: Callable[[], float]) -> None:
-        self.remaining = remaining
-
-    def __call__(self, exc: GitHubException, retry_count: int) -> RetryOption:
-        option = RETRY_DEFAULT(exc, retry_count)
-        if option.do_retry and isinstance(exc, RateLimitExceeded):
-            if exc.retry_after.total_seconds() > self.remaining():
-                return RetryOption(False)
-        return option
-
-
 def client(
-    auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, remaining: Optional[Callable[[], float]] = None
+    auth: Optional[str] = None,
+    transport: Optional[httpx.BaseTransport] = None,
+    remaining: Optional[Callable[[], float]] = None,
+    gate: Optional[write_gate.WriteGate] = None,
 ) -> Client:
     """githubkit のクライアント（ETag の読み直しと再試行つき）。`transport` はテストが差し替える。
 
     `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
     省くと上限（rate limit）は待たずに `GitHubError` で返す（残りを 0 秒とみなす）。githubkit の既定は解除の時刻まで
     （一次上限なら最大 1 時間）眠るため、そのままではスロットの読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
+    書き込みは `gate`（省けば `machine_gate()`。`transport` を渡すテストでは取らない）の順番を `remaining` の中で取り（決定 10）、
+    待ちの終わりは応答のフックで記録する。
     """
-    budget = remaining if remaining is not None else _no_wait
-    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=RetryWithin(budget), transport=transport)
-
-
-def _no_wait() -> float:
-    """上限の待ちに使える残りの秒（0。上限を再試行しない）。"""
-    return 0.0
+    if gate is None and transport is None:
+        gate = write_gate.machine_gate()
+    retry = RetryWithin(remaining if remaining is not None else github_limits.no_wait, gate)
+    options = github_limits.client_options(gate, remaining)
+    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, **options)
 
 
 def text_of(value: Any) -> str:
@@ -465,23 +460,9 @@ def _only_not_found(exc: GraphQLFailed) -> bool:
     return bool(errors) and all(e.type == "NOT_FOUND" for e in errors)
 
 
-def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool = False) -> GitHubError:
-    """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。
-
-    上限（`RateLimitExceeded`。`RequestFailed` の下位なので先に見る）は回復までの秒を、HTTP の拒否は状態を添える。
-    `detail_body` なら拒否の文へ応答の本文の先頭 300 字を足す。
-    """
-    if isinstance(exc, RateLimitExceeded):
-        quota = GRAPHQL if label == GRAPHQL else REST
-        kind = "・secondary rate limit" if isinstance(exc, SecondaryRateLimitExceeded) else ""  # 二次の上限は待てば戻る（#3941）
-        return GitHubError(
-            f"GitHub の上限（{quota} のスロット{kind}）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
-        )
-    if isinstance(exc, RequestFailed):
-        status = exc.response.status_code
-        body = f": {exc.response.text[:300]}" if detail_body else ""
-        return GitHubError(f"GitHub が断った（{status}）: {label}{body}", status)
-    return GitHubError(f"GitHub へ届かない: {label}: {exc}", unreached=True)
+def _translated(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
+    """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。写し方は `github_limits.failure_of`。"""
+    return GitHubError.of(github_limits.failure_of(exc, label, detail_body, time.time()))
 
 
 def _page_cap(name: str) -> int:
@@ -504,12 +485,17 @@ class _Counted(NamedTuple):
 
 
 @contextmanager
-def _translating(label: str, detail_body: bool = False) -> Iterator[None]:
-    """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。"""
+def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
+    """失敗（順番の待ちの `write_gate.Busy` も）を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
     try:
         yield
-    except (RateLimitExceeded, RequestFailed, RequestError) as exc:
-        raise _translated(exc, label, detail_body) from None
+    except (RateLimitExceeded, RequestFailed, RequestError, write_gate.Busy) as exc:
+        error = _translated(exc, label, detail_body)
+        github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
+        raise error from None
+    except GitHubError as error:
+        github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
+        raise
 
 
 @dataclass(frozen=True)
@@ -520,22 +506,36 @@ class GitHub:
     api: Client
     # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
     _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
+    # 二次レート制限の待ちの終わりを知らせる先。省けば `api` の throttler の `WriteGate`（A5）
+    gate: Optional[write_gate.WriteGate] = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.gate is None:
+            object.__setattr__(self, "gate", write_gate.gate_of(self.api.config.throttler))
 
     def rest(self, method: str, path: str, payload: Any = None, params: Optional[dict] = None) -> Any:
         """REST の 1 回の要求の本文（JSON なら値、ほかは文字列、空なら None）。失敗は `GitHubError`。"""
-        with _translating(f"{method} {path}", detail_body=True):
+        with _translating(f"{method} {path}", detail_body=True, gate=self.gate):
             resp = self.api.request(method, path, json=payload, params=params)
         return _response_body(resp)
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。"""
-        with _translating(GRAPHQL):
+        """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。
+        HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（`block` は応答のフックか `_translating`。A6）。"""
+        with _translating(GRAPHQL, gate=self.gate):
+            resp = self.api.graphql._request(query, variables)  # 誤りの写しへ応答のヘッダー（`Retry-After`）を渡す
             try:
-                return self.api.graphql(query, variables)
+                return self.api.graphql.parse_graphql_response(resp)
             except GraphQLFailed as exc:
                 if _only_not_found(exc) and exc.response.data is not None:
                     return exc.response.data
-                raise GitHubError(f"GraphQL の誤り: {'; '.join(e.message for e in exc.response.errors)}") from None
+                messages = "; ".join(e.message for e in exc.response.errors)
+                raise GitHubError.of(github_limits.graphql_failure(messages, resp.raw_response)) from None
+            except PrimaryRateLimitExceeded as exc:
+                limited = github_limits.graphql_limited(exc)
+                if limited is None:
+                    raise
+                raise GitHubError.of(limited) from None
 
     def _owner_name(self) -> dict[str, str]:
         owner, name = self.repo.split("/", 1)
@@ -573,13 +573,13 @@ class GitHub:
     def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
-        GraphQL のスロットが上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g）。
+        GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
         """
         wanted = sorted({int(n) for n in numbers})
         try:
             raw = self.nodes(wanted, "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
-            if exc.quota != GRAPHQL or len(wanted) > int(limits.value("github.rest-fallback", "count")):
+            if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
                 raise
             # 1 件ずつの REST の読み取りは github.rest-fallback 件まで（上で確かめた）
             return {n: self._rest_pull_or_none(n) for n in wanted}
@@ -606,11 +606,11 @@ class GitHub:
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
     def pull(self, number: int) -> Pull:
-        """PR を REST で読む。REST のスロットが上限なら GraphQL のスロットで読み替える（不足 g）。"""
+        """PR を REST で読む。REST のスロットが一次の上限なら GraphQL のスロットで読み替える（不足 g）。二次レート制限は読み替えない。"""
         try:
             return self._rest_pull(number)
         except GitHubError as exc:
-            if exc.quota != REST:
+            if exc.quota != REST or exc.secondary:
                 raise
             # 読み替えた先のスロットも上限なら、REST へ戻さずにその上限で止まる
             raw = self.nodes([number], "pullRequest", PULL_FIELDS)[int(number)]
@@ -863,7 +863,7 @@ class GitHub:
         `rest` は JSON でない本文を文字列にして ZIP を壊すため、応答の `content` を直に返す。
         """
         path = f"/repos/{self.repo}/actions/artifacts/{int(artifact_id)}/zip"
-        with _translating(f"GET {path}"):
+        with _translating(f"GET {path}", gate=self.gate):
             resp = self.api.request("GET", path)
         return bytes(resp.content)
 

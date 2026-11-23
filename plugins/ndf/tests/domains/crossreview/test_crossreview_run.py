@@ -393,6 +393,12 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
     }
 
 
+def _findings(state: dict) -> list[dict]:
+    """ジャーナルの行から発生の値（乱数。#4016）を外す。"""
+    assert all(len(f["occurrence"]) == 12 for f in state["findings"])
+    return [{k: v for k, v in f.items() if k != "occurrence"} for f in state["findings"]]
+
+
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
     SHA）と相手役の並び（reviewers）と重点（focus）を外す。"""
@@ -425,7 +431,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     ]
     assert "warnings" not in got
     state = _state(fake.state_dir)
-    assert state["findings"] == [
+    assert _findings(state) == [
         _entry("r1-1", "codex", "セクション B の根拠が無い", fin.FIXED, 1),
         _entry("r1-2", "kiro", "語の定義", fin.FIXED, 1),
     ]
@@ -466,7 +472,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["summary"]) == (0, "2 ラウンドで converged。指摘 2 件（直した 1・見送った 1・未解決 0）")
     assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
-    assert _state(fake.state_dir)["findings"] == [
+    assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
         _entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"),
     ]
@@ -491,7 +497,7 @@ def test_run_reopens_a_fixed_finding_that_returns(wt: Path, tmp_path: Path, caps
         "round 2 claude",
     ]
     state = _state(fake.state_dir)
-    assert state["findings"] == [_entry("r1-1", "codex", "一つ目", fin.FIXED, 2)]
+    assert _findings(state) == [_entry("r1-1", "codex", "一つ目", fin.FIXED, 2)]
     assert [r["verdict"] for r in state["rounds"]] == [drive.CHANGES_REQUIRED, drive.CHANGES_REQUIRED]
     assert [p for a, name, p in fake.prompts if a == "claude"][1].count("- r1-1: 一つ目") == 1
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.MAX_ROUNDS
@@ -512,7 +518,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["warnings"] == ["round 1 の修正担当が結果を書かなかった（failed: 落ちた）"]
     assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {drive.UNSAVED}）"}
     state = _state(fake.state_dir)
-    assert state["findings"] == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
+    assert _findings(state) == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
     assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
     again = Fake(fake.state_dir, {"codex": [["直す"], []], "kiro": [[], []]})

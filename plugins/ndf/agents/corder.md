@@ -59,7 +59,7 @@ timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config mode
 - CLI の有無と認証は先に `command -v codex` と `codex login status` で確かめる
 
 ### Serena MCP
-- `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集
+- `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集。最初に `initial_instructions` を呼び、操作は `serena_repl` に Python を渡す（使い方は `s.info("lsp")`）
 - **memory系は使用禁止**（NDFポリシー）
 
 ### Context7 MCP
