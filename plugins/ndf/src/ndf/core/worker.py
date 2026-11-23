@@ -161,8 +161,8 @@ RECORD_PROMPT = (
 )
 
 
-# 報告の見出し。`collect` は最後の見出しから末尾までを返す
-REPORT_HEADING = re.compile(r"^## 作業の報告", re.MULTILINE)
+# 報告の見出し。`collect` は行全体がこの見出しの最後の行から末尾までを返す（`## 作業の報告の補足` は選ばない）
+REPORT_HEADING = re.compile(r"^## 作業の報告[ \t]*\r?$", re.MULTILINE)
 
 
 class WorkerError(Exception):

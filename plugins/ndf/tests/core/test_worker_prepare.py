@@ -241,3 +241,11 @@ def test_prepare_does_not_reset_another_directory_when_the_parent_is_swapped(tmp
     code, out = _run(capsys, "prepare", "--dir", str(shared / "d"), "--name", "n")
     assert _invalid(code, out) and "paths" not in out.get("metrics", {})
     assert (other / "d" / "n.result.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_collect_skips_a_heading_that_only_starts_like_the_report_heading(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    body = "## 作業の報告\n- 作業: 調査\n- 結果: 完了\n## 作業の報告の補足\n補足\n"
+    _append(capsys, monkeypatch, report, body, "--done")
+    code, out = _run(capsys, "collect", "--report", str(report))
+    assert code == 0 and out["metrics"]["report"] == body
