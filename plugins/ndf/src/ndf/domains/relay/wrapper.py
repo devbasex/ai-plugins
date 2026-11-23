@@ -965,11 +965,21 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
                 "section": sec.number if sec else None,
                 "session_id": sec.session_id if sec else None,
                 "account": sec.account if sec else None,
-                # 会話の記録と背景のシェルの出力の場所は、ラッパーの環境で組んだもの（一覧を呼ぶ側の環境に依らない。#4036）
-                "transcript": str(observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)) if sec else None,
-                "shell_outputs": str(observe.shell_output_dir(self.s.environ, self.s.cwd, sec.session_id)) if sec else None,
+                # 会話の記録と背景のシェルの出力の場所は、子に渡した環境で組んだもの（一覧を呼ぶ側の環境に依らない。#4036）
+                **(self._observed_paths(sec) if sec else {"transcript": None, "shell_outputs": None}),
             },
         )
+
+    def _observed_paths(self, sec: Section) -> dict[str, str]:
+        """子の会話の記録と背景のシェルの出力の場所（`wrapper.json` の `transcript`・`shell_outputs`）。
+
+        子に渡した環境（`sec.target.env`。従量接続・登録済みキーでは共有の `CLAUDE_CONFIG_DIR` に切り替わる）で組み、
+        相対のパスは子の作業ディレクトリを基準に絶対化する（一覧のコマンドは別の作業ディレクトリから読む）。
+        """
+        env = sec.target.env if sec.target is not None else self.s.environ
+        transcript = observe.transcript_path(env, self.s.cwd, sec.session_id)
+        shells = observe.shell_output_dir(env, self.s.cwd, sec.session_id)
+        return {"transcript": str(self.s.cwd / transcript), "shell_outputs": str(self.s.cwd / shells)}
 
     def _log(self, row: Mapping[str, Any]) -> None:
         registry.append_log(self.dir, {"section": self.section.number if self.section else None, **dict(row)})

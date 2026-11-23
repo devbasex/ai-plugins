@@ -27,7 +27,7 @@ plugins/ndf/
 
 依存の向き: 書く側は `hooks/guards/relay_mark.py` → `domains/relay/signals.py` だけである。保存先は環境変数 `NDF_RELAY_DIR` から得るので `registry.py` を読まない（`registry.py` は `facts` 経由で `jsonschema` を読み込み、hook の許可 import の表にも無い）。読む側は `progress/plan/run.py` → `domains/relay/registry.py`（保存先の解決に `wrapper_dir`）・`domains/relay/signals.py`（活動の読み取りに `read_activity`）・`domains/relay/observe.py` である。そこから `progress/lane/liveness.py`（判定）→ `progress/plan/run_decide.py`（知らせ）へ続き、いずれも一方向である。`liveness.py` は `relay` を読まず、材料は今までどおり `Probes` の呼び出しが集める。`registry.py` は `hooks` を読まない。循環は無い。要素どうしの順序は設計文書の「処理の流れ」にある。
 
-**実装で置き場を変えたこと（4036-u2-judge）:** 活動を読む処理（下の「活動を読む」の手順 1〜6）は、`progress/plan/run.py` ではなく `domains/relay/observe.py` の `conductor_activity` に置いた。`domains/relay/hub.py` の `listing` が動いている行ごとにこれを呼び、`ndf relay ls` の行に `turn_done`・`moved`・`background` を載せる（結果のスキーマは `relay.result.schema.json`）。`progress/plan/run.py` の `lane_activity` は、`launch.wrappers` が読んだ一覧の行の 3 つの値を `liveness.Activity` へ写すだけである。理由は 2 つある。層の規則（`checks/rules.json` の `layers`。`contracts → adapters → core → progress → domains`）では `progress` から `domains` を読めない。また子の表（`checks/children.json`）で P3（`ndf.progress.plan`）の先に要るものに M3b（`ndf.domains.relay`）が無い（規則 child-deps の IG1）。`progress` は今もラッパーの一覧を `ndf relay ls` の出力で読んでいるので、同じ経路に載せた。活動は `ndf relay ls --activity`（`hub.listing(ctx, activity=True)`）のときだけ読む。`--activity` を付けるのは生死の判定が使う `run.probes` の一覧（`launch.wrappers(activity=True)`）だけで、起動の許可（`machine.admitted`）など稼働の印しか使わない一覧は活動を読まない。/proc の親の一覧（`process_parents`）は、シェルの生死を確かめる行（応答が終わり、今の応答の Stop の記録がある行）に届いたときに初めて読み、その 1 回の一覧の中で全行が共有する（`functools.cache`）。会話の記録と背景のシェルの出力の置き場は、ラッパーが自分の環境で組んで `wrapper.json` に書いた値（`transcript`・`shell_outputs`）を使い、一覧を呼ぶ側の環境（`CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_TMPDIR`）に依らない。判定の条件・閾値・知らせの中身は変えていない。
+**実装で置き場を変えたこと（4036-u2-judge）:** 活動を読む処理（下の「活動を読む」の手順 1〜6）は、`progress/plan/run.py` ではなく `domains/relay/observe.py` の `conductor_activity` に置いた。`domains/relay/hub.py` の `listing` が動いている行ごとにこれを呼び、`ndf relay ls` の行に `turn_done`・`moved`・`background` を載せる（結果のスキーマは `relay.result.schema.json`）。`progress/plan/run.py` の `lane_activity` は、`launch.wrappers` が読んだ一覧の行の 3 つの値を `liveness.Activity` へ写すだけである。理由は 2 つある。層の規則（`checks/rules.json` の `layers`。`contracts → adapters → core → progress → domains`）では `progress` から `domains` を読めない。また子の表（`checks/children.json`）で P3（`ndf.progress.plan`）の先に要るものに M3b（`ndf.domains.relay`）が無い（規則 child-deps の IG1）。`progress` は今もラッパーの一覧を `ndf relay ls` の出力で読んでいるので、同じ経路に載せた。活動は `ndf relay ls --activity`（`hub.listing(ctx, activity=True)`）のときだけ読む。`--activity` を付けるのは生死の判定が使う `run.probes` の一覧（`launch.wrappers(activity=True)`）だけで、起動の許可（`machine.admitted`）など稼働の印しか使わない一覧は活動を読まない。/proc の親の一覧（`process_parents`）は、シェルの生死を確かめる行（応答が終わり、今の応答の Stop の記録がある行）に届いたときに初めて読み、その 1 回の一覧の中で全行が共有する（`functools.cache`）。会話の記録と背景のシェルの出力の置き場は、ラッパーが子に渡した環境（起動先の `Target.env`。従量接続・登録済みキーでは共有の `CLAUDE_CONFIG_DIR`）で組み、相対のパスは子の作業ディレクトリを基準に絶対化して `wrapper.json` に書いた値（`transcript`・`shell_outputs`）を使い、一覧を呼ぶ側の環境（`CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_TMPDIR`）に依らない。判定の条件・閾値・知らせの中身は変えていない。
 
 設計文書の触るファイルのうち `plugins/ndf/src/ndf/progress/plan/cli.py` は、変える行が無い。活動を読む項目を `run.probes` に足すだけで `ndf lanes status` にも当たるためで、`cli.py:103` が `run.probes(where.repo, a.plan)` を渡す今の形のままにする。この経路の確かめは最後の「判定の値が増えることの当たり先」にある。
 
@@ -230,7 +230,7 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `lane_activity` | 行がある・`session_id` と `cwd` がある・会話の記録を読める・活動の記録がある | `Activity(turn_done, moved, background)`。`background` は次の 3 行で数える |
+| `lane_activity` | 行がある・`session_id` と `transcript`・`shell_outputs` がある・会話の記録を読める・活動の記録がある | `Activity(turn_done, moved, background)`。`background` は次の 3 行で数える |
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録の最後の応答が終わっている | その要素を数えない |
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録を読めない・応答の途中 | その要素を数える |
 | `lane_activity` | シェル・`live_shells` が数を返す | 一覧によらずその数を数える。一覧のシェルより少なければ、終わったシェルの出力のファイルの更新時刻を `moved` に重ねる |
@@ -241,11 +241,11 @@ plugins/ndf/
 
 手順は次の順である。
 
-1. `row` が `None`、または `session_id`・`cwd` が無ければ `None` を返す
-2. `observe.transcript_path(os.environ, Path(cwd), session_id)` を `observe.turn_done` で読む。`None` なら `None` を返す
+1. `row` が `None`、または `session_id`・`transcript`・`shell_outputs`（ラッパーが `wrapper.json` に書いた絶対パス）が文字列でなければ `None` を返す
+2. `Path(transcript)` を `observe.turn_done` で読む（一覧の側の `os.environ`・`cwd` からパスを組まない）。`None` なら `None` を返す
 3. `registry.wrapper_dir` でラッパーの保存先を求め、`signals.read_activity` で活動の記録を読む。無い・`session_id` が行と違う・`at` が手順 2 の時刻より前・`tasks` が `None` なら `Activity(turn_done, moved, None)` を返す
 4. `tasks` の要素ごとに、`type` が `subagent` なら手順 2 のパスと要素の `id` から `subagent_transcript_path` でパスを組み、`observe.turn_done` が `(True, t)` を返す要素だけを除いて `t` を集める
-5. 行の `pid`（`row.get("pid")`。`row["pid"]` で引かない）が整数なら `live_shells(pid, parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `shell_output_path` の更新時刻を集める（1 つも読めなければ、終わりを最初に確かめた時刻を集める。初めてなら `now` を `shells-ended.json` に残して集める）。`pid` が無い・整数でないとき（`live_shells` を呼ばない）と `live_shells` が `None` を返したときは、一覧の `shell` の数によらず（空でも）シェルの生死を確かめられない印を立てて手順 6 へ進む（ここで return しない）
+5. 行の `pid`（`row.get("pid")`。`row["pid"]` で引かない）が整数なら `live_shells(pid, parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `observe.shell_output_in(Path(shell_outputs), id)` の更新時刻を集める（1 つも読めなければ、終わりを最初に確かめた時刻を集める。初めてなら `now` を `shells-ended.json` に残して集める）。`pid` が無い・整数でないとき（`live_shells` を呼ばない）と `live_shells` が `None` を返したときは、一覧の `shell` の数によらず（空でも）シェルの生死を確かめられない印を立てて手順 6 へ進む（ここで return しない）
 6. 手順 2 の時刻と手順 4・5 で集めた時刻の最大を `moved` にする。手順 5 で確かめられない印が立っていれば `Activity(turn_done, moved, None)` を、そうでなければ残りの数の和を `background` にして返す
 
 読むファイルはレーンごとに 2 つと、`type` が `subagent` の要素の数と、`/proc` の conductor の子の数（`cmdline`）と、終わったシェルの出力のファイルの数である。繰り返しはレーンの数（並列の上限は `relay.max-named` の 6）と各レーンの `tasks` の要素の数で終わる。会話の記録は末尾の決まった大きさだけを読むので、記録が伸びても読む量は増えない。`/proc/<pid>/stat` は見えているプロセスの数だけ、シェルの生死を確かめる行がある読み直しで 1 度だけ読む（レーンの数を掛けない）。活動を求めない `ndf relay ls`（`--activity` なし）はどれも読まない。

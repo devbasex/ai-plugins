@@ -353,7 +353,7 @@ class _Turn(NamedTuple):
 def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> dict[str, Any]:
     """ラッパーの状態の値（`session_id`・`transcript`・`shell_outputs`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
 
-    会話の記録と出力の保存先はラッパーが自分の環境で組んで状態に書いた値を使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
+    会話の記録と出力の保存先はラッパーが子に渡した環境で組んで状態に書いた絶対パスを使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
     返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。
     UNIX 時刻）・`background`（終わった背景の作業を除いた数。確かめられなければ None）。conductor の会話の記録を
     読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めない背景の作業は走っているとみなす。
