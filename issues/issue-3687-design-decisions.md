@@ -51,14 +51,11 @@
 ### 決定 5: 依存を取れない場合も結果 JSON を返すため、`exec` の前に同期を 1 回挟む
 
 - **質問**: uv はあるが依存を取れないときに、結果 JSON と `deps_missing`（69）をどう返すか
-- **選んだ案**: `plugins/ndf/bin/ndf` が `exec uv run` の前に `uv sync --frozen --no-dev --inexact` を 1 回打つ（`--inexact` で今の `uv run` と同じに追加のパッケージを消さない）。失敗したら既にある `stop_deps_missing` を通す。成功したら 同期の後は環境の Python を直に `exec` する（`VIRTUAL_ENV` と PATH の先頭の環境の `bin` をランチャーが入れる。`uv run` を挟むと uv の起動が 1 起動に 2 回になる）。ただし `UV_ENV_FILE` で環境ファイルを指し、`UV_NO_ENV_FILE` で止めていないときだけは、読み込みを uv に任せて `exec uv run --no-sync` で渡す（環境ファイルの書式と上書きの順を自前で作り直さない）。呼び出し元が `UV_NO_SYNC` を真にしていれば、環境を書き換える同期の代わりに `uv sync --frozen --no-dev --check` を打つ（書き換えず、ネットワークに出ない）。0 以外なら同じく `stop_deps_missing` を通す（Python だけが残った環境で依存の import に落ちない）。確かめには `--inexact --offline --no-python-downloads` を付け、追加のパッケージを食い違いに数えず、ネットワークに出ず Python も取って入れない
+- **選んだ案**: `plugins/ndf/bin/ndf` が `exec uv run` の前に `uv sync --frozen --no-dev` を 1 回打つ。失敗したら既にある `stop_deps_missing` を通す。成功したら `exec uv run --no-sync` で渡す（同期済みの同じ環境を使い、`exec` の後に uv が同期し直さない）
 - 採らなかった案: `exec` をやめて `uv run` の終了コードを見る（シグナルの伝わり方が変わり、Ctrl-C と `SIGTERM` が中の処理へ届かなくなる）
 - 採らなかった案: venv が無いときだけ同期する（venv があっても lock と食い違えば `uv run --frozen` が取りに行き、同じ失敗が `exec` の後に起きる）
 - 採らなかった案: 同期の後も `uv run --frozen` のまま渡す（`uv run` が環境を同期し直すため同期の経路を 1 起動に 2 回通り、後続の処理で依存の用意に失敗すると結果 JSON が出ない）
-- 採らなかった案: 同期の後に `uv run --no-sync` で渡す（同期し直さないが、uv の起動が 1 起動に 2 回になる）
-- 採らなかった案: `UV_ENV_FILE` を start.py が Python で読み、その経路も uv を 1 回にする（uv は dotenvy で読み、無いファイルを誤りにし、読めない行を警告して飛ばし、後のファイルの値を優先して既にある環境変数は上書きしない。`python-dotenv` で読み直すと書式と誤りの扱いが食い違い、認証情報が渡らない形が起きうる。uv の起動が 2 回になるのは `UV_ENV_FILE` を指す起動だけ）
-- 採らなかった案: `UV_NO_SYNC` のときは環境の Python があれば使う（初回の同期が依存を入れる前に落ちると Python だけが残り、start.py の RECORD の検査も入っていない依存を見ないため、依存の import で落ちる）
-- **代償**: uv の起動は今までどおり 1 起動に 1 回で、`uv run`（1 回 32 ミリ秒）が同期（同期済みなら 1 回 15 ミリ秒。2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒）に替わる。`UV_ENV_FILE` で環境ファイルを読む起動だけは同期と `uv run` の 2 回になる
+- **代償**: 起動のたびに同期が 1 回増える。同期済みなら 1 回 15 ミリ秒である（2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒）。`uv run` 自体の 1 回 32 ミリ秒に対して 5 割弱の上乗せになる
 - 根拠: Value 1（MVV バージョン 1）
 
 ### 決定 6: 保存先の表を増やさないよう、実験版の行を既にある保存先の表へ足す

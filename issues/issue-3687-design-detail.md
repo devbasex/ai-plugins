@@ -8,7 +8,7 @@
 
 ```text
 plugins/ndf/
-├── bin/ndf                                   （変更: exec の前に uv sync を 1 回、exec は環境の Python を直に）
+├── bin/ndf                                   （変更: exec の前に uv sync を 1 回、exec は uv run --no-sync）
 ├── contracts/
 │   ├── limits/                              * （limits.json を 223 項目へ分割 + _meta.json）
 │   ├── causes/                              * （causes.json を 35 項目へ分割 + _meta.json）
@@ -75,7 +75,7 @@ plugins/ndf/
 | `src/ndf/domains/hooks/tables.py` | 変更 | 分割した表を標準ライブラリで読む | `json`・`pathlib` | モジュール | `load`（変更）・`load_split`（新設）・`policies`（変更）・`policy_value`（変更） |
 | `src/ndf/domains/hooks/budget.py` | 変更 | hook の起動ごとの予算の引き方を 1 項目の読みへ替える | `tables` | モジュール | `policy_name`・`budget_for`（変更。`limits` を渡さないときの中身） |
 | `src/ndf/domains/hooks/boot.py` | 変更 | システム python の下限の読み先を替える | `tables` | モジュール | （既存の下限の判定の行だけ） |
-| `bin/ndf` | 変更 | 依存を同期してから環境の Python へ渡す | — | シェルスクリプト | `truthy`（新設。uv と同じに真の値を読む）。`stop_deps_missing` の呼び出しを 2 か所足し、`exec` の先を替える |
+| `bin/ndf` | 変更 | 依存を同期してから uv へ渡す | — | シェルスクリプト | （`stop_deps_missing` の呼び出しを 1 か所足し、`exec` の `--frozen` を `--no-sync` へ替える） |
 
 ## 分割した表の読み手
 
@@ -440,17 +440,15 @@ plugins/ndf/
 
 ### 関数の仕様
 
-`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）と、新設の `truthy`（`UV_NO_SYNC`・`UV_NO_ENV_FILE` を uv と同じに 1・true・yes・y・on・t で、大文字小文字を問わず真と読む。外部コマンドを起動せずシェルの `case` で比べる）を使う。uv を入れた直後の起動も、既にある uv を使う起動と同じ `UV_NO_SYNC` の判定を通る。
+`plugins/ndf/bin/ndf` はシェルスクリプトで、関数は既にある `stop_deps_missing`（48-58 行）だけを使う。足すのは 98 行の `exec` の前の 3 行である。
 
 | 箇所 | 種類 | 変える中身 |
 | --- | --- | --- |
-| `bin/ndf` の 98 行の直前 | 変更 | `"$uv_bin" sync --frozen --no-dev --inexact --quiet --project "$root"` を打ち（`--inexact`: 今の `uv run` と同じに、lock に無い追加のパッケージを消さない）、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <uv の error: の行。無ければ最終行>"` を呼ぶ |
-| 同じ箇所（`UV_NO_SYNC` が真のとき） | 変更 | 上の同期の代わりに `"$uv_bin" sync --frozen --no-dev --inexact --check --offline --no-python-downloads --quiet --project "$root"` を打ち（ネットワークに出ず、合う Python が無くても取って入れない。追加のパッケージは食い違いに数えない）、0 以外（環境が無い・lock どおりでない）なら `stop_deps_missing` を呼ぶ。理由に `UV_NO_SYNC` を外す直し方を載せる |
-| `bin/ndf` の 98 行 | 変更 | `exec "$uv_bin" run --frozen ...` をやめ、`VIRTUAL_ENV` を `UV_PROJECT_ENVIRONMENT` に、PATH の先頭へ `$UV_PROJECT_ENVIRONMENT/bin` を入れてから `exec "$UV_PROJECT_ENVIRONMENT/bin/python" -P "$root/bin/start.py"` を呼ぶ（呼び出し元の値は既にある `NDF_CALLER_<名前>` の写しから start.py が戻す） |
-| 同じ箇所（`UV_ENV_FILE` があり `UV_NO_ENV_FILE` が真でないとき） | 変更 | 環境ファイルの読み込みを uv に任せ、`exec "$uv_bin" run --no-sync --no-dev --quiet --project "$root" python -P "$root/bin/start.py"` で渡す |
+| `bin/ndf` の 98 行の直前 | 変更 | `"$uv_bin" sync --frozen --no-dev --quiet --project "$root"` を打ち、0 以外なら `stop_deps_missing "依存を用意できない（ネットワークを確かめる）: <ログの最終行>"` を呼ぶ |
+| `bin/ndf` の 98 行 | 変更 | `exec "$uv_bin" run --frozen --no-dev ...` の `--frozen` を `--no-sync` へ替える。直前の同期で用意した同じ環境（`UV_PROJECT_ENVIRONMENT`）をそのまま使い、`exec` の後に uv が環境を同期し直さない |
 
 - 事前条件: `uv_bin` が決まっている（uv を探すか入れる処理の後）
-- 事後条件: `exec` へ進むのは同期（`UV_NO_SYNC` のときは `--check`）が成功したときだけ。uv の起動は 1 起動に 1 回（`UV_ENV_FILE` で環境ファイルを読むときだけ 2 回）。`UV_NO_SYNC` が真なら環境を書き換えない。成功したときのシグナルの伝わり方は今までと変わらない（`exec` のまま）
+- 事後条件: `exec` へ進むのは同期が成功したときだけ。同期の経路を通るのは 1 起動に 1 回（`uv run --no-sync`）。成功したときのシグナルの伝わり方は今までと変わらない（`exec` のまま）
 - lock の扱い: 同期は今の `uv run` と同じ `--frozen`（lock を更新せず、定義と lock の鮮度は確かめない）。定義と lock の食い違いは、配る前に CI の `uv lock --check`（`script-structure.yml` の lock の検査）が落とす
 - 副作用: `.venv` の作成・更新と、ログのファイル（既にある `$log` を使う）
 
@@ -459,14 +457,13 @@ plugins/ndf/
 | 箇所 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 同期 | 依存を取れない | ネットワークが無い・相手の障害 | 終了コード | 止める（`stop_deps_missing`） | 結果 JSON 1 行と `deps_missing`（69） | 再実行で直りうる |
-| 同期の確かめ（`UV_NO_SYNC`） | 環境が lock どおりでない | 環境が無い・初回の同期が依存を入れる前に落ちた | 終了コード | 止める（`stop_deps_missing`） | 結果 JSON 1 行と `deps_missing`（69）。理由に `UV_NO_SYNC` を外す直し方 | `UV_NO_SYNC` を外して再実行 |
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `start.emit_deps_missing`（単体テスト。子のプロセスを起動しない） | 同期の失敗のメッセージ（ログの最終行を含む）を渡すと、結果 JSON 1 行の `summary` と `cause.detail` にそのメッセージが入る | 空のログの最終行 | 終了コードが `deps_missing`（69） |
-| `bin/ndf`（リリース後テストの実機の確認。単体テストに足さない） | 同期が成功すれば今までどおりサブコマンドが動く。`UV_ENV_FILE` の値が子へ渡る | 同期済みの状態で 2 回続けて打っても同じ結果（冪等） | `UV_OFFLINE=1` で venv の無い状態から打つと、結果 JSON 1 行と 69。`UV_NO_SYNC=1` で依存の無い venv から打つと、結果 JSON 1 行と 69 |
+| `bin/ndf`（リリース後テストの実機の確認。単体テストに足さない） | 同期が成功すれば今までどおりサブコマンドが動く | 同期済みの状態で 2 回続けて打っても同じ結果（冪等） | `UV_OFFLINE=1` で venv の無い状態から打つと、結果 JSON 1 行と 69 |
 
 ## 検査の規則を足す手順
 
