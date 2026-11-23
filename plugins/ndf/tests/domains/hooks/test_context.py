@@ -339,3 +339,49 @@ def test_last_reply_prefers_the_payload_message_over_the_transcript(tmp_path):
     payload["last_assistant_message"] = 1
     assert context.HookContext("claude", "Stop", payload).last_reply == "どうしますか？"
     assert context.HookContext("claude", "Stop", {}).last_reply == ""
+
+
+def _user(content) -> str:
+    return json.dumps({"type": "user", "message": {"content": content}})
+
+
+_PROMPT = _user([{"type": "text", "text": "進めて"}])
+_ASK = _assistant([{"type": "tool_use", "name": "AskUserQuestion", "input": {}}])
+_BASH = _assistant([{"type": "tool_use", "name": "Bash", "input": {}}])
+_RESULT = _user([{"type": "tool_result", "tool_use_id": "t1", "content": "1 つ目"}])
+_REPLY = _assistant([{"type": "text", "text": "本文"}])
+_META = json.dumps({"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "メタ"}]}})
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        # 入力 → AskUserQuestion → 結果 → 本文（Tool の結果の user の行を入力と読まない）
+        ([_PROMPT, _ASK, _RESULT, _REPLY], True),
+        ([_PROMPT, _ASK, _RESULT], True),
+        # 入力 → Bash → 本文
+        ([_PROMPT, _BASH, _RESULT, _REPLY], False),
+        # 前の入力の前にだけ AskUserQuestion がある
+        ([_PROMPT, _ASK, _RESULT, _PROMPT, _BASH, _REPLY], False),
+        # content が文字列の user の行も入力
+        ([_ASK, _user("進めて"), _REPLY], False),
+        # AskUserQuestion の後のメタの行（isMeta が真）は入力に数えない
+        ([_PROMPT, _ASK, _RESULT, _META, _REPLY], True),
+        # 末尾に利用者の入力が無ければ読めた範囲で探す
+        ([_ASK, _REPLY], True),
+        ([], False),
+        # 壊れた行・オブジェクトでない行が混じっても読める行で決める
+        ([_PROMPT, '{"type": "user", "mess', _ASK, json.dumps(["user"]), _REPLY], True),
+    ],
+)
+def test_asked_since_prompt_looks_back_to_the_last_user_input(lines, expected):
+    assert context.asked_since_prompt("\n".join(lines)) is expected
+
+
+def test_asked_this_turn_reads_the_transcript_tail(tmp_path):
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("\n".join([_PROMPT, _ASK, _RESULT, _REPLY]) + "\n", encoding="utf-8")
+    assert context.HookContext("claude", "Stop", {"transcript_path": str(path)}).asked_this_turn is True
+    path.write_text("\n".join([_PROMPT, _BASH, _REPLY]) + "\n", encoding="utf-8")
+    assert context.HookContext("claude", "Stop", {"transcript_path": str(path)}).asked_this_turn is False
+    assert context.HookContext("claude", "Stop", {}).asked_this_turn is False

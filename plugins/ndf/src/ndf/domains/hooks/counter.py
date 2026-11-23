@@ -91,6 +91,22 @@ class Counter:
         self.data["pushbacks"] += 1
         return True
 
+    def pushback_left(self) -> bool:
+        """今の入力の後の変更要求が上限の手前か。数えない（呼んでも回数は増えない）。数えない数え手は偽。"""
+        return self.usable and self.data["pushbacks"] < tables.policy_value("hook.pushback", "attempts")
+
+    def mark_model_wait(self) -> None:
+        """今の入力の記録に、軽いモデルが待ちと判じたフラグを置く。数えない数え手は何もしない。
+
+        `model_wait` は `_fresh` に足さない（足すとフラグを持たない今の状態のファイルを壊れたとして読む）。
+        """
+        if self.usable:
+            self.data["model_wait"] = True
+
+    def model_waited(self) -> bool:
+        """今の入力で軽いモデルが待ちと判じたか。フラグが無い・数えない数え手は偽。"""
+        return self.usable and self.data.get("model_wait") is True
+
     def allow_deny(self, key: str) -> bool:
         """同じ拒否のキーの回数が上限の手前なら 1 つ数えて真。数えない数え手は偽（案内へ下げる）。"""
         denies = self.data["denies"]
@@ -144,6 +160,7 @@ class Counter:
         if source == "relay" or self.data["relay_mark"]:
             self.data["relay_mark"] = False
             return "relay"
+        self.data.pop("model_wait", None)
         self.data.update(_fresh(), turn=self.data["turn"] + 1)
         return "human"
 

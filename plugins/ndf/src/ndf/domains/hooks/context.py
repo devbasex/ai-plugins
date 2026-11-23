@@ -40,6 +40,8 @@ _WAIT_RE = re.compile(
 _ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
 # 本文の待ちを見る末尾の行数
 _TAIL_LINES = 4
+# 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
+_ASK_TOOL = "AskUserQuestion"
 
 
 class ShellCommand(NamedTuple):
@@ -521,6 +523,26 @@ def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
     return "report"
 
 
+def asked_since_prompt(tail: str) -> bool:
+    """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
+
+    Tool の結果だけを持つ `user` の行と、Claude Code が書くメタの行（`isMeta` が真）は利用者の入力に数えない
+    （`ndf.domains.relay.context_records._user_text` と同じ条件）。末尾に利用者の入力が無ければ、読めた範囲で探す。
+    """
+    for line in reversed(tail.splitlines()):
+        if '"user"' not in line and _ASK_TOOL not in line:
+            continue
+        rec = tables.json_object(line)
+        if rec is None:
+            continue
+        content = _content(rec)
+        if rec.get("type") == "user" and not rec.get("isMeta") and _is_prompt(content):
+            return False
+        if _asks(content):
+            return True
+    return False
+
+
 def context_tokens(tail: str) -> Optional[int]:
     """会話の記録の末尾から、最後の応答の文脈の量（入力の token と cache の token の和）。無ければ None。"""
     for line in reversed(tail.splitlines()):
@@ -601,6 +623,11 @@ class HookContext:
     def last_reply_kind(self) -> str:
         return classify_reply(self.last_reply, self.reply_code_lines)
 
+    @cached_property
+    def asked_this_turn(self) -> bool:
+        """今の利用者の入力の後に `AskUserQuestion` で人へ問うたか。"""
+        return asked_since_prompt(self.transcript_tail)
+
     @property
     def stop_hook_active(self) -> bool:
         return self.payload.get("stop_hook_active") is True
@@ -624,10 +651,29 @@ def _last_assistant_text(tail: str) -> str:
     return ""
 
 
+def _content(rec: dict[str, Any]) -> Any:
+    """会話の記録の 1 レコードの content。`message` が無い・形が違えば None。"""
+    message = rec.get("message")
+    return message.get("content") if isinstance(message, dict) else None
+
+
+def _is_prompt(content: Any) -> bool:
+    """利用者の入力の content か（文字列か text の要素を持つ）。Tool の結果だけを持つ行は偽。"""
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "text" for c in content)
+
+
+def _asks(content: Any) -> bool:
+    """`AskUserQuestion` の呼び出しを持つ content か。"""
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == _ASK_TOOL for c in content)
+
+
 def _record_text(rec: dict[str, Any]) -> Optional[str]:
     """会話の記録の 1 レコードの本文。text の要素が無ければ None（文字列でない text だけなら空文字）。"""
-    message = rec.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
+    content = _content(rec)
     if not isinstance(content, list):
         return None
     texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
