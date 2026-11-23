@@ -251,17 +251,17 @@ def test_check_entries_accepts_names_in_a_directory_that_existed(workdir):
 
 
 def test_prepare_paths_tells_a_missing_directory(tmp_path):
-    assert worker_paths.prepare_paths(tmp_path / "new", "n")[1]
-    assert not worker_paths.prepare_paths(tmp_path, "n")[1]
+    assert worker_paths.prepare_paths(tmp_path / "new", "n")[1].fresh
+    assert not worker_paths.prepare_paths(tmp_path, "n")[1].fresh
 
 
 def test_check_entries_refuses_a_directory_that_appeared_after_the_paths_were_resolved(tmp_path, workdir):
     d, _ = workdir
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     target = tmp_path / "new"
-    paths, fresh = worker_paths.prepare_paths(target, "n")
+    paths, origin = worker_paths.prepare_paths(target, "n")
     os.rename(d, target)  # 解いてから開くまでに、既存のディレクトリが同じ名前へ現れる
-    with worker_paths.open_workdir(paths.report.parent, create=True, fresh=fresh) as wd:
+    with worker_paths.open_workdir(paths.report.parent, create=True, origin=origin) as wd:
         assert wd.created
         with pytest.raises(worker_paths.EntryUnsafe) as e:
             worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
@@ -274,9 +274,9 @@ def test_open_workdir_refuses_another_users_directory_that_appeared_after_the_pa
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     _foreign(monkeypatch, d)
     target = tmp_path / "new"
-    paths, fresh = worker_paths.prepare_paths(target, "n")
+    paths, origin = worker_paths.prepare_paths(target, "n")
     os.rename(d, target)  # 解いてから開くまでに、別の利用者のディレクトリが同じ名前へ現れる（最初の open で開ける）
-    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, fresh=fresh):
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
         pass
     assert e.value.kind == "replaced"
     assert (target / "n.report.md.done").exists()
@@ -296,9 +296,61 @@ def test_prepare_paths_keeps_a_part_observed_missing_that_appears_while_rebuildi
         return seen
 
     monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
-    paths, fresh = worker_paths.prepare_paths(target, "n")
-    assert fresh == 1
+    paths, origin = worker_paths.prepare_paths(target, "n")
+    assert origin.fresh == 1
     assert paths.report == tmp_path.resolve() / "new" / "n.report.md"
+
+
+def test_prepare_paths_keeps_a_parent_observed_missing_that_appears_before_its_child_is_checked(tmp_path, monkeypatch):
+    parent = tmp_path.resolve() / "parent"
+    real_lexists = os.path.lexists
+
+    def lexists(p):  # parent が無いと観測した直後に、別の利用者の parent が現れる
+        seen = real_lexists(p)
+        if Path(p) == parent and not seen:
+            parent.mkdir()
+        return seen
+
+    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    paths, origin = worker_paths.prepare_paths(parent / "child", "n")
+    assert origin.fresh == 2
+    assert paths.report == tmp_path.resolve() / "parent" / "child" / "n.report.md"
+
+
+def test_prepare_paths_keeps_a_place_observed_missing_after_dotdot_returns_to_it(tmp_path, workdir, monkeypatch):
+    d, _ = workdir
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    target = tmp_path.resolve() / "new"
+    real_lexists = os.path.lexists
+
+    def lexists(p):  # new が無いと観測した後、既存のディレクトリが new へ移される
+        seen = real_lexists(p)
+        if Path(p) == target and not seen:
+            os.rename(d, target)
+        return seen
+
+    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    paths, origin = worker_paths.prepare_paths(tmp_path / "new" / ".." / "new", "n")
+    assert origin.fresh == 1
+    assert paths.report == target / "n.report.md"
+    with worker_paths.open_workdir(paths.report.parent, create=True, origin=origin) as wd:
+        assert wd.created
+        with pytest.raises(worker_paths.EntryUnsafe) as e:
+            worker_paths.check_entries(wd, ["n.report.md", "n.report.md.done", "n.result.json"])
+    assert e.value.kind == "replaced"
+    assert (target / "n.report.md.done").exists()
+
+
+def test_open_workdir_refuses_a_parent_swapped_after_the_paths_were_resolved(tmp_path):
+    parent = tmp_path / "shared"
+    parent.mkdir()
+    paths, origin = worker_paths.prepare_paths(parent / "new", "n")
+    parent.rename(tmp_path / "moved")
+    (parent / "new").mkdir(parents=True)  # 解いてから開くまでに、あった親が別のディレクトリへ差し替えられる
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
+        pass
+    assert e.value.kind == "replaced"
+    assert not (parent / "new" / "n.report.md").exists()
 
 
 def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):
