@@ -3,14 +3,15 @@
 #1142（NDF の作り直し）の設計レビュー 4 巡で見つかった項目 182 件を、行き先の子・順番・新設か追補か・要求の行の 4 つで 1 行ずつ割り当て、11.0.0 で解くか 11.x へ回すか（版）を添えた表である。あわせて、#1142 の要求の受け入れ条件 47 行の持ち主の子を決める。
 
 - 決めた理由（子を分ける基準・追補の単位・範囲を広げるか 11.x へ回すか・版・物差し・閉じる操作・依存の更新）は [issue-3395-design.md](issue-3395-design.md) にある
-- この表が正本である。子の表のコピー（`plugins/ndf-next/src/ndf/checks/children.json`）の `review_items` は、この表と入力の Issue の本文から生成する（手で写さない）。形・生成の書き手・規則は設計の「`review_items` の形」の節にある
+- この表が正本である。子の表のコピー（`plugins/ndf/src/ndf/checks/children.json`）の `review_items` は、この表から `ndf check --write-spec` で生成する（手で写さない）。形と規則は [issue-3684-3667-2339-design-detail.md](issue-3684-3667-2339-design-detail.md) の「設計レビューの項目の行き先」にある
 - 子の中身・先に要るもの・レーンの正本は、詳細設計の「実装計画」（[issue-3347-design-detail.md](issue-3347-design-detail.md#実装計画)）である。この表の「順番」は、設計で足す・分ける子を入れて求め直した値である
 
 ## 列の読み方
 
 | 列 | 何を書くか |
 | --- | --- |
-| 項目 | `<Issue 番号>-<連番>`。連番は 2026-11-14 に、その Issue の本文（`## 進行` より前）にある取り消し線の無いチェックボックスの行を、上から数えた順で振った。以後は番号を引き継ぐ。項目の同一性は本文の行の文の sha256（`text_sha`。`children.json` の `review_items` が持つ）で決め、取り消し線を引いた項目の番号は欠番にして使い直さず、新しい項目にはその Issue の既存の最大の連番 + 1 を振る。#3395 だけは本文が要求に書き直されたため、「依頼（原文）」の引用の中の 10 行を数える |
+| 項目 | `<Issue 番号>-<連番>`。連番は 2026-11-14 に、その Issue の本文（`## 進行` より前）にある取り消し線の無いチェックボックスの行を、上から数えた順で振った。以後は番号を引き継ぐ。項目の同一性は番号で決め、要旨が変わったかは要旨のセルの sha256 の先頭 12 文字（`text_sha`。`children.json` の `review_items` が持つ）で見分ける。取り消した項目の番号は欠番にして使い直さず、新しい項目にはその Issue の既存の最大の連番 + 1 を振る。#3395 だけは本文が要求に書き直されたため、「依頼（原文）」の引用の中の 10 行を数える |
+| 要旨 | 項目の要旨。`text_sha` の原文である |
 | 行き先の子 | 項目を解く子の記号。2 つ以上を `・` で並べたときは、先頭の子が項目を閉じる持ち主である。この設計の差分で解くものは `#3395 の設計`、承認済みの設計の差分で解いたものは `済み（PR <番号>）` と書く。版が `11.x` の行は、Issue の番号を書かず [11.x の対応表](issue-3388-design-routing.md) を指す。11.x での行き先は対応表だけが持つ |
 | 順番 | 行き先の子の流す順番（先に要るものの順番の最大 + 1）。`0` はこの設計の差分か承認済みの設計の差分で解き、子を流さないことを表す。`—` は版が `11.x` の行（11.x での順番は [11.x の子の表](issue-3388-design-children.md) が持つ）。数の直後に全角の括弧で注記を添えてよい（例: `2（比較の結論まで着手しない）`）。注記は人が読むためのもので、規則 `review-items` は数だけを読む |
 | 新設か追補か | `新設`（この設計で足す・分ける子）・`追補`（閉じた子への追補の単位）・`既存`（開いている子の受け入れ条件へ足す。分類 D・E・G は承認済みの設計で既に足した）・`#3395 の設計`・`済み` のどれか。版が `11.x` の行は `—` |
@@ -29,39 +30,27 @@
 
 ## 抜き出しのコマンドと突き合わせ
 
-入力の 24 本から項目の文を抜き出して `text_sha` を求め、項目の番号へ対応させてから表の 1 列目と比べる。番号は、`develop` の `children.json` に `review_items` があればその `text_sha` の一致で引き、一致しない項目は `<Issue 番号>-new:<text_sha>` として差分に出す（表に無い新しい項目）。`review_items` がまだ無い間（X1+ の最初の生成の前）は、本文の順の連番を番号とする。この間は 2026-11-14 の番号と本文の順が一致するよう、項目の取り消し（本文の取り消し線）を X1+ の最初の生成の後まで行わない（[issue-3395-design.md](issue-3395-design.md) の「表とコピーを直す時と書き手」）。
+項目の番号は、2026-11-14 に入力の 24 本の本文から項目の文を抜き出して振り、表の 1 列目と比べた（当時のコマンドは、このファイルのコミット `4433347b8` の版にある）。その後に本文が書き直された Issue（#3341 は要求に、#3342 は項目の追加）があり、本文からは同じ番号を求め直せない。そのため、以後の照合は Issue の本文を読まず、表の要旨のセルの sha256 の先頭 12 文字（`text_sha`）を、`main` の `children.json` に生成済みの `review_items` と比べる。表と同じコミットの `children.json` との照合と行き先の確かめは `plugins/ndf/bin/ndf check --only review-items` が行う。
 
 ```bash
-for n in 3341 3342 3343 3344 3345 3346 3347 3364 3365 3366 3367 3368 3377 3378 3379 3380 3381 3382 3390 3391 3392 3393 3394 3395; do
-  gh issue view "$n" --json body -q .body | N="$n" python3 -c '
-import hashlib, os, re, sys
-n = os.environ["N"]
-body = sys.stdin.read()
-if n == "3395":
-    lines = [l[2:] for l in body.split("\n") if re.match(r"^> [-*] \[[ xX]\] ", l)]
-else:
-    lines = [l for l in body.split("\n## 進行")[0].split("\n") if re.match(r"^[ \t]*[-*] \[[ xX]\] ", l)]
-for l in lines:
-    if not re.match(r"^[ \t]*[-*] \[[ xX]\] ~~", l):
-        text = re.sub(r"^[ \t]*[-*] \[[ xX]\] ", "", l)
-        print(n, hashlib.sha256(text.encode()).hexdigest()[:12])
-'
-done > /tmp/review-items-sha.txt
-python3 - /tmp/review-items-sha.txt <<'EOF' | sort > /tmp/review-items.txt
-import json, subprocess, sys
-shown = subprocess.run(["git", "show", "origin/develop:plugins/ndf-next/src/ndf/checks/children.json"], capture_output=True, text=True)
-copy = json.loads(shown.stdout).get("review_items", {}).get("items", {}) if shown.returncode == 0 else {}
-by_sha = {v["text_sha"]: k for k, v in copy.items()}
-seen = {}
-for line in open(sys.argv[1]):
-    n, sha = line.split()
-    seen[n] = seen.get(n, 0) + 1
-    print(by_sha.get(sha, f"{n}-new:{sha}") if copy else f"{n}-{seen[n]}")
+git fetch -q origin main
+python3 - <<'EOF'
+import hashlib, json, re, subprocess
+shown = subprocess.run(["git", "show", "origin/main:plugins/ndf/src/ndf/checks/children.json"], capture_output=True, text=True, check=True)
+copy = {i["id"]: i["text_sha"] for i in json.loads(shown.stdout).get("review_items", [])}
+rows = {}
+for line in open("issues/issue-1142-design-review-routing.md", encoding="utf-8"):
+    if re.match(r"\| [0-9]{4}-[0-9]+ ", line):
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().removeprefix("|").removesuffix("|"))]
+        rows[cells[0]] = hashlib.sha256(cells[1].encode()).hexdigest()[:12]
+for key in sorted(rows.keys() | copy.keys()):
+    if rows.get(key) != copy.get(key):
+        print(key, "表:", rows.get(key), "生成済み:", copy.get(key))
+print(len(rows), "件")
 EOF
-grep -oE '^\| [0-9]{4}-[0-9]+ ' issues/issue-1142-design-review-routing.md | tr -d '| ' | sort | diff - /tmp/review-items.txt && wc -l < /tmp/review-items.txt
 ```
 
-結果（2026-11-14）: 差分なし・182 件。表に無い項目は 0 件である。
+本文との突き合わせの結果（2026-11-14）: 差分なし・182 件。表に無い項目は 0 件である。
 
 | 範囲 | Issue | 項目 |
 | --- | ---: | ---: |

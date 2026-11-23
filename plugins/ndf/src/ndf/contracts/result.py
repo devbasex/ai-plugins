@@ -26,6 +26,8 @@ _LISTS = ("gaps", "process", "decisions", "warnings")
 _OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next", "outputs", "run_id")
 # routes のキーの語彙を持つ事実の表
 ANSWERS = "answers"
+# items の severity の語彙を持つ事実の表
+SEVERITIES = "severities"
 # エントリポイントの短い名前（next・routes のコマンドの先頭。パスとバージョンを含めない）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
 
@@ -96,6 +98,20 @@ def answer_errors(routes: object) -> list[str]:
     return [f"routes のキー {key!r} は回答の語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
 
 
+def severity_errors(items: object) -> list[str]:
+    """items の `severity` のうち、重さの表（事実の表 severities）に無いもの。形の誤り（文字列でない・空）はスキーマが報告する。"""
+    rows = items if isinstance(items, list) else []
+    given = [(i, row["severity"]) for i, row in enumerate(rows) if isinstance(row, dict) and "severity" in row]
+    words = [(i, word) for i, word in given if isinstance(word, str) and word]
+    known = set(facts.ids(SEVERITIES)) if words else set()
+    return [f"items/{i}/severity: {word!r} は重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
+
+
+def item_fields() -> frozenset[str]:
+    """結果のコントラクトが items の要素に形を決めた欄の名前。"""
+    return frozenset(contracts.load_json(SCHEMA)["$defs"]["item"]["properties"])
+
+
 def code_for(obj: Any) -> Optional[int]:
     """既定の終了コード。ok は 0、gate は承認ゲートの最初の値、stopped は cause.kind の終了コード。決められなければ None。"""
     if not isinstance(obj, dict):
@@ -120,6 +136,8 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
         errs += causes.kind_errors(obj["cause"])
     if "routes" in obj:
         errs += answer_errors(obj["routes"])
+    if "items" in obj:
+        errs += severity_errors(obj["items"])
     if code is not None and obj.get("status") in STATUSES:
         errs += _code_errors(obj, code)
     return errs

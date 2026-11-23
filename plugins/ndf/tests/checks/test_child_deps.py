@@ -106,3 +106,14 @@ def test_broken_table_stops(plugin, children):
 def test_owner_is_the_longest_package(plugin):
     children = table(plugin, {"A": row(["ndf.p"]), "B": row(["ndf.p.q"])})
     assert [child_deps.owner(m, children) for m in ("ndf.p.x", "ndf.p.q.y", "ndf.pq", "ndf.p")] == ["A", "B", None, "A"]
+
+
+def test_a_symlinked_table_is_not_read(plugin, rules, tmp_path):
+    path = plugin.root / child_deps.CHILDREN_REL
+    outside = path.rename(tmp_path / "outside.json")
+    outside.write_text(json.dumps({"children": {"A": row(needs=["秘密"])}, "tables": {}}))
+    scope = plugin.scope()
+    path.symlink_to(outside)
+    with pytest.raises(CheckError, match="シンボリックリンク") as caught:
+        child_deps.apply(scope, rules)
+    assert "秘密" not in str(caught.value)

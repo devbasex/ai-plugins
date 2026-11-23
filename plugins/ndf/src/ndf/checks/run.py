@@ -2,7 +2,7 @@
 
     ndf check [--only <規則>]... [--write-spec]
 
-`--only` があれば、その規則の指摘だけを違反にする。`--write-spec` があれば、規約の
+`--only` があれば、その規則の指摘だけを違反にする。`--only review-items` だけなら、その規則の入力だけを読み、ほかの規則を当てない。`--write-spec` があれば、規約の
 生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。
 結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
@@ -20,7 +20,7 @@ from typing import Any
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, limits_readers, lint, suppressions, smells, spec_docs, structure, words
 from ndf.checks import internal_names
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, contained, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -40,11 +40,16 @@ def _walk(plugin_root: Path) -> list[Path]:
 
 
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
-    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。"""
+    """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。
+
+    本文は読まない。シンボリックリンクがあれば `CheckError`（どの規則もリンク先の本文を読まないよう、読む前に止める）。
+    """
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
         if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
+            if path.is_symlink():
+                contained(plugin_root, rel)
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
@@ -101,7 +106,12 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 def select(
     scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。
+
+    `review-items` だけなら、その規則だけを当てる（項目の表だけを変えた PR で、全体の検査を打たない）。
+    """
+    if only and set(only) == {spec_docs.REVIEW_ITEMS} and not write_spec:
+        return spec_docs.check_review_items(scope, rules)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written)
     return [f for f in found if not only or f.rule in only]

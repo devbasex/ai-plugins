@@ -6,6 +6,7 @@
 plugins/ndf/bin/ndf check
 ```
 
+- 見るファイルにシンボリックリンクがあれば、どのファイルの本文も読まずに止める（`config_broken`）
 - 見るファイルを 1 回集め、`.py` の構文木を 1 ファイルにつき 1 回だけ作る。すべての規則が同じ木を読む
 - 兆候は初日から 0 件で、基準のファイルも増やさないラチェットも持たない。見つけた兆候はすべて違反になる
 - 規則のしきい値と名前の一覧は `rules.json` にあり、規則の関数は値を写さずにそこから読む
@@ -30,6 +31,7 @@ plugins/ndf/bin/ndf check
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public）・内部データの名前（種類のスキーマ） |
+| 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
 
 ## 兆候の規則
 
@@ -150,6 +152,7 @@ plugins/ndf/bin/ndf check                     # 書かずに検査する（CI �
 | `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
 | `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
 | `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
+| `review-items` | 設計レビューの項目の表に、ルートの空の項目がある。11.x へ回した項目が、ルートの指す対応表に無いか、対応表のルートが `spec.correspondence_routes` の形に当たらない（空・仮の `—` を含む）。子の表 `children.json` の `review_items` が、表から生成し直した中身と違う（`text_sha` の原文は表の要旨）。表が無い・列が足りない・数の列が読めない・表か `children.json` がリポジトリの外かシンボリックリンクを通るときは検査を止める（`config_broken`）。見出しは `rules.json` の `spec.review_items_columns`・`spec.correspondence_columns` が持つ。`ndf check --only review-items` はこの規則の入力だけを読む |
 
 サブコマンドの引数は、サブコマンドの `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果のコントラクトと結果のスキーマで確かめる。
 
