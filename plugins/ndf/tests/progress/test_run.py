@@ -114,7 +114,7 @@ def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsy
     assert env.launched == [tid]
     assert _labels(st, tid)["要求と受け入れ条件"] == "running"
     started = [e for e in run.read(st, tid).events if e.draft.kind == "started"][-1]
-    assert started.draft.payload == {"inputs": {"issues": [ISSUE]}}
+    assert started.draft.payload == {"inputs": {"issues": [ISSUE], "mode": "standard"}}
 
 
 def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env, capsys):
@@ -834,7 +834,7 @@ def test_a_stage_whose_values_are_decided_starts_with_the_values_in_its_step_dir
     assert run.advance(st, tid, repo, real)["status"] == "ok"
     assert _kinds(run.read(st, tid), "要求と受け入れ条件") == ["started"]
     held = invoke.read_values(_step_dir(st, tid, "requirements", "requirements"))
-    assert held is not None and held["plan"] == "requirements" and held["inputs"] == {"issues": [ISSUE]}
+    assert held is not None and held["plan"] == "requirements" and held["inputs"] == {"issues": [ISSUE], "mode": "standard"}
 
 
 def test_a_passing_github_failure_while_preparing_stops_as_transient_before_started(repo, st, env, capsys, monkeypatch):

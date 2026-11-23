@@ -25,7 +25,8 @@
       "phase": "design",
       "inputs": [
         "issues",
-        "worktree"
+        "worktree",
+        "mode"
       ]
     }
   },

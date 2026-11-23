@@ -15,8 +15,8 @@ from ndf.contracts import worker_paths
 from ndf.core import route
 from ndf.progress import definition, invoke
 
-# 設計は issues・worktree、実装は issues・worktree・mode を工程の入力に持つ
-STAGE_INPUTS = {"design": ("issues", "worktree"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
+# 設計と実装は issues・worktree・mode を工程の入力に持つ
+STAGE_INPUTS = {"design": ("issues", "worktree", "mode"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
 PROJECT = {
     "test": {"suites": [{"name": "pytest", "command": "pytest -q"}]},
     "ci": {"required_checks": ["pytest"]},
@@ -239,7 +239,7 @@ def test_prepare_plan_names_the_input_the_work_needs_when_the_stage_lacks_it(tmp
     # 工程「要求と受け入れ条件」の作業 requirements は工程の入力 issues を読む。無ければ起動の前に名前と出所で止まる
     repo = _sprint_repo(tmp_path)
     sprint_fixture.with_worker(monkeypatch)
-    run = _run("要求と受け入れ条件", inputs={})
+    run = _run("要求と受け入れ条件", inputs={"mode": "light"})
     work = tmp_path / "w"
     with pytest.raises(invoke.KindInputsMissing) as caught:
         invoke.prepare_plan(run, work, repo)
@@ -254,10 +254,10 @@ def test_prepare_plan_keeps_the_stage_inputs_the_template_does_not_take(tmp_path
     repo = _sprint_repo(tmp_path)
     sprint_fixture.with_worker(monkeypatch)
     work = tmp_path / "w"
-    got = invoke.prepare_plan(_run("要求と受け入れ条件", inputs={"issues": [3908]}), work, repo)
+    got = invoke.prepare_plan(_run("要求と受け入れ条件", inputs={"issues": [3908], "mode": "light"}), work, repo)
     held = invoke.read_values(work)
     assert got.template.name == "requirements" and got.local_tests is True and "issues" not in got.values
-    assert held is not None and held["inputs"] == {"issues": [3908]} and held["values"] == got.values
+    assert held is not None and held["inputs"] == {"issues": [3908], "mode": "light"} and held["values"] == got.values
 
 
 def test_prepare_plan_for_a_ci_only_project_leaves_local_tests_off(tmp_path, monkeypatch):

@@ -236,9 +236,9 @@ PROJECT = {
     "ci": {"required_checks": ["pytest", "lint"]},
     "workflow": {"launch": {"review": ["ndf-review"], "rebuild": ["ndf-rebuild"]}},
 }
-# テンプレート → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
+# テンプレート → 工程の入力（設計と実装は issues・worktree・mode、設計のマージは issues・worktree）
 STAGE_INPUTS = {
-    "design": ("issues", "worktree"),
+    "design": ("issues", "worktree", "mode"),
     "impl": ("issues", "worktree", "mode"),
     "design-merge": ("issues", "worktree"),
     "quality-gates": ("issues", "worktree"),
