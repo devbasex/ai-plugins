@@ -132,7 +132,7 @@ sequenceDiagram
 ### 決定 2: パスの取り違えを断つため、パスの決め方を 1 つの関数に置く
 
 - **質問**: supervisor の経路（サブエージェント）とプランの経路（`ndf answer work`）で、報告の保存先のパスの決め方を分けるか
-- **選んだ案**: `report_paths` の 1 つの関数が、作業ディレクトリと名前から 3 つのパスを組む。`ndf worker prepare` と `ndf answer work`（#3908）がどちらもこの関数を使う
+- **選んだ案**: `report_paths` の 1 つの関数が、作業ディレクトリと名前から 4 つのパス（プロンプト・報告・完了マーカー・結果ファイル）を組む。`ndf worker prepare` が返すのはそのうち報告・完了マーカー・結果ファイルの 3 つで、プロンプトのパスは `ndf answer work` だけが使う。`ndf worker prepare` と `ndf answer work`（#3908）がどちらもこの関数を使う
 - 採らなかった案: 経路ごとにパスを組む（同じ役割の決め方が 2 か所に分かれ、片方だけが変わる）
 - **代償**: 2 つの課題（#3877 と #3908）が同じ関数を触るため、実装の順序が決まる（#3877 が先）
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」（MVV バージョン 1）
@@ -148,7 +148,7 @@ sequenceDiagram
 ### 決定 4: `rm` を見る hook は、順序を確かめてから足すかを決める
 
 - **質問**: 空かもしれない変数を使った `rm` を PreToolUse の guard で拒否するか（要求仕様の受け入れ条件 5）
-- **選んだ案**: `PreToolUse` の guard を足し、空かもしれない変数をパスに含む `rm` を `deny` して書き直しの形を返す。公式の文書が「`PreToolUse` hooks run before the permission prompt.」（STD1）と定めるため、guard は確認のダイアログより先に呼ばれる。実装の最初に実機で 1 回確かめ、先に働かなければ guard を外して結果を Pull Request に残す
+- **選んだ案**: `PreToolUse` の guard を足し、空かもしれない変数をパスに含む `rm` を `deny` して書き直しの形を返す。公式の文書が「`PreToolUse` hooks run before the permission prompt.」（STD1）と定めるため、guard は確認のダイアログより先に呼ばれる。実装の最初に実機で 1 回確かめる。先に働かなければ guard を外し、確かめた結果をこの設計文書の「未確認のまま残ること」の行へ書き戻して受け入れ条件 5 を落とす（要求仕様の受け入れ条件 5 の但し書きのとおり）
 - 採らなかった案:
   - `PermissionRequest` の事象で拒否する（確認を出す直前に走る（STD2）ので遅くはないが、終了コード 2 が効かず `decision` の形でしか返せない。今ある 17 件の guard はどれもこの事象を使っておらず、実績が無い）
   - guard を足さないと決める（手順書の外で supervisor が `rm` を書いたときの守りが無くなる。手順書の外の `rm`（作業ファイルの片付けなど）でも同じ形は書かれる。2026-11-23 の 2 回はその例である）
@@ -218,9 +218,9 @@ sequenceDiagram
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1（コマンド 1 回で済む） | `ndf worker prepare --dir D --name n` が `status: ok` を返し、`metrics.paths` に `report`・`done`・`result` の 3 つの絶対パスが入る | 返りから `result` を落とすと落ちる |
-| 2（確認の条件に当たらない） | 手順書（`agent-layers.md`・`waiting.md`）に、報告の保存先のパスを組み立てる変数と `rm` が残っていない | 手順書に `rm -f` の行を戻すと落ちる |
+| 2（確認の条件に当たらない） | `ndf worker prepare` が、シェルの変数も `rm` も呼び出し側に求めずに、空のファイルの作成と古いマーカーの削除を自分で行う（呼んだ後に `.done` と `.result.json` が無く、`report` が空で在る）。手順書の文面はテストにせず、コードレビューで見る（`.md` の文言を照合するテストを書かない決まり。決定 1 の「手順書の文言は振る舞いを保証しない」と同じ理由） | コマンドが削除を行わず呼び出し側に任せると落ちる |
 | 3（前のマーカーを読まない） | 同じ `--dir` と `--name` で 2 回打つと、1 回目に作った `.done` と `.result.json` が消え、`report` は空になる | 2 回目で消さないようにすると落ちる |
-| 4（絶対パスを返す） | `--dir` に相対パスを渡しても、`metrics.paths` の 3 つは絶対パスで返る | 相対パスのまま返すと落ちる |
+| 4（絶対パスを返す） | `--dir` に相対パスを渡しても、コマンドを打った場所（カレントディレクトリ）を基準に解いた絶対パスが `metrics.paths` の 3 つに返る | 相対パスのまま返すと落ちる |
 | 4（作業ディレクトリを作る） | `--dir` が無いディレクトリでも作って用意する | 作らずに `stopped` にすると落ちる |
 | 決定 3（名前の形） | `--name` に `../x` や空文字を渡すと `stopped`（`invalid`）で、ファイルを 1 つも触らない | 形を確かめずにパスへ組むと落ちる |
 | 5（hook の拒否） | 実測で順序を確かめた後に書く。先に働くなら、空かもしれない変数の `rm` を含むコマンドで guard が `deny` を返す | guard の条件から変数の判定を外すと落ちる |
@@ -237,7 +237,7 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| hook と確認の順序 | NDF の `PreToolUse` の guard が、Claude Code の「Dangerous rm operation on possibly-empty variable path」の確認より先に働くかは、実機で打つまで分からない。公式の記述は外部の調査の STD の表にある。実装の最初に、確認の出ない安全な形（別のプロセスで `rm -f $UNSET/x` を打つ）で確かめ、結果を実装の Pull Request に残す |
+| hook と確認の順序 | NDF の `PreToolUse` の guard が、Claude Code の「Dangerous rm operation on possibly-empty variable path」の確認より先に働くかは、実機で打つまで分からない。公式の記述は外部の調査の STD の表にある。実装の最初に、guard を入れた Claude Code で、消えても困らない一時ディレクトリの中のパスに空の変数を混ぜた `rm -f` を 1 回打ち、確認のダイアログが出る前に guard の拒否が返るかを見る。結果はこの行へ書き戻す（決定 4） |
 | `PermissionRequest` の事象 | 事象の登録とコントラクト（`plugins/ndf/contracts/hooks/runtimes.json:21-27`）はあるが、使っている guard が 1 件も無く、呼ばれる時点の実績が無い |
 
 ## 外部の調査
@@ -269,4 +269,4 @@ sequenceDiagram
 | 「`PreToolUse` の `deny` で確認のダイアログが出ない」の明示の文 | https://code.claude.com/docs/en/hooks を 3 回、https://code.claude.com/docs/en/permissions を 1 回取得 | 見つからない。`"deny" prevents the tool call.` と、理由の宛先が Claude であることまでしか書かれていない。hooks のページは 293,973 文字で、取得の上限に当たり後半を読んでいない |
 | `Dangerous rm operation not ruled out` の節の定義の原文 | https://code.claude.com/docs/en/permission-modes を取得 | その節は取得した範囲（先頭 100,000 文字）の外で切れた。箇条書きからの引用にとどまる。理由: 上限 |
 
-調べた量: 候補 4 件・取得の試み 7 回。
+調べた量: 候補 4 件（STD1〜STD3・LIB1）・取得の試み 7 回。

@@ -32,7 +32,8 @@ flowchart TB
 | 会話の記録のパス | `domains/relay/observe.py:55-57`（`transcript_path(environ, cwd, session_id)`） | 記録のファイルのパス |
 | 最後の応答の時刻 | `domains/relay/observe.py:196-208`（`turn_done(path, size)`） | 最後の記録が終わった応答なら `(True, その時刻)`、途中なら `(False, None)` |
 | `session_id` と `cwd` | ラッパーの状態ファイル `wrapper.json`（`domains/relay/registry.py:28`・`wrapper.py:950-968`） | 会話の記録のパスを組む材料 |
-| 背景の作業の件数 | Stop の hook の入力の `background_tasks`（`domains/hooks/context.py:609-611`、`guards/relay_mark.py:22`） | conductor が応答を終えた時点の背景の作業の件数 |
+| 背景の作業 | Stop の hook の入力の `background_tasks`（`domains/hooks/context.py:609-611`、`guards/relay_mark.py:22`） | conductor が応答を終えた時点で走っている作業の一覧。要素ごとに `id`・`type`（`shell`・`subagent` など）・`status` を持つ（STD3） |
+| 背景のサブエージェントの会話の記録 | `<会話の記録のディレクトリ>/<session_id>/subagents/agent-<id>.jsonl`（2026-11-23 に手元の Claude Code で確かめた） | サブエージェントの最後の応答が終わったか（`observe.turn_done` で読める） |
 
 `ndf relay ls` の行（`domains/relay/hub.py:498-510`）には `session_id` と `cwd` が載っていない。
 
@@ -51,7 +52,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    SH["Stop の hook<br/>relay-marker guard"] -->|"背景の作業の件数を書く"| AF[("&lt;ラッパーの保存先&gt;/activity.json")]
+    SH["Stop の hook<br/>relay-marker guard"] -->|"背景の作業の一覧を書く"| AF[("&lt;ラッパーの保存先&gt;/activity.json")]
     WJ[("wrapper.json<br/>session_id・cwd")] --> PR["Probes.activity（新設）"]
     AF --> PR
     TR[("会話の記録<br/>&lt;session_id&gt;.jsonl")] -->|"observe.turn_done"| PR
@@ -67,7 +68,7 @@ Stop の hook が、conductor が応答を終えた時点の背景の作業の�
 
 | 要素 | 責務 |
 | --- | --- |
-| `activity.json`（新設。ラッパーの保存先） | conductor が応答を終えた時点の、背景の作業の件数と書いた時刻 |
+| `activity.json`（新設。ラッパーの保存先） | conductor が応答を終えた時点の、背景の作業の一覧（`id`・`type`）と書いた時刻 |
 | `relay-marker` guard（`domains/hooks/guards/relay_mark.py`。変更） | Stop のたびに `activity.json` を書く |
 | `Probes.activity`（新設。`progress/lane/liveness.py` のインターフェースと `progress/plan/run.py` の実装） | レーンの名前から、最後の応答が終わっているか・その時刻・背景の作業の件数を返す |
 | `liveness.judge`（変更） | 順 6 の前に、新しい条件を置いて `idle_conductor` を返す |
@@ -106,7 +107,7 @@ flowchart TB
 | キー | 型 | 中身 |
 | --- | --- | --- |
 | `at` | string | 書いた時刻（ISO 8601）。conductor が応答を終えた時刻に当たる |
-| `background` | integer | その時点の背景の作業の件数（hook の入力の `background_tasks` の数） |
+| `tasks` | array | その時点の背景の作業。要素は `{"id", "type"}`（hook の入力の `background_tasks` から写す） |
 
 `contracts/limits.json` に足す方針:
 
@@ -122,7 +123,7 @@ flowchart TB
 | --- | --- | --- |
 | `turn_done` | bool | 会話の記録の最後が、終わった応答か |
 | `moved` | float / None | 最後の応答の時刻（UNIX 時刻）。読めなければ `None` |
-| `background` | integer / None | `activity.json` の件数。無ければ `None` |
+| `background` | integer / None | まだ走っているとみなす背景の作業の数。`activity.json` の `tasks` のうち、`type` が `subagent` で会話の記録の最後の応答が終わっているものを除いた数。無ければ `None` |
 
 読めない（会話の記録が無い・`session_id` が取れない・`activity.json` が無い）ときは `None` を返し、判定は今までどおり `alive` にする。
 
@@ -134,7 +135,7 @@ flowchart TB
 
 | キー | 型 | 中身 |
 | --- | --- | --- |
-| `moved` | string / null | 今までどおり。`idle_conductor` のときは conductor の最後の応答の時刻を入れる |
+| `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは conductor の最後の応答の時刻（`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す）を入れる |
 | `background` | integer / null | 背景の作業の件数。`idle_conductor` のときは 0 |
 
 `ndf relay ls` の行に `session_id` と `cwd` を足す（会話の記録のパスを組むため）。既存のキーは変えない。
@@ -149,10 +150,11 @@ sequenceDiagram
     participant D as 耐久ワークフロー
     participant J as liveness.judge
     C->>H: 応答を終える
-    H->>A: at と background を書く
+    H->>A: at と tasks を書く
     loop 読み直しの間隔
         D->>D: ndf relay ls（session_id・cwd つき）
         D->>A: activity.json を読む
+        D->>D: subagent の tasks の会話の記録を turn_done で読み、終わったものを除く
         D->>D: 会話の記録を turn_done で読む
         D->>J: 行・スプリントの待ち・ラッパー・活動
         alt 応答が終わり・background が 0・閾値を過ぎた
@@ -181,17 +183,18 @@ sequenceDiagram
 - 比べた候補: STD1・STD2・PRD1・PRD2
 - 根拠: Value 5「決められた範囲の資源はできるだけ使われる。…待つ間は別の作業を進めるか、待っていることをオーガナイザーや conductor へ伝え、伝えられた側が別のレーンか supervisor を起動する」（MVV バージョン 1）
 
-### 決定 2: 背景の作業の有無は、Stop の hook が書き残す
+### 決定 2: 背景の作業は Stop の hook が一覧を書き残し、終わったサブエージェントは会話の記録で除く
 
-- **質問**: 背景の作業（シェル・サブエージェント）の有無を、耐久ワークフローからどう知るか
-- **選んだ案**: Stop の hook（`relay-marker` guard）が、入力の `background_tasks` の件数をラッパーの保存先の `activity.json` へ書き、判定がそれを読む
+- **質問**: 背景の作業（シェル・サブエージェント）が今も走っているかを、耐久ワークフローからどう知るか
+- **選んだ案**: Stop の hook（`relay-marker` guard）が、入力の `background_tasks` の要素の `id` と `type` をラッパーの保存先の `activity.json` へ書く。判定は、`type` が `subagent` の要素について、そのサブエージェントの会話の記録の最後の応答が終わっていれば「終わった」とみなして除き、残りの数を背景の作業の数とする
 - 採らなかった案:
+  - Stop の時点の件数だけを書く（今回の事象を捕まえられない。04:26 に conductor が応答を終えた時点では待っていた supervisor-waits が走っており件数は 1 で、04:50 に終わっても通知が届かなければ次の Stop は来ないので、件数は 1 のまま残る。読み手役の確かめで見つかった）
   - 会話の記録から読む（`observe.tool_pending` は「Tool の実行の途中か」を返すだけで、背景の作業が残っているかとは別である）
   - conductor の子プロセスを数える（サブエージェントは同じプロセスの中で動くので、プロセスの数に現れない）
   - 背景の作業を見ずに、時間だけで止まりとする（受け入れ条件 2 を満たさず、長い cross-review を回している間の行まで止まりとして知らせる）
-- **代償**: hook が呼ばれない実行（中継を使わない conductor）では `activity.json` が無く、判定は今までどおり `alive` になる
-- 作り方: 自前で作る（既存の guard に書き込みを足す）
-- 比べた候補: PRD1・PRD2・PRD3
+- **代償**: `type` が `shell` などサブエージェントでない背景の作業は、終わったかを外から確かめられないので「走っている」とみなす。そのため、背景のシェルの完了の通知が届かずに止まった行は捕まえられない（「未確認のまま残ること」）。hook が呼ばれない実行（中継を使わない conductor）では `activity.json` が無く、判定は今までどおり `alive` になる
+- 作り方: 自前で作る（既存の guard に書き込みを足し、既存の `observe.turn_done` を呼ぶ）
+- 比べた候補: STD3・PRD1・PRD2・PRD3
 - 根拠: Value 3「判断の要らない手順は仕組みが進める」（MVV バージョン 1）
 
 ### 決定 3: 閾値は 10 分とし、`contracts/limits.json` に置く
@@ -200,7 +203,7 @@ sequenceDiagram
 - **選んだ案**: `parallel-run.idle` を `seconds: 600`（10 分）にする。出力が止まったことを直接測る仕組みの一次情報は CircleCI の `no_output_timeout` の既定（10 分）だけで（PRD3）、同じ相場に合わせる
 - 採らなかった案:
   - 15 分・30 分（`relay.stall` と同じ）・60 分（`parallel-repo.stall` と同じ）（背景の作業が 0 件であることを条件にしているので、長く待つ理由が無い。lracct では 60 分にすると 3 時間のうち最初の 1 時間が失われる）
-  - 5 分（conductor が応答を終えてから次の通知が届くまでの間に、正常な行を止まりとして知らせうる。一次情報の相場より短い）
+  - 5 分（背景の作業が 0 件でも、conductor が応答を終えてから人やオーガナイザーの次の入力が届くまでには数分かかることがあり、その間の正常な行を止まりとして知らせうる。一次情報の相場（PRD3 の 10 分）より短い）
   - 既定を持たず、設定したときだけ働かせる（systemd の `WatchdogSec=` の形（STD2）。知らせが要るのは設定を忘れたレーンなので、既定を置く）
 - **代償**: 値の妥当さは、知らせの実績を見るまで分からない。合わなければ設定の 1 か所を直す
 - 根拠: Value 5「速く届く」・Value 2「役に立たない繰り返しに費用を使わない」（MVV バージョン 1）
@@ -236,6 +239,7 @@ sequenceDiagram
 - 判定の値を 8 から 9 に増やすため、値ごとに分岐する既存の規則が新しい値に当てはまるかを 1 つずつ見る。当てはまらない規則は実装で変える。集める経路は次の 2 つである
   - `liveness` の値の名前で `plugins/ndf` を検索する
   - 値を名指さずすべての判定に当たる規則（`STALL_KINDS` を読む側、知らせのキーを組む `notice_key`、リクエストを書く `write_report`）を読む
+- conductor が `AskUserQuestion` を使わずに本文で問いかけて応答を終えた行（#4000）は、背景の作業が 0 件なら閾値を過ぎて `idle_conductor` になる。人の答えを待って止まっていることに変わりはないので、知らせとして正しい。`AskUserQuestion` の質問（`ndf lanes question` のリクエスト）とスプリントの承認ゲートを待つ行は、今までどおり順 2・順 3 が先に拾う
 - `activity.json` を書くのは Stop の hook で、hook が落ちても conductor の進行は止めない（今の guard と同じ。書けなければ判定は `alive` のままになる）
 - `relay_mark.py` と `hub.py` は中継の本流で、並行するほかのスプリントも触りうる
 
@@ -255,7 +259,9 @@ sequenceDiagram
 | 4（リクエストの中身） | `idle_conductor` の `lane_stalled` に、最後に動いた時刻と背景の作業が 0 件であることが載る | `background` を載せずに書くと落ちる |
 | 5（閾値を設定で変える） | `contracts/limits.json` の `parallel-run.idle` を変えると、判定の境目が変わる。コードに秒の値を書かない | 判定のコードに 600 を書くと落ちる |
 | 決定 1（読めないとき） | 会話の記録を読めない・`session_id` が取れない行は、今までどおり `alive` になる | 読めないときに止まりとすると落ちる |
-| 決定 2（hook が書く） | Stop の hook が、入力の `background_tasks` の件数と時刻を `activity.json` へ書く。書けなくても conductor の進行を止めない | 書き込みの失敗で guard が例外を上げると落ちる |
+| 決定 2（hook が書く） | Stop の hook が、入力の `background_tasks` の `id`・`type` と時刻を `activity.json` へ書く。書けなくても conductor の進行を止めない | 書き込みの失敗で guard が例外を上げると落ちる |
+| 決定 2（終わったサブエージェントを除く） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば、背景の作業は 0 件とみなし、閾値を過ぎれば `idle_conductor` になる（lracct の事象の形） | 会話の記録を読まずに件数だけで判定すると落ちる |
+| 決定 2（シェルは走っているとみなす） | `tasks` が `shell` 1 件なら、閾値を過ぎても `alive` のまま | `shell` も終わったとみなすと落ちる |
 
 詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
 
@@ -270,7 +276,9 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | 閾値の妥当さ | 10 分が短すぎて正常な行を止まりと知らせるか、長すぎて気づきが遅れるかは、知らせの実績を見るまで分からない。合わなければ `contracts/limits.json` の 1 行を直す |
-| Stop の hook が呼ばれる頻度 | conductor が応答を終えるたびに呼ばれると見ているが、背景の作業を持ったまま終えた応答でも呼ばれるかは実測していない。実装で 1 回確かめる |
+| Stop の hook が呼ばれる頻度 | 公式の文書は、背景の作業を待って止まった応答でも Stop の入力に `background_tasks` が載ると定める（STD3）。実機で 1 回確かめる |
+| 背景の作業の `id` とサブエージェントの会話の記録の名前 | `background_tasks` の `subagent` の要素の `id` が、会話の記録のファイル名 `agent-<id>.jsonl` の `<id>` と同じかは実測していない。実装の最初に 1 回確かめ、違えば `activity.json` に会話の記録を引ける値を足す |
+| 背景のシェルの完了 | `shell` の背景の作業は終わったかを外から確かめられないので、完了の通知が届かずに止まった行は捕まえられない（決定 2 の代償）。捕まえる必要が出たら、知らせの実績を見て別の課題にする |
 
 ## 外部の調査
 
@@ -286,6 +294,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- |
 | STD1 | Kubernetes の Probe（liveness / readiness / startup の分離） | 「Liveness probes determine when to restart a container.」「Readiness probes determine when a container is ready to accept traffic.」。生きているかと仕事を受けられるかを別の probe で測り、失敗時の処置も再起動と切り離しで分ける。`periodSeconds` の既定は 10 秒 | 決定 4。既存の `stalled`（ラッパーの異常）と新しい `idle_conductor`（何もしていない）を別の値にする根拠 | https://kubernetes.io/docs/concepts/workloads/pods/probes/ （2026-11-23） |
 | STD2 | systemd の `WatchdogSec=` | サービス自身が `WATCHDOG=1` を打ち続け、間隔が設定を超えたら失敗とする。既定は 0 で無効 | 決定 1・決定 3。プロセスが居ることでなく「ハートビートが来続けること」を測る形の実績。既定を無効にせず置く理由は決定 3 にある | https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html （2026-11-23） |
+| STD3 | Claude Code の hooks（Stop の入力の `background_tasks`） | 「The `background_tasks` and `session_crons` arrays let hooks distinguish "session is done" from "session is paused waiting for background work to wake it back up".」。要素は `id`・`type`（`shell`・`subagent`・`monitor` など）・`status`・`description` を持ち、走っている作業がなければ空 | 決定 2。件数でなく要素の `id` と `type` を書き残し、サブエージェントは会話の記録で終わったかを確かめる根拠 | https://code.claude.com/docs/en/hooks （2026-11-23） |
 
 ### 主要な製品
 
@@ -304,4 +313,4 @@ sequenceDiagram
 | CircleCI の `no_output_timeout` 超過時の処置の原文 | 設定の一覧のページを取得 | 既定の 10 分までは一次情報で確認したが、超過時に何が起きるかはサポート記事（二次）でしか確認できていない。理由: 原文に無い |
 | Buildkite の「Default Command Step Timeout」の出荷時の値 | コマンドステップと打ち切りのページを 2 回取得 | 設定項目の存在は確認したが、出荷時の分数の記載が見つからなかった。理由: 原文に無い |
 
-調べた量: 候補 5 件・取得の試み 10 回。
+調べた量: 候補 6 件・取得の試み 13 回。
