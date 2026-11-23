@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,7 +18,7 @@ from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, lane, model, plan, store
 from ndf.progress.lane import fold
-from ndf.progress.lane import launch
+from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
 from plan_decls import REPO, doc
@@ -134,6 +136,44 @@ def test_cli_refuses_a_plan_file_that_names_a_removed_limit(repo, capsys, tmp_pa
     _cli(capsys, "start", _plan_file(tmp_path / "ok.json", _doc(one)))
     code, out = _cli(capsys, "lane", "add", "p6", lane_path)
     assert out["cause"]["kind"] == "invalid" and "plans" in out["summary"]
+
+
+def _refuse(what):
+    def refuse(*_a, **_k):
+        raise AssertionError(f"{what} を呼んだ（待たず、子のプロセスも起動しないテスト）")
+
+    return refuse
+
+
+@pytest.fixture
+def no_git(tmp_path, monkeypatch, detached):
+    """Git も `ndf relay ls` も子のプロセスで打たない作業ディレクトリ（`git init` しない）。保存先とリポジトリの識別を固定の値にし、
+    生死の材料をラッパーの無い一覧にする。待ちと子のプロセスの起動は、呼ばれたら落ちる偽にする。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    root = tmp_path / "store"
+    monkeypatch.setattr(command, "store_root_of", lambda _cwd: root)
+    monkeypatch.setattr(command, "repo_id", lambda _cwd, _root: "https://example.invalid/o/work")
+    probes = lambda repo, name: liveness.Probes(functools.partial(launch.wrapper_name, repo, name), lambda: {}, lambda _sid: None)  # noqa: E731
+    monkeypatch.setattr(plan_run, "probes", probes)
+    monkeypatch.setattr(time, "sleep", _refuse("time.sleep"))
+    monkeypatch.setattr(subprocess, "Popen", _refuse("subprocess.Popen"))
+    yield work
+    durable.release_store(root)
+
+
+@pytest.mark.parametrize(
+    "argv", [["limits", "p6", "--max-lanes", "7", "--reason", "x"], ["set", "p6", "a", "--plans", "2", "--reason", "x"]]
+)
+def test_cli_has_no_limits_subcommand_and_no_plans_option(no_git, capsys, tmp_path, argv):
+    # #3989 の受け入れ条件 1（#4217 で、子のプロセスを起動しない形に戻した）
+    code, _ = _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
+    assert code == 0
+    assert plan_cli.main(argv) == causes.exit_code("invalid")
+    _, out = _cli(capsys, "status", "p6")
+    assert "max_lanes" not in out["metrics"] and "max_plans" not in out["metrics"]
+    assert "plans" not in out["items"][0]
 
 
 def test_row_moved_to_another_lane(opened):
