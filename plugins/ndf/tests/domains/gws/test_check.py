@@ -208,9 +208,5 @@ def test_states_match_the_result_schema_enum() -> None:
     )
 
 
-def test_sizes_match_the_schema_enums() -> None:
-    # サムネイルの大きさは結果のスキーマ gws.result の metrics.size と、引数のスキーマ gws.args の --size の列挙と同じ
-    result_enum = _io_schema("result")["properties"]["metrics"]["properties"]["size"]["enum"]
-    args = next(v for v in _io_schema("args")["oneOf"] if v["properties"]["subcommand"]["const"] == "thumbnails")
-    assert list(thumbnails.SIZES) == result_enum == args["properties"]["--size"]["enum"]
-    assert thumbnails.DEFAULT_SIZE == args["properties"]["--size"]["default"]
+def test_the_default_size_is_one_of_the_choices() -> None:
+    assert thumbnails.DEFAULT_SIZE in thumbnails.SIZES

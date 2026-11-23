@@ -24,6 +24,8 @@ def test_issue_2967_normal_pace_does_not_need_verify() -> None:
     assert sd.close_plan(sd.CloseFacts("fast", (sd.MERGED_BY_CHECK,), mvv=True), PACES).verify is True
     assert sd.close_plan(sd.CloseFacts("auto", (sd.PROMOTE,), mvv=False), PACES).verify is False
     assert sd.closing_pace("normal") == "normal"
+    assert sd.verify_needed("normal", True, True, True) is False
+    assert "normal" not in sd.MVV_PACES
 
 
 def test_close_steps_follow_the_order() -> None:
