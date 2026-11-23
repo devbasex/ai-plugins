@@ -235,13 +235,17 @@ _OCTAL = "01234567"
 _HEX = "0123456789abcdefABCDEF"
 
 
-def _ansi_c_escape(text: str, i: int) -> tuple[str, int]:
-    """`text[i]` の `\\` から読む ANSI-C 引用のエスケープの値と、読んだ字数（Bash の `$'…'` の規則）。"""
+def ansi_c_escape(text: str, i: int) -> tuple[str, int]:
+    """`text[i]` の `\\` から読む ANSI-C 引用のエスケープの値と、読んだ字数（Bash の `$'…'` の規則）。
+
+    値が NUL（`\\0`・`\\x0` など）なら、Bash はそこで引用の値を打ち切る（呼び出し側が残りを捨てる）。Unicode の字にならない
+    値（サロゲート・`0x10FFFF` を超える値）は、例外にせず置換文字（U+FFFD）にする。
+    """
     nx = text[i + 1]
     if nx in _ANSI_C_NUMBERS:
         width, base = _ANSI_C_NUMBERS[nx]
         digits = _digits(text, i + 2, width, _HEX)
-        return (chr(int(digits, base)), 2 + len(digits)) if digits else ("\\" + nx, 2)
+        return (_code_point(int(digits, base)), 2 + len(digits)) if digits else ("\\" + nx, 2)
     if nx in _OCTAL:
         digits = _digits(text, i + 1, 3, _OCTAL)
         return chr(int(digits, 8) & 0xFF), 1 + len(digits)
@@ -250,11 +254,21 @@ def _ansi_c_escape(text: str, i: int) -> tuple[str, int]:
     return _ANSI_C_ESCAPES.get(nx, "\\" + nx), 2
 
 
+def _code_point(value: int) -> str:
+    if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+        return "\ufffd"
+    return chr(value)
+
+
 def _digits(text: str, start: int, width: int, allowed: str) -> str:
     end = start
     while end < len(text) and end - start < width and text[end] in allowed:
         end += 1
     return text[start:end]
+
+
+# ANSI-C 引用の中で NUL を読んだ後（閉じる `'` まで値に足さない）
+_CUT = "$'\0"
 
 
 def shell_value(text: str) -> str:
@@ -268,13 +282,14 @@ def shell_value(text: str) -> str:
         if quote == "'":
             quote = "" if ch == "'" else quote
             out.append("" if ch == "'" else ch)
-        elif quote == "$'":
+        elif quote in ("$'", _CUT):
             if ch == "\\" and nx:
-                char, step = _ansi_c_escape(text, i)
-                out.append(char)
+                char, step = ansi_c_escape(text, i)
+                quote = _CUT if char == "\0" else quote
+                out.append("" if quote == _CUT else char)
             elif ch == "'":
                 quote = ""
-            else:
+            elif quote != _CUT:
                 out.append(ch)
         elif ch == "\\" and nx and (quote == "" or nx in _DQ_ESCAPABLE):
             out.append("" if nx == "\n" else nx)

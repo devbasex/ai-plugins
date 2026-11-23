@@ -120,6 +120,9 @@ def test_split_env_string_keeps_which_parts_env_expands(text, source):
         ("$'\\u0072m'", "rm"),
         ("$'\\xZ'", "\\xZ"),
         ("$'\\cA'", "\x01"),
+        ("$'a\\0b'c", "ac"),
+        ("$'\\uD800'", "\ufffd"),
+        ("$'\\UFFFFFFFF'", "\ufffd"),
     ],
 )
 def test_shell_value_undoes_the_outer_quotes_and_escapes(text, value):

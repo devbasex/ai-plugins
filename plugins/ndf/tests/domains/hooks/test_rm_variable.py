@@ -50,6 +50,19 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         ("rm ${D:-''}/cache", "${D:-''}/cache"),
         ("rm \"${D:-''}/cache\"", None),
         ('rm "${D:-$$}/x"', None),
+        # `#` に演算子を付けた形は引数の数の加工で空になりうる。`${#}` は数
+        ('rm "${D:-${#%0}}/cache"', '"${D:-${#%0}}/cache"'),
+        ('rm "${D:-${#}}/cache"', None),
+        # 空の引用（ANSI-C の NUL・`$""`）は字を残さない
+        ("rm ${D:-$'\\0x'}/cache", "${D:-$'\\0x'}/cache"),
+        ('rm ${D:-$""}/cache', '${D:-$""}/cache'),
+        # 引用・エスケープの中の `$(` は字。算術展開は数を返す。コマンド置換は空になりうる
+        ("rm ${D:-'$(x)'}/cache", None),
+        ('rm "${D:-$((1+1))}/cache"', None),
+        ('rm "${D:-$(pwd)}/x"', '"${D:-$(pwd)}/x"'),
+        ('rm "${D:-$(pwd)/a}/x"', None),
+        # 空を代入する `:=` は空を返す
+        ('rm "${D:=}/x"', '"${D:=}/x"'),
         ("ls $W", None),
         ("rm -f 'cost$5.txt'", None),
         ("rm -f cost\\$5.txt", None),
@@ -73,6 +86,9 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         ('env --split-string "rm -f \\${D}/cache"', "${D}'/cache'"),
         # ANSI-C 引用の数値のエスケープは Bash が字に戻す（`\x72m` は `rm`）
         ("bash -c $'\\x72m -f \"$W/x\"'", '"$W/x"'),
+        # ANSI-C 引用の値は NUL で切れる。字にならない Unicode の値でも例外にしない
+        ("bash -c $'echo\\0; rm -f \"$W/x\"'", None),
+        ("bash -c $'\\uD800 \\UFFFFFFFF'", None),
         # オプションの値は削除の対象でない。`--` の後は `-` で始まっても対象
         ('rm --interactive="$mode" /tmp/x', None),
         ('rm -- -"$W"', '-"$W"'),
@@ -105,6 +121,15 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "empty-single-quotes-default",
         "single-quotes-in-double-quoted-default",
         "pid-default",
+        "hash-with-operator-default",
+        "argument-count-default",
+        "ansi-c-nul-default",
+        "locale-empty-default",
+        "quoted-substitution-text-default",
+        "arithmetic-default",
+        "substitution-default",
+        "substitution-then-text-default",
+        "empty-assignment",
         "not-rm",
         "single-quoted-dollar",
         "escaped-dollar",
@@ -123,6 +148,8 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "env-split-long-attached",
         "env-split-long",
         "ansi-c-hex-command",
+        "ansi-c-nul-cuts-the-command",
+        "ansi-c-invalid-code-points",
         "option-value",
         "after-double-dash",
         "option-name-from-variable",
@@ -228,6 +255,9 @@ def test_the_table_row_is_not_counted_and_keeps_denying_after_the_limit(tmp_path
         ("${W:-${1}}", True),
         ("${W:-''}", True),
         ("${W:-$$}", False),
+        ("${W:=}", True),
+        ("${#%0}", False),
+        ("${W:-${#%0}}", True),
     ],
 )
 def test_can_be_empty_reads_the_form_of_one_expansion(expansion, empty):

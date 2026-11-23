@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from ndf.domains.hooks.context import ansi_c_escape
 from ndf.domains.hooks.verdict import Verdict, deny
 
 # 展開の名前の 1 字目と 2 字目以降
@@ -151,11 +152,15 @@ def can_be_empty(expansion: str, in_double: bool = False) -> bool:
 
 
 def _may_be_empty(expansion: str, in_double: bool) -> bool:
-    """1 つの展開が空を返しうるか。パラメータの種類によらない（`${1}` は真、`$$`・`${#…}` は偽）。"""
+    """1 つの展開が空を返しうるか。パラメータの種類によらない（`${1}` は真、`$$`・`${#NAME}` は偽）。
+
+    `${#}`（引数の数）と `${#NAME}`・`${#1}`・`${#@}`（長さ）は数を返すので偽。`#` の後ろに演算子が続く形（`${#%0}`）は
+    特殊パラメータ `#` への演算子で、空を返しうる。
+    """
     if not expansion.startswith("${"):
         return expansion[1:2] not in _NEVER_EMPTY
     body = expansion[2:-1]
-    if body.startswith("#"):
+    if body == "#" or (body.startswith("#") and _PARAMETER.fullmatch(body[1:])):
         return False
     param = _PARAMETER.match(body)
     if param is None or body.startswith("!"):
@@ -171,32 +176,47 @@ def _may_be_empty(expansion: str, in_double: bool) -> bool:
 def _has_text(word: str, quote: str) -> bool:
     """既定値の字面 `word` を `quote` の状態から読み、展開の後に必ず 1 字以上が残るか。
 
-    引用とエスケープを外した後の字（二重引用の中の `'` は字）か、空を返さない展開があれば真。行の継続（`\\` と改行）は
-    字を残さない。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので、含めば偽にする。
+    引用とエスケープを外した後の字（二重引用の中の `'` は字）か、空を返さない展開があれば真。行の継続（`\\` と改行）・
+    空の引用（`''`・`""`・`$""` の `$`）・ANSI-C 引用の NUL から閉じる `'` までは字を残さない。算術展開（`$((…))`）は
+    数を返すので真。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので字に数えず、閉じていなければ偽にする。
+    単引用・ANSI-C 引用・エスケープの中の `$(`・`` ` `` は字。
     """
-    if "$(" in word or "`" in word:
-        return False
     i = 0
     while i < len(word):
         char, nxt = word[i], word[i + 1 : i + 2]
-        if quote in ("'", "$'"):
+        if quote == "'" or (quote == "$'" and char not in "\\'"):
             if char != "'":
                 return True
             quote = ""
             i += 1
+        elif quote == "$'":
+            if char == "'" or not nxt:
+                quote = "" if char == "'" else quote
+                i += 1
+                continue
+            value, step = ansi_c_escape(word, i)
+            if value != "\0":
+                return True
+            i, quote = _after_ansi_c(word, i + step), ""
         elif char == "\\":
             if nxt != "\n":
                 return True
             i += 2
-        elif char == "$" and nxt == "'" and quote == "":
-            quote = "$'"
-            i += 2
+        elif char == "$" and nxt in ("'", '"') and quote == "":
+            quote = "$'" if nxt == "'" else quote
+            i += 2 if nxt == "'" else 1
         elif char == '"' and quote in ("", '"', _IN_DOUBLE):
             quote = {"": '"', '"': ""}.get(quote, quote)
             i += 1
         elif char == "'" and quote == "":
             quote = "'"
             i += 1
+        elif word.startswith("$((", i):
+            return True
+        elif (char == "$" and nxt == "(") or char == "`":
+            i = _after_substitution(word, i)
+            if i < 0:
+                return False
         elif char == "$" and (nxt == "{" or _HEAD.fullmatch(nxt) or (nxt and nxt in _SPECIAL)):
             found: list[tuple[str, bool]] = []
             end = _expansion(word, i, found, quote in ('"', _IN_DOUBLE))
@@ -208,6 +228,41 @@ def _has_text(word: str, quote: str) -> bool:
         else:
             return True
     return False
+
+
+def _after_ansi_c(word: str, start: int) -> int:
+    """ANSI-C 引用の中の `start` から、閉じる `'` の次の位置（`\\'` は閉じない）。閉じなければ語の終わり。"""
+    i = start
+    while i < len(word) and word[i] != "'":
+        i += 2 if word[i] == "\\" else 1
+    return min(i + 1, len(word))
+
+
+def _after_substitution(word: str, start: int) -> int:
+    """`start` から始まるコマンド置換（`$(…)` か `` `…` ``）の次の位置。閉じていなければ -1。
+
+    `$(…)` は中の引用とエスケープを読みながら括弧を数える。`` `…` `` は次の逃がしていない `` ` `` まで。
+    """
+    if word[start] == "`":
+        i = start + 1
+        while i < len(word) and word[i] != "`":
+            i += 2 if word[i] == "\\" else 1
+        return i + 1 if i < len(word) else -1
+    depth, quote, i = 1, "", start + 2
+    while i < len(word):
+        char = word[i]
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif char == "\\":
+            i += 1
+        elif char in "'\"" and quote in ("", char):
+            quote = char if quote == "" else ""
+        elif quote == "" and char in "()":
+            depth += 1 if char == "(" else -1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
 
 
 def _is_option(plain: str, text: str) -> bool:
