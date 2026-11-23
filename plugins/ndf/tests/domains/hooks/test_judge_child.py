@@ -119,6 +119,24 @@ def test_classify_launches_in_an_empty_directory_so_no_project_instructions_are_
     assert call.cwd_entries == [[]]
 
 
+@pytest.mark.parametrize("mark", ["CLAUDE.md", ".git"])
+def test_the_scratch_parent_skips_a_temporary_area_inside_a_project(tmp_path, mark):
+    # 一時領域（`TMPDIR`）をリポジトリの中に置いた環境でも、祖先の CLAUDE.md を読む場所で起動しない
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    (repo / "tmp").mkdir(parents=True)
+    outside.mkdir()
+    (repo / mark).touch()
+    assert rj.scratch_parent([str(repo / "tmp"), str(outside)]) == os.path.realpath(outside)
+    assert rj.scratch_parent([str(repo / "tmp")]) is None
+
+
+def test_classify_fails_without_launching_when_no_scratch_parent_is_outside_a_project(monkeypatch):
+    monkeypatch.setattr(rj, "scratch_parent", lambda: None)
+    call = FakeCall(answered("report"))
+    got = rj.classify("本文", 5.0, None, call)
+    assert got["failure"] == "launch" and got["calls"] == 0 and call.argv == []
+
+
 def test_classify_wraps_the_reply_in_the_tags():
     call = FakeCall(answered("report"))
     rj.classify("どちらにしますか。", 5.0, None, call)

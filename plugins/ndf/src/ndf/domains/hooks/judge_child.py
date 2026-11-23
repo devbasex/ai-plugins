@@ -57,6 +57,10 @@ wait か report の 1 語だけを回答し、ほかに何も書かない。"""
 
 # 判定の 1 回の呼び出し（`claude.call_claude` と同じ形）
 Caller = Callable[..., claude.ClaudeReply]
+# 空の作業ディレクトリを作る親の候補（先頭は環境の一時領域。`TMPDIR` などで変わる）と、親か祖先にあれば
+# プロジェクトの中とみなす名前（claude は作業ディレクトリから上の CLAUDE.md を読む）
+SCRATCH_PARENTS = ("/tmp", "/var/tmp", "/dev/shm")
+PROJECT_MARKS = ("CLAUDE.md", "CLAUDE.local.md", ".git", os.path.join(".claude", "CLAUDE.md"))
 
 
 class JudgeSettingError(contracts.ContractError):
@@ -149,13 +153,31 @@ def classify(
     left = seconds - (clock() - start)
     if left < LEAST_SECONDS:
         return {"failure": "timeout", "calls": 0, "error": None}
+    parent = scratch_parent()
+    if parent is None:
+        return {"failure": "launch", "calls": 0, "error": "プロジェクトの外の一時領域が無い"}
     spec = claude.ClaudeCall(system=SYSTEM, permission=claude.Permission.JUDGE, model=setting("model"))
     argv = claude.claude_args(spec, base=(exe,)) if exe else claude.claude_args(spec)
-    # 空の作業ディレクトリで起動する。プロジェクトの中で起動すると、claude がそこから上の CLAUDE.md を読んで質問の前に
-    # 置き（`--setting-sources ''` でも読む）、回答がプロジェクトの指示に引きずられる（引用を待ちと読む）
-    with tempfile.TemporaryDirectory(prefix="ndf-judge-") as empty:
+    # プロジェクトの外の空の作業ディレクトリで起動する。プロジェクトの中で起動すると、claude がそこから上の CLAUDE.md を
+    # 読んで質問の前に置き（`--setting-sources ''` でも読む）、回答がプロジェクトの指示に引きずられる（引用を待ちと読む）
+    with tempfile.TemporaryDirectory(prefix="ndf-judge-", dir=parent) as empty:
         reply = call(argv, _prompt(text), left, cwd=Path(empty), options=_options(exe))
     return _read(reply)
+
+
+def scratch_parent(candidates: Optional[Sequence[str]] = None) -> Optional[str]:
+    """空の作業ディレクトリを作る親: 自身と祖先に `PROJECT_MARKS` の無い、書ける最初の候補。無ければ None。
+
+    候補の既定は環境の一時領域（`tempfile.gettempdir()`）の後に `SCRATCH_PARENTS`。一時領域をリポジトリの中に
+    置いた環境でも、祖先のプロジェクトの指示を判定の入力に入れない。
+    """
+    for path in candidates if candidates is not None else (tempfile.gettempdir(), *SCRATCH_PARENTS):
+        real = Path(os.path.realpath(path))
+        if not real.is_dir() or not os.access(real, os.W_OK | os.X_OK):
+            continue
+        if not any((d / mark).exists() for d in (real, *real.parents) for mark in PROJECT_MARKS):
+            return str(real)
+    return None
 
 
 def _options(exe: Optional[str]) -> claude.LaunchOptions:
