@@ -83,7 +83,8 @@ def test_context_over_the_limit_asks_for_a_handover_once():
 def test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document():
     # #3995 の 3995:7: 求める文は wait の行を残すことと ndf records handoff check を含み、背景の作業の終わりについて書かない
     prompt = switch_decide.HANDOVER_PROMPT
-    assert "ndf lanes wait" in prompt and "ndf records handoff check" in prompt and "背景" not in prompt
+    assert "ndf lanes wait" in prompt and "ndf records --cwd <メインディレクトリの絶対パス> handoff check" in prompt
+    assert "背景" not in prompt
 
 
 def _settings_limit(tmp_path, monkeypatch, env):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import json
 import os
@@ -429,6 +428,7 @@ def handoff_repos(tmp_path):
     other = tmp_path / "other"
     _ndf_repo(other)
     (tmp_path / "link").symlink_to(main / ".ndf" / "handoff")
+    (tmp_path / "sp ace").symlink_to(main / ".ndf" / "handoff")
     (tmp_path / "main-src").symlink_to(main / "src")
     (tmp_path / "wt-src").symlink_to(wt / "src")
     return {"main": main, "wt": wt, "other": other, "tmp": tmp_path}
@@ -495,6 +495,13 @@ _CHECK = "ndf records handoff check .ndf/handoff/x.md"
         ("main", f"ndf relay context record --event 引継ぎ開始 --work 3995; {_CHECK}", True),
         ("main", f"ndf relay context record --event 引継ぎ開始 --work 3995 | {_CHECK}", True),
         ("main", "ndf records --cwd {tmp}/main-src handoff check .ndf/handoff/next.md", True),
+        ("main", "ndf records handoff check {tmp}/sp\\ ace/x.md", True),
+        ("main", "ndf records handoff check '{tmp}/sp ace/x.md' --trim --history=\"{tmp}/sp ace/h.md\"", True),
+        ("main", f"{_CHECK} --trim --history='.ndf/handoff/h.md'", True),
+        ("main", "ndf records handoff check .ndf/hand\\off/x.md", True),
+        ("main", "'ndf' records handoff check .ndf/handoff/x.md", True),
+        ("main", "ndf records handoff check '.ndf/handoff/../x.md'", False),
+        ("main", "ndf records handoff check .ndf/handoff/x.md\\\n.md", False),
         ("main", f"{_CHECK} --trim --history /home/u/notes.md", False),
         ("main", f"{_CHECK} --trim --history .ndf/handoff/../x.md", False),
         ("main", _CHECK + " --trim --history {wt}/.ndf/handoff/h.md", False),
@@ -538,6 +545,12 @@ def test_passes_runs_only_the_handoff_commands(handoff_repos, at, command, passe
     assert _passes(cwd, "Bash", command=command.format(**words)) is passes
 
 
+def test_passes_does_not_run_the_handoff_command_in_the_background(handoff_repos):
+    # #3995: Tool の背景起動（run_in_background）は、コマンドの字面に & が無くても止める
+    assert not _passes(handoff_repos["main"], "Bash", command=_CHECK, run_in_background=True)
+    assert _passes(handoff_repos["main"], "Bash", command=_CHECK, run_in_background=False)
+
+
 def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsys):
     # #3995 の Task 8: 真になった引数を実際に打つと、更新されるのはいつもメインディレクトリの .ndf/handoff の文書で、偽の組は worktree を更新する
     git_sandbox.isolate_git(tmp_path, monkeypatch)
@@ -551,6 +564,10 @@ def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsy
     (tmp_path / "main-src").symlink_to(main / "src")
     (tmp_path / "wt-src").symlink_to(wt / "src")
     body = "## 現在地\n\n- x\n\n## 雑記\n\n- 移す\n"
+    # CLI が実際に使った根（_root の戻り値）を捕まえ、git rev-parse を 1 ケース 1 回に保つ
+    roots: list[Path] = []
+    real_root = records_cli._root
+    monkeypatch.setattr(records_cli, "_root", lambda args: roots.append(real_root(args)) or roots[-1])
     cases = [
         (main, str(main), True),
         (wt, str(main), True),
@@ -568,9 +585,10 @@ def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsy
         assert context_limit._ndf_args_pass(words, str(cwd), _limit_params()) is want
         monkeypatch.chdir(cwd)
         start = Path(os.path.realpath(at if at is not None else cwd))
-        assert records_cli._root(argparse.Namespace(cwd=Path(at) if at is not None else None)) == strict._repo_root(start)
+        roots.clear()
         cli.main(words)
         capsys.readouterr()
+        assert roots == [strict._repo_root(start)]
         updated = [root for root in (main, wt) if (root / ".ndf/handoff/next-history.md").exists()]
         assert updated == [main if want else wt]
 
@@ -581,17 +599,31 @@ def test_context_limit_passes_the_handoff_calls_at_the_operating_limit(tmp_path)
     (tmp_path / ".ndf" / "handoff").mkdir()
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": ".ndf/handoff/next.md"})
     stop_task = sample("claude", "PreToolUse", tmp_path, tool_name="TaskStop", tool_input={"task_id": "x"})
-    for payload in (read, stop_task, bash(tmp_path, "ndf records handoff check .ndf/handoff/next.md")):
+    check = "ndf records handoff check .ndf/handoff/next.md"
+    record = "ndf relay context record --event 引継ぎ開始 --work 3995"
+    chains = [f"{record} {op} {check}" for op in ("&&", ";", "|")]
+    for payload in (read, stop_task, *(bash(tmp_path, c) for c in (check, *chains))):
         assert deny_reason(call_entry("claude", "PreToolUse", payload)) is None
-    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ndf lanes status p1"))) is not None
+    for payload in (bash(tmp_path, "ndf lanes status p1"), bash(tmp_path, check, run_in_background=True)):
+        assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
+
+
+def test_script_chain_still_stops_other_ndf_chains_below_the_limit(tmp_path):
+    # #3995: 引継ぎのコマンドだけの連結は運用上限の下でも通り、ほかの NDF のコマンドを混ぜた連結は script-chain が止める
+    _usage_transcript(tmp_path, 1)
+    (tmp_path / ".ndf" / "handoff").mkdir()
+    check = "ndf records handoff check .ndf/handoff/next.md"
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, f"ndf relay context record --work 1 && {check}"))) is None
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, f"ndf lanes status p1 && {check}"))) is not None
 
 
 def test_context_limit_reason_tells_how_to_stop_the_watches_and_hand_over():
     # #3995 の 3995:8・テスト設計の 8: 監視を TaskStop で止め、supervisor を待ち、wait の行を残し、引継ぎ文書を書いて終える
     t = thresholds({}, tables.policy_value)
     for under, end in ((True, "次のセグメントのブロック"), (False, "ndf-next")):
-        text = context_limit._reason(t, under, ".ndf/handoff/")
-        for part in ("TaskStop", "supervisor", "wait の行", ".ndf/handoff/parallel-<計画>.md", "ndf records handoff check", end):
+        text = context_limit._reason(t, under, "/work/repo", ".ndf/handoff/")
+        parts = ("/work/repo/.ndf/handoff/parallel-<計画>.md ", "ndf records --cwd /work/repo handoff check")
+        for part in ("TaskStop", "supervisor", "wait の行", *parts, end):
             assert part in text
         assert len(text) <= 600
 

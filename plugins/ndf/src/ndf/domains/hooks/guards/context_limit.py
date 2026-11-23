@@ -2,8 +2,9 @@
 
 会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
 `context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、引継ぎに要る呼び出し（メインディレクトリの引継ぎ文書の Read・Write・Edit、
-`params.pass_tools`、`params.pass_ndf` の `ndf` のコマンドだけの Bash）を除いて止める。拒否の文は背景の監視の止め方・引継ぎ文書・
-終え方（中継の下は次のセグメントのブロック、外は ndf-next）を書き、文脈の量を入れない。拒否は同じ理由で数えられ、続けば案内へ下がる
+`params.pass_tools`、`params.pass_ndf` の `ndf` のコマンドだけの前景の Bash）を除いて止める。`pass_ndf` だけの連結は
+`script-chain` の guard も `handoff_bash` で通す。拒否の文は背景の監視の止め方・メインディレクトリの絶対パスの引継ぎ文書と
+その確かめ方・終え方（中継の下は次のセグメントのブロック、外は ndf-next）を書き、文脈の量を入れない。拒否は同じ理由で数えられ、続けば案内へ下がる
 （#3345 の決定 92）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
@@ -22,6 +23,7 @@ from typing import Optional
 from ndf import identity
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.context import context_tokens
+from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
 from ndf.domains.relay.signals import relay_dir
@@ -29,8 +31,12 @@ from ndf.domains.hooks.verdict import Verdict, deny, passing
 
 # 運用上限で通す Bash に許さない形: 変数の展開・コマンド置換（`$`・バッククォート）とプロセス置換
 _SUBSTITUTION = re.compile(r"[$`]|[<>]\(")
-# 運用上限で通す Bash の語に許さない形: チルダ・グロブ・ブレースの展開
-_GLOB = re.compile(r"^~|[*?\[{]")
+# 引用の外で展開や別の構文になる字（チルダ・グロブ・ブレース・extglob の括弧）。運用上限で通す Bash の語に許さない
+_UNQUOTED_SPECIAL = frozenset("~*?[{(")
+# 二重引用の中でバックスラッシュが外す字（ほかの字の前のバックスラッシュは残る）
+_DQUOTE_ESCAPES = frozenset('$`"\\\n')
+# この guard の名前（`guards.json` の行）
+_NAME = "context-limit"
 # ファイルへ書かないリダイレクト（演算子と先を空白でつないだ字面）: 記述子の複製（先が数字か -）と、/dev/null へ向ける形
 _SAFE_REDIRECT = re.compile(r"[<>]& (?:-|[0-9]+)|&?>>? /dev/null")
 
@@ -148,20 +154,72 @@ def _ndf_args_pass(words: list[str], cwd: str, params: dict) -> bool:
     return False
 
 
+def _static_word(text: str) -> Optional[str]:
+    """語の字面（引用とエスケープを残したもの）を、Bash が渡す値に読み直す。展開・グロブを含み値が静的に決まらなければ None。"""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            out.append(text[i + 1 : i + 2])
+            i += 2
+        elif c == "'":
+            end = text.find("'", i + 1)
+            if end < 0:
+                return None
+            out.append(text[i + 1 : end])
+            i = end + 1
+        elif c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] in "$`":
+                    return None
+                if text[i] == "\\" and text[i + 1 : i + 2] in _DQUOTE_ESCAPES:
+                    i += 1
+                out.append(text[i])
+                i += 1
+            if i >= n:
+                return None
+            i += 1
+        elif c in "$`" or c in _UNQUOTED_SPECIAL:
+            return None
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def _redirect_ok(r) -> bool:
     """ファイルへ書かないリダイレクト（記述子の複製か /dev/null）か。"""
     return not r.dynamic and _SAFE_REDIRECT.fullmatch(f"{r.op} {r.target}") is not None
 
 
 def _command_ok(cmd, cwd: str, params: dict) -> bool:
-    """ラッパーを持たず、展開の無い語で、背景でない `ndf` の通すコマンドか。"""
-    return (
-        not cmd.background
-        and cmd.argv == cmd.body_argv
-        and cmd.argv[:1] == (identity.FIXED_WORDS["entrypoint"],)
-        and not any(_GLOB.search(w) for w in cmd.argv)
-        and _ndf_args_pass(list(cmd.argv[1:]), cwd, params)
-    )
+    """背景でなく、語が Bash と同じ値に静的に決まり、先頭の語が `ndf`（ラッパーを持たない）の通すコマンドか。"""
+    words = [_static_word(w) for w in cmd.source]
+    if cmd.background or None in words or words[:1] != [identity.FIXED_WORDS["entrypoint"]]:
+        return False
+    return _ndf_args_pass([w for w in words[1:] if w is not None], cwd, params)
+
+
+def params() -> dict:
+    """この guard の `guards.json` の `params`（`script-chain` の guard が引継ぎの連結を見分けるのに使う）。"""
+    return next(g for g in tables.guards() if g["name"] == _NAME)["params"]
+
+
+def handoff_bash(ctx, params: dict) -> bool:
+    """`pass_ndf` のコマンドだけを前景で打つ Bash か（連結は単純なコマンドを 1 つずつ照らす）。
+
+    Tool の背景起動（`run_in_background`）・語の中の行の継続（構文木の語の切れ目が Bash と違う）は止める。
+    """
+    shell = ctx.shell
+    if background_call(ctx.tool_input) or "\\\n" in ctx.command:
+        return False
+    if not shell.commands or shell.assignments or shell.heredocs or len(shell.waits) > len(shell.commands):
+        return False
+    if _SUBSTITUTION.search(ctx.command) or not all(_redirect_ok(r) for r in shell.redirects):
+        return False
+    return all(_command_ok(c, ctx.cwd, params) for c in shell.commands)
 
 
 def _passes(ctx, params: dict) -> bool:
@@ -171,29 +229,25 @@ def _passes(ctx, params: dict) -> bool:
         return isinstance(path, str) and _in_handoff(path, ctx.cwd, params["handoff_dir"])
     if ctx.tool in params["pass_tools"]:
         return True
-    if ctx.tool != "Bash":
-        return False
-    shell = ctx.shell
-    if not shell.commands or shell.assignments or shell.heredocs or len(shell.waits) > len(shell.commands):
-        return False
-    if _SUBSTITUTION.search(ctx.command) or not all(_redirect_ok(r) for r in shell.redirects):
-        return False
-    return all(_command_ok(c, ctx.cwd, params) for c in shell.commands)
+    return ctx.tool == "Bash" and handoff_bash(ctx, params)
 
 
-def _reason(t: Thresholds, under_relay: bool, handoff_dir: str) -> str:
-    """運用上限の拒否の文（背景の監視の扱い・引継ぎ文書・終え方）。文脈の量は入れない。"""
+def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> str:
+    """運用上限の拒否の文（背景の監視の扱い・メインディレクトリ `main` の引継ぎ文書と確かめ方・終え方）。文脈の量は入れない。"""
     end = "応答の最後に次のセグメントのブロックを書いて終える" if under_relay else "ndf-next のブロックを出して新しいセッションで続ける"
+    docs = os.path.join(main, handoff_dir.strip("/"))
     return (
         f"文脈の量が運用上限（{t.limit} token）を超えた。次の手: 背景の監視（ndf lanes wait・Monitor）があれば TaskStop で止めて"
         "完了通知で確かめる。supervisor・ndf plan queue は止めずに報告を待つ。止める前に wait が戻っていたら結果を処理せず、"
         "引継ぎ文書の「現在地」の wait の行をそのまま残す。"
-        f"引継ぎ文書（オーガナイザーは {handoff_dir}parallel-<計画>.md）を書いて ndf records handoff check で確かめ、{end}"
+        f"引継ぎ文書はメインディレクトリの {docs}/ の下に絶対パスで書き（オーガナイザーは {docs}/parallel-<計画>.md ）、"
+        f"前景で ndf records --cwd {main} handoff check <文書の絶対パス> を打って確かめ、{end}"
     )
 
 
 def check(ctx, svc) -> Verdict | None:
-    if "agent_id" in ctx.payload or _main(ctx.cwd) is None:
+    main = None if "agent_id" in ctx.payload else _main(ctx.cwd)
+    if main is None:
         return None
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
@@ -202,4 +256,4 @@ def check(ctx, svc) -> Verdict | None:
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
-    return deny(_reason(t, under, svc.params["handoff_dir"]), notes={"context_tokens": tokens, "under_relay": under})
+    return deny(_reason(t, under, main, svc.params["handoff_dir"]), notes={"context_tokens": tokens, "under_relay": under})

@@ -47,7 +47,8 @@ class ShellCommand(NamedTuple):
 
     `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
-    読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。
+    読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
+    （#3995。運用上限の guard が Bash と同じ値に読み直す）。
     """
 
     argv: tuple[str, ...]
@@ -55,6 +56,7 @@ class ShellCommand(NamedTuple):
     loop_body: bool = False
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
+    source: tuple[str, ...] = ()
 
     @property
     def body_name(self) -> str:
@@ -124,7 +126,9 @@ def _walk(text: str) -> ShellScript:
         assignments += node.type == "variable_assignment"
         if node.type == "command":
             body, condition = _loop_position(node)
-            commands.append(ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True))))
+            commands.append(
+                ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True)), _source(node))
+            )
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -451,6 +455,16 @@ def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
             words.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
         elif target.type in _WORD_NODES:
             words.append(_unquote(target.text.decode("utf-8", "replace"), target.type))
+    return tuple(words)
+
+
+def _source(node: Any) -> tuple[str, ...]:
+    """単純コマンドの語の字面（引用とエスケープを残す）。並びは `_argv` と同じ。"""
+    words = []
+    for child in node.children:
+        target = child.children[0] if child.type == "command_name" and child.children else child
+        if target.type in _WORD_NODES:
+            words.append(target.text.decode("utf-8", "replace"))
     return tuple(words)
 
 
