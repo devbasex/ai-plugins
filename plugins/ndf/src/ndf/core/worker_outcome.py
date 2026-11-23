@@ -90,13 +90,13 @@ def outcome_of(
         return result.stopped(
             TOOL, "bad_report", f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics
         )
-    said = report.get("summary") if isinstance(report.get("summary"), str) and report["summary"] else "（要約なし）"
+    said = told if isinstance(told := report.get("summary"), str) and told else "（要約なし）"
     gaps = gaps_of(report)
     if status == OK and not gaps:
         summary = f"作業 {kind} の worker が完了した（起動 {metrics['attempts']} 回）: {said}"
         return result.result(TOOL, OK, summary, items, metrics, outputs=outputs)
     if status == GATE:
-        routes = report.get("routes") if isinstance(report.get("routes"), dict) and report["routes"] else {"retry": None, "cancel": None}
+        routes = given if isinstance(given := report.get("routes"), dict) and given else {"retry": None, "cancel": None}
         return result.result(TOOL, GATE, f"作業 {kind} の worker が判断を求めた: {said}", items, metrics, routes=routes)
     gaps = gaps or [{"kind": "work", "name": kind, "reason": said}]
     return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
