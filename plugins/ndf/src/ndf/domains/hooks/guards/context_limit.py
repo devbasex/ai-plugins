@@ -20,6 +20,7 @@ PostToolUse では、文脈の量が判断開始の値（`decide_from`）以上�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -362,28 +363,34 @@ def _tool_use_id(ctx) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def _cwd_digest(cwd: str) -> str:
+    """覚えた値の `cwd` の照合に使うダイジェスト（作業ディレクトリのパスを状態ファイルへ平文で残さない）。"""
+    return hashlib.sha256(cwd.encode("utf-8", "surrogatepass")).hexdigest()
+
+
 def _remembered(ctx, svc) -> Optional[int]:
     """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
 
-    PreToolUse は判定の対象（メインディレクトリに `.ndf` がある）と確かめた後にだけ覚えるので、値があれば対象の判定も済んでいる。
-    同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    `cwd` はダイジェストで照合する。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    Tool の実行で判定の対象から外れることがある（サブディレクトリでの `git init` など）ので、対象の判定は知らせる直前に確かめ直す。
     """
     item = _tool_use_id(ctx)
     got = svc.counter.take(MEMO_KEY, item) if item is not None else None
-    if got is None or got.get("cwd") != ctx.cwd or not isinstance(got.get("tokens"), int):
+    if got is None or got.get("cwd") != _cwd_digest(ctx.cwd) or not isinstance(got.get("tokens"), int):
         return None
     return got["tokens"]
 
 
 def _post(ctx, svc) -> Verdict | None:
-    """PostToolUse: 判断開始の値以上・運用上限未満なら、利用者の入力ごとに 1 度知らせる。
+    """PostToolUse: 判断開始の値以上・運用上限未満で、判定の対象なら、利用者の入力ごとに 1 度知らせる。
 
     知らせ済みか数え手が使えなければ、リポジトリを探さず会話の記録も読まずに終える。PreToolUse が覚えた値があれば
-    リポジトリを探し直さない。
+    会話の記録を読み直さず、リポジトリは知らせる直前にだけ探す。
     """
     if not svc.counter.usable or svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
         return None
     tokens = _remembered(ctx, svc)
+    checked = tokens is None
     if tokens is None:
         if _main(ctx.cwd) is None:
             return None
@@ -391,7 +398,11 @@ def _post(ctx, svc) -> Verdict | None:
         if tokens is None:
             return None
     t = thresholds(ctx.env, tables.policy_value)
-    if t.decide_from <= tokens < t.limit and svc.counter.bump(NOTICE_KEY) == 1:
+    if not t.decide_from <= tokens < t.limit:
+        return passing(context_tokens=tokens)
+    if not checked and _main(ctx.cwd) is None:
+        return None
+    if svc.counter.bump(NOTICE_KEY) == 1:
         return advise(_notice(tokens, t))
     return passing(context_tokens=tokens)
 
@@ -409,8 +420,8 @@ def check(ctx, svc) -> Verdict | None:
         return None
     item = _tool_use_id(ctx)
     if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
-        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd を覚える
-        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": ctx.cwd}, MEMO_KEEP)
+        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd のダイジェストを覚える
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
     t = thresholds(ctx.env, tables.policy_value)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)

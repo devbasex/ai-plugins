@@ -169,6 +169,26 @@ def test_context_limit_post_tool_use_checks_again_for_another_cwd(tmp_path, coun
     assert counted_main["n"] == 1
 
 
+def test_context_limit_post_tool_use_checks_the_repo_again_before_the_notice(tmp_path):
+    # Tool の実行で判定の対象から外れたら（PreToolUse の後に .ndf が無くなる）、覚えた値があっても知らせず、通知枠も使わない
+    usage_transcript(tmp_path, 300_000)
+    assert _tool(tmp_path, "PreToolUse") is None
+    (tmp_path / ".ndf").rename(tmp_path / "ndf-off")
+    assert _tool(tmp_path, "PostToolUse") is None
+    (tmp_path / "ndf-off").rename(tmp_path / ".ndf")
+    assert _notice(_tool(tmp_path, "PostToolUse", "toolu_B"))
+
+
+def test_context_limit_remembers_the_cwd_as_a_digest(tmp_path):
+    # 覚えた値の cwd は作業ディレクトリのパスを平文で残さない
+    usage_transcript(tmp_path, 200_000)
+    assert _tool(tmp_path, "PreToolUse") is None
+    session = sample("claude", "PreToolUse", tmp_path)["session_id"]
+    text = (state_dir() / "hooks" / "sessions" / f"{session}.json").read_text(encoding="utf-8")
+    assert _memo_size(tmp_path) == 1
+    assert str(tmp_path) not in text
+
+
 def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
     # #3995 の 3995:5: 知らせた後の同じ入力の組は覚えた項目を増やさない。運用上限の判定は今のまま。利用者の入力の後は再び覚える
     usage_transcript(tmp_path, 250_000)
