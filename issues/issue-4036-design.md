@@ -280,7 +280,7 @@ sequenceDiagram
 | 閾値の妥当さ | 10 分が短すぎて正常な行を止まりと知らせるか、長すぎて気づきが遅れるかは、知らせの実績を見るまで分からない。合わなければ `contracts/limits.json` の 1 行を直す |
 | Stop の hook が呼ばれる頻度 | 公式の文書は、背景の作業を待って止まった応答でも Stop の入力に `background_tasks` が載ると定める（STD3）。実機で 1 回確かめる |
 | 背景の作業の `id` とサブエージェントの会話の記録の名前 | `background_tasks` の `subagent` の要素の `id` が、会話の記録のファイル名 `agent-<id>.jsonl` の `<id>` と同じかは実測していない。実装の最初に 1 回確かめ、違えば `activity.json` に会話の記録を引ける値を足す |
-| 背景のシェルの生死と終わった時刻 | Bash の Tool のシェルが `claude` の直接の子の `bash -c source <HOME>/.claude/shell-snapshots/snapshot-…` であることは、2026-11-23 に手元の `ps` で確かめた（前景の呼び出し）。背景の呼び出し（`run_in_background`）でも同じ形か、出力のファイル（`/tmp/claude-<uid>/<作業ディレクトリの鍵>/<session_id>/tasks/<id>.output`）の置き場と更新時刻が終わった時刻の代わりになるかは、実装の最初に 1 回確かめる。違えば、シェルの生死を確かめられない扱い（一覧のシェルを走っているとみなす）へ落とし、受け入れ条件 1 のシェルの取りこぼしが捕まえられないことを Pull Request に残す |
+| 背景のシェルの生死と終わった時刻 | Bash の Tool のシェルが `claude` の直接の子の `bash -c source <HOME>/.claude/shell-snapshots/snapshot-…` であることは、2026-11-23 に手元の `ps` で確かめた（前景の呼び出し）。背景の呼び出し（`run_in_background`）でも同じ形か、出力のファイル（`/tmp/claude-<uid>/<作業ディレクトリの鍵>/<session_id>/tasks/<id>.output`）の置き場と更新時刻が終わった時刻の代わりになるかは、実装の最初に 1 回確かめる。違えば、シェルの生死を確かめられない扱い（`background` を `None` にし、判定を `alive` に倒す）へ落とし、受け入れ条件 1 のシェルの取りこぼしが捕まえられないことを Pull Request に残す |
 
 ## 外部の調査
 

@@ -196,7 +196,7 @@ plugins/ndf/
   - 事前条件: `row` は `ndf relay ls` の 1 行（`None` なら一覧に無い）。`state_dir` は NDF の状態の保存先（`identity.load().state_dir`）。会話の記録の保存先は、耐久ワークフローの環境変数（`os.environ`）から `transcript_path` が組む
   - 事後条件: 返る `Activity` の `turn_done` は conductor の会話の記録の最後が終わった応答か。`activity.json` は、`session_id` が行の `session_id` と同じで、`at` が conductor の最後の応答の時刻以上のときだけ使う（前の Stop の記録と今の応答を組み合わせない）。使えないとき・`tasks` が `None` のときは `background` を `None` にする。`background` は次の和である
     - `type` が `subagent` の要素のうち、終わっていないもの。終わったサブエージェントとは、`subagent_transcript_path` が返すパスの記録を `observe.turn_done` で読んで `(True, t)` が返るものをいう。記録を読めないもの（パスを組めない・ファイルが無い・壊れている・応答の途中）は走っているとみなす
-    - シェル: `live_shells(row["pid"], parents)` が数を返せばその数（Stop の一覧に載っていないシェルも数える）。`None` なら `type` が `shell` の要素の数（生死を確かめられないので一覧のシェルを走っているとみなす）
+    - シェル: `live_shells(row["pid"], parents)` が数を返せばその数（Stop の一覧に載っていないシェルも数える）。`None` なら、一覧の `shell` の数によらず `background` 全体を `None` にする（生死を確かめられないので止まりの根拠にしない。一覧が空でも、一覧に載っていないシェルが走っていることがある）
     - `subagent`・`shell` 以外の `type`（`monitor` など）の要素の数（走っているとみなす）
   - `moved` は、conductor の最後の応答の時刻と、除いた背景の作業の終わった時刻のうち最も遅いものである。終わったサブエージェントはその記録の最後の応答の時刻 `t`、終わったシェル（一覧に載り、`live_shells` が数を返し、生きているシェルより一覧のシェルが多いとき）は一覧のシェルごとの `shell_output_path` の更新時刻の最大を使う。終わったシェルの出力のファイルを 1 つも読めないときは、終わった時刻を確かめられないので `moved` を `now`（読み直しの時刻）にする（閾値が過ぎるまで待ち直す側へ倒す）。conductor の会話の記録を読めなければ `None` を返す
   - 副作用: ファイルの読み取り（`activity.json`・conductor の会話の記録の末尾・`type` が `subagent` の要素ごとにその会話の記録の末尾・`/proc` の conductor の子の `cmdline`・終わったシェルの出力のファイルの更新時刻）。会話の記録はどれも末尾だけを読む（`limits.json` の `hook.transcript-tail` の `count` バイト。決定 1 の代償）
@@ -216,7 +216,7 @@ plugins/ndf/
 | `lane_activity` | 活動の記録が無い | hook が呼ばれない実行（中継を使わない conductor） | `registry.read_activity` の返り（`None`） | 既定値で続ける（`Activity.background` を `None` にし、判定は新しい条件に当たらない） | 判定は `alive`（決定 2 の代償） | 後始末は無い |
 | `lane_activity` | 活動の記録が今の応答のものと確かめられない | 別のセッションの記録（切り替えの後に書けなかった）・`at` が最後の応答より前（今の Stop で書けなかった） | `session_id` と `at` の照合 | 既定値で続ける（`background` を `None`） | 判定は `alive`。前の Stop の空の一覧を根拠に止まりとしない | 次の Stop が書き直せば読める |
 | `lane_activity` | 背景の作業を観測できなかった記録 | Stop の入力に `background_tasks` が無い・型が違う（`tasks` が `null`） | `read_activity` の返りの `tasks` | 既定値で続ける（`background` を `None`） | 判定は `alive` | 後始末は無い |
-| `lane_activity` | シェルの生死を確かめられない | `/proc` が無い・行に `pid` が無い・ラッパーの子に `claude` が無い・`cmdline` を読めない | `live_shells` の返り（`None`） | 既定値で続ける（一覧の `shell` を走っているとみなして数える） | 判定は `alive`（今までの代償へ戻る） | 後始末は無い |
+| `lane_activity` | シェルの生死を確かめられない | `/proc` が無い・行に `pid` が無い・ラッパーの子に `claude` が無い・`cmdline` を読めない | `live_shells` の返り（`None`） | 既定値で続ける（一覧の `shell` の数によらず `background` を `None` にする。一覧が空でも 0 にしない） | 判定は `alive`（今までの代償へ戻る。Stop の一覧に載っていないシェルが走っていても止まりとしない） | 後始末は無い |
 | `lane_activity` | 終わったシェルの終わった時刻が分からない | 出力のファイルが無い・読めない | `shell_output_path` の返り・`stat` の失敗 | 既定値で続ける（`moved` を `now` にする） | その読み直しでは止まりにせず、閾値が過ぎた次の読み直しで止まりになる | 後始末は無い |
 | `lane_activity` | サブエージェントの会話の記録を読めない | `id` がファイル名に使えない形・記録のファイルが無い・壊れている・`id` と記録の名前が一致しない（設計文書の「未確認のまま残ること」） | `subagent_transcript_path` の返り（`None`）・`observe.turn_done` の返り（`None`） | 既定値で続ける（その要素を「走っている」として数える） | 判定は `alive`（止まりと知らせる側へ倒さない） | 次の読み直しで読めれば除かれる |
 | `lane_activity` | サブエージェントが応答の途中 | 背景のサブエージェントがまだ動いている | `observe.turn_done` の返り（`(False, None)`） | その要素を「走っている」として数える（正常） | 判定は `alive` | 後始末は無い |
@@ -230,7 +230,7 @@ plugins/ndf/
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録の最後の応答が終わっている | その要素を数えない |
 | `lane_activity` | `tasks` の要素の `type` が `subagent`・その会話の記録を読めない・応答の途中 | その要素を数える |
 | `lane_activity` | シェル・`live_shells` が数を返す | 一覧によらずその数を数える。一覧のシェルより少なければ、終わったシェルの出力のファイルの更新時刻を `moved` に重ねる |
-| `lane_activity` | シェル・`live_shells` が `None` | 一覧の `shell` の要素を数える |
+| `lane_activity` | `live_shells` が `None`（一覧の `shell` の数によらない） | `Activity(turn_done, moved, None)` |
 | `lane_activity` | `tasks` の要素の `type` が `subagent` でも `shell` でもない（`monitor` など） | その要素を数える |
 | `lane_activity` | 行はあるが conductor の会話の記録を読めない | `None` |
 | `lane_activity` | 会話の記録は読めるが活動の記録が無い・別のセッション・`at` が最後の応答より前・`tasks` が `null` | `Activity(turn_done, moved, None)` |
@@ -241,7 +241,7 @@ plugins/ndf/
 2. `observe.transcript_path(os.environ, Path(cwd), session_id)` を `observe.turn_done` で読む。`None` なら `None` を返す
 3. `registry.wrapper_dir` でラッパーの保存先を求め、`registry.read_activity` で活動の記録を読む。無い・`session_id` が行と違う・`at` が手順 2 の時刻より前・`tasks` が `None` なら `Activity(turn_done, moved, None)` を返す
 4. `tasks` の要素ごとに、`type` が `subagent` なら手順 2 のパスと要素の `id` から `subagent_transcript_path` でパスを組み、`observe.turn_done` が `(True, t)` を返す要素だけを除いて `t` を集める
-5. `live_shells(row["pid"], parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `shell_output_path` の更新時刻を集める（1 つも読めなければ `now` を集める）。`None` なら一覧の `shell` の数を使う
+5. `live_shells(row["pid"], parents)` でシェルを数える。数が返り、一覧の `shell` の数より少なければ、一覧の `shell` ごとに `shell_output_path` の更新時刻を集める（1 つも読めなければ `now` を集める）。`None` なら、一覧の `shell` の数によらず（空でも）`Activity(turn_done, moved, None)` を返す
 6. 残りの数の和を `background` に、手順 2 の時刻と手順 4・5 で集めた時刻の最大を `moved` にする
 
 読むファイルはレーンごとに 2 つと、`type` が `subagent` の要素の数と、`/proc` の conductor の子の数（`cmdline`）と、終わったシェルの出力のファイルの数である。繰り返しはレーンの数（並列の上限は `relay.max-named` の 6）と各レーンの `tasks` の要素の数で終わる。会話の記録は末尾の決まった大きさだけを読むので、記録が伸びても読む量は増えない。`/proc/<pid>/stat` は見えているプロセスの数だけ、読み直しごとに 1 度だけ読む（レーンの数を掛けない）。
@@ -263,7 +263,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻。`tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば `background` が 0 で、`moved` が conductor の最後の応答とサブエージェントの最後の応答のうち遅い方（lracct の現象の形。決定 2）。conductor とサブエージェントのどちらの記録も、`observe.turn_done` を差し替えずに実関数で読み、`size` に `limits.json` の `hook.transcript-tail` の `count` が渡る | `tasks` が空で `background` が 0。`subagent` 1 件でその記録が応答の途中なら 1。`shell` 1 件で、差し替えた `/proc`（一時ディレクトリ）に生きているシェルが 1 つなら 1、0 なら 0 で `moved` が出力のファイルの更新時刻。`/proc` を読めなければ 1。一覧が空でも生きているシェルが 1 つなら 1 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す。`subagent` の記録が無い・`id` が `../x` のときは、例外を上げずにその要素を数えて `background` が 1。`activity.json` の `session_id` が行と違う・`at` が conductor の最後の応答より前（前の Stop の空の一覧）・`tasks` が `null` のとき、`background` が `None` |
+| `lane_activity` | 記録のそろったレーンで `turn_done` が真・`moved` が記録の時刻。`tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば `background` が 0 で、`moved` が conductor の最後の応答とサブエージェントの最後の応答のうち遅い方（lracct の現象の形。決定 2）。conductor とサブエージェントのどちらの記録も、`observe.turn_done` を差し替えずに実関数で読み、`size` に `limits.json` の `hook.transcript-tail` の `count` が渡る | `tasks` が空で `background` が 0。`subagent` 1 件でその記録が応答の途中なら 1。`shell` 1 件で、差し替えた `/proc`（一時ディレクトリ）に生きているシェルが 1 つなら 1、0 なら 0 で `moved` が出力のファイルの更新時刻。`/proc` を読めなければ、一覧の `shell` の数によらず（空でも）`background` が `None`。一覧が空でも生きているシェルが 1 つなら 1 | 行が `None`・`session_id` が無い・会話の記録が無い・活動の記録が無いときの 4 通りで、例外を上げずに `None` か `background` が `None` の `Activity` を返す。`subagent` の記録が無い・`id` が `../x` のときは、例外を上げずにその要素を数えて `background` が 1。`activity.json` の `session_id` が行と違う・`at` が conductor の最後の応答より前（前の Stop の空の一覧）・`tasks` が `null` のとき、`background` が `None` |
 | `subagent_transcript_path` | `<d>/<sid>.jsonl` と `a1b2` から `<d>/<sid>/subagents/agent-a1b2.jsonl` | 英数字・`-`・`_` だけの `id` | 空の `id`・`/` か `.` を含む `id` で `None` |
 | `live_shells` | 一時ディレクトリに組んだ `/proc` の形（ラッパー → `claude` → `bash -c source …/.claude/shell-snapshots/snapshot-…`）で 1。登録済みアカウントの `CLAUDE_CONFIG_DIR`（`…/.ndf/accounts/<id>/shell-snapshots/snapshot-…`）のシェルも数える | MCP のサーバーなどシェルでない子は数えない。子が無ければ 0。`cmdline` を読む間に終わった子（`ProcessLookupError`）は数えない | ラッパーの `pid` が一覧に無い・子に `claude` が無い・`parents` が `None`・`cmdline` を読めない（`PermissionError`）とき `None` |
 | `process_parents` | 一時ディレクトリに組んだ `/proc` の `stat` から親 PID。comm に括弧や空白があっても読む | 数字でない項目は読まない。`stat` を読めない PID（`PermissionError`）は外して続ける | `/proc` が無ければ `None` |
