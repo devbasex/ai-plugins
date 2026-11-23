@@ -25,20 +25,16 @@ context window の量を測り、工程境界で会話を続けるか切るか�
 | 起動の共有処理 | — | LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の使用量ログへ 1 行を書く | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 | Claude の使用量ログの全体 | — | Claude の使用量の使用量ログの claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が使用量ログに無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値 | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 | 会話の記録だけの呼び出し | — | 使用量の使用量ログに行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。使用量ログができる前の分と、NDF のコードの外で打った claude -p が当たる | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
-| 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 現行方式 | — | 運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 試行方式 | — | カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 判断開始の値 | — | 試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 運用上限 | — | これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 判断開始の値 | — | これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 250,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない | — | — | `docs/specifications/ndf-context-thresholds.md` |
+| 運用上限 | — | これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 500,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない | 再起動の方針、現行方式、試行方式、適用値 | — | `docs/specifications/ndf-context-thresholds.md` |
 | 容量の余白 | — | 実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 再起動の理由 | — | 工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動・現行方式のカットポイントと、オーガナイザーの長い待ちの 7 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 再起動の理由 | — | 会話を切った・止めたときの理由（`ndf relay context record --reason`）。容量・運用上限・費用・独立性・手動・カットポイントと、オーガナイザーの長い待ちの 7 つ。容量と費用は過去の行を読むために残り、今は書かない | — | — | `docs/specifications/ndf-context-thresholds.md` |
 | 復元の期間 | — | 再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 復元の量 | — | 再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
-| 計測の条件 | — | 続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定 | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
+| 復元の量 | — | 再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。会話を替える費用の見込みの式の Q | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
+| 計測の条件 | — | 続けるか切るかを比べるときの 2 つの設定。「続ける」は運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は判断開始の値と運用上限を候補の閾値にした設定。値を変えて比べる | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
 | 計測の回 | — | 計測の条件 1 つで、フェーズの起動からその後の承認ゲートの回答を受けた最初の呼び出しまでを 1 回として数えたもの | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
 | 待ちの前に切る規則 | — | 承認ゲートか人の判断の質問を出す直前に、文脈が決めた量を超えていれば会話を切り、新しいセッションで質問を出し直す規則 | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
 | 境界の判定 | — | 工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 適用値 | — | 優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶキー。起動の引数かスプリントに含まれる課題番号の組（#829 #830） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 引継ぎの期間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | `docs/specifications/ndf-context-restart-policy.md` |

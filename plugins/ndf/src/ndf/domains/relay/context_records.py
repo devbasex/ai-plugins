@@ -1,4 +1,4 @@
-"""再起動の方針の判定の記録・会話の記録の読み取り・費用の見込みの較正（#3569。旧い `lib/context_decisions.py` と
+"""文脈の切り替えの判定の記録・会話の記録の読み取り・費用の見込みの較正（#3569。旧い `lib/context_decisions.py` と
 `lib/context_calibrate.py` の移し先）。
 
 保存先は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
@@ -16,6 +16,7 @@ import json
 import re
 import statistics
 from collections import defaultdict
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
@@ -23,7 +24,7 @@ from ndf import identity
 from ndf.adapters import git
 from ndf.contracts import facts
 from ndf.domains.records import jsonl, usage_decide
-from ndf.domains.relay import context_policy as cp
+from ndf.domains.relay import context_thresholds as ct
 from ndf.domains.relay import signals
 
 SCHEMA = 1
@@ -116,9 +117,10 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 # --- 判定の記録 ----------------------------------------------------------------------------------------
 
 
-def record_row(session_id: Optional[str], work: str, applied: cp.Resolved, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
+def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
     """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
-    列は旧い `context_decisions.boundary_row` と同じ。"""
+    列は旧い `context_decisions.boundary_row` と同じで、2 つの値（`decide_from`・`limit`・`sources`）を `applied` から書く。
+    消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
     row: dict[str, Any] = {
         "schema": SCHEMA,
         "at": jsonl.now(),
@@ -143,7 +145,7 @@ def record_row(session_id: Optional[str], work: str, applied: cp.Resolved, event
         "passed_once": False,
     }
     row.update(applied.as_dict())
-    row.update({"event": event} if event else {"stage": "cut", "verdict": cp.RESTART, "reason": reason})
+    row.update({"event": event} if event else {"stage": "cut", "verdict": ct.RESTART, "reason": reason})
     return row
 
 
@@ -358,13 +360,13 @@ def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) 
 
 def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
-    launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at"))))
+    launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
-    for (start, stage), (nxt, _) in zip(launches, launches[1:]):
+    for (start, stage), (nxt, _) in pairwise(launches):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]
         if not seg:
             continue
-        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        gaps = sum(1 for a, b in pairwise(seg) if b["ts"] - a["ts"] > CACHE_1H)
         out.append((stage, len(seg), gaps))
     return out
 
@@ -411,7 +413,7 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
     acc = _sampled(sessions, cache, attach_markers([r for r in rows if r.get("event") in MARKS], spans))
 
     def med(values: list[float]) -> Optional[float]:
-        return _median(values) if len(values) >= cp.MIN_SAMPLES else None
+        return _median(values) if len(values) >= ct.MIN_SAMPLES else None
 
     return {
         "restore_context": med(acc["restore_context"]),

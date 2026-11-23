@@ -278,9 +278,11 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
   （`until ! pgrep -x dockerd; do sleep 1; done &` のようにループの中でも）、`pgrep -- -f` のように `--` の後ろの語と、
   `pgrep -d f x` のようにオプションの値になった語
 - **判定が失敗したときは止めない**（入力が読めない・`jq` や `python3` が無い・記録を書けない）
-- 同じ hook が、文脈が上限を超えた conductor の工程の起動も止める（[context-window.md](context-window.md)
-  の「上限を超えたら hook が止める」）と、寿命 5 分の supervisor が長い文脈のまま収束ループを
-  始めるのも止める（同じ文書の「フェーズの中のスイッチポイント」）
+- 文脈の量が運用上限以上の conductor の Tool の呼び出しは、guard `context-limit` が引継ぎに要るものを除いて止める
+  （[context-window.md](context-window.md) の「運用上限で hook が止める」）。サブエージェント（入力に `agent_id` がある呼び出し）は
+  判定しないので、supervisor は止めない。今のランタイムには、寿命 5 分の supervisor が長い文脈のまま収束ループを始めるのを
+  止める guard が無い（#4233）。収束ループは、最初から寿命 1 時間の `ndf:supervisor-waits` で起動して通す
+  （同じ文書の「supervisor の定義を選ぶ」）
 
 **hook を置くのは Claude Code だけである。**
 

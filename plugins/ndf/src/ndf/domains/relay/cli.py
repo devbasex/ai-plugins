@@ -9,7 +9,7 @@
     ndf relay cap [--named <数> | --clear]                    # 同時に動かす数の上限（マシンの設定。#3989）
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
-    ndf relay context resolve | record | calibrate | report   # 再起動の方針の適用値・判定の記録・見込み・作業ごとの集計
+    ndf relay context resolve | record | calibrate | report   # 文脈の切り替えの 2 つの値・判定の記録・見込み・作業ごとの集計
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる（決定 92）
     ndf relay decide < セグメントの状態の JSON                       # セグメントを切り替えるかの判断（#2962）
@@ -39,6 +39,7 @@ from ndf.domains.relay import (
     account_decide,
     accounts,
     claude_args,
+    context_thresholds,
     hub,
     install,
     lane_question,
@@ -77,7 +78,7 @@ COMMANDS = {
     "mark": "子へ入力を送る前に中継のマーカーを立てる",
     "decide": "セグメントの状態の JSON（標準入力）から次の手を出す",
     "notice": "カットポイントのアナウンスの 1 文を出す（呼び手がラッパーの直接の子か）",
-    "context": "再起動の方針の適用値・判定の記録・費用の見込み・作業ごとの集計",
+    "context": "文脈の切り替えの 2 つの値・判定の記録・費用の見込み・作業ごとの集計",
 }
 
 
@@ -304,7 +305,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
         spin=hub.spin_of(environ),
-        context_limit=int(limits.value("relay.context", "count")),
+        context_limit=context_thresholds.thresholds(environ, limits.value).limit,
         guards=account_decide.Guards(
             limits.value("relay.five-hour-guard", "count"),
             limits.value("relay.weekly-prefer", "count"),

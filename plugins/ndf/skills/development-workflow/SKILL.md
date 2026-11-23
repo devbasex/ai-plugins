@@ -426,17 +426,17 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 
 | 項目 | 内容 |
 | --- | --- |
-| 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（guard `context-limit`）。試行方式（`context-window.md` の「再起動の方針」）では、カットポイントで `ndf-next` を出さずに次の工程を起動して hook に判定させ、独立性・手動のときだけ自分で切る |
+| 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（guard `context-limit`）が運用上限（既定 500,000）で止めたとき。判断開始の値（既定 250,000）の知らせを受けたら次のカットポイントで切る |
 | 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。情報文字列が `ndf-next` のコードブロック 1 つで出す |
 | 3 層で出す時点 | conductor がフェーズレポート（`## フェーズレポート`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 承認ゲート` なら、承認ゲートの承認とマージの後 |
-| 出す前に行うこと | 書き始める前に `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"` を打ち（ラッパーの下で hook に止められたときは hook が打ったので打たない）、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
+| 出す前に行うこと | 書き始める前に `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"` を打ち（hook は打たない。運用上限で止められた後も打てる）、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
 
 出す時点・アナウンス・新しい会話が状態を戻す手順は、`context-window.md` の「新しい会話で戻す」にある。
 
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと alias がラッパーを挟む。
 ラッパーは conductor が出した `ndf-next` のブロックを拾い、`/exit`・プラグインの更新・次のセッションの起動を行う。
 始め方・止め方・上限は [references/relay.md](references/relay.md)、利用上限でのアカウントの切り替えは [references/relay-accounts.md](references/relay-accounts.md) にある。
-**ブロックの前に次の Bash を 1 回実行し、結果の `summary`（アナウンス）をブロックの直前へそのままコピーする。**
+**ブロックの前に次の Bash を 1 回実行し、結果の `summary`（アナウンス）をブロックの直前へそのままコピーする**（運用上限で止められた後は打たない。guard が止める）。
 `metrics.inside` が偽か失敗ならラッパーの外である（書き方は `context-window.md` の「新しい会話で戻す」）。
 
 ```bash

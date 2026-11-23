@@ -25,6 +25,10 @@ _LOOP_NODES = _WAIT_LOOPS | frozenset({"for_statement", "c_style_for_statement"}
 _INNER_DEPTH = 5
 # 語として読むセクション（引用を外して読む）
 _WORD_NODES = frozenset({"word", "string", "raw_string", "number", "concatenation", "simple_expansion", "expansion", "ansi_c_string"})
+# リダイレクトの先が実行時に決まるセクションの種類（変数・算術の展開、コマンド置換・プロセス置換）
+_DYNAMIC_NODE = re.compile(r"(expansion|substitution)$")
+# ヒアドキュメントとヒアストリングのセクション
+_HEREDOC_NODES = frozenset({"heredoc_redirect", "herestring_redirect"})
 
 # 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
 _WAIT_RE = re.compile(
@@ -43,7 +47,8 @@ class ShellCommand(NamedTuple):
 
     `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
-    読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。
+    読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
+    （#3995。運用上限の guard が Bash と同じ値に読み直す）。
     """
 
     argv: tuple[str, ...]
@@ -51,6 +56,7 @@ class ShellCommand(NamedTuple):
     loop_body: bool = False
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
+    source: tuple[str, ...] = ()
 
     @property
     def body_name(self) -> str:
@@ -58,16 +64,29 @@ class ShellCommand(NamedTuple):
         return os.path.basename(self.body_argv[0]) if self.body_argv else ""
 
 
+class Redirect(NamedTuple):
+    """`file_redirect` の 1 つ。`op` は演算子（`2>&-` は `>&` と先 `-`）、`target` は先の字面、`dynamic` は先が実行時に決まるか。"""
+
+    op: str
+    target: str
+    dynamic: bool
+
+
 class ShellScript(NamedTuple):
     """シェルの構文木から読んだもの。
 
     `commands` と `loops`（ループのセクションを含むか）は外側の単純コマンドだけを見る。`waits` は外側の単純コマンドに、
     `bash -c` 系・`eval` の中身の単純コマンド（外側の背景とループの位置を引き継ぐ）を足した列で、待ちの guard が見る。
+    `redirects`・`heredocs`（ヒアドキュメントとヒアストリングの数）・`assignments`（変数の代入の数）は外側のスクリプトだけを見る
+    （#3995。運用上限の guard が引継ぎのコマンドを照らす）。
     """
 
     commands: tuple[ShellCommand, ...]
     loops: bool
     waits: tuple[ShellCommand, ...] = ()
+    redirects: tuple[Redirect, ...] = ()
+    heredocs: int = 0
+    assignments: int = 0
 
 
 def parse_payload(text: str) -> Optional[dict[str, Any]]:
@@ -85,34 +104,61 @@ def _parser() -> Any:
 
 def parse_shell(text: str) -> ShellScript:
     """シェルの文を構文木で読む（tree-sitter-bash）。"""
-    commands, loops = _walk(text)
-    waits = list(commands)
-    for cmd in commands:
-        waits += [c for script in _inner_scripts(cmd) for c in _collect(script, 1, cmd)]
-    return ShellScript(tuple(commands), loops, tuple(waits))
+    script = _walk(text)
+    waits = list(script.commands)
+    for cmd in script.commands:
+        waits += [c for inner in _inner_scripts(cmd) for c in _collect(inner, 1, cmd)]
+    return script._replace(waits=tuple(waits))
 
 
-def _walk(text: str) -> tuple[list[ShellCommand], bool]:
-    """1 つのスクリプトの単純コマンドと、ループのセクションを含むか。"""
+def _walk(text: str) -> ShellScript:
+    """1 つのスクリプトの単純コマンド・ループのセクションを含むか・リダイレクト・ヒアドキュメント・変数の代入（`waits` は空）。"""
     tree = _parser().parse(text.encode("utf-8"))
     commands: list[ShellCommand] = []
+    redirects: list[Redirect] = []
     loops = False
+    heredocs = assignments = 0
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
         loops = loops or node.type in _LOOP_NODES
+        heredocs += node.type in _HEREDOC_NODES
+        assignments += node.type == "variable_assignment"
         if node.type == "command":
             body, condition = _loop_position(node)
-            commands.append(ShellCommand(_argv(node), _in_background(node), body, condition, _strip_wrappers(_argv(node, True))))
+            argv, joined, source = _words(node)
+            commands.append(ShellCommand(argv, _in_background(node), body, condition, _strip_wrappers(joined), source))
+        elif node.type == "file_redirect":
+            redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
-    return commands, loops
+    return ShellScript(tuple(commands), loops, (), tuple(redirects), heredocs, assignments)
+
+
+def _redirect(node: Any) -> Redirect:
+    """`file_redirect` の演算子・先の字面・先が実行時に決まるか。`>&-`・`<&-` は演算子と先 `-` に分ける。"""
+    target = node.child_by_field_name("destination")
+    op = "".join(c.text.decode("utf-8", "replace") for c in node.children if c != target and c.type != "file_descriptor")
+    text = target.text.decode("utf-8", "replace") if target is not None else ""
+    if op in (">&-", "<&-") and not text:
+        op, text = op[:-1], "-"
+    return Redirect(op, text, target is not None and _has_dynamic(target))
+
+
+def _has_dynamic(node: Any) -> bool:
+    """`node` とその子孫に、値が実行時に決まる要素（展開・置換など）があるか。"""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if _DYNAMIC_NODE.search(current.type):
+            return True
+        stack.extend(current.children)
+    return False
 
 
 def _collect(text: str, depth: int, outer: Optional[ShellCommand]) -> list[ShellCommand]:
     """`bash -c` 系・`eval` の中身の単純コマンド。`outer` の背景とループの位置を論理和で引き継ぎ、深さの上限まで読み直す。"""
     found: list[ShellCommand] = []
-    commands, _ = _walk(text)
-    for inner in commands:
+    for inner in _walk(text).commands:
         cmd = _inherit(inner, outer)
         found.append(cmd)
         if depth < _INNER_DEPTH:
@@ -404,16 +450,27 @@ class _EnvSplit:
         return "ok"
 
 
-def _argv(node: Any, joined: bool = False) -> tuple[str, ...]:
-    """単純コマンドの語。`joined` なら連結の語（`-S'a b'`）も部分ごとに引用を外す（ラッパーの引数を読むため）。"""
-    words = []
+def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """単純コマンドの語を子の 1 回の走査で読む: 引用を外した語・連結の語（`-S'a b'`）も部分ごとに引用を外した語（ラッパーの引数を読むため）・字面（引用とエスケープを残す）。
+
+    `command_name` はその中の語の要素に置き換える。3 つの並びは同じ長さで、位置ごとに同じ語を指す。
+    """
+    argv: list[str] = []
+    joined: list[str] = []
+    source: list[str] = []
     for child in node.children:
         target = child.children[0] if child.type == "command_name" and child.children else child
-        if joined and target.type == "concatenation":
-            words.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
-        elif target.type in _WORD_NODES:
-            words.append(_unquote(target.text.decode("utf-8", "replace"), target.type))
-    return tuple(words)
+        if target.type not in _WORD_NODES:
+            continue
+        text = target.text.decode("utf-8", "replace")
+        word = _unquote(text, target.type)
+        argv.append(word)
+        source.append(text)
+        if target.type == "concatenation":
+            joined.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+        else:
+            joined.append(word)
+    return tuple(argv), tuple(joined), tuple(source)
 
 
 def _unquote(text: str, kind: str) -> str:
@@ -486,6 +543,8 @@ class HookContext:
     payload: dict[str, Any]
     tail_bytes: int = 262144
     env: dict[str, str] = field(default_factory=lambda: dict(os.environ))
+    # 同じ事象の guard どうしで分け合う判定（キーは判定した guard の名前。#3995 の `handoff_bash`）
+    memo: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def _str(self, key: str) -> str:
         value = self.payload.get(key)

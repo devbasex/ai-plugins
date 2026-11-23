@@ -5334,34 +5334,22 @@
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
-      "term": "再起動の方針",
-      "context": "ndf-context",
-      "meaning": "conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
-    },
-    {
-      "term": "現行方式",
-      "context": "ndf-context",
-      "meaning": "運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
-    },
-    {
-      "term": "試行方式",
-      "context": "ndf-context",
-      "meaning": "カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
-    },
-    {
       "term": "判断開始の値",
       "context": "ndf-context",
-      "meaning": "試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K）",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
+      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 250,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
+      "source": "docs/specifications/ndf-context-thresholds.md"
     },
     {
       "term": "運用上限",
       "context": "ndf-context",
-      "meaning": "これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
+      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 500,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
+      "source": "docs/specifications/ndf-context-thresholds.md",
+      "deprecated": [
+        "再起動の方針",
+        "現行方式",
+        "試行方式",
+        "適用値"
+      ]
     },
     {
       "term": "容量の余白",
@@ -5372,8 +5360,8 @@
     {
       "term": "再起動の理由",
       "context": "ndf-context",
-      "meaning": "工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動・現行方式のカットポイントと、オーガナイザーの長い待ちの 7 つ",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
+      "meaning": "会話を切った・止めたときの理由（`ndf relay context record --reason`）。容量・運用上限・費用・独立性・手動・カットポイントと、オーガナイザーの長い待ちの 7 つ。容量と費用は過去の行を読むために残り、今は書かない",
+      "source": "docs/specifications/ndf-context-thresholds.md"
     },
     {
       "term": "復元の期間",
@@ -5384,13 +5372,13 @@
     {
       "term": "復元の量",
       "context": "ndf-context",
-      "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q",
+      "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。会話を替える費用の見込みの式の Q",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "計測の条件",
       "context": "ndf-context",
-      "meaning": "続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定",
+      "meaning": "続けるか切るかを比べるときの 2 つの設定。「続ける」は運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は判断開始の値と運用上限を候補の閾値にした設定。値を変えて比べる",
       "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
@@ -5409,12 +5397,6 @@
       "term": "境界の判定",
       "context": "ndf-context",
       "meaning": "工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る",
-      "source": "docs/specifications/ndf-context-restart-policy.md"
-    },
-    {
-      "term": "適用値",
-      "context": "ndf-context",
-      "meaning": "優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {

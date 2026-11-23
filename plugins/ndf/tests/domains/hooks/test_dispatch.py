@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 import types
 
 import pytest
 
+from ndf import identity
 from ndf.domains.hooks import budget, dispatch, main
 from ndf.domains.hooks.context import HookContext
 from ndf.domains.hooks.counter import Counter
+from ndf.domains.hooks.guards import ask, context_limit
 from ndf.domains.hooks.verdict import Verdict, advise, deny, pushback
+from ndf.domains.relay import signals
 
-from ._hooks import bash, call_entry, records, state_dir
+from ._hooks import bash, call_entry, deny_reason, records, sample, state_dir
 
 
 def _spec(name: str, module: str, **kw) -> dispatch.GuardSpec:
@@ -93,6 +97,49 @@ def test_combine_keeps_the_strongest_and_joins_its_texts():
     assert dispatch.combine([]).kind == "pass"
 
 
+def test_combine_shows_only_the_sole_texts_of_the_strongest_kind():
+    # #3995（r4-1）: 運用上限の引継ぎのような `sole` の拒否があれば、ほかの拒否の文をつながない
+    got = dispatch.combine([deny("x"), deny("h", sole=True), deny("y")])
+    assert got.kind == "deny" and got.reason == "h"
+    assert dispatch.combine([deny("x"), advise("h"), Verdict("advise", context="s", sole=True)]).reason == "x"
+
+
+def test_combine_joins_every_sole_text_in_order():
+    got = dispatch.combine([deny("x"), deny("h1", sole=True), deny("y"), deny("h2", sole=True)])
+    assert got.kind == "deny" and got.reason == "h1\n\nh2"
+
+
+def test_combine_skips_empty_texts_when_joining():
+    assert dispatch.combine([deny(""), deny("x"), deny(""), deny("y")]).reason == "x\n\ny"
+    assert dispatch.combine([advise(""), advise("a")]).context == "a"
+
+
+def test_combine_with_an_empty_sole_text_drops_the_other_texts():
+    # 今の振る舞い: `sole` の判定を選んでから空の文を外すので、`sole` の文が空なら結果の文も空になる
+    got = dispatch.combine([deny("x"), deny("", sole=True)])
+    assert got.kind == "deny" and got.reason == ""
+
+
+def test_combine_keeps_pushback_as_a_reason_kind():
+    got = dispatch.combine([advise("a"), pushback("p"), pushback("q"), Verdict("pass")])
+    assert got.kind == "pushback" and got.reason == "p\n\nq" and got.context == ""
+
+
+def test_combine_of_advises_puts_the_text_in_context():
+    got = dispatch.combine([Verdict("pass"), advise("a"), Verdict("advise", context="b", sole=True)])
+    assert got.kind == "advise" and got.context == "b" and got.reason == ""
+
+
+def test_combine_of_only_passes_is_the_plain_pass():
+    got = dispatch.combine([Verdict("pass", notes={"n": 1}), Verdict("pass")])
+    assert got is dispatch.PASS
+
+
+def test_combine_does_not_carry_key_notes_or_sole():
+    got = dispatch.combine([deny("x", key="k", notes={"n": 1}, sole=True)])
+    assert got == Verdict("deny", reason="x")
+
+
 def test_long_injection_is_written_to_a_file_and_replaced_by_its_path(tmp_path, fake_guards, monkeypatch):
     # M3-H5・IH8: 注入の上限（PreToolUse は 600 字）を超える文はファイルへ書き、パスと先頭を入れる
     long_text = "長い案内。" * 400
@@ -163,3 +210,126 @@ def test_i7_fail_closed_guard_runs_after_the_deadline(tmp_path, fake_guards):
 
 def test_only_ask_forward_is_fail_closed_in_the_table():
     assert {s.name for s in dispatch.load_specs() if s.fail_closed} == {"ask-forward"}
+
+
+def _run_on(tmp_path, ctx, specs, counter):
+    return dispatch.run(ctx, specs, budget.budget_for("claude", "PreToolUse"), counter, tmp_path)
+
+
+def test_deny_key_none_keeps_denying_without_counting(tmp_path, fake_guards):
+    # #3995 の決定 6・3995:6: deny_key が none の拒否は数えず、違う呼び出しで 3 回続けても、数え手が使えなくても案内へ下げない
+    kept = _spec("kept", fake_guards("kept", lambda c, s: deny("止め続ける")), deny_key="none")
+    counted = _spec("counted", fake_guards("counted", lambda c, s: deny("止める")))
+    kinds = []
+    with Counter.open("s-1", tmp_path) as counter:
+        for command in ("ls", "pwd", "git status"):
+            ctx = HookContext("claude", "PreToolUse", bash(tmp_path, command))
+            kinds.append((_run_on(tmp_path, ctx, [kept], counter).verdict.kind, _run_on(tmp_path, ctx, [counted], counter).verdict.kind))
+    assert [k for k, _ in kinds] == ["deny", "deny", "deny"]
+    assert [k for _, k in kinds] == ["deny", "deny", "advise"]
+    out = _run_on(tmp_path, _ctx(tmp_path), [kept], Counter.unusable())
+    assert out.verdict.kind == "deny" and out.verdict.reason == "止め続ける"
+
+
+def _limit_repo(root, tokens):
+    """メインディレクトリに .ndf を持つリポジトリと、最後の応答の文脈の量が `tokens` の会話の記録。"""
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / ".ndf" / "handoff").mkdir(parents=True, exist_ok=True)
+    line = {"type": "assistant", "message": {"usage": {"input_tokens": tokens}}}
+    (root / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+
+
+def _handoff_write(root):
+    file = str(root / ".ndf" / "handoff" / "next.md")
+    return sample("claude", "PreToolUse", root, tool_name="Write", tool_input={"file_path": file, "content": "x"})
+
+
+@pytest.mark.parametrize("tool", ["Bash", "Read"])
+def test_context_limit_is_the_first_guard_selected(tmp_path, tool):
+    # #3995 の決定 6: dispatch.run の締め切りで飛ばされないよう、PreToolUse の Bash・Read で context-limit が先頭に呼ばれる
+    payload = (
+        bash(tmp_path, "ls")
+        if tool == "Bash"
+        else sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": "a"})
+    )
+    names = [s.name for s in dispatch.select(dispatch.load_specs(), HookContext("claude", "PreToolUse", payload), frozenset())]
+    assert names[0] == "context-limit"
+
+
+def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkeypatch):
+    # #3995 の決定 6: context-limit の判定の中で締め切りを越えても、その判定は残る（後の guard だけが飛ばされる）
+    _limit_repo(tmp_path, 500_000)
+    found = budget.budget_for("claude", "PreToolUse")
+    now = [0.0]
+    real = context_limit.check
+
+    def slow(ctx, svc):
+        got = real(ctx, svc)
+        now[0] = found.usable + 1.0
+        return got
+
+    monkeypatch.setattr(context_limit, "check", slow)
+    outs = []
+    for payload in (bash(tmp_path, "ls"), _handoff_write(tmp_path)):
+        now[0] = 0.0
+        ctx = HookContext("claude", "PreToolUse", payload)
+        specs = dispatch.select(dispatch.load_specs(), ctx, frozenset())
+        outs.append(dispatch.run(ctx, specs, found, Counter.unusable(), tmp_path, clock=lambda: now[0]))
+    assert [[r.name for r in out.runs] for out in outs] == [["context-limit"], ["context-limit"]]
+    assert outs[0].stopped == "deadline" and [out.verdict.kind for out in outs] == ["deny", "pass"]
+
+
+def _deadline(payload):
+    return main._deadline_out(main._Run({}, None, 0.0, "claude", "PreToolUse", payload))
+
+
+def test_deadline_out_drops_the_context_limit_verdict_only_for_that_call(tmp_path):
+    # #3995 の決定 6: プロセスの締め切りを過ぎた 1 回は通るが、続く締め切りを過ぎない呼び出しは止まる
+    _limit_repo(tmp_path, 500_000)
+    assert _deadline(bash(tmp_path, "ls")) == "" and _deadline(_handoff_write(tmp_path)) == ""
+    assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
+
+
+def test_deadline_before_the_output_drops_a_plain_guard_deny(tmp_path, monkeypatch):
+    # #3995 の決定 6: dispatch.run が full-test の拒否を返しても、出力の前に締め切りに達すれば出力は空（今と同じ）
+    suites = [
+        {
+            "name": "unit",
+            "runner": "pytest",
+            "command": "uv run --frozen pytest . -q -n 4",
+            "scope_command": "uv run --frozen pytest {paths} -q",
+        }
+    ]
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "test": {"suites": suites}}), encoding="utf-8")
+    monkeypatch.setenv(identity.WORKER_KIND_ENV, "impl")
+    got = []
+    real = dispatch.run
+
+    def capture(*args, **kw):
+        got.append(real(*args, **kw))
+        return got[-1]
+
+    def late(*args, **kw):
+        raise main._Deadline()
+
+    monkeypatch.setattr(dispatch, "run", capture)
+    monkeypatch.setattr(dispatch, "render", late)
+    assert call_entry("claude", "PreToolUse", bash(tmp_path, "uv run --frozen pytest . -q -n 4")) is None
+    assert got[-1].verdict.kind == "deny" and records()[-1]["error"] == "deadline"
+
+
+def test_deadline_out_keeps_only_the_fail_closed_deny(tmp_path, monkeypatch):
+    # #3995 の決定 6: 運用上限の中継の下でも、締め切りの後に残るのは ask-forward の on_deadline の拒否だけ
+    _limit_repo(tmp_path, 500_000)
+    relay = tmp_path / "relay"
+    relay.mkdir()
+    signals.set_launch(relay, "L1")
+    monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
+    monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
+    questions = [{"question": "設計を承認するか", "header": "設計", "options": [], "multiSelect": False}]
+    payload = sample(
+        "claude", "PreToolUse", tmp_path, tool_name="AskUserQuestion", tool_input={"questions": questions}, tool_use_id="toolu_A"
+    )
+    assert deny_reason(json.loads(_deadline(payload))) == ask.QUESTION_NOT_RECORDED
+    assert _deadline(bash(tmp_path, "ls")) == ""

@@ -4,7 +4,8 @@
   コントラクト表で外していない行を `order` の昇順に呼ぶ。`strict` の行はエントリポイントが先に呼ぶので、ここでは呼ばない
 - 締め切りの残りが余白を下回ったら、残りの guard を呼ばずに通す
 - guard の例外はその guard を `pass` にして、計測に例外の種類を書く
-- 同じ拒否は数え手で数え、上限を超えたら案内へ下げる。変更要求は利用者の入力ごとの合計で数え、上限を超えたら通す
+- 同じ拒否は数え手で数え、上限を超えたら案内へ下げる。表の列 `deny_key` が `none` の guard の拒否は数えず下げない
+  （#3995 の決定 6）。変更要求は利用者の入力ごとの合計で数え、上限を超えたら通す
 - 表の列 `fail_closed` が真の guard は、上の 3 つから外す。締め切りを過ぎても呼び、例外は拒否にし、拒否を数えず下げない
   （#3814 の I7）
 - 複数の判定は `deny` > `pushback` > `advise` > `pass` の順で 1 つにまとめる
@@ -133,7 +134,7 @@ def run(
                 continue
         began = clock()
         got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params))
-        if got.kind == "deny" and not spec.fail_closed and not counter.allow_deny(deny_key(spec, got, ctx)):
+        if got.kind == "deny" and _counted(spec) and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))
         outcome.notes.update(got.notes)
@@ -144,6 +145,11 @@ def run(
         outcome.notes["limited_reason"] = outcome.verdict.reason[:200]
         outcome.verdict = PASS
     return outcome
+
+
+def _counted(spec: GuardSpec) -> bool:
+    """拒否を数えて案内へ下げる guard か（`fail_closed` と `deny_key` が `none` の行は下げない）。"""
+    return not spec.fail_closed and spec.deny_key != "none"
 
 
 def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdict, str]:
@@ -158,14 +164,15 @@ def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdic
 
 
 def combine(verdicts: list[Verdict]) -> Verdict:
-    """最も強い判定の種類で 1 つにまとめる。同じ種類の文は順につなぐ。"""
+    """最も強い判定の種類で 1 つにまとめる。同じ種類の文は順につなぐ（`sole` の判定があればその文だけ）。"""
     if not verdicts:
         return PASS
     kind = min((v.kind for v in verdicts), key=strength)
     if kind == "pass":
         return PASS
-    texts = [v.text for v in verdicts if v.kind == kind and v.text]
-    joined = "\n\n".join(texts)
+    same = [v for v in verdicts if v.kind == kind]
+    chosen = [v for v in same if v.sole] or same
+    joined = "\n\n".join(v.text for v in chosen if v.text)
     return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
 
 

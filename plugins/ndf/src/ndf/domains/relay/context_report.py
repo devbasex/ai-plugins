@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, NamedTuple, Optional
 
 from ndf import identity
 from ndf.domains.records import jsonl, usage
-from ndf.domains.relay import context_policy as cp
+from ndf.domains.relay import context_thresholds as ct
 from ndf.domains.relay import context_records as cr
 
 IDLE_CAP = 1800  # 呼び出しの間隔をこの秒数で打ち切る（利用者の返答待ちを所要に入れない）
@@ -265,20 +265,17 @@ def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], sc
 
 
 def _restarts_by_reason(rows: list[dict[str, Any]]) -> dict[str, int]:
-    restarts: dict[str, int] = defaultdict(int)
-    for r in rows:
-        if r.get("verdict") == cp.RESTART:
-            restarts[r["reason"] if r.get("reason") else cr.UNKNOWN] += 1
+    restarts = Counter(r["reason"] if r.get("reason") else cr.UNKNOWN for r in rows if r.get("verdict") == ct.RESTART)
     return dict(restarts)
 
 
 def _rework(rows: list[dict[str, Any]]) -> int | str:
     """「継続」の判定が 2 回以上ある工程の数（やり直し）。「継続」の判定が無ければ「不明」。"""
-    keep: dict[str, int] = defaultdict(int)
-    for r in rows:
-        event = r["event"] if "event" in r else cr.EVENT_DECISION
-        if event == cr.EVENT_DECISION and r.get("verdict") == cp.CONTINUE and r.get("stage"):
-            keep[r["stage"]] += 1
+    keep = Counter(
+        r["stage"]
+        for r in rows
+        if (r["event"] if "event" in r else cr.EVENT_DECISION) == cr.EVENT_DECISION and r.get("verdict") == ct.CONTINUE and r.get("stage")
+    )
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
 
@@ -308,7 +305,7 @@ def report(work: str, rows: list[dict[str, Any]], usage_log: list[dict[str, Any]
         s["transcript"] = s["transcript"] or known[sid]["transcript"]
     scope = _Scope(usage_log, excluded, set(), windows)
     by_session = cr.attach_markers([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, scope))
-    restarted = {r.get("session_id") for r in mine if r.get("verdict") == cp.RESTART}
+    restarted = {r.get("session_id") for r in mine if r.get("verdict") == ct.RESTART}
     summed = _sum_sessions(sessions, by_session, scope, restarted)
     restarts = _restarts_by_reason(mine)
     compacts = summed["compacts"]
@@ -322,7 +319,6 @@ def report(work: str, rows: list[dict[str, Any]], usage_log: list[dict[str, Any]
         "restart_count": sum(restarts.values()),
         "auto_compacts": cr.UNKNOWN if compacts is None or not sessions else compacts,
         "quality": {"rework": _rework(mine), "review_fixes": cr.UNKNOWN, "missed_requirements": cr.UNKNOWN},
-        "no_policy_rows": sum(1 for r in mine if "policy" not in r),
     }
 
 

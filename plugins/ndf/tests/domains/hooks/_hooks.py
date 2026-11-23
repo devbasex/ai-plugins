@@ -10,12 +10,12 @@ from typing import Any
 import pytest
 
 from ndf import identity
-from ndf.domains.hooks import main, tables
+from ndf.domains.hooks import context, main, tables
 from ndf.domains.relay import signals
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 SRC = tables.PLUGIN_ROOT / "src"
-# 中継・オーガナイザー・通知・止め方の変数（テストを流す人の値を読まない）
+# 中継・オーガナイザー・通知・止め方・文脈の運用上限の変数（テストを流す人の値を読まない）
 ENV_NAMES = (
     "NDF_RELAY_DIR",
     "NDF_RELAY_LAUNCH",
@@ -23,6 +23,7 @@ ENV_NAMES = (
     "NDF_ORGANIZER_LANE",
     "NDF_FACTORY_RUN",
     "NDF_HOOK_OFF",
+    "NDF_CONTEXT_LIMIT",
     "NDF_WORKER_KIND",
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
@@ -79,6 +80,33 @@ def relay(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
     signals.set_launch(directory, "L1")
     return directory
+
+
+@pytest.fixture
+def counted_tail(monkeypatch):
+    """会話の記録の末尾を読んだ回数。"""
+    got = {"n": 0}
+    real = context.read_tail
+
+    def wrapped(*args, **kw):
+        got["n"] += 1
+        return real(*args, **kw)
+
+    monkeypatch.setattr(context, "read_tail", wrapped)
+    return got
+
+
+def ndf_repo(root: Path) -> None:
+    """`root` を NDF の引継ぎの規約を使うリポジトリ（メインディレクトリに .ndf）にする。"""
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / ".ndf").mkdir(exist_ok=True)
+
+
+def usage_transcript(root: Path, tokens: int) -> None:
+    """`root` を NDF のリポジトリにし、最後の応答の文脈の量が `tokens` の会話の記録を置く（#3995 の 3995:15）。"""
+    ndf_repo(root)
+    line = {"type": "assistant", "message": {"usage": {"input_tokens": tokens}}}
+    (root / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
 
 
 def state_dir() -> Path:

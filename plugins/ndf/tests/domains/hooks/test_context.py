@@ -36,7 +36,9 @@ def _transcript(tmp_path, tokens: int = 1000) -> None:
 
 
 def test_bash_pre_tool_use_parses_payload_shell_and_transcript_once(tmp_path, calls):
-    # sleep・script-chain の 2 つが構文木を、context-limit が会話の記録を読む
+    # sleep・script-chain の 2 つが構文木を、context-limit が会話の記録を読む（context-limit は .ndf のあるリポジトリだけを見る。#3995）
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".ndf").mkdir()
     _transcript(tmp_path)
     call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 1 && ndf plan status"))
     assert calls["parse_payload"] == 1 and calls["parse_shell"] == 1 and calls["read_tail"] == 1
@@ -59,6 +61,21 @@ def test_shell_tree_reads_words_background_and_loops():
     assert [c.background for c in script.commands if c.argv[0] == "sleep"] == [True]
     assert script.loops
     assert not context.parse_shell("ls -la").loops
+
+
+def test_shell_tree_reads_redirects_heredocs_and_assignments():
+    # #3995 の Task 7: 運用上限の guard が引継ぎのコマンドを照らすための、外側のスクリプトのリダイレクト・ヒアドキュメント・代入
+    script = context.parse_shell("ndf records handoff check x 2>&1 >/dev/null")
+    assert script.redirects == (context.Redirect(">&", "1", False), context.Redirect(">", "/dev/null", False))
+    assert (script.heredocs, script.assignments) == (0, 0)
+    assert context.parse_shell("ndf records handoff check x").redirects == ()
+    assert context.parse_shell("ndf x 2>&-").redirects == (context.Redirect(">&", "-", False),)
+    assert context.parse_shell("cat <<E\na\nE\n").heredocs == 1
+    assert context.parse_shell("cat <<< a").heredocs == 1
+    assert [r.dynamic for r in context.parse_shell("ndf x > >(cat)").redirects] == [True]
+    assert [r.dynamic for r in context.parse_shell('ndf x > "$F"').redirects] == [True]
+    assert context.parse_shell("GIT_DIR=x ndf a").assignments == 1
+    assert context.parse_shell("GIT_DIR=x; ndf a").assignments == 1
 
 
 def _positions(text: str) -> dict[tuple[str, ...], tuple[bool, bool, bool]]:

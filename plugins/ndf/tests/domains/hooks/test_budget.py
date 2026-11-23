@@ -136,8 +136,9 @@ def test_hook_budget_policies_pass_the_limits_schema():
 
 def test_hook_off_is_the_only_switch_in_the_env_table():
     hooks_rows = facts.ids("env", area="hooks")
-    assert hooks_rows == ("NDF_HOOK_OFF",)
-    # 閾値は上限の設定から読み、環境変数では受けない（今の NDF の止める変数を読まない）
+    # 止める口は NDF_HOOK_OFF だけ。NDF_CONTEXT_LIMIT は運用上限を下げる値で、止める口ではない（#3995 の詳細設計で area を hooks にした）
+    assert sorted(hooks_rows) == ["NDF_CONTEXT_LIMIT", "NDF_HOOK_OFF"]
+    # ほかの閾値は上限の設定から読み、環境変数では受けない（今の NDF の止める変数を読まない）
     assert not [n for n in facts.ids("env") if n.endswith("_GUARD")]
 
 

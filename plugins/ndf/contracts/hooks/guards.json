@@ -47,18 +47,25 @@
     },
     {
       "name": "context-limit",
-      "summary": "文脈の量が hook.context-limit を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
+      "summary": "PostToolUse で判断開始の値（上限の設定の context.decide-from）を超えたことを利用者の入力ごとに 1 度知らせ、PreToolUse で、文脈の量が運用上限（上限の設定の context.limit・NDF_CONTEXT_LIMIT）以上の呼び出しを、引継ぎに要るものを除いて止め続ける（拒否を数えない。SF12・#3995）",
       "module": "ndf.domains.hooks.guards.context_limit",
-      "events": ["PreToolUse"],
+      "events": ["PreToolUse", "PostToolUse"],
       "tools": [],
       "order": 20,
       "strict": false,
       "suggests": [
         {"tool": "Write", "input": {"file_path": ".ndf/handoff/next.md", "content": "# 引き継ぎ\n"}}
       ],
-      "deny_key": "reason",
+      "deny_key": "none",
       "limits": [],
-      "params": {"handoff_dir": ".ndf/handoff/"},
+      "params": {
+        "handoff_dir": ".ndf/handoff/",
+        "pass_tools": ["TaskStop"],
+        "pass_ndf": {
+          "records handoff check": {"positional": 1, "flags": ["--trim"], "options": ["--history"], "paths": ["positional", "--history"]},
+          "relay context record": {"positional": 0, "flags": [], "options": ["--work", "--event", "--verdict", "--reason"], "paths": []}
+        }
+      },
       "fail_closed": false
     },
     {

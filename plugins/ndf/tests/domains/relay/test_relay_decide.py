@@ -7,7 +7,8 @@ import json
 
 import pytest
 
-from ndf.domains.relay import account_decide, account_registry, hub_decide, switch_decide
+from ndf.contracts import limits
+from ndf.domains.relay import account_decide, account_registry, cli, hub_decide, switch_decide
 from ndf.domains.relay.account_decide import Pick, Usage
 
 BASE = switch_decide.SectionState(
@@ -77,6 +78,43 @@ def test_context_over_the_limit_asks_for_a_handover_once():
     assert switch_decide.decide(dataclasses.replace(over, handover_asked=True)).kind == "wait"
     assert switch_decide.decide(dataclasses.replace(over, idle_seconds=1.0)).kind == "wait"
     assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "wait"
+
+
+def test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document():
+    # #3995 の 3995:7: 求める文は wait の行を残すことと ndf records handoff check を含み、背景の作業の終わりについて書かない
+    prompt = switch_decide.HANDOVER_PROMPT
+    assert "ndf lanes wait" in prompt and "ndf records --cwd <メインディレクトリの絶対パス> handoff check" in prompt
+    assert "背景" not in prompt
+
+
+def _settings_limit(tmp_path, monkeypatch, env):
+    """ラッパーの設定（wrapper_settings）が判断へ渡す運用上限。`env` は NDF_CONTEXT_LIMIT（None なら無し）。"""
+    monkeypatch.chdir(tmp_path)
+    if env is None:
+        monkeypatch.delenv("NDF_CONTEXT_LIMIT", raising=False)
+    else:
+        monkeypatch.setenv("NDF_CONTEXT_LIMIT", env)
+    return cli.wrapper_settings("w1", []).context_limit
+
+
+@pytest.mark.parametrize(
+    ("env", "tokens", "kind"),
+    [(None, 500_000, "handover"), (None, 499_999, "wait"), ("300000", 300_000, "handover"), ("300000", 299_999, "wait")],
+)
+def test_wrapper_settings_hand_the_operating_limit_to_the_handover(tmp_path, monkeypatch, env, tokens, kind):
+    # #3995 の 3995:7・3995:9: ラッパーは運用上限（500,000。NDF_CONTEXT_LIMIT で替える）で静かな子に引継ぎを頼む
+    limit = _settings_limit(tmp_path, monkeypatch, env)
+    assert switch_decide.decide(state(context_tokens=tokens, context_limit=limit)).kind == kind
+
+
+def test_wrapper_settings_read_the_limit_from_the_limits_table(tmp_path, monkeypatch):
+    # #3995 の 3995:1: 上限の設定の 2 つの値を差し替えると、ラッパーの判断は差し替えた運用上限を使う
+    real = limits.value
+    swapped = {"context.decide-from": 100_000, "context.limit": 200_000}
+    monkeypatch.setattr(limits, "value", lambda name, key: swapped[name] if name in swapped else real(name, key))
+    limit = _settings_limit(tmp_path, monkeypatch, None)
+    assert switch_decide.decide(state(context_tokens=200_000, context_limit=limit)).kind == "handover"
+    assert switch_decide.decide(state(context_tokens=199_999, context_limit=limit)).kind == "wait"
 
 
 def test_3864_7_an_auth_failure_without_a_target_is_stalled_while_the_child_is_alive():

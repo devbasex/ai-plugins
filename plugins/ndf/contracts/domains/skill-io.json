@@ -131,7 +131,6 @@
       "ndf_settings": [
         "ask",
         "backlog",
-        "context",
         "glossary",
         "handoff",
         "mvv",
