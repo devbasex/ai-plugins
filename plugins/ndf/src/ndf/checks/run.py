@@ -19,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, load_settings
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -135,7 +135,7 @@ def main(argv: list[str]) -> int:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
-        scope = Scope(repo_root, ident.root.resolve(), ident.name)
+        scope = Scope(repo_root, ident.root.resolve(), ident.name, settings=load_settings(repo_root))
         found = select(scope, rules, args.only, args.write_spec, written)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
