@@ -8,7 +8,7 @@ ndf answer list <ステートマシン>                 # 書いた回答（選�
 ndf answer head <ステートマシン> [--gate release] # 承認で見た PR の head（マージの側が --expect-head へ渡して照らす。#2147）
 ndf answer work --state-dir <保存先> [--cwd <作業場所>] <作業名>
                                          # 起動指示を <保存先>/<作業名>.prompt.md へ書いてから ndf worker run へ置き換わる。
-                                         # 材料は工程が書いた <保存先>/values.json から取り、--cwd を省くと作業の定義の cwd で動く
+                                         # 材料は工程か ndf plan next が書いた <保存先>/values.json から取り、--cwd を省くと作業の定義の cwd で動く
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result, worker_paths
+from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
@@ -35,7 +36,6 @@ from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, qu
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
-from ndf.progress.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 
 
 def present(
@@ -277,7 +277,10 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         paths = worker_paths.report_paths(wd.path, kind, resolve=False)
         saved = values_in(wd)
         if saved is None:
-            raise WorkUnready(f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程から起動すると書かれる）")
+            raise WorkUnready(
+                f"保存先 {state_dir} に差し込みの値（{invoke.VALUES_FILE}）が無い（工程が組むか、ndf route render・run で組んだプランを"
+                " ndf plan next で流すと書く）"
+            )
         gaps = kind_gaps(kind, saved["values"], saved["inputs"], sources=invoke.FILL_SOURCES, covers=route.LAUNCH_SOURCES)
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)

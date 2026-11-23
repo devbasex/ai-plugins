@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts import causes, facts, limits, result
+from ndf.contracts import causes, facts, limits, result, worker_kinds
 from ndf.contracts.routing import END, PLAN_TARGETS, STOP
 
 # ステップを打つ作業ディレクトリの語。worktree は作業場所（使えなければリポジトリの根）、repo はリポジトリの根
@@ -203,6 +203,9 @@ def parse(raw: Any) -> Plan:
     steps_raw = raw.get("steps")
     if not isinstance(steps_raw, list) or not steps_raw:
         raise PlanError(f"プラン {raw['name']} に steps が無い")
+    held = worker_kinds.plan_values_error(raw)
+    if held is not None:
+        raise PlanError(f"プラン {raw['name']} の {held}")
     steps = tuple(_step(s) for s in steps_raw)
     needs = _strings(raw, "needs")
     plan = Plan(

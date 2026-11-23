@@ -49,7 +49,9 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
+import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +59,7 @@ from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
 from ndf.adapters import git, github
-from ndf.contracts import causes, exit_codes, limits, result
+from ndf.contracts import causes, exit_codes, limits, result, worker_kinds
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
 from ndf.core import branch_strategy
@@ -360,6 +362,87 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     return plan
 
 
+# テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
+WORKER_SLOT = "{{worker}}"
+
+
+def work_names(plan: Any) -> list[str]:
+    """プランの形（`expanded` の戻り値）の中で `{{worker}}` の後ろに置かれた作業の名前（現れた順。重なりを含む）。"""
+    if isinstance(plan, dict):
+        return [n for v in plan.values() for n in work_names(v)]
+    if not isinstance(plan, list):
+        return []
+    named = [str(plan[i + 1]) for i, v in enumerate(plan[:-1]) if v == WORKER_SLOT]
+    return named + [n for v in plan for n in work_names(v)]
+
+
+def _default_worker(t: Template, given: Collection[str], local_tests: bool) -> bool:
+    """プランが既定の worker（`ndf answer work`）で作業を起動するか（`worker` を渡さず、プランが `{{worker}}` を使う）。"""
+    return "worker" not in given and "worker" in needed(t, local_tests=local_tests, given=given)
+
+
+def _kinds_of(t: Template, local_tests: bool) -> list[str]:
+    return list(dict.fromkeys(work_names(expanded(t, local_tests=local_tests))))
+
+
+def worker_only_names(t: Template, *, local_tests: bool = True) -> set[str]:
+    """プランの作業が読む値の名前（作業の定義の `inputs` と `cwd`）のうち、テンプレートの差し込みに無いもの。
+
+    要求・設計などの単発のプランは、描画に使わない `issues`・`mode` を worker にだけ渡す（PR 4319 の指摘 r2-1）。
+    """
+    kinds = worker_kinds.work_kinds()
+    return {n for k in _kinds_of(t, local_tests) for n in (*kinds[k]["inputs"], kinds[k]["cwd"])} - set(t.params)
+
+
+def _split_worker_only(t: Template, pairs: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+    """`--set`・`--add` の値を、テンプレートの差し込みと、それ以外（worker にだけ渡す入力の候補）に分ける。"""
+    return {n: v for n, v in pairs.items() if n in t.params}, {n: v for n, v in pairs.items() if n not in t.params}
+
+
+def _check_worker_only(t: Template, given: Collection[str], held: Mapping[str, Value], local_tests: bool) -> None:
+    """worker にだけ渡す値が、既定の worker の作業が読む名前に無ければ、テンプレートに無い差し込みとして `RouteError`。"""
+    accepted = worker_only_names(t, local_tests=local_tests) if _default_worker(t, given, local_tests) else set()
+    unknown = sorted(set(held) - accepted)
+    if unknown:
+        raise RouteError(f"テンプレート {t.name} に無い差し込み: {', '.join(unknown)}")
+
+
+def work_values(t: Template, given: Collection[str], values: Mapping[str, Value], local_tests: bool) -> Optional[dict[str, Any]]:
+    """単発のプランが既定の worker を使うなら、その入力（プランの `worker_kinds.PLAN_KEY` に持たせる値）。使わなければ None。
+
+    `values` は差し込みの値に worker にだけ渡す値を足したもの。作業が読む値か作業場所が欠ければ `RouteError`（実行の
+    途中の worker で止まらず、組む時点で `--set`・`--add` を求める）。値はプラン本体に持たせ、`ndf plan next` が実行の
+    選んだ保存先の `values.json` へ回ごとに書く（`worker_kinds.hand_plan_values`。PR 4319 の指摘 r2-2・r2-3）。
+    """
+    if not _default_worker(t, given, local_tests):
+        return None
+    gaps: dict[str, str] = {}
+    for kind in _kinds_of(t, local_tests):
+        found = worker_kinds.kind_gaps(kind, values, {}, covers=LAUNCH_SOURCES)
+        gaps.update({n: f"差し込み {n}（--set か --add で渡す）" for n in found})
+    if gaps:
+        raise RouteError(f"テンプレート {t.name} の worker が読む値が無い: {', '.join(f'{n}: {s}' for n, s in gaps.items())}")
+    return worker_kinds.plan_values(t.name, values, local_tests)
+
+
+def _publish(out: Path, plan: Mapping[str, Any]) -> None:
+    """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
+
+    一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
+    書き換えない。プランは worker の入力（`work_values`）を含むので、置き換える前のアクセス権を写さず、常に
+    所有者だけが読み書きできる 0600 の新しいファイルとして公開する（PR 4319 の指摘 r3-1・r3-2）。
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 # --- テンプレートの検査 -----------------------------------------------------------------------
 
 
@@ -653,13 +736,17 @@ def _declared_ci_only(values: Mapping[str, Value]) -> bool:
 
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
-    given = _pairs(a.sets, a.adds)
+    given, held = _split_worker_only(t, _pairs(a.sets, a.adds))
     values, _ = launched(t, derived(t, given, Path.cwd()))
     _check_worktree(t, given, values)
-    plan = render(t, values, local_tests=not _declared_ci_only(values))
+    local = not _declared_ci_only(values)
+    _check_worker_only(t, given, held, local)
+    plan = render(t, values, local_tests=local)
+    work = work_values(t, given, {**values, **held}, local)
+    if work is not None:
+        plan[worker_kinds.PLAN_KEY] = work
     out = Path(a.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _publish(out, plan)
     return t, out
 
 

@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from ndf import cli, contracts, identity
-from ndf.contracts import causes, result, worker_paths
+from ndf.contracts import causes, result, worker_kinds, worker_paths
 from ndf.core import route, worker
-from ndf.progress import gate, invoke, model, worker_kinds
+from ndf.progress import gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
@@ -233,17 +233,17 @@ def test_ndf_answer_work_rewrites_the_prompt_when_it_is_run_again(tmp_path):
 
 def test_the_work_runs_in_the_worktree_or_the_repo_by_its_definition(tmp_path):
     values = {"repo": "/r", "worktree": "/r/.worktrees/b", "branch": "b", "issue": "5", "acceptance": "a.json", "issues": [5]}
-    invoke.write_values(tmp_path, "impl", values, {"issues": [5]}, True)
+    invoke.write_values(tmp_path, "impl", values, {"issues": [5], "mode": "standard"}, True)
     got: list[list[str]] = []
     for kind in ("impl", "worktree", "requirements"):
         assert gate._cmd_work(["--state-dir", str(tmp_path), kind], lambda exe, argv: got.append(argv)) == 0
     assert [a[a.index("--cwd") + 1] for a in got] == ["/r/.worktrees/b", "/r", "/r"]
 
 
-def test_the_template_worker_has_no_default_until_prompts_are_written():
-    # PR 3496 の指摘: `<保存先>/<作業名>-prompt.md` を書く処理が無いまま既定にすると worker のステップが必ず落ちる。
-    # 既定を持たず、決まらなければ実行の前に TemplateValuesMissing で止まる
-    assert route.params()["worker"].default is None
+def test_the_template_worker_defaults_to_ndf_answer_work_without_cwd():
+    # #3908 の受け入れ条件 1: 差し込み worker の既定は、プロンプトを組んで worker を起動する ndf answer work。
+    # 作業場所は作業の定義（cwd）が決めるので、既定の並びに --cwd を置かない
+    assert route.params()["worker"].default == ["ndf", "answer", "work", "--state-dir", "{state_dir}"]
     assert set(gate.work_kinds()) >= {"impl", "fix", "design", "plan-to-spec"}
 
 
@@ -351,7 +351,7 @@ def test_a_state_dir_without_the_values_stops_before_the_worker(tmp_path, capsys
 
 
 def test_a_missing_stage_input_stops_with_the_name_and_its_source(tmp_path, capsys):
-    invoke.write_values(tmp_path, "requirements", {"repo": "/r"}, {}, True)
+    invoke.write_values(tmp_path, "requirements", {"repo": "/r"}, {"mode": "standard"}, True)
     got: list[list[str]] = []
     code = gate._cmd_work(["--state-dir", str(tmp_path), "requirements"], lambda exe, argv: got.append(argv))
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -362,17 +362,17 @@ def test_a_missing_stage_input_stops_with_the_name_and_its_source(tmp_path, caps
 
 def test_kind_gaps_is_empty_when_the_stage_input_holds_the_value():
     values = {"repo": "/r", "worker": ["ndf-worker"]}
-    assert worker_kinds.kind_gaps("requirements", values, {"issues": [12, 34]}) == {}
+    assert worker_kinds.kind_gaps("requirements", values, {"issues": [12, 34], "mode": "standard"}) == {}
     assert worker_kinds.work_dir_of("requirements", values) == "/r"
 
 
 def test_kind_values_take_the_template_value_over_the_stage_input():
     got = worker_kinds.kind_values("requirements", {"issues": ["12"]}, {"issues": [34], "mode": "standard"})
-    assert got == {"issues": ["12"]}
+    assert got == {"issues": ["12"], "mode": "standard"}
 
 
 def test_kind_gaps_names_the_stage_input_that_is_missing():
-    got = worker_kinds.kind_gaps("requirements", {"repo": "/r"}, {})
+    got = worker_kinds.kind_gaps("requirements", {"repo": "/r"}, {"mode": "standard"})
     assert got == {"issues": "工程の入力 issues（工程の定義の metadata.ndf.inputs）"}
 
 

@@ -1,8 +1,8 @@
 """`ndf progress next` が本物の工程から作業を呼ぶ層（`invoke.invoke`）と本物のテンプレートで 1 スプリントを流すテスト（#3474）。
 
 工程の作業の偽物（`test_run.Fake`）を使わず、各行のプランはテンプレートを差し込みの出所（課題・`.ndf/project.json`・既定）で
-埋めて書く。差し替えるのは、埋めたプランを打つ子プロセス（`ndf plan next`）だけである。worker と承認ゲートの起動の
-既定は P2 #3295 が入れるので、ここではテストの中で与える。
+埋めて書く。差し替えるのは、埋めたプランを打つ子プロセス（`ndf plan next`）だけである。worker と承認ゲートの起動は、
+プランに載ったことを見分けられるようにテストの中で偽の名前を与える（worker の既定は `params.json` が持つ。#3908）。
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from types import SimpleNamespace
 import pytest
 import strategy_fixture
 
-from ndf.contracts import result
+from ndf.contracts import result, worker_kinds
 from ndf.core import durable, loop, route, worker_outcome
 from ndf.core.plan import records, runner, steps, transition_decide
-from ndf.progress import command, definition, gate, invoke, run, store, worker_kinds
+from ndf.progress import command, definition, gate, invoke, run, store
 
 ISSUE = 3474
 BRANCH = "sprint/s1"
@@ -65,10 +65,10 @@ def early_sprint(repo, monkeypatch):
     return _sprint(repo, monkeypatch, "0" * 40)
 
 
-def _sprint(repo: Path, monkeypatch, gathered: str) -> SimpleNamespace:
+def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS) -> SimpleNamespace:
     strategy_fixture.write(repo, "web-develop", PROJECT)
     held = route.params()
-    patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
+    patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
@@ -173,6 +173,18 @@ def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint
     assert out["summary"] == "工程 作業場所の用意 が失敗した: プランのテンプレート worktree が無い"
     assert out["metrics"]["stage"] == "作業場所の用意"
     assert [p["name"] for p in sprint.plans] == ["requirements"]
+
+
+def test_requirements_stage_starts_the_worker_by_the_default_of_params(repo, st, capsys, monkeypatch):
+    # #3908 の受け入れ条件 1: 差し込み worker を与えなくても、standard の工程「要求と受け入れ条件」が params.json の既定で
+    # worker を起動する。作業場所は作業の定義（kinds.json の cwd）が決めるので、既定の並びに --cwd を置かない
+    s = _sprint(repo, monkeypatch, "0" * 40, {"gate": DEFAULTS["gate"]})
+    tid = _new(capsys, "standard")
+    out = _turn(st, tid, repo, s.env)
+    assert out["status"] in ("ok", "gate"), out
+    assert s.plans[0]["name"] == "requirements"
+    work = next(step["run"] for step in s.plans[0]["steps"] if step["id"] == "work")
+    assert work == ["ndf", "answer", "work", "--state-dir", "{state_dir}", "requirements"]
 
 
 def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> dict:
