@@ -9,7 +9,7 @@
 ```text
 plugins/ndf/
 ├── contracts/
-│   ├── limits.json                           方針へ read_by を足す
+│   ├── limits.json                           方針へ read_by を足す・supervise.worker-run（3,600 秒）を足し supervise.worker-step を消す
 │   ├── data/
 │   │   └── internal-names.json              * 名前の対応表
 │   └── schemas/
