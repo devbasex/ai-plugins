@@ -4,7 +4,7 @@
 
 ## 今の姿
 
-何が起きたか・受け入れ条件は要求仕様（[issue-4172-requirements.md](./issue-4172-requirements.md)、正は #4172 の本文）にある。直す先は #4059 の設計（[issue-4059-design.md](./issue-4059-design.md)・[issue-4059-design-detail.md](./issue-4059-design-detail.md)、設計 PR #4115）と、そこから読み替える #4016 の設計（[issue-4016-design-detail.md](./issue-4016-design-detail.md)、設計 PR #4058）で、どれも未実装である。
+何が起きたか・受け入れ条件は要求仕様（[issue-4172-requirements.md](./issue-4172-requirements.md)、正は #4172 の本文）にある。直す先は #4059 の設計（[issue-4059-design.md](./issue-4059-design.md)・[issue-4059-design-detail.md](./issue-4059-design-detail.md)、設計 PR #4115）で、どちらも未実装である。そこから読み替える #4016 は実装済みで、確定仕様（[ndf-github-write-gate.md](../docs/specifications/ndf-github-write-gate.md)、設計 PR #4058）にある。
 
 ```mermaid
 flowchart LR

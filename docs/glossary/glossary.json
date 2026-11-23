@@ -8720,21 +8720,21 @@
       "term": "書き込みの順番の記録",
       "context": "ndf-durable",
       "meaning": "NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・次の内容を作る書き込みの時刻・待ちの終わりを持つ",
-      "pending_source": "issues/issue-4016-design.md",
-      "code": "write-gate"
+      "code": "write-gate",
+      "source": "docs/specifications/ndf-github-write-gate.md"
     },
     {
       "term": "内容を作る書き込み",
       "context": "ndf-durable",
       "meaning": "REST の POST と、GraphQL の create・add で始まる mutation。前の内容を作る書き込みから github.content-spacing の秒を空ける",
-      "pending_source": "issues/issue-4016-design.md",
-      "code": "content"
+      "code": "content",
+      "source": "docs/specifications/ndf-github-write-gate.md"
     },
     {
       "term": "二次レート制限",
       "context": "ndf-durable",
       "meaning": "GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る",
-      "pending_source": "issues/issue-4016-design.md"
+      "source": "docs/specifications/ndf-github-write-gate.md"
     }
   ]
 }

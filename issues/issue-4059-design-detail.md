@@ -1,6 +1,6 @@
 # #4059 の詳細設計: エージェントが打つ gh も NDF と同じ順番の記録で間を空ける
 
-設計文書 [issue-4059-design.md](./issue-4059-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。#4016 の部品（`WriteGate`・`limit_of`）は [issue-4016-design-detail.md](./issue-4016-design-detail.md) にあり、この文書は足す・置き換える関数だけを書く。
+設計文書 [issue-4059-design.md](./issue-4059-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。#4016 の部品（`WriteGate`・`limit_of`）は #4016 の確定仕様（[ndf-github-write-gate.md](../docs/specifications/ndf-github-write-gate.md)）にあり、この文書は足す・置き換える関数だけを書く。
 
 ## 地図
 

@@ -4,7 +4,7 @@
 
 ## 今の姿
 
-何が起きたか・目的・受け入れ条件は要求仕様（[issue-4059-requirements.md](./issue-4059-requirements.md)、正は #4059 の本文）にある。前提の設計は [issue-4016-design.md](./issue-4016-design.md) と [issue-4016-design-detail.md](./issue-4016-design-detail.md)（未実装）である。
+何が起きたか・目的・受け入れ条件は要求仕様（[issue-4059-requirements.md](./issue-4059-requirements.md)、正は #4059 の本文）にある。前提は #4016 の確定仕様（[ndf-github-write-gate.md](../docs/specifications/ndf-github-write-gate.md)。実装済み）である。
 
 ```mermaid
 flowchart TD
