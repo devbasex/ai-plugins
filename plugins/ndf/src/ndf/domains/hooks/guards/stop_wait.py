@@ -25,13 +25,15 @@ from ndf.domains.hooks.verdict import Verdict, passing
 # `development-workflow` の `references/asking.md` を指す。`{matched}` はルールで止めたときだけ当たった文を入れ、軽いモデルで
 # 止めたときは空にする
 REASON = (
-    "本文で人の回答を待って終えた{matched}。本文の問いは中継とオーガナイザーへ届かず、待ちの知らせも出ず、/goal も止まらない。"
+    "本文で人の回答を待って終えた{matched}。本文の質問は中継とオーガナイザーへ届かず、待ちの知らせも出ず、/goal も止まらない。"
     "人へ問えるのは承認ゲート（設計の承認は ndf-gate:1、本番系へ届く操作の承認は ndf-gate:2）と、development-workflow の "
-    "references/asking.md の「区分」に当たる問いだけである。当たるなら、AskUserQuestion の metadata.source に区分を付けて"
+    "references/asking.md の「区分」に当たる質問だけである。当たるなら、AskUserQuestion の metadata.source に区分を付けて"
     "出し直す（材料は本文に書いてよい）。当たらなければ人へ回さず推奨の案で決め、決めたことと理由を報告に 1 行で書いて続ける。"
-    "問いを出した後も、答えを待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
-    "問いの形の文を書き換えて終える。"
+    "質問を出した後も、回答を待たずに進められる作業を続ける。人の回答を待っていない（引用・ほかの場所の待ちの報告）なら、"
+    "質問の形の文を書き換えて終える。"
 )
+# 計測と待ちの知らせへ渡す理由。応答の本文（当たった文）を含めない
+LOGGED = "本文で人の回答を待って終えた（stop-wait）"
 # 当たった文として変更要求の文に添える字数の上限（長い文は末尾を「…」で切る）
 MATCHED_CHARS = 120
 # 判定の子を起動するのに要る残りの秒の下限（詳細設計の「処理の手順」）
@@ -60,11 +62,14 @@ def _result(
     judged: Optional[reply_judge.Judged] = None,
     matched: tuple[str, ...] = (),
 ) -> Verdict:
-    """判定と notes。`reply` が None（ルールを当てていない）なら notes に入れない。`matched` はルールで止めたときだけ渡す。"""
+    """判定と notes。`reply` が None（ルールを当てていない）なら notes に入れない。`matched` はルールで止めたときだけ渡す。
+
+    当たった文は会話へ返す `reason` にだけ入れ、計測と待ちの知らせへ渡す `logged` は本文を含まない固定の文にする。
+    """
     notes: dict = {"judge": judge, "judge_ms": round(judged.ms, 3) if judged else 0, "judge_calls": judged.calls if judged else 0}
     if reply is not None:
         notes = {"reply": reply, **notes}
-    return Verdict("pushback", reason=reason(matched), notes=notes) if wait else passing(**notes)
+    return Verdict("pushback", reason=reason(matched), notes=notes, logged=LOGGED) if wait else passing(**notes)
 
 
 def _quick_skip(ctx, svc, text: str) -> Optional[str]:
