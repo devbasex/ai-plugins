@@ -88,7 +88,7 @@ def test_context_record_refuses_a_mismatched_reason(tail, capsys):
 
 @pytest.mark.parametrize("tail", [["--policy", "current"], ["--root", "."]])
 def test_context_resolve_refuses_the_removed_options(tail, capsys):
-    # #3995 の 3995:3: 再起動の方針を消したので、resolve の --policy・--root は引数の誤り
+    # #3995 の 3995:3: 方針を消したので、resolve の --policy・--root は引数の誤り
     with pytest.raises(SystemExit) as exc:
         cli._parse(["context", "resolve", *tail])
     assert exc.value.code == 2

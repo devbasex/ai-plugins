@@ -16,7 +16,7 @@ from ndf.domains.relay.context_thresholds import Thresholds
 CONTINUE = "継続"
 # record_row に渡す 2 つの値（#3995 の決定 1）
 APPLIED = Thresholds(250_000, 500_000, {"decide_from": "default", "limit": "default"})
-# 再起動の方針を消す前の行だけが持つ列（#3995 の決定 1）
+# 方針を消す前の行だけが持つ列（#3995 の決定 1）
 POLICY_COLUMNS = ("policy", "margin", "config_error")
 
 
@@ -494,7 +494,7 @@ def test_estimate_stage_segments_current_behavior_edges(tmp_path):
     }
 
 
-# --- 旧い行（再起動の方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の基準） ---
+# --- 旧い行（消した方針の列 policy・margin・config_error を持つ）だけの記録（#3995 の Task 1。決定 1 の代償の基準） ---
 
 _OLD = {"policy": "current", "margin": 50_000, "config_error": None}
 
