@@ -153,8 +153,11 @@ def test_close_plan_and_review_args(loop: Callable[..., dict]) -> None:
 
 
 @pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
-def test_close_plan_accepts_every_pace_of_the_context_schema(loop: Callable[..., dict], pace: str) -> None:
-    assert loop("close-plan", "--pace", pace, "--route", "none")["status"] == "ok"
+def test_close_plan_accepts_every_pace_of_the_context_schema(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict], pace: str
+) -> None:
+    loop_cli.main(["--cwd", str(tmp_path), "close-plan", "--pace", pace, "--route", "none"])  # git のリポジトリは要らない
+    assert last_result(capsys.readouterr().out)["status"] == "ok"
 
 
 def test_step_loop_tool_is_the_cli_name() -> None:
