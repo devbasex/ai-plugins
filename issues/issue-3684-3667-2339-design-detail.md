@@ -421,7 +421,7 @@ plugins/ndf/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 結果のスキーマ | 4 つの欄を持つ結果 JSON が通る | 欄を 1 つも持たない結果 JSON（通る）・`items` が空（通る） | `severity` が語彙の外（通らない）・`acceptance` が文字列（並びでない。通らない） |
+| 結果のスキーマ | 4 つの欄を持つ結果 JSON が通る・重さの表の 4 つ（`critical`・`major`・`minor`・`nit`）のどれを `severity` に持つ項目も通る・既存の cross-review の結果 JSON（`severity` 付きの `items`）をそのまま通す | 欄を 1 つも持たない結果 JSON（通る）・`items` が空（通る） | `severity` が語彙の外（`blocker`・`info`。通らない）・`acceptance` が文字列（並びでない。通らない） |
 
 テストのファイル: `tests/contracts/test_result_items.py`（新設）
 
