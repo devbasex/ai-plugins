@@ -254,6 +254,45 @@ def test_write_file_publishes_written_inode_even_if_temp_name_is_swapped(workdir
     assert [p.name for p in d.iterdir()] == ["f"]
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="記述子から今の名前を引けない")
+def test_write_file_removes_temp_dir_moved_to_another_name(workdir, monkeypatch):
+    d, _ = workdir
+    real_replace = os.replace
+
+    def move_then_replace(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+        (tmp,) = (p for p in d.iterdir() if p.name.startswith("."))
+        tmp.rename(d / "moved")
+        real_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    monkeypatch.setattr(os, "replace", move_then_replace)
+    with worker_paths.open_workdir(d) as wd:
+        worker_paths.write_file(wd, "f", "書いた")
+    assert (d / "f").read_text(encoding="utf-8") == "書いた"
+    assert [p.name for p in d.iterdir()] == ["f"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+def test_write_file_keeps_swapped_dir_when_temp_dir_cannot_be_opened(workdir, monkeypatch):
+    d, _ = workdir
+    real_mkdir = os.mkdir
+    swapped = []
+
+    def mkdir_then_swap(path, mode=0o777, *, dir_fd=None):
+        real_mkdir(path, mode, dir_fd=dir_fd)
+        (d / path).rename(d / "moved")
+        real_mkdir(d / path, 0o000)
+        swapped.append(d / path)
+
+    monkeypatch.setattr(os, "mkdir", mkdir_then_swap)
+    try:
+        with worker_paths.open_workdir(d) as wd, pytest.raises(PermissionError):
+            worker_paths.write_file(wd, "f", "新")
+        assert swapped[0].is_dir()
+    finally:
+        for p in swapped:
+            p.rmdir()
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
 def test_write_file_refuses_read_only_file(workdir):
     d, _ = workdir
