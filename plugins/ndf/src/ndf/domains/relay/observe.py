@@ -94,16 +94,20 @@ def process_parents(proc: Path = Path("/proc")) -> Optional[dict[int, int]]:
         return None
     parents: dict[int, int] = {}
     for entry in entries:
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
-        except (FileNotFoundError, ProcessLookupError, PermissionError):  # 終わった・他のユーザーのプロセスは数えない
-            continue
-        fields = stat.rpartition(")")[2].split()  # `pid (comm) state ppid …`。comm は括弧や空白を含み得る
-        if len(fields) >= 2 and fields[1].isdigit():
-            parents[int(entry.name)] = int(fields[1])
+        ppid = _parent_of(entry) if entry.name.isdigit() else None
+        if ppid is not None:
+            parents[int(entry.name)] = ppid
     return parents
+
+
+def _parent_of(entry: Path) -> Optional[int]:
+    """`/proc/<pid>/stat` の親 PID。終わった・他のユーザーのプロセス（読めない `stat`）は None。"""
+    try:
+        stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+    except (FileNotFoundError, ProcessLookupError, PermissionError):  # noqa: NDF401 ファイル: 終わった・他のユーザーのプロセスは数えない
+        return None
+    fields = stat.rpartition(")")[2].split()  # `pid (comm) state ppid …`。comm は括弧や空白を含み得る
+    return int(fields[1]) if len(fields) >= 2 and fields[1].isdigit() else None
 
 
 def live_shells(wrapper_pid: int, parents: Optional[Mapping[int, int]], proc: Path = Path("/proc")) -> Optional[int]:
