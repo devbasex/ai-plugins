@@ -1,7 +1,7 @@
 """判定のリクエスト（hook の側）の単体テスト（#4000 の決定 1・3・6・7・10・11）。
 
 実時間の経過と実プロセスの起動をテストの仕様にしない。子の起動は偽の `Popen`・偽の `killpg`・差し替えた猶予の待ち
-（子の標準入出力は同じプロセスの中のパイプ）、`/proc` は偽の読み手、時刻は引数で渡す。設定（`limits.json` の判定の行）はまだ無いので、設定を読む口を差し替えて与える。
+（子の標準入出力は同じプロセスの中のパイプ）、`/proc` は偽の読み手、時刻は引数で渡す。設定は配布する `limits.json` の判定の行を読む。
 """
 
 from __future__ import annotations
@@ -18,26 +18,6 @@ import pytest
 
 from ndf.domains.hooks import reply_judge, tables
 
-# 詳細設計の「内部のデータと定数」の `hook.stop-wait.judge`（行が足されるまでテストの中だけで与える）
-JUDGE: dict[str, Any] = {
-    "model": "haiku",
-    "seconds": 5,
-    "max_chars": 1600,
-    "rest_seconds": 600,
-    "lock_seconds": 0.2,
-    "rounds": 3,
-    "auth_markers": ["Not logged in", "Invalid API key"],
-    "endpoint": {
-        "entrypoints": ["cli", "sdk-cli"],
-        "ancestors": 8,
-        "cli_exe": ["*/claude/versions/*"],
-        "script_hosts": ["node*"],
-        "flags": ["--settings", "--setting-sources"],
-        "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"],
-        "env_names": ["ANTHROPIC_", "CLAUDE_CONFIG_DIR"],
-    },
-}
-
 HOOK_PID = 100
 CLAUDE_EXE = "/home/u/.local/share/claude/versions/2.1.330"
 CLI_JS = "/opt/n/lib/node_modules/@anthropic-ai/claude-code/cli.js"
@@ -48,12 +28,6 @@ OTHER_ENV = {"CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/w/other"}
 LAUNCH = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
 GATEWAY = reply_judge.Launch(argv=["claude", "--settings", "gw.json"], project_dir="/w/p", exe=CLAUDE_EXE, exe_id=EXE_ID)
 OTHER = reply_judge.Launch(argv=["claude", "-p"], project_dir="/w/other", exe=CLAUDE_EXE, exe_id=EXE_ID)
-
-
-@pytest.fixture(autouse=True)
-def judge_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """設定を読む口を差し替える（`limits.json` の行は別の課題が足す）。"""
-    monkeypatch.setattr(reply_judge, "_judge", JUDGE.__getitem__)
 
 
 class Proc(NamedTuple):
@@ -502,7 +476,8 @@ def test_mark_rest_keeps_the_rests_already_written(tmp_path: Path) -> None:
 
 def test_mark_rest_does_not_write_while_another_stop_holds_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 錠を取れなければ書かない（別のセッションの書き込みを古い中身で上書きしない）
-    monkeypatch.setattr(reply_judge, "_judge", {**JUDGE, "lock_seconds": 0}.__getitem__)
+    real = reply_judge._judge
+    monkeypatch.setattr(reply_judge, "_judge", lambda key: 0 if key == "lock_seconds" else real(key))
     path = reply_judge.rest_path(tmp_path)
     path.parent.mkdir(parents=True)
     with open(path.with_name(reply_judge.REST_LOCK_NAME), "w") as held:

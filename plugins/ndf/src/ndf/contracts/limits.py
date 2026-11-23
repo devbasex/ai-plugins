@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 
@@ -48,10 +48,21 @@ class Policy(NamedTuple):
     lock: Optional[float] = None
     gate: Optional[float] = None
     first: Optional[float] = None
+    # 本文の待ちの判定（`hook.stop-wait.judge`。#4000）だけが持つ値
+    max_chars: Optional[int] = None
+    rest_seconds: Optional[float] = None
+    lock_seconds: Optional[float] = None
+    rounds: Optional[int] = None
+    model: Optional[str] = None
+    runtimes: Optional[list[str]] = None
+    auth_markers: Optional[list[str]] = None
+    endpoint: Optional[dict[str, Any]] = None
 
 
-# 方針の値の名前（名前と説明を除いた Policy の項目）
-VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
+# 数でない値（`value` で引かない。判定の子と hook の表が行から読む）
+OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
+# 方針の数の値の名前（名前と説明と数でない値を除いた Policy の項目）
+VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary", *OTHER_KEYS))
 
 
 def validate(raw: object) -> dict[str, Policy]:

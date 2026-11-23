@@ -19,12 +19,6 @@ MISSED = {
 }
 
 
-@pytest.fixture(autouse=True)
-def rounds(monkeypatch):
-    """設定の周の数（`limits.json` の判定の行はまだ無い）。"""
-    monkeypatch.setattr(judge_child, "setting", lambda key: {"rounds": 3}[key])
-
-
 def _emitted(capsys) -> dict:
     return json.loads(capsys.readouterr().out)
 
