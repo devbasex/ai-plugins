@@ -17,6 +17,7 @@ from githubkit.exception import RequestFailed, SecondaryRateLimitExceeded
 from githubkit.response import Response
 from githubkit.throttling import LocalThrottler
 
+from ndf import slot_pool
 from ndf.adapters import github, github_limits, write_gate
 from ndf.adapters.github_limits import Limit, limit_of, reasons_of
 
@@ -141,6 +142,14 @@ def test_a_refusal_without_the_phrase_is_not_a_secondary_limit() -> None:
     assert gate.blocked == []
 
 
+def test_the_phrase_outside_the_json_message_is_not_a_secondary_limit() -> None:
+    # PR 4265 の r1-3: JSON の応答は `message` だけを照合する
+    body = {"message": "Resource not accessible by integration", "errors": [SECONDARY], "documentation_url": "secondary rate limit"}
+    error, gate = _rest_failure(httpx.Response(403, json=body))
+    assert (error.secondary, error.retry_after) == (False, None)
+    assert gate.blocked == []
+
+
 def test_a_refusal_keeps_every_reason_while_the_message_is_cut() -> None:
     body = {"message": "Validation Failed", "errors": ["y" * 400, "line must be part of the diff"]}
     error, _ = _rest_failure(httpx.Response(422, json=body))
@@ -164,6 +173,18 @@ def test_graphql_secondary_limit_on_http_200_is_shared(kind: str) -> None:
     error, gate = _graphql_failure({"data": None, "errors": [{"type": kind, "message": SECONDARY}]})
     assert (error.secondary, error.hinted, error.quota) == (True, False, github.GRAPHQL)
     assert gate.blocked == [error.retry_after]
+
+
+def test_graphql_secondary_limit_on_http_200_reads_the_retry_after_of_the_response() -> None:
+    # PR 4265 の r1-2: githubkit が `GraphQLFailed` に変える前の応答のヘッダーで待ちの秒を決める
+    gate = _Gate()
+    answer = {"data": None, "errors": [{"type": "FORBIDDEN", "message": SECONDARY}]}
+    response = httpx.Response(200, json=answer, headers={"retry-after": "120"})
+    hub = github.GitHub(REPO, offline_client(lambda request: response), gate=gate)  # type: ignore[arg-type]
+    with pytest.raises(github.GitHubError) as err:
+        hub.graphql("mutation { addComment(input: {}) { x } }", {})
+    assert (err.value.secondary, err.value.hinted, err.value.retry_after) == (True, True, 120.0)
+    assert gate.blocked == [120.0]
 
 
 def test_graphql_other_errors_stay_as_they_are() -> None:
@@ -196,9 +217,79 @@ def test_retry_within_shares_the_secondary_limit_even_when_it_gives_up() -> None
     assert gate.blocked == [30.0, github_limits.backoff(1)]
 
 
+def test_a_secondary_limit_told_by_githubkit_is_shared_without_the_phrase() -> None:
+    # PR 4265 の r1-3: githubkit が `SecondaryRateLimitExceeded` と見分けた応答は、語や数の `retry-after` が無くても二次レート制限
+    limit = github_limits.limit_of_failure(_failed(403, {"retry-after": "soon"}, "forbidden", True), NOW)
+    assert limit == Limit(FIRST_WAIT, False)
+
+
 def test_retry_within_does_not_share_a_primary_limit() -> None:
     gate = _Gate()
     decide = github.RetryWithin(remaining=lambda: 0.0, gate=gate)  # type: ignore[arg-type]
     reset = str(int(time.time()) + 600)
     decide(_failed(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": reset}, "API rate limit exceeded", False), 0)
     assert gate.blocked == []
+
+
+# スロットの読み替え（PR 4265 の r1-4）
+
+
+def _counted(handler) -> tuple[github.GitHub, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    return github.GitHub(REPO, offline_client(record), gate=_Gate()), seen  # type: ignore[arg-type]
+
+
+def test_pulls_does_not_read_again_through_rest_on_a_secondary_limit() -> None:
+    answer = {"data": None, "errors": [{"type": "FORBIDDEN", "message": SECONDARY}]}
+    hub, seen = _counted(lambda request: httpx.Response(200, json=answer))
+    with pytest.raises(github.GitHubError) as err:
+        hub.pulls([1, 2, 3])
+    assert err.value.secondary and [r.url.path for r in seen] == ["/graphql"]
+
+
+def test_pull_does_not_read_again_through_graphql_on_a_secondary_limit() -> None:
+    hub, seen = _counted(lambda request: httpx.Response(403, json={"message": SECONDARY}, headers={"x-ratelimit-remaining": "12"}))
+    with pytest.raises(github.GitHubError) as err:
+        hub.pull(7)
+    assert err.value.secondary and [r.url.path for r in seen] == [f"/repos/{REPO}/pulls/7"]
+
+
+# 応答のフック（PR 4265 の r1-6）
+
+
+class _Watching(write_gate.WriteGate):
+    """`block` の時点で送信のロックを持たれているかを覚える `WriteGate`。"""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path, lambda: NOW, lambda seconds: None)
+        self.held_at_block: list[bool] = []
+
+    def block(self, seconds: float) -> None:
+        probe = slot_pool.try_lock(self.path.with_name(write_gate.SEND_LOCK_FILE))
+        self.held_at_block.append(probe is None)
+        if probe is not None:
+            probe.release()
+        super().block(seconds)
+
+
+@pytest.mark.parametrize(
+    ("path", "response"),
+    [
+        (f"/repos/{REPO}/issues", httpx.Response(403, json={"message": SECONDARY}, headers={"x-ratelimit-remaining": "12"})),
+        ("/graphql", httpx.Response(200, json={"data": None, "errors": [{"type": "FORBIDDEN", "message": SECONDARY}]})),
+    ],
+)
+def test_the_wait_is_recorded_before_the_send_lock_is_released(tmp_path: Path, path: str, response: httpx.Response) -> None:
+    gate = _Watching(tmp_path / write_gate.GATE_FILE)
+    api = github.client(auth="t", transport=httpx.MockTransport(lambda request: response), gate=gate)
+    with pytest.raises(github.GitHubError):
+        if path == "/graphql":
+            github.GitHub(REPO, api).graphql("mutation { addComment(input: {}) { x } }", {})
+        else:
+            github.GitHub(REPO, api).rest("POST", path, {"title": "t"})
+    assert gate.held_at_block[0] is True

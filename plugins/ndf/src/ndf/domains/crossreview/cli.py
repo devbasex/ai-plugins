@@ -87,7 +87,7 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     def port(pr: int) -> threads.GitHubPort:
         # PR ごとに 1 つの口を使い回す（読んだスレッドの一覧を resolve で取り直さない。PR 3944 の r6-8）
         if pr not in ports:
-            ports[pr] = threads.GitHubPort(hub, publisher, pr, gh.GitHubError)
+            ports[pr] = threads.GitHubPort(hub, publisher, pr, gh.GitHubError, block=gate.block)
         return ports[pr]
 
     def clean(texts: Sequence[str]) -> list[str]:

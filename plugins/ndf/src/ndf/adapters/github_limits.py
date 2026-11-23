@@ -3,6 +3,8 @@
 - 二次レート制限の見分けと待ちの秒は `limit_of` の 1 か所で決める。REST の 403・429 の応答も、GraphQL の HTTP 200 の誤りも
   ここを通す。GitHub が待ちの秒（`retry-after`、または一次の残量 0 と `x-ratelimit-reset`）を示したときだけ `hinted` を真にし、
   示さなければ `cross-review.secondary-rate-limit` の指数的な待ち（`routing.backoff`）の 1 回目の秒にする
+- 応答のフック（`watcher`）は、httpx が応答を返す前（送信のロックを放す前）に二次レート制限を見分けて待ちの終わりを
+  記録する。後続の書き込みが古い記録を読んで送らない（HTTP 200 の GraphQL の誤りも）
 - githubkit の打ち直しの判断（`RetryWithin`）は、二次レート制限なら打ち直すかに依らず（最後の試行でも）待ちの終わりを
   `WriteGate.block` でマシン全体へ知らせる
 - 拒否の理由（`reasons_of`）は応答の本文の全体から読み、切り詰めない
@@ -10,15 +12,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from http import HTTPStatus
 from typing import Any, NamedTuple, Optional
 
-from githubkit.exception import GitHubException, RateLimitExceeded, RequestError, RequestFailed
+import httpx
+from githubkit.exception import GitHubException, RateLimitExceeded, RequestError, RequestFailed, SecondaryRateLimitExceeded
 from githubkit.retry import RETRY_DEFAULT, RetryOption
 
+from ndf.adapters import write_gate
 from ndf.adapters.write_gate import WriteGate
 from ndf.contracts import limits, routing
 
@@ -26,8 +31,9 @@ from ndf.contracts import limits, routing
 REST, GRAPHQL = "rest", "graphql"
 # 二次レート制限を返す HTTP の状態（REST）
 LIMIT_STATUSES = (HTTPStatus.FORBIDDEN, HTTPStatus.TOO_MANY_REQUESTS)
-# REST の本文と、GraphQL の誤りの `message` が二次レート制限を表す語（小文字で比べる）
-REST_PHRASES = ("secondary rate limit",)
+# REST の `message`（JSON でなければ本文）と、GraphQL の誤りの `message` が二次レート制限を表す語（小文字で比べる）。
+# REST は githubkit の見分け（`secondary rate`）とそろえる
+REST_PHRASES = ("secondary rate",)
 GRAPHQL_PHRASES = ("secondary rate limit", "submitted too quickly")
 # `errors[]` の辞書から理由の文へつなぐ欄
 REASON_KEYS = ("message", "code", "field", "resource")
@@ -80,17 +86,17 @@ def _hint(headers: Mapping[str, str], now: float) -> Optional[float]:
     return None
 
 
-def limit_of(status: int, headers: Mapping[str, str], message: str, now: float) -> Optional[Limit]:
+def limit_of(status: int, headers: Mapping[str, str], message: str, now: float, known: bool = False) -> Optional[Limit]:
     """二次レート制限なら待ちの秒と `hinted`、ほかは None。
 
-    REST は 403・429 で、数の `retry-after` があるか本文に `secondary rate limit` があるもの（githubkit の
-    `SecondaryRateLimitExceeded` と、一次の残量が正で `retry-after` の無い通常の `RequestFailed`）。GraphQL は HTTP 200 の誤りの
-    `message` に `secondary rate limit` か `submitted too quickly` があるもの。`x-ratelimit-reset` だけでは `hinted` を真にしない
-    （GitHub は一次の上限の情報としてほぼすべての応答に付ける）。
+    REST は 403・429 で、`known`（githubkit が `SecondaryRateLimitExceeded` と見分けた）か、数の `retry-after` があるか、
+    `message`（JSON の `message`。`rest_message` が取り出す）に `secondary rate` があるもの（一次の残量が正で `retry-after` の
+    無い通常の `RequestFailed` も）。GraphQL は HTTP 200 の誤りの `message` に `secondary rate limit` か `submitted too quickly` が
+    あるもの。`x-ratelimit-reset` だけでは `hinted` を真にしない（GitHub は一次の上限の情報としてほぼすべての応答に付ける）。
     """
     text = message.lower()
     if status in LIMIT_STATUSES:
-        limited = _number(headers, "retry-after") is not None or any(p in text for p in REST_PHRASES)
+        limited = known or _number(headers, "retry-after") is not None or any(p in text for p in REST_PHRASES)
     else:
         limited = status == HTTPStatus.OK and any(p in text for p in GRAPHQL_PHRASES)
     if not limited:
@@ -124,10 +130,83 @@ def reasons_of(text: str) -> tuple[str, ...]:
     return tuple(found)
 
 
+def rest_message(text: str) -> str:
+    """REST の拒否の本文のうち、二次レート制限の語を探す文。JSON なら `message`（無ければ空）、JSON でなければ本文の全体。"""
+    body = _parsed(text)
+    if isinstance(body, dict):
+        return body["message"] if isinstance(body.get("message"), str) else ""
+    return text if isinstance(body, str) else ""
+
+
+def graphql_messages(text: str) -> str:
+    """GraphQL の応答の本文の誤りの `message` を `; ` でつないだ文。誤りが無い・JSON でなければ空。"""
+    body = _parsed(text)
+    errors = body.get("errors") if isinstance(body, dict) else None
+    if not isinstance(errors, list):
+        return ""
+    return "; ".join(str(e["message"]) for e in errors if isinstance(e, dict) and e.get("message") is not None)
+
+
 def limit_of_failure(exc: RequestFailed, now: float) -> Optional[Limit]:
     """githubkit の失敗（`SecondaryRateLimitExceeded` も通常の `RequestFailed` も）の二次レート制限。"""
     response = exc.response
-    return limit_of(response.status_code, response.headers, response.raw_response.text, now)
+    known = isinstance(exc, SecondaryRateLimitExceeded)
+    return limit_of(response.status_code, response.headers, rest_message(response.raw_response.text), now, known)
+
+
+def limit_of_response(response: httpx.Response, now: float) -> Optional[Limit]:
+    """httpx の応答（本文を読んだもの）の二次レート制限。HTTP 200 は GraphQL への POST の誤りだけを見る。"""
+    status = response.status_code
+    if status in LIMIT_STATUSES:
+        return limit_of(status, response.headers, rest_message(response.text), now)
+    request = response.request
+    if status != HTTPStatus.OK or request.method != "POST" or request.url.path != write_gate.GRAPHQL_PATH:
+        return None
+    messages = graphql_messages(response.text)
+    return limit_of(status, response.headers, messages, now) if messages else None
+
+
+def _watched(response: httpx.Response) -> bool:
+    """本文を読んで見分ける応答か（REST の 403・429 と、GraphQL への POST の 200）。"""
+    request = response.request
+    if response.status_code in LIMIT_STATUSES:
+        return True
+    return response.status_code == HTTPStatus.OK and request.method == "POST" and request.url.path == write_gate.GRAPHQL_PATH
+
+
+def _record(gate: WriteGate, response: httpx.Response) -> None:
+    limit = limit_of_response(response, time.time())
+    if limit is not None:
+        gate.block(limit.seconds)
+
+
+def watcher(gate: WriteGate) -> Callable[[httpx.Response], None]:
+    """httpx の応答のフック。二次レート制限なら、応答を返す前（`WriteGate` の送信のロックを放す前）に待ちの終わりを記録する。"""
+
+    def watch(response: httpx.Response) -> None:
+        if _watched(response):
+            response.read()
+            _record(gate, response)
+
+    return watch
+
+
+def async_watcher(gate: WriteGate) -> Callable[[httpx.Response], Awaitable[None]]:
+    """`watcher` の非同期版。記録は送信のロックを持つ手順と同じ専用のスレッド（`write_gate._FINISHER`）で書く。"""
+
+    async def watch(response: httpx.Response) -> None:
+        if _watched(response):
+            await response.aread()
+            await asyncio.get_running_loop().run_in_executor(write_gate._FINISHER, _record, gate, response)
+
+    return watch
+
+
+def hooks(gate: Optional[WriteGate]) -> dict[str, Any]:
+    """githubkit のクライアントへ渡す応答のフック（`gate` が無ければ空）。"""
+    if gate is None:
+        return {}
+    return {"event_hooks": {"response": [watcher(gate)]}, "async_event_hooks": {"response": [async_watcher(gate)]}}
 
 
 class RetryWithin:

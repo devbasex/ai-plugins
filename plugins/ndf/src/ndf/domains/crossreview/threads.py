@@ -214,10 +214,13 @@ class GitHubPort:
         pr: int,
         errors: type[Exception],
         pace: Optional[Pace] = None,
+        block: Optional[Callable[[float], None]] = None,
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`pace` はテストが差し替える。
+        `block`（`WriteGate.block`）へ二次レート制限の打ち直しの待ちを毎回知らせ、ほかのプロセスの書き込みも止める（#4016）。
         信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
+        self.block = block
         self.sleep, self.clock = pace if pace is not None else Pace(time.sleep, time.monotonic)
         self._me: Optional[str] = None
         self._pr_head: Optional[str] = None
@@ -226,7 +229,7 @@ class GitHubPort:
         self._last_post: Optional[float] = None
 
     def _write(self, call: Callable[[], T]) -> T:
-        return patient(call, self.errors, self.sleep)
+        return patient(call, self.errors, self.sleep, self.block)
 
     def _safe(self, body: str) -> str:
         (safe,), _ = self.publisher.guarded(body)

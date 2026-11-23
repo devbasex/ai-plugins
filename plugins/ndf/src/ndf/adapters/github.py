@@ -174,12 +174,13 @@ def client(
     `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
     省くと上限（rate limit）は待たずに `GitHubError` で返す（残りを 0 秒とみなす）。githubkit の既定は解除の時刻まで
     （一次上限なら最大 1 時間）眠るため、そのままではスロットの読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
-    書き込みは `gate`（省けば `machine_gate()`。`transport` を渡すテストでは取らない）の順番を取る。
+    書き込みは `gate`（省けば `machine_gate()`。`transport` を渡すテストでは取らない）の順番を取り、待ちの終わりは応答のフックで記録する。
     """
     if gate is None and transport is None:
         gate = write_gate.machine_gate()
     retry = RetryWithin(remaining if remaining is not None else github_limits.no_wait, gate)
-    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, throttler=gate)
+    hooks = github_limits.hooks(gate)
+    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, throttler=gate, **hooks)
 
 
 def text_of(value: Any) -> str:
@@ -522,12 +523,14 @@ class GitHub:
         """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。
         HTTP 200 の誤りが二次レート制限なら `secondary` の `GitHubError` にする（`_translating` が `block` する。A6）。"""
         with _translating(GRAPHQL, gate=self.gate):
+            resp = self.api.graphql._request(query, variables)  # 誤りの写しへ応答のヘッダー（`Retry-After`）を渡す
             try:
-                return self.api.graphql(query, variables)
+                return self.api.graphql.parse_graphql_response(resp)
             except GraphQLFailed as exc:
                 if _only_not_found(exc) and exc.response.data is not None:
                     return exc.response.data
-                raise GitHubError.of(github_limits.graphql_failure("; ".join(e.message for e in exc.response.errors), {})) from None
+                messages = "; ".join(e.message for e in exc.response.errors)
+                raise GitHubError.of(github_limits.graphql_failure(messages, resp.headers)) from None
             except PrimaryRateLimitExceeded as exc:
                 limited = github_limits.graphql_limited(exc)
                 if limited is None:
@@ -570,13 +573,13 @@ class GitHub:
     def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
-        GraphQL のスロットが上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g）。
+        GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
         """
         wanted = sorted({int(n) for n in numbers})
         try:
             raw = self.nodes(wanted, "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
-            if exc.quota != GRAPHQL or len(wanted) > int(limits.value("github.rest-fallback", "count")):
+            if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
                 raise
             # 1 件ずつの REST の読み取りは github.rest-fallback 件まで（上で確かめた）
             return {n: self._rest_pull_or_none(n) for n in wanted}
@@ -603,11 +606,11 @@ class GitHub:
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
     def pull(self, number: int) -> Pull:
-        """PR を REST で読む。REST のスロットが上限なら GraphQL のスロットで読み替える（不足 g）。"""
+        """PR を REST で読む。REST のスロットが一次の上限なら GraphQL のスロットで読み替える（不足 g）。二次レート制限は読み替えない。"""
         try:
             return self._rest_pull(number)
         except GitHubError as exc:
-            if exc.quota != REST:
+            if exc.quota != REST or exc.secondary:
                 raise
             # 読み替えた先のスロットも上限なら、REST へ戻さずにその上限で止まる
             raw = self.nodes([number], "pullRequest", PULL_FIELDS)[int(number)]

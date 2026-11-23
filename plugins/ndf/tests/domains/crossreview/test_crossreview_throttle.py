@@ -95,11 +95,15 @@ class _Publisher:
 
 def test_github_port_waits_on_the_limit_and_spaces_threads() -> None:
     waits: list[float] = []
+    blocked: list[float] = []
     now = [100.0]
     hub = _Hub(limited=1)
-    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=threads.Pace(waits.append, lambda: now[0]))
+    pace = threads.Pace(waits.append, lambda: now[0])
+    port = threads.GitHubPort(hub, _Publisher(), 7, _Limited, pace=pace, block=blocked.append)
     assert port.open_thread("a.py", None, HEAD, "一つ目") == 1
     assert waits == [limits.value(throttle_decide.POLICY, "interval")]
+    # 打ち直しの待ちはマシン全体の待ちの終わりへも知らせる（PR 4265 の r1-1）
+    assert blocked == waits
     port.open_thread("a.py", None, HEAD, "二つ目")
     assert waits[-1] == limits.value(throttle_decide.SPACING, "interval")
     port.reply(1, "直した")

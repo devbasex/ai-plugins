@@ -225,24 +225,25 @@ def test_without_the_record_lock_it_spaces_within_the_process(gate, path, capsys
     assert not path.exists()
 
 
-def test_eight_threads_get_distinct_spaced_reservations(path):
-    gate = write_gate.WriteGate(path)
-    start = threading.Barrier(8)
+def test_a_reservation_that_waited_on_the_record_lock_reads_the_ones_taken_meanwhile(path, clock, monkeypatch):
+    # 記録のロックを待つ間に 7 つの予約が先に入った順を、ロックの取得の前に割り込ませて作る（スレッドも本物の待ちも使わない）
+    others = [write_gate.WriteGate(path, clock, clock.sleep) for _ in range(7)]
+    last = write_gate.WriteGate(path, clock, clock.sleep)
     got: list[float] = []
+    real = slot_pool.lock
+    waiting = [True]
 
-    def take() -> None:
-        start.wait()
-        got.append(gate.reserve(WRITE).at)
+    def lock(lock_path):
+        if waiting and Path(lock_path).name == RECORD_LOCK:
+            waiting.clear()
+            got.extend(o.reserve(WRITE).at for o in others)
+        return real(lock_path)
 
-    threads = [threading.Thread(target=take) for _ in range(8)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    monkeypatch.setattr(slot_pool, "lock", lock)
+    got.append(last.reserve(WRITE).at)
 
-    ats = sorted(got)
-    assert len(set(ats)) == 8
-    assert all(b - a >= W - EPS for a, b in zip(ats, ats[1:]))
+    assert got == sorted(got) and len(set(got)) == 8
+    assert all(b - a >= W - EPS for a, b in zip(got, got[1:]))
 
 
 def test_two_gates_on_one_record_are_spaced(path, clock):
@@ -549,39 +550,19 @@ def test_without_the_record_lock_the_send_still_waits_the_spacing(gate, path, cl
 
 
 def test_no_other_send_starts_during_a_slow_response(path, clock):
+    # 送信のロックは応答の終わりまで持つ。持つ間は後の書き込みが取れない（取れるかを待たずに確かめる）
     first = write_gate.WriteGate(path, clock, clock.sleep)
     second = write_gate.WriteGate(path, clock, clock.sleep)
-    inside = threading.Event()
-    trying = threading.Event()
-    events: list[str] = []
-    real = second._send_lock
+    with first.hold(WRITE):
+        clock.now += 5  # 応答に 5 秒かかる
+        assert not _send_lock_is_free(path)
+        finished = clock.now
+    assert _send_lock_is_free(path)
 
-    def send_lock():
-        # 先の書き込みが送信のロックを持つ間に、後の書き込みが取りに行く
-        events.append("second-tries" if slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE)) is None else "free")
-        trying.set()
-        return real()
+    with second.hold(WRITE):
+        sent_at = clock.now
 
-    second._send_lock = send_lock
-
-    def slow() -> None:
-        with first.hold(WRITE):
-            inside.set()
-            assert trying.wait(10)
-            events.append("first-end")
-
-    def fast() -> None:
-        assert inside.wait(10)
-        with second.hold(WRITE):
-            events.append("second-start")
-
-    threads = [threading.Thread(target=slow), threading.Thread(target=fast)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert events == ["second-tries", "first-end", "second-start"]
+    assert sent_at >= finished + W - EPS
 
 
 def test_a_block_during_the_sleep_replaces_the_reservation(gate, path, clock):
@@ -761,3 +742,38 @@ def test_a_cancelled_caller_still_releases_the_send_lock(gate, path, monkeypatch
     assert len(finisher.ran) == 1
     assert _send_lock_is_free(path)
     assert record(path)["sent_next"] == pytest.approx(NOW + W)
+
+
+def test_async_steps_holding_the_send_lock_resume_on_the_finisher(gate, path, clock, monkeypatch):
+    # PR 4265 の r1-5: 最短の送信時刻を送信のロックを持ったまま待った後の読み直しは、既定のスレッドプールが
+    # 送信のロックを待つ手順で埋まっていても進む
+    seed(path, next=NOW - 10, sent_next=NOW + 5)
+    default, finisher = _Executor(), _Executor()
+    monkeypatch.setattr(write_gate, "_FINISHER", finisher)
+    real_sleep = asyncio.sleep
+
+    async def sleep(seconds: float) -> None:
+        clock.now += seconds
+        default.frozen = True  # 眠る間に既定のスレッドプールが埋まる
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+
+    async def write() -> float:
+        async with gate.async_acquire(PATCH):
+            return clock.now
+
+    async def main() -> Optional[float]:
+        asyncio.get_running_loop().set_default_executor(default)
+        task = asyncio.ensure_future(write())
+        for _ in range(50):
+            if task.done():
+                return task.result()
+            await real_sleep(0)
+        return None
+
+    sent_at = asyncio.run(main())
+
+    assert sent_at == pytest.approx(NOW + 5)
+    assert default.pending == [] and len(finisher.ran) == 2
+    assert _send_lock_is_free(path)
