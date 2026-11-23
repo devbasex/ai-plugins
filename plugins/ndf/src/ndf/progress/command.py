@@ -170,17 +170,26 @@ def _context_git_head(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     return Git(Path(context.get("worktree") or cwd)), str(context.get("branch") or "HEAD")
 
 
+def base_ref(git: Git, base: str) -> str:
+    """差分の起点の参照: 作業場所で `base` が読めればそのブランチ名、読めなければ `<リモート名>/<base>`（#3908）。
+
+    工程の条件 `code_in_diff`（`_sprint_range`）とリファクタリングの既定の起動（`refactor_values`）が同じ起点を使う。
+    """
+    try:
+        git.rev_parse(base)
+    except GitError:
+        # 手元に無いベースブランチは、取得し直したリモートの参照で見る
+        return f"{git.remote()}/{base}"
+    return base
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（ブランチ戦略の設定のスプリントの PR のマージ先。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = strategy(cwd).pr_target("sprint")
     if base.startswith("-"):
         raise FactUnknown(f"差分を求められない: ベースブランチ {base} が - で始まる")
     git, head = _context_git_head(context, cwd)
-    try:
-        git.rev_parse(base)
-        ref = base
-    except GitError:
-        ref = f"{git.remote()}/{base}"
+    ref = base_ref(git, base)
     return git, f"{git.merge_base(ref, head)}...{head}"
 
 

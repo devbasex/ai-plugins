@@ -93,6 +93,26 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
+# （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
+# （実装の PR の作成・push）が終わるまで決まらない。PR が無い・起点を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
+# `mapfile -d ''` で NUL 区切りのパスを 1 つずつの引数へ写すので、包みは `sh` でなく `bash` で打つ
+REFACTOR_WITH_PR = """ref=$1; shift
+if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
+fi
+if ! git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "起点が無い"
+fi
+mapfile -d '' -t files < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --)
+if [ "${#files[@]}" -eq 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
+fi
+exec "$@" --pr "$n" --scope "${files[@]}"
+"""
 
 Value = Union[str, list[str]]
 
@@ -470,6 +490,16 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
     entry = identity.FIXED_WORDS["entrypoint"]
     review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
     return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+
+
+def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
+    """設定が無いときの `{{refactor}}` の値（`REFACTOR_WITH_PR`）。PR の番号と触るファイルは打つ時点に読んで足す。
+
+    位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が `ndf refactor run` の argv になる。
+    """
+    entry = identity.FIXED_WORDS["entrypoint"]
+    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]
+    return ["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, *run]
 
 
 def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str]]:

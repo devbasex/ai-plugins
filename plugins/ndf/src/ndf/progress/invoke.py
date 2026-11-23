@@ -462,7 +462,8 @@ def template_values(
     """テンプレートの差し込みの値。工程の入力と出所の表（`FILL_SOURCES`）から埋め（`_fill_from_sources`）→ 打った場所
     （`route.derived_locally`）→ 課題の題と本文（`_fill_from_issue`）→ マージの方式（`route.derived_merge_method`）→
     起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から組むときだけの補い
-    （`_fill_review`・`refactor_values.fill`）を通す。
+    （`_fill_review`）を通す。リファクタリングの起動（`_fill_refactor`）は、設定が無いときの既定を課題を読む前の欠けの検査
+    （`_require_before_issue`）に見せるため、打った場所の値のすぐ後に決める（#3908 の決定 7）。
 
     課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりに写しを消すので、先に読むと
     手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
@@ -480,6 +481,7 @@ def template_values(
     names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
     values = route.derived_locally(t, values, cwd)
     route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
+    values = {**values, **_fill_refactor(t, values, run, work_dir, project=project)}
     _require_before_issue(t.name, names, values)
     pending = work_dir / merge_pending.PENDING_FILE
     values = _merge_method_first(t, names, values, pending)
@@ -487,7 +489,6 @@ def template_values(
     values = merge_pending.ask(t, {**values, **issued}, pending)
     values, launched = route.launched(t, values, issues=_issue_numbers(run))
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
-    values = {**values, **refactor_values.fill(t, values, run.inputs["issues"] if "issues" in run.inputs else [], work_dir)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if "merge_method" in missing:
         merge_pending.mark(pending)
@@ -564,6 +565,14 @@ def _fill_review(
     if by_default and isinstance(branch, str):
         return {"review": route.review_launch(t.name, branch, gathered)}
     return {"review": [*review, "--base", gathered]}
+
+
+def _fill_refactor(
+    t: route.Template, values: Mapping[str, route.Value], run: StageRun, state_dir: Path, *, project: Mapping[str, Any]
+) -> dict[str, route.Value]:
+    """工程「リファクタリング」の `{{refactor}}`（既定の起動と候補。`refactor_values.fill`）。"""
+    issues = run.inputs["issues"] if "issues" in run.inputs else []
+    return refactor_values.fill(t, values, issues, state_dir, project=project)
 
 
 def _fill_from_issue(

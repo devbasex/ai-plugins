@@ -563,6 +563,16 @@ def _sprint_branch_repo(repo: Path) -> None:
     _git(repo, "checkout", "-q", "-b", "sprint/s1")
 
 
+def test_base_ref_is_the_local_branch_or_the_remote_tracking_one(repo):
+    # #3908 の決定 7: 差分の起点の規則（工程の条件 code_in_diff と同じ）を切り出したもの。
+    # 手元に読めるブランチはその名前、読めなければ作業場所のリモート名を付けた参照
+    _sprint_branch_repo(repo)
+    assert command.base_ref(Git(repo), "develop") == "develop"
+    assert command.base_ref(Git(repo), "release") == "origin/release"
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
+    assert command.base_ref(Git(repo), "release") == "upstream/release"
+
+
 def _commit(repo: Path, changed: dict[str, str]) -> str:
     """`changed` を書いてコミットし、そのコミットを返す。"""
     for name, text in changed.items():

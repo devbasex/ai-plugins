@@ -1,16 +1,19 @@
 """工程「リファクタリング」の差し込み `refactor` の値（`ndf.progress.invoke` から分けた。#3908 の Task 8）。
 
-実装計画の「リファクタリングの時機」のスプリントの終わりの行を候補のファイルへ書いて `--candidates` を足す（#3879 構成要素 5）。
+設定（`workflow.launch.refactor`）が無ければ既定の起動を組み（#3908 の決定 7）、実装計画の「リファクタリングの時機」の
+スプリントの終わりの行を候補のファイルへ書いて `--candidates` を足す（#3879 構成要素 5）。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from ndf.core import route
+from ndf.adapters.git import Git
+from ndf.core import branch_strategy, route
 from ndf.core.plan import inputs_decide as plan_inputs
+from ndf.progress import command, definition
 
 
 REFACTOR_CANDIDATES = "refactor-candidates.md"
@@ -58,19 +61,47 @@ def _candidates(worktree: str, issues: Sequence[Any]) -> list[str]:
     return lines
 
 
-def fill(
-    t: route.Template, values: Mapping[str, route.Value], issues: Sequence[Any], state_dir: Path
-) -> dict[str, route.Value]:
-    """cross-refactoring なら、課題の実装計画のスプリントの終わりの候補を `state_dir` へ書き、`refactor` の後ろに `--candidates` を足す。
+# 必須のチェックを持つ設定のキーの道（`invoke.PROJECT_KEYS` の `required` と同じ場所）
+REQUIRED_CHECKS = ("ci", "required_checks")
 
-    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、`refactor` は今のまま。
+
+def _default_launch(values: Mapping[str, route.Value], project: Mapping[str, Any], worktree: str) -> Optional[list[str]]:
+    """設定（`workflow.launch.refactor`）が無いときの `refactor` の既定の起動（決まらなければ None）。
+
+    マージ先は読み込み済みの設定から（ファイルを読み直さない）、起点は工程の条件 `code_in_diff` と同じ規則
+    （`command.base_ref`）で決め、必須のチェックは設定の `ci.required_checks` から取る。
+    ブランチ戦略の設定が検査に落ちれば `route.RouteError`（`route.default_base` と同じ理由の文）。
     """
-    launch, worktree = values.get("refactor"), values.get("worktree")
-    if t.name != "cross-refactoring" or not isinstance(launch, list) or not isinstance(worktree, str):
+    branch = values.get("branch")
+    required = definition.dig(project, *REQUIRED_CHECKS)
+    named = [c for c in required if isinstance(c, str) and c] if isinstance(required, list) else []
+    if not isinstance(branch, str) or not branch or not named:
+        return None
+    try:
+        base = branch_strategy.of_project(project).pr_target("sprint")
+    except branch_strategy.StrategyError as exc:
+        raise route.RouteError(f"base を決められない: {exc.reason}") from None
+    return route.refactor_launch(branch, command.base_ref(Git(Path(worktree)), base), named)
+
+
+def fill(
+    t: route.Template, values: Mapping[str, route.Value], issues: Sequence[Any], state_dir: Path, *, project: Mapping[str, Any]
+) -> dict[str, route.Value]:
+    """cross-refactoring の `refactor`: 設定が無ければ既定の起動を組み、課題の実装計画のスプリントの終わりの候補を
+    `state_dir` へ書いて後ろに `--candidates` を足す。
+
+    実装計画か表の無い課題は飛ばす。候補が 1 行も無ければ何も書かず、起動は今のまま。既定も組めなければ空（呼び手が
+    `refactor` を欠けとして挙げる）。
+    """
+    given, worktree = values.get("refactor"), values.get("worktree")
+    if t.name != "cross-refactoring" or not isinstance(worktree, str):
+        return {}
+    launch = given if isinstance(given, list) else _default_launch(values, project, worktree)
+    if launch is None:
         return {}
     lines = _candidates(worktree, issues)
     if not lines:
-        return {}
+        return {"refactor": launch}
     out = state_dir / REFACTOR_CANDIDATES
     out.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     return {"refactor": [*launch, "--candidates", str(out)]}
