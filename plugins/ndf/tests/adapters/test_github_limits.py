@@ -1,4 +1,4 @@
-"""GitHub の二次レート制限の見分けと、待ちの終わりの共有（#4016 の決定 7・8。`github_limits` と `github` の口）。
+"""GitHub の二次レート制限の見分けと、待ちの終わりの共有（#4016 の決定 7・8・10。`github_limits` と `github` の口）。
 
 githubkit へ `httpx.MockTransport` を渡し、ネットワークへ出ない。書き込みの順番の記録は `tmp_path` に置き、本物のホームの下
 （`~/.local/state/ndf-github/`）を書かない（`transport` を渡す `client()` は `gate` を省けば順番を取らない）。
@@ -104,11 +104,33 @@ def test_client_with_a_transport_takes_no_gate_unless_given(tmp_path: Path) -> N
     api = github.client(auth="t", transport=transport, gate=gate)
     assert api.config.throttler is gate and github.GitHub(REPO, api).gate is gate
 
+    budgeted = github.client(auth="t", transport=transport, remaining=lambda: 5.0, gate=gate)
+    assert isinstance(budgeted.config.throttler, write_gate.Within) and github.GitHub(REPO, budgeted).gate is gate
+
 
 def test_client_without_a_transport_uses_the_machine_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     gate = write_gate.WriteGate(tmp_path / write_gate.GATE_FILE)
     monkeypatch.setattr(write_gate, "machine_gate", lambda: gate)
     assert github.client(auth="t").config.throttler is gate
+
+
+def test_a_write_over_the_budget_is_not_sent_and_carries_the_wait(tmp_path: Path) -> None:
+    """決定 10: 待ちの予算（3 秒）に順番の待ち（60 秒）が収まらなければ、送らずに `retry_after` 付きで返す。"""
+    path = tmp_path / write_gate.GATE_FILE
+    write_gate.WriteGate(path).block(60)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    gate = write_gate.WriteGate(path)
+    api = github.client(auth="t", transport=httpx.MockTransport(handler), remaining=lambda: 3.0, gate=gate)
+    with pytest.raises(github.GitHubError) as err:
+        github.GitHub(REPO, api).rest("PATCH", f"/repos/{REPO}/issues/1", {"body": "b"})
+
+    assert seen == [] and err.value.retry_after is not None and err.value.retry_after > 3
+    assert err.value.quota == github.REST and not err.value.secondary
 
 
 # _translated（GitHub.rest）

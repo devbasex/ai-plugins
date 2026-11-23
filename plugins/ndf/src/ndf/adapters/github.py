@@ -175,13 +175,14 @@ def client(
     `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
     省くと上限（rate limit）は待たずに `GitHubError` で返す（残りを 0 秒とみなす）。githubkit の既定は解除の時刻まで
     （一次上限なら最大 1 時間）眠るため、そのままではスロットの読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
-    書き込みは `gate`（省けば `machine_gate()`。`transport` を渡すテストでは取らない）の順番を取り、待ちの終わりは応答のフックで記録する。
+    書き込みは `gate`（省けば `machine_gate()`。`transport` を渡すテストでは取らない）の順番を `remaining` の中で取り（決定 10）、
+    待ちの終わりは応答のフックで記録する。
     """
     if gate is None and transport is None:
         gate = write_gate.machine_gate()
     retry = RetryWithin(remaining if remaining is not None else github_limits.no_wait, gate)
-    hooks = github_limits.hooks(gate)
-    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, throttler=gate, **hooks)
+    options = github_limits.client_options(gate, remaining)
+    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, **options)
 
 
 def text_of(value: Any) -> str:
@@ -459,7 +460,7 @@ def _only_not_found(exc: GraphQLFailed) -> bool:
     return bool(errors) and all(e.type == "NOT_FOUND" for e in errors)
 
 
-def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool = False) -> GitHubError:
+def _translated(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
     """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。写し方は `github_limits.failure_of`。"""
     return GitHubError.of(github_limits.failure_of(exc, label, detail_body, time.time()))
 
@@ -485,10 +486,10 @@ class _Counted(NamedTuple):
 
 @contextmanager
 def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
-    """失敗を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `github_limits.tell` で待ちの終わりを知らせる。"""
+    """失敗（順番の待ちの `write_gate.Busy` も）を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
     try:
         yield
-    except (RateLimitExceeded, RequestFailed, RequestError) as exc:
+    except (RateLimitExceeded, RequestFailed, RequestError, write_gate.Busy) as exc:
         error = _translated(exc, label, detail_body)
         github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
         raise error from None
@@ -510,8 +511,7 @@ class GitHub:
 
     def __post_init__(self) -> None:
         if self.gate is None:
-            throttler = self.api.config.throttler
-            object.__setattr__(self, "gate", throttler if isinstance(throttler, write_gate.WriteGate) else None)
+            object.__setattr__(self, "gate", write_gate.gate_of(self.api.config.throttler))
 
     def rest(self, method: str, path: str, payload: Any = None, params: Optional[dict] = None) -> Any:
         """REST の 1 回の要求の本文（JSON なら値、ほかは文字列、空なら None）。失敗は `GitHubError`。"""
