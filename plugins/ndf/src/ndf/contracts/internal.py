@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -86,6 +87,17 @@ def read_record(kind: str, raw: Mapping[str, Any]) -> Row:
     row = migrate(kind, raw)
     _require(kind, row)
     return row
+
+
+def read_line(kind: str, line: str) -> Row:
+    """JSONL の 1 行を読む。JSON として読めない・辞書でない行も `InternalError`（`invalid`）。"""
+    try:
+        raw = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
+    if not isinstance(raw, dict):
+        raise InternalError("invalid", "辞書でない")
+    return read_record(kind, raw)
 
 
 def write_record(kind: str, row: Mapping[str, Any]) -> Row:
@@ -179,8 +191,11 @@ def names() -> Mapping[str, Mapping[str, Any]]:
 
 
 def stamp(seconds: float) -> str:
-    """秒（UNIX 時刻）→ `at` の文字列（UTC・マイクロ秒まで）。"""
-    return datetime.fromtimestamp(seconds, UTC).isoformat(timespec="microseconds")
+    """秒（UNIX 時刻）→ `at` の文字列（UTC・マイクロ秒まで）。時刻にできない数なら `InternalError`。"""
+    try:
+        return datetime.fromtimestamp(seconds, UTC).isoformat(timespec="microseconds")
+    except (ValueError, OverflowError, OSError) as exc:
+        raise InternalError("invalid", "秒を時刻にできない") from exc
 
 
 def epoch(at: str) -> float:

@@ -133,6 +133,13 @@ def test_migrate_runs_the_steps_from_the_version_of_the_row(contracts_copy, monk
     assert kind_of(exc) == "precondition"
 
 
+@pytest.mark.parametrize("line", ["{not json", "[1]", "1", "null"])
+def test_read_line_refuses_a_line_that_is_not_an_object(line):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.read_line("usage", line)
+    assert kind_of(exc) == "invalid"
+
+
 # ---------------------------------------------------------------- 型の確かめ
 
 
@@ -191,6 +198,13 @@ def test_epoch_takes_back_the_stamp_to_the_microsecond(seconds):
 def test_stamp_keeps_the_order_within_a_second():
     assert internal.stamp(1795400000.1) < internal.stamp(1795400000.100001)
     assert internal.stamp(1795400000.0).endswith(".000000+00:00")
+
+
+@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), 1e300])
+def test_stamp_refuses_seconds_that_are_not_a_time(seconds):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.stamp(seconds)
+    assert kind_of(exc) == "invalid"
 
 
 @pytest.mark.parametrize("at", ["2026-11-23T10:00:00+09:00", "2026-11-23T01:00:00", "2026-02-30T00:00:00Z", "読めない"])

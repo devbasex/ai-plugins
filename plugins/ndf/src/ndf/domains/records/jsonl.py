@@ -39,22 +39,12 @@ def read_rows(path: Path, *, kind: str) -> tuple[list[dict[str, Any]], list[Brok
         if not line.strip():
             continue
         try:
-            rows.append(_row(kind, line))
+            rows.append(internal.read_line(kind, line))
         except internal.InternalError as exc:
             if exc.kind != "invalid":
                 raise
             broken.append(Broken(number, str(exc)))
     return rows, broken
-
-
-def _row(kind: str, line: str) -> dict[str, Any]:
-    try:
-        raw = json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise internal.InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
-    if not isinstance(raw, dict):
-        raise internal.InternalError("invalid", "辞書でない")
-    return internal.read_record(kind, raw)
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
