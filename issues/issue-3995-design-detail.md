@@ -242,34 +242,45 @@ docs/glossary/glossary.json・docs/glossary.md
 | `_context_record` | 同上 | 変更 | 変えない | `thresholds(os.environ, limits.value)` を `record_row` へ渡す |
 | `_context_report` | 同上 | 変更 | 変えない | `metrics` から `no_policy_rows` を消す |
 | `record_row` | `src/ndf/domains/relay/context_records.py` | シグネチャを変える | `record_row(session_id, work, applied: Thresholds, event, reason) -> dict` | 行の `decide_from`・`limit`・`sources` を `applied` から書く。`policy`・`margin`・`config_error` は書かない |
-| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数。U4 で、引継ぎに要る呼び出しを通す `_passes` と同じ単位で入れる） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。背景の監視（ndf lanes wait・Monitor）は子と一緒に止まった。supervisor・ndf plan queue とその工程は別のプロセスで動き続けていることがある。工程を終えたものとも止まったものとも決めず、引継ぎ文書の「現在地」に、流していた実行ごとにプランのパス・状態ディレクトリ（--state-dir に渡した値。渡していなければ既定と書く）・会話に出た実行キー（run_id）・キューならキューのプランの並びと --queue-dir を残し、次のセグメントで「引継ぎの後の実行の確かめ」の手順に従う、と残す。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」（ラッパーの `_stop_child` が終わりを確かめるのは Claude の子だけで、`core/plan/steps.py` は工程を `start_new_session=True` で起動するので、工程は子を止めても残り得る。運用上限以上の会話は guard が状態の確かめの Bash を止めるので、確かめは次のセグメントで行う） |
+| `HANDOVER_PROMPT` | `src/ndf/domains/relay/switch_decide.py` | 変更（定数。U4 で、引継ぎに要る呼び出しを通す `_passes` と同じ単位で入れる） | — | 「文脈の量が運用上限を超えたので、ラッパーが子を止めて起動し直した。背景の監視（ndf lanes wait・Monitor）は子と一緒に止まった。supervisor・ndf plan queue とその工程は別のプロセスで動き続けていることがある。工程を終えたものとも止まったものとも決めず、引継ぎ文書の「現在地」に、流していた実行ごとに打ったコマンドを引数ごとそのまま（ndf plan next はプランのパス・--from・--set・--state-dir、ndf plan queue は並び・--then・--from・--max・--queue-dir）と、会話に結果が出ていればその run_id を残し、次のセグメントで「引継ぎの後の実行の確かめ」の手順に従う、と残す。オーガナイザーは引継ぎ文書の「現在地」に打ち直す ndf lanes wait の行を残す。引継ぎ文書を更新して ndf records handoff check で確かめ、次のセグメントのブロック（ndf-next）を出してセグメントを終える」（ラッパーの `_stop_child` が終わりを確かめるのは Claude の子だけで、`core/plan/steps.py` は工程を `start_new_session=True` で起動するので、工程は子を止めても残り得る。運用上限以上の会話は guard が状態の確かめの Bash を止めるので、確かめは次のセグメントで行う） |
 
 `relay.result.schema.json` は `items` の `policy`・`margin`・`config_error` と `metrics` の `no_policy_rows` を消し、`metrics` に `decide_from`（integer）を足す（`metrics` は追加の項目を許さない）。`relay.args.schema.json` は `context resolve` の `--root`・`--policy` を消す。
 
 #### 引継ぎの後の実行の確かめ（U4）
 
-`ndf plan pending` は DBOS の `PENDING`・`ENQUEUED`・`DELAYED` を並べるだけで、`ndf plan next`（親）が止まっても行が残るので、生きているかの確かめに使わない。親と工程の生死は今のコードが書く次の記録で照らす。
+`ndf plan pending` は DBOS の `PENDING`・`ENQUEUED`・`DELAYED` を並べるだけで、`ndf plan next`（親）が止まっても行が残るので、生きているかの確かめに使わない。会話に結果が出る前の切り替えでは `run_id` を知らず、キューの結果は子の `run_id` を引き継がないので、引継ぎ文書には打ったコマンドを残し、実行の識別と生死は状態ディレクトリの記録から `ndf plan wait` が読む。会話が `run.json` や `plan.lock` を開いて照らす手順にはしない（照らし方をスクリプトに固定する）。
 
-| 記録 | 書く場所 | 中身 | 生死の照らし方 |
+| 記録 | 書く場所 | 中身 | 読み方 |
 | --- | --- | --- | --- |
-| 実行キー | `<状態ディレクトリ>/run.json` の `key` | 親が `_record_run` で書く | 引継ぎ文書の実行キーと違えば、別の回が始まっている。打ち直さずに利用者へ報告する |
-| 親のロック | `<状態ディレクトリ>/plan.lock` | 親が `runner.plan_lock` の間ずっと持つ。ファイルにホスト・pid・時刻（`durable_locks.write_owner`） | ホストが同じで pid が生きていれば（`kill -0`）親は動いている。ホストが違えば照らせないので打ち直さずに利用者へ報告する |
-| 工程の pid | `<状態ディレクトリ>/steps/<工程>.pid.json` | 工程を起動したときにホスト・pid・時刻を書き、終えたら消す（`steps._write_pid`） | 親が止まっていて残っていれば、工程の結果を受け取る親が無い（標準出力のパイプが切れている）ので、結果は保存されない |
+| 実行キー | `<状態ディレクトリ>/run.json` | 親が `_record_run` で書く `key`・`name`・`start` など。`ndf plan next` は工程を打つ前に書くので、会話に結果が出る前から読める | `ndf plan wait` が `durable.run_name(key)` を項目の `run` に出す（結果の `run_id` と同じ形）。保存済みの結果と承認待ちの目印は、この `run` の名前のファイルだけを読む |
+| 親のロック | `<状態ディレクトリ>/plan.lock` | 親が `runner.plan_lock` の間ずっと持つ OS のロック。ファイルの所有者の記録（`durable_locks.write_owner`）は解放の後も残る | `ndf plan wait` が `try_flock` の共有のロックで、待たずに取れるかを試してすぐ外す。取れれば親はいない（`parent` が `stopped`）。取れなければ親が持っている（`parent` が `running`）ので、そのときだけ所有者の記録を `owner` に添える。所有者の記録だけでは生死を決めない |
+| 工程の pid | `<状態ディレクトリ>/steps/<工程>.pid.json` | 工程を起動したときにホスト・pid・時刻を書き、終えたら消す（`steps._write_pid`） | 親が止まっていて残っていれば、工程の結果を受け取る親が無い（標準出力のパイプが切れている）ので、結果は保存されない。続ける `next` が `ensure_previous_stopped` で扱う |
+| キューのロック | `<キューの保存先>/queue.lock`（U4 で足す） | `ndf plan queue` が流す間ずっと持つ OS のロック（`durable_locks._held_exclusive(path, wait=False)`） | 2 本目の `ndf plan queue` は待たずに `store_in_use`（所有者を添える）で止まり、`queue.json` を書かない。子の終わりから次の組の起動までの間に子が 1 本も動いていなくても、キューの本体が生きていればロックは外れない |
 
-次のセグメントは、引継ぎ文書に残した実行ごとに次の順で確かめる。
+U4 で次を変える（`src/ndf/core/plan/cli.py`・`wait_decide.py`・`queue_run.py`・`plan.args.schema.json`・`plan.result.schema.json`）。
 
-1. `ndf plan wait <プラン> --state-dir <状態ディレクトリ> --timeout 0` を打つ。保存済みの結果（`status` の終わり・止まり）か承認ゲートが返れば、それを今までどおり処理する
-2. 返らなければ `run.json` の `key` を引継ぎ文書の実行キーと照らし（上の表）、`plan.lock` のホスト・pid で親を照らす。親が動いていれば `ndf plan wait` で待つ
-3. 親が止まっていれば、同じ実行を `ndf plan next <プラン> --state-dir <状態ディレクトリ>`（`--fresh` を付けない。前の回と同じ `--set`）で続ける。`next` は `plan.lock` を取り、`run.json` の実行キーの DBOS の記録から回復し、未完了の工程を打つ前に `ensure_previous_stopped` で同じホストの残った工程の組を止める。工程の pid が別のホストなら `refused` で止まるので、利用者へ報告する
-4. キューは、並びのプランごとに 1・2 を行う。動いている親が 1 本でもあれば `ndf plan wait` でそのプランを待ち、どれも動いていなければ同じ並びで `ndf plan queue … --resume --queue-dir <キューの保存先>` を打つ（完了したプランは流さず、未完了のプランは子の `next` が 3 のとおり同じ実行を続ける）
+| 関数 | 変える中身 |
+| --- | --- |
+| `_watched`・`wait_decide._item` | 項目に `run`（`run.json` が無ければ置かない）・`start`（`run.json` の `start`）・`parent`（`running`・`stopped`。`run.json` が無ければ置かない）・`owner`（`parent` が `running` のときだけ）を足す。止まりの項目は、その `run` の保存済みの結果の `next`（`_with_start` で止まった工程から打ち直す元の `ndf plan next`）を `next` に載せる。承認ゲートの項目の `routes` は、保存済みの結果の `routes` があればそれ、無ければ承認待ちの目印の `routes`（どちらも元の `ndf plan next … --answer` の形）。結果の最上位の `next` は今のまま待ち直しの `ndf plan wait` |
+| `_cmd_next` | `--expect-run <run名>` を足す。`prepare` が選んだ `inv.run_id` が違えば、`advance` を呼ばずに `precondition` で止める（`detail` に選ばれた名前と期待した名前）。`plan.lock` は今のとおり取る |
+| `_cmd_queue` | キューの保存先が決まった後、`queue_run.run` の全体を `queue.lock` の排他（待たない）の中で流す。取れなければ `store_in_use` で止める |
 
-この手順は U4 で `context-window.md` の「判定と再起動を記録する」の後と `parallel.md` の「セッションの切り替え」に書く。`plan.lock` のロックは親が止まれば OS が外すので、3 の `next` は待たずに取れる（親が動いているのに打つと `LOCK_WAIT_SECONDS` の 300 秒を待って `store_in_use` で止まるので、2 で先に照らす）。
+次のセグメントは、引継ぎ文書に残した実行ごとに次の順で確かめる。照らしてから読むので、別の回の結果や承認の口を引継ぎの対象として処理しない。
+
+1. 識別する: `ndf plan wait <プラン> --state-dir <状態ディレクトリ> --timeout 0`（`--state-dir` は元のコマンドに有るときだけ）を打ち、項目の `name` と `start` を元のコマンドのプランの名前と `--from`（無ければ null）と照らす。会話に `run_id` が出ていれば `run` とも照らす（同じ `durable.run_name` の形）。違えば別の回が状態ディレクトリを使っているので、打ち直さずに利用者へ報告する。項目に `run` が無ければ、元のコマンドは工程を打つ前に止まったので 3 へ進む。同じプラン・同じ開始点で別の回（`--fresh` や head が進んだ後の打ち直し）を引継ぎの間に同じ状態ディレクトリで始められると `run_id` の無い場合は見分けられないが、状態ディレクトリは打った会話のものとして扱い、ほかの会話・人はそこへ打たない
+2. 状態で分ける: 同じ結果の項目の `status` で決める。`ok` なら終わっている。`stopped` なら項目の `next`、承認ゲートなら項目の `routes` を今までどおり処理する（結果の最上位の `next` の `plan wait` で打ち直さない）。`status` が null で `parent` が `running` なら、同じ `ndf plan wait`（`--timeout` を付けない）で待つ
+3. 続ける: `status` が null で `parent` が `stopped`（または `run` が無い）なら、元のコマンドを引数ごとそのまま（`--from`・`--set`・`--state-dir` を保ち、`--fresh` を付けない）に、1 で読んだ `run` があれば `--expect-run <run>` を足して打つ。プランの中身・差し込みの値・開始点・head のどれかが変わっていて `choose_run` が別のキーを選べば、`next` は流さずに `precondition` で止まるので、利用者へ報告する。同じキーなら `next` は `plan.lock` を取り、`run.json` の実行キーの DBOS の記録から回復し、未完了の工程を打つ前に `ensure_previous_stopped` で同じホストの残った工程の組を止める。工程の pid が別のホストなら `refused` で止まるので、利用者へ報告する
+4. キュー: 元の `ndf plan queue` のコマンド（並び・`--then` の段・`--max`・`--from`・`--queue-dir`）に `--resume` を足して打つ。ただし `queue.json` で `ok` のプランの `--from` は外す（`queue_run._finished` は開始点を渡されたプランを完了と見ず、`next` を打ち直す。head が進んでいれば新しい回が先頭から走る）。止まり・承認ゲートで終わったプランの `--from` は、キューの結果の `next` と同じく止まった工程に置き換える。`--fresh` は付けない。キューの本体が生きていれば `store_in_use` で止まり何も変えないので、そのときは並びのプランを 1 本の `ndf plan wait` で待つ。本体が止まっていれば、打つ前に並びのプランごとに 1 を行い、`parent` が `running` のプランがあれば、それを `ndf plan wait` で待ち終えてから打つ（子の `next` が `plan.lock` を 300 秒待って止まらないように）
+
+この手順は U4 で `context-window.md` の「判定と再起動を記録する」の後と `parallel.md` の「セッションの切り替え」に書き、`HANDOVER_PROMPT` と同じ PR で届ける。`plan.lock` のロックは親が止まれば OS が外すので、3 の `next` は待たずに取れる（親が動いているのに打つと `LOCK_WAIT_SECONDS` の 300 秒を待って `store_in_use` で止まるので、1 で先に照らす）。
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_context_resolve` | `--policy`・`--root` を渡した | 旧い引数 | argparse | 止める | 引数の誤り（終了コード 2） | 引数を外して打ち直す |
+| `_cmd_next` | `--expect-run` と選んだ回の名前が違う | プランの中身・差し込みの値・開始点・head が引継ぎの前と変わった | `prepare` の後 | 流さずに止める（`run.json` も DBOS も変えない） | `precondition`（`detail` に選ばれた名前と期待した名前） | 利用者が元の回を続けるか新しい回にするかを決める |
+| `_cmd_queue` | `queue.lock` を取れない | 同じキューの保存先で本体が動いている | `_held_exclusive(wait=False)` が None | 流さずに止める（`queue.json` を書かない） | `store_in_use`（所有者を添える） | 本体を `ndf plan wait` で待つ |
 
 ### 単体テストの観点
 
@@ -278,6 +289,9 @@ docs/glossary/glossary.json・docs/glossary.md
 | `wrapper_settings` → `switch_decide.decide` | 環境変数なしで 500,000 の静かな子に `handover`。文に `wait` の行と `ndf records handoff check` を含む | 499,999 で `wait`。`NDF_CONTEXT_LIMIT=300000` の環境から組んだ設定で 300,000 に `handover`、299,999 で `wait`（時刻は差し替えた時計で進め、実際には待たない） | 同じセグメントの 2 度目は求めない（今のまま） |
 | `_context_resolve` | 既定で 250,000 / 500,000・出所 `default`、`NDF_CONTEXT_LIMIT=300000` で運用上限 300,000。出した JSON が結果のスキーマを通る | — | `--policy current`・`--root .` は引数の誤り |
 | `record_row`・`report`・`calibrate` | 行に `decide_from`・`limit`・`sources` があり、`policy`・`margin`・`config_error` が無い | — | 旧い行（3 つの列を持つ）と新しい行を混ぜた記録で、`report` の区分と `calibrate` の見込みが旧い行だけのときと同じ |
+| `_watched` | 一時の状態ディレクトリに `run.json` を置くと項目の `run` が `durable.run_name(key)`、`start` が `run.json` の値。テストの中で `plan.lock` を別に開いて排他で持つと `parent` が `running` で `owner` に所有者の記録、持たなければ `stopped`。止まりの保存済みの結果の `next`、承認ゲートの保存済みの結果か目印の `routes` が項目に載り、結果の最上位の `next` は `plan wait` | 所有者の記録（別のホスト・生きている pid）が残っていても、ロックを誰も持たなければ `stopped`。`run.json` の別のキーの名前の保存済みの結果と目印は読まない | `run.json` が無ければ `run`・`parent` を置かない |
+| `_cmd_next` の `--expect-run` | `prepare` の選ぶ名前と同じなら今のとおり進める | `--from` を外した・`--set` の値を変えた・プランの中身を変えたときは別の名前になり止まる | 違えば `precondition` で、`run.json` が変わらない（`advance` を差し替えて呼ばれないことを確かめる） |
+| `_cmd_queue` の `queue.lock` | 誰も持たなければ今のとおり流す | — | テストの中で `queue.lock` を別に開いて排他で持つと、`queue_run.run` を呼ばずに `store_in_use` |
 
 ## 契約と手順書
 
