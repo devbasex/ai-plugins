@@ -309,14 +309,16 @@ def drop(directory: Path, name: str) -> None:
     (directory / name).unlink(missing_ok=True)
 
 
-def write_activity(directory: Path, tasks: Any, session_id: Optional[str]) -> bool:
-    """`activity.json` に時刻・セッション・背景の作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
+def write_activity(directory: Path, tasks: Any, session_id: Optional[str], reply: Optional[str] = None) -> bool:
+    """`activity.json` に時刻・セッション・応答・背景の作業の一覧を書く。書けなければ偽（診断の記録なので conductor の応答を止めない）。
 
     `tasks` は Stop の hook の入力の生の値。リストでなければ、観測できなかったことを表す `null` を書く（空のリストと分ける）。
+    `reply` はこの Stop が終えた応答（会話の記録の最後の `assistant` の `uuid`。`observe.reply_id`）。読む側はこの値で
+    今の応答の記録かを確かめる（時刻で比べると、同じ秒に入った前の Stop の記録と区別できない）。読めなければ `null`。
     """
     rows = [_task(t) for t in tasks] if isinstance(tasks, list) else None
     try:
-        replace_json(directory / ACTIVITY_FILE, {"at": now_iso(), "session_id": session_id, "tasks": rows})
+        replace_json(directory / ACTIVITY_FILE, {"at": now_iso(), "session_id": session_id, "reply": reply, "tasks": rows})
     except OSError:  # noqa: NDF401 ファイル: 活動の記録が書けなくても、次の Stop が書き直す
         return False
     return True
@@ -336,8 +338,10 @@ def read_activity(directory: Path) -> Optional[dict[str, Any]]:
         return None
     if not isinstance(data, dict) or not isinstance(data.get("at"), str):
         return None
-    session, tasks = data.get("session_id"), data.get("tasks")
+    session, reply, tasks = data.get("session_id"), data.get("reply"), data.get("tasks")
     if session is not None and not isinstance(session, str):
+        return None
+    if reply is not None and not isinstance(reply, str):
         return None
     if tasks is not None and not (isinstance(tasks, list) and all(_is_task(t) for t in tasks)):
         return None

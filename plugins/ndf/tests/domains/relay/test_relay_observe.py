@@ -18,8 +18,9 @@ SIZE = 4096
 AT = "2026-11-22T01:02:03.000Z"
 
 
-def _assistant(stop, *blocks, at=AT):
-    return {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": stop, "content": list(blocks)}}
+def _assistant(stop, *blocks, at=AT, uuid=None):
+    row = {"type": "assistant", "timestamp": at, "message": {"role": "assistant", "stop_reason": stop, "content": list(blocks)}}
+    return row if uuid is None else {**row, "uuid": uuid}
 
 
 def _tool_use(tid):
@@ -349,3 +350,221 @@ def test_4036_live_shells_is_none_when_cmdline_cannot_be_read(tmp_path, monkeypa
     parents = observe.process_parents(tmp_path)
     _raising(monkeypatch, "read_bytes", tmp_path / "12" / "cmdline", PermissionError("denied"))
     assert observe.live_shells(10, parents, tmp_path) is None
+
+
+# conductor の活動（#4036 の「活動を読む」。`ndf relay ls` の行に載る）。時刻はテストが決め、本物の時間を待たない
+SID, CWD = "sid", observe.Path("/w")
+T0 = "2026-11-23T00:00:00.500Z"  # conductor の最後の応答（ミリ秒を持つ）
+T0_S = observe.datetime.fromisoformat("2026-11-23T00:00:00.500+00:00").timestamp()
+LATER = "2026-11-23T00:01:00.000Z"
+NOW = T0_S + 3600
+REPLY = "r0"  # conductor の最後の応答の `uuid`
+
+
+class _Lane:
+    """1 本のレーンの材料（会話の記録・ラッパーの保存先・/proc）を一時ディレクトリに組む。"""
+
+    def __init__(self, tmp_path):
+        self.root = tmp_path
+        self.environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"), "CLAUDE_CODE_TMPDIR": str(tmp_path / "t")}
+        self.transcript = observe.transcript_path(self.environ, CWD, SID)
+        self.transcript.parent.mkdir(parents=True)
+        self.transcript.write_text(json.dumps(_assistant("end_turn", TEXT, at=T0, uuid=REPLY)) + "\n", encoding="utf-8")
+        self.wrapper = tmp_path / "wrap"
+        self.wrapper.mkdir()
+        self.proc = tmp_path / "proc"
+        self.proc.mkdir()
+
+    def activity(self, tasks, at="2026-11-23T00:00:00+00:00", session=SID, reply=REPLY):
+        record = {"at": at, "session_id": session, "reply": reply, "tasks": tasks}
+        (self.wrapper / "activity.json").write_text(json.dumps(record), encoding="utf-8")
+
+    def subagent(self, aid, *rows):
+        path = observe.subagent_transcript_path(self.transcript, aid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    def shells(self, live):
+        _proc(self.proc, 10, ["ndf", "relay"])
+        _proc(self.proc, 11, ["claude"], ppid=10)
+        for n in range(live):
+            _proc(self.proc, 20 + n, SHELL_ARGS, ppid=11)
+
+    def output(self, task_id, mtime):
+        path = observe.shell_output_path(self.environ, CWD, SID, task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+
+    def read(self, pid=10, now=NOW, **row):
+        look = observe.Look(now, SIZE, lambda: observe.process_parents(self.proc), self.proc)
+        paths = {"transcript": str(self.transcript), "shell_outputs": str(observe.shell_output_dir(self.environ, CWD, SID))}
+        return observe.conductor_activity({"session_id": SID, "pid": pid, **paths, **row}, self.wrapper, look)
+
+
+def _act(turn_done, moved, background):
+    return {"turn_done": turn_done, "moved": moved, "background": background}
+
+
+def test_4036_a_finished_subagent_is_left_out_and_moves_the_time(tmp_path):
+    """lracct の形: 背景のサブエージェントが終わって通知を受けた後、conductor は何もしていない（決定 2）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "a1", "type": "subagent"}])
+    lane.subagent("a1", _assistant("end_turn", TEXT, at=LATER))
+    later = observe.datetime.fromisoformat("2026-11-23T00:01:00+00:00").timestamp()
+    assert lane.read() == _act(True, later, 0)
+
+
+@pytest.mark.parametrize(
+    ("make", "count"),
+    [
+        (lambda lane: None, 1),  # 記録が無いサブエージェントは走っているとみなす
+        (lambda lane: lane.subagent("a1", _assistant("tool_use", _tool_use("t1"), at=LATER)), 1),  # 応答の途中
+    ],
+    ids=["missing", "midway"],
+)
+def test_4036_a_subagent_that_cannot_be_read_or_runs_is_counted(tmp_path, make, count):
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "a1", "type": "subagent"}])
+    make(lane)
+    assert lane.read() == _act(True, T0_S, count)
+
+
+def test_4036_an_unsafe_subagent_id_and_a_monitor_are_counted(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "../x", "type": "subagent"}, {"id": "m1", "type": "monitor"}])
+    assert lane.read() == _act(True, T0_S, 2)
+
+
+def test_4036_no_tasks_and_no_live_shell_is_zero(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([])
+    assert lane.read() == _act(True, T0_S, 0)
+
+
+@pytest.mark.parametrize(("listed", "live", "count"), [(1, 1, 1), (0, 1, 1)], ids=["listed", "unlisted"])
+def test_4036_live_shells_are_counted_even_when_not_listed(tmp_path, listed, live, count):
+    lane = _Lane(tmp_path)
+    lane.shells(live)
+    lane.activity([{"id": "b1", "type": "shell"}] * listed)
+    assert lane.read() == _act(True, T0_S, count)
+
+
+def test_4036_a_finished_shell_moves_the_time_to_its_output(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "b1", "type": "shell"}])
+    lane.output("b1", T0_S + 120)
+    assert lane.read() == _act(True, T0_S + 120, 0)
+
+
+def test_4036_a_finished_shell_without_output_moves_the_time_to_now(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "b1", "type": "shell"}])
+    assert lane.read() == _act(True, NOW, 0)
+
+
+def test_4036_a_finished_shell_without_output_keeps_the_time_it_was_first_seen(tmp_path):
+    """出力のファイルが消えたシェルは、同じ Stop の記録の間は最初に終わりを確かめた時刻のまま（読み直すたびに 0 へ戻さない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([{"id": "b1", "type": "shell"}])
+    assert lane.read(now=NOW)["moved"] == NOW
+    assert lane.read(now=NOW + 900) == _act(True, NOW, 0)
+    lane.activity([{"id": "b1", "type": "shell"}], at="2026-11-23T00:30:00+00:00")  # 次の Stop の記録では確かめ直す
+    assert lane.read(now=NOW + 1800)["moved"] == NOW + 1800
+
+
+def test_4036_a_second_shell_ending_is_seen_afresh(tmp_path):
+    """終わったシェルの数が増えたら、前のシェルの終わりの時刻を使わない（長いシェルが終わった直後を止まりと読まない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(1)
+    lane.activity([{"id": "b1", "type": "shell"}, {"id": "b2", "type": "shell"}])
+    assert lane.read(now=NOW) == _act(True, NOW, 1)
+    (lane.proc / "20").rename(lane.proc / "gone")
+    assert lane.read(now=NOW + 900) == _act(True, NOW + 900, 0)
+
+
+def test_4036_proc_is_not_scanned_while_the_conductor_is_answering(tmp_path):
+    """シェルの生死を確かめる行に届かなければ /proc を読まない。"""
+    lane = _Lane(tmp_path)
+    lane.transcript.write_text(json.dumps(_assistant("tool_use", _tool_use("t1"), at=T0)) + "\n", encoding="utf-8")
+    calls = []
+    look = observe.Look(NOW, SIZE, lambda: calls.append(1), lane.proc)
+    paths = {"transcript": str(lane.transcript), "shell_outputs": str(tmp_path)}
+    assert observe.conductor_activity({"session_id": SID, "pid": 10, **paths}, lane.wrapper, look) == _act(False, None, None)
+    assert calls == []
+
+
+@pytest.mark.parametrize("pid", [None, "10", 99], ids=["no-pid", "not-int", "no-claude"])
+def test_4036_shells_that_cannot_be_checked_leave_the_count_unknown(tmp_path, pid):
+    """シェルの生死を確かめられなければ、一覧が空でも数を None にする（止まりの根拠にしない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([])
+    assert lane.read(pid=pid) == _act(True, T0_S, None)
+
+
+def test_4036_an_unreadable_proc_leaves_the_count_unknown_but_keeps_finished_subagents(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.proc.rmdir()
+    lane.activity([{"id": "a1", "type": "subagent"}])
+    lane.subagent("a1", _assistant("end_turn", TEXT, at=LATER))
+    later = observe.datetime.fromisoformat("2026-11-23T00:01:00+00:00").timestamp()
+    assert lane.read() == _act(True, later, None)
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda lane: None,
+        lambda lane: lane.activity([], session="other"),
+        lambda lane: lane.activity([], reply="r-prev"),
+        lambda lane: lane.activity([], reply=None),
+        lambda lane: lane.activity(None),
+    ],
+    ids=["none", "other-session", "previous-reply", "no-reply", "tasks-null"],
+)
+def test_4036_an_activity_record_not_for_this_turn_leaves_the_count_unknown(tmp_path, write):
+    """前の Stop の空の一覧・別のセッション・観測できなかった一覧は使わない。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    write(lane)
+    assert lane.read() == _act(True, T0_S, None)
+
+
+def test_4036_a_previous_stop_in_the_same_second_is_not_used(tmp_path):
+    """前の Stop の記録が今の応答と同じ秒に書かれていても、応答の `uuid` が違えば使わない（時刻で照らさない）。"""
+    lane = _Lane(tmp_path)
+    lane.shells(0)
+    lane.activity([], at="2026-11-23T00:00:00+00:00", reply="r-prev")
+    assert lane.read()["background"] is None
+    lane.activity([], at="2026-11-23T00:00:00+00:00")
+    assert lane.read()["background"] == 0
+
+
+def test_4036_reply_id_is_the_uuid_of_the_last_assistant(tmp_path):
+    path = _write(tmp_path, [_assistant("tool_use", _tool_use("t1"), uuid="a1"), _tool_result("t1")])
+    assert observe.reply_id(path, SIZE) == "a1"
+    assert observe.reply_id(_write(tmp_path, [_assistant("end_turn", TEXT)]), SIZE) is None
+    assert observe.reply_id(tmp_path / "none.jsonl", SIZE) is None
+
+
+@pytest.mark.parametrize(
+    "row", [{"session_id": None}, {"transcript": None}, {"shell_outputs": None}], ids=["no-session", "no-transcript", "no-outputs"]
+)
+def test_4036_a_row_without_its_session_has_no_activity(tmp_path, row):
+    lane = _Lane(tmp_path)
+    assert lane.read(**row) == _act(None, None, None)
+
+
+def test_4036_an_unreadable_conductor_transcript_has_no_activity(tmp_path):
+    lane = _Lane(tmp_path)
+    lane.transcript.unlink()
+    lane.activity([])
+    assert lane.read() == _act(None, None, None)

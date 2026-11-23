@@ -367,6 +367,13 @@ def test_wrappers_reads_the_relay_list_as_it_is_now(kwargs, got):
     assert calls[0][1:] == ["relay", "ls"]
 
 
+def test_wrappers_asks_for_the_activity_only_when_told():
+    """conductor の活動（#4036）は生死の判定が求めたときだけ `--activity` で読ませる。"""
+    run, calls = _fake_run(stdout=json.dumps({"status": "ok", "items": []}))
+    launch.wrappers(run, activity=True)
+    assert calls[0][1:] == ["relay", "ls", "--activity"]
+
+
 @pytest.mark.parametrize(
     ("kwargs", "got"),
     [

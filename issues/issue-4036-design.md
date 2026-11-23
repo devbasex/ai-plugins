@@ -53,7 +53,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     SH["Stop の hook<br/>relay-marker guard"] -->|"背景の作業の一覧を書く"| AF[("&lt;ラッパーの保存先&gt;/activity.json")]
-    WJ[("wrapper.json<br/>session_id・cwd")] --> PR["Probes.activity（新設）"]
+    WJ[("wrapper.json<br/>session_id・transcript・shell_outputs・pid")] --> PR["Probes.activity（新設）"]
     AF --> PR
     TR[("会話の記録<br/>&lt;session_id&gt;.jsonl")] -->|"observe.turn_done"| PR
     PR --> J["liveness.judge"]
@@ -62,7 +62,7 @@ flowchart LR
     S --> RQ["lane_stalled のリクエスト<br/>moved・background を載せる"]
 ```
 
-Stop の hook が、conductor が応答を終えた時点の背景の作業の一覧（`id` と `type`）をラッパーの保存先へ書く。生死の判定は、ラッパーの状態ファイルから `session_id` と `cwd` を取って会話の記録をたどり、最後の応答が終わっているかとその時刻を読む。一覧のうちサブエージェントは、その会話の記録が終わっていれば除く。応答が終わっていて、残った背景の作業が 0 件で、最後の応答から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
+Stop の hook が、conductor が応答を終えた時点の背景の作業の一覧（`id` と `type`）をラッパーの保存先へ書く。生死の判定は、`ndf relay ls --activity` がラッパーの状態ファイルに保存された会話の記録のパス（`transcript`）から、最後の応答が終わっているかとその時刻・最後の `assistant` の `uuid` を先に読む。`activity.json` はその後に読み、`session_id` と `uuid` が一致したときだけ背景の作業を数える。一覧のうちサブエージェントは、その会話の記録が終わっていれば除く。シェルは一覧に頼らず、conductor のプロセスの下で生きている Bash の Tool のシェルを数える。最後に動いた時刻（`moved`）は、conductor の最後の応答の時刻と、除いた背景の作業（終わったサブエージェント・終わったシェル）の終わった時刻のうち最も遅いものとする。応答が終わっていて、残った背景の作業が 0 件で、`moved` から閾値を過ぎていれば、新しい判定 `idle_conductor` を返して止まりとする。`lane_stalled` のリクエストには、最後に動いた時刻と背景の作業が 0 件であることを載せる。
 
 ## 構成要素
 
@@ -108,6 +108,7 @@ flowchart TB
 | --- | --- | --- |
 | `at` | string | 書いた時刻（ISO 8601）。conductor が応答を終えた時刻に当たる |
 | `session_id` | string / null | 書いた Stop の hook の入力の `session_id`。読む側はラッパーの一覧の行の `session_id` と同じときだけこの記録を使う |
+| `reply` | string / null | 書いた Stop が終えた応答。会話の記録の末尾から選んだ最後の `assistant` の記録の `uuid`（hook の `ctx.last_reply_id`）。読む側は conductor の会話の記録から同じ規則で選んだ `uuid`（`observe.reply_id`）と同じときだけこの記録を使う。会話の記録を読めない・`tasks` が `null` のとき（読む側が使わないので会話の記録を開かない）は `null` |
 | `tasks` | array / null | その時点の背景の作業。要素は `{"id", "type"}`（hook の入力の `background_tasks` から写す）。入力に `background_tasks` が無い・リストでないときは `null`（背景の作業を観測できなかった印）で、空のリストと区別する |
 
 `contracts/limits.json` に足す方針:
@@ -126,7 +127,7 @@ flowchart TB
 | `moved` | float / None | 最後に動いた時刻（UNIX 時刻）。conductor の最後の応答の時刻と、終わったとみなして除いた背景の作業（サブエージェントの会話の記録の最後の応答・終わったシェルの出力のファイルの更新時刻）の時刻のうち、最も遅いもの。読めなければ `None` |
 | `background` | integer / None | まだ走っているとみなす背景の作業の数。サブエージェントは `activity.json` の `tasks` のうち会話の記録の最後の応答が終わっていないもの、シェルは conductor のプロセスの下で今も生きている Bash の Tool のシェルの数。`activity.json` が無い・`tasks` が `null`・記録が今の応答のものと確かめられないときは `None` |
 
-読めない（会話の記録が無い・`session_id` が取れない・`activity.json` が無い）ときは `None` を返し、判定は今までどおり `alive` にする。`activity.json` が別のセッションのもの、または書いた時刻（`at`）が conductor の最後の応答の時刻より前（今の応答の Stop で書けなかった）のときは、背景の作業の数を `None`（不明）にする。
+会話の記録が無い・読めない・`session_id` が取れないときは `None` を返し、判定は今までどおり `alive` にする。会話の記録を読めたときは、`activity.json` が無くても `None` を返さず、会話の記録から得た `turn_done` と `moved` を持つ `Activity` を返し、`background` だけを `None`（不明）にする（判定は `alive`）。`activity.json` が別のセッションのもの、または `reply` が conductor の会話の記録の最後の `assistant` の記録の `uuid` と違う・どちらかが無い（今の応答の Stop で書けなかった）ときは、背景の作業の数を `None`（不明）にする。今の応答との対応は時刻で確かめない。`at` は秒で書かれるので、前の Stop と今の応答が同じ秒に入ると時刻では区別できず、前の Stop の空の一覧を今の応答のものとして使ってしまう。
 
 ## 入出力のコントラクト
 
@@ -136,10 +137,10 @@ flowchart TB
 
 | キー | 型 | 中身 |
 | --- | --- | --- |
-| `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは conductor の最後の応答の時刻（`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す）を入れる |
+| `moved` | string / null | 今までどおり ISO 8601 の文字列。`idle_conductor` のときは無活動の判定に使った最後の活動の時刻を入れる。conductor の最後の応答の時刻だけでなく、終わったとみなして除いた背景の作業の時刻も含めた最も遅いもの（上の `Activity.moved`。`Probes.activity` が返す UNIX 時刻を、リクエストを書く `_stall_report` が ISO 8601 へ直す） |
 | `background` | integer / null | 背景の作業の件数。`idle_conductor` のときは 0 |
 
-`ndf relay ls` の行に `session_id` と `cwd` を足す（会話の記録のパスを組むため）。既存のキーは変えない。
+`ndf relay ls --activity` の行に `turn_done`・`moved`・`background` を足す（読み方は詳細設計の「活動を読む」の手順 1〜6。会話の記録のパスは `wrapper.json` に保存された `transcript` を使い、一覧の側で組み直さない）。既存のキーは変えない。
 
 ## 処理の流れ
 
@@ -151,12 +152,23 @@ sequenceDiagram
     participant D as 耐久ワークフロー
     participant J as liveness.judge
     C->>H: 応答を終える
-    H->>A: at と tasks を書く
+    H->>A: at・reply（最後の応答の uuid）・tasks を書く
+    participant L as ndf relay ls --activity
     loop 読み直しの間隔
-        D->>D: ndf relay ls（session_id・cwd つき）
-        D->>A: activity.json を読む
-        D->>D: subagent の tasks の会話の記録を turn_done で読み、終わったものを除く
-        D->>D: 会話の記録を turn_done で読む
+        D->>L: ラッパーの一覧を活動つきで求める
+        L->>L: wrapper.json の transcript（ラッパーが保存したパス）から conductor の会話の記録を 1 回読み、応答が終わったか・時刻・最後の assistant の uuid を得る
+        alt 応答が終わり・時刻がある
+            L->>A: activity.json を読む
+            alt session_id と reply（uuid）が一致し・tasks がリスト
+                L->>L: subagent の tasks の会話の記録を turn_done で読み、終わったものを除く
+                L->>L: 生きている Bash の Tool のシェルを数える
+            else ほか
+                L->>L: 背景の作業の数は null（数えない）
+            end
+        else 応答の途中・時刻が無い
+            L->>L: activity.json を読まず、背景の作業の数は null
+        end
+        L-->>D: 行ごとの turn_done・moved・background
         D->>J: 行・スプリントの待ち・ラッパー・活動
         alt 応答が終わり・background が 0・閾値を過ぎた
             J-->>D: idle_conductor（止まり）
@@ -174,7 +186,7 @@ sequenceDiagram
 ### 決定 1: 最後の動きは、会話の記録の最後の応答の時刻で測る
 
 - **質問**: conductor の「最後の動き」を何で測るか
-- **選んだ案**: ラッパーの状態ファイルの `session_id` と `cwd` から会話の記録のパスを組み、`observe.turn_done` が返す最後の応答の時刻を使う
+- **選んだ案**: ラッパーが起動時に組んで状態ファイル（`wrapper.json`）に保存した会話の記録のパス（`transcript`）を `ndf relay ls --activity` が読み、`observe.turn_done` が返す最後の応答の時刻を使う。読む側の環境や `session_id`・`cwd` からパスを組み直さない
 - 採らなかった案:
   - ラッパーの状態ファイルの `at`（同じ状態では書き直さないため、動いていても古いままになる）
   - ステートマシンの記録の時刻（今の `moved` がこれで、工程が進まない間は更新されない。まさに #4036 が見落とした値）
@@ -187,7 +199,7 @@ sequenceDiagram
 ### 決定 2: 背景の作業は Stop の hook が一覧を書き残し、終わったサブエージェントは会話の記録で除く
 
 - **質問**: 背景の作業（シェル・サブエージェント）が今も走っているかを、耐久ワークフローからどう知るか
-- **選んだ案**: Stop の hook（`relay-marker` guard）が、入力の `background_tasks` の要素の `id` と `type` を、セッションの `session_id` と書いた時刻と一緒にラッパーの保存先の `activity.json` へ書く。判定は、記録が今のセッションの今の応答のものか（`session_id` が同じで、`at` が conductor の最後の応答より後か）を確かめてから使う。`type` が `subagent` の要素は、そのサブエージェントの会話の記録の最後の応答が終わっていれば「終わった」とみなして除く。シェルは Stop の一覧に頼らず、読み直しの時点で conductor（`claude`）のプロセスの子に Bash の Tool のシェル（`shell-snapshots/snapshot-` を読み込む `bash -c`）が生きているかを数える。応答が終わった後（`turn_done` が真）に生きている Bash の Tool のシェルは背景のシェルだけである。最後に動いた時刻は、conductor の最後の応答と、除いた背景の作業の終わった時刻のうち最も遅いものにし、その時刻から閾値が過ぎるのを待つ
+- **選んだ案**: Stop の hook（`relay-marker` guard）が、入力の `background_tasks` の要素の `id` と `type` を、セッションの `session_id` と書いた時刻と一緒にラッパーの保存先の `activity.json` へ書く。判定は、記録が今のセッションの今の応答のものか（`session_id` が同じで、欠けていない `reply` が conductor の会話の記録の最後の `assistant` の記録の `uuid` と同じか）を確かめてから使う。`at` は秒で書かれ、前の Stop と今の応答が同じ秒に入ると区別できないので、時刻では照合しない。`type` が `subagent` の要素は、そのサブエージェントの会話の記録の最後の応答が終わっていれば「終わった」とみなして除く。シェルは Stop の一覧に頼らず、読み直しの時点で conductor（`claude`）のプロセスの子に Bash の Tool のシェル（`shell-snapshots/snapshot-` を読み込む `bash -c`）が生きているかを数える。応答が終わった後（`turn_done` が真）に生きている Bash の Tool のシェルは背景のシェルだけである。最後に動いた時刻は、conductor の最後の応答と、除いた背景の作業の終わった時刻のうち最も遅いものにし、その時刻から閾値が過ぎるのを待つ
 - 採らなかった案:
   - Stop の時点の件数だけを書く（今回の現象を捕まえられない。04:26 に conductor が応答を終えた時点では待っていた supervisor-waits が走っており件数は 1 で、04:50 に終わっても通知が届かなければ次の Stop は来ないので、件数は 1 のまま残る。読み手役の確かめで見つかった）
   - 会話の記録から読む（`observe.tool_pending` は「Tool の実行の途中か」を返すだけで、背景の作業が残っているかとは別である）
@@ -255,7 +267,7 @@ sequenceDiagram
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1（止まりになる） | 応答が終わり・背景 0 件・最後の応答から閾値を過ぎた実行中の行が `idle_conductor` になり、`lane_stalled` のリクエストになる | 閾値の比較を落とすと落ちる |
+| 1（止まりになる） | 応答が終わり・背景 0 件・最後に動いた時刻（`moved`）から閾値を過ぎた実行中の行が `idle_conductor` になり、`lane_stalled` のリクエストになる | 閾値の比較を落とすと落ちる |
 | 2（背景の作業がある行） | 背景の作業が 1 件以上の行は、閾値を過ぎても `alive` のまま | 件数を見ずに時刻だけで判定すると落ちる |
 | 3（回答を待つ行） | スプリントの待ちが `gate` の行と、回答の後の `next` 待ちの行は、閾値を過ぎても止まりにならない | 新しい条件を順 2・順 3 より前に置くと落ちる |
 | 4（リクエストの中身） | `idle_conductor` の `lane_stalled` に、最後に動いた時刻と背景の作業が 0 件であることが載る | `background` を載せずに書くと落ちる |
@@ -263,7 +275,9 @@ sequenceDiagram
 | 決定 1（読めないとき） | 会話の記録を読めない・`session_id` が取れない行は、今までどおり `alive` になる | 読めないときに止まりとすると落ちる |
 | 決定 2（hook が書く） | Stop の hook が、入力の `background_tasks` の `id`・`type` と時刻を `activity.json` へ書く。書けなくても conductor の進行を止めない | 書き込みの失敗で guard が例外を上げると落ちる |
 | 決定 2（終わったサブエージェントを除く） | `activity.json` の `tasks` が `subagent` 1 件で、その会話の記録の最後の応答が終わっていれば、背景の作業は 0 件とみなし、閾値を過ぎれば `idle_conductor` になる（lracct の現象の形） | 会話の記録を読まずに件数だけで判定すると落ちる |
-| 決定 2（シェルは走っているとみなす） | `tasks` が `shell` 1 件なら、閾値を過ぎても `alive` のまま | `shell` も終わったとみなすと落ちる |
+| 決定 2（シェルが生きている） | `tasks` が `shell` 1 件で、conductor のプロセスの下に生きている Bash の Tool のシェルが 1 つあれば、閾値を過ぎても `alive` のまま（一覧が空でも生きているシェルがあれば同じ） | 生きているシェルを数えずに一覧だけで判定すると落ちる |
+| 決定 2（シェルが終わった） | `tasks` が `shell` 1 件で、生きているシェルが 0 なら、背景の作業は 0 件とみなし、その出力のファイルの更新時刻（`moved`）から閾値を過ぎれば `idle_conductor` になる。過ぎていなければ `alive` | 一覧に `shell` が残るだけで `alive` とすると落ちる。終わった時刻を `moved` に重ねないと落ちる |
+| 決定 2（シェルの生死を確かめられない） | `/proc` が読めない・ラッパーの `pid` が無いときは、一覧の `shell` の数によらず（空でも）`background` が `None` で、閾値を過ぎても `alive` のまま | 確かめられないシェルを 0 件と数えると落ちる |
 
 詳細設計は [issue-4036-design-detail.md](./issue-4036-design-detail.md) にある（新設する関数が 2 つ以上のため別ファイル）。
 

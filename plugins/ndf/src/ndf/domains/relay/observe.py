@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from ndf.adapters import agents, claude
 from ndf.domains.relay import signals
@@ -75,11 +76,19 @@ def shell_output_path(environ: Mapping[str, str], cwd: Path, session_id: str, ta
 
     一時の保存先は `CLAUDE_CODE_TMPDIR`、無ければ `/tmp`（Claude Code 2.1.330 の実測）。`task_id` がファイル名に使えなければ None。
     """
-    if not TASK_ID.fullmatch(task_id):
-        return None
+    return shell_output_in(shell_output_dir(environ, cwd, session_id), task_id)
+
+
+def shell_output_dir(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
+    """背景のシェルの出力のファイルを置くディレクトリ（`shell_output_path` の `<id>.output` の親）。"""
     key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     root = Path(environ.get("CLAUDE_CODE_TMPDIR") or "/tmp")  # noqa: S108 Claude Code が置く場所を読むだけで、ここでは作らない
-    return root / f"claude-{os.getuid()}" / key / session_id / "tasks" / f"{task_id}.output"
+    return root / f"claude-{os.getuid()}" / key / session_id / "tasks"
+
+
+def shell_output_in(directory: Path, task_id: str) -> Optional[Path]:
+    """`shell_output_dir` の返り `directory` の中の、背景のシェルの出力のファイル。`task_id` がファイル名に使えなければ None。"""
+    return directory / f"{task_id}.output" if TASK_ID.fullmatch(task_id) else None
 
 
 def process_parents(proc: Path = Path("/proc")) -> Optional[dict[int, int]]:
@@ -289,20 +298,174 @@ def tool_pending(path: Path, size: int) -> Optional[bool]:
 
 def turn_done(path: Path, size: int) -> Optional[tuple[bool, Optional[float]]]:
     """最後の会話の記録が終わった応答なら `(True, その時刻)`、途中なら `(False, None)`。読めない・壊れた・形が違えば None。"""
+    got = _turn(path, size)
+    return None if got is None else (got[0], got[1])
+
+
+def reply_id(path: Path, size: int) -> Optional[str]:
+    """最後の `assistant` の会話の記録の `uuid`（Stop の hook が `activity.json` に書き、読む側が今の応答かを照らす値）。
+
+    読めない・壊れた・`assistant` が無い・`uuid` が文字列でなければ None。
+    """
+    got = _turn(path, size)
+    return None if got is None else got[2]
+
+
+def _turn(path: Path, size: int) -> Optional[tuple[bool, Optional[float], Optional[str]]]:
+    """`turn_done` の 2 つと、最後の `assistant` の記録の `uuid`。読めない・壊れた・形が違えば None。"""
     try:
         rows = _talk(path, size)
     except _Unsure:  # noqa: NDF401 ファイル: 確定できない記録は止めてよい時点にしない（None）
         return None
     if not rows:
         return None
+    reply = next((r.get("uuid") for r in reversed(rows) if r["type"] == "assistant"), None)
+    reply = reply if isinstance(reply, str) else None
     last = rows[-1]
     if last["type"] != "assistant" or last["message"].get("stop_reason") not in ENDED or _pending(rows):
-        return (False, None)
-    return (True, _time(last.get("timestamp")))
+        return (False, None, reply)
+    return (True, _time(last.get("timestamp")), reply)
 
 
 def _time(value: Any) -> Optional[float]:
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
     except ValueError:  # noqa: NDF401 ファイル: 時刻の読めない記録は時刻を持たない
+        return None
+
+
+# --- conductor の活動（#4036）。`ndf relay ls --activity` の行に載せ、計画の実行が「何もしていない conductor」を判定する ---
+
+# Stop の hook の入力の `background_tasks` の要素の `type`
+SUBAGENT_TASK, SHELL_TASK = "subagent", "shell"
+# 活動を読めない行の値
+NO_ACTIVITY = {"turn_done": None, "moved": None, "background": None}
+# 出力のファイルを読めない、終わった背景のシェルを最初に確かめた時刻（ラッパーの保存先。`ndf relay ls --activity` が書く）
+SHELLS_ENDED_FILE = "shells-ended.json"
+
+
+@dataclass(frozen=True)
+class Look:
+    """1 回の `ndf relay ls --activity` で全行が共有する活動の材料。`now` は読む時刻、`size` は会話の記録の末尾を読む大きさ、
+    `parents` は `process_parents` の返りを返す口（シェルの生死を確かめる行に届いたときだけ呼ぶ。呼ぶ側が 1 回の一覧で
+    1 度だけ組むように包む）。"""
+
+    now: float
+    size: int
+    parents: Callable[[], Optional[Mapping[int, int]]]
+    proc: Path = Path("/proc")
+
+
+class _Turn(NamedTuple):
+    """conductor の今の応答: 会話の記録のパス・背景のシェルの出力の保存先・セッション・Stop の記録の時刻・最後の応答の時刻。"""
+
+    transcript: Path
+    outputs: Path
+    session_id: str
+    stop_at: str
+    at: float
+
+
+def conductor_activity(row: Mapping[str, Any], directory: Path, look: Look) -> dict[str, Any]:
+    """ラッパーの状態の値（`session_id`・`transcript`・`shell_outputs`・`pid`）とラッパーの保存先 `directory` から、conductor の活動を読む。
+
+    会話の記録と出力の保存先はラッパーが子に渡した環境で組んで状態に書いた絶対パスを使う（一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らない）。
+    返すのは `turn_done`（最後の応答が終わったか）・`moved`（最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。
+    UNIX 時刻）・`background`（終わった背景の作業を除いた数。確かめられなければ None）。conductor の会話の記録を
+    読めなければ 3 つとも None。止まりと知らせる側へ倒さないよう、読めない背景の作業は走っているとみなす。
+    """
+    session, transcript, outputs = row.get("session_id"), row.get("transcript"), row.get("shell_outputs")
+    if not isinstance(session, str) or not isinstance(transcript, str) or not isinstance(outputs, str):
+        return dict(NO_ACTIVITY)
+    got = _turn(Path(transcript), look.size)
+    if got is None:
+        return dict(NO_ACTIVITY)
+    done, at, reply = got
+    if not done or at is None:
+        return {"turn_done": done, "moved": at, "background": None}
+    record = signals.read_activity(directory)
+    tasks = _tasks_of(record, session, reply)
+    if record is None or tasks is None:
+        return {"turn_done": True, "moved": at, "background": None}
+    turn = _Turn(Path(transcript), Path(outputs), session, record["at"], at)
+    running, times = _others(turn, tasks, look.size)
+    shells = _shells(turn, directory, row.get("pid"), [t for t in tasks if t["type"] == SHELL_TASK], look)
+    moved = max([at, *times, *(shells[1] if shells is not None else [])])
+    return {"turn_done": True, "moved": moved, "background": None if shells is None else running + shells[0]}
+
+
+def _tasks_of(record: Optional[Mapping[str, Any]], session: str, reply: Optional[str]) -> Optional[list[dict[str, str]]]:
+    """今の応答の Stop が書いた背景の作業の一覧。別のセッション・前の Stop の記録・観測できなかった一覧なら None。
+
+    今の応答かは、記録の `reply` と会話の記録の最後の `assistant` の `uuid`（`reply`）が同じかで確かめる。時刻で比べると、
+    同じ秒に入った前の Stop の記録も通る。どちらかが無ければ確かめられないので使わない。
+    """
+    if record is None or record.get("session_id") != session or record.get("tasks") is None:
+        return None
+    return record["tasks"] if reply is not None and record.get("reply") == reply else None
+
+
+def _others(turn: _Turn, tasks: list[dict[str, str]], size: int) -> tuple[int, list[float]]:
+    """シェルでない背景の作業の、走っているとみなす数と、終わったサブエージェントの最後の応答の時刻。"""
+    running, times = 0, []
+    for task in (t for t in tasks if t["type"] != SHELL_TASK):
+        ended = _ended_subagent(turn.transcript, task["id"], size) if task["type"] == SUBAGENT_TASK else None
+        if ended is None:
+            running += 1
+        else:
+            times.append(ended)
+    return running, times
+
+
+def _ended_subagent(transcript: Path, agent_id: str, size: int) -> Optional[float]:
+    """サブエージェントの最後の応答が終わっていればその時刻。記録を読めない・応答の途中なら None（走っているとみなす）。"""
+    path = subagent_transcript_path(transcript, agent_id)
+    got = turn_done(path, size) if path is not None else None
+    return got[1] if got is not None and got[0] else None
+
+
+def _shells(turn: _Turn, directory: Path, pid: Any, listed: list[dict[str, str]], look: Look) -> Optional[tuple[int, list[float]]]:
+    """生きている背景のシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
+
+    `/proc` はここに届いた行で初めて読む（`look.parents`）。一覧より生きているシェルが少なければ、一覧のシェルの出力の
+    ファイルの更新時刻を終わった時刻とする。1 つも読めなければ、終わりを最初に確かめた時刻にする（`_first_seen`）。
+    """
+    live = live_shells(pid, look.parents(), look.proc) if isinstance(pid, int) and not isinstance(pid, bool) else None
+    if live is None:
+        return None
+    if live >= len(listed):
+        return live, []
+    ended = [_mtime(shell_output_in(turn.outputs, t["id"])) for t in listed]
+    return live, [t for t in ended if t is not None] or [_first_seen(directory, turn, len(listed) - live, look.now)]
+
+
+def _first_seen(directory: Path, turn: _Turn, ended: int, now: float) -> float:
+    """同じセッション・Stop の記録・終わったシェルの数について、シェルの終わりを最初に確かめた時刻。初めてなら `now` を残して返す。
+
+    一覧を読むたびに `now` にすると無活動の時間が毎回 0 に戻り、止まりにならない。終わったシェルの数もキーに入れるのは、
+    1 つ目が終わった時刻を 2 つ目の終わりに使い、長いシェルが終わった直後に止まりと読まないためである。
+    残せなければ `now`（その読み直しでは止まりにしない側へ倒す）。
+    """
+    path = directory / SHELLS_ENDED_FILE
+    key = {"session_id": turn.session_id, "stop_at": turn.stop_at, "ended": ended}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # 無い・壊れた記録は初めて確かめたものとして書き直す
+        data = None
+    seen = data.get("seen") if isinstance(data, dict) and all(data.get(k) == v for k, v in key.items()) else None
+    if isinstance(seen, (int, float)) and not isinstance(seen, bool):
+        return float(seen)
+    try:
+        signals.replace_json(path, {**key, "seen": now})
+    except OSError:  # 残せなければ読む時刻にする（次の読み直しが書き直す）
+        return now
+    return now
+
+
+def _mtime(path: Optional[Path]) -> Optional[float]:
+    if path is None:
+        return None
+    try:
+        return path.stat().st_mtime
+    except OSError:  # noqa: NDF401 ファイル: 出力のファイルを読めないシェルは終わった時刻が分からない（呼び手が最初に確かめた時刻にする）
         return None

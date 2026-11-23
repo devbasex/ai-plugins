@@ -669,3 +669,34 @@ def test_4036_a_row_without_the_state_file_carries_none(ctx):
     (registry.wrapper_dir(ctx.state_dir, "t1") / registry.STATE_FILE).unlink()
     row = hub.listing(ctx)[0]
     assert (row["session_id"], row["cwd"], row["pid"]) == (None, None, None)
+
+
+def test_4036_a_running_row_carries_the_conductor_activity(ctx, tmp_path, monkeypatch):
+    """`activity` を求めた一覧だけが、動いている行に conductor の活動を載せる。会話の記録はラッパーが状態に書いた場所を
+    （一覧を呼ぶ側の `CLAUDE_CONFIG_DIR` に依らず）、末尾の hook.transcript-tail の大きさだけ読む。"""
+    from ndf.domains.relay import observe
+
+    _spawned(ctx, "t1")
+    transcript = tmp_path / "wrapper-cfg" / "projects" / "-w" / "s1.jsonl"
+    state = {"state": "running", "session_id": "s1", "cwd": "/w", "pid": 42, "transcript": str(transcript), "shell_outputs": str(tmp_path)}
+    registry.write_state(registry.wrapper_dir(ctx.state_dir, "t1"), state)
+    transcript.parent.mkdir(parents=True)
+    ended = {"type": "assistant", "timestamp": "2026-11-23T00:00:00Z", "message": {"stop_reason": "end_turn", "content": []}}
+    transcript.write_text(json.dumps(ended) + "\n", encoding="utf-8")
+    sizes = []
+    real = observe._turn
+    monkeypatch.setattr(observe, "_turn", lambda path, size: sizes.append(size) or real(path, size))
+    plain = hub.listing(ctx)[0]
+    assert (plain["turn_done"], plain["moved"], plain["background"]) == (None, None, None) and sizes == []
+    row = hub.listing(ctx, activity=True)[0]
+    assert row["turn_done"] is True and row["moved"] == observe._time("2026-11-23T00:00:00Z")
+    # 活動の記録が無いので背景の作業の数は確かめられない
+    assert row["background"] is None
+    assert sizes == [int(limits.value("hook.transcript-tail", "count"))]
+
+
+def test_4036_a_stopped_row_carries_no_activity(ctx):
+    _spawned(ctx, "t1")
+    ctx.tmux.kill("t1")
+    row = hub.listing(ctx, activity=True)[0]
+    assert row["running"] is False and (row["turn_done"], row["moved"], row["background"]) == (None, None, None)

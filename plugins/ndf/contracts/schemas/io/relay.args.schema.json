@@ -500,6 +500,10 @@
         "subcommand": {
           "const": "ls",
           "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--activity": {
+          "type": "boolean",
+          "description": "動いている行に conductor の活動（turn_done・moved・background）も載せる"
         }
       },
       "required": [

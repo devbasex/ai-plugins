@@ -480,6 +480,27 @@
             ],
             "description": "ラッパーのプロセスの id（hub ls。状態のファイルが無ければ null）"
           },
+          "turn_done": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "conductor の最後の応答が終わったか（hub ls --activity。求めていない・動いていない・会話の記録を読めなければ null）"
+          },
+          "moved": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "conductor の最後の応答と、終わった背景の作業の時刻のうち最も遅いもの。UNIX 時刻（hub ls）"
+          },
+          "background": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "終わった背景の作業を除いた、まだ走っているとみなす背景の作業の数（hub ls。確かめられなければ null）"
+          },
           "registered": {
             "type": "boolean",
             "description": "登録簿に行があるか。偽は錠を持つだけのラッパー（hub ls）"

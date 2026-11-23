@@ -5,7 +5,9 @@
 変更要求、終わるのを待たせる（変更要求はセッションの数え手が利用者の入力ごとに数える）。
 
 中継の下では、どの戻りより前に活動（背景の作業の一覧とセッション）を `activity.json` へ書く（#4036）。入力の
-`background_tasks` は正規化の前の値を渡し、明示の空のリストと観測できなかった値を分けて残す。
+`background_tasks` は正規化の前の値を渡し、明示の空のリストと観測できなかった値を分けて残す。終えた応答の
+`uuid`（会話の記録の最後の `assistant`）も残し、読む側はそれで今の応答の記録かを確かめる。`uuid` は一覧がリストのときだけ
+読み、観測できなかったときは `reply` を `null` にする（読む側は `tasks` が `null` の記録を使わないので、会話の記録を開かない）。
 """
 
 from __future__ import annotations
@@ -19,7 +21,10 @@ def check(ctx, svc) -> Verdict | None:
     directory = signals.relay_dir(ctx.env)
     if directory is None:
         return None
-    signals.write_activity(directory, ctx.payload.get("background_tasks"), ctx.payload.get("session_id"))
+    tasks = ctx.payload.get("background_tasks")
+    # 一覧を観測できない（`tasks: null`）記録は読む側が使わないので、会話の記録を開いて uuid を読まない
+    reply = ctx.last_reply_id if isinstance(tasks, list) else None
+    signals.write_activity(directory, tasks, ctx.payload.get("session_id"), reply)
     if not ctx.last_reply:
         return None
     block = blocks.last_block(ctx.last_reply, svc.params["fence"])
