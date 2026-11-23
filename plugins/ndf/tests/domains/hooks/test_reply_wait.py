@@ -225,3 +225,24 @@ def test_an_operation_guide_is_not_a_wait():
 def test_an_empty_reply_is_none():
     assert reply_wait.reply_kind("") == "none"
     assert reply_wait.reply_kind("```\nprint(1)\n```") == "none"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "例を載せました。\n\n    続けてもよいですか？\n\nコミットは 1 件です。",
+        "例を載せました。\n\n````markdown\n```\n続けてもよいですか？\n```\n````\n\nコミットは 1 件です。",
+    ],
+)
+def test_a_question_in_indented_or_long_fenced_code_is_not_a_wait(text):
+    """コードのブロックは CommonMark の解析で決める（インデントのコード・四連の囲みの中の質問を本文と読まない）。"""
+    assert reply_wait.reply_kind(text) == "report"
+
+
+def test_a_question_in_a_heading_is_a_wait():
+    assert reply_wait.reply_kind("## このまま進めてよいですか？") == "prose_wait"
+
+
+def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():
+    text = "対応が完了しました。引き続きよろしくお願いします（このままマージしてよいですか）。"
+    assert reply_wait.reply_kind(text) != "closing_report"

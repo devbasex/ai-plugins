@@ -5,7 +5,7 @@
 （「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard `stop-wait` が軽いモデルの前に当てるのは `reply_kind` で、
 `classify_reply_wait` の待ちの文から、かぎ括弧の引用と、別の場所（ほかのセッション・レーン）の待ちの報告を外す。
 
-hook の閉包に入るため、標準ライブラリだけを読む。
+hook の閉包に入るため、標準ライブラリと、コードのブロックの行を決める `ndf.adapters.markdown`（CommonMark の解析）だけを読む。
 """
 
 from __future__ import annotations
@@ -104,6 +104,8 @@ _PAREN_INNER = re.compile(r"[（(]([^（）()]*)[）)]")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
 _DECORATION = "*_`~ 　"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
+# ATX の見出しの開きの `#` と、閉じの `#` の並び（見出しの文だけを残す）
+_HEADING_MARKS = re.compile(r"^#{1,6}\s*|\s+#+\s*$")
 _BULLET = re.compile(r"^(?:[-*+・]|\d+[.)])\s+")
 # かぎ括弧の引用（ほかの人の質問を引いて経緯を書いた文を、本人の質問と読まない）
 _QUOTED = re.compile(r"「[^「」]*」|『[^『』]*』")
@@ -131,21 +133,34 @@ _CLOSING = re.compile(
 _REPORT_ENDINGS = ("ました", "でした")
 
 
-def prose_lines(text: str) -> list[tuple[str, bool]]:
-    """コードのブロック・引用・表・見出しを除いた、空でない行と、箇条書きの項目かどうか。
+def _markdown_lines(text: str) -> list[str]:
+    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not normalized:
+        return []
+    lines = normalized.split("\n")
+    return lines[:-1] if normalized.endswith("\n") else lines
 
+
+def prose_lines(text: str) -> list[tuple[str, bool]]:
+    """コードのブロック・引用・表を除いた、空でない行と、箇条書きの項目かどうか。見出しは `#` を外した文を残す。
+
+    コードのブロック（囲みの種類と長さ・インデントのコード）は CommonMark の解析（`markdown.code_lines`）で決める。
     本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
     """
+    from ndf.adapters import markdown
+
+    lines = _markdown_lines(text)
+    code = markdown.code_lines(text)
     out: list[tuple[str, bool]] = []
-    in_code = False
-    for raw in text.splitlines():
+    for raw, in_code in zip(lines, code):
         line = raw.strip()
-        if line.startswith("```") or line.startswith("~~~"):
-            in_code = not in_code
+        if in_code or not line or line.startswith((">", "|")):
             continue
-        if in_code or not line:
-            continue
-        if line.startswith((">", "|")) or _HEADING.match(line):
+        if _HEADING.match(line):
+            line = _HEADING_MARKS.sub("", line)
+            if line:
+                out.append((line, False))
             continue
         stripped = _BULLET.sub("", line)
         out.append((stripped, stripped != line))
@@ -367,6 +382,9 @@ def _closing_report(lines: list[tuple[str, bool]]) -> bool:
     sentences = _sentences([text for text, _ in lines])
     body = list(sentences)
     while body and _CLOSING.match(_core(body[-1])):
+        # 結びの文の括弧書きの待ち（「引き続きよろしくお願いします（このままマージしてよいですか）。」）は外さない
+        if _paren_wait(body[-1]):
+            return False
         body.pop()
     if not body or len(body) == len(sentences):
         return False
@@ -394,7 +412,7 @@ def prose_kind(lines: list[tuple[str, bool]]) -> str:
 def reply_kind(text: str) -> str:
     """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
 
-    `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
+    `none`（コードのブロック・引用・表のほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
     待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`closing_report`
     （定型の結びの前が完了の報告だけ）・`report`。
     `prose_lines` の返りを既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
