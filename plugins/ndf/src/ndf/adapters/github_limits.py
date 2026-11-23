@@ -94,6 +94,14 @@ def _hint(headers: Mapping[str, str], now: float) -> Optional[float]:
     return None
 
 
+def _is_limited(status: int, headers: Mapping[str, str], message: str, known: bool) -> bool:
+    """二次レート制限の応答か（見分けの条件は `limit_of` の説明のとおり）。"""
+    text = message.lower()
+    if status in LIMIT_STATUSES:
+        return known or _number(headers, "retry-after") is not None or any(p in text for p in REST_PHRASES)
+    return status == HTTPStatus.OK and any(p in text for p in GRAPHQL_PHRASES)
+
+
 def limit_of(status: int, headers: Mapping[str, str], message: str, now: float, known: bool = False) -> Optional[Limit]:
     """二次レート制限なら待ちの秒と `hinted`、ほかは None。
 
@@ -104,15 +112,12 @@ def limit_of(status: int, headers: Mapping[str, str], message: str, now: float, 
     示された待ちが 0 秒なら githubkit が眠る秒（`sdk_sleep`）に読み替える。応答のフック・`RetryWithin`・`failure_of` が
     同じ秒を使い、同じ応答について記録を書き直さない（PR 4267 の r3-1）。
     """
-    text = message.lower()
-    if status in LIMIT_STATUSES:
-        limited = known or _number(headers, "retry-after") is not None or any(p in text for p in REST_PHRASES)
-    else:
-        limited = status == HTTPStatus.OK and any(p in text for p in GRAPHQL_PHRASES)
-    if not limited:
+    if not _is_limited(status, headers, message, known):
         return None
     hint = _hint(headers, now)
-    return Limit(sdk_sleep(hint), True) if hint is not None else Limit(backoff(0), False)
+    if hint is None:
+        return Limit(backoff(0), False)
+    return Limit(sdk_sleep(hint), True)
 
 
 def _parsed(text: str) -> Any:
