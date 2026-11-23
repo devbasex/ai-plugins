@@ -199,9 +199,9 @@ plugins/ndf/
 | `Counter.pushback_left` | `counter.py` | 新設 | `pushback_left(self) -> bool` | 数えずに、今の入力の後の変更要求が上限の手前かを返す。数え手が記録の排他を取れず数えられない状態（`usable` が偽）のときは偽 |
 | `Counter.mark_model_wait` | `counter.py` | 新設 | `mark_model_wait(self) -> None` | 今の入力の記録に `model_wait: true` を置く（入力が変わると記録ごと初期化される）。`usable` が偽なら何もしない |
 | `Counter.model_waited` | `counter.py` | 新設 | `model_waited(self) -> bool` | 今の入力の記録の `model_wait`。無ければ偽 |
-| `GuardServices` | `dispatch.py` | 変更 | 欄 `deadline: float`（`time.monotonic()` の基準の締め切りの絶対時刻。余白を引かない）を足す | guard が残りの秒を求める |
-| `run` | `dispatch.py` | 変更 | 引数 `deadline: float` を足す（`clock` の前） | 受け取った `deadline` をそのまま `GuardServices` に渡す。今の guard を打ち切る判定（`clock() - start > budget.usable`）は変えない |
-| `_guards` | `main.py` | 変更（中身だけ） | 変えない | SIGALRM に使う `run.started + found.deadline` を `dispatch.run` の `deadline` に渡す（SIGALRM と guard が同じ起点の時刻を使う） |
+| `GuardServices` | `dispatch.py` | 変更 | 欄 `deadline: float`（`time.monotonic()` の基準の締め切りの絶対時刻。余白を引かない）を足し、`params` を既定が空の最後の欄にする | guard が残りの秒を求める。呼び手は `params` 無しで作り、`run` が guard ごとに表の行の値を入れる |
+| `run` | `dispatch.py` | 変更 | 引数 `counter`・`state_dir` を締め切りと合わせて 1 つの `svc: GuardServices` にまとめる（`clock` の前）。`run(ctx, specs, budget, svc, clock)` | 受け取った `svc` に guard ごとの `params` を入れた写しを渡す（引数の数の上限 6 を超えないため、締め切りを引数で足さずに `svc` へまとめる）。今の guard を打ち切る判定（`clock() - start > budget.usable`）は変えない |
+| `_guards` | `main.py` | 変更（中身だけ） | 変えない | SIGALRM に使う `run.started + found.deadline` を `GuardServices` の `deadline` に入れて `dispatch.run` へ渡す（SIGALRM と guard が同じ起点の時刻を使う） |
 
 - `asked_since_prompt` の境: tool_result だけを持つ `user` の行（Tool の結果）は利用者の入力に数えない。末尾に利用者の入力が無ければ、読めた範囲で探す
 
@@ -212,7 +212,7 @@ plugins/ndf/
 | `asked_since_prompt` | 入力 → AskUserQuestion → 結果 → 本文 で真。入力 → Bash → 本文 で偽 | 前の入力の前にだけ AskUserQuestion がある → 偽。Tool の結果の `user` の行を入力と読まない | 壊れた行が混じっても読める行で決める |
 | `pushback_left` | 0 回・上限−1 回で真 | 上限ちょうどで偽 | 数えない数え手で偽。呼んでも回数が増えない |
 | `mark_model_wait` / `model_waited` | 置いた後に真 | 新しい入力で開き直した数え手で偽 | 数えない数え手で置いても偽 |
-| `run` | 渡した `deadline` が guard の `svc.deadline` に届く | — | — |
+| `run` | 渡した `svc` の `deadline` が guard の `svc.deadline` に届く | — | — |
 
 ## 起動の前置きのスロットを待つ上限
 

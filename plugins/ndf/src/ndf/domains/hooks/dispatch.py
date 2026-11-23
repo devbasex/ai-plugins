@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -68,13 +68,13 @@ class GuardSpec:
 
 @dataclass(frozen=True)
 class GuardServices:
-    """guard へ渡す部品。`params` は表の行の値。"""
+    """guard へ渡す部品。呼び手が `params` の無い形で作り、`run` が guard ごとに表の行の値を入れる。"""
 
     state_dir: Path
     counter: Counter
-    params: dict
     # 締め切りの絶対時刻（`time.monotonic()` の基準。余白を引いていない。SIGALRM と同じ起点）
     deadline: float
+    params: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -121,13 +121,12 @@ def run(
     ctx: HookContext,
     specs: list[GuardSpec],
     budget: Budget,
-    counter: Counter,
-    state_dir: Path,
-    deadline: float,
+    svc: GuardServices,
     clock: Callable[[], float] = time.monotonic,
 ) -> Outcome:
-    """表の順に guard を呼び、判定を 1 つにまとめる。"""
+    """表の順に guard を呼び、判定を 1 つにまとめる。`svc` は呼び手が作った部品（`params` は guard ごとに入れる）。"""
     start = clock()
+    counter = svc.counter
     outcome = Outcome(PASS)
     verdicts: list[Verdict] = []
     for spec in specs:
@@ -136,7 +135,7 @@ def run(
             if not spec.fail_closed:
                 continue
         began = clock()
-        got, error = _call(spec, ctx, GuardServices(state_dir, counter, spec.params, deadline))
+        got, error = _call(spec, ctx, replace(svc, params=spec.params))
         if got.kind == "deny" and _counted(spec) and not counter.allow_deny(deny_key(spec, got, ctx)):
             got = advise(f"{got.reason}{_DOWNGRADED}")
         outcome.runs.append(GuardRun(spec.name, round((clock() - began) * 1000, 3), got.kind, error))

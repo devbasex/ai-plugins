@@ -96,15 +96,15 @@ class Counter:
         return self.usable and self.data["pushbacks"] < tables.policy_value("hook.pushback", "attempts")
 
     def mark_model_wait(self) -> None:
-        """今の入力の記録に、軽いモデルが待ちと判じた印を置く。数えない数え手は何もしない。
+        """今の入力の記録に、軽いモデルが待ちと判じたフラグを置く。数えない数え手は何もしない。
 
-        `model_wait` は `_fresh` に足さない（足すと印を持たない今の状態のファイルを壊れたとして読む）。
+        `model_wait` は `_fresh` に足さない（足すとフラグを持たない今の状態のファイルを壊れたとして読む）。
         """
         if self.usable:
             self.data["model_wait"] = True
 
     def model_waited(self) -> bool:
-        """今の入力で軽いモデルが待ちと判じたか。印が無い・数えない数え手は偽。"""
+        """今の入力で軽いモデルが待ちと判じたか。フラグが無い・数えない数え手は偽。"""
         return self.usable and self.data.get("model_wait") is True
 
     def allow_deny(self, key: str) -> bool:
