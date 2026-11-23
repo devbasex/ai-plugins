@@ -410,7 +410,7 @@ def test_run_stops_as_bad_report_on_a_result_that_is_not_utf8(tmp_path, monkeypa
 def test_run_reads_the_result_once_during_and_once_after_the_delegation(tmp_path, monkeypatch, capsys, kind, reads):
     counted = []
     real_read = worker_paths.read_file
-    monkeypatch.setattr(worker_paths, "read_file", lambda wd, name: counted.append(name) or real_read(wd, name))
+    monkeypatch.setattr(worker_paths, "read_file", lambda wd, name, **kw: counted.append(name) or real_read(wd, name, **kw))
     body = {"status": "ok", "summary": "済んだ", "metrics": {worker.SEARCH_RECORD: SEARCHED}}
     assert _run_with(tmp_path, monkeypatch, _ok_writer(tmp_path, body, []), kind=kind) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok" and counted == ["out.json"] * reads
