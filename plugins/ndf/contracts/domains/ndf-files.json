@@ -15,7 +15,7 @@
     "fields": {"type": "array", "summary": "外の呼び手が頼る項目。書き手はこの項目の名前と意味を変えない。ほかの項目は足してよい", "optional": true}
   },
   "rows": [
-    {"id": "project", "location": "ndf", "path": "project.json", "kind": "ndf_settings", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["languages", "test", "ci", "services", "issues", "checks", "ndf_policies", "instructions", "materials", "docs", "analysis", "workflow", "branch_strategy"], "main_keys": ["branch_strategy"]},
+    {"id": "project", "location": "ndf", "path": "project.json", "kind": "ndf_settings", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["languages", "test", "ci", "services", "issues", "checks", "ndf_policies", "instructions", "materials", "docs", "analysis", "workflow", "branch_strategy", "toolchain", "budget"], "main_keys": ["branch_strategy"]},
     {"id": "project-measured", "location": "measured", "path": "<repo>/project.json", "kind": "measured", "tracked": false, "writer": "解析とテストの実行（M7）", "ends": "replaced", "keys": ["file_counts", "test_durations"]},
     {"id": "supervise", "location": "ndf", "path": "supervise.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["sync_checks", "format", "queue", "impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"]},
     {"id": "release", "location": "ndf", "path": "release.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["steps", "undistributed", "bump_undistributed", "changelog"]},

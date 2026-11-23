@@ -9,9 +9,10 @@ import ast
 import json
 from dataclasses import dataclass, field
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from ndf import identity
 from ndf.checks import imports
 
 RULES_PATH = Path(__file__).with_name("rules.json")
@@ -61,15 +62,38 @@ class Source:
 
 @dataclass
 class Scope:
-    """見る範囲。`plugin_root` の下だけを見る。"""
+    """見る範囲。`sources` は `plugin_root` の下だけを持つ。"""
 
     repo_root: Path
     plugin_root: Path
     plugin_name: str
     sources: list[Source] = field(default_factory=list)
 
+    @cached_property
+    def settings(self) -> dict[str, Any]:
+        """リポジトリの設定（`.ndf/project.json`）の値。設定を使う規則が最初に読んだときに 1 回だけ読む。
+
+        設定を使わない規則だけを当てる検査は、設定のファイルが壊れていても止まらない。
+        """
+        return load_settings(self.repo_root)
+
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
+
+    def repo_files(self, glob: str) -> list[Path]:
+        """`repo_root` からの相対のグロブに当たるファイル（プラグインの外も引ける）。並びは昇順。
+
+        グロブが絶対パス・`..` を含む・空なら `CheckError`。解決した先がリポジトリの外のもの（外を指すシンボリックリンク）は返さない。
+        """
+        pure = PurePosixPath(glob)
+        if not glob or pure.is_absolute() or Path(glob).is_absolute() or ".." in pure.parts:
+            raise CheckError(f"リポジトリの根からの相対のグロブでない: {glob!r}")
+        root = self.repo_root.resolve()
+        try:
+            matched = list(self.repo_root.glob(glob))
+        except (ValueError, NotImplementedError) as exc:
+            raise CheckError(f"グロブを解けない: {glob!r}: {exc}") from exc
+        return sorted(p for p in matched if p.is_file() and p.resolve().is_relative_to(root))
 
     def plugin_rel(self, src: Source) -> str:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""
@@ -122,6 +146,24 @@ def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
 def read_json(path: Path | str, unreadable: str) -> Any:
     """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
     return read_json_text(path, unreadable)[1]
+
+
+def load_settings(repo_root: Path) -> dict[str, Any]:
+    """リポジトリの設定（`.ndf/project.json`）の値。無ければ空の辞書、読めない・オブジェクトでなければ `CheckError`。
+
+    取得した他人のリポジトリを検査する経路があるため、シンボリックリンクを解いた先がリポジトリの外なら、ファイルの有無を
+    見る前に `CheckError` にする（外のファイルを読まない）。確かめと読みの間の差し替えまでは縛らない（検査の最中に
+    リポジトリへ書ける人は、検査の結果そのものを変えられる）。
+    """
+    path = repo_root / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
+    if not path.resolve().is_relative_to(repo_root.resolve()):
+        raise CheckError(f"リポジトリの設定がリポジトリの外を指す: {path}")
+    if not path.is_file():
+        return {}
+    data = read_json(path, "リポジトリの設定を読めない")
+    if not isinstance(data, dict):
+        raise CheckError(f"リポジトリの設定がオブジェクトでない: {path}")
+    return data
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
