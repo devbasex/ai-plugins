@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.checks import experimental, run
+from ndf.checks import experimental, lint, run
 from ndf.checks.model import CheckError, Scope
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -108,6 +108,7 @@ def test_link_to_outside_the_repository_is_not_read(plugin, tmp_path, monkeypatc
     outside.write_text("SECRET_IN_OUTSIDE = (\n", encoding="utf-8")
     (plugin.root / "link.py").symlink_to(outside)
     monkeypatch.setattr(identity, "ROOT", plugin.root)
+    monkeypatch.setattr(lint, "run_ruff", lambda rules, paths: [])
     run.main([])
     out = capsys.readouterr()
     assert last_result(out.out)["status"] == "ok"

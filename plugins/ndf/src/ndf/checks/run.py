@@ -53,9 +53,10 @@ def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
-        if not path.resolve().is_relative_to(root):
+        if not (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
             continue
-        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
+        # 名前と配置で候補に絞ってから、候補だけを解決してリポジトリの外を除く
+        if path.resolve().is_relative_to(root) and path.is_file():
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
