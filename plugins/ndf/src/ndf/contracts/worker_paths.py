@@ -163,9 +163,9 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
     置き換えを許すのは、呼んだ利用者が書き込める既存のファイルだけである（読み取り専用なら `PermissionError`）。
-    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は、開いた
-    記述子から引いた今の名前（同じ親の別名へ移されたとき）と作った名前のうち、作業ディレクトリの直下で開いた
-    記述子と同じ inode の名前だけを消す。開けなかった一時ディレクトリは確かめられないので消さない。消すのは名前で引く
+    作業ディレクトリの権限（グループ書き込み・sticky bit の有無）では拒まない。一時ディレクトリの後始末は、作った名前を先に
+    照合し、それで片付けられないとき（同じ親の別名へ移されたとき）だけ開いた記述子から今の名前を引いて、作業
+    ディレクトリの直下で開いた記述子と同じ inode の名前だけを消す。記述子は後始末が終わるまで閉じない。開けなかった一時ディレクトリは確かめられないので消さない。消すのは名前で引く
     `rmdir` で、照合の後に名前を差し替えられると差し替え先に当たりうるが、`rmdir` は空のディレクトリしか消さず
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
@@ -195,51 +195,60 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
     finally:
+        # 記述子は照合と `rmdir` が終わるまで閉じない。開いている間は inode が解放されず、同じ番号を別の
+        # ディレクトリが再利用して照合を通ることが無い
         try:
             if created:
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink("data", dir_fd=tmp_fd)
-            names = _current_names(tmp_fd, tmp)
+            if st is not None:
+                _remove_opened_dir(wd, tmp_fd, tmp, st, quiet=not private)
         finally:
             os.close(tmp_fd)
-        if st is not None:
-            _remove_opened_dir(wd, names, st, quiet=not private)
 
 
-def _current_names(fd: int, original: str) -> list[str]:
-    """開いたディレクトリの今の名前（記述子から引けたとき）と作った名前を、調べる順に返す。
+def _current_name(fd: int, original: str) -> Optional[str]:
+    """開いたディレクトリの今の名前を記述子から引く。作った名前と同じか引けなければ None。
 
-    共有の作業ディレクトリでは別の利用者が一時ディレクトリを同じ親の別名へ移せるので、作った名前だけを見ると
-    移された先が残る。今の名前は Linux の `/proc/self/fd` から引き、引けなければ作った名前だけを見る。
+    共有の作業ディレクトリでは別の利用者が一時ディレクトリを同じ親の別名へ移せるので、作った名前で片付け
+    られなかったときだけ、Linux の `/proc/self/fd` から今の名前を引く。
     """
-    names = []
     with contextlib.suppress(OSError):
         current = os.path.basename(os.readlink(f"/proc/self/fd/{fd}"))
         if current and not current.endswith(" (deleted)") and current != original:
-            names.append(current)
-    names.append(original)
-    return names
+            return current
+    return None
 
 
-def _remove_opened_dir(wd: WorkDir, names: list[str], opened: os.stat_result, *, quiet: bool) -> None:
-    """作業ディレクトリの直下で開いたディレクトリと同じ inode の名前を 1 つ `rmdir` する。
+def _remove_opened_dir(wd: WorkDir, fd: int, original: str, opened: os.stat_result, *, quiet: bool) -> None:
+    """作業ディレクトリの直下で、開いたディレクトリ（`fd`）と同じ inode の名前を 1 つ `rmdir` する。
 
+    作った名前を先に照合し、同じ inode でなければ（移された・消されたとき）だけ記述子から今の名前を引いて照合する。
     `quiet` なら失敗を飲む（元の例外を残す）。名前が開いたディレクトリでなければ消さない（差し替え先を消さない）。
+    呼ぶ側は `fd` をこの関数が終わるまで閉じない。
     """
-    for name in names:
-        try:
-            _check_name(name)
-            now = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
-        except (FileNotFoundError, EntryUnsafe):
-            continue
-        if (now.st_dev, now.st_ino) != (opened.st_dev, opened.st_ino):
-            continue
-        try:
-            os.rmdir(name, dir_fd=wd.fd)
-        except OSError:
-            if not quiet:
-                raise
+    if _remove_if_same(wd, original, opened, quiet=quiet):
         return
+    current = _current_name(fd, original)
+    if current is not None:
+        _remove_if_same(wd, current, opened, quiet=quiet)
+
+
+def _remove_if_same(wd: WorkDir, name: str, opened: os.stat_result, *, quiet: bool) -> bool:
+    """名前が開いたディレクトリと同じ inode なら `rmdir` して真を返す。照合に落ちれば偽。"""
+    try:
+        _check_name(name)
+        now = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    except (FileNotFoundError, EntryUnsafe):
+        return False
+    if (now.st_dev, now.st_ino) != (opened.st_dev, opened.st_ino):
+        return False
+    try:
+        os.rmdir(name, dir_fd=wd.fd)
+    except OSError:
+        if not quiet:
+            raise
+    return True
 
 
 def remove_file(wd: WorkDir, name: str) -> Literal["absent", "removed"]:
