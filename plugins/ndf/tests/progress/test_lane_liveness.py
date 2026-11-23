@@ -78,6 +78,28 @@ def test_judge_decides_one_kind(row, sprint, wrapper, listed, kind):
     assert verdict.stall == (kind in (liveness.STALLED, liveness.ENDED))
 
 
+AWAITING_ROW = LaneRow("r1", {"kind": "sprint", "issues": [1]}, "running", sprint_id="s1", answered_seq=5, resumed_seq=0)
+
+
+@pytest.mark.parametrize(
+    ("row", "sprint", "wrapper", "listed", "kind"),
+    [
+        (None, liveness.SPRINT_IDLE, ALIVE, True, liveness.IDLE),
+        (AWAITING_ROW, liveness.SPRINT_IDLE, ALIVE, True, liveness.RESUMING),
+        (RUNNING_ROW, liveness.SPRINT_GATE, ALIVE, True, liveness.WAITING_ANSWER),
+        (RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, False, liveness.UNKNOWN),
+        (RUNNING_ROW, liveness.SPRINT_IDLE, AUTH, True, liveness.STALLED),
+        (RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, liveness.ALIVE),
+        (RUNNING_ROW, liveness.SPRINT_WORKING, GONE, True, liveness.WORKING),
+        (RUNNING_ROW, liveness.SPRINT_IDLE, GONE, True, liveness.ENDED),
+    ],
+)
+def test_judge_without_activity_keeps_the_eight_kinds(row, sprint, wrapper, listed, kind):
+    """活動を読まない呼び手（`activity` を渡さない）の判定は、#4036 の前の 8 つのまま（受け入れ条件 3）。"""
+    verdict = liveness.judge(row, sprint, wrapper, listed)
+    assert verdict.kind == kind
+
+
 def test_a_row_awaiting_next_after_an_answer_is_resuming_not_a_stall():
     row = LaneRow("r1", {"kind": "sprint", "issues": [1]}, "running", sprint_id="s1", answered_seq=5, resumed_seq=0)
     verdict = liveness.judge(row, liveness.SPRINT_IDLE, None, True)
@@ -220,3 +242,84 @@ def test_status_without_probes_has_no_liveness(opened):
         pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[1]])), True)
         out = plan.status(conn, pid, datetime.now(UTC))
     assert "liveness" not in out["items"][0]
+
+
+# --- 何もしていない conductor（#4036） -------------------------------------------------------------
+
+
+def _quiet(background=0, turn_done=True):
+    """最後の応答が時刻 1000 に終わった活動。"""
+    return liveness.Activity(turn_done=turn_done, moved=1000.0, background=background)
+
+
+def test_a_conductor_idle_past_the_threshold_is_a_stall():
+    """応答が終わり、バックグラウンドの作業が無く、閾値を過ぎたら止まり（受け入れ条件 1）。"""
+    verdict = liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, _quiet(), 1000.0 + liveness.idle_after() + 60)
+    assert verdict.kind == liveness.IDLE_CONDUCTOR and verdict.stall
+    assert verdict.moved_at == 1000.0 and verdict.background == 0
+    assert verdict.as_dict()["moved_at"] == 1000.0 and verdict.as_dict()["background"] == 0
+
+
+@pytest.mark.parametrize(("past", "kind"), [(0, liveness.IDLE_CONDUCTOR), (-1, liveness.ALIVE)])
+def test_the_threshold_itself_is_a_stall_and_one_second_before_is_not(past, kind):
+    now = 1000.0 + liveness.idle_after() + past
+    assert liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, _quiet(), now).kind == kind
+
+
+@pytest.mark.parametrize(
+    "activity",
+    [None, _quiet(turn_done=False), _quiet(background=1), _quiet(background=None), liveness.Activity(True, None, 0)],
+)
+def test_a_conductor_with_work_or_unread_activity_stays_alive(activity):
+    """活動を読めない・応答の途中・バックグラウンドの作業が残る・数を確かめられない行は止まりにしない（受け入れ条件 2・決定 1）。"""
+    verdict = liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, activity, 10**9)
+    assert verdict.kind == liveness.ALIVE and not verdict.stall
+
+
+@pytest.mark.parametrize(
+    ("row", "sprint", "wrapper", "kind"),
+    [
+        (RUNNING_ROW, liveness.SPRINT_GATE, ALIVE, liveness.WAITING_ANSWER),
+        (AWAITING_ROW, liveness.SPRINT_IDLE, ALIVE, liveness.RESUMING),
+        (RUNNING_ROW, liveness.SPRINT_IDLE, AUTH, liveness.STALLED),
+    ],
+)
+def test_waits_and_stalled_wrappers_win_over_idle(row, sprint, wrapper, kind):
+    """承認ゲートと回答の後の next 待ちは閾値を過ぎても止まりにしない（受け入れ条件 3）。stalled は今までどおり（決定 4）。"""
+    assert liveness.judge(row, sprint, wrapper, True, _quiet(), 10**9).kind == kind
+
+
+def test_the_threshold_comes_from_limits(monkeypatch):
+    """閾値は limits.json の parallel-run.idle だけが持ち、変えると境目が変わる（受け入れ条件 5）。"""
+    from ndf.contracts import limits
+
+    assert liveness.idle_after() == limits.seconds(liveness.IDLE_POLICY)
+    real = limits.seconds
+    monkeypatch.setattr(limits, "seconds", lambda name: 30.0 if name == liveness.IDLE_POLICY else real(name))
+    assert liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, ALIVE, True, _quiet(), 1030.0).kind == liveness.IDLE_CONDUCTOR
+
+
+def test_judge_lanes_reads_activity_only_for_lanes_whose_wrapper_runs():
+    """活動は動いているラッパーのレーンだけ読み、判定へ渡す。止まり・待ちのレーンでは読まない。"""
+    asked = []
+
+    def activity(name):
+        asked.append(name)
+        return _quiet()
+
+    rows = {"a": [RUNNING_ROW], "b": [LaneRow("r1", {}, "running", sprint_id="s2")], "c": [LaneRow("r1", {}, "running", sprint_id="s3")]}
+    sprints = {"s1": _idle(), "s2": _idle(), "s3": _gate()}
+    found = liveness.Probes(
+        wrapper_name=lambda name: f"w-{name}",
+        wrappers=lambda: {"w-a": ALIVE, "w-b": AUTH, "w-c": ALIVE},
+        sprint=sprints.get,
+        activity=activity,
+    )
+    got = liveness.judge_lanes(rows, found, 10**9)
+    assert {k: v.kind for k, v in got.items()} == {"a": liveness.IDLE_CONDUCTOR, "b": liveness.STALLED, "c": liveness.WAITING_ANSWER}
+    assert asked == ["a"]
+
+
+def test_probes_read_no_activity_by_default():
+    probes = _Probes({"w-a": ALIVE}, {"s1": _idle()})
+    assert liveness.judge_lanes({"a": [RUNNING_ROW]}, probes.build(), 10**9)["a"].kind == liveness.ALIVE

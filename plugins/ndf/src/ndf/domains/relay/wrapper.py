@@ -965,8 +965,20 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
                 "section": sec.number if sec else None,
                 "session_id": sec.session_id if sec else None,
                 "account": sec.account if sec else None,
+                # 会話の記録の場所は、子に渡した環境で組んだもの（一覧を呼ぶ側の環境に依らない。#4036）
+                "transcript": self._recorded_transcript(sec) if sec else None,
             },
         )
+
+    def _recorded_transcript(self, sec: Section) -> str:
+        """子の会話の記録の場所（`wrapper.json` の `transcript`）。
+
+        子に渡した環境（`sec.target.env`。従量接続・登録済みキーでは共有の `CLAUDE_CONFIG_DIR` に切り替わる）で組み、
+        相対のパスは子の作業ディレクトリを基準に絶対化する（一覧のコマンドは別の作業ディレクトリから読む）。
+        ラッパー自身の環境で組む `wrapper_auth` の `_transcript`（`Path`）とは別の値なので、名前を分ける。
+        """
+        env = sec.target.env if sec.target is not None else self.s.environ
+        return str(self.s.cwd / observe.transcript_path(env, self.s.cwd, sec.session_id))
 
     def _log(self, row: Mapping[str, Any]) -> None:
         registry.append_log(self.dir, {"section": self.section.number if self.section else None, **dict(row)})

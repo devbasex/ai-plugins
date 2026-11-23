@@ -49,7 +49,9 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
+import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +59,7 @@ from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
 from ndf.adapters import git, github
-from ndf.contracts import causes, exit_codes, limits, result
+from ndf.contracts import causes, exit_codes, limits, result, worker_kinds
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
 from ndf.core import branch_strategy
@@ -93,6 +95,35 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
+# （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
+# （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
+# 差分を読めないか（起点が無いなど）は `git diff` 自身の終了コードで見て、空の差分と分ける（#3908 の r2-5）。
+# macOS 標準の Bash 3.2 でも動くよう `mapfile`・`wait $!`（プロセス置換の終了コード）を使わない（#3908 の r2-1）。
+# NUL 区切りのパスをプロセス置換から `read -d ''` で 1 つずつ読み、パスの後ろに空の区切り（パスは空にならない）と
+# `git diff` の終了コードを流して受け取る。配列を使うので包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
+# オプションと取り違えないよう、パスには `./` を前置して渡す（`ndf refactor run` がリポジトリ相対へ戻す。#3908 の r2-4）
+REFACTOR_WITH_PR = """ref=$1; shift
+if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
+fi
+files=() rc=1 end=
+while IFS= read -r -d '' f; do
+  if [ -n "$end" ]; then rc=$f
+  elif [ -z "$f" ]; then end=1
+  else files+=("./$f"); fi
+done < <(git diff --name-only -z --diff-filter=d "$ref...HEAD" --; printf '\\0%s\\0' "$?")
+if [ "$rc" != 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref からの差分を作業場所で読めない（取得し直してから打ち直す）" --cause precondition "git diff が失敗"
+fi
+if [ "${#files[@]}" -eq 0 ]; then
+  exec "$1" contracts emit --tool refactor --status stopped \\
+    --summary "起点 $ref からの差分のファイルが無い" --cause precondition "差分が空"
+fi
+exec "$@" --pr "$n" --scope "${files[@]}"
+"""
 
 Value = Union[str, list[str]]
 
@@ -331,6 +362,88 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     return plan
 
 
+# テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
+WORKER_SLOT = "{{worker}}"
+
+
+def work_names(plan: Any) -> list[str]:
+    """プランの形（`expanded` の戻り値）の中で `{{worker}}` の後ろに置かれた作業の名前（現れた順。重なりを含む）。"""
+    if isinstance(plan, dict):
+        return [n for v in plan.values() for n in work_names(v)]
+    if not isinstance(plan, list):
+        return []
+    named = [str(plan[i + 1]) for i, v in enumerate(plan[:-1]) if v == WORKER_SLOT]
+    return named + [n for v in plan for n in work_names(v)]
+
+
+def _default_worker(t: Template, given: Collection[str], local_tests: bool) -> bool:
+    """プランが既定の worker（`ndf answer work`）で作業を起動するか（`worker` を渡さず、プランが `{{worker}}` を使う）。"""
+    return "worker" not in given and "worker" in needed(t, local_tests=local_tests, given=given)
+
+
+def kinds_of(t: Template, local_tests: bool) -> list[str]:
+    """組むプランの作業の名前（現れた順。重なりを除く）。"""
+    return list(dict.fromkeys(work_names(expanded(t, local_tests=local_tests))))
+
+
+def worker_only_names(t: Template, *, local_tests: bool = True) -> set[str]:
+    """プランの作業が読む値の名前（作業の定義の `inputs` と `cwd`）のうち、テンプレートの差し込みに無いもの。
+
+    要求・設計などの単発のプランは、描画に使わない `issues`・`mode` を worker にだけ渡す（PR 4319 の指摘 r2-1）。
+    """
+    kinds = worker_kinds.work_kinds()
+    return {n for k in kinds_of(t, local_tests) for n in (*kinds[k]["inputs"], kinds[k]["cwd"])} - set(t.params)
+
+
+def _split_worker_only(t: Template, pairs: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+    """`--set`・`--add` の値を、テンプレートの差し込みと、それ以外（worker にだけ渡す入力の候補）に分ける。"""
+    return {n: v for n, v in pairs.items() if n in t.params}, {n: v for n, v in pairs.items() if n not in t.params}
+
+
+def _check_worker_only(t: Template, given: Collection[str], held: Mapping[str, Value], local_tests: bool) -> None:
+    """worker にだけ渡す値が、既定の worker の作業が読む名前に無ければ、テンプレートに無い差し込みとして `RouteError`。"""
+    accepted = worker_only_names(t, local_tests=local_tests) if _default_worker(t, given, local_tests) else set()
+    unknown = sorted(set(held) - accepted)
+    if unknown:
+        raise RouteError(f"テンプレート {t.name} に無い差し込み: {', '.join(unknown)}")
+
+
+def work_values(t: Template, given: Collection[str], values: Mapping[str, Value], local_tests: bool) -> Optional[dict[str, Any]]:
+    """単発のプランが既定の worker を使うなら、その入力（プランの `worker_kinds.PLAN_KEY` に持たせる値）。使わなければ None。
+
+    `values` は差し込みの値に worker にだけ渡す値を足したもの。作業が読む値か作業場所が欠ければ `RouteError`（実行の
+    途中の worker で止まらず、組む時点で `--set`・`--add` を求める）。値はプラン本体に持たせ、`ndf plan next` が実行の
+    選んだ保存先の `values.json` へ回ごとに書く（`worker_kinds.hand_plan_values`。PR 4319 の指摘 r2-2・r2-3）。
+    """
+    if not _default_worker(t, given, local_tests):
+        return None
+    gaps: dict[str, str] = {}
+    for kind in kinds_of(t, local_tests):
+        found = worker_kinds.kind_gaps(kind, values, {}, covers=LAUNCH_SOURCES)
+        gaps.update({n: f"差し込み {n}（--set か --add で渡す）" for n in found})
+    if gaps:
+        raise RouteError(f"テンプレート {t.name} の worker が読む値が無い: {', '.join(f'{n}: {s}' for n, s in gaps.items())}")
+    return worker_kinds.plan_values(t.name, values, local_tests)
+
+
+def _publish(out: Path, plan: Mapping[str, Any]) -> None:
+    """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
+
+    一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
+    書き換えない。プランは worker の入力（`work_values`）を含むので、置き換える前のアクセス権をコピーせず、常に
+    所有者だけが読み書きできる 0600 の新しいファイルとして公開する（PR 4319 の指摘 r3-1・r3-2）。
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 # --- テンプレートの検査 -----------------------------------------------------------------------
 
 
@@ -425,15 +538,21 @@ def default_base(repo: Path) -> str:
         raise RouteError(f"base を決められない: {exc.reason}") from None
 
 
-def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) -> Optional[str]:
+def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *, raise_passing: bool = False) -> Optional[str]:
     """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
 
     `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    `raise_passing` が真なら、打ち直せば通りうる GitHub の失敗（`GitHubError.passing`。上限・不達・5xx）は None にせず
+    そのまま上げる（呼び手が待ち時間付きの一時的な停止にし、方式が無い場合と分ける）。
     """
     try:
         hub = github.GitHub(git.Git(repo).remote_repo(remote), github.client())
         allowed = hub.allowed_merge_methods(base)
-    except (git.GitError, github.GitHubError):  # noqa: NDF401 外部コマンド: リモートか GitHub の設定を読めない
+    except github.GitHubError as exc:
+        if raise_passing and exc.passing:
+            raise
+        return None
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモートを読めない
         return None
     return github.pick_merge_method(None, allowed)
 
@@ -466,6 +585,16 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
     return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
 
 
+def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
+    """設定が無いときの `{{refactor}}` の値（`REFACTOR_WITH_PR`）。PR の番号と触るファイルは打つ時点に読んで足す。
+
+    位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が `ndf refactor run` の argv になる。
+    """
+    entry = identity.FIXED_WORDS["entrypoint"]
+    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]
+    return ["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, *run]
+
+
 def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str]]:
     """設定が無いときの `{{review}}` の値（ブランチとマージ先が決まらなければ None）。
 
@@ -483,11 +612,12 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
     return review_launch(t.name, branch, base)
 
 
-def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
+def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> dict[str, Value]:
     """テンプレートが使う差し込みのうち値の無い `review`・`acceptance` の補い（単発の経路と工程から組む経路で共有する）。
 
     `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
-    決まらない差し込みは含めない。
+    課題をまとめた単位（`issues` が 2 つ以上）は、課題ごとの `--issue` を番号の順に並べる（#3908 の決定 7。代表の課題
+    （`issue`）だけでは残りの課題の条件を検証しない）。決まらない差し込みは含めない。
     """
     out: dict[str, Value] = {}
     if _omitted(t, values, "review"):
@@ -496,7 +626,8 @@ def launch_values(t: Template, values: Mapping[str, Value]) -> dict[str, Value]:
             out["review"] = review
     issue = values.get("issue")
     if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
-        out["acceptance"] = [ACCEPTANCE_ISSUE, issue]
+        named = sorted({issue, *issues}, key=int) if len(issues) > 1 else [issue]
+        out["acceptance"] = [arg for n in named for arg in (ACCEPTANCE_ISSUE, n)]
     return out
 
 
@@ -515,13 +646,14 @@ def check_acceptance(values: Mapping[str, Value]) -> None:
             raise RouteError(f"acceptance の {arg} の後に値が無い: {' '.join(found)}")
 
 
-def launched(t: Template, values: Mapping[str, Value]) -> tuple[dict[str, Value], dict[str, Value]]:
+def launched(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> tuple[dict[str, Value], dict[str, Value]]:
     """`values` に起動の補い（`launch_values`）を足して `acceptance` を検査（`check_acceptance`）した値と、補った値。
 
-    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。補った値は、
+    単発の経路（`_write_plan`）と工程から組む経路（`ndf.progress.invoke.template_values`）で共有する。`issues` は工程の
+    入力の課題の並びで、まとめた単位の `acceptance` を課題ごとの `--issue` にする（#3908 の決定 7）。補った値は、
     `{{review}}` が既定の起動かを呼び手が見分けるために返す。検査に通らなければ `RouteError`。
     """
-    filled = launch_values(t, values)
+    filled = launch_values(t, values, issues=issues)
     out = {**values, **filled}
     check_acceptance(out)
     return out, filled
@@ -535,6 +667,11 @@ def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
     """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない。
     `base` はブランチ戦略の設定から決め、決まらなければ `RouteError`）。"""
+    return derived_merge_method(t, derived_locally(t, given, cwd))
+
+
+def derived_locally(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
+    """`derived` のうち手元（git と設定ファイル）だけで決まる `repo`・`remote`・`worktree`・`base` を足す。GitHub を呼ばない。"""
     out = dict(given)
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
@@ -544,8 +681,17 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:
         out["base"] = default_base(Path(str(out["repo"])))
+    return out
+
+
+def derived_merge_method(t: Template, given: Mapping[str, Value], *, raise_passing: bool = False) -> dict[str, Value]:
+    """省いた `merge_method` を `base` のブランチで許された方式から決めて足す（GitHub を呼ぶ。読めなければ足さない）。
+
+    `raise_passing` は `default_merge_method` へ渡す（真なら打ち直せば通りうる GitHub の失敗を上げる）。
+    """
+    out = dict(given)
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
-        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
+        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out), raise_passing=raise_passing)
         if method is not None:
             out["merge_method"] = method
     return out
@@ -591,13 +737,17 @@ def _declared_ci_only(values: Mapping[str, Value]) -> bool:
 
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
-    given = _pairs(a.sets, a.adds)
+    given, held = _split_worker_only(t, _pairs(a.sets, a.adds))
     values, _ = launched(t, derived(t, given, Path.cwd()))
     _check_worktree(t, given, values)
-    plan = render(t, values, local_tests=not _declared_ci_only(values))
+    local = not _declared_ci_only(values)
+    _check_worker_only(t, given, held, local)
+    plan = render(t, values, local_tests=local)
+    work = work_values(t, given, {**values, **held}, local)
+    if work is not None:
+        plan[worker_kinds.PLAN_KEY] = work
     out = Path(a.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _publish(out, plan)
     return t, out
 
 

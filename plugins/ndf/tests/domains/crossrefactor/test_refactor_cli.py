@@ -75,3 +75,10 @@ def test_collected_that_gives_up_waiting_for_a_test_slot_stops_with_its_cause(gi
 
 def test_bad_arguments_exit_with_the_invalid_code(capsys):
     assert cli.main(["touched"]) == causes.exit_code("invalid")
+
+
+def test_run_reads_scope_paths_with_a_leading_dot_slash_as_repo_relative(tmp_path):
+    # 既定の起動は先頭がハイフンのパスをオプションと分けるため `./` を前置して渡す（#3908 の r2-4）
+    argv = ["run", "--pr", "7", "--branch", "feat/x", "--base", "origin/main", "--required", "ci", "--work", str(tmp_path)]
+    got = cli.run_config(cli._parser().parse_args([*argv, "--scope", "./-x.py", "./lib/foo.py", "tests"]))
+    assert got.scope == ("-x.py", "lib/foo.py", "tests")

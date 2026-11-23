@@ -61,6 +61,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-next` | `relay-wrappers` state:relay/wrappers | `<名前>/next.json` | exchange | — | Stop の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | ndf_settings | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |
 | `relay-question` | `relay-wrappers` state:relay/wrappers | `<名前>/question.json` | exchange | — | PreToolUse の hook（M3a） | run | 内部（予告なく変えてよい） |
+| `relay-shells-ended` | `relay-wrappers` state:relay/wrappers | `<名前>/shells-ended.json` | exchange | — | ndf relay ls --activity（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-stop` | `relay-wrappers` state:relay/wrappers | `<名前>/stop` | exchange | — | ndf relay stop（M3b）と人（touch） | run | 内部（予告なく変えてよい） |
 | `relay-usage-fetch` | `relay-account-store` config:ndf/accounts（NDF_ACCOUNTS_DIR で差し替え） | `.usage-fetch/<名前>/<世代>.json` | measured | — | 中継のラッパー（使用率の API の取得） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper` | `relay-wrappers` state:relay/wrappers | `<名前>/wrapper.json` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
@@ -74,6 +75,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `sprint` | `ndf-sprints` repo:.ndf/sprints | `<id>/` | record | — | 開発ループとスプリント（M1） | cleanup | 内部（予告なく変えてよい） |
 | `supervise` | `ndf` repo:.ndf | `supervise.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `usage-log-file` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `usage.jsonl` | record | — | 使用量の使用量ログ（M7） | kept | 内部（予告なく変えてよい） |
+| `worker-append-lock` | `state-root` state:. | `worker-append.lock` | exchange | — | worker の報告の追記（C5） | kept | 内部（予告なく変えてよい） |
 | `worktree` | `ndf` repo:.ndf | `worktree.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `worktree-local` | `ndf` repo:.ndf | `worktree.local.json` | ndf_settings | — | 人（各自の機械の値。worktree.json のキーを上書きする） | kept | 内部（予告なく変えてよい） |
 

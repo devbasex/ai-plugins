@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from ndf.domains.hooks import outbox, sender
+from ndf.domains.hooks import outbox, reply_judge, sender
 
 from ._hooks import call_entry, read_sample, sample, sample_paths, state_dir, stop
 
@@ -71,6 +71,22 @@ def test_pushback_limit_queues_a_wait_notice(tmp_path, monkeypatch, spawned):
     monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
     for _ in range(3):
         call_entry("claude", "Stop", stop(tmp_path, "どちらにしますか？"))
+    box = outbox.outbox_dir(state_dir(), {"SLACK_BOT_TOKEN": "x", "SLACK_CHANNEL_ID": "C1"})
+    items = [json.loads(p.read_text(encoding="utf-8")) for p in box.glob("*.json")]
+    assert [i["kind"] for i in items] == ["wait"]
+
+
+def test_pushback_limit_after_a_model_wait_queues_a_wait_notice(tmp_path, monkeypatch, spawned):
+    # #4000 の決定 5: ルールが `report` と読む本文でも、同じ入力の中で軽いモデルが `wait` と回答していれば、上限の後に
+    # 変更要求を返し、エントリポイントが上限で通して待ちの知らせを書く。偽の `ask`・偽の `parent_launch` で子を起動しない
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "x")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    launch = reply_judge.Launch(["claude"], "/w/p", "/x/claude/versions/1", [1, 2])
+    asked = []
+    monkeypatch.setattr(reply_judge, "parent_launch", lambda env, pid: launch)
+    monkeypatch.setattr(reply_judge, "ask", lambda *a: asked.append(a) or reply_judge.Judged("wait", None, 1.0, 1))
+    outs = [call_entry("claude", "Stop", stop(tmp_path, "作業を終えた。")) for _ in range(3)]
+    assert [o is not None for o in outs] == [True, True, False] and len(asked) == 2
     box = outbox.outbox_dir(state_dir(), {"SLACK_BOT_TOKEN": "x", "SLACK_CHANNEL_ID": "C1"})
     items = [json.loads(p.read_text(encoding="utf-8")) for p in box.glob("*.json")]
     assert [i["kind"] for i in items] == ["wait"]

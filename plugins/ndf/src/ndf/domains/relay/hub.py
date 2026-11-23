@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import os
 import time
@@ -38,7 +39,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
 
 from ndf import identity
 from ndf.contracts import facts, limits, named_cap
-from ndf.domains.relay import hub_decide, registry, session_env, signals, switch_decide
+from ndf.domains.relay import hub_decide, observe, registry, session_env, signals, switch_decide
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
@@ -495,18 +496,47 @@ def _confirm(ctx: Context, name: str) -> Outcome:
     return Outcome(got.ok, got.reason, "" if got.ok else "precondition", [{"name": name}])
 
 
-def listing(ctx: Context) -> list[dict[str, Any]]:
-    """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。"""
+def listing(ctx: Context, activity: bool = False) -> list[dict[str, Any]]:
+    """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。
+
+    `activity` が真（`ndf relay ls --activity`）なら、動いている行に conductor の活動（`turn_done`・`moved`・`background`。
+    #4036）も載せる。偽なら活動を読まず 3 つとも None。/proc の親の一覧はシェルの生死を確かめる行まで進んだときに 1 度だけ読み、
+    全行で共有する。
+    """
     running = set(registry.busy_names(ctx.state_dir))
     entries = registry.read_registry(hub_dir(ctx.state_dir))
+    look = _look() if activity and running else None
     out = []
     # 登録簿の行と、登録簿に無く錠を持つラッパー（ハブが数えるラッパーをすべて載せる。#3989 の決定 3）
     for name in sorted(set(entries) | set(running)):
         state = registry.read_state(registry.wrapper_dir(ctx.state_dir, name))
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
         row = {"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason")}  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
-        out.append({**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False})
+        listed = {**row, **_current(entries[name]), "registered": True} if name in entries else {**row, "registered": False}
+        session = _session(state, listed.get("cwd"))
+        wrapper = registry.wrapper_dir(ctx.state_dir, name)
+        paths = {"transcript": (state or {}).get("transcript")}  # noqa: NDF501 ファイル: 状態が無ければ活動を読まない
+        seen = (
+            observe.conductor_activity({**session, **paths}, wrapper, look)
+            if look is not None and name in running
+            else dict(observe.NO_ACTIVITY)
+        )
+        out.append({**listed, **session, **seen})
     return out
+
+
+def _look() -> observe.Look:
+    """活動を読む材料（#4036）。会話の記録は Stop の hook と同じ末尾の大きさ（`hook.transcript-tail`）だけ読む。
+    会話の記録の場所はラッパーの状態の値を使うので、一覧を呼ぶ側の環境を渡さない。"""
+    size = int(limits.value("hook.transcript-tail", "count"))
+    return observe.Look(time.time(), size, functools.cache(observe.process_children))
+
+
+def _session(state: Optional[Mapping[str, Any]], cwd: Any) -> dict[str, Any]:
+    """会話の記録を組む材料とラッパーの pid（#4036）。`cwd` は `claude` を起動した場所（状態の値）を、状態に無ければ登録簿の値を使う。"""
+    if state is None:
+        return {"session_id": None, "cwd": cwd, "pid": None}
+    return {"session_id": state.get("session_id"), "cwd": state.get("cwd") or cwd, "pid": state.get("pid")}
 
 
 def _log(base: Path, rid: str, got: Outcome) -> None:

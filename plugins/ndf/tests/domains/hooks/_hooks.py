@@ -15,7 +15,8 @@ from ndf.domains.relay import signals
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 SRC = tables.PLUGIN_ROOT / "src"
-# 中継・オーガナイザー・通知・止め方・文脈の運用上限の変数（テストを流す人の値を読まない）
+# 中継・オーガナイザー・通知・止め方・文脈の運用上限の変数と、stop-wait が親の Claude Code を探す変数（テストを流す人の値を
+# 読まない。親の起動の変数が無ければ、stop-wait は実の `/proc` を読まず、判定の子も起動しない）
 ENV_NAMES = (
     "NDF_RELAY_DIR",
     "NDF_RELAY_LAUNCH",
@@ -27,6 +28,9 @@ ENV_NAMES = (
     "NDF_WORKER_KIND",
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_PROJECT_DIR",
+    "CLAUDE_CONFIG_DIR",
 )
 
 

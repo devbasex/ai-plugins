@@ -208,6 +208,24 @@ def test_impl_acceptance_defaults_to_the_issue():
     assert step["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "12"]
 
 
+def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
+    # #3908 の決定 7: 設定が無いときの {{refactor}}。PR の番号と触るファイルは打つ時点に読むので、包みの位置引数に
+    # ブランチ（$0）と起点（$1）を渡し、$2 以降を ndf refactor run の argv にする
+    got = route.refactor_launch("sprint/s1", "origin/develop", ["test", "lint"])
+    assert got[:5] == ["bash", "-c", route.REFACTOR_WITH_PR, "sprint/s1", "origin/develop"]
+    assert got[5:] == ["ndf", "refactor", "run", "--branch", "sprint/s1", "--base", "origin/develop", "--required", "test", "lint"]
+
+
+def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
+    # #3908 の決定 7: 課題をまとめた単位は、課題ごとの --issue で全部の課題の条件を検証する（代表の課題だけにしない）
+    t = route.choose("implement")
+    given = values("implement", issue="12")
+    del given["acceptance"]
+    got = route.launch_values(t, given, issues=["30", "12"])
+    assert got["acceptance"] == ["--issue", "12", "--issue", "30"]
+    route.check_acceptance(got)
+
+
 def test_impl_acceptance_takes_the_list_as_given():
     acceptance = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
     step = _impl_steps(acceptance=acceptance)["acceptance"]

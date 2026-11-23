@@ -189,15 +189,24 @@ def held_mib(directory: Path) -> int:
     return sum(_weight(description) for description in _live_owners(directory).values())
 
 
-def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object], *, absorbed: int | None = None) -> Taken | None:
+def take(
+    directory: Path,
+    capacity_mib: int,
+    weight: int,
+    owner: Mapping[str, object],
+    *,
+    absorbed: int | None = None,
+    lock_seconds: float = POOL_LOCK_SECONDS,
+) -> Taken | None:
     """重み `weight`（MiB）のスロットを取る。生きたオーナーの重みと足して容量を超えれば None。
 
     オーナーが 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親のスロットの番号で、
     その重みと、親と同じ種類（`kind`）のほかのオーナーの重みは数えない（子孫の重みが親の分を含む。親やほかの CLI の
     持つ分で子孫が待たない）。「オーナーが無ければ取る」も数えるオーナーだけで見る。
+    `lock_seconds` は排他を待つ上限の秒（0 なら待たない）。
     排他を待ちきれないときは `filelock.Timeout`、保存先へ書けないときは `OSError` を送る。
     """
-    with lock(directory / POOL_LOCK).acquire(timeout=POOL_LOCK_SECONDS):
+    with lock(directory / POOL_LOCK).acquire(timeout=lock_seconds):
         owners = _live_owners(directory)
         counted = _counted(owners, absorbed)
         if counted and sum(_weight(description) for description in counted.values()) + weight > capacity_mib:

@@ -1,4 +1,4 @@
-"""guard の本体の判定（sleep・process-wait・script-chain・context-limit・ask-forward・relay-marker・stop-wait）。unattended は test_unattended。"""
+"""guard の本体の判定（sleep・process-wait・script-chain・context-limit・ask-forward・relay-marker・stop-wait の別の場所の待ち）。unattended は test_unattended、stop-wait の判定の選び方は test_stop_wait。"""
 
 from __future__ import annotations
 

@@ -5,8 +5,8 @@
 - 挟むときは、すべてのセッションに付ける引数（`carried`）と、最初のセッションだけのもの（最初のプロンプト・
   `--session-id`・`--resume <ID>`・`-n`/`--name`）に分ける。会話ごとの引数を次のセッションへ持ち越さない
 
-オプションが値を取るかの表は `contracts/data/claude-cli.json` が持つ。表に無いオプションは、次の語が `-` で
-始まらなければ値ごと引き継ぐ。`--名前=値` の形は 1 語で読む。
+オプションが値を取るかの表は `contracts/data/claude-cli.json` が持ち、オプションの読み方は `claude_options`
+（hook の `reply_judge` と共に使う）が持つ。
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ from dataclasses import dataclass, field
 from typing import Iterator, Mapping, Optional, Sequence
 
 from ndf import contracts
+from ndf.domains.relay import claude_options
 
-TABLE = "data/claude-cli.json"
+TABLE = claude_options.TABLE
 
 
 @functools.lru_cache(maxsize=1)
 def _table() -> dict[str, frozenset[str]]:
-    data = contracts.load_json(TABLE)
-    return {k: frozenset(v) for k, v in data.items() if isinstance(v, list)}
+    return claude_options.table_of(contracts.load_json(TABLE))
 
 
 @dataclass(frozen=True)
@@ -39,11 +39,7 @@ class Parsed:
     resume: Optional[str] = None
 
 
-@dataclass(frozen=True)
-class _Option:
-    name: str
-    words: tuple[str, ...]  # オプションの語と値（`--名前=値` は 1 語）
-    value: Optional[str]
+_Option = claude_options.Option
 
 
 @dataclass
@@ -58,41 +54,11 @@ class _Acc:
     unsupported: Optional[str] = None
 
 
-def _take(args: Sequence[str], i: int) -> tuple[_Option, int]:
-    """`args[i]` から 1 つのオプションを読み、次の位置を返す。"""
-    t = _table()
-    word = args[i]
-    name, eq, inline = word.partition("=")
-    if eq and name.startswith("--"):
-        return _Option(name, (word,), inline), i + 1
-    nxt = args[i + 1] if i + 1 < len(args) else None
-    has_value = nxt is not None and not nxt.startswith("-")
-    if word in t["flags"]:
-        return _Option(word, (word,), None), i + 1
-    if word in t["variadic"]:
-        j = i + 1
-        while j < len(args) and not args[j].startswith("-"):
-            j += 1
-        return _Option(word, tuple(args[i:j]), None), j
-    if nxt is not None and (has_value or word in t["value"]):
-        return _Option(word, (word, nxt), nxt), i + 2
-    return _Option(word, (word,), None), i + 1
-
-
 def options(args: Sequence[str]) -> Iterator[tuple[str, Optional[str]]]:
     """オプションの名前と値（値が無ければ None）を前から順に返す。位置引数と `--` より後は返さない。
 
     値を取るかは `parse` と同じ表で決めるので、ほかのオプションの値になった語をオプションとして読まない。"""
-    i = 0
-    while i < len(args):
-        word = args[i]
-        if word == "--":
-            return
-        if not word.startswith("-") or word == "-":
-            i += 1
-            continue
-        opt, i = _take(args, i)
-        yield opt.name, opt.value
+    return claude_options.options(_table(), args)
 
 
 def without(args: Sequence[str], name: str) -> list[str]:
@@ -107,7 +73,7 @@ def without(args: Sequence[str], name: str) -> list[str]:
             out.append(word)
             i += 1
             continue
-        opt, i = _take(args, i)
+        opt, i = claude_options.take(_table(), args, i)
         if opt.name != name:
             out += opt.words
     return out
@@ -153,13 +119,13 @@ def parse(args: Sequence[str], environ: Mapping[str, str], tty: bool) -> Parsed:
         if word == "--":
             acc.positionals += args[i + 1 :]
             break
-        if not word.startswith("-") or word == "-":
+        if not claude_options.is_option(word):
             if not acc.positionals and word in t["subcommands"]:  # 前に付いたオプション（alias の分）があっても最初の語で読む
                 return Parsed(f"サブコマンド {word}")
             acc.positionals.append(word)
             i += 1
             continue
-        opt, i = _take(args, i)
+        opt, i = claude_options.take(_table(), args, i)
         if opt.name in t["non_interactive"]:
             return Parsed(f"非対話の起動 {opt.name}")
         _place(acc, opt)
