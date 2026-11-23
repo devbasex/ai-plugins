@@ -117,12 +117,15 @@ def test_prepare_removes_the_done_before_failing_on_the_result(tmp_path, monkeyp
     assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告" and not (d / "n.report.md.done").exists()
 
 
-def test_prepare_keeps_the_previous_report_when_it_cannot_be_emptied(tmp_path, monkeypatch, capsys):
+def test_prepare_keeps_the_previous_report_done_and_result_when_the_report_cannot_be_staged(tmp_path, monkeypatch, capsys):
     d = tmp_path / "w"
     _previous(d)
-    _fail_on(monkeypatch, "write_file", "n.report.md")
+    (d / "n.report.md.done").write_text("", encoding="utf-8")
+    (d / "n.result.json").write_text("{}", encoding="utf-8")
+    _fail_on(monkeypatch, "staged_write", "n.report.md")
     assert _invalid(*_run(capsys, "prepare", "--dir", str(d), "--name", "n"))
     assert (d / "n.report.md").read_text(encoding="utf-8") == "前の報告"
+    assert (d / "n.report.md.done").exists() and (d / "n.result.json").read_text(encoding="utf-8") == "{}"
 
 
 def _prepared(tmp_path, capsys) -> Path:

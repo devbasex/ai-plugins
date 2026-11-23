@@ -701,6 +701,19 @@ def test_write_file_failure_leaves_no_temp_and_keeps_original(workdir, monkeypat
     assert [p.name for p in d.iterdir()] == ["f"]
 
 
+def test_staged_write_publishes_only_after_the_body_and_not_when_it_raises(workdir):
+    d, _ = workdir
+    (d / "f").write_text("元", encoding="utf-8")
+    with worker_paths.open_workdir(d) as wd:
+        with worker_paths.staged_write(wd, "f", "新"):
+            assert (d / "f").read_text(encoding="utf-8") == "元"
+        assert (d / "f").read_text(encoding="utf-8") == "新"
+        with pytest.raises(OSError), worker_paths.staged_write(wd, "f", "後"):
+            raise OSError(28, os.strerror(28))
+    assert (d / "f").read_text(encoding="utf-8") == "新"
+    assert [p.name for p in d.iterdir()] == ["f"]
+
+
 def test_write_file_returns_after_publish_even_if_temp_dir_cleanup_fails(workdir, monkeypatch):
     d, _ = workdir
     (d / "f").write_text("元", encoding="utf-8")

@@ -632,6 +632,17 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
     拡張 ACL のあるファイルは ACL ごと写し、所有者・所有グループを保てないか ACL を写せなければ、既存のファイルを
     置き換える前に `EntryUnsafe`（`acl`）を上げる（アクセスを広げない）。
     """
+    with staged_write(wd, name, text):
+        pass
+
+
+@contextlib.contextmanager
+def staged_write(wd: WorkDir, name: str, text: str) -> Iterator[None]:
+    """`write_file` の一時ファイルを作ってアクセス権・ACL まで設定してから本体を走らせ、本体が終えたら `name` へ公開する。
+
+    置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`acl`）など）は本体の前に上がるので、本体で行う削除などは
+    置き換えられると分かった後にだけ起きる。本体が上げれば公開せず、一時ファイルを片付けて上げ直す。
+    """
     _check_name(name)
     data = text.encode("utf-8")
     existing = entry_state(wd, name)
@@ -658,6 +669,7 @@ def write_file(wd: WorkDir, name: str, text: str) -> None:
             if existing is not None:
                 _inherit_access(f.fileno(), name, existing, _access_acl(wd, name, existing))
             f.write(data)
+        yield
         os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
         published = True

@@ -810,11 +810,13 @@ def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[s
     前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
     残るのに報告が空」の組は起きない。3 つの名前は `check_entries` で 1 回ずつ確かめ、解いた時点か最初の `open` で
     無かった保存先にどれかがあれば、既存のディレクトリへ差し替えられたとみなして何も変えない。
+    報告の一時ファイルは削除の前に作り、アクセス権・ACL の設定まで済ませる（`staged_write`）。置き換えを拒む条件
+    （所有者を保てない・ACL を写せないなど）では完了マーカーと結果ファイルを消さずに止まる。
     """
     worker_paths.check_entries(wd, (paths.report.name, paths.done.name, paths.result.name))
-    done = worker_paths.remove_file(wd, paths.done.name)
-    removed = worker_paths.remove_file(wd, paths.result.name)
-    worker_paths.write_file(wd, paths.report.name, "")
+    with worker_paths.staged_write(wd, paths.report.name, ""):
+        done = worker_paths.remove_file(wd, paths.done.name)
+        removed = worker_paths.remove_file(wd, paths.result.name)
     return done, removed
 
 
