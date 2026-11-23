@@ -275,9 +275,11 @@ def test_stop_wait_after_the_limit(tmp_path, monkeypatch, reply, waited, kind, j
 
 
 def test_stop_wait_after_the_limit_with_no_prose_to_send(tmp_path, monkeypatch):
-    # 字下げのコードブロックだけの応答: ルールは本文の行と読む（`report`）が、質問へ渡す本文は空
+    # ルールは本文の行と読む（`report`）が、質問へ渡す本文が空（`code_lines` の数が行の数と合わないなど）。ルールと
+    # 本文の抜き出しが同じ CommonMark の解析を使うので実際の文では起きにくく、抜き出しの返りを空にして縛る
     judge = Judge(monkeypatch)
-    text = "    作業を終えた。"
+    monkeypatch.setattr(reply_judge, "judge_text", lambda *_: "")
+    text = REPORT
     assert _check(tmp_path, text, FakeCounter(left=False, waited=True)).kind == "pushback"
     got = _check(tmp_path, text, FakeCounter(left=True, waited=True))
     assert got.kind == "pass" and got.notes == {"reply": "report", "judge": "skip:no_prose", "judge_ms": 0, "judge_calls": 0}
