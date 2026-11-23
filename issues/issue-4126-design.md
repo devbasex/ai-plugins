@@ -126,7 +126,7 @@ flowchart LR
 - **選んだ案**: 4 つに分ける
   - CI: 新しい規則 `env-key` が、`env.json` の `key` の値が重ならないことと、`plugins/ndf/src` の `identity.env_name(...)` の呼び出しがどれも 1 つの文字列リテラルの引数を持ち、そのキーの行がちょうど 1 行あることを確かめる。キーの打ち間違い・付け忘れ・重なりは、取り込む前に落ちる
   - 読み手: 契約が読めない・`rows` が無い・キーの行の `id` が空でない文字列でない・キーの行が 1 行でないときは `identity.EnvNameError`（`LookupError` の子）を投げる。既定の名前へ戻さず、先の行も使わない。CI を通った後に起きるのは、導入したプラグインの契約が壊れたときだけである
-  - hook の経路: `signals.relay_role` は `EnvNameError` を受けたら `NESTED`（中継の保存先にもオーガナイザーの保存先にも書かない）を返す。#4061 の後は、中継へ書く 6 つの guard がどれも `relay_role` で頭を決め、`CHILD` のときだけ `relay_dir`・`relay_launch` を読むので、guard が例外を上げない。`relay-busy`（`fail_closed`・すべての PreToolUse に当たる）が契約の誤りで全 Tool を止めることは無い。`context-limit` の上限の判定は役割と別に今のとおり行い、案内の文だけが中継の外の文になる
+  - hook の経路: `signals.relay_role` は子の会話と判定する前に、guard が後で使う名前のキーをすべて解く（#4061・#4062 の後は `relay-dir`・`relay-session`・`relay-launch` の 3 つ）。どれかで `EnvNameError` を受けたら `NESTED`（中継の保存先にもオーガナイザーの保存先にも書かない）を返す。3 つが解けたなら `_env_keys` の結果は同じプロセスに残る（`lru_cache`）ので、`CHILD` の後に guard が呼ぶ `relay_dir`・`relay_launch` は同じ表を引き、`EnvNameError` を上げない。#4061 の後は、中継へ書く 6 つの guard がどれも `relay_role` で頭を決め、`CHILD` のときだけ `relay_dir`・`relay_launch` を読むので、guard が例外を上げない。#4049 の時点（`relay_role` の前）は、`fail_closed` の 2 つの guard の頭の判定（`relay_busy._target` と `ask-forward` の `relay_dir`）が `EnvNameError` を受けて対象外・書かずに通すに倒す（決定 5 の読み替え）。`relay-busy`（`fail_closed`・すべての PreToolUse に当たる）が契約の誤りで全 Tool を止めることは無い。`context-limit` の上限の判定は役割と別に今のとおり行い、案内の文だけが中継の外の文になる
   - ラッパー: 子を起動する前（`ndf relay` の起動の入口）に 3 つのキーを解き、`EnvNameError` なら結果 JSON の `stopped`・`config_broken` で止まる。起動の副作用（`launch.json` を書く・子を起こす）の前に止まる
   - ログイン: `relay/account_login.py` の最上位の `AUTH_ENV` を外し、ログインの子の環境を組む関数の中で名前を引く。`relay status` などログインと関係ない操作が、モジュールの import で契約の誤りに巻き込まれない
 - 採らなかった案: キーが無ければ None を返し、呼ぶ側が中継の外として扱う（契約の誤りが「中継の外」に化け、`ask-forward` がオーガナイザーの保存先へ書く。#4061 の入れ子の claude の見分けも黙って外れる）
@@ -143,7 +143,7 @@ flowchart LR
 | 順 | PR | 契約の変更 | この課題の直し |
 | --- | --- | --- | --- |
 | 1 | #4049 の実装 | 列 `key`。`NDF_RELAY_DIR` にキー。`NDF_RELAY_SESSION` の行（キーつき） | `identity.env_name` と規則 `env-key` を足す。`signals.py`・`adapters/claude.py`・`relay/account_login.py` の `NDF_RELAY_DIR` と、`relay_session`・`launch_env` の `NDF_RELAY_SESSION` をキーで引く。`AUTH_ENV` を関数の中へ移す。ラッパーの起動の入口でキーを解く。`SESSION_ENV` を置かない |
-| 2 | #4061・#4062 の実装（1 本目） | `NDF_RELAY_LAUNCH` の行（キーつき）。3 行を `child: drop` | `LAUNCH_ENV` を消し、`relay_launch`・`launch_env` をキーで引く。`relay_role` はキーで引き、`EnvNameError` を `NESTED` にする。`DIR_ENV` を置かない |
+| 2 | #4061・#4062 の実装（1 本目） | `NDF_RELAY_LAUNCH` の行（キーつき）。3 行を `child: drop` | `LAUNCH_ENV` を消し、`relay_launch`・`launch_env` をキーで引く。`relay_role` はキーで引き、判定の前に 3 つのキーを解き、`EnvNameError` を `NESTED` にする。`DIR_ENV` を置かない |
 | 3 | #4064 の実装（2 本目） | 無し | 無し |
 | 3 と並べてよい | #4101 の実装（lracct・#4049・#4062 のマージが前提。#4101 の決定 8） | ほかの行と `spec-env` | 決定 6 の読み替えに従う |
 
@@ -162,14 +162,18 @@ flowchart LR
 | `issue-4049-design-detail.md` | 「地図」の表の `relay/signals.py` の行 | 定数 `SESSION_ENV` を足す | 足さない。`relay_session` と `launch_env` は `identity.env_name("relay-session")` で名前を得る |
 | `issue-4049-design-detail.md` | 「背景の作業の記録（`signals`）」の「内部のデータと定数」 | `SESSION_ENV` は `NDF_RELAY_SESSION` | 行ごと無い |
 | `issue-4049-design-detail.md` | 「地図」の表の `contracts/domains/env.json` の行と、「guard `relay-busy`」の「内部のデータと定数」の後の `env.json` の段落 | `NDF_RELAY_SESSION` の行を足す | 行に `"key": "relay-session"` を足す。あわせて列 `key` と `NDF_RELAY_DIR` の `"key": "relay-dir"` を足す（決定 4） |
-| `issue-4049-design-detail.md` | 「guard `relay-busy`」の「関数の仕様」の `check` の事後条件（先に行う判定）と「異常系の処理」 | `_target` はファイルに触れず、先に行う判定は例外を上げない | `_target` は #4061 の後に `relay_role` へ移る。名前を引くために `env.json` を 1 プロセスに 1 回読む（`lru_cache`）。契約の誤りは `relay_role` が `NESTED` にするので、先に行う判定は今のとおり例外を上げない（決定 3） |
+| `issue-4049-design-detail.md` | 「guard `relay-busy`」の「関数の仕様」の `_target` の責務 | `env` の `NDF_RELAY_DIR` が空でない文字列で、`relay_session(env)` が None でなく… | `env` の `identity.env_name("relay-dir")` の名前の値が空でない文字列で、`relay_session(env)`（`relay-session` のキーで引く）が None でなく…。2 つの名前を引く間に `EnvNameError` が出たら偽（対象外）を返し、例外を外へ出さない。`relay_role` が無い #4049 の時点で、契約の誤りが `fail_closed` の `relay-busy` へ漏れて全 Tool を止めるのを防ぐ（決定 3）。#4061 の後は `relay_role` が同じ扱いを引き継ぐ |
+| `issue-4049-design-detail.md` | 「guard `relay-busy`」の「関数の仕様」の `check` の事後条件（先に行う判定）と「異常系の処理」 | `_target` はファイルに触れず、先に行う判定は例外を上げない | `_target` は初回だけ名前を引くために `env.json` を読む（`lru_cache`）。契約の誤りは `_target` が偽にする（#4061 の後は `relay_role` が `NESTED` にする）ので、先に行う判定は今のとおり例外を上げない（決定 3） |
+| `issue-4049-design-detail.md` | 「guard `relay-busy`」の「単体テストの観点」の `check`・`on_deadline` の行 | 中継の外・入れ子の claude の入力で例外の経路に入らない | 加えて、`relay-session` のキーを欠いた契約と `relay-dir` のキーを欠いた契約のそれぞれで、子の会話の環境のまま `check` と `on_deadline` に背景の Agent と `Read` を渡すと、どちらも None で例外を上げず、記録に触れない。入口から流しても拒否されない |
+| `issue-4049-design-detail.md` | 「guard `relay-busy`」の後（段落を足す） | 記述無し（`ask-forward` は変えない） | `ask-forward` も `fail_closed` で、#4049 の後は `signals.relay_dir` がキーで名前を引くので、契約の誤りで AskUserQuestion を止めうる。#4049 の実装は `ask.check`・`ask.on_deadline` の `relay_dir` の呼び出しで `EnvNameError` を受けたら、中継にもオーガナイザーにも書かずに通す（`check` は `passing(forwarded=[])`、`on_deadline` は None）。テストは上と同じ 2 つの壊した契約で AskUserQuestion を入口から流し、拒否されず、どちらの保存先にも書かれないこと。#4061 の後は `relay_role` の `NESTED` が同じ扱いを引き継ぐ |
 | `issue-4061-4062-4064-design.md` | 「文脈と制約」の 2 つ目の項目 | 環境変数の名前は文字列の定数で持つ | 環境変数の名前は `identity.env_name` で契約のキーから引く |
 | `issue-4061-4062-4064-design.md` | 決定 4 の「選んだ案」 | hook の経路は契約を import しないので、名前は `signals` の定数が持ち、テストで結ぶ | 名前は契約の行にだけあり、`signals` はキーで引く。名前と契約を結ぶテストは置かない |
 | `issue-4061-4062-4064-design.md` | 「データ構造」の 3 行 | `NDF_RELAY_LAUNCH` の行の値 | 行に `"key": "relay-launch"` を足す |
 | `issue-4061-4062-4064-design.md` | 「テスト設計」の受け入れ条件 6・7 の行 | `launch_env` のキーの集まりと契約の行の等しさ・`child_env` が 3 つを外すこと | キーの集まりの等しさのテストは置かない（名前は契約から引く）。`child_env` の行と、詳細設計の「ラッパーの `_start`」のテスト（子の環境の 3 つの値）はそのまま |
 | `issue-4061-4062-4064-design-detail.md` | 冒頭の段落（#4049 の実装を前提にする文） | `relay_session`・`SESSION_ENV`・`launch_env(directory, launch, session_id)` を前提にする | 前提から `SESSION_ENV` を外し、`identity.env_name` を足す |
-| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「内部のデータと定数」 | `DIR_ENV` は `"NDF_RELAY_DIR"` | 行ごと無い。`relay_role` は `identity.env_name("relay-dir")`・`("relay-session")` で名前を得る |
-| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「関数の仕様」の事前条件・事後条件・副作用 | 例外を上げない。`env.get("NDF_RELAY_DIR")` で読む。ファイルに触れない | 例外を上げない（`EnvNameError` を受けたら `NESTED`）。名前はキーで引く。初回だけ `env.json` を読む（決定 3） |
+| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「内部のデータと定数」 | `DIR_ENV` は `"NDF_RELAY_DIR"` | 行ごと無い。`relay_role` は `identity.env_name("relay-dir")`・`("relay-session")` で名前を得て、判定の前に `("relay-launch")` も解く |
+| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の「関数の仕様」の事前条件・事後条件・副作用 | 例外を上げない。`env.get("NDF_RELAY_DIR")` で読む。ファイルに触れない | 例外を上げない。`CHILD` と判定する前に、guard が使う 3 つのキー（`relay-dir`・`relay-session`・`relay-launch`）を解き、どれかで `EnvNameError` を受けたら `NESTED`。名前はキーで引く。初回だけ `env.json` を読む（決定 3） |
+| `issue-4061-4062-4064-design-detail.md` | 「子の会話の見分け（`signals.relay_role`）」の単体テストと、中継へ書く guard の入口のテスト | — | 加えて、`relay-launch` のキーだけを欠いた契約で、子の会話の環境の `relay_role` が `NESTED` を返す。同じ契約で AskUserQuestion・背景の Agent・`Read` の PreToolUse と Stop を入口から流すと、拒否されず、中継の保存先にもオーガナイザーの保存先にも書かれない |
 | `issue-4061-4062-4064-design-detail.md` | 「中継の変数の契約（`env.json`）」 | `NDF_RELAY_DIR` の行を直し、`NDF_RELAY_LAUNCH`・`NDF_RELAY_SESSION` を同じ形で並べる | #4049 が足した `NDF_RELAY_DIR`・`NDF_RELAY_SESSION` のキーを残し、`NDF_RELAY_LAUNCH` に `"key": "relay-launch"` を足して並べる |
 | `issue-4061-4062-4064-design-detail.md` | 「契約と `launch_env`」のテストの行 | `set(signals.launch_env(…))` が契約の行の `id` の集まりと等しい | 行ごと無い |
 
@@ -252,7 +256,7 @@ flowchart LR
 | 2 | #4061・#4062 の実装の PR の CI の `ndf check` | `LAUNCH_ENV` か `DIR_ENV` を最上位に置くと落ちる |
 | 3 | 2 の PR の後に、受け入れ条件 3 の `git grep`（引用符を付けない名前で `src`・`bin`・`hooks`）の当たりを、実行に使う名前と説明の文に分け、実行に使う名前が 0 件（実装の PR の完了判定で打つ） | — |
 | 4 | 実装の PR のコードレビュー（読み手が 1 つで、`identity` が `ndf.contracts` を import しない） | — |
-| 5 | `identity.env_name` の単体テスト: キーの行が 1 行なら名前を返す。0 行・2 行以上・契約のファイルが無い・JSON でない・`rows` が無い・キーの行の `id` が空のときは `EnvNameError`。規則 `env-key` のテスト: 無いキー・重なるキー・文字列リテラルでない引数を落とす。壊した契約を置いて hook の入口へ AskUserQuestion と `Read` の PreToolUse を流すと、中継の保存先とオーガナイザーの保存先に何も書かれず、`Read` は止められない。ラッパーの起動の入口は `stopped`・`config_broken` を返し、`launch.json` を書かない。`relay status` は契約が壊れていても動く | 既定の名前へ戻す・先の行を使う・`relay_role` が例外を上げる・ラッパーが起動の副作用の後に止まる・`AUTH_ENV` を import の時に組むと落ちる |
+| 5 | `identity.env_name` の単体テスト: キーの行が 1 行なら名前を返す。0 行・2 行以上・契約のファイルが無い・JSON でない・`rows` が無い・キーの行の `id` が空のときは `EnvNameError`。規則 `env-key` のテスト: 無いキー・重なるキー・文字列リテラルでない引数を落とす。壊した契約を置いて hook の入口へ AskUserQuestion と `Read` の PreToolUse を流すと、中継の保存先とオーガナイザーの保存先に何も書かれず、`Read` は止められない。壊し方は、#4049 の PR では `relay-dir` のキーを欠く・`relay-session` のキーを欠くの 2 つ（`relay_busy` の `check` と `on_deadline` の両方を通す）、#4062 の PR では加えて `relay-launch` のキーだけを欠くラッパーの起動の入口は `stopped`・`config_broken` を返し、`launch.json` を書かない。`relay status` は契約が壊れていても動く | 既定の名前へ戻す・先の行を使う・`relay_role` が例外を上げる・ラッパーが起動の副作用の後に止まる・`AUTH_ENV` を import の時に組むと落ちる |
 | 6 | 実装の PR で、同じ Python・同じ入力（中継の内と外）で、hook の入口（`hooks/entry.py`）の PreToolUse を変更の前後で交互に打って時間の分布を比べ、guard を呼んだ後に `ndf.contracts`・`jsonschema` が import されていないことを確かめる（設計では決定 2 の実測） | — |
 | 7 | ドキュメントレビューで見る（文言を突き合わせるテストは書かない） | — |
 
@@ -266,7 +270,7 @@ hook とラッパーの振る舞いのテスト（hook が読む値・`child_env
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4126 | 統合する（この課題の実装の PR は無い） | #4049 の実装の PR・#4061・#4062 の実装の PR | `plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/relay/account_login.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/checks/facts.py`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/tests/identity/test_env_name.py`、`plugins/ndf/tests/checks/test_facts.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #4126 | 統合する（この課題の実装の PR は無い） | #4049 の実装の PR・#4061・#4062 の実装の PR | `plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/domains/hooks/guards/relay_busy.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`、`plugins/ndf/src/ndf/domains/relay/account_login.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/checks/facts.py`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/tests/identity/test_env_name.py`、`plugins/ndf/tests/checks/test_facts.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
