@@ -622,7 +622,7 @@
     }
   },
   "toolchain": {
-    "workflows": ".github/workflows/*.yml",
+    "workflows": ".github/workflows/*.y*ml",
     "python_ci": [
       "3.11",
       "3.13"
@@ -641,5 +641,19 @@
     "launchers": [
       "plugins/ndf/bin/ndf"
     ]
+  },
+  "budget": {
+    "tests": 6000,
+    "ci_jobs": 40,
+    "unused_deps": 4,
+    "replaceable": 25,
+    "dep_modules": {
+      "markdown-it-py": "markdown_it",
+      "python-dotenv": "dotenv",
+      "ruamel-yaml": "ruamel"
+    },
+    "dep_exempt": {
+      "ruff": "子プロセスとして起動する（ndf check の lint）"
+    }
   }
 }

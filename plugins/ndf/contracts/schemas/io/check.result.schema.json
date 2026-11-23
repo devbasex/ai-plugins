@@ -31,6 +31,35 @@
         "written": {
           "type": "integer",
           "description": "--write-spec で書いた・消した生成物の数（--write-spec のときだけ）"
+        },
+        "budget": {
+          "type": "object",
+          "description": "規則 budget の 4 つの件数（違反の有無にかかわらず出す。--only で規則 budget を選ばないときは出さない）",
+          "additionalProperties": false,
+          "required": [
+            "tests",
+            "ci_jobs",
+            "unused_deps",
+            "replaceable"
+          ],
+          "properties": {
+            "tests": {
+              "type": "integer",
+              "description": "テストの関数の定義の数"
+            },
+            "ci_jobs": {
+              "type": "integer",
+              "description": "ワークフローのジョブの数"
+            },
+            "unused_deps": {
+              "type": "integer",
+              "description": "使われない依存の数"
+            },
+            "replaceable": {
+              "type": "integer",
+              "description": "置き換えの規則に当たった箇所の数"
+            }
+          }
         }
       }
     },

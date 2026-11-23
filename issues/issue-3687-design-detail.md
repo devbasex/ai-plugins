@@ -64,8 +64,8 @@ plugins/ndf/
 | `src/ndf/contracts/limits.py` | 変更 | 上限の設定を分割した表から読む | `ndf.contracts` | モジュール | `table`（変更） |
 | `src/ndf/contracts/causes.py` | 変更 | 停止理由を分割した表から読む | `ndf.contracts` | モジュール | `table`（変更） |
 | `src/ndf/checks/contracts_split.py` | 新設 | 分割した表の形を確かめる規則 | `ndf.contracts`・`checks.model` | モジュール | `check` |
-| `src/ndf/checks/toolchain.py` | 新設 | 配る構成の設定と指定箇所の一致を確かめる規則 | `ndf.contracts.toolchain`・`checks.model`・`ruamel.yaml`・`tomllib` | モジュール | `check`・`workflow_tools`・`pyproject_floor` |
-| `src/ndf/checks/budget.py` | 新設 | 件数の上限を確かめる規則 | `checks.model`・`checks.imports`・`ruamel.yaml`・`tomllib` | モジュール | `check`・`measure`・`count_tests`・`count_jobs`・`unused_deps`・`replaceable_hits` |
+| `src/ndf/checks/toolchain.py` | 新設 | 配る構成の設定と指定箇所の一致を確かめる規則 | `ndf.contracts.toolchain`・`checks.model`（ワークフローの読みは `read_workflow`・`Scope.workflows`）・`tomllib` | モジュール | `check`・`workflow_tools`・`pyproject_floor` |
+| `src/ndf/checks/budget.py` | 新設 | 件数の上限を確かめる規則 | `checks.model`（ワークフローは規則 `toolchain` と同じ `Scope.workflows` を使い、1 ファイル 1 回だけ読む）・`checks.imports`・`tomllib` | モジュール | `check`・`measure`・`count_tests`・`count_jobs`・`unused_deps`・`replaceable_hits` |
 | `src/ndf/checks/experimental.py` | 新設 | 実験版への参照を確かめる規則 | `ndf.contracts`・`checks.model` | モジュール | `check` |
 | `src/ndf/checks/model.py` | 変更 | 見る範囲にリポジトリの設定を持たせる | 既存 | `Scope` | `settings`（新設の属性）・`repo_files`（新設） |
 | `src/ndf/checks/run.py` | 変更 | 規則 4 つを並びへ足し、`budget.measure` の件数を `metrics.budget` へ出す | 上の 4 モジュール | モジュール | `check`（変更）・`collect`（変更） |
@@ -227,8 +227,9 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `check` | `src/ndf/checks/budget.py` | 新設 | `check(scope: Scope, rules: dict[str, Any], counts: Counts \| None = None) -> list[Finding]` | `measure` の件数（渡されなければ自分で数える）を設定の上限と比べ、超えた項目を違反にする |
 | `measure` | `src/ndf/checks/budget.py` | 新設 | `measure(scope: Scope) -> Counts` | 4 つの件数と、使われない依存・置き換えられる自作の中身を返す。`run.py` が 1 回だけ呼び、`check` へ渡し、件数を結果 JSON の `metrics.budget`（`{"tests": .., "ci_jobs": .., "unused_deps": .., "replaceable": ..}`）へ出す。違反の有無にかかわらず出す |
+| `check_jobs` | `src/ndf/checks/budget.py` | 新設 | `check_jobs(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | `ci_jobs` だけを数えて上限と比べる（規則の名前は `budget-ci-jobs`）。プラグインのファイルを読まない。`--only` に名前があるときだけ当て、ワークフローだけを変えた Pull Request の必須チェックが打つ |
 | `count_tests` | `src/ndf/checks/budget.py` | 新設 | `count_tests(scope: Scope) -> int` | テストのファイルの `def test_`・`async def test_` の定義の数 |
-| `count_jobs` | `src/ndf/checks/budget.py` | 新設 | `count_jobs(paths: list[Path]) -> int` | ワークフローの `jobs` のキーの数の合計 |
+| `count_jobs` | `src/ndf/checks/budget.py` | 新設 | `count_jobs(workflows: list[Workflow]) -> int` | ワークフローの `jobs` のキーの数の合計 |
 | `unused_deps` | `src/ndf/checks/budget.py` | 新設 | `unused_deps(scope: Scope) -> list[str]` | `toolchain.plugin_pyprojects` の各 `pyproject.toml` の `[project].dependencies` のうち、同じディレクトリの `src/` に import が無く、`budget.dep_exempt` にも無いものの名前 |
 | `replaceable_hits` | `src/ndf/checks/budget.py` | 新設 | `replaceable_hits(scope: Scope) -> list[Finding]` | 置き換えの規則に当たった箇所 |
 
@@ -236,9 +237,9 @@ plugins/ndf/
   - 事前条件: `scope.sources` の構文木が読めている（`unparsable` が先に走っている）
   - 事後条件: テストのファイルの見分けは既存の定義（`contracts/domains/test-files.json`）に従い、数えるのは最上位とクラスの中の関数の定義だけ（入れ子の関数は数えない）
 - `unused_deps`
-  - 事前条件: `toolchain.plugin_pyprojects` の各 `pyproject.toml` と、同じディレクトリの `uv.lock` が読める。`plugin_pyprojects` が無ければ数えない（0 件）
+  - 事前条件: `toolchain.plugin_pyprojects` の各 `pyproject.toml` と、同じディレクトリの `uv.lock` が読める。どちらもリポジトリの根からの相対のパスで、解決した先がリポジトリの中にあることを読む前に確かめる（`CheckError`）。`plugin_pyprojects` が無ければ数えない（0 件）
   - 数える対象: `[project].dependencies`（直接の実行時の依存）だけ。`[dependency-groups]` と `[project.optional-dependencies]`（開発用）と、lock にだけある推移的な依存は数えない。定義にあって同じディレクトリの `uv.lock` に無い依存も数えない（lock の鮮度は `uv lock --check` が別に見る）
-  - 対にするソース: `pyproject.toml` と同じディレクトリの `src/` の下の `.py`（`scope` の構文木を使う）
+  - 対にするソース: `pyproject.toml` と同じディレクトリの `src/` の下の `.py`（プラグインの中は `scope` の構文木を使い、プラグインの外の `src/` は読む）
   - import の名前: `budget.dep_modules` に在ればその値、無ければ正規化した名前の `-` と `.` を `_` へ替えたもの。import の最上位の名前と突き合わせる
   - 事後条件: 返りは定義の名前（PEP 503 で正規化した小文字）の昇順。`budget.dep_exempt` に挙げた依存は含まない
   - 副作用: 無し
