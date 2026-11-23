@@ -41,6 +41,20 @@ def collect(tree: ast.Module, module: str = "", is_package: bool = False) -> lis
     return found
 
 
+def bindings(tree: ast.Module, module: str = "", is_package: bool = False) -> dict[str, str]:
+    """import が束ねる名前 → 完全な名前。`from a import b as c` は `c` → `a.b`、`import a.b` は `a` → `a`。"""
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(
+                (alias.asname, alias.name) if alias.asname else (root, root) for alias in node.names for root in [alias.name.split(".")[0]]
+            )
+        elif isinstance(node, ast.ImportFrom):
+            base = _absolute(node, module, is_package)
+            found.update((alias.asname if alias.asname else alias.name, f"{base}.{alias.name}") for alias in node.names)
+    return found
+
+
 def targets(imp: Import, known: set[str]) -> list[str]:
     """import が読む、`known` の中のモジュール。`from pkg import mod` は `pkg.mod` があればそれを指す。"""
     subs = [f"{imp.module}.{n}" for n in imp.names if f"{imp.module}.{n}" in known]
