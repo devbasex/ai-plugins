@@ -217,6 +217,16 @@ def test_judge_text_keeps_a_heading_pushed_out_by_the_lead() -> None:
     assert len(out) == 1600 and out.splitlines()[:2] == [f"## {first}", f"## {second}"]
 
 
+def test_judge_text_keeps_a_later_heading_after_one_quoted_in_the_tail() -> None:
+    # 先行する見出しの文が末尾に引用されて残っても、その後の見出しが外れれば先頭へ足し、半分枠では後ろの見出しを残す
+    first, second = "このままマージしてよいですか？", "本番へデプロイしてよいですか？"
+    old = [f"古い質問 {i} はどうしますか？" for i in range(60)]
+    text = "\n".join([*(f"## {h}" for h in old), "あ" * 900, f"## {first}", "い" * 30, f"## {second}", "う" * 780, f"議事メモ: {first}"])
+    out = reply_judge.judge_text(text, [False] * (len(old) + 6), 1600, [*old, first, second])
+    lead, _, rest = out.partition("\nううう")
+    assert len(out) == 1600 and lead.endswith(f"## {second}") and text.endswith(rest)
+
+
 def test_judge_text_does_not_repeat_a_heading_already_in_the_tail() -> None:
     text = "あ" * 2000 + "\n## このままマージしてよいですか？\n以上。"
     out = reply_judge.judge_text(text, [False, False, False], 1600, ["このままマージしてよいですか？"])
