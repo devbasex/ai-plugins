@@ -440,7 +440,11 @@ def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optiona
         items = [{**items[0], "step": final["last"]}, *items[1:]]
         again = result.command(TOOL, "next", *_with_start(inv.again, final["last"])) if final["last"] else None
         gaps = _stop_gaps(inv, final, rec)
-        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again, gaps=gaps, **shared)
+        detail = final["detail"]
+        if final["last"] in rec.step_gaps:
+            # 工程の failed の理由はこの説明をそのまま載せるので、欠けの名前を末尾に添える（#3908）
+            detail = f"{detail}（欠け: {', '.join(sorted({g['name'] for g in rec.step_gaps[final['last']]}))}）"
+        return result.stopped(TOOL, final["kind"], detail, items=items, metrics=metrics, next=again, gaps=gaps, **shared)
     after = inv.plan.following(final["last"])
     cont = result.command(TOOL, "next", *_with_start(inv.again, after)) if after else None
     return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None}, **shared)
