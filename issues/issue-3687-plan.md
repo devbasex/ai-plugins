@@ -59,10 +59,10 @@
 
 ### Task 7: 件数の上限の規則 `budget` と置き換えの規則
 
-- **対象ファイル:** `plugins/ndf/src/ndf/checks/budget.py`（新設）、`plugins/ndf/contracts/replaceable/`（新設・3 ファイル）、`plugins/ndf/contracts/schemas/replaceable.schema.json`（新設）、`plugins/ndf/src/ndf/checks/run.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/tests/checks/test_budget.py`（新設）、`.ndf/project.json`
-- **変更内容:** 4 つの数え（テストの関数・CI のジョブ・使われない依存・置き換えられる自作）と、置き換えの規則 3 件（`fcntl.flock`・Markdown のテーブルの組み立て・打ち直しのループ）。4 つの件数は違反の有無にかかわらず `ndf check` の結果 JSON の `metrics.budget` へ出す（`budget.measure` を `run.py` が呼ぶ）。`.ndf/project.json` へ `budget` の値（`dep_modules`・`dep_exempt` を含む）を入れる
+- **対象ファイル:** `plugins/ndf/src/ndf/checks/budget.py`（新設）、`plugins/ndf/contracts/replaceable/`（新設・3 ファイル）、`plugins/ndf/contracts/schemas/replaceable.schema.json`（新設）、`plugins/ndf/src/ndf/checks/run.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/contracts/schemas/io/check.result.schema.json`、`plugins/ndf/tests/checks/test_budget.py`（新設）、`.ndf/project.json`
+- **変更内容:** 4 つの数え（テストの関数・CI のジョブ・使われない依存・置き換えられる自作）と、置き換えの規則 3 件（`fcntl.flock`・Markdown のテーブルの組み立て・打ち直しのループ）。4 つの件数は違反の有無にかかわらず `ndf check` の結果 JSON の `metrics.budget` へ出す（`budget.measure` を `run.py` が呼ぶ）。`ndf check` の結果のスキーマ（`check.result.schema.json`）は `metrics` を `additionalProperties: false` で閉じているので、同じ単位で `metrics.budget`（`tests`・`ci_jobs`・`unused_deps`・`replaceable` の 4 つの整数を必須に持ち、ほかのキーを持たない辞書）を足す。`.ndf/project.json` へ `budget` の値（`dep_modules`・`dep_exempt` を含む）を入れる
 - **満たす受け入れ条件:** 6・7
-- **進め方:** 上限 + 1 の入力・`exempt` の保存先・名前の正規化・依存名の例外で落ちるテストと、違反 0 件の入力でも `metrics.budget` に 4 つの件数が出ることで落ちるテスト → 実装。実測値（4,312・37・3・3）が上限の内に収まることを `ndf check` の実行で確かめる
+- **進め方:** 上限 + 1 の入力・`exempt` の保存先・名前の正規化・依存名の例外で落ちるテストと、違反 0 件の入力でも `metrics.budget` に 4 つの件数が出て、その結果 JSON が `check.result.schema.json` に通ることで落ちるテスト → 実装。実測値（4,312・37・3・3）が上限の内に収まることを `ndf check` の実行で確かめる
 
 ### Task 8: CI のワークフローの Python と uv の固定
 

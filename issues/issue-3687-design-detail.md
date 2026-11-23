@@ -25,6 +25,7 @@ plugins/ndf/
 │       ├── limits.schema.json                （変更: 1 項目の形へ）
 │       ├── causes.schema.json                （変更: 1 項目の形へ）
 │       ├── ndf-settings/project.schema.json  （変更: toolchain・budget のキー）
+│       ├── io/check.result.schema.json       （変更: metrics.budget の 4 件数）
 │       └── io/samples.{args,result}.schema.json *
 ├── src/ndf/
 │   ├── adapters/http.py                      （変更: fetch_body に本文の上限と転送の禁止の引数を足す）
@@ -251,7 +252,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `check` | 4 項目とも上限の内なら 0 件 | 数えた値が上限と等しいとき 0 件、上限 + 1 で 1 件 | 上の異常系の 4 行それぞれ |
-| `measure` と `run.py` | 違反 0 件の入力でも、`ndf check` の結果 JSON の `metrics.budget` に 4 つの件数が出る | 設定に `budget` が無いときも件数は出る（上限と比べないだけ） | — |
+| `measure` と `run.py` | 違反 0 件の入力でも、`ndf check` の結果 JSON の `metrics.budget` に 4 つの件数が出て、その結果 JSON が `contracts/schemas/io/check.result.schema.json` に通る（`metrics` は `additionalProperties: false` で閉じているため、スキーマへ `budget` を足さないと落ちる） | 設定に `budget` が無いときも件数は出る（上限と比べないだけ） | — |
 | `count_tests` | 最上位とクラスの中の `def test_` を数える | 入れ子の関数の `def test_` は数えない | 構文の誤りのファイルは `unparsable` が先に外す |
 | `count_jobs` | 2 本のワークフローの `jobs` の合計 | matrix を持つジョブは 1 件として数える | `jobs` が無い |
 | `unused_deps` | 行頭の import も関数の中の import も使っているとみなす | 名前の正規化（`mdit-py-plugins` と `mdit_py_plugins`）。`dep_modules` の別名（`python-dotenv` → `dotenv`）。`dep_exempt` の依存と開発用の依存は数えない | 依存の宣言が読めない |
