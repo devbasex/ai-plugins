@@ -254,7 +254,17 @@ def test_endpoint_refusal_with_the_real_resolver_names_a_key_of_the_user_setting
     assert rj.endpoint_refusal({"HOME": str(isolated.home)}, ("claude",), isolated.project) == "awsCredentialExport"
 
 
-@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_SCOPES",
+        # 接続の認証の省略（クラウドの接続で親だけが設定ファイルから読むと、子は親と違う認証で送る）
+        "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+        "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+        "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+    ],
+)
 def test_endpoint_refusal_with_the_real_resolver_names_an_oauth_variable_of_the_user_settings(isolated, name):
     settings = isolated.home / ".claude" / "settings.json"
     settings.write_text(json.dumps({"env": {name: "x"}}), encoding="utf-8")

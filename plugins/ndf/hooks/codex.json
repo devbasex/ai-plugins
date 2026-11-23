@@ -50,7 +50,7 @@
           {
             "type": "command",
             "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/c458bf4d77cadfd2/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex Stop",
-            "timeout": 9
+            "timeout": 6
           }
         ]
       }

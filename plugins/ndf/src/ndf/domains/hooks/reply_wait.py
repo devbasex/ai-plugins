@@ -123,7 +123,11 @@ _NON_REPLY_WAIT = re.compile(r"(結果|完了|終了|終わり|処理|反映|実
 _CLOSING = re.compile(
     r"^(?:(?:引き続き|今後とも|今後も|どうぞ|何卒|なにとぞ|以上です|以上)[、，,\s]*)*"
     r"よろしくお願い(?:します|いたします|致します|申し上げます)$"
+    r"|^以上(?:です|となります)?$"
 )
+# 定型の結びの前の文が完了の報告だけと確かめる末尾（丁寧の過去の言い切り）。これで終わらない文が 1 つでもあれば、
+# ルールで通さずに軽いモデルへ渡す（「いかがでしょう。」「判断が必要です。」は当たらない）
+_REPORT_ENDINGS = ("ました", "でした")
 
 
 def prose_lines(text: str) -> list[tuple[str, bool]]:
@@ -315,26 +319,60 @@ def classify_reply_wait(text: str) -> str:
     return APPROVAL if any(any(w in s for w in APPROVAL_WORDS) for s in waits) else ANSWER
 
 
+def _blank_quote(match: re.Match[str]) -> str:
+    """かぎ括弧の引用 1 つの置き換え。中の改行だけを残し、行の数と行の並びを変えない。"""
+    return "\n" * match.group(0).count("\n")
+
+
 def _unquoted_lines(lines: list[tuple[str, bool]]) -> list[tuple[str, bool]]:
-    """行ごとにかぎ括弧の引用の中身を除き、空になった行を落とす（行を抜き出し直さない）。"""
+    """かぎ括弧の引用の中身を除き、空になった行を落とす（行を抜き出し直さない）。
+
+    引用の開閉は行をまたいで追う（「ログの抜粋です。」の後の、2 行にわたる『…続けてもよいですか？』を本人の質問と
+    読まない）。行を改行でつないだ 1 つの文字に `_QUOTED` を当て、引用の中の改行だけを残して行の位置を保つ。
+    閉じない開きかっこは、これまでどおり引用に数えない。
+    """
+    joined = "\n".join(text for text, _ in lines)
+    prev = None
+    while prev != joined:
+        prev = joined
+        joined = _QUOTED.sub(_blank_quote, joined)
     out: list[tuple[str, bool]] = []
-    for text, bullet in lines:
-        rest = _unquoted(text).strip()
+    for (_, bullet), text in zip(lines, joined.split("\n")):
+        rest = text.strip()
         if rest:
             out.append((rest, bullet))
     return out
 
 
+def _closing_report(lines: list[tuple[str, bool]]) -> bool:
+    """定型の結び（「引き続きよろしくお願いします。」）で終え、結びの前が完了の報告だけの本文か。
+
+    本文の全部の文（引用を除いた行）を見る。末尾から定型の結びの文を外し、残りの文がどれも待ちの形でなく
+    丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるときだけ真。結びの前に質問・承認の依頼・言い切らない文が
+    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。
+    """
+    sentences = _sentences([text for text, _ in lines])
+    body = list(sentences)
+    while body and _CLOSING.match(_core(body[-1])):
+        body.pop()
+    if not body or len(body) == len(sentences):
+        return False
+    return all(not _is_wait(s) and _core(s).endswith(_REPORT_ENDINGS) for s in body)
+
+
 def prose_kind(lines: list[tuple[str, bool]]) -> str:
-    """本文の行（`prose_lines` の空でない返り）を持つ応答の種類。`report` / `elsewhere_wait` / `prose_wait`。
+    """本文の行（`prose_lines` の空でない返り）を持つ応答の種類。`report` / `closing_report` / `elsewhere_wait` /
+    `prose_wait`。
 
     行を抜き出し直さない。guard は `prose_lines` の返りを持ったまま、本文の行がある Stop でだけこれを呼ぶ
     （本文の全行の抜き出しを 1 回の Stop で 2 回しない）。待ちの文は `classify_reply_wait` と同じ形で探し、
-    かぎ括弧の引用の中身は行ごとに見ない（行をまたぐ引用は外さない）。
+    かぎ括弧の引用の中身は見ない（行をまたぐ引用も外す）。待ちの文が無く、定型の結びの前が完了の報告だけなら
+    `closing_report`（guard は軽いモデルを呼ばずに通す）。
     """
-    waits = _waits(_unquoted_lines(lines))
+    unquoted = _unquoted_lines(lines)
+    waits = _waits(unquoted)
     if not waits:
-        return "report"
+        return "closing_report" if _closing_report(unquoted) else "report"
     if all(_only_elsewhere(s) for s in waits):
         return "elsewhere_wait"
     return "prose_wait"
@@ -344,7 +382,8 @@ def reply_kind(text: str) -> str:
     """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
 
     `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
-    待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。
+    待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`closing_report`
+    （定型の結びの前が完了の報告だけ）・`report`。
     `prose_lines` の返りを既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
     """
     lines = prose_lines(text)

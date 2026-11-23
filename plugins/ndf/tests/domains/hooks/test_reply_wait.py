@@ -171,13 +171,41 @@ def test_prose_kind_matches_reply_kind_for_a_reply_with_prose():
     "text",
     [
         "対応が完了しました。引き続きよろしくお願いします。",
-        "以上です。よろしくお願いいたします。",
         "修正を push しました。今後ともよろしくお願い申し上げます。",
+        "PR を作りました。テストも通りました。以上です。\n引き続きよろしくお願いします。",
     ],
 )
-def test_a_set_closing_is_a_report(text):
-    """回答・承認を求めない定型の結びは待ちに数えない（変更要求を返さない）。"""
-    assert reply_wait.reply_kind(text) == "report"
+def test_a_completion_report_with_a_set_closing_is_settled_by_the_rule(text):
+    """定型の結びの前が完了の報告だけなら、ルールで `closing_report`（guard は軽いモデルを呼ばずに通す）。"""
+    assert reply_wait.reply_kind(text) == "closing_report"
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        # 結びだけで報告の文が無い・結びの前が言い切らない → ルールで決めず、軽いモデルへ渡す
+        ("以上です。よろしくお願いいたします。", "report"),
+        ("作業を終えました。どうしましょう。\n引き続きよろしくお願いします。", "report"),
+        ("作業を終えました。判断が必要です。引き続きよろしくお願いします。", "report"),
+        # 結びの前の承認の依頼・質問はルールの待ち
+        ("作業を終えました。マージしてよいですか。\n引き続きよろしくお願いします。", "prose_wait"),
+        ("作業を終えました。どちらにしますか？\n引き続きよろしくお願いします。", "prose_wait"),
+    ],
+)
+def test_a_set_closing_does_not_hide_what_comes_before_it(text, kind):
+    assert reply_wait.reply_kind(text) == kind
+
+
+def test_a_quote_over_several_lines_is_not_read_as_a_question():
+    """かぎ括弧の引用が行をまたいでも中身を判定に入れない。閉じない開きかっこは引用に数えない。"""
+    assert reply_wait.reply_kind("ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？』") == "report"
+    assert reply_wait.reply_kind("ログの抜粋です。\n「処理を止めました。\n「続けてもよいですか？」と出ました」") == "report"
+    assert reply_wait.reply_kind("ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？") == "prose_wait"
+
+
+def test_a_quote_over_several_lines_keeps_the_question_after_it():
+    text = "ログの抜粋です。\n『処理を止めました。\n続けてもよいですか？』\nこちらは再開してよいですか？"
+    assert reply_wait.reply_kind(text) == "prose_wait"
 
 
 @pytest.mark.parametrize("text", ["修正を終えました。ご確認をよろしくお願いします。", "差分を載せました。承認をお願いします。"])

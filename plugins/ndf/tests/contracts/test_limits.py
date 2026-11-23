@@ -90,8 +90,8 @@ _SCHEMA_VALUE_KEYS = (
     "lock_seconds",
     "rounds",
 )
-# 数でない値（`hook.stop-wait.judge` の model・auth_markers・endpoint）。`limits.value` では引かない
-_SCHEMA_OTHER_KEYS = ("model", "auth_markers", "endpoint")
+# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint）。`limits.value` では引かない
+_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
 
 
 def test_value_keys_match_policy_fields_and_schema():

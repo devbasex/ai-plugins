@@ -603,7 +603,7 @@ class HookContext:
 
     @cached_property
     def last_reply_kind(self) -> str:
-        """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`report`）。ルールの判定（#4000 の決定 1）。
+        """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`closing_report`・`report`）。ルールの判定（#4000 の決定 1）。
 
         本文の行は `reply_prose_lines` を読み、抜き出し直さない（`reply_wait.reply_kind` を呼ばない）。
         """

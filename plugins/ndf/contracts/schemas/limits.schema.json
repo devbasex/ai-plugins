@@ -37,6 +37,7 @@
           "gate": {"type": "number", "minimum": 0, "description": "関所の hook の timeout の秒"},
           "first": {"type": "number", "minimum": 0, "description": "最初の払い出しを待つ上限の秒"},
           "model": {"type": "string", "minLength": 1, "description": "判定に使うモデルの名前（hook.stop-wait.judge）"},
+          "runtimes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "判定する（モデルを呼ぶ）ランタイム。seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ（hook.stop-wait.judge）"},
           "max_chars": {"type": "integer", "minimum": 1, "description": "判定へ渡す本文の上限の字数（hook.stop-wait.judge）"},
           "rest_seconds": {"type": "number", "minimum": 0, "description": "起動が失敗した後に休む秒（hook.stop-wait.judge）"},
           "lock_seconds": {"type": "number", "minimum": 0, "description": "休みのマーカーの錠を待つ上限の秒（hook.stop-wait.judge）"},

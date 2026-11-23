@@ -37,7 +37,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/hooks/reply_judge.py` | 新設 | 本文から質問に渡す文を作り、親の Claude Code の起動を確かめ、子を起動して上限の秒で待つ。休みのマーカーを読み書きする | `tables`、`relay.claude_options`、`relay.signals`、標準ライブラリ | モジュール | `judge_text`（新設）・`parent_launch`（新設）・`Launch`（新設の型）・`ask`（新設）・`resting`（新設）・`mark_rest`（新設）・`endpoint_resting`（新設）・`endpoint_scope`（新設）・`Judged`（新設の型） |
-| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列は 10 系に 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard が使う形は、かぎ括弧の引用の中身を見ず、待ちの文がどれも別の場所の待ちの報告だけ（同じ文の前後の節に本人への問いが無い）の本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設）・`prose_lines`（新設。本文の行の抜き出し。1 回の Stop で 1 回だけ打つ）・`prose_kind`（新設。`prose_lines` の空でない返りを受け、`elsewhere_wait` / `prose_wait` / `report`。行を抜き出し直さず、かぎ括弧の引用は行ごとに外す。回答・承認を求めない定型の結び（「引き続きよろしくお願いします。」）だけの文は待ちに数えない）・`reply_kind`（新設。`prose_lines` が空なら `none`、あれば `prose_kind`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
+| `plugins/ndf/src/ndf/domains/hooks/reply_wait.py` | 新設 | 10 系（`ndf--v10.27.77` の `scripts/lib/wait_notice.py`）の本文の判定を移し、本文が回答・承認を待って終えたかをルールだけで返す。語の列は 10 系に 11.0.22 の `classify_reply` が拾う本人の回答待ち（「返答を待ちます」「ご回答をお待ちしています」）を足し、文の分け方はインラインコード・リンク先・URL の中の記号で切らない。guard が使う形は、かぎ括弧の引用の中身を見ず、待ちの文がどれも別の場所の待ちの報告だけ（同じ文の前後の節に本人への問いが無い）の本文を `elsewhere_wait` にする | 標準ライブラリ | モジュール | `classify_reply_wait`（新設）・`prose_lines`（新設。本文の行の抜き出し。1 回の Stop で 1 回だけ打つ）・`prose_kind`（新設。`prose_lines` の空でない返りを受け、`elsewhere_wait` / `prose_wait` / `closing_report` / `report`。行を抜き出し直さず、かぎ括弧の引用は開閉を行をまたいで追って外す（行を改行でつないで当て、引用の中の改行を残して行の位置を保つ）。回答・承認を求めない定型の結び（「引き続きよろしくお願いします。」）だけの文は待ちに数えず、結びの前が完了の報告だけなら `closing_report`）・`reply_kind`（新設。`prose_lines` が空なら `none`、あれば `prose_kind`）・`ELSEWHERE_RE`（新設の定数。`context.py` から移す） |
 | `plugins/ndf/src/ndf/domains/hooks/judge_child.py` | 新設 | 質問の文を持ち、実効の設定で送信先を確かめてから軽いモデルを 1 回打って回答を返す。判定の例の組を周の数だけ確かめる | `adapters.claude`、`contracts.limits`、`domains.relay.account_dir`、`domains.relay.claude_args` | モジュール | `endpoint_refusal`（新設）・`classify`（新設）・`main`（新設）・`run_cases`（新設） |
 | `plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py` | 変更 | 呼ばない条件を見て判定を選び、変更要求か通過を返す | `reply_judge`、`verdict` | モジュール | `check`（変更） |
 | `plugins/ndf/src/ndf/domains/hooks/context.py` | 変更 | 最後の利用者の入力の後に AskUserQuestion を使ったかを読む。最後の応答の種類をルールの判定から返す | `reply_wait`、標準ライブラリ | `HookContext` | `asked_since_prompt`（新設）・`HookContext.asked_this_turn`（新設）・`HookContext.has_reply_prose`（新設）・`HookContext.last_reply_kind`（変更）・`classify_reply`（削除） |
@@ -94,8 +94,9 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "seconds": 5, "max_chars": 1600, "rest_seconds": 600, "lock_seconds": 0.2, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint": {"entrypoints": ["cli", "sdk-cli"], "ancestors": 8, "cli_exe": ["*/claude/versions/*"], "script_hosts": ["node*"], "flags": ["--settings", "--setting-sources"], "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"], "env_names": ["ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "AWS_", "GOOGLE_", "CLOUD_ML_", "VERTEX_", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS"]}}`（`rest_seconds` は起動が失敗した後に休む間（決定 10）、`lock_seconds` は休みのマーカーの更新の錠を待つ上限、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint` は送信先が同じかの確かめに使う値（決定 11。`env_names` は前方一致で、設定の層が出所の変数だけに当てる。`apiKeyHelper` は `account_dir` の `helper` が見るので `keys` に入れない）） |
-| `hook.budget.stop` | 設定値 | `contracts/limits.json` | `p95_ms` 2500・`deadline` 7・`margin` 1.5・`timeout` 9（他のキーは今のまま） |
+| `hook.stop-wait.judge` | 設定値 | `contracts/limits.json` | `{"summary": …, "model": "haiku", "runtimes": ["claude"], "seconds": 5, "max_chars": 1600, "rest_seconds": 600, "lock_seconds": 0.2, "rounds": 3, "auth_markers": ["Not logged in", "Invalid API key"], "endpoint": {"entrypoints": ["cli", "sdk-cli"], "ancestors": 8, "cli_exe": ["*/claude/versions/*"], "script_hosts": ["node*"], "flags": ["--settings", "--setting-sources"], "keys": ["awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh"], "env_names": ["ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CODE_SKIP_", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "AWS_", "GOOGLE_", "CLOUD_ML_", "VERTEX_", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS"]}}`（`runtimes` はモデルを呼ぶランタイムで、guard の `skip:runtime` と、`seconds` を締め切り − 余白と比べる予算の検査（`budget._component_error`）がここを読む、`rest_seconds` は起動が失敗した後に休む間（決定 10）、`lock_seconds` は休みのマーカーの更新の錠を待つ上限、`rounds` は `judge-cases` が 1 つの例を打つ周の数（決定 9）、`auth_markers` は認証の失敗と読む本文の文字列（決定 10、MEA8）、`endpoint` は送信先が同じかの確かめに使う値（決定 11。`env_names` は前方一致で、設定の層が出所の変数だけに当てる。`CLAUDE_CODE_SKIP_`（`CLAUDE_CODE_SKIP_BEDROCK_AUTH` など）は接続の認証の省略なので含める。`apiKeyHelper` は `account_dir` の `helper` が見るので `keys` に入れない）） |
+| `hook.budget.stop` | 設定値 | `contracts/limits.json` | `p95_ms` 2500・`deadline` 7・`margin` 1.5・`timeout` 9（他のキーは今のまま）。Claude Code の Stop だけが読む |
+| `hook.budget.stop.codex` | 設定値 | `contracts/limits.json` | 今の `hook.budget.stop` の値（`p95_ms` 300・`deadline` 3.5・`margin` 1.5・`timeout` 6・`inject_chars` 2000）。Codex の Stop はモデルを呼ばないので判定の秒を足さない |
 | `CHILD_MODULE` | 定数 | `domains/hooks/reply_judge.py` | `"ndf.domains.hooks.judge_child"` |
 | 休みのマーカー | ファイル | `<状態の保存先>/hooks/judge-rest.json` | 無し（起動の失敗と送信先の不一致のときだけ `{"launch": {"at": <失敗した時刻>, "failure": "<種類>"}, "endpoint": {"<endpoint_scope>": <失敗した時刻>}}` を書く。`launch` はどの対象も休み、`endpoint` は対象ごとに休む。1 つの起動の形（リポジトリ・`--settings`・接続先の変数）の送信先の不一致で、別の起動の形のモデルの判定を止めない。更新は `.judge-rest.lock` の錠の中で行い、一時ファイルからの置き換え（`signals.replace_text(..., mode=0o600)`）で所有者だけが読めるファイルとして公開する。`metrics.prune_state` が消す対象と同じ保存先） |
 
@@ -168,6 +169,7 @@ plugins/ndf/
 | `ctx.has_reply_prose`（`ctx.reply_prose_lines` が空でないか）が偽（本文が空。文の判定はせず、`ctx.last_reply_kind` はまだ評価しない） | 通す（`reply=none`・`judge=skip:empty`） |
 | `ctx.asked_this_turn` が真 | 通す（`judge=skip:asked`）。ルールを当てない（`ctx.last_reply_kind` を評価しない）。AskUserQuestion で既に問うたターンの本文は提示した選択肢の案内（「選択肢から選んでください。」）を含みやすく、ルールはそれを待ちと読むため（設計の決定 5） |
 | ここで初めて `ctx.last_reply_kind`（`reply_wait.prose_kind` の本文の判定。1 行目で持った `ctx.reply_prose_lines` を使い、本文の行を抜き出し直さない）を評価し、ルールの判定が `elsewhere_wait`（待ちの文がどれも別の場所の待ちの報告だけ） | 通す（`judge=skip:elsewhere`） |
+| ルールの判定が `closing_report`（待ちの文が無く、定型の結び（「引き続きよろしくお願いします。」）を末尾から外した残りの文がどれも待ちの形でない丁寧の過去の言い切り（「ました」「でした」）。結びの前に質問・承認の依頼・言い切らない文があれば `prose_wait` か `report`） | 通す（`judge=skip:closing`）。軽いモデルを呼ばない |
 | ルールの判定が `prose_wait` | 変更要求（今の文面。`judge=rule`）。軽いモデルを呼ばない。上限に達していても返す（dispatch が上限で通し、待ち通知を送る） |
 | 上のどれでもなく、`judge_text(...)`（質問へ渡す本文）が空（コードブロックの行と空行だけの応答・`code_lines` の数が行の数と合わない応答。U+2028 を改行と数えるルールの判定は `report` などを返しうる） | 通す（`judge=skip:no_prose`。空の本文で子と `claude` を起動しない）。ただし `svc.counter.pushback_left()` が偽で `svc.counter.model_waited()` が真なら変更要求を返す（上限の後の待ちの知らせ） |
 | `ctx.background_tasks` が空でない | 通す（`judge=skip:background`。ルールの判定は `report`） |
@@ -190,7 +192,7 @@ plugins/ndf/
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `check` | 判定の notes: `reply`（ルールの判定。`prose_wait` / `report` / `elsewhere_wait` / `none`）・`judge`（`rule` / `model` / `fallback:<failure>` / `skip:<理由>`）・`judge_ms`・`judge_calls` | hook の計測の行（`<状態の保存先>/hooks/<日付>.jsonl`） | 本文 |
+| `check` | 判定の notes: `reply`（ルールの判定。`prose_wait` / `report` / `closing_report` / `elsewhere_wait` / `none`）・`judge`（`rule` / `model` / `fallback:<failure>` / `skip:<理由>`）・`judge_ms`・`judge_calls` | hook の計測の行（`<状態の保存先>/hooks/<日付>.jsonl`） | 本文 |
 
 ### 単体テストの観点
 
@@ -282,7 +284,7 @@ plugins/ndf/
 
 満たす決定: 決定 2、受け入れ条件 7・8
 
-- `contracts/limits.json`: 上の「内部のデータと定数」の 2 行。`hook.stop-wait.judge` の `seconds`（5）≤ `hook.budget.stop` の締め切り − 余白（7 − 1.5 = 5.5）。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
+- `contracts/limits.json`: 上の「内部のデータと定数」の 3 行。`hook.stop-wait.judge` の `seconds`（5）≤ `hook.budget.stop` の締め切り − 余白（7 − 1.5 = 5.5）。この比較は `runtimes` のランタイム（Claude Code）の予算とだけ行い、`hook.budget.stop.codex` とは比べない。`rest_seconds`（600）・`rounds`（3）・`auth_markers`・`endpoint` は秒の順序の検査に出てこない値で、`limits` の行には `hook.stop-wait.judge` だけを挙げる
 - `contracts/hooks/guards.json`: `stop-wait` の `limits` を `["hook.stop-wait.judge"]` にし、`summary` に軽いモデルの判定と戻り方を足す
-- `hooks/claude.json`・`hooks/codex.json`: `ndf hooks render` で作り直す（Stop の timeout 6 → 9）。手で書かない
+- `hooks/claude.json`・`hooks/codex.json`: `ndf hooks render` で作り直す（Claude Code の Stop の timeout 6 → 9。Codex の Stop は 6 のまま）。手で書かない
 - `ndf hooks judge-cases [--cases <パス>] [--rounds <周の数>]`: 既定のパスは `contracts/hooks/reply-judge-cases.json`、既定の周の数は設定の `rounds`（3）。各例を周の数だけ打ち、1 周でも外れた例を結果 JSON の `items` に `id`・`expect`・外れた周の `got` で出す。`metrics` に件数・外れた例の件数・打った回数・秒の最小と最大。外れがあれば `status` は `stopped`（終了コード 1）

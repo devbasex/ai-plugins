@@ -145,6 +145,20 @@ def test_stop_wait_passes_a_wait_elsewhere_without_the_model(tmp_path, monkeypat
     assert judge.asked == []
 
 
+def test_stop_wait_passes_a_completion_report_with_a_set_closing_without_the_model(tmp_path, monkeypatch):
+    judge = Judge(monkeypatch, kind="wait")
+    got = _check(tmp_path, "作業を終えました。\n引き続きよろしくお願いします。")
+    assert got.kind == "pass" and got.notes["reply"] == "closing_report" and got.notes["judge"] == "skip:closing"
+    assert judge.asked == []
+
+
+def test_stop_wait_still_judges_what_comes_before_a_set_closing(tmp_path, monkeypatch):
+    judge = Judge(monkeypatch, kind="wait")
+    got = _check(tmp_path, "作業を終えました。どうしましょう。\n引き続きよろしくお願いします。")
+    assert got.kind == "pushback" and got.notes["reply"] == "report" and got.notes["judge"] == "model"
+    assert len(judge.asked) == 1
+
+
 def test_stop_wait_pushes_back_a_question_here_after_a_wait_elsewhere(tmp_path, monkeypatch):
     judge = Judge(monkeypatch)
     got = _check(tmp_path, "別のレーンは承認を待っています。こちらは #4217 を載せてよいですか。")

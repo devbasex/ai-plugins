@@ -5,7 +5,8 @@
 見たうえで軽いモデル（`reply_judge.ask`）へ渡す（#4000 の決定 1・5・6・10・11）。条件は詳細設計の「処理の手順」の
 表の順に見て、最初に当たった 1 つを notes の `judge` に書く。本文は notes に入れない。
 
-別の場所（ほかのセッション・レーン）の待ちを報告しただけの応答は変更を要求しない。変更要求の上限の後はエントリポイントが
+別の場所（ほかのセッション・レーン）の待ちを報告しただけの応答と、定型の結び（「引き続きよろしくお願いします。」）の前が
+完了の報告だけの応答は、モデルを呼ばずに通す。変更要求の上限の後はエントリポイントが
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
 """
 
@@ -45,7 +46,7 @@ def _quick_skip(ctx, svc, text: str) -> Optional[str]:
         return "skip:no_prose"
     if ctx.background_tasks:
         return "skip:background"
-    if ctx.runtime != "claude":
+    if ctx.runtime not in reply_judge._judge("runtimes"):
         return "skip:runtime"
     if not svc.counter.pushback_left():
         return "skip:limit"
@@ -87,6 +88,8 @@ def check(ctx, svc) -> Verdict:
     kind = ctx.last_reply_kind
     if kind == "elsewhere_wait":
         return _result(kind, "skip:elsewhere", False)
+    if kind == "closing_report":
+        return _result(kind, "skip:closing", False)
     if kind == "prose_wait":
         return _result(kind, "rule", True)
     text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge._judge("max_chars")))

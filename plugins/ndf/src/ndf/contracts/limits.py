@@ -54,12 +54,13 @@ class Policy(NamedTuple):
     lock_seconds: Optional[float] = None
     rounds: Optional[int] = None
     model: Optional[str] = None
+    runtimes: Optional[list[str]] = None
     auth_markers: Optional[list[str]] = None
     endpoint: Optional[dict[str, Any]] = None
 
 
 # 数でない値（`value` で引かない。判定の子と hook の表が行から読む）
-OTHER_KEYS = ("model", "auth_markers", "endpoint")
+OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
 # 方針の数の値の名前（名前と説明と数でない値を除いた Policy の項目）
 VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary", *OTHER_KEYS))
 
