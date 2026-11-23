@@ -80,16 +80,18 @@ def validate(raw: dict[str, Any]) -> dict[str, Policy]:
 
 @contracts.cached_reader
 def table() -> dict[str, Policy]:
-    """設定を 1 プロセスに 1 回読む。"""
+    """設定の全件を 1 プロセスに 1 回読む（表全体の検査に使う。方針 1 つの参照は `policy`）。"""
     return validate(contracts.load_table(NDF_SETTINGS, LimitsError, "上限の設定"))
 
 
+@contracts.cached_reader
 def policy(name: str) -> Policy:
-    """方針の名前で 1 行を引く。無ければ `LimitsError`。"""
-    found = table().get(name)
-    if found is None:
+    """方針の名前で 1 行を引く。その方針のファイルだけを 1 プロセスに 1 回読む。無ければ `LimitsError`。"""
+    with contracts.raised_as(LimitsError):
+        body = contracts.load_item(NDF_SETTINGS, name)
+    if body is None:
         raise LimitsError(f"上限の設定に方針 {name} が無い")
-    return found
+    return validate({name: body})[name]
 
 
 def value(name: str, key: str) -> float:

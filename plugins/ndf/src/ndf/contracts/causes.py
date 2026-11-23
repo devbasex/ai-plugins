@@ -81,16 +81,25 @@ def validate(raw: dict[str, Any]) -> dict[str, CauseRow]:
 
 @contracts.cached_reader
 def table() -> dict[str, CauseRow]:
-    """表を 1 プロセスに 1 回読み、種類ごとの行を返す。"""
+    """表の全件を 1 プロセスに 1 回読み、種類ごとの行を返す（表全体の検査・一覧に使う。種類 1 つの参照は `row`・`has`）。"""
     with contracts.raised_as(CausesError):
         return validate(contracts.load_table(TABLE, CausesError, "停止理由の表"))
 
 
+def has(kind: str) -> bool:
+    """種類が表にあるか。項目のファイルは読まない。"""
+    with contracts.raised_as(CausesError):
+        return kind in contracts.split_keys(TABLE)
+
+
+@contracts.cached_reader
 def row(kind: str) -> CauseRow:
-    found = table().get(kind)
-    if found is None:
-        raise CausesError(f"停止理由の表に種類 {kind!r} が無い")
-    return found
+    """種類 1 つの行。その種類のファイルだけを 1 プロセスに 1 回読む。無ければ `CausesError`。"""
+    with contracts.raised_as(CausesError):
+        body = contracts.load_item(TABLE, kind)
+        if body is None:
+            raise CausesError(f"停止理由の表に種類 {kind!r} が無い")
+        return validate({kind: body})[kind]
 
 
 def build(kind: str, detail: str, *, instance: Optional[str] = None, retry_after: Optional[float] = None) -> dict[str, Any]:
@@ -120,7 +129,7 @@ def kind_of(value: object) -> Optional[str]:
 
 def unknown_kind_errors(kind: str, label: str) -> list[str]:
     """種類 `kind` が停止理由の表に無いときの 1 行（`label` は誤りの文で種類を指す名前）。"""
-    if kind not in table():
+    if not has(kind):
         return [f"{label} {kind!r} は停止理由の表に無い"]
     return []
 
@@ -150,7 +159,7 @@ def policy_of(kind: str) -> Optional[limits.Policy]:
 def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
     """打ち直しで直る止まりの次の待ちの秒。打ち直さない（ルートが retry でない・回数が尽きた）なら None。"""
     kind = kind_of(cause)
-    if cause is None or kind is None or kind not in table() or row(kind).route != "retry":
+    if cause is None or kind is None or not has(kind) or row(kind).route != "retry":
         return None
     pol = policy_of(kind)
     if pol is None or pol.attempts is None or used >= pol.attempts:

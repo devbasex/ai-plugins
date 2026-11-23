@@ -8,7 +8,7 @@ from typing import Any, Callable, NamedTuple
 import pytest
 
 from ndf import contracts
-from ndf.contracts import facts
+from ndf.contracts import causes, facts, limits
 from ndf.domains.hooks import tables
 
 REL = "things"
@@ -95,6 +95,26 @@ def test_keys_differing_only_in_case_stop_and_name_both(reader, tmp_path, monkey
     # パスの並びは OS で違う（Windows は大小文字を区別せずに並べる）ため、挙がったキーは順不同で比べる
     named = str(caught.value).rsplit(": ", 1)[1]
     assert sorted(named.split(", ")) == ["A", "a"]
+
+
+@pytest.mark.parametrize(
+    ("read", "files"),
+    [
+        (lambda: limits.value("cause.infra-wait", "attempts"), ["limits/cause.infra-wait.json"]),
+        (lambda: causes.exit_code("unknown"), ["causes/unknown.json"]),
+        (lambda: causes.policy_of("ci_pending"), ["causes/ci_pending.json", "limits/cause.ci-pending.json"]),
+        (lambda: causes.errors({"kind": "no_such", "detail": "x"}), []),
+    ],
+    ids=["limits.value", "causes.exit_code", "causes.policy_of", "causes.errors"],
+)
+def test_reading_one_item_reads_only_its_files(monkeypatch, read, files):
+    # 1 項目の参照で表の全件を読むと、CLI の起動ごとの読みが項目の数だけ増える（PR 4335 の r1-4）
+    contracts.use_dir(None)
+    seen = []
+    original = contracts.load_json
+    monkeypatch.setattr(contracts, "load_json", lambda rel: seen.append(rel) or original(rel))
+    read()
+    assert sorted(r for r in seen if r.startswith(("limits/", "causes/"))) == files
 
 
 def test_split_tables_lists_limits_and_causes_with_where_the_key_comes_from():
