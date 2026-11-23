@@ -87,10 +87,15 @@
 
 ### Task 11: 毎日のジョブと、見るブランチの既定
 
-- **対象ファイル:** `.github/workflows/runtime-plugin-smoke-latest.yml`、`scripts/runtime-smoke-latest.py`
-- **変更内容:** ジョブ `live-samples` を 1 件足し（matrix なし）、落ちたら食い違いのある相手ごとに 1 件の課題を作る。`ref` の既定を `develop` から `main` へ替える。**権限の境界**: `live-samples` のジョブは `permissions: contents: read` だけを持ち、`main` を取り出して（入力の `ref` を使わない）`ndf samples verify --peer github` を打ち、結果 JSON を成果物（artifact）として残す。課題を作るのは `needs: live-samples` の別のジョブで、`issues: write` を持ち、`main` の `scripts/runtime-smoke-latest.py report` だけを動かして成果物の結果 JSON を読む（宣言のコマンドやリポジトリのコードを、書き込みの権限を持つジョブで動かさない）。ランタイムの CLI は新しいジョブに入れない（ランタイムの `--help` は既存の matrix のジョブの `cli-help` が引き続き持つ）
+- **対象ファイル:** `.github/workflows/runtime-plugin-smoke-latest.yml`、`scripts/runtime-smoke-latest.py`、`scripts/tests/test_runtime_smoke_latest.py`
+- **変更内容:** ジョブ `live-samples` を 1 件（matrix なし）と、課題を作るジョブ `report` を 1 件足す。`ref` の既定を `develop` から `main` へ替える。ランタイムの CLI は `live-samples` に入れない（ランタイムの `--help` は既存の matrix のジョブの `cli-help` が引き続き持つ）
+  - **権限の境界**: ワークフロー全体の `permissions` を `contents: read` だけにし、今ある `issues: write` を外す。書き込みの権限（`issues: write`）は `report` のジョブだけが持つ。今の matrix のジョブ `runtime-smoke-latest` は入力の `ref` を取り出して `resolve` とスモークのスクリプトを動かすため、書き込みの権限を継がせない。その最後の手順 `Report the failure as an issue` は消し、課題の報告は `report` へ移す
+  - **`live-samples`**: `permissions: contents: read`。`main` を取り出し（入力の `ref` を使わない）、`ndf samples verify --peer github` の結果 JSON（標準出力の最後の 1 行）を `tmp/live-samples/result.json` に書く。食い違いでこの手順は 1（`samples_mismatch`）で落ちるので、成果物（artifact）`live-samples` のアップロードの手順は `if: always()` で動かし、`if-no-files-found: ignore` にする（検証の前に落ちて結果 JSON が無い日は何も上げない）
+  - **matrix のジョブの結果を渡す**: `runtime-smoke-latest` の最後に `if: always()` の手順を足し、ランタイムと `job.status` と入れた版の一覧（`$LATEST_VERSIONS`。無くてよい）を `tmp/runtime-smoke-latest/outcome/` に書いて、成果物 `runtime-smoke-latest-outcome-<ランタイム>` として上げる（`needs.<job>.result` は matrix の全体で 1 つの値なので、どのランタイムが落ちたかは成果物で渡す）
+  - **`report`**: `needs: [runtime-smoke-latest, live-samples]`、`if: ${{ !cancelled() && contains(needs.*.result, 'failure') }}`。前段のどれかが失敗で終わった日だけ起動し（`live-samples` が食い違いで 1 を返して失敗しても飛ばされない）、すべて成功の日は起動しない。`permissions: contents: read, issues: write`。`main` の `scripts/runtime-smoke-latest.py` だけを疎の取り出し（`persist-credentials: false`）で取り、`actions/download-artifact` で上の成果物を落とし、`report` で読む。結果 JSON の成果物が無ければ（検証の前の失敗）見本の報告は何もせずに終える。`live-samples` が失敗で終わっても、成果物の結果 JSON の `items` の `kind: mismatch` を相手ごとに数え、1 件以上の相手ごとに課題を作る（`kind: unreachable` だけの相手には作らない）。ランタイムの成果物は `status` が `failure` のランタイムだけ、今の `report --runtime` と同じ課題を作る。宣言のコマンドやリポジトリのコード（入力の `ref` のもの）を、このジョブでは動かさない
+  - **`report` の引数**: `--samples <結果 JSON のパス>`（見本の報告）と `--outcomes <ディレクトリ>`（ランタイムの報告）を足し、どちらも在るものだけを読む。読むのは JSON のデータだけである
 - **満たす受け入れ条件:** 1
-- **進め方:** ワークフローの合否は CI で見る。課題を作る部分は `runtime-smoke-latest.py` の既存のテストに相手の列を足して縛る
+- **進め方:** ワークフローの合否は CI で見る。課題を作る部分は `runtime-smoke-latest.py` の既存のテストに、相手の列（`kind: mismatch` のある相手だけに作る・`unreachable` だけでは作らない・結果 JSON が無ければ何もしない）と、ランタイムの成果物（`failure` のランタイムだけに作る）の列を足して縛る。ジョブの数は 2 件増え（37 → 39）、`budget.ci_jobs` の上限 40 の内に収まる
 
 ### Task 12: 依存を用意できないときの結果 JSON
 

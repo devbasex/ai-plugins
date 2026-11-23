@@ -71,10 +71,12 @@
 ### 決定 7: 1 日のジョブを増やさないよう、毎日の検証を既にあるワークフローのジョブとして足す
 
 - **質問**: 毎日の見本の検証を、新しいワークフローに置くか既にある毎日のワークフローに足すか
-- **選んだ案**: 既にある `.github/workflows/runtime-plugin-smoke-latest.yml`（毎日 06:00 JST）へジョブを 1 件足す。足すジョブは matrix を持たない `live-samples` である。同じ Pull Request で、このワークフローが見るブランチの既定を `develop` から `main` へ替える
+- **選んだ案**: 既にある `.github/workflows/runtime-plugin-smoke-latest.yml`（毎日 06:00 JST）へ、毎日走るジョブを 1 件足す。足すジョブは matrix を持たない `live-samples` である。権限を分けるため、課題を作るジョブ `report` も足すが、前段が失敗した日だけ起動する。同じ Pull Request で、このワークフローが見るブランチの既定を `develop` から `main` へ替える
 - 採らなかった案: 新しいワークフローを作る（ワークフローが 1 本増え、起動の時刻と落ちたときの課題の作り方を二重に持つ）
 - 採らなかった案: 既にあるランタイムごとの matrix のジョブへ相乗りする（GitHub の見本はランタイムに依らないため、同じ検証が 2 回走る）
-- 権限の境界: `live-samples` のジョブは `contents: read` だけを持ち、入力の `ref` を使わず `main` を取り出して検証する。課題を作るのは `needs: live-samples` の別のジョブで、`issues: write` を持ち、`main` の `scripts/runtime-smoke-latest.py report` で成果物の結果 JSON だけを読む（既存の `cli-help` の手順が検証器を `main` に固定しているのと同じ考え方。手動の実行で別の ref を渡した人が、書き込みの権限で宣言のコードを動かせないようにする）
+- 権限の境界: ワークフロー全体の権限を `contents: read` だけにし、`issues: write` は課題を作るジョブ `report` だけが持つ。`live-samples` のジョブは `contents: read` だけを持ち、入力の `ref` を使わず `main` を取り出して検証する。今のランタイムごとの matrix のジョブも、入力の `ref` のコード（`resolve` とスモーク）を動かすので書き込みの権限を持たせず、その課題の報告を `report` へ移す。`report` は `main` の `scripts/runtime-smoke-latest.py report` で成果物の JSON だけを読む（既存の `cli-help` の手順が検証器を `main` に固定しているのと同じ考え方。手動の実行で別の ref を渡した人が、書き込みの権限で宣言のコードを動かせないようにする）
+- 失敗の日の流れ: `ndf samples verify` は食い違いで必ず 1 を返すので、`live-samples` はその日に失敗で終わる。GitHub Actions は `needs` の先が失敗すると既定で後のジョブを飛ばすため、次の 3 つを定める。(1) 結果 JSON を成果物として上げる手順は `if: always()` で動かす。(2) `report` は `if: ${{ !cancelled() && contains(needs.*.result, 'failure') }}` で動かし、成果物が無い場合（検証の前の失敗）はその分の報告をせずに終える。(3) `live-samples` が失敗で終わっても、成果物の結果 JSON の `kind: mismatch` から相手ごとに課題を作る
+- 毎日のジョブの数: 毎日走るジョブは `live-samples` の 1 件だけ増える。`report` は前段のどれかが失敗した日だけ起動し、すべて成功の日は起動しない（飛ばされたジョブはランナーを使わない）。失敗の日は 1 実行あたり 2 件増えるが、今まで matrix の各ジョブの中で打っていた報告の手順はそこから消える
 - **代償**: ランタイムのスモークが落ちると、見本の検証も同じワークフローの実行の中で結果が読みにくくなる
 - 根拠: Value 2（MVV バージョン 1）
 
