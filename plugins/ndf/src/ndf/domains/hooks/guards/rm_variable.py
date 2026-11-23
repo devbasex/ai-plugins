@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from ndf.domains.hooks.context import ansi_c_escape
+from ndf.domains.hooks.context import _parser, ansi_c_escape
 from ndf.domains.hooks.verdict import Verdict, deny
 
 # 展開の名前の 1 字目と 2 字目以降
@@ -191,7 +191,8 @@ def _has_text(word: str, quote: str) -> bool:
 
     引用とエスケープを外した後の字（二重引用の中の `'` は字）か、空を返さない展開があれば真。行の継続（`\\` と改行）・
     空の引用（`''`・`""`・`$""` の `$`）・ANSI-C 引用の NUL から閉じる `'` までは字を残さない。算術展開（`$((…))`）は
-    数を返すので真。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので字に数えず、閉じていなければ偽にする。
+    数を返すので真。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので字に数えず、境界が構文木で確定しなければ偽にする
+    （算術展開と確定しない `$((` も同じ）。
     単引用・ANSI-C 引用・エスケープの中の `$(`・`` ` `` は字。
     """
     i = 0
@@ -241,19 +242,20 @@ def _dollar_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
     nxt = word[i + 1 : i + 2]
     if quote == "" and nxt in ("'", '"'):
         return None, ("$'" if nxt == "'" else quote), i + (2 if nxt == "'" else 1)
-    if word.startswith("$((", i):
-        return True, quote, i
     if nxt == "(":
-        return _substitution_text(word, i, quote)
+        node = _substitution_node(word, i, quote)
+        if node is not None and node[0] == "arithmetic_expansion":
+            return True, quote, i
+        return (False, quote, i) if node is None else (None, quote, node[1])
     if nxt == "{" or _HEAD.fullmatch(nxt) or (nxt and nxt in _SPECIAL):
         return _expansion_text(word, i, quote)
     return True, quote, i
 
 
 def _substitution_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
-    """コマンド置換の 1 歩。値が分からないので字に数えず、閉じていなければ偽にする。"""
-    end = _after_substitution(word, i)
-    return (False, quote, i) if end < 0 else (None, quote, end)
+    """コマンド置換の 1 歩。値が分からないので字に数えず、境界が確定しなければ偽にする。"""
+    node = _substitution_node(word, i, quote)
+    return (False, quote, i) if node is None else (None, quote, node[1])
 
 
 def _expansion_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
@@ -276,31 +278,24 @@ def _after_ansi_c(word: str, start: int) -> int:
     return min(i + 1, len(word))
 
 
-def _after_substitution(word: str, start: int) -> int:
-    """`start` から始まるコマンド置換（`$(…)` か `` `…` ``）の次の位置。閉じていなければ -1。
+def _substitution_node(word: str, start: int, quote: str) -> tuple[str, int] | None:
+    """`start` から始まるコマンド置換か算術展開の種類（構文木の節の型）と次の位置。境界が確定しなければ None。
 
-    `$(…)` は中の引用とエスケープを読みながら括弧を数える。`` `…` `` は次の逃がしていない `` ` `` まで。
+    `case` の `)`・コメントの中の `)`・`$((:); :)`（サブシェルを含むコマンド置換）を括弧の数では決められないので、
+    tree-sitter-bash の構文木から取る。構文の誤りを含む・節が見つからないときは確定しない。
     """
-    if word[start] == "`":
-        i = start + 1
-        while i < len(word) and word[i] != "`":
-            i += 2 if word[i] == "\\" else 1
-        return i + 1 if i < len(word) else -1
-    depth, quote, i = 1, "", start + 2
-    while i < len(word):
-        char = word[i]
-        if quote == "'":
-            quote = "" if char == "'" else quote
-        elif char == "\\":
-            i += 1
-        elif char in "'\"" and quote in ("", char):
-            quote = char if quote == "" else ""
-        elif quote == "" and char in "()":
-            depth += 1 if char == "(" else -1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return -1
+    prefix = ': "' if quote in ('"', _IN_DOUBLE) else ": "
+    body = word[start:].encode("utf-8")
+    offset = len(prefix.encode("utf-8"))
+    root = _parser().parse(prefix.encode("utf-8") + body).root_node
+    node = root.descendant_for_byte_range(offset, offset + 1)
+    while node is not None and node.start_byte == offset:
+        if node.type in ("command_substitution", "arithmetic_expansion"):
+            if node.has_error:
+                return None
+            return node.type, start + len(body[: node.end_byte - offset].decode("utf-8"))
+        node = node.parent
+    return None
 
 
 def _is_option(plain: str, text: str) -> bool:
