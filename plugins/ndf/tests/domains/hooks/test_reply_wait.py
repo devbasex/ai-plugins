@@ -110,7 +110,7 @@ def test_a_url_with_a_query_is_a_report(text):
 
 
 def test_a_wait_here_after_a_clause_naming_another_lane_is_a_wait():
-    """レーン名の節と「待」の節が別なら、待っている主体はこちら（節をまたいで別の場所の待ちと読まない）。"""
+    """レーン名の句と「待」の句が別なら、待っている主体はこちら（句をまたいで別の場所の待ちと読まない）。"""
     assert _is_wait("別のレーンを止めて、こちらの変更は回答を待ちます。")
 
 

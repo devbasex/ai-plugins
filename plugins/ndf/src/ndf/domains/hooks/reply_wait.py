@@ -80,7 +80,7 @@ REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビ�
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
 # 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）。リンク先は山括弧で
-# 囲んだ形（空白を含められる）・1 段の丸括弧を含む形・タイトルつきの形まで 1 つの範囲にする
+# 囲んだ形（空白を含められる）・入れ子 1 つの丸括弧を含む形・タイトルつきの形まで 1 つの範囲にする
 _INLINE_CODE = r"`[^`\n]+`"
 _LINK_DEST = r"\]\(\s*(?:<[^<>\n]*>|[^\s()<>]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"
 _URL = r"https?://[^\s`()（）「」『』。、？！]+"
@@ -89,9 +89,9 @@ _OPAQUE = re.compile(f"{_INLINE_CODE}|{_LINK_DEST}|{_URL}")
 _CODE_PLACEHOLDER = "`_`"
 # 文の区切りの記号の、範囲の中での置き換え（判定の語にも末尾の形にも当たらない字）
 _OPAQUE_MARKS = str.maketrans({"。": "．", "？": "＿", "?": "_", "！": "＿", "!": "_"})
-# 別の場所の待ちの報告の後の、節のつなぎ（「…待っていますが、」の「っていますが、」）
+# 別の場所の待ちの報告の後の、句のつなぎ（「…待っていますが、」の「っていますが、」）
 _CLAUSE_SEPARATORS = "、，, "
-# 節の区切り（読点の後で切る）。主題の「は」「も」で終わる節は次の節の主体なので、次の節とつなぐ（「別のレーンは、承認を待っています。」）
+# 句の区切り（読点の後で切る）。主題の「は」「も」で終わる句は次の句の主体なので、次の句とつなぐ（「別のレーンは、承認を待っています。」）
 _CLAUSE_END = re.compile(r"(?<=[、，,])")
 _TOPIC_ENDINGS = ("は", "も")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
@@ -216,7 +216,7 @@ def _unquoted(text: str) -> str:
 
 
 def _clauses(sentence: str) -> list[str]:
-    """文を読点で節に分ける。主題（「…は、」「…も、」）だけの節は、その主題で述べる次の節とつなぐ。"""
+    """文を読点で句に分ける。主題（「…は、」「…も、」）だけの句は、その主題で述べる次の句とつなぐ。"""
     out: list[str] = []
     for part in _CLAUSE_END.split(sentence):
         if not part:
@@ -229,7 +229,7 @@ def _clauses(sentence: str) -> list[str]:
 
 
 def _elsewhere_clause(clause: str) -> bool:
-    """節が別の場所の待ちの報告か。報告の前後（同じ節の中）に回答・承認を待つ問いが残れば偽。"""
+    """句が別の場所の待ちの報告か。報告の前後（同じ句の中）に回答・承認を待つ質問が残れば偽。"""
     found = ELSEWHERE_RE.search(clause)
     if found is None:
         return False
@@ -241,7 +241,7 @@ def _elsewhere_clause(clause: str) -> bool:
 def _only_elsewhere(sentence: str) -> bool:
     """文が別の場所の待ちの報告だけか。
 
-    節ごとに待っている主体を見る。別の場所の待ちと確かめられた節だけを外し、ほかの節に回答・承認を待つ問いが
+    句ごとに待っている主体を見る。別の場所の待ちと確かめられた句だけを外し、ほかの句に回答・承認を待つ質問が
     残れば偽（「別のレーンを止めて、こちらの変更は回答を待ちます。」は、こちらの回答待ち）。
     """
     found = False
@@ -288,7 +288,7 @@ def reply_kind(text: str) -> str:
     """guard `stop-wait` が使う最後の応答の種類（11 系の `classify_reply` と同じ語）。
 
     `none`（コードのブロック・引用・表・見出しのほかに本文が無い）・`elsewhere_wait`（待ちの文がどれも別の場所の
-    待ちの報告だけで、ほかの節に本人への問いが無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。
+    待ちの報告だけで、ほかの句に本人への質問が無い）・`prose_wait`（本文で人の回答・承認を待つ）・`report`。
     `has_prose` の結果を既に持つ呼び手は、これでなく `prose_kind` を呼ぶ。
     """
     return prose_kind(text) if has_prose(text) else "none"
