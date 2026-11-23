@@ -495,15 +495,16 @@ def _merge_method_first(
 ) -> dict[str, route.Value]:
     """前の試行がマージの方式を決められずに止まっていれば（目印 `pending` がある）、課題を読む前に方式を問う。
 
-    目印に同じ値で決めた方式が記録してあれば問わずに使う（`merge_pending.held_method`。方式が決まった後で課題を読めずに
-    止まった打ち直し）。問うて決まらなければ課題を読まずに `TemplateValuesMissing`（目印は残す）、決まれば方式を目印へ
-    記録しておいて足した値を返す。目印が無ければ今の値のまま（方式は課題の後に問う）。
+    目印に同じ値で決めた方式が記録してあれば（`merge_pending.held_method`。方式が決まった後で課題を読めずに止まった
+    打ち直し）、課題より先には問わずに今の値のまま返す。記録した方式はプランへ入れず、課題を読んだ後に問い直す。課題を
+    読めずに止まっている間に GitHub の許す方式が変わると、記録した方式ではマージが断られるためである（PR 4289 の指摘）。
+    問うて決まらなければ課題を読まずに `TemplateValuesMissing`（目印は残す）、決まれば方式を目印へ記録しておいて
+    足した値を返す。目印が無ければ今の値のまま（方式は課題の後に問う）。
     """
     if not pending.is_file():
         return dict(values)
-    held = merge_pending.held_method(pending, values)
-    if held is not None and "merge_method" in t.params and "merge_method" not in values:
-        return {**values, "merge_method": held}
+    if merge_pending.held_method(pending, values) is not None:
+        return dict(values)
     out = merge_pending.ask(t, values, pending)
     missing = _missing(names, out, FILL_SOURCES)
     if "merge_method" in missing:
