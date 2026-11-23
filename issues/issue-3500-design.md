@@ -143,7 +143,7 @@ flowchart LR
 | `.ndf/backlog/` の直下の 10 系の記録（`causes.jsonl`・`depths.jsonl`・`owner.json`・`overhaul/`・`review-*.json`） | 同上 | 退避して消す（`state/` と `research/` は残す） |
 | 引継ぎ文書 `.ndf/handoff/*.md`（86 件）と `*-history.md` | 同上 | 子の課題 3 の版を入れたら 1 件ずつ `ndf handoff import` で移す。閉じていないステートマシンが行き先なら本文と履歴を DB に書き、読み直して一致したときだけファイルを退避する。閉じた対象・ステートマシンの無い対象は退避だけする（どちらにするかはコードがステートマシンの状態で決める）。フォルダは空になってから `sweep` が退避する |
 | `.cross_review/` | 根 | 退避して消す |
-| `.worktrees/.ndf/` | メインディレクトリ | cross 系の作業場所が実際に `.git/ndf/work/` へ移った環境だけで扱う（今の `ndf-work` の保存先が `.worktrees/.ndf` かその中なら動かさない）。NDF の終わった作業場所（並びが一致しロックが無い）で、24 時間使われておらず、HEAD が参照から届き、変更・未追跡・無視されたファイルが無いものだけを `git worktree remove` し、登録された worktree が 1 つも残らなかったときだけ退避する |
+| `.worktrees/.ndf/` | メインディレクトリ | cross 系の作業場所が実際に `.git/ndf/work/` へ移った環境だけで扱う（今の `ndf-work` の保存先が `.worktrees/.ndf` かその中なら動かさない）。NDF の終わった作業場所（並びが一致しロックが無い）で、24 時間使われておらず、HEAD とその worktree の HEAD の reflog のコミットがすべて参照から届き、変更・未追跡・無視されたファイルが無いものだけを `git worktree remove` し、登録された worktree が 1 つも残らなかったときだけ退避する |
 | `.git/ndf/{estimate, sprint-limpl, step-history.jsonl, test-run, state.v10-*}`・`.git/ndf-main.lock`・`.git/ndf-branch-strategy.lock` | git の共通ディレクトリ | 退避して消す（錠は誰も持っていないことを確かめてから） |
 
 - **退避と削除は `ndf places sweep` が行う。** 残骸のパスは置き場の一覧に、退避の前提条件（`plain`・`flock`・`worktree-parent`・`empty-dir`）を値に持つ `retired` の行として載せ（コードがパスを選ぶ。AI に選ばせない）、`sweep` は前提条件と移す前の検査（今の保存先と同じかその祖先・symlink や作業ツリーの外・追跡されたファイルを含む、のどれかなら動かさない）を通ったパスだけを `.git/ndf/retired/<日時>-<乱数>/`（実行ごとに新しく作り、既にある退避は上書きしない）へ移し、移したパスと移さなかった理由を結果 JSON に並べる。同じ `sweep` は 14 日を過ぎた退避を消す。行の中身は詳細設計の「残骸の退避」にある
@@ -269,7 +269,7 @@ flowchart LR
 | I4（引継ぎの書き込み） | `ndf handoff write <ID> --file -` が形の検査を通った本文を事象 1 件で追記し、`show` が同じ本文を返す。形の違反は終了コード 1 で追記しない。無いステートマシンの ID は終了コード 2 | 違反でも書く・上書きする |
 | I5（引継ぎの版と履歴） | 2 回書くと `show` は 2 回目、`show --seq <1 回目>` は 1 回目を返す。`--trim` で移したセクションが、その後に通常の `write` を挟んでも `show --history` に残る。`ndf progress` の `history` に本文が出ない。`show` が DB から読む本文は返す 1 版だけ | 事象を更新する・履歴を落とす・通常の読み出しで本文を返す・最新版の表示で過去の版の本文を読む |
 | I6（別のマシンの再開） | 同じ `NDF_PROGRESS_DB` を指す別のクローン（別のディレクトリ）から `ndf handoff list --open` と `show` が同じ引継ぎを返す（SQLite のファイルを共有して模す。PostgreSQL は CI の今の PostgreSQL のジョブで確かめる） | リポジトリの中のファイルを読む |
-| I7（残骸の退避） | 一覧の `retired` の行のパスを置いて `ndf places sweep` を打つと `.git/ndf/retired/<日時>/` へ移り、結果 JSON に並ぶ。15 日前の退避は消え、13 日前のものは残る。`retired` でないパス・今の保存先と同じか祖先のパス・追跡されたファイルを含むパス・symlink を通るパス・登録された worktree が残る親・中に文書が残る `.ndf/handoff`・ほかのプロセスが開いている錠は動かない。固有のコミット・無視されたファイルを持つ worktree、最近使った worktree は外さない。同じ秒に別の worktree から打っても退避が重ならず、既存の退避を上書きしない | 一覧に無いパスを動かす・すぐ消す・前提条件を見ずに動かす |
+| I7（残骸の退避） | 一覧の `retired` の行のパスを置いて `ndf places sweep` を打つと `.git/ndf/retired/<日時>/` へ移り、結果 JSON に並ぶ。15 日前の退避は消え、13 日前のものは残る。`retired` でないパス・今の保存先と同じか祖先のパス・追跡されたファイルを含むパス・symlink を通るパス・登録された worktree が残る親・中に文書が残る `.ndf/handoff`・ほかのプロセスが開いている錠は動かない。固有のコミット（HEAD の reflog にだけ残るものを含む）・無視されたファイルを持つ worktree、最近使った worktree は外さない。同じ秒に別の worktree から打っても退避が重ならず、既存の退避を上書きしない | 一覧に無いパスを動かす・すぐ消す・前提条件を見ずに動かす |
 
 ## 詳細設計
 
