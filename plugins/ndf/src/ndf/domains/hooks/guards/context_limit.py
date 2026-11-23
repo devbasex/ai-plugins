@@ -2,8 +2,8 @@
 
 会話の記録の末尾の最後の応答の文脈の量（token）が運用上限（`context_thresholds.thresholds` の `limit`。上限の設定の
 `context.limit` と `NDF_CONTEXT_LIMIT`。#3995）以上なら、次の 1 手だけを残して止める。
-中継の下では応答の最後に次のセグメントのブロックを書いてセグメントを切り替え、外では引き継ぎの文書を書いて新しいセッションで
-続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
+中継の内外とも、引き継ぎの文書を Write / Edit で書いてから応答の最後に次のセグメントのブロックを書く。中継の下では
+中継がセグメントを切り替え、外では人が新しいセッションで続ける。拒否は同じ理由で数えられ、続けば案内へ下がる（#3345 の決定 92）。
 
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
 """
@@ -34,9 +34,10 @@ def check(ctx, svc) -> Verdict | None:
     if _next_step(ctx, handoff_dir):
         return passing(context_tokens=tokens)
     under = relay_dir(ctx.env) is not None
+    write = f"引き継ぎの文書を {handoff_dir} の下へ Write で書くか Edit で更新し（handoff check は打たない）"
     if under:
-        step = "Tool を呼ばずに、応答の最後に次のセグメントのブロックを書いて終える（中継が新しいセッションで続ける）"
+        step = f"{write}、応答の最後に次のセグメントのブロックを書いて終える（中継が新しいセッションで続ける）"
     else:
-        step = f"引き継ぎの文書を {handoff_dir} の下へ Write で書き、新しいセッションで続ける"
+        step = f"{write}、次のセグメントのブロックを書いて新しいセッションで続ける"
     reason = f"文脈の量が上限（{limit} token）を超えた。次の 1 手: {step}"
     return deny(reason, notes={"context_tokens": tokens, "under_relay": under})
