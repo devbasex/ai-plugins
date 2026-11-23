@@ -279,7 +279,7 @@ jq 'del(.max_lanes, .max_plans) | .lanes |= map(del(.plans))' plan.json > plan.j
 - テストのスロット（`plugins/ndf/src/ndf/testing/` とそのテスト）が変わらないこと
 - どのテストも事象の数・回数・状態で判定し、時間で区切らないこと
 
-テストのパスは `plugins/ndf/` からの相対で、ほかに `tests/progress/test_run_lanes.py`・`test_plan_run.py`・`tests/support/plan_decls.py` がある。
+テストのパスは `plugins/ndf/` からの相対で、ほかに `tests/progress/test_plan_run.py`・`tests/support/plan_decls.py` がある。
 
 ## 関連リンク
 

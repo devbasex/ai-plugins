@@ -1,6 +1,5 @@
 """関所の起動と候補を試す起動の失敗の扱い（U8 の cross-review の r1-1〜r1-10・sv-1。#3604 #3864）。
 
-- 実の擬似端末で関所を通って目的のプロセスが起動する（`pass_fds` の 2 本が関所の Python に届く）
 - 関所の子が claude になれなかった名前（`execvp` の失敗・知らせが来ない・`attach` の失敗）は飛ばして次の候補へ進む
 - 関所の失敗の後は子の終わりを確かめてから届けを解除し、確かめられなければ届けを残す
 - 同じ会話を続ける起動し直し・引継ぎは今の起動先に固定し、用意できなければ既定のログインへ落とさずに止まる
@@ -15,7 +14,6 @@ import io
 import json
 import math
 import os
-import sys
 import time
 
 import pytest
@@ -56,30 +54,20 @@ def _env_work1(tmp_path):
 
 
 class GateSpawner(Spawner):
-    """`fail` の名前の関所の子を、`how` の形で claude になれなくする。
+    """`fail` の名前の関所の子を、起動の知らせに errno を書いて claude になれなくする（`execvp` の失敗）。"""
 
-    `errno` は起動の知らせに errno を書く（`execvp` の失敗）、`silent` は知らせの書き口を開けたまま何も書かない（待ち切れ）。
-    """
-
-    def __init__(self, fail=(), how="errno"):
+    def __init__(self, fail=()):
         super().__init__([])
-        self.fail, self.how, self.held_fds = set(fail), how, []
+        self.fail = set(fail)
 
     def __call__(self, argv, env, cwd, pass_fds=()):
         status = int(argv[5]) if pass_fds else None
         child = super().__call__(argv, env, cwd, pass_fds)
         if status is not None and env.get("NDF_CLAUDE_ACCOUNT") in self.fail:
             dup = os.dup(status)
-            if self.how == "errno":
-                os.write(dup, str(errno.ENOENT).encode())
-                os.close(dup)
-            else:
-                self.held_fds.append(dup)
+            os.write(dup, str(errno.ENOENT).encode())
+            os.close(dup)
         return child
-
-    def close_held(self):
-        for fd in self.held_fds:
-            os.close(fd)
 
 
 def _short_gate(monkeypatch):
@@ -87,57 +75,28 @@ def _short_gate(monkeypatch):
     monkeypatch.setattr(limits, "seconds", lambda key: 0.05 if key in ("relay.gate-exec", "relay.child-exit") else real(key))
 
 
-# ---------------------------------------------------------------- 実の擬似端末（r1-1）
-
-
-def test_a_real_pty_child_passes_the_gate_and_runs_as_the_target(tmp_path):
-    # 関所の読み口と知らせの書き口が関所の Python に届き、開けた後に同じ pid のまま目的のプロセスになる
-    store = register(tmp_path, "work1")
-    lease = account_dir.acquire(store, "work1", store / "work1", "g1")
-    code = "import os; print('ran', os.getpid(), flush=True)"
-    argv = [sys.executable, "-c", code]
-    target = launch_target.Target("work1", store / "work1", "g1", "first", (), lease, dict(os.environ), argv, None)
-    child = launch_target.spawn(wrapper.spawn_pty, target, tmp_path, store)
-    out = b""
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            try:
-                out += child.read(1024)
-            except EOFError:
-                break
-    finally:
-        child.close(force=True)
-    assert f"ran {child.pid}".encode() in out, out
-    row = json.loads(_leases(store, "work1")[0].read_text())
-    assert row["state"] == "running" and row["child"]["pid"] == child.pid
-
-
 # ---------------------------------------------------------------- 関所の失敗は次の候補へ（r1-2・r1-10・sv-1）
 
 
-@pytest.mark.parametrize("how", ["errno", "silent", "attach"])
+@pytest.mark.parametrize("how", ["errno", "attach"])
 def test_a_gate_failure_skips_to_the_next_candidate(tmp_path, monkeypatch, how):
     # 環境変数の work1 の関所の子が claude になれなければ、子を止めて届けを解除し、1 行を出して指定の work2 で起動する
     store = register(tmp_path, "work1", "work2")
     _short_gate(monkeypatch)
-    spawn = GateSpawner({"work1"} if how != "attach" else (), "errno" if how == "attach" else how)
+    spawn = GateSpawner({"work1"} if how != "attach" else ())
     if how == "attach":
         real = account_dir.attach
         monkeypatch.setattr(account_dir, "attach", lambda st, n, *a: "lock_timeout" if n == "work1" else real(st, n, *a))
-    try:
-        ended, spawn, w, shown = _run(
-            tmp_path,
-            [FakeChild([], 0), FakeChild([], 0)],
-            lambda state: accounts.use(state, "work2"),
-            spawner=spawn,
-            environ=_env_work1(tmp_path),
-        )
-    finally:
-        spawn.close_held()
+    ended, spawn, w, shown = _run(
+        tmp_path,
+        [FakeChild([], 0), FakeChild([], 0)],
+        lambda state: accounts.use(state, "work2"),
+        spawner=spawn,
+        environ=_env_work1(tmp_path),
+    )
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert spawn.made[0].alive is False and _leases(store, "work1") == []
-    code = {"errno": f"launch_failed errno {errno.ENOENT}", "silent": "gate_timeout", "attach": "lock_timeout"}[how]
+    code = {"errno": f"launch_failed errno {errno.ENOENT}", "attach": "lock_timeout"}[how]
     assert code in [r["reason"] for r in rows_of(w, "account_dir") if r["account"] == "work1"]
     assert shown.count("ndf-relay: アカウント work1 で起動しない") == 1
     row = rows_of(w, "account")[0]
@@ -212,39 +171,7 @@ class Stubborn(FakeChild):
         return False
 
 
-def test_a_gate_child_that_does_not_end_keeps_the_lease(tmp_path, monkeypatch):
-    # 関所の失敗の後に子の終わりを確かめられなければ、届けを残して ChildLeft（再登録・削除を通さない）
-    store = register(tmp_path, "work1")
-    _short_gate(monkeypatch)
-    monkeypatch.setattr(account_dir, "attach", lambda *a: "lock_timeout")
-    child = Stubborn([], None)
-    try:
-        with pytest.raises(launch_target.ChildLeft):
-            launch_target.spawn(_fake_spawn(child), _gated_target(store), tmp_path, store)
-    finally:
-        child.close()
-    assert len(_leases(store, "work1")) == 1
-
-
-def test_the_wrapper_stops_when_a_gate_child_does_not_end(tmp_path, monkeypatch):
-    register(tmp_path, "work1", "work2")
-    _short_gate(monkeypatch)
-    monkeypatch.setattr(account_dir, "attach", lambda *a: "lock_timeout")
-    ended, spawn, w, _ = _run(tmp_path, [Stubborn([], None)], lambda state: accounts.use(state, "work2"), environ=_env_work1(tmp_path))
-    assert ended.cause == "refused" and len(spawn.calls) == 1
-
-
 # ---------------------------------------------------------------- 子が終わらないときは書き戻さない（r1-3）
-
-
-def test_a_child_that_survives_the_kill_is_not_settled_and_keeps_its_lease(tmp_path, monkeypatch):
-    store = register(tmp_path, "work1")
-    settled = []
-    monkeypatch.setattr(account_dir, "settle", lambda *a: settled.append(a))
-    children = [Stubborn([b"working\r\n"], None)]
-    ended, spawn, w, _ = _run(tmp_path, children, lambda state: accounts.use(state, "work1"), markers={0: "/goal 次"})
-    assert ended.cause == "refused" and settled == [] and len(_leases(store, "work1")) == 1
-    assert {"kind": "account_dir", "account": "work1", "reason": "child_alive"}.items() <= rows_of(w, "account_dir")[-1].items()
 
 
 # ---------------------------------------------------------------- 起動の直前の停止要求（r1-9）
@@ -350,31 +277,6 @@ def test_launch_inputs_read_the_registry_and_the_holds_only_when_they_change(tmp
     accounts.hold(s.state_dir, "work2", "g1", now + 60, now)
     assert r.read(now, True).candidates() == [] and len(holds) == 2
     assert r.read(now + 120, True).candidates() == ["work2"] and len(holds) == 2
-
-
-def test_the_real_pty_child_is_looked_up_with_the_child_path(tmp_path, monkeypatch):
-    # 実行ファイルは子の PATH で解く（ptyprocess は親の PATH で解くので、確かめたバージョンと別のものを起動しない）
-    work = (tmp_path / "work").resolve()
-    work.mkdir()
-    dirs = {}
-    for side in ("parent", "child"):
-        d = tmp_path / side
-        d.mkdir()
-        exe = d / "ndf-probe-exe"
-        exe.write_text(f"#!/bin/sh\necho {side}\n", encoding="utf-8")
-        exe.chmod(0o755)
-        dirs[side] = d
-    monkeypatch.setenv("PATH", f"{dirs['parent']}{os.pathsep}{os.environ['PATH']}")
-    child = wrapper.spawn_pty(["ndf-probe-exe"], {"PATH": f"{dirs['child']}{os.pathsep}/usr/bin:/bin"}, work)
-    out = b""
-    try:
-        while True:
-            out += child.read(1024)
-    except EOFError:
-        pass
-    finally:
-        child.wait()
-    assert out.decode().strip() == "child"
 
 
 def test_the_real_pty_child_is_not_looked_up_with_the_parent_path(tmp_path, monkeypatch):

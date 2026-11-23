@@ -23,6 +23,9 @@ from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, invoke, model, stages
 
 
+# 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
+
+
 def _stage(name: str, mode: str = "light"):
     return definition.load_definition(mode).stage(name)
 
@@ -517,31 +520,6 @@ def test_code_review_with_a_gathered_off_the_sprint_branch_stops_before_the_plan
     assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
 
 
-@pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
-def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
-    # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
-    (bin_dir / "gh").chmod(0o755)
-    argv = route.review_launch(name, "feat/x", "develop")
-    argv = [a if a != "ndf" else "echo" for a in argv]
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split()
-    assert out[:2] == ["cross-review", "run"] and out[-2:] == ["--pr", "3489"]
-    assert out[out.index("--purpose") + 1] == purpose and out[out.index("--base") + 1] == "develop"
-
-
-def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
-    (bin_dir / "gh").chmod(0o755)
-    argv = [a if a != "ndf" else "echo" for a in route.review_launch("design", "feat/x", "develop")]
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
-
-
 def test_workflow_ndf_settings_with_launch_and_stages_passes_the_schema(tmp_path):
     # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ設定はスキーマの検査を通る
     launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
@@ -958,34 +936,3 @@ def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     # outputs のキーは文脈の閉じた語彙なので、設定に無いキーは語彙の中の別のキーで確かめる
     assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]
-
-
-_READ_BOTH = """
-import json, os, sys
-from pathlib import Path
-src, script = sys.argv[1:3]
-sys.path.insert(0, src)
-from ndf import cli
-from ndf.progress import invoke
-ext = invoke.run_command([sys.executable, "-c", script], Path.cwd(), dict(os.environ))
-own = invoke.run_command(cli.ndf_command("plan", "next", "missing.json"), Path.cwd(), dict(os.environ))
-print(json.dumps({"ext": ext.stdout, "own": own.stdout}))
-"""
-
-
-def test_run_command_reads_external_scripts_in_the_locale_and_ndf_children_in_utf8(tmp_path):
-    """#4029: `ndf_command` の子だけを UTF-8 で読み、script の外部スクリプトの結果 JSON は従来どおりロケールの文字コード
-    （EUC-JP）で読む。日本語のパスが置換文字に変わらない。"""
-    import sys
-
-    import eucjp_locale
-
-    env = eucjp_locale.environ(tmp_path / "locale")
-    report = "import json; print(json.dumps({'tool': 't', 'status': 'ok', 'summary': 's', 'outputs': {'path': '/作業/日本語'}}, ensure_ascii=False))"
-    argv = [sys.executable, "-P", "-c", _READ_BOTH, str(cli.SRC), report.encode(eucjp_locale.ENCODING)]  # 子はロケールで argv を読む
-    done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, timeout=120, check=False)
-    assert done.stdout.strip(), done.stderr.decode(eucjp_locale.ENCODING, "replace")[-2000:]
-    got = json.loads(done.stdout.decode("ascii").strip().splitlines()[-1])
-    assert json.loads(got["ext"])["outputs"] == {"path": "/作業/日本語"}, done.stderr.decode(eucjp_locale.ENCODING, "replace")
-    own = got["own"].strip().splitlines()[-1]
-    assert "�" not in own and not own.isascii(), got

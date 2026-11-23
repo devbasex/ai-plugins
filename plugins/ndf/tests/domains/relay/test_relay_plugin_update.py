@@ -378,18 +378,6 @@ def test_i8_list_failure_inside_the_lock_still_confirms_the_target(tmp_path):
     assert plugin_update.major_changed("11.0.7", got.target)
 
 
-def test_i5_held_lock_fails_after_the_limit_without_commands_but_confirms_the_target(tmp_path, hold_lock):
-    lock = tmp_path / "claude" / "ndf" / "plugin-update.lock"
-    fd = hold_lock(lock)
-    try:
-        cli = FakeCli([[_row(tmp_path / "root", version="11.0.7")], [_row(tmp_path / "root", version="11.0.9")]], [])
-        got = _updater(tmp_path, cli, timeout=0.05, lock=lock)()
-    finally:
-        os.close(fd)
-    assert got.result == "failed" and "0.05 秒待っても終わらない" in got.reason
-    assert cli.commands() == [] and got.target.version == "11.0.9"
-
-
 def test_updater_folds_a_lock_that_cannot_be_made_into_failed(tmp_path):
     (tmp_path / "file").write_text("", encoding="utf-8")
     cli = FakeCli([[_row(tmp_path / "root")]] * 2, [])

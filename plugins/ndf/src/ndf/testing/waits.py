@@ -1,46 +1,14 @@
-"""揺れない待ち（#1967・#2758・#2964）。
+"""待たずに戻ることの確かめ（#1967・#2758・#2964）。
 
-テストは壁時計の短い上限で結果を決めない。条件（ファイルが現れた・値がそろった）を短い間隔で確かめて待ち、
-上限は待ちが壊れたときだけ効く長さにする。「待たずに戻る」ことを確かめるときは、上限を待った場合にかかる秒に
-合わせる（`returns_before`）。
+テストは本物の時間を待たない（`tdd-cycle` の「テストに書かないもの」）。「待たずに戻る」ことを確かめるときは、
+上限を待った場合にかかる秒に合わせる（`returns_before`）。
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
-from typing import TypeVar
-
-T = TypeVar("T")
-
-# 条件が成り立たないときに諦めるまでの秒。高負荷の全件テストでも届く長さにする（成り立てばすぐ戻る）
-DEFAULT_TIMEOUT = 60.0
-DEFAULT_INTERVAL = 0.01
-
-
-class WaitTimeout(AssertionError):
-    """条件が上限の秒までに成り立たなかった。"""
-
-
-def wait_until(
-    predicate: Callable[[], T], *, timeout: float = DEFAULT_TIMEOUT, interval: float = DEFAULT_INTERVAL, what: str = "条件"
-) -> T:
-    """`predicate` が真の値を返すまで待ち、その値を返す。上限を超えたら `WaitTimeout`。"""
-    deadline = time.monotonic() + timeout
-    while True:
-        value = predicate()
-        if value:
-            return value
-        if time.monotonic() >= deadline:
-            raise WaitTimeout(f"{what} が {timeout:.0f} 秒のうちに成り立たなかった")
-        time.sleep(interval)
-
-
-def wait_for_file(path: Path, *, timeout: float = DEFAULT_TIMEOUT, interval: float = DEFAULT_INTERVAL) -> Path:
-    """ファイルが現れるまで待つ（シグナルや起動を、ファイルで知らせ合う形で待つ）。"""
-    return wait_until(lambda: path if path.exists() else None, timeout=timeout, interval=interval, what=f"{path} の作成")
 
 
 @contextmanager

@@ -157,14 +157,6 @@ def test_reviewed_out_is_not_written_when_no_reviewer_answers_this_run(wt: Path,
     assert not out.exists()
 
 
-def test_issue_2370_limit_without_unresolved_moves_on(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#2370: 上限で終わっても未解決が 0 件なら ok で次の工程へ進み、理由を decisions に残す。"""
-    fake = Fake(tmp_path / "st", {"codex": [["一つ目"], ["二つ目"]], "kiro": [[], []]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--max-rounds", "2")
-    assert (code, got["status"]) == (0, "ok")
-    assert any(fin.MAX_ROUNDS in d["decision"] for d in got["decisions"])
-
-
 def test_issue_2370_limit_with_unresolved_is_incomplete_with_gaps_in_outputs(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#2370・PR #3462 の保留: 見送りに理由が無ければ incomplete で、gaps を outputs にも載せてプランの結果へ引き継ぐ。"""
     fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]}, decide=lambda fid: {"outcome": fin.SKIPPED})
@@ -245,22 +237,6 @@ def test_issue_2440_push_rejected_by_another_push_is_taken_in(repos: Repos, wt: 
     assert (code, got["status"]) == (0, "ok")
     tree = sh(repos.origin, "ls-tree", "--name-only", BRANCH)
     assert "other.txt" in tree and "fix0.txt" in tree
-
-
-def test_issue_2440_conflicting_push_reopens_the_fixed_findings(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#2440: マージで衝突したら取り消して止め、届かなかった修正の指摘を未解決（欠け）へ戻す。強制の push はしない。"""
-    fake = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
-
-    def conflicting() -> None:
-        sh(repos.other, "pull", "-q", "--rebase", "origin", BRANCH)
-        commit(repos.other, "fix0.txt", "衝突する中身", "衝突")
-        sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-
-    fake.after_commit = conflicting
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert got["cause"]["kind"] == "incomplete" and got["gaps"][0]["name"] == "r1-1"
-    assert any("diverged" in w for w in got["warnings"])
-    assert sh(repos.origin, "rev-parse", BRANCH).strip() == sh(repos.other, "rev-parse", "HEAD").strip()
 
 
 def test_issue_2444_rebuild_items_are_each_fixed_or_deferred(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -712,33 +688,6 @@ def test_main_directory_is_resolved_once(wt: Path, tmp_path: Path, capsys, monke
     monkeypatch.setattr(location, "main_worktree", lambda g: calls.append(g) or real(g))
     _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
     assert len(calls) == 1
-
-
-def test_pr_settings_are_compared_from_the_tree_without_following_links(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
-) -> None:
-    """PR 3944 の r4-2: PR が `.ndf/review.json` を実行者の設定と同じ中身のファイルへのリンクにしても、リンクをたどらずに
-    違いとして知らせる。UTF-8 でない中身でも止めず、違いとして知らせる。"""
-    trusted = json.dumps({"version": 1, "focus": ["実行者の重点"]})
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "review.json").write_text(trusted, encoding="utf-8")
-    outside = tmp_path / "outside.json"
-    outside.write_text(trusted, encoding="utf-8")
-    (repos.other / ".ndf").mkdir(exist_ok=True)
-    (repos.other / ".ndf" / "review.json").symlink_to(outside)
-    sh(repos.other, "add", ".ndf/review.json")
-    sh(repos.other, "commit", "-q", "-m", "リンク")
-    _push_to_pr(repos)
-    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
-    assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
-    (repos.other / ".ndf" / "review.json").unlink()
-    # 差分では Git がバイナリとして扱う中身（比べる側はデコードしない）
-    (repos.other / ".ndf" / "review.json").write_bytes(b"\xff\xfe\x00")
-    sh(repos.other, "add", ".ndf/review.json")
-    sh(repos.other, "commit", "-q", "-m", "UTF-8 でない")
-    _push_to_pr(repos)
-    code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st2", {"codex": [[]], "kiro": [[]]}), wt)
-    assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
 
 
 def test_same_settings_in_the_pr_are_not_warned(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

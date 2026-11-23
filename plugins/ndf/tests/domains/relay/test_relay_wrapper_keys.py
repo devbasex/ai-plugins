@@ -8,11 +8,9 @@
 
 from __future__ import annotations
 
-import fcntl
 import io
 import json
 import os
-import sys
 import time
 import types
 from datetime import datetime, timezone
@@ -178,25 +176,6 @@ def test_d12_a_settings_hit_stops_without_trying_the_key_out(tmp_path):
     assert "利用者の設定" in out and wrapper_auth.AUTH_FIX_METERED not in out
 
 
-def test_d12_a_question_lock_that_never_frees_ends_refused_without_a_successor(tmp_path):
-    held = []
-
-    def refuse_and_hold(w):
-        fd = os.open(w.dir / wrapper_stop.QUESTION_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        held.append(fd)
-        refuse(w)
-
-    first = KeyChild({3: refuse_and_hold})
-    try:
-        ended, spawn, w, _ = _run(tmp_path, first, [FakeChild([], 0)], names=("work2",))
-    finally:
-        for fd in held:
-            os.close(fd)
-    assert ended == wrapper.Ended("refused", wrapper_stop.LAUNCH_STUCK.format(dir=w.dir))
-    assert len(spawn.calls) == 1 and first.killed is not None
-
-
 def _bare(tmp_path, **sec):
     w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), clock=lambda: 100.0)
     w.dir.mkdir(parents=True, exist_ok=True)
@@ -265,59 +244,6 @@ def w_quiet(tmp_path) -> float:
     return make_settings(tmp_path).quiet
 
 
-class Stubborn(FakeChild):
-    """強制終了しても終わらない子。"""
-
-    def terminate(self, force=False):
-        return False
-
-
-def test_d12_a_contended_record_lock_shares_the_stop_deadline(tmp_path, monkeypatch):
-    # 401 の拒否のマークで記録の錠を待った分は、旧子の終わりを待つ時間から引く（確かめてから止めるまで relay.child-exit の中）
-    lock, child_exit = 0.3, 0.4
-    real_seconds, real_value = limits.seconds, limits.value
-    monkeypatch.setattr(limits, "seconds", lambda name: child_exit if name == "relay.child-exit" else real_seconds(name))
-    monkeypatch.setattr(limits, "value", lambda name, key: lock if (name, key) == (key_helper.POLICY, "lock") else real_value(name, key))
-    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO())
-    w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    rec = key_helper.create(w.dir)
-    w._auth_seen = lambda sec, screen: True
-    child = Stubborn([], None)
-    fields = dict(must_end=False, end_now=False, must_end_at=None, end_cause=None, end_source=None, stop_by=None, denied=False)
-    sec = types.SimpleNamespace(launch="l-1", account="metered", child=child, target=types.SimpleNamespace(helper=rec), **fields)
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        began = time.monotonic()
-        w._key_auth(sec, "")
-        stopped = w._stop_child(sec, sec.stop_by)
-        took = time.monotonic() - began
-    finally:
-        os.close(fd)
-        child.close()
-    assert sec.end_now and not stopped
-    assert child_exit - 0.05 <= took < child_exit + 0.15
-
-
-def test_d12_the_stop_of_a_real_pty_child_keeps_its_signal_waits_inside_the_deadline(tmp_path):
-    # 実際の PtyProcess.terminate は SIGHUP・SIGCONT・SIGINT・SIGKILL の後に固定の待ちを挟む。期限の残りの中に収める（r2-3）
-    from ptyprocess import PtyProcess
-
-    code = "import signal,time;[signal.signal(s,signal.SIG_IGN) for s in (signal.SIGHUP,signal.SIGINT)];print('ready',flush=True);time.sleep(30)"
-    child = PtyProcess.spawn([sys.executable, "-c", code])
-    try:
-        assert b"ready" in child.read(64) and child.delayafterterminate >= 0.1
-        w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO())
-        began = time.monotonic()
-        stopped = w._stop_child(types.SimpleNamespace(child=child), began + 0.12)
-        took = time.monotonic() - began
-    finally:
-        if child.isalive():
-            child.kill(9)
-        child.close(force=True)
-    assert stopped and took < 0.25 and child.delayafterterminate >= 0.1  # 縮めずに打てば 3 回の待ちだけで 0.3 秒
-
-
 def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
     # 止めずに待つ間の拒否のマークの期限を、後で止めへ移ったときの旧子の終わりの期限に使い回さない（r2-4）
     now = [100.0]
@@ -337,40 +263,4 @@ def test_d12_a_stop_after_an_earlier_deny_gets_its_own_deadline(tmp_path):
         f.write(json.dumps({"id": rec.helper_id, "gate": "利用者の設定"}) + "\n")
     w._key_auth(sec, "")
     assert sec.end_now and sec.stop_by == 200.0 + limits.seconds("relay.child-exit")
-    sec.child.close()
-
-
-def test_d12_a_401_left_on_the_screen_writes_the_deny_mark_once_per_launch(tmp_path, monkeypatch):
-    # 止める時点を待つ間に 401 が画面に残っても、書けた後は見回りごとに書き足さず錠も待たない。書けなければ期限の中で打ち直す（r3-3）
-    now = [100.0]
-    w = wrapper.Wrapper(make_settings(tmp_path), spawn=Spawner([]), out=io.BytesIO(), clock=lambda: now[0])
-    w.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    rec = key_helper.create(w.dir)
-    w._auth_seen = lambda sec, screen: True
-    fields = dict(must_end=True, end_now=False, must_end_at=95.0, end_cause="drift", end_source=None, stop_by=None, denied=False)
-    sec = types.SimpleNamespace(
-        launch="l-1", account="metered", child=FakeChild([], None), target=types.SimpleNamespace(helper=rec), **fields
-    )
-    calls, real = [], key_helper.deny
-    monkeypatch.setattr(key_helper, "deny", lambda r, wait=None: calls.append(wait) or real(r, wait))
-
-    def marks():
-        return [json.loads(x) for x in rec.path.read_text().splitlines()].count({"id": rec.helper_id, "deny": True})
-
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        w._key_auth(sec, "")  # 錠を取れずに書けない
-        assert not sec.denied and marks() == 0
-        now[0] = 95.0 + limits.seconds("relay.end-wait") - 0.01
-        w._key_auth(sec, "")  # 打ち直しは期限の残りの中
-        assert calls[-1] == pytest.approx(0.01)
-    finally:
-        os.close(fd)
-    now[0] = 101.0
-    w._key_auth(sec, "")
-    assert sec.denied and marks() == 1
-    for _ in range(3):
-        w._key_auth(sec, "")
-    assert marks() == 1 and len(calls) == 3
     sec.child.close()

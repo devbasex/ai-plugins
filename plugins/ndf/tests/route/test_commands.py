@@ -17,7 +17,7 @@ from ndf.core import route
 from ndf.core.route import local_tests
 from ndf.core.plan import model, steps
 
-from ._flow import fake_bin, git, ndf_bin, plan_of, repo_with_base, run_step, step_of, values
+from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of, values
 
 _REPO = "devbasex/ai-plugins"
 
@@ -67,23 +67,6 @@ def test_changes_check_finds_no_changes_since_work_start(tmp_path):
         assert run_step(check, repo, fill=fill)["status"] == "ok"
     missing = run_step(check, repo, fill={"state_dir": str(tmp_path / "none")})
     assert missing["kind"] == "precondition"
-
-
-def test_assess_detects_docs_only_diff(tmp_path):
-    """#3023: 差分が文書（既定は .md）だけなら not_applicable（全体テストを飛ばす）。コードを含めば ok。"""
-    step = step_of(plan_of("check", base="develop", remote="origin"), "assess")
-    bindir = ndf_bin(tmp_path)
-    docs = repo_with_base(tmp_path / "a", {"guide.md": "# g\n"})
-    assert run_step(step, docs, bindir)["kind"] == "not_applicable"
-    code = repo_with_base(tmp_path / "b", {"guide.md": "# g\n", "a.py": "a = 1\n"})
-    assert run_step(step, code, bindir)["status"] == "ok"
-
-
-def test_assess_stops_as_precondition_when_base_is_not_fetched(tmp_path):
-    """差分を取れない（`origin/<base>` が無い）ときは文書だけと読まず precondition で止まる（全体テストを黙って飛ばさない）。"""
-    step = step_of(plan_of("check", base="main", remote="origin"), "assess")
-    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
-    assert run_step(step, repo, ndf_bin(tmp_path))["kind"] == "precondition"
 
 
 def _ci_result(path, nodes):

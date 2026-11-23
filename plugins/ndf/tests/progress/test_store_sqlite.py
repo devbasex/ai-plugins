@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
-import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -110,33 +108,6 @@ def test_failed_backup_leaves_no_partial_file_and_keeps_old_ones(root, monkeypat
     assert store.backups(root) == old
 
 
-def _write_and_crash(url: str, root: str) -> None:
-    """書き込んで、チェックポイントさせずにプロセスを落とす（-wal にフレームを残す）。"""
-    path = store.sqlite_path(url)
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA wal_autocheckpoint=0")
-    conn.execute("INSERT INTO ndf_progress_machines VALUES ('sprint:r:late', 'sprint', 'r', 'late', NULL, '2026-11-14')")
-    conn.commit()
-    os._exit(0)
-
-
-def test_restore_puts_back_the_backup_and_moves_the_wal_aside(root):
-    url = store.default_url(root)
-    path = root / store.DB_NAME
-    with store.open_store(url, root, T0) as st:
-        _write_one(st)
-        backup = store.backup(st.engine, root, T0 + timedelta(minutes=1), force=True)
-    proc = mp.get_context("fork").Process(target=_write_and_crash, args=(url, str(root)))
-    proc.start()
-    proc.join()
-    wal = Path(f"{path}-wal")
-    assert wal.exists() and wal.stat().st_size > 0
-    retired = store.restore(url, root, backup, T0 + timedelta(hours=1))
-    assert _names(path) == _names(backup) == ["s1"]
-    assert Path(f"{retired}-wal").exists() and not wal.exists()
-    assert not path.with_name(f".{path.name}{store.RESTORING_SUFFIX}").exists()
-
-
 def test_restore_targets_the_file_named_by_the_url(root, tmp_path, monkeypatch):
     outside = tmp_path / "elsewhere" / "mine.sqlite"
     monkeypatch.setenv("NDF_PROGRESS_DB", f"sqlite:///{outside}")
@@ -206,30 +177,3 @@ def test_restore_refuses_a_sqlite_url_with_a_query_without_writing(root, tmp_pat
     with pytest.raises(store.UnsupportedUrl):
         store.restore(f"sqlite:///{db}?timeout=30", root, tmp_path / "missing.sqlite")
     assert not list(tmp_path.glob("progress.sqlite*"))
-
-
-def _open_once(url: str, root: str, log: str) -> None:
-    original = durable.check_file
-
-    def counting(path: Path) -> bool:
-        with open(log, "a") as f:
-            f.write("1\n")
-        return original(path)
-
-    durable.check_file = counting
-    store.open_store(url, Path(root)).close()
-
-
-def test_concurrent_openers_check_and_back_up_once(root, tmp_path):
-    # P1-6: 目印の無い保存先を 8 つのプロセスが同時に開いても、検査とバックアップは 1 回だけ（maint_lock と目印の読み直し）
-    url = store.default_url(root)
-    log = tmp_path / "checks.log"
-    ctx = mp.get_context("fork")
-    procs = [ctx.Process(target=_open_once, args=(url, str(root), str(log))) for _ in range(8)]
-    for p in procs:
-        p.start()
-    for p in procs:
-        p.join()
-    assert all(p.exitcode == 0 for p in procs)
-    assert log.read_text().count("1") == 1
-    assert len(store.backups(root)) == 1

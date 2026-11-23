@@ -12,7 +12,6 @@ import pytest
 
 from ndf.contracts import facts
 from ndf.domains.relay import account_registry, accounts, blocks, markers, observe, registry, session_env, signals
-from ndf.domains.relay import tmux as relay_tmux
 
 FENCE = "ndf-next"
 
@@ -780,18 +779,3 @@ def test_launched_ndf_does_not_put_a_bin_without_an_executable_ndf_first(tmp_pat
     got = session_env.with_launched_ndf(env, new)
     assert got["PATH"] == _path(local, "/usr/bin", "/bin")
     assert _resolved(got, "ndf") == [str(local / "ndf")]
-
-
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
-def test_the_wrapper_session_has_no_status_line(tmp_path):
-    # 結び付いた利用者の画面の下にラッパーのステータス行を出さない。サーバ全体の設定は変えない（#3833）
-    sock = f"ndf-test-{os.getpid()}"
-    tmux = ["tmux", "-f", "/dev/null", "-L", sock]
-    try:
-        subprocess.run([*tmux, *relay_tmux.new_session_args("t2", tmp_path, ["sleep", "30"], {})], check=True, timeout=10)
-        shown = subprocess.run([*tmux, "show-options", "-t", "=t2:", "status"], capture_output=True, text=True, timeout=10)
-        whole = subprocess.run([*tmux, "show-options", "-g", "status"], capture_output=True, text=True, timeout=10)
-    finally:
-        subprocess.run([*tmux, "kill-server"], capture_output=True, timeout=10)
-    assert shown.stdout.strip() == "status off"
-    assert whole.stdout.strip() == "status on"

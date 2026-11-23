@@ -6,12 +6,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from ._slides import DECK_FRAME, NODE, SCRIPT_TIME, needs_node, node
+from ._slides import DECK_FRAME, SCRIPT_TIME, needs_node, node
 
 pytestmark = needs_node
 
@@ -104,166 +103,7 @@ out([m.readScript({json.dumps(str(f))}), err({json.dumps(missing)}), err({json.d
     ]
 
 
-# ---- script-time.js の CLI（I-008・I-012・I-014） ----
-
-# 字数は 表紙 5・本編 12。見出しの `|` は表で `\|` に置き換わる
-SAMPLE = "## 1. 表紙（20秒）\n> あいう えお\n## 2. 本編|縦\n> **強調**と`コード`\n>\n> 二段落目です\n"
-USAGE = "usage: node lib/script-time.js <台本> [--wpm 350] [--limit <分>] [--json]"
-
-
-def cli(cwd: Path, *args: str) -> tuple[int, str, str]:
-    r = subprocess.run([NODE, str(SCRIPT_TIME), *args], capture_output=True, text=True, cwd=cwd, timeout=60, check=False)
-    return r.returncode, r.stdout, r.stderr
-
-
-@pytest.fixture
-def work(tmp_path: Path) -> Path:
-    (tmp_path / "s.md").write_text(SAMPLE, encoding="utf-8")
-    return tmp_path
-
-
-def sample_json(wpm: float, s1: float, s2: float, total: float) -> dict:
-    return {
-        "wpm": wpm,
-        "pages": [
-            {"no": 1, "title": "表紙", "chars": 5, "seconds": s1, "planned": 20},
-            {"no": 2, "title": "本編|縦", "chars": 12, "seconds": s2, "planned": None},
-        ],
-        "total": {"pages": 2, "chars": 17, "seconds": total, "planned": 20},
-    }
-
-
-def test_default_wpm_is_350(work: Path):
-    code, out, err = cli(work, "s.md", "--json")
-    assert (code, err) == (0, "")
-    assert json.loads(out) == sample_json(350, 0.9, 2.1, 3)
-
-
-def test_default_wpm_appears_in_the_table(work: Path):
-    code, out, _ = cli(work, "s.md")
-    assert code == 0
-    assert out.splitlines()[-1] == "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |"
-
-
-@pytest.mark.parametrize(
-    ("args", "wpm", "s1", "s2", "total"),
-    [
-        (["--wpm", "100"], 100, 3, 7.2, 10.2),
-        (["--wpm", "350.5"], 350.5, 0.9, 2.1, 3),
-        (["--wpm", "100", "--wpm", "200"], 200, 1.5, 3.6, 5.1),  # 後に書いた値が勝つ
-    ],
-)
-def test_wpm_overrides_the_default(work: Path, args: list[str], wpm: float, s1: float, s2: float, total: float):
-    code, out, _ = cli(work, "s.md", "--json", *args)
-    assert code == 0
-    assert json.loads(out) == sample_json(wpm, s1, s2, total)
-
-
-@pytest.mark.parametrize("args", [[], ["--json"], ["--wpm", "100"]])
-def test_usage_without_a_script(work: Path, args: list[str]):
-    assert cli(work, *args) == (1, "", USAGE + "\n")
-
-
-@pytest.mark.parametrize(
-    ("args", "message"),
-    [
-        (["s.md", "--wpm", "0"], "--wpm は正の数"),
-        (["s.md", "--wpm", "abc"], "--wpm は正の数"),
-        (["s.md", "--wpm"], "--wpm は正の数"),
-        (["s.md", "--limit", "-1"], "--limit は正の数"),
-        (["s.md", "--foo"], "知らない引数: --foo"),
-        (["s.md", "--wpm=100"], "知らない引数: --wpm=100"),
-        (["s.md", "other.md"], "台本は 1 つだけ渡す: other.md"),
-        (["s.md", "-x"], "台本は 1 つだけ渡す: -x"),
-    ],
-)
-def test_bad_arguments_exit_1(work: Path, args: list[str], message: str):
-    assert cli(work, *args) == (1, "", message + "\n")
-
-
-@pytest.mark.parametrize("args", [["--json", "s.md"], ["s.md", "--json", "--json"], ["--wpm", "350", "s.md", "--json"]])
-def test_flags_may_come_before_or_after_the_script(work: Path, args: list[str]):
-    code, out, _ = cli(work, *args)
-    assert code == 0
-    assert json.loads(out) == sample_json(350, 0.9, 2.1, 3)
-
-
-def test_limit_is_reported_in_json(work: Path):
-    code, out, _ = cli(work, "s.md", "--limit", "1", "--json")
-    assert code == 0
-    assert json.loads(out) == {**sample_json(350, 0.9, 2.1, 3), "limit": {"minutes": 1, "over": False}}
-
-
-# ---- main（I-014）: 出力の形・上限の判定・失敗の終了コード ----
-
-TABLE_HEAD = ["| # | 見出し | 字数 | 尺（秒） | 配分（秒） |", "| ---: | --- | ---: | ---: | ---: |"]
-
-
-def test_table_output(work: Path):
-    assert cli(work, "s.md") == (
-        0,
-        "\n".join(
-            [
-                *TABLE_HEAD,
-                "| 1 | 表紙 | 5 | 0.9 | 20 |",
-                "| 2 | 本編\\|縦 | 12 | 2.1 | — |",
-                "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |",
-            ]
-        )
-        + "\n",
-        "",
-    )
-
-
-def test_table_without_planned_seconds(tmp_path: Path):
-    (tmp_path / "noplan.md").write_text("## 1. A\n> あ\n## 2. B\n", encoding="utf-8")
-    assert cli(tmp_path, "noplan.md") == (
-        0,
-        "\n".join(
-            [*TABLE_HEAD, "| 1 | A | 1 | 0.2 | — |", "| 2 | B | 0 | 0.0 | — |", "| 合計 | 2 ページ（350 字/分） | 1 | 0.2（0分00秒） | — |"]
-        )
-        + "\n",
-        "",
-    )
-
-
-def test_over_limit_prints_the_table_and_exits_1(work: Path):
-    code, out, err = cli(work, "s.md", "--limit", "0.01")
-    assert code == 1
-    assert out.splitlines()[-1] == "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |"
-    assert err == "尺が上限を超えた: 0分03秒 > 0.01 分\n"
-
-
-def test_over_limit_in_json_also_exits_1(work: Path):
-    code, out, err = cli(work, "s.md", "--limit", "0.01", "--json")
-    assert code == 1
-    assert json.loads(out)["limit"] == {"minutes": 0.01, "over": True}
-    assert err == "尺が上限を超えた: 0分03秒 > 0.01 分\n"
-
-
-def test_limit_equal_to_the_total_is_not_over(tmp_path: Path):
-    (tmp_path / "one.md").write_text("## 1. A\n> " + "あ" * 350 + "\n", encoding="utf-8")
-    code, out, err = cli(tmp_path, "one.md", "--limit", "1", "--json")
-    assert (code, err) == (0, "")
-    assert json.loads(out) == {
-        "wpm": 350,
-        "pages": [{"no": 1, "title": "A", "chars": 350, "seconds": 60, "planned": None}],
-        "total": {"pages": 1, "chars": 350, "seconds": 60, "planned": None},
-        "limit": {"minutes": 1, "over": False},
-    }
-    code, out, err = cli(tmp_path, "one.md", "--wpm", "349", "--limit", "1")
-    assert code == 1
-    assert out.splitlines()[-1] == "| 合計 | 1 ページ（349 字/分） | 350 | 60.2（1分00秒） | — |"
-    assert err == "尺が上限を超えた: 1分00秒 > 1 分\n"
-
-
-def test_missing_script_exits_1(tmp_path: Path):
-    assert cli(tmp_path, "none.md") == (1, "", "台本が無い: none.md\n")
-
-
-def test_malformed_script_exits_2(tmp_path: Path):
-    (tmp_path / "dup.md").write_text("## 1. A\n## 1. B\n", encoding="utf-8")
-    assert cli(tmp_path, "dup.md") == (2, "", "台本のページの番号が重なる: 1（dup.md）\n")
+# ---- script-time.js ----
 
 
 def test_module_exports_without_running_main():

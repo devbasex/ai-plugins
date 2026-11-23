@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -596,19 +594,6 @@ def test_missing_input_does_not_start_the_row(repo, st, env, capsys):
     assert out["metrics"]["stage"] == "設計" and _labels(st, tid)["設計"] == "pending"
 
 
-def test_next_while_the_work_runs_returns_wait_and_show_gives_the_hand(repo, st, env, capsys):
-    tid = _new(capsys)
-    run.advance(st, tid, repo, env.env)
-    with store.run_lock(st, tid):
-        assert run.advance(st, tid, repo, env.env)["next"]["argv"][2] == "wait"
-        assert run.hand(st, run.read(st, tid))["argv"][2] == "wait"
-        timed = run.wait(st, tid, 0)
-        assert timed["cause"]["kind"] == "wait_timeout" and timed["next"]["argv"][2] == "wait"
-    # 作業が落ちた（排他が空いた）後の 1 手は next で、打てば終わったステップの次から流す
-    assert run.hand(st, run.read(st, tid))["argv"][2] == "next"
-    assert run.wait(st, tid, 0)["next"]["argv"][2] == "next"
-
-
 def test_records_failure_does_not_stop_the_work_and_resync_reports_it(repo, st, env, capsys):
     tid = _new(capsys)
     env.records.broken = True
@@ -636,23 +621,6 @@ def test_retry_delay_follows_the_cause_table():
     assert causes.retry_delay(causes.cause("usage_limit", "x"), 0) is None
     assert causes.retry_delay(causes.cause("usage_limit", "x", retry_after=30), 0) == 30.0
     assert causes.retry_delay(None, 0) is None
-
-
-def test_cli_next_launches_the_work_in_another_process(repo, capsys):
-    tid = _new(capsys)
-    code, out = _main(capsys, run.main, "next", tid)
-    assert code == 0 and out["next"]["argv"][2] == "wait"
-    # 起動した作業が排他を取り、要求と受け入れ条件の行へ結果を書くまで待つ（作業の起動の前に wait が戻りうる）
-    for _ in range(120):
-        _, waited = _main(capsys, run.main, "wait", tid, "--timeout", "60")
-        _, shown = _main(capsys, run.main, "show", tid)
-        kinds = [h["kind"] for h in shown["metrics"]["history"]]
-        if kinds[kinds.index("started") + 1 :]:
-            break
-        time.sleep(0.5)
-    assert kinds[kinds.index("started") + 1 :]
-    assert waited.get("cause", {}).get("kind") != "wait_timeout"
-    assert (run.work_root(command.store_root_of(repo), tid) / "work.log").is_file()
 
 
 def test_cli_answer_needs_a_known_answer(repo, capsys):
@@ -755,6 +723,24 @@ def test_append_lets_refusals_through_without_retrying(repo, st, capsys):
 # --- 現状固定: run.wait（I-026。作業が動く間だけ設定の間隔で待ち、上限で同じ wait を返す） -------------
 
 
+def test_wait_on_a_missing_table_is_refused(repo, st):
+    with pytest.raises(model.Refused, match="無い"):
+        run.wait(st, "no-such-table", 0, sleep=lambda s: None)
+
+
+def test_next_while_the_work_runs_returns_wait_and_show_gives_the_hand(repo, st, env, capsys):
+    tid = _new(capsys)
+    run.advance(st, tid, repo, env.env)
+    with store.run_lock(st, tid):
+        assert run.advance(st, tid, repo, env.env)["next"]["argv"][2] == "wait"
+        assert run.hand(st, run.read(st, tid))["argv"][2] == "wait"
+        timed = run.wait(st, tid, 0)
+        assert timed["cause"]["kind"] == "wait_timeout" and timed["next"]["argv"][2] == "wait"
+    # 作業が落ちた（排他が空いた）後の 1 手は next で、打てば終わったステップの次から流す
+    assert run.hand(st, run.read(st, tid))["argv"][2] == "next"
+    assert run.wait(st, tid, 0)["next"]["argv"][2] == "next"
+
+
 def test_wait_without_live_work_returns_the_report_at_once_without_sleeping(repo, st, capsys):
     tid = _new(capsys)
     slept: list[float] = []
@@ -808,46 +794,3 @@ def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st,
     )
     assert later["cause"] == {"kind": "wait_timeout", "detail": f"ステートマシン {tid} を流す作業がまだ動いている（0.05 秒待った）"}
     assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1
-
-
-def _session_leader() -> subprocess.Popen:
-    """起動した作業の代わり（別のプロセスの組の頭。`launch_worker` と同じ起動方）。"""
-    return subprocess.Popen(["sleep", "60"], start_new_session=True)
-
-
-def test_work_launched_but_not_yet_holding_the_lock_counts_as_live(repo, st, env, capsys):
-    # PR 3464 の指摘: next が排他を放してから作業が排他を取るまでの間に、wait・next が 2 本目を起動しない
-    tid = _new(capsys)
-    proc = _session_leader()
-    try:
-        env.env = run.Env(**{**vars(env.env), "launch": lambda st_, t, cwd: proc.pid})
-        assert run.advance(st, tid, repo, env.env)["next"]["argv"][2] == "wait"
-        assert run.launch_path(st.root, tid).is_file() and run.is_live(st, tid)
-        assert run.wait(st, tid, 0, sleep=lambda s: None)["cause"]["kind"] == "wait_timeout"
-        again = run.advance(st, tid, repo, env.env)
-        assert again["next"]["argv"][2] == "wait" and "動いている" in again["summary"]
-        assert len([e for e in run.read(st, tid).events if e.draft.kind == "started"]) == 1
-        assert run.hand(st, run.read(st, tid))["argv"][2] == "wait"
-        run.work(st, tid, repo, env.env)  # 作業が排他を取ればマーカーは消える
-        assert not run.launch_path(st.root, tid).exists() and not run.is_live(st, tid)
-    finally:
-        proc.kill()
-        proc.wait()
-
-
-def test_a_launch_mark_of_work_that_is_gone_is_not_live(repo, st, capsys):
-    tid = _new(capsys)
-    proc = _session_leader()
-    proc.kill()
-    proc.wait()
-    mark = run.launch_path(st.root, tid)
-    mark.parent.mkdir(parents=True, exist_ok=True)
-    mark.write_text(json.dumps({"pid": proc.pid}))
-    assert not run.is_live(st, tid)
-    mark.write_text("{")  # 書きかけのマーカーも起動した作業として数えない
-    assert not run.is_live(st, tid)
-
-
-def test_wait_on_a_missing_table_is_refused(repo, st):
-    with pytest.raises(model.Refused, match="無い"):
-        run.wait(st, "no-such-table", 0, sleep=lambda s: None)

@@ -350,25 +350,6 @@ def test_d4_the_shape_change_is_told_once_and_again_after_a_success(tmp_path):
     assert [(r["account"], r["items"]) for r in rows_of(w, "usage_shape")] == [("work1", ["five_hour"])] * 2
 
 
-def test_d4_a_fetch_that_raises_does_not_stop_the_thread(tmp_path):
-    # 決定 4: fetch_usage が例外を上げてもスレッドは止まらず、次のアカウントを取る
-    def fetch(target, now, force, gate):
-        if target.name == "work1":
-            raise OSError("偽の失敗")
-        return claude_usage.Usage(five_hour=(1.0, 2.0))
-
-    f = wrapper_fetch.Fetcher(fetch)
-    for name in ("work1", "work2"):
-        f.put(accounts.FetchTarget(tmp_path, name, "g1"), 0.0)
-    got, deadline = [], time.monotonic() + 10
-    while len(got) < 2 and time.monotonic() < deadline:
-        got += f.results()
-        time.sleep(0.01)
-    f.close()
-    assert [n for n, _ in got] == ["work1", "work2"] and isinstance(got[0][1], OSError) and got[1][1].error is None
-    assert f.busy == set()
-
-
 def test_d4_i14_a_refetched_window_frees_a_waiting_account(tmp_path):
     # 決定 4・I14: 待つ間（wait_reset）に取り直した値が上限でなければ、そのアカウントで同じ会話を続ける
     base = time.time()

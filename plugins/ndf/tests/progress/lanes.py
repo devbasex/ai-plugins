@@ -1,7 +1,6 @@
-"""6 本のレーンが `ndf progress next` で同じステートマシンの DB へ同時に書くテストの、レーン 1 本の中身（pytest は集めない）。
+"""ステートマシンの `next` を同じプロセスで進めるテストが共有する手（pytest は集めない）。
 
-レーンは自分のスプリントのステートマシンを作り、`next` を打っては起動した作業を同じプロセスで流し（`run.work`）、承認ゲートに
-回答して完了まで進める。これを決めた回数だけ繰り返し、`database is locked`（停止理由 store_busy）に当たった回数を返す。
+`turn` は `next` を打って起動した作業を同じプロセスで流し（`run.work`）、`answer` は承認ゲートに回答する。
 作業（プラン）は偽物で、ステートマシンの DB への書き込みだけが本物である。
 """
 
@@ -10,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ndf.contracts import result
-from ndf.progress import command, gate, invoke, model, run, store
+from ndf.progress import gate, invoke, run, store
 
 
 def values(cwd: Path, branch: str) -> dict:
@@ -60,45 +59,3 @@ class _NoRecords:
 
     def write(self, number: int, body: str) -> None:
         return None
-
-
-def _env(cwd: Path) -> run.Env:
-    given = values(cwd, "sprint/s")
-    return run.Env(
-        facts=lambda words, ctx, c: {w: True for w in words},
-        launch=lambda st, tid, c: None,
-        invoker=lambda r, c, w, a: ok_result(r, given),
-        records=lambda c: _NoRecords(),
-        sleep=lambda s: None,
-    )
-
-
-def _sprint(st: store.Store, tid: str, cwd: Path, env: run.Env) -> int:
-    """1 スプリントを完了まで流す。store_busy に当たった回数を返す（当たれば同じ手を打ち直す）。"""
-    busy = 0
-    for _ in range(200):
-        try:
-            out = turn(st, tid, cwd, env)
-            if out["status"] == "gate":
-                answer(st, tid, out["metrics"]["stage"], "approved", "レーンの試験")
-            elif out["metrics"].get("state") == "completed" or out["metrics"].get("move") == "done":
-                return busy
-        except store.StoreBusy:
-            busy += 1
-    raise AssertionError(f"{tid} が完了しない")
-
-
-def lane(url: str, root: str, cwd: str, name: str, rounds: int, barrier, out) -> None:
-    """全員がそろってから、`rounds` 回のスプリントを流し、(名前, busy の回数, 完了した数) を `out` へ置く。"""
-    here = Path(cwd)
-    env = _env(here)
-    repo = command.repo_id(here, Path(root))
-    barrier.wait()
-    busy = done = 0
-    for i in range(rounds):
-        sprint = f"{name}-{i}"
-        assert command.main(["new", sprint, "--mode", "light", "--issues", "1"]) == 0
-        with store.open_store(url, Path(root)) as st:
-            busy += _sprint(st, model.machine_id("sprint", repo, sprint), here, env)
-            done += 1
-    out.put((name, busy, done))

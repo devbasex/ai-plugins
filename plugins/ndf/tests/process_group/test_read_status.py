@@ -6,8 +6,6 @@
 from __future__ import annotations
 
 import os
-import threading
-import time
 
 import pytest
 
@@ -55,37 +53,6 @@ def test_reads_past_one_chunk_until_eof(read_status, pipe):
     _close_writer(pipe)
 
     assert read_status(pipe["r"], 5.0) == payload
-
-
-@pytest.mark.parametrize("read_status", READERS)
-def test_joins_writes_that_arrive_apart(read_status, pipe):
-    def later():
-        os.write(pipe["w"], b"1")
-        time.sleep(0.1)
-        os.write(pipe["w"], b"3")
-        _close_writer(pipe)
-
-    t = threading.Thread(target=later)
-    t.start()
-    try:
-        assert read_status(pipe["r"], 5.0) == b"13"
-    finally:
-        t.join()
-
-
-@pytest.mark.parametrize("read_status", READERS)
-def test_no_eof_within_the_time_is_none(read_status, pipe):
-    started = time.monotonic()
-
-    assert read_status(pipe["r"], 0.2) is None
-    assert time.monotonic() - started < 3.0
-
-
-@pytest.mark.parametrize("read_status", READERS)
-def test_partial_data_without_eof_is_still_none(read_status, pipe):
-    os.write(pipe["w"], b"2")
-
-    assert read_status(pipe["r"], 0.2) is None
 
 
 @pytest.mark.parametrize("read_status", READERS)

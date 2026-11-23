@@ -113,24 +113,6 @@ def test_clip_keeps_short_text_and_drops_text_when_no_injection_is_allowed(tmp_p
     assert not list(tmp_path.glob("*.md"))
 
 
-def test_entry_exception_and_deadline_print_nothing(tmp_path, monkeypatch):
-    # M3-H6: 例外・締め切り超えは出力なし・0
-    def boom(*a, **k):
-        raise RuntimeError("壊れた")
-
-    monkeypatch.setattr(dispatch, "run", boom)
-    assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None
-    assert records()[-1]["error"] == "RuntimeError"
-
-    def slow(*a, **k):
-        time.sleep(5)
-
-    monkeypatch.setattr(dispatch, "run", slow)
-    started = time.monotonic()
-    assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None
-    assert time.monotonic() - started < 3 and records()[-1]["error"] == "deadline"
-
-
 def test_entry_without_state_dir_still_answers(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_state_dir", lambda: None)
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None

@@ -13,7 +13,6 @@ import io
 import json
 import os
 import shlex
-import subprocess
 import sys
 
 import pytest
@@ -316,31 +315,6 @@ def test_i9_target_env_refused_leaves_no_files(tmp_path):
     got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--settings", "own.json"])
     assert got == "metered_overridden"
     assert list((account_choice.settings_path(s.state_dir)).iterdir()) == []
-
-
-def test_i9_target_env_removes_only_the_leftovers_of_ended_launches(tmp_path):
-    # 一時ファイルと固定のファイルの残骸: 起動した側が終わり、そのパスを起動引数に持つプロセスも無いものだけを消す
-    store = register(tmp_path)
-    s, _, env = _env(tmp_path)
-    d = account_choice.settings_path(s.state_dir)
-    d.mkdir(parents=True, mode=0o700)
-    dead = d / "999999999-1.00-00000000000000aa"
-    stale = [d / f"{dead.name}.json", d / f"{dead.name}.pin.json", d / f"{dead.name}.pin.ok"]
-    for p in stale:
-        p.write_text("{}")
-    live_stem = "999999999-1.00-00000000000000bb"
-    used = d / f"{live_stem}.pin.json"
-    used.write_text("{}")
-    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", json.dumps({"apiKeyHelper": f"x --pin {used}"})])
-    me = d / f"{os.getpid()}-{reg.proc_start(os.getpid()):.2f}-00000000000000cc.json"
-    me.write_text("{}")
-    try:
-        got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude"])
-        assert isinstance(got, account_choice.Built), got
-        assert not any(p.exists() for p in stale) and used.exists() and me.exists()
-    finally:
-        holder.kill()
-        holder.wait()
 
 
 # ---------------------------------------------------------------- helper の固定のファイルの確かめと config-gate

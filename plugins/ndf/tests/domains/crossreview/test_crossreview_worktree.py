@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -13,30 +12,6 @@ from ndf.core.converge import worktree
 from ndf.domains.crossreview import cli
 
 from ._repos import BRANCH, Repos, sh
-
-
-def _listed(repos: Repos, path: Path) -> bool:
-    return f"worktree {path}" in sh(repos.main, "worktree", "list", "--porcelain")
-
-
-def test_issue_3106_locked_registration_survives_prune_from_an_environment_without_the_directory(repos: Repos, tmp_path: Path) -> None:
-    """#3106: /tmp を共有しない別の環境の prune（worktree のディレクトリが見えない）でも、lock した登録は消えない。"""
-    locked = repos.add_worktree(tmp_path / "pr1")
-    plain = repos.add_worktree(tmp_path / "pr2")
-    reason = worktree.lock_review_worktree(git.Git(locked), locked, "cross-review", 1)
-    assert reason == worktree.lock_reason("cross-review", 1)
-    hidden = tmp_path / "hidden"
-    hidden.mkdir()
-    for wt in (locked, plain):
-        shutil.move(str(wt), str(hidden / wt.name))
-    sh(repos.main, "worktree", "prune")
-    for wt in (locked, plain):
-        shutil.move(str(hidden / wt.name), str(wt))
-    assert _listed(repos, locked)
-    assert worktree.registration(locked).worktree == locked
-    assert not _listed(repos, plain)
-    with pytest.raises(worktree.WorktreeUnregistered):
-        worktree.registration(plain)
 
 
 def _runner(codes: dict[str, int]):

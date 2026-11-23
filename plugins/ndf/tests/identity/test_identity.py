@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import fcntl
 import json
-import threading
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -468,19 +467,3 @@ def test_prepare_holds_the_old_locks_through_the_rename_and_the_format_file(iden
     assert ready.retired == (identity.Retired(ident.state_dir, retired),)
     assert seen == {"rename": True, "format": True}
     assert not taken_by_another(retired / old_lock.relative_to(ident.state_dir))
-
-
-def test_prepare_waits_for_the_state_lock(ident):
-    # 判定から format.json の作成までは、同じ保存先を用意するほかの処理と重ならない
-    ident.state_dir.parent.mkdir(parents=True, exist_ok=True)
-    with open(identity.lock_path(ident), "a") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)
-        worker = threading.Thread(target=identity.prepare_state_dir, args=(ident,), kwargs={"now": NOW})
-        worker.start()
-        worker.join(0.3)
-        assert worker.is_alive()
-        assert not (ident.state_dir / "format.json").exists()
-        fcntl.flock(held, fcntl.LOCK_UN)
-    worker.join(5)
-
-    assert (ident.state_dir / "format.json").exists()

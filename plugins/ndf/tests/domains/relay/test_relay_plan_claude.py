@@ -235,17 +235,6 @@ def test_3604_11_another_config_dir_does_not_launch(tmp_path, monkeypatch):
     assert fake.calls() == []
 
 
-def test_3604_11_the_lease_is_gone_after_a_timeout(tmp_path, monkeypatch):
-    fake = Fake(tmp_path, monkeypatch)
-    register(tmp_path, "work1")
-    fake.setenv({**_account_parent(fake), "FAKE_SLEEP": "30"})
-
-    got = fake.call(*FULL, timeout=2)
-
-    assert got.failure is claude.Failure.TIMEOUT
-    assert fake.leases("work1") == []
-
-
 def test_default_login_does_not_load_the_relay_checks(tmp_path, monkeypatch):
     fake = Fake(tmp_path, monkeypatch)
 

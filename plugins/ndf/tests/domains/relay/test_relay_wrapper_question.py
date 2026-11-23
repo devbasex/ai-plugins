@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 from pathlib import Path
 
@@ -201,57 +200,6 @@ def test_i4_a_question_written_after_the_decision_keeps_the_child_alive(tmp_path
         account_at = [i for i, r in enumerate(rows) if r["kind"] == "account"]
         # 最初のセグメントの account の行（起動の理由 first）と、切り替えの行の 2 つ。切り替えの行は転送の後
         assert len(account_at) == 2 and account_at[0] < forward_at < account_at[1]
-
-
-class LockWitness(FakeChild):
-    """`terminate` の中で、別のスレッドの hook が質問を書こうとする（ロックを持ったまま止めているかを見る）。"""
-
-    def __init__(self):
-        super().__init__([b"working\r\n"], None)
-        self.where: tuple[Path, str, str] | None = None
-        self.wrote_while_stopping: bool | None = None
-
-    def started(self, directory: Path, session_id: str, launch: str) -> None:
-        self.where = (directory, session_id, launch)
-
-    def hook_writes(self) -> bool:
-        directory, session_id, launch = self.where
-        payload = {"tool_use_id": "stale", "tool_input": {"questions": []}}
-        return signals.write_question(directory / signals.QUESTION_FILE, session_id, payload, 0.3, launch=launch)
-
-    def terminate(self, force=False):
-        got: list = []
-        hook = threading.Thread(target=lambda: got.append(self.hook_writes()))
-        hook.start()
-        hook.join()
-        self.wrote_while_stopping = got[0]
-        return super().terminate(force)
-
-
-class AfterStop(FakeChild):
-    """次の子。最初の見回りで、止めた前の子の hook が遅れて質問を書こうとした結果を残す。"""
-
-    def __init__(self, previous: LockWitness):
-        super().__init__([], 0)
-        self.previous = previous
-        self.late_write: bool | None = None
-
-    def isalive(self):
-        if self.late_write is None:
-            self.late_write = self.previous.hook_writes()
-        return super().isalive()
-
-
-def test_i4_the_child_is_stopped_holding_the_lock_and_its_late_hook_cannot_write(tmp_path):
-    # I4・受け入れ条件 10: 止めている間は hook がロックを取れず書けない。止めた後に前の子の hook が書こうとしても、
-    # 今の起動から外れているので書けず、次の子の質問のファイルは空のまま
-    first = LockWitness()
-    second = AfterStop(first)
-    ended, spawn, w = run_wrapper(tmp_path, [first, second], markers={0: "/goal 次"})
-    assert ended.cause == "" and len(spawn.calls) == 2
-    assert first.wrote_while_stopping is False
-    assert second.late_write is False
-    assert not signals.question_present(w.dir)
 
 
 class Unkillable(FakeChild):

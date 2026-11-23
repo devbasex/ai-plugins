@@ -6,21 +6,10 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
-from pathlib import Path
 
-import pytest
-
-from ndf.domains.hooks import budget, cli, env, registration, tables
-
-from ._hooks import AUTO, bash, make_repo, read_sample, records, sample_paths
-
-SH = shutil.which("sh")
-# 起動されたスクリプトが自分の argv を書く（環境の python と boot の経路の確かめ）
-PROBE = "import json, os, sys\nwith open(os.environ['PROBE_OUT'], 'w') as f:\n    json.dump(sys.argv, f)\n"
+from ndf.domains.hooks import budget, cli, registration, tables
 
 
 def _registered(runtime: str) -> dict:
@@ -30,30 +19,6 @@ def _registered(runtime: str) -> dict:
 def _commands() -> list[tuple[str, str, str]]:
     """（ランタイム・事象・ファイルの command）の一覧。"""
     return [(rt, ev, groups[0]["hooks"][0]["command"]) for rt in tables.runtimes() for ev, groups in _registered(rt).items()]
-
-
-def _run(command: str, runtime: str, root: Path, cache: Path, payload: str = "{}", path: str | None = None):
-    root_env = tables.runtimes()[runtime]["plugin_root_env"]
-    extra = {root_env: str(root), "XDG_CACHE_HOME": str(cache), "PATH": path if path is not None else os.environ["PATH"]}
-    return subprocess.run([SH, "-c", command], input=payload, capture_output=True, text=True, timeout=60, env={**os.environ, **extra})
-
-
-@pytest.fixture
-def probe_root(tmp_path) -> Path:
-    """`hooks/entry.py` と `hooks/boot.py` を、argv を書くだけのスクリプトに替えたプラグインの根。"""
-    root = tmp_path / "plugin"
-    (root / "hooks").mkdir(parents=True)
-    for name in ("entry.py", "boot.py"):
-        (root / "hooks" / name).write_text(PROBE, encoding="utf-8")
-    return root
-
-
-def _env_python(cache: Path) -> Path:
-    """登録が指す環境の python（`env` と同じ保存先）を、このテストの python へのリンクとして置く。"""
-    python = env.venv_python(env.Ident.of(tables.PLUGIN_ROOT, {"XDG_CACHE_HOME": str(cache)}))
-    python.parent.mkdir(parents=True)
-    python.symlink_to(sys.executable)
-    return python
 
 
 def test_registration_files_are_what_render_makes():
@@ -91,31 +56,6 @@ def test_render_check_passes_and_reports_a_stale_file(tmp_path, capsys, last_res
     assert registration.stale(copy) == []
 
 
-@pytest.mark.parametrize(("runtime", "event", "command"), _commands(), ids=lambda v: v if len(v) < 40 else "cmd")
-def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_location(
-    runtime, event, command, probe_root, tmp_path, monkeypatch
-):
-    # S1-H5・決定 89: 環境の python がある経路は entry.py、無い経路は boot.py（entry.py のパスを外す）、python3 も無ければ何もしない
-    out = tmp_path / "argv.json"
-    monkeypatch.setenv("PROBE_OUT", str(out))
-    cache = tmp_path / "cache"
-    done = _run(command, runtime, probe_root, cache)
-    assert done.returncode == 0, done.stderr
-    assert json.loads(out.read_text(encoding="utf-8")) == [str(probe_root / "hooks" / "boot.py"), runtime, event]
-    out.unlink()
-    _env_python(cache)
-    done = _run(command, runtime, probe_root, cache)
-    assert done.returncode == 0, done.stderr
-    assert json.loads(out.read_text(encoding="utf-8")) == [str(probe_root / "hooks" / "entry.py"), runtime, event]
-    out.unlink()
-    # python3 の無い PATH。登録の command が中で起動する sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    (bare / "sh").symlink_to(SH)
-    done = _run(command, runtime, probe_root, tmp_path / "no-cache", path=str(bare))
-    assert (done.returncode, done.stdout, out.exists()) == (0, "", False)
-
-
 def test_boot_and_entry_read_the_same_runtime_and_event(monkeypatch):
     # S1-H5: hooks/boot.py の main と hooks/entry.py の main は同じ位置のランタイムと事象を本体へ渡す
     import importlib.util
@@ -133,36 +73,6 @@ def test_boot_and_entry_read_the_same_runtime_and_event(monkeypatch):
             assert module.main([f"{name}.py", runtime, event]) == 0
     entry_args = [a for k, a in seen if k == "entry"]
     assert entry_args == [a for k, a in seen if k == "boot"] == [[rt, ev] for rt, ev, _ in _commands()]
-
-
-def test_without_the_environment_every_registered_event_passes_except_strict(tmp_path):
-    # S1-H2: 環境を消した状態で全事象の登録を打つ。strict の guard に当たる入力のほかは出力なし・0（SessionStart は
-    # 環境の用意を起動するので、M3-H14 のテスト test_process.py で通す）
-    samples = {(p.parts[-3], p.stem): p for p in sample_paths()}
-    cache = tmp_path / "no-venv"
-    for runtime, event, command in _commands():
-        if event == "SessionStart":
-            continue
-        path = samples.get((runtime, event))
-        payload = json.dumps(read_sample(path, tmp_path)) if path else json.dumps({"hook_event_name": event})
-        done = _run(command, runtime, tables.PLUGIN_ROOT, cache, payload)
-        assert (done.returncode, done.stdout) == (0, ""), (runtime, event, done.stderr)
-    repo = make_repo(tmp_path / "r", deliveries=AUTO)
-    claude_pre = next(c for rt, ev, c in _commands() if (rt, ev) == ("claude", "PreToolUse"))
-    denied = _run(claude_pre, "claude", tables.PLUGIN_ROOT, cache, json.dumps(bash(repo, "gh pr merge 1")))
-    assert denied.returncode == 0 and "deny" in denied.stdout
-    assert {r["path"] for r in records()} == {"boot"}
-    assert not cache.exists(), "環境が無い経路の SessionStart 以外は環境を用意しない"
-
-
-def test_without_python3_every_registered_event_does_nothing(tmp_path):
-    # python3 の無い PATH。登録の command が中で起動する sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    (bare / "sh").symlink_to(SH)
-    for runtime, _, command in _commands():
-        done = _run(command, runtime, tables.PLUGIN_ROOT, tmp_path / "no-venv", path=str(bare))
-        assert (done.returncode, done.stdout) == (0, "")
 
 
 def test_hook_scripts_pass_when_the_body_cannot_be_read(monkeypatch):

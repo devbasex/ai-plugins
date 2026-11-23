@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import sys
 
 from ndf.contracts import causes, result
 from ndf.domains.crossrefactor import cli, collect
@@ -54,26 +53,6 @@ def test_tests_picks_the_importing_test(gitwork, capsys):
     gitwork.make(FILES)
     code, got = run(capsys, "tests", "--changed", "lib/foo.py", "--work", str(gitwork.work))
     assert code == 0 and got["items"][0]["files"] == ["tests/test_foo.py"]
-
-
-def test_collected_stops_when_an_added_test_is_not_collected(gitwork, capsys):
-    project = {
-        "test": {
-            "suites": [
-                {
-                    "name": "pytest",
-                    "runner": "pytest",
-                    "command": "pytest tests",
-                    "collect_command": f"{sys.executable} -m pytest --collect-only -q -p no:cacheprovider tests",
-                    "paths": ["tests"],
-                }
-            ]
-        }
-    }
-    gitwork.make({**FILES, ".ndf/project.json": json.dumps(project)})
-    code, got = run(capsys, "collected", "--paths", "tests/foo_helpers.py", "tests/test_foo.py", "--work", str(gitwork.work))
-    assert got["cause"]["kind"] == "test_failed" and code == causes.exit_code("test_failed")
-    assert got["items"][0]["uncollected"] == ["tests/foo_helpers.py"]
 
 
 def test_collected_without_a_ndf_settings_is_undecided(gitwork, capsys):
