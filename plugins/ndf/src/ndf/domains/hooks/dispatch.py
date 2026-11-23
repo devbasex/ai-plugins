@@ -185,16 +185,20 @@ def combine(verdicts: list[Verdict]) -> Verdict:
     return Verdict(kind, reason=joined, logged=logged if logged != joined else "")
 
 
-def clip(text: str, limit: int, notes_dir: Path) -> str:
-    """注入の文を `limit` 字以下にする。超える分は全文をファイルへ書き、文には先頭とパスを入れる（IH8）。"""
+def clip(text: str, limit: int, notes_dir: Path, saved: str = "") -> str:
+    """注入の文を `limit` 字以下にする。超える分は全文をファイルへ書き、文には先頭とパスを入れる（IH8）。
+
+    `saved` があればファイルへはそれを書く（会話へ返す文が応答の本文の抜粋を含むとき、平文のファイルへ残さない）。
+    """
     if len(text) <= limit:
         return text
     if limit <= 0:
         return ""
+    kept = saved or text
     notes_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(kept.encode("utf-8")).hexdigest()[:12]
     path = notes_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{digest}.md"
-    path.write_text(text, encoding="utf-8")
+    path.write_text(kept, encoding="utf-8")
     suffix = f"…（全文: {path}）"
     if len(suffix) >= limit:
         return suffix[-limit:]
@@ -208,6 +212,7 @@ def render(outcome: Outcome, runtime: str, event: str, budget: Budget, notes_dir
     if not spec or kind not in spec["outputs"]:
         outcome.notes["inject_chars"] = 0
         return 0, ""
-    text = clip(outcome.verdict.text, budget.inject_chars, notes_dir)
+    # バックアップのファイルへは応答の本文を含まない `recorded` を書き、抜粋は会話へ返す文にだけ入れる
+    text = clip(outcome.verdict.text, budget.inject_chars, notes_dir, saved=outcome.verdict.recorded)
     outcome.notes["inject_chars"] = len(text)
     return 0, tables.output_for(runtime, event, kind, text)

@@ -160,6 +160,14 @@ def test_clip_keeps_short_text_and_drops_text_when_no_injection_is_allowed(tmp_p
     assert not list(tmp_path.glob("*.md"))
 
 
+def test_clip_saves_the_text_without_the_reply_excerpt(tmp_path):
+    # 会話へ返す文は抜粋を含んでよいが、平文のバックアップには本文を含まない文を書く
+    shown = dispatch.clip("抜粋 s3cr3t " + "x" * 400, 200, tmp_path, saved="固定の文")
+    notes = list(tmp_path.glob("*.md"))
+    assert len(notes) == 1 and notes[0].read_text(encoding="utf-8") == "固定の文"
+    assert "s3cr3t" in shown and len(shown) <= 200
+
+
 def test_entry_without_state_dir_still_answers(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_state_dir", lambda: None)
     assert call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999")) is None
