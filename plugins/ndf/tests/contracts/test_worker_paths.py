@@ -282,20 +282,25 @@ def test_open_workdir_refuses_another_users_directory_that_appeared_after_the_pa
     assert (target / "n.report.md.done").exists()
 
 
-def test_prepare_paths_keeps_a_part_observed_missing_that_appears_while_rebuilding(tmp_path, workdir, monkeypatch):
+def _on_missing(monkeypatch, name: str, action) -> None:
+    """解く途中で `name` が無いと観測した直後に `action` を 1 回だけ走らせる。"""
+    real_lookup = worker_paths._lookup
+    done = []
+
+    def lookup(parent, part):
+        child = real_lookup(parent, part)
+        if part == name and child is None and not done:
+            done.append(True)
+            action()
+        return child
+
+    monkeypatch.setattr(worker_paths, "_lookup", lookup)
+
+
+def test_prepare_paths_keeps_a_part_observed_missing_that_appears_right_after(tmp_path, workdir, monkeypatch):
     d, _ = workdir
     target = tmp_path / "new"
-    real_lexists = os.path.lexists
-    calls = []
-
-    def lexists(p):  # 最初に無いと観測した後、組み直す前に既存のディレクトリが同じ名前へ移される
-        seen = real_lexists(p)
-        calls.append(Path(p))
-        if Path(p) == target and calls.count(target) == 1 and not seen:
-            os.rename(d, target)
-        return seen
-
-    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # 無いと観測した直後に既存のディレクトリが同じ名前へ移される
     paths, origin = worker_paths.prepare_paths(target, "n")
     assert origin.fresh == 1
     assert paths.report == tmp_path.resolve() / "new" / "n.report.md"
@@ -303,15 +308,7 @@ def test_prepare_paths_keeps_a_part_observed_missing_that_appears_while_rebuildi
 
 def test_prepare_paths_keeps_a_parent_observed_missing_that_appears_before_its_child_is_checked(tmp_path, monkeypatch):
     parent = tmp_path.resolve() / "parent"
-    real_lexists = os.path.lexists
-
-    def lexists(p):  # parent が無いと観測した直後に、別の利用者の parent が現れる
-        seen = real_lexists(p)
-        if Path(p) == parent and not seen:
-            parent.mkdir()
-        return seen
-
-    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    _on_missing(monkeypatch, "parent", parent.mkdir)  # parent が無いと観測した直後に、別の利用者の parent が現れる
     paths, origin = worker_paths.prepare_paths(parent / "child", "n")
     assert origin.fresh == 2
     assert paths.report == tmp_path.resolve() / "parent" / "child" / "n.report.md"
@@ -321,15 +318,7 @@ def test_prepare_paths_keeps_a_place_observed_missing_after_dotdot_returns_to_it
     d, _ = workdir
     (d / "n.report.md.done").write_text("", encoding="utf-8")
     target = tmp_path.resolve() / "new"
-    real_lexists = os.path.lexists
-
-    def lexists(p):  # new が無いと観測した後、既存のディレクトリが new へ移される
-        seen = real_lexists(p)
-        if Path(p) == target and not seen:
-            os.rename(d, target)
-        return seen
-
-    monkeypatch.setattr(worker_paths.os.path, "lexists", lexists)
+    _on_missing(monkeypatch, "new", lambda: os.rename(d, target))  # new が無いと観測した後、既存のディレクトリが new へ移される
     paths, origin = worker_paths.prepare_paths(tmp_path / "new" / ".." / "new", "n")
     assert origin.fresh == 1
     assert paths.report == target / "n.report.md"
@@ -351,6 +340,42 @@ def test_open_workdir_refuses_a_parent_swapped_after_the_paths_were_resolved(tmp
         pass
     assert e.value.kind == "replaced"
     assert not (parent / "new" / "n.report.md").exists()
+
+
+def test_prepare_paths_ties_each_part_to_the_parent_it_checked(tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    (shared / "sub").mkdir(parents=True)
+    real_lookup = worker_paths._lookup
+    swapped = []
+
+    def lookup(parent, part):  # sub を開く直前に、shared を移して別の shared/sub/new を置く
+        if part == "sub" and not swapped:
+            swapped.append(True)
+            shared.rename(tmp_path / "moved")
+            (shared / "sub" / "new").mkdir(parents=True)
+            (shared / "sub" / "new" / "n.report.md").write_text("別の作業の報告", encoding="utf-8")
+        return real_lookup(parent, part)
+
+    monkeypatch.setattr(worker_paths, "_lookup", lookup)
+    paths, origin = worker_paths.prepare_paths(shared / "sub" / "new", "n")
+    assert origin.fresh == 1  # 確かめた親（移された shared）の下の sub には new が無い
+    assert origin.anchor == ((tmp_path / "moved" / "sub").stat().st_dev, (tmp_path / "moved" / "sub").stat().st_ino)
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
+        pass
+    assert e.value.kind == "replaced"
+    assert (shared / "sub" / "new" / "n.report.md").read_text(encoding="utf-8") == "別の作業の報告"
+    assert not (tmp_path / "moved" / "sub" / "new").exists()
+
+
+def test_open_workdir_does_not_recreate_a_parent_moved_after_the_paths_were_resolved(tmp_path):
+    parent = tmp_path / "shared"
+    parent.mkdir()
+    paths, origin = worker_paths.prepare_paths(parent / "new", "n")
+    parent.rename(tmp_path / "moved")  # 解いてから開くまでに、あった親が移される
+    with pytest.raises(worker_paths.EntryUnsafe) as e, worker_paths.open_workdir(paths.report.parent, create=True, origin=origin):
+        pass
+    assert e.value.kind == "replaced"
+    assert not parent.exists() and not (tmp_path / "moved" / "new").exists()
 
 
 def test_report_paths_refuses_a_file_link_followed_by_dotdot(tmp_path):

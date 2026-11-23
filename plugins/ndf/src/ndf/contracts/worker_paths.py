@@ -126,7 +126,7 @@ def _paths_under(base: Path, name: str) -> ReportPaths:
 
 
 def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
-    """根の側から 1 要素ずつ、ある要素は `strict=True` で解き、無い要素からは解かずに足す。
+    """根の側から 1 要素ずつ、確かめた親の記述子に対して次の要素だけを開いて解き、無い要素からは解かずに足す。
 
     残った無い要素の数と、その手前の解いた最も深いディレクトリの `(st_dev, st_ino)` を組で返す。
     `Path.resolve()`（`strict=False`）は参照先の無いリンクも先のパスへ解くので、`create=True` の `open_workdir` が
@@ -137,8 +137,10 @@ def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
     根の側から確かめるのは、末尾の側から確かめると `parent/child` が無いと観測した後に別の利用者の `parent` が
     現れたとき、`parent` を既存とみなして無い要素から外してしまうためである。根の側からなら、ある要素は
     その子を確かめる前にあったと観測しており、無いと観測した要素はその後に現れても無い要素に残る。
-    解いた要素の `stat` はその子を確かめる前に取り、`open_workdir` が開いた記述子と突き合わせる（解いた後に親を
-    差し替えられても、差し替え先で確かめた不在を差し替え前の親のものとみなさない）。
+    各要素は確かめた親の記述子に対する `openat` で開き、絶対パスから解き直さない（`_Walk`）。解いている間に親を
+    差し替えられても、子の観測は確かめた親のものになり、差し替え先で得た識別子を `anchor` に記録しない。
+    返す `anchor` は最も深い記述子の `fstat` で、`open_workdir` が開いた記述子と突き合わせる。
+    1 要素につき親の記述子に対する呼び出しだけで済むので、深さ d の保存先で調べる要素は d 個である。
 
     無い要素の後の `..` は無い要素を打ち消すだけにし、打ち消した後にまた要素が来れば、そこから確かめ直す。
     ただし一度無いと観測した場所（解いた親の下の名前）は、`..` の後に同じ場所へ戻っても無い要素として残す
@@ -148,53 +150,117 @@ def _resolve_existing(directory: Path) -> tuple[Path, int, tuple[int, int]]:
     その親へ進む前に `EntryUnsafe`（`other`）で拒む。
     """
     probe = directory.absolute()
-    base, st = _resolve_dir(Path(probe.anchor))
+    walk = _Walk(probe.anchor)
+    try:
+        missing = _walk_parts(walk, probe.parts[1:])
+        st = os.fstat(walk.fds[-1])
+        return walk.path.joinpath(*missing), len(missing), (st.st_dev, st.st_ino)
+    finally:
+        walk.close()
+
+
+def _walk_parts(walk: "_Walk", parts: Iterable[str]) -> list[str]:
+    """`parts` を `walk` の位置から順に解き、無いと観測した後の要素（`..` で打ち消した残り）を返す。"""
     missing: list[str] = []
     absent: set[Path] = set()
-    for part in probe.parts[1:]:
+    for part in parts:
         if part in ("", "."):
             continue
         if part == "..":
             if missing:
                 missing.pop()
-            elif base != base.parent:  # 解いた後のパスはリンクを含まないので、親へ上がるだけでよい
-                base = base.parent
-                st = os.stat(base)
+            else:  # 解いた位置はリンクを含まないので、持っている親の記述子へ戻るだけでよい
+                walk.up()
             continue
-        candidate = base / part
-        if not missing and candidate not in absent and os.path.lexists(candidate):
-            base, st = _resolve_dir(candidate)
+        candidate = walk.path / part
+        if not missing and candidate not in absent and walk.enter(part, candidate, strict=False):
             continue
         if not missing:
             absent.add(candidate)
         missing.append(part)
-    return base.joinpath(*missing), len(missing), (st.st_dev, st.st_ino)
+    return missing
 
 
-def _resolve_dir(probe: Path) -> tuple[Path, os.stat_result]:
-    """`_resolve_strict` で解き、解いた先とその `stat` を返す。ディレクトリでなければ `EntryUnsafe`（`other`）で拒む。
+# リンクをたどる回数の上限（Linux の MAXSYMLINKS と同じ）。超えたらリンクの循環とみなす
+_MAX_LINKS = 40
 
-    解いた後のパスはリンクを含まないので、続く `..` は `base.parent` で上がる。ファイルの親へ上がらないよう、ここで止める。
+
+class _Walk:
+    """`_resolve_existing` が解いている位置。`fds[i]` は根から `names[:i]` を開いた記述子で、抜けるまで開いたまま持つ。
+
+    次の要素は `fds[-1]`（確かめた親）に対してだけ開き、`..` は 1 つ手前の記述子へ戻る。
     """
-    resolved = _resolve_strict(probe)
-    st = os.stat(resolved)
-    if not stat.S_ISDIR(st.st_mode):
-        raise EntryUnsafe(str(probe), "other")
-    return resolved, st
+
+    def __init__(self, root: str) -> None:
+        self.root = root
+        self.fds = [os.open(root, _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC)]
+        self.names: list[str] = []
+        self.links = _MAX_LINKS
+
+    @property
+    def path(self) -> Path:
+        return Path(self.root).joinpath(*self.names)
+
+    def up(self) -> None:
+        if self.names:  # 根の親は根
+            os.close(self.fds.pop())
+            self.names.pop()
+
+    def close(self) -> None:
+        for fd in self.fds:
+            os.close(fd)
+        self.fds.clear()
+
+    def enter(self, part: str, probe: Path, *, strict: bool) -> bool:
+        """確かめた親の直下の `part` へ進む。リンクなら確かめた親から先を厳密に解く。
+
+        無ければ、`strict` なら `EntryUnsafe`（`symlink`。リンクの先が無い）、そうでなければ偽を返す。
+        ディレクトリでなければ（リンクの先を含む）`EntryUnsafe`（`other`）。
+        """
+        parent = self.fds[-1]
+        try:
+            child = _lookup(parent, part)
+        except OSError as e:
+            if e.errno not in (errno.ELOOP, errno.ENOTDIR):
+                raise
+            if _refused_kind(parent, part) != "symlink":
+                raise EntryUnsafe(str(probe), "other") from None
+            self._follow(os.readlink(part, dir_fd=parent), probe)
+            return True
+        if child is None:
+            if strict:
+                raise EntryUnsafe(str(probe), "symlink")
+            return False
+        self.fds.append(child)
+        self.names.append(part)
+        return True
+
+    def _follow(self, target: str, probe: Path) -> None:
+        """リンクの中身 `target` を、リンクのある親（絶対なら根）から 1 要素ずつ厳密に解く。"""
+        self.links -= 1
+        if self.links < 0:
+            raise EntryUnsafe(str(probe), "symlink")
+        if target.startswith("/"):
+            while self.names:
+                self.up()
+        for part in target.split("/"):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                self.up()
+                continue
+            self.enter(part, probe, strict=True)
 
 
-def _resolve_strict(probe: Path) -> Path:
-    """存在する要素（リンク自体を含む）を `strict=True` で解く。参照先の無いリンク・循環は `EntryUnsafe`（`symlink`）。"""
+def _lookup(parent: int, part: str) -> Optional[int]:
+    """確かめた親 `parent` の直下の `part` を、リンクをたどらずにディレクトリとして開く。無ければ None。
+
+    リンクか、ディレクトリでなければ `OSError`（`ELOOP`・`ENOTDIR`）を上げる。
+    """
     try:
-        return probe.resolve(strict=True)
-    except FileNotFoundError:
-        raise EntryUnsafe(str(probe), "symlink") from None
-    except RuntimeError:  # Python 3.12 以前はリンクの循環を RuntimeError で上げる
-        raise EntryUnsafe(str(probe), "symlink") from None
-    except OSError as e:
-        if e.errno == errno.ELOOP:
-            raise EntryUnsafe(str(probe), "symlink") from None
-        raise
+        return os.open(part, _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無い要素は無い要素として残す
+        return None
 
 
 def report_name(report: Path) -> tuple[Path, str]:
@@ -219,7 +285,8 @@ def open_workdir(directory: Path, *, create: bool = False, origin: Optional[Orig
     `origin` は呼ぶ側がパスを解いた時点の観測（`prepare_paths`）である。末尾の `origin.fresh` 個の要素は最初の `open` で
     開けても、開いた記述子を `_check_created` で確かめ、`WorkDir.created` を真にする（解いてから開くまでに現れた
     実ディレクトリを既存とみなさず、ほかの利用者の持ち物なら `EntryUnsafe`（`replaced`）で止める）。
-    その手前の要素は開いた記述子を `origin.anchor` と突き合わせし、解いた時点のディレクトリでなければ `EntryUnsafe`（`replaced`）で止める。
+    その手前の要素は作らずに開き、開いた記述子を `origin.anchor` と突き合わせし、無くなっているか解いた時点のディレクトリで
+    なければ `EntryUnsafe`（`replaced`）で止める。
     組んだパスと開いた場所が食い違ったまま操作することは無い。
     """
     path = Path(os.path.abspath(directory))
@@ -241,26 +308,42 @@ def _open_dir_nofollow(path: Path, *, create: bool = False, origin: Optional[Ori
     途中の要素は `_SEARCH`、最後の要素だけ `O_RDONLY` で開く。`create` が真なら、無い要素を親の記述子に対する `mkdir` で作る。
     `origin` があれば、末尾の `origin.fresh` 個の要素は呼ぶ側が解いた時点で無かったので、最初の `open` で開けても最初に
     無かった要素として扱い、その手前の要素（無ければ根）の記述子を `origin.anchor` と突き合わせる。
+    `create` で作るのは末尾の `origin.fresh` 個だけで、その手前の解いた時点であった要素は作らずに開く。無くなっていれば
+    `EntryUnsafe`（`replaced`）で止める（移された親の元の名前に空のディレクトリを作らない）。
     開いた記述子と、最初の `open` に無かった要素を経たか（`WorkDir.created`）を返す。
     """
     parts = path.parts[1:]
     fd = os.open(path.anchor, (_SEARCH if parts else os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC)
     created = False
-    fresh = origin.fresh if origin is not None else 0
+    at = len(parts) - (origin.fresh if origin is not None else 0)
     try:
-        _check_anchor(fd, origin, path, at=len(parts) - fresh, opened=0)
+        _check_anchor(fd, origin, path, at=at, opened=0)
         for i, part in enumerate(parts):
             mode = os.O_RDONLY if i == len(parts) - 1 else _SEARCH
             flags = mode | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-            child, made = _open_child(fd, part, flags, path, create=create, fresh=i >= len(parts) - fresh)
+            observed = None if origin is None else i < at  # 解いた時点であった要素は、アンカーと突き合わせる前に作らない
+            child, made = _open_part(fd, part, flags, path, create=create, observed=observed)
             created = created or made
             os.close(fd)
             fd = child
-            _check_anchor(fd, origin, path, at=len(parts) - fresh, opened=i + 1)
+            _check_anchor(fd, origin, path, at=at, opened=i + 1)
     except BaseException:
         os.close(fd)
         raise
     return fd, created
+
+
+def _open_part(fd: int, part: str, flags: int, path: Path, *, create: bool, observed: Optional[bool]) -> tuple[int, bool]:
+    """`_open_child` で開く。`observed` は解いた時点であった（真）・無かった（偽、`fresh`）・観測が無い（None）である。
+
+    あった要素は作らず、無ければ `EntryUnsafe`（`replaced`）にする。
+    """
+    try:
+        return _open_child(fd, part, flags, path, create=create and not observed, fresh=observed is False)
+    except FileNotFoundError:
+        if observed:  # 解いた時点であった要素が無い: 移された・差し替えられた
+            raise EntryUnsafe(str(path), "replaced") from None
+        raise
 
 
 def _check_anchor(fd: int, origin: Optional[Origin], path: Path, *, at: int, opened: int) -> None:
