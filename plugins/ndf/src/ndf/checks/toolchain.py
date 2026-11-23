@@ -3,9 +3,10 @@
 配る構成の設定（`ndf.contracts.toolchain`）が NDF の動く条件を持ち、リポジトリの設定（`.ndf/project.json` の `toolchain`）が
 突き合わせる対象を挙げる。設定のキーごとに独立して効く。
 
-- `workflows`: ワークフローの `setup-python` の `python-version` が `python_ci`（下限を確かめるワークフローでは
-  `python_compat.versions` も）に在り、`setup-uv` の `version` が uv のバージョンと同じで、`run` が `setup-uv` 以外で uv を入れない
-- `plugin_pyprojects`: `requires-python` の下限が Python の下限と同じ
+- `workflows`: ワークフローの `setup-python` が `python-version` を書き（`python-version-file` の参照先は読まない）、その値が
+  `python_ci`（下限を確かめるワークフローでは `python_compat.versions` も）に在り、`setup-uv` の `version` が uv のバージョンと同じで、
+  `run` のコマンドが `setup-uv` 以外で uv を入れない（シェルの語に分けて、コメント・`echo` の引数は見ず、行の継続はつなぐ）
+- `plugin_pyprojects`: `requires-python` が許す最も古い Python が、Python の下限の `.0`（`3.11` なら `3.11.0`）と同じ
 - `launchers`: ランチャーの `UV_VERSION=`・`UV_INSTALLER_SHA256=` の行が uv のバージョンとインストーラの sha256と同じ
 
 設定に `toolchain` が無ければ何も読まない（利用先のリポジトリは新しいキーを置くまで今までどおり）。
@@ -14,6 +15,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -31,16 +33,24 @@ from ndf.contracts import toolchain as contract
 RULE = __name__.rsplit(".", 1)[-1]
 SETUP_UV = "astral-sh/setup-uv"
 SETUP_PYTHON = "actions/setup-python"
-# `run` の本文で uv の導入とみなす形（pip・pip3 の引数の uv・pipx install uv・astral.sh/uv の取得）
-UV_INSTALL_PATTERNS = (
-    re.compile(r"\bpip3?\s+install\b[^\n;&|]*?(?<![\w./=-])uv(?![\w./-])"),
-    re.compile(r"\bpipx\s+install\b[^\n;&|]*?(?<![\w./=-])uv(?![\w./-])"),
-    re.compile(r"\bastral\.sh/uv\b"),
-)
+# `run` のコマンドで uv の導入とみなす形: `pip`・`pip3`・`python -m pip`・`pipx` の `install` の引数の uv の要求と、
+# `curl`・`wget` での astral.sh/uv の取得
+PIP_COMMANDS = frozenset({"pip", "pip3", "pipx"})
+PYTHON_COMMAND = re.compile(r"^python[0-9.]*$")
+UV_REQUIREMENT = re.compile(r"^uv(?:\[[^\]]*\])?(?:\s*[=<>!~].*)?$")
+FETCH_COMMANDS = frozenset({"curl", "wget"})
+UV_INSTALLER_URL = re.compile(r"\bastral\.sh/uv\b")
+# コマンドの前に付いても中身を変えない語（環境変数の代入・sudo・env）
+COMMAND_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=.*|sudo|env)$")
+# シェルの区切り（`;`・`&&`・`||`・`|`・`&`・括弧）
+SHELL_PUNCTUATION = frozenset(";&|()")
 # ランチャーの行（`<名前>="<値>"`）
 LAUNCHER_LINE = re.compile(r'^(UV_VERSION|UV_INSTALLER_SHA256)=["\']?([^"\'\s]*)')
-# `requires-python` の下限を決める条件（`>=3.11`・`~=3.11`・`==3.11.*`）
-FLOOR_CLAUSE = re.compile(r"^\s*(?:>=|~=|==)\s*([0-9]+)\.([0-9]+)")
+# `requires-python` の 1 つの条件（演算子・リリースの番号・`==`/`!=` の `.*`）
+SPEC_CLAUSE = re.compile(r"^\s*(===|~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)(\.\*)?\s*$")
+# 許す最も古い Python を探す範囲（3.0.0 から順に）。3.0.0 を許せば下限は無いとみなす
+PROBE_MINORS = range(100)
+PROBE_PATCHES = range(50)
 REQUIRES_PYTHON = re.compile(r"^\s*requires-python\s*=")
 
 
@@ -65,8 +75,15 @@ def _read_workflow(path: Path) -> _Workflow:
     try:
         text = path.read_text(encoding="utf-8")
         doc = YAML(typ="rt").load(text)
-    except (OSError, UnicodeDecodeError, YAMLError) as exc:
-        raise CheckError(f"ワークフローを読めない: {path}: {exc}") from exc
+    except YAMLError as exc:
+        # 例外の文には入力の行の抜粋が載る（Git の外の設定ファイルも読みうる）。パスと位置だけを出す
+        mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+        where = f":{mark.line + 1}:{mark.column + 1}" if mark is not None else ""
+        raise CheckError(f"ワークフローを YAML として読めない: {path}{where}") from None
+    except UnicodeDecodeError as exc:
+        raise CheckError(f"ワークフローを UTF-8 として読めない: {path}: 位置 {exc.start}") from None
+    except OSError as exc:
+        raise CheckError(f"ワークフローを読めない: {path}: {exc.strerror}") from None
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
     steps = [
         step
@@ -105,22 +122,118 @@ def workflow_tools(path: Path) -> list[ToolUse]:
     return _tools(_read_workflow(path))
 
 
+def _logical_lines(body: str) -> Iterator[tuple[int, str]]:
+    """`run` の本文の行を、行末の `\\` の継続をつないで返す（始まりの行の 0 始まりの位置と本文）。"""
+    start, parts = 0, []
+    for n, text in enumerate(body.splitlines()):
+        if not parts:
+            start = n
+        if text.rstrip().endswith("\\"):
+            parts.append(text.rstrip()[:-1])
+            continue
+        parts.append(text)
+        yield start, " ".join(parts)
+        parts = []
+    if parts:
+        yield start, " ".join(parts)
+
+
+def _commands(line: str) -> Iterator[list[str]]:
+    """1 行をシェルの語に分け、区切りごとのコマンドの語の並びを返す（`#` からのコメントは捨てる）。"""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    words: list[str] = []
+    for token in lexer:
+        if token and set(token) <= SHELL_PUNCTUATION:
+            yield words
+            words = []
+        else:
+            words.append(token)
+    yield words
+
+
+def _installs_uv(words: list[str]) -> bool:
+    """1 つのコマンドが setup-uv の外で uv を入れるか。"""
+    while words and COMMAND_PREFIX.match(words[0]):
+        words = words[1:]
+    if not words:
+        return False
+    name = words[0].rsplit("/", 1)[-1]
+    if name in FETCH_COMMANDS:
+        return any(UV_INSTALLER_URL.search(w) for w in words[1:])
+    if PYTHON_COMMAND.match(name) and words[1:3] == ["-m", "pip"]:
+        args = words[3:]
+    elif name in PIP_COMMANDS:
+        args = words[1:]
+    else:
+        return False
+    if "install" not in args:
+        return False
+    return any(UV_REQUIREMENT.match(w) for w in args[args.index("install") + 1 :])
+
+
+def _line_installs_uv(line: str) -> bool:
+    try:
+        return any(_installs_uv(words) for words in _commands(line))
+    except ValueError:
+        # 閉じない引用符（行をまたぐ文字列）は語に分けられない。分けられた前までは見ずに、行の全体を 1 つの語の並びとして見る
+        return any(_installs_uv(words) for words in [line.split()])
+
+
 def _run_hits(wf: _Workflow) -> Iterator[int]:
-    """`run` の本文が `setup-uv` 以外で uv を入れる行。"""
+    """`run` のコマンドが `setup-uv` 以外で uv を入れる行（1 ステップ 1 件）。"""
     for step in wf.steps:
         body = step.get("run")
         if not isinstance(body, str):
             continue
         key_line = step.lc.key("run")[0] + 1
-        for pattern in UV_INSTALL_PATTERNS:
-            m = pattern.search(body)
-            if m:
-                yield key_line + 1 + body[: m.start()].count("\n") if isinstance(body, LiteralScalarString) else key_line
+        for start, line in _logical_lines(body):
+            if _line_installs_uv(line):
+                yield key_line + 1 + start if isinstance(body, LiteralScalarString) else key_line
                 break
 
 
-def pyproject_floor(path: Path) -> tuple[tuple[int, int] | None, int]:
-    """`requires-python` の下限とその行。無い・下限の条件が無ければ下限は `None`（行は無ければ 1）。"""
+def _admits(clauses: list[tuple[str, tuple[int, ...], bool]], version: tuple[int, int, int]) -> bool:
+    """リリースの番号 `version` が条件のすべてを満たすか（PEP 440 の比較のうち、リリースの番号だけで決まる分）。"""
+    for op, want, wild in clauses:
+        width = max(len(want), len(version))
+        have, pad = version + (0,) * (width - len(version)), want + (0,) * (width - len(want))
+        if wild:
+            ok = version[: len(want)] == want
+            ok = ok if op == "==" else not ok
+        elif op == "~=":
+            ok = have >= pad and version[: len(want) - 1] == want[:-1]
+        else:
+            ok = {
+                "==": have == pad,
+                "===": have == pad,
+                "!=": have != pad,
+                ">=": have >= pad,
+                "<=": have <= pad,
+                ">": have > pad,
+                "<": have < pad,
+            }[op]
+        if not ok:
+            return False
+    return True
+
+
+def _clauses(spec: str, path: Path) -> list[tuple[str, tuple[int, ...], bool]]:
+    clauses = []
+    for clause in spec.split(","):
+        m = SPEC_CLAUSE.match(clause)
+        if not m or (m[3] and m[1] not in ("==", "!=")) or (m[1] == "~=" and "." not in m[2]):
+            raise CheckError(f"requires-python の条件を読めない: {path}: {clause.strip()}")
+        clauses.append((m[1], tuple(int(x) for x in m[2].split(".")), bool(m[3])))
+    return clauses
+
+
+def pyproject_floor(path: Path) -> tuple[tuple[int, int, int] | None, int]:
+    """`requires-python` が許す最も古い Python 3 のリリースとその行。
+
+    無い・3.0.0 を許す（下限が無い）・どれも許さなければ `None`（行は無ければ 1）。`>=3.11.1` は `(3, 11, 1)`、
+    `>=3.11,!=3.11.*` は `(3, 12, 0)` になる（比較の先頭だけでなく、条件の全体で決める）。
+    """
     try:
         text = path.read_text(encoding="utf-8")
         project = tomllib.loads(text).get("project")
@@ -130,8 +243,9 @@ def pyproject_floor(path: Path) -> tuple[tuple[int, int] | None, int]:
     spec = project.get("requires-python") if isinstance(project, dict) else None
     if not isinstance(spec, str):
         return None, line
-    floors = [(int(m[1]), int(m[2])) for clause in spec.split(",") if (m := FLOOR_CLAUSE.match(clause))]
-    return (max(floors) if floors else None), line
+    clauses = _clauses(spec, path)
+    lowest = next(((3, m, p) for m in PROBE_MINORS for p in PROBE_PATCHES if _admits(clauses, (3, m, p))), None)
+    return (None if lowest == (3, 0, 0) else lowest), line
 
 
 def _items(mapping: dict[str, Any], key: str) -> list[Any]:
@@ -183,21 +297,25 @@ class _Checker:
             value, line = tool.values["version"]
             return [] if value == self.uv else [self.finding(rel, line, f"setup-uv の version {value} が {self.uv} と違う")]
         if "python-version" not in tool.values:
-            return []
+            # python-version-file の参照先・指定なしの既定は許可の一覧と照らせないので、書いた値を求める
+            return [self.finding(rel, tool.line, f"setup-python に python-version（{sorted(ok)} のどれか）が無い")]
         value, line = tool.values["python-version"]
         bad = [v for v in value.split() if v not in ok]
         return [self.finding(rel, line, f"python-version {' '.join(bad)} は {sorted(ok)} に無い")] if bad else []
 
     def pyprojects(self) -> list[Finding]:
-        want = ".".join(map(str, self.floor))
+        want = (*self.floor, 0)
         found = []
         for rel, path in self.files(_items(self.settings, "plugin_pyprojects")):
             if path is None:
                 found.append(self.finding(rel, 1, "設定が挙げたファイルが無い"))
                 continue
             floor, line = pyproject_floor(path)
-            if floor != self.floor:
-                found.append(self.finding(rel, line, f"requires-python の下限 {floor} が Python の下限 {want} と違う"))
+            if floor != want:
+                have = "無し" if floor is None else ".".join(map(str, floor))
+                found.append(
+                    self.finding(rel, line, f"requires-python が許す最も古い Python {have} が下限 {'.'.join(map(str, want))} と違う")
+                )
         return found
 
     def launchers(self) -> list[Finding]:

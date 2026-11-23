@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 import json
+import shutil
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ndf import identity
 from ndf.checks import run, toolchain
-from ndf.checks.model import CheckError
+from ndf.checks.model import CheckError, Scope
 from ndf.contracts import toolchain as table
 
 UV = "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3"
 PY = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0"
 COMPAT = ".github/workflows/compat.yml"
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+PYPROJECT = "plugins/ndf-dev/pyproject.toml"
 SETTINGS: dict[str, Any] = {
     "workflows": ".github/workflows/*.yml",
     "python_ci": ["3.11", "3.13"],
     "python_compat": {"versions": ["3.10"], "workflows": [COMPAT]},
-    "plugin_pyprojects": ["plugins/ndf-dev/pyproject.toml"],
+    "plugin_pyprojects": [PYPROJECT],
     "launchers": ["plugins/ndf-dev/bin/ndf"],
 }
 
@@ -46,11 +50,13 @@ def _launcher(version: str | None = None, digest: str | None = None) -> str:
 
 
 class Repo:
-    def __init__(self, plugin) -> None:
-        self.plugin = plugin
+    """規則が読むファイルだけを置いた一時のディレクトリ（規則は `Scope` のファイルと設定しか読まないので git を作らない）。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
 
     def file(self, rel: str, text: str) -> None:
-        path = self.plugin.repo / rel
+        path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
@@ -58,13 +64,15 @@ class Repo:
         self.file(f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json", json.dumps({} if value is None else {"toolchain": value}))
 
     def check(self, rules) -> list:
-        return toolchain.check(self.plugin.scope(), rules)
+        return toolchain.check(Scope(self.root, self.root / "plugins" / "ndf-dev", "ndfdev"), rules)
 
 
 @pytest.fixture
-def repo(plugin) -> Repo:
-    """設定と 3 つの指定箇所がそろったリポジトリ（`pyproject.toml` は fixture が写した本物）。"""
-    r = Repo(plugin)
+def repo(tmp_path) -> Repo:
+    """設定と 3 つの指定箇所がそろったリポジトリ（`pyproject.toml` は本物の写し）。"""
+    r = Repo(tmp_path)
+    (tmp_path / PYPROJECT).parent.mkdir(parents=True)
+    shutil.copy(PLUGIN_ROOT / "pyproject.toml", tmp_path / PYPROJECT)
     r.settings(SETTINGS)
     r.file(".github/workflows/ci.yml", _workflow(_py("3.13"), _uv(), "- run: uv run pytest"))
     r.file(COMPAT, _workflow(_py("3.10")))
@@ -126,6 +134,16 @@ def test_unquoted_version_is_read_as_written(repo, rules):
     assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
 
 
+@pytest.mark.parametrize(
+    "with_",
+    ["", '\n        with:\n          python-version-file: ".python-version"', "\n        with:\n          cache: pip"],
+)
+def test_setup_python_without_python_version_is_a_finding(repo, rules, with_):
+    # python-version-file の参照先・既定の Python は許可の一覧と照らせない
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), f"- uses: {PY}{with_}"))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 12)]
+
+
 def test_without_python_compat_only_python_ci_is_allowed(repo, rules):
     repo.settings({k: v for k, v in SETTINGS.items() if k != "python_compat"})
     assert _lines(repo.check(rules)) == [(COMPAT, 10)]
@@ -163,6 +181,26 @@ def test_the_line_inside_a_block_run_is_reported(repo, rules):
     assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
 
 
+def test_a_continued_install_is_reported_at_its_first_line(repo, rules):
+    run = "- run: |\n          echo a\n          python3 -m pip install \\\n            --quiet \\\n            uv"
+    repo.file(".github/workflows/ci.yml", _workflow(run))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 10)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "|\n          # uv は setup-uv で入れる（pip install uv は使わない）\n          uv sync --frozen",
+        "uv sync --frozen  # pip install uv は使わない",
+        "echo 'pip install uv は使わない'",
+        'echo "curl https://astral.sh/uv/install.sh を打たない"',
+    ],
+)
+def test_comments_and_echoed_text_are_not_findings(repo, rules, body):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(), f"- run: {body}"))
+    assert repo.check(rules) == []
+
+
 @pytest.mark.parametrize(
     "body",
     ['python3 -m pip install --quiet "pathspec==1.1.1"', "uv pip install ruv-tool", "uv sync --frozen", "pip install uv-dynamic"],
@@ -194,6 +232,16 @@ def test_broken_workflow_stops_with_its_path(repo, rules):
         repo.check(rules)
 
 
+def test_broken_workflow_error_has_the_position_but_not_the_input(repo, rules):
+    # Git の外の設定ファイルも読みうるので、入力の抜粋（秘密を含みうる）を出さない
+    repo.file(".github/workflows/ci.yml", "env:\n  TOKEN: s3cr3t-value\n  bad: [\n")
+    with pytest.raises(CheckError) as caught:
+        repo.check(rules)
+    assert "s3cr3t" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert ".github/workflows/ci.yml:" in str(caught.value)
+
+
 def test_broken_contract_stops(repo, rules, monkeypatch):
     def broken():
         raise table.ToolchainError("形が違う")
@@ -222,9 +270,13 @@ def test_workflow_tools_stops_on_broken_yaml(tmp_path):
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ('[project]\nname = "x"\nrequires-python = ">=3.11"\n', ((3, 11), 3)),
-        ('[project]\nrequires-python = ">=3.11,<4"\n', ((3, 11), 2)),
-        ('[project]\nrequires-python = "<4, >= 3.12"\n', ((3, 12), 2)),
+        ('[project]\nname = "x"\nrequires-python = ">=3.11"\n', ((3, 11, 0), 3)),
+        ('[project]\nrequires-python = ">=3.11,<4"\n', ((3, 11, 0), 2)),
+        ('[project]\nrequires-python = "<4, >= 3.12"\n', ((3, 12, 0), 2)),
+        ('[project]\nrequires-python = ">=3.11.1"\n', ((3, 11, 1), 2)),
+        ('[project]\nrequires-python = ">=3.11,!=3.11.*"\n', ((3, 12, 0), 2)),
+        ('[project]\nrequires-python = ">3.10"\n', ((3, 10, 1), 2)),
+        ('[project]\nrequires-python = "~=3.11"\n', ((3, 11, 0), 2)),
         ('[project]\nrequires-python = "<4"\n', (None, 2)),
         ('[project]\nname = "x"\n', (None, 1)),
     ],
@@ -237,13 +289,25 @@ def test_pyproject_floor(tmp_path, text, expected):
 
 @pytest.mark.parametrize(
     ("text", "line"),
-    [('[project]\nrequires-python = ">=3.10"\n', 2), ('[project]\nname = "x"\n', 1), ('[project]\nrequires-python = "<4"\n', 2)],
+    [
+        ('[project]\nrequires-python = ">=3.10"\n', 2),
+        ('[project]\nname = "x"\n', 1),
+        ('[project]\nrequires-python = "<4"\n', 2),
+        ('[project]\nrequires-python = ">=3.11.1"\n', 2),
+        ('[project]\nrequires-python = ">=3.11,!=3.11.*"\n', 2),
+    ],
 )
 def test_pyproject_floor_that_differs_or_is_missing_is_a_finding(repo, rules, text, line):
-    repo.file("plugins/ndf-dev/pyproject.toml", text)
-    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/pyproject.toml", line)]
+    repo.file(PYPROJECT, text)
+    assert _lines(repo.check(rules)) == [(PYPROJECT, line)]
 
 
-def test_the_plugin_pyproject_matches_the_floor(repo, rules):
-    # fixture が写した本物の pyproject.toml の下限は、配る構成の設定の下限と同じ
-    assert toolchain.pyproject_floor(repo.plugin.root / "pyproject.toml")[0] == table.python_floor()
+def test_unreadable_requires_python_stops(repo, rules):
+    repo.file(PYPROJECT, '[project]\nrequires-python = ">=3.11a"\n')
+    with pytest.raises(CheckError, match="requires-python"):
+        repo.check(rules)
+
+
+def test_the_plugin_pyproject_matches_the_floor():
+    # 本物の pyproject.toml が許す最も古い Python は、配る構成の設定の下限の .0
+    assert toolchain.pyproject_floor(PLUGIN_ROOT / "pyproject.toml")[0] == (*table.python_floor(), 0)

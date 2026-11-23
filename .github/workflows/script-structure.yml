@@ -19,8 +19,9 @@ name: Script structure
 # script-structure-check の最後の手順は、NDF（plugins/ndf/）だけを見る検査（plugins/ndf/bin/ndf check。規則は
 # plugins/ndf/src/ndf/checks/README.md）と、lock・plugin.json・エントリポイントの構文・選べる値の検査を打つ。入れ替え（#3304）の
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
-# 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。ndf check だけは、規則 toolchain が
-# ワークフローを読むため、NDF_PATHS に .github/workflows を足した NDF_CHECK_PATHS で決める。merge queue と push では常に打つ
+# 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。規則 toolchain はワークフローを読むため、
+# 差分が NDF_PATHS に当たらず .github/workflows にだけ当たる PR では、ndf check を --only toolchain で打つ。差分は 1 回だけ取る。
+# merge queue と push では常にすべてを打つ
 #
 # lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit）に
 # そのプロジェクトの pyproject.toml と uv.lock が変わった Pull Request で打つ（#3370 の不変条件 IG5）。根は playwright-kit を
@@ -63,8 +64,8 @@ env:
   # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
   # ndf check は根の .ndf/*.json（宣言のスキーマ）と、.ndf/glossary.json の source の用語集（禁止語）も読む
   NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
-  # ndf check だけの入力。規則 toolchain がワークフローを読むため、NDF_PATHS に .github/workflows を足す
-  NDF_CHECK_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows
+  # 規則 toolchain だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここにだけ当たれば、ndf check を toolchain に絞る
+  TOOLCHAIN_PATHS: .github/workflows
 
 jobs:
   script-structure-check:
@@ -78,17 +79,28 @@ jobs:
         id: scope
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            for out in ndf ndf_check lock_root lock_ndf lock_playwright; do
+            for out in ndf toolchain lock_root lock_ndf lock_playwright; do
               echo "$out=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
           fi
-          # 引数のパスのどれかが Pull Request の差分にあれば true
-          touched() { [ -n "$(git diff --name-only HEAD^1 HEAD -- "$@")" ] && echo true || echo false; }
-          # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
-          echo "ndf=$(touched $NDF_PATHS)" >> "$GITHUB_OUTPUT"
-          # shellcheck disable=SC2086 # NDF_CHECK_PATHS はパスを空白で区切った一覧
-          echo "ndf_check=$(touched $NDF_CHECK_PATHS)" >> "$GITHUB_OUTPUT"
+          # Pull Request の差分のファイルの一覧を 1 回だけ取り、下の条件はすべてこの一覧から決める
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          # 引数のパス（ファイルかディレクトリ）のどれかに当たるファイルが差分にあれば true
+          touched() {
+            local p f
+            for p in "$@"; do
+              while IFS= read -r f; do
+                case "$f" in "$p" | "$p"/*) echo true; return ;; esac
+              done <<< "$changed"
+            done
+            echo false
+          }
+          # shellcheck disable=SC2086 # NDF_PATHS・TOOLCHAIN_PATHS はパスを空白で区切った一覧
+          {
+            echo "ndf=$(touched $NDF_PATHS)"
+            echo "toolchain=$(touched $TOOLCHAIN_PATHS)"
+          } >> "$GITHUB_OUTPUT"
           pw=plugins/playwright-kit/skills/playwright-kit-ops
           {
             echo "lock_root=$(touched pyproject.toml uv.lock "$pw/pyproject.toml" "$pw/uv.lock")"
@@ -152,8 +164,12 @@ jobs:
       - name: Check the references into plugins/ndf on the current tree
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
-        if: steps.scope.outputs.ndf_check == 'true'
+        if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
+      # NDF の入力が変わらずワークフローだけが変わった PR は、ワークフローを読む規則 toolchain だけを打つ
+      - name: Check the toolchain pins in the workflows
+        if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.toolchain == 'true'
+        run: plugins/ndf/bin/ndf check --only toolchain
       # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
       - name: Check that the root lock matches its declaration
         if: steps.scope.outputs.lock_root == 'true'

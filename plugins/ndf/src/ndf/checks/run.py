@@ -122,7 +122,13 @@ def check(
 def select(
     scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。
+
+    `only` が設定を読む規則（`SETTINGS_RULES`）だけなら、プラグインのファイルを集めず、ほかの規則も当てない
+    （ワークフローだけを変えた Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
+    """
+    if only and set(only) <= SETTINGS_RULES.keys() and not write_spec:
+        return sorted((f for name in SETTINGS_RULES if name in only for f in SETTINGS_RULES[name](scope, rules)), key=_order)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written, only)
     return [f for f in found if not only or f.rule in only]
