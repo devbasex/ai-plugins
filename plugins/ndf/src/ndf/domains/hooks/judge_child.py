@@ -294,7 +294,7 @@ def run_cases(path: Path, rounds: int, call: Caller = claude.call_claude) -> dic
             wrong = [word for word, _ in got if word != case["expect"]]
             if wrong:
                 missed.append({"id": case["id"], "expect": case["expect"], "got": wrong})
-    return {"items": missed, "metrics": _metrics(len(cases), len(missed), len(spent), spent)}
+    return {"items": missed, "metrics": _metrics(len(cases), len(missed), spent)}
 
 
 def positive_rounds(value: Any) -> bool:
@@ -316,12 +316,12 @@ def _outside_session(environ: MutableMapping[str, str]) -> Iterator[None]:
         environ.update(kept)
 
 
-def _metrics(cases: int, missed: int, calls: int, spent: list[float]) -> dict:
+def _metrics(cases: int, missed: int, spent: list[float]) -> dict:
     """件数・外れた例の件数・打った回数・秒の最小と最大。"""
     return {
         "cases": cases,
         "missed": missed,
-        "calls": calls,
+        "calls": len(spent),
         "min_seconds": round(min(spent), 3) if spent else 0.0,
         "max_seconds": round(max(spent), 3) if spent else 0.0,
     }
