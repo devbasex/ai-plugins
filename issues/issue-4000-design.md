@@ -98,7 +98,6 @@ sequenceDiagram
   G->>G: 呼ばない条件と休みのマーカーを見る
   G->>J: 本文・残りの秒
   J->>C: 起動（新しいプロセスの組）。標準入力に本文
-  C->>C: claude --version（CLI の下限。子ごとに 1 回）
   C->>L: 1 回だけ打つ（子と同じ組）
   L-->>C: wait
   C-->>J: {"kind": "wait", "calls": 1}
@@ -113,7 +112,7 @@ sequenceDiagram
 
 | 大項目 | 条件（要求） | 実現方式 |
 | --- | --- | --- |
-| 性能・拡張性 | 軽いモデルを呼ぶ Stop の待ちは秒の上限を超えない | 判定の上限 5 秒を、SIGALRM と同じ絶対時刻の締め切り（起動の時刻 ＋ 7 秒）から余白 1.5 秒を 1 回だけ引いた残りの内に置き、hook の側が子を上限で打ち切る。モデルを呼ぶ Stop が起動するプロセスは 3 つ（判定の子の python・`claude --version`・`claude -p`）。CLI の下限の確かめ（`cli_floor`）のバージョンの記録はプロセスの中にしか無く、判定の子は Stop ごとに新しいので毎回 `claude --version` を 1 回打つ。実測は子の起動 0.15〜0.2 秒 ＋ `claude --version` 0.007〜0.009 秒 ＋ 1 回 0.73〜1.51 秒（MEA3・MEA4・MEA7）で、打つのは 1 回である（決定 4） |
+| 性能・拡張性 | 軽いモデルを呼ぶ Stop の待ちは秒の上限を超えない | 判定の上限 5 秒を、SIGALRM と同じ絶対時刻の締め切り（起動の時刻 ＋ 7 秒）から余白 1.5 秒を 1 回だけ引いた残りの内に置き、hook の側が子を上限で打ち切る。モデルを呼ぶ Stop が起動するプロセスは 2 つ（判定の子の python・`claude -p`）。判定の子は CLI の下限の確かめ（`cli_floor` の `claude --version`）を打たない（利用者の決定、2026-11-23。判定の対象は今動いている Claude Code 自身で、その親のセッションが動いている時点で下限は満たしている）。実測は子の起動 0.15〜0.2 秒 ＋ 1 回 0.73〜1.51 秒（MEA3・MEA4）で、打つのは 1 回である（決定 4） |
 | 運用・保守性 | 直すのは質問の文と判定の例の組の 2 つ | 質問の文は子のモジュールの定数、組はコントラクトのファイルにあり、`ndf hooks judge-cases` が各例を 3 周打って組を確かめる |
 | セキュリティ | 学習に使わない設定を通らない起動をしない。本文を送る先はセッション自身が使う Claude の API と同じ | 子は `call_claude` の前置き（学習の設定の確かめ）をそのまま通す。送り先が同じと確かめられる Stop（Claude Code のセッションで、起動の引数・設定ファイルのキー・設定の `env` のどれでも接続を切り替えていないと確かめられる）だけで呼び、Codex のセッションと確かめられない Stop は文字列の判定で決める（決定 11） |
 
@@ -139,7 +138,7 @@ sequenceDiagram
 - **選んだ案**: 今の Stop の hook の `stop-wait` の中で判定を待つ。Stop の予算は締め切り 3.5 → 7 秒・登録の timeout 6 → 9 秒・p95 300 → 2,500 ms に上げる
 - 採らなかった案: Claude Code の prompt 型の hook（`type: "prompt"`）を Stop に登録する（呼ばない条件・変更要求の上限・上限の後の待ちの知らせ・計測が使えず、毎回の Stop で呼ばれる。Codex に同じ仕組みが無い）
 - 採らなかった案: 背景で走り、終了コード 2 で Claude を再開させる hook（`asyncRewake`）にする（待ちは消えるが、Claude が止まった後に再開させる。その間に利用者が打った入力や、中継（セッションを継いで動かす仕組み）の次のセグメントと競る。変更要求の上限を 1 つの数え手で数えられず、Codex に同じ仕組みも無い）
-- **代償**: 軽いモデルを呼ぶ Stop では会話の終わりが約 1〜1.7 秒遅れ、プロセスを 3 つ起動する（子の起動 0.15〜0.2 秒 ＋ CLI の下限の確かめの `claude --version` 0.007〜0.009 秒 ＋ モデルの回答 0.73〜1.51 秒）。上限の 5 秒に当たる Stop は 5 秒遅れる
+- **代償**: 軽いモデルを呼ぶ Stop では会話の終わりが約 1〜1.7 秒遅れ、プロセスを 2 つ起動する（子の起動 0.15〜0.2 秒 ＋ モデルの回答 0.73〜1.51 秒）。上限の 5 秒に当たる Stop は 5 秒遅れる
 - 作り方: 自前で作る・ライブラリやサービスを使う
 - 比べた候補: PRD1 / PRD2 / LIB1
 - 根拠: Value 3（同じ手順は毎回同じ結果になる）・Value 4（どのプロジェクトでもそのまま使える）（MVV バージョン 11）
@@ -150,8 +149,10 @@ sequenceDiagram
 - **選んだ案**: hook の側（`ndf.domains.hooks.reply_judge`）は標準ライブラリだけで子を起動する。起動は `[sys.executable, "-P", "-m", "ndf.adapters.reply_judge"]` を新しいプロセスの組で行い、標準入力で本文を渡して上限の秒で待つ。子（`ndf.adapters.reply_judge`）が `ClaudeCall` と `call_claude` で打つ
 - 採らなかった案: import の表の禁止から `ndf.adapters.claude` を外す（hook の起動が `jsonschema`・`httpx` まで読み、すべてのイベントの hook が遅くなる。#3345 の決定 89 が、hook を軽く保つために禁じた形である）
 - 採らなかった案: hook から `claude -p` を直に打つ（学習に使わない設定の確かめ・スロット・CLI の下限の前置きを二重に持つか、飛ばすことになる）
-- **組の持ち方**: 判定の子は `call_claude` に新しい組を作らない指定（`new_group=False`）を渡し、`claude` を判定の子と同じ組で起動する。今の `call_claude` は `claude` を `start_new_session=True` で別の組に置くため、hook の側が判定の子の組だけを止めると `claude` が残る。同じ組に収めれば、hook の側の 1 回の組への送信で判定の子と `claude` の両方が止まる。`claude --version`（`cli_floor`）は今のとおり別の組だが、バージョンを出して 0.01 秒ほどで自ら終わり、子孫を持たない
-- **代償**: 子の起動に 0.15〜0.2 秒かかる（MEA4）。hook の側は子の組を止めて回収する後始末を持つ。`call_claude` の起動の関数に組を選ぶ引数が 1 つ増える
+- 採らなかった案: 判定の子を省き、hook が `claude -p` を直接起動する（引数の組み立てと失敗の見分けを `call_claude` と二重に持つことになる）
+- **組の持ち方**: 判定の子は `call_claude` に新しい組を作らない指定（`new_group=False`）を渡し、`claude` を判定の子と同じ組で起動する。今の `call_claude` は `claude` を `start_new_session=True` で別の組に置くため、hook の側が判定の子の組だけを止めると `claude` が残る。同じ組に収めれば、hook の側の 1 回の組への送信で判定の子と `claude` の両方が止まる
+- **CLI の下限**: 判定の子は下限の確かめ（`claude --version`）を飛ばす指定（`cli_floor=False`）を渡す。判定の対象は今動いている Claude Code 自身で、その親のセッションが動いている時点で下限は満たしているためである（利用者の決定、2026-11-23）。`call_claude` は共用のまま保ち、既定の呼び手は今のとおり下限を確かめる
+- **代償**: 子の起動に 0.15〜0.2 秒かかる（MEA4）。hook の側は子の組を止めて回収する後始末を持つ。`call_claude` の起動の関数に、組を選ぶ引数と下限の確かめを飛ばす引数が増える
 - 根拠: Value 3（同じ手順は毎回同じ結果になる）・Value 8（正しいデータ構造で作られる）（MVV バージョン 11）
 
 ### 決定 4: 揺れる回答で誤って止めないため、同じ文を打ち直さず、通すべき報告の例を質問の文に置く
@@ -233,14 +234,16 @@ sequenceDiagram
     - hook の環境の `CLAUDE_CODE_ENTRYPOINT` が `endpoint.entrypoints`（既定 `cli`・`sdk-cli`。端末の対話と `claude -p`）のどれか。SDK に埋め込んだ起動（`sdk-ts` など）は、埋め込み元が設定を別の経路で渡しうるので、親と子で同じ設定が効くと確かめられない
     - `CLAUDE_PROJECT_DIR`（[hook のパスの解き方](https://code.claude.com/docs/en/hooks#reference-scripts-by-path)。セッションのプロジェクトの根）が絶対パスである。Stop の入力の `cwd` はセッション中の `cd` や worktree への移動で変わるので使わない
     - `CLAUDE_CONFIG_DIR` が無いか絶対パスである。相対パスは親の起動時の作業ディレクトリから解かれており、判定の子が解く場所と同じと確かめられないので呼ばない
-    - hook のプロセスから親をたどり（`/proc/<pid>/stat` の親の番号、最大 `endpoint.ancestors` 代）、**最も近い Claude Code の実プロセス 1 つ**を親とする。Claude Code かは実行ファイルと起動の形で見分ける: `/proc/<pid>/exe` の実パスが `endpoint.cli_exe`（既定 `*/claude/versions/*`。ネイティブの導入）に当たる、または実行ファイルの名前が `node` で始まり、起動引数の 2 つ目の実パスが `endpoint.cli_script`（既定 `*/@anthropic-ai/claude-code/cli.js`）に当たる。シェルのコマンドの文字列や位置引数に `claude` が含まれても親としない。最も近い 1 つより上の Claude Code（入れ子の外側）は見ない。見つからない・`/proc` が読めない（macOS を含む）なら呼ばない
-    - 親の起動引数（`/proc/<pid>/cmdline`）だけを判定の子へ渡す
+    - hook のプロセスから親をたどり（`/proc/<pid>/stat` の親の番号、最大 `endpoint.ancestors` 代）、**最も近い Claude Code の実プロセス 1 つ**を親とする。Claude Code かは実行ファイルで見分ける: `/proc/<pid>/exe` の実パスが `endpoint.cli_exe`（既定 `*/claude/versions/*`。ネイティブの導入）に当たるものを Claude Code とする。その前に実行ファイルの名前が `endpoint.script_hosts`（既定 `node*`）に当たる祖先に出会ったら、起動引数に依らず、そこで探すのを止めて呼ばない。npm の導入の Claude Code は node の上で動き、起動引数は `cli.js` のパスとは限らない（`claude` のシンボリックリンクから起動すると `node /usr/local/bin/claude` になる）ので、起動引数から Claude Code でないと確証できない。node を飛ばして上を探すと、node で起動した内側のセッションを見落とし、外側のネイティブ版の起動引数で判定してしまう。node の Claude Code を親と認めない理由は、親が起動時に読み込んだスクリプトの実体が `/proc` から特定できず（スクリプトは実行ファイルと違い `/proc/<pid>/exe` に残らない）、今のファイルシステムで解いたファイルが親と同じ CLI だと確かめられないためである。シェルのコマンドの文字列や位置引数に `claude` が含まれても親としない。最も近い 1 つより上の Claude Code（入れ子の外側）は見ない。見つからない・`/proc` が読めない（macOS を含む）なら呼ばない
+    - 親の起動引数（`/proc/<pid>/cmdline`）と、親の実行ファイルの実パス（`parent_exe`。`readlink(/proc/<pid>/exe)`）と、親が起動時に読み込んだ実行ファイルの同一性（`parent_exe_id`。`stat(/proc/<pid>/exe)` の `[st_dev, st_ino]`。リンクの先のパスでなく、親が読み込んだ実体を指す）を判定の子へ渡す。`readlink` の先が ` (deleted)` で終わる（親の起動後に消えたか置き換わった）なら呼ばない
+    - 判定の子は `claude` を起動する直前に `stat(parent_exe)` の `[st_dev, st_ino]` を `parent_exe_id` と比べ、違えば起動せずに `failure="endpoint"` を返す（親の起動後に差し替わったファイルを親と同じ CLI として起動しない。自動更新は版ごとに別のパスへ置くので、親のパスは差し替わらない）。同じなら `parent_exe` で起動し、PATH で引き直さない（親と同じ実体なので CLI の下限の確かめを打たない）。比べてから起動するまでの間に差し替えられる者は、利用者が次に起動する `claude` も差し替えられるので、この間を閉じても守れるものは増えない
+    - `ndf hooks judge-cases` は親が無いので、PATH の `claude` を CLI の下限の確かめ付きで起動する
   - **判定の子・実効の設定**（子は `claude` を起動する前に見る。外れたら `claude` を起動せずに `failure="endpoint"` を返し、hook の側は休みのマーカーを書く）: 次をすべて満たす
     - 親の起動引数を `claude_args.options`（`account_dir` が `--settings` を読むのと同じ解き方）で読み、`endpoint.flags`（既定 `--settings`・`--setting-sources`）のどれも無い。`--settings <値>` と `--settings=<値>` のどちらの形も当たる。判定の子は `--setting-sources ""` で設定を読まないので、[設定の優先順位](https://code.claude.com/docs/en/settings#settings-precedence) で利用者とプロジェクトの設定より強い起動時の設定は子へ渡らない
     - 既存の `account_dir.effective_env`（Claude Code が採用する実効値と出所を解く。中継が登録済みアカウントの起動の前に使う）を、子の環境・設定ディレクトリ・作業ディレクトリ `CLAUDE_PROJECT_DIR`・親の起動引数で打つ。これは管理者の設定（`managed-settings.json`・`managed-settings.d/*.json`・設定ディレクトリの `remote-settings.json`）・利用者の設定・プロジェクトの 2 つの設定を Claude Code と同じ順に重ねる。返りの `unresolved` が空で、`helper`（`apiKeyHelper`）が無く、`endpoint.keys`（既定 `awsAuthRefresh`・`awsCredentialExport`・`gcpAuthRefresh`）をどの層も定義せず、出所が設定の層（`子の環境` 以外）の変数に名前が `endpoint.env_names` で始まるもの（既定 `ANTHROPIC_`・`CLAUDE_CODE_USE_`・`CLAUDE_CONFIG_DIR`・`AWS_`・`GOOGLE_`・`CLOUD_ML_`・`VERTEX_`・`HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`・`https_proxy`・`http_proxy`・`all_proxy`・`no_proxy`・`NODE_EXTRA_CA_CERTS`）が無い
     - 設定の層の `env` の変数は、hook の環境へ受け継がれるかに依らず呼ばない理由にする。受け継ぎを 1 つの変数や 1 つの層で確かめても、ほかの変数とほかの層には及ばないので、この設計では外す手立てを置かない（外すなら層と変数ごとに確かめる別の設計にする）
   - ほかに: 判定の子へ渡す環境は hook の環境から環境変数の表の `child` が `drop` の行（`CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` など。接続と認証の変数を含まない）だけを外したもの。判定の子は中継の確かめ（`relay_checks`）を登録しないので、`call_claude` は利用上限で別のアカウントへ打ち直さない
-  - 値（`entrypoints`・`ancestors`・`cli_exe`・`cli_script`・`flags`・`keys`・`env_names`）は `limits.json` の判定の行の `endpoint` に置く
+  - 値（`entrypoints`・`ancestors`・`cli_exe`・`script_hosts`・`flags`・`keys`・`env_names`）は `limits.json` の判定の行の `endpoint` に置く
 - 採らなかった案: Codex でも `claude` が使えれば呼ぶ（Codex の応答の本文が、そのセッションと別に設定された Claude の接続先へ送られる）
 - 採らなかった案: 最小構成をやめて設定ファイルを読ませる（hook・MCP・プラグインまで読み、遅くなるうえ判定の子が hook を起こす。`--settings` の起動時の設定はそれでも渡らない）
 - 採らなかった案: hook の側で設定ファイルを自前で読む（管理者の設定の追加のファイルとサーバーから取ったコピー・層の重ね方を `account_dir` と二重に持つ。hook の閉包は `ndf.contracts` を読めないので `account_dir` を import できない）
@@ -252,13 +255,13 @@ sequenceDiagram
 
 ## 影響と危険
 
-- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code のセッションの Stop（送信先が同じと確かめられるもの。決定 11。`/proc` の無い macOS は確かめられないので含まない）。Codex のセッションと確かめられない Stop はモデルを呼ばず、今の文字列の判定のまま動く
+- **働く範囲**: NDF を入れたすべてのリポジトリの Claude Code のセッションの Stop（送信先が同じと確かめられるもの。決定 11。`/proc` の無い macOS と、node で起動した Claude Code（npm の導入）は確かめられないので含まない）。Codex のセッションと確かめられない Stop はモデルを呼ばず、今の文字列の判定のまま動く
 - **プロジェクトごとに違うもの**: 無い。モデル・秒・字数は NDF のコントラクト（`limits.json`）に置き、プロジェクトの設定にしない。guard を止めたいプロジェクトは、今ある guard の切り方（環境変数 `NDF_HOOK_OFF` に guard の名前をカンマで並べると、その guard を呼ばない。`tables.off_names`・`tables.is_off`）で止める
 - **当たるモード**: モードに依らない（hook はすべてのセッションで動く）
 - **利用者から見た振る舞いの変化**: 会話の終わりが約 1〜1.7 秒遅くなり、Stop ごとに費用がかかる。入出力のコントラクト（guard の名前・変更要求の文面・hook の登録のイベント）は変わらないが、使う人には遅れと費用として見える
 - **書きかけの文書と同じファイルを触る別の変更**: `limits.json`・`guards.json`・`hooks/claude.json`・`hooks/codex.json` は多くの課題が触る。実装の PR はスプリントブランチの最新から切り、`ndf hooks render` で登録を作り直す
 - **壊れうる箇所**: 判定の子が `claude` の子孫を残すと、会話の終わりごとにプロセスが積もる。hook の側が新しいプロセスの組で起動し、`claude` もその組に置き（決定 3）、時間切れ・割り込み（SIGALRM）・正常な終わりのどれでも組ごと止めて回収する。組への送信と回収の呼び出しを、偽の Popen と時計を差し込んだ単体テストで縛る
-- **費用**: この環境の Stop は 1 日 299〜822 回である。**安全側に寄せた見積として、呼ばない条件に当たる分を引かず、全部の Stop で 1 回ずつ呼ぶとして数える**（決定 4 で打ち直しをやめたので、1 回の Stop が打つのは 1 回である）。起動するプロセスは Stop ごとに 3 つ（判定の子の python・`claude --version`・`claude -p`）で、1 日 900〜2,466 回になる。`claude --version` は 1 回 0.007〜0.009 秒（MEA7）で、待ちへの寄与は 0.01 秒に収まる。1 回 0.00006〜0.0008 USD（MEA3・MEA6。質問の文が同じなので、続けて打つとプロンプトのキャッシュが効いて安くなる）から、1 日 0.02〜0.7 USD を見込む。代わりの案（列を足す・prompt 型の hook）は決定 1・決定 2 にある
+- **費用**: この環境の Stop は 1 日 299〜822 回である。**安全側に寄せた見積として、呼ばない条件に当たる分を引かず、全部の Stop で 1 回ずつ呼ぶとして数える**（決定 4 で打ち直しをやめたので、1 回の Stop が打つのは 1 回である）。起動するプロセスは Stop ごとに 2 つ（判定の子の python・`claude -p`）で、1 日 598〜1,644 回になる。1 回 0.00006〜0.0008 USD（MEA3・MEA6。質問の文が同じなので、続けて打つとプロンプトのキャッシュが効いて安くなる）から、1 日 0.02〜0.7 USD を見込む。代わりの案（列を足す・prompt 型の hook）は決定 1・決定 2 にある
 
 ### 代表のリポジトリでの振る舞い
 
@@ -282,7 +285,7 @@ sequenceDiagram
 | 3. 実際のモデルで組を確かめる | `ndf hooks judge-cases` が各例を設定の周の数だけ打ち、1 周でも外れた例を出して終了コード 1。偽の判定器で 3 周のうち 1 周だけ外すと、その例が外れとして出て 1 で終わる | 外れを数えずに 0 で終わると落ちる。周を 1 回しか打たないと、1 周だけ外す偽の判定器で通ってしまい落ちる |
 | 4. 呼ばない条件 | 本文が空・AskUserQuestion を使った・背景の作業が残る・上限に達した、の 4 つで判定器が呼ばれない。どれでもない Stop で 1 回呼ばれる | 条件の 1 つを外すと、その場合で判定器が呼ばれて落ちる |
 | 決定 5. 上限の後も待ち通知が届く | 同じ入力の中で前の Stop の判定器が `wait` を返し、上限に達した Stop の本文が文字列の判定で `report` のとき、変更要求を返して dispatch が上限で通し、待ち通知が送信待ちに入る。前に `wait` が無ければ通すだけ | フラグを見ずに文字列の判定だけで決めると、通知が入らずに落ちる |
-| 決定 11. 送信先が同じときだけ呼ぶ | hook の側: Codex のセッションで `skip:runtime`。`CLAUDE_CODE_ENTRYPOINT` が `sdk-ts`・`CLAUDE_PROJECT_DIR` が無い・`CLAUDE_CONFIG_DIR` が相対・親が見つからない（`/proc` が読めない）のどれでも子を起動せず `skip:endpoint`。偽の `/proc` で、近い順に「`bash -c 'claude …'`」「`--settings` 付きの Claude Code（実行ファイルが `…/claude/versions/2.1.330`）」「フラグの無い Claude Code」と並べると、近い方の Claude Code の引数が子へ渡り、子が `--settings` で `endpoint` を返す。休み中と残りの秒が足りない Stop では `/proc` を読まない。判定の子: 親の引数の `--settings x.json`・`--settings=x.json`・`--setting-sources=user`、`account_dir.effective_env` の返りの `unresolved`・`apiKeyHelper`・`awsCredentialExport`・設定の層の `ANTHROPIC_BASE_URL`・`HTTPS_PROXY`・`https_proxy` のどれでも `claude` を起動せず `failure="endpoint"`。`managed-settings.d/*.json` と `remote-settings.json` の `apiKeyHelper` でも同じ。子の環境の `ANTHROPIC_BASE_URL`（出所が `子の環境`）では呼ぶ。判定の子へ渡す環境から `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が外れ、`ANTHROPIC_BASE_URL` などは残る | ランタイムを見ずに呼ぶと Codex の例で落ちる。シェルの文字列や外側の Claude Code を親と読むと落ちる。`=` の形を見逃すと落ちる。管理者の追加のファイルを読まないと落ちる。環境を外しすぎ・外し漏れで落ちる。休み中に `/proc` を読むと落ちる |
+| 決定 11. 送信先が同じときだけ呼ぶ | hook の側: Codex のセッションで `skip:runtime`。`CLAUDE_CODE_ENTRYPOINT` が `sdk-ts`・`CLAUDE_PROJECT_DIR` が無い・`CLAUDE_CONFIG_DIR` が相対・親が見つからない（`/proc` が読めない）のどれでも子を起動せず `skip:endpoint`。偽の `/proc` で、近い順に「`bash -c 'claude …'`」「`--settings` 付きの Claude Code（実行ファイルが `…/claude/versions/2.1.330`）」「フラグの無い Claude Code」と並べると、近い方の Claude Code の引数が子へ渡り、子が `--settings` で `endpoint` を返す。近い順に「`node /usr/local/bin/claude`（実行ファイルが `node`。npm の `claude` のリンク名で起動した内側のセッション）」「フラグの無いネイティブ版の Claude Code（外側）」と並べると、node で探すのを止めて子を起動しない（`skip:endpoint`）。休み中と残りの秒が足りない Stop では `/proc` を読まない。判定の子: 親の引数の `--settings x.json`・`--settings=x.json`・`--setting-sources=user`、`account_dir.effective_env` の返りの `unresolved`・`apiKeyHelper`・`awsCredentialExport`・設定の層の `ANTHROPIC_BASE_URL`・`HTTPS_PROXY`・`https_proxy` のどれでも `claude` を起動せず `failure="endpoint"`。`managed-settings.d/*.json` と `remote-settings.json` の `apiKeyHelper` でも同じ。子の環境の `ANTHROPIC_BASE_URL`（出所が `子の環境`）では呼ぶ。判定の子へ渡す環境から `CLAUDECODE`・`CLAUDE_CODE_SESSION_ID` が外れ、`ANTHROPIC_BASE_URL` などは残る | ランタイムを見ずに呼ぶと Codex の例で落ちる。シェルの文字列や外側の Claude Code を親と読むと落ちる。起動引数が `cli.js` でない node を飛ばして外側のネイティブ版を親とすると落ちる。`=` の形を見逃すと落ちる。管理者の追加のファイルを読まないと落ちる。環境を外しすぎ・外し漏れで落ちる。休み中に `/proc` を読むと落ちる |
 | 5. 回答が得られないときは文字列の判定 | 判定器が時間切れ・起動の失敗・認証の失敗・形の違う回答を返すと、文字列の判定と同じ結果になる。偽の Popen が時間切れを起こすと、組へ SIGTERM と SIGKILL が送られて回収（`wait`）される | 失敗を通過や変更要求に倒すと落ちる。組へ送らずに戻ると落ちる |
 | 5. 割り込みでも回収する | 偽の Popen の待ちの中で例外（割り込みの代わり）が上がっても、組へ送って回収してから投げ直す | 割り込みで後始末を飛ばすと落ちる |
 | 決定 4. 1 回で決める | 1 つの Stop で判定器が 1 回だけ呼ばれる | 同じ Stop で 2 回打つと落ちる |
@@ -349,7 +352,7 @@ sequenceDiagram
 | MEA4 | 子の import（`ndf.adapters.claude`・`ndf.adapters.launch_slot`） | 152〜205 ms |
 | MEA5 | MEA3 で外れた例を切り分け、通すべき 4 例を 6 周ずつ判定 | 外れたのは「設計 PR を出しました。承認ゲートの承認資料は /tmp/a.md にあります。」だけで 6 回中 1 回。**同じ文を 2 回打って 2 回とも `wait` のときだけ待ちとする形**を 12 組試しても外れは 12 組中 2 組で、1 回打ち（6 回中 1 回）から減らなかった。回答の揺れは独立でなく、文が境目にあるために起きる（決定 4） |
 | MEA6 | 質問の文の report の例に「承認を求める資料を用意したことや作業の結果を報告している」を足し、見逃しの 5 文・引用・別の場所の待ち・作業の報告・承認資料の報告の 9 例を 6 周ずつ判定 | **54 回すべて期待どおり**（外れ 0）。合計 0.0032 USD（続けて打つとプロンプトのキャッシュが効き、1 回あたり 0.00006 USD まで下がる） |
-| MEA7 | CLI の下限の確かめが打つ `claude --version` を新しいプロセスから 6 回 | 0.007〜0.009 秒 |
+| MEA7 | CLI の下限の確かめが打つ `claude --version` を新しいプロセスから 6 回 | 0.007〜0.009 秒。**判定の子はこの確かめを打たない**（利用者の決定、2026-11-23。決定 3 の「CLI の下限」） |
 | MEA8 | 空の設定ディレクトリで認証の変数を外した `claude -p --output-format json`、無効な API キーを渡した同じ起動 | どちらも終了コード 1・`is_error: true`。本文は「Not logged in · Please run /login」（`api_error_status` null）と「Invalid API key · Fix external API key」（401・`authentication_error`）。今の `call_claude` では `failure` の無い失敗になる |
 | MEA9 | Claude Code の Bash の中の python から `/proc/<pid>/stat` の親の番号をたどり `/proc/<pid>/cmdline` を読む（Linux） | 2 代上（間に `/bin/bash -c`）で `claude -p --output-format …` の起動引数が読めた。入れ子のセッションでは最初に当たる `claude` が hook を動かすセッションである（決定 11） |
 | MEA10 | 同じたどり方で `/proc/<pid>/exe` と hook 側の環境を読む | Claude Code の実行ファイルの実パスは `~/.local/share/claude/versions/2.1.330`（`~/.local/bin/claude` はその symlink）。`/proc/<pid>/environ` は起動時の環境で、親が自分で入れた `CLAUDE_CODE_ENTRYPOINT` は子孫の環境にだけ見える（端末の対話は `cli`、`claude -p` は `sdk-cli`） |
