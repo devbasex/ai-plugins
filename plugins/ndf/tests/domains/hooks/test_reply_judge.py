@@ -459,6 +459,14 @@ def test_parent_launch_refuses_a_script_host_before_the_claude_executable() -> N
     assert launch_of(ENV, tree) is None
 
 
+@pytest.mark.parametrize("below", ["2.1.330/bin/tool", "tools/tool"])
+def test_parent_launch_does_not_take_an_executable_below_the_versions(below: str) -> None:
+    # 導入先の直下のファイルだけを Claude Code と認め、下の階層の実行ファイルは認めない
+    tree = {HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3"])}
+    tree[101] = Proc(ppid=1, exe=f"/home/u/.local/share/claude/versions/{below}", cmdline=["tool"], comm="tool")
+    assert launch_of(ENV, tree) is None
+
+
 @pytest.mark.parametrize(("depth", "wanted"), [(8, ["claude", "-p"]), (9, None)])
 def test_parent_launch_stops_at_the_generation_limit(depth: int, wanted: Optional[list[str]]) -> None:
     found = launch_of(ENV, chain(depth))
