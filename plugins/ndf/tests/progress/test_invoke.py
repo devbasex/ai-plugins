@@ -264,6 +264,7 @@ def test_template_values_missing_from_every_source_stop_as_precondition_by_name(
     # 出所（設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる。課題に依存しない差し込みが欠ければ
     # 課題を読む前に止まるので、課題の出所の差し込み（title・body_file・issue）はまだ挙げない（PR 4289 の r2-1）
     repo = _sprint_repo(tmp_path)
+    sprint_fixture.without_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))

@@ -240,10 +240,10 @@ def test_the_work_runs_in_the_worktree_or_the_repo_by_its_definition(tmp_path):
     assert [a[a.index("--cwd") + 1] for a in got] == ["/r/.worktrees/b", "/r", "/r"]
 
 
-def test_the_template_worker_has_no_default_until_prompts_are_written():
-    # PR 3496 の指摘: `<保存先>/<作業名>-prompt.md` を書く処理が無いまま既定にすると worker のステップが必ず落ちる。
-    # 既定を持たず、決まらなければ実行の前に TemplateValuesMissing で止まる
-    assert route.params()["worker"].default is None
+def test_the_template_worker_defaults_to_ndf_answer_work_without_cwd():
+    # #3908 の受け入れ条件 1: 差し込み worker の既定は、プロンプトを組んで worker を起動する ndf answer work。
+    # 作業場所は作業の定義（cwd）が決めるので、既定の並びに --cwd を置かない
+    assert route.params()["worker"].default == ["ndf", "answer", "work", "--state-dir", "{state_dir}"]
     assert set(gate.work_kinds()) >= {"impl", "fix", "design", "plan-to-spec"}
 
 

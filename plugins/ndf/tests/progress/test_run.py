@@ -812,8 +812,9 @@ def _step_dir(st, tid: str, stage_id: str, step: str, generation: int = 0) -> Pa
     return run.work_root(st.root, tid) / stage_id / f"{step}-g{generation}"
 
 
-def test_a_stage_whose_values_cannot_be_decided_stops_before_started(repo, st, env, capsys):
-    # params.json の worker に既定が無い今は、工程「要求と受け入れ条件」の差し込み worker が決まらない
+def test_a_stage_whose_values_cannot_be_decided_stops_before_started(repo, st, env, capsys, monkeypatch):
+    # worker の既定を外すと、工程「要求と受け入れ条件」の差し込み worker がどの出所からも決まらない
+    sprint_fixture.without_worker(monkeypatch)
     tid = _new(capsys)
     real = run.Env(**{**vars(env.env), "prepare": invoke.prepare_plan})
     out = run.advance(st, tid, repo, real)

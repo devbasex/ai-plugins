@@ -226,6 +226,7 @@ def test_plan_path_builds_again_over_the_values_of_another_plan(tmp_path, monkey
 
 def test_prepare_plan_leaves_no_values_when_a_value_cannot_be_decided(tmp_path, monkeypatch):
     repo = _sprint_repo(tmp_path)
+    sprint_fixture.without_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
