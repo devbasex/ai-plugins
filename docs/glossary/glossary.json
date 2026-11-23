@@ -4925,7 +4925,7 @@
     {
       "term": "上限の設定",
       "context": "ndf-durable",
-      "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
+      "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに 1 ファイルで持つデータ（plugins/ndf/contracts/limits/。#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
       "code": "limits_declaration"
@@ -7331,7 +7331,7 @@
     {
       "term": "停止理由の表",
       "context": "ndf-durable",
-      "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
+      "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes/`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {
