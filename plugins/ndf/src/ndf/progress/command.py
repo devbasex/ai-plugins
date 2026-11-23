@@ -27,13 +27,15 @@ ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモ
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import functools
 import json
 import subprocess
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
@@ -170,17 +172,43 @@ def _context_git_head(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     return Git(Path(context.get("worktree") or cwd)), str(context.get("branch") or "HEAD")
 
 
+# 工程の始まり（`base_refs_once` の中）で求めた起点: (作業場所, ベースブランチ) → 参照。範囲の外では None で、覚えない
+_BASE_REFS: contextvars.ContextVar[Optional[dict[tuple[Optional[Path], str], str]]] = contextvars.ContextVar("base_refs", default=None)
+
+
+@contextlib.contextmanager
+def base_refs_once() -> Iterator[None]:
+    """この中の `base_ref` は、同じ作業場所とベースブランチの起点を 1 回だけ求める（#3908 の r2-5）。
+
+    工程の始まりは条件 `code_in_diff` の判定と既定のリファクタリングの組み立てで同じ起点を使う。範囲を工程の始まりに
+    限り、設定（リモート名）が後で変わっても古い起点を使い続けない。
+    """
+    token = _BASE_REFS.set({})
+    try:
+        yield
+    finally:
+        _BASE_REFS.reset(token)
+
+
 def base_ref(git: Git, base: str) -> str:
     """差分の起点の参照: 作業場所で `base` が読めればそのブランチ名、読めなければ `<リモート名>/<base>`（#3908）。
 
-    工程の条件 `code_in_diff`（`_sprint_range`）とリファクタリングの既定の起動（`refactor_values`）が同じ起点を使う。
+    工程の条件 `code_in_diff`（`_sprint_range`）とリファクタリングの既定の起動（`refactor_values`）が同じ起点を使い、
+    `base_refs_once` の中では先に求めた起点を引き継ぐ（git を打ち直さない）。
     """
+    held = _BASE_REFS.get()
+    key = (git.cwd.resolve() if git.cwd is not None else None, base)
+    if held is not None and key in held:
+        return held[key]
     try:
         git.rev_parse(base)
+        ref = base
     except GitError:
         # 手元に無いベースブランチは、取得し直したリモートの参照で見る
-        return f"{git.remote()}/{base}"
-    return base
+        ref = f"{git.remote()}/{base}"
+    if held is not None:
+        held[key] = ref
+    return ref
 
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
