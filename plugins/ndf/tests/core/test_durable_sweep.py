@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
-import threading
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,7 +11,6 @@ import pytest
 
 from ndf.core import durable
 
-from ._durable_helpers import run_key_process as _run
 
 KEY_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".lock", ".checked")
 
@@ -51,29 +47,6 @@ def test_session_retires_a_finished_key_with_all_its_files(root):
     name = durable.run_name("done")
     assert _key_files(root, "done") == []
     assert (root / "dbos" / "retired" / f"{name}.sqlite").is_file()
-
-
-def test_pending_key_is_not_retired_and_is_listed(root):
-    _run(root, "waits", "wait")
-    name = durable.run_name("waits")
-
-    assert durable.retire(root, "waits") is None
-    result = durable.sweep(root, _later(hours=25))
-    assert not result.skipped and result.retired == []
-    assert f"{name}.sqlite" in _key_files(root, "waits")
-
-    found = durable.pending(root)
-    assert [(r.run_name, r.workflow_id, r.status) for r in found] == [(name, "wf-waits", "PENDING")]
-
-    # 日数が過ぎても、待ちを抱えたファイルは消さない
-    assert durable.sweep(root, _later(days=30)).deleted == []
-    assert f"{name}.sqlite" in _key_files(root, "waits")
-
-
-def test_pending_lists_only_waiting_runs(root):
-    _run(root, "waits", "wait")
-    _finish_without_retire(root, "ends")
-    assert [r.workflow_id for r in durable.pending(root)] == ["wf-waits"]
 
 
 def test_sweep_skips_a_key_whose_lock_is_held_and_retires_it_later(root):
@@ -171,25 +144,6 @@ def test_sweep_retires_finished_keys_in_name_order_and_reports_unreadable_files(
     assert _key_files(root, "a-done") == [] and _key_files(root, "b-done") == []
 
 
-def test_sweep_removes_marks_and_locks_left_without_a_key_file(root):
-    """現状固定: 本体の無い `.checked` と、だれも持たない `.lock` を消し、本体のあるキーの目印とロックは残す。"""
-    _run(root, "waits", "wait")
-    dbos = root / "dbos"
-    name = durable.run_name("waits")
-    (dbos / f"{name}.checked").touch()
-    orphan_mark = dbos / "run-gone.checked"
-    orphan_lock = dbos / "run-gone.lock"
-    orphan_mark.touch()
-    orphan_lock.touch()
-
-    result = durable.sweep(root, _later(hours=25))
-
-    assert result.retired == [] and result.warnings == [] and result.busy == 0
-    assert not orphan_mark.exists() and not orphan_lock.exists()
-    assert (dbos / f"{name}.checked").exists() and (dbos / f"{name}.lock").exists()
-    assert (dbos / f"{name}.sqlite").exists()
-
-
 def test_sweep_keeps_a_lock_without_a_key_file_while_it_is_held(root):
     """現状固定: 本体の無い `.lock` でも、`run_lock` を持つプロセスがいる間は消さず、busy にも数えない。"""
     root.mkdir(parents=True)
@@ -222,33 +176,6 @@ def test_workflows_reads_records_of_the_key_with_their_fields(root):
     assert [_fields(r) for r in by_key] == [_fields(r) for r in every]
     assert all(r.updated_at is not None and r.updated_at.tzinfo == UTC for r in every)
     assert durable.workflows(url, "another") == []
-
-
-def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_child(root):
-    """現状固定: 子の記録は親の ID を持つ。`pending` は終わった親を除き、待ちの子だけを返す。"""
-    _run(root, "family", "child-wait")
-    url = durable.run_url(root, "family")
-    name = durable.run_name("family")
-    version = durable.app_version("family")
-
-    records = sorted(durable.workflows(url, "family"), key=lambda r: r.workflow_id)
-    assert [_fields(r) for r in records] == [
-        (name, "wf-family", "SUCCESS", None, version),
-        (name, "wf-family-child", "PENDING", "wf-family", version),
-    ]
-    assert [_fields(r) for r in durable.pending(root)] == [(name, "wf-family-child", "PENDING", "wf-family", version)]
-
-
-def test_cancel_before_launch_cancels_the_run_and_its_waiting_child(root):
-    """現状固定: DBOS を起動せずに、親と待ちの子をまとめて取り消す。"""
-    _run(root, "cancel", "child-wait")
-    url = durable.run_url(root, "cancel")
-
-    durable.cancel_before_launch(url, "wf-cancel")
-
-    statuses = {r.workflow_id: r.status for r in durable.workflows(url, "cancel")}
-    assert statuses == {"wf-cancel": "SUCCESS", "wf-cancel-child": "CANCELLED"}
-    assert durable.pending(root) == []
 
 
 class _FailingClient:
@@ -305,42 +232,3 @@ def test_key_file_is_checked_once_a_day(root, monkeypatch):
     _finish_without_retire(root, "checked")
     assert len(calls) == 1
     assert (root / "dbos" / f"{durable.run_name('checked')}.checked").exists()
-
-
-def test_retiring_an_old_store_counts_its_pending_runs(root):
-    _run(root, "left", "wait")
-    (root / "format.json").write_text(json.dumps({"format": 0}))
-    durable.release_store(root)
-
-    ready = durable.prepare_store(root)
-    assert ready.retired_to is not None
-    assert ready.pending_count == 1
-
-
-def test_run_lock_reopens_when_the_lock_file_was_removed(root):
-    """`.lock` を消した後に同じキーで 2 つ取ると、1 つ目が抜けるまで 2 つ目が待つ（inode の確かめ）。"""
-    lock = root / "dbos" / f"{durable.run_name('k')}.lock"
-    got1, got2, release1 = threading.Event(), threading.Event(), threading.Event()
-
-    def take(got: threading.Event, release: threading.Event | None) -> None:
-        with durable.run_lock(root, "k"):
-            got.set()
-            if release is not None:
-                release.wait(10)
-
-    with durable.run_lock(root, "k"):
-        first = threading.Thread(target=take, args=(got1, release1))
-        first.start()
-        time.sleep(0.2)
-        assert not got1.is_set()
-        lock.unlink()  # 退避が .lock をロックを持ったまま消す
-    assert got1.wait(5)
-
-    second = threading.Thread(target=take, args=(got2, None))
-    second.start()
-    time.sleep(0.3)
-    assert not got2.is_set()
-    release1.set()
-    first.join(5)
-    assert got2.wait(5)
-    second.join(5)

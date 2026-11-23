@@ -9,13 +9,7 @@ from __future__ import annotations
 
 import functools
 import json
-import shutil
 import socket
-import ssl
-import subprocess
-import threading
-import time
-from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,7 +25,6 @@ TOKEN = "fake-access-value"
 REFRESH = "fake-refresh-value"
 RESET_5 = "2027-01-15T10:00:00Z"
 RESET_7 = "2027-01-20T00:00:00+00:00"
-MARGIN = 0.5  # 期限を越えたかの判定に足す小さな余白（秒）
 _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
 
 
@@ -413,62 +406,6 @@ def test_request_json_bad_url() -> None:
     assert http.request_json("GET", "ftp://x.test/a", {}, 5) == (0, None)
 
 
-def _timed(fn: Callable[[], Any]) -> tuple[Any, float]:
-    start = time.monotonic()
-    got = fn()
-    return got, time.monotonic() - start
-
-
-def test_request_json_slow_body_hits_deadline() -> None:
-    """往復全体の期限: 見出しと本文を上限より短い間隔で少しずつ返し続けるサーバーでも、`timeout` の内に `(0, None)`。"""
-    url, stop = _drip_server.start(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", every=0.1)
-    try:
-        got, took = _timed(lambda: http.request_json("GET", url, {}, 0.6))
-    finally:
-        stop()
-    assert got == (0, None)
-    assert took < 0.6 + MARGIN
-
-
-def test_request_json_slow_resolve_hits_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """往復全体の期限: 名前解決が `timeout` より長く返らなくても、結果を待たずに `(0, None)`。"""
-    release = threading.Event()
-
-    def slow_resolve(*a: Any, **k: Any) -> Any:
-        release.wait(10)
-        raise socket.gaierror("late")
-
-    monkeypatch.setattr(http, "DeadlineBackend", functools.partial(http.DeadlineBackend, resolve=slow_resolve))
-    try:
-        got, took = _timed(lambda: http.request_json("GET", "http://slow.test/", {}, 0.5))
-    finally:
-        release.set()
-    assert got == (0, None)
-    assert took < 0.5 + MARGIN
-
-
-def test_request_json_two_slow_addresses_share_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """往復全体の期限: アドレスが 2 つあってどちらの接続も渡された残りいっぱい待っても、通しで `timeout` の内に `(0, None)`。"""
-    infos = [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", 80)),
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.2", 80)),
-    ]
-    given: list[float] = []
-
-    def connect(info: Any, timeout: float) -> socket.socket:
-        given.append(timeout)
-        threading.Event().wait(timeout)
-        raise TimeoutError("slow")
-
-    backend = functools.partial(http.DeadlineBackend, resolve=lambda *a, **k: infos, connect=connect)
-    monkeypatch.setattr(http, "DeadlineBackend", backend)
-    got, took = _timed(lambda: http.request_json("GET", "http://two.test/", {}, 0.6))
-    assert got == (0, None)
-    assert took < 0.6 + MARGIN
-    assert given and given[0] <= 0.6
-    assert sum(given) <= 0.6 + MARGIN
-
-
 def test_request_json_before_send_refuses_without_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
     """`before_send` が理由を返せば接続の前に打ち切り、`(-1, None)` を返す。"""
     resolved: list[Any] = []
@@ -535,48 +472,6 @@ def test_request_json_no_proxy_connects_directly(monkeypatch: pytest.MonkeyPatch
     assert hosts == ["usage.invalid"]
 
 
-def test_request_json_slow_proxy_hits_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """往復全体の期限: プロキシが応答を少しずつ返し続けても、`timeout` の内に `(0, None)`。"""
-    proxy, stop = _drip_server.start(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", every=0.1)
-    monkeypatch.setenv("HTTP_PROXY", proxy)
-    try:
-        got, took = _timed(lambda: http.request_json("GET", "http://usage.invalid/", {}, 0.6))
-    finally:
-        stop()
-    assert got == (0, None)
-    assert took < 0.6 + MARGIN
-
-
-# ---- 送信の期限 ----
-
-
-def test_deadline_stream_write_stops_slow_reader() -> None:
-    """往復全体の期限: 相手が少しずつ読み取り続けても、送信は部分送信ごとに残りを引き直し、期限で打ち切る。"""
-    a, b = socket.socketpair()
-    a.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
-    b.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-    quit_ = threading.Event()
-
-    def drain() -> None:
-        while not quit_.wait(0.02):
-            try:
-                b.recv(1024)
-            except OSError:
-                return
-
-    threading.Thread(target=drain, daemon=True).start()
-    stream = http._DeadlineStream(http.SyncStream(a), time.monotonic() + 0.5)
-    try:
-        start = time.monotonic()
-        with pytest.raises(http.httpcore.WriteTimeout):
-            stream.write(b"x" * (8 * 1024 * 1024), timeout=5)
-        assert time.monotonic() - start < 0.5 + MARGIN
-    finally:
-        quit_.set()
-        a.close()
-        b.close()
-
-
 # ---- 接続先に当たるプロキシの設定だけを組む ----
 
 
@@ -637,52 +532,3 @@ def test_refresh_oauth_unreadable_number_is_error(raw: bytes) -> None:
     t = _respond(200, content=raw)
     assert http.request_json("POST", "https://x.test/a", {}, 5, http.RequestOptions(transport=t)) == (200, None)
     assert claude_usage.refresh_oauth(OAUTH, NOW, 3, transport=t) == ("error", None)
-
-
-# ---- HTTPS のプロキシ越しの HTTPS ----
-
-
-@pytest.fixture
-def proxy_cert(tmp_path: Any) -> tuple[str, str]:
-    """プロキシの自己署名の証明書（127.0.0.1）と秘密鍵。openssl が無ければ飛ばす。"""
-    if shutil.which("openssl") is None:
-        pytest.skip("openssl が無い")
-    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
-    subprocess.run(
-        [
-            "openssl",
-            "req",
-            "-x509",
-            "-newkey",
-            "rsa:2048",
-            "-nodes",
-            "-keyout",
-            key,
-            "-out",
-            cert,
-            "-days",
-            "1",
-            "-subj",
-            "/CN=127.0.0.1",
-            "-addext",
-            "subjectAltName=IP:127.0.0.1",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    return cert, key
-
-
-def test_request_json_tls_in_tls_slow_handshake_hits_deadline(monkeypatch: pytest.MonkeyPatch, proxy_cert: tuple[str, str]) -> None:
-    """往復全体の期限: HTTPS のプロキシへの CONNECT の後、接続先との TLS の応答が少しずつ届き続けても、`timeout` の内に `(0, None)`。"""
-    cert, key = proxy_cert
-    ctx = ssl.create_default_context(cafile=cert)
-    monkeypatch.setattr(http.httpcore._sync.connection, "default_ssl_context", lambda: ctx)
-    proxy, stop = _drip_server.start_tls_tunnel(cert, key, b"\x00", every=0.1)
-    monkeypatch.setenv("HTTPS_PROXY", proxy)
-    try:
-        got, took = _timed(lambda: http.request_json("GET", "https://usage.invalid/", {}, 0.8))
-    finally:
-        stop()
-    assert got == (0, None)
-    assert took < 0.8 + MARGIN

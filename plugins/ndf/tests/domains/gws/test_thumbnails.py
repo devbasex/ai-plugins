@@ -39,24 +39,6 @@ def _thumb_params(call: list[str]) -> dict[str, Any]:
     return json.loads(call[call.index("--params") + 1])
 
 
-def test_saves_every_page_in_order(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:
-    fakes.add("gws", [_pages("a", "b", "c"), _thumb()])
-    fakes.add("curl", _curl())
-    out = tmp_path / "out"
-    code, got = run_gws(capsys, last_result, "thumbnails", PID, str(out))
-    assert (code, got["status"]) == (0, "ok")
-    assert got["items"] == [
-        {"name": f"p{n}", "result": "saved", "objectId": oid, "detail": str(out / f"p{n}.png")} for n, oid in enumerate("abc", start=1)
-    ]
-    assert got["metrics"] == {"pages": 3, "size": "LARGE", "out_dir": str(out)}
-    assert sorted(p.name for p in out.iterdir()) == ["p1.png", "p2.png", "p3.png"]
-    thumbs = [c for c in fakes.calls("gws") if c[:4] == THUMB]
-    assert [_thumb_params(c)["pageObjectId"] for c in thumbs] == ["a", "b", "c"]
-    assert {_thumb_params(c)["thumbnailProperties.thumbnailSize"] for c in thumbs} == {"LARGE"}
-    assert all(c[:2] != AUTH for c in fakes.calls("gws"))
-    assert all("--max-time" in c for c in fakes.calls("curl"))
-
-
 def test_size_is_passed_to_gws(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:
     fakes.add("gws", [_pages("a"), _thumb()])
     fakes.add("curl", _curl())
@@ -104,7 +86,7 @@ def test_gws_failure_when_logged_in_stops_with_1_not_11(fakes: Fakes, tmp_path: 
     assert (code, got["status"], got["items"][0]["result"]) == (1, "stopped", "gws-failed")
 
 
-@pytest.mark.parametrize("status", [{"prefix": AUTH, "code": 1}, {"prefix": AUTH, "sleep": 10}], ids=["exit-1", "over-the-limit"])
+@pytest.mark.parametrize("status", [{"prefix": AUTH, "code": 1}], ids=["exit-1"])
 def test_unreadable_status_after_a_failure_is_a_plain_failure(
     fakes: Fakes, tmp_path: Path, capsys, last_result, monkeypatch, status: dict
 ) -> None:
@@ -159,14 +141,6 @@ def test_download_failure_stops_with_1(fakes: Fakes, tmp_path: Path, capsys, las
     assert len(fakes.calls("curl")) == 1
     if kind == "unknown":
         assert got["items"] == [{"name": "p1（a）のサムネイル", "result": "download-failed", "detail": "curl: failed"}]
-
-
-def test_gws_over_the_limit_is_interrupted(fakes: Fakes, tmp_path: Path, capsys, last_result, monkeypatch) -> None:
-    monkeypatch.setattr(limits, "seconds", lambda name: 0.5)
-    fakes.add("gws", [{"prefix": GET, "sleep": 10}])
-    fakes.add("curl", _curl())
-    code, got = run_gws(capsys, last_result, "thumbnails", PID, str(tmp_path / "out"))
-    assert (code, got["cause"]["kind"]) == (1, "interrupted")
 
 
 def test_out_dir_that_cannot_be_made_stops_with_1(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:

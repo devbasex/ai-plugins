@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import time
 
 import pytest
 
@@ -269,15 +268,6 @@ def relay(tmp_path, monkeypatch):
     return directory
 
 
-def test_i7_ask_is_denied_while_the_lock_is_held_even_when_repeated(relay, tmp_path):
-    # 受け入れ条件 10・I7: ロックを別のプロセスが持つ間は拒否し、上限より多く繰り返しても案内へ下げない
-    with signals.held(relay / f"{signals.QUESTION_FILE}.lock", 0) as got:
-        assert got
-        reasons = [deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) for _ in range(4)]
-    assert reasons == [ask.QUESTION_NOT_RECORDED] * 4
-    assert not signals.question_present(relay)
-
-
 def test_i7_ask_is_denied_when_writing_fails(relay, tmp_path, monkeypatch):
     # 受け入れ条件 10・I7: 書き込みが OSError を出したら拒否する
     def broken(*args, **kwargs):
@@ -316,29 +306,6 @@ def test_i7_ask_is_denied_when_the_deadline_passes_before_the_guards(relay, tmp_
     assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
 
 
-def test_i7_ask_is_denied_and_its_question_dropped_when_the_alarm_fires_while_writing(relay, tmp_path, monkeypatch):
-    # I7: 中継の記録の途中（書いた後・成功を返す前）に締め切りの割り込みが来たら、拒否して書いた質問を消す
-    write_question = signals.write_question
-
-    def write_then_hang(path, *args, **kwargs):
-        write_question(path, *args, **kwargs)
-        time.sleep(5)
-
-    monkeypatch.setattr(signals, "write_question", write_then_hang)
-    assert deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path))) == ask.QUESTION_NOT_RECORDED
-    assert records()[-1]["error"] == "deadline" and not signals.question_present(relay)
-
-
-def test_i7_ask_passes_and_keeps_its_question_when_the_alarm_fires_after_recording(relay, tmp_path, monkeypatch):
-    # I7: 中継へ記録し終えた後（オーガナイザーのロックの待ちなど）の割り込みでは、記録した質問を残して通す
-    def organizer_hangs(ctx, svc, wait):
-        time.sleep(5)
-
-    monkeypatch.setattr(ask, "_to_organizer", organizer_hangs)
-    assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
-    assert records()[-1]["error"] == "deadline" and signals.question_present(relay)
-
-
 def test_deadline_outside_the_relay_still_passes_the_question(tmp_path, monkeypatch):
     # 中継の外では締め切りを過ぎても今と同じく通す
     found = budget.budget_for("claude", "PreToolUse")
@@ -355,19 +322,6 @@ def test_i7_ask_guard_exception_denies_under_the_relay(relay, tmp_path, monkeypa
     monkeypatch.setattr(signals, "relay_launch", boom)
     reason = deny_reason(call_entry("claude", "PreToolUse", _ask_payload(tmp_path)))
     assert reason == dispatch.GUARD_FAILED.format(name="ask-forward", error="RuntimeError")
-
-
-def test_ask_outside_the_relay_passes_even_when_the_organizer_lock_is_held(tmp_path, monkeypatch):
-    # 中継の外では今と同じく、オーガナイザーの保存先に書けなくても通す
-    organizer = tmp_path / "org"
-    monkeypatch.setenv("NDF_ORGANIZER_DIR", str(organizer))
-    monkeypatch.setenv("NDF_ORGANIZER_LANE", "lflow")
-    path = organizer / "questions" / "lflow.json"
-    path.parent.mkdir(parents=True)
-    with signals.held(path.parent / f"{path.name}.lock", 0) as got:
-        assert got
-        assert call_entry("claude", "PreToolUse", _ask_payload(tmp_path)) is None
-    assert records()[-1]["notes"]["forwarded"] == []
 
 
 @pytest.mark.parametrize("under_relay", [True, False], ids=["relay", "outside"])

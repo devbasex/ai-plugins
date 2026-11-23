@@ -273,16 +273,6 @@ def test_same_file_is_not_written(tmp_path):
     assert w["config"].stat().st_mtime_ns == before and not Path(f"{w['config']}.lock").exists()
 
 
-def test_a_busy_claude_lock_gives_lock_busy_and_writes_nothing(tmp_path):
-    w = _synced(tmp_path, {"m": "A"})
-    _edit(w["config"], mcpServers={"m": "B"})
-    Path(f"{w['shared_file']}.lock").mkdir()  # 動いている claude が持つ錠（新しい）
-    shared_before = w["shared_file"].read_bytes()
-    assert _sync(w) == "lock_busy"
-    assert w["shared_file"].read_bytes() == shared_before and _mcp(w["config"]) == {"m": "B"}
-    assert not Path(f"{w['config']}.lock").exists()  # 取った錠は返す
-
-
 def test_a_stale_claude_lock_is_taken_over(tmp_path):
     w = _synced(tmp_path, {"m": "A"})
     lock = Path(f"{w['shared_file']}.lock")

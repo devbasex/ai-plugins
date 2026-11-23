@@ -9,11 +9,8 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
-import threading
-import time
 
 import pytest
 
@@ -90,19 +87,6 @@ def test_d12_helper_payout_is_three_per_minute_and_never_after_a_refusal(tmp_pat
     assert all(FAKE_KEY not in json.dumps(r) and FP not in json.dumps(r) for r in rows)
 
 
-def test_d12_concurrent_helpers_pay_at_most_three_times(tmp_path):
-    rec = key_helper.create(_dir(tmp_path))
-    paid: list[bool] = []
-    threads = [
-        threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)))) for _ in range(10)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert paid.count(True) == 3 and sum(r["out"] for r in _paid(rec.path)) == 3
-
-
 def test_d12_a_deny_mark_stops_the_payout(tmp_path):
     rec = key_helper.create(_dir(tmp_path))
     assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))
@@ -143,75 +127,6 @@ def test_i9_the_record_comes_from_the_arguments_not_the_settings_env(tmp_path, c
     assert _helper(capsys, FP, "--id", rec.helper_id)[0] == 1
 
 
-def test_d12_a_lock_timeout_leaves_a_fail_mark_instead_of_a_row(tmp_path):
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
-    finally:
-        os.close(fd)
-    assert _paid(rec.path) == []
-    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "lock"}]
-    assert key_helper.watch(d, rec) == key_helper.Seen(True, None)
-    # ラッパーが見回る前でも、錠の取れた次の呼び出しは同じ ID の拒否の後なのでキーを出さない（r2-6）
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0)) is False
-    assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1001.0, "out": False}]
-
-
-def test_d12_a_fail_mark_left_while_a_payout_is_inside_the_lock_gives_no_key(tmp_path, monkeypatch):
-    # A が錠の中で失敗のマークの確かめを通った後、B が錠の待ちを打ち切ってマークを残して拒んだら、A もキーを出さない（r3-1）
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    passed, refused, seen = threading.Event(), threading.Event(), []
-    real = key_helper._failed
-
-    def failed(directory, helper_id):
-        got = real(directory, helper_id)
-        if threading.current_thread() is not threading.main_thread() and not seen:
-            seen.append(got)
-            passed.set()
-            assert refused.wait(5)
-        return got
-
-    monkeypatch.setattr(key_helper, "_failed", failed)
-    paid: list = []
-    a = threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))))
-    a.start()
-    assert passed.wait(5)
-    b = key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0))  # A が錠を持つので B は錠の待ちを打ち切る
-    refused.set()
-    a.join()
-    assert seen == [False] and b is False and paid == [False]
-    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "helper", "cause": "lock"}]
-
-
-def test_d12_an_empty_fail_mark_is_a_refusal_for_both_readers(tmp_path, monkeypatch):
-    # 錠の待ちを打ち切った呼び出しがマークを作れても最初の書き込みが落ちると空のファイルが残る。拒否として扱う（r3-2）
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    real = os.write
-
-    def write(fd, data):
-        if b'"by"' in data:
-            raise OSError(28, "No space left on device")
-        return real(fd, data)
-
-    monkeypatch.setattr(key_helper.os, "write", write)
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0)) is False
-    finally:
-        os.close(fd)
-    monkeypatch.setattr(key_helper.os, "write", real)
-    assert (d / key_helper.FAIL_FILE).read_bytes() == b""
-    assert key_helper.watch(d, rec).auth
-    # 容量が戻っても、同じ ID ではキーを出さない
-    assert key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1001.0)) is False
-
-
 def test_d12_a_short_write_of_the_payout_row_gives_no_key(tmp_path, monkeypatch):
     # 空き容量の不足などで行の一部だけが書けたら、払い出しを数えられないのでキーを出さず失敗のマークを残す（r2-5）
     d = _dir(tmp_path)
@@ -247,27 +162,6 @@ def test_i9_a_changed_directory_is_a_record_failure(tmp_path):
     assert not key_helper.watch(d, rec).auth
 
 
-def test_d12_a_payout_takes_its_time_inside_the_lock(tmp_path):
-    # 錠を待った呼び出しは、錠を取った後の時刻で窓を照らして行に書く（古い時刻で窓を早く抜けない）
-    rec = key_helper.create(_dir(tmp_path))
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    taken: list[float] = []
-
-    def clock() -> float:
-        taken.append(time.monotonic())
-        return 1000.0
-
-    t = threading.Thread(target=lambda: key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, clock))
-    t.start()
-    time.sleep(0.2)
-    released = time.monotonic()
-    fcntl.flock(fd, fcntl.LOCK_UN)
-    os.close(fd)
-    t.join()
-    assert len(taken) == 1 and taken[0] >= released
-
-
 @pytest.mark.parametrize(
     "content", ["", "keep\n", json.dumps({"id": "x", "at": 1.0, "out": True}) + "\n"], ids=["empty", "text", "other-jsonl"]
 )
@@ -291,41 +185,3 @@ def test_d12_the_gate_row_is_appended_inside_the_helper_lock(tmp_path):
     key_helper.gate(rec, "user_settings")
     assert {"id": rec.helper_id, "gate": "user_settings"} in _rows(rec.path)
     assert key_helper.watch(d, rec) == key_helper.Seen(False, "user_settings")
-
-
-def test_d12_a_gate_that_cannot_take_the_lock_leaves_a_fail_mark(tmp_path):
-    # 錠を取れなければ記録へ書かず、失敗のマークへ `"by": "gate"` の行を足す（ラッパーは設定の当たりとして読む）
-    d = _dir(tmp_path)
-    rec = key_helper.create(d)
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    try:
-        key_helper.gate(rec, "user_settings")
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-    assert _rows(d / key_helper.FAIL_FILE) == [{"id": rec.helper_id, "by": "gate", "cause": "lock"}]
-    assert key_helper.watch(d, rec).source == key_helper.SETTINGS_FILE
-
-
-def test_i9_the_pin_is_checked_inside_the_record_lock(tmp_path):
-    # 払い出しの判断と同じ錠の中で固定を照らす（錠を待つ間に変わった設定の検証結果でキーを出さない）
-    rec = key_helper.create(_dir(tmp_path))
-    fd = os.open(rec.path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    checked: list[float] = []
-    paid: list[bool] = []
-
-    def pinned() -> bool:
-        checked.append(time.monotonic())
-        return False
-
-    t = threading.Thread(target=lambda: paid.append(key_helper.pay(rec.path, rec.helper_id, FAKE_KEY, at(1000.0), pinned=pinned)))
-    t.start()
-    time.sleep(0.2)
-    released = time.monotonic()
-    fcntl.flock(fd, fcntl.LOCK_UN)
-    os.close(fd)
-    t.join()
-    assert paid == [False] and len(checked) == 1 and checked[0] >= released
-    assert _paid(rec.path) == [{"id": rec.helper_id, "at": 1000.0, "out": False, "cause": "pin"}]

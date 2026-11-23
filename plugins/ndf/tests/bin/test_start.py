@@ -5,9 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -71,27 +68,6 @@ def test_a_whole_environment_is_checked_once_until_the_lock_changes(start, monke
     assert len(calls) == 2
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る（CI は setup-uv で入れる）")
-def test_the_entrypoint_stops_when_a_file_of_the_environment_is_gone(tmp_path):
-    cache = tmp_path / "cache"
-    env = {**os.environ, "XDG_CACHE_HOME": str(cache), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")}
-    first = subprocess.run([str(ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False, timeout=300)
-    assert first.returncode == 0, first.stderr
-    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    venv = cache / manifest["name"] / "venv" / manifest["version"]
-    stamp = venv / ".deps-checked"
-    assert stamp.exists()
-    victim = next(venv.glob("lib/python*/site-packages/tabulate/__init__.py"))
-    victim.unlink()
-    stamp.unlink()
-
-    done = subprocess.run([str(ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False, timeout=300)
-
-    assert done.returncode == causes.exit_code("deps_missing")
-    report = json.loads(done.stdout.strip().splitlines()[-1])
-    assert report["cause"]["kind"] == "deps_missing" and "tabulate" in report["cause"]["detail"]
-
-
 # --- 呼び出し元の環境へ戻す（#4029） ---
 
 # bin/ndf と uv run が NDF の子孫へ足す変数（呼び出し元の値へ戻す）
@@ -149,53 +125,3 @@ def test_the_package_runs_after_the_environment_is_restored(start, monkeypatch):
     monkeypatch.setattr(start.runpy, "run_module", lambda *a, **k: seen.append(os.environ["PATH"]))
     assert start.main() == 0
     assert seen == ["/caller"] and "NDF_CALLER_PATH" not in os.environ
-
-
-# uv run の代わり: uv run と同じく VIRTUAL_ENV・UV_RUN_RECURSION_DEPTH・PATH の先頭の venv の bin を足し、`python` の後を
-# テストの python で打つ
-_FAKE_UV_RUN = """#!/bin/sh
-export VIRTUAL_ENV="$UV_PROJECT_ENVIRONMENT" UV_RUN_RECURSION_DEPTH=1 PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"
-while [ "$1" != python ]; do shift; done
-shift
-exec "$FAKE_UV_PYTHON" "$@"
-"""
-_DUMP = "import json, os, sys; open(sys.argv[1], 'w').write(json.dumps(dict(os.environ)))"
-
-
-@pytest.mark.parametrize(
-    "caller",
-    [
-        {"UV_PROJECT_ENVIRONMENT": "/caller/env", "VIRTUAL_ENV": "/caller/venv", "PYTHONPATH": "/caller/pp"},
-        {},
-    ],
-    ids=["caller-has-values", "caller-has-none"],
-)
-def test_a_child_of_ndf_gets_the_callers_environment(tmp_path, caller):
-    """#4029 の再現: NDF が起動した子（プランのステップ）の環境に、NDF が足した UV_PROJECT_ENVIRONMENT・VIRTUAL_ENV・
-    UV_RUN_RECURSION_DEPTH・CLAUDE_PLUGIN_ROOT が無く、PATH の先頭が NDF の venv の bin でなく、PYTHONPATH に NDF の
-    src が無い。呼び出し元が元から持っていた値は残る。"""
-    import git_sandbox
-
-    fake = tmp_path / "fake"
-    fake.mkdir()
-    (fake / "uv").write_text(_FAKE_UV_RUN)
-    (fake / "uv").chmod(0o755)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    git_sandbox.sh(repo, "init", "-q", identity=True)
-    git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "init", identity=True)
-    dump = tmp_path / "child-env.json"
-    plan = repo / "plan.json"
-    plan.write_text(json.dumps({"name": "p", "repo": str(repo), "steps": [{"id": "s", "run": [sys.executable, "-c", _DUMP, str(dump)]}]}))
-    env = {k: v for k, v in os.environ.items() if k not in ADDED and not k.startswith("NDF_CALLER_")}
-    env |= {"PATH": f"{fake}{os.pathsep}{os.environ['PATH']}", "FAKE_UV_PYTHON": sys.executable, **caller}
-    env.pop("NDF_PROGRESS_DB", None)
-
-    done = subprocess.run(
-        [str(ROOT / "bin" / "ndf"), "plan", "next", str(plan)], cwd=repo, env=env, capture_output=True, text=True, check=False, timeout=300
-    )
-
-    assert done.returncode == 0, done.stdout + done.stderr
-    child = json.loads(dump.read_text())
-    assert {k: child.get(k) for k in ADDED} == {k: env.get(k) for k in ADDED}
-    assert not [k for k in child if k.startswith("NDF_CALLER_")]

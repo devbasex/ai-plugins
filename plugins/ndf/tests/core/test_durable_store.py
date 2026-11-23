@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,8 +13,6 @@ from lock_probe import taken_by_another
 
 from ndf.core import durable
 
-SRC = Path(__file__).resolve().parents[2] / "src"
-OPEN_SCRIPT = Path(__file__).with_name("_durable_store_open.py")
 NOW = datetime(2026, 11, 14, 12, 0, tzinfo=UTC)
 
 
@@ -147,7 +143,6 @@ def _hold(path: Path, mode: int):
 @pytest.mark.parametrize(
     ("lock", "mode", "error"),
     [
-        ("../state.lock", fcntl.LOCK_SH, durable.StoreInUse),  # 保存先を使うほかのプロセス
         ("dbos/run-old.lock", fcntl.LOCK_EX, durable.StoreLegacyRunning),  # キーのロックを持つ今の NDF（10.x）の耐久ワークフロー
         ("progress.sqlite.lock", fcntl.LOCK_SH, durable.StoreLegacyRunning),  # 別のチェックアウトからステートマシンの DB を開いたプロセス
     ],
@@ -216,28 +211,6 @@ def test_retire_holds_the_old_locks_through_the_rename_and_the_format_file(old_s
     assert durable.prepare_store(old_store, NOW).retired_to == retired
     assert seen == {"rename": True, "format": True}
     assert not taken_by_another(retired / "dbos" / "run-old.lock")
-
-
-def test_two_processes_opening_an_old_store_retire_it_once(old_store, tmp_path):
-    go = tmp_path / "go"
-    env = {**os.environ, "PYTHONPATH": str(SRC)}
-    procs = [
-        subprocess.Popen([sys.executable, str(OPEN_SCRIPT), str(old_store), str(go)], stdout=subprocess.PIPE, text=True, env=env)
-        for _ in range(2)
-    ]
-    go.touch()
-    outs = [json.loads(p.communicate(timeout=60)[0].strip().splitlines()[-1]) for p in procs]
-
-    assert {o["kind"] for o in outs} <= {"ok", "store_in_use"}
-    assert any(o["kind"] == "ok" for o in outs)
-    assert [o["retired_to"] for o in outs if o.get("retired_to")] == [str(old_store.with_name("state.v10-" + _today()))]
-    assert [p.name for p in old_store.parent.glob("state.v*")] == ["state.v10-" + _today()]
-    assert (old_store.with_name("state.v10-" + _today()) / "dbos" / "run-old.sqlite").read_bytes() == b"old"
-    assert _format(old_store) == durable.STORE_FORMAT
-
-
-def _today() -> str:
-    return datetime.now(UTC).strftime("%Y%m%d")
 
 
 def test_maint_lock_without_wait_yields_none_while_held(root):

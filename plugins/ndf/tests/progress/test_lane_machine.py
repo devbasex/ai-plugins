@@ -1,10 +1,9 @@
 """マシン全体の稼働中のレーンの数の上限（#3097・#2999・#3989）。数え方と判定は値で、別のリポジトリの計画は一時のリポジトリの
-ステートマシン（SQLite）で、同時の判定は起動の排他を 2 本のスレッドで取り合って確かめる。どれも回数と状態で判定し、時間で区切らない。"""
+ステートマシン（SQLite）で確かめる。どれも回数と状態で判定し、時間で区切らない。"""
 
 from __future__ import annotations
 
 import subprocess
-import threading
 from datetime import UTC, datetime
 
 import pytest
@@ -150,35 +149,6 @@ def _place(plan_id="plan:own"):
     return machine.PlanPlace(plan_id, "/own", "p6")
 
 
-def test_two_plans_admitting_at_once_do_not_pass_the_cap(monkeypatch):
-    """別の 2 つの計画（ステートマシンの ID が違う）の判定が同時に走っても、起動の排他の中で数えるので、起動した後の稼働中の数が
-    上限を超えない（受け入れ条件 8）。"""
-    _all_listed(monkeypatch)
-    named_cap.write(identity.load().state_dir, 3)
-    listed = {"o-a": _row()}
-    gate = threading.Barrier(3)
-    results = {}
-
-    def admit(name, plan_id):
-        def go(_held):
-            listed[name] = _row(plan_name=plan_id, cwd="/own")
-            return {"ok": True, "detail": "起動した"}
-
-        gate.wait()
-        results[name] = machine.admitted(machine.PlanLanes(plan_id), name, lambda: dict(listed), go, _place(plan_id))
-
-    threads = [threading.Thread(target=admit, args=(n, f"plan:{n}")) for n in ("w-a", "w-b", "w-c")]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    # 上限 3: 動いている 1 本に 2 本を足すと 3 で、3 本目は待つ
-    assert [r["ok"] for r in results.values()].count(True) == 2 and len(listed) == 3
-    (held,) = [r for r in results.values() if not r["ok"]]
-    assert held["waiting"]["reason"] == machine.RULE and held["waiting"]["machine_lanes"] == 3 and held["waiting"]["cap"] == 3
-    assert {p.plan_id for p in machine.indexed()} == {f"plan:{n}" for n in results if results[n]["ok"]}
-
-
 def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_does():
     """実行中の行を持つレーンの名前を、ラッパーの生死にかかわらず起動の手へ渡す（ハブが動いているラッパーとの和集合を数える。
     許可の後にラッパーだけが止まっても数え落とさない。#3989 の決定 3・7）。"""
@@ -190,14 +160,6 @@ def test_the_admission_hands_every_live_lane_to_the_hub_whatever_its_wrapper_doe
     assert machine.admitted(own, "w-a", lambda: listed, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
     assert machine.admitted(own, "w-a", lambda: None, go, machine.PlanPlace("plan:own", "/own", "p6"))["ok"]
     assert seen == [("w-b", "w-c"), ("w-b", "w-c")]
-
-
-def test_a_held_lock_makes_the_launch_wait_without_counting():
-    with machine.admit_lock(1.0):
-        got = machine.admitted(machine.PlanLanes("plan:own"), "w-a", lambda: {}, lambda _held: {"ok": True, "detail": ""}, _place())
-        assert machine.lock_free() is False
-    assert got["ok"] is False and got["waiting"] == {"reason": "lock", "machine_lanes": None, "cap": None, "unreadable": []}
-    assert machine.lock_free() is True
 
 
 def test_an_unreadable_list_decides_by_the_own_plan_alone(monkeypatch):

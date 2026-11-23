@@ -11,6 +11,7 @@ from ndf import cli
 from ndf.contracts import result
 from ndf.progress import gate, invoke, lane, model, run, store
 
+
 BY, KEY = "service:factory", "k-1"
 
 

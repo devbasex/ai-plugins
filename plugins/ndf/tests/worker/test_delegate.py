@@ -5,10 +5,18 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import result
 from ndf.core import worker
+
+
+@pytest.fixture(autouse=True)
+def _no_plugin_list(monkeypatch):
+    """導入済みの一覧は空とする（`root` が NDF でないと `delegate` が `claude plugin list --json` を子のプロセスで起動するため）。"""
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: [])
 
 
 class FakeClaude:

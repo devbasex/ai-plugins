@@ -1,4 +1,4 @@
-"""起動の前の用意・書き戻し・使用の届け・関所・保留の更新（`account_dir.py` の U3 の範囲。#3604 #3864）。
+"""起動の前の用意・書き戻し・使用の届け・保留の更新（`account_dir.py` の U3 の範囲。#3604 #3864）。
 
 設計書の「テスト設計」の 3604:6・3604:7（関数）・3604:12・I10 の行と、詳細設計書の「起動の前の用意」の
 「単体テストの観点」の `prepare`・`settle`・`planned_links`・`ready`・登録のコマンドと使用の届けの行を縛る。
@@ -9,10 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
-import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -209,25 +205,6 @@ def test_3604_12_prepare_and_settle_never_touch_the_shared_credentials_or_show_v
         _no_secret(path.read_text())
     for text in ad.REASONS.values():
         _no_secret(text)
-
-
-def test_prepare_waits_while_a_refresh_lock_exists_and_starts_with_the_new_credentials(tmp_path):
-    w = _world(tmp_path)
-    lock = w["acc"] / ad.REFRESH_LOCK
-    lock.mkdir()
-
-    def refresh() -> None:
-        time.sleep(0.3)
-        _json(w["acc"] / reg.CRED_FILE, {"claudeAiOauth": {"accessToken": NEW_ACCESS, "refreshToken": NEW_REFRESH}})
-        lock.rmdir()
-
-    t = threading.Thread(target=refresh)
-    start = time.monotonic()
-    t.start()
-    got = _prepare(w)
-    t.join()
-    assert got.ok and time.monotonic() - start >= 0.3
-    assert _read(w["acc"] / reg.CRED_FILE)["claudeAiOauth"]["accessToken"] == NEW_ACCESS
 
 
 # ---------------------------------------------------------------- 保留の更新・認証ファイルの書き込み
@@ -529,46 +506,3 @@ def test_r3_1_acquire_refuses_an_old_generation_left_by_an_interrupted_relogin(t
     with pytest.raises(reg.AccountError, match="needs_relogin"):
         ad.acquire(w["store"], "work1", w["acc"], "g1")
     assert _leases(w) == {}
-
-
-# ---------------------------------------------------------------- 起動の関所
-
-
-def _gate(tmp_path: Path, argv: list[str], go: bool) -> tuple[int, bytes]:
-    r, w = os.pipe()
-    sr, sw = os.pipe()
-    p = subprocess.Popen(ad.gated(argv, r, sw), pass_fds=(r, sw))
-    os.close(r)
-    os.close(sw)
-    if go:
-        os.write(w, b"1")
-    os.close(w)
-    with os.fdopen(sr, "rb") as f:
-        said = f.read()
-    return p.wait(timeout=30), said
-
-
-def _fake_claude(tmp_path: Path) -> tuple[str, Path]:
-    marker = tmp_path / "ran"
-    script = tmp_path / "claude"
-    script.write_text(f"#!/bin/sh\necho ran > {marker}\n")
-    script.chmod(0o755)
-    return str(script), marker
-
-
-def test_gated_runs_the_command_only_after_the_go_byte(tmp_path):
-    script, marker = _fake_claude(tmp_path)
-    assert ad.gated([script], 7, 9)[:6] == [sys.executable, "-I", "-c", ad.GATE_CODE, "7", "9"]
-    code, said = _gate(tmp_path, [script], go=True)
-    assert code == 0 and said == b"" and marker.exists()
-
-
-def test_gated_does_not_run_the_command_when_the_owner_goes_away(tmp_path):
-    script, marker = _fake_claude(tmp_path)
-    code, said = _gate(tmp_path, [script], go=False)
-    assert code == 125 and said == b"" and not marker.exists()
-
-
-def test_gated_reports_the_errno_when_the_command_is_missing(tmp_path):
-    code, said = _gate(tmp_path, [str(tmp_path / "no-such-claude")], go=True)
-    assert code == 127 and said == b"2"

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+
 from ndf.contracts import result
 from ndf.progress import gate, model, run
+
 
 BY = "human:reviewer"
 

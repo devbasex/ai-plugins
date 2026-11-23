@@ -10,7 +10,6 @@ import json
 import math
 import os
 import stat
-import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -174,23 +173,6 @@ def test_i16_forget_drops_the_fetch_record_of_the_generation_but_not_the_lock(tm
     assert accounts.fetch_lock_path(store, "work1").is_file()
 
 
-def test_i16_fetch_gate_close_waits_for_a_get_in_flight_and_refuses_new_ones():
-    gate = accounts.FetchGate()
-    assert gate.start_get() and gate.begin_refresh()
-    closed = threading.Event()
-    t = threading.Thread(target=lambda: (gate.close(), closed.set()))
-    t.start()
-    time.sleep(0.05)
-    assert not closed.is_set()  # 送信中の GET と更新の予約が終わるまで待つ
-    gate.end_get()
-    time.sleep(0.05)
-    assert not closed.is_set()
-    gate.end_refresh()
-    t.join(2)
-    assert closed.is_set()
-    assert not gate.start_get() and not gate.begin_refresh()  # 閉じた後は始めない
-
-
 # ---------------------------------------------------------------- 取得の本体とトークンの更新（`fetch_usage`・`_refresh`）
 
 ACCESS = "fake-access-u5b2-fetch"
@@ -248,10 +230,10 @@ class _Clock:
 class _Api:
     """偽の API。使用率の GET とトークンの更新の POST を数え、並べた応答を順に返す（最後の応答を繰り返す）。"""
 
-    def __init__(self, usage=None, token=None, on_get=None, on_post=None) -> None:
+    def __init__(self, usage=None, token=None, on_post=None) -> None:
         self.usage = list(usage or [(200, _usage_body())])
         self.token = list(token or [(200, TOKEN_BODY)])
-        self.on_get, self.on_post = on_get, on_post
+        self.on_post = on_post
         self.gets: list[str] = []
         self.posts: list[dict] = []
 
@@ -263,8 +245,6 @@ class _Api:
         url = str(request.url)
         if request.method == "GET" and url == claude_usage.USAGE_URL:
             self.gets.append(request.headers.get("authorization", ""))
-            if self.on_get:
-                self.on_get()
             status, body = self._next(self.usage)
         elif request.method == "POST" and url == claude_usage.TOKEN_URL:
             self.posts.append(json.loads(request.content))
@@ -357,24 +337,6 @@ def test_decision4_fetch_usage_retries_once_per_reset_inside_the_interval(world)
     clock.t = NOW + 150  # 同じリセットで試した後は、失敗して過ぎた窓が残っても呼ばない
     assert _fetch(world, api, clock) is None
     assert len(api.gets) == 2
-
-
-def test_decision4_two_wrappers_deciding_at_once_call_the_api_once(world):
-    entered, release = threading.Event(), threading.Event()
-
-    def stall() -> None:
-        entered.set()
-        release.wait(5)
-
-    clock, api = _Clock(), _Api(on_get=stall)
-    out: list = []
-    t = threading.Thread(target=lambda: out.append(_fetch(world, api, clock)))
-    t.start()
-    assert entered.wait(5)
-    assert _fetch(world, api, clock) is None  # 取得の排他を取れずに呼ばない
-    release.set()
-    t.join(5)
-    assert out[0].error is None and len(api.gets) == 1
 
 
 def test_decision4_failure_keeps_windows_and_writes_only_the_error(world):

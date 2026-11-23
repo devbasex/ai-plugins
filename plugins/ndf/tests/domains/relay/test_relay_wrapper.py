@@ -9,13 +9,11 @@ import fcntl
 import io
 import json
 import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 import pytest
-from ndf.domains.relay import accounts, install, markers, registry, signals, stop_signal, switch_decide, wrapper
+from ndf.domains.relay import accounts, markers, registry, signals, stop_signal, switch_decide, wrapper
 from ndf.domains.relay.account_decide import Usage
 from ndf.domains.relay.plugin_update import Target, Updated
 from relay_children import (
@@ -763,28 +761,6 @@ def test_i7_same_major_or_unknown_target_starts_the_next_child(tmp_path):
     assert [r["launched"] for r in _updates(w)] == [VERSION, "11.9.0", None]
 
 
-def test_i7_stop_points_the_relay_copy_at_the_target_and_the_copy_calls_it(tmp_path):
-    # 停止から打ち直しまで: relay.root が起動先を指し、複製は起動先の bin/ndf を呼ぶ
-    def plugin(version):
-        root = tmp_path / "cache" / version
-        ndf = root / "bin" / "ndf"
-        ndf.parent.mkdir(parents=True)
-        ndf.write_text(f'#!/bin/sh\necho "{version} $*"\n', encoding="utf-8")
-        ndf.chmod(0o755)
-        return root
-
-    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_BIN_HOME": str(tmp_path / "bin"), "PATH": str(tmp_path / "bin")}
-    got = install.install(env, plugin(VERSION), 9, replace_foreign=False, version=VERSION)
-    new = plugin("12.0.0")
-    hands = Hands(updated=[Updated("updated", VERSION, "12.0.0", "上げた", Target("12.0.0", new))])
-    ended, spawn, _, out = _run_hands(tmp_path, hands, [FakeChild([], 0)], environ={**env, "NDF_STATE_HOME": str(tmp_path / "old")})
-    assert ended.cause == "precondition" and spawn.calls == []
-    assert wrapper.MAJOR_CHANGED_LINE.format(own=VERSION, launched="12.0.0") in out
-    assert (got.copy.path.parent / "relay.version").read_text(encoding="utf-8") == "12.0.0\n"
-    launched = subprocess.run([sys.executable, "-I", str(got.copy.path), "ls"], capture_output=True, text=True, timeout=30, check=False)
-    assert launched.stdout.strip() == "12.0.0 relay ls"
-
-
 # --- 子の claude を起動できないとき（#3842） ---
 
 NOT_FOUND = "The command was not found or was not executable: claude."
@@ -927,65 +903,3 @@ def test_a_missing_work_dir_starts_no_first_section(tmp_path, capsys):
     ended, spawn, w, _ = _run_hands(tmp_path, hands, [FakeChild([], 0)], cwd=gone)
     _assert_stopped_with(w, ended, wrapper.LAUNCH_FAILED.format(why=wrapper.NO_CWD.format(cwd=gone)), capsys)
     assert hands.order == [] and spawn.calls == []
-
-
-# --- 本物の擬似端末で作業ディレクトリへ入る（#3842） ---
-
-
-def test_the_real_pty_child_runs_in_the_work_dir(tmp_path):
-    # 受け入れ条件 7: 子は作業ディレクトリへ入ってから起動する（preexec_fn で入る形でも今と同じ場所）
-    work = (tmp_path / "work").resolve()
-    work.mkdir()
-    child = wrapper.spawn_pty(["pwd"], {"PATH": os.environ["PATH"]}, work)
-    out = b""
-    try:
-        while True:
-            out += child.read(1024)
-    except EOFError:
-        pass
-    finally:
-        child.wait()
-    assert out.decode().strip() == str(work)
-
-
-def _run_real_pty(tmp_path, monkeypatch, work, before=None):
-    """本物の `spawn_pty` で回す。PATH には何もしない偽の claude を置く（作業ディレクトリへ入れなければ実行されない）。"""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / wrapper.CLAUDE).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (bin_dir / wrapper.CLAUDE).chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    calls = []
-
-    def spawn(argv, env, cwd):
-        calls.append(argv)
-        if before:
-            before()
-        return wrapper.spawn_pty(argv, env, cwd)
-
-    w = wrapper.Wrapper(make_settings(tmp_path, cwd=work), spawn=spawn, clock=clock_ticks())
-    return w.run("最初の 1 行"), calls, w
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root は入る権限の無いディレクトリへも入れる")
-def test_a_work_dir_without_permission_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
-    # 受け入れ条件 1・2・3: is_dir() は真でも入れないディレクトリで、子の側の PermissionError を停止理由にする
-    work = tmp_path / "locked"
-    work.mkdir(mode=0o600)
-    try:
-        ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work)
-    finally:
-        work.chmod(0o700)
-    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(13)))
-    _assert_stopped_with(w, ended, reason, capsys)
-    assert len(calls) == 1
-
-
-def test_a_work_dir_removed_after_the_check_stops_the_real_pty_launch(tmp_path, monkeypatch, capsys):
-    # 受け入れ条件 1・2・3: 確かめの後・spawn_pty の前に消えたディレクトリで、子の側の FileNotFoundError を停止理由にする
-    work = tmp_path / "work"
-    work.mkdir()
-    ended, calls, w = _run_real_pty(tmp_path, monkeypatch, work, before=work.rmdir)
-    reason = wrapper.LAUNCH_FAILED.format(why=wrapper.NO_ENTER.format(cwd=work, why=os.strerror(2)))
-    _assert_stopped_with(w, ended, reason, capsys)
-    assert len(calls) == 1

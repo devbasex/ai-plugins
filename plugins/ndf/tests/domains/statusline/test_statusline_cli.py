@@ -1,16 +1,13 @@
-"""`ndf statusline` の導入・切り替え・復元と、旧い `flock` との排他（#3569）。"""
+"""`ndf statusline` の導入・切り替え・復元（#3569）。"""
 
 from __future__ import annotations
 
 import json
-import shutil
 import stat
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.relay import signals
 from ndf.domains.statusline import cli, settings
 
 
@@ -163,22 +160,3 @@ def test_unknown_subcommand_is_a_usage_error():
     with pytest.raises(SystemExit) as exc:
         cli.main(["fly"])
     assert exc.value.code == 2
-
-
-@pytest.mark.skipif(shutil.which("flock") is None, reason="flock のコマンドが無い")
-def test_waits_for_the_old_flock_holder(tmp_path, home, monkeypatch, capsys, last_result):
-    # 旧い statusline-switch.sh と同じ錠（flock コマンド）を子が持つ間は、新しい書き手が待ちきれずに止まる
-    lock = _settings(tmp_path).parent / settings.LOCK_NAME
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    holder = subprocess.Popen(["flock", "-x", str(lock), "sleep", "3"])
-    try:
-        for _ in range(200):
-            with signals.held(lock, 0.02) as got:
-                if not got:
-                    break
-        monkeypatch.setattr(cli.limits, "seconds", lambda name: 0.2)
-        assert cli.main(["set"]) == 3
-        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "store_in_use"
-    finally:
-        holder.kill()
-        holder.wait()

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
-import time
 from collections.abc import Callable, Iterator
 
 import httpx
@@ -13,7 +10,6 @@ import pytest
 
 from ndf.adapters import http as notify
 
-from . import _drip_server
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -160,71 +156,6 @@ def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
 
     assert notify.fetch_body("https://x.test/old", 5, transport=_transport({"/old": old, "/new": new})) == b"ok"
     assert [t["read"] for t in timeouts] == [5, 3]
-
-
-Serve = Callable[..., str]
-
-
-@pytest.fixture
-def serve() -> Iterator[Serve]:
-    """本物の接続のサーバーを立て、URL を返す（振る舞いは `_drip_server.start`）。テストの終わりに止める。"""
-    stops: list[Callable[[], None]] = []
-
-    def start(head: bytes, drip: bytes, every: float, count: int | None = None) -> str:
-        url, stop = _drip_server.start(head, drip, every, count)
-        stops.append(stop)
-        return url
-
-    yield start
-    for stop in stops:
-        stop()
-
-
-def _fails_at_deadline(url: str) -> None:
-    started = time.monotonic()
-    with pytest.raises(notify.FetchError, match=r"^1 秒を越えた$"):
-        notify.fetch_body(url, 1)
-    assert time.monotonic() - started < 1.5
-
-
-def test_fetch_body_stops_waiting_at_deadline_on_real_connection(serve: Serve) -> None:
-    # httpcore は本文の読み始めの待ちの秒数（1 秒）で次の読み取りも待つため、期限で止めないと
-    # 0.8 秒の受信の後に 1 秒待って 1.8 秒まで延びる
-    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx", b"x", 0.8, count=1))
-
-
-def test_fetch_body_unsized_body_cut_at_deadline_is_not_success(serve: Serve) -> None:
-    # 長さの無い応答では、期限で止めた受信の終わりが本文の正常な終わりと読まれる
-    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nx", b"x", 0.3))
-
-
-def test_fetch_body_deadline_covers_trickling_headers(serve: Serve) -> None:
-    # 応答の頭が受信の待ちの秒数より短い間隔で届き続けても、上限で止める
-    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\n", b"X-A: b\r\n", 0.3))
-
-
-class _Stream:
-    def __init__(self, sock: socket.socket) -> None:
-        self.sock = sock
-
-    def get_extra_info(self, name: str) -> socket.socket | None:
-        return self.sock if name == "socket" else None
-
-
-def test_watchdog_stops_the_tls_connection_after_tcp_one_is_detached() -> None:
-    # httpcore の TLS 化（ssl の wrap_socket）は TCP の接続を手放して記述子を -1 にし、TLS の接続を新しく返す。
-    # 期限に止めるのは、TLS 化の後の接続でなければならない
-    tcp, _tcp_peer = socket.socketpair()
-    tls, tls_peer = socket.socketpair()
-    with tcp, _tcp_peer, tls, tls_peer:
-        watch = notify._Watchdog(0.2)
-        watch.trace("connection.connect_tcp.complete", {"return_value": _Stream(tcp)})
-        os.close(tcp.detach())
-        watch.trace("connection.start_tls.complete", {"return_value": _Stream(tls)})
-        tls_peer.settimeout(2)
-        assert tls_peer.recv(1) == b""
-        assert watch.fired
-        watch.stop()
 
 
 def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:

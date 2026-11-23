@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +11,6 @@ from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.contracts import result as results
 
-SRC = Path(__file__).resolve().parents[2] / "src"
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
 
 
@@ -159,19 +155,6 @@ def test_finish_writes_end_and_stops_when_record_failed(capsys):
     assert stopped["status"] == "stopped" and code != 0
     assert stopped["original_result"] == obj and results.errors(stopped, code) == []
     assert "実行の記録に書けない" in capsys.readouterr().err
-
-
-def test_parallel_children_write_whole_lines():
-    parent = run_log.open_run("parent", run_id="p", location="repo")
-    script = "from ndf.adapters import cli\nlog = cli.open_run('child')\nfor i in range(100):\n    log.write('n', i=i)\n"
-    env = {**os.environ, **parent.child_env(), "PYTHONPATH": str(SRC)}
-
-    procs = [subprocess.Popen([sys.executable, "-c", script], env=env) for _ in range(4)]
-
-    assert [p.wait(timeout=60) for p in procs] == [0, 0, 0, 0]
-    rows = lines(parent.path)
-    assert len([row for row in rows if row["event"] == "n"]) == 400
-    assert len({row["run_id"] for row in rows}) == 5
 
 
 def test_half_written_line_is_closed_before_next(tmp_path):

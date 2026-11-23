@@ -10,13 +10,22 @@ SQLite に固有の検査・バックアップ・戻し（P1-1・P1-2・P1-5）�
 
 from __future__ import annotations
 
+import functools
 import subprocess
 import uuid
 
 import pytest
 
 from ndf.core import durable
-from ndf.progress import command, model, store
+from ndf.progress import command, definition, model, store
+
+# モードの定義はテストの間に変わらない。読むたびに流す公式のスキーマでの検査（1 回 0.3〜1.7 秒）をモードごとに 1 回で済ませる
+_load_definition = functools.cache(definition.load_definition)
+
+
+@pytest.fixture(autouse=True)
+def _definition_checked_once(monkeypatch):
+    monkeypatch.setattr(definition, "load_definition", _load_definition)
 
 
 @pytest.fixture(scope="session")

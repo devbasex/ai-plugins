@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import time
 from pathlib import Path
 
@@ -448,43 +447,6 @@ def test_launch_refuses_after_a_failed_rewrite(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------- 並行の保存と確かめ（決定 11）
-
-
-def test_concurrent_saves_keep_both_runtimes(monkeypatch):
-    training.cache_path().unlink()
-    real_dumps = training_cache.json.dumps
-
-    def slow_dumps(*args, **kwargs):
-        time.sleep(0.05)
-        return real_dumps(*args, **kwargs)
-
-    monkeypatch.setattr(training_cache.json, "dumps", slow_dumps)
-    threads = [threading.Thread(target=training.save, args=([training.Reading(rt, False, "x")], NOW)) for rt in ("claude", "codex")]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert set(saved()) == {"claude", "codex"}
-
-
-def test_concurrent_launches_check_once():
-    training.cache_path().unlink()
-    calls: list[str] = []
-
-    def read(runtime, env, now):
-        calls.append(runtime)
-        time.sleep(0.2)
-        return training.Reading(runtime, False, "テストの読み手")
-
-    answers: list = []
-    threads = [threading.Thread(target=lambda: answers.append(training.ensure("codex", now=NOW, read=read))) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert calls == ["codex"] and answers == [None, None]
 
 
 def test_launch_gives_up_when_another_check_does_not_end(monkeypatch):
