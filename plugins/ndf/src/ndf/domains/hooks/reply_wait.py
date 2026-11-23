@@ -363,6 +363,16 @@ def _user_wait(core: str) -> bool:
     return any(w in core for w in GENERIC_USER_WAIT) and _NON_REPLY_WAIT.search(core) is None
 
 
+def _ends_as_question(sentence: str, core: str) -> bool:
+    """文が疑問符か問いの語尾（WAIT_ENDINGS）で終わるか。`core` は `_core(sentence)`。"""
+    return sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS)
+
+
+def _wait_hits(core: str) -> list[str]:
+    """`core` に含まれるリクエストの語（WAIT_CONTAINS）を、列の順に返す。"""
+    return [w for w in WAIT_CONTAINS if w in core]
+
+
 def _is_wait(sentence: str) -> bool:
     """文が人の返事を待つ形か。"""
     core = _core(sentence)
@@ -370,11 +380,11 @@ def _is_wait(sentence: str) -> bool:
         return False
     if _user_wait(core):
         return True
-    if sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
+    if _ends_as_question(sentence, core):
         return True
     if core.endswith(BACKGROUND_WAIT_ENDINGS):
         return False
-    hits = [w for w in WAIT_CONTAINS if w in core]
+    hits = _wait_hits(core)
     if not hits:
         return False
     # 「…場合は…ください」だけの文は添え書き。許可を条件にする形（「進めてよければ」）は待ちに数える
@@ -392,10 +402,9 @@ def _asks_reply(sentence: str) -> bool:
     if not _is_wait(sentence):
         return False
     core = _core(sentence)
-    ends_with_mark = sentence.rstrip(_DECORATION).endswith(("?", "？"))
-    if _user_wait(core) or ends_with_mark or core.endswith(WAIT_ENDINGS):
+    if _user_wait(core) or _ends_as_question(sentence, core):
         return True
-    hits = [w for w in WAIT_CONTAINS if w in core]
+    hits = _wait_hits(core)
     if not set(hits) <= set(INSTRUCTION_ONLY):
         return True
     if not any(w in core for w in OPERATION_VERBS):
