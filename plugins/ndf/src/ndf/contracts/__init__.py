@@ -70,6 +70,11 @@ def _refuse_duplicate_keys(pairs: list) -> dict:
     return dict(pairs)
 
 
+def parse_json(text: str) -> Any:
+    """JSON の本文の値。JSON でなければ `ValueError`、同じキーが 2 つあれば `ContractError`（後の値で黙って上書きしない）。"""
+    return json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
+
+
 def load_json(rel: str) -> Any:
     """`contracts/<rel>` を読む。同じキーが 2 つあれば断る（後の値で黙って上書きしない）。"""
     path = _dir / rel
@@ -78,33 +83,41 @@ def load_json(rel: str) -> Any:
     except OSError as exc:
         raise ContractError(f"コントラクト {path} を読めない: {exc.strerror or exc}") from None
     try:
-        return json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
+        return parse_json(text)
     except ContractError as exc:
         raise ContractError(f"コントラクト {path}: {exc}") from None
     except ValueError as exc:
         raise ContractError(f"コントラクト {path} が JSON として壊れている: {exc}") from None
 
 
-def _list_keys(rel: str) -> list[str]:
-    """`contracts/<rel>/` の項目のキー（ファイル名から拡張子 `.json` を除いたもの。ファイル名の昇順）。中身は読まない。
+def item_keys(names: Iterable[str]) -> list[str]:
+    """分けた表のディレクトリのファイル名の集まりから、項目のキー（拡張子 `.json` を除いたもの。ファイル名の昇順）。
 
     `META_PREFIX` で始まるファイルは項目でないので読まない。ほかのファイルは拡張子が小文字の `.json` でなければ断る
     （黙って飛ばすと、書いたつもりの項目が表から消える）。大小文字だけが違うキーは、大小文字を区別しないファイルシステムで
     1 つに潰れるため重なりとして断る。
     """
-    root = _dir / rel
-    if not root.is_dir():
-        raise ContractError(f"分けた表のディレクトリ {root} が無い")
-    paths = sorted(p for p in root.iterdir() if not p.name.startswith(META_PREFIX))
+    paths = sorted(Path(n) for n in names if not n.startswith(META_PREFIX))
     odd = [p.name for p in paths if p.suffix != ".json"]
     if odd:
-        raise ContractError(f"分けた表 {root} に拡張子が .json でないファイルがある: {', '.join(odd)}")
+        raise ContractError(f"拡張子が .json でないファイルがある: {', '.join(odd)}")
     keys = [p.stem for p in paths]
     folded = set(duplicates(k.casefold() for k in keys))
     if folded:
         clash = [k for k in keys if k.casefold() in folded]
-        raise ContractError(f"分けた表 {root} に大小文字だけが違うキーがある: {', '.join(clash)}")
+        raise ContractError(f"大小文字だけが違うキーがある: {', '.join(clash)}")
     return keys
+
+
+def _list_keys(rel: str) -> list[str]:
+    """`contracts/<rel>/` の項目のキー（`item_keys`）。中身は読まない。"""
+    root = _dir / rel
+    if not root.is_dir():
+        raise ContractError(f"分けた表のディレクトリ {root} が無い")
+    try:
+        return item_keys(p.name for p in root.iterdir())
+    except ContractError as exc:
+        raise ContractError(f"分けた表 {root} に{exc}") from None
 
 
 @cached_reader

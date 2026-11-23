@@ -143,6 +143,9 @@
   "child_deps": {
     "max_per_slot": 2
   },
+  "contracts_split": {
+    "summary": "分ける表の一覧に挙げた表が、1 項目 1 ファイルの形でない"
+  },
   "experimental": {
     "summary": "既定で動くもの（プラグインの根の下で配るファイル）が実験版の保存先を参照する"
   },

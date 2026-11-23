@@ -21,6 +21,7 @@ from ndf import cli, identity
 from ndf.checks import (
     budget,
     child_deps,
+    contracts_split,
     experimental,
     facts,
     invariants,
@@ -120,7 +121,7 @@ def check(
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
-    found += child_deps.apply(scope, rules)
+    found += child_deps.apply(scope, rules) + contracts_split.check(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
     if not only or experimental.RULE in only:
         found += experimental.check(scope, rules)
