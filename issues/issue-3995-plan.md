@@ -155,7 +155,7 @@
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | 4 files changed, 197 insertions(+), 5 deletions(-)（plugins の下） |
 | U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | 13 files changed, 729 insertions(+), 49 deletions(-)（cross-review の後。600 行の目安を越えたのは cross-review の直し。実装の時点は 8 files changed, 421 insertions(+), 33 deletions(-)） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | 6 files changed, 160 insertions(+), 9 deletions(-)（`issues/issue-3995-plan.md` の行を含む） |
-| U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
+| U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | 9 files changed, 363 insertions(+), 55 deletions(-)（`issues/issue-3995-plan.md` の行を含む。`test_guards.py` が 1000 行の安全網を越えたので、知らせのテストを `test_context_notice.py` に置き、会話の記録の補助（約 25 行）を `_hooks.py` へ移した。移した補助は足した行と消した行の両方に数えられる） |
 | U7 手順書・README・用語集 | Task 13・14 | 3995:10・3995:11・3995:12・3995:13・3995:14 | 約 300 | （実装の後に書き足す） |
 
 U2 は 400 行を超えるが、大半は `context_policy.py`・`test_context_policy.py`・`context.schema.json` の削除で、振る舞いを足す差分は約 300 行である。U4 は 400 行を超える見込みで、600 行を越えたら Task 7（`ShellScript`）を先の単位へ分け直す。単位の PR の acceptance には、その単位で初めてそろう条件だけを渡す。またがる条件は後の単位の側で渡す（`3995:1`・`3995:9` は U1 で guard とラッパー、U2 で `resolve` がそろう。`3995:6` は U4 で通す呼び出しと文、U5 で止め続ける振る舞いがそろう。`3995:7` は U1 で引継ぎを求める判定、U4 で求める文がそろう。`3995:10`・`3995:11` は U2 で契約、U7 で手順書がそろう。`3995:16` は U1〜U6 の境界のテストが U6 でそろう）。

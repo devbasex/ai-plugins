@@ -1,7 +1,7 @@
 """セッションの数え手（#3345 の決定 92・IH5）。
 
 セッションごとの状態のファイル 1 つ（`<状態の保存先>/hooks/sessions/<session_id>.json`）で、利用者の入力ごとの
-Stop の変更要求の合計と、同じ拒否の回数を持つ。数え直すのは利用者の入力だけで、中継が送った入力は数え直さない
+Stop の変更要求の合計と、同じ拒否の回数と、guard が Tool の呼び出しごとに覚える値（`memo`。#3995）を持つ。数え直すのは利用者の入力だけで、中継が送った入力は数え直さない
 （中継は送る前に `mark_relay` でマーカーを立てる）。
 
 排他は `fcntl` で取り、待つのは `hook.counter-lock` の秒まで。取れない・ファイルが壊れているときは数えずに通す
@@ -106,6 +106,30 @@ class Counter:
         counts = self.data["counts"]
         counts[key] = counts.get(key, 0) + 1  # noqa: NDF502 ファイル: 初めてのキーは 0 回
         return counts[key]
+
+    def remember(self, key: str, item: str, value: dict, keep: int) -> None:
+        """`memo[key]` に今の入力の番号を添えて `item` の値を置く。入力の替わった値と、`keep` を超えた古い値を消す。
+
+        `memo` は `_fresh` に足さない（足すと `memo` を持たない今の状態のファイルを壊れたとして読む）。数えない数え手は何もしない。
+        """
+        if not self.usable:
+            return
+        memo = self.data.get("memo")
+        if not isinstance(memo, dict):
+            memo = self.data["memo"] = {}
+        table = memo.get(key)
+        turn = self.data["turn"]
+        kept = {k: v for k, v in table.items() if isinstance(v, dict) and v.get("turn") == turn} if isinstance(table, dict) else {}
+        kept.pop(item, None)
+        kept[item] = {**value, "turn": turn}
+        memo[key] = dict(list(kept.items())[-keep:])
+
+    def take(self, key: str, item: str) -> Optional[dict]:
+        """`memo[key]` の `item` の値を取り出して消す。無い・数えない数え手・形が違えば None。"""
+        memo = self.data.get("memo")
+        table = memo.get(key) if self.usable and isinstance(memo, dict) else None
+        value = table.pop(item, None) if isinstance(table, dict) else None
+        return value if isinstance(value, dict) else None
 
     def reset(self, source: str = "human") -> str:
         """入力を受けた。中継のマーカーがあるか中継の入力ならマーカーを消すだけ。人の入力なら数え直す。消したほうを返す。"""

@@ -7,6 +7,11 @@
 引継ぎ文書の確かめ方と終え方（中継の下は次のセグメントのブロック、外は ndf-next）を、後に背景の監視の止め方を書き、文脈の量を入れない。拒否は数えず、
 案内へ下げずに止め続ける（表の `deny_key` が `none`。#3995 の決定 6）。
 
+PostToolUse では、文脈の量が判断開始の値（`decide_from`）以上・運用上限未満なら、超えたことと役ごとの切りどころを
+案内する（利用者の入力ごとに 1 度。数え手の `NOTICE_KEY`）。知らせ済みの入力と数え手が使えないときはリポジトリを探さず、
+会話の記録も読まない。文脈の量と判定の対象かどうかは、同じ呼び出し（`tool_use_id`）・同じ `cwd` の PreToolUse が数え手の
+`memo` に覚えた値を使い、読み直さない（#3995 の決定 3）。
+
 計測のマーカー `under_relay` は判定したときだけ書く（判定しなかった行と中継の外を見分ける。#2789）。
 
 サブエージェント（入力の `agent_id`）と、メインディレクトリに `.ndf` の無い会話は判定せず、会話の記録も読まない（#3995 の 3995:15）。
@@ -15,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -28,7 +34,7 @@ from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
 from ndf.domains.relay.signals import relay_dir
-from ndf.domains.hooks.verdict import Verdict, deny, passing
+from ndf.domains.hooks.verdict import Verdict, advise, deny, passing
 
 # 運用上限で通す Bash に許さない形: 変数の展開・コマンド置換（`$`・バッククォート）とプロセス置換
 _SUBSTITUTION = re.compile(r"[$`]|[<>]\(")
@@ -38,6 +44,12 @@ _UNQUOTED_SPECIAL = frozenset("~*?[{(")
 _DQUOTE_ESCAPES = frozenset('$`"\\\n')
 # この guard の名前（`guards.json` の行）
 _NAME = "context-limit"
+# 判断開始の値を知らせた回数を数える数え手の `counts` のキー（利用者の入力ごとに数え直す）
+NOTICE_KEY = "context-limit:notice"
+# PreToolUse が読んだ文脈の量を `tool_use_id` ごとに覚える数え手の `memo` のキー
+MEMO_KEY = "context-limit:tokens"
+# 同じ入力の中で覚えておく `tool_use_id` の数の上限（1 つの応答の並列の呼び出しの数より大きく取る）
+MEMO_KEEP = 16
 # ファイルへ書かないリダイレクト（演算子と先を空白でつないだ字面）: 記述子の複製（先が数字か -）と、/dev/null へ向ける形
 _SAFE_REDIRECT = re.compile(r"[<>]& (?:-|[0-9]+)|&?>>? /dev/null")
 # Bash が引用の外で語を区切る空白（字句の blank。ほかの Unicode の空白は語の一部になる）
@@ -334,13 +346,82 @@ def _reason(t: Thresholds, under_relay: bool, main: str, handoff_dir: str) -> st
     )
 
 
+def _notice(tokens: int, t: Thresholds) -> str:
+    """判断開始の値を超えたことと、役ごとの切りどころを書いた案内の文。"""
+    return (
+        f"文脈の量が判断開始の値（{t.decide_from} token）を超えた（今 {tokens} token。運用上限は {t.limit} token）。"
+        "工程の途中の Tool は止めないので、次の切りどころで引継ぎ文書を書いて切り替える。"
+        "レーンの conductor は次のカットポイント（ドキュメントレビューのマージの後・リファクタリングとコードレビューの前後・"
+        "スプリントの Pull Request を出した後・マージのフェーズを終えた後）で、"
+        "オーガナイザーはこの知らせを処理し終えて次の wait を張る前か、利用者への報告を終えた時点で切る。"
+        "運用上限に達すると、引継ぎに要る呼び出しのほかは止まる。"
+    )
+
+
+def _tool_use_id(ctx) -> Optional[str]:
+    value = ctx.payload.get("tool_use_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _cwd_digest(cwd: str) -> str:
+    """覚えた値の `cwd` を照らすのに使うダイジェスト（作業ディレクトリのパスを状態ファイルへ平文で残さない）。"""
+    return hashlib.sha256(cwd.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _remembered(ctx, svc) -> Optional[int]:
+    """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
+
+    `cwd` はダイジェストで照らす。同じ呼び出しの PreToolUse と PostToolUse の間に新しい応答（`usage`）は足されないので値は同じ。
+    Tool の実行で判定の対象から外れることがある（サブディレクトリでの `git init` など）ので、対象の判定は知らせる直前に確かめ直す。
+    """
+    item = _tool_use_id(ctx)
+    got = svc.counter.take(MEMO_KEY, item) if item is not None else None
+    if got is None or got.get("cwd") != _cwd_digest(ctx.cwd) or not isinstance(got.get("tokens"), int):
+        return None
+    return got["tokens"]
+
+
+def _post(ctx, svc) -> Verdict | None:
+    """PostToolUse: 判断開始の値以上・運用上限未満で、判定の対象なら、利用者の入力ごとに 1 度知らせる。
+
+    知らせ済みか数え手が使えなければ、リポジトリを探さず会話の記録も読まずに終える。PreToolUse が覚えた値があれば
+    会話の記録を読み直さず、リポジトリは知らせる直前にだけ探す。
+    """
+    if not svc.counter.usable or svc.counter.data["counts"].get(NOTICE_KEY, 0) > 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        return None
+    tokens = _remembered(ctx, svc)
+    checked = tokens is None
+    if tokens is None:
+        if _main(ctx.cwd) is None:
+            return None
+        tokens = context_tokens(ctx.transcript_tail)
+        if tokens is None:
+            return None
+    t = thresholds(ctx.env, tables.policy_value)
+    if not t.decide_from <= tokens < t.limit:
+        return passing(context_tokens=tokens)
+    if not checked and _main(ctx.cwd) is None:
+        return None
+    if svc.counter.bump(NOTICE_KEY) == 1:
+        return advise(_notice(tokens, t))
+    return passing(context_tokens=tokens)
+
+
 def check(ctx, svc) -> Verdict | None:
-    main = None if "agent_id" in ctx.payload else _main(ctx.cwd)
+    if "agent_id" in ctx.payload:
+        return None
+    if ctx.event == "PostToolUse":
+        return _post(ctx, svc)
+    main = _main(ctx.cwd)
     if main is None:
         return None
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None
+    item = _tool_use_id(ctx)
+    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd のダイジェストを覚える
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
     t = thresholds(ctx.env, tables.policy_value)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
