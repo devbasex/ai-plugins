@@ -141,47 +141,6 @@ def test_load_settings_is_empty_without_the_settings_file(tmp_path: Path) -> Non
     assert load_settings(tmp_path) == {}
 
 
-@pytest.mark.parametrize("kind", ["file", "missing", "dir"], ids=["ファイル", "無い", "ディレクトリ"])
-def test_load_settings_stops_on_a_settings_file_that_resolves_outside_the_repository(tmp_path: Path, kind: str) -> None:
-    repo = tmp_path / "repo"
-    outside = tmp_path / "outside.json"
-    if kind == "file":
-        outside.write_text(json.dumps({"version": 1}), encoding="utf-8")
-    elif kind == "dir":
-        outside.mkdir()
-    path = _settings_file(repo)
-    path.parent.mkdir(parents=True)
-    path.symlink_to(outside)
-    with pytest.raises(CheckError, match="リポジトリの外"):
-        load_settings(repo)
-
-
-@pytest.mark.parametrize("hop", [True, False], ids=["外のリンクが内を指す", "外のリンクが無い"])
-def test_load_settings_stops_on_a_link_that_passes_outside_the_repository(tmp_path: Path, hop: bool) -> None:
-    """PR 4308 の r4-1: 外を通って内へ戻るリンクも、外のリンクの有無によらず同じく止める。"""
-    repo = tmp_path / "repo"
-    real = repo / "real.json"
-    real.parent.mkdir()
-    real.write_text(json.dumps({"version": 1}), encoding="utf-8")
-    if hop:
-        (tmp_path / "hop.json").symlink_to(real)
-    path = _settings_file(repo)
-    path.parent.mkdir()
-    path.symlink_to(Path("..") / ".." / "hop.json")
-    with pytest.raises(CheckError, match="リポジトリの外"):
-        load_settings(repo)
-
-
-def test_load_settings_follows_a_link_that_stays_inside_the_repository(tmp_path: Path) -> None:
-    real = tmp_path / "conf" / "project.json"
-    real.parent.mkdir()
-    real.write_text(json.dumps({"version": 1, "budget": BUDGET}), encoding="utf-8")
-    path = _settings_file(tmp_path)
-    path.parent.mkdir()
-    path.symlink_to(Path("..") / "conf" / "project.json")
-    assert load_settings(tmp_path)["budget"] == BUDGET
-
-
 @pytest.mark.parametrize("text", ["{", "[]"], ids=["JSON でない", "オブジェクトでない"])
 def test_load_settings_stops_on_a_broken_settings_file(tmp_path: Path, text: str) -> None:
     path = _settings_file(tmp_path)

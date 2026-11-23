@@ -6,10 +6,7 @@
 from __future__ import annotations
 
 import ast
-import errno
 import json
-import os
-import stat
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -23,8 +20,6 @@ RULES_PATH = Path(__file__).with_name("rules.json")
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
-# シンボリックリンクをたどる回数の上限（輪になったリンクで止まらないため。Linux の MAXSYMLINKS と同じ）
-MAX_LINK_HOPS = 40
 
 
 class CheckError(Exception):
@@ -156,82 +151,16 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 def load_settings(repo_root: Path) -> dict[str, Any]:
     """リポジトリの設定（`.ndf/project.json`）の値。無ければ空の辞書、読めない・オブジェクトでなければ `CheckError`。
 
-    リポジトリの根の記述子から 1 要素ずつリンクをたどらずに開き（`_open_inside`）、種別の確かめと読み込みは開いた
-    同じ記述子で行う。確かめた後にファイル・親ディレクトリをリンクへ差し替えられても、外のファイルは読まない。
+    ほかの `.ndf/` の設定の読み手と同じく、リポジトリの中のファイルとしてそのまま読む（シンボリックリンクの解決先は確かめない。
+    リポジトリへ書ける人はコードそのものを変えられるので、ここで解決先を縛っても守るものが増えない）。
     """
     path = repo_root / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
-    fd = _open_inside(repo_root, path)
-    if fd is None:
+    if not path.is_file():
         return {}
-    try:
-        with os.fdopen(fd, encoding="utf-8") as f:
-            data = json.loads(f.read())
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"リポジトリの設定を読めない: {path}: {exc}") from exc
+    data = read_json(path, "リポジトリの設定を読めない")
     if not isinstance(data, dict):
         raise CheckError(f"リポジトリの設定がオブジェクトでない: {path}")
     return data
-
-
-def _open_inside(repo_root: Path, path: Path) -> int | None:
-    """`repo_root` の下の `path` を通常のファイルとして読む記述子。無い・通常のファイルでなければ None。
-
-    根の記述子を起点に各要素を `O_NOFOLLOW` で開き、シンボリックリンクに当たればその記述子の下でリンク先を読んで
-    1 つずつたどる。リンクの先・`..` がリポジトリの外へ出た時点で `CheckError` にし、外のパスは開きも `lstat` も
-    しない（外のリンクの有無を結果に出さない）。絶対パスのリンク先は、解決済みの根のパスで始まるものだけを内側とする。
-    たどった親ディレクトリは記述子で持つので、途中で差し替えられても外へは出ない。
-    """
-    root = repo_root.resolve()
-    outside = CheckError(f"リポジトリの設定がリポジトリの外を指す: {path}")
-    pending = list(path.relative_to(repo_root).parts)
-    # 根から今いるディレクトリまでの記述子（`..` で 1 つ戻る）
-    dirs = [os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)]
-    hops = 0
-    try:
-        while pending:
-            part = pending.pop(0)
-            if part in ("", "."):
-                continue
-            if part == "..":
-                if len(dirs) == 1:
-                    raise outside
-                os.close(dirs.pop())
-                continue
-            try:
-                fd = os.open(part, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dirs[-1])
-            except FileNotFoundError:
-                return None
-            except OSError as exc:
-                if exc.errno != errno.ELOOP:
-                    return None
-                hops += 1
-                if hops > MAX_LINK_HOPS:
-                    raise CheckError(f"リポジトリの設定のリンクが深すぎる: {path}") from exc
-                try:
-                    target = Path(os.readlink(part, dir_fd=dirs[-1]))
-                except OSError:
-                    return None
-                if target.is_absolute():
-                    if target.parts[: len(root.parts)] != root.parts:
-                        raise outside from exc
-                    while len(dirs) > 1:
-                        os.close(dirs.pop())
-                    pending = list(target.parts[len(root.parts) :]) + pending
-                else:
-                    pending = list(target.parts) + pending
-                continue
-            mode = os.fstat(fd).st_mode
-            if pending and stat.S_ISDIR(mode):
-                dirs.append(fd)
-            elif not pending and stat.S_ISREG(mode):
-                return fd
-            else:
-                os.close(fd)
-                return None
-        return None
-    finally:
-        for d in dirs:
-            os.close(d)
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
