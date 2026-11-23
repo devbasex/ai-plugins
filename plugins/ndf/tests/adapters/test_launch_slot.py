@@ -299,3 +299,117 @@ def test_gate_checks_before_and_after_taking_the_slot(pool, refusal_calls, monke
         assert slot_pool.held_mib(pool) == slot_pool.weight_mib(launch_slot.KIND)
     assert [name for name, _agent, _env in calls] == ["verdict", "verdict"]
     assert slot_pool.held_mib(pool) == 0
+
+
+# ---------------------------------------------------------------- `_wait_for` の上限の有無による排他の秒と眠る秒の固定
+
+
+@pytest.fixture
+def busy_pool(pool, monkeypatch):
+    """取る判定の排他がいつも待ちきれない偽のプールと偽の時計。`seen` に排他を待つ秒を順に残す。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    seen: list[float] = []
+
+    def busy(directory, capacity, weight, owner, *, lock_seconds):
+        seen.append(lock_seconds)
+        raise launch_slot.Timeout(str(directory))
+
+    monkeypatch.setattr(launch_slot.slot_pool, "take", busy)
+    return pool, clock, seen, test_limits.load_limits(Path.cwd())
+
+
+def test_wait_without_a_limit_keeps_the_full_pool_lock_and_poll(busy_pool):
+    """上限を省けば、残りの秒にかかわらず排他は `POOL_LOCK_SECONDS`、眠る秒は間隔のまま（最後の周も削らない）。"""
+    pool, clock, seen, lim = busy_pool
+
+    with pytest.raises(launch_slot.NoSlot, match="空かなかった"):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
+
+    assert seen and set(seen) == {launch_slot.slot_pool.POOL_LOCK_SECONDS}
+    assert len(seen) == len(clock.slept) + 1
+    assert clock.slept == [0.05] * len(clock.slept)
+
+
+def test_wait_without_a_limit_does_not_trim_the_last_sleep(pool, monkeypatch):
+    """上限を省けば、間隔が残りの秒を越えても間隔どおり眠る（設定の上限 0.12・間隔 0.05 なら 0.05 を 3 回）。"""
+    monkeypatch.setattr(launch_slot, "wait_policy", lambda: (0.12, 0.05))
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: None)
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
+
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.05])
+
+
+def test_wait_with_a_limit_trims_the_last_sleep_to_what_is_left(pool, monkeypatch):
+    """上限を決めれば、眠る秒は間隔と残りの秒の小さい方（上限 0.12・間隔 0.05 なら 0.05・0.05・0.02）。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: None)
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0.12)
+
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.02])
+    assert clock.now == pytest.approx(0.12)
+
+
+def test_wait_with_a_limit_shrinks_the_pool_lock_each_round(busy_pool):
+    """上限を決めれば、排他を待つ秒は周ごとの残りの秒（上限 0.12 なら 0.12・0.07・0.02・0）。"""
+    pool, clock, seen, lim = busy_pool
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=0.12)
+
+    assert seen == pytest.approx([0.12, 0.07, 0.02, 0.0])
+    assert clock.slept == pytest.approx([0.05, 0.05, 0.02])
+
+
+def test_wait_with_a_large_limit_caps_the_pool_lock(busy_pool, monkeypatch):
+    """上限が `POOL_LOCK_SECONDS` より長ければ、排他を待つ秒は `POOL_LOCK_SECONDS` で頭打ちになる。"""
+    pool, _clock, seen, lim = busy_pool
+    monkeypatch.setattr(launch_slot, "wait_policy", lambda: (0.3, 5.0))
+    cap = launch_slot.slot_pool.POOL_LOCK_SECONDS
+
+    with pytest.raises(launch_slot.NoSlot):
+        launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=cap + 7.0)
+
+    assert seen[0] == cap and all(s <= cap for s in seen)
+    assert seen[-1] == pytest.approx(0.0)
+
+
+def test_wait_skips_taking_while_memory_is_below_the_floor(pool, monkeypatch):
+    """使えるメモリが下限を割る間はプールを取りに行かず、上限を決めていれば残りの秒に収めて眠る。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: pytest.fail("メモリが足りないのに取りに行った"))
+    lim = test_limits.load_limits(Path.cwd())
+
+    with pytest.raises(launch_slot.NoSlot, match="使えるメモリ: 0 MiB"):
+        launch_slot._wait_for("claude", pool, lim, lambda: 0, limit=0.07)
+
+    assert clock.slept == pytest.approx([0.05, 0.02])
+
+
+def test_wait_records_only_when_it_waited_at_least_one_poll(pool, monkeypatch):
+    """取れたとき、間隔以上待っていれば `launch_slot` を記録し、すぐ取れたなら記録しない。"""
+    clock = FakeClock()
+    monkeypatch.setattr(launch_slot, "time", clock)
+    records: list[dict] = []
+    monkeypatch.setattr(launch_slot, "record", lambda event, **fields: records.append({"event": event, **fields}))
+    answers = iter([None, None, "taken"])
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: next(answers))
+    lim = test_limits.load_limits(Path.cwd())
+
+    assert launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=1.0) == "taken"
+    assert records == [{"event": "launch_slot", "agent": "claude", "waited_seconds": 0.1}]
+
+    records.clear()
+    monkeypatch.setattr(launch_slot.slot_pool, "take", lambda *a, **k: "now")
+    assert launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB) == "now"
+    assert records == []
