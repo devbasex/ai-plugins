@@ -87,7 +87,7 @@ flowchart TB
   R1 & R2 & R3 & R4 -->|違反があれば| X["Pull Request が落ちる"]
 ```
 
-設計どおりに実装を終えると、次の形になる。コントラクトの 1 項目を変える Pull Request の差分は 1 ファイルに収まり、同じ表の別の項目を触る Pull Request と衝突しない。NDF が動く Python の下限と uv のバージョンは `toolchain.json` が唯一の宣言である。`pyproject.toml`・CI のワークフロー・`bin/ndf` がそこと食い違えば Pull Request が落ちる。テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数はリポジトリの設定に上限を持ち、超えた Pull Request が落ちる。実験版は `plugins/ndf/experimental/` に置き、既定で動くものから参照すると落ちる。テストダブルの見本は毎日 1 回本物の記述と当たり、食い違えば見本のパスを挙げて課題になる。依存を用意できないときは、どの場合でも結果 JSON と `deps_missing`（69）で終わる。
+設計どおりに実装を終えると、次の形になる。コントラクトの 1 項目を変える Pull Request の差分は 1 ファイルに収まり、同じ表の別の項目を触る Pull Request と衝突しない。NDF が動く Python の下限と uv のバージョンは `toolchain.json` が唯一の宣言である。`pyproject.toml`・CI のワークフロー・`bin/ndf` がそこと食い違えば Pull Request が落ちる。テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数はリポジトリの設定に上限を持ち、超えた Pull Request が落ちる。実験版は配布元の外の `experimental/ndf/` に置き、既定で動くものから参照すると落ちる。テストダブルの見本は毎日 1 回本物の記述と当たり、食い違えば見本のパスを挙げて課題になる。依存を用意できないときは、どの場合でも結果 JSON と `deps_missing`（69）で終わる。
 
 ## 構成要素
 
@@ -162,9 +162,14 @@ flowchart LR
   "toolchain": {
     "workflows": ".github/workflows/*.yml",
     "python_ci": ["3.11", "3.13"],
-    "plugin_pyprojects": ["plugins/ndf/pyproject.toml"]
+    "plugin_pyprojects": ["plugins/ndf/pyproject.toml"],
+    "launchers": ["plugins/ndf/bin/ndf"]
   },
-  "budget": {"tests": 4400, "ci_jobs": 40, "unused_deps": 3, "replaceable": 3}
+  "budget": {
+    "tests": 4400, "ci_jobs": 40, "unused_deps": 3, "replaceable": 3,
+    "dep_modules": {"markdown-it-py": "markdown_it", "python-dotenv": "dotenv", "ruamel-yaml": "ruamel"},
+    "dep_exempt": {"ruff": "子プロセスとして起動する（ndf check の lint）"}
+  }
 }
 ```
 
@@ -175,13 +180,19 @@ flowchart LR
 | `toolchain.uv.version`・`installer_sha256`（配る） | 起動が入れる uv のバージョンと照合値 | 検査が `bin/ndf` の `UV_VERSION=`・`UV_INSTALLER_SHA256=` の行、ワークフローの `setup-uv` の `version` と突き合わせる |
 | `toolchain.workflows`（設定） | 検査が見るワークフローのグロブ。無ければワークフローを見ない | 検査 |
 | `toolchain.python_ci`（設定） | `setup-python` の `python-version` に書いてよい値の一覧 | 検査 |
-| `budget.*`（設定） | 件数の上限。キーが無い項目は数えない | 検査 |
+| `toolchain.plugin_pyprojects`（設定） | `requires-python` を `python.floor` と照らす `pyproject.toml` の一覧。無ければ照らさない | 検査 |
+| `toolchain.launchers`（設定） | `UV_VERSION=`・`UV_INSTALLER_SHA256=` の行を `uv` の宣言と照らすランチャーの一覧。無ければ照らさない | 検査 |
+| `budget.tests`・`ci_jobs`・`unused_deps`・`replaceable`（設定） | 件数の上限。キーが無い項目は上限と比べない（件数は `metrics` に出す） | 検査 |
+| `budget.dep_modules`（設定） | 依存の名前（正規化した小文字）→ import の名前。書かない依存は、名前の `-` と `.` を `_` へ替えたものを import の名前とみなす | 検査 |
+| `budget.dep_exempt`（設定） | 使っているとみなす依存の名前 → 理由（子プロセスとして起動する・プラグインとして読み込まれるなど、import に現れない使い方） | 検査 |
+
+**設定のキーごとに独立して効く。** `toolchain` のキーが 1 つも無ければ規則 `toolchain` は何も照らさず、`workflows`・`plugin_pyprojects`・`launchers` はそれぞれ在るものだけを照らす。NDF 自身を照らすのは ai-plugins の設定がこの 3 つを持つからであり、規則がプラグインの置き場を決め打ちしない。利用先のリポジトリは、新しいキーを置く前から検査に落ちることが無い。
 
 `bin/ndf` はシェルで動き、uv より前に走るため、この宣言を読まない。自分の行を持ち、検査が宣言と一致を確かめる。
 
 ### 見本の宣言
 
-見本を当てる相手は 2 通りある。GitHub の REST のように本番がリクエストの検証に使う記述を公開している相手は、その記述（PRD3）と当てる。記述の無い相手（ランタイムの CLI）は、コマンドを打って出力と当てる。
+見本を当てる相手は 2 通りある。GitHub の REST のように本番がリクエストの検証に使う記述を公開している相手は、その記述（PRD3）と当てる。記述の無い相手（ランタイムの CLI）は、既にある毎日のジョブの `cli-help` がコマンドを打って出力と当てる（下で述べる）。
 
 ```json
 // plugins/ndf/contracts/live-samples/github-rest-issue.json
@@ -189,21 +200,19 @@ flowchart LR
   "summary": "GitHub の REST の課題 1 件の応答の形",
   "peer": "github",
   "sample": "tests/samples/github/rest/issue.json",
-  "source": {"schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json", "pointer": "#/components/schemas/issue"},
-  "compare": "schema",
-  "calls": 1
+  "source": {"schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json", "pointer": "#/components/schemas/issue"}
 }
 ```
 
 | キー | 意味 |
 | --- | --- |
-| `peer` | 相手（`github`・`claude`・`codex`）。呼び出しの数は相手ごとに数える |
+| `peer` | 相手（この変更では `github` だけ）。呼び出しの数は相手ごとに数える |
 | `sample` | 見本のファイル（プラグインの根からの相対）。テストダブルはこのファイルだけから応答を組み立てる |
-| `source` | 本物の取り方。`schema`（公開の記述の URL と JSON ポインタ）か `command`（打つコマンドの引数の配列。シェルを通さない）のどちらか 1 つ |
-| `compare` | 比べ方。`schema`（見本が記述に合うか）・`keys`（キーの集合と値の型）・`exact`（値まで） |
-| `calls` | 1 回の検証で相手を呼ぶ回数。相手ごとの合計が上限を超えると、呼ばずに止まる |
+| `source` | 本物の取り方。`schema`（公開の記述の URL と JSON ポインタ）。記述は OpenAPI 3.1 の bundled 版（`descriptions-next/`）を取る。3.1 のスキーマは JSON Schema 2020-12 と同じ書き方で、null を取る列は `type` の配列で書かれる（3.0 の `nullable` を持たない） |
 
-比べ方は、取り方で決める。`source` が `schema` の相手は `schema` にする。`command` の相手は出力が毎回同じかで選び、変わらない出力（`--help`）は `exact`、変わる値を含む出力（バージョン・時刻）は `keys` にする。既定は置かず、宣言ごとに書く。
+比べ方は 1 通り（見本が記述の定義に合うか）で、宣言に比べ方のキーは置かない。記述の無い相手（ランタイムの CLI）を本物と当てる仕事は、既にある毎日のジョブの `cli-help`（`--help` を `contracts/domains/cli-floors.json` と突き合わせる）が持ち続ける。同じ `--help` を見本の側でも打つと、毎日の CLI の起動がランタイムごとに 1 回増えるためである。
+
+**呼び出しの数は宣言の自己申告にしない。** 相手ごとの上限は上限の表の 1 項目（`contracts/limits/samples.fetch.json` の `peers`。`{"github": 2}`）に置く。`ndf samples verify` は宣言から相手ごとの異なる URL の数を求め、1 つの URL を 1 回だけ取る（同じ記述を指す見本が増えても呼び出しは増えない）。打ち直しは持たない（`retries` は 0。失敗は次の日のジョブに任せる）。最悪の呼び出しの数（異なる URL の数 ×（1 + 打ち直し））が上限を超える宣言では、1 回も呼ばずに止まる。実際に送った要求の数を相手ごとに数え、結果 JSON の `metrics.calls` に出す。
 
 ### 予算と置き換えの規則
 
@@ -211,7 +220,7 @@ flowchart LR
 | --- | --- | --- |
 | `budget.tests` | 4,400（実測 4,312） | テストのファイルの `def test_` と `async def test_` の定義の数 |
 | `budget.ci_jobs` | 40（実測 37） | `toolchain.workflows` に当たるファイルの `jobs` のキーの数の合計（matrix の展開は数えない） |
-| `budget.unused_deps` | 3（実測 3） | 依存の宣言のうち、`src/` に import も子プロセスの起動も無いものの数 |
+| `budget.unused_deps` | 3（実測 3） | `toolchain.plugin_pyprojects` の各 `pyproject.toml` の `[project].dependencies`（直接の実行時の依存。`dependency-groups` の開発用と推移的な依存は数えない）のうち、同じディレクトリの `src/` に import が無く `budget.dep_exempt` にも無いものの数。対にする lock は同じディレクトリの `uv.lock` で、lock に無い依存は数えない |
 | `budget.replaceable` | 3（実測 3。構文木で数えられる形に限る） | 置き換えの規則に当たった箇所の数 |
 
 **上限は実測の値に余裕を乗せて置く。** テストの関数とジョブの数は、機能を足せば増えるため実測の 2 パーセント（4,312 → 4,400、37 → 40）を乗せる。使われない依存と置き換えられる自作は、増やしてよいものではないため実測と同じ値を置く（1 件でも増えれば落ちる）。要求仕様の前提 3 が挙げる置き換えられる自作 5 件のうち、`budget.replaceable` が数えるのは構文木で見つかる 3 件である。残る 2 件（Markdown の解析の拡張・Slack への送信）は、宣言した依存を使っていない形なので `budget.unused_deps` の 3 件に含まれる。
@@ -234,16 +243,18 @@ flowchart LR
 
 | 列 | 値 |
 | --- | --- |
-| 保存先 | `plugins/ndf/experimental/` |
+| 保存先 | `experimental/ndf/`（リポジトリの根からの相対。配布元の `plugins/ndf/` の外） |
 | 持ち主 | 実験版を足した担い手 |
-| 呼び方 | `python3 plugins/ndf/experimental/<名前>.py`（配る対象に入れないため、`bin/` に入口を置かない） |
+| 呼び方 | `python3 experimental/ndf/<名前>.py`（配る対象に入れないため、`bin/` に入口を置かない） |
 | 消す時点 | 本体へ移したとき、または使われないと決めたとき |
+
+**保存先を配布元の外に置く。** Claude Code のマーケットプレイス（`.claude-plugin/marketplace.json` の `source: ./plugins/ndf`）は `plugins/ndf/` のディレクトリを丸ごと配り、Codex もプラグインのディレクトリ（`.codex-plugin/` を持つ `plugins/ndf/`）を単位に取り込むため、その内側に置くと `bin/` に入口が無くても実験版のファイルが利用者へ届く。配布元の外に置けば、両ランタイムの配布経路に除外の仕組みを足さずに済み、除外の漏れも起きない。
 
 ## 入出力のコントラクト
 
 | 呼び出し | 返り | 終了コード |
 | --- | --- | --- |
-| `ndf samples verify [--peer <相手>]` | 結果 JSON。`items` は食い違った見本ごとに `sample`（見本のパス）・`peer`・`detail`（食い違ったキーか型）。`metrics` は `samples`（当てた数）・`calls`（相手ごとの呼び出しの数） | 食い違い 0 件なら 0。1 件以上なら `samples_mismatch` で 1。本物を呼べなければ `infra_wait`（75） |
+| `ndf samples verify [--peer <相手>]` | 結果 JSON。`items` は見本ごとに `sample`（見本のパス）・`peer`・`kind`（`mismatch`＝食い違い・`unreachable`＝本物を取れない）・`detail`（食い違ったキーか型、または取れなかった理由）。`metrics` は `samples`（当てた数）・`calls`（相手ごとに実際に送った要求の数） | `mismatch` が 0 件で `unreachable` も 0 件なら 0。`mismatch` が 1 件以上なら、`unreachable` があっても `samples_mismatch` で 1。`mismatch` が 0 件で `unreachable` があれば `infra_wait`（75） |
 | `ndf check`（規則 4 つ） | 今のまま。`items` の `rule` が `contracts-split`・`toolchain`・`budget`・`experimental` | 今のまま（違反 1・構文の誤り 2） |
 | `plugins/ndf/bin/ndf <サブコマンド>`（依存を用意できないとき） | 結果 JSON 1 行。`summary` と `cause.detail` に無いものの名前と直し方 | `deps_missing`（69） |
 
@@ -261,11 +272,11 @@ sequenceDiagram
   D->>V: 1 起動する（ref は main）
   V->>C: 2 見本の宣言を読む
   V->>V: 3 相手ごとの呼び出しの数を予算と照らす
-  V->>R: 4 fetch のコマンドを打つ
+  V->>R: 4 記述を URL ごとに 1 回取る
   R-->>V: 5 本物の応答
-  V->>V: 6 見本とキーの集合・型を比べる
-  V-->>D: 7 結果 JSON（食い違った見本のパス）
-  D->>G: 8 相手ごとに 1 件（同じ相手の課題が開いていれば作らない）
+  V->>V: 6 見本が記述の定義に合うかを確かめる
+  V-->>D: 7 結果 JSON（食い違いと取れなかった見本のパス）
+  D->>G: 8 食い違いのある相手ごとに 1 件（同じ相手の課題が開いていれば作らない。書き込みの権限は報告のジョブだけが持つ）
 ```
 
 依存の用意の流れは、`exec` の前に同期を 1 回挟む形へ変える。
@@ -278,16 +289,16 @@ flowchart TB
   U -->|ある| Y["uv sync --frozen --no-dev"]
   I -->|成功| Y
   Y -->|失敗| E
-  Y -->|成功| X["exec uv run … start.py"]
+  Y -->|成功| X["exec uv run --no-sync … start.py"]
 ```
 
 ## 非機能の実現方式
 
 | 条件（要求仕様） | 実現方式 |
 | --- | --- |
-| 運用・保守性: 落ちたら相手ごとに 1 件の課題 | 既にある `scripts/runtime-smoke-latest.py report` と同じ形（同じ相手の開いた課題があれば作らない）を、相手の列を `peer` に替えて使う。課題を作るのは見本の食い違い（`samples_mismatch`）のときだけで、本物へ届かなかったとき（`infra_wait`）は作らない。届かない状態が続いていることは、ジョブが続けて失敗していることで気づく（GitHub は定期のワークフローが続けて失敗すると、リポジトリの管理者へ通知する） |
+| 運用・保守性: 落ちたら相手ごとに 1 件の課題 | 既にある `scripts/runtime-smoke-latest.py report` と同じ形（同じ相手の開いた課題があれば作らない）を、相手の列を `peer` に替えて使う。課題を作るのは `items` に食い違い（`kind: mismatch`）がある相手だけで、本物へ届かなかった相手（`kind: unreachable`）には作らない。同じ実行で両方が起きても、食い違いのある相手の課題は作る。届かない状態が続いていることは、ジョブが続けて失敗していることで気づく（GitHub は定期のワークフローが続けて失敗すると、リポジトリの管理者へ通知する） |
 | システム環境: 宣言した Python と uv で走る | ワークフローの `setup-python` と `setup-uv` の値を `toolchain.json` の値にそろえ、検査が食い違いを落とす |
-| 性能・拡張性: CI の所要を 3 分以上延ばさない | 足す 4 規則は既にある `ndf check` の 1 回の実行に相乗りし、構文木は 1 ファイル 1 回だけ作る既存の仕組み（`checks/model.py` の `Source`）を使う。ジョブは毎日のジョブの 1 件だけ増やし、Pull Request のジョブは増やさない。起動に足す `uv sync --frozen` は、同期済みなら 1 回 15 ミリ秒（2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒） |
+| 性能・拡張性: CI の所要を 3 分以上延ばさない | 足す 4 規則は既にある `ndf check` の 1 回の実行に相乗りし、構文木は 1 ファイル 1 回だけ作る既存の仕組み（`checks/model.py` の `Source`）を使う。ジョブは毎日のジョブの 1 件だけ増やし、Pull Request のジョブは増やさない。起動に足す `uv sync --frozen` は、後段の `uv run` を `--no-sync` にして同期の経路を 1 起動に 1 回に保つ。同期済みなら 1 回 15 ミリ秒（2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒） |
 
 ## 決定の記録
 
@@ -323,7 +334,7 @@ flowchart TB
 | --- | --- | --- |
 | 予算の値（テスト 4,400・ジョブ 40・使われない依存 3・置き換えられる自作 3） | `.ndf/project.json` の `budget` | #3687 |
 | CI で回す Python の版（3.11・3.13）と見るワークフロー | `.ndf/project.json` の `toolchain` | #3687 |
-| 見本の相手（GitHub・claude・codex）と取り方 | `plugins/ndf/contracts/live-samples/` | #3687 |
+| 見本の相手（GitHub）と取り方・相手ごとの呼び出しの上限 | `plugins/ndf/contracts/live-samples/` | #3687 |
 | 毎日のジョブが見るブランチ（`main`） | `.github/workflows/runtime-plugin-smoke-latest.yml` | #3687 |
 | 分ける表の一覧（`limits`・`causes`） | `plugins/ndf/contracts/domains/split-tables.json` | #3687 |
 
@@ -335,23 +346,24 @@ flowchart TB
 | 見本 | 本物の相手の入出力を記録した JSON。テストダブルはこれだけから応答を組み立てる | 追加 |
 | 分割した表 | 1 項目 1 ファイルへ分けたコントラクトの表。ディレクトリの名前がもとの表の名前で、ファイル名が項目のキーになる | 追加 |
 | テストと CI の予算 | テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数の上限 | 追加 |
-| 安定版と実験版 | NDF の変更の 2 つの経路。実験版の保存先は `plugins/ndf/experimental/` | 意味の変更（10 系の `experimental/` から保存先を改める） |
+| 安定版と実験版 | NDF の変更の 2 つの経路。実験版の保存先は `experimental/ndf/`（配布元の `plugins/ndf/` の外） | 意味の変更（10 系の `experimental/` から保存先を改める） |
 
 ## テスト設計
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1 見本を本物に当てる毎日のジョブ | 偽の `fetch`（応答を返すスクリプト）を使い、見本と同じ形なら 0、キーを 1 つ増やした応答なら 1 でそのキーと見本のパスが `items` に出る | 食い違いを数えずに 0 を返すようにすると落ちる |
-| 1 の呼び出しの予算 | 相手ごとの `calls` の合計が予算を超える宣言では、本物を呼ばずに止まる | 予算を読まずに全部呼ぶと落ちる |
+| 1 の呼び出しの予算 | 相手ごとの最悪の呼び出しの数（異なる URL の数 ×（1 + 打ち直し））が `samples.fetch` の `peers` の上限を超える宣言では、本物を呼ばずに止まる。同じ URL の見本が 2 件あっても要求は 1 回 | 予算を読まずに全部呼ぶ・見本ごとに取り直すと落ちる |
+| 1 の取得の障害と食い違いの同時 | ある見本が取れず、別の見本が食い違うと、結果は `samples_mismatch`（1）で `items` に両方が載る | 取得の障害で `infra_wait` を返して食い違いを隠すと落ちる |
 | 2 コントラクトは 1 項目 1 ファイル | 分けた表の 1 ファイルを 2 項目へ戻すと `contracts-split` が落ち、ディレクトリの全ファイルを読んで元の 1 ファイルと同じ辞書になる | 読み手がディレクトリを読まず 1 ファイルだけを読むと、読めない項目が出て落ちる |
 | 2 キーの重なり | 同じキーのファイルが 2 つある（大文字と小文字だけが違うなど）と、読み手が断る | 後のファイルで黙って上書きすると落ちる |
 | 3 Python の下限 | `pyproject.toml` の `requires-python` を宣言と違う値にすると `toolchain` が落ちる。hook のエントリポイントは宣言の `hook_floor` を読んで動く | hook が宣言ではなく自分の中の値で下限を見るようにすると落ちる |
 | 3 CI の Python | ワークフローの `python-version` に宣言の一覧に無い値（`3.x` など）を書くと落ちる | 一覧を読まずに素通ししていると落ちる |
 | 4 CI の uv | ワークフローの `setup-uv` の `version` か `bin/ndf` の `UV_VERSION=` が宣言と違うと落ちる。`version` を書いていないステップも落ちる | 書いていないステップを見逃すと落ちる |
-| 5 依存を用意できないとき | uv が無い・入れられない・同期に失敗する、の 3 つで結果 JSON 1 行と `deps_missing`（69）になる | 同期の失敗を `exec` の後に起こすと、結果 JSON が出ずに落ちる |
+| 5 依存を用意できないとき | 同期の失敗のメッセージを `start.emit_deps_missing` へ渡すと結果 JSON 1 行と `deps_missing`（69）になる（単体テスト）。uv が無い・入れられない・同期に失敗する、の 3 つをランチャーごと通す確認はリリース後テストの実機で行う | 同期の失敗を `exec` の後に起こすと、実機の確認で結果 JSON が出ずに落ちる |
 | 6 テストと CI の予算 | テストの関数を上限 + 1 件に増やすと `budget` が落ち、ワークフローのジョブを上限 + 1 件に増やすと落ちる | 数を数えずに宣言だけ読むと落ちる |
-| 7 使われない依存と自作 | 宣言した依存に import の無いものを 1 件足すと件数が増えて落ちる。置き換えの規則に当たる箇所を 1 件足すと落ちる | `exempt` の保存先まで数えると、今の状態で既に落ちる |
-| 8 実験版の参照 | 既定で動くもの（`src/`・`hooks/`・`skills/`・`agents/`・`contracts/`・`manifests/`）から実験版の置き場を参照すると落ち、README と CHANGELOG からの参照は落ちない | 除外の一覧を持たずに全ファイルを見ると、README で落ちる |
+| 7 使われない依存と自作 | 宣言した依存に import の無いものを 1 件足すと件数が増えて落ちる。置き換えの規則に当たる箇所を 1 件足すと落ちる。違反が無いときも `ndf check` の `metrics.budget` に 4 つの件数が出る | `exempt` の保存先まで数えると、今の状態で既に落ちる。違反のときだけ件数を出すと、通った Pull Request で件数が取れずに落ちる |
+| 8 実験版の参照 | 既定で動くもの（`bin/`・`src/`・`hooks/`・`skills/`・`agents/`・`contracts/`・`manifests/`・`.claude-plugin/`・`.codex-plugin/`）から実験版の置き場を参照すると落ち、README と CHANGELOG と保存先の表の実験版の行からの参照は落ちない | 除外の一覧を持たずに全ファイルを見ると、README と `locations.json` で落ちる。`bin/` を見ないと `bin/ndf` からの参照を見逃して落ちる |
 | 9 退行しない | 既存の 15 件の必須チェックが落ちない | 足した規則が既存の違反を新しく数えると落ちる |
 
 ## 未確認のまま残ること
@@ -366,7 +378,7 @@ flowchart TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3687 | 実装する | — | `plugins/ndf/contracts/limits/`（新設・分割）、`plugins/ndf/contracts/causes/`（新設・分割）、`plugins/ndf/contracts/data/toolchain.json`（新設）、`plugins/ndf/contracts/live-samples/`（新設）、`plugins/ndf/contracts/replaceable/`（新設）、`plugins/ndf/contracts/domains/split-tables.json`（新設）、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/schemas/limits.schema.json`、`plugins/ndf/contracts/schemas/causes.schema.json`、`plugins/ndf/contracts/schemas/toolchain.schema.json`（新設）、`plugins/ndf/contracts/schemas/live-sample.schema.json`（新設）、`plugins/ndf/contracts/schemas/replaceable.schema.json`（新設）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/contracts/schemas/io/samples.args.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/samples.result.schema.json`（新設）、`plugins/ndf/src/ndf/contracts/__init__.py`、`plugins/ndf/src/ndf/contracts/limits.py`、`plugins/ndf/src/ndf/contracts/causes.py`、`plugins/ndf/src/ndf/contracts/toolchain.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/boot.py`、`plugins/ndf/src/ndf/domains/hooks/tables.py`、`plugins/ndf/src/ndf/domains/samples/verify.py`（新設）、`plugins/ndf/src/ndf/domains/samples/cli.py`（新設）、`plugins/ndf/src/ndf/checks/run.py`、`plugins/ndf/src/ndf/checks/model.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/contracts_split.py`（新設）、`plugins/ndf/src/ndf/checks/toolchain.py`（新設）、`plugins/ndf/src/ndf/checks/budget.py`（新設）、`plugins/ndf/src/ndf/checks/experimental.py`（新設）、`plugins/ndf/src/ndf/route/cli.py`、`plugins/ndf/bin/ndf`、`plugins/ndf/tests/contracts/test_split.py`（新設）、`plugins/ndf/tests/contracts/test_toolchain.py`（新設）、`plugins/ndf/tests/checks/test_contracts_split.py`（新設）、`plugins/ndf/tests/checks/test_toolchain.py`（新設）、`plugins/ndf/tests/checks/test_budget.py`（新設）、`plugins/ndf/tests/checks/test_experimental.py`（新設）、`plugins/ndf/tests/domains/samples/test_verify.py`（新設）、`plugins/ndf/tests/domains/samples/test_cli.py`（新設）、`plugins/ndf/tests/samples/github/rest/issue.json`（新設）、`plugins/ndf/tests/support/sample_hub.py`（新設）、`plugins/ndf/tests/support/test_sample_hub.py`（新設）、`.ndf/project.json`、`.github/workflows/runtime-plugin-smoke-latest.yml`、`.github/workflows/lint.yml`、`.github/workflows/pytest.yml`、`.github/workflows/glossary.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/script-structure.yml`、`.github/workflows/release-cd.yml`、`.github/workflows/ndf-release-reusable.yml`、`.github/workflows/deps-weekly.yml`、`.github/workflows/runtime-plugin-smoke.yml`、`.github/workflows/runtime-plugin-validate.yml`、`docs/glossary/glossary.json`、`AGENTS.md` |
+| #3687 | 実装する | — | `plugins/ndf/contracts/limits/`（新設・分割）、`plugins/ndf/contracts/causes/`（新設・分割）、`plugins/ndf/contracts/data/toolchain.json`（新設）、`plugins/ndf/contracts/live-samples/`（新設）、`plugins/ndf/contracts/replaceable/`（新設）、`plugins/ndf/contracts/domains/split-tables.json`（新設）、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/schemas/limits.schema.json`、`plugins/ndf/contracts/schemas/causes.schema.json`、`plugins/ndf/contracts/schemas/toolchain.schema.json`（新設）、`plugins/ndf/contracts/schemas/live-sample.schema.json`（新設）、`plugins/ndf/contracts/schemas/replaceable.schema.json`（新設）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/contracts/schemas/io/samples.args.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/samples.result.schema.json`（新設）、`plugins/ndf/src/ndf/contracts/__init__.py`、`plugins/ndf/src/ndf/contracts/limits.py`、`plugins/ndf/src/ndf/contracts/causes.py`、`plugins/ndf/src/ndf/contracts/toolchain.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/boot.py`、`plugins/ndf/src/ndf/domains/hooks/tables.py`、`plugins/ndf/src/ndf/domains/samples/verify.py`（新設）、`plugins/ndf/src/ndf/domains/samples/cli.py`（新設）、`plugins/ndf/src/ndf/checks/run.py`、`plugins/ndf/src/ndf/checks/model.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/contracts_split.py`（新設）、`plugins/ndf/src/ndf/checks/toolchain.py`（新設）、`plugins/ndf/src/ndf/checks/budget.py`（新設）、`plugins/ndf/src/ndf/checks/experimental.py`（新設）、`plugins/ndf/src/ndf/route/cli.py`、`plugins/ndf/bin/ndf`、`plugins/ndf/tests/contracts/test_split.py`（新設）、`plugins/ndf/tests/contracts/test_toolchain.py`（新設）、`plugins/ndf/tests/checks/test_contracts_split.py`（新設）、`plugins/ndf/tests/checks/test_toolchain.py`（新設）、`plugins/ndf/tests/checks/test_budget.py`（新設）、`plugins/ndf/tests/checks/test_experimental.py`（新設）、`plugins/ndf/tests/domains/samples/test_verify.py`（新設）、`plugins/ndf/tests/domains/samples/test_cli.py`（新設）、`plugins/ndf/tests/samples/github/rest/issue.json`（新設）、`plugins/ndf/tests/support/sample_hub.py`（新設）、`plugins/ndf/tests/support/test_sample_hub.py`（新設）、`.ndf/project.json`、`.github/workflows/runtime-plugin-smoke-latest.yml`、`.github/workflows/lint.yml`、`.github/workflows/pytest.yml`、`.github/workflows/glossary.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/script-structure.yml`、`.github/workflows/release-cd.yml`、`.github/workflows/ndf-release-reusable.yml`、`.github/workflows/deps-weekly.yml`、`.github/workflows/runtime-plugin-smoke.yml`、`.github/workflows/runtime-plugin-validate.yml`、`docs/glossary/glossary.json`、`AGENTS.md`。旧ファイル `limits.json`・`causes.json` を読む既存の検査・コード・テスト（`scripts/contracts_lib/limits_decl.py`、`scripts/check-ndf-contracts.py`、`scripts/tests/test_check_ndf_contracts.py`、`plugins/ndf/src/ndf/contracts/facts.py`、`plugins/ndf/contracts/domains/loop-phases.json`、`plugins/ndf/src/ndf/checks/spec_model.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/domains/hooks/budget.py`、`plugins/ndf/src/ndf/domains/hooks/registration.py`、`plugins/ndf/src/ndf/domains/hooks/guards/session.py`、`plugins/ndf/tests/contracts/conftest.py` ほかのテスト。一覧は実装計画の Task 4）、`plugins/ndf/contracts/causes/samples_mismatch.json`（新設）、`plugins/ndf/contracts/limits/samples.fetch.json`（新設）、`plugins/ndf/tests/bin/test_start.py` |
 
 詳細設計は [issue-3687-design-detail.md](./issue-3687-design-detail.md) にある。
 
