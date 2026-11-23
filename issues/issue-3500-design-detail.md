@@ -143,7 +143,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `clear_results` | 退避できない・コミットできない・退避を消せない | git の錠・権限 | `rename`・`git commit`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
-| `adopt_legacy` | 移し替え先に同じ名前がある・書き手が開いたまま別のファイルシステムにある・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`st_dev` の比較と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
+| `adopt_legacy` | 移し替え先に同じ名前がある・前の版の `detach` の子が worktree を `cwd` にしているか中のファイルを開いている・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`/proc/*/cwd` と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
 | `_check_location` | `.worktrees` を作れない | 権限 | `prepare` | 止める | 終了コード 1 | 再実行可 |
 
 ### 並行と排他
@@ -164,16 +164,22 @@ plugins/ndf/
 
 `adopt_legacy` は前の置き場の下の計画ごと（`<worktree>/.ndf/parallel/<計画>/`）に次の扱いをする。`worktree` がメインディレクトリなら何もしない。
 
+移せる条件と worktree を外せる条件は分けて確かめる。`rename` が守るのは既に開いたログへの書き込みだけで、前の版の `detach` は外す worktree を子の `cwd` にして `ndf lanes run` を起動する（`progress/plan/run.py` の `detach`）。動いている間に worktree を外すと、子の以後の Git 操作と相対パスの読み書きが失敗し得る。そこで、前の置き場に計画が 1 つでもあれば、移す前に次を確かめる。
+
+- worktree を使っているプロセスの検査（ファイルシステムが同じでも違っても行う。symlink の検査の次）: `/proc/*/cwd` と `/proc/*/fd` を走査し、`cwd` が worktree かその下にあるプロセス、または worktree の下のファイルを開いているプロセスがあれば、どの計画も移さず `kept` に `writer_open`。`/proc` が無い環境（macOS など）は確かめられないので移さず `writer_unverifiable`。どちらも worktree を外さない
+- 使っているときに移さないのは、移すと前の置き場から計画が消え、次の `merged`・`cleanup` が前の版の `detach` の worktree と分からずに外してしまうため。前の置き場を残せば、次の呼び出しでも同じ検査が走り、書き手が終わってから移して外す
+- 走査は前の置き場に計画があるときだけ行う（前の版の記録が無い worktree の外し方は今のまま）
+
 移す前の symlink の検査（どの行よりも先。当たればその計画を移さず `kept` に `symlink`、worktree も外さない）: 前の置き場は `worktree` の根から `.ndf`・`.ndf/parallel`・`<計画>` まで、新しい置き場はメインディレクトリの根から `.ndf`・`.ndf/parallel` までの各要素を、根の記述子から `os.open(<要素>, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, dir_fd=<親の記述子>)` で順に開く（要素が symlink なら `ELOOP`）。あわせて開いた記述子の実体が起点の実体の下にあることを確かめる。`rename`・複写・前の置き場の削除は、検査済みの親の記述子を基準に行い（`os.rename(<計画>, <計画>, src_dir_fd=..., dst_dir_fd=...)`、複写と削除も `dir_fd` を使い、中の symlink はたどらずリンクのまま扱う）、パスの文字列で引き直さない。`.ndf` や `parallel` が外を指していても、外の計画のディレクトリそのものを動かしたり消したりしない
 
 | 前の置き場 | 新しい置き場 | 同じファイルシステムか（`st_dev`） | 扱い |
 | --- | --- | --- | --- |
-| ある | 無い | 同じ | `rename` で移す。動いている `detach` の子が前の `run.log` を開いていても、`rename` は開いたファイルを保つので書き足しは新しい置き場へ届く |
-| ある | 無い | 違う | `/proc/*/fd` を走査し、前の置き場の下のファイルの inode を開いているプロセスがあれば移さない（`writer_open`）。`/proc` が無い環境は確かめられないので移さない（`writer_unverifiable`）。開いているプロセスが無いときだけ、新しい置き場の隣の一時フォルダへ複写し、`rename` で新しい置き場にしてから前の置き場を消す。書き手が開いたまま複写すると、複写の後の書き足しは前のファイルにだけ届き、前を消すと失われるため |
+| ある | 無い | 同じ | `rename` で移す（上の検査で、worktree を使うプロセスがいないことを確かめてある） |
+| ある | 無い | 違う | 新しい置き場の隣の一時フォルダへ複写し、`rename` で新しい置き場にしてから前の置き場を消す。上の検査で書き手がいないことを確かめてあるので、複写の後の書き足しが前のファイルにだけ届いて失われることは無い |
 | ある | ある | どちらでも | 移さない（`exists`）。新しい置き場を読み書きし、前の置き場は消さない |
 | 無い | どちらでも | — | 何もしない |
 
-`writer_open` で外さなかった worktree は、書き手（`detach` で切り離した `ndf lanes run`）が終わった後の次の `merged`・`cleanup` で移ってから外れる。
+`writer_open` で外さなかった worktree は、書き手（`detach` で切り離した `ndf lanes run`）が終わった後の次の `merged`・`cleanup` で移ってから外れる。`writer_unverifiable` の worktree は `/proc` のある環境で外すか、人が書き手の終わりを確かめて片付ける。
 
 ### 起動ごとの git の呼び出し数
 
@@ -185,7 +191,7 @@ plugins/ndf/
 | cross-refactoring の読み取りの工程の起動 | 0 | — |
 | cross-refactoring の作業場所の用意（`workspace.prepare`、1 回の実行に 1 回） | −1（`_exclude_results` の `rev-parse --git-path info/exclude` が無くなる） | — |
 | cross-refactoring のコードを書く工程の起動（`clear_results`） | `ls-files` 1 回。追跡されていたときだけ `commit` 1 回。起点は `run.ws.work` を `prepare(..., root=)` に渡すので 0 | 下の「起動ごとの索引の確かめ」 |
-| `adopt_legacy`（worktree を外すとき） | 0（ファイルの `stat` と `rename` だけ） | — |
+| `adopt_legacy`（worktree を外すとき） | 0（ファイルの `stat`・`rename` と、前の版の記録があるときだけの `/proc` の走査） | — |
 
 起動ごとの索引の確かめ: `ls-files` は、コードを書く工程の起動の数（1 回の実行で、項目ごとの `add-tests` と `implement`、フレーキーの直しの起動、最後の修正の周の数の和）だけ打つ。項目が 10 の実行なら約 20〜25 回で、1 回は数ミリ秒（担当の起動は 1 回が数分）。前の担当が `git add -f` で作業ファイルを新しく追跡したかは起動ごとに変わり、前の起動のコミットを調べる（`diff-tree`）のも git を 1 回打つので、`ls-files` を起動ごとに 1 回打つのが最小である。読み取りの工程では打たない。
 
