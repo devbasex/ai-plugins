@@ -16,6 +16,7 @@ import json
 import re
 import statistics
 from collections import defaultdict
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
@@ -361,11 +362,11 @@ def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
     launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
-    for (start, stage), (nxt, _) in zip(launches, launches[1:]):
+    for (start, stage), (nxt, _) in pairwise(launches):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]
         if not seg:
             continue
-        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        gaps = sum(1 for a, b in pairwise(seg) if b["ts"] - a["ts"] > CACHE_1H)
         out.append((stage, len(seg), gaps))
     return out
 
