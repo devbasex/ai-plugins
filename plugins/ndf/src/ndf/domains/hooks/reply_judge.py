@@ -169,10 +169,10 @@ def _claude_launch(
         for _ in range(int(endpoint["ancestors"])):
             current = _ppid(read, current)
             exe = readlink(_proc_file(current, "exe"))
-            if _matches(exe, endpoint["cli_exe"]):
-                return _found(current, exe, read, stat)
             if _matches(os.path.basename(exe), endpoint["script_hosts"]):
                 return None
+            if _matches(exe, endpoint["cli_exe"]):
+                return _found(current, exe, read, stat)
     except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
         return None
     return None

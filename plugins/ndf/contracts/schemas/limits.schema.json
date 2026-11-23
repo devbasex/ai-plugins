@@ -64,7 +64,7 @@
       "properties": {
         "entrypoints": {"type": "array", "items": {"type": "string"}},
         "ancestors": {"type": "integer", "minimum": 1},
-        "cli_exe": {"type": "array", "items": {"type": "string"}},
+        "cli_exe": {"type": "array", "items": {"type": "string", "pattern": "^[^?\\[\\]]*/claude/versions/[^/?\\[\\]]+$"}, "description": "Claude Code の実行ファイルのパターン。導入先のディレクトリ /claude/versions/ を字のとおりに持つものだけ"},
         "script_hosts": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "node*"}}]},
         "flags": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "--settings"}}, {"contains": {"const": "--setting-sources"}}]},
         "keys": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "awsAuthRefresh"}}, {"contains": {"const": "awsCredentialExport"}}, {"contains": {"const": "gcpAuthRefresh"}}]},

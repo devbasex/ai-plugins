@@ -450,6 +450,15 @@ def test_parent_launch_stops_at_a_node_launch(script: str) -> None:
     assert "/proc/101/cmdline" not in seen
 
 
+def test_parent_launch_refuses_a_script_host_before_the_claude_executable() -> None:
+    # Claude Code の導入先にある node も、実行ファイルのパターンより先にスクリプトホストとして拒む
+    tree = {
+        HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3"]),
+        101: Proc(ppid=1, exe="/home/u/.local/share/claude/versions/node", cmdline=["node", "x.js"], comm="node"),
+    }
+    assert launch_of(ENV, tree) is None
+
+
 @pytest.mark.parametrize(("depth", "wanted"), [(8, ["claude", "-p"]), (9, None)])
 def test_parent_launch_stops_at_the_generation_limit(depth: int, wanted: Optional[list[str]]) -> None:
     found = launch_of(ENV, chain(depth))
