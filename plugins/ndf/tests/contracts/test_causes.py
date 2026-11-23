@@ -113,3 +113,18 @@ def test_cause_refuses_unknown_kind_and_empty_detail(kind, detail):
 )
 def test_errors(value, count):
     assert len(causes.errors(value)) == count
+
+
+def test_table_keeps_every_kind_and_representative_row():
+    # #3687: 表を停止理由ごとのファイルへ分けても、読みの結果は分ける前と同じ件数と行を返す
+    assert len(causes.table()) == 35
+    row = causes.row("ci_pending")
+    assert (row.kind, row.std_type, row.exit_id, row.route, row.retry, row.exhausted) == (
+        "ci_pending",
+        "timeout",
+        "failed",
+        "retry",
+        "cause.ci-pending",
+        "step",
+    )
+    assert row.exit == causes.exit_code("ci_pending")
