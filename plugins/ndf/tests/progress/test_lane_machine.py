@@ -208,12 +208,14 @@ def test_two_plans_admitting_at_once_count_inside_the_lock_and_do_not_pass_the_c
     monkeypatch.setattr(machine, "admit_lock", _lock(record))
     for event, name in (("count", "count"), ("over_cap", "over_cap"), ("index", "index_plan")):
         monkeypatch.setattr(machine, name, recorded(event, getattr(machine, name)))
+
     # 索引の計画を読むと Git を子のプロセスで打つので、レーンの無い読める計画にする（本数は共有の一覧のラッパーで数える）
-    monkeypatch.setattr(
-        machine,
-        "read_lanes",
-        lambda cwd, plan, skip=(): None if PIDS.get(plan) in skip else machine.PlanLanes(PIDS.get(plan, f"{cwd}:{plan}")),
-    )
+    def read_lanes(cwd, plan, skip=()):
+        if PIDS.get(plan) in skip:
+            return None
+        return machine.PlanLanes(PIDS.get(plan, f"{cwd}:{plan}"))
+
+    monkeypatch.setattr(machine, "read_lanes", read_lanes)
 
     def attempt(label, wrapper, plan_name, inside=None):
         def listed():
