@@ -27,6 +27,7 @@ plugins/ndf/
 │       ├── ndf-settings/project.schema.json  （変更: toolchain・budget のキー）
 │       └── io/samples.{args,result}.schema.json *
 ├── src/ndf/
+│   ├── adapters/http.py                      （変更: fetch_body に本文の上限と転送の禁止の引数を足す）
 │   ├── contracts/__init__.py                 （変更: load_split と validator_errors を足す）
 │   ├── contracts/limits.py                   （変更: 分割した表を読む）
 │   ├── contracts/causes.py                   （変更: 同上）
@@ -44,6 +45,7 @@ plugins/ndf/
 │   ├── domains/hooks/tables.py               （変更: 分割した表を標準ライブラリで読む）
 │   └── route/cli.py                          （変更: samples のサブコマンドを足す）
 └── tests/
+    ├── adapters/test_notify.py               （変更: fetch_body の本文の上限と 3xx のテストを足す）
     ├── samples/github/rest/issue.json       * （見本の実体）
     ├── contracts/test_split.py              *
     ├── contracts/test_toolchain.py          *
@@ -65,6 +67,7 @@ plugins/ndf/
 | `src/ndf/checks/experimental.py` | 新設 | 実験版への参照を確かめる規則 | `ndf.contracts`・`checks.model` | モジュール | `check` |
 | `src/ndf/checks/model.py` | 変更 | 見る範囲にリポジトリの設定を持たせる | 既存 | `Scope` | `settings`（新設の属性）・`repo_files`（新設） |
 | `src/ndf/checks/run.py` | 変更 | 規則 4 つを並びへ足し、`budget.measure` の件数を `metrics.budget` へ出す | 上の 4 モジュール | モジュール | `check`（変更）・`collect`（変更） |
+| `src/ndf/adapters/http.py` | 変更 | 本文の取得に本文の上限と転送の禁止を指定できるようにする | 既存 | モジュール | `fetch_body`（変更。`max_bytes`・`follow` の引数） |
 | `src/ndf/domains/samples/verify.py` | 新設 | 見本を本物の記述と突き合わせる | `ndf.contracts`・`ndf.adapters.http`・`jsonschema` | モジュール | `verify`・`fetch_document`・`definition_schema`・`compare` |
 | `src/ndf/domains/samples/cli.py` | 新設 | `ndf samples verify` のエントリポイント | `verify`・`ndf.contracts.result` | モジュール | `main` |
 | `src/ndf/domains/hooks/tables.py` | 変更 | 分割した表を標準ライブラリで読む | `json`・`pathlib` | モジュール | `load`（変更）・`load_split`（新設）・`policies`（変更）・`policy_value`（変更） |
@@ -308,7 +311,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `verify` | `src/ndf/domains/samples/verify.py` | 新設 | `verify(peer: str \| None = None, fetch: Callable[[str], Any] = fetch_document) -> VerifyResult` | 宣言の見本を本物の記述と突き合わせ、見本ごとの結果（食い違い・取れない）と相手ごとの要求の数を返す |
-| `fetch_document` | `src/ndf/domains/samples/verify.py` | 新設 | `fetch_document(url: str) -> dict[str, Any]` | 公開の記述（OpenAPI 3.1 の bundled 版）の文書の全体を 1 回の要求で取る。打ち直さない |
+| `fetch_document` | `src/ndf/domains/samples/verify.py` | 新設 | `fetch_document(url: str) -> dict[str, Any]` | 公開の記述（OpenAPI 3.1 の bundled 版）の文書の全体を 1 回の要求で取る。打ち直さない。`http.fetch_body(url, seconds, max_bytes=<samples.fetch の max_bytes>, follow=False)` で取り、本文を `json.loads` する |
+| `fetch_body` | `src/ndf/adapters/http.py` | 変更（引数を足す） | `fetch_body(url: str, timeout: float, transport: httpx.BaseTransport \| None = None, *, max_bytes: int \| None = None, follow: bool = True) -> bytes` | 既定の値（上限なし・転送を追う）では今までと同じ。`max_bytes` を渡すと、受け取った本文の合計がそれを超えた時点で読むのをやめて `FetchError`（「本文が <max_bytes> バイトを超えた」）。`follow=False` なら転送を追わず、3xx の応答は本文を読まずに `FetchError`（「HTTP <状態>（転送は追わない）」）で、要求は 1 回だけ送る |
 | `definition_schema` | `src/ndf/domains/samples/verify.py` | 新設 | `definition_schema(document: dict[str, Any], pointer: str) -> dict[str, Any]` | 文書の全体を根に持ったまま、ポインタの定義を指す検証用のスキーマ（`{"$schema": <2020-12>, "components": document["components"], "$ref": pointer}`。OpenAPI だけの語（`example`・`discriminator`）は 2020-12 の検証器が知らない語として無視する）を返す。切り出さないので、定義の中の `#/components/schemas/...` の参照は同じ文書の中で解ける |
 | `compare` | `src/ndf/domains/samples/verify.py` | 新設 | `compare(sample: Any, schema: dict[str, Any]) -> list[str]` | `Draft202012Validator(schema)` で見本を確かめ、`contracts.validator_errors` で食い違いの説明を返す |
 | `validator_errors` | `src/ndf/contracts/__init__.py` | 新設（切り出し） | `validator_errors(validator: Validator, instance: Any) -> list[str]` | 既存の `schema_errors` の誤りの整形（`<場所>: <理由>` の昇順）だけを切り出す。`schema_errors` はこれを呼ぶ形に変え、振る舞いは変えない |
@@ -318,7 +322,8 @@ plugins/ndf/
   - 事前条件: 見本の宣言（`contracts/live-samples/`）と上限（`contracts/limits/samples.fetch.json` の `seconds`・`retries`・`peers`）が読める
   - 呼び出しの数え方: 相手ごとに、当てる見本の `source.schema` の異なる URL の数を求める。最悪の要求の数（異なる URL の数 ×（1 + `retries`））が `peers` のその相手の上限を超える宣言では、1 回も呼ばずに `precondition` で返す。`peers` に無い相手の見本も呼ばずに `precondition` で返す。取った文書は URL ごとに 1 回だけ取り、同じ URL を指す見本で使い回す。実際に送った要求（取得の失敗も 1 回と数える）を相手ごとに数えて返す
   - 事後条件: 見本ごとの結果の並びは見本のパスの昇順。1 つの URL が取れなくても、ほかの URL の見本は当て続ける
-  - 副作用: ネットワーク（記述の取得。`adapters/http.py` を打ち直し 0 回で使う）
+  - 副作用: ネットワーク（記述の取得。`adapters/http.py` の `fetch_body` を、転送を追わず（`follow=False`）・本文の上限（`max_bytes`）を付けて使う。打ち直しの繰り返しは `verify` も `fetch_body` も持たない）
+  - 取得の経路の選び方: `request_json` は本文の上限が 1 MiB で、GitHub の記述（2026-11-23 の実測で 14,395,662 バイト）を受け取れないため使わない。`fetch_body` の既定は転送を追うため、転送 1 回ごとに要求が 1 回増えて `peers` の上限の数え方（1 URL 1 要求）と合わない。そこで `follow=False` で 1 URL 1 要求に固定し、宣言の URL が転送を返したら `unreachable` にする（宣言の URL を転送の先へ直すのは人の仕事）
 - `definition_schema`
   - 事前条件: 文書の `openapi` が `3.1.` で始まる（3.0 の文書は `nullable` を持ち、2020-12 の検証器では null を受けられないため断る）
   - 事後条件: 返りのスキーマを `Draft202012Validator.check_schema` に通せる。参照は文書の中（`#/components/...`）だけで解き、外の URL を取りに行かない（`referencing` の既定の取得は使わない）
@@ -328,6 +333,8 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `fetch_document` | 記述を取れない | ネットワーク・相手の障害 | `httpx` の例外と状態コード | その URL の見本を `unreachable` にして続ける | ほかに食い違いが無ければ `infra_wait` で 75。`items` に `kind: unreachable` の見本 | 再実行で直りうる（毎日のジョブは次の日に再び打つ） |
+| `fetch_document` | 転送（3xx）が返った | 相手が記述の置き場を移した | `fetch_body(follow=False)` の `FetchError` | 転送の先を取りに行かず、その URL の見本を `unreachable` にして続ける（要求は 1 回と数える） | 同上。`detail` に状態コード | 宣言の URL を転送の先へ直して打ち直す |
+| `fetch_document` | 本文が上限を超えた | 記述が大きくなった、または別の物を返した | `fetch_body(max_bytes=...)` の `FetchError` | 読むのをやめ、その URL の見本を `unreachable` にして続ける | 同上。`detail` に上限のバイト数 | `samples.fetch` の `max_bytes` を見直して打ち直す |
 | `definition_schema` | 文書が 3.1 でない | 宣言の URL の誤り（3.0 の `descriptions/` を指した） | `openapi` の値 | 止める（呼び出しの後だが見本を当てない） | `config_broken` で 2 | 宣言の URL を直して打ち直す |
 | `definition_schema` | ポインタの先が無い | 相手の記述の形が変わった | 引いた値の有無 | 違反にする（食い違い 1 件） | `samples_mismatch` で 1。`items` に見本のパスとポインタ | 宣言を直して打ち直す |
 | `compare` | 文書の中の参照が解けない | 相手の記述の形が変わった（参照先の定義が消えた） | `referencing` の `Unresolvable` | 違反にする（食い違い 1 件。例外で落とさない） | `samples_mismatch` で 1。`items` に解けなかった参照 | 見本と宣言を直して打ち直す |
@@ -355,7 +362,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `VerifyResult` | 型 | `src/ndf/domains/samples/verify.py` | 見本ごとの結果の並び・当てた数・相手ごとの要求の数 |
 | `Outcome` | 型 | `src/ndf/domains/samples/verify.py` | 見本のパス・相手・`kind`（`mismatch`・`unreachable`）・説明 |
-| 記述の取得の上限 | 設定値 | `contracts/limits/samples.fetch.json` | 秒 60・打ち直し 0 回・相手ごとの要求の上限 `peers: {"github": 2}`（分割した `limits` の 1 項目として足す。`limits.schema.json` の 1 項目の形へ `retries` と `peers`（相手 → 整数）を足す） |
+| 記述の取得の上限 | 設定値 | `contracts/limits/samples.fetch.json` | 秒 60・打ち直し 0 回・本文の上限 `max_bytes: 67108864`（64 MiB。2026-11-23 の実測 14,395,662 バイトの約 4.7 倍）・相手ごとの要求の上限 `peers: {"github": 2}`（分割した `limits` の 1 項目として足す。`limits.schema.json` の 1 項目の形へ `retries`・`max_bytes` と `peers`（相手 → 整数）を足す） |
 
 ### ログと記録の出力
 
@@ -367,7 +374,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `fetch_document` | `src/ndf/adapters/http.py`（`httpx` の呼び出しと打ち直し） | `git grep -n 'httpx' -- plugins/ndf/src` | 使う（打ち直しの回数は `samples.fetch` の `retries`＝0 を渡し、打ち直しの扱いを二重に持たない） |
+| `fetch_document` | `src/ndf/adapters/http.py` の `request_json`（転送を追わない・本文 1 MiB まで）と `fetch_body`（転送を追う・本文の上限なし・総経過時間の期限） | `sed -n '236,262p;485,560p' plugins/ndf/src/ndf/adapters/http.py` | どちらもそのままは使えない。`request_json` は 1 MiB の上限で GitHub の記述（14,395,662 バイト）を落とし、`fetch_body` は転送を追うので 1 URL 1 要求にならない。`fetch_body` へ `max_bytes` と `follow` の引数を足して使う（期限の仕組み（`_Fetch`・`_Watchdog`）はそのまま再利用し、既定の値の呼び出し元の振る舞いは変えない）。打ち直しはどちらも持たないので、`retries`＝0 は `verify` の要求の数の見積もりにだけ使う |
 | `compare` | `src/ndf/contracts/__init__.py` の `schema_errors`（116 行）・`_schema_validator`（101 行） | 同ファイルの読み | そのままは使えない。`schema_errors` はコントラクトの下のファイルのパスを取り、`$defs` だけを持たせた写しを作るため、取得した文書の `components` を解けない。誤りの整形を `validator_errors` へ切り出して使い、検証器は `definition_schema` の返りから作る（`_schema_validator` の「根を残して `$ref` で指す」作り方と同じ形） |
 | `main` | `src/ndf/contracts/result.py` の `emit` | `git grep -n 'def emit' -- plugins/ndf/src` | 使う（結果 JSON の形とテストの差し替え（`conftest.py` の `_checked_emit`）に乗る） |
 
@@ -381,6 +388,7 @@ plugins/ndf/
 | `definition_schema` | 参照を含む定義でも、参照先の列の型の誤りを見つける（参照先を検証せずに通さない） | null を取る列に null の見本が通る | 3.0 の文書（`nullable` を持つ）を断る。ポインタの先が無い |
 | `compare` | 見本が定義に合えば 0 件 | 空の辞書の見本 | キーの型が違う見本で、そのキーが説明に出る。参照先の定義を消した文書で例外にならず食い違い 1 件 |
 | `main` | 結果 JSON の形がサブコマンドのスキーマに合う | 食い違い 0 件のときの `metrics` | `infra_wait` のとき 75 |
+| `fetch_body`（`httpx.MockTransport` を渡す。ネットワークに出ない） | `max_bytes` と `follow` を渡さない呼び出しは今までどおり転送を追う | 本物と同じ 14,395,662 バイトの本文を `max_bytes` 64 MiB で受け取れる（`request_json` の 1 MiB を超える大きさ）。本文が `max_bytes` + 1 バイトで `FetchError` | `follow=False` で 301・302・307 を返すと `FetchError` で、転送の先へ要求が送られない（転送の先を返す偽の相手への要求が 0 回）。`verify` へ通すと、その URL の要求は 1 回と数えられ `unreachable` になる |
 
 ## 依存の用意
 
