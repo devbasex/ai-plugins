@@ -61,6 +61,15 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         ('rm "${D:-$((1+1))}/cache"', None),
         ('rm "${D:-$(pwd)}/x"', '"${D:-$(pwd)}/x"'),
         ('rm "${D:-$(pwd)/a}/x"', None),
+        # 置換の境界は構文木から取る（`case` の `)`・コメントの `)`）。`$((` は閉じた `)` の後ろが `)` のときだけ算術展開
+        ('rm "${D:-$(case x in x) echo;; esac)}/cache"', '"${D:-$(case x in x) echo;; esac)}/cache"'),
+        ('rm "${D:-$(case x in x) echo;; esac)a}/cache"', None),
+        ('rm "${D:-$(echo # )\n)}/cache"', '"${D:-$(echo # )\n)}/cache"'),
+        ('rm "${D:-$((:); :)}/cache"', '"${D:-$((:); :)}/cache"'),
+        ('rm -- "${D:-$((:); :)fallback}"', None),
+        ('rm -- "${D:-$((1 ? (2,3) : 4))}"', None),
+        ('rm "${D:-`true`}/cache"', '"${D:-`true`}/cache"'),
+        ('rm "${D:-`true`a}/cache"', None),
         # 空を代入する `:=` は空を返す
         ('rm "${D:=}/x"', '"${D:=}/x"'),
         ("ls $W", None),
@@ -129,6 +138,14 @@ ORIGINAL = "rm -f $W/$n.md.done $W/$n.result.json"
         "arithmetic-default",
         "substitution-default",
         "substitution-then-text-default",
+        "case-in-substitution",
+        "case-in-substitution-then-text",
+        "paren-in-comment",
+        "subshell-in-substitution",
+        "subshell-in-substitution-then-text",
+        "arithmetic-with-inner-parens",
+        "backquote-substitution",
+        "backquote-substitution-then-text",
         "empty-assignment",
         "not-rm",
         "single-quoted-dollar",
@@ -267,3 +284,20 @@ def test_can_be_empty_reads_the_form_of_one_expansion(expansion, empty):
 def test_can_be_empty_keeps_single_quotes_inside_double_quotes():
     # 二重引用の中の既定値の `'` は字のまま残る
     assert rm_variable.can_be_empty("${W:-''}", in_double=True) is False
+
+
+def test_a_default_with_many_substitutions_is_parsed_once(monkeypatch):
+    # 既定値の置換の境界は 1 回の構文解析でまとめて取る（置換ごとに残りを読み直さない）
+    parser = rm_variable._parser()
+    sizes: list[int] = []
+
+    class Counting:
+        def parse(self, source):
+            sizes.append(len(source))
+            return parser.parse(source)
+
+    rm_variable._substitutions.cache_clear()
+    monkeypatch.setattr(rm_variable, "_parser", lambda: Counting())
+    command = 'rm -- "${D:-$(true)$(true)$(true)$(true)$(true)fallback}"'
+    assert rm_variable.risky_removal(parse_shell(command)) is None
+    assert len(sizes) == 1

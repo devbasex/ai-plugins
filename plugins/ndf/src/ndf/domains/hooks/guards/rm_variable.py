@@ -14,6 +14,7 @@ Claude Code は「Dangerous rm operation on possibly-empty variable path」の�
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from ndf.domains.hooks.context import _parser, ansi_c_escape
 from ndf.domains.hooks.verdict import Verdict, deny
@@ -191,16 +192,17 @@ def _has_text(word: str, quote: str) -> bool:
 
     引用とエスケープを外した後の字（二重引用の中の `'` は字）か、空を返さない展開があれば真。行の継続（`\\` と改行）・
     空の引用（`''`・`""`・`$""` の `$`）・ANSI-C 引用の NUL から閉じる `'` までは字を残さない。算術展開（`$((…))`）は
-    数を返すので真。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので字に数えず、境界が構文木で確定しなければ偽にする
-    （算術展開と確定しない `$((` も同じ）。
+    数を返すので真（`$((` が算術展開かは Bash と同じ規則で決める）。コマンド置換（`$(…)`・`` `…` ``）は値が分からないので
+    字に数えず、境界が構文木で確定しなければ偽にする。
     単引用・ANSI-C 引用・エスケープの中の `$(`・`` ` `` は字。
     """
+    subs = _substitutions(word, quote in ('"', _IN_DOUBLE))
     i = 0
     while i < len(word):
         if quote in ("'", "$'"):
             text, quote, i = _quoted_text(word, i, quote)
         else:
-            text, quote, i = _plain_text(word, i, quote)
+            text, quote, i = _plain_text(word, i, quote, subs)
         if text is not None:
             return text
     return False
@@ -221,7 +223,7 @@ def _quoted_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
     return None, "", _after_ansi_c(word, i + step)
 
 
-def _plain_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+def _plain_text(word: str, i: int, quote: str, subs: dict[int, int]) -> tuple[bool | None, str, int]:
     """引用の外・二重引用の中・既定値の中から読む 1 歩。字が残るか決まれば真偽を、続きを読むなら `None` を返す。"""
     char, nxt = word[i], word[i + 1 : i + 2]
     if char == "\\":
@@ -231,31 +233,30 @@ def _plain_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
     if char == "'":
         return (None, "'", i + 1) if quote == "" else (True, quote, i)
     if char == "`":
-        return _substitution_text(word, i, quote)
+        return _substitution_text(i, quote, subs)
     if char == "$":
-        return _dollar_text(word, i, quote)
+        return _dollar_text(word, i, quote, subs)
     return True, quote, i
 
 
-def _dollar_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+def _dollar_text(word: str, i: int, quote: str, subs: dict[int, int]) -> tuple[bool | None, str, int]:
     """`$` から読む 1 歩（引用の始まり・算術展開・コマンド置換・パラメータの展開）。"""
     nxt = word[i + 1 : i + 2]
     if quote == "" and nxt in ("'", '"'):
         return None, ("$'" if nxt == "'" else quote), i + (2 if nxt == "'" else 1)
+    if word.startswith("$((", i) and _is_arithmetic(word, i):
+        return True, quote, i
     if nxt == "(":
-        node = _substitution_node(word, i, quote)
-        if node is not None and node[0] == "arithmetic_expansion":
-            return True, quote, i
-        return (False, quote, i) if node is None else (None, quote, node[1])
+        return _substitution_text(i, quote, subs)
     if nxt == "{" or _HEAD.fullmatch(nxt) or (nxt and nxt in _SPECIAL):
         return _expansion_text(word, i, quote)
     return True, quote, i
 
 
-def _substitution_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
+def _substitution_text(i: int, quote: str, subs: dict[int, int]) -> tuple[bool | None, str, int]:
     """コマンド置換の 1 歩。値が分からないので字に数えず、境界が確定しなければ偽にする。"""
-    node = _substitution_node(word, i, quote)
-    return (False, quote, i) if node is None else (None, quote, node[1])
+    end = subs.get(i)
+    return (False, quote, i) if end is None else (None, quote, end)
 
 
 def _expansion_text(word: str, i: int, quote: str) -> tuple[bool | None, str, int]:
@@ -278,24 +279,71 @@ def _after_ansi_c(word: str, start: int) -> int:
     return min(i + 1, len(word))
 
 
-def _substitution_node(word: str, start: int, quote: str) -> tuple[str, int] | None:
-    """`start` から始まるコマンド置換か算術展開の種類（構文木の節の型）と次の位置。境界が確定しなければ None。
+def _is_arithmetic(word: str, start: int) -> bool:
+    """`start` の `$((` が算術展開か。Bash と同じく、括弧を数えて閉じた `)` の直後に `)` が続くときだけ真。
 
-    `case` の `)`・コメントの中の `)`・`$((:); :)`（サブシェルを含むコマンド置換）を括弧の数では決められないので、
-    tree-sitter-bash の構文木から取る。構文の誤りを含む・節が見つからないときは確定しない。
+    `$((:); :)` のように閉じた `)` の後ろが `)` でなければ、サブシェルを含むコマンド置換。閉じなければ偽。
     """
-    prefix = ': "' if quote in ('"', _IN_DOUBLE) else ": "
-    body = word[start:].encode("utf-8")
+    depth, i = 1, start + 3
+    while i < len(word):
+        char = word[i]
+        if char == "\\":
+            i += 1
+        elif char in "'\"":
+            close = word.find(char, i + 1)
+            if close < 0:
+                return False
+            i = close
+        elif char in "()":
+            depth += 1 if char == "(" else -1
+            if depth == 0:
+                return word[i + 1 : i + 2] == ")"
+        i += 1
+    return False
+
+
+@lru_cache(maxsize=64)
+def _substitutions(word: str, double: bool) -> dict[int, int]:
+    """既定値の字面 `word` の中のコマンド置換（`$(…)`・`` `…` ``）の始まりの位置から、次の位置への表。
+
+    `case` の `)`・コメントの中の `)`・`$((:); :)` を括弧の数では決められないので、tree-sitter-bash の構文木から取る。
+    元の `${…}` の文脈（`double` は二重引用の中か）で 1 回だけ読み、誤りを含むときと `` ` `` を含むとき（`${…}` の中の
+    `` `…` `` を置換と読まない）だけ、既定値だけでもう 1 回読んで補う。
+    誤りを含む節・誤りの節の中の節は載せない（境界が確定しない置換は表に無く、空になりうると判定される）。
+    """
+    if "$(" not in word and "`" not in word:
+        return {}
+    quote = '"' if double else ""
+    table = _boundaries(word, f": {quote}${{_:-", f"}}{quote}")
+    if table[1] or "`" in word:
+        for start, end in _boundaries(word, f": {quote}", quote)[0].items():
+            table[0].setdefault(start, end)
+    return table[0]
+
+
+def _boundaries(word: str, prefix: str, suffix: str) -> tuple[dict[int, int], bool]:
+    """`prefix` + `word` + `suffix` を構文木で読んだ、`word` の中のコマンド置換の境界（文字の位置）と、誤りを含むか。"""
+    body = word.encode("utf-8")
     offset = len(prefix.encode("utf-8"))
-    root = _parser().parse(prefix.encode("utf-8") + body).root_node
-    node = root.descendant_for_byte_range(offset, offset + 1)
-    while node is not None and node.start_byte == offset:
-        if node.type in ("command_substitution", "arithmetic_expansion"):
-            if node.has_error:
-                return None
-            return node.type, start + len(body[: node.end_byte - offset].decode("utf-8"))
-        node = node.parent
-    return None
+    chars = [0] * (len(body) + 1)
+    pos = 0
+    for index, char in enumerate(word):
+        size = len(char.encode("utf-8"))
+        chars[pos : pos + size] = [index] * size
+        pos += size
+    chars[len(body)] = len(word)
+    root = _parser().parse(prefix.encode("utf-8") + body + suffix.encode("utf-8")).root_node
+    table: dict[int, int] = {}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type == "ERROR":
+            continue
+        inside = offset <= node.start_byte and node.end_byte <= offset + len(body)
+        if node.type == "command_substitution" and inside and not node.has_error:
+            table.setdefault(chars[node.start_byte - offset], chars[node.end_byte - offset])
+        stack.extend(node.children)
+    return table, root.has_error
 
 
 def _is_option(plain: str, text: str) -> bool:
