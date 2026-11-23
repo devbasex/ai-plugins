@@ -18,17 +18,16 @@ DIR = contracts.DEFAULT_DIR.name
 LIST = f"{DIR}/{contracts.SPLIT_TABLES}"
 ITEM = f"{DIR}/limits/test-run.test.json"
 CAUSE = f"{DIR}/causes/ci_pending.json"
+SCHEMAS = [f"{DIR}/{contracts.schema_path(table)}" for table in ("limits", "causes")]
 
 
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
-    """分ける表の一覧と、一覧が挙げる実物の表を置いたプラグイン（規則はファイルしか読まないので git を作らない）。"""
+    """分ける表の一覧と、表ごとのスキーマと項目 1 つを置いたプラグイン（規則はファイルしか読まないので git を作らない）。"""
     top = tmp_path / "repo" / "plugins" / "p"
-    (top / LIST).parent.mkdir(parents=True)
-    shutil.copy(PLUGIN_ROOT / LIST, top / LIST)
-    shutil.copy(PLUGIN_ROOT / "pyproject.toml", top / "pyproject.toml")
-    for table in contracts.split_tables():
-        shutil.copytree(PLUGIN_ROOT / DIR / table, top / DIR / table)
+    for rel in (LIST, *SCHEMAS, ITEM, CAUSE, "pyproject.toml"):
+        (top / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(PLUGIN_ROOT / rel, top / rel)
     return top
 
 
@@ -54,11 +53,11 @@ def _merge_back(root: Path, table: str) -> None:
     shutil.rmtree(root / DIR / table)
 
 
-def _link_outside(root: Path) -> None:
+def _link_outside(root: Path, rel: str) -> None:
     outside = root.parents[2] / "outside.json"
     outside.write_text("{}", encoding="utf-8")
-    (root / ITEM).unlink()
-    (root / ITEM).symlink_to(outside)
+    (root / rel).unlink()
+    (root / rel).symlink_to(outside)
 
 
 def _link_directory_outside(root: Path) -> None:
@@ -72,7 +71,14 @@ def _text(rel: str, value: object) -> Callable[[Path], object]:
     return lambda root: (root / rel).write_text(body, encoding="utf-8")
 
 
-def test_the_split_tables_have_no_findings(root, rules):
+def test_the_split_tables_have_no_findings(rules):
+    # 実物の表の全件は、写さずにそのまま読む
+    scope = Scope(PLUGIN_ROOT.parents[1], PLUGIN_ROOT, "p")
+    scope.sources = run.collect(PLUGIN_ROOT / DIR, scope.repo_root)
+    assert contracts_split.check(scope, rules) == []
+
+
+def test_a_table_of_items_has_no_findings(root, rules):
     assert _check(root, rules) == []
 
 
@@ -101,12 +107,26 @@ def test_a_table_that_is_not_a_directory_of_items_is_a_finding(root, rules, brea
         (CAUSE, {"causes": [{"kind": "a"}, {"kind": "b"}]}),
         (ITEM, {"a.b": {"summary": "x", "seconds": 1}, "a.c": {"summary": "y", "seconds": 2}}),
         (ITEM, {"summary": "x", "seconds": 1, "a.c": {"summary": "y", "seconds": 2}}),
+        (ITEM, {"summary": "上限", "a.b": {"seconds": 1}, "a.c": {"count": 2}}),
+        (CAUSE, {"retry": {"exit": "a"}, "meaning": "x"}),
         (CAUSE, [{"meaning": "a"}, {"meaning": "b"}]),
         (ITEM, "{not json"),
         (ITEM, '{"seconds": 1, "seconds": 2}'),
         (ITEM, "1"),
     ],
-    ids=["source-key", "source-key-and-more", "source-list", "key-to-item", "item-in-item", "list", "not-json", "same-key-twice", "number"],
+    ids=[
+        "source-key",
+        "source-key-and-more",
+        "source-list",
+        "key-to-item",
+        "item-in-item",
+        "heading-and-items",
+        "item-named-as-a-field",
+        "list",
+        "not-json",
+        "same-key-twice",
+        "number",
+    ],
 )
 def test_a_file_that_is_not_one_item_is_a_finding(root, rules, rel, value):
     _text(rel, value)(root)
@@ -126,9 +146,23 @@ def test_a_file_that_is_not_one_item_is_a_finding(root, rules, rel, value):
             marks=pytest.mark.skipif("sys.platform != 'linux'"),
         ),
         (lambda root: (root / ITEM).write_bytes(b"\xff"), ITEM, "読めない"),
-        (_link_outside, ITEM, "読めない"),
+        (lambda root: _link_outside(root, ITEM), ITEM, "読めない"),
+        (lambda root: (root / LIST).write_bytes(b"\xff"), LIST, "一覧を読めない"),
+        (lambda root: _link_outside(root, LIST), LIST, "一覧を読めない"),
+        (lambda root: (root / SCHEMAS[0]).unlink(), SCHEMAS[0], "スキーマを読めない"),
+        (_text(SCHEMAS[0], []), SCHEMAS[0], "スキーマを読めない"),
     ],
-    ids=["extension", "subdirectory", "case", "not-utf8", "linked-outside"],
+    ids=[
+        "extension",
+        "subdirectory",
+        "case",
+        "not-utf8",
+        "linked-outside",
+        "list-not-utf8",
+        "list-linked-outside",
+        "no-schema",
+        "broken-schema",
+    ],
 )
 def test_names_and_files_the_reader_refuses_are_one_finding(root, rules, break_, path, named):
     break_(root)
@@ -156,11 +190,16 @@ def test_only_a_plugin_with_the_list_is_checked_and_a_broken_list_is_a_finding(r
     assert _paths(root, _check(root, rules)) == paths
 
 
-def test_the_check_command_applies_the_rule(root, rules, monkeypatch):
+@pytest.mark.parametrize(("only", "applied"), [(contracts_split.RULE, 1), ("smells", 0)])
+def test_the_check_command_applies_the_rule_only_when_selected(root, rules, monkeypatch, only, applied):
     monkeypatch.setattr(lint, "run_ruff", lambda rules, paths: [])
     # コントラクトの全部を要る規則は、この入力では当てない
     for module, name in ((run.child_deps, "apply"), (run.facts, "check"), (run.spec_docs, "check")):
         monkeypatch.setattr(module, name, lambda *args: [])
+    calls = []
+    rule = run.SELECTED_RULES[contracts_split.RULE]
+    monkeypatch.setitem(run.SELECTED_RULES, contracts_split.RULE, lambda *args: calls.append(args) or rule(*args))
     _text(f"{DIR}/limits.json", {})(root)
-    found = run.select(_scope(root), rules, [contracts_split.RULE])
-    assert _paths(root, found) == [f"{DIR}/limits.json"]
+    found = run.select(_scope(root), rules, [only])
+    assert len(calls) == applied
+    assert _paths(root, found) == [f"{DIR}/limits.json"] * applied

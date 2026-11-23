@@ -6,8 +6,9 @@
 - 分ける前の 1 ファイル（`<表>.json`）が在る
 - 項目のファイルが 2 つ以上の項目を持つ形か、項目の読み手（`contracts.load_split`）が断る形である
 
-読むのは検査の対象のプラグインのファイルだけで、一覧を持たないプラグインには当てない。項目の値の形は表ごとのスキーマ
-（`ndf contracts check`）が確かめる。
+項目か項目の集まりかは、項目のスキーマ（`schemas/<表>.schema.json`）がオブジェクトの値を認める欄の名前で見分ける。読むのは
+検査の対象のプラグインのファイルだけで、一覧を持たないプラグインには当てない（一覧が在るのに読めないときは違反にする）。
+項目の値の形そのものは `ndf contracts check` がスキーマで確かめる。
 """
 
 from __future__ import annotations
@@ -40,16 +41,26 @@ def _tables(text: str) -> dict[str, str]:
     return tables
 
 
-def _holds_items(data: dict[str, Any], source_key: str) -> bool:
+def _object_fields(src: Source | None) -> frozenset[str]:
+    """項目のスキーマ `src` の欄のうち、値がオブジェクトのものの名前。スキーマとして読めなければ `ContractError`。"""
+    if src is None:
+        raise contracts.ContractError("項目のスキーマを読めない（無い・UTF-8 でない・リポジトリの外を指す）")
+    try:
+        fields = contracts.parse_json(src.text)["properties"]
+        return frozenset(name for name, field in fields.items() if field.get("type") == "object")
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise contracts.ContractError(f"項目のスキーマを読めない: {exc!r}") from None
+
+
+def _holds_items(data: dict[str, Any], source_key: str, object_fields: frozenset[str]) -> bool:
     """1 項目でなく、項目の集まりを持つ形か。
 
-    分ける前のキー（`source_key`）を持つ・値がすべて辞書（キー → 項目）・自分と同じ名前の欄を持つ辞書を中に持つ、のどれか。
+    分ける前のキー（`source_key`）を持つか、オブジェクトの欄（`object_fields`）でない名前に辞書（別の項目）を持つ。
     """
-    nested = [v for v in data.values() if isinstance(v, dict)]
-    return source_key in data or len(nested) == len(data) > 0 or any(v.keys() & data.keys() for v in nested)
+    return source_key in data or any(isinstance(v, dict) and k not in object_fields for k, v in data.items())
 
 
-def _item_error(src: Source | None, source_key: str) -> str | None:
+def _item_error(src: Source | None, source_key: str, object_fields: frozenset[str]) -> str | None:
     """項目のファイル 1 つの誤り。無ければ `None`。`src` が `None` なら、検査が集めなかった（読めない）ファイル。"""
     if src is None:
         return "項目のファイルを読めない（UTF-8 でない・リポジトリの外を指す・ファイルでない）"
@@ -59,14 +70,15 @@ def _item_error(src: Source | None, source_key: str) -> str | None:
         return f"項目のファイルを読めない: {exc}"
     if not isinstance(data, dict):
         return f"項目がオブジェクトでない（{type(data).__name__}）"
-    return "1 ファイルが 2 つ以上の項目を持つ形になっている" if _holds_items(data, source_key) else None
+    return "1 ファイルが 2 つ以上の項目を持つ形になっている" if _holds_items(data, source_key, object_fields) else None
 
 
 @dataclass(frozen=True)
 class _Table:
-    """分けた表 1 つ。`root` は表のディレクトリ、`sources` は検査が集めたファイル（パス → ファイル）。"""
+    """分けた表 1 つ。`root` は表のディレクトリ、`schema` は項目のスキーマのパス、`sources` は検査が集めたファイル（パス → ファイル）。"""
 
     root: Path
+    schema: Path
     source_key: str
     sources: dict[Path, Source]
 
@@ -84,11 +96,16 @@ class _Table:
             contracts.item_keys(names)
         except contracts.ContractError as exc:
             yield self.root, f"分けた表に{exc}"
+        try:
+            object_fields = _object_fields(self.sources.get(self.schema))
+        except contracts.ContractError as exc:
+            yield self.schema, str(exc)
+            return
         for name in names:
             path = self.root / name
             if name.startswith(contracts.META_PREFIX) or path.suffix != ".json":
                 continue
-            error = _item_error(self.sources[path] if path in self.sources else None, self.source_key)
+            error = _item_error(self.sources.get(path), self.source_key, object_fields)
             if error is not None:
                 yield path, error
 
@@ -98,12 +115,15 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     top = scope.plugin_root / rules["facts"]["contracts_dir"]
     sources = {s.path: s for s in scope.sources}
     listed = top / contracts.SPLIT_TABLES
-    if listed not in sources:
+    # 検査が集めない一覧（UTF-8 でない・リポジトリの外を指す）を、一覧の無いプラグインと取り違えない
+    if listed not in sources and not (listed.is_symlink() or listed.exists()):
         return []
     errors: list[tuple[Path, str]] = []
     try:
+        if listed not in sources:
+            raise contracts.ContractError("分ける表の一覧を読めない（UTF-8 でない・リポジトリの外を指す・ファイルでない）")
         for name, source_key in _tables(sources[listed].text).items():
-            errors += _Table(top / name, source_key, sources).errors()
+            errors += _Table(top / name, top / contracts.schema_path(name), source_key, sources).errors()
     except contracts.ContractError as exc:
         errors.append((listed, str(exc)))
     return [Finding(RULE, scope.rel(path), 1, f"{rules[KEY]['summary']}: {detail}") for path, detail in errors]

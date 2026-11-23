@@ -45,6 +45,11 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
 SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
+# プラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則
+SELECTED_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {
+    contracts_split.RULE: contracts_split.check,
+    experimental.RULE: experimental.check,
+}
 # 規則の一部だけを当てる名前。全体の規則が同じ違反を出すので、`--only` に名前があるときだけ当てる
 PARTIAL_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {budget.JOBS_RULE: budget.check_jobs}
 
@@ -114,25 +119,23 @@ def check(
 ) -> list[Finding]:
     """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
 
-    設定を読む規則（`SETTINGS_RULES` と規則 budget）と規則 experimental は、`only` が無いか `only` に名前があるときだけ当てる。
+    `SELECTED_RULES`・`SETTINGS_RULES` の規則と規則 budget は、`only` が無いか `only` に名前があるときだけ当てる。
     規則 budget を当てたときは、件数を違反の有無にかかわらず `metrics` の `budget` へ入れる。
     """
     found = unparsable(scope)
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
-    found += child_deps.apply(scope, rules) + contracts_split.check(scope, rules)
+    found += child_deps.apply(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
-    if not only or experimental.RULE in only:
-        found += experimental.check(scope, rules)
+    for name, rule in {**SELECTED_RULES, **SETTINGS_RULES}.items():
+        if not only or name in only:
+            found += rule(scope, rules)
     if not only or budget.RULE in only:
         counts = budget.measure(scope)
         found += budget.check(scope, rules, counts)
         if metrics is not None:
             metrics[budget.RULE] = counts.as_metrics()
-    for name, rule in SETTINGS_RULES.items():
-        if not only or name in only:
-            found += rule(scope, rules)
     for name, rule in PARTIAL_RULES.items():
         if only and name in only:
             found += rule(scope, rules)
