@@ -1,0 +1,14 @@
+{
+  "summary": "GitHub の REST の課題 1 件の応答の、ラベルの要素 1 つの形。公開リポジトリの応答（2026-11-24 JST に録った）のキーと null の位置をそのまま残し、値は GitHub の文書の例の値へ置き換えた。記述の要素の定義は archived_at を持たず、archived_by は null もオブジェクトも通らない組み合わせになっているので、この 2 つだけを既知の食い違いにする",
+  "peer": "github",
+  "sample": "tests/samples/github/rest/issue_label.json",
+  "source": {
+    "schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json",
+    "pointer": "#/components/schemas/issue/properties/labels/items/oneOf/1"
+  },
+  "absent_keys": [],
+  "known_mismatches": [
+    "(最上位): 定義に無いキー 1 件",
+    "archived_by: type"
+  ]
+}

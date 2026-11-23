@@ -1,5 +1,5 @@
 {
-  "summary": "GitHub の REST の課題 1 件（GET /repos/{owner}/{repo}/issues/{issue_number}）の応答の形。公開リポジトリの応答（2026-11-24 JST に録った、ラベルの無い完了した課題。ラベルの列の本物の応答は記述と食い違うため、空の並びを録った）のキーをそのまま残し、人と課題を特定する値は GitHub の文書の例の値へ置き換えた",
+  "summary": "GitHub の REST の課題 1 件（GET /repos/{owner}/{repo}/issues/{issue_number}）の応答の形。公開リポジトリの応答（2026-11-24 JST に録った、ラベルの無い完了した課題。ラベルの要素は記述と食い違うため、github-rest-issue-label の見本が受け持つ）のキーをそのまま残し、人と課題を特定する値（日時と件数を含む）は GitHub の文書の例の値へ置き換えた",
   "peer": "github",
   "sample": "tests/samples/github/rest/issue.json",
   "source": {
@@ -22,5 +22,6 @@
     "user/email",
     "user/name",
     "user/starred_at"
-  ]
+  ],
+  "known_mismatches": []
 }

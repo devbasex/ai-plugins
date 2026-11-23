@@ -22,7 +22,7 @@ OTHER_URL = "https://example.test/other.json"
 
 
 def _compare(data: Any, doc: dict[str, Any], absent: list[str]) -> list[str]:
-    return verify.compare(data, verify.definition_schema(doc, POINTER), absent)
+    return verify.compare(data, verify.definition_target(doc, POINTER), absent)
 
 
 def test_compare_accepts_the_recorded_shape() -> None:
@@ -68,7 +68,7 @@ def test_compare_reports_a_changed_sample_without_its_values_and_keys(change: Ch
 
 
 def test_compare_reports_an_empty_sample() -> None:
-    got = verify.compare({}, verify.definition_schema(document(), POINTER), list(properties(document(), "issue")))
+    got = verify.compare({}, verify.definition_target(document(), POINTER), list(properties(document(), "issue")))
     assert got == ["(最上位): required labels, number, user"]
 
 
@@ -128,11 +128,55 @@ def test_compare_reports_a_changed_description(change: Change, absent: list[str]
     ],
 )
 def test_safe_path_shows_only_names_the_definition_decides(path: list[str | int], expected: str) -> None:
-    assert verify.safe_path(path, verify.definition_schema(document(), POINTER)) == expected
+    assert verify.safe_path(path, verify.definition_target(document(), POINTER)) == expected
 
 
-def test_definition_schema_is_a_valid_schema() -> None:
-    Draft202012Validator.check_schema(verify.definition_schema(document(), POINTER))
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda ref: {"unevaluatedProperties": False, "$ref": ref},
+        lambda ref: {"unevaluatedProperties": False, "$dynamicRef": ref},
+        lambda ref: {"$schema": Draft202012Validator.META_SCHEMA["$id"], "$ref": ref},
+        lambda ref: {"$schema": "http://json-schema.org/draft-07/schema#", "allOf": [{"$ref": ref}]},
+    ],
+    ids=["unevaluated-ref", "unevaluated-dynamic-ref", "nested-schema", "other-dialect"],
+)
+def test_compare_resolves_references_only_inside_the_document(wrap: Callable[[str], Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """jsonschema が registry で参照を解く経路でも、文書の中の参照は解き、外の URL は取りに行かずに食い違いにする。"""
+    sent: list[Any] = []
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, *a, **kw: sent.append(req))
+    doc = {**document(), "x-free": {"type": "object", "additionalProperties": True}}
+    got = {}
+    for ref in ("#/x-free", "#/x-gone", "https://example.test/x.json"):
+        properties(doc, "issue")["meta"] = wrap(ref)
+        got[ref] = _compare(sample(), doc, ABSENT)
+    gone = [f"記述に参照の先が無い: {ref}" for ref in got]
+    assert list(got.values()) == [[], gone[1:2], gone[2:]]
+    assert sent == []
+
+
+@pytest.mark.parametrize("pointer", ["#/paths/~1issues/get/schema", "#/x-shapes/0"])
+def test_compare_resolves_references_from_the_document_root(pointer: str) -> None:
+    doc = document()
+    shape = {"anyOf": [{"type": "null"}, {"type": "object", "properties": {"login": {"type": "string"}, "id": {"type": "integer"}}}]}
+    doc.update({"paths": {"/issues": {"get": {"schema": shape}}}, "x-shapes": [shape]})
+    properties(doc, "issue")["user"] = {"$ref": pointer}
+    absent = [key for key in ABSENT if key != "user/starred_at"]
+    assert _compare(sample(), doc, absent) == []
+    assert _compare({**sample(), "user": {"login": 1}}, doc, absent) == ["user: anyOf"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "known", "expected"),
+    [
+        ({"number": "x"}, ["number: type"], []),
+        ({"number": "x", "body": 1}, ["number: type"], ["body: type"]),
+        ({}, ["number: type"], ["既知の食い違いが消えた: number: type"]),
+    ],
+)
+def test_compare_excludes_only_the_known_mismatches(changes: dict[str, Any], known: list[str], expected: list[str]) -> None:
+    target = verify.definition_target(document(), POINTER)
+    assert verify.compare({**sample(), **changes}, target, ABSENT, known) == expected
 
 
 @pytest.mark.parametrize(
@@ -144,9 +188,9 @@ def test_definition_schema_is_a_valid_schema() -> None:
         ("3.1.0", "#/components/no-such/issue", verify.RefError),
     ],
 )
-def test_definition_schema_refuses(openapi: Any, pointer: str, error: type[Exception]) -> None:
+def test_definition_target_refuses(openapi: Any, pointer: str, error: type[Exception]) -> None:
     with pytest.raises(error):
-        verify.definition_schema({**document(), "openapi": openapi}, pointer)
+        verify.definition_target({**document(), "openapi": openapi}, pointer)
 
 
 def test_verify_without_definitions_sends_nothing(world: World) -> None:
@@ -213,8 +257,8 @@ def test_verify_stops_before_the_calls_exceed_the_limit(
     path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **policy}), encoding="utf-8")
     contracts.use_dir(world.root / "contracts")
     for i in range(urls):
-        world.define(f"s{i}", url=f"{URL}?{i}")
-        world.documents[f"{URL}?{i}"] = document()
+        world.define(f"s{i}", url=f"{URL}/{i}")
+        world.documents[f"{URL}/{i}"] = document()
     if ok:
         assert verify.verify(peer, world.fetch).outcomes == []
         return
@@ -224,11 +268,24 @@ def test_verify_stops_before_the_calls_exceed_the_limit(
     assert world.fetched == []
 
 
-@pytest.mark.parametrize("change", [{"peer": "Git Hub"}, {"sample": "tests/samples/../x.json"}, {"url": "http://x.test"}, {"extra": 1}])
-def test_verify_refuses_a_definition_of_wrong_shape(world: World, change: dict[str, Any]) -> None:
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"peer": "Git Hub"},
+        {"sample": "tests/samples/../x.json"},
+        {"extra": 1},
+        {"url": f"http://x.test/{SECRET_VALUE}"},
+        {"url": f"https://user:{SECRET_VALUE}@x.test/d.json"},
+        {"url": f"https://x.test/d.json?sig={SECRET_VALUE}"},
+        {"url": f"https://x.test/d.json#{SECRET_VALUE}"},
+    ],
+)
+def test_verify_refuses_a_definition_of_wrong_shape_without_its_values(world: World, change: dict[str, Any]) -> None:
     world.define(data=False, **change)
-    with pytest.raises(verify.DefinitionError):
+    with pytest.raises(verify.DefinitionError) as caught:
         verify.verify(fetch=world.fetch)
+    assert SECRET_VALUE not in str(caught.value)
+    assert world.fetched == []
 
 
 @pytest.mark.parametrize(

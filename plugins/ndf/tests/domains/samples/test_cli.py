@@ -28,8 +28,9 @@ def _secrets(w: World) -> None:
 
 
 def _old_document(w: World) -> None:
-    w.documents[URL] = {**document(), "openapi": "3.0.3"}
-    w.define()
+    url = f"https://example.test/{SECRET_VALUE}.json"
+    w.documents[url] = {**document(), "openapi": "3.0.3"}
+    w.define(url=url)
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,8 @@
 - 呼び出しの上限は上限の設定 `samples.fetch` の `peers`（相手ごと）が持つ。最悪の要求の数が上限を超えれば 1 回も呼ばない
 - 説明に出すのは、記述か見本の定義が名前を決めた語（`properties` のキー・検証の規則の名前・参照）と配列の添字と件数だけである。
   見本の値と、見本の側の辞書のキーの名前は出さない（見本は本物の応答で、値とキーに利用者の識別情報が入りうる）
-- 参照（`$ref`）は文書の中（`#/...`）だけで解き、外の URL を取りに行かない
+- 参照（`$ref`）は文書の中（`#/...`）だけで、文書の根から解く。検証器には取得を持たない registry を渡し、外の URL を取りに行かない
+- 本物の応答と記述の既知の食い違いは、見本の定義の `known_mismatches` に挙げたものだけを除く。出なくなれば食い違いにする
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from urllib.parse import unquote
 
 from jsonschema import Draft202012Validator, validators
 from jsonschema.exceptions import UnknownType, ValidationError
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from ndf import contracts
 from ndf.adapters import http
@@ -52,6 +55,13 @@ class VersionError(Exception):
 
 class RefError(Exception):
     """文書の中の参照の先が無い（か、文書の外を指す）。`str(e)` が参照。"""
+
+
+class Target(NamedTuple):
+    """検証に使う定義。`schema` は検証のスキーマ、`document` は参照を解く文書の全体。"""
+
+    document: dict[str, Any]
+    schema: dict[str, Any]
 
 
 class Layers(NamedTuple):
@@ -107,6 +117,8 @@ class Definition(NamedTuple):
     url: str
     pointer: str
     absent: list[str]
+    known: list[str]
+    name: str
 
 
 def fetch_document(url: str) -> dict[str, Any]:
@@ -164,12 +176,15 @@ def verify(peer: str | None = None, fetch: Callable[[str], Any] = fetch_document
 
 
 def _definitions() -> list[Definition]:
-    """見本の定義を見本のパスの昇順で返す。形が違えば `DefinitionError`。"""
+    """見本の定義を見本のパスの昇順で返す。形が違えば `DefinitionError`（URL に書かれた認証情報を出さないよう、値を含まない位置だけを説明に出す）。"""
     out = []
     for name, raw in contracts.load_split(DEFINITIONS).items():
-        contracts.require_schema(raw, DEFINITION_SCHEMA, DefinitionError, f"見本の定義 {DEFINITIONS}/{name}.json")
+        places = sorted({error.partition(": ")[0] for error in contracts.schema_errors(raw, DEFINITION_SCHEMA)})
+        if places:
+            raise DefinitionError(f"見本の定義 {DEFINITIONS}/{name}.json の形が {DEFINITION_SCHEMA} と違う: {', '.join(places)}")
         source = raw["source"]
-        out.append(Definition(raw["sample"], raw["peer"], source["schema"], source["pointer"], raw["absent_keys"]))
+        keys = (raw["absent_keys"], raw["known_mismatches"])
+        out.append(Definition(raw["sample"], raw["peer"], source["schema"], source["pointer"], *keys, name))
     return sorted(out)
 
 
@@ -208,42 +223,48 @@ def _mismatches(definition: Definition, documents: _Documents) -> list[str]:
     except ValueError:
         return ["見本が JSON として読めない"]
     try:
-        schema = definition_schema(documents.get(definition), definition.pointer)
+        target = definition_target(documents.get(definition), definition.pointer)
     except VersionError as exc:
-        raise VerifyError("config_broken", f"{exc}: {definition.url}") from exc
+        raise VerifyError("config_broken", f"{exc}: {DEFINITIONS}/{definition.name}.json") from exc
     except RefError as exc:
-        return [ref_detail(exc)]
-    return compare(sample, schema, definition.absent)
+        return [ref_detail(str(exc))]
+    return compare(sample, target, definition.absent, definition.known)
 
 
-def definition_schema(document: dict[str, Any], pointer: str) -> dict[str, Any]:
-    """文書の全体を根に持ったまま、`pointer` の定義を指す検証用のスキーマを返す。
+def definition_target(document: dict[str, Any], pointer: str) -> Target:
+    """`pointer` の定義を指す検証用のスキーマを、参照を解く文書の全体とともに返す。
 
     3.1 でない文書は `VersionError`、ポインタの先が無ければ `RefError`。
     """
     version = document["openapi"] if "openapi" in document else None
     if not isinstance(version, str) or not version.startswith(OPENAPI_PREFIX):
         raise VersionError(f"記述が OpenAPI {OPENAPI_PREFIX}x でない")
-    _target(document, pointer)
-    return {"$schema": Draft202012Validator.META_SCHEMA["$id"], "components": document["components"], "$ref": pointer}
+    _resolve(document, pointer)
+    return Target(document, {"$ref": pointer})
 
 
-def compare(sample: Any, schema: dict[str, Any], absent: list[str]) -> list[str]:
-    """見本と定義の食い違いの説明を昇順で返す。空なら合う。`absent` は見本の定義の `absent_keys`。"""
+def compare(sample: Any, target: Target, absent: list[str], known: Sequence[str] = ()) -> list[str]:
+    """見本と定義の食い違いの説明を昇順で返す。空なら合う。
+
+    `absent` と `known` は見本の定義の `absent_keys` と `known_mismatches`。`known` の説明は除き、出なくなったものを食い違いにする。
+    """
     try:
-        found = {describe(error, schema) for error in _validator(schema).iter_errors(sample)}
-        return sorted(found.union(unknown_keys(sample, schema), added_keys(sample, schema, absent)))
+        found = {describe(error, target) for error in _validator(target).iter_errors(sample)}
+        found.update(unknown_keys(sample, target), added_keys(sample, target, absent))
     except RefError as exc:
-        return [ref_detail(exc)]
+        return [ref_detail(str(exc))]
+    except Unresolvable as exc:
+        return [ref_detail(f"#{exc.ref}" if exc.ref.startswith("/") else exc.ref)]
     except (UnknownType, re.error):
         return ["記述の定義がスキーマとして読めない"]
+    return sorted(found.difference(known) | {f"既知の食い違いが消えた: {line}" for line in known if line not in found})
 
 
-def ref_detail(exc: RefError) -> str:
-    return f"記述に参照の先が無い: {exc}"
+def ref_detail(ref: str) -> str:
+    return f"記述に参照の先が無い: {ref}"
 
 
-def describe(error: ValidationError, schema: dict[str, Any]) -> str:
+def describe(error: ValidationError, target: Target) -> str:
     """検証の誤り 1 件を `<パス>: <検証の規則>` で返す（`required` は足りないキーの名前を添える）。
 
     `error.message` は見本の値を含みうるので使わない。`error.instance` は、足りないキー（スキーマの語）の有無だけを見る。
@@ -251,67 +272,67 @@ def describe(error: ValidationError, schema: dict[str, Any]) -> str:
     rule = str(error.validator)
     if rule == "required":
         rule += " " + ", ".join(sorted(k for k in error.validator_value if k not in error.instance))
-    return f"{safe_path(list(error.absolute_path), schema)}: {rule}"
+    return f"{safe_path(list(error.absolute_path), target)}: {rule}"
 
 
-def unknown_keys(sample: Any, schema: dict[str, Any]) -> list[str]:
+def unknown_keys(sample: Any, target: Target) -> list[str]:
     """見本の辞書のキーのうち、定義の `properties` に無いものの件数を位置ごとに返す。
 
     `additionalProperties`・`patternProperties` を書く定義と、`properties` を持たない定義（自由な辞書）は数えない。
     """
     out = []
-    for at in _positions(sample, schema):
+    for at in _positions(sample, target):
         if any(_is_open(node) for node in at.layers.nodes) or not at.layers.matched:
             continue
         names = _names(at.layers.nodes)
         count = sum(1 for key in at.value if key not in names)
         if names and count:
-            out.append(f"{safe_path(at.path, schema)}: 定義に無いキー {count} 件")
+            out.append(f"{safe_path(at.path, target)}: 定義に無いキー {count} 件")
     return sorted(out)
 
 
-def added_keys(sample: Any, schema: dict[str, Any], absent: list[str]) -> list[str]:
+def added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]:
     """記述の定義のキーのうち基準の形（見本のキーと `absent`）に無いものと、`absent` のうち記述から消えたものを返す。"""
     known = set(absent)
     found = set()
-    for at in _positions(sample, schema):
+    for at in _positions(sample, target):
         if at.dynamic or not at.layers.matched:
             continue
         base = tuple(ANY if isinstance(part, int) else part for part in at.path)
         new = {key for key in _names(at.layers.nodes) - set(at.value) if "/".join((*base, key)) not in known}
-        found |= {f"{safe_path(base, schema)}: 記述に足されたキー {key}" for key in new}
-    return sorted(found | {line for entry in absent for line in _gone(entry, schema)})
+        found |= {f"{safe_path(base, target)}: 記述に足されたキー {key}" for key in new}
+    return sorted(found | {line for entry in absent for line in _gone(entry, target)})
 
 
-def safe_path(path: Sequence[str | int], schema: dict[str, Any]) -> str:
+def safe_path(path: Sequence[str | int], target: Target) -> str:
     """見本の中の位置を `/` 区切りにする（最上位は `(最上位)`）。定義の `properties` に無い辞書のキーは `*` に伏せる。"""
     labels = []
-    nodes = [schema]
+    nodes = [target.schema]
     for part in path:
-        layers = _layers(nodes, schema, _every).nodes
+        layers = _layers(nodes, target.document, _every).nodes
         label = str(part) if isinstance(part, int) or part in _names(layers) else ANY
         labels.append(label)
         nodes = [child for node in layers for child in _children(node, part)]
     return "/".join(labels) if labels else TOP
 
 
-def _gone(entry: str, schema: dict[str, Any]) -> list[str]:
+def _gone(entry: str, target: Target) -> list[str]:
     """`absent_keys` の 1 つが、記述の定義の `properties` に無ければその説明。"""
     *parents, key = entry.split("/")
-    nodes = [schema]
+    nodes = [target.schema]
     for part in parents:
-        nodes = [child for node in _layers(nodes, schema, _every).nodes for child in _children(node, part)]
-    if key in _names(_layers(nodes, schema, _every).nodes):
+        nodes = [child for node in _layers(nodes, target.document, _every).nodes for child in _children(node, part)]
+    if key in _names(_layers(nodes, target.document, _every).nodes):
         return []
-    return [f"{safe_path(parents, schema)}: 記述から消えたキー {key}"]
+    return [f"{safe_path(parents, target)}: 記述から消えたキー {key}"]
 
 
-def _positions(sample: Any, schema: dict[str, Any]) -> Iterator[Position]:
+def _positions(sample: Any, target: Target) -> Iterator[Position]:
     """見本の辞書を、その位置に効く定義とともに順に返す（定義の無い位置の下へは進まない）。"""
-    validator = _validator(schema)
-    queue: list[tuple[_Place, Any, list[Any], bool]] = [((), sample, [schema], False)]
+    validator = _validator(target)
+    queue: list[tuple[_Place, Any, list[Any], bool]] = [((), sample, [target.schema], False)]
     for path, value, nodes, dynamic in queue:
-        layers = _layers(nodes, schema, lambda branch, value=value: validator.evolve(schema=branch).is_valid(value))
+        layers = _layers(nodes, target.document, lambda branch, value=value: validator.evolve(schema=branch).is_valid(value))
         if isinstance(value, dict):
             yield Position(path, value, layers, dynamic)
         names = _names(layers.nodes)
@@ -342,7 +363,7 @@ def _layers(nodes: list[Any], root: dict[str, Any], keep: Callable[[Any], bool])
             continue
         seen.add(id(node))
         out.append(node)
-        queue += [_target(root, node["$ref"])] if "$ref" in node else []
+        queue += [_resolve(root, node["$ref"])] if "$ref" in node else []
         queue += node["allOf"] if "allOf" in node else []
         for word in [w for w in ("anyOf", "oneOf") if w in node]:
             kept = [branch for branch in node[word] if keep(branch)]
@@ -381,7 +402,7 @@ def _items(node: dict[str, Any], index: int | None) -> list[Any]:
     return [prefix[index]] if index < len(prefix) else rest
 
 
-def _target(root: dict[str, Any], ref: Any) -> Any:
+def _resolve(root: dict[str, Any], ref: Any) -> Any:
     """文書の中の参照の先。文書の外を指す・先が無ければ `RefError`。"""
     local = isinstance(ref, str) and ref.startswith("#/")
     found, value = json_pointer.resolve(root, unquote(ref[1:])) if local else (False, None)
@@ -390,10 +411,16 @@ def _target(root: dict[str, Any], ref: Any) -> Any:
     return value
 
 
-def _validator(schema: dict[str, Any]) -> Any:
-    """`schema` の検証器。参照は `_target` だけで解く。"""
+def _validator(target: Target) -> Any:
+    """`target.schema` の検証器。参照は文書の根から `_resolve` だけで解く。
+
+    jsonschema は `unevaluatedProperties`・`unevaluatedItems` と、入れ子の `$schema` で切り替わった標準の検証器では、差し替えた
+    `$ref` を通らずに registry で参照を解く。文書を根にし、取得を持たない registry を渡して、その経路でも文書の外を取りに行かせない
+    （既定の registry は外の URL を取りに行く）。
+    """
 
     def follow(validator: Any, ref: Any, instance: Any, _: Any) -> Iterator[ValidationError]:
-        yield from validator.descend(instance, _target(schema, ref))
+        yield from validator.descend(instance, _resolve(target.document, ref))
 
-    return validators.extend(Draft202012Validator, {"$ref": follow, "$dynamicRef": follow})(schema)
+    cls = validators.extend(Draft202012Validator, {"$ref": follow, "$dynamicRef": follow})
+    return cls(target.document, registry=Registry()).evolve(schema=target.schema)
