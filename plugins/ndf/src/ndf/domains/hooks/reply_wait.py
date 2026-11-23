@@ -107,6 +107,29 @@ _PERMISSION_ASKS = (
 _FAVOR_ASKS = ("いただけますか", "いただけませんか", "もらえますか", "もらえませんか", "くれますか", "くれませんか")
 # 見出しの問いを選択肢から選ばせる問いと読む語（「どちらの案で進めますか？」）。手段を問う「どのように」は数えない
 _CHOICE_ASK = re.compile(r"どちら|どっち|どれ|いずれ|選|どの(?!よう|程度|くらい|ぐらい)")
+# 進め方・方針を決めさせる問い（「どう進めますか？」「どうしますか？」）。下の箇条書きは選択肢
+_DECISION_ASK = re.compile(r"進め|方針|どうしますか|どうしましょうか|どうするか")
+# 箇条書きの項目が選択肢であることを示す頭（「案 A: …」「A. …」「選択肢 1」「Option B」）
+_OPTION_ITEM = re.compile(r"^(?:案|選択肢|オプション|option|プラン|plan)\s*\S|^[A-ZＡ-Ｚ]\s*[:：.)）]", re.IGNORECASE)
+# 疑問の語。これを含む問いは事実・手段を問う（操作の実行可否の問いにしない）
+_INTERROGATIVES = ("どう", "どの", "どこ", "どれ", "どちら", "どんな", "何", "なに", "なぜ", "いつ", "誰", "いくつ", "いくら")
+# 操作の実行可否を尋ねる末尾（「このままマージしますか？」「進めましょうか？」）
+_ACTION_ASK_ENDINGS = ("ますか", "ましょうか", "ませんか")
+# 実行可否でなく、有無・可否・状態を問う末尾（「制限はありますか？」「変更できますか？」）
+_STATE_ASK_ENDINGS = (
+    "ありますか",
+    "できますか",
+    "いますか",
+    "なりますか",
+    "わかりますか",
+    "分かりますか",
+    "かかりますか",
+    "違いますか",
+    "変わりますか",
+)
+# 見出しの問いに直下の本文が答えている頭・言い切り（FAQ の「はい、変更できます。」）
+_ANSWER_HEAD = re.compile(r"^(?:はい|いいえ|いえ|ええ|yes|no)(?:[、，,。.!！\s]|$)", re.IGNORECASE)
+_ANSWER_ENDINGS = ("できます", "できません", "可能です", "不可です", "構いません", "かまいません", "不要です", "必要です")
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
 # 文の区切りに数えない範囲: インラインコード・リンク先・URL（クエリの `?` を文末と読まない）。リンク先は山括弧で
@@ -216,10 +239,11 @@ def _directed_heading(lines: list[ProseLine], at: int) -> bool:
     """`at` の見出しが利用者への問いか（章題でないか）。
 
     見出しが回答・承認を待つ文を持ち、次のどれかに当たれば問い: 後に本文の行が無い（「## このまま進めてよいですか？」で
-    終える）・利用者への依頼（`_requests_user`。「## このままマージしてよいですか？」「## 確認してください」の下に
-    報告と結び）・選択肢を選ばせる問いで、次の見出しまでの行がどれも箇条書き（「## どちらの案で進めますか？」の下に
-    選択肢）。承認の語の出現や箇条書きの有無だけでは問いにしない。後の本文が問いに答える章題（「### どうやって
-    設定しますか？」の下の説明や手順の箇条書き・「## マージの承認は必要ですか？」の下の説明）は問いにしない。
+    終える）・利用者への依頼か操作の実行可否の問い（`_requests_user`。「## このままマージしますか？」「## 確認して
+    ください」の下に報告と結び）・選択肢を選ばせる問い（`_offers_choices`。「## どう進めますか？」の下に案の箇条書き）。
+    承認の語の出現や箇条書きの有無だけでは問いにしない。直下の本文が問いに答える章題（「## 設定ファイルを変更しても
+    よいですか？」の下の「はい、変更できます。」・「### どうやって設定しますか？」の下の手順・「## マージの承認は
+    必要ですか？」の下の説明）は問いにしない。
     """
     asks = [s for s in _sentences([lines[at].text]) if _asks_reply(s)]
     if not asks:
@@ -231,19 +255,46 @@ def _directed_heading(lines: list[ProseLine], at: int) -> bool:
         below.append(line)
     if not any(not line.heading for line in lines[at + 1 :]):
         return True
+    if _answers(below):
+        return False
     if any(_requests_user(s) for s in asks):
         return True
-    return bool(below) and all(line.bullet for line in below) and any(_CHOICE_ASK.search(s) for s in asks)
+    return _offers_choices(asks, below)
+
+
+def _answers(below: list[ProseLine]) -> bool:
+    """見出しの直下の最初の文が、見出しの問いへの答え（「はい、…」「変更できます。」）か。"""
+    first = _sentences([below[0].text])[:1] if below else []
+    if not first:
+        return False
+    core = _core(first[0])
+    return _ANSWER_HEAD.match(core) is not None or core.endswith(_ANSWER_ENDINGS)
+
+
+def _offers_choices(asks: list[str], below: list[ProseLine]) -> bool:
+    """見出しの問いの直下が、選ばせる選択肢の箇条書きか。
+
+    次の見出しまでの行がどれも箇条書きで、問いが選ばせる・進め方を決めさせる形か、項目が案の形（「案 A: …」）なら真。
+    手段を問う見出しの下の手順（「どうやって設定しますか？」＋「設定ファイルを開く」）は選択肢にしない。
+    """
+    if not below or not all(line.bullet for line in below):
+        return False
+    if any(_CHOICE_ASK.search(s) or _DECISION_ASK.search(s) for s in asks):
+        return True
+    return len(below) >= 2 and all(_OPTION_ITEM.match(line.text) for line in below)
 
 
 def _requests_user(sentence: str) -> bool:
-    """文が利用者に承認・回答を直接求める依頼か（事実や手段を問う文でないか）。
+    """文が利用者に承認・回答を直接求める依頼か、操作の実行可否を尋ねる問いか（事実や手段を問う文でないか）。
 
     許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つ依頼（「確認してください」
-    「ご承認をお願いします」「ご確認いただけますか？」）を依頼にする。
+    「ご承認をお願いします」「ご確認いただけますか？」）・疑問の語を持たない実行可否の問い（「このままマージしますか？」）
+    を依頼にする。有無・可否を問う形（「制限はありますか？」）は依頼にしない。
     """
-    core = _core(sentence)
+    core = _core(sentence).rstrip("?？")
     if any(w in core for w in _PERMISSION_ASKS) or _user_wait(core):
+        return True
+    if core.endswith(_ACTION_ASK_ENDINGS) and not core.endswith(_STATE_ASK_ENDINGS) and not any(w in core for w in _INTERROGATIVES):
         return True
     if not any(w in core for w in REPLY_WORDS + APPROVAL_WORDS):
         return False
