@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, get_type_hints
 
 from ndf import contracts
 
@@ -59,10 +59,9 @@ class Policy(NamedTuple):
     endpoint: Optional[dict[str, Any]] = None
 
 
-# 数でない値（`value` で引かない。判定の子と hook の表が行から読む）
-OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
-# 方針の数の値の名前（名前と説明と数でない値を除いた Policy の項目）
-VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary", *OTHER_KEYS))
+# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ）は
+# `value` で引かず、判定の子と hook の表が行から読む
+VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 
 def validate(raw: object) -> dict[str, Policy]:

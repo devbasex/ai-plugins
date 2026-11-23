@@ -103,7 +103,7 @@ def test_value_keys_match_policy_fields_and_schema():
 
 
 def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
-    """配布する `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
+    """プラグインの `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
     from ndf.domains.hooks import reply_judge
 
     assert reply_judge._judge("model") == "haiku"
