@@ -193,7 +193,7 @@ def test_append_makes_no_done_when_the_report_cannot_be_written(tmp_path, capsys
 
 
 def test_append_reads_again_when_another_append_published_before_the_lock(tmp_path, capsys, monkeypatch):
-    # PR 4325 の r1-8: 開いてからロックを取るまでに別の追記が公開したら、開き直して先の追記の後ろへ足す
+    # PR 4325 の r1-8: ロックを取るまでに別の追記が公開したら、その後ろへ足す（報告はロックを取ってから読む）
     report = _prepared(tmp_path, capsys)
     real, published = worker_append._try_lock, []
 
@@ -218,10 +218,33 @@ def test_append_stops_without_writing_while_another_append_holds_the_report(tmp_
     assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()
 
 
+def test_append_locks_a_file_only_the_writer_can_open(tmp_path, capsys, monkeypatch):
+    # PR 4325 の r2-2: 報告を読めるだけの利用者が追記を止められない。ロックの inode は公開をまたいで同じ
+    report = _prepared(tmp_path, capsys)
+    report.chmod(0o644)
+    lock = Path(f"{report}{worker_append.LOCK_SUFFIX}")
+    _append(capsys, monkeypatch, report, "1 つ目\n")
+    first = lock.stat()
+    _append(capsys, monkeypatch, report, "2 つ目\n", "--done")
+    assert first.st_mode & 0o077 == 0 and lock.stat().st_ino == first.st_ino
+
+
+def test_append_refuses_a_lock_others_can_open_or_a_link(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    lock = Path(f"{report}{worker_append.LOCK_SUFFIX}")
+    lock.write_text("", encoding="utf-8")
+    lock.chmod(0o644)
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
+    lock.unlink()
+    lock.symlink_to(tmp_path / "outside")
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
+    assert report.read_text(encoding="utf-8") == "" and not (tmp_path / "outside").exists()
+
+
 def test_append_refuses_a_report_that_was_not_prepared(tmp_path, capsys, monkeypatch):
     code, out = _append(capsys, monkeypatch, tmp_path / "n.report.md", "本文\n", "--done")
     assert out["cause"]["kind"] == "precondition" and code == causes.exit_code("precondition")
-    assert not (tmp_path / "n.report.md.done").exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("cmd", ["append", "collect"])

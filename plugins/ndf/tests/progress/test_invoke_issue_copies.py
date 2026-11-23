@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 from sprint_fixture import sprint_repo as _sprint_repo
 
-from ndf.contracts import worker_paths
+from ndf.contracts import result, worker_paths
 from ndf.core import route
 from ndf.progress import invoke
 
@@ -106,3 +108,22 @@ def test_plan_in_a_directory_others_can_rename_in_is_not_handed_to_the_run(tmp_p
     finally:
         work.chmod(0o700)
     assert e.value.kind == "shared"
+
+
+def test_the_run_gets_the_checked_directory_for_the_plan_and_the_state(tmp_path, monkeypatch):
+    # PR 4325 の r2-1: リンクを経た保存先は、解いて確かめたディレクトリをプランと --state-dir の両方に渡す
+    real = tmp_path / "real"
+    real.mkdir(mode=0o700)
+    (tmp_path / "link").symlink_to(real)
+    _plan_path(tmp_path, monkeypatch, real / "w")
+    seen: list[list[str]] = []
+
+    def runner(argv, cwd, env):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(result.result("plan", "ok", "済んだ")) + "\n", "")
+
+    run = invoke.StageRun(invoke.PLAN, "design", {"issues": [1]}, (), "none", "design")
+    assert invoke.invoke(run, tmp_path, tmp_path / "link" / "w", runner=runner).status == "ok"
+    argv = seen[0]
+    assert argv[argv.index("next") + 1] == str(real / "w" / "design.json")
+    assert argv[argv.index("--state-dir") + 1] == str(real / "w")

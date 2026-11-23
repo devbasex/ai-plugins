@@ -874,10 +874,22 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     return None
 
 
+def _checked_dir(work_dir: Path) -> Path:
+    """プランの実行の保存先を開いて（無ければ作って）解いた、ほかの利用者が差し替えられないパス。
+
+    プランの実行は保存先をパスから開き直すので、リンクを経る元のパスでなくこのパスを渡す（リンクを置いた祖先は、解いた
+    パスの連鎖を確かめる `worker_paths.check_unshared` に入らず、後で別のディレクトリへ向けられうる）。
+    """
+    with worker_paths.open_or_create(work_dir) as wd:
+        worker_paths.check_unshared(wd)
+        return wd.path
+
+
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
         if template(run.name) is None:
             return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} が無い"), {})
+        work_dir = _checked_dir(work_dir)  # 以後の読み書きと `--state-dir` は、プランと同じ確かめたディレクトリで行う
         ended = _no_route(run, work_dir, answer)
         if ended is not None:
             return ended

@@ -347,21 +347,21 @@ def _private_group(gid: int) -> bool:
     return bool(names and groups) and groups[0].gr_name == names[0] and set(groups[0].gr_mem) <= {names[0]}
 
 
-def check_unshared(wd: WorkDir, name: str) -> None:
+def check_unshared(wd: WorkDir, name: Optional[str] = None) -> None:
     """`wd` の直下の `name` と、`wd` から根までの各ディレクトリの項目を、ほかの利用者が差し替えられないことを確かめる。
 
-    差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
+    `name` が None なら、`wd` の中の名前は見ずに `wd` から根までの項目だけを確かめる。差し替えられれば `EntryUnsafe`（`shared`）。後でパスから開き直す手順（`gh pr create --body-file` など）へ渡す名前に使う。
     記述子で確かめた中身でも、名前かその祖先を差し替えられると、開き直した手は別のファイルを読むためである。祖先は開いた
     記述子から `..` をカーネルに引かせてたどる（名前を解き直さない）。`..` がたどるのは今ある場所なので、最後に `wd.path` を
     根から開き直して `wd` と同じディレクトリかを突き合わせ、開いた後に移されていれば `EntryUnsafe`（`replaced`）にする
     （確かめた連鎖と、渡すパスの連鎖を同じにする。連鎖を差し替えられないと確かめた後なので、この後に移されることも無い）。
     """
-    child = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    child = os.stat(name, dir_fd=wd.fd, follow_symlinks=False) if name is not None else None
     cur = os.dup(wd.fd)
     try:
         while True:
-            if not _entry_fixed(cur, child):
-                raise EntryUnsafe(str(wd.path / name), "shared")
+            if child is not None and not _entry_fixed(cur, child):
+                raise EntryUnsafe(str(wd.path / name if name is not None else wd.path), "shared")
             up = os.open("..", _SEARCH | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=cur)
             here, above = os.fstat(cur), os.fstat(up)
             os.close(cur)

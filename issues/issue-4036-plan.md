@@ -35,7 +35,7 @@
 - **変更内容:** 実機の Claude Code で次の 3 つを 1 回ずつ確かめる（設計書の「未確認のまま残ること」の 2〜4 行目）
   - 背景のサブエージェントを待って応答を終えたとき、Stop の hook の入力に `background_tasks` が載るか。載る要素の形（`id`・`type` などのキー）
   - `subagent` の要素の `id` が、会話の記録の `<セッションの記録から .jsonl を除いたもの>/subagents/agent-<id>.jsonl` の `<id>` と同じか
-  - `run_in_background` で起動した Bash の Tool のシェルが `claude` の直接の子の `bash -c source …/.claude/shell-snapshots/snapshot-…` の形か。出力のファイル（`/tmp/claude-<uid>/<作業ディレクトリの鍵>/<session_id>/tasks/<id>.output`）の場所と、更新時刻がシェルの終わった時刻の代わりになるか
+  - `run_in_background` で起動した Bash の Tool のシェルが `claude` の直接の子の `bash -c source …/.claude/shell-snapshots/snapshot-…` の形か
 - 違ったときの扱いは設計書が定める。`id` が違えば `activity.json` に会話の記録を引ける値を足す。シェルの形が違えば、生死を確かめられない扱い（一覧のシェルを走っているとみなす）へ落とし、受け入れ条件 1 のシェルの取りこぼしを捕まえられないことを Pull Request に残す。どちらも Task 3・5 の中身が変わるので、結果を Task 3 の前にそろえる
 - **満たす受け入れ条件:** 無し（Task 3〜5 の前提）
 - **進め方:** テスト駆動を適用しない（実機の入力と `/proc` の形の記録）

@@ -61,7 +61,7 @@ __all__ = [
     "entry_state",
     "held_dir_id",
     "names_a_directory",
-    "open_file",
+    "open_lock",
     "open_or_create",
     "open_resolved",
     "open_subdir",
@@ -260,7 +260,7 @@ def entry_state(wd: WorkDir, name: str) -> Optional[os.stat_result]:
     return st
 
 
-def open_file(wd: WorkDir, name: str) -> Optional[int]:
+def _open_file(wd: WorkDir, name: str) -> Optional[int]:
     """名前のファイルをリンクをたどらずに読み取りで開いた記述子。無ければ None。リンクなら `EntryUnsafe`、開けなければ `EntryUnreadable`。"""
     _check_name(name)
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -282,7 +282,7 @@ def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
     （`foreign`）で止める（共有の保存先で別の利用者が用意・書き換えできる中身を、呼んだ利用者の権限で使わないため）。
     書き込めるかはモードのビットと、開いた記述子の拡張 ACL で見る（`_others_may_write`）。
     """
-    fd = open_file(wd, name)
+    fd = _open_file(wd, name)
     if fd is None:
         return None
     try:
@@ -302,6 +302,48 @@ def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
         return data.decode("utf-8")
     except UnicodeDecodeError as e:
         raise EntryUnreadable(name, str(e)) from None
+
+
+def open_lock(wd: WorkDir, name: str) -> int:
+    """呼んだ利用者だけが開けるロックのファイルを開く（無ければ空で作る）。置き換えないので、inode は消されるまで同じである。
+
+    読めるだけの利用者も `flock` で排他のロックを取れるので、グループとほかの利用者に何も許さないファイルだけを使う。
+    作ったときは親から継いだ拡張 ACL を外す。既にある名前が、リンク数 1 の通常のファイルでない・呼んだ利用者の持ち物でない・
+    ほかの利用者が開けるなら `EntryUnsafe`。
+    """
+    _check_name(name)
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    made = False
+    try:
+        fd = os.open(name, flags, dir_fd=wd.fd)
+    except FileNotFoundError:
+        try:
+            fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=wd.fd)
+            made = True
+        except FileExistsError:  # 間に別の追記が作った
+            fd = os.open(name, flags, dir_fd=wd.fd)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise EntryUnsafe(name, "symlink") from None
+        raise
+    try:
+        _check_lock(fd, name, made=made)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _check_lock(fd: int, name: str, *, made: bool) -> None:
+    """開いたロックのファイル `fd` を呼んだ利用者だけが開けることを確かめる（`open_lock`）。"""
+    if made:
+        _drop_inherited_acl(fd, name)
+    st = os.fstat(fd)
+    kind = _unsafe_kind(st)
+    if kind:
+        raise EntryUnsafe(name, kind)
+    if st.st_uid != os.geteuid() or st.st_mode & 0o077 or _others_may_write(fd, st):
+        raise EntryUnsafe(name, "foreign")
 
 
 def _others_may_write(fd: int, st: os.stat_result) -> bool:
