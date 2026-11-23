@@ -106,7 +106,7 @@ _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 _BULLET = re.compile(r"^(?:[-*+・]|\d+[.)])\s+")
 # かぎ括弧の引用（ほかの人の質問を引いて経緯を書いた文を、本人の質問と読まない）
 _QUOTED = re.compile(r"「[^「」]*」|『[^『』]*』")
-# 別の場所（ほかのセッション・レーン）の待ちを報告する文。11 系の `classify_reply` と同じ形（context.py もこれを読む）
+# 別の場所（ほかのセッション・レーン）の待ちを報告する文。11 系の `classify_reply` と同じ形
 _ELSEWHERE_PLACES = r"(セッション|レーン|計画|オーガナイザー)"
 ELSEWHERE_RE = re.compile(rf"(別の|ほかの|他の)?{_ELSEWHERE_PLACES}[^\n]{{0,40}}(承認|回答|判断)[^\n]{{0,10}}待")
 # 句の中の別の場所の待ちの報告。USER_WAIT_CONTAINS で待ちにした語（確認・指示・返事など）も報告として外す

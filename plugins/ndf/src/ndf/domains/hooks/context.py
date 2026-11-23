@@ -1,8 +1,8 @@
 """hook の 1 回の事象の文脈（#3345 の決定 88・IH1）。
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
-ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`・
-`classify_reply`）だけが行い、`HookContext` はその結果を持つ。
+ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の
+待ちのルール（`reply_wait` の `has_prose`・`prose_kind`。#4000 の決定 1）だけが行い、`HookContext` はその結果を持つ。
 """
 
 from __future__ import annotations
@@ -14,8 +14,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.hooks import tables
-from ndf.domains.hooks.reply_wait import ELSEWHERE_RE
+from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.hooks.strict import _SHELLS
 
 # 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
@@ -31,16 +30,6 @@ _DYNAMIC_NODE = re.compile(r"(expansion|substitution)$")
 # ヒアドキュメントとヒアストリングのセクション
 _HEREDOC_NODES = frozenset({"heredoc_redirect", "herestring_redirect"})
 
-# 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
-_WAIT_RE = re.compile(
-    r"(よろしいですか|いかがですか|どうしますか|どちらにしますか|選んでください|お知らせください|教えてください|"
-    r"承認をお願いします|ご確認ください|ご判断ください|指示をください|お待ちしています|返答を待ちます|回答を待ちます)"
-    r"|[?？]\s*$"
-)
-# 別の場所（ほかのセッション・レーン・計画）の待ちを報告する言い回し（#2324）
-_ELSEWHERE_RE = ELSEWHERE_RE
-# 本文の待ちを見る末尾の行数
-_TAIL_LINES = 4
 # 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
 _ASK_TOOL = "AskUserQuestion"
 
@@ -506,24 +495,6 @@ def read_tail(path: str, size: int) -> str:
     return text.split("\n", 1)[1] if end > size and "\n" in text else text
 
 
-def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
-    """最後の応答の種類: `none`（空）・`elsewhere_wait`（別の場所の待ちの報告）・`prose_wait`（本文で人の回答を待つ）・`report`。
-
-    `code_lines` は行ごとのコードブロックのマーカー（`ndf.adapters.markdown.code_lines`）。コードの中の行は見ない。
-    """
-    lines = text.splitlines()
-    flags = code_lines if code_lines is not None and len(code_lines) == len(lines) else [False] * len(lines)
-    prose = [line for line, code in zip(lines, flags) if not code and line.strip()]
-    if not prose:
-        return "none"
-    tail = "\n".join(prose[-_TAIL_LINES:])
-    if _ELSEWHERE_RE.search(tail):
-        return "elsewhere_wait"
-    if any(_WAIT_RE.search(line.strip()) for line in prose[-_TAIL_LINES:]):
-        return "prose_wait"
-    return "report"
-
-
 def asked_since_prompt(tail: str) -> bool:
     """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
 
@@ -621,8 +592,17 @@ class HookContext:
         return markdown.code_lines(self.last_reply) if self.last_reply else []
 
     @cached_property
+    def has_reply_prose(self) -> bool:
+        """最後の応答に本文の行があるか（ルールの `has_prose`）。guard `stop-wait` と `last_reply_kind` が同じ結果を読む。"""
+        return reply_wait.has_prose(self.last_reply)
+
+    @cached_property
     def last_reply_kind(self) -> str:
-        return classify_reply(self.last_reply, self.reply_code_lines)
+        """最後の応答の種類（`none`・`elsewhere_wait`・`prose_wait`・`report`）。ルールの判定（#4000 の決定 1）。
+
+        本文の行の有無は `has_reply_prose` を読み、確かめ直さない（`reply_wait.reply_kind` を呼ばない）。
+        """
+        return reply_wait.prose_kind(self.last_reply) if self.has_reply_prose else "none"
 
     @cached_property
     def asked_this_turn(self) -> bool:
