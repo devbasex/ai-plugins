@@ -241,7 +241,7 @@ plugins/ndf/
 | `import_file` | 名前が単一のファイル名でない・本文か履歴が旧フォルダの中の通常のファイルでない | 入力の誤り・symlink・別の種類のファイル | 読む前の名前の検査と、記述子でたどった旧フォルダの要素と `lstat` | 読まずに止める | 終了コード 2 と理由（`invalid_name`・`not_regular_file`・`outside_folder`） | 何もしていない。再実行可 |
 | `import_file` | 行き先を 1 つに決められない | 名前に完全一致する閉じていないステートマシンが 2 つ以上 | 行き先の選定 | 書かずに止める | 終了コード 2 と候補の ID | 何もしていない。`--to <ID>` で再実行 |
 | `import_file` | 判定の後に末尾の番号がずれた | 通常の `write`・別の `import`・進行の更新と同時 | `append_events` の `Conflict` | 読み直して判定からやり直し、尽きたら止める | 尽きたら `store_busy` の終了コード | 書いていない・動かしていない。再実行可 |
-| `import_file` | 退避の途中で失敗した | 権限・ディスク | `rename` | 止める | 終了コード 1 と、動かしたファイルと残ったファイル | 再実行で残りだけを動かす（下の「再開」） |
+| `import_file` | 退避の途中で失敗した | 権限・ディスク | `rename` | 止める | 終了コード 1 と、動かしたファイルと残ったファイル、退避先 | 再実行で、照合の記録がある同じ退避先へ残りだけを動かす（下の「再開」） |
 
 ### 内部のデータと定数
 
@@ -268,7 +268,7 @@ plugins/ndf/
 | `show` | 最後の版・`--seq` の版・`--history` | 版が 1 つ・通常の `show` が過去の版の本文を読まない（`read_handoff` の SQL が 1 行） | 引継ぎが無い・無い `--seq` |
 | `listing` | 引継ぎを持つものだけ・`--open` | 0 件・行がすべて `completed` のレーンは `--open` に出ない・行の無いレーンは出る | 別のリポジトリのステートマシンを含めない |
 | `read_events` | `handoff_written` の `payload` が `None` で、ほかの事象は今のまま | — | — |
-| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く・閉じたステートマシンと無いステートマシンの文書は書かずに動く | 履歴のファイルが無い・新方式の版が既にある対象は書かずに動く・本文だけ動いた後の再実行で履歴だけが動き版が増えない・引継ぎを持たない閉じていないステートマシンが行き先に選ばれる・`issue-<番号>`・`sprint-<名>`・`parallel-<名>` の旧ファイル名がそれぞれのステートマシンへ移る・`show sprint:<名>` が `sprint-<名>.md` を `outputs.legacy` に返す・`list --open` が 0 件でも旧文書だけの対象は手順 0 の `show` で見つかる | 書いた版の読み直しが違うと動かさない・判定と追記の間に通常の `write` を差し込むと `Conflict` からやり直して書かずに退避する・同じ文書の `import` を 2 つ同時に打っても版が 1 つ・`sprint-<名>` が同じ名前の閉じていないスプリントとレーンの両方に当たると終了コード 2・`../x`・`a/b` の名前・外を指す symlink の本文と履歴・外を指す symlink の `.ndf/handoff` と `.ndf`（読まず・動かさない）・同じ名前の閉じていないステートマシンが 2 つ |
+| `import_file` | 本文と履歴が 1 版に入り、2 つのファイルが退避先へ動く・閉じたステートマシンと無いステートマシンの文書は書かずに動く | 履歴のファイルが無い・新方式の版が既にある対象は書かずに動く・本文だけ動いた後の再実行で履歴だけが同じ退避先へ動き版が増えない・閉じたステートマシンの文書で本文だけ動いた後の再実行でも履歴が同じ退避先へ動く・引継ぎを持たない閉じていないステートマシンが行き先に選ばれる・`issue-<番号>`・`sprint-<名>`・`parallel-<名>` の旧ファイル名がそれぞれのステートマシンへ移る・`show sprint:<名>` が `sprint-<名>.md` を `outputs.legacy` に返す・`list --open` が 0 件でも旧文書だけの対象は手順 0 の `show` で見つかる | 書いた版の読み直しが違うと動かさない・判定と追記の間に通常の `write` を差し込むと `Conflict` からやり直して書かずに退避する・同じ文書の `import` を 2 つ同時に打っても版が 1 つ・`sprint-<名>` が同じ名前の閉じていないスプリントとレーンの両方に当たると終了コード 2・`../x`・`a/b` の名前・外を指す symlink の本文と履歴・外を指す symlink の `.ndf/handoff` と `.ndf`（読まず・動かさない）・同じ名前の閉じていないステートマシンが 2 つ |
 
 ### 前の版の引継ぎ文書の移し替え（子の課題 3）
 
@@ -289,8 +289,8 @@ plugins/ndf/
   - 新版を優先: `source` を持たない `handoff_written`（`ndf handoff write` が書いた版）が 1 つでもあれば、前の版の文書を書かずに退避だけし、`outputs.superseded = true` を返す（`show` の最新版を古い内容で上書きしない）
   - 移し済み: `source` が `.ndf/handoff/<名>.md` の版があれば書かない（下の「再開」）
   - どちらでもなければ、本文を `check_text` に通し、上の (5) で `payload = {"body": <本文>, "history": <履歴のファイルの中身>, "lines", "bytes", "source": ".ndf/handoff/<名>.md", "source_sha256": {"body": ..., "history": ...}}` の 1 件を足す。トランザクションの後で `read_handoff(seq=<書いた seq>)` で読み直し、本文・履歴・SHA-256 が一致したときだけ退避へ進む
-- 退避: `places.retired_slot(cwd, now)`（下の「残骸の退避」の、実行ごとに衝突しない退避先）の下の `main/.ndf/handoff/` へ、本文、履歴の順に `rename` する（行き先に同じ名前があれば上書きせずに止める）
-- 再開: 退避の途中で止まった後の再実行は、DB の移し済みの版の `source_sha256` を正とする。旧フォルダに残っているファイルのうち、SHA-256 がその版の記録と一致するものだけを退避し、版は足さない。本文が既に退避済みで履歴だけが残る場合も、履歴の SHA-256 で同じ版の残りと分かるので退避できる。一致しないファイルは動かさず終了コード 1（移した後に人が書き足した内容を失わない）
+- 退避: DB に書いたか（行き先あり）・書かなかったか（行き先 0・新版を優先）によらず同じ手順で行う。(1) `places.retired_slot(cwd, now)`（下の「残骸の退避」の、実行ごとに衝突しない退避先）の下に `main/.ndf/handoff/` を作る。(2) ファイルを動かす前に、照合の記録 `main/.ndf/handoff/<名>.import.json`（`{"name", "body_sha256", "history_sha256"（履歴が無ければ null）, "seq"（DB に書いた版。書かなければ null）, "superseded"}`）を同じディレクトリの一時ファイルから付け替えて書く。(3) 本文、履歴の順に `rename` する（行き先に同じ名前があれば上書きせずに止める）。照合の記録は退避の一部として退避先に残り、退避と一緒に 14 日の後に消える
+- 再開: 退避の途中で止まった後の再実行は、旧フォルダに `<名>.md` か `<名>-history.md` が残っていれば、先に `.git/ndf/retired/*/main/.ndf/handoff/<名>.import.json` のうち、記録にあるファイルがまだ退避先にそろっていないもの（途中で止まった退避）を探す（退避先の名前は日時順なので新しいものから見る）。見つかればその退避先と照合の記録を正とし、旧フォルダに残っているファイルのうち SHA-256 が記録と一致するものだけを同じ退避先へ動かし、DB には何も足さない（DB に書いた版なら、記録の `seq` の版の `source_sha256` とも一致することを確かめる）。本文が既に退避済みで履歴だけが残る場合も、履歴の SHA-256 で同じ文書の残りと分かるので、DB に書かなかった対象（閉じた・無いステートマシン、新版を優先した対象）でも元の退避先へそろう。一致しないファイルは動かさず終了コード 1（移した後に人が書き足した内容を失わない）。途中の退避が見つからず本文が無いのに履歴だけが残るときは、読まず・動かさずに終了コード 2（`orphan_history`）。`sweep` は、照合の記録があってファイルがそろっていない退避を 14 日を過ぎても消さず、`items[]` に `incomplete_import` を出す（残りの照合先を失わない）
 - `.ndf/handoff` のフォルダは `retired` の値 `empty-dir` の行で、`sweep`（子の課題 4）は中が空になるまで動かさない。移していない文書が残る間は `items[]` に `not_empty` と残りの数が出る
 - 旧ファイル名と移し先: 前の版の手順書は、ステートマシンの名前と違うファイル名で文書を書いた（ai-plugins の実物は `issue-<番号>`・`sprint-<名>`・`parallel-<計画>` と、それ以外の名前）。名前と ID の対応は `domains/handoff/record.py` の定数 `LEGACY_NAMES` 1 か所が持ち、`import_file` の行き先の選定と `show` の旧文書の確かめが同じ表を両方向に使う
 
@@ -344,7 +344,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `sweep` | 移せない | 権限・移す前の検査・行の前提条件 | `rename`・上の検査 | そのパスを飛ばして続ける | 結果 JSON の `items[]` に理由（`in_use`・`symlink`・`tracked`・`lock_held`・`lock_open_elsewhere`・`lock_reopened`・`lock_unverifiable`・`not_ndf_workspace`・`locked`・`recently_used`・`unreachable_commits`・`local_files`・`registered_worktrees_remain`・`not_empty`・`dest_exists`・`os_error`）。全体は終了コード 0（`warnings` あり） | 次の `sweep` で再試行 |
+| `sweep` | 移せない | 権限・移す前の検査・行の前提条件 | `rename`・上の検査 | そのパスを飛ばして続ける | 結果 JSON の `items[]` に理由（`in_use`・`symlink`・`tracked`・`lock_held`・`lock_open_elsewhere`・`lock_reopened`・`lock_unverifiable`・`not_ndf_workspace`・`locked`・`recently_used`・`unreachable_commits`・`local_files`・`registered_worktrees_remain`・`not_empty`・`dest_exists`・`incomplete_import`・`os_error`）。全体は終了コード 0（`warnings` あり） | 次の `sweep` で再試行 |
 | `sweep` | 古い退避を消せない | 権限 | `rmtree` | 飛ばして続ける | 同上 | 同上 |
 
 ### 内部のデータと定数
