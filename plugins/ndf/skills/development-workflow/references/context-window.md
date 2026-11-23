@@ -35,10 +35,11 @@ worker の 3 層）は [agent-layers.md](agent-layers.md) が持つ。
 
 ## context window はカットポイントで切る
 
-**目安は 1 工程あたり 10 万トークンで、遅くとも 20 万で切る。** モデルが持つ上限まで
-詰めない。
+**目安は 1 工程あたり 10 万トークンである。** モデルが持つ上限まで詰めない。切る点は 4 つのカットポイントで
+（「再起動の方針」）、カットポイントの前に量だけで切らない。量で止めるのは運用上限を超えたときの hook である。
 
-**この上限は実測で守られていなかった**（#827。会話の記録から conductor のコンテキスト量を数えた）。
+**目安は実測で守られていなかった**（#827。会話の記録から conductor のコンテキスト量を数えた。次の表の 20 万は
+集計の基準であって、切る条件ではない）。
 
 | 範囲 | conductor の文脈 | 20 万を超えた会話 | 工程の開始ごとに切ったときの再読込の削減見込み |
 | --- | --- | --- | --- |
@@ -123,27 +124,23 @@ hook の無いランタイムにスイッチポイントは無い。Codex / Kiro
 
 ## 上限を超えたら hook が止める
 
-**Claude Code では、文脈が上限を超えた conductor が工程へ入る起動を hook が 1 度止める**
-（guard `context-limit`）。止めるのは文脈が運用上限（上限の設定 `contracts/limits.json` の `context.limit`。既定 **500,000**
-トークン）以上のときである。環境変数 `NDF_CONTEXT_LIMIT` で変えられ、`NDF_CONTEXT_GUARD=0` で止められる（判定も記録もしない）。
-
-| 経路 | 止める起動 |
-| --- | --- |
-| 対話 | 工程 Skill（上の 4 つのカットポイントの直後に始まる工程と、エントリポイントの `development-workflow` / `issue-plan-strategy`。一覧は `scripts/lib/token-guard-stages.txt`） |
-| 3 層 | `description` の先頭語がフェーズ（`設計` / `実装` / `検査` / `マージ` / `仕上げ`）の Agent |
+**Claude Code では、文脈が上限を超えたら hook が Tool の呼び出しを止める**（guard `context-limit`。
+`contracts/hooks/guards.json` の `PreToolUse` で、Tool を問わない）。止めるのは文脈が運用上限（上限の設定
+`contracts/limits.json` の `context.limit`。既定 **500,000** トークン）以上のときである。環境変数 `NDF_CONTEXT_LIMIT` で変えられる。
 
 - **コンテキスト量は、会話の記録の最後の assistant 呼び出しの `usage` から読む**
   （`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`）。読めなければ止めない
-- **サブエージェントの中の起動は止めない。** 見るのは conductor だけである
-- **止めるのはカットポイントごとに 1 度である。** 止めた直後に、工程へ入る次の起動が同じもの
-  （Skill なら名前と引数、Agent なら `description`）であれば 1 度だけ通す。**続けると決めたら、
-  同じ起動をもう一度行う。** 別の起動なら、上限を超えている限り再び止める
-- **ラッパー（[relay.md](relay.md)）の直接の子の conductor では、1 度の通しをしない。** 上限を
-  超えている限り止め続ける。人が居ない前提で、上限を超えたまま進むことを機械で止めるためである。
-  conductor は新しいフェーズを起動せず、動いている supervisor の報告を待ってから、引継ぎ文書を
-  更新し、次のコマンドのブロック（次のセクション）を出して応答を終える
-- 止めたときの理由の欄が、利用者へ示すコマンド（次のセクション）を持つ。conductor はそれを次のセクションの
-  形で示して応答を終える
+- **工程の起動に限らず、すべての Tool を止める。** 通すのは引継ぎ文書の置き場（`.ndf/handoff/`）の下への `Write` / `Edit` だけである。
+  同じ起動をやり直しても判定は変わらない
+- **同じ拒否は利用者の入力ごとに 2 回まで返し、3 回目からは案内へ下がって通る**（上限の設定の `hook.deny-repeat`）。
+  案内へ下がったのを続けてよい合図として扱わない
+- **ラッパー（[relay.md](relay.md)）の下で止められたら**、Tool を呼ばずに、応答の最後に次のコマンドのブロック
+  （次のセクション）を書いて応答を終える。ラッパーが新しいセッションで続ける
+- **ラッパーの外で止められたら**、引継ぎ文書を `.ndf/handoff/` の下へ `Write` で書くか `Edit` で更新し、次のコマンドのブロックを出して応答を終える。
+  利用者が新しい会話へブロックの中身を貼り付けて続ける
+- どちらでも、動いている supervisor とプランは止めない。止められた後は `Bash`（`ndf relay notice`・`ndf relay context record` など）も
+  止まるので打たない（アナウンスの書き方は次のセクション）
+- サブエージェントの中の呼び出しを外す判定は、まだ入っていない（#3995 の後の単位で足す）
 
 Codex / Kiro / agy には hook を置かない。4 つのカットポイントで 1 行を出す規約だけで守る
 （[waiting.md](waiting.md) の「hook」セクションの表）。
@@ -165,9 +162,10 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **旧い設定からの移り方。** 旧い設定を消す前に、引き継ぐ値を取り出して効いていることを確かめる。
 
-1. 旧い設定で止めたかった値（`.ndf/context.json` の `trial.limit` か、`NDF_CONTEXT_POLICY` で選んでいた方針の運用上限）を
-   書き留める
-2. その値を `NDF_CONTEXT_LIMIT` に入れる。値が無ければこの手順は飛ばす（既定の 500,000 で動く）
+1. `NDF_CONTEXT_LIMIT` に正の整数を既に入れていれば、旧い版でもそれが旧い設定より優先して効いていた。
+   値を変えずに 3 へ進む
+2. `NDF_CONTEXT_LIMIT` が無いときだけ、旧い設定で止めたかった値（`.ndf/context.json` の `trial.limit` か、
+   `NDF_CONTEXT_POLICY` で選んでいた方針の運用上限）を `NDF_CONTEXT_LIMIT` に入れる。値が無ければ何も入れない（既定の 500,000 で動く）
 3. `ndf relay context resolve` で、効いている 2 つの値と値ごとの出所（`default` か `env`）を確かめる
 4. 確かめた後で `.ndf/context.json` を消し（コミットしていればその削除もコミットする）、環境変数 `NDF_CONTEXT_POLICY` を外す
 
@@ -189,7 +187,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 hook は工程の起動ごとに 1 行（方針・値・工程・文脈の量・窓・帯・判定・理由・欠けた値・作業の識別子）を
 状態ディレクトリ（`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の
 `decisions/<owner>__<repo>.decisions.jsonl` へ追記する。作業の識別子は課題番号の昇順の並び（`#829 #830`）である。
-conductor は `ndf-next` を出すたびに `ndf relay context record --verdict 再起動 --reason <理由> --work <作業の識別子>` で判定「再起動」を書き、`ndf relay context calibrate` で費用の見込みを較正し直す。
+conductor は `ndf-next` を出すたびに `ndf relay context record --verdict 再起動 --reason <理由> --work <作業の識別子>` で判定「再起動」を書く。`ndf relay context calibrate` は打たない（今の hook は費用の見込みを判定に使わない）。
 
 **マーカー「引継ぎ開始」と「復元完了」は、Claude Code では hook が打つ。** conductor が打つのは、hook が打たない場面だけである。
 
@@ -242,8 +240,9 @@ NDF が起動した分・引継ぎの期間・復元の期間で、同じ呼び�
   次のセッションを自動で起動する。ラッパーが無ければ、人がブロックの中身を新しい会話へ貼り付ける
 - **Claude Code では、ブロックの直前のアナウンスを `ndf relay notice` の結果の `summary` で書く**。`summary` を
   言い換えずにそのままコピーする。文面と秒数（アイドルの秒数）は `ndf relay notice` だけが持つ。呼び方は
-  `development-workflow` の `SKILL.md` の、カットポイントのアナウンスの段落にある。hook に止められたときは、
-  拒否文が同じ 1 文を含むので、実行し直さずにコピーしてよい。`ndf relay notice` を打てないか実行が失敗
+  `development-workflow` の `SKILL.md` の、カットポイントのアナウンスの段落にある。hook に止められたときは
+  `ndf relay notice` も止まるので打たない。拒否文がラッパーの下と告げていればアナウンスを書かずにブロックだけを出し、
+  外と告げていればラッパーの外の書き方で書く。`ndf relay notice` を打てないか実行が失敗
   したときは、ラッパーの外として扱い、人がブロックの中身を新しい会話へ貼り付けると書く。Codex / Kiro /
   agy では、今までどおり中身を新しい会話へ貼り付けると書く。**ラッパーの下（`metrics.inside` が真）では、
   手で入力させる文（「次の 1 行を使って」「貼り付けて」）を書かない。** 例外は 2 行目そのものが

@@ -54,7 +54,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `src/ndf/domains/hooks/dispatch.py` | 変更 | guard の判定をまとめる | — | モジュール | `run`（変更） |
 | `src/ndf/domains/hooks/counter.py` | 変更 | セッションごとの数え手 | — | `Counter` | `remember`・`take`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | ラッパーの設定を組む | `context_thresholds`・`limits` | モジュール | `wrapper_settings`（変更） |
-| `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`limits` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
+| `src/ndf/domains/relay/cli_context.py` | 変更 | `ndf relay context` のサブコマンド | `context_thresholds`・`tables` | モジュール | `_context_resolve`・`_context_record`・`_context_report`・引数の定義（変更） |
 | `src/ndf/domains/relay/context_records.py` | 変更 | 判定の記録の行と較正 | `context_thresholds` | モジュール | `record_row`（シグネチャを変える） |
 | `src/ndf/domains/relay/context_report.py` | 変更 | 作業ごとの集計 | `context_thresholds` | モジュール | 集計の `no_policy_rows` を消す（変更） |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | ラッパーの判断 | — | モジュール | `HANDOVER_PROMPT`（文を変える） |
