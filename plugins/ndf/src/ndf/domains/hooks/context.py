@@ -48,7 +48,9 @@ class ShellCommand(NamedTuple):
     `argv` は引用を外した語、`background` は `&` で背景へ回したか。`loop_body`・`loop_condition` は `while` / `until`
     の本体・条件の中か。`body_argv` は先頭のラッパーのコマンド（`timeout 590` など）とその引数を外した語で、
     読めないラッパーの引数か、コマンドを起動しない形（`command -v`）なら空。`source` は語ごとの引用とエスケープを残した字面
-    （#3995。運用上限の guard が Bash と同じ値に読み直す）。
+    （#3995。運用上限の guard が Bash と同じ値に読み直す）。`body_source` は `body_argv` と位置をそろえた字面（#3877。
+    `rm` の guard が展開の効く位置を読む。ラッパーが無ければ `source` そのもの。`env -S` で分けた語は、env が文字にした部分を
+    単引用で囲み、env が展開する `${NAME}` を字面のまま置く）。
     """
 
     argv: tuple[str, ...]
@@ -57,6 +59,7 @@ class ShellCommand(NamedTuple):
     loop_condition: bool = False
     body_argv: tuple[str, ...] = ()
     source: tuple[str, ...] = ()
+    body_source: tuple[str, ...] = ()
 
     @property
     def body_name(self) -> str:
@@ -127,7 +130,8 @@ def _walk(text: str) -> ShellScript:
         if node.type == "command":
             body, condition = _loop_position(node)
             argv, joined, source = _words(node)
-            commands.append(ShellCommand(argv, _in_background(node), body, condition, _strip_wrappers(joined), source))
+            stripped, stripped_source = _strip_wrappers(joined, source)
+            commands.append(ShellCommand(argv, _in_background(node), body, condition, stripped, source, stripped_source))
         elif node.type == "file_redirect":
             redirects.append(_redirect(node))
         stack.extend(reversed(node.children))
@@ -191,15 +195,137 @@ def _loop_position(node: Any) -> tuple[bool, bool]:
 
 
 def _inner_scripts(cmd: ShellCommand) -> list[str]:
-    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。"""
+    """`bash`・`sh`・`zsh`・`dash` の `-c` の引数と、`eval` の引数をつないだ文字列。
+
+    外側のシェルが引用とエスケープを解いた後の値を返す（`bash -c "rm \\"\\$W\\""` の中身は `rm "$W"`）。
+    """
     body_argv, head = cmd.body_argv, cmd.body_name
     if head == "eval" and len(body_argv) > 1:
-        return [" ".join(body_argv[1:])]
+        return [" ".join(shell_value(text) for text in cmd.body_source[1:])]
     if head in _SHELLS:
         for i, word in enumerate(body_argv[1:-1], start=1):
             if word.startswith("-") and not word.startswith("--") and "c" in word:
-                return [body_argv[i + 1]]
+                return [shell_value(cmd.body_source[i + 1])]
     return []
+
+
+# ANSI-C 引用（`$'…'`）の中のエスケープ
+_ANSI_C_ESCAPES = {
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+}
+# 二重引用の中で `\\` が文字にする字（改行は行の継続として消える）。guards も同じ集まりを使う（`context_limit`）
+DQUOTE_ESCAPABLE = frozenset('$`"\\\n')
+
+
+# ANSI-C 引用の数値のエスケープ（字・桁の上限・基数）
+_ANSI_C_NUMBERS = {"x": (2, 16), "u": (4, 16), "U": (8, 16)}
+_OCTAL = "01234567"
+_HEX = "0123456789abcdefABCDEF"
+
+
+def ansi_c_escape(text: str, i: int) -> tuple[str, int]:
+    """`text[i]` の `\\` から読む ANSI-C 引用のエスケープの値と、読んだ字数（Bash の `$'…'` の規則）。
+
+    値が NUL（`\\0`・`\\x0` など）なら、Bash はそこで引用の値を打ち切る（呼び出し側が残りを捨てる）。Unicode の字にならない
+    値（サロゲート・`0x10FFFF` を超える値）は、例外にせず置換文字（U+FFFD）にする。
+    """
+    nx = text[i + 1]
+    if nx in _ANSI_C_NUMBERS:
+        width, base = _ANSI_C_NUMBERS[nx]
+        digits = _digits(text, i + 2, width, _HEX)
+        return (_code_point(int(digits, base)), 2 + len(digits)) if digits else ("\\" + nx, 2)
+    if nx in _OCTAL:
+        digits = _digits(text, i + 1, 3, _OCTAL)
+        return chr(int(digits, 8) & 0xFF), 1 + len(digits)
+    if nx == "c" and i + 2 < len(text):
+        return chr(ord(text[i + 2]) & 0x1F), 3
+    if nx in _ANSI_C_ESCAPES:
+        return _ANSI_C_ESCAPES[nx], 2
+    return "\\" + nx, 2
+
+
+def _code_point(value: int) -> str:
+    if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+        return "\ufffd"
+    return chr(value)
+
+
+def _digits(text: str, start: int, width: int, allowed: str) -> str:
+    end = start
+    while end < len(text) and end - start < width and text[end] in allowed:
+        end += 1
+    return text[start:end]
+
+
+# ANSI-C 引用の中で NUL を読んだ後（閉じる `'` まで値に足さない）
+_CUT = "$'\0"
+
+
+def shell_value(text: str) -> str:
+    """語の字面から、外側のシェルが引用とエスケープを解いた値。展開（`$NAME`・`$(…)`）は値が分からないので字面のまま残す。"""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        if quote == "'":
+            piece, quote, step = _single_step(text[i], quote)
+        elif quote in ("$'", _CUT):
+            piece, quote, step = _ansi_c_step(text, i, quote)
+        else:
+            piece, quote, step = _plain_step(text, i, quote)
+        out.append(piece)
+        i += step
+    return "".join(out)
+
+
+def _single_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """単引用の中の 1 字の値と、次の引用の状態と読んだ字数（`'` で引用が終わり、ほかの字はそのまま値になる）。"""
+    if ch == "'":
+        return "", "", 1
+    return ch, quote, 1
+
+
+def _ansi_c_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """ANSI-C 引用の中の 1 字の値と、次の引用の状態と読んだ字数（NUL の後は閉じる `'` まで値に足さない）。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx:
+        char, step = ansi_c_escape(text, i)
+        quote = _CUT if char == "\0" else quote
+        return ("" if quote == _CUT else char), quote, step
+    if ch == "'":
+        return "", "", 1
+    return ("" if quote == _CUT else ch), quote, 1
+
+
+def _plain_step(text: str, i: int, quote: str) -> tuple[str, str, int]:
+    """引用の外と二重引用の中の 1 字の値と、次の引用の状態と読んだ字数。"""
+    ch, nx = text[i], text[i + 1 : i + 2]
+    if ch == "\\" and nx and (quote == "" or nx in DQUOTE_ESCAPABLE):
+        return ("" if nx == "\n" else nx), quote, 2
+    if ch == "$" and nx == "'" and quote == "":
+        return "", "$'", 2
+    return _quote_step(ch, quote)
+
+
+def _quote_step(ch: str, quote: str) -> tuple[str, str, int]:
+    """引用を開け閉てする字（`"` と引用の外の `'`）なら値を残さず状態を変え、ほかの字はそのまま値にする。"""
+    if ch == '"':
+        return "", ("" if quote == '"' else '"'), 1
+    if ch == "'" and quote == "":
+        return "", "'", 1
+    return ch, quote, 1
 
 
 class _Opts(NamedTuple):
@@ -287,12 +413,34 @@ _SPLIT_OK = "ok"
 _SPLIT_CUT = "cut"
 
 
-def _strip_wrappers(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """先頭のラッパーのコマンドとその引数を外した語。読めない引数・コマンドを起動しない形なら空。"""
-    words: Optional[list[str]] = list(argv)
+class _Word(str):
+    """ラッパーを外す途中の語。値（`str`）と、位置をそろえた字面（`source`）を持つ。
+
+    `env -S` で分けた語の字面は、GNU env が文字にした部分を単引用で囲み、`${NAME}` を字面のまま残す。
+    """
+
+    source: str
+
+    def __new__(cls, value: str, source: str) -> "_Word":
+        word = super().__new__(cls, value)
+        word.source = source
+        return word
+
+
+def _strip_wrappers(argv: tuple[str, ...], source: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """先頭のラッパーのコマンドとその引数を外した語と、それに位置をそろえた字面。読めない引数・コマンドを起動しない形なら空。
+
+    先頭がラッパーでなければ、語と字面をそのまま返す。ラッパーの後ろの語は、外側のシェルが引用とエスケープを解いた値
+    （`shell_value`）で読む（`env -S "rm \\${D}"` の env が受け取るのは `rm ${D}`）。
+    """
+    if not argv or os.path.basename(argv[0]) not in _WRAPPER_ARGS:
+        return argv, source
+    words: Optional[list[str]] = [_Word(shell_value(text), text) for text in source]
     while words and os.path.basename(words[0]) in _WRAPPER_ARGS:
         words = _after_options(os.path.basename(words[0]), words[1:])
-    return tuple(words) if words else ()
+    if not words:
+        return (), ()
+    return tuple(str(word) for word in words), tuple(getattr(word, "source", word) for word in words)
 
 
 def _after_options(name: str, words: list[str]) -> Optional[list[str]]:
@@ -370,6 +518,8 @@ class _EnvSplit:
         self.quote = ""
         self.words: list[str] = []
         self.word: Optional[list[str]] = None
+        # 語の部分ごとの（値, 展開の字面）。文字のままの部分は展開の字面が None
+        self.parts: list[tuple[str, Optional[str]]] = []
 
     def run(self) -> Optional[tuple[str, ...]]:
         state: Optional[str] = _SPLIT_OK
@@ -380,14 +530,16 @@ class _EnvSplit:
         self._end()
         return tuple(self.words)
 
-    def _add(self, text: str) -> None:
+    def _add(self, text: str, expansion: Optional[str] = None) -> None:
+        """語へ `text` を足す。`expansion` は GNU env が展開する部分（`${NAME}`）の字面で、文字のままの部分は None。"""
         if self.word is None:
-            self.word = []
+            self.word, self.parts = [], []
         self.word.append(text)
+        self.parts.append((text, expansion))
 
     def _end(self) -> None:
         if self.word is not None:
-            self.words.append("".join(self.word))
+            self.words.append(_Word("".join(self.word), _quoted_source(self.parts)))
             self.word = None
 
     def _single(self) -> str:
@@ -445,9 +597,25 @@ class _EnvSplit:
         end = self.text.find("}", self.i)
         if not self.text.startswith("${", self.i) or end < 0:
             return None
-        self._add(self.text[self.i : end + 1])
+        expansion = self.text[self.i : end + 1]
+        self._add(expansion, expansion)
         self.i = end + 1
         return "ok"
+
+
+def _quoted_source(parts: list[tuple[str, Optional[str]]]) -> str:
+    """`env -S` で分けた 1 語の字面。続いた文字のままの部分を 1 つの単引用で囲み、展開の部分を字面のまま置く。"""
+    out: list[str] = []
+    literal: list[str] = []
+    for text, expansion in parts + [("", "")]:
+        if expansion is None:
+            literal.append(text)
+            continue
+        if literal:
+            out.append("'" + "".join(literal).replace("'", "'\\''") + "'")
+            literal = []
+        out.append(expansion)
+    return "".join(out)
 
 
 def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
@@ -458,18 +626,28 @@ def _words(node: Any) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]
     argv: list[str] = []
     joined: list[str] = []
     source: list[str] = []
+    previous_end: Optional[int] = None
     for child in node.children:
         target = child.children[0] if child.type == "command_name" and child.children else child
         if target.type not in _WORD_NODES:
+            previous_end = None
             continue
         text = target.text.decode("utf-8", "replace")
         word = _unquote(text, target.type)
-        argv.append(word)
-        source.append(text)
         if target.type == "concatenation":
-            joined.append("".join(_unquote(part.text.decode("utf-8", "replace"), part.type) for part in target.children))
+            part = "".join(_unquote(p.text.decode("utf-8", "replace"), p.type) for p in target.children)
         else:
-            joined.append(word)
+            part = word
+        if previous_end == child.start_byte:
+            # 隙間の無い 2 つのセクションは 1 つの語（tree-sitter-bash は `$W/$n.md.done` を `$W/$` と `n.md.done` に割る）
+            argv[-1] += word
+            joined[-1] += part
+            source[-1] += text
+        else:
+            argv.append(word)
+            joined.append(part)
+            source.append(text)
+        previous_end = child.end_byte
     return tuple(argv), tuple(joined), tuple(source)
 
 

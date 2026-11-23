@@ -237,7 +237,7 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| hook と確認の順序 | NDF の `PreToolUse` の guard が、Claude Code の「Dangerous rm operation on possibly-empty variable path」の確認より先に働くかは、実機で打つまで分からない。公式の記述は外部の調査の STD の表にある。実装の最初に、guard を入れた Claude Code で、消えても困らない一時ディレクトリの中のパスに空の変数を混ぜた `rm -f` を 1 回打ち、確認のダイアログが出る前に guard の拒否が返るかを見る。結果はこの行へ書き戻す（決定 4） |
+| hook と確認の順序 | **確かめた（2026-11-23・Claude Code v2.1.330）。`PreToolUse` の hook が確認のダイアログより先に働く。** 一時の設定（`--settings`）で Bash を `deny` するだけの `PreToolUse` の hook を入れ、`rm -f $W/$n.md.done $W/$n.result.json`（要求仕様の受け入れ条件の原文と同じ形）を対話の Claude Code に 1 回打たせた。hook を入れない同じ起動（`--permission-mode bypassPermissions`）では「Dangerous rm operation on possibly-empty variable path: $W/$n.md.done in `rm -f $W/$n.md.done $W/$n.result.json` (rewrite it as "${W:?}"/"${n:?}".md.done or use a literal path)」の確認が出て「Do you want to proceed?」で止まったが、hook を入れた同じ起動では確認が出ず、`Not run · permission denied` と `Reason: PreToolUse:Bash hook error: <hook の理由>` がツールの結果として返り、対象のファイルは消えなかった。よって決定 4 の guard（`rm-variable`）を足し、受け入れ条件 5 を満たす（決定 4） |
 | `PermissionRequest` のイベント | イベントの登録とコントラクト（`plugins/ndf/contracts/hooks/runtimes.json:21-27`）はあるが、使っている guard が 1 件も無く、呼ばれる時点の実績が無い |
 
 ## 外部の調査
