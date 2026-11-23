@@ -29,7 +29,7 @@ $skills
 
 $report
 
-長い出力と報告のコピーは、1 回の `ndf worker append --report $report_arg --done` で書く（本文はヒアドキュメントで渡す）。
+長い出力と報告コピーは、1 回の `ndf worker append --report $report_arg --done` で書く（本文はヒアドキュメントで渡す）。
 同じ呼び出しが完了マーカー（$done）も作る。`Write`・`Edit` の Tool とリダイレクトでこの 2 つを書かない。
 
 ## 作業の結果ファイル
