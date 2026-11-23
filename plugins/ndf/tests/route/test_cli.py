@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,38 @@ def test_render_implement_with_a_given_worker_holds_no_values(tmp_path):
     assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
     assert worker_kinds.PLAN_KEY not in json.loads(out.read_text())
     assert not (tmp_path / "impl.state").exists()
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_render_publishes_a_new_plan_readable_only_by_the_owner(tmp_path):
+    """PR 4319 の指摘 r3-1・r3-2: プランは worker の入力を含むので、所有者だけが読み書きできる 0600 で公開する。"""
+    out = tmp_path / "impl.json"
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _mode(out) == 0o600
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".impl.json.")] == []
+
+
+def test_render_replaces_an_existing_0644_plan_with_a_0600_one(tmp_path):
+    out = tmp_path / "impl.json"
+    out.write_text("{}\n", encoding="utf-8")
+    out.chmod(0o644)
+    before = out.stat().st_ino
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert _mode(out) == 0o600 and out.stat().st_ino != before
+    assert json.loads(out.read_text())["steps"]
+
+
+def test_render_does_not_write_through_an_existing_symlink(tmp_path):
+    target = tmp_path / "target.json"
+    target.write_text("keep\n", encoding="utf-8")
+    out = tmp_path / "impl.json"
+    out.symlink_to(target)
+    assert route.main(["render", *_impl_args(out, tmp_path)]) == 0
+    assert target.read_text(encoding="utf-8") == "keep\n"
+    assert not out.is_symlink() and _mode(out) == 0o600
 
 
 def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():

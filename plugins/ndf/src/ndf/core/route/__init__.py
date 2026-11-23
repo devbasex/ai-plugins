@@ -63,7 +63,7 @@ from ndf.contracts import causes, exit_codes, limits, result, worker_kinds
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
 from ndf.core import branch_strategy
-from ndf.core.route import local_tests, plan_access
+from ndf.core.route import local_tests
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
 from ndf.testing import declared, scoped
@@ -429,27 +429,17 @@ def _publish(out: Path, plan: Mapping[str, Any]) -> None:
     """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
 
     一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
-    書き換えない。書き終えるまでは作成時の 0600 のままにし、作成者のほかに書きかけを読ませも書き換えさせもしない
-    （PR 4319 の指摘 r4-3）。新規のプランは 0600 のまま公開する。既存の通常のファイルを置き換えるときだけ、書き終えた
-    後にその実効のアクセス権（所有者・グループ・ACL・モード）を写し、名前がまだ同じファイルを指すことを確かめてから
-    置き換える（`plan_access`）。確かめられない・写せないときは公開しない（PR 4319 の指摘 r3-1〜r5-5）。
+    書き換えない。プランは worker の入力（`work_values`）を含むので、置き換える前のアクセス権を写さず、常に
+    所有者だけが読み書きできる 0600 の新しいファイルとして公開する（PR 4319 の指摘 r3-1・r3-2）。
     """
     out.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(plan, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     fd, name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
     tmp = Path(name)
     try:
-        with open(fd, "wb", closefd=False) as fh:
-            fh.write(data)
-        with plan_access.existing(out) as found:
-            if found is not None:
-                plan_access.apply(fd, found)
-                plan_access.check_unchanged(out, found)
-            os.replace(tmp, out)
-    except plan_access.AccessError as exc:
-        raise RouteError(f"置き換える前のプランのアクセス権を引き継げないので公開しない: {exc}") from exc
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp, out)
     finally:
-        os.close(fd)
         tmp.unlink(missing_ok=True)
 
 
