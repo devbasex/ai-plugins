@@ -13,7 +13,9 @@ plugins/ndf/
 │   ├── data/
 │   │   └── internal-names.json              * 名前の対応表
 │   ├── workflow/
-│   │   └── context.schema.json               pace を $defs の plain_pace と mvv_pace の 2 つに分ける
+│   │   ├── context.schema.json               pace を $defs の plain_pace と mvv_pace の 2 つに分ける・version を形の版に・product_version を足す
+│   │   ├── stage-io.schema.json              release-result の outputs.version を product_version へ
+│   │   └── stages/                           deploy.json（出力）・release-verification.json・layout-review.json（入力）の version を product_version へ
 │   └── schemas/
 │       ├── limits.schema.json                read_by を必須にする
 │       ├── result.schema.json                items の要素へ任意の欄を 4 つ
@@ -60,8 +62,11 @@ plugins/ndf/
 │   ├── domains/loop/record_decide.py         at を時刻の文字列で書き、読むときに秒へ直す・version-shipped の version を product_version へ
 │   ├── contracts/result.py                   emit が version を確かめる（欄は任意）
 │   ├── progress/plan/__init__.py             read_doc が今の版より大きい版で止まる
-│   ├── progress/command.py                   条件 release_record が product_version を見る・文脈を核の移行へ通す
-│   └── progress/invoke.py                    文脈の値の確かめを核の移行の後にする
+│   ├── progress/command.py                   条件 release_record が product_version を見る・machine_context を compose_context へ・_prepare_new が version: 1 を書く
+│   ├── progress/run.py                       View.context を compose_context へ
+│   ├── progress/stages.py                    compose_context を新設
+│   ├── progress/gate/asking.py               リリースのゲートが product_version を読む
+│   └── progress/invoke.py                    read_report・_call_skill が結果の版を見る
 ├── skills/refactoring/SKILL.md               値の置き場の基準
 └── tests/                                    下の「単体テストの観点」の表のファイル
 ```
@@ -430,7 +435,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `read_record` | 形に合わない行 | 項目の欠け・型の違い | `read_record` | 呼び出し元へ返す（`InternalError`） | 呼び出し元のサブコマンドが `stopped`・`invalid`・終了コード 2 | 行を直してから打ち直す |
+| `read_record` | 形に合わない行 | 項目の欠け・型の違い | `read_record` | 呼び出し元へ返す（`InternalError`）。`jsonl.read_rows` から呼ばれたときは `read_rows` が受けて、その行を `Broken` に入れて読み進める（上の「`read_rows` の不合格の行の扱い」）。`LoopStore.read` から呼ばれたときは今の `StoreError` と同じく止める（開発ループの事象は 1 件欠けると状態を再生できない） | `read_rows` の経路は結果の `broken_rows` か警告に行番号が出る。`LoopStore.read` の経路は `stopped`・`invalid`・終了コード 2 | 行を直してから打ち直す |
 | `read_record` | 知らない種類 | `kind` の綴りの誤り | 同上 | 止める | `stopped`・`config_broken`・終了コード 2 | 綴りを直す |
 | `write_record` | 形に合わない行 | スキーマに無い欄・型の違い・時刻の書式 | `write_record` | 書かずに呼び出し元へ返す | `stopped`・`invalid`・終了コード 2 | 呼び出し元を直す |
 | `migrate` | 移せない版 | 今の版より新しい版 | `migrate` | 止める（新しい版を古い読み手が読まない。#1706 と同じ止まり方だが、理由を「新しい版の記録を古い NDF が読んだ」と出す） | `stopped`・`precondition`・終了コード 3 | プラグインを更新する |
@@ -460,6 +465,10 @@ plugins/ndf/
 | `read_record` | 今の版の行をそのまま返す | 上の移し方の表のサンプルの 7 行が、それぞれ右の列の版 1 の行になる（数の `at`・文字列の `version`・`status` を持たない事象・`until` を秒のまま） | 今の版 + 1 の行（`precondition`）・知らない種類（`config_broken`） |
 | `write_record` | `version` と `at` を埋めて返す | `at` を呼び出し元が渡した行（上書きしない）・`+00:00` の時刻（通る）・`status` を持たない種類の行（通る） | スキーマに無い欄を持つ行（書かずに `InternalError`）・固有の欄の型の違い（同）・時差の無い時刻・`+09:00` の時刻・UTC の接尾辞を持つ不正な日付（`2026-02-30T00:00:00Z`。書式の検査器で落ちる） |
 | `migrate` | 合成した版 1 → 2 の移行で項目が移る（今の版は 1 なので、移行の経路は合成したスキーマで確かめる） | 移す項目が無い版（そのまま） | 新しい版（止まる） |
+| `jsonl.read_rows` | 合う行だけを返し、`Broken` が空 | 書きかけの最後の行（`Broken` 1 件・行番号つき）・項目の欠けた行（`Broken` 1 件・止まらない） | 今の版より新しい版の行（止まる） |
+| `compose_context` | 作成の時点の値に出力を重ね、`version` が 1 | 文字列の `version` を持つ旧い作成の時点の値と旧い `deploy` の出力（どちらも `product_version` へ移り、`release_record` が真）・出力に `version` が無い通常の工程（形の版が 1 のまま） | — |
+| `result.emit` | 合う結果をそのまま出す | — | 形の違う結果で、代わりの `stopped`（`invalid`）が 1 行出て終了コード 2 |
+| `invoke.read_report` | `version` の無い結果を版 1 として受ける | `version: 1` | `version: 2` の結果（`stopped`・`precondition`。`bad_report` にしない）・`version: "1"`（`bad_report`） |
 | `stamp`・`epoch` | `epoch(stamp(t)) == t`（マイクロ秒まで） | 同じ秒の 2 つの時刻の前後が保たれる | 時差つきの文字列を `epoch` に渡す（`InternalError`） |
 | 開発ループの再生 | 版 0 の事象だけの `record.jsonl` と、版 0 と版 1 が混ざった `record.jsonl` から、今と同じ状態（回答の時刻・停止の時刻・出した版）が再生できる | 出荷の事象の `product_version` が `released` に入る | — |
 | 条件 `release_record` | `product_version` を持つ文脈で真 | 形の版 `version: 1` だけを持つ未出荷の文脈で偽 | — |
