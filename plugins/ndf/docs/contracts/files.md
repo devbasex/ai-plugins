@@ -21,7 +21,6 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `backlog-rank` | `backlog-state` main:.ndf/backlog/state（NDF_UPKEEP_STATE_DIR で差し替え） | `<repo>/rank.json` | record | — | 棚卸し（M6） | replaced | 内部（予告なく変えてよい） |
 | `backlog-rejected` | `backlog-state` main:.ndf/backlog/state（NDF_UPKEEP_STATE_DIR で差し替え） | `<repo>/rejected.json` | record | — | 棚卸し（M6） | kept | 内部（予告なく変えてよい） |
 | `code-metrics` | `ndf` repo:.ndf | `code-metrics.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
-| `context` | `ndf` repo:.ndf | `context.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `design` | `issues` repo:issues | `issue-<n>-design.md` | document | 追跡 | 設計の工程 | archived | 内部（予告なく変えてよい） |
 | `design-detail` | `issues` repo:issues | `issue-<n>-design-detail.md` | document | 追跡 | 詳細設計の工程 | archived | 内部（予告なく変えてよい） |
 | `estimate` | `ndf` repo:.ndf | `estimate.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |

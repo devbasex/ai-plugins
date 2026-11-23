@@ -16,7 +16,7 @@
 | `decision-request` | 内部（予告なく変えてよい） | 引数を受けない | — | `ask` | — | none | 人へ判断を求める前に、経緯・根拠・選択肢を示す手順 |
 | `deploy` | 内部（予告なく変えてよい） | `[^ ]+` | — | `worktree` | — | none | 環境ブランチへのデプロイの Pull Request を作る。引数は環境ブランチの名前 |
 | `design` | 内部（予告なく変えてよい） | 引数を受けない | — | `backlog` | — | none | 領域ごとの設計の観点と手順 |
-| `development-workflow` | 公開 | `#[1-9][0-9]*`<br>`--loop( [0-9A-Za-z][0-9A-Za-z_-]*)?( --milestones ([^ "]+\|"[^"]+")\| --budget-(laps\|usd\|hours) ([0-9]+(\.[0-9]+)?\|default))*( -- 終わり: .+)?` | — | `ask`・`backlog`・`context`・`glossary`・`handoff`・`mvv`・`mvv-body`・`pace`・`parallel`・`project`・`projects`・`release`・`supervise`・`worktree`・`worktree-local` | `NDF_FACTORY_RUN`・`NDF_VERSION`・`NDF_STATE_HOME`・`NDF_LOOP_EXCLUDE`・`NDF_ISSUE_REQUEST_FILE`・`NDF_MVV_STATE_DIR`・`NDF_PROGRESS_DB`・`NDF_ORGANIZER_DIR`・`NDF_ORGANIZER_LANE`・`GH_TOKEN` | block | 課題を指して、要求から本番のリリースまでの開発の工程を回す |
+| `development-workflow` | 公開 | `#[1-9][0-9]*`<br>`--loop( [0-9A-Za-z][0-9A-Za-z_-]*)?( --milestones ([^ "]+\|"[^"]+")\| --budget-(laps\|usd\|hours) ([0-9]+(\.[0-9]+)?\|default))*( -- 終わり: .+)?` | — | `ask`・`backlog`・`glossary`・`handoff`・`mvv`・`mvv-body`・`pace`・`parallel`・`project`・`projects`・`release`・`supervise`・`worktree`・`worktree-local` | `NDF_FACTORY_RUN`・`NDF_VERSION`・`NDF_STATE_HOME`・`NDF_LOOP_EXCLUDE`・`NDF_ISSUE_REQUEST_FILE`・`NDF_MVV_STATE_DIR`・`NDF_PROGRESS_DB`・`NDF_ORGANIZER_DIR`・`NDF_ORGANIZER_LANE`・`GH_TOKEN` | block | 課題を指して、要求から本番のリリースまでの開発の工程を回す |
 | `docker-container-access` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | コンテナへの接続と localhost の経路の失敗を調べる |
 | `document-drafting` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 文書の下書きを書く手順 |
 | `document-rebuild` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 既存の文書を作り直す手順 |
