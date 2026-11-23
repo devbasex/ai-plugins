@@ -229,6 +229,44 @@ def test_stop_wait_passes_when_the_model_does_not_answer(tmp_path, monkeypatch, 
     assert got.kind == "pass" and got.notes["judge"] == f"fallback:{failure}" and not counter.model_waited()
 
 
+HEADING_ASK = "## どちらの案で進めますか？\n- 案 A\n- 案 B"
+
+
+def test_stop_wait_follows_the_model_for_a_heading_that_requests_the_user(tmp_path, monkeypatch):
+    judge = Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, HEADING_ASK)
+    assert got.kind == "pass" and got.notes["reply"] == "heading_wait" and got.notes["judge"] == "model"
+    judge.kind = "wait"
+    assert _check(tmp_path, HEADING_ASK).kind == "pushback"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "judged"),
+    [({"runtime": "codex"}, "skip:runtime"), ({"deadline": NOW + 1.5 + 0.4}, "skip:time")],
+    ids=["codex", "time"],
+)
+def test_stop_wait_pushes_back_a_heading_wait_when_the_model_cannot_be_used(tmp_path, monkeypatch, kwargs, judged):
+    judge = Judge(monkeypatch, kind="report")
+    got = _check(tmp_path, HEADING_ASK, **kwargs)
+    assert got.kind == "pushback" and got.notes["reply"] == "heading_wait" and got.notes["judge"] == judged
+    assert judge.asked == []
+
+
+def test_stop_wait_pushes_back_a_heading_wait_when_the_model_does_not_answer(tmp_path, monkeypatch):
+    Judge(monkeypatch, kind=None, failure="timeout")
+    got = _check(tmp_path, HEADING_ASK)
+    assert got.kind == "pushback" and got.notes["judge"] == "fallback:timeout"
+
+
+def test_stop_wait_keeps_the_delegated_heading_before_a_long_report(tmp_path, monkeypatch):
+    # 見出しの後に上限を超える検証結果が続いても、判定を委ねた見出しはモデルへ渡る
+    results = "\n".join(f"検証 {i} の結果はすべて通過しました。" for i in range(200))
+    judge = Judge(monkeypatch, kind="report")
+    _check(tmp_path, f"## このままマージしてよいですか？\n{results}")
+    ((sent, _, _),) = judge.asked
+    assert sent.splitlines()[0] == "## このままマージしてよいですか？"
+
+
 def test_stop_wait_rests_after_a_launch_failure(tmp_path, monkeypatch):
     judge = Judge(monkeypatch, kind=None, failure="launch")
     _check(tmp_path, REPORT)

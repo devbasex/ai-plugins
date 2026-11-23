@@ -203,6 +203,18 @@ def test_judge_text_returns_the_tail_within_the_limit(size: int, kept: int) -> N
     assert len(out) == kept and text.endswith(out)
 
 
+def test_judge_text_keeps_the_delegated_heading_within_the_limit() -> None:
+    text = "## このままマージしてよいですか？\n" + "あ" * 2000
+    out = reply_judge.judge_text(text, [False, False], 1600, ["このままマージしてよいですか？"])
+    assert len(out) == 1600 and out.startswith("## このままマージしてよいですか？\n") and text.endswith(out.splitlines()[1])
+
+
+def test_judge_text_does_not_repeat_a_heading_already_in_the_tail() -> None:
+    text = "あ" * 2000 + "\n## このままマージしてよいですか？\n以上。"
+    out = reply_judge.judge_text(text, [False, False, False], 1600, ["このままマージしてよいですか？"])
+    assert out == text[-1600:]
+
+
 # ask
 
 

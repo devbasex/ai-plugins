@@ -251,6 +251,8 @@ def test_a_question_in_a_heading_is_a_wait():
         ("このまま進めてよいですか？\n\n## 検証結果\nテストはすべて通りました。\n差分は確認済みです。", "prose_wait"),
         # 章題は完了の報告の文に数えない
         ("## 実装結果\n対応が完了しました。\n引き続きよろしくお願いします。", "closing_report"),
+        # 直下の本文が見出しの事柄を言い切って回答した質問の見出しは章題（定型の結びで通す）
+        ("## 再起動は必要ですか？\n再起動は不要だと確認しました。\n以上です。", "closing_report"),
     ],
 )
 def test_a_heading_without_a_question_is_a_title(text, kind):
@@ -268,20 +270,40 @@ def test_a_heading_without_a_question_is_a_title(text, kind):
         # 手段の質問の下の手順
         "## どうやって設定しますか？\n- 設定ファイルを開く\n- 値を書く",
         "## どうやって移行を進めますか？\n- 設定を書き出す\n- 新しい環境へ読み込む",
-        # 利用者への質問の下に選択肢・判断材料・結び（定型の結びでも通さない）
-        "## どちらの案で進めますか？\n- 案 A\n- 案 B",
-        "## どう進めますか？\n- 案 A: 先に直す\n- 案 B: 後で直す",
-        "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
-        "## このままマージしますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        # 見出しと別の事柄の報告と結び（回答と読まず、定型の結びでも通さない）
         "## 既存の設定を使いますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
-        "## 確認してください\n修正を反映しました。\n引き続きよろしくお願いします。",
-        "## このままマージしてよいですか？\nCI はすべて通過し、マージできます。",
+        # 判断できない見出しを残したまま、別の場所の待ちだけとして通さない
+        "## 既存の設定を使いますか？\n別のレーンは承認を待っています。",
     ],
 )
 def test_a_question_heading_followed_by_prose_goes_to_the_model(text):
     # 後に本文が続く質問の見出しは、利用者への質問か章題かを語の形で決めず、ルールで待ちにも定型の結びにもしない
     # （`report` は stop-wait が軽いモデルへ回す）
     assert reply_wait.reply_kind(text) == "report"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 見出しで選択・承認・確認を明示的に求め、下に選択肢・判断材料・結び（定型の結びでも通さない）
+        "## どちらの案で進めますか？\n- 案 A\n- 案 B",
+        "## どう進めますか？\n- 案 A: 先に直す\n- 案 B: 後で直す",
+        "## このままマージしてよいですか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        "## このままマージしますか？\nテストはすべて通りました。\n引き続きよろしくお願いします。",
+        "## 確認してください\n修正を反映しました。\n引き続きよろしくお願いします。",
+        "## このままマージしてよいですか？\nCI はすべて通過し、マージできます。",
+        # 本人への承認の質問に別の場所の待ちを併記しても、別の場所の待ちだけとして通さない
+        "## このままマージしてよいですか？\n別のレーンは承認を待っています。",
+    ],
+)
+def test_a_heading_that_requests_the_user_is_a_heading_wait(text):
+    # stop-wait はモデルの判定に従い、モデルを使えない Stop では変更を要求する
+    assert reply_wait.reply_kind(text) == "heading_wait"
+
+
+def test_delegated_headings_lists_the_headings_left_to_the_model():
+    lines = reply_wait.prose_lines("## 実装結果\n## このままマージしてよいですか？\nテストはすべて通りました。")
+    assert reply_wait.delegated_headings(lines) == ["このままマージしてよいですか？"]
 
 
 def test_a_wait_in_the_parentheses_of_a_set_closing_is_not_a_closing_report():

@@ -6,7 +6,9 @@
 表の順に見て、最初に当たった 1 つを notes の `judge` に書く。本文は notes に入れない。
 
 別の場所（ほかのセッション・レーン）の待ちを報告しただけの応答と、定型の結び（「引き続きよろしくお願いします。」）の前が
-完了の報告だけの応答は、モデルを呼ばずに通す。変更要求の上限の後はエントリポイントが
+完了の報告だけの応答は、モデルを呼ばずに通す。見出しで承認・選択を明示的に求め、後に本文が続く応答（`heading_wait`）は
+モデルの判定に従い、モデルを使えない Stop（Codex・休み・時間切れ・回答なしなど）ではルールの待ちとして変更を要求する。
+モデルへ渡す本文が字数の上限で切られても、判定を委ねた見出しは先頭に残す。変更要求の上限の後はエントリポイントが
 通して待ちの知らせを書く（#3345 の決定 92）。上限の後に変更要求を返すのは、待ちの知らせへ渡すためだけである。
 """
 
@@ -16,7 +18,7 @@ import os
 import time
 from typing import Optional
 
-from ndf.domains.hooks import budget, reply_judge
+from ndf.domains.hooks import budget, reply_judge, reply_wait
 from ndf.domains.hooks.verdict import Verdict, passing
 
 REASON = (
@@ -94,13 +96,16 @@ def check(ctx, svc) -> Verdict:
         return _result(kind, "skip:closing", False)
     if kind == "prose_wait":
         return _result(kind, "rule", True)
-    text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge._judge("max_chars")))
+    # 見出しで承認・選択を明示的に求める本文（`heading_wait`）は、モデルを使えない Stop ではルールの待ちとして変更を要求する
+    rule_wait = kind == "heading_wait"
+    keep = reply_wait.delegated_headings(ctx.reply_prose_lines)
+    text = reply_judge.judge_text(ctx.last_reply, ctx.reply_code_lines, int(reply_judge._judge("max_chars")), keep)
     skipped = _quick_skip(ctx, svc, text)
     if skipped is not None:
         waited = skipped in _AFTER_LIMIT and not svc.counter.pushback_left() and svc.counter.model_waited()
-        return _result(kind, skipped, waited)
+        return _result(kind, skipped, waited or rule_wait)
     seconds = _seconds(ctx, svc)
     if seconds < MIN_SECONDS:
-        return _result(kind, "skip:time", False)
+        return _result(kind, "skip:time", rule_wait)
     judge, wait, judged = _ask(svc, text, seconds)
-    return _result(kind, judge, wait, judged)
+    return _result(kind, judge, wait or (rule_wait and judge != "model"), judged)

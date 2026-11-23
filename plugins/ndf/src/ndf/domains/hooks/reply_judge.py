@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf.domains.hooks import tables
 from ndf.domains.relay import claude_options, signals
@@ -84,16 +84,24 @@ def _markdown_lines(text: str) -> list[str]:
     return lines[:-1] if normalized.endswith("\n") else lines
 
 
-def judge_text(text: str, code_lines: list[bool], max_chars: int) -> str:
+def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
     """コードブロックの行と空行を除いた本文。`max_chars` を超えれば末尾の `max_chars` 字（決定 7）。
 
+    `keep` はモデルへ判定を委ねた見出しの文（`reply_wait.delegated_headings`）。本文が上限を超えて切ったとき、
+    切った末尾に無い見出しを「## 」を付けて先頭に置き、合わせて `max_chars` 字に収める（見出しは上限の半分まで）。
     `code_lines` の数が行の数と合わなければ、どの行がコードか分からないので空の文を返す（本文を作らない）。
     """
     lines = _markdown_lines(text)
     if len(code_lines) != len(lines):
         return ""
     prose = "\n".join(line for line, code in zip(lines, code_lines) if not code and line.strip())
-    return prose if len(prose) <= max_chars else prose[-max_chars:]
+    if len(prose) <= max_chars:
+        return prose
+    tail = prose[-max_chars:]
+    lead = "\n".join(f"## {heading}" for heading in keep if heading not in tail)[: max_chars // 2]
+    if not lead:
+        return tail
+    return lead + "\n" + prose[-(max_chars - len(lead) - 1) :]
 
 
 def _proc_file(pid: int, name: str) -> Path:
