@@ -167,7 +167,7 @@ plugins/ndf/
 
 満たす決定: 決定 3、受け入れ条件 4
 
-準備の後に報告と完了マーカーを書くのは worker、報告を読むのは supervisor である。どちらも `Write`・`Read` の Tool とシェルのリダイレクトを使うとリンクをたどるので、この 2 つのサブコマンドで上の関数を通す。呼び出しの回数は増えない（worker は `Write` と `: >` の 2 回が `ndf worker append --done` の 1 回に、supervisor は `Read` の 1 回が `ndf worker collect` の 1 回になる）。
+準備の後に報告と完了マーカーを書くのは worker、報告を読むのは supervisor である。どちらも `Write`・`Read` の Tool とシェルのリダイレクトを使うとリンクをたどるので、この 2 つのサブコマンドで上の関数を通す。呼び出しの回数は増えない（worker は `Write` と `: >` の 2 回が `ndf worker append --done` の 1 回に、supervisor は `Read` の 1 回が `ndf worker collect` の 1 回になる）。Tool の呼び出しの回数は変わらないが、`ndf` の起動（Python の起動）は worker 1 件につき `prepare`・`append --done`・`collect` の 3 回増える。これはリンクをたどらずに読み書きするための設計上のコストで、長い出力も報告と同じ 1 回の `append --done` にまとめて、これより増やさない（長い出力を分けて先に書くと 1 回、中間通知の後に報告を回収すると `collect` が 1 回増える）。
 
 ### 関数の仕様
 
