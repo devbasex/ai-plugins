@@ -186,7 +186,7 @@ def _lock(record, busy=False):
     @contextlib.contextmanager
     def admit_lock(_seconds, clock=None):
         if busy or state["held"]:
-            raise machine.LockBusy("偽の錠に持ち主がいる")
+            raise machine.LockBusy("偽の錠にオーナーがいる")
         state["held"] = True
         record("lock-in")
         try:
