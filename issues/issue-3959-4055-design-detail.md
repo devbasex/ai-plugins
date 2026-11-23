@@ -114,7 +114,7 @@ plugins/ndf/
 
 PR を読んだ後の失敗（`_judged` が中で受け、`gate` へ例外を出さない）。どの行も `skip` は偽、`head` は (1) で読んだ値。`verdict` が null の行は `why` の先頭が「MVV 判定を打てない: 」。承認ゲートは省かずに人へ問う。
 
-| 段階 | 失敗 | 検出する例外・条件 | `verdict` | `why` に足す理由 | コメント | 結果 | 再試行 |
+| 手順 | 失敗 | 検出する例外・条件 | `verdict` | `why` に足す理由 | コメント | 結果 | 再試行 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | (2) | ベースの MVV・レッドラインの設定を読めない | `fetch_branch_or_raise` の `GitError`・`current` の `MvvError`（参照を解決できないときを含む）・`boundary_paths` の `JsonFileError`・`OSError` | null | 「ベースの MVV を読めない: <原因>」。作業ツリーの MVV で代えない | 書く | `ok`・人へ問う | 直して 判定のステップから |
 | (4) | 差分を読めない | `compare_files` の `GitHubError`、300 件に届いたときの手元の読み直しの `GitError`（head の取得の終了コードが 0 でない・merge-base・`git diff`）・`DiffError` | null | 「変えたファイルを読めない: <原因>」 | 書く | 同上 | 判定のステップから |
