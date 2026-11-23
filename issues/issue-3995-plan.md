@@ -153,7 +153,7 @@
 | U1 2 つの値を解く関数と guard・ラッパー | Task 1・2・3 | 3995:4 | 約 400 | 14 files changed, 451 insertions(+), 202 deletions(-)（plugins の下。cross-review r1-1 で `HANDOVER_PROMPT` を U4 へ移した後）（うち約 190 行は test_context_policy.py から test_context_report.py へ移したテストで、足した行と消した行の両方に数えられる） |
 | U2 再起動の方針の撤去と `ndf relay context` | Task 4・5 | 3995:1・3995:2・3995:3・3995:9 | 約 750（うち削除が約 450） | （実装の後に書き足す） |
 | U3 サブエージェントと NDF の外を外す | Task 6 | 3995:15 | 約 250 | 4 files changed, 197 insertions(+), 5 deletions(-)（plugins の下） |
-| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | （実装の後に書き足す） |
+| U4 引継ぎに要る呼び出しと拒否の文 | Task 7・8・9 | 3995:7・3995:8 | 約 550 | 8 files changed, 421 insertions(+), 33 deletions(-)（`issues/issue-3995-plan.md` の 4 行を含む） |
 | U5 止め続ける | Task 10 | 3995:6 | 約 150 | （実装の後に書き足す） |
 | U6 判断開始の値の知らせ | Task 11・12 | 3995:5・3995:16 | 約 400 | （実装の後に書き足す） |
 | U7 手順書・README・用語集 | Task 13・14 | 3995:10・3995:11・3995:12・3995:13・3995:14 | 約 300 | （実装の後に書き足す） |
@@ -250,3 +250,6 @@ main は lracct（11.0.16）と lcrfast（11.0.17）で変わった。U1 の実�
 | Task 6: `check` の異常の列の「`agent_id` があれば 300,000 の PostToolUse も None」と、NDF の外の「300,000 の PostToolUse も None」 | guard の `events` は今も PreToolUse だけで、PostToolUse の判定は U6（Task 12）で足す | U3 では PreToolUse の行だけをテストにする。PostToolUse の行は U6 で `events` を広げるときに足す |
 | Task 6 の対象ファイルは `context_limit.py`・`runtimes.json`・`test_guards.py` | `test_context.py` の `test_bash_pre_tool_use_parses_payload_shell_and_transcript_once` が `.ndf` の無い `tmp_path` で `read_tail` 1 回を期待する。`runtimes.json` を変えると `docs/contracts/hooks.md` の生成し直しも要る | U3 でそのテストの `tmp_path` に `.git`・`.ndf` を作り、`hooks.md` を `ndf check --write-spec` で生成し直した |
 | U1 の見込みの差分は約 400 行 | 実際は下の表の値。`test_context_policy.py` から `test_context_report.py` へ移したテスト（約 190 行）が足した行と消した行の両方に数えられる | 単位は分け直さない（振る舞いを足す差分は見込みの内） |
+| Task 7: `Redirect` の `op` は演算子の子の字面、`target` は先の節の字面 | tree-sitter-bash では `2>&-` の演算子の子が `>&-` の 1 つで先（`destination`）の節が無く、`1<>f` は `<` と `ERROR`（`>`）の子に分かれる | U4 で `>&-`・`<&-` は演算子 `>&`・`<&` と先 `-` に分けた（詳細設計書の許すリダイレクトの「先が `-`」と同じ意味）。`<>` は記述子と先を除いた子をつないだ字面で読み、許さない形として止まる。先が実行時に決まるかは、節の種類が `expansion`・`substitution` で終わるか（算術の展開も含む）で読む（`ndf check` の `const-fact` が、詳細設計書の 4 つの種類の集まりを `worktree/write_target.py` の集まりとの重なりとして落とすため） |
+| Task 8: コマンド置換は `ShellScript` の語で見分ける | 語の外に立つ `$(...)`・バッククォート・プロセス置換は `_argv` の語に入らず（`_WORD_NODES` に無い）、中のコマンドは別の単純コマンドとして `commands` に入る。中身が許可対象の `ndf` なら照らしをすり抜ける | U4 で、Bash の文の字面に `$`・バッククォート・`<(`・`>(` があれば止める形にした（変数の展開もここで止まる）。語のチルダ・グロブ・ブレースは語ごとに見る |
+| Task 8: `guards.json` の `context-limit` の `summary` | 「次の 1 手だけを通して止める」のまま | U4 では変えない。詳細設計書の文への書き換えは U5（計画の Task 10）のまま |
