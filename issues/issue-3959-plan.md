@@ -18,7 +18,7 @@
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
 | `plugins/ndf/src/ndf/progress/command.py` | `stage_inputs_of`（新設） |
-| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`（新設）・`mvv_skip` |
+| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`（新設）・`mvv_skip` |
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節） |
 | `plugins/ndf/src/ndf/progress/gate/checks.py` | `MvvFacts.review_holds`・`check_review_holds`・`refusals`・`judgeable`・`may_skip`・`note`・`CHECKS_BY_GATE` |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `--machine`・`_mvv_inputs`・`_env_inputs`・`_mvv_cite` |
@@ -46,7 +46,7 @@
 
 ### Task 2: 工程の入力のコントラクトを 1 つにし、判定のエントリポイントで確かめる
 
-- **対象ファイル:** `plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/cli.py`（`_env_inputs`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`GATE_STEPS`・`GATE_STAGES`）、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`
+- **対象ファイル:** `plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/cli.py`（`_env_inputs`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`GATE_STEPS`・`GATE_STAGES`）、`plugins/ndf/src/ndf/progress/model.py`（`MVV_GATE_STEPS`。`GATE_STEPS` と `asking.material` が読む 1 か所の表）、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`
 - **変更内容:** 詳細設計書の「工程の入力のコントラクト」と、「プランの外のエントリポイント」の `_env_inputs` の手順（`stage_io` で `mode` を使わずに StageDef を作り、`stage_input_errors` のスキーマの誤りを先に `invalid`、キーの不足を `input_missing` にする）。`{"context": {...}}` の入力は `invalid`、形が合い `mode` だけが無い入力は `input_missing` で止め、`gate` を呼ばない
 - **満たす受け入れ条件:** 9
 - **進め方:** 失敗するテスト（`{"context": {...}}` で `invalid` にならない）→ 通す最小実装 → 整理
@@ -61,7 +61,7 @@
 ### Task 4: 判定を打つ条件と省く条件を分け、リリース承認ゲートを省かない
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`（`validation_rows`・`mvv_validate_sprint`・`compare_files`）、`plugins/ndf/src/ndf/progress/gate/checks.py`（`judgeable`・`refusals`・`may_skip`・`note`・`CHECKS_BY_GATE`）、`plugins/ndf/src/ndf/progress/gate/asking.py`（`mvv_lines`・`material`）、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`
-- **変更内容:** 詳細設計書の「判定を打つ条件と省く条件」と「リリース承認ゲートの省略の止め」と「手順書」の「プランの経路の承認資料の生成」。MVV とレッドラインのパスをベースから 1 度だけ読み（`fetch_branch_or_raise` で取得し、#4076 の `current` と `Snapshot.commit` を使う）、差分は `snap.commit` と head の組から読む。プランの承認資料（`asking.material`）に今回の判定・`why`・保留の欄を載せる
+- **変更内容:** 詳細設計書の「判定を打つ条件と省く条件」と「リリース承認ゲートの省略の止め」と「手順書」の「プランの経路の承認資料の生成」。MVV とレッドラインのパスをベースから 1 度だけ読み（`fetch_branch_or_raise` で取得し、#4076 の `current` と `Snapshot.commit` を使う）、差分は `snap.commit` と head の組から読む。プランの承認資料（`asking.material`）に今回の判定・`why`・保留の欄を載せる（判定は文脈でなく、待っている工程の判定のステップの `step_recorded` の `outputs.mvv_gate` から読む）
 - **この単位で作る `_judged` の手順 (5) の範囲（保留なしの経路）:** `validation_rows` で記録を 1 回読み、手順 (7) の再利用にだけ渡す（読めなければ再利用を省いて LLM で判定する）。保留は読まず、出力の `holds` は常に `null`（承認資料は「レビューの保留: 未確認」）。`review_rows`・`review_holds`・`review_prs`・`MvvFacts.review_holds`・`check_review_holds` は参照しない（Task 5 が足す）。詳細設計書の手順のうち保留に関わる部分（(5) の保留の算出と「読めない」保留、`holds` の配列、保留による `skip` 偽）は Task 5 で足す
 - **満たす受け入れ条件:** 1・2・3（判定と PR のコメント）
 - **進め方:** 失敗するテスト（`normal` で LLM のスタブが呼ばれない）→ 通す最小実装 → 整理

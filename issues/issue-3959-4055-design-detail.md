@@ -45,7 +45,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの前の判定 | `checks`・`mvv`・`mvv_decide`・`mvv_material_decide` | モジュール | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`（変更）・`snapshot_facts`・`review_prs`（新設）・定数 `GATE_STEPS`・`GATE_STAGES`（新設）。`base_facts` は消す |
-| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`（新設）・`mvv_skip`（変更） |
+| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`・`MVV_GATE_STEPS`（新設）・`mvv_skip`（変更） |
 | `src/ndf/progress/gate/checks.py` | 変更 | 省かない理由の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更）・`judgeable`（新設）・`may_skip`・`note`（変更）・定数 `CHECKS_BY_GATE`（新設） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の記録の読み書き | `jsonl`・`mvv_decide` | `ReviewWrite`（新設）、モジュール | `validation_rows`・`review_rows`・`cite`・`compare_files`（新設。`_judged` は `pr_files` を呼ばず、`pr_facts` には読み済みの行を渡す）・`record_review`（返り値を変える）・`mvv_validate_sprint`（引数 `rows` と返り値を変える） |
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | — | モジュール | `review_holds`（新設） |
@@ -248,7 +248,7 @@ PR を読む前の失敗（`gate` が受ける）:
 - `definition.stage_input_errors(stage: stages.StageDef, obj: Any) -> StageInputErrors`（新設。`NamedTuple(schema: list[str], missing: list[str])`）: `schema` は `validate_io(stage.input_ref, obj)`（規約が無ければ「工程 <name> に入力の規約が無い」の 1 件）、`missing` は `obj` が object のときだけ `stage.inputs` のうち無いキーの「文脈のキー <k> が無い」（object でなければ空。`schema` が先に外れる）。`validate_stage_input` は `schema + missing` を返す（規則は 1 つで、分けて受けたい呼び手だけがこの関数を使う）。`definition.stage_io(name: str) -> stages.StageDef`（新設）: 上の (1)
 - `stage_inputs_of` の手順: (1) `store_root_of(cwd)` の保存先を開き、`read_current(conn, machine_id)` で定義とイベントを読む（無い ID は `model.Refused`）。(1') 同じトランザクションで `store.read_machine(conn, machine_id)` の `repo` を、起動元の `repo_id(cwd, store_root_of(cwd))` と比べ、違えば `model.Refused`（「ステートマシン <ID> のリポジトリ <repo> が起動元 <repo_id> と違う」）。`NDF_PROGRESS_DB` で共有する DB では `read_current` が ID だけで読み、後続の `gate` は起動元の GitHub 接続で PR へ書くので、文脈を返す前に照合する（`--carry` の `_check_carry` と同じ比べ方）。(2) `snapshot.stages` から、ステップの id が `step_id` の工程を引く。無ければ `model.Refused`（「ステートマシンのモードは承認ゲート <区分> を持たない」）。(3) `invoke.resolve_inputs(stage, machine_context(current))`。入力のキーが文脈に無ければ `StageInputMissing` をそのまま返す（プランと同じく判定しない）。文脈の `design_pr` は足さない: 設計の工程の入力（`design.json`）に無いので、足すとプランの経路と判定する PR が分かれる。どちらの経路も `pr_number` が `worktree` のブランチの開いた PR を選ぶ
 - CLI の例外の扱い: `model.Refused` は `stopped`・`refused`、`StageInputMissing`・`StageInputInvalid` は `stopped`・`input_missing`・`invalid`（`exit-codes.md` の既存の種類）
-- 判定のステップの id（`design-mvv`・`release-mvv`）は工程の定義（`contracts/workflow/stages/design.json`・`deploy.json`）の値で、`mvv_gate.py` に区分 → ステップの id の表 `GATE_STEPS = {"design": "design-mvv", "release": "release-mvv"}` と、区分 → そのステップを持つ工程の文書の名前の表 `GATE_STAGES = {"design": "design", "release": "deploy"}` を置く。定義の id を変えたら表も変える（テストで、`GATE_STAGES` の工程の文書の中に `GATE_STEPS` の id のステップがあることを縛る）
+- 判定のステップの id（`design-mvv`・`release-mvv`）は工程の定義（`contracts/workflow/stages/design.json`・`deploy.json`）の値で、区分 → ステップの id の表は `progress/model.py` の `MVV_GATE_STEPS = {"design": "design-mvv", "release": "release-mvv"}` の 1 か所に置き、`mvv_gate.py` の `GATE_STEPS` はそれを読む（`progress` は `records` を読まないので、`asking.material` も同じ表を `model` から読む）。`mvv_gate.py` には 区分 → そのステップを持つ工程の文書の名前の表 `GATE_STAGES = {"design": "design", "release": "deploy"}` を置く。定義の id を変えたら表も変える（テストで、`GATE_STAGES` の工程の文書の中に `GATE_STEPS` の id のステップがあることを縛る）
 - 手順書: `agent-layers.md` の supervisor が守る規則に次の 2 つを足す。
   - 設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打ち、結果の `outputs.mvv_gate` を設計の工程の出力の `mvv_gate` へそのまま載せ、承認資料の「MVV 判定」の欄にも同じ値を載せる（下の「承認資料の出所」）
   - リリース承認ゲート（プランを使わず、本番へ届く操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、`ndf records mvv gate --gate release --machine <ステートマシンの ID>` を打つ（文脈の `pr` がスプリントの PR）。結果の `outputs.mvv_gate` は承認資料の「MVV 判定」の欄にだけ載せ、工程の出力へは載せない（#4105 までリリース承認ゲートは省かないので、ゲートが読む出力が要らない）。結果が `ok` でないとき（ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`）は、欄に「判定できない: <結果の summary>」を載せて承認ゲートを返す（止まらずに人へ問う）。プランの経路（`release-mvv` を持つ本番のリリースプラン）では打たない（判定のステップが打つ）`pace.md` の「MVV 判定」の表から順 2（進め方）を外し、「進め方は省くかだけを決める」と `--machine` の行を足す。`project-mvv.md` の「工程での読み方」（#4076 が足す節）の承認ゲートの行から `pace.md` を指す
@@ -268,7 +268,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `_env_inputs` | プランが組む入力（`resolve_inputs` の結果）→ 同じ値を返す | 文脈のキーでない余分なキーを持つ入力 → `invalid` | `{"context": {...}}` の形（最上位に `mode` が無く、`schema` と `missing` の両方に当たる）→ 例外を出さず `invalid`（判定を打たず、`gate` を呼ばない）。`mode` だけが無く形は合う → `input_missing`。`pace` の値が文脈のスキーマに無い → `invalid`。object でない（配列）→ `invalid` |
 | `stage_input_errors`・`stage_io` | `stage_io("design")` の `inputs`・`input_ref` が `load_definition(<design-mvv を持つモード>)` の設計の工程と同じ | `{"context": {...}}` → `schema` と `missing` の両方が空でない。`validate_stage_input` が 2 つを合わせたものと同じ | object でない → `schema` だけ |
 | `_mvv_gate`（両方のエントリポイント） | 同じステートマシンの文脈で、`NDF_STAGE_INPUT`（プランが組む入力）と `--machine` の 2 回の起動が同じ入力で `gate` を呼び、同じ PR の番号を読み、同じ判定のスタブの結果から同じ `mvv_gate` を返す | 文脈の `design_pr` が `worktree` のブランチの PR と違う → 両方とも `worktree` のブランチの PR を判定する | — |
-| `GATE_STEPS` | 定義の `design.json`・`deploy.json` に同じ id のステップがある | — | — |
+| `GATE_STEPS`（`model.MVV_GATE_STEPS`） | 定義の `design.json`・`deploy.json` に同じ id のステップがある | — | — |
 
 ## 手順書
 
@@ -285,7 +285,7 @@ PR を読む前の失敗（`gate` が受ける）:
 
 承認資料の出所（プランの経路は `progress/gate/asking.py` の `material` が、supervisor の経路は `approval-request.md` の手順が、同じ規則で組む）:
 
-- 出所は今回の判定の出力 `outputs.mvv_gate` だけにする。プランの経路は判定のステップ（`design-mvv`・`release-mvv`）の済んだ出力（文脈の `mvv_gate`。`ndf progress show` のその行の `outputs.mvv_gate` と同じ値）、supervisor の経路は自分が打った `--machine` の結果の `outputs.mvv_gate` を読む。PR のコメントは出所にしない（差分を読む間に head が動いた・読み直しに失敗した・判定を打てなかった・コメントの投稿に失敗した終わり方では今回のコメントが無く、PR には前回の判定のコメントが残るため）
+- 出所は今回の判定の出力 `outputs.mvv_gate` だけにする。プランの経路は、待っている工程の判定のステップ（`design-mvv`・`release-mvv`）の済んだ記録（`step_recorded` の report の `outputs.mvv_gate`。`ndf progress show` のその行の `outputs.mvv_gate` と同じ値。文脈 `v.context()` の `mvv_gate` は工程が終わるまで書かれず、前の工程の値が残るので読まない）、supervisor の経路は自分が打った `--machine` の結果の `outputs.mvv_gate` を読む。PR のコメントは出所にしない（差分を読む間に head が動いた・読み直しに失敗した・判定を打てなかった・コメントの投稿に失敗した終わり方では今回のコメントが無く、PR には前回の判定のコメントが残るため）
 - 載せ方: `verdict` があれば判定・理由・根拠の項目・レッドライン、null なら「判定できない: <`why`>」。どちらでも `why` の省かない理由を 1 件残らず載せる。保留は `holds` の値で 3 通りに分ける: 空でない配列なら 1 件残らず載せる、空の配列 `[]` なら「レビューの保留: 無し（記録を読んで確かめた）」、`null` かキーが無いなら「レビューの保留: 未確認（<理由>）」。理由は、区分が `release` なら「リリースの保留は #4105 まで読まない（省かない）」、それ以外なら「保留を読む前に判定が止まった: <`why` の先頭>」。未確認を「無し」と書かない。`noted: false` なら「この判定の記録は PR のコメントに書けなかった（PR のコメントは前回の判定）」を添える。`outputs.mvv_gate` が無い（判定のステップが済んでいない・`--machine` が `ok` でない）ときは「判定できない: <理由>」と「レビューの保留: 未確認」を載せ、PR のコメントから補わない
 
 プランの経路の承認資料の生成（`progress/gate/asking.py`。満たす決定: 決定 2、受け入れ条件 1・3・4）:
@@ -293,14 +293,14 @@ PR を読む前の失敗（`gate` が受ける）:
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `mvv_lines` | `progress/gate/asking.py` | 新設 | `mvv_lines(out: Optional[Mapping[str, Any]], gate: str) -> list[str]` | 上の「載せ方」の規則で「## MVV 判定」の節の行を返す純粋な関数。`out` は文脈の `mvv_gate`（無ければ None）。`progress` は `records` を読まないので、`records` の関数を呼ばず値だけを読む |
-| `material` | `progress/gate/asking.py` | 変更 | シグネチャは同じ | 質問の区分（`q.gate`）が設計承認・リリース承認で、モードの定義がその区分の判定のステップ（`design-mvv`・`release-mvv`）を持つとき、「## 未確認の点」の後ろに `mvv_lines(ctx.get("mvv_gate"), q.gate)` を足す。判定のステップを持たないモードでは節を出さない（今の資料と同じ） |
+| `material` | `progress/gate/asking.py` | 変更 | シグネチャは同じ | 質問の区分（`q.gate`）が設計承認・リリース承認で、待っている工程 `q.stage` の定義がその区分の判定のステップ（`model.MVV_GATE_STEPS[q.gate]`。`design-mvv`・`release-mvv`）を持つとき、「## 未確認の点」の後ろに `mvv_lines(out, q.gate)` を足す。`out` は `v.context()` の `mvv_gate` から取らず、`_waiting_context` と同じく待っている工程の済んだステップ（`run.step_progress(v, q.stage).done`。事象 `step_recorded`）から、そのステップの id の report の `outputs.mvv_gate` を直接読む（無ければ None）。工程の出力（`outputs_recorded`）は工程が終わる時にだけ書かれるので、`v.context()` には承認ゲートで待っている工程の判定が無く、リリース承認ゲートでは前の工程（設計）が残した `mvv_gate` を今回の判定と取り違えるため。判定のステップを持たないモードでは節を出さない（今の資料と同じ） |
 
 `write_material` は変えない（書いた資料を書き直さないので、判定のステップが済んだ後に組まれる今の順のまま、資料は今回の判定を載せる）。`presentation_path` で返す資料はこの `material` の出力である。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `mvv_lines` | 判定・`why`・保留 2 件 → すべて載る | `holds: []` → 「無し（記録を読んで確かめた）」。`holds: null`（ベースの取得の失敗）→ 「未確認」と止まった理由。`release` の `holds: null` → #4105 の理由。`noted: false` → 添え書き | `out` が None → 「判定できない」と「未確認」 |
-| `material` | 判定のステップが済んだ文脈の設計承認ゲートの資料に「## MVV 判定」の節があり、`holds` と `why` が載る | 判定のステップを持たないモード → 節が無い | — |
+| `material` | 設計の工程の途中（`design-mvv` の `step_recorded` だけがあり、工程の出力は未記録）の設計承認ゲートの資料に「## MVV 判定」の節があり、その記録の `holds` と `why` が載る | 判定のステップを持たないモード → 節が無い。文脈に設計の工程の `mvv_gate`（`verdict` あり）が残り、deploy の工程の `release-mvv` がまだ済んでいないリリース承認ゲート → 設計の判定を載せず「判定できない」 | — |
 
 ## 工程の入力のコントラクト
 
