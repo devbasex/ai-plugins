@@ -145,7 +145,7 @@ class GitHubError(Exception):
 
     @property
     def passing(self) -> bool:
-        """打ち直せば通りうる失敗（不達・5xx・上限）か。状態が 0 でも届いて断られた失敗（GraphQL の誤り・認証が無い）は偽。"""
+        """打ち直せば通りうる失敗（不達・5xx・上限）か。状態が 0 でも相手が受けて断った失敗（GraphQL の誤り・認証が無い）は偽。"""
         return self.unreached or self.status >= 500 or self.retry_after is not None or self.status == 429
 
     @classmethod

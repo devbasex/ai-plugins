@@ -2,13 +2,13 @@
 
 ## 概要
 
-supervisor が worker へ作業を出すとき、worker が報告を書くファイル（置く場所）・完了マーカー・作業の結果ファイルを
+supervisor が worker へ作業を出すとき、worker が報告を書くファイル（保存先）・完了マーカー・作業の結果ファイルを
 前の作業の残りが無い状態にしてから渡す。この用意を `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>` の
 1 回の呼び出しが行い、報告の書き込みは `ndf worker append`、報告の読み取りは `ndf worker collect` が行う。
 supervisor と worker が打つ Bash に、パスを組み立てるシェルの変数も `rm` も現れない。
 
 あわせて、空になりうる変数をパスに含む `rm` を `PreToolUse` の guard（`rm-variable`）が止め、書き直しの形を
-ツールの結果として返す。Claude Code が端末の画面に出す確認のダイアログはモデルに届かないため、ダイアログが
+ツールの結果として返す。Claude Code が端末の画面に出す確認のダイアログはモデルへ渡らないため、ダイアログが
 開くとレーンは人の入力を待って止まる。guard は確認のダイアログより先に働くので、止まりがダイアログから
 ツールの結果へ替わる。
 
@@ -21,15 +21,15 @@ supervisor と worker が打つ Bash に、パスを組み立てるシェルの�
 | 用語 | 意味 |
 | --- | --- |
 | 報告の保存先 | 1 人の worker が読み書きする 4 つのファイル（起動指示・報告・完了マーカー・作業の結果ファイル）のパスの組 |
-| 置く場所 | 起動指示の欄の名前。報告のファイル（`<worker の名前>.report.md`）の絶対パスを指す |
-| 完了マーカー | worker が報告を書き終えたことを示す空のファイル（`<置く場所>.done`）。supervisor はこのファイルが現れるのを待つ |
+| 保存先 | 起動指示の欄の名前。報告のファイル（`<worker の名前>.report.md`）の絶対パスを指す |
+| 完了マーカー | worker が報告を書き終えたことを示す空のファイル（`<保存先>.done`）。supervisor はこのファイルが現れるのを待つ |
 | 作業の結果ファイル | worker の作業の成否を持つ結果 JSON のファイル（`<worker の名前>.result.json`）。成否はこのファイルの `status` だけで決まる |
 | 作業ディレクトリ | supervisor が worker ごとの 4 つのファイルを置くディレクトリ。`ndf worker prepare --dir` で受ける |
 
 ## 背景
 
-supervisor が報告の保存先を用意する手順は、手順書の 2 行（`agent-layers.md` の起動指示の「置く場所」の欄と
-`waiting.md` の待ち方）が `: > <置く場所>; rm -f <置く場所>.done` として持っていた。supervisor は worker ごとの
+supervisor が報告の保存先を用意する手順は、手順書の 2 行（`agent-layers.md` の起動指示の「保存先」の欄と
+`waiting.md` の待ち方）が `: > <保存先>; rm -f <保存先>.done` として持っていた。supervisor は worker ごとの
 分をまとめて用意するため、この 2 つをシェルの変数とループで書く。その形が Claude Code の
 「空になりうる変数のパスへの `rm`」の確認に当たり、確認のダイアログが開いている間、そのツールの呼び出しは
 結果を返さない。ラッパーのプロセスは動いたままなのでレーンの生死の判定は「動いている」のままで、利用者か
@@ -97,7 +97,7 @@ supervisor が報告の保存先を用意する手順は、手順書の 2 行（
 | キー | パス | 使う側 |
 | --- | --- | --- |
 | `prompt` | `<作業ディレクトリ>/<名前>.prompt.md` | `ndf answer work`（工程のプランの経路）だけ |
-| `report` | `<作業ディレクトリ>/<名前>.report.md` | 起動指示の「置く場所」 |
+| `report` | `<作業ディレクトリ>/<名前>.report.md` | 起動指示の「保存先」 |
 | `done` | `<作業ディレクトリ>/<名前>.report.md.done` | supervisor が待つパス |
 | `result` | `<作業ディレクトリ>/<名前>.result.json` | 起動指示の「作業の結果ファイル」 |
 
@@ -107,7 +107,7 @@ supervisor が報告の保存先を用意する手順は、手順書の 2 行（
 返した解決済みのパスを受けるので、親を解き直さずに絶対パスにするだけである（用意の後に親をリンクへ
 差し替えられても、リンクの先のパスを開かない）。
 
-`report_name(report)` は逆向きの処理で、起動指示の「置く場所」から作業ディレクトリと worker の名前を取り出す。
+`report_name(report)` は逆向きの処理で、起動指示の「保存先」から作業ディレクトリと worker の名前を取り出す。
 
 ### 報告の保存先を用意する（`ndf worker prepare`）
 
@@ -154,7 +154,7 @@ supervisor が 2 回目の完了マーカーを待つとき、1 回目のもの�
 ### 報告を書く（`ndf worker append`）
 
 ```text
-ndf worker append --report <置く場所> [--done]
+ndf worker append --report <保存先> [--done]
 ```
 
 本文は標準入力から受ける。起動指示は引用符で囲んだ区切りのヒアドキュメント（`<<'NDF_REPORT'`）で渡す形を
@@ -174,7 +174,7 @@ ndf worker append --report <置く場所> [--done]
 ### 報告を読む（`ndf worker collect`）
 
 ```text
-ndf worker collect --report <置く場所>
+ndf worker collect --report <保存先>
 ```
 
 完了マーカーを確かめ（無ければ `stopped`（`precondition`））、報告を読んで最後の `## 作業の報告` から末尾までを
@@ -280,7 +280,7 @@ guard の不具合で止めない）。
 | `ndf worker run` | 作業の結果ファイルの保存先を起動の前に 1 回だけ開き、委譲の間と委譲の後の読み取りをその記述子で行う。前の試行の結果ファイルは起動の前に消し、消せなければ worker を起動せずに `stopped`（`invalid`）。保存先を開けないときも起動せずに `invalid` にする。委譲中に結果ファイルがリンクへ差し替わる・UTF-8 で読めなければ、再起動せずに `stopped`（`bad_report`）。結果ファイルを読むのは委譲中の判定で 1 回と委譲の後に 1 回だけで、読んで解いた中身を成否の判定と記録の探索の両方へ渡す |
 | `ndf contracts emit --out` | worker が作業の結果ファイルを書く通常の経路。同じ書き込みの処理で新しい inode として書く。`--out` がシンボリックリンク・ハードリンク・ディレクトリなら、標準出力へ行を出さずに `stopped`（`invalid`） |
 | `ndf answer work`（工程のプランの経路） | 同じパスの決め方（`report_paths`）と同じ初期化（`reset_report`）を使い、起動指示を報告の保存先へ書く。報告の保存先の決め方をこの経路と supervisor の経路で分けない |
-| 手順書 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` の起動指示の「置く場所」「作業の結果ファイル」の欄と worker の守る規則、`plugins/ndf/skills/development-workflow/references/waiting.md` の「中間通知を受けたとき」が、3 つのサブコマンドの 1 行だけを書く。パスを組み立てる変数・`rm`・リダイレクト（`>`・`>>`・`: >`）は書かない |
+| 手順書 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` の起動指示の「保存先」「作業の結果ファイル」の欄と worker の守る規則、`plugins/ndf/skills/development-workflow/references/waiting.md` の「中間通知を受けたとき」が、3 つのサブコマンドの 1 行だけを書く。パスを組み立てる変数・`rm`・リダイレクト（`>`・`>>`・`: >`）は書かない |
 | サブコマンドの一覧 | `plugins/ndf/docs/contracts/commands.md` は `ndf check --write-spec` の生成物で、手で書かない |
 
 起動の回数は、worker 1 件につき、通常の完了通知では `prepare` と `append --done` の 2 回である。中間通知を
@@ -292,7 +292,7 @@ guard の不具合で止めない）。
 
 | 失敗 | 返り | 止まった時点の状態 |
 | --- | --- | --- |
-| worker の名前の形が合わない・「置く場所」が `<名前>.report.md` の形でない | `stopped`（`invalid`） | ファイルを 1 つも触らない。作業ディレクトリも作らない |
+| worker の名前の形が合わない・「保存先」が `<名前>.report.md` の形でない | `stopped`（`invalid`） | ファイルを 1 つも触らない。作業ディレクトリも作らない |
 | 作業ディレクトリを作れない・開けない・同名のファイルがある | `stopped`（`invalid`。`summary` にパスと理由） | 何も作っていない |
 | 3 つのどれかがリンク・ディレクトリ・ほかの種類 | `stopped`（`invalid`。`summary` にパスと見つけた種類） | 1 つも変えていない。リンクの先も触らない |
 | 用意した作業ディレクトリが、開く前に既存のディレクトリへ差し替えられた | `stopped`（`invalid`） | 差し替え先の報告・完了マーカー・結果ファイルがそのまま残る |

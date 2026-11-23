@@ -511,7 +511,7 @@ def _start_once(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any
 
 
 def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """試行の始まりに、前の試行の値（`values.json` と課題の写し）を工程のすべてのステップの保存先から消し（消せなければ
+    """試行の始まりに、前の試行の値（`values.json` と課題のコピー）を工程のすべてのステップの保存先から消し（消せなければ
     precondition）、次に流すステップがプランならその差し込みを組んで確かめる（#3908 の決定 2・4）。組めなければ `invoke.plan_failure` の結果、組めれば None。
 
     次に流すステップは、出力の失敗で初めから流し直す（`redo`）なら最初のステップ、ほかは終わっていない最初のステップである。

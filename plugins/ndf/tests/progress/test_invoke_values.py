@@ -47,7 +47,7 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
 
 
 def _issue_repo(tmp_path: Path, monkeypatch) -> Path:
-    """設定 `PROJECT` を持つ作業場所。worker の既定を置き、課題の題と本文は偽の課題から写す。"""
+    """設定 `PROJECT` を持つ作業場所。worker の既定を置き、課題の題と本文は偽の課題からコピーする。"""
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
@@ -166,7 +166,7 @@ def test_clear_values_removes_the_file_from_each_dir_and_skips_dirs_without_it(t
 
 
 def test_clear_values_removes_the_issue_copies_with_or_without_the_values(tmp_path):
-    # 差し込みを組み終える前に止まった試行（values.json が無い）の写しも消し、新しい試行で課題と書き手の権限を読み直す
+    # 差し込みを組み終える前に止まった試行（values.json が無い）のコピーも消し、新しい試行で課題と作成者の権限を読み直す
     # （PR 4289 の指摘）
     done, stopped = tmp_path / "a", tmp_path / "b"
     for d in (done, stopped):
@@ -227,7 +227,7 @@ def test_plan_path_builds_again_over_the_values_of_another_plan(tmp_path, monkey
 def test_prepare_plan_leaves_no_values_when_a_value_cannot_be_decided(tmp_path, monkeypatch):
     repo = _sprint_repo(tmp_path)
     sprint_fixture.without_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題からコピーしない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     with pytest.raises(invoke.TemplateValuesMissing):

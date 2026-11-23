@@ -26,11 +26,11 @@ ndf worker run --kind <種類> --prompt-file <本文> --result-file <結果> --c
     worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する
 ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>
     報告の保存先を用意する。前の完了マーカーと結果ファイルを消し、報告を空にして 3 つの絶対パスを metrics.paths に返す
-ndf worker append --report <置く場所> [--done]
+ndf worker append --report <保存先> [--done]
     標準入力の本文を報告の末尾へ足す。--done なら続けて完了マーカーを作る
 ndf worker draft --state-dir <保存先>
     標準入力の本文を PR 本文の下書き（<保存先>/work/pr_body.md）として書く
-ndf worker collect --report <置く場所>
+ndf worker collect --report <保存先>
     完了マーカーを確かめ、報告の最後の「## 作業の報告」から末尾までを metrics.report に返す
 ndf worker closing-check --base <参照> [--cwd <作業場所>]
     `<参照>..HEAD` のコミットに closing keywords があれば refused で止める（push の前に打つ）
@@ -799,9 +799,9 @@ def _paths_of(directory: str, name: str, *, resolve: bool = True) -> tuple[worke
 
 
 def _report_paths(report: str) -> worker_paths.ReportPaths:
-    """`--report <置く場所>` から報告の保存先のパスを組む。形が違えば `WorkerError`（invalid）。
+    """`--report <保存先>` から報告の保存先のパスを組む。形が違えば `WorkerError`（invalid）。
 
-    置く場所は `prepare` が解決済みで返したパスなので、親を解き直さない（準備の後に親をリンクへ差し替えられても
+    保存先は `prepare` が解決済みで返したパスなので、親を解き直さない（準備の後に親をリンクへ差し替えられても
     `open_workdir` がリンクを拒む）。
     """
     try:

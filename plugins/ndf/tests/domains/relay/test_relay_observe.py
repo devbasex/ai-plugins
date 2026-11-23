@@ -466,7 +466,7 @@ def test_4036_a_second_shell_ending_is_seen_afresh(tmp_path):
 
 
 def test_4036_proc_is_not_scanned_while_the_conductor_is_answering(tmp_path):
-    """シェルの生死を確かめる行に届かなければ /proc を読まない。"""
+    """シェルの生死を確かめる行まで進まなければ /proc を読まない。"""
     lane = _Lane(tmp_path)
     lane.transcript.write_text(json.dumps(_assistant("tool_use", _tool_use("t1"), at=T0)) + "\n", encoding="utf-8")
     calls = []

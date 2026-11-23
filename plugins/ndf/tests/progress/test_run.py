@@ -839,7 +839,7 @@ def test_a_stage_whose_values_are_decided_starts_with_the_values_in_its_step_dir
 
 def test_a_passing_github_failure_while_preparing_stops_as_transient_before_started(repo, st, env, capsys, monkeypatch):
     def fail(*a, **k):
-        raise GitHubError("届かない", 0, retry_after=30.0)
+        raise GitHubError("つながらない", 0, retry_after=30.0)
 
     monkeypatch.setattr(invoke, "template_values", fail)
     tid = _new(capsys)
@@ -893,7 +893,7 @@ def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs
     dirs = [_step_dir(st, tid, "design", step) for step in ("design", "design-review", "design-merge")]
     for d in dirs:
         invoke.write_values(d, "古い", {}, {}, True)
-    # 課題の写しも消す。残すと新しい試行が GitHub で直した題・本文を使わない
+    # 課題のコピーも消す。残すと新しい試行が GitHub で直した題・本文を使わない
     copies = [dirs[0] / invoke.ISSUE_BODY_FILE.format(number=ISSUE), dirs[0] / invoke.ISSUE_TITLE_FILE.format(number=ISSUE)]
     for c in copies:
         c.write_text("{}", encoding="utf-8")

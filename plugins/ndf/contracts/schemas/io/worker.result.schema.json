@@ -53,7 +53,7 @@
           "properties": {
             "report": {
               "type": "string",
-              "description": "報告の絶対パス（起動指示の「置く場所」）"
+              "description": "報告の絶対パス（起動指示の「保存先」）"
             },
             "done": {
               "type": "string",

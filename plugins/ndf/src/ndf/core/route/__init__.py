@@ -430,7 +430,7 @@ def _publish(out: Path, plan: Mapping[str, Any]) -> None:
     """プランを同じディレクトリの一時ファイルへ書いてから置き換える（書きかけや、前のプランの一部を読ませない）。
 
     一時ファイルは一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルやシンボリックリンクの先を
-    書き換えない。プランは worker の入力（`work_values`）を含むので、置き換える前のアクセス権を写さず、常に
+    書き換えない。プランは worker の入力（`work_values`）を含むので、置き換える前のアクセス権をコピーせず、常に
     所有者だけが読み書きできる 0600 の新しいファイルとして公開する（PR 4319 の指摘 r3-1・r3-2）。
     """
     out.parent.mkdir(parents=True, exist_ok=True)

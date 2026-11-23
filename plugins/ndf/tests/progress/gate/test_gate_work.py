@@ -19,7 +19,7 @@ from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
 # `agent-layers.md` の「supervisor → worker」が定める起動指示の 7 項目（見出しでそろう）
-PROMPT_ITEMS = ("作業", "入力", "手順", "読む Skill", "返す形", "置く場所", "作業の結果ファイル")
+PROMPT_ITEMS = ("作業", "入力", "手順", "読む Skill", "返す形", "保存先", "作業の結果ファイル")
 
 
 def _saved(plan: str, values: dict, inputs: dict) -> dict:
@@ -324,7 +324,7 @@ def test_the_prompt_of_the_worktree_work_shows_the_outputs_it_must_return(tmp_pa
 
 @pytest.fixture
 def contracts_copy(tmp_path):
-    """コントラクトの写しを保存先にする（起動指示のテンプレートを差し替えて確かめる）。"""
+    """コントラクトのコピーを保存先にする（起動指示のテンプレートを差し替えて確かめる）。"""
     root = tmp_path / "contracts"
     shutil.copytree(contracts.DEFAULT_DIR, root)
     contracts.use_dir(root)

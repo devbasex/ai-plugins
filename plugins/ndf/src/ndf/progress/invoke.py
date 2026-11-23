@@ -408,21 +408,21 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
 
     課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
     PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を照らす（`route.launch_values`）。
-    題と本文は試行ごとに保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
-    （承認の回答・続き・プランの打ち直し）はその写しを使う。工程の新しい試行は `clear_values` が写しを消し、課題と書き手の
+    題と本文は試行ごとに保存先へ初回に 1 度だけコピーし（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
+    （承認の回答・続き・プランの打ち直し）はそのコピーを使う。工程の新しい試行は `clear_values` がコピーを消し、課題と作成者の
     権限を読み直す。同じ試行の中で読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
     届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
 
-    写しは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読む写しは呼んだ利用者が
+    コピーは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読むコピーは呼んだ利用者が
     持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
-    precondition にする）。書き手の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
+    precondition にする）。作成者の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
     書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
     保存先のパスで返す（共有の領域のリンクを経ない）。PR を作るステップ（`gh pr create --body-file`）はこの名前を開き直すので、
-    返す前に、写しの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
-    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめた写しと別の本文を送らない）。
+    返す前に、コピーの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
+    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめたコピーと別の本文を送らない）。
     """
     issues = _issue_numbers(run)
     if not issues:
@@ -444,16 +444,16 @@ def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dic
 
 
 def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
-    """同じ試行が写した題。題の写しと本文の写しがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
+    """同じ試行がコピーした題。題のコピーと本文のコピーがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
 
-    私有でない写し（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
+    私有でないコピー（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
     """
     text = worker_paths.read_file(wd, copy_name, owned=True)
     if text is None or worker_paths.read_file(wd, body_name, owned=True) is None:
         return None
     try:
         held = json.loads(text)
-    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れた写しは無いものとして読み直す
+    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れたコピーは無いものとして読み直す
         return None
     return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
 
@@ -485,8 +485,8 @@ def template_values(
     （`_fill_review`）を通す。リファクタリングの起動（`_fill_refactor`）は、設定が無いときの既定を課題を読む前の欠けの検査
     （`_require_before_issue`）に見せるため、打った場所の値のすぐ後に決める（#3908 の決定 7）。
 
-    課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりに写しを消すので、先に読むと
-    手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と書き手の権限を読み直すためである（PR 4289 の指摘）。
+    課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりにコピーを消すので、先に読むと
+    手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と作成者の権限を読み直すためである（PR 4289 の指摘）。
     同じ理由で、課題の前には手元で決まる打った場所の値（`route.derived_locally`）だけを決め、GitHub に問うマージの方式
     （`route.derived_merge_method`）は課題を読んだ後に決める（課題を読めずに止まる試行で問い合わせを増やさない。PR 4289 の指摘）。
     ただしマージの方式を決められずに止まった試行の打ち直し（目印 `merge_pending.PENDING_FILE` がある）では、方式を課題より
@@ -555,10 +555,10 @@ def _fill_from_sources(
 
 
 def _fill_refs(t: route.Template, values: Mapping[str, route.Value], run: StageRun) -> dict[str, route.Value]:
-    """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題から写す（#3908 の r2-2）。
+    """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題からコピーする（#3908 の r2-2）。
 
     スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、束ねた課題のうちコミットに出ない課題を
-    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文の写し（`_issue_values`）には足さない。
+    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文のコピー（`_issue_values`）には足さない。
     """
     if "refs" not in t.params or "refs" in values:
         return {}
@@ -645,16 +645,16 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
 
 
-# 試行の始まりに消す、前の試行が保存先に残した課題の題・本文の写し（差し込みの値 `VALUES_FILE` と一緒に消す）
+# 試行の始まりに消す、前の試行が保存先に残した課題の題・本文のコピー（差し込みの値 `VALUES_FILE` と一緒に消す）
 ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
 
 
 def clear_values(state_dirs: Iterable[Path]) -> None:
     """渡された保存先から前の試行の値を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
 
-    差し込みの値（`VALUES_FILE`）と課題の写し（`ISSUE_COPIES`）を消す。写しは差し込みの値の有無によらず消す。残すと
-    `_issue_values` が写しを優先し、新しい試行が GitHub で直した題・本文を使わず、書き手の権限も確かめ直さない
-    （前の試行の後で write 権限を失った書き手の本文を worker に読ませる。PR 4289 の指摘）。
+    差し込みの値（`VALUES_FILE`）と課題のコピー（`ISSUE_COPIES`）を消す。コピーは差し込みの値の有無によらず消す。残すと
+    `_issue_values` がコピーを優先し、新しい試行が GitHub で直した題・本文を使わず、作成者の権限も確かめ直さない
+    （前の試行の後で write 権限を失った作成者の本文を worker に読ませる。PR 4289 の指摘）。
     マージの方式を決められずに止まった目印（`merge_pending.PENDING_FILE`）は消さない（打ち直しが方式を先に問うため）。
     消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
     """

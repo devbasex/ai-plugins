@@ -103,7 +103,7 @@ def test_a_stage_with_an_acceptance_without_an_issue_stops_as_invalid_without_ru
 
 
 def test_several_issues_fill_the_acceptance_with_an_issue_flag_for_each_issue(tmp_path, filled):
-    # #3908 の決定 7・受け入れ条件 2: 課題を束ねた単位は、代表の課題（#3）から title を写し、acceptance で全部の課題を照らす
+    # #3908 の決定 7・受け入れ条件 2: 課題を束ねた単位は、代表の課題（#3）から title をコピーし、acceptance で全部の課題を照らす
     repo = _sprint_repo(tmp_path)
     got = _values(tmp_path, _impl_run(repo, [4, 3]), repo)
     assert got["issue"] == "3" and got["title"] == "#3 の題"
@@ -119,8 +119,8 @@ def test_a_valid_acceptance_of_several_issues_fills_the_title_from_the_represent
 
 
 def test_a_missing_project_value_stops_before_reading_the_issue(tmp_path, filled):
-    # 課題に依存しない差し込み（設定の required）が欠ければ、課題の題・本文と書き手の権限を GitHub から読む前に止まる。
-    # 試行の始まりに写しを消すので、読んでから止まると打ち直すたびに読み直す（PR 4289 の指摘）
+    # 課題に依存しない差し込み（設定の required）が欠ければ、課題の題・本文と作成者の権限を GitHub から読む前に止まる。
+    # 試行の始まりにコピーを消すので、読んでから止まると打ち直すたびに読み直す（PR 4289 の指摘）
     repo = _sprint_repo(tmp_path)
     work = tmp_path / "w"
     work.mkdir()
@@ -168,7 +168,7 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
 
 def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_issue(tmp_path, filled, local, monkeypatch):
     # マージの方式を決められずに止まった試行の打ち直しは、方式を課題より先に問うて、決まらなければ課題を読まずに止める。
-    # 決まった試行で課題と書き手の権限を読み直す（写しは clear_values が消している。PR 4289 の指摘）
+    # 決まった試行で課題と作成者の権限を読み直す（コピーは clear_values が消している。PR 4289 の指摘）
     answers = iter([None, None, "squash"])
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: filled.append("merge_method") or next(answers))
     for _ in range(2):

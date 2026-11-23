@@ -307,7 +307,7 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
 
 def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
     # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題を束ねた単位でも issue を求めない。
-    # 題と本文は代表の課題（番号の最も小さい #3）から写す（#3908 の決定 7）
+    # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
@@ -574,7 +574,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
 
 
 def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
-    # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue を写す
+    # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue をコピーする
     repo = _sprint_repo(tmp_path, PROJECT)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"

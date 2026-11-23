@@ -1,6 +1,6 @@
 """worker が書いた結果ファイルから `ndf worker run` の結果を組むところ（`core/worker.py` の部品）。
 
-- 結果ファイルの status を写す（ok・gate・stopped。#1682）。gate は承認ゲートの結果、stopped と欠け（gaps）の付いた ok は
+- 結果ファイルの status をコピーする（ok・gate・stopped。#1682）。gate は承認ゲートの結果、stopped と欠け（gaps）の付いた ok は
   欠けを付けた incomplete にする
 - `--require-output` の名前（作業の定義の outputs。#3908）は、結果ファイルの `outputs` にあり、値が結果 JSON の
   `outputs` の形（`contracts/schemas/result.schema.json` の `$defs/outputs`）に合うかを確かめる。無いか形が違えば
@@ -25,7 +25,7 @@ OUTPUTS_SCHEMA = result.SCHEMA + "#/$defs/outputs"
 
 
 def _gap_of(raw: object) -> dict[str, str]:
-    """gaps の要素 1 つ。形の違う要素（kind・name・reason が空でない文字列でない）も捨てず、中身を理由に写した欠けにする。"""
+    """gaps の要素 1 つ。形の違う要素（kind・name・reason が空でない文字列でない）も捨てず、中身を理由にコピーした欠けにする。"""
     keys = ("kind", "name", "reason")
     if isinstance(raw, dict) and all(isinstance(raw.get(k), str) and raw[k] for k in keys):
         return {k: raw[k] for k in keys}
@@ -56,7 +56,7 @@ def _output_gap(report: Mapping[str, Any], name: str) -> Optional[dict[str, str]
 def require_outputs(report: Any, required: Sequence[str]) -> tuple[Any, Optional[dict[str, Any]]]:
     """ok の結果ファイルの `outputs` を `required`（`--require-output`）の名前で確かめ、（結果ファイル, 確かめた outputs）を返す（#3908）。
 
-    欠け（無い・形の違う値）があれば欠けを `gaps` に足した写しと None、無ければ `report` と確かめた名前の値だけの outputs。
+    欠け（無い・形の違う値）があれば欠けを `gaps` に足したコピーと None、無ければ `report` と確かめた名前の値だけの outputs。
     ok でないか `required` が空なら `report` と None。欠けの付いた ok は `outcome_of` が incomplete にする。
     確かめた outputs を結果ファイルの中へ戻さないのは、worker が同じキーを結果ファイルに書いて確かめを迂回できないためである。
     """
@@ -77,7 +77,7 @@ def outcome_of(
     *,
     outputs: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """worker が書いた結果ファイルの status を写した `worker run` の結果（#1682）。
+    """worker が書いた結果ファイルの status をコピーした `worker run` の結果（#1682）。
 
     結果ファイルの status を読まずに ok を返すと、作業を残した worker の「判断が要る」「できなかった」が完了に
     化けるためである。gate（判断が要る）は承認ゲートの結果にし、stopped（できなかった）と欠け（gaps）の付いた ok は

@@ -13,7 +13,7 @@
 | 3 | プランのステップが `ndf answer work --state-dir <保存先> requirements` を打つ |
 | 4 | `ndf answer work` が `values.json`・作業の定義（`contracts/worker/kinds.json`）・共通のテンプレート（`contracts/worker/prompt.md`）から起動指示を組み、`<保存先>/requirements.prompt.md` へ書く |
 | 5 | 同じプロセスが `ndf worker run --kind requirements --prompt-file …` へ置き換わり、作業の定義の `cwd`（`requirements` は `repo`）が指す場所で `claude -p` を起動する |
-| 6 | worker が書いた結果ファイルの `status` が `ndf worker run` の結果になり、プランの結果を通って工程へ返る。必須の出力を持つ作業（`worktree` の `worktree`・`branch`、`release` の `delivery`・`version`）では、`--require-output` で確かめた値も工程の出力へ届く |
+| 6 | worker が書いた結果ファイルの `status` が `ndf worker run` の結果になり、プランの結果を通って工程へ返る。必須の出力を持つ作業（`worktree` の `worktree`・`branch`、`release` の `delivery`・`version`）では、`--require-output` で確かめた値も工程の出力へ渡る |
 
 差し込みを決められない工程は、行に `started` も `failed` も書かずに `stopped`（`precondition`）で返し、決まらない名前とその値の出所を結果の `items` に並べる。手で閉じるときの出力の値の取り場所は、スプリントの文脈のスキーマの `x-source` が持ち、`ndf progress check` が欠けたキーの行に添える。
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | 作業の名前 | 工程のプランが worker へ渡す作業の識別子（`requirements`・`impl` など）。唯一の基準は `plugins/ndf/contracts/worker/kinds.json` の `kinds` のキー |
 | 差し込みの値 | プランのテンプレートの `{{名前}}` に入る値。`ndf.progress.invoke.template_values` が組む。起動指示のテンプレートの差し込み（`$名前`）とは別の仕組みである |
-| 起動指示 | worker へ渡すプロンプト。作業・入力・手順・読む Skill・返す形・置く場所・作業の結果ファイルの 7 項目と、worker が守る規則 7 個を持つ |
+| 起動指示 | worker へ渡すプロンプト。作業・入力・手順・読む Skill・返す形・保存先・作業の結果ファイルの 7 項目と、worker が守る規則 7 個を持つ |
 | 試行 | 工程の行の `started` 1 件から、その行の `failed` か `completed` までの 1 回。初回の開始と、失敗の後の打ち直しがそれぞれ 1 つの試行になる |
 | 代表の課題 | 課題を複数持つ工程で、題と本文と番号をコピーする対象になる課題。番号の最も小さいもの |
 | 起点 | 差分を取る参照。作業場所で読めればマージ先のブランチ名、読めなければ `<リモート名>/<マージ先>` |
@@ -170,7 +170,7 @@ flowchart TD
 | 名前の値の形が違う | `stopped`（`incomplete`）。欠けの理由に形の誤りを書く |
 | `--require-output` が無い（定義の `outputs` が空） | 今までどおり `ok`。`outputs` は載せない |
 
-確かめた値は結果ファイルへ戻さない。戻すと、worker が同じキーを結果ファイルへ書いて確かめを迂回できる。プランの実行はステップの結果 JSON の `outputs` を `outputs.json` に重ねてプランの結果へ載せる処理を既に持つので、そこから先は工程の出力まで今の経路で届く。
+確かめた値は結果ファイルへ戻さない。戻すと、worker が同じキーを結果ファイルへ書いて確かめを迂回できる。プランの実行はステップの結果 JSON の `outputs` を `outputs.json` に重ねてプランの結果へ載せる処理を既に持つので、そこから先は工程の出力まで今の経路で渡る。
 
 ### 欠けをプランの停止結果へ運ぶ
 
@@ -293,7 +293,7 @@ ndf plan next <プラン>
 | `ndf progress next`（行を始める前） | 差し込み・作業が読む値を決められない | `stopped`（`precondition`）。`started` も `failed` も書かない |
 | `ndf progress next`（行を始める前） | 前の試行の値を消せない・`values.json` を書けない | `stopped`（`precondition`）。プランを起動していないので打ち直せる |
 | `ndf progress next`（行を始める前） | 課題を GitHub から読めない | `transient`（上限・不達・5xx）か `precondition`。`retry_after` を添える |
-| `ndf worker run` | 必須の出力が無い・形が違う | `stopped`（`incomplete`）。欠けの名前がプランの結果と工程の `failed` の理由まで届く |
+| `ndf worker run` | 必須の出力が無い・形が違う | `stopped`（`incomplete`）。欠けの名前がプランの結果と工程の `failed` の理由まで返る |
 | `ndf worker run` | 結果ファイルを読めない・`status` が無い | `stopped`（`bad_report`） |
 | リファクタリングの包み | Pull Request が無い・起点を読めない・差分が空 | `stopped`（`precondition`）。`ndf refactor run` を打たない |
 | `ndf progress finish`・`check` | 出力に文脈のキーが欠ける | `stopped`（`refused`）。欠けた行に取り場所が付く |
@@ -326,7 +326,7 @@ ndf plan next <プラン>
 | リファクタリングの既定 | `workflow` を持たず `ci.required_checks` を持つリポジトリで既定の argv が組まれ、設定があればそれが優先する。必須のチェックが無ければ `refactor` が欠けに挙がる | `tests/progress/test_invoke_refactor.py`・`tests/route/test_templates.py` |
 | 単発のプランの値の受け渡し | 既定の worker を使うプランが `work_values` を持ち、`ndf plan next` が回ごとに保存先へ書く。作業が読む値が渡っていなければ描画の時点で断る | `tests/route/test_cli.py` |
 | 必須の出力の受け渡し | 結果ファイルの `outputs` のうち `--require-output` の名前の値だけが `ok` の結果に載る。無い・形が違うときは欠けの付いた `incomplete` になる | `tests/core/test_worker_outcome.py` |
-| 欠けがプランの停止結果まで届く | 欠けを持つ `incomplete` のステップで、ステップとプランの両方の結果に同じ欠けが載る。欠けの無い `incomplete` では補った 1 件が載る。止まった説明の末尾に欠けた名前が付く | `tests/core/plan/test_steps.py`・`tests/core/plan/test_runner.py` |
+| 欠けがプランの停止結果まで渡る | 欠けを持つ `incomplete` のステップで、ステップとプランの両方の結果に同じ欠けが載る。欠けの無い `incomplete` では補った 1 件が載る。止まった説明の末尾に欠けた名前が付く | `tests/core/plan/test_steps.py`・`tests/core/plan/test_runner.py` |
 | 出力の値の取り場所 | `ndf progress check` が欠けた `delivery`・`mvv_gate` の行に取り場所を添え、`items` に載せる。取り場所を持たないキーの行は変わらない | `tests/progress/test_command_check.py`・`tests/progress/test_definition.py` |
 
 ## 関連リンク

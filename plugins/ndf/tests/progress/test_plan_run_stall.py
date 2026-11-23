@@ -69,7 +69,7 @@ def test_a_five_item_stall_from_an_older_snapshot_still_reads():
     assert dict(report.facts)["background"] is None
 
 
-# --- 活動を読む（`ndf relay ls` の行を写す） ---------------------------------------------------------
+# --- 活動を読む（`ndf relay ls` の行をコピーする） ---------------------------------------------------------
 
 
 def _row(turn_done=True, moved=1000.0, background=0):

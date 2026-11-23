@@ -227,21 +227,21 @@ interim」）で行う。
 
 **supervisor は worker を起動する前に、worker ごとに `ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>`
 を 1 回打つ。** このコマンドが前の完了マーカーと結果ファイルを消し、報告を空にする。結果 JSON の `status` が `ok` のときだけ、
-`metrics.paths.report` を `置く場所`、`metrics.paths.done` を待つパスにする。前の worker の報告や完了マーカーが
+`metrics.paths.report` を `保存先`、`metrics.paths.done` を待つパスにする。前の worker の報告や完了マーカーが
 残ったパスを渡すと、コピーの待ちがその完了マーカーに即座に反応し、今の worker の報告を待たずに終わる。
 
-**待つのは完了マーカーのファイル `<置く場所>.done` である。** worker
-は `ndf worker append --report "<置く場所>" --done` で、報告コピーを `置く場所` の末尾へ書き、続けて空のファイル `<置く場所>.done` を作る
-（[agent-layers.md](agent-layers.md) の起動指示の `置く場所`）。
+**待つのは完了マーカーのファイル `<保存先>.done` である。** worker
+は `ndf worker append --report "<保存先>" --done` で、報告コピーを `保存先` の末尾へ書き、続けて空のファイル `<保存先>.done` を作る
+（[agent-layers.md](agent-layers.md) の起動指示の `保存先`）。
 
 ```bash
 # Bash の run_in_background: true で起動する（フォアグラウンドで打たない）。最後の 3600 が上限の秒数
-bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5; done' _ "<置く場所>" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
+bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5; done' _ "<保存先>" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
 | 終了コード | supervisor の動き |
 | --- | --- |
-| 0（`<置く場所>.done` が現れた） | `ndf worker collect --report "<置く場所>"` を打ち、`status` が `ok` なら `metrics.report`（最後の `## 作業の報告` から末尾まで）を報告として読み、フェーズを進める。`ok` でなければ「報告が無いまま終わったとき」の規則で扱う |
+| 0（`<保存先>.done` が現れた） | `ndf worker collect --report "<保存先>"` を打ち、`status` が `ok` なら `metrics.report`（最後の `## 作業の報告` から末尾まで）を報告として読み、フェーズを進める。`ok` でなければ「報告が無いまま終わったとき」の規則で扱う |
 | 124（上限の 3600 秒に達した） | [interrupt-resume.md](interrupt-resume.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
 
 - **worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。** 同じ報告である

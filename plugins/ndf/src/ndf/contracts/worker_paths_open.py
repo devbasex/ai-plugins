@@ -32,7 +32,7 @@ class EntryUnsafe(EntryError):
     `foreign` は `read_file(owned=True)` が読むファイルを呼んだ利用者が持たないか、グループかほかの利用者が書き込めること。
 
     `owner` は `write_file` が置き換える既存のファイルの所有者・所有グループを新しい inode で保てないこと（`_inherit_access`）。
-    `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を保てないので置き換えないこと（`_refuse_acl`。ACL の値は写さない）。
+    `acl` は `write_file` が置き換える既存のファイルの拡張 ACL を保てないので置き換えないこと（`_refuse_acl`。ACL の値はコピーしない）。
 
     `shared` は名前か、その名前から根までのどこかのディレクトリの項目を、呼んだ利用者と root のほかが差し替えられること
     （`check_unshared`。後でパスから開き直す手順へ渡す名前に使う）。

@@ -332,7 +332,7 @@ SHELLS_ENDED_FILE = "shells-ended.json"
 @dataclass(frozen=True)
 class Look:
     """1 回の `ndf relay ls --activity` で全行が共有する活動の材料。`now` は読む時刻、`size` は会話の記録の末尾を読む大きさ、
-    `children` は `process_children` の返りを返す口（シェルの生死を確かめる行に届いたときだけ呼ぶ。呼ぶ側が 1 回の一覧で
+    `children` は `process_children` の返りを返す口（シェルの生死を確かめる行まで進んだときだけ呼ぶ。呼ぶ側が 1 回の一覧で
     1 度だけ組むように包む）。"""
 
     now: float
@@ -411,7 +411,7 @@ def _ended_subagent(transcript: Path, agent_id: str, size: int) -> Optional[floa
 def _shells(turn: _Turn, directory: Path, pid: Any, listed: list[dict[str, str]], look: Look) -> Optional[tuple[int, list[float]]]:
     """生きている背景のシェルの数と、一覧のシェルが終わった時刻。生死を確かめられなければ None。
 
-    `/proc` はここに届いた行で初めて読む（`look.children`）。一覧より生きているシェルが少なければ、終わりを最初に確かめた
+    `/proc` はここまで進んだ行で初めて読む（`look.children`）。一覧より生きているシェルが少なければ、終わりを最初に確かめた
     時刻を終わった時刻とする（`_first_seen`）。出力のファイルの更新時刻は使わない。最後に出力した時刻であって、出力の後に
     黙って動く作業では終わった時刻より古く、終わった直後のレーンを止まりと読むためである。
     """

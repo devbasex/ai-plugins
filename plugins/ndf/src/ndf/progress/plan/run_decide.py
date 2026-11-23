@@ -216,9 +216,9 @@ class LaunchTry(NamedTuple):
 
 
 class Stall(NamedTuple):
-    """写しの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）。写しでは JSON の list のまま持ち、
+    """コピーの止まり 1 つ（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）。コピーでは JSON の list のまま持ち、
     読む所で包む。最後に動いた時刻は ISO 8601 の文字列か UNIX 時刻の数。背景の作業の数の既定の None は、#4036 の前に書かれた
-    5 つの組の写しを読み直しの途中で包むためである。"""
+    5 つの組のコピーを読み直しの途中で包むためである。"""
 
     lane: str
     key: str
@@ -287,7 +287,7 @@ def with_stalls(
     judged: bool = True,
     relaunch: Sequence[tuple[str, str, str]] = (),
 ) -> dict[str, Any]:
-    """写しへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）、
+    """コピーへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせのキー, 理由, 最後に動いた時刻, 行, 背景の作業の数）、
     `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければリクエストを閉じない）、
     `relaunch` は `/goal` を入れ直して再起動できる（アカウントが使える）止まったレーンの（レーン, 行, スプリントの ID）。"""
     judged_part = {"unknown": list(unknown), "judged": judged, "relaunch": [list(r) for r in relaunch]}

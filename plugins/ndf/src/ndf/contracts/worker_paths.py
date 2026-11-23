@@ -185,10 +185,10 @@ def _paths_under(base: Path, name: str) -> ReportPaths:
 
 
 def report_name(report: Path) -> tuple[Path, str]:
-    """起動指示の「置く場所」（`<名前>.report.md`）から、作業ディレクトリと worker の名前を取り出す。形が違えば `NameInvalid`。"""
+    """起動指示の「保存先」（`<名前>.report.md`）から、作業ディレクトリと worker の名前を取り出す。形が違えば `NameInvalid`。"""
     name = report.name.removesuffix(REPORT_SUFFIX)
     if name == report.name or not NAME_RE.fullmatch(name):
-        raise NameInvalid(f"置く場所は <[A-Za-z0-9._-] の 1〜64 文字>{REPORT_SUFFIX} の形にする: {str(report)!r}")
+        raise NameInvalid(f"保存先は <[A-Za-z0-9._-] の 1〜64 文字>{REPORT_SUFFIX} の形にする: {str(report)!r}")
     return report.parent, name
 
 
@@ -413,7 +413,7 @@ def check_writable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
 def write_file(wd: WorkDir, name: str, text: str, *, private: bool = False) -> None:
     """私有の一時ディレクトリに作った新しい inode を `name` へ公開する。既存のファイルを開かず、切り詰めない。
 
-    `private` なら、公開する前に新しい inode からグループとほかの利用者の書き込み権限を外す（既存のファイルから写した
+    `private` なら、公開する前に新しい inode からグループとほかの利用者の書き込み権限を外す（既存のファイルからコピーした
     モードにも当てる）。`read_file(owned=True)` で読み直す値（`values.json`）と起動指示を、umask や前のファイルの
     アクセス権によらず、書き換えられない状態で公開するため。
 
@@ -426,12 +426,12 @@ def write_file(wd: WorkDir, name: str, text: str, *, private: bool = False) -> N
     リンクをたどらない。名前を差し替えるのに要る権限は同じ名前を消すのに要る権限と同じなので、差し替えた手は
     その空のディレクトリを自分で消せる。この呼び出しが消せるものは差し替えた手が消せるものを超えない。
     既存のファイルを置き換えるときは、確かめた時点のアクセス権（setuid などを除くモードとグループ）を新しい inode へ
-    公開する前に写す（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
+    公開する前にコピーする（`_inherit_access`）。グループ権限で読んでいた利用者が、置き換えの後に読めなくならないため。
     所有者か所有グループを新しい inode で保てないときは、既存のファイルを置き換える前に `EntryUnsafe`（`owner`）を上げる
     （所有者に与えていた権限を別の利用者へ、グループに与えていた権限を別のグループへ与えない）。
-    拡張 ACL のあるファイルは ACL の値を写さずに、置き換える前に `EntryUnsafe`（`acl`）を上げる（`_refuse_acl`）。
+    拡張 ACL のあるファイルは ACL の値をコピーせずに、置き換える前に `EntryUnsafe`（`acl`）を上げる（`_refuse_acl`）。
     新しい inode が親の既定の ACL から継いだ ACL は、公開の前に外す（`_drop_inherited_acl`）。どちらも、モードのビット
-    だけを写して置き換えると読める人が広がりうるためである（拡張 ACL のあるファイルでは、モードのグループのビットは
+    だけをコピーして置き換えると読める人が広がりうるためである（拡張 ACL のあるファイルでは、モードのグループのビットは
     所有グループの権限ではなく ACL のマスクである）。
     """
     with staged_write(wd, name, text, private=private):
@@ -508,10 +508,10 @@ def _tmp_owned(tmp: str, tmp_fd: int) -> os.stat_result:
 
 
 def _fill_data(wd: WorkDir, fd: int, name: str, data: bytes, existing: Optional[os.stat_result], *, private: bool = False) -> None:
-    """開いた一時ファイル `fd` から継いだ拡張 ACL を外し、置き換える既存のファイルのアクセス権を写してから中身を書き、閉じる。
+    """開いた一時ファイル `fd` から継いだ拡張 ACL を外し、置き換える既存のファイルのアクセス権をコピーしてから中身を書き、閉じる。
 
     置き換える既存のファイルが拡張 ACL を持つなら、何も退けない・公開しないうちに `EntryUnsafe`（`acl`）で止まる。
-    `private` なら、写した後のモードからグループとほかの利用者の書き込みのビットを外す（同じ記述子に対する `fchmod`）。
+    `private` なら、コピーした後のモードからグループとほかの利用者の書き込みのビットを外す（同じ記述子に対する `fchmod`）。
     """
     with os.fdopen(fd, "wb") as f:
         _drop_inherited_acl(f.fileno(), name)  # 無い名前へ作るときも親の既定の ACL を継ぐ
@@ -530,8 +530,8 @@ def _refuse_acl(wd: WorkDir, name: str, existing: os.stat_result) -> None:
     """置き換える既存のファイルが拡張 ACL を持つ・持つかを確かめられないなら `EntryUnsafe`（`acl`）。
 
     拡張 ACL のあるファイルでは、モードのグループのビットは所有グループの権限ではなく ACL のマスクなので、
-    `_inherit_access` がモードのビットだけを写すと、置き換えの後に読める人が広がりうる（macOS の ACL は拒否の項目も
-    持つので、外すと読める人が広がる）。ACL の値は写さず、置き換えないことで広がらないようにする。
+    `_inherit_access` がモードのビットだけをコピーすると、置き換えの後に読める人が広がりうる（macOS の ACL は拒否の項目も
+    持つので、外すと読める人が広がる）。ACL の値はコピーせず、置き換えないことで広がらないようにする。
     リンクをたどらずに開いた記述子を確かめた inode（`existing`）と突き合わせ、違えば `EntryUnsafe`（`replaced`）。
     Linux は `O_PATH` の記述子を `/proc/self/fd` から引いて `system.posix_acl_access` を見る（`_has_acl`）。
     macOS は書き込めることを確かめ済みの既存のファイルを書き込み専用で（切り詰めずに）開き、`acl_get_fd_np` で
@@ -610,7 +610,7 @@ def _drop_acl_darwin(fd: int, name: str) -> None:
 def _drop_inherited_acl(fd: int, name: str) -> None:
     """新しい一時ファイル `fd` が親から継いだ拡張 ACL を、公開の前に外す。外せなければ `EntryUnsafe`（`acl`）。
 
-    継いだ名前付きの項目が、写したモードのグループのビットをマスクにして（macOS では許可の項目のまま）読めるように
+    継いだ名前付きの項目が、コピーしたモードのグループのビットをマスクにして（macOS では許可の項目のまま）読めるように
     ならないためである。Linux は `system.posix_acl_access` を `os.removexattr` で外し、macOS は `_drop_acl_darwin` で外す。
     ACL が無い・ACL に対応しないファイルシステムと、どちらの手段も無い OS は何もしない。
     """
@@ -678,9 +678,9 @@ def _restore_retired(wd: WorkDir, tmp_fd: int, retired: list[tuple[str, str]]) -
 
 
 def _inherit_access(fd: int, name: str, existing: os.stat_result) -> None:
-    """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へ写す。
+    """置き換える既存のファイルのグループとモード（setuid・setgid・sticky を除く）を新しいファイル `fd` へコピーする。
 
-    モードの所有者・グループのビットは所有者・所有グループに当たるので、写すのは新しいファイルの所有者と所有グループが
+    モードの所有者・グループのビットは所有者・所有グループに当たるので、コピーするのは新しいファイルの所有者と所有グループが
     元と同じときだけである。所有者が違う（別の利用者のファイルをグループの書き込み権限で置き換える）か、グループを
     変えられない（呼んだ利用者が属さない）ときは、公開する前に `EntryUnsafe`（`owner`）を上げる（元の所有者が読めなかった
     内容を `group` の権限で読めるようにしない・グループの権限を元と違うグループへ与えない）。

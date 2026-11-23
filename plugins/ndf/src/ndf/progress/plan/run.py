@@ -138,7 +138,7 @@ def probes(repo: str, plan: str) -> liveness.Probes:
 def lane_activity(row: Mapping[str, Any] | None) -> liveness.Activity | None:
     """ラッパーの一覧の行（`ndf relay ls`）に載った conductor の活動（#4036）。行が無い・活動を読めなければ None。
 
-    活動は `domains/relay` が読んで一覧の行に載せる（層の規則で `progress` は `domains` を読まない）。ここは写すだけである。
+    活動は `domains/relay` が読んで一覧の行に載せる（層の規則で `progress` は `domains` を読まない）。ここはコピーするだけである。
     """
     done = row.get("turn_done") if row is not None else None
     if row is None or not isinstance(done, bool):

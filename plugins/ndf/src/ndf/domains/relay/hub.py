@@ -500,7 +500,7 @@ def listing(ctx: Context, activity: bool = False) -> list[dict[str, Any]]:
     """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。
 
     `activity` が真（`ndf relay ls --activity`）なら、動いている行に conductor の活動（`turn_done`・`moved`・`background`。
-    #4036）も載せる。偽なら活動を読まず 3 つとも None。/proc の親の一覧はシェルの生死を確かめる行に届いたときに 1 度だけ読み、
+    #4036）も載せる。偽なら活動を読まず 3 つとも None。/proc の親の一覧はシェルの生死を確かめる行まで進んだときに 1 度だけ読み、
     全行で共有する。
     """
     running = set(registry.busy_names(ctx.state_dir))

@@ -644,7 +644,7 @@ def test_retired_kept_is_not_hidden_by_a_cleanup_failure(workdir, monkeypatch):
     assert name == "done" and kept is not None and kept.read_text(encoding="utf-8") == "古い"
 
 
-# --- #3877 r6: 拡張 ACL のある既存のファイルは ACL を写さずに置き換えない -------------------------------
+# --- #3877 r6: 拡張 ACL のある既存のファイルは ACL をコピーせずに置き換えない -------------------------------
 
 
 def _acl(*entries: tuple[int, int, int]) -> bytes:
