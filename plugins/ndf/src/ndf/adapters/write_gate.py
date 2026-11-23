@@ -9,7 +9,9 @@
   予約を置き換え（I3）、前の書き込みを送り終えた時刻から間隔が足りなければ待つ（I6）。送信のロックは応答まで持つ
 - 記録を読めない・ロックを取れないときも書き込みを止めない。プロセスの中の記録で間を空け、標準エラーへ 1 行を出す（I5）。
   記録へ書けなかった分は、書けるまで記録を読むたびにプロセスの中の記録から重ねる
-- 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める
+- 非同期の経路では、ロックの取得を含む手順をイベントループの外（`asyncio.to_thread`）で進める。送信のロックを放す
+  `_finish` は専用のスレッド（`_FINISHER`）で進め、ロックを待つ手順が既定のスレッドプールを埋めても放せるようにする
+- passwd に載らない UID は、環境に依らない UID ごとの置き場（`/tmp/ndf-github-<UID>`。持ち主と 0700 を確かめる）を使う
 
 ロックは取るたびに `slot_pool.lock` で作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
 再入として通るためである。
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import stat
 import json
 import os
 import pwd
@@ -27,6 +30,7 @@ import tempfile
 import threading
 import time
 from collections.abc import AsyncGenerator, Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing, contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, TypeVar
@@ -52,6 +56,10 @@ LOCK_SECONDS = 10.0
 # 記録を最後に書いた時刻が今よりこの秒を越えて先なら、壁時計が戻ったとみなす
 CLOCK_SLACK = 1.0
 GATE_FILE = "write-gate.json"
+# passwd に載らない UID の置き場の親。環境変数（TMPDIR）を読まない（決定 1）
+SHARED_TMP = Path("/tmp")
+# 非同期の経路で送信のロックを放す専用のスレッド。送信のロックを待たないので、ここが埋まって止まることはない
+_FINISHER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndf-write-gate-finish")
 SEND_LOCK_FILE = "write-gate.send.lock"
 PR_LOCK_DIR = "pr"
 RECORD_VERSION = 1
@@ -181,18 +189,32 @@ def _restore(record: dict[str, float], old: Reservation) -> None:
 
 @functools.cache
 def _private_home() -> Path:
-    """このプロセスだけが使う置き場（0700・名前を予測できない）。共有の一時ディレクトリに決まった名前を置かない。"""
+    """このプロセスだけが使う置き場（0700・名前を予測できない）。UID ごとの置き場を安全に使えないときだけ使う。"""
     return Path(tempfile.mkdtemp(prefix="ndf-github-"))
 
 
+def _uid_home(uid: int) -> Optional[Path]:
+    """UID ごとの置き場 `SHARED_TMP/ndf-github-<UID>`。シンボリックリンク・ほかの持ち主・0700 でなければ None。"""
+    place = SHARED_TMP / f"ndf-github-{uid}"
+    try:
+        place.mkdir(mode=0o700, exist_ok=True)
+        info = os.lstat(place)
+    except OSError as exc:
+        diag(f"書き込みの順番の記録の置き場を作れない: {place}: {exc}", kind="write_gate")
+        return None
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_mode & 0o077:
+        diag(f"書き込みの順番の記録の置き場を使えない（持ち主か権限が違う）: {place}", kind="write_gate")
+        return None
+    return place
+
+
 def _home() -> Path:
-    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）だけ `HOME`、それも無ければプロセスの中の置き場へ落とす。"""
+    """OS のユーザーのホーム。passwd に載らない UID（コンテナの任意 UID）は `HOME` を読まず UID ごとの置き場へ落とす。"""
     uid = os.getuid()
     try:
         return Path(pwd.getpwuid(uid).pw_dir)
     except KeyError:
-        home = os.path.expanduser("~")
-        fallback = Path(home) if os.path.isabs(home) else _private_home()
+        fallback = _uid_home(uid) or _private_home()
         diag(f"UID {uid} が passwd に無い。書き込みの順番の記録を {fallback} の下に置く", kind="write_gate")
         return fallback
 
@@ -229,6 +251,8 @@ class WriteGate(BaseThrottler):
         self._memory = _empty()
         # プロセスの中の記録に、記録へ書けていない変更があるか
         self._unsaved = False
+        # プロセスの中の記録だけを変えた回数。記録へ重ねた後に増えていれば、その変更を保存の結果で消さない
+        self._fallbacks = 0
         self._mutex = threading.Lock()
 
     @contextmanager
@@ -250,7 +274,8 @@ class WriteGate(BaseThrottler):
         try:
             yield
         finally:
-            await asyncio.to_thread(self._finish, writes.kind, send)
+            # 既定のスレッドプールは送信のロックを待つ手順で埋まりうるので、放す処理は専用のスレッドで進める
+            await asyncio.get_running_loop().run_in_executor(_FINISHER, self._finish, writes.kind, send)
 
     async def _turn(self, kind: str, count: int) -> Optional[FileLock]:
         """`_steps` の各手順（ロックの取得を含む）をイベントループの外で進め、眠りだけをループの上で待つ。"""
@@ -369,7 +394,7 @@ class WriteGate(BaseThrottler):
         try:
             now = self.clock()
             record = None if held is None else self._load(now)
-            record = self._memory_view(now) if record is None else self._with_unsaved(record, now)
+            record = self._memory_view(now) if record is None else self._with_unsaved(record, now)[0]
             return record["blocked_until"] > now, _earliest_send(record, kind) - now
         finally:
             if held is not None:
@@ -385,8 +410,9 @@ class WriteGate(BaseThrottler):
             record = self._load(now)
             if record is None:
                 return self._in_process(change)
-            result = change(self._with_unsaved(record, now), now)
-            self._store(record, now)
+            record, seen = self._with_unsaved(record, now)
+            result = change(record, now)
+            self._store(record, now, seen)
             return result
         finally:
             held.release()
@@ -397,6 +423,7 @@ class WriteGate(BaseThrottler):
             result = change(self._memory, now)
             self._memory["written_at"] = now
             self._unsaved = True
+            self._fallbacks += 1
             return result
 
     def _memory_view(self, now: float) -> dict[str, float]:
@@ -404,15 +431,15 @@ class WriteGate(BaseThrottler):
             memory = dict(self._memory)
         return _rewound(memory, now)
 
-    def _with_unsaved(self, record: dict[str, float], now: float) -> dict[str, float]:
-        """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。"""
+    def _with_unsaved(self, record: dict[str, float], now: float) -> tuple[dict[str, float], int]:
+        """記録へ書けていない変更があれば、プロセスの中の記録の時刻を重ねる（遅い方を採る）。重ねた時点の変更の回数も返す。"""
         with self._mutex:
-            unsaved = self._unsaved
+            unsaved, seen, memory = self._unsaved, self._fallbacks, dict(self._memory)
         if unsaved:
-            memory = self._memory_view(now)
+            memory = _rewound(memory, now)
             for key in TIMES:
                 record[key] = max(record[key], memory[key])
-        return record
+        return record, seen
 
     def _record_lock(self) -> Optional[FileLock]:
         held = slot_pool.lock(self.path.with_name(self.path.name + ".lock"))
@@ -454,10 +481,11 @@ class WriteGate(BaseThrottler):
             return _empty()
         return _rewound({k: float(raw[k]) for k in (*TIMES, "written_at")}, now)
 
-    def _store(self, record: dict[str, float], now: float) -> None:
+    def _store(self, record: dict[str, float], now: float, seen: int) -> None:
+        """記録を書き、プロセスの中の記録へ写す。`seen` の後にプロセスの中だけで変えた分は残し、未保存の印も消さない。"""
         record["written_at"] = now
         with self._mutex:
-            self._memory = dict(record)
+            self._memory = self._merged(record, seen)
         try:
             slot_pool.write_json(self.path, {"version": RECORD_VERSION, **record})
         except OSError as exc:
@@ -466,4 +494,12 @@ class WriteGate(BaseThrottler):
         else:
             unsaved = False
         with self._mutex:
-            self._unsaved = unsaved
+            self._memory = self._merged(record, seen)
+            self._unsaved = unsaved or self._fallbacks != seen
+
+    def _merged(self, record: dict[str, float], seen: int) -> dict[str, float]:
+        """（`_mutex` の中で呼ぶ）記録の写し。`seen` の後にプロセスの中だけで変えた時刻があれば遅い方を採る。"""
+        if self._fallbacks == seen:
+            return dict(record)
+        memory = _rewound(dict(self._memory), record["written_at"])
+        return {**record, **{key: max(record[key], memory[key]) for key in TIMES}}

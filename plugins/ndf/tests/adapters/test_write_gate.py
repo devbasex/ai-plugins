@@ -9,6 +9,7 @@ import asyncio
 import json
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -244,22 +245,13 @@ def test_eight_threads_get_distinct_spaced_reservations(path):
 
 
 def test_two_gates_on_one_record_are_spaced(path, clock):
-    # 別のプロセスの WriteGate と同じく、プロセスの中の記録を共有しない 2 つが同じ記録で予約する
-    gates = [write_gate.WriteGate(path, clock, clock.sleep) for _ in range(2)]
-    start = threading.Barrier(2)
-    got: list[float] = []
+    # 別のプロセスの WriteGate と同じく、プロセスの中の記録を共有しない 2 つが同じ記録を引き継ぐ。
+    # 予約の間の排他は test_the_record_lock_is_held_while_reserving が確かめる
+    first, second = (write_gate.WriteGate(path, clock, clock.sleep) for _ in range(2))
 
-    def take(gate: write_gate.WriteGate) -> None:
-        start.wait()
-        got.append(gate.reserve(WRITE).at)
+    got = [first.reserve(WRITE).at, second.reserve(WRITE).at]
 
-    threads = [threading.Thread(target=take, args=(g,)) for g in gates]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert abs(got[0] - got[1]) >= W - EPS
+    assert got[1] - got[0] >= W - EPS
 
 
 def test_the_record_lock_is_held_while_reserving(gate, path):
@@ -293,24 +285,39 @@ def _no_entry(uid: int):
     raise KeyError(uid)
 
 
-def test_gate_path_falls_back_to_home_for_a_uid_outside_passwd(tmp_path, monkeypatch, capsys):
+def test_a_uid_outside_passwd_shares_one_place_whatever_the_environment(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(write_gate.pwd, "getpwuid", _no_entry)
-    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    monkeypatch.setattr(write_gate, "SHARED_TMP", tmp_path)
+    got = []
+    for home in (str(tmp_path / "a"), str(tmp_path / "b"), None):
+        if home is None:
+            monkeypatch.delenv("HOME", raising=False)
+        else:
+            monkeypatch.setenv("HOME", home)
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "t"))
+        got.append(write_gate.gate_path())
 
-    assert write_gate.gate_path() == tmp_path / "h" / ".local" / "state" / "ndf-github" / write_gate.GATE_FILE
+    place = tmp_path / f"ndf-github-{write_gate.os.getuid()}"
+    assert got == [place / ".local" / "state" / "ndf-github" / write_gate.GATE_FILE] * 3
+    assert place.stat().st_mode & 0o777 == 0o700
+    assert write_gate.pr_lock("o/r", 1).lock_file == str(place / ".local" / "state" / "ndf-github" / "pr" / "o__r__1.lock")
     assert "passwd に無い" in capsys.readouterr().err
 
 
-def test_gate_path_falls_back_to_the_temp_dir_without_home(tmp_path, monkeypatch):
+def test_a_uid_place_open_to_others_falls_back_to_a_private_dir(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(write_gate.pwd, "getpwuid", _no_entry)
-    monkeypatch.delenv("HOME", raising=False)
-    monkeypatch.setattr(write_gate.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(write_gate, "SHARED_TMP", tmp_path / "shared")
+    monkeypatch.setattr(write_gate.tempfile, "tempdir", str(tmp_path / "private"))
+    (tmp_path / "private").mkdir()
+    (tmp_path / "shared" / f"ndf-github-{write_gate.os.getuid()}").mkdir(parents=True, mode=0o777)
+    (tmp_path / "shared" / f"ndf-github-{write_gate.os.getuid()}").chmod(0o777)
     write_gate._private_home.cache_clear()
 
     try:
         got = write_gate.gate_path()
-        assert got.is_relative_to(tmp_path) and got == write_gate.gate_path()
+        assert got.is_relative_to(tmp_path / "private") and got == write_gate.gate_path()
         assert got.parents[3].stat().st_mode & 0o777 == 0o700
+        assert "持ち主か権限が違う" in capsys.readouterr().err
     finally:
         write_gate._private_home.cache_clear()
 
@@ -390,6 +397,20 @@ def test_an_unwritable_record_keeps_the_send_spacing(gate, path, clock, unwritab
         sent_at = clock.now
 
     assert sent_at >= finished + W - EPS
+
+
+def test_a_fallback_change_while_saving_is_kept_and_written_later(gate, path):
+    # 記録のロックを持つ保存の途中で、ロックを取れなかった別のスレッドがプロセスの中の記録だけを変える
+    seed(path)
+
+    def change(record: dict, now: float) -> None:
+        gate._in_process(lambda memory, now: memory.__setitem__("blocked_until", now + 30))
+
+    gate._apply(change)
+
+    assert gate._unsaved
+    assert gate.reserve(WRITE).at >= NOW + 30
+    assert record(path)["blocked_until"] == pytest.approx(NOW + 30)
 
 
 def test_the_record_written_again_carries_the_unsaved_changes(gate, path, monkeypatch):
@@ -609,6 +630,50 @@ def test_async_acquire_takes_the_locks_off_the_event_loop(gate, path, monkeypatc
 
     assert threads and loop_thread not in threads
     assert record(path)["sent_next"] == pytest.approx(NOW + W)
+    probe = slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE))
+    assert probe is not None
+    probe.release()
+
+
+def test_async_release_runs_while_the_default_pool_waits_for_the_send_lock(gate, path, clock):
+    # 既定のスレッドプールを 1 本にし、後の書き込みが送信のロックを待ってその 1 本を埋める
+    released = threading.Event()
+    on_loop: dict = {}
+    real_finish, real_send = gate._finish, gate._send_lock
+    calls: list[int] = []
+
+    def finish(kind, send):
+        real_finish(kind, send)
+        clock.now += W  # 送り終えてから間隔が過ぎた（後の書き込みを本物の時間で眠らせない）
+        released.set()
+
+    def send_lock():
+        calls.append(1)
+        if len(calls) == 2:
+            on_loop["loop"].call_soon_threadsafe(on_loop["waiting"].set)
+            assert released.wait(10)
+        return real_send()
+
+    gate._finish, gate._send_lock = finish, send_lock
+    request = httpx.Request("PATCH", "https://api.github.com/repos/o/r/issues/1")
+
+    async def second() -> None:
+        async with gate.async_acquire(request):
+            pass
+
+    async def main() -> None:
+        on_loop["loop"] = asyncio.get_running_loop()
+        on_loop["loop"].set_default_executor(ThreadPoolExecutor(max_workers=1))
+        on_loop["waiting"] = asyncio.Event()
+        async with gate.async_acquire(request):
+            clock.now += W  # 後の書き込みの予約を今にする
+            later = asyncio.ensure_future(second())
+            await on_loop["waiting"].wait()
+        await asyncio.wait_for(later, 10)
+
+    asyncio.run(main())
+
+    assert released.is_set() and len(calls) == 2
     probe = slot_pool.try_lock(path.with_name(write_gate.SEND_LOCK_FILE))
     assert probe is not None
     probe.release()
