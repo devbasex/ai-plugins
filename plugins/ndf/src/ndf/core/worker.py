@@ -24,6 +24,8 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 
 ndf worker run --kind <種類> --prompt-file <本文> --result-file <結果> --cwd <作業場所> --state-dir <保存先> [--sources <JSON>] [--timeout <秒>]
     worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する
+ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>
+    報告の保存先を用意する。前の完了マーカーと結果ファイルを消し、報告を空にして 3 つの絶対パスを metrics.paths に返す
 ndf worker closing-check --base <参照> [--cwd <作業場所>]
     `<参照>..HEAD` のコミットに closing keywords があれば refused で止める（push の前に打つ）
 ndf worker plan-edit <plan.json> --new <新しい中身> --reason <理由> [--state-dir <保存先>]
@@ -57,7 +59,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.adapters import claude, git
-from ndf.contracts import causes, exit_codes, result
+from ndf.contracts import causes, exit_codes, result, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable_locks
 from ndf.core.plan import files as plan_files
@@ -699,6 +701,48 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
+def _paths_of(directory: str, name: str) -> worker_paths.ReportPaths:
+    try:
+        return worker_paths.report_paths(Path(directory), name)
+    except worker_paths.NameInvalid as exc:
+        raise WorkerError("invalid", str(exc)) from None
+
+
+def _reset(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths) -> tuple[str, str]:
+    """3 つの名前を先に確かめてから、完了マーカー → 結果ファイル → 報告（空にする）の順に変える。
+
+    前の報告が消えるのは完了マーカーと結果ファイルが消えた後だけなので、どこで止まっても「前の完了マーカーが
+    残るのに報告が空」の組は起きない。
+    """
+    for entry in (paths.report, paths.done, paths.result):
+        worker_paths.entry_state(wd, entry.name)
+    done = worker_paths.remove_file(wd, paths.done.name)
+    removed = worker_paths.remove_file(wd, paths.result.name)
+    worker_paths.write_file(wd, paths.report.name, "")
+    return done, removed
+
+
+def _cmd_prepare(a: argparse.Namespace) -> int:
+    """報告の保存先を用意し、3 つの絶対パスを `metrics.paths` に返す（#3877）。失敗のときはパスを返さない。"""
+    paths = _paths_of(a.dir, a.name)
+    try:
+        Path(a.dir).mkdir(parents=True, exist_ok=True)
+        with worker_paths.open_workdir(paths.report.parent) as wd:
+            done, removed = _reset(wd, paths)
+    except worker_paths.EntryUnsafe as exc:
+        raise WorkerError("invalid", f"{paths.report.parent / exc.name} はリンク数が 1 の通常のファイルでない（{exc.kind}）") from None
+    except OSError as exc:  # 利用者の入力: 作れない・消せない・書けない保存先は呼び出しの誤り
+        raise WorkerError("invalid", f"報告の保存先 {paths.report.parent} を用意できない: {exc.strerror or exc}") from None
+    items = [
+        {"kind": "report", "path": str(paths.report), "action": "created"},
+        {"kind": "done", "path": str(paths.done), "action": done},
+        {"kind": "result", "path": str(paths.result), "action": removed},
+    ]
+    shown = {"report": str(paths.report), "done": str(paths.done), "result": str(paths.result)}
+    summary = f"報告の保存先を用意した（報告 {paths.report}・完了マーカー {paths.done}・結果 {paths.result}）"
+    return result.emit(result.result(TOOL, OK, summary, items, {"paths": shown}))
+
+
 def _add_run(sub: Any) -> None:
     rn = sub.add_parser("run", help="worker を起動し、結果ファイルが書かれるまで再起動する")
     for name in ("--kind", "--prompt-file", "--result-file", "--cwd", "--state-dir"):
@@ -737,10 +781,17 @@ def _add_attention(sub: Any) -> None:
     at.set_defaults(fn=_cmd_attention)
 
 
+def _add_prepare(sub: Any) -> None:
+    pr = sub.add_parser("prepare", help="報告の保存先を用意し、前の完了マーカーと結果ファイルを消す")
+    pr.add_argument("--dir", required=True)
+    pr.add_argument("--name", required=True)
+    pr.set_defaults(fn=_cmd_prepare)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=TOOL, description="worker の規則文と受け渡し")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for add in (_add_run, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention):
+    for add in (_add_run, _add_prepare, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention):
         add(sub)
     return p
 

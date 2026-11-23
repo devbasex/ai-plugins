@@ -101,6 +101,27 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "prepare",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--dir": {
+          "type": "string"
+        },
+        "--name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--dir",
+        "--name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "run",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
