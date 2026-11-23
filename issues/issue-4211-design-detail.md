@@ -271,7 +271,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `batch_lock` | `src/ndf/progress/plan/batch_claims.py` | 新設 | `(seconds: float) -> ContextManager[None]` | `<状態の保存先>/parallel/batches/batches.lock` の flock（すべてのコマンドがこの 1 つのパスを開く。`locations.json` の行も同じパス）。`machine.admit_lock` と同じ待ち方で、取れなければ `LockBusy` |
 | `owner_of` | 同上 | 新設 | `(record: dict) -> SlotOwner` | 記録の DB の参照（`db`。下の「持ち主の DB の参照」）から持ち主の DB の URL を解き、`state_dir` の計画を開いて `SlotOwner`（計画の状態・その id の `batch_claimed` があるか・`batch_closed` があるか・担い手の行が実行中か）を返す。呼び手の `NDF_PROGRESS_DB` と `store.default_url` は、参照と同じ DB を指すと確かめられたときだけ使う。DB は開けたが計画が無い（消された）なら `SlotOwner.gone`。参照から DB を特定できない（呼び手の接続先が参照と違う・参照のファイルが無い）なら `OwnerUnresolved`、DB につながらない・読み取りが失敗したなら `OwnerUnreadable` を投げる（どちらも空きとみなさない） |
-| `db_ref` | 同上 | 新設 | `(url: str) -> str` | 記録に書く DB の参照を作る。SQLite は DB のファイルの絶対パス（`store.sqlite_path` の解決後）、ほかは `<ドライバー>://<ホスト>:<ポート>/<DB 名>`（利用者名・パスワード・問い合わせの引数を落とす）。認証情報を記録へ書かない |
+| `db_ref` | 同上 | 新設 | `(url: str) -> str` | 記録に書く DB の参照を作る。SQLite は DB のファイルの絶対パス（`store.sqlite_path` の解決後）、ほかは `<ドライバー>://<ホスト>:<ポート>/<DB 名>?<接続先を変える引数>`。接続先を変える問い合わせの引数（`host`・`hostaddr`・`port`・`dbname`・`service`）は、キーの順に並べて参照に残す（どれも認証情報を含まない）。利用者名・パスワードと、そのほかの問い合わせの引数（`sslpassword`・`passfile` など認証にかかわるものを含む）は落とし、認証情報を記録へ書かない。接続先を URL から確定できない（ホストが URL のどこにも無く、`PGHOST` などの環境変数や既定のソケットで決まる）URL は `DbRefUnresolved` を投げる |
 | `slot_free` | 同上 | 新設 | `(record: Optional[dict], owner: Optional[SlotOwner]) -> bool` | 記録が無い・持ち主が `gone`・持ち主にその id の `batch_claimed` が無い（`assign` の書きかけの残骸）・その id の `batch_closed` がある・持ち主の計画が終わり（`completed`・`cancelled`）かつ担い手の行が実行中でない、のどれかなら真。`paused` と `running` は、担い手の行の状態によらず偽 |
 | `claim_slot` | 同上 | 新設 | `(kind: str, key: str, own: SlotRef, write: bool) -> Optional[dict]` | `batch_lock` の中で呼ぶ。記録を読み、`owner_of` と `slot_free` が偽ならその記録を返す（`OwnerUnreadable` はそのまま上げる）。真で `write` なら自分の記録を書き、None を返す |
 | `release_slot` | 同上 | 新設 | `(kind: str, key: str, own: SlotRef) -> None` | `batch_lock` を取り、記録の持ち主の組が `own` と同じときだけ消す |
@@ -284,6 +284,8 @@ flowchart LR
 | --- | --- | --- |
 | SQLite のファイルのパス | そのパスの SQLite（呼び手の `NDF_PROGRESS_DB` を見ない） | ファイルが無い: `OwnerUnresolved`（DB ごと消えたのか、別のマシンの記録か見分けられないため、空きとみなさない） |
 | サーバーの DB の参照 | 呼び手の `NDF_PROGRESS_DB` を `db_ref` に通した値が記録の `db` と同じなら、その URL（認証情報は呼び手のもの） | 呼び手に `NDF_PROGRESS_DB` が無いか違う DB を指す: `OwnerUnresolved` |
+
+`db_ref` が `DbRefUnresolved` を投げたとき、書き手（`claim_slot(write=True)`）は記録を書かずに `assign` を `stopped`・`precondition`（「`NDF_PROGRESS_DB` にホストを書く」）で返し、読み手（`owner_of` が呼び手の URL を照らす所）は `OwnerUnresolved` にする。どちらも同一性を確かめられない URL を同じ DB とみなさない。
 
 `OwnerUnresolved` と `OwnerUnreadable` は、どちらも記録を上書きせず枠を保つ。`assign` は前者を `stopped`・`precondition`（記録の `db`・計画・まとめの id と「その DB を指す `NDF_PROGRESS_DB` で打ち直すか、持ち主の計画のオーガナイザーが閉じるのを待つ」）、後者を `stopped`・`transient` で返す。
 
@@ -301,7 +303,7 @@ flowchart LR
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `claim_slot` | 空きで書き、使用中で記録を返す | 持ち主の計画が `completed`・消された・`batch_closed` あり・その id の `batch_claimed` 無し（残骸）で空き。`cancelled` で担い手の行が終わっていれば空き | 別の保存先の 2 つの計画を差し替えた錠の待ち合わせで同時に打つと片方だけが書く。持ち主が `paused`、または `cancelled` で担い手の行が実行中なら使用中。差し替えた読みで DB の接続を失敗させると `transient` で、記録を上書きしない。持ち主が SQLite の DB で書いた記録を、別の `NDF_PROGRESS_DB` を持つ呼び手が読んでも記録のパスの DB を開き、使用中と判定する。サーバーの DB の記録を、別のサーバーを指す呼び手が読むと `precondition` で記録を上書きしない。記録に利用者名とパスワードが載らない |
+| `claim_slot` | 空きで書き、使用中で記録を返す | 持ち主の計画が `completed`・消された・`batch_closed` あり・その id の `batch_claimed` 無し（残骸）で空き。`cancelled` で担い手の行が終わっていれば空き | 別の保存先の 2 つの計画を差し替えた錠の待ち合わせで同時に打つと片方だけが書く。持ち主が `paused`、または `cancelled` で担い手の行が実行中なら使用中。差し替えた読みで DB の接続を失敗させると `transient` で、記録を上書きしない。持ち主が SQLite の DB で書いた記録を、別の `NDF_PROGRESS_DB` を持つ呼び手が読んでも記録のパスの DB を開き、使用中と判定する。サーバーの DB の記録を、別のサーバーを指す呼び手が読むと `precondition` で記録を上書きしない。ホストを問い合わせの `host` だけで変えた 2 つの PostgreSQL の URL が別の参照になり、後の呼び手が `precondition` で記録を上書きしない。ホストの無い URL（`postgresql:///ndf`）は書き手でも読み手でも `precondition`。記録に利用者名・パスワード・`sslpassword` が載らない |
 | `release_slot` | 同じ持ち主の組で消す | 別の保存先の同じ名前の計画（同じまとめの id）の記録を消さない | — |
 
 ## 種類 `batch` の行（`launch`・`command`・`liveness`）
