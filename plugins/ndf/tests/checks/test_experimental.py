@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.checks import experimental
+from ndf.checks import experimental, run
 from ndf.checks.model import CheckError, Scope
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +96,23 @@ def test_unreadable_table_stops_the_check(plugin, rules, table):
         _check(plugin, rules)
 
 
+def test_link_to_outside_the_repository_is_not_read(plugin, rules, table, tmp_path):
+    outside = tmp_path / "outside.py"
+    outside.write_text(f"X = '{_needle()}'\n", encoding="utf-8")
+    (plugin.root / "link.py").symlink_to(outside)
+    assert _check(plugin, rules) == []
+
+
+def test_table_linked_to_outside_the_repository_is_not_read(plugin, rules, table, tmp_path):
+    outside = tmp_path / "table.json"
+    outside.write_text("{", encoding="utf-8")
+    table.unlink()
+    table.symlink_to(outside)
+    assert _check(plugin, rules) == []
+
+
 def test_this_repository_has_no_reference(rules):
     repo = PLUGIN_ROOT.parents[1]
-    assert experimental.check(Scope(repo, PLUGIN_ROOT, "ndf"), rules) == []
+    scope = Scope(repo, PLUGIN_ROOT, "ndf")
+    scope.sources = run.collect(PLUGIN_ROOT, repo)
+    assert experimental.check(scope, rules) == []

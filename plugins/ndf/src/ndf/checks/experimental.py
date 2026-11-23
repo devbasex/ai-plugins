@@ -1,7 +1,8 @@
 """規則 experimental: 既定で動くものから実験版の保存先への参照を違反にする。
 
 実験版はプラグインの根（取得元が配るディレクトリ）の外の保存先（保存先の表 `locations` の行 `experimental`）に置き、`ndf` のパッケージに
-入らない。そのため import の形は見ず、プラグインの根の下で配るファイルの本文に保存先のパスが現れることを参照とみなす。
+入らない。そのため import の形は見ず、プラグインの根の下の見るファイル（検査が集めた文字のファイル）の本文に保存先のパスが
+現れることを参照とみなす。
 利用者向けの説明（`README.md`・`CHANGELOG.md`・`docs/`）は実験版を紹介してよく、保存先のパスを持つのが役目のもの
 （`EXEMPT_FILES` と `EXEMPT_VALUES`）は数えない。
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import contracts
-from ndf.checks.model import SKIP_DIRS, CheckError, Finding, Scope
+from ndf.checks.model import CheckError, Finding, Scope, Source
 from ndf.contracts import facts
 
 # 規則の名前と、保存先の表の実験版の行の id は、どちらもこのモジュールの名前（表の id を文字列リテラルで写さない）
@@ -40,31 +41,23 @@ EXEMPT_VALUES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _needle(scope: Scope) -> str | None:
-    """見る範囲の保存先の表の、実験版の行の保存先。表かその行が無ければ `None`、表が読めなければ `CheckError`。"""
-    path = scope.plugin_root / table_rel()
-    if not path.is_file():
+def _inside(scope: Scope) -> list[Source]:
+    """見るファイル（検査が集めた `scope.sources`）のうち、解決した先がリポジトリの中のもの。外を指すリンクの本文は読まない。"""
+    root = scope.repo_root.resolve()
+    return [s for s in scope.sources if s.path.resolve().is_relative_to(root)]
+
+
+def _needle(sources: list[Source], table: Path) -> str | None:
+    """保存先の表の、実験版の行の保存先。表かその行が無ければ `None`、表が読めなければ `CheckError`。"""
+    src = next((s for s in sources if s.path == table), None)
+    if src is None:
         return None
     try:
-        rows = json.loads(path.read_text(encoding="utf-8"))["rows"]
+        rows = json.loads(src.text)["rows"]
         found = [r["path"] for r in rows if r["id"] == ROW_ID]
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CheckError(f"保存先の表を読めない: {path}: {exc}") from exc
+        raise CheckError(f"保存先の表を読めない: {table}: {exc}") from exc
     return found[0] if found else None
-
-
-def _files(scope: Scope) -> list[Path]:
-    """プラグインの根の下で配るファイル（`SKIP_DIRS` の下を除く）。"""
-    base = scope.rel(scope.plugin_root)
-    found = []
-    for top in sorted(scope.plugin_root.iterdir()):
-        if top.name in SKIP_DIRS:
-            continue
-        if top.is_file():
-            found.append(top)
-            continue
-        found += [p for p in scope.repo_files(f"{base}/{top.name}/**/*") if not SKIP_DIRS.intersection(p.parts)]
-    return found
 
 
 def _strings(value: Any, route: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], str]]:
@@ -91,14 +84,13 @@ def _json_lines(path: Path, text: str, needle: str, exempt: tuple[str, ...]) -> 
     return sorted({text[: max(text.find(json.dumps(s, ensure_ascii=False)[1:-1]), 0)].count("\n") + 1 for s in hits})
 
 
-def _lines(path: Path, rel: str, needle: str) -> list[int]:
-    """保存先のパスが現れる行。読めない（文字でない）ファイルは本文を見ない。"""
-    raw = path.read_bytes()
-    if needle.encode() not in raw:
+def _lines(src: Source, rel: str, needle: str) -> list[int]:
+    """保存先のパスが現れる行。"""
+    text = src.text
+    if needle not in text:
         return []
-    text = raw.decode("utf-8", errors="replace")
     if rel in EXEMPT_VALUES:
-        return _json_lines(path, text, needle, EXEMPT_VALUES[rel])
+        return _json_lines(src.path, text, needle, EXEMPT_VALUES[rel])
     return [n for n, line in enumerate(text.splitlines(), 1) if needle in line]
 
 
@@ -107,14 +99,18 @@ def _allowed(rel: str) -> bool:
 
 
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    """既定で動くもの（プラグインの根の下で配るファイル）から実験版の保存先への参照を違反にする。"""
-    needle = _needle(scope)
+    """既定で動くもの（プラグインの根の下の見るファイル）から実験版の保存先への参照を違反にする。
+
+    ファイルの列挙と本文は検査が集めた `scope.sources` を使い、ここで列挙し直さない。
+    """
+    sources = _inside(scope)
+    needle = _needle(sources, scope.plugin_root / table_rel())
     if needle is None:
         return []
     found = []
-    for path in _files(scope):
-        rel = path.relative_to(scope.plugin_root).as_posix()
+    for src in sources:
+        rel = scope.plugin_rel(src)
         if _allowed(rel):
             continue
-        found += [Finding(RULE, scope.rel(path), n, rules[RULE]["summary"]) for n in _lines(path, rel, needle)]
+        found += [Finding(RULE, src.rel, n, rules[RULE]["summary"]) for n in _lines(src, rel, needle)]
     return found

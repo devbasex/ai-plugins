@@ -93,14 +93,16 @@ def check(
 ) -> list[Finding]:
     """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
 
-    設定を読む規則（`SETTINGS_RULES`）は、`only` が無いか `only` に名前があるときだけ当てる。
+    設定を読む規則（`SETTINGS_RULES`）と規則 experimental は、`only` が無いか `only` に名前があるときだけ当てる。
     """
     found = unparsable(scope)
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
-    found += spec_docs.check(scope, rules, write_spec, written) + experimental.check(scope, rules)
+    found += spec_docs.check(scope, rules, write_spec, written)
+    if not only or experimental.RULE in only:
+        found += experimental.check(scope, rules)
     for name, rule in SETTINGS_RULES.items():
         if not only or name in only:
             found += rule(scope, rules)
