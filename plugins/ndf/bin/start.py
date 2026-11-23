@@ -45,6 +45,9 @@ CALLER_ENV = {
 }
 # 写しの空の値を「無かった」と読む変数（エントリポイントが無いときも空で写す）
 EMPTY_IS_UNSET = frozenset({"CLAUDE_PLUGIN_ROOT"})
+# 写しが無いとき、今の値を残す変数。エントリポイントが消した後に値があれば環境ファイル（UV_ENV_FILE）から uv が入れたもので、
+# NDF を通らない uv run と同じに子へ渡す（写しがあれば呼び出し元の値を優先する。uv も環境ファイルで既存の値を上書きしない）
+KEEP_WHEN_UNHELD = frozenset({"UV_ISOLATED"})
 
 
 def recorded_files(dist) -> list[str]:
@@ -99,6 +102,8 @@ def restore_caller_env(env: MutableMapping[str, str]) -> None:
         return
     for name, held in CALLER_ENV.items():
         value = env.pop(held, None)
+        if value is None and name in KEEP_WHEN_UNHELD:
+            continue
         if value is None or (not value and name in EMPTY_IS_UNSET):
             env.pop(name, None)
         else:

@@ -110,6 +110,19 @@ def test_another_plugins_root_comes_back_as_the_callers_value(start):
     assert env == {"CLAUDE_PLUGIN_ROOT": "/other-plugin", "PATH": "/a"}
 
 
+def test_uv_isolated_from_the_env_file_stays_without_a_callers_copy(start):
+    # 呼び出し元に UV_ISOLATED が無く、UV_ENV_FILE から uv が入れた値は子へ残す
+    env = {"PATH": "/ndf-venv/bin:/usr/bin", "NDF_CALLER_PATH": "/usr/bin", "UV_ISOLATED": "1"}
+    start.restore_caller_env(env)
+    assert env == {"PATH": "/usr/bin", "UV_ISOLATED": "1"}
+
+
+def test_the_callers_uv_isolated_wins_over_the_env_file(start):
+    env = {"NDF_CALLER_UV_ISOLATED": "0", "UV_ISOLATED": "1"}
+    start.restore_caller_env(env)
+    assert env == {"UV_ISOLATED": "0"}
+
+
 def test_a_start_not_through_the_entrypoint_keeps_the_environment(start):
     # 写しが 1 つも無い（bin/ndf を通らずに start.py を打った）ときは何も変えない
     env = {"UV_PROJECT_ENVIRONMENT": "/v", "VIRTUAL_ENV": "/v", "PATH": "/v/bin", "PYTHONPATH": "/src"}

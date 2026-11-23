@@ -45,7 +45,7 @@ NDF の extras が消える）。プロセスを起動する箇所は多く、1 
 | ---: | --- | --- |
 | 1 | `bin/ndf` | export の前に、呼び出し元の `UV_PROJECT_ENVIRONMENT`・`VIRTUAL_ENV`・`UV_RUN_RECURSION_DEPTH`・`PATH`・`PYTHONPATH` を `NDF_CALLER_<名前>` へ写す。あれば空でも写し、無ければ写しを消す（外側の `ndf` の写しを残さない）。`CLAUDE_PLUGIN_ROOT` は `NDF_CALLER_PLUGIN_ROOT` へ写す（無ければ空） |
 | 2 | `bin/ndf` | 自分の値を export して `uv run ... python -P bin/start.py` を打つ |
-| 3 | `bin/start.py` の `restore_caller_env` | 依存の環境の欠けを確かめた後、自分のパッケージを呼ぶ前に、`CALLER_ENV` の写しから呼び出し元の値へ戻し、写しを消す。`CLAUDE_PLUGIN_ROOT` だけは空の写しを「無かった」と読む（`EMPTY_IS_UNSET`） |
+| 3 | `bin/start.py` の `restore_caller_env` | 依存の環境の欠けを確かめた後、自分のパッケージを呼ぶ前に、`CALLER_ENV` の写しから呼び出し元の値へ戻し、写しを消す。`CLAUDE_PLUGIN_ROOT` だけは空の写しを「無かった」と読む（`EMPTY_IS_UNSET`）。`UV_ISOLATED` は写しが無ければ消さず、環境ファイル（`UV_ENV_FILE`）から uv が入れた値を残す（`KEEP_WHEN_UNHELD`） |
 | 4 | `ndf.cli.ndf_command` | 自分のサブコマンドを子で打つ argv を `python -I [-X utf8=<値>] -c <起動の 1 行> <src> <引数>...` で組む |
 
 自分の import の道（`sys.path`）は起動のときに決まっているので、手順 3 で `PYTHONPATH` を戻しても自分の import は変わらない。
