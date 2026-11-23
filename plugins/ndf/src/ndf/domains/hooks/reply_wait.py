@@ -82,48 +82,6 @@ OPERATION_VERBS = (
 )
 # 回答・判断を求める語。操作の動詞と並んでも待ちに残す
 REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビュー", "返事", "指示", "意見", "知らせ", "決め")
-# 見出しの問いを利用者への承認・許可の依頼と読む形（「このままマージしてよいですか？」）。承認の語（「承認」「マージ」）の
-# 出現だけでは依頼にしない（「マージの承認は必要ですか？」は事実を問う章題）
-_PERMISSION_ASKS = (
-    "てよいですか",
-    "てよろしいですか",
-    "てもよいですか",
-    "てもよろしいですか",
-    "てもいいですか",
-    "ていいですか",
-    "でよいですか",
-    "でよろしいですか",
-    "でよろしいでしょうか",
-    "でいいですか",
-    "てよいか",
-    "てもよいか",
-    "でよいか",
-    "てよければ",
-    "でよければ",
-    "よろしければ",
-    "問題なければ",
-)
-# 利用者に何かをしてもらう問いの形（「ご確認いただけますか？」）。回答・承認の語と並ぶときだけ依頼にする
-_FAVOR_ASKS = ("いただけますか", "いただけませんか", "もらえますか", "もらえませんか", "くれますか", "くれませんか")
-# 見出しの問いを選択肢から選ばせる問いと読む語（「どちらの案で進めますか？」）。手段を問う「どのように」は数えない
-_CHOICE_ASK = re.compile(r"どちら|どっち|どれ|いずれ|選|どの(?!よう|程度|くらい|ぐらい)")
-# 進め方・方針を決めさせる問い（「どう進めますか？」「どうしますか？」）。下の箇条書きは選択肢
-_DECISION_ASK = re.compile(r"進め|方針|どうしますか|どうしましょうか|どうするか")
-# 手段を尋ねる問い（「どうやって移行を進めますか？」）。下の箇条書きは手順で、項目が案の形のときだけ選択肢
-_METHOD_ASK = re.compile(r"どうやって|どのように|どうすれば|どうしたら|方法|手順|やり方")
-# 箇条書きの項目が選択肢であることを示す頭（「案 A: …」「A. …」「選択肢 1」「Option B」）
-_OPTION_ITEM = re.compile(r"^(?:案|選択肢|オプション|option|プラン|plan)\s*\S|^[A-ZＡ-Ｚ]\s*[:：.)）]", re.IGNORECASE)
-# 疑問の語。これを含む問いは実行の提案にしない
-_INTERROGATIVES = ("どう", "どの", "どこ", "どれ", "どちら", "どんな", "何", "なに", "なぜ", "いつ", "誰", "いくつ", "いくら")
-# 実行の提案と読む形。申し出の「ましょうか」と、今の状態のまま操作するかを尋ねる「このまま…ますか」だけを確かな問いにする。
-# ほかの「…ますか？」は、実行の提案（「既存の設定を使いますか？」）と状態の質問（「再起動後も残りますか？」）を語尾で
-# 分けられないので、確かな問いにも章題にもせずモデルの判定へ回す（`_heading_kind` の UNSURE）
-_OFFER_ENDINGS = ("ましょうか",)
-_PROCEED_MARKERS = ("このまま",)
-# 見出しの問いに直下の本文が答えている頭（FAQ の「はい、変更できます。」）。言い切りの語尾（「マージできます。」
-# 「レビューが必要です。」）は承認の判断材料の報告にも現れるので、答えの印にしない
-_ANSWER_HEAD = re.compile(r"^(?:はい|いいえ|いえ|yes|no)(?:[、，,。.!！\s]|$)", re.IGNORECASE)
-
 # 見出しの種類（`_heading_kind` の返り）
 ASKS = "asks"
 UNSURE = "unsure"
@@ -197,9 +155,9 @@ class ProseLine(NamedTuple):
 
 
 def prose_lines(text: str) -> list[ProseLine]:
-    """コードのブロック・引用・表を除いた、空でない行。見出しは `heading` の印を付けて残す。
+    """コードのブロック・引用・表を除いた、空でない行。見出しは `heading` を真にして残す。
 
-    見出しは最後の 3 行にも完了の報告の文にも数えず、利用者への問いの見出し（`_heading_kind`）だけを待ちの
+    見出しは最後の 3 行にも完了の報告の文にも数えず、利用者への質問の見出し（`_heading_kind`）だけを待ちの
     候補にする（`_waits`）。
     コードのブロック（囲みの種類と長さ・インデントのコード）は CommonMark の解析（`markdown.code_lines`）で決める。
     本文の全行の抜き出しはこの 1 つだけで行う。呼び手は返りを持ち、`prose_kind` へ渡す（1 回の Stop で 2 回しない）。
@@ -233,74 +191,16 @@ def _last_lines(lines: list[ProseLine]) -> list[str]:
 
 
 def _heading_kind(lines: list[ProseLine], at: int) -> str | None:
-    """`at` の見出しの種類。利用者への確かな問いは ASKS、問いの形だが判断できないものは UNSURE、章題は None。
+    """`at` の見出しの種類。利用者への確かな質問は ASKS、質問の形だが判断できないものは UNSURE、章題は None。
 
-    見出しが回答・承認を待つ文を持つときだけ問いの候補にする。後に本文の行が無い（「## このまま進めてよいですか？」で
-    終える）なら ASKS。直下の最初の行が「はい」「いいえ」で始まる答えなら章題（「## 設定ファイルを変更してもよいですか？」
-    の下の「はい、変更できます。」）。利用者への依頼か実行の提案（`_requests_user`。「## このままマージしてよいですか？」
-    「## 確認してください」の下に報告と結び）と、選択肢を選ばせる問い（`_offers_choices`。「## どう進めますか？」の下に
-    案の箇条書き）は ASKS。残りの問い（「## 既存の設定を使いますか？」「## この設定は再起動後も残りますか？」
-    「### どうやって設定しますか？」の下の説明や手順）は、語の形で利用者への問いか章題かを決められないので UNSURE に
-    する。UNSURE はルールで待ちにも定型の結びの通過にもせず、軽いモデルの判定へ回す（`prose_kind`）。
+    見出しが回答・承認を待つ文を持つときだけ質問の候補にする。後に本文の行が無い（「## このまま進めてよいですか？」で
+    終える）ときだけ ASKS。後に本文が続く質問の見出しは、利用者への質問（「## どちらの案で進めますか？」の下に案）か
+    章題（「## どうやって設定しますか？」の下に手順、FAQ の答え）かを語の形で決められないので UNSURE にする。
+    UNSURE はルールで待ちにも定型の結びの通過にもせず、軽いモデルの判定へ回す（`prose_kind`）。
     """
-    asks = [s for s in _sentences([lines[at].text]) if _asks_reply(s)]
-    if not asks:
+    if not any(_asks_reply(s) for s in _sentences([lines[at].text])):
         return None
-    below: list[ProseLine] = []
-    for line in lines[at + 1 :]:
-        if line.heading:
-            break
-        below.append(line)
-    if not any(not line.heading for line in lines[at + 1 :]):
-        return ASKS
-    if _answers(below):
-        return None
-    if any(_requests_user(s) for s in asks) or _offers_choices(asks, below):
-        return ASKS
-    return UNSURE
-
-
-def _answers(below: list[ProseLine]) -> bool:
-    """見出しの直下の最初の行が、見出しの問いへの答え（「はい、…」「いいえ、…」）か。箇条書きの項目は答えにしない。"""
-    if not below or below[0].bullet:
-        return False
-    first = _sentences([below[0].text])[:1]
-    return bool(first) and _ANSWER_HEAD.match(_core(first[0])) is not None
-
-
-def _offers_choices(asks: list[str], below: list[ProseLine]) -> bool:
-    """見出しの問いの直下が、選ばせる選択肢の箇条書きか。
-
-    次の見出しまでの行がどれも箇条書きで、項目が案の形（「案 A: …」）か、問いが選ばせる形（「どちらの案で…」）か
-    進め方を決めさせる形（「どう進めますか？」）なら真。手段を尋ねる問い（「どうやって移行を進めますか？」）は、
-    項目が案の形のときだけ真（下の手順を選択肢にしない）。
-    """
-    if not below or not all(line.bullet for line in below):
-        return False
-    if len(below) >= 2 and all(_OPTION_ITEM.match(line.text) for line in below):
-        return True
-    if any(_METHOD_ASK.search(s) for s in asks):
-        return False
-    return any(_CHOICE_ASK.search(s) or _DECISION_ASK.search(s) for s in asks)
-
-
-def _requests_user(sentence: str) -> bool:
-    """文が利用者に承認・回答を直接求める依頼か、実行の提案か（事実・手段・状態を問う文でないか）。
-
-    許可を求める形（`_PERMISSION_ASKS`）・返事を待つと述べる文・回答や承認の語を持つ依頼（「確認してください」
-    「ご承認をお願いします」「ご確認いただけますか？」）・疑問の語を持たない申し出（「先に直しましょうか？」）と
-    「このまま…ますか？」（「このままマージしますか？」）を依頼にする。
-    """
-    core = _core(sentence).rstrip("?？")
-    if any(w in core for w in _PERMISSION_ASKS) or _user_wait(core):
-        return True
-    if not any(w in core for w in _INTERROGATIVES) and (
-        core.endswith(_OFFER_ENDINGS) or (core.endswith("ますか") and any(m in core for m in _PROCEED_MARKERS))
-    ):
-        return True
-    if not any(w in core for w in REPLY_WORDS + APPROVAL_WORDS):
-        return False
-    return any(w in core for w in WAIT_CONTAINS + _FAVOR_ASKS)
+    return UNSURE if any(not line.heading for line in lines[at + 1 :]) else ASKS
 
 
 def _opaque(match: re.Match[str]) -> str:
@@ -391,7 +291,7 @@ def _asks_reply(sentence: str) -> bool:
 
 
 def _waits(lines: list[ProseLine]) -> list[str]:
-    """本文の行（`prose_lines` の返り）の、利用者への問いの見出しと、見出しを除いた最後の行から、回答・承認を待つ文を取り出す。"""
+    """本文の行（`prose_lines` の返り）の、利用者への質問の見出しと、見出しを除いた最後の行から、回答・承認を待つ文を取り出す。"""
     headings = [line.text for i, line in enumerate(lines) if line.heading and _heading_kind(lines, i) == ASKS]
     return [s for s in _sentences(headings + _last_lines(lines)) if _asks_reply(s)]
 
@@ -500,14 +400,14 @@ def _closing_report(lines: list[ProseLine]) -> bool:
 
     本文の全部の文（引用を除いた行）を見る。末尾から定型の結びの文を外し、残りの文がどれも待ちの形でなく
     丁寧の過去の言い切り（`_REPORT_ENDINGS`）で終わるときだけ真。結びの前に質問・承認のリクエスト・言い切らない文が
-    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。判断できない問いの見出し（`_heading_kind` の UNSURE）が
+    あれば偽（ルールの待ちか、軽いモデルの判定へ回す）。判断できない質問の見出し（`_heading_kind` の UNSURE）が
     あっても偽。括弧書きの中に待ちの形の文（「（このままマージしてよいですか）」）
     があっても偽。最後の行の最後の文が定型の結びでなければ、本文全体を文に分けずに偽を返す。
     """
-    # 問いの形だが利用者への問いか章題か決められない見出し（UNSURE）があれば、軽いモデルの判定へ回す
+    # 質問の形だが利用者への質問か章題か決められない見出し（UNSURE）があれば、軽いモデルの判定へ回す
     if any(line.heading and _heading_kind(lines, i) == UNSURE for i, line in enumerate(lines)):
         return False
-    # ほかの見出しは章題で、完了の報告の文に数えない（問いの見出しは `_waits` が先に待ちにする）
+    # ほかの見出しは章題で、完了の報告の文に数えない（質問の見出しは `_waits` が先に待ちにする）
     lines = [line for line in lines if not line.heading]
     if not lines:
         return False
