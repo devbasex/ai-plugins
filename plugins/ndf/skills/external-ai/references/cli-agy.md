@@ -97,7 +97,7 @@ invalid value "900" for flag -print-timeout: time: missing unit in duration "900
 
 既定の 5 分は、収束ループの監視の上限（上限の表 [limits.json](../../../contracts/limits.json) の `monitor.phase.*`。レビュー・反証・提案は
 1200 秒、適用・修正は 3600 秒）より短い。**CLI が先に打ち切ると結果ファイルが残らず、起動できなかった
-場合と区別が付かない。** 工程の上限 + 120 秒（`monitor.cli-margin`）を渡す。
+場合と区別が付かない。** 工程の上限 + 120 秒を渡す。
 
 ## 出力ストリーム
 

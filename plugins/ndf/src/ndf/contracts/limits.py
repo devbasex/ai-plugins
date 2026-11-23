@@ -57,6 +57,8 @@ class Policy(NamedTuple):
     runtimes: Optional[list[str]] = None
     auth_markers: Optional[list[str]] = None
     endpoint: Optional[dict[str, Any]] = None
+    # 読み手の指定: 方針を引くモジュールの名前（規則 `limit-readers` が実際の読み手と突き合わせる。値として引かない）
+    read_by: tuple[str, ...] = ()
 
 
 # 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ）は
@@ -67,7 +69,8 @@ VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optiona
 def validate(raw: object) -> dict[str, Policy]:
     """設定の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
     contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の設定 {NDF_SETTINGS}")
-    return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
+    rows = raw["policies"].items()  # type: ignore[index]
+    return {name: Policy(name=name, **{**row, "read_by": tuple(row["read_by"])}) for name, row in rows}
 
 
 @contracts.cached_reader

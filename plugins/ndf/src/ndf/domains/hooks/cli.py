@@ -76,7 +76,7 @@ def _stats(days: float) -> int:
 
 
 def _check_budget() -> int:
-    errors = budget.check_budget(tables.policies(), budget.registrations_of(tables.PLUGIN_ROOT))
+    errors = budget.check_budget(budget.registrations_of(tables.PLUGIN_ROOT))
     if errors:
         return result.emit(result.stopped(TOOL, "config_broken", f"hook の予算の破れが {len(errors)} 件ある", items=errors))
     return result.emit(result.result(TOOL, result.OK, "hook の予算の順序を守れている"))

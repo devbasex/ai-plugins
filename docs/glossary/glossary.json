@@ -4945,10 +4945,18 @@
     {
       "term": "名前の対応表",
       "context": "ndf-code-structure",
-      "meaning": "同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335）",
+      "meaning": "同じ意味の値の 1 つの名前と、消した別名と、使う種類を持つ表（plugins/ndf/contracts/data/internal-names.json。#2339）",
       "source": "",
-      "pending_source": "issues/issue-2335-design.md",
-      "code": "names"
+      "pending_source": "issues/issue-3684-3667-2339-design.md",
+      "code": "internal-names"
+    },
+    {
+      "term": "読み手の指定",
+      "context": "ndf-code-structure",
+      "meaning": "上限の設定の方針が持つ、その方針を引くモジュールの名前（read_by。#3684）",
+      "source": "",
+      "pending_source": "issues/issue-3684-3667-2339-design.md",
+      "code": "read_by"
     },
     {
       "term": "オーナーのキー",
@@ -7266,7 +7274,7 @@
       "term": "ラチェット",
       "context": "ndf-code-structure",
       "meaning": "基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない",
-      "pending_source": "issues/issue-1142-design-smells.md"
+      "pending_source": "issues/issue-3684-3667-2339-design.md"
     },
     {
       "term": "アダプター",

@@ -98,8 +98,7 @@
         },
         "--budget": {
           "type": "number",
-          "default": 120.0,
-          "description": "締め切りの秒（既定 120）"
+          "description": "締め切りの秒（省けば上限の設定の project.measure）"
         },
         "--root": {
           "type": "string",
