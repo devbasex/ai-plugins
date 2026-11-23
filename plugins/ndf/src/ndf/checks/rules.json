@@ -64,7 +64,27 @@
   },
   "facts": {
     "min_str": 4,
-    "contracts_dir": "contracts"
+    "contracts_dir": "contracts",
+    "generated_schemas": ["schemas/io/*.args.schema.json"],
+    "limit_kinds": [
+      {"words": ["TIMEOUT", "WAIT", "SECONDS", "GRACE"], "keys": ["seconds", "timeout", "deadline"]},
+      {"words": ["INTERVAL"], "keys": ["interval", "max_interval"]},
+      {"words": ["MAX", "LIMIT", "CAP", "KEEP", "BUDGET"], "keys": ["count"]},
+      {"words": ["RETRY", "ATTEMPT"], "keys": ["attempts"]},
+      {"words": ["DAYS"], "keys": ["count"]}
+    ],
+    "limit_constants": [
+      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（#3394 の決定 60）で 2 回に固定した値で、運用で変えない"},
+      {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},
+      {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
+      {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
+      {"name": "ndf.domains.release.land.QUEUE_POLL_SECONDS", "kind": "implementation", "reason": "マージキューの PR を読み直す間隔。待ちの上限は別に持ち、間隔は問い合わせの都合で決めた"},
+      {"name": "ndf.domains.statusline.settings.REFRESH_INTERVAL", "kind": "implementation", "reason": "statusLine の設定へ書く再描画の間隔。表示の都合で決めた"},
+      {"name": "ndf.domains.worktree.guard_decide.MAX_LISTED", "kind": "implementation", "reason": "案内の文に並べるパスの件数。表示の都合で決めた"},
+      {"name": "ndf.progress.lane.machine.LOCK_POLL_SECONDS", "kind": "implementation", "reason": "起動の排他を取り直す間隔。待ちの上限は方針 parallel-machine.admit-lock が持つ"},
+      {"name": "ndf.testing.records.SECONDS_PER_DAY", "kind": "external", "reason": "1 日の秒数（単位の換算）"},
+      {"name": "ndf.testing.slots.POLL_SECONDS", "kind": "implementation", "reason": "スロットとメモリを確かめる間隔。待ちの上限は方針 test-slots.wait が持つ"}
+    ]
   },
   "words": {
     "glossary_config": "glossary.json",
@@ -167,6 +187,7 @@
     "tables": ["ndf.contracts.limits.table", "ndf.contracts.limits.NDF_SETTINGS", "ndf.domains.hooks.tables.policies"],
     "whole": [
       {"module": "ndf.checks.limits_readers", "reason": "この規則そのもの。方針の読み手の指定だけを読む"},
+      {"module": "ndf.checks.facts", "reason": "規則 const-fact。定数と比べる数の一覧だけを読む"},
       {"module": "ndf.contracts.cli", "reason": "事実の表が指す方針の名前の有無だけを確かめる"}
     ],
     "dynamic": [

@@ -8,6 +8,7 @@ from collections import defaultdict
 
 import pytest
 
+from ndf import contracts
 from ndf.checks import limits_readers, run
 from ndf.checks.model import CheckError
 
@@ -363,13 +364,13 @@ def test_each_contract_file_is_read_once(with_limits, monkeypatch):
     plugin = with_limits(a_b=policy("ndf.m"))
     plugin.write("contracts/r.json", json.dumps(BUDGETS))
     opened: list[str] = []
-    real = limits_readers.contracts.read_text_json
+    real = contracts.read_text_json
 
     def counting(path):
         opened.append(path.name)
         return real(path)
 
-    monkeypatch.setattr(limits_readers.contracts, "read_text_json", counting)
+    monkeypatch.setattr(contracts, "read_text_json", counting)
     limits_readers.check(plugin.scope(), rules_of(dynamic=DYNAMIC))
     # 上限の設定のスキーマは検証器のキャッシュの有無で読む回数が変わるので数えない
     assert sorted(n for n in opened if n != "limits.schema.json") == ["limits.json", "r.json"]

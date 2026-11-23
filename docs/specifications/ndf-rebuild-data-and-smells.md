@@ -133,8 +133,12 @@ hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しな�
 | `member` | 文字列が別のファイルの集まりの要素 |
 | `table-set` | 事実の表の `id` を 2 つ以上含む集まり |
 | `table-str` | 事実の表の `id` に等しい 4 字以上の文字列 |
+| `enum-set` | 手書きのスキーマの `enum`（2 つ以上の値）と同じ集まり。生成されるスキーマ（`rules.json` の `facts.generated_schemas`）とは比べない |
+| `enum-subset` | 手書きのスキーマの `enum` の一部の集まり |
+| `limit-num` | 名前が上限・回数・待ちを表し（`facts.limit_kinds` の語）、その語に対応する値のキーの数が上限の設定にある定数。定数のまま置く値は `facts.limit_constants` に理由つきで載せる |
+| `stale` | `facts.limit_constants` の行の定数が無いか、上限の設定の数に当たらない |
 
-- 定数として読むのは、文字列・数・文字列だけの集まり（tuple・list・set・dict の鍵・`set(...)` などの呼び出し）である
+- 定数として読むのは、文字列・数・文字列だけの集まり（tuple・list・set・dict の鍵・`set(...)` などの呼び出し）である。dict は値の集まりも `<名前>.values` として読む
 - `shared_names` が真の表（`id` が他の名前空間と共有する名前。`ndf-files`・`release-forms`・`skill-io`）は、`table-set`・`table-str` の照合から外し、形だけを確かめる
 - 重複は基準に残さない。片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）
 

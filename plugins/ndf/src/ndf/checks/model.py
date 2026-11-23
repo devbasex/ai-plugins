@@ -12,6 +12,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from ndf import contracts
 from ndf.checks import imports
 
 RULES_PATH = Path(__file__).with_name("rules.json")
@@ -122,6 +123,14 @@ def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
 def read_json(path: Path | str, unreadable: str) -> Any:
     """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
     return read_json_text(path, unreadable)[1]
+
+
+def read_contract(path: Path, unreadable: str) -> tuple[str, Any]:
+    """コントラクトのファイルの本文と値。実行時の読み手と同じく、同じキーが 2 つあれば断る。"""
+    try:
+        return contracts.read_text_json(path)
+    except (contracts.ContractError, UnicodeDecodeError) as exc:
+        raise CheckError(f"{unreadable}: {exc}") from exc
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:

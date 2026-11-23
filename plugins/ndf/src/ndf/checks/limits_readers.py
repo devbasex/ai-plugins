@@ -23,9 +23,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf import contracts
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope
+from ndf.checks.model import CheckError, Finding, Scope, read_contract
 from ndf.checks.spec_model import CONTRACTS
 from ndf.contracts import limits
 
@@ -103,14 +102,6 @@ def _filled(template: str, value: str, keys: tuple[str, ...]) -> str:
     return name
 
 
-def _contract(path: Path, unreadable: str) -> tuple[str, Any]:
-    """コントラクトのファイルの本文と値。実行時の読み手と同じく、同じキーが 2 つあれば断る。"""
-    try:
-        return contracts.read_text_json(path)
-    except (contracts.ContractError, UnicodeDecodeError) as exc:
-        raise CheckError(f"{unreadable}: {exc}") from exc
-
-
 def dynamic_names(row: Mapping[str, str], data: Any) -> frozenset[str]:
     """`dynamic` の 1 行が組み立てうる方針の名前。語彙の値のうち文字列でないもの（null など）は名前を作らない。"""
     try:
@@ -130,7 +121,7 @@ def settings(rules: dict[str, Any], contracts_dir: Path) -> Settings:
     """`rules.json` の `limits` を読み、動的な読み口の名前をコントラクトのファイルの語彙から組み立てる（ファイルは 1 回ずつ読む）。"""
     conf = rules["limits"]
     rels = {row["vocabulary"].partition("#")[0] for row in conf["dynamic"]}
-    data = {rel: _contract(contracts_dir / rel, "動的な読み口の語彙を読めない")[1] for rel in sorted(rels)}
+    data = {rel: read_contract(contracts_dir / rel, "動的な読み口の語彙を読めない")[1] for rel in sorted(rels)}
     dynamic = tuple(_dynamic(row, data[row["vocabulary"].partition("#")[0]]) for row in conf["dynamic"])
     readers = {name: Reader(**row) for name, row in conf["readers"].items()}
     whole = frozenset(row["module"] for row in conf["whole"])
@@ -675,7 +666,7 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     if not (contracts_dir / limits.NDF_SETTINGS).is_file():
         return []
     # 指定と行番号の両方に使う本文を 1 回だけ読む
-    text, raw = _contract(contracts_dir / limits.NDF_SETTINGS, "上限の設定を読めない")
+    text, raw = read_contract(contracts_dir / limits.NDF_SETTINGS, "上限の設定を読めない")
     try:
         want = declared(raw)
     except limits.LimitsError as exc:
