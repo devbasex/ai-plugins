@@ -143,7 +143,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `clear_results` | 退避できない・コミットできない・退避を消せない | git の錠・権限 | `rename`・`git commit`・`rmtree` | 止める（`GitError`・`OSError` のまま。担当は起動していない） | 今の起動の失敗と同じ | コミットの前に止まったら退避したフォルダを元へ戻す。再実行可（追跡が残っていれば同じ手順をやり直し、無ければ作り直すだけ） |
-| `adopt_legacy` | 移し替え先に同じ名前がある・前の版の `detach` の子が worktree を `cwd` にしているか中のファイルを開いている・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`/proc/*/cwd` と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、`kept` があるときその worktree を外さない | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
+| `adopt_legacy` | 移し替え先に同じ名前がある・前の版の `detach` の子が worktree を `cwd` にしているか中のファイルを開いている・起点からのパスに symlink がある・移せない | 前の版と今の版が別々に書いた・動いている `detach`・外を指す `.ndf` や `parallel`・権限 | 移す前の `exists`・`/proc/*/cwd` と `/proc/*/fd` の走査・記述子でたどる要素の検査・`rename` | 移さない（前の置き場は消さない）。`kept` に理由（`exists`・`writer_open`・`writer_unverifiable`・`symlink`・`os_error`）とパスを入れる | 呼んだコマンドの結果 JSON の `warnings` に `legacy_plan_record` とパス・理由（終了コード 0）。worktree を外すコマンドは、理由が `writer_open`・`writer_unverifiable`・`symlink`・`os_error` のときその worktree を外さない。`exists` は外す（前の置き場は無視したファイルの退避に入る） | 人が中身を見て片付ける。再実行すると、書き手が終わっていれば移る |
 | `_check_location` | `.worktrees` を作れない | 権限 | `prepare` | 止める | 終了コード 1 | 再実行可 |
 
 ### 並行と排他
@@ -158,8 +158,8 @@ plugins/ndf/
 
 前の版は計画の記録を linked worktree の根の `.ndf/parallel/<計画>/` に書いた。この記録が失われるのは worktree を外すときなので、移し替えは worktree を外す共通の手順に置く。計画を再始動する必要は無い。
 
-- 入口: `domains/worktree/removal.remove_evacuating` が、テスト環境を閉じた後、無視したファイルを退避する前に `places.adopt_legacy("ndf-parallel", item.path, cwd)` を呼ぶ。`ndf worktree merged`・`ndf worktree cleanup` はどちらもこの手順を通るので、利用者が worktree を外す普通の経路で必ず移る。`kept` が 1 つでもあれば、その worktree は外さない（`Removal` の `refused` に `legacy_plan_record` を入れる）
-- 結果 JSON: `merged`・`cleanup` の結果 JSON の `outputs.adopted[]` に移したパス（前と後）、`warnings[]` に `{"code": "legacy_plan_record", "path": <前の置き場>, "reason": <kept の理由>}` を出す
+- 入口: `domains/worktree/removal.remove_evacuating` が、テスト環境を閉じた後、無視したファイルを退避する前に `places.adopt_legacy("ndf-parallel", item.path, cwd)` を呼ぶ。`ndf worktree merged`・`ndf worktree cleanup` はどちらもこの手順を通るので、利用者が worktree を外す普通の経路で必ず移る。`kept` の理由が `writer_open`・`writer_unverifiable`・`symlink`・`os_error`（移せずに外すと記録を失うか、動いている書き手を壊す恐れがある）のどれかなら、その worktree は外さない（`Removal` の `refused` に `legacy_plan_record` を入れる）。`exists` だけなら外す。前の版で始めた計画を新しい版で同じ名前のまま再実行すると普通に起きるので、止めると利用者が手で片付けるまで外せなくなる。その前の置き場は、この後の無視したファイルの退避（`trash.evacuate`。追跡していないファイルを無視したものも含めて退避し、外せなければ戻す）が他のファイルと一緒に退避するので失われない
+- 結果 JSON: `merged`・`cleanup` の結果 JSON の `outputs.adopted[]` に移したパス（前と後）、`warnings[]` に `{"code": "legacy_plan_record", "path": <前の置き場>, "reason": <kept の理由>}` を出す（`exists` も警告として出し、worktree は外す）
 - `record_dir` と `detach` は移し替えをしない（計画の起動の経路に移し替えの git とファイル操作を足さない）
 
 `adopt_legacy` は前の置き場の下の計画ごと（`<worktree>/.ndf/parallel/<計画>/`）に次の扱いをする。`worktree` がメインディレクトリなら何もしない。
@@ -176,7 +176,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | ある | 無い | 同じ | `rename` で移す（上の検査で、worktree を使うプロセスがいないことを確かめてある） |
 | ある | 無い | 違う | 新しい置き場の隣の一時フォルダへ複写し、`rename` で新しい置き場にしてから前の置き場を消す。上の検査で書き手がいないことを確かめてあるので、複写の後の書き足しが前のファイルにだけ届いて失われることは無い |
-| ある | ある | どちらでも | 移さない（`exists`）。新しい置き場を読み書きし、前の置き場は消さない |
+| ある | ある | どちらでも | 移さない（`exists`。警告だけで worktree を外すのは止めない）。新しい置き場を読み書きし、前の置き場は `remove_evacuating` の無視したファイルの退避に任せる |
 | 無い | どちらでも | — | 何もしない |
 
 `writer_open` で外さなかった worktree は、書き手（`detach` で切り離した `ndf lanes run`）が終わった後の次の `merged`・`cleanup` で移ってから外れる。`writer_unverifiable` の worktree は `/proc` のある環境で外すか、人が書き手の終わりを確かめて片付ける。
