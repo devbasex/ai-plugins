@@ -474,8 +474,9 @@ class WriteGate(BaseThrottler):
         try:
             reservation = self.reserve(kind, count=count, remaining=remaining)
             while True:
-                if reservation.wait > 0:
-                    yield Pause(reservation.wait)
+                wait = self._left(reservation, remaining)
+                if wait > 0:
+                    yield Pause(wait)
                 blocked, send = yield from self._sendable(kind, remaining)
                 if not blocked:
                     return send
@@ -485,6 +486,16 @@ class WriteGate(BaseThrottler):
             if reservation is not None:
                 self.withdraw(reservation)
             raise
+
+    def _left(self, reservation: Reservation, remaining: Optional[Callable[[], float]]) -> float:
+        """眠る直前の、予約の時刻までの秒。予算があれば、予約を書いた後に過ぎた時間（記録の保存・非同期の再開）を引いて
+        読み直し、予算に収まらなければ `Busy`（`_steps` が予約を取り消す）。時計が戻っても予約の時の秒より長くは眠らない。"""
+        if remaining is None:
+            return reservation.wait
+        wait = min(reservation.wait, reservation.at - self.clock())
+        if wait > 0:
+            _within_budget(remaining, wait)
+        return wait
 
     def _sendable(self, kind: str, remaining: Optional[Callable[[], float]]) -> Generator[Pause, None, tuple[bool, Optional[FileLock]]]:
         """送信のロックを取り、最短の送信時刻まで眠る秒を出す。(待ちの終わりが延びたか, 送信のロック)。延びたらロックを放して返す。"""

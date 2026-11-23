@@ -102,6 +102,44 @@ def test_within_gives_back_the_reservation_when_the_budget_runs_out_while_sleepi
     assert record(path)["next"] == pytest.approx(NOW + 2)
 
 
+def _slow_save(gate, monkeypatch, clock: Clock, budget: _Budget, seconds: float, spent: Optional[float] = None) -> None:
+    """予約を書き終えるまでに時計が `seconds` 秒進み、予算が `spent`（省けば同じ秒）減ったことにする。
+
+    予算は呼び手が自分の数え方で返す（`RetryWithin` の `remaining` と同じ）ので、時計と同じだけ減るとは限らない。"""
+    real = gate.reserve
+
+    def reserve(*args, **kwargs):
+        made = real(*args, **kwargs)
+        clock.now += seconds
+        budget.left -= seconds if spent is None else spent
+        return made
+
+    monkeypatch.setattr(gate, "reserve", reserve)
+
+
+def test_within_rereads_the_wait_after_saving_the_reservation(gate, path, clock, monkeypatch):
+    # PR 4267 の r2-2: 予約の保存中に 2 秒過ぎたら、予約の時の 3 秒でなく残りの 1 秒だけ眠る
+    seed(path, next=NOW + 3)
+    budget = _Budget(10)
+    _slow_save(gate, monkeypatch, clock, budget, 2)
+
+    assert _send(gate.within(budget)) == [True]
+    assert clock.slept == [pytest.approx(1)]
+
+
+def test_within_refuses_before_sleeping_when_saving_used_up_the_budget(gate, path, clock, monkeypatch):
+    # PR 4267 の r2-2: 予約の保存中に予算が予約の時刻までの残りを下回れば、眠らずに `Busy` を出して予約を取り消す
+    seed(path, next=NOW + 3)
+    budget = _Budget(4)
+    _slow_save(gate, monkeypatch, clock, budget, 1, spent=3)
+
+    with pytest.raises(write_gate.Busy) as busy:
+        _send(gate.within(budget))
+
+    assert busy.value.seconds == pytest.approx(2)
+    assert clock.slept == [] and record(path)["next"] == pytest.approx(NOW + 3)
+
+
 class _Held:
     """ほかのプロセスが持つロックの偽物。待つ秒を覚え、その秒で Timeout を返す。"""
 
