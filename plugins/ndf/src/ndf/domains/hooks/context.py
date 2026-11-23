@@ -648,26 +648,28 @@ def _content(rec: dict[str, Any]) -> Any:
     return message.get("content") if isinstance(message, dict) else None
 
 
+def _items(content: Any, kind: str) -> list[dict[str, Any]]:
+    """content の要素のうち type が `kind` の dict。content が list でなければ空。"""
+    if not isinstance(content, list):
+        return []
+    return [c for c in content if isinstance(c, dict) and c.get("type") == kind]
+
+
 def _is_prompt(content: Any) -> bool:
     """利用者の入力の content か（文字列か text の要素を持つ）。Tool の結果だけを持つ行は偽。"""
     if isinstance(content, str):
         return True
-    return isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "text" for c in content)
+    return bool(_items(content, "text"))
 
 
 def _asks(content: Any) -> bool:
     """`AskUserQuestion` の呼び出しを持つ content か。"""
-    if not isinstance(content, list):
-        return False
-    return any(isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == _ASK_TOOL for c in content)
+    return any(c.get("name") == _ASK_TOOL for c in _items(content, "tool_use"))
 
 
 def _record_text(rec: dict[str, Any]) -> Optional[str]:
     """会話の記録の 1 レコードの本文。text の要素が無ければ None（文字列でない text だけなら空文字）。"""
-    content = _content(rec)
-    if not isinstance(content, list):
-        return None
-    texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    texts = [c.get("text") for c in _items(_content(rec), "text")]
     if not texts:
         return None
     return "\n".join(t for t in texts if isinstance(t, str))
