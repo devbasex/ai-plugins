@@ -14,7 +14,21 @@ from ndf.domains.crossrefactor import drive, prompt_decide, store
 from ndf.domains.crossrefactor.symbols_decide import Touched
 from ndf.domains.records import mvv
 
-from ._drive_world import BRANCH, PR, FakeAgents, FakeHub, Watched, World, base_acts, commit_in, fake_ci, make_world, ports, propose_area, sh
+from ._drive_world import (
+    BRANCH,
+    PR,
+    FakeAgents,
+    FakeHub,
+    Watched,
+    World,
+    base_acts,
+    commit_in,
+    fake_ci,
+    make_world,
+    ports,
+    propose_area,
+    sh,
+)
 
 # 作業場所に作る MVV の本文のパス（このリポジトリ自身の MVV の文書は読まない）
 NDF_DIR = ".ndf"
