@@ -60,20 +60,26 @@ class RunArgs:
     cwd: Path
 
 
-class Precondition(Exception):
+class Stop(Exception):
+    """止まる理由を持つ例外の基底。`kind` は結果の `cause.kind`、`detail` は説明。"""
+
+    kind = ""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class Precondition(Stop):
     """起点か差分を決められない（`stopped`（precondition））。"""
 
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail)
-        self.detail = detail
+    kind = "precondition"
 
 
-class BadReport(Exception):
+class BadReport(Stop):
     """worker の結果の形の誤り（`stopped`（bad_report））。"""
 
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail)
-        self.detail = detail
+    kind = "bad_report"
 
 
 def _resolve(g: git.Git, ref: str) -> Optional[str]:
@@ -416,39 +422,40 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
     return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
 
 
-def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]:
-    """起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す。"""
-    g = git_of(args.cwd)
+def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str]]:
+    """起点の参照の名前と、起点から `HEAD` までの差分のパス。決められなければ `Precondition`。
+
+    差分の失敗には起点の参照の名前を頭に付け、包まれない `GitError` は「git を打てない」にする。
+    """
     try:
         head = _head_sha(g)
-        ref, start = start_point(g, args.base, args.remote)
+        ref, start = start_point(g, base, remote)
         try:
             changed = diff_paths(g, start, head)
         except Precondition as exc:
             raise Precondition(f"起点 {ref} から差分を読めない: {exc.detail}") from None
-    except Precondition as exc:
-        return result.stopped(TOOL, "precondition", exc.detail)
     except git.GitError as exc:
-        return result.stopped(TOOL, "precondition", f"git を打てない: {exc}")
-    found = sd.candidates(changed, args.issues, args.kinds)
-    chosen = sd.select(found, inspect(args.cwd, found))
-    log.info("組み直す文書を選んだ", extra={"start_ref": ref, "candidates": len(found), "targets": len(chosen.targets)})
-    if not chosen.targets:
-        summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
-        return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
+        raise Precondition(f"git を打てない: {exc}") from None
+    return ref, changed
+
+
+def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]:
+    """起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す。"""
     try:
+        ref, changed = start_and_changes(git_of(args.cwd), args.base, args.remote)
+        found = sd.candidates(changed, args.issues, args.kinds)
+        chosen = sd.select(found, inspect(args.cwd, found))
+        log.info("組み直す文書を選んだ", extra={"start_ref": ref, "candidates": len(found), "targets": len(chosen.targets)})
+        if not chosen.targets:
+            summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
+            return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
         prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
         out, result_file = run_worker(args, prompt, runner)
-    except Precondition as exc:
-        return result.stopped(TOOL, "precondition", exc.detail)
-    except BadReport as exc:
-        return result.stopped(TOOL, "bad_report", exc.detail)
-    attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
-    log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
-    if out.get("status") != result.OK:
-        return _worker_stopped(out)
-    try:
+        attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
+        log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
+        if out.get("status") != result.OK:
+            return _worker_stopped(out)
         report = _read_report(result_file)
-    except BadReport as exc:
-        return result.stopped(TOOL, "bad_report", exc.detail)
+    except Stop as exc:
+        return result.stopped(TOOL, exc.kind, exc.detail)
     return _checked(report, chosen.targets, chosen.skipped)
