@@ -71,9 +71,7 @@ def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: P
     assert f"git diff {head}...HEAD" in limit
 
 
-def test_issue_4285_major_without_impact_becomes_minor_and_is_not_handed_over(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, hub
-) -> None:
+def test_issue_4285_major_without_impact_becomes_minor_and_is_not_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """受け入れ条件 9: 起きることの 1 文の無い文章の指摘は minor になり、修正担当に渡らず、レビューは終わる。"""
     bare = {k: v for k, v in MAJOR.items() if k != "impact"}
     fake = Recording(tmp_path / "st", {"codex": [[bare]], "kiro": [[]]})
