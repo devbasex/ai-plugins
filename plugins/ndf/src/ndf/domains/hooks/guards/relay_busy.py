@@ -8,7 +8,8 @@ SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出
 （監視と取り違えると、引継ぎで作業を失う）。
 
 すべての PreToolUse に当たる `fail_closed` の行なので、対象外の呼び出しは、例外を上げうる処理（記録・構文解析・表の読み込み）
-より先に通す。
+より先に通す。作業を始め得ない呼び出し（Read・フォアグラウンドの Bash など）は、環境変数のコントラクトを読む会話の確かめ
+（`_target`）よりも先に、Tool の名前と `run_in_background` だけで通す。
 """
 
 from __future__ import annotations
@@ -45,18 +46,19 @@ def check(ctx, svc) -> Optional[Verdict]:
         if ctx.payload.get("source") in _FRESH_SOURCES and _target(ctx.env, ctx.session_id):
             record_count(ctx.env, ctx.session_id, 0, "session")
         return None
-    if not _target(ctx.env, ctx.session_id) or not _starts_background(ctx.tool, ctx.tool_input, svc.params):
+    if not _may_start(ctx.tool, ctx.tool_input) or not _target(ctx.env, ctx.session_id):
         return None
-    return _record_start(ctx)
+    return _record_start(ctx) if _starts_background(ctx.tool, ctx.tool_input, svc.params) else None
 
 
 def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
     """エントリポイントの締め切りを過ぎたときの拒否の理由。記録し終えていない子の会話の作業の開始だけを拒否し、ほかは None（通す）。"""
-    if payload.get("hook_event_name") != "PreToolUse" or not _target(env, payload.get("session_id")):
+    tool, tool_input = payload.get("tool_name"), payload.get("tool_input")
+    if payload.get("hook_event_name") != "PreToolUse" or not _may_start(tool, tool_input):
         return None
-    if _recorded is payload or not _starts_background(payload.get("tool_name"), payload.get("tool_input"), table_params()):
+    if not _target(env, payload.get("session_id")) or _recorded is payload:
         return None
-    return BUSY_START_FAILED
+    return BUSY_START_FAILED if _starts_background(tool, tool_input, table_params()) else None
 
 
 def table_params() -> Mapping[str, Any]:
@@ -98,14 +100,19 @@ def _target(env: Mapping[str, str], session_id: Any) -> bool:
     return child is not None and session_id == child
 
 
+def _may_start(tool: Any, tool_input: Any) -> bool:
+    """作業を始め得る呼び出しか（Tool の名前と Bash の `run_in_background` の値の比べだけで、ファイルと構文解析に触れない）。"""
+    if tool == "Bash":
+        return isinstance(tool_input, dict) and background_call(tool_input)
+    return tool in ("Agent", "Monitor")
+
+
 def _starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool:
     """作業を始める呼び出しか。例外を外へ出さない。Monitor は必ずバックグラウンドで動くので、確かめられない入力は作業とする。"""
-    given = tool_input if isinstance(tool_input, dict) else {}
-    if tool == "Monitor":
-        return task_kind("monitor", given.get("command"), params) == "work"
-    if tool == "Bash":
-        return background_call(given) and task_kind("shell", given.get("command"), params) == "work"
-    return tool == "Agent"
+    if not _may_start(tool, tool_input) or tool == "Agent":
+        return tool == "Agent"
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return task_kind("monitor" if tool == "Monitor" else "shell", command, params) == "work"
 
 
 def task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str:
