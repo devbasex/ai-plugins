@@ -265,7 +265,9 @@ class Publisher:
                 # 単独の完全名も、URL・番号付きの参照と同じく秘密と重なれば照会しない
                 for m in _bare_repo(self.hub.repo).finditer(text):
                     sort(self.hub.repo, m.span(), secrets)
-        asked = {r for r in clean if not any(same_repo(r, t) for t in tainted)}
+        # 照会の直前に same_repo と同じ規則（大文字・小文字を区別しない）で名前をまとめ、同じリポジトリを 1 回だけ問う
+        dirty = {t.lower() for t in tainted}
+        asked = set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values())
         seen = self.hub.visibilities(asked) if asked else {}
         return tainted | {r for r, v in seen.items() if v != PUBLIC}
 
