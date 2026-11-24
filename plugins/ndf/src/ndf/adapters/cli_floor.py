@@ -39,7 +39,11 @@ class TooOld(Exception):
     """外部 CLI が下限より古い。`name`・`path`（実パス）・`found`（見つけたバージョン）・`floor`（下限）を持つ。"""
 
     def __init__(self, name: str, path: str, found: str, floor: str) -> None:
-        super().__init__(f"{name} {found}（{path}）は下限 {floor} より古い。{floor} 以上へ上げる")
+        self._fill(f"{name} {found}（{path}）は下限 {floor} より古い。{floor} 以上へ上げる", name, path, found, floor)
+
+    def _fill(self, message: str, name: str, path: str, found: str, floor: str) -> None:
+        """例外の文面と 4 属性をまとめて設定する（`TooOld` と派生の初期化が共有する）。"""
+        Exception.__init__(self, message)
         self.name, self.path, self.found, self.floor = name, path, found, floor
 
 
@@ -48,8 +52,7 @@ class Unverified(TooOld):
 
     def __init__(self, name: str, path: Optional[str], floor: str) -> None:
         where = path if path is not None else "実行ファイルが見つからない"
-        Exception.__init__(self, f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない")
-        self.name, self.path, self.found, self.floor = name, where, "", floor
+        self._fill(f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない", name, where, "", floor)
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
