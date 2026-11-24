@@ -42,6 +42,59 @@ def test_a_missing_executable_passes():
     cli_floor.require("claude", "claude", {"PATH": "/nonexistent"})
 
 
+RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "dontAsk", "依頼")
+
+
+def _claude_at(monkeypatch, found):
+    """claude の実行ファイルを `/bin/claude` に見せ、`--version` を `found`（None は読めない）と答えさせる（子のプロセスを起動しない）。"""
+    monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: "/bin/claude")
+    monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
+
+
+def test_issue_3955_restricted_launch_needs_the_flag_floor(monkeypatch):
+    """#3955 の決定 2: `--restricted` を含む起動だけに 2.1.316 を当てる。含まない起動は共通の下限のまま。"""
+    _claude_at(monkeypatch, "2.1.315")
+    with pytest.raises(cli_floor.TooOld):
+        cli_floor.require("claude", "claude", args=RESTRICTED)
+    cli_floor.require("claude", "claude", args=("-p", "--permission-mode", "acceptEdits"))
+    cli_floor.require("claude", "claude")
+
+
+def test_issue_3955_flag_floor_is_met_at_its_version(monkeypatch):
+    _claude_at(monkeypatch, "2.1.316")
+    cli_floor.require("claude", "claude", args=RESTRICTED)
+    cli_floor.require("claude", "claude")
+
+
+def test_issue_3955_common_floor_still_refuses_either_launch(monkeypatch):
+    _claude_at(monkeypatch, "2.1.267")
+    for args in (RESTRICTED, ()):
+        with pytest.raises(cli_floor.TooOld):
+            cli_floor.require("claude", "claude", args=args)
+
+
+def test_issue_3955_unreadable_version_refuses_only_the_restricted_launch(monkeypatch):
+    """版を確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す。"""
+    _claude_at(monkeypatch, None)
+    with pytest.raises(cli_floor.Unverified) as caught:
+        cli_floor.require("claude", "claude", args=RESTRICTED)
+    assert isinstance(caught.value, cli_floor.TooOld)
+    cli_floor.require("claude", "claude", args=("-p",))
+
+
+def test_issue_3955_missing_executable_refuses_the_restricted_launch():
+    with pytest.raises(cli_floor.Unverified):
+        cli_floor.require("claude", "claude", {"PATH": "/nonexistent"}, args=RESTRICTED)
+
+
+def test_issue_3955_flag_floors_are_not_below_the_row_floor():
+    import semver
+
+    for name in FLOOR:
+        for floor in facts.row("cli-floors", name).get("flag_floors", {}).values():
+            assert semver.Version.parse(floor) >= semver.Version.parse(FLOOR[name])
+
+
 # ---------------------------------------------------------------- 起動の箇所を探す（I12）
 
 TABLE_EXECUTABLES = {facts.value("cli-floors", n, "executable") for n in FLOOR}

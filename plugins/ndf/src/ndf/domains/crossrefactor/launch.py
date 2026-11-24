@@ -27,8 +27,6 @@ from ndf.core.converge import participants
 from ndf.domains.crossrefactor import cost_decide, launch_decide
 
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
-# 読み取りの工程の claude に許す Tool（読むだけ）
-READ_TOOLS = "Read,Grep,Glob"
 # コードを書く工程の claude に許す Tool（リファクタリングは 1 つのファイルの複数箇所を書き換える）
 CODE_TOOLS = "Read,Edit,MultiEdit,Write,Bash,Grep,Glob"
 
@@ -67,10 +65,7 @@ def _limit(req: Request) -> float:
 
 def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
     if req.runtime == participants.FIXER:
-        call = claude.ClaudeCall(
-            system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=READ_TOOLS
-        )
-        return agents.Launch(req.runtime, (*claude.claude_args(call), req.prompt), workdir, agents.AgentPaths.at(paths_stem), _limit(req))
+        return participants.read_only_launch(f"{launch_decide.SKILL} の {req.phase} の担当", workdir, req.prompt, paths_stem, _limit(req))
     return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
 
 
@@ -86,22 +81,9 @@ def _coding(req: Request, workdir: Path, paths_stem: Path, location: launch_deci
     return agents.Launch(req.runtime, (*claude.claude_args(call), prompt), workdir, paths, _limit(req))
 
 
-def _answer_text(req: Request, out: Path) -> str:
-    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にする。"""
-    if req.runtime != participants.FIXER:
-        return agents.tail(out)
-    raw = out.read_text(encoding="utf-8", errors="replace")
-    try:
-        payload = json.loads(raw)
-    except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
-        return raw
-    body = payload.get("result") if isinstance(payload, dict) else None
-    return body if isinstance(body, str) else raw
-
-
 def _collect_stdout(req: Request, out: Path, collect: Path) -> Optional[dict[str, Any]]:
     key = req.key
-    found = participants.listed_of(_answer_text(req, out), key) if out.is_file() else None
+    found = participants.listed_of(participants.answer_text(req.runtime, out), key) if out.is_file() else None
     if found is None:
         return None
     got = {key: found}

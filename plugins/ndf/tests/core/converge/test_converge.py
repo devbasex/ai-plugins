@@ -76,3 +76,44 @@ def test_sandbox_failed_reads_only_lines_that_start_with_bwrap(tmp_path: Path, e
     paths = agents.AgentPaths(tmp_path / "o", tmp_path / "e", tmp_path / "l", tmp_path / "p")
     paths.err.write_text(err, encoding="utf-8")
     assert agents.sandbox_failed(paths) == line
+
+
+# ---------------------------------------------------------------- #3955: 席を決める・読むだけの claude
+
+
+def test_issue_3955_assign_is_unchanged_for_cross_refactoring() -> None:
+    """受け入れ条件 13: cross-refactoring の相手役の選び方（既定・名指し・allowed）は変えない。"""
+    assert participants.assign() == ("codex", "kiro")
+    assert participants.assign(("kiro", "kiro", "codex")) == ("kiro", "codex")
+    assert participants.assign(allowed={"claude", "codex"}) == ("codex",)
+    with pytest.raises(participants.UnknownParticipant):
+        participants.assign(allowed={"claude"})
+    with pytest.raises(participants.UnknownParticipant):
+        participants.assign(("kiro",), allowed={"claude", "codex"})
+    with pytest.raises(participants.UnknownParticipant):
+        participants.assign(("claude",))
+    with pytest.raises(participants.FixerNotAllowed):
+        participants.assign(allowed={"codex"})
+
+
+def test_issue_3955_read_only_launch_is_a_separate_minimal_claude(tmp_path: Path) -> None:
+    """受け入れ条件 7・8: 修正担当の会話を持たない最小構成で、読む Tool だけを許す。読める場所を渡すと境界を足す。"""
+    plain = participants.read_only_launch("sys", tmp_path, "読む", tmp_path / "s", 30.0)
+    assert plain.agent == participants.FIXER and plain.argv[-1] == "読む"
+    assert "--no-session-persistence" in plain.argv and "--resume" not in plain.argv and "--session-id" not in plain.argv
+    assert plain.argv[plain.argv.index("--tools") + 1] == participants.READ_TOOLS == "Read,Grep,Glob"
+    assert "--restricted" not in plain.argv
+    place = tmp_path / "in"
+    bound = participants.read_only_launch("sys", tmp_path, "読む", tmp_path / "s", 30.0, (place,))
+    assert bound.argv[-3:] == ("--permission-mode", "dontAsk", "読む")
+    assert "--restricted" in bound.argv and bound.argv[bound.argv.index("--add-dir") + 1] == str(place)
+    assert "acceptEdits" not in bound.argv
+
+
+def test_issue_3955_answer_text_is_the_outer_result_for_claude(tmp_path: Path) -> None:
+    out = tmp_path / "o"
+    out.write_text('{"result": "本文"}', encoding="utf-8")
+    assert participants.answer_text("claude", out) == "本文"
+    out.write_text("切れた {", encoding="utf-8")
+    assert participants.answer_text("claude", out) == "切れた {"
+    assert participants.answer_text("codex", out) == "切れた {"

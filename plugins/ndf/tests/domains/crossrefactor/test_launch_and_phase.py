@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from pathlib import PurePosixPath as P
 
@@ -123,3 +124,45 @@ def test_launch_cost_reads_only_the_claude_report(tmp_path: Path, runtime, want)
     out.parent.mkdir(parents=True)
     out.write_text('{"result": "済んだ", "total_cost_usd": 0.75}', encoding="utf-8")
     assert launch.cost(req, dirs) == want
+
+
+# #3955 の受け入れ条件 13: 読むだけの claude の起動を相手役を決める部品へ移しても、cross-refactoring の起動の引数と本文の取り出しは変えない
+READ_ONLY_CLAUDE = [
+    "claude", "-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config",
+    "--disable-slash-commands", "--system-prompt", "cross-refactoring の propose の担当",
+    "--tools", "Read,Grep,Glob", "--allowed-tools", "Read,Grep,Glob", "--permission-mode", "acceptEdits", "提案する",
+]  # fmt: skip
+
+
+def _collected(tmp_path: Path, runtime: str, output: str):
+    """読み取りの工程の担当を偽の起動で動かし、起動の中身と回収した結果を返す。"""
+    dirs = launch.Dirs(tmp_path / "read", tmp_path / "work", tmp_path / "logs")
+    seen: list[agents.Launch] = []
+
+    def fake(spec: agents.Launch) -> agents.AgentStatus:
+        seen.append(spec)
+        spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
+        spec.paths.out.write_text(output, encoding="utf-8")
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    Path(launch.location_of(launch.Request("propose", runtime, "", "rf1"), dirs).collect).parent.mkdir(parents=True, exist_ok=True)
+    got, _ = launch.run(launch.Request("propose", runtime, "提案する", "rf1", key="proposals"), dirs, fake)
+    return seen[0], got
+
+
+def test_issue_3955_read_only_claude_launch_is_unchanged(tmp_path: Path):
+    spec, got = _collected(tmp_path, "claude", json.dumps({"result": 'メモ\n{"proposals": [{"id": "p1"}]}'}))
+    assert list(spec.argv) == READ_ONLY_CLAUDE and spec.agent == "claude"
+    assert got == {"proposals": [{"id": "p1"}]}
+
+
+@pytest.mark.parametrize(
+    ("runtime", "output", "want"),
+    [
+        ("claude", '途中で切れた {"proposals": [{"id": "p2"}]}', [{"id": "p2"}]),
+        ("codex", 'ログ\n{"proposals": [{"id": "p3"}]}\n', [{"id": "p3"}]),
+    ],
+)
+def test_issue_3955_answer_text_reads_the_outer_result_or_the_tail(tmp_path: Path, runtime, output, want):
+    _, got = _collected(tmp_path, runtime, output)
+    assert got == {"proposals": want}

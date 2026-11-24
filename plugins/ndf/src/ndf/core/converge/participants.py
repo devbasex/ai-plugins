@@ -11,6 +11,8 @@
   選び、外の名前を名指せば `UnknownParticipant`。修正担当が外なら起動の前に `FixerNotAllowed`（#3941。`declared_allowed`）
 - 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
   それでも起動できない担当があれば、提案やレビューを流す前に止める（#3907）
+- claude の読むだけの起動（`read_only_launch`）と、その出力から本文を取り出す処理（`answer_text`）は cross-refactoring と
+  cross-review の席の claude が共有する（#3955）
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ SANDBOX = "{sandbox}"
 FIXER = next(r["id"] for r in facts.rows(RUNTIMES) if r["executable"] == claude.CLAUDE)
 # 相手役・修正担当 1 回の監視の上限
 REVIEW_TIMEOUT = "monitor.phase.review"
+# 読むだけの claude に許す Tool
+READ_TOOLS = "Read,Grep,Glob"
 
 
 class UnknownParticipant(ValueError):
@@ -138,6 +142,26 @@ def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: 
     args = _review_args(row, worktree)
     limit = timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
     return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
+
+
+def read_only_launch(system: str, workdir: Path, prompt: str, stem: Path, timeout: float, readable: Sequence[Path] = ()) -> agents.Launch:
+    """`READ_TOOLS` だけを許した、会話を残さない最小構成の `claude -p` の 1 回の起動（修正担当とは別のプロセスと会話）。
+    `readable` を渡すと、読める場所を `workdir` とそれらだけに限る（#3955）。"""
+    call = claude.ClaudeCall(system=system, permission=claude.Permission.TOOLS, tools=READ_TOOLS, readable=tuple(readable))
+    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), timeout)
+
+
+def answer_text(runtime: str, out: Path) -> str:
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは出力の末尾。"""
+    if runtime != FIXER:
+        return agents.tail(out)
+    raw = out.read_text(encoding="utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
+        return raw
+    body = payload.get("result") if isinstance(payload, dict) else None
+    return body if isinstance(body, str) else raw
 
 
 def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:

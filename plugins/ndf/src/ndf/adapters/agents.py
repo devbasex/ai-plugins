@@ -319,7 +319,7 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
 
 def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
-        cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd)
+        cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd, args=spec.argv[1:])
     except cli_floor.TooOld as exc:
         return _not_started(spec, AgentState.REFUSED, str(exc))
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})

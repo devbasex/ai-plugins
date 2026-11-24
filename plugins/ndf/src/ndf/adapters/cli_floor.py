@@ -7,6 +7,8 @@
 - バージョンを読めない（出力の形が違う・起動できない・期限切れ）ときは標準エラーへ 1 行を出して起動を通す。
   CLI が無い・壊れているときの扱いは、今の起動の箇所が持つ
 - 表に無い名前（kiro・agy）は何も打たない
+- 行の `flag_floors`（引数の名前から下限）の引数を起動の引数 `args` が含めば、その下限と比べる。このときは版を確かめられなくても
+  起動を通さず `Unverified` を上げる（`--restricted` の読み取りの境界を頼れない版で起動しない。#3955）
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 import semver
 
@@ -39,6 +41,14 @@ class TooOld(Exception):
     def __init__(self, name: str, path: str, found: str, floor: str) -> None:
         super().__init__(f"{name} {found}（{path}）は下限 {floor} より古い。{floor} 以上へ上げる")
         self.name, self.path, self.found, self.floor = name, path, found, floor
+
+
+class Unverified(TooOld):
+    """引数ごとの下限（`flag_floors`）を当てる起動で、外部 CLI の版を確かめられない（見つからない・`--version` を読めない）。"""
+
+    def __init__(self, name: str, path: Optional[str], floor: str) -> None:
+        Exception.__init__(self, f"{name} の版を確かめられない（{path or '実行ファイルが見つからない'}）。下限 {floor} 以上かを確かめられないので起動しない")
+        self.name, self.path, self.found, self.floor = name, path or "", "", floor
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
@@ -120,18 +130,29 @@ def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapp
         raise error(str(exc)) from None
 
 
-def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
-    """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。"""
+def _flag_floor(row: Mapping[str, object], args: Sequence[str]) -> Optional[str]:
+    """起動の引数 `args` が含む、行の `flag_floors` の引数の下限のうち最も高いもの。含まなければ None。"""
+    floors = row.get("flag_floors")
+    found = [str(v) for k, v in floors.items() if k in args] if isinstance(floors, Mapping) else []
+    return max(found, key=semver.Version.parse) if found else None
+
+
+def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None, args: Sequence[str] = ()) -> None:
+    """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。
+    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、版を確かめられなければ `Unverified`（#3955）。"""
     if name not in facts.ids(TABLE):
         return
-    path = resolve(argv0, env, cwd)
-    if path is None:
-        return
     row = facts.row(TABLE, name)
-    found = _version(name, path, row, env, cwd)
-    floor = str(row["min_version"])
-    if found is not None and semver.Version.parse(found) < semver.Version.parse(floor):
-        raise TooOld(name, path, found, floor)
+    strict = _flag_floor(row, args)
+    floor = strict if strict is not None else str(row["min_version"])
+    path = resolve(argv0, env, cwd)
+    found = _version(name, path, row, env, cwd) if path is not None else None
+    if found is None:
+        if strict is not None:
+            raise Unverified(name, path, strict)
+        return
+    if semver.Version.parse(found) < semver.Version.parse(floor):
+        raise TooOld(name, str(path), found, floor)
 
 
 def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
