@@ -103,10 +103,10 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 基準と指示 | Task 1〜5 | 1、2、5、6、7、8、9、10、11、20 | 約 600 | |
-| U2 記録 | Task 6 | 12、17 | 約 550 | |
-| U3 hook | Task 7 | 17、18、19 | 約 400 | |
-| U4 手順書 | Task 8 | 3、4、13、14、15、16 | 約 350 | |
+| U1 基準と指示 | Task 1〜5 | 1、2、5、6、7、8、9、10、11、20 | 約 600 | 694（追加 611・削除 83） |
+| U2 記録 | Task 6 | 12、17 | 約 550 | 712（追加 694・削除 18） |
+| U3 hook | Task 7 | 17、18、19 | 約 400 | 423（追加 417・削除 6） |
+| U4 手順書 | Task 8 | 3、4、13、14、15、16 | 約 350 | 262（追加 178・削除 84） |
 
 行数は、生成物（`docs/contracts/*.md`・`docs/glossary.md`・`contracts/schemas/io/*.json`）を除いて数える。数えるコマンドは `git diff --shortstat <ベース>...HEAD -- . ':(exclude)plugins/ndf/docs/contracts' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)docs/glossary.md'`。
 
