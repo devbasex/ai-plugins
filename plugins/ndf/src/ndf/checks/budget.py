@@ -23,8 +23,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ndf import contracts, identity
-from ndf.checks.model import SRC_DIR, CheckError, Finding, Scope, Source, Workflow
+from ndf import contracts
+from ndf.checks.model import SRC_DIR, CheckError, Finding, Scope, Source, Workflow, settings_path
 from ndf.contracts import facts
 
 RULE = __name__.rsplit(".", 1)[-1]
@@ -296,7 +296,7 @@ def measure(scope: Scope) -> Counts:
 
 def _settings_line(scope: Scope, key: str) -> tuple[str, int]:
     """設定のファイル（リポジトリの根からの相対）と、`budget` の中の `key` の行（見つからなければ 1）。"""
-    path = scope.repo_root / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
+    path = settings_path(scope.repo_root)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
