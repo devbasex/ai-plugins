@@ -44,7 +44,8 @@ plugins/ndf/
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv` | モジュール | `_mvv_current`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 指摘の基準の文 | — | — | キー `mvv_criterion`・`mvv`（新設） |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 基準と指示の組み立て | `records.mvv.Snapshot` | モジュール | `criteria_lines`・`reviewer_block`・`fixer_block`（変更）・`mvv_item`（新設） |
-| `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`criteria_decide`・`journal` | `RunConfig`・`_Run`（変更） | `_start`・`_round`・`_review_prompt`・`_fix_prompt`・`_summary`・`_prepare_round`・`_reusable`（変更）・`_citations`（新設） |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`criteria_decide`・`journal` | `_Run`（変更） | `_start`・`_round`・`_review_prompt`・`_fix_prompt`・`_summary`・`_prepare_round`・`_reusable`（変更）・`_citations`（新設） |
+| `src/ndf/domains/crossreview/settings.py` | 新設 | 起動の引数とレビューの設定の読み取り（`drive.py` から移す） | `git`・`criteria_decide`・`finish_decide` | `RunConfig`（移して変更。`cli.py` と `drive.py` はここから読む）・`ReviewSettings`・`DriveStopped`（移す） | `settings_path`・`read_settings`・`blob_id`・`proposed_differs`・`outside_checkout`（移す） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`apply_fix`・`skipped_texts`（変更）・`ingest_citations`（新設）・`handable`（新設） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | `criteria_decide` | `Finding`（変更） | `_finding_gaps`・`finish`（変更） |
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 結果 JSON | — | モジュール | `mvv_outputs`（新設） |

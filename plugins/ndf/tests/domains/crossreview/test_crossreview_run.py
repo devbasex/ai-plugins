@@ -856,11 +856,13 @@ def test_issue_4014_heavy_findings_without_impact_do_not_launch_the_fixer(wt: Pa
 
 def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severity(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#4014: 1 文つきの major と、1 文つきの重要度の無い指摘は修正担当へ渡り、指示のその行に起きることの 1 文が載る。
-    1 文の無い重要度の無い指摘は minor で渡らない。"""
+    1 文の無い重要度の無い指摘は minor で渡らない。
+    #4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役が MVV の項目を添えても重さも記録のキーも変わらず、
+    ジャーナルの指摘と結果 JSON の `outputs` のキーは MVV の無い形のままである。"""
     said = [
-        {"text": "保存が止まる", "severity": "major", "impact": " 入力が消える "},
+        {"text": "保存が止まる", "severity": "major", "impact": " 入力が消える ", "mvv": "Value 5"},
         {"text": "認可が抜ける", "impact": "他人の記録が読める"},
-        {"text": "語が揺れる"},
+        {"text": "語が揺れる", "mvv": "P1"},
     ]
     fake = Recording(tmp_path / "st", {"codex": [said, []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
@@ -869,26 +871,16 @@ def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severi
     assert "- r1-1: 保存が止まる（major）— 起きること: 入力が消える" in fix
     assert "- r1-2: 認可が抜ける（major）— 起きること: 他人の記録が読める" in fix
     assert "r1-3" not in fix
-    assert [r["severity"] for r in _state(fake.state_dir)["findings"]] == ["major", "major", "minor"]
-
-
-def test_issue_4076_without_an_approved_mvv_the_journal_and_outputs_keep_their_shape(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役が MVV の項目を添えても重さも記録のキーも変わらず、
-    ジャーナルの指摘と結果 JSON の `outputs` のキーは MVV の無い形のままである。"""
-    said = [
-        {"text": "止まる", "severity": "major", "impact": IMPACT, "mvv": "Value 5"},
-        {"text": "語が揺れる", "severity": "minor", "mvv": "P1"},
-    ]
-    fake = Recording(tmp_path / "st", {"codex": [said, []], "kiro": [[], []]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
     assert got["outputs"] == {"gaps": []}
     assert [i for i in got["items"] if i["kind"] == "finding"] == [
         {"kind": "finding", "id": "r1-1", "outcome": fin.FIXED},
-        {"kind": "finding", "id": "r1-2", "outcome": fin.UNRESOLVED},
+        {"kind": "finding", "id": "r1-2", "outcome": fin.FIXED},
+        {"kind": "finding", "id": "r1-3", "outcome": fin.UNRESOLVED},
     ]
-    state = _state(fake.state_dir)
-    light = _entry("r1-2", "codex", "語が揺れる", fin.UNRESOLVED, 1) | {"severity": "minor", "raised_severity": "minor"}
+    light = _entry("r1-3", "codex", "語が揺れる", fin.UNRESOLVED, 1) | {"severity": "minor"}
     del light["impact"]
-    assert _findings(state) == [_entry("r1-1", "codex", "止まる", fin.FIXED, 1) | {"raised_severity": "major"}, light]
-    assert "r1-2" not in next(p for a, _, p in fake.prompts if a == "claude")
+    assert _findings(_state(fake.state_dir)) == [
+        _entry("r1-1", "codex", "保存が止まる", fin.FIXED, 1) | {"impact": "入力が消える", "raised_severity": "major"},
+        _entry("r1-2", "codex", "認可が抜ける", fin.FIXED, 1) | {"impact": "他人の記録が読める"},
+        light,
+    ]
