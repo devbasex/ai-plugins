@@ -15,7 +15,7 @@ import os
 import sys
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional, TextIO
 
@@ -362,7 +362,7 @@ def _finish(t: Target, gen: Generation, turn: LastTurn, q: Ratios, stderr: TextI
 
 def _wake_row(t: Target, keep: Mapping[str, Any], wake_id: str, turn: LastTurn, now: float, limit: int) -> None:
     """`wake` の行を書く。書けなくても状態は起床を持つので起床させる（集計は `wake` の無い `wake_result` を数える）。"""
-    try:
+    with suppress(OSError):  # noqa: NDF402 ファイル: 記録を書けなくても起床は状態のフラグで突き合わせる
         _cache_row(
             t,
             "wake",
@@ -374,5 +374,3 @@ def _wake_row(t: Target, keep: Mapping[str, Any], wake_id: str, turn: LastTurn, 
             n_max=limit,
             spent=keep["spent"],
         )
-    except OSError:  # noqa: NDF401 ファイル: 記録を書けなくても起床は状態のフラグで突き合わせる
-        pass
