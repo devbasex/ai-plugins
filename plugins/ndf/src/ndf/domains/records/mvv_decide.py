@@ -55,7 +55,7 @@ def signal_kinds(verdict: Optional[str], approved: bool) -> list[str]:
 class Signals:
     """改訂の兆候。`overrides` は覆し、`unknown_pass` は「判定できない」を人が通した数（覆しに数えない）。"""
 
-    version: Optional[int]
+    mvv_version: Optional[int]
     overrides: int
     unknown_pass: int
     unknown: int
@@ -118,7 +118,7 @@ def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], re
     `repo` はメインディレクトリのパスで、記録の `repo` がこれと同じ行だけを数える。
     """
     version = current_version(decl)
-    mine = [r for r in rows if r.get("repo") == repo and r.get("version") == version]
+    mine = [r for r in rows if r.get("repo") == repo and r.get("mvv_version") == version]
     pairs: dict[str, set[tuple[Any, Any, Any]]] = {k: set() for k in (*OVERRIDES, OVERRIDE_UNKNOWN_PASS, UNKNOWN)}
     for r in mine:
         kind = r.get("kind")
@@ -142,15 +142,22 @@ def mvv_validation_key(inputs: Mapping[str, str]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def reusable(rows: Iterable[Mapping[str, Any]], key: str) -> Optional[Mapping[str, Any]]:
+def reusable(
+    rows: Iterable[Mapping[str, Any]], key: str, excluded: Iterable[tuple[int, Optional[Mapping[str, Any]]]] = ()
+) -> Optional[Mapping[str, Any]]:
     """同じ MVV 判定の入力の最新の判定が「従う」なら、その行（再利用の元）。無いか最新が「従う」でなければ None。
 
-    `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない）は呼び手が除く。
+    `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない・形が違う）は呼び手が除き、
+    `excluded`（それより前の読めた行の数と、辞書として読めた中身）で渡す。最新の判定より後に、同じ入力の判定かもしれない除いた行
+    （キーが同じか、キーを文字列として読めない）があれば、それが最新の判定かもしれないので None（古い「従う」へさかのぼらない）。
     """
     last_mvv_validation: Optional[Mapping[str, Any]] = None
-    for r in rows:
+    seen = 0
+    for n, r in enumerate(rows, 1):
         if r.get("kind") == MVV_VALIDATION_SPRINT and r.get("key") == key:
-            last_mvv_validation = r
+            last_mvv_validation, seen = r, n
+    if any(before >= seen and (raw is None or not isinstance(raw.get("key"), str) or raw["key"] == key) for before, raw in excluded):
+        return None
     if last_mvv_validation is None or last_mvv_validation.get("verdict") != FOLLOW:
         return None
     return last_mvv_validation

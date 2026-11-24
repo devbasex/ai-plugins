@@ -49,13 +49,12 @@ def _context_record(args: argparse.Namespace) -> int:
 
 def _context_calibrate(args: argparse.Namespace) -> int:
     try:
-        body = context_records.calibrate(context_records.toplevel(None), args.days, time.time(), os.environ)
+        body, skipped = context_records.calibrate(context_records.toplevel(None), args.days, time.time(), os.environ)
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"見込みのファイルへ書けない: {exc}"))
     samples = body["samples"]
-    return result.emit(
-        result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics={"samples": sum(samples.values())})
-    )
+    metrics = {"samples": sum(samples.values()), "skipped": skipped}
+    return result.emit(result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics=metrics))
 
 
 def _span(args: argparse.Namespace) -> Optional[tuple[float, float]]:
@@ -89,10 +88,10 @@ def _context_report(args: argparse.Namespace) -> int:
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"判定の記録を読めない: {exc}"))
     rows = [r for r in rows if since is None or context_records.at_least(r, since)]
-    usage_log = context_report.load_usage_log(os.environ)
+    usage_log, usage_skipped = context_report.load_usage_log(os.environ)
     targets = [context_records.recorded_work(args.work, None)] if args.work else context_report.works(rows)
     reports = [context_report.report(w, rows, usage_log, span) for w in targets]
-    metrics = {"works": len(reports), "skipped": skipped}
+    metrics = {"works": len(reports), "skipped": skipped, "usage_skipped": usage_skipped}
     return result.emit(result.result(TOOL, result.OK, f"{len(reports)} 件の作業を集計した", items=reports, metrics=metrics))
 
 

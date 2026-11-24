@@ -19,6 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, limits_readers, lint, suppressions, smells, spec_docs, structure, words
+from ndf.checks import internal_names
 from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
@@ -92,6 +93,7 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules) + limits_readers.check(scope, rules)
+    found += internal_names.check(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
     return sorted(found, key=_order)
 
