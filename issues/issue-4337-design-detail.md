@@ -307,7 +307,7 @@ plugins/ndf/
   - 副作用: 候補ごとに `contained` を 1 回。通常ファイルの `plan` だけ本文を読む（UTF-8）。読むときは `os.open` に `O_NOFOLLOW` を付け、確かめた後に末尾がリンクへ替わっていても辿らない。git を打たない
 - `launch_worker`
   - 事後条件: 起動指示は `<state_dir>/document-rebuild.prompt.md`、worker の結果ファイルは `<state_dir>/document-rebuild.result.json`。argv は `[ndf, "worker", "run", "--kind", "document-rebuild", "--prompt-file", <起動指示>, "--result-file", <結果>, "--cwd", <cwd>, "--state-dir", <state_dir>]`
-  - 副作用: 起動指示のファイルを書く。子プロセス `ndf worker run` を 1 回（その下で `claude -p`）
+  - 副作用: 起動指示のファイルを書く。子プロセス `ndf worker run` を 1 回。その中で `claude -p` を通常 1 回、worker が結果ファイルを書かずに応答を終えたときは `core/worker.py` の `RESUMES`（今は 3）回まで再起動するので最大 4 回打つ。読み手役のサブエージェントは worker の会話の中で立ち、上限は設計書の「影響と危険」の Claude の起動の行にある。再起動の回数は `ndf worker run` の標準出力の `metrics.attempts` に出るので、`drive` はそれを `info` のログに出す
 - `drive`
   - 事後条件: どの終わり方でも、設計書の「終わり方」の表の結果 JSON を返す。`ok` の `metrics` は `targets`（対象のパス）と `readers`（worker の記録をそのまま）。対象が 0 件なら `launch_worker` を呼ばない
   - 副作用: 上の関数のものだけ。コミット・`push`・GitHub への書き込みを持たない（条件 13）
@@ -385,7 +385,7 @@ plugins/ndf/
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `drive` | 起点の参照の名前・候補と対象の数・worker の終わりの `status` | `logging` の `info`（`log.info(…, extra=…)`。`core/worker.py` の 717 行目と同じ形） | 起動指示の本文・文書の本文 |
+| `drive` | 起点の参照の名前・候補と対象の数・worker の終わりの `status`・`claude -p` を起動した回数（`metrics.attempts`） | `logging` の `info`（`log.info(…, extra=…)`。`core/worker.py` の 717 行目と同じ形） | 起動指示の本文・文書の本文 |
 | `drive` | 結果 JSON | 標準出力の最後の 1 行と `--out`（`cli.main`） | — |
 
 ### 既存の部品の再利用
