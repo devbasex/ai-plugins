@@ -21,7 +21,7 @@
 | `src/ndf/domains/release/trail.py`・`approval_decide.py`・`cli.py` | 担い手の語・`TrailError`・回答の語を `ndf.core` から読む。振る舞いは変えない |
 | `src/ndf/checks/children.json` | 新設したモジュール（`ndf.core.actors`・`ndf.core.approval_words`・`ndf.core.merge_approval`・`ndf.core.production_merge`）のオーナーの子 `PM1` と、それを読む子の先に要る子を足す（設計書の「子の表の変更」） |
 | `contracts/causes/approval_stale.json`（新設） | 停止理由 `approval_stale` の定義 |
-| `src/ndf/adapters/github.py` | `branch_file`・`viewer_login`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す |
+| `src/ndf/adapters/github.py` | `branch_file`・`viewer`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す |
 | `src/ndf/ci_cli.py` | `ndf ci merge` に判定・照合・証跡の確かめと `--production-gate` を足し、`ndf ci ask`・`ndf ci answer` を足す |
 | `src/ndf/core/plan/cli.py`・`src/ndf/core/plan/runner.py` | `ndf plan next` に `--by` を足し、回答の記録 `answer-records/<ステップ>.json` を書く |
 | `src/ndf/progress/run.py` | `stale_routes`・`_failed_report`（`approval_stale` の経路）、`_consume`（MVV 通過の `seen`）、`migrate_definition`・`_migrated_order`・`view`・`advance`（写しの移行） |
@@ -66,7 +66,7 @@
 ### Task 5: GitHub のアダプタにマージ先の設定の読み取りと直前の照合を足す
 
 - **対象ファイル:** `src/ndf/adapters/github.py`、`tests/adapters/test_github_merge.py`
-- **変更内容:** `branch_file`・`viewer_login`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す。`expect` が無い呼び出しの要求の数が今と同じことを先に縛る。`tests/adapters/test_github_merge.py` は設計書では既存の扱いだが、今は無いので新設する（既存の `test_github.py`・`test_merge_queue.py` を膨らませず、照合の観点を 1 本にまとめるため）
+- **変更内容:** `branch_file`・`viewer`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す。`expect` が無い呼び出しの要求の数が今と同じことを先に縛る。`tests/adapters/test_github_merge.py` は設計書では既存の扱いだが、今は無いので新設する（既存の `test_github.py`・`test_merge_queue.py` を膨らませず、照合の観点を 1 本にまとめるため）
 - **満たす受け入れ条件:** 設計の決定 3（要求の数・作業場所の設定を読まない）、設計の決定 8
 - **進め方:** 退行テスト → 失敗するテスト → 通す最小実装 → 整理
 

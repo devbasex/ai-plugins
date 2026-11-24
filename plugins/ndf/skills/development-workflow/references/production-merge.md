@@ -5,8 +5,11 @@
 
 ## 例: project-trygroup-prd の 2 本のマージ
 
-マージが止まるかどうかは、マージ先が本番チャネルか（`branches.production`）と、本番チャネルへ自動で反映する届け先の行
-（`release.deliveries` の `channel: production` で `kind` が `manual` でない行）があるかの 2 つで決まる。
+`release.deliveries` を書いた構成では、本番チャネル（`branches.production`）宛てのマージで、本番チャネルへ自動で反映する
+届け先の行（`release.deliveries` の `channel: production` で `kind` が `manual` でない行）があるときに承認が要る。
+`release.deliveries` が無い構成と設定を読めない構成も、本番チャネル宛てなら承認を求める。この場合の判定は下の「マージ先ごとの判定」にある。
+
+次の例は `release.deliveries` を書いた構成である。
 ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）が `branches.base: develop`・`branches.production: main` を持ち、
 `release.deliveries` に、stg へ自動で反映する `channel: base`・`kind: auto` の行と、prd へ自動で反映する `channel: production`・`kind: auto` の行を持つとき:
 
@@ -39,7 +42,7 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | --- | --- | --- |
 | 本番チャネルでない | 当たらない | そのまま進む |
 | 自動反映の本番チャネル | 当たる | 承認を得るまで進めない |
-| 本番チャネルで、`release.deliveries` が無い・不明、または設定が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
+| 本番チャネルで、`release.deliveries` が無い・不明、または設定が読めない | 当たるとして扱う。`release.deliveries` が無ければ `release.cd` を読み、CD の設定がある（自動で反映する）、`null`（未設定）、無い・形が違う（決められない）のどれでも当たる | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
 | 本番チャネルで、`release.deliveries` に `channel: production` で `kind` が `manual` でない行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
 
 **判定は PR のベースリポジトリのマージ先のブランチにある `branch_strategy` とマージ先だけで決める。** 判定の規則は

@@ -35,7 +35,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/core/production_merge.py` | 新設 | `branch_strategy` とマージ先から、本番へ自動で届くかの判定の値を返す | 標準ライブラリ | モジュール | `Verdict`・`judge`・`automatic_rows`・`needs_approval`・`reaches_production`（新設） |
 | `src/ndf/ci_cli.py` | 変更 | `ndf ci merge` に判定と証跡の確かめを足し、`ndf ci ask`・`ndf ci answer` を足す | `adapters.github`・`core.merge_approval`・`core.approval_words`・`core.production_merge`・`contracts.result` | モジュール | `_parser`・`_merge`（変更）、`_pr_target`・`_judge_pr`・`_unapproved`・`_ask_approval`・`_answer`・`_presented`（新設） |
-| `src/ndf/adapters/github.py` | 変更 | マージ先の設定の読み取り・token の利用者・直前の照合を足す | `githubkit` | `GitHub` | `merge`・`_merge_with`・`_enqueue`（変更）、`branch_file`・`viewer_login`・`_verify`（新設） |
+| `src/ndf/adapters/github.py` | 変更 | マージ先の設定の読み取り・token の利用者・直前の照合を足す | `githubkit` | `GitHub` | `merge`・`_merge_with`・`_enqueue`（変更）、`branch_file`・`viewer`・`_verify`（新設） |
 | `src/ndf/core/merge_approval.py` | 新設 | 承認の対象とマージの承認の証跡を組み、読み、判定し、書く | `adapters.github`・`adapters.publish`・`core.approval_words` | モジュール | `MergeTarget`・`MergeRow`・`render_merge_row`・`merge_rows`・`merge_judgment`・`write_merge_row`（新設）。`By`・`USER_BY`・`MVV_BY`・`BY_CHOICES`・`BY_LINE`・`TrailError`（`domains/release/trail.py` から移す） |
 | `src/ndf/core/approval_words.py` | 新設 | 回答の語と、承認資料が対象にしたコミットの行の見出し | 標準ライブラリ | モジュール | `APPROVED`・`REJECTED`・`ANSWERS`・`HEAD_LINE`（`domains/release/approval_decide.py` から移す） |
 | `src/ndf/core/actors.py` | 新設 | 回答した者の形 | 標準ライブラリ | モジュール | `ACTORS`・`HUMAN`（`progress/gate/answering.py` の `ACTORS` を移し、`ndf answer --by` と `ndf plan next --by` が共有する） |
@@ -194,13 +194,13 @@ plugins/ndf/
 | `MergeRow` | `core/merge_approval.py` | 新設 | `class MergeRow(NamedTuple)`: `answer: str`・`by: str`・`target: MergeTarget`・`production: bool`・`record_id: str` | 証跡の 1 行の中身 |
 | `MERGE_MARK` | `core/merge_approval.py` | 新設 | 定数 `"<!-- ndf:merge-approval -->"`（名前空間は `identity.FIXED_WORDS['workflow_namespace']`） | マージの承認の証跡のマーカー。`ndf:release-approval` を含まない |
 | `render_merge_row` | `core/merge_approval.py` | 新設 | `(row: MergeRow) -> str` | マーカーと行（回答・担い手・ベースリポジトリ・PR・マージ先・HEAD・本番へ反映されるか・回答の記録の識別子）の Markdown を作る |
-| `merge_rows` | `core/merge_approval.py` | 新設 | `(hub: GitHub, number: int, login: str) -> list[MergeRow]` | PR のコメントから、数える証跡を古い順に返す（決定 7 の「証跡の判定」の規則 1・2） |
+| `merge_rows` | `core/merge_approval.py` | 新設 | `(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]` | PR のコメントから、数える証跡を古い順に返す（決定 7 の「証跡の判定」の規則 1・2） |
 | `merge_judgment` | `core/merge_approval.py` | 新設 | `(rows: Sequence[MergeRow], now: MergeTarget) -> Optional[MergeRow]` | 規則 3・4 で残した最新の 1 件が承認ならその行、無いか却下なら `None` |
-| `write_merge_row` | `core/merge_approval.py` | 新設 | `(hub: GitHub, row: MergeRow, login: str) -> bool` | 同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せず偽 |
+| `write_merge_row` | `core/merge_approval.py` | 新設 | `(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool` | 同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せず偽 |
 
 - `merge_rows`
-  - 事前条件: `login` は `GitHub.viewer_login()` の値。空なら数えずに `TrailError`（`NO_LOGIN`）
-  - 事後条件: 編集されたコメント、書き手が `login` と違うコメント（大文字小文字と、ボットの末尾の `[bot]` の有無は区別しない）、マーカーの無いコメント、行が読めないコメントは含まない。担い手 `mvv` の行は、判定の記録（`checks.note` の見出し）と同じコメントにあるものだけを含む
+  - 事前条件: `viewer` は `GitHub.viewer()` の値。アカウント ID が 0（読めない）なら数えずに `TrailError`（`NO_LOGIN`）
+  - 事後条件: 編集されたコメント、書き手のアカウント ID（`Authored.author_id`）が `viewer.account_id` と違うコメント（名前が同じでも別のアカウントなら含まない）、マーカーの無いコメント、行が読めないコメントは含まない。担い手 `mvv` の行は、判定の記録（`checks.note` の見出し）と同じコメントにあるものだけを含む
   - 副作用: GitHub のコメントの読み取り（`GitHub.comments`。floor(N / 100) + 1 回）
 - `write_merge_row`
   - 副作用: コメントの読み取りと、無ければ投稿 1 回（`Publisher.comment`）
@@ -212,7 +212,7 @@ plugins/ndf/
 | `merge_rows` | 行が読めない | 手で書いた・形が古い | 行の解釈 | 既定値で続ける（数えない） | 無し | — |
 | `write_merge_row` | 投稿できない | 通信・権限 | `GitHubError` | 呼び出し元へ返す | 呼び手の結果 | 同じ `record_id` で送り直せる（重ならない） |
 | `write_merge_row` | `by` が `user`・`mvv` でない、`answer` が承認・却下でない | 呼び手の誤り | 引数の確かめ | 止める（`TrailError`） | 呼び手の結果 | 書かない |
-| `merge_rows`・`write_merge_row` | `login` が空 | token の利用者を読めない（GraphQL の `viewer` が空） | 引数の確かめ | 止める（`TrailError`。理由は `NO_LOGIN`） | `ndf ci merge` は `precondition`（キューに入っていれば外す。`approval_stale` にしない）。`ndf ci answer` は `refused`。工程の回答は `model.Refused` で回答を記録しない | 書かない。login を読める token で打ち直す |
+| `merge_rows`・`write_merge_row` | `viewer` のアカウント ID が 0 | token の利用者を読めない（GraphQL の `viewer` が空） | 引数の確かめ | 止める（`TrailError`。理由は `NO_LOGIN`） | `ndf ci merge` は `precondition`（キューに入っていれば外す。`approval_stale` にしない）。`ndf ci answer` は `refused`。工程の回答は `model.Refused` で回答を記録しない | 書かない。login を読める token で打ち直す |
 
 ### 処理の手順
 
@@ -392,7 +392,7 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じ回答の送り直し・2 つの端末からの同じ回答 | PR の証跡のコメント、状態の記録 | 証跡は質問の id（`record_id`）で重ならないように書く（`write_merge_row`）。状態の記録は今のトランザクションと冪等のキー | 証跡の後・記録の前で止まっても、送り直しで証跡は 1 件のまま記録される。記録の後に証跡が無ければ `_same` の `ensure` が書く |
+| 同じ回答の送り直し・2 つの端末からの同じ回答 | PR の証跡のコメント、状態の記録 | 証跡は提示ごとの識別子（`record_id`。質問の id と `presentation_key` の組）で重ならないように書く（`write_merge_row`）。状態の記録は今のトランザクションと冪等のキー | 証跡の後・記録の前で止まっても、送り直しで証跡は 1 件のまま記録される。記録の後に証跡が無ければ `_same` の `ensure` が書く |
 
 ### 既存の部品の再利用
 
@@ -458,8 +458,8 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `branch_file` | `adapters/github.py` | 新設 | `(self, base: str, path: str) -> FileAt` | 1 回の GraphQL で、ベースリポジトリの名前・ブランチのファイルの本文と blob の oid を読む。無ければ本文と oid が `None`。同じ要求で token の利用者の login（`viewer { login }`）も読み、`viewer_login` のために持つ |
-| `viewer_login` | `adapters/github.py` | 新設 | `(self) -> str` | token の利用者の login（1 回だけ読み、インスタンスに持つ）。`branch_file` が同じ要求の `viewer { login }` で読んでいれば要求を送らない。読んでいなければ GraphQL の `viewer` を 1 回読む（REST の `/user` は GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` で 403 になるため使わない）。読めなければ空文字 |
+| `branch_file` | `adapters/github.py` | 新設 | `(self, base: str, path: str) -> FileAt` | 1 回の GraphQL で、ベースリポジトリの名前・ブランチのファイルの本文と blob の oid を読む。無ければ本文と oid が `None`。同じ要求で token の利用者（`viewer { login databaseId }`）も読み、`viewer` のために持つ。応答の `viewer` が空でも空として持つ |
+| `viewer` | `adapters/github.py` | 新設 | `(self) -> Viewer` | token の利用者（`Viewer(login, account_id)`。1 回だけ読み、インスタンスに持つ）。`branch_file` が同じ要求で読んでいれば、空だったときも要求を送らない。読んでいなければ GraphQL の `viewer { login databaseId }` を 1 回読む（REST の `/user` は GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` で 403 になるため使わない）。読めなければアカウント ID が 0 |
 | `merge` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False, expect: Optional[MergeExpect] = None) -> MergeOutcome` | `expect` があれば、要求を送る直前に照らす |
 | `_merge_with` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str], method: Optional[str], route: _MergeRoute, expect: Optional[MergeExpect] = None) -> MergeOutcome` | 最初の PR の読み直しをやめ、方式の問い合わせの後・送る直前に `_verify` を呼ぶ。`expect` が無ければ今と同じ |
 | `_enqueue` | `adapters/github.py` | 変更 | `(self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None) -> Optional[MergeOutcome]` | キューの状態の問い合わせに `baseRefName`・HEAD・設定の oid と本文を足して照らし、投入の後に PR を読み直してマージ先が変わればキューから外す |
@@ -500,7 +500,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `branch_file` | `GitHub.repository`・`GitHub.graphql` | `grep -n "def repository\|def graphql" src/ndf/adapters/github.py` | `repository` を使って問い合わせる |
-| `viewer_login` | `GitHub` のメソッド | `grep -n "viewer" src/ndf/adapters/*.py` | 0 件。新設する |
+| `viewer` | `GitHub` のメソッド | `grep -n "viewer" src/ndf/adapters/*.py` | 0 件。新設する |
 | `_verify` | `_preflight` | `grep -n "def _preflight" src/ndf/adapters/github.py` | HEAD の照合は `_preflight` と同じ規則にそろえ、マージ先と oid を足す |
 
 ### 単体テストの観点
