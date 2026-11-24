@@ -329,6 +329,10 @@ sequenceDiagram
   - Tool の名前と許可の規則を分けて渡す。今の `Permission.TOOLS` は同じ文字列を `--tools`（使える Tool）と `--allowed-tools`（許可の規則）の両方に渡す。場所を限った規則（`Read(//<パス>/**)` など）を同じ文字列に入れると、`--tools` に Tool の名前でない値が渡る。そこで、claude の起動の部品（`adapters/claude.py` の `ClaudeCall`）に読める場所の一覧を足し、空でないときだけ上の 3 つの引数を組み立てる。`--tools` と `--allowed-tools` には今のとおり Tool の名前（`Read,Grep,Glob`）だけを渡し、場所の規則は使わない。権限の引数は今のとおり `permission_args` の 1 か所で組み立てる
   - 共有する関数は、読める場所を引数で受ける。cross-refactoring は場所を渡さず、今と同じ引数になる（受け入れ条件 13）
   - 範囲の外を本当に断るかは、実装の PR で実際の claude を起動して手で確かめる（「未確認のまま残ること」）。断らなければ実装の PR をマージせず、設計に戻す
+- **claude の下限のバージョンを 2.1.268 から 2.1.316 に上げる。** `--restricted` の読み取りの境界は、2.1.316 より前の版では保てないためである。2.1.316 で、読み取りの許可の規則に当たる作業ディレクトリの外のファイルを、`--restricted` のセッションがアップロードしてしまう不具合が直った（[Claude Code の変更履歴の 2.1.316](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21316) ）。その前にも、読んでいる途中で差し替えたリンクから作業ディレクトリの外を読めた不具合（2.1.290）と、起動の後に登録される Tool に `--tools` と `--restricted` が効かない不具合（2.1.295）が直っている
+  - 下限は、外部 CLI の下限の表（`plugins/ndf/contracts/domains/cli-floors.json` の `claude` の行の `min_version`）の 1 か所で上げる。席の claude のためだけの下限は作らない。修正担当も claude で、cross-review は claude 無しでは回らないので、席の claude にだけ別の下限を持たせても、使える環境は変わらないためである
+  - 起動の前の検査は今のものを使う。相手役の起動（`agents.run_agent`）は、起動の直前に `cli_floor.require` でバージョンを下限と比べ、古ければ起動せずに断られた（`refused`）状態を返す。席の claude が断られると、その席は結果が無いとして分岐の表に進む。修正担当の起動も同じ検査で断られる
+  - 表の `min_version` の説明は「NDF が使う引数・サブコマンドがすべて入った最初のバージョン」である。これに「NDF が頼る振る舞いの不具合が直った最初のバージョン」を足し、上げた理由（`--restricted` の境界、#3955）を表の説明か行に残す
 - 採らなかった案: cross-review の駆動に別に書く（同じ役割の起動が 2 か所に分かれ、許す Tool の変更が片方にしか効かない）
 - 採らなかった案: 保存先（`--state-dir`）の全体を `--add-dir` に足す。上のとおり、レビューに要らない修正担当の結果や実行のログまで読めるようになる
 - 採らなかった案: `--allowed-tools` に場所を限った読み取りの規則だけを書いて範囲を限る。許可の規則は当たらない読み取りを断らないので、範囲の外の読み取りが通りうる
@@ -400,6 +404,7 @@ sequenceDiagram
   - 相手役へ渡す資料の置き場の移動（決定 2）。資料のパスを保存先の直下で組み立てている箇所が残ると、相手役が差分を開けない
   - 記録のコメントの表の列の追加。今の表を読み戻す処理が無いことは確かめた（`report_decide.open_items` は、コメントの最後の行に埋めた未解決の指摘の JSON の一覧だけを読む。決定 7 と同じ対象）
 - **費用**: 相手役が欠けたとき・`allowed` が狭いときに claude の起動が増える（要求の「今の利用者への影響と互換」）
+- **claude の下限のバージョン**: 2.1.268 から 2.1.316 に上がる（決定 2）。2.1.268〜2.1.315 の claude を使う環境では、cross-review に限らず、NDF が起動する claude が下限で断られる。claude を更新すれば直る
 - **同じファイルを触る別の変更**: [#3953](https://github.com/devbasex/ai-plugins/issues/3953) （止まったときの結果 JSON の形の誤り）である。`finish_decide.py` と `cli.py` を触る見込みがある。この変更は `finish_decide.py` を触らない
 
 ### 代表のリポジトリでの振る舞い
@@ -435,6 +440,7 @@ sequenceDiagram
 | 6 | `allowed` が claude だけのとき、`invalid` で止まらずに席が `claude`・`claude-2` になり、codex と kiro を起動しない | 選べる相手役が 0 で投げる・2 つ目の席の名前が重なると落ちる |
 | 決定 3 | `claude-2` の席の起動の `agent` がランタイム claude で、無進捗の許容が claude の値で引かれ、出力のファイルの名前は `round<n>-claude-2` になる | 起動に席の名前を渡すと落ちる |
 | 7・8・I5 | 席の claude の起動の引数が会話を残さない最小構成で、許す Tool が `Read,Grep,Glob` だけであり、修正担当の会話の ID を持たない。起動の引数に `--restricted` と `--permission-mode dontAsk` があり、`acceptEdits` が無く、`--add-dir` が `review-input/` だけを指し、`--tools` と `--allowed-tools` が Tool の名前だけである。依頼文が指すファイルがすべて `review-input/` の下にあり、修正担当の結果・実行のログ・状態ファイルが `review-input/` に無い。読める場所を渡さない cross-refactoring の起動の引数は今と同じである | 修正担当の起動の形（`FIXER_TOOLS`・会話の指定）を使う・`--restricted` か `dontAsk` を落とす・保存先の全体を `--add-dir` に渡す・資料を保存先の直下に書く・場所の規則を `--tools` に混ぜると落ちる |
+| claude の下限（決定 2） | バージョンの検査を差し替えて claude を 2.1.315 と答えさせると、席の claude の起動は子のプロセスを起動せずに断られた状態を返し、その席は結果が無いとして分岐の表に進む。2.1.316 なら起動する | 下限を上げない・席の claude の起動で下限の検査を通さないと落ちる |
 | 9 | codex と kiro が両方読めると、claude を相手役として起動せず、ラウンドの記録に `filled` が無い | 読めたときにも埋めると落ちる |
 | 10・I3 | codex と kiro が両方起動し直しても読めないと `precondition` で止まり、claude を相手役として起動しない | 全員が読めないときに埋めると落ちる |
 | 11 | 埋めた claude も読めないと、そのラウンドを収束に数えず `incomplete_reviewers` で止まり、claude を 2 回起動しない | 埋めた席を起動し直す・埋め直すと落ちる |
@@ -459,7 +465,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py` |
+| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py` |
 
 ## 未確認のまま残ること
 
