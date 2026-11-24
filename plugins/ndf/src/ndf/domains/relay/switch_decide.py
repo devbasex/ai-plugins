@@ -32,9 +32,8 @@ AUTH_RESUME_PROMPT = "認証の失敗でアカウントを替えた。中断し�
 # 見回りで替えた先の最初の入力に足す 1 行（子を止めると監視も終わるが、起動し直した会話はそれを知らない。#4049 の決定 9）
 MONITOR_RESUME = (
     "バックグラウンドの監視（ndf lanes wait・ndf plan wait・ndf ci watch・Monitor）は、アカウントの切り替えで終了した。"
-    "動かしていた監視は始め直してから待つ。ndf lanes wait は、最後に受け取った結果（items・metrics.new_stalls・計画の終わり）のうち"
-    "処理していないものだけを処理してから、その結果の next を打つ（items があっても、未報告の new_stalls を報告してから打つ）。"
-    "next が null なら計画は終わったので、未報告ならレーンごとの結果を要約して [ndf-parallel] finished <計画名> の行を出し、打たずに終える。"
+    "動かしていた監視は始め直してから待つ。ndf lanes wait は、最後に受け取った結果の処理を development-workflow の parallel.md の"
+    "「手順」どおりに終えてから、その結果の next を打つ（next が null なら計画は終わったので、終了の報告だけして打たない）。"
     "結果を受け取っていないか読めなければ、終わった wait の元の行（同じ --after）を打つ。ほかの監視は同じコマンドを打つ"
 )
 # 止めるものも待つものも無い見回りの理由
