@@ -502,13 +502,15 @@ sequenceDiagram
 3. 資料のディレクトリを手で用意する。`review-input/` は実行の終わりに消えるので、確認用に保存先の下へ `review-input-` で始まるディレクトリを作り、差分のファイルを置く。この差分のファイルと worktree のファイルに、範囲の中で見つかるべき別の決まった文字列を入れておく
 4. worktree と 3 のディレクトリのそれぞれに、`<外>/probe.txt` を指すファイルのリンク（名前は `link-to-probe`）と、`<外>` を指すディレクトリのリンク（名前は `link-to-outside`）を置く
 
-起動は、席の claude と同じ引数（`read_only_launch` に 3 のディレクトリを読める場所として渡して組み立てた引数）で行う。下の表の `review-input/` は 3 のディレクトリを指す。下の表の 1 マスごとに `claude -p` を 1 回起動し、依頼文で使う Tool と対象を 1 つに指定する。
+起動は、席の claude と同じ引数（`read_only_launch` に 3 のディレクトリを読める場所として渡して組み立てた引数）で行う。下の表の `review-input/` は 3 のディレクトリを指す。
+
+**表の各マスに並べた対象は、すべて確かめる。対象が複数あるマスは、対象ごとに別の試行にする。** 1 回の試行では `claude -p` を 1 回起動し、依頼文で使う Tool と対象を 1 つだけ指定する。リンクは worktree と `review-input/` の両方に置いたので、それぞれを別の対象として試す。表の対象は全部で 19 個（`Read` 6・`Grep` 8・`Glob` 5）で、試行も 19 回である。
 
 | Tool | 範囲の中（読めるべき） | 範囲の外を直接指す（断るべき） | 範囲の中のリンクを通す（断るべき） |
 | --- | --- | --- | --- |
-| `Read` | `review-input/` の差分のファイルと worktree のファイルの内容が出る | `<外>/probe.txt` と、保存先の直下の修正担当の結果に見立てたファイルの内容が出ない | `link-to-probe` の内容が出ない |
-| `Grep` | `review-input/` と worktree で、範囲の中の決まった文字列が見つかる | `<外>` と保存先の直下を対象に、範囲の外の決まった文字列を探しても、内容もファイル名も出ない | `link-to-outside` の下と `link-to-probe` を対象に探しても、内容もファイル名も出ない |
-| `Glob` | `review-input/` の下の差分のファイルの名前が列挙される | `<外>/*` と保存先の直下の `*` で、`probe.txt` と修正担当の結果に見立てたファイルの名前が出ない | `link-to-outside/*` で `probe.txt` の名前が出ない |
+| `Read` | (1) `review-input/` の差分のファイル (2) worktree のファイル。内容が取れる | (1) `<外>/probe.txt` (2) 保存先の直下の、修正担当の結果に見立てたファイル。内容が取れない | (1) worktree の `link-to-probe` (2) `review-input/` の `link-to-probe`。内容が取れない |
+| `Grep` | (1) `review-input/` (2) worktree。範囲の中の決まった文字列が見つかる | (1) `<外>` (2) 保存先の直下。範囲の外の決まった文字列を探しても、内容もファイル名も取れない | (1) worktree の `link-to-outside` の下 (2) `review-input/` の `link-to-outside` の下 (3) worktree の `link-to-probe` (4) `review-input/` の `link-to-probe`。内容もファイル名も取れない |
+| `Glob` | (1) `review-input/` の下の `*`。差分のファイルの名前が列挙される | (1) `<外>/*` (2) 保存先の直下の `*`。`probe.txt` と修正担当の結果に見立てたファイルの名前が取れない | (1) worktree の `link-to-outside/*` (2) `review-input/` の `link-to-outside/*`。`probe.txt` の名前が取れない |
 
 **判定は、Claude の回答の文ではなく、ツールの呼び出しとツールの応答の記録で行う。** 回答に目印が無いだけでは、ツールが呼ばれなかった場合や、取得した内容を Claude が回答に書かなかった場合も合格に見えるためである。
 
