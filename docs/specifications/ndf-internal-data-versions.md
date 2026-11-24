@@ -161,9 +161,9 @@ sequenceDiagram
 | プランのステップの結果を受け取る（`core/plan/steps.py` の `last_json`） | 代わりの `stopped`（`precondition`）にする | 確かめない（一部の欄だけの結果も受け取る） |
 | 保存したプランの結果を読む（`stored_result`） | `InternalError`（`precondition`） | 確かめない |
 
-代わりの結果には元の値を入れない。`tool` は固定の `ndf` にし、`detail` は誤りの件数と、標準エラーに出すものと同じ誤りの文で作る
-（`emit` が結果をスキーマで確かめるのは 1 回）。誤りの文には元の値とキーを入れず、スキーマの中の場所と規則の名前だけを書く
-（`required` は欠けた欄の名前を添える）。スキーマでは見ない誤り（表に無い `cause.kind`・`severity`・`routes` のキー、新しい `version`、終了コードの食い違い）も、欄の名前と NDF の語彙にある語だけで書く。停止理由の表（`contracts/causes/`）の `invalid` が読めないときも、代わりの結果を 1 行で出す（`emit_unchecked`）。
+代わりの結果には元の値を入れない。`tool` は固定の `ndf` にし、`detail` は誤りの件数と、標準エラーに出すものと同じエラーの文で作る
+（`emit` が結果をスキーマで確かめるのは 1 回）。エラーの文には元の値とキーを入れず、スキーマの中の場所と規則の名前だけを書く
+（`required` は欠けた欄の名前を添える）。スキーマでは見ない誤り（表に無い `cause.kind`・`severity`・`routes` のキー、新しい `version`、終了コードの食い違い）も、欄の名前と、コントラクトの表（停止理由・重大度など）に載っている語だけで書く。停止理由の表（`contracts/causes/`）の `invalid` が読めないときも、代わりの結果を 1 行で出す（`emit_unchecked`）。
 
 ### キーの名前（名前の対応表と規則 `internal-names`）
 

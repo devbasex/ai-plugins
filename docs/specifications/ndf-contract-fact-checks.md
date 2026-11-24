@@ -126,7 +126,7 @@ hook（Claude Code と Codex が決まった時点で呼ぶ NDF の処理）の�
 | 運用で決める上限・回数・待ち時間 | 上限の設定の方針にする | `supervise.worker-run` を読む `core/worker.py` の `work_timeout` |
 
 `pace` は開発の進め方で、`fast` と `auto` では、設計とリリースの承認ゲートに限り、プロジェクトの判断基準（MVV: Mission・Vision・Value）による判定で承認を省けることがある。
-省くには、承認済みの MVV とそのハッシュの一致、レッドラインに触れないこと、判定の記録などの条件がすべて要る。条件の正本は
+省くには、承認済みの MVV とそのハッシュの一致、レッドライン（人の承認を省いてはいけない変更）に触れないこと、判定の記録などの条件がすべて要る。条件の正本は
 [`pace.md` の「MVV 判定」](../../plugins/ndf/skills/development-workflow/references/pace.md#mvv-判定) である。`MVV_PACES` は `fast` と `auto` の 2 つだけを持つ。
 `normal` を含む `pace` の全体から作ると、通常の進め方でも承認を省いてしまう。
 
