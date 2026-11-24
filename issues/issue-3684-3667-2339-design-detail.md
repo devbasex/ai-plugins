@@ -83,7 +83,7 @@ plugins/ndf/
 | `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`check`（新設） |
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
 | `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `consts`（変更）・`dict_values`・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
-| `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`VERSION`（新設） |
+| `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`readable_version`・`VERSION`（新設） |
 | `src/ndf/checks/spec_render.py` | 変更 | 設計レビューの項目の表から、項目ごとの行き先の並び（`review_items`）を組み立てる | `checks.spec_model` | モジュール | `review_items`（新設） |
 | `src/ndf/checks/spec_docs.py` | 変更 | 生成した `review_items` と `children.json` の差分と、行き先の無い項目を指摘にする | `checks.spec_render` | モジュール | `check`（変更） |
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
@@ -427,6 +427,7 @@ plugins/ndf/
 | `read_record` | `src/ndf/contracts/internal.py` | 新設 | `read_record(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]` | 1 行を読み、古い版は移行してから種類のスキーマで確かめる |
 | `write_record` | `src/ndf/contracts/internal.py` | 新設 | `write_record(kind: str, row: Mapping[str, Any]) -> dict[str, Any]` | 書く前に今の版の形で確かめ、`version` と `at` を埋めて返す |
 | `migrate` | `src/ndf/contracts/internal.py` | 新設 | `migrate(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]` | 古い版の行を今の版の形へ移す（種類ごとに 1 か所） |
+| `readable_version` | `src/ndf/contracts/internal.py` | 新設 | `readable_version(kind: str, raw: Mapping[str, Any]) -> int` | 行の版だけを返す（移さず、形も確かめない。新しい版なら止める）。対象外の行を読み飛ばす `jsonl.read_rows` が使う |
 | `stamp`・`epoch` | `src/ndf/contracts/internal.py` | 新設 | `stamp(seconds: float) -> str`・`epoch(at: str) -> float` | 秒（`time.time()`）と `at` の文字列（UTC・マイクロ秒まで）を行き来する |
 
 - `read_record`

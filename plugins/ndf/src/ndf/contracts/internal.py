@@ -99,18 +99,23 @@ def write_record(kind: str, row: Mapping[str, Any]) -> Row:
 
 def migrate(kind: str, raw: Mapping[str, Any]) -> Row:
     """古いバージョンの行を今のバージョンの形へ移す。新しいバージョンなら `InternalError`（`precondition`）。"""
-    spec = _kind(kind)
-    found, current = _version_of(spec, raw), version()
-    if found > current:
-        raise InternalError(
-            "precondition", f"新しいバージョンの記録（{kind}・バージョン {found}）を古い NDF が読んだ。プラグインを更新する"
-        )
+    found, current = readable_version(kind, raw), version()
     row = dict(raw)
     if found == current:
         return row
-    for step in spec.steps[found:current]:
+    for step in _kind(kind).steps[found:current]:
         row = step(row)
     return {**row, "version": current}
+
+
+def readable_version(kind: str, raw: Mapping[str, Any]) -> int:
+    """行の形のバージョン（移さず、形も確かめない）。新しいバージョンなら `InternalError`（`precondition`）。"""
+    found = _version_of(_kind(kind), raw)
+    if found > version():
+        raise InternalError(
+            "precondition", f"新しいバージョンの記録（{kind}・バージョン {found}）を古い NDF が読んだ。プラグインを更新する"
+        )
+    return found
 
 
 def _kind(kind: str) -> Kind:

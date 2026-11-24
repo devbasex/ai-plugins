@@ -36,7 +36,7 @@ def read_rows(
 ) -> tuple[list[dict[str, Any]], list[Broken]]:
     """種類 `kind` の `wanted` が真の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。
 
-    `wanted` が偽の行はバージョンだけを見て、形を確かめない（錠の中で一部の行だけを使う読み手が、全部の行の検証を払わない）。
+    `wanted` が偽の行はバージョンだけを見て、移さず、形も確かめない（錠の中で一部の行だけを使う読み手が、全部の行の移行と検証を払わない）。
     """
     if not path.is_file():
         return [], []
@@ -51,7 +51,7 @@ def read_rows(
             if wanted(raw):
                 rows.append(internal.read_record(kind, raw))
             else:
-                internal.migrate(kind, raw)
+                internal.readable_version(kind, raw)
         except internal.InternalError as exc:
             if exc.kind != "invalid":
                 raise

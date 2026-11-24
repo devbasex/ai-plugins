@@ -45,14 +45,16 @@ def test_read_stops_on_a_newer_version(tmp_path):
     assert exc.value.kind == "precondition"
 
 
-def test_read_validates_only_the_wanted_rows_and_stops_on_a_newer_version_of_any_row(tmp_path, monkeypatch):
+def test_read_moves_and_validates_only_the_wanted_rows_and_stops_on_a_newer_version_of_any_row(tmp_path, monkeypatch):
+    moved: list[Mapping[str, Any]] = []
     checked: list[Mapping[str, Any]] = []
-    real = internal.read_record
-    monkeypatch.setattr(internal, "read_record", lambda kind, raw: checked.append(raw) or real(kind, raw))
+    move, read = internal.migrate, internal.read_record
+    monkeypatch.setattr(internal, "migrate", lambda kind, raw: moved.append(raw) or move(kind, raw))
+    monkeypatch.setattr(internal, "read_record", lambda kind, raw: checked.append(raw) or read(kind, raw))
     mine, other = {**ROW, "agent_id": "a"}, {"agent_id": "b"}
     path = write(tmp_path / "u.jsonl", json.dumps(mine), json.dumps(other), "[1]", json.dumps({"agent_id": "a"}))
     rows, broken = jsonl.read_rows(path, kind="usage", wanted=_wanted)
-    assert rows == [{**mine, "version": 1}] and [b.line for b in broken] == [3, 4] and len(checked) == 2
+    assert rows == [{**mine, "version": 1}] and [b.line for b in broken] == [3, 4] and len(checked) == len(moved) == 2
     write(path, json.dumps(mine), json.dumps({**other, "version": 2}))
     with pytest.raises(InternalError) as exc:
         jsonl.read_rows(path, kind="usage", wanted=_wanted)
