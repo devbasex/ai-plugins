@@ -1,6 +1,6 @@
 # #4337 の詳細設計: 起動の設定が無いリポジトリでも、設計とドキュメント再構成が流れる
 
-設計書 [issue-4337-design.md](./issue-4337-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存のクラス `TemplateValuesMissing` の引数も変えるので、設計書とは別のファイルにした。文中の「決定 N」「I N」「E N」は設計書の、「条件 N」は要求仕様（[issue-4337-requirements.md](./issue-4337-requirements.md)）のものを指す。パスは `plugins/ndf/` からの相対で書く。
+設計書 [issue-4337-design.md](./issue-4337-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存のクラス `TemplateValuesMissing` の引数も変えるので、設計書とは別のファイルにした。文中の「決定 N」「I N」「E N」は設計書のものを指す。「条件 N」は要求仕様（[issue-4337-requirements.md](./issue-4337-requirements.md)）のものを指す。パスは `plugins/ndf/` からの相対で書く。
 
 ## 地図
 
@@ -35,7 +35,12 @@ plugins/ndf/
     └── domains/docrebuild/test_docrebuild_select.py *、test_docrebuild_run.py *
 ```
 
-依存の向き: 層の向き（下から `contracts`・`adapters`・`core`・`progress`・`domains`）だけに従う。`progress.invoke` → `progress.rebuild_values` → `core.branch_strategy`・`adapters.git`・`core.route` と、`domains.docrebuild.cli` → `drive` → `select_decide` → `core.issue_docs` の 2 本で、互いを読まない。`progress.rebuild_values` は `domains.docrebuild` を読まず、コマンドの語の並びだけを組む（設計書の「コンテキスト」の上流と下流）。`domains.docrebuild` は `progress` を読まない（設計書の「コンテキスト」）。`domains.loop.design_tests` は `core.issue_docs` を読むだけで、`domains.docrebuild` とはつながらない。循環は無い。
+依存の向き: 層の向き（下から `contracts`・`adapters`・`core`・`progress`・`domains`）だけに従う。依存は次の 2 本で、互いを読まない。
+
+- `progress.invoke` → `progress.rebuild_values` → `core.branch_strategy`・`adapters.git`・`core.route`
+- `domains.docrebuild.cli` → `drive` → `select_decide` → `core.issue_docs`
+
+`progress.rebuild_values` は `domains.docrebuild` を読まず、コマンドの語の並びだけを組む（設計書の「コンテキスト」の上流と下流）。`domains.docrebuild` は `progress` を読まない（設計書の「コンテキスト」）。`domains.loop.design_tests` は `core.issue_docs` を読むだけで、`domains.docrebuild` とはつながらない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -170,10 +175,10 @@ plugins/ndf/
 | `template_values` | 同上 | 変更（シグネチャは変えない） | 今のまま | `_fill_from_sources` の直後、`route.derived_locally` の前に `rebuild_values.fill` を呼ぶ。`undecided` があれば `TemplateValuesMissing(t.name, {"rebuild": FROM_PROJECT}, {"rebuild": undecided.fields()})` を上げ、無ければ返した値を `values` に足す |
 
 - `template_values`
-  - 事後条件: `derived_locally` は値のある `base`・`remote` を求め直さないので（`_omitted` が偽）、設計のプランの `base` と `rebuild` の `--base` は同じ値になり、`branch_strategy` の読み取りと `Git.remote()` はそれぞれ 1 回になる（条件 14 の行の確かめ）
+  - 事後条件: `derived_locally` は値のある `base`・`remote` を求め直さない（`_omitted` が偽）。そのため設計のプランの `base` と `rebuild` の `--base` は同じ値になる。`branch_strategy` の読み取りと `Git.remote()` はそれぞれ 1 回になる（条件 14 の行の確かめ）
   - 副作用: 今のものに加えて無し（`Git.remote()` の 1 回は `derived_locally` から移るだけ）
 
-`rebuild_values.fill` へ渡す `mode` は `run.inputs.get("mode")` である。工程「設計」の定義は既に `mode` を持ち、工程「ドキュメント再構成」の定義には今回足す（下の「契約とテンプレート」）。`run.inputs` の `mode` はテンプレートの `params` に無いので、`_fill_from_sources` が `values` へ入れず、`values.json` にも入らない。
+`rebuild_values.fill` へ渡す `mode` は `run.inputs.get("mode")` である。工程「設計」の定義は既に `mode` を持ち、工程「ドキュメント再構成」の定義にはこの課題で足す（下の「契約とテンプレート」）。`run.inputs` の `mode` はテンプレートの `params` に無いので、`_fill_from_sources` が `values` へ入れず、`values.json` にも入らない。
 
 `invoke.py` は今 982 行である。足すのは `template_values` の 4 行ほどと `TemplateValuesMissing` の数行で、ロジックは `rebuild_values` に置き、1,000 行を超えない。超えるときは `TemplateValuesMissing` の `details` の組み立てを `rebuild_values` 側の `Undecided.fields()` に寄せて行数を減らす。
 
@@ -211,7 +216,10 @@ plugins/ndf/
 - `candidates`
   - 事後条件: 並びは差分の順（`design`・`manuscript`）の後に `plan_paths` の順。同じパスは 1 回だけ。差分にある実装計画は `kind_of` が `None` を返すので、`plan` は差分によらず番号からだけ入る（決定 9）
 - `select`
-  - 事前条件: `regular` は `lstat` で通常ファイルと分かった候補のパス、`present` は作業場所に何かがある（`lstat` が成功した）パス、`plans` は通常ファイルの `plan` の候補の本文
+  - 事前条件
+    - `regular`: `lstat` で通常ファイルと分かった候補のパス
+    - `present`: 作業場所に何かがある（`lstat` が成功した）パス
+    - `plans`: 通常ファイルの `plan` の候補の本文
   - 事後条件: `targets` は通常ファイルだけ（I1）。`skipped` は、差分から来た候補で通常ファイルでないもの（リンク・サブモジュール・作業場所に無いもの）と、`plan` の候補で `present` にあるが通常ファイルでないもの。`plan` の候補で作業場所に無いもの（実装計画を書かない課題）と、省いた行を持たないものは `skipped` に入れない（選ぶ条件に合わないだけで、外したのではない）
 
 ### 処理の手順
@@ -234,7 +242,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `KINDS` | 定数 | `src/ndf/domains/docrebuild/select_decide.py` | `("design", "plan", "manuscript")`。`cli._parser` の `--kind` の `choices` もこれを読む |
-| `PLAN_FILE` | 定数 | 同上 | `"issues/issue-{number}-plan.md"`（`progress/refactor_values.py` にも同じ値がある。層の向きで `domains` は `progress` を読まない決まりにしたので（設計書の「コンテキスト」）、ここに持つ。`core.issue_docs` へ移すと 2 か所が 1 つになるが、`refactor_values` は設計書の触るファイルに無いので今回は移さない） |
+| `PLAN_FILE` | 定数 | 同上 | `"issues/issue-{number}-plan.md"`（`progress/refactor_values.py` にも同じ値がある。層の向きで `domains` は `progress` を読まない決まりにしたので（設計書の「コンテキスト」）、ここに持つ。`core.issue_docs` へ移すと 2 か所が 1 つになるが、`refactor_values` は設計書の触るファイルに無いので、この課題では移さない） |
 | `OMITTED` | 定数 | 同上 | `"省いた文書: 設計書"` |
 | `ISSUES_DIR` | 定数 | 同上 | `"issues/"` |
 
@@ -284,7 +292,12 @@ plugins/ndf/
   - 事後条件: どの終わり方でも、設計書の「終わり方」の表の結果 JSON を返す。`ok` の `metrics` は `targets`（対象のパス）と `readers`（worker の記録をそのまま）。対象が 0 件なら `launch_worker` を呼ばない
   - 副作用: 上の関数のものだけ。コミット・`push`・GitHub への書き込みを持たない（条件 13）
 
-`Runner` は `Callable[[list[str], Path], subprocess.CompletedProcess[str]]` で、既定の `_run` は `subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)` を打つ。テストは偽物に替える。
+`Runner` の形と既定の値は次のとおりである。テストは偽物に替える。
+
+| 名前 | 値 |
+| --- | --- |
+| `Runner` | `Callable[[list[str], Path], subprocess.CompletedProcess[str]]` |
+| 既定の `_run` | `subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)` を打つ |
 
 ### 異常系の処理
 
@@ -416,4 +429,9 @@ plugins/ndf/
 | `src/ndf/checks/children.json` | `P1b` の `packages` に `ndf.progress.rebuild_values`、`M1` の `packages` に `ndf.domains.docrebuild` と `ndf.core.issue_docs` を足す。`needs` は変えない |
 | `src/ndf/cli.py` | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を、辞書順の位置へ足す |
 
-`agents/worker.md`・プランのテンプレート（`contracts/templates/design.json`・`document-rebuild.json`）・`core/plan/`・`progress/run.py` は変えない（設計書の「設計の結果」）。
+次のものは変えない（設計書の「設計の結果」）。
+
+- `agents/worker.md`
+- プランのテンプレート（`contracts/templates/design.json`・`document-rebuild.json`）
+- `core/plan/`
+- `progress/run.py`
