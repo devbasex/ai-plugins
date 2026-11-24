@@ -95,6 +95,25 @@ def test_ask_retries_once_and_tells_the_errors():
     assert "形に合わなかった" in fake.calls[1][1]
 
 
+def test_ask_checks_only_before_the_retry_and_stops_when_the_check_raises():
+    schema = llm.answer_schema(choices=["fix", "stop"])
+    checked: list[int] = []
+    fake = FakeClaude(reply(good("fix")))
+    assert llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1)).ok
+    assert checked == []
+    fake = FakeClaude(reply(good("wait")), reply(good("stop")))
+    assert llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1)).ok
+    assert checked == [1] and len(fake.calls) == 2
+
+    def moved() -> None:
+        raise RuntimeError("材料が古い")
+
+    fake = FakeClaude(reply(good("wait")), reply(good("stop")))
+    with pytest.raises(RuntimeError, match="材料が古い"):
+        llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=moved)
+    assert len(fake.calls) == 1
+
+
 def test_ask_returns_needs_human_after_two_misses_without_picking_words():
     schema = llm.answer_schema(choices=["fix", "stop"])
     text = claude.ClaudeReply(True, None, "fix にするのがよい", 0.1)
