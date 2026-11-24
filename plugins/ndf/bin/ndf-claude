@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# このプラグインだけを読む claude を起動する（#3409・決定 74）。引数はそのまま claude の後ろへ渡す。
+# このプラグインだけを読む claude を起動する（#3409・docs/specifications/ndf-rebuild.md の決定 74）。引数はそのまま claude の後ろへ渡す。
 #
 #   bin/ndf-claude                                              # 対話のセッション
 #   bin/ndf-claude -p --output-format stream-json --verbose "…"  # 1 回の質問
@@ -18,7 +18,8 @@ while [ -L "$self" ]; do
   self="$(readlink "$self")"
   case "$self" in /*) ;; *) self="$dir/$self" ;; esac
 done
-# 隣のエントリポイント（このファイルの名前から末尾の -claude を外したもの）。名前を文文字列で持たない（決定 75）
+# 隣のエントリポイント（このファイルの名前から末尾の -claude を外したもの）。名前を文字列で持たない
+# （docs/specifications/ndf-rebuild.md の決定 75）
 entry="${self%-claude}"
 
 # 結果 JSON を 1 行出して止まるサブコマンドの回答は、そのまま出して同じ終了コードで終わる

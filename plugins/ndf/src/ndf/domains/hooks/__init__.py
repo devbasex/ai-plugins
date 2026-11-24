@@ -1,4 +1,4 @@
-"""hook の判定（#3345 の決定 88〜96）。
+"""hook の判定（docs/specifications/ndf-rebuild.md の決定 88・89・90・91・92・93・94・95・96）。
 
 ランタイムの事象 1 つにつきエントリポイント 1 本が `main.run_entry` を呼び、guard の表（`contracts/hooks/guards.json`）を順に
 呼ぶ。入力の解析は `context.HookContext` が 1 回だけ行う。環境が無いときのエントリポイントは `boot.run_boot` で、
