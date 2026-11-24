@@ -33,18 +33,22 @@ def source_in(base: Path):
     return lambda rel: Source(base / rel, rel)
 
 
-def got(tmp_path, files: dict[str, str], rules=None) -> dict[str, list[str]]:
-    """合成したモジュールが引く方針 → モジュールの名前（`ndf.` を除く）。"""
+def synthetic(tmp_path, files: dict[str, str], rules=None):
+    """合成したモジュールの構文木と、規則のデータから作った設定の組。"""
     trees = {f"src/ndf/{rel}": ast.parse(text) for rel, text in files.items()}
     conf = limits_readers.settings(rules if rules is not None else rules_of(), source_in(tmp_path))
-    found = limits_readers.actual(trees, conf)
+    return trees, conf
+
+
+def got(tmp_path, files: dict[str, str], rules=None) -> dict[str, list[str]]:
+    """合成したモジュールが引く方針 → モジュールの名前（`ndf.` を除く）。"""
+    found = limits_readers.actual(*synthetic(tmp_path, files, rules))
     return {name: sorted(m.removeprefix("ndf.") for m in mods) for name, mods in found.items()}
 
 
 def unresolved(tmp_path, files: dict[str, str], rules=None) -> list[tuple[str, int]]:
-    trees = {f"src/ndf/{rel}": ast.parse(text) for rel, text in files.items()}
-    conf = limits_readers.settings(rules if rules is not None else rules_of(), source_in(tmp_path))
-    return [(r.module.removeprefix("ndf."), r.line) for r in limits_readers.reads(trees, conf) if r.names is None]
+    found = limits_readers.reads(*synthetic(tmp_path, files, rules))
+    return [(r.module.removeprefix("ndf."), r.line) for r in found if r.names is None]
 
 
 # ---------------------------------------------------------------- actual: 読み口と引数の解き方
@@ -366,12 +370,18 @@ def test_broken_settings_stop_and_a_plugin_without_settings_is_skipped(plugin, w
         findings(plugin)
 
 
+@pytest.fixture
+def synthetic_checks(monkeypatch):
+    """合成のプラグインで動かせない検査を差し替える。"""
+    monkeypatch.setattr(run.lint, "scan", lambda *_: defaultdict(set))  # ruff を起動しない
+    monkeypatch.setattr(run.spec_docs, "check", lambda *_: [])  # 規約の生成物を持たない合成のプラグイン
+
+
+@pytest.mark.usefixtures("synthetic_checks")
 def test_the_check_reads_each_contract_file_and_validates_the_limits_once(with_limits, rules, monkeypatch):
     plugin = with_limits(a_b=policy("ndf.m"))
     plugin.write("contracts/r.json", json.dumps(BUDGETS))
     plugin.write("contracts/schemas/a.schema.json", json.dumps({"enum": ["a", "b"]}))
-    monkeypatch.setattr(run.lint, "scan", lambda *_: defaultdict(set))  # ruff を起動しない
-    monkeypatch.setattr(run.spec_docs, "check", lambda *_: [])  # 規約の生成物を持たない合成のプラグイン
     opened: list[str] = []
     validated: list[object] = []
     read_text, validate = Path.read_text, limits.validate
@@ -388,9 +398,8 @@ def test_the_check_reads_each_contract_file_and_validates_the_limits_once(with_l
     assert sorted(opened) == ["a.schema.json", "limits.json", "r.json"] and len(validated) == 1
 
 
-def test_the_rule_runs_in_the_check(with_limits, rules, monkeypatch):
+@pytest.mark.usefixtures("synthetic_checks")
+def test_the_rule_runs_in_the_check(with_limits, rules):
     plugin = with_limits(a_b=policy("ndf.m"))
-    monkeypatch.setattr(run.lint, "scan", lambda *_: defaultdict(set))  # ruff を起動しない
-    monkeypatch.setattr(run.spec_docs, "check", lambda *_: [])  # 規約の生成物を持たない合成のプラグイン
     rules["limits"] = rules_of()["limits"]
     assert [f.path.rsplit("/", 1)[-1] for f in run.check(plugin.scope(), rules) if f.rule == "limit-readers"] == ["limits.json"]
