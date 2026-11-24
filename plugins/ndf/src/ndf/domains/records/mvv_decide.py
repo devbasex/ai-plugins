@@ -379,6 +379,11 @@ def defer_holds(defer: Any) -> bool:
     return defer not in _SETTLED_DEFERS
 
 
+def _user_deferral(row: Optional[Mapping[str, Any]]) -> bool:
+    """記録 `row` が、通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りか。"""
+    return row is not None and row.get("outcome") == REVIEW_DEFERRED and defer_holds(row.get(REVIEW_DEFER)) and "item" not in row
+
+
 def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
     """1 つのキーの記録の並び `seq`（記録の順）の保留を、`fixed_at` に直した通常の指摘の記録で解いてよいか。
 
@@ -396,7 +401,7 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
     if _open_redline(seq):
         return False
     last = seq[-1]
-    if last.get("outcome") != REVIEW_DEFERRED or not defer_holds(last.get(REVIEW_DEFER)) or "item" in last:
+    if not _user_deferral(last):
         return False
     return internal.epoch(str(last.get("at"))) < internal.epoch(fixed_at)
 
@@ -408,7 +413,7 @@ def holding_keys(seqs: Mapping[str, Sequence[Mapping[str, Any]]]) -> set[str]:
     for key, seq in seqs.items():
         rest = [r for r in seq if not (r.get("outcome") == REVIEW_FIXED and r.get("withheld"))]
         last = rest[-1] if rest else None
-        if last is not None and last.get("outcome") == REVIEW_DEFERRED and defer_holds(last.get(REVIEW_DEFER)) and "item" not in last:
+        if _user_deferral(last):
             out.add(key)
     return out
 
@@ -503,7 +508,7 @@ def _key_hold(seq: Sequence[Mapping[str, Any]], mvv: tuple[int, str], hidden: st
         return f"{_named(seq[-1])}（記録の自由記述が未完了）"
     held: Optional[Mapping[str, Any]] = None
     for r in current:
-        if r.get("outcome") == REVIEW_DEFERRED and r.get(REVIEW_DEFER) not in _SETTLED_DEFERS:
+        if r.get("outcome") == REVIEW_DEFERRED and defer_holds(r.get(REVIEW_DEFER)):
             held = r
         elif r.get("outcome") == REVIEW_FIXED:
             held = None
