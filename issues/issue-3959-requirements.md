@@ -191,7 +191,7 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 
 ## #4076 の設計から移した仕組み（2026-11-22）
 
-> 2026-11-23 の追記: #3959 の設計承認ゲートで、利用者が保留の規則を絞った（下の「レッドライン」「見送り」の規則と例は絞った後の形に直した）。今の規則では、redline の行が 1 行でもあるキーは直した後もずっと保留になり、今のバージョンの deferred が 1 件でも残れば保留になる。cross-review はほとんどの PR で何かを見送るので、事実上どの PR も承認ゲートを省けないためである。保留にするのは、直っていないレッドラインと、利用者の判断が要る見送りだけで、記録を読めないときは今どおり保留にする
+> 2026-11-23 の追記: #3959 の設計承認ゲートで、利用者が保留の規則を絞った（下の「レッドライン」「見送り」の規則と例は絞った後の形に直した）。絞ったのは、絞る前の規則では、redline の行が 1 行でもあるキーは直した後もずっと保留になり、今のバージョンの deferred が 1 件でも残れば保留になっていたためである。cross-review はほとんどの PR で何かを見送るので、事実上どの PR も承認ゲートを省けなかった。保留にするのは、直っていないレッドラインと、利用者の判断が要る見送りだけで、記録を読めないときは今どおり保留にする
 
 > 2026-11-22 の追記: 下の規則のうち、リリース承認ゲートでスプリントの単位の PR の行を読む部分は #4105 が持つ。それまでリリース承認ゲートは `fast`・`auto` でも省かない（受け入れ条件 4）。
 
@@ -217,9 +217,9 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | `check_review_holds` | `progress/gate/checks.py` | 新設 | `check_review_holds(f: MvvFacts) -> Optional[str]` | `f.review_holds` が空でなければ省かない理由を返す |
 | `MvvFacts` | `progress/gate/checks.py` | 変更 | 欄 `review_holds: tuple[str, ...] = ()` を足す | — |
 
-- `review_holds`: 各 PR の行を head によらずすべて読み、指摘のキーごとに記録の順（下の「最後」の決め方）に並べて、次の 2 つの規則で保留を決める。head で行を選ばない（記録の後に head が進んだ PR・別の `--state-dir` の起動が別のキーだけを書いた head でも、前の head の保留を落とさない）。承認依頼の「MVV 判定」の行も同じ規則の結果を使う
+- `review_holds`: 各 PR の行を head によらずすべて読み、指摘のキーごとに記録の順（下の「最後」の決め方）に並べて、次の 2 つの規則で保留を決める。head で行を選ばない（記録の後に head が進んだ PR・別の `--state-dir` の起動が別のキーだけを書いた head でも、前の head の保留を落とさない）。承認資料の「MVV 判定」の欄も同じ規則の結果を使う
   - レッドライン: キーに `redline` の行があり、そのキーの最後の `redline` の行より後に同じキーの `fixed` の行が無ければ（どの head・どのバージョンでも）、そのキーは `redline` で保留する。後の `fixed` があれば直ったとみなして外す。項目はそのキーの `redline` の行の `item` を `・` で分けた和を出た順に並べ、本文は最後の `redline` の行の `text` を使う
-  - 見送り: 保留していないキーで、バージョンが `mvv` と同じ `deferred` の行のうち、見送りの区分 `defer` が `needs_user`（利用者の判断が要る）か区分の無い行があり、それより後に同じキー・同じバージョンの `fixed` の行が無ければ、`deferred` で保留する。区分が `filed`（範囲外を起票した）・`not_applicable`（基準に当たらない・意図どおり）の見送りは保留にしない。保留の区分と理由は、保留の元になった行（今のバージョンで `needs_user` か区分の無い `deferred` の行のうち最後の行）の `reason` から採り、その後ろの `filed`・`not_applicable` の行の理由で置き換えない。キーごとに返す保留は多くても 1 件で、レッドラインで保留したキーは見送りで数えない。外すのは同じキー・同じバージョンの後の `fixed` だけで、後の `unresolved`・別のキーの行・行が無いことでは外さない。古いバージョンの `deferred` は数えず、古いバージョンの `fixed` も解除に使わない。見送りの区分 `defer` は、修正担当が見送るときに `needs_user`・`filed`・`not_applicable` のどれかを書き、cross-review のジャーナルが理由とともに持ち、`record_review` が `mvv-review` の `deferred` の行に書く。区分が無い・知らない値の行は、記録を読めないときと同じく保留にする
+  - 見送り: 保留していないキーで、バージョンが `mvv` と同じ `deferred` の行のうち、見送りの区分 `defer` が `needs_user`（利用者の判断が要る）か区分の無い行があり、それより後に同じキー・同じバージョンの `fixed` の行が無ければ、`deferred` で保留する。区分が `filed`（範囲外を起票した）・`not_applicable`（基準に当たらない・意図どおり）の見送りは保留にしない。保留の区分と理由は、保留の元になった行（今のバージョンで `needs_user` か区分の無い `deferred` の行のうち最後の行）の `reason` から採り、その後ろの `filed`・`not_applicable` の行の理由で置き換えない。キーごとに返す保留は多くても 1 件で、レッドラインで保留したキーは見送りで数えない。外すのは同じキー・同じバージョンの後の `fixed` だけで、後の `unresolved`・別のキーの行・行が無いことでは外さない。前の MVV バージョンの `deferred` は数えず、前の MVV バージョンの `fixed` も解除に使わない。見送りの区分 `defer` は、修正担当が見送るときに `needs_user`・`filed`・`not_applicable` のどれかを書き、cross-review のジャーナルが理由とともに持ち、`record_review` が `mvv-review` の `deferred` の行に書く。区分が無い・知らない値の行は、記録を読めないときと同じく保留にする
   - 例: 同じ head・同じキーが `deferred`（`needs_user`）→ `fixed` → `deferred`（`needs_user`）と記録されたら `deferred` で保留する。`deferred`（`filed`）だけなら保留にしない。`redline` の後に同じキーの `fixed` があれば外し、`fixed` の後にまた `redline` が記録されたら保留する
 - 人の承認との関係: ゲートで人が承認しても記録を書き換えず、承認を表す行も作らない。その PR を対象にする後の設計承認ゲート（同じゲートの打ち直し）は、レッドラインの後に同じキーの `fixed` が記録されるか、見送りが解消されるまで同じ保留を返し、`fast`・`auto` でも人に問う（余分な人の承認は許す）。リリース承認ゲートは #4105 まで保留を読まないが、省かないので人が答える。保留はその PR を対象にするゲートにだけ掛かる
 - 「最後」の決め方: キーごとの行の順は `at` の古い順で、`at` が同じ（`jsonl.now()` は秒精度）ときは `mvv-validation.jsonl` の追記順に従う。`record_review` の重ねない判定もこの順の最後の行を使う
@@ -232,14 +232,14 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `record_review` | `redline`・`deferred` の行を書けない | 保存先の権限 | `OSError` | 収束にせず止める（承認ゲートが記録の無い PR を省けるため） | 結果の `status` が `STOPPED`、`cause.kind` が `mvv_record_failed`（終了コードは止まったことを表す値）、`warnings` に原因 | 保存先を直して `ndf cross-review run` を打ち直す（終わりにまた書く。重ねない） |
-| `review_rows` | `mvv-validation.jsonl` を読めない | 権限・容量・壊れた符号 | `OSError`（`mvv_gate._judged` が受ける） | 「該当なし」にせず、読めない理由を `MvvFacts.review_holds` の 1 件にする | ゲートが省かれず、承認依頼の「MVV 判定」の行に理由 | 原因を直せば次のゲートの判定で読み直す |
+| `review_rows` | `mvv-validation.jsonl` を読めない | 権限・容量・壊れた符号 | `OSError`（`mvv_gate._judged` が受ける） | 「該当なし」にせず、読めない理由を `MvvFacts.review_holds` の 1 件にする | ゲートが省かれず、承認資料の「MVV 判定」の欄に理由 | 原因を直せば次のゲートの判定で読み直す |
 | `review_holds` | 読めない行がある | 書き込みの途中の中断・手で壊した | `jsonl.read_rows` の読めなかった行の数 | どの repo・PR の行か分からないので、その数を保留の 1 件にする | 同上（「mvv-validation.jsonl に読めない行が N 件ある」） | 壊れた行を直すか消せば次のゲートの判定で外れる |
 
 ### テストで落とす壊し方
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `review_holds` | 直っていない `redline`・区分が `needs_user` の `deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | `fixed` だけ → 空。`redline` の後に同じキーの `fixed`（別の head・別の `--state-dir` でも）→ 外す。`redline` → `fixed` → `redline` → 保留。同じキーに `P1` と後の `P1・C7` → `P1・C7` の 1 件。区分が `filed`・`not_applicable` の `deferred` だけ → 空。区分の無い `deferred`・知らない区分 → 保留。同じ `at` の `deferred` と `fixed` → 追記順で後の方。head A のキー K の `deferred`（`needs_user`）の後に head B で別のキー L の `fixed` だけ → K を返す。`deferred` の後の `unresolved` → `deferred` のまま。古いバージョンの `deferred` だけ → 空 | 別の repo の行は読まない。`broken` が 1 以上 → 読めない行の件数を 1 件返す |
+| `review_holds` | 直っていない `redline`・区分が `needs_user` の `deferred` を返す。`item: P1・C7` の `redline` → `PR #N の P1・C7（redline）` | `fixed` だけ → 空。`redline` の後に同じキーの `fixed`（別の head・別の `--state-dir` でも）→ 外す。`redline` → `fixed` → `redline` → 保留。同じキーに `P1` と後の `P1・C7` → `P1・C7` の 1 件。区分が `filed`・`not_applicable` の `deferred` だけ → 空。区分の無い `deferred`・知らない区分 → 保留。同じ `at` の `deferred` と `fixed` → 追記順で後の方。head A のキー K の `deferred`（`needs_user`）の後に head B で別のキー L の `fixed` だけ → K を返す。`deferred` の後の `unresolved` → `deferred` のまま。前の MVV バージョンの `deferred` だけ → 空 | 別の repo の行は読まない。`broken` が 1 以上 → 読めない行の件数を 1 件返す |
 | `_summary`・`finish`・`cmd_run` | `record_review` が書ける → `mvv_record_failed` が None で、`finish` の普段の判定のまま | `mvv_unresolved` と書けない `redline` が重なる → `mvv_record_failed`（`summary` に `mvv_unresolved`）。`handed` の欠けと書けない `deferred` が重なる → `mvv_record_failed` で、`handed` の欠けが `gaps` に残る。直して打ち直す → `mvv_unresolved` で止まる | `redline` を書けない → 収束の判定でも `cmd_run` の結果 JSON と終了コードが `STOPPED`・`mvv_record_failed`（CLI が `finish` を打ち直しても成功に戻らない） |
 | `mvv_gate._judged` | 記録が読める → `review_holds` の結果 | 記録のファイルが無い → 空 | `review_rows` の `OSError` → 読めない理由の 1 件で `may_skip` が偽 |
 | `check_review_holds` | `review_holds` があれば理由を返し `may_skip` が偽 | 空 → None | — |
