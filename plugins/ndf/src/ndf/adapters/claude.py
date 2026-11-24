@@ -578,7 +578,7 @@ def call_claude(
 
 def _inherited(env: Mapping[str, str]) -> bool:
     """中継が確定して子へ渡した起動先を継いだ環境か。中継のマーカー（`NDF_RELAY_DIR`）の無い `NDF_CLAUDE_ACCOUNT` は利用者の指定として扱う（#4136）。"""
-    return bool(env.get("NDF_CLAUDE_ACCOUNT")) and bool(env.get("NDF_RELAY_DIR"))
+    return bool(env.get("NDF_CLAUDE_ACCOUNT")) and bool(env.get(identity.env_name("relay-dir")))
 
 
 def _accounted(

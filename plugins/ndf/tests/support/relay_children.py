@@ -59,6 +59,19 @@ class FakeChild:
             os.close(self.gate)
 
 
+def no_work(child: FakeChild) -> FakeChild:
+    """起動されたとき、子の SessionStart の hook の代わりに作業 0 件の記録を置く子（記録の無い子は引継ぎと見回りの替えを待つ。#4049）。"""
+    before = getattr(child, "started", None)
+
+    def started(directory, session_id, launch):
+        assert signals.write_busy(directory, launch, session_id, 0, "session")
+        if before is not None:
+            before(directory, session_id, launch)
+
+    child.started = started
+    return child
+
+
 class Spawner:
     """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次のセグメントのブロック。
 
@@ -173,6 +186,48 @@ def run_wrapper(tmp_path, children, prepare=None, markers=None, wall=None, **cha
         for c in spawn.made + spawn.children:
             c.close()
     return ended, spawn, w
+
+
+class Patrol:
+    """見回りを 1 回ずつ打つラッパー。時計は `now` を進めるまで止まり、子の文脈の量は `tokens` に置く（fixture `patrol` が作る）。"""
+
+    def __init__(self, tmp_path: Path, children: int = 3, **changes):
+        self.now, self.tokens = 0.0, 0
+        self.spawn = Spawner([FakeChild([], None) for _ in range(children)])
+        self.w = wrapper.Wrapper(make_settings(tmp_path, **changes), spawn=self.spawn, clock=lambda: self.now)
+        self.w.dir.mkdir(parents=True)
+        assert self.w._first_start("最初の 1 行") is None
+
+    @property
+    def sec(self):
+        return self.w.section
+
+    def look(self, between=None) -> switch_decide.Step:
+        """見回り 1 回。`between` は手を決めてから打つまでの間に呼ぶ。"""
+        self.w._pump(0.0)
+        step = switch_decide.decide(self.w._state(False))
+        self.w._note(step)
+        if between is not None:
+            between()
+        assert self.w._act(step) is None
+        return step
+
+    def later(self, seconds: float, between=None) -> switch_decide.Step:
+        self.now += seconds
+        return self.look(between)
+
+    def says(self, text: bytes = b"x") -> None:
+        """子が画面へ書く。"""
+        os.write(self.sec.child.write_fd, text)
+
+    def busy(self, count: int, source: str = "stop", monitors: int = 0) -> None:
+        """子の hook の代わりに、今の起動の記録を書く。"""
+        assert signals.write_busy(self.w.dir, self.sec.launch, self.sec.session_id, count, source, monitors)
+
+    def state(self) -> tuple[str, str]:
+        """状態のファイルの状態と理由。"""
+        data = registry.read_state(self.w.dir)
+        return data["state"], data["reason"]
 
 
 def log_rows(w) -> list[dict]:

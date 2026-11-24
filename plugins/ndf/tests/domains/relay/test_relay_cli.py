@@ -55,6 +55,12 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["decide"]) == 0
     assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "account"
+    # バックグラウンドの作業の記録も入力の JSON で渡せる（#4049）
+    found = {"count": 2, "source": "stop", "at": "2026-11-22T03:19:34+00:00", "monitors": 0}
+    busy = {**data, "next_block": None, "limit_pick": None, "idle_seconds": 9.0, "stall_seconds": 9.0, "background": found}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(busy)))
+    assert cli.main(["decide"]) == 0
+    assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "wait_background"
     monkeypatch.setattr("sys.stdin", io.StringIO('{"unknown": 1}'))
     assert cli.main(["decide"]) != 0
 

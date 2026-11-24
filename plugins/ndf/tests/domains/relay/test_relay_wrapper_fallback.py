@@ -19,7 +19,7 @@ import pytest
 from ndf.contracts import limits
 from ndf.domains.relay import account_choice, account_decide, key_helper, observe, switch_decide, wrapper
 from ndf.domains.relay import account_registry as reg
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, no_work, put_usage, register
 
 FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
@@ -137,11 +137,11 @@ def test_3864_9_d8_metered_goes_back_to_a_registered_account_at_the_safe_point(t
 
     environ = {"NDF_SUPERVISE_CLAUDE_FALLBACK": BEDROCK_DECL}
     ended, spawn, w, _ = _run(
-        tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], environ, prepare, initial=wrapper.Choice((reg.METERED,))
+        tmp_path, [no_work(FakeChild([b"working\r\n"], None)), FakeChild([], 0)], environ, prepare, initial=wrapper.Choice((reg.METERED,))
     )
     (one, _), (two, _) = spawn.calls
     assert _envs(spawn) == [reg.METERED, "work1"]
-    assert two[1:3] == ["--resume", one[2]] and two[-1] == switch_decide.GUARD_BACK_PROMPT
+    assert two[1:3] == ["--resume", one[2]] and two[-1].startswith(switch_decide.GUARD_BACK_PROMPT)
 
 
 def test_d8_guard_back_prompt_is_chosen_when_the_current_target_is_metered():
@@ -162,9 +162,11 @@ def test_d8_guard_back_prompt_is_chosen_when_the_current_target_is_metered():
         handover_asked=False,
         guard_pick=pick,
         safe=True,
+        background=switch_decide.Background(0, "stop", "2026-11-22T03:19:34+00:00", 0),
     )
-    assert switch_decide.decide(switch_decide.SectionState(**base, metered=True)).prompt == switch_decide.GUARD_BACK_PROMPT
-    assert switch_decide.decide(switch_decide.SectionState(**base)).prompt == switch_decide.GUARD_RESUME_PROMPT
+    back = switch_decide.decide(switch_decide.SectionState(**base, metered=True)).prompt
+    assert back.startswith(switch_decide.GUARD_BACK_PROMPT)
+    assert switch_decide.decide(switch_decide.SectionState(**base)).prompt.startswith(switch_decide.GUARD_RESUME_PROMPT)
 
 
 def test_d8_tried_is_cleared_once_the_switched_child_answers(tmp_path):
