@@ -224,6 +224,8 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 - **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読む。その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなる。空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、理由の行を会話で 1 度だけ書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである
 
+今回の応答を決める手がかりは `Reply`（Stop の入力の `last_assistant_message` の文）だけで、応答の ID の手がかりは持たない（#4068・#4199 の設計の決定 4 の「応答の ID が取れたとき」。ID の手がかりは実測の後に別の設計で足す）。
+
 状態から `TurnRead` への対応は次のとおりで、ここが対応の唯一の保存先である。
 
 `ref` は、突き合わせを通った応答（`current` か `none` の `form`）の `(message_id, at)` の組で、`at` は `timestamp_seconds(ContextRead.timestamp)` である。`ContextRead.message_id` か `at` のどちらかが None なら `ref` は None。`current` では 2 つとも必ずそろう。照合の結果は `ContextRead.state`・`reason`、ID と時刻は `ContextRead.message_id`・`timestamp` が渡す（`form` でも読めた値を持つ。上の「記録の読み手」の事後条件）。
