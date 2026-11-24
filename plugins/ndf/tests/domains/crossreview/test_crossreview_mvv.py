@@ -18,6 +18,9 @@ from ndf.domains.records import mvv
 from ._repos import BRANCH, Repos, commit, sh
 from .test_crossreview_run import IMPACT, PR, Fake, Recording, _run, _state
 
+# 作業場所に作る MVV の本文のパス（このリポジトリ自身の MVV の文書は読まない）
+NDF_DIR = ".ndf"
+BODY_AT = f"{NDF_DIR}/mvv.md"
 BODY = "# 見本の MVV\n\n## Mission\n\n使命\n\n## Value\n\n1. **一つ目**\n2. **二つ目**\n"
 MAJOR = {"text": "止まる", "severity": "major", "impact": IMPACT}
 
@@ -33,7 +36,7 @@ def mvv_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _approve(tree: Path, version: int, body: str = BODY, approved: str | None = None) -> None:
     """`tree` のブランチへ、`version` で承認した MVV の設定と本文をコミットする。`approved` は、承認の記録に残す sha256 の元の本文（省けば `body`）。"""
     sha = hashlib.sha256((approved if approved is not None else body).encode("utf-8")).hexdigest()
-    commit(tree, ".ndf/mvv.md", body, "MVV の本文")
+    commit(tree, BODY_AT, body, "MVV の本文")
     commit(tree, ".ndf/mvv.json", json.dumps({"versions": [{"version": version, "sha256": sha}]}), "MVV の設定")
 
 
@@ -75,7 +78,7 @@ def test_approved_mvv_of_the_base_reaches_both_prompts_as_snapshots(
     スナップショットのパスを渡す。"""
     _push_base(repos)
     _merge_base_into_pr(repos)
-    commit(repos.other, ".ndf/mvv.md", BODY + "3. **PR が足した**\n", "本文を変える")
+    commit(repos.other, BODY_AT, BODY + "3. **PR が足した**\n", "本文を変える")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     fake = _fixing(tmp_path)
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
@@ -90,7 +93,7 @@ def test_approved_mvv_of_the_base_reaches_both_prompts_as_snapshots(
 def test_unapproved_mvv_adds_nothing_to_the_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path) -> None:
     """MVV がまだ承認されていなければ、指示に MVV の基準も `mvv` のキーも載せず、スナップショットも書かない。"""
     commit(repos.main, ".ndf/mvv.json", json.dumps({"versions": []}), "設定だけ")
-    commit(repos.main, ".ndf/mvv.md", BODY, "本文")
+    commit(repos.main, BODY_AT, BODY, "本文")
     sh(repos.main, "push", "-q", "origin", "HEAD:refs/heads/main")
     fake = _fixing(tmp_path)
     _run(capsys, monkeypatch, fake, wt, "--base", "main")
@@ -104,12 +107,12 @@ def test_mismatched_mvv_of_the_base_stops_before_any_agent(repos: Repos, wt: Pat
     """ベースブランチの MVV の本文が承認された内容と違えば、PR が本文を元に戻していても、担当を起動せずに止める。"""
     _push_base(repos, body=BODY + "勝手に足した\n", approved=BODY)
     _merge_base_into_pr(repos)
-    commit(repos.other, ".ndf/mvv.md", BODY, "本文を戻す")
+    commit(repos.other, BODY_AT, BODY, "本文を戻す")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     fake = _fixing(tmp_path)
     _, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
-    assert "承認の記録と合わない" in got["summary"] and ".ndf/mvv.md" in got["summary"]
+    assert "承認の記録と合わない" in got["summary"] and BODY_AT in got["summary"]
     assert fake.calls == []
     assert not store.state_pr(fake.state_dir, PR).path.exists()
 
