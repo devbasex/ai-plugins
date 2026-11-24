@@ -343,19 +343,19 @@ def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, ba
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
-    remote, base = fetch_tips(g, head_branch, remote, base_branch)
-    _refuse_lossy_sync(g, remote, before)
-    own = own_commits(g, remote, before)
-    g.run("reset", "--hard", remote)
+    tip, base = fetch_tips(g, head_branch, remote, base_branch)
+    _refuse_lossy_sync(g, tip, before)
+    own = own_commits(g, tip, before)
+    g.run("reset", "--hard", tip)
     if not own:
-        return SyncResult(before, remote, 0, (), remote, base)
+        return SyncResult(before, tip, 0, (), tip, base)
     picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
-        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote, base)
+        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), tip, base)
     conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
     if not conflicts:
         # 空になったコミットなど、衝突のファイル無しで載せ直せなかった。origin へ合っていないので成功とは返さない
         raise SyncRefused(f"自分の未送信のコミットを origin の先頭へ載せ直せないので {before} へ戻した: {picked.stderr.strip()}")
-    return SyncResult(before, before, 0, conflicts, remote, base)
+    return SyncResult(before, before, 0, conflicts, tip, base)
