@@ -22,7 +22,7 @@
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
 自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
-merge-base の SHA）が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
+merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
 """
@@ -125,6 +125,9 @@ class _Run:
     remarks: Sequence[prior_decide.Remark] = ()
     # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
+    # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
+    mvv: Optional[str] = None
+    mvv_branch: Optional[str] = None
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
@@ -250,7 +253,8 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
-    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [], snapshot=snap)
+    journal = FindingJournal(store.list_of(data, store.FINDINGS))
+    run = _Run(cfg, g, ref, data, journal, warnings, [], [], snapshot=snap, mvv=snap.identity, mvv_branch=based.branch)
     if rebound:
         _save(run)
     _ingest_pending(run)
@@ -688,12 +692,11 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     cfg = run.cfg
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
-    reviewed = scope_decide.reviewed_of(run.data)
+    reviewed = scope_decide.reviewed_of(run.data, run.mvv)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    basis = scope_decide.Basis(merge_base, cfg.reviewers, cfg.settings.focus)
-    scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, basis), head)
+    scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, _basis(run, head)), head)
     diff = _round_stem(run, round_no, ".diff")
     diff.write_text(run.g.run("diff", f"{scope.base or merge_base}...HEAD"), encoding="utf-8")
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
@@ -718,6 +721,11 @@ def _merge_base(run: _Run, head: str) -> str:
     if head not in run.merge_bases:
         run.merge_bases[head] = run.g.merge_base(run.cfg.base_commit, head)
     return run.merge_bases[head]
+
+
+def _basis(run: _Run, head: str) -> scope_decide.Basis:
+    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値）。"""
+    return scope_decide.Basis(_merge_base(run, head), run.cfg.reviewers, run.cfg.settings.focus, run.mvv)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -763,6 +771,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         scope_decide.BASE: prep.base,
         scope_decide.REVIEWERS: list(run.cfg.reviewers),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
+        scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
         "scope": prep.scope.kind,
     }
     rounds.append(record)
@@ -777,6 +786,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
+        run.data[store.REVIEWED_MVV] = run.mvv
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
@@ -797,12 +807,12 @@ def _reusable(run: _Run) -> bool:
     """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head が今の HEAD、比較基点が今の `--base` と HEAD の
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
     比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
-    そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。"""
+    そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。MVV が違えば、今の MVV に反しないかを
+    まだ確かめていないので回し直す（#4076）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
     head = run.g.rev_parse("HEAD")
-    basis = scope_decide.Basis(_merge_base(run, head), run.cfg.reviewers, run.cfg.settings.focus)
-    if scope_decide.read_by_all_head(run.data, basis) != head:
+    if scope_decide.read_by_all_head(run.data, _basis(run, head)) != head:
         return False
     open_, handed = run.journal.pending(run.cfg.handed)
     return not open_ and not handed

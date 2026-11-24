@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -266,6 +267,61 @@ def test_mismatch_stops_unless_it_is_allowed(repo: Path) -> None:
     got = mvv.current(repo, "main", allow_mismatch=True)
     assert got == mvv.Snapshot("mismatch", None, None, None, (), got.blobs, head, "", None)
     assert _snapshots(repo) == []
+
+
+@pytest.mark.parametrize("decl", [_decl(BODY), _decl(BODY, body="mvv.md").replace(", ", ",\r\n")])
+def test_identity_is_the_same_from_current_and_without_a_snapshot(repo: Path, decl: str) -> None:
+    """識別子は状態・バージョン・本文と共通原則の sha256 からなる。スナップショットを書かずに読んでも同じになる。"""
+    _commit(repo, decl)
+    got = mvv.identity_at(repo, "main")
+    assert got == f"approved:11:{_sha(BODY)}:{hashlib.sha256(mvv.principles()).hexdigest()}"
+    assert _snapshots(repo) == []
+    assert mvv.current(repo, "main").identity == got
+
+
+def test_identity_follows_the_declared_body_path(repo: Path) -> None:
+    """設定の `body` が既定のパスでなくても、そのパスの本文から識別子を作る。"""
+    _commit(repo, _decl(BODY, body="docs/x.md"), body_at=".ndf/docs/x.md")
+    assert mvv.identity_at(repo, "main").startswith(f"approved:11:{_sha(BODY)}:")
+
+
+def test_identity_changes_with_the_common_principles_only_when_approved(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """共通原則の本文が変わると、承認済みの MVV の識別子だけが変わる（MVV の無いプロジェクトは NDF を更新しても変わらない）。"""
+    for decl, state in ((None, "absent"), (json.dumps({"versions": []}), "unapproved")):
+        with monkeypatch.context() as m:
+            m.setattr(mvv, "principles", lambda: pytest.fail("承認済みでないのに共通原則を読んだ"))
+            _commit(repo, decl)
+            assert mvv.identity_at(repo, "main") == mvv.current(repo, "main").identity == f"{state}:::"
+    _commit(repo, _decl(BODY))
+    before = mvv.identity_at(repo, "main")
+    monkeypatch.setattr(mvv, "principles", lambda: "変えた共通原則".encode("utf-8"))
+    assert mvv.identity_at(repo, "main") not in (before, "")
+
+
+def test_identity_of_a_mismatched_or_unreadable_mvv_is_an_error(repo: Path) -> None:
+    _commit(repo, _decl("承認した本文"))
+    for ref in ("main", "origin/nope"):
+        with pytest.raises(mvv.MvvError):
+            mvv.identity_at(repo, ref)
+
+
+def test_identity_does_not_fetch_objects_missing_from_a_partial_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """部分クローンで MVV の設定が手元に無ければ、リモートから取得せずに `MvvError`（git の起動すべてで遅延取得を止め、
+    それを読まないバージョンの git のために通信の手段も許さない）。"""
+    started: list[tuple[str, Optional[str], Optional[str]]] = []
+
+    def fake_run(cmd, **kwargs):
+        started.append((cmd[1], kwargs["env"].get("GIT_NO_LAZY_FETCH"), kwargs["env"].get("GIT_ALLOW_PROTOCOL")))
+        if cmd[1] == "ls-tree":
+            return subprocess.CompletedProcess(cmd, 0, f"100644 blob {'b' * 40}\t.ndf/mvv.json\0", "")
+        names = kwargs["input"].splitlines()
+        return subprocess.CompletedProcess(cmd, 0, b"".join(n + b" missing\n" for n in names), b"")
+
+    monkeypatch.delenv("GIT_NO_LAZY_FETCH", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(mvv.MvvError, match="読めない"):
+        mvv.identity_at(tmp_path, "a" * 40)
+    assert started == [("ls-tree", "1", ""), ("cat-file", "1", "")]
 
 
 def test_unresolved_ref_is_an_error_not_absent(repo: Path) -> None:

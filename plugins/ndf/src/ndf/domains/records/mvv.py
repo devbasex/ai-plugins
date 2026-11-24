@@ -62,6 +62,11 @@ class Snapshot(NamedTuple):
     principles_sha256: str
     principles_path: Optional[Path]
 
+    @property
+    def identity(self) -> str:
+        """この MVV を見分ける値（`mvv_decide.identity_of`）。"""
+        return md.identity_of(self.state, self.version, self.sha256, self.principles_sha256)
+
 
 def _state_dir() -> Path:
     var = facts.value("locations", "mvv-state", "env")
@@ -236,11 +241,31 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     設定がツリーに無いと確かめられたときだけ `absent`。参照・設定・本文を読めないときと、本文が承認の記録と合わない
     とき（`allow_mismatch` でない）は `MvvError`、スナップショットを書けないときは `OSError`。
     """
-    g = git_mod.Git(root)
+    snap, body, shared = _read(git_mod.Git(root), root, ref, allow_mismatch)
+    if snap.state != md.State.APPROVED or snap.sha256 is None:
+        return snap
+    found = items(_text(body, list(snap.blobs)[-1]), shared.decode("utf-8"))
+    where = _snapshot_dir(outside)
+    body_copy = _write_verified(where / f"v{snap.version}-{snap.sha256[:_NAME_SHA]}.md", body, snap.sha256)
+    shared_copy = _write_verified(where / f"principles-{snap.principles_sha256[:_NAME_SHA]}.md", shared, snap.principles_sha256)
+    return snap._replace(path=body_copy, items=found, principles_path=shared_copy)
+
+
+def identity_at(root: Path, ref: str) -> str:
+    """参照 `ref`（取得済みの参照かコミット）の MVV を見分ける値（`Snapshot.identity`）。スナップショットを書かない。
+
+    `current` と同じ読み方で求める。参照・設定・本文を読めないときと、本文が承認の記録と合わないときは `MvvError`。
+    ネットワークに出ない（部分クローンで設定や本文が手元に無ければ、取得せずに `MvvError`）。
+    """
+    return _read(git_mod.Git.offline(root), root, ref, False)[0].identity
+
+
+def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[Snapshot, bytes, bytes]:
+    """参照 `ref` の MVV を `g` で読んだ結果（スナップショットのパスと項目は空）と、承認済みのときの本文と共通原則（ほかは空）。"""
     commit = ref if git_mod.FULL_SHA.match(ref) else _commit_of(g, ref)
     held = _decl_blob(g, commit)
     if held is None:
-        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
+        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None), b"", b""
     usual = md.body_path({})
     # 本文は既定のパスにあると見込んで、設定と同じ 1 回の起動で読む
     raw, guess = _blobs(g, held, f"{commit}:{usual}")
@@ -248,7 +273,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
         raise MvvError(f"{commit} の MVV の設定（{decl_path()}）を読めない: {held}")
     decl = decl_from(raw, commit, root)
     if md.status(decl, None) == md.State.UNAPPROVED:
-        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
+        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None), b"", b""
     path = md.body_path(decl)
     body = guess if path == usual and guess is not None else _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
     blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
@@ -258,16 +283,12 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     if state == md.State.MISMATCH and not allow_mismatch:
         raise MvvError(mismatch_detail(blobs))
     if state != md.State.APPROVED:
-        return Snapshot(state, None, None, None, (), blobs, commit, "", None)
+        return Snapshot(state, None, None, None, (), blobs, commit, "", None), b"", b""
     version = md.current_version(decl)
     if version is None:
         raise MvvError(f"{commit} の MVV の設定の最後のバージョンに番号が無い: {decl_path()}")
     shared = principles()
-    found = items(_text(body, path), shared.decode("utf-8"))
-    shared_sha, where = _sha256(shared), _snapshot_dir(outside)
-    body_copy = _write_verified(where / f"v{version}-{sha[:_NAME_SHA]}.md", body, sha)
-    shared_copy = _write_verified(where / f"principles-{shared_sha[:_NAME_SHA]}.md", shared, shared_sha)
-    return Snapshot(state, version, sha, body_copy, found, blobs, commit, shared_sha, shared_copy)
+    return Snapshot(state, version, sha, None, (), blobs, commit, _sha256(shared), None), body, shared
 
 
 def _text(body: bytes, path: str) -> str:

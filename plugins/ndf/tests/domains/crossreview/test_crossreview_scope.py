@@ -8,6 +8,7 @@ import pytest
 
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.records import mvv
 
 from ._repos import Repos, commit, run_cli, sh
 
@@ -203,6 +204,69 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
     assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
 
 
+APPROVED = "approved:11:aaa:ccc"
+
+
+def _read_with(mvv: object) -> dict:
+    """MVV の記録が `mvv`（None なら記録が無い）の 1 ラウンドを持つ状態ファイルの中身。"""
+    row = {"round": 1, "head": "h1", "verdict": "converged"}
+    return {"rounds": [row if mvv is None else {**row, scope_decide.MVV: mvv}]}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "now", "head"),
+    [
+        ({"id": APPROVED, "mvv_branch": "main"}, APPROVED, "h1"),
+        ({"id": "absent:::"}, "absent:::", "h1"),
+        # MVV の記録が無いラウンド（この記録を足す前のバージョンが書いた）は、今も MVV が無いときだけ同じとみなす
+        (None, "absent:::", "h1"),
+        ("壊れた値", "absent:::", "h1"),
+        (None, APPROVED, None),
+        (None, "unapproved:::", None),
+        # バージョン・本文・共通原則・承認の状態のどれか 1 つでも違えば、前のラウンドを使わない
+        ({"id": APPROVED}, "approved:12:aaa:ccc", None),
+        ({"id": APPROVED}, "approved:11:bbb:ccc", None),
+        ({"id": APPROVED}, "approved:11:aaa:ddd", None),
+        ({"id": APPROVED}, "absent:::", None),
+        ({"id": "absent:::"}, APPROVED, None),
+        # 今の MVV を確かめられなければ、どの記録とも違うとみなす
+        ({"id": APPROVED}, scope_decide.UNKNOWN_MVV, None),
+        ({"id": scope_decide.UNKNOWN_MVV}, scope_decide.UNKNOWN_MVV, None),
+        (None, scope_decide.UNKNOWN_MVV, None),
+    ],
+)
+def test_previous_round_is_reused_only_under_the_same_mvv(recorded: object, now: str, head: str | None) -> None:
+    state = _read_with(recorded)
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(mvv=now)) == head
+
+
+@pytest.mark.parametrize(
+    ("recorded", "now", "reviewed"),
+    [
+        (APPROVED, APPROVED, {A, B}),
+        (None, "absent:::", {A, B}),
+        (None, APPROVED, set()),
+        (APPROVED, "approved:12:bbb:ccc", set()),
+        (APPROVED, scope_decide.UNKNOWN_MVV, set()),
+        (APPROVED, None, {A, B}),
+    ],
+)
+def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | None, now: str | None, reviewed: set[str]) -> None:
+    """前と違う MVV で詳細レビューを通ったセクションは、設計の PR ではまだ通っていないセクションとして並ぶ。"""
+    state = {**_read_with({"id": recorded} if recorded else None), store.REVIEWED: [A, B]}
+    if recorded:
+        state[store.REVIEWED_MVV] = recorded
+    assert scope_decide.reviewed_of(state, now) == reviewed
+    got = scope_decide.state_scope(state, True, 2, [A, B], scope_decide.Basis(mvv=now))
+    assert got == (scope_decide.Scope(scope_decide.SINCE, "h1", ()) if reviewed else scope_decide.Scope(scope_decide.FULL, None, (A, B)))
+
+
+def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
+    rounds = [{scope_decide.MVV: {"id": APPROVED, "mvv_branch": "main"}}, {"round": 2}, "壊れたラウンド"]
+    assert scope_decide.mvv_branch({"rounds": rounds}) == "main"
+    assert scope_decide.mvv_branch({"rounds": [{"round": 1}]}) is None
+
+
 def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """PR 3944 の r3-4: 前のラウンドを読んでいない相手役を足すと、`run` と同じく全差分を返す（担当の既定も `run` と同じ）。"""
     wt = repos.add_worktree(tmp_path / "pr8")
@@ -216,6 +280,70 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
     assert run_cli(capsys, *base, "--reviewer", "codex", "--reviewer", "kiro")[1]["items"][0]["scope"] == scope_decide.FULL
     assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
+
+
+def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
+    repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。
+    範囲を変えない MVV は読まない。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "文書でない")
+    state = tmp_path / "state"
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    data = {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}]}
+    store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base(data, sha))
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.SINCE
+    used: list[git.Git] = []
+
+    def missing(g: git.Git, *args: object) -> list[str]:
+        used.append(g)
+        raise git.GitError("could not fetch from promisor remote")
+
+    monkeypatch.setattr(changes, "changed_sections", missing)
+    monkeypatch.setattr(mvv, "identity_at", lambda *a: pytest.fail("全差分に決まった後に MVV を読んだ"))
+    code, got = run_cli(capsys, *base)
+    assert (code, got["items"][0]["scope"], got["items"][0]["base"]) == (0, scope_decide.FULL, None)
+    assert "promisor" in got["warnings"][0] and [g.env for g in used] == [git.NO_LAZY_FETCH]
+
+
+def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
+    """変わったセクションは改名を調べずに読み（調べると部分クローンで前の本文の取得が要る）、改名前と消えたパスを除く。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    calls: list[list[str]] = []
+
+    def runner(args: list[str], cwd: Path | None) -> git.Completed:
+        calls.append(args)
+        return git.Completed(0, "a.txt\0", "")
+
+    assert changes.changed_sections(git.Git(tmp_path, runner), "b", tmp_path) == []
+    [call] = calls
+    assert call[0] == "diff" and {"--no-renames", "--diff-filter=d"} <= set(call)
+
+
+def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path) -> None:
+    """手元に無い blob を git grep が飛ばしたら、本文の無い文書とみなさずに止める。空のファイルは行が無くてよい。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes, settings
+
+    empty = settings.blob_id(b"", 40)
+    trees = {"empty.md": empty, "a.md": "a" * 40}
+
+    def changed(*paths: str) -> list[str]:
+        listed = "".join(f"100644 blob {trees[p]}\t{p}\0" for p in paths)
+        out = {"diff": git.Completed(0, "\0".join(paths), ""), "ls-tree": git.Completed(0, listed, "")}
+        skipped = git.Completed(1, "", "error: unable to read")
+        return changes.changed_sections(git.Git(tmp_path, lambda args, cwd: out.get(args[0], skipped)), "b", tmp_path)
+
+    assert changed("empty.md") == []
+    with pytest.raises(git.GitError, match=r"本文を読めない: a\.md"):
+        changed("empty.md", "a.md")
 
 
 def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
