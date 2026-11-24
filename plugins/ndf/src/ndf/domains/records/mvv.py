@@ -158,14 +158,26 @@ def _blob(g: git_mod.Git, name: str, where: str) -> bytes:
         raise MvvError(f"{where}を読めない: {exc}") from exc
 
 
+def _is_private(path: Path) -> bool:
+    """`path` が所有者のほかに権限を与えていない通常のファイルか（無ければ偽。リンクは辿らない）。"""
+    if not os.path.lexists(path):
+        return False
+    mode = path.lstat().st_mode
+    return stat.S_ISREG(mode) and stat.S_IMODE(mode) & 0o077 == 0
+
+
 def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
-    """`path` の中身の sha256 が `sha256` でなければ、`data` を一時ファイルへ書いて置き換える。同じなら書かない。"""
-    if path.exists() and _sha256(path.read_bytes()) == sha256:
+    """`path` を、所有者だけが読める（0600）中身 `data`（sha256 は `sha256`）のファイルにする。
+
+    中身と権限が同じなら書かない。違えば一時ファイルへ書いて置き換える（本文は非公開のリポジトリのものを含む）。
+    """
+    if _is_private(path) and _sha256(path.read_bytes()) == sha256:
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=path.parent, prefix=f".{path.name}.") as tmp:
         new = Path(tmp) / path.name
-        new.write_bytes(data)
+        with open(os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+            out.write(data)
         os.replace(new, path)
     return path
 
@@ -183,9 +195,13 @@ def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
         return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
     raw = _blob(g, held, f"{commit} の MVV の設定（{decl_path()}）")
     decl = decl_from(raw, commit, root)
+    if md.status(decl, None) == md.State.UNAPPROVED:
+        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
     path = md.body_path(decl)
     body = _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
-    sha, blobs = _sha256(body), {decl_path(): _blob_id(raw), path: _blob_id(body)}
+    blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
+    body = md.approved_form(decl, body)
+    sha = _sha256(body)
     state = md.status(decl, sha)
     if state == md.State.MISMATCH and not allow_mismatch:
         raise MvvError(f"ベースの MVV の本文が承認の記録と合わない: {path}")

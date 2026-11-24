@@ -127,6 +127,21 @@ def status(decl: Optional[Mapping[str, Any]], body_sha256: Optional[str]) -> str
     return State.APPROVED if last["sha256"] == body_sha256 else State.MISMATCH
 
 
+def approved_form(decl: Optional[Mapping[str, Any]], body: bytes) -> bytes:
+    """本文のバイト列を、承認の記録の sha256 と合う改行の形にして返す（合う形が無ければ元のまま）。
+
+    `core.autocrlf`・`eol=crlf` は作業場所と Git の blob で改行だけを変えるので、どちらで承認した記録も、どちらのバイト列
+    からも同じに判定する。改行のほかの違いは合う形が無いので `mismatch` のまま残る。
+    """
+    last = latest(decl) if decl is not None else None
+    approved = last.get("sha256") if last is not None else None
+    lf = body.replace(b"\r\n", b"\n")
+    for form in (body, lf, lf.replace(b"\n", b"\r\n")):
+        if hashlib.sha256(form).hexdigest() == approved:
+            return form
+    return body
+
+
 def body_path(decl: Mapping[str, Any]) -> str:
     """本文のパス（リポジトリの根からの POSIX のパス）。設定の `body`（文字列でなければ既定）を設定のディレクトリから解く。
 

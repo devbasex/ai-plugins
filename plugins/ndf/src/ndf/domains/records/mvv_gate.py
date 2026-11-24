@@ -65,7 +65,7 @@ def base_facts(root: Path, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
     last = md.latest(decl)
     approved = last["sha256"] if last is not None else None
     body = preflight.mvv_body(root, decl)
-    held = MvvFacts(state, preflight.sha256_of(body), approved, ref, str(inputs.get("mode")), boundary_paths=paths)
+    held = MvvFacts(state, preflight.sha256_of(body, decl), approved, ref, str(inputs.get("mode")), boundary_paths=paths)
     return held, body.read_text(encoding="utf-8")
 
 

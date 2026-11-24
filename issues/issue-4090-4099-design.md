@@ -210,7 +210,7 @@ graph TD
 ### 決定 9: 古いローカルのベースで既に入った変更を検査し直さないため、取得したベースをコミット 1 つに固定してすべてへ渡す
 
 - **質問**: `current` と差分の起点が別の参照を読む食い違いを、どう無くすか（#4090 の事象 9）
-- **選んだ案**: `drive._start` は同期（head とベースの 1 回の fetch）の後に `current(root, <リモート>/<ベース>)` を呼び、返った `Snapshot.commit`（`current` が手順 (1) で解いたコミット）を `RunConfig` の `base_commit` に置く。`_changed`・`_merge_base`・相手役の差分の起点（`scope.base or base_commit`）・`Basis` はすべて `base_commit` を使い、`cfg.base`（名前）は表示と取得にだけ使う。`review-scope` も手元の `<リモート>/<ベース>` を 1 回コミットに解いて同じく渡す。`Snapshot.commit` は #3959 の詳細設計が足す欄と同じものを、この設計で先に足す
+- **選んだ案**: `drive._start` は同期（head とベースの 1 回の fetch）の後に `current(root, <リモート>/<ベース>)` を呼び、返った `Snapshot.commit`（`current` が手順 (1) で解いたコミット）を `RunConfig` の `base_commit` に置く。`_changed`・`_merge_base`・相手役の差分の起点（`scope.base or base_commit`）・`Basis` はすべて `base_commit` を使い、`cfg.base`（名前）は表示と取得にだけ使う。`review-scope` も手元の `<リモート>/<ベース>` を 1 回コミットに解いて同じく渡す。`Snapshot.commit` は #3959 の詳細設計が足す欄と同じものを、この設計で先に足す。`--base` が `<リモート>/<ブランチ>` の形ならリモート名を外した名前をブランチとして扱い、コミットの SHA などブランチに解けない値なら、MVV は Pull Request のマージ先のブランチ（`baseRefName`）のリモートの先端から読み、差分の起点は渡されたコミットのままにする（2026-11-24 の補足。要求仕様の前提 1 のとおり、レビュー中のブランチ自身の MVV を確かめに使わないため）
 - 採らなかった案: `cfg.base` を `<リモート>/<ベース>` の名前に書き換える（名前は起動の途中で別のセッションの fetch に動かされうる。コミットで固定しないと、差分と MVV が別の時点を読む）
 - **代償**: `RunConfig` に欄が 1 つ増える
 - 根拠: Value 3 / Value 7（MVV バージョン 11）
