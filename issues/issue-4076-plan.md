@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `issues/issue-4076-design.md`・`issues/issue-4076-design-detail.md` | #4090 #4099 の設計の「#4076 の文書のどこを置き換えるか」の表の 15 か所と、上の保存先の 3 つの変更 | U1 |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py`（新設） | `drive.py` から移す `Changed`・`_regular_blobs`・`_local_text`・`_committed_texts`・`changed`・`sections`・`changed_sections`（U2。別のモジュールから読む名前は下線を外した）。`_committed_texts` がコミットを引数に取る・`_Target`・`_review_diff`・`_diff_files`・`_base_lines`（U8）。`_citations`・`_final_target`・`_final_citations`（U10） | U2・U8・U10 |
-| `plugins/ndf/src/ndf/domains/crossreview/settings.py`（新設） | `drive.py` から移す `ReviewSettings`・`settings_path`・`_inside`・`read_settings`・`blob_id`・`proposed_differs`・`outside_checkout` と、`outside_checkout` が使う `RunConfig`・`DriveStopped`・`DEFAULT_MAX_ROUNDS`（別のモジュールから読む名前は下線を外した） | U2 |
+| `plugins/ndf/src/ndf/domains/crossreview/settings.py`（新設） | `drive.py` から移す `ReviewSettings`・`settings_path`・`_inside`・`read_settings`・`blob_id`・`proposed_differs`・`outside_checkout` と、`outside_checkout` が使う `RunConfig`・`DriveStopped`・`DEFAULT_MAX_ROUNDS`（U2。別のモジュールから読む名前は下線を外した）。`RunConfig` に欄 `base_commit: Optional[str] = None` を足す（U5） | U2・U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 移した関数を呼ぶ形にする（U2）。`_start` がスナップショットを得てベースをコミットに固定し、失敗は `refused`（U5）。`_review_prompt`・`_fix_prompt` に基準 5 とパス（U5）。`_prepare_round`・`_reusable`・ラウンドの記録の MVV の識別子（U6）。`_Prepared` に `docs`・`full_diff`（U8）。修正担当へ `handable` を渡す（U9）。`_round` の確かめ・`last_target`・`_settle_resolved` が `by: ndf` の指摘を飛ばす・ラウンドの記録の `mvv_checked`（U10）。`_start` の引継ぎと `restate`（U11）。`_Run.clean`・`_summary` が `mvv_outputs`・`record_review` を呼ぶ（U12） | U2・U5・U6・U8〜U12 |
 | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | `changed_sections`・`read_settings` の呼び先（U2）。`Basis` に MVV の識別子・`cmd_scope` がベースのコミットと共通原則の sha256 を求める（U6） | U2・U6 |
 | `plugins/ndf/src/ndf/adapters/git.py` | `Git.run_bytes`（新設） | U3 |
@@ -93,8 +93,8 @@
 
 ### Task 7: 基準 5 の指示と、起動の始めのスナップショットとベースのコミットの固定
 
-- **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
-- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を `<リモート>/<ベース>` で呼び `base_commit` を固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
+- **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
+- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を `<リモート>/<ベース>` で呼び、`settings.RunConfig` に足す `base_commit` を `dataclasses.replace(cfg, base_commit=snap.commit)` で固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
 - **満たす受け入れ条件:** 4076:1、4076:2、4076:8（テスト設計の 4090-9・4090-11 の指示の側）
 - **進め方:** 失敗するテスト（承認済みの MVV があるのに指示に基準 5 とスナップショットのパスが無い）→ 通す最小実装 → 整理
 
