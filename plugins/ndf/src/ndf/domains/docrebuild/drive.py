@@ -36,6 +36,8 @@ REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
+# 起動指示を書くときの開き方（既存の内容を消して書き、リンクはたどらない）
+_PROMPT_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
 WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
@@ -239,7 +241,10 @@ def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, An
     result_file = args.state_dir / f"{WORK_KIND}.result.json"
     try:
         args.state_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt, encoding="utf-8")
+        # 保存先の起動指示がリンクなら、たどってリンク先を上書きせずに止まる（O_NOFOLLOW は最後の要素がリンクなら ELOOP）
+        fd = os.open(prompt_file, _PROMPT_FLAGS, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(prompt)
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
     argv = [

@@ -181,6 +181,22 @@ def test_changed_paths_stops_without_a_merge_base(tmp_path: Path) -> None:
     assert not any(c[0] == "merge-base" for c in fake.calls)
 
 
+def test_run_worker_does_not_follow_a_linked_prompt_file(tmp_path: Path) -> None:
+    """保存先の起動指示がリンクなら、リンク先を上書きせず、worker も起動せずに止まる。"""
+    args = _args(tmp_path)
+    args.state_dir.mkdir()
+    other = tmp_path / "other.txt"
+    other.write_text("利用者のデータ\n", encoding="utf-8")
+    (args.state_dir / f"{drive.WORK_KIND}.prompt.md").symlink_to(other)
+
+    def runner(argv: Sequence[str], cwd: Path) -> Any:
+        raise AssertionError("worker を起動しない")
+
+    with pytest.raises(drive.Precondition):
+        drive.run_worker(args, "起動指示", runner)
+    assert other.read_text(encoding="utf-8") == "利用者のデータ\n"
+
+
 # --- 作業場所の確かめ ---
 
 
