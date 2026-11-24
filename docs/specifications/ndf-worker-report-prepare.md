@@ -25,6 +25,7 @@ supervisor と worker が打つ Bash に、パスを組み立てるシェルの�
 | 完了マーカー | worker が報告を書き終えたことを示す空のファイル（`<保存先>.done`）。supervisor はこのファイルが現れるのを待つ |
 | 作業の結果ファイル | worker の作業の成否を持つ結果 JSON のファイル（`<worker の名前>.result.json`）。成否はこのファイルの `status` だけで決まる |
 | 作業ディレクトリ | supervisor が worker ごとの 4 つのファイルを置くディレクトリ。`ndf worker prepare --dir` で受ける |
+| 再起動 | `ndf worker run` が、作業の結果ファイルを書かずに応答を終えた worker を、同じ会話（`--resume`）で続けさせること。上限は 3 回（`ndf.core.worker.RESUMES`） |
 
 ## 背景
 
