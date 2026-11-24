@@ -1,6 +1,6 @@
 """Claude Code の設定の保存先の規則（`CLAUDE_CONFIG_DIR`、空か無ければ `~/.claude`）の振る舞いを固定する。
 
-`claude.same_cache_rows` のキャッシュの根と `signals.claude_config_root` は同じ規則で、どちらも渡された環境の
+`claude.same_cache_rows` のキャッシュの根と `identity.claude_config_root` は同じ規則で、どちらも渡された環境の
 `CLAUDE_CONFIG_DIR` を読み、プロセスの `CLAUDE_CONFIG_DIR` は読まない。渡された環境で未設定か空のときは
 `Path.home()` がプロセスの `HOME` を参照するため、テストは `HOME` を一時ディレクトリへ差し替える。
 """
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.adapters import claude
-from ndf.domains.relay import signals
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def _environs(tmp_path: Path) -> list[tuple[dict, Path]]:
 @pytest.mark.parametrize("case", range(3))
 def test_claude_config_root_follows_the_given_environ(home, tmp_path, case):
     environ, expected = _environs(tmp_path)[case]
-    assert signals.claude_config_root(environ) == expected
+    assert identity.claude_config_root(environ) == expected
 
 
 @pytest.mark.parametrize("case", range(3))
@@ -54,7 +54,7 @@ def test_same_cache_rows_uses_plugins_cache_under_the_config_root(home, tmp_path
 @pytest.mark.parametrize("case", range(3))
 def test_same_cache_rows_and_claude_config_root_agree(home, tmp_path, case):
     environ, _ = _environs(tmp_path)[case]
-    parent = signals.claude_config_root(environ) / "plugins" / "cache" / "ai-plugins" / "ndf"
+    parent = identity.claude_config_root(environ) / "plugins" / "cache" / "ai-plugins" / "ndf"
     moved = _row(parent / "11.0.10")
     assert claude.same_cache_rows([moved], parent / "11.0.7", "11.0.7", environ) == [moved]
 
@@ -66,7 +66,7 @@ def test_same_cache_rows_ignores_the_process_environ(home, tmp_path):
 
 
 def test_claude_config_root_ignores_the_process_environ(home):
-    assert signals.claude_config_root({}) == home / ".claude"
+    assert identity.claude_config_root({}) == home / ".claude"
 
 
 def test_same_cache_rows_finds_rows_through_a_symlinked_config_root(home, tmp_path):
@@ -82,5 +82,5 @@ def test_same_cache_rows_finds_rows_through_a_symlinked_config_root(home, tmp_pa
 
 def test_claude_config_root_does_not_resolve_or_expand(home):
     # 値はそのままのパスで返す（解決もしない・`~` も展開しない）
-    assert signals.claude_config_root({"CLAUDE_CONFIG_DIR": "~/x"}) == Path("~/x")
-    assert signals.claude_config_root({"CLAUDE_CONFIG_DIR": "rel/conf"}) == Path("rel/conf")
+    assert identity.claude_config_root({"CLAUDE_CONFIG_DIR": "~/x"}) == Path("~/x")
+    assert identity.claude_config_root({"CLAUDE_CONFIG_DIR": "rel/conf"}) == Path("rel/conf")

@@ -3,6 +3,6 @@
   "seconds": 300,
   "read_by": [
     "ndf.domains.relay.accounts",
-    "ndf.domains.relay.wrapper"
+    "ndf.domains.relay.wrapper_fetch"
   ]
 }
