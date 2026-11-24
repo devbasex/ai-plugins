@@ -301,13 +301,12 @@ class _LocalBase(NamedTuple):
     mvv_ref: Optional[str]
 
 
-def _local_base(g: git.Git, base: str, branch: Optional[str]) -> _LocalBase:
+def _local_base(g: git.Git, remote: str, base: str, branch: Optional[str]) -> _LocalBase:
     """`run` の起動の始めと同じ決め方で、リモートから取得せずに比較元と MVV を読む参照を決める。
 
     `--base` がブランチなら、取得済みのリモートのブランチの先頭が両方になる。コミット（SHA・タグなど）なら、MVV は PR の
     マージ先のブランチから読むので、`run` がラウンドの記録に残した `branch` を使う。記録が無ければ MVV を読む参照は決められない。
     """
-    remote = g.remote()
     tracking = f"refs/remotes/{remote}"
     commit = base if git.FULL_SHA.match(base) else None
     if commit is None:
@@ -350,7 +349,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     g = git.Git(wt)
-    based = _local_base(g, args.base, scope_decide.mvv_branch(data))
+    # `_resolve` が求めたメインディレクトリから読む（`g.remote()` は `git worktree list` を打ち直す）
+    based = _local_base(g, git.remote_of(resolved.policy.main), args.base, scope_decide.mvv_branch(data))
     sections = changes.changed_sections(g, based.commit, wt)
     now, unsure = _local_mvv(wt, based.mvv_ref)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
