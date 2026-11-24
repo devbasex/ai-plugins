@@ -306,16 +306,20 @@ class Judged(NamedTuple):
     item: Optional[str]
 
     @property
-    def note(self) -> Optional[str]:
-        """記録に残す自由記述の欄の名前（見送りの理由・必ず人の承認が要る操作に当たる指摘の本文）。"""
-        return _REVIEW_NOTES.get(self.outcome)
+    def free_fields(self) -> dict[str, str]:
+        """記録に残す自由記述（記録の欄の名前 → 伏せる前の値）。
+
+        根拠の記述の誤りが引いた項目、見送りの理由、必ず人の承認が要る操作に当たる指摘の本文のうち、文字列のもの。
+        """
+        held = {"item": self.row.get("cited")} if self.item is None else {}
+        note = _REVIEW_NOTES.get(self.outcome)
+        held |= {note: self.row.get(note)} if note is not None else {}
+        return {k: v for k, v in held.items() if isinstance(v, str)}
 
     @property
     def free_texts(self) -> list[str]:
         """記録に残す自由記述。呼び手が秘密などを伏せる。"""
-        held = [self.row.get(self.note)] if self.note is not None else []
-        held += [self.row.get("cited")] if self.item is None else []
-        return [t for t in held if isinstance(t, str)]
+        return list(self.free_fields.values())
 
 
 def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str) -> list[Judged]:
@@ -338,9 +342,7 @@ def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str,
         out["item"] = found.item
     if shown is None:
         return out | {"withheld": True}
-    held = {"item": found.row.get("cited")} if found.item is None else {}
-    held |= {found.note: found.row.get(found.note)} if found.note is not None else {}
-    return out | {k: shown[v] for k, v in held.items() if isinstance(v, str)}
+    return out | {k: shown[v] for k, v in found.free_fields.items()}
 
 
 def one_per_key(entries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
