@@ -1,0 +1,5 @@
+{
+  "summary": "stop・restart が対象のラッパーの終わりを待つ上限と間隔（NDF_RELAY_STOP_WAIT で替える）",
+  "seconds": 30,
+  "interval": 0.2
+}

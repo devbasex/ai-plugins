@@ -149,7 +149,7 @@ symlink と、claude がアカウント側に作った項目（`plans` など）
 
 ## 替え先の選び方
 
-閾値は 3 つで、`contracts/limits.json` が持つ。
+閾値は 3 つで、`contracts/limits/` が持つ。
 
 | 閾値 | 値 | 意味 |
 | --- | --- | --- |

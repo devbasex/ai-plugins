@@ -1,0 +1,7 @@
+{
+  "meaning": "判断の呼び出しの回答が 2 回とも形に合わなかった",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}

@@ -1,0 +1,7 @@
+{
+  "meaning": "worker が作業を終えられずに欠けを残した",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "step",
+  "retry": null
+}

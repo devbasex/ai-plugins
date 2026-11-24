@@ -10,7 +10,7 @@ hook の閉包の中にあるので、標準ライブラリと同じパッケー
   （決定 10）。起動の失敗は親の探索の前に `resting` で、送信先の不一致（`endpoint`）は親の起動引数を含む確かめの
   対象（`endpoint_scope`）ごとに親の探索の後で `endpoint_resting` で確かめる
 
-設定（モデル・秒・字数・休む間・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge` から `judge_setting` が読む。
+設定（モデル・秒・字数・休む間・送信先の確かめの値）は `contracts/limits/hook.stop-wait.judge.json` から `judge_setting` が読む。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class Judged(NamedTuple):
 
 
 def judge_setting(key: str) -> Any:
-    """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。"""
+    """判定の設定（`contracts/limits/hook.stop-wait.judge.json`）の 1 つの値。"""
     return tables.policy_value("hook.stop-wait.judge", key)
 
 

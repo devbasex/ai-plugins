@@ -17,12 +17,14 @@ dependencies = [
     "jsonschema==4.26.0",
     "markdown-it-py==4.3.0",
     "mdit-py-plugins==0.7.0",
+    "packaging==26.3",  # requires-python を PEP 440 の条件として読み、許す Python を比べる（規則 toolchain）
     "pathspec==1.1.1",
     "psutil==7.2.2",
     "ptyprocess==0.7.0",
     "pydantic==2.14.3",
     "pygments==2.21.0",
     "python-dotenv==1.2.4",
+    "referencing==0.37.0",  # 見本の突き合わせ（samples）の参照の解決で、jsonschema の既定の外部取得を使わない registry を渡す（#3687）
     "ruamel-yaml==0.19.1",
     "ruff==0.17.5",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
     "semver==3.1.1",

@@ -28,7 +28,7 @@ DEFAULT_WAIT_LIMIT_SECONDS = 1800
 
 
 def test_weight_mib() -> int:
-    """テスト 1 本の重み（`contracts/limits.json` の `launch.weight.test`）。"""
+    """テスト 1 本の重み（`contracts/limits/launch.weight.test.json`）。"""
     return slot_pool.weight_mib("test")
 
 

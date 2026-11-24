@@ -198,6 +198,7 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `analysis` | Analysis か null | — | — | 任意 | 解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない |
 | `branch_strategy`（メインディレクトリから読む） | BranchStrategy | — | — | 任意 | ブランチ戦略の設定。ブランチの名前・リリース方式・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む |
+| `budget` | Budget | — | — | 任意 | このリポジトリの件数の上限と、使われない依存の数え方。検査（ndf check の規則 budget）が読む。キーが無い項目は上限と比べない |
 | `checks` | Checks か Unknown か null | — | — | 任意 | 静的解析・整形の Tool の並び |
 | `ci` | Ci か Unknown か null | — | — | 任意 | CI の提供元・ワークフロー・必須のチェック |
 | `docs` | Docs か Unknown か null | — | — | 任意 | 差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト） |
@@ -209,8 +210,9 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | `services` | Services か Unknown か null | — | — | 任意 | テストと動作の確かめに要るコンテナ・compose のファイル・データベース |
 | `test` | Test か Unknown か null | — | — | 任意 | テストの戦略（suites）。テストのコマンドの SSOT |
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す） |
+| `toolchain` | Toolchain | — | — | 任意 | このリポジトリの CI が何で回すか。検査（ndf check の規則 toolchain）が読む。キーごとに独立して効き、無いキーは突き合わせない。NDF 自身が動く条件は配るコントラクト（contracts/data/toolchain.json）が持つ |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
-| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages） |
+| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch） |
 
 例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}}`
 

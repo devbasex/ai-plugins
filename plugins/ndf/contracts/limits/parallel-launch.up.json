@@ -1,0 +1,5 @@
+{
+  "summary": "一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる）",
+  "seconds": 120,
+  "interval": 5
+}

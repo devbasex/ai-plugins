@@ -1,0 +1,4 @@
+{
+  "summary": "LLM の CLI（claude -p・codex・kiro）1 本が重い起動のスロットから取るメモリの重み。実測（2026-11-13）claude 16 本で 4.3 GiB",
+  "gib": 0.5
+}

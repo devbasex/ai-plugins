@@ -180,7 +180,7 @@ worktree のブランチが文脈の `branch` と違うときで、ベースブ�
 | 1 | ベースブランチからのプロダクションコードの差分の行数を見る。10 行以下なら飛ばす（行の数え方と記録の残し方は [workflow-modes.md](workflow-modes.md) の「リファクタリングの退避先」） |
 | 2 | テストの走らせ方は設定（`.ndf/project.json` の `test`）の戦略で決まるので、テストの引数を渡さない。設定に `test` が無いリポジトリだけ `--round-test` に項目ごとにそのまま走らせるコマンドを渡す |
 | 3 | 全体テストは `init`（`local-scoped-ci-whole` では走らせない）・危険フラグ・最終ゲートで走る。`quality-gates` の全体テストと重ねて回さない |
-| 4 | 必要なら `--budget-minutes` で所要の上限を渡す（既定は `contracts/limits.json` の `cross-refactoring.default-budget`）。上限に収まる件数だけが採られ、残りはリファクタリング計画に理由とともに残る |
+| 4 | 必要なら `--budget-minutes` で所要の上限を渡す（既定は `contracts/limits/cross-refactoring.default-budget.json`）。上限に収まる件数だけが採られ、残りはリファクタリング計画に理由とともに残る |
 
 **リファクタリングの差分は、続く工程「コードレビュー」のつなぎ目のレビューが見る。** 集めた時点より後に入るので、
 単位のレビューには入らない。`cross-refactoring` を通した後も、つなぎ目にコードのファイルがあればコードレビューを飛ばさない。

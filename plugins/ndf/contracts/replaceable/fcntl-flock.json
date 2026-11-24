@@ -1,0 +1,6 @@
+{
+  "summary": "fcntl.flock の直接の呼び出し。filelock で置き換えられる",
+  "find": {"kind": "call", "name": "fcntl.flock"},
+  "replace_with": "filelock",
+  "exempt": ["src/ndf/domains/hooks/counter.py", "src/ndf/domains/hooks/env.py", "src/ndf/domains/hooks/outbox.py"]
+}

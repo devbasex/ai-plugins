@@ -58,7 +58,7 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | I2 | プラン | 宣言のあるリポジトリのプランは、手元のテストのステップ（`test-limited`・`test-all`）を持たない | `supervise.py new` のテストが落ちる |
 | I3 | プラン | 宣言のあるリポジトリの実装のプランは、実装のステップの直後に Draft の PR を出すステップ（`pr-draft`）を持つ | 同上 |
 | I4 | プラン | マージのステップより前に、CI の結果を待って止まるステップが無い。監視のステップも cross-refactoring の最終ゲートも、CI の結果を 1 回読むだけである | 同上 |
-| I5 | CI の監視ログ | 改修を起こす回数は上限（`contracts/limits.json` の `supervise.ci-fix` の `attempts`、既定 3）を超えない | 上限に当たったら改修を起こさず、理由を添えてプランを止める |
+| I5 | CI の監視ログ | 改修を起こす回数は上限（`contracts/limits/` の `supervise.ci-fix` の `attempts`、既定 3）を超えない | 上限に当たったら改修を起こさず、理由を添えてプランを止める |
 | I6 | CI の監視ログ | CI の結果を取得できないとき、監視のステップは `unknown` を記録して次へ進む | — |
 | I7 | プロジェクトの宣言 | 宣言のあるリポジトリのマージは、テストのチェックがすべて現れて通った（成功・中立・飛ばした）ときだけ行う | マージのステップが `stopped` を返す |
 | I8 | プロジェクトの宣言 | 宣言の無いリポジトリでは、プラン・hook・cross-refactoring・cross-review の振る舞いを変えない。検査のプランにリファクタリング（`assess`・`refactor`）を入れるのは宣言のあるリポジトリだけである | 既存のテストが落ちる |
@@ -240,7 +240,7 @@ cross-review の修正担当は `claude -p --setting-sources ''` で起動する
 
 | キー | 値 | 意味 |
 | --- | --- | --- |
-| `contracts/limits.json` の `supervise.ci-fix` の `attempts` | 3 | CI の失敗の改修を起こす回数の上限。数えるのは落ちた head の数 |
+| `contracts/limits/` の `supervise.ci-fix` の `attempts` | 3 | CI の失敗の改修を起こす回数の上限。数えるのは落ちた head の数 |
 
 ### CI の監視ログ
 

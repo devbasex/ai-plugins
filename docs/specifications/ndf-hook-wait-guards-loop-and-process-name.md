@@ -19,10 +19,10 @@ Claude Code の PreToolUse の hook は、`waiting.md` が禁じる 2 つの待�
 | --- | --- |
 | 禁じる待ち方・代わりの待ち方・guard の一覧と外し方 | `plugins/ndf/skills/development-workflow/references/waiting.md` の「禁じる待ち方」と「hook」 |
 | guard の宣言（順・対象の Tool・勧める Tool） | `plugins/ndf/contracts/hooks/guards.json` |
-| ループの外の上限の秒 | `plugins/ndf/contracts/limits.json` の `hook.sleep`（既定 30 秒） |
+| ループの外の上限の秒 | `plugins/ndf/contracts/limits/` の `hook.sleep`（既定 30 秒） |
 
 [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) の環境変数の表（`NDF_SLEEP_GUARD`・
-`NDF_SLEEP_MAX_SEC`）は 10 系の値である。11 系の sleep の判定はこの文書が正で、上限は `limits.json`、外し方は
+`NDF_SLEEP_MAX_SEC`）は 10 系の値である。11 系の sleep の判定はこの文書が正で、上限は `contracts/limits/`、外し方は
 `NDF_HOOK_OFF=<guard の名前>` である。
 
 ## 概要
@@ -62,7 +62,7 @@ guard も無かった。#3812 の通し（2026-11-19）では、supervisor と w
 
 - NDF を Claude Code へ導入したすべてのリポジトリで働く。Codex・Kiro・agy には hook が無く、`waiting.md` の規約だけが当たる
 - モードに依らない
-- 設定は `limits.json` の `hook.sleep` だけを読む。ほかの設定と引数は持たない
+- 設定は `contracts/limits/` の `hook.sleep` だけを読む。ほかの設定と引数は持たない
 - `read-repeat`・`script-chain`・`full-test` の判定は変えない。`ShellScript.commands` と `loops` は外側の単純コマンドだけを持ち、これらの guard の入力は内側の単純コマンドを含まない
 
 ## 仕様
@@ -179,7 +179,7 @@ GNU findutils 4.10.0）。
 
 | 名前 | 置き場 | 値 |
 | --- | --- | --- |
-| `hook.sleep` | `plugins/ndf/contracts/limits.json` | ループの外の上限の秒（既定 30） |
+| `hook.sleep` | `plugins/ndf/contracts/limits/` | ループの外の上限の秒（既定 30） |
 | `sleep` の行 | `plugins/ndf/contracts/hooks/guards.json` | 順 30・PreToolUse・Bash |
 | `process-wait` の行 | `plugins/ndf/contracts/hooks/guards.json` | 順 31・PreToolUse・Bash・`deny_key` command・勧める Tool は `Monitor`（完了マーカーのファイルを待つ例） |
 
@@ -206,7 +206,7 @@ GNU findutils 4.10.0）。
 | プロセス名の待ちを `sleep` と別の guard にする | 止める条件と案内が違い、`NDF_HOOK_OFF` で片方だけを外せる。`sleep` を含まない `until ! pgrep -f x; do :; done` を `sleep` の名前で止めずに済む |
 | `pgrep -f` のうちループの中だけを止める | 単発の確かめ（受け入れ条件の確かめなど）を巻き込まない |
 | ラッパーを外した語を `body_argv` として別に持つ | `argv` を書き換えると script-chain の guard の判定が変わる。表に無いオプションを値を取らないものと見なすと、値をコマンドと読み違えて無関係の語で止める |
-| 上限の秒は `limits.json` の値（30 秒）のまま | 11 系は閾値を `limits.json` に置き、環境変数で受けない。直したのはループの中の止め方で、上限の値ではない |
+| 上限の秒は `contracts/limits/` の値（30 秒）のまま | 11 系は閾値を `contracts/limits/` に置き、環境変数で受けない。直したのはループの中の止め方で、上限の値ではない |
 
 ## テスト観点
 

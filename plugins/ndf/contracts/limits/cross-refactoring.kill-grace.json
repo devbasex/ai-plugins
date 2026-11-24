@@ -1,0 +1,4 @@
+{
+  "summary": "プロセスグループを止めるときの SIGTERM から SIGKILL までの猶予",
+  "seconds": 5
+}

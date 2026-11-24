@@ -1,0 +1,8 @@
+{
+  "meaning": "ステートマシンの DB（SQLite）の書き込みの待ちが busy_timeout を超えた",
+  "std_type": "timeout",
+  "exit": "infra_wait",
+  "route": "retry",
+  "retry": "cause.store-busy",
+  "exhausted": "step"
+}

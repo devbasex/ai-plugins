@@ -191,7 +191,7 @@ bump → bump-others → changelog → notes → snapshot →（sync）→ relea
 | `TRIAL_ROW` | `release_lib/materials.py` | `承認前の試用で確かめたこと`（承認資料の欄の名前。`cmd_approval_facts` もここから引く） |
 | `PENDING_REASONS` | `release_lib/prod_land.py` | `queued` → 「merge queue のマージを待つ」、`human` → 「人のマージを待つ」 |
 | `RELEASE_KINDS["prod-trunk"]` | `supervise_lib/release_templates.py` | 承認の手順 `trial`・facts の並び・`approve`、手順の組み立て `_trunk_prod_approvals`、承認ゲート無し |
-| merge queue の待ちの間隔 | `plugins/ndf/contracts/limits.json` の `release-steps.ci-wait` の `interval` | 15 秒。上限は `--ci-wait` |
+| merge queue の待ちの間隔 | `plugins/ndf/contracts/limits/` の `release-steps.ci-wait` の `interval` | 15 秒。上限は `--ci-wait` |
 | 系列の無い本番の版 | `lib/release_version.py` の `decide_release` | origin の最新のタグ・本番ブランチの版・ベースブランチの版の基底のうち最も大きいものを上げ幅で上げた正式版。記録の `how` は `decided` |
 
 `supervise_lib/queue_fill.py` の `_fill_prod` は、「版」の欄の明示も系列も無いとき `decide_release` で版を決め、本番のプランの状態ディレクトリの

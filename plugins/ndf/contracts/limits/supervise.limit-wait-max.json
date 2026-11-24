@@ -1,0 +1,4 @@
+{
+  "summary": "claude の利用上限の待ちの最大。計画の limit_wait_max で上書きする",
+  "seconds": 10800
+}

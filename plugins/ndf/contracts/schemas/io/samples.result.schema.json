@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "samples.result.schema.json",
+  "title": "ndf samples の結果 JSON",
+  "description": "ndf samples が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は、載せた項目のほかの項目を受けない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "samples"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf samples の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "突き合わせた見本の数（本物を取れない見本を数えない）"
+        },
+        "calls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "相手ごとに実際に送った要求の数（取得の失敗も 1 回と数える）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "見本の食い違い 1 つごと、または本物を取れない見本ごとの項目の並び（見本のパスの昇順）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sample": {
+            "type": "string",
+            "description": "見本のファイルのプラグインの根からのパス"
+          },
+          "peer": {
+            "type": "string",
+            "description": "相手"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "mismatch",
+              "unreachable"
+            ],
+            "description": "mismatch は本物の記述との食い違い、unreachable は本物を取れない"
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "description": "食い違いのパスと検証の規則か記述のキーの名前、または取れない理由。見本の値と、見本の側の辞書のキーの名前は出さない"
+          }
+        },
+        "required": [
+          "sample",
+          "peer",
+          "kind",
+          "detail"
+        ]
+      }
+    }
+  }
+}

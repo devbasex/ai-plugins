@@ -22,7 +22,7 @@
 | --- | --- |
 | `ndf check` | `--only`（array of string・任意）: この規則の指摘だけを違反にする（繰り返せる）<br>`--write-spec`（boolean・任意）: 規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する |
 
-結果の `metrics`: `files`（integer）・`findings`（object）・`written`（integer）。`items` の要素: `detail`（string）・`line`（integer）・`path`（string）・`rule`（string）
+結果の `metrics`: `budget`（object）・`files`（integer）・`findings`（object）・`written`（integer）。`items` の要素: `detail`（string）・`line`（integer）・`path`（string）・`rule`（string）
 
 ## `ndf ci`
 
@@ -371,6 +371,16 @@
 | `ndf route test` | `--result`（string・任意）<br>`--failed-from`（string・任意）<br>`command`（string・任意・位置） |
 
 結果の `metrics`: `exit_code`（integer）・`failed_runs`（integer）・`failed_tests`（array of string）・`runs`（integer）・`same_cause`（integer）・`streak`（integer）・`templates`（integer）。`items` の要素: `command`（string）・`exit_code`（integer）・`kind`（string）・`name`（string）・`params`（array of string）・`passed`（boolean）・`path`（string）・`purpose`（string）・`suite`（string）
+
+## `ndf samples`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/samples.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/samples.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf samples verify` | `--peer`（string・任意）: この相手の見本だけを突き合わせる |
+
+結果の `metrics`: `calls`（object）・`samples`（integer）。`items` の要素: `detail`（string）・`kind`（string）・`peer`（string）・`sample`（string）
 
 ## `ndf settings`
 

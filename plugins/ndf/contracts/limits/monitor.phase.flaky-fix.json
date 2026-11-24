@@ -1,0 +1,4 @@
+{
+  "summary": "cross-refactoring のフレーキーなテストの直しの工程の監視の上限。駆動は安全網の残りを --timeout で渡す",
+  "seconds": 3600
+}
