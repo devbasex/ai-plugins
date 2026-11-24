@@ -347,9 +347,11 @@ def test_cli_refuses_a_plan_file_of_the_wrong_shape(repo, capsys, tmp_path):
 
 
 @pytest.mark.parametrize(("version", "kind"), [(2, "precondition"), (0, "invalid"), ("2", "invalid"), (None, "invalid")])
-def test_a_plan_file_of_a_newer_version_is_told_from_the_wrong_shape(repo, capsys, tmp_path, version, kind):
-    path = _plan_file(tmp_path / "plan.json", {**_doc(_decl("a", [[1]])), "version": version})
-    code = cli.main(["lanes", "init", path])
+def test_a_plan_file_of_a_newer_version_is_told_from_the_wrong_shape(capsys, monkeypatch, tmp_path, version, kind):
+    path = Path(_plan_file(tmp_path / "plan.json", {**_doc(_decl("a", [[1]])), "version": version}))
+    # 設定を読むまでの経路（保存先を開く）を通さず、読み手の例外がエントリポイントで停止理由になることだけを見る
+    monkeypatch.setattr(plan_cli, "_dispatch", lambda a, cwd: plan.read_doc(path, plan.PLAN_SCHEMA, "計画の設定"))
+    code = cli.main(["lanes", "init", str(path)])
     out = last_result(capsys.readouterr().out)
     assert out["cause"]["kind"] == kind and code == causes.exit_code(kind)
 
