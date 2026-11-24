@@ -465,7 +465,7 @@ def test_plain_reasons_kept_only_in_the_records_are_cleaned_in_the_same_call() -
     snap = Snapshot("approved", 11, "a" * 64, None, (), {}, HEAD1, "c" * 64, None)
     judged = {"id": "r1-1", "text": "a", "mvv": "Value 5", "outcome": "deferred", "reason": "MVV の理由", "judged_mvv": snap.identity}
     plain = {"id": "r1-2", "text": "b", "by": "codex", "outcome": "deferred", "reason": "通常の理由"}
-    once = publish.once(clean)
+    once = publish.Once(clean)
     out = report_decide.mvv_outputs([judged, plain], snap, HEAD1, once)
     assert [d["id"] for d in out["disputed"]] == ["r1-1"] and out["findings"] == []
     assert calls == [["MVV の理由", "通常の理由"]]
@@ -480,7 +480,7 @@ def test_same_value_is_cleaned_once() -> None:
         calls.append(list(texts))
         return [t.upper() for t in texts]
 
-    once = publish.once(clean)
+    once = publish.Once(clean)
     assert (once(["a", "b", "a"]), once(["b", "c"]), once([])) == (["A", "B", "A"], ["B", "C"], [])
     assert (calls, once.failure) == ([["a", "b"], ["c"]], None)
 
@@ -506,7 +506,7 @@ def test_issue_4090_7_failure_hides_every_value_and_the_message(error: Exception
             raise raised
         return texts
 
-    once = publish.once(clean)
+    once = publish.Once(clean)
     assert once(["a"]) == ["a"]
     raised = error
     assert (once(["a", "b"]), once(["c"])) == ([publish.WITHHELD] * 2, [publish.WITHHELD])

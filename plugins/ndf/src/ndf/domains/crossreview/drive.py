@@ -697,7 +697,7 @@ def _mvv_results(run: _Run) -> tuple[Optional[dict[str, Any]], Optional[dict[str
     snap = criteria_decide.approved(run.snapshot)
     if snap is None:
         return None, None
-    rows, seen = list(run.journal.rows.values()), publish.once(run.clean)
+    rows, seen = list(run.journal.rows.values()), publish.Once(run.clean)
     out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
     if seen.failure is not None:
         run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")

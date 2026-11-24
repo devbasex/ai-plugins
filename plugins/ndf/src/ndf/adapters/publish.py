@@ -230,8 +230,8 @@ def _query_failure(exc: Exception) -> str:
 
 
 class Once:
-    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ。失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因
-    （無ければ None）。"""
+    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ（レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み）。
+    失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因（無ければ None）。"""
 
     def __init__(self, clean: Callable[[Sequence[str]], Sequence[str]]) -> None:
         self._clean = clean
@@ -248,11 +248,6 @@ class Once:
             except Exception as exc:  # noqa: BLE001 ネットワーク: 照会できなくてもレビューの結果は返し、自由記述を伏せる
                 self.failure, self.error = _query_failure(exc), exc
         return [WITHHELD if self.failure is not None else self._done[t] for t in texts]
-
-
-def once(clean: Callable[[Sequence[str]], Sequence[str]]) -> Once:
-    """レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み。"""
-    return Once(clean)
 
 
 @dataclass

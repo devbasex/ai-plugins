@@ -284,7 +284,7 @@ def _cite_shown(root: Path, errors: list[dict[str, Any]], where: dict[str, Any])
     伏せ方は判定するリポジトリの公開範囲を照会せず、公開の書き先と同じにする（結果の受け手はその閲覧者と限らない。#3959）。
     照会に失敗したら各欄を `WITHHELD` にし、注意の原因は `failure_text` の定型文と診断の記録の識別子にする。
     """
-    seen = publish.once(lambda texts: publish.Publisher(_hub(root)).guarded(*texts, assume_public=True)[0])
+    seen = publish.Once(lambda texts: publish.Publisher(_hub(root)).guarded(*texts, assume_public=True)[0])
     shown = iter(seen([t for e in errors for t in (e["path"], e["cited"], *e["unknown"])]))
     items = [{**e, "path": next(shown), "cited": next(shown), "unknown": [next(shown) for _ in e["unknown"]]} for e in errors]
     if seen.failure is None:

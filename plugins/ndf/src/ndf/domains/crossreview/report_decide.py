@@ -93,7 +93,7 @@ def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str
     """結果 JSON の `outputs.mvv`: MVV `snapshot` で判定した指摘の一覧。`head` はレビューしたコミット。
 
     見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りのパスと引いた項目は、`clean` に 1 回で通して出す。
-    同じ 1 回に、記録だけに書く通常の指摘の見送りの理由も通す（`clean` が `publish.once` なら、記録の側は照会し直さない）。
+    同じ 1 回に、記録だけに書く通常の指摘の見送りの理由も通す（`clean` が `publish.Once` なら、記録の側は照会し直さない）。
     """
     # 記録（`mvv.record_review`）だけに書く通常の指摘の自由記述も同じ 1 回で伏せ、公開範囲の照会を 1 回にまとめる
     everything = mvv_decide.judged_findings(rows, snapshot.identity, holds=True)
