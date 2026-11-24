@@ -116,6 +116,20 @@ def test_launch_record_says_whether_the_registration_was_given(tmp_path, gate, m
     assert (True, "2.1.330") in seen
 
 
+def test_default_empty_list_writes_the_launch_record_once_per_launch(tmp_path, monkeypatch):
+    # 起床を無効にした既定（一覧が空）では、今の起動の記録は候補を試す前の 1 回だけ書く（候補の起動の直前に書き直さない）
+    seen = []
+    real = signals.set_launch
+    monkeypatch.setattr(
+        signals,
+        "set_launch",
+        lambda d, launch, rewake=False, claude_version=None: seen.append((launch, rewake)) or real(d, launch, rewake, claude_version),
+    )
+    _first(tmp_path)
+    started = [x for x in seen if x[0] is not None]
+    assert len(started) == 1 and started[0][1] is False
+
+
 @pytest.mark.parametrize("user", [("--settings", USER_SETTINGS), ("--settings=x.json",)])
 def test_user_settings_win_even_for_a_listed_version(tmp_path, gate, user):
     argv, env, w = _first(tmp_path, args=user)

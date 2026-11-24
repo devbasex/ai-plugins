@@ -55,6 +55,7 @@ WAKE = keep_cache.WAKE_HEAD + "キャッシュを保つための起床（1/33）
 def rewake_child(relay_child, monkeypatch):
     """起床の hook の登録を渡した今の起動の子（会話は UUID の形の `SID`）。"""
     signals.set_launch(relay_child, LAUNCH, rewake=True)
+    monkeypatch.setenv("NDF_RELAY_REWAKE", "1")
     monkeypatch.setenv("NDF_RELAY_SESSION", SID)
     monkeypatch.setattr(turn, "clock", lambda: NOW)
     return relay_child
@@ -86,6 +87,15 @@ def test_no_state_for_another_launch_or_an_unregistered_launch(tmp_path, rewake_
     _input(tmp_path)
     assert signals.read_keep(rewake_child, SID) is None
     signals.set_launch(rewake_child, LAUNCH, rewake=False)
+    _input(tmp_path)
+    assert signals.read_keep(rewake_child, SID) is None
+
+
+def test_child_without_the_registration_takes_no_lock_and_reads_no_launch(tmp_path, rewake_child, monkeypatch):
+    """登録を渡していない子（`NDF_RELAY_REWAKE` が無い）は、排他も今の起動の記録の読み取りもせずに抜ける（#4068）。"""
+    monkeypatch.delenv("NDF_RELAY_REWAKE")
+    monkeypatch.setattr(signals, "held", lambda *a, **k: pytest.fail("排他を取った"))
+    monkeypatch.setattr(signals, "rewake_on", lambda *a, **k: pytest.fail("今の起動の記録を読んだ"))
     _input(tmp_path)
     assert signals.read_keep(rewake_child, SID) is None
 

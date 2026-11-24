@@ -153,12 +153,22 @@ def test_wake_reply_first_call_with_no_writes_is_still_a_wake(wake_head):
         use(split=False),
         use(w1h=1, total=5),
         {**use(), "cache_creation": {"ephemeral_1h_input_tokens": 1.5, "ephemeral_5m_input_tokens": 0}},
+        {k: v for k, v in use().items() if k != "output_tokens"},
+        {**use(), "output_tokens": "7"},
+        {**use(), "cache_read_input_tokens": -1},
     ],
 )
 def test_wake_reply_unpriced_when_a_split_is_missing_or_wrong(wake_head, bad):
     rows = tail(said("x"), call("m0"), said(WAKE), call("w1", usage=use(read=10)), call("w2", usage=bad))
     got = keep_cache.wake_reply(rows, "m0")
     assert got.kind == "wake" and got.usage.priced is False and got.usage.cache_write_1h is None and got.usage.cache_write_5m is None
+
+
+def test_wake_reply_missing_read_counts_as_zero_and_stays_priced(wake_head):
+    # 読み出しの量の項目が無い呼び出しは 0 として数え、費用は確定のまま（会話の記録の読み取りと同じ扱い）
+    no_read = {k: v for k, v in use(w1h=5).items() if k != "cache_read_input_tokens"}
+    rows = tail(said("x"), call("m0"), said(WAKE), call("w1", usage=use(read=10)), call("w2", usage=no_read))
+    assert keep_cache.wake_reply(rows, "m0").usage == Usage(2, 10, 14, 5, 0, True)
 
 
 def test_wake_reply_stops_at_the_next_input_and_sees_preempted_and_unknown(wake_head, monkeypatch):
@@ -380,9 +390,11 @@ def test_contested_reply_voids_a_wait_that_has_not_woken(relay_dir):
     assert got == "contested" and keep["generation"] == {"at": T0, "by": "contested", "message_id": "m1", "sleeps": False}
     assert "wait_id" not in keep and keep["ttl"] == "1h" and keep["last"] == {"x": 1}
     assert [(r["kind"], r.get("reason")) for r in _log(relay_dir)] == [("wait_void", "contested"), ("contest", None)]
-    # 既に contested なら書かない
-    assert signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0 + 5, "h3", "m1"))[0] == "contested"
-    assert len(_log(relay_dir)) == 2
+    # 3 件目の Stop: 世代と待ちはそのまま（取り消しは 1 回だけ）で、集計のために contest の行だけを書く
+    got, after = signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0 + 5, "h3", "m1"), works=2)
+    assert got == "contested" and after == keep and signals.read_keep(relay_dir, SID) == keep
+    rows = _log(relay_dir)
+    assert [r["kind"] for r in rows] == ["wait_void", "contest", "contest"] and rows[2]["works"] == 2
 
 
 @pytest.mark.parametrize("change", [{"k": 1}, {"pending": {"wake_id": "w"}}, {"wait_id": T0 - 9}])

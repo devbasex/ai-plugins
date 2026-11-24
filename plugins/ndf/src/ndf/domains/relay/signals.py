@@ -116,6 +116,11 @@ def launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]:
     }
 
 
+def rewake_registered(env: Mapping[str, str]) -> bool:
+    """ラッパーが起床の hook の登録を渡した子の環境か（`NDF_RELAY_REWAKE` が `1`。#4068）。ファイルを読まない。"""
+    return env.get(identity.env_name("relay-rewake")) == "1"
+
+
 def relay_launch(env: Mapping[str, str]) -> Optional[str]:
     """hook の環境の起動の ID。無ければ None。"""
     return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
@@ -585,8 +590,9 @@ def void_wait(keep: dict[str, Any], at: float) -> bool:
 def bump_generation(directory: Path, launch: str, session_id: str, gen: Generation, works: int = 0) -> tuple[str, dict[str, Any]]:
     """世代を新しい時刻でだけ書き換える（子を止める排他の中で呼ぶ）。返すのは結果と書いた後の状態。
 
-    - `contested`: 同じ応答（`message_id`）を別の書き込み元が既に取っていた。世代の `by` を `contested` に替え、その応答で始まった
-      起床させていない待ちを取り消す（`wait_void`）。替えたときだけ `contest` の行を書く
+    - `contested`: 同じ応答（`message_id`）を別の書き込み元が既に取っていた。最初の取り合いだけが世代の `by` を `contested` に替え、
+      その応答で始まった起床させていない待ちを取り消す（`wait_void`）。`contest` の行は取り合った Stop ごとに 1 行書く（3 件目以降の
+      Stop も、版別の集計で作業待ちの Stop と取り合いの失効に数えるため）
     - `older`: 世代が既に同じか新しい時刻。何も書かない
     - `taken`: 世代を書いた。作業が 1 件以上なら `work_stop` の行を書く。状態が無ければ世代だけの状態を作る
     """
@@ -601,7 +607,7 @@ def bump_generation(directory: Path, launch: str, session_id: str, gen: Generati
             update_keep(directory, session_id, keep)
             if voided:
                 append_cache_log(directory, launch, session_id, "wait_void", wait_id, reason=BY_CONTESTED)
-            append_cache_log(directory, launch, session_id, "contest", keep.get("wait_id"), message_id=gen.message_id, works=works)
+        append_cache_log(directory, launch, session_id, "contest", keep.get("wait_id"), message_id=gen.message_id, works=works)
         return "contested", keep
     if now is not None and now.at >= gen.at:
         return "older", keep

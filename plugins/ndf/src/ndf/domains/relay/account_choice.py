@@ -669,28 +669,41 @@ def _write_new(path: Path, text: str) -> None:
 
 
 def _launch_made(
-    env: Mapping[str, str], store: Path, cwd: Path, argv: list[str], pin: Path, record: Optional[tuple[Path, str]]
+    env: Mapping[str, str],
+    store: Path,
+    cwd: Path,
+    argv: list[str],
+    pin: Path,
+    record: Optional[tuple[Path, str]],
+    decl: Union[Decl, str, None] = None,
 ) -> Union[Made, str]:
     """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。"""
     target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
     if target.startswith(KEY_PREFIX):
         return _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, _tail(pin, record), _source(argv, cwd))
-    decl = _decl_of(store, env)
+    decl = _decl_of(store, env) if decl is None else decl
     return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, _tail(pin, record))
 
 
 def key_target(
-    env: Mapping[str, str], store: Path, state_dir: Path, cwd: Path, argv: list[str], record: Optional[tuple[Path, str]]
+    env: Mapping[str, str],
+    store: Path,
+    state_dir: Path,
+    cwd: Path,
+    argv: list[str],
+    record: Optional[tuple[Path, str]],
+    decl: Union[Decl, str, None] = None,
 ) -> Union[Built, str]:
     """キーの子（API キーの設定の従量の接続）の替え先。固定のファイルのパスを決めて (b) の形の起動引数で確かめ、通れば
     `Resolved.pins` を固定のファイルへ書く（別冊の「確かめた設定への固定」）。`record` はラッパーの払い出しの記録先と helper の ID
     （`ndf plan` は None）。キーの子でなければ `target_env` と同じ。登録簿のキーの子かは `env` の `NDF_CLAUDE_ACCOUNT` で決める
-    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。
+    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。`decl` は呼び手が読んだ従量の接続の設定で、
+    在れば読み直さない（ラッパーが版の判定と起動に同じ設定を使う。#4068）。
     """
     registry = (env.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX)  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続
-    decl = _decl_of(store, env)
+    decl = _decl_of(store, env) if decl is None else decl
     if not registry and (isinstance(decl, str) or not _is_key(decl)):
-        return target_env(env, reg.METERED, store, state_dir, cwd, argv)
+        return target_env(env, reg.METERED, store, state_dir, cwd, argv, decl)
     start = reg.proc_start(os.getpid())
     try:
         d = _settings_dir(state_dir)
@@ -701,7 +714,7 @@ def key_target(
     _sweep(d)
     stem = f"{os.getpid()}-{start:.2f}-{secrets.token_hex(8)}"
     pin_file = d / f"{stem}{PIN_SUFFIX}"
-    got = _launch_made(env, store, cwd, argv, pin_file, record)
+    got = _launch_made(env, store, cwd, argv, pin_file, record, None if registry else decl)
     if isinstance(got, str):
         return got
     child, final, helper, from_file, gen, pin = got
@@ -721,23 +734,26 @@ def key_target(
     return reason
 
 
-def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str]) -> Union[Built, str]:
+def target_env(
+    env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str], decl: Union[Decl, str, None] = None
+) -> Union[Built, str]:
     """確定した替え先の子の環境と最終の起動引数。使えなければ値を含まない理由の符号を返す。
 
     登録済みアカウントは `prepare` の後に `account_env`（`Built.resolved` は `Prepared.resolved`。理由は `prepare` の
     `Prepared.reason`）。`metered` は `build` の後に `verify` を当て、外れれば `metered_overridden`・`key_gate` を返す。キーの子は
     確かめた設定への固定のファイル（`Built.pin_file`）と、元の `--settings` がファイルなら合成の一時ファイル（`Built.settings_file`）を
     書く（払い出しの記録先を helper へ渡す起動は `key_target`）。
-    `env` は `child_env(…, account=target, decided=True)` の出力。
+    `env` は `child_env(…, account=target, decided=True)` の出力。`decl` は呼び手が読んだ従量の接続の設定で、在れば読み直さない
+    （`metered_of` の値。ラッパーが版の判定と起動に同じ設定を使う。#4068）。
     """
     if target.startswith(KEY_PREFIX):
         return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, cwd, argv, None)
     if target == reg.METERED:
-        decl = _decl_of(store, env)
+        decl = _decl_of(store, env) if decl is None else decl
         if isinstance(decl, str):
             return decl
         if _is_key(decl):
-            return key_target(env, store, state_dir, cwd, argv, None)
+            return key_target(env, store, state_dir, cwd, argv, None, decl)
         got = _build(env, decl, cwd, argv, [])
         if isinstance(got, str):
             return got

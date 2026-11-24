@@ -19,7 +19,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional, TextIO
 
-from ndf import identity
 from ndf.adapters import transcript
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.guards import relay_busy
@@ -86,7 +85,7 @@ def run(
 
 def _target(payload: Mapping[str, Any], environ: Mapping[str, str], started: float) -> Optional[Target]:
     """ラッパーが登録を渡した中継の子の会話の Stop なら `Target`。ほか（入れ子の claude・登録の無い起動）は None。"""
-    if environ.get(identity.env_name("relay-rewake")) != "1":
+    if not signals.rewake_registered(environ):
         return None
     directory, launch = signals.relay_dir(environ), signals.relay_launch(environ)
     session, path = payload.get("session_id"), payload.get("transcript_path")

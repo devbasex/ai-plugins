@@ -5,7 +5,8 @@
 `relay.markers.take` がマーカーを消せたら、その入力は中継が送ったものである（決定 111）。
 
 起床の hook の登録を渡した中継の子では、子を止める排他の中で起床の状態の世代を入力の時刻に書き換え、眠る hook の
-予約を失効させる（#4068 の詳細設計の「UserPromptSubmit の guard」）。起床のフラグが在る間の、頭が `WAKE_HEAD` の
+予約を失効させる（#4068 の詳細設計の「UserPromptSubmit の guard」）。登録を渡していない子（`NDF_RELAY_REWAKE` が無い）は、
+排他を取らず今の起動の記録も読まずに抜ける。登録を渡した子だけが、排他の中で今の起動の記録と起動の ID を照らし合わせる。起床のフラグが在る間の、頭が `WAKE_HEAD` の
 入力は中継が送った起床の文として数え直さない（設計の決定 10）。
 """
 
@@ -31,7 +32,9 @@ def _relayed(ctx, svc) -> bool:
 
 
 def _rewake_child(ctx) -> Any:
-    """起床の状態を書いてよい中継の子なら（保存先, 起動の ID）。ほかは None。"""
+    """起床の状態を書いてよい中継の子なら（保存先, 起動の ID）。ほかは None（登録を渡していない子はファイルを見ずに None）。"""
+    if not signals.rewake_registered(ctx.env):
+        return None
     directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
     session = ctx.session_id
     if directory is None or launch is None or session != signals.relay_session(ctx.env):

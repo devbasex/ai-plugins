@@ -654,6 +654,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
+        self.rewake_used = {}  # 今の起動の記録は登録なし。登録を渡す候補だけが `_rewake_child` で書き直す
         signals.drop_other_busy(self.dir, launch)  # 今の起動の記録は子の SessionStart の hook が書く（#4049）
         self.rewake = self._rewake_plan(self._env_for(None, launch, req.session_id))  # 起床の hook の登録の前提（#4068）
         try:

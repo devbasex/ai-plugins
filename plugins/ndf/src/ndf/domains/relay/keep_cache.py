@@ -211,10 +211,27 @@ def _call_rows(rows: list) -> list:
     return [adopted[k] for k in order]
 
 
+def _count(usage: Mapping[str, Any], key: str, absent_zero: bool) -> bool:
+    """費用に使う量の項目が 0 以上の整数か。`absent_zero` の項目は、無ければ 0 として通す（会話の記録の読み取りと同じ扱い）。"""
+    if key not in usage:
+        return absent_zero
+    return _int_value(usage[key]) and usage[key] >= 0
+
+
+def _priced_call(usage: Mapping[str, Any], split: Optional[tuple[int, int]]) -> bool:
+    """1 つの呼び出しの費用を確定できるか。出力の量は必須、読み出しの量は無ければ 0（`transcript.usage_tokens` と同じ）。
+
+    寿命別の書き込みが読めて、その和が書き込みの合計の項目と一致することも求める（決定 14）。
+    """
+    if split is None or _WRITE not in usage or sum(split) != _amount(usage, _WRITE):
+        return False
+    return _count(usage, "output_tokens", absent_zero=False) and _count(usage, _READ, absent_zero=True)
+
+
 def _sum_usage(calls: list) -> Usage:
     usages = [_usage_row(c) for c in calls]
     split = [_split_writes(u) for u in usages]
-    priced = all(s is not None and sum(s) == _amount(u, _WRITE) and _WRITE in u for s, u in zip(split, usages))
+    priced = all(_priced_call(u, s) for s, u in zip(split, usages))
     one_hour = sum(s[0] for s in split) if priced else None
     five_min = sum(s[1] for s in split) if priced else None
     return Usage(
