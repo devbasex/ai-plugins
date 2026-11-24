@@ -263,7 +263,14 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 | `tag`・`branch`・`changelog_heading` | 名前の書式。タグ・リリースブランチ・CHANGELOG の見出しを作り、同じ書式で読み戻す。`tag` は既定を持たない（`null` はタグを作らない）。`branch` の既定は `release/v{version}`、見出しの既定は `## [{plugin} {version}] - {date}` |
 
 - 材料の収集・組み立て・タグは保存先の種類の名前で分岐せず、アダプターのインタフェースだけを呼ぶ。種類を足すときは、アダプター 1 つと `version_store.KINDS` とスキーマの行を足す
-- 範囲の起点（承認資料とリリースブランチに集める差分の古い側の端）はリリース方式で決まる。`merge_base_branch` は本番ブランチの HEAD、`trunk` の `release_pr` と `release_branch` はバージョンの単位ごとの前のリリースの起点（前のバージョンのタグ、無ければ今のバージョンが保存先に入ったコミット、それも無ければ本番ブランチの最初のコミット）、`production_pr` は本番の PR と本番ブランチの分岐点である。ベースブランチと本番ブランチが同じ `trunk` で本番ブランチの HEAD を起点にすると、範囲が空になるため
+- 範囲の起点（承認資料とリリースブランチに集める差分の古い側の端）は、リリース方式ごとに次の表のとおり決まる（`domains/release/since_decide.py` の区分）。`trunk` の `release_pr` と `release_branch` は別の方式で、どちらもバージョンの単位ごとの前のリリースを起点にする。前のリリースの起点は、前のバージョンのタグ、無ければ今のバージョンが保存先に入ったコミット、それも無ければ本番ブランチの最初のコミットである。`trunk` で本番ブランチの HEAD を起点にしないのは、ベースブランチと本番ブランチが同じなので範囲が空になるためである
+
+  | リリース方式 | 範囲の起点 | 範囲の終点 |
+  | --- | --- | --- |
+  | `merge_base_branch` | 本番ブランチの HEAD | ベースブランチの HEAD |
+  | `trunk` の `release_pr` | バージョンの単位ごとの前のリリースの起点 | 本番ブランチの HEAD |
+  | `release_branch`（選んだスプリントを集める） | バージョンの単位ごとの前のリリースの起点 | 選んだスプリントを集めた先頭 |
+  | `production_pr` | 本番の PR と本番ブランチの分岐点 | PR の先頭 |
 - 書式に合わない名前は読み戻さず、前のバージョンの候補にしない
 - リリース対象外のファイル（バージョンを上げるかの判定で数えないファイル）の既定は、テストのファイルの表 `contracts/domains/test-files.json` の行から作る。`.ndf/release.json` の `undistributed` は既定へ足し、置き換えない
 - 利用者のリポジトリは、置いたテンプレートの workflow から再利用可能なワークフロー（`workflow_call` を持ち、ほかのリポジトリから `uses:` で呼べる workflow。`.github/workflows/ndf-release-reusable.yml`）を呼ぶ。再利用可能なワークフローは秘密の名前を決め打たず、`release_token` の 1 つで受ける
