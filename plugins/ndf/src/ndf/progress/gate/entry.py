@@ -44,7 +44,16 @@ from ndf.progress.gate.answering import (
     no_post,
     recheck,
 )
-from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, material_sha256, question, write_material
+from ndf.progress.gate.asking import (
+    RELEASE_GATE,
+    TOOL,
+    Target,
+    gate_result,
+    material_sha256,
+    question,
+    read_presented,
+    write_material,
+)
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
@@ -68,7 +77,9 @@ def present(
     seen = observe(first)
     asked = replace(first, target=replace(seen, material=None))
     path = write_material(st.root, v, asked)
-    q = replace(asked, target=replace(seen, material=material_sha256(path)))
+    # 提示の識別子は資料を書いたときに発行される（`write_material`）。リリースのリクエストの ID に使うので写す
+    held = read_presented(st.root, asked)
+    q = replace(asked, target=replace(seen, material=material_sha256(path), presentation=held.presentation))
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:

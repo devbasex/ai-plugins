@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field, replace
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -48,6 +49,7 @@ class Target:
 
     `repo`・`pr`・`base` は承認の対象（ベースリポジトリ・PR の番号・マージ先）、`production` は承認でマージが本番へ
     反映され得るか（判定の部品の `reaches_production`）。マージの承認の証跡はこの組に結び付ける（#4409 の決定 7）。
+    `presentation` は資料を書いた（出し直した）ときに発行した提示の識別子（`write_material`）。分からなければ None。
     """
 
     head: Optional[str] = None
@@ -56,6 +58,7 @@ class Target:
     pr: Optional[int] = None
     base: Optional[str] = None
     production: Optional[bool] = None
+    presentation: Optional[str] = None
 
     def binding(self) -> Optional[merge_approval.MergeTarget]:
         """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""
@@ -73,7 +76,7 @@ class Target:
 
     def as_dict(self) -> dict[str, Any]:
         """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。承認の対象の値は分かるときだけ置く。"""
-        extra = {"repo": self.repo, "pr": self.pr, "base": self.base, "production": self.production}
+        extra = {"repo": self.repo, "pr": self.pr, "base": self.base, "production": self.production, "presentation": self.presentation}
         return {"head": self.head, "material_sha256": self.material, **{k: v for k, v in extra.items() if v is not None}}
 
     @classmethod
@@ -90,6 +93,7 @@ class Target:
             pr if isinstance(pr, int) and not isinstance(pr, bool) else None,
             raw.get("base") if isinstance(raw.get("base"), str) else None,
             production if isinstance(production, bool) else None,
+            raw.get("presentation") if isinstance(raw.get("presentation"), str) and raw.get("presentation") else None,
         )
 
     def presented(self, now: "Target") -> "Target":
@@ -264,6 +268,8 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
     ただし、提示した承認の対象と `q.target` の承認の対象（マージ先・HEAD）か「本番へ反映されるか」が違えば、
     資料と提示した対象の両方を `q.target` で書き直す（待ちの間に PR が動いた。古い資料のまま新しい HEAD の回答の経路を
     返さない）。資料の sha256 が変わるので、古い資料を見て打った回答は断られる。
+    提示した対象を書くたびに、新しい提示の識別子（`presentation`）を発行して一緒に書く。承認の対象が A → B → A と
+    戻っても、最後の提示は最初の提示と別の識別子になる（リクエスト・回答・証跡を最初の提示と取り違えない）。
     """
     path = material_path(root, q)
     shown = presented_path(root, q)
@@ -277,7 +283,8 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
         tmp.replace(path)
     if not shown.exists():
         tmp = shown.with_name(f".{shown.name}.tmp")
-        tmp.write_text(json.dumps(q.target.as_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
+        issued = replace(q.target, material=None, presentation=uuid.uuid4().hex[:12])
+        tmp.write_text(json.dumps(issued.as_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
         tmp.replace(shown)
     return path
 
@@ -325,16 +332,14 @@ RELEASE_KIND = "lane-release"
 
 
 def presentation_key(t: Target) -> str:
-    """提示した承認の対象（ベースリポジトリ・PR・マージ先・HEAD・本番へ反映されるか）の識別子。承認の対象が無ければ空。
+    """提示の識別子（`write_material` が資料を書くたびに発行した `presentation`）。承認の対象か識別子が無ければ空。
 
-    待ちの間に PR が動いて資料を出し直すと（`write_material`）値が変わる。リリースのリクエストの ID とマージの承認の
-    証跡の記録の識別子に入れ、出し直す前の提示への回答と証跡を、出し直した提示に使わない（#4409）。
+    値から作らないので、承認の対象が元へ戻って資料を出し直しても、前の提示と同じ値にならない。リリースのリクエストの
+    ID とマージの承認の証跡の記録の識別子に入れ、出し直す前の提示への回答と証跡を、出し直した提示に使わない（#4409）。
     """
-    b = t.binding()
-    if b is None:
+    if t.binding() is None or not t.presentation:
         return ""
-    raw = json.dumps([b.repo.lower(), b.number, b.base, b.head, t.production], ensure_ascii=False)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return t.presentation
 
 
 def presented_id(q: Question) -> str:

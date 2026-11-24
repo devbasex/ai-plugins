@@ -56,7 +56,8 @@ def _asked(st, repo, env, capsys, production: bool = True) -> gate.Question:
     v = run.read(st, tid)
     q = replace(gate.question(v, run.decide(v)), target=_target(production))
     asking.write_material(st.root, v, q)
-    return q
+    # 提示の識別子は資料を書いたときに発行される（`gate.present` と同じく、提示した対象を質問に持たせる）
+    return replace(q, target=asking.read_presented(st.root, q))
 
 
 class Posts:
@@ -175,12 +176,18 @@ def _a_production_change_after_the_question_is_refused(repo, st, env, capsys):
 
 
 def _each_presentation_has_its_own_request_and_trail_ids(repo, st, env, capsys):
-    """r2-3・r2-4: 資料を出し直すと、リリースのリクエストの ID と証跡の記録の識別子が変わる。資料の sha256 だけでは変わらない。"""
-    q = _asked(st, repo, env, capsys)
-    moved = replace(q, target=_target(head="f" * 40))
-    assert gate.request_id(moved) != gate.request_id(q) and asking.presented_id(moved) != asking.presented_id(q)
-    assert gate.request_id(replace(q, target=replace(_target(), material="m"))) == gate.request_id(q)
-    assert asking.presented_id(replace(q, target=gate.Target())) == q.id
+    """r2-3・r2-4・r3-1: 資料を出し直すたびに提示の識別子が変わり、リリースのリクエストの ID と証跡の記録の識別子も変わる。
+    承認の対象が A → B → A と戻っても、最初の提示と同じにならない。資料の sha256 だけでは変わらない。"""
+    first = _asked(st, repo, env, capsys)
+    v = run.read(st, first.machine_id)
+    ids = [gate.request_id(first)]
+    for target in (_target(head="f" * 40), _target()):
+        asking.write_material(st.root, v, replace(first, target=target))
+        ids.append(gate.request_id(replace(first, target=asking.read_presented(st.root, first))))
+    assert len(set(ids)) == 3
+    assert gate.request_id(replace(first, target=replace(first.target, material="m"))) == ids[0]
+    assert asking.presented_id(replace(first, target=gate.Target())) == first.id
+    assert asking.presented_id(replace(first, target=_target())) == first.id
 
 
 def _the_material_says_the_merge_reaches_production(repo, st, env, capsys):
@@ -189,7 +196,7 @@ def _the_material_says_the_merge_reaches_production(repo, st, env, capsys):
     v = run.read(st, q.machine_id)
     assert asking.PRODUCTION_LINE in asking.material(v, q)
     assert asking.PRODUCTION_LINE not in asking.material(v, replace(q, target=_target(False)))
-    assert asking.read_presented(st.root, q) == _target()
+    assert replace(asking.read_presented(st.root, q), presentation=None) == _target()
 
 
 def _an_old_seen_reads_as_a_target_without_binding():
