@@ -10,7 +10,7 @@ from ndf.core import issue_docs
 @pytest.mark.parametrize(
     ("path", "numbers"),
     [
-        ("issues/issue-4337-design.md", {4337}),
+        ("issues/issue-75-design.md", {75}),
         ("issues/issue-7-8-design-detail.md", {7, 8}),
         ("issues/sub/issue-1-design.md", set()),
         ("issues/issue-1-requirements.md", set()),
@@ -22,7 +22,7 @@ def test_design_issues_reads_the_numbers_in_the_name(path: str, numbers: set[int
 
 
 def test_design_issues_compares_numbers_not_prefixes() -> None:
-    assert 433 not in issue_docs.design_issues("issues/issue-4337-design.md")
+    assert 7 not in issue_docs.design_issues("issues/issue-75-design.md")
 
 
 def test_plan_file_formats_the_issue_number() -> None:

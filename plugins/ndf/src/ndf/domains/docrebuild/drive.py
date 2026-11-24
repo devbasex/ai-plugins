@@ -61,7 +61,7 @@ class RunArgs:
 
 
 class Stop(Exception):
-    """止まる理由を持つ例外の基底。`kind` は結果の `cause.kind`、`detail` は説明。"""
+    """停止理由を持つ例外の基底。`kind` は結果の `cause.kind`、`detail` は説明。"""
 
     kind = ""
 

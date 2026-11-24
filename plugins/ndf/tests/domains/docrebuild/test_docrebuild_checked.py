@@ -12,8 +12,8 @@ import pytest
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild.select_decide import Target
 
-DESIGN = "issues/issue-4337-design.md"
-PLAN = "issues/issue-4337-plan.md"
+DESIGN = "issues/issue-75-design.md"
+PLAN = "issues/issue-75-plan.md"
 DOC_A = "docs/a.md"
 DOC_B = "docs/b.md"
 TARGETS = (Target(DESIGN, "design"), Target(PLAN, "plan"), Target(DOC_B, "manuscript"), Target(DOC_A, "manuscript"))

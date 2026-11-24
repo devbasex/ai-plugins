@@ -25,10 +25,10 @@ from ndf.domains.docrebuild.select_decide import Target
 HEAD = "a" * 40
 BASE_SHA = "b" * 40
 LOCAL_SHA = "c" * 40
-DESIGN = "issues/issue-4337-design.md"
+DESIGN = "issues/issue-75-design.md"
 OTHER_DESIGN = "issues/issue-4000-design.md"
-REQ = "issues/issue-4337-requirements.md"
-PLAN = "issues/issue-4337-plan.md"
+REQ = "issues/issue-75-requirements.md"
+PLAN = "issues/issue-75-plan.md"
 OMITTED_PLAN = "# 計画\n\n省いた文書: 設計書（課題 1・公開インタフェース 変わらない）\n\n## 修正対象\n"
 
 
@@ -72,7 +72,7 @@ def _write(root: Path, rel: str, text: str = "# 文書\n") -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _args(cwd: Path, *, base: str = "main", remote: str = "origin", issues=(4337,), kinds=("design",)) -> drive.RunArgs:
+def _args(cwd: Path, *, base: str = "main", remote: str = "origin", issues=(75,), kinds=("design",)) -> drive.RunArgs:
     return drive.RunArgs(base, remote, tuple(issues), tuple(kinds), cwd / "state", cwd)
 
 
@@ -511,7 +511,7 @@ def test_drive_drops_the_reason_of_a_passed_check(tmp_path: Path, reason: Any) -
     assert written is got and code == 0
 
 
-# --- 止まる理由の種類と説明（drive の例外の受け方を変えても同じに保つ） ---
+# --- 停止理由の種類と説明（drive の例外の受け方を変えても同じに保つ） ---
 
 
 class RaisingGit(FakeGit):
@@ -540,7 +540,7 @@ class BrokenRemoteGit(FakeGit):
 
 @pytest.mark.parametrize("cls", [drive.Precondition, drive.BadReport])
 def test_stop_exceptions_carry_their_detail(cls: type[Exception]) -> None:
-    """止まる理由の例外は説明を `detail` と `str()` の両方で持ち、互いに別の種類として受けられる。"""
+    """停止理由の例外は説明を `detail` と `str()` の両方で持ち、互いに別の種類として受けられる。"""
     exc = cls("説明")
     assert exc.detail == "説明" and str(exc) == "説明"  # type: ignore[attr-defined]
     assert isinstance(exc, Exception)
@@ -693,7 +693,7 @@ def _main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, got: dict[str, Any]) 
     stdout = io.StringIO()
     with redirect_stdout(stdout):
         code = cli.main(
-            ["run", "--base", "main", "--remote", "origin", "--issue", "4337", "--kind", "design", "--state-dir", "st", "--out", "out.json"]
+            ["run", "--base", "main", "--remote", "origin", "--issue", "75", "--kind", "design", "--state-dir", "st", "--out", "out.json"]
         )
     written = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     return code, written, stdout.getvalue().strip().splitlines()[-1]

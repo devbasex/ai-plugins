@@ -39,6 +39,7 @@
       "description": "足すべき内容（add-<番号>）と、読み手役が不合格とした文書（reader-<番号>）",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "id",
           "text"
