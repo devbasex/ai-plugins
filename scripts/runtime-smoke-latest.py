@@ -32,7 +32,8 @@ STATUSES = ("success", "failure", "cancelled")  # job.status の値
 PEER_RE = re.compile(r"[a-z0-9-]+")
 # 見本の定義のスキーマ（plugins/ndf/contracts/schemas/live-sample.schema.json）の sample と同じ形
 SAMPLE_RE = re.compile(r"tests/samples/([a-z0-9][a-z0-9_-]*/)+[a-z0-9][a-z0-9_-]*\.json")
-DETAIL_MAX = 500
+DETAIL_MAX = 500  # 食い違いの説明を課題へコピーする文字数。越えた分は切る
+NO_DETAIL = "（説明は実行の URL のログを見る）"  # 課題へコピーできない説明の代わり
 SHOWN_ITEMS = 50  # 課題の本文に並べる食い違いの数（本文の大きさの上限に収める）
 
 NPM_DIST_TAGS = "https://registry.npmjs.org/-/package/{package}/dist-tags"
@@ -138,20 +139,27 @@ def failed_runtimes(outcomes: Path) -> list[tuple[str, str]]:
 
 
 def _mismatch(item: object) -> tuple[str, str, str] | None:
-    """食い違いの項目の（相手・見本・説明）。決めた形に合わなければ None"""
+    """食い違いの項目の（相手・見本・課題に載せる説明）。相手か見本が決めた形に合わなければ None"""
     if not isinstance(item, dict):
         return None
-    peer, sample, detail = item.get("peer"), item.get("sample"), item.get("detail")
-    if not (isinstance(peer, str) and isinstance(sample, str) and isinstance(detail, str)):
+    peer, sample = item.get("peer"), item.get("sample")
+    if not (isinstance(peer, str) and isinstance(sample, str)):
         return None
     if not (PEER_RE.fullmatch(peer) and SAMPLE_RE.fullmatch(sample)):
         return None
+    return peer, sample, _shown_detail(item.get("detail"))
+
+
+def _shown_detail(detail: object) -> str:
+    """課題に載せる説明。長ければ切り、1 行の文字列でなければ固定の文にする（食い違いそのものは説明の形に依らず報告する）"""
     # isprintable は改行と制御文字で偽になる（1 行だけを通す）
-    return (peer, sample, detail) if 0 < len(detail) <= DETAIL_MAX and detail.isprintable() else None
+    if not (isinstance(detail, str) and detail and detail.isprintable()):
+        return NO_DETAIL
+    return detail if len(detail) <= DETAIL_MAX else f"{detail[: DETAIL_MAX - 1]}…"
 
 
 def mismatches(samples: Path) -> dict[str, list[str]]:
-    """見本の結果 JSON の食い違いを、相手 → `<見本>: <説明>` の並びにする。形に合わない項目は数えない"""
+    """見本の結果 JSON の食い違いを、相手 → `<見本>: <説明>` の並びにする。相手か見本が形に合わない項目は数えない"""
     data = read_json(samples)
     items = data.get("items") if isinstance(data, dict) else None
     found: dict[str, list[str]] = {}

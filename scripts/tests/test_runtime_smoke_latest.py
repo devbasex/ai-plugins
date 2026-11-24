@@ -273,10 +273,6 @@ BAD_ITEMS = {
     "sample-root": mismatch(sample="EVIL.json"),
     "sample-parent": mismatch(sample="tests/samples/../EVIL.json"),
     "sample-newline": mismatch(sample=f"{SAMPLE}\n", detail="EVIL"),
-    "detail-lines": mismatch(detail="a\n```\nEVIL"),
-    "detail-long": mismatch(detail="EVIL" + "x" * 497),
-    "detail-empty": mismatch(sample="tests/samples/evil/a.json", detail=""),
-    "detail-surrogate": mismatch(detail="EVIL\ud800"),
     "kind": mismatch(kind="EVIL"),
     "not-object": "EVIL",
 }
@@ -293,3 +289,23 @@ def test_report_drops_sample_items_out_of_shape(mod, monkeypatch, tmp_path, caps
     out = capsys.readouterr()
     assert "evil" not in f"{title}{body}{out.out}{out.err}{gh.calls}".lower()
     assert "1 件" in out.err
+
+
+@pytest.mark.parametrize(
+    ("detail", "shown"),
+    [
+        ("x" * 501, "x" * 499 + "…"),
+        ("a\n```\nEVIL", "（説明は実行の URL のログを見る）"),
+        ("EVIL\ud800", "（説明は実行の URL のログを見る）"),
+        ("", "（説明は実行の URL のログを見る）"),
+        (["EVIL"], "（説明は実行の URL のログを見る）"),
+    ],
+    ids=["long", "lines", "surrogate", "empty", "type"],
+)
+def test_report_keeps_mismatch_whose_detail_is_out_of_shape(mod, monkeypatch, tmp_path, detail, shown):
+    code, gh = run_report(mod, monkeypatch, tmp_path, samples=[mismatch(detail=detail)])
+    assert code == 0
+    [(title, body)] = written(gh)
+    assert title == "テストの見本が本物の記述と食い違った: github"
+    assert "食い違い: 1 件" in body and f"{SAMPLE}: {shown}\n" in body
+    assert "EVIL" not in body
