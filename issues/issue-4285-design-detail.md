@@ -25,6 +25,8 @@ plugins/ndf/
   src/ndf/domains/records/{reading_decide,reading}.py *
   src/ndf/domains/records/cli.py
   src/ndf/domains/hooks/guards/reading_check.py *
+  src/ndf/domains/hooks/guards/ask.py            前の guard が止めた質問を、中継とオーガナイザーへ書かない
+  src/ndf/checks/children.json                   hook が読む reading_decide を、hook と同じオーナー（M3a）にする
   tests/ の対応するファイル
 ```
 
@@ -129,6 +131,7 @@ plugins/ndf/
 
 - `ndf-gate:` の質問で、一致する記録に PR があるときだけ、git を 1 回起動し、その PR のブランチの `refs/remotes/<リモート>/<ブランチ>` をまとめて読む（`git for-each-ref`）。リモートの名前は `git.remote_of`（メインディレクトリの `.ndf/worktree.json` の設定）で決める。リポジトリの名前は、git を起動せずに、リポジトリの git の設定のそのリモートの URL から決める（本番へのマージを見る guard `merge-production` と同じ読み方）。読めたものだけを `heads` に入れる。時間の上限は `hook.git-rev-parse` の 0.4 秒とする（この上限は #3684 で使われなくなって消えたので、guard を読み手として書いて戻す）
 - `guards.json` の行: イベント `PreToolUse`・Tool `AskUserQuestion`・`order` 55（質問を転送する `ask-forward` の 60 より前）・`fail_closed` 偽・`deny_key` は `reason`・`limits` は `hook.git-rev-parse` と `hook.counter-lock`
+- 止めた質問は人へ出ない。hook は、前の guard が止めた後も残りの guard を呼ぶので、`ask-forward`（`guards/ask.py`）は、前の guard が止めていれば（`GuardServices.decided`）、質問を中継とオーガナイザーの質問のファイルに書かない
 - 止める理由の文は、区分と、足りないものの語（`no_record` など）だけで決まる固定の文とし、記録を作るコマンドを添える。質問の文やハッシュ値を入れない。同じ理由の拒否を数える今の仕組み（`hook.deny-repeat` の 2 回）が、区分と語の組ごとに数えるようにするためである。2 回止めた後は、同じ区分の別の質問でも、同じ理由であれば、止めずに注意を添えて通す
 
 ## 手順書の変更

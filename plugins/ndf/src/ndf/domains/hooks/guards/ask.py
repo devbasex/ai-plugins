@@ -38,6 +38,8 @@ def _first_question(tool_input: dict) -> str:
 
 def check(ctx, svc) -> Verdict:
     global _recorded
+    if svc.decided:  # 前の guard が止めた質問は人へ出ないので、どこへも書かない（#4285）
+        return passing(forwarded=[])
     wait = forward_wait()
     forwarded: list[str] = []
     relay = signals.relay_dir(ctx.env)
