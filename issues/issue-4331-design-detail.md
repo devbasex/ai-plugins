@@ -23,7 +23,7 @@ scripts/
     └── test_ci_test_durations.py *
 ```
 
-依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドだけに頼り、`scripts/pytest_shard.py` も NDF のコード（`plugins/ndf/src`）も import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
+依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドだけに頼る。`scripts/pytest_shard.py` も NDF のコード（`plugins/ndf/src`）も import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -69,7 +69,7 @@ scripts/
 | 試行の番号のファイルの名前 `shard-attempt-<番号>.txt` | 設定値 | `.github/workflows/pytest.yml` | — |
 | 手順の名前 `根のテスト`・`NDF のテスト` | 設定値 | `.github/workflows/pytest.yml` | — |
 
-成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側の `scripts/ci_test_durations.py` と `scripts/pytest_shard.py` も定数で持つ（それぞれの「内部のデータと定数」）。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
+成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。持つのは `scripts/ci_test_durations.py` と `scripts/pytest_shard.py` である（それぞれの「内部のデータと定数」）。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
 
 ## 割り当て
 
@@ -98,7 +98,7 @@ scripts/
   - 副作用: ファイルシステムを走査する
 - `pytest_configure`
   - 事前条件: `-p pytest_shard` で読み込まれている
-  - 事後条件: `shard_env` が `None` なら何も保存しない。そうでなければ `config.stash[OWNER]` に `dict[str, int]`（リポジトリのルートから見たパスから担当のジョブの番号）と、`config.stash[INDEX]` にこのジョブの番号がある。`config` に `workerinput` があるプロセス（xdist の worker）は、`config.workerinput[OWNER_KEY]` をそのまま保存し、`_test_files` と `read_seconds` を呼ばない。ほかのプロセス（controller と、`-n` を付けない実行）は、`assign_files(_test_files(config), total, read_seconds())` の結果を保存する
+  - 事後条件: `shard_env` が `None` なら何も保存しない。そうでなければ、`config.stash` に次の 2 つがある。`config.stash[OWNER]` の `dict[str, int]`（リポジトリのルートから見たパスから担当のジョブの番号）と、`config.stash[INDEX]` のこのジョブの番号である。`config` に `workerinput` があるプロセス（xdist の worker）は、`config.workerinput[OWNER_KEY]` をそのまま保存する。`_test_files` と `read_seconds` は呼ばない。ほかのプロセス（controller と、`-n` を付けない実行）は、`assign_files(_test_files(config), total, read_seconds())` の結果を保存する
   - 副作用: controller では実測秒の表を読む
 - `pytest_configure_node`
   - `@pytest.hookimpl(optionalhook=True)` を付ける。xdist が無い環境で、pytest が未知のフックとして読み込みを止めないためである
@@ -109,10 +109,10 @@ scripts/
 - `_file_of`
   - 事後条件: `base` の下の `/`.join(先頭からの部分) + `.py` を長い方から探し、最初に実在したファイルを `ROOT` から見たパスで返す。見つからなければ `None`
 - `_seconds`
-  - 事後条件: `<JUnit XML の置き場>` の下のすべての `*.xml` を読む。置き場から見た XML のパスに `pytest-ndf-junit-` を含むものは `base` を `ROOT / "plugins" / "ndf"` に、ほかは `ROOT` にして `_file_of` を呼ぶ。表を書くのは、すべての XML が読めて、項目が 1 つ以上あったときだけである
+  - 事後条件: `<JUnit XML の置き場>` の下のすべての `*.xml` を読む。`_file_of` を呼ぶときの `base` は、置き場から見た XML のパスで決める。パスに `pytest-ndf-junit-` を含むものは `ROOT / "plugins" / "ndf"`、ほかは `ROOT` である。表を書くのは、すべての XML が読めて、項目が 1 つ以上あったときだけである
   - 副作用: `scripts/pytest-shard-seconds.json` を書き直す。`summary` の文を「根の conftest.py と NDF のテストの手順のプラグインがジョブの割り当てに使う」に変える
 
-モジュールの説明（docstring）の「NDF のテストは `--seconds` を渡さず、ファイルの項目数で分ける」の段落は、プラグインの使い方（`-p pytest_shard` と `PYTHONPATH`）に書き換える。`files` のサブコマンドは残す（受け入れ条件 10 の確かめが使う）。
+モジュールの説明（docstring）の「NDF のテストは `--seconds` を渡さず、ファイルの項目数で分ける」の段落を書き換える。書き換えた先は、プラグインの使い方（`-p pytest_shard` と `PYTHONPATH`）である。`files` のサブコマンドは残す（受け入れ条件 10 の確かめが使う）。
 
 ### 異常系の処理
 
@@ -166,13 +166,13 @@ scripts/
 | `_file_of` | `tests.test_example.TestX` を `base=NDF_ROOT` で `plugins/ndf/tests/test_example.py` に戻す | 先頭の部分だけが実在するとき、長い方から探して当たったものを返す | どこにも無ければ `None` |
 | `_seconds` | 根と NDF の XML を並べた置き場から、`plugins/ndf/tests/...` と `scripts/tests/...` の両方のキーを持つ表を作る | — | 壊れた XML で 1 を返し、表を書き直さない |
 
-`files --total 2 --index <番号>` に `tests/a.py` の 2 件と `tests/b.py`・`tests/c.py` の 1 件ずつを渡すと、ジョブ 0 が `tests/a.py`、ジョブ 1 が `tests/b.py` と `tests/c.py` を出すことも、このファイルで縛る（受け入れ条件 10。今の出力が変わらないこと）。
+`files --total 2 --index <番号>` の出力も、このファイルで縛る（受け入れ条件 10。今の出力が変わらないこと）。`tests/a.py` の 2 件と `tests/b.py`・`tests/c.py` の 1 件ずつを渡すと、ジョブ 0 が `tests/a.py`、ジョブ 1 が `tests/b.py` と `tests/c.py` を出す。
 
 ## 実測秒の表
 
 満たす決定: 決定 7、決定 9
 
-`scripts/pytest-shard-seconds.json` の形（`summary` と `seconds`）は変えない。キーに `plugins/ndf/tests/...` が加わる。中身は、実装の Pull Request の CI の成果物を `gh run download <run の ID> -p 'pytest-*junit-*' -D <保存先>` で取り、`python3 scripts/pytest_shard.py seconds <保存先>` で作り直した値にする。使う回の条件は設計文書の処理の流れの「実測秒の作り直し」のとおりである。関数は持たない。
+`scripts/pytest-shard-seconds.json` の形（`summary` と `seconds`）は変えない。キーに `plugins/ndf/tests/...` が加わる。中身は、実装の Pull Request の CI の成果物から作り直した値にする。成果物は `gh run download <run の ID> -p 'pytest-*junit-*' -D <保存先>` で取り、`python3 scripts/pytest_shard.py seconds <保存先>` で作り直す。使う回の条件は設計文書の処理の流れの「実測秒の作り直し」のとおりである。関数は持たない。
 
 ## 所要の読み取り
 
@@ -206,17 +206,17 @@ scripts/
   - 事後条件: `self.calls[kind]` が 1 増えている。`kind` は `jobs`・`pages`・`zips`・`artifacts` のどれかで、`trend` の最後の行に出すのは前の 3 つである
   - 副作用: 外部コマンド `gh api --method GET <path>` を `CALL_TIMEOUT` 秒の上限で打つ（ネットワーク）
 - `read_parts`
-  - 事前条件: `xml_dir` の下が、成果物の名前ごとのディレクトリ（`actions/download-artifact` を `merge-multiple` なしで使ったときと、`fetch_run` の展開の形）である
+  - 事前条件: `xml_dir` の下が、成果物の名前ごとのディレクトリである。`actions/download-artifact` を `merge-multiple` なしで使ったときと、`fetch_run` の展開の形がこれに当たる
   - 事後条件: ディレクトリの名前が `pytest-junit-<番号>` なら根、`pytest-ndf-junit-<番号>` なら NDF の部品になる。各部品は、中の `*.xml` の項目（読めなければ `error` に理由）と、`shard-attempt-<番号>.txt` の整数（無いか読めなければ `None`）を持つ
   - 副作用: ファイルを読む
 - `match_attempts`
-  - 事後条件: `Match` は、ジョブの番号 0〜`total - 1` のそれぞれを、`missing`（根か NDF の部品が無いか読めない）・`stale`（どちらかの部品の試行の番号が一覧の `run_attempt` と違う）・`accepted`（照合が通った）のどれか 1 つに入れる。`failed` は `accepted` のうち一覧の `conclusion` が `success` でない番号である。`shard_attempts` は長さ `total` で、`accepted` の番号には試行の番号を、ほかには `None` を置く
+  - 事後条件: `Match` は、ジョブの番号 0〜`total - 1` のそれぞれを、次の 3 つのどれか 1 つに入れる。`missing`（根か NDF の部品が無いか読めない）・`stale`（どちらかの部品の試行の番号が一覧の `run_attempt` と違う）・`accepted`（照合が通った）である。`failed` は `accepted` のうち一覧の `conclusion` が `success` でない番号である。`shard_attempts` は長さ `total` で、`accepted` の番号には試行の番号を、ほかには `None` を置く
 - `current_total`
   - 事後条件: 返す集計は設計文書の「集計の JSON」の形どおりで、`run` と `attempt` は引数の値である。`valid` が真になるのは、ジョブの一覧が取れ、`total` が 1 以上で、`missing` と `stale` と `failed` がどれも空のときだけである。真なら `root_seconds`・`ndf_seconds`・`total_seconds` に小数第 1 位で丸めた秒を、偽なら 3 つとも `None` と `reason` を入れる
   - 副作用: ジョブの一覧を 1 回引く（`kind="jobs"`、`actions/runs/<run の ID>/jobs?filter=latest&per_page=100`）
 - `past_totals`
   - 事前条件: `need >= 1`
-  - 事後条件: `Search.totals` は数えた過去の回の `(run の ID, 合計の秒)` を実行番号の大きい順に持ち、長さは `need` 以下である。`Search.stop` は止めた理由（`enough`・`zip_limit`・`page_limit`・`retention`・`exhausted`・`list_error`）、`Search.unreadable` は数えなかった回の ID と理由を持つ
+  - 事後条件: `Search.totals` は数えた過去の回の `(run の ID, 合計の秒)` を実行番号の大きい順に持ち、長さは `need` 以下である。`Search.stop` は止めた理由（`enough`・`zip_limit`・`page_limit`・`retention`・`exhausted`・`list_error`）を持つ。`Search.unreadable` は数えなかった回の ID と理由を持つ
   - 副作用: 実行の一覧・成果物の一覧のページ（`kind="pages"`）と集計の ZIP（`kind="zips"`）を引く
 - `fetch_run`
   - 事後条件: `dest/<成果物の名前>/` の下に、期限切れでない `pytest-junit-*`・`pytest-ndf-junit-*` の成果物の ZIP を展開してある
@@ -407,7 +407,13 @@ scripts/
   - 事後条件: `NDF_OK_TOOLS_OUT` が空でない実行では、そのファイルに検証済みのサブコマンドの名前が 1 行ずつ辞書順に並び、`session.exitstatus` は変わらない。空か無い実行の振る舞いは今と同じである
   - 副作用: `NDF_OK_TOOLS_OUT` のファイルを書く（今と同じ）
 
-モジュールの説明（docstring）の「各ジョブは環境変数 `NDF_OK_TOOLS_OUT` のファイルへ記録を書き、後のジョブ `ndf-next-ok-tools` が合わせて確かめる」を、「`NDF_OK_TOOLS_OUT` を渡された実行は記録を書くだけで、自分では確かめない。合わせて確かめるのは後のジョブ `pytest (NDF の ok の出力)` である」に書き換える。`is_full_run` は変えない。
+モジュールの説明（docstring）の次の文を書き換える。
+
+| 今の文 | 書き換えた後の文 |
+| --- | --- |
+| 各ジョブは環境変数 `NDF_OK_TOOLS_OUT` のファイルへ記録を書き、後のジョブ `ndf-next-ok-tools` が合わせて確かめる | `NDF_OK_TOOLS_OUT` を渡された実行は記録を書くだけで、自分では確かめない。合わせて確かめるのは後のジョブ `pytest (NDF の ok の出力)` である |
+
+`is_full_run` は変えない。
 
 ### 異常系の処理
 
