@@ -461,7 +461,11 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 変える関数は `cli_floor.require` と `agents._guarded_run` の 2 つで、中身は地図の表の行にある。
 
-- `cli-floors.json` に `flag_floors` を足した後は、`agents.run_agent` の `cli_floor.require` が、`--restricted` を付けた 2.1.315 以前の claude の起動だけを起動せずに `refused` で返す。`--restricted` を付けない起動は、今のとおり `min_version`（2.1.268）と比べる
+- `cli-floors.json` に `flag_floors` を足した後は、`--restricted` を付けた claude の起動を、次の 2 つの場合に起動せずに断る
+  - claude が 2.1.315 以前である。`cli_floor.require` が `TooOld` を投げる
+  - 実行ファイルが見つからないか、`--version` を読めず、版を確かめられない。`cli_floor.require` が `Unverified`（`TooOld` の派生）を投げる
+- どちらの例外も、`agents._guarded_run` が今の `except cli_floor.TooOld` で受け、子のプロセスを起動せずに `refused` の状態を返す。`Unverified` は `TooOld` の派生なので、受ける箇所を足さない
+- `--restricted` を付けない起動は、今のとおり `min_version`（2.1.268）と比べ、版を確かめられなければ通す
 - テストは 2 か所に置く。どちらもバージョンの検査を差し替え、子のプロセスを起動しない（設計文書のテスト設計の「claude の下限」）
   - `tests/adapters/test_cli_floor.py`: 2.1.315 のとき、`args` に `--restricted` があれば `TooOld`、無ければ通る。2.1.316 ならどちらも通る。2.1.267 ならどちらも `TooOld`。版を読めない（`--version` の出力が形に合わない）とき、`args` に `--restricted` があれば `Unverified`、無ければ今のとおり通る
   - `tests/domains/crossreview/test_crossreview_run.py`: 2.1.315 で、席を埋めない実行（codex と kiro が両方結果を返す）がレビューと修正担当の起動まで今と同じに進む。kiro の席を埋める実行では、席の claude だけが断られて結果の無い席になる
