@@ -316,7 +316,7 @@ plugins/ndf/
   - 事後条件: 起動指示は `<state_dir>/document-rebuild.prompt.md`、worker の結果ファイルは `<state_dir>/document-rebuild.result.json`。argv は `[ndf, "worker", "run", "--kind", "document-rebuild", "--prompt-file", <起動指示>, "--result-file", <結果>, "--cwd", <cwd>, "--state-dir", <state_dir>]`
   - 副作用: 起動指示のファイルを書く。子プロセス `ndf worker run` を 1 回。その中で `claude -p` を通常 1 回、worker が結果ファイルを書かずに応答を終えたときは `core/worker.py` の `RESUMES`（今は 3）回まで再起動するので最大 4 回打つ。読み手役のサブエージェントは worker の会話の中で立ち、上限は設計書の「影響と危険」の Claude の起動の行にある。再起動の回数は `ndf worker run` の標準出力の `metrics.attempts` に出るので、`drive` はそれを `info` のログに出す
 - `drive`
-  - 事後条件: どの終わり方でも、設計書の「終わり方」の表の結果 JSON を返す。`ok` の `metrics` は `targets`（対象のパス）と `readers`（worker の記録をそのまま）。対象が 0 件なら `launch_worker` を呼ばない
+  - 事後条件: どの終わり方でも、設計書の「終わり方」の表の結果 JSON を返す。`ok` の `metrics` は `targets`（対象のパス）と `readers`（`reader_gaps` を通った、対象の文書ごとに 1 件の記録。対象の外の記録は入れない）。対象が 0 件なら `launch_worker` を呼ばない
   - 副作用: 上の関数のものだけ。コミット・`push`・GitHub への書き込みを持たない（条件 13）
 
 `Runner` の形と既定の値は次のとおりである。テストは偽物に替える。
@@ -361,9 +361,9 @@ plugins/ndf/
 | `plan` | `self` 以外 | 欠け（実装計画は手順書で書いた担当が読み直す文書） |
 | どれでも | ほかの値 | 欠け |
 
-`checks` の各要素は、`verdict` が `pass` か `fail`、`restatements` が空でない文字列の並び、`fail` なら `reason` が空でない文字列であること。同じ対象の `doc` を持つ記録が 2 件以上あれば、どれが正しいか決められないので、その文書の欠け（`記録が 2 件以上ある`）にする。`readers` に対象の外の `doc` があっても欠けにせず、確かめもせずに、worker が書いたまま `metrics.readers` に残す。
+`checks` の各要素は、`verdict` が `pass` か `fail`、`restatements` が空でない文字列の並び、`fail` なら `reason` が空でない文字列であること。同じ対象の `doc` を持つ記録が 2 件以上あれば、どれが正しいか決められないので、その文書の欠け（`記録が 2 件以上ある`）にする。`readers` に対象の外の `doc` の記録があっても欠けにせず、形も確かめない。
 
-`drive` は、`reader_gaps` が空のときだけ `reader_items` を呼ぶ。渡すのは、`readers` から `doc` が対象のパスである記録だけを取り出した、対象の文書ごとに 1 件の並びである。対象の外の記録は渡さないので、`items` と `warnings` には、組み直した文書の不合格だけが現れる。
+`drive` は、`reader_gaps` が空のとき、`readers` から `doc` が対象のパスである記録だけを取り出す。取り出した並びは対象の文書ごとに 1 件で、どれも `reader_gaps` を通っている。`drive` はこの並びを `reader_items` に渡し、結果の `metrics.readers` にも同じ並びを書く。対象の外の記録は結果のどこにも書かず、件数だけを `warnings` に 1 件（`対象の外の文書の記録を N 件外した`）載せる。そのため、`items` と `warnings` には組み直した文書の不合格だけが現れ、専用の結果スキーマが `metrics.readers` の各要素に求める形（`cli.adopt` が確かめる）を、対象の外の記録が破ることもない。
 
 `drive` の進み方:
 
@@ -419,7 +419,7 @@ plugins/ndf/
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
 | `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason`。対象の外の `doc` の記録が形を問わず欠けにならない | 対象の行が無い・同じ対象の行が 2 件・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`checks` 2 の先頭が `pass`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
 | `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件（I5） | `fail` が無ければ空 | — |
-| `drive` | `readers` に対象の外の `doc` の `fail` があっても、`items` と `warnings` に出ず、`metrics.readers` には残る | — | 同じ対象の記録が 2 件 → `stopped`（`incomplete`） |
+| `drive` | `readers` に対象の外の `doc` の `fail` や形の違う記録があっても、`items` にも `metrics.readers` にも出ず、`warnings` に外した件数だけが出る。その結果が `cli.adopt` を通って `ok` で書かれる | — | 同じ対象の記録が 2 件 → `stopped`（`incomplete`） |
 | `contained` | 作業場所の通常ファイル | 作業場所の根そのものがリンクで、その先の通常ファイル | 末尾がリンク・`issues/` がリンクで作業場所の外を指す・途中のディレクトリがリンクで作業場所の中を指す・存在しない（どれも理由を返す） |
 | `drive` | squash で取り込み済みで内容の同じ設計書が渡らない（決定 2）。差分から選んだ候補が無ければ `differs_from_start` を呼ばない | — | — |
 | `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `launch_worker` を呼ばない（条件 10） | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
