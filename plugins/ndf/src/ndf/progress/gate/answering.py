@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -288,7 +288,11 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     q = question(v, replace(m, action=run.Action.GATE))
     # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）
     seen, now = Target.from_dict(p.get("seen")), observe(q, material=False)
-    if seen.head is None or now.head is None or seen.head == now.head:
+    if p.get("by") == model.MVV_SERVICE:
+        changed = _judged_elsewhere(p, q, seen, now)
+        if changed is None:
+            return None
+    elif seen.head is None or now.head is None or seen.head == now.head:
         changed = _material_moved(st.root, q, seen)
         if changed is None:
             return None
@@ -317,6 +321,20 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
     run.append(st, machine_id, build, after)
     return why
+
+
+def _judged_elsewhere(p: Mapping[str, Any], q: Question, seen: Target, now: Target) -> Optional[str]:
+    """MVV 判定で承認ゲートを省いた回答（`service:mvv`）が、今の質問の PR と head の両方を判定したものでなければ違いの文。
+
+    同じコミットを指す別の PR へ承認の対象が変わると head だけでは見分けられないため、判定した PR の番号も照らす（#3959）。
+    PR か head のどちらかを読めなければ、照らせないので違うと扱う（人へ問い直す）。"""
+    held = p.get(model.MVV_KEY)
+    judged = held.get("pr") if isinstance(held, Mapping) else None
+    if q.pr is None or isinstance(judged, bool) or judged != q.pr:
+        return f"MVV 判定した PR（判定した PR {judged}・今の質問の PR {q.pr}）"
+    if seen.head is None or now.head is None or seen.head != now.head:
+        return f"head の SHA（判定した値 {seen.head}・今の値 {now.head}）"
+    return None
 
 
 def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.EventDraft]:

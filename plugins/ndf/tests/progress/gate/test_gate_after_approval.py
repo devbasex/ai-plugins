@@ -168,3 +168,25 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
         assert gate.waiting(run.read(st, tid)) is not None
     if expect == "head の SHA":
         assert "sha256" not in why
+
+
+@pytest.mark.parametrize(
+    ("judged", "question_pr", "seen", "now", "kept"),
+    [
+        (5, 5, "h1", "h1", True),
+        # 同じコミットを指す別の PR へ承認の対象が変わった。head が同じでも、判定した PR が違えば人へ問い直す
+        (5, 6, "h1", "h1", False),
+        (None, 5, "h1", "h1", False),
+        (5, None, "h1", "h1", False),
+        (True, 1, "h1", "h1", False),
+        (5, 5, "h1", "h2", False),
+        (5, 5, None, "h1", False),
+        (5, 5, "h1", None, False),
+    ],
+)
+def test_a_service_answer_needs_both_the_judged_pr_and_head_to_match(judged, question_pr, seen, now, kept):
+    # #3959: MVV 判定で設計承認ゲートを省いた回答は、判定した PR の番号と head の両方が今の質問と同じときだけ読む
+    q = gate.Question("q", "t", "設計", "design-gate", "design", ("approved",), question_pr)
+    payload = {"by": model.MVV_SERVICE, model.MVV_KEY: {"pr": judged, "head": seen}}
+    got = answering._judged_elsewhere(payload, q, gate.Target(head=seen), gate.Target(head=now))
+    assert (got is None) is kept
