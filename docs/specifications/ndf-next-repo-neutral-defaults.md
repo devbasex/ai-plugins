@@ -272,8 +272,8 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
   | `release_branch`（選んだスプリントを集める） | バージョンの単位ごとの前のリリースの起点 | 選んだスプリントを集めた先頭 |
   | `production_pr` | 本番の PR と本番ブランチの分岐点 | PR の先頭 |
 - 書式に合わない名前は読み戻さず、前のバージョンの候補にしない
-- リリース対象外のファイル（バージョンを上げるかの判定で数えないファイル）の既定は、テストのファイルの表 `contracts/domains/test-files.json` の行から作る。`.ndf/release.json` の `undistributed` は既定へ足し、置き換えない
-- 利用者のリポジトリは、置いたテンプレートの workflow から再利用可能なワークフロー（`workflow_call` を持ち、ほかのリポジトリから `uses:` で呼べる workflow。`.github/workflows/ndf-release-reusable.yml`）を呼ぶ。再利用可能なワークフローは秘密の名前を決め打たず、`release_token` の 1 つで受ける
+- リリース対象外のファイル（バージョンを上げるかの判定で数えないファイル）の既定は、テストのファイルの表 `contracts/domains/test-files.json` の行から作る。`.ndf/release.json` の `undistributed` は既定へ足し、置き換えない。リリース対象外のファイルだけが変わった場合、既定ではバージョンを上げない。`.ndf/release.json` の `bump_undistributed` が `true` なら、対象外のファイルだけの変更でもバージョンを上げる（`domains/release/changes_decide.py` の `needs_bump`）
+- 利用者のリポジトリは、置いたテンプレートの workflow から再利用可能なワークフロー（`workflow_call` を持ち、ほかのリポジトリから `uses:` で呼べる workflow。`.github/workflows/ndf-release-reusable.yml`）を呼ぶ。再利用可能なワークフローは秘密の名前を決め打たない。呼び出し元は、リリースに使う認証情報（自分のリポジトリの秘密）を `release_token` に割り当てる。`merge` のジョブでは `release_token` が必須で、無ければマージの前に失敗して止まる。`assemble` と `publish` のジョブは、省略すると `github.token` を使う。`github.token` で作成したリリース PR の CI は、書き込み権限のある人が PR の画面で起動を承認するまで待つ
 
 ### Skill の本文
 

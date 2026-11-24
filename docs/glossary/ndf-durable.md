@@ -23,7 +23,7 @@
 | 実行の識別子 | `run_id` | 1 回のエントリポイントの実行に実行の核が振る識別子。記録・オーナーの記録・耐久の記録をつなぐ（#2335） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
 | 実行の記録 | `run_log` | 1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338） | — | — | `docs/specifications/ndf-rebuild-review-scope.md` |
 | 起点の実行 | — | 親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
-| 子の実行 | — | 実行の核を通るエントリポイントが子プロセスとして起動した、核を通るエントリポイントの実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 子の実行 | — | 実行の核を通るエントリポイントが子プロセスとして起動した、核を通るエントリポイントの実行。自分の実行の識別子と、親の実行の識別子を持つ。出力先が file で親の記録のファイルのパスを受け取ったときだけ、親と同じファイルへ書く（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 診断 | — | スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 出力先 | — | 実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 全文ファイル | — | 実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
