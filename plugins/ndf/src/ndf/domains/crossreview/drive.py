@@ -524,10 +524,7 @@ def _fill_seats(
     prompt = _review_prompt(run, round_no, fresh, remarks)
     prompts: dict[str, str] = {}
     for absent, why in targets.items():
-        seat = participants.free_seat(run.seats)
-        run.seats[run.seats.index(absent)] = seat
-        seats.seat_filled(run, Filled(seat, absent, why.cause), f"round {round_no}")
-        prompts[seat] = prompt
+        prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
     return seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch)
 
 

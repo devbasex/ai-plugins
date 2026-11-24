@@ -145,6 +145,14 @@ def seat_filled(run: SeatRun, f: Filled, when: str) -> None:
     run.warnings.append(filled_warning(f, when))
 
 
+def fill_seat(run: SeatRun, absent: str, reason: str, when: str) -> str:
+    """席 `absent` を空いている claude の席で置き換え、埋めた席と注意を記録して、新しい席の名前を返す。"""
+    seat = participants.free_seat(run.seats)
+    run.seats[run.seats.index(absent)] = seat
+    seat_filled(run, Filled(seat, absent, reason), when)
+    return seat
+
+
 def fill_refused(run: SeatRun) -> None:
     """始める前の確かめ。学習の設定で断られた claude 以外の席を claude で埋める。修正担当か、1 者だけ名指した相手役が断られたら、
     どの担当も起動せずに precondition で止める（#3907・#3955）。"""
@@ -155,11 +163,10 @@ def fill_refused(run: SeatRun) -> None:
     if cfg.fixer in refused or not cfg.may_fill:
         # レビューを流す前に止める。断られた担当を相手役が読めなかったと数えない（#3907）
         raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(refused.values()))
-    for i, absent in enumerate(list(run.seats)):
+    for absent in list(run.seats):
         why = refused.get(participants.runtime_of(absent))
         if why is not None:
-            run.seats[i] = participants.free_seat(run.seats)
-            seat_filled(run, Filled(run.seats[i], absent, f"unready: {why}"), "起動の前")
+            fill_seat(run, absent, f"unready: {why}", "起動の前")
 
 
 def reused_warnings(run: SeatRun) -> None:
