@@ -212,25 +212,31 @@ def _with_lap(state: LoopState, number: int, **change: Any) -> LoopState:
     return replace(state, laps=tuple(laps))
 
 
-def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
-    """周に付く事象を当てる。"""
-    kind, n = ev["kind"], int(ev["lap"])
-    lap = state.laps[_lap_index(state, n)]
+def _lap_change(lap: Lap, ev: Mapping[str, Any]) -> dict[str, Any]:
+    """周に付く事象から、周 `lap` の変わる欄と新しい値を求める。"""
+    kind = ev["kind"]
     if kind == MODE_DECIDED:
-        return _with_lap(state, n, mode=ev["mode"], basis=ev["basis"])
+        return {"mode": ev["mode"], "basis": ev["basis"]}
     if kind == ISSUE_EXCLUDED:
         # 外すと課題の組が変わるので、決めたモードを捨てて決め直させる（#2923）
-        return _with_lap(state, n, excluded=(*lap.excluded, (int(ev["issue"]), ev["reason"])), mode=None, basis=None)
+        return {"excluded": (*lap.excluded, (int(ev["issue"]), ev["reason"])), "mode": None, "basis": None}
     if kind == ISSUES_CREATED:
-        return _with_lap(state, n, created=(*lap.created, *(int(i) for i in ev["issues"] if int(i) not in lap.created)))
+        return {"created": (*lap.created, *(int(i) for i in ev["issues"] if int(i) not in lap.created))}
     if kind == GATE_SHOWN:
-        return _with_lap(state, n, gates=(*lap.gates, (int(ev["pr"]), ev["head"])))
+        return {"gates": (*lap.gates, (int(ev["pr"]), ev["head"]))}
     if kind == GATE_ANSWERED:
         got = Answer(int(ev["pr"]), ev["answer"], ev["head"], ev["note"], _at(ev))
-        return _with_lap(state, n, answers=(*lap.answers, got))
+        return {"answers": (*lap.answers, got)}
     if kind == VERSION_SHIPPED:
-        return _with_lap(state, n, released=(*lap.released, str(ev["product_version"])))
-    return _with_lap(state, n, outcome=ev["outcome"], reason=ev["reason"])
+        return {"released": (*lap.released, str(ev["product_version"]))}
+    return {"outcome": ev["outcome"], "reason": ev["reason"]}
+
+
+def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
+    """周に付く事象を当てる。"""
+    n = int(ev["lap"])
+    lap = state.laps[_lap_index(state, n)]
+    return _with_lap(state, n, **_lap_change(lap, ev))
 
 
 def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
