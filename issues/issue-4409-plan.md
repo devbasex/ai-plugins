@@ -19,7 +19,7 @@
 | `contracts/causes/approval_stale.json`（新設） | 停止理由 `approval_stale` の定義 |
 | `src/ndf/adapters/github.py` | `branch_file`・`viewer_login`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す |
 | `src/ndf/ci_cli.py` | `ndf ci merge` に判定・照合・証跡の確かめと `--production-gate` を足し、`ndf ci ask`・`ndf ci answer` を足す |
-| `src/ndf/core/plan/cli.py`・`src/ndf/core/plan/runner.py` | `ndf plan next` に `--by` を足し、回答の記録 `answers/<ステップ>.json` を書く |
+| `src/ndf/core/plan/cli.py`・`src/ndf/core/plan/runner.py` | `ndf plan next` に `--by` を足し、回答の記録 `answer-records/<ステップ>.json` を書く |
 | `src/ndf/progress/run.py` | `stale_routes`・`_failed_report`（`approval_stale` の経路）、`_consume`（MVV 通過の `seen`）、`migrate_definition`・`_migrated_order`・`view`・`advance`（写しの移行） |
 | `src/ndf/progress/gate/asking.py`・`answering.py`・`entry.py` | 質問の対象に承認の対象を足し、回答の前に証跡を書き、承認資料に本番へ反映され得る行を書く |
 | `src/ndf/domains/records/mvv_gate.py`・`contracts/workflow/context.schema.json` | MVV 判定の通過で判定の記録のコメントに証跡の行を入れ、出力 `mvv_gate` に `target` を足す |
@@ -69,7 +69,7 @@
 ### Task 6: `ndf ci merge` が判定と証跡を確かめてからマージする
 
 - **対象ファイル:** `src/ndf/ci_cli.py`、`src/ndf/progress/run.py`（`stale_routes`・`_failed_report`）、`tests/adapters/test_ci_cli.py`
-- **変更内容:** `--pr`・`--production-gate {stop,defer,stale}`・`--approved-head`・`--approved-base`・`--presented-out` を足し、`_merge_target`・`_judge_pr`・`_unapproved` を足す。`approval_stale` で止まった工程に `ndf progress retry` と `ndf progress next` の経路を載せる
+- **変更内容:** `--pr`・`--production-gate {stop,defer,stale}`・`--approved-head`・`--approved-base`・`--presented-out` を足し、`_pr_target`・`_judge_pr`・`_unapproved` を足す。`approval_stale` で止まった工程に `ndf progress retry` と `ndf progress next` の経路を載せる
 - **満たす受け入れ条件:** 4409:2・4409:4・4409:5（承認の記録が無い・HEAD が変わった）・4409:7・4409:8・4409:9、設計の決定 5
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 

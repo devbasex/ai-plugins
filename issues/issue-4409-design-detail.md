@@ -34,7 +34,7 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/core/production_merge.py` | 新設 | `branch_strategy` とマージ先から、本番へ自動で届くかの判定の値を返す | 標準ライブラリ | モジュール | `Verdict`・`judge`・`automatic_rows`・`needs_approval`・`reaches_production`（新設） |
-| `src/ndf/ci_cli.py` | 変更 | `ndf ci merge` に判定と証跡の確かめを足し、`ndf ci ask`・`ndf ci answer` を足す | `adapters.github`・`core.merge_approval`・`core.approval_words`・`core.production_merge`・`contracts.result` | モジュール | `_parser`・`_merge`（変更）、`_merge_target`・`_judge_pr`・`_unapproved`・`_ask`・`_answer`・`_presented`（新設） |
+| `src/ndf/ci_cli.py` | 変更 | `ndf ci merge` に判定と証跡の確かめを足し、`ndf ci ask`・`ndf ci answer` を足す | `adapters.github`・`core.merge_approval`・`core.approval_words`・`core.production_merge`・`contracts.result` | モジュール | `_parser`・`_merge`（変更）、`_pr_target`・`_judge_pr`・`_unapproved`・`_ask_approval`・`_answer`・`_presented`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | マージ先の設定の読み取り・token の利用者・直前の照合を足す | `githubkit` | `GitHub` | `merge`・`_merge_with`・`_enqueue`（変更）、`branch_file`・`viewer_login`・`_verify`（新設） |
 | `src/ndf/core/merge_approval.py` | 新設 | 承認の対象とマージの承認の証跡を組み、読み、判定し、書く | `adapters.github`・`adapters.publish`・`core.approval_words` | モジュール | `MergeTarget`・`MergeRow`・`render_merge_row`・`merge_rows`・`merge_judgment`・`write_merge_row`（新設）。`By`・`USER_BY`・`MVV_BY`・`BY_CHOICES`・`BY_LINE`・`TrailError`（`domains/release/trail.py` から移す） |
 | `src/ndf/core/approval_words.py` | 新設 | 回答の語と、承認資料が対象にしたコミットの行の見出し | 標準ライブラリ | モジュール | `APPROVED`・`REJECTED`・`ANSWERS`・`HEAD_LINE`（`domains/release/approval_decide.py` から移す） |
@@ -114,7 +114,7 @@ plugins/ndf/
 | `_parser` | `ci_cli.py` | 変更 | `() -> argparse.ArgumentParser` | `merge` に `--pr`（`--branch` と排他で必須）・`--production-gate {stop,defer,stale}`（既定 `stop`）・`--approved-head`・`--approved-base`・`--presented-out` を足し、`ask`・`answer` を足す |
 | `_merge` | `ci_cli.py` | 変更 | `(args: argparse.Namespace) -> dict` | 設計文書の「`ndf ci merge` がマージするかを決める順序」の図のとおりに、PR を読み、照合・判定・証跡の確かめを通してからマージする |
 | `_worktree_head`・`_held_mismatch`・`_approved_by`・`_merged` | `ci_cli.py` | 新設 | `_worktree_head(args) -> (head, 結果)`・`_held_mismatch(args, pull, target) -> Optional[dict]`・`_approved_by(args, hub, pull, target, verdict) -> (担い手, 結果)`・`_merged(args, target, outcome, verdict, approved_by) -> dict` | `_merge` の分岐を順序の段ごとに分けた部品（分岐の多い関数の検査 PLR0912）。順に、作業場所の HEAD と `--reviewed` の照合、承認の時点と `--pr` のレビューを経た HEAD の照合、承認が要るときの証跡の担い手（無ければキューから外して `--production-gate` の結果）、`GitHub.merge` の結果からの結果 JSON。振る舞いは `_merge` と同じ |
-| `_merge_target` | `ci_cli.py` | 新設 | `(hub: GitHub, pull: Pull) -> trail.MergeTarget` | 読んだ PR から承認の対象（ベースリポジトリ・番号・マージ先・HEAD）を作る |
+| `_pr_target` | `ci_cli.py` | 新設 | `(hub: GitHub, pull: Pull) -> trail.MergeTarget` | 読んだ PR から承認の対象（ベースリポジトリ・番号・マージ先・HEAD）を作る |
 | `_judge_pr` | `ci_cli.py` | 新設 | `(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]` | PR のベースリポジトリのマージ先から設定を読み（`GitHub.branch_file`）、判定と設定の blob の oid を返す |
 | `_unapproved` | `ci_cli.py` | 新設 | `(args: argparse.Namespace, target: trail.MergeTarget, verdict: Verdict) -> dict` | 承認が要って有効な証跡が無いときの結果を、`--production-gate` の値で作る（設計文書の `--production-gate` の表） |
 | `stale_routes` | `progress/run.py` | 新設 | `(machine_id: str, stage: str) -> dict[str, Any]` | `approval_stale` で止まった工程の経路 `ndf progress retry <ID> <工程> --reason approval_stale` と `ndf progress next <ID>` を、この順で返す |
@@ -170,7 +170,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_judge_pr` | `core/branch_strategy.py` の `load_at_ref` | `grep -n "def load_at_ref" src/ndf/core/branch_strategy.py` | 使えない。Git のリモートから読み、決定 3 で採らなかった |
 | `stale_routes` | `progress/run.py` の `failed_routes`・`_cmd` | `grep -n "def failed_routes\|def _cmd" src/ndf/progress/run.py` | `_cmd` を使う。`failed_routes` は回答の語彙の 3 つを返すので別に持つ |
-| `_merge_target` | `trail.MergeTarget` | 同じ設計の新設 | 使う |
+| `_pr_target` | `trail.MergeTarget` | 同じ設計の新設 | 使う |
 | `_unapproved` | `contracts.result` の `result`・`stopped`・`gate` | `grep -n "^def " src/ndf/contracts/result.py` | 使う。結果の形はこの 3 つで作る |
 
 ### 単体テストの観点
@@ -271,7 +271,7 @@ plugins/ndf/
 | `_answer` | 回答の記録が無い・読めない | 端末から直に打った | ファイルの読み取り | 止める | `stopped`（`refused`） | 書かない |
 | `_answer` | 回答した者が `human` でない | `conductor`・`organizer`・`service:*`・`--by` 無し | 記録の `by` | 止める | `stopped`（`refused`） | 書かない |
 | `_answer` | 提示の識別子が違う | 流し直しで提示が置き換わった | 記録と提示のファイルの比較 | 止める | `stopped`（`refused`） | プランを流し直して回答し直す |
-| `_answer` | 承認の対象が今の PR と違う | 質問の後に HEAD・マージ先が変わった | `_merge_target` との比較 | 止める | `stopped`（`refused`） | 同上 |
+| `_answer` | 承認の対象が今の PR と違う | 質問の後に HEAD・マージ先が変わった | `_pr_target` との比較 | 止める | `stopped`（`refused`） | 同上 |
 | `_ask` | 提示のファイルを書けない | 保存先の権限 | `OSError` | 止める | `stopped`（`precondition`） | 再実行できる |
 
 ### 内部のデータと定数
