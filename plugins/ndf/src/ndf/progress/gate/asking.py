@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from ndf import cli
 from ndf.contracts import result
-from ndf.domains.release import trail
+from ndf.core import merge_approval
 from ndf.progress import lane, model, plan, run
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -57,11 +57,11 @@ class Target:
     base: Optional[str] = None
     production: Optional[bool] = None
 
-    def binding(self) -> Optional[trail.MergeTarget]:
-        """承認の対象の 4 つの値がそろえば `trail.MergeTarget`、欠ければ None。"""
+    def binding(self) -> Optional[merge_approval.MergeTarget]:
+        """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""
         if not self.repo or self.pr is None or not self.base or not self.head:
             return None
-        return trail.MergeTarget(self.repo, int(self.pr), self.base, self.head)
+        return merge_approval.MergeTarget(self.repo, int(self.pr), self.base, self.head)
 
     def differs(self, seen: Target) -> list[str]:
         """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
@@ -279,7 +279,7 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
 # 提示した承認の対象の保存先（承認資料の隣）
 PRESENTED_SUFFIX = ".target.json"
 # 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
-PRODUCTION_LINE = trail.PRODUCTION_MATERIAL_LINE
+PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
 def presented_path(root: Path, q: Question) -> Path:

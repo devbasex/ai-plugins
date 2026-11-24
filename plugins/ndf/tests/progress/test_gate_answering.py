@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters.github import GitHubError
-from ndf.domains.release import trail
+from ndf.core import merge_approval
 from ndf.progress import command, gate, model, run
 from ndf.progress.gate import asking
 
@@ -61,10 +61,10 @@ class Posts:
     """証跡を書く口の偽物。書いた行を `rows` に残し、同じ記録の識別子は 2 度書かない。`fail` なら書けない。"""
 
     def __init__(self, fail: bool = False) -> None:
-        self.rows: list[trail.MergeRow] = []
+        self.rows: list[merge_approval.MergeRow] = []
         self.fail = fail
 
-    def __call__(self, row: trail.MergeRow) -> bool:
+    def __call__(self, row: merge_approval.MergeRow) -> bool:
         if self.fail:
             raise GitHubError("届かない", unreached=True)
         if any(r.record_id == row.record_id for r in self.rows):
@@ -88,7 +88,13 @@ def test_the_answer_writes_the_trail_before_it_is_recorded(repo, st, env, capsys
     posts = Posts()
     _give(st, q, value, post=posts)
     (row,) = posts.rows
-    assert (row.answer, row.by, row.target, row.production, row.record_id) == (value, "user", trail.MergeTarget("o/r", 7, "main", HEAD), True, q.id)
+    assert (row.answer, row.by, row.target, row.production, row.record_id) == (
+        value,
+        "user",
+        merge_approval.MergeTarget("o/r", 7, "main", HEAD),
+        True,
+        q.id,
+    )
     (ev,) = _answered(st, q)
     # 回答の事象の seen は承認の対象を持つ（デプロイのマージが読む）
     seen = run.payload_of(ev)["seen"]

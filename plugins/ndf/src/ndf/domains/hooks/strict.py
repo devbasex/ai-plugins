@@ -41,7 +41,7 @@ _PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 # ブランチ戦略の設定の保存先（`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
 _SECTION = "branch_strategy"
 _DELIVERIES_KEY = f"{_SECTION}.release.deliveries"
-# マージの承認の証跡のマーカーの語（`domains.release.trail.MERGE_MARK` の中身。hook は trail を読めないので語だけを持つ）
+# マージの承認の証跡のマーカーの語（`core.merge_approval.MERGE_MARK` の中身。hook は merge_approval を読めないので語だけを持つ）
 MERGE_MARK_WORD = f"{identity.FIXED_WORDS['workflow_namespace']}:merge-approval"
 # コメントの本文をファイルから読む引数（`gh pr comment`・`gh issue comment` の `--body-file`・`-F`、`gh api` の `--input`）
 _BODY_FILE_FLAGS = ("--body-file", "-F", "--input")

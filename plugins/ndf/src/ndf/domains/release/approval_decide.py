@@ -23,21 +23,20 @@ from typing import NamedTuple
 
 from ndf import identity
 
+# 回答の語と提示したコミットの行（`core.approval_words`）。REJECTED は読む側（`trail`・`domains.loop.cli`）へ見せるために読む
+from ndf.core.approval_words import ANSWERS, APPROVED, HEAD_LINE, REJECTED  # noqa: F401
+
 _NS = identity.FIXED_WORDS["workflow_namespace"]
 # 証跡のマーカーと、承認資料の提示のマーカー（提示は証跡に数えない）
 TRAIL_MARK = f"<!-- {_NS}:release-approval -->"
 REQUEST_MARK = f"<!-- {_NS}:release-approval-request -->"
 # 承認の判定を PR の HEAD へ付ける commit status の名前
 STATUS_CONTEXT = f"{_NS}/release-approval"
-# 回答の語（事実の表 answers の語と同じ綴り）
-APPROVED, REJECTED = "approved", "rejected"
-ANSWERS = (APPROVED, REJECTED)
 # 判定
 STALE, MISSING = "stale", "missing"
 # 証跡の行の見出し
 ANSWER_LINE = "回答:"
 COMMIT_LINE = "承認したコミット:"
-HEAD_LINE = "提示したコミット:"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
 

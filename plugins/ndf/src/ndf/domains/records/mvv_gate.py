@@ -22,8 +22,7 @@ from ndf.adapters import llm, publish
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits
-from ndf.core import production_merge
-from ndf.domains.release import approval_decide, trail
+from ndf.core import approval_words, merge_approval, production_merge
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -157,9 +156,11 @@ def _recorded(hub: GitHub, number: int, outcome: dict[str, Any]) -> dict[str, An
     text = note(outcome["gate"], outcome["verdict"], outcome["why"])
     held = outcome.get("target")
     if outcome["skip"] and isinstance(held, dict):
-        t = trail.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
-        row = trail.MergeRow(approval_decide.APPROVED, trail.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}")
-        text = f"{text}\n{trail.render_merge_row(row)}"
+        t = merge_approval.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
+        row = merge_approval.MergeRow(
+            approval_words.APPROVED, merge_approval.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}"
+        )
+        text = f"{text}\n{merge_approval.render_merge_row(row)}"
     post_note(hub, number, text)
     return outcome
 

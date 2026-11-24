@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -17,8 +16,7 @@ from typing import Any, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
-from ndf.core import actors, production_merge
-from ndf.domains.release import approval_decide, trail
+from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.progress import command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
@@ -82,22 +80,22 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
 
 
 # マージの承認の証跡を書く口（行を渡し、書いたら真、同じ記録の証跡が既にあれば偽）
-Post = Callable[[trail.MergeRow], bool]
+Post = Callable[[merge_approval.MergeRow], bool]
 
 
-def no_post(row: trail.MergeRow) -> bool:
+def no_post(row: merge_approval.MergeRow) -> bool:
     """証跡を書かない口（PR を読まないテストと、承認の対象を持たない質問）。"""
     return False
 
 
 def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
-    """`trail.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。"""
+    """`merge_approval.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。"""
     made: list[GitHub] = []
 
-    def post(row: trail.MergeRow) -> bool:
+    def post(row: merge_approval.MergeRow) -> bool:
         if not made:
             made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
-        return trail.write_merge_row(made[0], row, made[0].viewer_login())
+        return merge_approval.write_merge_row(made[0], row, made[0].viewer_login())
 
     return post
 
@@ -171,7 +169,11 @@ def _carry(conn: Any, machine_id: str, issues: Sequence[int], reason: str) -> Op
 
 
 # 証跡を書く回答 → 証跡の回答（変更要求は承認しない回答なので、先の承認を取り消す却下として書く）
-_TRAIL_ANSWERS = {run.APPROVED: approval_decide.APPROVED, run.REJECTED: approval_decide.REJECTED, run.REQUEST_CHANGES: approval_decide.REJECTED}
+_TRAIL_ANSWERS = {
+    run.APPROVED: approval_words.APPROVED,
+    run.REJECTED: approval_words.REJECTED,
+    run.REQUEST_CHANGES: approval_words.REJECTED,
+}
 # MVV 判定が通した回答（証跡は `mvv_gate.py` が判定の記録と同じコメントに書くので、ここでは書かない）
 MVV_BY = model.MVV_SERVICE
 
@@ -187,7 +189,7 @@ def _trail_by(conn: Any, q: Question, a: Answer, seen: Target) -> Optional[str]:
         return None
     role = a.by.split(":", 1)[0]
     if role == actors.HUMAN or (role == "organizer" and _relayed(conn, q, a)):
-        return trail.USER_BY
+        return merge_approval.USER_BY
     if seen.production:
         raise model.Refused(
             f"回答した者 {a.by} の承認は、本番へ反映されるマージの証跡にならない（利用者が --by human で回答する。"
@@ -211,7 +213,7 @@ def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> No
     target = seen.binding()
     if target is None or a.value not in _TRAIL_ANSWERS:
         return
-    post(trail.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, q.id))
+    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, q.id))
 
 
 def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:

@@ -346,7 +346,7 @@ def test_cli_merge_refuses_a_head_other_than_the_reviewed_one(monkeypatch, capsy
 
 # --- ndf ci merge・ask・answer の本番チャネルの判定と承認の証跡（#4409） ---
 
-from ndf.domains.release import trail  # noqa: E402
+from ndf.core import merge_approval  # noqa: E402
 
 
 def _use(monkeypatch: pytest.MonkeyPatch, hub: merge_hub.MergeHub, head: str = merge_hub.HEAD) -> merge_hub.MergeHub:
@@ -370,9 +370,16 @@ def _use(monkeypatch: pytest.MonkeyPatch, hub: merge_hub.MergeHub, head: str = m
     return hub
 
 
-def _approve(hub: merge_hub.MergeHub, answer: str = "approved", head: str = merge_hub.HEAD, base: str = "main", production: bool = True, by: str = "user") -> None:
-    target = trail.MergeTarget(merge_hub.REPO, 7, base, head)
-    body = trail.render_merge_row(trail.MergeRow(answer, by, target, production, f"r{len(hub.comments_of.get(7, []))}"))
+def _approve(
+    hub: merge_hub.MergeHub,
+    answer: str = "approved",
+    head: str = merge_hub.HEAD,
+    base: str = "main",
+    production: bool = True,
+    by: str = "user",
+) -> None:
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, base, head)
+    body = merge_approval.render_merge_row(merge_approval.MergeRow(answer, by, target, production, f"r{len(hub.comments_of.get(7, []))}"))
     hub.comments_of.setdefault(7, []).append(github.Authored(hub.login, "OWNER", body))
 
 
@@ -383,9 +390,13 @@ def _out(capsys, last_result) -> dict:
 @pytest.mark.parametrize("gate", ["stop", "defer", "stale"])
 def test_merge_to_a_non_production_base_merges_whatever_the_gate(monkeypatch, capsys, last_result, gate):
     """受け入れ条件 7: develop 宛て（本番チャネルは main）の PR は止まらずにマージする。"""
-    hub = _use(monkeypatch, merge_hub.MergeHub(
-        pulls_of={7: merge_hub.pull(base="develop")}, files={"develop": (merge_hub.project_text(merge_hub.strategy(base="develop")), "c1")}
-    ))
+    hub = _use(
+        monkeypatch,
+        merge_hub.MergeHub(
+            pulls_of={7: merge_hub.pull(base="develop")},
+            files={"develop": (merge_hub.project_text(merge_hub.strategy(base="develop")), "c1")},
+        ),
+    )
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", gate]) == 0
     assert hub.merged == [7] and "comments" not in hub.calls
     assert _out(capsys, last_result)["metrics"]["verdict"] == "not_production"
@@ -419,7 +430,13 @@ def test_merge_without_approval_stops_for_automatic_unset_and_unknown(monkeypatc
     assert code == 10 and found["status"] == "gate" and hub.merged == []
     held = json.loads(out_file.read_text(encoding="utf-8"))
     assert held["presented_id"] == found["metrics"]["presented_id"]
-    assert (held["repo"], held["number"], held["base"], held["head"], held["production"]) == (merge_hub.REPO, 7, "main", merge_hub.HEAD, True)
+    assert (held["repo"], held["number"], held["base"], held["head"], held["production"]) == (
+        merge_hub.REPO,
+        7,
+        "main",
+        merge_hub.HEAD,
+        True,
+    )
     assert ci_cli.PRODUCTION_LINE in out_file.with_suffix(".md").read_text(encoding="utf-8")
 
 
@@ -493,7 +510,9 @@ def test_merge_rejudges_when_the_config_changed_before_sending(monkeypatch, caps
 def test_merge_by_pr_does_nothing_for_a_merged_pr(monkeypatch, capsys, last_result):
     """決定 5: --pr の PR がマージ済みなら、設定の読み取りもマージもしない。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
-    assert ci_cli.main(["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.HEAD, "--approved-base", "main"]) == 0
+    assert (
+        ci_cli.main(["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.HEAD, "--approved-base", "main"]) == 0
+    )
     assert _out(capsys, last_result)["metrics"]["merge"] == "already"
     assert hub.calls == ["pulls"]
 

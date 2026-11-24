@@ -3,7 +3,7 @@
 読み取り・分類・マージの前段の確かめは外部との接続の層（`ndf.adapters.ci`・`ndf.adapters.github`）が持ち、
 このエントリポイントは引数と出力だけを持つ。
 
-マージ先が自動反映の本番チャネルなら、PR に残ったマージの承認の証跡（`domains.release.trail` の `MERGE_MARK`）を
+マージ先が自動反映の本番チャネルなら、PR に残ったマージの承認の証跡（`core.merge_approval` の `MERGE_MARK`）を
 確かめたときだけマージする（#4409）。判定の規則は `core.production_merge` が持つ。証跡が無いときの終え方は
 `--production-gate`（`stop`・`defer`・`stale`）で選ぶ。単発のプランの承認待ちは `ask` が質問し、回答の後に `answer` が
 プランの実行の回答の記録から証跡を書く。工程（`ndf.progress`）は読まない。
@@ -34,15 +34,14 @@ from ndf.adapters.ci import (
 )
 from ndf.adapters.github import GitHub, MergeExpect, MergeOutcome, Pull
 from ndf.contracts import result
-from ndf.core import actors, production_merge
+from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.core.production_merge import Verdict
-from ndf.domains.release import approval_decide, trail
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 # 承認の証跡が無いときの終え方（`--production-gate`）。stop は承認待ち、defer はマージせずに ok、stale は approval_stale
-PRODUCTION_GATES = ("stop", "defer", "stale")
+PRODUCTION_GATES = production_merge.GATES
 # `metrics.gate` の値（`ndf ci merge` の承認待ち・先送りと `ndf ci ask` が共有する）
 GATE_NAME = "production-merge"
 # 判定に読むマージ先の設定のファイル（PR のベースリポジトリのマージ先のブランチ）
@@ -50,7 +49,7 @@ PROJECT_FILE = production_merge.PROJECT_FILE
 # 直前の確かめで判定をやり直した結果が承認待ちになったことを `GitHub.merge` から受ける種類
 _REJUDGED = "production_gate"
 # 承認資料の、本番へ反映され得ることを示す行
-PRODUCTION_LINE = trail.PRODUCTION_MATERIAL_LINE
+PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -78,7 +77,7 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--production-gate",
         choices=PRODUCTION_GATES,
-        default="stop",
+        default=production_merge.STOP,
         help="自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale",
     )
     m.add_argument("--approved-head", help="工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）")
@@ -219,9 +218,9 @@ def _open_pull(hub: GitHub, branch: str) -> Optional[Pull]:
     return opened[0] if opened else None
 
 
-def _merge_target(hub: GitHub, pull: Pull) -> trail.MergeTarget:
+def _merge_target(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget:
     """読んだ PR の承認の対象（ベースリポジトリ・番号・マージ先・HEAD）。"""
-    return trail.MergeTarget(hub.repo, pull.number, pull.base_ref, pull.head_sha)
+    return merge_approval.MergeTarget(hub.repo, pull.number, pull.base_ref, pull.head_sha)
 
 
 def _verdict_of(hub: GitHub, base: str, text: Optional[str], repo: str) -> Verdict:
@@ -237,26 +236,26 @@ def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:
     return _verdict_of(hub, pull.base_ref, found.text, found.repo), found.oid
 
 
-def _approval(hub: GitHub, target: trail.MergeTarget) -> Optional[trail.MergeRow]:
+def _approval(hub: GitHub, target: merge_approval.MergeTarget) -> Optional[merge_approval.MergeRow]:
     """今の承認の対象への有効な承認の証跡（決定 7 の「証跡の判定」）。無ければ None。"""
-    return trail.merge_judgment(trail.merge_rows(hub, target.number, hub.viewer_login()), target)
+    return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer_login()), target)
 
 
-def _material(target: trail.MergeTarget, production: bool) -> str:
+def _material(target: merge_approval.MergeTarget, production: bool) -> str:
     """承認資料。本番へ反映され得るなら、その行を書く（承認する人が本番への反映を知らずに承認しない）。"""
     lines = [
         f"# PR {target.number} のマージの承認",
         "",
         f"- リポジトリ: {target.repo}",
         f"- マージ先: {target.base}",
-        f"- {approval_decide.HEAD_LINE} {target.head}",
+        f"- {approval_words.HEAD_LINE} {target.head}",
     ]
     if production:
         lines.append(f"- {PRODUCTION_LINE}")
     return "\n".join(lines) + "\n"
 
 
-def _presented(path: Path, target: trail.MergeTarget, production: bool) -> str:
+def _presented(path: Path, target: merge_approval.MergeTarget, production: bool) -> str:
     """提示の識別子を新しく作り、承認の対象と合わせて `path` へ、承認資料を隣（`.md`）へ書いて識別子を返す。"""
     presented_id = uuid.uuid4().hex
     body = {"presented_id": presented_id, **target._asdict(), "production": production}
@@ -272,7 +271,7 @@ def _pr_items(number: int) -> list[dict]:
     return [{"kind": "pr", "number": number}]
 
 
-def _asking(target: trail.MergeTarget, verdict: Verdict, out: Optional[str], summary: str) -> dict:
+def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[str], summary: str) -> dict:
     """承認の回答を待つ結果。`out` があれば承認の対象と承認資料を書く（書けなければ precondition）。"""
     production = production_merge.reaches_production(verdict)
     metrics: dict[str, Any] = {"gate": GATE_NAME, "verdict": verdict.value, "production": production}
@@ -281,11 +280,11 @@ def _asking(target: trail.MergeTarget, verdict: Verdict, out: Optional[str], sum
             metrics["presented_id"] = _presented(Path(out), target, production)
         except OSError as exc:
             return result.stopped(TOOL, "precondition", f"承認の対象を {out} へ書けない: {exc}", items=_pr_items(target.number))
-    routes = {approval_decide.APPROVED: None, approval_decide.REJECTED: None}
+    routes = {approval_words.APPROVED: None, approval_words.REJECTED: None}
     return result.result(TOOL, result.GATE, summary, items=_pr_items(target.number), metrics=metrics, routes=routes)
 
 
-def _stale(target: trail.MergeTarget, detail: str, verdict: Optional[Verdict] = None) -> dict:
+def _stale(target: merge_approval.MergeTarget, detail: str, verdict: Optional[Verdict] = None) -> dict:
     """承認の取り直しで止まる結果。再試行のコマンドは工程の実行側が組む（状態機械の ID と工程を知らないため）。"""
     metrics: dict[str, Any] = {"gate": GATE_NAME}
     if verdict is not None:
@@ -293,14 +292,14 @@ def _stale(target: trail.MergeTarget, detail: str, verdict: Optional[Verdict] = 
     return result.stopped(TOOL, "approval_stale", detail, instance=target.head, items=_pr_items(target.number), metrics=metrics)
 
 
-def _unapproved(args: argparse.Namespace, target: trail.MergeTarget, verdict: Verdict) -> dict:
+def _unapproved(args: argparse.Namespace, target: merge_approval.MergeTarget, verdict: Verdict) -> dict:
     """承認が要って有効な証跡が無いときの結果（`--production-gate` の値で決まる。マージはしていない）。"""
     where = f"#{target.number}（{target.base} 宛て、HEAD {target.head[:12]}）"
-    if args.production_gate == "defer":
+    if args.production_gate == production_merge.DEFER:
         metrics = {"gate": GATE_NAME, "merge": "deferred", "verdict": verdict.value}
         summary = f"{where} は本番チャネルへの承認の証跡が無いので、マージをリリース承認ゲートの後へ先送りした"
         return result.result(TOOL, result.OK, summary, items=_pr_items(target.number), metrics=metrics)
-    if args.production_gate == "stale":
+    if args.production_gate == production_merge.STALE:
         return _stale(target, f"{where} に、今の HEAD とマージ先への本番チャネルの承認の証跡が無い（承認ゲートから質問し直す）", verdict)
     return _asking(target, verdict, args.presented_out, f"{where} は本番チャネルへのマージなので承認の回答を待つ")
 
@@ -344,6 +343,58 @@ def _merge_pull(args: argparse.Namespace, hub: GitHub) -> tuple[Optional[Pull], 
     return pull, None
 
 
+def _worktree_head(args: argparse.Namespace) -> tuple[Optional[str], Optional[dict]]:
+    """`--branch` なら作業場所の HEAD。`--reviewed`（レビューを経た HEAD）と違えば、PR を読まずに止まる `refused` の結果。"""
+    if args.branch is None:
+        return None, None
+    head = git.Git().rev_parse("HEAD")
+    if args.reviewed is not None and args.reviewed != head:
+        detail = f"作業場所の HEAD {head[:12]} がレビューを経た HEAD {args.reviewed[:12]} と違う"
+        return head, result.stopped(TOOL, "refused", detail, instance=head)
+    return head, None
+
+
+def _held_mismatch(args: argparse.Namespace, pull: Pull, target: merge_approval.MergeTarget) -> Optional[dict]:
+    """承認した対象（`--approved-head`・`--approved-base`）か、`--pr` のときのレビューを経た HEAD が今の PR と違えば止まる結果。"""
+    mismatch = _approved_mismatch(args, pull)
+    if mismatch is not None:
+        return _stale(target, f"#{pull.number} の{mismatch}（承認ゲートから質問し直す）")
+    if args.reviewed is not None and args.pr is not None and not git.sha_matches(args.reviewed, pull.head_sha):
+        detail = f"#{pull.number} の HEAD がレビューを経た HEAD {args.reviewed[:12]} と違う"
+        return result.stopped(TOOL, "refused", detail, instance=pull.head_sha)
+    return None
+
+
+def _approved_by(
+    args: argparse.Namespace, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict
+) -> tuple[Optional[str], Optional[dict]]:
+    """承認が要る判定なら、今の承認の対象への証跡の担い手。証跡が無ければ、マージキューから外して `--production-gate` の結果。"""
+    if not production_merge.needs_approval(verdict):
+        return None, None
+    row = _approval(hub, target)
+    if row is not None:
+        return row.by, None
+    if pull.queued:
+        hub.dequeue(pull.number)
+    return None, _unapproved(args, target, verdict)
+
+
+def _merged(
+    args: argparse.Namespace, target: merge_approval.MergeTarget, outcome: MergeOutcome, verdict: Verdict, approved_by: Optional[str]
+) -> dict:
+    """`GitHub.merge` の結果から結果 JSON を組む。"""
+    items = _pr_items(target.number)
+    if outcome.kind == _REJUDGED:
+        return _unapproved(args, target, Verdict(outcome.detail))
+    if outcome.merged:
+        metrics: dict[str, Any] = {"merge": "merged", "verdict": verdict.value}
+        if approved_by is not None:
+            metrics["approved_by"] = approved_by
+        return result.result(TOOL, result.OK, outcome.detail, items=items, metrics=metrics)
+    kind = outcome.kind if outcome.kind is not None else "unknown"
+    return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
+
+
 def _merge(args: argparse.Namespace) -> dict:
     """PR を、確かめ・本番チャネルの判定・承認の証跡の確かめを通してから `GitHub.merge` でマージする（#2602・#4409）。
 
@@ -355,36 +406,23 @@ def _merge(args: argparse.Namespace) -> dict:
     """
     if (args.approved_head is None) != (args.approved_base is None):
         return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
-    head: Optional[str] = None
-    if args.branch is not None:
-        repo = git.Git()
-        head = repo.rev_parse("HEAD")
-        if args.reviewed is not None and args.reviewed != head:
-            detail = f"作業場所の HEAD {head[:12]} がレビューを経た HEAD {args.reviewed[:12]} と違う"
-            return result.stopped(TOOL, "refused", detail, instance=head)
+    head, refused = _worktree_head(args)
+    if refused is not None:
+        return refused
     hub = _hub(args)
     pull, done = _merge_pull(args, hub)
     if pull is None:
         return done if done is not None else result.stopped(TOOL, "unknown", "PR を決められない")
     target = _merge_target(hub, pull)
-    mismatch = _approved_mismatch(args, pull)
-    if mismatch is not None:
-        return _stale(target, f"#{pull.number} の{mismatch}（承認ゲートから質問し直す）")
+    stopped = _held_mismatch(args, pull, target)
+    if stopped is not None:
+        return stopped
     if args.approved_head is not None:
         head = args.approved_head
-    elif head is None:
-        head = pull.head_sha
-    if args.reviewed is not None and args.pr is not None and not git.sha_matches(args.reviewed, pull.head_sha):
-        return result.stopped(TOOL, "refused", f"#{pull.number} の HEAD がレビューを経た HEAD {args.reviewed[:12]} と違う", instance=pull.head_sha)
     verdict, oid = _judge_pr(hub, pull)
-    approved_by: Optional[str] = None
-    if production_merge.needs_approval(verdict):
-        row = _approval(hub, target)
-        if row is None:
-            if pull.queued:
-                hub.dequeue(pull.number)
-            return _unapproved(args, target, verdict)
-        approved_by = row.by
+    approved_by, unapproved = _approved_by(args, hub, pull, target, verdict)
+    if unapproved is not None:
+        return unapproved
 
     def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
         again = _verdict_of(hub, pull.base_ref, text, hub.repo)
@@ -393,17 +431,8 @@ def _merge(args: argparse.Namespace) -> dict:
         return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
 
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
-    outcome = hub.merge(pull.number, expect_head=head, method=args.method, expect=expect)
-    items = _pr_items(pull.number)
-    if outcome.kind == _REJUDGED:
-        return _unapproved(args, target, Verdict(outcome.detail))
-    if outcome.merged:
-        metrics: dict[str, Any] = {"merge": "merged", "verdict": verdict.value}
-        if approved_by is not None:
-            metrics["approved_by"] = approved_by
-        return result.result(TOOL, result.OK, outcome.detail, items=items, metrics=metrics)
-    kind = outcome.kind if outcome.kind is not None else "unknown"
-    return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
+    outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
+    return _merged(args, target, outcome, verdict, approved_by)
 
 
 def _ask(args: argparse.Namespace) -> dict:
@@ -433,8 +462,8 @@ def _answer(args: argparse.Namespace) -> dict:
     if record.get("by") != actors.HUMAN:
         return _refuse(f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない")
     answer = record.get("answer")
-    if answer not in approval_decide.ANSWERS:
-        return _refuse(f"回答 {answer} は {' / '.join(approval_decide.ANSWERS)} のどれでもない")
+    if answer not in approval_words.ANSWERS:
+        return _refuse(f"回答 {answer} は {' / '.join(approval_words.ANSWERS)} のどれでもない")
     shown = _read_json(args.presented)
     presented_id = record.get("presented_id")
     if shown is None or not presented_id or shown.get("presented_id") != presented_id:
@@ -445,13 +474,19 @@ def _answer(args: argparse.Namespace) -> dict:
         return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
     now = _merge_target(hub, pull)
     try:
-        held = trail.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
+        held = merge_approval.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
     except (KeyError, TypeError, ValueError):
         return _refuse(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
     if not held.same(now):
         return _refuse(f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number)
-    row = trail.MergeRow(str(answer), trail.USER_BY, now, shown.get("production") is True, f"{record.get('run')}:{record.get('step')}:{presented_id}")
-    written = trail.write_merge_row(hub, row, hub.viewer_login())
+    row = merge_approval.MergeRow(
+        str(answer),
+        merge_approval.USER_BY,
+        now,
+        shown.get("production") is True,
+        f"{record.get('run')}:{record.get('step')}:{presented_id}",
+    )
+    written = merge_approval.write_merge_row(hub, row, hub.viewer_login())
     summary = f"#{pull.number} へ回答 {answer} のマージの承認の証跡を{'書いた' if written else '既に書いてあった'}"
     return result.result(TOOL, result.OK, summary, items=_pr_items(pull.number), metrics={"answer": answer, "written": written})
 
@@ -465,6 +500,6 @@ def main(argv: list[str]) -> int:
         out = result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after)
     except git.GitError as exc:
         out = result.stopped(TOOL, "precondition", str(exc))
-    except trail.TrailError as exc:
+    except merge_approval.TrailError as exc:
         out = result.stopped(TOOL, "refused", str(exc))
     return result.emit(out)

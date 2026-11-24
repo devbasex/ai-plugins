@@ -33,7 +33,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
-from ndf.core import branch_strategy
+from ndf.core import branch_strategy, merge_approval
 from ndf.domains.release import (
     approval_decide,
     assemble,
@@ -313,7 +313,10 @@ def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
     p.add_argument("--presented", required=True, help="提示した HEAD の SHA（present の outputs.head）")
     p.add_argument(
-        "--by", required=True, choices=trail.BY_CHOICES, help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+        "--by",
+        required=True,
+        choices=merge_approval.BY_CHOICES,
+        help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）",
     )
 
 

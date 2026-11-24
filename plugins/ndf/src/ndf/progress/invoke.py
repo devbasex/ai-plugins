@@ -42,7 +42,7 @@ from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
 from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
-from ndf.core import durable, route
+from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
@@ -328,7 +328,8 @@ PLAN_ANSWER_BY = "service:progress"
 # 工程から組むプランの `ndf ci merge --production-gate`（#4409 の決定 4・決定 5）。承認ゲートの無い工程（Pull Request・
 # ドキュメントレビュー・確定仕様化）は承認の無いマージをデプロイへ先送りし、承認ゲートを持つ工程（設計・デプロイ）は
 # 承認の後に対象が変わっていれば approval_stale で止めて質問し直す。表に無いテンプレートは既定の stop のまま組む
-PRODUCTION_GATE = {"merge": "defer", "plan-to-spec": "defer", "design-merge": "stale", "release": "stale"}
+_DEFER, _STALE = production_merge.DEFER, production_merge.STALE
+PRODUCTION_GATE = {"merge": _DEFER, "plan-to-spec": _DEFER, "design-merge": _STALE, "release": _STALE}
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,

@@ -32,6 +32,11 @@ class Verdict(str, Enum):
     UNKNOWN = "unknown"
 
 
+# 承認の証跡が無いときの `ndf ci merge --production-gate` の終え方。stop は承認待ち、defer はマージせずに ok、stale は
+# approval_stale（工程が組むプランの値 `progress.invoke.PRODUCTION_GATE` も同じ語を使う）
+STOP, DEFER, STALE = "stop", "defer", "stale"
+GATES = (STOP, DEFER, STALE)
+
 # 承認が要る値（`ndf ci merge` の扱い。承認資料の「本番へ反映され得る」も同じ集合）
 _NEEDS_APPROVAL = frozenset({Verdict.AUTOMATIC, Verdict.UNSET, Verdict.UNKNOWN})
 

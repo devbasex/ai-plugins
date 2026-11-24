@@ -22,7 +22,7 @@ from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
-from ndf.domains.release import trail
+from ndf.core import merge_approval
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import note, refusals
 
@@ -98,7 +98,10 @@ class Hub:
 
     def branch_file(self, base: str, path: str) -> FileAt:
         """マージ先 main の設定（自動反映の本番チャネル。#4409）。"""
-        section = {"branches": {"base": "main", "production": "main"}, "release": {"deliveries": [{"channel": "production", "kind": "auto"}]}}
+        section = {
+            "branches": {"base": "main", "production": "main"},
+            "release": {"deliveries": [{"channel": "production", "kind": "auto"}]},
+        }
         return FileAt("o/r", json.dumps({"branch_strategy": section}), "c1")
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
@@ -160,8 +163,13 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
     # 省いた判定の記録は、担い手 mvv のマージの承認の証跡の行を同じコメントに持つ（#4409 の決定 7。投稿は 1 件のまま）
     hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text)])
-    (row,) = trail.merge_rows(hub, 5, "octocat")  # type: ignore[arg-type]
-    assert (row.answer, row.by, row.target, row.production) == ("approved", "mvv", trail.MergeTarget("o/r", 5, "main", "h" * 40), True)
+    (row,) = merge_approval.merge_rows(hub, 5, "octocat")  # type: ignore[arg-type]
+    assert (row.answer, row.by, row.target, row.production) == (
+        "approved",
+        "mvv",
+        merge_approval.MergeTarget("o/r", 5, "main", "h" * 40),
+        True,
+    )
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
