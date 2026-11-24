@@ -220,61 +220,6 @@ def test_lines_map_across_hunks_with_no_lines_on_one_side() -> None:
     assert file.added == {5: "x"}
 
 
-# --- 置き換えた行の中の変わっていない行 ---------------------------------------------------------
-
-
-def _hunks(base: str, head: str) -> tuple[changes.Hunk, ...]:
-    """`base` の本文全部を `head` に置き換える hunk。"""
-    old = [changes.Line(n, None, t) for n, t in enumerate(base.removesuffix("\n").split("\n"), 1)]
-    new = [changes.Line(None, n, t) for n, t in enumerate(head.removesuffix("\n").split("\n"), 1)]
-    return (changes.Hunk(1, (*old, *new)),)
-
-
-@pytest.mark.parametrize(
-    ("base", "head", "same"),
-    [
-        # 隣の説明だけを直した（根拠の行は変わっていない）
-        (f"古い\r{CITED}\n", f"新しい\r{CITED}\n", {(1, 1): (1, 1)}),
-        # 説明を足して、行の中の位置がずれた
-        (f"説明\r{CITED}\n", f"説明\r足した\r{CITED}\n", {(1, 0): (1, 0), (1, 2): (1, 1)}),
-        # 改行を LF に変えた
-        ("a\rb\n", "a\nb\n", {(1, 0): (1, 0), (2, 0): (1, 1)}),
-        # 根拠の行を足した・変えた
-        ("説明\n", f"説明\r{CITED}\n", {(1, 0): (1, 0)}),
-        (f"説明\r{CITED}\n", f"説明\r{CITED}。\n", {(1, 0): (1, 0)}),
-    ],
-)
-def test_unchanged_rows_inside_replaced_lines_are_found(base: str, head: str, same: dict) -> None:
-    """単独の CR で区切った 1 行の一部を編集しても、変わっていない Markdown の行をベースの位置に対応させる。"""
-    assert changes._same_rows(_hunks(base, head)) == same
-
-
-def test_rows_are_compared_only_inside_the_same_run_of_replaced_lines() -> None:
-    text = "diff --git a/n b/n\n--- a/n\n+++ b/n\n@@ -1,3 +1,3 @@\n-x\ra\n same\n-b\n+c\ra\n+b\n"
-    (file,) = changes._diff_files(text)
-    assert changes._same_rows(file.hunks) == {(3, 0): (3, 0)}
-
-
-@pytest.mark.parametrize(("count", "found"), [(50, 50), (200, 0)])
-def test_repeated_rows_are_compared_only_up_to_the_limit(count: int, found: int) -> None:
-    """前後の行が違う繰り返しの行は、行の組の数の上限までだけ照合し、超えれば対応させない。"""
-    rows = [CITED] * count
-    assert len(changes._matched(["古い", *rows, "前"], ["新しい", *rows, "後"])) == found
-
-
-def test_repeated_rows_around_an_edit_are_matched_whatever_their_number() -> None:
-    """同じ行が上限を超えて並ぶ中の説明を 1 行変えても、前後の行はすべて対応する。"""
-    rows = [CITED] * 5000
-    assert sorted(changes._matched([*rows, "古い", *rows], [*rows, "新しい", *rows])) == [(n, n) for n in range(10001) if n != 5000]
-
-
-def test_rows_that_appear_once_divide_the_comparison() -> None:
-    """入れ替えた行は順序を保つ側だけを対応させ、1 回だけ現れる行の間の、繰り返す行も対応させる。"""
-    assert sorted(changes._matched(list("a=b=c"), list("a=1=c"))) == [(0, 0), (1, 1), (3, 3), (4, 4)]
-    assert sorted(changes._matched(list("abcd"), list("bcad"))) == [(1, 0), (2, 1), (3, 3)]
-    assert changes._matched([], list("ab")) == []
-
-
 # --- コミットの本文 ---------------------------------------------------------------------------
 
 

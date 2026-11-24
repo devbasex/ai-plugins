@@ -8,11 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
-from bisect import bisect_left
-from collections import Counter
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from difflib import SequenceMatcher
-from itertools import groupby
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -142,8 +138,6 @@ _HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _NAMES = {"--- ": (True, "a/"), "+++ ": (False, "b/"), "rename from ": (True, ""), "rename to ": (False, "")}
 # Markdown の解析が 1 行とみなす本文と改行
 _MARKDOWN_ROW = re.compile(r"([^\r\n]*)(\r\n|\r|\n|\Z)")
-# 置き換えた行の照合（`_matched`）で、繰り返す行を照合する 1 区間の行の組の数の上限
-_MAX_PAIRS = 10_000
 
 
 class Line(NamedTuple):
@@ -271,75 +265,4 @@ def _markdown_lines(text: str) -> list[tuple[int, str]]:
         if row[0]:
             out.append((no, row[1]))
             no += row[2].endswith("\n")
-    return out
-
-
-def _rows(lines: Iterable[Line], of_base: bool) -> list[tuple[tuple[int, int], str]]:
-    """差分の行のうちベース（`of_base`）か head の側にあるものを Markdown の行に分け、（git の行の番号, その行の中で何番目か。
-    0 始まり）と本文を返す。"""
-    out: list[tuple[tuple[int, int], str]] = []
-    for line in lines:
-        no = line.base if of_base else line.head
-        if no is not None:
-            out += [((no, nth), text) for nth, (_, text) in enumerate(_markdown_lines(line.text + "\n"))]
-    return out
-
-
-def _anchors(a: Sequence[str], b: Sequence[str]) -> list[tuple[int, int]]:
-    """どちらにも 1 回だけ現れる同じ行のうち、順序を保って最も多く対応させた、`a` と `b` の位置の組。"""
-    in_a, in_b = Counter(a), Counter(b)
-    at = {t: i for i, t in enumerate(a) if in_a[t] == 1 and in_b[t] == 1}
-    # 最長増加部分列。ends[k] は長さ k + 1 の列の末尾の位置の最小値、tails[k] はその末尾の組の番号
-    ends: list[int] = []
-    tails: list[int] = []
-    pairs: list[tuple[int, int]] = []
-    before: list[Optional[int]] = []
-    for j, text in enumerate(b):
-        if (i := at.get(text)) is None:
-            continue
-        k = bisect_left(ends, i)
-        before.append(tails[k - 1] if k else None)
-        ends[k : k + 1], tails[k : k + 1] = [i], [len(pairs)]
-        pairs.append((i, j))
-    out: list[tuple[int, int]] = []
-    n = tails[-1] if tails else None
-    while n is not None:
-        out.append(pairs[n])
-        n = before[n]
-    return out[::-1]
-
-
-def _matched(a: Sequence[str], b: Sequence[str]) -> list[tuple[int, int]]:
-    """`a` と `b` の、順序を保って対応する同じ行の位置の組。1 回だけ現れる行で区切り、区切りの間は前後の同じ行を先に対応させ、
-    残りは行の組の数が `_MAX_PAIRS` 以下のときだけ照合する（同じ行の繰り返しで所要時間が行数の 2 乗に増えない）。"""
-    out: list[tuple[int, int]] = []
-    i = j = 0
-    for end_i, end_j in (*_anchors(a, b), (len(a), len(b))):
-        stop_i, stop_j = end_i, end_j
-        while i < stop_i and j < stop_j and a[i] == b[j]:
-            out.append((i, j))
-            i, j = i + 1, j + 1
-        while i < stop_i and j < stop_j and a[stop_i - 1] == b[stop_j - 1]:
-            stop_i, stop_j = stop_i - 1, stop_j - 1
-            out.append((stop_i, stop_j))
-        if 0 < (stop_i - i) * (stop_j - j) <= _MAX_PAIRS:
-            match = SequenceMatcher(None, a[i:stop_i], b[j:stop_j], autojunk=False)
-            out += [(i + x + n, j + y + n) for x, y, size in match.get_matching_blocks() for n in range(size)]
-        if end_i < len(a):
-            out.append((end_i, end_j))
-        i, j = end_i + 1, end_j + 1
-    return out
-
-
-def _same_rows(hunks: Sequence[Hunk]) -> dict[tuple[int, int], tuple[int, int]]:
-    """置き換えた git の行の中で変わっていない Markdown の行の、head の位置からベースの位置（位置は `_rows`）。git は `\\r` だけで
-    区切った文書の 1 か所の変更を、つながった行全部の置き換えとして出す。"""
-    out: dict[tuple[int, int], tuple[int, int]] = {}
-    for hunk in hunks:
-        for replaced, run in groupby(hunk.lines, key=lambda x: x.base is None or x.head is None):
-            if not replaced:
-                continue
-            lines = list(run)
-            base, head = _rows(lines, True), _rows(lines, False)
-            out |= {head[j][0]: base[i][0] for i, j in _matched([t for _, t in base], [t for _, t in head])}
     return out
