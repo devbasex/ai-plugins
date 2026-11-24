@@ -93,7 +93,7 @@ ndf-next では、直訳調の内部の呼び名 29 語が 1,061 ファイル中
 
 `.ndf/` の設定ファイルの識別子を `settings` にしないのは、MVV の設定の中の最上位のキー `settings` と、Claude Code の起動の
 引数 `--settings` が別の意味ですでに使っているためである。MVV 判定の内部の識別子に `mvv_` を付けるのも、原因の種類の値
-`validation`（`contracts/causes.json` の列 `std_type`）と分けるためである。言語モデルの判定の答えの欄 `verdict`
+`validation`（`contracts/causes/` の列 `std_type`）と分けるためである。言語モデルの判定の答えの欄 `verdict`
 （`follow` / `not_follow` / `unknown`）は承認ゲートの判定と同じ形を共有するため改名せず、設定に書くときに `follow` を `pass` へ写す。
 
 ### 改名した保存先と記録
@@ -200,7 +200,7 @@ sequenceDiagram
 
 ## エラー処理
 
-原因の種類は `contracts/causes.json` の既存の行で、終了コードは `contracts/facts/exit-codes.json` が決める。
+原因の種類は `contracts/causes/` の既存の行で、終了コードは `contracts/facts/exit-codes.json` が決める。
 
 | 場面 | 原因の種類 | 終了コード | 行き先 |
 | --- | --- | --- | --- |

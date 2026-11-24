@@ -260,7 +260,7 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 
 | 場所 | 値 |
 | --- | --- |
-| `plugins/ndf/contracts/limits.json` の `hook.ask-forward` | 0.3 秒。hook がロックを待つ上限（`ask-forward`・`ask-answered`・`ask-closed` で共通） |
+| `plugins/ndf/contracts/limits/` の `hook.ask-forward` | 0.3 秒。hook がロックを待つ上限（`ask-forward`・`ask-answered`・`ask-closed` で共通） |
 | 同 `relay.child-exit` | 5 秒。強制終了が偽を返した後に子の終わりを待つ上限 |
 | `guards.json` の `fail_closed` | どの行も必須の列。真は `ask-forward` だけ |
 | `guards.json` の `ask-answered` / `ask-closed` | PostToolUse・Tool `AskUserQuestion`・`order` 60 / Stop と UserPromptSubmit・Tool なし・`order` 10（`relay-marker` より前） |

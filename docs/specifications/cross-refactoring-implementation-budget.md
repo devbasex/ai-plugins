@@ -19,7 +19,7 @@ PR https://github.com/devbasex/ai-plugins/pull/2452 の完了判定で、cross-r
 
 | 用語 | 意味 |
 | --- | --- |
-| 実装の予算 | `--budget-minutes` の値（既定は `limits.json` の `cross-refactoring.default-budget` の 60 分）。採る改善項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う |
+| 実装の予算 | `--budget-minutes` の値（既定は `contracts/limits/` の `cross-refactoring.default-budget` の 60 分）。採る改善項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う |
 | 実効の予算 | 予算の延長を当てた後の実装の予算。延ばさなければ実装の予算と同じ |
 | 予算の延長 | グレード high の候補の見積りの和 S が実装の予算 B を超え 2B 以下のとき、実効の予算を `ceil(S)` 分にすること |
 | 実装時間 | 改善項目のテストの追加・実装・修正で担当の CLI が動いた時間。提案・選定・テストの実行・CI の待ちは含めない |
@@ -127,7 +127,7 @@ stateDiagram-v2
 ### 成立の判定と前進の判定（`verify`・`judge`）
 
 1. 落ちた項目ごとに落ちたテストの集合 F(n) を `fix_history[]` へ積む。F(n) が空なら通過、`same_cause`（既定 2）回続けて同じなら停滞、
-   前に見たどれかの集合と同じなら振動、それ以外は前進（`limits.json` の `cross-refactoring.fix-progress`）
+   前に見たどれかの集合と同じなら振動、それ以外は前進（`contracts/limits/` の `cross-refactoring.fix-progress`）
 2. 初めて落ちた項目と、停滞か振動した項目は、判定の担い手に成立を判定させる（`VERIFY=judge`）。答えは
    `{"item", "feasible", "reason", "evidence"}` で、項目の `feasibility[]` に積む
 3. 成立しない項目は、その項目のコミットだけを新しい順に `git revert` で打ち消す（`revert_reason: infeasible`）
@@ -199,7 +199,7 @@ stateDiagram-v2
 
 | 置き場 | 値 |
 | --- | --- |
-| `plugins/ndf/contracts/limits.json` | `cross-refactoring.default-budget`（3600 秒）・`cross-refactoring.budget-extension`（`factor: 2`）・`cross-refactoring.safety-net`（`factor: 2`）・`cross-refactoring.fix-progress`（`same_cause: 2`）・`monitor.phase.judge`（1200 秒）・`monitor.phase.flaky-fix`（3600 秒。駆動は安全網の残りを渡す） |
+| `plugins/ndf/contracts/limits/` | `cross-refactoring.default-budget`（3600 秒）・`cross-refactoring.budget-extension`（`factor: 2`）・`cross-refactoring.safety-net`（`factor: 2`）・`cross-refactoring.fix-progress`（`same_cause: 2`）・`monitor.phase.judge`（1200 秒）・`monitor.phase.flaky-fix`（3600 秒。駆動は安全網の残りを渡す） |
 | 状態ファイル | `budget`（`minutes`・`source`・`effective_minutes`・`extension`）・`safety_net_minutes`・`safety_net`（`limit_minutes`・`used_seconds`・`halted_at`）・`items[].feasibility[]`・`fix_history[]`・`fixer`・`fixer_switched`・`outside_scope[]`・`sendbacks[]`・`coding_seconds`・`revert_reason`・`halt`・`feasibility_request`・`flaky_request`・`flaky_requested`・`flaky_fixes[]`。版は 3（`schema: 3`）で、版 2 の途中の状態ファイルは再開せずに止める |
 
 ## テスト観点

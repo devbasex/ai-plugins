@@ -19,7 +19,7 @@ NDF が true の設定だけを false へ書き込み、1 回読み直す。読�
 | --- | --- |
 | 引数と結果の項目の一覧 | `plugins/ndf/docs/contracts/commands.md` の `ndf training`（スキーマから生成する） |
 | 結果の `items` の形 | `plugins/ndf/contracts/schemas/io/training.result.schema.json` |
-| 時間の上限の値 | `plugins/ndf/contracts/limits.json` の `claude-training.call`・`codex-training.call`・`training.save-lock`・`training.check-valid` |
+| 時間の上限の値 | `plugins/ndf/contracts/limits/` の `claude-training.call`・`codex-training.call`・`training.save-lock`・`training.check-valid` |
 | 利用者向けの説明 | [plugins/ndf/README.md](../../plugins/ndf/README.md) の「学習の設定を確かめる」 |
 
 ## 概要
@@ -261,7 +261,7 @@ codex の `codex_training_allowed`・
 | `training.claude.lock`・`training.codex.lock` | 同じ担当の確かめの排他 |
 | `training.<担当>.revoked` | 取り消した時刻か `all` |
 
-### 上限（`contracts/limits.json`）
+### 上限（`contracts/limits/`）
 
 | キー | 秒 | 使う箇所 |
 | --- | ---: | --- |

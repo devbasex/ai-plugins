@@ -217,7 +217,7 @@ graph LR
 | `contracts/workflow/stages/refactor.json` | `inputs: ["worktree", "branch", "issues"]` |
 | `contracts/workflow/ndf.schema.json` | 範囲の語 `unreviewed_diff`・条件の語 `code_in_unreviewed_diff`・`optional_inputs` |
 | `contracts/templates/params.json` | 差し込み `acceptance`（並び） |
-| `contracts/causes.json`・`contracts/schemas/result.schema.json`・`contracts/version.json` | 停止理由 `unreviewed`（レビューを経た HEAD の後にレビューを通っていないコミットがある）、結果 JSON の `gathered`、契約のバージョン 8 |
+| `contracts/causes/`・`contracts/schemas/result.schema.json`・`contracts/version.json` | 停止理由 `unreviewed`（レビューを経た HEAD の後にレビューを通っていないコミットがある）、結果 JSON の `gathered`、契約のバージョン 8 |
 | 実装のプランの状態ディレクトリ | `reviewed-head`・`unresolved`・`unresolved-delta`・`delta-base`・`delta-recheck`・`cross-review-delta/`。工程「リファクタリング」のプランの状態ディレクトリに `refactor-candidates.md` |
 
 ## エラー処理

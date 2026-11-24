@@ -172,8 +172,8 @@ C = 187,691 なら 9.5 時間を超える（n = 20）と切り替える。
 
 | 置き場 | キー | 値 |
 | --- | --- | --- |
-| `contracts/limits.json` | `parallel-switch.long-wait` | 14,400 秒。文脈を読めないときに切り替える W の閾値 |
-| `contracts/limits.json` | `parallel-switch.relay-check` | 10 秒。`relay.py is-child` の上限 |
+| `contracts/limits/` | `parallel-switch.long-wait` | 14,400 秒。文脈を読めないときに切り替える W の閾値 |
+| `contracts/limits/` | `parallel-switch.relay-check` | 10 秒。`relay.py is-child` の上限 |
 | `lib/token_rates.py` の `READ_RATES` | — | Opus 5.5・Sonnet 5.5 は 0.05、Fable 5.2・5.1 は 0.025、表に無いモデルは 0.1 |
 
 再起動の判定の記録の理由は 7 つ（容量・運用上限・費用・独立性・手動・カットポイント・待ち）で、行の形は変えない。作業の

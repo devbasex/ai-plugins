@@ -185,7 +185,7 @@
   （API キーの宣言なら `api-key-helper metered <指紋>`。指紋は検証した宣言のキーの SHA-256）に、`--pin <固定のファイル>` と、
   ラッパーの起動では `--record <記録先> --id <helper の ID>` を続けたものである
 - hook は `{"type": "command", "command": <config-gate の文字列>, "timeout": <relay.key-helper の gate>, "onFailure": "block"}` である。
-  `timeout` は合成のたびに `contracts/limits.json` の `relay.key-helper` の `gate`（今は 5 秒）から読み、固定値を持たない。
+  `timeout` は合成のたびに `contracts/limits/` の `relay.key-helper` の `gate`（今は 5 秒）から読み、固定値を持たない。
   認証と宛先の変更を拒む `config-gate` の待ち時間は、契約の値の変更に追随する。`onFailure` が効く
   Claude Code 2.1.295（`account_choice.GATE_FLOOR`）より古い・版を読めないときは `key_gate` で起動しない。`disableAllHooks`・
   管理の設定の `allowManagedHooksOnly`・`--bare`・`--safe-mode`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE` で hook が働かない

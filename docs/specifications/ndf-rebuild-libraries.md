@@ -284,13 +284,13 @@ conductor が切り方を直して打ち直すまで後続がすべて待つ。�
 ### 決定 30: 同時に動く重い起動は重みのスロットで数え、GitHub の上限は接続の層が枠の使い分けで受ける
 
 LLM と外部 CLI の起動は、テストと同じ保存先の重い起動のスロット（`ndf.slot_pool`・`ndf.adapters.launch_slot`）を
-`contracts/limits.json` の `launch.weight.<種類>` の重みで取り、空きが無ければ上限まで待つ。GitHub の上限は、
+`contracts/limits/` の `launch.weight.<種類>` の重みで取り、空きが無ければ上限まで待つ。GitHub の上限は、
 ステップに資源のタグを付けて数える代わりに、`ndf.adapters.github` が枠の使い分けで受ける。待つのは呼び手が渡した予算（`remaining`）の中だけで、予算を越える上限や予算を渡さない呼び出しは待たずに呼び手へ返す（決定 16）。
 プランの JSON に資源の宣言を足さずに済む。
 
 ### 決定 31: ステップの打ち切りは耐久ステップの中で行う
 
-ステップの子の待ちは耐久ステップの中にあり、上限（ステップの `timeout`、無ければ `limits.json` の `supervise.run-step`）で
+ステップの子の待ちは耐久ステップの中にあり、上限（ステップの `timeout`、無ければ `contracts/limits/` の `supervise.run-step`）で
 打ち切って `interrupted` で止まる（`ndf.core.plan.steps`）。DBOS の上で見張ると、見張りごとに耐久ワークフローが要り、
 子のプロセスを持つスレッドの外から止める仕組みを作ることになる。
 

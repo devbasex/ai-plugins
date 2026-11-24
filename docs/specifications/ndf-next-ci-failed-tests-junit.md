@@ -27,7 +27,7 @@ CI の修正の後の手元の確かめ（`ndf route test --failed-from`）が�
 | 語 | 意味 |
 | --- | --- |
 | 読み取りの記録 | 落ちたテストのチェック 1 件について、どこから読んだか（`junit`・`log`・`none`）・何件読めたか・読めなかった理由を持つ 1 行。CI の結果 JSON の `metrics.failed_test_reads` の 1 要素 |
-| 取得の枠 | 1 回の組み立てで取得してよい成果物の ZIP の本数。`contracts/limits.json` の `github.failed-logs` の `count` で、読むチェックの数の上限と同じ値 |
+| 取得の枠 | 1 回の組み立てで取得してよい成果物の ZIP の本数。`contracts/limits/` の `github.failed-logs` の `count` で、読むチェックの数の上限と同じ値 |
 
 ## 背景
 
