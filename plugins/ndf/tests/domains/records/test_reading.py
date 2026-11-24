@@ -179,9 +179,10 @@ def test_add_refuses_a_wrong_shape_without_writing(change: dict, repo: Path, cap
     [("main", True), ("feature/4285-日本語.1", True)]
     + [(b, False) for b in ("*", "a/*", "a:b", "^a", "a..b", "/a", "a/", "a//b", ".a", "a/.b", "a.lock", "a.", "a@{1}", "a b", "a\n", "")],
 )
-def test_rows_keep_only_a_single_branch_name(branch: str, kept: bool, repo: Path) -> None:
+def test_rows_keep_only_a_single_branch_name(branch: str, kept: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """記録のブランチは強制更新の refspec に入るので、書いてある行も 1 つのブランチを表す名前だけを読む。"""
-    row = {**reading.add(ENTRY, repo), "prs": [{**PRS[0], "branch": branch}]}
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path))
+    row = _row(version=internal.version(), at=internal.stamp(0), question_key="0" * 64, prs=[{**PRS[0], "branch": branch}], reads=READS)
     text = json.dumps(row) + "\n"
     reading.checks_path().write_text(text, encoding="utf-8")
     assert reading.rows() == ([row] if kept else [])
