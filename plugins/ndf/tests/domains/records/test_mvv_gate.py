@@ -135,7 +135,7 @@ class Hub:
         if isinstance(moved, Exception):
             raise moved
         head = moved.get("head", self.case.get("head", HEAD))
-        return SimpleNamespace(body=self.case["body"], head_sha=head, base_ref=moved.get("base", "main"))
+        return SimpleNamespace(body=moved.get("body", self.case["body"]), head_sha=head, base_ref=moved.get("base", "main"))
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
         self.paths.append(path)
@@ -294,20 +294,28 @@ def test_the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo
     assert hub.paths == [f"/repos/o/r/compare/{base}...{HEAD}"] and out["verdict"] == FOLLOW
 
 
-@pytest.mark.parametrize(
-    ("reads", "kind"),
-    [
-        ([{"head": "b" * 40}], "pr_moved"),
-        ([{"base": "develop"}], "pr_moved"),
-        ([github.GitHubError("読めない", 502)], "pr_reread_failed"),
-    ],
-)
-def test_a_pr_that_moves_before_the_note_is_not_judged_or_noted(
-    repo: Path, reads: list[Any], kind: str, notes: list[tuple[int, str]]
-) -> None:
-    # LLM の回答を待つ間に PR が動いたら、判定を捨ててコメントを書かない（書く直前に 1 回だけ読み直す）
+MOVES = [
+    ({"head": "b" * 40}, "pr_moved"),
+    ({"base": "develop"}, "pr_moved"),
+    ({"body": "書き換えた本文"}, "pr_moved"),
+    (github.GitHubError("読めない", 502), "pr_reread_failed"),
+]
+
+
+@pytest.mark.parametrize(("change", "kind"), MOVES)
+def test_a_pr_that_moved_before_the_llm_does_not_start_it(repo: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
+    # 2 回目の読み取り（LLM を起動する直前）で head・マージ先・本文が変わった・読めない → LLM を起動せず、コメントも書かない
     ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": reads}), ask)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": [change]}), ask)
+    assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
+    assert ask.calls == [] and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+
+
+@pytest.mark.parametrize(("change", "kind"), MOVES)
+def test_a_pr_that_moves_while_the_llm_answers_is_not_noted(repo: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
+    # 3 回目の読み取り（コメントを書く直前）で変わった → 判定を捨ててコメントを書かない
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": [{}, change]}), ask)
     assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
     assert len(ask.calls) == 1 and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
 

@@ -54,6 +54,14 @@ class GateError(Exception):
     """判定を打てない（PR が無い・LLM が回答しない）。承認ゲートは省かずに人へ問う。"""
 
 
+class _Moved(Exception):
+    """LLM を起動する直前に PR が動いていた・読み直せなかった。`outcome` は止まった結果（コメントを書かない）。"""
+
+    def __init__(self, outcome: dict[str, Any]) -> None:
+        super().__init__(outcome["stopped_by"]["kind"])
+        self.outcome = outcome
+
+
 def boundary_paths(root: Path, ref: str) -> tuple[str, ...]:
     """コミット `ref` の進め方の設定のレッドラインのパス（設定が無ければ空。形が壊れていれば `jsonfile.JsonFileError`）。
 
@@ -162,11 +170,16 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     return f"{text}（診断の記録 {ident}）"
 
 
-def judge_with(ask: Ask) -> mvv.Judge:
-    """`mvv.mvv_validate_sprint` へ渡す判定の関数。回答の判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。"""
+def judge_with(ask: Ask, before: Optional[Callable[[], None]] = None) -> mvv.Judge:
+    """`mvv.mvv_validate_sprint` へ渡す判定の関数。回答の判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。
+
+    `before` は LLM を起動する直前に呼ぶ確かめ（記録を再利用して LLM を呼ばないときは呼ばない）。例外で起動を止める。
+    """
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
+        if before is not None:
+            before()
         got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT))
         if not got.ok:
             raise GateError(f"MVV 判定の回答が無い: {got.cause}")
@@ -194,22 +207,39 @@ class _Judging:
         out = mm.stop_outcome(self.gate, kind, why, self.pull.head_sha)
         return _recorded(self.hub, self.number, out, self.where) if noted else out
 
-    def posted_if_current(self, out: dict[str, Any]) -> dict[str, Any]:
-        """手順 (9): PR を読み直し、head とマージ先が (1) のままなら結果 `out` を PR のコメントへ書く。
+    def moved(self) -> Optional[dict[str, Any]]:
+        """PR を読み直し、判定の材料にした head・マージ先・本文のどれかが (1) と違えば、止まった結果（コメントを書かない）を返す。
 
-        差分を読んだ後の結果（判定・材料に載らない差分・LLM の無回答）は、LLM を待つ間に PR が更新されうるので、書く直前に
-        1 回だけ読み直す。動いていた・読めなければ結果を捨て、コメントを書かずに止める（更新前の差分への判定を今の変更への判定と
-        読ませない。#3959）。
+        本文も材料なので照らす（本文の編集では head が変わらない）。読み直せないときも、材料が今の PR と同じか確かめられないので止める。
+        マージ先のブランチの HEAD が進んだかは照らさない（判定はベースのコミット `snap.commit` に固定し、その HEAD と照らすのは
+        #4106 が判定を使う時点である）。
         """
         try:
             again = self.hub.pull(self.number)
         except GitHubError as exc:
-            why = ["判定の後に PR を読み直せない: " + self.text("pr_reread_failed", exc)]
+            why = ["判定の間に PR を読み直せない: " + self.text("pr_reread_failed", exc)]
             return self.stopped("pr_reread_failed", why, noted=False)
-        if (again.head_sha, again.base_ref) != (self.pull.head_sha, self.pull.base_ref):
-            moved = f"{self.pull.base_ref}@{self.pull.head_sha} → {again.base_ref}@{again.head_sha}"
-            return self.stopped("pr_moved", [self.text("pr_moved", moved)], noted=False)
-        return _recorded(self.hub, self.number, out, self.where)
+        if (again.head_sha, again.base_ref, again.body) == (self.pull.head_sha, self.pull.base_ref, self.pull.body):
+            return None
+        moved = f"{self.pull.base_ref}@{self.pull.head_sha} → {again.base_ref}@{again.head_sha}"
+        if again.body != self.pull.body:
+            moved += "（本文が変わった）"
+        return self.stopped("pr_moved", [self.text("pr_moved", moved)], noted=False)
+
+    def still_current(self) -> None:
+        """手順 (7) の前: LLM を起動する直前に `moved` で確かめ、動いていれば `_Moved` で起動を止める。"""
+        stop = self.moved()
+        if stop is not None:
+            raise _Moved(stop)
+
+    def posted_if_current(self, out: dict[str, Any]) -> dict[str, Any]:
+        """手順 (9): `moved` で確かめ、材料が (1) のままなら結果 `out` を PR のコメントへ書く。
+
+        LLM の回答を待つ間にも PR は更新されうるので、書く直前にも確かめる。動いていた・読めなければ結果を捨て、コメントを書かずに
+        止める（更新前の材料への判定を今の変更への判定と読ませない。#3959）。
+        """
+        stop = self.moved()
+        return stop if stop is not None else _recorded(self.hub, self.number, out, self.where)
 
 
 def _base_snapshot(j: _Judging, remote: str, inputs: Mapping[str, Any]) -> tuple[mvv.Snapshot, MvvFacts, str]:
@@ -276,9 +306,13 @@ def _judged(
         "変えたファイルと差分": mm.patch_material(rows),
     }
     asked = {"gate": gate_name, "question": mm.SYSTEM, "material": mm.prompt(mm.redlines(shared, project), materials)}
-    # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）
+    # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）。LLM を起動する直前に PR を照らし、
+    # 動いていれば起動しない（記録を再利用するときは LLM を起動しないので照らさない）
     try:
-        row, unrecorded = mvv.mvv_validate_sprint(root, asked, judge_with(ask), reuse=held is not None, rows=held, broken=broken)
+        judge = judge_with(ask, before=j.still_current)
+        row, unrecorded = mvv.mvv_validate_sprint(root, asked, judge, reuse=held is not None, rows=held, broken=broken)
+    except _Moved as stop:
+        return stop.outcome
     except GateError as exc:
         why = ["MVV 判定を打てない: " + j.text("llm_no_answer", exc), *refusals(facts, gate_name)]
         return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False))

@@ -544,14 +544,14 @@ def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str
     比較の REST を 1 回打つ。ページを指定すると `files` は 1 ページ目に比較の全体の分（`COMPARE_FILES_CAP` 件まで）が載り、
     コミットの一覧だけがページで区切られるので、`page=1&per_page=1` で使わないコミットの一覧を 1 件に抑える。
     `files` が `COMPARE_FILES_CAP` 件に届いたときと、比較の API の認証情報に権限が無い（`COMPARE_DENIED`。非公開のリポジトリで
-    Contents の読み取りを持たない API の認証情報）ときは、head を取得して同じ組を手元の git（`--merge-base`）で読み直す。
+    Contents の読み取りを持たない API の認証情報。`compare_denied`）ときは、head を取得して同じ組を手元の git（`--merge-base`）で読み直す。
     基点を SHA で固定するので、読む間にマージ先が進んでも差分は変わらない。
     比較を読めなければ `GitHubError`、手元で読めなければ `GitError`・`mvv_material_decide.DiffError`。
     """
     try:
         got = hub.rest("GET", f"/repos/{hub.repo}/compare/{base}...{head}", params={"page": 1, "per_page": 1})
     except GitHubError as exc:
-        if exc.status not in COMPARE_DENIED:
+        if not compare_denied(exc):
             raise
         return _local_files(g, remote, base, head)
     files = got.get("files") if isinstance(got, dict) else None
@@ -560,6 +560,16 @@ def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str
     if len(files) < COMPARE_FILES_CAP:
         return files
     return _local_files(g, remote, base, head)
+
+
+def compare_denied(exc: GitHubError) -> bool:
+    """比較の API の失敗が、権限が無いことによる拒否か（手元の git で読み直してよいか）。
+
+    状態が `COMPARE_DENIED` でも、GitHub のアダプターがレート制限と識別した失敗（`quota`・`secondary`・`retry_after` のどれかを
+    持つ）は拒否でない。手元の git へ切り替えると、上限に当たるたびに `git fetch` と `git diff` が増えるので、そのまま投げる。
+    """
+    limited = exc.quota is not None or exc.secondary or exc.retry_after is not None
+    return exc.status in COMPARE_DENIED and not limited
 
 
 def _local_files(g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:

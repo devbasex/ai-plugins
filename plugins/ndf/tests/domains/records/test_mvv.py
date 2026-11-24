@@ -361,10 +361,22 @@ def test_compare_files_reads_with_git_when_the_api_token_cannot_read_the_compari
     assert g.calls == [("fetch", "origin", "h" * 40), ("diff", "b" * 40, "h" * 40, *mvv.LOCAL_DIFF)]
 
 
-def test_compare_files_does_not_read_with_git_on_other_failures() -> None:
+def _limited(kind: str) -> GitHubError:
+    if kind == "quota":
+        return GitHubError("上限", 403, quota="rest")
+    if kind == "retry_after":
+        return GitHubError("上限", 403, retry_after=60.0)
+    made = GitHubError("二次の上限", 403)
+    made.secondary = True
+    return made
+
+
+@pytest.mark.parametrize("refused", [GitHubError("落ちた", 502), _limited("quota"), _limited("retry_after"), _limited("secondary")])
+def test_compare_files_does_not_read_with_git_on_other_failures(refused: GitHubError) -> None:
+    # レート制限と識別できた 403 は拒否でないので、手元の git へ切り替えずにそのまま投げる
     g = CountingGit(git.Completed(0, "", ""))
     with pytest.raises(GitHubError):
-        mvv.compare_files(CompareHub([], refused=GitHubError("落ちた", 502)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+        mvv.compare_files(CompareHub([], refused=refused), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
     assert g.calls == []
 
 
