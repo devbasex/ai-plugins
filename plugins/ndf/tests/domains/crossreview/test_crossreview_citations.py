@@ -284,20 +284,23 @@ def test_only_the_round_that_reads_the_whole_diff_keeps_it(repos: Repos, wt: Pat
     利用者の設定によらない同じ形になる。"""
     sh(wt, "config", "diff.noprefix", "true")
     prepared: list[drive._Prepared] = []
+    targets: list[Target] = []
     prepare = drive._prepare_round
 
-    def kept(*args: Any) -> drive._Prepared:
-        prepared.append(prepare(*args))
+    def kept(run: Any, round_no: int) -> drive._Prepared:
+        prepared.append(prepare(run, round_no))
+        targets.append(run.last_target)
         return prepared[-1]
 
     monkeypatch.setattr(drive, "_prepare_round", kept)
     fake = Fake(tmp_path / "st", {"codex": [["直す所"], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt, "--purpose", "check")
     first, second = prepared
-    assert (first.scope.kind, first.full_diff) == ("full", first.diff)
-    assert (second.scope.kind, second.full_diff) == ("since", None)
+    first_target, second_target = targets
+    assert (first.scope.kind, first_target.full_diff) == ("full", first.diff)
+    assert (second.scope.kind, second_target.full_diff) == ("since", None)
     body = sh(wt, "show", f"origin/{BRANCH}:doc.md")
-    assert first.docs == second.docs == {"doc.md": body}
+    assert first_target.docs == second_target.docs == {"doc.md": body}
     (file,) = changes._diff_files(first.diff.read_text(encoding="utf-8"))
     assert (file.path, file.base_path) == ("doc.md", "doc.md") and "足した" in file.added.values()
     assert [f.path for f in changes._diff_files(second.diff.read_text(encoding="utf-8"))] == ["fix0.txt"]

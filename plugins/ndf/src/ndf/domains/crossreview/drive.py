@@ -661,8 +661,7 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
 
 class _Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
-    PR の全差分で変わったファイル・比較基点の merge-base の SHA・head の Markdown の本文・全差分のファイル（差分のファイルが
-    PR の全差分でなければ None））。"""
+    PR の全差分で変わったファイル・比較基点の merge-base の SHA）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -671,8 +670,6 @@ class _Prepared(NamedTuple):
     diff: Path
     files: tuple[str, ...]
     base: str
-    docs: Mapping[str, str]
-    full_diff: Optional[Path]
 
 
 def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
@@ -703,7 +700,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
         _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     else:
         _check_unsent(run, head)
-    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, changed.docs, full_diff)
+    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
 
 
 def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:
