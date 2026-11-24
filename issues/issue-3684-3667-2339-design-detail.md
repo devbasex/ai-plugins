@@ -366,7 +366,7 @@ plugins/ndf/
 
 | 種類 | 核での種類の名前 | スキーマ | 書く入口 | 読む入口 |
 | --- | --- | --- | --- | --- |
-| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_checked`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読み、形は前の呼び出しより後に足された行だけ確かめる））・`jsonl.read_rows`（呼び手は `usage.py:110`・`domains/relay/context_report.py:57`） |
+| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読み、形はその `agent_id` の行だけ確かめる）・`usage.py:110`・`domains/relay/context_report.py:57`） |
 | 記録（MVV の兆候・検証） | `mvv-signals`・`mvv-validation` | `internal/mvv-signals.schema.json`・`internal/mvv-validation.schema.json`（新設） | `jsonl.append_locked`（呼び手は `domains/records/mvv.py:122・142`） | `jsonl.read_rows`（`mvv.py:90・135`） |
 | 記録（文脈の記録） | `context-records` | `internal/context-records.schema.json`（新設） | 書き手のモジュール（実装の単位 4 で `jsonl` へ寄せる） | `jsonl.read_rows`（`domains/relay/context_records.py:168`） |
 | 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append`。`version-shipped` のイベントを組む 2 か所（`control_decide.py:284` の出荷の取り込みと `:321` の明示の出荷）はどちらも `version=` を `product_version=` に変える。旧い欄 `version`（文字列）を `product_version` へ移すのは、既存の行を読む `migrate` だけで、書き手に読み替えを置かない | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
@@ -376,7 +376,7 @@ plugins/ndf/
 | 工程の表 | — | `workflow/progress.schema.json`（既存の `version: const 1`） | 契約の一部（人が書く） | `progress/model.py` の `require_schema`（変えない） |
 | 結果 | `result` | `schemas/result.schema.json`（任意の `version` を足す） | `contracts/result.py` の `emit`（下の「結果の版と、形の違う結果」） | `progress/invoke.py` の `read_report`（子プロセスの標準出力の最後の行）と `_call_skill`（`invoke.py:780`。Skill の回答）。どちらも `result.errors` で確かめている入口で、版の扱いを下の項に置く |
 
-`jsonl` の 4 つの関数（`read_rows`・`read_checked`・`append`・`append_locked`）は種類（`kind`）を必須の引数に持つ。表の呼び手はすべて種類を渡す（`usage.py:77` の読み戻しも `kind="usage"`）。`jsonl.parse_lines` は種類を持たない行の分解だけを残す。今の呼び手（`usage.py:51` の `transcript_usage` と `relay/context_records.py:267`）は Claude の会話ログ（外部の形）を読むので、核を通さない。
+`jsonl` の 3 つの関数（`read_rows`・`append`・`append_locked`）は種類（`kind`）を必須の引数に持つ。表の呼び手はすべて種類を渡す（`usage.py:77` の読み戻しも `kind="usage"`）。`jsonl.parse_lines` は種類を持たない行の分解だけを残す。今の呼び手（`usage.py:51` の `transcript_usage` と `relay/context_records.py:267`）は Claude の会話ログ（外部の形）を読むので、核を通さない。
 
 **`read_rows` の不合格の行の扱い: 止めずに、理由つきで数えて返し、呼び手が結果に出す。** 追記だけの記録（使用量・MVV・文脈の記録）は、1 行の欠けで集計や判断の全体を止めると、これまで動いていた読み出しが止まる。一方、数えるだけで呼び手が捨てると、壊れた行が黙って欠ける。そこで次のように分ける。
 

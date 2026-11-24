@@ -2,7 +2,7 @@
 
 使用量ログは 1 本の JSONL（表 ndf-files の usage-log-file）で、書き手（hook かスクリプトか）によらず同じ保存先に書く。
 同じ `agent_id` の差を書くときは、使用量ログの錠の中で既存の行を読んでから書く（別々のサブエージェントの hook が
-同時に走るため）。形は、前の停止より後に足された行だけ確かめる（`jsonl.read_checked`）。書き込みの失敗は hook を落とさず、標準エラーへ 1 行出して続ける（I5）。
+同時に走るため）。形は、その `agent_id` の行だけ確かめる（錠の中で使用量ログ全体を検証しない）。書き込みの失敗は hook を落とさず、標準エラーへ 1 行出して続ける（I5）。
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def record_subagent(
     """終わったサブエージェント 1 回を使用量ログへ 1 行書き、書いた行を返す（書けなければ None）。
 
     同じ `agent_id` の 2 回目以降は、前までの行の合計との差を書く。会話の記録を読めなければ usage は unknown。
-    使用量ログに読めない行があれば `warnings` へ足す。新しいバージョンの行があれば書かずに `InternalError`。
+    使用量ログに JSON として読めない行か、形の違うその `agent_id` の行があれば `warnings` へ足す。新しいバージョンの行があれば書かずに `InternalError`。
     """
     agent = payload.get("agent_id")
     transcript = payload.get("agent_transcript_path")
@@ -77,7 +77,7 @@ def record_subagent(
         path = usage_log_path(env)
         with jsonl.lock(path):
             total = transcript_usage(Path(transcript))
-            prior, broken = jsonl.read_checked(path, kind="usage", wanted=lambda r: r.get("agent_id") == agent)
+            prior, broken = jsonl.read_rows(path, kind="usage", wanted=lambda r: r.get("agent_id") == agent)
             warnings += jsonl.broken_items(path, broken)
             usage: Any = ud.stop_delta(prior, agent, total).as_dict() if isinstance(total, ud.Usage) else ud.UNKNOWN
             row = {"at": jsonl.now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}

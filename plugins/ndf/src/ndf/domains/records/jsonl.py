@@ -6,11 +6,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import sys
-import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,87 +31,27 @@ class Broken(NamedTuple):
     raw: Optional[dict[str, Any]]
 
 
-def read_rows(path: Path, *, kind: str) -> tuple[list[dict[str, Any]], list[Broken]]:
-    """種類 `kind` の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。"""
-    if not path.is_file():
-        return [], []
-    return _read_text(path.read_text(encoding="utf-8"), kind, 1)
+def read_rows(
+    path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool] = lambda row: True
+) -> tuple[list[dict[str, Any]], list[Broken]]:
+    """種類 `kind` の `wanted` が真の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。
 
-
-def read_checked(path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool]) -> tuple[list[dict[str, Any]], list[Broken]]:
-    """`wanted` が真の行と、ファイル全体の除いた行（錠は呼び手が持つ）。形は、前の呼び出しより後に足された行だけ確かめる。
-
-    確かめ終えた位置は `<ファイル>.checked` に置く。位置より前の中身か種類の形が変われば、初めから確かめ直す。新しいバージョンの行が
-    あれば位置を進めずに `InternalError`。位置を書けなくても読んだ結果を返す（次の呼び出しが同じ所から確かめ直す）。
+    `wanted` が偽の行はバージョンだけを見て、形を確かめない（錠の中で一部の行だけを使う読み手が、全部の行の検証を払わない）。
     """
     if not path.is_file():
         return [], []
-    data, mark, shape = path.read_bytes(), Path(f"{path}.checked"), internal.fingerprint(kind)
-    size, broken = _load_mark(mark, data, shape)
-    rows = _known_rows(data[:size], kind, wanted, {b.line for b in broken})
-    added, bad = _read_text(data[size:].decode("utf-8"), kind, data.count(b"\n", 0, size) + 1)
-    # 書きかけの最後の行は次の追記で変わるので、改行で終わる所までを確かめ終えた位置にする
-    end = data.rfind(b"\n") + 1
-    if end > size:
-        whole = data.count(b"\n")
-        _save_mark(mark, data[:end], shape, [*broken, *(b for b in bad if b.line <= whole)])
-    return rows + [r for r in added if wanted(r)], broken + bad
-
-
-def _digest(data: bytes, shape: str, broken: list[Broken]) -> str:
-    """確かめ終えた中身・種類の形・位置・除いた行をまとめて見分ける値（どれかが変われば別の値になる）。"""
-    head = json.dumps([shape, len(data), [[b.line, b.reason] for b in broken]])
-    return hashlib.sha256(head.encode("utf-8") + data).hexdigest()
-
-
-def _save_mark(mark: Path, data: bytes, shape: str, broken: list[Broken]) -> None:
-    """確かめ終えた位置を書く。新しく作った一時ファイルを付け替えるので、`mark` がシンボリックリンクでもリンク先を変えない。"""
-    body = {"size": len(data), "digest": _digest(data, shape, broken), "broken": [[b.line, b.reason] for b in broken]}
-    try:
-        fd, name = tempfile.mkstemp(prefix=f".{mark.name}.", suffix=".tmp", dir=mark.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(json.dumps(body, ensure_ascii=False))
-            os.replace(name, mark)
-        except OSError:
-            os.unlink(name)
-            raise
-    except OSError as exc:  # 位置は作り直せるので、書けなくても記録の読み書きを止めない
-        print(f"記録を確かめ終えた位置を書けない: {exc}", file=sys.stderr)
-
-
-def _load_mark(mark: Path, data: bytes, shape: str) -> tuple[int, list[Broken]]:
-    """確かめ終えた位置と、そこまでの除いた行。無い・読めない・今の中身と合わないなら初めから（0）。"""
-    try:
-        held = json.loads(mark.read_text(encoding="utf-8"))
-        size, digest = int(held["size"]), held["digest"]
-        broken = [Broken(int(line), str(reason), 0, None) for line, reason in held["broken"]]
-    except (OSError, ValueError, TypeError, KeyError):  # 位置は作り直せるので、読めなければ初めから確かめる
-        return 0, []
-    return (size, broken) if digest == _digest(data[:size], shape, broken) else (0, [])
-
-
-def _known_rows(data: bytes, kind: str, wanted: Callable[[Mapping[str, Any]], bool], skip: set[int]) -> list[dict[str, Any]]:
-    """形を確かめ終えた行のうち `wanted` が真のもの（今のバージョンの形へ移すだけで、形は確かめない）。"""
-    rows = []
-    for number, line in enumerate(data.decode("utf-8").split("\n"), 1):
-        if line.strip() and number not in skip:
-            raw = json.loads(line)
-            if wanted(raw):
-                rows.append(internal.migrate(kind, raw))
-    return rows
-
-
-def _read_text(text: str, kind: str, first: int) -> tuple[list[dict[str, Any]], list[Broken]]:
     rows: list[dict[str, Any]] = []
     broken: list[Broken] = []
-    for number, line in enumerate(text.split("\n"), first):
+    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         raw: Any = None
         try:
             raw = _object(line)
-            rows.append(internal.read_record(kind, raw))
+            if wanted(raw):
+                rows.append(internal.read_record(kind, raw))
+            else:
+                internal.migrate(kind, raw)
         except internal.InternalError as exc:
             if exc.kind != "invalid":
                 raise
