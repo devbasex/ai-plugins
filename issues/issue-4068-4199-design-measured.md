@@ -58,7 +58,7 @@
 | 仕組み | 起こす主体 | 間隔 | 効く会話 | 根拠のファイル | 実測（中継の子、2026-11-15〜11-24） |
 | --- | --- | --- | --- | --- | --- |
 | `ndf lanes wait` | 待ちのコマンドが戻り、Claude Code がバックグラウンドの作業の完了を知らせる。会話は結果の `next` で張り直す（`parallel.md` の「手順」の 2） | 知らせが無ければ 540 秒で戻る（引数で変えられない） | オーガナイザー。レーンの conductor も行の順を待つときに打つ | `plugins/ndf/contracts/limits/parallel-wait.poll.json`（`seconds` 540）・`src/ndf/progress/plan/wait.py` | 738 回戻った。中央値 9.0 分・最長 9.4 分 |
-| `ndf plan wait`・`ndf progress wait` | 同上（`waiting.md` の「結果の読み方」の終了コード 3 `wait_timeout` の後に同じ `wait` を打つ） | `--timeout` の既定 600 秒（引数で変えられる） | プランを流す conductor・レーンの conductor | `contracts/limits/supervise.wait-default.json`・`src/ndf/core/plan/cli.py` の 237 行・`src/ndf/progress/run.py` の 915 行 | `progress wait` 193 回、最長 25.2 分。`plan wait` 0 回。最長の 25.2 分は `--timeout 3300` を指定した 1 回（2026-11-24 14:09 JST に作業の知らせで戻った）で、既定のまま打った呼び出しは最長 10.0 分（2026-11-24 に全会話の記録から引数ごとに数え直した。258 回） |
+| `ndf plan wait`・`ndf progress wait` | 同上（`waiting.md` の「結果の読み方」の終了コード 3 `wait_timeout` の後に同じ `wait` を打つ） | `--timeout` の既定 600 秒（引数で変えられる） | プランを流す conductor・レーンの conductor | `contracts/limits/supervise.wait-default.json`・`src/ndf/core/plan/cli.py` の 237 行・`src/ndf/progress/run.py` の 915 行 | `progress wait` 193 回、最長 25.2 分。`plan wait` 0 回。最長の 25.2 分は `--timeout 3300` を指定した 1 回（作業の知らせで戻った）で、既定のまま打った呼び出しは最長 10.0 分（2026-11-24 に全会話の記録から引数ごとに数え直した。258 回） |
 | `ndf ci watch` | 同上 | `--budget` が必須で既定は無い。ランナーの割り当て待ち（最大 1,800 秒）は予算に数えない | CI を待つ conductor | `src/ndf/ci_cli.py` の 43 行・`contracts/limits/ci.runner-wait.json` | 91 回、最長 6.0 分 |
 | バックグラウンドの Agent（supervisor・worker）の知らせ | Claude Code。終わったときと、Agent が自分のバックグラウンドの作業を待って応答を終えたとき（「is waiting on its own background work」） | 決まった間隔は無い。工程の長さで決まる | supervisor に工程を任せた conductor | `waiting.md` の「supervisor の報告の待ち」 | 起動から知らせまで（知らせに `tool-use-id` が付いた 239 回）: 中央値 5.2 分・最長 128 分・60 分超 4 回 |
 | `/goal` の確かめ（Goal check-in） | Claude Code。`/goal` の条件があり、バックグラウンドの作業が残る会話へ知らせる | 実測で中央値 66.2 分・90 パーセンタイル 255 分。続けて満たされないと「idle check-ins paused until your next message」で止まる（15 回） | `/goal` で始めたオーガナイザーと conductor | Claude Code の振る舞い（NDF の設定は無い） | 230 回。間隔が 60 分を越えたのは 96 回 |
@@ -91,15 +91,15 @@
 - 作業を待つ 10 回のうち 9 回はレーンの conductor で、残る 1 回は `/goal` で始めた中継の下の会話だった。間の中央値は 120 分、`S` の中央値は 179,549 token
 - **監視だけを待って 1 時間を越えた回は、どの範囲でも 0 回だった。** 待ちのコマンドは 2026-11-15 以後の 1,022 回のどれも 26 分以内に戻った
 
-例（時刻は JST）:
+例（会話の ID・レーンの名前・時刻は伏せ、間と文脈の量だけを残した）:
 
-| 会話 | 役割 | 待ちの始まり | 間 | `S` | 待っていたもの | 次に起こしたもの |
-| --- | --- | --- | ---: | ---: | --- | --- |
-| `df6e1cce` | レーン `llimit` の conductor | 11-21 21:07 | 128 分 | 92,537 | 実装のフェーズの supervisor（Agent）1 つだけ。監視は張っていない | supervisor の完了の知らせ（23:15）。その間に知らせは無かった |
-| `3e089ab0` | レーン `lracct` の conductor | 11-22 04:26 | 175 分 | 310,503 | supervisor（Agent）2 つ。supervisor の側が完了の知らせを待って止まった | オーガナイザーの入力（07:21） |
-| `b69ae895` | レーンの conductor | 11-20 13:03 | 134 分 | 417,545 | 実装の supervisor（Agent）と、PR の状態を待つ `until` のループ | バックグラウンドの Bash の完了の知らせ |
-| `6f3fef3b` | オーガナイザー（計画 p12・p9） | 11-22 03:40 | 200 分 | 276,260 | `AskUserQuestion` で設計承認を問い、回答を待った。`ndf lanes wait` は張っていたが、質問の表示中は知らせで応答を始めない | 利用者の回答（07:01） |
-| `554db695` | オーガナイザー（計画 p9） | 11-24 04:25 | 176 分 | 219,501 | `AskUserQuestion` でリリース承認を問い、回答を待った | 利用者の回答（07:21） |
+| 例 | 役割 | 間 | `S` | 待っていたもの | 次に起こしたもの |
+| --- | --- | ---: | ---: | --- | --- |
+| A | レーンの conductor | 128 分 | 92,537 | 実装のフェーズの supervisor（Agent）1 つだけ。監視は張っていない | supervisor の完了の知らせ。その間に知らせは無かった |
+| B | レーンの conductor | 175 分 | 310,503 | supervisor（Agent）2 つ。supervisor の側が完了の知らせを待って止まった | オーガナイザーの入力 |
+| C | レーンの conductor | 134 分 | 417,545 | 実装の supervisor（Agent）と、PR の状態を待つ `until` のループ | バックグラウンドの Bash の完了の知らせ |
+| D | オーガナイザー | 200 分 | 276,260 | `AskUserQuestion` で承認を問い、回答を待った。`ndf lanes wait` は張っていたが、質問の表示中は知らせで応答を始めない | 利用者の回答 |
+| E | オーガナイザー | 176 分 | 219,501 | `AskUserQuestion` で承認を問い、回答を待った | 利用者の回答 |
 
 ### 起こす対象を縮めた後の費用の見込み（2026-11-24）
 
