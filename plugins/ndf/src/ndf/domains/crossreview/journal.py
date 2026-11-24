@@ -120,6 +120,11 @@ def _blocking(row: dict[str, Any]) -> bool:
     return not row.get(fin.REDLINE) and criteria_decide.blocking(criteria_decide.severity_of(row.get("severity")))
 
 
+def _made_by_ndf(row: Mapping[str, Any]) -> bool:
+    """NDF が機械で確かめて作った指摘か。"""
+    return row.get("by") == BY_NDF
+
+
 def _same_mvv(held: Optional[str], now: Optional[str]) -> bool:
     """見送ったときの MVV（`held`）が今回（`now`）と同じか。識別子の無い見送り（識別子を書く前のバージョンの NDF が残した
     もの・どの MVV での見送りか分からないもの）は、今も MVV が無いときだけ同じとみなす。"""
@@ -309,7 +314,7 @@ class FindingJournal:
         記録のあるラウンドのまま残す。PR のスレッドは、ラウンドの記録の head に付けるためである）。"""
         if errors is None:
             return False
-        mine = [f for f in self.rows.values() if f.get("by") == BY_NDF]
+        mine = [f for f in self.rows.values() if _made_by_ndf(f)]
         held = {f.get(CITATION_KEY): f for f in mine}
         found = {citation_key(e): e for e in reversed(errors)}
         before = {str(f["id"]): dict(f) for f in mine}
@@ -318,7 +323,7 @@ class FindingJournal:
         for row in mine:
             if row.get("outcome") == fin.UNRESOLVED and row.get(CITATION_KEY) not in found:
                 row |= {"outcome": fin.FIXED, "reason": None, JUDGED: mvv}
-        return before != {str(f["id"]): f for f in self.rows.values() if f.get("by") == BY_NDF}
+        return before != {str(f["id"]): f for f in self.rows.values() if _made_by_ndf(f)}
 
     def _cite(
         self, row: Optional[dict[str, Any]], key: str, error: Mapping[str, Any], mvv: Optional[str], round_no: int, recorded: bool
