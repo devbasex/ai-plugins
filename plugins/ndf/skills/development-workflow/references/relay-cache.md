@@ -31,6 +31,6 @@ supervisor の知らせが届いた応答は、文脈を読み出しの値段で
 費用は各行に書いた倍率で出すので、方針を直した後も過去の行の費用は変わらない。
 
 1. `metrics.hit_rate_by_age` で、当たりの率が 95% を下回る `age` の幅が起床の時点（既定 50 分）を含めば、`cache.wake` の `seconds`（余白）を広げる
-2. `metrics.d_median`（起床の書き込みと出力の費用の中央値）で `cache.wake-cost` の `count` を直す
+2. `metrics.d_median`（起床の書き込みと出力の費用の中央値）をもとに、`cache.wake-cost` の `count` を直す。`count` は 1 以上の整数しか受け付けないため、レポートの値をそのまま写さない。中央値が数値なら、小数点以下を切り上げ、1 未満なら 1 にした整数を `count` に設定する。`null`（費用の分かる起床が 1 件も無い）なら設定を変えない
 3. `metrics.by_version` で、作業を待つ Stop（`work_stops`）が 20 回以上たまったバージョンの `lost_ratio` が 0.1 を越えたら、`cache.rewake` の `versions` からそのバージョンを外す Pull Request を作る
 4. `estimated_avoided_*` は避けた書き直しの推定（起床しなかった場合は観測できない）で、確かめた額として読まない。`unpriced_waits`（費用の分からない起床を持つ待ち）は推定に入らない
