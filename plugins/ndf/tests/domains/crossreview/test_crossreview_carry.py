@@ -121,7 +121,11 @@ def test_issue_4090_5_judgements_of_an_earlier_mvv_are_dropped() -> None:
 def test_carried_item_missing_from_the_mvv_is_an_ordinary_finding_with_a_warning() -> None:
     listed, _ = prior_decide.recorded([_published(_left())])
     journal = _resumed(listed, items=("Mission", "C7"))
-    assert _marks(journal) == {VALUE: {}, REDLINE: {"mvv": "C7", "redline": True, "redline_items": ["C7"], "judged_mvv": V11}, CITATION: {"judged_mvv": V11}}
+    assert _marks(journal) == {
+        VALUE: {},
+        REDLINE: {"mvv": "C7", "redline": True, "redline_items": ["C7"], "judged_mvv": V11},
+        CITATION: {"judged_mvv": V11},
+    }
     assert journal.rows["p-r1-1"]["severity"] == "minor"
     [warning] = journal.warnings
     assert "p-r1-1" in warning and "MVV の項目" in warning and "p-r1-2" not in warning
@@ -146,6 +150,59 @@ def test_record_lists_light_findings_only_when_they_wait_for_a_person_or_were_ma
     assert [i["id"] for i in report_decide.open_items(block)] == ["r1-2", "r1-n1"]
     # 根拠の記述の誤りを見分ける値は、手元の状態ファイルだけに持つ
     assert "citation_key" not in block and "k" * 64 not in block
+
+
+# --- 既にある指摘に重ねる判定 -------------------------------------------------------------------
+
+PLAIN = {"text": REDLINE, "severity": "major", "impact": IMPACT, "by": "codex", "path": "doc.md"}
+
+
+def _held(outcome: str = fin.UNRESOLVED, mvv: Optional[str] = None) -> FindingJournal:
+    """同じ本文の指摘を普通の指摘（`mvv` なら `Value 5`）として持つ、元の保存先のジャーナル。"""
+    journal = FindingJournal()
+    journal.enter(1, [PLAIN if mvv is None else {**PLAIN, "mvv": "Value 5"}], ITEMS, mvv)
+    journal.rows["r1-1"]["outcome"] = outcome
+    return journal
+
+
+@pytest.mark.parametrize("outcome", [fin.UNRESOLVED, fin.FIXED, fin.SKIPPED])
+@pytest.mark.parametrize("judged", [None, V11, V12])
+def test_redline_in_the_record_is_put_on_the_finding_already_held(outcome: str, judged: Optional[str]) -> None:
+    listed, _ = prior_decide.recorded([_published(_left())])
+    journal = _held(outcome, judged)
+    assert "r1-1" not in journal.carry(listed, ITEMS, V11) and journal.merged == ["r1-1"]
+    assert [r["id"] for r in journal.rows.values() if r["text"] == REDLINE] == ["r1-1"]
+    assert (_marks(journal)[REDLINE], journal.rows["r1-1"]["outcome"]) == (JUDGED[REDLINE], fin.UNRESOLVED)
+    assert REDLINE not in _handed(journal) and journal.revived == ([] if outcome == fin.UNRESOLVED else ["r1-1"])
+    # 同じ記録をもう一度読んでも変わらず、人が閉じた後も戻さない
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    assert journal.carry(listed, ITEMS, V11) == [] and journal.merged == []
+    assert journal.rows["r1-1"]["outcome"] == fin.FIXED
+
+
+def test_judgement_of_another_mvv_in_the_record_is_not_put_on_the_finding_already_held() -> None:
+    journal = _held()
+    journal.carry(prior_decide.recorded([_published(_left())])[0], ITEMS, V12)
+    assert (_marks(journal)[REDLINE], journal.merged, REDLINE in _handed(journal)) == ({}, [], True)
+
+
+def test_redline_judged_on_a_tracked_thread_reaches_the_first_state_directory(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """別の保存先が、状態ファイルの追うスレッドの指摘をレッドラインと判定した後に、元の保存先で再開しても修正担当へ渡さない。"""
+    _push_base(repos, text=REDLINE_BODY)
+    plain = {**MAJOR, "path": "doc.md"}
+    first = Recording(tmp_path / "st", {"codex": [[plain]], "kiro": [[]]}, decide=lambda fid: None)
+    _run(capsys, monkeypatch, first, wt, "--base", "main", "--max-rounds", "1")
+    hub.port.existing = [Remark("comment", "ndf", hub.comments[-1][2], trusted=True)]
+    other = Recording(tmp_path / "st2", {"codex": [[{**plain, "mvv": "P1"}]], "kiro": [[]]}, decide=lambda fid: None)
+    _run(capsys, monkeypatch, other, wt, "--base", "main", "--max-rounds", "1")
+    hub.port.existing = [Remark("comment", "ndf", hub.comments[-1][2], trusted=True)]
+    again = Recording(tmp_path / "st", {"codex": [], "kiro": []}, decide=lambda fid: None)
+    _, got = _run(capsys, monkeypatch, again, wt, "--base", "main", "--max-rounds", "1")
+    [row] = _state(tmp_path / "st")["findings"]
+    assert (row["mvv"], row["redline"], row["outcome"]) == ("P1", True, fin.UNRESOLVED)
+    assert "人の承認を待つ 1" in got["summary"]
 
 
 # --- 戻した根拠の記述の誤り --------------------------------------------------------------------

@@ -6,6 +6,8 @@
 - スプリント MVV 判定は、MVV 判定の入力の全体（スプリント MVV・プロジェクト MVV・共通原則・指示文）が同じで最新の
   判定が「従う」なら、その判定を再利用する（判定の揺れで開発ループを止めない。#2614）
 - 改訂の兆候は、ベースブランチの設定（現行のバージョン）で数える（#2970）
+- cross-review の指摘のうち、プロジェクト MVV に反するとした指摘と根拠の記述の誤りを記録する形を決める。見送った指摘は
+  改訂の兆候にも数える（#4076）
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, NamedTuple, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.records import files
 from ndf.domains.records import mvv_material_decide as mm
@@ -30,8 +33,26 @@ OVERRIDE_REJECT = "override_reject"
 OVERRIDE_PASS = "override_pass"
 OVERRIDE_UNKNOWN_PASS = "unknown_pass"
 OVERRIDES = (OVERRIDE_REJECT, OVERRIDE_PASS)
+# cross-review の修正担当が、MVV の項目に反する指摘を見送った（「判定できない」と合わせて数える）
+REVIEW_DISPUTED = "review_disputed"
 # MVV 判定の記録の種類（スプリント MVV 判定）
 MVV_VALIDATION_SPRINT = "sprint-mvv"
+# cross-review の指摘の記録の種類
+MVV_REVIEW = "mvv-review"
+# cross-review の指摘（ジャーナルの行）の欄: 反する項目・判定したときの MVV を見分ける値・必ず人の承認が要る操作に当たるかと、
+# 当たる操作の番号
+REVIEW_ITEM, REVIEW_JUDGED, REVIEW_REDLINE, REVIEW_REDLINE_ITEMS = "mvv", "judged_mvv", "redline", "redline_items"
+# 指摘の終わり方。必ず人の承認が要る操作に当たる指摘は、記録では終わり方によらず `REVIEW_REDLINE` にする
+REVIEW_FIXED, REVIEW_DEFERRED, REVIEW_UNRESOLVED = "fixed", "deferred", "unresolved"
+# 同じキーの指摘が 2 件あるとき、後のものほど優先して記録する終わり方の順
+_REVIEW_ORDER = (REVIEW_FIXED, REVIEW_UNRESOLVED, REVIEW_DEFERRED, REVIEW_REDLINE)
+# NDF が機械で確かめて作った指摘（根拠の記述の誤り）の `by`
+BY_NDF = identity.FIXED_WORDS["entrypoint"]
+# 終わり方ごとの、記録に残す自由記述の欄
+_REVIEW_NOTES = {REVIEW_DEFERRED: "reason", REVIEW_REDLINE: "text"}
+# 前の記録と比べる欄（最初の組は MVV と指摘の状態、次の組は記録の中身）
+_REVIEW_STATE = ("head", "outcome", "mvv_version", "sha256")
+_REVIEW_CONTENT = ("item", "reason", "text", "withheld")
 # 判定の行が持つ、判定の中身（承認ゲートの判定が読む。再利用の行へも写す）
 VERDICT_DETAILS = ("reasons", "boundary", "basis")
 # 改訂の設定（mvv.json の settings.revise_after）のキーと、無いときの閾値
@@ -259,20 +280,88 @@ def citation_errors(lines: Sequence[tuple[str, int, str, bool]], catalog: Mappin
 def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], repo: str) -> Signals:
     """設定の現行のバージョンで兆候を数える。覆しは同じ（スプリント状態・承認ゲート・PR）の組を 1 件にまとめる。
 
+    cross-review の指摘の見送りは、同じ（PR・指摘のキー）を 1 件にまとめて「判定できない」に足す（指摘の id は起動ごとに変わる）。
     `repo` はメインディレクトリのパスで、記録の `repo` がこれと同じ行だけを数える。
     """
     version = current_version(decl)
     mine = [r for r in rows if r.get("repo") == repo and r.get("mvv_version") == version]
-    pairs: dict[str, set[tuple[Any, Any, Any]]] = {k: set() for k in (*OVERRIDES, OVERRIDE_UNKNOWN_PASS, UNKNOWN)}
+    pairs: dict[str, set[tuple[Any, ...]]] = {k: set() for k in (*OVERRIDES, OVERRIDE_UNKNOWN_PASS, UNKNOWN, REVIEW_DISPUTED)}
     for r in mine:
         kind = r.get("kind")
         if kind in pairs:
-            pairs[kind].add(_pair(r))
+            pairs[kind].add((r.get("pr"), r.get("key")) if kind == REVIEW_DISPUTED else _pair(r))
     limits = _settings(decl)
     overrides = len(pairs[OVERRIDE_REJECT]) + len(pairs[OVERRIDE_PASS])
-    unknown = len(pairs[UNKNOWN])
+    unknown = len(pairs[UNKNOWN]) + len(pairs[REVIEW_DISPUTED])
     revision_due = overrides >= limits[OVERRIDE_LIMIT_KEY] or unknown >= limits[UNKNOWN_LIMIT_KEY]
     return Signals(version, overrides, len(pairs[OVERRIDE_UNKNOWN_PASS]), unknown, revision_due)
+
+
+class Judged(NamedTuple):
+    """今の MVV で判定した cross-review の指摘 1 件。`row` はジャーナルの行、`outcome` は記録する終わり方、`item` は反する MVV の項目
+    （根拠の記述の誤りは None）。"""
+
+    row: Mapping[str, Any]
+    outcome: str
+    item: Optional[str]
+
+    @property
+    def note(self) -> Optional[str]:
+        """記録に残す自由記述の欄の名前（見送りの理由・必ず人の承認が要る操作に当たる指摘の本文）。"""
+        return _REVIEW_NOTES.get(self.outcome)
+
+    @property
+    def free_texts(self) -> list[str]:
+        """記録に残す自由記述。呼び手が秘密などを伏せる。"""
+        held = [self.row.get(self.note)] if self.note is not None else []
+        held += [self.row.get("cited")] if self.item is None else []
+        return [t for t in held if isinstance(t, str)]
+
+
+def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str) -> list[Judged]:
+    """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。"""
+    out = []
+    for row in rows:
+        if row.get(REVIEW_JUDGED) != mvv or row.get("outcome") not in _REVIEW_ORDER:
+            continue
+        if row.get(REVIEW_REDLINE):
+            out.append(Judged(row, REVIEW_REDLINE, "・".join(row[REVIEW_REDLINE_ITEMS])))
+        elif REVIEW_ITEM in row or row.get("by") == BY_NDF:
+            out.append(Judged(row, row["outcome"], row.get(REVIEW_ITEM)))
+    return out
+
+
+def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
+    """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。"""
+    out: dict[str, Any] = {"id": str(found.row["id"]), "outcome": found.outcome}
+    if found.item is not None:
+        out["item"] = found.item
+    if shown is None:
+        return out | {"withheld": True}
+    held = {"item": found.row.get("cited")} if found.item is None else {}
+    held |= {found.note: found.row.get(found.note)} if found.note is not None else {}
+    return out | {k: shown[v] for k, v in held.items() if isinstance(v, str)}
+
+
+def one_per_key(entries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """同じキーの記録を、人の判断が要る終わり方を優先して 1 件にする（同じ終わり方なら後の記録）。"""
+    out: dict[str, dict[str, Any]] = {}
+    for e in entries:
+        held = out.get(e["key"])
+        if held is None or _REVIEW_ORDER.index(e["outcome"]) >= _REVIEW_ORDER.index(held["outcome"]):
+            out[e["key"]] = e
+    return list(out.values())
+
+
+def review_recorded(last: Optional[Mapping[str, Any]], entry: Mapping[str, Any]) -> bool:
+    """同じキーの最後の記録 `last` があるので、`entry` を書かなくてよいか。
+
+    伏せた記録は、伏せずに書いた同じ状態の記録があれば書かない。伏せた記録の後の、伏せない記録は書く。
+    """
+    if last is None:
+        return False
+    keys = _REVIEW_STATE if entry.get("withheld") and not last.get("withheld") else _REVIEW_STATE + _REVIEW_CONTENT
+    return all(last.get(k) == entry.get(k) for k in keys)
 
 
 def signals_ref(base_branch: str, remote: str) -> str:

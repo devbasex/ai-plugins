@@ -13,7 +13,7 @@ import pytest
 
 from ndf.adapters import git, markdown
 from ndf.contracts import result
-from ndf.domains.crossreview import changes, drive, store
+from ndf.domains.crossreview import changes, drive, fixer, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.changes import DiffFile, Target
 from ndf.domains.records import mvv
@@ -499,7 +499,7 @@ def test_last_fix_is_settled_only_by_the_check_of_its_commit(
 
 
 def _refuse_push(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(drive.push, "push_fix", lambda *a: drive.push.PushResult(False, False, None, None, "断られた", ()))
+    monkeypatch.setattr(fixer.push, "push_fix", lambda *a: fixer.push.PushResult(False, False, None, None, "断られた", ()))
 
 
 @pytest.mark.parametrize("readable", [True, False])
@@ -633,7 +633,7 @@ def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Rep
     def checked(*args: Any) -> Any:
         calls = count_git(monkeypatch)
         got = check(*args)
-        order.append(calls)
+        order.append(list(calls))
         return got
 
     monkeypatch.setattr(drive, "_save", lambda run: order.append("save") or save(run))

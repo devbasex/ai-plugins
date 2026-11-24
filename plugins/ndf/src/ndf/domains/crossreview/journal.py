@@ -167,6 +167,11 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
 
 
+def _judged_items(marks: Mapping[str, Any], items: Sequence[str]) -> list[str]:
+    """前の実行が残した判定 `marks`（`report_decide.MARKS` の欄）の項目のうち、`items`（MVV の項目）にあるもの。"""
+    return [i for i in (marks.get(MVV), *store.list_of(marks, REDLINE_ITEMS)) if criteria_decide.mvv_item(i, items)]
+
+
 def _restore(row: dict[str, Any], c: prior_decide.Carried, items: Sequence[str], mvv: Optional[str]) -> bool:
     """引き継いだ指摘 `row` に、前の実行が残した MVV の判定を戻す。別の MVV での判定は外して履歴に残す。同じ MVV なのに項目が
     `items`（MVV の項目）に無ければ、判定を外して偽。"""
@@ -178,7 +183,7 @@ def _restore(row: dict[str, Any], c: prior_decide.Carried, items: Sequence[str],
         return True
     if row["by"] == BY_NDF:
         return True
-    named = [i for i in (c.mvv, *store.list_of(row, REDLINE_ITEMS)) if criteria_decide.mvv_item(i, items)]
+    named = _judged_items(row, items)
     if not named:
         _unclassify(row)
         return False
@@ -216,6 +221,8 @@ class FindingJournal:
         self.revived: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
+        # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
+        self.merged: list[str] = []
 
     def _next_id(self, round_no: int, by_ndf: bool = False) -> str:
         """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`。NDF が確かめて作った指摘は番号の前に
@@ -330,24 +337,58 @@ class FindingJournal:
 
     def carry(self, carried: Sequence[prior_decide.Carried], items: Sequence[str] = (), mvv: Optional[str] = None) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
-        あれば入れない（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）。`items` は承認済みの
-        MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
+        あれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定だけをその行へ
+        重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
         added = []
         unknown = []
-        keys = {f.get("key") for f in self.rows.values()}
+        self.merged = []
+        by_key = {f.get("key"): f for f in self.rows.values()}
         for c in carried:
             key = oscillation.finding_key(c.text)
-            if c.id in self.rows or key in keys:
+            # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
+            known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
+            if known is not None:
+                place = _located({"path": c.path, "line": c.line}) | {"section": _text(c.section)}
+                if self.merge_marks(str(known["id"]), c._asdict(), items, mvv, place):
+                    self.merged.append(str(known["id"]))
                 continue
-            keys.add(key)
+            if c.id in self.rows:
+                continue
             row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
-            row = self.rows[c.id] = row | located
+            row = self.rows[c.id] = by_key[key] = row | located
             if not _restore(row, c, items, mvv):
                 unknown.append(c.id)
             added.append(c.id)
         self.warnings = [_unknown_items("引き継いだ指摘", unknown)] if unknown else []
         return added
+
+    def merge_marks(
+        self, fid: str, marks: Mapping[str, Any], items: Sequence[str], mvv: Optional[str], place: Optional[Mapping[str, Any]] = None
+    ) -> bool:
+        """前の実行が残した MVV の判定 `marks` のうち、今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。
+
+        閉じた指摘は、必ず人の承認が要る操作と今回初めて分かったときだけ未解決へ戻す。`place`（位置とセクション）があれば別の場所で
+        見つかった再発として戻し（`_revive`）、無ければ開いたままの同じスレッドの指摘として、スレッドを持ったまま戻す。"""
+        row = self.rows[fid]
+        named = _judged_items(marks, items)
+        if not named or mvv is None or marks.get(JUDGED) != mvv or row.get("by") == BY_NDF:
+            return False
+        before = dict(row)
+        closed = row.get("outcome") != fin.UNRESOLVED
+        known = bool(row.get(fin.REDLINE)) and row.get(JUDGED) == mvv
+        if closed and (known or not any(criteria_decide.redline(i) for i in named)):
+            return False
+        if row.get(JUDGED) not in (None, mvv):
+            _unclassify(row)
+        if closed and place is not None:
+            self._revive(row, dict(place), place.get("section"), 0)
+        elif closed:
+            self.reopen([fid])
+            row.pop(SKIPPED_MVV, None)
+        for item in named:
+            _classify(row, {}, item, items, mvv)
+        return before != row
 
     def restate(self, mvv: Optional[str]) -> list[str]:
         """`mvv` と違う MVV で決めた判定を外し、外した指摘の id を返す（出し直されない指摘に前の判定を残さない）。"""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -139,10 +140,13 @@ class FakeHub:
     ロックのファイルを書かない）。"""
 
     def __init__(self):
+        from ndf.domains.crossreview import cli
+
         self.comments: list[tuple[str, int, str]] = []
         self.port = FakePort()
         self.slug = ""
         self.made = 0
+        self.clean: Any = cli._redacted
 
     def make(self, repo_arg, state_repo, cwd):
         from ndf.domains.crossreview import cli
@@ -155,7 +159,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, self.port.at, self.port.at, publishing=lambda pr: contextlib.nullcontext())
+        return cli.Hub(comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext())
 
 
 @pytest.fixture(autouse=True)
