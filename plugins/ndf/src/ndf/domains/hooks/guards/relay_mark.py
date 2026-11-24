@@ -4,6 +4,7 @@
 （`next.json`）を書く。`/goal` の続き（`stop_hook_active` が真）でも同じに書く。作業が残る間はマーカーを書かずに
 変更要求、終わるのを待たせる（変更要求はセッションの数え手が利用者の入力ごとに数える）。監視だけが残るならマーカーを書く
 （次のセグメントを始めるラッパーが、子とともに監視を止める。作業と監視の分け方は `relay_busy.task_kind`）。
+一覧を観測できなかった Stop では、起動ごとの記録に作業が残る間、同じくマーカーを書かずに変更要求する（記録が無ければ書く）。
 
 中継の下では、どの戻りより前に活動（バックグラウンドの作業の一覧とセッション）を `activity.json` へ書く（#4036）。入力の
 `background_tasks` は正規化の前の値を渡し、明示の空のリストと観測できなかった値を分けて残す。終えた応答の
@@ -15,6 +16,8 @@
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.guards import relay_busy
@@ -38,7 +41,7 @@ def check(ctx, svc) -> Verdict | None:
     if block is None:
         return passing(**notes)
     if counted is None:
-        counted = relay_busy.work_count(ctx.background_tasks, relay_busy.table_params())
+        counted = relay_busy.work_count(tasks, relay_busy.table_params()) if isinstance(tasks, list) else _recorded(ctx, directory)
     work, monitors = counted
     if work:
         return pushback(
@@ -49,6 +52,13 @@ def check(ctx, svc) -> Verdict | None:
     wait = float(tables.policy_value("hook.counter-lock", "seconds"))
     written = signals.write_next(directory, ctx.session_id, block, ctx.stop_hook_active, wait)
     return passing(relay_next=written, goal_active=ctx.stop_hook_active, **notes)
+
+
+def _recorded(ctx, directory: Path) -> tuple[int, int]:
+    """起動ごとの記録の（作業の件数, 監視の件数）。記録が無い・この会話のものでないなら 0 件。"""
+    launch = signals.relay_launch(ctx.env)
+    found = signals.read_busy(directory, launch, ctx.session_id) if launch is not None else None
+    return (found[0], found[3]) if found is not None else (0, 0)
 
 
 def _counts(ctx, tasks) -> bool:

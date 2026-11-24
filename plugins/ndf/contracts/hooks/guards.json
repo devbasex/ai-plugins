@@ -195,7 +195,7 @@
     },
     {
       "name": "relay-busy",
-      "summary": "中継の下の子の会話で、SessionStart（startup・resume）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、コマンドが params.wait_commands だけでできていない Monitor と run_in_background の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（待つだけのコマンドの Monitor とバックグラウンドの Bash）には触れない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049）",
+      "summary": "中継の下の子の会話で、SessionStart（startup・resume）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、コマンドが params.wait_commands だけでできていない Monitor と run_in_background の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（待つだけのコマンドの Monitor とバックグラウンドの Bash）の前には、同じ排他の中で作業の件数を保ったまま監視だけを 1 件以上にし、書けなくても止めない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049）",
       "module": "ndf.domains.hooks.guards.relay_busy",
       "events": ["SessionStart", "PreToolUse"],
       "tools": [],
@@ -237,7 +237,7 @@
     },
     {
       "name": "relay-marker",
-      "summary": "中継の下で、子の会話の Stop の作業の件数を起動ごとの記録へ書く（一覧が無い・relay-busy を止めた環境では書かない）。最後の応答が次のセグメントのブロックを持てば、作業が残る間は変更要求、作業が無ければ（監視だけが残っても）中継のマーカーを書く（#1877・#2438・#4049）",
+      "summary": "中継の下で、子の会話の Stop の作業の件数を起動ごとの記録へ書く（一覧が無い・relay-busy を止めた環境では書かない）。最後の応答が次のセグメントのブロックを持てば、作業が残る間（一覧が無ければ前の記録で見る）は変更要求、作業が無ければ（監視だけが残っても）中継のマーカーを書く（#1877・#2438・#4049）",
       "module": "ndf.domains.hooks.guards.relay_mark",
       "events": ["Stop"],
       "tools": [],

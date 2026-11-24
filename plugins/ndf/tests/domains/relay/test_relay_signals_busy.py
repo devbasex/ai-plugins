@@ -133,6 +133,59 @@ def test_start_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
     assert not signals.record_start(tmp_path / "missing", A, "s1", 0)
 
 
+@pytest.mark.parametrize(
+    "before, after",
+    [
+        ((0, "session", 0), (0, "session", 1)),
+        ((2, "stop", 0), (2, "stop", 1)),
+        ((1, "start", 0), (1, "start", 1)),
+        ((0, "stop", 3), (0, "stop", 3)),
+    ],
+    ids=str,
+)
+def test_start_of_a_monitor_keeps_the_works_and_leaves_at_least_one_monitor(tmp_path, before, after):
+    signals.set_launch(tmp_path, A)
+    assert signals.write_busy(tmp_path, A, "s1", *before)
+    assert signals.record_monitor(tmp_path, A, "s1", 0)
+    got = signals.read_busy(tmp_path, A, "s1")
+    assert got is not None and (got[0], got[1], got[3]) == after
+
+
+def test_start_of_a_monitor_does_not_turn_an_unknown_record_into_no_works(tmp_path):
+    signals.set_launch(tmp_path, A)
+    assert not signals.record_monitor(tmp_path, A, "s1", 0)
+    assert signals.read_busy(tmp_path, A, "s1") is None
+
+
+def test_start_of_a_monitor_is_recorded_only_for_the_current_launch_under_the_stop_lock(tmp_path):
+    assert signals.write_busy(tmp_path, A, "s1", 0, "stop")
+    signals.set_launch(tmp_path, B)
+    assert not signals.record_monitor(tmp_path, A, "s1", 0)
+    signals.set_launch(tmp_path, A)
+    with signals.held(tmp_path / signals.STOP_LOCK, 0) as got:
+        assert got and not signals.record_monitor(tmp_path, A, "s1", 0)
+    assert not signals.record_monitor(tmp_path / "missing", A, "s1", 0)
+    assert signals.read_busy(tmp_path, A, "s1")[3] == 0
+
+
+def test_start_of_a_monitor_already_recorded_does_not_take_the_stop_lock(tmp_path):
+    signals.set_launch(tmp_path, A)
+    assert signals.write_busy(tmp_path, A, "s1", 0, "stop", 1)
+    with signals.held(tmp_path / signals.STOP_LOCK, 0) as got:
+        assert got and signals.record_monitor(tmp_path, A, "s1", 0)
+
+
+def test_start_of_a_monitor_reads_the_works_again_under_the_stop_lock(tmp_path, monkeypatch):
+    # 排他の前に読んだ 0 件で、その間に始まった作業を消さない
+    signals.set_launch(tmp_path, A)
+    assert signals.write_busy(tmp_path, A, "s1", 0, "stop")
+    real = signals.current_launch
+    monkeypatch.setattr(signals, "current_launch", lambda d: signals.write_busy(d, A, "s1", 1, "start") and real(d))
+    assert signals.record_monitor(tmp_path, A, "s1", 0)
+    got = signals.read_busy(tmp_path, A, "s1")
+    assert got is not None and (got[0], got[1], got[3]) == (1, "start", 1)
+
+
 def test_records_of_other_launches_are_dropped(tmp_path):
     signals.drop_other_busy(tmp_path, B)
     for launch in (A, B):

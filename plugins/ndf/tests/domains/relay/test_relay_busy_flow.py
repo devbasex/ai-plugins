@@ -159,6 +159,23 @@ def test_3_a_watch_started_after_the_last_stop_does_not_hold_the_handover(child)
     assert p.later(10.0).kind == "handover"
 
 
+def test_2_a_watch_started_after_the_last_stop_is_not_lost_by_the_stall(child):
+    # 監視を張った応答を Esc で中断して次の Stop が来ない子は、止まりの秒でも起動し直さない
+    p, hooks = child(tokens=FULL - 1)
+    hooks.stop()
+    assert not hooks.denied({"tool_name": "Monitor", "tool_input": {"command": LANES["command"]}})
+    assert p.later(1000.0).kind == "wait_background" and len(p.spawn.calls) == 1
+
+
+def test_2_a_watch_started_between_the_stall_decision_and_the_stop_keeps_the_child(child):
+    p, hooks = child(tokens=FULL - 1)
+    hooks.stop()
+    p.now += 1000.0
+    watch = {"tool_name": "Monitor", "tool_input": {"command": LANES["command"]}}
+    assert p.look(lambda: hooks.denied(watch)).kind == "restart"
+    assert p.sec.child.alive and p.look().kind == "wait_background"
+
+
 def test_3_a_work_started_between_the_decision_and_the_stop_keeps_the_child(child):
     p, hooks = child()
     hooks.stop()

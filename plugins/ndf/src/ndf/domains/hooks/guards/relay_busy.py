@@ -2,13 +2,16 @@
 
 SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出しの前に、子を止める排他の中で「1 件以上」を書く。書けない
 開始は、締め切りの経路でも拒否する。記録が 0 件の子は、その後に作業を始めていない。件数は Stop の `relay-marker` が書き直す。
+監視を始める呼び出しの前には、同じ排他の中で作業の件数を保ったまま監視だけを 1 件以上にする（応答を中断して Stop が来ない子を、
+ラッパーが止まりで起動し直して監視を失わせない）。こちらは書けなくても拒否しない。
 
 バックグラウンドの作業 1 件は、待つべき作業と止めてよい監視に分ける。監視は、コマンドが待つだけの NDF のコマンド
 （`params.wait_commands`）だけでできている Monitor とバックグラウンドの Bash だけで、確かめきれないものはすべて作業とする
 （監視と取り違えると、引継ぎで作業を失う）。
 
 すべての PreToolUse に当たる `fail_closed` の行なので、対象外の呼び出しは、例外を上げうる処理（記録・構文解析・表の読み込み）
-より先に通す。
+より先に通す。作業を始め得ない呼び出し（Read・フォアグラウンドの Bash など）は、環境変数のコントラクトを読む会話の確かめ
+（`_target`）よりも先に、Tool の名前と `run_in_background` だけで通す。
 """
 
 from __future__ import annotations
@@ -45,18 +48,22 @@ def check(ctx, svc) -> Optional[Verdict]:
         if ctx.payload.get("source") in _FRESH_SOURCES and _target(ctx.env, ctx.session_id):
             record_count(ctx.env, ctx.session_id, 0, "session")
         return None
-    if not _target(ctx.env, ctx.session_id) or not _starts_background(ctx.tool, ctx.tool_input, svc.params):
+    if not _may_start(ctx.tool, ctx.tool_input) or not _target(ctx.env, ctx.session_id):
         return None
-    return _record_start(ctx)
+    if _starts_background(ctx.tool, ctx.tool_input, svc.params):
+        return _record_start(ctx)
+    _record_monitor(ctx)
+    return None
 
 
 def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
     """エントリポイントの締め切りを過ぎたときの拒否の理由。記録し終えていない子の会話の作業の開始だけを拒否し、ほかは None（通す）。"""
-    if payload.get("hook_event_name") != "PreToolUse" or not _target(env, payload.get("session_id")):
+    tool, tool_input = payload.get("tool_name"), payload.get("tool_input")
+    if payload.get("hook_event_name") != "PreToolUse" or not _may_start(tool, tool_input):
         return None
-    if _recorded is payload or not _starts_background(payload.get("tool_name"), payload.get("tool_input"), table_params()):
+    if not _target(env, payload.get("session_id")) or _recorded is payload:
         return None
-    return BUSY_START_FAILED
+    return BUSY_START_FAILED if _starts_background(tool, tool_input, table_params()) else None
 
 
 def table_params() -> Mapping[str, Any]:
@@ -87,6 +94,16 @@ def _record_start(ctx) -> Optional[Verdict]:
     return None
 
 
+def _record_monitor(ctx) -> None:
+    """監視の開始を記録する。書けなくても監視は始める（止めてよく、打ち直せば同じ知らせを受け取れる）。"""
+    try:
+        directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
+        if directory is not None and launch is not None:
+            signals.record_monitor(directory, launch, ctx.session_id, float(tables.policy_value("hook.counter-lock", "seconds")))
+    except Exception:  # noqa: BLE001,S110 ファイル: fail_closed の行なので、ここで上げると監視の開始を拒否してしまう
+        pass
+
+
 def _target(env: Mapping[str, str], session_id: Any) -> bool:
     """中継のラッパーが起動した子の会話か。入れ子の claude は会話の ID が違う。コントラクトの誤りも対象外とし、例外を外へ出さない。
 
@@ -98,14 +115,19 @@ def _target(env: Mapping[str, str], session_id: Any) -> bool:
     return child is not None and session_id == child
 
 
+def _may_start(tool: Any, tool_input: Any) -> bool:
+    """作業を始め得る呼び出しか（Tool の名前と Bash の `run_in_background` の値の比べだけで、ファイルと構文解析に触れない）。"""
+    if tool == "Bash":
+        return isinstance(tool_input, dict) and background_call(tool_input)
+    return tool in ("Agent", "Monitor")
+
+
 def _starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool:
     """作業を始める呼び出しか。例外を外へ出さない。Monitor は必ずバックグラウンドで動くので、確かめられない入力は作業とする。"""
-    given = tool_input if isinstance(tool_input, dict) else {}
-    if tool == "Monitor":
-        return task_kind("monitor", given.get("command"), params) == "work"
-    if tool == "Bash":
-        return background_call(given) and task_kind("shell", given.get("command"), params) == "work"
-    return tool == "Agent"
+    if not _may_start(tool, tool_input) or tool == "Agent":
+        return tool == "Agent"
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return task_kind("monitor" if tool == "Monitor" else "shell", command, params) == "work"
 
 
 def task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str:

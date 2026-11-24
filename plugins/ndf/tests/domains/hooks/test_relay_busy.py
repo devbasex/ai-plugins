@@ -86,15 +86,32 @@ def test_the_start_of_a_work_is_recorded_and_passes(relay_child, tmp_path, call)
     assert busy(relay_child) == (1, 0, "start")
 
 
+@pytest.mark.parametrize("name", ["watch-bash", "watch-monitor"])
+def test_the_start_of_a_watch_is_recorded_as_a_monitor_only(relay_child, tmp_path, name):
+    session_start(tmp_path, "startup")
+    assert pre(tmp_path, OTHERS[name]) is None
+    assert busy(relay_child) == (0, 1, "session")
+
+
 @others
-def test_other_calls_touch_neither_the_record_nor_its_place(relay_child, tmp_path, monkeypatch, call):
+def test_other_calls_pass_when_the_record_cannot_be_written(relay_child, tmp_path, monkeypatch, call):
     # 監視の開始と、バックグラウンドで始めない呼び出しは、記録が書けない状態でも通る
     session_start(tmp_path, "startup")
     monkeypatch.setattr(signals, "record_start", boom)
+    monkeypatch.setattr(signals, "record_monitor", boom)
     monkeypatch.setattr(signals, "relay_dir", boom)
     assert pre(tmp_path, call) is None
     monkeypatch.undo()
     assert signals.read_busy(relay_child, LAUNCH, "s1")[0] == 0
+
+
+@pytest.mark.parametrize("name", [n for n in OTHERS if not n.startswith("watch-")])
+def test_calls_that_cannot_start_a_work_do_not_read_the_env_contract(relay_child, tmp_path, monkeypatch, name):
+    monkeypatch.setattr(relay_busy, "_target", boom)
+    call = payload(tmp_path, OTHERS[name])
+    ctx = HookContext("claude", "PreToolUse", call)
+    svc = dispatch.GuardServices(tmp_path, Counter.unusable(), 0.0, params=dict(relay_busy.table_params()))
+    assert relay_busy.check(ctx, svc) is None and relay_busy.on_deadline(ctx.env, call) is None
 
 
 ZERO = (0, 0, "session")
