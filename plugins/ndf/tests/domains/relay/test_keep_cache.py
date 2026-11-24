@@ -156,6 +156,8 @@ def test_wake_reply_first_call_with_no_writes_is_still_a_wake(wake_head):
         {k: v for k, v in use().items() if k != "output_tokens"},
         {**use(), "output_tokens": "7"},
         {**use(), "cache_read_input_tokens": -1},
+        {**use(), "cache_creation_input_tokens": None},
+        {**use(), "cache_creation_input_tokens": "0"},
     ],
 )
 def test_wake_reply_unpriced_when_a_split_is_missing_or_wrong(wake_head, bad):

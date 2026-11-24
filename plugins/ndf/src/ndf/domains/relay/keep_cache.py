@@ -221,9 +221,9 @@ def _count(usage: Mapping[str, Any], key: str, absent_zero: bool) -> bool:
 def _priced_call(usage: Mapping[str, Any], split: Optional[tuple[int, int]]) -> bool:
     """1 つの呼び出しの費用を確定できるか。出力の量は必須、読み出しの量は無ければ 0（`transcript.usage_tokens` と同じ）。
 
-    寿命別の書き込みが読めて、その和が書き込みの合計の項目と一致することも求める（決定 14）。
+    書き込みの合計の項目は必須の 0 以上の整数で、寿命別の書き込みが読めて、その和が合計と一致することも求める（決定 14）。
     """
-    if split is None or _WRITE not in usage or sum(split) != _amount(usage, _WRITE):
+    if split is None or not _count(usage, _WRITE, absent_zero=False) or sum(split) != usage[_WRITE]:
         return False
     return _count(usage, "output_tokens", absent_zero=False) and _count(usage, _READ, absent_zero=True)
 

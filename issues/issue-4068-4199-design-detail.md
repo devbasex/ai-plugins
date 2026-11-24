@@ -179,7 +179,7 @@ plugins/ndf/
 | `LastTurn` | 型（`NamedTuple`） | `keep_cache.py` | `message_id`・`at`（`timestamp` の UNIX 秒）・`tokens`（入力・読み出し・書き込みの合計）・`ttl`（`1h`・`5m`・None（未定。`_settle` が補う））・`model`・`cache_read`・`cache_write`・`output` |
 | `TurnRead` | 型（`NamedTuple`） | 同上 | `turn`（`LastTurn` か None）・`reason`（`unrecorded`・`form`・`newer` か None）・`ref`（`form` のときだけ。突き合わせた最後の `assistant` の行の `message.id` と `timestamp` の UNIX 秒の組 `(message_id, at)`。どちらかが読めなければ None。ほかの理由では None） |
 | `Reply` | 型（`NamedTuple`） | 同上 | `kind`（`wake`・`preempted`・`unknown`・`truncated`）・`first_read`（起床の最初の呼び出しの読み出し。当たりの判定に使う。`wake` のときだけ）・`usage`（`Usage`。起床に属する全呼び出しの合計。`wake` のときだけ） |
-| `Usage` | 型（`NamedTuple`） | 同上 | `calls`（呼び出しの数）・`cache_read`・`output`（どれも合計）・`cache_write_1h`・`cache_write_5m`（寿命別の書き込みの合計。`priced` が偽なら None）・`priced`（真偽。全呼び出しで `cache_creation` の `ephemeral_1h_input_tokens`・`ephemeral_5m_input_tokens` が 0 以上の整数で在り、2 つの和が `cache_creation_input_tokens` と同じとき真。1 つでも欠ける・整数でない・負・和が違えば偽で、推し量らない） |
+| `Usage` | 型（`NamedTuple`） | 同上 | `calls`（呼び出しの数）・`cache_read`・`output`（どれも合計）・`cache_write_1h`・`cache_write_5m`（寿命別の書き込みの合計。`priced` が偽なら None）・`priced`（真偽。設計の決定 14 の条件を全呼び出しが満たすとき真で、1 つでも外れれば偽にして推し量らない。条件は次の 4 つである。`cache_creation` の `ephemeral_1h_input_tokens`・`ephemeral_5m_input_tokens` が 0 以上の整数で在る。`cache_creation_input_tokens` が 0 以上の整数で在り、2 つの和と同じである。`output_tokens` が 0 以上の整数で在る。`cache_read_input_tokens` が 0 以上の整数である。`cache_read_input_tokens` の項目だけは、無ければ 0 として通す（`transcript.usage_tokens` と同じ扱い）） |
 | `Opening` | 型（`NamedTuple`） | 同上 | `kind`（`wake`・`normal`・`unknown`）・`at`（待ちを終えた入力の行の時刻）・`first_read`（その入力の直後の最初の呼び出しの読み出し） |
 | `Ratios` | 型（`NamedTuple`） | 同上 | `w`（`ratios` に渡した寿命の書き込みの倍率。どの応答の寿命を渡すかは下の「寿命とモデルの取り方」）・`w_1h`・`w_5m`・`r`・`d`・`out`・`wake_margin`（起こす時点の余白。`cache.wake.seconds`）・`interval`・`hit` |
 | `Step` | 型（`NamedTuple`） | 同上 | `kind`（`wake`・`stop`）・`reason` |
@@ -232,7 +232,7 @@ plugins/ndf/
 
 1. **起動を突き合わせる。** `signals.current_launch` が `t.launch` でなければ、世代も含めて何も書かずに `Settled(stale=True)` を返す
 2. **世代を取る。** `bump_generation(Generation(at=turn.at, by=t.hook_id, message_id=turn.message_id))` を呼ぶ。`bump_generation` は次の順で判定する
-   1. (2a) 取り合い: 世代の `message_id` が `turn.message_id` と同じで、書き込み元が自分でなければ、時刻を比べない。世代の `by` を `contested` に替える（既に `contested` ならそのまま）。続けて、先に世代を取った hook がこの応答で始めた待ちを取り消す。取り消すのは、状態の `wait_id` が世代の `at` と同じで、`k` が 0 で `pending` が無いときである。このとき待ちの項目（`wait_id`・`k`・`n_max`・`spent`・`wait_stop`・`opened`）を消し、`wait_void` の行を 1 行書く。ほかの項目（世代の `at`・`message_id`、状態の `ttl`・`last`・`stopped`・`noted`・`pending`）は書かずに `stale` を返す。どちらの hook も起こさない（設計の決定 4）。`by` を `contested` に替えたときは、待ちを取り消したかに依らず `contest` の行を 1 行書く（既にある待ちの上の取り合いも数えるため。`wait_void` は新しい待ちを取り消したときだけの行で、取り合いの数には使わない）。既に `contested` だったときは書かない
+   1. (2a) 取り合い: 世代の `message_id` が `turn.message_id` と同じで、書き込み元が自分でなければ、時刻を比べない。世代の `by` を `contested` に替える（既に `contested` ならそのまま）。続けて、先に世代を取った hook がこの応答で始めた待ちを取り消す。取り消すのは、状態の `wait_id` が世代の `at` と同じで、`k` が 0 で `pending` が無いときである。このとき待ちの項目（`wait_id`・`k`・`n_max`・`spent`・`wait_stop`・`opened`）を消し、`wait_void` の行を 1 行書く。ほかの項目（世代の `at`・`message_id`、状態の `ttl`・`last`・`stopped`・`noted`・`pending`）は書かずに `stale` を返す。どちらの hook も起こさない（設計の決定 4）。`contest` の行は、取り合った Stop ごとに 1 行書く。世代を `contested` に替えて待ちを取り消すのは、同じ応答の最初の取り合いだけである。同じ応答の 3 件目以降の Stop（世代が既に `contested`）では、世代も待ちも書き換えず、`contest` の行だけを書く。どの Stop も、待ちを取り消したかに依らず書く（既にある待ちの上の取り合いと、3 件目以降の作業待ちの Stop も版別の集計に数えるため。`wait_void` は新しい待ちを取り消したときだけの行で、取り合いの数には使わない）
 
    取り消すのが待ちだけなのは、(3)〜(7) のうち Stop ごとに違う入力（作業の件数 `works`）を使うのが (6) の「待つ子か」だけだからである。(3) の寿命・(4) のフラグの突き合わせ・(5) の待ちの終わり・(7) の `last` は、取り合った応答と `tail` だけで決まり、どちらの hook が先に書いても同じ値になる。先に取った hook が古い Stop（作業 1 件）で、正しい Stop が作業 0 件なら、取り消さないと存在しない待ちの `wait_start` が残り、集計に混ざる。逆に先に取った hook が正しい Stop でも取り消す（どちらが正しいかを決められないので、どちらも起こさない決定 4 の代償に含める）。次の待つ子の Stop が新しい待ちを始める。`k` が 1 以上か `pending` が在る待ち（起こした後に取り合いが届いた）は、起こした記録を持つので取り消さない。(6) が書く `stop_waking`（`scope` `once`・寿命がまだ分からない）は一度きりの知らせで集計に入らないので、取り消さない
    2. (2b) 古い: そうでなく、世代の時刻が `turn.at` より新しいか同じなら、何も書かずに `stale` を返す
@@ -343,7 +343,7 @@ plugins/ndf/
    | --- | --- |
    | `ref` が None（応答の ID か時刻が読めず、Stop と応答を結べない） | 起動が今の起動なら、書いていなければ `stopped`（記録の形）と `stop_waking`（`scope` `session`）を書く（#4068 の受け入れ条件 7 の「記録の形が違う」。時刻の欠けもこれに当たる）。世代・`pending` は変えない（世代の時刻が無く、フラグの突き合わせを Stop と結べないため。フラグは次の Stop の `_settle` の (4) が突き合わせる）。遅れて動いた古い hook がこの行に入っても書くものは変わらない。`last_context` は末尾の最後の応答だけを見るので、古い hook が読んだ形の違う応答は、今の Stop の hook も読む同じ応答で、その hook も同じ `stopped` を書くからである |
    | 起動が今の起動でない・世代を取れない（新しい世代・同じ時刻の先の書き込み元） | 何も書かない（遅れて動いた hook はフラグも `stopped` も変えない） |
-   | 同じ `message_id` の取り合い（`bump_generation` の (2a)。時刻より先に見る） | 世代の `by` を `contested` に替え、先に取った hook がこの応答で始めた起こしていない待ちを (2a) のとおり取り消す（`wait_void`）。フラグ・`stopped` は変えない（`_settle` の (2) と同じ） |
+   | 同じ `message_id` の取り合い（`bump_generation` の (2a)。時刻より先に見る） | 最初の取り合いでは、世代の `by` を `contested` に替え、先に取った hook がこの応答で始めた起こしていない待ちを (2a) のとおり取り消す（`wait_void`）。どの取り合いでも `contest` の行を 1 行書く。フラグ・`stopped` は変えない（`_settle` の (2) と同じ） |
    | 突き合わせを通り、起こしたフラグが無い | 書いていなければ `stopped`（記録の形）と `stop_waking`（`scope` `session`） |
    | 突き合わせを通り、起こしたフラグが在る | `_reconcile` で `wake_result` を書いてフラグを消し（起床の結果の照合は今回の応答の形の検証と分ける。#4199 の受け入れ条件 8）、続けて書いていなければ `stopped` と `stop_waking`（`scope` `session`） |
 
@@ -383,7 +383,7 @@ plugins/ndf/
 | 待ちの終わり | 同上 | `kind: wait_end`・`wait_id`・`opened_at`（待ちを終えた入力の行の時刻）・`age`（`opened_at − last.at`）・`k`・`hit`（待ちを終えた最初の呼び出しの読み出しが `tokens` の `cache.hit.ratio` 以上か）・`cache_read`（その読み出し）・`tokens`・`ttl`・`model`（どれも更新前の状態の `last`。待ちの終わりの直前の応答）・`w`・`r`（`last.ttl` の書き込みの倍率と `last.model` の読み出しの倍率）。待ちを終えた応答の書き込み・出力は書かない（設計の決定 15） |
 | やめた・一時的に起こさなかった | 同上 | `kind: stop_waking`・`wait_id`・`reason`・`scope`（`session`・`wait`・`once`）・`k`・`n_max` |
 | 待ちを取り消した | 同上 | `kind: wait_void`・`wait_id`・`reason`（`contested`・`arrival`）。取り合った応答で始めた、起こしていない待ち（`_settle` の (2a)）か、到着で失効させた予約の Stop が始めた、起こしていない待ち（「処理の手順」の 3 の到着による失効） |
-| 取り合い | 同上 | `kind: contest`・`wait_id`（その時点の状態の待ち。無ければ null）・`message_id`（取り合った応答）・`works`（後から来た hook の作業の件数）。世代の `by` を `contested` に替えたときに 1 行（`_settle` の (2a)・「処理の手順」の 3 の `form` の分岐） |
+| 取り合い | 同上 | `kind: contest`・`wait_id`（その時点の状態の待ち。無ければ null）・`message_id`（取り合った応答）・`works`（後から来た hook の作業の件数）。取り合った Stop ごとに 1 行。世代を `contested` に替えるのは最初の 1 件だけで、3 件目以降の Stop も行は書く（`_settle` の (2a)・「処理の手順」の 3 の `form` の分岐） |
 | 作業を待つ Stop | 同上 | `kind: work_stop`・`message_id`。作業が 1 件以上の Stop の hook が世代を取ったときに 1 行（`_settle` の (2c)）。取り合いの率の分母に使い、同じ応答に `contest` の行か `revoked` 真の `arrival` の行があれば分子にも入れる（先に取った側が作業を待っていた取り合い・到着で失効した予約） |
 | 到着による失効 | 同上 | `kind: arrival`・`wait_id`（その時点の状態の待ち。無ければ null）・`message_id`（その時点の世代の応答。無ければ null）・`works`（この hook の作業の件数）・`revoked`（眠ると決まった世代（`sleeps` 真）の `by` を `arrival` に替えたか。世代を取っても眠らなかった Stop の世代では偽）・`voided`（同じ区間で待ちを取り消したか）。今回の応答が `unrecorded` の Stop で、`works` が 1 以上か `revoked` が真のときに 1 行（「処理の手順」の 3 の到着による失効）。通常の予約の更新（新しい応答の Stop・guard の入力・起床）では書かないので、到着で失効した予約だけを見分けられる。取り合いの率に使う |
 
@@ -450,13 +450,16 @@ plugins/ndf/
 
 ## UserPromptSubmit の guard（`turn`）
 
-- 中継の下の UserPromptSubmit で、子を止めるロックの中で次の 3 つを行う。中継の下とは、次の 3 つがそろうときである。中継の保存先と起動の ID（`NDF_RELAY_LAUNCH`）がある。入力の `session_id` が `NDF_RELAY_SESSION` と同じである。会話の ID が `SESSION_ID_RE` の形である
-  1. `signals.rewake_on(<保存先>, <自分の起動の ID>)` が偽なら何も書かない。偽になるのは次の 2 つのときである
+- guard は、起こす hook の登録を渡した中継の子でだけ、ロックを取って状態を書く。手順は次の順である
+  - まず環境変数 `NDF_RELAY_REWAKE` を見る。`1` でなければ（登録を渡していない子。一覧が空の既定の設定を含む）、ロックを取らず、`launch.json` も読まずに抜ける（`signals.rewake_registered`）
+  - 次に中継の下かを確かめる。中継の下とは、次の 3 つがそろうときである。中継の保存先と起動の ID（`NDF_RELAY_LAUNCH`）がある。入力の `session_id` が `NDF_RELAY_SESSION` と同じである。会話の ID が `SESSION_ID_RE` の形である。そろわなければロックを取らずに抜ける
+  - そろえば、子を止めるロックの中で次の 3 つを行う
+  1. `signals.rewake_on(<保存先>, <自分の起動の ID>)` が偽なら何も書かない。環境変数があっても、今の起動の記録との照合はロックの中で行う。偽になるのは次の 2 つのときである
      - 今の起動（`launch.json`）が自分の起動でない（起動し直した後の旧い起動の guard が、新しい起動の予約を失効させない）
      - 今の起動に起こす hook の登録を渡していない（バージョンの一覧に無い子で状態を作らない）
   2. `bump_generation(Generation(at=clock(), by="turn"))` を呼ぶ（眠る hook の予約を失効させる）。状態のファイルが無い会話では、世代だけを持つ状態を作る。最初の待ちでバックグラウンドの hook より先に入力が届いても、後から動く hook は入力より古い応答の時刻しか持たず、世代を取れない
   3. 状態に待ち（`wait_id`）が在り、起こしたフラグ（`pending`）が無ければ、同じ区間で `opened` にその `clock()` を書く（既に在れば書き換えない）。起こす文の入力は、必ず `_finish` が `pending` を書いた後に届くので、`pending` の無い待ちへの入力は通常の入力である。`pending` が在る間の入力は、下の「起こす文の見分け」の起床の入力の条件で見分ける。起床の入力なら書かず、ほかの入力（利用者の割り込み・バックグラウンドの作業の知らせ）なら `opened` を書く。起床の文が `prompt` に載ることは設計の決定 7 の実測 5 で確かめる。載らないバージョンはバージョンの門の一覧に入れない（設計の決定 10）。フラグの直後の入力の行が末尾の範囲の外へ押し出され、`wake_reply` が `truncated`、`opening` が `unknown` を返すことがある。そのときも `opened` があれば `_settle` の (5) で待ちを終える。`opened` は、待ちを旧い `k`・`wait_stop` から切り離すために使う。通常の入力の後の Tool の結果が大きく、次の Stop の `opening` が入力の行を末尾の範囲の外へ押し出されて `unknown` を返すときに効く
-- この guard はプラグインの登録の今の UserPromptSubmit の上で動くので、プロセスは増えない。増える CPU 時間（起動状態の確認・ロック・世代の読み書き）は、設計の決定 7 の実測 11 の (e) で入力の回数で重みを付けて判定に入れる。状態のファイルを作るのは、起こす hook の登録を渡した中継の子だけである
+- この guard はプラグインの登録の今の UserPromptSubmit の上で動くので、プロセスは増えない。増える CPU 時間は、登録を渡した子では起動状態の確認・ロック・世代の読み書き、登録を渡していない子では環境変数の確認だけである。どちらも設計の決定 7 の実測 11 の (e) で、登録あり・登録なしに分けて入力の回数で重みを付けて判定に入れる。状態のファイルを作るのは、起こす hook の登録を渡した中継の子だけである
 - 起こす文の見分け: guard（`turn.check`）は今、#3995 の数え手の `svc.counter.reset(source=...)` を入力ごとに呼ぶ。数え手は、判断開始の値の知らせを利用者の入力ごとに数え直すカウンターである。中継のマーカーを消せた入力は `source="relay"` で呼び、数え手は数え直さない。ほかは `"human"` で呼び、数え手は数え直す（利用者の入力の番号を 1 つ進める）。起床の入力も `"relay"` で呼び、利用者の入力（`"human"`）として数え直さない。起床の入力とは、次の 3 つがすべてそろう入力である。この同じ条件を、数え手の `source` と手順 3 の `opened` の両方に使う（状態の更新と入力元の判定で別の条件を持たない）。
   - 中継の下で `signals.rewake_on(<保存先>, <自分の起動の ID>)` が真（起こす hook の登録を渡した今の起動）
   - 同じロックの区間で読んだ状態に起こしたフラグ（`pending`）が在る（起こす文の入力は、必ず `_finish` が `pending` を書いた後に届く）
