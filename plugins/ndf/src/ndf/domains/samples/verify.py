@@ -203,10 +203,12 @@ def _check_calls(definitions: list[Definition], peer: str | None) -> None:
     if policy.peers is None:
         raise limits.LimitsError(f"上限の設定の方針 {FETCH_POLICY} に peers が無い")
     retries = int(limits.value(FETCH_POLICY, "retries"))
-    peers = {d.peer for d in definitions} | ({peer} if peer is not None else set())
+    urls: dict[str, set[str]] = {} if peer is None else {peer: set()}
+    for definition in definitions:
+        urls.setdefault(definition.peer, set()).add(definition.url)
     over = []
-    for name in sorted(peers):
-        worst = len({d.url for d in definitions if d.peer == name}) * (1 + retries)
+    for name in sorted(urls):
+        worst = len(urls[name]) * (1 + retries)
         cap = policy.peers[name] if name in policy.peers else None
         if cap is None or worst > cap:
             over.append(f"{name} は最悪 {worst} 回（上限 {'なし' if cap is None else cap}）")
