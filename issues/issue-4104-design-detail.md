@@ -128,7 +128,7 @@ plugins/ndf/
 | --- | --- |
 | (1) | `pr_number(..., expect)` で番号を決め、`hub.pull` を 1 回読む。`pull.head_sha != expect.head` か `pull.base_ref != expect.base` なら `GateError`（「CI が確かめた #<n>（<base> 宛て・<a>）と PR の今（<base'> 宛て・<b>）が違う」）。`gate` が受けて `verdict: null`・`head` 無し・コメント無しで返す |
 | (3) | `judgeable` が理由を返したとき、ベースの MVV の状態（`snap.state`）が `absent`・`unapproved` なら `skip: true`・`why`: 「MVV が承認されていないので判定しない」で返す（コメントを書かない）。`mismatch` なら #3959 のとおり `skip` 偽・`noted: false` |
-| (4) | #3959 のとおり差分を読んだ後に `hub.pull` を読み直す。読み直した head か宛先が (1) と違うとき・読み直しが `GitHubError` のとき、#3959 はコメントを書かずに返すが、区分 `fix` では出力に `noted: false` を明示する（今回の判定の記録が PR に無いので、`_fix_result` が `refused` でなく `precondition` に分ける。`noted` が無いと `head` を持つ出力は `refused` になり、今回のコメントが無いまま人に承認を求める） |
+| (4) | 区分 `fix` だけの追加の処理として、差分を読んだ直後に `hub.pull` を 1 回読み直す（#3959 は差分を読んだ直後には読み直さない）。即時修正では CI が確かめた PR から動いたときに LLM を起動しないためで、PR の読み取りが判定 1 回につき 1 回増える。読み直した head か宛先が (1) と違うとき・読み直しが `GitHubError` のときは、LLM を呼ばずコメントを書かずに返し、出力に `noted: false` を明示する（今回の判定の記録が PR に無いので、`_fix_result` が `refused` でなく `precondition` に分ける。`noted` が無いと `head` を持つ出力は `refused` になり、今回のコメントが無いまま人に承認を求める） |
 | (5)〜(9) | #3959 のまま。検査は `CHECKS_BY_GATE["fix"]`、保留は `review_prs(FIX, number)`。(7) で LLM が回答しない（`GateError`）ときも #3959 のとおり (7) が受けて `verdict: null`・(1) の `head` のまま (9) で記録を書くので、記録のある進めない判定（`refused`）になる。`gate` が `GateError` を受けて `head` 無しにするのは (1) までの失敗だけである |
 | 出力 | 判定の本体が (1) を読み終えた終わり方は、どれも `target` に `expect.item()` をそのまま置く（`head_ref` を含む 6 つのキー。(1) で `expect` と同じと確かめた値で、項目を組み直さない。手順 3 のマージがこの値と CI の項目の完全一致を照らす）。`note_url` は (9) で書けたときだけ |
 | 省くか | `skip` は「理由が空・判定がコントラクトの形・『従う』・レッドラインが空」で真。進め方（`inputs["pace"]`）とモードを読まない |
@@ -154,7 +154,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `pr_number`（`fix`） | CI の PR のリポジトリ・宛先・head のブランチが判定の対象と違う | `gh pr view <ブランチ>` が別の宛先の PR を選んだ・`gh` の既定のリポジトリが origin と違い、同じ番号の別のブランチの PR を CI が読んだ（決定 3） | `GateError` | `gate` が `verdict: null`・`head` 無しで返す | `precondition`（終了コード 1）。コメント無し | 余分な PR を閉じ、プランを `ci` から打ち直す |
 | `_judged`（`fix` の (1)） | CI の後に push・宛先の変更があった | 同じ作業場所からの push・人の宛先の変更 | (1) の比較 | 同上 | 同上 | プランを `ci` から打ち直す（新しい head で CI と判定をやり直す） |
-| `_judged`（`fix` の (4)） | 差分を読む間に head・宛先が動いた・差分の後に PR を読み直せない | 判定の最中の push・宛先の変更・GitHub が回答しない | #3959 の (4) の読み直し | `head` あり・コメント無し・`noted: false` | `precondition`（人の回答を待たない） | 動いたときはプランを `ci` から、読み直せないときは判定のステップから打ち直す |
+| `_judged`（`fix` の (4)） | 差分を読む間に head・宛先が動いた・差分の後に PR を読み直せない | 判定の最中の push・宛先の変更・GitHub が回答しない | `fix` の (4) で足す、差分を読んだ直後の読み直し | `head` あり・コメント無し・`noted: false` | `precondition`（人の回答を待たない） | 動いたときはプランを `ci` から、読み直せないときは判定のステップから打ち直す |
 | `_judged`（(7)） | LLM が回答しない | LLM の失敗 | #3959 の (7) の `GateError` | `verdict: null`・`head` あり・(9) で記録を書く | `refused`（記録を読んで人が答える） | 人が却下してから打ち直すか、承認する |
 | `_judged`（`fix` の (3)） | ベースの MVV のハッシュが承認の記録と違う | ベースの MVV の本文を承認なしに変えた | `judgeable` と `snap.state` | `skip` 偽・`noted: false` | `precondition` | MVV を承認し直してから打ち直す |
 | `_judged`（(9)） | 判定の記録を PR に書けない | GitHub が回答しない | `_recorded` | `noted: false` | `precondition`（人の回答を待たない。コメントの無い理由で承認させない） | `ndf plan next <プラン>` で判定のステップから打ち直す |
