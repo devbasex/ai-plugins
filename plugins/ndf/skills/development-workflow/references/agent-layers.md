@@ -228,7 +228,7 @@ supervisor が守る規則:
 - **打つ場所**: 起動指示の「作業場所」の worktree で打つ。設計承認ゲートでは、判定する PR がその worktree のブランチの開いた PR に決まる
 - **保存先**: 起動指示の「作業ディレクトリ」の下の `mvv-gate-design.json`・`mvv-gate-release.json`。結果 JSON は PR から取った
   自由記述（判定の理由・保留の文）を含むので、コミットの対象になる worktree の中に置かない。作業ディレクトリが作業場所の worktree の
-  下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 判断が要る` で返す（`理由` に作業ディレクトリが
+  下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 止まった` で返す（`理由` に作業ディレクトリが
   worktree の中にあることを書く）
 - **書き方**: `mktemp` で作った新しいファイル（0600）に書いてから、所定のパスへ `mv` で置き換える。判定が `stopped` で終わったとき
   （終了コードが 0 でない）も置き換えるよう、判定のコマンドと `mv` を `&&` でつながない。打ち直しで同じパスへ書くときも、既にある
@@ -255,7 +255,7 @@ tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && { ndf reco
    | --- | --- | --- |
    | このリリースで `ndf release-steps assemble` を打ち、`ok` の結果 JSON に `outputs.pr` がある（版上げの PR を組み立てた） | `outputs.pr` の PR | `--expect-pr <outputs.pr>` |
    | ブランチ戦略がリリース用の PR を作らない（`ndf release-steps assemble` を打たない。`trunk` の `production_pr` など） | スプリントの PR そのもの | 渡さない（判定する PR が承認する PR である） |
-   | リリース用の PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 判断が要る` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
+   | リリース用の PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 止まった` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
 
    文脈のキー `release_pr` は使わない（承認ゲートの時点ではまだ無い）。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
 2. 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、上の書き方で
