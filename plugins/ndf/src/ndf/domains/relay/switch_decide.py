@@ -12,6 +12,7 @@ from typing import NamedTuple, Optional
 
 from ndf import identity
 from ndf.domains.relay.account_decide import Pick
+from ndf.domains.relay.signals import Background
 
 # 文脈の量が上限を超えたときに中継が子へ送る 1 行（#2595。hook の外でも判定の機会を作る）
 HANDOVER_PROMPT = (
@@ -66,18 +67,6 @@ END_WAIT = "API キーの設定が変わった。止められる時点を待つ"
 REVOKED = "API キーの子を止めた。替える先が無い"
 # 既定のログイン（アカウントの指定が無い）の起動先の値。登録の名前に使えない括弧を含むので重ならない
 DEFAULT_TARGET = "(default)"
-
-
-class Background(NamedTuple):
-    """今の起動のバックグラウンドの作業の記録（`signals.read_busy`）。`count` は作業、`monitors` は監視の件数。
-
-    `source` は書いた事象（`start` なら `count` は「少なくとも 1 件」）、`at` は書いた時刻。
-    """
-
-    count: int
-    source: str
-    at: str
-    monitors: int
 
 
 @dataclass(frozen=True)

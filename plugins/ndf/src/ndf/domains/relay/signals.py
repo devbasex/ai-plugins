@@ -30,7 +30,7 @@ import time
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Optional, Union
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional, Union
 
 from ndf import identity
 
@@ -55,6 +55,18 @@ class SignalError(ValueError):
 
 class QuestionUnreadable(SignalError):
     """質問のファイルが在るが読めない（権限・ディレクトリ・I/O の誤り）。中身が壊れていることと見分ける（#3814）。"""
+
+
+class Background(NamedTuple):
+    """今の起動のバックグラウンドの作業の記録（`read_busy`）。`count` は作業、`monitors` は監視の件数。
+
+    `source` は書いた事象（`start` なら `count` は「少なくとも 1 件」）、`at` は書いた時刻。
+    """
+
+    count: int
+    source: str
+    at: str
+    monitors: int
 
 
 def require_keys() -> None:
@@ -437,8 +449,8 @@ def _has_monitors(found: Optional[tuple[int, str, str, int]]) -> bool:
     return found is not None and found[3] > 0
 
 
-def read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str, int]]:
-    """今の起動・今の会話の記録の（作業の件数, `source`, 書いた時刻, 監視の件数）。無い・読めない・形が違えば None（不明）。"""
+def read_busy(directory: Path, launch: str, session_id: str) -> Optional[Background]:
+    """今の起動・今の会話の記録。無い・読めない・形が違えば None（不明）。"""
     path = _busy_path(directory, launch)
     try:
         data = _read(path) if path is not None else None
@@ -452,7 +464,7 @@ def read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[i
         return None
     if source == "start" and count == 0:  # 開始の記録は「少なくとも 1 件」なので、0 件は矛盾
         return None
-    return count, source, at, monitors
+    return Background(count, source, at, monitors)
 
 
 def _is_count(value: Any) -> bool:

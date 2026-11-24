@@ -15,7 +15,7 @@ from ndf.domains.relay import signals, switch_decide
 from ndf.domains.relay.wrapper_launch import Ended
 
 Section = Any  # `wrapper.Section`（import の輪を作らないよう型の名前だけで受ける）
-Busy = Optional[tuple[int, str, str, int]]  # `signals.read_busy` の返り
+Busy = Optional[signals.Background]  # `signals.read_busy` の返り
 
 
 def _busy_zero(found: Busy) -> bool:
