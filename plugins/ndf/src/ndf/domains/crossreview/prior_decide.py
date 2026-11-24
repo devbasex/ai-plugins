@@ -166,6 +166,26 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optional[Carried]:
+    """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。"""
+    fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
+    if fid is None or text is None:
+        return None
+    thread, line = item.get("thread"), item.get("line")
+    return Carried(
+        fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
+        None,
+        text,
+        _opt_text(item.get("by")),
+        _opt_text(item.get("severity")),
+        _opt_text(item.get("path")),
+        line if type(line) is int and line > 0 else None,
+        _opt_text(item.get("section")),
+        **judged,
+        thread=thread if type(thread) is int else None,
+    )
+
+
 def recorded(remarks: Iterable[Remark]) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
@@ -175,28 +195,13 @@ def recorded(remarks: Iterable[Remark]) -> tuple[list[Carried], dict[int, Mappin
     out: list[Carried] = []
     marks: dict[int, Mapping[str, Any]] = {}
     for item in report_decide.open_items(mine[-1].body) if mine else ():
-        fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
-        if fid is None or text is None:
+        judged = _marks_of(item)
+        one = _recorded_one(item, judged)
+        if one is None:
             continue
-        judged, by = _marks_of(item), _opt_text(item.get("by"))
-        thread = item["thread"] if type(item.get("thread")) is int else None
-        if thread is not None:
-            marks[thread] = judged
-            if by != report_decide.BY_NDF:
+        if one.thread is not None:
+            marks[one.thread] = judged
+            if one.by != report_decide.BY_NDF:
                 continue
-        line = item.get("line")
-        out.append(
-            Carried(
-                fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
-                None,
-                text,
-                by,
-                _opt_text(item.get("severity")),
-                _opt_text(item.get("path")),
-                line if type(line) is int and line > 0 else None,
-                _opt_text(item.get("section")),
-                **judged,
-                thread=thread,
-            )
-        )
+        out.append(one)
     return out, marks
