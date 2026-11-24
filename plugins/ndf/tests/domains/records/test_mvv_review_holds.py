@@ -163,11 +163,40 @@ def test_fast_design_gate_is_not_skipped_while_the_review_holds_remain(
         assert hold.startswith("PR #5 の ") or hold.startswith(mvv_gate.RECORDS_UNREADABLE)
 
 
-def test_the_gate_puts_the_holds_on_the_pr_and_the_approval_material(repo: Path, notes: list[tuple[int, str]]) -> None:
-    # 保留の文は holds にだけ置き、why には件数の固定の文だけ。PR のコメントと承認資料にも保留が載る
-    RepoKey.value = mvv.repo_key(repo)
+class GateGit:
+    """承認ゲートの経路が使う Git のアダプターの偽物。リモート名と設計のブランチ名を返し、ベースの取得と進め方の設定の読み取りは
+    何もしない（git のプロセスを起動しない）。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def remote(self) -> str:
+        return "origin"
+
+    def run(self, *args: str) -> str:
+        assert args == ("rev-parse", "--abbrev-ref", "HEAD")
+        return "design/x\n"
+
+    def fetch_branch_or_raise(self, remote: str, branch: str) -> None:
+        return None
+
+    def blobs(self, *wheres: str) -> tuple[None, ...]:
+        return tuple(None for _ in wheres)
+
+
+def test_the_gate_puts_the_holds_on_the_pr_and_the_approval_material(
+    fake_git: Path, notes: list[tuple[int, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 保留の文は holds にだけ置き、why には件数の固定の文だけ。PR のコメントと承認資料にも保留が載る。
+    # 承認ゲートの経路は Git のアダプターとベースの MVV の読み取りを偽にして通す
+    body = fake_git.parent / "mvv.md"
+    body.write_text(test_mvv_gate.BODY, encoding="utf-8")
+    snap = mvv.Snapshot(md.State.APPROVED, 1, SHA, body, (), {}, "b" * 40, "c" * 64, None)
+    monkeypatch.setattr(mvv_gate, "Git", GateGit)
+    monkeypatch.setattr(mvv, "current", lambda root, ref, allow_mismatch=False, outside=None: snap)
+    RepoKey.value = mvv.repo_key(fake_git)
     _write([_deferred(1)])
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(PR, DOCS), Ask(FOLLOW))
+    out = mvv_gate.gate(fake_git, "design", _inputs(), _hub(PR, DOCS), Ask(FOLLOW))
     [hold] = out["holds"]
     assert (out["skip"], hold) == (False, "PR #5 の Value 1（deferred・needs_user）: 理由 1")
     assert "レビューの保留が 1 件ある（内容は保留の欄）" in out["why"] and not any(hold in w for w in out["why"])
