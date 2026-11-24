@@ -6363,28 +6363,28 @@
       "context": "ndf-relay",
       "meaning": "起床させてよい hook を 1 つに決める値（応答の記録の時刻か入力・起床の時刻、書き込み元の ID、取った応答の message.id の 3 つの組）。会話ごとの起床の状態に置き、新しい時刻でだけ書き換わる（#4068）",
       "code": "generation",
-      "pending_source": "issues/issue-4068-4199-design.md"
+      "source": "docs/specifications/ndf-relay-cache-rewake.md"
     },
     {
       "term": "待ち（起床の記録の）",
       "context": "ndf-relay",
       "meaning": "待つ子の Stop で始まり、通常の入力（利用者の入力・裏の作業の知らせ）で始まったと確かめた応答の Stop で終わる 1 回の待ち。長さは待ちを終えた入力の時刻までで数え、wait_id で見分ける（#4068）",
       "code": "wait_id",
-      "pending_source": "issues/issue-4068-4199-design.md"
+      "source": "docs/specifications/ndf-relay-cache-rewake.md"
     },
     {
       "term": "取り合い",
       "context": "ndf-relay",
       "meaning": "2 つの起床の hook が同じ応答（同じ message.id）を自分の Stop の応答として取りに来た状態。世代の書き込み元を contested に替え、どちらの hook も起床させない（#4068）",
       "code": "contested",
-      "pending_source": "issues/issue-4068-4199-design.md"
+      "source": "docs/specifications/ndf-relay-cache-rewake.md"
     },
     {
       "term": "寿命別の書き込み",
       "context": "ndf-relay",
       "meaning": "応答の記録が持つ、1 時間のキャッシュへの書き込みと 5 分のキャッシュへの書き込みの token（usage.cache_creation の 2 つの項目）。寿命を決め、起床の書き込みの費用を寿命ごとの倍率で数えるのに使う（#4199）",
       "code": "cache_creation",
-      "pending_source": "issues/issue-4068-4199-design.md"
+      "source": "docs/specifications/ndf-relay-cache-rewake.md"
     },
     {
       "term": "立ち上がりの確認",

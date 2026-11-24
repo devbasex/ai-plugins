@@ -96,7 +96,7 @@
 | 起床の間隔 | — | 最後の応答の時刻から起床までの秒。寿命から余白（cache.wake の seconds）を引いた値（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
 | 起床の回数の上限 | `n_max` | 起床の費用の合計が、書き直し 1 回の追加の費用 (w − r) × S を上回らない最大の回数（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
 | 書き直し | — | キャッシュが切れた後の応答で、文脈の全体をキャッシュへ書き込むこと（キャッシュの再書き込み。入力の 1.25 倍か 2 倍の値段。#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
-| 起床の hook の世代 | `generation` | 起床させてよい hook を 1 つに決める値（応答の記録の時刻か入力・起床の時刻、書き込み元の ID、取った応答の message.id の 3 つの組）。会話ごとの起床の状態に置き、新しい時刻でだけ書き換わる（#4068） | — | — | — |
-| 待ち（起床の記録の） | `wait_id` | 待つ子の Stop で始まり、通常の入力（利用者の入力・裏の作業の知らせ）で始まったと確かめた応答の Stop で終わる 1 回の待ち。長さは待ちを終えた入力の時刻までで数え、wait_id で見分ける（#4068） | — | — | — |
-| 取り合い | `contested` | 2 つの起床の hook が同じ応答（同じ message.id）を自分の Stop の応答として取りに来た状態。世代の書き込み元を contested に替え、どちらの hook も起床させない（#4068） | — | — | — |
-| 寿命別の書き込み | `cache_creation` | 応答の記録が持つ、1 時間のキャッシュへの書き込みと 5 分のキャッシュへの書き込みの token（usage.cache_creation の 2 つの項目）。寿命を決め、起床の書き込みの費用を寿命ごとの倍率で数えるのに使う（#4199） | — | — | — |
+| 起床の hook の世代 | `generation` | 起床させてよい hook を 1 つに決める値（応答の記録の時刻か入力・起床の時刻、書き込み元の ID、取った応答の message.id の 3 つの組）。会話ごとの起床の状態に置き、新しい時刻でだけ書き換わる（#4068） | — | — | `docs/specifications/ndf-relay-cache-rewake.md` |
+| 待ち（起床の記録の） | `wait_id` | 待つ子の Stop で始まり、通常の入力（利用者の入力・裏の作業の知らせ）で始まったと確かめた応答の Stop で終わる 1 回の待ち。長さは待ちを終えた入力の時刻までで数え、wait_id で見分ける（#4068） | — | — | `docs/specifications/ndf-relay-cache-rewake.md` |
+| 取り合い | `contested` | 2 つの起床の hook が同じ応答（同じ message.id）を自分の Stop の応答として取りに来た状態。世代の書き込み元を contested に替え、どちらの hook も起床させない（#4068） | — | — | `docs/specifications/ndf-relay-cache-rewake.md` |
+| 寿命別の書き込み | `cache_creation` | 応答の記録が持つ、1 時間のキャッシュへの書き込みと 5 分のキャッシュへの書き込みの token（usage.cache_creation の 2 つの項目）。寿命を決め、起床の書き込みの費用を寿命ごとの倍率で数えるのに使う（#4199） | — | — | `docs/specifications/ndf-relay-cache-rewake.md` |
