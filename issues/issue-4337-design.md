@@ -187,7 +187,7 @@ flowchart TD
 | --- | --- |
 | 組み直した | `ok`。`items` は足すべき内容の `{"id", "text", "doc"}`、`metrics` は `targets`（対象のパス）・`readers`（文書ごとの読み手役の記録）・`blobs`（worker の後の `HEAD` での対象ごとの blob の SHA）・`skipped`（決定 2 で省いた設計書） |
 | 対象の外のファイルを worker が変えた | `ok`。`items` に変えたファイル 1 件ずつ（`id` は `scope-<番号>`、`text` はパスと「対象の外を変えた。戻すか、残す理由を書く」）足し、`warnings` にも載せる（I8） |
-| 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点）」、`items` は空、`metrics.targets` は空。worker を起動しない。決定 2 で省いた設計書だけのときも同じで、`summary` と `metrics.skipped` に省いたパスを載せる |
+| 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点）」、`items` は空、`metrics.targets` は空。worker を起動しない。ただし `rebuild-base.json` がある打ち直しの試行では、範囲の差分から `scope-` の項目と `metrics.range` を足す（「組み直しの前後の範囲」）。決定 2 で省いた設計書だけのときも同じで、`summary` と `metrics.skipped` に省いたパスを載せる |
 | 起点を決められない | `stopped`（`precondition`）。`summary` に読めない参照の名前（リモートが登録されていないときは、その名前と設定のキー `.ndf/worktree.json` の `remote`）。分岐点が無いとき（三点差分の失敗）も同じで、参照の名前と git の文を載せる。worker を起動しない |
 | worker が作業を残した・起動に失敗した・判断を求めた | `stopped`。`ndf worker run` の結果の `kind`・`gaps` を載せる（I7。下の「worker の終わりの読み方」） |
 | 足すべき内容の形が違う（`text` が無い、`doc` が対象の文書でない） | `stopped`（`bad_report`） |
@@ -201,10 +201,11 @@ flowchart TD
 - 比べる元は、組み直すステップの最初の試行で worker を起動する前の `HEAD` の SHA（起点を決めるときに読んだもの）である。`--state-dir` の `rebuild-base.json` に書き、打ち直し（`ndf progress retry`）の試行では書き直さずに読む。`--state-dir` はプランの保存先で、打ち直しでも同じ場所である。止まった試行で worker がコミットを残しても、そのコミットは範囲に入る
 - 読んだ SHA が今の `HEAD` の祖先でなければ（履歴を書き換えた）、比べる元に使わずに `stopped`（`precondition`）にし、SHA と `rebuild-base.json` のパスを示す。打ち直す前にファイルを消せば、今の `HEAD` を比べる元として始め直す
 - `ok` で終えたら `rebuild-base.json` を消す。次に同じプランを新しく流したときに古い元を使わない
+- `rebuild-base.json` がある試行では、worker を起動するかどうかによらず、`ok` を返す前に比べる元からの範囲の差分を読む。打ち直しで対象が 0 件になったとき（前の試行の worker が唯一の対象を消してコミットし、止まったときなど）も、「対象が 0 件」の `ok` を返す前に、範囲の差分を下の 2 つに反映する。前の試行で消した対象は今の対象に入らないので、対象の外の変更（消したパス）として出る
 
 **対象の外の変更の拾い方**: 範囲の差分を `git diff --name-only -z --no-renames <比べる元> HEAD` で読む。名前の変更を検出させないので、移した元のパスは消したパスとして、移した先は足したパスとして出る。消したパスも含めて、対象のパスの外にあるものを I8 の項目にする。止めない理由は決定 4 にある。push は後ろのステップなので、拾うのは push の前である。
 
-**組み直しの前後の差分の渡し方**: 範囲の中で変わった対象があれば、`items` に 1 件だけ `rebuilt-1` を足す。`text` には、変わった対象のパスと、範囲の差分を読むコマンド `git diff <比べる元> <後の HEAD> -- <対象>` を書き、「組み直しの前後で事実・条件・数値が変わっていないかを確かめる」と頼む。`metrics.range` にも `{"base": <比べる元>, "head": <後の HEAD>}` を持つ。PR 全体の差分は、組み直しの前の執筆の変更も含むので、内容の確かめには使わない
+**組み直しの前後の差分の渡し方**: 範囲の中で変わった対象があれば、`metrics.range` に `{"base": <比べる元>, "head": <後の HEAD>, "paths": [変わった対象]}` を持つ。処置が要る `items` には入れない。入れると、事実や条件がすべて保たれていても、受け取った項目の処置のためにレビューが修正担当を少なくとも 1 回起動する（`drive._verdict`）からである。代わりに `ndf cross-review run` は、`--findings` のファイルに `metrics.range` があれば、レビュー担当への指示に「組み直しの前後の差分 `git diff <base> <head> -- <paths>` を読み、事実・条件・数値が変わっていれば指摘にする」の 1 文を足す（`drive._review_prompt`）。変化を見つけたときだけ、通常の指摘として修正担当へ渡る。PR 全体の差分は、組み直しの前の執筆の変更も含むので、内容の確かめには使わない
 
 **`items` の `id`**: サブコマンドが次の表のとおりに振り、worker が書いた `id` は使わない。
 
@@ -213,7 +214,6 @@ flowchart TD
 | worker の足すべき内容 | `add-1`・`add-2` … | 結果ファイルの並びの順 |
 | 読み手役の合格でない文書 | `reader-1`・`reader-2` … | 文書のパスの順 |
 | 対象の外の変更 | `scope-1`・`scope-2` … | パスの順 |
-| 組み直しの前後の差分 | `rebuilt-1`（1 件だけ） | — |
 
 レビューの指摘の結果は `id` をキーに数える。worker の `id` を残すと、重なった 2 件の片方の処置で両方が処置済みになる。接頭辞が違うので、worker の書き方によらず 1 つの結果の中で重ならず、どの項目も捨てない（I6）。
 
@@ -266,11 +266,20 @@ worker の `gate` は `stopped` にする。ステップの結果の `routes` �
 
 | 項目 | 何を書くか | 出所 | 出所が無いとき |
 | --- | --- | --- | --- |
-| 組み直しで確かめが済んでいない文書 | 項目ごとに、対象の文書・最後の結果（`fail`・`fixed`・`not_run`・対象の外の変更・組み直しの前後の差分）・レビューの処置（直した / 見送った / 未処置）と見送りの理由・レビューの記録への URL | 文脈の `rebuild_result` が指す結果の `items` のうち `reader-`・`scope-`・`rebuilt-` で始まるもの。処置と理由は、その PR の `cross-review` の記録（`id` で引く） | `rebuild_result` が文脈に無いか、当たる項目が 0 件なら「無し」。ファイルが読めなければ「読めない（パス）」と書き、承認ゲートは止めない |
+| 組み直しで確かめが済んでいない文書 | 項目ごとに、対象の文書・最後の結果（`fail`・`fixed`・`not_run`・対象の外の変更）・レビューの処置（直した / 見送った / 未処置）と見送りの理由・レビューの記録への URL | 文脈の `rebuild_result` が指す結果の `items` のうち `reader-`・`scope-` で始まるもの。処置と理由は、その PR の `cross-review` の記録（`id` で引く） | `rebuild_result` が文脈に無いか、当たる項目が 0 件なら「無し」。ファイルが読めなければ「読めない（パス）」と書き、承認ゲートは止めない |
 
 レビューの記録に `id` が無い項目は「未処置」と書く。こうすると、レビューまで届かなかった項目も承認する人に見える。
 
-**PR を作れないとき**: `docs-pr` は、スプリントのブランチにベースブランチとの差分が無いと PR を作れずに止まる。これはこの変更の前からの振る舞いである。差分が無くても項目は残りうる。たとえば、設計書を省いた実装計画がベースブランチに入っていて（決定 9）、worker が何も変えず記録だけを残したときである。このときも項目は落とさない。conductor は今の止まり方のとおり工程「ドキュメントレビュー」の止まりを扱う。レビューを通らなかった項目は、上の行に「未処置」として載り、リリース承認ゲートで承認する人が判断する。
+**PR を作れないとき**: `docs-pr` は、スプリントのブランチにベースブランチとの差分が無いと PR を作れずに止まる（`gh pr create` の `No commits between`）。これはこの変更の前からの振る舞いで、根は #4337 の外の #3401（差分の無いスプリントで PR の作成が止まる）と同じである。差分が無くても項目は残りうる。たとえば、設計書を省いた実装計画がベースブランチに入っていて（決定 9）、worker が何も変えず記録だけを残したときである。この場合は次のとおりに進める。
+
+| 順 | 担当 | 条件と手段 |
+| --- | --- | --- |
+| 1 | conductor | 工程「ドキュメントレビュー」が `docs-pr` で止まり、作業場所で `git diff --quiet <リモート>/<ベース>...HEAD` が終了コード 0（差分が無い）であることを確かめる。差分があれば別の原因なので、この手順を使わない |
+| 2 | conductor | `ndf progress finish <ID> ドキュメントレビュー --reason <理由> --output <工程の出力のファイル>` で工程を終える。理由と出力の `summary` には「差分が無く PR を作れない。組み直しの項目 <件数> 件は未処置で `rebuild_result` に残る」と書く。`finish` は工程の出力を文脈へ足すだけで、文脈の `rebuild_result` を消さない |
+| 3 | リリース承認の資料を組む conductor | 上の行の出所の `rebuild_result` から項目を読み、レビューの記録が無いので全件を「未処置」と書く |
+
+差分の無い PR の作成を工程が自動で飛ばす分岐は #3401 が持ち、この設計では足さない。
+
 
 結果ファイルはプランの保存先（`{state_dir}`）に残り、パスは文脈が持つ。工程「ドキュメントレビュー」を始める時点でファイルが無ければ、項目を落とさないように工程を始めずに止める。ドキュメントレビューが見る差分（`sprint_diff`）に文書の変更が無くても PR があれば、受け取った項目があるかぎり収束とせず修正担当へ渡す（`drive._verdict`。今の振る舞い）。
 
@@ -358,7 +367,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 | ステップ: リモート追跡の参照が読めないとき | 上に加えて `git remote`・手元の参照の `git rev-parse` | +2 |
 | ステップ: `--previous` があり、差分に設計書があるとき | 設計書の今の blob を読む `git ls-tree -z HEAD -- <設計書>` | +1 |
 | ステップ: worker を起動したとき | worker の後の範囲の差分 `git diff --name-only -z --no-renames <比べる元> HEAD`・後の `HEAD` の `git rev-parse`・対象の blob を読む `git ls-tree -z HEAD -- <対象>` | +3 |
-| ステップ: 打ち直しの試行で `rebuild-base.json` があるとき | 比べる元が今の `HEAD` の祖先かを見る `git merge-base --is-ancestor` | +1 |
+| ステップ: 打ち直しの試行で `rebuild-base.json` があるとき | 比べる元が今の `HEAD` の祖先かを見る `git merge-base --is-ancestor`。worker を起動しない（対象が 0 件の）試行では、加えて範囲の差分の `git diff --name-only -z --no-renames` | +1（worker を起動しないときは +2） |
 
 作業場所の中の通常ファイルの確かめと実装計画の頭の読み取りは、ファイルを直に扱うので git を打たない。worker の中で打つ git は worker の作業に含め、この表に数えない。
 
@@ -443,11 +452,11 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 - 採らなかった案: 原稿を、コミットの件名の課題の番号や、スプリントブランチへ直接積んだコミットかどうかで絞る（件名に番号の無いコミットと、PR で取り込んだ自分の原稿が、知らせなく対象から落ちる。組み直されないまま `ok` で進む害のほうが大きい）
 - あわせて選んだ案: 対象の外の変更は、worker の後・push の前に `ndf document-rebuild run` がコードで拾い、`scope-<番号>` の項目と `warnings` に載せる（I8）。止めずに後ろのレビューへ渡し、レビューが 1 件ずつ戻すか、残す理由を書く。止めると、打ち直しで worker が同じ変更を繰り返し、戻す手段も持たないからである
 - 採らなかった案: 対象の外の変更を `stopped` にする（上の理由。宣言の外の変更を失敗にせず、拾って知らせる側で解く）
-- **要求の目的との関係**: 要求仕様の目的の 2 つ目「組み直すのはその工程で書いた文書だけにし、別の課題の設計書・要求仕様のコピー・実装計画を書き換えない」は、書き換えない文書を設計書・要求仕様のコピー・実装計画の 3 つと挙げている。原稿については、前提 4 が「作業場所の差分にある `issues/` の外の Markdown」と定めている。そこで、この設計は原稿の範囲を前提 4 のとおりスプリントの差分全体とし、3 つの文書だけを課題の番号と種類で絞る。原稿を課題ごとに絞るには要求の前提 4 を変える必要があり、要求仕様の正は課題の本文なので、この設計では変えない
+- **要求の目的との関係**: 要求仕様の目的の 2 つ目は「組み直すのはその工程で書いた文書だけ」である。前提 4 は原稿の種類（作業場所の差分にある `issues/` の外の Markdown）を定めるが、別の課題の原稿を組み直してよいとは書いていない。この設計の選び方は、スプリントの差分にある別の課題の原稿も対象にするので、要求の目的より広い。原稿のパスを課題や工程ごとに持つ入力は今の工程に無く（採らなかった案の 1 つ目と 3 つ目）、絞るには工程の入力か原稿の置き場の規約を足す必要がある。そこで、この広さを要求との差として「未確認のまま残ること」に挙げ、設計承認ゲートで承認する人の合意を取る。合意が得られなければ、実装に入る前に、原稿の置き場の規約で絞る案へ設計を戻す。要求仕様の正は課題の本文なので、合意したら課題の本文の目的を書き直してからコピーをそろえる
 - **代償**: `documentation` で、次の 2 つも対象になる。どちらも許す
     - 同じブランチで直した、原稿でない Markdown（変更履歴など）
-    - スプリントブランチにマージ済みの、別の課題の原稿。原稿の名前は課題の番号を持たず、前提 4 は原稿を作業場所の差分で決めるので、設計書のように番号で絞れない。別の課題の原稿 1 件ごとに、組み直しの手間と読み手役の確かめが 1 回増える。別の課題が同じ原稿を同時に直していると、後からマージする側で衝突する
-- **書き換えの見つけ方**: 対象の中の書き換え（内容を変えたかどうか）は、コードでは決められない。worker への起動指示に「内容を変えない」と書くだけでなく、push の前に組み直しの前後の範囲（比べる元から worker の後の `HEAD` まで）を `metrics.range` と `rebuilt-1` の項目に残し、続くレビューがその範囲の差分で事実・条件・数値の変化を確かめる。PR 全体の差分は組み直しの前の執筆の変更も含むので、内容の確かめには範囲の差分を使う。工程「設計」ではそのプランのレビューが、工程「ドキュメント再構成」では工程「ドキュメントレビュー」のレビューが確かめる。どちらもマージ（取り消せない操作）の前である。決定 5 で採らなかった「記録を起動指示で頼むだけにする」と違い、頼んだことが守られたかを範囲の差分とレビューで確かめられる。`rebuilt-1` は 1 件だけなので、レビューが扱う項目は組み直しの 1 回につき 1 件増える
+    - スプリントブランチにマージ済みの、別の課題の原稿。原稿の名前は課題の番号を持たず、前提 4 は原稿を作業場所の差分で決めるので、設計書のように番号で絞れない。別の課題の原稿 1 件ごとに、組み直しの手間と読み手役の確かめが 1 回増え、その原稿にも組み直しの編集が入りうる（要求との差。上の合意が要る）。別の課題が同じ原稿を同時に直していると、後からマージする側で衝突する
+- **書き換えの見つけ方**: 対象の中の書き換え（内容を変えたかどうか）は、コードでは決められない。worker への起動指示に「内容を変えない」と書くだけでなく、push の前に組み直しの前後の範囲（比べる元から worker の後の `HEAD` まで）を `metrics.range` に残し、続くレビューのレビュー担当がその範囲の差分で事実・条件・数値の変化を確かめる。PR 全体の差分は組み直しの前の執筆の変更も含むので、内容の確かめには範囲の差分を使う。工程「設計」ではそのプランのレビューが、工程「ドキュメント再構成」では工程「ドキュメントレビュー」のレビューが確かめる。どちらもマージ（取り消せない操作）の前である。決定 5 で採らなかった「記録を起動指示で頼むだけにする」と違い、頼んだことが守られたかを範囲の差分とレビューで確かめられる。範囲は処置の要る項目にしないので、変化が無ければ修正担当は起動しない
 - 根拠: Value 1「人の判断を、読み切れる量の大事な所だけにする」・Value 3（MVV バージョン 11）
 
 ### 決定 5: 読み手役の確かめを省かせないため、組み直す worker だけに読み手役の起動を許し、記録が無ければ済んだとしない
@@ -592,7 +601,8 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | I5（差分が空） | `sprint_diff` に文書の変更が無く、`--findings` に項目があるレビューの回で、収束とせずに修正担当へ項目が渡り、決めない項目があれば `incomplete` になる（今の `drive._verdict` と `finish_decide` を、受け取った項目で縛る） | 差分が空なら項目を見ずに収束とする |
 | I8 | worker が対象の外のファイル（要求仕様のコピー・別の課題の設計書）を変えてコミットしたとき、`ok` の結果の `items` に `scope-<番号>` が、`warnings` にそのパスが出る。対象の外のファイルを対象のパスへ移したときは、移した元のパスが `scope-<番号>` に出る（`--no-renames` を渡したことを偽物の git の引数で見る）。対象だけを変えたときは出ない（git と worker は偽物に替える） | worker の後の差分を読まない。名前の変更の検出を残す |
 | I8（打ち直し） | 1 回目の試行で worker が対象の外をコミットして `stopped` で終わり、打ち直しの試行が `ok` で終わったとき、打ち直しの結果に 1 回目の変更の `scope-<番号>` が出る。比べる元は `rebuild-base.json` の SHA で、`ok` の後はファイルが消える。SHA が今の `HEAD` の祖先でなければ `stopped`（`precondition`）になる | 試行ごとに起動の前の `HEAD` を比べる元にする |
-| 決定 4（前後の差分） | 対象が変わった `ok` の結果に、`rebuilt-1` が 1 件だけ入り、`text` に比べる元と後の `HEAD` の SHA と対象のパスがあり、`metrics.range` と一致する。対象が変わらなければ入らない | PR 全体の差分の起点を渡す。対象ごとに項目を足す |
+| 決定 4（前後の差分） | 対象が変わった `ok` の結果の `metrics.range` に比べる元と後の `HEAD` の SHA と変わった対象のパスが入り、`items` には前後の差分の項目が入らない。`--findings` のファイルに `metrics.range` があるとき、レビュー担当への指示に範囲の差分を読む 1 文が入り、無ければ入らない（レビュー担当は偽物に替え、指示の文字列だけを見る） | 範囲を `items` に入れる。PR 全体の差分の起点を渡す |
+| I8（打ち直しで 0 件） | 1 回目の試行で worker が唯一の対象を消してコミットし `stopped` で終わり、打ち直しの試行で対象が 0 件になったとき、`ok` の結果の `items` に消したパスの `scope-<番号>` が入り、worker は起動しない | 対象が 0 件なら範囲の差分を読まない |
 | 決定 2 | 工程「ドキュメント再構成」で、`--previous` の `blobs` と今の blob が同じ設計書が対象から外れて `metrics.skipped` に出る。blob が違えば対象に入る。`--previous` のファイルが無いか形が違えば、外さずに `warnings` が出る | `--previous` を見ない。違う blob でも外す |
 | I1（作業場所の外） | 親のディレクトリが作業場所の外へのシンボリックリンクで、その先に通常ファイルの設計書と要求仕様のコピーがあるとき、どちらも worker へ渡らず `warnings` に出る | 末尾だけを `lstat` する |
 | I6 | worker の `items` が同じ `id` を 2 件持つ・`reader-1` を持つ・`id` を持たないとき、結果の `items` は全件が残り、`id` が重ならない。レビューの読み取り（`as_handed`）でも別々の項目になる | worker の `id` をそのまま使う |
@@ -604,7 +614,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/domains/crossreview/test_handed_empty_diff.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
+| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/domains/crossreview/test_handed_empty_diff.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
 
 `plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。このファイルは、ndf の作り直し（#3347）でモジュールを受け持つ子の課題の表である。各行の持ち主はその子の呼び名で、`P1b` は #3092（`ndf.progress.invoke` などプランの実行の準備）、`M1` は #3300（`ndf.domains.loop`）を受け持つ。新しいモジュールは、隣のモジュールと同じ持ち主の `packages` に足し、`needs` は変えない。
 
@@ -627,6 +637,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | 項目 | 内容 |
 | --- | --- |
 | 組み直す worker が読み手役を立てられるか | `ndf worker run` の起動はサブエージェントの Tool を許すが、この設計の起動指示で実物を打っていない。条件 16 の手動確認（マージ前）で分かる。立てられなければ `not_run` と理由と書き手の代わりの点検が残り、条件 16 は満たす |
+| 原稿の範囲の要求との差（合意が要る） | 要求の目的は「その工程で書いた文書だけ」を組み直すとするが、この設計は `documentation` でスプリントの差分にある別の課題の原稿も対象にする（決定 4）。設計承認ゲートで承認する人が合意するかを決める。合意しなければ、実装の前に原稿の置き場の規約で絞る設計へ戻す |
 | プランの保存先が工程「ドキュメントレビュー」まで残るか | `rebuild_result` が指すファイルは、工程「ドキュメント再構成」のプランの保存先にある。消える経路はコードの読みで見つけていないが、実物で確かめていない。消えていれば工程「ドキュメントレビュー」が始まらずに止まり、項目は落ちない（「不合格の扱い」） |
 
 ## 外部の調査
