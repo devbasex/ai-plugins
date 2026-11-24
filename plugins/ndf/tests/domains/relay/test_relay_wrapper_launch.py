@@ -340,7 +340,7 @@ def _metered(tmp_path, settings_env=None):
         (tmp_path / "claude" / "settings.json").write_text(json.dumps({"env": settings_env}))
     s = make_settings(tmp_path)
     env = session_env.child_env(s.environ, s.state_dir, reg.METERED, decided=True)
-    return account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, [wrapper.CLAUDE])
+    return account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [wrapper.CLAUDE]))
 
 
 def test_target_env_builds_the_metered_child_on_the_shared_config_dir(tmp_path):
@@ -358,7 +358,7 @@ def test_target_env_without_a_metered_setting_is_unavailable(tmp_path):
     store = register(tmp_path)
     s = make_settings(tmp_path)
     env = session_env.child_env(s.environ, s.state_dir, reg.METERED, decided=True)
-    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unavailable"
+    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [])) == "metered_unavailable"
 
 
 def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_the_child(tmp_path):
@@ -368,7 +368,9 @@ def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_t
     environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-x ANTHROPIC_CUSTOM_HEADERS=X-A:1"}
     env = session_env.child_env(environ, s.state_dir, reg.METERED, decided=True)
     assert not account_choice.key_child(env, reg.METERED, store)
-    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unclassified"
+    assert (
+        account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [])) == "metered_unclassified"
+    )
 
 
 def test_candidates_are_the_registered_accounts_that_pass_ready_and_are_not_held(tmp_path):

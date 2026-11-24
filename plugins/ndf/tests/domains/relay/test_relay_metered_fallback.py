@@ -203,7 +203,9 @@ def test_4116_target_env_verifies_the_replaced_model_argument(tmp_path):
     # 差し替えた起動引数で確かめ（verify）と起動の両方が動く
     store = register(tmp_path)
     s, _, env = _env(tmp_path, f"{BEDROCK_DECL} ANTHROPIC_MODEL=profile-1")
-    got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--model", "opus"])
+    got = account_choice.target_env(
+        env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude", "--model", "opus"])
+    )
     assert not isinstance(got, str), got
     assert got.argv == ["claude", "--model", "profile-1"] and got.env["ANTHROPIC_MODEL"] == "profile-1"
 
@@ -280,7 +282,7 @@ def test_i9_the_check_and_the_launch_carry_the_same_helper_except_the_pin_tail(t
     helper = shlex.split(_settings_of(check)["apiKeyHelper"])
     assert not {"--pin", "--record", "--id"} & set(helper)
     record = (tmp_path / "rec.jsonl", "id-1")
-    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], record)
+    got = account_choice.key_target(env, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]), record)
     assert isinstance(got, account_choice.Built), got
     data = _settings_of(got.argv)
     words = shlex.split(data["apiKeyHelper"])
@@ -298,7 +300,9 @@ def test_i9_target_env_writes_a_settings_file_and_keeps_the_original(tmp_path):
     own = tmp_path / "own.json"
     own.write_text(json.dumps({"env": {"BASH_DEFAULT_TIMEOUT_MS": "1000"}}), encoding="utf-8")
     before = own.read_text()
-    got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--settings", "own.json"])
+    got = account_choice.target_env(
+        env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude", "--settings", "own.json"])
+    )
     assert isinstance(got, account_choice.Built), got
     value = got.argv[got.argv.index("--settings") + 1]
     assert value == str(got.settings_file) and got.settings_file.parent == account_choice.settings_path(s.state_dir)
@@ -312,7 +316,9 @@ def test_i9_target_env_refused_leaves_no_files(tmp_path):
     s, _, env = _env(tmp_path)
     (tmp_path / "own.json").write_text("{}", encoding="utf-8")
     _user_settings(tmp_path, {"env": {"ANTHROPIC_BASE_URL": "https://gateway.example.com"}})
-    got = account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, ["claude", "--settings", "own.json"])
+    got = account_choice.target_env(
+        env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude", "--settings", "own.json"])
+    )
     assert got == "metered_overridden"
     assert list((account_choice.settings_path(s.state_dir)).iterdir()) == []
 
@@ -328,7 +334,9 @@ def _launched(tmp_path, monkeypatch, record=True):
     d.mkdir(mode=0o700)
     os.chmod(d, 0o700)
     rec = key_helper.create(d) if record else None
-    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], (rec.path, rec.helper_id) if rec else None)
+    got = account_choice.key_target(
+        env, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]), (rec.path, rec.helper_id) if rec else None
+    )
     assert isinstance(got, account_choice.Built), got
     for k, v in got.env.items():
         monkeypatch.setenv(k, v)

@@ -142,6 +142,16 @@ def candidates(env: Mapping[str, str], store: Path, state_dir: Path, now: float,
 Decl = tuple[dict[str, str], bool]  # 従量の接続の設定（変数の組、保存した設定か）
 
 
+class LaunchArgs(NamedTuple):
+    """替え先を用意する起動の作業ディレクトリと起動引数。`decl` は呼び手が読んだ従量の接続の設定（`metered_of` の値）で、
+    在れば読み直さない（ラッパーがバージョンの判定と起動に同じ設定を使う。#4068）。
+    """
+
+    cwd: Path
+    argv: list[str]
+    decl: Union[Decl, str, None] = None
+
+
 def metered_decl(store: Path, environ: Mapping[str, str]) -> Union[Decl, str, None]:
     """従量の接続の設定。無ければ None、使えなければ値を含まない理由の符号（詳細設計書の「従量の接続の設定の検証」）。
 
@@ -668,42 +678,29 @@ def _write_new(path: Path, text: str) -> None:
         os.close(fd)
 
 
-def _launch_made(
-    env: Mapping[str, str],
-    store: Path,
-    cwd: Path,
-    argv: list[str],
-    pin: Path,
-    record: Optional[tuple[Path, str]],
-    decl: Union[Decl, str, None] = None,
-) -> Union[Made, str]:
-    """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。"""
+def _launch_made(env: Mapping[str, str], store: Path, args: LaunchArgs, tail: list[str]) -> Union[Made, str]:
+    """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。
+    `tail` は `_tail` の末尾の引数。"""
     target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
     if target.startswith(KEY_PREFIX):
-        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, _tail(pin, record), _source(argv, cwd))
-    decl = _decl_of(store, env) if decl is None else decl
-    return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, _tail(pin, record))
+        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), args.argv, tail, _source(args.argv, args.cwd))
+    decl = _decl_of(store, env) if args.decl is None else args.decl
+    return decl if isinstance(decl, str) else _build(env, decl, args.cwd, args.argv, tail)
 
 
 def key_target(
-    env: Mapping[str, str],
-    store: Path,
-    state_dir: Path,
-    cwd: Path,
-    argv: list[str],
-    record: Optional[tuple[Path, str]],
-    decl: Union[Decl, str, None] = None,
+    env: Mapping[str, str], store: Path, state_dir: Path, args: LaunchArgs, record: Optional[tuple[Path, str]]
 ) -> Union[Built, str]:
     """キーの子（API キーの設定の従量の接続）の替え先。固定のファイルのパスを決めて (b) の形の起動引数で確かめ、通れば
     `Resolved.pins` を固定のファイルへ書く（別冊の「確かめた設定への固定」）。`record` はラッパーの払い出しの記録先と helper の ID
     （`ndf plan` は None）。キーの子でなければ `target_env` と同じ。登録簿のキーの子かは `env` の `NDF_CLAUDE_ACCOUNT` で決める
-    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。`decl` は呼び手が読んだ従量の接続の設定で、
-    在れば読み直さない（ラッパーが版の判定と起動に同じ設定を使う。#4068）。
+    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。`args.decl` は `LaunchArgs` のとおり。
     """
     registry = (env.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX)  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続
-    decl = _decl_of(store, env) if decl is None else decl
+    decl = _decl_of(store, env) if args.decl is None else args.decl
+    cwd, argv = args.cwd, args.argv
     if not registry and (isinstance(decl, str) or not _is_key(decl)):
-        return target_env(env, reg.METERED, store, state_dir, cwd, argv, decl)
+        return target_env(env, reg.METERED, store, state_dir, LaunchArgs(cwd, argv, decl))
     start = reg.proc_start(os.getpid())
     try:
         d = _settings_dir(state_dir)
@@ -714,7 +711,7 @@ def key_target(
     _sweep(d)
     stem = f"{os.getpid()}-{start:.2f}-{secrets.token_hex(8)}"
     pin_file = d / f"{stem}{PIN_SUFFIX}"
-    got = _launch_made(env, store, cwd, argv, pin_file, record, None if registry else decl)
+    got = _launch_made(env, store, LaunchArgs(cwd, argv, None if registry else decl), _tail(pin_file, record))
     if isinstance(got, str):
         return got
     child, final, helper, from_file, gen, pin = got
@@ -734,26 +731,24 @@ def key_target(
     return reason
 
 
-def target_env(
-    env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str], decl: Union[Decl, str, None] = None
-) -> Union[Built, str]:
+def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path, args: LaunchArgs) -> Union[Built, str]:
     """確定した替え先の子の環境と最終の起動引数。使えなければ値を含まない理由の符号を返す。
 
     登録済みアカウントは `prepare` の後に `account_env`（`Built.resolved` は `Prepared.resolved`。理由は `prepare` の
     `Prepared.reason`）。`metered` は `build` の後に `verify` を当て、外れれば `metered_overridden`・`key_gate` を返す。キーの子は
     確かめた設定への固定のファイル（`Built.pin_file`）と、元の `--settings` がファイルなら合成の一時ファイル（`Built.settings_file`）を
     書く（払い出しの記録先を helper へ渡す起動は `key_target`）。
-    `env` は `child_env(…, account=target, decided=True)` の出力。`decl` は呼び手が読んだ従量の接続の設定で、在れば読み直さない
-    （`metered_of` の値。ラッパーが版の判定と起動に同じ設定を使う。#4068）。
+    `env` は `child_env(…, account=target, decided=True)` の出力。`args.decl` は `LaunchArgs` のとおり。
     """
+    cwd, argv = args.cwd, args.argv
     if target.startswith(KEY_PREFIX):
-        return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, cwd, argv, None)
+        return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, LaunchArgs(cwd, argv), None)
     if target == reg.METERED:
-        decl = _decl_of(store, env) if decl is None else decl
+        decl = _decl_of(store, env) if args.decl is None else args.decl
         if isinstance(decl, str):
             return decl
         if _is_key(decl):
-            return key_target(env, store, state_dir, cwd, argv, None, decl)
+            return key_target(env, store, state_dir, LaunchArgs(cwd, argv, decl), None)
         got = _build(env, decl, cwd, argv, [])
         if isinstance(got, str):
             return got
@@ -824,7 +819,7 @@ def retry_env(
     if pick.kind != "switch" or pick.account is None:
         return None
     child = session_env.child_env(env, state_dir, pick.account, decided=True)
-    got = target_env(child, pick.account, store, state_dir, cwd, argv)
+    got = target_env(child, pick.account, store, state_dir, LaunchArgs(cwd, argv))
     if isinstance(got, str):
         print(f"ndf plan: 替え先 {pick.account} を用意できない（{got}）。打ち直さない", file=sys.stderr)
         return None

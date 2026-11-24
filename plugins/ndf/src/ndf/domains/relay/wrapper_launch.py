@@ -190,11 +190,11 @@ class LaunchSteps:
         return (account_choice.merged_settings if key else account_choice.with_settings)(built, self.rewake.settings), True, version
 
     def _rewake_child(self, launch: str, env: Mapping[str, str], on: bool, version: Optional[str]) -> dict[str, str]:
-        """子の環境の `NDF_RELAY_REWAKE` を登録の有無にそろえ、版を起動の行のために残す。
+        """子の環境の `NDF_RELAY_REWAKE` を登録の有無にそろえ、バージョンを起動の行のために残す。
 
-        今の起動の記録は `_start` が候補を試す前に登録なし（`rewake` 偽・版なし）で書いてある。書き直すのは、登録を渡す候補と、
-        同じ起動の前の候補に登録を渡した記録を戻す候補だけである（起床を無効にした既定の設定では書き直さない）。記録の版を読むのは
-        登録を渡した子の起床の記録だけなので、登録の無い起動の版は起動の行（`rewake_used`）にだけ残す。
+        今の起動の記録は `_start` が候補を試す前に登録なし（`rewake` 偽・バージョンなし）で書いてある。書き直すのは、登録を渡す候補と、
+        同じ起動の前の候補に登録を渡した記録を戻す候補だけである（起床を無効にした既定の設定では書き直さない）。記録のバージョンを読むのは
+        登録を渡した子の起床の記録だけなので、登録の無い起動のバージョンは起動の行（`rewake_used`）にだけ残す。
         """
         if on or self.rewake_used.get("rewake") is True:
             signals.set_launch(self.dir, launch, rewake=on, claude_version=version)
@@ -279,9 +279,11 @@ class LaunchSteps:
         gate, helper = found
         use = account_choice.with_settings(argv, self.rewake.settings) if self._listed(gate) else argv
         if helper is not None:
-            got = account_choice.key_target(env, self.store, self.s.state_dir, self.s.cwd, use, (helper.path, helper.helper_id), gate.decl)
+            got = account_choice.key_target(
+                env, self.store, self.s.state_dir, account_choice.LaunchArgs(self.s.cwd, use, gate.decl), (helper.path, helper.helper_id)
+            )
         else:
-            got = account_choice.target_env(env, name, self.store, self.s.state_dir, self.s.cwd, use, gate.decl)
+            got = account_choice.target_env(env, name, self.store, self.s.state_dir, account_choice.LaunchArgs(self.s.cwd, use, gate.decl))
         if isinstance(got, str):
             self._skip(name, got)
             return None
