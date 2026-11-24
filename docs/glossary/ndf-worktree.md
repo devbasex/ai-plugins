@@ -16,8 +16,8 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | セッション開始 hook | — | worktree-session.sh。Claude Code / Codex の SessionStart、Kiro の agentSpawn などで動く | 開始時の hook | — | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |
 | 開発 worktree | — | 人が変更を加えて Pull Request にする worktree。ブランチを持つ | 開発用の worktree | — | `plugins/ndf/skills/worktree/SKILL.md` |
 | レビュー worktree | — | cross-review と cross-refactoring が一時的に使う worktree。システムの一時ディレクトリに置く | レビュー用の worktree | — | `plugins/ndf/skills/worktree/SKILL.md` |
-| 依存物 | — | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | — | — | — |
-| 依存の用意 | — | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、設定に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない | — | — | — |
+| 依存物 | — | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | — | — | `plugins/ndf/skills/worktree/SKILL.md` |
+| 依存の用意 | — | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、設定に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない | — | — | `plugins/ndf/skills/worktree/SKILL.md` |
 | テスト環境 | — | 1 つの worktree に対応して立ち上げる、テスト実行に必要なサービスの一式。番号で識別され、他の worktree とポート・データ保存先・ネットワークを共有しない | — | — | `plugins/ndf/skills/worktree/references/test-execution.md` |
 | テスト環境の用意 | — | 到達の確認が通らないときに、テスト環境を起動して到達を確かめ直すこと | — | — | `plugins/ndf/skills/worktree/references/test-execution.md` |
 | テスト環境のスロット | — | テスト環境へ割り当てる 0〜63 の番号。worktree ごとのポートの計算に使う | — | — | `docs/specifications/ndf-testenv-reclaim.md` |
@@ -26,8 +26,8 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | テスト環境の回収 | — | 残った割り当てのテスト環境を compose の定義なしで破棄し、解放の時刻を書くこと | — | — | `docs/specifications/ndf-testenv-reclaim.md` |
 | 見えない位置の割り当て | — | worktree のパスがメインディレクトリの下に無く、親のディレクトリが無いか、親のディレクトリがメインディレクトリと別のファイルシステムにある割り当て。回収を打った位置から存在を確かめられないため、残った割り当てとして判定しない | — | — | `docs/specifications/ndf-testenv-reclaim.md` |
 | 回収の予約 | — | 環境名ごとのロック。回収が環境名の共有を確かめてから解放を終えるまで持ち、割り当ての追加と使い始めが短く取って通る | — | — | `docs/specifications/ndf-testenv-reclaim.md` |
-| 到達の確認 | — | コンテナの中から worktree の探りのマーカーを読み、テストのコンテナが worktree を見ているかを確かめること | — | — | — |
-| ツールのパス | `tool_paths` | CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す | — | — | — |
+| 到達の確認 | — | コンテナの中から worktree の探りのマーカーを読み、テストのコンテナが worktree を見ているかを確かめること | — | — | `plugins/ndf/skills/worktree/references/test-execution.md` |
+| ツールのパス | `tool_paths` | CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す | — | — | `plugins/ndf/skills/worktree/references/ndf-settings.md` |
 | 残る状態 | — | NDF の実行が作り、その実行が終わった後もディスクに残るもの（レビュー worktree・状態ファイル・一時ファイル・投稿キューの項目）（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 状態のオーナー | — | 残る状態を作った実行。オーナーが生きている間は、別の実行がその状態を消さない（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 状態の寿命 | — | 残る状態を片付けてよくなる条件（オーナーのプロセスの終わり・Pull Request が閉じたこと・送り終えたこと など）。状態の種類ごとに 1 つ決める（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |

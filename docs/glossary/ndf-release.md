@@ -11,7 +11,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリースプラン | — | リリースの手順をステップの列として持つプラン | 配布の計画、昇格のプラン | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースコマンド | — | リポジトリが `.ndf/release.json` に定義し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド | 配布のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インストール確認 | — | 隔離した HOME で ref からプラグインをインストールし、バージョンと中身が ref と一致するかを確かめる | 導入確認 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 導入の確認 | — | `.ndf/pace.json` の `<セクション>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける | — | — | — |
+| 導入の確認 | — | `.ndf/pace.json` の `<セクション>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | リリース完了の確認 | — | 公開が済んだことを、リリース先の状態から読み取れる値 | 完了の事実 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリース記録 | — | release が Pull Request へ残す記録のブロック。段階・バージョン・スプリントの Pull Request に、CD を読んだときは CD の結果を持つ | リリースの記録、配布の記録 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
 | リリース種別 | `release_type` | リリースの種類。production（本番リリース）/ verification（開発版のデプロイ） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
@@ -22,9 +22,9 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 開発版 | — | ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きのバージョン。マージされた変更がそのまま載る。手動反映の本番系の形では、production: false の行（検証の環境）へ届くことも開発版に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番 | — | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 正式版 | — | 本番チャネルへ出す、接尾辞の無いバージョン。出したらリリースタグを打つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 自動反映の本番チャネル | `auto_production_branch` | 本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。設定の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージはリリース承認ゲートに当たる | — | — | — |
-| 手動反映の本番系 | `manual_production` | リリースの設定の行のうち、production: true と定義され、kind: manual（担い手が手で起動する）のもの。そこへ届ける操作の前にリリース承認ゲートを掛ける。自動反映の本番チャネルと対になる | — | — | — |
-| リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form のテンプレートで組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ設定の delivery から決まる。リリースの形とは別の軸 | 配布の経路 | — | — |
+| 自動反映の本番チャネル | `auto_production_branch` | 本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。設定の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージはリリース承認ゲートに当たる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
+| 手動反映の本番系 | `manual_production` | リリースの設定の行のうち、production: true と定義され、kind: manual（担い手が手で起動する）のもの。そこへ届ける操作の前にリリース承認ゲートを掛ける。自動反映の本番チャネルと対になる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form のテンプレートで組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ設定の delivery から決まる。リリースの形とは別の軸 | 配布の経路 | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
 | CD | — | 継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で定義する | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | CD の案内 | — | CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 手動反映の理由 | — | delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない | — | — | `docs/specifications/ndf-release-via-cd.md` |

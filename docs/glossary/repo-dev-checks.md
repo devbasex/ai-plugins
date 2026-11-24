@@ -6,7 +6,7 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
-| 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じバージョン・同じ設定で走らせる 1 つのコマンド | — | — | — |
+| 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じバージョン・同じ設定で走らせる 1 つのコマンド | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | 古いバイトコード | — | Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | git を使うテストの基盤 | — | cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow） | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | CLI のバージョンの一覧 | — | スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。バージョンを上げるときに書き換える唯一の場所 | — | — | `docs/specifications/runtime-smoke-cli-versions.md` |
