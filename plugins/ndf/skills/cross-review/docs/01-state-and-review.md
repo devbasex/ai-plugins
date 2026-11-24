@@ -124,7 +124,7 @@
 
 | キー | 中身 |
 | --- | --- |
-| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`branch` は MVV を読んだブランチ）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
+| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`mvv_branch` は MVV を読んだブランチ）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（ジャーナルへ入れるときに下げた後の値）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。引き継いだ指摘の行は記録された `severity` だけを持つ |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |

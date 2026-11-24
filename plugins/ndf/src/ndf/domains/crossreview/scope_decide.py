@@ -29,7 +29,7 @@ FOCUS = "focus"
 # GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
 MVV = "mvv"
 MVV_ID = "id"
-MVV_BRANCH = "branch"
+MVV_BRANCH = "mvv_branch"
 # 今の MVV を確かめられないときの、MVV を見分ける値。どの記録とも違うとみなし、前のラウンドを使わない
 UNKNOWN_MVV = ""
 # MVV の記録の無いラウンド（記録を足す前のバージョンが書いた）の、MVV を見分ける値

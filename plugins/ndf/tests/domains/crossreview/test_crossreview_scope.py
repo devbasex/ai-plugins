@@ -215,7 +215,7 @@ def _read_with(mvv: object) -> dict:
 @pytest.mark.parametrize(
     ("recorded", "now", "head"),
     [
-        ({"id": APPROVED, "branch": "main"}, APPROVED, "h1"),
+        ({"id": APPROVED, "mvv_branch": "main"}, APPROVED, "h1"),
         ({"id": "absent:::"}, "absent:::", "h1"),
         # MVV の記録が無いラウンド（この記録を足す前のバージョンが書いた）は、今も MVV が無いときだけ同じとみなす
         (None, "absent:::", "h1"),
@@ -261,7 +261,7 @@ def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | 
 
 
 def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
-    rounds = [{scope_decide.MVV: {"id": APPROVED, "branch": "main"}}, {"round": 2}, "壊れたラウンド"]
+    rounds = [{scope_decide.MVV: {"id": APPROVED, "mvv_branch": "main"}}, {"round": 2}, "壊れたラウンド"]
     assert scope_decide.mvv_branch({"rounds": rounds}) == "main"
     assert scope_decide.mvv_branch({"rounds": [{"round": 1}]}) is None
 

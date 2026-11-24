@@ -292,8 +292,8 @@ def test_converged_review_runs_again_after_a_new_mvv_is_approved(repos: Repos, w
     assert "doc.md#セクション B" in _prompt(again, "codex")
     state = _state(again.state_dir)
     assert [(r["scope"], r["mvv"]) for r in state["rounds"]] == [
-        ("full", {"id": _identity(11), "branch": "main"}),
-        ("full", {"id": _identity(12, BODY + "3. **三つ目**\n"), "branch": "main"}),
+        ("full", {"id": _identity(11), "mvv_branch": "main"}),
+        ("full", {"id": _identity(12, BODY + "3. **三つ目**\n"), "mvv_branch": "main"}),
     ]
     assert state["reviewed_mvv"] == state["rounds"][-1]["mvv"]["id"] and "doc.md#セクション B" in state["reviewed_sections"]
 
@@ -400,15 +400,15 @@ def test_review_scope_of_a_commit_base_reads_the_branch_run_recorded(
     base = gathered if form == "full" else gathered[:10]
     fake = _clean(tmp_path)
     _run(capsys, monkeypatch, fake, wt, "--base", base)
-    assert _state(fake.state_dir)["rounds"][0]["mvv"] == {"id": _identity(11), "branch": "main"}
+    assert _state(fake.state_dir)["rounds"][0]["mvv"] == {"id": _identity(11), "mvv_branch": "main"}
     assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "since"
     path = store.state_pr(fake.state_dir, PR).path
     data = store.read_object(path)
-    del data["rounds"][0]["mvv"]["branch"]
+    del data["rounds"][0]["mvv"]["mvv_branch"]
     store.write_object(path, data)
     got = _scope_of(capsys, fake, wt, "--base", base)
     assert got["items"][0]["scope"] == "full" and "ブランチ" in got["warnings"][0]
-    data["rounds"][0]["mvv"]["branch"] = "main"
+    data["rounds"][0]["mvv"]["mvv_branch"] = "main"
     store.write_object(path, data)
     _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
     sh(wt, "fetch", "-q", "origin")

@@ -405,7 +405,7 @@ def _rounds_without_heads(state: dict) -> list[dict]:
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
-        assert r["mvv"] == {"id": "absent:::", "branch": "main"}
+        assert r["mvv"] == {"id": "absent:::", "mvv_branch": "main"}
         row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
