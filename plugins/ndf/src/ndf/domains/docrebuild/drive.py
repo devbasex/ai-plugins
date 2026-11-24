@@ -406,6 +406,20 @@ def _read_report(path: Path) -> dict[str, Any]:
     return report
 
 
+def _reader_summary(
+    raw: Any, targets: Sequence[Target], skipped: Sequence[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
+    """欠けの無い確かめの記録を整形し、(readers, items, warnings) を返す。"""
+    records = raw if isinstance(raw, list) else []  # 欠けが無ければ並びである（reader_gaps が確かめた）
+    readers = [_clean(_records_of(records, t.path)[0]) for t in targets]
+    found, said = reader_items(readers)
+    warnings = [*skipped, *said]
+    outside = len(records) - len(readers)
+    if outside:
+        warnings.append(f"対象の外の文書の記録を {outside} 件外した")
+    return readers, found, warnings
+
+
 def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequence[str]) -> dict[str, Any]:
     """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。"""
     try:
@@ -417,13 +431,7 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
     gaps = reader_gaps(raw, targets)
     if gaps:
         return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
-    records = raw if isinstance(raw, list) else []  # 欠けが無ければ並びである（reader_gaps が確かめた）
-    readers = [_clean(_records_of(records, t.path)[0]) for t in targets]
-    found, said = reader_items(readers)
-    warnings = [*skipped, *said]
-    outside = len(records) - len(readers)
-    if outside:
-        warnings.append(f"対象の外の文書の記録を {outside} 件外した")
+    readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
     summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格 {len(found)} 件）"
     return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
