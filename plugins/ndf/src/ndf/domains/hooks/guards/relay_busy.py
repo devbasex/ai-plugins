@@ -133,9 +133,9 @@ def _may_start(tool: Any, tool_input: Any) -> bool:
 
 
 def _starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool:
-    """作業を始める呼び出しか。例外を外へ出さない。Monitor は必ずバックグラウンドで動くので、確かめられない入力は作業とする。"""
-    if not _may_start(tool, tool_input) or tool == "Agent":
-        return tool == "Agent"
+    """`_may_start` を通した呼び出しが作業を始めるか。例外を外へ出さない。Monitor は必ずバックグラウンドで動くので、確かめられない入力は作業とする。"""
+    if tool == "Agent":
+        return True
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     return task_kind("monitor" if tool == "Monitor" else "shell", command, params) == "work"
 
