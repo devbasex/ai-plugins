@@ -86,11 +86,19 @@ def test_the_start_of_a_work_is_recorded_and_passes(relay_child, tmp_path, call)
     assert busy(relay_child) == (1, 0, "start")
 
 
+@pytest.mark.parametrize("name", ["watch-bash", "watch-monitor"])
+def test_the_start_of_a_watch_is_recorded_as_a_monitor_only(relay_child, tmp_path, name):
+    session_start(tmp_path, "startup")
+    assert pre(tmp_path, OTHERS[name]) is None
+    assert busy(relay_child) == (0, 1, "session")
+
+
 @others
-def test_other_calls_touch_neither_the_record_nor_its_place(relay_child, tmp_path, monkeypatch, call):
+def test_other_calls_pass_when_the_record_cannot_be_written(relay_child, tmp_path, monkeypatch, call):
     # 監視の開始と、バックグラウンドで始めない呼び出しは、記録が書けない状態でも通る
     session_start(tmp_path, "startup")
     monkeypatch.setattr(signals, "record_start", boom)
+    monkeypatch.setattr(signals, "record_monitor", boom)
     monkeypatch.setattr(signals, "relay_dir", boom)
     assert pre(tmp_path, call) is None
     monkeypatch.undo()

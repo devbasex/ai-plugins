@@ -10,7 +10,12 @@ import pytest
 from ndf.contracts import limits
 from ndf.domains.relay import account_decide, account_registry, cli, hub_decide, switch_decide
 from ndf.domains.relay.account_decide import Pick, Usage
+from ndf.domains.relay.switch_decide import Background
 
+AT = "2026-11-22T03:19:34+00:00"
+IDLE, WATCHING = Background(0, "stop", AT, 0), Background(0, "stop", AT, 1)  # 作業が無い・監視だけが残る
+WORKING, STARTED = Background(2, "stop", AT, 1), Background(1, "start", AT, 0)  # 作業が残る・作業を始めた
+# 動いていてバックグラウンドの作業が無いと確かめられた子
 BASE = switch_decide.SectionState(
     question=False,
     next_block=None,
@@ -19,6 +24,7 @@ BASE = switch_decide.SectionState(
     idle_seconds=10.0,
     quiet_seconds=5.0,
     stall_seconds=1800.0,
+    background=IDLE,
 )
 
 
@@ -75,14 +81,14 @@ def test_context_over_the_limit_asks_for_a_handover_once():
     over = state(context_tokens=800_000, context_limit=800_000)
     got = switch_decide.decide(over)
     assert got.kind == "handover" and got.prompt == switch_decide.HANDOVER_PROMPT
-    assert switch_decide.decide(dataclasses.replace(over, handover_asked=True)).kind == "wait"
-    assert switch_decide.decide(dataclasses.replace(over, idle_seconds=1.0)).kind == "wait"
-    assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "wait"
+    assert switch_decide.decide(dataclasses.replace(over, handover_asked=True)).kind == "active"
+    assert switch_decide.decide(dataclasses.replace(over, idle_seconds=1.0)).kind == "active"
+    assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "active"
 
 
 @pytest.mark.parametrize(
     ("idle", "stall", "kind"),
-    [(1799.9, 1800.0, "wait"), (1800.0, 1800.0, "restart"), (9999.0, 0.0, "wait")],
+    [(1799.9, 1800.0, "active"), (1800.0, 1800.0, "restart"), (9999.0, 0.0, "active")],
     ids=["just-before", "reached", "off"],
 )
 def test_the_stall_restarts_only_once_the_stall_seconds_are_reached(idle, stall, kind):
@@ -116,7 +122,7 @@ def _settings_limit(tmp_path, monkeypatch, env):
 
 @pytest.mark.parametrize(
     ("env", "tokens", "kind"),
-    [(None, 500_000, "handover"), (None, 499_999, "wait"), ("300000", 300_000, "handover"), ("300000", 299_999, "wait")],
+    [(None, 500_000, "handover"), (None, 499_999, "active"), ("300000", 300_000, "handover"), ("300000", 299_999, "active")],
 )
 def test_wrapper_settings_hand_the_operating_limit_to_the_handover(tmp_path, monkeypatch, env, tokens, kind):
     # #3995 の 3995:7・3995:9: ラッパーは運用上限（500,000。NDF_CONTEXT_LIMIT で替える）で静かな子に引継ぎを頼む
@@ -131,7 +137,7 @@ def test_wrapper_settings_read_the_limit_from_the_limits_table(tmp_path, monkeyp
     monkeypatch.setattr(limits, "value", lambda name, key: swapped[name] if name in swapped else real(name, key))
     limit = _settings_limit(tmp_path, monkeypatch, None)
     assert switch_decide.decide(state(context_tokens=200_000, context_limit=limit)).kind == "handover"
-    assert switch_decide.decide(state(context_tokens=199_999, context_limit=limit)).kind == "wait"
+    assert switch_decide.decide(state(context_tokens=199_999, context_limit=limit)).kind == "active"
 
 
 def test_3864_7_an_auth_failure_without_a_target_is_stalled_while_the_child_is_alive():
@@ -144,7 +150,7 @@ def test_3864_7_an_auth_failure_without_a_target_is_stalled_while_the_child_is_a
 def test_3864_6_an_auth_failure_resumes_on_the_target_with_the_auth_prompt():
     # 受け入れ条件 #3864 の 6: 認証の失敗の switch は account の手で、同じ会話を AUTH_RESUME_PROMPT で続ける
     got = switch_decide.decide(state(auth_pick=Pick("switch", "work2", "work1 の認証に失敗した"), next_block="/goal x"))
-    assert got == ("account", "work1 の認証に失敗した", switch_decide.AUTH_RESUME_PROMPT, "work2")
+    assert got == switch_decide.Step("account", "work1 の認証に失敗した", switch_decide.AUTH_RESUME_PROMPT, "work2")
     assert switch_decide.AUTH_RESUME_PROMPT == "認証の失敗でアカウントを替えた。中断したところから続ける"
 
 
@@ -182,7 +188,7 @@ def test_next_block_waits_from_the_first_mark_not_only_from_the_last_output():
         ({"child_alive": False, "child_exit": 0}, "finish"),
         ({"child_alive": False, "child_exit": 1}, "restart"),
         ({"idle_seconds": 1800.0}, "restart"),
-        ({}, "wait"),
+        ({}, "active"),
     ],
 )
 def test_child_end_and_stall(changes, kind):
@@ -230,7 +236,7 @@ def test_i15_spin_held_turns_even_a_first_time_account_switch_into_spin():
     pick = Pick("switch", "main", "team が上限に当たった")
     got = switch_decide.decide(state(limit_pick=pick, spin_held=True, spin_seen=frozenset({"team"})))
     assert got.kind == "spin"
-    assert switch_decide.decide(state(spin_held=True)).kind == "wait"  # 起動の手でなければ当てない
+    assert switch_decide.decide(state(spin_held=True)).kind == "active"  # 起動の手でなければ当てない
 
 
 @pytest.mark.parametrize("code", [0, 1])
@@ -328,15 +334,17 @@ GUARD = Pick("switch", "work2", "work1 の 5 時間 86% が閾値 A 85% 以上�
 
 
 def test_d11_guard_switch_at_a_safe_point_resumes_with_the_guard_prompt():
-    # 決定 11・I12: 見回りの判断が switch で止めてよい時点なら、替え先で同じ会話を続ける手（account）と GUARD_RESUME_PROMPT
+    # 決定 11・I12: 見回りの判断が switch で止めてよい時点なら、替え先で同じ会話を続ける手（account）と GUARD_RESUME_PROMPT。
+    # 替えで終わる監視の張り直しを続けて伝える（#4049 の受け入れ条件 12）
     got = switch_decide.decide(state(guard_pick=GUARD, safe=True))
-    assert got == switch_decide.Step("account", GUARD.reason, switch_decide.GUARD_RESUME_PROMPT, "work2")
+    prompt = f"{switch_decide.GUARD_RESUME_PROMPT}。{switch_decide.MONITOR_RESUME}"
+    assert got == switch_decide.Step("account", GUARD.reason, prompt, "work2", busy="zero")
 
 
 def test_i13_guard_switch_waits_until_the_safe_point():
-    # I13: 止めてよい時点の外では替えのために子を止めず wait
+    # I13: 止めてよい時点の外では替えのために子を止めず、動いている子として扱う
     got = switch_decide.decide(state(guard_pick=GUARD, safe=False))
-    assert got == switch_decide.Step("wait", "閾値を越えた。止めてよい時点を待つ")
+    assert got == switch_decide.Step("active", switch_decide.GUARD_POINT)
 
 
 @pytest.mark.parametrize(
@@ -347,8 +355,9 @@ def test_i13_guard_switch_waits_until_the_safe_point():
     ],
 )
 def test_r1_8_waiting_for_the_safe_point_does_not_hold_the_stall_restart_or_the_handover(changes, kind):
-    # cross-review の r1-8: 止めてよい時点を待つ間も、出力の止まりの再起動と文脈の上限の引継ぎは働く
+    # cross-review の r1-8: 止めてよい時点を待つ間も、出力の止まりの再起動と文脈の上限の引継ぎは働く。作業が残ればどちらも待つ（#4049）
     assert switch_decide.decide(state(guard_pick=GUARD, safe=False, **changes)).kind == kind
+    assert switch_decide.decide(state(guard_pick=GUARD, safe=False, background=WORKING, **changes)).kind == "wait_background"
 
 
 @pytest.mark.parametrize(
@@ -356,7 +365,7 @@ def test_r1_8_waiting_for_the_safe_point_does_not_hold_the_stall_restart_or_the_
     [
         ({"next_block": "/goal 次", "idle_seconds": 60.0}, "switch"),  # 次のセグメントのマーカーはカットポイントの判断が先
         ({"question": True, "question_id": "toolu_1"}, "forward"),  # 質問は転送が先
-        ({"guard_pick": Pick("keep", "work1", "替えない")}, "wait"),  # keep なら見回りの手は無い（子が動いている）
+        ({"guard_pick": Pick("keep", "work1", "替えない")}, "active"),  # keep なら見回りの手は無い（子が動いている）
         ({"limit_pick": Pick("wait_reset", "work1", "上限")}, "wait_reset"),  # 上限の判断が先
         ({"spin": True, "spin_seen": frozenset({"work1", "work2"})}, "spin"),  # 続きの中で起動した起動先への替えは spin
     ],
@@ -364,8 +373,8 @@ def test_r1_8_waiting_for_the_safe_point_does_not_hold_the_stall_restart_or_the_
 def test_i13_guard_comes_after_the_marker_question_and_limit_and_is_cut_by_the_spin(changes, kind):
     got = switch_decide.decide(state(**{"guard_pick": GUARD, "safe": True, **changes}))
     assert got.kind == kind
-    if kind == "wait":
-        assert got.reason == "子が動いている"
+    if kind == "active":
+        assert got.reason == switch_decide.ACTIVE
 
 
 G = account_decide.Guards(85.0, 70.0, 90.0)  # 閾値 A・B・C（`contracts/limits/` の既定）
@@ -572,3 +581,99 @@ def test_3864_9_d12_revoked_comes_first_and_never_stalls(changes, kind):
 
 def test_d12_revoked_is_none_without_must_end():
     assert switch_decide._revoked(state(end_ready=True, drift_pick=SWITCH_K2)) is None
+
+
+# --- バックグラウンドの作業が残る子を止めずに待つ（#4049） ---
+
+OVER = {"context_tokens": 800_000, "context_limit": 800_000}
+STALL = {"idle_seconds": 1800.0}
+AT_GUARD = {"guard_pick": GUARD, "safe": True}
+
+
+@pytest.mark.parametrize(
+    "changes, found, kind, reason",
+    [
+        (OVER, IDLE, "handover", "800000"),
+        (OVER, WATCHING, "handover", "800000"),
+        (OVER, WORKING, "wait_background", f"作業 2 件の終わりを待つ（監視 1 件は数えない。記録 {AT}）"),
+        (OVER, STARTED, "wait_background", f"作業 1 件以上の終わりを待つ（開始の記録 {AT}）"),
+        (OVER, None, "wait_background", switch_decide.BACKGROUND_UNKNOWN),
+        (STALL, IDLE, "restart", "1800 秒止まっている"),
+        (STALL, WATCHING, "wait_background", f"監視 1 件の終わりを待つ（記録 {AT}）"),
+        (STALL, WORKING, "wait_background", "作業 2 件"),
+        (STALL, None, "restart", "1800 秒止まっている"),
+        ({**OVER, **STALL}, IDLE, "handover", "800000"),
+        ({**OVER, **STALL}, WATCHING, "handover", "800000"),
+        ({**OVER, **STALL}, STARTED, "wait_background", "1 件以上"),
+        ({**OVER, **STALL}, None, "restart", "1800 秒止まっている"),
+        ({**OVER, "handover_asked": True}, WORKING, "active", switch_decide.ACTIVE),
+        ({**OVER, "context_tokens": 799_999}, WORKING, "active", switch_decide.ACTIVE),
+        ({**OVER, "idle_seconds": 4.9}, WORKING, "active", switch_decide.ACTIVE),
+        (AT_GUARD, WATCHING, "account", GUARD.reason),
+        (AT_GUARD, WORKING, "wait_background", "作業 2 件"),
+        (AT_GUARD, STARTED, "wait_background", "1 件以上"),
+        (AT_GUARD, None, "wait_background", switch_decide.BACKGROUND_UNKNOWN),
+        ({**AT_GUARD, **STALL}, IDLE, "account", GUARD.reason),
+        ({**AT_GUARD, **STALL}, WORKING, "wait_background", "作業 2 件"),
+        ({**AT_GUARD, **STALL}, None, "restart", "1800 秒止まっている"),
+        ({**AT_GUARD, "limit_pick": Pick("switch", "main", "上限")}, WORKING, "account", "上限"),
+        ({"spin": True, **STALL}, IDLE, "spin", "1800 秒止まっている"),
+        ({"spin": True, **STALL}, WORKING, "wait_background", "作業 2 件"),
+        ({"child_alive": False, "child_exit": 1, **STALL}, WORKING, "restart", "終了コード 1"),
+    ],
+)
+def test_4049_1_2_12_a_child_with_works_left_is_waited_for(changes, found, kind, reason):
+    # 受け入れ条件 1・2・10・11・12: 作業が残れば引継ぎ・起動し直し・見回りの替えを待ち、監視だけなら起動し直しだけを待つ
+    got = switch_decide.decide(state(background=found, **changes))
+    assert got.kind == kind and reason in got.reason
+
+
+@pytest.mark.parametrize(
+    "changes, found, busy",
+    [
+        (OVER, IDLE, "zero"),
+        (STALL, IDLE, "none_running"),
+        (STALL, None, "none_running"),
+        (AT_GUARD, IDLE, "zero"),
+        ({**AT_GUARD, "limit_pick": Pick("switch", "main", "上限")}, IDLE, None),
+        ({"auth_pick": Pick("switch", "work2", "認証")}, IDLE, None),
+        ({"next_block": "/goal 次"}, IDLE, None),
+        ({"child_alive": False, "child_exit": 1}, IDLE, None),
+    ],
+)
+def test_4049_3_the_steps_that_depend_on_the_count_ask_for_a_recheck_before_stopping(changes, found, busy):
+    assert switch_decide.decide(state(background=found, **changes)).busy == busy
+
+
+def test_4049_12_going_back_from_metered_also_tells_to_rearm_the_watches():
+    back = switch_decide.decide(state(metered=True, **AT_GUARD))
+    assert back.prompt == f"{switch_decide.GUARD_BACK_PROMPT}。{switch_decide.MONITOR_RESUME}"
+
+
+ALL_AT_ONCE = {**OVER, **STALL, **AT_GUARD}
+
+
+@pytest.mark.parametrize(
+    "changes, needed",
+    [
+        (OVER, True),
+        (STALL, True),
+        ({"spin": True, **STALL}, True),
+        (AT_GUARD, True),
+        ({**OVER, "context_tokens": 799_999}, False),
+        ({**OVER, "idle_seconds": 4.9}, False),
+        ({**OVER, "handover_asked": True}, False),
+        ({"idle_seconds": 1799.9}, False),
+        ({"idle_seconds": 9999.0, "stall_seconds": 0.0}, False),
+        ({**AT_GUARD, "safe": False}, False),
+        ({**ALL_AT_ONCE, "limit_pick": Pick("switch", "main", "上限")}, False),
+        ({**ALL_AT_ONCE, "limit_pick": Pick("wait_reset", "work1", "上限")}, False),
+        ({**ALL_AT_ONCE, "auth_pick": Pick("switch", "work2", "認証")}, False),
+        ({**ALL_AT_ONCE, "question": True}, False),
+        ({**ALL_AT_ONCE, "next_block": "/goal 次"}, False),
+        ({**ALL_AT_ONCE, "must_end": True}, False),
+        ({"child_alive": False, "child_exit": 1}, False),
+    ],
+)
+def test_4049_10_the_record_is_needed_only_where_the_chosen_step_depends_on_it(changes, needed):
+    assert switch_decide.needs_background(state(**changes)) is needed

@@ -144,12 +144,17 @@ def _mark(session_id: str) -> int:
 def _decide() -> int:
     try:
         data = json.loads(sys.stdin.read())
-        pick = data.pop("limit_pick", None)
-        state = switch_decide.SectionState(**data, limit_pick=account_decide.Pick(**pick) if pick else None)
+        pick, found = data.pop("limit_pick", None), data.pop("background", None)
+        state = switch_decide.SectionState(
+            **data,
+            limit_pick=account_decide.Pick(**pick) if pick else None,
+            background=switch_decide.Background(**found) if found else None,
+        )
     except (ValueError, TypeError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"セグメントの状態の JSON の形が違う: {exc}"))
-    step = switch_decide.decide(state)
-    return result.emit(result.result(TOOL, result.OK, step.reason, items=[step._asdict()]))
+    step = switch_decide.decide(state)._asdict()
+    del step["busy"]  # 子を止める直前の読み直しの条件はラッパーの中だけの値
+    return result.emit(result.result(TOOL, result.OK, step["reason"], items=[step]))
 
 
 def hub_context(environ: Mapping[str, str]) -> hub.Context:

@@ -22,6 +22,7 @@ from ndf.domains.relay import account_choice, account_decide, accounts, key_help
 from ndf.domains.relay.account_decide import Pick
 from ndf.domains.relay.account_registry import METERED
 from ndf.domains.relay.wrapper_auth import AUTH_FIX_METERED
+from ndf.domains.relay.wrapper_busy import Busy
 from ndf.domains.relay.wrapper_launch import CHILD_ALIVE, Ended
 
 Section = Any  # `wrapper.Section`（import の輪を作らないよう型の名前だけで受ける）
@@ -70,14 +71,18 @@ class StopSteps:
 
     # ---------------------------------------------------------------- 子を止める
 
-    def _stop_if_clear(self, sec: Section) -> str:
+    def _stop_if_clear(self, sec: Section, allow: Optional[Callable[[Busy], bool]] = None) -> str:
         """質問の hook と同じロックを待たずに取り、質問のファイルが無ければロックを持ったまま子を止める（I4）。
 
-        `"stopped"` は子の終わりを確かめた、`"held"` はロックを取れない・質問のファイルが在る（子にも何もしない）、
+        `allow` を渡すと、同じロックの中でバックグラウンドの作業の記録を読み直し、偽なら止めない（#4049。開始の記録も同じロックの
+        中で書かれるので、読み直しの後に作業は始まらない）。
+        `"stopped"` は子の終わりを確かめた、`"held"` はロックを取れない・質問のファイルが在る・`allow` が偽（子にも何もしない）、
         `"alive"` は強制終了しても子が終わらない。止めたら止めた子の起動を今の起動から外し、残った hook が書けないようにする。
         """
         with signals.held(self.dir / signals.STOP_LOCK, 0) as got:
             if not got or signals.question_present(self.dir):
+                return "held"
+            if allow is not None and not allow(signals.read_busy(self.dir, sec.launch, sec.session_id)):
                 return "held"
             stopped = self._stop_child(sec)
             signals.set_launch(self.dir, None)
