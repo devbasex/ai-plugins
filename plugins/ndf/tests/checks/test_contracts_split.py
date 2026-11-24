@@ -11,8 +11,8 @@ import pytest
 
 from ndf import contracts
 from ndf.checks import contracts_split, lint, run
-from ndf.checks.model import Finding, Scope
-from ndf.contracts import exit_codes
+from ndf.checks.model import CheckError, Finding, Scope
+from ndf.contracts import causes, exit_codes
 from ndf.identity import PluginIdentity
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +47,11 @@ def _check(root: Path, rules: dict) -> list[Finding]:
 def _paths(root: Path, found: list[Finding]) -> list[str]:
     """指摘のパス（プラグインの根からの相対）。"""
     return [(root.parents[1] / f.path).relative_to(root).as_posix() for f in found]
+
+
+def _item_paths(root: Path, report: dict) -> list[str]:
+    """結果 JSON の `items` のパス（プラグインの根からの相対）。"""
+    return [(root.parents[1] / item["path"]).relative_to(root).as_posix() for item in report["items"]]
 
 
 def _merge_back(root: Path, table: str) -> None:
@@ -219,17 +224,35 @@ def test_the_check_command_applies_the_rule_only_when_selected(root, rules, monk
     for module, name in ((run.child_deps, "apply"), (run.facts, "check"), (run.spec_docs, "check")):
         monkeypatch.setattr(module, name, lambda *args: [])
     calls = []
-    rule = run.SELECTED_RULES[contracts_split.RULE]
-    monkeypatch.setitem(run.SELECTED_RULES, contracts_split.RULE, lambda *args: calls.append(args) or rule(*args))
+    rule = run.CONTRACT_RULES[contracts_split.RULE]
+    monkeypatch.setitem(run.CONTRACT_RULES, contracts_split.RULE, lambda *args: calls.append(args) or rule(*args))
     _text(f"{DIR}/limits.json", {})(root)
     found = run.select(_scope(root), rules, [only])
     assert len(calls) == applied
     assert _paths(root, found) == [f"{DIR}/limits.json"] * applied
 
 
+def test_the_rule_alone_does_not_collect_the_files_of_the_plugin(root, rules, monkeypatch):
+    monkeypatch.setattr(run, "collect", lambda *args: pytest.fail("プラグインのファイルを集めた"))
+    _text(f"{DIR}/limits.json", {})(root)
+    found = run.select(Scope(root.parents[1], root, "p"), rules, [contracts_split.RULE])
+    assert _paths(root, found) == [f"{DIR}/limits.json"]
+
+
+def test_files_that_the_check_has_collected_are_not_read_again(root, rules):
+    scope = _scope(root)
+    for src in scope.sources:
+        _ = src.text
+    _text(ITEM, "{not json")(root)
+    assert contracts_split.check(scope, rules) == []
+
+
 @pytest.fixture
-def own_contracts(root):
+def own_contracts(root, monkeypatch):
     """検査の対象のプラグインの表を、結果 JSON を出す側のコントラクトの読み手にも読ませる。"""
+    shutil.copy(PLUGIN_ROOT / RESULT_SCHEMA, root / RESULT_SCHEMA)
+    monkeypatch.setattr(run.identity, "load", lambda: PluginIdentity(root, "p", "P_", root))
+    monkeypatch.setattr(run, "_repo_root", lambda plugin_root: root.parents[1])
     contracts.use_dir(root / DIR)
     yield root
     contracts.use_dir(None)
@@ -244,17 +267,51 @@ def own_contracts(root):
     ],
     ids=["all", "only-check-failed"],
 )
-def test_the_command_reports_the_findings_when_the_table_of_causes_is_one_file_again(
-    own_contracts, monkeypatch, capsys, last_result, break_, broken
-):
+def test_the_command_reports_the_findings_when_the_table_of_causes_is_one_file_again(own_contracts, capsys, last_result, break_, broken):
     # 結果 JSON の cause を確かめる停止理由の表そのものが、分ける前の 1 ファイルに戻っている
     root = own_contracts
-    shutil.copy(PLUGIN_ROOT / RESULT_SCHEMA, root / RESULT_SCHEMA)
     break_(root)
-    monkeypatch.setattr(run.identity, "load", lambda: PluginIdentity(root, "p", "P_", root))
-    monkeypatch.setattr(run, "_repo_root", lambda plugin_root: root.parents[1])
     assert run.main(["--only", contracts_split.RULE]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)
     assert report["cause"]["kind"] == "config_broken"
-    paths = [(root.parents[1] / item["path"]).relative_to(root).as_posix() for item in report["items"]]
-    assert paths == broken
+    assert _item_paths(root, report) == broken
+
+
+def _read_causes(*args: object) -> list[Finding]:
+    """停止理由の表を読む後続の規則（規約の規則）の代わり。"""
+    try:
+        causes.rows()
+    except contracts.ContractError as exc:
+        raise CheckError(str(exc)) from exc
+    return []
+
+
+def test_the_findings_remain_when_a_later_rule_stops_on_the_broken_table(own_contracts, monkeypatch, capsys, last_result):
+    root = own_contracts
+    monkeypatch.setattr(run.lint, "run_ruff", lambda rules, paths: [])
+    for module, name in ((run.child_deps, "apply"), (run.facts, "check"), (run.words, "check"), (run.invariants, "check")):
+        monkeypatch.setattr(module, name, lambda *args: [])
+    monkeypatch.setattr(run.spec_docs, "check", _read_causes)
+    _merge_back(root, "causes")
+    assert run.main([]) == exit_codes.unreadable_code()
+    report = last_result(capsys.readouterr().out)
+    assert report["cause"]["kind"] == "config_broken"
+    assert _item_paths(root, report) == [f"{DIR}/causes", f"{DIR}/causes.json"]
+
+
+@pytest.mark.parametrize("linked", [True, False], ids=["linked-outside", "not-utf8"])
+def test_the_cause_of_the_result_is_not_read_from_outside_or_from_broken_bytes(own_contracts, capsys, last_result, linked):
+    root = own_contracts
+    rel = f"{DIR}/causes/check_failed.json"
+    outside = root.parents[2] / "outside.json"
+    outside.write_text('{"route": "SECRET"}', encoding="utf-8")
+    if linked:
+        (root / rel).symlink_to(outside)
+    else:
+        (root / rel).write_bytes(b"\xff")
+    assert run.main(["--only", contracts_split.RULE]) == exit_codes.unreadable_code()
+    out = capsys.readouterr()
+    report = last_result(out.out)
+    assert report["cause"]["kind"] == "config_broken"
+    assert _item_paths(root, report) == [rel]
+    assert "SECRET" not in out.out + out.err

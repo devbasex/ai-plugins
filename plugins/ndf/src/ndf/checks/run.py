@@ -4,7 +4,7 @@
 
 `--only` があれば、その規則の指摘だけを違反にする。`--write-spec` があれば、規約の
 生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。
-結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
+結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken（止まる前の指摘は items に残す）で、終了コードは種類の終了コード（1・2・2）である。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import argparse
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -45,14 +45,21 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
 SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
-# プラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則。
-# これだけを選んだ検査は、ほかの規則が読むコントラクトの表（停止理由の表など）が壊れていても止まらない
-SELECTED_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {
-    contracts_split.RULE: contracts_split.check,
-    experimental.RULE: experimental.check,
-}
+# コントラクトのうち要るファイルだけを自分で読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則。
+# ほかの規則はコントラクトの表（停止理由の表など）が壊れていると止まるため、その前に当てる
+CONTRACT_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {contracts_split.RULE: contracts_split.check}
+# 検査が集めたプラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則
+SELECTED_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {experimental.RULE: experimental.check}
 # 規則の一部だけを当てる名前。全体の規則が同じ違反を出すので、`--only` に名前があるときだけ当てる
 PARTIAL_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {budget.JOBS_RULE: budget.check_jobs}
+
+
+class Halted(CheckError):
+    """途中の規則が止まった検査。`found` は止まる前の指摘（`CheckError` の文と合わせて結果に残す）。"""
+
+    def __init__(self, reason: str, found: list[Finding]) -> None:
+        super().__init__(reason)
+        self.found = found
 
 
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
@@ -110,6 +117,56 @@ def _order(f: Finding) -> tuple[str, int, str, str]:
     return (f.path, f.line, f.rule, f.detail)
 
 
+def _gather(parts: Iterable[list[Finding]], only: list[str] | None) -> list[Finding]:
+    """規則ごとの指摘の並びから、`only` の規則の指摘（無ければすべて）をパスと行の順で返す。途中で止まれば `Halted`。"""
+    found: list[Finding] = []
+    try:
+        for part in parts:
+            found += [f for f in part if not only or f.rule in only]
+    except CheckError as exc:
+        raise Halted(str(exc), sorted(found, key=_order)) from exc
+    return sorted(found, key=_order)
+
+
+def _chosen(
+    table: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]], scope: Scope, rules: dict[str, Any], only: list[str] | None
+) -> Iterator[list[Finding]]:
+    """`table` の規則のうち `only` に名前があるもの（`only` が無ければすべて）を 1 つずつ当てる。"""
+    for name, rule in table.items():
+        if not only or name in only:
+            yield rule(scope, rules)
+
+
+def _parts(
+    scope: Scope,
+    rules: dict[str, Any],
+    write_spec: bool,
+    written: list[str] | None,
+    only: list[str] | None,
+    metrics: dict[str, Any] | None,
+) -> Iterator[list[Finding]]:
+    """見る範囲に規則を 1 つずつ当て、規則ごとの指摘を返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
+
+    `CONTRACT_RULES`・`SELECTED_RULES`・`SETTINGS_RULES` の規則と規則 budget は、`only` が無いか `only` に名前があるときだけ当てる。
+    規則 budget を当てたときは、件数を違反の有無にかかわらず `metrics` の `budget` へ入れる。
+    """
+    yield unparsable(scope)
+    yield from _chosen(CONTRACT_RULES, scope, rules, only)
+    yield smell_findings(scope, rules)
+    yield structure.check(scope, rules) + structure.cycles(scope)
+    yield facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
+    yield child_deps.apply(scope, rules)
+    yield spec_docs.check(scope, rules, write_spec, written)
+    yield from _chosen({**SELECTED_RULES, **SETTINGS_RULES}, scope, rules, only)
+    if not only or budget.RULE in only:
+        counts = budget.measure(scope)
+        yield budget.check(scope, rules, counts)
+        if metrics is not None:
+            metrics[budget.RULE] = counts.as_metrics()
+    if only:
+        yield from _chosen(PARTIAL_RULES, scope, rules, only)
+
+
 def check(
     scope: Scope,
     rules: dict[str, Any],
@@ -118,29 +175,8 @@ def check(
     only: list[str] | None = None,
     metrics: dict[str, Any] | None = None,
 ) -> list[Finding]:
-    """見る範囲に規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
-
-    `SELECTED_RULES`・`SETTINGS_RULES` の規則と規則 budget は、`only` が無いか `only` に名前があるときだけ当てる。
-    規則 budget を当てたときは、件数を違反の有無にかかわらず `metrics` の `budget` へ入れる。
-    """
-    found = unparsable(scope)
-    found += smell_findings(scope, rules)
-    found += structure.check(scope, rules) + structure.cycles(scope)
-    found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
-    found += child_deps.apply(scope, rules)
-    found += spec_docs.check(scope, rules, write_spec, written)
-    for name, rule in {**SELECTED_RULES, **SETTINGS_RULES}.items():
-        if not only or name in only:
-            found += rule(scope, rules)
-    if not only or budget.RULE in only:
-        counts = budget.measure(scope)
-        found += budget.check(scope, rules, counts)
-        if metrics is not None:
-            metrics[budget.RULE] = counts.as_metrics()
-    for name, rule in PARTIAL_RULES.items():
-        if only and name in only:
-            found += rule(scope, rules)
-    return sorted(found, key=_order)
+    """見る範囲に規則（`_parts`）を当て、`only` の規則の指摘（無ければすべて）を返す。途中の規則が止まれば `Halted`。"""
+    return _gather(_parts(scope, rules, write_spec, written, only, metrics), only)
 
 
 def select(
@@ -151,21 +187,20 @@ def select(
     written: list[str] | None = None,
     metrics: dict[str, Any] | None = None,
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。途中の規則が止まれば `Halted`。
 
-    `only` がほかの規則なしで当てられる規則（`SETTINGS_RULES`・`PARTIAL_RULES`・`SELECTED_RULES`）だけなら、ほかの規則を当てない。
-    そのうちプラグインのファイルを読まない規則（`SELECTED_RULES` のほか）だけなら、ファイルも集めない（ワークフローだけを変えた
+    `only` がほかの規則なしで当てられる規則（`CONTRACT_RULES`・`SETTINGS_RULES`・`PARTIAL_RULES`・`SELECTED_RULES`）だけなら、ほかの規則を
+    当てない。そのうち集めたファイルを読まない規則（`SELECTED_RULES` のほか）だけなら、ファイルも集めない（ワークフローだけを変えた
     Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
     """
-    alone = {**SETTINGS_RULES, **PARTIAL_RULES, **SELECTED_RULES}
+    alone = {**CONTRACT_RULES, **SETTINGS_RULES, **PARTIAL_RULES, **SELECTED_RULES}
     if only and set(only) <= alone.keys() and not write_spec:
         if set(only) & SELECTED_RULES.keys():
             scope.sources = collect(scope.plugin_root, scope.repo_root)
             unparsable(scope)
-        return sorted((f for name in alone if name in only for f in alone[name](scope, rules)), key=_order)
+        return _gather(_chosen(alone, scope, rules, only), only)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    found = check(scope, rules, write_spec, written, only, metrics)
-    return [f for f in found if not only or f.rule in only]
+    return check(scope, rules, write_spec, written, only, metrics)
 
 
 def _repo_root(plugin_root: Path) -> Path:
@@ -192,6 +227,11 @@ def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None
         return result.emit_unchecked(TOOL, "config_broken", f"{summary}（コントラクトのファイルが読めない: {exc}）", items)
 
 
+def _print_findings(found: list[Finding]) -> None:
+    for f in found:
+        print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="プラグインだけを見る検査")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
@@ -207,10 +247,12 @@ def main(argv: list[str]) -> int:
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name)
         found = select(scope, rules, args.only, args.write_spec, written, measured)
+    except Halted as exc:
+        _print_findings(exc.found)
+        return emit(str(exc), [f.as_item() for f in exc.found], {}, "config_broken")
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
-    for f in found:
-        print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
+    _print_findings(found)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule, **measured}
     if written is not None:

@@ -75,13 +75,25 @@ def parse_json(text: str) -> Any:
     return json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
 
 
+def _inside(path: Path) -> Path:
+    """`path` そのもの。シンボリックリンクを解いた先がコントラクトを持つプラグインの外なら、読む前に断る。
+
+    外の値は読み手の誤りの文に載り、検査の結果として CI のログへ出る。プラグインの外は配られないので、正しいリンクでもない。
+    """
+    if not path.resolve().is_relative_to(_dir.parent.resolve()):
+        raise ContractError(f"コントラクト {path} がプラグインの外を指す")
+    return path
+
+
 def load_json(rel: str) -> Any:
     """`contracts/<rel>` を読む。同じキーが 2 つあれば断る（後の値で黙って上書きしない）。"""
-    path = _dir / rel
+    path = _inside(_dir / rel)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ContractError(f"コントラクト {path} を読めない: {exc.strerror or exc}") from None
+    except UnicodeDecodeError as exc:
+        raise ContractError(f"コントラクト {path} を UTF-8 として読めない: 位置 {exc.start}") from None
     try:
         return parse_json(text)
     except ContractError as exc:
@@ -111,7 +123,7 @@ def item_keys(names: Iterable[str]) -> list[str]:
 
 def _list_keys(rel: str) -> list[str]:
     """`contracts/<rel>/` の項目のキー（`item_keys`）。中身は読まない。"""
-    root = _dir / rel
+    root = _inside(_dir / rel)
     if not root.is_dir():
         raise ContractError(f"分けた表のディレクトリ {root} が無い")
     try:
