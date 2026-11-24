@@ -14,7 +14,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
-import folded
 import git_sandbox
 import pytest
 import sqlalchemy as sa
@@ -200,7 +199,7 @@ NORMAL = "進め方 normal は承認ゲートを MVV 判定で省かない"
 
 
 @pytest.mark.parametrize("gate_name", ["design", "release"])
-def _normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes: list[tuple[int, str]]) -> None:
+def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes: list[tuple[int, str]]) -> None:
     # 受け入れ条件 1: normal でも判定が verdict に載り、skip は偽のまま、判定の記録が PR のコメントに載る
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, gate_name, _inputs(pace="normal", pr=5), _hub(5, DOCS), ask)
@@ -213,7 +212,7 @@ def _normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes: li
     assert f"判定したコミット（PR の head）: {HEAD}" in text
 
 
-def _fast_skips_only_the_design_gate(repo: Path) -> None:
+def test_fast_skips_only_the_design_gate(repo: Path) -> None:
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["skip"], out["why"], out["holds"]) == (True, [], [])
     assert model.mvv_skip({"step": {"outputs": {model.MVV_KEY: out}}}, "step", "design")
@@ -236,7 +235,7 @@ def _fast_skips_only_the_design_gate(repo: Path) -> None:
         ("design", _inputs(), {"body": "設定", "files": [{"filename": ".ndf/mvv.json", "status": "modified", "patch": "+x"}]}, "C7"),
     ],
 )
-def _machine_checks_after_the_first_do_not_stop_the_verdict(
+def test_machine_checks_after_the_first_do_not_stop_the_verdict(
     repo: Path, gate_name: str, inputs: dict[str, Any], case: dict[str, Any], word: str, notes: list[tuple[int, str]]
 ) -> None:
     # 受け入れ条件 2: 検査 2〜6 が外れても判定は打たれ、skip は偽で、外れた理由が why と PR のコメントに載る
@@ -246,7 +245,7 @@ def _machine_checks_after_the_first_do_not_stop_the_verdict(
     assert any(word in w for w in out["why"]) and any(word in text for _, text in notes)
 
 
-def _the_boundary_paths_come_from_the_base_and_not_the_worktree(repo: Path, notes: list[tuple[int, str]]) -> None:
+def test_the_boundary_paths_come_from_the_base_and_not_the_worktree(repo: Path, notes: list[tuple[int, str]]) -> None:
     # 検査 4: ベースの規則が効く。worktree の .ndf/pace.json からパスを消しても外れる
     _base(repo, {".ndf/pace.json": json.dumps({"version": 1, "boundary_paths": ["docs/**"]})})
     (repo / ".ndf").mkdir(exist_ok=True)
@@ -266,7 +265,7 @@ def _the_boundary_paths_come_from_the_base_and_not_the_worktree(repo: Path, note
     ],
     ids=["not-json", "not-a-list", "not-strings"],
 )
-def _a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: list[tuple[int, str]], pace: str) -> None:
+def test_a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: list[tuple[int, str]], pace: str) -> None:
     _base(repo, {".ndf/pace.json": pace})
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
@@ -275,7 +274,7 @@ def _a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: 
 
 
 @pytest.mark.parametrize("change", ["unapproved", "mismatch"])
-def _without_an_approved_mvv_on_the_base_no_verdict_and_no_note(repo: Path, change: str, notes: list[tuple[int, str]]) -> None:
+def test_without_an_approved_mvv_on_the_base_no_verdict_and_no_note(repo: Path, change: str, notes: list[tuple[int, str]]) -> None:
     # 検査 1 だけが判定を止める。PR へも書かない（承認済みの MVV が無いリポジトリで今と同じ）
     if change == "unapproved":
         _base(repo, {".ndf/mvv.json": json.dumps({"body": "mvv.md", "versions": []})})
@@ -287,7 +286,7 @@ def _without_an_approved_mvv_on_the_base_no_verdict_and_no_note(repo: Path, chan
     assert "note_url" not in out and ask.calls == [] and notes == []
 
 
-def _without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # MVV を導入していないリポジトリは、PR の取得もベースの取得もせずに検査 1 と同じ理由で止める（#3959 の r1-8）
     git_sandbox.isolate_git(tmp_path, monkeypatch)
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
@@ -303,7 +302,7 @@ def _without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base(tmp_path
     assert "pr" not in out and "head" not in out
 
 
-def _the_worktree_mvv_is_not_read(repo: Path) -> None:
+def test_the_worktree_mvv_is_not_read(repo: Path) -> None:
     # PR が MVV の設定を消しても、ベースが承認済みなら判定を打ち、検査 5 が外れる
     git_sandbox.sh(repo, "rm", "-q", ".ndf/mvv.json")
     case = {"body": "設定を消す", "files": [{"filename": ".ndf/mvv.json", "status": "removed", "patch": "-x"}]}
@@ -312,7 +311,7 @@ def _the_worktree_mvv_is_not_read(repo: Path) -> None:
     assert len(ask.calls) == 1 and out["skip"] is False and any("C7" in w for w in out["why"])
 
 
-def _the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fetched: list[tuple[str, ...]] = []
     real = git.Git.fetch
 
@@ -360,7 +359,7 @@ def no_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.mark.parametrize(("retry", "reads", "launches"), [(False, 2, 1), (True, 3, 2)])
-def _an_unchanged_pr_is_read_again_only_before_the_retry_and_the_note(
+def test_an_unchanged_pr_is_read_again_only_before_the_retry_and_the_note(
     no_git: Path, notes: list[tuple[int, str]], retry: bool, reads: int, launches: int
 ) -> None:
     # LLM の 1 回目の起動の前には読み直さない。読み直しはコメントを書く直前の 1 回と、打ち直すときはその直前の 1 回
@@ -371,7 +370,7 @@ def _an_unchanged_pr_is_read_again_only_before_the_retry_and_the_note(
 
 @pytest.mark.parametrize("retry", [True, False], ids=["before_the_retry", "before_the_note"])
 @pytest.mark.parametrize(("change", "kind"), MOVES)
-def _a_pr_that_moves_while_judging_is_not_relaunched_or_noted(
+def test_a_pr_that_moves_while_judging_is_not_relaunched_or_noted(
     no_git: Path, change: Any, kind: str, retry: bool, notes: list[tuple[int, str]]
 ) -> None:
     # 打ち直す直前（retry）かコメントを書く直前の読み直しで、head・マージ先・本文が変わった・読めない → 打ち直さず、
@@ -383,14 +382,14 @@ def _a_pr_that_moves_while_judging_is_not_relaunched_or_noted(
 
 
 @pytest.mark.parametrize("failure", [github.GitHubError("比較を読めない", 502), {"no_files": True}])
-def _a_diff_that_cannot_be_read_is_noted_without_a_verdict(repo: Path, failure: Any, notes: list[tuple[int, str]]) -> None:
+def test_a_diff_that_cannot_be_read_is_noted_without_a_verdict(repo: Path, failure: Any, notes: list[tuple[int, str]]) -> None:
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "compare": failure}), ask)
     assert (out["verdict"], _stopped(out), out["head"], ask.calls, len(notes)) == (None, "diff_unreadable", HEAD, [], 1)
     assert out["why"][0].startswith("変えたファイルを読めない: ")
 
 
-def _a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, notes: list[tuple[int, str]]) -> None:
+def test_a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, notes: list[tuple[int, str]]) -> None:
     out = mvv_gate.gate(repo, "design", _inputs(mvv_ref=None), _hub(5, DOCS), Ask(None, ok=False))
     assert (out["verdict"], out["skip"], _stopped(out), out["head"], out["holds"]) == (None, False, "llm_no_answer", HEAD, [])
     assert out["why"][0].startswith("MVV 判定を打てない: " + mm.STOP_REASONS["llm_no_answer"])
@@ -398,7 +397,7 @@ def _a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, notes:
     assert "形が合わない" not in json.dumps(out, ensure_ascii=False)
 
 
-def _a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 記録は読めるが判定の行の追記だけが OSError: verdict は保ち、skip は偽で、may_skip の結果で上書きしない
     real = jsonl.append_locked
 
@@ -414,7 +413,7 @@ def _a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip(repo: Path, mon
     assert HOST not in out["why"][0]
 
 
-def _an_unreadable_record_judges_again_without_reuse(repo: Path) -> None:
+def test_an_unreadable_record_judges_again_without_reuse(repo: Path) -> None:
     ask = Ask(FOLLOW)
     first = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     path = mvv.record_path("mvv-validation")
@@ -424,7 +423,7 @@ def _an_unreadable_record_judges_again_without_reuse(repo: Path) -> None:
     assert len(ask.calls) == 2 and again["verdict"] == first["verdict"]
 
 
-def _broken_rows_of_the_record_are_warned_once(repo: Path) -> None:
+def test_broken_rows_of_the_record_are_warned_once(repo: Path) -> None:
     path = mvv.record_path("mvv-validation")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた\n", encoding="utf-8")
@@ -433,7 +432,7 @@ def _broken_rows_of_the_record_are_warned_once(repo: Path) -> None:
     assert out["verdict"] == FOLLOW and warnings == [{"kind": "broken_rows", "path": str(path), "lines": [1]}]
 
 
-def _a_note_that_cannot_be_posted_keeps_the_verdict_and_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_note_that_cannot_be_posted_keeps_the_verdict_and_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(hub: Any, number: int, text: str) -> None:
         raise github.GitHubError(f"https://x-access-token:zz-fake@{HOST}/o/r に書けない", 403)
 
@@ -444,7 +443,9 @@ def _a_note_that_cannot_be_posted_keeps_the_verdict_and_does_not_skip(repo: Path
     assert HOST not in json.dumps(out, ensure_ascii=False)
 
 
-def _the_cause_of_a_failure_stays_in_the_local_record(repo: Path, monkeypatch: pytest.MonkeyPatch, notes: list[tuple[int, str]]) -> None:
+def test_the_cause_of_a_failure_stays_in_the_local_record(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, notes: list[tuple[int, str]]
+) -> None:
     # 例外の文（社内のホスト名・ホームのパス・秘密・別のリポジトリ）は出力にも PR のコメントにも入らず、診断の記録にだけ残る
     monkeypatch.setenv("NDF_TEST_TOKEN", "zz-fake-secret-88")
     cause = f"fetch https://x-access-token:zz-fake-secret-88@github.com/other-owner/other-repo.git と {HOST} と /home/someone/x に失敗した"
@@ -562,7 +563,7 @@ def test_an_unlisted_failure_is_not_turned_into_an_outcome(repo: Path) -> None:
         mvv_gate.gate(repo, "design", _inputs(), _raising(KeyError("x")), Ask(FOLLOW))
 
 
-def _the_mode_without_the_gate_is_told_first(tmp_path: Path) -> None:
+def test_the_mode_without_the_gate_is_told_first(tmp_path: Path) -> None:
     out = mvv_gate.gate(tmp_path, "design", {"pace": "normal"}, _no_hub, Ask(FOLLOW))
     assert (out["verdict"], out["why"], _stopped(out)) == (None, ["モード None は承認ゲート design を持たない"], "no_gate")
 
@@ -586,7 +587,7 @@ def test_cli_writes_the_outcome_as_the_step_output(repo: Path, monkeypatch: pyte
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
 
 
-def _the_outcome_fits_the_context_schema(repo: Path) -> None:
+def test_the_outcome_fits_the_context_schema(repo: Path) -> None:
     # 文脈のスキーマ（$defs.mvv_gate）が判定・止まった判定・判定しない出力のどれも受ける
     outs = [
         mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW)),
@@ -600,7 +601,7 @@ def _the_outcome_fits_the_context_schema(repo: Path) -> None:
 # --- 手元の git の差分を、GitHub の比較の files の行の形にする（diff_rows・unquote_path） ---
 
 
-def _diff_rows_reads_added_removed_modified_and_renamed_files() -> None:
+def test_diff_rows_reads_added_removed_modified_and_renamed_files() -> None:
     text = (
         "diff --git a/new b/new\nnew file mode 100644\nindex 0000000..8ba3a16\n--- /dev/null\n+++ b/new\n@@ -0,0 +1 @@\n+n\n"
         "diff --git a/keep b/keep\ndeleted file mode 100644\nindex b68fde2..0000000\n--- a/keep\n+++ /dev/null\n@@ -1 +0,0 @@\n-k\n"
@@ -633,7 +634,7 @@ def _diff_rows_reads_added_removed_modified_and_renamed_files() -> None:
     assert mm.incomplete_patches(rows) == ["差分の全体を材料に載せられない: bin"]
 
 
-def _diff_rows_restores_quoted_paths() -> None:
+def test_diff_rows_restores_quoted_paths() -> None:
     text = (
         'diff --git "a/\\346\\227\\245.md" "b/\\346\\227\\245.md"\nindex 1..2 100644\n'
         '--- "a/\\346\\227\\245.md"\n+++ "b/\\346\\227\\245.md"\n@@ -1 +1 @@\n-x\n+y\n'
@@ -660,14 +661,14 @@ def _plan_inputs(repo: Path, **context: Any) -> dict[str, Any]:
     return invoke.resolve_inputs(definition.load_definition(str(full["mode"])).stage("設計"), full)
 
 
-def _the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[int, str]]) -> None:
+def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[int, str]]) -> None:
     # Task 1: プランが組む平らな入力で、今の形の mvv_gate を返す（fast で検査を通り「従う」で、保留が無ければ省く）
     out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", HEAD)
     assert [n for n, _ in notes] == [5]
 
 
-def _a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes: list[tuple[int, str]]) -> None:
+def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes: list[tuple[int, str]]) -> None:
     # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ質問し、PR へも書かない
     _base(repo, {".ndf/mvv.json": None, ".ndf/mvv.md": None})
     ask = Ask(FOLLOW)
@@ -675,13 +676,13 @@ def _a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes
     assert out["skip"] is False and out["verdict"] is None and ask.calls == [] and notes == []
 
 
-def _the_gate_steps_are_steps_of_the_named_stage_documents() -> None:
+def test_the_gate_steps_are_steps_of_the_named_stage_documents() -> None:
     for gate_name, step_id in mvv_gate.GATE_STEPS.items():
         doc = contracts.load_json(f"workflow/stages/{mvv_gate.GATE_STAGES[gate_name]}.json")
         assert step_id in [name for task in doc["do"] for name in task]
 
 
-def _env_inputs_returns_the_plan_input_unchanged(repo: Path) -> None:
+def test_env_inputs_returns_the_plan_input_unchanged(repo: Path) -> None:
     given = _plan_inputs(repo)
     assert cli._env_inputs("design", given) == given
 
@@ -695,7 +696,7 @@ def _env_inputs_returns_the_plan_input_unchanged(repo: Path) -> None:
         ({"mode": None}, "input_missing"),
     ],
 )
-def _env_inputs_refuses_inputs_of_another_shape(repo: Path, change: dict[str, Any], kind: str) -> None:
+def test_env_inputs_refuses_inputs_of_another_shape(repo: Path, change: dict[str, Any], kind: str) -> None:
     given = {**_plan_inputs(repo), **change}
     if change.get("mode", "") is None:
         given.pop("mode")
@@ -705,7 +706,7 @@ def _env_inputs_refuses_inputs_of_another_shape(repo: Path, change: dict[str, An
 
 
 @pytest.mark.parametrize("given", [{"context": {"issues": [3959], "mode": "standard", "pace": "normal"}}, [1, 2]])
-def _env_inputs_refuses_a_nested_context_and_a_non_object_as_invalid(given: Any) -> None:
+def test_env_inputs_refuses_a_nested_context_and_a_non_object_as_invalid(given: Any) -> None:
     # {"context": {...}} は最上位に mode が無く、規約の誤りと足りないキーの両方に当たるが、規約の誤りが先で invalid
     with pytest.raises(cli._InputError) as caught:
         cli._env_inputs("design", given)
@@ -718,7 +719,7 @@ def _cli_gate(repo: Path, capsys: pytest.CaptureFixture[str], gate_name: str, *e
 
 
 @pytest.mark.parametrize("gate_name", ["design", "release"])
-def _the_cli_takes_the_input_from_exactly_one_source(
+def test_the_cli_takes_the_input_from_exactly_one_source(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], gate_name: str
 ) -> None:
     # 受け入れ条件 8・9: 環境変数だけ・--machine だけ・両方・どちらも無しの 4 行を、区分ごとに確かめる
@@ -756,7 +757,7 @@ def _the_cli_takes_the_input_from_exactly_one_source(
         (lambda: invoke.StageInputInvalid(["pace: 形が違う"]), "invalid"),
     ],
 )
-def _the_cli_stops_without_judging_when_the_machine_gives_no_input(
+def test_the_cli_stops_without_judging_when_the_machine_gives_no_input(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: Any, kind: str
 ) -> None:
     def fail(*_a: Any) -> dict[str, Any]:
@@ -769,7 +770,7 @@ def _the_cli_stops_without_judging_when_the_machine_gives_no_input(
     assert (out["status"], out["cause"]["kind"]) == ("stopped", kind)
 
 
-def _a_db_error_while_reading_the_machine_shows_only_its_kind(
+def test_a_db_error_while_reading_the_machine_shows_only_its_kind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # 共有 DB への照会の失敗は、SQL 文・バインド値・接続先を結果へ載せず、例外の種類だけを出す（ndf progress と同じ）。
@@ -787,7 +788,7 @@ def _a_db_error_while_reading_the_machine_shows_only_its_kind(
     assert "SELECT" not in shown and "secret-bind" not in shown and "db.internal" not in shown
 
 
-def _the_cli_refuses_a_nested_context_in_the_environment_without_judging(
+def test_the_cli_refuses_a_nested_context_in_the_environment_without_judging(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # 受け入れ条件 9 の例（11.0.22 で status: ok・判定なしを返した入力）
@@ -800,7 +801,7 @@ def _the_cli_refuses_a_nested_context_in_the_environment_without_judging(
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "input_missing")
 
 
-def _both_entrypoints_judge_the_same_pr_with_the_same_input(
+def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], notes: list[tuple[int, str]]
 ) -> None:
     # 受け入れ条件 8: 同じステートマシンの文脈で、NDF_STAGE_INPUT と --machine が同じ入力・同じ PR で同じ mvv_gate を返す
@@ -835,7 +836,7 @@ def _both_entrypoints_judge_the_same_pr_with_the_same_input(
     assert [n for n, _ in notes] == [5, 5]
 
 
-def _the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(repo: Path, tmp_path: Path) -> None:
+def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(repo: Path, tmp_path: Path) -> None:
     # 作業場所が別のリポジトリなら、そのブランチ名で PR を探さない
     other = tmp_path / "other"
     git_sandbox.sh(tmp_path, "init", "-q", "-b", "design/x", str(other))
@@ -865,7 +866,7 @@ class _BranchOnlyGit:
         return "design/x\n"
 
 
-def _a_worktree_at_the_same_path_is_not_checked_with_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_worktree_at_the_same_path_is_not_checked_with_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 作業場所とリポジトリの根（root）が同じパスなら、共通ディレクトリを Git に問わない
     def no_git(where: Path) -> str:
         raise AssertionError("同じパスで共通ディレクトリを問うた")
@@ -915,7 +916,7 @@ def _no_judging(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mvv_gate.llm, "ask", lambda *a, **k: pytest.fail("LLM を呼んだ"))
 
 
-def _expect_pr_judges_when_the_input_pr_is_the_pr_to_approve(
+def test_expect_pr_judges_when_the_input_pr_is_the_pr_to_approve(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     tid = _release_machine(repo, capsys, 12)
@@ -929,7 +930,7 @@ def _expect_pr_judges_when_the_input_pr_is_the_pr_to_approve(
     assert out["status"] == "ok" and [s["pr"] for s in seen] == [12]
 
 
-def _expect_pr_of_another_pr_stops_without_reading_judging_or_commenting(
+def test_expect_pr_of_another_pr_stops_without_reading_judging_or_commenting(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], notes: list[tuple[int, str]]
 ) -> None:
     tid = _release_machine(repo, capsys, 12)
@@ -948,14 +949,14 @@ def _expect_pr_of_another_pr_stops_without_reading_judging_or_commenting(
     assert "56" not in out["summary"] and "12" not in out["summary"]
 
 
-def _expect_pr_is_invalid_for_the_design_gate(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_expect_pr_is_invalid_for_the_design_gate(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _no_judging(monkeypatch)
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_plan_inputs(repo)))
     out = _cli_gate(repo, capsys, "design", "--expect-pr", "5")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "invalid")
 
 
-def _expect_pr_without_the_pr_in_the_context_is_input_missing(
+def test_expect_pr_without_the_pr_in_the_context_is_input_missing(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(repo)
@@ -965,34 +966,3 @@ def _expect_pr_without_the_pr_in_the_context_is_input_missing(
     _no_judging(monkeypatch)
     out = _cli_gate(repo, capsys, "release", "--machine", tid, "--expect-pr", "12")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "input_missing")
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-# fmt: off
-CASES = folded.cases(
-        _normal_pace_judges_and_keeps_the_gate, _fast_skips_only_the_design_gate, _machine_checks_after_the_first_do_not_stop_the_verdict,
-        _the_boundary_paths_come_from_the_base_and_not_the_worktree, _a_broken_boundary_setting_on_the_base_is_a_base_failure,
-        _without_an_approved_mvv_on_the_base_no_verdict_and_no_note, _without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base,
-        _the_worktree_mvv_is_not_read, _the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit,
-        _an_unchanged_pr_is_read_again_only_before_the_retry_and_the_note, _a_pr_that_moves_while_judging_is_not_relaunched_or_noted,
-        _a_diff_that_cannot_be_read_is_noted_without_a_verdict, _a_verdict_the_llm_does_not_give_keeps_the_head_and_notes,
-        _a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip, _an_unreadable_record_judges_again_without_reuse,
-        _broken_rows_of_the_record_are_warned_once, _a_note_that_cannot_be_posted_keeps_the_verdict_and_does_not_skip,
-        _the_cause_of_a_failure_stays_in_the_local_record, _the_mode_without_the_gate_is_told_first, _the_outcome_fits_the_context_schema,
-        _diff_rows_reads_added_removed_modified_and_renamed_files, _diff_rows_restores_quoted_paths,
-        _the_flat_plan_input_keeps_todays_outcome, _a_repository_without_an_approved_mvv_keeps_a_null_verdict,
-        _the_gate_steps_are_steps_of_the_named_stage_documents, _env_inputs_returns_the_plan_input_unchanged,
-        _env_inputs_refuses_inputs_of_another_shape, _env_inputs_refuses_a_nested_context_and_a_non_object_as_invalid,
-        _the_cli_takes_the_input_from_exactly_one_source, _the_cli_stops_without_judging_when_the_machine_gives_no_input,
-        _a_db_error_while_reading_the_machine_shows_only_its_kind, _the_cli_refuses_a_nested_context_in_the_environment_without_judging,
-        _both_entrypoints_judge_the_same_pr_with_the_same_input, _the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository,
-        _a_worktree_at_the_same_path_is_not_checked_with_git, _expect_pr_judges_when_the_input_pr_is_the_pr_to_approve,
-        _expect_pr_of_another_pr_stops_without_reading_judging_or_commenting, _expect_pr_is_invalid_for_the_design_gate,
-        _expect_pr_without_the_pr_in_the_context_is_input_missing,
-)
-# fmt: on
-
-
-@pytest.mark.parametrize("case", CASES)
-def test_mvv_gate_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-import folded
 import pytest
 
 from ndf.core import durable
@@ -39,7 +37,7 @@ def _context(tid: str) -> dict:
         return command.machine_context(command.read_current(conn, tid))
 
 
-def _the_design_inputs_are_what_the_plan_would_pass(repo, capsys, last_result, tmp_path):
+def test_the_design_inputs_are_what_the_plan_would_pass(repo, capsys, last_result, tmp_path):
     tid = _machine(repo, capsys, last_result, tmp_path)
     got = stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
     design = definition.load_definition("standard").stage("設計")
@@ -47,7 +45,7 @@ def _the_design_inputs_are_what_the_plan_would_pass(repo, capsys, last_result, t
     assert got == {"issues": [3959], "worktree": WORKTREE_OUT["worktree"], "mode": "standard", "pace": "normal", "mvv_ref": SHA}
 
 
-def _a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_result, tmp_path):
+def test_a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_result, tmp_path):
     tid = _machine(repo, capsys, last_result, tmp_path)
     out_file = tmp_path / "design.json"
     out_file.write_text(
@@ -64,7 +62,7 @@ def _a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_result, 
     assert "design_pr" not in stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
 
 
-def _an_unknown_machine_is_refused(tmp_path, monkeypatch):
+def test_an_unknown_machine_is_refused(tmp_path, monkeypatch):
     # 保存先と空の DB はあるが、その ID のステートマシンが無い。保存先は一時ディレクトリに作り、Git で解かない
     root = _store_at(monkeypatch, tmp_path)
     durable.prepare_store(root)
@@ -76,7 +74,7 @@ def _an_unknown_machine_is_refused(tmp_path, monkeypatch):
         durable.release_store(root)
 
 
-def _a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, last_result, tmp_path, monkeypatch):
+def test_a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, last_result, tmp_path, monkeypatch):
     tid = _machine(repo, capsys, last_result, tmp_path)
     other = "https://example.com/secret-owner/other.git"
     root = command.store_root_of(Path.cwd())
@@ -99,7 +97,7 @@ def _a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, last_r
     assert str(caught.value).replace(tid, "") != str(unknown.value).replace("sprint:none", "")
 
 
-def _a_step_the_definition_does_not_have_is_refused(repo, capsys, last_result, tmp_path):
+def test_a_step_the_definition_does_not_have_is_refused(repo, capsys, last_result, tmp_path):
     # どのモードも判定のステップ（design-mvv・release-mvv）を持つ。定義に無いステップの id は断る
     tid = _machine(repo, capsys, last_result, tmp_path, mode="light")
     assert stage_inputs.stage_inputs_of(repo, tid, "design-mvv")["mode"] == "light"
@@ -107,7 +105,7 @@ def _a_step_the_definition_does_not_have_is_refused(repo, capsys, last_result, t
         stage_inputs.stage_inputs_of(repo, tid, "no-such-mvv")
 
 
-def _a_context_without_an_input_key_is_missing_it(repo, capsys, last_result):
+def test_a_context_without_an_input_key_is_missing_it(repo, capsys, last_result):
     # 作業場所の用意を終えていなければ worktree が文脈に無い。プランと同じく判定の入力を組まない
     made = _run(capsys, last_result, "new", "s1", "--mode", "standard", "--issues", "3959")
     with pytest.raises(invoke.StageInputMissing) as caught:
@@ -122,7 +120,7 @@ def _store_at(monkeypatch, tmp_path: Path) -> Path:
     return root
 
 
-def _a_missing_store_is_not_created_and_stops(tmp_path, monkeypatch):
+def test_a_missing_store_is_not_created_and_stops(tmp_path, monkeypatch):
     # 判定の入力を読むだけの経路は、保存先を作らずに止まる
     root = _store_at(monkeypatch, tmp_path)
     with pytest.raises(store.StoreNotReady):
@@ -130,7 +128,7 @@ def _a_missing_store_is_not_created_and_stops(tmp_path, monkeypatch):
     assert not root.exists()
 
 
-def _a_legacy_store_is_neither_retired_nor_changed(tmp_path, monkeypatch):
+def test_a_legacy_store_is_neither_retired_nor_changed(tmp_path, monkeypatch):
     # 旧い形の保存先（format.json が無い）は退避せず、中身も変えずに止まる
     root = _store_at(monkeypatch, tmp_path)
     root.mkdir(parents=True)
@@ -139,21 +137,3 @@ def _a_legacy_store_is_neither_retired_nor_changed(tmp_path, monkeypatch):
     with pytest.raises(store.StoreNotReady):
         stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
     assert sorted(p.name for p in root.parent.iterdir()) == before and sorted(p.name for p in root.iterdir()) == ["old.txt"]
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-@pytest.mark.parametrize(
-    "case",
-    folded.cases(
-        _the_design_inputs_are_what_the_plan_would_pass,
-        _a_recorded_design_pr_is_not_added_to_the_inputs,
-        _an_unknown_machine_is_refused,
-        _a_machine_of_another_repo_is_refused_before_reading_it,
-        _a_step_the_definition_does_not_have_is_refused,
-        _a_context_without_an_input_key_is_missing_it,
-        _a_missing_store_is_not_created_and_stops,
-        _a_legacy_store_is_neither_retired_nor_changed,
-    ),
-)
-def test_command_mvv_inputs_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)

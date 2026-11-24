@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
 
-import folded
 import pytest
 
 from ndf.progress import gate
@@ -81,7 +79,7 @@ def test_the_note_shows_the_boundary_and_why_the_gate_was_not_skipped():
 # --- #3959 Task 4: 検査 1 だけが判定を止め、区分ごとの検査が省略だけを止める ---
 
 
-def _only_the_first_check_stops_the_verdict():
+def test_only_the_first_check_stops_the_verdict():
     assert gate.checks.judgeable(PASSING) is None
     assert "承認済みでない" in str(gate.checks.judgeable(replace(PASSING, status="mismatch", current=None, approved=None)))
     # 検査 2 が外れても判定は打てる（省くかだけが止まる）
@@ -89,20 +87,8 @@ def _only_the_first_check_stops_the_verdict():
 
 
 @pytest.mark.parametrize("kind", ["design", "release"])
-def _each_gate_has_the_checks_in_order(kind):
+def test_each_gate_has_the_checks_in_order(kind):
     assert gate.checks.CHECKS_BY_GATE[kind] == gate.checks.CHECKS and gate.checks.CHECKS[0] is gate.checks.check_mvv_hash
     hit = replace(PASSING, referenced=None)
     assert gate.refusals(hit, kind) == ["スプリントの状態に承認済み MVV の参照が無い"]
     assert gate.may_skip(hit, FOLLOW, kind) == (False, ["スプリントの状態に承認済み MVV の参照が無い"])
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-@pytest.mark.parametrize(
-    "case",
-    folded.cases(
-        _only_the_first_check_stops_the_verdict,
-        _each_gate_has_the_checks_in_order,
-    ),
-)
-def test_gate_checks_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)

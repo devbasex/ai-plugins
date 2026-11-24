@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
-from typing import Any
 
-import folded
 import pytest
 
 from ndf import contracts
@@ -163,14 +161,14 @@ def test_input_needs_the_declared_context_keys():
 DESIGN_INPUT = {"issues": [1], "worktree": "/work/a", "mode": "standard", "pace": "normal", "mvv_ref": "a" * 64}
 
 
-def _a_nested_context_is_both_a_schema_error_and_missing_keys():
+def test_a_nested_context_is_both_a_schema_error_and_missing_keys():
     stage = definition.load_definition("standard").stage("設計")
     got = definition.stage_input_errors(stage, {"context": DESIGN_INPUT})
     assert got.schema and got.missing
     assert definition.validate_stage_input(stage, {"context": DESIGN_INPUT}) == got.schema + got.missing
 
 
-def _the_flat_design_input_passes_and_a_key_not_declared_by_the_stage_is_refused():
+def test_the_flat_design_input_passes_and_a_key_not_declared_by_the_stage_is_refused():
     stage = definition.load_definition("standard").stage("設計")
     assert definition.stage_input_errors(stage, DESIGN_INPUT) == ([], [])
     # 文脈のスキーマにあるキーでも、工程の inputs・optional_inputs に無ければ拒む（resolve_inputs が渡さないキー）
@@ -178,14 +176,14 @@ def _the_flat_design_input_passes_and_a_key_not_declared_by_the_stage_is_refused
     assert got.schema == ["工程 設計 の入力の定義に無いキー design_pr"] and got.missing == []
 
 
-def _a_non_object_input_is_only_a_schema_error():
+def test_a_non_object_input_is_only_a_schema_error():
     stage = definition.load_definition("standard").stage("設計")
     got = definition.stage_input_errors(stage, [DESIGN_INPUT])
     assert got.schema and got.missing == []
 
 
 @pytest.mark.parametrize(("name", "mode"), [("design", "standard"), ("deploy", "standard")])
-def _stage_io_reads_the_inputs_of_the_stage_without_the_mode(name, mode):
+def test_stage_io_reads_the_inputs_of_the_stage_without_the_mode(name, mode):
     loaded = next(s for s in definition.load_definition(mode).stages if s.id == name)
     got = definition.stage_io(name)
     assert (got.name, got.inputs, got.optional_inputs, got.input_ref, got.steps) == (
@@ -469,17 +467,3 @@ def test_current_find_enum_without_the_property_or_its_enum_is_none():
 def test_current_find_enum_keeps_an_empty_enum_and_stops_there():
     tree = {"items": [{"properties": {"answer": {"enum": []}}}, {"properties": {"answer": {"enum": ["later"]}}}]}
     assert _find_enum(tree, "answer") == []
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-@pytest.mark.parametrize(
-    "case",
-    folded.cases(
-        _a_nested_context_is_both_a_schema_error_and_missing_keys,
-        _the_flat_design_input_passes_and_a_key_not_declared_by_the_stage_is_refused,
-        _a_non_object_input_is_only_a_schema_error,
-        _stage_io_reads_the_inputs_of_the_stage_without_the_mode,
-    ),
-)
-def test_definition_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)

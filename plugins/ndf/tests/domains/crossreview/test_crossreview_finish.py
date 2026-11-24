@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-import folded
 import pytest
 
 from ndf.contracts import result
@@ -154,7 +152,7 @@ OPEN_MVV = fin.Finding("F1", "反する", fin.UNRESOLVED, None, "major", "Value 
         ((), (fin.Handed("R1", "足す"),), FAILED, fin.RECORD_FAILED, "本来の終わり方は incomplete", ["R1"]),
     ],
 )
-def _rows_left_unwritten_stop_before_any_other_ending(findings, handed, failed, kind, within, gaps) -> None:
+def test_rows_left_unwritten_stop_before_any_other_ending(findings, handed, failed, kind, within, gaps) -> None:
     got = fin.finish(fin.Review(fin.CONVERGED, 2, findings), handed, record_failed=failed)
     assert (got.kind, [g["name"] for g in got.gaps]) == (kind, gaps) and within in got.summary
     assert ("MVV の記録を書けない" in got.warnings) is (failed is not None)
@@ -164,7 +162,7 @@ def _rows_left_unwritten_stop_before_any_other_ending(findings, handed, failed, 
     ("final", "rounds", "outcome", "kind"),
     [("done", 1, fin.FIXED, "invalid"), (fin.CONVERGED, 1, "maybe", "invalid"), (fin.ERROR, 0, fin.FIXED, "work_stopped")],
 )
-def _unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped(final: str, rounds: int, outcome: str, kind: str) -> None:
+def test_unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped(final: str, rounds: int, outcome: str, kind: str) -> None:
     review = fin.Review(final, rounds, (fin.Finding("F1", "x", outcome, None),) if rounds else ())
     assert fin.finish(review).kind == kind
 
@@ -172,15 +170,3 @@ def _unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped(fin
 def test_malformed_summary_is_invalid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, ["x"])))
     assert code != 0 and got["cause"]["kind"] == "invalid"
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-@pytest.mark.parametrize(
-    "case",
-    folded.cases(
-        _rows_left_unwritten_stop_before_any_other_ending,
-        _unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped,
-    ),
-)
-def test_crossreview_finish_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)

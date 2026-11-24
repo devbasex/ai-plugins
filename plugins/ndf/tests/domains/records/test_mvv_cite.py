@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-import folded
 import pytest
 
 from ndf import cli
@@ -90,7 +89,7 @@ def _write(where: Path, name: str, text: str) -> Path:
 
 
 @pytest.mark.parametrize("case", list(CASES))
-def _cite_reads_basis_lines_and_headings_of_a_material(tmp_path: Path, case: str) -> None:
+def test_cite_reads_basis_lines_and_headings_of_a_material(tmp_path: Path, case: str) -> None:
     text, require_basis, want, checked = CASES[case]
     got = mvv.cite(APPROVED, [_write(tmp_path, "a.md", text)], require_basis=require_basis)
     assert [(e["kind"], e["line"]) for e in got.errors] == want and got.checked == checked
@@ -100,7 +99,7 @@ def _cite_reads_basis_lines_and_headings_of_a_material(tmp_path: Path, case: str
 
 
 @pytest.mark.parametrize("state", ["absent", "unapproved"])
-def _without_an_approved_mvv_nothing_is_checked_but_files_are_read(tmp_path: Path, state: str) -> None:
+def test_without_an_approved_mvv_nothing_is_checked_but_files_are_read(tmp_path: Path, state: str) -> None:
     snap = mvv.Snapshot(state, None, None, None, (), {}, "c0ffee", "", None)
     doc = _write(tmp_path, "a.md", "- 根拠: Value 9（MVV バージョン 1）\n")
     assert mvv.cite(snap, [doc], require_basis=True) == mvv.Cited([], 0)
@@ -200,7 +199,7 @@ def _shown(out: dict[str, Any]) -> str:
     return json.dumps({k: out.get(k) for k in ("items", "summary", "warnings")}, ensure_ascii=False)
 
 
-def _the_result_carries_the_version_or_the_errors(run: Cite) -> None:
+def test_the_result_carries_the_version_or_the_errors(run: Cite) -> None:
     out = run.run(_write(run.root, "a.md", MATERIAL))
     assert out["status"] == "ok" and out["items"] == [] and result.code_for(out) == 0
     assert out["summary"] == "根拠の行の誤り 0 件（MVV バージョン 11・1 ファイル）"
@@ -228,7 +227,7 @@ NOT_BARE = [f"{TARGET}-2", f"{TARGET}.js", f"{TARGET}/sub", "other-owner/target"
 
 
 @pytest.mark.parametrize("seen", ["PRIVATE", "PUBLIC"])
-def _references_to_the_target_itself_are_masked_unless_it_is_public(run: Cite, seen: str) -> None:
+def test_references_to_the_target_itself_are_masked_unless_it_is_public(run: Cite, seen: str) -> None:
     hidden = seen == "PRIVATE"
     refs = (f"{TARGET}#12", f"https://github.com/{TARGET}/pull/34")
     assert run.fields(*refs, seen=seen) == ([(publish.PRIVATE_REF_TEXT,) * 2] * 2 if hidden else [(r, r) for r in refs])
@@ -255,7 +254,7 @@ def _references_to_the_target_itself_are_masked_unless_it_is_public(run: Cite, s
     ],
     ids=["secret", "home-mail-account", "ssh-secret-user", "https-git-user", "credentials"],
 )
-def _free_text_is_masked_like_a_public_target_without_a_lookup(run: Cite, basis: tuple[str, ...]) -> None:
+def test_free_text_is_masked_like_a_public_target_without_a_lookup(run: Cite, basis: tuple[str, ...]) -> None:
     out = run.run(run.material(*basis, name=f"{SECRET}.md"))
     shown = _shown(out)
     assert out["cause"]["kind"] == "refused" and run.guarded == 1 and run.graph.queries == []
@@ -264,7 +263,7 @@ def _free_text_is_masked_like_a_public_target_without_a_lookup(run: Cite, basis:
     assert [len(i["unknown"]) for i in out["items"]] == [len(re.split(" / |・", b)) for b in basis]
 
 
-def _lookups_go_100_references_at_a_time_and_the_fixed_ssh_user_is_looked_up(run: Cite) -> None:
+def test_lookups_go_100_references_at_a_time_and_the_fixed_ssh_user_is_looked_up(run: Cite) -> None:
     run.run(run.material(" ".join(f"other-{n}/repo#1" for n in range(101))))
     assert [len(q) for q in run.graph.queries] == [100, 1]
     run.graph.queries.clear()
@@ -274,14 +273,14 @@ def _lookups_go_100_references_at_a_time_and_the_fixed_ssh_user_is_looked_up(run
 
 
 @pytest.mark.parametrize("cited", [f"https://github.com/{SECRET}/{SECRET}", f"https://github.com/{PRIV}/issues/1{SECRET}"])
-def _secrets_in_or_across_references_reach_neither_the_lookup_nor_the_result(run: Cite, cited: str) -> None:
+def test_secrets_in_or_across_references_reach_neither_the_lookup_nor_the_result(run: Cite, cited: str) -> None:
     run.graph.visibility[TARGET.lower()] = "PUBLIC"
     out = run.run(run.material(cited))
     asked, shown = json.dumps(run.graph.queries), _shown(out)
     assert all(SECRET[i : i + 4] not in asked + shown for i in range(len(SECRET) - 3))
 
 
-def _a_failed_lookup_withholds_every_field_and_stays_refused(run: Cite) -> None:
+def test_a_failed_lookup_withholds_every_field_and_stays_refused(run: Cite) -> None:
     run.graph.fail = github.GitHubError(f"https://x-access-token:{SECRET}@github.com/other-owner/x at {HOST}")
     out = run.run(run.material(f"{PRIV}#1 / Value 9"))
     item = out["items"][0]
@@ -294,7 +293,7 @@ def _a_failed_lookup_withholds_every_field_and_stays_refused(run: Cite) -> None:
     assert SECRET not in warning and HOST not in warning and "other-owner" not in warning
 
 
-def _headings_follow_the_gate_and_the_gate_is_required(run: Cite, capsys: pytest.CaptureFixture[str], last_result) -> None:
+def test_headings_follow_the_gate_and_the_gate_is_required(run: Cite, capsys: pytest.CaptureFixture[str], last_result) -> None:
     out = run.run(_write(run.root, "a.md", f"{BASIS}- 根拠: Value 3\n"))
     assert out["cause"]["kind"] == "refused" and {i["kind"] for i in out["items"]} == {"heading"}
     bare = _write(run.root, "b.md", "# 資料\n\n例は「根拠: Value 9（MVV バージョン 1）」と書く。\n")
@@ -304,7 +303,7 @@ def _headings_follow_the_gate_and_the_gate_is_required(run: Cite, capsys: pytest
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid" and code != 0
 
 
-def _a_base_or_file_that_cannot_be_read_is_a_precondition_without_the_cause(run: Cite) -> None:
+def test_a_base_or_file_that_cannot_be_read_is_a_precondition_without_the_cause(run: Cite) -> None:
     run.fetch_error = GitError(f"origin の main をマージできない: https://x-access-token:{SECRET}@github.com/other-owner/x {HOST}")
     out = run.run(run.material("Value 9"))
     assert out["cause"]["kind"] == "precondition" and run.graph.queries == []
@@ -317,23 +316,3 @@ def _a_base_or_file_that_cannot_be_read_is_a_precondition_without_the_cause(run:
     assert run.run(run.material("Value 3"))["cause"]["kind"] == "precondition"
     run.current_error = None
     assert run.run(run.root / "無い.md")["cause"]["kind"] == "precondition"
-
-
-# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
-@pytest.mark.parametrize(
-    "case",
-    folded.cases(
-        _cite_reads_basis_lines_and_headings_of_a_material,
-        _without_an_approved_mvv_nothing_is_checked_but_files_are_read,
-        _the_result_carries_the_version_or_the_errors,
-        _references_to_the_target_itself_are_masked_unless_it_is_public,
-        _free_text_is_masked_like_a_public_target_without_a_lookup,
-        _lookups_go_100_references_at_a_time_and_the_fixed_ssh_user_is_looked_up,
-        _secrets_in_or_across_references_reach_neither_the_lookup_nor_the_result,
-        _a_failed_lookup_withholds_every_field_and_stays_refused,
-        _headings_follow_the_gate_and_the_gate_is_required,
-        _a_base_or_file_that_cannot_be_read_is_a_precondition_without_the_cause,
-    ),
-)
-def test_mvv_cite_cases(case: Any, request: pytest.FixtureRequest) -> None:
-    folded.run(case, request)
