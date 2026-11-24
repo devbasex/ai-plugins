@@ -280,6 +280,22 @@ def test_remote_repo_passes_remote_name_and_propagates_failure() -> None:
     assert str(exc.value) == "git remote get-url -- up が失敗（終了コード 2）: no such remote"
 
 
+@pytest.mark.parametrize(
+    ("url", "shown"),
+    [
+        ("https://h/o/r.git?access_token=dummy&x=1", "https://h/o/r.git?***"),
+        ("https://user:dummy@h/o/r.git", "https://***@h/o/r.git"),
+        ("https://dummy@h/o/r.git?t=dummy@x", "https://***@h/o/r.git?***"),
+        ("https://h/o/r.git", "https://h/o/r.git"),
+    ],
+)
+@pytest.mark.parametrize("call", [lambda g: g.fetch_branch_or_raise("origin", "main"), lambda g: g.run("cat-file", "blob", "x")])
+def test_failure_message_masks_credentials_and_query_of_urls(call, url: str, shown: str) -> None:
+    with pytest.raises(git.GitError) as exc:
+        call(git.Git(runner=_fake(128, stderr=f"fatal: unable to access {url} : Could not resolve host")))
+    assert str(exc.value).endswith(f"fatal: unable to access {shown} : Could not resolve host")
+
+
 def test_run_git_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict = {}
 
