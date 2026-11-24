@@ -234,6 +234,15 @@ def test_assume_public_hides_the_bare_full_name_of_a_private_target(visibility: 
     assert got == expected + BARE_KEPT
 
 
+def test_assume_public_does_not_look_up_a_bare_name_holding_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 単独の完全名も、URL・番号付きの参照と同じく、秘密を含めば公開範囲の照会へ送らずに伏せる
+    secret = "zz-secret-name-42"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    stub = StubHub(f"acme/{secret}", {f"acme/{secret}": "PUBLIC"})
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(f"直す先は acme/{secret} だ", assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [] and secret not in got and "acme" not in got
+
+
 def test_the_bare_name_pattern_matches_only_the_name_and_its_git_suffix() -> None:
     pattern = publish._bare_repo(PRIVATE_REPO)
     assert [m.group() for m in pattern.finditer(f"{PRIVATE_REPO}.git と {PRIVATE_REPO}. と {PRIVATE_REPO}.js")] == [

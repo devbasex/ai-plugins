@@ -251,15 +251,21 @@ class Publisher:
             return set()
         clean: set[str] = set()
         tainted: set[str] = set()
+
+        def sort(repo: str, span: tuple[int, int], secrets: Sequence[tuple[int, int]]) -> None:
+            bad = run_log.redact(repo) != repo or _overlaps(span, secrets)
+            (tainted if bad else clean).add(repo)
+
         for text in texts:
             secrets = run_log.secret_spans(text)
             for m in (m for pattern in _REPO_PATTERNS for m in pattern.finditer(text)):
                 if assume_public or not same_repo(m["repo"], self.hub.repo):
-                    bad = run_log.redact(m["repo"]) != m["repo"] or _overlaps(m.span(), secrets)
-                    (tainted if bad else clean).add(m["repo"])
-            if assume_public and not any(same_repo(r, self.hub.repo) for r in clean | tainted) and _bare_repo(self.hub.repo).search(text):
-                clean.add(self.hub.repo)
-        asked = clean - tainted
+                    sort(m["repo"], m.span(), secrets)
+            if assume_public:
+                # 単独の完全名も、URL・番号付きの参照と同じく秘密と重なれば照会しない
+                for m in _bare_repo(self.hub.repo).finditer(text):
+                    sort(self.hub.repo, m.span(), secrets)
+        asked = {r for r in clean if not any(same_repo(r, t) for t in tainted)}
         seen = self.hub.visibilities(asked) if asked else {}
         return tainted | {r for r, v in seen.items() if v != PUBLIC}
 
