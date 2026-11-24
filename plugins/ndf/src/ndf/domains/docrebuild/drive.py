@@ -305,7 +305,9 @@ def _record_gap(rec: Mapping[str, Any], kind: str) -> Optional[str]:
         return f"verdict が {'・'.join(VERDICTS)} のどれでもない"
     if not isinstance(checks, list):
         return "checks が並びでない"
-    if (kind == "plan") != (verdict == "self") and kind != "manuscript":
+    # 詳細設計書の `reader_gaps` の表の「使える種類」の列。原稿はどれも、実装計画は `self` だけ、設計書は `self` 以外。
+    usable_kind = kind == "manuscript" or (kind == "plan") == (verdict == "self")
+    if not usable_kind:
         return f"{kind} に {verdict} は使えない"
     if verdict not in CHECKED:
         if checks:
