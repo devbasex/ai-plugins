@@ -65,7 +65,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.adapters import claude, git
-from ndf.contracts import causes, exit_codes, facts, limits, result, worker_paths
+from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
@@ -87,6 +87,8 @@ RESULT_FILE_LINE = "結果ファイル（応答を終える前にここへ書く
 PR_BODY_DRAFT = Path("work") / "pr_body.md"
 # 作業種別 → 届ける手順の Skill（plugin の skills/<名前>/SKILL.md）
 PAUSE_SKILLS: dict[str, tuple[str, ...]] = {"fix": ("fix",), "sweep": ("fix",)}
+# 文書を書く作業が読む Skill（この作業にだけ文書の基準の本文を渡す。#4285）
+WRITING_SKILL = "document-style"
 SKILLS_DIR = "skills"
 SKILL_FILE = "SKILL.md"
 # 書き手の付いた本文の JSON が持つ文字列のキー（`Source` の並びの順）
@@ -238,6 +240,11 @@ def system_prompt(kind: str, state_dir: Path, skills_dir: Path, sources: Sequenc
     rules = "\n".join(WORK_RULES).format(pr_body_draft=pr_body_draft(state_dir), state_dir=shlex.quote(str(state_dir)))
     procedure = "\n".join(KIND_RULES.get(kind, ()))  # noqa: NDF502 利用者の入力: 手順を足さない作業種別は空
     parts = [rules, procedure, skills_section(kind, skills_dir)]
+    if WRITING_SKILL in worker_kinds.work_kinds().get(kind, {}).get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
+        try:
+            parts.append(writing.criteria())
+        except writing.CriteriaBroken as exc:
+            raise WorkerError("precondition", str(exc)) from None
     if sources:
         parts.append("## 書き手の付いた本文\n" + "\n\n".join(quote_source(s) for s in sources))
     return "\n\n".join(p for p in parts if p)

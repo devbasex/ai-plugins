@@ -79,7 +79,7 @@ cat Makefile 2>/dev/null | grep -n '^test'
 ### 実装の選択を MVV と突き合わせる
 
 承認済みのプロジェクト MVV があれば、依存の追加・公開インタフェースの形・データの扱いを選ぶときに MVV と突き合わせる。
-**反する疑いがあれば、実装を進めずに人へ戻す**（理由と根拠の項目つき）。MVV のセクションの読み方と人へ戻す形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+**反する疑いがあれば、実装を進めずに人へ戻す**（理由と根拠の項目つき）。MVV の読み方と人へ戻す形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md#工程での読み方) にある。
 
 ## サイクル
 

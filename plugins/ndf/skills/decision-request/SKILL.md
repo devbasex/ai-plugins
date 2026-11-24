@@ -53,6 +53,13 @@ description: "Before asking the user to decide or approve, lay out the findings,
 **1 回の質問に載せる質問は、材料を示し終えたものだけにする。** 別の質問の材料がまだ揃って
 いないなら、揃ってから聞く。
 
+## 出す前に読ませる
+
+**質問の文と、その直前に示す材料を、読み手役に読ませてから出す。** 読み手役は、会話の経緯を知らずに、承認する人の立場で読む AI である。
+手順と記録は `development-workflow` の
+[approval-request.md の「読み手役の確認」](../development-workflow/references/approval-request.md#読み手役の確認) にある。読ませた記録が無いと、
+Claude Code では hook が質問を止める。
+
 ## しないこと
 
 | しないこと | 起きること |

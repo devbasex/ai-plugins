@@ -170,6 +170,32 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "mvv current",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ"
+        },
+        "--allow-mismatch": {
+          "type": "boolean",
+          "description": "本文が承認の記録と合わなくても止まらず、警告を付けて状態だけを返す"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "mvv gate",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -228,6 +254,72 @@
       },
       "required": [
         "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "reading add",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--file": {
+          "type": "string",
+          "description": "入力の JSON のファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "reading check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--file": {
+          "type": "string",
+          "description": "入力の JSON のファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "reading prompt",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--file": {
+          "type": "string",
+          "description": "入力の JSON のファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--file"
       ]
     },
     {

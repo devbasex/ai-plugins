@@ -2033,6 +2033,24 @@
       "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
+      "term": "MVV のスナップショット",
+      "context": "ndf-loop",
+      "meaning": "ndf records mvv current と ndf cross-review run が、ベースブランチで承認された MVV の本文と NDF の共通原則を保存したファイル。工程の担当と cross-review の相手役・修正担当は、作業場所の .ndf/mvv.md でなくこのファイルを読む",
+      "source": "plugins/ndf/skills/development-workflow/references/project-mvv.md"
+    },
+    {
+      "term": "根拠の行の確かめ",
+      "context": "ndf-cross-review",
+      "meaning": "Pull Request が足した MVV の根拠の行（指示と結果での呼び名は「根拠の記述」）について、書いたバージョンが承認済みの今のバージョンか、項目がそのバージョンにあるかを、ndf cross-review run が機械で確かめること。誤りは直るまで残り、見送れない",
+      "source": "plugins/ndf/skills/cross-review/SKILL.md"
+    },
+    {
+      "term": "MVV に反する指摘",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review の指摘のうち、承認済みのプロジェクト MVV に反するもの（指摘の基準 5）。Mission・Vision・Value に反するものは修正担当へ渡り、必ず人の承認が要る操作に当たるものは渡さずに人の承認を待つ",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
       "term": "MVV の改訂",
       "context": "ndf-loop",
       "meaning": "プロジェクト MVV の本文を変え、利用者の承認で新しいバージョンにすること",
@@ -4552,7 +4570,7 @@
     {
       "term": "読み手役",
       "context": "ndf-document",
-      "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
+      "meaning": "文書と、想定した読み手の説明と、通じない文の 4 つの型だけを渡され、会話や経緯を知らずに読む AI（サブエージェントか external-ai で呼ぶ別の CLI）。要点の言い直しと、読み手に通じない文の引用を返す",
       "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
     },
     {
@@ -5382,13 +5400,13 @@
     {
       "term": "判断開始の値",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 250,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
+      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 450,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
       "source": "docs/specifications/ndf-context-thresholds.md"
     },
     {
       "term": "運用上限",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 500,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
+      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 600,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
       "source": "docs/specifications/ndf-context-thresholds.md",
       "deprecated": [
         "再起動の方針",

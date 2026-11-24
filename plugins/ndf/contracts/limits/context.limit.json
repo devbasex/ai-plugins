@@ -1,6 +1,6 @@
 {
   "summary": "運用上限。文脈の量がこれ以上なら guard が止め、中継のラッパーが引継ぎを頼む（token。NDF_CONTEXT_LIMIT で替える。#3995）",
-  "count": 500000,
+  "count": 600000,
   "read_by": [
     "ndf.domains.relay.context_thresholds"
   ]

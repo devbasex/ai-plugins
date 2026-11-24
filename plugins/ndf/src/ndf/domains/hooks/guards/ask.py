@@ -39,7 +39,7 @@ def _first_question(tool_input: dict) -> str:
 
 def check(ctx, svc) -> Verdict:
     global _recorded
-    if not signals.keys_known():
+    if svc.decided or not signals.keys_known():  # 前の guard が止めた質問は人へ出ないので、どこへも書かない（#4285）
         return passing(forwarded=[])
     wait = forward_wait()
     forwarded: list[str] = []

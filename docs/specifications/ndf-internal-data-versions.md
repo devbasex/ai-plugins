@@ -71,11 +71,12 @@ sequenceDiagram
 | --- | --- | --- | --- | --- |
 | `usage` | LLM の使用量 | `records/usage.py` | `records/usage.py`・`relay/context_report.py` | `version` を足すだけ |
 | `mvv-signals` | MVV を見直す兆候（人の判断の上書きなど） | `records/mvv.py` | 同左 | `version` → `mvv_version`（無ければ `null`） |
-| `mvv-validation` | MVV の判定の結果 | `records/mvv.py` | 同左 | 時刻のキーを `at` へ |
+| `mvv-validation` | MVV の判定の結果（承認ゲートの判定と、cross-review が MVV に反すると指摘したものがどう終わったか） | `records/mvv.py` | 同左 | 時刻のキーを `at` へ |
 | `context-records` | 会話を切り替えるかの判定 | `relay/context_records.py` | 同左 | 時刻のキーを `at` へ。`schema`・`policy`・`margin`・`config_error` を外す。`event` が無ければ `"判定"` を入れる |
 | `loop-event` | 開発ループのイベント | `loop/store.py` の `LoopStore.append` | `LoopStore.read` | 秒の `at` を文字列へ。文字列の `version` → `product_version`。期限の `until` は秒のまま |
 | `context` | 工程どうしで引き継ぐ値 | `progress/command.py` の `_new_doc` | `progress/stages.py` の `compose_context` | `version` → `product_version` |
 | `stage-snapshot` | スプリントを始めた時点の工程の定義 | `progress/command.py` の `_new_doc` | `progress/command.py` の `read_current` | `version` → `definition_version`。各工程の入出力の `version` → `product_version` |
+| `reading-check` | 読み手役（想定した読み手の立場で文書を読む AI）が、質問の文と文書を確認した記録（[ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md)） | `records/reading.py` | `records/reading.py`・`hooks/guards/reading_check.py`（hook は `internal` を読み込まず、使う欄だけを確かめる） | 古い形式は無い |
 
 スキーマは `contracts/schemas/internal/<種類>.schema.json` にある（`context` だけは `contracts/workflow/context.schema.json`）。コードのパスは、
 `progress/` は `src/ndf/` の下、ほかは `src/ndf/domains/` の下である。種類を足すときは、スキーマを置き、`KINDS` に 1 行を足す。
@@ -122,7 +123,8 @@ sequenceDiagram
 | --- | --- |
 | 使用量の集計 | 結果の `broken_rows` に件数 |
 | 会話を新しく始めるかの判定の、集計（`report`）と判定に使う費用の見込みの計算し直し（`calibrate`） | 結果の `metrics.skipped` に件数（報告が読む使用量の行は `usage_skipped`） |
-| MVV の記録、サブエージェントの使用量の記録 | 結果の `items` に警告 `{"kind": "broken_rows", "path", "lines"}` |
+| MVV の記録、サブエージェントの使用量の記録 | 結果の `items` に警告 `{"kind": "broken_rows", "path", "lines"}`（cross-review が MVV の記録を書くときを除く） |
+| cross-review が MVV の記録を書くとき（書いた記録の二重を避けるために、前の記録を読む） | 伝えない。飛ばした行は無いものとして扱うので、同じ記録がもう 1 行書かれることがある |
 
 - MVV の判定は、同じ入力の前回の結果を使い回す。ただし、ファイルの中で前回の結果の行より後ろに飛ばした行があり、
   それが同じ入力の判定かもしれないときは、判定し直す

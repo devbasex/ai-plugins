@@ -15,10 +15,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ndf.domains.crossrefactor import budget_decide, flaky_decide
 from ndf.domains.crossrefactor.symbols_decide import Touched
+from ndf.domains.records.mvv_decide import State
+
+if TYPE_CHECKING:
+    from ndf.domains.records.mvv import Snapshot
 
 # コードを書く工程の結果の形の指示（前置きの改行・空白は呼び出し側が付ける）
 COMMIT_RESULT = '結果は {"commit": "<最後のコミット>"}。'
@@ -28,8 +32,21 @@ def item_text(item: Mapping[str, Any]) -> str:
     return f"{item['id']}（{item['path']} の {item['symbol']}）: {item['title']}"
 
 
-def propose(pr: int, touched: Touched, candidates: str = "") -> str:
-    """提案の指示文。`candidates` は実装計画が挙げたスプリントの終わりの候補（空ならセクションを載せない）。"""
+def mvv_text(snap: Snapshot) -> str:
+    """提案と計画の指示文に足す、承認済みのプロジェクト MVV を読ませる文。承認済みの MVV が無ければ空文字列。"""
+    if snap.state != State.APPROVED:
+        return ""
+    return (
+        "このリポジトリには、承認済みのプロジェクト MVV がある。プロジェクトの使命（Mission）・目指す姿（Vision）・判断で大切にすること"
+        f"（Value）と、必ず人の承認が要る操作を書いた文書である（バージョン {snap.version}）。作業の前に次の 2 つのファイルの全体を読み、"
+        "判断の基準にする。どちらかに反するリファクタリングは、提案も採用もしない。2 つとも作業ディレクトリの外にあるが、読んでよい。\n"
+        f"- 本文: {snap.path}\n"
+        f"- 共通原則（どのプロジェクトにも当てはまり、本文より優先する原則）: {snap.principles_path}\n"
+    )
+
+
+def propose(pr: int, touched: Touched, candidates: str = "", mvv: str = "") -> str:
+    """提案の指示文。`candidates` は実装計画が挙げたスプリントの終わりの候補、`mvv` は `mvv_text` の文（空ならどちらも載せない）。"""
     lines = [f"- {p}: {', '.join(sorted(n))}" for p, n in touched.symbols.items()]
     # 構文木の読み手の無い言語のファイルは、ファイル単位で提案を通す（`symbols_decide.in_touched`）
     lines += [f"- {p}: （ファイル全体。関数の範囲を読めないため、ファイルの中のどの関数・クラスも提案できる）" for p in touched.whole_files]
@@ -40,7 +57,7 @@ def propose(pr: int, touched: Touched, candidates: str = "") -> str:
     return (
         f"PR #{pr} が触る次の関数・クラスについて、振る舞いを変えないリファクタリングを提案する。ほかの関数は提案しない。\n"
         f"{symbols}\n"
-        f"{planned}"
+        f"{planned}{mvv}"
         '最後の行に JSON {"proposals": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>"}]} を出す。'
     )
 
@@ -50,14 +67,16 @@ def _tiers() -> str:
     return "・".join(budget_decide.TIER_ORDER)
 
 
-def plan(pr: int, proposals: Sequence[Mapping[str, Any]]) -> str:
+def plan(pr: int, proposals: Sequence[Mapping[str, Any]], mvv: str = "") -> str:
+    """計画の指示文。`mvv` は `mvv_text` の文（空なら載せない）。"""
     lines = [f"- {p['path']} {p['symbol']}: {p['title']}（{p['reason']}）" for p in proposals]
     return (
         f"PR #{pr} のリファクタリングの提案から、採る項目を選んで並べる（重なるものは 1 つにする）。\n"
         + "\n".join(lines)
         + f"\n項目ごとにグレード（tier: {_tiers()}）と、手法（technique: extract_function などの snake_case の識別子）と、"
-        + "直す前に振る舞いを固定するテストを足すか（tests: true / false）を付ける。所要の分は書かない（配分の表から見積もる）。"
-        + '\n最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
+        + "直す前に振る舞いを固定するテストを足すか（tests: true / false）を付ける。所要の分は書かない（配分の表から見積もる）。\n"
+        + mvv
+        + '最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
         + ' "tier": "<グレード>", "technique": "<手法>", "tests": <真偽>}]} を出す。'
     )
 

@@ -127,7 +127,7 @@ guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts
 | guard | 事象 | すること |
 | --- | --- | --- |
 | `merge-production` | PreToolUse（Bash） | 直に打つ `gh pr merge` が自動で本番へ届くなら止める |
-| `context-limit` | PreToolUse・PostToolUse | 文脈の量が判断開始の値（既定 250,000）以上なら利用者の入力ごとに 1 度知らせ、運用上限（既定 500,000。`NDF_CONTEXT_LIMIT`）以上なら引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、TaskStop、`ndf records handoff check` と `ndf relay context record` だけの Bash）を除いて止め続ける。サブエージェントは見ない |
+| `context-limit` | PreToolUse・PostToolUse | 文脈の量が判断開始の値（既定 450,000）以上なら利用者の入力ごとに 1 度知らせ、運用上限（既定 600,000。`NDF_CONTEXT_LIMIT`）以上なら引継ぎに要る呼び出し（引継ぎ文書の Read・Write・Edit、TaskStop、`ndf records handoff check` と `ndf relay context record` だけの Bash）を除いて止め続ける。サブエージェントは見ない |
 | `heredoc` | PreToolUse（Bash） | 区切りを引用符で囲まないヒアドキュメントの本文にコマンド置換があれば止める |
 | `sleep` | PreToolUse（Bash） | 前景のループの中の `sleep` と前景の長い `sleep` の待ちを止め、Monitor か背景の起動を勧める |
 | `process-wait` | PreToolUse（Bash） | `pgrep -f` / `pkill -f` をループで繰り返す待ちを止め、完了マーカーのファイルか Monitor で待つよう勧める |
@@ -245,14 +245,14 @@ agy models   # 認証確認
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.29/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.31/skills/deploy/SKILL.md
 ```
 
 実体のパスは `codex plugin list` で確かめます。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  11.0.29  <path>
+# => ndf@ai-plugins  installed, enabled  11.0.31  <path>
 ```
 
 Claude Code では `disable-model-invocation: true` と `/ndf:deploy` のスラッシュコマンドで同じ役割を果たします。

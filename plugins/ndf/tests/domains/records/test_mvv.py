@@ -212,3 +212,12 @@ def test_record_path_raises_identity_error_without_the_env_and_the_state_dir(mon
     monkeypatch.setattr(identity, "load", _unloadable)
     with pytest.raises(identity.IdentityError):
         mvv.record_path("mvv-validation")
+
+
+def test_count_signals_counts_disputed_findings_by_their_key() -> None:
+    """レビューの指摘の見送りは、指摘のキーごとに 1 件として「判定できない」に足す（id では見分けない）。"""
+    row = {"repo": "/m", "mvv_version": 2, "kind": md.REVIEW_DISPUTED, "pr": 1, "key": "a", "id": "r1-1"}
+    rows = [row, {**row, "id": "r2-1"}, {**row, "key": "b"}, {**row, "pr": 2}, {**row, "mvv_version": 1, "key": "c"},
+            {"repo": "/m", "mvv_version": 2, "kind": md.UNKNOWN, "state": "s", "gate": "g", "pr": 1}]  # fmt: skip
+    got = md.count_signals(rows, _decl(2, {"unknowns": 4}), "/m")
+    assert (got.overrides, got.unknown_pass, got.unknown, got.revision_due) == (0, 0, 4, True)

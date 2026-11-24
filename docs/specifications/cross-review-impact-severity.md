@@ -18,6 +18,9 @@
 同じ指摘に相手役が `"impact": "設定を読んだ利用者の PR が誤って閉じられる"` を書いていれば、行は `major` のまま修正担当へ渡り、
 修正担当への指示のその指摘の行に「— 起きること: <1 文>」が添わる。
 
+承認済みのプロジェクト MVV があるときだけ、MVV の項目を挙げた指摘（`mvv`）の重要度と扱いが上と変わる。違いは各節に書き、
+仕組みの全体は [cross-review-project-mvv.md](cross-review-project-mvv.md) が正である。
+
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・境界・テスト観点）を残す。手順と表の正は次にある。
 
 | 何を | 正本 |
@@ -68,16 +71,16 @@ Conventional Comments の `(blocking)`・`(non-blocking)` と Google のレビ�
 
 | # | 対象 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 初めて取り込んだ行（そのとき） | `severity` は必ず尺度の値で、`effective_severity(元の重要度, impact)` の返りである | テストが落ちる |
+| I1 | 初めて取り込んだ行（そのとき） | `severity` は必ず尺度の値で、`effective_severity(元の重要度, impact, redline=…)` の返りである。ただし、MVV の Mission・Vision・Value に反する指摘は、その返りと元の重要度の重い方を `major` 以上にした値で、必ず人の承認が要る操作（`P`・`C` の番号）に当たる指摘は 1 文が無くても下げない（`redline` が真） | テストが落ちる |
 | I2 | 初めて取り込んだ行（そのとき） | `raised_severity` を必ず持つ（尺度に無い・無いときは null）。`impact` は 1 文があるときだけ、前後の空白を除いて持つ | テストが落ちる |
-| I3 | 引き継いだ行・組み直しの行・前の版で書いた行（入れたとき） | `impact`・`raised_severity` を足さず、記録された `severity` のまま読む | テストが落ちる |
-| I3a | 出し直された行（取り込み・引き継ぎのどちらの行も） | `severity` は既にある値と新しい項目を下げた後の値の重い方で、既にある値より軽くならない。`impact` は無ければ足し、あれば保つ。`raised_severity` は持つ行だけ更新する（下の「出し直された指摘の重ね方」）。I1・I3 は出し直しには当てはめない | テストが落ちる |
-| I4 | 収束の妨げ・未解決の重い指摘・記録のコメントの表・スレッド | どれも行の `severity` だけを読む。下げた行は今の `minor` と同じに扱われる | テストが落ちる |
+| I3 | 引き継いだ行・組み直しの行・前の版で書いた行（入れたとき） | `impact`・`raised_severity` を足さず、記録された `severity` のまま読む。記録に今と同じ MVV での Mission・Vision・Value の判定が残っていれば、`major` 以上に固定する | テストが落ちる |
+| I3a | 出し直された行（取り込み・引き継ぎのどちらの行も） | `severity` は既にある値と新しい項目を下げた後の値の重い方で、既にある値より軽くならない。例外は MVV の判定で重さを固定した行で、固定を外すとき（MVV が変わったときと、必ず人の承認が要る操作と言われたとき）に、固定する前の重さ（`unpinned_severity`）へ戻してから重ねるので、軽くなることがある。`impact` は無ければ足し、あれば保つ。`raised_severity` は持つ行だけ更新する（下の「出し直された指摘の重ね方」）。I1・I3 は出し直しには当てはめない | テストが落ちる |
+| I4 | 収束の妨げ・未解決の重い指摘・記録のコメントの表・スレッド | どれも行の `severity` だけを読む。下げた行は今の `minor` と同じに扱われる。例外は MVV の 2 つで、必ず人の承認が要る操作に当たる指摘（`redline`）は、重さによらず収束を妨げず、未解決なら表に「人の承認を待つ」と出る。この指摘と、根拠の行の誤りを NDF が見つけた指摘（`by: ndf`）は、重さによらず、次の実行が読む未解決の指摘の一覧に載る | テストが落ちる |
 | I5 | 相手役への指示 | 「基準に当たる指摘は critical・major」の文を持たず、`critical`・`major` に `impact` を求め、書けない指摘は `minor` にすると書く。文は `review-criteria.json` の `impact.reviewer` から組む | テストが落ちる |
 
 ### 取り込む重要度の規則
 
-`effective_severity(severity, impact)` は次のとおり決める（`severity` は `severity_of` を通した値）。下げる先（`minor`）は「収束の妨げにならない
+`effective_severity(severity, impact, redline=False)` は次のとおり決める（`severity` は `severity_of` を通した値）。下げる先（`minor`）は「収束の妨げにならない
 重さのうち最も重いもの」、上げる先（`major`）は「収束の妨げになる重さのうち最も軽いもの」で、どちらも尺度の表から引き、文字列で直書きしない。
 
 | 相手役の重要度 | 1 文あり | 1 文なし |
@@ -85,6 +88,10 @@ Conventional Comments の `(blocking)`・`(non-blocking)` と Google のレビ�
 | `critical`・`major` | そのまま | `minor` |
 | `minor`・`nit` | そのまま | そのまま |
 | 無い・尺度に無い値（`"重い"` など） | `major` | `minor` |
+
+`redline` が真（必ず人の承認が要る操作に当たる指摘）なら、1 文が無くても「1 文あり」の列で決める。MVV の Mission・Vision・Value に反する
+指摘は、この表の値に続けて `major` 以上に固定する（`criteria_decide.at_least_blocking`・`journal._classify`）。どちらも、1 文が無ければ
+結果の注意（`warnings`）に指摘の id が載る。
 
 `impact` が文字列でない（数値・配列・null）・空・空白だけのときは 1 文なしと読む。項目の無い古い出力も同じである。
 
@@ -108,13 +115,15 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 
 ### 相手役と修正担当への指示
 
-- 相手役の出力の最後の行の JSON は `text`・`severity`・`impact`・`path`・`line`・`section` を持つ（`drive._review_prompt`）
+- 相手役の出力の最後の行の JSON は `text`・`severity`・`impact`・`path`・`line`・`section` を持つ（`drive._review_prompt`）。承認済みの MVV があるときは、反する項目を書く `mvv` も持つ
 - 相手役への「指摘の基準」の重要度の行は「重要度 severity は critical・major・minor・nit から選ぶ。」に `impact.reviewer` の文を続ける。
   基準ごとの「起きること」の言い換えは次のとおりで、当たるものを 1 つ書けばよい
   - 基準 2（秘密・認証認可・利用者のデータ・戻せない操作）: 何が誰に漏れるか・何が戻せなくなるか・誰がどの操作を権限の外で実行できるか・
     どのデータに何が起きるか。認可の指摘はデータへの影響が無くても「誰がどの操作を権限の外で実行できるか」だけで足りる。起きる確率は書かない
   - 基準 3（トークン・所要時間・処理の回数を増やす変更）: 何がどの単位でどれだけ増えるか
   - 基準 4（設計文書の食い違い）: 実装する人が何を作り違えるか
+  - 基準 6（文書の読み手に通じない文。Markdown を変えた PR だけ）: どの読み手が何を取り違えるか、何を決められなくなるか。
+    この言い換えは `impact.reviewer` ではなく `document.fields` に置く。文書を含まない PR の指示を変えないためである（[ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md)）
 - 修正担当への指示の各指摘の行は、行が `impact` を持てば末尾に「— 起きること: <1 文>」を添える（`criteria_decide.fixer_impact`）。持たない行
   （引き継いだ行・前の版の行）は今の形のまま
 - 記録のコメントの表とスレッドの書式は変えない
@@ -142,14 +151,14 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 | 行の出所 | `severity` | `impact` | `raised_severity` |
 | --- | --- | --- | --- |
 | 取り込み | 下げた後の値 | 1 文があれば | 置く（null を含む） |
-| 引き継ぎ（`t<コメントの id>`・`p-<元の id>`） | 記録された値（出し直されれば重い方。I3a） | 置かない（出し直された項目が 1 文を持てば足す） | 置かない |
+| 引き継ぎ（`t<コメントの id>`・`p-<元の id>`） | 記録された値（出し直されれば重い方。I3a。今と同じ MVV の Mission・Vision・Value の判定が残っていれば `major` 以上） | 置かない（出し直された項目が 1 文を持てば足す） | 置かない |
 | 組み直しの足すべき内容 | 置かない | 置かない | 置かない |
 | 前の版で書いた行 | そのまま | 無い | 無い |
 
 `review-criteria.json` の `impact` は `reviewer`（相手役への指示の文。`{blocking}`・`{light_first}`・`{light}` を尺度から埋める）と
 `fixer_label`（修正担当への添え書きの名前「起きること」）を持つ。キーが無ければ `reviewer_block` は `KeyError` で止まる（契約のテストが先に落とす）。
 
-`ndf cross-review run` の引数と結果 JSON（`cross-review.result.schema.json`）は変わらない。
+1 文と `raised_severity` は、`ndf cross-review run` の引数と結果 JSON（`cross-review.result.schema.json`）に現れない。
 
 ## 運用
 
@@ -158,7 +167,7 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 | 項目 | 内容 |
 | --- | --- |
 | 今より早く収束するラウンドがある | 相手役が利用者の経路への影響を書けない重い不具合を見つけたとき、その指摘は修正担当へ渡らずに表へ「軽い」で残る |
-| 基準 2 の重い指摘も下がる（#4045） | 駆動は指摘がどの基準に当たるかを知らないので、秘密の漏れ・認証認可・利用者のデータ・戻せない操作に触れる `critical`・`major` も、相手役が `impact` を書き忘れるか項目の形が崩れるだけで `minor` へ下がる。その指摘は修正担当へ渡らず、ラウンドは収束してマージへ進み得る。基準 2 に当たる指摘を下げずに渡す変更は [#4045](https://github.com/devbasex/ai-plugins/issues/4045) が扱い、この版の実装には入っていない |
+| 基準 2 の重い指摘も下がる（#4045） | 駆動は指摘がどの基準に当たるかを知らないので、秘密の漏れ・認証認可・利用者のデータ・戻せない操作に触れる `critical`・`major` も、相手役が `impact` を書き忘れるか項目の形が崩れるだけで `minor` へ下がる。その指摘は修正担当へ渡らず、ラウンドは収束してマージへ進み得る。相手役が `mvv` に必ず人の承認が要る操作の番号（`P`・`C`）を書いた指摘だけは下がらず、「人の承認を待つ」として残る。基準 2 に当たる指摘を下げずに渡す変更は [#4045](https://github.com/devbasex/ai-plugins/issues/4045) が扱い、この版の実装には入っていない |
 | 相手役が 1 文を書く割合 | codex・kiro が指示どおりに `impact` を書くか、書けない指摘を自分で `minor` にするかは、実際の実行の出力でしか分からない |
 
 リリースの後、5 回以上の実行の状態ファイルの `raised_severity`・`severity`・`impact` と相手役の出力（`round<n>-<相手役>.out`）を集計し、
@@ -185,6 +194,7 @@ major で出すと、入れる順で `raised_severity` が変わり、元の重�
 - [issue #4014](https://github.com/devbasex/ai-plugins/issues/4014) — 要求と受け入れ条件
 - [Pull Request #4023](https://github.com/devbasex/ai-plugins/pull/4023) — 実装
 - [issue #4045](https://github.com/devbasex/ai-plugins/issues/4045) — 1 文の欠けた基準 2 の重い指摘を下げずに修正担当へ渡す
+- [cross-review-project-mvv.md](cross-review-project-mvv.md) — MVV に反する指摘の重要度の固定と、人の承認を待つ指摘の扱い
 - [cross-review-evidence-based.md](cross-review-evidence-based.md) — 指摘の採否を根拠で決める枠組み
 - [cross-review-fixer-sessions.md](cross-review-fixer-sessions.md) — 同じ実測から起こした、修正担当の会話を続ける仕様（#4013）
 - Conventional Comments: https://conventionalcomments.org/

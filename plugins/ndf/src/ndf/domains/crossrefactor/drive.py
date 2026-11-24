@@ -3,6 +3,8 @@
 - 完了の記録が残っていて PR の head と結果を変える引数が同じなら、前回の結果を返す。案内には drive が持つ手段だけを
   書く（`finished_decide`。drive は打ち直しの引数を持たないので、状態ファイルを消す手順を案内する。#2057）
 - 作業場所は `workspace` が用意し、再開では作り直さずに登録を確かめる（#3106）
+- 承認済みのプロジェクト MVV があれば、提案と計画の担当の指示文に、本文と NDF の共通原則のスナップショットのパスを載せる。
+  ベースブランチの MVV を読めなければ、担当を起動せずに止める（#4076）
 - 課題が触る関数（#622）を init で決め、提案と計画の項目はその関数を指すものだけを採る
 - 担当の結果ファイルの保存先は `launch` が決める（#750）
 - コードを書く工程は、担当を起動する前に起点を工程の記録へ書く。担当が結果を出さずに終われば、起点まで取り消して
@@ -32,7 +34,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, NamedTuple, Optional, cast
 
 from ndf.adapters import agents, git, github, publish
 from ndf.contracts import limits
@@ -62,6 +64,7 @@ from ndf.domains.crossrefactor import (
     verify_decide,
     workspace,
 )
+from ndf.domains.records import mvv
 from ndf.testing import declared
 from ndf.testing import scoped, slots
 
@@ -157,6 +160,13 @@ class _Run:
     ws: workspace.Workspace
     state: dict[str, Any]
     path: Path
+    # 起動の始めに取得した、MVV を読むブランチとその先頭のコミット
+    base_branch: str
+    base_tip: str
+    # 差分の起点のコミット（`--base` がブランチなら `base_tip`、コミットならそのコミット）
+    diff_base: str
+    # 提案と計画の担当へ渡す、プロジェクト MVV を読ませる文（承認済みの MVV が無ければ空）
+    mvv: str = ""
 
     @property
     def work(self) -> git.Git:
@@ -194,7 +204,7 @@ def _init(run: _Run) -> None:
     if "touched" in run.state:
         return
     cfg = run.cfg
-    touched = scope.touched_or_explicit(run.ws.work, cfg.base, "HEAD", cfg.scope, cfg.symbols)
+    touched = scope.touched_or_explicit(run.ws.work, run.diff_base, "HEAD", cfg.scope, cfg.symbols)
     run.state.update(
         pr=cfg.pr, branch=cfg.branch, base=cfg.base, args=cfg.args(), target_scope=list(cfg.scope), touched=touched.as_json(), phases={}
     )
@@ -269,7 +279,7 @@ def _record_spent(run: _Run, req: launch.Request, spent: float) -> None:
 def _propose(run: _Run) -> list[dict[str, Any]]:
     """提案の担当を順に起動し、提案をまとめる。結果を出さない担当は数えずに続ける。"""
     workspace.refresh_readers(run.ws)
-    prompt = prompt_decide.propose(run.cfg.pr, _touched(run), run.cfg.candidates)
+    prompt = prompt_decide.propose(run.cfg.pr, _touched(run), run.cfg.candidates, run.mvv)
     by_runtime: dict[str, list[dict[str, Any]]] = {}
     for runtime in run.ws.runtimes:
         got = _launch(run, launch.Request("propose", runtime, prompt, f"pr{run.cfg.pr}", "proposals"))
@@ -280,18 +290,25 @@ def _propose(run: _Run) -> list[dict[str, Any]]:
     return merged
 
 
+def _planned(run: _Run, proposals: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    """計画の担当を起動し、(項目の元, 提案で代えたか) を返す。提案が無ければ起動せず、結果が無ければ提案で代える。"""
+    if not proposals:
+        return [], False
+    prompt = prompt_decide.plan(run.cfg.pr, proposals, run.mvv)
+    got = _launch(run, launch.Request("plan", participants.FIXER, prompt, f"pr{run.cfg.pr}", "items"))
+    if got is None:
+        return proposals, True
+    return got["items"], False
+
+
 def _plan(run: _Run) -> None:
     """提案から項目を組む（済んでいれば何もしない）。計画の担当が結果を出さなければ提案をそのまま項目にする。"""
     if "items" in run.state:
         return
     proposals = _propose(run)
     _record_phase(run, "plan")
-    planned = None
-    if proposals:
-        req = launch.Request("plan", participants.FIXER, prompt_decide.plan(run.cfg.pr, proposals), f"pr{run.cfg.pr}", "items")
-        got = _launch(run, req)
-        planned = got["items"] if got is not None else None
-    items, skipped = items_decide.plan_items(planned if planned is not None else proposals, _touched(run))
+    planned, fallback = _planned(run, proposals)
+    items, skipped = items_decide.plan_items(planned, _touched(run))
     table = _allocation_table(run)
     for item in items:
         # 見積りは配分の表から出す（手法と、テストを足すか）。担当の申告の分は使わない（#3643）
@@ -300,7 +317,7 @@ def _plan(run: _Run) -> None:
     run.state.update(
         items=picked.adopted,
         skipped=skipped + picked.skipped,
-        plan_fallback=planned is None and bool(proposals),
+        plan_fallback=fallback,
         budget=picked.budget.as_json(),
         plan={"table_source": table["source"], "table": table},
     )
@@ -688,8 +705,52 @@ def _resume_mismatch(cfg: RunConfig, state: Mapping[str, Any], path: Path) -> Op
     return Finish("invalid", detail)
 
 
+def _base_of_pr(cfg: RunConfig, ports: Ports, repo: git.Git) -> str:
+    """PR のマージ先のブランチ（`--base` がコミットのときだけ読む）。読めなければ、MVV を決められないので止める。"""
+    try:
+        return ports.github(repo).pull(cfg.pr).base_ref
+    except github.GitHubError as exc:
+        raise DriveStopped("precondition", f"PR #{cfg.pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
+
+
+class _Fetched(NamedTuple):
+    """`_fetch_both` の戻り値。"""
+
+    head: str  # PR の先頭のコミット
+    base_branch: str  # MVV を読むブランチ
+    base_tip: str  # MVV を読むブランチの先頭のコミット
+    diff_base: str  # 差分の起点のコミット
+
+
+def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> _Fetched:
+    """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミット・差分の起点の
+    コミットを返す。取得が進めるのはリモート追跡参照だけなので、差分の起点に手元のブランチの名前は使わない。"""
+    remote = repo.remote()
+
+    def fetch(branch: str) -> tuple[str, str]:
+        return worktree.fetch_tips(repo, cfg.branch, remote, branch)
+
+    (head, tip), base = worktree.fetch_base(repo, cfg.base, remote, fetch, lambda: _base_of_pr(cfg, ports, repo))
+    return _Fetched(
+        head=head,
+        base_branch=base.branch,
+        base_tip=tip,
+        diff_base=base.commit if base.commit is not None else tip,
+    )
+
+
+def _read_mvv(run: _Run) -> str:
+    """提案と計画の指示文に足す MVV の文。MVV を読めなければ、MVV を渡さない提案にならないよう担当の起動前に止める（#4076）。"""
+    try:
+        snap = mvv.of_base(run.ws.work, run.base_branch, run.base_tip, run.ws.root)
+    except mvv.MvvError as exc:
+        raise DriveStopped("precondition", str(exc)) from exc
+    return prompt_decide.mvv_text(snap)
+
+
 def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish]]:
-    root = workspace.root_of(git.Git(cfg.repo), cfg.pr)
+    repo = git.Git(cfg.repo)
+    root = workspace.root_of(repo, cfg.pr)
     path = store.path_of(root)
     state = store.load(path)
     reused = _reused(cfg, state, path)
@@ -701,8 +762,12 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
     if mismatch is not None:
         return None, mismatch
     runtimes = (*participants.assign(cfg.participants), participants.FIXER)
-    ws = workspace.prepare(git.Git(cfg.repo), cfg.pr, cfg.branch, runtimes)
-    return _Run(cfg, ports, ws, state, path), None
+    try:
+        fetched = _fetch_both(cfg, ports, repo)
+    except DriveStopped as exc:
+        return None, Finish(exc.kind, exc.detail)
+    ws = workspace.prepare(repo, cfg.pr, fetched.head, runtimes)
+    return _Run(cfg, ports, ws, state, path, fetched.base_branch, fetched.base_tip, fetched.diff_base), None
 
 
 def _ready(run: _Run) -> None:
@@ -722,6 +787,7 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     assert run is not None
     try:
         _ready(run)
+        run.mvv = _read_mvv(run)
         _init(run)
         _plan(run)
         _items(run)

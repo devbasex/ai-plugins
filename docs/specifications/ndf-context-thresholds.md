@@ -1,4 +1,4 @@
-# 文脈の切り替えの閾値: 判断開始の値 250,000 で知らせ、運用上限 500,000 で止める
+# 文脈の切り替えの閾値: 判断開始の値 450,000 で知らせ、運用上限 600,000 で止める
 
 ## 概要
 
@@ -7,16 +7,16 @@
 
 | 値 | 上限の設定の行 | 既定 | 振る舞い |
 | --- | --- | --- | --- |
-| 判断開始の値（タイミングを見て再起動） | `context.decide-from` | 250,000 | guard が Tool の実行の後に、超えたことと役ごとの切りどころを利用者の入力ごとに 1 度知らせる。Tool は止めない。conductor は次の切りどころで引継ぎ文書を書いて切る |
-| 運用上限（速やかに再起動） | `context.limit` | 500,000 | guard が引継ぎに要る呼び出しを除くすべての Tool の呼び出しを止め続ける。中継のラッパーは、子が静かで、バックグラウンドの作業が残っていなければ、子を止めて引継ぎを頼む文で起動し直す |
+| 判断開始の値（タイミングを見て再起動） | `context.decide-from` | 450,000 | guard が Tool の実行の後に、超えたことと役ごとの切りどころを利用者の入力ごとに 1 度知らせる。Tool は止めない。conductor は次の切りどころで引継ぎ文書を書いて切る |
+| 運用上限（速やかに再起動） | `context.limit` | 600,000 | guard が引継ぎに要る呼び出しを除くすべての Tool の呼び出しを止め続ける。中継のラッパーは、子が静かで、バックグラウンドの作業が残っていなければ、子を止めて引継ぎを頼む文で起動し直す |
 
 例（オーガナイザーが計画 p12 の `ndf lanes wait` を背景で張っている会話）:
 
 | 文脈の量 | 起きること |
 | --- | --- |
-| 249,999 | 何も起きない |
-| 250,000 | 次の Tool の実行の後に、超えたことと切りどころ（知らせを処理し終えて次の `wait` を張る前か、利用者への報告を終えた時点）を書いた案内が 1 度だけ会話へ入る。同じ入力の間の 2 回目以降は出ない |
-| 500,000 | Bash・Skill・Agent などの呼び出しが止まる。止める理由の文が、背景の `wait` を TaskStop で止め、`.ndf/handoff/parallel-p12.md` を書いて `ndf records handoff check` で確かめ、`ndf-next` のブロックを出す手順を示す。引継ぎ文書の Read・Write・Edit と TaskStop と確かめの Bash は通る |
+| 449,999 | 何も起きない |
+| 450,000 | 次の Tool の実行の後に、超えたことと切りどころ（知らせを処理し終えて次の `wait` を張る前か、利用者への報告を終えた時点）を書いた案内が 1 度だけ会話へ入る。同じ入力の間の 2 回目以降は出ない |
+| 600,000 | Bash・Skill・Agent などの呼び出しが止まる。止める理由の文が、背景の `wait` を TaskStop で止め、`.ndf/handoff/parallel-p12.md` を書いて `ndf records handoff check` で確かめ、`ndf-next` のブロックを出す手順を示す。引継ぎ文書の Read・Write・Edit と TaskStop と確かめの Bash は通る |
 
 値は個人の環境変数 `NDF_CONTEXT_LIMIT` で運用上限だけを替えられ、guard を止める口は `NDF_HOOK_OFF=context-limit` だけである。
 Codex には guard を置かず、手順書のカットポイントで守る。
@@ -31,6 +31,7 @@ Codex には guard を置かず、手順書のカットポイントで守る。
 閾値はかつて 3 か所（guard とラッパーの 800,000、再起動の方針の 200,000 / 400,000）にあり、手順書の値と実際に止める値が
 食い違い、手順書の止める口 `NDF_CONTEXT_GUARD` には読み手が無かった。2026-11-21 に利用者が値を 250,000 と 500,000 の
 2 つに決め、対象をオーガナイザーとレーンの conductor の両方にした（[#3995](https://github.com/devbasex/ai-plugins/issues/3995)）。
+この値では会話の再起動が多すぎたため、2026-11-24 に利用者が 450,000 と 600,000 へ上げた。
 
 決定の要点:
 
@@ -60,7 +61,7 @@ supervisor のスイッチポイント、Codex の扱いは含まない。
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/contracts/limits/` | `context.decide-from`（`count` 250,000）と `context.limit`（`count` 500,000）の 2 つの方針。文脈の切り替えの値はここだけにある |
+| `plugins/ndf/contracts/limits/` | `context.decide-from`（`count` 450,000）と `context.limit`（`count` 600,000）の 2 つの方針。文脈の切り替えの値はここだけにある |
 | `context_thresholds.thresholds(environ, value)` | 2 つの値に `NDF_CONTEXT_LIMIT` を重ね、`Thresholds(decide_from, limit, sources)` を返す唯一の関数。上限の設定の引き方 `value` は呼び手が渡す。判定の記録の語（継続・拒否・再起動と再起動の理由）もここに置く |
 | guard `context-limit`（`guards.json` の行、`order` 20、`events` は PreToolUse と PostToolUse、`deny_key` は `none`、`fail_closed` は偽） | PostToolUse で知らせ、PreToolUse で止める。上限の設定は `hooks.tables.policy_value` で読む |
 | `hooks/dispatch.py` | `deny_key` が `none` の行の拒否を数えず、案内へ下げない。`sole` の付いた拒否があれば、まとめた判定の文をその文だけにする |
@@ -152,8 +153,8 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 
 | 名前 | 意味 |
 | --- | --- |
-| `context.decide-from`（`contracts/limits/`） | 判断開始の値。既定 250,000 |
-| `context.limit`（`contracts/limits/`） | 運用上限。既定 500,000 |
+| `context.decide-from`（`contracts/limits/`） | 判断開始の値。既定 450,000 |
+| `context.limit`（`contracts/limits/`） | 運用上限。既定 600,000 |
 | `NDF_CONTEXT_LIMIT` | 運用上限（正の整数）。guard・ラッパー・`resolve`・`record` の 4 つに効く。ラッパーは子へ同じ環境を渡すので、子の guard とラッパーは同じ値になる |
 | `NDF_HOOK_OFF=context-limit`（か `all`） | guard が判定も知らせもしない。動いている会話には効かず、claude を起動し直して効かせる |
 
@@ -193,14 +194,14 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 | --- | --- |
 | 上限の設定の値を差し替えると、guard・ラッパー・`resolve` が差し替えた値を使う | `plugins/ndf/tests/domains/relay/test_context_thresholds.py`（`test_values_follow_the_given_table`・`test_resolve_follows_the_limits_table`）、`tests/domains/hooks/test_guards.py`（`test_context_limit_reads_the_limit_from_the_limits_table`）、`tests/domains/relay/test_relay_decide.py`（`test_wrapper_settings_read_the_limit_from_the_limits_table`） |
 | 旧い行・旧いモジュール・旧い設定の形が残っていない | `test_context_thresholds.py`（`test_the_limits_table_has_no_old_rows`・`test_the_restart_policy_module_is_gone`・`test_the_restart_policy_setting_schema_is_gone`） |
-| 既定で 250,000 / 500,000 を返し、`--policy`・`--root` を断る | `test_context_thresholds.py`（`test_resolve_returns_the_two_defaults`）、`test_relay_cli_parse.py`（`test_context_resolve_refuses_the_removed_options`） |
+| 既定で 450,000 / 600,000 を返し、`--policy`・`--root` を断る | `test_context_thresholds.py`（`test_resolve_returns_the_two_defaults`）、`test_relay_cli_parse.py`（`test_context_resolve_refuses_the_removed_options`） |
 | `NDF_CONTEXT_LIMIT` が運用上限を替えて判断開始の値を下げ、誤った値を無視する | `test_context_thresholds.py`（`test_env_overrides_the_limit_and_lowers_the_decide_from`・`test_env_that_is_not_a_positive_integer_is_ignored`・`test_reversed_table_lowers_the_decide_from_to_the_limit`） |
-| 249,999 / 250,000 / 499,999 では止めず 500,000 で止める。環境変数の値でも同じ | `test_guards.py`（`test_context_limit_stops_at_the_operating_limit`） |
+| 449,999 / 450,000 / 599,999 では止めず 600,000 で止める。環境変数の値でも同じ | `test_guards.py`（`test_context_limit_stops_at_the_operating_limit`） |
 | 引継ぎに要る呼び出しだけを通し、リンク・別のリポジトリ・リダイレクト・連結を見分ける | `test_guards.py`（`test_passes_*`・`test_context_limit_passes_the_handoff_calls_at_the_operating_limit`） |
 | 違う呼び出しを続けても止め続ける | `test_guards.py`（`test_context_limit_keeps_denying_different_calls`） |
 | 止める理由の文が手順を含み、文脈の量を含まず、ほかの拒否と同時でも単独で届く | `test_guards.py`（`test_context_limit_reason_*`） |
 | 判断開始の値で入力ごとに 1 度知らせ、記録の読み取りが呼び出しごとに 1 回以内 | `tests/domains/hooks/test_context_notice.py` |
-| 作業の残っていない子に、ラッパーが 500,000 で 1 度だけ引継ぎを頼み、499,999 では頼まない | `test_relay_decide.py`（`test_context_over_the_limit_asks_for_a_handover_once`・`test_wrapper_settings_hand_the_operating_limit_to_the_handover`・`test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document`） |
+| 作業の残っていない子に、ラッパーが 600,000 で 1 度だけ引継ぎを頼み、599,999 では頼まない | `test_relay_decide.py`（`test_context_over_the_limit_asks_for_a_handover_once`・`test_wrapper_settings_hand_the_operating_limit_to_the_handover`・`test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document`） |
 | サブエージェント・NDF の外・`usage` の無い会話は判定しない。`agent_type` だけなら判定する | `test_guards.py`（`test_context_limit_skips_a_subagent`・`test_context_limit_judges_with_only_the_agent_type`・`test_context_limit_passes_without_usage`・`test_context_limit_skips_conversations_outside_ndf_without_reading`） |
 | `NDF_HOOK_OFF=context-limit` で判定も知らせもしない | `test_guards.py`（`test_hook_off_context_limit_neither_judges_nor_notifies`） |
 | `context-limit` が dispatch の並びの先頭で、締め切りで判定を失わない | `tests/domains/hooks/test_dispatch.py`（`test_context_limit_is_the_first_guard_selected`・`test_context_limit_verdict_survives_the_deadline_inside_run`） |

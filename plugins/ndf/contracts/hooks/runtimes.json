@@ -78,6 +78,7 @@
       "timeout_max": 600,
       "skipped": {
         "read-repeat": "Codex には Read の Tool が無く、ファイルはシェルで読む",
+        "reading-check": "Codex には AskUserQuestion の Tool が無い",
         "ask-forward": "Codex には AskUserQuestion の Tool が無い",
         "ask-answered": "Codex には AskUserQuestion の Tool が無い",
         "ask-closed": "Codex には AskUserQuestion の Tool が無い",

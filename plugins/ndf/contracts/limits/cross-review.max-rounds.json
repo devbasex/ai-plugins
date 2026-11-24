@@ -3,6 +3,6 @@
   "count": 3,
   "read_by": [
     "ndf.domains.crossreview.cli",
-    "ndf.domains.crossreview.drive"
+    "ndf.domains.crossreview.settings"
   ]
 }

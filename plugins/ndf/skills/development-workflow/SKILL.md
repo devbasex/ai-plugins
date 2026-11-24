@@ -426,7 +426,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 
 | 項目 | 内容 |
 | --- | --- |
-| 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（guard `context-limit`）が運用上限（既定 500,000）で止めたとき。判断開始の値（既定 250,000）の知らせを受けたら次のカットポイントで切る |
+| 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（guard `context-limit`）が運用上限（既定 600,000）で止めたとき。判断開始の値（既定 450,000）の知らせを受けたら次のカットポイントで切る |
 | 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。情報文字列が `ndf-next` のコードブロック 1 つで出す |
 | 3 層で出す時点 | conductor がフェーズレポート（`## フェーズレポート`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 承認ゲート` なら、承認ゲートの承認とマージの後 |
 | 出す前に行うこと | 書き始める前に `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"` を打ち（hook は打たない。運用上限で止められた後も打てる）、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |

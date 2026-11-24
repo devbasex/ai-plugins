@@ -122,10 +122,10 @@ def _settings_limit(tmp_path, monkeypatch, env):
 
 @pytest.mark.parametrize(
     ("env", "tokens", "kind"),
-    [(None, 500_000, "handover"), (None, 499_999, "active"), ("300000", 300_000, "handover"), ("300000", 299_999, "active")],
+    [(None, 600_000, "handover"), (None, 599_999, "active"), ("500000", 500_000, "handover"), ("500000", 499_999, "active")],
 )
 def test_wrapper_settings_hand_the_operating_limit_to_the_handover(tmp_path, monkeypatch, env, tokens, kind):
-    # #3995 の 3995:7・3995:9: ラッパーは運用上限（500,000。NDF_CONTEXT_LIMIT で替える）で静かな子に引継ぎを頼む
+    # #3995 の 3995:7・3995:9: ラッパーは運用上限（600,000。NDF_CONTEXT_LIMIT で替える）で静かな子に引継ぎを頼む
     limit = _settings_limit(tmp_path, monkeypatch, env)
     assert switch_decide.decide(state(context_tokens=tokens, context_limit=limit)).kind == kind
 

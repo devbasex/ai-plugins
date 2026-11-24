@@ -61,6 +61,7 @@ codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_e
 | `-C <dir>` | 作業ディレクトリ。指定しないと cwd が想定と異なりファイルを読めなくなる |
 | `--dangerously-bypass-approvals-and-sandbox` | bwrap 非対応環境で必須。外部隔離環境内でのみ使用する |
 | `--config model_reasoning_effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
+| `-o <file>` | 最終 message を、呼び出した側が決めたファイルへ書かせる。プロンプトに出力先を書けないときに使う。最終 message が無ければ中身は得られない |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
 

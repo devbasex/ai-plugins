@@ -180,8 +180,22 @@
       "fail_closed": false
     },
     {
+      "name": "reading-check",
+      "summary": "承認と判断の質問（metadata.source が ndf-gate: か ndf-ask: で始まる）の前に、読み手役が確認した記録を調べ、同じ質問の記録が無いか、承認する Pull Request の head が記録と違えば止める（#4285）",
+      "module": "ndf.domains.hooks.guards.reading_check",
+      "events": ["PreToolUse"],
+      "tools": ["AskUserQuestion"],
+      "order": 55,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "reason",
+      "limits": ["hook.git-rev-parse", "hook.counter-lock"],
+      "params": {},
+      "fail_closed": false
+    },
+    {
       "name": "ask-forward",
-      "summary": "AskUserQuestion を中継とオーガナイザーへのシグナルファイルに書き、待ちの知らせを送信待ちへ書く。転送は待たない（docs/specifications/ndf-rebuild.md の決定 93・#3035）。中継の下で書けなければ質問を拒否する（#3814）",
+      "summary": "AskUserQuestion を中継とオーガナイザーへのシグナルファイルに書き、待ちの知らせを送信待ちへ書く。転送は待たない（docs/specifications/ndf-rebuild.md の決定 93・#3035）。中継の下で書けなければ質問を拒否する（#3814）。前の guard が止めた質問は書かない（#4285）",
       "module": "ndf.domains.hooks.guards.ask",
       "events": ["PreToolUse"],
       "tools": ["AskUserQuestion"],

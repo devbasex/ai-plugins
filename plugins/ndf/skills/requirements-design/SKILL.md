@@ -41,7 +41,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 **手順 0・3a・3b は `standard` のときだけ通す。** `light` / `operation` / `documentation` では飛ばす
 （この 3 モードの工程と所要を変えない）。
 
-要求仕様の読み手（承認する人。その機能を初めて見る）・読み手が下す判断・セクションの順序と、変更の種類ごとの中心のセクションは
+要求仕様の読み手は [文書の書き方・直し方の基準](../../contracts/data/writing-criteria.md) の「1. 読み手を想定する」の表が、読み手が下す判断・セクションの順序と、変更の種類ごとの中心のセクションは
 [references/document-roles.md](references/document-roles.md)（文書の役割の表）が決める。手順で書いたものは、その順で仕様に並べる（手順 7）。
 
 ### 0. 用語集を用意する（`standard`）
@@ -172,8 +172,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ### 5a. 要求と範囲を MVV と突き合わせる
 
 承認済みのプロジェクト MVV があれば、手順 1〜5 の要求と範囲を MVV と突き合わせる。**反する疑いがあれば、要求を書き切らずに
-人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV のセクションの読み方・人へ戻す形・「MVV なし」の
-ときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV の読み方・人へ戻す形・承認済みの MVV が
+無いときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md#工程での読み方) にある。
 
 ### 6. 実装前に明文化する項目
 

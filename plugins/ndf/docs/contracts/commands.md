@@ -270,14 +270,18 @@
 | `ndf records gws-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records handoff check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`path`（string・必須・位置）<br>`--trim`（boolean・任意）: テンプレートに無いセクションを退避先へ移してから確かめる<br>`--history`（string・任意）: 退避先（--trim のとき要る） |
 | `ndf records mvv answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--version`（integer・任意）: 回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン） |
+| `ndf records mvv current` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ<br>`--allow-mismatch`（boolean・任意）: 本文が承認の記録と合わなくても止まらず、警告を付けて状態だけを返す |
 | `ndf records mvv gate` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--gate`（string・必須・値 `design`・`release`）: 承認ゲートの区分 |
 | `ndf records mvv signals` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ |
 | `ndf records preflight` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf records reading add` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
+| `ndf records reading check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
+| `ndf records reading prompt` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
 | `ndf records spec finalize` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--spec`（array of string・必須）: 溶かした先の確定仕様（複数可）<br>`--remove`（array of string・任意）: 消す設計（複数可）<br>`--source-of`（array of string・任意）: <語>=<ファイル> で語の SSOT を明示する<br>`--message（-m）`（string・任意）: コミットの件名。無ければコミットせずパスだけを出す |
 | `ndf records usage report` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--since`（string・必須）<br>`--until`（string・必須） |
 | `ndf records usage stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 
-結果の `metrics`: `bytes`（integer）・`commit`（string）・`lines`（integer）・`revision_due`（boolean）。`items` の要素: `agent_id`（string）・`at`（string）・`broken_rows`（integer）・`caller`（string）・`cause`（object）・`closable`（boolean）・`closed_issues`（integer）・`context`（string）・`files`（array of string）・`gate`（—）・`issue`（integer）・`kind`（string）・`lines`（integer か array）・`missing_path`（string）・`moved`（string）・`mvv_version`（integer か null）・`name`（string）・`overrides`（integer）・`path`（string）・`pr`（—）・`reason`（string）・`repo`（string）・`result`（string）・`since`（string）・`state`（—）・`status`（string）・`summary`（string）・`term`（string）・`transcript`（string）・`unknown`（integer）・`unknown_pass`（integer）・`unknown_rows`（integer）・`until`（string）・`usage`（object か string）・`version`（integer）・`violation`（string）・`warnings`（array of string）・`word`（string）
+結果の `metrics`: `bytes`（integer）・`commit`（string）・`lines`（integer）・`prompt`（string）・`revision_due`（boolean）。`items` の要素: `agent_id`（string）・`at`（string）・`broken_rows`（integer）・`caller`（string）・`cause`（object）・`closable`（boolean）・`closed_issues`（integer）・`context`（string）・`error`（string）・`files`（array of string）・`gate`（—）・`issue`（integer）・`kind`（string）・`lines`（integer か array）・`missing`（string）・`missing_path`（string）・`moved`（string）・`mvv_version`（integer か null）・`name`（string）・`overrides`（integer）・`path`（string）・`pr`（—）・`prs`（array of object）・`question_key`（string）・`reads`（array of object）・`reason`（string）・`repo`（string）・`result`（string）・`since`（string）・`state`（—）・`status`（string）・`summary`（string）・`term`（string）・`transcript`（string）・`unknown`（integer）・`unknown_pass`（integer）・`unknown_rows`（integer）・`until`（string）・`usage`（object か string）・`version`（integer）・`violation`（string）・`warnings`（array of string）・`word`（string）
 
 ## `ndf refactor`
 

@@ -21,11 +21,21 @@ from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accept
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
 
-def rejections_path() -> Path:
-    """`gate-rejections.jsonl` の保存先（表 locations の mvv-state。環境変数があればその位置、無ければ状態の保存先）。"""
+def mvv_state_dir() -> Path:
+    """MVV の記録とスナップショットの保存先（表 locations の mvv-state。環境変数があればその位置、無ければ状態の保存先）。"""
     var = facts.value("locations", "mvv-state", "env")
-    base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("locations", "mvv-state", "path")
-    return base / facts.value("ndf-files", "gate-rejections", "path")
+    # 環境変数があれば identity を読まない。状態の保存先を解けなければ IdentityError のまま
+    return Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("locations", "mvv-state", "path")
+
+
+def mvv_record_path(file_id: str) -> Path:
+    """表 ndf-files の `file_id` の記録の保存先（`mvv_state_dir` の下）。"""
+    return mvv_state_dir() / facts.value("ndf-files", file_id, "path")
+
+
+def rejections_path() -> Path:
+    """`gate-rejections.jsonl` の保存先。"""
+    return mvv_record_path("gate-rejections")
 
 
 def rejection_row(v: run.View, q: Question, a: Answer) -> dict[str, Any]:
