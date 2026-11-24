@@ -8,15 +8,21 @@
   収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
+- 基準 5（プロジェクト MVV に反しないか）は、ベースブランチの MVV が承認済みのときだけ指示に載せる。MVV の本文と
+  NDF の共通原則は、起動の始めに保存したスナップショットのパスで渡す（#4076）
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import contracts
 from ndf.contracts import facts
+from ndf.domains.records.mvv_decide import State
+
+if TYPE_CHECKING:
+    from ndf.domains.records.mvv import Snapshot
 
 TABLE = "data/review-criteria.json"
 SEVERITIES = "severities"
@@ -126,16 +132,41 @@ def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
     return value
 
 
-def criteria_lines(focus: Sequence[str]) -> list[str]:
-    """基準の行（番号の順）。重点があるときだけ基準 3 を足す。"""
+def _approved(mvv: Optional[Snapshot]) -> Optional[Snapshot]:
+    """承認済みの MVV ならそのまま返す。MVV が無いか承認済みでなければ None。"""
+    return mvv if mvv is not None and mvv.state == State.APPROVED else None
+
+
+def mvv_item(value: object, items: Sequence[str]) -> Optional[str]:
+    """相手役が指摘の `mvv` に書いた MVV の項目（例: `Value 5`）。前後の空白を除き、`items` に無ければ None。"""
+    item = value.strip() if isinstance(value, str) else None
+    return item if item in items else None
+
+
+def _mvv_lines(who: str, mvv: Optional[Snapshot]) -> list[str]:
+    """MVV の指摘の書き方・扱い方の文（`who` は `reviewer` か `fixer`）。承認済みの MVV が無ければ空。"""
+    t = _table()
+    return [t["mvv"][who].format(number=t["mvv_number"])] if _approved(mvv) else []
+
+
+def mvv_shape(mvv: Optional[Snapshot]) -> str:
+    """相手役が出す指摘の JSON に足すキー `mvv` の説明。承認済みの MVV が無ければ空文字列。"""
+    t = _table()
+    return str(t["mvv"]["shape"].format(number=t["mvv_number"])) if _approved(mvv) else ""
+
+
+def criteria_lines(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:
+    """基準の行（番号の順）。重点があるときだけ基準 3 を、承認済みの MVV があるときだけ基準 5 を足す。"""
     t = _table()
     items = dict(t["criteria"])
     if focus:
         items[t["focus_criterion"]] = f"{t['focus_label']}: {' / '.join(focus)}"
+    if (held := _approved(mvv)) is not None:
+        items[t["mvv_number"]] = t["mvv_criterion"].format(version=held.version, path=held.path, principles=held.principles_path)
     return [f"{n}. {items[n]}" for n in sorted(items, key=int)]
 
 
-def reviewer_block(focus: Sequence[str]) -> list[str]:
+def reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:
     """相手役への「指摘の基準」のセクション。"""
     t = _table()
     names = "・".join(facts.ids(SEVERITIES))
@@ -147,10 +178,11 @@ def reviewer_block(focus: Sequence[str]) -> list[str]:
     return [
         "## 指摘の基準",
         "次のどれかに当たるものだけを指摘として書く。見つけたものはこのラウンドですべて書き、次のラウンドへ残さない。",
-        *criteria_lines(focus),
+        *criteria_lines(focus, mvv),
         f"書かないもの: {'・'.join(t['not_written'])}",
         f"対応のアクションの無いもの（{'・'.join(t['no_action'])}）は指摘にしない。",
         f"重要度 severity は {names} から選ぶ。{impact}",
+        *_mvv_lines("reviewer", mvv),
     ]
 
 
@@ -165,14 +197,15 @@ def fixer_ci_only() -> str:
     return str(_table()["fixer_ci_only"])
 
 
-def fixer_block(focus: Sequence[str]) -> list[str]:
+def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:
     """修正担当への「指摘の基準」のセクション。"""
     t = _table()
     return [
         "## 指摘の基準",
         "指摘ごとに次の基準のどれかに当たるかを確かめ直す。当たれば直す（fixed）。当たらなければ対象のファイルを変えず、"
         "どの基準にも当たらない理由を添えて見送る（deferred）。",
-        *criteria_lines(focus),
+        *criteria_lines(focus, mvv),
         f"当たらないもの: {'・'.join(t['not_written'])}",
         t["out_of_scope"],
+        *_mvv_lines("fixer", mvv),
     ]

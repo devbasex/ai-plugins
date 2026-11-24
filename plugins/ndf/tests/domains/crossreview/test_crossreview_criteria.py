@@ -10,6 +10,8 @@ import pytest
 from ndf.contracts import facts
 from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records.mvv import Snapshot
+from ndf.domains.records.mvv_decide import State
 
 from ._repos import Repos, run_cli
 from .test_crossreview_run import PR, Fake, Recording, _run, _state
@@ -75,6 +77,34 @@ def test_focus_reads_version_1_only() -> None:
     # 基準 3 は重点があるときだけ現れ、番号は詰めない
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(())] == ["1", "2", "4"]
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(("速さ",))] == ["1", "2", "3", "4"]
+
+
+def _snapshot(state: str) -> Snapshot:
+    path = Path("/s/v11.md"), Path("/s/principles.md")
+    if state != State.APPROVED:
+        return Snapshot(state, None, None, None, (), {}, "c" * 40, "", None)
+    return Snapshot(state, 11, "a" * 64, path[0], ("Value 5",), {}, "c" * 40, "b" * 64, path[1])
+
+
+def test_issue_4076_criterion_5_appears_only_with_the_approved_mvv() -> None:
+    """承認済みの MVV があるときだけ、基準 5 と、相手役・修正担当への MVV の文が指示に足される。"""
+    approved = _snapshot(State.APPROVED)
+    assert [x.split(".")[0] for x in criteria_decide.criteria_lines(("速さ",), approved)] == ["1", "2", "3", "4", "5"]
+    last = criteria_decide.criteria_lines((), approved)[-1]
+    assert all(x in last for x in ("バージョン 11", "/s/v11.md", "/s/principles.md"))
+    for build in (criteria_decide.reviewer_block, criteria_decide.fixer_block):
+        plain = build(())
+        more = [x for x in build((), approved) if x not in plain]
+        assert len(more) == 2 and last in more and not any("{" in x for x in more)
+        for state in (State.ABSENT, State.UNAPPROVED):
+            assert build((), _snapshot(state)) == plain
+    assert criteria_decide.mvv_shape(_snapshot(State.ABSENT)) == criteria_decide.mvv_shape(None) == ""
+    assert '"mvv": ' in criteria_decide.mvv_shape(approved)
+
+
+@pytest.mark.parametrize("value, want", [("Value 5", "Value 5"), (" Value 5\n", "Value 5"), ("Value 99", None), (None, None), (5, None)])
+def test_issue_4076_mvv_item_is_one_of_the_items(value: object, want: str | None) -> None:
+    assert criteria_decide.mvv_item(value, ("Mission", "Value 5")) == want
 
 
 def test_issue_4013_fixer_sessions_reads_a_boolean_and_defaults_to_false() -> None:

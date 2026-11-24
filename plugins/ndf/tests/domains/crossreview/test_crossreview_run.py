@@ -648,9 +648,9 @@ def test_focus_is_fixed_before_the_sync(repos: Repos, wt: Path, tmp_path: Path, 
     settings.write_text(json.dumps({"version": 1, "focus": ["実行者の重点"]}), encoding="utf-8")
     real = worktree.sync_worktree
 
-    def sync_overwriting(g, branch):
+    def sync_overwriting(*args, **kwargs):
         settings.write_text(json.dumps({"version": 1, "focus": ["PR の重点"]}), encoding="utf-8")
-        return real(g, branch)
+        return real(*args, **kwargs)
 
     monkeypatch.setattr(worktree, "sync_worktree", sync_overwriting)
     fake = Recording(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
