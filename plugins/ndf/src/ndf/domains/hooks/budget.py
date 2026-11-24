@@ -106,10 +106,10 @@ def missing_budget(runtime: str, event: str) -> str:
     return f"{runtime} の {event} の予算が {tables.policy_path(found[0]) if found else 'コントラクト表'} に無い"
 
 
-def budget_registrations(runtime: Optional[str] = None) -> list[dict[str, Any]]:
+def budget_registrations(runtime: Optional[str] = None, rewake: bool = True) -> list[dict[str, Any]]:
     """予算から作る登録（事象ごとに 1 行・timeout は予算の値と、バックグラウンドの登録の行）。登録のファイルが無いときに検査へ渡す。
 
-    `runtime` を渡せばそのランタイムの行だけを作る（省略時は全部）。
+    `runtime` を渡せばそのランタイムの行だけを作る（省略時は全部）。`rewake` が偽ならバックグラウンドの登録の行を付けない。
     """
     regs = []
     for name, rt in tables.runtimes().items():
@@ -118,16 +118,23 @@ def budget_registrations(runtime: Optional[str] = None) -> list[dict[str, Any]]:
         for event in rt["events"]:
             found = budget_for(name, event)
             regs.append({"runtime": name, "event": event, "timeout": found.timeout if found else None})
-        regs += rewake_registrations(name)
+        regs += rewake_registrations(name) if rewake else []
     return regs
 
 
-def registrations_of(plugin_root: Path) -> list[dict[str, Any]]:
-    """`hooks/<ランタイム>.json` の登録を 1 行ずつ。ファイルが無いランタイムは予算から作る。"""
+def registrations_of(plugin_root: Path, rewake: bool = True) -> list[dict[str, Any]]:
+    """`hooks/<ランタイム>.json` の登録を 1 行ずつ。ファイルが無いランタイムは予算から作る。
+
+    `rewake` が偽なら、予算から作るバックグラウンドの登録の行（`rewake_registrations`）を付けない。ファイルの行の
+    `asyncRewake` は付ける（方針を読まずに破れと分かる）。
+    """
     regs: list[dict[str, Any]] = []
     for runtime in tables.runtimes():
         path = plugin_root / "hooks" / f"{runtime}.json"
-        regs += _file_registrations(runtime, path) + rewake_registrations(runtime) if path.is_file() else budget_registrations(runtime)
+        if not path.is_file():
+            regs += budget_registrations(runtime, rewake)
+            continue
+        regs += _file_registrations(runtime, path) + (rewake_registrations(runtime) if rewake else [])
     return regs
 
 

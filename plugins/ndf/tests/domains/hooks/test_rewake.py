@@ -517,10 +517,12 @@ def test_unreachable_wake_is_a_budget_violation(monkeypatch, seconds, interval):
 
 
 def test_async_rewake_in_the_plugin_registration_is_a_violation():
-    regs = budget.registrations_of(tables.PLUGIN_ROOT) + [
-        {"runtime": "claude", "event": "Stop", "timeout": 12, "async_rewake": True, "file": True}
-    ]
-    assert any("asyncRewake" in e for e in budget.check_budget(regs))
+    row = {"runtime": "claude", "event": "Stop", "timeout": 12, "async_rewake": True, "file": True}
+    assert any("asyncRewake" in e for e in budget.check_budget(budget.registrations_of(tables.PLUGIN_ROOT) + [row]))
+    # SessionStart の検査（rewake=False）は予算から作る起床の行を付けないが、登録のファイルの asyncRewake は破れのまま
+    bare = budget.registrations_of(tables.PLUGIN_ROOT, rewake=False)
+    assert not any(r.get("async_rewake") for r in bare)
+    assert any("asyncRewake" in e for e in budget.check_budget(bare + [row]))
 
 
 def test_missing_async_rewake_row_refuses_the_entry(monkeypatch):
