@@ -1,7 +1,8 @@
 """hook の予算の読み手と、上限の順序の検査（#3345 の決定 90・IH3）。
 
-予算は上限の設定の方針 `hook.budget.<イベント>`（ランタイムで違うイベントは `hook.budget.<イベント>.<ランタイム>` が先）にある。
-`limits` を渡さない呼び出し（hook の起動のたび）は、使う予算の 1 方針のファイルだけを読む。
+予算は上限の設定の方針 `hook.budget.<予算のキー>` にある。キーはランタイムのコントラクト表のイベントが持ち、ランタイムで予算が違う
+イベントは別のキー（`stop` と `stop.codex`）を指す（方針のファイルの有無を試して選ばない）。
+使う方針のファイルだけを読む（hook の起動のたびに全件を読まない）。
 検査はキーをまたぐ順序を見る（JSON Schema では書けない）:
 
 - guard の部品の上限（guard の表の `limits` の秒）≤ 締め切り − 余白
@@ -39,36 +40,30 @@ class Budget:
         return self.deadline - self.margin
 
 
-def _policy_names(spec: dict[str, Any], runtime: str) -> tuple[str, str]:
-    """イベントのコントラクトの予算の方針の名前（ランタイム固有・共通）。"""
-    return f"hook.budget.{spec['budget']}.{runtime}", f"hook.budget.{spec['budget']}"
-
-
-def policy_name(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[str]:
-    """事象の予算の方針の名前。コントラクト表に無い事象は None。"""
+def _budget_policy(runtime: str, event: str) -> Optional[tuple[str, Optional[dict[str, Any]]]]:
+    """イベントの予算の方針の名前と中身。コントラクト表に無いイベントは None。"""
     spec = tables.event_spec(runtime, event)
     if spec is None:
         return None
-    specific, common = _policy_names(spec, runtime)
-    found = tables.policy(specific) is not None if limits is None else specific in limits
-    return specific if found else common
+    name = f"hook.budget.{spec['budget']}"
+    return name, tables.policy(name)
 
 
-def budget_for(runtime: str, event: str, limits: Optional[dict] = None) -> Optional[Budget]:
+def budget_for(runtime: str, event: str) -> Optional[Budget]:
     """事象の予算。コントラクト表に無い事象と、予算の行が欠けた事象は None。"""
-    name = policy_name(runtime, event, limits)
-    if name is None:
+    found = _budget_policy(runtime, event)
+    if found is None:
         return None
-    row = tables.policy(name) if limits is None else limits.get(name)
+    name, row = found
     if row is None or any(k not in row for k in BUDGET_KEYS):
         return None
     return Budget(name, *(row[k] for k in BUDGET_KEYS))
 
 
-def missing_budget(runtime: str, event: str, limits: Optional[dict] = None) -> str:
+def missing_budget(runtime: str, event: str) -> str:
     """予算の無いイベントの文。直す先のファイルを示す。"""
-    name = policy_name(runtime, event, limits)
-    return f"{runtime} の {event} の予算が {tables.policy_path(name) if name else 'コントラクト表'} に無い"
+    found = _budget_policy(runtime, event)
+    return f"{runtime} の {event} の予算が {tables.policy_path(found[0]) if found else 'コントラクト表'} に無い"
 
 
 def budget_registrations(runtime: Optional[str] = None) -> list[dict[str, Any]]:
@@ -107,58 +102,52 @@ def _file_registrations(runtime: str, path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def checked_policies() -> dict[str, dict[str, Any]]:
-    """`check_budget` が確かめる方針（名前 → 値）。ランタイムのイベントの予算と、guard の部品の上限のファイルだけを読む。"""
-    budgets = {n for name, rt in tables.runtimes().items() for spec in rt["events"].values() for n in _policy_names(spec, name)}
-    return tables.policies(budgets | {n for guard in tables.guards() for n in guard["limits"]})
-
-
-def check_budget(limits: dict, registrations: list[dict[str, Any]]) -> list[str]:
-    """予算の順序の破れの一覧（空なら守れている）。"""
-    errors = _guard_limit_errors(limits)
+def check_budget(registrations: list[dict[str, Any]]) -> list[str]:
+    """上限の設定の予算の順序の破れの一覧（空なら守れている）。"""
+    errors = _guard_limit_errors()
     for reg in registrations:
-        errors += _registration_errors(limits, reg)
+        errors += _registration_errors(reg)
     return errors
 
 
-def _guard_limit_errors(limits: dict) -> list[str]:
+def _guard_limit_errors() -> list[str]:
     pairs = [(g, rt, ev) for g in tables.guards() for rt in tables.runtimes() for ev in g["events"]]
-    errors = [e for guard, runtime, event in pairs for e in _pair_errors(guard, runtime, event, limits)]
+    errors = [e for guard, runtime, event in pairs for e in _pair_errors(guard, runtime, event)]
     return sorted({e for e in errors if e})
 
 
-def _pair_errors(guard: dict[str, Any], runtime: str, event: str, limits: dict) -> list[str]:
+def _pair_errors(guard: dict[str, Any], runtime: str, event: str) -> list[str]:
     """1 組（guard・ランタイム・事象）の破れの文。予算の行が無ければその文、あれば部品ごとの文（守れていれば空）。"""
-    found = budget_for(runtime, event, limits)
+    found = budget_for(runtime, event)
     if found is None:
-        return [missing_budget(runtime, event, limits)] if tables.event_spec(runtime, event) is not None else []
-    return [_component_error(guard["name"], name, limits, found, runtime, event) for name in guard["limits"]]
+        return [missing_budget(runtime, event)] if tables.event_spec(runtime, event) is not None else []
+    return [_component_error(guard["name"], name, tables.policy(name), found, runtime, event) for name in guard["limits"]]
 
 
-def _component_error(guard: str, name: str, limits: dict, found: Budget, runtime: str, event: str) -> str:
+def _component_error(guard: str, name: str, row: Optional[dict[str, Any]], found: Budget, runtime: str, event: str) -> str:
     """部品の上限が締め切り − 余白を超えれば破れの文。守れていれば空。
 
     部品の行が `runtimes` を持てば、そのランタイムの予算とだけ比べる（ほかのランタイムでは部品を使わない。
     `hook.stop-wait.judge` は Claude Code だけでモデルを呼ぶ）。
     """
-    if name not in limits:
+    if row is None:
         return f"{guard} の部品の上限 {tables.policy_path(name)} が無い"
-    runtimes = limits[name].get("runtimes")
+    runtimes = row.get("runtimes")
     if runtimes is not None and runtime not in runtimes:
         return ""
     where = f"{runtime} の {event}"
-    seconds = limits[name].get("seconds")
+    seconds = row.get("seconds")
     if seconds is not None and seconds > found.usable:
         return f"{guard} の部品の上限 {name}（{seconds} 秒）が {where} の締め切り − 余白（{found.usable} 秒）を超える"
     return ""
 
 
-def _registration_errors(limits: dict, reg: dict[str, Any]) -> list[str]:
+def _registration_errors(reg: dict[str, Any]) -> list[str]:
     runtime, event, timeout = reg["runtime"], reg["event"], reg.get("timeout")
     where = f"{runtime} の {event} の登録"
     if timeout is None:
         return [f"{where}に timeout が無い"]
-    found = budget_for(runtime, event, limits)
+    found = budget_for(runtime, event)
     if found is None:
         return [f"{where}はコントラクト表か予算に無い事象を指す"]
     errors = []

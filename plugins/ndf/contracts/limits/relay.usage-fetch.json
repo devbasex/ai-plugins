@@ -1,4 +1,8 @@
 {
   "summary": "1 つのアカウントの使用率の API を呼ぶ間隔の下限。取得の記録の at で数え、プロセスをまたぐ。間隔の中では、最後に試した後に過ぎたリセット 1 つにつき 1 回だけ取り直す（決定 4）",
-  "seconds": 300
+  "seconds": 300,
+  "read_by": [
+    "ndf.domains.relay.accounts",
+    "ndf.domains.relay.wrapper_fetch"
+  ]
 }

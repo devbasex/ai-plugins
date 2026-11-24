@@ -3,5 +3,8 @@
   "attempts": 4,
   "interval": 2,
   "factor": 2,
-  "max_interval": 30
+  "max_interval": 30,
+  "read_by": [
+    "ndf.adapters.notify"
+  ]
 }

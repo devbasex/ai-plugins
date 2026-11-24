@@ -32,7 +32,7 @@ from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
 from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
@@ -605,7 +605,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--branch")
     r.add_argument("--purpose", default=TOOL)
     r.add_argument("--reviewer", action="append")
-    r.add_argument("--max-rounds", type=int, default=drive.DEFAULT_MAX_ROUNDS)
+    r.add_argument("--max-rounds", type=int, default=int(limits.value(drive.MAX_ROUNDS, "count")))
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
 

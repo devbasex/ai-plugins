@@ -149,13 +149,13 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 準備のリファクタリング | Task 1・2 | 15 の一部 | 約 180（移動の追加と削除の和を含む） | （実装の後に書き足す） |
-| U2 環境変数のキーと会話の ID | Task 3・4 | 5 の一部 | 約 750 | |
-| U3 起動ごとの記録 | Task 5 | 5・8 の一部 | 約 320 | |
-| U4 待つだけのコマンドの見分け | Task 6 | 13 | 約 400 | |
-| U5 hook の記録 | Task 7・8 | 3・7・8 と、4・5 の hook の側 | 約 700 | |
-| U6 ラッパーの判定と待ち | Task 9・10・11 | 1・2・4・5・6・9・10・11・12・15 | 約 950 | |
-| U7 手順書と用語集 | Task 12 | 9 の説明 | 約 130 | |
+| U1 準備のリファクタリング | Task 1・2 | 15 の一部 | 約 180（移動の追加と削除の和を含む） | 141（https://github.com/devbasex/ai-plugins/pull/4370 ） |
+| U2 環境変数のキーと会話の ID | Task 3・4 | 5 の一部 | 約 750 | 494（https://github.com/devbasex/ai-plugins/pull/4372 ） |
+| U3 起動ごとの記録 | Task 5 | 5・8 の一部 | 約 320 | 245（https://github.com/devbasex/ai-plugins/pull/4376 ） |
+| U4 待つだけのコマンドの見分け | Task 6 | 13 | 約 400 | 424（https://github.com/devbasex/ai-plugins/pull/4371 ） |
+| U5 hook の記録 | Task 7・8 | 3・7・8 と、4・5 の hook の側 | 約 700 | 660（https://github.com/devbasex/ai-plugins/pull/4380 ） |
+| U6 ラッパーの判定と待ち | Task 9・10・11 | 1・2・4・5・6・9・10・11・12・15 | 約 950 | 809（https://github.com/devbasex/ai-plugins/pull/4388 。Task 11 の通しのテスト 264 行は 1,000 行を超えるため https://github.com/devbasex/ai-plugins/pull/4390 に分けた） |
+| U7 手順書と用語集 | Task 12 | 9 の説明 | 約 130 | 281（https://github.com/devbasex/ai-plugins/pull/4392 。画面に出る文の直しと、レビューで足した監視の始め直しの手順を含む） |
 
 - 行数は追加と削除の和で、`git diff --shortstat <ベース>...HEAD -- . ':(exclude)docs/glossary.md' ':(exclude)plugins/ndf/docs/contracts'` で数える（どちらも再生成で作るので数えない）
 - **1 課題 1 単位にしない理由:** 見込みは合わせて約 3,400 行で 1,000 行を超えるので、タスクの依存の向きで分けた。受け入れ条件 14 は設計文書がマージ済みで、どの単位も変えない（スプリントの完了判定で確かめる）

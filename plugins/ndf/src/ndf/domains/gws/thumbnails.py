@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ndf import contracts
 from ndf.contracts import exit_codes, limits, result
 from ndf.domains.gws import GwsStop, Outcome, call, unauthenticated_gate
 from ndf.domains.gws import report_decide as rd
@@ -26,8 +27,8 @@ from ndf.domains.records import gws as records_gws
 
 # 上限の設定（contracts/limits/）の名前。gws のスライドの操作・認証の状態の読み取り・curl に使う
 LIMIT = "google-workspace.thumbnails"
-# サムネイルの大きさ（引数の選択肢。引数のスキーマ gws.args はここから生成し、結果のスキーマ gws.result の列挙と同じであることをテストが確かめる）
-SIZES = ("SMALL", "MEDIUM", "LARGE")
+# サムネイルの大きさ（引数の選択肢。結果のスキーマ gws.result から読み、引数のスキーマ gws.args はここから生成する）
+SIZES = contracts.schema_enum(contracts.schema_path("io/gws.result"), "/properties/metrics/properties/size")
 DEFAULT_SIZE = "LARGE"
 CURL = "curl"
 # curl が --max-time に当たったときの終了コード

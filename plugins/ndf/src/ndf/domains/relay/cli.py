@@ -295,7 +295,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         cwd=cwd,
         env=session_env.tool_env(environ),
         timeout=limits.seconds("relay.plugin-update"),
-        lock=signals.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
+        lock=identity.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
         version=raw if isinstance(raw, str) else None,
     )
     return wrapper.Settings(

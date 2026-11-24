@@ -67,12 +67,12 @@ def test_localenv_mode() -> None:
     assert localenv_decide.mode(["x.sql"], [])[0].result == localenv_decide.SHARE
 
 
-def test_env_name_keeps_digest_and_length() -> None:
-    a = testenv_decide.env_name("My_Repo", "feat/" + "x" * 80)
-    b = testenv_decide.env_name("My_Repo", "feat/" + "x" * 80 + "y")
+def test_testenv_name_keeps_digest_and_length() -> None:
+    a = testenv_decide.testenv_name("My_Repo", "feat/" + "x" * 80)
+    b = testenv_decide.testenv_name("My_Repo", "feat/" + "x" * 80 + "y")
     assert len(a) <= testenv_decide.NAME_MAX and a.startswith("my-repo-wt-feat-x")
     assert a != b  # 先頭が同じ長い名前どうしでも要約値で分かれる
-    assert testenv_decide.env_name("r", "feat/a") == testenv_decide.env_name("r", "feat/a")
+    assert testenv_decide.testenv_name("r", "feat/a") == testenv_decide.testenv_name("r", "feat/a")
 
 
 def test_ports_and_slots() -> None:

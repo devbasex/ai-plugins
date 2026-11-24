@@ -1,4 +1,7 @@
 {
   "summary": "ラッパーがセグメントの状態を見回る間隔",
-  "interval": 0.5
+  "interval": 0.5,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
 }

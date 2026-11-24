@@ -320,13 +320,13 @@ def busy_pool(pool, monkeypatch):
 
 
 def test_wait_without_a_limit_keeps_the_full_pool_lock_and_poll(busy_pool):
-    """上限を省けば、残りの秒にかかわらず排他は `POOL_LOCK_SECONDS`、眠る秒は間隔のまま（最後の周も削らない）。"""
+    """上限を省けば、残りの秒にかかわらず排他は `launch.slot-lock`、眠る秒は間隔のまま（最後の周も削らない）。"""
     pool, clock, seen, lim = busy_pool
 
     with pytest.raises(launch_slot.NoSlot, match="空かなかった"):
         launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB)
 
-    assert seen and set(seen) == {launch_slot.slot_pool.POOL_LOCK_SECONDS}
+    assert seen and set(seen) == {launch_slot.slot_pool.pool_lock_seconds()}
     assert len(seen) == len(clock.slept) + 1
     assert clock.slept == [0.05] * len(clock.slept)
 
@@ -371,10 +371,10 @@ def test_wait_with_a_limit_shrinks_the_pool_lock_each_round(busy_pool):
 
 
 def test_wait_with_a_large_limit_caps_the_pool_lock(busy_pool, monkeypatch):
-    """上限が `POOL_LOCK_SECONDS` より長ければ、排他を待つ秒は `POOL_LOCK_SECONDS` で頭打ちになる。"""
+    """上限が `launch.slot-lock` より長ければ、排他を待つ秒は `launch.slot-lock` で頭打ちになる。"""
     pool, _clock, seen, lim = busy_pool
     monkeypatch.setattr(launch_slot, "wait_policy", lambda: (0.3, 5.0))
-    cap = launch_slot.slot_pool.POOL_LOCK_SECONDS
+    cap = launch_slot.slot_pool.pool_lock_seconds()
 
     with pytest.raises(launch_slot.NoSlot):
         launch_slot._wait_for("claude", pool, lim, lambda: PLENTY_MIB, limit=cap + 7.0)

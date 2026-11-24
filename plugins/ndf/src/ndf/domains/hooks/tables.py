@@ -9,10 +9,9 @@ hook の経路では `ndf.contracts`（jsonschema を読む）を import しな�
 from __future__ import annotations
 
 import json
-import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Collection, Optional
+from typing import Any, Optional
 
 # このファイルから 4 つ上がプラグインの根（src/ndf/domains/hooks/tables.py）
 PLUGIN_ROOT = Path(__file__).resolve().parents[4]
@@ -52,34 +51,11 @@ def _refuse_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict:
     return out
 
 
-def _split_keys(rel: str) -> list[str]:
-    """分けた表の項目のキー（ファイル名の昇順）。`.json` でないファイルと、大小文字だけが違うキーは断る。"""
-    root = CONTRACTS / rel
-    if not root.is_dir():
-        raise TableError(f"分けた表のディレクトリ {root} が無い")
-    # 先頭が _ のファイルは項目でない（`ndf.contracts` の `META_PREFIX` と同じ規則）
-    stems = [os.path.splitext(n) for n in sorted(os.listdir(root)) if not n.startswith("_")]
-    odd = [stem + ext for stem, ext in stems if ext != ".json"]
-    if odd:
-        raise TableError(f"分けた表 {root} に拡張子が .json でないファイルがある: {', '.join(odd)}")
-    keys = [stem for stem, _ in stems]
-    folded = [k.casefold() for k in keys]
-    if len(set(folded)) != len(folded):
-        clash = [k for k, f in zip(keys, folded) if folded.count(f) > 1]
-        raise TableError(f"分けた表 {root} に大小文字だけが違うキーがある: {', '.join(clash)}")
-    return keys
-
-
 def _split_item(rel: str, key: str) -> dict[str, Any]:
     item = load(f"{rel}/{key}.json")
     if not isinstance(item, dict):
         raise TableError(f"分けた表の項目 {CONTRACTS / rel / key}.json がオブジェクトでない（{type(item).__name__}）")
     return item
-
-
-def load_split(rel: str) -> dict[str, Any]:
-    """分けた表 `contracts/<rel>/` の、ファイル名（拡張子 `.json` を除く）→ 中身の辞書。規則は `ndf.contracts.load_split` と同じ。"""
-    return {key: _split_item(rel, key) for key in _split_keys(rel)}
 
 
 def json_object(text: str) -> Optional[dict[str, Any]]:
@@ -94,14 +70,6 @@ def json_object(text: str) -> Optional[dict[str, Any]]:
 def hooks_dir(state_dir: Path) -> Path:
     """状態の保存先の下の hook の保存先（計測・送信待ち・セッションの数え手・注入のバックアップ）。"""
     return state_dir / "hooks"
-
-
-def policies(names: Collection[str]) -> dict[str, dict[str, Any]]:
-    """上限の設定のうち、`names` にある方針（名前 → 値）。無い方針は含めず、ある方針の数だけファイルを読む。
-
-    hook の起動の経路では `policy`・`policy_value` で 1 方針だけを読み、ここを呼ぶのは予算の検査だけである。
-    """
-    return {key: _split_item(LIMITS_DIR.name, key) for key in _split_keys(LIMITS_DIR.name) if key in names}
 
 
 def policy_path(name: str) -> str:

@@ -16,6 +16,9 @@ from ndf.core.converge import oscillation
 from ndf.domains.crossrefactor import symbols_decide
 
 FIELDS = ("path", "symbol", "title")
+# 計画の項目が持つ欄（起動指示で求めた欄と、提案をそのまま項目にするときの担当）。計画の担当が足したほかの欄は持たない
+# （`ndf refactor state` が項目を結果の items へそのまま出すため、結果のコントラクトの欄と名前が重なりうる）
+PLANNED = (*FIELDS, "reason", "by", "tier", "technique", "tests")
 
 
 class Status(StrEnum):
@@ -53,7 +56,7 @@ def merge_proposals(by_runtime: Mapping[str, Iterable[Mapping[str, Any]]]) -> tu
 
 def plan_items(planned: Iterable[Mapping[str, Any]], touched: symbols_decide.Touched) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """計画の項目を、触る関数を指すもの（番号と状態を振る）と範囲外で見送るものへ分ける。"""
-    complete = [dict(p) for p in planned if _complete(p)]
+    complete = [{k: p[k] for k in PLANNED if k in p} for p in planned if _complete(p)]
     kept, skipped = symbols_decide.split_by_touched(complete, touched)
     items = [{**p, "id": f"I-{n:03d}", "status": Status.OPEN.value} for n, p in enumerate(kept, start=1)]
     return items, [{**p, "reason": why} for p, why in skipped]

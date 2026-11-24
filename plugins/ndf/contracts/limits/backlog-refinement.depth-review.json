@@ -1,4 +1,7 @@
 {
   "summary": "見直しの 1 回の秒の上限の既定（.ndf/backlog.json の depths.review.seconds で上書きする）",
-  "seconds": 1800
+  "seconds": 1800,
+  "read_by": [
+    "ndf.domains.backlog.depth"
+  ]
 }

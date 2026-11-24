@@ -1,0 +1,7 @@
+{
+  "summary": "LLM の CLI の `--version` を待つ上限の秒。過ぎたら読めないとして起動を通す",
+  "seconds": 5,
+  "read_by": [
+    "ndf.adapters.cli_floor"
+  ]
+}

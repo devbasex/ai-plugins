@@ -1,0 +1,7 @@
+{
+  "summary": "回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒",
+  "seconds": 600,
+  "read_by": [
+    "ndf.progress.plan"
+  ]
+}

@@ -1,4 +1,9 @@
 {
   "summary": "耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）",
-  "interval": 0.2
+  "interval": 0.2,
+  "read_by": [
+    "ndf.core.durable",
+    "ndf.core.plan.runner",
+    "ndf.progress.run"
+  ]
 }

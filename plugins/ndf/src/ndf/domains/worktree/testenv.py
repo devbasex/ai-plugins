@@ -25,14 +25,15 @@ from typing import Any, Optional
 from filelock import FileLock, Timeout
 
 from ndf.adapters.git import Git
+from ndf.contracts import limits
 from ndf.domains.worktree import container, ndf_settings, deps, allocations, localenv, outcomes, repo, testenv_decide
 from ndf.testing import testenv as placement
 
 SECTION = ndf_settings.TESTENV
 # 証跡の保存先（worktree の下。共通の git ディレクトリの info/exclude で追跡から外す）
 EVIDENCE = ".ndf-evidence"
-# 同じテスト環境の実行の目印を待つ秒
-INUSE_WAIT = 5
+# 同じテスト環境の実行の目印を待つ上限の方針（contracts/limits/）
+INUSE_LOCK = "worktree.inuse-lock"
 
 
 class TestenvError(Exception):
@@ -84,8 +85,8 @@ def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Targ
 def environment_name(t: Target, branch: Optional[str]) -> str:
     """環境名。`branch` は今のブランチ（detached HEAD なら `None`）。"""
     if branch is not None:
-        return testenv_decide.env_name(t.main_dir.name, branch)
-    return testenv_decide.env_name(t.main_dir.name, f"detached-{t.path.name}", t.key)
+        return testenv_decide.testenv_name(t.main_dir.name, branch)
+    return testenv_decide.testenv_name(t.main_dir.name, f"detached-{t.path.name}", t.key)
 
 
 def assign(t: Target) -> dict[str, Any]:
@@ -392,7 +393,7 @@ def run_test(t: Target, kind: str, out: Optional[Path] = None) -> int:
     t.book.update(t.key, _touch)
     # 実行中は reap の対象から外れるよう、目印を握ったまま走らせる
     try:
-        with FileLock(str(inuse_lock(t, row["environment"])), timeout=INUSE_WAIT):
+        with FileLock(str(inuse_lock(t, row["environment"])), timeout=limits.seconds(INUSE_LOCK)):
             rc = t.shell.attached(["sh", "-c", command], t.path, values)
     except Timeout as exc:
         raise TestenvError(f"同じテスト環境で別の実行が動いている: {row['environment']}") from exc

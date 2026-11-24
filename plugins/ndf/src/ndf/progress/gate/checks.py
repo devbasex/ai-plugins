@@ -15,12 +15,13 @@ import re
 
 import pathspec
 
+from ndf import contracts
 from ndf.contracts import facts
 from ndf.progress import model
 from ndf.progress.gate.asking import bullets
 
 # 承認ゲートを省かないモード（MVV 判定の前の検査 3）
-EXCLUDED_MODES = ("operation", "documentation")
+EXCLUDED_MODES = contracts.schema_enum(model.CONTEXT, "/$defs/gated_mode")
 # 利用者の MVV の設定のファイルの名前（拡張子を除く。表 ndf-files の設定の行から引く。MVV 判定の前の検査 5。共通原則の C7）
 MVV_STEM = "mvv"
 # MVV 判定の語（判定の応答の verdict）

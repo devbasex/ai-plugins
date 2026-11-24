@@ -28,15 +28,20 @@ from pathlib import Path
 from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import identity
-from ndf.contracts import causes, exit_codes, limits, result
+from ndf.contracts import causes, exit_codes, internal, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
-# 待ちの上限の既定（秒）と、見回りの間隔の設定
-WAIT_DEFAULT_SECONDS = 600.0
+# 待ちの上限の既定と、見回りの間隔の方針（contracts/limits/）
+WAIT_DEFAULT = "supervise.wait-default"
 WAIT_POLL = "durable.wait-from-poll"
+
+
+def wait_default_seconds() -> float:
+    """待ちの上限の既定の秒。"""
+    return float(limits.seconds(WAIT_DEFAULT))
 
 
 def _root() -> Path:
@@ -123,7 +128,10 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
     if record is None:
         return wait_decide.Watched(plan.name, None)
     run = durable.run_name(record["key"])
-    done = files.read_json(runner.result_path(sdir, run))
+    try:
+        done = runner.stored_result(sdir, run)
+    except internal.InternalError as exc:
+        return wait_decide.Watched(plan.name, STOPPED, exc.kind, str(exc))
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))
@@ -226,7 +234,7 @@ def _parser() -> argparse.ArgumentParser:
     wt = sub.add_parser("wait", help="流れている回を見回る")
     wt.add_argument("plans", nargs="+")
     wt.add_argument("--state-dir")
-    wt.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
+    wt.add_argument("--timeout", type=float, default=wait_default_seconds())
     wt.set_defaults(fn=_cmd_wait)
     pd = sub.add_parser("pending", help="待ちを抱えた実行を並べる")
     pd.set_defaults(fn=_cmd_pending)

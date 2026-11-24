@@ -1,4 +1,7 @@
 {
   "summary": "学習の設定の記録（training.json）を書く排他の待ちの上限",
-  "seconds": 2
+  "seconds": 2,
+  "read_by": [
+    "ndf.adapters.training_cache"
+  ]
 }

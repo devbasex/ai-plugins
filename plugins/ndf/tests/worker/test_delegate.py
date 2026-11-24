@@ -47,6 +47,12 @@ def _handoff(tmp_path):
     return worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
 
 
+def test_the_default_timeout_is_the_worker_limit_of_the_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker.limits, "seconds", lambda name: {"supervise.worker-run": 12.5}[name])
+    assert _handoff(tmp_path).timeout == 12.5
+    assert worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state", timeout=3.0).timeout == 3.0
+
+
 def test_written_on_the_second_call_returns_after_one_resume(tmp_path):
     h = _handoff(tmp_path)
     fake = FakeClaude(h.result_file, write_on=2)

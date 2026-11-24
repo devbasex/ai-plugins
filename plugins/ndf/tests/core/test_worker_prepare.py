@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import io
 import json
 import os
@@ -11,7 +13,7 @@ import pytest
 
 from ndf import identity
 from ndf.contracts import causes, worker_paths
-from ndf.core import worker, worker_append
+from ndf.core import durable_locks, worker, worker_append
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -212,7 +214,7 @@ def test_append_reads_again_when_another_append_published_before_the_lock(tmp_pa
 def test_append_stops_without_writing_while_another_append_holds_the_report(tmp_path, capsys, monkeypatch):
     report = _prepared(tmp_path, capsys)
     monkeypatch.setattr(worker_append, "_try_lock", lambda fd: False)
-    monkeypatch.setattr(worker_append.durable_locks, "LOCK_WAIT_SECONDS", 0.0)
+    monkeypatch.setattr(worker_append.durable_locks, "lock_wait_seconds", lambda: 0.0)
     code, out = _append(capsys, monkeypatch, report, "本文\n", "--done")
     assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
     assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()
@@ -232,6 +234,77 @@ def test_append_locks_a_private_file_outside_the_report_directory(tmp_path, caps
     assert code == 0 and report.read_text(encoding="utf-8") == "1 つ目\n2 つ目\n"
     assert first.st_mode & 0o077 == 0 and first.st_nlink == 1 and _lock_file().stat().st_ino == first.st_ino
     assert not list(report.parent.glob("*lock*")) and not list(_lock_file().parent.glob(".ndf-*"))
+
+
+# 現状固定（4367 の I-001: 追記のロックを待つループを `durable_locks` の 1 つの関数へまとめる前）。実物の `flock` で待たせる
+
+
+@contextlib.contextmanager
+def _another_append():
+    """別に開いたロックのファイルで、追記のロックを排他で持つ（報告を 1 度書いた後に呼ぶ）。"""
+    with open(_lock_file(), "r+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield held
+
+
+@pytest.mark.parametrize("limit", [0.0, 0.1])
+def test_append_waits_to_the_limit_and_names_the_report(tmp_path, capsys, monkeypatch, clock, limit):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "1 つ目\n")
+    monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: limit)
+    paths = worker_paths.report_paths(report.parent, "n", resolve=False)
+    with _another_append(), worker_paths.open_workdir(report.parent) as wd:
+        with pytest.raises(durable_locks.StoreInUse) as err:
+            worker_append.append(wd, paths, "2 つ目\n", done=True)
+        code, out = _append(capsys, monkeypatch, report, "2 つ目\n", "--done")
+    assert str(err.value) == f"報告のロックを {limit:g} 秒待っても取れない: {report}" and err.value.paths == (report,)
+    assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
+    assert set(clock.sleeps) == ({durable_locks.LOCK_POLL_SECONDS} if limit else set())
+    assert report.read_text(encoding="utf-8") == "1 つ目\n" and not Path(f"{report}.done").exists()
+    # 取れなかった追記はロックを残さず、放された後の追記は通る
+    assert _append(capsys, monkeypatch, report, "3 つ目\n")[0] == 0
+    assert report.read_text(encoding="utf-8") == "1 つ目\n3 つ目\n"
+
+
+def test_append_goes_on_after_another_append_publishes_and_releases_during_the_last_wait(tmp_path, capsys, monkeypatch, clock):
+    # 上限を越える待ちの後にも 1 回試す。報告はロックを取ってから読むので、待つ間に公開された本文の後ろへ足す
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "")
+    monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: durable_locks.LOCK_POLL_SECONDS / 2)
+    with _another_append() as held:
+
+        def publish_and_release():
+            with worker_paths.open_workdir(report.parent) as wd:
+                worker_paths.write_file(wd, report.name, "先の追記\n")
+            fcntl.flock(held, fcntl.LOCK_UN)
+
+        clock.on_sleep = publish_and_release
+        code, _ = _append(capsys, monkeypatch, report, "後の追記\n", "--done")
+    assert code == 0 and report.read_text(encoding="utf-8") == "先の追記\n後の追記\n"
+    assert clock.sleeps == [durable_locks.LOCK_POLL_SECONDS] and Path(f"{report}.done").exists()
+
+
+def test_append_holds_the_lock_while_writing_and_releases_it_on_failure(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    tried = []
+
+    def fail(wd, name, text):
+        with pytest.raises(BlockingIOError), _another_append():
+            pass
+        tried.append(name)
+        raise worker_paths.EntryError("書けない")
+
+    monkeypatch.setattr(worker_paths, "write_file", fail)
+    assert _invalid(*_append(capsys, monkeypatch, report, "本文\n"))
+    assert tried == [report.name]
+    with _another_append():
+        pass
+
+
+def test_append_does_not_record_the_owner_in_the_lock(tmp_path, capsys, monkeypatch):
+    report = _prepared(tmp_path, capsys)
+    _append(capsys, monkeypatch, report, "本文\n", "--done")
+    assert _lock_file().stat().st_size == 0
 
 
 def test_append_refuses_a_lock_others_can_open_or_a_link(tmp_path, capsys, monkeypatch):

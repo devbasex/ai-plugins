@@ -75,8 +75,8 @@ def test_options_after_the_claude_args_are_not_checked():
 @pytest.mark.parametrize(
     "tail",
     [
-        ["--verdict", context_thresholds.RESTART],
-        ["--event", context_records.MARKS[0], "--reason", context_thresholds.REASONS[0]],
+        ["--verdict", context_thresholds.Verdict.RESTART],
+        ["--event", context_records.MARKS[0], "--reason", context_thresholds.Reason.CAPACITY],
     ],
 )
 def test_context_record_refuses_a_mismatched_reason(tail, capsys):

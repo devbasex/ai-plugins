@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "内部データの共通の欄",
+  "description": "内部データの種類のスキーマが $ref で引く欄。読み書きの核（ndf.contracts.internal）が種類のスキーマへ埋め込んで検証器を組む",
+  "$defs": {
+    "version": {"type": "integer", "enum": [1], "description": "読める形のバージョンの並び"},
+    "time": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|\\+00:00)$", "description": "UTC の RFC 3339 の時刻"}
+  }
+}

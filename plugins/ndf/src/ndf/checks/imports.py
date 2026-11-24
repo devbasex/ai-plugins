@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 
@@ -38,6 +39,33 @@ def collect(tree: ast.Module, module: str = "", is_package: bool = False) -> lis
         elif isinstance(node, ast.ImportFrom):
             names = tuple(alias.name for alias in node.names)
             found.append(Import(node.lineno, _absolute(node, module, is_package), names))
+    return found
+
+
+def _own_statements(scope: ast.AST) -> Iterator[ast.AST]:
+    """囲み（モジュール・関数・クラス）の中の文。内側の関数とクラスの中と、式の中へは降りない。"""
+    for node in ast.iter_child_nodes(scope):
+        if isinstance(node, ast.expr):
+            continue
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield from _own_statements(node)
+
+
+def bindings(scope: ast.AST, module: str = "", is_package: bool = False) -> dict[str, str]:
+    """囲み 1 つの import が束ねる名前 → 完全な名前（内側の関数の import は、その関数の囲みだけに束ねる）。
+
+    `from a import b as c` は `c` → `a.b`、`import a.b` は `a` → `a`。
+    """
+    found = {}
+    for node in _own_statements(scope):
+        if isinstance(node, ast.Import):
+            found.update(
+                (alias.asname, alias.name) if alias.asname else (root, root) for alias in node.names for root in [alias.name.split(".")[0]]
+            )
+        elif isinstance(node, ast.ImportFrom):
+            base = _absolute(node, module, is_package)
+            found.update((alias.asname if alias.asname else alias.name, f"{base}.{alias.name}") for alias in node.names)
     return found
 
 

@@ -21,6 +21,8 @@ from ndf.domains.backlog import state
 from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT, is_positive_int
 
 DEPTHS = (REVIEW, OVERHAUL)
+# 深さ → 1 回の秒の上限の既定の方針（上限の設定）
+SECONDS_POLICIES = {REVIEW: "backlog-refinement.depth-review", OVERHAUL: "backlog-refinement.depth-overhaul"}
 EVENTS = (TIMED_OUT, RAN)
 
 
@@ -68,7 +70,7 @@ def depth_seconds(decl: dict[str, Any], depth: str) -> int:
         raise DepthError(f"depths.{depth}.seconds は正の整数で書く")
     if "seconds" in entry:
         return entry["seconds"]
-    return int(limits.seconds(f"backlog-refinement.depth-{depth}"))
+    return int(limits.seconds(SECONDS_POLICIES[depth]))
 
 
 def _now() -> str:

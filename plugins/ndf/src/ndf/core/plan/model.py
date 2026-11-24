@@ -23,8 +23,8 @@ from ndf.contracts.routing import END, PLAN_TARGETS, STOP
 # ステップを打つ作業ディレクトリの語。worktree は作業場所（使えなければリポジトリの根）、repo はリポジトリの根
 IN_WORKTREE, IN_REPO = "worktree", "repo"
 LOCATIONS = (IN_WORKTREE, IN_REPO)
-# 上限を書かないプランの、ステップの数の上限（ステップの数の倍）
-LIMIT_PER_STEP = 3
+# 上限を書かないプランの、ステップの数の上限の方針（contracts/limits/。ステップの数の倍）
+LIMIT_PER_STEP = "supervise.limit-per-step"
 # 承認の回答のルートに書ける語（ステップの id のほか）
 ANSWER_TARGETS = (END, STOP)
 
@@ -87,6 +87,11 @@ class Plan:
 
 def _opt(raw: Mapping[str, Any], key: str, default: Any) -> Any:
     return raw[key] if key in raw else default
+
+
+def limit_per_step() -> int:
+    """上限を書かないプランの、ステップ 1 つあたりの打つ数の上限。"""
+    return int(limits.value(LIMIT_PER_STEP, "count"))
 
 
 def _policy(step_id: str, kind: str, values: Mapping[str, Any]) -> limits.Policy:
@@ -210,7 +215,7 @@ def parse(raw: Any) -> Plan:
     plan = Plan(
         name=raw["name"],
         steps=steps,
-        limit=int(_opt(raw, "limit", LIMIT_PER_STEP * len(steps))),
+        limit=int(_opt(raw, "limit", limit_per_step() * len(steps))),
         repo=raw.get("repo"),
         worktree=raw.get("worktree"),
         touches=_strings(raw, "touches"),

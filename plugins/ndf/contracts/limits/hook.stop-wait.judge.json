@@ -55,5 +55,10 @@
       "no_proxy",
       "NODE_EXTRA_CA_CERTS"
     ]
-  }
+  },
+  "read_by": [
+    "ndf.domains.hooks.budget",
+    "ndf.domains.hooks.judge_child",
+    "ndf.domains.hooks.reply_judge"
+  ]
 }

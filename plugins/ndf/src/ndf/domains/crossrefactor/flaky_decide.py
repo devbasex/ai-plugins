@@ -18,7 +18,6 @@ KEPT = "kept"
 NONE = "no_commit"
 SENDBACK = "sendback"
 REVERTED = "undone"
-MAX_ATTEMPTS = 2
 
 
 def split_flaky(own: Iterable[str], again: Iterable[str]) -> tuple[frozenset[str], frozenset[str]]:
@@ -73,13 +72,13 @@ def violations(commits: Sequence[Commit], tests: Iterable[str], is_test: Callabl
     return found
 
 
-def outcome(commits: Sequence[Commit], found: Sequence[dict[str, str]], attempts: int) -> str:
-    """直しの起動 1 回の後の続け方。`attempts` はこの起動を含む起動の回数。"""
+def outcome(commits: Sequence[Commit], found: Sequence[dict[str, str]], attempts: int, max_attempts: int) -> str:
+    """直しの起動 1 回の後の続け方。`attempts` はこの起動を含む起動の回数、`max_attempts` はその上限。"""
     if not commits:
         return NONE
     if not found:
         return KEPT
-    return SENDBACK if attempts < MAX_ATTEMPTS else REVERTED
+    return SENDBACK if attempts < max_attempts else REVERTED
 
 
 def fixed(commits: Sequence[Commit]) -> dict[str, str]:

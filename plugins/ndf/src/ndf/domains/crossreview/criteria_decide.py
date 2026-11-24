@@ -17,9 +17,9 @@ from typing import Any, Optional
 
 from ndf import contracts
 from ndf.contracts import facts
+from ndf.contracts.result import SEVERITIES
 
 TABLE = "data/review-criteria.json"
-SEVERITIES = "severities"
 # 読む設定のバージョン
 DECL_VERSION = 1
 # 修正担当の会話を保存するかのキー（#4013）

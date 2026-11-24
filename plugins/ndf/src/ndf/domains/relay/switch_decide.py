@@ -299,7 +299,7 @@ def _ended(state: SectionState) -> Step:
     return _restart_or_stop(state, f"子が終了コード {state.child_exit} で終わった")
 
 
-def _over(state: SectionState) -> bool:
+def _context_over(state: SectionState) -> bool:
     """文脈の量が上限以上か。"""
     return state.context_limit is not None and state.context_tokens is not None and state.context_tokens >= state.context_limit
 
@@ -311,7 +311,7 @@ def _stalled(state: SectionState) -> bool:
 
 def _alive(state: SectionState, quiet: bool) -> Step:
     """動いている子の手。作業が残る子は止めない。止まりでは監視だけの子も止めない（#4049 の決定 4・9）。"""
-    ask, stalled, found = _over(state) and quiet and not state.handover_asked, _stalled(state), state.background
+    ask, stalled, found = _context_over(state) and quiet and not state.handover_asked, _stalled(state), state.background
     if found is not None and found.count and (ask or stalled):
         return _wait_background(found)
     if ask and found is not None:

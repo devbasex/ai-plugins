@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-event.schema.json",
+  "title": "開発ループのイベントの 1 行",
+  "description": "開発ループの記録（loops/<ループの名前>/record.jsonl）の行。書き手は ndf.domains.loop.store。欄の型を持ち、種類の語彙と種類ごとに要る欄は ndf.domains.loop.record_decide の REQUIRED が持つ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "kind"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
+    "kind": {"type": "string", "description": "イベントの種類"},
+    "session": {"type": "string", "description": "オーナーのキーを取った・返したセッション"},
+    "until": {"type": "number", "description": "オーナーのキーの期限（UNIX 時刻の秒。書いた時刻とは別の値）"},
+    "lap": {"type": "integer", "description": "ループの回の番号"},
+    "issues": {"type": "array", "items": {"type": "integer"}, "description": "選んだ課題・起票した課題"},
+    "mode": {"type": "string", "description": "モード"},
+    "basis": {"type": "string", "description": "モードの判定の根拠"},
+    "issue": {"type": "integer", "description": "外した課題"},
+    "pr": {"type": "integer", "description": "設計承認ゲートの PR の番号"},
+    "head": {"type": "string", "description": "設計承認ゲートを出した時点か、回答した時点の PR の HEAD"},
+    "answer": {"type": "string", "description": "設計承認ゲートの回答"},
+    "note": {"type": "string", "description": "回答に添えた文"},
+    "product_version": {"type": "string", "description": "リリースした製品のバージョン"},
+    "outcome": {"type": "string", "description": "ループの 1 回の終わり方"},
+    "by": {"type": "string", "description": "止めた主体"},
+    "reason": {"type": "string", "description": "課題を外した・回を締めた・止めた理由"},
+    "table": {"type": "string", "description": "結び付けたレーンのステートマシンの ID"}
+  }
+}

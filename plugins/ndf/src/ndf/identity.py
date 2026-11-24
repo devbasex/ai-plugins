@@ -176,7 +176,7 @@ def env_name(key: str) -> str:
 @lru_cache(maxsize=1)
 def _env_keys() -> dict[str, tuple[str, ...]]:
     """キー → そのキーを持つ行の名前（表の順）。1 プロセスに 1 回だけ読む。表の形が違えば `EnvNameError`。"""
-    path = ROOT / "contracts" / "domains" / "env.json"
+    path = ROOT / "contracts/domains/env.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

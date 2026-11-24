@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
-import time
 from collections.abc import Iterator
 
 from ndf import identity
@@ -23,7 +22,7 @@ LOCK_FILE = "worker-append.lock"
 def append(wd: worker_paths.WorkDir, paths: worker_paths.ReportPaths, body: str, *, done: bool) -> bool:
     """報告の末尾へ `body` を足し、`done` なら続けて完了マーカーを作る。報告が無ければ何もせず偽。
 
-    待つ上限は `durable_locks.LOCK_WAIT_SECONDS` で、当たれば何も書かずに `durable_locks.StoreInUse`。
+    待つ上限は `durable_locks.LOCK_WAIT` で、当たれば何も書かずに `durable_locks.StoreInUse`。
     """
     if worker_paths.entry_state(wd, paths.report.name) is None:
         return False
@@ -44,12 +43,11 @@ def _held(paths: worker_paths.ReportPaths) -> Iterator[None]:
         worker_paths.check_unshared(state)
         fd = worker_paths.open_lock(state, LOCK_FILE)
     try:
-        deadline = time.monotonic() + durable_locks.LOCK_WAIT_SECONDS
-        while not _try_lock(fd):
-            if time.monotonic() >= deadline:
-                detail = f"報告のロックを {durable_locks.LOCK_WAIT_SECONDS:g} 秒待っても取れない: {paths.report}"
-                raise durable_locks.StoreInUse(detail, (paths.report,))
-            time.sleep(durable_locks.LOCK_POLL_SECONDS)
+        durable_locks.wait_lock(
+            lambda: _try_lock(fd),
+            paths.report,
+            lambda limit: f"報告のロックを {limit:g} 秒待っても取れない: {paths.report}",
+        )
         yield
     finally:
         os.close(fd)

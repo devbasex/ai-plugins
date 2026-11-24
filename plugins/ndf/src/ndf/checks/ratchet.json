@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "rules": {
+    "copy-dup": {
+      "max": 653,
+      "measured": "2026-11-24",
+      "commit": "b53e0df1146a2b46db80b3199ff146d60c8aaaba"
+    }
+  }
+}

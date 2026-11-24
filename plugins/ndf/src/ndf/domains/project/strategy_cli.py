@@ -24,8 +24,6 @@ from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.records import jsonfile
 
-# 作成の結果の status → 終了コードの区分（ask は前提が無い・正常な否定の結果）
-EXIT = {"ok": "ok", "ask": "precondition", "stopped": "failed"}
 LISTS = ("evidence", "questions", "diff", "failed", "warnings")
 
 
@@ -36,7 +34,9 @@ def _emit(out: dict[str, Any]) -> int:
     for k in LISTS:
         out.setdefault(k, [])
     sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
-    return exit_codes.code_of(EXIT[out["status"]])
+    # ask は結果のコントラクトの status でない（前提が無い・正常な否定の結果の終了コードで返す）
+    status = out["status"]
+    return exit_codes.code_of("precondition") if status == "ask" else exit_codes.first_code(status)
 
 
 def _commit(root: Path, plan: bw.WritePlan, digest: Optional[str], base: dict[str, Any], write_now: bool = False) -> int:

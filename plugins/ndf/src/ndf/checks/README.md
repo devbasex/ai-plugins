@@ -7,7 +7,7 @@ plugins/ndf/bin/ndf check
 ```
 
 - 見るファイルを 1 回集め、`.py` の構文木を 1 ファイルにつき 1 回だけ作る。すべての規則が同じ木を読む
-- 兆候は初日から 0 件で、基準のファイルも増やさないラチェットも持たない。見つけた兆候はすべて違反になる
+- 兆候は初日から 0 件で、基準のファイルもラチェットも持たない。見つけた兆候はすべて違反になる。ラチェットは規則 `copy-dup` だけが持つ（下の「コピーで生まれた重複の規則」）
 - 規則のしきい値と名前の一覧は `rules.json` にあり、規則の関数は値を写さずにそこから読む
 - 結果 JSON を標準出力の最後の 1 行に出す。形は結果のコントラクト（`ndf.contracts.result`）で、出す前に確かめる。違反は 1 件につき 1 行を標準エラーへ出す
 - 止まったときの停止理由（`cause`）と終了コード:
@@ -17,7 +17,8 @@ plugins/ndf/bin/ndf check
 | 違反が無い | `ok` | 無し | 0 |
 | 違反がある | `stopped` | `check_failed` | 1 |
 | 構文の誤りで読めない `.py` がある | `stopped` | `invalid` | 2 |
-| 規則のデータ・子の表・用語集・git・PR のイベントの JSON が読めない。コントラクトのファイルがプラグインの外を指す・コントラクトの下にディレクトリのリンクがある | `stopped` | `config_broken` | 2 |
+| 規則のデータ・子の表・ラチェットの基準・用語集・git・PR のイベントの JSON が読めない。コントラクトのファイルがプラグインの外を指す・コントラクトの下にディレクトリのリンクがある | `stopped` | `config_broken` | 2 |
+| `--write-spec` がラチェットの基準を書けない | `stopped` | `unknown` | 1 |
 
 `cause.detail` は `summary` と同じ文である。違反の一覧は `items`、規則ごとの件数は `metrics.findings` にある。途中の規則が止まった（`config_broken`）ときも、その前に当てた規則の違反は `items` に残る。
 
@@ -25,11 +26,12 @@ plugins/ndf/bin/ndf check
 
 | 範囲 | 当てる規則 |
 | --- | --- |
-| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
+| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・コピーで生まれた重複・内部データの名前・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
 | `tests/` の下の `.py` | 行数の上限・I3・禁止語 |
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
-| コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
+| コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public）・内部データの名前（種類のスキーマ） |
+| 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
 | 分ける表の一覧（`contracts/domains/split-tables.json`）が挙げる表のディレクトリ `contracts/<表>/` と項目のスキーマ `contracts/schemas/<表>.schema.json`、分ける前の 1 ファイル `contracts/<表>.json` | `contracts-split`（表が 1 項目 1 ファイルのままで、分ける前の 1 ファイルが残っていないか。一覧を持たないプラグインでは何も見ない） |
 | リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフロー・`pyproject.toml`・ランチャー（プラグインの外も見る） | `toolchain`（Python と uv の指定が配る構成の設定 `contracts/data/toolchain.json` と合うか。設定に `toolchain` が無ければ何も見ない） |
 | テストのファイル・製品のコード・リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフローと `pyproject.toml`（プラグインの外も見る） | `budget`（テストの関数・CI のジョブ・使われない依存・置き換えの規則 `contracts/replaceable/` に当たる箇所を数え、設定の `budget` の上限と比べる。件数は違反の有無にかかわらず `metrics.budget` に出す。上限のキーが無い項目は比べない）。`--only budget-ci-jobs` は、プラグインのファイルを読まずに CI のジョブの上限だけを比べる |
@@ -87,11 +89,65 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない |
+| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない。辞書の定数は、キーの集まりのほかに値の集まりも `<名前>.values` として読む。ほかに、手書きのスキーマの `enum` と同じ集まり（`enum-set`）とその一部（`enum-subset`）、名前が上限・回数・待ちを表し上限の設定と同じ数を持つ定数（`limit-num`。名前の語と値のキーの対応は `rules.json` の `facts.limit_kinds`、定数のまま置く値と理由は `facts.limit_constants`）、当たらなくなった `facts.limit_constants` の行（`stale`）を、1 つのファイルの定数だけでも数える |
 | `fact-table` | 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`。`*.schema.json` を除く）が、`contracts/facts/fact.schema.json`（表の共通の形）に合わない・読めない・行の並び `rows` が無い・行に文字列の `id` が無い・`id` が重なる・表の名前が 2 つの保存先で重なる |
 | `env-key` | 環境変数の表（`contracts/domains/env.json`）の `key` を 2 つ以上の行が持つ。`key` を持つ行の `key` か `id` が空でない文字列でない。コードの `identity.env_name` の呼び出しの引数が 1 つの文字列リテラルでないか、そのキーを持つ行が無い。呼び出しがあるのに表が無い・JSON として読めない・`rows` が配列でない（呼び出しの行を指す） |
 
-重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）。
+重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む・スキーマの `enum` を `ndf.contracts.schema_enum` で読む・上限の設定から引く）。
+
+## コピーで生まれた重複の規則
+
+| 規則 | 違反と数えるもの |
+| --- | --- |
+| `copy-dup` | 2 つ以上のファイルの最上位に同じ名前の関数がある組（名前ごとに 1 件。`_` で始まる名前も数える）と、4 つ以上のファイルに出る 8〜80 字の文字列（文字列ごとに 1 件。docstring を除き、f 文字列の文字の部分を含む）。どちらも辞書順の先頭のファイルの行に付ける。ファイルの数・文字列の長さ・同名を認める関数の名前は `rules.json` の `copy_dup` にある |
+
+### ラチェット
+
+`copy-dup` は初日から 0 件にできないので、件数をラチェットの基準（`ratchet.json` の `rules.<規則>.max`）と比べる。件数が基準と同じなら違反に数えない。
+
+| 場合 | 結果 |
+| --- | --- |
+| 件数が基準と同じ | 通る |
+| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出す。指摘の全件は `--only copy-dup` を渡したときだけ出すので、変更の前のコードの出力と比べて増えた分を減らす |
+| 件数が基準より少ない（重複を減らして基準を据え置いた） | 落ちる。`ndf check --write-spec` が基準を今の件数へ下げるので、`ratchet.json` を同じ Pull Request に含める |
+| 基準が、変更の前の基準より大きい（`--ratchet-base <commit>` を渡したとき） | 落ちる。基準を上げる経路は無い |
+
+- CI は `--ratchet-base HEAD^1`（Pull Request・merge queue・push のどれも、変更の前の先頭）を渡す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
+- `measured` と `commit` は、基準を書いた日と、その時の `HEAD` である
+- 構文の誤りで読めないファイルがあれば、件数が足りないので比べず、基準も下げない
+- `--only` がラチェットを当てる規則を選んでいなければ、基準を読まず、比べず、`--write-spec` でも下げない
+- ラチェットを当てる規則を足すときは、`run.py` の `RATCHETED` と `ratchet.json` の両方に書く。基準の行が無い規則は検査を止める（`config_broken`）
+
+## 上限の設定の読み手の規則
+
+| 規則 | 違反と数えるもの |
+| --- | --- |
+| `limit-readers` | 上限の設定（`contracts/limits/`）の方針の読み手の指定（`read_by`）と、`src/` のコードが実際に方針を引くモジュールの食い違い。種類は `unread`（指定した読み手がその方針を引いていない。指摘は方針のファイルの `read_by` の行）・`undeclared`（方針の `read_by` に無いモジュールが引いている。指摘は呼び出しの行）・`unresolved`（方針の名前を解けない読み口。指摘は呼び出しの行） |
+
+方針を足すときは、引くモジュールの名前を `read_by` に書く。どのコードからも引かれない方針は置けない。
+
+方針を引く関数（読み口）の指定は `rules.json` の `limits` が持つ。
+
+| キー | 中身 |
+| --- | --- |
+| `readers` | 読み口の完全な名前 → 方針の名前の引数の名前（`arg`）と位置（`index`。メソッドは `self` を数えない）。名前を引数で受けて読み口へ渡す関数・メソッド、名前を欄に持つクラス、引数で受けた読み口（`<関数>.<引数>`）も並べ、呼び手を読み手に数える。引数の既定値の方針は、既定値を書いたモジュールが引く。`template` があれば、引数の値を `{}` に入れた名前を引く |
+| `tables` | 方針の表を丸ごと返す名前。参照したモジュールは `whole` に要る（引くモジュールは 1 行ずつ読む読み口を使う） |
+| `whole` | 表を受け取るだけで方針を引かないモジュールと、その理由 |
+| `dynamic` | 名前を実行時に組み立てる読み手。`at` は組み立てる関数の完全な名前、`expr` は読み口の引数の式の綴り（引数が関数の中の名前なら、その名前に入る式。`for` の変数なら並びの式）。式の綴りか、`template` の形が実際のコードと違えば `unresolved` になる。`vocabulary`（コントラクトのファイルと JSON Pointer。`*` は辞書か並びのすべて）の文字列の値を `template` の `{}` に、`*` が当たったキー（左から数える）を `{1}`・`{2}` … に入れた名前を引く。組み立てた名前のうち上限の設定に無いものは数えない |
+
+名前は、文字列・モジュールの最上位の定数（import の先は 1 階層）・関数の中の代入・並びと辞書の定数・条件式から解く。条件式は枝ごとに見て、引数をそのまま渡す枝だけを呼び手からの受け渡しと扱う。import は関数の囲みごとに解く。
+
+メソッドの読み口は、受け手のクラスを、引数と `self` の欄の注釈・クラスの呼び出し・関数の戻り値の注釈から解けた呼び出しだけを数える。
+
+## 内部データの名前の規則
+
+| 規則 | 違反と数えるもの |
+| --- | --- |
+| `internal-names` | 内部データの種類のスキーマ（`contracts/schemas/internal/<種類>.schema.json`）の欄か、その種類を書く関数の中の辞書のキーが、名前の対応表（`contracts/data/internal-names.json`）でその種類に使えない名前 |
+
+名前の対応表は、意味ごとに、使う 1 つの名前（`key`）・消した別名（`aliases_removed`）・使ってよい種類（`where`）を持つ。確かめるのは、表が持つ名前（使う名前か消した別名）と、時刻の欄（共通の欄の `time` を引くか `format` が `date-time`）で、`where` にその種類があれば違反にしない。意味の違う値が同じ名前を使うときは、表に別の行を足す。
+
+種類を書く関数は、`rules.json` の `internal_names.writers` の関数（値は種類の引数の位置。`null` ならキーワード `kind` だけ）を、種類の文字列で呼ぶ関数である。ほかの所で組んだ行の名前は、核（`ndf.contracts.internal`）が書く前に閉じたスキーマで確かめる。
 
 ## 子の表の規則
 
@@ -112,7 +168,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 設定（`.ndf/`）と入出力（サブコマンド・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約を、コードと SSOT の表から生成し、食い違いを落とす（#3518・#3519）。生成物はコントラクトのページ（`docs/contracts/*.md`）とサブコマンドごとの引数のスキーマ（`contracts/schemas/io/*.args.schema.json`）で、保存先は `rules.json` の `spec.generated` が持つ。コントラクトの保存先（`contracts/`）を持たないプラグインには当てない。
 
 ```bash
-plugins/ndf/bin/ndf check --write-spec   # 生成物を書き直してから検査する
+plugins/ndf/bin/ndf check --write-spec   # 生成物を書き直し、減った件数へラチェットの基準を下げてから検査する
 plugins/ndf/bin/ndf check                     # 書かずに検査する（CI と同じ）
 ```
 
@@ -123,6 +179,7 @@ plugins/ndf/bin/ndf check                     # 書かずに検査する（CI �
 | `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
 | `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
 | `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
+| `review-items` | 設計レビューの項目の表に、ルートの空の項目がある。11.x へ回した項目が、ルートの指す対応表に無いか、対応表のルートが `spec.correspondence_routes` の形に当たらない（空・仮の `—` を含む）。子の表 `children.json` の `review_items` が、表から生成し直した中身と違う（`text_sha` の原文は表の要旨）。表が無い・列が足りない・数の列が読めない・表か `children.json` がリポジトリの外かシンボリックリンクを通るときは検査を止める（`config_broken`）。見出しは `rules.json` の `spec.review_items_columns`・`spec.correspondence_columns` が持つ。`ndf check --only review-items` はこの規則の入力だけを読む |
 
 サブコマンドの引数は、サブコマンドの `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果のコントラクトと結果のスキーマで確かめる。
 

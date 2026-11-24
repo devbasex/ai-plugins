@@ -30,8 +30,8 @@ from ndf import contracts, identity
 from ndf.progress import model, stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
-NDF_SCHEMA = "workflow/ndf.schema.json"
-CONTEXT = "workflow/context.schema.json"
+NDF_SCHEMA = model.NDF_SCHEMA
+CONTEXT = model.CONTEXT
 X_SOURCE = "x-source"
 MODES_DIR = "workflow/modes"
 STAGES_DIR = "workflow/stages"
@@ -212,9 +212,8 @@ def _ndf_meta(node: Mapping[str, Any]) -> Any:
     return dig(node, "metadata", NAMESPACE)
 
 
-@contracts.cached_reader
-def _context_properties() -> dict[str, Any]:
-    return contracts.load_json(CONTEXT)["properties"]
+def _context_properties() -> Mapping[str, Any]:
+    return contracts.load_schema(CONTEXT)["properties"]
 
 
 def _context_keys() -> set[str]:

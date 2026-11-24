@@ -57,8 +57,6 @@ IDLE_POLICY = "parallel-run.idle"
 SPRINT_GATE, SPRINT_WORKING, SPRINT_IDLE, SPRINT_UNKNOWN = "gate", "working", "idle", "unknown"
 # ラッパーの状態のうち、止まりと読むもの（`ndf relay ls` の `state`）
 WRAPPER_STALLED = "stalled"
-# `ndf progress wait --timeout 0` が「作業がまだ動いている」で返す停止理由の種類
-WAIT_TIMEOUT = "wait_timeout"
 
 
 @dataclass(frozen=True)
@@ -119,7 +117,8 @@ def sprint_wait(out: Optional[Mapping[str, Any]]) -> str:
     status = out.get("status")
     if status == result.GATE:
         return SPRINT_GATE
-    if status == result.STOPPED and causes.kind_of(out.get("cause")) == WAIT_TIMEOUT:
+    # `ndf progress wait --timeout 0` は「作業がまだ動いている」を wait_timeout で返す
+    if status == result.STOPPED and causes.kind_of(out.get("cause")) == "wait_timeout":
         return SPRINT_WORKING
     return SPRINT_IDLE if status in (result.OK, result.STOPPED) else SPRINT_UNKNOWN
 
