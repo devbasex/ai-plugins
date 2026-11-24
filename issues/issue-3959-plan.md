@@ -103,7 +103,7 @@
 ### Task 9: 秘密と参照の伏せ方を直し、結果に入れる原因の文を伏せる関数を作る
 
 - **対象ファイル:** `plugins/ndf/src/ndf/adapters/run_log.py`（`secret_spans`。`redact` もそれで置き換える）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`・`scrub`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`public_cause`）、`plugins/ndf/tests/adapters/test_publish.py`、`plugins/ndf/tests/adapters/test_cli_run_log.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`（`public_cause`）
-- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」の「伏せ方」のうち `Publisher` と `scrub` の部分と、「判定を打つ条件と省く条件」の `public_cause`。秘密を含む参照を照会へ送らず、秘密の一致範囲と非公開の参照の一致範囲の和を原文の上で 1 回で置き換える。秘密が参照の境界をまたぐ場合と、`ssh://git@github.com/<所有者>/<リポジトリ>` の形の参照の両方を、同じタスクのテストで確かめる。`run_log.redact` だけを変えて `scrub` を変えない（またはその逆の）途中の状態を作らないため、`run_log.py` と `publish.py` を同じタスクで変える
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」の「伏せ方」のうち `Publisher` と `scrub` の部分と、「判定を打つ条件と省く条件」の `public_cause`。秘密を含む参照を照会へ送らず、秘密の一致範囲と非公開の参照の一致範囲の和を原文の上で 1 回で置き換える。`publish._REPO_URL` を、認証情報付きの URL と `***@` に伏せ字済みの URL も参照として拾う形に変え、URL の全体を伏せる。`secret_spans` は固定の SSH の利用者名（`ssh://git@github.com/` の `git@`）を秘密の範囲に入れず、公開のリポジトリの SSH の URL は今どおり所有者名とリポジトリ名を残す。秘密が参照の境界をまたぐ場合と、`ssh://git@github.com/<所有者>/<リポジトリ>` の形の参照の両方を、同じタスクのテストで確かめる。`run_log.redact` だけを変えて `scrub` を変えない（またはその逆の）途中の状態を作らないため、`run_log.py` と `publish.py` を同じタスクで変える
 - **満たす受け入れ条件:** 3・7（PR のコメントと `cite` の結果に秘密の断片を残さない）
 - **進め方:** 失敗するテスト（秘密の前半が参照の中、後半が参照の外にある文で、`scrub` の結果に秘密の後半が残る）→ 通す最小実装 → 整理
 
