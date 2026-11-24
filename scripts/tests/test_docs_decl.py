@@ -39,18 +39,34 @@ def code_of(source: str) -> str:
     except (SyntaxError, tokenize.TokenError):  # 読めないソースは注記を外さずに全文で見る
         return source
     lines = source.splitlines(keepends=True)
-    drop = set()
+
+    def char_col(row: int, byte_col: int) -> int:  # ast の列は UTF-8 のバイト数なので文字数へ直す
+        return len(lines[row - 1].encode("utf-8")[:byte_col].decode("utf-8", errors="ignore"))
+
+    def blank(text: str) -> str:  # 改行を残して空白に置き換え、同じ行の残りの位置を保つ
+        return "".join(c if c in "\r\n" else " " for c in text)
+
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
         if isinstance(body, list) and body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
             if isinstance(body[0].value.value, str):
-                drop.update(range(body[0].lineno, body[0].end_lineno + 1))
+                doc = body[0]
+                start, end = doc.lineno, doc.end_lineno
+                sc, ec = char_col(start, doc.col_offset), char_col(end, doc.end_col_offset)
+                if start == end:
+                    line = lines[start - 1]
+                    lines[start - 1] = line[:sc] + blank(line[sc:ec]) + line[ec:]
+                    continue
+                lines[start - 1] = lines[start - 1][:sc] + blank(lines[start - 1][sc:])
+                for row in range(start + 1, end):
+                    lines[row - 1] = blank(lines[row - 1])
+                lines[end - 1] = blank(lines[end - 1][:ec]) + lines[end - 1][ec:]
     for tok in tokens:
         if tok.type == tokenize.COMMENT:
             row, col = tok.start
             line = lines[row - 1]
             lines[row - 1] = line[:col] + ("\n" if line.endswith("\n") else "")
-    return "".join("" if i + 1 in drop else line for i, line in enumerate(lines))
+    return "".join(lines)
 
 
 def mentions(source: str, doc: str) -> bool:
@@ -105,3 +121,11 @@ def test_a_doc_named_only_in_notes_is_not_a_dependency():
     source = '"""出典は docs/specifications/a.md の決定 1。"""\n# docs/specifications/a.md\nx = 1\n'
     assert not mentions(code_of(source), "docs/specifications/a.md")
     assert mentions(code_of(source + 'p = "docs/specifications/a.md"\n'), "docs/specifications/a.md")
+
+
+def test_code_on_the_docstring_line_is_kept():
+    source = 'def f():\n    """注記。"""; p = "docs/specifications/a.md"\n'
+    assert mentions(code_of(source), "docs/specifications/a.md")
+    source = 'def f():\n    """注記\n    docs/specifications/a.md"""; p = "docs/specifications/b.md"\n'
+    assert not mentions(code_of(source), "docs/specifications/a.md")
+    assert mentions(code_of(source), "docs/specifications/b.md")
