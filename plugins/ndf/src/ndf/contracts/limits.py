@@ -1,7 +1,7 @@
-"""上限の設定（`contracts/limits.json`）の読み手。
+"""上限の設定（`contracts/limits/<方針の名前>.json`。1 方針 1 ファイル）の読み手。
 
 時間・回数・間隔・量の上限は設定だけが値を持ち、コードは方針の名前で引く（値を写さない）。
-形は `contracts/schemas/limits.schema.json` にある。
+方針 1 つの形は `contracts/schemas/limits.schema.json` にある。
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from typing import Any, NamedTuple, Optional, get_type_hints
 
 from ndf import contracts
 
-NDF_SETTINGS = "limits.json"
+NDF_SETTINGS = "limits"
 SCHEMA = contracts.schema_path("limits")
+# 方針の名前の形（SSOT は設定のスキーマの $defs）
+NAME_SCHEMA = SCHEMA + "#/$defs/name"
 
 
 class LimitsError(contracts.ContractError):
@@ -57,31 +59,53 @@ class Policy(NamedTuple):
     runtimes: Optional[list[str]] = None
     auth_markers: Optional[list[str]] = None
     endpoint: Optional[dict[str, Any]] = None
+    # 公開の記述の取得（`samples.fetch`。#3687）だけが持つ値
+    retries: Optional[int] = None
+    max_bytes: Optional[int] = None
+    peers: Optional[dict[str, int]] = None
 
 
-# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ）は
-# `value` で引かず、判定の子と hook の表が行から読む
+# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ・相手ごとの
+# 上限）は `value` で引かず、判定の子・hook の表・見本の突き合わせが項目から読む
 VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 
-def validate(raw: object) -> dict[str, Policy]:
-    """設定の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
-    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の設定 {NDF_SETTINGS}")
-    return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
+def validate(raw: dict[str, Any]) -> dict[str, Policy]:
+    """方針の名前 → 中身の辞書を確かめて方針の表にする。形の誤りは `LimitsError`。"""
+    errs = [
+        f"{name}: {e}"
+        for name, row in raw.items()
+        for e in (*contracts.schema_errors(name, NAME_SCHEMA), *contracts.schema_errors(row, SCHEMA))
+    ]
+    if errs:
+        raise LimitsError(f"上限の設定 {NDF_SETTINGS} の形が違う: {'; '.join(errs)}")
+    return {name: Policy(name=name, **row) for name, row in raw.items()}
+
+
+@contracts.cached_reader
+def _checked() -> dict[str, Policy]:
+    """このプロセスで読んで確かめた方針のキャッシュ。`table` と `policy` が足し、`policy` が引く。"""
+    return {}
 
 
 @contracts.cached_reader
 def table() -> dict[str, Policy]:
-    """設定を 1 プロセスに 1 回読む。"""
-    return validate(contracts.load_as(NDF_SETTINGS, LimitsError))
+    """設定の全件を 1 プロセスに 1 回読む（表全体の検査に使う。方針 1 つの参照は `policy`）。"""
+    found = validate(contracts.load_table(NDF_SETTINGS, LimitsError, "上限の設定"))
+    _checked().update(found)
+    return found
 
 
 def policy(name: str) -> Policy:
-    """方針の名前で 1 行を引く。無ければ `LimitsError`。"""
-    found = table().get(name)
-    if found is None:
-        raise LimitsError(f"上限の設定に方針 {name} が無い")
-    return found
+    """方針の名前で 1 行を引く。まだ読んでいない方針ならそのファイルだけを読む。無ければ `LimitsError`。"""
+    checked = _checked()
+    if name not in checked:
+        with contracts.raised_as(LimitsError):
+            body = contracts.load_item(NDF_SETTINGS, name)
+        if body is None:
+            raise LimitsError(f"上限の設定に方針 {name} が無い")
+        checked.update(validate({name: body}))
+    return checked[name]
 
 
 def value(name: str, key: str) -> float:

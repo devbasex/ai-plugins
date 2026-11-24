@@ -1,0 +1,7 @@
+{
+  "meaning": "マージの方式がマージ先のブランチで許されていない",
+  "std_type": "configuration",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}

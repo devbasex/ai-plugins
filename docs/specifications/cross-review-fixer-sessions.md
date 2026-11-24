@@ -24,7 +24,7 @@
 | --- | --- |
 | 会話の続け方・新しい会話にする条件・起動し直し・`process` の文 | `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) |
 | `.ndf/review.json` の `fixer_sessions` の型・既定・残るもの | [docs/contracts/ndf-settings.md](../../plugins/ndf/docs/contracts/ndf-settings.md) と [review.schema.json](../../plugins/ndf/contracts/schemas/ndf-settings/review.schema.json) |
-| 窓の手前の余白 `cross-review.fixer.resume-margin`（`count` 50000） | [contracts/limits.json](../../plugins/ndf/contracts/limits.json) |
+| 窓の手前の余白 `cross-review.fixer.resume-margin`（`count` 50000） | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) |
 | 続けるかの判断 | [resume_decide.py](../../plugins/ndf/src/ndf/domains/crossreview/resume_decide.py) の `choose`・`grown` |
 | 会話の引数と結果の行の読み取り | [adapters/claude.py](../../plugins/ndf/src/ndf/adapters/claude.py) の `Session`・`session_args`・`result_line`・`context_tokens`・`context_window`・`compacted`・`conversation_missing` |
 
@@ -125,7 +125,7 @@
 | ---: | --- | --- | --- |
 | 1 | NDF が uuid4 の ID を決めて `--session-id` で始め、`--resume` で続ける。次のラウンドで使う ID は `_Run` のメモリだけで持つ（Claude の会話の記録と修正担当の出力には残り得る。I3） | 始める前に ID が決まるので、出力を読めない・書きかけで止まったときも ID が分かる。Claude Code の CLI の機能で足り、NDF が会話の保持を作らない | 出力の `session_id` を読む・`--continue`（同じ worktree の別の claude の会話を拾う恐れ）・`--fork-session`（ID が毎回変わり得るものが無い） |
 | 2 | `claude.py` の `ClaudeCall` に会話の指定 `Session`（`id`・`resume`）を足し、すべての権限で受ける。指定があれば `--no-session-persistence` を付けない | claude の引数を組む場所を `claude.py` の 1 か所に保つ。`resume: Optional[str]` を置き換えたので、意味の無い組み合わせが生まれない | `drive.py` が組んだ列を書き換える・`resume` の横に `session_id` を足す |
-| 3 | 「最後の文脈 + 増分の最大 + 余白」が窓に収まるときだけ続ける。窓は結果の行の主モデルから読み、余白は `limits.json` の 1 つの値（50,000。relay の再起動の方針の余白と同じ値）に置く | 続けたラウンドの中でも文脈は増え、窓を超えると自動の要約に入る。窓はモデルと環境で 5 倍違い（1,000,000 と 200,000）、固定の上限はどちらにも合わない。窓を全モデルの最小値にすると、補助の呼び出しで小さい窓のモデルが載るだけで続ける機能が黙って止まる | 固定の上限（150,000）・`usage` の合計で測る（全ターンの読みの合計で、持ち越す文脈を表さない）・上限を置かない |
+| 3 | 「最後の文脈 + 増分の最大 + 余白」が窓に収まるときだけ続ける。窓は結果の行の主モデルから読み、余白は `contracts/limits/` の 1 つの値（50,000。relay の再起動の方針の余白と同じ値）に置く | 続けたラウンドの中でも文脈は増え、窓を超えると自動の要約に入る。窓はモデルと環境で 5 倍違い（1,000,000 と 200,000）、固定の上限はどちらにも合わない。窓を全モデルの最小値にすると、補助の呼び出しで小さい窓のモデルが載るだけで続ける機能が黙って止まる | 固定の上限（150,000）・`usage` の合計で測る（全ターンの読みの合計で、持ち越す文脈を表さない）・上限を置かない |
 | 4 | 会話が見つからない印を見たときだけ、同じラウンドで新しい会話で 1 度だけ起動し直し、出力の名前を `-fix-new` で分ける | アカウントの切り替えで保存先が変わっても、そのラウンドの修正を失わない。印の無い失敗（タイムアウトは 20 分走った後）を起動し直すと、1 ラウンドの時間が 2 倍になる。記録の置き場は claude の内部の形なので、事前にファイルを探すより claude が答える印を読む | DONE でなければいつも起動し直す・起動の前に会話の記録のファイルを探す・出力を上書きする |
 | 5 | 続けた会話にも、毎回同じ形のプロンプト（その回の指摘・結果ファイルのパス・指摘の基準）と system を渡す | 前の指示が自動の要約で落ちた会話や、新しい会話へ落ちた起動でも同じに動く。プロンプトの組み立てが会話の状態で 2 通りにならない | 続けた会話には指摘の一覧だけを渡す |
 | 6 | NDF は会話の記録を消さず、claude の `cleanupPeriodDays`（既定 30 日）に任せる | 記録の置き場は claude の内部の形で、消し損ねと消し過ぎを NDF が持つことになる | 駆動の終わりに、その起動で作った記録を消す |
@@ -140,7 +140,7 @@
 | 置き場 | 項目 | 値 |
 | --- | --- | --- |
 | `.ndf/review.json`（version 1） | `fixer_sessions` | 真偽値、既定 偽。例: `{"version": 1, "focus": [], "fixer_sessions": true}` |
-| `contracts/limits.json` | `cross-review.fixer.resume-margin` | `count` 50000（トークン） |
+| `contracts/limits/` | `cross-review.fixer.resume-margin` | `count` 50000（トークン） |
 | `contracts/domains/ndf-files.json` | 行 `review` の `keys` | `fixer_sessions` を含む |
 | `_Run`（駆動のメモリだけ） | `fixer_last` | `resume_decide.Previous`（会話の ID・DONE で終わったか・マージできたか・自動の要約の行があったか・最後の文脈・窓）。起動の始めは None |
 | `_Run`（駆動のメモリだけ） | `fixer_growth` | 増分の最大。起動の始めは 0 |

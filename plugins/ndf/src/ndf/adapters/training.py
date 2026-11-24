@@ -126,7 +126,7 @@ class Patch(NamedTuple):
 
 
 class Endpoint(NamedTuple):
-    """学習の設定を読み書きする口。`url` を `policy`（`contracts/limits.json`）の時間で読み、`values` でキーごとの真偽値を取り出す。
+    """学習の設定を読み書きする口。`url` を `policy`（`contracts/limits/`）の時間で読み、`values` でキーごとの真偽値を取り出す。
 
     `source` は書き換えないときの理由に載せる設定の在りか、`place` は書き換えた後の理由に載せる設定の在りか（キーを含まない）、
     `patch` は 1 つのキーを false へ書き込む要求の形。

@@ -1,0 +1,4 @@
+{
+  "summary": "実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予",
+  "seconds": 5
+}

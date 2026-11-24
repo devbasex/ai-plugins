@@ -189,3 +189,46 @@ def test_fetch_body_errors(routes: dict[str, Handler], reason: str) -> None:
 def test_fetch_body_invalid_url() -> None:
     with pytest.raises(notify.FetchError, match=r"^URL が不正$"):
         notify.fetch_body("::", 5, transport=_transport({}))
+
+
+# 本物の記述（GitHub の REST の OpenAPI）と同じ大きさ（2026-11-23 の実測）と、その取得に使う上限（64 MiB）
+_DESCRIPTION_BYTES = 14_395_662
+_DESCRIPTION_MAX = 64 * 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    ("size", "max_bytes", "reason"),
+    [
+        (_DESCRIPTION_BYTES, _DESCRIPTION_MAX, None),
+        (8, 8, None),
+        (9, 8, "本文が 8 バイトを超えた"),
+        (0, 0, None),
+    ],
+    ids=["real-size", "exactly-max", "max-plus-one", "empty"],
+)
+def test_fetch_body_limits_the_body_size(size: int, max_bytes: int, reason: str | None) -> None:
+    t = _transport({"/a": lambda req: httpx.Response(200, content=iter([b"x" * (size // 2), b"x" * (size - size // 2)]))})
+    if reason is None:
+        assert len(notify.fetch_body("https://x.test/a", 5, transport=t, max_bytes=max_bytes)) == size
+        return
+    with pytest.raises(notify.FetchError) as caught:
+        notify.fetch_body("https://x.test/a", 5, transport=t, max_bytes=max_bytes)
+    assert str(caught.value) == reason
+
+
+@pytest.mark.parametrize("status", [301, 302, 304, 307])
+def test_fetch_body_without_follow_sends_one_request(status: int) -> None:
+    seen: list[str] = []
+
+    def unread() -> Iterator[bytes]:
+        raise AssertionError("3xx の本文を読んだ")
+        yield b""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        return httpx.Response(status, headers={"Location": "/new"}, content=unread())
+
+    with pytest.raises(notify.FetchError) as caught:
+        notify.fetch_body("https://x.test/old", 5, transport=httpx.MockTransport(handler), follow=False)
+    assert str(caught.value) == f"HTTP {status}（転送は追わない）"
+    assert seen == ["/old"]

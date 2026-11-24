@@ -1,0 +1,7 @@
+{
+  "meaning": "不変条件で操作を断った",
+  "std_type": "validation",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}

@@ -2049,14 +2049,16 @@ def test_i1_script_structure_runs_age_on_every_event():
     assert "--base HEAD^1 --head HEAD" in run and "if" not in found[0]
     # r2-8: 差分はシェルで先に見ず、age の中の 1 回の git diff だけで決める
     assert "git " not in run and run.count("plugin-deps.py age") == 1
-    [setup] = [s for s in all_steps if s.get("id") == "py312"]
-    assert setup["uses"].startswith("actions/setup-python@") and setup["with"]["update-environment"] is False
-    assert int(str(setup["with"]["python-version"]).split(".")[1]) >= 11
     users = [s for s in all_steps if re.search(r"plugin-deps\.py (age|affected)", s.get("run", ""))]
     assert len(users) == 2
+    # 2 つの手順が同じ setup-python の手順の出力を指す（手順の id は Python のバージョンに合わせて変わってよい）
+    ids = {re.fullmatch(r"\$\{\{ steps\.(\w+)\.outputs\.python-path \}\}", s["env"]["PYTHON"]).group(1) for s in users}
+    assert len(ids) == 1
     for s in users:
         assert s["run"].startswith('"$PYTHON" scripts/plugin-deps.py') and "uv run" not in s["run"]
-        assert s["env"]["PYTHON"] == "${{ steps.py312.outputs.python-path }}"
+    [setup] = [s for s in all_steps if s.get("id") in ids]
+    assert setup["uses"].startswith("actions/setup-python@") and setup["with"]["update-environment"] is False
+    assert int(str(setup["with"]["python-version"]).split(".")[1]) >= 11
 
 
 def load_deps_weekly() -> dict:
@@ -2613,13 +2615,15 @@ def test_3691_3_checker_comes_from_main_with_three_sparse_files():
     assert "inputs.floors_ref != ''" in floors[0]["if"] and "inputs.floors_ref != 'main'" in floors[0]["if"]
 
 
-def test_3691_3_help_steps_run_after_the_smoke_and_before_the_report():
-    """3691:3: 2 つの照らし合わせは成果物の後・課題の報告の前に、スモークの成否によらず走る。gh は claude の行だけで打つ。"""
+def test_3691_3_help_steps_run_after_the_smoke_and_before_the_outcome():
+    """3691:3: 2 つの突き合わせはスモークの後・成果物と結果の前に、スモークの成否によらず走る。gh は claude のジョブだけで打つ。"""
+    smoke, _ = step_named("Run unauthenticated runtime smoke with the latest CLI")
+    outcome, _ = step_named("Pass the outcome to the report job")
     upload, _ = step_named("Upload smoke artifacts")
-    report, _ = step_named("Report the failure as an issue")
     cli_at, cli = step_named("Check CLI --help against the floors table")
     gh_at, gh = step_named("Check gh --help against the floors table")
-    assert upload < cli_at < gh_at < report
+    # 結果は成果物のアップロードの失敗も含むよう、ジョブの最後に渡す
+    assert smoke < cli_at < gh_at < upload < outcome == len(smoke_steps()) - 1
     assert cli["if"] == "${{ !cancelled() }}"
     assert gh["if"] == "${{ !cancelled() && matrix.runtime == 'claude' }}"
     assert "tmp/deps-tool/scripts/plugin-deps.py cli-help" in cli["run"]

@@ -31,7 +31,7 @@ PACKAGE = "@googleworkspace/cli"
 PACKAGE_URL = "https://www.npmjs.com/package/@googleworkspace/cli"
 # npm の後ろに付ける引数
 INSTALL_ARGS = ("install", "-g", PACKAGE)
-# 上限の設定（contracts/limits.json）の名前
+# 上限の設定（contracts/limits/）の名前
 CALL_LIMIT = "google-workspace.call"
 INSTALL_LIMIT = "google-workspace.install"
 # 利用者に `gws auth login` を頼む案内の文

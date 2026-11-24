@@ -1,0 +1,5 @@
+{
+  "summary": "承認の証跡を置いた後に、証跡のチェック（ndf/release-approval）が success になるまで待つ上限と間隔",
+  "seconds": 600,
+  "interval": 10
+}

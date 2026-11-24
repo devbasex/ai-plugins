@@ -70,8 +70,8 @@ def test_a_whole_environment_is_checked_once_until_the_lock_changes(start, monke
 
 # --- 呼び出し元の環境へ戻す（#4029） ---
 
-# bin/ndf と uv run が NDF の子孫へ足す変数（呼び出し元の値へ戻す）
-ADDED = ("CLAUDE_PLUGIN_ROOT", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH")
+# bin/ndf と uv run が NDF の子孫へ足す・bin/ndf が消す変数（呼び出し元の値へ戻す）
+ADDED = ("CLAUDE_PLUGIN_ROOT", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_RUN_RECURSION_DEPTH", "PATH", "PYTHONPATH", "UV_ISOLATED")
 
 
 def test_the_callers_values_come_back_and_the_held_copies_go(start):
@@ -88,6 +88,7 @@ def test_the_callers_values_come_back_and_the_held_copies_go(start):
         "NDF_CALLER_PATH": "/usr/bin",
         "PYTHONPATH": "/ndf/src",
         "NDF_CALLER_PYTHONPATH": "/caller-pp",
+        "NDF_CALLER_UV_ISOLATED": "1",
         "HOME": "/home/x",
     }
 
@@ -98,6 +99,7 @@ def test_the_callers_values_come_back_and_the_held_copies_go(start):
         "UV_RUN_RECURSION_DEPTH": "",
         "PATH": "/usr/bin",
         "PYTHONPATH": "/caller-pp",
+        "UV_ISOLATED": "1",
         "HOME": "/home/x",
     }
 
@@ -106,6 +108,19 @@ def test_another_plugins_root_comes_back_as_the_callers_value(start):
     env = {"CLAUDE_PLUGIN_ROOT": "/ndf", "NDF_CALLER_PLUGIN_ROOT": "/other-plugin", "PATH": "/b", "NDF_CALLER_PATH": "/a"}
     start.restore_caller_env(env)
     assert env == {"CLAUDE_PLUGIN_ROOT": "/other-plugin", "PATH": "/a"}
+
+
+def test_uv_isolated_from_the_env_file_stays_without_a_callers_copy(start):
+    # 呼び出し元に UV_ISOLATED が無く、UV_ENV_FILE から uv が入れた値は子へ残す
+    env = {"PATH": "/ndf-venv/bin:/usr/bin", "NDF_CALLER_PATH": "/usr/bin", "UV_ISOLATED": "1"}
+    start.restore_caller_env(env)
+    assert env == {"PATH": "/usr/bin", "UV_ISOLATED": "1"}
+
+
+def test_the_callers_uv_isolated_wins_over_the_env_file(start):
+    env = {"NDF_CALLER_UV_ISOLATED": "0", "UV_ISOLATED": "1"}
+    start.restore_caller_env(env)
+    assert env == {"UV_ISOLATED": "0"}
 
 
 def test_a_start_not_through_the_entrypoint_keeps_the_environment(start):
@@ -125,3 +140,15 @@ def test_the_package_runs_after_the_environment_is_restored(start, monkeypatch):
     monkeypatch.setattr(start.runpy, "run_module", lambda *a, **k: seen.append(os.environ["PATH"]))
     assert start.main() == 0
     assert seen == ["/caller"] and "NDF_CALLER_PATH" not in os.environ
+
+
+@pytest.mark.parametrize("line", ["error: Failed to download `ruff==0.17.5`", ""])
+def test_a_failed_sync_stops_with_one_result_line_and_deps_missing(start, capsys, line):
+    # #3687: bin/ndf は exec の前の uv sync が落ちたら、uv の error の行（無ければ最終行。空もある）を添えてここを呼ぶ
+    detail = f"依存を用意できない（ネットワークを確かめる）: {line}"
+    code = start.emit_deps_missing(detail)
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1
+    report = json.loads(out[0])
+    assert (report["status"], report["summary"], report["cause"]) == ("stopped", detail, {"kind": "deps_missing", "detail": detail})
+    assert code == causes.exit_code("deps_missing") == 69

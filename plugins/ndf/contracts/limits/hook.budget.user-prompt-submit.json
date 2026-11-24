@@ -1,0 +1,8 @@
+{
+  "summary": "hook の予算（UserPromptSubmit）。注入の上限は人のいない実行の始めの案内（形の説明を含めて約 1,400 字）が収まる字数",
+  "p95_ms": 100,
+  "deadline": 1,
+  "margin": 0.5,
+  "timeout": 3,
+  "inject_chars": 2000
+}

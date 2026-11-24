@@ -35,10 +35,8 @@ _PLAIN_NODES = _WORD_NODES - {"ansi_c_string"} | frozenset(
 )
 # 外側のシェルが展開しうる字（引用の外）
 _EXPANDING = re.compile(r"[$`*?\[{~]")
-# `only_commands` が外すラッパー（動かすコマンドと引数が字面で決まるもの。`env` は環境を、`xargs` は引数を、`exec` は argv[0] を変える）
-_STEADY_WRAPPERS = frozenset({"timeout", "nice", "ionice", "stdbuf", "nohup", "time", "command"})
 # `only_commands` が中の文を読むシェル（`zsh` は `-c` でも起動ファイルを読む）と、起動ファイルを読まないオプション
-_STEADY_SHELLS = frozenset({"sh", "bash", "dash", "ksh"})
+_STEADY_SHELLS = _SHELLS - {"zsh"}
 _STEADY_OPTION = re.compile(r"-[cefuvx]+|--norc|--noprofile")
 
 # 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
@@ -205,7 +203,8 @@ def _is_steady(node: Any, cmd: ShellCommand) -> bool:
     if skipped < 0 or cmd.source[skipped:] != cmd.body_source:
         return False
     names = {os.path.basename(shell_value(text)) for text in cmd.source[:skipped]}
-    return not names & (_WRAPPER_ARGS.keys() - _STEADY_WRAPPERS) and _all_fixed(_word_groups(node)[: skipped + 1])
+    altered = any(name in _WRAPPER_ARGS and _WRAPPER_ARGS[name].alters for name in names)
+    return not altered and _all_fixed(_word_groups(node)[: skipped + 1])
 
 
 def _fixed_inner(node: Any, cmd: ShellCommand) -> bool:
@@ -438,6 +437,7 @@ class _Opts(NamedTuple):
     `flags` は値を取らない・`values` は値を取る・`attached` は値を付けた 1 語（`--x=値`・`-x値`）だけで取る・`stops` は
     コマンドを起動しないオプション。`lead` はオプションの後の前置きの語の読み方（`duration` は 1 語・`env` は `NAME=値`）。
     `numeric` は `-` と数字だけの 1 語（`nice -10`）を値付きのオプションとして読み飛ばす。
+    `alters` は起動するコマンドの環境（`env`）・引数（`xargs`）・argv[0]（`exec`）を変える。
     """
 
     flags: frozenset[str]
@@ -446,6 +446,7 @@ class _Opts(NamedTuple):
     stops: frozenset[str] = frozenset()
     lead: str = ""
     numeric: bool = False
+    alters: bool = False
 
 
 def _names(*names: str) -> frozenset[str]:
@@ -465,13 +466,14 @@ _WRAPPER_ARGS = dict(
         _names("-u", "--unset", "-C", "--chdir", "-f", "--file", "-a", "--argv0", "-S", "--split-string"),
         attached=_names("--ignore-signal", "--default-signal", "--block-signal"),
         lead="env",
+        alters=True,
     ),
     nice=_Opts(frozenset(), _names("-n", "--adjustment"), numeric=True),
     ionice=_Opts(_names("-t", "--ignore"), _names("-c", "--class", "-n", "--classdata"), stops=_names("-p", "-P", "-u")),
     stdbuf=_Opts(frozenset(), _names("-i", "--input", "-o", "--output", "-e", "--error")),
     nohup=_Opts(frozenset(), frozenset()),
     time=_Opts(_names("-p", "-a", "--append", "-v", "--verbose", "-q", "--quiet"), _names("-f", "--format", "-o", "--output")),
-    exec=_Opts(_names("-c", "-l"), _names("-a")),
+    exec=_Opts(_names("-c", "-l"), _names("-a"), alters=True),
     command=_Opts(_names("-p"), frozenset(), stops=_names("-v", "-V")),
     xargs=_Opts(
         _names(
@@ -507,6 +509,7 @@ _WRAPPER_ARGS = dict(
             "--process-slot-var",
         ),
         attached=_names("-e", "--eof", "-i", "--replace", "-l"),
+        alters=True,
     ),
 )
 # `env -S` の文字列の、引用符の外と `"` の中のエスケープ（`\_`・`\c` は別に読む）

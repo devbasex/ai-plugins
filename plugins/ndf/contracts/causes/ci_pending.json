@@ -1,0 +1,8 @@
+{
+  "meaning": "CI のチェックが終わっていない",
+  "std_type": "timeout",
+  "exit": "failed",
+  "route": "retry",
+  "retry": "cause.ci-pending",
+  "exhausted": "step"
+}

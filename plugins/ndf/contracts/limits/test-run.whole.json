@@ -1,0 +1,5 @@
+{
+  "summary": "全体テストの上限 = max(seconds, factor × 実測の所要)。実測の記録が少なく短くても seconds を下回らない",
+  "seconds": 1800,
+  "factor": 3
+}

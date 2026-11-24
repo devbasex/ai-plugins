@@ -1,0 +1,4 @@
+{
+  "summary": "Slack へ送る HTTP の上限",
+  "seconds": 10
+}

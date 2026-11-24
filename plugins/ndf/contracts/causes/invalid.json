@@ -1,0 +1,7 @@
+{
+  "meaning": "読めない・呼び出しの誤り・結果の形の誤り",
+  "std_type": "validation",
+  "exit": "unreadable",
+  "route": "conductor",
+  "retry": null
+}

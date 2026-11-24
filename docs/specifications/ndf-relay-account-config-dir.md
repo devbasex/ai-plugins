@@ -29,7 +29,7 @@
 | 起動の前の用意・同期・書き戻し・使用の届け・関所 | `plugins/ndf/src/ndf/domains/relay/account_dir.py`・`account_sync.py`・`account_files.py` |
 | 子の環境の組み立て | `plugins/ndf/src/ndf/domains/relay/session_env.py` |
 | 登録の保存先・登録の世代・再登録が要る印 | `plugins/ndf/src/ndf/domains/relay/account_registry.py`・`account_register.py` |
-| 待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `claude-accounts.lock`・`claude-account-dir.lock`・`relay.gate-exec` |
+| 待ちの上限 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `claude-accounts.lock`・`claude-account-dir.lock`・`relay.gate-exec` |
 
 ## 用語
 

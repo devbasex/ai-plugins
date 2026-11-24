@@ -1,0 +1,4 @@
+{
+  "summary": "claude の無進捗の許容。--output-format json は完了まで 1 バイトも出さない",
+  "seconds": 900
+}

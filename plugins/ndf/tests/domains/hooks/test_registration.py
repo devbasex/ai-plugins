@@ -34,7 +34,7 @@ def test_one_registration_per_event_and_every_one_has_the_budget_timeout():
         for event, groups in got.items():
             assert len(groups) == 1 and len(groups[0]["hooks"]) == 1, (runtime, event)
             assert groups[0]["hooks"][0]["timeout"] == budget.budget_for(runtime, event).timeout
-    assert budget.check_budget(tables.policies(), budget.registrations_of(tables.PLUGIN_ROOT)) == []
+    assert budget.check_budget(budget.checked_policies(), budget.registrations_of(tables.PLUGIN_ROOT)) == []
 
 
 def test_codex_registers_the_events_its_contract_holds_and_names_why_guards_skip():

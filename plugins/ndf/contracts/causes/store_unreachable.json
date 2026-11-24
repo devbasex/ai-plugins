@@ -1,0 +1,8 @@
+{
+  "meaning": "記録の DB へ繋げない・使えない（接続・認証の失敗・途中の切断、SQLite のファイルを開けない・ディスクの満杯や I/O の誤り）。DB は壊れていないのでバックアップから戻さず、打ち直す",
+  "std_type": "communication",
+  "exit": "infra_wait",
+  "route": "retry",
+  "retry": "cause.store-unreachable",
+  "exhausted": "step"
+}

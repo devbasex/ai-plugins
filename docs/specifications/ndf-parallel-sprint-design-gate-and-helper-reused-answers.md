@@ -192,7 +192,7 @@ sequenceDiagram
 
 | 値 | 置き場 |
 | --- | --- |
-| hook の上限の秒（8） | `contracts/limits.json` の `hook.ask-forward` |
+| hook の上限の秒（8） | `contracts/limits/` の `hook.ask-forward` |
 | 依頼の id の SHA の桁（12） | `lib/gate1_ids.py` の `HEAD_LEN` |
 
 ## 決定と理由

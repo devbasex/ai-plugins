@@ -1,0 +1,6 @@
+{
+  "summary": "NDF が動く Python と uv（#3687 の決定 3）。python.floor は NDF が動く Python の下限で、検査（ndf check の規則 toolchain）がリポジトリの設定の plugin_pyprojects の requires-python と突き合わせる。python.hook_floor は依存の環境が無いときに hook のエントリポイントが動くシステムの python3 の下限で、ndf.domains.hooks.boot が標準ライブラリで読む。uv.version と uv.installer_sha256 は起動が入れる uv のバージョンとインストーラの sha256で、検査がランチャーの UV_VERSION=・UV_INSTALLER_SHA256= の行とワークフローの setup-uv の version と突き合わせる。CI が何で回すかはリポジトリの設定（.ndf/project.json の toolchain）が持つ",
+  "owner": "Z2（#3687。ndf.contracts）",
+  "python": {"floor": "3.11", "hook_floor": "3.9"},
+  "uv": {"version": "0.13.7", "installer_sha256": "d263ee68314cf5bea36b08e6bd9e2c4563240d7adb73756cf33af5c199b92db4"}
+}

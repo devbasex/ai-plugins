@@ -28,7 +28,7 @@ from ndf.contracts import causes
 ATTEMPTS = 2
 # needs_human の説明に載せる、回答の先頭の字数
 ANSWER_HEAD = 200
-# 打ち直さない失敗の、停止理由の種類（`contracts/causes.json`）
+# 打ち直さない失敗の、停止理由の種類（`contracts/causes/`）
 FAILURE_CAUSES: dict[claude.Failure, str] = {
     claude.Failure.LAUNCH: "precondition",
     claude.Failure.TIMEOUT: "interrupted",

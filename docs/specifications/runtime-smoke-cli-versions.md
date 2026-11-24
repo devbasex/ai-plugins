@@ -60,7 +60,7 @@ kiro と agy は取得の失敗を `|| true` で読み飛ばしていた。kiro 
 | スモークの起動（`scripts/runtime-smoke-test.sh`） | 一覧の各行を `--build-arg` として像の作成へ渡す。`--cli-versions <パス>` で別の一覧を受ける |
 | アダプタ（`tests/runtime-smoke/adapters/kiro.sh`・`agy.sh`） | CLI が無いときに読み飛ばす分岐を持たない。`kiro-cli --version`・`agy --version` を `version.log` に残す |
 | 最新の版の解決と課題の報告（`scripts/runtime-smoke-latest.py`） | `resolve` が取得元の最新を一覧と同じ形で出す。`report` が失敗の課題を作るか、開いている課題へコメントを足す |
-| 最新の版のスモーク（`.github/workflows/runtime-plugin-smoke-latest.yml`） | 毎日と手で起動し、`resolve` → スモーク → 失敗なら `report` をランタイムごとに回す |
+| 最新の版のスモーク（`.github/workflows/runtime-plugin-smoke-latest.yml`） | 毎日と手で起動し、ジョブ `runtime-smoke-latest` が `resolve` → スモークをランタイムごとに回し、失敗した日だけジョブ `report` が課題へ書く |
 
 ### 常に成り立つ条件
 
@@ -70,7 +70,7 @@ kiro と agy は取得の失敗を `|| true` で読み飛ばしていた。kiro 
 | I2 | 4 つの Containerfile が宣言する `ARG` の名前の和集合は一覧のキーの集合と一致する。各 `ARG` は接頭辞（`CLAUDE_CODE_`・`CODEX_`・`KIRO_CLI_`・`AGY_`）のランタイムの Containerfile にだけ現れ、既定値を持たない。一覧の値は空でない | 検査のテストが落ちる。値の無い `ARG` は像の作成で落ちる |
 | I3 | リリースの経路の取得先は版数を含むものだけである。`latest` と公式のインストーラを使わない | 検査のテストが落ちる |
 | I4 | 同じランタイムの、開いている最新の版のスモークの失敗の課題は高々 1 件である | 2 度目以降はコメントを足し、新しい課題を作らない |
-| I5 | 最新の版のスモークは Pull Request と push で起動せず、権限は `contents: read`・`issues: write` だけで、secret を参照しない | 検査のテストが落ちる |
+| I5 | 最新の版のスモークは Pull Request と push で起動せず、権限の既定は `contents: read` だけで、`issues: write` を持つのはジョブ `report` だけ。secret を参照しない | 検査のテストが落ちる |
 
 ### 処理の流れ
 
@@ -103,10 +103,11 @@ sequenceDiagram
     R-->>L: 一覧と同じ形の一時ファイル
     L->>T: --cli-versions <一時ファイル>
     T-->>L: 結果と成果物
-    alt 解決かスモークが落ちた
-        L->>R: report --runtime <名前> --run-url <URL> --versions <一時ファイル>
-        R->>G: 開いている同じ題を探す
-        alt ある
+    L->>L: 結果（status とバージョンの一覧）をジョブの出力へ渡す
+    alt どれかのランタイムが失敗した（main のコードを試した実行だけ）
+        L->>R: ジョブ report が report --run-url <URL> --outcomes <ジョブの出力の JSON>
+        R->>G: 開いている課題の一覧を 1 回取る
+        alt 同じ題がある
             R->>G: コメントを足す
         else 無い
             R->>G: 課題を作る
@@ -124,8 +125,8 @@ sequenceDiagram
 | 取得の失敗を読み飛ばさず像の作成を落とし、作成の中で版を照らす | `\|\| true` のままでは CLI が入らないまま通る（kiro が実際にそうだった）。CLI が無い状態がリリースの経路で起こらなくなるため、アダプタの読み飛ばしの分岐も外した |
 | 最新の版のスモークが落ちたら課題を作り、PR は作らない | 落ちたときに要るのは多くの場合アダプタの修正で、版だけを上げる PR は自分の必須のチェックで落ちる。`GITHUB_TOKEN` で作った PR では `pull_request` の workflow が走らず、必須のチェックの結果が返らない。PR を作る権限（`contents: write`・`pull-requests: write`）は課題の `issues: write` より広い |
 | 課題はランタイムごとの題の完全一致で探し、通っても閉じない | 落ちる原因も直す PR もランタイムごとに別である。ラベルを使うと先に作る手順が増える。通ったことで閉じると、版を上げないまま課題が消える。閉じるのは直す PR である |
-| develop を毎日 1 回試す | 次にデプロイするのは develop の中身である。claude は 30 日に 25 版を 21 日に分けて出しており（2026-09-13〜10-13、npm の `time`）、週 1 回ではデプロイの日までに気づけない日がある。公開リポジトリのため実行時間は課金されない |
-| 定期の起動が止まったことに気づく仕組みは持たない | 止まるのは公開リポジトリで 60 日動きが無いときで、develop へほぼ毎日 push がある。気づく仕組みも定期の起動に頼るため、同じ条件で止まる |
+| main を毎日 1 回試す | 次にデプロイするのは main の中身である。claude は 30 日に 25 のバージョンを 21 日に分けて出しており（2026-09-13〜10-13、npm の `time`）、週 1 回ではデプロイの日までに気づけない日がある。公開リポジトリのため実行時間は課金されない |
+| 定期の起動が止まったことに気づく仕組みは持たない | 止まるのは公開リポジトリで 60 日動きが無いときで、main へほぼ毎日 push がある。気づく仕組みも定期の起動に頼るため、同じ条件で止まる |
 | 解決と報告を 1 本の Python スクリプトの 2 つの副命令にする | 取得元ごとの JSON の読み方と、作るかコメントするかの分岐は、workflow の YAML に書くとテストできない。版を上げる手順も同じ `resolve` を使い、解決の書き手を 1 つにする |
 
 ## データ・設定
@@ -168,7 +169,7 @@ sequenceDiagram
 | 副命令 | 入力 | 出力 | 失敗 |
 | --- | --- | --- | --- |
 | `resolve --runtime <claude\|codex\|kiro\|agy\|all>` | claude・codex は npm の `dist-tags` の `latest`、kiro は `stable/latest/manifest.json` の `version` と `packages[].download` が `<版>/kirocli-<arch>-linux-musl.tar.gz` の要素の `sha256`、agy は `linux_amd64`・`linux_arm64` の manifest の `version`・`url`・`sha512` | 標準出力へ、そのランタイムのキーを一覧と同じ形で出す（`all` は 4 ランタイム分） | 取得元に届かない・版数や checksum の形が読めない・agy の arch ごとの版が違う・agy の `url` が版を含まないときは終了コード 1 で、標準エラーへ取得元の URL を書く |
-| `report --runtime <名前> --run-url <URL> [--versions <パス>] [--repo <owner/name>]` | 落ちたランタイム・実行の URL・入れた版の一覧 | 題 `最新の版のスモークが落ちた: <ランタイム>` の開いている課題があれば、番号の最も小さいものへコメントを足し、無ければ作る。本文とコメントにランタイム・入れた版・実行の URL を書く。一覧が無いか空なら版は「解決できなかった」と書く | `gh` が失敗したら終了コード 1（workflow の実行が失敗として残る） |
+| `report --run-url <URL> [--outcomes <ジョブの出力の JSON>] [--samples <結果 JSON>] [--repo <owner/name>]` | 実行の URL・ランタイムごとの結果（`status` とバージョンの一覧）・見本の突き合わせの結果 JSON | `--outcomes` が成功とも取り消しとも言わないランタイム（結果の無いものを含む）と、`--samples` に食い違いのある相手ごとに、題（`最新の版のスモークが落ちた: <ランタイム>`・`テストの見本が本物の記述と食い違った: <相手>`）の開いている課題があれば、番号の最も小さいものへコメントを足し、無ければ作る。読んだ値は決めた形に合うものだけを題と本文へコピーする。バージョンの一覧が無いか空なら「解決できなかった」と書く | 課題の一覧を取れなければ終了コード 1。作成かコメントが失敗したら、残りの報告を続けてから 1（workflow の実行が失敗として残る） |
 
 `--repo` を省くと `GITHUB_REPOSITORY`、それも無ければ `gh` の既定のリポジトリを使う。課題の本文に
 GitHub の closing keywords（`Closes` などの後に番号を書くと、マージで課題を閉じる機能）は書かない。
@@ -177,11 +178,11 @@ GitHub の closing keywords（`Closes` などの後に番号を書くと、マ�
 
 | 項目 | 契約 |
 | --- | --- |
-| 起動 | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch` だけ。手の起動の入力は `ref`（試すブランチ、既定 `develop`）と `floors_ref`（照らす下限の表の ref、既定は空）。定期の起動は `develop` を試す |
-| ジョブ | `runtime-smoke-latest`、matrix `runtime: [claude, codex]`、`fail-fast: false`。チェックの名前 `runtime-smoke-latest (<ランタイム>)` は必須のチェック `runtime-smoke (<ランタイム>)` と重ならない |
+| 起動 | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch` だけ。手の起動の入力は `ref`（試すブランチ、既定 `main`）と `floors_ref`（突き合わせる下限の表の ref、既定は空）。定期の起動は `main` を試す |
+| ジョブ | `runtime-smoke-latest`（matrix `runtime: [claude, codex]`、`fail-fast: false`）と、見本を突き合わせる `live-samples`・課題へ書く `report`（[ndf-live-samples-verify.md](ndf-live-samples-verify.md) の「毎日のジョブ」）。チェックの名前 `runtime-smoke-latest (<ランタイム>)` は必須のチェック `runtime-smoke (<ランタイム>)` と重ならない |
 | 同時の実行 | `concurrency` の 1 つのグループで並べ、取り消さない |
 | `--help` の照らし合わせ | 成果物を残した後、前の段の成否によらず（`if: ${{ !cancelled() }}`）打つ。`main` の先端から `scripts/plugin-deps.py`・`cli-floors.json`・`claude-cli.json` の 3 つだけを sparse の checkout で `tmp/deps-tool` に取り、`floors_ref` が空でも `main` でもないときだけ、その ref の 2 つの JSON を `tmp/deps-floors` に取る。`Check CLI --help against the floors table` が `plugin-deps.py cli-help --root tmp/deps-tool --floors <表の作業ツリー> --runtime <ランタイム> --image ai-plugins-runtime-smoke-<ランタイム>` で、スモークが残したイメージの中の最新の CLI を照らす。`claude` の行だけ、`Check gh --help against the floors table` がホストの `gh` を照らす。検証器と打つ引数は常に `main` の表で決まり、`floors_ref` の表からは照らす名前だけを読む（[依存の更新の仕様](dependency-updates-renovate-and-supply-chain.md)の「`--help` の照らし合わせ」） |
-| 報告の条件 | 解決・スモーク・`--help` の照らし合わせのどれかの段が落ちたとき（`if: failure()`）に `report` を打つ |
+| 報告の条件 | `runtime-smoke-latest` が失敗した（解決・スモーク・`--help` の突き合わせ・成果物のアップロードのどれか）か、見本に食い違いがあり、`schedule` の起動か、`ref` と `floors_ref` がどちらも `main`（か空）の手の起動のとき、ジョブ `report` が打つ。ランタイムごとの結果は成果物でなくジョブの出力で渡す |
 | 残すもの | 解決した一覧を step summary へ、`tmp/runtime-smoke/<ランタイム>`（`version.log`・`cli-versions.env` を含む）を成果物 `runtime-smoke-latest-<ランタイム>` へ |
 
 workflow の一覧の表（trigger・permissions・job・artifact）は
@@ -199,8 +200,8 @@ workflow の一覧の表（trigger・permissions・job・artifact）は
 
 ## セキュリティ
 
-- 最新の版のスモークの書き込みの権限は課題を作る `issues: write` だけにし、secret を参照せず
-  `--with-secrets=off` で走らせる。`issues: write` は認可の変更に当たり、リリース承認ゲートで人が見た
+- 最新の版のスモークの書き込みの権限は課題を作る `issues: write` だけで、ジョブ `report` だけが持つ。
+  ほかのジョブは入力の `ref` のコードを動かすため持たない。secret を参照せず `--with-secrets=off` で走らせる
 - kiro と agy の取得物は、一覧に持つ checksum（sha256・sha512）で確かめてから置く
 - リリースの経路は版数を含む取得先だけを使い、版を変えずに中身が変わりうるインストーラを通さない
 
@@ -231,6 +232,7 @@ workflow の一覧の表（trigger・permissions・job・artifact）は
 ## 関連リンク
 
 - [issue #1982](https://github.com/devbasex/ai-plugins/issues/1982) — CLI の版の固定と最新の版のスモーク
+- [issue #3687](https://github.com/devbasex/ai-plugins/issues/3687) — 見本の突き合わせと報告のジョブ、試すブランチを `main` にしたこと
 - [Runtime Plugin Container Smoke Test 仕様](runtime-plugin-container-smoke.md)
 - [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md)
 - [Runtime smoke README](../../tests/runtime-smoke/README.md)

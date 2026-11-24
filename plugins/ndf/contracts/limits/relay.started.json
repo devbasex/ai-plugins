@@ -1,0 +1,5 @@
+{
+  "summary": "spawn・restart の後に、ラッパーが立ち上がって登録簿に載るのを待つ上限と間隔",
+  "seconds": 15,
+  "interval": 0.2
+}

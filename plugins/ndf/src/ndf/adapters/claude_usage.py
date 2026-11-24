@@ -3,7 +3,7 @@
 1 回の要求と応答の形だけを持ち、保存先・排他・取得の記録は持たない（`domains/relay/accounts.py` が持つ）。
 使用率の API（`GET /api/oauth/usage`）は公開の文書が無く形が変わりうるので、形が違えば `error: shape` と
 読めなかった項目の名前（`missing`）を返す。トークンの更新は Claude Code 本体と同じエンドポイント・同じ要求の形で送る。
-通信は `http.request_json` で行い、転送を追わない。上限の秒は呼ぶ側が `contracts/limits.json` から渡す。
+通信は `http.request_json` で行い、転送を追わない。上限の秒は呼ぶ側が `contracts/limits/` から渡す。
 
 10 系の出所はコミット `976513356^` の `claude_usage.py`（`USAGE_SCOPE` は同じコミットの
 `claude_accounts.py`）。テストは `transport` に `httpx.MockTransport` を渡す。
