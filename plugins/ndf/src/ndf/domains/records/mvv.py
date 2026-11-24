@@ -251,6 +251,15 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     return snap._replace(path=body_copy, items=found, principles_path=shared_copy)
 
 
+def of_base(root: Path, branch: str, commit: str, outside: Path) -> Snapshot:
+    """取得済みのベースブランチ `branch` の先頭 `commit` の MVV（`current`）。読めない・スナップショットを書けないときは、どれも
+    ブランチ名を添えた `MvvError`（MVV を担当へ渡す処理が、担当を起動する前に止まるために使う）。"""
+    try:
+        return current(root, commit, outside=outside)
+    except (MvvError, identity.IdentityError, OSError) as exc:
+        raise MvvError(f"{branch} の MVV を読めない: {exc}") from exc
+
+
 def identity_at(root: Path, ref: str) -> str:
     """参照 `ref`（取得済みの参照かコミット）の MVV を見分ける値（`Snapshot.identity`）。スナップショットを書かない。
 

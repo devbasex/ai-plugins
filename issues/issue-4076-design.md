@@ -196,7 +196,7 @@ sequenceDiagram
 ### 決定 2: 担当が MVV を入力に受けるため、起動指示の項目に MVV の欄を足す
 
 - **質問**: 設計・詳細設計・実装・完了判定の supervisor と worker に、どう MVV を渡すか
-- **選んだ案**: `agent-layers.md` の conductor → supervisor と supervisor → worker の起動指示の項目に「MVV」を足す。値は `current` の結果から `MVV: バージョン <version>・本文 <path>・共通原則 <principles_path>（承認済み）` か `MVV: 無し（<状態>）` の 1 行で、作業の前に読むことを守る規則に足す。cross-refactoring の `$RF_MVV` も同じ 1 行と、写しを読んで判断の基準にする指示で埋める
+- **選んだ案**: `agent-layers.md` の conductor → supervisor と supervisor → worker の起動指示の項目に「MVV」を足す。値は `current` の結果から `MVV: バージョン <version>・本文 <path>・共通原則 <principles_path>（承認済み）` か `MVV: 無し（<状態>）` の 1 行で、作業の前に読むことを守る規則に足す。cross-refactoring の `$RF_MVV` も同じ 1 行と、写しを読んで判断の基準にする指示で埋める。`ndf refactor run` はテンプレートを使わず提案と計画の指示文を自分で組むので、同じ内容（バージョン・2 つのパス・読んで判断の基準にする指示）をその指示文に載せる
 - 採らなかった案: hook で起動指示の MVV の欄の有無を止める（プランの worker の指示は呼び手が書き、組み立てる処理が NDF にまだ無い。欄の無い起動を止めても中身の正しさは確かめられず、確かめは決定 4・5 のレビューが持つ）
 - 採らなかった案: 担当が自分で `.ndf/mvv.md` を探して読む（今の形。読むかが担当に任され、#4049 の設計者も読まなかった）
 - **代償**: 欄を書き忘れた起動は止まらない。起動指示は AI が書くので、受け入れ条件 1 のうち起動指示の欄は手順書（`agent-layers.md`）の項目でだけ縛り、テストでは縛らない。その担当の出力の MVV への反しは、cross-review の基準 5 と根拠の行の確かめが拾う
