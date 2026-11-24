@@ -385,13 +385,13 @@ def _review(path: str) -> fin.Review:
     return fin.as_review(store.read_object(Path(path)))
 
 
-def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
+def _emit_verdict(verdict: fin.Verdict, mvv: Optional[dict[str, Any]] = None, **extra: Any) -> int:
     """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
     gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。指摘の本文や理由を含む値は、結果を
-    集めるログへ秘密を写さないよう、ここで伏せる。"""
+    集めるログへ秘密を写さないよう、ここで伏せる。`mvv` は outputs の mvv（自由記述を伏せ終えたもの。承認済みの MVV が無ければ None）。"""
     warnings = [*extra.pop("warnings", ()), *verdict.warnings]
     summary, decisions, gaps, warnings = run_log.redact([verdict.summary, verdict.decisions, verdict.gaps, warnings])
-    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps}, **extra}
+    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps, **({"mvv": mvv} if mvv is not None else {})}, **extra}
     if verdict.status == fin.OK:
         return _ok(summary, **shared)
     return _stop(str(verdict.kind), summary, gaps=gaps if verdict.kind == "incomplete" else None, **shared)
@@ -593,7 +593,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return made[0]
 
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr))
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
@@ -605,7 +605,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+    return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
 def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:

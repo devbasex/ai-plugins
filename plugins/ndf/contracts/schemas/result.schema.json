@@ -80,7 +80,7 @@
         "design_pr": {"type": "integer", "minimum": 1},
         "pr": {"type": "integer", "minimum": 1},
         "delivery": {"type": "object"},
-        "mvv": {"type": "object", "minProperties": 1, "description": "ベースブランチの MVV を読んだ結果。ndf records mvv current は state（approved・unapproved・absent・mismatch）を置き、approved のときだけ version・sha256・path（本文を書いたファイル）・principles_path（共通原則を書いたファイル）・items（Mission・Value 1 などの項目の一覧）も置く"},
+        "mvv": {"type": "object", "minProperties": 1, "description": "ベースブランチの MVV を読んだ結果。ndf records mvv current は state（approved・unapproved・absent・mismatch）を置き、approved のときだけ version・sha256・path（本文を書いたファイル）・principles_path（共通原則を書いたファイル）・items（Mission・Value 1 などの項目の一覧）も置く。ndf cross-review run は、MVV が承認済みのときだけ、version・sha256・head（レビューしたコミット）と、その MVV で判定した指摘 findings・citations（根拠の記述の誤り）・redlines（必ず人の承認が要る操作）・disputed（見送り）を置く"},
         "mvv_gate": {"type": "object", "required": ["gate", "skip", "why"], "description": "承認ゲートの直前の MVV 判定の結果（形は workflow/context.schema.json の mvv_gate）"},
         "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット（形は workflow/context.schema.json の gathered）"},
         "gaps": {

@@ -22,11 +22,12 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.contracts.exit_codes import OK, STOPPED
 from ndf.domains.crossreview import criteria_decide, store
+from ndf.domains.records import mvv_decide
 
 # 指摘の終わり方
-FIXED = "fixed"
-SKIPPED = "deferred"
-UNRESOLVED = "unresolved"
+FIXED = mvv_decide.REVIEW_FIXED
+SKIPPED = mvv_decide.REVIEW_DEFERRED
+UNRESOLVED = mvv_decide.REVIEW_UNRESOLVED
 OUTCOMES = (FIXED, SKIPPED, UNRESOLVED)
 # 決めた（直した・見送った）終わり方
 DECIDED = (FIXED, SKIPPED)
@@ -45,7 +46,7 @@ GAP_UNHANDLED = "unhandled_finding"
 GAP_NO_REASON = "skip_without_reason"
 GAP_MVV = "mvv_unresolved"
 # 必ず人の承認が要る操作に当たる指摘かどうかの欄（ジャーナルと要約の指摘）
-REDLINE = "redline"
+REDLINE = mvv_decide.REVIEW_REDLINE
 # NDF が機械で確かめて作った指摘かどうかの欄（要約の指摘）
 BY_NDF = "by_ndf"
 # 根拠の記述を確かめられたかの欄（ラウンドの記録と要約）と、確かめられなかった欠けの名前

@@ -20,7 +20,7 @@
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
-確かめてから `summary.json`（`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
+確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
 自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
 merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
@@ -38,7 +38,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import facts, limits
+from ndf.contracts import facts, internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
@@ -88,7 +88,8 @@ class Outcome(NamedTuple):
     """駆動の結果。`review` は `finish_decide.finish` へ渡す形、`process` は起動ごとの過程、`reviewed_head` は
     今回の起動で相手役の全員が読めた最後のラウンドの HEAD（最後のラウンドの修正のコミットは含まない。#3879。そのような
     ラウンドが無ければ None。一部の相手役が読めなかったラウンドの HEAD は出さない。PR 3944 の r2-3）。`reused` は
-    相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。"""
+    相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。`mvv` は結果 JSON の `outputs.mvv`
+    （承認済みのプロジェクト MVV が無ければ None。#4076）。"""
 
     review: fin.Review
     summary_path: Path
@@ -96,6 +97,7 @@ class Outcome(NamedTuple):
     process: tuple[dict[str, str], ...]
     reviewed_head: Optional[str] = None
     reused: bool = False
+    mvv: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -123,6 +125,8 @@ class _Run:
     checked_head: Optional[str] = None
     last_target: Optional[changes.Target] = None
     citations: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
+    # 結果と MVV の記録に残す自由記述を伏せる処理（PR に書く記録のコメントと同じもの）
+    clean: report_decide.Cleaner = run_log.redact
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
@@ -239,7 +243,7 @@ def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
         raise DriveStopped("precondition", f"{based.branch} の MVV を読めない: {exc}") from exc
 
 
-def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
+def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide.Cleaner) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     based = _sync(cfg, g, reader_for)
@@ -259,7 +263,21 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     journal = FindingJournal(store.list_of(data, store.FINDINGS))
-    run = _Run(cfg, g, ref, data, journal, warnings, [], [], snapshot=snap, mvv=snap.identity, mvv_branch=based.branch, sent=synced.remote)
+    run = _Run(
+        cfg,
+        g,
+        ref,
+        data,
+        journal,
+        warnings,
+        [],
+        [],
+        snapshot=snap,
+        mvv=snap.identity,
+        mvv_branch=based.branch,
+        sent=synced.remote,
+        clean=clean,
+    )
     if rebound:
         _save(run)
     _ingest_pending(run)
@@ -566,6 +584,30 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
+def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
+    """MVV に反するとした指摘と根拠の記述の誤りを MVV の記録に残し、結果 JSON の `outputs.mvv` を返す（承認済みの MVV が無ければ None）。
+
+    対象のコミットは、PR に届いた最後のコミット（指摘にする誤りは、このコミットで確かめたものだけである）。自由記述を伏せられない
+    ときも、記録を書けないときも、レビューの終わり方は変えず、注意に載せる。
+    """
+    snap = criteria_decide.approved(run.snapshot)
+    if snap is None:
+        return None
+    rows, seen = list(run.journal.rows.values()), report_decide.once(run.clean)
+    out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
+    if seen.failure is not None:
+        run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")
+    try:
+        mvv.record_review(run.cfg.worktree, run.ref.current_pr, run.sent, snap, rows, seen if seen.failure is None else None)
+    except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
+        run.warnings.append(f"MVV の記録を書けない（次の起動で書く）: {exc}")
+        return out
+    if seen.failure is not None:
+        later = "次の起動で書き直す。それまで設計承認ゲートは省かない"
+        run.warnings.append(f"MVV の記録（mvv-validation.jsonl）の自由記述を伏せて書いた（{later}）: {seen.failure}")
+    return out
+
+
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。
     前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
@@ -573,7 +615,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused)
+    results = _mvv_results(run)
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused, results)
 
 
 class _Prepared(NamedTuple):
@@ -742,17 +785,23 @@ def _reusable(run: _Run) -> bool:
     return not open_ and not handed
 
 
-def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
+def drive(
+    cfg: RunConfig,
+    launch: Launcher = agents.run_agent,
+    reader_for: Optional[ReaderFor] = None,
+    clean: report_decide.Cleaner = run_log.redact,
+) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。
+    `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
-    run = _start(cfg, reader_for)
+    run = _start(cfg, reader_for, clean)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)

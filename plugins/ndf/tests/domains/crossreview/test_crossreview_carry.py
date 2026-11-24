@@ -121,7 +121,11 @@ def test_issue_4090_5_judgements_of_an_earlier_mvv_are_dropped() -> None:
 def test_carried_item_missing_from_the_mvv_is_an_ordinary_finding_with_a_warning() -> None:
     listed, _ = prior_decide.recorded([_published(_left())])
     journal = _resumed(listed, items=("Mission", "C7"))
-    assert _marks(journal) == {VALUE: {}, REDLINE: {"mvv": "C7", "redline": True, "redline_items": ["C7"], "judged_mvv": V11}, CITATION: {"judged_mvv": V11}}
+    assert _marks(journal) == {
+        VALUE: {},
+        REDLINE: {"mvv": "C7", "redline": True, "redline_items": ["C7"], "judged_mvv": V11},
+        CITATION: {"judged_mvv": V11},
+    }
     assert journal.rows["p-r1-1"]["severity"] == "minor"
     [warning] = journal.warnings
     assert "p-r1-1" in warning and "MVV の項目" in warning and "p-r1-2" not in warning

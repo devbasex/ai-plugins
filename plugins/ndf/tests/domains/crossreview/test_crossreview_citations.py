@@ -633,7 +633,7 @@ def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Rep
     def checked(*args: Any) -> Any:
         calls = count_git(monkeypatch)
         got = check(*args)
-        order.append(calls)
+        order.append(list(calls))
         return got
 
     monkeypatch.setattr(drive, "_save", lambda run: order.append("save") or save(run))
