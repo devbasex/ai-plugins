@@ -153,8 +153,8 @@ def failed_runtimes(outcomes: str) -> list[tuple[str, str]]:
 
 
 def _mismatch(item: object) -> tuple[str, str, str] | None:
-    """食い違いの項目の（相手・見本・課題に載せる説明）。相手か見本が決めた形に合わなければ None"""
-    if not isinstance(item, dict):
+    """食い違いの項目の（相手・見本・課題に載せる説明）。食い違いでないか、相手か見本が決めた形に合わなければ None"""
+    if not isinstance(item, dict) or item.get("kind") != "mismatch":
         return None
     peer, sample = item.get("peer"), item.get("sample")
     if not (isinstance(peer, str) and isinstance(sample, str)):
@@ -181,11 +181,12 @@ def mismatches(samples: Path) -> dict[str, list[str]]:
     for item in items if isinstance(items, list) else ():
         if isinstance(item, dict) and item.get("kind") == "unreachable":
             continue
-        got = _mismatch(item) if isinstance(item, dict) and item.get("kind") == "mismatch" else None
+        got = _mismatch(item)
         if got is None:
             dropped += 1
-        else:
-            found.setdefault(got[0], []).append(f"{got[1]}: {got[2]}")
+            continue
+        peer, sample, detail = got
+        found.setdefault(peer, []).append(f"{sample}: {detail}")
     if dropped:
         print(f"WARNING: 決めた形に合わない項目を数えなかった: {dropped} 件", file=sys.stderr)
     return dict(sorted(found.items()))
