@@ -118,9 +118,14 @@ def test_count_tests_ignores_unparsable_files_removed_first(tree):
 # --- count_jobs
 
 
+def _jobs_only(*names: str) -> str:
+    """ジョブだけを持つワークフローの本文。"""
+    return "on: push\njobs:\n" + "".join(f"  {name}:\n    runs-on: u\n" for name in names)
+
+
 def test_count_jobs_sums_two_workflows(tree):
-    a = tree.write_repo(".github/workflows/a.yml", "on: push\njobs:\n  x:\n    runs-on: u\n  y:\n    runs-on: u\n")
-    b = tree.write_repo(".github/workflows/b.yml", "on: push\njobs:\n  z:\n    runs-on: u\n")
+    a = tree.write_repo(".github/workflows/a.yml", _jobs_only("x", "y"))
+    b = tree.write_repo(".github/workflows/b.yml", _jobs_only("z"))
     assert budget.count_jobs([read_workflow(a), read_workflow(b)]) == 3
 
 
