@@ -237,7 +237,7 @@ plugins/ndf/
 | `_settle_resolved` | `crossreview/drive.py` | 変更 | （同じ） | `by` が `ndf` の指摘を飛ばす（終わり方を変えない） |
 | `citation_key` | `journal.py` | 新設 | `citation_key(error: Mapping[str, Any]) -> str` | 誤りの照合キー。`[path, cited, kind]` の生の値を区切りの曖昧さの無い JSON（`json.dumps(..., ensure_ascii=False, separators=(",", ":"))`）にした UTF-8 の SHA-256 の 16 進を返す。伏せ字も鍵も通さない（キーは手元のジャーナルだけに置き、公開のコメントに載せない） |
 | `_Run` | `crossreview/drive.py` | 変更 | 欄 `clean: Callable[[Sequence[str]], Sequence[str]]`・`snapshot: Snapshot`・`mvv: str`・`checked_head: Optional[str]`・`last_target: Optional[_Target]`・`citations: dict` を足す | `clean` は `_start` が記録のコメントに渡すのと同じ `hub.clean` を置き、`_summary` が `mvv_outputs` と `record_review` に渡す（`_citations` は使わない）。`snapshot` は起動の始めに `current` が返した値、`mvv` は今回の識別子。`checked_head` は確かめが最後に成功した head、`citations` は（merge-base・head・識別子）→ 成功した確かめの結果、`last_target` は最後のラウンドの対象 |
-| `FindingJournal.ingest_citations` | `journal.py` | 新設 | `ingest_citations(self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: str)` | 下の規則。誤りごとに `citation_key` を作って突き合わせる。`clean` を呼ばない |
+| `FindingJournal.ingest_citations` | `journal.py` | 新設 | `ingest_citations(self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: str) -> bool` | 下の規則。指摘を足したか、既存の指摘の欄の値が変わったときだけ真を返す。誤りごとに `citation_key` を作って突き合わせる。`clean` を呼ばない |
 
 - `parse_citation`
   - 候補: 左から空白と `- ` を除いた先頭が `根拠:` で、`MVV` を含むか、`decision` が真
@@ -315,7 +315,7 @@ plugins/ndf/
 | `_review_diff` | `+++ b/<パス>` と `@@ -a,b +c,d @@` の形で出る | 利用者の設定 `diff.noprefix=true`・`diff.mnemonicPrefix=true`・`diff.context=0`・`diff.suppressBlankEmpty=true` と `textconv` の属性を置いたリポジトリでも、同じ差分が出て `_citations` が根拠の行の誤りを拾う | — |
 | `_base_lines` | hunk の前後の行を換算する | ファイルの先頭と末尾の hunk | 足した行 → None |
 | `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git を打たず、1 回目と同じ結果を返す。同じ別リポジトリへの参照を含む誤りが 3 件ある確かめで、`clean` の呼び出しと公開範囲の照会（`hub.visibilities`）が 0 回。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
-| `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない） | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。その指摘は結果を返す前に状態ファイルにあり、記録のコメントの一覧にも載る。同じ状態ディレクトリの打ち直しで確かめが失敗しても未解決のまま残る。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
+| `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たず、ジャーナルが変わらないので状態ファイルも書き直さない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない） | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。その指摘は結果を返す前に状態ファイルにあり、記録のコメントの一覧にも載る。同じ状態ディレクトリの打ち直しで確かめが失敗しても未解決のまま残る。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
 | `citation_key`・`ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の指摘。前のバージョンの `P1` を引いた誤り → `mvv` も `redline` も持たず `handable` に入り、残れば `mvv_unresolved`。消えた誤り → `fixed`。同じ状態ディレクトリでの再開で同じ誤りを再検出 → 元の指摘が未解決のまま置き直され、新しい指摘を足さない。`citation_key` は生の `[path, cited, kind]` だけで決まり、伏せ字の規則・秘密の環境変数・参照先の公開範囲を変えても同じ | 照合キーを持たない `by: ndf` の指摘（記録のコメントから戻した指摘）がある状態で同じ誤りを再検出 → 元の指摘が `fixed`・新しい指摘が 1 回だけ足される。識別子の違う既存の指摘も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
 | `apply_fix` | `by: ndf` の指摘への `deferred` は終わり方を変えない | — | — |
 | `_settle_resolved` | 普通の指摘は今どおり `fixed` | `by: ndf` の指摘は `unresolved` のまま | — |
@@ -404,7 +404,7 @@ plugins/ndf/
 
 - `_summary` の手順
   1. 承認済みの MVV があるか（`snap.state == "approved"`）を最初に判定する。承認済みで再利用でないときだけ、終わり方を判定する head で `_final_citations(run, head)` と `ingest_citations` を打つ。承認済みでない（`absent`・`unapproved`）ときは `_final_citations` も `_final_target` も呼ばない（最後の修正で head が変わっても `git merge-base` を打たない）
-     - 再利用でない起動は、`ingest_citations` の後、`finish` の判定・要約・結果の返却より前に `_save(run)` を 1 回打つ（ラウンドの末尾の保存の後に変わったジャーナルを状態ファイルへ残す。記録のコメントも状態ファイルから作るので、最後の修正で初めて見つかった指摘がコメントの一覧にも載る）
+     - `ingest_citations` が真を返したとき（ラウンドの末尾の保存の後にジャーナルが変わったとき）だけ、`finish` の判定・要約・結果の返却より前に `_save(run)` を 1 回打つ。変わらなければ書かない（変わったジャーナルを状態ファイルへ残す。記録のコメントも状態ファイルから作るので、最後の修正で初めて見つかった指摘がコメントの一覧にも載る）
   2. `finish` に `mvv_checked`（承認済みの MVV が無いか、`run.checked_head` が終わり方を判定する head と同じ）を渡す
   3. `run.clean`（記録のコメントと同じ `hub.clean`）を `once` で包んだ値を 1 つ作り、`mvv_outputs`、`record_review` の順に識別子とともに渡す。`record_review` が伏せる値（`reason`・`text`・`cited`）は `mvv_outputs` が伏せる値に含まれるので、`record_review` は照会しない
   4. 包みの `failure` があれば、注意「MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: <原因>」を足して `outputs.mvv` は `WITHHELD` の値のまま返し、`record_review` には `clean=None` を渡して自由記述を持たない記録を書かせ、注意「MVV の記録（mvv-validation.jsonl）の自由記述を伏せて書いた（次の起動で書き直す。それまで設計承認ゲートは省かない）: <原因>」を足す。`record_review` が書けなかったら結果は変えず注意に載せる（`ReviewWrite.missing` と `mvv_record_failed` は #3959）。それ以外の終わり方と結果の返却は変えない
