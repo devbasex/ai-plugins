@@ -77,11 +77,6 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。CI で動く | — | — | `docs/specifications/ndf-issue-items.md` |
 | 工程が足すセクション | — | 起票の後に工程が Issue の本文へ書き足すセクション（進行・承認ゲートの回答・閉じた理由・再発など）。起票者は書かない | 工程が足す節 | — | `docs/specifications/ndf-issue-items.md` |
 | 保存先ごとの表し方 | — | 記載項目を、課題の保存先ごとにどの欄・セクション・ラベルで表すかの対応 | — | — | `docs/specifications/ndf-issue-items.md` |
-| 棚卸しの実行 | — | 棚卸しを 1 回流すまとまり。オーナーを持つ実行は owner claim が返した識別子（run）で区別する | — | — | — |
-| 棚卸しの記録の保存先 | — | upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の保存先）と、実行ごとの保存先を持つ | — | — | — |
-| 候補の記録 | — | candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む | — | — | — |
-| 棚卸しの回 | — | 1 回の candidates から始まり、続く apply・rank・report が読み書きする候補・反映・順位の記録のまとまり。実行の識別子を渡した candidates は、その実行の回を実行ごとの保存先に始める | — | — | — |
-| 実行ごとの保存先 | — | 棚卸しの記録の保存先の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/） | — | — | — |
 | 見積の入力 | — | ndf issues rank --scores に渡す、課題ごとの見積の段階と根拠の JSON | — | — | `docs/specifications/ndf-issues-rank-estimate-input-and-sources.md` |
 | 見積の根拠 | — | 見積の入力の列ごとの why。段階を付けた理由の 1 行 | — | — | `docs/specifications/ndf-issues-rank-estimate-input-and-sources.md` |
 | 実害の区分 | — | 見積の入力の ubv.impact。UBV の帯（実害の目安）を引く区分 | — | — | `docs/specifications/ndf-issues-rank-estimate-input-and-sources.md` |

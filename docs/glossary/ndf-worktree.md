@@ -18,7 +18,6 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | レビュー worktree | — | cross-review と cross-refactoring が一時的に使う worktree。システムの一時ディレクトリに置く | レビュー用の worktree | — | `plugins/ndf/skills/worktree/SKILL.md` |
 | 依存物 | — | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | — | — | — |
 | 依存の用意 | — | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、設定に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない | — | — | — |
-| 用意のマーカー | — | 依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く | — | — | — |
 | テスト環境 | — | 1 つの worktree に対応して立ち上げる、テスト実行に必要なサービスの一式。番号で識別され、他の worktree とポート・データ保存先・ネットワークを共有しない | — | — | — |
 | テスト環境の用意 | — | 到達の確認が通らないときに、テスト環境を起動して到達を確かめ直すこと | — | — | — |
 | テスト環境のスロット | — | テスト環境へ割り当てる 0〜63 の番号。worktree ごとのポートの計算に使う | — | — | `docs/specifications/ndf-testenv-reclaim.md` |

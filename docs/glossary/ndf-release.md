@@ -30,8 +30,6 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 手動反映の理由 | — | delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | リリースの Pull Request | — | 本番チャネルへ変更を入れる Pull Request。リリースのテンプレートでは `release/v<バージョン>` が、経路 merge ではベースブランチが head になる | 昇格の Pull Request | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
 | リリースの承認資料 | — | リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の HEAD のときだけ本番チャネルへマージする。リリースのテンプレートでは、承認したコミットから比べた HEAD までに版上げなど許可した差分のほかが無いことを確かめ、比べた HEAD をマージする | 昇格の承認資料 | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
-| 載ったバージョン | — | PR が載った正式版。CHANGELOG のバージョンのセクション → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測でバージョンを寄せる規則 | — | — | — |
-| 動いたバージョン | — | 呼び出しや会話を動かした NDF のバージョン（使用量の使用量ログの ndf_version・会話の Skill の保存先のバージョン） | — | — | — |
 | 記録の PR | — | リリース記録（## リリース記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230） | — | — | `docs/specifications/ndf-sprint-close-record-pr-at-run-time.md` |
 | 記録の保存先が分からない | — | まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つエントリポイントと前のバージョンで組んだプランだけが渡す | — | — | `docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md` |
 | 他のプラグイン | — | リリースの設定の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
@@ -69,7 +67,6 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 利用者の設定のスナップショット | — | 利用者の設定ディレクトリの、導入済みのプラグインと取得元の登録をキーと値の組で書き出したもの。リリース後テストの前に取り、後で今の状態と比べる | — | — | — |
 | 対象のバージョン | — | リリース後テストの記録の `対象のバージョン:` の行に書くバージョン。全角の括弧から後ろは注記として読まない。先頭の小文字の `v` の有無は同じバージョンとして扱う | — | — | — |
 | 本番のバージョン | — | リリース記録の `バージョン:` の行の `→` の右に書く、本番へ出したバージョン。全角の括弧から後ろは注記として読まない。読み取った値は先頭の `v` を付けない形にそろえる | — | — | — |
-| バージョンの表記の揺れ | — | 同じバージョンを指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す | — | — | — |
 | デプロイ | — | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | 配布 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 開発版のデプロイ | — | 開発版のチャネルへバージョンを出すことと、検証の環境への反映。フェーズの名前でもある | 検証リリース、検証への配布、開発版の配布 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | デプロイなし | — | リリース記録の段階の値。どの環境へも届けずに工程を終えたこと | 配布なし | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
