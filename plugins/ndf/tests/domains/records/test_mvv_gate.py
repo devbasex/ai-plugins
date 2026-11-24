@@ -16,12 +16,13 @@ from typing import Any
 import git_sandbox
 import pytest
 
-from ndf import contracts
-from ndf.adapters import llm
+from ndf import contracts, identity
+from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
-from ndf.domains.records import cli, jsonl, mvv, mvv_gate
+from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
+from ndf.progress.gate.checks import note, refusals
 
 BODY = "# MVV\n\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | リリース対象の取得元・バージョンの規則を変える | 利用者全員に効く |\n"
 SHA = hashlib.sha256(BODY.encode("utf-8")).hexdigest()
@@ -224,6 +225,90 @@ def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(tmp_path: P
     monkeypatch.setattr(mvv_gate, "_judged", newer)
     with pytest.raises(InternalError):
         mvv_gate.gate(tmp_path, "design", _inputs(), _no_hub, Ask(FOLLOW))
+
+
+def _raising(exc: Exception) -> Any:
+    def open_hub(root: Path) -> Hub:
+        raise exc
+
+    return open_hub
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        mvv_gate.GateError("理由"),
+        git.GitError("理由"),
+        github.GitHubError("理由", 500),
+        mvv.MvvError("理由"),
+        jsonfile.JsonFileError("理由"),
+        identity.IdentityError("理由"),
+        OSError("理由"),
+    ],
+)
+def test_a_failure_before_reading_the_pr_is_the_whole_outcome_without_the_head(
+    repo: Path, exc: Exception, notes: list[tuple[int, str]]
+) -> None:
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "release", _inputs(pr=5), _raising(exc), ask)
+    assert out == {"gate": "release", "skip": False, "verdict": None, "why": [f"MVV 判定を打てない: {exc}"]}
+    assert ask.calls == [] and notes == []
+
+
+def test_an_unlisted_failure_is_not_turned_into_an_outcome(repo: Path) -> None:
+    with pytest.raises(KeyError):
+        mvv_gate.gate(repo, "design", _inputs(), _raising(KeyError("x")), Ask(FOLLOW))
+
+
+def test_machine_checks_before_the_pr_return_every_reason_without_the_head_or_a_note(repo: Path, notes: list[tuple[int, str]]) -> None:
+    out = mvv_gate.gate(repo, "design", _inputs(mvv_ref=None), _no_hub, Ask(FOLLOW))
+    facts, _ = mvv_gate.base_facts(repo, _inputs(mvv_ref=None))
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": refusals(facts)} and out["why"]
+    assert notes == []
+
+
+@pytest.mark.parametrize(
+    ("files", "why"),
+    [
+        ([{"filename": "docs/a.md", "status": "modified"}], "レッドラインのパスに当たる: docs/a.md"),
+        ([{"filename": "src/a.py", "status": "modified", "changes": 3}], "差分の全体を材料に載せられない: src/a.py"),
+    ],
+)
+def test_checks_after_reading_the_pr_return_the_head_and_leave_a_note(
+    repo: Path, files: list[dict[str, Any]], why: str, notes: list[tuple[int, str]]
+) -> None:
+    (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": ["docs/**"]}), encoding="utf-8")
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files, "head": "a" * 40}), Ask(FOLLOW))
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40}
+    assert notes == [(5, note("design", None, [why]))]
+
+
+def test_a_verdict_that_keeps_the_gate_returns_the_verdict_and_the_head(repo: Path, notes: list[tuple[int, str]]) -> None:
+    case = {"body": "変更", "files": [], "head": "a" * 40}
+    verdict = DESIGN_2213["verdict"]
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), Ask(verdict))
+    why = ["レッドラインに当たる: " + " / ".join(verdict["boundary"])]
+    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40}
+    assert notes == [(5, note("design", verdict, why))]
+
+
+def test_a_note_that_cannot_be_posted_turns_a_skip_into_an_outcome_without_the_verdict_or_the_head(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(hub: Any, number: int, text: str) -> None:
+        raise github.GitHubError("書けない", 403)
+
+    monkeypatch.setattr(mvv_gate, "post_note", fail)
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": []}), ask)
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["MVV 判定を打てない: 書けない"]} and len(ask.calls) == 1
+
+
+def test_the_mode_without_the_gate_is_told_before_the_pace(tmp_path: Path) -> None:
+    out = mvv_gate.gate(tmp_path, "design", {"pace": "normal"}, _no_hub, Ask(FOLLOW))
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["モード None は承認ゲート design を持たない"]}
+    out = mvv_gate.gate(tmp_path, "design", {"mode": "standard"}, _no_hub, Ask(FOLLOW))
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["進め方 None は承認ゲートを MVV 判定で省かない"]}
 
 
 def test_the_release_gate_needs_the_pr_in_the_context(repo: Path) -> None:
