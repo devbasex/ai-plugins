@@ -2,147 +2,239 @@
 
 [issue-3960-design.md](./issue-3960-design.md) の決定 4 とテスト設計が使う 4 つのコマンドである。どれもリポジトリの根で打つ。`<base>` は変更の前のコミットで、`main` を取り込んだ後は `git merge-base HEAD origin/main` である。
 
-## 参照の確かめ（条件 2・3・5・6）
+## 共通の読み込み
 
-下を `/tmp/refs.py` に置く。`list` で一覧のひな形を作り、分類を埋めてから `check` を打つ。`main` を取り込んで候補が増えたら、`check` が挙げた行を一覧に足す。
+下を `/tmp/gitread.py` に置く。変更の前の中身は、ファイルの数によらず `git cat-file --batch` の 1 回で読む。git の起動は、参照の `list` が 2 回・`check` が 3 回、構文木が 4 回、値が 2 回、子の表が 1 回である。
+
+```python
+import subprocess
+def git(*a):
+    return subprocess.run(["git", *a], capture_output=True, check=True).stdout
+def blobs(rev, names):
+    """`rev` の時点の中身を、git cat-file --batch の 1 回でまとめて読む。"""
+    names = list(names)
+    ask = "".join(f"{rev}:{n}\n" for n in names).encode()
+    out = subprocess.run(["git", "cat-file", "--batch"], input=ask, capture_output=True, check=True).stdout
+    held, at = {}, 0
+    for n in names:
+        end = out.index(b"\n", at)
+        size = int(out[at:end].split()[2])
+        held[n] = out[end + 1:end + 1 + size]
+        at = end + size + 2
+    return held
+```
+
+## 参照の確かめ（条件 1・2・3・5・6）
+
+下を `/tmp/refs.py` に置く。`list` で一覧のひな形を作り、分類を埋めてから `check` を打つ。`main` を取り込んで候補が変わったら `list` を打ち直す。埋めた分類は引き継ぎ、増えた行だけが空で出る。
 
 ```bash
-python3 /tmp/refs.py list <base> - > /tmp/refs.tsv
+python3 /tmp/refs.py list <base> /tmp/refs.tsv > /tmp/refs.new && mv /tmp/refs.new /tmp/refs.tsv
 python3 /tmp/refs.py check <base> /tmp/refs.tsv
 ```
 
 ```python
-import collections, re, subprocess, sys
-mode, base, ledger = sys.argv[1], sys.argv[2], sys.argv[3]
+import collections, pathlib, re, sys
+from gitread import blobs, git
+mode, base, ledger = sys.argv[1:4]
 NL = r"[ \t]*(?:\n[ \t]*#?[ \t]*)?"
 SEP = NL + r"(?:[・、,，〜～\-–]|と|及び|および)" + NL
-RUN = re.compile(r"決定" + NL + r"(\d+)((?:" + SEP + r"(?:決定" + NL + r")?\d+)*)")
-PATH = re.compile(r"(?<!docs/glossary/)ndf-rebuild[a-z-]*\.md")
-FORM = re.compile(r"docs/specifications/(ndf-rebuild(?:-[a-z]+)*\.md) の決定 (\d+(?:・\d+)*)(?!\d)(?!" + SEP + r"(?:決定" + NL + r")?\d)")
-SECTION = re.compile(r"docs/specifications/ndf-rebuild(?:-[a-z]+)*\.md の「[^」\n]+」")
+MORE = "(?:" + SEP + r"(?:決定" + NL + r")?\d+)"
+RUN = re.compile(r"決定" + NL + r"\d+" + MORE + "*")
+OLD_PATH = re.compile(r"issue-(?:1142|3347|3395|3388)-[a-z0-9-]+(?:\.md)?")
+SPEC_PATH = re.compile(r"(?<!docs/glossary/)ndf-rebuild[a-z-]*\.md")
+FORM = re.compile(r"docs/specifications/(ndf-rebuild(?:-[a-z]+)*\.md) の決定 (\d+(?:・\d+)*)(?!\d)(?!" + MORE + ")")
+SECTION = re.compile(r"docs/specifications/(ndf-rebuild(?:-[a-z]+)*\.md) の「([^」\n]+)」")
 KINDS = ("書き換え", "別の設計", "移設対象外", "決められない")
-def git(*a):
-    return subprocess.run(["git", *a], capture_output=True, check=True).stdout
+CHECKS = "plugins/ndf/src/ndf/checks/"
+OTHER = (CHECKS + "children.json", CHECKS + "rules.json")  # 設計文書のパスは値の確かめが見る
+REQUIRED = {CHECKS + "invariants.py": "ndf-rebuild.md「常に成り立つ条件」",
+            "plugins/ndf/src/ndf/core/plan/transition_decide.py": "ndf-rebuild-scripted-flow.md「洗い出しの一覧」"}
+UNMOVED = "ndf-rebuild.md「番号の対応表」"
 def texts(rev):
-    names = git("ls-tree", "-rz", "--name-only", rev, "plugins/ndf") if rev else git("ls-files", "-z", "plugins/ndf")
-    for name in names.decode().split("\0"):
+    if rev:
+        held = blobs(rev, (n for n in git("ls-tree", "-rz", "--name-only", rev, "plugins/ndf").decode().split("\0") if n))
+    else:
+        held = {n: pathlib.Path(n).read_bytes() for n in git("ls-files", "-z", "plugins/ndf").decode().split("\0") if n and pathlib.Path(n).is_file()}
+    for name, raw in held.items():
         try:
-            if name:
-                yield name, (git("show", f"{rev}:{name}") if rev else open(name, "rb").read()).decode()
-        except (UnicodeDecodeError, OSError):
+            yield name, raw.decode()
+        except UnicodeDecodeError:
             continue
-def runs(name, text):
+def old_refs(name, text):
+    """古い形の参照の（位置・番号かパスの並び）。番号の並びは 1 つの組で、範囲は展開する。"""
+    found = []
     for m in RUN.finditer(text):
-        parts = re.findall(r"(\D*)(\d+)", m[0])
         nums = []
-        for sep, n in parts:
+        for sep, n in re.findall(r"(\D*)(\d+)", m[0]):
             nums += range(int(nums[-1]) + 1, int(n) + 1) if nums and re.search("[〜～]", sep) else [int(n)]
-        line = text[text.rfind("\n", 0, m.start()) + 1:].split("\n")[0]
-        for n in nums:
-            yield name, line.strip().replace("\t", " "), str(n)
-found = collections.Counter()
+        found.append((m.start(), [str(n) for n in nums]))
+    if name not in OTHER:
+        found += [(m.start(), [m[0]]) for m in OLD_PATH.finditer(text)]
+    return sorted(found)
+def candidates(name, text):
+    """組の並び。組は（行の文・番号かパス）の並び。"""
+    for pos, tokens in old_refs(name, text):
+        line = text[text.rfind("\n", 0, pos) + 1:].split("\n")[0].strip().replace("\t", " ")
+        yield [(name, line, t) for t in tokens]
+groups = [g for name, text in texts(base) for g in candidates(name, text)]
+flat = [c for g in groups for c in g]
+rows = [l.split("\t") for l in open(ledger, encoding="utf-8").read().splitlines()] if pathlib.Path(ledger).is_file() else []
 if mode == "list":
-    for name, text in texts(base):
-        for row in runs(name, text):
-            print("\t".join([*row, "", "", ""]))
+    kept = collections.defaultdict(list)
+    for r in rows:
+        kept[tuple(r[:3])].append(r[3:])
+    total = collections.Counter(flat)
+    kept = {c: olds if len(olds) == total[c] else [] for c, olds in kept.items()}
+    for c in flat:
+        print("\t".join([*c, *(kept[c].pop(0) if kept.get(c) else ["", "", ""])]))
     sys.exit()
-held = {}
-def decisions(name):
+def headings(name, held={}):
     if name not in held:
-        try:
-            held[name] = set(re.findall(r"^#{2,4} 決定 (\d+)", open("docs/specifications/" + name, encoding="utf-8").read(), re.M))
-        except OSError:
-            held[name] = set()
+        path = pathlib.Path("docs/specifications") / name
+        held[name] = re.findall(r"^#{2,4} (.+)$", path.read_text(encoding="utf-8"), re.M) if path.is_file() else []
     return held[name]
 bad = []
-rows = [l.split("\t") for l in open(ledger, encoding="utf-8").read().splitlines()]
 for r in rows:
-    if len(r) != 6 or r[3] not in KINDS or not r[5] or (r[3] == "書き換え") != bool(r[4]):
+    r += [""] * (6 - len(r))
+    path, new = not r[2].isdigit(), r[4]
+    if r[3] == "書き換え":
+        ok = bool(re.search("#|「", new)) or (path and new == "=")
+    else:
+        ok = r[3] in KINDS and new == (UNMOVED if path else "")
+    if not ok or not r[5].strip():
         bad.append(f"一覧の行の形: {r}")
-        r += [""] * (6 - len(r))
-want = collections.Counter(row for name, text in texts(base) for row in runs(name, text))
-have = collections.Counter((r[0], r[1], r[2]) for r in rows)
-bad += [f"候補が一覧に無い: {k}" for k in want - have] + [f"候補に無い一覧の行: {k}" for k in have - want]
-new_want = collections.Counter((r[0], r[4]) for r in rows if r[3] == "書き換え")
-old_want = collections.Counter((r[0], r[2]) for r in rows if r[3] != "書き換え")
-new_have, old_have = collections.Counter(), collections.Counter()
+if [tuple(r[:3]) for r in rows] != flat:
+    have, want = collections.Counter(tuple(r[:3]) for r in rows), collections.Counter(flat)
+    bad += [f"候補が一覧に無い: {k}" for k in want - have] + [f"候補に無い一覧の行: {k}" for k in have - want]
+    bad.append("一覧の並びが候補と違う（list で並べ直す）")
+    print("\n".join(bad))
+    print("違反", len(bad), "件")
+    sys.exit(1)
+left, want, untouched = iter(rows), collections.defaultdict(list), collections.defaultdict(list)
+for g in groups:
+    items = []
+    for name, line, token in g:
+        r = next(left)
+        items += [("new", r[4])] if r[4] not in ("", "=") else [("old", token)] if not r[4] else []
+        untouched[name, line].append(not r[4])
+    want[g[0][0]].append(items)
+refs, seen = 0, set()
 for name, text in texts(None):
-    spans = []
+    seen.add(name)
+    spans, found = [], []
     for m in FORM.finditer(text):
         spans.append(m.span())
         for n in m[2].split("・"):
-            new_have[name, f"{m[1]}#{n}"] += 1
-            if n not in decisions(m[1]):
-                bad.append(f"決定が無い: {name} {m[0]}")
-    spans += [m.span() for m in SECTION.finditer(text)]
-    for m in PATH.finditer(text):
+            found.append((m.start(), ("new", f"{m[1]}#{n}")))
+            if not any(h.startswith(f"決定 {n}:") for h in headings(m[1])):
+                bad.append(f"決定が無い: {name} {m[1]} の決定 {n}")
+    for m in SECTION.finditer(text):
+        spans.append(m.span())
+        if name not in OTHER:
+            found.append((m.start(), ("new", f"{m[1]}「{m[2]}」")))
+        if m[2] not in headings(m[1]):
+            bad.append(f"見出しが無い: {name} {m[0]}")
+    for m in SPEC_PATH.finditer(text):
         if not any(a <= m.start() < b for a, b in spans):
             bad.append(f"形が違う: {name} {text[m.start():m.start() + 60]!r}")
     rest = list(text)
     for a, b in spans:
         rest[a:b] = "\0" * (b - a)
-    for _, _, n in runs(name, "".join(rest)):
-        old_have[name, n] += 1
-for label, w, h in (("新しい形", new_want, new_have), ("残した参照", old_want, old_have)):
-    bad += [f"{label}が足りない: {k} {c} 件" for k, c in (w - h).items()] + [f"{label}が余る: {k} {c} 件" for k, c in (h - w).items()]
+    found += [(p, ("old", t)) for p, ts in old_refs(name, "".join(rest)) for t in ts]
+    found = [item for _, item in sorted(found, key=lambda f: f[0])]
+    refs += sum(kind == "new" for kind, _ in found)
+    at = 0
+    for items in want.get(name, []):
+        now = found[at:at + len(items)]
+        if sorted(now) != sorted(items):
+            bad.append(f"並びが一覧と違う: {name} {at + 1} 番目から {items} のはずが {now}")
+            break
+        at += len(items)
+    else:
+        if found[at:]:
+            bad.append(f"一覧に無い参照: {name} {found[at:]}")
+    lines = {l.strip().replace("\t", " ") for l in text.split("\n")}
+    bad += [f"残す行が変わった: {name} {line}" for (n, line), keep in untouched.items() if n == name and all(keep) and line not in lines]
+    if name in REQUIRED and ("new", REQUIRED[name]) not in found:
+        bad.append(f"決めたセクションを指していない: {name} {REQUIRED[name]}")
+    bad += [f"設計文書のパスが残る: {name} {m[0]}" for m in OLD_PATH.finditer(text)]
+bad += [f"ファイルが無い: {name}" for name in sorted(set(want) - seen)]
 print("\n".join(bad))
-print("参照", sum(new_have.values()), "件・残した参照", sum(old_have.values()), "件・違反", len(bad), "件")
+print("候補", len(flat), "件・新しい参照", refs, "件・違反", len(bad), "件")
 sys.exit(bool(bad))
 ```
 
-候補は、`決定` に続く番号の並びを番号ごとに数える（`・`・`、`・`〜`・改行・2 つ目の「決定」を挟む並びも拾い、範囲は展開する）。番号でない数を拾った候補（例: 「決定 14 と 2026-11-20」）は、根拠を添えて `別の設計` に分ける。`check` は次の 5 つを見る。
+候補は 2 種類で、ファイルの中の並びの順に出る。
 
-1. 候補と一覧が過不足なく合う
-2. 確定仕様のパスを書く箇所が、番号の形かセクションの名前の形だけである
-3. 指す決定の見出しがある
-4. 書き換えた参照の数が、ファイルと番号ごとに一覧と合う
-5. 残した参照の数が、ファイルと番号ごとに一覧と合う
+- `決定` に続く番号。番号ごとに 1 件と数える（`・`・`、`・`〜`・改行・2 つ目の「決定」を挟む並びも拾い、範囲は展開する）。番号でない数を拾った候補（例: 「決定 14 と 2026-11-20」）は、根拠を添えて `別の設計` に分ける
+- 設計文書 36 本のパス（番号の列にファイル名が入る）。`書き換え` の新しい参照には、セクションを指すなら `ndf-rebuild.md「常に成り立つ条件」` の形を書く。同じ文の番号の参照や別のファイルの名前へ畳むなら `=` を書く。`移設対象外` と `決められない` のパスは `ndf-rebuild.md「番号の対応表」` とする。`children.json` と `rules.json` の中のパスは候補に出さず、残りだけを見る
 
-`ed88d9b4a` の候補は 716 件である。`identity.py` の「決定 75・決定 79」を書き換えた形で確かめた結果は次のとおりである。
+`check` は次の 6 つを見る。数ではなく、ファイルの中の並びで 1 件ずつ対応付ける。
+
+1. 候補と一覧が、並びの順まで過不足なく合う
+2. 変更の後の参照の並びが、一覧の並びと 1 件ずつ合う（1 つの「決定」に並ぶ番号の組の中だけは、確定仕様のファイルごとにまとめた並べ替えを許す）
+3. 書き換えの無い候補だけの行は、文が変わらない
+4. 確定仕様のパスを書く箇所が、番号の形かセクションの名前の形だけで、指す決定とセクションの見出しがある
+5. `invariants.py` が「常に成り立つ条件」を、`transition_decide.py` が「洗い出しの一覧」を指す
+6. 設計文書 36 本のパスが 1 つも残らない
+
+`f8c20aae5` の候補は 725 件（番号 716・パス 9）である。設計文書のパスを書く 7 ファイルと、`identity.py` の「決定 75・決定 79」を書き換えた形で確かめた結果は次のとおりである。
 
 | 書き換えた後の文 | 終了コード |
 | --- | ---: |
-| `docs/specifications/ndf-rebuild.md の決定 75・79`（一覧どおり） | 0 |
+| 一覧どおり（`…の決定 75・79`） | 0 |
 | 上と同じで、ほかの行の 1 件を `移設対象外` に分けて残した | 0 |
 | 旧い形のまま残した | 1 |
 | `…の決定 75・決定 999`・`…の決定 75、999`・`…の決定 75〜79`・`…の決定 75・999` | 1 |
 | パスと番号の間、番号と番号の間で改行した | 1 |
 | 1 つだけ旧い形（`…の決定 75・#1142 の決定 79`）・無い文書 | 1 |
-| 一覧から候補を 1 行落とした・別の行の番号も変えた | 1 |
+| 一覧から候補を 1 行落とした・残す行の文を変えた | 1 |
+| `identity.py` の 2 つの「決定 101」のうち、一覧と違うほうを書き換えた（数は同じ） | 1 |
+| `transition_decide.py` の旧いパスを削るだけにした（一覧を `=` にしても）・無い見出しを指した | 1 |
+| `invariants.py` に設計文書のパスを残した | 1 |
 
 ## 子の表の確かめ（条件 7）
 
-下を `/tmp/kids.py` に置き、`python3 /tmp/kids.py <base>` を打つ。`children` と `tables` は変更の前から全項目が変わらないこと、先に要る子・順番・レーン・Issue は変更の前の「子の記号」の 52 件とも合うことを見る。
+下を `/tmp/kids.py` に置き、`python3 /tmp/kids.py <base>` を打つ。`children` と `tables` は変更の前から全項目が変わらないこと、先に要る子・順番・レーン・Issue は変更の前の「子の記号」の 52 件とも合うことを見る。確定仕様の側は、52 件の記号・Issue・中身が変わらないことと、R0・R1 が表の直前の段落に `R0 #3757「<変更の前の中身>」` の形で移ったことを見る。
 
 ```python
-import json, re, subprocess, sys
+import json, sys
+from gitread import blobs
 base = sys.argv[1]
-show = lambda p: subprocess.run(["git", "show", f"{base}:{p}"], capture_output=True, text=True, check=True).stdout
 KIDS, SPEC = "plugins/ndf/src/ndf/checks/children.json", "docs/specifications/ndf-rebuild.md"
-old, new = json.loads(show(KIDS)), json.load(open(KIDS, encoding="utf-8"))
+before = {n: raw.decode() for n, raw in blobs(base, (KIDS, SPEC)).items()}
+old, new = json.loads(before[KIDS]), json.load(open(KIDS, encoding="utf-8"))
 def table(text):
     sec = text[text.index("## 子の記号"):text.index("## 決定と理由")]
+    lead = sec[:sec.index("\n|")]
     cells = [[c.strip() for c in line.strip("|").split("|")] for line in sec.splitlines() if line.startswith("|")]
-    return cells[0], {c[0]: c for c in cells[2:]}
+    return lead, cells[0], cells[2:]
 bad = []
 for key in ("children", "tables"):
     for k in sorted(set(old[key]) | set(new[key])):
         if json.dumps(old[key].get(k)) != json.dumps(new[key].get(k)):
             bad.append(f"{key} {k}: {old[key].get(k)} → {new[key].get(k)}")
 kids = new["children"]
-for k, c in table(show(SPEC))[1].items():
+lead, head, body = table(open(SPEC, encoding="utf-8").read())
+rows = {c[0]: c for c in body}
+for c in table(before[SPEC])[2]:
+    k = c[0]
     if k in ("R0", "R1"):
+        if f"{k} {c[1]}「{c[2]}」" not in lead:
+            bad.append(f"表の直前の段落に無い: {k} {c[1]}「{c[2]}」")
         continue
+    if rows.get(k, [])[:3] != c[:3]:
+        bad.append(f"記号・Issue・中身が変更の前と違う: {c[:3]} → {rows.get(k)}")
     want = {"issue": int(c[1].strip("#")), "needs": sorted([] if c[3] == "無し" else c[3].split("・")), "order": int(c[4]), "lane": c[5]}
     got = {**{f: kids.get(k, {}).get(f) for f in want}, "needs": sorted(kids.get(k, {}).get("needs", []))}
     if want != got:
         bad.append(f"変更の前の確定仕様と違う {k}: {want} → {got}")
-head, rows = table(open(SPEC, encoding="utf-8").read())
 if head != ["記号", "Issue", "中身"]:
     bad.append(f"確定仕様の列: {head}")
-if set(rows) != set(kids):
-    bad.append(f"記号の違い: {sorted(set(rows) ^ set(kids))}")
-bad += [f"Issue の違い: {k}" for k in set(rows) & set(kids) if rows[k][1] != f"#{kids[k]['issue']}"]
+if sorted(c[0] for c in body) != sorted(kids):
+    bad.append(f"記号の違い: {sorted(set(rows) ^ set(kids))}（表 {len(body)} 行）")
+bad += [f"Issue か中身が無い: {c}" for c in body if c[1] != f"#{kids.get(c[0], {}).get('issue')}" or not c[2:] or not c[2]]
 if [k for k, v in kids.items() if "ndf.core.refs" in v["packages"]] != ["C4"]:
     bad.append("ndf.core.refs のオーナーが C4 だけでない")
 if new["tables"].get("contracts/limits/") != ["D1", "T1+", "M3a"]:
@@ -152,15 +244,18 @@ print("子", len(kids), "件・違反", len(bad), "件")
 sys.exit(bool(bad))
 ```
 
-- 変更の前（`<base>` と同じ形）: 1（列と、`M3b+`・`R0`・`R1`・`X9` の記号の違い）
+- 変更の前（`<base>` と同じ形）: 1（列・記号の違いと、R0・R1 が段落に無いこと）
 - 「子の記号」だけを決定 1 の形にしたとき: 0（`子 54 件・違反 0 件`）
 - その上で C2 の `needs`・C4 の `packages`・`contracts/limits/` の書き込み元・X9 を 1 つずつ削ったとき: どれも 1
+- X3 の中身を変えた・R0 か R1 の文を消した・変えた・行を重ねた・X9 の中身を空にしたとき: どれも 1
 
 ## 構文木の確かめ（条件 10）
 
-```bash
-python3 - <base> <<'PY'
-import ast, subprocess, sys
+下を `/tmp/tree.py` に置き、`python3 /tmp/tree.py <base>` を打つ。ファイルの集合は全体で比べ、中身は `git diff` が挙げた `.py` だけを読む。
+
+```python
+import ast, sys
+from gitread import blobs, git
 base = sys.argv[1]
 def tree(text):
     t = ast.parse(text)
@@ -168,18 +263,15 @@ def tree(text):
         if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and ast.get_docstring(n, clean=False) is not None:
             n.body[0].value.value = ""
     return ast.dump(t)
-run = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout
-names = run("ls-files", "--", "plugins/ndf/*.py").split()
-old = {n for n in run("ls-tree", "-r", "--name-only", base, "plugins/ndf").split("\n") if n.endswith(".py")}
-bad = sorted(set(names) ^ old)
-for n in sorted(set(names) & old):
-    before, after = run("show", f"{base}:{n}"), open(n, encoding="utf-8").read()
-    if before != after and tree(before) != tree(after):
-        bad.append(n)
+now = {n for n in git("ls-files", "-z", "--", "plugins/ndf/*.py").decode().split("\0") if n}
+old = {n for n in git("ls-tree", "-rz", "--name-only", base, "plugins/ndf").decode().split("\0") if n.endswith(".py")}
+changed = {n for n in git("diff", "-z", "--name-only", "--no-renames", base, "--", "plugins/ndf/*.py").decode().split("\0") if n}
+bad = sorted(now ^ old)
+before = blobs(base, sorted(changed & now & old))
+bad += [n for n, raw in before.items() if tree(raw.decode()) != tree(open(n, encoding="utf-8").read())]
 print("\n".join(bad))
-print("違い", len(bad), "件")
+print("変わった .py", len(before), "件・違い", len(bad), "件")
 sys.exit(bool(bad))
-PY
 ```
 
 - 変更の前: `違い 0 件`
@@ -200,16 +292,22 @@ PY
 | `script-structure.yml` | `REVIEW_ITEMS_PATHS` の決めた替え先 |
 
 ```python
-import json, re, subprocess, sys, tomllib
+import json, re, sys, tomllib
+from gitread import blobs, git
 base = sys.argv[1]
-run = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout
 WF, CK = ".github/workflows/script-structure.yml", "plugins/ndf/src/ndf/checks/"
 OLD, NEW = "issues/issue-1142-design-review-routing.md", "docs/specifications/ndf-review-items.md"
 OLD11, NEW11 = "issue-3388-design-routing.md", "ndf-review-items-11x.md"
+def hide(v, key):
+    """空でない文だけを伏せる。キーの削除・空の文・文字列でない値は違いとして残す。"""
+    if isinstance(v.get(key), str) and v[key].strip():
+        v[key] = "<文>"
 def mask(v):
+    for x in v.values() if isinstance(v, dict) else v if isinstance(v, list) else ():
+        mask(x)
     if isinstance(v, dict):
-        return {k: "" if k == "summary" and isinstance(x, str) else mask(x) for k, x in v.items()}
-    return [mask(x) for x in v] if isinstance(v, list) else v
+        hide(v, "summary")
+    return v
 def loaded(name, text, before):
     v = json.loads(text)
     if name.startswith("plugins/ndf/contracts/"):
@@ -217,11 +315,11 @@ def loaded(name, text, before):
     if name == CK + "rules.json":
         for r in v["facts"]["limit_constants"]:
             if r["name"] == "ndf.adapters.llm.ATTEMPTS":
-                r["reason"] = ""
+                hide(r, "reason")
         if before and v["spec"]["review_items_source"] == OLD:
             v["spec"]["review_items_source"] = NEW
     if name == CK + "children.json":
-        v["summary"] = ""
+        hide(v, "summary")
         for i in v["review_items"] if before else []:
             i["routed_to"] = [NEW11 if r == OLD11 else r for r in i["routed_to"]]
     return v
@@ -235,15 +333,17 @@ def value(name, text, before):
     if name == "plugins/ndf/bin/ndf-claude":
         return [l for i, l in enumerate(text.splitlines()) if i == 0 or not re.match(r"\s*#", l)]
     return text
-bad = []
-for line in run("diff", "--raw", "--no-renames", base, "--", "plugins/ndf", WF).splitlines():
+bad, targets = [], []
+for line in git("diff", "--raw", "--no-renames", base, "--", "plugins/ndf", WF).decode().splitlines():
     meta, name = line.split("\t")
     modes = meta.lstrip(":").split()
     if modes[4] != "M" or modes[0] != modes[1]:
         bad.append(f"追加・削除・モードの変更: {name}")
     elif not name.endswith((".py", ".md")):
-        if value(name, run("show", f"{base}:{name}"), True) != value(name, open(name, encoding="utf-8").read(), False):
-            bad.append(f"説明のほかの値が違う: {name}")
+        targets.append(name)
+for name, raw in blobs(base, targets).items():
+    if value(name, raw.decode(), True) != value(name, open(name, encoding="utf-8").read(), False):
+        bad.append(f"説明のほかの値が違う: {name}")
 print("\n".join(bad))
 print("違い", len(bad), "件")
 sys.exit(bool(bad))
@@ -251,4 +351,5 @@ sys.exit(bool(bad))
 
 - 変更の前: 0
 - 各ファイルで、許す差だけを加えたとき: 0
+- `ATTEMPTS` の `reason` のキーを消す・空の文にする、`contracts/` の `summary` を空にしたとき: どれも 1（空でない文どうしの差だけを許す）
 - limits の数値・依存のバージョン・起動の行・`rules.json` のほかの値・`children.json` の項目の番号・ワークフローのほかの値を 1 つ変えたとき: どれも 1
