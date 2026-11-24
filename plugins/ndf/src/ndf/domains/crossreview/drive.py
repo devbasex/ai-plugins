@@ -493,7 +493,9 @@ def _reviewer_findings(status: agents.AgentStatus, out: Path, runtime: str) -> O
     if status.state != agents.AgentState.DONE:
         return None
     try:
-        text = participants.answer_text(runtime, out) if runtime == participants.FIXER else out.read_text(encoding="utf-8", errors="replace")
+        text = (
+            participants.answer_text(runtime, out) if runtime == participants.FIXER else out.read_text(encoding="utf-8", errors="replace")
+        )
     except OSError:  # noqa: NDF401 ファイル: 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
         return None
     return participants.findings_of(text)

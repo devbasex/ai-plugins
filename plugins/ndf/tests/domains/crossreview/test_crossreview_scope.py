@@ -463,7 +463,12 @@ def test_issue_3955_assignable_uses_each_previous_seat_once(seats, options, want
 
 
 def test_issue_3955_read_by_all_head_counts_a_filled_seat_only_with_stand_in() -> None:
-    rec = {"head": "h1", "verdict": fin.CONVERGED, "reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "r"}]}
+    rec = {
+        "head": "h1",
+        "verdict": fin.CONVERGED,
+        "reviewers": ["codex", "claude"],
+        "filled": [{"seat": "claude", "for": "kiro", "reason": "r"}],
+    }
     state = {"rounds": [rec]}
     for seats in (("codex", "kiro"), ("codex", "claude")):
         assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=seats, stand_in=True)) == "h1"

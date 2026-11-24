@@ -207,7 +207,14 @@ def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
 
 
 def test_issue_3955_no_readable_places_keep_the_current_args():
-    assert claude.permission_args(claude.Permission.TOOLS, "Read") == ["--tools", "Read", "--allowed-tools", "Read", "--permission-mode", "acceptEdits"]
+    assert claude.permission_args(claude.Permission.TOOLS, "Read") == [
+        "--tools",
+        "Read",
+        "--allowed-tools",
+        "Read",
+        "--permission-mode",
+        "acceptEdits",
+    ]
 
 
 def test_issue_3955_readable_places_go_through_claude_call(tmp_path):

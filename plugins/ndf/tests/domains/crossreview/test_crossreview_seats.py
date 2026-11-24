@@ -18,7 +18,6 @@ from ._repos import BRANCH, run_cli
 from .test_crossreview_run import FAIL, FAILED_WITH_FINDINGS, NO_FINDINGS, PR, Fake, _run, _state, seat_of
 
 
-
 def _allow(wt: Path, *allowed: str) -> None:
     """メインディレクトリの `.ndf/runtimes.json` の `allowed` を書く。"""
     from ndf.core.converge import location
@@ -139,8 +138,13 @@ def test_issue_3955_both_refused_reviewers_are_filled_with_two_claudes(wt: Path,
     assert _state(fake.state_dir)["rounds"][0]["reviewers"] == ["claude", "claude-2"]
 
 
-@pytest.mark.parametrize(("refused", "extra"), [({"claude": "c"}, ()), ({"kiro": "k"}, ("--reviewer", "kiro")), ({"codex": "c"}, ("--reviewer", "codex", "--reviewer", "codex"))])
-def test_issue_3955_refused_fixer_or_single_named_reviewer_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch, refused, extra) -> None:
+@pytest.mark.parametrize(
+    ("refused", "extra"),
+    [({"claude": "c"}, ()), ({"kiro": "k"}, ("--reviewer", "kiro")), ({"codex": "c"}, ("--reviewer", "codex", "--reviewer", "codex"))],
+)
+def test_issue_3955_refused_fixer_or_single_named_reviewer_is_precondition(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, refused, extra
+) -> None:
     """受け入れ条件 15 (c)(d)・名指しの数え方: 修正担当か、1 者だけ名指した相手役が断られると、どの担当も起動せずに止まる。"""
     _refuse(monkeypatch, refused)
     fake = Fake(tmp_path / "st", {})
@@ -175,7 +179,10 @@ def test_issue_3955_unread_kiro_seat_is_filled_by_claude_for_the_rest_of_the_run
     assert any("相手役 kiro の席" in w and "failed: 落ちた" in w and "（claude）" in w and w.startswith("round 1") for w in got["warnings"])
     rounds = _state(fake.state_dir)["rounds"]
     filled = [{"seat": "claude", "for": "kiro", "reason": "failed: 落ちた"}]
-    assert [(r["reviewers"], r["filled"], r["scope"]) for r in rounds] == [(["codex", "claude"], filled, "full"), (["codex", "claude"], filled, "since")]
+    assert [(r["reviewers"], r["filled"], r["scope"]) for r in rounds] == [
+        (["codex", "claude"], filled, "full"),
+        (["codex", "claude"], filled, "since"),
+    ]
     findings = _state(fake.state_dir)["findings"]
     assert {f["by"] for f in findings} == {"codex", "claude"}
     since = [p for p in _prompts(fake, "round2-codex.out") + _prompts(fake, "round2-claude.out")]
@@ -200,7 +207,10 @@ def test_issue_3955_first_filled_in_round_two_reads_the_whole_diff(wt: Path, tmp
     (seat,) = _prompts(fake, "round2-claude.out")
     assert f"{fake.input_dir}/round2-full.diff" in seat and "範囲: full" in seat
     assert "doc.md" in fake.inputs["round2-full.diff"] and "doc.md" not in fake.inputs["round2.diff"]
-    assert all(f"{fake.input_dir}/round3.diff" in p and "範囲: since" in p for p in _prompts(fake, "round3-codex.out") + _prompts(fake, "round3-claude.out"))
+    assert all(
+        f"{fake.input_dir}/round3.diff" in p and "範囲: since" in p
+        for p in _prompts(fake, "round3-codex.out") + _prompts(fake, "round3-claude.out")
+    )
     assert "kiro" not in [seat_of(s) for s in fake.launches if s.paths.out.name.startswith("round3-")]
 
 
@@ -346,7 +356,6 @@ def test_issue_3955_old_or_unknown_claude_refuses_only_the_seat(wt: Path, tmp_pa
     assert any("相手役 claude が差分を読めなかった" in w and "refused" in w for w in got["warnings"])
 
 
-
 class _Denied(Fake):
     """席の claude の出力の外側の JSON に、`target`（リクエストで渡した差分のファイルのパスを受け取る）の Read の拒否を足す偽物。"""
 
@@ -360,7 +369,9 @@ class _Denied(Fake):
             found = re.search(r"差分は (\S+?)（", spec.argv[-1])
             assert found is not None
             body = json.loads(spec.paths.out.read_text(encoding="utf-8"))
-            body["permission_denials"] = [{"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": self.target(found.group(1))}}]
+            body["permission_denials"] = [
+                {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": self.target(found.group(1))}}
+            ]
             spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         return status
 
