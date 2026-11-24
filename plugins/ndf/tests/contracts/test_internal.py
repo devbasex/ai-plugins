@@ -194,6 +194,38 @@ def test_the_refusal_does_not_show_the_values():
     assert "sk-test-secret" not in str(exc.value) and "agent_id" in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"sk-test-secret": 1},
+        {"model_usage": {"sk-test-secret": 1}},
+        {"model_usage": {"m": {"sk-test-secret": "x"}}},
+        {"usage": {**TOKENS, "sk-test-secret": 1}},
+    ],
+)
+def test_the_refusal_does_not_show_the_keys_of_the_input(extra):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.write_record("usage", {**USAGE, **extra})
+    assert "sk-test-secret" not in str(exc.value)
+
+
+def test_the_refusal_names_the_missing_field():
+    with pytest.raises(internal.InternalError, match="caller"):
+        internal.write_record("usage", {k: v for k, v in USAGE.items() if k != "caller"})
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ({"version": "11.0.23", "pr": 3}, {"product_version": "11.0.23", "pr": 3}),
+        ({"version": "11.0.22", "product_version": "11.0.23"}, {"product_version": "11.0.23"}),
+        ({"pr": 3}, {"pr": 3}),
+    ],
+)
+def test_plan_outputs_move_the_product_version(old, new):
+    assert internal.plan_outputs(old) == new
+
+
 @pytest.mark.parametrize("at", [AT, "2026-11-23T01:00:00Z", "2026-11-23T01:00:00.123456+00:00"])
 def test_write_keeps_the_time_of_the_caller(at):
     assert internal.write_record("usage", {**USAGE, "at": at})["at"] == at

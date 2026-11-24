@@ -411,13 +411,23 @@ plugins/ndf/
 | `stages/deploy.json` の出力・`release-verification.json`・`layout-review.json` の入力 | `version` | `product_version`（上の「工程の文脈の版」） |
 | 保存済みのスナップショットの入出力 | `version` | `read_record("stage-snapshot", ...)` が移す（同上） |
 
-読む側は、旧い `version` を `outputs` に持つ結果を受けない（結果のスキーマが拒み、`bad_report` になる）。結果は、同じ NDF の中で子プロセスまたは Skill が出してすぐ読む 1 回限りの値で、出す側と読む側の版がそろうためである。旧い名前が残るのは保存済みの値（`outputs_recorded` と スナップショット）だけで、これは `compose_context` と `read_record("stage-snapshot", ...)` が移す。
+子プロセスまたは Skill がその場で出した結果は、旧い `version` を `outputs` に持つなら受けない（結果のスキーマが拒み、`bad_report` になる）。出す側と読む側の版がそろうためである。ただし結果は 1 回限りの値ではなく、プランの状態の保存先にも残り、プランの再開と `ref: version` が更新の後に読む。旧い名前が残る保存済みの値と、今の形へ移す所は次のとおり。
+
+| 保存済みの値 | 移す所 |
+| --- | --- |
+| `outputs_recorded` | `compose_context` |
+| スナップショット | `read_record("stage-snapshot", ...)` |
+| プランの出力の記録 `outputs.json` | `core/plan/records.py` の `_stored_outputs`（`recorded_outputs`・`_add_outputs` が通す） |
+| プランの結果のバックアップ `results/<回>.json` の `outputs` | `core/plan/runner.py` の `stored_result`（`_stored`・`RepoSources.plan_record`・`invoke._previous`・`ndf plan wait` が通す） |
+
+後の 2 つの移し方は `internal.plan_outputs` だけが持つ。プランの出力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。
 
 確かめ（単体テスト）: `cmd_record` の結果 → `invoke.finished`（`deploy` の出力の定義で拾う）→ `outputs_recorded` → `compose_context` → `release-verification` の入力の解決、を 1 本の流れで通し、入力に `product_version` の文字列が渡ることを見る。旧いスナップショット（入力が `version`）と旧い `deploy` の出力を持つ、出荷済みのスプリントを再開した場合も同じ値が渡ることを見る。
 
 ### 結果の版と、形の違う結果
 
 - **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は元の `tool` が `^[a-z][a-z0-9-]*$` に合う文字列ならそれ、無ければ `ndf`・`cause.kind` は `invalid`）を 1 行で出し、`invalid` の終了コードを返す。**代わりの結果の `detail` には、確かめた値も `ValidationError.message` も入れない。** `schema_errors` の文は値やオブジェクト全体を含みうるので、それを標準出力へ移すと、元の結果を出さない措置が効かず、不正な結果に混ざった秘密や利用者のデータが工程や閲覧者へ渡る。`detail` は固定の文「結果 JSON の形が違う（<件数> 件）」に、誤りごとのスキーマの側の場所（`absolute_schema_path`。スキーマのキーと番号だけで値を含まない）と規則の名前（`validator`。例 `required`・`enum`）を足して組む。値を含む誤りの文は、今と同じく標準エラーにだけ書く。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
+- **読む側（プランのステップ。`core/plan/steps.py` の `last_json`）:** 部分的な結果 JSON も受けるので `result.errors` では確かめず、今の版より大きい `version` の結果だけを代わりの `stopped`・`precondition`（`result.refused_newer`）に替える。`outputs`・`routes` を使う前に替わるので、後続のステップへ進まない
 - **読む側（`invoke.read_report`・`_call_skill`）:** 結果の `version` が無ければ版 1、1 なら今の版として `result.errors` で確かめる（今と同じ）。今の版より大きい版は形の違い（`bad_report`）と分け、`stopped`・`precondition`（「新しい版の結果を古い NDF が受け取った。プラグインを更新する」）の `StageResult` にする。整数でない `version` は形の違いとして今の `bad_report` に入れる
 
 ### 関数の仕様

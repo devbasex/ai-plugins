@@ -36,7 +36,7 @@ from ndf.core.plan import queue_decide
 from ndf.core.plan.queue_run import QUEUE_PRS
 from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
-from ndf.core.plan.runner import RUN_FILE, result_path
+from ndf.core.plan.runner import RUN_FILE, stored_result
 from ndf.core.refs.resume import SKIP, DesignPr
 
 # 参照の設定のキー（種類・参照の先・読む outputs のキー・空に解けたときの実行条件）
@@ -383,7 +383,7 @@ class RepoSources:
         run = read_json(state_dir / RUN_FILE)
         if run is None or not isinstance(run.get("key"), str):
             return None
-        found = read_json(result_path(state_dir, durable.run_name(run["key"])))
+        found = stored_result(state_dir, durable.run_name(run["key"]))
         if found is None:
             return None
         outputs = found["outputs"] if isinstance(found.get("outputs"), dict) else {}

@@ -39,6 +39,7 @@ from ndf.core.plan.records import (
     _add_outputs,
     _add_prs,
     _keep_step_gaps,
+    read_result,
     recorded_outputs,
     recorded_prs,
     recorded_step_gaps,
@@ -112,6 +113,11 @@ def waiting_path(state_dir: Path, run: str) -> Path:
 def result_path(state_dir: Path, run: str) -> Path:
     """回 `run`（キーの名前）の結果のバックアップ。"""
     return state_dir / RESULTS_DIR / f"{run}.json"
+
+
+def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
+    """回 `run`（キーの名前）の結果のバックアップ（今の形）。終わっていなければ None。"""
+    return read_result(result_path(state_dir, run))
 
 
 # --- 耐久ワークフロー ---------------------------------------------------------------------
@@ -460,7 +466,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
 
 
 def _stored(inv: Invocation) -> dict[str, Any]:
-    found = read_json(inv.result_path)
+    found = stored_result(inv.state_dir, inv.run_id)
     if found is not None:
         return found
     items = [_run_item(inv)]

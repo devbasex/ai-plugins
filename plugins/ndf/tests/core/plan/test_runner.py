@@ -214,6 +214,21 @@ def test_final_result_ok_carries_the_recorded_prs_and_outputs(two_steps):
     assert out["outputs"] == {"pr": 5, "gaps": []}
 
 
+def test_final_result_moves_outputs_recorded_before_the_rename(tmp_path):
+    records.write_json(tmp_path / records.OUTPUTS_FILE, {"version": "11.0.23", "pr": 5})
+    assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.23", "pr": 5}, [])
+    records._add_outputs(tmp_path, {"product_version": "11.0.24"})
+    assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.24", "pr": 5}, [])
+
+
+def test_stored_result_moves_outputs_backed_up_before_the_rename(tmp_path):
+    old = result.result("plan", "ok", "済んだ", outputs={"version": "11.0.23"})
+    records.write_json(runner.result_path(tmp_path, "r1"), old)
+    got = runner.stored_result(tmp_path, "r1")
+    assert got == {**old, "outputs": {"product_version": "11.0.23"}} and result.errors(got) == []
+    assert runner.stored_result(tmp_path, "none") is None
+
+
 def test_final_result_ok_with_recorded_gaps_is_incomplete(two_steps):
     gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
     _write_records(two_steps, prs=[5], outputs={"pr": 5, "gaps": [gap]})

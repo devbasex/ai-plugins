@@ -128,7 +128,7 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
     if record is None:
         return wait_decide.Watched(plan.name, None)
     run = durable.run_name(record["key"])
-    done = files.read_json(runner.result_path(sdir, run))
+    done = runner.stored_result(sdir, run)
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))

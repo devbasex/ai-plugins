@@ -158,9 +158,17 @@ def newer(obj: Any) -> bool:
 
 def received(obj: Any) -> Optional[dict[str, Any]]:
     """ほかのプロセスや Skill から受けた結果。新しいバージョンなら代わりの `stopped`（precondition）、形が違えば None。"""
-    if newer(obj):
-        return stopped(_safe_tool(obj), "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
+    refused = refused_newer(obj)
+    if refused is not None:
+        return refused
     return obj if not errors(obj) else None
+
+
+def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
+    """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。"""
+    if not newer(obj):
+        return None
+    return stopped(_safe_tool(obj), "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
 
 
 def _safe_tool(obj: Any) -> str:

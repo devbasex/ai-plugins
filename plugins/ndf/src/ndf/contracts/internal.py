@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple, Optional
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from ndf import contracts
 
@@ -73,6 +73,12 @@ def _renamed(row: Row, old: str, new: str) -> Row:
 def _context_v1(row: Row) -> Row:
     """`version` は出した製品のバージョンだった。"""
     return _renamed(row, "version", "product_version")
+
+
+def plan_outputs(raw: Mapping[str, Any]) -> Row:
+    """保存済みのプランの出力（結果の `outputs`。形のバージョンを持たない）を今の形へ移す。旧い `version` は出した製品のバージョンだった。"""
+    moved = {k: v for k, v in raw.items() if k != "version"}
+    return {"product_version": raw["version"], **moved} if "version" in raw else moved
 
 
 def _snapshot_v1(row: Row) -> Row:
@@ -187,15 +193,16 @@ def _validator(schema: str) -> Draft202012Validator:
 
 
 def _require(kind: str, row: Row) -> None:
-    """種類のスキーマに合わなければ `InternalError`。誤りの文は値を含まないもの（欄の名前とスキーマの語）だけで組む。"""
-    errors = [
-        e.message
-        if e.validator in ("required", "additionalProperties")
-        else f"{'/'.join(str(p) for p in e.absolute_path)} が {e.validator} に合わない"
-        for e in _validator(_kind(kind).schema).iter_errors(row)
-    ]
+    """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（入力の値もキーも含まない）。"""
+    errors = {_broken(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
+
+
+def _broken(error: ValidationError) -> str:
+    """破った規則。欠けた欄（`required`）の文はスキーマにある欄の名前だけを含むので添える。"""
+    rule = contracts.broken_rule(error)
+    return f"{rule}: {error.message}" if error.validator == "required" else rule
 
 
 @contracts.cached_reader

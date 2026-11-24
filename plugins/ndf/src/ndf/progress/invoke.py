@@ -725,7 +725,7 @@ def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[s
     record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
     if record is None:
         return None, None
-    return record, plan_files.read_json(plan_runner.result_path(work_dir, durable.run_name(record["key"])))
+    return record, plan_runner.stored_result(work_dir, durable.run_name(record["key"]))
 
 
 def _from_of(command: Any) -> Optional[str]:
