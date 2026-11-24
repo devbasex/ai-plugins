@@ -140,7 +140,7 @@ NDF 11.0.26（取得元の `main` から隔離した設定ディレクトリへ�
 - [ ] 13. 既定のコマンドは作業場所でのコミットまでを行い、push と Pull Request の作成・更新を行わない
 - [ ] 14. 既定のコマンドを決められないとき（例: `branch_strategy` の設定が無い）、`ndf progress next` は工程の記録（`started`・`failed`）を書かずに止まり、決められない理由と、設定のキー `workflow.launch.rebuild` と値の形（コマンドの語の並び）が結果で分かる
 - [ ] 15. （退行）`workflow.launch.rebuild` を設定したリポジトリでは、2 つの工程とも設定のコマンドが変わらずに使われる
-      前提の確認: `plugins/ndf/tests/progress/test_sprint_templates.py` ほか 3 ファイルを実行し 67 件が通った（167ea3bbc。`standard` のスプリントのプランに設定の `ndf-rebuild` が入ることを確かめるテストを含む。ほか 3 ファイルの名前は記録に残っていない。未確認）
+      前提の確認: `plugins/ndf/tests/progress/test_sprint_templates.py` ほか 3 ファイルを実行し 67 件が通った（167ea3bbc。`standard` のスプリントのプランに設定の `ndf-rebuild` が入ることを確かめるテストを含む。67 件が通ったことは確かめた。`test_sprint_templates.py` 以外の 3 ファイルの名前は記録に残っておらず、分からない）
 - [ ] 16. 既定のコマンドを実物の worker で設計書 1 本に打つと、既定のコマンドの結果ファイル（`--out`）に、`document-rebuild` の読み手役の確かめの結果（言い直しと合否）か、読み手役を立てられなかった理由が残る
 - [ ] 17. この課題を閉じる時点の `main` に、`.ndf/project.json` の `workflow.launch.rebuild` と `scripts/launch-document-rebuild.sh` が無い
 
@@ -202,7 +202,7 @@ NDF 11.0.26（取得元の `main` から隔離した設定ディレクトリへ�
 | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- |
 | 代わりの設定とスクリプトを消す Pull Request（既定を足す PR と同じにするか、リリースの後の PR にするか）。非機能の条件の移行性を満たす方を選ぶ。設計の答え（決定 8）: 既定を足す PR では消さず、既定を持つバージョンのリリース後テストが通った後に、消すだけの別の PR を出す | 設計 | 設計承認ゲート |
-| 組み直す worker が読み手役を立てる手段。worker は別のサブエージェントを起動しない規則（`plugins/ndf/agents/worker.md`）があり、`document-rebuild` は読み手役をサブエージェントか `external-ai` で呼ぶと定める。設計の答え（決定 5）: `ndf worker run`（プランのステップが、CLI から `claude -p` で worker を起動するコマンド）が起動する組み直しの worker に限り、読み手役のサブエージェントを立ててよい例外を作り、確かめの結果か立てられなかった理由を結果に残させる | 設計 | 設計承認ゲート |
+| 組み直す worker が読み手役を立てる手段。worker は別のサブエージェントを起動しない規則（本体は `development-workflow` の `agent-layers.md` の役割の表。supervisor がサブエージェントとして起動する `ndf:worker` の定義 `plugins/ndf/agents/worker.md` は、その Tool も外している）があり、`document-rebuild` は読み手役をサブエージェントか `external-ai` で呼ぶと定める。設計の答え（決定 5）: `ndf worker run`（プランのステップが、CLI から `claude -p` で worker を起動するコマンド）が起動する組み直しの worker に限り、読み手役のサブエージェントを立ててよい例外を作り、確かめの結果か立てられなかった理由を結果に残させる | 設計 | 設計承認ゲート |
 | 原稿のパスを差分から決めるか、工程の入力で受け取るか（条件 7 と前提 4 を満たすこと）。設計の答え（決定 4）: 差分から決める。差分にある `issues/` の外の Markdown を原稿とし、`documentation` モードのときだけ選ぶ | 設計 | 設計承認ゲート |
 
 ## 起票者の推定
