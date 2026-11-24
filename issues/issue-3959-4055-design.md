@@ -37,7 +37,7 @@ graph TD
 | #4076 が作る部品 | 振る舞い | 場所 |
 | --- | --- | --- |
 | MVV のコピー | `current(root, ref) -> Snapshot`。ベースブランチの承認済みの MVV のバージョン・sha256・コピーのパス・項目の一覧（`items`）・解決したコミット（`commit`）を返す。ベースの本文が承認の記録と合わなければ `MvvError`。CLI は `ndf records mvv current --base` | `records/mvv.py` |
-| 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py` |
+| 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py`（`citation_errors`）、`records/mvv.py`（`fenced_lines`・`decision_lines`） |
 | cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
 | 共通原則の本文 | `principles()` を `mvv_gate.py` から `mvv.py` へ移す | `records/mvv.py` |
 
