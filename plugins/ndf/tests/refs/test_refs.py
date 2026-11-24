@@ -240,6 +240,15 @@ def test_version_reads_a_result_backed_up_before_the_rename(tmp_path: Path) -> N
     assert got.values == {"v": "1.2.3"}
 
 
+@pytest.mark.parametrize("kind", [refs.VERSION, refs.PLAN_RESULT])
+@pytest.mark.parametrize("stored", ["version", "product_version"])
+def test_the_key_a_plan_wrote_before_the_rename_reads_the_product_version(tmp_path: Path, kind: str, stored: str) -> None:
+    write_result(tmp_path / "rel", OK, {stored: "1.2.3"})
+    src = refs.RepoSources(failing_hub(500))
+    got = refs.resolve([refs.Ref("v", kind, "rel", "version")], refs.Context((), (), tmp_path), src)
+    assert got.values == {"v": "1.2.3"}
+
+
 def test_version_does_not_read_a_stored_result_of_a_newer_version(tmp_path: Path) -> None:
     write_result(tmp_path / "rel", OK, {"product_version": "1.2.3"}, version=2)
     src = refs.RepoSources(failing_hub(500))

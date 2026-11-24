@@ -76,10 +76,14 @@ def _context_v1(row: Row) -> Row:
     return _renamed(row, "version", "product_version")
 
 
-def plan_outputs(raw: Mapping[str, Any]) -> Row:
-    """保存済みのプランの出力（結果の `outputs`。形のバージョンを持たない）を今の形へ移す。旧い `version` は出した製品のバージョンだった。"""
-    moved = {k: v for k, v in raw.items() if k != "version"}
-    return {"product_version": raw["version"], **moved} if "version" in raw else moved
+def stage_value_key(key: str) -> str:
+    """工程どうしで渡す値（プランの出力・工程の入力。形のバージョンを持たない）の今の名前。旧い `version` は出した製品のバージョンだった。"""
+    return "product_version" if key == "version" else key
+
+
+def stage_values(raw: Mapping[str, Any]) -> Row:
+    """保存済みの、工程どうしで渡す値を今の形へ移す。旧い名前と今の名前の両方があれば今の名前の値を残す。"""
+    return {stage_value_key(k): v for k, v in raw.items() if stage_value_key(k) == k or stage_value_key(k) not in raw}
 
 
 def _snapshot_v1(row: Row) -> Row:
@@ -92,7 +96,7 @@ def _snapshot_v1(row: Row) -> Row:
 
 def _stage_v1(stage: Row) -> Row:
     keys = {k: stage[k] for k in ("inputs", "outputs") if isinstance(stage.get(k), list)}
-    return {**stage, **{k: ["product_version" if name == "version" else name for name in names] for k, names in keys.items()}}
+    return {**stage, **{k: [stage_value_key(name) for name in names] for k, names in keys.items()}}
 
 
 def _loop_event_v1(row: Row) -> Row:

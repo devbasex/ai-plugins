@@ -33,7 +33,7 @@ def _add_outputs(state_dir: Path, outputs: dict[str, Any]) -> None:
 def _stored_outputs(state_dir: Path) -> Optional[dict[str, Any]]:
     """`outputs.json` の outputs。旧い形は今の形へ移す。"""
     found = read_json(state_dir / OUTPUTS_FILE)
-    return None if found is None else internal.plan_outputs(found)
+    return None if found is None else internal.stage_values(found)
 
 
 def read_result(path: Path) -> Optional[dict[str, Any]]:
@@ -43,7 +43,7 @@ def read_result(path: Path) -> Optional[dict[str, Any]]:
         raise internal.InternalError("precondition", f"新しいバージョンの保存済みの結果 {path} を古い NDF が読んだ。プラグインを更新する")
     if found is None or not isinstance(found.get("outputs"), dict):
         return found
-    return {**found, "outputs": internal.plan_outputs(found["outputs"])}
+    return {**found, "outputs": internal.stage_values(found["outputs"])}
 
 
 def recorded_outputs(state_dir: Path) -> tuple[Optional[dict[str, Any]], list[str]]:

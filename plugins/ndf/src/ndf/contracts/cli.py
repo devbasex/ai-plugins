@@ -10,7 +10,6 @@ ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] [--next
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import sys
 from pathlib import Path
@@ -130,13 +129,11 @@ def _cmd_emit(a: argparse.Namespace) -> int:
     obj = _result_from_args(a)
     if a.out is None:
         return result.emit(obj, a.code)
-    # 確かめと整形は result.emit に 1 回だけ任せ、出せた行をファイルへ書いてから標準出力へ出す
-    buffer = io.StringIO()
-    code = result.emit(obj, a.code, stream=buffer)
-    line = buffer.getvalue()
-    if line != result.dumps_line(obj) + "\n":  # 形の違う結果の代わりの stopped は、結果ファイルへ書かない
-        sys.stdout.write(line)
-        return code
+    # 確かめと整形は result.line_of に 1 回だけ任せ、出せた行をファイルへ書いてから標準出力へ出す
+    line = result.line_of(obj, a.code)
+    if not line.valid:  # 形の違う結果の代わりの stopped は、結果ファイルへ書かない
+        print(line.text)
+        return line.code
     # `Path` は末尾の `/`・`/.` を落とすので、ディレクトリとして指定された生の引数をファイルの書き込み先にしない
     if worker_paths.names_a_directory(a.out):
         return result.emit(result.stopped(TOOL, "invalid", f"--out {a.out} はディレクトリを指す（ファイルのパスを渡す）"))
@@ -149,11 +146,11 @@ def _cmd_emit(a: argparse.Namespace) -> int:
             if expected is not None:
                 worker_paths.check_dir_id(wd, expected)
             # worker の結果ファイルは私有で書く（`ndf worker run` は共有の保存先で私有でない結果ファイルを受けない）
-            worker_paths.write_file(wd, out.name, line, private=expected is not None)
+            worker_paths.write_file(wd, out.name, f"{line.text}\n", private=expected is not None)
     except worker_paths.EntryUnsafe as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"--out {out} に書けない: {exc}"))
-    sys.stdout.write(line)
-    return code
+    print(line.text)
+    return line.code
 
 
 def parser() -> argparse.ArgumentParser:

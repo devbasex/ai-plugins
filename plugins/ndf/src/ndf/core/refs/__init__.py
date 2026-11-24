@@ -205,8 +205,8 @@ def _target(ref: Ref, ctx: Context) -> Path:
 
 
 def _output(ref: Ref, ctx: Context, src: Sources, default_key: str) -> Union[Any, Unresolved, _Empty]:
-    """参照の先のプランの最後の回が完了で、outputs にキーがあればその値。"""
-    where, key = _target(ref, ctx), ref.key if ref.key is not None else default_key
+    """参照の先のプランの最後の回が完了で、outputs にキーがあればその値。プランが書いた旧いキーは、移した後の今の名前で引く。"""
+    where, key = _target(ref, ctx), internal.stage_value_key(ref.key if ref.key is not None else default_key)
     record = src.plan_record(where)
     if record is None:
         return Unresolved("input_missing", f"{where} に前の回の結果が無い")

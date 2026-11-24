@@ -8,7 +8,7 @@ import pytest
 from ndf import cli, identity
 from ndf.contracts import causes
 from ndf.contracts import cli as contracts_cli
-from ndf.contracts import exit_codes
+from ndf.contracts import exit_codes, result
 
 
 def _run(capsys, *argv):
@@ -207,6 +207,13 @@ def test_emit_explicit_code_writes_out(capsys, tmp_path):
     assert dest.read_text(encoding="utf-8") == line
 
 
+def test_emit_to_a_file_puts_the_result_in_a_line_once(capsys, tmp_path, monkeypatch):
+    real, seen = result.dumps_line, []
+    monkeypatch.setattr(result, "dumps_line", lambda obj: seen.append(obj) or real(obj))
+    assert _emit(capsys, "ok", "--out", str(tmp_path / "r.json"))[0] == 0
+    assert len(seen) == 1
+
+
 @pytest.mark.parametrize(
     ("status", "extra", "err"),
     [
@@ -224,7 +231,7 @@ def test_emit_refusals_write_no_file(capsys, tmp_path, status, extra, err):
     dest = tmp_path / "r.json"
     code, out, told = _emit(capsys, status, *extra, "--out", str(dest))
     assert (code, told) == (2, err)
-    assert json.loads(out)["tool"] == "w" and json.loads(out)["cause"]["kind"] == "invalid"
+    assert json.loads(out)["tool"] == "ndf" and json.loads(out)["cause"]["kind"] == "invalid"
     assert not dest.exists()
 
 

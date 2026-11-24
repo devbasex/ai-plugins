@@ -62,12 +62,14 @@ class Choice(NamedTuple):
 
 
 class Outcome(NamedTuple):
-    """手の実行の結果。`kind` は停止理由の種類、`answer` は承認の回答（期限までに無ければ None）。"""
+    """手の実行の結果。`kind` は停止理由の種類、`answer` は承認の回答（期限までに無ければ None）、`newer` は読めない
+    新しいバージョンの結果で止まったか。"""
 
     status: str
     kind: Optional[str] = None
     retry_after: Optional[float] = None
     answer: Optional[str] = None
+    newer: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,13 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
     return _finish(state, STOPPED, kind, detail)
 
 
+def _after_newer(state: StepState, step: Step, done: Outcome) -> Next:
+    """新しいバージョンの結果を返したステップ。中身を読めないので、プランの `on_cause`・`on_fail`・`retry` を見ずに止まる。"""
+    state = _chose(state, Choice(RULE_STOPPED, chosen.Chooser.SCRIPT, step.id, routing.STOP, done.kind))
+    detail = f"ステップ {step.id} が新しいバージョンの結果を返して {done.kind} で止まった。プラグインを更新する"
+    return _finish(state, STOPPED, done.kind, detail)
+
+
 def _after_gate(state: StepState, step: Step) -> Next:
     """承認ゲートを返したステップ。ルートの表があれば回答を待ち、無ければプランを承認ゲートで終える。"""
     if not step.on_answer:
@@ -209,4 +218,6 @@ def decide(plan: Plan, state: StepState, done: Optional[Outcome]) -> Next:
         return _after_ok(plan, state, step)
     if done.status == GATE:
         return _after_gate(state, step)
+    if done.newer:
+        return _after_newer(state, step, done)
     return _after_stop(plan, state, step, done)

@@ -39,6 +39,12 @@ def test_outcome_of_a_newer_version_is_stopped_before_its_values_are_used(status
     line = json.dumps({"version": 2, "tool": "t", "status": status, "summary": "s", "outputs": {"pr": 3}, "routes": {"approved": "x"}})
     out = steps.outcome_of(_step(), 0, line)
     assert (out["status"], out["kind"], out["outputs"], out["routes"]) == ("stopped", "precondition", None, None)
+    assert out["newer"] is True
+
+
+def test_a_precondition_of_a_readable_result_is_not_newer():
+    line = json.dumps({"tool": "t", "status": "stopped", "summary": "s", "cause": {"kind": "precondition", "detail": "d"}})
+    assert steps.outcome_of(_step(), 3, line)["newer"] is False
 
 
 def test_outcome_ignores_the_version_of_json_that_is_not_a_result():

@@ -8,9 +8,8 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
-from typing import Any, Optional, TextIO
+from typing import Any, NamedTuple, Optional, TextIO
 
 from ndf import contracts, identity
 from ndf.contracts import causes, exit_codes, facts, internal
@@ -31,8 +30,8 @@ ANSWERS = "answers"
 SEVERITIES = "severities"
 # エントリポイントの短い名前（next・routes のコマンドの先頭。パスとバージョンを含めない）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
-# 形の確かめを通っていない結果から引き継いでよい `tool` の形
-_SAFE_TOOL = re.compile(r"[a-z][a-z0-9-]*")
+# 新しいバージョンの結果を止めるときの文（値を含まない）
+NEWER = "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する"
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:
@@ -165,16 +164,11 @@ def received(obj: Any) -> Optional[dict[str, Any]]:
 
 
 def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
-    """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。"""
-    if not newer(obj):
-        return None
-    return stopped(_safe_tool(obj), "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
+    """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。
 
-
-def _safe_tool(obj: Any) -> str:
-    """形の違う結果から引き継ぐ `tool`。決めた形の文字列でなければエントリポイントの名前。"""
-    tool = obj.get("tool") if isinstance(obj, dict) else None
-    return tool if isinstance(tool, str) and _SAFE_TOOL.fullmatch(tool) else ENTRY
+    確かめていない結果の値は `tool` も引き継がない（形の合う秘密が入りうる）。`tool` はエントリポイントの名前にする。
+    """
+    return stopped(ENTRY, "precondition", NEWER) if newer(obj) else None
 
 
 def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
@@ -193,9 +187,16 @@ def dumps_line(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
-def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
-    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、誤りを標準エラーへ書き、代わりの `stopped`（invalid）を
-    1 行で出して invalid の終了コードを返す。"""
+class Line(NamedTuple):
+    """出す結果の 1 行（改行を含まない）と終了コード。`valid` は元の結果の行か（偽なら形の違う結果の代わりの `stopped`）。"""
+
+    text: str
+    code: int
+    valid: bool
+
+
+def line_of(obj: Any, code: Optional[int] = None) -> Line:
+    """結果を確かめ、1 行に 1 回だけ整形する。形が違えば誤りを標準エラーへ書き、代わりの `stopped`（invalid）の行にする。"""
     if code is None:
         code = code_for(obj)
     errs = errors(obj, code)
@@ -203,26 +204,35 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
         errs = errs or ["終了コードを決められない（stopped に cause が無い）"]
         for line in errs:
             print(f"結果の形の誤り: {line}", file=sys.stderr)
-        return _emit_instead(obj, len(errs), stream)
-    print(dumps_line(obj), file=stream or sys.stdout)
-    return code
+        return _instead(obj, len(errs))
+    return Line(dumps_line(obj), code, True)
 
 
-def _emit_instead(obj: Any, count: int, stream: Optional[TextIO]) -> int:
-    """形の違う結果の代わりの `stopped`（invalid）を 1 行で出す。元の結果の値も、値を含みうる誤りの文も入れない。"""
+def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
+    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、誤りを標準エラーへ書き、代わりの `stopped`（invalid）を
+    1 行で出して invalid の終了コードを返す。"""
+    line = line_of(obj, code)
+    print(line.text, file=stream or sys.stdout)
+    return line.code
+
+
+def _instead(obj: Any, count: int) -> Line:
+    """形の違う結果の代わりの `stopped`（invalid）。元の結果の値（`tool` を含む）も、値を含みうる誤りの文も入れない。"""
     detail = "・".join([f"結果 JSON の形が違う（{count} 件）", *contracts.broken_rules(obj, SCHEMA)])
-    tool = _safe_tool(obj)
     try:
-        instead = stopped(tool, "invalid", detail)
+        return Line(dumps_line(stopped(ENTRY, "invalid", detail)), causes.exit_code("invalid"), False)
     except (contracts.ContractError, ValueError):  # 停止理由の表が読めないか、種類が無い
-        return emit_unchecked(tool, "invalid", detail)
-    print(dumps_line(instead), file=stream or sys.stdout)
-    return causes.exit_code("invalid")
+        return Line(dumps_line(_unchecked(ENTRY, "invalid", detail)), exit_codes.unreadable_code(), False)
+
+
+def _unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> dict[str, Any]:
+    """表で確かめずに組んだ `stopped` の結果。"""
+    return result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))
 
 
 def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
     """コントラクトの表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
-    print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
+    print(dumps_line(_unchecked(tool, kind, detail, items)))
     return exit_codes.unreadable_code()
 
 

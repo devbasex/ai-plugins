@@ -347,6 +347,8 @@ def _missing_record(handoff: Handoff, wd: worker_paths.WorkDir) -> bool:
     if handoff.kind not in RECORD_KINDS:
         return False
     report = _read_result(wd, handoff.result_file.name, owned=handoff.owned)
+    if result.newer(report):  # 中身を読めないので再起動せず、`_deliver` が止める
+        return False
     return isinstance(report, dict) and report.get("status") == OK and search_record(report) is None
 
 
@@ -618,15 +620,20 @@ def _load_sources(path: Optional[str]) -> list[Source]:
 
 
 def _deliver(handoff: Handoff, system: str, root: Path, wd: worker_paths.WorkDir) -> tuple[Delivery, Any]:
-    """開いた結果の保存先 `wd` を worker へ渡し、委譲の後に結果ファイルを 1 回だけ読む。読めなければ `bad_report` にして中身を返さない。"""
+    """開いた結果の保存先 `wd` を worker へ渡し、委譲の後に結果ファイルを 1 回だけ読む。読めなければ `bad_report`、新しいバージョンなら
+    `precondition` にして中身を返さない。"""
     done = delegate(handoff, system, root=root, wd=wd)
     if done.cause is not None:
         return done, None
     try:
-        return done, _read_result(wd, handoff.result_file.name, owned=handoff.owned)
+        report = _read_result(wd, handoff.result_file.name, owned=handoff.owned)
     except worker_paths.EntryError as exc:
         done.cause, done.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
         return done, None
+    if result.newer(report):
+        done.cause, done.detail = "precondition", f"結果ファイル {handoff.result_file}: {result.NEWER}"
+        return done, None
+    return done, report
 
 
 @contextlib.contextmanager

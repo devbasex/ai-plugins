@@ -235,8 +235,8 @@ def test_the_refusal_names_the_missing_field():
         ({"pr": 3}, {"pr": 3}),
     ],
 )
-def test_plan_outputs_move_the_product_version(old, new):
-    assert internal.plan_outputs(old) == new
+def test_stage_values_move_the_product_version(old, new):
+    assert internal.stage_values(old) == new
 
 
 @pytest.mark.parametrize("at", [AT, "2026-11-23T01:00:00Z", "2026-11-23T01:00:00.123456+00:00"])
