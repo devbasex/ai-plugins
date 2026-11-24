@@ -54,7 +54,7 @@ graph TD
 
 ```mermaid
 graph LR
-  B["ベースブランチの<br>.ndf/mvv.json・mvv.md"] --> CUR["ndf records mvv current<br>版・sha256・写しのパス・項目の一覧"]
+  B["ベースブランチの<br>.ndf/mvv.json・body が指す本文"] --> CUR["ndf records mvv current<br>版・sha256・写しのパス・項目の一覧"]
   CUR --> IN["起動指示の MVV の欄<br>（supervisor・worker・RF_MVV）"]
   CUR --> CR["cross-review の 1 回の起動"]
   CR --> RV["相手役: 基準 5 で<br>MVV に反する指摘（mvv: Value N）"]
@@ -275,7 +275,7 @@ sequenceDiagram
 ## 影響と危険
 
 - **働く範囲**: 利用先のリポジトリでも働く。基準 5・根拠の行の確かめ・記録が現れるのは、承認済みの MVV（状態 `approved`）を持つリポジトリだけである。持たないリポジトリでは cross-review の指示・ジャーナル・結果の形が今と変わらない（受け入れ条件 8）
-- **プロジェクトごとに違うもの**: MVV の本文と項目の一覧は、そのリポジトリのベースブランチの `.ndf/mvv.md` から読む。新しい設定のキーは足さない。兆候の閾値は今の `settings.revise_after` を使う
+- **プロジェクトごとに違うもの**: MVV の本文と項目の一覧は、そのリポジトリの設定が指す本文から読む。リリース対象の `current`・`review-scope`・preflight は、`.ndf/mvv.json` の最上位の `body` を宣言から読み、`body_path` で解く（決定 1）。`mvv.md` は `body` が無いときの既定値としてだけ使い、コードに固定しない。`current` と `review-scope` はベースブランチから、preflight は作業場所から読む。新しい設定のキーは足さない。兆候の閾値は今の `settings.revise_after` を使う
 - **当たるモード**: cross-review を通るモード（`standard`・`legacy-refactor`・`documentation` の設計 PR と単位の PR）。起動指示の MVV の欄はすべてのモード
 - **同じファイルを触る別の変更**: `sprint/p12-lcrfast-r1`（#4014・#4030・#4013）が同じ 4 ファイルを触る。実装はこのスプリントが main へ入った後の main から切る。先に始めると `review-criteria.json` の `summary` と `reviewer_block` が衝突する
 - **#4084（#4045 の設計の直し）**: `journal.apply_fix`・`enter` と MVV の再判定を触る。後に入る PR が、#4084 の重さの置き直しを、分類を外す箇所（決定 5）でも打つ
