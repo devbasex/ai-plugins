@@ -7,8 +7,9 @@ cross-refactoring の drive は打ち直しの引数を持たないため、案�
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,17 @@ class Finished:
 
 def _how(reopen_flag: str | None, discard_hint: str) -> str:
     return f"打ち直すなら {reopen_flag}" if reopen_flag else f"打ち直すなら {discard_hint}"
+
+
+def same_target(recorded: Mapping[str, Any] | None, given: str | None) -> bool:
+    """記録の PR のマージ先（`branch` と、引数で渡されたかの `given`）が、今の引数 `given` でも変わらないか。
+
+    記録が None（`--base` がブランチだったか、マージ先を記録する前の記録）なら、マージ先を使わないので比べない。引数で渡した
+    マージ先を今は渡していなければ、GitHub から読む値と同じとは限らないので、変わったと読む。
+    """
+    if recorded is None:
+        return True
+    return not recorded["given"] if given is None else recorded["branch"] == given
 
 
 def finished(

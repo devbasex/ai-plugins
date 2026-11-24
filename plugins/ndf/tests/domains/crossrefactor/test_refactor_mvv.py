@@ -10,8 +10,9 @@ from typing import Any
 
 import pytest
 
-from ndf.adapters import agents, github
-from ndf.domains.crossrefactor import drive, prompt_decide, store
+from ndf.adapters import agents, git, github
+from ndf.core.converge import participants, worktree
+from ndf.domains.crossrefactor import drive, finished_decide, prompt_decide, store
 from ndf.domains.crossrefactor.symbols_decide import Touched
 from ndf.domains.records import mvv
 
@@ -171,6 +172,35 @@ def test_given_merge_target_is_not_read_from_github(world: World) -> None:
     assert hub.reads == 1
 
 
+def test_corrected_merge_target_does_not_reuse_the_finished_result(world: World) -> None:
+    """コミットの `--base` で完了した後にマージ先を訂正すると、前回の結果を返さず、訂正した先の MVV で打ち直す。"""
+    sh(world.main, "push", "-q", "origin", f"{world.base}:refs/heads/release")
+    _push_mvv(world, 12)
+    for target, told in (("release", False), ("main", True), ("main", None)):
+        fake = FakeAgents({**base_acts(), "propose": lambda spec, submit: {"proposals": []}})  # type: ignore[arg-type,dict-item]
+        cfg = world.config(world.base, target_branch=target)
+        got = drive.drive(cfg, ports(fake, FakeHub("clean"), ci=fake_ci(Watched(None))))
+        assert got.kind == "ok", got.detail
+        assert {"バージョン 12" in p for p in _prompts(fake, "propose")} == (set() if told is None else {told})
+
+
+@pytest.mark.parametrize(
+    ("recorded", "given", "same"),
+    [
+        (None, "main", True),
+        (None, None, True),
+        ({"branch": "main", "given": True}, "main", True),
+        ({"branch": "main", "given": False}, "main", True),
+        ({"branch": "main", "given": False}, None, True),
+        ({"branch": "old", "given": False}, "main", False),
+        ({"branch": "old", "given": True}, "main", False),
+        ({"branch": "old", "given": True}, None, False),
+    ],
+)
+def test_finished_target_is_compared_only_for_a_commit_base(recorded: dict[str, Any] | None, given: str | None, same: bool) -> None:
+    assert finished_decide.same_target(recorded, given) is same
+
+
 class Reached(Exception):
     """項目の着手まで進んだことを知らせる例外。"""
 
@@ -210,13 +240,31 @@ def test_resume_with_a_changed_mvv_defers_the_open_items_against_it(world: World
     assert (item["status"], item["reason"]) == ("deferred", "今の MVV に反する: 一つ目に反する")
 
 
-def test_resume_with_a_changed_mvv_goes_on_with_the_kept_items_and_asks_once(world: World) -> None:
+def test_resume_with_a_changed_mvv_goes_on_with_the_kept_items_and_asks_once(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """残した項目は 1 回だけ確かめて続ける。起点へ戻すのは 1 回で、読み取り用ディレクトリは確かめる担当の分だけを合わせる。"""
     _push_mvv(world, 11)
     _stop_after_plan(world)
     _push_mvv(world, 12)
+    resets: list[str] = []
+    readers: list[str] = []
+    reset, refresh = drive._reset, worktree.detach_clean
+
+    def count_reset(run: drive._Run, sha: str) -> None:
+        resets.append(sha)
+        reset(run, sha)
+
+    def count_refresh(g: git.Git, commit: str) -> None:
+        readers.append(g.cwd.name if g.cwd is not None else "")
+        refresh(g, commit)
+
+    monkeypatch.setattr(drive, "_reset", count_reset)
+    monkeypatch.setattr(worktree, "detach_clean", count_refresh)
     for phases in (["plan", "add-tests"], ["add-tests"]):
         got, fake = _resume(world, _answer(True))
         assert got is None and [phase for phase, _ in fake.prompts] == phases
+        assert len(resets) == 1 and readers == ([participants.FIXER] if "plan" in phases else [])
+        resets.clear()
+        readers.clear()
 
 
 def test_resume_of_a_state_without_the_mvv_of_the_plan_checks_the_open_items(world: World) -> None:

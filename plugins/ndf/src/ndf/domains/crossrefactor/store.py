@@ -13,7 +13,7 @@
 | `mvv` | 項目を計画したか確かめた MVV を見分ける値（`records.mvv.Snapshot.identity`） |
 | `skipped` | 範囲外で見送った提案 |
 | `final` | 最終ゲートの記録（`status`・`outside_failures`） |
-| `done` | 完了の記録（`head`・`args`・結果 JSON） |
+| `done` | 完了の記録（`head`・`args`・`--base` がコミットのときの PR のマージ先 `target`・結果 JSON） |
 """
 
 from __future__ import annotations

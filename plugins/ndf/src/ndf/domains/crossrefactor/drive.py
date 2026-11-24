@@ -163,14 +163,24 @@ class _Run:
     ws: workspace.Workspace
     state: dict[str, Any]
     path: Path
-    # 起動の始めに取得した、MVV を読むブランチとその先頭のコミット
-    base_branch: str
+    # 起動の始めに取得した、MVV を読むブランチ（と `--base` のコミット）と、そのブランチの先頭のコミット
+    base: worktree.Base
     base_tip: str
-    # 差分の起点のコミット（`--base` がブランチなら `base_tip`、コミットならそのコミット）
-    diff_base: str
     # 提案と計画の担当へ渡す、プロジェクト MVV を読ませる文（承認済みの MVV が無ければ空）と、その MVV を見分ける値
     mvv: str = ""
     mvv_id: str = ""
+    # この起動で、止まった実行の途中の項目を起点まで戻したか
+    rewound: bool = False
+
+    @property
+    def diff_base(self) -> str:
+        """差分の起点のコミット（`--base` がブランチなら `base_tip`、コミットならそのコミット）。"""
+        return self.base.commit if self.base.commit is not None else self.base_tip
+
+    @property
+    def target(self) -> Optional[dict[str, Any]]:
+        """完了の記録に残す PR のマージ先（`branch`）と、引数で渡されたか（`given`）。`--base` がブランチなら使わないので None。"""
+        return None if self.base.commit is None else {"branch": self.base.branch, "given": self.cfg.target_branch is not None}
 
     @property
     def work(self) -> git.Git:
@@ -196,6 +206,8 @@ def _reused(cfg: RunConfig, state: Mapping[str, Any], path: Path) -> Optional[Fi
     if "done" not in state:
         return None
     done = state["done"]
+    if not finished_decide.same_target(done["target"] if "target" in done else None, cfg.target_branch):
+        return None
     head = worktree.fetch_head(git.Git(cfg.repo), cfg.branch)
     recorded = (done["head"] if "head" in done else None, done["args"] if "args" in done else None)
     hint = f"状態ファイル {path} を消してから同じコマンドを打ち直す"
@@ -333,7 +345,7 @@ def _recheck_mvv(run: _Run) -> None:
     opened = [i for i in run.state["items"] if i["status"] == Status.OPEN.value]
     if run.mvv and opened:
         _rewind(run)
-        workspace.refresh_readers(run.ws)
+        workspace.refresh_readers(run.ws, (participants.FIXER,))
         req = launch.Request(
             "plan", participants.FIXER, prompt_decide.mvv_check(run.cfg.pr, opened, run.mvv), f"pr{run.cfg.pr}-mvv", "items"
         )
@@ -610,10 +622,13 @@ def _flaky_fix(run: _Run) -> None:
 
 
 def _rewind(run: _Run) -> None:
-    """止まった実行の途中の項目（起点の記録がある）を、起点まで戻す。"""
+    """止まった実行の途中の項目（起点の記録がある）を、起点まで戻す。この起動で戻してあれば何もしない。"""
+    if run.rewound:
+        return
     resumed = items_decide.next_open(run.state["items"])
     if resumed is not None and "start" in resumed:
         _reset(run, resumed["start"])
+        run.rewound = True
 
 
 def _items(run: _Run) -> None:
@@ -744,22 +759,23 @@ def _base_of_pr(cfg: RunConfig, ports: Ports, repo: git.Git) -> str:
         raise DriveStopped("precondition", f"PR #{cfg.pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
 
 
-def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, str, str, str]:
-    """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミット・差分の起点の
-    コミットを返す。取得が進めるのはリモート追跡参照だけなので、差分の起点に手元のブランチの名前は使わない。"""
+def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, worktree.Base, str]:
+    """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミットを返す。
+
+    取得が進めるのはリモート追跡参照だけなので、差分の起点に手元のブランチの名前は使わない。"""
     remote = repo.remote()
 
     def fetch(branch: str) -> tuple[str, str]:
         return worktree.fetch_tips(repo, cfg.branch, remote, branch)
 
     (head, tip), base = worktree.fetch_base(repo, cfg.base, remote, fetch, lambda: _base_of_pr(cfg, ports, repo))
-    return head, base.branch, tip, base.commit if base.commit is not None else tip
+    return head, base, tip
 
 
 def _read_mvv(run: _Run) -> None:
     """提案と計画の指示文に足す MVV の文と、その MVV を見分ける値を持つ。MVV を読めなければ、MVV を渡さない提案にならないよう担当の起動前に止める（#4076）。"""
     try:
-        snap = mvv.of_base(run.ws.work, run.base_branch, run.base_tip, run.ws.root)
+        snap = mvv.of_base(run.ws.work, run.base.branch, run.base_tip, run.ws.root)
     except mvv.MvvError as exc:
         raise DriveStopped("precondition", str(exc)) from exc
     run.mvv, run.mvv_id = prompt_decide.mvv_text(snap), snap.identity
@@ -780,11 +796,11 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
         return None, mismatch
     runtimes = (*participants.assign(cfg.participants), participants.FIXER)
     try:
-        head, base_branch, base_tip, diff_base = _fetch_both(cfg, ports, repo)
+        head, base, base_tip = _fetch_both(cfg, ports, repo)
     except DriveStopped as exc:
         return None, Finish(exc.kind, exc.detail)
     ws = workspace.prepare(repo, cfg.pr, head, runtimes)
-    return _Run(cfg, ports, ws, state, path, base_branch, base_tip, diff_base), None
+    return _Run(cfg, ports, ws, state, path, base, base_tip), None
 
 
 def _ready(run: _Run) -> None:
@@ -818,7 +834,7 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     finish = _publish(run, _summary(run))
     # 配分の履歴は最終ゲートを通った実行だけを足す（止まった実行は足さない）
     allocation.record_run(run.work, run.state, _now())
-    run.state["done"] = {"head": run.work.rev_parse("HEAD"), "args": cfg.args(), "result": finish.as_json()}
+    run.state["done"] = {"head": run.work.rev_parse("HEAD"), "args": cfg.args(), "target": run.target, "result": finish.as_json()}
     run.save()
     workspace.release(git.Git(cfg.repo), run.ws)
     return finish
