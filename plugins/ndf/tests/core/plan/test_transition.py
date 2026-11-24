@@ -66,6 +66,7 @@ def test_a_result_of_a_newer_version_stops_before_the_routes_of_the_plan(routes)
     plan = _plan({"id": "a", **routes}, {"id": "b"}, {"id": "fix", "next": "end"})
     acts, final = _drive(plan, {"a": [Outcome("stopped", "precondition", newer=True)]})
     assert acts == [RunStep("a", 0)] and (final.status, final.kind) == ("stopped", "precondition")
+    assert final.newer
     assert [(c.frm, c.to, c.cause) for c in final.choices] == [("a", "stop", "precondition")]
 
 

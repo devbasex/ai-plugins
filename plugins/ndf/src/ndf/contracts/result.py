@@ -32,6 +32,8 @@ SEVERITIES = "severities"
 ENTRY = identity.FIXED_WORDS["entrypoint"]
 # 新しいバージョンの結果を止めるときの文（値を含まない）
 NEWER = "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する"
+# 新しいバージョンの結果で止めたことを、止まった結果の `cause.instance` で後の読み手へ伝える値（ふつうの precondition と見分ける）
+NEWER_INSTANCE = "result-newer"
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:
@@ -168,7 +170,13 @@ def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
 
     確かめていない結果の値は `tool` も引き継がない（形の合う秘密が入りうる）。`tool` はエントリポイントの名前にする。
     """
-    return stopped(ENTRY, "precondition", NEWER) if newer(obj) else None
+    return stopped(ENTRY, "precondition", NEWER, instance=NEWER_INSTANCE) if newer(obj) else None
+
+
+def stopped_by_newer(obj: Any) -> bool:
+    """新しいバージョンの結果を受けて止まった結果（`refused_newer` か、それを受けて止まった呼び手の結果）か。"""
+    cause = obj.get("cause") if isinstance(obj, dict) else None
+    return causes.kind_of(cause) == "precondition" and cause.get("instance") == NEWER_INSTANCE
 
 
 def _code_errors(obj: dict[str, Any], code: int) -> list[str]:

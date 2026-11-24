@@ -108,9 +108,10 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 | 件数が基準より少ない（重複を減らして基準を据え置いた） | 落ちる。`ndf check --write-spec` が基準を今の件数へ下げるので、`ratchet.json` を同じ Pull Request に含める |
 | 基準が、変更の前の基準より大きい（`--ratchet-base <commit>` を渡したとき） | 落ちる。基準を上げる経路は無い |
 
-- CI は `--ratchet-base HEAD^1` を渡す。`HEAD^1` は、Pull Request ではマージ先の先頭、merge queue では 1 つ前の項目のマージ、push では push の前の先頭を指す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
+- CI は `--ratchet-base` に、Pull Request と merge queue では `HEAD^1`（マージ先の先頭と、1 つ前の項目のマージ）、push では push の前の先頭（`github.event.before`。複数のコミットの push では `HEAD^1` と違う）を渡す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
 - `measured` と `commit` は、基準を書いた日と、その時の `HEAD` である
 - 構文の誤りで読めないファイルがあれば、件数が足りないので比べず、基準も下げない
+- `--only` がラチェットを当てる規則を選んでいなければ、基準を読まず、比べず、`--write-spec` でも下げない
 - ラチェットを当てる規則を足すときは、`run.py` の `RATCHETED` と `ratchet.json` の両方に書く。基準の行が無い規則は検査を止める（`config_broken`）
 
 ## 上限の設定の読み手の規則

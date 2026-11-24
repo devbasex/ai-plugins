@@ -151,7 +151,8 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
     """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`・`gaps`・`newer`）。
 
-    `newer` は新しいバージョンの結果を受けて止まったか。真なら、プランのルート（`on_cause`・`retry`）を見ずに止まる。
+    `newer` は新しいバージョンの結果を受けて止まったか（ステップのコマンドの中で受けて止まったものを含む）。真なら、プランのルート
+    （`on_cause`・`retry`）を見ずに止まる。
     """
     found = _last_result_line(stdout)
     refused = result.refused_newer(found)
@@ -175,7 +176,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "prs": _prs(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
-        "newer": False,
+        "newer": result.stopped_by_newer(found),
     }
 
 

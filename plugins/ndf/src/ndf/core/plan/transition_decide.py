@@ -88,6 +88,7 @@ class StepState:
     detail: Optional[str] = None
     last: Optional[str] = None
     choices: tuple[Choice, ...] = ()
+    newer: bool = False
 
 
 def start_state(plan: Plan, start: Optional[str], prelude: Sequence[str] = ()) -> StepState:
@@ -182,7 +183,7 @@ def _after_newer(state: StepState, step: Step, done: Outcome) -> Next:
     """新しいバージョンの結果を返したステップ。中身を読めないので、プランの `on_cause`・`on_fail`・`retry` を見ずに止まる。"""
     state = _chose(state, Choice(RULE_STOPPED, chosen.Chooser.SCRIPT, step.id, routing.STOP, done.kind))
     detail = f"ステップ {step.id} が新しいバージョンの結果を返して {done.kind} で止まった。プラグインを更新する"
-    return _finish(state, STOPPED, done.kind, detail)
+    return _finish(replace(state, newer=True), STOPPED, done.kind, detail)
 
 
 def _after_gate(state: StepState, step: Step) -> Next:

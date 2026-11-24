@@ -301,6 +301,7 @@ class Delivery:
     detail: str = ""
     replies: list[str] = field(default_factory=list)
     notice: Optional[str] = None
+    instance: Optional[str] = None
 
 
 def _written(wd: worker_paths.WorkDir, name: str) -> bool:
@@ -632,6 +633,7 @@ def _deliver(handoff: Handoff, system: str, root: Path, wd: worker_paths.WorkDir
         return done, None
     if result.newer(report):
         done.cause, done.detail = "precondition", f"結果ファイル {handoff.result_file}: {result.NEWER}"
+        done.instance = result.NEWER_INSTANCE  # プランがルートを見ずに止まる
         return done, None
     return done, report
 
@@ -716,7 +718,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
     items = [{"kind": "session", "session": done.session, "result_file": str(handoff.result_file)}]
     log.info("worker の受け渡しを終えた", extra={"kind": handoff.kind, "attempts": done.attempts, "cause": done.cause})
     if done.cause is not None:
-        out = result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics)
+        out = result.stopped(TOOL, done.cause, done.detail, instance=done.instance, items=items, metrics=metrics)
     else:
         checked, outputs = require_outputs(report, a.require_output)
         out = outcome_of(handoff.kind, handoff.result_file, checked, items, metrics, outputs=outputs)

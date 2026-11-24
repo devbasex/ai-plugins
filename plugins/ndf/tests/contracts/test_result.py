@@ -149,6 +149,12 @@ def test_the_results_put_out_instead_do_not_take_the_tool(tool):
     assert _instead({**result.result("t", "stopped", "理由なし"), "tool": tool})["tool"] == "ndf"
     refused = result.received({**result.result("t", "ok", "済んだ"), "tool": tool, "version": 2})
     assert refused is not None and refused["tool"] == "ndf"
+    assert result.stopped_by_newer(refused) and result.errors(refused) == []
+
+
+@pytest.mark.parametrize("obj", [_stopped("precondition"), _stopped("invalid"), result.result("t", "ok", "済んだ"), None])
+def test_other_results_are_not_stopped_by_a_newer_one(obj):
+    assert not result.stopped_by_newer(obj)
 
 
 def test_emit_puts_out_an_unchecked_result_when_the_causes_are_unreadable(contracts_copy, capsys):

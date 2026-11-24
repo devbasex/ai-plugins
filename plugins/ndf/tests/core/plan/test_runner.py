@@ -237,6 +237,13 @@ def test_stored_result_of_a_newer_version_is_refused(tmp_path):
     assert exc.value.kind == "precondition"
 
 
+@pytest.mark.parametrize("newer", [True, False, None])
+def test_final_result_tells_the_outer_plan_that_it_stopped_at_a_newer_result(two_steps, newer):
+    final = {"status": "stopped", "kind": "precondition", "detail": "止まった", "last": None, "count": 1}
+    out = runner.final_result(two_steps, final if newer is None else {**final, "newer": newer}, "SUCCESS")
+    assert result.stopped_by_newer(out) is (newer is True) and result.errors(out) == []
+
+
 def test_final_result_ok_with_recorded_gaps_is_incomplete(two_steps):
     gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
     _write_records(two_steps, prs=[5], outputs={"pr": 5, "gaps": [gap]})

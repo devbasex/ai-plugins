@@ -241,6 +241,7 @@ def test_run_stops_at_a_result_file_of_a_newer_version(tmp_path, monkeypatch, ca
     assert _run_with(tmp_path, monkeypatch, call, kind=kind) == causes.exit_code("precondition")
     out = json.loads(capsys.readouterr().out)
     assert out["cause"]["kind"] == "precondition" and "outputs" not in out and "routes" not in out and len(calls) == 1
+    assert result.stopped_by_newer(out)
 
 
 SEARCHED = {"terms": ["詳細設計"], "files": ["tests/test_stage_check.py"]}

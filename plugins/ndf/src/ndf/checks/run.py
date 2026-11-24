@@ -12,12 +12,11 @@
 from __future__ import annotations
 
 import argparse
-import io
+import hashlib
 import json
 import os
 import subprocess
 import sys
-import tarfile
 from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -147,36 +146,54 @@ def _ratchet_base(scope: Scope, path: Path, ref: str) -> dict[str, ratchet.Basel
     return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
 
 
-def _base_files(scope: Scope, ref: str) -> dict[str, str]:
-    """commit `ref` の製品のコードのディレクトリの、ファイルごとの本文（git の起動は 1 回）。"""
-    out = _git_stdout(scope.repo_root, "archive", "--format=tar", ref, "--", scope.rel(scope.plugin_root / SRC_DIR))
-    with tarfile.open(fileobj=io.BytesIO(out)) as tar:
-        blobs = {member.name: tar.extractfile(member) for member in tar if member.isfile()}
-        return {rel: blob.read().decode("utf-8", "replace") for rel, blob in blobs.items() if blob is not None}
+def _base_blobs(scope: Scope, ref: str) -> dict[str, str]:
+    """commit `ref` の製品のコードの `.py` と規則のデータの、パスごとの blob の id（シンボリックリンクを除く）。本文は読まない。"""
+    out = _git_stdout(scope.repo_root, "ls-tree", "-r", "-z", ref, "--", scope.rel(scope.plugin_root / SRC_DIR))
+    rows = [os.fsdecode(row).partition("\t") for row in out.split(b"\0") if row]
+    found = {rel: meta.split() for meta, _, rel in rows}
+    rules_rel = scope.rel(scope.plugin_root / RULES_REL)
+    return {rel: blob for rel, (mode, _, blob) in found.items() if mode.startswith("100") and (rel.endswith(".py") or rel == rules_rel)}
 
 
-def _base_scope(scope: Scope, files: Mapping[str, str]) -> Scope:
-    """変更の前の製品のコード。今と同じ本文のファイルは構文木を作り直さず、構文の誤りで読めないファイルは除く。"""
-    now = {src.rel: src for src in scope.code()}
-    base = Scope(scope.repo_root, scope.plugin_root, scope.plugin_name)
-    for rel, text in files.items():
-        same = now.get(rel)
-        if same is None or same.text != text:
-            same = Source(scope.repo_root / rel, rel)
-            same.text = text
-        base.sources.append(same)
+def _is_blob(src: Source, blob: str) -> bool:
+    """本文が git の blob `blob` と同じか（id は本文から計算し、git を起動しない。64 桁なら SHA-256 のリポジトリ）。"""
+    data = src.text.encode()
+    made = hashlib.new("sha256" if len(blob) == 64 else "sha1", b"blob %d\0" % len(data) + data, usedforsecurity=False)
+    return made.hexdigest() == blob
+
+
+def _base_files(scope: Scope, ref: str) -> dict[str, Source]:
+    """commit `ref` の製品のコードの `.py` と規則のデータ。今と同じ本文のファイルは今の `Source`（構文木を作り直さない）を使い、変わったか
+    消えたファイルの本文だけを git から 1 回で読む。"""
+    now = {src.rel: src for src in scope.sources}
+    blobs = _base_blobs(scope, ref)
+    files = {rel: now[rel] for rel, blob in blobs.items() if rel in now and _is_blob(now[rel], blob)}
+    rest = {rel: blob for rel, blob in blobs.items() if rel not in files}
+    asked = "".join(f"{blob}\n" for blob in rest.values())
+    bodies = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=asked)) if rest else []
+    for rel, body in zip(rest, bodies, strict=True):
+        if body is None:
+            raise CheckError(f"変更の前のファイルを読めない: {ref}:{rel}")
+        files[rel] = Source(scope.repo_root / rel, rel)
+        files[rel].text = body.decode("utf-8", "replace")
+    return files
+
+
+def _base_scope(scope: Scope, files: Mapping[str, Source]) -> Scope:
+    """変更の前の製品のコード。構文の誤りで読めないファイルは除く。"""
+    base = Scope(scope.repo_root, scope.plugin_root, scope.plugin_name, list(files.values()))
     base.sources = base.code()
     unparsable(base)
     return base
 
 
-def _base_rules(scope: Scope, files: Mapping[str, str], rules: dict[str, Any]) -> dict[str, Any]:
+def _base_rules(scope: Scope, files: Mapping[str, Source], rules: dict[str, Any]) -> dict[str, Any]:
     """変更の前の規則のデータ。変更の前に無いキーは今の値にする（今の規則の関数が読む）。"""
     rel = scope.rel(scope.plugin_root / RULES_REL)
     if rel not in files:
         return rules
     try:
-        old = json.loads(files[rel])
+        old = json.loads(files[rel].text)
     except ValueError as exc:
         raise CheckError(f"変更の前の規則のデータを読めない: {rel}: {exc}") from exc
     merged = {key: {**value, **old[key]} for key, value in rules.items() if key in old and isinstance(value, dict)}
@@ -200,17 +217,19 @@ def ratcheted(
 
     件数が基準と同じ規則の指摘は外す。増えた規則は、commit `base_ref` に無い指摘だけを残し（既にある指摘で増えた箇所が埋もれない）、
     `only` があればすべて残す（呼び手が `only` で絞る）。構文の誤りで読めないファイルがあれば、件数が足りないので比べない。
+    `only` がラチェットを当てる規則を 1 つも選んでいなければ、基準を読まず、比べず、下げない。
     """
     kept = [f for f in found if f.rule not in RATCHETED]
-    if any(f.rule == "syntax" for f in kept):
+    watched = [rule for rule in RATCHETED if not only or rule in only]
+    if not watched or any(f.rule == "syntax" for f in kept):
         return kept
     path = contained(scope.plugin_root, ratchet.RATCHET_REL)
-    counts = {rule: sum(f.rule == rule for f in found) for rule in RATCHETED}
-    if written is not None:
-        commit = _git_stdout(scope.repo_root, "rev-parse", "HEAD").decode().strip()
-        if ratchet.lower(path, counts, commit, datetime.now(timezone.utc).date().isoformat()):
-            written.append(ratchet.RATCHET_REL)
+    counts = {rule: sum(f.rule == rule for f in found) for rule in watched}
     limits = ratchet.baseline(path)
+    if written is not None and ratchet.below(counts, limits):
+        commit = _git_stdout(scope.repo_root, "rev-parse", "HEAD").decode().strip()
+        limits = ratchet.lower(path, counts, limits, commit, datetime.now(timezone.utc).date().isoformat())
+        written.append(ratchet.RATCHET_REL)
     why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base_ref) if base_ref is not None else {})
     over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
     listed = [f for f in found if f.rule in over]

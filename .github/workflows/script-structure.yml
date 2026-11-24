@@ -162,8 +162,16 @@ jobs:
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
-        # ラチェットの基準（plugins/ndf/src/ndf/checks/ratchet.json）を、変更の前（HEAD^1）の基準より上げていないかも見る
-        run: plugins/ndf/bin/ndf check --ratchet-base HEAD^1
+        # ラチェットの基準（plugins/ndf/src/ndf/checks/ratchet.json）を、変更の前の基準より上げていないかも見る。変更の前は、
+        # Pull Request と merge queue では HEAD^1、push では push の前の先頭（複数のコミットの push では HEAD^1 と違う）。
+        # ブランチを作った push は push の前の先頭が無いので HEAD^1 と比べる
+        env:
+          BEFORE: ${{ github.event_name == 'push' && !github.event.created && github.event.before || '' }}
+        run: |
+          if [ -n "$BEFORE" ] && ! git cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
+            git fetch -q --no-tags --depth=1 origin "$BEFORE"
+          fi
+          plugins/ndf/bin/ndf check --ratchet-base "${BEFORE:-HEAD^1}"
       # 表だけの差分では全体の検査を打たず、行き先と生成済みの review_items の照合だけを打つ（全体の検査は同じ規則を含む）
       - name: Check the design review items
         if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.review_items == 'true'

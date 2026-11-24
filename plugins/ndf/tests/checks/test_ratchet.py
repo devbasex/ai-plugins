@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import io
+import hashlib
 import json
-import tarfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -84,7 +83,9 @@ def test_a_missing_or_undecodable_limit_file_stops(tmp_path):
 def test_lower_rewrites_only_the_rules_below_their_limit(tmp_path):
     path = tmp_path / "ratchet.json"
     path.write_text(body(5, kept={**ROW, "max": 2}), encoding="utf-8")
-    assert ratchet.lower(path, {"copy-dup": 3, "kept": 2}, "c1", "2026-02-02") == ["copy-dup"]
+    counts, rows = {"copy-dup": 3, "kept": 2}, ratchet.baseline(path)
+    assert ratchet.below(counts, rows) == ["copy-dup"]
+    assert ratchet.lower(path, counts, rows, "c1", "2026-02-02") == ratchet.baseline(path)
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "version": 1,
         "rules": {"copy-dup": {"max": 3, "measured": "2026-02-02", "commit": "c1"}, "kept": {**ROW, "max": 2}},
@@ -92,11 +93,8 @@ def test_lower_rewrites_only_the_rules_below_their_limit(tmp_path):
 
 
 @pytest.mark.parametrize("count", [5, 6])
-def test_lower_does_not_write_without_a_rule_below_its_limit(tmp_path, count):
-    path = tmp_path / "ratchet.json"
-    path.write_text(body(5), encoding="utf-8")
-    assert ratchet.lower(path, {"copy-dup": count}, "c1", "2026-02-02") == []
-    assert path.read_text(encoding="utf-8") == body(5)
+def test_a_count_not_below_its_limit_is_not_lowered(count):
+    assert ratchet.below({"copy-dup": count}, limits(5)) == []
 
 
 def test_lower_raises_when_the_file_cannot_be_written(tmp_path, monkeypatch):
@@ -104,7 +102,7 @@ def test_lower_raises_when_the_file_cannot_be_written(tmp_path, monkeypatch):
     path.write_text(body(5), encoding="utf-8")
     monkeypatch.setattr(Path, "write_text", _refused)
     with pytest.raises(ratchet.RatchetError):
-        ratchet.lower(path, {"copy-dup": 3}, "c1", "2026-02-02")
+        ratchet.lower(path, {"copy-dup": 3}, limits(5), "c1", "2026-02-02")
 
 
 def _refused(*_args, **_kwargs):
@@ -170,36 +168,36 @@ def test_one_more_finding_lists_all_the_places_only_when_the_rule_is_selected(pl
     assert checked("--only", "I3")[0] == 0
 
 
-def _tar(files: dict[str, str]) -> bytes:
-    """`git archive` の出力。"""
-    out = io.BytesIO()
-    with tarfile.open(fileobj=out, mode="w") as tar:
-        for rel, text in files.items():
-            member = tarfile.TarInfo(rel)
-            member.size = len(text.encode())
-            tar.addfile(member, io.BytesIO(text.encode()))
-    return out.getvalue()
+def _blob(text: str) -> str:
+    """git の blob の id。"""
+    data = text.encode()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+def _base(monkeypatch, plugin, files: dict[str, str], commit: bytes = b"") -> list[tuple[str, str]]:
+    """git の応答を、変更の前の `src/` が `files`（パス → 本文）のものにする。git の（引数の先頭, 標準入力）を返す並びへ足す。"""
+    src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
+    bodies = {_blob(text): text for text in files.values()}
+    tree = "".join(f"100644 blob {_blob(text)}\t{src}/{rel}\0" for rel, text in files.items())
+    asked = []
+
+    def git(_root, *args, stdin=""):
+        asked.append((args[0], stdin))
+        if args[0] == "cat-file":
+            return commit if "^{commit}" in stdin else b"".join(_file(bodies[blob]) for blob in stdin.split())
+        return {"rev-parse": f"{plugin.repo}\n", "ls-tree": f"{tree}120000 blob {'0' * 40}\t{src}/ndf/link.py\0"}[args[0]].encode()
+
+    monkeypatch.setattr(run, "_git_stdout", git)
+    return asked
 
 
 @pytest.fixture
 def against(plugin, checked, monkeypatch):
-    """変更の前の `src/` を渡した中身（パス → 本文）にして `ndf check` を打つ関数。git の引数の並びも返す。"""
+    """変更の前の `src/` を渡した中身（パス → 本文）にして `ndf check` を打つ関数。git の引数と標準入力の並びも返す。"""
 
     def call(limit: int, files: dict[str, str]):
         plugin.write(ratchet.RATCHET_REL, body(limit))
-        src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
-        answers = {
-            "rev-parse": f"{plugin.repo}\n".encode(),
-            "cat-file": _object("commit", "tree x\n") + _file(body(limit)),
-            "archive": _tar({f"{src}/{rel}": text for rel, text in files.items()}),
-        }
-        asked = []
-
-        def git(_root, *args, stdin=""):
-            asked.append(args[0])
-            return answers[args[0]]
-
-        monkeypatch.setattr(run, "_git_stdout", git)
+        asked = _base(monkeypatch, plugin, files, _object("commit", "tree x\n") + _file(body(limit)))
         code, report = checked("--ratchet-base", "HEAD^1")
         assert code == exit_codes.code_of("failed")
         return report, asked
@@ -215,25 +213,30 @@ def test_one_more_finding_lists_the_places_the_base_does_not_have(plugin, agains
     report, asked = against(1, {"ndf/a.py": twice, "ndf/b.py": twice, "ndf/broken.py": "def (:\n", "ndf/x.json": "{}"})
     assert _paths(report) == ["c.py", "ratchet.json"] and "2 件" in report["items"][1]["detail"]
     assert all(set(i) == {"rule", "path", "line", "detail"} for i in report["items"])
-    assert asked == ["rev-parse", "cat-file", "archive"]
+    assert [name for name, _ in asked] == ["rev-parse", "cat-file", "ls-tree", "cat-file"]
 
 
 def test_a_finding_that_a_rule_change_adds_is_not_in_the_base(plugin, rules, against):
     same = {"ndf/a.py": "def twice():\n    return 1\n", "ndf/b.py": "def twice():\n    return 1\n"}
-    assert _paths(against(0, same)[0]) == ["ratchet.json"]
+    report, asked = against(0, same)
+    assert _paths(report) == ["ratchet.json"] and [name for name, _ in asked] == ["rev-parse", "cat-file", "ls-tree"]
     # 変更の前の規則は twice の同名を認めていた
     old = {"copy_dup": {**rules["copy_dup"], "allow_names": ["twice"]}}
     assert _paths(against(0, {**same, "ndf/checks/rules.json": json.dumps(old)})[0]) == ["a.py", "ratchet.json"]
 
 
-def test_the_base_reuses_the_trees_of_the_unchanged_files(plugin):
-    a = plugin.write("src/ndf/a.py", "x = 1\n")
-    b = plugin.write("src/ndf/b.py", "x = 1\n")
+def test_the_base_reads_only_the_changed_and_removed_files_and_reuses_the_others(plugin, monkeypatch):
+    # 変わらないファイルは構文木を作り直さず、本文も git から読まない（PR 4358 の r5-5）
+    plugin.write("src/ndf/a.py", "x = '日本語'\n")
+    plugin.write("src/ndf/b.py", "x = 1\n")
+    plugin.write("src/ndf/untracked.py", "x = 1\n")
     scope = plugin.scope()
-    rel = {p: p.relative_to(plugin.repo).as_posix() for p in (a, b)}
-    base = run._base_scope(scope, {rel[a]: "x = 1\n", rel[b]: "x = 2\n"})
+    asked = _base(monkeypatch, plugin, {"ndf/a.py": "x = '日本語'\n", "ndf/b.py": "x = 2\n", "ndf/gone.py": "x = 3\n", "ndf/x.json": "{}"})
+    base = run._base_scope(scope, run._base_files(scope, "HEAD^1"))
     now = {s.rel: s for s in scope.sources}
-    assert [s is now[s.rel] for s in base.sources] == [True, False]
+    got = {s.path.name: (s.text, s is now.get(s.rel)) for s in base.sources}
+    assert got == {"a.py": ("x = '日本語'\n", True), "b.py": ("x = 2\n", False), "gone.py": ("x = 3\n", False)}
+    assert asked[1:] == [("cat-file", f"{_blob('x = 2' + chr(10))}\n{_blob('x = 3' + chr(10))}\n")]
 
 
 def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):
@@ -245,6 +248,23 @@ def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):
     assert code == 0 and report["metrics"]["written"] == 1 and report["items"] == []
     row = json.loads(path.read_text(encoding="utf-8"))["rules"]["copy-dup"]
     assert (row["max"], row["commit"]) == (1, "c1")
+
+
+def test_write_spec_that_lowers_nothing_neither_asks_for_the_head_nor_reads_the_limits_twice(plugin, checked, monkeypatch):
+    plugin.write(ratchet.RATCHET_REL, body(1))
+    asked, read, real = [], [], ratchet.baseline
+    monkeypatch.setattr(run, "_git_stdout", lambda _root, *args, stdin="": asked.append(args[-1]) or f"{plugin.repo}\n".encode())
+    monkeypatch.setattr(ratchet, "baseline", lambda path: read.append(path) or real(path))
+    code, report = checked("--write-spec")
+    assert code == 0 and report["metrics"]["written"] == 0
+    assert asked == ["--show-toplevel"] and len(read) == 1
+
+
+@pytest.mark.parametrize("extra", [(), ("--write-spec",), ("--ratchet-base", "HEAD^1")])
+def test_a_check_of_other_rules_does_not_read_the_limits(plugin, checked, extra):
+    path = plugin.write(ratchet.RATCHET_REL, "{")
+    assert checked("--only", "I3", *extra)[0] == 0
+    assert path.read_text(encoding="utf-8") == "{"
 
 
 def test_write_spec_does_not_raise_the_limit(plugin, checked):

@@ -85,16 +85,17 @@ def verdicts(counts: Mapping[str, int], current: Mapping[str, Baseline], base: M
     return {rule: "。".join(why) for rule, why in reasons.items() if why}
 
 
-def lower(path: Path, counts: Mapping[str, int], commit: str, day: str) -> list[str]:
-    """件数が基準を下回った規則の基準を今の件数へ書き直し、書いた規則の名前を返す。無ければ書かない。"""
-    rows = baseline(path)
-    below = [rule for rule in rows if rule in counts and counts[rule] < rows[rule].max]
-    if not below:
-        return []
-    rows.update({rule: Baseline(counts[rule], day, commit) for rule in below})
+def below(counts: Mapping[str, int], current: Mapping[str, Baseline]) -> list[str]:
+    """件数が今の基準を下回った規則の名前。"""
+    return [rule for rule, row in current.items() if rule in counts and counts[rule] < row.max]
+
+
+def lower(path: Path, counts: Mapping[str, int], current: Mapping[str, Baseline], commit: str, day: str) -> dict[str, Baseline]:
+    """件数が今の基準 `current` を下回った規則（`below`）の基準を今の件数へ書き直し、書いた後の基準を返す。"""
+    rows = {**current, **{rule: Baseline(counts[rule], day, commit) for rule in below(counts, current)}}
     doc = {"version": RATCHET_VERSION, "rules": {rule: asdict(row) for rule, row in rows.items()}}
     try:
         path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
         raise RatchetError(f"ラチェットの基準を書けない: {path}: {exc}") from exc
-    return below
+    return rows
