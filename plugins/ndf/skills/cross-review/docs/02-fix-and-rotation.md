@@ -10,7 +10,7 @@
 **メインは修正コードを書かない。** 判定が修正を要すると、`run` が修正担当（claude）を作業の worktree で起動する。
 修正担当へ渡す指示は、収束の妨げになる重さの未解決の指摘（`id`・本文・重要度・場所と、相手役が書いた起きることの 1 文）と、まだ決めていない足すべき内容
 （`--findings`）の一覧と、相手役と同じ「指摘の基準」（[01](01-state-and-review.md) の「指摘の基準」）である。`minor`・`nit` の
-指摘は渡さない。担当は指摘ごとに基準に当たるかを確かめ直し、当たれば直し、当たらなければ対象のファイルを変えずに当たらない
+指摘と、必ず人の承認が要る操作に当たる指摘（基準 5 の `P`・`C` の番号）は渡さない。担当は指摘ごとに基準に当たるかを確かめ直し、当たれば直し、当たらなければ対象のファイルを変えずに当たらない
 理由を添えて見送る。この PR の目的の外の指摘は見送り、`/ndf:out-of-scope` の判断に従う。承認の要らない起票だけを行って番号を
 見送りの理由に書き、起票しないと決めたらその理由を書く。別のリポジトリへの書き込みなど承認が要るときは GitHub へ書かず、
 書き先・題・本文の案を見送りの理由に書いて呼び出し元へ返す（修正担当は人に問えない）。直したら
@@ -64,13 +64,30 @@ PR に載せずに `mvv_unresolved` で止める。次の起動は、始めに�
 | --- | --- | --- |
 | `converged`・`max_rounds`・`oscillating`・`errored` | 0 件 | `status: ok`。上限・振動・誤りで終わったときは、そう決めた理由が `decisions` に載る |
 | `converged`・`max_rounds`・`oscillating`・`errored` | 収束の妨げになる重さの未解決の指摘・扱わなかった足すべき内容・理由の無い見送りが 1 件以上 | `status: stopped`・`incomplete`（`gaps` つき）。プランは `incomplete` のルートへ進み、`gaps` は承認資料の「未確認の点」になる |
+| `converged`・`max_rounds`・`oscillating`・`errored` | MVV に反する指摘か MVV の根拠の行の誤りの未解決・根拠の行を最後のコミットで確かめられない・PR に届いていない手元のコミットの根拠の行の誤り | `status: stopped`・`mvv_unresolved`。次の工程へ進まずに人へ戻す。欠けは最上位の `gaps` でなく `outputs.gaps` に載る |
 | `incomplete_reviewers`（起動し直しても読めない相手役がいた） | どれでも | `status: stopped`・`work_stopped`。相手役ごとの理由は `warnings`。直して同じコマンドを打ち直せば次のラウンドから続く |
 | `errored` で 1 ラウンドも終わらなかった | — | `status: stopped`・`work_stopped` |
 
-`minor`・`nit` の未解決の指摘は欠けにしない。`summary` に「軽い指摘 <件数>」と載る。
+`minor`・`nit` の未解決の指摘は欠けにしない。`summary` に「軽い指摘 <件数>」と載る。必ず人の承認が要る操作に当たる指摘も欠けにせず、「人の承認を待つ <件数>」と載る。
 
 結果 JSON の `items` は指摘ごとの `id` と `outcome`、`metrics` は `rounds`（終えたラウンドの数）と `findings`（指摘の数）、
 `process` は起動ごとの過程（相手役ごとの指摘の数・修正担当・push）である。
+
+マージ先のブランチに承認済みの MVV があれば、`outputs.mvv` に MVV の確かめの結果が載る。載るのは、今の MVV で判定した指摘だけである。
+
+| キー | 中身 |
+| --- | --- |
+| `version`・`sha256`・`head` | 確かめた MVV のバージョンと本文の sha256、終わり方を決めた head |
+| `findings` | Mission・Vision・Value に反する指摘のうち、直したものと未解決のもの（`id`・`item`（反する項目）・`by`・`outcome`） |
+| `disputed` | 反する指摘のうち、修正担当が反しないとして見送ったもの（`id`・`item`・`reason`） |
+| `redlines` | 必ず人の承認が要る操作に当たる指摘（`id`・`item`・`text`） |
+| `citations` | 根拠の行の誤り（`id`・`path`・`line`・`cited`・`unknown`・`outcome`） |
+
+`reason`・`text`・`path`・`cited`・`unknown` は、記録のコメントと同じ方法で秘密や非公開の参照先を伏せた値である。参照先の公開範囲を
+GitHub に問い合わせられなければ、固定の文「（参照先の公開範囲を確かめられず伏せた）」になり、`warnings` に載る。
+
+指摘ごとの終わり方は MVV の記録（`mvv-validation.jsonl`）にも残る。`disputed` は MVV の改訂の兆候として数える
+（[project-mvv.md](../../development-workflow/references/project-mvv.md#改訂の兆候)）。
 
 ## PR に残す記録
 

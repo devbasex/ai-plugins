@@ -470,4 +470,4 @@ plugins/ndf/
 | `skills/cross-review/SKILL.md`・`skills/fix/SKILL.md` | 基準 5・`mvv_unresolved`・`outputs.mvv` の説明。`fix` の「指摘の基準」の表に基準 5 の写し |
 | `docs/contracts/commands.md` | `ndf records mvv current` の行 |
 | `contracts/schemas/result.schema.json`・`contracts/version.json` | 結果 JSON の `outputs` のキーに `mvv` を足し、コントラクトのバージョンを 1 つ上げる（`outputs` は決めたキーだけを許す） |
-| `docs/glossary/glossary.json` | 語「MVV の写し」「根拠の行の確かめ」「MVV に反する指摘」を追加し、`ndf records glossary render` で `docs/glossary.md` を作り直す |
+| `docs/glossary/glossary.json` | 語「MVV のスナップショット」「根拠の行の確かめ」「MVV に反する指摘」を追加し、`ndf records glossary render` で `docs/glossary.md` を作り直す |

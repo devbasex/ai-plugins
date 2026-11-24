@@ -172,8 +172,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ### 5a. 要求と範囲を MVV と突き合わせる
 
 承認済みのプロジェクト MVV があれば、手順 1〜5 の要求と範囲を MVV と突き合わせる。**反する疑いがあれば、要求を書き切らずに
-人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV のセクションの読み方・人へ戻す形・「MVV なし」の
-ときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV の読み方・人へ戻す形・承認済みの MVV が
+無いときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md#工程での読み方) にある。
 
 ### 6. 実装前に明文化する項目
 

@@ -190,6 +190,24 @@ ndf refactor run --pr <PR> --branch <head ブランチ> --base <マージ先の�
 あり PR の head と引数が同じなら、前回の結果を返す。状態ファイルの中身（項目・工程の起点・最終ゲートの記録）は
 `ndf refactor state --pr <PR>` で読める。作業場所を片付けるときは `ndf refactor release --pr <PR>` を打つ。
 
+### 提案と計画の担当へ MVV を渡す
+
+提案と計画の指示のテンプレート（[prompts/propose.md](prompts/propose.md)・[prompts/plan.md](prompts/plan.md)）には、判断の基準の MVV を
+入れる `$RF_MVV` がある。テンプレートから指示を作るときは、次のコマンドの結果で埋める。`ndf refactor run` が組む指示はこの 2 つの
+テンプレートを使わず、MVV も載せない。
+
+```bash
+ndf records mvv current --base <マージ先のブランチ>
+```
+
+| `outputs.mvv.state` | `$RF_MVV` に入れる文 |
+| --- | --- |
+| `approved` | `MVV: バージョン <version>・本文 <path>・共通原則 <principles_path>（承認済み）。作業の前に 2 つのファイルの全体を読み、判断の基準にする。作業ディレクトリの外にあるが、この 2 つは読んでよい。` |
+| `absent`・`unapproved` | `MVV: 無し（<state>）。mvv_basis は空にする。` |
+
+`status` が `stopped` なら指示を作らず、`summary` の理由を報告して止まる。1 行の形と結果の読み方は
+[project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md#工程での読み方) にある。
+
 ### リファクタリング計画のコメントを書き直す時点
 
 `run` は結果の出口（完了・止まった）で、Pull Request のリファクタリング計画のコメントを書く。前に書いた本文と同じなら書かず、
