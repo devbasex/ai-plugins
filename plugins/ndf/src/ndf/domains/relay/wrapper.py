@@ -569,33 +569,31 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         stopped = "stopped" if sec.must_end else self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
-        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
-        if ended is None:
-            # 替える手は子を止める前に確定した起動順をそのまま使う（尽きたら今のアカウント。既定のログインへ落とさない）。
-            # 起動し直しは今の起動先に固定する
-            if step.kind == "account":
-                choice, reason = sec.choice or Choice(launch_target.named(step.account), sec.account), sec.choice_reason
-            else:
-                choice, reason = Choice(launch_target.named(sec.account), fixed=True), "cut"
-            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason=reason)
-            ended = self._start(req)
-        if ended is None:
-            # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
-            self._current().handover_asked = sec.handover_asked
-        return ended
+        # 替える手は子を止める前に確定した起動順をそのまま使う（尽きたら今のアカウント。既定のログインへ落とさない）。
+        # 起動し直しは今の起動先に固定する
+        if step.kind == "account":
+            choice, reason = sec.choice or Choice(launch_target.named(step.account), sec.account), sec.choice_reason
+        else:
+            choice, reason = Choice(launch_target.named(sec.account), fixed=True), "cut"
+        # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
+        return self._relaunch(step, sec, choice, reason, handover_asked=sec.handover_asked)
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         # 子の端末へは書かず、子を止めて同じ会話を引継ぎを頼む文（HANDOVER_PROMPT）で起動し直す。起動し直しの回数には数えない（I6）
         stopped = self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
+        choice = Choice(launch_target.named(sec.account), fixed=True)  # 同じ会話を別の認証で続けない
+        return self._relaunch(step, sec, choice, "cut", handover_asked=True)
+
+    def _relaunch(self, step: switch_decide.Step, sec: Section, choice: Choice, reason: str, handover_asked: bool) -> Optional[Ended]:
+        """子を止めた後に同じ会話を起動し直す。起動できたら、続きのセグメントに引継ぎを頼んだかを書く。"""
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            choice = Choice(launch_target.named(sec.account), fixed=True)  # 同じ会話を別の認証で続けない
-            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason="cut")
+            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason=reason)
             ended = self._start(req)
         if ended is None:
-            self._current().handover_asked = True
+            self._current().handover_asked = handover_asked
         return ended
 
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
