@@ -174,7 +174,7 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
     ("judged", "question_pr", "seen", "now", "kept"),
     [
         (5, 5, "h1", "h1", True),
-        # 同じコミットを指す別の PR へ承認の対象が変わった。head が同じでも、判定した PR が違えば人へ問い直す
+        # 同じコミットを指す別の PR へ承認の対象が変わった。head が同じでも、判定した PR が違えば人へ改めて質問する
         (5, 6, "h1", "h1", False),
         (None, 5, "h1", "h1", False),
         (5, None, "h1", "h1", False),

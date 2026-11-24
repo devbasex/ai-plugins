@@ -64,7 +64,7 @@ def read_rows(
     return rows, broken
 
 
-def read_tail(
+def read_rows_after(
     path: Path, start: int, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool] = lambda row: True
 ) -> Optional[tuple[list[dict[str, Any]], int, int]]:
     """バイト位置 `start` より後に足された、改行で終わる行のうち `wanted` が真の行と、読めなかった行の数と、読み終えた位置。
@@ -78,7 +78,7 @@ def read_tail(
                 return None
             f.seek(start)
             data = f.read()
-    except FileNotFoundError:
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 記録がまだ無ければ足された行も無い（置き換えられたときと同じく全体を読む）
         return None
     end = data.rfind(b"\n") + 1
     rows: list[dict[str, Any]] = []

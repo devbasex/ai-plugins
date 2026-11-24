@@ -647,7 +647,7 @@ def _record_mvv(
         # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
         repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
         step = "記録の書き込み"
-        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean, since, index)
+        got = mvv.record_review(mvv.ReviewTarget(repo, run.ref.current_pr, run.sent), snap, rows, clean, since, index)
         if got.cause is None:
             run.data[store.MVV_FIXES_CHECKED] = _checked_state(run.ref.current_pr, checked if fresh else since, index)
     except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
@@ -658,7 +658,7 @@ def _record_mvv(
     held = run.data.pop(store.MVV_RECORD_ERROR, None)
     if got.cause is not None:
         run.data[store.MVV_RECORD_ERROR] = got.cause
-    if got.cause != held or run.data.get(store.MVV_FIXES_CHECKED, before) != before:
+    if got.cause != held or (store.MVV_FIXES_CHECKED in run.data and run.data[store.MVV_FIXES_CHECKED] != before):
         try:
             _save(run)
         except OSError:

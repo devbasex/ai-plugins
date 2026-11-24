@@ -518,6 +518,14 @@ def record_key(text: str) -> str:
     return _sha256(oscillation.finding_key(str(run_log.redact(text))).encode("utf-8"))
 
 
+class ReviewTarget(NamedTuple):
+    """`record_review` が書く記録の `repo`（`repo_key` の値）・`pr`・`head`（レビューした PR とその head）。"""
+
+    repo: str
+    pr: int
+    head: str
+
+
 class ReviewWrite(NamedTuple):
     """`record_review` の結果。`written` は足した行の数、`missing` は記録に無いままの必須の行（`redline`・`deferred`）、
     `cause` は最初の失敗の原因（`failure_cause` の形。失敗が無ければ None）。"""
@@ -536,16 +544,16 @@ def failure_cause(step: str, exc: BaseException) -> str:
     return f"{step}: {type(exc).__name__}: {publish.scrub(str(exc), False).text}"
 
 
-def _review_rows_of(repo: str, pr: int, head: str, snapshot: Snapshot, found: Sequence[md.Judged], clean: Any) -> list[dict[str, Any]]:
+def _review_rows_of(target: ReviewTarget, snapshot: Snapshot, found: Sequence[md.Judged], clean: Any) -> list[dict[str, Any]]:
     # 同じ秒の中でも、直した時刻（`md.REVIEW_FIXED_AT`）との前後を見分けられるよう、時刻はマイクロ秒まで書く
-    shared = {"at": jsonl.now_exact(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
+    shared = {"at": jsonl.now_exact(), "repo": target.repo, "pr": target.pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
     texts = [t for f in found for t in f.free_texts] if clean is not None else []
     shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
     keyed = [(record_key(str(f.row["text"])), f) for f in found]
     reviews = [{**md.review_entry(f, shown if clean is not None else None), "key": key} for key, f in keyed]
     # 必須の行を先に書く（後の通常の行の失敗で、必須の行が欠けない）
     ordered = sorted(md.one_per_key(reviews), key=lambda e: e["outcome"] not in md.REVIEW_REQUIRED)
-    return [{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in ordered]
+    return [{**shared, "kind": md.MVV_REVIEW, "head": target.head, **e} for e in ordered]
 
 
 def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
@@ -575,7 +583,7 @@ def _skip_unheld(index: HoldIndex, repo: str, pr: int, resolving: dict[str, str]
     行だけを読んで更新する（足された行の PR のキーはすべて候補に足す）。確かめられなければ何も外さない。"""
     if index.size < 0:
         return entries
-    tail = jsonl.read_tail(record_path("mvv-validation"), index.size, kind="mvv-validation", wanted=_of_pr_rows(repo, pr))
+    tail = jsonl.read_rows_after(record_path("mvv-validation"), index.size, kind="mvv-validation", wanted=_of_pr_rows(repo, pr))
     if tail is None or tail[1]:
         index.size = -1
         return entries
@@ -594,9 +602,7 @@ def _plain_fix_entry(entry: Mapping[str, Any]) -> bool:
 
 
 def record_review(
-    repo: str,
-    pr: int,
-    head: str,
+    target: ReviewTarget,
     snapshot: Snapshot,
     rows: Sequence[Mapping[str, Any]],
     clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
@@ -605,7 +611,7 @@ def record_review(
 ) -> ReviewWrite:
     """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書く。
 
-    `repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
+    `target.repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
     自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
     `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
     書けなくても例外を出さず、記録に無いままの必須の行と原因を返す（#3959。打ち直すと欠けた行だけを書く）。
@@ -616,11 +622,11 @@ def record_review(
     found = md.judged_findings(rows, snapshot.identity, holds=True, since=since)
     if not found:
         return ReviewWrite(0, (), None)
-    entries = _review_rows_of(repo, pr, head, snapshot, found, clean)
+    entries = _review_rows_of(target, snapshot, found, clean)
     # 通常の指摘を直した記録は、同じキーの保留が通常の指摘の見送りで、その見送りより後に直したときだけ書く（追記の前の読み取りで照らす）
     resolving = {record_key(str(f.row["text"])): str(f.row[md.REVIEW_FIXED_AT]) for f in found if f.plain and f.outcome == md.REVIEW_FIXED}
     if resolving and index is not None:
-        entries = _skip_unheld(index, repo, pr, resolving, entries)
+        entries = _skip_unheld(index, target.repo, target.pr, resolving, entries)
         if not entries:
             return ReviewWrite(0, (), None)
     wrote, left, cause = _append_reviews(entries, resolving, index)
@@ -671,25 +677,25 @@ def _append_missing(
 
 
 def _append_reviews(
-    entries: list[dict[str, Any]], resolving: Optional[Mapping[str, str]] = None, index: Optional[HoldIndex] = None
+    entries: list[dict[str, Any]], resolving: Mapping[str, str], index: Optional[HoldIndex] = None
 ) -> tuple[int, list[dict[str, Any]], Optional[str]]:
     """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。直した通常の指摘の記録で
     キーが `resolving`（キー → 直した時刻）にあるものは、同じキーの保留を解けるときだけ足す（`md.plain_fix_clears`）。
     レッドライン・見送りなど、ほかの終わり方の記録には照らさない。`index` は読んだ記録から確かな候補に更新する。"""
-    resolving = resolving or {}
     left: set[str] = set()
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ordered = sorted(held, key=lambda r: internal.epoch(r["at"]))
         last = {r["key"]: r for r in ordered}
-        seqs: dict[str, list[dict[str, Any]]] = {}
+        # 足す行のキーは記録に無くても空の並びを持つ（空の並びは保留の候補にならない）
+        seqs: dict[str, list[dict[str, Any]]] = {e["key"]: [] for e in entries}
         for r in ordered:
             seqs.setdefault(r["key"], []).append(r)
 
         def kept(e: Mapping[str, Any]) -> bool:
             if e["key"] not in resolving or not _plain_fix_entry(e):
                 return True
-            return md.plain_fix_clears(seqs.get(e["key"], []), resolving[e["key"]])
+            return md.plain_fix_clears(seqs[e["key"]], resolving[e["key"]])
 
         wanted = [e for e in entries if kept(e)]
         new = [e for e in wanted if not md.review_recorded(last.get(e["key"]), e)]

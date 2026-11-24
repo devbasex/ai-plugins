@@ -327,7 +327,7 @@ def _judged_elsewhere(p: Mapping[str, Any], q: Question, seen: Target, now: Targ
     """MVV 判定で承認ゲートを省いた回答（`service:mvv`）が、今の質問の PR と head の両方を判定したものでなければ違いの文。
 
     同じコミットを指す別の PR へ承認の対象が変わると head だけでは見分けられないため、判定した PR の番号も照らす（#3959）。
-    PR か head のどちらかを読めなければ、照らせないので違うと扱う（人へ問い直す）。"""
+    PR か head のどちらかを読めなければ、照らせないので違うと扱う（人へ改めて質問する）。"""
     held = p.get(model.MVV_KEY)
     judged = held.get("pr") if isinstance(held, Mapping) else None
     if q.pr is None or isinstance(judged, bool) or judged != q.pr:
