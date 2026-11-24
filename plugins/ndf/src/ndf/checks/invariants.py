@@ -1,4 +1,4 @@
-"""プラグインの不変条件 I1・I3（issues/issue-1142-design-next.md の「不変条件」）。
+"""プラグインの不変条件 I1・I3（docs/specifications/ndf-rebuild.md の「常に成り立つ条件」）。
 
 - I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の保存先の名前を
   文文字列で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
@@ -45,7 +45,7 @@ def _shell_lines(src: Source) -> list[tuple[int, str]]:
 
 
 def own_name(scope: Scope) -> list[Finding]:
-    """I1: コードが自分の名前を文文字列で持つ箇所（#3347 の決定 101）。
+    """I1: コードが自分の名前を文文字列で持つ箇所（docs/specifications/ndf-rebuild.md の決定 101）。
 
     名前の文字列そのものは今の名前と入れ替えの後の名前（`identity.FINAL_NAME`）で、パスと前置きはそれに
     ディレクトリ名を足して検証する。Python のパッケージの形（`src/ndf/`・`ndf.` で始まるモジュール名）は検証しない。
