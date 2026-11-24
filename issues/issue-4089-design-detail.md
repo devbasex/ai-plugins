@@ -219,7 +219,7 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 満たす決定: 決定 6、受け入れ条件 10
 
-#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail, known_ttl, last_message, started) -> TurnRead`）と返り値の型を変えずに、中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の実装が #4068 の詳細設計から替えるのは次の 2 点だけである。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
+#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail, last_message, started) -> TurnRead`）と返り値の型を #4068 の詳細設計のまま使い、中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。状態の寿命（以前の `known_ttl`）は引数に取らない。排他の外で読んだ状態で寿命を補うと、並んで動く hook の順で古い値を使うためである（#4068・#4199 の設計の決定 13）。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の実装が #4068 の詳細設計から替えるのは次の 2 点だけである。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
 
 - **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読み、その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなり、空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、理由の行を会話で 1 度だけ書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである
@@ -243,6 +243,6 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | `cache_write` | `u` の `cache_creation_input_tokens`。無ければ 0（同上） | 無い（同上） |
 | `output` | `u` の `output_tokens` | 無い・整数でない |
 | `model` | `entry["message"]["model"]` | 無い・空・文字列でない |
-| `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら引数の `known_ttl`（#4068 の詳細設計のまま） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
+| `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら None（未定）。補うのは呼び手の `rewake._settle` だけで、子を止める排他の中で読み直した状態の `ttl` を使う。それでも未定なら待ちを始めない（#4068・#4199 の設計の決定 13） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
 
 同じ `message.id` の前の行は、どの項目でも読まない。前の行と採用行で `usage` が違う複数行の応答でも、文脈の量（`tokens`・`S`）と起床の費用（`cache_read`・`cache_write`・`output`・`ttl`）は同じ採用行の値になる。
