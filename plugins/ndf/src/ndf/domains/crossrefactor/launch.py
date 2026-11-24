@@ -64,9 +64,8 @@ def _limit(req: Request) -> float:
 
 
 def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
-    if req.runtime == participants.FIXER:
-        return participants.read_only_launch(f"{launch_decide.SKILL} の {req.phase} の担当", workdir, req.prompt, paths_stem, _limit(req))
-    return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
+    system = f"{launch_decide.SKILL} の {req.phase} の担当"
+    return participants.reading_launch(req.runtime, system, workdir, req.prompt, paths_stem, _limit(req))
 
 
 def _coding(req: Request, workdir: Path, paths_stem: Path, location: launch_decide.ResultPlace) -> agents.Launch:

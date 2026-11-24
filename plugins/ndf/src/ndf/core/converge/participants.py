@@ -234,6 +234,15 @@ def read_only_launch(
     return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), limit)
 
 
+def reading_launch(
+    seat: str, system: str, workdir: Path, prompt: str, stem: Path, timeout: Optional[float] = None, readable: Sequence[Path] = ()
+) -> agents.Launch:
+    """席 `seat` の読むだけの 1 回の起動。claude の席は `read_only_launch`（`system`・`readable` を使う）、ほかは `review_launch`。"""
+    if runtime_of(seat) != FIXER:
+        return review_launch(seat, workdir, prompt, stem, timeout)
+    return read_only_launch(system, workdir, prompt, stem, timeout, readable=readable)
+
+
 class ClaudeAnswer(NamedTuple):
     """claude の `--output-format json` の出力を 1 回読んだもの。`text` は結果を探す本文（外側の JSON の `result`。外側が JSON で
     なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。"""
