@@ -59,7 +59,7 @@ def _hub(monkeypatch: pytest.MonkeyPatch, heads: dict[int, str]) -> list[set[int
         asked.append(set(numbers))
         return {n: SimpleNamespace(head_sha=heads[n]) if n in heads else None for n in numbers}
 
-    monkeypatch.setattr(records_cli, "_hub", lambda root: SimpleNamespace(pulls=pulls))
+    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: SimpleNamespace(pulls=pulls))
     return asked
 
 
@@ -161,6 +161,7 @@ def test_add_fills_the_row_and_keeps_no_text(repo: Path, capsys, last_result) ->
         {"reads": [READS[1]]},
         {"reads": [{**READS[0], "result": "remained"}]},
         {"prs": [{"number": 7, "branch": "design/x"}]},
+        {"prs": [{**PRS[0], "branch": "*"}]},
         {"questions": []},
         {"questions": [{"question": " ", "options": []}]},
         {"questions": "設計を承認しますか"},
@@ -171,6 +172,21 @@ def test_add_refuses_a_wrong_shape_without_writing(change: dict, repo: Path, cap
     code, got = _run(capsys, last_result, repo, "add", {**ENTRY, **change})
     assert code != 0 and got["cause"]["kind"] == "invalid"
     assert reading.rows() == []
+
+
+@pytest.mark.parametrize(
+    ("branch", "kept"),
+    [("main", True), ("feature/4285-日本語.1", True)]
+    + [(b, False) for b in ("*", "a/*", "a:b", "^a", "a..b", "/a", "a/", "a//b", ".a", "a/.b", "a.lock", "a.", "a@{1}", "a b", "a\n", "")],
+)
+def test_rows_keep_only_a_single_branch_name(branch: str, kept: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """記録のブランチは強制更新の refspec に入るので、書いてある行も 1 つのブランチを表す名前だけを読む。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path))
+    row = _row(version=internal.version(), at=internal.stamp(0), question_key="0" * 64, prs=[{**PRS[0], "branch": branch}], reads=READS)
+    text = json.dumps(row) + "\n"
+    reading.checks_path().write_text(text, encoding="utf-8")
+    assert reading.rows() == ([row] if kept else [])
+    assert rd.light_rows(text, internal.version()) == ([row] if kept else [])
 
 
 def test_rows_stop_on_a_newer_version(repo: Path) -> None:
@@ -184,17 +200,29 @@ def test_rows_stop_on_a_newer_version(repo: Path) -> None:
 # --- 承認の手順の確かめ ---------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("head", "prs", "words"), [(HEAD, [7], []), (MOVED, [7], [rd.HEAD_MOVED]), (HEAD, [7, 8], ["no_pr"])])
+@pytest.mark.parametrize(("head", "words"), [(HEAD, []), (MOVED, [rd.HEAD_MOVED])])
 def test_check_compares_with_the_heads_on_github(
-    head: str, prs: list[int], words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
+    head: str, words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
 ) -> None:
     reading.add(ENTRY, repo)
-    asked = _hub(monkeypatch, {7: head, 8: HEAD})
-    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
-    assert asked == [{7, *prs}]
+    asked = _hub(monkeypatch, {7: head})
+    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
+    assert asked == [{7}]
     assert fetched == [("origin", "+refs/heads/design/x:refs/remotes/origin/design/x")]
     assert [i["missing"] for i in got["items"]] == words
     assert (code == 0) is (words == []) and ("cause" not in got or got["cause"]["kind"] == "precondition")
+
+
+@pytest.mark.parametrize(("recorded", "prs", "word"), [(False, [7], rd.NO_RECORD), (True, [7, 8], "no_pr")])
+def test_check_returns_what_the_record_lacks_without_reading_github(
+    recorded: bool, prs: list[int], word: str, repo: Path, capsys, last_result, monkeypatch, fetched
+) -> None:
+    if recorded:
+        reading.add(ENTRY, repo)
+    asked = _hub(monkeypatch, {7: HEAD, 8: HEAD})
+    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
+    assert got["items"] == [{"missing": word}] and got["cause"]["kind"] == "precondition"
+    assert (asked, fetched) == ([], [])
 
 
 def test_check_without_a_pull_request_does_not_read_github(repo: Path, capsys, last_result, monkeypatch, fetched) -> None:
@@ -208,10 +236,23 @@ def test_check_stops_as_unknown_when_github_cannot_be_read(repo: Path, capsys, l
     def broken(numbers: Any) -> dict:
         raise GitHubError("502", 502)
 
-    monkeypatch.setattr(records_cli, "_hub", lambda root: SimpleNamespace(pulls=broken))
+    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: SimpleNamespace(pulls=broken))
     reading.add(ENTRY, repo)
     _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
     assert got["status"] == "stopped" and got["cause"]["kind"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("heads", "prs", "kind"), [({}, [7, 8], "unknown"), ({7: HEAD}, [7], "unknown"), ({7: MOVED}, [7, 8], "precondition")]
+)
+def test_check_does_not_pass_a_pull_request_without_a_head(
+    heads: dict[int, str], prs: list[int], kind: str, repo: Path, capsys, last_result, monkeypatch
+) -> None:
+    """GitHub が None を返した PR は、確かめられていない。head が違うと分かった PR があれば、そちらを先に知らせる。"""
+    reading.add({**ENTRY, "prs": [*PRS, {"number": 8, "branch": "design/y", "head": HEAD}]}, repo)
+    _hub(monkeypatch, heads)
+    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
+    assert got["status"] == "stopped" and got["cause"]["kind"] == kind
 
 
 # --- 読み手役への指示 -----------------------------------------------------------------------------------

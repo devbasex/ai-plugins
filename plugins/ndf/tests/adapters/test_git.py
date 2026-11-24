@@ -77,8 +77,9 @@ def test_repo_of_url(url: str, repo: str | None) -> None:
 
 
 def test_remote_repo_refuses_non_github_remote() -> None:
-    with pytest.raises(git.GitError, match="GitHub"):
-        git.Git(runner=_fake(stdout="https://gitlab.com/x/y.git\n")).remote_repo("origin")
+    with pytest.raises(git.GitError, match="GitHub") as exc:
+        git.Git(runner=_fake(stdout="https://user:s3cret@gitlab.com/x/y.git\n")).remote_repo("origin")
+    assert "s3cret" not in str(exc.value)
 
 
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:

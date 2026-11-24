@@ -85,7 +85,7 @@ plugins/ndf/
 | `reading.prompt` | 新設 | `(entry: Mapping[str, Any]) -> str` | 読み手役への指示を返す。`files`・`reader`・`questions_kind` と、4 つの型・2 つの区分の見分け方・返す形を入れる。文書は加工しない。「エンジニア向けの補足」を外した文書や、直した部分だけの文書は、担当が先に別のファイルへ作る |
 | `reading.add` | 新設 | `(entry: Mapping[str, Any], root: Path) -> dict[str, Any]` | 担当が書いた記録を確かめ、足りない値を補って 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` を送出し、追記しない。GitHub を読まない |
 | `reading.rows` | 新設 | `() -> list[dict[str, Any]]` | 記録を古い順に返す。壊れた行は無いものとして扱い、今の NDF より新しいバージョンの行があれば `InternalError` を送出する。ファイルが無ければ空。ファイルを開けなければ `OSError` を送出する |
-| `reading.check` | 新設 | `(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを取り込んでから、GitHub の head と記録を `missing` で比べる。GitHub を読めなければ `GitHubError` を送出する。手順は表の下にある |
+| `reading.check` | 新設 | `(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを取り込んでから、GitHub の head と記録を `missing` で比べる。GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown` を送出する。手順は表の下にある |
 | `reading_decide.question_key` | 新設 | `(questions: Sequence[Mapping[str, Any]]) -> str` | 質問ごとの「質問の文・複数選択か・選択肢の名前と説明」だけを残した JSON（キーの順を固定し、文字列の前後の空白を除く）の SHA-256。区分などは含めない |
 | `reading_decide.used_row` | 新設 | `(key: str, repo: str, rows) -> Optional[Mapping[str, Any]]` | 使う記録の行（`repo` と `question_key` が一致する最後の行）を返す。無ければ `None` |
 | `reading_decide.light_rows` | 新設 | `(text: str, version: int) -> list[dict[str, Any]]` | 記録のファイルの本文から、使う欄の形が合う行を古い順に返す。壊れた行は無いものとして扱う。`version` より新しい行があれば `NewerRow` を送出する。hook が使う |
@@ -93,8 +93,9 @@ plugins/ndf/
 
 `reading.check` の手順:
 
-1. 記録に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決める（hook と同じ設定を読む）。fetch が失敗しても続け、記録に PR が無ければ fetch しない
-2. `GitHub.pulls` で、記録の PR と承認する PR の head をまとめて読み、`missing` に渡す
+1. `heads` を空にして `missing` を呼ぶ。足りないもの（`no_record`・`no_pr`）があるか、使う記録の行に PR が無ければ、fetch も GitHub の読み取りもせずに、その結果を返す
+2. 使う記録の行に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決め（hook と同じ設定を読む）、リモートの名前とリポジトリの名前は最初に 1 回ずつ決めて、1〜3 で使い回す（`hub` にはリポジトリの名前を渡す）。fetch が失敗しても続ける
+3. `GitHub.pulls` で、使う記録の行の PR の head をまとめて読み、`missing` に渡す（1 で、承認する PR がすべてこの行にあることを確かめてある）。`missing` が空でも、`GitHub.pulls` が `None` を返した PR（PR でない・無い番号）が 1 つでもあれば、確認できていないので `HeadUnknown` を送出する
 
 | 語 | 条件 |
 | --- | --- |
@@ -102,7 +103,7 @@ plugins/ndf/
 | `no_pr` | 承認する PR の番号（`prs`）に、使う記録の行（`repo` と `question_key` が一致する最後の行）に書かれていないものがある。hook は `prs` を渡さないので、承認の手順でだけ出る |
 | `head_moved` | 使う記録の行の PR のうち、`heads` にあって記録した head と違うものがある |
 
-`heads` に無い PR は調べられなかったものとして扱い、`head_moved` に数えない。
+`heads` に無い PR は調べられなかったものとして扱い、`missing` は `head_moved` に数えない。その後の扱いは呼び出し元で違う。hook は通して計測の記録に残し（「質問の前に記録を調べる（hook）」の表の順 5）、`reading.check` は `HeadUnknown` を送出して `ok` にしない。
 
 コマンド（AI が手順の中で打つ。コマンドの一覧では「内部」に分類する）。どれも入力は JSON のファイル 1 つで受け、複数行の文を引数に載せない。キーは、`prompt` が `files`（読ませるファイルのパスの配列）・`reader`（立場・ふだん使う言葉・知識）・`questions_kind`（`requirements`・`design`・`none`。言い直しに含めさせる問いの種類）、`add` が下の表の「担当」のキー、`check` が `questions` と `prs`（番号の配列）である。
 
@@ -110,7 +111,7 @@ plugins/ndf/
 | --- | --- |
 | `ndf records reading prompt --file <JSON>` | `ok`。指示の文を結果の `metrics` で返す |
 | `ndf records reading add --file <JSON>` | 追記したら `ok`。形が違えば誤りの一覧を結果に入れて `invalid` |
-| `ndf records reading check --file <JSON>` | 足りないものが無ければ `ok`、あれば `stopped`・`precondition`。GitHub を読めなければ `stopped`・`unknown` で、担当はそのことを承認資料に書いて進む |
+| `ndf records reading check --file <JSON>` | 足りないものが無ければ `ok`、あれば `stopped`・`precondition`。GitHub を読めないか、head を得られない PR があれば `stopped`・`unknown` で、担当はそのことを承認資料に書いて進む |
 
 ### 内部のデータと定数
 
@@ -119,7 +120,7 @@ plugins/ndf/
 | キー | 型 | 誰が書くか | 値 |
 | --- | --- | --- | --- |
 | `questions` | 配列 | 担当 | `AskUserQuestion` に渡す `questions` と同じ形。行には書かず、`question_key` の計算に使う |
-| `prs[].number`・`prs[].branch`・`prs[].head` | 整数・文字列・文字列 | 担当 | 承認する PR と、読み手役の確認を終えた時点の head。判断の質問と、PR の無い承認では `prs` を空にする |
+| `prs[].number`・`prs[].branch`・`prs[].head` | 整数・文字列・文字列 | 担当 | 承認する PR と、読み手役の確認を終えた時点の head。`branch` は refspec に入るので、1 つのブランチを表す名前（git の `check-ref-format` の規則）だけを受ける。`*` などを含む値は `add` が拒み、書いてある行は壊れた行として読まない（`reading.rows` と `light_rows` の両方）。判断の質問と、PR の無い承認では `prs` を空にする |
 | `reads[].name` | 文字列 | 担当 | 文書のパスか、固定の文字列 `question`（質問の文）・`material`（質問の直前に示す材料か承認資料）。`question` が 1 つも無い記録は拒む |
 | `reads[].reader` | 文字列 | 担当 | 読み手の立場 |
 | `reads[].round` | 1 か 2 | 担当 | その立場で何回目の読みか |
@@ -174,4 +175,5 @@ plugins/ndf/
 | `question_key` | 選択肢の説明・複数選択かどうか・文の境界が変わると値が変わる。区分だけが変わっても変わらない | — |
 | `missing` | 一致すれば空。`no_record`・`no_pr`・`head_moved` の条件ごとにその語を返す。別のリポジトリの記録は数えない | `heads` に無い PR では `head_moved` を返さない |
 | `reading.add` | 値を補って 1 行追記する | `question` の無い記録で `ReadingInvalid`。複数行と引用符を含む値をそのまま受ける |
+| `reading.check` | GitHub の head と一致すれば空。記録だけで足りないと決まれば GitHub を読まない | `GitHub.pulls` が `None` を返した PR があれば `HeadUnknown` |
 | `reading_check.check` | 「質問の前に記録を調べる（hook）」の表の順 1〜5 を 1 つずつ確かめる。壊れた行だけの記録は `no_record` で止まる | 開けない記録・git の失敗で通す |

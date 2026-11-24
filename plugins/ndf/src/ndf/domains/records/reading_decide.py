@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Optional
 
 # 足りないものを表す語（hook の止める理由と `ndf records reading check` の結果に出る）
 NO_RECORD = "no_record"
 HEAD_MOVED = "head_moved"
+# 1 つのブランチの名前（git check-ref-format の規則）。refspec に入れるので、`*` などのパターンと範囲の記号を受けない
+_BRANCH = re.compile(r"(?![./])(?!.*(?:\.\.|//|/\.|@\{|\.lock(?:/|\Z)))[^\x00-\x20\x7f~^:?*\[\\\ud800-\udfff]+(?<![./])")
 
 
 class NewerRow(Exception):
@@ -80,7 +83,7 @@ def light_rows(text: str, version: int) -> list[dict[str, Any]]:
         found = row.get("version")
         if type(found) is int and found > version:
             raise NewerRow(found)
-        if _has_used_keys(row):
+        if has_used_keys(row):
             rows.append(row)
     return rows
 
@@ -93,7 +96,8 @@ def _row(line: str) -> Optional[dict[str, Any]]:
     return row if isinstance(row, dict) else None
 
 
-def _has_used_keys(row: Mapping[str, Any]) -> bool:
+def has_used_keys(row: Mapping[str, Any]) -> bool:
+    """比べるのに使う欄の形が合うか（ブランチは 1 つを表す名前だけ）。書くときも読むときもこれで確かめる。"""
     prs = row.get("prs")
     return (
         isinstance(row.get("repo"), str)
@@ -104,4 +108,7 @@ def _has_used_keys(row: Mapping[str, Any]) -> bool:
 
 
 def _is_pr(pr: Any) -> bool:
-    return isinstance(pr, dict) and type(pr.get("number")) is int and all(isinstance(pr.get(k), str) for k in ("branch", "head"))
+    if not (isinstance(pr, dict) and type(pr.get("number")) is int and isinstance(pr.get("head"), str)):
+        return False
+    branch = pr.get("branch")
+    return isinstance(branch, str) and _BRANCH.fullmatch(branch) is not None
