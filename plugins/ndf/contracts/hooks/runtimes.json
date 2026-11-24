@@ -5,7 +5,7 @@
     "claude": {
       "summary": "Claude Code（https://code.claude.com/docs/en/hooks）",
       "plugin_root_env": "CLAUDE_PLUGIN_ROOT",
-      "samples": ["2.1.325"],
+      "samples": ["2.1.325", "2.1.331"],
       "timeout_max": 600,
       "skipped": {},
       "events": {

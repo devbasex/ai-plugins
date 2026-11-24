@@ -62,8 +62,8 @@ def deny(reason: str, key: str = "", notes: Optional[dict] = None, sole: bool = 
     return Verdict("deny", reason=reason, key=key, notes=notes if notes is not None else {}, sole=sole)
 
 
-def pushback(reason: str) -> Verdict:
-    return Verdict("pushback", reason=reason)
+def pushback(reason: str, notes: Optional[dict] = None) -> Verdict:
+    return Verdict("pushback", reason=reason, notes=notes if notes is not None else {})
 
 
 def advise(context: str) -> Verdict:
