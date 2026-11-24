@@ -105,10 +105,15 @@ class Seats(NamedTuple):
     may_fill: bool = True
 
 
+def is_claude_seat(seat: str) -> bool:
+    """席が claude のものか（`claude` か `claude-<数>`）。"""
+    head, _, num = seat.rpartition("-")
+    return seat == FIXER or (head == FIXER and num.isdigit())
+
+
 def runtime_of(seat: str) -> str:
     """席の名前のランタイム（`claude-<数>` は claude、ほかはそのまま）。"""
-    head, _, num = seat.rpartition("-")
-    return FIXER if head == FIXER and num.isdigit() else seat
+    return FIXER if is_claude_seat(seat) else seat
 
 
 def free_seat(taken: Collection[str]) -> str:
