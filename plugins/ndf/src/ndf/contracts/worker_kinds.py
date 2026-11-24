@@ -20,7 +20,7 @@ from types import MappingProxyType
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import worker_paths
+from ndf.contracts import internal, worker_paths
 
 KINDS_FILE = "worker/kinds.json"
 NO_SOURCES: Mapping[str, str] = MappingProxyType({})
@@ -143,8 +143,10 @@ def _has_shape(held: Any, shape: Mapping[str, type]) -> bool:
 
 
 def values_of(held: Any) -> Optional[dict[str, Any]]:
-    """`values.json` の中身を読んだ値。辞書でない・キーか型が `VALUES_SHAPE` と違えば None。"""
-    return held if _has_shape(held, VALUES_SHAPE) else None
+    """`values.json` の中身を読んだ値。辞書でない・キーか型が `VALUES_SHAPE` と違えば None。工程の入力の旧い名前は今の名前へ移す。"""
+    if not _has_shape(held, VALUES_SHAPE):
+        return None
+    return {**held, "inputs": internal.stage_values(held["inputs"])}
 
 
 # 単発のプラン（`ndf route render・run`）が既定の worker の入力を持つ、プランの最上位のキー（PR 4319 の指摘 r2-2・r2-3）

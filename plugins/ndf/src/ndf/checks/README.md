@@ -7,7 +7,7 @@ plugins/ndf/bin/ndf check
 ```
 
 - 見るファイルを 1 回集め、`.py` の構文木を 1 ファイルにつき 1 回だけ作る。すべての規則が同じ木を読む
-- 兆候は初日から 0 件で、基準のファイルも増やさないラチェットも持たない。見つけた兆候はすべて違反になる
+- 兆候は初日から 0 件で、基準のファイルもラチェットも持たない。見つけた兆候はすべて違反になる。ラチェットは規則 `copy-dup` だけが持つ（下の「コピーで生まれた重複の規則」）
 - 規則のしきい値と名前の一覧は `rules.json` にあり、規則の関数は値を写さずにそこから読む
 - 結果 JSON を標準出力の最後の 1 行に出す。形は結果のコントラクト（`ndf.contracts.result`）で、出す前に確かめる。違反は 1 件につき 1 行を標準エラーへ出す
 - 止まったときの停止理由（`cause`）と終了コード:
@@ -17,7 +17,8 @@ plugins/ndf/bin/ndf check
 | 違反が無い | `ok` | 無し | 0 |
 | 違反がある | `stopped` | `check_failed` | 1 |
 | 構文の誤りで読めない `.py` がある | `stopped` | `invalid` | 2 |
-| 規則のデータ・子の表・用語集・git・PR の事象の JSON が読めない | `stopped` | `config_broken` | 2 |
+| 規則のデータ・子の表・ラチェットの基準・用語集・git・PR の事象の JSON が読めない | `stopped` | `config_broken` | 2 |
+| `--write-spec` がラチェットの基準を書けない | `stopped` | `unknown` | 1 |
 
 `cause.detail` は `summary` と同じ文である。違反の一覧は `items`、規則ごとの件数は `metrics.findings` にある。
 
@@ -25,7 +26,7 @@ plugins/ndf/bin/ndf check
 
 | 範囲 | 当てる規則 |
 | --- | --- |
-| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・内部データの名前・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
+| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・コピーで生まれた重複・内部データの名前・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
 | `tests/` の下の `.py` | 行数の上限・I3・禁止語 |
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
@@ -90,6 +91,29 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む・スキーマの `enum` を `ndf.contracts.schema_enum` で読む・上限の設定から引く）。
 
+## コピーで生まれた重複の規則
+
+| 規則 | 違反と数えるもの |
+| --- | --- |
+| `copy-dup` | 2 つ以上のファイルの最上位に同じ名前の関数がある組（名前ごとに 1 件。`_` で始まる名前も数える）と、4 つ以上のファイルに出る 8〜80 字の文字列（文字列ごとに 1 件。docstring を除き、f 文字列の文字の部分を含む）。どちらも辞書順の先頭のファイルの行に付ける。ファイルの数・文字列の長さ・同名を認める関数の名前は `rules.json` の `copy_dup` にある |
+
+### ラチェット
+
+`copy-dup` は初日から 0 件にできないので、件数をラチェットの基準（`ratchet.json` の `rules.<規則>.max`）と比べる。件数が基準と同じなら違反に数えない。
+
+| 場合 | 結果 |
+| --- | --- |
+| 件数が基準と同じ | 通る |
+| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出す。指摘の全件は `--only copy-dup` を渡したときだけ出すので、変更の前のコードの出力と比べて増えた分を減らす |
+| 件数が基準より少ない（重複を減らして基準を据え置いた） | 落ちる。`ndf check --write-spec` が基準を今の件数へ下げるので、`ratchet.json` を同じ Pull Request に含める |
+| 基準が、変更の前の基準より大きい（`--ratchet-base <commit>` を渡したとき） | 落ちる。基準を上げる経路は無い |
+
+- CI は `--ratchet-base HEAD^1`（Pull Request・merge queue・push のどれも、変更の前の先頭）を渡す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
+- `measured` と `commit` は、基準を書いた日と、その時の `HEAD` である
+- 構文の誤りで読めないファイルがあれば、件数が足りないので比べず、基準も下げない
+- `--only` がラチェットを当てる規則を選んでいなければ、基準を読まず、比べず、`--write-spec` でも下げない
+- ラチェットを当てる規則を足すときは、`run.py` の `RATCHETED` と `ratchet.json` の両方に書く。基準の行が無い規則は検査を止める（`config_broken`）
+
 ## 上限の設定の読み手の規則
 
 | 規則 | 違反と数えるもの |
@@ -140,7 +164,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 設定（`.ndf/`）と入出力（サブコマンド・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約を、コードと SSOT の表から生成し、食い違いを落とす（#3518・#3519）。生成物はコントラクトのページ（`docs/contracts/*.md`）とサブコマンドごとの引数のスキーマ（`contracts/schemas/io/*.args.schema.json`）で、保存先は `rules.json` の `spec.generated` が持つ。コントラクトの保存先（`contracts/`）を持たないプラグインには当てない。
 
 ```bash
-plugins/ndf/bin/ndf check --write-spec   # 生成物を書き直してから検査する
+plugins/ndf/bin/ndf check --write-spec   # 生成物を書き直し、減った件数へラチェットの基準を下げてから検査する
 plugins/ndf/bin/ndf check                     # 書かずに検査する（CI と同じ）
 ```
 

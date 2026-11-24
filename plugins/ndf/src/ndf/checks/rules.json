@@ -199,6 +199,12 @@
       {"at": "ndf.domains.hooks.budget._pair_errors", "expr": "guard['limits']", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
     ]
   },
+  "copy_dup": {
+    "min_files": 4,
+    "min_chars": 8,
+    "max_chars": 80,
+    "allow_names": ["check", "main"]
+  },
   "internal_names": {
     "writers": {"write_record": 0, "append": null, "append_locked": null}
   },

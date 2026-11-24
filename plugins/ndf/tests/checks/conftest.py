@@ -10,7 +10,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
-from ndf.checks import child_deps, run, spec_docs, spec_render
+from ndf.checks import child_deps, ratchet, run, spec_docs, spec_render
 from ndf.checks.model import Finding, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +57,9 @@ def plugin(tmp_path: Path) -> Plugin:
     child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
     (root / child_deps.CHILDREN_REL).parent.mkdir(parents=True)
     (root / child_deps.CHILDREN_REL).write_text(json.dumps({"children": {"X": child}, "tables": {}}))
+    # ラチェットの基準。合成のプラグインは重複を持たない
+    row = {"max": 0, "measured": "2026-01-01", "commit": "c0"}
+    (root / ratchet.RATCHET_REL).write_text(json.dumps({"version": ratchet.RATCHET_VERSION, "rules": dict.fromkeys(run.RATCHETED, row)}))
     git_sandbox.sh(repo, "init", "-q", strip=True)
     return Plugin(repo, root)
 

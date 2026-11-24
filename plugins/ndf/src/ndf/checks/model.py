@@ -153,6 +153,17 @@ def source_imports(src: Source, module: str) -> list[imports.Import]:
     return imports.collect(src.tree, module, src.path.name == "__init__.py")
 
 
+def _docstrings(tree: ast.Module) -> set[int]:
+    owners = [tree, *(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))]
+    return {id(o.body[0].value) for o in owners if o.body and isinstance(o.body[0], ast.Expr) and isinstance(o.body[0].value, ast.Constant)}
+
+
+def string_constants(tree: ast.Module) -> list[tuple[int, str]]:
+    """文字列の定数（docstring を除き、f 文字列の文字の部分を含む）を行とともに返す。"""
+    docs = _docstrings(tree)
+    return [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+
+
 def contained(root: Path, rel: str | Path) -> Path:
     """`root` の下の `rel` の解決後のパス。`root` の外を指すか、シンボリックリンクを通れば `CheckError`（たどって読み書きしない）。"""
     base = root.resolve()
@@ -195,6 +206,7 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
             "limits",
             "internal_names",
             "words",
+            "copy_dup",
             "child_deps",
         )
         if k not in data

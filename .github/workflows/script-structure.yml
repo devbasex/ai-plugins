@@ -162,7 +162,8 @@ jobs:
         run: python3 scripts/check-plugin-refs.py check --tree current
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
-        run: plugins/ndf/bin/ndf check
+        # ラチェットの基準（plugins/ndf/src/ndf/checks/ratchet.json）を、変更の前（HEAD^1）の基準より上げていないかも見る
+        run: plugins/ndf/bin/ndf check --ratchet-base HEAD^1
       # 表だけの差分では全体の検査を打たず、行き先と生成済みの review_items の照合だけを打つ（全体の検査は同じ規則を含む）
       - name: Check the design review items
         if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.review_items == 'true'
