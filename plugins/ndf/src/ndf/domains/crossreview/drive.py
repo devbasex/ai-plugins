@@ -166,24 +166,20 @@ class _Changed(NamedTuple):
     docs: dict[str, str]
 
 
-def _tree_entries(g: git.Git, rev: str, paths: Sequence[str]) -> dict[str, tuple[str, str, str]]:
-    """`rev` のツリーの `paths` の、パスから（モード, 種別, オブジェクトの ID）。`git ls-tree` を 1 回だけ打つ。"""
-    out: dict[str, tuple[str, str, str]] = {}
-    for entry in g.run("ls-tree", "--full-tree", "-z", rev, "--", *paths).split("\0"):
-        if not entry:
-            continue
-        meta, path = entry.split("\t", 1)
-        mode, kind, oid = meta.split()
-        out[path] = (mode, kind, oid)
-    return out
-
-
 def _regular_blobs(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
     """HEAD のツリーで通常のファイル（シンボリックリンク・サブモジュールでない）の `paths` の、パスから blob の ID。
     `git ls-tree` を 1 回だけ打つ。"""
     if not paths:
         return {}
-    return {path: oid for path, (mode, kind, oid) in _tree_entries(g, "HEAD", paths).items() if kind == "blob" and mode in _REGULAR_MODES}
+    out: dict[str, str] = {}
+    for entry in g.run("ls-tree", "--full-tree", "-z", "HEAD", "--", *paths).split("\0"):
+        if not entry:
+            continue
+        meta, path = entry.split("\t", 1)
+        mode, kind, oid = meta.split()
+        if kind == "blob" and mode in _REGULAR_MODES:
+            out[path] = oid
+    return out
 
 
 def _local_text(root: Path, path: str, oid: str) -> Optional[str]:
@@ -369,10 +365,10 @@ def _proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     隠す。PR 3944 の r5-4）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
     開かずにツリーの種別と blob の ID で比べる（シンボリックリンクをたどらず、中身を設定として解釈しない。PR 3944 の r4-2）。"""
     rel = _settings_path(Path(), "review").as_posix()
-    entry = _tree_entries(g, head, [rel]).get(rel)
-    if entry is None:
+    entry = g.run("ls-tree", "--full-tree", "-z", head, "--", rel).rstrip("\0")
+    if not entry:
         return raw is not None
-    mode, kind, oid = entry
+    mode, kind, oid = entry.split("\t", 1)[0].split()
     if raw is None or kind != "blob" or mode not in _REGULAR_MODES:
         return True
     return oid != _blob_id(raw, len(oid))
@@ -386,7 +382,7 @@ def outside_checkout(cfg: RunConfig) -> RunConfig:
     リンクを通ると、同期でリンクが置き換わった後に別の場所を読み書きする。PR 3944 の r8-1）。"""
     state = Path(os.path.realpath(cfg.state_dir))
     tree = Path(os.path.realpath(cfg.worktree))
-    if _inside(state, tree):
+    if state == tree or tree in state.parents:
         raise DriveStopped(
             "precondition",
             f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
@@ -405,8 +401,8 @@ def _start(cfg: RunConfig) -> _Run:
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
     if _proposed_differs(g, synced.remote, cfg.settings.raw):
-        rel = _settings_path(Path(), "review")
-        warnings.append(FOCUS_DIFFERS.format(pr_path=rel.as_posix(), trusted=(cfg.main or cfg.worktree) / rel))
+        rel = _settings_path(Path(), "review").as_posix()
+        warnings.append(FOCUS_DIFFERS.format(pr_path=rel, trusted=_settings_path(cfg.main or cfg.worktree, "review")))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
@@ -696,7 +692,8 @@ def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed]
     round_no = rounds[-1].get("round") or len(rounds)
     journal = FindingJournal(store.list_of(data, store.FINDINGS))
     rounds[-1]["fix"] = _fix_record(journal, ref, path, handed, round_no)
-    _write_journal(ref, data, journal)
+    data[store.FINDINGS] = list(journal.rows.values())
+    store.write_object(ref.path, data)
     _consume(path, round_no)
     return round_no
 
@@ -791,14 +788,9 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
 # --- 記録 -------------------------------------------------------------------------------
 
 
-def _write_journal(ref: store.StateRef, data: dict[str, Any], journal: FindingJournal) -> None:
-    """ジャーナルの行を状態の指摘へ入れて状態ファイルへ書く（`_save` と `merge_fix` で共有）。"""
-    data[store.FINDINGS] = list(journal.rows.values())
-    store.write_object(ref.path, data)
-
-
 def _save(run: _Run) -> None:
-    _write_journal(run.ref, run.data, run.journal)
+    run.data[store.FINDINGS] = list(run.journal.rows.values())
+    store.write_object(run.ref.path, run.data)
 
 
 def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
@@ -943,19 +935,6 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
-    return _fix_round(run, round_no, record, prep.head, open_, handed, launch)
-
-
-def _fix_round(
-    run: _Run,
-    round_no: int,
-    record: dict[str, Any],
-    reviewed_head: str,
-    open_: Sequence[dict[str, Any]],
-    handed: Sequence[fin.Handed],
-    launch: Launcher,
-) -> Optional[str]:
-    """修正必須と判定したラウンドで修正担当を起動し、修正を記録して送る。次へ進むなら None、止まるなら終わり方。"""
     _save(run)
     fix = _fix(run, round_no, open_, handed, launch)
     if fix is None:
@@ -965,7 +944,7 @@ def _fix_round(
     record["fix"] = fix
     _save(run)
     _consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if _push(run, round_no, reviewed_head, fix) else fin.ERROR
+    return None if _push(run, round_no, prep.head, fix) else fin.ERROR
 
 
 def _reusable(run: _Run) -> bool:

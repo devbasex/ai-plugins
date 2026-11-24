@@ -146,16 +146,11 @@ def recorded(remarks: Iterable[Remark]) -> list[Carried]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。"""
-    latest = None
-    for r in remarks:
-        # 同じ時刻なら後に出たものを採る（安定ソートの末尾と同じ選び方）
-        if r.kind == "comment" and r.trusted and _ours(r.body):
-            if latest is None or (r.updated or r.at) >= (latest.updated or latest.at):
-                latest = r
-    if latest is None:
+    mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.updated or r.at)
+    if not mine:
         return []
     out = []
-    for item in report_decide.open_items(latest.body):
+    for item in report_decide.open_items(mine[-1].body):
         fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
         if fid is None or text is None or type(item.get("thread")) is int:
             continue

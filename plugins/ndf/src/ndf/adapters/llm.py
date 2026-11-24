@@ -100,13 +100,6 @@ def _head(reply: claude.ClaudeReply) -> str:
     return shown[:ANSWER_HEAD]
 
 
-def _failed(reply: claude.ClaudeReply, attempt: int, cost: float) -> JudgeAnswer:
-    """打ち直しても直らない失敗の結果。表 `claude-failures` の `judge_cause` を停止理由にする。"""
-    run_log.record("judge", attempts=attempt, valid=False, cost=cost, failure=str(reply.failure))
-    kind = facts.value(claude.FAILURES, reply.failure, "judge_cause")
-    return JudgeAnswer(False, None, causes.cause(kind, reply.error or str(reply.failure)), attempt, cost)
-
-
 def ask(question: str, material: str, schema: dict, timeout: float, call: Optional[Caller] = None) -> JudgeAnswer:
     """質問と材料を `claude -p --json-schema` で渡し、回答を確かめる。合わなければ 1 回だけ打ち直す。
 
@@ -123,7 +116,9 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
         reply = run(argv, _prompt(question, material, errors), timeout)
         cost += reply.cost
         if reply.failure is not None:
-            return _failed(reply, attempt, cost)
+            run_log.record("judge", attempts=attempt, valid=False, cost=cost, failure=str(reply.failure))
+            kind = facts.value(claude.FAILURES, reply.failure, "judge_cause")
+            return JudgeAnswer(False, None, causes.cause(kind, reply.error or str(reply.failure)), attempt, cost)
         errors = [reply.error] if reply.error else check_answer(reply.answer, schema)
         if not errors:
             run_log.record("judge", attempts=attempt, valid=True, cost=cost)

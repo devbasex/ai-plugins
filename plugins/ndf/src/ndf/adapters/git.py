@@ -294,10 +294,6 @@ class Git:
             raise GitError("メインディレクトリを求められない（git worktree list が空）")
         return remote_of(entries[0].path)
 
-    def _remote_or_default(self, remote: Optional[str]) -> str:
-        """`remote` を省けば（`None`）この作業場所のリモート名、渡せばそのまま。"""
-        return remote if remote is not None else self.remote()
-
     def remote_url(self, remote: Optional[str] = None) -> str:
         """リモートの URL。`remote` を省けばこの作業場所のリモート名。引けなければ `GitError`。"""
         remote = remote if remote is not None else self.remote()
@@ -305,7 +301,7 @@ class Git:
 
     def remote_repo(self, remote: Optional[str] = None) -> str:
         """リモートの `<所有者>/<リポジトリ>`。`remote` を省けばこの作業場所のリモート名。GitHub の URL でなければ `GitError`。"""
-        remote = self._remote_or_default(remote)
+        remote = remote if remote is not None else self.remote()
         url = self.remote_url(remote)
         repo = repo_of_url(url)
         if repo is None:

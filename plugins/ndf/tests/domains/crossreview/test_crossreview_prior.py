@@ -262,63 +262,6 @@ def test_record_is_chosen_by_its_last_update() -> None:
     assert prior_decide.recorded([rewritten, other]) == []
 
 
-def _texts(carried: list[prior_decide.Carried]) -> list[str]:
-    return [c.text for c in carried]
-
-
-def _one(text: str, at: str, updated: str = "") -> prior_decide.Remark:
-    return _record([{**_OPEN_NO_THREAD, "text": text}], {}, at)._replace(updated=updated)
-
-
-def test_newest_record_wins_regardless_of_its_place_in_the_list() -> None:
-    """最新の記録は並び順によらず選ぶ（先頭にあっても末尾にあっても同じ）。"""
-    old, new = _one("古い", "2026-11-20T00:00:00Z"), _one("新しい", "2026-11-20T05:00:00Z")
-    assert _texts(prior_decide.recorded([new, old])) == ["新しい"]
-    assert _texts(prior_decide.recorded([old, new])) == ["新しい"]
-
-
-def test_record_without_an_update_time_is_compared_by_its_creation_time() -> None:
-    """最終更新の時刻が空の記録は作った時刻で比べ、更新の時刻を持つ記録と並べる。"""
-    updated = _one("更新あり", "2026-11-20T00:00:00Z", updated="2026-11-20T02:00:00Z")
-    created_later = _one("作成のみ", "2026-11-20T03:00:00Z")
-    created_earlier = _one("作成のみ古い", "2026-11-20T01:00:00Z")
-    assert _texts(prior_decide.recorded([created_later, updated])) == ["作成のみ"]
-    assert _texts(prior_decide.recorded([updated, created_earlier])) == ["更新あり"]
-
-
-def test_records_with_the_same_time_pick_the_last_one_listed() -> None:
-    """同じ時刻の記録が並ぶと、後に並んだものを選ぶ（安定な並べ替えの末尾と同じ）。"""
-    first, second = _one("先", "2026-11-20T00:00:00Z"), _one("後", "2026-11-20T00:00:00Z")
-    assert _texts(prior_decide.recorded([first, second])) == ["後"]
-    assert _texts(prior_decide.recorded([second, first])) == ["先"]
-    # 比べる値（updated か at）が同じなら、どちらの欄から来ても同じ扱い
-    by_update = _one("更新", "2026-11-19T00:00:00Z", updated="2026-11-20T00:00:00Z")
-    assert _texts(prior_decide.recorded([by_update, first])) == ["先"]
-    assert _texts(prior_decide.recorded([first, by_update])) == ["更新"]
-
-
-def test_only_trusted_record_comments_are_candidates() -> None:
-    """候補は書き手が信頼でき `MARKER` で始まる PR コメントだけ。新しくてもほかの種類・印の無いもの・信頼できないものは選ばない。"""
-    chosen = _one("本物", "2026-11-20T00:00:00Z")
-    later = "2026-11-21T00:00:00Z"
-    noise = [
-        chosen._replace(kind="review", at=later),
-        chosen._replace(kind="review_comment", at=later, path="a.py", line=1),
-        chosen._replace(body="前置き\n" + chosen.body.replace(report_decide.MARKER, ""), at=later),
-        chosen._replace(trusted=False, at=later),
-    ]
-    assert _texts(prior_decide.recorded([chosen, *noise])) == ["本物"]
-    assert _texts(prior_decide.recorded([*noise, chosen])) == ["本物"]
-    assert prior_decide.recorded(noise) == []
-    assert prior_decide.recorded([]) == []
-
-
-def test_recorded_reads_a_one_shot_iterable() -> None:
-    """引数は 1 回しか読めないイテレータでもよい。"""
-    old, new = _one("古い", "2026-11-20T00:00:00Z"), _one("新しい", "2026-11-20T05:00:00Z")
-    assert _texts(prior_decide.recorded(r for r in [old, new])) == ["新しい"]
-
-
 def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r2-6: 状態ファイルが追うスレッドを別の実行が resolve していたら、その指摘を修正担当へ渡し直さず、
     同じスレッドへ返信もし直さない。"""

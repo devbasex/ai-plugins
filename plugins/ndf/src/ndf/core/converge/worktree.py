@@ -303,7 +303,7 @@ def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None) ->
     g.run("reset", "--hard", remote)
     if not own:
         return SyncResult(before, remote, 0, (), remote)
-    picked = g.attempt("cherry-pick", *own)
+    picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
         return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote)
     conflicts = conflicted_files(g)

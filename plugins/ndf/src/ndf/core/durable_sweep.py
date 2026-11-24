@@ -174,15 +174,14 @@ def sweep(root: Path, records: Records, now: datetime | None = None) -> SweepRes
 
     24 時間に 1 回だけ走査する。開いているプロセスがいるキー（`run_lock` を待たずに取れないキー）は触らない。
     """
-    return _guarded_sweep(root, now, lambda now, out: _sweep_body(root, records, now, out), "片付けで読めないファイルがあった")
 
+    def body(now: datetime, out: SweepResult) -> None:
+        dbos_dir = _dbos_dir(root)
+        if dbos_dir.is_dir():
+            _sweep_live(root, records, now, out)
+            _sweep_kept(dbos_dir, now, out)
 
-def _sweep_body(root: Path, records: Records, now: datetime, out: SweepResult) -> None:
-    """`sweep` の走査の本体。`dbos/` があるときだけ、生きているキーと retired/・broken/ を片付ける。"""
-    dbos_dir = _dbos_dir(root)
-    if dbos_dir.is_dir():
-        _sweep_live(root, records, now, out)
-        _sweep_kept(dbos_dir, now, out)
+    return _guarded_sweep(root, now, body, "片付けで読めないファイルがあった")
 
 
 def _sweep_live(root: Path, records: Records, now: datetime, out: SweepResult) -> None:
