@@ -66,9 +66,8 @@ def sha256_of(path: Path) -> Optional[str]:
 
 
 def mvv_body(root: Path, decl: Mapping[str, Any]) -> Path:
-    """プロジェクト MVV の本文のパス（設定の `body`、無ければ表 ndf-files の mvv-body。設定と同じ保存先）。"""
-    body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
-    return files.path(root, "mvv").parent / body
+    """プロジェクト MVV の本文のパス（解き方は `mvv_decide.body_path`。パスが不正なら `MvvError`）。"""
+    return root / md.body_path(decl)
 
 
 def mvv_state(root: Path) -> str:
@@ -80,7 +79,11 @@ def mvv_state(root: Path) -> str:
         decl = jsonfile.read_object(path)
     except jsonfile.JsonFileError:
         return md.State.UNREADABLE
-    return md.status(decl, sha256_of(mvv_body(root, decl)))
+    try:
+        body = mvv_body(root, decl)
+    except md.MvvError:
+        return md.State.UNREADABLE
+    return md.status(decl, sha256_of(body))
 
 
 def mvv_checked(root: Path) -> pd.Checked:

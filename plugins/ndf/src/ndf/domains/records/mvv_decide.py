@@ -12,9 +12,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Optional
+
+from ndf.contracts import facts
+from ndf.domains.records import files
+from ndf.domains.records import mvv_material_decide as mm
 
 # 判定の語は承認ゲートの判定（`ndf.progress.gate.checks`）の綴りを使う
 from ndf.progress.gate.checks import FOLLOW, NOT_FOLLOW, UNKNOWN
@@ -32,6 +38,15 @@ VERDICT_DETAILS = ("reasons", "boundary", "basis")
 REVISE_AFTER = "revise_after"
 OVERRIDE_LIMIT_KEY, UNKNOWN_LIMIT_KEY = "overrides", "unknowns"
 DEFAULT_LIMITS = {OVERRIDE_LIMIT_KEY: 3, UNKNOWN_LIMIT_KEY: 5}
+# 本文の `## <名前>` の見出しと、Value のセクションの行頭の番号
+_H2 = re.compile(r"^##[ \t]+(.+?)[ \t\r]*$", re.MULTILINE)
+_NUMBERED = re.compile(r"^([0-9]+)\.[ \t]", re.MULTILINE)
+# 項目を拾う本文のセクション
+MISSION, VISION, VALUE, REDLINES = "Mission", "Vision", "Value", "必ず人の承認が要る操作"
+
+
+class MvvError(ValueError):
+    """MVV の設定・本文が読めないか壊れている・メインディレクトリを解けない。"""
 
 
 def override_kind(verdict: Optional[str], approved: bool) -> Optional[str]:
@@ -110,6 +125,35 @@ def status(decl: Optional[Mapping[str, Any]], body_sha256: Optional[str]) -> str
     if body_sha256 is None:
         return State.UNREADABLE
     return State.APPROVED if last["sha256"] == body_sha256 else State.MISMATCH
+
+
+def body_path(decl: Mapping[str, Any]) -> str:
+    """本文のパス（リポジトリの根からの POSIX のパス）。設定の `body`（文字列でなければ既定）を設定のディレクトリから解く。
+
+    絶対パス・`..` を含む値・空は `MvvError`。
+    """
+    held = decl.get("body")
+    body = held if isinstance(held, str) else facts.value("ndf-files", "mvv-body", "path")
+    path = PurePosixPath(body)
+    if not body or path.is_absolute() or ".." in path.parts:
+        raise MvvError(f"MVV の設定の body は設定のディレクトリの中の相対パスにする: {body!r}")
+    return str(PurePosixPath(files.relpath("mvv")).parent / path)
+
+
+def _section_items(name: str, text: str) -> list[str]:
+    if name in (MISSION, VISION):
+        return [name]
+    if name == VALUE:
+        return [f"{VALUE} {no}" for no in _NUMBERED.findall(text)]
+    return list(mm.redlines(text)) if name == REDLINES else []
+
+
+def items_of(body: str, principles: str) -> tuple[str, ...]:
+    """MVV の本文と共通原則の本文に実在する項目（`Mission`・`Value 1`・`P1`・`C1` など）。重ねずに出た順。"""
+    heads = list(_H2.finditer(body))
+    ends = [h.start() for h in heads[1:]] + [len(body)]
+    got = [i for h, end in zip(heads, ends, strict=True) for i in _section_items(h.group(1), body[h.end() : end])]
+    return tuple(dict.fromkeys([*got, *mm.redlines(principles)]))
 
 
 def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], repo: str) -> Signals:

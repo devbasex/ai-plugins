@@ -93,6 +93,7 @@ def _approved(body: Any = "mvv.md", sha: Any = _SHA_X) -> bytes:
         (_approved(sha=1), {"mvv.md": b"x"}, "unapproved"),
         (_approved(), {"mvv.md": b"z"}, "mismatch"),
         (_approved(), {"mvv.md": None}, "unreadable"),
+        (_approved(body="../.ndf/mvv.md"), {"mvv.md": b"x"}, "unreadable"),
     ],
 )
 def test_mvv_state_reads_the_ndf_settings_and_the_body(tmp_path: Path, decl: bytes | None, files: dict, state: str) -> None:
