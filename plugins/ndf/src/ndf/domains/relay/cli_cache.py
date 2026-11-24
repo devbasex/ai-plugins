@@ -30,6 +30,8 @@ STOP_KINDS = frozenset({"work_stop", "contest", "arrival"})
 # 当たりの率を分ける `age` の幅（分）。60 分を越えたものは `60m+`
 AGE_BUCKETS = (30, 45, 50, 55, 60)
 OVER = "60m+"
+# 待ちにまとめる行の種類
+WAIT_KINDS = ("wait_start", "wake", "wake_result", "wait_end", "stop_waking", "wait_void")
 Row = Mapping[str, Any]
 Wait = defaultdict[str, list]
 
@@ -78,16 +80,11 @@ def _bucket(age: float) -> str:
     return next((f"{m}m" for m in AGE_BUCKETS if age <= m * 60), OVER)
 
 
-def _wait_kinds() -> tuple[str, ...]:
-    """待ちにまとめる行の種類。"""
-    return ("wait_start", "wake", "wake_result", "wait_end", "stop_waking", "wait_void")
-
-
 def _by_wait(rows: list[Row]) -> list[Wait]:
     """待ちの行を（会話, `wait_id`）でまとめ、種類ごとの並びにする。"""
     waits: dict[tuple, Wait] = {}
     for row in rows:
-        if row.get("kind") in _wait_kinds() and row.get("wait_id") is not None:
+        if row.get("kind") in WAIT_KINDS and row.get("wait_id") is not None:
             waits.setdefault((row.get("session_id"), row["wait_id"]), defaultdict(list))[row["kind"]].append(row)
     return list(waits.values())
 
