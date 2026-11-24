@@ -406,30 +406,37 @@ def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
     return lambda row: all(row.get(k) == entry[k] for k in ("kind", "repo", "pr"))
 
 
+def _append_missing(kind: str, entries: list[dict[str, Any]], missing: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]) -> int:
+    """記録 `kind` をロックし、`entries` と同じ種類・リポジトリ・PR の記録から `missing` が選んだ記録だけを足して、足した件数を返す。"""
+    path = record_path(kind)
+    with jsonl.lock(path):
+        held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
+        new = missing(held)
+        for e in new:
+            jsonl.append(path, e, kind=kind)
+    return len(new)
+
+
 def _append_reviews(entries: list[dict[str, Any]]) -> int:
     """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足し、足した件数を返す。"""
-    path = record_path("mvv-validation")
-    with jsonl.lock(path):
-        held, _ = jsonl.read_rows(path, kind="mvv-validation", wanted=_of_pr(entries[0]))
+
+    def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         last = {r["key"]: r for r in sorted(held, key=lambda r: internal.epoch(r["at"]))}
-        new = [e for e in entries if not md.review_recorded(last.get(e["key"]), e)]
-        for e in new:
-            jsonl.append(path, e, kind="mvv-validation")
-    return len(new)
+        return [e for e in entries if not md.review_recorded(last.get(e["key"]), e)]
+
+    return _append_missing("mvv-validation", entries, missing)
 
 
 def _append_disputed(entries: list[dict[str, Any]]) -> int:
     """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足し、足した件数を返す。"""
     if not entries:
         return 0
-    path = record_path("mvv-signals")
-    with jsonl.lock(path):
-        held, _ = jsonl.read_rows(path, kind="mvv-signals", wanted=_of_pr(entries[0]))
+
+    def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         known = {(r.get("key"), r["mvv_version"], r.get("sha256")) for r in held}
-        new = [e for e in entries if (e["key"], e["mvv_version"], e["sha256"]) not in known]
-        for e in new:
-            jsonl.append(path, e, kind="mvv-signals")
-    return len(new)
+        return [e for e in entries if (e["key"], e["mvv_version"], e["sha256"]) not in known]
+
+    return _append_missing("mvv-signals", entries, missing)
 
 
 def mvv_validate_sprint(
