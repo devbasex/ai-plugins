@@ -28,7 +28,7 @@ SLEPT, ANSWERED = "slept", "answered"
 # 待ちの上限の名前（利用上限の待ちの頭打ち）
 USAGE_WAIT_MAX = "supervise.limit-wait-max"
 USAGE_LIMIT = "usage_limit"
-# 選択の記録の規則の番号（AI が判断している分岐の一覧。issues/issue-1142-design-scripted-flow.md）。
+# 選択の記録の規則の番号（AI が判断している分岐の一覧。docs/specifications/ndf-rebuild-scripted-flow.md の「洗い出しの一覧」）。
 # 止まったプランの再開点（R03）、衝突で止まったときのマージ（R10）、承認の回答の後のルート（R13）
 RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
 

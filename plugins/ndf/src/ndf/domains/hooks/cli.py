@@ -1,4 +1,4 @@
-"""`ndf hooks` のサブコマンド（#3345 の決定 90・94・95）。
+"""`ndf hooks` のサブコマンド（docs/specifications/ndf-rebuild.md の決定 90・94・95）。
 
     ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と変更要求の数・注入の最大
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）

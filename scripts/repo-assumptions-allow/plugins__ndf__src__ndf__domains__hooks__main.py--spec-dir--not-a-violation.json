@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/hooks/main.py",
+  "name": "spec-dir",
+  "kind": "not-a-violation",
+  "reason": "決まりの出所として NDF 自身の確定仕様の決定を示す注記（#3960）",
+  "count": 2
+}

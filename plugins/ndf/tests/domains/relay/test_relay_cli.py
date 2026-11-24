@@ -1,4 +1,4 @@
-"""`ndf relay` のサブコマンドと、待ちを抱えた実行の一覧の読み取り（#2898・#2464・決定 86・決定 92）。"""
+"""`ndf relay` のサブコマンドと、待ちを抱えた実行の一覧の読み取り（#2898・#2464・docs/specifications/ndf-rebuild.md の決定 86・92）。"""
 
 from __future__ import annotations
 

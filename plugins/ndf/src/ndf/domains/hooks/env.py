@@ -1,4 +1,4 @@
-"""hook の依存の環境の用意と片付け（#3345 の決定 89・#3105）。標準ライブラリだけで書く。
+"""hook の依存の環境の用意と片付け（docs/specifications/ndf-rebuild.md の決定 89・#3105）。標準ライブラリだけで書く。
 
     python3 -m ndf.domains.hooks.env prepare   # 切り離した用意（環境が無いときの SessionStart が起動する）
 

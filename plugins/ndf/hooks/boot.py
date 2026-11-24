@@ -1,4 +1,4 @@
-"""環境が無いときの hook のエントリポイント（#3345 の決定 89・91・IH2・IH4）。標準ライブラリだけを読む。
+"""環境が無いときの hook のエントリポイント（docs/specifications/ndf-rebuild.md の決定 89・91・IH2・IH4）。標準ライブラリだけを読む。
 
 登録の command は、環境の python が無ければシステムの `python3` でこのファイルを起動する。`hooks/entry.py` のパスは
 登録の command が `shift` で外すので、`argv[1]` がランタイム、`argv[2]` が事象になり、`hooks/entry.py` と同じ位置で読む。

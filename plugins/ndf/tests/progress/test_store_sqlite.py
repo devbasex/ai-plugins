@@ -1,4 +1,6 @@
-"""SQLite のステートマシンの DB の開き方・検査・バックアップ・戻し（P1-1・P1-2・P1-5・P1-6。#3344 の決定 82・I9・I11）。"""
+"""SQLite のステートマシンの DB の開き方・検査・バックアップ・戻し
+（P1-1・P1-2・P1-5・P1-6。docs/specifications/ndf-rebuild.md の決定 82・I9・I11）。
+"""
 
 from __future__ import annotations
 

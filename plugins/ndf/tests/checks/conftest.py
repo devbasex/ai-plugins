@@ -15,7 +15,7 @@ from ndf.checks.model import Finding, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # 仮のディレクトリ名とプラグイン名。I1 が `identity.FINAL_NAME`（`ndf`）と別に `plugin.json` の `name` と
-# ディレクトリ名も当てることを確かめるため、どちらも `ndf` と違う名前にする（#3347 の決定 100）
+# ディレクトリ名も当てることを確かめるため、どちらも `ndf` と違う名前にする（docs/specifications/ndf-rebuild.md の決定 100）
 DIR = "ndf-dev"
 NAME = "ndfdev"
 # 規約の規則のテストが一時の保存先へ写すディレクトリ

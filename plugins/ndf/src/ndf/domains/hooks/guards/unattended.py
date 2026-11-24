@@ -8,7 +8,7 @@
 - Stop: マーカーのあるセッションで、最後の応答がセグメントの報告の形（コントラクト `contracts/hooks/unattended-report.json`）に合わないか、
   `次のコマンド:` にコマンドを載せたまま結果が `判断が要る` でも `完了` でもなく区分が `ndf-ask:human-action` でもなければ
   変更を要求する。背景の作業か予定が残る Stop は変更を要求しない。変更要求の回数はセッションの数え手が利用者の入力ごとに理由を
-  またいで数え（#3345 の決定 92・`hook.pushback`）、上限の後は dispatch が通して計測と待ちの知らせに残す
+  またいで数え（docs/specifications/ndf-rebuild.md の決定 92・`hook.pushback`）、上限の後は dispatch が通して計測と待ちの知らせに残す
 - SessionEnd: マーカーを消す
 
 マーカーは `<状態の保存先>/hooks/unattended/<session_id>.json` に置く。形の判定は `ndf.domains.hooks.report` が持つ。

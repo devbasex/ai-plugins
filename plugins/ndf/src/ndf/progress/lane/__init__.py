@@ -56,7 +56,7 @@ from ndf.progress.lane.types import (
 
 # 行のキーの接頭辞（r1・r2…）
 ROW_PREFIX = "r"
-# 計画が記録する形の番号のキー。違えばレーンを起動しない（#3344 の決定 86）
+# 計画が記録する形の番号のキー。違えばレーンを起動しない（docs/specifications/ndf-rebuild.md の決定 86）
 FORMAT_KEYS = ("store_format", "format", "table_version")
 # 計画の決まりを確かめて書く操作の排他のキーの接頭辞（store.run_lock のキーと値を分ける）
 PLAN_LOCK_PREFIX = "plan-write:"
