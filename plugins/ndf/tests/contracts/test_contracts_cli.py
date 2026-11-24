@@ -100,18 +100,16 @@ def test_emit_gate_with_routes(capsys):
     assert json.loads(out)["routes"] == {"approved": go, "rejected": None}
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        ("--route", "approved", "ndf go"),
-        ("--route", "approved", '{"argv": ["/x/ndf/10.0.0/scripts/go.py"]}'),
-        ("--route", "maybe", '{"argv": ["ndf", "go"]}'),
-    ],
-)
+@pytest.mark.parametrize("args", [("approved", '{"argv": ["/x/ndf/10.0.0/scripts/go.py"]}'), ("maybe", '{"argv": ["ndf", "go"]}')])
 def test_emit_refuses_routes_that_cannot_be_run_as_is(capsys, args):
-    code, out, _ = _emit(capsys, "gate", *args)
+    code, out, _ = _emit(capsys, "gate", "--route", *args)
     assert code == exit_codes.code_of("unreadable")
-    assert out == ""
+    assert json.loads(out)["cause"]["kind"] == "invalid" and "routes" not in json.loads(out)
+
+
+def test_emit_refuses_a_route_that_is_not_an_object(capsys):
+    code, out, _ = _emit(capsys, "gate", "--route", "approved", "ndf go")
+    assert (code, out) == (exit_codes.code_of("unreadable"), "")
 
 
 def test_emit_next_outputs_and_run_id(capsys):
@@ -125,7 +123,7 @@ def test_emit_next_outputs_and_run_id(capsys):
 def test_emit_refuses_stopped_without_cause_and_writes_nothing(capsys, tmp_path):
     dest = tmp_path / "r.json"
     code, out, err = _emit(capsys, "stopped", "--out", str(dest))
-    assert code == 2 and out == ""
+    assert code == 2 and json.loads(out)["cause"]["kind"] == "invalid"
     assert "結果の形の誤り" in err
     assert not dest.exists()
 
@@ -214,19 +212,22 @@ def test_emit_explicit_code_writes_out(capsys, tmp_path):
 @pytest.mark.parametrize(
     ("status", "extra", "err"),
     [
-        ("ok", ("--code", "3"), "結果の形の誤り: status ok と終了コード 3 が合わない\n"),
+        ("ok", ("--code", "739241"), "結果の形の誤り: status ok と終了コードが合わない\n"),
         (
             "stopped",
             ("--cause", "infra_wait", "d", "--code", "2"),
-            "結果の形の誤り: cause.kind infra_wait の終了コードは 75（渡された値 2）\n",
+            "結果の形の誤り: cause.kind infra_wait の終了コードは 75 で、渡された終了コードと合わない\n",
         ),
-        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind 'nope' は停止理由の表に無い\n"),
-        ("gate", (), "結果の形の誤り: (最上位): 'routes' is a required property\n"),
+        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind が停止理由の表に無い\n"),
+        ("gate", (), "結果の形の誤り: allOf/1/then/required（required）: 'routes' is a required property\n"),
     ],
 )
-def test_emit_refusals_write_nothing(capsys, tmp_path, status, extra, err):
+def test_emit_refusals_write_no_file(capsys, tmp_path, status, extra, err):
     dest = tmp_path / "r.json"
-    assert _emit(capsys, status, *extra, "--out", str(dest)) == (2, "", err)
+    code, out, told = _emit(capsys, status, *extra, "--out", str(dest))
+    assert (code, told) == (2, err)
+    assert json.loads(out)["tool"] == "ndf" and json.loads(out)["cause"]["kind"] == "invalid"
+    assert "739241" not in out
     assert not dest.exists()
 
 
@@ -263,11 +264,12 @@ def test_emit_passes_every_field(capsys):
     }
 
 
-# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない書き込み先では標準出力へも出さない。
+# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず（標準出力には代わりの stopped を出す）、書けない書き込み先では標準出力へも出さない。
 def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
     dest = tmp_path / "r.json"
     dest.write_text("old\n", encoding="utf-8")
-    assert _emit(capsys, "ok", "--code", "3", "--out", str(dest)) == (2, "", "結果の形の誤り: status ok と終了コード 3 が合わない\n")
+    code, out, err = _emit(capsys, "ok", "--code", "3", "--out", str(dest))
+    assert (code, err) == (2, "結果の形の誤り: status ok と終了コードが合わない\n") and json.loads(out)["status"] == "stopped"
     assert dest.read_text(encoding="utf-8") == "old\n"
 
 

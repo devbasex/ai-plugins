@@ -129,7 +129,7 @@ I4 の「今の起動より後」は、続きの一時レーンを起動した�
 | 名前 | 既定 | 中身 |
 | --- | --- | --- |
 | 環境変数 `NDF_PARALLEL_LAUNCH_SECONDS` | 120 | 立ち上がりを待つ上限の秒（試験で縮める） |
-| 上限の設定 `parallel-launch.up`（`plugins/ndf/contracts/limits/`） | `seconds` 120・`interval` 5 | 上限の既定と一覧を読む間隔 |
+| 方針 [`parallel-launch.up`](https://github.com/devbasex/ai-plugins/blob/86a28c3c08cda2f5ebdb3de18934c3951dcac2e8/plugins/ndf/contracts/limits/parallel-launch.up.json)（NDF 11.x のコードはこの値を使わないため、このファイルは削除した。リンクは削除前のもの） | `seconds` 120・`interval` 5 | `seconds` は立ち上がりを待つ上限の既定値、`interval` はレーンの一覧を読み直す間隔（秒） |
 
 ### `parallel.py wait` の返り値
 

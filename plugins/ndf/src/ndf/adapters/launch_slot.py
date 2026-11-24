@@ -107,7 +107,7 @@ def _wait_for(
     started = time.monotonic()
     while True:
         left = max(0.0, limit - (time.monotonic() - started))
-        lock_seconds = _lock_and_sleep(slot_pool.POOL_LOCK_SECONDS, left, bounded)
+        lock_seconds = _lock_and_sleep(slot_pool.pool_lock_seconds(), left, bounded)
         taken = _take_once(directory, lim, owner, read_memory, lock_seconds)
         waited = time.monotonic() - started
         if taken is not None:

@@ -24,7 +24,7 @@
       "stage": "リリース後テスト",
       "phase": "close",
       "inputs": [
-        "version"
+        "product_version"
       ]
     }
   },

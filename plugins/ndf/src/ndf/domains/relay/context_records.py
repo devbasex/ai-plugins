@@ -1,8 +1,8 @@
 """文脈の切り替えの判定の記録・会話の記録の読み取り・費用の見込みの較正（#3569。旧い `lib/context_decisions.py` と
 `lib/context_calibrate.py` の移し先）。
 
-保存先は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
-`context-policy.py` と hook も同じファイルを読み書きする。そのため行の形（キー・値の型）を足さない・変えない。
+保存先は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、旧いプラグインが書いた行も読む。行の形は
+`contracts/schemas/internal/context-records.schema.json` が持ち、旧い行は核（`ndf.contracts.internal`）が今の形へ移す。
 
 | ファイル | 中身 | 書き方 |
 | --- | --- | --- |
@@ -27,7 +27,6 @@ from ndf.domains.records import jsonl, usage_decide
 from ndf.domains.relay import context_thresholds as ct
 from ndf.domains.relay import signals
 
-SCHEMA = 1
 LOCAL = "_local"
 MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
@@ -120,9 +119,8 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
     """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
     列は旧い `context_decisions.boundary_row` と同じで、2 つの値（`decide_from`・`limit`・`sources`）を `applied` から書く。
-    消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
+    理由の語に無い `reason` は `ValueError`。消した方針の列（`policy`・`margin`・`config_error`）は書かない（#3995 の決定 1）。"""
     row: dict[str, Any] = {
-        "schema": SCHEMA,
         "at": jsonl.now(),
         "runtime": "claude",
         "source": "record",
@@ -145,16 +143,15 @@ def record_row(session_id: Optional[str], work: str, applied: ct.Thresholds, eve
         "passed_once": False,
     }
     row.update(applied.as_dict())
-    row.update({"event": event} if event else {"stage": "cut", "verdict": ct.RESTART, "reason": reason})
+    row.update({"event": event} if event else {"stage": "cut", "verdict": ct.Verdict.RESTART, "reason": ct.Reason(reason)})
     return row
 
 
 def append(repo: str, row: Mapping[str, Any], environ: Mapping[str, str]) -> Path:
-    """判定の記録へ 1 行を追記する（1 回の書き込みで 1 行。排他は取らない）。書けなければ `OSError`。"""
+    """判定の記録へ 1 行を追記し、書いたファイルを返す（1 回の書き込みで 1 行。排他は取らない）。書けなければ `OSError`。"""
     path = decisions_path(repo, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(dict(row), ensure_ascii=False, sort_keys=True) + "\n")
+    jsonl.append(path, row, kind="context-records")
     return path
 
 
@@ -165,9 +162,9 @@ def read(repo: Optional[str], environ: Mapping[str, str]) -> tuple[list[dict[str
     rows: list[dict[str, Any]] = []
     skipped = 0
     for p in paths:
-        got, broken = jsonl.read_rows(p)
+        got, broken = jsonl.read_rows(p, kind="context-records")
         rows += got
-        skipped += broken
+        skipped += len(broken)
     return sorted(rows, key=lambda r: str(r.get("at")) if r.get("at") else ""), skipped
 
 
@@ -360,7 +357,9 @@ def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) 
 
 def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
-    launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.CONTINUE and (t := parse_ts(r.get("at"))))
+    launches = sorted(
+        (t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == ct.Verdict.CONTINUE and (t := parse_ts(r.get("at")))
+    )
     out = []
     for (start, stage), (nxt, _) in pairwise(launches):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]
@@ -428,12 +427,12 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
     }
 
 
-def calibrate(root: Optional[Path], days: int, now: float, environ: Mapping[str, str]) -> dict[str, Any]:
-    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書く。書けなければ `OSError`（前の見込みは残る）。"""
+def calibrate(root: Optional[Path], days: int, now: float, environ: Mapping[str, str]) -> tuple[dict[str, Any], int]:
+    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書き、見込みと飛ばした行の数を返す。書けなければ `OSError`（前の見込みは残る）。"""
     repo = repo_key(root)
-    rows, _ = read(repo, environ)
+    rows, skipped = read(repo, environ)
     body = estimate(rows, since=now - days * 86400)
     path = estimates_path(repo, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     signals.replace_json(path, body)
-    return body
+    return body, skipped

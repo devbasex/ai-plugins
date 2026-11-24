@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import result, routing
+from ndf.contracts import internal, result, routing
 from ndf.core import durable
 from ndf.core.plan import assemble_decide, model, records, runner
 
@@ -212,6 +212,29 @@ def test_final_result_ok_carries_the_recorded_prs_and_outputs(two_steps):
     assert out["status"] == "ok" and out["summary"] == "p が終わった"
     assert out["items"] == [_plan_item(two_steps), {"kind": "pr", "number": 5}, {"kind": "pr", "number": 7}]
     assert out["outputs"] == {"pr": 5, "gaps": []}
+
+
+def test_final_result_moves_outputs_recorded_before_the_rename(tmp_path):
+    records.write_json(tmp_path / records.OUTPUTS_FILE, {"version": "11.0.23", "pr": 5})
+    assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.23", "pr": 5}, [])
+    records._add_outputs(tmp_path, {"product_version": "11.0.24"})
+    assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.24", "pr": 5}, [])
+
+
+def test_stored_result_moves_outputs_backed_up_before_the_rename(tmp_path):
+    old = result.result("plan", "ok", "済んだ", outputs={"version": "11.0.23"})
+    records.write_json(runner.result_path(tmp_path, "r1"), old)
+    got = runner.stored_result(tmp_path, "r1")
+    assert got == {**old, "outputs": {"product_version": "11.0.23"}} and result.errors(got) == []
+    assert runner.stored_result(tmp_path, "none") is None
+
+
+def test_stored_result_of_a_newer_version_is_refused(tmp_path):
+    newer = {**result.result("plan", "gate", "待つ", routes={"approved": None}), "version": 2}
+    records.write_json(runner.result_path(tmp_path, "r1"), newer)
+    with pytest.raises(internal.InternalError) as exc:
+        runner.stored_result(tmp_path, "r1")
+    assert exc.value.kind == "precondition"
 
 
 def test_final_result_ok_with_recorded_gaps_is_incomplete(two_steps):

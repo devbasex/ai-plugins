@@ -23,11 +23,11 @@ import semver
 
 from ndf import process_group
 from ndf.adapters.run_log import diag
-from ndf.contracts import facts
+from ndf.contracts import facts, limits
 
 TABLE = "cli-floors"
-# `--version` を待つ上限（秒）。過ぎたら読めないとして起動を通す
-VERSION_SECONDS = 5.0
+# `--version` を待つ上限の方針（contracts/limits/）。過ぎたら読めないとして起動を通す
+VERSION_POLICY = "cli-floor.version"
 # (実パス, st_mtime_ns, st_size) → 読めたバージョン（読めなければ None）
 _SEEN: dict[tuple[str, int, int], Optional[str]] = {}
 _LOCK = threading.Lock()
@@ -77,7 +77,7 @@ def _read_version(path: str, row: Mapping[str, object], env: Optional[Mapping[st
     except OSError:  # noqa: NDF401 外部コマンド: 起動できなければ読めないとして通し、起動の失敗は今の起動の箇所が扱う
         return None
     try:
-        out, _ = proc.communicate(timeout=VERSION_SECONDS)
+        out, _ = proc.communicate(timeout=limits.seconds(VERSION_POLICY))
     except subprocess.TimeoutExpired:
         process_group.stop_group(proc)
         if proc.stdout is not None:

@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from ndf.adapters import git
-from ndf.contracts import facts
+from ndf.contracts import facts, limits
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide
 from ndf.domains.crossreview import finish_decide as fin
 
-# ラウンドの上限の既定
-DEFAULT_MAX_ROUNDS = 3
+# ラウンドの上限の既定の方針（contracts/limits/）
+MAX_ROUNDS = "cross-review.max-rounds"
 
 
 class DriveStopped(Exception):
@@ -45,7 +45,7 @@ class RunConfig:
     state_dir: Path
     every_section: bool
     reviewers: tuple[str, ...]
-    max_rounds: int = DEFAULT_MAX_ROUNDS
+    max_rounds: int = field(default_factory=lambda: int(limits.value(MAX_ROUNDS, "count")))
     handed: tuple[fin.Handed, ...] = ()
     fixer: str = participants.FIXER
     # 実行者のメインディレクトリと、そこから同期の前に読んだレビューの設定（認可と同じ解決を使う。PR 3944 の r4-1・r4-4）

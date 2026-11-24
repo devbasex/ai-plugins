@@ -63,6 +63,8 @@ class Policy(NamedTuple):
     retries: Optional[int] = None
     max_bytes: Optional[int] = None
     peers: Optional[dict[str, int]] = None
+    # 読み手の指定: 方針を引くモジュールの名前（規則 `limit-readers` が実際の読み手と突き合わせる。値として引かない）
+    read_by: tuple[str, ...] = ()
 
 
 # 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ・相手ごとの
@@ -79,7 +81,7 @@ def validate(raw: dict[str, Any]) -> dict[str, Policy]:
     ]
     if errs:
         raise LimitsError(f"上限の設定 {NDF_SETTINGS} の形が違う: {'; '.join(errs)}")
-    return {name: Policy(name=name, **row) for name, row in raw.items()}
+    return {name: Policy(name=name, **{**row, "read_by": tuple(row["read_by"])}) for name, row in raw.items()}
 
 
 @contracts.cached_reader

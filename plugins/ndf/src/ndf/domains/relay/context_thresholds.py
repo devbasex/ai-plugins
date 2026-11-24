@@ -10,15 +10,33 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from typing import Any, Callable, Mapping, NamedTuple
 
 DECIDE_FROM = "context.decide-from"  # 上限の設定の方針の名前（判断開始の値）
 LIMIT = "context.limit"  # 上限の設定の方針の名前（運用上限）
 DEFAULT, FROM_ENV = "default", "env"
 MIN_SAMPLES = 3  # 見込みに使う中央値の標本の下限
-CONTINUE, DENY, RESTART = "継続", "拒否", "再起動"  # 判定の記録の verdict の値
-# 再起動の理由（判定の記録の列の値。過去の行が持つ値と同じ並び）
-REASONS = ("容量", "運用上限", "費用", "独立性", "手動", "カットポイント", "待ち")
+
+
+class Verdict(StrEnum):
+    """判定の記録の verdict の値。"""
+
+    CONTINUE = "継続"
+    DENY = "拒否"
+    RESTART = "再起動"
+
+
+class Reason(StrEnum):
+    """再起動の理由（判定の記録の列の値。過去の行が持つ値と同じ並び）。"""
+
+    CAPACITY = "容量"
+    LIMIT = "運用上限"
+    COST = "費用"
+    INDEPENDENCE = "独立性"
+    MANUAL = "手動"
+    CUT_POINT = "カットポイント"
+    WAIT = "待ち"
 
 
 class Thresholds(NamedTuple):

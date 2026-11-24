@@ -222,7 +222,7 @@ def test_snapshot_path_is_the_real_path(repo: Path, tmp_path: Path, monkeypatch:
 
 def test_items_ignore_examples_in_code_blocks() -> None:
     body = "## Mission\r\n\r\n使命\r\n\r\n## Value\r\n\r\n1. **一つ目**\r\n\r\n```markdown\r\n99. 例\r\n## Vision\r\n```\r\n\r\n2. **二つ目**\r\n"
-    assert mvv.items(body, "```\n| C9 | 例 | x |\n```\n\n| C1 | 秘密 | x |\n") == ("Mission", "Value 1", "Value 2", "C1")
+    assert mvv.items_in(body, "```\n| C9 | 例 | x |\n```\n\n| C1 | 秘密 | x |\n") == ("Mission", "Value 1", "Value 2", "C1")
 
 
 def test_failed_write_leaves_no_temporary_file(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

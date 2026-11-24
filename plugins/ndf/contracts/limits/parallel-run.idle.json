@@ -1,4 +1,7 @@
 {
   "summary": "conductor が応答を終えてバックグラウンドの作業を持たないまま、何もしていないとみなすまでの秒",
-  "seconds": 600
+  "seconds": 600,
+  "read_by": [
+    "ndf.progress.lane.liveness"
+  ]
 }

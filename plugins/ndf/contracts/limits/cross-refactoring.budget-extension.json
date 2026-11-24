@@ -1,4 +1,7 @@
 {
   "summary": "グレード high の候補の見積りの和が予算を超えたとき、予算を延ばしてよい倍率",
-  "factor": 2
+  "factor": 2,
+  "read_by": [
+    "ndf.domains.crossrefactor.budget_decide"
+  ]
 }

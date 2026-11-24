@@ -15,6 +15,7 @@ from typing import Any, NamedTuple, Optional
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+from ndf import contracts
 from ndf.core.plan.inputs_decide import files_cell
 from ndf.domains.relay import signals
 
@@ -28,8 +29,10 @@ KIND_HEADING = "種類"
 IMPACT_HEADING = "影響"
 INTERFACE_ROW = "公開インタフェース"
 NOT_STATED = "記載なし"
-# 「公開インタフェース」の 2 列目の書き出しと値（この順に当てる）
-INTERFACE_VALUES = ("変わらない", "変わる")
+# 「公開インタフェース」の 2 列目の書き出しと値。書き出しが重なる値があるので、長い順に当てる
+_INTERFACE = "/properties/items/items/properties/public_interface/properties/value"
+_INTERFACE_ENUM = contracts.schema_enum(contracts.schema_path("io/materials.result"), _INTERFACE)
+INTERFACE_VALUES = tuple(sorted((v for v in _INTERFACE_ENUM if v != NOT_STATED), key=len, reverse=True))
 
 
 class Head(NamedTuple):

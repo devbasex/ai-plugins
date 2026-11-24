@@ -28,6 +28,7 @@ from typing import IO, Any, Optional
 import sqlalchemy as sa
 from sqlalchemy import event as sa_event
 
+from ndf.contracts import limits
 from ndf.core import durable
 from ndf.progress import backup as _backup
 from ndf.progress import model
@@ -37,7 +38,6 @@ from ndf.progress.backup import (  # noqa: F401
     BACKUP_DIR,
     BACKUP_PREFIX,
     BROKEN_MARK,
-    KEEP_BACKUPS,
     RESTORING_SUFFIX,
     BackupFailed,
     _write_backup,
@@ -51,7 +51,8 @@ log = logging.getLogger(__name__)
 DB_NAME = "progress.sqlite"
 # ステートマシンの DB の検査の目印（保存先の中）
 CHECKED_MARK = "progress.checked"
-BUSY_TIMEOUT_SECONDS = 30
+# 書き込みの待ちの上限の方針（contracts/limits/）
+BUSY_TIMEOUT = "progress.busy-timeout"
 # SQLite のエラーの文言で取り合い（StoreBusy）と破損（StoreBroken）を見分ける語
 BUSY_MARKERS = ("locked", "busy")
 BROKEN_MARKERS = ("malformed", "not a database")
@@ -217,7 +218,8 @@ class Store:
 
 def _sqlite_engine(path: Path) -> sa.Engine:
     """WAL と busy_timeout で開き、トランザクションを `BEGIN IMMEDIATE` で始める Engine（接続はまだしない）。"""
-    engine = sa.create_engine(f"{durable.SQLITE_PREFIX}{path}", connect_args={"timeout": BUSY_TIMEOUT_SECONDS}, poolclass=sa.NullPool)
+    busy = limits.seconds(BUSY_TIMEOUT)
+    engine = sa.create_engine(f"{durable.SQLITE_PREFIX}{path}", connect_args={"timeout": busy}, poolclass=sa.NullPool)
 
     @sa_event.listens_for(engine, "connect")
     def _pragmas(dbapi_conn: Any, _record: Any) -> None:
@@ -225,7 +227,7 @@ def _sqlite_engine(path: Path) -> sa.Engine:
         dbapi_conn.isolation_level = None
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_SECONDS * 1000}")
+        cur.execute(f"PRAGMA busy_timeout={int(busy * 1000)}")
         cur.close()
 
     @sa_event.listens_for(engine, "begin")
@@ -243,7 +245,7 @@ def _translated(store: Store) -> Iterator[None]:
     except sa.exc.OperationalError as exc:
         text = str(exc.orig)
         if any(m in text for m in BUSY_MARKERS):
-            raise StoreBusy(f"ステートマシンの DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
+            raise StoreBusy(f"ステートマシンの DB の書き込みが {limits.seconds(BUSY_TIMEOUT):g} 秒を超えて待った: {text}") from exc
         # 接続の失敗・認証の失敗・途中の切断。接続 URL のパスワードを結果 JSON・ログへ出さない
         shown = store.engine.url.render_as_string(hide_password=True)
         raise StoreUnreachable(f"ステートマシンの DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc

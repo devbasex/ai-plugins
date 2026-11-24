@@ -655,5 +655,12 @@
     "dep_exempt": {
       "ruff": "子プロセスとして起動する（ndf check の lint）"
     }
+  },
+  "workflow": {
+    "launch": {
+      "rebuild": [
+        "scripts/launch-document-rebuild.sh"
+      ]
+    }
   }
 }

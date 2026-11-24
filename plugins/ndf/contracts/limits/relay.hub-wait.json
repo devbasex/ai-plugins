@@ -1,4 +1,7 @@
 {
   "summary": "頼む側がリレーハブの回答を待つ上限（NDF_RELAY_HUB_WAIT で替える）。起動の確かめと停止の待ちを含む",
-  "seconds": 120
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
 }

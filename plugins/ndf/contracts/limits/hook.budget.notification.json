@@ -4,5 +4,8 @@
   "deadline": 3.5,
   "margin": 1.5,
   "timeout": 6,
-  "inject_chars": 0
+  "inject_chars": 0,
+  "read_by": [
+    "ndf.domains.hooks.budget"
+  ]
 }

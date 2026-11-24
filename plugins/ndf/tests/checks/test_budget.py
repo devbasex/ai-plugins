@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts, identity
-from ndf.checks import budget, child_deps, lint, model, run, spec_model, toolchain
+from ndf.checks import budget, child_deps, lint, model, ratchet, run, spec_model, toolchain
 from ndf.checks.model import CheckError, Scope, load_rules, read_workflow
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +59,9 @@ def tree(tmp_path: Path) -> Repo:
     shutil.copy(PLUGIN_ROOT / "pyproject.toml", root / "pyproject.toml")
     child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
     _write(root / child_deps.CHILDREN_REL, json.dumps({"children": {"X": child}, "tables": {}}))
+    # ラチェットの基準。合成のプラグインは重複を持たない
+    row = {"max": 0, "measured": "2026-01-01", "commit": "c0"}
+    _write(root / ratchet.RATCHET_REL, json.dumps({"version": ratchet.RATCHET_VERSION, "rules": dict.fromkeys(run.RATCHETED, row)}))
     return Repo(repo, root)
 
 

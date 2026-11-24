@@ -1,0 +1,7 @@
+{
+  "summary": "同じテスト環境の実行の目印を待つ上限の秒",
+  "seconds": 5,
+  "read_by": [
+    "ndf.domains.worktree.testenv"
+  ]
+}

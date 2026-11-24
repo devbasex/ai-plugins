@@ -24,7 +24,7 @@
       "stage": "体裁レビュー",
       "phase": "close",
       "inputs": [
-        "version"
+        "product_version"
       ]
     }
   },

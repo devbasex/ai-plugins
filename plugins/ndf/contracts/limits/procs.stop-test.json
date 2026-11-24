@@ -1,5 +1,9 @@
 {
   "summary": "テストのスロットが止めるテストのプロセスの組の、SIGTERM から SIGKILL までの猶予と、終わりを見る間隔",
   "seconds": 10,
-  "interval": 0.1
+  "interval": 0.1,
+  "read_by": [
+    "ndf.testing.command",
+    "ndf.testing.slots"
+  ]
 }

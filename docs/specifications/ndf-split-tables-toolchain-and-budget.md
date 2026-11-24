@@ -35,7 +35,7 @@ Pull Request と衝突しない。テストの関数が上限 6,000 を超える
 | --- | --- |
 | 分割した表の形と読み手、規則 `contracts-split` | 分割した表に挙げていないコントラクトの表の分割 |
 | 配る構成の設定とリポジトリの設定 `toolchain`、規則 `toolchain` | `.python-version`（作らない。手元で使う Python の指定は `requires-python` に従う） |
-| 件数の上限 `budget` と置き換えの規則、規則 `budget` | 前の件数より増やさない仕組み（#3684 が持つ）、CI でのテストの実行時間の計測（#4331） |
+| テスト・CI のジョブ・使われない依存・ライブラリへ置き換えられる自作の件数の上限（設定 `budget`）と、それを調べる規則 `budget` | 前の件数より増やさない仕組み（[ラチェット](ndf-contract-fact-checks.md)）、CI でのテストの実行時間の計測（#4331） |
 | 実験版の保存先と規則 `experimental` | 実験版の台帳（[10 系の台帳](../archive/ndf-experiments.md) の後は未定） |
 | `plugins/ndf/bin/ndf` の依存の用意 | `start.py` が呼び出し元の環境変数を戻す形（[ndf-entrypoint-caller-env.md](ndf-entrypoint-caller-env.md)） |
 
@@ -45,7 +45,7 @@ Pull Request と衝突しない。テストの関数が上限 6,000 を超える
 
 | 表 | 保存先 | 項目の単位 | 件数（2026-11-24） |
 | --- | --- | --- | ---: |
-| `limits` | `plugins/ndf/contracts/limits/<方針の名前>.json` | 上限の方針 | 231 |
+| `limits` | `plugins/ndf/contracts/limits/<方針の名前>.json` | 上限の方針 | 187 |
 | `causes` | `plugins/ndf/contracts/causes/<停止理由>.json` | 停止理由 | 37 |
 
 - 分ける表の一覧は `plugins/ndf/contracts/domains/split-tables.json` が持つ。この一覧自身は分けない
@@ -60,7 +60,7 @@ Pull Request と衝突しない。テストの関数が上限 6,000 を超える
 | `contracts.split_keys(rel)` | ディレクトリの一覧だけ（項目は読まない） |
 | `contracts.load_item(rel, key)`・`limits.policy`・`causes.row` | その項目のファイルだけ。1 プロセスに 1 回 |
 | `causes.has` | ディレクトリの一覧だけ |
-| `hooks/tables.py` の `load_split`・`policy`・`policy_value`・`policies(names)` | hook の経路。標準ライブラリだけで同じ規則を読む。`policies` は渡した名前の項目だけを読む |
+| `hooks/tables.py` の `policy`・`policy_value` | hook が使う関数。標準ライブラリだけで動き、渡された名前の方針のファイルだけを読む |
 
 hook は 1 回の起動で読む項目のファイルを、PreToolUse と Stop で 6 つ以下、SessionStart で 20 以下にする。`budget_for` は予算の 1 項目だけを引き、
 全件を読まない。
@@ -128,7 +128,8 @@ ai-plugins の値を利用先のリポジトリへ持ち込まないためであ
 ### 規則の当て方
 
 - 4 つの規則は既にある必須チェック `script-structure-check` の `ndf check` の中で走る。必須チェックは増えない
-- 差分が NDF の検査の入力に当たらずワークフローだけに当たる Pull Request では、`ndf check --only toolchain --only budget-ci-jobs` を打つ
+- 差分が NDF の検査の入力に当たらずワークフローか設計レビューの項目の表に当たる Pull Request では、`ndf check` を 1 回だけ打つ。
+  ワークフローに当たれば `--only toolchain --only budget-ci-jobs`、表に当たれば `--only review-items` を並べる
 - 途中の規則が止まっても、止まる前の指摘は結果 JSON の `items` に残り、`config_broken`（2）で終わる
 
 ### 依存の用意（`plugins/ndf/bin/ndf`）

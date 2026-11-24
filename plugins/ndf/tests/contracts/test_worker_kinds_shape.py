@@ -23,9 +23,16 @@ def _plan(**over: Any) -> dict[str, Any]:
     return held
 
 
-def test_values_of_returns_the_same_dict_when_the_shape_matches():
+def test_values_of_returns_the_held_values_when_the_shape_matches():
     held = _held()
-    assert wk.values_of(held) is held
+    assert wk.values_of(held) == held
+
+
+def test_values_of_moves_the_product_version_held_before_the_rename():
+    # PR 4358 の r4-1: 更新の前に始めた試行の工程の入力を、今の作業の定義の名前で引ける
+    got = wk.values_of(_held(values={"repo": "/r"}, inputs={"version": "11.0.23", "issues": [1]}))
+    assert got is not None and got["inputs"] == {"product_version": "11.0.23", "issues": [1]}
+    assert wk.kind_gaps("layout-review", got["values"], got["inputs"]) == {}
 
 
 def test_values_of_keeps_extra_keys():

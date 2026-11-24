@@ -109,7 +109,7 @@ def _gap(kind: str, name: str, reason: str) -> dict[str, str]:
     return {"kind": kind, "name": name, "reason": reason}
 
 
-def _shown(f: Finding) -> str:
+def _gap_text(f: Finding) -> str:
     """欠けに載せる指摘の文。根拠の記述の誤りの本文は、文書のパスと根拠欄の中身を含むので載せない。"""
     if f.by_ndf:
         return f"NDF が見つけた根拠の記述の誤り（中身は PR の記録のコメントの指摘 {f.id} にある）"
@@ -119,9 +119,9 @@ def _shown(f: Finding) -> str:
 def _finding_gaps(findings: Sequence[Finding], *, mvv_checked: bool = True, unsent_citations: int = 0) -> list[dict[str, str]]:
     rest = [f for f in findings if not f.redline]
     gaps = [
-        _gap(GAP_MVV if f.mvv or f.by_ndf else GAP_UNRESOLVED, f.id, _shown(f)) for f in rest if f.outcome == UNRESOLVED and blocking(f)
+        _gap(GAP_MVV if f.mvv or f.by_ndf else GAP_UNRESOLVED, f.id, _gap_text(f)) for f in rest if f.outcome == UNRESOLVED and blocking(f)
     ]
-    gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {_shown(f)}") for f in rest if f.outcome == SKIPPED and not f.reason]
+    gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {_gap_text(f)}") for f in rest if f.outcome == SKIPPED and not f.reason]
     if not mvv_checked:
         reason = "PR が足した根拠の記述が承認済みの MVV に合うかを、最後のコミットで確かめられなかった（原因は注意にある）"
         gaps.append(_gap(GAP_MVV, CITATION_CHECK, reason))

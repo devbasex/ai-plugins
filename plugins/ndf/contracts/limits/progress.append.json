@@ -1,0 +1,7 @@
+{
+  "summary": "ステートマシンの番号のぶつかり（同時の追記）で読み直して書き直す回数",
+  "attempts": 3,
+  "read_by": [
+    "ndf.progress.command"
+  ]
+}

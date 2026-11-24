@@ -31,6 +31,7 @@ import re
 from ndf import identity
 from ndf.adapters.github import WRITE_PERMISSIONS, Authored, GitHub, GitHubError, Pull, text_of
 from ndf.adapters.publish import Publisher
+from ndf.contracts import facts
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import approval_decide
 
@@ -69,14 +70,8 @@ BY_CHOICES = tuple(b.value for b in By)
 _PROJECT_FILE = f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
-# 判定 → commit status の状態（承認だけが success。待ちは pending で必須のチェックがマージを塞ぐ）
-STATUS_STATE = {
-    approval_decide.APPROVED: "success",
-    approval_decide.REJECTED: "failure",
-    approval_decide.STALE: "pending",
-    approval_decide.MISSING: "pending",
-}
-
+# 判定 → commit status の状態の表（`contracts/domains/approval-states.json`）
+APPROVAL_STATES = "approval-states"
 
 # レビューの判定を変える状態（COMMENTED は変えない。GitHub のレビューの判定と同じ）
 REVIEW_VERDICTS = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
@@ -191,7 +186,7 @@ def answer(hub: GitHub, number: int, value: str, by: str, presented: str, writer
 def post_status(hub: GitHub, sha: str, judgment: approval_decide.Judgment) -> None:
     """判定を commit status に付ける。"""
     payload = {
-        "state": STATUS_STATE[judgment.state],
+        "state": facts.value(APPROVAL_STATES, judgment.state, "commit_state"),
         "context": approval_decide.STATUS_CONTEXT,
         "description": judgment.detail[:140],
     }

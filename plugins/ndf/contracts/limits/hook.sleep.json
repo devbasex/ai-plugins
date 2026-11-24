@@ -1,4 +1,7 @@
 {
   "summary": "sleep の guard が前景の sleep に許す秒。超える待ちは Monitor かバックグラウンドの起動を勧める",
-  "seconds": 30
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.hooks.guards.sleep"
+  ]
 }

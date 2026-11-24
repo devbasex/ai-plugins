@@ -14,7 +14,7 @@ from ndf.core import durable_locks as locks
 
 @pytest.fixture(autouse=True)
 def short_wait(monkeypatch):
-    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 0.2)
 
 
 def test_lock_owner_without_a_record(tmp_path):
@@ -63,7 +63,7 @@ def test_exclusive_lock_on_an_unwritable_place_is_config_broken(tmp_path):
 
 def test_exclusive_store_lock_does_not_wait(root, monkeypatch):
     path = locks.store_lock_path(root)
-    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 60.0)
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 60.0)
     with locks.store_lock(root, exclusive=True) as got:
         assert got == path and _recorded_owner(path)["pid"] == os.getpid()
         with pytest.raises(locks.StoreInUse) as err, locks.store_lock(root, exclusive=True):
@@ -72,3 +72,53 @@ def test_exclusive_store_lock_does_not_wait(root, monkeypatch):
     assert err.value.paths == (path,)
     with locks.store_lock(root, exclusive=False), locks.store_lock(root, exclusive=False) as shared:
         assert shared == path
+
+
+# --- 現状固定（4367 の I-001: ロックを上限まで待つループを 1 つの関数へまとめる前） ----------------------------------
+
+
+@pytest.mark.parametrize("mode", [fcntl.LOCK_EX, fcntl.LOCK_SH])
+def test_waiting_lock_polls_to_the_limit_and_names_the_owner(tmp_path, clock, mode):
+    path = tmp_path / "x.lock"
+    with locks.exclusive_lock(path), locks.open_lock_file(path) as other:
+        before, owner = path.read_text(encoding="utf-8"), locks.lock_owner(path)
+        with pytest.raises(locks.StoreInUse) as err:
+            locks.lock(other, mode, True, path)
+        assert path.read_text(encoding="utf-8") == before
+    assert str(err.value) == f"ロックを 0.2 秒待っても取れない: {path}（オーナー: {owner}）"
+    assert err.value.paths == (path,) and err.value.kind == "store_in_use"
+    # 上限を越えるまで、同じ間隔で待つ
+    assert set(clock.sleeps) == {locks.LOCK_POLL_SECONDS} and sum(clock.sleeps) == pytest.approx(0.2, abs=locks.LOCK_POLL_SECONDS * 1.01)
+
+
+def test_a_lock_released_during_the_last_wait_is_taken(tmp_path, clock, monkeypatch):
+    # 上限を越える待ちの後にも 1 回試す
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: locks.LOCK_POLL_SECONDS / 2)
+    path = tmp_path / "x.lock"
+    with locks.open_lock_file(path) as held, locks.open_lock_file(path) as other:
+        assert locks.try_flock(held, fcntl.LOCK_EX)
+        clock.on_sleep = lambda: fcntl.flock(held, fcntl.LOCK_UN)
+        assert locks.lock(other, fcntl.LOCK_EX, True, path) is True
+        assert len(clock.sleeps) == 1 and _recorded_owner(path)["pid"] == os.getpid()
+
+
+def test_a_lock_not_waited_for_returns_false_without_sleeping(tmp_path, clock):
+    path = tmp_path / "x.lock"
+    with locks.exclusive_lock(path), locks.open_lock_file(path) as other:
+        assert locks.lock(other, fcntl.LOCK_EX, False, path) is False
+    assert clock.sleeps == []
+
+
+def test_a_waited_lock_with_no_time_left_is_tried_once(tmp_path, clock, monkeypatch):
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 0.0)
+    path = tmp_path / "x.lock"
+    with locks.exclusive_lock(path), pytest.raises(locks.StoreInUse), locks.exclusive_lock(path):
+        pass
+    assert clock.sleeps == []
+
+
+def test_a_shared_lock_does_not_record_the_owner(tmp_path):
+    path = tmp_path / "x.lock"
+    with locks.open_lock_file(path) as handle:
+        assert locks.lock(handle, fcntl.LOCK_SH, True, path) is True
+        assert path.read_text(encoding="utf-8") == ""

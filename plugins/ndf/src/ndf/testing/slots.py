@@ -39,12 +39,13 @@ from pathlib import Path
 from filelock import Timeout
 
 from ndf import identity, process_group, slot_pool
+from ndf.contracts import limits as policies
 from ndf.testing import declared
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
 # 記録の結果（FINISHED など）は records の名前を slots からも読めるように再び公開する
-from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, RECORD_LOCK_SECONDS
+from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED
 
 log = logging.getLogger(__name__)
 
@@ -57,8 +58,8 @@ SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
 # スロットとメモリを確かめる間隔
 POLL_SECONDS = 2.0
-# 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
-STOP_INTERVAL_SECONDS = 30.0
+# 1 回の下限割れで止めた後、次に止めるまで空ける秒の方針（contracts/limits/test-slots.stop-interval.json。I6）
+STOP_INTERVAL = "test-slots.stop-interval"
 # テストの組を止める猶予と間隔の方針（contracts/limits/procs.stop-test.json）
 STOP_TEST = "procs.stop-test"
 STOP_FILE = "stop.json"
@@ -181,12 +182,12 @@ class _MemoryMonitor:
         return True
 
     def _claim_stop(self, index: int) -> bool:
-        """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
+        """前の停止から `STOP_INTERVAL` の秒が経っていれば停止の時刻を書いて真を返す（I6）。"""
         try:
-            with slot_pool.lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+            with slot_pool.lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=records.record_lock_seconds()):
                 last = slot_pool.read_field(self.directory / STOP_FILE, "at")
                 now = time.time()
-                if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
+                if isinstance(last, (int, float)) and now - last < policies.value(STOP_INTERVAL, "interval"):
                     return False
                 slot_pool.write_json(self.directory / STOP_FILE, {"at": now, "slot": index})
                 return True

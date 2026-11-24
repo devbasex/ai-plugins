@@ -1,6 +1,7 @@
 """検査が共有する型: 指摘・見る範囲・1 回だけ解析するファイル・規則のデータ。
 
 構文木は `Source.tree` が 1 ファイルにつき 1 回だけ作り、すべての規則が同じ木を読む（RF3）。規則は木を書き換えない。
+コントラクトの値（`Source.contract`）と検証済みの上限の設定（`Scope.limit_settings`）も同じく 1 回だけ作り、規則は書き換えない。
 """
 
 from __future__ import annotations
@@ -11,23 +12,27 @@ import os
 import re
 import sys
 import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Optional
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
 
-from ndf import identity
+from ndf import contracts, identity
 from ndf.checks import imports
+from ndf.contracts import limits
 
 RULES_PATH = Path(__file__).with_name("rules.json")
 # スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
+# プラグインの根からのコントラクトの保存先（`ndf.contracts` の既定の保存先の名前）
+CONTRACTS = contracts.DEFAULT_DIR.name
 # 見るファイルを集めるときに降りないディレクトリ（依存の環境・キャッシュ）
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 # `ReusedAnchorWarning` の文の、2 つ目の定義の位置（行の抜粋は字下げされ、行頭の語に当たらない）
@@ -67,9 +72,28 @@ class Source:
         """構文の誤りは `SyntaxError` のまま送出する（検査のエントリポイントが `syntax` の違反にする）。"""
         return ast.parse(self.text, filename=self.rel)
 
+    @cached_property
+    def _contract(self) -> Any:
+        return contracts.parse_file(self.path, self.text)
+
+    def contract(self, unreadable: str) -> Any:
+        """コントラクトのファイルの値。実行時の読み手と同じく同じキーが 2 つあれば断る。断るときは `CheckError`。"""
+        try:
+            return self._contract
+        except (OSError, contracts.ContractError, UnicodeDecodeError) as exc:
+            raise CheckError(f"{unreadable}: {exc}") from exc
+
     @property
     def is_python(self) -> bool:
         return self.path.suffix == ".py"
+
+
+@dataclass(frozen=True)
+class Limits:
+    """プラグインの上限の設定の、方針の名前 → ファイルと、スキーマで確かめた方針。"""
+
+    sources: Mapping[str, Source]
+    policies: Mapping[str, limits.Policy]
 
 
 @dataclass(frozen=True)
@@ -164,6 +188,44 @@ class Scope:
         """プラグインの根からの相対のパス（`src/ndf/...`・`tests/...`）。"""
         return src.path.relative_to(self.plugin_root).as_posix()
 
+    def source(self, path: Path) -> Source:
+        """`path` のファイル。見る範囲にあれば、すべての規則が共有する `Source` を返す。"""
+        return next((s for s in self.sources if s.path == path), None) or Source(path, self.rel(path))
+
+    def split_table(self, rel: str) -> Optional[dict[str, Source]]:
+        """コントラクトの分けた表 `rel` の、項目のキー → ファイル。ディレクトリが無ければ `None`、キーの形が違えば `CheckError`。"""
+        root = self.plugin_root / CONTRACTS / rel
+        if not root.is_dir():
+            return None
+        try:
+            keys = contracts.item_keys(p.name for p in root.iterdir())
+        except contracts.ContractError as exc:
+            raise CheckError(f"分けた表 {root} に{exc}") from exc
+        held = {s.path: s for s in self.sources}
+        paths = {key: root / f"{key}.json" for key in keys}
+        return {key: held[path] if path in held else Source(path, self.rel(path)) for key, path in paths.items()}
+
+    def contract(self, rel: str, unreadable: str) -> Any:
+        """コントラクトの値。`rel` がファイル（`.json`）ならその値、分けた表なら項目のキー → 値。読めなければ `CheckError`。"""
+        if rel.endswith(".json"):
+            return self.source(self.plugin_root / CONTRACTS / rel).contract(unreadable)
+        table = self.split_table(rel)
+        if table is None:
+            raise CheckError(f"{unreadable}: 分けた表のディレクトリが無い: {rel}")
+        return {key: source.contract(unreadable) for key, source in table.items()}
+
+    @cached_property
+    def limit_settings(self) -> Optional[Limits]:
+        """上限の設定。持たないプラグインは `None`、読めない・形が違えば `CheckError`。"""
+        sources = self.split_table(limits.NDF_SETTINGS)
+        if sources is None:
+            return None
+        raw = {name: source.contract("上限の設定を読めない") for name, source in sources.items()}
+        try:
+            return Limits(sources, limits.validate(raw))
+        except limits.LimitsError as exc:
+            raise CheckError(str(exc)) from exc
+
     def code(self) -> list[Source]:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
         return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith(SRC_DIR + "/")]
@@ -255,6 +317,30 @@ def source_imports(src: Source, module: str) -> list[imports.Import]:
     return imports.collect(src.tree, module, src.path.name == "__init__.py")
 
 
+def _docstrings(tree: ast.Module) -> set[int]:
+    owners = [tree, *(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))]
+    return {id(o.body[0].value) for o in owners if o.body and isinstance(o.body[0], ast.Expr) and isinstance(o.body[0].value, ast.Constant)}
+
+
+def string_constants(tree: ast.Module) -> list[tuple[int, str]]:
+    """文字列の定数（docstring を除き、f 文字列の文字の部分を含む）を行とともに返す。"""
+    docs = _docstrings(tree)
+    return [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+
+
+def contained(root: Path, rel: str | Path) -> Path:
+    """`root` の下の `rel` の解決後のパス。`root` の外を指すか、シンボリックリンクを通れば `CheckError`（たどって読み書きしない）。"""
+    base = root.resolve()
+    named = Path(os.path.normpath(base / rel))
+    try:
+        resolved = named.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise CheckError(f"パスを解決できない: {rel}: {exc}") from exc
+    if resolved != named or not resolved.is_relative_to(base):
+        raise CheckError(f"{base} の外を指すか、シンボリックリンクを通るパスは読み書きしない: {rel}")
+    return resolved
+
+
 def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
     """JSON のファイルの本文と値。読めない・JSON でなければ `CheckError`（`<unreadable>: <渡したパス>: <例外>`）。"""
     try:
@@ -267,6 +353,11 @@ def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
 def read_json(path: Path | str, unreadable: str) -> Any:
     """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
     return read_json_text(path, unreadable)[1]
+
+
+def key_line(lines: Sequence[str], name: str) -> int:
+    """JSON の本文の行の並び `lines` で、キー `name` が最初に現れる行の番号。無ければ 1。"""
+    return next((n for n, line in enumerate(lines, 1) if f'"{name}":' in line), 1)
 
 
 def settings_path(repo_root: Path) -> Path:
@@ -304,7 +395,10 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
             "exception_types",
             "structure",
             "facts",
+            "limits",
+            "internal_names",
             "words",
+            "copy_dup",
             "child_deps",
             "contracts_split",
             "experimental",

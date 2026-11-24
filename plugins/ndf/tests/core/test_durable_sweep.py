@@ -71,10 +71,10 @@ def test_sweep_deletes_retired_and_broken_files_after_keep_days(root):
     broken.write_bytes(b"broken")
 
     # 退避の時刻から数える（ファイルの元の更新時刻ではない）
-    kept = durable.sweep(root, _later(days=durable.KEEP_DAYS - 1))
+    kept = durable.sweep(root, _later(days=durable.keep_days() - 1))
     assert kept.deleted == [] and retired.exists() and broken.exists()
 
-    gone = durable.sweep(root, _later(days=durable.KEEP_DAYS + 1))
+    gone = durable.sweep(root, _later(days=durable.keep_days() + 1))
     assert {str(retired), str(broken)} <= set(gone.deleted)
     assert not retired.exists() and not broken.exists()
 

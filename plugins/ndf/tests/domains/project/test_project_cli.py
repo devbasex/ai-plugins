@@ -127,6 +127,21 @@ def _answers(tmp_path: Path, answers: dict) -> Path:
     return path
 
 
+def test_the_measure_deadline_comes_from_the_settings_unless_given(tmp_path, monkeypatch):
+    seen: list[float] = []
+
+    def fake(root, budget):
+        seen.append(budget)
+        raise check.CheckError("測らない")
+
+    monkeypatch.setattr(cli, "measure_project", fake)
+    monkeypatch.setattr(cli.limits, "seconds", lambda name: {"project.measure": 7.5}[name])
+    args = ["measure", "--root", str(tmp_path / "repo"), "--out", str(tmp_path / "m.json")]
+    assert cli.main(args) != 0
+    assert cli.main([*args, "--budget", "30"]) != 0
+    assert seen == [7.5, 30.0]
+
+
 def test_measure_writes_outside_the_repo_only(repo, tmp_path, capsys, last_result):
     assert cli.main(["measure", "--root", str(repo), "--out", str(repo / "m.json")]) == 1
     out = tmp_path / "out" / "m.json"
