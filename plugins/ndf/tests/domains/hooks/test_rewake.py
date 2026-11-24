@@ -219,6 +219,20 @@ def test_unknown_ttl_is_filled_from_state_or_noted(child):
     assert code == 2 and keep(child)["last"]["ttl"] == "1h"
 
 
+@pytest.mark.parametrize(("before", "usage", "after"), [("5m", use(read=9, w1h=5), "1h"), ("1h", use(read=9, w5m=5), "5m")])
+def test_a_reply_that_writes_decides_the_ttl_over_the_state(child, before, usage, after):
+    """#4199 の条件 2: 書き込みのどちらかが正の応答の寿命は、状態の寿命に依らずその応答の書き込みで決まる。"""
+    signals.update_keep(child, SID, {"ttl": before})
+    write_tail(child, said("x"), reply("m1", usage=usage))
+
+    def halt(clock):
+        raise RuntimeError("眠りに入ったまま")
+
+    stop(child, clock=Clock(T0 + 1, halt))
+    assert keep(child)["ttl"] == after and keep(child)["last"]["ttl"] == after
+    assert [r["ttl"] for r in log(child) if r["kind"] == "wait_start"] == [after]
+
+
 def test_zero_write_reply_keeps_the_ttl_an_earlier_hook_wrote_before_the_lock(child, monkeypatch):
     """#4199 の条件 1 の順: 後の応答の hook がロックの外で状態を読む（寿命は不明）→ 先の応答の hook が 1 時間の待ちを
     始める → 後の hook がロックを取る。後の hook の後も寿命は 1 時間で、起床の時点は 1 時間の寿命から決まる。"""
