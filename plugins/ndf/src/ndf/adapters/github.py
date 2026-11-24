@@ -38,9 +38,9 @@ from ndf.contracts import limits
 T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
-# PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-PULL_FIELDS = (
+PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
+    " isCrossRepository"
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
@@ -237,8 +237,8 @@ class Pull(NamedTuple):
     merge_state: str
     author: str
     association: str
-    # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    merge_sha: str = ""
+    merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
+    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
 
     @property
     def authored(self) -> Authored:
@@ -262,7 +262,7 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
+            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "", bool(raw.get("isCrossRepository")),
         )  # fmt: skip
 
 

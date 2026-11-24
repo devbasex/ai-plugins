@@ -210,6 +210,10 @@
             "release"
           ],
           "description": "承認ゲートの区分"
+        },
+        "--machine": {
+          "type": "string",
+          "description": "ステートマシンの ID（プランの外で打つとき。環境変数 NDF_STAGE_INPUT の代わりに文脈から入力を組み、両方は渡せない）。NDF_STAGE_INPUT は工程の入力の規約 stage-in の平らな形で、外れれば invalid、キーが足りなければ input_missing で止まる"
         }
       },
       "required": [

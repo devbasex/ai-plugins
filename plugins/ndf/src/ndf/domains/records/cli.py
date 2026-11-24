@@ -9,7 +9,7 @@
     ndf records mvv current --base <ブランチ> [--allow-mismatch]   # ベースブランチの承認済みの MVV を読み、本文をファイルに書く
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
-    ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
+    ndf records mvv gate --gate design|release [--machine <ID>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
@@ -35,7 +35,7 @@ from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.progress import invoke, model
+from ndf.progress import definition, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -186,10 +186,55 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"覆しの記録: {kinds}" if rows else "覆しではないので書かなかった", rows)
 
 
+class _InputError(Exception):
+    """判定の入力を決められない。`kind` は停止理由の語（`invalid`・`input_missing`・`refused`）。"""
+
+    def __init__(self, kind: str, summary: str) -> None:
+        super().__init__(summary)
+        self.kind, self.summary = kind, summary
+
+
+def _env_inputs(gate: str, inputs: Any) -> dict[str, Any]:
+    """`NDF_STAGE_INPUT` の値を、プランが組むのと同じ規則（工程の入力の規約 `stage-in` と工程の入力のキー）で確かめて返す。
+
+    工程の入力の規則はモードに依らないので、判定のステップを持つ工程の文書から `mode` を読まずに定義を作る。規約の誤りが
+    1 件でもあれば `invalid`（`{"context": {...}}` の形もここで落ちる）、無くてキーが足りなければ `input_missing`。
+    """
+    stage = definition.stage_io(mvv_gate.GATE_STAGES[gate])
+    got = definition.stage_input_errors(stage, inputs)
+    if got.schema:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV}）の形が合わない: " + "; ".join(got.schema))
+    if got.missing:
+        raise _InputError("input_missing", f"工程の入力（環境変数 {INPUT_ENV}）にキーが足りない: " + "; ".join(got.missing))
+    return dict(inputs)
+
+
+def _mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    """判定の入力。`NDF_STAGE_INPUT`（プランの経路）か `--machine`（ステートマシンの ID）のどちらか一方から決める。"""
+    raw = os.environ.get(INPUT_ENV)
+    if raw is not None and args.machine is not None:
+        raise _InputError("invalid", f"判定の入力の出所が 2 つある（環境変数 {INPUT_ENV} と --machine）。どちらか一方にする")
+    if args.machine is not None:
+        try:
+            return stage_inputs.stage_inputs_of(root, args.machine, mvv_gate.GATE_STEPS[args.gate])
+        except model.Refused as exc:
+            raise _InputError("refused", str(exc)) from exc
+        except invoke.StageInputError as exc:
+            raise _InputError(exc.kind, str(exc)) from exc
+    if raw is None:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object か --machine <ステートマシンの ID>）が無い")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV}）を JSON として読めない") from exc
+    return _env_inputs(args.gate, parsed)
+
+
 def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    inputs = invoke.stage_inputs(os.environ)
-    if inputs is None:
-        return result.stopped(TOOL, "invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object）が無い")
+    try:
+        inputs = _mvv_inputs(args, root)
+    except _InputError as exc:
+        return result.stopped(TOOL, exc.kind, exc.summary)
     warnings: list[dict[str, Any]] = []
     out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
@@ -327,6 +372,12 @@ def _add_mvv(sub: Any) -> None:
     answer.set_defaults(handler=_mvv_answer)
     gate = m.add_parser("gate")
     gate.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの区分")
+    gate.add_argument(
+        "--machine",
+        default=None,
+        help="ステートマシンの ID（プランの外で打つとき。環境変数 NDF_STAGE_INPUT の代わりに文脈から入力を組み、両方は渡せない）。"
+        "NDF_STAGE_INPUT は工程の入力の規約 stage-in の平らな形で、外れれば invalid、キーが足りなければ input_missing で止まる",
+    )
     gate.set_defaults(handler=_mvv_gate)
 
 

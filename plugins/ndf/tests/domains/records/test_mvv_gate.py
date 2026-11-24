@@ -21,6 +21,7 @@ from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
+from ndf.progress import command, definition, invoke, model
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import note, refusals
 
@@ -84,7 +85,8 @@ class Hub:
         self.number, self.case = number, case
 
     def pulls_by_head(self, branches: list[str]) -> dict[str, list[SimpleNamespace]]:
-        return {b: [SimpleNamespace(number=self.number, state="open")] if b == "design/x" else [] for b in branches}
+        opened = [SimpleNamespace(number=self.number, state="open", cross_repository=False)]
+        return {b: list(self.case.get("pulls", opened)) if b == "design/x" else [] for b in branches}
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
@@ -321,10 +323,194 @@ def _no_hub_release(root: Path) -> SimpleNamespace:
 
 
 def test_cli_writes_the_outcome_as_the_step_output(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_inputs(pace="normal")))
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_plan_inputs(repo, pace="normal")))
     assert cli.main(["--cwd", str(repo), "mvv", "gate", "--gate", "design"]) == 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "ok" and out["outputs"]["mvv_gate"]["skip"] is False
     monkeypatch.delenv("NDF_STAGE_INPUT")
     assert cli.main(["--cwd", str(repo), "mvv", "gate", "--gate", "design"]) != 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+
+
+# --- #3959 単位 1: 今の判定の振る舞いを縛る（Task 1）・工程の入力の形（Task 2）・プランの外のエントリポイント（Task 3） ---
+
+
+def _plan_inputs(repo: Path, **context: Any) -> dict[str, Any]:
+    """プランが NDF_STAGE_INPUT に入れる入力（文脈から `resolve_inputs` で組んだ平らな object）。"""
+    full = {"issues": [3959], "worktree": str(repo), "mode": "standard", "pace": "fast", "mvv_ref": SHA, "design_pr": 9, **context}
+    return invoke.resolve_inputs(definition.load_definition(str(full["mode"])).stage("設計"), full)
+
+
+def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[int, str]]) -> None:
+    # Task 1: プランが組む平らな入力で、今の形の mvv_gate を返す（fast で検査を通り「従う」なら省く）
+    case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
+    out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, case), Ask(FOLLOW))
+    assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", "h" * 40)
+    assert [n for n, _ in notes] == [5]
+
+
+def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path) -> None:
+    # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ問う
+    git_sandbox.sh(repo, "rm", "-q", ".ndf/mvv.json")
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _plan_inputs(repo, mvv_ref=None), _no_hub, ask)
+    assert out["skip"] is False and out["verdict"] is None and ask.calls == []
+
+
+def test_the_gate_steps_are_steps_of_the_named_stage_documents() -> None:
+    for gate_name, step_id in mvv_gate.GATE_STEPS.items():
+        doc = contracts.load_json(f"workflow/stages/{mvv_gate.GATE_STAGES[gate_name]}.json")
+        assert step_id in [name for task in doc["do"] for name in task]
+
+
+def test_env_inputs_returns_the_plan_input_unchanged(repo: Path) -> None:
+    given = _plan_inputs(repo)
+    assert cli._env_inputs("design", given) == given
+
+
+@pytest.mark.parametrize(
+    ("change", "kind"),
+    [
+        ({"unknown": 1}, "invalid"),
+        ({"design_pr": 4}, "invalid"),
+        ({"pace": "slow"}, "invalid"),
+        ({"mode": None}, "input_missing"),
+    ],
+)
+def test_env_inputs_refuses_inputs_of_another_shape(repo: Path, change: dict[str, Any], kind: str) -> None:
+    given = {**_plan_inputs(repo), **change}
+    if change.get("mode", "") is None:
+        given.pop("mode")
+    with pytest.raises(cli._InputError) as caught:
+        cli._env_inputs("design", given)
+    assert caught.value.kind == kind
+
+
+@pytest.mark.parametrize("given", [{"context": {"issues": [3959], "mode": "standard", "pace": "normal"}}, [1, 2]])
+def test_env_inputs_refuses_a_nested_context_and_a_non_object_as_invalid(given: Any) -> None:
+    # {"context": {...}} は最上位に mode が無く、規約の誤りと足りないキーの両方に当たるが、規約の誤りが先で invalid
+    with pytest.raises(cli._InputError) as caught:
+        cli._env_inputs("design", given)
+    assert caught.value.kind == "invalid"
+
+
+def _cli_gate(repo: Path, capsys: pytest.CaptureFixture[str], gate_name: str, *extra: str) -> dict[str, Any]:
+    cli.main(["--cwd", str(repo), "mvv", "gate", "--gate", gate_name, *extra])
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("gate_name", ["design", "release"])
+def test_the_cli_takes_the_input_from_exactly_one_source(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], gate_name: str
+) -> None:
+    # 受け入れ条件 8・9: 環境変数だけ・--machine だけ・両方・どちらも無しの 4 行を、区分ごとに確かめる
+    seen: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        cli.mvv_gate,
+        "gate",
+        lambda root, g, inputs, hub, warnings: seen.append((g, dict(inputs))) or mm.gate_outcome(g, None, False, ["x"]),
+    )
+    from_machine = (
+        {"pr": 5, "mode": "standard", "pace": "normal", "mvv_ref": SHA} if gate_name == "release" else _plan_inputs(repo, pace="normal")
+    )
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", lambda root, mid, step: asked.append((mid, step)) or from_machine)
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    # どちらも無し
+    none = _cli_gate(repo, capsys, gate_name)
+    assert (none["status"], none["cause"]["kind"]) == ("stopped", "invalid") and "--machine" in none["summary"]
+    # --machine だけ
+    assert _cli_gate(repo, capsys, gate_name, "--machine", "sprint:x")["status"] == "ok"
+    assert asked == [("sprint:x", mvv_gate.GATE_STEPS[gate_name])] and seen[-1] == (gate_name, from_machine)
+    # 環境変数だけ
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(from_machine))
+    assert _cli_gate(repo, capsys, gate_name)["status"] == "ok" and seen[-1] == (gate_name, from_machine)
+    # 両方
+    both = _cli_gate(repo, capsys, gate_name, "--machine", "sprint:x")
+    assert (both["status"], both["cause"]["kind"]) == ("stopped", "invalid") and len(seen) == 2
+
+
+@pytest.mark.parametrize(
+    ("exc", "kind"),
+    [
+        (lambda: model.Refused("ステートマシン sprint:x は無い"), "refused"),
+        (lambda: invoke.StageInputMissing(["pr"]), "input_missing"),
+        (lambda: invoke.StageInputInvalid(["pace: 形が違う"]), "invalid"),
+    ],
+)
+def test_the_cli_stops_without_judging_when_the_machine_gives_no_input(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: Any, kind: str
+) -> None:
+    def fail(*_a: Any) -> dict[str, Any]:
+        raise exc()
+
+    monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", fail)
+    monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("入力を組めないのに判定を打った"))
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    out = _cli_gate(repo, capsys, "release", "--machine", "sprint:x")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", kind)
+
+
+def test_the_cli_refuses_a_nested_context_in_the_environment_without_judging(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 受け入れ条件 9 の例（11.0.22 で status: ok・判定なしを返した入力）
+    monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("形の違う入力で判定を打った"))
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({"context": {"pace": "normal", "mode": "standard", "issues": [3959]}}))
+    out = _cli_gate(repo, capsys, "design")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "invalid")
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({k: v for k, v in _plan_inputs(repo).items() if k != "mode"}))
+    out = _cli_gate(repo, capsys, "design")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "input_missing")
+
+
+def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], notes: list[tuple[int, str]]
+) -> None:
+    # 受け入れ条件 8: 同じステートマシンの文脈で、NDF_STAGE_INPUT と --machine が同じ入力・同じ PR で同じ mvv_gate を返す
+    monkeypatch.chdir(repo)
+    assert command.main(["new", "s1", "--mode", "standard", "--issues", "3959", "--pace", "fast"]) == 0
+    tid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["machine_id"]
+    out_file = repo.parent / "outputs.json"
+    out_file.write_text(json.dumps({"steps": [], "summary": "用意した", "outputs": {"worktree": str(repo), "branch": "design/x"}}))
+    assert command.main(["finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で"]) == 0
+    # 文脈の design_pr は判定する PR と違っても読まない（両方とも worktree のブランチの PR を判定する）
+    out_file.write_text(
+        json.dumps({"steps": [], "summary": "設計", "outputs": {"design_pr": 99, "mvv_gate": mm.gate_outcome("design", None, False, [])}})
+    )
+    assert command.main(["finish", tid, "設計", "--output", str(out_file), "--reason", "手で"]) == 0
+    capsys.readouterr()
+    case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
+    monkeypatch.setattr(cli, "_hub", _hub(5, case))
+    seen: list[dict[str, Any]] = []
+    real = mvv_gate.gate
+
+    def judged(root: Path, gate_name: str, inputs: Any, hub: Any, warnings: Any) -> dict[str, Any]:
+        seen.append(dict(inputs))
+        return real(root, gate_name, inputs, hub, Ask(FOLLOW), warnings)
+
+    monkeypatch.setattr(cli.mvv_gate, "gate", judged)
+    by_machine = _cli_gate(repo, capsys, "design", "--machine", tid)
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(seen[0]))
+    by_env = _cli_gate(repo, capsys, "design")
+    assert seen[0] == seen[1] and "design_pr" not in seen[0]
+    assert by_machine["outputs"] == by_env["outputs"] and by_env["outputs"]["mvv_gate"]["skip"] is True
+    assert [n for n, _ in notes] == [5, 5]
+
+
+def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(repo: Path, tmp_path: Path) -> None:
+    # 作業場所が別のリポジトリなら、そのブランチ名で PR を探さない
+    other = tmp_path / "other"
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "design/x", str(other))
+    git_sandbox.sh(other, "commit", "-q", "--allow-empty", "-m", "x")
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _plan_inputs(repo, worktree=str(other)), _hub(5, {"body": "変更", "files": []}), ask)
+    assert out["verdict"] is None and "worktree でない" in out["why"][0] and ask.calls == []
+    # フォークの同名ブランチは数えず、同じリポジトリの開いた PR が 2 件なら決めない
+    fork = SimpleNamespace(number=7, state="open", cross_repository=True)
+    mine = SimpleNamespace(number=5, state="open", cross_repository=False)
+    case = {"body": "変更", "files": [], "pulls": [fork, mine]}
+    assert mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, case)) == 5
+    twice = {**case, "pulls": [mine, SimpleNamespace(number=6, state="open", cross_repository=False)]}
+    with pytest.raises(mvv_gate.GateError, match="複数"):
+        mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, twice))

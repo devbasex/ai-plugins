@@ -27,7 +27,7 @@ from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, may_skip, note, refusals
-from ndf.progress.model import MVV_PACES
+from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES
 
 # 判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 VERDICT_SCHEMA = "mvv-verdict"
@@ -35,6 +35,9 @@ VERDICT_SCHEMA = "mvv-verdict"
 JUDGE_LIMIT = "supervise.judge-step"
 # 承認ゲートの区分（設計は作業場所のブランチの PR、リリースは文脈の pr を判定する）
 DESIGN, RELEASE = "design", "release"
+# 区分 → 判定のステップの id（`progress.model` の 1 か所の表）と、そのステップを持つ工程の文書の名前（`stages/<名前>.json`）
+GATE_STEPS = MVV_GATE_STEPS
+GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答）。テストはスタブへ差し替える
 Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
 
@@ -69,16 +72,35 @@ def base_facts(root: Path, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
     return held, body.read_text(encoding="utf-8")
 
 
+def _common_dir(where: Path) -> str:
+    return Git(where).run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+
+
 def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> int:
-    """判定する PR の番号。リリースは文脈の `pr`、設計は作業場所のブランチの開いた PR。無ければ `GateError`。"""
+    """判定する PR の番号。無い・決められなければ `GateError`。
+
+    リリースは文脈の `pr`。設計は作業場所（入力の `worktree`。無ければ `root`）のブランチの開いた PR で、文脈の `design_pr` は
+    読まない（プランの経路の入力に無いので、`NDF_STAGE_INPUT` と `--machine` の両方で同じ PR を選ぶため。#3959 の決定 5）。
+    作業場所が判定するリポジトリの worktree でなければ、そのブランチ名で PR を探さない。マージ先が判定するリポジトリで、head も
+    同じリポジトリのもの（フォークの同名ブランチを除く）を数え、1 件に決まらなければ止める（どれにもコメントを書かない）。
+    """
     if gate == RELEASE:
         if not isinstance(inputs.get("pr"), int):
             raise GateError("文脈にスプリントの PR の番号（pr）が無い")
         return int(inputs["pr"])
-    branch = Git(root).run("rev-parse", "--abbrev-ref", "HEAD").strip()
-    opened = [p for p in hub.pulls_by_head([branch])[branch] if p.state == "open"]
+    where = Path(inputs["worktree"]) if isinstance(inputs.get("worktree"), str) else root
+    try:
+        same = _common_dir(where) == _common_dir(root)
+    except GitError:
+        same = False
+    if not same:
+        raise GateError(f"作業場所 {where} が判定するリポジトリの worktree でない")
+    branch = Git(where).run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    opened = [p for p in hub.pulls_by_head([branch])[branch] if p.state == "open" and not p.cross_repository]
     if not opened:
         raise GateError(f"ブランチ {branch} の開いた設計の PR が無い")
+    if len(opened) > 1:
+        raise GateError(f"ブランチ {branch} の開いた PR が複数あり、判定する PR を 1 つに決められない")
     return opened[0].number
 
 
