@@ -5,12 +5,14 @@
 
 ## 例: project-trygroup-prd の 2 本のマージ
 
-ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）が `branches.base: develop`・`branches.production: main` と、
-`release.deliveries` に `develop` へのマージで stg・`main` へのマージで prd へ自動で反映する 2 行を持つとき:
+マージが止まるかどうかは、マージ先が本番チャネルか（`branches.production`）と、本番チャネルへ自動で反映する届け先の行
+（`release.deliveries` の `channel: production` で `kind` が `manual` でない行）があるかの 2 つで決まる。
+ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）が `branches.base: develop`・`branches.production: main` を持ち、
+`release.deliveries` に、stg へ自動で反映する `channel: base`・`kind: auto` の行と、prd へ自動で反映する `channel: production`・`kind: auto` の行を持つとき:
 
 1. 実装の Pull Request（`develop` 宛て）は、`develop` が本番チャネルでないため止まらずにマージする
-2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `release.deliveries` に `kind: auto`・`branch: main` の行が
-   あるため、マージのステップ（`ndf ci merge`）が承認の証跡を見つけられずに承認待ち（終了コード 10）で止まり、承認資料を書く
+2. リリースの Pull Request（`develop` → `main`）は止まる。マージ先の `main` が `branches.production` に設定され、`release.deliveries` に
+   `channel: production` の自動反映の行があるためである。マージのステップ（`ndf ci merge`）は承認の証跡を見つけられずに承認待ち（終了コード 10）で止まり、承認資料を書く
 3. 利用者が承認したら、返された経路（`--answer approved --by human`）で回答し、証跡を書いてからマージのステップを打ち直す
 
 **設計 Pull Request のマージ先が自動反映の本番チャネルなら、そのマージは本番への反映も起動する。** 設計承認ゲートの承認資料に
@@ -38,7 +40,7 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | 本番チャネルでない | 当たらない | そのまま進む |
 | 自動反映の本番チャネル | 当たる | 承認を得るまで進めない |
 | 本番チャネルで、`release.deliveries` が無い・不明、または設定が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
-| 本番チャネルで、`release.deliveries` に `kind: auto` のその行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
+| 本番チャネルで、`release.deliveries` に `channel: production` で `kind` が `manual` でない行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
 
 **判定は PR のベースリポジトリのマージ先のブランチにある `branch_strategy` とマージ先だけで決める。** 判定の規則は
 `ndf.core.production_merge` の 1 か所にあり、プランのマージのステップが打つ `ndf ci merge` と、エージェントが直接打つ
