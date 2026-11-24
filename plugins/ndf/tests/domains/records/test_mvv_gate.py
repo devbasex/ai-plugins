@@ -18,13 +18,14 @@ from typing import Any
 
 import git_sandbox
 import pytest
+import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
-from ndf.progress import command, definition, invoke, model, stage_inputs
+from ndf.progress import command, definition, invoke, model, stage_inputs, store
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import note, refusals
 
@@ -454,6 +455,22 @@ def test_the_cli_stops_without_judging_when_the_machine_gives_no_input(
     monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
     out = _cli_gate(repo, capsys, "release", "--machine", "sprint:x")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", kind)
+
+
+def test_a_db_error_while_reading_the_machine_shows_only_its_kind(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 共有 DB への照会の失敗は、SQL 文・バインド値・接続先を結果へ載せず、例外の種類だけを出す（ndf progress と同じ）
+    def fail(*_a: Any) -> dict[str, Any]:
+        raise sa.exc.ProgrammingError("SELECT * FROM ndf_progress_machines WHERE id = ?", ("secret-bind",), Exception("db.internal"))
+
+    monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", fail)
+    monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("入力を組めないのに判定を打った"))
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    out = _cli_gate(repo, capsys, "release", "--machine", "sprint:x")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", store.StoreUnreachable.kind)
+    shown = json.dumps(out, ensure_ascii=False)
+    assert "SELECT" not in shown and "secret-bind" not in shown and "db.internal" not in shown
 
 
 def test_the_cli_refuses_a_nested_context_in_the_environment_without_judging(

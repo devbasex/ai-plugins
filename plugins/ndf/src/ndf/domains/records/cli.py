@@ -30,12 +30,15 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
+import sqlalchemy as sa
+
 from ndf import cli, contracts
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.progress import definition, invoke, model, stage_inputs
+from ndf.core import durable
+from ndf.progress import command, definition, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -187,11 +190,14 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 
 class _InputError(Exception):
-    """判定の入力を決められない。`kind` は停止理由の語（`invalid`・`input_missing`・`refused`）。"""
+    """判定の入力を決められない。`kind` は停止理由の語（`invalid`・`input_missing`・`refused`）。
 
-    def __init__(self, kind: str, summary: str) -> None:
+    `stopped` があれば、その止まった結果をそのまま返す（保存先・DB の例外を `ndf progress` と同じ形に変えたもの）。
+    """
+
+    def __init__(self, kind: str, summary: str, stopped: dict[str, Any] | None = None) -> None:
         super().__init__(summary)
-        self.kind, self.summary = kind, summary
+        self.kind, self.summary, self.stopped = kind, summary, stopped
 
 
 def _env_inputs(gate: str, inputs: Any) -> dict[str, Any]:
@@ -221,6 +227,11 @@ def _mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]:
             raise _InputError("refused", str(exc)) from exc
         except invoke.StageInputError as exc:
             raise _InputError(exc.kind, str(exc)) from exc
+        except sa.exc.SQLAlchemyError as exc:
+            # 本文は SQL・バインド値・接続先を含みうるので、ndf progress と同じく種類の名前だけを出す
+            raise _InputError("", "", command.stopped_db(TOOL, exc)) from exc
+        except durable.StoreStopped as exc:
+            raise _InputError("", "", exc.stopped(TOOL)) from exc
     if raw is None:
         raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object か --machine <ステートマシンの ID>）が無い")
     try:
@@ -240,7 +251,7 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
         inputs = _mvv_inputs(args, root)
     except _InputError as exc:
-        return result.stopped(TOOL, exc.kind, exc.summary)
+        return exc.stopped if exc.stopped is not None else result.stopped(TOOL, exc.kind, exc.summary)
     if args.expect_pr is not None:
         # 判定に使う入力そのものと比べる（gate の中は変えない）。比べるだけなので GitHub へつながない
         try:
