@@ -20,7 +20,7 @@ plugins/ndf/
 ├── src/ndf/core/converge/participants.py         … 席を決める・席の名前からランタイムを引く・断られた理由の組・claude の読むだけの起動
 ├── src/ndf/domains/crossrefactor/launch.py       … claude の読むだけの起動と本文の取り出しを participants の関数で行う
 ├── src/ndf/domains/crossreview/
-│   ├── scope_decide.py                           … 埋めた席の記録（Filled）・前回の席が誰の代わりに読んだか
+│   ├── scope_decide.py                           … 埋めた席の記録（Filled）・前回の席に今回の席を割り当てる照合
 │   ├── drive.py                                  … 今の席を持つ・起動し直しの後に埋める・資料を実行ごとの review-input-*/ に書く
 │   ├── report_decide.py                          … ラウンドの表に「相手役」の列
 │   └── cli.py                                    … review_seats で席を決め、駆動の設定へ渡す
@@ -43,7 +43,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役と席を決め、読むだけの起動を組み立てる | `adapters.claude`・`adapters.agents`・`adapters.training`・`contracts.facts` | `Seats`（新設）、モジュール | `review_seats`・`runtime_of`・`free_seat`・`fill_targets`・`refusals`・`read_only_launch`・`answer_text`・`_able`・定数 `READ_TOOLS`・`SEAT_COUNT`（新設）・`unready`・`assign`（中身だけ変更） |
 | `src/ndf/adapters/claude.py` | 変更 | `claude -p` の起動の引数 | — | `ClaudeCall`（変更） | `permission_args`（変更）・`claude_launch`（読める場所を渡すだけ）・定数 `DONT_ASK`・`RESTRICTED`（新設） |
-| `src/ndf/domains/crossreview/scope_decide.py` | 変更 | ラウンドの範囲と記録のキー | `store`・`finish_decide` | `Filled`（新設）・`Basis`（変更） | `filled_of`・`stood_for`・定数 `FILLED`（新設）・`read_by_all_head`（変更） |
+| `src/ndf/domains/crossreview/scope_decide.py` | 変更 | ラウンドの範囲と記録のキー | `store`・`finish_decide` | `Filled`（新設）・`Basis`（変更） | `filled_of`・`stand_ins`・`assignable`・定数 `FILLED`（新設）・`read_by_all_head`（変更） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | cross-review の収束ループの駆動 | `participants`・`scope_decide`・`report_decide` | `RunConfig`・`_Run`（変更）・`_Unread`・`_Reviewed`（新設） | `_input_path`・`_drop_inputs`・`_seat_launch`・`_fill`・`_fill_refused`・`_filled_warning`・`_reused_warnings`（新設）・`_launch_reviewers`・`_review`・`_reviewer_findings`・`_unread_hint`・`_round`・`_reusable`・`drive`（変更）・`_write_diff`・`_remarks_file`・`_prepare_round`（書き先か読む値だけ変える） |
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントの本文 | `scope_decide` | モジュール | `_seats_cell`（新設）・`_round_rows`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `participants`・`drive` | `Resolved`（変更） | `_reviewers`（変更）・`_run_config`・`cmd_scope`・`_state_parsers`（読む値か help だけ変える） |
@@ -236,12 +236,15 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | --- | --- | --- | --- | --- |
 | `Filled` | `domains/crossreview/scope_decide.py` | 新設 | `class Filled(NamedTuple): seat: str; absent: Optional[str]; reason: str` と `record() -> dict[str, Any]` | 埋めた席 1 件。`record()` は `{"seat", "for", "reason"}` の形（`absent` を `for` に書く） |
 | `filled_of` | `domains/crossreview/scope_decide.py` | 新設 | `filled_of(record: Mapping[str, Any]) -> list[Filled]` | ラウンドの記録の `filled` を読む。形の違う要素は飛ばす |
-| `stood_for` | `domains/crossreview/scope_decide.py` | 新設 | `stood_for(record: Mapping[str, Any]) -> list[str]` | ラウンドの `reviewers` の席ごとに、誰の代わりに読んだか（`filled` に載り `for` があればその相手役、ほかは席そのもの） |
-| `Basis` | `domains/crossreview/scope_decide.py` | 変更 | フィールド `stand_in: bool = False` を足す | 真なら、前のラウンドの席を `stood_for` で読み替えて今回の席と比べる |
-| `read_by_all_head` | `domains/crossreview/scope_decide.py` | 変更 | 今のまま | `basis.stand_in` が真なら `set(stood_for(r))`、偽なら今のとおり `set(reviewers)` で包含を見る |
+| `stand_ins` | `domains/crossreview/scope_decide.py` | 新設 | `stand_ins(record: Mapping[str, Any]) -> list[frozenset[str]]` | ラウンドの `reviewers` の席ごとに、割り当ててよい名前の候補（`filled` に載り `for` があれば席の名前とその相手役の 2 つ、ほかは席の名前だけ） |
+| `assignable` | `domains/crossreview/scope_decide.py` | 新設 | `assignable(seats: Collection[str], options: Sequence[Collection[str]]) -> bool` | `seats` の全員を、名前を候補に含む `options` の別々の要素へ割り当てられるか（2 部グラフの最大マッチング。増加路を探す数行の処理） |
+| `Basis` | `domains/crossreview/scope_decide.py` | 変更 | フィールド `stand_in: bool = False` を足す | 真なら、前のラウンドの席を `stand_ins` の候補で今回の席と照合する |
+| `read_by_all_head` | `domains/crossreview/scope_decide.py` | 変更 | 今のまま | `basis.stand_in` が真なら `assignable(basis.reviewers, stand_ins(r))`、偽なら今のとおり `set(reviewers)` で包含を見る |
 
-- `stood_for`
-  - 事後条件: 返す並びの長さは `reviewers` と同じである。前の 1 つの席は 1 つの名前にしか対応しない（設計文書の「前回の 1 つの席で今回の 2 つの席を満たさない」）
+- `stand_ins`
+  - 事後条件: 返す並びの長さは `reviewers` と同じである。要素は 1 つか 2 つの名前を持つ
+- `assignable`
+  - 事後条件: 真なら、`options` の 1 つの要素に今回の席を 2 つ以上割り当てていない（設計文書の「前回の 1 つの席で今回の 2 つの席を満たさない」）。`seats` が `options` の数より多ければ偽
 
 `stand_in` を真にするのは `drive._reusable` だけで、`may_fill` が真のときである。差分の起点を決める `round_scope.previous_head` と CLI の `review-scope` は `stand_in` を渡さず、今のとおり席の名前で比べる。
 
@@ -255,7 +258,8 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `Filled`・`filled_of`・`stood_for` | `scope_decide` の `REVIEWERS`・`store.list_of` | `scope_decide.py` を読んだ | 記録のキーを同じモジュールに置き、配列の読み出しに `store.list_of` を使う |
+| `Filled`・`filled_of`・`stand_ins` | `scope_decide` の `REVIEWERS`・`store.list_of` | `scope_decide.py` を読んだ | 記録のキーを同じモジュールに置き、配列の読み出しに `store.list_of` を使う |
+| `assignable` | 標準ライブラリと依存のライブラリのマッチング | `pyproject.toml` の依存を読んだ | 依存にグラフのライブラリは無い。席は 2 つほどで、増加路の探索を数行で書く。マッチングのためだけに依存を足さない |
 
 ### 単体テストの観点
 
@@ -264,8 +268,9 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `Filled.record`・`filled_of` | 往復で同じ値 | `for` が null | `filled` が配列でない・要素が辞書でない・`seat` が無い要素を飛ばす |
-| `stood_for` | `codex` と `{"seat": "claude", "for": "kiro"}` → `codex`・`kiro` | `for` が null の席はその席自身 | — |
-| `read_by_all_head` | `stand_in` 真で、今回 `codex`・`kiro` が前回 `codex`・`claude（kiro の代わり）` を読んだとみなす | `stand_in` 偽なら今と同じ結果 | 前回 `kiro`・`claude（codex の代わり）`、今回 `codex`・`claude` で None |
+| `stand_ins` | `codex` と `{"seat": "claude", "for": "kiro"}` → `{codex}`・`{claude, kiro}` | `for` が null の席はその席の名前だけ | — |
+| `assignable` | 今回 `codex`・`kiro`、候補 `{codex}`・`{claude, kiro}` で真。今回 `codex`・`claude`、同じ候補で真 | 今回の席が候補の数より多いと偽 | 今回 `codex`・`claude`、候補 `{kiro}`・`{claude, codex}` で偽（1 つの候補を 2 度使わない） |
+| `read_by_all_head` | `stand_in` 真で、前回 `codex`・`claude（kiro の代わり）` を、今回 `codex`・`kiro` も今回 `codex`・`claude` も読んだとみなす | `stand_in` 偽なら今と同じ結果 | 前回 `kiro`・`claude（codex の代わり）`、今回 `codex`・`claude` で None |
 
 ## 駆動が今の席を持ち、空いた席を埋める（drive.py）
 
@@ -389,7 +394,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_review`・`_fill` | kiro が起動し直しても結果を返さず、claude で 1 回埋め、codex と claude の指摘で判定する | round 2 で初めて埋めた claude に全差分と、前回の情報を含まない依頼文が渡る。記録の `scope` は `since` のまま | 埋めた claude も結果を返さず `incomplete_reviewers`、claude の起動は 1 回 |
 | `_round` | 記録の `reviewers` が `codex`・`claude`、`filled` が 1 件 | 全員が結果を返すと `filled` が無い | 全員が結果を返さず `precondition`、claude の席だけが結果を返さず `incomplete_reviewers` |
 | `_fill_refused` | kiro を断ると席が `codex`・`claude`、`reason` が `unready: ` で始まる | 両方断ると `claude`・`claude-2` | 修正担当を断ると `precondition`、`--reviewer kiro` で kiro を断ると `precondition` |
-| `_reusable`・`_reused_warnings` | 埋めた席で収束した同じ head の打ち直しで前回の結果を返し、注意が載る | `allowed` を変えた打ち直しで前回の結果を返さない | 名指し 1 者の打ち直しで代わりに数えない |
+| `_reusable`・`_reused_warnings` | 埋めた席で収束した同じ head の打ち直しで前回の結果を返し、注意が載る。前回 `codex`・`claude（kiro の代わり）` で、`allowed` を claude と codex に絞った打ち直しでも前回の結果を返す | 前回 `kiro`・`claude（codex の代わり）` で、`allowed` を claude と codex に変えた打ち直しで前回の結果を返さない | 名指し 1 者の打ち直しで代わりに数えない |
 | `_seat_launch` | `claude-2` の起動の `agent` が `claude`、出力の名前が `round<n>-claude-2` | 依頼文が指すファイルがすべて `run.input_dir` の下 | — |
 | `_input_path`・`_drop_inputs` | 1 回の実行の資料が 1 つのディレクトリにそろい、`--add-dir` がそのディレクトリを指す | 同じ保存先に前の実行の `review-input-*` のディレクトリ（別の PR の差分のファイル入り）と、`review-input-` で始まるシンボリックリンクを置いてから実行すると、`--add-dir` はどちらとも違う新しいディレクトリを指し、そこに前の実行のファイルが無い | 実行が `precondition` で止まっても、資料のディレクトリが消えている |
 | `_reviewer_findings` | `{"findings": []}` は成功 | — | 終了コード 0 でも `findings` が無ければ結果が無い |
