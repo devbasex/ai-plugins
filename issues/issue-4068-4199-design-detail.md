@@ -24,7 +24,7 @@ plugins/ndf/
 │       ├── keep_cache.py *
 │       ├── cli.py・cli_cache.py *
 │       ├── signals.py
-│       └── wrapper.py
+│       └── wrapper.py・wrapper_launch.py
 ├── contracts/
 │   ├── limits/cache.wake.json・cache.write-ratio.json・cache.read-ratio.json・cache.output-ratio.json・cache.wake-cost.json・cache.hit.json・cache.handoff.json・cache.rewake.json・hook.budget.stop-rewake.json *（`hook.transcript-tail.json` は `read_by` だけ変更）
 │   ├── schemas/limits.schema.json
@@ -35,11 +35,9 @@ plugins/ndf/
 ├── docs/contracts/hooks.md・files.md・commands.md（再生成）
 ├── skills/development-workflow/references/relay.md
 ├── src/ndf/contracts/limits.py
-├── src/ndf/adapters/cli_floor.py
 └── tests/domains/
     ├── hooks/test_rewake.py *・test_registration.py・test_budget.py・test_guards.py
     └── relay/test_keep_cache.py *・test_relay_wrapper.py・test_relay_cli_parse.py
-（`cli_floor` のテストは今の保存先の `tests/` の下のファイルに足す）
 ```
 
 依存の向き:
@@ -59,9 +57,8 @@ plugins/ndf/
 | `hooks/entry.py` | 変更 | `argv[3]` が `rewake` なら `rewake.run` の終了コードを返す | — | — | `main`（変更） |
 | `src/ndf/domains/hooks/registration.py` | 変更 | 中継の子へ `--settings` で渡す起こす hook の登録（Stop の `asyncRewake: true` 1 つ・`timeout` は背景の予算から・command は `hooks/entry.py` の絶対パス）を作る。プラグインの登録（`render`）には足さない | `hooks.tables`・`hooks.budget` | — | `rewake_entry`・`rewake_settings`・`rewake_unreachable`（新設。`budget.rewake_reach` をそのまま返す）。`render` は変えない |
 | `src/ndf/domains/hooks/budget.py` | 変更 | 背景の登録（`rewake_entry` と同じく `rewake_budget` の `timeout` を持つ行）を `async_rewake` の予算と上限で検査し、`cache.wake` の起こす時点と確かめる間隔が背景の `timeout` の内に届くか（`rewake_reach`）を確かめ、プラグインの登録のファイルに `asyncRewake` の登録があれば破れとする。同期の登録は今の予算と上限で検査する | `hooks.tables`・`relay.keep_cache`（`TTL_SECONDS` だけ）（`registration` は読まない。`registration` が `budget` を読むので輪を作らない） | — | `rewake_budget`・`rewake_reach`・`rewake_registrations`（新設）・`registrations_of`・`budget_registrations`・`_file_registrations`・`_registration_errors`（変更） |
-| `src/ndf/adapters/cli_floor.py` | 変更 | `require` が下限の確かめに使ったバージョンを返す | 標準ライブラリ・`semver` | — | `require`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 起こす状態（会話ごと）と起こす記録の読み書き。世代は新しい時刻でだけ書き換え、同じ応答の取り合いを `contested` にする。今の起動の記録（`launch.json`）に起こす hook の登録を渡したか（`rewake`）を持つ | 標準ライブラリ | — | `read_keep`・`bump_generation`・`update_keep`・`append_cache_log`・`rewake_on`（新設）・`set_launch`（`rewake` の引数を足す）、定数 `KEEP_PREFIX`・`CACHE_LOG`・`SESSION_ID_RE` |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | `_start` のバージョンの確かめ（`cli_floor.require`）のバージョンが `cache.rewake` の `versions` のどれかと完全に一致し、利用者の `--settings` が無く、`registration.rewake_unreachable()` が None なら、子の起動の引数に `--settings <rewake_settings の JSON>` を、子の環境に `NDF_RELAY_REWAKE=1` を足す | `signals`・`adapters.cli_floor`・`hooks.registration`（`rewake_settings`） | `Wrapper` | `_start`（変更） |
+| `src/ndf/domains/relay/wrapper.py`・`wrapper_launch.py` | 変更 | 利用者の `--settings` が無く、`registration.rewake_unreachable()` が None なら登録つきの引数を作り、候補ごとに最終の環境で解いた `claude` の実パスの版（`cli_floor.version_at`）が `cache.rewake` の `versions` のどれかと完全に一致する候補だけ、起動の引数に `--settings <rewake_settings の JSON>` を、子の環境に `NDF_RELAY_REWAKE=1` を、起動の記録に `rewake` 真を入れる（「ラッパー」の節） | `signals`・`adapters.cli_floor`（`resolve`・`version_at`）・`hooks.registration`（`rewake_settings`） | `Wrapper` | `_start`・`_try`・`_fallback`（変更） |
 | `src/ndf/domains/relay/cli_cache.py` | 新設 | `ndf relay cache report` | `keep_cache`・`signals` | モジュール `cli_cache` | `report`・`run`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | サブコマンド `cache report` を足す | `cli_cache` | — | `build_parser`（変更） |
 | `contracts/limits/<方針の名前>.json`・`contracts/schemas/limits.schema.json`・`src/ndf/contracts/limits.py` | 新設（方針のファイル）・変更 | 方針のファイル `cache.wake`・`cache.write-ratio`・`cache.read-ratio`・`cache.output-ratio`・`cache.wake-cost`・`cache.hit`・`cache.handoff`・`cache.rewake`・`hook.budget.stop-rewake`（どれも `contracts/limits/` に 1 方針 1 ファイル）を足し、スキーマと `Policy` に `ratios`・`default`・`ratio`・`versions`・`calls`・`start` の項目を足す | — | `Policy` | `texts`（新設）・`value`（数でない値で `LimitsError`） |
@@ -211,7 +208,7 @@ plugins/ndf/
 | 背景の作業の分け方 | #4049 の `relay_busy.task_kind`・`work_count` | #4049 の詳細設計 | そのまま使う |
 | 中継のマーカー | `markers.mark` | `grep -n "def mark" src/ndf/domains/relay/markers.py` | 使わない。先に届いた利用者の入力がマーカーを取り、起こしたフラグの間の通常の入力を見分けられないので、`prompt` の頭で見分ける（設計の決定 10） |
 | 排他・起動の突き合わせ | `signals.held`・`STOP_LOCK`・`current_launch` | #4049 の詳細設計 | そのまま使う |
-| バージョンの確かめ | `adapters/cli_floor.require` | `grep -n "cli_floor" src/ndf/domains/relay/wrapper.py` | 確かめに使ったバージョンを返すよう変えて、`_start` が打つ結果のバージョンを使う（「ラッパー」の節） |
+| バージョンの確かめ | `adapters/cli_floor.resolve`・`version_at`（`account_choice.claude_version` が使う、実パスごとの版の記録） | `grep -n "version_at\|cli_floor" src/ndf/domains/relay/*.py` | そのまま使う。候補ごとの最終の環境で実パスを解き、記録から版を読む。`require` は起動先を選ぶ前の環境で解くので門に使わず、変えない（「ラッパー」の節） |
 | 対象の会話の限定 | #4049 の `signals.relay_session`・`SESSION_ENV` | #4049 の詳細設計 | そのまま使う。会話の ID の形は `SESSION_ID_RE`（`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`）を `signals` に足し、`keep-<会話>.json` の名前を作る前に突き合わせる |
 
 ### 単体テストの観点
@@ -278,22 +275,28 @@ plugins/ndf/
 
 ## ラッパー（`wrapper._start`）
 
-- `adapters/cli_floor.require(name, argv0, env, cwd) -> Optional[str]` に変える。下限の確かめ（古ければ `TooOld`）は今のまま保ち、確かめに使ったバージョン（`_version` が同じ実パス・更新時刻・大きさで持つ値。表に無い名前・見つからない・読めないなら None）を返す。`refuse_old` は返り値を捨てるだけで変えない。`--version` の起動は増えない
-- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値をバージョンとして使う。次の 2 つがそろえば、`_launch_target` へ渡す起動の引数（`[CLAUDE, *head, *self.s.args, *once]`）の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。起動先を決めた後の `Target.argv` には足さない。API キーの従量の子では、`account_choice._source` がこの 1 つの `--settings` を元の設定として読む。`_compose` が `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直す。そのため `hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。キーでない子は足した引数をそのまま受ける
-  - バージョンの文字列が `limits.texts("cache.rewake", "versions")`（`contracts/limits/cache.rewake.json` を読む）のどれかと完全に一致する（`semver` の大小では比べない）
-  - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
-  - `registration.rewake_unreachable()` が None（起こす時点と確かめる間隔が背景の `timeout` の内に届く）。理由の文が返れば登録も `NDF_RELAY_REWAKE` も足さない。そのときはラッパーの `log.jsonl` に `{"kind": "rewake_off", "reason": <理由の文>}` を起動ごとに 1 行書く（`ndf check` も同じ理由で破れとする）
+- バージョンの門は、起動先（候補）ごとに、実際に起動する実行ファイルで決める。起動先を選ぶ前の `_start` の `cli_floor.require`（下限の確かめ）の版は門に使わない。従量の接続の設定は子の環境の `PATH` を上書きでき（`account_choice.fallbacks` が最終の環境で `claude` を解き直すのと同じ理由）、選ぶ前の環境で解いた `claude` と、子として起動する `claude` が別の実行ファイルになり得るためである。`cli_floor.require` は変えない
+- 起動の手順（`_start`・`wrapper_launch._try`・`_fallback`）:
+  1. `_start` は、次の 2 つがそろうときだけ、`_launch_target` へ渡す起動の引数（`[CLAUDE, *head, *self.s.args, *once]`）とは別に、`head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足した引数（以下「登録つきの引数」）を作る。そろわなければ作らず、どの候補にも登録を渡さない
+     - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
+     - `registration.rewake_unreachable()` が None（起こす時点と確かめる間隔が背景の `timeout` の内に届く）。理由の文が返れば、ラッパーの `log.jsonl` に `{"kind": "rewake_off", "reason": <理由の文>}` を起動ごとに 1 行書く（`ndf check` も同じ理由で破れとする）
+     - `limits.texts("cache.rewake", "versions")`（`contracts/limits/cache.rewake.json` を読む）が空でない
+  2. 候補ごとに、`_try`・`_fallback` は登録つきの引数があればそれで起動先を用意する（`account_choice.target_env`・`key_target`。既定のログインは引数をそのまま使う）。API キーの従量の子では、`account_choice._source` がこの 1 つの `--settings` を元の設定として読み、`_compose` が `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直す。そのため `hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。起動先を決めた後に別の `--settings` を足すことはしない
+  3. 用意した起動先の最終の環境（`Target.env`）と作業ディレクトリで、`exe = cli_floor.resolve(CLAUDE, Target.env, cwd)` と `version = cli_floor.version_at("claude", exe, Target.env, cwd)` を打つ。`spawn_pty` が起動する実行ファイル（`cli_floor.locate(argv[0], Target.env, cwd)`）と同じものを指す。`version_at` は `cli_floor` の既存の記録（実パス・更新時刻・大きさの組）を使うので、`_start` の `require` と同じ実行ファイルなら `--version` を打ち直さない。別の実行ファイルのときだけ 1 回打つ
+  4. `version` が一覧のどれかと完全に一致すれば（`semver` の大小では比べない）、その起動先は登録つきのまま起動し、`Target.env` に `NDF_RELAY_REWAKE=1` を足す。一致しない（一覧に無い・None）なら、用意した起動先の一時ファイルを消し（`Target.drop_files`）、同じ候補を登録の無い引数で用意し直して起動する。キーの子の払い出しの記録（`key_helper.create`）は作り直さず、同じ記録を渡す。用意し直しは設定の合成だけで、`--version` も外部の呼び出しも増えない
+  5. その候補を起動する直前（`_spawn_target` の前）に、`signals.set_launch(self.dir, launch, rewake=<登録つきで起動するか>)` で今の起動の記録を書き直す（`_start` が候補を試す前に書く記録は `rewake` 偽。子の最初の UserPromptSubmit より前に真偽が決まる）。UserPromptSubmit の guard が `signals.rewake_on` で読む。起動の行（`account`）に `rewake`（真偽）と `claude_version`（3 の `version`）を足す
 
-  `<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。一覧に無い・None・一覧が空・利用者の `--settings` があるなら足さない。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。登録を足すときは、子の環境に `NDF_RELAY_REWAKE=1` も足す。足さないときは、親の環境に同じ名前があっても子の環境から外す（登録の無い子の hook が眠らないように）。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかは `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く。UserPromptSubmit の guard が `signals.rewake_on` で読む
+  `<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。登録の無い起動先では、親の環境に `NDF_RELAY_REWAKE` があっても子の環境から外す（登録の無い子の hook が眠らないように）。こうして候補ごとに、登録・`NDF_RELAY_REWAKE`・起動の記録の `rewake` が、その候補の実行ファイルの版の 1 つの判定でそろう。`--resume` で起動し直すときも同じ判定で毎回行う（`--settings` は起動ごとの引数で、会話に残らない）
 - 見回りではバージョンを読まない
 
 | 観点 | テスト |
 | --- | --- |
 | バージョンの門 | `versions` を `["2.1.330", "2.1.332"]` にした値で、バージョン 2.1.330 と 2.1.332 は足す・2.1.331（両端の間の測っていないバージョン）・2.1.329・2.1.333 は足さない。読めない・一覧が空でも足さない。足した引数の JSON が `rewake_settings` と同じ。足した起動の子の環境に `NDF_RELAY_REWAKE=1` があり、足さない起動（一覧に無いバージョン・利用者の `--settings`）では、親の環境に `NDF_RELAY_REWAKE=1` があっても子の環境に無い |
+| 起動先ごとの実行ファイル | 親の `PATH` の `claude` が 2.1.330（一覧に在る）で、従量の接続の設定が `PATH` を上書きして 2.1.333 の `claude` を指す見本で、その子の起動の引数の `--settings` に `hooks.Stop` の起こす登録が無く（`apiKeyHelper`・`ConfigChange` は在る）、子の環境に `NDF_RELAY_REWAKE` が無く、今の起動の記録の `rewake` が偽。向きを逆にした見本（親が 2.1.333・設定の `PATH` が 2.1.330）でも、`_start` の時点で一覧が空でなければ、その子には登録・変数・`rewake` 真がそろう。同じ実行ファイルの候補では `--version` の実行が `_start` の 1 回だけで、別の実行ファイルの候補で 1 回増える。用意し直した候補の一時ファイルが残らない |
 | 届かない宣言 | バージョンが一覧に在り、`cache.wake` の `seconds` を 120 にした値で、初回の起動と `--resume` の再開のどちらも `--settings` の登録も `NDF_RELAY_REWAKE` も足さず、`log.jsonl` に `rewake_off` の行があり、今の起動の記録の `rewake` が偽 |
 | 利用者の `--settings` | バージョンが一覧に在り、受け継ぐ引数に `--settings=x.json` があるときと `--settings x.json` があるときのどちらも、初回の起動と `--resume` の再開の引数に `--settings` が 1 つだけで、利用者の値がそのまま並び、`rewake_settings` の JSON が無い。今の起動の記録の `rewake` が偽 |
 | 従量キーの子 | バージョンが一覧に在り、利用者の `--settings` が無く、起動先が API キーの従量の接続の子のとき、初回の起動と `--resume` の再開のどちらでも、子の起動の引数に `--settings` が 1 つだけで、その JSON が `apiKeyHelper`・`hooks.ConfigChange` の `config-gate` の hook・`hooks.Stop` の `rewake_settings` の登録の 3 つをすべて持つ。起動先の理由が `key_unresolved`・`key_overridden` にならない |
-| バージョンの取得 | `require` が下限の確かめに読んだバージョンを返し、下限より古ければ今のとおり `TooOld`。`_start` から通した 1 回の起動で、差し替えた `--version` の実行が 1 回だけ |
+| バージョンの取得 | `require` は変えず、下限より古ければ今のとおり `TooOld`。既定のログインと、`PATH` を上書きしない候補の起動で、差し替えた `--version` の実行が `_start` の 1 回だけ（門は `version_at` が同じ記録を読む） |
 
 ## 集計（`ndf relay cache report`）
 
