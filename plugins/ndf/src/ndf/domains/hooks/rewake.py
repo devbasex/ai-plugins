@@ -350,7 +350,7 @@ def _finish(t: Target, gen: Generation, turn: LastTurn, q: Ratios, stderr: TextI
         now = clock()
         wake_id = uuid.uuid4().hex
         flag = {"wake_id": wake_id, "tokens": turn.tokens, "at": now, "after": turn.message_id, "model": turn.model, "ttl": turn.ttl}
-        keep.update(pending=flag, k=k + 1, spent=spent + q.r * turn.tokens + q.d)
+        keep.update(pending=flag, k=k + 1, spent=spent + keep_cache.wake_cost(turn.tokens, q))
         keep = signals.with_generation(keep, Generation(now, t.hook_id))
         try:
             signals.update_keep(t.relay_dir, t.session_id, keep)

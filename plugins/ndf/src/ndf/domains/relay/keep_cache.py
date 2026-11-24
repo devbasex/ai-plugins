@@ -4,7 +4,7 @@
 
 - `last_turn` は今回の Stop の応答を末尾から読む（`adapters.transcript.last_context` を 1 回だけ呼ぶ）
 - `wake_reply` は起床の後の応答（起床の呼び出し）を、`wake_opening` は応答を始めた入力を読む
-- `ratios`・`wake_at`・`n_max`・`wake_step`・`cache_hit` は起床の時点・回数の上限・次の手・当たりを決める
+- `ratios`・`wake_at`・`wake_cost`・`rewrite_cost`・`n_max`・`wake_step`・`cache_hit` は起床の時点・回数の上限・次の手・当たりを決める
 - `is_wake_input` は起床の文の入力の行の形だけを知る。形はまだ測っていないので、実装の PR では常に None を返す
 """
 
@@ -368,9 +368,19 @@ def wake_at(at: float, ttl: Optional[str], wake_margin: float) -> Optional[float
     return at + TTL_SECONDS["1h"] - wake_margin if ttl == "1h" else None
 
 
+def wake_cost(tokens: int, q: Ratios) -> float:
+    """起床 1 回の費用 `r × S + d`。"""
+    return q.r * tokens + q.d
+
+
+def rewrite_cost(tokens: int, q: Ratios) -> float:
+    """書き直し 1 回の費用 `(w − r) × S`。"""
+    return (q.w - q.r) * tokens
+
+
 def n_max(tokens: int, q: Ratios) -> int:
     """書き直し 1 回の費用に届く起床の回数 `floor((w − r) × S / (r × S + d))`。0 未満にしない。"""
-    return max(0, math.floor((q.w - q.r) * tokens / (q.r * tokens + q.d)))
+    return max(0, math.floor(rewrite_cost(tokens, q) / wake_cost(tokens, q)))
 
 
 def cache_hit(read: int, before: int, ratio: float) -> bool:
@@ -382,6 +392,6 @@ def wake_step(k: int, limit: int, spent: float, tokens: int, q: Ratios) -> Step:
     """次の手。回数の上限か、累計に次の起床を足すと今の書き直しの費用を越えるなら `stop`、ほかは `wake`。"""
     if k + 1 > limit:
         return Step("stop", "count")
-    if spent + q.r * tokens + q.d > (q.w - q.r) * tokens:
+    if spent + wake_cost(tokens, q) > rewrite_cost(tokens, q):
         return Step("stop", "cost")
     return Step("wake")
