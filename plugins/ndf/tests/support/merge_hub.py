@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf.adapters import github_merge
-from ndf.adapters.github import Authored, FileAt, MergeExpect, MergeOutcome, Pull
+from ndf.adapters.github import Authored, FileAt, MergeExpect, MergeOutcome, Pull, Viewer
 
 REPO = "o/r"
 HEAD = "a" * 40
@@ -47,6 +47,8 @@ class MergeHub:
     files: dict[str, tuple[Optional[str], Optional[str]]] = field(default_factory=lambda: {"main": (project_text(strategy()), "c1")})
     comments_of: dict[int, list[Authored]] = field(default_factory=dict)
     login: str = "octocat"
+    # token の利用者と、偽物が書いたコメントの書き手のアカウント ID（0 は読めない利用者）
+    account_id: int = 1
     file_repo: Optional[str] = None
     merged: list[int] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
@@ -73,8 +75,8 @@ class MergeHub:
         text, oid = self.files.get(base, (None, None))
         return FileAt(self.file_repo or self.repo, text, oid)
 
-    def viewer_login(self) -> str:
-        return self.login
+    def viewer(self) -> Viewer:
+        return Viewer(self.login, self.account_id)
 
     def comments(self, number: int) -> list[Authored]:
         self.calls.append("comments")
@@ -87,7 +89,7 @@ class MergeHub:
         if method == "POST" and path.endswith("/comments"):
             self.calls.append("post_comment")
             number = int(path.split("/")[-2])
-            self.comments_of.setdefault(number, []).append(Authored(self.login, "OWNER", payload["body"]))
+            self.comments_of.setdefault(number, []).append(Authored(self.login, "OWNER", payload["body"], author_id=self.account_id))
             return {"html_url": f"https://example.invalid/{number}"}
         return {}
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +22,8 @@ from ndf.progress.gate.asking import (
     Question,
     Target,
     material_path,
+    presented_id,
+    read_presented,
     release_request_of,
     request_id,
     sprint_issues,
@@ -46,7 +49,13 @@ def _request_fields(v: run.View, q: Question, lane_name: Optional[str]) -> dict[
 
 
 def _seen_path(root: Path, q: Question) -> Path:
-    return material_path(root, q).with_name(q.id + SEEN_SUFFIX)
+    """リクエストを出したときに見た対象の保存先（提示ごと。`q.target` は提示した承認の対象）。"""
+    return material_path(root, q).with_name(presented_id(q) + SEEN_SUFFIX)
+
+
+def _as_presented(root: Path, q: Question) -> Question:
+    """待っている質問に、提示した承認の対象（`read_presented`）を持たせる（リクエストの ID と見た対象を提示ごとに分ける）。"""
+    return replace(q, target=read_presented(root, q))
 
 
 def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str, str]) -> Optional[dict[str, Any]]:
@@ -54,7 +63,8 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
 
     外のオーガナイザーの下（`NDF_ORGANIZER_DIR`）なら `requests/<id>.json`（`external.write_request`）、計画のステートマシンの
     レーンならリクエストの事象（`plan.open_request`）。どちらでもなければ出さない（人が `ndf answer` で回答する）。
-    リクエストを出したときに見た対象は承認資料の隣に残し、回答を書くときの見た対象にする。
+    リクエストを出したときに見た対象は承認資料の隣に残し、回答を書くときの見た対象にする。`q.target` は提示した承認の
+    対象（`present` が `write_material` の後に渡す）で、リクエストの ID と見た対象の保存先は提示ごとに分かれる。
     """
     if q.gate != RELEASE_GATE:
         return None
@@ -86,9 +96,22 @@ def _plan_request(st: store.Store, v: run.View, q: Question) -> Optional[dict[st
         plan_id, name, held = found
         key = held.key if held is not None else None
         if key is None:
+            _close_earlier(conn, plan_id, q)
             body = {**_request_fields(v, q, name), "kind": RELEASE_KIND}
             key = plan.open_request(conn, plan_id, body, f"レーン {name} のリリースのリクエスト", run.ACTOR)
     return {"kind": "plan", "id": request_id(q), "plan": plan_id, "request": key}
+
+
+def _close_earlier(conn: Any, plan_id: str, q: Question) -> None:
+    """同じ質問の、出し直す前の提示へのリクエストで回答の無いものを閉じる（古い資料への回答を新しい提示に使わない）。"""
+    view, _ = lane.read_plan(conn, plan_id)
+    prefix, now = f"{RELEASE_KIND}-{q.id}", request_id(q)
+    for r in view.requests.values():
+        ident = r.body.get("id")
+        if r.body.get("kind") != RELEASE_KIND or not isinstance(ident, str) or ident == now or not ident.startswith(prefix):
+            continue
+        if r.closed is None and r.release is None:
+            plan.close_request(conn, plan_id, r.key, "待ちの間に承認の対象が変わり、資料を出し直した", run.ACTOR)
 
 
 def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Optional[dict[str, Any]]:
@@ -122,10 +145,12 @@ def take_reply(
     """リリース承認ゲートが待つリクエストに回答があれば、承認ゲートの回答（`organizer`）として書く。書いた結果を返す。
 
     見た対象はリクエストを出したときの対象で、その後に PR の head が変わっていれば回答は断られる（今の対象との検証は `answer`）。
+    読むのは今の提示へのリクエストの回答だけで、資料を出し直す前のリクエストへの回答は読まない。
     """
     q = waiting(run.read(st, machine_id))
     if q is None or q.gate != RELEASE_GATE:
         return None
+    q = _as_presented(st.root, q)
     reply = _organizer_reply(st, q, env)
     if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
         return None

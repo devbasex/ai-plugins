@@ -28,12 +28,20 @@ def _pull(base: str = "main", head: str = HEAD) -> Pull:
 class Wire:
     """`rest`・`graphql` の偽物。要求を `seen` に残し、応答は関数で決める。"""
 
-    def __init__(self, verify: Optional[dict] = None, queue: Optional[dict] = None, put: Any = None, after: Optional[Pull] = None) -> None:
+    def __init__(
+        self,
+        verify: Optional[dict] = None,
+        queue: Optional[dict] = None,
+        put: Any = None,
+        after: Optional[Pull] = None,
+        viewer: Optional[dict] = None,
+    ) -> None:
         self.seen: list[tuple[str, str]] = []
         self.verify = verify if verify is not None else _verify_data()
         self.queue = queue
         self.put = put
         self.after = after
+        self.viewer = viewer if viewer is not None else {"login": "octocat", "databaseId": 1}
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
         self.seen.append((method, path))
@@ -68,9 +76,9 @@ class Wire:
         if name == "verify":
             return {"repository": self.verify}
         if name == "viewer":
-            return {"viewer": {"login": "octocat"}}
+            return {"viewer": self.viewer}
         if name == "file":
-            return {"viewer": {"login": "octocat"}, "repository": {"nameWithOwner": REPO, "object": {"oid": "c1", "text": "{}"}}}
+            return {"viewer": self.viewer or None, "repository": {"nameWithOwner": REPO, "object": {"oid": "c1", "text": "{}"}}}
         return {}
 
 
@@ -182,20 +190,20 @@ def _branch_file_reads_text_and_oid_with_the_repository_name():
     assert wire.seen == [("GRAPHQL", "file")]
 
 
-def _viewer_login_is_read_once():
+def _viewer_is_read_once():
     wire = Wire()
     hub = _hub(wire)
-    assert hub.viewer_login() == "octocat"
-    assert hub.viewer_login() == "octocat"
+    assert hub.viewer() == github.Viewer("octocat", 1)
+    assert hub.viewer() == github.Viewer("octocat", 1)
     assert wire.seen == [("GRAPHQL", "viewer")]
 
 
-def _viewer_login_after_branch_file_sends_no_request():
-    """r1-7: マージ先の設定の読み取りが同じ要求で login を読むので、login の読み取りの要求を増やさない。"""
-    wire = Wire()
+def _viewer_after_branch_file_sends_no_request(viewer, want):
+    """r1-7・r2-5: マージ先の設定の読み取りが同じ要求で利用者を読むので、空だったときも利用者の読み取りの要求を増やさない。"""
+    wire = Wire(viewer=viewer)
     hub = _hub(wire)
     hub.branch_file("main", PATH)
-    assert hub.viewer_login() == "octocat"
+    assert hub.viewer() == want
     assert wire.seen == [("GRAPHQL", "file")]
 
 
@@ -232,8 +240,19 @@ def _viewer_login_after_branch_file_sends_no_request():
         scenes.scene(
             _branch_file_reads_text_and_oid_with_the_repository_name, id="branch_file_reads_text_and_oid_with_the_repository_name"
         ),
-        scenes.scene(_viewer_login_is_read_once, id="viewer_login_is_read_once"),
-        scenes.scene(_viewer_login_after_branch_file_sends_no_request, id="viewer_login_after_branch_file_sends_no_request"),
+        scenes.scene(_viewer_is_read_once, id="viewer_is_read_once"),
+        *[
+            scenes.scene(
+                _viewer_after_branch_file_sends_no_request,
+                id=f"viewer_after_branch_file_sends_no_request-{label}",
+                viewer=v,
+                want=w,
+            )
+            for label, v, w in [
+                ("read", {"login": "octocat", "databaseId": 1}, github.Viewer("octocat", 1)),
+                ("empty", {}, github.Viewer("", 0)),
+            ]
+        ],
     ],
 )
 def test_merge_verification_scenes(request, scene, values):

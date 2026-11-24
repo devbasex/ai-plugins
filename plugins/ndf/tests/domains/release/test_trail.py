@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.adapters.github import Authored
+from ndf.adapters.github import Authored, Viewer
 from ndf.core import merge_approval
 from ndf.domains.release import approval_decide, trail
 
@@ -13,6 +13,8 @@ from ._fakes import HEAD, OTHER, FakeHub, pull
 import scenes
 
 TARGET = merge_approval.MergeTarget("o/r", 7, "main", HEAD)
+# token の利用者（`FakeHub` が書いたコメントの書き手と同じアカウント ID 1）
+ME = Viewer("octocat", 1)
 
 
 def _row(
@@ -21,16 +23,16 @@ def _row(
     return merge_approval.MergeRow(answer, by, target, production, record)
 
 
-def _hub(*bodies: str, author: str = "octocat", edited: bool = False) -> FakeHub:
+def _hub(*bodies: str, author: str = "octocat", edited: bool = False, author_id: int = 1) -> FakeHub:
     hub = FakeHub(pulls={7: pull()})
-    hub.comments_of[7] = [Authored(author, "OWNER", b, "", edited) for b in bodies]
+    hub.comments_of[7] = [Authored(author, "OWNER", b, "", edited, author_id) for b in bodies]
     return hub
 
 
 def _rendered_row_reads_back():
     row = _row()
     hub = _hub(merge_approval.render_merge_row(row))
-    assert merge_approval.merge_rows(hub, 7, "octocat") == [row]
+    assert merge_approval.merge_rows(hub, 7, ME) == [row]
 
 
 def _rendered_row_does_not_carry_the_release_approval_mark():
@@ -41,36 +43,39 @@ def _rendered_row_does_not_carry_the_release_approval_mark():
 
 def _merge_rows_skip_edited_and_other_writers():
     body = merge_approval.render_merge_row(_row())
-    assert merge_approval.merge_rows(_hub(body, edited=True), 7, "octocat") == []
-    # 書き込み権限を持つ別の login の証跡も数えない（同じ login だけ）
-    hub = _hub(body, author="someone")
+    assert merge_approval.merge_rows(_hub(body, edited=True), 7, ME) == []
+    # 書き込み権限を持つ別のアカウントの証跡も数えない（同じアカウントだけ）
+    hub = _hub(body, author="someone", author_id=2)
     hub.trusted.add("someone")
-    assert merge_approval.merge_rows(hub, 7, "octocat") == []
+    assert merge_approval.merge_rows(hub, 7, ME) == []
 
 
-def _an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches():
-    """r1-10: token の利用者を読めない（空の login）なら数えも書きもせずに TrailError。ボットの `[bot]` の有無は同じ書き手とする。"""
+def _an_unread_viewer_neither_counts_nor_writes_and_a_same_named_account_does_not_match():
+    """r1-10・r2-1: token の利用者のアカウント ID が読めなければ数えも書きもせずに TrailError。
+    ボット `ndf-app[bot]` と同じ名前の個人アカウント `ndf-app` の証跡は、アカウント ID が違うので数えない。"""
     body = merge_approval.render_merge_row(_row())
-    with pytest.raises(merge_approval.TrailError, match="login"):
-        merge_approval.merge_rows(_hub(body), 7, "")
+    with pytest.raises(merge_approval.TrailError, match="アカウント ID"):
+        merge_approval.merge_rows(_hub(body), 7, Viewer("", 0))
     hub = FakeHub(pulls={7: pull()})
     with pytest.raises(merge_approval.TrailError):
-        merge_approval.write_merge_row(hub, _row(), "")
+        merge_approval.write_merge_row(hub, _row(), Viewer("", 0))
     assert not [r for r in hub.requests if r[0] == "POST"]
-    assert merge_approval.merge_rows(_hub(body, author="ndf-app[bot]"), 7, "ndf-app") == [_row()]
+    bot = Viewer("ndf-app[bot]", 41)
+    assert merge_approval.merge_rows(_hub(body, author="ndf-app", author_id=42), 7, bot) == []
+    assert merge_approval.merge_rows(_hub(body, author="ndf-app[bot]", author_id=41), 7, bot) == [_row()]
 
 
 def _merge_rows_skip_release_approval_trails_and_broken_rows():
     release = approval_decide.render_trail("approved", HEAD, "user")
     broken = f"{merge_approval.MERGE_MARK}\n回答: approved\n"
-    assert merge_approval.merge_rows(_hub(release, broken), 7, "octocat") == []
+    assert merge_approval.merge_rows(_hub(release, broken), 7, ME) == []
 
 
 def _mvv_rows_count_only_inside_the_mvv_note():
     alone = merge_approval.render_merge_row(_row(by="mvv"))
     with_note = "## MVV 判定（リリース承認ゲート）\n\n- 判定: 従う\n\n" + alone
-    assert merge_approval.merge_rows(_hub(alone), 7, "octocat") == []
-    assert [r.by for r in merge_approval.merge_rows(_hub(with_note), 7, "octocat")] == ["mvv"]
+    assert merge_approval.merge_rows(_hub(alone), 7, ME) == []
+    assert [r.by for r in merge_approval.merge_rows(_hub(with_note), 7, ME)] == ["mvv"]
 
 
 def _judgment_takes_the_latest_answer_for_the_same_target():
@@ -91,8 +96,8 @@ def _judgment_ignores_rows_without_production_and_compares_repo_case_insensitive
 
 def _write_merge_row_posts_once_per_record():
     hub = FakeHub(pulls={7: pull()})
-    assert merge_approval.write_merge_row(hub, _row(), "octocat") is True
-    assert merge_approval.write_merge_row(hub, _row(), "octocat") is False
+    assert merge_approval.write_merge_row(hub, _row(), ME) is True
+    assert merge_approval.write_merge_row(hub, _row(), ME) is False
     posts = [r for r in hub.requests if r[0] == "POST"]
     assert len(posts) == 1
 
@@ -100,7 +105,7 @@ def _write_merge_row_posts_once_per_record():
 def _write_merge_row_refuses_bad_values(answer, by):
     hub = FakeHub(pulls={7: pull()})
     with pytest.raises(merge_approval.TrailError):
-        merge_approval.write_merge_row(hub, _row(answer, by), "octocat")
+        merge_approval.write_merge_row(hub, _row(answer, by), ME)
     assert not [r for r in hub.requests if r[0] == "POST"]
 
 
@@ -117,8 +122,8 @@ def _release_check_does_not_count_merge_rows():
         scenes.scene(_rendered_row_does_not_carry_the_release_approval_mark, id="rendered_row_does_not_carry_the_release_approval_mark"),
         scenes.scene(_merge_rows_skip_edited_and_other_writers, id="merge_rows_skip_edited_and_other_writers"),
         scenes.scene(
-            _an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches,
-            id="an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches",
+            _an_unread_viewer_neither_counts_nor_writes_and_a_same_named_account_does_not_match,
+            id="an_unread_viewer_neither_counts_nor_writes_and_a_same_named_account_does_not_match",
         ),
         scenes.scene(
             _merge_rows_skip_release_approval_trails_and_broken_rows, id="merge_rows_skip_release_approval_trails_and_broken_rows"

@@ -381,7 +381,7 @@ def _approve(
 ) -> None:
     target = merge_approval.MergeTarget(merge_hub.REPO, 7, base, head)
     body = merge_approval.render_merge_row(merge_approval.MergeRow(answer, by, target, production, f"r{len(hub.comments_of.get(7, []))}"))
-    hub.comments_of.setdefault(7, []).append(github.Authored(hub.login, "OWNER", body))
+    hub.comments_of.setdefault(7, []).append(github.Authored(hub.login, "OWNER", body, author_id=hub.account_id))
 
 
 def _out(capsys, last_result) -> dict:
@@ -463,7 +463,8 @@ def _merge_ignores_stale_rejected_or_not_production_trails(monkeypatch, capsys, 
 def _merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_result):
     hub = _use(monkeypatch, merge_hub.MergeHub())
     _approve(hub)
-    hub.login = "someone"
+    # 同じ名前でも、アカウントが違えば数えない
+    hub.account_id = 2
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "defer"]) == 0
     assert hub.merged == []
 
@@ -472,7 +473,7 @@ def _merge_without_a_login_stops_apart_from_approval_stale(monkeypatch, capsys, 
     """r1-10: token の利用者の login を読めなければ、approval_stale でなく precondition で止まり、キューから外す。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(queued=True)}))
     _approve(hub)
-    hub.login = ""
+    hub.login, hub.account_id = "", 0
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "stale"]) == causes.exit_code("precondition")
     assert hub.merged == [] and hub.dequeued == [7] and "login" in _out(capsys, last_result)["cause"]["detail"]
 

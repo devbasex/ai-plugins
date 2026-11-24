@@ -324,9 +324,29 @@ ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 RELEASE_KIND = "lane-release"
 
 
+def presentation_key(t: Target) -> str:
+    """提示した承認の対象（ベースリポジトリ・PR・マージ先・HEAD・本番へ反映されるか）の識別子。承認の対象が無ければ空。
+
+    待ちの間に PR が動いて資料を出し直すと（`write_material`）値が変わる。リリースのリクエストの ID とマージの承認の
+    証跡の記録の識別子に入れ、出し直す前の提示への回答と証跡を、出し直した提示に使わない（#4409）。
+    """
+    b = t.binding()
+    if b is None:
+        return ""
+    raw = json.dumps([b.repo.lower(), b.number, b.base, b.head, t.production], ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def presented_id(q: Question) -> str:
+    """質問 `q` の、提示した承認の対象（`q.target`）ごとの識別子。承認の対象が無ければ質問の id のまま。"""
+    key = presentation_key(q.target)
+    return f"{q.id}-{key}" if key else q.id
+
+
 def request_id(q: Question) -> str:
-    """リリースのリクエストの ID（質問の id から作る。変更要求で流し直した質問は別のリクエストになる）。"""
-    return f"{RELEASE_KIND}-{q.id}"
+    """リリースのリクエストの ID（質問の id と提示した承認の対象から作る。変更要求で流し直した質問と、待ちの間に
+    資料を出し直した質問は別のリクエストになる）。`q.target` は提示した承認の対象（`read_presented`）を持たせて渡す。"""
+    return f"{RELEASE_KIND}-{presented_id(q)}"
 
 
 def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:

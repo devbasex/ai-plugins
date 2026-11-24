@@ -30,6 +30,7 @@ from ndf.progress.gate.asking import (
     accepted_path,
     material_path,
     material_sha256,
+    presented_id,
     question,
     read_presented,
     release_request_of,
@@ -89,17 +90,17 @@ def no_post(row: merge_approval.MergeRow) -> bool:
 
 
 def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
-    """`merge_approval.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。
+    """`merge_approval.write_merge_row` を token の利用者（アカウント ID）で呼ぶ口。GitHub は 1 つだけ作る。
 
-    `observe` と同じ GitHub を渡せば、設定の読み取りで読んだ login を使い、login の読み取りを増やさない。
-    書けない（login を読めない・値が不正）なら `model.Refused`（回答は記録しない）。"""
+    `observe` と同じ GitHub を渡せば、設定の読み取りで読んだ利用者を使い、利用者の読み取りを増やさない。
+    書けない（利用者のアカウント ID を読めない・値が不正）なら `model.Refused`（回答は記録しない）。"""
     made: list[GitHub] = []
 
     def post(row: merge_approval.MergeRow) -> bool:
         if not made:
             made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
         try:
-            return merge_approval.write_merge_row(made[0], row, made[0].viewer_login())
+            return merge_approval.write_merge_row(made[0], row, made[0].viewer())
         except merge_approval.TrailError as exc:
             raise model.Refused(f"マージの承認の証跡を書けないので、回答を記録しない: {exc}") from None
 
@@ -118,7 +119,7 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     """回答を受けられるかを確かめ、待っている質問と、照らした対象を返す。断るなら `model.Refused`（行は待ちのまま残る）。
 
     提示した承認の対象（`read_presented`）があれば、照らした対象はその対象そのもので、今の承認の対象か回答した者の見た
-    HEAD と違えば断る（質問の後に HEAD かマージ先が変わった。#4409）。無ければ（旧版の質問）回答した者の見た head を返す。"""
+    HEAD と違えば断る（質問の後に HEAD かマージ先が変わった。#4409）。本番へ反映されるかが提示から変わったときも断る。無ければ（旧版の質問）回答した者の見た head を返す。"""
     q = waiting(v)
     if q is None:
         raise model.Refused(f"ステートマシン {v.machine_id} は回答を待っていない（実行の前か、済んだ回答）")
@@ -142,6 +143,12 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     current = now.binding()
     if (current is not None and not held.same(current)) or (a.seen.head is not None and a.seen.head != held.head):
         raise model.Refused(f"質問の後に承認の対象が変わった（今は {now.base} 宛て、HEAD {now.head}）。今の対象で質問し直す")
+    # PR・HEAD・マージ先が同じでも、マージ先の設定が変わって本番へ反映されるかが変われば、古い資料への回答を受けない
+    if current is not None and now.production is not None and shown.production != now.production:
+        reach = "反映される" if now.production else "反映されない"
+        raise model.Refused(
+            f"質問の後にマージ先の設定が変わり、このマージは本番へ{reach}ようになった。資料を出し直すので、今の資料で回答し直す"
+        )
     return q, replace(shown, material=now.material if now.material is not None else a.seen.material)
 
 
@@ -220,11 +227,14 @@ def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
 
 
 def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> None:
-    """照らした承認の対象と質問の id で証跡の行を作り、`post` で書く（同じ質問の id の証跡があれば書かない）。"""
+    """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。
+
+    同じ提示への送り直しだけが重なりとして書かれない。資料を出し直した後の回答は、出し直す前の提示の証跡があっても書く。"""
     target = seen.binding()
     if target is None or a.value not in _TRAIL_ANSWERS:
         return
-    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, q.id))
+    record = presented_id(replace(q, target=seen))
+    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record))
 
 
 def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
@@ -243,6 +253,8 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
         if held is not None:
             return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
         q, seen = _refusal(v, a, observe, st.root)
+        # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
+        q = replace(q, target=seen)
         by = _trail_by(conn, q, a, seen)
         if by is not None:
             _post_trail(q, a, seen, by, post)
@@ -296,7 +308,15 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
     gate = p.get("gate")
     if seen.binding() is None or not isinstance(p.get("gate_id"), str):
         return
-    q = Question(str(p["gate_id"]), v.machine_id, str(held.draft.row_key), str(p.get("step")), gate if isinstance(gate, str) else None, ())
+    q = Question(
+        str(p["gate_id"]),
+        v.machine_id,
+        str(held.draft.row_key),
+        str(p.get("step")),
+        gate if isinstance(gate, str) else None,
+        (),
+        target=seen,
+    )
     by = _trail_by(conn, q, a, seen)
     if by is not None:
         _post_trail(q, a, seen, by, post)

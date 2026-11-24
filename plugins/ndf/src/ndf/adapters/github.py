@@ -57,14 +57,14 @@ TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 BOT_SUFFIX = "[bot]"
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
-# マージ先の設定の読み取りに、token の利用者の login（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
+# マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
 _BRANCH_FILE = (
-    "query($owner: String!, $name: String!, $expr: String!) { viewer { login } repository(owner: $owner, name: $name) {"
+    "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
     " nameWithOwner object(expression: $expr) { ... on Blob { oid text } } } }"
 )
 # token の利用者の login だけを読む問い合わせ。REST の `/user` と違い、GitHub App のインストールトークンと Actions の
 # `GITHUB_TOKEN` でもボットの login を返す
-_VIEWER = "query { viewer { login } }"
+_VIEWER = "query { viewer { login databaseId } }"
 # 信用の区分（#3364）。OWNER はリポジトリのオーナーでそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
@@ -154,6 +154,21 @@ def _login(user: Any) -> str:
     return text_of(user["login"]) if isinstance(user, dict) else ""
 
 
+def _account_id(raw: Any) -> int:
+    """GitHub が発行するアカウント ID（REST の `user.id`・GraphQL の `databaseId`）。無い・読めなければ 0。"""
+    if not isinstance(raw, dict):
+        return 0
+    got = raw["id"] if "id" in raw else raw["databaseId"] if "databaseId" in raw else None
+    return got if isinstance(got, int) and not isinstance(got, bool) and got > 0 else 0
+
+
+class Viewer(NamedTuple):
+    """token の利用者。`account_id` は GitHub が発行するアカウント ID で、読めなければ 0（`login` は表示に使うだけ）。"""
+
+    login: str
+    account_id: int
+
+
 class Authored(NamedTuple):
     """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。
 
@@ -167,13 +182,16 @@ class Authored(NamedTuple):
     url: str = ""
     # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
     edited: bool = False
+    # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
+    author_id: int = 0
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
         url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
         created, updated = raw.get("created_at"), raw.get("updated_at")
         edited = isinstance(created, str) and isinstance(updated, str) and updated != created
-        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited)
+        user = raw["user"]
+        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, _account_id(user))
 
 
 class Pull(NamedTuple):
@@ -415,8 +433,8 @@ class GitHub:
     api: Client
     # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
     _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
-    # token の利用者の login（`viewer_login`。1 回だけ読む）
-    _viewer: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
+    # token の利用者（`viewer`。1 回だけ読む。読んだら 1 件）
+    _viewer: list[Viewer] = field(default_factory=list, compare=False, repr=False)
     # 二次レート制限の待ちの終わりを知らせる先。省けば `api` の throttler の `WriteGate`（A5）
     gate: Optional[write_gate.WriteGate] = field(default=None, compare=False, repr=False)
 
@@ -783,24 +801,26 @@ class GitHub:
     def branch_file(self, base: str, path: str) -> FileAt:
         """ブランチ `base` のファイル `path` の本文と blob の oid を、応答のリポジトリ名と合わせて 1 回の GraphQL で読む（#4409 の決定 3）。
 
-        同じ要求で token の利用者の login も読み、`viewer_login` が要求を増やさずに返せるよう残す。
+        同じ要求で token の利用者も読み、`viewer` が要求を増やさずに返せるよう残す。応答の `viewer` が空でも、空として残す
+        （読めなかった結果を同じ実行の中で読み直さない）。
         """
         data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         return _file_at(self._repository_of(data), "object")
 
     def _remember_viewer(self, node: Any) -> None:
+        if self._viewer:
+            return
         login = node.get("login") if isinstance(node, dict) else None
-        if isinstance(login, str) and login and "login" not in self._viewer:
-            self._viewer["login"] = login
+        self._viewer.append(Viewer(login if isinstance(login, str) else "", _account_id(node)))
 
-    def viewer_login(self) -> str:
-        """この token の利用者の login（1 回だけ読む。`branch_file` が読んでいれば要求を送らない）。
+    def viewer(self) -> Viewer:
+        """この token の利用者（1 回だけ読む。`branch_file` が読んでいれば、空だったときも要求を送らない）。
 
-        GraphQL の `viewer` で読むので、GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` ではボットの login を
-        返す。読めなければ空文字（呼び手は空の login で証跡を数えも書きもしない）。届かない・上限は投げ直す。
+        GraphQL の `viewer` で読むので、GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` ではボットを返す。
+        読めなければアカウント ID が 0（呼び手は証跡を数えも書きもしない）。届かない・上限は投げ直す。
         """
-        if "login" not in self._viewer:
+        if not self._viewer:
             try:
                 data = self.graphql(_VIEWER, {})
             except GitHubError as exc:
@@ -808,8 +828,7 @@ class GitHub:
                     raise
                 data = {}
             self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
-            self._viewer.setdefault("login", "")
-        return self._viewer["login"]
+        return self._viewer[0]
 
     def merge(
         self,

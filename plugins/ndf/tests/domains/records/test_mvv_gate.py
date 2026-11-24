@@ -162,8 +162,8 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
     # 省いた判定の記録は、担い手 mvv のマージの承認の証跡の行を同じコメントに持つ（#4409 の決定 7。投稿は 1 件のまま）
-    hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text)])
-    (row,) = merge_approval.merge_rows(hub, 5, "octocat")  # type: ignore[arg-type]
+    hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text, author_id=1)])
+    (row,) = merge_approval.merge_rows(hub, 5, github.Viewer("octocat", 1))  # type: ignore[arg-type]
     assert (row.answer, row.by, row.target, row.production) == (
         "approved",
         "mvv",

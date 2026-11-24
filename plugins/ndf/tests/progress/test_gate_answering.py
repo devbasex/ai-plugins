@@ -94,7 +94,7 @@ def _the_answer_writes_the_trail_before_it_is_recorded(repo, st, env, capsys, va
         "user",
         merge_approval.MergeTarget("o/r", 7, "main", HEAD),
         True,
-        q.id,
+        asking.presented_id(q),
     )
     (ev,) = _answered(st, q)
     # 回答の事象の seen は承認の対象を持つ（デプロイのマージが読む）
@@ -119,7 +119,7 @@ def _a_recorded_answer_without_its_trail_writes_it_on_resend(repo, st, env, caps
     _give(st, q, post=lambda row: False)
     posts = Posts()
     _give(st, q, post=posts)
-    assert [r.record_id for r in posts.rows] == [q.id]
+    assert [r.record_id for r in posts.rows] == [asking.presented_id(q)]
 
 
 def _an_answer_not_by_the_user_is_refused_for_a_production_merge(repo, st, env, capsys, by):
@@ -163,6 +163,24 @@ def _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it(repo, s
     assert moved in asking.material_path(st.root, q).read_text(encoding="utf-8")
     gate.answer(st, q.machine_id, a, lambda _q: _target(head=moved), posts)
     assert [r.target.head for r in posts.rows] == [moved]
+
+
+def _a_production_change_after_the_question_is_refused(repo, st, env, capsys):
+    """r2-2: PR・HEAD・マージ先が同じでも、本番へ反映されるかが提示から変われば、古い資料への回答を断る。"""
+    q = _asked(st, repo, env, capsys, production=False)
+    posts = Posts()
+    with pytest.raises(model.Refused, match="本番へ反映される"):
+        _give(st, q, post=posts, observe=lambda _q: _target(True))
+    assert posts.rows == [] and _answered(st, q) == []
+
+
+def _each_presentation_has_its_own_request_and_trail_ids(repo, st, env, capsys):
+    """r2-3・r2-4: 資料を出し直すと、リリースのリクエストの ID と証跡の記録の識別子が変わる。資料の sha256 だけでは変わらない。"""
+    q = _asked(st, repo, env, capsys)
+    moved = replace(q, target=_target(head="f" * 40))
+    assert gate.request_id(moved) != gate.request_id(q) and asking.presented_id(moved) != asking.presented_id(q)
+    assert gate.request_id(replace(q, target=replace(_target(), material="m"))) == gate.request_id(q)
+    assert asking.presented_id(replace(q, target=gate.Target())) == q.id
 
 
 def _the_material_says_the_merge_reaches_production(repo, st, env, capsys):
@@ -215,6 +233,8 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
             _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it,
             id="a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it",
         ),
+        scenes.scene(_a_production_change_after_the_question_is_refused, id="a_production_change_after_the_question_is_refused"),
+        scenes.scene(_each_presentation_has_its_own_request_and_trail_ids, id="each_presentation_has_its_own_request_and_trail_ids"),
         scenes.scene(_the_material_says_the_merge_reaches_production, id="the_material_says_the_merge_reaches_production"),
         scenes.scene(_an_old_seen_reads_as_a_target_without_binding, id="an_old_seen_reads_as_a_target_without_binding"),
         scenes.scene(_stale_routes_carry_the_retry_and_the_next, id="stale_routes_carry_the_retry_and_the_next"),

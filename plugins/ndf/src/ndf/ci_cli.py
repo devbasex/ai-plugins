@@ -239,7 +239,7 @@ def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:
 
 def _approval(hub: GitHub, target: merge_approval.MergeTarget) -> Optional[merge_approval.MergeRow]:
     """今の承認の対象への有効な承認の証跡（決定 7 の「証跡の判定」）。無ければ None。"""
-    return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer_login()), target)
+    return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer()), target)
 
 
 def _approval_material(target: merge_approval.MergeTarget, production: bool) -> str:
@@ -373,7 +373,7 @@ def _approved_by(
     args: argparse.Namespace, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict
 ) -> tuple[Optional[str], Optional[dict]]:
     """承認が要る判定なら、今の承認の対象への証跡の担い手。証跡が無ければ、マージキューから外して `--production-gate` の結果。
-    token の利用者の login を読めなければ、マージキューから外して `precondition`（`merge_approval.NO_LOGIN`）。"""
+    token の利用者のアカウント ID を読めなければ、マージキューから外して `precondition`（`merge_approval.NO_LOGIN`）。"""
     if not production_merge.needs_approval(verdict):
         return None, None
     try:
@@ -442,8 +442,16 @@ def _merge(args: argparse.Namespace) -> dict:
 
     def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
         again = _verdict_of(hub, pull.base_ref, text, hub.repo)
-        if not production_merge.needs_approval(again) or _approval(hub, target) is not None:
+        if not production_merge.needs_approval(again):
             return None
+        try:
+            if _approval(hub, target) is not None:
+                return None
+        except merge_approval.TrailError as exc:
+            # 初めの判定と同じく、token の利用者を読めなければキューから外して precondition（approval_stale にしない）
+            if pull.queued:
+                hub.dequeue(pull.number)
+            return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
         return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
 
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
@@ -504,7 +512,7 @@ def _answer(args: argparse.Namespace) -> dict:
         shown.get("production") is True,
         f"{record.get('run')}:{record.get('step')}:{presented_id}",
     )
-    written = merge_approval.write_merge_row(hub, row, hub.viewer_login())
+    written = merge_approval.write_merge_row(hub, row, hub.viewer())
     summary = f"#{pull.number} へ回答 {answer} のマージの承認の証跡を{'書いた' if written else '既に書いてあった'}"
     return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"answer": answer, "written": written})
 

@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import NamedTuple, Sequence
 
 from ndf import identity
-from ndf.adapters.github import GitHub
+from ndf.adapters.github import Authored, GitHub, Viewer
 from ndf.adapters.publish import Publisher
 from ndf.core.approval_words import ANSWERS, APPROVED
 
@@ -104,33 +104,31 @@ def _parse_merge_row(body: str) -> MergeRow | None:
     return MergeRow(str(answer), str(by), t, production == _YES, str(record))
 
 
-# token の利用者の login を読めないときの理由（`approval_stale` と別の止まり方にする。承認し直しても数えられないため）
+# token の利用者を読めないときの理由（`approval_stale` と別の止まり方にする。承認し直しても数えられないため）
 NO_LOGIN = (
-    "この token の利用者の login を読めない（GitHub の GraphQL の viewer が空）ので、マージの承認の証跡の書き手を照らせず、"
-    "証跡を数えも書きもしない。login を読める token（利用者の個人の token か GitHub App の token）で打ち直す"
+    "この token の利用者のアカウント ID を読めない（GitHub の GraphQL の viewer が空）ので、マージの承認の証跡の書き手を照らせず、"
+    "証跡を数えも書きもしない。利用者を読める token（利用者の個人の token か GitHub App の token）で打ち直す"
 )
 
 
-def same_writer(author: str, login: str) -> bool:
-    """コメントの書き手 `author` が token の利用者 `login` か。大文字小文字と、ボットの login の末尾の `[bot]` の有無を区別しない
-    （REST のコメントの書き手は `<名前>[bot]`、GraphQL の `viewer` は `<名前>` で返すことがある）。"""
+def same_writer(c: Authored, viewer: Viewer) -> bool:
+    """コメント `c` の書き手が token の利用者 `viewer` か。GitHub が発行するアカウント ID で比べる。
 
-    def key(name: str) -> str:
-        return name.lower().removesuffix("[bot]")
-
-    return bool(login) and key(author) == key(login)
+    名前（login）では比べない。個人アカウントと GitHub App は名前の空間が別で、ボット `<名前>[bot]` と同じ名前の
+    個人アカウント `<名前>` を作れるため、名前を寄せて比べると別のアカウントの証跡を数える。"""
+    return viewer.account_id > 0 and c.author_id == viewer.account_id
 
 
-def merge_rows(hub: GitHub, number: int, login: str) -> list[MergeRow]:
-    """PR のコメントから数える証跡を古い順に返す。書き手が `login`（`ndf ci merge` を打つ token の利用者）と同じで、
-    編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
+def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
+    """PR のコメントから数える証跡を古い順に返す。書き手が `viewer`（`ndf ci merge` を打つ token の利用者）と同じ
+    アカウントで、編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
 
-    `login` が空（token の利用者を読めない）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
-    if not login:
+    `viewer` のアカウント ID が読めていない（0）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
+    if viewer.account_id <= 0:
         raise TrailError(NO_LOGIN)
     rows = []
     for c in hub.comments(number):
-        if c.edited or not same_writer(c.author, login):
+        if c.edited or not same_writer(c, viewer):
             continue
         row = _parse_merge_row(c.body)
         if row is not None:
@@ -146,13 +144,13 @@ def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | Non
     return kept[-1]
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, login: str) -> bool:
+def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
     """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
 
-    `login` が空なら、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
+    `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, login)):
+    if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, viewer)):
         return False
     Publisher(hub).comment(row.target.number, render_merge_row(row))
     return True
