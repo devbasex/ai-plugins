@@ -235,15 +235,26 @@ def own_contracts(root):
     contracts.use_dir(None)
 
 
-def test_the_command_reports_the_findings_when_the_table_of_causes_is_one_file_again(own_contracts, monkeypatch, capsys, last_result):
+@pytest.mark.parametrize(
+    ("break_", "broken"),
+    [
+        (lambda root: _merge_back(root, "causes"), [f"{DIR}/causes", f"{DIR}/causes.json"]),
+        # ディレクトリは残り、検査の結果に使う種類（check_failed）だけが無い
+        (_text(f"{DIR}/causes.json", {"causes": [{"kind": "check_failed"}]}), [f"{DIR}/causes.json"]),
+    ],
+    ids=["all", "only-check-failed"],
+)
+def test_the_command_reports_the_findings_when_the_table_of_causes_is_one_file_again(
+    own_contracts, monkeypatch, capsys, last_result, break_, broken
+):
     # 結果 JSON の cause を確かめる停止理由の表そのものが、分ける前の 1 ファイルに戻っている
     root = own_contracts
     shutil.copy(PLUGIN_ROOT / RESULT_SCHEMA, root / RESULT_SCHEMA)
-    _merge_back(root, "causes")
+    break_(root)
     monkeypatch.setattr(run.identity, "load", lambda: PluginIdentity(root, "p", "P_", root))
     monkeypatch.setattr(run, "_repo_root", lambda plugin_root: root.parents[1])
     assert run.main(["--only", contracts_split.RULE]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)
     assert report["cause"]["kind"] == "config_broken"
     paths = [(root.parents[1] / item["path"]).relative_to(root).as_posix() for item in report["items"]]
-    assert paths == [f"{DIR}/causes", f"{DIR}/causes.json"]
+    assert paths == broken

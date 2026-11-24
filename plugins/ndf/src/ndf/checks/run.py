@@ -34,7 +34,7 @@ from ndf.checks import (
     words,
 )
 from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, walk
-from ndf.contracts import ContractError, result
+from ndf.contracts import ContractError, causes, result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -179,12 +179,13 @@ def _repo_root(plugin_root: Path) -> Path:
 def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None) -> int:
     """結果 JSON を結果のコントラクト（`ndf.contracts.result`）で確かめて 1 行で出し、終了コードを返す。
 
-    `kind` が無ければ合格（ok）、あれば停止理由の種類を `cause` に持つ stopped にする。停止理由の表そのものが読めなければ、
+    `kind` が無ければ合格（ok）、あれば停止理由の種類を `cause` に持つ stopped にする。停止理由の表が読めないか `kind` を持たなければ、
     表で確かめずに指摘（`items`）を持つ config_broken を出す（表が壊れたことの指摘を失わない）。
     """
     if kind is None:
         return result.emit(result.result(TOOL, result.OK, summary, items=items, metrics=metrics))
     try:
+        causes.row(kind)  # 表に種類が無いことも、表の誤り（`ContractError`）として下で受ける
         return result.emit(result.stopped(TOOL, kind, summary, items=items, metrics=metrics))
     except ContractError as exc:
         # 表の誤りは出力の前に投げられるので、標準出力へ 2 行出ることは無い
