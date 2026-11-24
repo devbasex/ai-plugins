@@ -23,9 +23,7 @@ conductor へ伝えれば次のフェーズから反映する。
 | supervisor | 1 つのフェーズ（連続する工程のグループ）を通す役割。`ndf plan` が主に担い、プランのテンプレートが無いなど対応できないフェーズだけサブエージェント（`ndf:supervisor`）が代行する | 問えない | worker | 人間への質問、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への質問、進捗記録、収束の判定、設計の決定 |
 
-**worker は葉である。** 深さ 3（worker がさらに起動する形）は実測していない。
-
-**例外は、文書を組み直す worker の読み手役だけである。** `ndf document-rebuild run` が `ndf worker run` で起動した組み直しの担当に限り、読み手役のサブエージェントを、読み手役の対象の文書 1 件につき最大 2 回（1 回目が不合格のときだけ 2 回目）立ててよい。`ndf:worker` で起動した worker には当たらない（定義がサブエージェントの Tool を外している）。例外を置くのは、組み直しで読み手役の確かめを省かせないためである。許可は組み直しの起動指示（`contracts/worker/document-rebuild.md`）に書き、立てた回数と結果は文書ごとに結果ファイルの `metrics.readers` に残させる。記録が欠けるか形が違えば、`ndf document-rebuild run` が `incomplete` で止める。立てられなかったときは `document-rebuild` の「立てられないとき」の扱いで、理由を `not_run` として残す（課題「起動の設定が無いリポジトリでも、設計とドキュメント再構成が流れる」 https://github.com/devbasex/ai-plugins/issues/4337 ）。
+**worker は葉である。** 深さ 3（worker がさらに起動する形）は実測していない。**例外は、文書を組み直す worker の読み手役だけである。** `ndf document-rebuild run` が `ndf worker run` で起動した組み直しの担当に限り、読み手役のサブエージェントを、読み手役の対象の文書 1 件につき最大 2 回（1 回目が不合格のときだけ 2 回目）立ててよい。`ndf:worker` で起動した worker には当たらない（定義がサブエージェントの Tool を外している）。例外を置くのは、組み直しで読み手役の確かめを省かせないためである。許可は組み直しの起動指示（`contracts/worker/document-rebuild.md`）に書き、立てた回数と結果は文書ごとに結果ファイルの `metrics.readers` に残させる。記録が欠けるか形が違えば、`ndf document-rebuild run` が `incomplete` で止める。立てられなかったときは `document-rebuild` の「立てられないとき」の扱いで、理由を `not_run` として残す。
 
 | 層 | 持つ単位 | 何を持って帰るか |
 | --- | --- | --- |
