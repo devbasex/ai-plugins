@@ -302,7 +302,9 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
 
 
 def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
-    """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。"""
+    """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。
+
+    担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。"""
     p = run.event_payload(held)
     seen = Target.from_dict(p.get("seen"))
     gate = p.get("gate")
@@ -317,7 +319,7 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
         (),
         target=seen,
     )
-    by = _trail_by(conn, q, a, seen)
+    by = _trail_by(conn, q, replace(a, by=str(p.get("by"))), seen)
     if by is not None:
         _post_trail(q, a, seen, by, post)
 
@@ -326,6 +328,9 @@ def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], No
     p = run.event_payload(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等のキー {a.key} は別の回答（{p.get('answer')}・質問 {p.get('gate_id')}）に使った")
+    # 送り直しで回答した者を変えない（記録は自動の処理の回答なのに、送り直しの申告で利用者の証跡を書かない）
+    if p.get("by") != a.by:
+        raise model.Refused(f"冪等のキー {a.key} の回答は {p.get('by')} が書いた。送り直しの回答した者 {a.by} と違う")
     ensure()
     summary = f"冪等のキー {a.key} の回答は書いてある（事象 {held.seq}）"
     metrics = {"machine_id": machine_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}

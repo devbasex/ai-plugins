@@ -123,6 +123,16 @@ def _a_recorded_answer_without_its_trail_writes_it_on_resend(repo, st, env, caps
     assert [r.record_id for r in posts.rows] == [asking.presented_id(q)]
 
 
+def _a_resend_by_another_actor_is_refused_and_writes_no_trail(repo, st, env, capsys):
+    """r4-4: 自動の処理が記録した回答を、同じ冪等のキーで利用者として送り直しても、利用者の証跡にしない。"""
+    q = _asked(st, repo, env, capsys, production=False)
+    posts = Posts()
+    _give(st, q, by="service:factory", post=posts, observe=lambda _q: _target(False))
+    with pytest.raises(model.Refused, match="service:factory"):
+        _give(st, q, by="human", post=posts, observe=lambda _q: _target(False))
+    assert posts.rows == [] and len(_answered(st, q)) == 1
+
+
 def _an_answer_not_by_the_user_is_refused_for_a_production_merge(repo, st, env, capsys, by):
     """受け入れ条件 5（回答の記録を経ない・organizer の中継）: 本番へ反映されるマージの承認は、利用者の回答でなければ断る。"""
     q = _asked(st, repo, env, capsys)
@@ -234,6 +244,9 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
             )
             for i, v in enumerate(["conductor", "service:factory", "organizer"])
         ],
+        scenes.scene(
+            _a_resend_by_another_actor_is_refused_and_writes_no_trail, id="a_resend_by_another_actor_is_refused_and_writes_no_trail"
+        ),
         scenes.scene(_service_mvv_and_non_production_answers_write_no_trail, id="service_mvv_and_non_production_answers_write_no_trail"),
         scenes.scene(_a_base_changed_after_the_question_is_refused, id="a_base_changed_after_the_question_is_refused"),
         scenes.scene(
