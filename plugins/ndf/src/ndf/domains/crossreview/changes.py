@@ -81,17 +81,22 @@ def _committed_texts(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
     return {p: "".join(f"{line}\n" for line in lines) for p, lines in texts.items()}
 
 
-def changed(g: git.Git, base: str, root: Path) -> Changed:
-    """変わったファイルと、そのうち Markdown の本文。本文はレビューするコミット（HEAD）の通常のファイルの blob だけから読む
+def _docs(g: git.Git, files: Sequence[str], root: Path) -> dict[str, str]:
+    """`files` のうち Markdown の本文。本文はレビューするコミット（HEAD）の通常のファイルの blob だけから読む
     （シンボリックリンクは差分の上のリンクとして扱い、リンク先を読まない。PR 3944 の r6-1）。作業場所のファイルから読めない
     本文はまとめて 1 回で読む（PR 3944 の r7-4）。"""
-    files = tuple(g.changed_files(base, "HEAD"))
     blobs = _regular_blobs(g, [p for p in files if p.endswith(".md")])
     docs: dict[str, Optional[str]] = {path: _local_text(root, path, oid) for path, oid in blobs.items()}
     missing = [path for path, text in docs.items() if text is None]
     if missing:
         docs |= _committed_texts(g, missing)
-    return Changed(files, {path: text for path, text in docs.items() if text is not None})
+    return {path: text for path, text in docs.items() if text is not None}
+
+
+def changed(g: git.Git, base: str, root: Path) -> Changed:
+    """変わったファイルと、そのうち Markdown の本文。"""
+    files = tuple(g.changed_files(base, "HEAD"))
+    return Changed(files, _docs(g, files, root))
 
 
 def sections(docs: dict[str, str]) -> list[str]:
@@ -99,5 +104,6 @@ def sections(docs: dict[str, str]) -> list[str]:
 
 
 def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
-    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。"""
-    return sections(changed(g, base, root).docs)
+    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。改名を調べない（調べると部分クローンで前の本文が
+    要る。改名前のパスは HEAD に無く、セクションは同じになる）。"""
+    return sections(_docs(g, g.changed_files(base, "HEAD", "--no-renames"), root))

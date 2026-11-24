@@ -307,7 +307,7 @@ def test_identity_of_a_mismatched_or_unreadable_mvv_is_an_error(repo: Path) -> N
 
 def test_identity_does_not_fetch_objects_missing_from_a_partial_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """部分クローンで MVV の設定が手元に無ければ、リモートから取得せずに `MvvError`（git の起動すべてで遅延取得を止め、
-    それを読まない版の git のために通信の手段も許さない）。"""
+    それを読まないバージョンの git のために通信の手段も許さない）。"""
     started: list[tuple[str, Optional[str], Optional[str]]] = []
 
     def fake_run(cmd, **kwargs):

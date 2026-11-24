@@ -43,7 +43,7 @@ WORKTREE_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.js
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 # 部分クローン（`--filter`）で手元に無いオブジェクトを、読み取りの途中でリモートから取得させない環境変数。
-# `GIT_NO_LAZY_FETCH` を読まない版（2.43.0・2.44.0 など）も、通信の手段を 1 つも許さなければ取得が通信の前に失敗する
+# `GIT_NO_LAZY_FETCH` を読まないバージョン（2.43.0・2.44.0 など）も、通信の手段を 1 つも許さなければ取得が通信の前に失敗する
 NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
 # （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
@@ -225,7 +225,7 @@ class Git:
 
     @classmethod
     def offline(cls, cwd: Optional[Path]) -> Git:
-        """手元に無いオブジェクトをリモートから取得しない `Git`（`NO_LAZY_FETCH`）。欠けたオブジェクトは、git の版と操作により、無いものとして読むか `GitError`。"""
+        """手元に無いオブジェクトをリモートから取得しない `Git`（`NO_LAZY_FETCH`）。欠けたオブジェクトは、git のバージョンと操作により、無いものとして読むか `GitError`。"""
         return cls(cwd, functools.partial(run_git, env=NO_LAZY_FETCH), NO_LAZY_FETCH)
 
     def attempt(self, *args: str) -> Completed:
@@ -325,13 +325,13 @@ class Git:
         """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
         return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
-    def changed_files(self, base: str, head: str) -> list[str]:
-        """`base...head`（分岐点から head まで）で変わったファイルのパス。
+    def changed_files(self, base: str, head: str, *options: str) -> list[str]:
+        """`base...head`（分岐点から head まで）で変わったファイルのパス。`options` は `git diff` に足す引数。
 
         `-z` で NUL 区切りに読む。改行区切りでは、既定の `core.quotePath` が日本語・タブ・引用符を含むパスを
         引用・エスケープした文字列のまま返し、呼び手が実際のファイルを開けない。
         """
-        return [p for p in self.run("diff", "--name-only", "-z", END_OF_OPTIONS, f"{base}...{head}").split("\0") if p]
+        return [p for p in self.run("diff", "--name-only", "-z", *options, END_OF_OPTIONS, f"{base}...{head}").split("\0") if p]
 
     def changed_lines(self, base: str, head: str, exclude: Iterable[str] = ()) -> int:
         """`base..head` の first-parent の各コミットの変更行数の和。`exclude` のコミットの分は数えない（#3087）。

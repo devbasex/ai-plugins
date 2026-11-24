@@ -281,6 +281,49 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
 
 
+def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
+    repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "文書でない")
+    state = tmp_path / "state"
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    data = {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}]}
+    store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base(data, sha))
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.SINCE
+    used: list[git.Git] = []
+
+    def missing(g: git.Git, *args: object) -> list[str]:
+        used.append(g)
+        raise git.GitError("could not fetch from promisor remote")
+
+    monkeypatch.setattr(changes, "changed_sections", missing)
+    code, got = run_cli(capsys, *base)
+    assert (code, got["items"][0]["scope"], got["items"][0]["base"]) == (0, scope_decide.FULL, None)
+    assert "promisor" in got["warnings"][0] and [g.env for g in used] == [git.NO_LAZY_FETCH]
+
+
+def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
+    """変わったセクションは改名を調べずに読む（調べると部分クローンで前の本文の取得が要る）。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    calls: list[list[str]] = []
+
+    def runner(args: list[str], cwd: Path | None) -> git.Completed:
+        calls.append(args)
+        return git.Completed(0, "a.txt\0", "")
+
+    assert changes.changed_sections(git.Git(tmp_path, runner), "b", tmp_path) == []
+    [call] = calls
+    assert call[0] == "diff" and "--no-renames" in call
+
+
 def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
     渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
