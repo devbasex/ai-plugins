@@ -1,6 +1,6 @@
 # #3959 #4055 の詳細設計: MVV 判定（判定を打つ条件・レビューの保留・根拠の行・プランの外のエントリポイント）
 
-設計文書 [issue-3959-4055-design.md](./issue-3959-4055-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。前提は #4076 の実装が main へ入った後の形である（`records/mvv.py` の `current`・`Snapshot`・`principles`・`record_review`・`fenced_lines`・`decision_lines`、`records/mvv_decide.py` の `citation_errors`・`items_of`、`crossreview/drive.py` の `_summary` が `record_review` を呼ぶ形）。#4076 の実装は #4090・#4099 の設計（PR #4121）の直しを含むので、#4076 の部品の形はその設計の「#4076 の文書のどこを置き換えるか」の後の形で読む。#4090・#4099 の決定 16 が挙げる #3959 と重なる 5 点（`Snapshot.commit`・`cite` の `mismatch`・`cite` が使う確かめの関数・`record_review` の契約・`review_holds` の規則）は、決定 16 の「#3959 の実装がすること」の列の形でこの文書に書いた（設計の決定 11）。
+設計文書 [issue-3959-4055-design.md](./issue-3959-4055-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。前提は #4076 の実装が main へ入った後の形である（`records/mvv.py` の `current`・`Snapshot`・`principles`・`record_review`・`fenced_lines`・`decision_lines`、`records/mvv_decide.py` の `citation_errors`・`items_of`、`crossreview/drive.py` の `_summary` が `record_review` を呼ぶ形）。#4076 の実装は #4090・#4099 の設計（PR #4121）の直しを含むので、#4076 の部品の形は確定仕様（[ndf-mvv-current-and-stage-inputs.md](../docs/specifications/ndf-mvv-current-and-stage-inputs.md)・[cross-review-project-mvv.md](../docs/specifications/cross-review-project-mvv.md)）と今のコードの形で読む（設計の文書は実装が終わって消した）。#4090・#4099 の決定 16 が挙げる #3959 と重なる 5 点（`Snapshot.commit`・`cite` の `mismatch`・`cite` が使う確かめの関数・`record_review` の契約・`review_holds` の規則）は、決定 16 の「#3959 の実装がすること」の列の形でこの文書に書いた（設計の決定 11）。
 
 ## 地図
 

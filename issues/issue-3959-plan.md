@@ -4,8 +4,8 @@
 
 - 要求仕様: [issue-3959-requirements.md](./issue-3959-requirements.md)（正は #3959 の本文）。受け入れ条件は番号で指す。条件 6 は #4104 へ移したので無い
 - 設計書: [issue-3959-4055-design.md](./issue-3959-4055-design.md)、詳細設計書: [issue-3959-4055-design-detail.md](./issue-3959-4055-design-detail.md)
-- 前提にする設計: #4076 の設計（[issue-4076-design.md](./issue-4076-design.md)）と、その直しの #4090・#4099 の設計（[issue-4090-4099-design.md](./issue-4090-4099-design.md)）。単位 2〜4 は #4076 の実装が main へ入った後に始める（要求仕様の前提 1、設計の決定 7）
-- 前提にする実装計画: [issue-4076-plan.md](./issue-4076-plan.md)。この計画の単位が使う #4076 の部品と、それを作る #4076 の単位は「レビューの単位」の表の後にある
+- 前提にする仕様: #4076（直しの #4090・#4099 を含む）の確定仕様。承認済みの MVV の読み取りと MVV の記録は [ndf-mvv-current-and-stage-inputs.md](../docs/specifications/ndf-mvv-current-and-stage-inputs.md)、cross-review の MVV の扱いは [cross-review-project-mvv.md](../docs/specifications/cross-review-project-mvv.md) にある。この計画の「#4076 の設計」「#4090・#4099 の設計」「#4076 の計画の U<番号>」は、実装が終わって消した文書を指す。単位 2〜4 は #4076 の実装が main へ入った後に始める（要求仕様の前提 1、設計の決定 7）
+- この計画の単位が使う #4076 の部品と、それを作る #4076 の単位は「レビューの単位」の表の後にある
 - モード: `standard`（公開インタフェースの `ndf records mvv gate` の引数と `ndf records mvv cite` を足し、手順書とコントラクトを変える）
 
 ## 修正対象
