@@ -49,7 +49,7 @@ tests/
 
 - `last_context`
   - 事前条件: `tail` は `read_tail` の返した文字列。`anchor` は `ToolUse`・`Reply`・`Tail` のどれか（`Anchor = Union[ToolUse, Reply, Tail]`）
-  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` なら `reason` があり、`tokens` は None である。`none` の `form`（突き合わせを通った応答の採用行の形が違う）では、読める項目だけを持つ。採用行の `message.id` が空でない文字列なら `message_id` に、`timestamp` が `timestamp_seconds` で直せる文字列なら `timestamp` に持つ。`entry` は採用行の object を持つ（読めない項目だけ None）。#4068 の `last_turn` が、この 2 つから Stop と応答を結ぶ `ref` を作る。`form` 以外の `none` では 3 つとも None。`current` のとき `reason` は None
+  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` なら `reason` があり、`tokens` は None である。`none` の `form`（突き合わせを通った応答の採用行の形が違う）では、読める項目だけを持つ。採用行の `message.id` が空でない文字列なら `message_id` に、`timestamp` が `timestamp_seconds` で直せる文字列なら `timestamp` に持つ。`entry` には採用行の object をそのまま入れる。`message_id` と `timestamp` は読めたほうだけを持ち、読めないほうは None にする。#4068 の `last_turn` が、この 2 つから Stop と応答を結ぶ `ref` を作る。`form` 以外の `none` では 3 つとも None。`current` のとき `reason` は None
   - 副作用: 無し（ファイルを開かない）
 - `timestamp_seconds`
   - 事後条件: 末尾の `Z` を `+00:00` に替えて `datetime.fromisoformat` で解く。時差を持つ時刻なら `.timestamp()` の値、`ValueError` か時差が無い（`tzinfo` が None）なら None。例外を投げない
@@ -219,7 +219,7 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 満たす決定: 決定 6、受け入れ条件 10
 
-#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail, last_message, started) -> TurnRead`）と返り値の型を #4068 の詳細設計のまま使う。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。状態の寿命（以前の `known_ttl`）は引数に取らない。ロックの外で読んだ状態で寿命を補うと、並んで動く hook の順で古い値を使うためである（#4068・#4199 の設計の決定 13）。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の実装が #4068 の詳細設計から替えるのは次の 2 点だけである。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
+#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail, last_message, started) -> TurnRead`）と返り値の型を #4068 の詳細設計のまま使う。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。状態の寿命（以前の `known_ttl`）は引数に取らない。ロックの外で読んだ状態で寿命を補うと、並んで動く hook の順で古い値を使うためである（#4068・#4199 の設計の決定 13）。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の詳細設計は、この部品を使うために次の 2 点を反映済みである（#4068 の詳細設計の「処理の手順」の 3）。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
 
 - **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読む。その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなる。空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、理由の行を会話で 1 度だけ書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである

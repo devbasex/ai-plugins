@@ -57,7 +57,7 @@
 
 | 仕組み | 起こす主体 | 間隔 | 効く会話 | 根拠のファイル | 実測（中継の子、2026-11-15〜11-24） |
 | --- | --- | --- | --- | --- | --- |
-| `ndf lanes wait` | 待ちのコマンドが戻り、Claude Code がバックグラウンドの作業の完了を知らせる。会話は結果の `next` で張り直す（`parallel.md` の「手順」の 2） | 知らせが無ければ 540 秒で戻る（引数で変えられない） | オーガナイザー。レーンの conductor も行の順を待つときに打つ | `plugins/ndf/contracts/limits/parallel-wait.poll.json`（`seconds` 540）・`src/ndf/progress/plan/wait.py` | 738 回戻った。中央値 9.0 分・最長 9.4 分 |
+| `ndf lanes wait` | 待ちのコマンドが戻り、Claude Code がバックグラウンドの作業の完了を知らせる。会話は結果の `next` で張り直す（`parallel.md` の「手順」の 2） | 知らせが無ければ 540 秒で戻る（引数で変えられない） | オーガナイザー。レーンの conductor も、計画で先に進める作業の完了を待つときに打つ | `plugins/ndf/contracts/limits/parallel-wait.poll.json`（`seconds` 540）・`src/ndf/progress/plan/wait.py` | 738 回戻った。中央値 9.0 分・最長 9.4 分 |
 | `ndf plan wait`・`ndf progress wait` | 同上（`waiting.md` の「結果の読み方」の終了コード 3 `wait_timeout` の後に同じ `wait` を打つ） | `--timeout` の既定 600 秒（引数で変えられる） | プランを流す conductor・レーンの conductor | `contracts/limits/supervise.wait-default.json`・`src/ndf/core/plan/cli.py` の 237 行・`src/ndf/progress/run.py` の 915 行 | `progress wait` 193 回、最長 25.2 分。`plan wait` 0 回。最長の 25.2 分は `--timeout 3300` を指定した 1 回（作業の知らせで戻った）で、既定のまま打った呼び出しは最長 10.0 分（2026-11-24 に全会話の記録から引数ごとに数え直した。258 回） |
 | `ndf ci watch` | 同上 | `--budget` が必須で既定は無い。ランナーの割り当て待ち（最大 1,800 秒）は予算に数えない | CI を待つ conductor | `src/ndf/ci_cli.py` の 43 行・`contracts/limits/ci.runner-wait.json` | 91 回、最長 6.0 分 |
 | バックグラウンドの Agent（supervisor・worker）の知らせ | Claude Code。終わったときと、Agent が自分のバックグラウンドの作業を待って応答を終えたとき（「is waiting on its own background work」） | 決まった間隔は無い。工程の長さで決まる | supervisor に工程を任せた conductor | `waiting.md` の「supervisor の報告の待ち」 | 起動から知らせまで（知らせに `tool-use-id` が付いた 239 回）: 中央値 5.2 分・最長 128 分・60 分超 4 回 |
