@@ -4,7 +4,8 @@
   書く（`finished_decide`。drive は打ち直しの引数を持たないので、状態ファイルを消す手順を案内する。#2057）
 - 作業場所は `workspace` が用意し、再開では作り直さずに登録を確かめる（#3106）
 - 承認済みのプロジェクト MVV があれば、提案と計画の担当の指示文に、本文と NDF の共通原則のスナップショットのパスを載せる。
-  ベースブランチの MVV を読めなければ、担当を起動せずに止める（#4076）
+  ベースブランチの MVV を読めなければ、担当を起動せずに止める。計画の後に MVV が変わった再開では、未着手の項目を今の MVV で
+  確かめてから続ける（#4076）
 - 課題が触る関数（#622）を init で決め、提案と計画の項目はその関数を指すものだけを採る
 - 担当の結果ファイルの保存先は `launch` が決める（#750）
 - コードを書く工程は、担当を起動する前に起点を工程の記録へ書く。担当が結果を出さずに終われば、起点まで取り消して
@@ -95,6 +96,8 @@ class RunConfig:
     budget_minutes: Optional[int] = None
     safety_net_minutes: Optional[float] = None
     candidates: str = ""
+    # PR のマージ先のブランチ（`base` がコミットのときだけ使う。渡せば GitHub から読まない）
+    target_branch: Optional[str] = None
 
     def args(self) -> list[str]:
         """結果を変える引数の並び。安全網の上限は入れない（大きくして打ち直すと、止まった所から続ける）。
@@ -163,8 +166,11 @@ class _Run:
     # 起動の始めに取得した、MVV を読むブランチとその先頭のコミット
     base_branch: str
     base_tip: str
-    # 提案と計画の担当へ渡す、プロジェクト MVV を読ませる文（承認済みの MVV が無ければ空）
+    # 差分の起点のコミット（`--base` がブランチなら `base_tip`、コミットならそのコミット）
+    diff_base: str
+    # 提案と計画の担当へ渡す、プロジェクト MVV を読ませる文（承認済みの MVV が無ければ空）と、その MVV を見分ける値
     mvv: str = ""
+    mvv_id: str = ""
 
     @property
     def work(self) -> git.Git:
@@ -202,7 +208,7 @@ def _init(run: _Run) -> None:
     if "touched" in run.state:
         return
     cfg = run.cfg
-    touched = scope.touched_or_explicit(run.ws.work, cfg.base, "HEAD", cfg.scope, cfg.symbols)
+    touched = scope.touched_or_explicit(run.ws.work, run.diff_base, "HEAD", cfg.scope, cfg.symbols)
     run.state.update(
         pr=cfg.pr, branch=cfg.branch, base=cfg.base, args=cfg.args(), target_scope=list(cfg.scope), touched=touched.as_json(), phases={}
     )
@@ -312,7 +318,32 @@ def _plan(run: _Run) -> None:
         plan_fallback=planned is None and bool(proposals),
         budget=picked.budget.as_json(),
         plan={"table_source": table["source"], "table": table},
+        mvv=run.mvv_id,
     )
+    run.save()
+
+
+def _recheck_mvv(run: _Run) -> None:
+    """計画に使った MVV が今の MVV と違う再開で、未着手の項目を今の MVV で確かめ、反する項目を見送る（#4076）。
+
+    計画の MVV を記録していない状態も、違うものとして確かめる。確かめの担当が結果を出さなければ、項目を実装せずに止める。
+    """
+    if "items" not in run.state or run.state_get("mvv", None) == run.mvv_id:
+        return
+    opened = [i for i in run.state["items"] if i["status"] == Status.OPEN.value]
+    if run.mvv and opened:
+        _rewind(run)
+        workspace.refresh_readers(run.ws)
+        req = launch.Request(
+            "plan", participants.FIXER, prompt_decide.mvv_check(run.cfg.pr, opened, run.mvv), f"pr{run.cfg.pr}-mvv", "items"
+        )
+        refused = items_decide.against_mvv(_launch(run, req), [i["id"] for i in opened])
+        if refused is None:
+            raise DriveStopped("work_stopped", "計画の後に MVV が変わったが、未着手の項目を今の MVV で確かめる担当が結果を出さなかった")
+        for item in opened:
+            if item["id"] in refused:
+                _close(run, item, Status.DEFERRED, f"今の MVV に反する: {refused[item['id']]}")
+    run.state["mvv"] = run.mvv_id
     run.save()
 
 
@@ -578,15 +609,20 @@ def _flaky_fix(run: _Run) -> None:
     run.save()
 
 
+def _rewind(run: _Run) -> None:
+    """止まった実行の途中の項目（起点の記録がある）を、起点まで戻す。"""
+    resumed = items_decide.next_open(run.state["items"])
+    if resumed is not None and "start" in resumed:
+        _reset(run, resumed["start"])
+
+
 def _items(run: _Run) -> None:
     """未着手の項目を順に流す。止まった実行の途中の項目（起点の記録がある）は、起点まで戻してからやり直す。
 
     途中の項目は、積まれていたフレーキーの直しをマージする前に起点へ戻す。直しの後に戻すと直しのコミットが消える。
     起点は直しをマージした後の HEAD へ置き直す（項目を取り消しても直しのコミットは残す）。
     """
-    resumed = items_decide.next_open(run.state["items"])
-    if resumed is not None and "start" in resumed:
-        _reset(run, resumed["start"])
+    _rewind(run)
     _flaky_fix(run)
     while (found := items_decide.next_open(run.state["items"])) is not None:
         item = cast(dict[str, Any], found)
@@ -698,31 +734,35 @@ def _resume_mismatch(cfg: RunConfig, state: Mapping[str, Any], path: Path) -> Op
 
 
 def _base_of_pr(cfg: RunConfig, ports: Ports, repo: git.Git) -> str:
-    """PR のマージ先のブランチ（`--base` がコミットのときだけ読む）。読めなければ、MVV を決められないので止める。"""
+    """PR のマージ先のブランチ（`--base` がコミットのときだけ使う）。呼び手が渡していなければ GitHub から読む。読めなければ、MVV を
+    決められないので止める。"""
+    if cfg.target_branch is not None:
+        return cfg.target_branch
     try:
         return ports.github(repo).pull(cfg.pr).base_ref
     except github.GitHubError as exc:
         raise DriveStopped("precondition", f"PR #{cfg.pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
 
 
-def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, str, str]:
-    """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミットを返す。"""
+def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, str, str, str]:
+    """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミット・差分の起点の
+    コミットを返す。取得が進めるのはリモート追跡参照だけなので、差分の起点に手元のブランチの名前は使わない。"""
     remote = repo.remote()
 
     def fetch(branch: str) -> tuple[str, str]:
         return worktree.fetch_tips(repo, cfg.branch, remote, branch)
 
     (head, tip), base = worktree.fetch_base(repo, cfg.base, remote, fetch, lambda: _base_of_pr(cfg, ports, repo))
-    return head, base.branch, tip
+    return head, base.branch, tip, base.commit if base.commit is not None else tip
 
 
-def _read_mvv(run: _Run) -> str:
-    """提案と計画の指示文に足す MVV の文。MVV を読めなければ、MVV を渡さない提案にならないよう担当の起動前に止める（#4076）。"""
+def _read_mvv(run: _Run) -> None:
+    """提案と計画の指示文に足す MVV の文と、その MVV を見分ける値を持つ。MVV を読めなければ、MVV を渡さない提案にならないよう担当の起動前に止める（#4076）。"""
     try:
         snap = mvv.of_base(run.ws.work, run.base_branch, run.base_tip, run.ws.root)
     except mvv.MvvError as exc:
         raise DriveStopped("precondition", str(exc)) from exc
-    return prompt_decide.mvv_text(snap)
+    run.mvv, run.mvv_id = prompt_decide.mvv_text(snap), snap.identity
 
 
 def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish]]:
@@ -740,11 +780,11 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
         return None, mismatch
     runtimes = (*participants.assign(cfg.participants), participants.FIXER)
     try:
-        head, base_branch, base_tip = _fetch_both(cfg, ports, repo)
+        head, base_branch, base_tip, diff_base = _fetch_both(cfg, ports, repo)
     except DriveStopped as exc:
         return None, Finish(exc.kind, exc.detail)
     ws = workspace.prepare(repo, cfg.pr, head, runtimes)
-    return _Run(cfg, ports, ws, state, path, base_branch, base_tip), None
+    return _Run(cfg, ports, ws, state, path, base_branch, base_tip, diff_base), None
 
 
 def _ready(run: _Run) -> None:
@@ -764,8 +804,9 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     assert run is not None
     try:
         _ready(run)
-        run.mvv = _read_mvv(run)
+        _read_mvv(run)
         _init(run)
+        _recheck_mvv(run)
         _plan(run)
         _items(run)
         _final(run)

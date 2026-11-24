@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Refactor a PR across runtimes: participants propose once, claude plans, tests, applies and verifies items fitting a budget. Use when structural improvement should be done across runtimes（クロスリファクタリング・多AIリファクタリング・予算内のリファクタリング）."
-argument-hint: "--pr N --branch NAME --base BRANCH --scope PATH... --required CHECK... [--ci-test NAME...] [--symbols FILE:NAME...] [--participants RUNTIME...] [--max-fix N] [--budget-minutes N] [--safety-net-minutes N] [--work DIR]"
+argument-hint: "--pr N --branch NAME --base BRANCH --scope PATH... --required CHECK... [--ci-test NAME...] [--symbols FILE:NAME...] [--participants RUNTIME...] [--max-fix N] [--budget-minutes N] [--safety-net-minutes N] [--target-branch NAME] [--work DIR]"
 allowed-tools:
   - Bash
   - Read
@@ -73,6 +73,7 @@ allowed-tools:
 | `--max-fix N` | 項目ごとの修正と、最終ゲート修正の回数の上限 | `2` |
 | `--budget-minutes N` | 実装の予算（分）。採る項目を選ぶのにだけ使う | `contracts/limits/cross-refactoring.default-budget.json` |
 | `--safety-net-minutes N` | 安全網の上限（分）。止まった実行は、より大きい値で同じコマンドを打ち直すと続く | 実効の予算 × 設定の倍率 |
+| `--target-branch NAME` | PR のマージ先のブランチ。`--base` がコミットのときだけ使い、渡すと GitHub から読まない | GitHub から読む |
 | `--work DIR` | 対象のリポジトリの中の位置 | `.` |
 
 ```text
@@ -204,7 +205,10 @@ ndf refactor run --pr <PR> --branch <head ブランチ> --base <マージ先の�
 | `--base` の値 | MVV を読むブランチ |
 | --- | --- |
 | ブランチか `<リモート>/<ブランチ>` | そのブランチの、リモートの最新のコミット |
-| コミットの SHA・タグなど | PR のマージ先のブランチの、リモートの最新のコミット（GitHub から 1 回読む） |
+| コミットの SHA・タグなど | PR のマージ先のブランチの、リモートの最新のコミット（`--target-branch` を渡さなければ GitHub から 1 回読む） |
+
+再開で、計画に使った MVV と今の承認済みの MVV が違えば（計画の MVV を記録していない状態も）、未着手の項目を計画の担当に今の
+MVV で 1 回確かめさせ、反する項目を見送ってから続ける。確かめの担当が結果を出さなければ `work_stopped` で止まる。
 
 承認済みの MVV が無いリポジトリでは何も載せない。ブランチを取得できない・MVV を読めない・本文が承認の記録と合わない・
 スナップショットを保存できないときは、担当を起動せずに `precondition` で止まる。`summary` の理由を報告して止まる。

@@ -10,6 +10,7 @@
 | `touched` | 課題が触る関数（`symbols_decide.Touched.as_json`） |
 | `phases` | 工程ごとの記録（起点 `base_sha` と開始の時刻。`phase_decide.start_phase`） |
 | `items` | 項目（`items_decide`）。項目ごとに起点 `start`・検証の記録 `history`・見送りの理由 `reason` を持つ |
+| `mvv` | 項目を計画したか確かめた MVV を見分ける値（`records.mvv.Snapshot.identity`） |
 | `skipped` | 範囲外で見送った提案 |
 | `final` | 最終ゲートの記録（`status`・`outside_failures`） |
 | `done` | 完了の記録（`head`・`args`・結果 JSON） |
