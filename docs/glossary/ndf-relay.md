@@ -97,3 +97,14 @@
 | 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | `docs/specifications/ndf-relay-account-switching.md` |
 | 止めてよい時点 | — | ラッパーがセグメントの途中で子を止めてアカウントを替えてよい時点。子の出力が静かな時間止まり、回答待ちの質問が無く、会話の記録の最後が終わった応答（結果を待つ Tool の呼び出しが無い）で、その応答がラッパーの最後の入力より後の時点 | — | — | `docs/specifications/ndf-relay-account-switching.md` |
 | 最後の砦 | — | 上限で停まった子を、上限でない登録済みアカウント・従量の接続（保存した設定・API キー）・最も早く上限が解けるアカウントの順に、人の入力無しで同じ会話へ戻すラッパーの振る舞い | — | — | `docs/specifications/ndf-relay-account-switching.md` |
+| キャッシュの寿命 | — | プロンプトのキャッシュが、書くか読む要求の始まりから保たれる時間。Claude Code のメインの会話は 1 時間、サブエージェントは主に 5 分（実測。#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| キャッシュの起床 | — | 寿命の内に裏の作業を待つ子を起床させて短く応答させ、文脈を読み出しの値段で読ませてキャッシュの寿命を延ばすこと（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 起床の hook | `rewake` | 中継の子の Stop でバックグラウンドに起動し（asyncRewake）、起床の時点に確かめ直して、起床させるなら終了コード 2 で終わる NDF の hook。確かめた Claude Code のバージョンの子にだけラッパーが登録を渡す（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 起床の記録 | `cache_log` | 起床の hook が中継の保存先の cache-log.jsonl に書く、待ちの始まりと終わり・起床・その結果・やめた理由の行の記録。ndf relay cache report が集計する（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 起床の間隔 | — | 最後の応答の時刻から起床までの秒。寿命から余白（cache.wake の seconds）を引いた値（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 起床の回数の上限 | `n_max` | 起床の費用の合計が、書き直し 1 回の追加の費用 (w − r) × S を上回らない最大の回数（#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 書き直し | — | キャッシュが切れた後の応答で、文脈の全体をキャッシュへ書き込むこと（キャッシュの再書き込み。入力の 1.25 倍か 2 倍の値段。#4068） | — | — | `plugins/ndf/skills/development-workflow/references/relay.md` |
+| 起床の hook の世代 | `generation` | 起床させてよい hook を 1 つに決める値（応答の記録の時刻か入力・起床の時刻、書き込み元の ID、取った応答の message.id の 3 つの組）。会話ごとの起床の状態に置き、新しい時刻でだけ書き換わる（#4068） | — | — | — |
+| 待ち（起床の記録の） | `wait_id` | 待つ子の Stop で始まり、通常の入力（利用者の入力・裏の作業の知らせ）で始まったと確かめた応答の Stop で終わる 1 回の待ち。長さは待ちを終えた入力の時刻までで数え、wait_id で見分ける（#4068） | — | — | — |
+| 取り合い | `contested` | 2 つの起床の hook が同じ応答（同じ message.id）を自分の Stop の応答として取りに来た状態。世代の書き込み元を contested に替え、どちらの hook も起床させない（#4068） | — | — | — |
+| 寿命別の書き込み | `cache_creation` | 応答の記録が持つ、1 時間のキャッシュへの書き込みと 5 分のキャッシュへの書き込みの token（usage.cache_creation の 2 つの項目）。寿命を決め、起床の書き込みの費用を寿命ごとの倍率で数えるのに使う（#4199） | — | — | — |

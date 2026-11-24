@@ -21,7 +21,7 @@
 | NDF の外部 CLI 委譲（`ndf-agent-cli`） | cross-review / cross-refactoring が参加者の CLI を選び、起動し、監視し、結果を読むときの語。ランタイム・ホスト・参加者プール・起動結果 | 36 | `docs/glossary/ndf-agent-cli.md` |
 | NDF の cross-review（`ndf-cross-review`） | Pull Request のレビューを CLI へ委譲し、新しい指摘が出なくなるまで回す収束ループの語。指摘・反証・総評・修正担当 | 43 | `docs/glossary/ndf-cross-review.md` |
 | NDF の cross-refactoring（`ndf-cross-refactoring`） | 想定最大時間に収まるリファクタリング計画を立てて通す語。改善候補・改善項目・配分テーブル・最終ゲート | 83 | `docs/glossary/ndf-cross-refactoring.md` |
-| NDF のラッパー（`ndf-relay`） | ラッパーがセッションを切り替え、シェルの設定へ組み込まれるときの語 | 91 | `docs/glossary/ndf-relay.md` |
+| NDF のラッパー（`ndf-relay`） | ラッパーがセッションを切り替え、シェルの設定へ組み込まれるときの語 | 102 | `docs/glossary/ndf-relay.md` |
 | NDF のリリース（`ndf-release`） | release が走らせるリリースの種別・リリースコマンド・公開操作・リリース記録の語 | 124 | `docs/glossary/ndf-release.md` |
 | NDF の指示書チェック（`ndf-instructions`） | instructions-check.py が見る指示書・スコープ・読み込み量・リリース済みバージョンの語 | 7 | `docs/glossary/ndf-instructions.md` |
 | NDF の課題の棚卸し（`ndf-issue-upkeep`） | backlog-refinement と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先 | 79 | `docs/glossary/ndf-issue-upkeep.md` |
