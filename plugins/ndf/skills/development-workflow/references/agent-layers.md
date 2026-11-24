@@ -210,7 +210,7 @@ supervisor が守る規則:
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
 15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。実装の `gathered` は、すべての単位の PR をスプリントブランチへマージした後にスプリントブランチの worktree で `ndf progress gathered` を打ち、結果の `outputs.gathered` をそのまま写す（マージ先がスプリントブランチの開いた Pull Request が 1 つでもある・worktree がマージしていないときは止まるので、直してから打ち直す）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く。**書いた後に `ndf progress check <ステートマシンの ID> "<工程>" --output <パス>` を打ち、`ok` になってから `終えた工程` に足す。** `check` は conductor の `ndf progress finish` と同じ規則で確かめ、ステートマシンへは書かない。`metrics.outputs` がその工程の置いてよいキーで、`warnings` は `finish` が捨てるキーである。`refused` なら `cause.detail` の誤りに従って出力を直し、打ち直す。起動指示がこの規則を渡さなくても行う。設計の `mvv_gate` は出力の JSON ファイルにだけ置き、フェーズレポートの本文へ写さない。出力の JSON ファイルは `mktemp` で作った新しいファイルに書いてから置き換える（下の「承認ゲートの前の MVV 判定」）
 16. **起動指示の MVV の欄にあるスナップショット（本文と共通原則）の全体を、作業の前に読む。** 判断への使い方と人へ戻す形は [project-mvv.md の「工程での読み方」](project-mvv.md#工程での読み方) に従う。worker へは、起動指示の MVV の欄の 1 行をそのままコピーして渡す
-17. **設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打つ。** 結果は作業ディレクトリの `mvv-gate-design.json` に保存し、`outputs.mvv_gate` を設計の工程の出力と承認資料の「MVV 判定」の欄に載せる（下の「承認ゲートの前の MVV 判定」）。プランの経路では打たない
+17. **設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打つ。** 結果は作業ディレクトリの `mvv-gate-design.json` に保存し、`outputs.mvv_gate` があればそれを設計の工程の出力と承認資料の「MVV 判定」の欄に載せる（下の「承認ゲートの前の MVV 判定」）。プランの経路では打たない
 18. **リリース承認ゲートを手動の経路で返す前に、承認する PR を先に決め、`ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打つ。** 結果は作業ディレクトリの `mvv-gate-release.json` に保存し、承認資料の「MVV 判定」の欄にだけ載せる（下の「承認ゲートの前の MVV 判定」）。プランの経路では打たない
 
 ```json
@@ -243,8 +243,10 @@ tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && { ndf reco
 **設計承認ゲート（規則 17）:**
 
 1. 上のコマンドで判定を打ち、作業ディレクトリの `mvv-gate-design.json` に保存する
-2. 結果の `outputs.mvv_gate` を、設計の工程の出力の JSON ファイル（規則 15）の `outputs.mvv_gate` へそのまま載せる
-3. 承認資料の「MVV 判定」の欄を、同じ値から組む（[approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄)）
+2. 結果に `outputs.mvv_gate` がある場合だけ、その値を設計の工程の出力の JSON ファイル（規則 15）の `outputs.mvv_gate` へそのまま写す。
+   結果が `ok` でなくキーが無い場合は、工程の出力に判定を書かない
+3. 承認資料の「MVV 判定」の欄を組む。`outputs.mvv_gate` があれば同じ値から組む（[approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄)）。
+   キーが無ければ、同じセクションの「判定の結果 JSON が `ok` でないとき」の文を載せる。どちらの場合も承認ゲートは返し、人へ問う
 4. 承認資料の根拠の行を `ndf records mvv cite --gate design` で確かめる（[approval-request.md の「承認資料を組んだら」](approval-request.md#承認資料を組んだら)）
 
 **リリース承認ゲート（規則 18。プランを使わず、本番系へ届く操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）:**
@@ -255,7 +257,8 @@ tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && { ndf reco
    | --- | --- | --- |
    | このリリースで `ndf release-steps assemble` を打ち、`ok` の結果 JSON に `outputs.pr` がある（版上げの PR を組み立てた） | `outputs.pr` の PR | `--expect-pr <outputs.pr>` |
    | ブランチ戦略がリリース用の PR を作らない（`ndf release-steps assemble` を打たない。`trunk` の `production_pr` など） | スプリントの PR そのもの | 渡さない（判定する PR が承認する PR である） |
-   | リリース用の PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 止まった` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
+   | 版数を持たない `merge_base_branch`（`release.version_store.kind` が `none`。`ndf release-steps assemble` は版上げの PR を組まない） | リリースの手順がこのリリースで作った、または呼び出し元が渡した、ベースブランチから本番ブランチへの PR | `--expect-pr <その PR の番号>`。その PR を決められなければ下の行と同じく止まる |
+   | 版上げの PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 止まった` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
 
    文脈のキー `release_pr` は使わない（承認ゲートの時点ではまだ無い）。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
 2. 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、上の書き方で
