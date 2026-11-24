@@ -226,11 +226,11 @@ flowchart LR
   担当が手で導入を試し、利用者の ndf のバージョンを黙って上げた）による。導入の操作（プラグインの導入・更新と取得元の登録・更新）を
   禁じる手順書だけでは、担当が読み落とすと効かない。利用者の設定のスナップショットは設定のファイルを読むだけで作り、
   ランタイムごとに次の値だけを比べる（`domains/release/user_config_decide.py`）。時刻・インストール先のパス・自動更新の設定は、
-  バージョンが変わらなくても動くため入れない。
+  バージョンが変わらなくても動くため入れない。インストール先のパス（プラグインを置いた場所）は比べないが、どのプロジェクトに導入したか（`projectPath`）は比べる。同じバージョンとコミットのまま導入先のプロジェクトだけが変わっても、利用者の設定の変更として検知するためである。
 
   | ランタイム | 比べる値 | 比べない値 |
   | --- | --- | --- |
-  | Claude Code | 導入一覧（`installed_plugins.json`）の行ごとの範囲（`scope`）・バージョン・コミットと、取得元（`known_marketplaces.json`）の `source` | 組織が管理する設定から入る行（`scope: managed`）。利用者が変えられず、Claude Code が一時的に書き換えることがあるため |
+  | Claude Code | 導入一覧（`installed_plugins.json`）の行ごとの範囲（`scope`）・バージョン・コミット、範囲が `user` 以外の行では導入先のプロジェクト（`projectPath`）と、取得元（`known_marketplaces.json`）の `source` | 組織が管理する設定から入る行（`scope: managed`）。利用者が変えられず、Claude Code が一時的に書き換えることがあるため |
   | Codex | `config.toml` の `plugins` の有効・無効（`enabled`）と、導入の保存先にあるバージョンの一覧、`marketplaces` の `source_type`・`source`・`ref` | — |
 
   取得元の URL に認証情報（`user:pass@`）が埋め込まれていれば、スナップショットに入れる前に `***@` へ伏せる。前後の差分の通知は
