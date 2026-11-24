@@ -690,9 +690,10 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 
 def _write_diff(run: _Run, round_no: int, suffix: str, base: str, head: str) -> Path:
-    """`base...head` の差分をラウンドのファイルへ書く。"""
+    """`base...head` の差分をラウンドのファイルへ書く（`base` と `head` が同じなら空のファイル）。"""
     path = run.round_stem(round_no, suffix)
-    path.write_text(changes.review_diff(run.g, base, head), encoding="utf-8")
+    # 同じ SHA どうしの差分は空なので Git を起動しない
+    path.write_text("" if base == head else changes.review_diff(run.g, base, head), encoding="utf-8")
     return path
 
 
