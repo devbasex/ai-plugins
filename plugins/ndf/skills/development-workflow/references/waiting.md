@@ -125,7 +125,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 | 渡したプランがすべて終わった | 0 | `status: ok` | 次のステージへ進む |
 | どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（回答ごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の回答に対応する `routes` のコマンドを打つ。ほかの承認ゲートの `routes` は `items` の各行にある |
 | どれかのプランが止まった | 原因の種類（`cause.kind`）ごとの終了コード | `status: stopped`・`cause`（先頭の止まり）・`next`（同じ待ち） | `cause.kind` と `items` の各行の `cause` を読み、原因を片付けてから続きを打つ |
-| 上限（`--timeout`、既定 3000 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 待つ相手は動いている。結果の `next` の同じ `wait` を打つ |
+| 上限（`--timeout`、既定 3000 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 上限までに、終わり・止まり・承認ゲートのどれも確認できなかった。実行の記録がまだ無いプランもこの結果になるので、タイムアウトだけではキューが起動したかは分からない。キューが動いていることを確かめ、動いていれば結果の `next` の同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
 - 開発ループでは `loop sprint` の `metrics.research` も `wait` と並べて背景で起動する。
