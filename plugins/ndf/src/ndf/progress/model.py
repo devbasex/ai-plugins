@@ -159,7 +159,7 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
     """
     report = done[before] if before is not None and before in done else None
     held = _outputs(report).get(MVV_KEY) if report is not None else None
-    if gate not in MVV_SKIP_GATES or not hold_checked(held):
+    if not mvv_counted(held, gate):
         return None
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
 
@@ -167,6 +167,15 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
 def hold_checked(held: Any) -> bool:
     """判定の出力 `held` がレビューの保留を確かめて 0 件だったか（`holds` が空のリスト）。"""
     return isinstance(held, dict) and isinstance(held.get("holds"), list) and not held["holds"]
+
+
+def mvv_counted(held: Any, gate: Optional[str]) -> bool:
+    """区分 `gate` の判定 `held` を、承認ゲートを省く判定として数えてよいか。
+
+    省いてよい区分（`MVV_SKIP_GATES`）で、レビューの保留を確かめて 0 件だった（`hold_checked`）ときだけ真。
+    `mvv_skip` と `mvv_answer_void` が同じ式で決める。
+    """
+    return gate in MVV_SKIP_GATES and hold_checked(held)
 
 
 def mvv_answer_void(payload: Mapping[str, Any], gate: Optional[str]) -> bool:
@@ -177,7 +186,7 @@ def mvv_answer_void(payload: Mapping[str, Any], gate: Optional[str]) -> bool:
     """
     if payload.get("by") != MVV_SERVICE:
         return False
-    return gate not in MVV_SKIP_GATES or not hold_checked(payload.get(MVV_KEY))
+    return not mvv_counted(payload.get(MVV_KEY), gate)
 
 
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
