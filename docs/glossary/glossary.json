@@ -736,7 +736,7 @@
       "term": "系統（決定番号の）",
       "context": "ndf-design",
       "meaning": "決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く",
-      "pending_source": "issues/issue-3347-design.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "固定する理由（依存のバージョンの）",
@@ -748,13 +748,13 @@
       "term": "安定版（依存の）",
       "context": "ndf-code-structure",
       "meaning": "依存のパッケージのバージョンのうち、PEP 440 の pre-release でも developmental release でもないバージョン。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う",
-      "pending_source": "issues/issue-3347-design.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "一時コピーの検査",
       "context": "ndf-rebuild",
       "meaning": "新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと",
-      "pending_source": "issues/issue-3347-design.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "即時修正",
@@ -2266,24 +2266,24 @@
       "code": "library",
       "context": "ndf-code-structure",
       "meaning": "2 つ以上のスクリプトが使う関数とクラスの保存先。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「重点領域」（点数を重くする領域）とは別",
-      "pending_source": "issues/issue-1142-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "エントリポイント",
       "code": "entry_point",
       "context": "ndf-code-structure",
       "meaning": "Skill・プラン・hook・設定・利用者が呼ぶスクリプトのパスとサブコマンドと引数と出力の形",
-      "pending_source": "issues/issue-1142-requirements.md",
       "deprecated": [
         "入口"
-      ]
+      ],
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "移行ステップ",
       "code": "migration_step",
       "context": "ndf-design",
       "meaning": "設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別",
-      "pending_source": "issues/issue-1142-requirements.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "使用量の使用量ログ",
@@ -2304,7 +2304,7 @@
       "code": "drive_state",
       "context": "ndf-cross-review",
       "meaning": "収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する",
-      "pending_source": "issues/issue-1142-design.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "構造チェック",
@@ -3235,42 +3235,42 @@
       "context": "ndf-durable",
       "meaning": "DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ",
       "code": "durable_workflow",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "耐久ステップ",
       "context": "ndf-durable",
       "meaning": "耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語",
       "code": "durable_step",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "耐久キュー",
       "context": "ndf-durable",
       "meaning": "DBOS の register_queue で作る、同時の本数と分割を持つ待ち行列。supervise.py queue（キュー）とは別の語",
       "code": "durable_queue",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "耐久の記録",
       "context": "ndf-durable",
       "meaning": "1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<キー>.sqlite）",
       "code": "durable_store",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "実行のキー",
       "context": "ndf-durable",
       "meaning": "起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う",
       "code": "run_key",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "実行の回",
       "context": "ndf-durable",
       "meaning": "同じ実行のキーの中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号",
       "code": "attempt",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "結果を変える引数",
@@ -3284,14 +3284,14 @@
       "context": "ndf-supervise",
       "meaning": "ステップが使う、共有する外部のスロットの名前（今は graphql だけ）",
       "code": "resource_tag",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "資源のクォータ",
       "context": "ndf-supervise",
       "meaning": "資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources）",
       "code": "resource_limit",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "重なりの組",
@@ -3317,7 +3317,7 @@
       "context": "ndf-supervise",
       "meaning": "複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く",
       "code": "shared_list",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "除外の行",
@@ -7189,7 +7189,7 @@
       "term": "ステートマシンの DB",
       "context": "ndf-durable",
       "meaning": "計画・レーン・スプリントのステートマシンと進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行のキーごとのファイルに分け、置かない（#1142 の決定 81）",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "定義の改訂",
@@ -7316,29 +7316,29 @@
       "term": "兆候",
       "context": "ndf-code-structure",
       "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
-      "pending_source": "issues/issue-1142-design-smells.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "兆候の基準ファイル",
       "context": "ndf-code-structure",
       "meaning": "`scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON",
-      "pending_source": "issues/issue-1142-design-smells.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "抑制コメント",
       "context": "ndf-code-structure",
       "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える",
-      "pending_source": "issues/issue-1142-design-smells.md",
       "deprecated_standalone": [
         "印"
       ],
-      "code": "suppressions"
+      "code": "suppressions",
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "判定データ",
       "context": "ndf-code-structure",
       "meaning": "分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別",
-      "pending_source": "issues/issue-1142-design-smells.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "ラチェット",
@@ -7350,65 +7350,65 @@
       "term": "アダプター",
       "context": "ndf-code-structure",
       "meaning": "外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別",
-      "pending_source": "issues/issue-1142-design-decisions.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "事実の表",
       "context": "ndf-code-structure",
       "meaning": "1 つの事実（例: ランタイムの一覧）を行と列で持つコントラクトの JSON。`contracts/facts/` の 1 ファイル",
-      "pending_source": "issues/issue-1142-design-data.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "オーナーのモジュール",
       "context": "ndf-code-structure",
       "meaning": "1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する",
-      "pending_source": "issues/issue-1142-design-data.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "重複の組",
       "context": "ndf-code-structure",
       "meaning": "同じ事実を持つと見える 2 つ以上の最上位の定数の組。種類は `same-set`・`subset`・`affix`・`same-str`・`member`・`same-num`",
-      "pending_source": "issues/issue-1142-design-data.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "重複の基準",
       "context": "ndf-code-structure",
       "meaning": "移行の前に拾った重複の組と、組ごとの扱いの一覧。ラチェットの基準になる",
-      "pending_source": "issues/issue-1142-design-data.md"
+      "source": "docs/specifications/ndf-rebuild-data-and-smells.md"
     },
     {
       "term": "停止理由の種類",
       "context": "ndf-durable",
       "meaning": "手順のスクリプトとプランが停止理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、ルートはこれだけで決まる",
-      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+      "source": "docs/specifications/ndf-rebuild-scripted-flow.md"
     },
     {
       "term": "停止理由の表",
       "context": "ndf-durable",
       "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes/`）",
-      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+      "source": "docs/specifications/ndf-rebuild-scripted-flow.md"
     },
     {
       "term": "ルート",
       "context": "ndf-durable",
       "meaning": "止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか",
-      "pending_source": "issues/issue-1142-design-scripted-flow.md",
       "deprecated": [
         "行き先"
       ],
-      "code": "route"
+      "code": "route",
+      "source": "docs/specifications/ndf-rebuild-scripted-flow.md"
     },
     {
       "term": "判断の呼び出し",
       "context": "ndf-durable",
       "meaning": "スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、回答をスキーマで確かめる操作。今の `type: judge` のステップを置き換える",
-      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+      "source": "docs/specifications/ndf-rebuild-scripted-flow.md"
     },
     {
       "term": "回答ごとのルート",
       "context": "ndf-durable",
       "meaning": "承認ゲートと人への質問の結果に添える、回答の値から次に打つコマンドへの表（結果 JSON の `routes`）",
-      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+      "source": "docs/specifications/ndf-rebuild-scripted-flow.md"
     },
     {
       "term": "人のいない実行",
@@ -7514,7 +7514,7 @@
       "term": "プラグインの入れ替え",
       "context": "ndf-rebuild",
       "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前とバージョンを替えること。取得元とプラグイン名は変えない。「入れ替え」と略す",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild-libraries.md"
     },
     {
       "term": "旧いプラグイン",
@@ -7568,7 +7568,7 @@
       "term": "新しいプラグイン",
       "context": "ndf-rebuild",
       "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "文書のルート",
@@ -7592,67 +7592,67 @@
       "term": "プラグインの定義",
       "context": "ndf-rebuild",
       "meaning": "プラグインの `plugin.json` が持つプラグイン名とバージョン",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "初期構成",
       "context": "ndf-rebuild",
       "meaning": "新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの保存先（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "チェックアウトの保存先",
       "context": "ndf-code-structure",
       "meaning": "<git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、ステートマシンの DB と実行のキーごとの耐久の記録とバックアップを置く（#1142 の作り直し）",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "形の番号",
       "context": "ndf-code-structure",
       "meaning": "チェックアウトの保存先の format.json と耐久の記録のアプリのバージョンが持つ整数。読み書きの形が変わるときだけ上げ、NDF のバージョンとは別に動く",
-      "pending_source": "issues/issue-1142-design-next.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "レビューの項目",
       "context": "ndf-rebuild",
       "meaning": "設計レビューの Issue の本文（進行のセクションより前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し）",
-      "pending_source": "issues/issue-3395-requirements.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "ルートの表",
       "context": "ndf-rebuild",
       "meaning": "レビューの項目ごとに、ルートの子・順番・新設か追補か・要求の行を持つ 1 つの表（#1142 の作り直し）",
-      "pending_source": "issues/issue-3395-requirements.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "追補の単位",
       "context": "ndf-rebuild",
       "meaning": "閉じた子へ足す作業を、元の子の名前に + を付けて別の子にしたもの（例: X1+）",
-      "pending_source": "issues/issue-3395-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "要求の行",
       "context": "ndf-rebuild",
       "meaning": "#1142 の要求仕様の行番号か受け入れ条件の番号。レビューの項目の根拠になる",
-      "pending_source": "issues/issue-3395-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "目的の物差し",
       "context": "ndf-rebuild",
       "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則",
-      "pending_source": "issues/issue-3395-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "選択の記録",
       "context": "ndf-rebuild",
       "meaning": "ルートを選ぶたびに 1 行残す事象。選んだ主体（スクリプト・conductor・人）・規則の番号・ルートを持ち、目的の物差しが数える（#1142 の作り直し）",
-      "pending_source": "issues/issue-3395-design.md"
+      "source": "docs/specifications/ndf-rebuild-measure.md"
     },
     {
       "term": "閉じる証拠",
       "context": "ndf-rebuild",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
-      "pending_source": "issues/issue-3395-design.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "マシンに依らない条件",
@@ -7819,43 +7819,43 @@
       "term": "振り分け表",
       "context": "ndf-rebuild",
       "meaning": "#1142 の設計レビューの全項目と要求の行について、ルートの子とバージョン（11.0.0 か 11.x）を持つ表。ルートの表と要求の受け入れ条件のオーナーの表から成る。ルートは各子の Issue の本文へ写した（docs/specifications/ndf-rebuild-review-scope.md の決定 109）",
-      "pending_source": "issues/issue-3388-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "11.x の行",
       "context": "ndf-rebuild",
       "meaning": "振り分け表でバージョンの列が 11.x の行。11.0.0 を出した後に解く（#1142 の作り直し）",
-      "pending_source": "issues/issue-3388-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "閉じた子",
       "context": "ndf-rebuild",
       "meaning": "ルートの子のうち、設計を書く時点で GitHub の Issue の状態が CLOSED のもの。子の表のコピーの closed では判定しない（#3388）",
-      "pending_source": "issues/issue-3388-requirements.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "多観点レビュー",
       "context": "ndf-rebuild",
       "meaning": "観点ごとに独立したレビュー役を並列に立て、設計の抜けを探すレビュー。ラウンドを重ねて磨く cross-review とは別の場（#3388）",
-      "pending_source": "issues/issue-3388-requirements.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "起票の前に人へ見せる場",
       "context": "ndf-rebuild",
       "meaning": "多観点レビューの範囲の外の指摘を分類し、分類ごとの目指す姿と受け入れ条件の案を、設計承認ゲートの承認資料のセクション「多観点レビューの分類」に載せる場。人が回答した承認ゲートの後にだけ起票する（#3388）",
-      "pending_source": "issues/issue-3388-design.md"
+      "source": "docs/specifications/ndf-rebuild.md"
     },
     {
       "term": "11.x の対応表",
       "context": "ndf-rebuild",
       "meaning": "振り分け表の 11.x の行ごとに、11.x でのルート（11.x の子の記号・開いている Issue・作らない理由のどれか 1 つ）を持つ #3388 の表。11.x の行のルートの SSOT（#3388）",
-      "pending_source": "issues/issue-3388-design.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "11.x の子",
       "context": "ndf-rebuild",
       "meaning": "11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388）",
-      "pending_source": "issues/issue-3388-design.md"
+      "source": "docs/specifications/ndf-rebuild-review-scope.md"
     },
     {
       "term": "承認済みのコミット",

@@ -7,12 +7,12 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | 結果 JSON | `step_result` | 手順のスクリプトが返す 1 行の JSON。status と終了コードで読み、成功は ok だけ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 耐久ワークフロー | `durable_workflow` | DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ | — | — | — |
-| 耐久ステップ | `durable_step` | 耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語 | — | — | — |
-| 耐久キュー | `durable_queue` | DBOS の register_queue で作る、同時の本数と分割を持つ待ち行列。supervise.py queue（キュー）とは別の語 | — | — | — |
-| 耐久の記録 | `durable_store` | 1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<キー>.sqlite） | — | — | — |
-| 実行のキー | `run_key` | 起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う | — | — | — |
-| 実行の回 | `attempt` | 同じ実行のキーの中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号 | — | — | — |
+| 耐久ワークフロー | `durable_workflow` | DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 耐久ステップ | `durable_step` | 耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語 | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 耐久キュー | `durable_queue` | DBOS の register_queue で作る、同時の本数と分割を持つ待ち行列。supervise.py queue（キュー）とは別の語 | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 耐久の記録 | `durable_store` | 1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<キー>.sqlite） | — | — | `docs/specifications/ndf-rebuild.md` |
+| 実行のキー | `run_key` | 起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 実行の回 | `attempt` | 同じ実行のキーの中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号 | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 結果の保存先 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。保存先が無いことと、材料が 0 件であることを分けて扱う | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
@@ -48,13 +48,13 @@
 | アクティビティ | — | 工程の中の実行の単位。DBOS のステップ 1 つで流し、入力の範囲と出力の規約を持つ。プラン 1 本の実行・承認ゲートの回答の待ち・記録の 3 種類がある。プランのステップとは別 | — | — | — |
 | ステートマシンのワークフロー | — | スプリントのステートマシン 1 つを、登録した工程の定義に沿って流す DBOS のワークフロー。実行のたびに ID が替わり、ステートマシンの ID は変わらない | — | — | — |
 | 進行の事象 | — | ステートマシンへの変更 1 件の記録。誰が・いつ・何を・理由と変更後の状態を持ち、追記だけで残す。行の今の状態は最新の事象から引く | — | — | — |
-| ステートマシンの DB | — | 計画・レーン・スプリントのステートマシンと進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行のキーごとのファイルに分け、置かない（#1142 の決定 81） | — | — | — |
+| ステートマシンの DB | — | 計画・レーン・スプリントのステートマシンと進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行のキーごとのファイルに分け、置かない（#1142 の決定 81） | — | — | `docs/specifications/ndf-rebuild.md` |
 | 定義の改訂 | — | スプリントのステートマシンの定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書のバージョン（`document.version`）と MVV の改訂とは別 | — | — | — |
-| 停止理由の種類 | — | 手順のスクリプトとプランが停止理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、ルートはこれだけで決まる | — | — | — |
-| 停止理由の表 | — | 停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes/`） | — | — | — |
-| ルート | `route` | 止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか | 行き先 | — | — |
-| 判断の呼び出し | — | スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、回答をスキーマで確かめる操作。今の `type: judge` のステップを置き換える | — | — | — |
-| 回答ごとのルート | — | 承認ゲートと人への質問の結果に添える、回答の値から次に打つコマンドへの表（結果 JSON の `routes`） | — | — | — |
+| 停止理由の種類 | — | 手順のスクリプトとプランが停止理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、ルートはこれだけで決まる | — | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
+| 停止理由の表 | — | 停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes/`） | — | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
+| ルート | `route` | 止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか | 行き先 | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
+| 判断の呼び出し | — | スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、回答をスキーマで確かめる操作。今の `type: judge` のステップを置き換える | — | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
+| 回答ごとのルート | — | 承認ゲートと人への質問の結果に添える、回答の値から次に打つコマンドへの表（結果 JSON の `routes`） | — | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
 | 遷移の判断 | — | プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く | — | — | — |
 | DBOS を起動しない実行器 | — | 耐久ワークフローの判断の関数を、DBOS を起動せずに回すテスト用の実行の経路 | — | — | — |
 | 判断の関数 | — | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。保存先のモジュールの名前は _decide.py で終わる | — | — | — |

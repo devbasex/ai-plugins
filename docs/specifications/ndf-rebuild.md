@@ -446,7 +446,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 
 **番号の規則。** 決定と不変条件の番号は `ndf-rebuild` で始まる 6 本を通して一意で、設計の材料で重なった番号は最大の次へ振り直した。番号は再利用しない。新しく足す番号は 6 本の最大の次を取る。11.x の子（#3388）は自分の設計と確定仕様に自分の番号を持ち、この系統の番号を使わない。決定 102 の「系統ごとの名前空間」と不変条件 IG6 は、この規則（#3412 の決定 3）が置き換えた。
 
-設計の材料（2026-11-21 に消す前のコミット）: https://github.com/devbasex/ai-plugins/tree/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues
+設計の材料（2026-11-21 に消す前のコミット）: https://github.com/devbasex/ai-plugins/tree/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues（材料は #3990 で `issues/` から消した。ほかの読み方と消すときの決定は [removed-rebuild-design-docs.md](removed-rebuild-design-docs.md)）
 
 元の系統は材料の文書のまとまりで、`design`（前の企画の頭の設計）・`decisions`・`libraries`・`dbos`・`next`・`#3347`・`fixes`・`review-routing`・`#3388` などである。表に無い番号は、元の系統の番号のまま確定仕様にある。
 
@@ -497,4 +497,4 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 ## 関連リンク
 
 - [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)・[版とリリース](../versioning-and-distribution.md)（ランタイムごとの取得と導入）・`plugins/ndf/src/ndf/checks/README.md`（`ndf check` の規則）
-- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）
+- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）・[#3990](https://github.com/devbasex/ai-plugins/issues/3990)（設計の材料を消す）
