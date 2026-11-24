@@ -473,20 +473,29 @@ def cmd_report(args: argparse.Namespace) -> int:
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
 
 
+PREPARE_ERRORS = (ValueError, participants.FixerNotAllowed, PolicyUnresolved, worktree.WorktreeUnregistered)
+"""`run` と `review-scope` の準備（実行者の設定の解決）で止める例外。応答は `_prepare_stop` が決める。"""
+
+
+def _prepare_stop(exc: Exception) -> int:
+    """準備で起きた `PREPARE_ERRORS` の例外の結果を出して終了コードを返す（`run` と `review-scope` で同じ応答にする）。"""
+    if isinstance(exc, ValueError):
+        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
+        return _stop("invalid", str(exc))
+    if isinstance(exc, worktree.WorktreeUnregistered):
+        return _unregistered(exc, str(exc.worktree))
+    # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
+    # 止める（PR 3944 の r1-4・r2-7）
+    return _stop("precondition", str(exc))
+
+
 def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | int:
     """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
     try:
         cfg = _run_config(args)
-    except ValueError as exc:
-        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
-        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
-        return _stop("invalid", str(exc))
-    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
-        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
-        # 止める（PR 3944 の r1-4・r2-7）
-        return _stop("precondition", str(exc))
-    except worktree.WorktreeUnregistered as exc:
-        return _unregistered(exc, str(exc.worktree))
+    except PREPARE_ERRORS as exc:
+        return _prepare_stop(exc)
     try:
         # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
         cfg = drive.outside_checkout(cfg)
