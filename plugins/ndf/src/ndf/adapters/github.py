@@ -605,6 +605,23 @@ class GitHub:
         got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
+    def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
+        """head のブランチが `branch` で、このリポジトリの開いた PR（フォークの同名ブランチを除く。新しい順）。
+
+        取得の時点で開いた PR に絞り、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
+        （候補が 1 件だけかを、取得の範囲から外れた古い PR で取り違えない）。`github.list-pages` ページを超えたら `GitHubError`。
+        """
+        pages = _page_cap("github.list-pages")
+        variables: dict[str, Any] = {"head": branch, "after": None}
+        found: list[Pull] = []
+        for _ in range(pages):
+            conn = self.repository(_OPEN_HEAD_PAGE, variables)["pullRequests"]
+            found += [p for p in (Pull.from_graphql(n) for n in conn["nodes"]) if not p.cross_repository]
+            if len(found) >= enough or not conn["pageInfo"]["hasNextPage"]:
+                return found[:enough]
+            variables["after"] = conn["pageInfo"]["endCursor"]
+        raise _too_many_pages(f"ブランチ {branch} の開いた PR の一覧が", pages, "github.list-pages")
+
     def pull(self, number: int) -> Pull:
         """PR を REST で読む。REST のスロットが一次の上限なら GraphQL のスロットで読み替える（不足 g）。二次レート制限は読み替えない。"""
         try:
@@ -976,6 +993,13 @@ _ISSUE_PAGE = (
     "query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!], $after: String) {"
     f" repository(owner: $owner, name: $name) {{ issues(labels: $labels, states: $states, first: {PER_PAGE}, after: $after) {{"
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
+)
+
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）
+_OPEN_HEAD_PAGE = (
+    "query($owner: String!, $name: String!, $head: String!, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PULLS_PER_HEAD},"
+    f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
 
