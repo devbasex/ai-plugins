@@ -241,19 +241,16 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         inputs = _mvv_inputs(args, root)
     except _InputError as exc:
         return result.stopped(TOOL, exc.kind, exc.summary)
-    open_hub: Callable[[Path], github_mod.GitHub] = _hub
     if args.expect_pr is not None:
-        # 判定に使う入力そのものと比べる（gate の中は変えない）。release の pr_number は文脈の pr を読むだけで GitHub を呼ばない
-        hub = _hub(root)
-        open_hub = lambda _root: hub  # noqa: E731
+        # 判定に使う入力そのものと比べる（gate の中は変えない）。比べるだけなので GitHub へつながない
         try:
-            judged = mvv_gate.pr_number(root, mvv_gate.RELEASE, inputs, hub)
+            judged: int | None = mvv_gate.release_pr(inputs)
         except mvv_gate.GateError:
             judged = None  # 判定する PR を決められなければ、今どおり gate が停止理由を返す
         if judged is not None and judged != args.expect_pr:
             return result.stopped(TOOL, "not_applicable", OTHER_PR)
     warnings: list[dict[str, Any]] = []
-    out = mvv_gate.gate(root, args.gate, inputs, open_hub, warnings=warnings)
+    out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
     return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
 
