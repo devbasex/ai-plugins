@@ -134,14 +134,14 @@ plugins/ndf/
 | 出力 | 判定の本体が (1) を読み終えた終わり方は、どれも `target` に `expect.item()` をそのまま置く（`head_ref` を含む 6 つのキー。(1) で `expect` と同じと確かめた値で、項目を組み直さない。手順 3 のマージがこの値と CI の項目の完全一致を照らす）。`note_url` は今回の記録を PR に書けたとき（(2)・(4) の失敗のコメントか (9) のコメント）だけ |
 | 省くか | `skip` は「理由が空・判定がコントラクトの形・『従う』・レッドラインが空」で真。進め方（`inputs["pace"]`）とモードを読まない |
 
-手順 (4) の差分を読んだ直後の読み直しは、次の 2 案から選ぶ。どちらでも、PR が動いた判定は (9) か (4) で捨てられ、`precondition` で止まる。
+即時修正では、手順 (4) で差分を読んだ直後に PR を読み直す。これは #4104 の設計（ https://github.com/devbasex/ai-plugins/pull/4141 で承認済み。[issue-4104-design.md](./issue-4104-design.md) の「`ndf records mvv gate --gate fix`」の終わり方の表と決定 1）が決めた止まり方で、実装はこれに従う。差分を読めた場合は、この読み直しか手順 (9) の読み直しで PR が動いたと分かった時点で、コメントを書かずに `precondition` で止まる。ベースか差分を読めない場合は、上の表の「(2)・(4) の読み取りの失敗」の行に従い、読み直さずに失敗の記録をコメントに書く。
+
+MVV 判定を承認ゲートの手前で進め方によらず打つ #3959（ https://github.com/devbasex/ai-plugins/issues/3959 ）の設計は、初めは差分を読んだ直後に PR を読み直す形だった。#4104 の設計はそれに合わせて、差分の後の読み直しを即時修正の止まり方に入れた。その後 #3959 は、差分を読む間に PR が動く判定が約 0.17% と小さいため、差分を読んだ直後には読み直さないと決めた（確定仕様の「運用」）。即時修正でも読み直しを外すと、次の表のとおり費用の掛かり方が変わる。外すかどうかは、#4104 の設計を変えることになるので、この詳細設計では決めない。
 
 | 案 | PR が動いていない判定（ほとんどの判定） | 差分を読む間に PR が動いた判定 |
 | --- | --- | --- |
-| (4) で読み直す（この詳細設計の案） | PR の読み取りが判定 1 回につき 1 回増える（実測 約 0.6 秒。トークンは使わない） | LLM を起動せずに止まる |
+| (4) で読み直す（承認済みの #4104 の設計。この詳細設計が実装する案） | PR の読み取りが判定 1 回につき 1 回増える（実測 約 0.6 秒。トークンは使わない） | LLM を起動せずに止まる |
 | (4) で読み直さず (9) だけで止める（#3959 の振る舞い） | 増えない | LLM を 1 回起動した後に (9) で判定を捨てる（`claude -p` の 1 回の費用の中央値 $0.072 と判定の所要時間） |
-
-この詳細設計は、#3959 も差分を読んだ後に読み直すという #3959 の設計の途中の版を前提に書いており、即時修正のために 2 案を比べて選んだものではない。#3959 は、動く割合の推定（比較の REST の経路で約 0.17%）から、1 回目の LLM の起動の前に読み直さないと決めた（確定仕様の「運用」）。（未確認: 即時修正でも同じ推定が当てはまるか。#4104 の設計承認で、(9) だけで止める案と比べて決め直す）
 
 `records/cli.py` の `_mvv_gate`:
 
@@ -173,7 +173,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `gate`（`fix`） | 判定のスタブが「従う」・レッドライン空・保留無し → `skip` 真、コメント 1 件、`target` と `note_url` あり。PR の検索の API を呼ばない | 入力に `pace`・`mode` が無くても判定する。ベースの MVV が `absent` → 判定のスタブを呼ばず `skip` 真・コメント無し | レッドラインのパス・MVV の設定の変更・保留・「従わない」→ `skip` 偽・コメント 1 件。LLM のスタブが `GateError` → `verdict: null`・`head` あり・コメント 1 件・`noted` 無し。ベースの取得か差分の読み取りが失敗 → `verdict: null`・`head` あり・PR を読み直さずにコメント 1 件・`noted` 真・`note_url` あり・LLM を呼ばない。同じ失敗でコメントの投稿も失敗 → `noted: false`・`note_url` 無し。差分の後の読み直しで head か宛先が動いた・読み直しが `GitHubError` → `noted: false`・コメント無し・LLM を呼ばない。`expect` の head か宛先が今の PR と違う・(1) の `hub.pull` が `GitHubError` → `head` 無し・`target` 無し・判定のスタブもコメントも呼ばない。`expect` が無い → `head` 無し・`target` 無し |
+| `gate`（`fix`） | 判定のスタブが「従う」・レッドライン空・保留無し → `skip` 真、コメント 1 件、`target` と `note_url` あり。PR の検索の API を呼ばない | 入力に `pace`・`mode` が無くても判定する。ベースの MVV が `absent` → 判定のスタブを呼ばず `skip` 真・コメント無し | レッドラインのパス・MVV の設定の変更・保留・「従わない」→ `skip` 偽・コメント 1 件。LLM のスタブが `GateError` → `verdict: null`・`head` あり・コメント 1 件・`noted` 真・`note_url` あり（投稿に成功したときの #3959 の `_recorded` の共通の形）。ベースの取得か差分の読み取りが失敗 → `verdict: null`・`head` あり・PR を読み直さずにコメント 1 件・`noted` 真・`note_url` あり・LLM を呼ばない。同じ失敗でコメントの投稿も失敗 → `noted: false`・`note_url` 無し。差分の後の読み直しで head か宛先が動いた・読み直しが `GitHubError` → `noted: false`・コメント無し・LLM を呼ばない。`expect` の head か宛先が今の PR と違う・(1) の `hub.pull` が `GitHubError` → `head` 無し・`target` 無し・判定のスタブもコメントも呼ばない。`expect` が無い → `head` 無し・`target` 無し |
 | `pr_number`（`fix`） | `expect.number` | 同じブランチの別の宛先の開いた PR があっても `expect.number` | `expect.repo`・`expect.base`・`expect.head_ref` が違う → `GateError`（PR を読まない） |
 | `_mvv_gate`（`fix`） | `skip` 真 → 終了コード 0、`mvv_gate.judgment` が 32 桁の 16 進、`mvv_gate.target` が `ci.json` の項目と完全に一致（`head_ref` を含む）。部品 `fix-mvv` が渡す引数（`--gate fix --base --branch --ci-result`）を `records.args.schema.json` が受ける | MVV が承認されていない → 0。同じ入力で 2 回打つ → `judgment` が違う | 「従わない」→ 1・`refused`・`summary` に PR・宛先・head とコメントの URL・`cause.instance` が `mvv_gate.judgment`。LLM の無回答 → 1・`refused`。ベースか差分を読めずにコメントを書けた → 1・`refused`・`summary` に判定の記録の URL（`note_url`）。コメントを書けなかった → 1・`precondition`。差分の後に head が動いた・読み直せない → 1・`precondition`。`noted: false`・`head` 無し → 1・`precondition`。`ci.json` が無い・空・失敗の結果 → `precondition` で判定の本体を呼ばない。項目の `head_ref` が `--branch` と違う・項目のリポジトリか宛先が違う・(1) で PR を読めない・読んだ PR の head か宛先が項目と違う → `precondition`・`mvv_gate.target` 無し・`items` に PR の項目無し・判定のスタブもコメントも呼ばない。`--base` 無し・`--branch` 無し・`--machine` 併用・`--gate design` に `--branch` → `invalid`（引数のスキーマも同じく拒む） |
 | `note`（`fix`） | 見出しが「即時修正のマージ」で、直後に判定した PR・宛先・head の行 | 同じ PR を別の head で判定し直す → 新しいコメントの見出しの head が新しい値 | — |
