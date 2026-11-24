@@ -24,6 +24,7 @@
 | `src/ndf/contracts/writing.py`（新設） | `criteria`・`types_section` | U1 |
 | `src/ndf/domains/crossreview/criteria_decide.py` | `document_block` | U1 |
 | `src/ndf/domains/crossreview/drive.py` | `_Run.documents`・`_prepare_round`・`_review_prompt`・`_fix_prompt` | U1 |
+| `src/ndf/domains/crossreview/round_scope.py`（新設）・`cli.py`・`scope_decide.py` | `previous_head`・`descended`（差分の範囲と、基準 6 の制限に使う前のラウンドの head を同じ条件で決める） | U1 |
 | `src/ndf/core/worker.py` | `system_prompt` | U1 |
 | `contracts/schemas/internal/reading-check.schema.json`（新設） | 記録の 1 行の形 | U2 |
 | `src/ndf/contracts/internal.py`・`contracts/data/internal-names.json` | 種類 `reading-check` の登録 | U2 |
@@ -66,7 +67,7 @@
 ### Task 4: 文書を含む PR のレビューと修正の指示に、基準を入れる
 
 - **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py`
-- **変更内容:** 詳細設計書の「基準の本文を指示に入れる」の節の `document_block`・`_prepare_round`・`_review_prompt`・`_fix_prompt` と、`review-criteria.json` の変更。`_Run.documents` の判定には `_prepare_round` が読む変更ファイルの一覧を使い、git を追加で起動しない。2 ラウンド目以降の `since` は、状態ファイルに残る前のラウンドの head から得る。`drive.py` の行数の扱いは「修正対象」の頭のとおり
+- **変更内容:** 詳細設計書の「基準の本文を指示に入れる」の節の `document_block`・`_prepare_round`・`_review_prompt`・`_fix_prompt` と、`review-criteria.json` の変更。`_Run.documents` の判定には `_prepare_round` が読む変更ファイルの一覧を使い、git を追加で起動しない。2 ラウンド目以降の `previous` は、`round_scope.previous_head` が返す前のラウンドの head から得る。`drive.py` の行数の扱いは「修正対象」の頭のとおり
 - **満たす受け入れ条件:** 7、8、9、10、11
 - **進め方:** 失敗するテスト（Markdown を含む PR の 2 つの指示に基準の本文が無い）→ 通す最小実装 → 整理。テストの観点は、設計書の「テスト設計」の受け入れ条件 7・9・10・11 の行
 

@@ -49,6 +49,7 @@ from ndf.domains.crossreview import (
     push,
     report_decide,
     resume_decide,
+    round_scope,
     scope_decide,
     store,
     threads,
@@ -537,7 +538,8 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
     return path
 
 
-def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path, remarks: Optional[Path] = None) -> str:
+def _review_prompt(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path] = None) -> str:
+    scope, diff = prep.scope, prep.diff
     decided = run.journal.skipped_texts()
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
@@ -546,7 +548,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     lines += criteria_decide.reviewer_block(run.cfg.settings.focus)
-    lines += criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, scope_decide.read_by_all_head(run.data))
+    lines += criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, prep.previous)
     if run.cfg.handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *(f"- {h.id}: {h.text}" for h in run.cfg.handed)]
     if decided:
@@ -817,7 +819,7 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
 
 class _Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
-    PR の全差分で変わったファイル・比較基点の merge-base の SHA）。"""
+    PR の全差分で変わったファイル・比較基点の merge-base の SHA・今回の相手役の全員が読んだ前のラウンド）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -826,6 +828,7 @@ class _Prepared(NamedTuple):
     diff: Path
     files: tuple[str, ...]
     base: str
+    previous: Optional[criteria_decide.Previous]
 
 
 def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
@@ -835,6 +838,13 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
     for path, n in scope_decide.oversized(lengths, limit):
         if not any(w.startswith(f"設計文書 {path} が ") for w in run.warnings):
             run.warnings.append(f"設計文書 {path} が {n} 行ある（{limit} 行を超える）。読み手とレビューが追えるよう分けることを考える")
+
+
+def _write_diff(run: _Run, round_no: int, suffix: str, base: str) -> Path:
+    """`base...HEAD` の差分をラウンドのファイルへ書く。"""
+    path = _round_stem(run, round_no, suffix)
+    path.write_text(run.g.run("diff", f"{base}...HEAD"), encoding="utf-8")
+    return path
 
 
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
@@ -848,24 +858,14 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
     basis = scope_decide.Basis(merge_base, cfg.reviewers, cfg.settings.focus)
-    scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, basis), head)
-    diff = _round_stem(run, round_no, ".diff")
-    diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
-    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
-
-
-def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:
-    """前の head からの差分（`SINCE`）は、前の head が `head` の祖先のときだけ使う。巻き直しで前の変更を取り除いた後の
-    `前の head...HEAD` は分岐点から今の側だけを表し、前の head からの削除が相手役に渡らないので、PR の全差分へ戻す
-    （PR 3944 の r6-7）。`run` と `review-scope` が同じに決める。"""
-    if scope.kind != scope_decide.SINCE or scope.base is None:
-        return scope
-    try:
-        kept = g.is_ancestor(scope.base, head)
-    except git.GitError:
-        # 前の head のコミットが手元に無い（巻き直しで消えた）。前の head からの差分は作れないので全差分にする
-        kept = False
-    return scope if kept else scope_decide.Scope(scope_decide.FULL, None, ())
+    prev = round_scope.previous_head(run.g, run.data, basis, head)
+    scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
+    diff = since = _write_diff(run, round_no, ".diff", scope.base or cfg.base)
+    if prev is not None and scope.base is None:
+        # 全差分を渡すラウンドでも、前の head からの差分はここで 1 回だけ作り、相手役の全員に渡す（相手役ごとに作らせない。#4285）
+        since = _write_diff(run, round_no, "-since.diff", prev)
+    previous = None if prev is None else criteria_decide.Previous(prev, since)
+    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous)
 
 
 def _merge_base(run: _Run, head: str) -> str:
@@ -906,7 +906,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    prompt = _review_prompt(run, round_no, prep.scope, prep.diff, _remarks_file(run, round_no, _remarks(run, prep)))
+    prompt = _review_prompt(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)))
     raised, unread = _review(run, round_no, prompt, launch)
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く

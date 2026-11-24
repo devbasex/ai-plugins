@@ -19,7 +19,7 @@ class NewerRow(Exception):
     """読める形より新しいバージョンの行がある。"""
 
 
-def question_key(questions: Sequence[Mapping[str, Any]]) -> str:
+def question_key(questions: Any) -> str:
     """`AskUserQuestion` の `questions` の SHA-256。
 
     質問の文・複数選択か・選択肢の名前と説明だけを使い、文字列の前後の空白を除く。区分（`metadata`）や見出しは含めない。

@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.contracts import facts, writing
@@ -180,19 +181,26 @@ def fixer_block(focus: Sequence[str]) -> list[str]:
     ]
 
 
-def document_block(role: str, documents: bool, since: Optional[str] = None) -> list[str]:
+class Previous(NamedTuple):
+    """今回の相手役の全員が読んだ前のラウンド。`head` はその head、`diff` は `head` から今の head までの差分のファイル。"""
+
+    head: str
+    diff: Path
+
+
+def document_block(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]:
     """文書を含む PR（`documents`）の指示に足す「文書の指摘の基準」のセクション（#4285 の決定 4〜6）。含まなければ空。
 
-    `role` は `REVIEWER`（相手役）か `FIXER`（修正担当）。`since` は相手役の全員が読めた前のラウンドの head で、
-    無ければ None（1 ラウンド目）。基準の本文を読めなければ `writing.CriteriaBroken`。"""
+    `role` は `REVIEWER`（相手役）か `FIXER`（修正担当）。`previous` は今回の相手役の全員が読んだ
+    前のラウンドで、無ければ None（1 ラウンド目か、全差分を読み直すラウンド）。基準の本文を読めなければ `writing.CriteriaBroken`。"""
     if not documents:
         return []
     doc = _table()["document"]
     lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", f"{doc['number']}. {doc['text']}"]
     if role == REVIEWER:
         lines += doc["fields"]
-        if since:
-            lines.append(doc["since"].format(since=since))
+        if previous is not None:
+            lines.append(doc["since"].format(since=previous.head, diff=previous.diff))
     else:
         lines.append(doc["fixer"])
     return [*lines, writing.criteria().rstrip()]
