@@ -66,10 +66,11 @@ def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequ
     return _SeatResult(None, denied) if denied else _SeatResult(participants.findings_of(answer.text))
 
 
-def _unread_hint(seat: str, cause: str, err: Path) -> tuple[str, str]:
+def _unread_hint(seat: str, cause: str, err: Path, local_cause: Optional[str] = None) -> tuple[str, str]:
     """読めなかった席 1 つの理由と直し方の 1 行を、PR のコメント用と手元用の組で返す。直し方は席のランタイムで引き、
     文は 1 度だけ組み立てる。標準エラーのログ `err` は、PR のコメントに載る注意にはファイル名、手元の precondition の
-    詳細には絶対パスで示す（PR 4461 の r3-1）。"""
+    詳細には絶対パスで示す（PR 4461 の r3-1）。`local_cause` は手元用の理由（実行ファイルの絶対パスを含む CLI の
+    バージョン検査の文面など。無ければ `cause`。PR 4461 の r1-1）。"""
     row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
     if cause.startswith(DENIED_READ):
         fix = DENIED_FIX
@@ -80,8 +81,8 @@ def _unread_hint(seat: str, cause: str, err: Path) -> tuple[str, str]:
         )
     else:
         fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
-    line = f"- {seat}: {cause}。{fix}（標準エラー: "
-    return f"{line}{err.name}）", f"{line}{err}）"
+    local = cause if local_cause is None else local_cause
+    return f"- {seat}: {cause}。{fix}（標準エラー: {err.name}）", f"- {seat}: {local}。{fix}（標準エラー: {err}）"
 
 
 class Unread(NamedTuple):
@@ -99,16 +100,24 @@ def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path) -> agents.Lau
     return participants.reading_launch(seat, participants.ClaudeReader(SEAT_SYSTEM, readable), run.cfg.worktree, prompt, stem)
 
 
-def _unread_cause(sandbox: Optional[str], got: _SeatResult, status: agents.AgentStatus) -> tuple[str, str]:
-    """結果の無い席の過程に載せる種類と、注意に載せる理由の組。サンドボックスの失敗・差分のファイルの読み取りの拒否・
-    完了でない状態の順に決める。"""
+class _Cause(NamedTuple):
+    """結果の無い席の過程に載せる種類（`kind`）、注意に載せる理由（`shown`）、手元の precondition の詳細の理由（`local`）。"""
+
+    kind: str
+    shown: str
+    local: Optional[str] = None
+
+
+def _unread_cause(sandbox: Optional[str], got: _SeatResult, status: agents.AgentStatus) -> _Cause:
+    """結果の無い席の理由。サンドボックスの失敗・差分のファイルの読み取りの拒否・完了でない状態の順に決める。"""
     if sandbox is not None:
-        return "sandbox", sandbox
+        return _Cause("sandbox", sandbox)
     if got.denied:
         # 注意は PR のコメントに載るので、差分のファイルの名前だけを書く。絶対パスは手元の結果 JSON の過程にだけ残す（PR 4461 の r2-1）
         cause = f"{DENIED_READ}: " + " / ".join(p.name for p in got.denied)
-        return f"{DENIED_READ}: " + " / ".join(str(p) for p in got.denied), cause
-    return str(status.state), f"{status.state}: {status.detail}"
+        return _Cause(f"{DENIED_READ}: " + " / ".join(str(p) for p in got.denied), cause)
+    # CLI のバージョン検査で拒否された席は、注意へ CLI 名・バージョン・下限だけを載せ、実行ファイルの絶対パスは手元の詳細に残す（PR 4461 の r1-1）
+    return _Cause(str(status.state), f"{status.state}: {status.shown}", f"{status.state}: {status.detail}")
 
 
 def launch_reviewers(
@@ -129,11 +138,11 @@ def launch_reviewers(
         got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required)
         found = got.findings
         if found is None:
-            kind, cause = _unread_cause(sandbox, got, status)
-            warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{cause}）"
-            run.note(round_no, seat, f"回答無し{again}（{kind}）", warning)
-            hint, local = _unread_hint(seat, cause, spec.paths.err)
-            unread[seat] = Unread(hint, cause, local)
+            why = _unread_cause(sandbox, got, status)
+            warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{why.shown}）"
+            run.note(round_no, seat, f"回答無し{again}（{why.kind}）", warning)
+            hint, local = _unread_hint(seat, why.shown, spec.paths.err, why.local)
+            unread[seat] = Unread(hint, why.shown, local)
             continue
         run.note(round_no, seat, f"指摘 {len(found)} 件{again}")
         raised += [{**f, "by": seat} for f in found]

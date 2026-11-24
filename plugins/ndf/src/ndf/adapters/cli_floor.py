@@ -36,14 +36,17 @@ _LOCK = threading.Lock()
 
 
 class TooOld(Exception):
-    """外部 CLI が下限より古い。`name`・`path`（実パス）・`found`（見つけたバージョン）・`floor`（下限）を持つ。"""
+    """外部 CLI が下限より古い。`name`・`path`（実パス）・`found`（見つけたバージョン）・`floor`（下限）を持つ。
+    `public` は実パスを除いた文面（PR のコメントなど公開される場所へ載せる。PR 4461 の r1-1）。"""
 
     def __init__(self, name: str, path: str, found: str, floor: str) -> None:
-        self._fill(f"{name} {found}（{path}）は下限 {floor} より古い。{floor} 以上へ上げる", name, path, found, floor)
+        tail = f"は下限 {floor} より古い。{floor} 以上へ上げる"
+        self._fill(f"{name} {found}（{path}）{tail}", f"{name} {found} {tail}", name, path, found, floor)
 
-    def _fill(self, message: str, name: str, path: str, found: str, floor: str) -> None:
-        """例外の文面と 4 属性をまとめて設定する（`TooOld` と派生の初期化が共有する）。"""
+    def _fill(self, message: str, public: str, name: str, path: str, found: str, floor: str) -> None:
+        """例外の文面・公開用の文面と 4 属性をまとめて設定する（`TooOld` と派生の初期化が共有する）。"""
         Exception.__init__(self, message)
+        self.public = public
         self.name, self.path, self.found, self.floor = name, path, found, floor
 
 
@@ -51,10 +54,11 @@ class Unverified(TooOld):
     """引数ごとの下限（`flag_floors`）を当てる起動で、外部 CLI のバージョンを確かめられない（見つからない・`--version` を読めない）。"""
 
     def __init__(self, name: str, path: Optional[str], floor: str) -> None:
-        where = path if path is not None else "実行ファイルが見つからない"
-        self._fill(
-            f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない", name, where, "", floor
-        )
+        missing = "実行ファイルが見つからない"
+        where = path if path is not None else missing
+        tail = f"。下限 {floor} 以上かを確かめられないので起動しない"
+        public = f"{name} のバージョンを確かめられない" + (f"（{missing}）" if path is None else "") + tail
+        self._fill(f"{name} のバージョンを確かめられない（{where}）{tail}", public, name, where, "", floor)
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:

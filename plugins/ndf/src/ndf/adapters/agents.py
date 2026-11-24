@@ -202,7 +202,8 @@ class AgentState(StrEnum):
 
 
 class AgentStatus(NamedTuple):
-    """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。"""
+    """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。
+    `public` は `detail` が手元のパスを含むときの公開用の文面（無ければ `detail` をそのまま公開してよい。PR 4461 の r1-1）。"""
 
     agent: str
     state: str
@@ -210,6 +211,12 @@ class AgentStatus(NamedTuple):
     detail: str
     warnings: tuple[str, ...]
     restore: Optional[str] = None
+    public: Optional[str] = None
+
+    @property
+    def shown(self) -> str:
+        """PR のコメントなど公開される場所へ載せる文面。"""
+        return self.detail if self.public is None else self.public
 
 
 def stall_seconds(agent: str) -> float:
@@ -299,9 +306,9 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     return watch(proc, spec, poll)
 
 
-def _not_started(spec: Launch, state: AgentState, detail: str) -> AgentStatus:
+def _not_started(spec: Launch, state: AgentState, detail: str, public: Optional[str] = None) -> AgentStatus:
     record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
-    return AgentStatus(spec.agent, state, None, detail, ())
+    return AgentStatus(spec.agent, state, None, detail, (), public=public)
 
 
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
@@ -321,7 +328,7 @@ def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
         cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd, args=spec.argv[1:])
     except cli_floor.TooOld as exc:
-        return _not_started(spec, AgentState.REFUSED, str(exc))
+        return _not_started(spec, AgentState.REFUSED, str(exc), exc.public)
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)
