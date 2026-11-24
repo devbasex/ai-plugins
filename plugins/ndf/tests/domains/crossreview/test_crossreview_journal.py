@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide
+from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 from ndf.domains.crossreview import finish_decide as fin
 
 IMPACT = "保存が止まり、利用者の入力が消える"
@@ -24,12 +25,15 @@ def _row(fid: str, text: str, round_no: int, outcome: str = fin.UNRESOLVED, reas
 
 
 def _plain(rows) -> list[dict]:
-    """行から発生の値（乱数）を外す。新しい行と再発の行は 12 字の発生の値を持つ。"""
+    """行から発生の値（乱数）と直した時刻を外す。新しい行と再発の行は 12 字の発生の値を持ち、修正担当が直したと返した行は
+    直した時刻を持つ。"""
     out = []
     for row in rows:
         row = dict(row)
         occurrence = row.pop(journal_mod.OCCURRENCE, None)
         assert occurrence is None or len(occurrence) == 12
+        fixed_at = row.pop(REVIEW_FIXED_AT, None)
+        assert fixed_at is None or isinstance(fixed_at, str)
         out.append(row)
     return out
 

@@ -430,9 +430,10 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _findings(state: dict) -> list[dict]:
-    """ジャーナルの行から発生の値（乱数。#4016）を外す。"""
+    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）を外す。"""
     assert all(len(f["occurrence"]) == 12 for f in state["findings"])
-    return [{k: v for k, v in f.items() if k != "occurrence"} for f in state["findings"]]
+    assert all(isinstance(f.get("fixed_at", ""), str) for f in state["findings"])
+    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at")} for f in state["findings"]]
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:
@@ -521,7 +522,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
     assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
-        {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::", "held_for_user": True},
+        {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::"},
     ]
     prompts = {name: p for _, name, p in fake.prompts}
     assert "見送り済み" not in prompts["round1-codex.out"]

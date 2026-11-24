@@ -137,7 +137,7 @@ def test_findings_judged_under_another_mvv_or_settled_plain_ones_are_not_recorde
     other = {**_deferred(), "judged_mvv": _snapshot(10).identity}
     plain = {"id": "r1-9", "text": "普通の指摘", "outcome": "deferred", "reason": "範囲の外"}
     snap = _snapshot()
-    # 区分が filed・not_applicable の通常の見送りと、利用者に委ねた見送りの印の無い通常の指摘の直しは、記録を読まずに何も書かない
+    # 区分が filed・not_applicable の通常の見送りと、直した時刻の無い通常の指摘の直しは、記録を読まずに何も書かない
     filed = {**plain, "defer": "filed"}
     fixed = {**plain, "id": "r1-8", "text": "直した普通の指摘", "outcome": "fixed", "reason": None}
     reads: list[Any] = []
@@ -145,8 +145,8 @@ def test_findings_judged_under_another_mvv_or_settled_plain_ones_are_not_recorde
     monkeypatch.setattr(jsonl, "read_rows", lambda *a, **kw: (reads.append(a), real(*a, **kw))[1])
     assert mvv.record_review(str(root), PR, HEAD, snap, [other, filed, fixed], list) == (0, (), None)
     assert reads == []
-    # 印があっても、同じキーの保留の記録が無ければ書かない
-    assert mvv.record_review(str(root), PR, HEAD, snap, [{**fixed, md.REVIEW_HELD: True}], list) == (0, (), None)
+    # 直した時刻があっても、同じキーの保留の記録が無ければ書かない
+    assert mvv.record_review(str(root), PR, HEAD, snap, [{**fixed, md.REVIEW_FIXED_AT: LATER}], list) == (0, (), None)
     assert _reviews() == [] and _signals() == []
 
 
@@ -155,7 +155,7 @@ def test_fixing_a_plain_finding_does_not_clear_a_redline_of_an_earlier_mvv(root:
     old = _snapshot(10, "b")
     _record(root, {**REDLINE, "text": "人に聞く操作"}, snap=old)
     snap = _snapshot()
-    plain = {"id": "r2-1", "text": "人に聞く操作", "by": "kiro", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    plain = {"id": "r2-1", "text": "人に聞く操作", "by": "kiro", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
     assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [plain], list).written == 0
     holds = md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-")
     assert holds == [f"PR #{PR} の P1・C7（redline）: 人に聞く操作"]
@@ -182,14 +182,16 @@ def test_a_plain_finding_left_to_the_user_holds_the_design_gate_until_it_is_fixe
     assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == [
         f"PR #{PR} の 指摘 r1-9（deferred・{kind}）: 利用者が決める"
     ]
-    # 後の起動で直せば、利用者に委ねた見送りの印（修正担当の結果を取り込むときに付く）と保留の記録があるので、直した記録を書き、保留が外れる
-    fixed = {**plain, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    # 後の起動で直せば、見送りを記録した後に直した（修正担当の結果を取り込むときに直した時刻が付く）ので、直した記録を書き、保留が外れる
+    fixed = {**plain, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
     assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list).written == 1
     assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == []
     # 記録を書く前に止まったら、通常の指摘の見送りも欠けた必須の行に数える
     assert [e["outcome"] for e in mvv.unwritable(snap, [plain], "止まった").missing] == ["deferred"]
 
 
+# 直した時刻（記録の見送りより前・後）
+EARLIER, LATER = "2000-01-01T00:00:00+00:00", "2099-01-01T00:00:00+00:00"
 PLAIN = {"id": "r1-9", "text": "普通の指摘", "by": "codex", "outcome": "deferred", "reason": "利用者が決める"}
 
 
@@ -202,7 +204,7 @@ def test_a_plain_fix_is_not_withheld_and_an_old_withheld_fix_is_completed(root: 
     """#3959: 自由記述の無い直しは、同じ起動で別の指摘の自由記述を伏せても `withheld` を付けずに書き、保留を解く。"""
     snap = _snapshot()
     assert mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list).written == 1
-    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
     other = {**_deferred(), "judged_mvv": snap.identity}
     assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed, other], None).cause is None
     assert [r.get("withheld") for r in _reviews() if r["outcome"] == "fixed"] == [None]
@@ -214,37 +216,55 @@ def test_a_fix_withheld_by_an_earlier_version_is_written_again(root: Path) -> No
     snap = _snapshot()
     mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
     [held] = _reviews()
-    later = {**held, "at": "2099-01-01T00:00:00+00:00", "id": "r2-1", "outcome": "fixed", "withheld": True}
+    later = {**held, "at": "2098-01-01T00:00:00+00:00", "id": "r2-1", "outcome": "fixed", "withheld": True}
     jsonl.append_locked(
         mvv.record_path("mvv-validation"), {k: v for k, v in later.items() if k not in ("reason", "version")}, kind="mvv-validation"
     )
     assert _plain_holds(root) != []
-    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
     assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list).written == 1
     assert _reviews()[-1].get("withheld") is None
 
 
-def test_a_hold_from_another_state_dir_is_cleared_by_a_fix_without_the_mark(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """#3959: 別の状態ディレクトリで見送った指摘が再掲されて直されたら、記録の保留を 1 回だけ読んで解く。"""
-    from ndf.domains.crossreview import drive, store
-
+def test_a_fix_made_before_another_state_dir_deferred_it_does_not_clear_the_hold(root: Path) -> None:
+    """#3959: 別の状態ディレクトリが後から利用者の判断に委ねた指摘は、それより前に直した記録の再送では解かない。"""
     snap = _snapshot()
     mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
+    before = {**PLAIN, "id": "r1-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: EARLIER}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [before], list).written == 0
+    assert _plain_holds(root) != []
+
+
+def test_a_hold_added_by_another_state_dir_after_the_last_check_is_cleared_by_a_later_fix(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3959: 状態ディレクトリ A が別件の直しを照らし終えた後に、B が指摘を利用者に委ねて見送っても、A でその指摘を再掲して直せば、
+    記録の最新の状態と照らして保留を解く。照らし終えた時刻より前の直しは、記録を読まずに照らし直さない。"""
+    snap = _snapshot()
+    other = {**PLAIN, "id": "r1-2", "text": "別件", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: EARLIER}
+    # A: 別件の直しを照らした（保留が無いので書かない）。照らし終えた時刻を since として次の起動へ渡す
+    assert mvv.record_review(str(root), PR, HEAD, snap, [other], list).written == 0
+    since = jsonl.now()
+    # B: 同じ PR で指摘を利用者に委ねて見送る
+    mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
     reads: list[Any] = []
-    real = mvv.validation_rows
-    monkeypatch.setattr(mvv, "validation_rows", lambda *a: (reads.append(a), real(*a))[1])
-    run = SimpleNamespace(ref=SimpleNamespace(current_pr=PR), data={})
-    # 印の無い直しが無ければ、記録を読まない
-    assert drive._with_stored_holds(run, str(root), [PLAIN]) == ([PLAIN], set()) and reads == [] and run.data == {}
-    fixed = {**PLAIN, "id": "r1-1", "outcome": "fixed", "reason": None}
-    rows, cleared = drive._with_stored_holds(run, str(root), [fixed])
-    assert rows[0][md.REVIEW_HELD] is True and cleared == {mvv.record_key(PLAIN["text"])} and len(reads) == 1
-    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, rows, list).written == 1
-    assert _plain_holds(root) == []
-    drive._forget_holds(run, cleared)
-    # 覚えたキーを使い、2 回目からは記録を読まない
-    assert run.data[store.MVV_PLAIN_HOLDS] == {"pr": PR, "keys": []}
-    assert drive._with_stored_holds(run, str(root), [fixed]) == ([fixed], set()) and len(reads) == 1
+    real = jsonl.read_rows
+    monkeypatch.setattr(jsonl, "read_rows", lambda *a, **kw: (reads.append(a), real(*a, **kw))[1])
+    # A: 照らし終えた時刻より前の直しだけなら、記録を読まない
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [other], list, since) == (0, (), None) and reads == []
+    # A: 再掲された指摘を直せば、追記の前の 1 回の読み取りで最新の保留と照らして解く
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [other, fixed], list, since).written == 1
+    assert len(reads) == 1 and _plain_holds(root) == []
+
+
+def test_the_check_time_is_kept_per_pr() -> None:
+    from ndf.domains.crossreview import drive, store
+
+    run = SimpleNamespace(ref=SimpleNamespace(current_pr=PR), data={store.MVV_FIXES_CHECKED: {"pr": PR, "at": EARLIER}})
+    assert drive._fixes_checked(run) == EARLIER
+    # 巻き直した後の別の PR では、前の PR の時刻を使わない
+    assert drive._fixes_checked(SimpleNamespace(ref=SimpleNamespace(current_pr=PR + 1), data=run.data)) is None
 
 
 def test_broken_shape_is_refused(root: Path) -> None:

@@ -54,9 +54,9 @@ DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE = "needs_user", "filed", "no
 DEFERS = (DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE)
 # 保留にしない見送りの区分
 _SETTLED_DEFERS = (DEFER_FILED, DEFER_NOT_APPLICABLE)
-# 指摘のジャーナルの行の印: 修正担当が一度でも利用者の判断に委ねて見送った（区分が `needs_user`・無い・知らない値）。直しても
-# 外さない。通常の指摘を直した記録で承認ゲートの保留を解くのは、この印のある行だけである（#3959）
-REVIEW_HELD = "held_for_user"
+# 指摘のジャーナルの行の欄: 修正担当が直したと返した時刻（`jsonl.now` の形）。通常の指摘を直した記録で承認ゲートの保留を解くのは、
+# 保留の見送りの記録より後に直した行だけである（見送りより前の直しの再送で保留を解かない。#3959）
+REVIEW_FIXED_AT = "fixed_at"
 # NDF が機械で確かめて作った指摘（根拠の記述の誤り）の `by`
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 # 終わり方ごとの、記録に残す自由記述の欄
@@ -336,17 +336,18 @@ class Judged(NamedTuple):
         return list(self.free_fields.values())
 
 
-def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str, *, holds: bool = False) -> list[Judged]:
+def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str, *, holds: bool = False, since: Optional[str] = None) -> list[Judged]:
     """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。
 
     `holds` なら、MVV で判定していない通常の指摘のうち、承認ゲートの保留に関わるもの（`plain` が真）も返す。区分が
-    `needs_user`・無い・知らない値の見送りと、その見送りの後に直した指摘（印 `REVIEW_HELD` のある行）である（#3959）。
+    `needs_user`・無い・知らない値の見送りと、直した時刻（`REVIEW_FIXED_AT`）が `since` より後の直した指摘である
+    （`since` が None ならすべての直した指摘。前の起動で記録へ照らした直しを、起動のたびに照らし直さない。#3959）。
     """
     out = []
     for row in rows:
         if row.get("outcome") not in _REVIEW_ORDER:
             continue
-        if holds and _plain_hold(row):
+        if holds and _plain_hold(row, since):
             out.append(Judged(row, row["outcome"], None, True))
             continue
         if row.get(REVIEW_JUDGED) != mvv:
@@ -363,21 +364,13 @@ def plain_row(row: Mapping[str, Any]) -> bool:
     return not (row.get(REVIEW_JUDGED) is not None or REVIEW_ITEM in row or row.get("by") == BY_NDF or row.get(REVIEW_REDLINE))
 
 
-def plain_holds(rows: Iterable[Mapping[str, Any]], repo: str, pr: int) -> set[str]:
-    """記録 `rows`（`mvv-review` の行）のうち、PR `pr` の、通常の指摘を直した記録で解ける保留のキー（`plain_fix_clears`）。"""
-    keyed: dict[Any, list[Mapping[str, Any]]] = {}
-    mine = [r for r in rows if r.get("kind") == MVV_REVIEW and r.get("repo") == repo and r.get("pr") == pr]
-    for r in sorted(mine, key=lambda r: internal.epoch(str(r.get("at")))):
-        keyed.setdefault(r.get("key"), []).append(r)
-    return {str(k) for k, seq in keyed.items() if plain_fix_clears(seq)}
-
-
-def _plain_hold(row: Mapping[str, Any]) -> bool:
-    """MVV で判定していない通常の指摘で、承認ゲートの保留を作る見送りか、保留を解く直した指摘か。"""
+def _plain_hold(row: Mapping[str, Any], since: Optional[str]) -> bool:
+    """MVV で判定していない通常の指摘で、承認ゲートの保留を作る見送りか、`since` の後に直した指摘か。"""
     if not plain_row(row):
         return False
     if row.get("outcome") == REVIEW_FIXED:
-        return row.get(REVIEW_HELD) is True
+        done = row.get(REVIEW_FIXED_AT)
+        return isinstance(done, str) and (since is None or internal.epoch(done) > internal.epoch(since))
     return row.get("outcome") == REVIEW_DEFERRED and defer_holds(row.get(REVIEW_DEFER))
 
 
@@ -386,11 +379,12 @@ def defer_holds(defer: Any) -> bool:
     return defer not in _SETTLED_DEFERS
 
 
-def plain_fix_clears(seq: Sequence[Mapping[str, Any]]) -> bool:
-    """1 つのキーの記録の並び `seq`（記録の順）の保留を、通常の指摘を直した記録で解いてよいか。
+def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
+    """1 つのキーの記録の並び `seq`（記録の順）の保留を、`fixed_at` に直した通常の指摘の記録で解いてよいか。
 
-    解けるのは通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りが最後の記録で、直っていないレッドラインが無いときだけ。
-    前の MVV でレッドラインだった指摘は、MVV が変わると通常の指摘として扱われるが、その直しではレッドラインの保留を解かない。
+    解けるのは通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りが最後の記録で、直っていないレッドラインが無く、
+    その見送りを記録した後に直したときだけ。前の MVV でレッドラインだった指摘は、MVV が変わると通常の指摘として扱われるが、
+    その直しではレッドラインの保留を解かない。別の状態ディレクトリが後から見送った指摘を、それより前の直しの再送では解かない。
     """
     # 自由記述を伏せて書いた直しの記録（自由記述の無い直しには付けないが、前の版が付けた）は、補って書き直せるよう外して読む
     end = len(seq)
@@ -403,7 +397,9 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]]) -> bool:
     if lines and not any(r.get("outcome") == REVIEW_FIXED for r in seq[lines[-1] + 1 :]):
         return False
     last = seq[-1]
-    return last.get("outcome") == REVIEW_DEFERRED and defer_holds(last.get(REVIEW_DEFER)) and "item" not in last
+    if last.get("outcome") != REVIEW_DEFERRED or not defer_holds(last.get(REVIEW_DEFER)) or "item" in last:
+        return False
+    return internal.epoch(str(last.get("at"))) < internal.epoch(fixed_at)
 
 
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:

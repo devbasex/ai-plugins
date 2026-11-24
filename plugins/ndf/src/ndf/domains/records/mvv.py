@@ -546,14 +546,6 @@ def _review_rows_of(repo: str, pr: int, head: str, snapshot: Snapshot, found: Se
     return [{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in ordered]
 
 
-def stored_plain_holds(repo: str, pr: int) -> set[str]:
-    """記録にある、PR `pr` の通常の指摘を直した記録で解ける保留のキー（`md.plain_holds`）。記録が無ければ空。
-
-    読むだけなのでロックを取らない。読めなければ `validation_rows` の例外をそのまま投げる。"""
-    rows, _ = validation_rows(Path(repo))
-    return md.plain_holds(review_rows(rows), repo, pr)
-
-
 def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
     """記録を書く前に止まった（呼び手が記録の `repo` を解けない）結果。今の MVV で判定した必須の行をすべて欠けとする。"""
     found = md.judged_findings(rows, snapshot.identity, holds=True)
@@ -568,6 +560,7 @@ def record_review(
     snapshot: Snapshot,
     rows: Sequence[Mapping[str, Any]],
     clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
+    since: Optional[str] = None,
 ) -> ReviewWrite:
     """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書く。
 
@@ -575,14 +568,15 @@ def record_review(
     自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
     `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
     書けなくても例外を出さず、記録に無いままの必須の行と原因を返す（#3959。打ち直すと欠けた行だけを書く）。
+    直した通常の指摘は、直した時刻が `since`（前の起動が記録へ照らし終えた時刻）より後のものだけを、追記の前の読み取りで
+    同じキーの保留と照らす（`md.plain_fix_clears`）。
     """
-    found = md.judged_findings(rows, snapshot.identity, holds=True)
+    found = md.judged_findings(rows, snapshot.identity, holds=True, since=since)
     if not found:
         return ReviewWrite(0, (), None)
     entries = _review_rows_of(repo, pr, head, snapshot, found, clean)
-    # 通常の指摘を直した記録は、利用者の判断に委ねた見送りの印がある指摘だけが `found` に入る（印の無い直しでは記録を読まない）。
-    # 書くのは、同じキーの保留が通常の指摘の見送りのときだけ（前の MVV のレッドラインを解かない）
-    resolving = frozenset(record_key(str(f.row["text"])) for f in found if f.plain and f.outcome == md.REVIEW_FIXED)
+    # 通常の指摘を直した記録は、同じキーの保留が通常の指摘の見送りで、その見送りより後に直したときだけ書く（追記の前の読み取りで照らす）
+    resolving = {record_key(str(f.row["text"])): str(f.row[md.REVIEW_FIXED_AT]) for f in found if f.plain and f.outcome == md.REVIEW_FIXED}
     wrote, left, cause = _append_reviews(entries, resolving)
     missing = tuple(e for e in left if e["outcome"] in md.REVIEW_REQUIRED)
     if cause is not None:
@@ -625,10 +619,12 @@ def _append_missing(
 
 
 def _append_reviews(
-    entries: list[dict[str, Any]], resolving: frozenset[str] = frozenset()
+    entries: list[dict[str, Any]], resolving: Optional[Mapping[str, str]] = None
 ) -> tuple[int, list[dict[str, Any]], Optional[str]]:
-    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。キーが `resolving` の記録
-    （通常の指摘を直した記録）は、同じキーの保留が通常の指摘の見送りのときだけ足す（`md.plain_fix_clears`）。"""
+    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。キーが `resolving`（キー → 直した
+    時刻）の記録（通常の指摘を直した記録）は、同じキーの保留を解けるときだけ足す（`md.plain_fix_clears`）。"""
+
+    resolving = resolving or {}
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ordered = sorted(held, key=lambda r: internal.epoch(r["at"]))
@@ -636,7 +632,7 @@ def _append_reviews(
         seqs: dict[str, list[dict[str, Any]]] = {}
         for r in ordered:
             seqs.setdefault(r["key"], []).append(r)
-        wanted = [e for e in entries if e["key"] not in resolving or md.plain_fix_clears(seqs.get(e["key"], []))]
+        wanted = [e for e in entries if e["key"] not in resolving or md.plain_fix_clears(seqs.get(e["key"], []), resolving[e["key"]])]
         return [e for e in wanted if not md.review_recorded(last.get(e["key"]), e)]
 
     return _append_missing("mvv-validation", entries, missing)

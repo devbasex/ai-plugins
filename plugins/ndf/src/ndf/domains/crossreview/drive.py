@@ -30,7 +30,6 @@ merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そ
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -59,7 +58,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
-from ndf.domains.records import mvv
+from ndf.domains.records import jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 
 # 終わったときの要約（`finish_decide` が読む）
@@ -617,34 +616,11 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
-def _with_stored_holds(run: _Run, repo: str, rows: Sequence[Mapping[str, Any]]) -> tuple[list[Mapping[str, Any]], set[str]]:
-    """直した通常の指摘のうち、見送りの印（`md.REVIEW_HELD`）が無いが、記録に同じキーの通常の保留があるものに印を付けた行と、
-    そのキー。別の状態ディレクトリで見送った指摘が再掲されて直されたときに、保留を解くためである（#3959）。
-
-    記録は、印の無い直しが初めて出たときに 1 回だけロックを取らずに読み、キーを状態ファイルに覚える（印の無い直しが無ければ
-    読まない）。読めなければ印を付けない（保留を解かない側に倒す）。"""
-    unmarked = [r for r in rows if r.get("outcome") == fin.FIXED and md.plain_row(r) and r.get(md.REVIEW_HELD) is not True]
-    if not unmarked:
-        return list(rows), set()
-    pr = run.ref.current_pr
-    cached = run.data.get(store.MVV_PLAIN_HOLDS)
-    if not (isinstance(cached, dict) and cached.get("pr") == pr and isinstance(cached.get("keys"), list)):
-        try:
-            keys = sorted(mvv.stored_plain_holds(repo, pr))
-        except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError):  # noqa: NDF401 外部の記録: 読めなければ保留を解かない
-            return list(rows), set()
-        cached = run.data[store.MVV_PLAIN_HOLDS] = {"pr": pr, "keys": keys}
-    held = {k for k in cached["keys"] if isinstance(k, str)}
-    marked = {id(r) for r in unmarked if mvv.record_key(str(r["text"])) in held}
-    out = [{**r, md.REVIEW_HELD: True} if id(r) in marked else r for r in rows]
-    return out, {mvv.record_key(str(r["text"])) for r in unmarked if id(r) in marked}
-
-
-def _forget_holds(run: _Run, cleared: set[str]) -> None:
-    """記録に書き終えた（解いた）保留のキーを、状態ファイルに覚えたキーから外す（次の起動で同じ直しのために記録を読まない）。"""
-    cached = run.data.get(store.MVV_PLAIN_HOLDS)
-    if isinstance(cached, dict) and isinstance(cached.get("keys"), list):
-        cached["keys"] = [k for k in cached["keys"] if k not in cleared]
+def _fixes_checked(run: _Run) -> Optional[str]:
+    """今の PR で、直した通常の指摘を記録の保留と照らし終えた時刻（無ければ None）。"""
+    held = run.data.get(store.MVV_FIXES_CHECKED)
+    ok = isinstance(held, dict) and held.get("pr") == run.ref.current_pr and isinstance(held.get("at"), str)
+    return held["at"] if ok else None
 
 
 def _record_mvv(
@@ -652,16 +628,17 @@ def _record_mvv(
 ) -> mvv.ReviewWrite:
     """MVV の記録を書き、結果を返す。書けなければ固定の注意を足し、伏せた原因（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
     step = "メインディレクトリの解決"
-    # 覚えた保留のキーが変わったときも状態ファイルを書く（比べるために写しを取る）
-    remembered = copy.deepcopy(run.data.get(store.MVV_PLAIN_HOLDS))
+    since = _fixes_checked(run)
+    # 前の起動より後に直した通常の指摘があれば、照らし終えた時刻を進めて状態ファイルに残す
+    fresh = any(f.plain and f.outcome == fin.FIXED for f in md.judged_findings(rows, snap.identity, holds=True, since=since))
+    checked = jsonl.now()
     try:
         # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
         repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
         step = "記録の書き込み"
-        rows, cleared = _with_stored_holds(run, repo, rows)
-        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean)
-        if got.cause is None and cleared:
-            _forget_holds(run, cleared)
+        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean, since)
+        if got.cause is None and fresh:
+            run.data[store.MVV_FIXES_CHECKED] = {"pr": run.ref.current_pr, "at": checked}
     except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
         # 記録を書く前に止まった。どの行が記録にあるか分からないので、必須の行をすべて欠けとする
         got = mvv.unwritable(snap, rows, mvv.failure_cause(step, exc))
@@ -670,7 +647,7 @@ def _record_mvv(
     held = run.data.pop(store.MVV_RECORD_ERROR, None)
     if got.cause is not None:
         run.data[store.MVV_RECORD_ERROR] = got.cause
-    if got.cause != held or run.data.get(store.MVV_PLAIN_HOLDS) != remembered:
+    if got.cause != held or _fixes_checked(run) != since:
         try:
             _save(run)
         except OSError:
