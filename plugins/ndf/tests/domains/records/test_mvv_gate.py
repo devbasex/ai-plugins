@@ -458,16 +458,18 @@ def test_the_cli_stops_without_judging_when_the_machine_gives_no_input(
 
 
 def test_a_db_error_while_reading_the_machine_shows_only_its_kind(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # 共有 DB への照会の失敗は、SQL 文・バインド値・接続先を結果へ載せず、例外の種類だけを出す（ndf progress と同じ）
+    # 共有 DB への照会の失敗は、SQL 文・バインド値・接続先を結果へ載せず、例外の種類だけを出す（ndf progress と同じ）。
+    # 故障は stage_inputs_of で起こすので、リポジトリは Git で作らず、CLI のリポジトリの解決も差し替える
     def fail(*_a: Any) -> dict[str, Any]:
         raise sa.exc.ProgrammingError("SELECT * FROM ndf_progress_machines WHERE id = ?", ("secret-bind",), Exception("db.internal"))
 
+    monkeypatch.setattr(cli, "_root", lambda args: tmp_path)
     monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", fail)
     monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("入力を組めないのに判定を打った"))
     monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
-    out = _cli_gate(repo, capsys, "release", "--machine", "sprint:x")
+    out = _cli_gate(tmp_path, capsys, "release", "--machine", "sprint:x")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", store.StoreUnreachable.kind)
     shown = json.dumps(out, ensure_ascii=False)
     assert "SELECT" not in shown and "secret-bind" not in shown and "db.internal" not in shown
@@ -538,13 +540,25 @@ def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(
         mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, twice))
 
 
-def test_a_worktree_at_the_same_path_is_not_checked_with_git(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+class _BranchOnlyGit:
+    """ブランチ名だけを返す Git の偽物（子プロセスを起動しない）。ほかの問い合わせはテストを落とす。"""
+
+    def __init__(self, where: Path) -> None:
+        self.where = where
+
+    def run(self, *args: str) -> str:
+        assert args == ("rev-parse", "--abbrev-ref", "HEAD"), f"想定しない Git の呼び出し: {args}"
+        return "design/x\n"
+
+
+def test_a_worktree_at_the_same_path_is_not_checked_with_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 作業場所と起動元が同じパスなら、共通ディレクトリを Git に問わない
     def no_git(where: Path) -> str:
         raise AssertionError("同じパスで共通ディレクトリを問うた")
 
     monkeypatch.setattr(mvv_gate, "_common_dir", no_git)
-    assert mvv_gate.pr_number(repo, "design", _plan_inputs(repo, worktree=str(repo)), Hub(5, {})) == 5
+    monkeypatch.setattr(mvv_gate, "Git", _BranchOnlyGit)
+    assert mvv_gate.pr_number(tmp_path, "design", _plan_inputs(tmp_path, worktree=str(tmp_path)), Hub(5, {})) == 5
 
 
 # --- #3959 Task 9: 失敗の原因を定型文と手元の診断の記録に分ける ---
