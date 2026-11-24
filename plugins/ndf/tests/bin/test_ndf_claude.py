@@ -1,4 +1,4 @@
-"""このプラグインだけを読む claude の起動の引数（`ndf launch-args`。#3409・docs/specifications/ndf-rebuild.md の決定 74・S1-H4）。
+"""このプラグインだけを読む claude の起動の引数（`ndf launch-args`。#3409・確定仕様 ndf-rebuild の決定 74・S1-H4）。
 
 外す設定と読む引数を、組み立てる関数の返りで確かめる。
 """

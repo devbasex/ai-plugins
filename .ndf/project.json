@@ -508,24 +508,6 @@
           "plugins/ndf/tests/domains/records/test_preflight.py",
           "plugins/ndf/tests/domains/records/test_spec.py"
         ]
-      },
-      {
-        "paths": [
-          "docs/specifications/ndf-rebuild.md"
-        ],
-        "tests": [
-          "plugins/ndf/tests/bin/test_ndf_claude.py",
-          "plugins/ndf/tests/core/test_durable.py",
-          "plugins/ndf/tests/core/test_durable_format.py",
-          "plugins/ndf/tests/core/test_durable_store.py",
-          "plugins/ndf/tests/core/test_durable_sweep.py",
-          "plugins/ndf/tests/core/test_durable_url.py",
-          "plugins/ndf/tests/domains/relay/test_relay_cli.py",
-          "plugins/ndf/tests/domains/relay/test_relay_hub.py",
-          "plugins/ndf/tests/domains/relay/test_relay_parts.py",
-          "plugins/ndf/tests/progress/test_store_pg.py",
-          "plugins/ndf/tests/progress/test_store_sqlite.py"
-        ]
       }
     ]
   },
