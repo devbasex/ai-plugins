@@ -290,19 +290,25 @@ def _propose(run: _Run) -> list[dict[str, Any]]:
     return merged
 
 
+def _planned(run: _Run, proposals: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    """計画の担当を起動し、(項目の元, 提案で代えたか) を返す。提案が無ければ起動せず、結果が無ければ提案で代える。"""
+    if not proposals:
+        return [], False
+    prompt = prompt_decide.plan(run.cfg.pr, proposals, run.mvv)
+    got = _launch(run, launch.Request("plan", participants.FIXER, prompt, f"pr{run.cfg.pr}", "items"))
+    if got is None:
+        return proposals, True
+    return got["items"], False
+
+
 def _plan(run: _Run) -> None:
     """提案から項目を組む（済んでいれば何もしない）。計画の担当が結果を出さなければ提案をそのまま項目にする。"""
     if "items" in run.state:
         return
     proposals = _propose(run)
     _record_phase(run, "plan")
-    planned = None
-    if proposals:
-        prompt = prompt_decide.plan(run.cfg.pr, proposals, run.mvv)
-        req = launch.Request("plan", participants.FIXER, prompt, f"pr{run.cfg.pr}", "items")
-        got = _launch(run, req)
-        planned = got["items"] if got is not None else None
-    items, skipped = items_decide.plan_items(planned if planned is not None else proposals, _touched(run))
+    planned, fallback = _planned(run, proposals)
+    items, skipped = items_decide.plan_items(planned, _touched(run))
     table = _allocation_table(run)
     for item in items:
         # 見積りは配分の表から出す（手法と、テストを足すか）。担当の申告の分は使わない（#3643）
@@ -311,7 +317,7 @@ def _plan(run: _Run) -> None:
     run.state.update(
         items=picked.adopted,
         skipped=skipped + picked.skipped,
-        plan_fallback=planned is None and bool(proposals),
+        plan_fallback=fallback,
         budget=picked.budget.as_json(),
         plan={"table_source": table["source"], "table": table},
     )
