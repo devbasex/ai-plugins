@@ -94,7 +94,7 @@
 ### Task 7: 基準 5 の指示と、起動の始めのスナップショットとベースのコミットの固定
 
 - **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
-- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を `<リモート>/<ベース>` で呼び、`settings.RunConfig` に足す `base_commit` を `dataclasses.replace(cfg, base_commit=snap.commit)` で固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
+- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（この節の手順のうち、MVV を読むブランチの決め方と差分の起点は #4076 の詳細設計の「MVV の写し（`current`）」の `drive._start` の手順に従う。`--base` は、先頭が `<g.remote() の値>/` と一致するときだけその部分を外し、`sprint/…`・`release/…` のようにスラッシュを含むブランチ名はそのまま使う。`sync_worktree` に `base_branch` としてそのブランチを渡し、`current` をそのリモート追跡参照で呼び、`settings.RunConfig` に足す `base_commit` を `dataclasses.replace(cfg, base_commit=<差分の起点>)` で固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
 - **満たす受け入れ条件:** 4076:1、4076:2、4076:8（テスト設計の 4090-9・4090-11 の指示の側）
 - **進め方:** 失敗するテスト（承認済みの MVV があるのに指示に基準 5 とスナップショットのパスが無い）→ 通す最小実装 → 整理
 
