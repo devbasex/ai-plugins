@@ -49,7 +49,7 @@ tests/
 
 - `last_context`
   - 事前条件: `tail` は `read_tail` の返した文字列。`anchor` は `ToolUse`・`Reply`・`Tail` のどれか（`Anchor = Union[ToolUse, Reply, Tail]`）
-  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` なら `reason` があり、`tokens` は None である。`none` の `form`（突き合わせを通った応答の採用行の形が違う）では、読める項目だけを持つ。採用行の `message.id` が空でない文字列なら `message_id` に、`timestamp` が `timestamp_seconds` で直せる文字列なら `timestamp` に持つ。`entry` には採用行の object をそのまま入れる。`message_id` と `timestamp` は読めたほうだけを持ち、読めないほうは None にする。#4068 の `last_turn` が、この 2 つから Stop と応答を結ぶ `ref` を作る。`form` 以外の `none` では 3 つとも None。`current` のとき `reason` は None
+  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` なら `reason` があり、`tokens` は None である。`none` の `form`（突き合わせを通った応答の採用行の形が違う）では、読める項目だけを持つ。採用行の `message.id` が空でない文字列なら、`message_id` に持つ。`timestamp` が `timestamp_seconds` で直せる文字列なら、`timestamp` に持つ。`entry` には採用行の object をそのまま入れる。`message_id` と `timestamp` は読めたほうだけを持ち、読めないほうは None にする。#4068 の `last_turn` が、この 2 つから Stop と応答を結ぶ `ref` を作る。`form` 以外の `none` では 3 つとも None。`current` のとき `reason` は None
   - 副作用: 無し（ファイルを開かない）
 - `timestamp_seconds`
   - 事後条件: 末尾の `Z` を `+00:00` に替えて `datetime.fromisoformat` で解く。時差を持つ時刻なら `.timestamp()` の値、`ValueError` か時差が無い（`tzinfo` が None）なら None。例外を投げない
@@ -83,15 +83,15 @@ tests/
 | `last_context` | `Tail`・最後の応答の後に利用者の行が無い | 最後の応答の量・`current` |
 | `last_context` | `Tail`・ある | 最後の応答の量・`behind`・`after` |
 
-形を確かめるのは、手がかりで `current` か `behind` を決めた後の、最後の応答の採用行（最も新しい物理の行）の 1 行だけである。確かめる項目は `message.usage`（設計文書の「文脈の量」の形）・`message.id`（空でない文字列）・`timestamp`（`timestamp_seconds` が None でない文字列）である。量・ID・時刻はこの行から読み、同じ応答の前の行へ替えない。この 3 つが `form` の条件のすべてで、要求の受け入れ条件 6・10 と設計文書の決定 6 も同じ 3 つを指す。採用行の object は `ContextRead.entry` に入れて返す。`message.id` が文字列でない採用行は、その行だけを 1 つの応答として突き合わせる（突き合わせは形に依らずに決まる）。`form` は `current` の候補の形の違いだけに出す。`behind` の候補の形の違いは、突き合わせの理由（`unrecorded`・`after`）のまま `none` にする。#4068 が今回でない応答の欠けで会話ごと止めないためである。
+形を確かめるのは、手がかりで `current` か `behind` を決めた後の、最後の応答の採用行（最も新しい物理の行）の 1 行だけである。確かめる項目は次の 3 つである。`message.usage` は設計文書の「文脈の量」の形か。`message.id` は空でない文字列か。`timestamp` は `timestamp_seconds` が None でない文字列か。量・ID・時刻はこの行から読み、同じ応答の前の行へ替えない。この 3 つが `form` の条件のすべてで、要求の受け入れ条件 6・10 と設計文書の決定 6 も同じ 3 つを指す。採用行の object は `ContextRead.entry` に入れて返す。`message.id` が文字列でない採用行は、その行だけを 1 つの応答として突き合わせる（突き合わせは形に依らずに決まる）。`form` は `current` の候補の形の違いだけに出す。`behind` の候補の形の違いは、突き合わせの理由（`unrecorded`・`after`）のまま `none` にする。#4068 が今回でない応答の欠けで会話ごと止めないためである。
 
-文はまとまりの各行の `message.content` が list のときの、`type` が `text` で `text` が文字列の要素を、ファイルの順に区切りの文字なしでつなぐ。`Reply.text` との比べは、両方から空白文字を除いた（`"".join(s.split())`）文字列の完全一致で行う（設計文書の「入出力のコントラクト」の「`Reply` の文の比べ方」）。`tool_use` の要素は `type` が `tool_use` で `id` が文字列の要素である。list でない `content` と、形の違う要素は飛ばす（突き合わせに外れる側へ倒れる）。
+文はまとまりの各行の `message.content` が list のときの、`type` が `text` で `text` が文字列の要素を、ファイルの順に区切りの文字なしでつなぐ。`Reply.text` との比べは、両方から空白文字を除いた（`"".join(s.split())`）文字列の完全一致で行う。比べ方の正本は設計文書の「入出力のコントラクト」の「`Reply` の文の比べ方」である。`tool_use` の要素は `type` が `tool_use` で `id` が文字列の要素である。list でない `content` と、形の違う要素は飛ばす（突き合わせに外れる側へ倒れる）。
 
 - 繰り返しの終わる条件: 末尾から 1 行ずつ新しい順に読む。次の 3 つの読みを順に行い、手がかりごとに必要な所で止める
   1. **読み 1・最も新しい応答の行まで**: 各行を `json.loads` し、書きかけのフラグ・利用者の行の有無を数える。`compact_boundary` の行に会えば止める（`compacted`）。`tail` の先頭に達すれば止める（`empty`）。合成の応答・`isSidechain`・会話でない行を除く最初の `assistant` の行（採用行）で次へ進む。`Tail` はここで終わる（量・ID・時刻・利用者の行の有無がそろう）
   2. **読み 2・最後の応答のまとまりまで**（`Reply`・`ToolUse`）: さらに古い行を `json.loads` し、同じ `message.id` の行を集める。別の `message.id` の会話の `assistant` の行（前の応答。合成の応答は除く）・`compact_boundary` の行・`tail` の先頭で止める。1 つの応答の行が別の応答の行をまたいで再び現れることは無い（設計文書の「測った結果」で 130,047 応答のうち 0 件）。`Reply` はここで終わる。`ToolUse` は、まとまりにその ID の `tool_use` があればここで終わる（`current`）。ID が空の文字列なら探さずに `behind`（`unrecorded`）で終わる
   3. **読み 3・ID を持つ応答の探索**（`ToolUse` で、最後の応答にその ID が無いとき）: 読み 2 が止まるのに使った行（前の応答の `assistant` の行）から始める。この行は読み 2 で解釈済みなので、その `tool_use` の要素を先に突き合わせる。逆順の読み取りで読み 2 がこの行を消費し、読み 3 を次の行から始めると、直前の応答の最後の物理の行にだけある ID を見落とす。その後の行は、その ID の文字列か `compact_boundary` の文字列を含む行だけを `json.loads` する。その ID の `tool_use` を持つ会話の `assistant` の行に会えば `current` で終わる。`compact_boundary` の行か `tail` の先頭に会えば `behind`（`unrecorded`）で終わる。最後の応答より古い行の書きかけ・壊れた行は結果を変えないので、解釈しない
-- 計算量の注意: `tail` の大きさは呼ぶ側が決める。hook は `hook.transcript-tail`、ラッパーは `relay.transcript-tail` の宣言の値を `read_tail` の `size` に渡し、`read_tail` と `last_context` は渡された大きさをそのまま使う（読み手の中に上限を持たない）。256 KiB は 2 つの宣言の今の既定値で、下の時間を測った条件である。まとまりは最後の応答の行だけを持ち、応答ごとの辞書を作らない。代表の末尾（このマシンの大きい 200 本の末尾 256 KiB。行は中央 134.5・最大 341）での時間は次のとおりである。読み 1 で止める `Tail` が中央 0.26・最大 0.73 ms である。読み 3 を最後まで走る `ToolUse` の最悪の経路が中央 0.43・p95 0.68・最大 1.23 ms である（全行を解釈すると中央 1.59・最大 2.98 ms）。これは PreToolUse・PostToolUse の予算（`hook.budget.*` の p95 100 ms）の 1.3% 以下である。ラッパーの見回りの間隔（`relay.tick` 0.5 秒）に対しては 0.15% 以下である。今の読み手（最初の `usage` の行で止める）と同じ桁である
+- 計算量の注意: `tail` の大きさは呼ぶ側が決める。hook は `hook.transcript-tail`、ラッパーは `relay.transcript-tail` の設定の値を `read_tail` の `size` に渡す。`read_tail` と `last_context` は渡された大きさをそのまま使い、読み手の中に上限を持たない。256 KiB は 2 つの宣言の今の既定値で、下の時間を測った条件である。まとまりは最後の応答の行だけを持ち、応答ごとの辞書を作らない。代表の末尾（このマシンの大きい 200 本の末尾 256 KiB。行は中央 134.5・最大 341）での時間は次のとおりである。読み 1 で止める `Tail` が中央 0.26・最大 0.73 ms である。読み 3 を最後まで走る `ToolUse` の最悪の経路が中央 0.43・p95 0.68・最大 1.23 ms である（全行を解釈すると中央 1.59・最大 2.98 ms）。これは PreToolUse・PostToolUse の予算（`hook.budget.*` の p95 100 ms）の 1.3% 以下である。ラッパーの見回りの間隔（`relay.tick` 0.5 秒）に対しては 0.15% 以下である。今の読み手（最初の `usage` の行で止める）と同じ桁である
 
 ### 内部のデータと定数
 
@@ -219,16 +219,16 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 満たす決定: 決定 6、受け入れ条件 10
 
-#4068 の `keep_cache.last_turn`（#4068 の詳細設計）は、シグネチャ（`last_turn(tail, last_message, started) -> TurnRead`）と返り値の型を #4068 の詳細設計のまま使う。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。状態の寿命（以前の `known_ttl`）は引数に取らない。ロックの外で読んだ状態で寿命を補うと、並んで動く hook の順で古い値を使うためである（#4068・#4199 の設計の決定 13）。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の詳細設計は、この部品を使うために次の 2 点を反映済みである（#4068 の詳細設計の「処理の手順」の 3）。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
+#4068 の `keep_cache.last_turn` は、シグネチャと返り値の型を #4068 の詳細設計のまま使う。シグネチャは `last_turn(tail, last_message, started) -> TurnRead` である。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼ぶ。状態の寿命（以前の `known_ttl`）は引数に取らない。ロックの外で読んだ状態で寿命を補うと、並んで動く hook の順で古い値を使うためである（#4068・#4199 の設計の決定 13）。`tail` を自分で走査し直さず、採用行を探し直さない。#4068 の詳細設計は、この部品を使うために次の 2 点を反映済みである（#4068 の詳細設計の「処理の手順」の 3）。寿命の補い・起こす状態・起こす記録と集計の規則は #4068 の設計のまま変えない（範囲の外）。
 
-- **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` でなく共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読む。その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）
+- **末尾の読み取り**: #4068 の `rewake.run`（手順 3）は、会話の記録の末尾を `agents.tail` で読まない。共有の `read_tail(transcript_path, <hook.transcript-tail の値>)` で読む。その文字列を `last_turn` の `tail` に渡す。`last_context` は `read_tail` が返す文字列だけを受け付ける（設計文書の「入出力のコントラクト」）
 - **読めないとき**: 共有の `read_tail` は `OSError` を投げず空の文字列を返す。#4068 の手順 3 の「読めない（`OSError`）なら」の分岐は無くなる。空の文字列は `last_context` の `none`（`empty`）から下の表の `TurnRead(None, "unrecorded")` へ進む。呼び手の振る舞い（起こさず止めずに 0、理由の行を会話で 1 度だけ書く）は、今の「読めない」と「`unrecorded`」の扱いと同じである
 
-今回の応答を決める手がかりは `Reply`（Stop の入力の `last_assistant_message` の文）だけで、応答の ID の手がかりは持たない（#4068・#4199 の設計の決定 4 の「応答の ID が取れたとき」。ID の手がかりは実測の後に別の設計で足す）。
+今回の応答を決める手がかりは `Reply`（Stop の入力の `last_assistant_message` の文）だけで、応答の ID の手がかりは持たない。#4068・#4199 の設計の決定 4 の「応答の ID が取れたとき」に当たり、ID の手がかりは実測の後に別の設計で足す。
 
 状態から `TurnRead` への対応は次のとおりで、ここが対応の唯一の保存先である。
 
-`ref` は、突き合わせを通った応答（`current` か `none` の `form`）の `(message_id, at)` の組である。`at` は `timestamp_seconds(ContextRead.timestamp)` である。`ContextRead.message_id` か `at` のどちらかが None なら `ref` は None。`current` では 2 つとも必ずそろう。照合の結果は `ContextRead.state`・`reason`、ID と時刻は `ContextRead.message_id`・`timestamp` が渡す（`form` でも読めた値を持つ。上の「記録の読み手」の事後条件）。
+`ref` は、突き合わせを通った応答（`current` か `none` の `form`）の `(message_id, at)` の組である。`at` は `timestamp_seconds(ContextRead.timestamp)` である。`ContextRead.message_id` か `at` のどちらかが None なら `ref` は None。`current` では 2 つとも必ずそろう。照合の結果は `ContextRead.state`・`reason` が渡し、ID と時刻は `ContextRead.message_id`・`timestamp` が渡す。`form` でも読めた値を持つ（上の「記録の読み手」の事後条件）。
 
 | `last_context` の結果 | `last_turn` の結果（上から順に当てる） |
 | --- | --- |
@@ -250,4 +250,4 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | `model` | `entry["message"]["model"]` | 無い・空・文字列でない |
 | `ttl` | `u` の `cache_creation` の `ephemeral_1h_input_tokens`（1 時間の書き込み）と `ephemeral_5m_input_tokens`（5 分の書き込み）を #4068 の設計の決定 2 の表に当てる。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら None（未定）。補うのは呼び手の `rewake._settle` だけで、子を止めるロックの中で読み直した状態の `ttl` を使う。それでも未定なら待ちを始めない（#4068・#4199 の設計の決定 13） | `cache_creation` が object でない・2 つの項目のどちらかが無い・整数でない・負 |
 
-同じ `message.id` の前の行は、どの項目でも読まない。前の行と採用行で `usage` が違う複数行の応答でも、文脈の量（`tokens`・`S`）と起床の費用（`cache_read`・`cache_write`・`output`・`ttl`）は同じ採用行の値になる。
+同じ `message.id` の前の行は、どの項目でも読まない。前の行と採用行で `usage` が違う複数行の応答でも、使う値は同じ採用行の値になる。文脈の量（`tokens`・`S`）も、起床の費用（`cache_read`・`cache_write`・`output`・`ttl`）も同じである。
