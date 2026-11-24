@@ -58,7 +58,7 @@ def _time_to_at(row: Row) -> Row:
 
 def _signal_v1(row: Row) -> Row:
     """`version` は MVV の設定のバージョンだった。"""
-    return {"mvv_version": None, **{"mvv_version" if k == "version" else k: v for k, v in row.items()}}
+    return {"mvv_version": None, **_renamed(row, "version", "mvv_version")}
 
 
 def _decision_v1(row: Row) -> Row:
