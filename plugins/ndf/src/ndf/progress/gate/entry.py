@@ -414,7 +414,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--material-sha256", help="見た承認資料の sha256")
     ap.add_argument(
         "--presentation",
-        help="見た資料の提示の識別子。提示した承認の対象を持つ承認ゲートでは必須（routes が埋める。資料を出し直すと変わる）",
+        help="利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）",
     )
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
     return ap

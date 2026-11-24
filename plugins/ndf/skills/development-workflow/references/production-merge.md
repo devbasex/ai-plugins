@@ -5,7 +5,7 @@
 
 - 設定から本番チャネルを特定できない（マージ先を問わない）
 - 本番チャネル宛てで、自動で反映する設定がある
-- 本番チャネル宛てで、反映の方法の設定（`release.deliveries`）が無いか形が違う
+- 本番チャネル宛てで、反映の方法の設定（`release.deliveries`）が無いか、配列でない
 
 ## 例: project-trygroup-prd の 2 本のマージ
 
@@ -43,9 +43,9 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | --- | --- | --- |
 | 本番チャネルでない | 当たらない | そのまま進む |
 | 自動反映の本番チャネル | 当たる | 承認を得るまで進めない |
-| 本番チャネルで、`release.deliveries` が無い・形が違う | 当たるとして扱う。`release.deliveries` が無ければ `release.cd` を読み、CD の設定がある（自動で反映する）、`null`（未設定）、無い・形が違う（決められない）のどれでも当たる | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
+| 本番チャネルで、`release.deliveries` が無い・配列でない | 当たるとして扱う。`release.deliveries` が無ければ `release.cd` を読み、CD の設定がある（自動で反映する）、`null`（未設定）、無い・形が違う（決められない）のどれでも当たる | 承認を得るまで進めない。`release.deliveries` を設定すれば次から判定できる |
 | 設定を読めず、本番チャネルを特定できない（設定のファイルが無い・JSON として読めない・`branches.production` が無い） | マージ先にかかわらず当たるとして扱う | 承認を得るまで進めない。設定を直せば次から判定できる |
-| 本番チャネルで、`release.deliveries` に `channel: production` で `kind` が `manual` でない行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
+| 本番チャネルで、`release.deliveries` が配列で、`channel: production` で `kind` が `manual` でない行が無い（手で反映・リリースしない） | 当たらない。配列の行の中身は検証しないので、`channel` の欠けた行や形の違う行しか無い場合もここに入る | そのまま進む。本番への反映は `release` の工程で承認を取る |
 
 **判定は PR のベースリポジトリのマージ先のブランチにある `branch_strategy` とマージ先だけで決める。** 判定の規則は
 `ndf.core.production_merge` の 1 か所にあり、プランのマージのステップが打つ `ndf ci merge` と、エージェントが直接打つ

@@ -75,8 +75,11 @@ PR を読めた後は、省くときも省かないときも判定の記録（�
 
 承認ゲートで止まると、`ndf progress` の結果は質問（`metrics.gate.id`）と回答ごとのルート（そのまま打てる `ndf answer` の行）を返す。
 conductor は承認資料（[approval-request.md](approval-request.md) の形）に PR のコメントの判定の記録を添えて利用者へ示し、
-回答のルートを打つ。打つのは利用者に示した時点のルートで、`--head`・`--material-sha256`・`--presentation` を省かない。
+回答のルートを打つ。打つのは利用者に示した時点のルートである。ルートに含まれる `--head`・`--material-sha256`・`--presentation` は
+そのまま渡し、ルートに無いものは足さない（PR の無い承認ゲートでは `--head` が入らない）。
 資料を出し直した後に古いルートを打つと、回答は断られて承認ゲートは待ちのまま残る。
+
+次の例は PR がある承認ゲートのルートに、理由・回答者・冪等のキーを補った形である。
 
 ```text
 ndf answer <スプリントの ID> --gate <質問の id> --result <回答の語> --head <見た head> --material-sha256 <見た資料の sha256> --presentation <提示の識別子> --reason <理由> --by human --key <冪等のキー> [--notes <指摘ファイル>]

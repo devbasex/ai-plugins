@@ -309,14 +309,20 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 **利用者が承認ゲートで回答したら、承認も変更要求もスプリントのステートマシンへ `ndf answer` で 1 行書く。** pace と MVV 判定の
 有無を問わない。利用者へ新しい確認は求めない。書いた回答は `ndf answer list <ステートマシン>` で古い順に読める。
-打つのは、利用者に示した時点の承認ゲートの結果の `routes` にある、回答の語のコマンドである。`routes` は、見た PR の HEAD（`--head`）・
-承認資料の sha256（`--material-sha256`）・資料の提示の識別子（`--presentation`）を固定している。PR を持つ承認ゲートでこれらを省くか、
-資料を出し直した後に古い `routes` を打つと、回答は断られ、承認ゲートは待ちのまま残る。下の表の `<…>` は `routes` が埋めない値である。
+打つのは、利用者に示した時点の結果の `routes` にある、回答に対応するコマンドである。`routes` を返すのは、スプリントのステートマシン
+（`ndf progress`）か、プラン自身（`ndf plan`）のどちらかで、返るコマンドと補う引数が違う。
 
-| 進め方 | 承認 | 変更要求 |
+- `ndf progress` の承認ゲートが返す `routes` は `ndf answer` である。`--reason`・`--by human`・`--key` を補って打つ。
+  コマンドに含まれる `--head`（見た PR の HEAD）・`--material-sha256`（承認資料の sha256）・`--presentation`（資料の提示の識別子）は
+  そのまま渡す。これらを消すか、資料を出し直した後に古い `routes` を打つと、回答は断られ、承認ゲートは待ちのまま残る
+- プラン自身が回答を待つときの `routes` は `ndf plan next ... --answer <回答> --by human` である。引数を足さずにそのまま打つ
+
+下の表の `<…>` は `routes` が埋めない値である。
+
+| 回答を待っているもの | 承認 | 変更要求 |
 | --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `routes.approved` のコマンドに `--reason <要約> --by human --key <冪等のキー>` を足して打つ | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
-| スプリントのステートマシンがある（`reject` の無いプラン） | 同上 | `routes.request_changes` のコマンドに `--reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` を足して打つ |
+| スプリントのステートマシン（`ndf progress` が回答を待つ） | 提示時の `routes.approved` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー>` を補って打つ | 提示時の `routes.request_changes` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` を補って打つ |
+| `reject` のステップを持つプラン（プラン自身が回答を待つ） | プランの `routes.approved` の `ndf plan next` をそのまま打つ | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
 | ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
 
 `--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
