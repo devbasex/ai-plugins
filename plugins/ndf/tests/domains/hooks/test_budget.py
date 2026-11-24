@@ -86,6 +86,8 @@ def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns(m
         "claude の Stop の予算が contracts/limits/hook.budget.stop.json に無い",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         "read-repeat の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        "reading-check の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        "reading-check の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         # relay-busy の開始の記録は PreToolUse の排他を待つ。SessionStart も同じ行の事象である（#4049）
         "relay-busy の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
         "relay-busy の部品の上限 hook.counter-lock（99 秒）が claude の SessionStart の締め切り − 余白（2.0 秒）を超える",
