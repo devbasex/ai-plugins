@@ -13,7 +13,7 @@ plugins/ndf/
 │   ├── core/
 │   │   └── issue_docs.py *            設計書の名前の正規表現と、名前に含む課題の番号
 │   ├── progress/
-│   │   ├── invoke.py                  rebuild を base より先に決める。欠けの行に 3 つのキーを足す
+│   │   ├── invoke.py                  rebuild を derived_locally より先に決める。欠けの行に 3 つのキーを足す
 │   │   └── rebuild_values.py *        設定が無いときの既定のコマンドを組む
 │   ├── domains/
 │   │   ├── loop/design_tests.py       正規表現を core.issue_docs から読む
@@ -47,7 +47,7 @@ plugins/ndf/
 | `src/ndf/core/issue_docs.py` | 新設 | 設計書のパスの形と、名前に含む課題の番号を 1 か所で持つ | `re` | モジュール `ndf.core.issue_docs` | `DESIGN_FILE`（新設）、`design_issues`（新設） |
 | `src/ndf/domains/loop/design_tests.py` | 変更 | 正規表現を `core.issue_docs` から読む | `ndf.core.issue_docs` | モジュール | `_designs`（中身だけ変える） |
 | `src/ndf/progress/rebuild_values.py` | 新設 | 設定が無いときの `rebuild`・`base`・`remote` を組み、決められなければ理由を返す | `ndf.core.route`・`ndf.core.branch_strategy`・`ndf.adapters.git`・`ndf.identity` | モジュール `ndf.progress.rebuild_values` | `Undecided`・`Filled`・`kinds_for`・`launch`・`fill`（すべて新設） |
-| `src/ndf/progress/invoke.py` | 変更 | `rebuild` を打った場所の値より先に決め、欠けの行に 3 つのキーを載せる | `ndf.progress.rebuild_values` | `TemplateValuesMissing`、モジュール | `TemplateValuesMissing.__init__`・`TemplateValuesMissing.items`（変更）、`template_values`（変更）、定数 `PROJECT_KEYS`（`rebuild` の道を `rebuild_values.SETTING_PATH` から読む） |
+| `src/ndf/progress/invoke.py` | 変更 | `rebuild` を、作業場所から求める差し込み（`route.derived_locally`。`base`・`remote` など）より先に決める。値が欠けたときの `items` の `rebuild` の行に 3 つのキーを載せる | `ndf.progress.rebuild_values` | `TemplateValuesMissing`、モジュール | `TemplateValuesMissing.__init__`・`TemplateValuesMissing.items`（変更）、`template_values`（変更）、定数 `PROJECT_KEYS`（`rebuild` の道を `rebuild_values.SETTING_PATH` から読む） |
 | `src/ndf/domains/docrebuild/__init__.py` | 新設 | パッケージの説明だけを持つ | — | — | — |
 | `src/ndf/domains/docrebuild/select_decide.py` | 新設 | 差分のパスと課題の番号から候補を挙げ、通常ファイルと実装計画の頭で対象を決める | `ndf.core.issue_docs` | モジュール | `Target`・`Selection`・`kind_of`・`plan_paths`・`omits_design`・`candidates`・`select`（すべて新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`changed_paths`・`inspect`・`prompt_text`・`launch_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
@@ -160,7 +160,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `kinds_for` | 判定表の 3 行 | `mode` が `None` | 表に無い名前で空 |
 | `launch` | 課題 2 つ・種類 2 つで `--issue`・`--kind` が並ぶ | `{state_dir}` が置き換わらずに残る | — |
-| `fill` | 設定の無い `design` で `rebuild`・`base`・`remote` が返り、`--base` と `base`、`--remote` と `remote` が同じ値。`trunk` と `up` でも同じ（`origin`・`main` を書かない） | 設定 `workflow.launch.rebuild` があれば `Filled({})`。`values` に `base`・`remote` があれば読まない（`Git.remote` を呼ばない） | `branch_strategy` が無い → `Undecided` で `Git.remote` を呼ばない。`RemoteError` → `Undecided` |
+| `fill` | 設定の無い `design` で `rebuild`・`base`・`remote` が返り、`--base` と `base`、`--remote` と `remote` が同じ値。ベースブランチが `trunk`、リモートが `up` でも同じ（実装に `origin`・`main` を書かない） | 設定 `workflow.launch.rebuild` があれば `Filled({})`。`values` に `base`・`remote` があれば読まない（`Git.remote` を呼ばない） | `branch_strategy` が無い → `Undecided` で `Git.remote` を呼ばない。`RemoteError` → `Undecided` |
 
 ## 差し込みの値を集める処理（`ndf.progress.invoke`）
 
@@ -193,7 +193,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `TemplateValuesMissing.items` | `details` の無い行は今のまま 2 キー | `details` のある行だけ 5 キー | — |
-| `template_values` | 設定の無い `standard` のスプリントの 2 つの工程で、プランの組み直すステップに `ndf document-rebuild run` と `--out` が入る（`test_sprint_templates.py`） | 設定がある 2 つの工程で設定のコマンドが入る（今のテストを残す） | `branch_strategy` の無いリポジトリで、2 つの工程とも 5 キーの行が返り、工程の記録が無い |
+| `template_values` | 設定の無い、モード `standard` のスプリントの 2 つの工程で、プランの組み直すステップに `ndf document-rebuild run` と `--out` が入る（`test_sprint_templates.py`） | 設定がある 2 つの工程で設定のコマンドが入る（今のテストを残す） | `branch_strategy` の無いリポジトリで、2 つの工程とも 5 キーの行が返り、工程の記録が無い |
 
 ## 対象の選択（`ndf.domains.docrebuild.select_decide`）
 
@@ -252,7 +252,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `kind_of` | 課題の設計書・`documentation` の原稿 | 課題 433 と `issue-4337-design.md`、`issue-7-8-design.md` と課題 8 | 別の課題の設計書・要求仕様のコピー・実装計画 → `None` |
 | `omits_design` | 判定表の真の 2 行 | `##` の直前の行・本文の 1 行目 | 判定表の偽の 3 行 |
-| `candidates` | 工程「設計」で設計書だけ（条件 6）。`documentation` で原稿、`standard` で `docs/` を含まない（条件 7・8） | 差分が空でも `plan_paths` が入る（決定 9） | — |
+| `candidates` | 工程「設計」で設計書だけ（条件 6）。モード `documentation` で原稿、モード `standard` で `docs/` を含まない（条件 7・8） | 差分が空でも `plan_paths` が入る（決定 9） | — |
 | `select` | 省いた行を持つ実装計画が残る（条件 9） | 実装計画が作業場所に無い → `skipped` に入らない | 差分の `.md` のリンクと、リンクの実装計画が外れ `skipped` に出る（I1） |
 
 ## 組み直しの駆動（`ndf.domains.docrebuild.drive`）
@@ -265,14 +265,14 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `RunArgs` | `src/ndf/domains/docrebuild/drive.py` | 新設 | `@dataclass(frozen=True) RunArgs(base: str, remote: str, issues: tuple[int, ...], kinds: tuple[str, ...], state_dir: Path, cwd: Path)` | 1 回の実行の引数を持つ |
 | `Precondition` | 同上 | 新設 | `class Precondition(Exception)`、属性 `detail: str` | 起点か差分を決められないことを表す |
-| `BadReport` | 同上 | 新設 | `class BadReport(Exception)`、属性 `detail: str` | worker の足すべき内容の形の誤りを表す |
+| `BadReport` | 同上 | 新設 | `class BadReport(Exception)`、属性 `detail: str` | worker の足すべき内容（結果ファイルの `items` に書く、対象の外で直すべきこと）の形の誤りを表す |
 | `start_point` | 同上 | 新設 | `(g: git.Git, base: str, remote: str) -> str` | 設計書の「処理の流れ」の表どおりに起点の参照を決め、その SHA を返す |
 | `changed_paths` | 同上 | 新設 | `(g: git.Git, start: str, head: str) -> list[str]` | 3 ドット差分の消していないパスを返す |
 | `inspect` | 同上 | 新設 | `(cwd: Path, found: Sequence[Target]) -> tuple[set[str], set[str], dict[str, str]]` | 候補を `lstat` し、通常ファイル・作業場所にあるもの・通常ファイルの実装計画の本文を返す |
 | `prompt_text` | 同上 | 新設 | `(targets: Sequence[Target], requirements: Sequence[str], skill: Path) -> str` | 起動指示のテンプレートへ対象・要求仕様のコピー・手順書のパスを差し込む |
 | `launch_worker` | 同上 | 新設 | `(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]` | 起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す |
 | `added_items` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | worker の `items` を確かめ、`id` を `add-<番号>` に振り直す |
-| `reader_gaps` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | `metrics.readers` の欠けを、対象の文書ごとの `gaps` の要素にする（I4） |
+| `reader_gaps` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | 読み手役の記録（`metrics.readers`。形は設計書の「読み手役の記録」の表）の欠けを、対象の文書ごとの `gaps` の要素にする（I4） |
 | `reader_items` | 同上 | 新設 | `(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]` | `fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5） |
 | `drive` | 同上 | 新設 | `(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]` | 起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す |
 
@@ -327,7 +327,7 @@ plugins/ndf/
 | 種類 | `verdict` | 欠けでない条件 |
 | --- | --- | --- |
 | どれでも | `not_run` | `checks` が空の並びで、`reason` が空でない文字列 |
-| `design` | `pass`・`fail` | `checks` が 1 か 2。最後の `checks` の `verdict` が `verdict` と同じ。`checks` が 1 で `verdict` が `fail` なら `reason` が要る。`fixed` は欠け |
+| `design` | `pass`・`fail` | `checks` が 1 か 2。最後の `checks` の要素の `verdict` が、記録の `verdict` と同じ。`checks` が 1 で記録の `verdict` が `fail` なら、記録の `reason` が要る。記録の `verdict` が `fixed` なら欠け |
 | `plan`・`manuscript` | `pass`・`fixed`・`fail` | `checks` が 1。`pass` なら `checks` の `verdict` が `pass`、`fixed`・`fail` なら `fail` |
 | どれでも | ほかの値 | 欠け |
 
@@ -339,7 +339,7 @@ plugins/ndf/
 | --- | --- | --- |
 | 起点と差分 | `Precondition` | `stopped`（`precondition`）。worker を起動しない |
 | 選択 | 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類: …・起点: <参照の名前>）」、`items` は空、`metrics.targets` は空。`skipped` があれば `warnings` に載せる |
-| 起動 | 標準出力が `ok` でない | 上の異常系の表の 2 行 |
+| 起動 | 標準出力が `ok` でない | 上の異常系の表の、`drive` の「worker が `stopped` で終わった」と「worker が `gate` で終わった」の 2 行 |
 | 確かめ | `added_items` が `BadReport` | `stopped`（`bad_report`） |
 | 確かめ | `reader_gaps` が空でない | `stopped`（`incomplete`） |
 | 確かめ | どれも通った | `ok`。`items` は `added_items` の後に `reader_items` の項目。`warnings` は `skipped` と `reader_items` の文 |
@@ -379,7 +379,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `start_point` | リモート追跡ブランチが読める。`trunk`・`up` でも同じ（条件 5） | 登録済みでリモート追跡が無い・リモートが 1 つも無い → 手元 | 両方読めない・ほかの名前だけ → `Precondition`（偽の git） |
+| `start_point` | リモート追跡ブランチが読める。ベースブランチが `trunk`、リモートが `up` でも同じ（条件 5） | 登録済みでリモート追跡が無い・リモートが 1 つも無い → 手元 | 両方読めない・ほかの名前だけ → `Precondition`（偽の git） |
 | `changed_paths` | 日本語と空白を含むパス、消したファイルが出ない | 空の差分 | 終了コード 128 → `Precondition`。`merge-base` を打たない |
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
 | `reader_gaps` | `plan` の `fixed`（`checks` 1）・設計書の `fail`（`checks` 2）・3 種類の `not_run` | 設計書の `fail` で `checks` 1 と `reason` | 対象の行が無い・`restatements` が無い・原稿に `checks` 2・`not_run` に理由が無いか `checks` が空でない（I4） |
@@ -425,7 +425,7 @@ plugins/ndf/
 | `contracts/templates/params.json` | `rebuild` の `summary` の後ろに「工程から組むときに設定（`workflow.launch.rebuild`）が無ければ、`ndf document-rebuild run` を組む」を、`review` の説明と同じ形で足す |
 | `contracts/worker/document-rebuild.md` | `prompt_text` が差し込む `$targets`（対象のパスと種類の箇条）・`$requirements`・`$skill` を持つ。書くこと: 作業場所でコミットし push も Pull Request もしない・要求仕様のコピーを変えない・対象の外で直すべきことは当たる対象の `doc` を添えて結果ファイルの `items` に書く・文書ごとの読み手役の記録を `metrics.readers` に書く（形は設計書の「読み手役の記録」の表）・読み手役に限りサブエージェントを設計書 1 件につき最大 2 回、実装計画と原稿 1 件につき 1 回立ててよい・立てられなければ `not_run` と理由を書く |
 | `contracts/schemas/io/document-rebuild.result.schema.json` | `items` の要素は `id`・`text` が必須で、`add-` の要素は `doc` も必須。`metrics` は `targets`（文字列の並び）と `readers`（設計書の「読み手役の記録」の表の形）。`refactor.result.schema.json` と同じく `result.schema.json` を土台にする |
-| `skills/development-workflow/references/agent-layers.md` | 役割の表の worker の行とは別の行に、「`ndf worker run` が起動する組み直しの worker（`ndf document-rebuild run` が起動するもの）に限り、読み手役のサブエージェントを立ててよい。`ndf:worker` で起動した worker には当たらない」を足す（#4285 の文と別の行にする。設計書の「影響と危険」） |
+| `skills/development-workflow/references/agent-layers.md` | 役割の表の worker の行とは別の行に、「`ndf worker run` が起動する組み直しの worker（`ndf document-rebuild run` が起動するもの）に限り、読み手役のサブエージェントを立ててよい。`ndf:worker` で起動した worker には当たらない」を足す（#4285 が足す、conductor が読み手役を立ててよいという文と別の行にする。設計書の「影響と危険」） |
 | `src/ndf/checks/children.json` | `P1b` の `packages` に `ndf.progress.rebuild_values`、`M1` の `packages` に `ndf.domains.docrebuild` と `ndf.core.issue_docs` を足す。`needs` は変えない |
 | `src/ndf/cli.py` | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を、辞書順の位置へ足す |
 

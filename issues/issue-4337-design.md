@@ -110,7 +110,7 @@ flowchart TD
 | 要素 | 責務 |
 | --- | --- |
 | 既定の組み立て（新設。`ndf.progress.rebuild_values`） | 設定が無いときの既定のコマンドを組む。工程とモードから文書の種類への対応を持つ。ベースブランチは、値がまだ無ければ読み込み済みの設定から 1 回だけ決め、テンプレートが `base` を使うなら `base` の値としても返す。リモートの名前も、値がまだ無ければ `Git.remote()` で 1 回だけ求め、`remote` の値としても返す。決められなければ理由・設定のキー・値の形を返す |
-| 差し込みの値を集める処理（変更。`ndf.progress.invoke`） | `rebuild` を、打った場所の値より先に埋める。打った場所の値とは、`route.derived_locally` が作業場所の git と設定から求める差し込み（`base`・`remote` など）である。`rebuild_values.fill` が返した `base` と `remote` も差し込みに入れる。`derived_locally` は値のある `base`・`remote` を求め直さないので、設計のプランの `rebuild` と `base` は同じ解決済みのマージ先になり、ブランチ戦略の設定の読み込みと検証、`Git.remote()` の `git worktree list` はそれぞれ 1 回で済む。欠けの `items` に、`rebuild_values.fill` が返した理由・設定のキー・値の形の 3 つを載せる |
+| 差し込みの値を集める処理（変更。`ndf.progress.invoke`） | `rebuild` を、`route.derived_locally` が作業場所の git と設定から求める差し込み（`base`・`remote` など）より先に埋める。`rebuild_values.fill` が返した `base` と `remote` も差し込みに入れる。`derived_locally` は値のある `base`・`remote` を求め直さない。そのため、設計のプランの `rebuild` と `base` は同じ解決済みのマージ先になる。ブランチ戦略の設定の読み込みと検証、`Git.remote()` の `git worktree list` はそれぞれ 1 回で済む。欠けの `items` に、`rebuild_values.fill` が返した理由・設定のキー・値の形の 3 つを載せる |
 | サブコマンドの入口（新設。`ndf.domains.docrebuild.cli`。`__init__.py` はパッケージの説明だけ） | `ndf document-rebuild run` の引数を定義し、`drive` を呼ぶ。`ndf/cli.py` の `COMMANDS` に登録する。引数のスキーマ `document-rebuild.args.schema.json` と `docs/contracts/commands.md` は、規約の生成（`checks/spec_render.py`）が、`checks/spec_model.py` の読んだこの引数の定義から作る。手では書かない |
 | 組み直しの駆動（新設。`ndf.domains.docrebuild.drive`） | 起点を決め、git から差分を読み、`select_decide` で対象を選び、起動指示を組み、`ndf worker run` を打ち、結果を確かめ、`--out` と標準出力へ出す。コミット・`push`・GitHub への書き込みを持たない |
 | 対象の選択（新設。`ndf.domains.docrebuild.select_decide`） | 差分のパス・実装計画の頭・通常ファイルかどうかから対象を選ぶ。ファイルも git も読まない純粋な処理 |
@@ -191,7 +191,7 @@ flowchart TD
 1. 標準出力の結果 JSON を先に読む。`_cmd_run`（`core/worker.py`）が結果ファイルを検査した後の `status`・`kind`・`gaps` である。`ok` でなければ、結果ファイルを読まずに `stopped` を返す（I7）
 2. 標準出力が `ok` のときだけ、worker の結果ファイルを読み、足すべき内容（`items`）と `metrics.readers` を取る。標準出力の `items` はセッションの情報（`{"kind": "session", …}`）なので、足すべき内容として読まない
 
-worker の `gate` は `stopped` にする。ステップの結果の `routes` は、`approved` に承認したときの行き先を、`rejected` に却下したときの行き先を持つ。プランの実行（`runner._result_of`）は、ステップが `gate` を返すと `routes` によらず、`approved` の行き先を次のステップ（push の側）にする。そのため `gate` のまま返すと、承認だけで組み直しと確かめを飛ばして push に進む。止まった後は、プランを打ち直す（`ndf progress retry`）。組み直すステップが対象を選び直し、worker を新しく起動する。
+worker の `gate` は `stopped` にする。ステップの結果の `routes` は、`approved` に承認したときの行き先を、`rejected` に却下したときの行き先を持つ。ステップが `gate` を返すと、プランの実行（`runner._result_of`）は `routes` に何を書いたかを見ずに、`approved` の行き先（push の側）を次のステップにする。そのため `gate` のまま返すと、承認だけで組み直しと確かめを飛ばして push に進む。止まった後は、プランを打ち直す（`ndf progress retry`）。組み直すステップが対象を選び直し、worker を新しく起動する。
 
 **起動指示**: 次のことを書く。
 
@@ -425,7 +425,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 ### 決定 9: 設計 PR を取り込んだ後も組み直せるように、設計書を省いた実装計画は差分でなく課題の番号で選ぶ
 
 - **質問**: 設計 PR がベースブランチへマージコミットで入った後の工程「ドキュメント再構成」で、省いた行を持つ実装計画をどう見つけるか（条件 9）
-- **選んだ案**: `--issue` の番号からパスを決め、作業場所にあって省いた行を持てば選ぶ。設計 PR は工程「設計」の終わりにマージされるので、マージコミットで入ると差分が空になる。実装計画は工程「設計」の対象でないため、差分から選ぶと、どちらの工程でも組み直されない
+- **選んだ案**: `--issue` の番号からパスを決め、作業場所にあって省いた行を持てば選ぶ。設計 PR は工程「設計」の終わりにマージされる。マージコミットで入ると起点が `HEAD` そのものになり、差分が空になる（「処理の流れ」の実測の表）。実装計画は工程「設計」の対象でないため、差分から選ぶと、どちらの工程でも組み直されない
 - 採らなかった案: 起点をマージの前へ戻す（どのコミットまで戻すかを知る入力が工程に無く、ほかの課題の文書まで差分に入る）
 - 採らなかった案: 工程「設計」でも実装計画を選ぶ（前提 3 と条件 6 に反する）
 - **代償**: 前のスプリントで組み直した同じ課題の実装計画が省いた行を持ったまま残っていれば、次のスプリントで 1 回組み直す
