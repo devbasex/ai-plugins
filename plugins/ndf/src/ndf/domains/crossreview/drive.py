@@ -138,6 +138,11 @@ class _Run:
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
 
+    @property
+    def mvv_items(self) -> tuple[str, ...]:
+        """承認済みのプロジェクト MVV の項目（MVV を読んでいないか、承認済みでなければ空）。"""
+        return self.snapshot.items if self.snapshot is not None else ()
+
     def round_stem(self, round_no: int, suffix: str) -> Path:
         """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
         return self.cfg.state_dir / f"round{round_no}{suffix}"
@@ -355,9 +360,8 @@ def _carry(run: _Run, prior: _Prior) -> None:
     carried = prior_decide.carried(prior.threads, tracked, marks)
     held = tracked | {c.comment for c in carried}
     carried += [c for c in listed if c.thread is None or c.thread not in held]
-    items = run.snapshot.items if run.snapshot is not None else ()
-    merged = _merge_tracked(run, prior.threads, done, marks, items)
-    added = set(run.journal.carry(carried, items, run.mvv))
+    merged = _merge_tracked(run, prior.threads, done, marks, run.mvv_items)
+    added = set(run.journal.carry(carried, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
     _detach_revived(run)
     merged.update(run.journal.merged)
@@ -778,8 +782,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
-    items = run.snapshot.items if run.snapshot is not None else ()
-    run.history.append(run.journal.enter(round_no, raised, items, run.mvv))
+    run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
     _detach_revived(run)
     record = _round_record(run, round_no, prep)
