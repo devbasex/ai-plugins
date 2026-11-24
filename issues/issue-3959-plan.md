@@ -4,8 +4,8 @@
 
 - 要求仕様: [issue-3959-requirements.md](./issue-3959-requirements.md)（正は #3959 の本文）。受け入れ条件は番号で指す。条件 6 は #4104 へ移したので無い
 - 設計書: [issue-3959-4055-design.md](./issue-3959-4055-design.md)、詳細設計書: [issue-3959-4055-design-detail.md](./issue-3959-4055-design-detail.md)
-- 前提にする設計: #4076 の設計（[issue-4076-design.md](./issue-4076-design.md)）と、その直しの #4090・#4099 の設計（[issue-4090-4099-design.md](./issue-4090-4099-design.md)）。単位 2〜4 は #4076 の実装が main へ入った後に始める（要求仕様の前提 1、設計の決定 7）
-- 前提にする実装計画: [issue-4076-plan.md](./issue-4076-plan.md)。この計画の単位が使う #4076 の部品と、それを作る #4076 の単位は「レビューの単位」の表の後にある
+- 前提にする仕様: #4076（直しの #4090・#4099 を含む）の確定仕様。承認済みの MVV の読み取りと MVV の記録は [ndf-mvv-current-and-stage-inputs.md](../docs/specifications/ndf-mvv-current-and-stage-inputs.md)、cross-review の MVV の扱いは [cross-review-project-mvv.md](../docs/specifications/cross-review-project-mvv.md) にある。この計画の「#4076 の設計」「#4090・#4099 の設計」「#4076 の計画の U<番号>」は、実装が終わって消した文書を指す。単位 2〜4 は #4076 の実装が main へ入った後に始める（要求仕様の前提 1、設計の決定 7）
+- この計画の単位が使う #4076 の部品と、それを作る #4076 の単位は「レビューの単位」の表の後にある
 - モード: `standard`（公開インタフェースの `ndf records mvv gate` の引数と `ndf records mvv cite` を足し、手順書とコントラクトを変える）
 
 ## 修正対象
@@ -73,7 +73,7 @@
 ### Task 5: レビューの保留を読み、記録の欠落で cross-review を止める
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`review_rows`・`ReviewWrite`・`record_review`）、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`（`check_review_holds`・`MvvFacts`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（保留の配線）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`（#4076 の計画の U12 が作る。この単位は書き足す）、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
-- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は、直っていないレッドラインと、見送りの区分が `needs_user`（または区分の無い）見送りだけを保留にし、伏せた記録（`withheld: true`。#4076 の計画の U12 が書く）の 3 つ目の規則を含む（設計の決定 2・11）。修正担当が見送るときに区分を書き（`drive.py` の結果の形・`review-criteria.json`）、ジャーナル（`journal.py`）が持ち、`record_review` が記録に書く。`record_review` の重ねない判定は詳細設計書に書いた全項目（head・終わり方・バージョン・項目・理由・本文・`withheld`）と伏せた記録の 2 つの規則のまま。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
+- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は、直っていないレッドラインと、見送りの区分が `needs_user`（または区分の無い）見送りだけを保留にし、伏せた記録（`withheld: true`。#4076 の計画の U12 が書く）の 3 つ目の規則を含む（設計の決定 2・11）。修正担当が見送るときに区分を書き（`drive.py` の結果の形・`review-criteria.json`）、ジャーナル（`journal.py`）が持ち、`record_review` が記録に書く。`record_review` の重ねない判定は、今の規則（比べる全項目と、伏せた記録の 2 つの規則）に `defer` の比較を足したもので、全項目は詳細設計書にある。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
 - **満たす受け入れ条件:** 4・5
 - **進め方:** 失敗するテスト（`fast` で保留があっても `skip: true`）→ 通す最小実装 → 整理
 
