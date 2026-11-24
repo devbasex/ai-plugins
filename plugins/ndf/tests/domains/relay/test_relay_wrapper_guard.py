@@ -516,3 +516,16 @@ def test_r3_4_the_queued_time_of_the_old_generation_does_not_hold_back_the_new_o
     register(tmp_path, "work1", generation="g2")
     w._queue_fetch(base + 1)
     assert put == [("g1", base), ("g2", base + 1)]
+
+
+def test_failed_fetches_are_written_as_one_row_and_the_name_becomes_free(tmp_path):
+    # #4049 の受け入れ条件 15（変えない振る舞い）: 取得の例外は見回り 1 回につき 1 行にまとめ、名前を取得の途中から外す
+    w = wrapper.Wrapper(make_settings(tmp_path, fetch=lambda *_: None))
+    w.dir.mkdir(parents=True)
+    w._drain_fetch()
+    w.fetcher.busy.update({"work1", "work2"})
+    w.fetcher.done.put(("work1", OSError("x")))
+    w.fetcher.done.put(("work2", ValueError("y")))
+    w._drain_fetch()
+    (row,) = rows_of(w, "usage_fetch_failed")
+    assert row["count"] == 2 and row["sample"][0] == {"account": "work1", "error": "OSError"} and w.fetcher.busy == set()
