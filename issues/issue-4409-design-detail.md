@@ -1,8 +1,8 @@
 # #4409 の詳細設計: 自動反映の本番チャネルへのマージを、リリース承認ゲートの回答まで止める
 
-設計文書 [issue-4409-design.md](./issue-4409-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。決定の中身と採らなかった案は設計文書の「決定の記録」に、受け入れ条件は要求仕様 [issue-4409-requirements.md](./issue-4409-requirements.md) にある。
+設計文書 [issue-4409-design.md](./issue-4409-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。決定の中身と採らなかった案は、設計文書の「決定の記録」にある。受け入れ条件は、要求仕様 [issue-4409-requirements.md](./issue-4409-requirements.md) にある。
 
-別ファイルにした理由: 新設する関数が 2 つ以上あり（判定の部品の `judge`、`ndf ci ask`・`ndf ci answer` など）、既存の関数のシグネチャも変える（`GitHub.merge`・`answering.answer` など）。
+別ファイルにした理由: 新設する関数が 2 つ以上ある（判定の部品の `judge`、`ndf ci ask`・`ndf ci answer` など）。既存の関数のシグネチャも変える（`GitHub.merge`・`answering.answer` など）。
 
 ## 地図
 
@@ -364,7 +364,7 @@ plugins/ndf/
 
 - `answer`
   - 事前条件: `post` は PR を持つ承認ゲートでは `github_post` の口である
-  - 事後条件: 回答の事象の `seen` には、回答した者の HEAD と承認資料の sha256 に、提示した対象の `repo`・`pr`・`base`・`production` を足したものが入る（`invoke._approved_target` がここを読む）
+  - 事後条件: 回答の事象の `seen` には、回答した者の HEAD と承認資料の sha256 が入る。そこへ、提示した対象の `repo`・`pr`・`base`・`production` を足す（`invoke._approved_target` がここを読む）
   - 副作用: GitHub の PR の読み取り（`observe`）、コメントの読み取りと投稿（`post`）、状態の記録のトランザクション
 - `_trail_by`
   - 副作用: `organizer` のときだけ、計画の状態機械のリクエスト（`release_request_of`）を読む
@@ -557,7 +557,10 @@ plugins/ndf/
 | `contracts/templates/release.json` | `params` に `pr`・`approved_head`・`approved_base` を足す。最初のステップ `release-merge` は `["ndf", "ci", "merge", "--pr", "{{pr}}", "--production-gate", "stale", "--approved-head", "{{approved_head}}", "--approved-base", "{{approved_base}}"]`、その後に今の `work` |
 | `contracts/causes/approval_stale.json` | 停止理由の定義を足す |
 
-単体テストの観点: テンプレートを組んだプランで、`merge` の `ok`（`deferred` を含む）が `approve-merge` へ流れないこと、`approve-*`・`reject-*` が `on_answer` からしか到達しないこと（`tests/progress/test_sprint_templates.py`）。
+単体テストの観点（`tests/progress/test_sprint_templates.py`）: テンプレートを組んだプランで、次の 2 つを確かめる。
+
+- `merge` の `ok`（`deferred` を含む）が `approve-merge` へ流れない
+- `approve-*`・`reject-*` が `on_answer` からしか到達しない
 
 ## 差し込みの組み立て
 
