@@ -10,9 +10,11 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Optional
 
+from ndf import identity
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records.mvv_decide import State
 
 
 def _text(value: object) -> Optional[str]:
@@ -28,9 +30,23 @@ def _text(value: object) -> Optional[str]:
 OCCURRENCE = "occurrence"
 
 
-# 必ず人の承認が要る操作に当たる指摘かどうかと、相手役が挙げたその番号（`P1`・`C7`）の欄（#4076）
-REDLINE = "redline"
+# 指摘がプロジェクト MVV に反するときの欄（#4076）。下の識別子は、どの MVV かを表す文字列（`records.mvv.Snapshot.identity`）
+# 反する項目（`Value 5`・`P1` など）
+MVV = "mvv"
+# 重さを、修正担当へ渡す重さに固定したか（`Value`・`Vision`・`Mission` に反する指摘）と、固定する前の重さ
+PINNED = "mvv_pinned"
+UNPINNED = "unpinned_severity"
+# 必ず人の承認が要る操作に当たるか（欄の名前は `finish_decide` が持つ）と、相手役が挙げたその番号（`P1`・`C7`）
 REDLINE_ITEMS = "redline_items"
+# 上の 5 つを決めたときの MVV の識別子
+JUDGED = "judged_mvv"
+# MVV が変わって外した判定の並び（追記だけ）
+HISTORY = "mvv_history"
+# 見送ったときの MVV の識別子
+SKIPPED_MVV = "skipped_mvv"
+# NDF が機械で確かめて作った指摘の `by` と、修正担当の結果で終わり方を変えない指摘へ修正担当が返した理由の欄
+BY_NDF = identity.FIXED_WORDS["entrypoint"]
+FIXER_REASON = "fixer_reason"
 
 
 def new_occurrence() -> str:
@@ -90,75 +106,144 @@ def _raised(item: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _named_any(item: dict[str, Any]) -> bool:
+    """相手役が `mvv` に何か書いたか（キーが無い・null・空白だけなら偽）。"""
+    value = item.get("mvv")
+    return value is not None and bool(str(value).strip())
+
+
 def _blocking(row: dict[str, Any]) -> bool:
-    return criteria_decide.blocking(criteria_decide.severity_of(row.get("severity")))
+    """修正担当へ渡し、収束を止める指摘か（必ず人の承認が要る操作に当たる指摘は、重さによらず偽）。"""
+    return not row.get(fin.REDLINE) and criteria_decide.blocking(criteria_decide.severity_of(row.get("severity")))
+
+
+def _same_mvv(held: Optional[str], now: Optional[str]) -> bool:
+    """見送ったときの MVV（`held`）が今回（`now`）と同じか。識別子の無い見送り（識別子を書く前のバージョンの NDF が残した
+    もの・どの MVV での見送りか分からないもの）は、今も MVV が無いときだけ同じとみなす。"""
+    return held == now or (held is None and now is not None and now.startswith(f"{State.ABSENT}:"))
+
+
+def _unpin(row: dict[str, Any]) -> None:
+    """固定した重さを、固定する前へ戻す。"""
+    if UNPINNED in row:
+        row["severity"] = row.pop(UNPINNED)
+    row.pop(PINNED, None)
+
+
+def _unclassify(row: dict[str, Any]) -> None:
+    """前の MVV で決めた判定を外して履歴に残す。終わり方は変えない。"""
+    old = {k: row[k] for k in (JUDGED, MVV, REDLINE_ITEMS, "outcome", SKIPPED_MVV) if k in row}
+    row[HISTORY] = [*store.list_of(row, HISTORY), old]
+    _unpin(row)
+    for key in (MVV, fin.REDLINE, REDLINE_ITEMS, JUDGED):
+        row.pop(key, None)
+
+
+def _classify(row: dict[str, Any], item: dict[str, Any], named: str, items: Sequence[str], mvv: Optional[str]) -> None:
+    """相手役が `item` で挙げた MVV の項目 `named` を指摘 `row` に残す。挙げた項目は、言われた順によらず `items`（MVV の項目）の順に並べる。
+    必ず人の承認が要る操作が 1 つでもあれば、`Value` などの項目より優先して重さの固定を外す。"""
+    held = {named, row.get(MVV), *store.list_of(row, REDLINE_ITEMS)}
+    found = [i for i in items if i in held]
+    redlines = [i for i in found if criteria_decide.redline(i)]
+    if redlines:
+        _unpin(row)
+        row |= {MVV: redlines[0], fin.REDLINE: True, REDLINE_ITEMS: redlines, JUDGED: mvv}
+        return
+    severity = criteria_decide.severity_of(row.get("severity"))
+    pinned = [criteria_decide.at_least_blocking(s) for s in (severity, criteria_decide.severity_of(item.get("severity")))]
+    row.setdefault(UNPINNED, severity)
+    row |= {MVV: found[0], PINNED: True, JUDGED: mvv, "severity": criteria_decide.heavier(*pinned)}
+
+
+def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str]) -> bool:
+    """出し直された見送り済みの指摘を、判定し直すか。別の MVV での見送りと、必ず人の承認が要る操作と今回初めて言われた
+    指摘（修正担当が見送りを決められない）が当たる。"""
+    if row.get("outcome") != fin.SKIPPED:
+        return False
+    redline = named is not None and criteria_decide.redline(named) and not row.get(fin.REDLINE)
+    return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
+
+
+def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[str]) -> list[str]:
+    """MVV の項目の書き方に問題のある指摘の注意（無ければ空）。相手役が書いた文は載せず、指摘の id だけを並べる。"""
+    out = []
+    if unknown:
+        names = "・".join(dict.fromkeys(unknown))
+        out.append(f"round {round_no} の指摘 {names} の mvv が承認済みの MVV の項目に無いので、普通の指摘として扱った")
+    if unexplained:
+        names = "・".join(dict.fromkeys(unexplained))
+        out.append(f"round {round_no} の MVV に反する指摘 {names} に起きること（impact）が無いが、重さを下げずに扱った")
+    return out
 
 
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
-    指摘はキーで重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。必ず人の承認が要る操作に
-    当たる指摘は、修正担当へ渡さず未解決のまま残す（終わり方の判定が欠けにして、人の判断へ戻す）。
+    指摘はキーで重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。MVV が変わった後に出し直された
+    指摘は、見送り済みでも今の MVV で判定し直す。必ず人の承認が要る操作に当たる指摘は、修正担当へ渡さず、収束も止めずに、
+    未解決のまま残す（#4076）。
     """
 
     def __init__(self, rows: Sequence[Any] = ()):
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
-        # 直したのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
+        # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
+        # 最後の `enter` で、相手役の指摘について結果に残す注意
+        self.warnings: list[str] = []
 
     def _next_id(self, round_no: int) -> str:
         """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
         return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
 
-    def enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = ()) -> frozenset[str]:
+    def enter(
+        self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None
+    ) -> frozenset[str]:
         """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
-        MVV の項目で、指摘の `mvv` がこの中にあれば行に残す。見送り済みは扱わず、
+        MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
+        unknown: list[str] = []
+        unexplained: list[str] = []
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
             if not text:
                 continue
             key = oscillation.finding_key(text)
+            named = criteria_decide.mvv_item(item.get("mvv"), items)
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
                 known = self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section"))) | _raised(item)
                 by_key[key] = known
             else:
-                self._raised_again(known, item, round_no)
-            self._classify(known, criteria_decide.mvv_item(item.get("mvv"), items), items)
+                self._raised_again(known, item, round_no, named, mvv)
+            if named is not None and known.get("by") != BY_NDF:
+                _classify(known, item, named, items, mvv)
+                if known.get(PINNED) and "impact" not in _raised(item):
+                    unexplained.append(str(known["id"]))
+            elif named is None and items and _named_any(item):
+                unknown.append(str(known["id"]))
             touched[key] = known
-        return frozenset(key for key, row in touched.items() if _blocking(row) and not row.get(REDLINE))
+        self.warnings = _mvv_warnings(round_no, unknown, unexplained)
+        return frozenset(key for key, row in touched.items() if _blocking(row))
 
-    def _classify(self, row: dict[str, Any], named: Optional[str], items: Sequence[str]) -> None:
-        """指摘が反する MVV の項目 `named` を行に残す。必ず人の承認が要る操作なら、`Value` などの項目や見送りより優先し、
-        軽い重さでも人の判断へ戻るよう収束の妨げになる重さにする。前に人が決めた同じ指摘は開き直さない。"""
-        if named is None:
-            return
-        if not criteria_decide.redline(named):
-            row.setdefault("mvv", named)
-            return
-        if not row.get(REDLINE) and row.get("outcome") == fin.SKIPPED:
-            row |= {"outcome": fin.UNRESOLVED, "reason": None, OCCURRENCE: new_occurrence()}
-            self.revived.append(str(row["id"]))
-        held = {named, *store.list_of(row, REDLINE_ITEMS)}
-        found = [i for i in items if i in held]
-        severity = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("severity")))
-        row |= {REDLINE: True, REDLINE_ITEMS: found, "mvv": found[0], "severity": severity}
-
-    def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int) -> None:
-        """既にある指摘が出し直されたとき。直した指摘なら未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す。
+    def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
+        """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
+        未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。"""
         new = _raised(item)
-        if known.get("outcome") == fin.FIXED:
+        if known.get(JUDGED) not in (None, mvv):
+            _unclassify(known)
+        if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
         severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
         if severity is not None:
             known["severity"] = severity
+        if UNPINNED in known:
+            known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
         if "raised_severity" in known:
@@ -166,13 +251,13 @@ class FindingJournal:
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
-        """直した指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
+        """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line"):
+        for stale in ("path", "line", SKIPPED_MVV):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
@@ -193,32 +278,56 @@ class FindingJournal:
             added.append(c.id)
         return added
 
-    def skipped_texts(self) -> list[str]:
-        """見送り済みの指摘の本文。"""
-        return [f["text"] for f in self.rows.values() if f.get("outcome") == fin.SKIPPED]
+    def restate(self, mvv: Optional[str]) -> list[str]:
+        """`mvv` と違う MVV で決めた判定を外し、外した指摘の id を返す（出し直されない指摘に前の判定を残さない）。"""
+        stale = [f for f in self.rows.values() if f.get(JUDGED) not in (None, mvv)]
+        for row in stale:
+            _unclassify(row)
+        return [str(f["id"]) for f in stale]
+
+    def skipped_texts(self, mvv: Optional[str] = None) -> list[str]:
+        """今回と同じ MVV `mvv` で見送った指摘の本文。"""
+        return [f["text"] for f in self.rows.values() if f.get("outcome") == fin.SKIPPED and _same_mvv(f.get(SKIPPED_MVV), mvv)]
+
+    def handable(self) -> list[dict[str, Any]]:
+        """修正担当へ渡す未解決の指摘。"""
+        return [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f)]
 
     def pending(self, handed: Sequence[fin.Handed]) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
-        """修正担当へ渡す未解決の指摘と、まだ決めていない足すべき内容（必ず人の承認が要る操作に当たる指摘は渡さない）。"""
-        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f) and not f.get(REDLINE)]
+        """修正担当へ渡す未解決の指摘と、まだ決めていない足すべき内容。"""
         undecided = [h for h in handed if h.id not in self.rows or self.rows[h.id].get("outcome") not in fin.DECIDED]
-        return open_, undecided
+        return self.handable(), undecided
 
-    def redlines(self) -> list[dict[str, Any]]:
-        """人の判断を待つ、必ず人の承認が要る操作に当たる未解決の指摘。"""
-        return [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and f.get(REDLINE)]
+    def apply_fix(
+        self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int, *, mvv: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """修正の結果の指摘ごとの終わり方をマージし、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。
+        `mvv` は修正担当を起動したときの MVV の識別子（分からなければ None）で、見送りに残す。
 
-    def apply_fix(self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int) -> list[dict[str, Any]]:
-        """修正の結果の指摘ごとの終わり方をマージ、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。"""
+        NDF が機械で確かめて作った指摘（閉じるのは機械の確かめだけ）と、必ず人の承認が要る操作に当たる指摘（人の承認を待つ）への
+        結果は、終わり方を変えず、修正担当の理由だけを残す。返す件にも入れない。返した件のうち直した指摘は、修正のコミットを
+        送り直した後に直したへ戻るためである（#4109）。"""
         texts = {h.id: h.text for h in handed}
-        reported = [f for f in items if isinstance(f, dict) and f.get("outcome") in fin.DECIDED]
-        for item in reported:
+        taken = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("outcome") not in fin.DECIDED:
+                continue
             fid = str(item.get("id"))
             reason = _text(item.get("reason"))
-            if fid in self.rows:
-                self.rows[fid] |= {"outcome": item["outcome"], "reason": reason}
-            elif fid in texts:
-                self.rows[fid] = _journal_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
-        return reported
+            row = self.rows.get(fid)
+            if row is not None and (row.get("by") == BY_NDF or row.get(fin.REDLINE)):
+                row[FIXER_REASON] = reason
+                continue
+            taken.append(item)
+            if row is None and fid in texts:
+                row = self.rows[fid] = _journal_row(fid, round_no, texts[fid], "rebuild")
+            if row is None:
+                continue
+            row |= {"outcome": item["outcome"], "reason": reason}
+            row.pop(SKIPPED_MVV, None)
+            if item["outcome"] == fin.SKIPPED and mvv is not None:
+                row[SKIPPED_MVV] = mvv
+        return taken
 
     def reopen(self, fids: Sequence[str]) -> None:
         """直したとした指摘を未解決へ戻す（修正が PR に届かなかった）。"""
@@ -227,10 +336,12 @@ class FindingJournal:
                 self.rows[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
 
     def restore_fixed(self, fids: Sequence[str]) -> None:
-        """送れずに未解決へ戻した指摘を、送り直せた後に直したへ戻す（未解決のままの行だけ）。"""
+        """送れずに未解決へ戻した指摘を、送り直せた後に直したへ戻す（未解決のままの行だけ。必ず人の承認が要る操作に当たる
+        指摘は、承認を待つまま残す）。"""
         for fid in fids:
-            if fid in self.rows and self.rows[fid].get("outcome") == fin.UNRESOLVED:
-                self.rows[fid] |= {"outcome": fin.FIXED, "reason": None}
+            row = self.rows.get(fid)
+            if row is not None and row.get("outcome") == fin.UNRESOLVED and not row.get(fin.REDLINE):
+                row |= {"outcome": fin.FIXED, "reason": None}
 
     def findings(self) -> tuple[fin.Finding, ...]:
         """要約に載せる指摘（終わり方を知っている行）。"""
@@ -241,6 +352,8 @@ class FindingJournal:
                 f["outcome"],
                 _text(f.get("reason")),
                 criteria_decide.severity_of(f.get("severity")),
+                _text(f.get(MVV)),
+                bool(f.get(fin.REDLINE)),
             )
             for f in self.rows.values()
             if f.get("outcome") in fin.OUTCOMES
