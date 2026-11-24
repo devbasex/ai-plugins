@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -15,6 +16,7 @@ from ndf import contracts
 from ndf.adapters import git
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
+from ndf.domains.records import preflight
 
 BODY = """# 見本の MVV
 
@@ -134,6 +136,41 @@ def test_current_keeps_a_matching_snapshot_and_replaces_a_different_one(repo: Pa
     assert again == first and first.path.stat().st_ino == inode
     assert hashlib.sha256(first.principles_path.read_bytes()).hexdigest() == first.principles_sha256
     assert _snapshots(repo) == sorted([first.path, first.principles_path])
+
+
+def test_snapshots_are_readable_only_by_the_owner(repo: Path) -> None:
+    """umask 022 でも 0600 で作り、前からあった緩い権限のスナップショットは使い回さずに作り直す。"""
+    _commit(repo, _decl(BODY))
+    before = os.umask(0o022)
+    try:
+        first = mvv.current(repo, "main")
+        assert first.path is not None and [p.stat().st_mode & 0o777 for p in _snapshots(repo)] == [0o600, 0o600]
+        first.path.chmod(0o644)
+        assert mvv.current(repo, "main") == first and first.path.stat().st_mode & 0o777 == 0o600
+    finally:
+        os.umask(before)
+
+
+LF, CRLF = BODY.replace("\r\n", "\n"), BODY
+
+
+@pytest.mark.parametrize("approved", [LF, CRLF])
+@pytest.mark.parametrize("committed", [LF, CRLF])
+@pytest.mark.parametrize("checked_out", [LF, CRLF])
+def test_line_ending_conversion_does_not_split_preflight_and_current(repo: Path, approved: str, committed: str, checked_out: str) -> None:
+    """`core.autocrlf`・`eol=crlf` で作業場所と blob の改行が違っても、どちらで承認した記録も両方が承認済みにする。"""
+    _commit(repo, _decl(approved), committed)
+    (repo / ".ndf" / "mvv.md").write_bytes(checked_out.encode("utf-8"))
+    got = mvv.current(repo, "main")
+    assert (preflight.mvv_state(repo), got.state, got.sha256) == ("approved", "approved", _sha(approved))
+    assert got.path is not None and got.path.read_bytes() == approved.encode("utf-8")
+    assert got.blobs[".ndf/mvv.md"] == _blob_id(committed.encode("utf-8"))
+
+
+def test_a_change_other_than_line_endings_is_a_mismatch_for_both(repo: Path) -> None:
+    _commit(repo, _decl(LF), CRLF.replace("使命", "別の使命"))
+    assert preflight.mvv_state(repo) == "mismatch"
+    assert mvv.current(repo, "main", allow_mismatch=True).state == "mismatch"
 
 
 def test_failed_write_leaves_no_temporary_file(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

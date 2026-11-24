@@ -58,9 +58,10 @@ def ndf_settings_checked(root: Path) -> pd.Checked:
     return pd.Checked(pd.NDF_SETTINGS, result.result(TOOL, result.OK, "プロジェクトの設定を読めた", warnings=warnings))
 
 
-def sha256_of(path: Path) -> Optional[str]:
+def sha256_of(path: Path, decl: Mapping[str, Any]) -> Optional[str]:
+    """本文の sha256（改行は承認の記録と合う形にそろえる。`mvv_decide.approved_form`）。"""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return hashlib.sha256(md.approved_form(decl, path.read_bytes())).hexdigest()
     except OSError:  # noqa: NDF401 ファイル: 読めない本文は sha256 の無い unreadable の状態にする
         return None
 
@@ -83,7 +84,7 @@ def mvv_state(root: Path) -> str:
         body = mvv_body(root, decl)
     except md.MvvError:
         return md.State.UNREADABLE
-    return md.status(decl, sha256_of(body))
+    return md.status(decl, sha256_of(body, decl))
 
 
 def mvv_checked(root: Path) -> pd.Checked:

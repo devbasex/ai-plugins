@@ -8,9 +8,9 @@
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `adapters.markdown`（足す） | モジュール | `body_path`（新設）・`parse_citation`（新設）・`decision_lines`（新設）・`fenced_lines`（#4076 の新設を置き換え）・`citation_errors`（#4076 の新設を置き換え）・`review_holds`（#3959 の新設に条件を足す） |
-| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`（新設）・`record_review`（引数を足す）・`record_key`（新設） |
-| `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ） |
+| `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `adapters.markdown`（足す） | モジュール | `approved_form`（新設）・`body_path`（新設）・`parse_citation`（新設）・`decision_lines`（新設）・`fenced_lines`（#4076 の新設を置き換え）・`citation_errors`（#4076 の新設を置き換え）・`review_holds`（#3959 の新設に条件を足す） |
+| `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`mvv_decide` | `Snapshot`（欄を足す） | `current`（置き換え）・`_write_verified`・`_is_private`（新設）・`record_review`（引数を足す）・`record_key`（新設） |
+| `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ）・`sha256_of`（設定を受け `approved_form` を通す） |
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` を足す） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`journal` | `RunConfig`・`_Run`（欄 `clean` を足す）・`_Prepared`（欄を足す）・`_Target`（新設） | `_start`・`_prepare_round`・`_merge_base`・`_committed_texts`・`_citations`（置き換え）・`_final_target`・`_final_citations`・`_review_diff`・`_diff_files`・`_base_lines`（新設）・`_settle_resolved`・`_summary`（変更） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`carry`・`ingest_citations`（変更）・`restate`・`citation_key`（新設） |
@@ -18,7 +18,7 @@
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントと結果 JSON | — | モジュール | `open_block`（変更）・`mvv_outputs`（引数を足す）・`once`（新設） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `_finding_gaps`・`finish`（引数を足す） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | モジュール | `read_by_all_head`（変更） |
-| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
+| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `Hub`（欄 `target` を足す）・`cmd_run`（`target` を `drive.drive` へ渡す）・`cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
 
 依存の向きは #4076 のままで、`mvv_decide` が `adapters.markdown`（git もファイルも読まない純粋な解析）を読むことだけが増える。循環は無い。
 
@@ -32,19 +32,25 @@
 | --- | --- | --- | --- | --- |
 | `Snapshot` | `records/mvv.py` | 変更 | #4076 の欄に `commit: str`・`principles_sha256: str`・`principles_path: Optional[Path]` を足す | `commit` は手順 (1) で解いたコミット（状態によらず置く）。`principles_*` は共通原則の sha256 と写し（承認済みのときだけ置き、それ以外は `""` と None） |
 | `body_path` | `records/mvv_decide.py` | 新設 | `body_path(decl: Mapping[str, Any]) -> str` | 設定の最上位の `body`（文字列でなければ表 `ndf-files` の `mvv-body` の既定）を `.ndf/` からの相対で解き、リポジトリの根からの POSIX のパスを返す。絶対パス・`..` を含む値・空は `MvvError` |
+| `approved_form` | `records/mvv_decide.py` | 新設 | `approved_form(decl: Optional[Mapping[str, Any]], body: bytes) -> bytes` | 本文を、元の形・LF・CRLF のうち sha256 が承認の記録と合う形にして返す（どれも合わなければ元のまま）。`preflight.sha256_of(path, decl)` と `current` の両方がこれを通してから sha256 を求めるので、`core.autocrlf`・`eol=crlf` で作業場所と blob の改行が違っても、どちらのバイト列で承認した記録でも判定が割れない |
 | `current` | `records/mvv.py` | 変更 | `current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot` | 下の手順 |
-| `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイルへ書いて `os.replace` で置き換える。同じなら書かない |
+| `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、通常のファイルでないか、所有者のほかに権限を与えているか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイル（0600 で作る。umask によらない）へ書いて `os.replace` で置き換える。中身も権限も同じなら書かない |
 | `_mvv_current` | `records/cli.py` | 変更 | （同じ）。引数 `--allow-mismatch` を足す | `git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ |
 
 - `current` の手順（#4076 の手順を置き換える）
   1. `git rev-parse --verify <ref>^{commit}` でコミットへ解く。失敗は `MvvError`（`precondition`）
   2. `git ls-tree -z <コミット> -- .ndf/mvv.json` を打つ。成功して出力が空のとき（ツリーに設定のエントリが無いと確かめられたとき）だけ `absent`（`commit` は置き、共通原則は読まない）。`ls-tree` の失敗、エントリが通常のファイルの blob でない（`tree`・`commit`・シンボリックリンク）は `MvvError`（`precondition`）
-  3. 設定を `ls-tree` で得た blob の名前で `run_bytes` で読み、`decl_from` で検査する。`body_path(decl)` で本文のパスを決め、本文を `run_bytes` で読む。設定の blob の読み取りの失敗（blob の欠損を含む）・本文が読めないときは `MvvError`（`precondition`）。読めなかったことを `absent` に落とさない
+  3. 設定を `ls-tree` で得た blob の名前で `run_bytes` で読み、`decl_from` で検査する。`body_path(decl)` で本文のパスを決め、本文を `run_bytes` で読み、`approved_form` で改行の形をそろえてから sha256 を求める（`blobs` の id は元のバイト列から計算する）。設定の blob の読み取りの失敗（blob の欠損を含む）・本文が読めないときは `MvvError`（`precondition`）。読めなかったことを `absent` に落とさない
   4. `mvv_decide.status` で状態を決める。`mismatch` は、`allow_mismatch` が偽なら `MvvError`（「ベースの MVV の本文が承認の記録と合わない: <本文のパス>」）。真なら状態 `mismatch`・項目なし・写しを書かずに返す（基準 5 は外れる）。`unapproved` はそのまま返す
-  5. 承認済みなら、本文の写しと共通原則の写し（`mvv.principles` のバイト列から sha256 を求め、`principles-<先頭 12 文字>.md`）を `_write_verified` で書き、`items_of` で項目の一覧を作る。`blobs` の鍵は設定のパスと `body_path` のパス
+  5. 承認済みなら、本文（`approved_form` の形。sha256 は承認の記録と同じ）の写しと共通原則の写し（`mvv.principles` のバイト列から sha256 を求め、`principles-<先頭 12 文字>.md`）を `_write_verified` で書き、`items_of` で項目の一覧を作る。`blobs` の鍵は設定のパスと `body_path` のパス
   - 副作用: `git rev-parse`・`git ls-tree` を 1 回ずつ、`git show`（`run_bytes`）を 2 回（`absent` では 0 回）。写しのファイルを 2 つまで読み、違えば書く
-- `drive._start`（#4076 の手順を置き換える）: `remote = g.remote()`、`sync_worktree(g, cfg.branch, remote, base_branch=cfg.base)` の後に `snap = current(root, f"{remote}/{cfg.base}")` を呼び、`cfg = dataclasses.replace(cfg, base_commit=snap.commit)` とする（`RunConfig` は frozen dataclass）。`current` の `MvvError`（`mismatch` を含む）は #4076 のとおり相手役を起動せずに `refused` で止める（`allow_mismatch` を渡さない）。`RunConfig`（`crossreview/settings.py`）に `base_commit: Optional[str] = None` を足す。以後の `changes.changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）は名前を Git に渡さない
-- `cmd_scope`（`review-scope`）: 手元の `<リモート>/<ベース>` を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「基準 5 と識別子」）。ネットワークに出ず写しを書かない（#4076 のまま）
+- `drive._start`（#4076 の手順を置き換える）。`--base`（`cfg.base`）は差分の起点で、ブランチ名（`main`）・リモート追跡参照（`origin/main`。実装のテンプレートの `{{review}}`）・コミット（`review-delta` のレビュー済み HEAD）のどれでもよい。MVV を読むのは PR のマージ先ブランチで、`--base` の文字列から作らない
+  1. マージ先ブランチ: `target = target_of(<今の PR の番号>)`。`target_of: Callable[[int], str]` は `drive.drive` の引数で、`cmd_run` が `Hub` に足す欄 `target`（`GitHub.pull(pr).base_ref`。`run` の口と同じクライアント）を渡す。1 回の起動で GitHub を 1 回だけ読む。読めなければ、fetch も相手役の起動もせずに `refused`（`GitHubError` の `unreached` が真なら `transient`、ほかは `precondition`。`cmd_head` と同じ分け方）で止める。読んだ値を状態ファイルの最上位 `merge_target` に書く（`review-scope` がネットワークに出ずに読む）
+  2. `remote = g.remote()`、`sync_worktree(g, cfg.branch, remote, base_branch=target)` を打つ
+  3. `snap = current(root, f"{remote}/{target}")` を呼ぶ。`MvvError`（`mismatch` を含む）と、写しを書けない `OSError` の両方を `DriveStopped("precondition", <例外の文>)` に変える（`OSError` は文に写しの置き場のパスを入れる）。`cmd_run` がそれを `refused` にする。相手役を起動せず、`allow_mismatch` を渡さない。`OSError` を受けるのは `current` の呼び出しだけとし、ほかの処理を同じ `try` に入れない
+  4. 差分の起点 `base_commit`: `cfg.base` が `target`・`<リモート>/<target>`・`refs/heads/<target>`・`refs/remotes/<リモート>/<target>` のどれかなら `snap.commit`（古いローカルのブランチを読まない。決定 9）。ほかは `g.rev_parse(cfg.base)` で 1 回だけコミットに解く（`review-delta` の SHA はそのコミットのまま。起点をマージ先へ広げない）。この規則は `settings.base_commit(g, base, target, remote, target_commit) -> str` に置き、`run` と `review-scope` が同じものを呼ぶ
+  5. `cfg = dataclasses.replace(cfg, base_commit=<4 の値>)` とする（`RunConfig` は frozen dataclass。`crossreview/settings.py` の `RunConfig` に `base_commit: Optional[str] = None` を足す）。以後の `changes.changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）は名前を Git に渡さない
+- `cmd_scope`（`review-scope`）: 状態ファイルの `merge_target` から手元の `<リモート>/<merge_target>` を `git rev-parse` で 1 回コミットに解き（差分の起点は `--base` から `settings.base_commit` で決める）、`merge_target` が無ければ識別子を確かめられないので全差分（`FULL`）を返す。そのコミットで `git ls-tree` を打つ。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「基準 5 と識別子」）。ネットワークに出ず写しを書かない（#4076 のまま）
 
 ### 異常系の処理
 
@@ -56,7 +62,9 @@
 | `current` | 設定はあるが本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
 | `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
 | `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
-| `_write_verified` | 写しを書けない | 権限・容量 | `OSError` | 呼び出し元へ返す | `refused`（`precondition`） | 打ち直せる |
+| `_write_verified` | 写しを書けない | 権限・容量 | `OSError` | `current` は `OSError` のまま返す。`drive._start` は `DriveStopped("precondition", …)` に、`_mvv_current` は `precondition` の結果に変える | `refused`（`precondition`）、`summary` に写しの置き場のパスと原因。相手役を起動しない | 打ち直せる |
+| `drive._start` | マージ先ブランチを読めない | GitHub の障害・権限・PR が無い | `target_of` の例外 | `DriveStopped`。`--base` の文字列から推し量らない | `refused`（`unreached` なら `transient`、ほかは `precondition`） | 打ち直せる |
+| `drive._start` | 差分の起点を解けない | `--base` の参照・コミットが手元に無い | `g.rev_parse` の `GitError` | そのまま返す（今の `GitError` と同じ） | `refused`（`precondition`） | 起点を直して打ち直す |
 | `_mvv_current` | 取得に失敗した | ネットワーク・リモートの名前 | `fetch_branch_or_raise` の `GitError` | 古い参照を読まずに止める | `refused`（`precondition`）、`summary` に取得の誤り | 打ち直せる |
 
 ### 並行と排他
@@ -70,9 +78,9 @@
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
-| `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身の写しは書き直さない。違う中身の写しは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
+| `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身で 0600 の写しは書き直さない。違う中身・0600 より緩い権限の写しは、検証済みの中身の 0600 になる（umask 022 でも）。承認・blob・作業場所の改行が LF と CRLF のどの組でも、`preflight.mvv_state` と `current` がともに承認済み（改行のほかの違いはどちらも `mismatch`）。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
 | `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
-| `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |
+| `drive._start` | ローカルの `main` が古くても、`--base main` と `--base origin/main` の merge-base・差分・`Basis.base` がリモートのコミットから作られる。fetch の refspec のブランチは、`--base` が `origin/main` でも SHA でもマージ先ブランチ（`refs/heads/origin/main` や `refs/heads/<SHA>` を取らない）。`--base <レビュー済み HEAD の SHA>` の差分はその SHA からで、MVV はマージ先ブランチの版 | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError`・`current` の `OSError`（写しを書けない）・マージ先ブランチを読めない → 相手役を起動せず `refused` |
 
 ## 基準 5 と識別子
 
