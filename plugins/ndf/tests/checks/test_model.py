@@ -10,6 +10,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from ndf import contracts, identity
+from ndf.checks import run
 from ndf.checks.model import CheckError, Scope, load_settings, read_workflow
 
 SCHEMA = "schemas/ndf-settings/project.schema.json"
@@ -117,6 +118,59 @@ def test_repo_files_skips_a_symlink_that_resolves_outside_the_repository(tmp_pat
     assert Scope(repo, repo, "p").repo_files("w/*.yml") == [repo / "w" / "in.yml"]
 
 
+def _linked_tree(tmp_path: Path) -> Path:
+    """リポジトリの中・外を指すリンクと切れたリンクを `tools/` に置いたリポジトリの根。"""
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    for folder in (repo / "tools", repo / "shared", outside):
+        folder.mkdir(parents=True)
+    for path in (repo / "tools" / "own.py", repo / "shared" / "x.py", outside / "x.py"):
+        path.write_text("import os\n", encoding="utf-8")
+    (repo / "tools" / "note.txt").write_text("x\n", encoding="utf-8")
+    (repo / "tools" / "linked.py").symlink_to(repo / "shared" / "x.py")
+    (repo / "tools" / "away.py").symlink_to(outside / "x.py")
+    (repo / "tools" / "gone.py").symlink_to(repo / "shared" / "gone.py")
+    (outside / "back.py").symlink_to(repo / "shared" / "x.py")
+    (repo / "away").symlink_to(outside)
+    (repo / "near").symlink_to(repo / "shared")
+    return repo
+
+
+@pytest.mark.parametrize("via_link", [False, True], ids=["根が実体", "根がリンク"])
+def test_every_listing_keeps_only_files_that_resolve_inside_the_repository(tmp_path: Path, via_link: bool) -> None:
+    repo = _linked_tree(tmp_path)
+    if via_link:
+        (tmp_path / "alias").symlink_to(repo)
+        repo = tmp_path / "alias"
+    scope = Scope(repo, repo / "plugins" / "p", "p")
+    inside = ["tools/linked.py", "tools/own.py"]
+    assert sorted(s.rel for s in scope.python_under(repo / "tools")) == inside
+    assert [scope.rel(p) for p in scope.repo_files("tools/*.py")] == inside
+    assert [s.rel for s in run.collect(repo / "tools", repo)] == ["tools/linked.py", "tools/note.txt", "tools/own.py"]
+
+
+def test_python_under_reads_a_linked_directory_only_when_it_resolves_inside_the_repository(tmp_path: Path) -> None:
+    repo = _linked_tree(tmp_path)
+    scope = Scope(repo, repo / "plugins" / "p", "p")
+    assert scope.python_under(repo / "away") == []
+    assert [s.rel for s in scope.python_under(repo / "near")] == ["near/x.py"]
+
+
+def test_python_under_uses_the_collected_sources_inside_the_plugin(tmp_path: Path) -> None:
+    repo = _linked_tree(tmp_path)
+    (repo / "tools" / "other").mkdir()
+    (repo / "tools" / "other" / "b.py").write_text("import re\n", encoding="utf-8")
+    plugin = repo / "tools" / "other"
+    scope = Scope(repo, plugin, "p")
+    scope.sources = run.collect(plugin, repo)
+    (plugin / "late.py").write_text("(", encoding="utf-8")
+    collected = scope.sources[0]
+    assert scope.python_under(plugin) == [collected]
+    assert scope.python_under(plugin / "src") == []
+    found = scope.python_under(repo / "tools")
+    assert sorted(s.rel for s in found) == ["tools/linked.py", "tools/other/b.py", "tools/own.py"]
+    assert any(s is collected for s in found)
+
+
 def test_settings_default_to_an_empty_dict(tmp_path: Path) -> None:
     assert Scope(tmp_path, tmp_path, "p").settings == {}
 
@@ -164,6 +218,14 @@ def test_load_settings_stops_on_a_link_that_resolves_outside_the_repository(tmp_
         path.parent.symlink_to(outside / identity.FIXED_WORDS["ndf_settings_dir"])
     with pytest.raises(CheckError):
         load_settings(repo)
+
+
+def test_load_settings_follows_a_link_that_resolves_inside_the_repository(tmp_path: Path) -> None:
+    repo = _linked_tree(tmp_path)
+    (repo / "shared" / "project.json").write_text('{"version": 1}', encoding="utf-8")
+    _settings_file(repo).parent.symlink_to(repo / "shared")
+    (tmp_path / "alias").symlink_to(repo)
+    assert load_settings(tmp_path / "alias") == {"version": 1}
 
 
 def test_read_workflow_warns_of_a_reused_anchor_without_the_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
