@@ -308,10 +308,10 @@ def _mvv_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _push_pr(repos: Repos, name: str, *lines: str) -> None:
     """PR のブランチへ、`lines` を持つ文書を送る。"""
+    sh(repos.other, "fetch", "-q", "origin")
     sh(repos.other, "reset", "-q", "--hard", f"origin/{BRANCH}")
     commit(repos.other, name, "\n".join([*lines, ""]), "文書を変える")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    sh(repos.other, "fetch", "-q", "origin")
 
 
 class Fixer(Recording):
@@ -508,6 +508,19 @@ def test_issue_4090_12_resolved_thread_does_not_settle_the_error(repos: Repos, w
     assert "- r1-n1: " in next(p for agent, _, p in again.prompts if agent == "claude")
 
 
+def test_error_added_back_by_the_last_fix_leaves_its_resolved_thread(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """直ってスレッドも閉じた誤りを最後の修正が足し直したら、未解決へ戻し、閉じたスレッドから切り離す。"""
+    _push_base(repos)
+    _push_pr(repos, "doc.md", "# 設計", WRONG)
+    _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt, ("doc.md", f"{RIGHT}\n")), wt)
+    assert _state(tmp_path / "st")["threads"]["r1-n1"]["resolved"]
+    _push_pr(repos, "doc.md", "# 設計", RIGHT)
+    again = Fixer(tmp_path / "st", wt, ("doc.md", f"{WRONG}\n"), script={"codex": [[MAJOR]], "kiro": [[]]})
+    _base(capsys, monkeypatch, again, wt, "--max-rounds", "1")
+    state = _state(tmp_path / "st")
+    assert [f["outcome"] for f in _by_ndf(tmp_path / "st")] == [fin.UNRESOLVED] and "r1-n1" not in state["threads"]
+
+
 def test_without_an_approved_mvv_nothing_is_checked(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """承認済みの MVV が無ければ確かめず（最後の修正の後も）、前の起動が残した NDF の指摘は解決にする。"""
     _push_pr(repos, "doc.md", "# 設計", WRONG)
@@ -612,12 +625,12 @@ def test_issue_4099_1_lines_that_came_out_of_a_code_block_are_checked(tree: Path
     assert _found(tree, base) == [(new, 3, "Value 1", "version")]
 
 
-def test_fences_inside_lists_and_quotes_are_noticed(tree: Path) -> None:
-    """リストや引用の中の囲みを消したときも、本文に出た行を拾う。"""
-    body = ["- 例", "", "  ~~~", f"  {WRONG}", "  ~~~", ""]
-    base = commit(tree, "a.md", "\n".join(body), "元の文書")
-    commit(tree, "a.md", "\n".join(line for line in body if "~~~" not in line), "囲みを消す")
-    assert _found(tree, base) == [("a.md", 3, "Value 1", "version")]
+@pytest.mark.parametrize(("before", "after"), [("- ~~~", "- 例"), ("  ~~~", "  例"), ("1. ```", "1. 例")])
+def test_fences_inside_lists_are_noticed(tree: Path, before: str, after: str) -> None:
+    """リストの中の囲みの始まりだけを変えたときも、本文に出た行を拾う。"""
+    base = commit(tree, "a.md", f"{before}\n   {WRONG}\n", "元の文書")
+    commit(tree, "a.md", f"{after}\n   {WRONG}\n", "囲みを変える")
+    assert _found(tree, base) == [("a.md", 2, "Value 1", "version")]
 
 
 def test_lines_split_by_a_carriage_return_are_checked_one_by_one(tree: Path) -> None:
@@ -627,6 +640,11 @@ def test_lines_split_by_a_carriage_return_are_checked_one_by_one(tree: Path) -> 
     _bytes(tree, "a.md", f"前\r{WRONG}\n{WRONG}\r後\n新\r{WRONG}\n".encode())
     _commit(tree)
     assert _found(tree, base) == [("a.md", 1, "Value 1", "version"), ("a.md", 3, "Value 1", "version")]
+    _bytes(tree, "b.md", f"文\r```\r{WRONG}\n".encode())
+    base = _commit(tree)
+    _bytes(tree, "b.md", f"```\n文\r```\r{WRONG}\n".encode())
+    _commit(tree)
+    assert _found(tree, base) == [("b.md", 2, "Value 1", "version")]
 
 
 def _edited(tree: Path, count: int, *, fences: bool = False, other: bool = False) -> str:
