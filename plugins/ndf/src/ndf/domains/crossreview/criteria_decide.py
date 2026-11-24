@@ -45,6 +45,11 @@ def blocking(severity: Optional[str]) -> bool:
     return severity is None or bool(facts.value(SEVERITIES, severity, "blocking"))
 
 
+def blocking_value(value: Any) -> bool:
+    """読んだままの重要度の値（無い・知らない値を含む）が収束の妨げになるか。`severity_of` を通してから `blocking` で判定する。"""
+    return blocking(severity_of(value))
+
+
 def _rank(severity: Optional[str]) -> int:
     """重さの順位。分からない重要度は収束の妨げになる重さのうち最も軽いものと同じに数える。"""
     return int(facts.value(SEVERITIES, severity if severity is not None else _lightest_blocking(), "rank"))

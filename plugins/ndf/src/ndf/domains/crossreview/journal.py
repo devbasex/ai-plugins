@@ -86,7 +86,7 @@ def _raised(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _blocking(row: dict[str, Any]) -> bool:
-    return criteria_decide.blocking(criteria_decide.severity_of(row.get("severity")))
+    return criteria_decide.blocking_value(row.get("severity"))
 
 
 class FindingJournal:
