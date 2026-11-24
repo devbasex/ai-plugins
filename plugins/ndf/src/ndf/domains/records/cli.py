@@ -50,7 +50,11 @@ def _root(args: argparse.Namespace) -> Path:
 
 
 def _hub(root: Path) -> github_mod.GitHub:
-    return github_mod.GitHub(Git(root).remote_repo(), github_mod.client())
+    return _repo_hub(Git(root).remote_repo())
+
+
+def _repo_hub(repo: str) -> github_mod.GitHub:
+    return github_mod.GitHub(repo, github_mod.client())
 
 
 def _stdin_json() -> Any:
@@ -246,7 +250,7 @@ def _reading_add(entry: Any, root: Path) -> dict[str, Any]:
 
 
 def _reading_check(entry: Any, root: Path) -> dict[str, Any]:
-    missing = reading.check(entry, root, _hub)
+    missing = reading.check(entry, root, _repo_hub)
     if missing:
         detail = "読み手役が確認した記録が足りない: " + "・".join(missing)
         return result.stopped(TOOL, "precondition", detail, items=[{"missing": word} for word in missing])

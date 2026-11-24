@@ -101,7 +101,7 @@ def rows() -> list[dict[str, Any]]:
     return [row for row in found if rd.has_used_keys(row)]
 
 
-def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]:
+def check(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]:
     """承認の手順用: 質問を出す前に足りないもの（`reading_decide.missing`）。PR の今の head は GitHub から読む。
 
     記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
@@ -112,15 +112,15 @@ def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -
     if not (isinstance(prs, list) and all(type(n) is int and n > 0 for n in prs)):
         raise ReadingInvalid("prs は、承認する PR の番号の配列にする")
     git = Git(root)
-    repo, found = git.remote_repo(), rows()
+    remote = git.remote()
+    repo, found = git.remote_repo(remote), rows()
     row = rd.used_row(key, repo, found)
     short = rd.missing(key, repo, found, {}, prs)
     if short or row is None or not row["prs"]:
         return short
-    remote = git.remote()
     git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in row["prs"]))
     # 足りないものが無いので、承認する PR はすべて記録の行にある
-    pulls = hub(root).pulls({pr["number"] for pr in row["prs"]})
+    pulls = hub(repo).pulls({pr["number"] for pr in row["prs"]})
     short = rd.missing(key, repo, found, {n: pull.head_sha for n, pull in pulls.items() if pull is not None}, prs)
     unread = sorted(n for n, pull in pulls.items() if pull is None)
     if unread and not short:

@@ -83,7 +83,7 @@ plugins/ndf/
 | `reading.prompt` | 新設 | `(entry: Mapping[str, Any]) -> str` | 読み手役への指示を返す。`files`・`reader`・`questions_kind` と、4 つの型・2 つの区分の見分け方・返す形を入れる。文書は加工しない。「エンジニア向けの補足」を外した文書や、直した部分だけの文書は、担当が先に別のファイルへ作る |
 | `reading.add` | 新設 | `(entry: Mapping[str, Any], root: Path) -> dict[str, Any]` | 担当が書いた記録を確かめ、足りない値を補って 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` を送出し、追記しない。GitHub を読まない |
 | `reading.rows` | 新設 | `() -> list[dict[str, Any]]` | 記録を古い順に返す。壊れた行は無いものとして扱い、今の NDF より新しいバージョンの行があれば `InternalError` を送出する。ファイルが無ければ空。ファイルを開けなければ `OSError` を送出する |
-| `reading.check` | 新設 | `(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを取り込んでから、GitHub の head と記録を `missing` で比べる。GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown` を送出する。手順は表の下にある |
+| `reading.check` | 新設 | `(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを取り込んでから、GitHub の head と記録を `missing` で比べる。GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown` を送出する。手順は表の下にある |
 | `reading_decide.question_key` | 新設 | `(questions: Sequence[Mapping[str, Any]]) -> str` | 質問ごとの「質問の文・複数選択か・選択肢の名前と説明」だけを残した JSON（キーの順を固定し、文字列の前後の空白を除く）の SHA-256。区分などは含めない |
 | `reading_decide.used_row` | 新設 | `(key: str, repo: str, rows) -> Optional[Mapping[str, Any]]` | 使う記録の行（`repo` と `question_key` が一致する最後の行）を返す。無ければ `None` |
 | `reading_decide.light_rows` | 新設 | `(text: str, version: int) -> list[dict[str, Any]]` | 記録のファイルの本文から、使う欄の形が合う行を古い順に返す。壊れた行は無いものとして扱う。`version` より新しい行があれば `NewerRow` を送出する。hook が使う |
@@ -92,7 +92,7 @@ plugins/ndf/
 `reading.check` の手順:
 
 1. `heads` を空にして `missing` を呼ぶ。足りないもの（`no_record`・`no_pr`）があるか、使う記録の行に PR が無ければ、fetch も GitHub の読み取りもせずに、その結果を返す
-2. 使う記録の行に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決める（hook と同じ設定を読む）。fetch が失敗しても続ける
+2. 使う記録の行に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決め（hook と同じ設定を読む）、リモートの名前とリポジトリの名前は最初に 1 回ずつ決めて、1〜3 で使い回す（`hub` にはリポジトリの名前を渡す）。fetch が失敗しても続ける
 3. `GitHub.pulls` で、使う記録の行の PR の head をまとめて読み、`missing` に渡す（1 で、承認する PR がすべてこの行にあることを確かめてある）。`missing` が空でも、`GitHub.pulls` が `None` を返した PR（PR でない・無い番号）が 1 つでもあれば、確認できていないので `HeadUnknown` を送出する
 
 | 語 | 条件 |

@@ -59,7 +59,7 @@ def _hub(monkeypatch: pytest.MonkeyPatch, heads: dict[int, str]) -> list[set[int
         asked.append(set(numbers))
         return {n: SimpleNamespace(head_sha=heads[n]) if n in heads else None for n in numbers}
 
-    monkeypatch.setattr(records_cli, "_hub", lambda root: SimpleNamespace(pulls=pulls))
+    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: SimpleNamespace(pulls=pulls))
     return asked
 
 
@@ -235,7 +235,7 @@ def test_check_stops_as_unknown_when_github_cannot_be_read(repo: Path, capsys, l
     def broken(numbers: Any) -> dict:
         raise GitHubError("502", 502)
 
-    monkeypatch.setattr(records_cli, "_hub", lambda root: SimpleNamespace(pulls=broken))
+    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: SimpleNamespace(pulls=broken))
     reading.add(ENTRY, repo)
     _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
     assert got["status"] == "stopped" and got["cause"]["kind"] == "unknown"
