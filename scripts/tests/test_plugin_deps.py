@@ -2615,13 +2615,15 @@ def test_3691_3_checker_comes_from_main_with_three_sparse_files():
     assert "inputs.floors_ref != ''" in floors[0]["if"] and "inputs.floors_ref != 'main'" in floors[0]["if"]
 
 
-def test_3691_3_help_steps_run_after_the_smoke_and_before_the_report():
-    """3691:3: 2 つの照らし合わせは成果物の後・課題の報告の前に、スモークの成否によらず走る。gh は claude の行だけで打つ。"""
+def test_3691_3_help_steps_run_after_the_smoke_and_before_the_outcome():
+    """3691:3: 2 つの突き合わせはスモークの後・成果物と結果の前に、スモークの成否によらず走る。gh は claude のジョブだけで打つ。"""
+    smoke, _ = step_named("Run unauthenticated runtime smoke with the latest CLI")
+    outcome, _ = step_named("Pass the outcome to the report job")
     upload, _ = step_named("Upload smoke artifacts")
-    report, _ = step_named("Report the failure as an issue")
     cli_at, cli = step_named("Check CLI --help against the floors table")
     gh_at, gh = step_named("Check gh --help against the floors table")
-    assert upload < cli_at < gh_at < report
+    # 結果は成果物のアップロードの失敗も含むよう、ジョブの最後に渡す
+    assert smoke < cli_at < gh_at < upload < outcome == len(smoke_steps()) - 1
     assert cli["if"] == "${{ !cancelled() }}"
     assert gh["if"] == "${{ !cancelled() && matrix.runtime == 'claude' }}"
     assert "tmp/deps-tool/scripts/plugin-deps.py cli-help" in cli["run"]

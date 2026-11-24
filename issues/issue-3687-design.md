@@ -285,7 +285,7 @@ sequenceDiagram
   V->>V: 6 見本が記述の定義に合うかを確かめる
   V-->>D: 7 結果 JSON（食い違いと取れなかった見本のパス）
   V-->>D: 7a 食い違いなら 1 で失敗。結果 JSON は if: always() で成果物へ上げる
-  D->>G: 8 報告のジョブ（前のジョブが失敗した日だけ・if: !cancelled() と needs の failure）が成果物を読み、食い違いのある相手ごとに 1 件（同じ相手の課題が開いていれば作らない。成果物が無ければ何もしない。書き込みの権限は報告のジョブだけが持つ）
+  D->>G: 8 報告のジョブ（ランタイムのジョブが失敗したか見本に食い違いがある日だけ・if: !cancelled() と needs の結果。書き込みの権限は報告のジョブだけが持つ）が、ランタイムの失敗をジョブの出力から、見本の食い違いを成果物から、互いに独立に報告する。失敗したランタイムごと・食い違いのある相手ごとに 1 件（同じ題の課題が開いていればコメントを足す）。見本の成果物が無ければ見本の報告だけを省き、ランタイムの失敗は報告する
 ```
 
 依存の用意の流れは、`exec` の前に同期を 1 回挟む形へ変える。
@@ -309,7 +309,7 @@ flowchart TB
 | --- | --- |
 | 運用・保守性: 落ちたら相手ごとに 1 件の課題 | 既にある `scripts/runtime-smoke-latest.py report` と同じ形（同じ相手の開いた課題があれば作らない）を、相手の列を `peer` に替えて使う。課題を作るのは `items` に食い違い（`kind: mismatch`）がある相手だけで、本物へ届かなかった相手（`kind: unreachable`）には作らない。同じ実行で両方が起きても、食い違いのある相手の課題は作る。届かない状態が続いていることは、ジョブが続けて失敗していることで気づく（GitHub は定期のワークフローが続けて失敗すると、リポジトリの管理者へ通知する） |
 | システム環境: 設定した Python と uv で走る | ワークフローの `setup-python` と `setup-uv` の値を `toolchain.json` の値にそろえ、検査が食い違いを落とす |
-| 性能・拡張性: CI の所要を 3 分以上延ばさない | 足す 4 規則は既にある `ndf check` の 1 回の実行に相乗りし、構文木は 1 ファイル 1 回だけ作る既存の仕組み（`checks/model.py` の `Source`）を使う。毎日走るジョブは `live-samples` の 1 件だけ増やす。権限を分けるために足す報告のジョブ `report` は、前のジョブのどれかが失敗した日だけ起動する（`if: ${{ !cancelled() && contains(needs.*.result, 'failure') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}`）ので、失敗の日だけ 1 実行あたり 2 件になる。ワークフローのジョブの定義は 2 件増え（37 → 39）、`budget.ci_jobs` の上限 40 の内に収まる。Pull Request のジョブは増やさない。起動に足す `uv sync --frozen` は、後続の `uv run` を `--no-sync` にして同期の経路を 1 起動に 1 回に保つ。同期済みなら 1 回 15 ミリ秒（2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒） |
+| 性能・拡張性: CI の所要を 3 分以上延ばさない | 足す 4 規則は既にある `ndf check` の 1 回の実行に相乗りし、構文木は 1 ファイル 1 回だけ作る既存の仕組み（`checks/model.py` の `Source`）を使う。毎日走るジョブは `live-samples` の 1 件だけ増やす。権限を分けるために足す報告のジョブ `report` は、ランタイムのジョブが失敗したか見本に食い違いがある日だけ起動する（`if: ${{ !cancelled() && (needs.runtime-smoke-latest.result == 'failure' || needs.live-samples.outputs.mismatch-artifact-id != '') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}`）ので、失敗の日だけ 1 実行あたり 2 件になる。ワークフローのジョブの定義は 2 件増え（37 → 39）、`budget.ci_jobs` の上限 40 の内に収まる。Pull Request のジョブは増やさない。起動に足す `uv sync --frozen` は、後続の `uv run` を `--no-sync` にして同期の経路を 1 起動に 1 回に保つ。同期済みなら 1 回 15 ミリ秒（2026-11-23 の実測。`uv sync --frozen --no-dev --quiet --project plugins/ndf` を 3 回で 45 ミリ秒） |
 
 ## 決定の記録
 
