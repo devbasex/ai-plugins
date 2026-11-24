@@ -477,8 +477,8 @@ def _refused_answer(detail: str, number: Optional[int] = None) -> dict:
 def _answer(args: argparse.Namespace) -> dict:
     """プランの実行が書いた回答の記録を、提示した承認の対象と今の PR に照らしてから、マージの承認の証跡に書く。
 
-    書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象が
-    今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。
+    書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象と
+    「本番へ反映されるか」が今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。
     """
     record = _read_json(args.answer_record)
     if record is None:
@@ -504,6 +504,16 @@ def _answer(args: argparse.Namespace) -> dict:
     if not held.same(now):
         return _refused_answer(
             f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number
+        )
+    # 本番へ反映されるかも提示から変わっていないかを照らす（工程の承認ゲートと同じ。設定の読み取りは利用者も同じ要求で読む）
+    verdict, _ = _judge_pr(hub, pull)
+    production = production_merge.reaches_production(verdict)
+    if shown.get("production") is not production:
+        reach = "反映される" if production else "反映されない"
+        return _refused_answer(
+            f"#{pull.number} は質問の後にマージ先の設定が変わり、このマージは本番へ{reach}ようになった"
+            "（プランを流し直し、出し直した資料で回答し直す）",
+            pull.number,
         )
     row = merge_approval.MergeRow(
         str(answer),

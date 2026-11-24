@@ -601,6 +601,9 @@ def _answer_refuses_without_writing(monkeypatch, capsys, last_result, tmp_path, 
         hub.pulls_of[7] = merge_hub.pull(head=merge_hub.OTHER)
     if case == "moved-base":
         hub.pulls_of[7] = merge_hub.pull(base="release")
+    if case == "moved-production":
+        # r3-3: 質問の後にマージ先の設定が手で反映する形へ変わり、本番へ反映されるかが提示と違う
+        hub.files["main"] = (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c2")
     assert ci_cli.main(_answer_args(record, presented)) == causes.exit_code("refused")
     assert "post_comment" not in hub.calls
 
@@ -744,7 +747,9 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
         ],
         *[
             scenes.scene(_answer_refuses_without_writing, id=scenes.label("answer_refuses_without_writing", i, (v,)), case=v)
-            for i, v in enumerate(["no-record", "conductor", "organizer", "no-by", "other-id", "no-id", "moved-head", "moved-base"])
+            for i, v in enumerate(
+                ["no-record", "conductor", "organizer", "no-by", "other-id", "no-id", "moved-head", "moved-base", "moved-production"]
+            )
         ],
         scenes.scene(_a_new_presentation_refuses_the_answer_to_the_old_one, id="a_new_presentation_refuses_the_answer_to_the_old_one"),
     ],
