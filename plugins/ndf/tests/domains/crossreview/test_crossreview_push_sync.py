@@ -211,3 +211,44 @@ def test_sync_refuses_an_unsent_merge_commit(repos: Repos, tmp_path: Path) -> No
     with pytest.raises(worktree.SyncRefused, match="マージ"):
         worktree.sync_worktree(git.Git(wt), BRANCH)
     assert sh(wt, "rev-parse", "HEAD").strip() == before
+
+
+def _counting(calls: list[list[str]]) -> git.Runner:
+    def run(args: list[str], cwd: Path | None) -> git.Completed:
+        calls.append(args)
+        return git.run_git(args, cwd)
+
+    return run
+
+
+def test_sync_fetches_the_base_branch_in_the_same_fetch(repos: Repos, tmp_path: Path) -> None:
+    """#4076: `base_branch` を渡すと、1 回の取得で head とベースのリモート追跡参照が両方新しくなる。"""
+    wt = _review_worktree(repos, tmp_path)
+    head = commit(repos.other, "o.txt", "o\n", "head の push")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    base = commit(repos.other, "b.txt", "b\n", "ベースの push")
+    sh(repos.other, "push", "-q", "origin", "HEAD:refs/heads/main")
+    calls: list[list[str]] = []
+    got = worktree.sync_worktree(git.Git(wt, _counting(calls)), BRANCH, "origin", base_branch="main")
+    assert got.remote == got.after == head
+    assert sh(wt, "rev-parse", "refs/remotes/origin/main").strip() == base
+    refspecs = [f"+refs/heads/{b}:refs/remotes/origin/{b}" for b in (BRANCH, "main")]
+    assert [c for c in calls if c[0] == "fetch"] == [["fetch", "--", "origin", *refspecs]]
+
+
+@pytest.mark.parametrize("base", [None, BRANCH])
+def test_fetch_head_without_another_base_fetches_one_refspec(repos: Repos, tmp_path: Path, base: str | None) -> None:
+    wt = _review_worktree(repos, tmp_path)
+    calls: list[list[str]] = []
+    worktree.fetch_head(git.Git(wt, _counting(calls)), BRANCH, "origin", base_branch=base)
+    assert calls[0] == ["fetch", "--", "origin", f"+refs/heads/{BRANCH}:refs/remotes/origin/{BRANCH}"]
+
+
+def test_sync_fails_as_a_whole_when_the_base_cannot_be_fetched(repos: Repos, tmp_path: Path) -> None:
+    wt = _review_worktree(repos, tmp_path)
+    before = sh(wt, "rev-parse", "HEAD").strip()
+    commit(repos.other, "o.txt", "o\n", "head の push")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    with pytest.raises(git.GitError):
+        worktree.sync_worktree(git.Git(wt), BRANCH, "origin", base_branch="nope")
+    assert sh(wt, "rev-parse", "HEAD").strip() == before

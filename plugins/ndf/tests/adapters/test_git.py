@@ -301,6 +301,28 @@ def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -
         git.run_git(["status"], None)
 
 
+def test_run_bytes_returns_stdout_without_newline_conversion(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    raw = b"\xef\xbb\xbf1\r\n2\xff\r\n"
+    (path / "raw").write_bytes(raw)
+    oid = git_sandbox.sh(path, "hash-object", "-w", "--no-filters", "raw", strip=True)
+    assert git.Git(path).run_bytes("cat-file", "blob", oid) == raw
+    with pytest.raises(git.GitError, match="git cat-file blob nope が失敗（終了コード 128）: fatal"):
+        git.Git(path).run_bytes("cat-file", "blob", "nope")
+
+
+def test_run_bytes_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs, cmd=cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"o", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.Git(Path("/w")).run_bytes("status") == b"o"
+    assert seen["cmd"] == ["git", "status"] and seen["cwd"] == Path("/w") and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
 def test_common_dir_is_real_main_git_dir_from_main_and_linked_worktree(tmp_path: Path) -> None:
     path, _ = _init_repo(tmp_path, {"a": "a\n"})
     git_sandbox.sh(path, "worktree", "add", "-q", "-b", "side", str(tmp_path / "side"), identity=True, strip=True)
