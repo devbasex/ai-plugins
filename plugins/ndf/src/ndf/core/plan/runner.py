@@ -56,8 +56,8 @@ RESULTS_DIR = "results"
 # 差し込み `{work_base}` の保存先（状態の保存先の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
-# 承認待ちへの回答の記録と、承認待ちで止まったステップの提示の識別子の控えの保存先（状態の保存先の下）
-ANSWERS_DIR = "answers"
+# 承認待ちへの回答の記録と、承認待ちで止まったステップの提示の識別子の写しの保存先（状態の保存先の下）
+ANSWERS_DIR = "answer-records"
 PRESENTED_DIR = "presented"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
@@ -124,7 +124,7 @@ def answer_path(state_dir: Path, step: str) -> Path:
 
 
 def presented_path(state_dir: Path, step: str) -> Path:
-    """承認待ちで止まったステップ `step` の提示の識別子（ステップの結果の `metrics.presented_id`）の控え。"""
+    """承認待ちで止まったステップ `step` の提示の識別子（ステップの結果の `metrics.presented_id`）の写し。"""
     return state_dir / PRESENTED_DIR / f"{step}.json"
 
 
@@ -357,7 +357,7 @@ def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
 def _record_answer(inv: Invocation, baseline: dict[str, Any], answer: str, by: str) -> None:
     """待っていたステップへの回答の記録を書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。
 
-    提示の識別子は、待っていたステップの結果の `metrics.presented_id` の控えから写す。無ければ null（`ndf ci answer` が断る）。
+    提示の識別子は、待っていたステップの結果の `metrics.presented_id` の写しから写す。無ければ null（`ndf ci answer` が断る）。
     一時ファイルから置き換えて書く。書けなければ `OSError`。
     """
     step = str(baseline["step"])

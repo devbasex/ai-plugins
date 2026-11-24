@@ -481,7 +481,7 @@ def test_merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, l
 
 
 def test_merge_rejudges_when_the_config_changed_before_sending(monkeypatch, capsys, last_result):
-    """決定 3・8: 判定の後にマージ先の設定へ自動反映の行が足されたら、照合の本文で判定し直して止まる。"""
+    """決定 3・8: 判定の後にマージ先の設定へ自動反映の行が足されたら、確かめの本文で判定し直して止まる。"""
     manual = merge_hub.project_text(merge_hub.strategy(deliveries="manual"))
     auto = merge_hub.project_text(merge_hub.strategy(deliveries="auto"))
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (manual, "c1")}, files_at_merge={"main": (auto, "c2")}))
@@ -564,7 +564,7 @@ def _asked(monkeypatch, capsys, last_result, tmp_path, hub: merge_hub.MergeHub) 
 
 
 def _record(tmp_path: Path, presented_id: str | None, by: str = "human", answer: str = "approved") -> Path:
-    path = tmp_path / "answers" / "merge.json"
+    path = tmp_path / "answer-records" / "merge.json"
     path.parent.mkdir(exist_ok=True)
     body = {"step": "merge", "answer": answer, "by": by, "at": "t", "run": "run-1", "presented_id": presented_id}
     path.write_text(json.dumps(body), encoding="utf-8")

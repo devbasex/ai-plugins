@@ -6,5 +6,5 @@ import re
 
 # 人・conductor・organizer・サービス（`service:<主体>`）
 ACTORS = re.compile(r"^(human|conductor|organizer|service):[A-Za-z0-9._@/-]+$|^(human|conductor|organizer)$")
-# 利用者が直に答えたときの値
+# 利用者が直に回答たときの値
 HUMAN = "human"

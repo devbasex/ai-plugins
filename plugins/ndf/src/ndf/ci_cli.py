@@ -5,7 +5,7 @@
 
 マージ先が自動反映の本番チャネルなら、PR に残ったマージの承認の証跡（`domains.release.trail` の `MERGE_MARK`）を
 確かめたときだけマージする（#4409）。判定の規則は `core.production_merge` が持つ。証跡が無いときの終え方は
-`--production-gate`（`stop`・`defer`・`stale`）で選ぶ。単発のプランの承認待ちは `ask` が問い、回答の後に `answer` が
+`--production-gate`（`stop`・`defer`・`stale`）で選ぶ。単発のプランの承認待ちは `ask` が質問し、回答の後に `answer` が
 プランの実行の回答の記録から証跡を書く。工程（`ndf.progress`）は読まない。
 """
 
@@ -34,7 +34,7 @@ from ndf.adapters.ci import (
 )
 from ndf.adapters.github import GitHub, MergeExpect, MergeOutcome, Pull
 from ndf.contracts import result
-from ndf.core import production_merge
+from ndf.core import actors, production_merge
 from ndf.core.production_merge import Verdict
 from ndf.domains.release import approval_decide, trail
 
@@ -47,10 +47,8 @@ PRODUCTION_GATES = ("stop", "defer", "stale")
 GATE_NAME = "production-merge"
 # 判定に読むマージ先の設定のファイル（PR のベースリポジトリのマージ先のブランチ）
 PROJECT_FILE = production_merge.PROJECT_FILE
-# 直前の照合で判定をやり直した結果が承認待ちになったことを `GitHub.merge` から受ける種類
+# 直前の確かめで判定をやり直した結果が承認待ちになったことを `GitHub.merge` から受ける種類
 _REJUDGED = "production_gate"
-# 回答の記録の回答した者のうち、証跡を書けるもの（利用者が直に答えたときだけ）
-HUMAN = "human"
 # 承認資料の、本番へ反映され得ることを示す行
 PRODUCTION_LINE = trail.PRODUCTION_MATERIAL_LINE
 
@@ -319,7 +317,8 @@ def _approved_mismatch(args: argparse.Namespace, pull: Pull) -> Optional[str]:
     """`--approved-head`・`--approved-base` が今の PR と違えば理由。渡されていなければ None。"""
     if args.approved_head is None and args.approved_base is None:
         return None
-    head, base = args.approved_head or "", args.approved_base or ""
+    head = args.approved_head if args.approved_head is not None else ""
+    base = args.approved_base if args.approved_base is not None else ""
     if not base or base != pull.base_ref:
         return f"承認したマージ先 {base or '（無い）'} が今のマージ先 {pull.base_ref} と違う"
     if not head or not git.sha_matches(head, pull.head_sha):
@@ -346,7 +345,7 @@ def _merge_pull(args: argparse.Namespace, hub: GitHub) -> tuple[Optional[Pull], 
 
 
 def _merge(args: argparse.Namespace) -> dict:
-    """PR を、照合・本番チャネルの判定・承認の証跡の確かめを通してから `GitHub.merge` でマージする（#2602・#4409）。
+    """PR を、確かめ・本番チャネルの判定・承認の証跡の確かめを通してから `GitHub.merge` でマージする（#2602・#4409）。
 
     本文に決めていない「マージの前に決める」残リスクの行（`- [ ]`）が残れば、マージせずに `refused` で止まり、残った行を理由に出す。
     `--reviewed`（レビューを経た HEAD）が作業場所の HEAD と違えば、PR を読まずに `refused` で止まる（#3879 決定 2）。
@@ -431,8 +430,8 @@ def _answer(args: argparse.Namespace) -> dict:
     record = _read_json(args.answer_record)
     if record is None:
         return _refuse(f"回答の記録 {args.answer_record} が無い（ndf plan next --answer <回答> --by human で回答する）")
-    if record.get("by") != HUMAN:
-        return _refuse(f"回答した者 {record.get('by')} は利用者（{HUMAN}）でないので、マージの承認の証跡を書かない")
+    if record.get("by") != actors.HUMAN:
+        return _refuse(f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない")
     answer = record.get("answer")
     if answer not in approval_decide.ANSWERS:
         return _refuse(f"回答 {answer} は {' / '.join(approval_decide.ANSWERS)} のどれでもない")

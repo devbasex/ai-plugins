@@ -16,7 +16,7 @@ from typing import Any, Optional
 from ndf import cli
 from ndf.contracts import result
 from ndf.domains.release import trail
-from ndf.progress import lane, model, run
+from ndf.progress import lane, model, plan, run
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
@@ -291,7 +291,8 @@ def read_presented(root: Path, q: Question) -> Target:
     """質問で提示した承認の対象。無い・読めなければ空の対象（旧版で出した質問）。"""
     try:
         return Target.from_dict(json.loads(presented_path(root, q).read_text(encoding="utf-8")))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 提示の記録の無い質問は、承認の対象の無い質問として扱う
+    except (OSError, ValueError):
+        # 提示の記録の無い質問は、承認の対象の無い質問として扱う
         return Target()
 
 
@@ -303,6 +304,8 @@ def accepted_path(root: Path, machine_id: str, gate_id: str) -> Path:
     return run.work_root(root, machine_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
 
 
+# オーガナイザーのリリースの回答の語 → 承認ゲートの回答の語（`release.take_reply` と、中継を確かめる `answering` が共有する）
+ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # リクエストの中身の kind（計画のステートマシンのリクエスト。リクエストの ID の頭にも使う）
 RELEASE_KIND = "lane-release"
 

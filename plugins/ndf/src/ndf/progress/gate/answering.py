@@ -21,6 +21,7 @@ from ndf.core import actors, production_merge
 from ndf.domains.release import approval_decide, trail
 from ndf.progress import command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
+    ORGANIZER_ANSWERS,
     DESIGN_GATE,
     REJECTING,
     RELEASE_GATE,
@@ -202,8 +203,6 @@ def _relayed(conn: Any, q: Question, a: Answer) -> bool:
     reply = held.release if held is not None and held.release is not None else None
     if not isinstance(reply, dict):
         return False
-    from ndf.progress.gate.release import ORGANIZER_ANSWERS  # noqa: PLC0415 輪を避ける（release は answering を読む）
-
     return ORGANIZER_ANSWERS.get(str(reply.get("result"))) == a.value
 
 

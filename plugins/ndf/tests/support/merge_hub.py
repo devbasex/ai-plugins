@@ -1,7 +1,7 @@
 """`ndf ci merge`・`ask`・`answer` のテストが共有する、ネットワークへ出ない GitHub の偽物（#4409）。
 
 PR・マージ先のブランチごとの設定（`.ndf/project.json` の本文と blob の oid）・コメントを持ち、マージとコメントの投稿を
-記録する。`GitHub.merge` の照合（`expect`）は、PR の今のマージ先・HEAD と設定の oid を照らすだけの単純な形で真似る。
+記録する。`GitHub.merge` の確かめ（`expect`）は、PR の今のマージ先・HEAD と設定の oid を照らすだけの単純な形で真似る。
 """
 
 from __future__ import annotations
@@ -50,9 +50,9 @@ class MergeHub:
     merged: list[int] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     dequeued: list[int] = field(default_factory=list)
-    # マージの直前の照合で返す設定（ブランチ → (本文, oid)）。無ければ `files`
+    # マージの直前の確かめで返す設定（ブランチ → (本文, oid)）。無ければ `files`
     files_at_merge: Optional[dict[str, tuple[Optional[str], Optional[str]]]] = None
-    # 照合で見せる PR（判定の後に変わった PR）。無ければ `pulls_of`
+    # 確かめで見せる PR（判定の後に変わった PR）。無ければ `pulls_of`
     pull_at_merge: Optional[Pull] = None
 
     def pulls_by_head(self, branches: Any) -> dict[str, list[Pull]]:
@@ -106,7 +106,7 @@ class MergeHub:
         now = self.pull_at_merge or self.pulls_of[number]
         if expect is not None:
             if now.base_ref != expect.base or now.head_sha != expect.head:
-                return MergeOutcome(False, "refused", "照合で変わった", now.head_sha)
+                return MergeOutcome(False, "refused", "確かめで変わった", now.head_sha)
             text, oid = (self.files_at_merge or self.files).get(expect.base, (None, None))
             if oid != expect.config_oid:
                 stop = expect.rejudge(text)

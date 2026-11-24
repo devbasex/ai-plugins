@@ -1,7 +1,7 @@
 """マージ先が自動反映の本番チャネルかの判定の部品（#4409 の決定 2）。
 
 hook（`domains.hooks.strict`）と `ndf ci merge` が同じ規則で判定するために、規則をここだけに置く。
-hook は環境が無いときシステムの python3 で動くため、標準ライブラリだけで書き、ほかの ndf のモジュールを読まない。
+hook は環境が無いときシステムの python3 で動くため、標準ライブラリと標準ライブラリだけで書いた `ndf.identity` だけを読む。
 値の意味と呼ぶ側の扱いは #4409 の設計の表「判定の部品が返す値」にある。
 """
 
@@ -11,9 +11,10 @@ import json
 from enum import Enum
 from typing import Optional
 
-# 判定に読むマージ先の設定のファイル（リポジトリの根からのパス）と、その中のセクション
-PROJECT_FILE = ".ndf/project.json"
-SECTION = "branch_strategy"
+from ndf import identity
+
+# 判定に読むマージ先の設定のファイル（リポジトリの根からのパス）
+PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 
 
 class Verdict(str, Enum):
@@ -25,7 +26,7 @@ class Verdict(str, Enum):
     AUTOMATIC = "automatic"
     # 本番チャネルで、届け先の行が手動だけか空（別のリリースの手順で届ける）
     MANUAL = "manual"
-    # 本番チャネルで、`deliveries` が無く `cd` が null（配布のプリセットの形）
+    # 本番チャネルで、`deliveries` が無く `cd` が null（ブランチ戦略のプリセットの形）
     UNSET = "unset"
     # 設定を読めない・形が違う
     UNKNOWN = "unknown"
@@ -76,7 +77,7 @@ def judge_text(text: Optional[str], base: str) -> Verdict:
         data = json.loads(text)
     except ValueError:
         return Verdict.UNKNOWN
-    return judge(data.get(SECTION) if isinstance(data, dict) else None, base)
+    return judge(data.get("branch_strategy") if isinstance(data, dict) else None, base)
 
 
 def needs_approval(v: Verdict) -> bool:

@@ -15,6 +15,7 @@ from typing import Any, Optional
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
+    ORGANIZER_ANSWERS,
     RELEASE_GATE,
     RELEASE_KIND,
     Question,
@@ -28,7 +29,6 @@ from ndf.progress.gate.asking import (
 from ndf.progress.plan import external
 
 # 外のオーガナイザーの回答 → 承認ゲートの回答
-ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # リクエストを出したときに見た対象の保存先（承認資料の隣）
 SEEN_SUFFIX = ".seen.json"
 

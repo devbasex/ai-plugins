@@ -144,7 +144,7 @@
             "deferred",
             "already"
           ],
-          "description": "マージの結末（merge）。merged はマージした、deferred は本番チャネルへの承認の証跡が無いので先送りした、already は既にマージ済みだった"
+          "description": "マージの結果（merge）。merged はマージした、deferred は本番チャネルへの承認の証跡が無いので先送りした、already は既にマージ済みだった"
         },
         "verdict": {
           "type": "string",

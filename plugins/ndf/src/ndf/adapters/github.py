@@ -72,14 +72,14 @@ _MERGE_QUEUE_STATE = (
     " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue }"
     " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
 )
-# 照合の項目（PR のマージ先・HEAD・ベースリポジトリと、マージ先の設定の blob の oid と本文。#4409 の決定 8）
+# 確かめの項目（PR のマージ先・HEAD・ベースリポジトリと、マージ先の設定の blob の oid と本文。#4409 の決定 8）
 _VERIFY_FIELDS = "nameWithOwner pullRequest(number: $number) {{ baseRefName headRefOid{extra} }} config: object(expression: $expr) {{ ... on Blob {{ oid text }} }}"
 _VERIFY = (
     "query($owner: String!, $name: String!, $number: Int!, $expr: String!) { repository(owner: $owner, name: $name) { "
     + _VERIFY_FIELDS.format(extra="")
     + " } }"
 )
-# キューの状態の問い合わせに照合の項目を足したもの（要求を増やさずに照らす）
+# キューの状態の問い合わせに確かめの項目を足したもの（要求を増やさずに照らす）
 _MERGE_QUEUE_VERIFY = (
     "query($owner: String!, $name: String!, $number: Int!, $branch: String!, $expr: String!) { repository(owner: $owner, name: $name) { "
     + _VERIFY_FIELDS.format(extra=" id isMergeQueueEnabled isInMergeQueue")
@@ -364,7 +364,7 @@ class FileAt(NamedTuple):
 
 
 class Verified(NamedTuple):
-    """マージとキューへの投入の直前の照合の応答（PR のマージ先・HEAD・ベースリポジトリと、マージ先の設定）。"""
+    """マージとmerge queue への追加の直前の確かめの応答（PR のマージ先・HEAD・ベースリポジトリと、マージ先の設定）。"""
 
     base: str
     head: str
@@ -375,7 +375,7 @@ class Verified(NamedTuple):
 class MergeExpect(NamedTuple):
     """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
 
-    `rejudge` は照合の応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
+    `rejudge` は確かめの応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
     """
 
     pull: "Pull"
@@ -489,7 +489,7 @@ def _verified(repo: dict) -> Verified:
 
 
 def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
-    """照合の応答 `fresh` と判定に使った値を比べる。マージ先・HEAD・ベースリポジトリが違えば `refused`。
+    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD・ベースリポジトリが違えば `refused`。
     設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を足さない）。送ってよければ None。"""
     if fresh.base != expect.base:
         return MergeOutcome(False, "refused", f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head)

@@ -1,4 +1,4 @@
-"""`GitHub.merge` の直前の照合と、マージ先の設定の読み取り（#4409 の決定 3・決定 8）。
+"""`GitHub.merge` の直前の確かめと、マージ先の設定の読み取り（#4409 の決定 3・決定 8）。
 
 要求は `GitHub.rest`・`GitHub.graphql` の口で受け、数と順を確かめる（通信の層は `test_github.py` が見る）。
 """
@@ -105,7 +105,7 @@ def test_merge_with_expect_verifies_right_before_sending_and_does_not_reread_the
     wire = Wire()
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert out.merged
-    # 最初の PR の読み直しは照合へ移る（方式の問い合わせ 2 回の後、PUT の直前）
+    # 最初の PR の読み直しは確かめへ移る（方式の問い合わせ 2 回の後、PUT の直前）
     assert wire.seen == [("GET", f"/repos/{REPO}/rules/branches/main"), ("GET", f"/repos/{REPO}"), ("GRAPHQL", "verify"), ("PUT", f"/repos/{REPO}/pulls/7/merge")]
 
 

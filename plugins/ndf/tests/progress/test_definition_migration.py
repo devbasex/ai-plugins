@@ -90,7 +90,7 @@ def _until_release_gate(st, tid: str, repo: Path, env: run.Env) -> dict:
 
 
 def _no_migration(monkeypatch):
-    """移行の無い前の版の振る舞い（`next` が移行を打たない）。"""
+    """移行の無い前のバージョンの振る舞い（`next` が移行を打たない）。"""
     monkeypatch.setattr(run, "migrate_definition", lambda st, machine_id: None)
 
 

@@ -46,6 +46,10 @@
         "--answer": {
           "type": "string"
         },
+        "--by": {
+          "type": "string",
+          "description": "回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す"
+        },
         "--set": {
           "type": "array",
           "items": {
