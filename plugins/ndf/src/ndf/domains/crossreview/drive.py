@@ -935,6 +935,19 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
+    return _fix_round(run, round_no, record, prep.head, open_, handed, launch)
+
+
+def _fix_round(
+    run: _Run,
+    round_no: int,
+    record: dict[str, Any],
+    reviewed_head: str,
+    open_: Sequence[dict[str, Any]],
+    handed: Sequence[fin.Handed],
+    launch: Launcher,
+) -> Optional[str]:
+    """修正必須と判定したラウンドで修正担当を起動し、修正を記録して送る。次へ進むなら None、止まるなら終わり方。"""
     _save(run)
     fix = _fix(run, round_no, open_, handed, launch)
     if fix is None:
@@ -944,7 +957,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["fix"] = fix
     _save(run)
     _consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if _push(run, round_no, prep.head, fix) else fin.ERROR
+    return None if _push(run, round_no, reviewed_head, fix) else fin.ERROR
 
 
 def _reusable(run: _Run) -> bool:
