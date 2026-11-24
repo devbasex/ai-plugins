@@ -13,7 +13,14 @@
 
 ## [ndf 11.0.27] - 2026-11-24
 
-- Add: #3687 本物に当てる見本のジョブ、テストと CI の上限、配る構成の設定をそろえる（スプリント p9-lz2-ci）（#4359）
+### 利用者向けの変化
+
+- 依存を用意できないとき（uv が無い・入れられない・依存を取れない）、`bin/ndf` がどの場合も結果 JSON と終了コード 69（`deps_missing`）で止まる。これまで uv はあるがネットワークが無いときの終了コードは 1 だった（#3687・#4359）
+- 上限と停止理由の表 `contracts/limits.json`・`contracts/causes.json` が、1 項目 1 ファイルの `contracts/limits/`・`contracts/causes/` に変わる。パスを直に読んでいる場合は読み替える（#3687・#4359）
+- Python の下限と uv のバージョンを `contracts/data/toolchain.json` の 1 か所に持つ。`.ndf/project.json` に `toolchain` を書くと、違う値を書いた変更を `ndf check` が落とす（#3687・#4359）
+- `.ndf/project.json` に `budget` を書くと、テストの件数・CI のジョブ数・使われない依存・置き換えられる自作の件数が上限を超えたとき `ndf check` が落とす（#3687・#4359）
+- テストの見本を GitHub の公開の記述と突き合わせる `ndf samples verify` を足す（#3687・#4359）
+- 実験版を `experimental/ndf/` に置いて `python3` で呼べる。既定で動くものからの参照は `ndf check` が落とす（#3687・#4359）
 
 ## [ndf 11.0.26] - 2026-11-23
 
