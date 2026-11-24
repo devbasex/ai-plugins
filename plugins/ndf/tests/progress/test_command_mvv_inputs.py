@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
 
 SHA = "a" * 64
@@ -61,10 +62,16 @@ def test_a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_resu
     assert "design_pr" not in stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
 
 
-def test_an_unknown_machine_is_refused(repo, st):
-    # 保存先と空の DB はある（st が用意する）が、その ID のステートマシンが無い
-    with pytest.raises(model.Refused, match="無い"):
-        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+def test_an_unknown_machine_is_refused(tmp_path, monkeypatch):
+    # 保存先と空の DB はあるが、その ID のステートマシンが無い。保存先は一時ディレクトリに作り、Git で解かない
+    root = _store_at(monkeypatch, tmp_path)
+    durable.prepare_store(root)
+    try:
+        store.open_store(store.default_url(root), root).close()  # 表だけの空の DB を作る
+        with pytest.raises(model.Refused, match="無い"):
+            stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
+    finally:
+        durable.release_store(root)
 
 
 def test_a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, last_result, tmp_path, monkeypatch):
