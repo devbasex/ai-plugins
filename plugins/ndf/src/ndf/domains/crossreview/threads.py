@@ -36,12 +36,13 @@ T = TypeVar("T")
 
 # 状態ファイルのキー（指摘の番号 → {"comment": 最初のコメントの id, "replied": bool, "resolved": bool}）
 THREADS = report_decide.THREADS
-# 指摘の発生の値（`journal` が書く）と、最初のコメントと返信の本文に置くその行
+# 指摘の発生の値（`journal` が書く）
 OCCURRENCE = journal.OCCURRENCE
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
-OCCURRENCE_LINE = report_decide.OCCURRENCE_LINE
-_OCCURRENCE = report_decide.OCCURRENCE_IN
+# 最初のコメントと返信の本文に置く発生の値の行
+OCCURRENCE_LINE = "<!-- ndf-occurrence: {value} -->"
+_OCCURRENCE = re.compile(r"<!-- ndf-occurrence: (\S+) -->")
 # 最初のコメントに閉じた理由を足すときの見出し（`finding_of` が閉じた理由の有無を読む目印）
 CLOSED_HEAD = "**この実行で閉じた**"
 _FINDING_ID = re.compile(r"\*\*cross-review の指摘 (\S+)\*\*")

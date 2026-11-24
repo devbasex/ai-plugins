@@ -75,8 +75,6 @@ class Carried(NamedTuple):
     judged_mvv: Optional[str] = None
     unpinned_severity: Optional[str] = None
     thread: Optional[int] = None
-    # 指摘が初めて記録されたときの発生の値（`report_decide.ORIGIN`）
-    origin: Optional[str] = None
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -147,10 +145,7 @@ def carried(threads: Iterable[Thread], tracked: Collection[int], marks: Mapping[
         if found is None or not found.group("text").strip():
             continue
         text, by, severity = found.group("text").strip(), found.group("by"), found.group("severity")
-        opened = report_decide.OCCURRENCE_IN.search(t.body)
-        judged = dict(marks[t.comment]) if t.comment in marks else {}
-        if opened is not None and judged.get(report_decide.ORIGIN) is None:
-            judged[report_decide.ORIGIN] = opened.group(1)
+        judged = marks[t.comment] if t.comment in marks else {}
         out.append(Carried(f"t{t.comment}", t.comment, text, by, severity, t.path, t.line, **judged))
     return out
 
@@ -160,7 +155,7 @@ def _opt_text(value: object) -> Optional[str]:
 
 
 def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
-    """一覧の 1 件が持つ MVV の判定と、初めて記録されたときの発生の値（形の違う値は None）。"""
+    """一覧の 1 件が持つ MVV の判定（形の違う値は None）。"""
     redlines = item.get(report_decide.REDLINE_ITEMS)
     return {
         report_decide.MVV: _opt_text(item.get(report_decide.MVV)),
@@ -168,7 +163,6 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
         report_decide.REDLINE_ITEMS: [i for i in redlines if isinstance(i, str)] if isinstance(redlines, list) else None,
         report_decide.JUDGED: _opt_text(item.get(report_decide.JUDGED)),
         report_decide.UNPINNED: criteria_decide.severity_of(item.get(report_decide.UNPINNED)),
-        report_decide.ORIGIN: _opt_text(item.get(report_decide.ORIGIN)),
     }
 
 

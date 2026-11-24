@@ -429,9 +429,9 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _findings(state: dict) -> list[dict]:
-    """ジャーナルの行から発生の値と、初めて記録されたときの発生の値（乱数。#4016）を外す。"""
+    """ジャーナルの行から発生の値（乱数。#4016）を外す。"""
     assert all(len(f["occurrence"]) == 12 for f in state["findings"])
-    return [{k: v for k, v in f.items() if k not in ("occurrence", "origin")} for f in state["findings"]]
+    return [{k: v for k, v in f.items() if k != "occurrence"} for f in state["findings"]]
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:

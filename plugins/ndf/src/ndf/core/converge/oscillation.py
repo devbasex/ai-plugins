@@ -17,15 +17,10 @@ BODY_MATCH = "review.body-match"
 _SPACES = re.compile(r"\s+")
 
 
-def whole(text: str) -> str:
-    """指摘の本文の全体を、空白をまとめ大文字小文字をそろえた文字列。"""
-    return _SPACES.sub(" ", text).strip().casefold()
-
-
 def finding_key(text: str) -> str:
     """指摘の本文から同じさのキーを作る。"""
     width = int(limits.value(BODY_MATCH, "count"))
-    return whole(text)[:width]
+    return _SPACES.sub(" ", text).strip().casefold()[:width]
 
 
 def returned(history: Sequence[Set[str]]) -> frozenset[str]:

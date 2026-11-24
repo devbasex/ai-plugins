@@ -9,7 +9,6 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import publish
-from ndf.core.converge import oscillation
 from ndf.domains.crossreview import prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
@@ -185,118 +184,6 @@ def test_judgement_of_another_mvv_in_the_record_is_not_put_on_the_finding_alread
     journal = _held()
     journal.carry(prior_decide.recorded([_published(_left())])[0], ITEMS, V12)
     assert (_marks(journal)[REDLINE], journal.merged, REDLINE in _handed(journal)) == ({}, [], True)
-
-
-def _record(*rows: dict[str, Any]) -> list[prior_decide.Carried]:
-    """別の保存先の記録のコメントから戻す指摘（伏せる処理を通した後）。"""
-    journal = FindingJournal([{"by": "codex", "outcome": fin.UNRESOLVED, "severity": "major", **r} for r in rows])
-    return prior_decide.recorded([_published(journal)])[0]
-
-
-def _redline(fid: str, text: str) -> dict[str, Any]:
-    return {"id": fid, "text": text, "redline": True, "mvv": "P1", "redline_items": ["P1"], "judged_mvv": V11}
-
-
-def test_another_finding_with_the_same_recorded_id_is_carried_under_a_free_id() -> None:
-    """別の保存先の指摘は、本文が違えば id が重なっても引き継ぎ、次の起動でも重ねない。"""
-    journal = _resumed(_record({"id": "r1-1", "text": VALUE}))
-    listed = _record(_redline("r1-1", REDLINE))
-    assert journal.carry(listed, ITEMS, V11) == ["p-r1-1-2"]
-    assert journal.rows["p-r1-1-2"]["redline"] is True and _handed(journal) == [VALUE]
-    assert journal.carry(listed, ITEMS, V11) == [] and journal.carry(_record(*journal.rows.values()), ITEMS, V11) == []
-
-
-PREFIX = "共通の状況の説明。" * 20
-
-
-def test_findings_that_only_start_alike_are_carried_apart() -> None:
-    """本文の先頭だけが同じ指摘には、MVV の判定を重ねない。出し直しは、本文の全体が同じ方へ重ねる。"""
-    journal = FindingJournal()
-    journal.enter(1, [{**PLAIN, "text": f"{PREFIX}止まる"}], ITEMS, V11)
-    assert journal.carry(_record(_redline("r1-1", f"{PREFIX}消す")), ITEMS, V11) == ["p-r1-1"] and journal.merged == []
-    assert _handed(journal) == [f"{PREFIX}止まる"]
-    blocking = journal.enter(2, [{**PLAIN, "text": f"{PREFIX}{t}"} for t in ("止まる", "消す")], ITEMS, V11)
-    assert (len(journal.rows), len(blocking), _handed(journal)) == (2, 1, [f"{PREFIX}止まる"])
-
-
-def _raise(*paths: str, **more: Any) -> FindingJournal:
-    """`<パス> を消す` という指摘を出したジャーナル。"""
-    journal = FindingJournal()
-    journal.enter(1, [_delete(p, **more) for p in paths], ITEMS, V11)
-    return journal
-
-
-def _delete(path: str, **more: Any) -> dict[str, Any]:
-    return {**PLAIN, "text": f"{path} を消す", **more}
-
-
-ALICE, BOB = "/home/alice", "/home/bob"
-HIDDEN = f"{publish.HOME_TEXT} を消す"
-
-
-def test_masked_texts_of_the_record_go_back_to_their_own_findings() -> None:
-    """伏せた本文が同じになる 2 つの指摘も、初めて記録されたときの発生の値で、それぞれの指摘へ戻る。"""
-    journal = _raise(ALICE, BOB)
-    other = _resumed(_record(*journal.rows.values()))
-    assert [r["text"] for r in other.rows.values()] == [HIDDEN, HIDDEN]
-    other.rows["p-r1-2"] |= _redline("p-r1-2", HIDDEN)
-    # 別の保存先の判定は、その指摘が再発して発生の値が変わった後でも、元の指摘へ戻る
-    journal.rows["r1-2"]["outcome"] = fin.FIXED
-    journal.enter(2, [_delete(BOB)], ITEMS, V11)
-    assert journal.carry(_record(*other.rows.values()), ITEMS, V11) == [] and journal.merged == ["r1-2"]
-    assert _handed(journal) == [f"{ALICE} を消す"]
-    # 同じ記録を 2 つの保存先の間で往復しても増えない
-    assert other.carry(_record(*journal.rows.values()), ITEMS, V11) == [] and len(other.rows) == 2
-
-
-def test_masked_text_of_another_state_directory_is_kept_apart_from_the_finding_with_its_id() -> None:
-    journal = _raise(ALICE)
-    listed = _record(*_raise(BOB, mvv="P1").rows.values())
-    assert journal.carry(listed, ITEMS, V11) == ["p-r1-1"] and journal.carry(listed, ITEMS, V11) == []
-    assert (journal.merged, _handed(journal)) == ([], [f"{ALICE} を消す"])
-    assert (journal.rows["p-r1-1"]["redline"], journal.rows["p-r1-1"]["text"]) == (True, HIDDEN)
-    # 元の指摘の出し直しは元の行に、もう一方の原文は引き継いだ行に重ねる
-    assert journal.enter(2, [_delete(ALICE), _delete(BOB)], ITEMS, V11) == {"r1-1"}
-    assert (len(journal.rows), _handed(journal)) == (2, [f"{ALICE} を消す"])
-
-
-def test_record_of_an_earlier_version_does_not_grow_on_every_start() -> None:
-    """発生の値の無い記録（前のバージョン）の伏せた本文は、id も同じ行にだけ重ねる。"""
-    listed = _record({"id": "r1-1", "text": HIDDEN})
-    journal = _resumed(listed)
-    assert journal.carry(listed, ITEMS, V11) == []
-    assert _raise(ALICE).carry(listed, ITEMS, V11) == ["p-r1-1"]
-
-
-@pytest.mark.parametrize(("path", "waits"), [("doc.md", True), ("other.md", False)])
-def test_redline_carried_masked_waits_when_its_text_is_raised_again(path: str, waits: bool) -> None:
-    """空の保存先に伏せて戻したレッドラインは、同じファイルの原文で分類なしに出し直されても修正担当へ渡さない。"""
-    journal = _resumed(_record(*_raise(ALICE, mvv="P1").rows.values()))
-    blocking = journal.enter(1, [_delete(ALICE, path=path)], ITEMS, V11)
-    assert (len(journal.rows), bool(blocking), bool(_handed(journal))) == ((1, False, False) if waits else (2, True, True))
-    assert journal.carry(_record(*_raise(ALICE).rows.values()), ITEMS, V11) == ["p-r1-1-2"]
-
-
-@pytest.mark.parametrize("rounds", ["同じラウンド", "後のラウンド"])
-def test_findings_that_may_be_the_masked_redline_all_wait_for_a_person(rounds: str) -> None:
-    """どちらを伏せたものか決められない指摘は、別の行のまま、どちらも人の承認を待つ。"""
-    journal = _resumed(_record(*_raise(ALICE, mvv="P1").rows.values()))
-    raised = [_delete(BOB), _delete(ALICE)]
-    for no, batch in enumerate([raised] if rounds == "同じラウンド" else [[r] for r in raised], 1):
-        assert journal.enter(no, batch, ITEMS, V11) == frozenset()
-    assert {f"{ALICE} を消す", f"{BOB} を消す"} <= {r["text"] for r in journal.rows.values()} and _handed(journal) == []
-
-
-def test_another_finding_that_only_starts_alike_is_not_an_oscillation() -> None:
-    """前々ラウンドの指摘と先頭だけが同じ別の行は、振動に数えない。同じ行が戻れば振動である。"""
-    journal = FindingJournal()
-    first = _delete(f"{PREFIX}A")
-    second = _delete(f"{PREFIX}B")
-    history = [journal.enter(1, [first], ITEMS, V11)]
-    journal.carry(_record({"id": "r1-1", "text": second["text"]}), ITEMS, V11)
-    history.append(journal.enter(2, [_delete("別の所")], ITEMS, V11))
-    assert not oscillation.returned([*history, journal.enter(3, [second], ITEMS, V11)])
-    assert oscillation.returned([*history, journal.enter(3, [first], ITEMS, V11)]) == {"r1-1"}
 
 
 def test_redline_judged_on_a_tracked_thread_reaches_the_first_state_directory(
