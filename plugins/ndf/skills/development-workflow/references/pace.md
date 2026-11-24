@@ -93,6 +93,11 @@ ndf progress new <スプリント名> --mode <モード> --issues <番号>... --
 判定を打ったときは、進め方によらず、判定の記録（判定・理由・レッドライン・レビューの保留・省かない理由）を PR のコメントへ載せる。
 同じ材料への「従う」の判定は記録を使い直し、LLM を呼ばない。判定は `mvv-validation.jsonl`（MVV の記録の保存先。[project-mvv.md](project-mvv.md)）に残る。
 
+**省いた回答も、回答を読む前に今の PR の head と照らす。** 判定の後に head が進んでいれば、承認ゲートは待ちへ戻り、人へ問う。
+レビューの approve（`gh pr review --approve`）は `fast` と `auto` でもしない（`AGENTS.md`）。
+
+### supervisor の経路の打ち方
+
 **プランを使わずに工程を進めるとき（supervisor の経路）は、`--machine` で同じ判定を打つ。**
 
 ```text
@@ -103,10 +108,59 @@ ndf records mvv gate --gate <design か release> --machine <ステートマシ�
   `invalid` で止まる。ID が無い・別のリポジトリのステートマシン・モードがその判定のステップを持たないときは `refused` で止まる
 - `NDF_STAGE_INPUT` は工程の入力の規約 `stage-in` の平らな形で、形が違えば `invalid`、キーが足りなければ `input_missing` で止まる
 - `--expect-pr` は `--gate release` だけで受ける（`design` では `invalid`）。判定する PR がその番号と違えば、判定せずに `not_applicable` で止まる
-- 打つ場所・結果の保存先・承認資料への載せ方は、[agent-layers.md](agent-layers.md) の supervisor が守る規則 17・18 にある
 
-**省いた回答も、回答を読む前に今の PR の head と照らす。** 判定の後に head が進んでいれば、承認ゲートは待ちへ戻り、人へ問う。
-レビューの approve（`gh pr review --approve`）は `fast` と `auto` でもしない（`AGENTS.md`）。
+**プランを使わずに承認ゲートを返す supervisor は、自分で MVV 判定を打ち、結果を承認資料に載せる（[agent-layers.md](agent-layers.md) の supervisor が守る規則 17）。** プランの経路
+（判定のステップ `design-mvv`・`release-mvv` を持つプラン）では判定のステップが打つので、打たない。判定の条件は
+[上の「MVV 判定」](#mvv-判定)、承認資料への載せ方は [approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄) にある。
+
+打つ場所と保存先は、どちらの承認ゲートでも同じである。
+
+- **打つ場所**: 起動指示の「作業場所」の worktree で打つ。設計承認ゲートでは、判定する PR がその worktree のブランチの開いた PR に決まる
+- **保存先**: 起動指示の「作業ディレクトリ」の下の `mvv-gate-design.json`・`mvv-gate-release.json`。結果 JSON は PR から取った
+  自由記述（判定の理由・保留の文）を含むので、コミットの対象になる worktree の中に置かない。作業ディレクトリが作業場所の worktree の
+  下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 止まった` で返す（`理由` に作業ディレクトリが
+  worktree の中にあることを書く）
+- **書き方**: `mktemp` で作った新しいファイル（0600）に書いてから、所定のパスへ `mv` で置き換える。判定が `stopped` で終わったとき
+  （終了コードが 0 でない）も置き換えるよう、判定のコマンドと `mv` を `&&` でつながない。打ち直しで同じパスへ書くときも、既にある
+  ファイルの権限を引き継がない
+
+```bash
+tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && { ndf records mvv gate --gate design --machine <ステートマシンの ID> > "$tmp"; mv -f "$tmp" "<作業ディレクトリ>/mvv-gate-design.json"; }
+```
+
+[agent-layers.md](agent-layers.md) の supervisor が守る規則 15 の工程の出力の JSON ファイルも、同じく `mktemp` で作ったファイルに書いてから置き換える。
+
+**設計承認ゲート:**
+
+1. 上のコマンドで判定を打ち、作業ディレクトリの `mvv-gate-design.json` に保存する
+2. 結果に `outputs.mvv_gate` がある場合だけ、その値を設計の工程の出力の JSON ファイル（agent-layers.md の規則 15）の `outputs.mvv_gate` へそのまま写す。
+   結果が `ok` でなくキーが無い場合は、工程の出力に判定を書かない
+3. 承認資料の「MVV 判定」の欄を組む。`outputs.mvv_gate` があれば同じ値から組む（[approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄)）。
+   キーが無ければ、同じセクションの「判定の結果 JSON が `ok` でないとき」の文を載せる。どちらの場合も承認ゲートは返し、人へ問う
+4. 承認資料の根拠の行を `ndf records mvv cite --gate design` で確かめる（[approval-request.md の「承認資料を組んだら」](approval-request.md#承認資料を組んだら)）
+
+**リリース承認ゲート（プランを使わず、本番系へ届く操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）:**
+
+1. **承認する PR を先に決める。** このリリースで承認する人がマージを承認する PR で、承認資料の「対象を開くためのもの」に載せる PR である
+
+   | 場合 | 承認する PR | 判定のコマンドに渡すもの |
+   | --- | --- | --- |
+   | このリリースで `ndf release-steps assemble` を打ち、`ok` の結果 JSON に `outputs.pr` がある（版上げの PR を組み立てた） | `outputs.pr` の PR | `--expect-pr <outputs.pr>` |
+   | ブランチ戦略がリリース用の PR を作らない（`ndf release-steps assemble` を打たない。`trunk` の `production_pr` など） | スプリントの PR そのもの | 渡さない（判定する PR が承認する PR である） |
+   | 版数を持たない `merge_base_branch`（`release.version_store.kind` が `none`。`ndf release-steps assemble` は版上げの PR を組まない） | リリースの手順がこのリリースで作った、または呼び出し元が渡した、ベースブランチから本番ブランチへの PR | `--expect-pr <その PR の番号>`。その PR を決められなければ下の行と同じく止まる |
+   | 版上げの PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 止まった` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
+
+   文脈のキー `release_pr` は使わない（承認ゲートの時点ではまだ無い）。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
+2. 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、上の書き方で
+   作業ディレクトリの `mvv-gate-release.json` に保存する。`--expect-pr` を渡すと、判定のコマンドが判定に使う入力の PR と比べ、違えば
+   判定せずに（LLM を呼ばず、PR にコメントを書かずに）`not_applicable` で止まる
+3. 結果で承認資料の「MVV 判定」の欄を組む。`ok` なら「MVV 判定の欄」の手順で、`ok` でなければ同じセクションの「判定の結果 JSON が `ok` でないとき」の
+   文で載せる。どの結果でも承認ゲートは返す。結果の `outputs.mvv_gate` は工程の出力へは載せない
+4. 承認資料の根拠の行を `ndf records mvv cite --gate release` で確かめる
+
+**判定の中身を、フェーズレポートの本文へ写さない。** `終えた工程` にはファイルのパスだけを書き、`outputs.mvv_gate` の中身（判定の理由・
+レッドライン・`why`・`holds`）を `理由` などへ写さない。conductor はパスを `ndf progress finish --output` へ渡すだけで、中身を読んで人へ
+転送しない。`mvv-gate-<区分>.json` は手元の記録で、呼び出し元へは返さない。
 
 ## 承認ゲートで止まった後の続け方
 
