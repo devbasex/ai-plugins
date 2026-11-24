@@ -122,11 +122,18 @@ Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の
 `.ndf/ask.json` に `{"version": 1, "mode": "off"}` を書きます。判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`
 へ追記され、10 系の [`scripts/ask.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/ask.py) の `summary` で数えます。
 
+**`reading-check` の guard は、読み手役が確認した記録の無い質問を止めます。** 区分が `ndf-gate:` か `ndf-ask:` で始まる質問の直前に、
+`${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/reading-checks.jsonl` を読み、同じリポジトリで同じ質問の文の記録があるかを調べます。`ndf-gate:` の質問では、
+記録に書かれた Pull Request の head が、手元のリモート追跡ブランチの head と同じかも調べます。同じ区分・同じ理由で止めるのは、利用者が次に入力するまでの間に
+2 回までで、その次は注意を付けて質問を出せます。区分の無い質問、人のいない実行、記録を調べられないときは止めません。
+環境変数 `NDF_HOOK_OFF=reading-check` で働かなくなります。記録を作る手順の正本は
+[`approval-request.md` の「読み手役の確認」](../plugins/ndf/skills/development-workflow/references/approval-request.md#読み手役の確認) です。
+
 手元の版（2026-10-31）で確かめたランタイムごとの扱い:
 
 | ランタイム | 問い合わせの Tool | hook で止められるか | 扱い |
 |---|---|---|---|
-| Claude Code 2.1.314 | `AskUserQuestion`（`metadata.source` を持つ） | 止められる（PreToolUse の `deny`） | 止める |
+| Claude Code 2.1.314 | `AskUserQuestion`（`metadata.source` を持つ） | 止められる（PreToolUse の `deny`） | 読み手役が確認した記録が無いときに止める（`reading-check`） |
 | Codex CLI 0.164.0 | `request_user_input`（`codex features list` で `default_mode_request_user_input` が `under development`・`false`。exec では使えない） | 確かめていない（PreToolUse が発火するか、区分の欄があるか） | 対象外。Skill の手順の規則（`asking.md`）だけで守る |
 
 hook の無いランタイムでは、区分に当たる問いを本文か各ランタイムの問い合わせの Tool で出し、区分の名前を問いの先頭に書きます。

@@ -13,6 +13,7 @@
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
     ndf records gws-check                          # gws の認証を確かめる
+    ndf records reading prompt|add|check --file <JSON>   # 読み手役への指示・確認の記録・質問を出す前に足りないもの
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 """
@@ -32,7 +33,7 @@ from ndf import cli, contracts
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
-from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, spec, usage
+from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
 from ndf.progress import invoke, model
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
@@ -49,7 +50,11 @@ def _root(args: argparse.Namespace) -> Path:
 
 
 def _hub(root: Path) -> github_mod.GitHub:
-    return github_mod.GitHub(Git(root).remote_repo(), github_mod.client())
+    return _repo_hub(Git(root).remote_repo())
+
+
+def _repo_hub(repo: str) -> github_mod.GitHub:
+    return github_mod.GitHub(repo, github_mod.client())
 
 
 def _stdin_json() -> Any:
@@ -220,6 +225,41 @@ def _gws_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, "gws は認証済み")
 
 
+def _reading(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    try:
+        # 相対パスは対象のリポジトリ（--cwd）の根から解く（引継ぎ文書と同じ）
+        entry = json.loads((root / args.file.expanduser()).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return result.stopped(TOOL, "precondition", f"入力の JSON を読めない: {exc}")
+    try:
+        return _READING[args.action](entry, root)
+    except reading.ReadingInvalid as exc:
+        return result.stopped(TOOL, "invalid", f"入力の形が違う: {exc}", items=[{"error": str(exc)}])
+    except OSError as exc:
+        return result.stopped(TOOL, "precondition", f"読み手役が確認した記録を読み書きできない: {exc}")
+    except (github_mod.GitHubError, reading.HeadUnknown) as exc:
+        return result.stopped(TOOL, "unknown", f"承認する PR の今の head を GitHub から読めない: {exc}")
+
+
+def _reading_prompt(entry: Any, root: Path) -> dict[str, Any]:
+    return result.result(TOOL, result.OK, "読み手役への指示を作った", metrics={"prompt": reading.prompt(entry)})
+
+
+def _reading_add(entry: Any, root: Path) -> dict[str, Any]:
+    return result.result(TOOL, result.OK, "読み手役が確認した記録を 1 行足した", [reading.add(entry, root)])
+
+
+def _reading_check(entry: Any, root: Path) -> dict[str, Any]:
+    missing = reading.check(entry, root, _repo_hub)
+    if missing:
+        detail = "読み手役が確認した記録が足りない: " + "・".join(missing)
+        return result.stopped(TOOL, "precondition", detail, items=[{"missing": word} for word in missing])
+    return result.result(TOOL, result.OK, "読み手役が確認した記録は、質問と承認する PR に合う")
+
+
+_READING: dict[str, Callable[[Any, Path], dict[str, Any]]] = {"prompt": _reading_prompt, "add": _reading_add, "check": _reading_check}
+
+
 def _preflight(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return preflight.check(root)
 
@@ -265,6 +305,14 @@ def _add_mvv(sub: Any) -> None:
     gate.set_defaults(handler=_mvv_gate)
 
 
+def _add_reading(sub: Any) -> None:
+    r = sub.add_parser("reading").add_subparsers(dest="action", required=True)
+    for action in _READING:
+        a = r.add_parser(action)
+        a.add_argument("--file", type=Path, required=True, help="入力の JSON のファイル")
+        a.set_defaults(handler=_reading)
+
+
 def _add_close_check(sub: Any) -> None:
     k = sub.add_parser("close-check")
     k.add_argument("issue", type=int)
@@ -290,6 +338,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     c.set_defaults(handler=_cleanup_stage)
     _add_close_check(sub)
+    _add_reading(sub)
     sub.add_parser("preflight").set_defaults(handler=_preflight)
     sub.add_parser("gws-check").set_defaults(handler=_gws_check)
     return p

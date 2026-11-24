@@ -62,6 +62,7 @@
     {"id": "gate-rejections", "location": "mvv-state", "path": "gate-rejections.jsonl", "kind": "record", "tracked": false, "writer": "承認ゲート（P2）", "ends": "kept", "reader": "service"},
     {"id": "mvv-validation", "location": "mvv-state", "path": "mvv-validation.jsonl", "kind": "record", "tracked": false, "writer": "MVV 判定（M7）", "ends": "kept"},
     {"id": "mvv-signals", "location": "mvv-state", "path": "mvv-signals.jsonl", "kind": "record", "tracked": false, "writer": "承認ゲートの回答の写し（M7）", "ends": "kept"},
+    {"id": "reading-checks", "location": "mvv-state", "path": "reading-checks.jsonl", "kind": "record", "tracked": false, "writer": "読み手役が確認した記録（#4285）", "ends": "kept"},
     {"id": "usage-log-file", "location": "usage-log", "path": "usage.jsonl", "kind": "record", "tracked": false, "writer": "使用量の使用量ログ（M7）", "ends": "kept"},
     {"id": "organizer-request", "location": "organizer", "path": "requests/<id>.json", "kind": "exchange", "tracked": false, "writer": "計画とレーンのステートマシン（P3）", "ends": "kept", "reader": "service", "fields": ["kind", "id", "lane", "prs", "issues", "sprint_state", "at", "ndf_version"]},
     {"id": "organizer-answer", "location": "organizer", "path": "answers/<id>.json", "kind": "exchange", "tracked": false, "writer": "外のオーガナイザー（サービス）", "ends": "kept", "fields": ["result"]},
