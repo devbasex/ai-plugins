@@ -208,8 +208,11 @@ def report(rows: Iterable[Row], since: Optional[float] = None) -> dict[str, Any]
     rows = list(rows)
     waits, voided, partial = _split(_by_wait(rows), since)
     lengths = [n for n in map(_length, waits) if n is not None]
-    unpriced = [w for w in waits if _unpriced(w)]
-    avoided = [a for a in (_avoided(w) for w in waits if not _unpriced(w)) if a is not None]
+    unpriced: list[Wait] = []
+    priced: list[Wait] = []
+    for w in waits:
+        (unpriced if _unpriced(w) else priced).append(w)
+    avoided = [a for a in map(_avoided, priced) if a is not None]
     return {
         "waits": len(waits),
         "limit_stopped_waits": sum(
