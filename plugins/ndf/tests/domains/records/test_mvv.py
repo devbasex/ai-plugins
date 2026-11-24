@@ -155,6 +155,7 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     path = mvv.record_path("mvv-validation")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた\n", encoding="utf-8")
+    path.chmod(0o644)
     inputs = {"sprint": "本文", "project": "MVV", "principles": "原則", "prompt": "指示"}
     first, _ = mvv.mvv_validate_sprint(repo, inputs, judge)
     second, _ = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge)
@@ -164,6 +165,8 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     assert len(calls) == 3
     rows, broken = jsonl.read_rows(path, kind="mvv-validation")
     assert len(rows) == 4 and [b.line for b in broken] == [1]
+    # 判定の理由を伏せずに持つので、先に通常の権限で作られていても、追記の後は所有者だけが読める（#3959 の r1-5）
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_mvv_validate_sprint_judges_again_after_a_row_of_the_same_inputs_that_does_not_fit(main_dir: Path) -> None:

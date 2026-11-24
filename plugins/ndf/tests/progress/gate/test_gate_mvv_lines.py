@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.records import mvv, mvv_decide
+from ndf.domains.records import mvv, mvv_decide, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import gate, model
 
@@ -132,6 +132,15 @@ CASES = {
         ("- 対象の PR を特定できなかったため、MVV 判定は済んでいない。" + mm.STOP_REASONS["no_pr"], "未確認"),
         ("今ある判定は",),
     ),
+    # MVV を導入していないリポジトリは PR を読む前に止める（mvv_gate.mvv_declared_locally）。PR の特定の失敗と書かない
+    "no-mvv-before-pr": (
+        mm.stop_outcome("design", "mvv_unapproved", [mvv_gate.NO_DECL]),
+        "design",
+        "h1",
+        True,
+        ("- MVV 判定は打っていない。" + mm.STOP_REASONS["mvv_unapproved"], "未確認"),
+        ("対象の PR を特定できなかった",),
+    ),
     "unrestricted": (
         _stored(),
         "design",
@@ -186,3 +195,10 @@ def test_the_stored_view_keeps_counts_and_every_mark_of_the_verdict():
     }
     assert (got["verdict"]["verdict"], got["verdict"]["basis"]) == ("follow", ["Value 1", "Value 4"])
     assert [model.mvv_stored_view({**held, "holds": h})["holds"] for h in ([], None)] == [[], None]
+    # モデルが根拠の項目へ写した自由な文字列は、閲覧範囲を限れない保存先と資料へ載せない（#3959 の r1-4）
+    basis = ["Value 1", "C4", "P1", "Mission", "スプリント Value 2", "token=ghp_xxx", "Value 1 に沿う", 3]
+    held = judged(verdict={**judged()["verdict"], "basis": basis})
+    kept = ["Value 1", "C4", "P1", "Mission", "スプリント Value 2"]
+    assert model.mvv_stored_view(held)["verdict"]["basis"] == kept
+    text = "\n".join(gate.mvv_lines(held, "design", 7, "h1", private=False))
+    assert "根拠の項目: " + "・".join(kept) in text and "ghp_xxx" not in text

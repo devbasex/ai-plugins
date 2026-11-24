@@ -225,13 +225,14 @@ _MODE_LINES = ("old mode ", "new mode ")
 def unquote_path(name: str) -> str:
     """git が `"` で囲んでエスケープしたパスを元のパスへ戻す。囲みが無ければそのまま。UTF-8 で読めなければ `DiffError`。
 
-    git は ASCII でないバイトを 8 進のエスケープにするので、囲みの中は ASCII だけである。エスケープを Python の
-    `unicode_escape` でバイトへ戻し（8 進は 1 バイトの文字になる）、UTF-8 で読む。
+    git は既定で ASCII でないバイトを 8 進のエスケープにするが、`core.quotePath=false` では UTF-8 の文字をそのまま出し、タブなどだけを
+    エスケープする。どちらでも戻せるよう、囲みの中を UTF-8 のバイト列にしてから Python の `unicode_escape` でエスケープを戻し
+    （エスケープでないバイトと 8 進のエスケープは、どちらも 1 バイトの文字になる）、バイト列へ戻して UTF-8 で読む。
     """
     if len(name) < 2 or not (name.startswith('"') and name.endswith('"')):
         return name
     try:
-        return name[1:-1].encode("ascii").decode("unicode_escape").encode("latin-1").decode("utf-8")
+        return name[1:-1].encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
     except UnicodeError as exc:
         raise DiffError(f"引用したパスを読めない: {name}") from exc
 

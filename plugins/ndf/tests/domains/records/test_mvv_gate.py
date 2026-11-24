@@ -255,8 +255,18 @@ def test_the_boundary_paths_come_from_the_base_and_not_the_worktree(repo: Path, 
     assert len(ask.calls) == 1 and out["skip"] is False and out["why"] == ["レッドラインのパスに当たる: docs/a.md"]
 
 
-def test_a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: list[tuple[int, str]]) -> None:
-    _base(repo, {".ndf/pace.json": "{壊れた"})
+@pytest.mark.parametrize(
+    "pace",
+    [
+        "{壊れた",
+        # 型を書き損じた設定を「保護するパスが無い」と読まない（#3959 の r1-7）
+        json.dumps({"version": 1, "boundary_paths": "docs/**"}),
+        json.dumps({"version": 1, "boundary_paths": ["docs/**", 1]}),
+    ],
+    ids=["not-json", "not-a-list", "not-strings"],
+)
+def test_a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: list[tuple[int, str]], pace: str) -> None:
+    _base(repo, {".ndf/pace.json": pace})
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert (out["verdict"], _stopped(out), out["head"], ask.calls) == (None, "base_unreadable", HEAD, [])
@@ -274,6 +284,19 @@ def test_without_an_approved_mvv_on_the_base_no_verdict_and_no_note(repo: Path, 
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, "mvv_unapproved", HEAD)
     assert "note_url" not in out and ask.calls == [] and notes == []
+
+
+def test_without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # MVV を導入していないリポジトリは、PR の取得もベースの取得もせずに検査 1 と同じ理由で止める（#3959 の r1-8）
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    plain = tmp_path / "plain"
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "main", str(plain))
+    _commit(plain, {"README.md": "x\n"})
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(plain, "design", _inputs(), _no_hub, ask)
+    assert (_stopped(out), out["skip"], out["why"], ask.calls) == ("mvv_unapproved", False, [mvv_gate.NO_DECL], [])
+    assert "pr" not in out and "head" not in out
 
 
 def test_the_worktree_mvv_is_not_read(repo: Path) -> None:
@@ -618,6 +641,8 @@ def test_diff_rows_restores_quoted_paths() -> None:
     rows = mm.diff_rows(text)
     assert [(r["filename"], r.get("previous_filename")) for r in rows] == [("日.md", None), ('q"t\\\t', "日")]
     assert mm.unquote_path("plain/path") == "plain/path"
+    # core.quotePath=false では UTF-8 の文字をそのまま出し、タブなどだけをエスケープする（#3959 の r1-9）
+    assert mm.unquote_path('"日本\\tx.md"') == "日本\tx.md"
     with pytest.raises(mm.DiffError):
         mm.unquote_path('"\\377"')
     with pytest.raises(mm.DiffError):

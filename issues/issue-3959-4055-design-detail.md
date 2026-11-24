@@ -123,8 +123,8 @@ plugins/ndf/
 | `may_skip` | `progress/gate/checks.py` | 変更 | `may_skip(f: MvvFacts, verdict: Any, gate: str = "design") -> tuple[bool, list[str]]` | `refusals(f, gate)` を使う。ほかは今と同じ |
 | `gate` | `records/mvv_gate.py` | 変更 | シグネチャは同じ | 下の手順 |
 | `_judged` | `records/mvv_gate.py` | 変更 | シグネチャは同じ | 下の手順 |
-| `pr_number` | `records/mvv_gate.py` | 変更 | シグネチャは同じ | `design` は `inputs["worktree"]`（文字列のとき。無ければ `root`）のブランチの開いた PR。`release` は今のまま（文脈の `pr`）。文脈の `design_pr` は読まない（プランの経路の入力に無いので、両方のエントリポイントで同じ PR を選ぶため）。`design` では、両方のエントリポイントで次の 2 つを確かめ、外れれば `GateError` にする（`gate` の手順 (3) で `verdict: null`・`stopped_by.kind: no_pr`・コメント無し）。(a) `worktree` の所属: `git -C <worktree> rev-parse --path-format=absolute --git-common-dir` が `root` の同じ値と一致する（同じリポジトリの worktree である）。worktree でない・別のリポジトリへ移設や再利用されたパスなら「作業場所が判定するリポジトリの worktree でない」で止め、そのパスのブランチ名で PR を探さない。(b) PR の一意性: そのブランチを head に持つ開いた PR のうち、宛先が起動元の GitHub リポジトリ（`hub.repo`）で、head のリポジトリも `hub.repo` のもの（フォークの同名ブランチを除く）だけを数える。0 件なら今どおり「開いた PR が無い」、2 件以上（同じブランチから別の宛先へ開いた PR など）なら「ブランチの開いた PR が複数あり、判定する PR を 1 つに決められない」で止め、どれにもコメントを書かない。`GateError` の文はブランチ名とパスを含みうるので、今どおり `failure_text` で診断の記録にだけ残す |
-| `boundary_paths` | `records/mvv_gate.py` | 変更 | `boundary_paths(root: Path, ref: str) -> tuple[str, ...]` | レッドラインのパスを、作業ツリーでなくコミット `ref` の進め方の設定ファイルから読む。ファイルの位置は今の `boundary_paths` と同じく宣言から求める（`files.relpath("pace")`。`ndf-files` の `locations` の宣言から得るリポジトリ相対パスで、`.ndf/pace.json` を文字列リテラルで書かない）。内容だけを、固定したコミットから `git show <ref>:<そのパス>` で読む。`ref` に無ければ空。形が壊れていれば `jsonfile.JsonFileError` |
+| `pr_number` | `records/mvv_gate.py` | 変更 | シグネチャは同じ | `design` は `inputs["worktree"]`（文字列のとき。無ければ `root`）のブランチの開いた PR。`release` は今のまま（文脈の `pr`）。文脈の `design_pr` は読まない（プランの経路の入力に無いので、両方のエントリポイントで同じ PR を選ぶため）。`design` では、両方のエントリポイントで次の 2 つを確かめ、外れれば `GateError` にする（`gate` の手順 (4) で `verdict: null`・`stopped_by.kind: no_pr`・コメント無し）。(a) `worktree` の所属: `git -C <worktree> rev-parse --path-format=absolute --git-common-dir` が `root` の同じ値と一致する（同じリポジトリの worktree である）。worktree でない・別のリポジトリへ移設や再利用されたパスなら「作業場所が判定するリポジトリの worktree でない」で止め、そのパスのブランチ名で PR を探さない。(b) PR の一意性: そのブランチを head に持つ開いた PR のうち、宛先が起動元の GitHub リポジトリ（`hub.repo`）で、head のリポジトリも `hub.repo` のもの（フォークの同名ブランチを除く）だけを数える。0 件なら今どおり「開いた PR が無い」、2 件以上（同じブランチから別の宛先へ開いた PR など）なら「ブランチの開いた PR が複数あり、判定する PR を 1 つに決められない」で止め、どれにもコメントを書かない。`GateError` の文はブランチ名とパスを含みうるので、今どおり `failure_text` で診断の記録にだけ残す |
+| `boundary_paths` | `records/mvv_gate.py` | 変更 | `boundary_paths(root: Path, ref: str) -> tuple[str, ...]` | レッドラインのパスを、作業ツリーでなくコミット `ref` の進め方の設定ファイルから読む。ファイルの位置は今の `boundary_paths` と同じく宣言から求める（`files.relpath("pace")`。`ndf-files` の `locations` の宣言から得るリポジトリ相対パスで、`.ndf/pace.json` を文字列リテラルで書かない）。内容だけを、固定したコミットから `git show <ref>:<そのパス>` で読む。`ref` にファイルかキー `boundary_paths` が無ければ空。JSON として読めない・`boundary_paths` が文字列の配列でないときは `jsonfile.JsonFileError`（型を書き損じた設定を「保護するパスが無い」と読まず、人へ問う） |
 | `Snapshot` | `records/mvv.py` | 変えない（#4076 の実装が欄 `commit` を足す。#4090・#4099 の決定 9） | — | `current` が解決したコミットの SHA を `commit` に持つ。この Issue は欄を足さずに `snapshot_facts` で読む |
 | `current` | `records/mvv.py` | 変えない（#4076 の関数） | — | 参照の解決はエントリポイントの 1 回だけで、呼び手は解決し直さない。ベースの本文が承認の記録と合わない（`mismatch`）ときの振る舞いは、引数 `allow_mismatch` で 2 つに分かれる。既定（`allow_mismatch=False`）では `MvvError` を投げる（#4090・#4099 の決定 15）。`allow_mismatch=True` では投げずに、状態 `mismatch` の `Snapshot` を返す。呼び手ごとの使い分けは次のとおり。`gate`（`_judged` の手順 (2)）は `allow_mismatch=True` で呼び、`mismatch` を検査 1 の外れとして扱う（コメントを書かず `noted: false`。ベースを読めない失敗のコメントは書かない）。`cite`（`_mvv_cite`）は既定のまま呼び、`MvvError` を `precondition` にする（確かめるバージョンを決められないまま `ok` にしない） |
 | `snapshot_facts` | `records/mvv_gate.py` | 新設 | `snapshot_facts(root: Path, snap: mvv.Snapshot, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]` | `base_facts` の置き換え。MVV の状態・本文の sha256・承認の記録の sha256・本文をすべて `snap`（ベースの MVV）から、`boundary_paths` を `boundary_paths(root, snap.commit)` から作る。作業ツリーの `.ndf/mvv.json`・`.ndf/mvv.md`・`.ndf/pace.json` は読まない（PR が `boundary_paths` から自分の変えるパスを外しても、今回の変更にはベースの規則が効く） |
@@ -147,8 +147,9 @@ plugins/ndf/
 - `gate`
   - 手順:
     - (1) モードの定義がそのゲートを持たなければ、今どおり判定せずに返す
-    - (2) `_judged` を呼んで返す
-    - (3) `gate` が捕まえるのは、`_judged` の手順 (1)（PR を読み終えるまで）の例外（`GateError`・`GitError`・`GitHubError`・`IdentityError`・`OSError`）だけである。そのときは `verdict: null`・`skip` 偽・`head` 無し・`why` は「MVV 判定を打てない: <`failure_text("no_pr", 例外, …)`>」にし、コメントは書かない（書く先の PR が決まっていない）。PR を読んだ後の失敗は `_judged` が中で受け、`gate` へ例外を出さない（下の「PR を読んだ後の失敗」）
+    - (2) MVV を導入していないリポジトリでは、GitHub への問い合わせも `git fetch` もせずに返す。リモート名を 1 度だけ解き（`Git.remote`）、手元の HEAD とそのリモートの追跡ブランチのどれにも MVV の設定ファイル（`mvv.decl_path()`）が無ければ（関数 `mvv_declared_locally`。`git rev-parse --remotes=<リモート>` と `git cat-file --batch` の 2 回）、`stopped_by` が `mvv_unapproved`・`verdict: null`・`skip` 偽・`pr` と `head` 無しの結果を返し、コメントは書かない。手元が古くて MVV を見落としても、判定を打たずに人へ問うだけで、承認ゲートを省く側へは倒れない。承認資料は、この結果を「MVV 判定は打っていない」と載せ、PR を特定できなかったとは書かない
+    - (3) `_judged` を、判定するリポジトリと (2) で解いたリモート名の組を渡して呼び、返す
+    - (4) `gate` が捕まえるのは、(2) と `_judged` の手順 (1)（PR を読み終えるまで）の例外（`GateError`・`GitError`・`GitHubError`・`IdentityError`・`OSError`）だけである。そのときは `verdict: null`・`skip` 偽・`head` 無し・`why` は「MVV 判定を打てない: <`failure_text("no_pr", 例外, …)`>」にし、コメントは書かない（書く先の PR が決まっていない）。PR を読んだ後の失敗は `_judged` が中で受け、`gate` へ例外を出さない（下の「PR を読んだ後の失敗」）
   - 進め方の条件（`inputs["pace"] not in MVV_PACES` で返す行）は消す。進め方は `_judged` の最後の「省くか」でだけ読む
 - `_judged`
   - 手順:
@@ -222,7 +223,7 @@ plugins/ndf/
   - 出力は PR のコメント（`_recorded`）と承認資料（下の「手順書」の「載せ方」）へ写されるので、伏せて残すのでなく、初めから載せない
   - 例外の全文は `failure_text` が手元の診断の記録（状態の保存先の `mvv-gate-failures.jsonl`。`record_failure` がファイルを 0600 にしてから書くので、読めるのは判定を打った OS の利用者だけ。0600 にできなければ書かない）へ書き、PR のコメントと承認資料は識別子でそれを指す
   - 判定の理由と保留の自由記述（見送りの理由・レッドラインの指摘本文）は例外の文でないので、この規則の対象でない（下の「手順書」の「承認資料の開示の範囲」）
-  - 対象は次のすべてである: `gate` の手順 (3) の「MVV 判定を打てない: 」・下の「PR を読んだ後の失敗」の表の各行の原因・手順 (5) の保留「MVV の記録（mvv-validation.jsonl）を読めない: 」・手順 (7) の追記の失敗の原因（`unrecorded`）と LLM の失敗の理由・`_recorded` の「判定の記録を PR に書けない: 」
+  - 対象は次のすべてである: `gate` の手順 (4) の「MVV 判定を打てない: 」・下の「PR を読んだ後の失敗」の表の各行の原因・手順 (5) の保留「MVV の記録（mvv-validation.jsonl）を読めない: 」・手順 (7) の追記の失敗の原因（`unrecorded`）と LLM の失敗の理由・`_recorded` の「判定の記録を PR に書けない: 」
   - 例外を受けたその場で `failure_text` に変え、例外の文を `gate_outcome` へ渡さない
   - `warnings` にも例外の文を載せない
 - `note`（`checks.py`）: シグネチャを `note(gate: str, verdict: Any, why: Sequence[str], holds: Optional[Sequence[str]] = None, head: Optional[str] = None) -> str` に変える。`holds` が空でなければ「### レビューの保留」の箇条書きを足す。`head` があれば、判定の行の後に「- 判定したコミット（PR の head）: <SHA>」を足す。承認する人が、コメントがどのコミットへの判定かを PR の今の head と照らすためである。呼び手は `mvv_gate._recorded` だけ
@@ -278,7 +279,7 @@ plugins/ndf/
 
 PR を読んだ後の失敗（`_judged` が中で受け、`gate` へ例外を出さない）。どの行も `skip` は偽、`head` は (1) で読んだ値。`verdict` が null の行は `why` の先頭が「MVV 判定を打てない: 」。表の `<原因: 種類>` は `failure_text(<種類>, 例外, …)` が返す定型文と診断の記録の識別子で、例外の文は診断の記録にだけ残る。承認ゲートは省かずに人へ問う。
 
-| 手順 | 推定（`claude -p` の全体で MVV 判定を代えた） | 失敗 | 検出する例外・条件 | `verdict` | `why` に足す理由 | コメント | 結果 | 再試行 |
+| 手順 | 失敗 | 検出する例外・条件 | `verdict` | `why` に足す理由 | コメント | 結果 | 再試行 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | (2) | ベースの MVV・レッドラインの設定を読めない | `fetch_branch_or_raise` の `GitError`・`current` の `MvvError`（参照を解決できないときを含む。本文のハッシュの不一致は `allow_mismatch=True` で読むのでここに来ず、(3) の検査 1 になる）・`boundary_paths` の `JsonFileError`・`OSError` | null | 「ベースの MVV を読めない: <原因: `base_unreadable`>」。作業ツリーの MVV で代えない | 書く | `ok`・人へ問う | 直して 判定のステップから |
 | (4) | 差分を読めない | `compare_files` の `GitHubError`（403・404 を除く）、手元の読み直し（300 件に届いた・比較を読む権限が無い）の `GitError`（head の取得の終了コードが 0 でない・`git diff`）・`DiffError` | null | 「変えたファイルを読めない: <原因: `diff_unreadable`>」 | 書く | 同上 | 判定のステップから |
@@ -330,7 +331,7 @@ PR を読む前の失敗（`gate` が受ける）:
 
 満たす決定: 決定 3
 
-リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らず、ゲートの側でも省かない。省いてよい区分の表 `MVV_SKIP_GATES` を設計承認ゲートだけにし、`mvv_skip` はほかの区分を省かない。省いた回答を消費の時点で判定の対象（PR・宛先・宛先の先端）と照合する仕組みは #4106 が持ち、この Issue では区分の条件のほかは今のまま head だけを照合する（決定 9）。
+リリース承認ゲートは #4105 まで、判定のステップの出力（新しい判定は `skip: false`）に頼らず、ゲートの側でも省かない。省いてよい区分の表 `MVV_SKIP_GATES` を設計承認ゲートだけにし、`mvv_skip` はほかの区分を省かない。省いた回答を消費の時点で判定の対象（PR・宛先・宛先の先端）と照合する仕組みは #4106 が持ち、この Issue では区分の条件のほかは、判定した PR 番号と head が承認の対象の PR 番号と head に一致するかだけを照合する（決定 9）。
 
 更新前の NDF が書いた状態から再開しても、保留を確かめていない MVV 判定では承認ゲートを通さない（決定 3）。更新前の NDF が書いた状態は 3 つある。更新の前に済ませた判定の `skip: true`、まだ読まれていない `service:mvv` の回答、更新の前に消費してステップを済みにした `service:mvv` の回答である。どれも、レビューの保留を確かめた証拠（判定の出力の `holds` が空の配列 `[]`）を持たない。
 
@@ -743,11 +744,14 @@ PR を読む前の失敗（`gate` が受ける）:
 | `NDF_PROGRESS_DB` で保存先の外に置いた SQLite のファイル | DB のファイルを 0600 にする（無ければ `os.open(path, os.O_CREAT \| os.O_WRONLY, 0o600)` で空のファイルを作り、あれば `chmod(0o600)`）。続けて、既にある副ファイル（`<DB>-wal`・`<DB>-shm`・`<DB>-journal`）もすべて `chmod(0o600)` する。ほかのプロセスの接続が残した副ファイルは、DB のファイルの権限を変えても元の権限のまま残るためである。SQLite がこれから作る副ファイルは、DB のファイルと同じ権限になる。バックアップは保存先の下に置くので、上の行の規則で守られる | DB のファイルと、既にある副ファイルのすべての `chmod` が成功した（所有者でないなどで 1 つでも失敗すれば偽） |
 | `NDF_PROGRESS_DB` の PostgreSQL | 何もしない。読める人は DB の認証情報を持つ人で、NDF は限れない | 常に偽 |
 
+  - 判定の記録（`mvv-validation.jsonl`）も、判定の理由・レッドライン・cross-review の指摘の本文を伏せずに持つ。そのため、診断の記録（`mvv-gate-failures.jsonl`）と同じく、所有者だけが読めるファイル（0600）にだけ追記する（`mvv._append_record`）。親のディレクトリは無ければ 0700 で作り、既にある記録が 0600 より広ければ、追記する記述子で 0600 に狭める。umask 022 の環境で通常の追記をすると、他の OS の利用者も読めるファイルができるためである
+
   - `private` が偽の保存先には、判定の自由記述を保存しない。伏せるのは DB へ渡す値だけで、`ndf records mvv gate` の出力（結果 JSON）は伏せない（supervisor が作業ディレクトリに置く結果 JSON には全文が残る）
     - 判定の出力が DB へ入る経路は 3 つある。ステップの記録（`step_recorded`）、工程の出力（`outputs_recorded`）、承認ゲートを省いた回答（`answered`）である。`answered` は、`progress/run.py` の `_consume` が `model.mvv_answer` で組む `service:mvv` の回答で、判定の出力の全体を payload の `mvv_gate` に写す。この 3 つのどれかを伏せずに書くと、そこから判定の自由記述が読める
     - `Store` は `private` を、接続ごとの `conn.info["ndf_private"]`（SQLAlchemy の `Connection.info`）に置く。`store.append_events` は、`step_recorded`・`outputs_recorded`・`answered` の事象を書く前にこの値を読む。偽か値が無ければ、payload の `mvv_gate` を `model.mvv_stored_view`（新設）に通してから書く。`step_recorded` では report の `outputs.mvv_gate`、`outputs_recorded` では出力の `mvv_gate`、`answered` では payload の直下の `mvv_gate` を通す
     - `answered` の payload のうち、`mvv_gate` の外の値（`by`・`answer`・`gate`・`gate_id`・`seen`）は伏せない。回答を承認として数えるか（`mvv_answer_void` の `hold_checked`）と、回答した者が見た対象との照合（`recheck` の `seen`）に使うためである。`mvv_gate` の中でも、`holds` が空の配列かどうかと `head` は残る（次の箇条）ので、`mvv_answer_void` の結果は伏せる前と変わらない
-    - `mvv_stored_view` は、`verdict.reasons`・レッドラインの本文・`holds` の各要素・`why` の各要素を、件数を保ったまま固定の文「伏せた（全文は今回の判定のコメントで読む）」に置き換える。`skip`・`verdict.verdict`・根拠の項目の名前・`holds` が空の配列かどうか・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない
+    - `mvv_stored_view` は、`verdict.reasons`・レッドラインの本文・`holds` の各要素・`why` の各要素を、件数を保ったまま固定の文「伏せた（全文は今回の判定のコメントで読む）」に置き換える。`skip`・`verdict.verdict`・`holds` が空の配列かどうか・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない
+    - 根拠の項目（`verdict.basis`）は、MVV と共通原則の項目の形（`Mission`・`Vision`・`Value <番号>`・`C<番号>`・`P<番号>`。頭に「スプリント 」を付けた形も認める）に合う文字列だけを残し、ほかは除く（`model.mvv_basis_shared`）。判定の結果のスキーマは各要素に任意の文字列を許すので、モデルが PR の本文や差分から写した認証情報や内部情報を、PR の閲覧権限が無い共有の保存先の利用者に見せないためである。閲覧範囲を限れない保存先から作る承認資料の「根拠の項目」の行も、同じ関数で絞る
     - DB から読んで組むプランの承認資料は、理由と保留の本文の代わりに、件数と今回の判定のコメントへの案内を載せる（supervisor の経路の載せ方と同じ）。承認する人が全文を読める場所は、今回の判定のコメントだけになる。そこで資料に次の文を載せ、読めないときは承認させずに判定のやり直しへ回す
       - `noted` が真: 「理由と保留の全文は、今回の判定のコメント <note_url> で読めます。コメントを開けない場合や、判断に必要な理由が伏せ字で読めない場合は、承認せず、『変更を求める』の回答で判定のやり直しを依頼してください」
       - `noted` が真でない（コメントの投稿に失敗した・コメントを書かない終わり方）: 「理由と保留の全文を読める場所がありません。承認せず、『変更を求める』の回答で判定のやり直しを依頼してください」。この終わり方では `_recorded` が `skip` を偽にしているので、`fast`・`auto` でも承認ゲートは省かれず、承認する人に届く

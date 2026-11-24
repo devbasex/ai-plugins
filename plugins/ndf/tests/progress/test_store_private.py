@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
 from ndf.progress import store
 
@@ -19,11 +20,16 @@ def _mode(path: Path) -> int:
 
 
 @pytest.mark.parametrize("where", ["default", "outside-missing", "outside-with-sides", "side-refused", "postgresql"])
-def test_opening_the_store_restricts_it_to_the_owner_or_marks_it_not_private(root, tmp_path, monkeypatch, request, where):
+def test_opening_the_store_restricts_it_to_the_owner_or_marks_it_not_private(root, tmp_path, monkeypatch, where):
     db = tmp_path / "p.sqlite"
     sides = [Path(f"{db}{x}") for x in ("-wal", "-shm")]
-    urls = {"default": lambda: store.default_url(root), "postgresql": lambda: request.getfixturevalue("pg_url")}
-    url = urls[where]() if where in urls else f"sqlite:///{db}"
+    urls = {"default": store.default_url(root), "postgresql": "postgresql://ndf@127.0.0.1:1/unused"}
+    url = urls.get(where, f"sqlite:///{db}")
+    if where == "postgresql":
+        # 閲覧範囲の判定は URL の種類だけで決まるので、サーバーを起動せず、接続の生成と表の用意を差し替える
+        memory = sa.create_engine("sqlite://")
+        monkeypatch.setattr(store.sa, "create_engine", lambda *a, **k: memory)
+        monkeypatch.setattr(store, "ensure_schema", lambda *a, **k: None)
     if where == "default":
         os.chmod(root, 0o755)
     if where in ("outside-with-sides", "side-refused"):

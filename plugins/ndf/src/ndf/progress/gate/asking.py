@@ -228,6 +228,9 @@ def _mismatch(out: Mapping[str, Any], pr: Optional[int], head: Optional[str]) ->
     別の PR の判定は、判定した PR の番号と head を載せない（承認する人が見られない PR とコミットを知らせないため）。"""
     if "pr" not in out and "head" not in out and isinstance(out.get("stopped_by"), dict):
         text = out["stopped_by"]["text"] if "text" in out["stopped_by"] else ""
+        # MVV を導入していないリポジトリは PR を読む前に止める（`mvv_gate.mvv_declared_locally`）。PR の特定の失敗と書かない
+        if out["stopped_by"].get("kind") == "mvv_unapproved":
+            return [f"- MVV 判定は打っていない。{text}", "- レビューの保留: 未確認（MVV 判定を打っていない）"]
         return [
             f"- 対象の PR を特定できなかったため、MVV 判定は済んでいない。{text}",
             "- レビューの保留: 未確認（保留を読む前に判定が止まった）",
@@ -277,7 +280,7 @@ def _verdict_lines(out: Mapping[str, Any], private: bool) -> list[str]:
     reasons, boundary = _strings(verdict.get("reasons")), _strings(verdict.get("boundary"))
     lines = [
         f"- 判定: {verdict['verdict'] if 'verdict' in verdict else '無し'}",
-        f"- 根拠の項目: {'・'.join(_strings(verdict.get('basis'))) or '無し'}",
+        f"- 根拠の項目: {'・'.join(_strings(verdict.get('basis') if private else model.mvv_basis_shared(verdict.get('basis')))) or '無し'}",
     ]
     if not private:
         return [*lines, f"- 理由 {len(reasons)} 件・レッドライン {len(boundary)} 件"]

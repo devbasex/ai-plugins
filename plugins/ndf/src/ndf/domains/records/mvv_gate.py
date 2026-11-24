@@ -45,6 +45,8 @@ GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
+# 手元のどの参照にも MVV の設定が無いときの理由（`mvv_declared_locally`。#3959）
+NO_DECL = "MVV の設定が手元の HEAD にもリモートの追跡ブランチにも無いため、MVV 判定を打たない"
 # 記録を読めないときの保留の頭（#3959）
 RECORDS_UNREADABLE = "MVV の記録（mvv-validation.jsonl）を読めない: "
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答。キーワード `before_retry` は打ち直しの起動の直前に呼ぶ
@@ -67,7 +69,7 @@ class _Moved(Exception):
 
 
 def boundary_paths(root: Path, ref: str) -> tuple[str, ...]:
-    """コミット `ref` の進め方の設定のレッドラインのパス（設定が無ければ空。形が壊れていれば `jsonfile.JsonFileError`）。
+    """コミット `ref` の進め方の設定のレッドラインのパス（設定かキーが無ければ空。形が壊れていれば `jsonfile.JsonFileError`）。
 
     worktree のファイルでなくベースのコミットから読む（PR が規則を緩めても、今回の変更にはベースの規則が効く。#3959）。
     """
@@ -81,8 +83,23 @@ def boundary_paths(root: Path, ref: str) -> tuple[str, ...]:
         raise jsonfile.JsonFileError(f"{where} の進め方の設定を JSON として解けない: {exc}") from exc
     if not isinstance(decl, dict):
         raise jsonfile.JsonFileError(f"{where} の進め方の設定が JSON の object でない")
-    held = decl["boundary_paths"] if isinstance(decl.get("boundary_paths"), list) else []
-    return tuple(p for p in held if isinstance(p, str))
+    if "boundary_paths" not in decl:
+        return ()
+    held = decl["boundary_paths"]
+    # 書き損じた設定を「保護するパスが無い」と読むと、保護したパスを変える PR を人の承認なしに通しうる（壊れた設定は人へ問う）
+    if not isinstance(held, list) or not all(isinstance(p, str) for p in held):
+        raise jsonfile.JsonFileError(f"{where} の boundary_paths が文字列の配列でない")
+    return tuple(held)
+
+
+def mvv_declared_locally(root: Path, remote: str) -> bool:
+    """手元の HEAD かリモート `remote` の追跡ブランチのどれかに MVV の設定があるか（ネットワークに出ない。#3959）。
+
+    どこにも無ければ、PR のベースにも承認済みの MVV は無いと見て、PR の取得とベースの取得を省く。手元が古くて見落としても、
+    判定を打たずに人へ問うだけで、承認ゲートを省く側へは倒れない。"""
+    g = Git(root)
+    tips = g.run("rev-parse", f"--remotes={remote}").split()
+    return any(raw is not None for raw in g.blobs(*[f"{ref}:{mvv.decl_path()}" for ref in ["HEAD", *tips]]))
 
 
 def snapshot_facts(root: Path, snap: mvv.Snapshot, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
@@ -296,11 +313,11 @@ def _read_records(j: _Judging, snap: mvv.Snapshot, warnings: list[dict[str, Any]
 
 
 def _judged(
-    root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: OpenHub, ask: Ask, warnings: list[dict[str, Any]]
+    where: tuple[Path, str], gate_name: str, inputs: Mapping[str, Any], open_hub: OpenHub, ask: Ask, warnings: list[dict[str, Any]]
 ) -> dict[str, Any]:
     # 手順 (1): 判定する PR と head を決める。ここまでの失敗は `gate` が受ける（書く先の PR が決まっていない）。
-    # リモート名は 1 度だけ解き、GitHub の接続先とベースの取得の両方に使う
-    remote = Git(root).remote()
+    # `where` は判定するリポジトリとリモート名。リモート名は `gate` が 1 度だけ解き、GitHub の接続先とベースの取得の両方に使う
+    root, remote = where
     hub = open_hub(root, remote)
     number = pr_number(root, gate_name, inputs, hub)
     j = _Judging(root, gate_name, hub, number, hub.pull(number))
@@ -397,7 +414,11 @@ def gate(
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.stop_outcome(gate_name, "no_gate", [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])
     try:
-        return _judged(root, gate_name, inputs, hub, ask, [] if warnings is None else warnings)
+        remote = Git(root).remote()
+        if not mvv_declared_locally(root, remote):
+            # MVV を導入していないリポジトリは、GitHub にも取得にも出ずに検査 1 と同じ理由で止める（PR を読まないので pr・head は無い）
+            return mm.stop_outcome(gate_name, "mvv_unapproved", [NO_DECL])
+        return _judged((root, remote), gate_name, inputs, hub, ask, [] if warnings is None else warnings)
     except (GateError, GitError, GitHubError, identity.IdentityError, OSError) as exc:
         why = ["MVV 判定を打てない: " + failure_text("no_pr", exc, {"root": root, "gate": gate_name})]
         return mm.stop_outcome(gate_name, "no_pr", why)

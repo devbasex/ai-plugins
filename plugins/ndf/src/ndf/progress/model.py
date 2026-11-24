@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -212,11 +213,21 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
 MVV_WITHHELD = "伏せた（全文は今回の判定のコメントで読む）"
 
 
+# 根拠の項目として共有してよい形（Mission・Vision・Value <番号>・共通原則の C<番号>・レッドラインの P<番号>。頭に「スプリント 」を
+# 付けた形も認める）。モデルが書いたほかの文字列は、閲覧範囲を限れない保存先と資料へ写さない（#3959）
+_SHARED_BASIS = re.compile(r"(?:スプリント )?(?:Mission|Vision|Value [0-9]{1,3})|[CP][0-9]{1,3}")
+
+
+def mvv_basis_shared(raw: Any) -> Any:
+    """判定の根拠の項目 `raw` のうち、`_SHARED_BASIS` の形に合う文字列だけ。配列でなければそのまま返す。"""
+    return [b for b in raw if isinstance(b, str) and _SHARED_BASIS.fullmatch(b)] if isinstance(raw, list) else raw
+
+
 def mvv_stored_view(held: Any) -> Any:
     """判定の出力 `held` から自由記述（理由・レッドライン・保留・`why` の各要素）を `MVV_WITHHELD` に置き換えた写し。
 
-    件数・`skip`・判定の語・根拠の項目の名前・`holds` が空の配列か null か・`stopped_by`・`noted`・`note_url`・`pr`・`head` は
-    残すので、`mvv_skip` と `hold_checked` の結果は変わらない。object でなければそのまま返す。"""
+    根拠の項目は MVV と共通原則の項目の形に合うものだけを残す（`mvv_basis_shared`）。件数・`skip`・判定の語・
+    `holds` が空の配列か null か・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない。object でなければそのまま返す。"""
     if not isinstance(held, dict):
         return held
 
@@ -227,6 +238,8 @@ def mvv_stored_view(held: Any) -> Any:
     verdict = held.get("verdict")
     if isinstance(verdict, dict):
         out["verdict"] = {**verdict, **{k: hidden(verdict[k]) for k in ("reasons", "boundary") if k in verdict}}
+        if "basis" in verdict:
+            out["verdict"]["basis"] = mvv_basis_shared(verdict["basis"])
     return out
 
 

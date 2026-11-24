@@ -483,7 +483,7 @@ def _append_private(path: Path, line: bytes) -> None:
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
-            raise OSError(f"診断の記録が自分の通常のファイルでない: {path}")
+            raise OSError(f"記録が自分の通常のファイルでない: {path}")
         if st.st_mode & 0o077:
             os.fchmod(fd, 0o600)
         view = memoryview(line)
@@ -491,6 +491,22 @@ def _append_private(path: Path, line: bytes) -> None:
             view = view[os.write(fd, view) :]
     finally:
         os.close(fd)
+
+
+def _append_record(path: Path, row: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    """種類 `kind` の 1 行を核で確かめてから、所有者だけが読めるファイル（0600）へ足し、書いた行を返す（錠は呼び手が持つ）。
+
+    判定の記録（mvv-validation）は判定の理由・レッドライン・指摘の本文を伏せずに持つので、同じホストのほかの OS の利用者に
+    読ませない（#3959）。"""
+    out = internal.write_record(kind, row)
+    _append_private(path, (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
+    return out
+
+
+def _private_lock(path: Path) -> Any:
+    """`path` の親を無ければ 0700 で作り（既にあれば権限を変えない）、記録の錠を返す。"""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return jsonl.lock(path)
 
 
 def record_failure(row: Mapping[str, Any]) -> str:
@@ -503,8 +519,7 @@ def record_failure(row: Mapping[str, Any]) -> str:
     ident = secrets.token_hex(8)
     out = internal.write_record("mvv-gate-failure", {**row, "id": ident})
     path = record_path("mvv-gate-failures")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with jsonl.lock(path):
+    with _private_lock(path):
         _append_private(path, (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
     return ident
 
@@ -661,13 +676,13 @@ def _append_missing(
     try:
         path = record_path(kind)
         step = "ロックの取得"
-        with jsonl.lock(path):
+        with _private_lock(path):
             step = "既存の行の読み取り"
             held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
             new = missing(held)
             step = "追記"
             for e in new:
-                jsonl.append(path, e, kind=kind)
+                _append_record(path, e, kind)
                 done += 1
             if done_hook is not None:
                 done_hook(path)
@@ -772,7 +787,8 @@ def mvv_validate_sprint(
         verdict, cost = judge(inputs)
         row = md.judged_row(key, verdict, jsonl.now(), repo, cost)
     try:
-        return jsonl.append_locked(path, row, kind="mvv-validation"), None
+        with _private_lock(path):
+            return _append_record(path, row, "mvv-validation"), None
     except OSError as exc:
         return row, str(exc)
 
