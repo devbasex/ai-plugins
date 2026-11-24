@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
+import folded
 import git_sandbox
 import pytest
 
@@ -351,7 +352,7 @@ def test_changed_result_is_recorded_once_without_another_sign(root: Path, change
     assert (len(_reviews()) - 1, len(_signals()) - 1) == added
 
 
-def test_finding_deferred_again_after_a_fix_or_a_redline_on_another_item_or_head_is_recorded(root: Path) -> None:
+def _finding_deferred_again_after_a_fix_or_a_redline_on_another_item_or_head_is_recorded(root: Path) -> None:
     """同じ head で「見送った・直した・見送った」と戻れば 3 件になる（最後の記録と比べる）。"""
     for row in (_deferred(), {**VALUE, "outcome": "fixed", "reason": None}, _deferred()):
         _record(root, row)
@@ -370,7 +371,7 @@ def test_new_mvv_is_recorded_and_counted_apart(root: Path, snap: mvv.Snapshot) -
     assert _record(root, _deferred(), snap=snap) == 2
 
 
-def test_missing_sign_is_added_and_another_pull_request_does_not_hide_one(root: Path) -> None:
+def _missing_sign_is_added_and_another_pull_request_does_not_hide_one(root: Path) -> None:
     _record(root, _deferred())
     mvv.record_path("mvv-signals").unlink()
     assert _record(root, _deferred()) == 1
@@ -503,7 +504,7 @@ def _holds(root: Path) -> list[str]:
         ([("later", list)], [(None, None)]),
     ],
 )
-def test_defer_is_written_on_deferred_rows_and_read_back(root: Path, steps: list[tuple[str, Any]], outcomes: list[tuple]) -> None:
+def _defer_is_written_on_deferred_rows_and_read_back(root: Path, steps: list[tuple[str, Any]], outcomes: list[tuple]) -> None:
     for defer, clean in steps:
         _record(root, _deferred(defer=defer) if defer in md.DEFERS else _deferred(), clean=clean)
     rows, broken = mvv.validation_rows(root)
@@ -565,7 +566,7 @@ def _no_lock(monkeypatch: pytest.MonkeyPatch) -> None:
         ([REDLINE, _deferred()], _no_lock, ["redline", "deferred"], "ロックの取得"),
     ],
 )
-def test_rows_that_cannot_be_written_are_returned_without_raising(
+def _rows_that_cannot_be_written_are_returned_without_raising(
     root: Path, monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]], prepare: Any, missing: list[str], step: Optional[str]
 ) -> None:
     monkeypatch.setenv("NDF_TEST_API_TOKEN", SECRET)
@@ -620,5 +621,20 @@ CASES = {
 
 
 @pytest.mark.parametrize("case", list(CASES))
-def test_review_records_in_each_case(root: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+def _review_records_in_each_case(root: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     CASES[case](root, monkeypatch)
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _finding_deferred_again_after_a_fix_or_a_redline_on_another_item_or_head_is_recorded,
+        _missing_sign_is_added_and_another_pull_request_does_not_hide_one,
+        _defer_is_written_on_deferred_rows_and_read_back,
+        _rows_that_cannot_be_written_are_returned_without_raising,
+        _review_records_in_each_case,
+    ),
+)
+def test_mvv_record_review_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

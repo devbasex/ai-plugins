@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
+import folded
 import git_sandbox
 import pytest
 
@@ -24,7 +25,7 @@ def _decl(version: int, limits: dict | None = None) -> dict:
     return out
 
 
-def test_override_kind_does_not_count_a_passed_unknown_as_an_override_but_signals_count_it() -> None:
+def _override_kind_does_not_count_a_passed_unknown_as_an_override_but_signals_count_it() -> None:
     assert md.override_kind(md.FOLLOW, approved=False) == md.OVERRIDE_REJECT
     assert md.override_kind(md.NOT_FOLLOW, approved=True) == md.OVERRIDE_PASS
     assert md.override_kind(md.UNKNOWN, approved=True) == md.OVERRIDE_UNKNOWN_PASS
@@ -93,7 +94,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return main
 
 
-def test_repo_key_is_the_main_directory_from_a_worktree_and_refuses_outside_git(repo: Path, tmp_path: Path) -> None:
+def _repo_key_is_the_main_directory_from_a_worktree_and_refuses_outside_git(repo: Path, tmp_path: Path) -> None:
     assert mvv.repo_key(repo / ".worktrees" / "w") == mvv.repo_key(repo) == str(repo.resolve())
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -184,7 +185,7 @@ def test_mvv_validate_sprint_judges_again_after_a_row_of_the_same_inputs_that_do
 
 
 # 現状固定（I-011 の前）: 記録の保存先は NDF_MVV_STATE_DIR → 状態の保存先の順。状態の保存先を解けなければ IdentityError のまま
-def test_record_path_prefers_the_env_dir_and_raises_without_it_and_the_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _record_path_prefers_the_env_dir_and_raises_without_it_and_the_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
     monkeypatch.setattr(identity, "load", _unloadable)
     assert mvv.record_path("mvv-validation") == tmp_path / "m" / "mvv-validation.jsonl"
@@ -232,7 +233,7 @@ def _follow(calls: list[int]) -> mvv.Judge:
     return judge
 
 
-def test_validation_rows_reads_every_row_once_the_record_exists_and_refuses_a_non_file(repo: Path) -> None:
+def _validation_rows_reads_every_row_once_the_record_exists_and_refuses_a_non_file(repo: Path) -> None:
     assert mvv.validation_rows(repo) == ([], [])
     path = mvv.record_path("mvv-validation")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,7 +260,7 @@ def test_validation_rows_reads_every_row_once_the_record_exists_and_refuses_a_no
         mvv.validation_rows(repo)
 
 
-def test_mvv_validate_sprint_reuses_from_the_given_rows_without_reading_the_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _mvv_validate_sprint_reuses_from_the_given_rows_without_reading_the_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
     first, _ = mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls))
     rows, broken = mvv.validation_rows(repo)
@@ -273,7 +274,7 @@ def test_mvv_validate_sprint_reuses_from_the_given_rows_without_reading_the_reco
     assert len(calls) == 3
 
 
-def test_mvv_validate_sprint_returns_the_row_and_the_cause_when_it_cannot_append(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _mvv_validate_sprint_returns_the_row_and_the_cause_when_it_cannot_append(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*_a: Any, **_k: Any) -> dict:
         raise OSError("書けない")
 
@@ -323,7 +324,7 @@ def _files(n: int) -> list[dict[str, Any]]:
     return [{"filename": f"f{i}", "status": "modified", "patch": "+x", "changes": 1} for i in range(n)]
 
 
-def test_compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> None:
+def _compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> None:
     hub, g = CompareHub(_files(mvv.COMPARE_FILES_CAP - 1)), CountingGit(git.Completed(0, "", ""))
     assert mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40) == hub.files  # type: ignore[arg-type]
     assert hub.paths == [f"/repos/o/r/compare/{'b' * 40}...{'h' * 40}"] and g.calls == []
@@ -337,7 +338,7 @@ def test_compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> No
             "--src-prefix=a/", "--dst-prefix=b/", "-M"} <= set(mvv.LOCAL_DIFF)  # fmt: skip
 
 
-def test_compare_files_refuses_an_unfetchable_head_or_an_answer_without_files() -> None:
+def _compare_files_refuses_an_unfetchable_head_or_an_answer_without_files() -> None:
     g = CountingGit(git.Completed(128, "", "取得できない"))
     with pytest.raises(git.GitError, match="取得できない"):
         mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
@@ -370,7 +371,7 @@ def _limited(kind: str) -> GitHubError:
         (_limited("secondary"), False),
     ],
 )
-def test_compare_files_reads_with_git_only_when_the_api_token_cannot_read_the_comparison(refused: GitHubError, by_git: bool) -> None:
+def _compare_files_reads_with_git_only_when_the_api_token_cannot_read_the_comparison(refused: GitHubError, by_git: bool) -> None:
     # 非公開のリポジトリで API の認証情報に Contents の読み取りが無い（403・404）: 同じ SHA の組を手元の git で読む。
     # ほかの失敗と、レート制限と識別できた 403 は拒否でないので、手元の git へ切り替えずにそのまま投げる
     hub, g = CompareHub([], refused=refused), CountingGit(git.Completed(0, "", ""))
@@ -384,9 +385,7 @@ def test_compare_files_reads_with_git_only_when_the_api_token_cannot_read_the_co
     assert g.calls == [("fetch", "origin", "h" * 40), ("diff", "b" * 40, "h" * 40, *mvv.LOCAL_DIFF)]
 
 
-def test_compare_files_at_the_cap_reads_only_the_changes_of_the_pr_from_the_merge_base(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _compare_files_at_the_cap_reads_only_the_changes_of_the_pr_from_the_merge_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # マージ先だけが分岐の後に進んだ状態（本物の git）: マージ先だけの変更が載らず、両方で同じに変えたファイルが落ちない
     git_sandbox.isolate_git(tmp_path, monkeypatch)
     origin, local = tmp_path / "origin", tmp_path / "local"
@@ -407,3 +406,23 @@ def test_compare_files_at_the_cap_reads_only_the_changes_of_the_pr_from_the_merg
     git_sandbox.sh(tmp_path, "clone", "-q", "--single-branch", "-b", "main", str(origin), str(local))
     rows = mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), git.Git(local), "origin", base, head)  # type: ignore[arg-type]
     assert sorted(r["filename"] for r in rows) == ["both.txt", "pr.txt"]
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _override_kind_does_not_count_a_passed_unknown_as_an_override_but_signals_count_it,
+        _repo_key_is_the_main_directory_from_a_worktree_and_refuses_outside_git,
+        _record_path_prefers_the_env_dir_and_raises_without_it_and_the_state_dir,
+        _validation_rows_reads_every_row_once_the_record_exists_and_refuses_a_non_file,
+        _mvv_validate_sprint_reuses_from_the_given_rows_without_reading_the_record,
+        _mvv_validate_sprint_returns_the_row_and_the_cause_when_it_cannot_append,
+        _compare_files_reads_the_comparison_once_and_git_only_at_the_cap,
+        _compare_files_refuses_an_unfetchable_head_or_an_answer_without_files,
+        _compare_files_reads_with_git_only_when_the_api_token_cannot_read_the_comparison,
+        _compare_files_at_the_cap_reads_only_the_changes_of_the_pr_from_the_merge_base,
+    ),
+)
+def test_mvv_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

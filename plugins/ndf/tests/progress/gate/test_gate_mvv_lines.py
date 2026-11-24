@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import folded
 import pytest
 
 from ndf.domains.records import mvv, mvv_decide, mvv_gate
@@ -173,7 +176,7 @@ CASES = {
 
 
 @pytest.mark.parametrize("case", CASES.values(), ids=CASES.keys())
-def test_the_mvv_lines_match_the_verdict_to_the_question_and_carry_no_citation(case):
+def _the_mvv_lines_match_the_verdict_to_the_question_and_carry_no_citation(case):
     out, gate_name, head, private, present, absent = case
     lines = gate.mvv_lines(out, gate_name, 7, head, private=private)
     text = "\n".join(lines)
@@ -186,7 +189,7 @@ def test_the_mvv_lines_match_the_verdict_to_the_question_and_carry_no_citation(c
     assert mvv_decide.citation_errors(rows, {11: ["Value 1", "Value 4"]}) == []
 
 
-def test_the_stored_view_keeps_counts_and_every_mark_of_the_verdict():
+def _the_stored_view_keeps_counts_and_every_mark_of_the_verdict():
     held = judged(skip=True, stopped_by={"kind": "pr_moved", "text": "定型文"}, why=["w1", "w2", "w3"])
     got, w = model.mvv_stored_view(held), model.MVV_WITHHELD
     assert got["verdict"]["reasons"] == [w, w] and got["verdict"]["boundary"] == [w] and got["why"] == [w] * 3 and got["holds"] == [w, w]
@@ -202,3 +205,15 @@ def test_the_stored_view_keeps_counts_and_every_mark_of_the_verdict():
     assert model.mvv_stored_view(held)["verdict"]["basis"] == kept
     text = "\n".join(gate.mvv_lines(held, "design", 7, "h1", private=False))
     assert "根拠の項目: " + "・".join(kept) in text and "ghp_xxx" not in text
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _the_mvv_lines_match_the_verdict_to_the_question_and_carry_no_citation,
+        _the_stored_view_keeps_counts_and_every_mark_of_the_verdict,
+    ),
+)
+def test_gate_mvv_lines_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

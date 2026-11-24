@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import folded
 import pytest
 
 from ndf.adapters.github import GitHubError
@@ -135,7 +137,7 @@ def _material_of(out):
 
 
 @pytest.mark.parametrize("private", [True, False])
-def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, env, repo, new_table, flow, monkeypatch, private):
+def _the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, env, repo, new_table, flow, monkeypatch, private):
     from ndf.progress.gate import entry
 
     st.private = private
@@ -175,7 +177,7 @@ def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, e
         )
 
 
-def test_write_material_places_an_owner_only_file_once_and_keeps_the_one_placed_first(st, repo, new_table, flow, monkeypatch, tmp_path):
+def _write_material_places_an_owner_only_file_once_and_keeps_the_one_placed_first(st, repo, new_table, flow, monkeypatch, tmp_path):
     import os
     from dataclasses import replace
 
@@ -206,3 +208,15 @@ def test_write_material_places_an_owner_only_file_once_and_keeps_the_one_placed_
     monkeypatch.setattr(os, "link", link)
     assert gate.write_material(tmp_path / "b", v, q) == raced
     assert raced.read_text(encoding="utf-8") == "先に置いた資料\n" and [p.name for p in raced.parent.iterdir()] == [raced.name]
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _the_plan_material_carries_the_verdict_of_the_head_it_was_made_for,
+        _write_material_places_an_owner_only_file_once_and_keeps_the_one_placed_first,
+    ),
+)
+def test_gate_present_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

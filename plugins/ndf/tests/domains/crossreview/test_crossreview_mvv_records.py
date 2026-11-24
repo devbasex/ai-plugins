@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Optional
 
+import folded
 import pytest
 
 from ndf.adapters import publish
@@ -168,7 +169,7 @@ def _refuse(*_: Any) -> None:
     raise OSError(FULL)
 
 
-def test_records_that_cannot_be_written_stop_the_review_until_written(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
+def _records_that_cannot_be_written_stop_the_review_until_written(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
     """受け入れ条件 5: 見送り・レッドラインの記録を書けなければ、収束でも STOPPED・mvv_record_failed で止まる。保存先のパスを含む
     原因は、認証情報を伏せて状態ファイルだけに残す。直して打ち直すと欠けた行を書いて収束し、注意を消す。"""
     path = mvv.record_path("mvv-validation")
@@ -198,7 +199,7 @@ def test_records_that_cannot_be_written_stop_the_review_until_written(review: Re
     assert drive.RECORDS_UNWRITTEN in review.hub.comments[-1][2]
 
 
-def test_cause_that_cannot_be_saved_still_stops_the_review(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
+def _cause_that_cannot_be_saved_still_stops_the_review(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
     """MVV の記録と状態ファイルの両方に書けなくても、結果を返して止まり、固定の注意を 2 つ載せる。同じ head の打ち直しで初めて
     失敗しても、PR のコメントに注意を載せる（載せた後は、同じ失敗で書き直さない）。"""
     review.run(Visibility())
@@ -261,3 +262,15 @@ def test_issue_4090_5_citation_error_reaches_the_result_and_the_records_after_st
         ("r2-n1", "Value 1", fin.UNRESOLVED),
     ]
     assert _records("mvv-signals") == []
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _records_that_cannot_be_written_stop_the_review_until_written,
+        _cause_that_cannot_be_saved_still_stops_the_review,
+    ),
+)
+def test_crossreview_mvv_records_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

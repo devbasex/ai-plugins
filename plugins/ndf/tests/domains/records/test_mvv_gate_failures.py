@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import folded
 import git_sandbox
 import pytest
 
@@ -36,7 +37,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # --- #3959 Task 9: 失敗の原因を定型文と手元の診断の記録に分ける ---
 
 
-def test_failure_text_keeps_the_exception_only_in_the_local_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _failure_text_keeps_the_exception_only_in_the_local_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NDF_TEST_TOKEN", "zz-fake-secret-77")
     exc = git.GitError(f"fetch https://x-access-token:zz-fake-secret-77@{HOST}/team/repo.git に失敗した")
     got = mvv_gate.failure_text("base_unreadable", exc, {"gate": "design", "pr": 5, "root": repo})
@@ -52,7 +53,7 @@ def test_failure_text_keeps_the_exception_only_in_the_local_record(repo: Path, m
     assert first != second and [r["cause"] for r in rows] == ["", ""] and len({r["id"] for r in rows}) == 2
 
 
-def test_failure_text_does_not_raise_when_the_record_cannot_be_written(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _failure_text_does_not_raise_when_the_record_cannot_be_written(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     blocked = tmp_path / "blocked"
     blocked.write_text("ファイルなのでディレクトリにできない")
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(blocked / "state"))
@@ -60,7 +61,7 @@ def test_failure_text_does_not_raise_when_the_record_cannot_be_written(repo: Pat
     assert got == f"{mm.STOP_REASONS['diff_unreadable']}（診断の記録に書けない）"
 
 
-def test_every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr() -> None:
+def _every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr() -> None:
     assert set(mm.STOP_REASONS) == {
         "no_gate", "no_pr", "mvv_unapproved", "base_unreadable", "diff_unreadable", "pr_moved", "pr_reread_failed",
         "incomplete_patches", "llm_no_answer", "records_unreadable", "records_unwritable", "note_unwritten",
@@ -124,7 +125,7 @@ def umask_022() -> Any:
     os.umask(old)
 
 
-def test_record_failure_creates_the_directory_0700_and_the_file_0600(repo: Path, umask_022: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def _record_failure_creates_the_directory_0700_and_the_file_0600(repo: Path, umask_022: None, monkeypatch: pytest.MonkeyPatch) -> None:
     fd = _Fd(monkeypatch)
     got = mvv_gate.failure_text("base_unreadable", f"fetch {HOST}", {"gate": "design"})
     path = mvv.record_path("mvv-gate-failures")
@@ -135,7 +136,7 @@ def test_record_failure_creates_the_directory_0700_and_the_file_0600(repo: Path,
     assert fd.written and set(fd.written) == {opened} and flags & os.O_NONBLOCK and flags & os.O_NOFOLLOW
 
 
-def test_record_failure_narrows_an_existing_wider_file(repo: Path, umask_022: None) -> None:
+def _record_failure_narrows_an_existing_wider_file(repo: Path, umask_022: None) -> None:
     path = mvv.record_path("mvv-gate-failures")
     path.parent.mkdir(parents=True)
     path.write_text("")
@@ -162,7 +163,7 @@ def _existing(mode: int = 0o644) -> Path:
         {"fail_open": OSError(errno.ENXIO, "No such device or address")},
     ],
 )
-def test_record_failure_writes_nothing_when_the_file_cannot_be_kept_private(
+def _record_failure_writes_nothing_when_the_file_cannot_be_kept_private(
     repo: Path, monkeypatch: pytest.MonkeyPatch, stubbed: dict[str, Any]
 ) -> None:
     path = _existing()
@@ -171,7 +172,7 @@ def test_record_failure_writes_nothing_when_the_file_cannot_be_kept_private(
     assert _unwritable(got) and path.read_text(encoding="utf-8") == "前の行\n"
 
 
-def test_record_failure_does_not_follow_a_symlink(repo: Path, tmp_path: Path) -> None:
+def _record_failure_does_not_follow_a_symlink(repo: Path, tmp_path: Path) -> None:
     target = tmp_path / "other.txt"
     target.write_text("別のファイル\n")
     path = mvv.record_path("mvv-gate-failures")
@@ -179,3 +180,20 @@ def test_record_failure_does_not_follow_a_symlink(repo: Path, tmp_path: Path) ->
     path.symlink_to(target)
     assert _unwritable(mvv_gate.failure_text("base_unreadable", HOST, {}))
     assert target.read_text(encoding="utf-8") == "別のファイル\n"
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _failure_text_keeps_the_exception_only_in_the_local_record,
+        _failure_text_does_not_raise_when_the_record_cannot_be_written,
+        _every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr,
+        _record_failure_creates_the_directory_0700_and_the_file_0600,
+        _record_failure_narrows_an_existing_wider_file,
+        _record_failure_writes_nothing_when_the_file_cannot_be_kept_private,
+        _record_failure_does_not_follow_a_symlink,
+    ),
+)
+def test_mvv_gate_failures_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

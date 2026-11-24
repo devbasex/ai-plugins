@@ -10,7 +10,9 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 from pathlib import Path
+from typing import Any
 
+import folded
 import pytest
 from result_json import last_result
 
@@ -126,14 +128,14 @@ def _human(st, tid, head: str = "h1") -> None:
     gate.answer(st, tid, gate.Answer(q.id, "approved", "人が承認した", "human:reviewer", f"k-{q.id}", seen=gate.Target(head=head)))
 
 
-def test_a_skip_on_the_release_gate_waits_for_a_human_without_a_service_answer(repo, st, env, capsys):
+def _a_skip_on_the_release_gate_waits_for_a_human_without_a_service_answer(repo, st, env, capsys):
     tid = _new(capsys)
     out = _to_release_gate(st, tid, repo, env, _held("release", holds=[]))
     assert out["status"] == "gate" and out["metrics"]["step"] == "release-gate"
     assert [e.draft.payload["by"] for e in _answers(st, tid)] == ["human:test"]
 
 
-def test_an_old_service_answer_on_the_release_gate_asks_a_human_and_the_human_answer_carries_on(repo, st, env, capsys):
+def _an_old_service_answer_on_the_release_gate_asks_a_human_and_the_human_answer_carries_on(repo, st, env, capsys):
     # 決定 3: 更新前の NDF が書いた判定の skip: true と、まだ読まれていない service:mvv の承認から再開する
     tid = _new(capsys)
     _to_release_gate(st, tid, repo, env, OLD_RELEASE)
@@ -151,7 +153,7 @@ def test_an_old_service_answer_on_the_release_gate_asks_a_human_and_the_human_an
     assert done["status"] == "ok" and done["metrics"]["state"] == "completed"
 
 
-def test_a_release_gate_closed_by_an_old_service_answer_is_opened_again(repo, st, env, capsys):
+def _a_release_gate_closed_by_an_old_service_answer_is_opened_again(repo, st, env, capsys):
     # 決定 3: 更新前の NDF が service:mvv の回答を消費して済みにした承認ゲートは、後ろのステップが済んでいなければ開き直す
     tid = _new(capsys)
     _to_release_gate(st, tid, repo, env, OLD_RELEASE)
@@ -172,7 +174,7 @@ def test_a_release_gate_closed_by_an_old_service_answer_is_opened_again(repo, st
     assert len(recorded) == 2
 
 
-def test_a_release_gate_closed_by_an_old_service_answer_is_not_opened_after_the_next_step(repo, st, env, capsys):
+def _a_release_gate_closed_by_an_old_service_answer_is_not_opened_after_the_next_step(repo, st, env, capsys):
     tid = _new(capsys)
     _to_release_gate(st, tid, repo, env, OLD_RELEASE)
     old = _old_mvv_answer(st, tid, OLD_RELEASE)
@@ -183,7 +185,7 @@ def test_a_release_gate_closed_by_an_old_service_answer_is_not_opened_after_the_
     assert run.decide(run.read(st, tid)).action == run.Action.RESUME
 
 
-def test_a_failed_merge_after_an_old_service_answer_asks_a_human_after_the_retry(repo, st, env, capsys):
+def _a_failed_merge_after_an_old_service_answer_asks_a_human_after_the_retry(repo, st, env, capsys):
     tid = _new(capsys)
     _to_release_gate(st, tid, repo, env, OLD_RELEASE)
     old = _old_mvv_answer(st, tid, OLD_RELEASE)
@@ -197,7 +199,7 @@ def test_a_failed_merge_after_an_old_service_answer_asks_a_human_after_the_retry
     assert out["status"] == "gate" and out["metrics"]["step"] == "release-gate"
 
 
-def test_the_design_gate_counts_only_a_service_answer_that_checked_the_holds(repo, st, env, capsys):
+def _the_design_gate_counts_only_a_service_answer_that_checked_the_holds(repo, st, env, capsys):
     # 保留を確かめた証拠（holds: []）を持つ判定だけが設計承認ゲートを省く
     tid = _new(capsys)
     env.fake.script["design-mvv"] = [_held_step(_held("design", holds=[]))]
@@ -210,7 +212,7 @@ def test_the_design_gate_counts_only_a_service_answer_that_checked_the_holds(rep
 
 
 @pytest.mark.parametrize("extra", [{}, {"holds": None}, {"holds": ["直っていないレッドライン"]}])
-def test_the_design_gate_does_not_count_a_verdict_without_checked_holds(repo, st, env, capsys, extra):
+def _the_design_gate_does_not_count_a_verdict_without_checked_holds(repo, st, env, capsys, extra):
     tid = _new(capsys)
     held = _held("design", **extra, **FREE)
     env.fake.script["design-mvv"] = [_held_step(held)]
@@ -224,7 +226,7 @@ def test_the_design_gate_does_not_count_a_verdict_without_checked_holds(repo, st
     assert gate.approved_head(run.read(st, tid), "design") is None
 
 
-def test_consume_does_not_take_an_answer_that_is_not_counted(repo, st, env, capsys):
+def _consume_does_not_take_an_answer_that_is_not_counted(repo, st, env, capsys):
     tid = _new(capsys)
     _to_release_gate(st, tid, repo, env, OLD_RELEASE)
     old = _old_mvv_answer(st, tid, OLD_RELEASE)
@@ -255,11 +257,11 @@ def test_consume_does_not_take_an_answer_that_is_not_counted(repo, st, env, caps
         ({"by": 3}, "release", False),
     ],
 )
-def test_mvv_answer_void(payload, kind, void):
+def _mvv_answer_void(payload, kind, void):
     assert model.mvv_answer_void(payload, kind) is void
 
 
-def test_mvv_skip_takes_only_a_design_verdict_that_checked_the_holds():
+def _mvv_skip_takes_only_a_design_verdict_that_checked_the_holds():
     done = {"m": {"outputs": {"mvv_gate": _held("design", holds=[])}}}
     assert model.mvv_skip(done, "m", "design") is not None
     for held in (_held("design"), _held("design", holds=None), _held("design", holds=["x"])):
@@ -285,7 +287,7 @@ def _recorded_mvv(st, tid, step: str) -> dict:
     return _recorded_report(st, tid, step)["outputs"]["mvv_gate"]
 
 
-def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answer(repo, st, env, capsys):
+def _an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answer(repo, st, env, capsys):
     from ndf.progress import stages, store
 
     st.private = False
@@ -313,3 +315,24 @@ def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answ
         store.append_events(conn, tid, [draft], v.events[-1].seq)
     got = run.read(st, tid).events[-1].draft.payload["outputs"]["mvv_gate"]
     assert got["verdict"]["reasons"] == [model.MVV_WITHHELD] * 2 and got["why"] == [model.MVV_WITHHELD] and got["head"] == JUDGED
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _a_skip_on_the_release_gate_waits_for_a_human_without_a_service_answer,
+        _an_old_service_answer_on_the_release_gate_asks_a_human_and_the_human_answer_carries_on,
+        _a_release_gate_closed_by_an_old_service_answer_is_opened_again,
+        _a_release_gate_closed_by_an_old_service_answer_is_not_opened_after_the_next_step,
+        _a_failed_merge_after_an_old_service_answer_asks_a_human_after_the_retry,
+        _the_design_gate_counts_only_a_service_answer_that_checked_the_holds,
+        _the_design_gate_does_not_count_a_verdict_without_checked_holds,
+        _consume_does_not_take_an_answer_that_is_not_counted,
+        _mvv_answer_void,
+        _mvv_skip_takes_only_a_design_verdict_that_checked_the_holds,
+        _an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answer,
+    ),
+)
+def test_run_mvv_answers_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

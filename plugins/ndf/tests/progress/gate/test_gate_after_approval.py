@@ -6,7 +6,9 @@ import json
 import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
+import folded
 import pytest
 
 from ndf.progress import gate, model, run
@@ -59,7 +61,7 @@ def _commit(repo, name, text):
     return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def test_git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behavior_docs(repo):
+def _git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behavior_docs(repo):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text('{"docs": {"behavior": ["**/skills/**/*.md"]}}')
     base = _commit(repo, "src/a.py", "x = 1\n")
@@ -96,7 +98,7 @@ def test_there_is_no_approved_head_after_a_rejection(st, new_table, release_ques
     assert model.gate_label("release")
 
 
-def test_a_service_answer_that_is_not_counted_is_no_approval_even_after_a_human_one(st, new_table, release_question):
+def _a_service_answer_that_is_not_counted_is_no_approval_even_after_a_human_one(st, new_table, release_question):
     # #3959 の決定 3: リリース承認ゲートの service:mvv の回答は承認にしない。前の人の承認へさかのぼらない
     tid = new_table()
     _approve(st, tid, release_question(tid), "h1")
@@ -142,7 +144,7 @@ SEEN = {
 
 
 @pytest.mark.parametrize("case", SEEN.values(), ids=SEEN.keys())
-def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, monkeypatch, case):
+def _the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, monkeypatch, case):
     placed, hashed, change, now, expect, reads = case
     tid = new_table()
     q = release_question(tid)
@@ -184,9 +186,23 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
         (5, 5, "h1", None, False),
     ],
 )
-def test_a_service_answer_needs_both_the_judged_pr_and_head_to_match(judged, question_pr, seen, now, kept):
+def _a_service_answer_needs_both_the_judged_pr_and_head_to_match(judged, question_pr, seen, now, kept):
     # #3959: MVV 判定で設計承認ゲートを省いた回答は、判定した PR の番号と head の両方が今の質問と同じときだけ読む
     q = gate.Question("q", "t", "設計", "design-gate", "design", ("approved",), question_pr)
     payload = {"by": model.MVV_SERVICE, model.MVV_KEY: {"pr": judged, "head": seen}}
     got = answering._judged_elsewhere(payload, q, gate.Target(head=seen), gate.Target(head=now))
     assert (got is None) is kept
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behavior_docs,
+        _a_service_answer_that_is_not_counted_is_no_approval_even_after_a_human_one,
+        _the_recheck_compares_only_the_material_the_answerer_saw,
+        _a_service_answer_needs_both_the_judged_pr_and_head_to_match,
+    ),
+)
+def test_gate_after_approval_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

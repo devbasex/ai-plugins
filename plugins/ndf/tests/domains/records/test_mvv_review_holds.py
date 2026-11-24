@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import folded
 import pytest
 
 from ndf.domains.records import jsonl, mvv, mvv_gate
@@ -76,7 +77,7 @@ HOLDS = {
 
 
 @pytest.mark.parametrize(("rows", "broken", "expected"), HOLDS.values(), ids=HOLDS.keys())
-def test_review_holds_keep_only_unfixed_redlines_and_deferrals_that_need_the_user(
+def _review_holds_keep_only_unfixed_redlines_and_deferrals_that_need_the_user(
     rows: list[dict[str, Any]], broken: int, expected: list[str]
 ) -> None:
     assert md.review_holds(rows, broken, "/m", [PR], MVV, hidden=HIDDEN) == expected
@@ -140,7 +141,7 @@ def _no_git(self: Any, *args: Any, **kw: Any) -> str:
 
 
 @pytest.mark.parametrize(("prepare", "skip", "held", "unwritten"), GATES.values(), ids=GATES.keys())
-def test_fast_design_gate_is_not_skipped_while_the_review_holds_remain(
+def _fast_design_gate_is_not_skipped_while_the_review_holds_remain(
     fake_git: Path, prepare: Callable[[], None], skip: bool, held: int, unwritten: bool
 ) -> None:
     # 受け入れ条件 4: 直っていないレッドライン・利用者の判断が要る見送り・読めない記録は、fast でも「従う」の判定で省かない。
@@ -184,7 +185,7 @@ class GateGit:
         return tuple(None for _ in wheres)
 
 
-def test_the_gate_puts_the_holds_on_the_pr_and_the_approval_material(
+def _the_gate_puts_the_holds_on_the_pr_and_the_approval_material(
     fake_git: Path, notes: list[tuple[int, str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 保留の文は holds にだけ置き、why には件数の固定の文だけ。PR のコメントと承認資料にも保留が載る。
@@ -204,7 +205,7 @@ def test_the_gate_puts_the_holds_on_the_pr_and_the_approval_material(
     assert f"  - {hold}" in gate.mvv_lines(out, "design", PR, HEAD)
 
 
-def test_records_are_read_once_and_a_broken_row_stops_the_reuse(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _records_are_read_once_and_a_broken_row_stops_the_reuse(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """記録は判定 1 回につき 1 回だけ読む。同じ材料の「従う」は再利用するが、その後ろに読めない行があれば再利用せず保留にする。"""
     reads: list[Path] = []
     real = jsonl.read_rows
@@ -221,9 +222,24 @@ def test_records_are_read_once_and_a_broken_row_stops_the_reuse(repo: Path, monk
     assert (out["skip"], out["holds"], len(ask.calls)) == (False, ["mvv-validation.jsonl に読めない行が 1 件ある"], 2)
 
 
-def test_release_gate_does_not_read_the_holds(repo: Path) -> None:
+def _release_gate_does_not_read_the_holds(repo: Path) -> None:
     # 決定 3: リリース承認ゲートは #4105 まで保留を読まず（null）、fast でも省かない
     RepoKey.value = mvv.repo_key(repo)
     _write([_redline(1)])
     out = mvv_gate.gate(repo, "release", _inputs(pr=PR), _hub(PR, DOCS), Ask(FOLLOW))
     assert (out["skip"], out["holds"], out["why"]) == (False, None, [mvv_gate.RELEASE_KEPT])
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _review_holds_keep_only_unfixed_redlines_and_deferrals_that_need_the_user,
+        _fast_design_gate_is_not_skipped_while_the_review_holds_remain,
+        _the_gate_puts_the_holds_on_the_pr_and_the_approval_material,
+        _records_are_read_once_and_a_broken_row_stops_the_reuse,
+        _release_gate_does_not_read_the_holds,
+    ),
+)
+def test_mvv_review_holds_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)

@@ -4,7 +4,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
+import folded
 import pytest
 
 from ndf.adapters import run_log
@@ -292,7 +294,7 @@ def test_redact_hides_dict_keys_bytes_and_non_json_values(monkeypatch):
 SECRET = "s3cr3t-value-123"
 
 
-def test_secret_spans_are_the_ranges_redact_replaces(monkeypatch):
+def _secret_spans_are_the_ranges_redact_replaces(monkeypatch):
     # #3959 Task 9: 秘密の一致範囲を原文の上で求め、redact はその範囲を伏せ字にする
     monkeypatch.setenv("NDF_TEST_TOKEN", SECRET)
     text = f"a {SECRET} b https://user:pa55@github.com/o/r Authorization: Bearer x.y"
@@ -301,7 +303,7 @@ def test_secret_spans_are_the_ranges_redact_replaces(monkeypatch):
     assert run_log.redact(text) == f"a {run_log.MASK} b https://{run_log.MASK}@github.com/o/r Authorization: {run_log.MASK}"
 
 
-def test_overlapping_matches_of_a_repeating_secret_are_all_masked():
+def _overlapping_matches_of_a_repeating_secret_are_all_masked():
     # 繰り返しのある秘密が重なって現れても、後の一致の末尾を伏せ字から漏らさない
     secret = "abcabcab"
     text = "x abcabcabcab y"
@@ -321,7 +323,20 @@ def test_overlapping_matches_of_a_repeating_secret_are_all_masked():
         ("xssh://git@github.com/o/r", False),
     ],
 )
-def test_only_the_fixed_ssh_user_of_github_is_not_a_secret(text, kept):
+def _only_the_fixed_ssh_user_of_github_is_not_a_secret(text, kept):
     # スキームが ssh・利用者名が git・ホストが github.com の 3 つがそろうときだけ、利用者名を秘密に数えない
     assert (run_log.secret_spans(text) == []) is kept
     assert (run_log.redact(text) == text) is kept
+
+
+# #3959 で足した場合を 1 つのテストの関数へ束ねる（テストの関数の数の予算。束ね方は tests/support/folded.py）
+@pytest.mark.parametrize(
+    "case",
+    folded.cases(
+        _secret_spans_are_the_ranges_redact_replaces,
+        _overlapping_matches_of_a_repeating_secret_are_all_masked,
+        _only_the_fixed_ssh_user_of_github_is_not_a_secret,
+    ),
+)
+def test_cli_run_log_cases(case: Any, request: pytest.FixtureRequest) -> None:
+    folded.run(case, request)
