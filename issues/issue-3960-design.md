@@ -295,6 +295,24 @@ flowchart TD
 
 5 つのコマンドの全文と、合否を確かめた結果は [issue-3960-design-checks.md](./issue-3960-design-checks.md) にある。
 
+## どこを変えるか
+
+詳細設計はこのセクションに畳む。新設する関数 0・シグネチャを変える関数 0 のため。責務や失敗時の扱いが変わる関数も無い。変えるファイルは「設計の結果」の 86 本で、種類ごとに次のとおり変える。参照をどの決定へ向けるかは、「書き換えの手順」の表で決める。
+
+| ファイル（本数） | 変える場所 | 変える前 → 変えた後 | 変わらないことの確かめ | 決定 |
+| --- | --- | --- | --- | --- |
+| `plugins/ndf` の `.py`（60）・`bin/ndf-claude`（1）・`pyproject.toml`（1） | コメントと docstring | 番号・課題の番号・設計文書のパスで決定を指す → 確定仕様のパスと番号で指す。`child_deps.py` は入れ替えで消すという説明も外す | `.py` は構文木の確かめ。ほかの 2 本は値の確かめ | 3 |
+| `contracts/hooks/`（3）・`contracts/limits/`（9）の JSON | `summary` の文 | 同上。ほかの値は変えない | 値の確かめ。`ndf check --write-spec` の後に差分が無い | 3 |
+| `checks/README.md`（1） | 「子の表の規則」と、決定を指す文 | SSOT は設計文書 2 本 → SSOT は `children.json`。表の変え方の順を足す | 条件 8 の検索 | 1・3 |
+| `checks/children.json`（1） | `summary` と、生成する `review_items` の `routed_to` | 設計文書のコピーと名乗る → 自分が SSOT だと書く。`children` と `tables` の値は変えない | 子の表の確かめ・値の確かめ | 1・2 |
+| `checks/rules.json`（1） | `spec.review_items_source` と、`ndf.adapters.llm.ATTEMPTS` の `reason` の文 | 入力は `issues/` の表 → 入力は `docs/specifications/` の表。`reason` は決定の指し方だけが替わる | 値の確かめ | 2・3 |
+| `ndf-review-items.md`（新設）・`ndf-review-items-11x.md`（新設） | 全文 | `issues/` の 2 つの表 → 確定仕様の 2 つの表 | 移した表の確かめ | 2 |
+| `ndf-rebuild.md`・`ndf-rebuild-review-scope.md`・`ndf-contract-fact-checks.md`・`docs/specifications/README.md`（4） | 表の保存先を書く文・「子の記号」の表・リンク・文書の一覧 | 旧い保存先を書く → 新しい保存先を書く。一覧には新設の 2 本の行を足す | 子の表の確かめ・リンクの検査 | 1・2 |
+| `.github/workflows/script-structure.yml`（1） | `REVIEW_ITEMS_PATHS` の 1 行 | 旧い 2 つのパス → 新しい 2 つのパス | 値の確かめ | 2 |
+| `docs/glossary/` の 2 本 | 「子の表」の意味 | 設計の Pull Request で変えてあり、実装では変えない | `ndf records glossary render --check` | 1 |
+
+`main` に 11.0.29 を取り込んだ後（2fd9227a4）、「決定 N」の行は 602 行・267 ファイルに増えた。増えた行は #4126・#4049 と中継の設計の決定を指す。作り直しの決定を指す行は増えておらず、触るファイルの一覧は変わらない。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
