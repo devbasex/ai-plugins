@@ -35,7 +35,7 @@
 | `contracts/hooks/runtimes.json` | claude の Stop に `async_rewake`（予算 `stop-rewake`・`timeout_max` 3,300） | U5 |
 | `contracts/domains/env.json` | `NDF_RELAY_REWAKE` の行 | U5 |
 | `hooks/claude.json`・`docs/contracts/hooks.md`（再生成） | `ndf hooks render`・`ndf check --write-spec` で作り直す（`asyncRewake` は載らないことを確かめる） | U5 |
-| `src/ndf/adapters/cli_floor.py` | `record_key`（新設）。`resolve`・`version_at`・`require` は変えない | U6 |
+| `src/ndf/adapters/cli_floor.py` | `version_record_key`（新設）。`resolve`・`version_at`・`require` は変えない | U6 |
 | `src/ndf/domains/relay/wrapper.py`・`wrapper_launch.py`・`account_choice.py` | `_start`・`_try`・`_fallback`（変更）、`account_choice.metered_of`・`version_env`（新設）、`target_env`・`key_target`・`key_child` に `decl` の引数 | U6 |
 | `src/ndf/domains/relay/cli_cache.py`（新設）・`src/ndf/domains/relay/cli.py` | `report`・`run`（新設）、`build_parser` にサブコマンド `cache report` | U7 |
 | `contracts/schemas/io/relay.args.schema.json`・`relay.result.schema.json` | `cache report` の引数と結果 | U7 |
@@ -101,7 +101,7 @@
 ### Task 8: ラッパーが確かめた版の子にだけ起こす hook を登録する
 
 - **対象ファイル:** `src/ndf/adapters/cli_floor.py`、`src/ndf/domains/relay/wrapper.py`、`src/ndf/domains/relay/wrapper_launch.py`、`src/ndf/domains/relay/account_choice.py`、`tests/adapters/test_cli_floor.py`、`tests/domains/relay/test_relay_wrapper_rewake.py`
-- **変更内容:** 詳細設計の「ラッパー（`wrapper._start`）」のとおり。起動先ごとの最終の環境（`version_env`）で解いた `claude` の版が `cache.rewake` の `versions` のどれかと完全に一致する候補だけ、起動の引数に `--settings <rewake_settings の JSON>`、子の環境に `NDF_RELAY_REWAKE=1`、起動の記録に `rewake` 真を入れる。利用者の `--settings` があれば足さない。同じ実行ファイルなら `--version` の起動は `_start` の下限の確かめの 1 回だけ（`record_key` で記録を引く）。`wrapper.py` は今 951 行なので、足す処理は `wrapper_launch.py`・`account_choice.py` の関数に置き、`wrapper.py` には呼び出しだけを足す
+- **変更内容:** 詳細設計の「ラッパー（`wrapper._start`）」のとおり。起動先ごとの最終の環境（`version_env`）で解いた `claude` の版が `cache.rewake` の `versions` のどれかと完全に一致する候補だけ、起動の引数に `--settings <rewake_settings の JSON>`、子の環境に `NDF_RELAY_REWAKE=1`、起動の記録に `rewake` 真を入れる。利用者の `--settings` があれば足さない。同じ実行ファイルなら `--version` の起動は `_start` の下限の確かめの 1 回だけ（`version_record_key` で記録を引く）。`wrapper.py` は今 951 行なので、足す処理は `wrapper_launch.py`・`account_choice.py` の関数に置き、`wrapper.py` には呼び出しだけを足す
 - **満たす受け入れ条件:** 4068:3（ラッパーの側）・13（ラッパーが `limits.texts` から `versions` を読む）
 - **進め方:** 失敗するテスト（一覧が `2.1.330`・`2.1.332` のとき `2.1.331`・`2.1.333`・`2.1.329` では足さない、など設計書の「テスト設計」の 3 の行）→ 通す最小実装 → 整理。Task 1 の退行テストが通り続けることを確かめる
 

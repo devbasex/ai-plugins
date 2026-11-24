@@ -172,7 +172,7 @@ def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
     return version_at(name, resolve(argv0, env, cwd), env, cwd) if name in facts.ids(TABLE) else None
 
 
-def record_key(path: Optional[str]) -> Optional[tuple[tuple[str, int, int], bool]]:
+def version_record_key(path: Optional[str]) -> Optional[tuple[tuple[str, int, int], bool]]:
     """実行ファイルのバージョンの記録のキー（実パス・更新時刻・大きさ）と、そのキーが記録に在るか。`--version` を打たない。無ければ None（#4068）。"""
     if path is None:
         return None

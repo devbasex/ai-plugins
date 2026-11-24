@@ -78,7 +78,7 @@ REWAKE_ENV = identity.env_name("relay-rewake")
 
 def recorded_version(exe: Optional[str], env: Mapping[str, str], cwd: Path) -> Optional[str]:
     """`--version` の記録に在れば読んだバージョン。記録に無ければ None（打たない）。"""
-    found = cli_floor.record_key(exe)
+    found = cli_floor.version_record_key(exe)
     return cli_floor.version_at("claude", exe, env, cwd) if found is not None and found[1] else None
 
 
@@ -169,7 +169,7 @@ class LaunchSteps:
     def _gate_after(self, g: Gate, key: bool) -> Optional[str]:
         """用意の後にバージョンを読む候補（別の実行ファイルを指す従量の接続）のバージョン。キーでない子は `version_probe` の行を書く。"""
         venv = account_choice.version_env(g.env, g.decl)
-        found = cli_floor.record_key(g.exe)
+        found = cli_floor.version_record_key(g.exe)
         cached = found is not None and found[1]
         if not key and found is not None:
             row = {"kind": "version_probe", "pid": os.getpid(), "section": g.section, "account": g.name, "claude_path": g.exe}
