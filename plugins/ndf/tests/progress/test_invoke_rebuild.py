@@ -42,13 +42,15 @@ def test_launch_lists_issues_and_kinds_and_keeps_the_state_dir_placeholder() -> 
 
 
 class Remote:
-    """`Git.remote` の偽物（呼んだ回数を数える）。"""
+    """`Git.remote` の偽物（呼んだ回数と、呼んだ `Git` の作業場所を残す）。"""
 
     def __init__(self, name: str = "origin", error: Exception | None = None) -> None:
         self.name, self.error, self.calls = name, error, 0
+        self.cwds: list[Path | None] = []
 
     def __call__(self, g: git.Git) -> str:
         self.calls += 1
+        self.cwds.append(g.cwd)
         if self.error is not None:
             raise self.error
         return self.name
@@ -159,24 +161,22 @@ def test_stage_without_branch_strategy_stops_with_the_setting_and_shape(tmp_path
     assert row["setting"] == "workflow.launch.rebuild" and row["shape"] == rebuild_values.SHAPE and row["reason"]
 
 
-def test_design_plan_uses_one_base_and_one_remote(tmp_path, monkeypatch) -> None:
-    """決定 7: 設計のプランの `base` と `--base`、`remote` と `--remote` は同じ値で、ブランチ戦略と `Git.remote` を 1 回ずつ読む。"""
+def test_design_plan_uses_one_base_and_one_remote(tmp_path, monkeypatch, remote: Remote) -> None:
+    """決定 7: 設計のプランの `base` と `--base`、`remote` と `--remote` は同じ値で、ブランチ戦略と `Git.remote` を 1 回ずつ読む。
+
+    `Git.remote` は偽物で、`git worktree list` を打たない。
+    """
     _with_worker(monkeypatch)
     repo = _sprint_repo(tmp_path, {"ci": {"required_checks": ["test"]}})
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    reads = {"strategy": 0, "remote": 0}
-    held_of, held_remote = branch_strategy.of_project, git.Git.remote
+    reads = {"strategy": 0}
+    held_of = branch_strategy.of_project
 
     def of_project(project):
         reads["strategy"] += 1
         return held_of(project)
 
-    def remote(g):
-        reads["remote"] += 1
-        return held_remote(g)
-
     monkeypatch.setattr(branch_strategy, "of_project", of_project)
-    monkeypatch.setattr(git.Git, "remote", remote)
     monkeypatch.setattr(route, "default_base", lambda repo: pytest.fail("base は rebuild と同じ値を使う"))
     work = tmp_path / "w"
     work.mkdir()
@@ -186,5 +186,6 @@ def test_design_plan_uses_one_base_and_one_remote(tmp_path, monkeypatch) -> None
     values = invoke.template_values(t, _stage("design", repo), work, repo, project=project, local_tests=True)
     argv = values["rebuild"]
     assert argv[argv.index("--base") + 1] == values["base"] == "develop"
-    assert argv[argv.index("--remote") + 1] == values["remote"]
-    assert reads == {"strategy": 1, "remote": 1}
+    assert argv[argv.index("--remote") + 1] == values["remote"] == remote.name
+    assert reads == {"strategy": 1}
+    assert remote.calls == 1 and remote.cwds == [repo]

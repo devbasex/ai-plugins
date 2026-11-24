@@ -168,18 +168,22 @@ def _rebuild_step(plan: dict) -> list[str]:
 
 def test_standard_sprint_without_the_rebuild_setting_launches_the_default_command(repo, st, capsys, monkeypatch):
     """#4337 の条件 1・2: 設定 `workflow.launch.rebuild` が無くても、工程「設計」と「ドキュメント再構成」のプランが組め、
-    組み直すステップに `ndf document-rebuild run` と `--out` が入る。"""
-    subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
-    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
-    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
-    gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
-    s = _sprint(repo, monkeypatch, gathered, project=PROJECT_WITHOUT_REBUILD)
+    組み直すステップに `ndf document-rebuild run` と `--out` が入る。
+
+    確かめるのはプランの引数だけなので、ブランチ名は git の境界（`invoke._branch_of`）の偽物から返し、2 つのプランを
+    組んだ所で止める。集めた時点（`gathered`）を使う工程「コードレビュー」まで進まないので、SHA は git から求めない。
+    """
+    monkeypatch.setattr(invoke, "_branch_of", lambda run: BRANCH)
+    s = _sprint(repo, monkeypatch, "0" * 40, project=PROJECT_WITHOUT_REBUILD)
     tid = _new(capsys, "standard")
+    wanted = {"design", "document-rebuild"}
     for _ in range(MAX_TURNS):
         out = _turn(st, tid, repo, s.env)
         assert out["status"] in ("ok", "gate"), out
-        if out["metrics"].get("state") == "completed":
+        if wanted <= {p["name"].removesuffix(f"-{BRANCH}") for p in s.plans}:
             break
+    else:
+        pytest.fail("設計とドキュメント再構成のプランが組まれない")
     plans = {p["name"].removesuffix(f"-{BRANCH}"): p for p in s.plans}
     design, rebuild = _rebuild_step(plans["design"]), _rebuild_step(plans["document-rebuild"])
     for argv in (design, rebuild):
