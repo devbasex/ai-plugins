@@ -12,7 +12,7 @@ import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive
+from ndf.domains.crossreview import cli, drive, seats
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, run_cli
@@ -388,9 +388,9 @@ def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert fin.INCOMPLETE_REVIEWERS in got["summary"] and fake.seat_calls == ["claude"]
     # 理由は席ごとの注意に、直し方はラウンド全体の注意（結果の無い席ごとの行）に載る
-    denied = f"{drive.DENIED_READ}: round1.diff"
+    denied = f"{seats.DENIED_READ}: round1.diff"
     assert any("相手役 claude が差分を読めなかった" in w and denied in w for w in got["warnings"])
-    assert any(f"- claude: {denied}。{drive.DENIED_FIX}" in w for w in got["warnings"])
+    assert any(f"- claude: {denied}。{seats.DENIED_FIX}" in w for w in got["warnings"])
     assert fake.input_dir is not None and not any(str(fake.input_dir) in w for w in got["warnings"])
     assert any(str(fake.input_dir / "round1.diff") in p["result"] for p in got["process"])
     other = _Denied(tmp_path / "st2", script, lambda diff, cwd: "/etc/passwd")

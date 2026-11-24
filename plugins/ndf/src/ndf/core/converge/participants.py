@@ -269,7 +269,8 @@ def denied_reads(denials: Sequence[Mapping[str, Any]], required: Sequence[Path],
     wanted = [Path(os.path.normpath(os.path.abspath(p))) for p in required]
     hit: set[Path] = set()
     for d in denials:
-        names = READ_PATH_ARGS.get(str(d.get("tool_name")), ())
+        tool = str(d.get("tool_name"))
+        names = READ_PATH_ARGS[tool] if tool in READ_PATH_ARGS else ()
         args = d.get("tool_input")
         if not isinstance(args, dict):
             continue

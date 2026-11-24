@@ -1,6 +1,6 @@
 """収束ループの駆動（サブコマンド `ndf cross-review run`）。1 回の起動でラウンドを上限まで回す。
 
-始める前に担当すべてを起動できるか（学習の設定のバックアップ）を確かめ、修正担当か名指し 1 者が断られれば `precondition` で止め、ほかの断られた相手役の席は claude で埋める（#3907・#3955）。
+始める前に担当すべてを起動できるか（学習の設定のバックアップ）を確かめ、修正担当か名指し 1 者が断られれば `precondition` で止め、ほかの断られた相手役の席は claude で埋める（#3907・#3955）。席の起動と埋めは `seats` が持つ。
 
 1 ラウンドは次の順に進む:
 
@@ -34,14 +34,13 @@ from __future__ import annotations
 import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import facts, internal, limits
+from ndf.contracts import internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
@@ -53,6 +52,7 @@ from ndf.domains.crossreview import (
     resume_decide,
     round_scope,
     scope_decide,
+    seats,
     settings,
     store,
     threads,
@@ -77,15 +77,10 @@ RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原
 CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
 # 出た・消えたときに、指摘が同じでも PR の記録を書き直す注意
 MVV_NOTICES = (RECORDS_UNWRITTEN, CAUSE_UNSAVED)
-# 相手役へ渡す資料を置く、実行ごとのディレクトリの名前の頭（後ろは mkdtemp のランダムな文字列。#3955）と、席の claude の system の文
+# 相手役へ渡す資料を置く、実行ごとのディレクトリの名前の頭（後ろは mkdtemp のランダムな文字列。#3955）
 INPUT_PREFIX = "review-input-"
-SEAT_SYSTEM = "cross-review の相手役（読むだけ）"
 # `--base` からの全差分のファイルの名前の後ろ（`round<n>-full.diff`。前の head からの差分を渡すラウンドで、根拠の確かめと埋めた席が使う）
 FULL_DIFF_SUFFIX = "-full.diff"
-# claude の席が渡した差分のファイルの読み取りを拒否された理由の頭（結果の無い席の理由と過程に載せる）
-DENIED_READ = "permission_denials"
-# その席の直し方（ログインでなく、読み取りの権限を確かめさせる。PR 4461 の r3-2）
-DENIED_FIX = "claude が理由に示した差分のファイルを読める設定か（`--restricted`・`--add-dir` の読み取りの範囲と、利用者の permissions の deny）を確かめる"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -490,113 +485,23 @@ def _review_prompt(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[
     return "\n".join(lines)
 
 
-class _SeatResult(NamedTuple):
-    """席 1 回の結果。`findings` は指摘（結果が無ければ None）、`denied` は読み取りを拒否された差分のファイル（claude の席だけ）。"""
-
-    findings: Optional[list[dict[str, Any]]]
-    denied: tuple[Path, ...] = ()
-
-
-def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequence[Path]) -> _SeatResult:
-    """完了した席の出力の指摘。claude は外側の JSON を 1 回だけ読み、`result` の指摘と `permission_denials` を取り出す（PR 4461 の
-    r2-4）。渡した差分のファイルの読み取りを拒否されていれば、指摘が空でも結果が無い（r1-1）。完了でない・出力が無い・指摘の配列が
-    無ければ結果が無い。"""
-    if status.state != agents.AgentState.DONE:
-        return _SeatResult(None)
-    out = spec.paths.out
-    try:
-        if spec.agent != participants.FIXER:
-            return _SeatResult(participants.findings_of(out.read_text(encoding="utf-8", errors="replace")))
-        answer = participants.claude_answer(out)
-    except OSError:  # noqa: NDF401 ファイル: 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
-        return _SeatResult(None)
-    denied = participants.denied_reads(answer.denials, required, spec.cwd)
-    return _SeatResult(None, denied) if denied else _SeatResult(participants.findings_of(answer.text))
-
-
-def _unread_hint(seat: str, cause: str, err: Path) -> str:
-    """読めなかった席 1 つの理由と直し方（precondition の詳細の 1 行）。直し方は席のランタイムで引く。"""
-    row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
-    if cause.startswith(DENIED_READ):
-        fix = DENIED_FIX
-    elif cause.startswith(agents.SANDBOX_FAILED):
-        fix = (
-            "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、外で隔離された環境で打つ"
-            "（`unshare -Ur true` が通らない環境では NDF がサンドボックスを外して起動する）"
-        )
-    else:
-        fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
-    return f"- {seat}: {cause}。{fix}（標準エラー: {err}）"
-
-
-class _Unread(NamedTuple):
-    """結果の無い席 1 つの直し方（precondition の詳細の行）と理由（埋めた席の `reason`）。"""
-
-    hint: str
-    cause: str
-
-
 class _Reviewed(NamedTuple):
     """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。"""
 
     raised: list[dict[str, Any]]
-    unread: dict[str, _Unread]
+    unread: dict[str, seats.Unread]
     silent: bool
 
 
-def _seat_launch(run: _Run, seat: str, prompt: str, stem: Path) -> agents.Launch:
-    """席の 1 回の起動。claude の席は読める場所をこの実行の資料のディレクトリに限った読むだけの起動（#3955 の決定 2・3）。"""
-    if participants.runtime_of(seat) != participants.FIXER:
-        return participants.review_launch(seat, run.cfg.worktree, prompt, stem)
-    readable = () if run.input_dir is None else (run.input_dir,)
-    return participants.read_only_launch(SEAT_SYSTEM, run.cfg.worktree, prompt, stem, readable=readable)
-
-
-def _launch_reviewers(
-    run: _Run, round_no: int, prompts: Mapping[str, str], required: Sequence[Path], launch: Launcher, suffix: str = ""
-) -> tuple[list[dict[str, Any]], dict[str, _Unread]]:
-    """席ごとのリクエストで並べて起動し、指摘と、結果の無い席ごとの直し方と理由を返す。結果の無い席は注意と過程に載せる。
-    `required` はリクエストで渡した差分のファイル（claude の席がその読み取りを拒否されたら結果の無い席と数える）。
-    出力の名前・指摘の担当・注意・過程には席の名前を、起動にはランタイムの名前を使う（#3955 の決定 3）。"""
-    seats = list(prompts)
-    specs = [_seat_launch(run, s, prompts[s], run.round_stem(round_no, f"-{s}{suffix}")) for s in seats]
-    with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
-        statuses = list(pool.map(launch, specs))
-    raised: list[dict[str, Any]] = []
-    unread: dict[str, _Unread] = {}
-    again = "（起動し直した）" if suffix else ""
-    for seat, spec, status in zip(seats, specs, statuses):
-        sandbox = agents.sandbox_failed(spec.paths)
-        got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required)
-        found = got.findings
-        if found is None:
-            kind = "sandbox" if sandbox is not None else DENIED_READ if got.denied else str(status.state)
-            if sandbox is not None:
-                cause = sandbox
-            elif got.denied:
-                # 注意は PR のコメントに載るので、差分のファイルの名前だけを書く。絶対パスは手元の結果 JSON の過程にだけ残す（PR 4461 の r2-1）
-                cause = f"{DENIED_READ}: " + " / ".join(p.name for p in got.denied)
-                kind += ": " + " / ".join(str(p) for p in got.denied)
-            else:
-                cause = f"{status.state}: {status.detail}"
-            warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{cause}）"
-            run.note(round_no, seat, f"回答無し{again}（{kind}）", warning)
-            unread[seat] = _Unread(_unread_hint(seat, cause, spec.paths.err), cause)
-            continue
-        run.note(round_no, seat, f"指摘 {len(found)} 件{again}")
-        raised += [{**f, "by": seat} for f in found]
-    return raised, unread
-
-
-def _review(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], launch: Launcher) -> _Reviewed:
+def _review_round(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], launch: Launcher) -> _Reviewed:
     """今の席を並べて起動し、結果の無い claude 以外の席だけを同じラウンドで 1 度だけ起動し直す（#3941）。それでも結果の無い席が
     どれも claude 以外なら、その席を claude の読むだけの起動で埋める（`participants.fill_targets`。#3955）。"""
     prompt = _review_prompt(run, round_no, prep, remarks)
-    required = _diff_files(run, prep)
-    raised, unread = _launch_reviewers(run, round_no, dict.fromkeys(run.seats, prompt), required, launch)
+    required = _prompt_diffs(run, prep)
+    raised, unread = seats.launch_reviewers(run, round_no, dict.fromkeys(run.seats, prompt), required, launch)
     retry = [s for s in unread if participants.runtime_of(s) != participants.FIXER]
     if retry:
-        more, again = _launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
+        more, again = seats.launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
         raised += more
         kept = {s: unread[s] for s in unread if s not in retry}
         unread = {s: kept[s] if s in kept else again[s] for s in run.seats if s in kept or s in again}
@@ -610,8 +515,8 @@ def _review(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], 
 
 
 def _fill_seats(
-    run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], targets: Mapping[str, _Unread], launch: Launcher
-) -> tuple[list[dict[str, Any]], dict[str, _Unread]]:
+    run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], targets: Mapping[str, seats.Unread], launch: Launcher
+) -> tuple[list[dict[str, Any]], dict[str, seats.Unread]]:
     """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。埋めた claude はこの実行で初めて加わるので、前回の情報を含まない
     リクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。"""
     full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
@@ -621,12 +526,12 @@ def _fill_seats(
     for absent, why in targets.items():
         seat = participants.free_seat(run.seats)
         run.seats[run.seats.index(absent)] = seat
-        _seat_filled(run, Filled(seat, absent, why.cause), f"round {round_no}")
+        seats.seat_filled(run, Filled(seat, absent, why.cause), f"round {round_no}")
         prompts[seat] = prompt
-    return _launch_reviewers(run, round_no, prompts, _diff_files(run, fresh), launch)
+    return seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch)
 
 
-def _diff_files(run: _Run, prep: _Prepared) -> tuple[Path, ...]:
+def _prompt_diffs(run: _Run, prep: _Prepared) -> tuple[Path, ...]:
     """相手役のリクエスト（`_review_prompt`）が読ませる差分のファイル。ラウンドの差分と、文書を含む PR で前のラウンドがあれば
     `criteria_decide.document_block` が読ませる前の head からの差分（PR 4461 の r2-2）。"""
     since = (prep.previous.diff,) if run.documents and prep.previous is not None else ()
@@ -639,41 +544,6 @@ def _full_diff(run: _Run, round_no: int, prep: _Prepared) -> Path:
     if target is not None and target.full_diff is not None and (target.merge_base, target.head) == (prep.base, prep.head):
         return target.full_diff
     return _write_diff(run, round_no, FULL_DIFF_SUFFIX, prep.base, prep.head)
-
-
-def _filled_warning(f: Filled, when: str) -> str:
-    """席を埋めた注意の文。`when` は `round <n>`・`起動の前`・`前回の round <n>`。"""
-    who = f"相手役 {f.absent} の席" if f.absent is not None else f"席 {f.seat}"
-    return f"{when}に{who}を claude の読むだけの起動（{f.seat}）で埋めた（理由: {f.reason}）"
-
-
-def _seat_filled(run: _Run, f: Filled, when: str) -> None:
-    run.filled.append(f)
-    run.warnings.append(_filled_warning(f, when))
-
-
-def _fill_refused(run: _Run) -> None:
-    """始める前の確かめ。学習の設定で断られた claude 以外の席を claude で埋める。修正担当か、1 者だけ名指した相手役が断られたら、
-    どの担当も起動せずに precondition で止める（#3907・#3955）。"""
-    cfg = run.cfg
-    refused = participants.refused_runtimes([*(participants.runtime_of(s) for s in run.seats), cfg.fixer])
-    if not refused:
-        return
-    if cfg.fixer in refused or not cfg.may_fill:
-        # レビューを流す前に止める。断られた担当を相手役が読めなかったと数えない（#3907）
-        raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(refused.values()))
-    for i, absent in enumerate(list(run.seats)):
-        why = refused.get(participants.runtime_of(absent))
-        if why is not None:
-            run.seats[i] = participants.free_seat(run.seats)
-            _seat_filled(run, Filled(run.seats[i], absent, f"unready: {why}"), "起動の前")
-
-
-def _reused_warnings(run: _Run) -> None:
-    """前回の結果を返すときに、最後のラウンドの埋めた席の注意を作り直す（#3955）。"""
-    last = store.last_round(run.data)
-    for f in scope_decide.filled_of(last):
-        run.warnings.append(_filled_warning(f, f"前回の round {last.get('round')}"))
 
 
 # --- 記録 -------------------------------------------------------------------------------
@@ -873,7 +743,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
         # 根拠の確かめが全差分を読むので、ここで 1 回だけファイルへ書き、席を埋めるときにも使う（Git を 2 回起動しない。PR 4461 の r1-2）
         try:
             full_diff = _write_diff(run, round_no, FULL_DIFF_SUFFIX, merge_base, head)
-        except (git.GitError, OSError):  # noqa: NDF401 ファイル: 書けなければ確かめが git から読み直し、失敗を注意に載せる
+        except (git.GitError, OSError):  # 書けなければ確かめが git から読み直し、失敗を注意に載せる
             full_diff = None
     run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
     if head == run.sent or criteria_decide.approved(run.snapshot) is None:
@@ -949,7 +819,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    got = _review(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)), launch)
+    got = _review_round(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)), launch)
     raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
     if got.silent:
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
@@ -1038,11 +908,11 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) 
         # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）
         n = len(store.list_of(run.data, store.ROUNDS))
         run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
-        _reused_warnings(run)
+        seats.reused_warnings(run)
         return _summary(run, fin.CONVERGED, n, reused=True)
     run.remarks = [*prior.comments, *_read_reviews(prs, run.warnings)]
-    run.warnings += [_filled_warning(f, "起動の前") for f in cfg.prefilled]
-    _fill_refused(run)
+    run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
+    seats.fill_refused(run)
     final, done = fin.MAX_ROUNDS, 0
     first = len(store.list_of(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):
