@@ -57,6 +57,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: str, session_id: str, count: int, source: str, monitors: int = 0) -> bool` | `busy-<launch>.json` を `{"launch", "session_id", "count", "monitors", "source", "at"}` で置き換え（`count` は作業の件数、`monitors` は監視の件数）、書けたら真 |
 | `record_start` | 同上 | 新設 | `record_start(directory: Path, launch: str, session_id: str, wait: float) -> bool` | 子を止める排他 `STOP_LOCK` を `wait` 秒まで待って取り、その中で今の起動が `launch` のときだけ `write_busy(…, 1, "start")` を打ち、書けたら真 |
+| `record_monitor` | 同上 | 新設 | `record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool` | `record_start` と同じ排他の中で、今の起動が `launch` で記録があるときだけ、`count` と `source` を保って `monitors` を 1 以上にする。書けなければ偽 |
 | `read_busy` | 同上 | 新設 | `read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str, int]]` | `busy-<launch>.json` が今の起動・今の会話の記録で形が合えば `(count, source, at, monitors)`（`monitors` が無ければ 0）、ほかは None（不明） |
 | `drop_other_busy` | 同上 | 新設 | `drop_other_busy(directory: Path, launch: str) -> None` | `busy-*.json` のうち `launch` のもの以外を消す |
 | `relay_session` | 同上 | 新設 | `relay_session(env: Mapping[str, str]) -> Optional[str]` | 環境の `NDF_RELAY_SESSION`。無い・空なら None |
@@ -134,7 +135,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | SessionStart で子の会話の 0 件を書き、PreToolUse で子の会話の背景の作業の開始を記録し、記録できなければその呼び出しを拒否する |
+| `check` | `src/ndf/domains/hooks/guards/relay_busy.py` | 新設 | `check(ctx, svc) -> Verdict \| None` | SessionStart で子の会話の 0 件を書き、PreToolUse で子の会話の背景の作業の開始を記録し、記録できなければその呼び出しを拒否する。監視の開始は `_record_monitor` が記録し、書けなくても通す（例外も外へ出さない） |
 | `on_deadline` | 同上 | 新設 | `on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]` | 締め切りを過ぎたとき、記録し終えていない子の会話の作業の開始なら拒否の理由を返す。作業か監視かは `table_params()` の `wait_commands` で `check` と同じに分ける |
 | `table_params` | 同上 | 新設 | `table_params() -> Mapping[str, Any]` | guard の表（`tables.guards()`。`lru_cache` の読み込み）から `relay-busy` の行の `params` を返す。行が無い・`params` が辞書でないときは空の辞書（`wait_commands` が無いので、背景の Bash はすべて作業に倒れる）。例外を外へ出さない。`check` は `svc.params` を使い、`params` を受け取らない `on_deadline` と `relay_mark.check` がこれを使う |
 | `_target` | 同上 | 新設 | `_target(env: Mapping[str, str], session_id: Any) -> bool` | 中継の対象の子の会話か。`env` の `NDF_RELAY_DIR` が空でない文字列で、`relay_session(env)` が None でなく、`session_id` がそれと等しい。保存先がディレクトリとして見えるかは見ない |
@@ -185,7 +186,7 @@ plugins/ndf/
 | 項目 | 値 |
 | --- | --- |
 | `name` | `relay-busy` |
-| `summary` | 中継の下の子の会話で、SessionStart（`startup`・`resume`）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、コマンドが `params.wait_commands` だけでできていない Monitor と `run_in_background` の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（待つだけのコマンドの Monitor と背景の Bash）には触れない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049） |
+| `summary` | 中継の下の子の会話で、SessionStart（`startup`・`resume`）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、コマンドが `params.wait_commands` だけでできていない Monitor と `run_in_background` の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（待つだけのコマンドの Monitor と背景の Bash）の前には、同じ排他の中で作業の件数を保ったまま監視だけを 1 件以上にし、書けなくても止めない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049） |
 | `module` | `ndf.domains.hooks.guards.relay_busy` |
 | `events` | `["SessionStart", "PreToolUse"]` |
 | `tools` | `[]`（Tool の絞り込みは `check` の先の判定で行う） |

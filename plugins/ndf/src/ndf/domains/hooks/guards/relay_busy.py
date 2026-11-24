@@ -2,6 +2,8 @@
 
 SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出しの前に、子を止める排他の中で「1 件以上」を書く。書けない
 開始は、締め切りの経路でも拒否する。記録が 0 件の子は、その後に作業を始めていない。件数は Stop の `relay-marker` が書き直す。
+監視を始める呼び出しの前には、同じ排他の中で作業の件数を保ったまま監視だけを 1 件以上にする（応答を中断して Stop が来ない子を、
+ラッパーが止まりで起動し直して監視を失わせない）。こちらは書けなくても拒否しない。
 
 バックグラウンドの作業 1 件は、待つべき作業と止めてよい監視に分ける。監視は、コマンドが待つだけの NDF のコマンド
 （`params.wait_commands`）だけでできている Monitor とバックグラウンドの Bash だけで、確かめきれないものはすべて作業とする
@@ -48,7 +50,10 @@ def check(ctx, svc) -> Optional[Verdict]:
         return None
     if not _may_start(ctx.tool, ctx.tool_input) or not _target(ctx.env, ctx.session_id):
         return None
-    return _record_start(ctx) if _starts_background(ctx.tool, ctx.tool_input, svc.params) else None
+    if _starts_background(ctx.tool, ctx.tool_input, svc.params):
+        return _record_start(ctx)
+    _record_monitor(ctx)
+    return None
 
 
 def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
@@ -87,6 +92,16 @@ def _record_start(ctx) -> Optional[Verdict]:
         return deny(BUSY_START_FAILED)
     _recorded = ctx.payload
     return None
+
+
+def _record_monitor(ctx) -> None:
+    """監視の開始を記録する。書けなくても監視は始める（止めてよく、打ち直せば同じ知らせを受け取れる）。"""
+    try:
+        directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
+        if directory is not None and launch is not None:
+            signals.record_monitor(directory, launch, ctx.session_id, float(tables.policy_value("hook.counter-lock", "seconds")))
+    except Exception:  # noqa: BLE001,S110 ファイル: fail_closed の行なので、ここで上げると監視の開始を拒否してしまう
+        pass
 
 
 def _target(env: Mapping[str, str], session_id: Any) -> bool:

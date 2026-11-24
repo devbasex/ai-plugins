@@ -389,7 +389,7 @@ def _busy_path(directory: Path, launch: str) -> Optional[Path]:
 def write_busy(directory: Path, launch: str, session_id: str, count: int, source: str, monitors: int = 0) -> bool:
     """起動の記録に作業の件数 `count` と監視の件数 `monitors` を書く。起動の ID の形が違うか書けなければ偽で、前の中身のまま（#4049）。
 
-    `source` は `BUSY_SOURCES` のどれか。排他は取らない（開始の記録は `record_start` が取って呼ぶ）。
+    `source` は `BUSY_SOURCES` のどれか。排他は取らない（開始の記録は `record_start` と `record_monitor` が取って呼ぶ）。
     """
     path = _busy_path(directory, launch)
     if path is None:
@@ -411,6 +411,22 @@ def record_start(directory: Path, launch: str, session_id: str, wait: float) -> 
         with held(directory / STOP_LOCK, wait) as got:
             return got and current_launch(directory) == launch and write_busy(directory, launch, session_id, 1, "start")
     except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返し、呼び手が開始を拒否する
+        return False
+
+
+def record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool:
+    """`record_start` と同じ排他の中で、今の起動の記録の作業の件数を保ったまま監視を 1 件以上にする。書けなければ偽（#4049）。
+
+    記録が無ければ書かない（作業の件数が分からないので、0 件と書くとラッパーが作業を抱えた子を止めうる）。
+    """
+    try:
+        with held(directory / STOP_LOCK, wait) as got:
+            found = read_busy(directory, launch, session_id) if got and current_launch(directory) == launch else None
+            if found is None:
+                return False
+            count, source, _at, monitors = found
+            return monitors > 0 or write_busy(directory, launch, session_id, count, source, 1)
+    except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返す（監視の開始は止めない）
         return False
 
 
