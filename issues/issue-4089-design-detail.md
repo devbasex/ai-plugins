@@ -1,6 +1,6 @@
 # #4089 の詳細設計: 文脈の量の読み手を 1 つにし、どの応答の量かと古さを返す
 
-設計文書 [issue-4089-design.md](./issue-4089-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。
+設計文書 [issue-4089-design.md](./issue-4089-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。文中の #4068 は、キャッシュの寿命が切れる前に、裏の作業を待つ子を起こして保つ機能で、この部品を使う。
 
 ## 地図
 
@@ -170,7 +170,7 @@ PreToolUse（運用上限の止め）:
 | 入力に `agent_id` がある | None（#3995 のまま） |
 | `_main(ctx.cwd)` が None | None（会話の記録を読まない。#3995 のまま） |
 | `last_context(ctx.transcript_tail, ToolUse(id))` が `none` | None |
-| 読めた・入力に `tool_use_id` がある・この入力の後にまだ知らせていない | `remember(MEMO_KEY, id, {"tokens", "cwd", "state"}, MEMO_KEEP)`（`cwd` は今の `_cwd_digest(ctx.cwd)`）で覚えてから下の行を判定する。当たらなければ覚えずに下の行を判定する（#3995 のまま） |
+| 読めた・入力に `tool_use_id` がある・最後の利用者の入力の後にまだ知らせていない | `remember(MEMO_KEY, id, {"tokens", "cwd", "state"}, MEMO_KEEP)`（`cwd` は今の `_cwd_digest(ctx.cwd)`）で覚えてから下の行を判定する。当たらなければ覚えずに下の行を判定する（#3995 のまま） |
 | `tokens ≥ limit`・`_passes` が偽（状態は問わない） | `deny(_reason(...))`。notes は `context_tokens`・`context_state`・`under_relay` |
 | `tokens ≥ limit`・`_passes` が真 | `passing`（notes は `context_tokens`・`context_state`） |
 | `tokens < limit`（`current`・`behind` とも） | `passing`（同上） |
@@ -181,7 +181,7 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | --- | --- |
 | 入力に `agent_id` がある | None（#3995 のまま） |
 | `_main(ctx.cwd)` が None | None（会話の記録を読まない。#3995 のまま） |
-| 数え手が使えないか、この入力の後に知らせ済み | None（会話の記録を読まない。#3995 のまま） |
+| 数え手が使えないか、最後の利用者の入力の後に知らせ済み | None（会話の記録を読まない。#3995 のまま） |
 | `take(MEMO_KEY, 入力の tool_use_id)` が値を返し、その `cwd` が `_cwd_digest(ctx.cwd)` と同じで `tokens` が整数（今の `_remembered` の照合） | 覚えた `tokens` と `state`（無いか別の値なら `behind`）で下の行を判定する（会話の記録を読まない） |
 | 覚えた値が無い・ID が無い・照合に外れた（`cwd` が違う・`tokens` が整数でない） | `last_context(ctx.transcript_tail, ToolUse(id))` で読む。`none` なら None |
 | `decide_from ≤ tokens < limit`・`bump(NOTICE_KEY) == 1` | `advise(_notice(...), notes={context_tokens, context_state})` |

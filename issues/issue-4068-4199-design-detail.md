@@ -24,7 +24,7 @@
 - 利用上限に当たったアカウントから別のアカウントへ子を切り替える仕組み（#3604・#3864）
 - バックグラウンドの作業と監視の分け方（#4049）
 
-**成果物の分け方。** この詳細設計の実装は、無効のまま入れる「実装の PR」である。`cache.rewake` の `versions` は空、`is_wake_input` は常に None のままマージし、どの子にも起こす hook を登録しない。設計の決定 7 の 11 の実測は、続きの「有効化の PR」でマージした実装を使って行う。そこで `is_wake_input` と `versions` を直す（設計の決定 7 の「一覧に載せる手順」）。
+**成果物の分け方。** この詳細設計の実装は、無効のまま入れる「実装の PR」である。`cache.rewake` の `versions` は空、`is_wake_input` は常に None のままマージし、どの子にも起こす hook を登録しない。設計の決定 7 の 11 項目の実測（Claude Code の版ごとに、頼る振る舞いを確かめる 11 の測定。以下「実測 N」はその N 番目）は、続きの「有効化の PR」でマージした実装を使って行う。そこで `is_wake_input` と `versions` を直す（設計の決定 7 の「一覧に載せる手順」）。
 
 **#4089（会話の記録の末尾を読む部品）との順序。** #4089 は未実装で、この実装の前でも後でもよい。
 
@@ -40,14 +40,14 @@
 
 次の表は、#4089 の `last_context(tail, Reply(<文>))` が返す状態（`current`・`behind`・`none`）と、`none` の理由の要点である。正本は #4089 の詳細設計の「#4068 との受け渡し」にある。表では、理由を状態の後の括弧に書く:
 
-| 状態 | 意味 | この実装での扱い |
+| 状態（括弧は `last_context` の理由） | 意味 | この実装での扱い（`TurnRead` の理由） |
 | --- | --- | --- |
-| `current` | 末尾の最後の応答が、渡した文（Stop の `last_assistant_message`）と同じで、量・時刻・`message.id` を読めた | 今回の応答として使う |
+| `current` | 末尾の最後の応答が、渡した文（Stop の `last_assistant_message`）と同じで、量・時刻・`message.id` を読めた | `ref.at` が `started` より後なら `newer`（形の違いより先に確かめる。#4089 の表）。ほかは今回の応答として使う |
 | `behind` | 末尾の最後の応答が渡した文と違う（今回の応答がまだ記録に無い） | `unrecorded`（一時的） |
 | `none`（`compacted`・`partial`） | 圧縮の境の後でまだ応答が無い・同じ応答の行が書きかけ | `unrecorded`（一時的） |
 | `none`（`empty`） | 末尾が空か、応答の行が無い（`read_tail` が読めなかったときを含む） | `unrecorded`（一時的） |
-| `none`（`unrecorded`） | 末尾の最後の応答は渡した文と一致せず（今回の応答ではない）、しかもその応答の採用行の形が違う。状態の欄の `unrecorded` は `last_context` の理由で、扱いの欄の `unrecorded` は `TurnRead` の理由である | `unrecorded`（一時的） |
-| `none`（`form`） | 突き合わせた応答の採用行の `usage`・`message.id`・`timestamp` の形が違う。採用行は、最後の応答の行のうち最も新しい物理の行（同じ `message.id` の行が複数あれば最後の行）で、量・ID・時刻はこの行だけから読む（#4089 の設計の「読む単位の決まり」） | `form`（記録の形が違う。会話で止める） |
+| `none`（`unrecorded`） | 末尾の最後の応答は渡した文と一致せず（今回の応答ではない）、しかもその応答の採用行の形が違う | `unrecorded`（一時的） |
+| `none`（`form`） | 突き合わせた応答の採用行の `usage`・`message.id`・`timestamp` の形が違う。採用行は、最後の応答の行のうち最も新しい物理の行（同じ `message.id` の行が複数あれば最後の行）で、量・ID・時刻はこの行だけから読む（#4089 の設計の「読む単位の決まり」） | `ref.at` が `started` より後なら `newer`（形の違いより先に確かめる）。ほかは `form`（記録の形が違う。会話で止める） |
 
 ## 地図
 
@@ -414,7 +414,7 @@ plugins/ndf/
 | 測る量（1 日あたり） | 比べる相手 | 通す条件 |
 | --- | --- | --- |
 | 追加の起動の数（Stop ごとの 1 回と、版を確かめる `--version` の追加の起動の和） | 既存の同期の Stop の hook の起動の数（Stop の数） | 1.1 倍以内 |
-| 追加の CPU 時間（起こす hook の経路ごとと、UserPromptSubmit の guard に足す処理を測り、回数で重みを付けた和） | Stop の数 × 既存の同期の Stop の hook 1 回の CPU 時間 | 以内 |
+| 追加の CPU 時間（起こす hook の経路ごとと、UserPromptSubmit の guard に足す処理を測り、回数で重みを付けた和） | Stop の数 × 既存の同期の Stop の hook 1 回の CPU 時間 | 以内（倍率を付けない。1.0 倍以内） |
 
 - `runtimes.json` の claude の `Stop` に、次の値を足す。`"async_rewake": {"budget": "stop-rewake", "timeout_max": 3300}`。`timeout_max` はバックグラウンドの登録だけの上限で、事象の `timeout_max`（同期の Stop の登録の上限。ランタイムの 600）は変えない。この行は `render` が読まず、`rewake_entry` と予算の検査だけが読む
 - 方針のファイル `contracts/limits/hook.budget.stop-rewake.json` を置く。形は今の `hook.budget.*` と同じ（`p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）である。値は次のとおりである。3,300 秒を受け付けないバージョンでは、設計の決定 7 のとおりバージョンの一覧に入れない
@@ -460,7 +460,7 @@ plugins/ndf/
   - 同じロックの区間で読んだ状態に起こしたフラグ（`pending`）が在る（起こす文の入力は、必ず `_finish` が `pending` を書いた後に届く）
   - `prompt` の頭が `WAKE_HEAD`
 
-  どれか 1 つでも欠ければ、頭が `WAKE_HEAD` でも利用者の入力として `"human"` で呼ぶ。登録を渡していない起動・中継の外・起こしたフラグの無い会話で、利用者が起こす文を引用して貼り付けても、数え手は数え直し、判断開始の値の知らせは抑えない。`"human"` で数え直すと、起こすたびに判断開始の値の知らせが出直し、文脈の大きい子に知らせが増える（設計の決定 10）。ラッパーが初回のプロンプトに置く今の中継のマーカー（`markers.take`）の扱いは変えない
+  どれか 1 つでも欠ければ、頭が `WAKE_HEAD` でも利用者の入力として `"human"` で呼ぶ。登録を渡していない起動・中継の外・起こしたフラグの無い会話で、利用者が起こす文を引用して貼り付けても、数え手は数え直し、判断開始の値の知らせは抑えない。逆に、起床の入力を `"relay"` で呼ぶのは、`"human"` で数え直すと、起こすたびに判断開始の値の知らせが出直し、文脈の大きい子に知らせが増えるためである（設計の決定 10）。ラッパーが初回のプロンプトに置く今の中継のマーカー（`markers.take`）の扱いは変えない
 
 | 観点 | テスト |
 | --- | --- |
@@ -510,7 +510,7 @@ plugins/ndf/
 | 届かない宣言 | バージョンが一覧に在り、`cache.wake` の `seconds` を 120 にした値で、初回の起動と `--resume` の再開のどちらも `--settings` の登録も `NDF_RELAY_REWAKE` も足さず、`log.jsonl` に `rewake_off` の行があり、今の起動の記録の `rewake` が偽 |
 | 利用者の `--settings` | バージョンが一覧に在り、受け継ぐ引数に `--settings=x.json` があるときと `--settings x.json` があるときのどちらも、初回の起動と `--resume` の再開の引数に `--settings` が 1 つだけで、利用者の値がそのまま並び、`rewake_settings` の JSON が無い。今の起動の記録の `rewake` が偽 |
 | 従量キーの子 | バージョンが一覧に在り、利用者の `--settings` が無く、起動先が API キーの従量の接続の子のとき、初回の起動と `--resume` の再開のどちらでも、子の起動の引数に `--settings` が 1 つだけで、その JSON が `apiKeyHelper`・`hooks.ConfigChange` の `config-gate` の hook・`hooks.Stop` の `rewake_settings` の登録の 3 つをすべて持つ。起動先の理由が `key_unresolved`・`key_overridden` にならない |
-| バージョンの取得 | `require` は変えず、下限より古ければ今のとおり `TooOld`。既定のログインと、`PATH` を上書きしない候補の起動で、差し替えた `--version` の実行が `_start` の 1 回だけ（門は `version_at` が同じ記録を読む）。キーでない従量の接続が別の `claude` を指す見本で、`version_probe` の行が 1 行あり、`claude_path` が解いた実パス・最初の起動で `ran` 真・同じラッパーの `--resume` の再開で `ran` 偽。差し替えた `_spawn_target` がその候補で失敗して次の候補へ進む見本でも、失敗した候補の `version_probe` の行が残る。一覧が空の起動では、同じ候補で `ran` 偽の行があり `--version` の実行が 0 回。一覧が空で `rewake_ready` が真の起動で、既定のログイン・登録済みアカウント・`PATH` を上書きしない従量の接続の候補の起動の行の `claude_version` が `_start` の `require` が読んだ版で、`--version` の実行が `_start` の 1 回だけ。同じ条件でキーでない従量の接続が別の `claude` を指す見本では、`claude_version` が null で `version_probe`（`ran` 偽）が 1 行。API キーの候補が同じ実行ファイルの版を先に読んでいた見本では、その候補の `claude_version` が記録の版。どの見本でも、記録に無い鍵で `version_at` が呼ばれない。同じラッパーのプロセスで、API キーの候補が同じ実行ファイルの版を `_gate_off` で読んだ後に、キーでない候補が確かめと固定を通る見本では、その行の `cached` が真で、集計の版の確かめの回数に入らない（一覧が空でも空でなくても同じ）。起動の行（`account`）の `rewake_ready` が、利用者の `--settings` が無く届く起動で真、どちらかが欠ける起動で偽（一覧が空でも）。同じ実行ファイルの候補・キーの子・利用者の `--settings` がある起動では、この行が無い |
+| バージョンの取得 | `require` は変えず、下限より古ければ今のとおり `TooOld`。既定のログインと、`PATH` を上書きしない候補の起動で、差し替えた `--version` の実行が `_start` の 1 回だけ（門は `version_at` が同じ記録を読む）。キーでない従量の接続が別の `claude` を指す見本で、`version_probe` の行が 1 行あり、`claude_path` が解いた実パス・最初の起動で `ran` 真・同じラッパーの `--resume` の再開で `ran` 偽。差し替えた `_spawn_target` がその候補で失敗して次の候補へ進む見本でも、失敗した候補の `version_probe` の行が残る。一覧が空の起動では、同じ候補で `ran` 偽の行があり `--version` の実行が 0 回。一覧が空で `rewake_ready` が真の起動で、既定のログイン・登録済みアカウント・`PATH` を上書きしない従量の接続の候補の起動の行の `claude_version` が `_start` の `require` が読んだ版で、`--version` の実行が `_start` の 1 回だけ。同じ条件でキーでない従量の接続が別の `claude` を指す見本では、`claude_version` が null で `version_probe`（`ran` 偽）が 1 行。API キーの候補が同じ実行ファイルの版を先に読んでいた見本では、その候補の `claude_version` が記録の版。どの見本でも、記録に無い鍵で `version_at` が呼ばれない。同じラッパーのプロセスで、API キーの候補が同じ実行ファイルの版を `_gate_off` で読んだ後に、キーでない候補が確かめと固定を通る見本では、その行の `cached` が真で、集計の版の確かめの回数に入らない（一覧が空でも空でなくても同じ）。起動の行（`account`）の `rewake_ready` が、利用者の `--settings` が無く届く起動で真、どちらかが欠ける起動で偽（一覧が空でも）。同じ実行ファイルの候補・キーの子・利用者の `--settings` がある起動では、`version_probe` の行が無い |
 
 ## 集計（`ndf relay cache report`）
 
