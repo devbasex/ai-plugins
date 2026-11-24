@@ -289,3 +289,53 @@ def test_shared_names_table_still_has_its_shape_checked(with_schema, rules):
     plugin.write("contracts/domains/bad.json", json.dumps({**dup, "shared_names": "yes"}))
     found = sorted((f.path.rsplit("/", 1)[-1], f.detail.split(":", 1)[0]) for f in facts.check(plugin.scope(), rules))
     assert found == [("bad.json", "表の形"), ("skills.json", "`id` の重なり")]
+
+
+# 環境変数のキーの規則 env-key（#4126 の決定 3）
+
+ENV_COLUMNS = {"key": {"type": "string", "summary": "k", "optional": True}}
+CALL = 'from ndf import identity\n\n\ndef f():\n    return identity.env_name("one")\n'
+
+
+def _env_keys(plugin, text: str | None, code: str = "") -> list[tuple[str, int]]:
+    """環境変数の表とコードを置き、規則 env-key の違反を（ファイル名, 行）で返す。"""
+    if text is not None:
+        plugin.write("contracts/domains/env.json", text)
+    plugin.write("src/ndf/a.py", code)
+    return [(f.path.rsplit("/", 1)[-1], f.line) for f in facts.env_key_findings(plugin.scope(), "contracts")]
+
+
+ONE = {"id": "ONE", "key": "one"}
+
+
+@pytest.mark.parametrize(
+    ("rows", "code", "expected"),
+    [
+        ([ONE, {"id": "PLAIN"}], CALL, []),
+        ([ONE], 'from ndf.identity import env_name as en\n\nA = en("one")\n', []),
+        ([ONE], 'from ndf.identity import env_name as en\n\nA = en("two")\n', [("a.py", 3)]),
+        ([ONE], 'from ndf.identity import env_name\n\nA = env_name("two")\n', [("a.py", 3)]),
+        ([{"id": "PLAIN"}], CALL, [("a.py", 5)]),
+        ([ONE], 'from ndf import identity as i\n\nK = "one"\nA = i.env_name(K)\n', [("a.py", 4)]),
+        ([ONE], 'from ndf import identity\n\nA = identity.env_name(key="one")\n', [("a.py", 3)]),
+        ([ONE, {"id": "OTHER", "key": "one"}], CALL, [("env.json", 4)]),
+        ([ONE, {"id": "X", "key": ""}], CALL, [("env.json", 4)]),
+        ([ONE, {"id": "", "key": "x"}], CALL, [("env.json", 4)]),
+        ([{"id": "X", "key": ""}], "", [("env.json", 3)]),
+        ([ONE], 'from other import env_name\n\nA = env_name("two")\n', []),
+    ],
+)
+def test_env_key_reports_rows_and_calls(plugin, rows, code, expected):
+    text = '{\n"rows": [\n' + ",\n".join(json.dumps(r) for r in rows) + "\n]}\n"
+    assert _env_keys(plugin, text, code) == expected
+
+
+@pytest.mark.parametrize("text", [None, "{", "[]", '{"rows": null}'], ids=["missing", "not-json", "list", "rows-null"])
+@pytest.mark.parametrize(("code", "expected"), [("", []), (CALL, [("a.py", 5)])], ids=["no-call", "call"])
+def test_env_key_reports_each_call_when_the_table_cannot_be_read(plugin, text, code, expected):
+    assert _env_keys(plugin, text, code) == expected
+
+
+def test_env_key_is_part_of_the_facts_rules(with_schema, rules):
+    with_schema.write("contracts/domains/env.json", table([ONE, {"id": "OTHER", "key": "one"}], ENV_COLUMNS))
+    assert [f.rule for f in facts.check(with_schema.scope(), rules)] == ["env-key"]

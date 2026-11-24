@@ -132,8 +132,9 @@
 - 登録済みアカウントが尽き、退避先が API キーだけのとき、`ndf plan` の worker は API キーへ退避できず、上限の打ち直しの待ちへ
   進む。`key:` の子の中で打った `ndf plan` は待たずに止まる。対話の子は API キーで続く
 - 上限の後の打ち直しは、最初の実行が道具で済ませた操作を確かめずに同じプロンプトを最初から打つので、外部への操作が重なり得る（#4143）
-- 入れ子の `ndf plan` の `claude -p` は親の環境から `NDF_RELAY_DIR`・`NDF_RELAY_LAUNCH` を継ぐ。helper の記録は起動引数だけで
-  決まるので外側の子に影響しないが、内側の hook が外側の保存先へ何を書くかは確かめていない
+- 入れ子の `ndf plan` の `claude -p` は親の環境から `NDF_RELAY_DIR`・`NDF_RELAY_LAUNCH`・`NDF_RELAY_SESSION` を継ぐ。helper の記録は起動引数だけで
+  決まるので外側の子に影響しない。内側の hook は会話の ID が違うので、外側の子のバックグラウンドの作業の記録を書かない
+  （[ndf-relay-background-wait.md](ndf-relay-background-wait.md)）。質問とマーカーのファイルは書きうる（#4061）
 
 ## テスト観点
 

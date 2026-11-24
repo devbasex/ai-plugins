@@ -32,6 +32,10 @@
         "revision_due": {
           "type": "boolean",
           "description": "MVV の改訂を提案する兆候があるか（mvv signals）"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "読み手役への指示の文（reading prompt）"
         }
       }
     },
@@ -93,7 +97,7 @@
           },
           "at": {
             "type": "string",
-            "description": "書いた時刻（usage stop・mvv answer）"
+            "description": "書いた時刻（usage stop・mvv answer・reading add）"
           },
           "caller": {
             "type": "string",
@@ -143,7 +147,7 @@
           },
           "version": {
             "type": "integer",
-            "description": "記録の行の形のバージョン（usage stop・mvv answer）"
+            "description": "記録の行の形のバージョン（usage stop・mvv answer・reading add）"
           },
           "overrides": {
             "type": "integer",
@@ -163,7 +167,7 @@
           },
           "repo": {
             "type": "string",
-            "description": "リポジトリのキー（mvv answer）"
+            "description": "リポジトリのキー（mvv answer）か、リポジトリの owner/name（reading add）"
           },
           "state": {
             "description": "承認ゲートの回答の state（mvv answer。回答の値のまま）"
@@ -208,6 +212,32 @@
           "cause": {
             "type": "object",
             "description": "確かめが停止理由（preflight）"
+          },
+          "question_key": {
+            "type": "string",
+            "description": "質問の文の SHA-256（reading add）"
+          },
+          "prs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "承認する PR の番号・ブランチ・head（reading add）"
+          },
+          "reads": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "読ませたものと、立場・回・結果（reading add）"
+          },
+          "missing": {
+            "type": "string",
+            "description": "質問を出す前に足りないもの（reading check）"
+          },
+          "error": {
+            "type": "string",
+            "description": "入力の形の誤り（reading add・check・prompt）"
           }
         }
       }

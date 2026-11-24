@@ -8,6 +8,7 @@
 | `next.json` | Stop の hook（`relay-marker`） | 次のセグメントのブロック。中継が読んで次のセグメントを始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の質問。中継が人かオーガナイザーへ回す |
 | `launch.json` | 中継のラッパー | 今の子の起動の ID（子へは `NDF_RELAY_LAUNCH` で渡す）。止めた子の hook に質問を書かせない（#3814） |
+| `busy-<起動の ID>.json` | 子の会話の hook（SessionStart・PreToolUse の `relay-busy` と Stop の `relay-marker`） | その起動のバックグラウンドの作業の件数。ラッパーは書かず、ほかの起動のものを消すだけである（#4049） |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、質問を `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
@@ -26,10 +27,10 @@ import json
 import os
 import re
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Optional, Union
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional, Union
 
 from ndf import identity
 
@@ -38,6 +39,12 @@ QUESTION_FILE = "question.json"
 LAUNCH_FILE = "launch.json"
 LAUNCH_ENV = "NDF_RELAY_LAUNCH"
 ACTIVITY_FILE = "activity.json"
+BUSY_PREFIX = "busy-"
+BUSY_SOURCES = ("session", "start", "stop")
+# 起動の ID の形（ラッパーが作る `uuid.uuid4().hex`）
+LAUNCH_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+# 子を止める排他のファイル。質問の転送とバックグラウンドの作業の開始の記録が共有する
+STOP_LOCK = f"{QUESTION_FILE}.lock"
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -50,21 +57,62 @@ class QuestionUnreadable(SignalError):
     """質問のファイルが在るが読めない（権限・ディレクトリ・I/O の誤り）。中身が壊れていることと見分ける（#3814）。"""
 
 
+class Background(NamedTuple):
+    """今の起動のバックグラウンドの作業の記録（`read_busy`）。`count` は作業、`monitors` は監視の件数。
+
+    `source` は書いた事象（`start` なら `count` は「少なくとも 1 件」）、`at` は書いた時刻。
+    """
+
+    count: int
+    source: str
+    at: str
+    monitors: int
+
+
+def require_keys() -> None:
+    """中継の変数の名前をすべてコントラクトから引けることを確かめる。引けなければ `identity.EnvNameError`（#4126 の決定 3）。"""
+    identity.env_name("relay-dir")
+    identity.env_name("relay-session")
+
+
+def keys_known() -> bool:
+    """`require_keys` が通るか。通らないコントラクトでは、hook は中継へもオーガナイザーへも書かない側へ倒す。"""
+    try:
+        require_keys()
+    except identity.EnvNameError:  # noqa: NDF401 ファイル: コントラクトの誤りは hook の例外にせず、呼び手が対象外として扱う
+        return False
+    return True
+
+
 def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
     """中継の下ならセグメントのやり取りの保存先。外か保存先が無ければ None。"""
-    value = env.get("NDF_RELAY_DIR")
+    value = env.get(identity.env_name("relay-dir"))
     path = Path(value) if value else None
     return path if path is not None and path.is_dir() else None
 
 
-def launch_env(directory: Path, launch: str) -> dict[str, str]:
-    """子のセッションへ渡す、セグメントのやり取りの保存先と起動の ID の環境変数。"""
-    return {"NDF_RELAY_DIR": str(directory), LAUNCH_ENV: launch}
+def under_relay(env: Mapping[str, str]) -> bool:
+    """中継のラッパーの下か。保存先が在るかは見ない。"""
+    return bool(env.get(identity.env_name("relay-dir")))
+
+
+def launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]:
+    """子のセッションへ渡す、セグメントのやり取りの保存先・起動の ID・子の会話の ID の環境変数。"""
+    return {
+        identity.env_name("relay-dir"): str(directory),
+        LAUNCH_ENV: launch,
+        identity.env_name("relay-session"): session_id,
+    }
 
 
 def relay_launch(env: Mapping[str, str]) -> Optional[str]:
     """hook の環境の起動の ID。無ければ None。"""
     return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
+
+
+def relay_session(env: Mapping[str, str]) -> Optional[str]:
+    """hook の環境の子の会話の ID。無ければ None。"""
+    return env.get(identity.env_name("relay-session")) or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う
 
 
 def set_launch(directory: Path, launch: Optional[str]) -> None:
@@ -88,11 +136,6 @@ def organizer_question_path(env: Mapping[str, str]) -> Optional[Path]:
     if not root or not lane or not NAME_RE.match(lane):
         return None
     return Path(root) / "questions" / f"{lane}.json"
-
-
-def claude_config_root(environ: Mapping[str, str]) -> Path:
-    """Claude Code の設定の保存先（規則は `identity.claude_config_root`）。"""
-    return identity.claude_config_root(environ)
 
 
 def now_iso() -> str:
@@ -348,3 +391,98 @@ def read_activity(directory: Path) -> Optional[dict[str, Any]]:
 
 def _is_task(item: Any) -> bool:
     return isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("type"), str)
+
+
+def _busy_path(directory: Path, launch: str) -> Optional[Path]:
+    """起動の記録のファイル。起動の ID の形が違えば None（環境変数の値をファイルの名前に使わない）。"""
+    return directory / f"{BUSY_PREFIX}{launch}.json" if LAUNCH_ID_RE.fullmatch(launch) else None
+
+
+def write_busy(directory: Path, launch: str, session_id: str, count: int, source: str, monitors: int = 0) -> bool:
+    """起動の記録に作業の件数 `count` と監視の件数 `monitors` を書く。起動の ID の形が違うか書けなければ偽で、前の中身のまま（#4049）。
+
+    `source` は `BUSY_SOURCES` のどれか。排他は取らない（開始の記録は `record_start` と `record_monitor` が取って呼ぶ）。
+    """
+    path = _busy_path(directory, launch)
+    if path is None:
+        return False
+    data = {"launch": launch, "session_id": session_id, "count": count, "monitors": monitors, "source": source, "at": now_iso()}
+    try:
+        replace_json(path, data)
+    except OSError:  # noqa: NDF401 ファイル: 書けなければ偽を返し、呼び手が扱う
+        return False
+    return True
+
+
+def record_start(directory: Path, launch: str, session_id: str, wait: float) -> bool:
+    """子を止める排他を `wait` 秒まで待って取り、今の起動が `launch` のときだけ件数 1 を書く。書けなければ偽（#4049）。
+
+    ラッパーも同じ排他の中で子を止め、今の起動を外すので、止めた子の開始は偽になる。
+    """
+    try:
+        with held(directory / STOP_LOCK, wait) as got:
+            return got and current_launch(directory) == launch and write_busy(directory, launch, session_id, 1, "start")
+    except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返し、呼び手が開始を拒否する
+        return False
+
+
+def record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool:
+    """`record_start` と同じ排他の中で、今の起動の記録の作業の件数を保ったまま監視を 1 件以上にする。書けなければ偽（#4049）。
+
+    既に監視が記録されていれば、排他を取らずに真を返す（書くものが無い監視の開始を、排他の競合で遅らせない）。
+    記録が無ければ書かない（作業の件数が分からないので、0 件と書くとラッパーが作業を抱えた子を止めうる）。
+    """
+    if _has_monitors(read_busy(directory, launch, session_id)):
+        return True
+    try:
+        with held(directory / STOP_LOCK, wait) as got:
+            found = read_busy(directory, launch, session_id) if got and current_launch(directory) == launch else None
+            if found is None:
+                return False
+            return _has_monitors(found) or write_busy(directory, launch, session_id, found[0], found[1], 1)
+    except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返す（監視の開始は止めない）
+        return False
+
+
+def _has_monitors(found: Optional[tuple[int, str, str, int]]) -> bool:
+    """`read_busy` の返りが監視を 1 件以上持つか。"""
+    return found is not None and found[3] > 0
+
+
+def read_busy(directory: Path, launch: str, session_id: str) -> Optional[Background]:
+    """今の起動・今の会話の記録。無い・読めない・形が違えば None（不明）。"""
+    path = _busy_path(directory, launch)
+    try:
+        data = _read(path) if path is not None else None
+    except (SignalError, OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない記録は件数が分からないとして扱う
+        return None
+    if data is None or data.get("launch") != launch or data.get("session_id") != session_id:
+        return None
+    count, source, at = data.get("count"), data.get("source"), data.get("at")
+    monitors = data["monitors"] if "monitors" in data else 0
+    if not (_is_count(count) and _is_count(monitors) and source in BUSY_SOURCES and _is_zoned(at)):
+        return None
+    if source == "start" and count == 0:  # 開始の記録は「少なくとも 1 件」なので、0 件は矛盾
+        return None
+    return Background(count, source, at, monitors)
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_zoned(value: Any) -> bool:
+    """タイムゾーンを持つ時刻の文字列か（`now_iso` の形）。"""
+    try:
+        return isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:  # noqa: NDF401 ファイル: 時刻として読めない値は形が違うとして扱う
+        return False
+
+
+def drop_other_busy(directory: Path, launch: str) -> None:
+    """ほかの起動の記録を消す。起動の ID の形でない名前のファイルには触れず、消せないものは残して続ける。"""
+    for path in list(directory.glob(f"{BUSY_PREFIX}*.json")):
+        other = path.stem.removeprefix(BUSY_PREFIX)
+        if other != launch and LAUNCH_ID_RE.fullmatch(other):
+            with suppress(OSError):  # noqa: NDF402 ファイル: 残っても起動ごとの名前なので読まれず、次の起動が消し直す
+                drop(directory, path.name)

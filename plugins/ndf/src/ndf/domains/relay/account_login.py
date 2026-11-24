@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 import psutil
 
+from ndf import identity
 from ndf.adapters import claude as claude_adapter
 from ndf.adapters import cli_floor
 from ndf.contracts import facts, limits
@@ -35,13 +36,6 @@ POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-# 専用の設定ディレクトリで claude を起動するときに外す変数（親の認証を子のログインへ持ち込まない）。
-# 認証の値・提供元の選択・認証のプロファイルは、登録済みアカウントの子と同じく子の環境の表の account-drop の行から引く
-AUTH_ENV = (
-    *facts.ids("env", child="account-drop"),
-    "NDF_CLAUDE_ACCOUNT",
-    "NDF_RELAY_DIR",
-)
 
 
 class LoginError(Exception):
@@ -81,7 +75,10 @@ def require_claude(claude: str, env: Mapping[str, str]) -> None:
 
 def auth_env(environ: Mapping[str, str], config_dir: Path) -> dict[str, str]:
     """専用の設定ディレクトリで claude を打つ環境（親の認証の変数を外し、`CLAUDE_CONFIG_DIR` を置く）。"""
-    env = {k: v for k, v in environ.items() if k not in AUTH_ENV}
+    # 親の認証を子のログインへ持ち込まない。認証の値・提供元の選択・認証のプロファイルは、登録済みアカウントの子と同じく
+    # 子の環境の表の account-drop の行から引く
+    drop = (*facts.ids("env", child="account-drop"), "NDF_CLAUDE_ACCOUNT", identity.env_name("relay-dir"))
+    env = {k: v for k, v in environ.items() if k not in drop}
     env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env
 

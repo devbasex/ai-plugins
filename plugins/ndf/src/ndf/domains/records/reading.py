@@ -36,6 +36,10 @@ class ReadingInvalid(ValueError):
     """入力の形が違う。文に入力の値を含まない。"""
 
 
+class HeadUnknown(Exception):
+    """GitHub から今の head を得られない PR がある（PR でない・無い番号）。"""
+
+
 def checks_path() -> Path:
     """記録のファイル（保存先は承認ゲートの変更要求の記録と同じ mvv-state）。"""
     return mvv.record_path("reading-checks")
@@ -81,6 +85,8 @@ def add(entry: Mapping[str, Any], root: Path) -> dict[str, Any]:
     _require_keys(entry, ADD_KEYS)
     key = _key(entry["questions"])
     row = {"repo": Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
+    if not rd.has_used_keys(row):
+        raise ReadingInvalid("prs は、number（整数）・branch（1 つのブランチの名前）・head（SHA）を持つオブジェクトの配列にする")
     try:
         return jsonl.append_locked(checks_path(), row, kind="reading-check")
     except internal.InternalError as exc:
@@ -90,33 +96,37 @@ def add(entry: Mapping[str, Any], root: Path) -> dict[str, Any]:
 
 
 def rows() -> list[dict[str, Any]]:
-    """記録の行（古い順）。壊れた行は除く。ファイルが無ければ空、開けなければ `OSError`、新しいバージョンの行があれば `InternalError`。"""
+    """記録の行（古い順）。壊れた行（ブランチの名前でない `branch` を含む）は除く。ファイルが無ければ空、開けなければ `OSError`、新しいバージョンの行があれば `InternalError`。"""
     found, _ = jsonl.read_rows(checks_path(), kind="reading-check")
-    return found
+    return [row for row in found if rd.has_used_keys(row)]
 
 
-def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]:
+def check(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]:
     """承認の手順用: 質問を出す前に足りないもの（`reading_decide.missing`）。PR の今の head は GitHub から読む。
 
-    後で動く hook が新しい head と比べられるように、先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
-    GitHub を読めなければ `GitHubError`。
+    記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、
+    先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
+    GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown`（足りないものがあればそちらを返す）。
     """
     _require_keys(entry, CHECK_KEYS)
     key, prs = _key(entry["questions"]), entry["prs"]
     if not (isinstance(prs, list) and all(type(n) is int and n > 0 for n in prs)):
         raise ReadingInvalid("prs は、承認する PR の番号の配列にする")
     git = Git(root)
-    repo, found = git.remote_repo(), rows()
+    remote = git.remote()
+    repo, found = git.remote_repo(remote), rows()
     row = rd.used_row(key, repo, found)
-    recorded = row["prs"] if row is not None else []
-    if recorded:
-        remote = git.remote()
-        git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in recorded))
-    numbers = {*prs, *(pr["number"] for pr in recorded)}
-    heads: dict[int, str] = {}
-    if numbers:
-        heads = {n: pull.head_sha for n, pull in hub(root).pulls(numbers).items() if pull is not None}
-    return rd.missing(key, repo, found, heads, prs)
+    short = rd.missing(key, repo, found, {}, prs)
+    if short or row is None or not row["prs"]:
+        return short
+    git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in row["prs"]))
+    # 足りないものが無いので、承認する PR はすべて記録の行にある
+    pulls = hub(repo).pulls({pr["number"] for pr in row["prs"]})
+    short = rd.missing(key, repo, found, {n: pull.head_sha for n, pull in pulls.items() if pull is not None}, prs)
+    unread = sorted(n for n, pull in pulls.items() if pull is None)
+    if unread and not short:
+        raise HeadUnknown("GitHub に PR が無い: " + "・".join(f"#{n}" for n in unread))
+    return short
 
 
 def _key(questions: Any) -> str:

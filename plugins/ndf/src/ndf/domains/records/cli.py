@@ -50,7 +50,11 @@ def _root(args: argparse.Namespace) -> Path:
 
 
 def _hub(root: Path) -> github_mod.GitHub:
-    return github_mod.GitHub(Git(root).remote_repo(), github_mod.client())
+    return _repo_hub(Git(root).remote_repo())
+
+
+def _repo_hub(repo: str) -> github_mod.GitHub:
+    return github_mod.GitHub(repo, github_mod.client())
 
 
 def _stdin_json() -> Any:
@@ -233,7 +237,7 @@ def _reading(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         return result.stopped(TOOL, "invalid", f"入力の形が違う: {exc}", items=[{"error": str(exc)}])
     except OSError as exc:
         return result.stopped(TOOL, "precondition", f"読み手役が確認した記録を読み書きできない: {exc}")
-    except github_mod.GitHubError as exc:
+    except (github_mod.GitHubError, reading.HeadUnknown) as exc:
         return result.stopped(TOOL, "unknown", f"承認する PR の今の head を GitHub から読めない: {exc}")
 
 
@@ -246,7 +250,7 @@ def _reading_add(entry: Any, root: Path) -> dict[str, Any]:
 
 
 def _reading_check(entry: Any, root: Path) -> dict[str, Any]:
-    missing = reading.check(entry, root, _hub)
+    missing = reading.check(entry, root, _repo_hub)
     if missing:
         detail = "読み手役が確認した記録が足りない: " + "・".join(missing)
         return result.stopped(TOOL, "precondition", detail, items=[{"missing": word} for word in missing])

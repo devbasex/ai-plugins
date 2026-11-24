@@ -51,6 +51,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `projects` | `ndf` repo:.ndf | `projects.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `reading-checks` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-checks.jsonl` | record | — | 読み手役が確認した記録（#4285） | kept | 内部（予告なく変えてよい） |
 | `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
+| `relay-busy` | `relay-wrappers` state:relay/wrappers | `<名前>/busy-<起動>.json` | exchange | — | 子の会話の SessionStart・PreToolUse・Stop の hook（M3a）。中継のラッパーはほかの起動のものを消す | run | 内部（予告なく変えてよい） |
 | `relay-copy-launcher` | `relay-copy` config:ndf | `relay.py` | exchange | — | 人（ndf relay install） | replaced | 内部（予告なく変えてよい） |
 | `relay-copy-root` | `relay-copy` config:ndf | `relay.root` | exchange | — | 中継（M3b）・SessionStart hook（更新後の向け直し） | replaced | 内部（予告なく変えてよい） |
 | `relay-hub-log` | `relay-hub` state:relay/hub | `hub-log.jsonl` | record | — | 中継のリレーハブ（M3） | cleanup | 内部（予告なく変えてよい） |
