@@ -4,7 +4,8 @@
 
 `--only` があれば、その規則の指摘だけを違反にする。`--only review-items` だけなら、その規則の入力だけを読み、ほかの規則を当てない。`--write-spec` があれば、規約の
 生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書き、減った件数へラチェットの基準を下げてから検査する。
-`--ratchet-base` があれば、ラチェットの基準が、その commit の基準より上がっていないかも見る（CI はマージ先の先頭を渡す）。
+`--ratchet-base` があれば、ラチェットの基準が、その commit の基準より上がっていないかも見る（CI はマージ先の先頭を渡す）。件数が
+基準を超えた規則は、その commit に無い指摘だけを出す（`--only` に規則を渡せばすべて出す）。
 結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
@@ -35,15 +36,17 @@ from ndf.checks import (
     suppressions,
     words,
 )
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, contained, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, contained, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
-# ラチェットを当てる規則（件数が基準と同じなら違反にしない）。ほかの規則は 0 件を保つ
-RATCHETED = (copy_dup.RULE,)
+# ラチェットを当てる規則と、その規則の関数（件数が基準と同じなら違反にしない）。ほかの規則は 0 件を保つ
+RATCHETED = {copy_dup.RULE: copy_dup.check}
+# 件数が基準を超えた規則の理由に添える、箇所の見方
+LISTING = "増えた箇所は --ratchet-base <変更の前の commit>、全件は --only {rule} で出る"
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
 
 
@@ -138,11 +141,37 @@ def _ratchet_base(scope: Scope, path: Path, ref: str) -> dict[str, ratchet.Basel
     return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
 
 
-def ratcheted(scope: Scope, found: list[Finding], base_ref: Optional[str], written: list[str] | None) -> list[Finding]:
+def _base_scope(scope: Scope, ref: str) -> Scope:
+    """commit `ref` の製品のコード。構文の誤りで読めないファイルは除く。"""
+    src = scope.rel(scope.plugin_root / SRC_DIR)
+    names = os.fsdecode(_git_stdout(scope.repo_root, "ls-tree", "-r", "-z", "--name-only", ref, "--", src)).split("\0")
+    rels = [name for name in names if name.endswith(".py")]
+    blobs = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin="".join(f"{ref}:{rel}\n" for rel in rels)))
+    base = Scope(scope.repo_root, scope.plugin_root, scope.plugin_name)
+    for rel, blob in zip(rels, blobs, strict=True):
+        source = Source(scope.repo_root / rel, rel)
+        source.text = (blob or b"").decode("utf-8", "replace")
+        base.sources.append(source)
+    unparsable(base)
+    return base
+
+
+def _added(scope: Scope, found: list[Finding], rules: dict[str, Any], ref: Optional[str]) -> list[Finding]:
+    """`found` のうち、commit `ref` に無い指摘。`ref` が無ければ増えた分を見分けられないので空。"""
+    if ref is None or not found:
+        return []
+    base = _base_scope(scope, ref)
+    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](base, rules)}
+    return [f for f in found if (f.rule, f.key) not in before]
+
+
+def ratcheted(
+    scope: Scope, found: list[Finding], rules: dict[str, Any], only: list[str] | None, written: list[str] | None, base_ref: Optional[str]
+) -> list[Finding]:
     """ラチェットを当てる規則の指摘を、基準と比べた結果に置き換える。`written` があれば、減った件数へ基準を下げ、パスを足す。
 
-    件数が基準と同じ規則の指摘は外す。増えた規則は、増えた箇所を探せるように指摘をすべて残す。構文の誤りで読めないファイルが
-    あれば、件数が足りないので比べない。
+    件数が基準と同じ規則の指摘は外す。増えた規則は、commit `base_ref` に無い指摘だけを残し（既にある指摘で増えた箇所が埋もれない）、
+    `only` があればすべて残す（呼び手が `only` で絞る）。構文の誤りで読めないファイルがあれば、件数が足りないので比べない。
     """
     kept = [f for f in found if f.rule not in RATCHETED]
     if any(f.rule == "syntax" for f in kept):
@@ -155,8 +184,10 @@ def ratcheted(scope: Scope, found: list[Finding], base_ref: Optional[str], writt
             written.append(ratchet.RATCHET_REL)
     limits = ratchet.baseline(path)
     why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base_ref) if base_ref is not None else {})
-    kept += [f for f in found if f.rule in why and counts[f.rule] > limits[f.rule].max]
-    return sorted(kept + [Finding(rule, scope.rel(path), 1, text) for rule, text in why.items()], key=_order)
+    over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
+    listed = [f for f in found if f.rule in over]
+    kept += listed if only else _added(scope, listed, rules, base_ref)
+    return sorted(kept + [Finding(rule, scope.rel(path), 1, text) for rule, text in {**why, **over}.items()], key=_order)
 
 
 def select(
@@ -169,7 +200,7 @@ def select(
     if only and set(only) == {spec_docs.REVIEW_ITEMS} and written is None:
         return spec_docs.check_review_items(scope, rules)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    found = ratcheted(scope, check(scope, rules, written is not None, written), base_ref, written)
+    found = ratcheted(scope, check(scope, rules, written is not None, written), rules, only, written, base_ref)
     return [f for f in found if not only or f.rule in only]
 
 

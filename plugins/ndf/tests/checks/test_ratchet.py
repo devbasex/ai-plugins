@@ -154,12 +154,44 @@ def test_findings_equal_to_the_limit_are_not_violations(plugin, checked):
     assert code == 0 and report["items"] == [] and report["metrics"]["findings"] == {}
 
 
-def test_one_more_finding_lists_the_places_and_the_reason(plugin, checked):
+def _paths(report) -> list[str]:
+    return [i["path"].rsplit("/", 1)[-1] for i in report["items"]]
+
+
+def test_one_more_finding_lists_all_the_places_only_when_the_rule_is_selected(plugin, checked):
     plugin.write(ratchet.RATCHET_REL, body(0))
     code, report = checked()
     assert code == exit_codes.code_of("failed")
-    assert [(i["rule"], i["path"].rsplit("/", 1)[-1]) for i in report["items"]] == [("copy-dup", "a.py"), ("copy-dup", "ratchet.json")]
+    assert _paths(report) == ["ratchet.json"] and "1 件" in report["items"][0]["detail"]
+    code, report = checked("--only", "copy-dup")
+    assert code == exit_codes.code_of("failed") and _paths(report) == ["a.py", "ratchet.json"]
     assert checked("--only", "I3")[0] == 0
+
+
+def test_one_more_finding_lists_the_places_the_base_does_not_have(plugin, checked, monkeypatch):
+    limit = plugin.write(ratchet.RATCHET_REL, body(1)).relative_to(plugin.repo).as_posix()
+    src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
+    twice = "\n\ndef twice():\n    return 1\n"
+    # 変更の前: a.py・b.py に twice（行は今と違う）、broken.py は読めない
+    files = {f"{src}/ndf/a.py": twice, f"{src}/ndf/b.py": twice, f"{src}/ndf/broken.py": "def (:\n", f"{src}/ndf/x.json": "{}"}
+    blobs = {"HEAD^1^{commit}": _object("commit", "tree x\n"), f"HEAD^1:{limit}": _file(body(1))}
+    blobs.update({f"HEAD^1:{rel}": _file(text) for rel, text in files.items()})
+
+    def git(_root, *args, stdin=""):
+        if args[0] == "rev-parse":
+            return f"{plugin.repo}\n".encode()
+        if args[0] == "ls-tree":
+            assert args[-3:] == ("HEAD^1", "--", src)
+            return "".join(f"{rel}\0" for rel in files).encode()
+        return b"".join(blobs[name] for name in stdin.splitlines())
+
+    monkeypatch.setattr(run, "_git_stdout", git)
+    plugin.write("src/ndf/c.py", "def added():\n    return 1\n")
+    plugin.write("src/ndf/d.py", "def added():\n    return 1\n")
+    code, report = checked("--ratchet-base", "HEAD^1")
+    assert code == exit_codes.code_of("failed") and _paths(report) == ["c.py", "ratchet.json"]
+    assert "2 件" in report["items"][1]["detail"]
+    assert all(set(i) == {"rule", "path", "line", "detail"} for i in report["items"])
 
 
 def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):

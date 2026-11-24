@@ -33,7 +33,13 @@ def _places(found: Iterable[tuple[str, str, int]]) -> Places:
 def _findings(places: Places, min_files: int, what: str) -> list[Finding]:
     """`min_files` 以上のファイルが持つものを、辞書順の先頭のファイルの指摘にする。"""
     return [
-        Finding(RULE, min(files), files[min(files)], f"{what} {key!r} が {len(files)} ファイルにある: {', '.join(sorted(files))}")
+        Finding(
+            RULE,
+            min(files),
+            files[min(files)],
+            f"{what} {key!r} が {len(files)} ファイルにある: {', '.join(sorted(files))}",
+            f"{what} {key}",
+        )
         for key, files in places.items()
         if len(files) >= min_files
     ]
