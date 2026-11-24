@@ -76,10 +76,12 @@ def test_check_answer_rejects_choice_outside_and_missing_reason():
 def test_ask_passes_schema_to_claude_and_accepts_first_answer():
     schema = llm.answer_schema(choices=["fix", "stop"])
     fake = FakeClaude(reply(good()))
+    checked: list[int] = []
 
-    got = llm.ask("どうするか", "材料", schema, 30, call=fake)
+    # 打ち直しの前の確かめ before_retry は、1 回目で受け取れば呼ばない
+    got = llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1))
 
-    assert got == llm.JudgeAnswer(True, good(), None, 1, 0.5)
+    assert got == llm.JudgeAnswer(True, good(), None, 1, 0.5) and checked == []
     argv = fake.calls[0][0]
     assert json.loads(argv[argv.index("--json-schema") + 1]) == schema
     assert "--setting-sources" in argv
@@ -88,22 +90,14 @@ def test_ask_passes_schema_to_claude_and_accepts_first_answer():
 def test_ask_retries_once_and_tells_the_errors():
     schema = llm.answer_schema(choices=["fix", "stop"])
     fake = FakeClaude(reply(good("wait")), reply(good("stop")))
+    checked: list[int] = []
 
-    got = llm.ask("どうするか", "材料", schema, 30, call=fake)
+    got = llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1))
 
     assert got.ok and got.answer == good("stop") and got.attempts == 2 and got.cost == 1.0
     assert "形に合わなかった" in fake.calls[1][1]
-
-
-def test_ask_checks_only_before_the_retry_and_stops_when_the_check_raises():
-    schema = llm.answer_schema(choices=["fix", "stop"])
-    checked: list[int] = []
-    fake = FakeClaude(reply(good("fix")))
-    assert llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1)).ok
-    assert checked == []
-    fake = FakeClaude(reply(good("wait")), reply(good("stop")))
-    assert llm.ask("どうするか", "材料", schema, 30, call=fake, before_retry=lambda: checked.append(1)).ok
-    assert checked == [1] and len(fake.calls) == 2
+    # 打ち直しの直前に before_retry を 1 回呼ぶ。確かめが例外を投げれば打ち直さない
+    assert checked == [1]
 
     def moved() -> None:
         raise RuntimeError("材料が古い")

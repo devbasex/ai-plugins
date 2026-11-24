@@ -45,12 +45,10 @@ def test_failure_text_keeps_the_exception_only_in_the_local_record(repo: Path, m
     assert HOST not in got and "team/repo" not in got and "zz-fake" not in got
     assert (row["kind"], row["gate"], row["pr"], row["head"], row["repo"]) == ("base_unreadable", "design", 5, None, mvv.repo_key(repo))
     assert HOST in row["cause"] and "zz-fake-secret-77" not in row["cause"]
-
-
-def test_failure_text_writes_a_new_row_each_time_and_keeps_an_empty_cause(repo: Path) -> None:
+    # 同じ失敗でも呼ぶたびに新しい行（別の識別子）を書き、空の原因も空のまま残す
     first = mvv_gate.failure_text("llm_no_answer", "", {"gate": "release"})
     second = mvv_gate.failure_text("llm_no_answer", "", {"gate": "release"})
-    rows = _failures()
+    rows = _failures()[1:]
     assert first != second and [r["cause"] for r in rows] == ["", ""] and len({r["id"] for r in rows}) == 2
 
 
@@ -160,6 +158,8 @@ def _existing(mode: int = 0o644) -> Path:
         {"fchmod_error": PermissionError(1, "許されない")},
         {"st": {"st_uid": os.geteuid() + 1}},
         {"st": {"st_mode": stat.S_IFIFO | 0o600}},
+        # 本物の FIFO は作らない。読み手の無い FIFO を O_NONBLOCK で開いたときの ENXIO をスタブで返す（待たずに失敗する）
+        {"fail_open": OSError(errno.ENXIO, "No such device or address")},
     ],
 )
 def test_record_failure_writes_nothing_when_the_file_cannot_be_kept_private(
@@ -179,9 +179,3 @@ def test_record_failure_does_not_follow_a_symlink(repo: Path, tmp_path: Path) ->
     path.symlink_to(target)
     assert _unwritable(mvv_gate.failure_text("base_unreadable", HOST, {}))
     assert target.read_text(encoding="utf-8") == "別のファイル\n"
-
-
-def test_record_failure_does_not_wait_on_a_fifo_without_a_reader(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 本物の FIFO は作らない。読み手の無い FIFO を O_NONBLOCK で開いたときの ENXIO をスタブで返す
-    _Fd(monkeypatch, fail_open=OSError(errno.ENXIO, "No such device or address"))
-    assert _unwritable(mvv_gate.failure_text("base_unreadable", HOST, {}))
