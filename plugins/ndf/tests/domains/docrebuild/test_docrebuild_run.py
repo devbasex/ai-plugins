@@ -484,6 +484,9 @@ def test_drive_does_not_read_the_result_file_unless_ok(tmp_path: Path, out: dict
     got = _run(tmp_path, fake, FakeWorker({"broken": True}, out))
     assert got["status"] == "stopped" and got["cause"]["kind"] == kind
     assert ("gaps" in got) is (kind == "incomplete")
+    assert got["metrics"] == {"worker_status": out["status"]}
+    written, code = cli.adopt(got)
+    assert written is got and code == causes.exit_code(kind)
 
 
 def test_drive_reads_items_from_the_result_file_not_stdout(tmp_path: Path) -> None:
@@ -518,6 +521,9 @@ def test_drive_stops_on_bad_reports(tmp_path: Path, worker: FakeWorker, kind: st
     assert got["cause"]["detail"].startswith(detail)
     if kind == "incomplete":
         assert got["gaps"][0]["name"] == DESIGN
+    launched = worker.stdout is None  # 標準出力が壊れた実行は worker の status を読めない
+    assert got["metrics"] == ({"worker_status": "ok"} if launched else {})
+    assert cli.adopt(got)[0] is got
 
 
 def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Path) -> None:
@@ -530,7 +536,7 @@ def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Pa
         {"doc": "docs/x.md", "verdict": "?"},
     ]
     got = _run(tmp_path, fake, FakeWorker(_report(readers=[fail, *outside])))
-    assert got["status"] == "ok"
+    assert got["status"] == "ok" and got["metrics"]["worker_status"] == "ok"
     assert [i["id"] for i in got["items"]] == ["reader-1"]
     assert [r["doc"] for r in got["metrics"]["readers"]] == [DESIGN]
     assert got["warnings"][-1] == "対象の外の文書の記録を 2 件外した"
@@ -709,6 +715,22 @@ def test_adopt_replaces_a_wrong_result(items: list, metrics: dict) -> None:
     out, code = cli.adopt(bad)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and out["items"] == []
     assert code == causes.exit_code("invalid")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"tool": "document-rebuild", "status": "ok", "items": [], "metrics": {}},
+        {"tool": "document-rebuild", "status": "stopped", "summary": "s", "items": [], "metrics": {}},
+        {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [], "metrics": {"worker_status": "done"}},
+    ],
+)
+def test_adopt_writes_why_it_replaced_the_result(bad: dict, capsys: pytest.CaptureFixture[str]) -> None:
+    """共通の検査だけで差し替えたときも、値を含まない誤りの文を標準エラーへ書く。"""
+    out, _ = cli.adopt(bad)
+    assert out["cause"]["kind"] == "invalid"
+    err = capsys.readouterr().err
+    assert err.startswith("結果の形の誤り: ") and "done" not in err
 
 
 def _main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, got: dict[str, Any]) -> tuple[int, dict[str, Any], str]:

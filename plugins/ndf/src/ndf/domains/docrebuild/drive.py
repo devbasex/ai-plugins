@@ -412,15 +412,21 @@ def reader_items(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, s
     return items, warnings
 
 
+def _worker_metrics(status: str) -> dict[str, str]:
+    """`ndf worker run` が標準出力に返した検査後の `status` を写した `metrics`（手動確認が `--out` だけで worker の終わり方を見分ける）。"""
+    return {"worker_status": status}
+
+
 def _worker_stopped(out: Mapping[str, Any]) -> dict[str, Any]:
     """worker が `ok` で終えなかったときの結果（I7。結果ファイルは読まない）。`gate` も `stopped` にする。"""
     said = out.get("summary") or "（要約なし）"
+    metrics = _worker_metrics(str(out.get("status")))
     if out.get("status") == result.GATE:
-        return result.stopped(TOOL, "work_stopped", f"組み直す worker が判断を求めた: {said}")
+        return result.stopped(TOOL, "work_stopped", f"組み直す worker が判断を求めた: {said}", metrics=metrics)
     cause = out.get("cause")
     kind = cause.get("kind") if isinstance(cause, dict) else None
     gaps = out.get("gaps") if kind == "incomplete" else None
-    return result.stopped(TOOL, kind or "work_stopped", f"組み直す worker が止まった: {said}", gaps=gaps)
+    return result.stopped(TOOL, kind or "work_stopped", f"組み直す worker が止まった: {said}", gaps=gaps, metrics=metrics)
 
 
 def _read_report(path: Path) -> dict[str, Any]:
@@ -448,20 +454,24 @@ def _reader_summary(
 
 
 def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequence[str]) -> dict[str, Any]:
-    """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。"""
+    """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。
+
+    worker は `ok` で終えているので、どの結果にも `metrics.worker_status` の `ok` を載せる。
+    """
+    worker = _worker_metrics(result.OK)
     try:
         added = added_items(report.get("items"), targets)
     except BadReport as exc:
-        return result.stopped(TOOL, "bad_report", exc.detail)
+        return result.stopped(TOOL, "bad_report", exc.detail, metrics=worker)
     metrics = report.get("metrics")
     raw = metrics.get("readers") if isinstance(metrics, dict) else None
     gaps = reader_gaps(raw, targets)
     if gaps:
-        return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
+        return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps, metrics=worker)
     readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
     summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格か未確認 {len(found)} 件）"
-    return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
+    return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers, **worker}, warnings=warnings)
 
 
 def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str]]:
@@ -497,7 +507,10 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
         if out.get("status") != result.OK:
             return _worker_stopped(out)
-        report = _read_report(result_file)
     except Stop as exc:
         return result.stopped(TOOL, exc.kind, exc.detail)
+    try:
+        report = _read_report(result_file)
+    except Stop as exc:  # worker は ok で終えたので、結果ファイルを読めなくても worker の status を残す
+        return result.stopped(TOOL, exc.kind, exc.detail, metrics=_worker_metrics(result.OK))
     return _checked(report, chosen.targets, chosen.skipped)

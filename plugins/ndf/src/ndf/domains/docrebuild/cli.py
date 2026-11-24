@@ -55,7 +55,9 @@ def adopt(obj: dict[str, Any]) -> tuple[dict[str, Any], int]:
     own = sorted(contracts.broken_rule(e) for e in _own_validator().iter_errors(obj))
     if not common and not own and code is not None:
         return obj, code
-    for line in own:
+    # 共通の検査だけで止まったときも、何を直すかが分かるように、値を含まない文を全件書く
+    lines = [*result.safe_errors(obj, code), *own, *([result.NO_CODE] if code is None else [])]
+    for line in dict.fromkeys(lines):
         print(f"結果の形の誤り: {line}", file=sys.stderr)
     count = len(common) + len(own) + (code is None)
     return result.stopped(ENTRY, "invalid", f"結果 JSON の形が違う（{count} 件）"), causes.exit_code("invalid")

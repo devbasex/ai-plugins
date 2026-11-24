@@ -60,6 +60,7 @@ plugins/ndf/
 | `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.core.issue_docs`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`diff_paths`・`inspect`・`requirements_of`・`prompt_text`・`run_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 新設 | `ndf document-rebuild run` の引数を定義し、`drive` を呼び、`--out` と標準出力へ同じ結果を書く | `ndf.cli`・`ndf.identity`・`ndf.contracts.result`・`ndf.contracts.causes`・`drive` | モジュール | `_parser`・`adopt`・`main`（新設） |
 | `src/ndf/cli.py` | 変更 | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を足す | — | `COMMANDS` | — |
+| `src/ndf/contracts/result.py` | 変更 | 値を含まない誤りの文を返す `_safe_errors` を `safe_errors` として公開し、終了コードを決められないときの文を定数 `NO_CODE` にする。`emit` の振る舞いは変えない | — | — | `safe_errors(obj: Any, code: Optional[int]) -> list[str]`（名前だけ変える）・`NO_CODE`（新設） |
 | `src/ndf/adapters/git.py` | 変更 | 参照のコミットの SHA を、読めなければ None、git の失敗は `GitError` で返す | — | `Git` | `Git.commit_or_none(ref: str) -> Optional[str]`（新設） |
 | `src/ndf/checks/children.json` | 変更 | 新しいモジュールの持ち主を足す（設計書の「設計の結果」の段落） | — | — | — |
 | `contracts/worker/document-rebuild.md` | 新設 | 組み直す worker への起動指示のテンプレート | — | — | — |
@@ -322,6 +323,8 @@ plugins/ndf/
     | 足すべき内容の形が違う・結果ファイルを読めない | `stopped`（`bad_report`） | `ok` |
     | worker が `stopped` で終わった（I7） | `stopped`（worker の `cause.kind`） | `stopped` |
     | worker が `gate` で終わった（I7） | `stopped`（`work_stopped`） | `gate` |
+
+    `bad_report` の経路は、worker が `ok` で終えた後の検査で止まったので `ok` を写す。`added_items` の検査は `reader_gaps` より先なので、この経路では確かめの記録を検査していない。手動確認がこの実行で条件 16 を判定しないことは、設計書の手動確認の節に書く
   - 副作用: 上の関数のものだけ。コミット・`push`・GitHub への書き込みを持たない（条件 13）
 
 `Runner` の形と既定の値は次のとおりである。テストは偽物に替える。
@@ -445,7 +448,10 @@ plugins/ndf/
     - `result.errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応）
     - `contracts.broken_rules(obj, RESULT_SCHEMA)`（専用の結果スキーマ `io/document-rebuild.result`。`items` の `doc`・`metrics.readers` の形）
     - `result.code_for(obj)` が `None`（`stopped` に `cause` が無い）
-  - 副作用: 誤りがあれば、`contracts.broken_rules` の文（結果の値を含まない）を標準エラーへ 1 行ずつ書く。`result.errors` の文は結果の値を含むので書かない
+  - 副作用: 誤りがあれば、`invalid` に差し替える原因のすべてについて、結果の値を含まない文を `結果の形の誤り: <文>` の形で標準エラーへ 1 行ずつ書く。共通の検査だけで差し替えたときも、担当者が直す箇所を見つけられるようにするためである。書く文は次の 3 つで、同じ文は 1 回だけ書く。`result.errors` の文は結果の値を含むので書かない
+    - 共通の検査の文: `result.safe_errors(obj, code)`（`result.emit` が使っていた `_safe_errors` を公開に改める。スキーマの場所と規則の名前と、`status` と停止理由の対応の誤り）
+    - 専用の結果スキーマの文: `contracts.broken_rule` の文
+    - 終了コードを決められないとき: `result.NO_CODE`（`emit` と同じ文）
 - `main`
   - 事後条件: `drive.drive` の結果（例外のときは停止理由の結果）を `adopt` に通し、返った結果を先に `--out` へ、次に `result.emit` で標準出力へ書く。`adopt` を通った結果なので `emit` は差し替えず、`--out` のファイルと標準出力の最後の 1 行は同じ JSON になる。`--out` は `core.plan.files.write_json` で一時ファイルから置き換える。終了コードは `adopt` が返したもの
   - 副作用: `--out` のファイルを書く。`cwd` は打った場所（`Path.cwd()`）
@@ -473,7 +479,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `adopt` | 形の正しい `ok` をそのまま返す | `stopped` の結果も同じ終了コードで返す | `add-` の項目に `doc` が無い・`metrics.readers` の `verdict` が表に無い → `stopped`（`invalid`）に差し替わる |
+| `adopt` | 形の正しい `ok` をそのまま返す | `stopped` の結果も同じ終了コードで返す | `add-` の項目に `doc` が無い・`metrics.readers` の `verdict` が表に無い → `stopped`（`invalid`）に差し替わる。`summary` が無い・`stopped` に `cause` が無い・`metrics.worker_status` が列挙に無い → 標準エラーに値を含まない `結果の形の誤り:` の行が出る |
 | `main` | `--out` と標準出力の最後の 1 行が同じ JSON | — | `adopt` が差し替えたとき、`--out` にも差し替えた `stopped` が書かれ、元の `items` が残らない |
 
 ## 契約とテンプレート

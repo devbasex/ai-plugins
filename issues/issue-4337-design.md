@@ -166,7 +166,7 @@ flowchart TD
 | 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点）」、`items` は空、`metrics.targets` は空。worker を起動しない |
 | 起点を決められない | `stopped`（`precondition`）。`summary` に読めない参照の名前（ほかの名前のリモートだけがあるときは、求めた名前と設定のキー `.ndf/worktree.json` の `remote`）。分岐点が無いとき（`git diff A...B` の 3 ドット差分の失敗）も同じで、参照の名前と git の文を載せる。worker を起動しない。条件 11 が挙げるのは参照が読めないときだけで、ほかの 2 つは要求仕様の E4 の行にある |
 | worker が作業を残した・起動に失敗した・判断を求めた | `stopped`。`ndf worker run` の結果の `kind`・`gaps` を載せる（I7。下の「worker の終わりの読み方」）。`metrics.worker_status` に `ndf worker run` の `status`（`gate` か `stopped`）を写す |
-| 足すべき内容の形が違う（`text` が無い、`doc` が対象の文書でない） | `stopped`（`bad_report`） |
+| 足すべき内容の形が違う（`text` が無い、`doc` が対象の文書でない） | `stopped`（`bad_report`）。`metrics.worker_status` は `ok`。確かめの記録は検査していない |
 | 確かめの記録が欠けた文書がある | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件で、`kind` は `reader`、`name` は文書のパス、`reason` は欠けた内容（I4）。`metrics.worker_status` は `ok` |
 | 読み手役が不合格とした文書がある | `ok`。`items` に不合格の文書を 1 件ずつ（`id` は `reader-<番号>`、`text` は文書・不合格の質問・理由）足し、`warnings` にも文書ごとに 1 件載せる（I5） |
 | 読み手役を 1 回も立てられなかった文書（`not_run`）がある | `ok`。読み手役の確認が済んでいないので合格と同じには扱わず、不合格の文書と同じく `items`（`text` は文書・立てられなかった理由）と `warnings` に 1 件ずつ載せる（I5） |
@@ -535,9 +535,13 @@ A・B の表と条件 16 の合否は、`ndf worker run` が `ok` を返した�
 - 起点の参照を決められず、worker を起動しなかった（`stopped`（`precondition`））
 - worker が作業を残した、起動に失敗した、または判断を求めた（I7）。読み手役を呼ぶ前に止まり、会話記録が終了まで残っていても同じである
 
-`ndf worker run` が `ok` を返したかは、同じ実行の `--out` の `metrics.worker_status` で確かめる。この値は、`ndf document-rebuild run` が `ndf worker run` の標準出力から写した検査後の `status` である（「終わり方」の表の下）。`ok` なら判定に進み、`gate` か `stopped` なら判定せずにやり直す。`metrics.worker_status` が無い場合は、判定せずに `cause.kind` と停止理由を確認する。`invalid` なら、結果の形の検査で止まり元の `metrics` が残っていないので、標準エラーに出た出力の検査エラーを調べて直してからやり直す。対象が 0 件だった場合や起点を決められなかった場合は worker を起動していないので、対象と起点を確認してやり直す。worker が書いた結果ファイルの `status` や、`cause` と `gaps` では見分けない。結果ファイルが `ok` でも `ndf worker run` は `stopped` を返すことがあり、I4 と I7 はどちらも `stopped`（`incomplete`）になるからである。
+`ndf worker run` が `ok` を返したかは、同じ実行の `--out` の `metrics.worker_status` で確かめる。この値は、`ndf document-rebuild run` が `ndf worker run` の標準出力から写した検査後の `status` である（「終わり方」の表の下）。`ok` なら判定に進み、`gate` か `stopped` なら判定せずにやり直す。worker が書いた結果ファイルの `status` や、`cause` と `gaps` では、`ndf worker run` が `ok` を返したかを見分けない。結果ファイルが `ok` でも `ndf worker run` は `stopped` を返すことがあり、I4 と I7 はどちらも `stopped`（`incomplete`）になるからである。
 
-`metrics.worker_status` が `ok` の実行では、A・B の判定とは別に、`--out` だけで条件 16 の不合格を決められる。要求仕様の条件 16 は「確かめの結果か、立てられなかった理由が残る」ことである。次のどれかに当たれば、条件 16 が求める出力が欠けているので、条件 16 は不合格とし、記録の処理を直す。会話記録が欠けていても、この判定は変わらない。
+`metrics.worker_status` が `ok` でも、`cause.kind` が `bad_report` の実行では A・B・条件 16 を判定しない。worker の足すべき内容か結果ファイルの検査で止まり、確かめの記録まで検査していないので、`metrics.readers` が無くても記録の処理の不具合ではないからである。この場合は `cause.detail` の停止原因を直してから、同じ条件で確認をやり直す。
+
+`metrics.worker_status` が無い場合も、判定せずに `cause.kind` と停止理由を確認する。`cause.kind` が `invalid` なら、標準エラーに出た `結果の形の誤り:` の行で違反した規則を確認する。原因を直してから、同じ条件で確認をやり直す。対象が 0 件だった場合や起点を決められなかった場合は worker を起動していないので、対象と起点を確認してやり直す。
+
+`metrics.worker_status` が `ok` で、`cause.kind` が `bad_report` でない実行では、A・B の判定とは別に、`--out` だけで条件 16 の不合格を決められる。要求仕様の条件 16 は「確かめの結果か、立てられなかった理由が残る」ことである。次のどれかに当たれば、条件 16 が求める出力が欠けているので、条件 16 は不合格とし、記録の処理を直す。会話記録が欠けていても、この判定は変わらない。
 
 - `--out` の `metrics.readers` に対象の設計書の記録が無い
 - 記録が `pass` か `fail` なのに、`checks` に読み手役による設計書の言い直しが無い
