@@ -1,4 +1,4 @@
-"""本番チャネルへのマージを見る `strict` の guard（#3345 の決定 91）。
+"""本番チャネルへのマージを見る `strict` の guard（docs/specifications/ndf-rebuild.md の決定 91）。
 
 AI が Bash で直に打つ `gh pr merge` を、マージ先のリポジトリの設定（`.ndf/project.json` の `branch_strategy` の
 `release.deliveries`）で判定する。

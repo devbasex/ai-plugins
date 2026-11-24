@@ -1,4 +1,5 @@
-"""guard の表を順に呼び、判定を 1 つにまとめ、注入を切り、出力をコントラクト表の形にする（#3345 の決定 88・90〜92）。
+"""guard の表を順に呼び、判定を 1 つにまとめ、注入を切り、出力をコントラクト表の形にする
+（docs/specifications/ndf-rebuild.md の決定 88・90・91・92）。
 
 - 表（`contracts/hooks/guards.json`）のうち、事象と Tool が当たり、`NDF_HOOK_OFF` で止めておらず、ランタイムの
   コントラクト表で外していない行を `order` の昇順に呼ぶ。`strict` の行はエントリポイントが先に呼ぶので、ここでは呼ばない
@@ -160,7 +161,8 @@ def _counted(spec: GuardSpec) -> bool:
 def _call(spec: GuardSpec, ctx: HookContext, svc: GuardServices) -> tuple[Verdict, str]:
     try:
         got = importlib.import_module(spec.module).check(ctx, svc)
-    except Exception as exc:  # noqa: BLE001 利用者の入力: guard の失敗は通す側へ倒し（fail_closed は止める側）、種類を計測に残す（決定 91）
+    except Exception as exc:  # noqa: BLE001 利用者の入力: guard の失敗は通す側へ倒す（docs/specifications/ndf-rebuild.md の決定 91）
+        # fail_closed の guard は止める側へ倒す。どちらも例外の種類を計測に残す
         error = type(exc).__name__
         if spec.fail_closed:
             return deny(GUARD_FAILED.format(name=spec.name, error=error)), error
