@@ -33,7 +33,7 @@ from ndf.domains.hooks.context import DQUOTE_ESCAPABLE, context_tokens
 from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
-from ndf.domains.relay.signals import relay_dir
+from ndf.domains.relay.signals import keys_known, relay_dir
 from ndf.domains.hooks.verdict import Verdict, advise, deny, passing
 
 # 運用上限で通す Bash に許さない形: 変数の展開・コマンド置換（`$`・バッククォート）とプロセス置換
@@ -366,6 +366,13 @@ def _cwd_digest(cwd: str) -> str:
     return hashlib.sha256(cwd.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _remember(ctx, svc, tokens: int) -> None:
+    """この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために文脈の量と `cwd` のダイジェストを覚える。"""
+    item = _tool_use_id(ctx)
+    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
+
+
 def _remembered(ctx, svc) -> Optional[int]:
     """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
 
@@ -421,14 +428,12 @@ def check(ctx, svc) -> Verdict | None:
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None
-    item = _tool_use_id(ctx)
-    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
-        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd のダイジェストを覚える
-        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
+    _remember(ctx, svc, tokens)
     t = thresholds(ctx.env, tables.policy_value)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
-    under = relay_dir(ctx.env) is not None
+    # コントラクトの誤りで名前を引けなければ、拒否は保ったまま中継の外の案内にする（#4126 の決定 3）
+    under = keys_known() and relay_dir(ctx.env) is not None
     # 引継ぎの手順はほかの guard の拒否より先に従い、連結で末尾（wait の行の扱い）が切れないよう単独で出す
     reason = _reason(t, under, main, svc.params["handoff_dir"])
     return deny(reason, notes={"context_tokens": tokens, "under_relay": under}, sole=True)

@@ -21,10 +21,9 @@ from ndf.adapters import claude_usage
 from ndf.contracts import limits
 from ndf.domains.relay import account_choice, account_dir, accounts, observe, switch_decide, wrapper, wrapper_fetch
 from ndf.domains.relay import account_registry as reg
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usage, register, rows_of, run_wrapper
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, no_work, put_usage, register, rows_of, run_wrapper
 
 BARE_LIMIT = b"You've hit your limit\r\n"  # リセットの時刻も窓の語も持たない上限の行
-GUARD_WAIT = "閾値を越えた。止めてよい時点を待つ"
 BEDROCK_DECL = "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"
 
 
@@ -98,7 +97,7 @@ def _guarded(tmp_path, usages, turn=60.0, tool=False, outputs=None, exit_code=No
         if turn is not None:
             put_turn(tmp_path, session_id, time.time() + turn, tool)
 
-    first = Hooked(outputs or [b"working\r\n"], exit_code, on_start)
+    first = no_work(Hooked(outputs or [b"working\r\n"], exit_code, on_start))
     return run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare)
 
 
@@ -112,7 +111,7 @@ def test_d11_i12_3864_4_guard_switches_at_the_safe_point_and_resumes_the_same_co
     ended, spawn, w = _guarded(tmp_path, {"work1": work1, "work2": (10.0, None)})
     (first, _), (second, _) = spawn.calls
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
-    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1] == switch_decide.GUARD_RESUME_PROMPT
+    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1].startswith(switch_decide.GUARD_RESUME_PROMPT)
     assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account") if "from" in r][-1] == ("work1", "work2", "guard")
 
 
@@ -128,7 +127,7 @@ def test_i12_guard_keeps_the_account_without_an_inner_candidate_or_below_c(tmp_p
     outputs = [b"working\r\n"] + [b""] * 8
     ended, spawn, w = _guarded(tmp_path, usages, outputs=outputs, exit_code=0)
     assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason
-    assert GUARD_WAIT not in [r["reason"] for r in rows_of(w, "wait")]
+    assert switch_decide.GUARD_POINT not in [r["reason"] for r in rows_of(w, "active")]
 
 
 @pytest.mark.parametrize(
@@ -147,7 +146,7 @@ def test_i13_guard_does_not_stop_the_child_outside_the_safe_point(tmp_path, turn
     ended, spawn, w = _guarded(tmp_path, {"work1": (86.0, None), "work2": (10.0, None)}, turn, tool, outputs, 0)
     assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason
     if outputs[-1] == b"":
-        assert GUARD_WAIT in [r["reason"] for r in rows_of(w, "wait")]
+        assert switch_decide.GUARD_POINT in [r["reason"] for r in rows_of(w, "active")]
 
 
 def _limited(tmp_path, names, on_start, line=LIMIT_LINE, wall=None, pin="work1"):
@@ -516,3 +515,16 @@ def test_r3_4_the_queued_time_of_the_old_generation_does_not_hold_back_the_new_o
     register(tmp_path, "work1", generation="g2")
     w._queue_fetch(base + 1)
     assert put == [("g1", base), ("g2", base + 1)]
+
+
+def test_failed_fetches_are_written_as_one_row_and_the_name_becomes_free(tmp_path):
+    # #4049 の受け入れ条件 15（変えない振る舞い）: 取得の例外は見回り 1 回につき 1 行にまとめ、名前を取得の途中から外す
+    w = wrapper.Wrapper(make_settings(tmp_path, fetch=lambda *_: None))
+    w.dir.mkdir(parents=True)
+    w._drain_fetch()
+    w.fetcher.busy.update({"work1", "work2"})
+    w.fetcher.done.put(("work1", OSError("x")))
+    w.fetcher.done.put(("work2", ValueError("y")))
+    w._drain_fetch()
+    (row,) = rows_of(w, "usage_fetch_failed")
+    assert row["count"] == 2 and row["sample"][0] == {"account": "work1", "error": "OSError"} and w.fetcher.busy == set()

@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
+from ndf import identity
 from ndf.adapters import agents, claude
 from ndf.domains.relay import signals
 
@@ -65,7 +66,7 @@ def _cwd_key(cwd: Path) -> str:
 
 
 def transcript_path(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    return signals.claude_config_root(environ) / "projects" / _cwd_key(cwd) / f"{session_id}.jsonl"
+    return identity.claude_config_root(environ) / "projects" / _cwd_key(cwd) / f"{session_id}.jsonl"
 
 
 def subagent_transcript_path(transcript: Path, agent_id: str) -> Optional[Path]:

@@ -139,7 +139,7 @@ def test_stop_without_background_tasks_writes_an_empty_list(tmp_path, relay):
 
 def test_stop_with_background_tasks_writes_them_and_pushes_back(tmp_path, relay):
     out = call_entry("claude", "Stop", stop(tmp_path, FENCE, background_tasks=[SUBAGENT, SHELL]))
-    assert "背景の作業が 2 件" in out["reason"]
+    assert "バックグラウンドの作業が 2 件" in out["reason"]
     assert signals.read_activity(relay)["tasks"] == [
         {"id": SUBAGENT["id"], "type": "subagent"},
         {"id": SHELL["id"], "type": "shell"},
@@ -170,7 +170,7 @@ def test_stop_keeps_its_verdict_when_activity_cannot_be_written(tmp_path, relay,
 
     monkeypatch.setattr(signals, "replace_json", broken)
     out = call_entry("claude", "Stop", stop(tmp_path, FENCE, background_tasks=[SHELL]))
-    assert "背景の作業が 1 件" in out["reason"]
+    assert "バックグラウンドの作業が 1 件" in out["reason"]
     assert signals.read_activity(relay) is None
 
 

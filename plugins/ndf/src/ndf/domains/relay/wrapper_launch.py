@@ -65,7 +65,7 @@ class LaunchSteps:
     last_skip: str
     _log: Callable[[Mapping[str, Any]], None]
     _say: Callable[[str], None]
-    _env_for: Callable[[Optional[str], str], dict[str, str]]
+    _env_for: Callable[[Optional[str], str, str], dict[str, str]]
     _inputs: Callable[[float, bool], launch_inputs.Inputs]
     _length: Callable[[Section, float], float]
 
@@ -124,7 +124,7 @@ class LaunchSteps:
         if self._spins(req.kind, None):
             return SPUN
         full = [*argv, req.prompt] if req.prompt else argv
-        target = Target(None, None, "", req.reason, skipped, None, self._env_for(None, launch), full, None)
+        target = Target(None, None, "", req.reason, skipped, None, self._env_for(None, launch, req.session_id), full, None)
         return Launched(target, self._spawn_target(target))
 
     def _skip(self, name: str, code: str) -> None:
@@ -134,7 +134,7 @@ class LaunchSteps:
     def _try(self, name: str, req: Launch, argv: list[str], launch: str) -> Optional[Launched]:
         """1 つの名前を `account_choice.target_env` で用意して起動する。用意できない・関所の子が claude になれなければ、
         理由の文を `last_skip` に置いて None（届けは解除済み）。キーの子は払い出しの記録を作り、記録先と ID を helper に渡す。"""
-        env = self._env_for(name, launch)
+        env = self._env_for(name, launch, req.session_id)
         helper = None
         if account_choice.key_child(env, name, self.store):
             try:  # 記録の無いキーの子を起動しない（払い出しを数えられない）
