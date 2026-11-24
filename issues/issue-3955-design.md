@@ -4,7 +4,7 @@
 
 ## 今の姿
 
-何が起きたか・目的・受け入れ条件は要求仕様の [issue-3955-requirements.md](./issue-3955-requirements.md) にある。その正は [#3955](https://github.com/devbasex/ai-plugins/issues/3955) の本文である。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
+何が起きたか・目的・受け入れ条件は要求仕様の [issue-3955-requirements.md](./issue-3955-requirements.md) にある。要求の正本は [#3955](https://github.com/devbasex/ai-plugins/issues/3955) の本文である。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
 
 変える箇所は、相手役を決める所（起動の前）と、ラウンドの中の起動し直しの後の 2 か所である。
 
@@ -44,9 +44,9 @@ graph TD
 - cross-refactoring の相手役の選び方は変えない（受け入れ条件 13）。`participants.assign` の入出力は今のまま残す
 - 引数と結果 JSON のキーは足さない（要求の「影響」）。状態ファイルのラウンドの記録にはキーを 1 つ足す（移行は無い）
 - 相手役の全員がレビュー結果を返さなかったときは、今と同じく `precondition` で止める（前提 1）。埋めた claude も結果を返さなければ、埋め直さずに `incomplete_reviewers` で止める（前提 2）
-- 学習の設定による起動の制限は保つ。断られた担当は起動しない。cross-review の駆動は、今の `participants.unready` に代えて、断られたランタイムと理由の組を返す `participants.refusals` で確かめる（処理の流れの「始める前の確かめ」）
+- 学習の設定による起動の制限は保つ。断られた担当は起動しない。cross-review の駆動は、今の `participants.unready` に代えて `participants.refusals` で確かめる。`refusals` は断られたランタイムと理由の組を返す（処理の流れの「始める前の確かめ」）
 - 利用者が `--reviewer` で 1 者だけを名指したときは、起動の前にもラウンドの中でも席を埋めない（前提 4）
-- 実行の担い手は `ndf cross-review run` の 1 プロセスで、相手役の起動は今のとおり並べて行う。ラウンドの中で足す起動は、起動し直しの後に、結果の無い席ごとに 1 回である。起動の前に埋めた席は、ほかの席と同じに毎ラウンド起動する
+- 実行するのは `ndf cross-review run` の 1 プロセスで、相手役の起動は今のとおり並べて行う。ラウンドの中で足す起動は、起動し直しの後に、結果の無い席ごとに 1 回である。起動の前に埋めた席は、ほかの席と同じに毎ラウンド起動する
 
 ## 解き方の全体像
 
@@ -104,7 +104,7 @@ graph TD
 | I2 | 1 回の実行 | 埋めるのは claude 以外のランタイムの席だけで、1 つの席を埋めるのは 1 回だけである。claude の席は起動し直さない | 結果の無い席に claude の席が 1 つでもあれば、ほかに結果の無い claude 以外の席があっても、どの席も埋めずに `incomplete_reviewers` で止める（全員が結果を返さないときは I3 が先に効く） |
 | I3 | 1 回の実行 | 全員がレビュー結果を返さなかったラウンドでは席を埋めない | `precondition` で止め、状態ファイルにそのラウンドを残さない |
 | I4 | 1 回の実行 | 一度埋めた席は、同じ実行の以後のラウンドでも埋めた claude が座り、欠けた相手役を起動しない | — （駆動が今の席を持ち続けることで保つ） |
-| I5 | 1 回の実行 | 席に座る claude は、修正担当と会話を共有せず、ファイルを書き換える Tool を持たない。読めるのはレビューする worktree と、レビューの資料の置き場（決定 2）だけである | — （起動の引数で保つ） |
+| I5 | 1 回の実行 | 席に座る claude は、修正担当と会話を共有せず、ファイルを書き換える Tool を持たない。読めるのはレビューする worktree と、レビューの資料のディレクトリ（決定 2）だけである | — （起動の引数で保つ） |
 
 ### ドメインイベント
 
@@ -123,11 +123,15 @@ graph TD
 | 要素 | 責務 |
 | --- | --- |
 | 相手役を決める部品（`participants.py`。変える） | cross-review の席を決める `review_seats` と、席の名前からランタイムを引く `runtime_of` と、学習の設定で断られたランタイムと理由の組を返す `refusals` を足す（`unready` は `refusals` を使う形にし、返り値は変えない）。claude の読むだけの起動の組み立てと、claude の出力から本文を取り出す処理を cross-refactoring から移して持つ。`assign` は変えない |
-| cross-review の駆動（`drive.py`。変える） | 今の席を実行の間持ち、起動し直しの後に空いた席を埋める。ラウンドの記録に実際に座った席と埋めた席を書き、注意に埋めたことを載せる。起動・監視・認証の確かめにはランタイムの名前を、指摘の担当・出力の名前・記録には席の名前を使う。相手役へ渡す資料を保存先の下の `review-input/` に書く（決定 2）。同じ head の打ち直しで前回の結果を返すときは、前回埋めた席を数えて判定し、注意を作り直す（データ構造の節） |
+| cross-review の駆動（`drive.py`。変える） | 今の席を実行の間持ち、起動し直しの後に空いた席を埋める。ラウンドの記録に実際に座った席と埋めた席を書き、注意に埋めたことを載せる。起動・監視・認証の確かめにはランタイムの名前を、指摘の担当・出力の名前・記録には席の名前を使う。相手役へ渡す資料を、実行ごとに保存先の下に新しく作る `review-input-<ランダムな接尾辞>/` に書き、実行の終わりに消す（決定 2）。同じ head の打ち直しで前回の結果を返すときは、前回埋めた席を数えて判定し、注意を作り直す（データ構造の節） |
 | cross-review の CLI（`cli.py`。変える） | `--reviewer` の名指しと `allowed` から `review_seats` で席を決め、名指しが 1 者かを駆動の設定に渡す。詳しくは下の「CLI の 2 つのコマンド」 |
+| ラウンドの範囲の判断（`scope_decide.py`。変える） | ラウンドの記録のキーに `filled` を足し、埋めた席 1 件の型と、前回の席ごとに割り当ててよい名前の候補を読む関数を持つ。同じ head の打ち直しの再利用の判定（`read_by_all_head`）で、埋めた席を実際の席名か欠けた相手役のどちらか一方として数える |
 | 記録のコメント（`report_decide.py`。変える） | ラウンドの表に「相手役」の列を足し、埋めた席は欠けた相手役の名前を添えて示す |
 | claude の起動の部品（`adapters/claude.py`。変える） | 起動の設定（`ClaudeCall`）に読める場所の一覧を足す。空でないときだけ、`permission_args` で `--restricted`・`--add-dir`・`dontAsk` を組み立てる（決定 2）。空なら今と同じ引数を返す |
+| 外部 CLI の下限の検査（`adapters/cli_floor.py`・`adapters/agents.py`。変える） | 下限の表の行の `flag_floors` を読み、起動の引数に含まれる引数の下限と比べる。含まれなければ今のとおり `min_version` と比べる。相手役の起動は起動の引数をすべて検査に渡す（決定 2） |
 | cross-refactoring の起動（`crossrefactor/launch.py`。変える） | claude の読むだけの起動と本文の取り出しを、相手役を決める部品の関数で行う（振る舞いは変えない） |
+
+ファイルと関数の粒度は、詳細設計の [issue-3955-design-detail.md](./issue-3955-design-detail.md) にある。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるため、別ファイルにした。
 
 ```mermaid
 graph LR
@@ -152,7 +156,7 @@ graph LR
 
 ### CLI の 2 つのコマンド
 
-**`run` と `review-scope` は、同じ席の関数で席を決める。** 今の 2 つのコマンドは、名指しと `allowed` から相手役を決める処理（`cli._resolve` の中の `_reviewers`）を共有し、同じ相手役でレビューの範囲を計算している。この共有の処理を `assign` から `review_seats` に替える。`run` の設定を作る所だけを替えると、claude だけを許したリポジトリで、レビューは始まるのに、利用者が事前に範囲を確かめる `review-scope` は `invalid` で止まるためである。
+**`run` と `review-scope` は、同じ席の関数で席を決める。** 今の 2 つのコマンドは、名指しと `allowed` から相手役を決める処理（`cli._resolve` の中の `_reviewers`）を共有する。そして同じ相手役でレビューの範囲を計算している。この共有の処理を `assign` から `review_seats` に替える。`run` の設定を作る所だけを替えると、claude だけを許したリポジトリで食い違いが起きる。レビューは始まるのに、利用者が事前に範囲を確かめる `review-scope` は `invalid` で止まる。
 
 - `review-scope` が示す範囲は、起動の前に分かる席（名指しと `allowed` から決まる席）に基づく。始める前の確かめで断られて埋める席と、ラウンドの中で埋める席は、起動しないと分からないので含めない。このことを `review-scope` の説明（CLI の help と手順書）に書く
 - 「名指しが 1 者」は、`--reviewer` を数えた回数ではなく、重なりを除いた後の席の数で決める。今の CLI は `--reviewer` を複数回渡す形で、`assign` は同じ名前の重なりと修正担当を除く。`--reviewer codex --reviewer codex` は codex だけを名指したことになり、席を埋めない
@@ -191,7 +195,7 @@ graph LR
 
 **`filled` は埋めた後のすべてのラウンドに書く。** 埋めたラウンドだけに書くと、2 ラウンド目以降の記録だけを読んだ人が、`claude` が修正担当でなく席に座ったことを読み取れないためである。
 
-**2 ラウンド目以降に前の head からの差分だけを渡してよいかは、今回の席が全員、前のラウンドを読んでいるかで決まる。** その判定（`scope_decide.read_by_all_head`）は、記録の `reviewers`（埋めた後の席）の全員が結果を返した直近のラウンドの記録を 1 件選び、次の 3 つを確かめる。
+**2 ラウンド目以降に前の head からの差分だけを渡してよいかは、今回の席が全員、前のラウンドを読んでいるかで決まる。** その判定（`scope_decide.read_by_all_head`）は、ラウンドの記録を 1 件選ぶ。選ぶのは、記録の `reviewers`（埋めた後の席）の全員が結果を返した直近のラウンドである。その記録で次の 3 つを確かめる。
 
 - そのラウンドの比較基点（`base`）が今回と同じ
 - そのラウンドのレビューの重点（`focus`）が今回と同じ
@@ -199,26 +203,28 @@ graph LR
 
 3 つが合えば、そのラウンドの head が差分の起点の候補になる。設計の PR で詳細にレビューしていない節が残るときは、候補があっても全差分を渡す（`review_scope`）。
 
-`reviewers` を埋めた後の席で書くのは、この判定のためである。round 1 で kiro の席を claude で埋めたとき、記録が `["codex", "claude"]` なら、round 2 の席（codex・claude）は全員含まれ、前の head からの差分で続く。起動の引数（codex・kiro）を書くと、round 2 の claude が含まれず、毎ラウンド全差分を読み直す。逆に、claude が読んでいないラウンドを claude が読んだと記録すると、claude が前の変更を見ないまま収束する。
+`reviewers` を埋めた後の席で書くのは、この判定のためである。例として、round 1 で kiro の席を claude で埋めたとする。記録が `["codex", "claude"]` なら、round 2 の席（codex・claude）は全員含まれ、前の head からの差分で続く。起動の引数（codex・kiro）を書くと、round 2 の claude が含まれず、毎ラウンド全差分を読み直す。逆に、claude が読んでいないラウンドを claude が読んだと記録すると、claude が前の変更を見ないまま収束する。
 
 別の起動で打ち直すと、席は既定（codex・kiro）から決め直す。head が変わっていれば比較が合わないので、kiro をもう一度起動し、全差分を読み直す。欠けた相手役がログインし直していれば、その相手役が戻る。
 
-**同じ head で打ち直したときは、前回の結果をそのまま返せるか（`_reusable`）を、前回埋めた席を欠けた相手役の代わりとして数えて判定する。** 埋めた席を数えないと、kiro が引き続き使えない環境で同じ head を打ち直すたびに、起動 0 回で返せる収束の結果に対して codex 1 回・kiro 2 回（起動し直しを含む）・claude 1 回を起動し、全差分を読み直すためである。
+**同じ head で打ち直したときは、前回の結果をそのまま返せるか（`_reusable`）を、前回埋めた席を欠けた相手役の代わりとして数えて判定する。** 埋めた席を数えないと、kiro が引き続き使えない環境で、同じ head を打ち直すたびに次の起動が起きるためである。1 度も起動せずに前回の収束の結果を返せるのに、codex を 1 回・kiro を 2 回（起動し直しを含む）・claude を 1 回起動し、全差分を読み直すことになる。
 
 - 比べるのは、最後のラウンド（収束したラウンド）の記録である
-- 今回の席を前回の席に 1 対 1 で対応させ、前回の 1 つの席で今回の 2 つの席を満たさない。そのため、置き換えは前回の席の側で行う。前回の `reviewers` の席ごとに、その席が誰の代わりに読んだかを 1 つだけ決める
-  - `filled` に載り、`for` が相手役の名前の席は、その相手役の代わりとする
-  - `filled` に載らない席と、`for` が null の席（`allowed` のために起動の前に埋めた席）は、その席自身とする
-- 今回の席が全員、前回の席の「誰の代わりか」に含まれれば、前回のラウンドを全員が読んだとみなす。前回の席はどれも 1 つの名前にしか対応せず、今回の席の名前は重ならないので、前回の同じ席を 2 度数えることは無い
-- 例 1: 前回が `codex` と `{"seat": "claude", "for": "kiro"}` の claude なら、前回の席は codex・kiro の代わりになる。今回の席が codex・kiro なら前回の結果を返す
-- 例 2: 前回が `kiro` と `{"seat": "claude", "for": "codex"}` の claude で、同じ head のまま `allowed` を claude と codex に変えて打ち直すと、今回の席は codex・claude になる。前回の席は kiro・codex の代わりで、今回の `claude` の代わりになる席が無いので、前回の結果を返さずにレビューを回す
+- 今回の席を、前回の別々の席に 1 つずつ割り当てられるかで判定する。前回の 1 つの席で今回の 2 つの席を満たさない
+- 前回の `reviewers` の席ごとに、割り当ててよい今回の席の名前（候補）を決める
+  - `filled` に載り、`for` が相手役の名前の席は、実際の席名と、代わった相手役の名前の 2 つを候補にする。割り当てるのはどちらか一方だけである
+  - `filled` に載らない席と、`for` が null の席（`allowed` のために起動の前に埋めた席）は、その席自身だけを候補にする
+- 今回の席の全員を、候補に含む前回の席へ、重ならずに割り当てられれば、前回のラウンドを全員が読んだとみなす。割り当ては 2 部グラフの最大マッチングで求める。席は 2 つほどなので、計算の量は問題にならない
+- 例 1: 前回が `codex` と `{"seat": "claude", "for": "kiro"}` の claude で、今回の席が codex・kiro とする。codex を前回の codex に、kiro を前回の claude に割り当てられるので、前回の結果を返す
+- 例 2: 例 1 と同じ前回で、同じ head のまま `allowed` を claude と codex に絞って打ち直すと、今回の席は codex・claude になる。codex を前回の codex に、claude を前回の claude（実際の席名）に割り当てられる。両者とも前回の差分を読んでいるので、前回の結果を返す
+- 例 3: 前回が `kiro` と `{"seat": "claude", "for": "codex"}` の claude だったとする。同じ head のまま `allowed` を claude と codex に変えて打ち直すと、今回の席は codex・claude になる。今回の codex と claude を割り当てられるのは、どちらも前回の claude の席だけで、前回の kiro の席の候補は kiro だけである。前回の claude の席を 2 度数えないので、前回の結果を返さずにレビューを回す
 - 相手役の代わりとして数えるのは、今回の実行が席を埋めてよいとき（名指しが 1 者でないとき。決定 6）だけである。名指しが 1 者なら、前回の席をその席自身として、今と同じに比べる
 - 代わりに読んだ席は claude で、修正担当と同じランタイムである。修正担当が `allowed` の外なら席を決める時点で止まるので、代わりに読んだ席が `allowed` の外になることは無い
 - 比較基点（`base`）と重点（`focus`）は今と同じに確かめる
 
 この数え方は再利用の判定だけに使う。head が変わって新しいラウンドを回すときは、今回の席（kiro を含む）をそのまま起動する。
 
-**前回の結果を返すときは、最後のラウンドの `filled` から、席を埋めた注意を作り直して結果 JSON の `warnings` に載せる。** 今の `run.warnings` は起動ごとに空から始まるので、新しいラウンドの中でだけ注意を作ると、再利用した結果 JSON から、誰がどの理由で席を埋めたかが消えるためである。注意の文は、ラウンドの中で埋めたときと同じ形（欠けた相手役・理由・埋めた席）にし、前回のラウンドの番号を添える。`allowed` が初めから claude と codex に絞られているときなど、置き換えなしで再利用できる場合も同じである。
+**前回の結果を返すときは、最後のラウンドの `filled` から、席を埋めた注意を作り直して結果 JSON の `warnings` に載せる。** 今の `run.warnings` は起動ごとに空から始まる。新しいラウンドの中でだけ注意を作ると、再利用した結果 JSON から、誰がどの理由で席を埋めたかが消えるためである。注意の文は、ラウンドの中で埋めたときと同じ形（欠けた相手役・理由・埋めた席）にし、前回のラウンドの番号を添える。`allowed` が初めから claude と codex に絞られているときなど、置き換えなしで再利用できる場合も同じである。
 
 ## 処理の流れ
 
@@ -228,9 +234,9 @@ graph LR
 
 **確かめる順は今のままにする。** 今の `drive` は、同じ head の収束の結果を返せるか（`_reusable`）を先に判定し、返せるときは学習の設定を確かめずに返す。この順を保つ。返せる結果を、学習の設定の確かめのために `precondition` へ変えないためである。`_reusable` が今回の席として使うのは、`review_seats` が起動の時点で決めた席である（前回埋めた席の数え方はデータ構造の節）。この後の確かめで断られた席を claude で埋めても、その前に済んだ再利用の判定には影響しない。
 
-**どの席を埋めるかを決めるため、確かめの結果はランタイムと理由の組で受け取る。** 今の `participants.unready` は断る理由の文字列の並び（`list[str]`）を返すので、どのランタイムが断られたかが分からない。そこで相手役を決める部品に `participants.refusals(runtimes)` を足し、断られたランタイムから理由への対応（`dict[str, str]`。断られなかったランタイムは含めない）を返す。
+**どの席を埋めるかを決めるため、確かめの結果はランタイムと理由の組で受け取る。** 今の `participants.unready` は断る理由の文字列の並び（`list[str]`）を返すので、どのランタイムが断られたかが分からない。そこで相手役を決める部品に `participants.refusals(runtimes)` を足す。返すのは、断られたランタイムから理由への対応（`dict[str, str]`）で、断られなかったランタイムは含めない。
 
-- 同じランタイムは 1 回だけ確かめる。渡す前に席の名前をランタイムの名前へ直し（`claude-2` は claude）、修正担当の claude と合わせて重なりを除く（今の `unready` の `dict.fromkeys` と同じ）。`claude`・`claude-2`・修正担当がそろっても、claude の確かめは 1 回である
+- 同じランタイムは 1 回だけ確かめる。渡す前に席の名前をランタイムの名前へ直す（`claude-2` は claude）。そして修正担当の claude と合わせて重なりを除く（今の `unready` の `dict.fromkeys` と同じ）。`claude`・`claude-2`・修正担当がそろっても、claude の確かめは 1 回である
 - `unready` は `refusals` の理由を並べて返す薄い関数として残す。cross-refactoring の呼び出しと返り値は変えない
 - 駆動は `refusals` の結果のランタイムを席の名前へ戻して、埋める席を決める
 
@@ -285,11 +291,11 @@ sequenceDiagram
 | 3a | 埋めた claude が全員結果を返した | 埋めた後の席の指摘で判定する | 判定のとおり |
 | 3b | 埋めた claude の 1 つでも結果を返さない | 起動し直しも埋め直しもしない | `incomplete_reviewers`（前提 2） |
 
-名指しが 1 者のときは席が 1 つなので、その 1 者に結果が無ければ 1 行目に当たる。`--reviewer` で 2 者を名指したときも、既定の席と同じにこの表を使う。今の相手役になれるランタイムは codex と kiro の 2 つで、席は 2 つまでなので、2 行目のうち claude の席と claude 以外の席が同時に結果を返さない場合は、実際には 1 行目に当たる。2 行目を「1 つでもある」と書くのは、相手役になれるランタイムが増えて席が 3 つ以上になっても、同じ規則で止めるためである。
+名指しが 1 者のときは席が 1 つなので、その 1 者に結果が無ければ 1 行目に当たる。`--reviewer` で 2 者を名指したときも、既定の席と同じにこの表を使う。今の相手役になれるランタイムは codex と kiro の 2 つで、席は 2 つまでである。そのため、2 行目のうち claude の席と claude 以外の席が同時に結果を返さない場合は、実際には 1 行目に当たる。2 行目を「1 つでもある」と書くのは、相手役になれるランタイムが増えて席が 3 つ以上になっても、同じ規則で止めるためである。
 
 **埋めた claude がそのラウンドで初めて加わる担当なら、PR の全差分を渡す。** 今の `_prepare_round` は、相手役を起動する前に差分の範囲を決める。前のラウンドで codex と kiro が全員結果を返していれば、範囲は前の head からの差分になる。この差分をそのまま埋めた claude に渡すと、claude は PR のそれより前の変更を一度も見ないまま、その席で収束する。そこで駆動は次のようにする。
 
-- 埋めた claude への依頼文は、ラウンドの範囲にかかわらず、前回の情報を渡さずに（`_review_prompt` の `prep.previous` を None にして）組み立て直す。今の `_review_prompt` は、範囲が全差分のラウンドでも、前の head があれば文書の指摘の基準 6 を前回以降に変わった文などに限る。ほかの席と同じ依頼文を渡すと、初めて読む claude にもこの制限がかかり、変わっていない文への指摘が軽く扱われるためである
+- 埋めた claude への依頼文は、ラウンドの範囲にかかわらず、前回の情報を渡さずに組み立て直す（`_review_prompt` の `prep.previous` を None にする）。今の `_review_prompt` は、範囲が全差分のラウンドでも、前の head があれば文書の指摘の基準 6 を前回以降に変わった文などに限る。ほかの席と同じ依頼文を渡すと、初めて読む claude にもこの制限がかかり、変わっていない文への指摘が軽く扱われるためである
 - そのラウンドの範囲が前の head からの差分なら、`--base` からの全差分のファイルを別に作り、上の依頼文と一緒に埋めた claude へ渡す
 - そのラウンドの範囲がもともと全差分なら、差分のファイルはほかの席と同じものを渡し、依頼文だけを上のとおり組み立て直す
 - 全差分は、埋めた claude の席への依頼にだけ使う。ラウンドの範囲（`prep.scope`）は書き換えない。ラウンドの記録の `scope` と、詳細にレビューした節の更新（`store.REVIEWED`。範囲が全差分のときだけ足す）は、元の `prep.scope` で決める。claude 向けに `prep.scope` を全差分へ差し替えると、前の head からの差分しか受け取っていない codex も全差分を読んだと記録されるためである
@@ -319,25 +325,37 @@ sequenceDiagram
 - **選んだ案**: cross-refactoring の次の 2 つを、相手役を決める部品の関数へ移す。cross-review の駆動と cross-refactoring の起動が同じ関数を呼ぶ。system の文は呼び手が渡す
   - `_read_only` の claude の分岐。`Read,Grep,Glob` だけを許し、会話を残さない最小構成の `claude -p` である
   - `_answer_text`。外側の JSON の `result` を本文にする
-- **席の claude が読める場所は、レビューする worktree と、レビューの資料の置き場だけに限る。** 席の claude の指摘は PR のコメントとして GitHub に載る。差分や PR の本文に仕込まれた指示に従って、claude が worktree の外のファイル（`~/.ssh`・認証情報など）を読み、指摘の本文に書き写すと、その中身が公開されるためである。codex と kiro はサンドボックスの中で動くが、claude の読むだけの起動には今その境界が無い
-  - レビューの資料の置き場は、状態の保存先（`--state-dir`）の下の専用のディレクトリ `review-input/` にする。駆動は、相手役へ渡す差分のファイル・前の head からの差分のファイル・既存のコメントのファイル・埋めた claude 用の全差分のファイルを、このディレクトリに書く。依頼文はこのディレクトリの中のファイルだけを指す
+- **席の claude が読める場所は、レビューする worktree と、レビューの資料のディレクトリだけに限る。** 席の claude の指摘は PR のコメントとして GitHub に載る。差分や PR の本文には、claude への指示が仕込まれうる。それに従って claude が worktree の外のファイル（`~/.ssh`・認証情報など）を読み、指摘の本文に書き写すと、その中身が公開されるためである。codex と kiro はサンドボックスの中で動くが、claude の読むだけの起動には今その境界が無い
+  - レビューの資料のディレクトリは、`ndf cross-review run` の実行ごとに、状態の保存先（`--state-dir`）の下に新しく作る。名前は `review-input-<ランダムな接尾辞>/` で、以下では `review-input/` と略す。駆動は、相手役へ渡す差分のファイル・前の head からの差分のファイル・既存のコメントのファイル・埋めた claude 用の全差分のファイルを、このディレクトリに書く。依頼文はこのディレクトリの中のファイルだけを指す
+  - 実行ごとに新しく作るのは、前の実行の資料を読ませないためである。同じ `--state-dir` を別の PR で使い回すと、決まった名前のディレクトリには前の PR の差分が残る。席の claude がそれを読み、今回の PR のコメントに書き写すと、前の PR の中身を今回の PR の閲覧者に開示してしまう
+  - 作り方は次の 3 つを守る
+    - `tempfile.mkdtemp(prefix="review-input-", dir=<保存先>)` で作る。この関数は、同じ名前のディレクトリやシンボリックリンクが既にあれば別の名前で作り直し、既存のものを使わない。作ったディレクトリは空で、作った利用者だけが読める
+    - 作ったディレクトリのパスを実行の間持ち、資料の書き込みと `--add-dir` にはそのパスだけを使う。既存のディレクトリを探して再利用しない
+    - 実行が終わるとき（止まったときを含む）に、そのディレクトリを消す。消せなくても実行の結果は変えない。消し残しは次の実行の `--add-dir` に渡らない
   - 修正担当の結果・実行のログ・要約・状態ファイルは、今のとおり保存先の直下に置き、`review-input/` には置かない。保存先の全体を読めるようにすると、修正担当の結果や実行のログまで席の claude が読めるようになるためである
   - 範囲の外の読み取りは、許可の規則（`--allowed-tools`）ではなく、claude の起動の形で断る。許可の規則は、当たる操作を確かめずに通すためのもので、当たらない操作を断るものではないためである。起動の引数は次の 3 つを今の `Permission.TOOLS` の引数に足し、または置き換える（claude 2.1.331 の `claude --help` で確かめた）
     - `--restricted` を足す。ファイルの Tool を作業ディレクトリ（`--add-dir` で足した場所を含む）に閉じ込め、利用者とプロジェクトの設定ファイルも読まない
-    - `--add-dir` に `review-input/` だけを渡す。作業ディレクトリ（起動する場所）は今のとおり worktree である
+    - `--add-dir` に、この実行で作った `review-input/` だけを渡す。作業ディレクトリ（起動する場所）は今のとおり worktree である
     - 許可のモードを `acceptEdits` から `dontAsk`（事前に許していない操作を尋ねずに断る）に替える。席の claude は書き換えないので、編集を受けるモードは要らない
-  - `--tools` と `--allowed-tools` には、今のとおり同じ Tool の名前（`Read,Grep,Glob`）だけを渡し、場所を限った規則は使わない。`Permission.TOOLS` を 2 つの値に分ける作業は要らない。理由は次のとおりである。今の `Permission.TOOLS` は同じ文字列を `--tools`（使える Tool）と `--allowed-tools`（許可の規則）の両方に渡す。場所を限った規則（`Read(//<パス>/**)` など）を同じ文字列に入れると、`--tools` に Tool の名前でない値が渡る。読める場所は、claude の起動の部品（`adapters/claude.py` の `ClaudeCall`）に足す一覧で受け、空でないときだけ上の 3 つの引数を組み立てる。権限の引数は今のとおり `permission_args` の 1 か所で組み立てる
+  - `--tools` と `--allowed-tools` には、今のとおり同じ Tool の名前（`Read,Grep,Glob`）だけを渡し、場所を限った規則は使わない。`Permission.TOOLS` を 2 つの値に分ける作業は要らない。理由は次のとおりである。今の `Permission.TOOLS` は、同じ文字列を `--tools`（使える Tool）と `--allowed-tools`（許可の規則）の両方に渡す。場所を限った規則（`Read(//<パス>/**)` など）を同じ文字列に入れると、`--tools` に Tool の名前でない値が渡る。読める場所は、claude の起動の部品（`adapters/claude.py` の `ClaudeCall`）に足す一覧で受ける。空でないときだけ上の 3 つの引数を組み立てる。権限の引数は今のとおり `permission_args` の 1 か所で組み立てる
   - 共有する関数は、読める場所を引数で受ける。cross-refactoring は場所を渡さず、今と同じ引数になる（受け入れ条件 13）
-  - 範囲の外を本当に断るかは、実装の PR で実際の claude を起動して手で確かめる（「未確認のまま残ること」）。断らなければ実装の PR をマージせず、設計に戻す
-- **claude の下限のバージョンを 2.1.268 から 2.1.316 に上げる。** `--restricted` の読み取りの境界は、2.1.316 より前の版では保てないためである。2.1.315 以前は、読み取りの許可の規則が当たる作業ディレクトリの外のファイルを、`--restricted` のセッションでもアップロードしてしまう不具合があり、2.1.316 で直った（変更履歴の文は「`--restricted` sessions uploading files from outside the working directories when a Read allow rule covered them」で、送り先は書いていない）。この設計の起動も `--allowed-tools` に `Read`（場所を限らない読み取りの許可の規則）を渡すので、この不具合に当たる（[Claude Code の変更履歴の 2.1.316](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21316) ）。その前にも、読んでいる途中で差し替えたリンクから作業ディレクトリの外を読めた不具合（2.1.290）と、起動の後に登録される Tool に `--tools` と `--restricted` が効かない不具合（2.1.295）が直っている
-  - 下限は、外部 CLI の下限の表（`plugins/ndf/contracts/domains/cli-floors.json` の `claude` の行の `min_version`）の 1 か所で上げる。席の claude のためだけの下限は作らない。修正担当も claude で、cross-review は claude 無しでは回らないので、席の claude にだけ別の下限を持たせても、使える環境は変わらないためである
-  - 起動の前の検査は今のものを使う。相手役の起動（`agents.run_agent`）は、起動の直前に `cli_floor.require` でバージョンを下限と比べ、古ければ起動せずに断られた（`refused`）状態を返す。席の claude が断られると、その席は結果が無いとして分岐の表に進む。修正担当の起動も同じ検査で断られる
-  - 表の `min_version` の説明は「NDF が使う引数・サブコマンドがすべて入った最初のバージョン」である。これに「NDF が頼る振る舞いの不具合が直った最初のバージョン」を足し、上げた理由（`--restricted` の境界、#3955）を表の説明か行に残す
+  - 範囲の外を本当に断るかは、実装の PR で実際の claude を起動して手で確かめる（「未確認のまま残ること」の「読み取りの境界の実機確認」）。範囲の外のファイルの内容か名前を Claude が取れた場合は、実装の PR のマージを止めて設計に戻す
+- **`--restricted` を付けた claude の起動にだけ、下限 2.1.316 を当てる。claude の共通の下限（2.1.268）は変えない。** `--restricted` の読み取りの境界は、2.1.316 より前のバージョンでは保てないためである
+  - 2.1.315 以前には、`--restricted` のセッションでも、作業ディレクトリの外のファイルをアップロードしてしまう不具合があった。当たるのは、読み取りの許可の規則がそのファイルに当たるときで、2.1.316 で直った
+  - 変更履歴の文は「`--restricted` sessions uploading files from outside the working directories when a Read allow rule covered them」である。送り先は書いていない。出典は [Claude Code の変更履歴の 2.1.316](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21316) である
+  - この設計の起動も `--allowed-tools` に `Read`（場所を限らない読み取りの許可の規則）を渡すので、この不具合に当たる
+  - その前にも、作業ディレクトリの境界に関わる不具合が 2 つ直っている。2.1.290 では、読んでいる途中で差し替えたリンクから作業ディレクトリの外を読めた不具合が直った。2.1.295 では、起動の後に登録される Tool に `--tools` と `--restricted` が効かない不具合が直った
+  - 共通の下限を上げないのは、席を埋めない実行を止めないためである。共通の下限を上げると、修正担当の claude も 2.1.268〜2.1.315 で起動を断られる。codex と kiro が両方レビューできて席を埋めない実行でも、修正担当を起動できず、今は完走する cross-review が途中で止まる
+  - 引数ごとの下限は、外部 CLI の下限の表（`plugins/ndf/contracts/domains/cli-floors.json`）の `claude` の行に、列 `flag_floors`（引数の名前から下限への対応）として足す。値は `{"--restricted": "2.1.316"}` である。引数ごとの下限は、その行の `min_version` 以上の値にする
+  - 起動の前の検査は、今の `cli_floor.require` に起動の引数を渡す形に広げる。起動の引数に `flag_floors` の引数が含まれれば、その下限と比べる。含まれなければ、今のとおり `min_version` と比べる。相手役の起動（`agents.run_agent`）は、起動の直前に起動の引数をすべて渡して確かめる。修正担当の起動など `--restricted` を付けない起動は、今と同じ下限で確かめる
+  - `flag_floors` の引数を含む起動では、版を確かめられないときも断る。今の `cli_floor.require` は、実行ファイルが見つからないか `--version` を読めなければ、比べずに起動を許す。読み取りの境界のための下限でこれを許すと、境界の不具合を含む版の claude が範囲の外のファイルを読み、その内容を PR のコメントに書き写せるためである。`flag_floors` の引数を含まない起動は、今のとおり版を読めなくても通す
+  - 席の claude が 2.1.316 より古いか版を確かめられないと、席の claude の起動だけが断られた（`refused`）状態を返す。その席は結果が無いとして分岐の表に進む。読める場所を渡さない cross-refactoring の claude の起動は `--restricted` を付けないので、今の下限のままである
+  - 表の `columns` に `flag_floors` の説明を足す。説明には「その引数で NDF が頼る振る舞いの不具合が直った最初のバージョン」と、足した理由（`--restricted` の読み取りの境界、#3955）を書く
 - 採らなかった案: cross-review の駆動に別に書く（同じ役割の起動が 2 か所に分かれ、許す Tool の変更が片方にしか効かない）
 - 採らなかった案: 保存先（`--state-dir`）の全体を `--add-dir` に足す。上のとおり、レビューに要らない修正担当の結果や実行のログまで読めるようになる
 - 採らなかった案: `--allowed-tools` に場所を限った読み取りの規則だけを書いて範囲を限る。許可の規則は当たらない読み取りを断らないので、範囲の外の読み取りが通りうる
 - 採らなかった案: 拒否の規則（`--disallowed-tools`）で `~/.ssh` などの危ない場所を並べて断る。並べ漏れた場所は読める。拒否の規則は許可より優先されるので、「全体を断り、worktree だけ許す」形も書けない
-- **代償**: cross-refactoring の起動のファイルも触る。振る舞いは変えないので、既存の cross-refactoring のテストが通ることで確かめる。相手役へ渡す資料の置き場が保存先の直下から `review-input/` に変わる（codex と kiro にも同じパスを渡す）
+- **代償**: cross-refactoring の起動のファイルも触る。振る舞いは変えないので、既存の cross-refactoring のテストが通ることで確かめる。相手役へ渡す資料のディレクトリが、保存先の直下から実行ごとの `review-input/` に変わる（codex と kiro にも同じパスを渡す）。実行の終わりに消すので、止まった後に資料のファイルを保存先から見返すことはできなくなる
 - 根拠: Value 11「重複と冗長が無い」（MVV バージョン 11）
 
 ### 決定 3: 監視と記録を両方正しく引くため、席の名前とランタイムの名前を分ける
@@ -359,8 +377,8 @@ sequenceDiagram
 
 - **質問**: 読めなかった相手役の席をいつ埋めるか、埋めた claude が読めなければどうするか
 - **選んだ案**: 埋める席は、今の起動し直し（同じラウンドで 1 度）の後もレビュー結果の無い claude 以外の席だけにする。その席を同じラウンドで claude の読むだけの起動で 1 回埋める
-  - 起動し直すのは claude 以外の席だけにする。claude の席は、どの時点で座ったかによらず起動し直さない。対象は、そのラウンドで埋めた claude、前のラウンドで埋めて座り続けている claude、起動の前に埋めた claude（`allowed` が狭いとき・学習の設定で断られたとき）の 3 つである
-  - claude の席が結果を返さなければ、起動し直しも埋め直しもせずに `incomplete_reviewers` で止める（全員が結果を返さなければ `precondition`）
+  - 起動し直すのは claude 以外の席だけにする。claude の席は、どの時点で座ったかによらず起動し直さない。対象は、そのラウンドで埋めた claude、前のラウンドで埋めて座り続けている claude、起動の前に埋めた claude の 3 つである。起動の前に埋めるのは、`allowed` が狭いときと学習の設定で断られたときである
+  - claude の席が結果を返さなければ、起動し直しも埋め直しもせずに `incomplete_reviewers` で止める。全員が結果を返さなければ `precondition` で止める
   - 1 つの claude の席の起動は、1 ラウンドに 1 回である
 - 採らなかった案: 起動し直しをやめて、最初に読めなかった時点で埋める。一時的な失敗でも claude の起動が増え、欠けた相手役の指摘が失われる
 - 採らなかった案: 埋めた claude も 1 度起動し直す。1 ラウンドの待ちが最大で 3 回分の起動になる。claude が結果を返さない原因は、利用上限や認証のように起動し直しで直らないものが多い
@@ -390,7 +408,7 @@ sequenceDiagram
 - **質問**: 埋めたことを PR の記録のコメントのどこに示すか
 - **選んだ案**: ラウンドの表に「相手役」の列を足し、席の名前を `・` で並べる。埋めた席は欠けた相手役を括弧で添える（例: `codex・claude（kiro の席）`）。注意の欄には、結果 JSON の注意と同じ文が今のとおり載る
 - 採らなかった案: 注意の欄だけに書く。ラウンドごとの席が読めず、2 ラウンド目以降も埋めた席で読んだことが分からない
-- **代償**: 記録のコメントの表が 1 列広がる。記録のコメントを読み戻す処理（`report_decide.open_items`）は、コメントの最後の行に書き込んだ未解決の指摘の JSON の一覧だけを読み、ラウンドの表は読まないので影響しない
+- **代償**: 記録のコメントの表が 1 列広がる。記録のコメントを読み戻す処理（`report_decide.open_items`）には影響しない。この処理は、コメントの最後の行に書き込んだ未解決の指摘の JSON の一覧だけを読み、ラウンドの表は読まないためである
 - 根拠: Value 14「判断の理由が残り、語がそろっている」（MVV バージョン 11）
 
 ## 影響と危険
@@ -401,11 +419,11 @@ sequenceDiagram
 - **壊れうる箇所**: 次の 4 つである
   - 席の名前とランタイムの名前の取り違え（決定 3）
   - 差分の起点の比較が今の席で行われること（データ構造の節）
-  - 相手役へ渡す資料の置き場の移動（決定 2）。資料のパスを保存先の直下で組み立てている箇所が残ると、相手役が差分を開けない
-  - 記録のコメントの表の列の追加。今の表を読み戻す処理が無いことは確かめた（`report_decide.open_items` は、コメントの最後の行に書き込んだ未解決の指摘の JSON の一覧だけを読む。決定 7 と同じ対象）
+  - 相手役へ渡す資料のディレクトリの移動（決定 2）。資料のパスを保存先の直下で組み立てている箇所が残ると、相手役が差分を開けない
+  - 記録のコメントの表の列の追加。今の表を読み戻す処理が無いことは確かめた。`report_decide.open_items` は、コメントの最後の行に書き込んだ未解決の指摘の JSON の一覧だけを読む（決定 7 と同じ対象）
 - **費用**: 相手役が欠けたとき・`allowed` が狭いときに claude の起動が増える（要求の「今の利用者への影響と互換」）
-- **claude の下限のバージョン**: 2.1.268 から 2.1.316 に上がる（決定 2）。2.1.268〜2.1.315 の claude を使う環境では、cross-review に限らず、NDF が起動する claude が下限で断られる。claude を更新すれば直る
-- **同じファイルを触る別の変更**: [#3953](https://github.com/devbasex/ai-plugins/issues/3953) （止まったときの結果 JSON の形の誤り）である。`finish_decide.py` と `cli.py` を触る見込みがある。この変更は `finish_decide.py` を触らない
+- **claude の下限のバージョン**: 共通の下限は 2.1.268 のまま変えない。`--restricted` を付けて起動する席の claude にだけ、下限 2.1.316 を当てる（決定 2）。2.1.268〜2.1.315 の claude を使う環境でも、席を埋めない cross-review と修正担当、ほかの claude の起動は今と同じに動く。席を埋める場面でだけ、席の claude が断られ、結果の無い席として分岐の表のとおり止まる（`incomplete_reviewers` か `precondition`）。claude を更新すれば直る
+- **同じファイルを触る別の変更**: [#3953](https://github.com/devbasex/ai-plugins/issues/3953) である。止まったときの結果 JSON の形の誤りを扱い、`finish_decide.py` と `cli.py` を触る見込みがある。この変更は `finish_decide.py` を触らない
 
 ### 代表のリポジトリでの振る舞い
 
@@ -439,17 +457,17 @@ sequenceDiagram
 | 5 | `allowed` が claude と codex のとき、`--reviewer` の無い起動の席が `codex`・`claude` になり、起動の前に埋めたことが注意に載り、`filled` の 1 件が `{"seat": "claude", "for": null, "reason": "allowed の相手役 1（codex）"}` になる | `review_seats` が埋めない・`assign` を呼ぶと落ちる |
 | 6 | `allowed` が claude だけのとき、`invalid` で止まらずに席が `claude`・`claude-2` になり、codex と kiro を起動しない | 選べる相手役が 0 で投げる・2 つ目の席の名前が重なると落ちる |
 | 決定 3 | `claude-2` の席の起動の `agent` がランタイム claude で、無進捗の許容が claude の値で引かれ、出力のファイルの名前は `round<n>-claude-2` になる | 起動に席の名前を渡すと落ちる |
-| 7・8・I5 | 席の claude の起動の引数が会話を残さない最小構成で、許す Tool が `Read,Grep,Glob` だけであり、修正担当の会話の ID を持たない。起動の引数に `--restricted` と `--permission-mode dontAsk` があり、`acceptEdits` が無く、`--add-dir` が `review-input/` だけを指し、`--tools` と `--allowed-tools` が Tool の名前だけである。依頼文が指すファイルがすべて `review-input/` の下にあり、修正担当の結果・実行のログ・状態ファイルが `review-input/` に無い。読める場所を渡さない cross-refactoring の起動の引数は今と同じである | 修正担当の起動の形（`FIXER_TOOLS`・会話の指定）を使う・`--restricted` か `dontAsk` を落とす・保存先の全体を `--add-dir` に渡す・資料を保存先の直下に書く・場所の規則を `--tools` に混ぜると落ちる |
-| claude の下限（決定 2） | バージョンの検査を差し替えて claude を 2.1.315 と答えさせると、席の claude の起動は子のプロセスを起動せずに断られた状態を返し、その席は結果が無いとして分岐の表に進む。2.1.316 なら起動する | 下限を上げない・席の claude の起動で下限の検査を通さないと落ちる |
+| 7・8・I5 | 席の claude の起動の引数が会話を残さない最小構成で、許す Tool が `Read,Grep,Glob` だけであり、修正担当の会話の ID を持たない。起動の引数に `--restricted` と `--permission-mode dontAsk` があり、`acceptEdits` が無く、`--add-dir` が `review-input/` だけを指し、`--tools` と `--allowed-tools` が Tool の名前だけである。依頼文が指すファイルがすべて `review-input/` の下にあり、修正担当の結果・実行のログ・状態ファイルが `review-input/` に無い。保存先に前の実行の `review-input-*` のディレクトリ（別の PR の差分入り）と `review-input-` で始まるシンボリックリンクを置いてから実行しても、`--add-dir` はそのどちらとも違う新しいディレクトリを指し、そこに前の実行のファイルが無い。実行が終わると（止まったときも）そのディレクトリが消えている。読める場所を渡さない cross-refactoring の起動の引数は今と同じである | 修正担当の起動の形（`FIXER_TOOLS`・会話の指定）を使う・`--restricted` か `dontAsk` を落とす・保存先の全体を `--add-dir` に渡す・資料を保存先の直下に書く・場所の規則を `--tools` に混ぜる・資料のディレクトリを決まった名前で使い回すと落ちる |
+| claude の下限（決定 2） | バージョンの検査を差し替えて claude を 2.1.315 と答えさせる。(a) 席の claude の起動（`--restricted` 付き）は子のプロセスを起動せずに断られた状態を返し、その席は結果が無いとして分岐の表に進む。2.1.316 なら起動する。(b) codex と kiro が両方結果を返す実行では、2.1.315 でも修正担当の claude が起動され、レビューと修正のラウンドが今と同じに進む。(c) 読める場所を渡さない cross-refactoring の claude の起動は、2.1.315 でも断られない。(d) 2.1.267 なら、`--restricted` の有無によらず今のとおり断られる。(e) 版を読めない（`--version` の出力が形に合わない）と答えさせると、席の claude の起動は子のプロセスを起動せずに断られた状態を返し、修正担当の claude は今のとおり起動される | `--restricted` の下限を付けない・共通の下限を上げる・席の claude の起動で起動の引数を検査に渡さない・`--restricted` の起動で版を読めないときに通すと落ちる |
 | 9 | codex と kiro が両方読めると、claude を相手役として起動せず、ラウンドの記録に `filled` が無い | 読めたときにも埋めると落ちる |
 | 10・I3 | codex と kiro が両方起動し直しても読めないと `precondition` で止まり、claude を相手役として起動しない | 全員が読めないときに埋めると落ちる |
 | 11 | 埋めた claude も読めないと、そのラウンドを収束に数えず `incomplete_reviewers` で止まり、claude を 2 回起動しない | 埋めた席を起動し直す・埋め直すと落ちる |
 | 分岐の順（I2・I3） | `allowed` が codex と claude で席が `codex`・`claude` のとき、(a) 両方が結果を返さないと `precondition` で止まり `claude-2` を起動しない、(b) claude の席だけが結果を返さないと、claude を起動し直さず、どの席も埋めずに `incomplete_reviewers` で止まる、(c) codex だけが起動し直しても結果を返さないと、codex の席を `claude-2` で埋めて判定へ進む。`--reviewer codex --reviewer kiro` の 2 者の名指しで kiro が結果を返さないときも、既定と同じに `claude` で埋める | 分岐の表の 1 行目と 2 行目の順を入れ替える・claude の席に結果が無いのに claude 以外の席を埋める・2 者の名指しで埋めないと落ちる |
 | 名指しの数え方 | `--reviewer codex --reviewer codex` で codex が起動し直しても結果を返さないと、席を埋めずに `precondition` で止まり、claude を相手役として起動しない。始める前の確かめで codex を断られたときも、埋めずに `precondition` で止まる | `--reviewer` の出現回数で 1 者かを決めると落ちる |
 | `review-scope`（5・6） | `allowed` が claude だけのとき、`run` と `review-scope` がどちらも `invalid` で止まらず、同じ席（`claude`・`claude-2`）で範囲を決める | `run` の設定を作る所だけを `review_seats` に替えると落ちる |
-| 同じ head の打ち直し | (a) round 1 で kiro の席を claude で埋めて収束した状態ファイルで、同じ head のまま打ち直すと、どの担当も起動せずに前回の結果（`converged`）を返し、結果 JSON の `warnings` に kiro の席を claude で埋めたことと理由が載る。(b) `allowed` が claude と codex で収束した後に同じ head で打ち直すと、前回の結果を返し、`warnings` に起動の前に埋めたことが載る。(c) (a) の状態ファイルで `--reviewer kiro` の 1 者を名指して打ち直すと、前回の結果を返さない。(d) round 1 で kiro と、codex の席を埋めた claude が収束した状態ファイルで、同じ head のまま `allowed` を claude と codex に変えて打ち直すと、前回の結果を返さずにレビューを回す | 埋めた席を欠けた相手役の代わりに数えない・再利用のときに注意を作らない・名指し 1 者でも代わりに数える・前回の 1 つの席で今回の 2 つの席を満たすと落ちる |
+| 同じ head の打ち直し | (a) round 1 で kiro の席を claude で埋めて収束した状態ファイルで、同じ head のまま打ち直すと、どの担当も起動せずに前回の結果（`converged`）を返し、結果 JSON の `warnings` に kiro の席を claude で埋めたことと理由が載る。(b) `allowed` が claude と codex で収束した後に同じ head で打ち直すと、前回の結果を返し、`warnings` に起動の前に埋めたことが載る。(c) (a) の状態ファイルで `--reviewer kiro` の 1 者を名指して打ち直すと、前回の結果を返さない。(d) round 1 で kiro と、codex の席を埋めた claude が収束した状態ファイルで、同じ head のまま `allowed` を claude と codex に変えて打ち直すと、前回の結果を返さずにレビューを回す（前回の claude の席を codex と claude の両方に数えない）。(e) (a) の状態ファイル（codex と、kiro の席を埋めた claude）で、同じ head のまま `allowed` を claude と codex に絞って打ち直すと、どの担当も起動せずに前回の結果を返す | 埋めた席を欠けた相手役の代わりに数えない・再利用のときに注意を作らない・名指し 1 者でも代わりに数える・前回の 1 つの席で今回の 2 つの席を満たす・埋めた席を代わった相手役としてしか数えない（実際の席名で数えない）と落ちる |
 | 埋めた claude の依頼文 | 設計の PR で詳細にレビューしていない節が残り、round 2 の範囲が全差分で前の head があるとき、codex の依頼文は文書の基準 6 を前回以降に変わった文などに限り、round 2 で初めて加わった claude の依頼文はその制限を含まない | 埋めた claude にほかの席と同じ依頼文を渡すと落ちる |
-| 結果の有無の定義 | 相手役が終了コード 0 で終わっても出力に `findings` 配列が無いと、その席を結果が無いとして扱い（起動し直し・埋める）、`{"findings": []}` を返した席は成功として埋めない | 起動の失敗だけを結果が無いとして扱う・空の指摘を失敗と数えると落ちる |
+| 結果の有無の定義 | 相手役が終了コード 0 で終わっても出力に `findings` 配列が無いと、その席を結果が無いとして扱い（起動し直し・埋める）、`{"findings": []}` を返して完了した席は成功として埋めない。完了でない状態（失敗・無進捗・時間切れ）で終わった席は、出力に有効な `{"findings": []}` があっても結果が無いとして扱う | 起動の失敗だけを結果が無いとして扱う・空の指摘を失敗と数える・出力の JSON だけで成功を判定すると落ちる |
 | 埋めた claude の差分（4 の続き） | round 1 で codex と kiro が両方結果を返し、round 2 で初めて kiro が起動し直しても結果を返さないと、round 2 の codex には前の head からの差分が、埋めた claude には `--base` からの全差分が渡る。round 2 の記録の `reviewers` が `codex`・`claude` で、round 3 は両者に round 2 の head からの差分が渡る | 埋めた claude にそのラウンドの差分をそのまま渡す・埋める前の席を記録すると落ちる |
 | 起動し直しの回数（決定 4） | (a) `allowed` が claude だけで `claude-2` が結果を返さないと、`claude-2` を起動し直さずに `incomplete_reviewers` で止まり、claude の起動はラウンドで席ごとに 1 回である。(b) round 1 で kiro の席を埋め、round 2 で座り続けた claude が結果を返さないと、起動し直さずに `incomplete_reviewers` で止まる | claude の席にも起動し直しを当てると落ちる |
 | 始める前の確かめ（受け入れ条件 15） | (a)〜(d) と (f) は、駆動から呼ぶ `participants.refusals` を差し替え、断るランタイムをキー、理由を値とする対応を返させる。(e) は、ランタイムごとに確かめた回数を数えるため、`refusals` の中で呼ぶ `training.ensure` を差し替える。(a) kiro だけを断ると、kiro を起動せずに席が `codex`・`claude` になり、`filled` の `reason` が `unready: ` で始まる、(b) codex と kiro を両方断ると、席が `claude`・`claude-2` になる、(c) 修正担当の claude を断ると、どの担当も起動せずに `precondition` で止まる、(d) `--reviewer kiro` で kiro を断ると、埋めずに `precondition` で止まる、(e) `allowed` が claude だけで席が `claude`・`claude-2` のとき、学習の設定の確かめは claude について 1 回だけ呼ばれる、(f) 最後のラウンドが同じ head で収束しているとき、kiro を断る設定でも学習の設定を確かめずに前回の結果（`converged`）を返す | 断られた相手役を起動する・断られた席を埋めずに止める・修正担当を断られても進む・同じランタイムを 2 回確かめる・再利用の判定より先に確かめると落ちる |
@@ -465,14 +483,57 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py` |
+| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/cli_floor.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_cli_floor.py` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 席の claude が資料の置き場を開け、それ以外を開けないか | 相手役へ渡す差分のファイルは worktree の外の `review-input/` にある（決定 2）。`--restricted`・`--add-dir`・`dontAsk` で起動した最小構成の `claude -p` が、`review-input/` と worktree のファイルを開け、それ以外を断るかは、実機で起動して確かめていない（引数の意味は `claude --help` の説明だけで確かめた）。テストでは起動を偽物にして、起動の引数と依頼文が指す場所だけを確かめる（テスト設計の「7・8・I5」）。実際の CLI では、実装の PR で手で起動して次の 3 つを確かめ、結果を PR の本文に書く: (1) `review-input/` の差分のファイルと worktree のファイルを読める、(2) 範囲の外に置いた無害なファイル（一時ディレクトリに作った、秘密を含まない決まった文字列のファイル）の読み取りを断る、(3) 保存先の直下の修正担当の結果の読み取りを断る。(2) か (3) が通れば、実装の PR をマージせず設計に戻す。リリース後テストでも、kiro が未ログインの環境で claude の席が指摘を返すことを見る |
+| 席の claude が資料のディレクトリを開け、それ以外を開けないか | 相手役へ渡す差分のファイルは worktree の外の `review-input/` にある（決定 2）。`--restricted`・`--add-dir`・`dontAsk` で起動した最小構成の `claude -p` が、`review-input/` と worktree のファイルを開け、それ以外を断るかは、実機で起動して確かめていない（引数の意味は `claude --help` の説明だけで確かめた）。テストでは起動を偽物にして、起動の引数と依頼文が指す場所だけを確かめる（テスト設計の「7・8・I5」）。実際の CLI では、実装の PR で手で起動し、表の下の「読み取りの境界の実機確認」の手順で確かめる。リリース後テストでも、kiro が未ログインの環境で claude の席が指摘を返すことを見る |
 | 席の claude の 1 回の時間 | 席の claude は出力を完了まで出さない形（`--output-format json`）で起動するため、無進捗の許容は claude の 900 秒で見る。設計 PR の全差分を読む 1 回がこの中に収まるかは、リリース後テストで実際の設計 PR に回して分かる |
+
+### 読み取りの境界の実機確認
+
+**許した 3 つの Tool（`Read`・`Grep`・`Glob`）のそれぞれについて、範囲の外のファイルの内容も名前も取れないことを確かめる。** `Read` だけを確かめると、`Grep` が範囲の外のファイルの中身を検索結果として返す実装や、`Glob` が範囲の外のファイル名を列挙する実装でも合格に見えるためである。範囲の外を指すシンボリックリンクを範囲の中に置く場合も確かめる。
+
+準備は次の 4 つで、上から順に行う。確認は確認用の worktree で行い、終わったら置いたファイル・リンク・ディレクトリを消す。
+
+1. 範囲の外の一時ディレクトリ（以下 `<外>`）に、無害なファイル `probe.txt` を作る。中身は秘密を含まない決まった文字列（例: `NDF-BOUNDARY-PROBE-3955`）にする
+2. 状態の保存先の直下に、修正担当の結果に見立てたファイルを置く。中身は 1 と同じ決まった文字列にする
+3. 資料のディレクトリを手で用意する。`review-input/` は実行の終わりに消えるので、確認用に保存先の下へ `review-input-` で始まるディレクトリを作り、差分のファイルを置く。この差分のファイルと worktree のファイルに、範囲の中で見つかるべき別の決まった文字列を入れておく
+4. worktree と 3 のディレクトリのそれぞれに、`<外>/probe.txt` を指すファイルのリンク（名前は `link-to-probe`）と、`<外>` を指すディレクトリのリンク（名前は `link-to-outside`）を置く
+
+起動は、席の claude と同じ引数（`read_only_launch` に 3 のディレクトリを読める場所として渡して組み立てた引数）で行う。下の表の `review-input/` は 3 のディレクトリを指す。
+
+**表の各マスに並べた対象は、すべて確かめる。対象が複数あるマスは、対象ごとに別の試行にする。** 1 回の試行では `claude -p` を 1 回起動し、依頼文で使う Tool と対象を 1 つだけ指定する。リンクは worktree と `review-input/` の両方に置いたので、それぞれを別の対象として試す。表の対象は全部で 19 個（`Read` 6・`Grep` 8・`Glob` 5）で、試行も 19 回である。
+
+| Tool | 範囲の中（読めるべき） | 範囲の外を直接指す（断るべき） | 範囲の中のリンクを通す（断るべき） |
+| --- | --- | --- | --- |
+| `Read` | (1) `review-input/` の差分のファイル (2) worktree のファイル。内容が取れる | (1) `<外>/probe.txt` (2) 保存先の直下の、修正担当の結果に見立てたファイル。内容が取れない | (1) worktree の `link-to-probe` (2) `review-input/` の `link-to-probe`。内容が取れない |
+| `Grep` | (1) `review-input/` (2) worktree。範囲の中の決まった文字列が見つかる | (1) `<外>` (2) 保存先の直下。範囲の外の決まった文字列を探しても、内容もファイル名も取れない | (1) worktree の `link-to-outside` の下 (2) `review-input/` の `link-to-outside` の下 (3) worktree の `link-to-probe` (4) `review-input/` の `link-to-probe`。内容もファイル名も取れない |
+| `Glob` | (1) `review-input/` の下の `*`。差分のファイルの名前が列挙される | (1) `<外>/*` (2) 保存先の直下の `*`。`probe.txt` と修正担当の結果に見立てたファイルの名前が取れない | (1) worktree の `link-to-outside/*` (2) `review-input/` の `link-to-outside/*`。`probe.txt` の名前が取れない |
+
+**判定は、Claude の回答の文ではなく、ツールの呼び出しとツールの応答の記録で行う。** 回答に目印が無いだけでは、ツールが呼ばれなかった場合や、取得した内容を Claude が回答に書かなかった場合も合格に見えるためである。
+
+- 記録を取るため、確認の起動だけは出力の形を `--output-format json` から `--output-format stream-json --verbose` に替える。権限に関わる引数（`--tools`・`--allowed-tools`・`--restricted`・`--add-dir`・`--permission-mode`）は席の claude と同じにする
+- 試行ごとに、指定した Tool の呼び出し（`tool_use`）が記録にあることと、その引数が次の表のとおりであることを確かめる。どちらかが違えば、その試行は判定に使わず、依頼文を直してやり直す。Grep で検索パターンを確かめるのは、対象のパスが合っていても、パターンが目印と違えば、範囲の外を検索できても「一致なし」になって合格に見えるためである
+
+  | Tool | 確かめる引数 |
+  | --- | --- |
+  | `Read` | 読むファイルのパスが、指定した対象である |
+  | `Grep` | 検索するパスが指定した対象で、検索パターンがその試行の目印の文字列（「断るべき」の試行は範囲の外の決まった文字列、「読めるべき」の試行は範囲の中の決まった文字列）に一致する |
+  | `Glob` | 検索の起点のパスとパターンが、指定した対象である |
+
+- その呼び出しへの応答（`tool_result`）で判定する。応答が拒否（`is_error` が真）なら、断ったとみなす
+- 「断るべき」の試行で応答が拒否でないときは、応答の本文を見て、次のどれか 1 つでも当たれば読めた（不合格）とみなす。どれにも当たらなければ（一致なし・ファイルなしなど）、断ったとみなす
+  - 範囲の外の決まった文字列がある。Grep では、目印に一致した行がこれに当たる
+  - 範囲の外のファイルのパスがある。Grep では、目印に一致した行を取得したファイルのパスがこれに当たる。Glob では、列挙されたパスがこれに当たる。`probe.txt` と修正担当の結果に見立てたファイルの名前のほか、リンクの名前（`link-to-probe`・`link-to-outside/…`）で返ったパスも、リンクの指す先が範囲の外なので、これに当たる
+- 名前の照合では、Tool の引数に書いた対象名と、拒否の応答のメッセージに含まれる対象名は数えない。数えるのは、拒否でない応答の本文に、Tool が取得したファイルの内容、またはファイルのパスとして現れたものだけである
+- 「読めるべき」の試行は、拒否でない応答の本文に、範囲の中の決まった文字列か差分のファイルの名前があれば合格である
+
+結果は、Tool ごと・対象ごとの表と、確かめた claude のバージョンを、実装の PR の本文に書く。表には試行ごとに、呼び出しの有無・応答が拒否か・本文で見つかったものを書く。
+
+「断るべき」の列のどれか 1 つでも、Claude が範囲の外のファイルの内容か名前を取れた場合は、実装の PR のマージを止めて設計に戻す。「読めるべき」の列のどれかが読めなかった場合も、席の claude が差分を開けないので、マージを止めて設計に戻す。
 
 ## 外部の調査
 
