@@ -19,6 +19,7 @@ import pytest
 from ndf import contracts
 from ndf.adapters import llm
 from ndf.contracts import causes
+from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
 
@@ -148,7 +149,7 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
-    rows, _ = jsonl.read_rows(mvv.record_path("mvv-validation"))
+    rows, _ = jsonl.read_rows(mvv.record_path("mvv-validation"), kind="mvv-validation")
     assert [r["boundary"] for r in rows] == [[], []] and "reused_from" in rows[1]
 
 
@@ -214,6 +215,15 @@ def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
 def test_a_verdict_that_cannot_be_had_asks_a_human(repo: Path, inputs: dict, hub: Any, ask: Ask, why: str) -> None:
     out = mvv_gate.gate(repo, "design", inputs, hub, ask)
     assert out["skip"] is False and out["verdict"] is None and why in out["why"][0]
+
+
+def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def newer(*args: Any) -> dict:
+        raise InternalError("precondition", "新しいバージョンの記録")
+
+    monkeypatch.setattr(mvv_gate, "_judged", newer)
+    with pytest.raises(InternalError):
+        mvv_gate.gate(tmp_path, "design", _inputs(), _no_hub, Ask(FOLLOW))
 
 
 def test_the_release_gate_needs_the_pr_in_the_context(repo: Path) -> None:

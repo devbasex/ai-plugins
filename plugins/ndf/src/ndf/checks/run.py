@@ -24,6 +24,7 @@ from ndf.checks import (
     child_deps,
     copy_dup,
     facts,
+    internal_names,
     invariants,
     limits_readers,
     lint,
@@ -112,6 +113,7 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules) + limits_readers.check(scope, rules) + copy_dup.check(scope, rules)
+    found += internal_names.check(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
     return sorted(found, key=_order)
 

@@ -30,7 +30,7 @@ plugins/ndf/bin/ndf check
 | `tests/` の下の `.py` | 行数の上限・I3・禁止語 |
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
-| コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
+| コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public）・内部データの名前（種類のスキーマ） |
 | 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
 
 ## 兆候の規則
@@ -133,6 +133,16 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 名前は、文字列・モジュールの最上位の定数（import の先は 1 階層）・関数の中の代入・並びと辞書の定数・条件式から解く。条件式は枝ごとに見て、引数をそのまま渡す枝だけを呼び手からの受け渡しと扱う。import は関数の囲みごとに解く。
 
 メソッドの読み口は、受け手のクラスを、引数と `self` の欄の注釈・クラスの呼び出し・関数の戻り値の注釈から解けた呼び出しだけを数える。
+
+## 内部データの名前の規則
+
+| 規則 | 違反と数えるもの |
+| --- | --- |
+| `internal-names` | 内部データの種類のスキーマ（`contracts/schemas/internal/<種類>.schema.json`）の欄か、その種類を書く関数の中の辞書のキーが、名前の対応表（`contracts/data/internal-names.json`）でその種類に使えない名前 |
+
+名前の対応表は、意味ごとに、使う 1 つの名前（`key`）・消した別名（`aliases_removed`）・使ってよい種類（`where`）を持つ。確かめるのは、表が持つ名前（使う名前か消した別名）と、時刻の欄（共通の欄の `time` を引くか `format` が `date-time`）で、`where` にその種類があれば違反にしない。意味の違う値が同じ名前を使うときは、表に別の行を足す。
+
+種類を書く関数は、`rules.json` の `internal_names.writers` の関数（値は種類の引数の位置。`null` ならキーワード `kind` だけ）を、種類の文字列で呼ぶ関数である。ほかの所で組んだ行の名前は、核（`ndf.contracts.internal`）が書く前に閉じたスキーマで確かめる。
 
 ## 子の表の規則
 
