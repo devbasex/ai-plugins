@@ -1,5 +1,5 @@
 {
-  "summary": "セッションの数え手の排他を待つ上限。取れなければ数えずに通す（決定 92）",
+  "summary": "セッションの数え手の排他を待つ上限。取れなければ数えずに通す（docs/specifications/ndf-rebuild.md の決定 92）",
   "seconds": 0.2,
   "read_by": [
     "ndf.domains.hooks.budget",

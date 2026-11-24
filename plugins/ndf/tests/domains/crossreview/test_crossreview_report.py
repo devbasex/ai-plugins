@@ -74,7 +74,7 @@ def test_comment_carries_rounds_fix_commits_and_every_finding() -> None:
     assert body.startswith(report_decide.MARKER)
     assert "ラウンドの上限で止まった。ラウンド 2・指摘 3（直した 1・見送った 1・未解決 1）" in body
     # 修正の記録: コミット・送ったか・直した指摘
-    assert f"| 1 | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
+    assert f"| 1 | — | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
     # 表のセルは改行と縦棒で崩れない。見送った理由が載る
     assert "| r1-2 | kiro | — | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
     assert "| r2-1 | codex | — | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
@@ -511,3 +511,16 @@ def test_issue_4090_7_failure_hides_every_value_and_the_message(error: Exception
     raised = error
     assert (once(["a", "b"]), once(["c"])) == ([publish.WITHHELD] * 2, [publish.WITHHELD])
     assert (once.failure, calls) == (cause, 2)
+
+
+def test_issue_3955_round_table_names_the_seats_and_whose_seat_was_filled() -> None:
+    """受け入れ条件 3: ラウンドの表に「相手役」の列があり、埋めた席は欠けた相手役を添える。列の数は見出しと行でそろう。"""
+    filled = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "failed: 1"}]}
+    assert report_decide._seats_cell(filled) == "codex・claude（kiro の席）"
+    before = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": None, "reason": "allowed の相手役 1（codex）"}]}
+    assert report_decide._seats_cell(before) == "codex・claude"
+    assert report_decide._seats_cell({}) == "—"
+    rows = report_decide._round_rows([{"round": 1, **filled}, {"round": 2}])
+    assert rows[0].startswith("| ラウンド | 相手役 |")
+    assert "| codex・claude（kiro の席） |" in rows[2]
+    assert len({r.count(" | ") for r in rows}) == 1

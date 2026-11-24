@@ -6,7 +6,7 @@
 DBOS は起動するか記録を読むときに初めて import する（`_load`。約 0.3 秒の CPU を DBOS を開かない呼び出しで使わない。B3）。
 先に付けた `workflow`・`step` は `_Deferred` が覚え、`launch` の前の `_load` が DBOS のデコレータを当てる。
 
-記録の保存先（設計の決定 81〜86。issues/issue-1142-design-next.md の「DBOS の記録とステートマシンの保存先」）:
+記録の保存先（docs/specifications/ndf-rebuild.md の決定 81・82・83・84・85・86）:
 
 - チェックアウトの保存先 `<git の共通ディレクトリ>/<プラグイン名>/state/` は、先頭に形の番号 `format.json` を持つ。
   使うプロセスは隣の `state.lock` を共有で持ち、番号が古い保存先は排他の下で名前を変えて退避する（`prepare_store`）
@@ -120,12 +120,13 @@ log = logging.getLogger(__name__)
 # DBOS の記録に載せるログの下限。標準出力は結果 JSON の 1 行に使うため、DBOS の INFO を出さない
 LOG_LEVEL = "WARNING"
 
-# 耐久ワークフローの中の DBOS の呼び出しの順の番号。アプリのバージョンは `format-<FORMAT>-<キーの名前>`（決定 84）
+# 耐久ワークフローの中の DBOS の呼び出しの順の番号。
+# アプリのバージョンは `format-<FORMAT>-<キーの名前>`（docs/specifications/ndf-rebuild.md の決定 84）
 FORMAT = 1
 # 耐久ワークフローの関数（`@durable.workflow` を付けた src の関数）のソースの sha256。
 # 関数を変えたら、FORMAT を上げるか、呼び出しの順が変わらないと判断してこの値だけを書き直す
 FORMAT_SOURCE_HASH = "15db4cc3f838e5731ec1ac208ee114cb0666311953793bb6f45a88f92ca71034"
-# チェックアウトの保存先の `format.json` の番号（決定 85）
+# チェックアウトの保存先の `format.json` の番号（docs/specifications/ndf-rebuild.md の決定 85）
 STORE_FORMAT = 2
 # キーの名前の接頭辞。名前の形を決めるだけで、URL の片付けの絞り込みには使わない（絞るのは実行の一覧）
 RUN_PREFIX = "run-"
@@ -385,7 +386,9 @@ def run_name(run_key: str) -> str:
 
 
 def app_version(run_key: str) -> str:
-    """実行のキーのアプリのバージョン。キーごとに 1 つで、NDF のバージョンを上げても変わらない（決定 84）。
+    """実行のキーのアプリのバージョン。
+
+    キーごとに 1 つで、NDF のバージョンを上げても変わらない（docs/specifications/ndf-rebuild.md の決定 84）。
 
     DBOS の `application_versions.version_name` は DB 全体で一意なので、キーの名前を入れて 1 つの DB のキーどうしで分ける。
     """
@@ -427,7 +430,7 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
             yield held
 
 
-# --- チェックアウトの保存先（決定 85） ---------------------------------------------------
+# --- チェックアウトの保存先（docs/specifications/ndf-rebuild.md の決定 85） ---------------------------------------------------
 
 
 def _read_format(root: Path) -> int | None:
@@ -530,8 +533,8 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
     """保存先の形の番号を確かめて用意し、保存先のロックを共有で持ったまま返す（プロセスが終わるまで放さない）。
 
     番号が無い・古い保存先は、共有を放して排他を待たずに取り、排他の下で番号を読み直してから退避する。
-    共有で取り直して番号をもう一度確かめ、違えばやり直す（決定 85・I10・I11）。旧い NDF の実行が旧い錠を持つ
-    （`StoreLegacyRunning`）・退避先が既にある（`StoreRetireTargetExists`）ときはやり直さずに止まる。
+    共有で取り直して番号をもう一度確かめ、違えばやり直す（docs/specifications/ndf-rebuild.md の決定 85・I10・I11）。
+    旧い NDF の実行が旧い錠を持つ（`StoreLegacyRunning`）・退避先が既にある（`StoreRetireTargetExists`）ときはやり直さずに止まる。
     """
     now = now or datetime.now(UTC)
     if root in _held_stores:
@@ -609,7 +612,7 @@ def release_store(root: Path) -> None:
         handle.close()
 
 
-# --- キーごとのファイルの検査と退避（決定 82・83） -----------------------------------------
+# --- キーごとのファイルの検査と退避（docs/specifications/ndf-rebuild.md の決定 82・83） -----------------------------------------
 
 
 def check_file(path: Path) -> bool:
@@ -753,7 +756,7 @@ def sweep_url(root: Path, database_url: str, now: datetime | None = None) -> Swe
     return sweeping.sweep_url(root, database_url, _RECORDS, now)
 
 
-# --- 待ちを抱えた実行の一覧（決定 86） ---------------------------------------------------
+# --- 待ちを抱えた実行の一覧（docs/specifications/ndf-rebuild.md の決定 86） ---------------------------------------------------
 
 
 def _pending_in(root: Path) -> list[RunRecord]:
@@ -783,7 +786,8 @@ def pending(root_or_url: Path | str) -> list[RunRecord]:
 
 
 def launch(database_url: str, run_key: str) -> None:
-    """DBOS を実行のキーの名前と形の番号のバージョンで起動し、同じキーの途中の耐久ワークフローを回復する（決定 81・84）。
+    """DBOS を実行のキーの名前と形の番号のバージョンで起動し、
+    同じキーの途中の耐久ワークフローを回復する（docs/specifications/ndf-rebuild.md の決定 81・84）。
 
     呼び手は `run_lock(root, run_key, database_url)` を持った状態で呼び、DBOS を閉じるまで持つ。
     SQLite のときはキーごとの目印が古ければ先に `quick_check` を打ち、壊れていれば broken/ へ移して `StoreBroken`。

@@ -16,7 +16,7 @@ from typing import NamedTuple, Optional
 from ndf.adapters import git
 from ndf.contracts import facts, limits
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide
+from ndf.domains.crossreview import criteria_decide, scope_decide
 from ndf.domains.crossreview import finish_decide as fin
 
 # ラウンドの上限の既定の方針（contracts/limits/）
@@ -36,7 +36,8 @@ class RunConfig:
     """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose ならセクションを必ず詳細レビューへ通す）。
     `base_commit` は起動の始めに `base` が指していたコミット（#4090。MVV を読むコミットとは違うことがある）。差分と
     前回の結果を再利用できるかはこれで決め、
-    名前の `base` は取得と表示にだけ使う。"""
+    名前の `base` は取得と表示にだけ使う。`reviewers` は起動の前に決めた席（`participants.review_seats`。書き換えない）、
+    `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。"""
 
     worktree: Path
     branch: str
@@ -52,6 +53,8 @@ class RunConfig:
     main: Optional[Path] = None
     settings: ReviewSettings = field(default_factory=lambda: ReviewSettings())
     base_commit: Optional[str] = None
+    may_fill: bool = True
+    prefilled: tuple[scope_decide.Filled, ...] = ()
 
 
 def settings_path(root: Path, file_id: str) -> Path:

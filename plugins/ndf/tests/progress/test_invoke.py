@@ -254,7 +254,8 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
 @pytest.mark.parametrize(
     ("name", "missing"),
     [
-        ("design", {"worker", "rebuild", "required"}),
+        # rebuild は設定が無ければ既定のコマンドを組むので欠けに挙がらない（#4337）
+        ("design", {"worker", "required"}),
         ("impl", {"test_command", "worker", "required"}),
         ("design-merge", {"worker"}),
     ],

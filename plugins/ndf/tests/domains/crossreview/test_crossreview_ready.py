@@ -25,16 +25,17 @@ def wt(repos: Repos, tmp_path: Path) -> Path:
     return repos.add_worktree(tmp_path / "wt")
 
 
-def test_runtime_that_cannot_launch_stops_before_any_review(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+def test_runtime_that_cannot_launch_is_not_launched_and_its_seat_is_filled(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     refused = "学習に使わない設定と確かめられていないので codex を起動しない（確かめられなかった: トークンが無い）"
     monkeypatch.setattr(training, "ensure", lambda runtime, env=None, now=None, read=None: refused if runtime == "codex" else None)
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
 
     code, got = _run(capsys, monkeypatch, fake, wt)
 
-    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
-    assert refused in got["cause"]["detail"]
-    assert fake.calls == []
+    # #3955 の受け入れ条件 15: 断られた相手役は起動せず、その席を claude で埋めてレビューする
+    assert (code, got["status"]) == (0, "ok")
+    assert "codex" not in fake.calls and fake.seat_calls == ["claude"]
+    assert any(refused in w for w in got["warnings"])
 
 
 def test_unreadable_runtime_policy_is_not_treated_as_absent(tmp_path) -> None:

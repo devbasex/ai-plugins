@@ -301,9 +301,9 @@ def test_only_the_round_that_reads_the_whole_diff_keeps_it(repos: Repos, wt: Pat
     assert (second.scope.kind, second_target.full_diff) == ("since", None)
     body = sh(wt, "show", f"origin/{BRANCH}:doc.md")
     assert first_target.docs == second_target.docs == {"doc.md": body}
-    (file,) = changes._diff_files(first.diff.read_text(encoding="utf-8"))
+    (file,) = changes._diff_files(fake.inputs[first.diff.name])
     assert (file.path, file.base_path) == ("doc.md", "doc.md") and "足した" in file.added.values()
-    assert [f.path for f in changes._diff_files(second.diff.read_text(encoding="utf-8"))] == ["fix0.txt"]
+    assert [f.path for f in changes._diff_files(fake.inputs[second.diff.name])] == ["fix0.txt"]
 
 
 # --- 根拠の記述の確かめ（収束ループの中） ----------------------------------------------------------
@@ -429,13 +429,13 @@ def test_issue_4090_4_failed_round_is_checked_again_before_the_verdict(repos: Re
     _push_pr(repos, "doc.md", "# 設計", WRONG)
     read = changes._diff_files
     failing = _git_fails(monkeypatch, "_diff_files")
-    reviewed = drive._review
+    reviewed = drive._review_round
 
     def review_then_recover(*args: Any) -> Any:
         monkeypatch.setattr(changes, "_diff_files", read)
         return reviewed(*args)
 
-    monkeypatch.setattr(drive, "_review", review_then_recover)
+    monkeypatch.setattr(drive, "_review_round", review_then_recover)
     fake = Fixer(tmp_path / "st", wt)
     _, got = _base(capsys, monkeypatch, fake, wt)
     assert (got["cause"]["kind"], len(failing)) == ("mvv_unresolved", 1)
@@ -448,14 +448,14 @@ def test_round_checked_only_at_the_end_is_reused_on_the_same_head(repos: Repos, 
     """ラウンドの中の確かめに失敗しても、同じ head の最後の確かめに成功して収束したら、打ち直しは相手役を起動せずに前回の結果を返す。"""
     _push_base(repos)
     _push_pr(repos, "doc.md", "# 設計", RIGHT)
-    read, reviewed = changes._diff_files, drive._review
+    read, reviewed = changes._diff_files, drive._review_round
     _git_fails(monkeypatch, "_diff_files")
 
     def review_then_recover(*args: Any) -> Any:
         monkeypatch.setattr(changes, "_diff_files", read)
         return reviewed(*args)
 
-    monkeypatch.setattr(drive, "_review", review_then_recover)
+    monkeypatch.setattr(drive, "_review_round", review_then_recover)
     code, got = _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt), wt)
     assert (code, got["status"]) == (0, "ok")
     assert [r["mvv_checked"] for r in _state(tmp_path / "st")["rounds"]] == [True]

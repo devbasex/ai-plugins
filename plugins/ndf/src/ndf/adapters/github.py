@@ -1,4 +1,4 @@
-"""GitHub の読み書き（外部との接続の層。githubkit の上に置く。#1142 の決定 16・17）。
+"""GitHub の読み書き（外部との接続の層。githubkit の上に置く。docs/specifications/ndf-rebuild-libraries.md の決定 16・17）。
 
 - 単発の読み書きと読み直しは REST で行う。githubkit の `http_cache` が ETag 付きで読み直し、変わっていない応答は上限に数えられない
 - 番号やブランチごとの読み取りは、GraphQL のエイリアスで 1 回のクエリへまとめる（A2）。ループの中で 1 件ずつ呼ばない

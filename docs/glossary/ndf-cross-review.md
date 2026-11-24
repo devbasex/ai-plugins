@@ -41,7 +41,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | ラウンドを足す | — | final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 最終ステータス | `review_status` | cross-review の収束の終わり方を表す 1 語（approved / unverified / final の値 / unknown）。loop_drive.review_status が状態ファイルから決める | — | — | — |
 | 回答ファイル | — | 駆動が止まりで示す items[0].result_file。止まりへの回答を書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別 | — | — | — |
-| 席 | — | cross-review の 1 ラウンドの 2 つの担当のスロット。名前は kiro / kiro-2 の形（SEAT_PATTERN） | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
+| 席 | — | cross-review の 1 ラウンドの 2 つのレビュー担当のスロット。席の名前は相手役の名前で、claude の読むだけの起動で埋めた 2 つ目の席は claude-2 と呼ぶ | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
 | 未解決のスレッド | — | Pull Request のレビュースレッドのうち、解決済みのマーカーが付いていないもの。`gh_parts.py pr-info --with threads` が返す | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 本来の判定 | `intent` | レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む | — | — | `docs/specifications/pr-review-steps-script.md` |
 | レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | `docs/specifications/pr-review-steps-script.md` |

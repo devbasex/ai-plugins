@@ -1,7 +1,7 @@
 """同じファイルの同じ範囲を読み続けるのを止める guard。
 
 同じファイル（更新時刻まで同じ）の同じ範囲を `hook.read-repeat` の回数を超えて読むと止める。止める文は範囲ごとに
-同じなので、同じ拒否が続けば数え手が案内へ下げる（#3345 の決定 92）。
+同じなので、同じ拒否が続けば数え手が案内へ下げる（docs/specifications/ndf-rebuild.md の決定 92）。
 """
 
 from __future__ import annotations

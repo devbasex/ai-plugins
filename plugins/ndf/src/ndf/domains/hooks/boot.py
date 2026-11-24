@@ -1,4 +1,4 @@
-"""環境が無いときの hook のエントリポイントの本体（#3345 の決定 89・91・IH2）。標準ライブラリだけで書く。
+"""環境が無いときの hook のエントリポイントの本体（docs/specifications/ndf-rebuild.md の決定 89・91・IH2）。標準ライブラリだけで書く。
 
 登録の command は、環境の python が無ければシステムの `python3` で `hooks/boot.py` を起動し、`hooks/boot.py` が
 `run_boot(sys.argv)` を呼ぶ。引数は `entry` と同じ位置（`argv[1]` がランタイム、`argv[2]` が事象）にある。

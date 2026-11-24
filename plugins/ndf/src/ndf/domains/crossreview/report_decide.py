@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
-from ndf.domains.crossreview import criteria_decide, store
+from ndf.domains.crossreview import criteria_decide, scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
@@ -181,17 +181,24 @@ def final_of(data: Mapping[str, Any]) -> Optional[str]:
     return verdict if verdict in fin.FINALS else None
 
 
+def _seats_cell(r: Mapping[str, Any]) -> str:
+    """ラウンドの「相手役」のセル。席を ・ で並べ、欠けた相手役の席を埋めた席は `（<相手役> の席）` を添える（#3955）。"""
+    absent = {f.seat: f.absent for f in scope_decide.filled_of(r) if f.absent is not None}
+    seats = [f"{s}（{absent[s]} の席）" if s in absent else str(s) for s in store.list_of(r, scope_decide.REVIEWERS)]
+    return _cell("・".join(seats))
+
+
 def _round_rows(rounds: Sequence[Mapping[str, Any]]) -> list[str]:
     rows = [
-        "| ラウンド | レビューした head | 範囲 | 判定 | 修正のコミット | 送った | 直した指摘 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| ラウンド | 相手役 | レビューした head | 範囲 | 判定 | 修正のコミット | 送った | 直した指摘 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for r in rounds:
         fix = r.get("fix") if isinstance(r.get("fix"), Mapping) else {}
         fixed = fix.get("fixed") if isinstance(fix.get("fixed"), list) else []
         pushed = "—" if not fix else ("送った" if fix.get("pushed") else "送れていない")
         rows.append(
-            f"| {_cell(r.get('round'))} | {_short(r.get('head'))} | {_cell(r.get('scope'))} | {_cell(r.get('verdict'))} "
+            f"| {_cell(r.get('round'))} | {_seats_cell(r)} | {_short(r.get('head'))} | {_cell(r.get('scope'))} | {_cell(r.get('verdict'))} "
             f"| {_short(fix.get('commit'))} | {pushed} | {_cell('・'.join(map(str, fixed)))} |"
         )
     return rows

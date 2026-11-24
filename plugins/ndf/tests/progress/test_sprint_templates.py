@@ -65,8 +65,8 @@ def early_sprint(repo, monkeypatch):
     return _sprint(repo, monkeypatch, "0" * 40)
 
 
-def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS) -> SimpleNamespace:
-    strategy_fixture.write(repo, "web-develop", PROJECT)
+def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS, project: dict = PROJECT) -> SimpleNamespace:
+    strategy_fixture.write(repo, "web-develop", project)
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
@@ -156,6 +156,45 @@ def test_next_carries_a_sprint_to_the_last_row_with_the_real_templates(repo, st,
     assert "{{" not in text and "ndf-worker" in text and "ndf-review" in text and f"#{ISSUE} の題" in text
     if mode == "standard":
         assert "ndf-refactor" in text and "ndf-rebuild" in text
+
+
+# `workflow.launch.rebuild` の無いリポジトリの設定（#4337）
+PROJECT_WITHOUT_REBUILD = {**PROJECT, "workflow": {"launch": {k: v for k, v in PROJECT["workflow"]["launch"].items() if k != "rebuild"}}}
+
+
+def _rebuild_step(plan: dict) -> list[str]:
+    return next(step["run"] for step in plan["steps"] if step["id"] == "rebuild")
+
+
+def test_standard_sprint_without_the_rebuild_setting_launches_the_default_command(repo, st, capsys, monkeypatch):
+    """#4337 の条件 1・2: 設定 `workflow.launch.rebuild` が無くても、工程「設計」と「ドキュメント再構成」のプランが組め、
+    組み直すステップに `ndf document-rebuild run` と `--out` が入る。
+
+    確かめるのはプランの引数だけなので、ブランチ名は git の境界（`invoke._branch_of`）の偽物から返し、2 つのプランを
+    組んだ手で止める。設計の承認の後の 1 手は工程「コードレビュー」まで続けて流れ、集めた時点（`gathered`）が偽の SHA
+    なのでそこで止まるが、2 つのプランはその前に組み終わっている。そのため SHA は git から求めず、止まったかは
+    2 つのプランが組まれていないときだけ確かめる。
+    """
+    monkeypatch.setattr(invoke, "_branch_of", lambda run: BRANCH)
+    s = _sprint(repo, monkeypatch, "0" * 40, project=PROJECT_WITHOUT_REBUILD)
+    tid = _new(capsys, "standard")
+    wanted = {"design", "document-rebuild"}
+    for _ in range(MAX_TURNS):
+        out = _turn(st, tid, repo, s.env)
+        if wanted <= {p["name"].removesuffix(f"-{BRANCH}") for p in s.plans}:
+            break
+        assert out["status"] in ("ok", "gate"), out
+    else:
+        pytest.fail("設計とドキュメント再構成のプランが組まれない")
+    plans = {p["name"].removesuffix(f"-{BRANCH}"): p for p in s.plans}
+    design, rebuild = _rebuild_step(plans["design"]), _rebuild_step(plans["document-rebuild"])
+    for argv in (design, rebuild):
+        assert argv[:3] == ["ndf", "document-rebuild", "run"] and argv[-2:] == ["--out", "{state_dir}/rebuild.json"]
+        assert argv[argv.index("--issue") + 1] == str(ISSUE) and argv[argv.index("--state-dir") + 1] == "{state_dir}"
+    assert [design[i + 1] for i, w in enumerate(design) if w == "--kind"] == ["design"]
+    assert [rebuild[i + 1] for i, w in enumerate(rebuild) if w == "--kind"] == ["design", "plan"]
+    assert design[design.index("--base") + 1] == "develop"
+    assert design[design.index("--remote") + 1] == "origin"
 
 
 def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint, capsys, monkeypatch):

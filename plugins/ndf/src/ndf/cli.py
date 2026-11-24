@@ -75,6 +75,7 @@ COMMANDS: dict[str, str] = {
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "cross-review": "ndf.domains.crossreview.cli",
+    "document-rebuild": "ndf.domains.docrebuild.cli",
     "gws": "ndf.domains.gws.cli",
     "hooks": "ndf.domains.hooks.cli",
     "issues": "ndf.domains.backlog.cli",

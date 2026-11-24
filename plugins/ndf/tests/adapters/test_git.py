@@ -520,3 +520,13 @@ def test_remote_repo_uses_the_declared_remote(tmp_path: Path) -> None:
     assert git.Git(path).remote_repo() == "o/up"
     with pytest.raises(git.GitError):
         git.Git(path).remote_repo("origin")
+
+
+def test_commit_or_none_tells_unreadable_refs_from_git_failures() -> None:
+    """#4337: 読めない参照（終了コード 1）は None、ほかの終了コードは `GitError`。"""
+    runner = _fake_cwd(stdout=FULL + "\n")
+    assert git.Git(Path("/w"), runner).commit_or_none("refs/remotes/up/trunk") == FULL
+    assert runner.calls == [(["rev-parse", "--verify", "--quiet", "--end-of-options", "refs/remotes/up/trunk^{commit}"], Path("/w"))]
+    assert git.Git(runner=_fake_cwd(1)).commit_or_none("x") is None
+    with pytest.raises(git.GitError, match="終了コード 128"):
+        git.Git(runner=_fake_cwd(128, stderr="fatal\n")).commit_or_none("x")

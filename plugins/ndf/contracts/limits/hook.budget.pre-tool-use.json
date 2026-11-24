@@ -1,5 +1,5 @@
 {
-  "summary": "hook の予算（PreToolUse）。p95 の目標・締め切り・余白・登録の timeout・注入の上限の字数（#3345 の決定 90）",
+  "summary": "hook の予算（PreToolUse）。p95 の目標・締め切り・余白・登録の timeout・注入の上限の字数（docs/specifications/ndf-rebuild.md の決定 90）",
   "p95_ms": 100,
   "deadline": 1,
   "margin": 0.5,

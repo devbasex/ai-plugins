@@ -1,4 +1,5 @@
-"""ステートマシンの保存（SQLite と PostgreSQL）と、ステートマシンの DB の検査・バックアップ・戻し（#3344 の決定 81・82）。
+"""ステートマシンの保存（SQLite と PostgreSQL）と、ステートマシンの DB の検査・バックアップ・戻し
+（docs/specifications/ndf-rebuild.md の決定 81・82）。
 
 - 接続先は URL で決める。`NDF_PROGRESS_DB` があればその値、無ければチェックアウトの保存先の
   `sqlite:///<保存先>/progress.sqlite`。ローカルは SQLite、Factory は PostgreSQL の URL を渡す

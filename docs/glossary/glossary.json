@@ -3703,7 +3703,7 @@
     {
       "term": "席",
       "context": "ndf-cross-review",
-      "meaning": "cross-review の 1 ラウンドの 2 つの担当のスロット。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
+      "meaning": "cross-review の 1 ラウンドの 2 つのレビュー担当のスロット。席の名前は相手役の名前で、claude の読むだけの起動で埋めた 2 つ目の席は claude-2 と呼ぶ",
       "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {

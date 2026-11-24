@@ -27,6 +27,9 @@ PR = 41
 FAIL = "fail"
 # 相手役のサンドボックスがコマンドを打てず、読めなかったことを指摘として書いて終わる（#3893）
 SANDBOX = "sandbox"
+# 終了は成功したが指摘の配列を出さない・失敗で終わったが出力に有効な指摘の配列がある（どちらも結果が無い。#3955）
+NO_FINDINGS = "no-findings"
+FAILED_WITH_FINDINGS = "failed-with-findings"
 SANDBOX_ERR = "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces\n"
 _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
 # 偽の相手役が文字列の指摘に添える起きることの 1 文（#4014。1 文の無い指摘はジャーナルへ入れるときに minor へ下がる）
@@ -34,7 +37,8 @@ IMPACT = "利用者の経路で処理が止まる"
 
 
 class Fake:
-    """偽の相手役と修正担当。`script[相手役][n]` は相手役の n 回目（0 から）の起動の指摘の本文の並びか `FAIL`。
+    """偽の相手役と修正担当。`script[席][n]` は席の n 回目（0 から）の起動の指摘の本文の並びか `FAIL`。席は出力の名前
+    （`round<n>-<席>[-retry]`）から読み、`--restricted` を付けた claude の起動は席の claude（`claude`・`claude-2`。#3955）とする。
 
     相手役は毎ラウンド 1 回ずつ起動されるので、n はラウンドの番号 - 1 にあたる。台本の位置と修正の回数は偽物が
     数える（相手役は並べて起動されるので、数える値はロックで守る）。
@@ -51,31 +55,58 @@ class Fake:
         self._lock = threading.Lock()
         self._said: dict[str, int] = {}
         self._fixes = 0
+        # 席の claude の起動の席の名前の並び（#3955）
+        self.seat_calls: list[str] = []
+        # 相手役へ渡した資料のディレクトリと、その中のファイルの写し（ディレクトリは実行の終わりに消える。#3955）
+        self.input_dir: Optional[Path] = None
+        self.inputs: dict[str, str] = {}
+
+    def _keep_inputs(self, prompt: str) -> None:
+        """リクエストの文が指す資料のディレクトリの中身を写す。"""
+        found = re.search(r"(/\S*?/{prefix}[^/\s]+)/".format(prefix=drive.INPUT_PREFIX), prompt)
+        if found is None:
+            return
+        self.input_dir = Path(found.group(1))
+        self.inputs |= {f.name: f.read_text(encoding="utf-8") for f in self.input_dir.iterdir() if f.is_file()}
 
     def _next_lines(self, agent: str) -> Any:
         """相手役の台本の次の 1 回分。台本が尽きたら指摘無し。"""
         with self._lock:
             at = self._said.get(agent, 0)
             self._said[agent] = at + 1
-        lines = self.script[agent]
+        lines = self.script.get(agent, [])
         return lines[at] if at < len(lines) else []
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
         self.calls.append(spec.agent)
         with self._lock:
             self.launches.append(spec)
+            self._keep_inputs(spec.argv[-1])
         spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
-        if spec.agent == "claude":
+        seated = spec.agent == "claude" and "--restricted" in spec.argv
+        if spec.agent == "claude" and not seated:
             return self._fix(spec)
-        said = self._next_lines(spec.agent)
+        seat = seat_of(spec)
+        if seated:
+            with self._lock:
+                self.seat_calls.append(seat)
+        said = self._next_lines(seat)
         if said == FAIL:
             return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
+        if said == NO_FINDINGS:
+            spec.paths.out.write_text("読み終えた", encoding="utf-8")
+            return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+        if said == FAILED_WITH_FINDINGS:
+            spec.paths.out.write_text('{"findings": []}\n', encoding="utf-8")
+            return agents.AgentStatus(spec.agent, agents.AgentState.STALLED, None, "止まった", ())
         if said == SANDBOX:
             spec.paths.err.write_text(SANDBOX_ERR, encoding="utf-8")
             said = ["round の差分と worktree を読み取れませんでした。レビューは未実施です"]
         # 台本の指摘は本文の文字列（起きることの 1 文つき。#4014）か、相手役の出力の形の辞書（重要度・位置つき。#3941）
         body = {"findings": [{"text": t, "section": "", "impact": IMPACT} if isinstance(t, str) else t for t in said]}
-        spec.paths.out.write_text(f"考えた {{途中}}\n{json.dumps(body, ensure_ascii=False)}\n", encoding="utf-8")
+        text = f"考えた {{途中}}\n{json.dumps(body, ensure_ascii=False)}\n"
+        # 席の claude は --output-format json の外側の JSON の result に本文を返す
+        spec.paths.out.write_text(json.dumps({"result": text}, ensure_ascii=False) if seated else text, encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
 
     def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
@@ -94,6 +125,12 @@ class Fake:
         store.fix_result_path(self.state_dir, ref).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
         spec.paths.out.write_text("{}", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+
+def seat_of(spec: agents.Launch) -> str:
+    """起動の出力の名前（`round<n>-<席>[-retry].out`）の席の名前。"""
+    name = spec.paths.out.name.removesuffix(".out")
+    return name.split("-", 1)[1].removesuffix("-retry")
 
 
 # 修正担当の結果に載る指摘の id と、その指摘を作ったもの
@@ -181,14 +218,15 @@ def test_one_reviewer_failing_once_is_relaunched_in_the_same_round(wt: Path, tmp
 
 
 def test_issue_3941_reviewer_failing_twice_does_not_converge(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#3941: 起動し直しても読めない相手役がいれば、残りの相手役が 0 件でも収束にせず incomplete_reviewers・work_stopped で止める。"""
-    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [[]]})
+    """#3941・#3955 の受け入れ条件 11: 起動し直しても読めない相手役の席を埋めた claude も読めなければ、残りの相手役が 0 件でも
+    収束にせず incomplete_reviewers・work_stopped で止める。埋めた claude は起動し直さない。"""
+    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [[]], "claude": [FAIL]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "work_stopped")
     assert fin.INCOMPLETE_REVIEWERS in got["summary"]
-    assert any("起動し直しても差分を読めなかった" in w and "codex login status" in w for w in got["warnings"])
+    assert any("起動し直しても" in w and "auth status" in w for w in got["warnings"])
     assert _state(fake.state_dir)["rounds"][-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
-    assert "claude" not in fake.calls
+    assert fake.seat_calls == ["claude"] and fake.calls.count("claude") == 1
 
 
 def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -197,6 +235,8 @@ def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path:
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
     assert "codex login status" in got["cause"]["detail"] and "kiro-cli whoami" in got["cause"]["detail"]
+    # #3955 の受け入れ条件 10: 全員が読めなければ席を埋めない（claude を相手役として起動しない）
+    assert "claude" not in fake.calls
 
 
 def test_issue_3893_sandbox_failure_with_another_reviewer_failing_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -644,12 +684,12 @@ def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_
     """PR 3944 の r2-3: 一部の相手役が読めなかったラウンドの HEAD は --reviewed-out へ書かず、今回の起動で全員が読めた最後の
     ラウンドの HEAD を書く。そのようなラウンドが無ければ書かない。"""
     out = tmp_path / "reviewed"
-    fake = Fake(tmp_path / "st", {"codex": [["直す"], FAIL, FAIL], "kiro": [[], []]})
+    fake = Fake(tmp_path / "st", {"codex": [["直す"], FAIL, FAIL], "kiro": [[], []], "claude": [FAIL]})
     _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(out))
     rounds = _state(fake.state_dir)["rounds"]
     assert rounds[-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
     assert out.read_text().strip() == rounds[0]["head"] != rounds[1]["head"]
-    again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]]})
+    again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]], "claude": [FAIL]})
     _run(capsys, monkeypatch, again, wt, "--reviewed-out", str(out))
     assert not out.exists()
 

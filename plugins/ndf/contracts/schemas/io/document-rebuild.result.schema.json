@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document-rebuild.result.schema.json",
+  "title": "ndf document-rebuild の結果 JSON",
+  "description": "ndf document-rebuild run が標準出力の最後の 1 行と --out に書く結果 JSON（#4337）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "document-rebuild"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf document-rebuild の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "組み直した対象の文書のパス"
+        },
+        "readers": {
+          "type": "array",
+          "description": "対象の文書ごとに 1 件の確かめの記録（対象の外の記録は入れない）",
+          "items": {
+            "$ref": "#/$defs/reader"
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "足すべき内容（add-<番号>）と、読み手役が不合格とした文書（reader-<番号>）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(add|reader)-[1-9][0-9]*$",
+            "description": "項目の番号（add-<番号> は worker の足すべき内容、reader-<番号> は読み手役の不合格）"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "足すべき内容か、不合格の文書・質問・理由"
+          },
+          "doc": {
+            "type": "string",
+            "minLength": 1,
+            "description": "当たる対象の文書のパス"
+          }
+        },
+        "if": {
+          "properties": {
+            "id": {
+              "pattern": "^add-"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "doc"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id_prefix": {
+      "type": "string",
+      "enum": [
+        "add",
+        "reader"
+      ],
+      "description": "items の id の接頭辞（add は worker の足すべき内容、reader は読み手役の不合格。サブコマンドが振る）"
+    },
+    "reader": {
+      "type": "object",
+      "description": "対象の文書 1 件の確かめの記録",
+      "additionalProperties": false,
+      "required": [
+        "doc",
+        "verdict",
+        "checks"
+      ],
+      "properties": {
+        "doc": {
+          "type": "string",
+          "minLength": 1,
+          "description": "対象の文書のパス"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "not_run",
+            "self"
+          ],
+          "description": "最後の結果（pass・fail は読み手役、not_run は立てられなかった、self は worker 自身が読み直した）"
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 2,
+          "description": "読み手役の確かめの並び（行った順）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verdict",
+              "restatements"
+            ],
+            "properties": {
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              },
+              "restatements": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "質問ごとの言い直し"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "description": "不合格の質問と理由"
+              }
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "not_run の理由・self の文書の種類・fail で 2 回目を行えなかった理由"
+        }
+      }
+    }
+  }
+}

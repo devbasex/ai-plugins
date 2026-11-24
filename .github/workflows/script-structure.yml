@@ -66,7 +66,7 @@ env:
   # ndf check は根の .ndf/*.json（宣言のスキーマ）と、.ndf/glossary.json の source の用語集（禁止語）も読む
   NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
   # ndf check の規則 review-items だけが読む表（設計レビューの項目の表と 11.x の対応表）。これだけに当たる Pull Request では、その規則だけを打つ
-  REVIEW_ITEMS_PATHS: issues/issue-1142-design-review-routing.md issues/issue-3388-design-routing.md
+  REVIEW_ITEMS_PATHS: docs/specifications/ndf-review-items.md docs/specifications/ndf-review-items-11x.md
   # 規則 toolchain と CI のジョブの数の上限だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここに当たれば、この 2 つを打つ
   TOOLCHAIN_PATHS: .github/workflows
 
