@@ -104,12 +104,33 @@ def _parse_merge_row(body: str) -> MergeRow | None:
     return MergeRow(str(answer), str(by), t, production == _YES, str(record))
 
 
+# token の利用者の login を読めないときの理由（`approval_stale` と別の止まり方にする。承認し直しても数えられないため）
+NO_LOGIN = (
+    "この token の利用者の login を読めない（GitHub の GraphQL の viewer が空）ので、マージの承認の証跡の書き手を照らせず、"
+    "証跡を数えも書きもしない。login を読める token（利用者の個人の token か GitHub App の token）で打ち直す"
+)
+
+
+def same_writer(author: str, login: str) -> bool:
+    """コメントの書き手 `author` が token の利用者 `login` か。大文字小文字と、ボットの login の末尾の `[bot]` の有無を区別しない
+    （REST のコメントの書き手は `<名前>[bot]`、GraphQL の `viewer` は `<名前>` で返すことがある）。"""
+
+    def key(name: str) -> str:
+        return name.lower().removesuffix("[bot]")
+
+    return bool(login) and key(author) == key(login)
+
+
 def merge_rows(hub: GitHub, number: int, login: str) -> list[MergeRow]:
     """PR のコメントから数える証跡を古い順に返す。書き手が `login`（`ndf ci merge` を打つ token の利用者）と同じで、
-    編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。"""
+    編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
+
+    `login` が空（token の利用者を読めない）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
+    if not login:
+        raise TrailError(NO_LOGIN)
     rows = []
     for c in hub.comments(number):
-        if c.edited or not login or c.author.lower() != login.lower():
+        if c.edited or not same_writer(c.author, login):
             continue
         row = _parse_merge_row(c.body)
         if row is not None:
@@ -126,7 +147,9 @@ def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | Non
 
 
 def write_merge_row(hub: GitHub, row: MergeRow, login: str) -> bool:
-    """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。"""
+    """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
+
+    `login` が空なら、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
     if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, login)):

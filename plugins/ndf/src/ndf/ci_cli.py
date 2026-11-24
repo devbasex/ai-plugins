@@ -371,10 +371,17 @@ def _held_mismatch(args: argparse.Namespace, pull: Pull, target: merge_approval.
 def _approved_by(
     args: argparse.Namespace, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict
 ) -> tuple[Optional[str], Optional[dict]]:
-    """承認が要る判定なら、今の承認の対象への証跡の担い手。証跡が無ければ、マージキューから外して `--production-gate` の結果。"""
+    """承認が要る判定なら、今の承認の対象への証跡の担い手。証跡が無ければ、マージキューから外して `--production-gate` の結果。
+    token の利用者の login を読めなければ、マージキューから外して `precondition`（`merge_approval.NO_LOGIN`）。"""
     if not production_merge.needs_approval(verdict):
         return None, None
-    row = _approval(hub, target)
+    try:
+        row = _approval(hub, target)
+    except merge_approval.TrailError as exc:
+        # token の利用者を読めず証跡を数えられない。承認し直しても変わらないので approval_stale にせず precondition で止まる
+        if pull.queued:
+            hub.dequeue(pull.number)
+        return None, result.stopped(TOOL, "precondition", str(exc), instance=target.head, items=_pr_item_list(target.number))
     if row is not None:
         return row.by, None
     if pull.queued:

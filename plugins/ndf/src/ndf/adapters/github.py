@@ -57,10 +57,14 @@ TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 BOT_SUFFIX = "[bot]"
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
+# マージ先の設定の読み取りに、token の利用者の login（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
 _BRANCH_FILE = (
-    "query($owner: String!, $name: String!, $expr: String!) { repository(owner: $owner, name: $name) {"
+    "query($owner: String!, $name: String!, $expr: String!) { viewer { login } repository(owner: $owner, name: $name) {"
     " nameWithOwner object(expression: $expr) { ... on Blob { oid text } } } }"
 )
+# token の利用者の login だけを読む問い合わせ。REST の `/user` と違い、GitHub App のインストールトークンと Actions の
+# `GITHUB_TOKEN` でもボットの login を返す
+_VIEWER = "query { viewer { login } }"
 # 信用の区分（#3364）。OWNER はリポジトリのオーナーでそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
@@ -450,7 +454,9 @@ class GitHub:
 
     def repository(self, query: str, variables: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """`repository(owner, name)` の下を読むクエリの `repository` の値。null（読めない・無い）なら `GitHubError`（3394-6）。"""
-        data = self.graphql(query, {**self._owner_name(), **(variables if variables is not None else {})})
+        return self._repository_of(self.graphql(query, {**self._owner_name(), **(variables if variables is not None else {})}))
+
+    def _repository_of(self, data: Any) -> dict[str, Any]:
         repo = data["repository"] if isinstance(data, dict) and "repository" in data else None
         if not isinstance(repo, dict):
             raise GitHubError(f"{self.repo} を GraphQL で読めない（repository が null。リポジトリが無いか、権限が無い）")
@@ -775,19 +781,34 @@ class GitHub:
         return bytes(resp.content)
 
     def branch_file(self, base: str, path: str) -> FileAt:
-        """ブランチ `base` のファイル `path` の本文と blob の oid を、応答のリポジトリ名と合わせて 1 回の GraphQL で読む（#4409 の決定 3）。"""
-        return _file_at(self.repository(_BRANCH_FILE, {"expr": f"{base}:{path}"}), "object")
+        """ブランチ `base` のファイル `path` の本文と blob の oid を、応答のリポジトリ名と合わせて 1 回の GraphQL で読む（#4409 の決定 3）。
+
+        同じ要求で token の利用者の login も読み、`viewer_login` が要求を増やさずに返せるよう残す。
+        """
+        data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
+        self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        return _file_at(self._repository_of(data), "object")
+
+    def _remember_viewer(self, node: Any) -> None:
+        login = node.get("login") if isinstance(node, dict) else None
+        if isinstance(login, str) and login and "login" not in self._viewer:
+            self._viewer["login"] = login
 
     def viewer_login(self) -> str:
-        """この token の利用者の login（1 回だけ読む）。利用者を持たない token なら空文字。"""
+        """この token の利用者の login（1 回だけ読む。`branch_file` が読んでいれば要求を送らない）。
+
+        GraphQL の `viewer` で読むので、GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` ではボットの login を
+        返す。読めなければ空文字（呼び手は空の login で証跡を数えも書きもしない）。届かない・上限は投げ直す。
+        """
         if "login" not in self._viewer:
             try:
-                raw = self.rest("GET", "/user")
+                data = self.graphql(_VIEWER, {})
             except GitHubError as exc:
-                if exc.quota is not None or exc.status not in (403, 404):
+                if exc.quota is not None or exc.passing:
                     raise
-                raw = {}
-            self._viewer["login"] = text_of(raw.get("login")) if isinstance(raw, dict) else ""
+                data = {}
+            self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+            self._viewer.setdefault("login", "")
         return self._viewer["login"]
 
     def merge(

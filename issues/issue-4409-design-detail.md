@@ -198,8 +198,8 @@ plugins/ndf/
 | `write_merge_row` | `core/merge_approval.py` | 新設 | `(hub: GitHub, row: MergeRow, login: str) -> bool` | 同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せず偽 |
 
 - `merge_rows`
-  - 事前条件: `login` は `GitHub.viewer_login()` の値
-  - 事後条件: 編集されたコメント、書き手が `login` と違うコメント、マーカーの無いコメント、行が読めないコメントは含まない。担い手 `mvv` の行は、判定の記録（`checks.note` の見出し）と同じコメントにあるものだけを含む
+  - 事前条件: `login` は `GitHub.viewer_login()` の値。空なら数えずに `TrailError`（`NO_LOGIN`）
+  - 事後条件: 編集されたコメント、書き手が `login` と違うコメント（大文字小文字と、ボットの末尾の `[bot]` の有無は区別しない）、マーカーの無いコメント、行が読めないコメントは含まない。担い手 `mvv` の行は、判定の記録（`checks.note` の見出し）と同じコメントにあるものだけを含む
   - 副作用: GitHub のコメントの読み取り（`GitHub.comments`。floor(N / 100) + 1 回）
 - `write_merge_row`
   - 副作用: コメントの読み取りと、無ければ投稿 1 回（`Publisher.comment`）
@@ -211,6 +211,7 @@ plugins/ndf/
 | `merge_rows` | 行が読めない | 手で書いた・形が古い | 行の解釈 | 既定値で続ける（数えない） | 無し | — |
 | `write_merge_row` | 投稿できない | 通信・権限 | `GitHubError` | 呼び出し元へ返す | 呼び手の結果 | 同じ `record_id` で送り直せる（重ならない） |
 | `write_merge_row` | `by` が `user`・`mvv` でない、`answer` が承認・却下でない | 呼び手の誤り | 引数の確かめ | 止める（`TrailError`） | 呼び手の結果 | 書かない |
+| `merge_rows`・`write_merge_row` | `login` が空 | token の利用者を読めない（GraphQL の `viewer` が空） | 引数の確かめ | 止める（`TrailError`。理由は `NO_LOGIN`） | `ndf ci merge` は `precondition`（キューに入っていれば外す。`approval_stale` にしない）。`ndf ci answer` は `refused`。工程の回答は `model.Refused` で回答を記録しない | 書かない。login を読める token で打ち直す |
 
 ### 処理の手順
 
@@ -456,8 +457,8 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `branch_file` | `adapters/github.py` | 新設 | `(self, base: str, path: str) -> FileAt` | 1 回の GraphQL で、ベースリポジトリの名前・ブランチのファイルの本文と blob の oid を読む。無ければ本文と oid が `None` |
-| `viewer_login` | `adapters/github.py` | 新設 | `(self) -> str` | token の利用者の login（1 回だけ読み、インスタンスに持つ） |
+| `branch_file` | `adapters/github.py` | 新設 | `(self, base: str, path: str) -> FileAt` | 1 回の GraphQL で、ベースリポジトリの名前・ブランチのファイルの本文と blob の oid を読む。無ければ本文と oid が `None`。同じ要求で token の利用者の login（`viewer { login }`）も読み、`viewer_login` のために持つ |
+| `viewer_login` | `adapters/github.py` | 新設 | `(self) -> str` | token の利用者の login（1 回だけ読み、インスタンスに持つ）。`branch_file` が同じ要求の `viewer { login }` で読んでいれば要求を送らない。読んでいなければ GraphQL の `viewer` を 1 回読む（REST の `/user` は GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` で 403 になるため使わない）。読めなければ空文字 |
 | `merge` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False, expect: Optional[MergeExpect] = None) -> MergeOutcome` | `expect` があれば、要求を送る直前に照らす |
 | `_merge_with` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str], method: Optional[str], route: _MergeRoute, expect: Optional[MergeExpect] = None) -> MergeOutcome` | 最初の PR の読み直しをやめ、方式の問い合わせの後・送る直前に `_verify` を呼ぶ。`expect` が無ければ今と同じ |
 | `_enqueue` | `adapters/github.py` | 変更 | `(self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None) -> Optional[MergeOutcome]` | キューの状態の問い合わせに `baseRefName`・HEAD・設定の oid と本文を足して照らし、投入の後に PR を読み直してマージ先が変わればキューから外す |

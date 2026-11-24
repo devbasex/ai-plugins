@@ -58,6 +58,8 @@ class Wire:
             name = "queue"
         elif name == "query" and "pullRequest" in query:
             name = "verify"
+        elif name == "query" and "repository" not in query:
+            name = "viewer"
         elif name == "query":
             name = "file"
         self.seen.append(("GRAPHQL", name))
@@ -65,8 +67,10 @@ class Wire:
             return {"repository": self.queue}
         if name == "verify":
             return {"repository": self.verify}
+        if name == "viewer":
+            return {"viewer": {"login": "octocat"}}
         if name == "file":
-            return {"repository": {"nameWithOwner": REPO, "object": {"oid": "c1", "text": "{}"}}}
+            return {"viewer": {"login": "octocat"}, "repository": {"nameWithOwner": REPO, "object": {"oid": "c1", "text": "{}"}}}
         return {}
 
 
@@ -182,7 +186,16 @@ def _viewer_login_is_read_once():
     hub = _hub(wire)
     assert hub.viewer_login() == "octocat"
     assert hub.viewer_login() == "octocat"
-    assert wire.seen == [("GET", "/user")]
+    assert wire.seen == [("GRAPHQL", "viewer")]
+
+
+def _viewer_login_after_branch_file_sends_no_request():
+    """r1-7: マージ先の設定の読み取りが同じ要求で login を読むので、login の読み取りの要求を増やさない。"""
+    wire = Wire()
+    hub = _hub(wire)
+    hub.branch_file("main", PATH)
+    assert hub.viewer_login() == "octocat"
+    assert wire.seen == [("GRAPHQL", "file")]
 
 
 @pytest.mark.parametrize(
@@ -217,6 +230,7 @@ def _viewer_login_is_read_once():
             _branch_file_reads_text_and_oid_with_the_repository_name, id="branch_file_reads_text_and_oid_with_the_repository_name"
         ),
         scenes.scene(_viewer_login_is_read_once, id="viewer_login_is_read_once"),
+        scenes.scene(_viewer_login_after_branch_file_sends_no_request, id="viewer_login_after_branch_file_sends_no_request"),
     ],
 )
 def test_merge_verification_scenes(request, scene, values):

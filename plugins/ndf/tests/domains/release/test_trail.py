@@ -48,6 +48,18 @@ def _merge_rows_skip_edited_and_other_writers():
     assert merge_approval.merge_rows(hub, 7, "octocat") == []
 
 
+def _an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches():
+    """r1-10: token の利用者を読めない（空の login）なら数えも書きもせずに TrailError。ボットの `[bot]` の有無は同じ書き手とする。"""
+    body = merge_approval.render_merge_row(_row())
+    with pytest.raises(merge_approval.TrailError, match="login"):
+        merge_approval.merge_rows(_hub(body), 7, "")
+    hub = FakeHub(pulls={7: pull()})
+    with pytest.raises(merge_approval.TrailError):
+        merge_approval.write_merge_row(hub, _row(), "")
+    assert not [r for r in hub.requests if r[0] == "POST"]
+    assert merge_approval.merge_rows(_hub(body, author="ndf-app[bot]"), 7, "ndf-app") == [_row()]
+
+
 def _merge_rows_skip_release_approval_trails_and_broken_rows():
     release = approval_decide.render_trail("approved", HEAD, "user")
     broken = f"{merge_approval.MERGE_MARK}\n回答: approved\n"
@@ -104,6 +116,10 @@ def _release_check_does_not_count_merge_rows():
         scenes.scene(_rendered_row_reads_back, id="rendered_row_reads_back"),
         scenes.scene(_rendered_row_does_not_carry_the_release_approval_mark, id="rendered_row_does_not_carry_the_release_approval_mark"),
         scenes.scene(_merge_rows_skip_edited_and_other_writers, id="merge_rows_skip_edited_and_other_writers"),
+        scenes.scene(
+            _an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches,
+            id="an_empty_login_neither_counts_nor_writes_and_a_bot_login_matches",
+        ),
         scenes.scene(
             _merge_rows_skip_release_approval_trails_and_broken_rows, id="merge_rows_skip_release_approval_trails_and_broken_rows"
         ),

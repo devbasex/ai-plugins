@@ -468,6 +468,15 @@ def _merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_resu
     assert hub.merged == []
 
 
+def _merge_without_a_login_stops_apart_from_approval_stale(monkeypatch, capsys, last_result):
+    """r1-10: token の利用者の login を読めなければ、approval_stale でなく precondition で止まり、キューから外す。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(queued=True)}))
+    _approve(hub)
+    hub.login = ""
+    assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "stale"]) == causes.exit_code("precondition")
+    assert hub.merged == [] and hub.dequeued == [7] and "login" in _out(capsys, last_result)["cause"]["detail"]
+
+
 def _merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, last_result):
     """決定 3: 別のリポジトリから読んだ設定（自動反映の行が無くても）は unknown として承認を求める。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c1")}))
@@ -665,6 +674,7 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
             )
         ],
         scenes.scene(_merge_does_not_count_trails_of_another_login, id="merge_does_not_count_trails_of_another_login"),
+        scenes.scene(_merge_without_a_login_stops_apart_from_approval_stale, id="merge_without_a_login_stops_apart_from_approval_stale"),
         scenes.scene(_merge_reads_the_base_branch_of_the_pr_repository, id="merge_reads_the_base_branch_of_the_pr_repository"),
         scenes.scene(_merge_rejudges_when_the_config_changed_before_sending, id="merge_rejudges_when_the_config_changed_before_sending"),
         scenes.scene(_merge_by_pr_does_nothing_for_a_merged_pr, id="merge_by_pr_does_nothing_for_a_merged_pr"),

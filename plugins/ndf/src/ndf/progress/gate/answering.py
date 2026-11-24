@@ -89,13 +89,19 @@ def no_post(row: merge_approval.MergeRow) -> bool:
 
 
 def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
-    """`merge_approval.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。"""
+    """`merge_approval.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。
+
+    `observe` と同じ GitHub を渡せば、設定の読み取りで読んだ login を使い、login の読み取りを増やさない。
+    書けない（login を読めない・値が不正）なら `model.Refused`（回答は記録しない）。"""
     made: list[GitHub] = []
 
     def post(row: merge_approval.MergeRow) -> bool:
         if not made:
             made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
-        return merge_approval.write_merge_row(made[0], row, made[0].viewer_login())
+        try:
+            return merge_approval.write_merge_row(made[0], row, made[0].viewer_login())
+        except merge_approval.TrailError as exc:
+            raise model.Refused(f"マージの承認の証跡を書けないので、回答を記録しない: {exc}") from None
 
     return post
 
