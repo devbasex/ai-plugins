@@ -128,3 +128,9 @@ def test_read_stops_on_a_newer_version(tmp_path: Path) -> None:
     with pytest.raises(internal.InternalError) as exc:
         _loop(tmp_path, [{**_new(OLD[0]), "version": internal.version() + 1}]).read()
     assert exc.value.kind == "precondition" and "プラグインを更新する" in str(exc.value)
+
+
+def test_a_note_with_a_unicode_line_separator_stays_in_one_row(tmp_path: Path) -> None:
+    loop = store.LoopStore(tmp_path / "demo")
+    loop.append([rec.event(rec.GATE_ANSWERED, T0, lap=1, pr=4301, answer="rejected", head="abc", note="一行\u2028二行\u0085三行")])
+    assert [ev["note"] for ev in loop.read()] == ["一行\u2028二行\u0085三行"]

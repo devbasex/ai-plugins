@@ -148,7 +148,7 @@ class LoopState:
     def rejections(self) -> list[dict[str, Any]]:
         """設計承認ゲートの変更要求（回答 `request_changes` と `rejected`）の一覧。振り返りが数える（#2400）。"""
         return [
-            {"lap": lap.number, "pr": a.pr, "answer": a.answer, "note": a.note, "at": a.at}
+            {"lap": lap.number, "pr": a.pr, "answer": a.answer, "note": a.note, "at": internal.stamp(a.at)}
             for lap in self.laps
             for a in lap.answers
             if a.answer != APPROVED
