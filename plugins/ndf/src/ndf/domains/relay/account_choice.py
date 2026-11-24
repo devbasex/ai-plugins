@@ -338,7 +338,20 @@ def _key_build(
 
 def metered_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
     """従量の接続の設定。無い・読めない・検証に外れれば理由の符号。ラッパーは候補ごとに 1 回だけ読んで用意とバージョンの判定へ渡す（#4068）。"""
-    return _decl_of(store, env)
+    decl = metered_decl(store, env)
+    if decl is None:
+        return "metered_unavailable"
+    if isinstance(decl, str):
+        return "metered_unclassified" if decl in ("unclassified", "headers") else "metered_unavailable"
+    return decl
+
+
+_decl_of = metered_of
+
+
+def _decl_or_read(store: Path, env: Mapping[str, str], decl: Union[Decl, str, None]) -> Union[Decl, str]:
+    """呼び手が読んだ従量の接続の設定（`LaunchArgs.decl`）。無ければ `metered_of` で読み直す。"""
+    return metered_of(store, env) if decl is None else decl
 
 
 def with_settings(argv: list[str], settings: str) -> list[str]:
@@ -369,15 +382,6 @@ def version_env(env: Mapping[str, str], decl: Optional[Decl]) -> dict[str, str]:
         return dict(env)
     extra, _ = decl
     return session_env.metered_env(env, {k: v for k, v in extra.items() if k == "PATH"}, saved=True)
-
-
-def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
-    decl = metered_decl(store, env)
-    if decl is None:
-        return "metered_unavailable"
-    if isinstance(decl, str):
-        return "metered_unclassified" if decl in ("unclassified", "headers") else "metered_unavailable"
-    return decl
 
 
 def build(
@@ -684,7 +688,7 @@ def _launch_made(env: Mapping[str, str], store: Path, args: LaunchArgs, tail: li
     target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
     if target.startswith(KEY_PREFIX):
         return _key_build(env, target[len(KEY_PREFIX) :], _book(store), args.argv, tail, _source(args.argv, args.cwd))
-    decl = _decl_of(store, env) if args.decl is None else args.decl
+    decl = _decl_or_read(store, env, args.decl)
     return decl if isinstance(decl, str) else _build(env, decl, args.cwd, args.argv, tail)
 
 
