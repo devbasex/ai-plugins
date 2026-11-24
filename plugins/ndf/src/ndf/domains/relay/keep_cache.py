@@ -345,11 +345,21 @@ def ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios:
     return Ratios(w, w_1h, w_5m, r, d, out, margin, interval, hit_ratio)
 
 
+def wake_margin_in_range(margin: float) -> bool:
+    """起床の時点の余白が 0 以上 1 時間未満か。"""
+    return 0 <= margin < TTL_SECONDS["1h"]
+
+
+def checks_per_sleep(margin: float, interval: float) -> int:
+    """1 回の眠りで世代を確かめる回数 `ceil((3600 − 余白) / 間隔)`。間隔は 0 より大きいこと。"""
+    return math.ceil((TTL_SECONDS["1h"] - margin) / interval)
+
+
 def _check_wake(margin: float, interval: float) -> None:
     """余白が 0 以上 1 時間未満で、1 回の眠りで世代を確かめる回数が `MAX_CHECKS` 以内か。外れれば `TableError`。"""
-    if not 0 <= margin < TTL_SECONDS["1h"]:
+    if not wake_margin_in_range(margin):
         raise TableError(f"起床の時点の余白（cache.wake の seconds）は 0 以上 {TTL_SECONDS['1h']} 未満にする: {margin}")
-    if math.ceil((TTL_SECONDS["1h"] - margin) / interval) > MAX_CHECKS:
+    if checks_per_sleep(margin, interval) > MAX_CHECKS:
         raise TableError(f"1 回の眠りで世代を確かめる回数が {MAX_CHECKS} を越える（余白 {margin}・間隔 {interval}）")
 
 

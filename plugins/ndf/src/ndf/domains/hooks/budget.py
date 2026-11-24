@@ -13,13 +13,12 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.domains.hooks import tables
-from ndf.domains.relay.keep_cache import MAX_CHECKS, TTL_SECONDS
+from ndf.domains.relay.keep_cache import MAX_CHECKS, TTL_SECONDS, checks_per_sleep, wake_margin_in_range
 
 # Budget の値のキー（hook.budget.* の方針が持つもの）
 BUDGET_KEYS = ("p95_ms", "deadline", "margin", "timeout", "inject_chars")
@@ -77,9 +76,9 @@ def rewake_reach(found: Budget) -> Optional[str]:
     """`cache.wake` の起床の時点と確かめる間隔が、バックグラウンドの登録の timeout の内に届かなければ理由の文。届けば None。"""
     margin = tables.policy_value("cache.wake", "seconds")
     interval = tables.policy_value("cache.wake", "interval")
-    if interval <= 0 or math.ceil((TTL_SECONDS["1h"] - margin) / interval) > MAX_CHECKS:
+    if interval <= 0 or checks_per_sleep(margin, interval) > MAX_CHECKS:
         return f"cache.wake の間隔 {interval} 秒（余白 {margin} 秒）では、1 回の眠りで世代を確かめる回数が {MAX_CHECKS} を越える"
-    if not 0 <= margin < TTL_SECONDS["1h"]:
+    if not wake_margin_in_range(margin):
         return f"cache.wake の余白 {margin} 秒が 0 以上 {TTL_SECONDS['1h']} 秒未満でない"
     need = TTL_SECONDS["1h"] - margin + interval + found.margin
     if need > found.timeout:
