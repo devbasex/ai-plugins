@@ -78,8 +78,9 @@ plugins/ndf/
 | `reading.prompt` | 新設 | `(entry: Mapping[str, Any]) -> str` | 読み手役への指示を返す。`files`・`reader`・`questions_kind` と、4 つの型・2 つの区分の見分け方・返す形を入れる。文書は加工しない。「エンジニア向けの補足」を外した文書や、直した部分だけの文書は、担当が先に別のファイルへ作る |
 | `reading.add` | 新設 | `(entry: Mapping[str, Any], root: Path) -> dict[str, Any]` | 担当が書いた記録を確かめ、足りない値を補って 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` を送出し、追記しない。GitHub を読まない |
 | `reading.rows` | 新設 | `() -> list[dict[str, Any]]` | 記録を古い順に返す。壊れた行は無いものとして扱い、今の NDF より新しいバージョンの行があれば `InternalError` を送出する。ファイルが無ければ空。ファイルを開けなければ `OSError` を送出する |
-| `reading.check` | 新設 | `(questions, prs: Sequence[int], root: Path) -> list[str]` | 承認の手順用。後で動く hook が新しい head と比べられるように、先に `git fetch` を打つ（失敗しても続ける）。その後、`GitHub.pulls` で PR の head をまとめて読み、`missing` に渡す。GitHub を読めなければ `GitHubError` を送出する |
+| `reading.check` | 新設 | `(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]` | 承認の手順用。後で動く hook が新しい head と比べられるように、先に `git fetch` を打つ（失敗しても続ける）。その後、`GitHub.pulls` で PR の head をまとめて読み、`missing` に渡す。GitHub を読めなければ `GitHubError` を送出する |
 | `reading_decide.question_key` | 新設 | `(questions: Sequence[Mapping[str, Any]]) -> str` | 質問ごとの「質問の文・複数選択か・選択肢の名前と説明」だけを残した JSON（キーの順を固定し、文字列の前後の空白を除く）の SHA-256。区分などは含めない |
+| `reading_decide.used_row` | 新設 | `(key: str, repo: str, rows) -> Optional[Mapping[str, Any]]` | 使う記録の行（`repo` と `question_key` が一致する最後の行）を返す。無ければ `None` |
 | `reading_decide.light_rows` | 新設 | `(text: str, version: int) -> list[dict[str, Any]]` | 記録のファイルの本文から、使う欄の形が合う行を古い順に返す。壊れた行は無いものとして扱う。`version` より新しい行があれば `NewerRow` を送出する。hook が使う |
 | `reading_decide.missing` | 新設 | `(key: str, repo: str, rows, heads: Mapping[int, str], prs: Sequence[int] = ()) -> list[str]` | 足りないものを表す語（下の表）を返す。空なら通す。`heads` は PR の番号から今の head（SHA）への対応、`prs` は承認の手順で渡す、承認する PR の番号 |
 
@@ -110,7 +111,7 @@ plugins/ndf/
 | `reads[].name` | 文字列 | 担当 | 文書のパスか、固定の文字列 `question`（質問の文）・`material`（質問の直前に示す材料か承認資料）。`question` が 1 つも無い記録は拒む |
 | `reads[].reader` | 文字列 | 担当 | 読み手の立場 |
 | `reads[].round` | 1 か 2 | 担当 | その立場で何回目の読みか |
-| `reads[].result` | `passed` か `remained` | 担当 | 合格か、2 回目にも残ったか |
+| `reads[].result` | `passed` か `remained` | 担当 | 合格か、2 回目にも残ったか。`remained` は `round` が 2 のときだけ書ける |
 | `version` | 整数 | `add` | 記録の行の形のバージョン |
 | `at`・`repo`・`question_key` | 文字列 | `add` | 記録した時刻・リポジトリ（`owner/name`）・質問の SHA-256 |
 

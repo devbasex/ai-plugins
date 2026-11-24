@@ -22,6 +22,13 @@ SIGNAL = {"at": AT, "kind": md.OVERRIDE_PASS, "repo": "/m", "state": "s", "gate"
 VALIDATION = md.judged_row("k", md.FOLLOW, AT, "/m", {"usd": None, "reasons": ["r"], "boundary": [], "basis": ["Value 1"]})
 DECISION = {**cr.record_row("s1", "#1", APPLIED, cr.MARK_HANDOFF, None), "at": AT}
 ANSWERED = {"kind": "gate-answered", "lap": 2, "pr": 4301, "answer": "approved", "head": "abc", "note": ""}
+READING = {
+    "at": AT,
+    "repo": "o/r",
+    "question_key": "a" * 64,
+    "prs": [{"number": 1, "branch": "design/x", "head": "b" * 40}],
+    "reads": [{"name": "question", "reader": "承認する人", "round": 1, "result": "passed"}],
+}
 LEASE = {"kind": "lease-taken", "session": "s1", "until": 1795400600.0}
 # 旧いプラグインの hook が書いた行（バージョン 0）
 OLD_DECISION = {
@@ -125,6 +132,8 @@ def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
         ("context-records", cr.record_row(None, "", APPLIED, None, "手動")),
         ("context", {"issues": [1], "product_version": "11.0.23"}),
         ("stage-snapshot", SNAPSHOT),
+        ("reading-check", READING),
+        ("reading-check", {**READING, "prs": []}),
     ],
 )  # fmt: skip
 def test_a_row_of_each_writer_is_written_and_read_back_unchanged(kind, row):
@@ -202,6 +211,24 @@ def test_read_line_refuses_a_line_that_is_not_an_object(line):
 def test_write_refuses_a_row_that_does_not_fit(row):
     with pytest.raises(internal.InternalError) as exc:
         internal.write_record("usage", row)
+    assert kind_of(exc) == "invalid"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"reads": []},
+        {"reads": [{**READING["reads"][0], "name": "material"}]},
+        {"reads": [{**READING["reads"][0], "round": 3}]},
+        {"reads": [{**READING["reads"][0], "result": "remained"}]},
+        {"reads": [{**READING["reads"][0], "quote": "x"}]},
+        {"prs": [{"number": 1, "branch": "design/x"}]},
+        {"question_key": "a"},
+    ],
+)
+def test_issue_4285_a_reading_check_row_that_does_not_fit_is_refused(change):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.write_record("reading-check", {**READING, **change})
     assert kind_of(exc) == "invalid"
 
 
