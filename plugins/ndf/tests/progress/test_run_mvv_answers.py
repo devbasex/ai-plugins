@@ -212,10 +212,12 @@ def test_the_design_gate_counts_only_a_service_answer_that_checked_the_holds(rep
 @pytest.mark.parametrize("extra", [{}, {"holds": None}, {"holds": ["直っていないレッドライン"]}])
 def test_the_design_gate_does_not_count_a_verdict_without_checked_holds(repo, st, env, capsys, extra):
     tid = _new(capsys)
-    held = _held("design", **extra)
+    held = _held("design", **extra, **FREE)
     env.fake.script["design-mvv"] = [_held_step(held)]
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["step"] == "design-gate" and _answers(st, tid) == []
+    # 閲覧範囲を限れる保存先は、判定の自由記述を伏せずに残す
+    assert st.private is True and _recorded_mvv(st, tid, "design-mvv")["verdict"]["reasons"] == ["理由 1", "理由 2"]
     # 更新前の NDF が書いた、まだ読まれていない service:mvv の回答も数えない
     _old_mvv_answer(st, tid, held)
     assert run.decide(run.read(st, tid)).action == run.Action.GATE
@@ -305,11 +307,3 @@ def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answ
         store.append_events(conn, tid, [draft], v.events[-1].seq)
     got = run.read(st, tid).events[-1].draft.payload["outputs"]["mvv_gate"]
     assert got["verdict"]["reasons"] == [model.MVV_WITHHELD] * 2 and got["why"] == [model.MVV_WITHHELD] and got["head"] == JUDGED
-
-
-def test_a_restricted_store_keeps_the_full_verdict(repo, st, env, capsys):
-    assert st.private is True
-    tid = _new(capsys)
-    env.fake.script["design-mvv"] = [_held_step(_held("design", holds=None, **FREE))]
-    lanes.turn(st, tid, repo, env.env)
-    assert _recorded_mvv(st, tid, "design-mvv")["verdict"]["reasons"] == ["理由 1", "理由 2"]

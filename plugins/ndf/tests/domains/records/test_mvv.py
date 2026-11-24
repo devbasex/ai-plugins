@@ -24,14 +24,12 @@ def _decl(version: int, limits: dict | None = None) -> dict:
     return out
 
 
-def test_override_kind_does_not_count_a_passed_unknown_as_an_override() -> None:
+def test_override_kind_does_not_count_a_passed_unknown_as_an_override_but_signals_count_it() -> None:
     assert md.override_kind(md.FOLLOW, approved=False) == md.OVERRIDE_REJECT
     assert md.override_kind(md.NOT_FOLLOW, approved=True) == md.OVERRIDE_PASS
     assert md.override_kind(md.UNKNOWN, approved=True) == md.OVERRIDE_UNKNOWN_PASS
     assert md.override_kind(md.FOLLOW, approved=True) is None
-
-
-def test_signal_kinds_count_every_unknown_whatever_the_answer() -> None:
+    # 兆候は「判定できない」をどの回答でも数える
     assert md.signal_kinds(md.UNKNOWN, approved=True) == [md.UNKNOWN, md.OVERRIDE_UNKNOWN_PASS]
     assert md.signal_kinds(md.UNKNOWN, approved=False) == [md.UNKNOWN]
     assert md.signal_kinds(md.FOLLOW, approved=True) == []
@@ -95,11 +93,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return main
 
 
-def test_repo_key_is_the_main_directory_from_a_worktree(repo: Path) -> None:
+def test_repo_key_is_the_main_directory_from_a_worktree_and_refuses_outside_git(repo: Path, tmp_path: Path) -> None:
     assert mvv.repo_key(repo / ".worktrees" / "w") == mvv.repo_key(repo) == str(repo.resolve())
-
-
-def test_repo_key_outside_git_raises(tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
     with pytest.raises(mvv.MvvError):
@@ -186,11 +181,15 @@ def test_mvv_validate_sprint_judges_again_after_a_row_of_the_same_inputs_that_do
 
 
 # 現状固定（I-011 の前）: 記録の保存先は NDF_MVV_STATE_DIR → 状態の保存先の順。状態の保存先を解けなければ IdentityError のまま
-def test_record_path_prefers_the_env_dir_and_does_not_load_the_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_record_path_prefers_the_env_dir_and_raises_without_it_and_the_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
     monkeypatch.setattr(identity, "load", _unloadable)
     assert mvv.record_path("mvv-validation") == tmp_path / "m" / "mvv-validation.jsonl"
     assert mvv.record_path("mvv-signals") == tmp_path / "m" / "mvv-signals.jsonl"
+    # 環境変数も状態の保存先も無ければ IdentityError
+    monkeypatch.delenv("NDF_MVV_STATE_DIR")
+    with pytest.raises(identity.IdentityError):
+        mvv.record_path("mvv-validation")
 
 
 @pytest.mark.parametrize("env", [None, ""])
@@ -206,13 +205,6 @@ def test_record_path_falls_back_to_the_state_dir_when_the_env_is_unset_or_empty(
 
 def _unloadable() -> identity.PluginIdentity:
     raise identity.IdentityError("plugin.json を読めない")
-
-
-def test_record_path_raises_identity_error_without_the_env_and_the_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
-    monkeypatch.setattr(identity, "load", _unloadable)
-    with pytest.raises(identity.IdentityError):
-        mvv.record_path("mvv-validation")
 
 
 def test_count_signals_counts_disputed_findings_by_their_key() -> None:
@@ -237,7 +229,7 @@ def _follow(calls: list[int]) -> mvv.Judge:
     return judge
 
 
-def test_validation_rows_reads_nothing_before_the_record_exists_and_refuses_a_non_file(repo: Path) -> None:
+def test_validation_rows_reads_every_row_once_the_record_exists_and_refuses_a_non_file(repo: Path) -> None:
     assert mvv.validation_rows(repo) == ([], [])
     path = mvv.record_path("mvv-validation")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -248,12 +240,9 @@ def test_validation_rows_reads_nothing_before_the_record_exists_and_refuses_a_no
     path.mkdir()
     with pytest.raises(OSError, match="ファイルでない"):
         mvv.validation_rows(repo)
-
-
-def test_validation_rows_returns_every_row_and_the_broken_ones(repo: Path) -> None:
-    calls: list[int] = []
-    first, _ = mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls))
-    path = mvv.record_path("mvv-validation")
+    # すべての種類の行と読めない行を返し、不正なバイトと新しい形式の行は投げる
+    path.rmdir()
+    first, _ = mvv.mvv_validate_sprint(repo, INPUTS, _follow([]))
     with path.open("a", encoding="utf-8") as f:
         f.write("{壊れた\n")
     rows, broken = mvv.validation_rows(repo)
@@ -339,14 +328,12 @@ def test_compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> No
             "--src-prefix=a/", "--dst-prefix=b/", "-M"} <= set(mvv.LOCAL_DIFF)  # fmt: skip
 
 
-def test_compare_files_refuses_a_head_it_cannot_fetch_without_reading_the_diff() -> None:
+def test_compare_files_refuses_an_unfetchable_head_or_an_answer_without_files() -> None:
     g = CountingGit(git.Completed(128, "", "取得できない"))
     with pytest.raises(git.GitError, match="取得できない"):
         mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
     assert [c[0] for c in g.calls] == ["fetch"]
-
-
-def test_compare_files_refuses_an_answer_without_files() -> None:
+    # 応答に files が無ければ GitHubError
     hub = CompareHub([])
     hub.rest = lambda *a, **k: {"message": "x"}  # type: ignore[method-assign]
     with pytest.raises(GitHubError):

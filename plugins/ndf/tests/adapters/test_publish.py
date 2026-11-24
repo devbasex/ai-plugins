@@ -71,9 +71,11 @@ def test_scrub_on_a_private_target_drops_only_secrets() -> None:
     assert got.dropped == {"secret": 1}
 
 
-def test_repo_refs_finds_urls_and_short_refs_but_not_anchors() -> None:
+def test_repo_refs_finds_urls_and_short_refs_but_not_anchors_or_other_hosts() -> None:
     text = f"https://github.com/{PRIVATE_REPO}/pull/1) と {PUBLIC_REPO}#2、tools/app#3 でなく docs/x.md#見出し"
     assert publish.repo_refs(text) == {PRIVATE_REPO, PUBLIC_REPO, "tools/app"}
+    # SSH の利用者名とほかのホストは参照でない
+    assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
 
 
 @pytest.mark.parametrize(
@@ -258,10 +260,6 @@ def test_the_bare_name_pattern_matches_only_the_name_and_its_git_suffix() -> Non
         f"{PRIVATE_REPO}.git",
         PRIVATE_REPO,
     ]
-
-
-def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:
-    assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
 
 
 def test_publisher_reads_visibilities_once_and_drops_private_refs_on_a_public_target() -> None:

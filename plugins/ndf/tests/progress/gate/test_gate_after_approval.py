@@ -59,7 +59,7 @@ def _commit(repo, name, text):
     return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def test_git_docs_only_splits_the_range_like_the_sprint_diff(repo):
+def test_git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behavior_docs(repo):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text('{"docs": {"behavior": ["**/skills/**/*.md"]}}')
     base = _commit(repo, "src/a.py", "x = 1\n")
@@ -72,15 +72,10 @@ def test_git_docs_only_splits_the_range_like_the_sprint_diff(repo):
     assert docs_only(skill, code) is False
     assert docs_only(code, base) is False  # 祖先でない
     assert docs_only("0" * 40, doc) is False  # 読めない
-
-
-def test_git_docs_only_asks_again_when_behavior_docs_are_not_declared(repo):
-    base = _commit(repo, "src/a.py", "x = 1\n")
-    doc = _commit(repo, "docs/a.md", "# a\n")
-    skill = _commit(repo, "skills/s/SKILL.md", "# s\n")
-    docs_only = gate.git_docs_only(repo)
-    assert docs_only(base, doc) is False  # 振る舞いを決める文書が分からない
-    assert docs_only(doc, skill) is False
+    # 振る舞いを決める文書の設定が無ければ、文書だけの範囲でも出し直す
+    (repo / ".ndf" / "project.json").write_text("{}")
+    _commit(repo, ".ndf/project.json", "{}")
+    assert gate.git_docs_only(repo)(base, doc) is False
 
 
 def test_the_approved_head_is_the_head_seen_by_the_last_release_answer(st, repo, new_table, capsys, release_question):
