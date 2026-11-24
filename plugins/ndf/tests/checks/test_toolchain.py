@@ -231,9 +231,34 @@ def test_launcher_without_the_lines_is_a_finding(repo, rules):
     assert _lines(repo.check(rules)) == [("plugins/ndf-dev/bin/ndf", 1)] * 2
 
 
-def test_a_missing_listed_file_is_a_finding(repo, rules):
-    repo.settings({**SETTINGS, "launchers": ["plugins/ndf-dev/bin/none"]})
-    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/bin/none", 1)]
+@pytest.mark.parametrize("key", ["plugin_pyprojects", "launchers"])
+def test_a_missing_listed_file_is_a_finding(repo, rules, key):
+    repo.settings({**SETTINGS, key: ["plugins/ndf-dev/none"]})
+    assert _lines(repo.check(rules)) == [("plugins/ndf-dev/none", 1)]
+
+
+def test_a_missing_listed_file_has_the_same_finding_under_either_key(repo, rules):
+    repo.settings({**SETTINGS, "plugin_pyprojects": ["none"], "launchers": ["none"]})
+    found = repo.check(rules)
+    assert len(found) == 2
+    assert found[0] == found[1]
+
+
+@pytest.mark.parametrize(
+    ("key", "text", "line"),
+    [("plugin_pyprojects", '[project]\nrequires-python = ">=3.10"\n', 2), ("launchers", _launcher("0.0.1"), 3)],
+)
+def test_listed_files_are_checked_in_the_listed_order_past_a_missing_one(repo, rules, key, text, line):
+    # グロブは当たるファイルを昇順に 1 つずつ見る。欠けた 1 つは、その前後のファイルの検査を止めない
+    for rel in ("z/one", "a/one", "a/two"):
+        repo.file(rel, text)
+    repo.settings({key: ["z/one", "none-*", "a/*"]})
+    assert _lines(repo.check(rules)) == [("z/one", line), ("none-*", 1), ("a/one", line), ("a/two", line)]
+
+
+def test_a_missing_compat_workflow_is_not_a_finding(repo, rules):
+    repo.settings({**SETTINGS, "python_compat": {"versions": ["3.10"], "workflows": [COMPAT, ".github/workflows/none.yml"]}})
+    assert repo.check(rules) == []
 
 
 def test_broken_workflow_stops_with_its_path(repo, rules):
