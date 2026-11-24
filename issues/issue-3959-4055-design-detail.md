@@ -312,7 +312,7 @@ PR を読む前の失敗（`gate` が受ける）:
 - CLI の例外の扱い: `model.Refused` は `stopped`・`refused`、`StageInputMissing`・`StageInputInvalid` は `stopped`・`input_missing`・`invalid`（`exit-codes.md` の既存の種類）
 - 判定のステップの id（`design-mvv`・`release-mvv`）は工程の定義（`contracts/workflow/stages/design.json`・`deploy.json`）の値で、区分 → ステップの id の表は `progress/model.py` の `MVV_GATE_STEPS = {"design": "design-mvv", "release": "release-mvv"}` の 1 か所に置き、`mvv_gate.py` の `GATE_STEPS` はそれを読む（`progress` は `records` を読まないので、`asking.material` も同じ表を `model` から読む）。`mvv_gate.py` には 区分 → そのステップを持つ工程の文書の名前の表 `GATE_STAGES = {"design": "design", "release": "deploy"}` を置く。定義の id を変えたら表も変える（テストで、`GATE_STAGES` の工程の文書の中に `GATE_STEPS` の id のステップがあることを縛る）
 - 手順書: `agent-layers.md` の supervisor が守る規則に次の 2 つを足す。
-  - 設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打ち、結果の `outputs.mvv_gate` を設計の工程の出力の `mvv_gate` へそのまま載せ、承認資料の「MVV 判定」の欄にも同じ値を載せる（下の「承認資料の出所」。自由記述は下の「承認資料の開示の範囲」のとおり伏せる）
+  - 設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打ち、結果の `outputs.mvv_gate` を、設計の工程の出力の JSON ファイル（規則 15 で作業ディレクトリに書くファイル）の `mvv_gate` へそのまま載せる。承認資料の「MVV 判定」の欄にも同じ値を載せる（下の「承認資料の出所」）。このファイルは手元の記録で、呼び出し元へは返さない。フェーズレポートの `終えた工程` にはファイルのパスだけを書き、`outputs.mvv_gate` の中身（判定の理由・レッドライン・`why`・`holds`）をレポートの本文（`理由`・`summary` など）へ写さない。conductor はパスを `ndf progress finish --output` へ渡すだけで、中身を読んで人へ転送しない。承認資料の欄と、レポートの本文に判定を書くときは、下の「承認資料の開示の範囲」の supervisor の経路の行のとおり自由記述を伏せる
   - リリース承認ゲート（プランを使わず、本番に反映される操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、`ndf records mvv gate --gate release --machine <ステートマシンの ID>` を打つ（文脈の `pr` がスプリントの PR）。結果の `outputs.mvv_gate` は承認資料の「MVV 判定」の欄にだけ載せ、工程の出力へは載せない（#4105 までリリース承認ゲートは省かないので、ゲートが読む出力が要らない）。結果が `ok` でないとき（ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`）は、欄に「判定できない: <結果の summary>」を載せて承認ゲートを返す（止まらずに人へ問う）。プランの経路（`release-mvv` を持つ本番のリリースプラン）では打たない（判定のステップが打つ）
 - 手順書: `pace.md` の「MVV 判定」の表から順 2（進め方）を外し、「進め方は省くかだけを決める」と `--machine` の行を足す。`project-mvv.md` の「工程での読み方」（#4076 が足す節）の承認ゲートの行から `pace.md` を指す
 
@@ -341,7 +341,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- |
 | `skills/development-workflow/references/pace.md` | 具体例の最後の段落（`normal` は判定しない）を「判定し、省かない」に変える。「MVV 判定」の表から順 2 を外し、機械の検査に 7（レビューの保留）を足し、検査 1 だけが判定を止めること・ほかは省くかだけを決めることを書く。`--machine` の行と、リリース承認ゲートは #4105 まで省かないことを足す |
 | `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所を、進め方によらず今回の判定の出力 `outputs.mvv_gate` にし（下の「承認資料の出所」）、保留（`holds`）を足す。`pace: normal` は助言、の注記を消す。「目指す姿の根拠」の欄は決定の見出し（`### 決定 <数>: <題>`）の下へ根拠の行を載せる形にする（上の「根拠の行の確かめ」の「承認資料の見出しの契約」）。承認資料を渡す前に `ndf records mvv cite` を打ち、`ok`・`refused`・`precondition` で分ける手順を足す。supervisor が呼び出し元へ返す資料では「MVV 判定」の欄の自由記述を `WITHHELD` の文に置き換える（下の「承認資料の開示の範囲」の表） |
-| `skills/development-workflow/references/agent-layers.md` | supervisor が守る規則に、設計承認ゲートとリリース承認ゲート（手動の経路）を返す前の `--machine` の判定と、結果を載せる先と、`cite` を足す（上の「プランの外のエントリポイント」の手順書） |
+| `skills/development-workflow/references/agent-layers.md` | supervisor が守る規則に、設計承認ゲートとリリース承認ゲート（手動の経路）を返す前の `--machine` の判定と、結果を載せる先と、`cite` を足す（上の「プランの外のエントリポイント」の手順書）。規則 15 に、工程の出力の `mvv_gate` は出力の JSON ファイルにだけ置き、フェーズレポートの本文へ写さないことを足す（下の「承認資料の開示の範囲」の表） |
 | `skills/development-workflow/references/project-mvv.md` | 「工程での読み方」の承認ゲートの行（判定はどの進め方でも打つ） |
 | `docs/contracts/commands.md` | `ndf records mvv gate` の `--machine` と、`ndf records mvv cite` の行 |
 | `docs/glossary/glossary.json` | 語「レビューの保留」を追加、「MVV 判定」の意味を変え、`ndf records glossary render` で `docs/glossary.md` を作り直す |
@@ -365,6 +365,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- | --- | --- |
 | プランの経路（`write_material`・`presentation_path`） | 判定を打った実行環境の、リポジトリの Git ディレクトリの中（`material_path` の `<Git ディレクトリ>/ndf/state/progress-work/<ステートマシンの識別子の sha256 の頭>/` の下） | 同じ Git ディレクトリに、判定した PR のブランチ（差分の全体）と、PR を読んだ GitHub の認証がある | そのまま載せる。このファイルを読める人は、同じ場所で PR の差分そのものを読めるので、新しく開示する情報は無い |
 | supervisor の経路（`approval-request.md`） | 呼び出し元へ返す資料の本文。呼び出し元はそれを承認する人へ転送する（チャットへの貼り付けなど） | 確かめられない。supervisor が判定した PR の作業場所で動いても、同じ実行環境にあることは、呼び出し元やその先で資料を読む人が Git ディレクトリと同じ権限を持つ証拠にならない | 自由記述（判定の理由・レッドライン・保留の文）を載せず、`WITHHELD` の文に置き換える。判定（従う・従わない・判定できない）・根拠の項目の名前・保留の件数・`noted` は載せる。`noted` が偽でなければ「理由と保留の全文は PR の判定のコメントで読む」を添える（PR のコメントは `Publisher.guarded` を通っているので、PR を見られる人だけが全文を読める）。`noted: false` なら「理由と保留の全文は、判定した作業場所で `ndf records mvv gate` の結果を読む」を添える |
+| supervisor の工程の出力（規則 15 の出力の JSON ファイルと、`ndf progress finish` が書くステートマシンの記録） | 作業ディレクトリのファイルと、ステートマシンの保存先（どちらも判定を打った実行環境の手元） | プランの経路と同じ。手元の記録として持ち、呼び出し元へ返す本文に含めない | `outputs.mvv_gate` をそのまま持つ（承認ゲートを省くかを決める `mvv_skip` と、プランの経路の資料がこの値を読むため）。フェーズレポートにはパスだけを書き、中身を写さない。中身をレポートや資料に書くときは、上の supervisor の経路の行の伏せ方に従う |
 | PR のコメント（`_recorded`） | GitHub の PR | PR を見られる人 | `Publisher.guarded` が書き先の公開範囲を照会して伏せる。照会できなければ公開の書き先と同じに伏せる（上の `_recorded`） |
 | 上のほかの書き先（実行環境の外のファイル・チャット・メールなど） | 今は無い | 確かめられない | 載せない。経路を足す変更の中で、自由記述を `Publisher.guarded` と同じ包みに通すか、`WITHHELD` の文に置き換える処理を入れ、受け手が PR を見られるかを確かめられないときは伏せる |
 
