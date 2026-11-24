@@ -167,6 +167,13 @@ def test_line_ending_conversion_does_not_split_preflight_and_current(repo: Path,
     assert got.blobs[".ndf/mvv.md"] == _blob_id(committed.encode("utf-8"))
 
 
+def test_a_record_of_the_lf_body_covers_mixed_line_endings(repo: Path) -> None:
+    """LF にそろえた sha256 の記録は、LF と CRLF が混ざった作業場所と、Git が LF にそろえた blob の両方を承認済みにする。"""
+    _commit(repo, _decl(LF), LF)
+    (repo / ".ndf" / "mvv.md").write_bytes(CRLF.replace("\r\n", "\n", 3).encode("utf-8"))
+    assert (preflight.mvv_state(repo), mvv.current(repo, "main").state) == ("approved", "approved")
+
+
 def test_a_change_other_than_line_endings_is_a_mismatch_for_both(repo: Path) -> None:
     _commit(repo, _decl(LF), CRLF.replace("使命", "別の使命"))
     assert preflight.mvv_state(repo) == "mismatch"
