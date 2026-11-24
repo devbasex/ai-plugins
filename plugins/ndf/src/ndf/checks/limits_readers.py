@@ -101,10 +101,16 @@ def _filled(template: str, value: str, keys: tuple[str, ...]) -> str:
     return name
 
 
+def _vocabulary(row: Mapping[str, str]) -> tuple[str, list[str]]:
+    """`dynamic` の 1 行の `vocabulary` を、コントラクトのファイルと JSON Pointer の `steps` に分ける。"""
+    rel, _, pointer = row["vocabulary"].partition("#")
+    return rel, pointer.split("/")[1:]
+
+
 def dynamic_names(row: Mapping[str, str], data: Any) -> frozenset[str]:
     """`dynamic` の 1 行が組み立てうる方針の名前。語彙の値のうち文字列でないもの（null など）は名前を作らない。"""
     try:
-        values = list(_pointed(data, row["vocabulary"].partition("#")[2].split("/")[1:]))
+        values = list(_pointed(data, _vocabulary(row)[1]))
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise CheckError(f"動的な読み口の語彙を引けない: {row['vocabulary']}: {exc}") from exc
     return frozenset(_filled(row["template"], value, keys) for value, keys in values if isinstance(value, str))
@@ -122,9 +128,9 @@ def settings(rules: dict[str, Any], source: Callable[[str], Source]) -> Settings
     `source` は、コントラクトの保存先からの相対パスのファイルを返す。
     """
     conf = rules["limits"]
-    rels = {row["vocabulary"].partition("#")[0] for row in conf["dynamic"]}
+    rels = {_vocabulary(row)[0] for row in conf["dynamic"]}
     data = {rel: source(rel).contract("動的な読み口の語彙を読めない") for rel in sorted(rels)}
-    dynamic = tuple(_dynamic(row, data[row["vocabulary"].partition("#")[0]]) for row in conf["dynamic"])
+    dynamic = tuple(_dynamic(row, data[_vocabulary(row)[0]]) for row in conf["dynamic"])
     readers = {name: Reader(**row) for name, row in conf["readers"].items()}
     whole = frozenset(row["module"] for row in conf["whole"])
     return Settings(readers, frozenset(conf["tables"]), whole, dynamic)
