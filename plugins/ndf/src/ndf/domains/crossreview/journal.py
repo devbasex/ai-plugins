@@ -44,7 +44,7 @@ JUDGED = "judged_mvv"
 HISTORY = "mvv_history"
 # 見送ったときの MVV の識別子
 SKIPPED_MVV = "skipped_mvv"
-# NDF が機械で確かめて作った指摘の `by` と、その指摘へ修正担当が返した理由の欄
+# NDF が機械で確かめて作った指摘の `by` と、修正担当の結果で終わり方を変えない指摘へ修正担当が返した理由の欄
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 FIXER_REASON = "fixer_reason"
 
@@ -304,8 +304,9 @@ class FindingJournal:
         """修正の結果の指摘ごとの終わり方をマージし、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。
         `mvv` は修正担当を起動したときの MVV の識別子（分からなければ None）で、見送りに残す。
 
-        NDF が機械で確かめて作った指摘への結果は、終わり方を変えず（閉じるのは機械の確かめだけ）、修正担当の理由だけを残す。
-        返す件にも入れない。返した件のうち直した指摘は、修正のコミットを送り直した後に直したへ戻るためである（#4109）。"""
+        NDF が機械で確かめて作った指摘（閉じるのは機械の確かめだけ）と、必ず人の承認が要る操作に当たる指摘（人の承認を待つ）への
+        結果は、終わり方を変えず、修正担当の理由だけを残す。返す件にも入れない。返した件のうち直した指摘は、修正のコミットを
+        送り直した後に直したへ戻るためである（#4109）。"""
         texts = {h.id: h.text for h in handed}
         taken = []
         for item in items:
@@ -314,7 +315,7 @@ class FindingJournal:
             fid = str(item.get("id"))
             reason = _text(item.get("reason"))
             row = self.rows.get(fid)
-            if row is not None and row.get("by") == BY_NDF:
+            if row is not None and (row.get("by") == BY_NDF or row.get(fin.REDLINE)):
                 row[FIXER_REASON] = reason
                 continue
             taken.append(item)
