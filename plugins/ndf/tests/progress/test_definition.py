@@ -429,3 +429,10 @@ def test_current_find_enum_without_the_property_or_its_enum_is_none():
 def test_current_find_enum_keeps_an_empty_enum_and_stops_there():
     tree = {"items": [{"properties": {"answer": {"enum": []}}}, {"properties": {"answer": {"enum": ["later"]}}}]}
     assert _find_enum(tree, "answer") == []
+
+
+@pytest.mark.parametrize("mode", ["standard", "light", "operation", "documentation", "legacy-refactor"])
+def test_cleanup_runs_right_after_deploy(mode):
+    """#4409 の決定 6: 5 つのモードで、クリーンアップはデプロイの直後にある（スプリントの PR はデプロイでマージされる）。"""
+    ids = [s.id for s in definition.load_definition(mode).stages]
+    assert ids.index("cleanup") == ids.index("deploy") + 1

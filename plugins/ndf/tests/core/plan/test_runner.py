@@ -337,3 +337,51 @@ def test_result_of_with_gaps_in_the_given_outputs_is_incomplete(two_steps):
     gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
     out = runner._result_of(two_steps, {"status": "ok", "count": 2}, "SUCCESS", _records(two_steps, 2, {"gaps": [gap]}))
     assert (out["status"], out["cause"]["kind"], out["gaps"]) == ("stopped", "incomplete", [gap])
+
+
+# --- 承認待ちへの回答の記録（#4409 の決定 7） ---
+
+
+@pytest.fixture
+def gated(in_repo) -> runner.Invocation:
+    """承認待ちのステップ merge（on_answer を持つ）のプランの回。"""
+    steps = [H.py_step("merge", "pass", on_answer={"approved": "end", "rejected": "end"})]
+    rel = H.write_plan(in_repo, "g", steps)
+    inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
+    inv.state_dir.mkdir(parents=True, exist_ok=True)
+    return inv
+
+
+def test_routes_answer_with_the_user_as_the_actor(gated):
+    """受け入れ条件 4: 承認待ちの結果の経路は `ndf plan next <プラン> --answer <回答> --by human`。"""
+    argv = runner._routes(gated)["merge"]["approved"]["argv"]
+    assert argv[-4:] == ["--answer", "approved", "--by", "human"]
+
+
+def test_the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
+    runner.write_json(runner.presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p1"})
+    runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "approved", "human")
+    got = json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))
+    assert (got["step"], got["answer"], got["by"], got["run"], got["presented_id"]) == ("merge", "approved", "human", gated.run_id, "p1")
+
+
+def test_the_answer_record_without_a_presented_id_holds_null(gated):
+    runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "rejected", "human")
+    assert json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))["presented_id"] is None
+
+
+def test_the_step_result_carries_the_presented_id_of_a_gate():
+    from ndf.core.plan import steps
+
+    step = model.Step(id="merge", run=["x"])
+    out = steps.outcome_of(step, 10, json.dumps(result.result("ci", "gate", "待つ", metrics={"presented_id": "p1"}, routes={"approved": None})) + "\n")
+    assert out["presented_id"] == "p1"
+    ok = steps.outcome_of(step, 0, json.dumps(result.result("ci", "ok", "済んだ", metrics={"presented_id": "p1"})) + "\n")
+    assert ok["presented_id"] is None
+
+
+def test_next_refuses_an_actor_of_the_wrong_shape(capsys):
+    from ndf.core.plan import cli
+
+    assert cli.main(["next", "p.json", "--answer", "approved", "--by", "人"]) != 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"

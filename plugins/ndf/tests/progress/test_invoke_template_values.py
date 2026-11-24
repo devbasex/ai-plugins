@@ -223,3 +223,40 @@ def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_
     stopped = invoke.plan_failure("close", got.value)
     assert stopped["cause"]["kind"] == "transient" and stopped["cause"]["retry_after"] == 60.0
     assert filled == [] and pending.exists()
+
+
+# --- 工程から組むプランの production_gate と承認の対象（#4409 の決定 4・5） ---
+
+from ndf.core import route as _route  # noqa: E402
+from ndf.progress import invoke as _invoke  # noqa: E402
+from ndf.progress import model as _model  # noqa: E402
+
+
+def _stage_run(name: str, gated: bool = True, approved=None) -> _invoke.StageRun:
+    return _invoke.StageRun("plan", name, {}, (), "none", "s", {}, approved=approved, gated=gated)
+
+
+@pytest.mark.parametrize(
+    ("name", "gated", "want"),
+    [("merge", False, "defer"), ("plan-to-spec", False, "defer"), ("design-merge", True, "stale"), ("design-merge", False, "defer")],
+)
+def test_stage_plans_choose_how_an_unapproved_production_merge_ends(name, gated, want):
+    t = _route.templates()[name]
+    assert _invoke._fill_production_gate(t, _stage_run(name, gated))["production_gate"] == want
+
+
+def test_templates_outside_the_table_keep_the_stop_default():
+    assert "production_gate" not in _invoke._fill_production_gate(_route.templates()["fix"], _stage_run("fix"))
+
+
+def test_release_takes_the_approved_head_and_base_from_the_answer():
+    """利用者の回答と MVV 判定が通した回答（`service:mvv`）のどちらの seen からも同じ値を作る。旧版の回答は空。"""
+    t = _route.templates()["release"]
+    user = {"head": "h", "material_sha256": "m", "repo": "o/r", "pr": 8, "base": "main", "production": True}
+    held = {"gate": "release", "skip": True, "head": "h", "target": {"repo": "o/r", "pr": 8, "base": "main", "head": "h", "production": True}}
+    mvv, _ = _model.mvv_answer("release-gate", "listen", "approved", held, "q")
+    for seen in (user, mvv["seen"]):
+        got = _invoke._fill_production_gate(t, _stage_run("release", approved=seen))
+        assert (got["approved_head"], got["approved_base"]) == ("h", "main")
+    old = _invoke._fill_production_gate(t, _stage_run("release", approved={"head": "h", "material_sha256": None}))
+    assert (old["approved_head"], old["approved_base"]) == ("h", "")
