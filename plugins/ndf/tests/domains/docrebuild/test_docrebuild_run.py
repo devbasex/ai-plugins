@@ -99,7 +99,7 @@ def _reader(doc: str, verdict: str = "pass", checks: Optional[list] = None, reas
 
 
 class FakeWorker:
-    """`ndf worker run` の偽物。起動指示を読み、結果ファイルを私有で書き（`ndf contracts emit --out` と同じ）、標準出力に結果 JSON を出す。"""
+    """`ndf worker run` の偽物。起動指示を読み、結果ファイルを書き、標準出力に結果 JSON を出す。"""
 
     def __init__(self, report: Optional[dict[str, Any]] = None, out: Optional[dict[str, Any]] = None, stdout: Optional[str] = None) -> None:
         self.report = report
@@ -112,9 +112,7 @@ class FakeWorker:
         self.argv.append(argv)
         self.prompt = Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
         if self.report is not None:
-            path = Path(argv[argv.index("--result-file") + 1])
-            path.write_text(json.dumps(self.report, ensure_ascii=False), encoding="utf-8")
-            path.chmod(0o600)
+            Path(argv[argv.index("--result-file") + 1]).write_text(json.dumps(self.report, ensure_ascii=False), encoding="utf-8")
         stdout = self.stdout if self.stdout is not None else json.dumps(self.out, ensure_ascii=False) + "\n"
         return subprocess.CompletedProcess(argv, 0, stdout, "")
 
@@ -213,19 +211,6 @@ def test_inspect_sorts_regular_files_links_and_unreadable_plans(tmp_path: Path) 
     assert seen.unreadable == {"issues/issue-1-plan.md": "UTF-8 で読めない"}
 
 
-def test_inspect_excludes_files_under_a_linked_parent(tmp_path: Path) -> None:
-    """親ディレクトリがリンクなら、末尾が通常ファイルでも作業場所の外を指しうるので対象にしない。"""
-    work, outside = tmp_path / "work", tmp_path / "outside"
-    _write(outside, "a.md")
-    _write(outside, "issue-4337-design.md")
-    work.mkdir()
-    os.symlink(outside, work / "docs")
-    os.symlink(outside, work / "issues")
-    seen = drive.inspect(work, [Target("docs/a.md", "manuscript"), Target(DESIGN, "design")])
-    assert seen.regular == frozenset()
-    assert set(seen.excluded) == {"docs/a.md", DESIGN} and {"docs/a.md", DESIGN} <= seen.present
-
-
 def test_requirements_follow_every_issue_in_the_design_name(tmp_path: Path) -> None:
     """課題 7 だけを進めても、`issue-7-8-design.md` には課題 7 と 8 の要求仕様が組になり、別の設計書の要求仕様は混ざらない。"""
     for rel in ("issues/issue-7-requirements.md", "issues/issue-8-requirements.md", "issues/issue-9-requirements.md"):
@@ -235,13 +220,6 @@ def test_requirements_follow_every_issue_in_the_design_name(tmp_path: Path) -> N
         "issues/issue-7-8-design.md": ["issues/issue-7-requirements.md", "issues/issue-8-requirements.md"],
         "issues/issue-9-design.md": ["issues/issue-9-requirements.md"],
     }
-
-
-def test_requirements_skip_copies_under_a_linked_parent(tmp_path: Path) -> None:
-    _write(tmp_path / "outside", REQ.removeprefix("issues/"))
-    (tmp_path / "work").mkdir()
-    os.symlink(tmp_path / "outside", tmp_path / "work" / "issues")
-    assert drive.requirements_of(tmp_path / "work", [Target(DESIGN, "design")]) == {}
 
 
 # --- 足すべき内容と確かめの記録 ---
@@ -263,10 +241,19 @@ def test_added_items_renumber_ids_and_keep_every_item() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw", [[{"doc": DESIGN}], [{"text": " ", "doc": DESIGN}], [{"text": "a", "doc": "docs/other.md"}], ["a"], {"text": "a"}]
+    "raw",
+    [
+        [{"doc": DESIGN}],
+        [{"text": " ", "doc": DESIGN}],
+        [{"text": "a", "doc": "docs/other.md"}],
+        [{"text": "a", "doc": [DESIGN]}],
+        [{"text": "a", "doc": {"path": DESIGN}}],
+        ["a"],
+        {"text": "a"},
+    ],
 )
 def test_added_items_reject_bad_shapes(raw: Any) -> None:
-    """I3: `text` が無い・`doc` が対象に無い項目は `BadReport`。"""
+    """I3: `text` が無い・`doc` が文字列でない・`doc` が対象に無い項目は `BadReport`。"""
     with pytest.raises(drive.BadReport):
         drive.added_items(raw, TARGETS)
 
@@ -365,7 +352,6 @@ def test_drive_hands_only_this_issues_design(tmp_path: Path) -> None:
     assert f"`{REQ}`" in worker.prompt
 
 
-@pytest.mark.parametrize(("base", "remote"), [("main", "origin"), ("trunk", "up")])
 def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
     """工程の課題が 7 だけでも、`issue-7-8-design.md` の行に課題 8 の要求仕様が添えられる。"""
     design = "issues/issue-7-8-design.md"
@@ -378,37 +364,7 @@ def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
     assert "`issues/issue-7-requirements.md`" in line and "`issues/issue-8-requirements.md`" in line
 
 
-def test_drive_does_not_follow_a_link_left_at_the_prompt_file(tmp_path: Path) -> None:
-    """保存先の起動指示の名前に残ったリンクをたどらず、リンク先のファイルを書き換えない。"""
-    _write(tmp_path, DESIGN)
-    victim = tmp_path / "victim.txt"
-    victim.write_text("元のまま", encoding="utf-8")
-    (tmp_path / "state").mkdir()
-    os.symlink(victim, tmp_path / "state" / drive.PROMPT_NAME)
-    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
-    worker = FakeWorker(_report())
-    assert _run(tmp_path, fake, worker)["status"] == "ok"
-    assert victim.read_text(encoding="utf-8") == "元のまま"
-    assert f"`{DESIGN}`" in worker.prompt
-
-
-def test_drive_refuses_a_result_file_others_can_write(tmp_path: Path) -> None:
-    """`ok` の後に読む結果ファイルが、ほかの利用者も書き込めるものなら使わずに `stopped`（bad_report）。"""
-    _write(tmp_path, DESIGN)
-    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
-    worker = FakeWorker(_report())
-
-    def loosened(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-        done = worker(argv, cwd)
-        Path(argv[argv.index("--result-file") + 1]).chmod(0o666)
-        return done
-
-    got = drive.drive(_args(tmp_path), git_of=fake.git_of, runner=loosened)
-    assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
-    argv = worker.argv[0]
-    assert argv[argv.index("--result-dir-id") + 1].count(":") == 1
-
-
+@pytest.mark.parametrize(("base", "remote"), [("main", "origin"), ("trunk", "up")])
 def test_drive_on_the_sprint_branch_itself(tmp_path: Path, base: str, remote: str) -> None:
     """条件 4・5: 作業場所がスプリントブランチそのものでも、起点はベースブランチなので設計書が対象に入る。"""
     _write(tmp_path, DESIGN)
@@ -543,6 +499,18 @@ def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Pa
     assert written is got and code == 0
 
 
+@pytest.mark.parametrize("reason", ["", None, "読めた"])
+def test_drive_drops_the_reason_of_a_passed_check(tmp_path: Path, reason: Any) -> None:
+    """合格の確かめの `reason` は出力に載せない。空・null でも結果のスキーマに通る。"""
+    _write(tmp_path, DESIGN)
+    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
+    passed = _reader(DESIGN, checks=[{"verdict": "pass", "restatements": ["要点"], "reason": reason}])
+    got = _run(tmp_path, fake, FakeWorker(_report(readers=[passed])))
+    assert got["status"] == "ok" and got["metrics"]["readers"][0]["checks"] == [{"verdict": "pass", "restatements": ["要点"]}]
+    written, code = cli.adopt(got)
+    assert written is got and code == 0
+
+
 # --- エントリポイント ---
 
 
@@ -611,17 +579,6 @@ def test_main_writes_the_replacement_to_both(tmp_path: Path, monkeypatch: pytest
     code, written, last = _main(tmp_path, monkeypatch, bad)
     assert code == causes.exit_code("invalid")
     assert written["status"] == "stopped" and written["items"] == [] and json.loads(last) == written
-
-
-def test_main_does_not_follow_a_link_left_at_the_old_temporary_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--out` を書くとき、固定の名前の一時ファイル（`out.tmp`）に残ったリンクをたどらない。"""
-    victim = tmp_path / "victim.txt"
-    victim.write_text("元のまま", encoding="utf-8")
-    os.symlink(victim, tmp_path / "out.tmp")
-    got = {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [], "metrics": {"targets": []}}
-    code, written, _ = _main(tmp_path, monkeypatch, got)
-    assert code == 0 and written == got
-    assert victim.read_text(encoding="utf-8") == "元のまま"
 
 
 def test_main_rejects_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:

@@ -171,7 +171,9 @@ def test_standard_sprint_without_the_rebuild_setting_launches_the_default_comman
     組み直すステップに `ndf document-rebuild run` と `--out` が入る。
 
     確かめるのはプランの引数だけなので、ブランチ名は git の境界（`invoke._branch_of`）の偽物から返し、2 つのプランを
-    組んだ所で止める。集めた時点（`gathered`）を使う工程「コードレビュー」まで進まないので、SHA は git から求めない。
+    組んだ手で止める。設計の承認の後の 1 手は工程「コードレビュー」まで続けて流れ、集めた時点（`gathered`）が偽の SHA
+    なのでそこで止まるが、2 つのプランはその前に組み終わっている。そのため SHA は git から求めず、止まったかは
+    2 つのプランが組まれていないときだけ確かめる。
     """
     monkeypatch.setattr(invoke, "_branch_of", lambda run: BRANCH)
     s = _sprint(repo, monkeypatch, "0" * 40, project=PROJECT_WITHOUT_REBUILD)
@@ -179,9 +181,9 @@ def test_standard_sprint_without_the_rebuild_setting_launches_the_default_comman
     wanted = {"design", "document-rebuild"}
     for _ in range(MAX_TURNS):
         out = _turn(st, tid, repo, s.env)
-        assert out["status"] in ("ok", "gate"), out
         if wanted <= {p["name"].removesuffix(f"-{BRANCH}") for p in s.plans}:
             break
+        assert out["status"] in ("ok", "gate"), out
     else:
         pytest.fail("設計とドキュメント再構成のプランが組まれない")
     plans = {p["name"].removesuffix(f"-{BRANCH}"): p for p in s.plans}

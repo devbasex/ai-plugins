@@ -156,7 +156,7 @@ flowchart TD
 
 **設計書を省いた行**: 最初の `##` の見出しより前にある、行頭が `省いた文書: 設計書` で、その直後が `（` か行末の行である。行全体は照合しない。`implementation-plan` の手順が書く行は、後ろに満たした条件の値が続くからである。当たるのは `省いた文書: 設計書（課題 1・公開インタフェース 変わらない・触るファイル 3・新設する関数 0・シグネチャを変える関数 0）` のような行で、`省いた文書: 実行計画（課題 1・PR 1）` や `省いた文書: 詳細設計書（別ファイル）（…）` は当たらない。
 
-**通常ファイルに限る**: 種類に合うパスを作業場所で `lstat` し、通常ファイルだけを対象にする（I1）。末尾の名前だけでなく、作業場所から末尾の手前までの親ディレクトリも 1 つずつ `lstat` し、リンクかディレクトリでないものがあれば外す。親ディレクトリがリンクだと、末尾が通常ファイルでも作業場所の外のファイルを指すからである。実装計画の頭は、こうして通常ファイルと確かめたものだけを読む。外したパス（シンボリックリンク・リンクの親ディレクトリの下にあるもの・サブモジュール・作業場所に無いもの）は `warnings` に 1 件ずつ載せる。要求仕様のコピーも同じ確かめを通ったものだけを起動指示に載せる。
+**通常ファイルに限る**: 種類に合うパスを作業場所で `lstat` し、通常ファイルだけを対象にする（I1）。実装計画の頭は、`lstat` で通常ファイルと確かめたものだけを読む。外したパス（シンボリックリンク・サブモジュール・作業場所に無いもの）は `warnings` に 1 件ずつ載せる。
 
 **終わり方**:
 
@@ -178,8 +178,6 @@ flowchart TD
 
 1. 標準出力の結果 JSON を先に読む。`_cmd_run`（`core/worker.py`）が結果ファイルを検査した後の `status`・`kind`・`gaps` である。`ok` でなければ、結果ファイルを読まずに `stopped` を返す（I7）
 2. 標準出力が `ok` のときだけ、worker の結果ファイルを読み、足すべき内容（`items`）と `metrics.readers` を取る。標準出力の `items` はセッションの情報（`{"kind": "session", …}`）なので、足すべき内容として読まない
-
-保存先（`--state-dir`）は、起動指示を書く前に 1 回だけ開き（`worker_paths.open_or_create`）、結果ファイルを読み終えるまで同じ記述子を持つ。起動指示は既存のファイルを開かずに私有の新しいファイルとして置き換える（`write_file(private=True)`）。保存先に残ったリンクをたどって、別のファイルを上書きしないためである。`ndf worker run` には `--result-dir-id` で開いた保存先の識別子を渡し、同じ保存先かを突き合わせさせる。結果ファイルは、同じ記述子から、呼んだ利用者が持ち、ほかの利用者が書き込めないものだけを読む（`read_file(owned=True)`）。読めなければ `stopped`（`bad_report`）にする。
 
 worker の `gate` は `stopped` にする。ステップの結果の `routes` は、`approved` に承認したときの行き先を、`rejected` に却下したときの行き先を持つ。ステップが `gate` を返すと、プランの実行（`runner._result_of`）は `routes` に何を書いたかを見ずに、`approved` の行き先（push の側）を次のステップにする。そのため `gate` のまま返すと、承認だけで組み直しと確かめを飛ばして push に進む。止まった後は、プランを打ち直す（`ndf progress retry`）。組み直すステップが対象を選び直し、worker を新しく起動する。
 
@@ -209,14 +207,7 @@ worker の `gate` は `stopped` にする。ステップの結果の `routes` �
 
 `checks` の上限 2 は、`document-rebuild` の手順の「回数」（1 回の確認につき立場ごとに 2 回まで）から決まる。設計書と原稿は、文書の書き方の基準の表で読み手の立場が 1 つに決まるからである（立場が 3 つあるのは要求仕様だけで、要求仕様のコピーは組み直さない）。表に合わない記録は欠け（I4）とする。`self` は `items` にも `warnings` にも足さず、記録にだけ残す。読み手役が確かめたことにはせず、確かめた範囲を偽らない（Value 13「確かめたことだけが済んだとされる」）。
 
-**不合格の扱い**: 読み手役が不合格とした文書は、止めずに組み直しの結果ファイル（`{state_dir}/rebuild.json`）の `items` と `warnings` に残す（I5）。`document-rebuild` の手順は、2 回目も不合格なら直さずに報告し、進めるかを承認する人が判断すると定めるが、コードは承認ゲートを足さない。結果ファイルの `items` を後ろで誰が読むかは、工程によって違う。
-
-| 工程 | 結果ファイルの `items` を読むもの | 直さずに残った項目 |
-| --- | --- | --- |
-| 設計 | 同じプランの次のステップ（`cross-review --findings`）が 1 件ずつ直すか見送る | 設計承認ゲートで承認する人が見る |
-| ドキュメント再構成 | 無い。プランは組み直しの後に push するだけで、工程「ドキュメントレビュー」の `cross-review` は `--findings` を受けず、スプリントの差分だけを見る | 結果ファイルにだけ残り、レビューにもリリース承認の資料にも載らない |
-
-ドキュメント再構成の結果をドキュメントレビューとリリース承認の資料へ渡す仕組みは、この設計の範囲に含めない（今の工程の間にも受け渡しが無い）。課題「ドキュメント再構成で読み手役が不合格とした文書と足すべき内容が、ドキュメントレビューとリリース承認に届かない」（ https://github.com/devbasex/ai-plugins/issues/4459 ）で扱う。
+**不合格の扱い**: 読み手役が不合格とした文書は、止めずに組み直しの結果ファイル（`{state_dir}/rebuild.json`）の `items` と `warnings` に残す（I5）。`document-rebuild` の手順は、2 回目も不合格なら直さずに報告し、進めるかを承認する人が判断すると定めるが、コードは承認ゲートを足さない。結果ファイルの `items` を後ろで読むものは工程によって違う。工程「設計」では、同じプランの次のステップ（`cross-review --findings`）が 1 件ずつ直すか見送り、直さずに残った項目を設計承認ゲートで承認する人が見る。工程「ドキュメント再構成」では読むものが無い。プランは組み直しの後に push するだけで、工程「ドキュメントレビュー」の `cross-review` は `--findings` を受けず、スプリントの差分だけを見る。そのため不合格の項目は結果ファイルにだけ残り、レビューにもリリース承認の資料にも載らない。この受け渡しは設計の範囲に含めず（今の工程の間にも受け渡しが無い）、課題「ドキュメント再構成で読み手役が不合格とした文書と足すべき内容が、ドキュメントレビューとリリース承認に届かない」（ https://github.com/devbasex/ai-plugins/issues/4459 ）で扱う。
 
 ### 既定のコマンド
 
@@ -487,7 +478,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
+| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/docs/contracts/index.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設）、`plugins/ndf/tests/core/test_issue_docs.py`（新設）、`plugins/ndf/tests/adapters/test_git.py` |
 
 `plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。このファイルは、ndf の作り直し（#3347）でモジュールを受け持つ子の課題の表で、各行の持ち主はその子の呼び名である。`ndf.progress.rebuild_values` を `P1b`（#3092。`ndf.progress.invoke` などプランの実行の準備の持ち主）、`ndf.domains.docrebuild` を `M1`（#3300。`ndf.domains.loop` の持ち主）、`ndf.core.issue_docs` を `C3`（#3292。`ndf.core.route` の持ち主）の `packages` に足す。持ち主は、新しいモジュールと同じ層で同じ部品を使うモジュールの持ち主から選んだ。`rebuild_values` は `invoke` と同じく工程を始める前の準備なので `P1b` にする。`docrebuild` は、`loop` と同じ domains 層で worker を起動して結果を読むので、`ndf.core.worker` の持ち主 `C5` を `needs` に既に持つ `M1` にする。`issue_docs` は、`M1` のモジュール（`design_tests`・`docrebuild`）と `P1b` の `refactor_values` の両方が読む。規則 `child-deps` は、子が読む別の子のモジュールの持ち主が、その子の `needs` の推移の閉包に入ることを求める（IG1）。`M1` は既に `P1b` を `needs` に持つので、`issue_docs` を `M1` に置くと `P1b` から `M1` を読むことになり、この規則に反する。そこで、`P1b` と `M1` の両方が `needs` に直接持つ `C3` に置く。`C3` は同じ core 層で、起動のコマンドを組む `route` の持ち主である。`C3` は閉じた子だが、持ち主と IG1 を見る検査（`checks/child_deps.py` の `owner`・`closure`・`import_findings`）は、子が閉じているかを見ない。`needs` は変えない。
 
