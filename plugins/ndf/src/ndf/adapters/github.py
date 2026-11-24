@@ -995,10 +995,11 @@ _ISSUE_PAGE = (
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
 )
 
-# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）。1 ブランチ専用の照会なので、
+# フォークの同名ブランチが先に並んでも往復が増えないよう、上限の件数（`PER_PAGE`）で読む
 _OPEN_HEAD_PAGE = (
     "query($owner: String!, $name: String!, $head: String!, $after: String) {"
-    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PULLS_PER_HEAD},"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PER_PAGE},"
     f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
