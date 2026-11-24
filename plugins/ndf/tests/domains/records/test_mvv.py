@@ -66,6 +66,7 @@ def test_reusable_does_not_go_back_past_an_excluded_row_that_may_be_the_latest()
     follow = md.judged_row("k", md.FOLLOW, "t1", "/m", {})
     assert md.reusable([follow], "k", [(1, {"key": "k"})]) is None
     assert md.reusable([follow], "k", [(1, None)]) is None and md.reusable([follow], "k", [(1, {})]) is None
+    assert md.reusable([follow], "k", [(1, {"key": None})]) is None and md.reusable([follow], "k", [(1, {"key": 7})]) is None
     assert md.reusable([follow], "k", [(1, {"key": "other"})]) == follow
     assert md.reusable([follow], "k", [(0, {"key": "k"}), (0, None)]) == follow
 

@@ -149,14 +149,14 @@ def reusable(
 
     `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない・形が違う）は呼び手が除き、
     `excluded`（それより前の読めた行の数と、辞書として読めた中身）で渡す。最新の判定より後に、同じ入力の判定かもしれない除いた行
-    （キーが同じか、キーを読めない）があれば、それが最新の判定かもしれないので None（古い「従う」へさかのぼらない）。
+    （キーが同じか、キーを文字列として読めない）があれば、それが最新の判定かもしれないので None（古い「従う」へさかのぼらない）。
     """
     last_mvv_validation: Optional[Mapping[str, Any]] = None
     seen = 0
     for n, r in enumerate(rows, 1):
         if r.get("kind") == MVV_VALIDATION_SPRINT and r.get("key") == key:
             last_mvv_validation, seen = r, n
-    if any(before >= seen and (raw is None or "key" not in raw or raw["key"] == key) for before, raw in excluded):
+    if any(before >= seen and (raw is None or not isinstance(raw.get("key"), str) or raw["key"] == key) for before, raw in excluded):
         return None
     if last_mvv_validation is None or last_mvv_validation.get("verdict") != FOLLOW:
         return None

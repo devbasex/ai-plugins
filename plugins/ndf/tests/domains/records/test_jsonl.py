@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -71,6 +73,34 @@ def test_read_checked_validates_each_row_once_and_keeps_reporting_the_broken_lin
     assert read() == (["05", "03"], [2, 5], 5)
     Path(f"{path}.checked").write_text("[", encoding="utf-8")
     assert read() == (["05", "03"], [2, 5], 5)
+
+
+def _wanted(row: Mapping[str, Any]) -> bool:
+    return row.get("agent_id") == "a"
+
+
+def test_read_checked_returns_the_rows_when_the_mark_cannot_be_written(tmp_path, capsys):
+    path = write(tmp_path / "u.jsonl", json.dumps({**ROW, "agent_id": "a"}))
+    Path(f"{path}.checked").mkdir()
+    rows, broken = jsonl.read_checked(path, kind="usage", wanted=_wanted)
+    assert len(rows) == 1 and broken == [] and "位置を書けない" in capsys.readouterr().err
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["u.jsonl", "u.jsonl.checked"]
+
+
+def test_read_checked_does_not_write_through_a_symbolic_link(tmp_path):
+    path, other = write(tmp_path / "u.jsonl", json.dumps(ROW)), write(tmp_path / "other", "元の中身")
+    mark = Path(f"{path}.checked")
+    mark.symlink_to(other)
+    jsonl.read_checked(path, kind="usage", wanted=_wanted)
+    assert other.read_text(encoding="utf-8") == "元の中身\n" and not mark.is_symlink()
+
+
+def test_read_checked_reads_from_the_start_when_the_broken_lines_of_the_mark_changed(tmp_path):
+    path = write(tmp_path / "u.jsonl", json.dumps({**ROW, "agent_id": "a"}))
+    first = jsonl.read_checked(path, kind="usage", wanted=_wanted)
+    mark = Path(f"{path}.checked")
+    mark.write_text(json.dumps({**json.loads(mark.read_text(encoding="utf-8")), "broken": [[1, "x"]]}), encoding="utf-8")
+    assert jsonl.read_checked(path, kind="usage", wanted=_wanted) == first and len(first[0]) == 1
 
 
 def test_read_checked_stops_on_a_newer_version_every_time(tmp_path):

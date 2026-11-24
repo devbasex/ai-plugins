@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
+import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,7 +46,7 @@ def read_checked(path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]],
     """`wanted` が真の行と、ファイル全体の除いた行（錠は呼び手が持つ）。形は、前の呼び出しより後に足された行だけ確かめる。
 
     確かめ終えた位置は `<ファイル>.checked` に置く。位置より前の中身か種類の形が変われば、初めから確かめ直す。新しいバージョンの行が
-    あれば位置を進めずに `InternalError`。
+    あれば位置を進めずに `InternalError`。位置を書けなくても読んだ結果を返す（次の呼び出しが同じ所から確かめ直す）。
     """
     if not path.is_file():
         return [], []
@@ -54,14 +57,31 @@ def read_checked(path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]],
     # 書きかけの最後の行は次の追記で変わるので、改行で終わる所までを確かめ終えた位置にする
     end = data.rfind(b"\n") + 1
     if end > size:
-        held = [*broken, *(b for b in bad if b.line <= data.count(b"\n"))]
-        body = {"size": end, "digest": _digest(data[:end], shape), "broken": [[b.line, b.reason] for b in held]}
-        mark.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        whole = data.count(b"\n")
+        _save_mark(mark, data[:end], shape, [*broken, *(b for b in bad if b.line <= whole)])
     return rows + [r for r in added if wanted(r)], broken + bad
 
 
-def _digest(data: bytes, shape: str) -> str:
-    return hashlib.sha256(shape.encode("utf-8") + data).hexdigest()
+def _digest(data: bytes, shape: str, broken: list[Broken]) -> str:
+    """確かめ終えた中身・種類の形・位置・除いた行をまとめて見分ける値（どれかが変われば別の値になる）。"""
+    head = json.dumps([shape, len(data), [[b.line, b.reason] for b in broken]])
+    return hashlib.sha256(head.encode("utf-8") + data).hexdigest()
+
+
+def _save_mark(mark: Path, data: bytes, shape: str, broken: list[Broken]) -> None:
+    """確かめ終えた位置を書く。新しく作った一時ファイルを付け替えるので、`mark` がシンボリックリンクでもリンク先を変えない。"""
+    body = {"size": len(data), "digest": _digest(data, shape, broken), "broken": [[b.line, b.reason] for b in broken]}
+    try:
+        fd, name = tempfile.mkstemp(prefix=f".{mark.name}.", suffix=".tmp", dir=mark.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(body, ensure_ascii=False))
+            os.replace(name, mark)
+        except OSError:
+            os.unlink(name)
+            raise
+    except OSError as exc:  # 位置は作り直せるので、書けなくても記録の読み書きを止めない
+        print(f"記録を確かめ終えた位置を書けない: {exc}", file=sys.stderr)
 
 
 def _load_mark(mark: Path, data: bytes, shape: str) -> tuple[int, list[Broken]]:
@@ -72,7 +92,7 @@ def _load_mark(mark: Path, data: bytes, shape: str) -> tuple[int, list[Broken]]:
         broken = [Broken(int(line), str(reason), 0, None) for line, reason in held["broken"]]
     except (OSError, ValueError, TypeError, KeyError):  # 位置は作り直せるので、読めなければ初めから確かめる
         return 0, []
-    return (size, broken) if digest == _digest(data[:size], shape) else (0, [])
+    return (size, broken) if digest == _digest(data[:size], shape, broken) else (0, [])
 
 
 def _known_rows(data: bytes, kind: str, wanted: Callable[[Mapping[str, Any]], bool], skip: set[int]) -> list[dict[str, Any]]:
