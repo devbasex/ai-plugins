@@ -360,20 +360,41 @@ def _came_out(g: git.Git, commit: str, rows: Sequence[_Row]) -> list[_Row]:
     return out
 
 
+class _Candidate(NamedTuple):
+    """根拠の記述が本文に増えうるファイル。`added` は足した行（ファイルごとに 1 回だけ求める。候補の行ごとに全 hunk を走査
+    しない）、`fenced` はコードブロックの囲みの行を変えたか。"""
+
+    file: DiffFile
+    added: Mapping[int, str]
+    fenced: bool
+
+
+def _diff_text(g: git.Git, target: Target) -> str:
+    """確かめる対象の差分（全差分のファイルがあればその中身、無ければ git から読む）。"""
+    if target.full_diff is not None:
+        return target.full_diff.read_bytes().decode("utf-8")
+    return review_diff(g, target.merge_base, target.head)
+
+
+def _candidates(files: Sequence[DiffFile]) -> list[_Candidate]:
+    """`files` のうち、コードブロックの囲みの行を変えたか、根拠の記述の書き出しのある行を足したもの。"""
+    found = [_Candidate(file, added, _fence_changed(file, added)) for file in files for added in (file.added,)]
+    return [c for c in found if c.fenced or any(_cites(text) for text in c.added.values())]
+
+
 def _new_rows(g: git.Git, target: Target) -> list[_Row]:
     """PR で本文に増えた根拠の記述: 足した行と、変わっていないがコードブロックの囲みを変えたので本文に出た行。"""
-    held = target.full_diff.read_bytes().decode("utf-8") if target.full_diff is not None else None
-    diff = held if held is not None else review_diff(g, target.merge_base, target.head)
-    changed_files = _diff_files(diff)
-    # 足した行はファイルごとに 1 回だけ求める（候補の行ごとに全 hunk を走査しない）
-    new = {file.path: file.added for file in changed_files}
-    marked = [(file, _fence_changed(file, new[file.path])) for file in changed_files]
-    files = [(file, fenced) for file, fenced in marked if fenced or any(_cites(text) for text in new[file.path].values())]
-    missing = [file.path for file, _ in files if file.path not in target.docs]
+    candidates = _candidates(_diff_files(_diff_text(g, target)))
+    missing = [c.file.path for c in candidates if c.file.path not in target.docs]
     texts = {**target.docs, **(_committed_texts(g, target.head, missing) if missing else {})}
-    found = [(row, fenced) for file, fenced in files for row in _cited_rows(file, texts[file.path])]
-    added = [row for row, _ in found if row.line in new[row.file.path]]
-    kept = [row for row, fenced in found if fenced and row.line not in new[row.file.path]]
+    added: list[_Row] = []
+    kept: list[_Row] = []
+    for candidate in candidates:
+        for row in _cited_rows(candidate.file, texts[candidate.file.path]):
+            if row.line in candidate.added:
+                added.append(row)
+            elif candidate.fenced:
+                kept.append(row)
     return sorted([*added, *_came_out(g, target.merge_base, kept)], key=lambda row: (row.file.path, row.line, row.part))
 
 
