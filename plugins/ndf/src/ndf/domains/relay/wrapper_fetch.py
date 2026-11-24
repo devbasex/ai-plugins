@@ -132,11 +132,14 @@ class FetchSteps:
         for name, got in f.results():
             if isinstance(got, Exception):
                 failed.append({"account": name, "error": type(got).__name__})
-            elif got is not None and got.error == "shape" and not f.shape_told:
+                continue
+            if got is None:
+                continue
+            if got.error == "shape" and not f.shape_told:
                 f.shape_told = True
                 self._say(SHAPE_LINE)
                 self._log({"kind": "usage_shape", "account": name, "items": list(got.missing)})
-            elif got is not None and got.error is None:
+            elif got.error is None:
                 f.shape_told = False
         if failed:
             self._log({"kind": "usage_fetch_failed", "count": len(failed), "sample": failed[:10]})
