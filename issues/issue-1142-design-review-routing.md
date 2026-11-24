@@ -3,7 +3,7 @@
 #1142（NDF の作り直し）の設計レビュー 4 巡で見つかった項目 182 件を、行き先の子・順番・新設か追補か・要求の行の 4 つで 1 行ずつ割り当て、11.0.0 で解くか 11.x へ回すか（版）を添えた表である。あわせて、#1142 の要求の受け入れ条件 47 行の持ち主の子を決める。
 
 - 決めた理由（子を分ける基準・追補の単位・範囲を広げるか 11.x へ回すか・版・物差し・閉じる操作・依存の更新）は [issue-3395-design.md](issue-3395-design.md) にある
-- この表が正本である。子の表のコピー（`plugins/ndf/src/ndf/checks/children.json`）の `review_items` は、この表から `ndf check --write-spec` で生成する（手で写さない）。形と規則は [issue-3684-3667-2339-design-detail.md](issue-3684-3667-2339-design-detail.md) の「設計レビューの項目の行き先」にある
+- この表が正本である。子の表のコピー（`plugins/ndf/src/ndf/checks/children.json`）の `review_items` は、この表から `ndf check --write-spec` で生成する（手で写さない）。形と規則は [ndf-contract-fact-checks.md](../docs/specifications/ndf-contract-fact-checks.md) の「設計レビューの指摘の対応先」にある
 - 子の中身・先に要るもの・レーンの正本は、詳細設計の「実装計画」（[issue-3347-design-detail.md](issue-3347-design-detail.md#実装計画)）である。この表の「順番」は、設計で足す・分ける子を入れて求め直した値である
 
 ## 列の読み方

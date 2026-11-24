@@ -73,13 +73,13 @@
 | `bin/ndf`・`bin/start.py` | エントリポイント 1 本と、依存の環境の欠けを確かめてから副命令の表（`src/ndf/cli.py` の `COMMANDS`）の各パッケージを呼ぶスクリプト |
 | `bin/ndf-claude` | このプラグインだけを読む claude の起動（`ndf launch-args` の値を使う。決定 74） |
 | `pyproject.toml`・`uv.lock` | 自分の依存の宣言と lock（決定 78） |
-| `contracts/` | 事実の表（`facts/`）・止まった理由（`causes/`）・結果 JSON のスキーマ・上限（`limits/`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
+| `contracts/` | 事実の表（`facts/`・`domains/`）・NDF の記録の型（`schemas/internal/`。[ndf-internal-data-versions.md](ndf-internal-data-versions.md)）・止まった理由（`causes/`）・結果 JSON のスキーマ・上限（`limits/`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
 | `src/ndf/adapters/` | GitHub・git・CI・Markdown・通知・LLM・外部 CLI の呼び出し |
 | `src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を `plugin.json` と環境から求め、旧い置き場を退避する |
 | `src/ndf/core/` | 判断のループ・DBOS の殻（`durable*.py`。置き場・鍵ごとの記録・ロック・退避と片付け・待ちの一覧で、DBOS を import するのはここだけ）・プランの実行（`plan/`）・行き先の選び方・参照・worker の受け渡し・ブランチ戦略 |
 | `src/ndf/progress/` | 工程の定義・進行表の型と保存・`next` と `answer`・承認ゲート・計画とレーン・組み換え |
 | `src/ndf/domains/` | 開発ループ・リリース・中継・hook の判定（決定 88〜96）・cross-refactoring・cross-review・棚卸し・記録・worktree ほか |
-| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`。CI では `script-structure.yml` が打つ）。I1・I3、子の表の規則 `child-deps`、兆候・構造・事実の規則 |
+| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`。CI では `script-structure.yml` が打つ）。I1・I3、子の表の規則 `child-deps`、問題のある作り（兆候）・行数と import の向き（構造）・同じ値の重複（事実）・設定と入出力の文書の一致（規約）のほか、使われない上限・コピーで生まれた重複・記録のキーの名前の規則（一覧は `src/ndf/checks/README.md`） |
 | `src/ndf/testing/` | テスト基盤（隔離・揺れない待ち・同時実行の枠） |
 | `skills/`・`agents/`・`manifests/` | Skill 本文・エージェント定義・配る Skill の表 |
 | `hooks/` | hook の入口（`entry.py`・`boot.py`）と、`ndf hooks render` が作る登録（`claude.json`・`codex.json`） |
@@ -91,7 +91,7 @@
 - 外から `plugins/ndf/` の中を名指す参照は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる
 - 開発の間のジョブ（`plugins/ndf-next/**` だけを見るもの）は消し、`ndf check` は `script-structure.yml` が打つ
 - 旧い状態の置き場の退避と、中継の複製の版の記録は R1 #3758 が入れた（決定 79）
-- 子の表のコピー `children.json` と規則 `child-deps` は残り、閉じていない子の import の向き・順番・レーンを照らす
+- 子の表のコピー `children.json`（設計レビューの項目 `review_items` も持つ）と規則 `child-deps` は残り、コードの import の向きと、完了していない子の順番・レーン（並行して進める組）が表のとおりかを調べる
 
 ### エントリポイント
 
@@ -482,7 +482,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 | `scripted-flow` | 決定 65 | 振り直した（`libraries` の決定 65 と重なる） | [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | 決定 130 |
 | `scripted-flow` | 決定 64 | 移さない（子 Issue の流す順と PR の分け方の作業の決定。結果は各子の本文が持つ） | — | — |
 | `#3395` | 決定 114 | 移した（物差しの決定） | [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | 決定 114 |
-| `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 落とした（決定 121 は入れ替えの前だけに当たる進め方、IY4 は範囲の一覧の条件、ほかは規則 `review-items` が無い。11.x の範囲） | — | — |
+| `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 移さない（決定 121 は入れ替えの前だけの進め方、IY4 は要求の無い項目を範囲の一覧に載せる条件で、確定仕様に残す対象が無い）。IY6（`review_items` は表から生成した結果と一致する）は、11.0.0 の後に [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) の I5 として作った。IY1（項目は表に 1 行だけ）・IY2（対応先は決めた語のどれか）・IY7（完了した子を対応先にしない）は検査を作っていない（11.x の項目の対応先の形だけは I5 が見る） | — | — |
 
 ## テスト観点
 

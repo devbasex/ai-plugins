@@ -15,17 +15,18 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | 3 | 2 回目の失敗。run の番号は違うが、数字を伏せた鍵は同じなので回数が 2 になる |
 | 4 | 判定役がまた同じステップを返す。回数が 2 に達したので、ステップを流さずにプランが「止まった」になる。理由は「ステップ release が同じ原因（exit=1: PR #<数> の CI が失敗: runtime-smoke (agy)（run <数>…）で 2 回失敗した（方針 supervise.step-rerun）。打ち直さずに止める」で、進捗の記録へ `kind: same-cause` の 1 行が書かれる |
 
-**方針と値の一覧はコピーしない。** 一覧の正本は設定そのものと、契約の検査が描く逆引きの表である。
+**方針と値の一覧は、この文書には書かない。** 値は上限の設定のファイルを、方針を使うモジュールはそのファイルの `read_by` を見る。
 
 | 何を | 正本 |
 | --- | --- |
 | 方針の名前と値 | [`plugins/ndf/contracts/limits/`](../../plugins/ndf/contracts/limits/) |
-| 方針ごとの値・何の上限か・引く関数の表（生成物） | [`plugins/ndf/contracts/index.md`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/index.md) の「上限の設定」 |
+| 方針を使うモジュール | 方針のファイルの `read_by`（検査は [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)） |
 | 設定の読み手と監視の工程 × 担当の引き方 | [`lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/limits.py) の冒頭の説明 |
 | 再試行と待ちの止まり方 | [`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py) の冒頭の説明 |
 | 開発ループの各上限の値の意味（監視の上限・無進捗の許容・時間予算など） | [ndf-development-loop-limits.md](ndf-development-loop-limits.md) |
 
-この文書が扱うのは、決定の理由、構成要素の責務と契約、常に成り立つ条件、検査の規則である。
+この文書が扱うのは、決定の理由、構成要素の責務と入出力のコントラクト、常に成り立つ条件、検査の規則である。方針を使うモジュールの指定（`read_by`）と、
+上限と同じ数を持つ定数の検査は [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) にある。
 
 ## コンテキスト
 
@@ -72,7 +73,7 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | 8 | ステップの打ち直しは、判定役の入力を変えずに、判定の後にプランの実行が数えて止める | 判定は言語モデルの答えで同じ入力でも揃わず、止まるかを答えに任せるとテストで縛れない |
 | 9 | 待ちと再試行は次の眠りを残りの秒に縮め、期限の時刻に最後の 1 回を打つ。同じ規則を `retry_call` と `wait_until` の両方に当てる | 設定した上限を使い切ってから止めるため。2 つの関数で規則が分かれると、同じ方針でも打つ回数が関数で変わる |
 | 10 | シェルのスクリプトの数字は検査に入れない | `statusline.sh` は表示のたびに動き、設定を読むと Python の起動（21 ms）が毎回足される |
-| 11 | 方針の名前と設定の対応の検査と、方針ごとに引く関数の表は契約の検査に置く | 構造チェックはコードの形を見る検査で、契約の一覧の逆引きの表を描く役割を持たない |
+| 11 | 方針を使うモジュールの名前を、方針のファイルの `read_by` に書く。実際に使うモジュールと一致するかは `ndf check` の規則 `limit-readers` が調べる。コードに書いた方針の名前が設定にあるかは、コントラクトの検査も調べる | 方針の名前を実行時に組み立てるコードがあり、文字列の検索では使われている方針を「使われていない」と誤る（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)） |
 
 ## 仕様
 
@@ -96,7 +97,8 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | 待ちの部品（`plugins/ndf/scripts/lib/waits.py`） | `retry_call` / `wait_until` が方針を引数に取り、同じ原因の上限・打つ回数・最後の照会・止まった理由を受け持つ。数字の既定値を持たない。`tenacity` を import する唯一のモジュール |
 | ステップの打ち直しの上限（`plugins/ndf/scripts/supervise_lib/rerun.py`） | ステップの失敗ごとに原因の鍵を数え、判定役の打ち直しを方針 `supervise.step-rerun` の回数で止める。`state.py` の `RunState.record` と `engine.py` の `Engine._next_after_judge` から呼ばれる |
 | 構造チェック（`scripts/check-script-structure.py`・`scripts/structure_checks/limits_rules.py`） | 検査の種類 `limit-literal` と `sleep-loop` を持ち、`wrapped` の持ち主の表に `tenacity`（持ち主 `lib/waits.py`）を持つ |
-| 契約の検査（`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/limits_decl.py`） | 設定の形と方針の名前の対応を確かめ、契約の一覧に「上限の設定」の表を描く |
+| コントラクトの検査（この文書のほかの箇所の「契約の検査」。`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/limits_decl.py`） | `plugins/ndf/src/` のコードに書いた方針の名前のファイルがあるかを確かめる |
+| 上限を使うモジュールの検査（`plugins/ndf/src/ndf/checks/limits_readers.py`。規則 `limit-readers`） | 方針を使うモジュールの指定（`read_by`）が、実際に使うモジュールと一致するかを確かめる |
 | 例外リスト（`scripts/script-structure-allow/`） | 待ちのループと、名前の規則に当たるが上限でない数字の行を理由つきで持つ |
 
 ```mermaid
@@ -137,7 +139,7 @@ graph TD
 | I1 | 上限の設定 | 方針の名前は一意で、各方針は `summary` と値を 1 つ以上持つ。秒・間隔は 0 以上の数、倍率は 1 以上の数、打つ回数と同じ原因の上限は 1 以上の整数で、知らないキーを持たない | 読み手が `LimitsError`（理由に設定のパスと方針の名前）。CI では契約の検査が落とす |
 | I2 | 上限の設定 | 設定が無い・壊れている・引いた方針の名前が無い・引いた値が方針に無いとき、部品は組み込みの値へ戻らない | `LimitsError`。エントリポイントは終了コード 1 で止まる |
 | I3 | 上限の設定 | テストと実験版を除く `plugins/ndf/` の Python のコードに、上限の数字のリテラルが無い | 構造チェックの `limit-literal` が落とす |
-| I4 | 上限の設定 | コードが引く方針の名前はすべて設定にあり、設定の方針はすべてどこかのコードが引く（接頭辞で数え上げる `monitor.` の方針は引かれたものとする） | 契約の検査が落とす |
+| I4 | 上限の設定 | コードに書いた方針の名前はすべて設定にある。方針の `read_by` は、実際にその方針を使うモジュールと一致し、使われない方針は無い | 無い名前はコントラクトの検査が、`read_by` の食い違いは `ndf check` の `limit-readers` が落とす |
 | I5 | 上限の設定 | 監視の工程と担当のすべての組で、無進捗の許容 < 監視の上限 < CLI の上限 | `limits.py check` が組を出して終了コード 1 |
 | I6 | 1 回の再試行 | 眠りのループは `lib/waits.py` と、例外リストに理由つきで載った待ちのループだけにある | 構造チェックの `sleep-loop` が落とす |
 | I7 | 1 回の再試行 | `tenacity` を import するのは `lib/waits.py` だけ | 構造チェックの `wrapped` が落とす |
@@ -288,21 +290,21 @@ stateDiagram-v2
 ```
 contracts/limits/
 ├── _meta.json                           # owner（設定を書き換えてよいもの）
-├── monitor.cli-margin.json
-├── supervise.design-stage-read.json
+├── cross-review.secondary-rate-limit.json
 ├── supervise.step-rerun.json
-└── supervise.worktree-lock.json
+└── supervise.worker-run.json
 ```
 
-`contracts/limits/supervise.design-stage-read.json`:
+`contracts/limits/cross-review.secondary-rate-limit.json`:
 
 ```json
 {
-  "summary": "設計の結果の gh / git の一時的な失敗の打ち直し。…",
-  "seconds": 120,
-  "per_call": 30,
-  "interval": 15,
-  "same_cause": 3
+  "summary": "GitHub の二次レート制限（403・429・GraphQL の誤り）に当たったときの打ち直しと、…",
+  "attempts": 4,
+  "interval": 60,
+  "factor": 2,
+  "max_interval": 600,
+  "read_by": ["ndf.adapters.github_limits", "ndf.domains.crossreview.throttle_decide"]
 }
 ```
 
@@ -310,7 +312,8 @@ contracts/limits/
 | --- | --- | --- | --- |
 | ファイル名（方針の名前） | str | — | `<領域>.<用途>`。領域は Skill の名前、`*_lib` の名前から `_lib` を除いたもの、`lib/` の部品はその部品の名前（例 `post-queue`）、エントリポイントのスクリプトはその名前。用途は小文字のケバブケース |
 | `owner`（`_meta.json`） | str | 許さない | 設定を書き換えてよいもの（子 Issue の記号とパッケージ） |
-| `summary` | str | 許さない | 何の上限か。理由の文と契約の一覧に出る |
+| `summary` | str | 許さない | 何の上限か。理由の文に出る |
+| `read_by` | list[str] | 許さない（1 つ以上） | 方針を使うモジュールの名前（例 `ndf.core.worker`）。コードが値として読むものではない |
 | `seconds` | number | 省略可 | 上限の秒。待ちと再試行では開始から期限までの秒（眠りと照会・呼び出しの時間を含む）、呼び出しでは `timeout` |
 | `interval` | number | 省略可 | 待ちの最初の間隔（秒）。再試行では毎回の間隔 |
 | `factor` | number | 省略可 | 待ちの間隔の倍率（値が変わらない間に掛ける） |
@@ -319,16 +322,17 @@ contracts/limits/
 | `attempts` | int | 省略可 | 打つ回数の上限（最初の 1 回を含む） |
 | `same_cause` | int | 省略可 | 同じ原因の鍵の失敗の上限の回数 |
 
-`lib/limits.py` の外では、方針の名前を文字列のリテラル（またはモジュールの最上位で文字列を代入した定数）で書く。契約の検査が
-構文木で `limits.policy(…)`・`limits.seconds(…)`・`limits.value(…)` の名前を集めて設定と突き合わせるためである。
+方針の名前は、文字列のリテラルかモジュールの最上位の定数で書く。規則 `limit-readers` とコントラクトの検査が、
+コードの構文木から `limits.policy(…)`・`limits.seconds(…)`・`limits.value(…)` に渡した名前を集めるためである。名前を実行時に組み立てる箇所は、
+`plugins/ndf/src/ndf/checks/rules.json` の `limits.dynamic` に書く。
 
 ## 運用
 
 ### 上限の値を変える・足すとき
 
-1. 設定の方針の値を変える。新しい上限は、方針の名前を決めて `summary` と値を足し、コードから `limits.policy`・`limits.seconds`・`limits.value` で引く
-2. `python3 scripts/check-ndf-contracts.py` で、形と名前の対応を確かめ、契約の一覧の「上限の設定」の表を描き直す
-3. 監視の工程と担当の値を変えたときは `python3 plugins/ndf/scripts/lib/limits.py check` で順序を確かめる
+1. 設定の方針の値を変える。新しい上限は、方針の名前を決めて `summary`・値・`read_by`（使うモジュール）を足し、コードから `limits.policy`・`limits.seconds`・`limits.value` で読む。使うモジュールを変えたら `read_by` も直し、使うモジュールが無くなった方針は削除する
+2. `plugins/ndf/bin/ndf check --only limit-readers --only const-fact` で、`read_by` の食い違いと、上限と同じ数を持つ定数が無いことを確かめる
+3. 監視の値を変えたときは、進捗の無い時間の許容（`monitor.stall.<担当>`）が、監視の上限（`monitor.phase.<工程>`）より短いこと（I5）を確かめる
 4. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す
 
 ### 制約
@@ -352,14 +356,15 @@ contracts/limits/
 | 同じ理由の失敗が `same_cause` 回で止まり、待ちの合計まで眠らないこと。数字だけが違う理由は同じ原因、文が違えば別の原因として数えること | `test_lib_waits.py`・`test_cause_key.py` |
 | 毎回同じステップを返す判定役のプランが、2 回目の失敗の後の打ち直しで「止まった」になり、理由に原因の要旨と回数が出ること。別の失敗に変わったら流し続けること。再開の後も回数を引き継ぐこと | `test_supervise_step_rerun.py` |
 | 条件が揃わない値を返し続ける `wait_until` が期限の時刻に最後の照会を打つこと（上限 30 秒・間隔 10 秒・照会 2 秒で 0・12・24・30 秒）。理由に待った秒・照会の回数・上限の秒が出ること | `test_lib_waits.py` |
-| コードに設定に無い方針の名前を書く・どこからも引かれない方針を足すと、契約の検査が落ちること | `python3 scripts/check-ndf-contracts.py` |
+| 設定に無い方針の名前をコードに書くと、コントラクトの検査が落ちること | `python3 scripts/check-ndf-contracts.py` |
+| 使われない方針と、`read_by` の食い違いで `limit-readers` が落ちること | `plugins/ndf/tests/checks/test_limits_readers.py` |
 | `limits.py check` が設定の値で全組を判定し、無進捗の許容を監視の上限より長くした設定で組を出して終了コード 1 になること | `test_limits.py`・`test_limits_declaration.py` |
 
 ## 関連リンク
 
 - [ndf-development-loop-limits.md](ndf-development-loop-limits.md): 開発ループの各上限の値の意味と置き場
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md): cross-refactoring の時間予算と手順の監視の上限
-- [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md): 投稿キューの一時的な失敗の流し直し（方針 `post-queue.transient-reflush`）
-- サービスの確定仕様 `ndf-factory-dev-loops.md`: Factory の開発ループの利用上限の待ち（方針 `supervise.limit-retry` と揃える値）
+- [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md): 投稿キューの一時的な失敗の流し直し（方針 [`post-queue.transient-reflush`](https://github.com/devbasex/ai-plugins/blob/86a28c3c08cda2f5ebdb3de18934c3951dcac2e8/plugins/ndf/contracts/limits/post-queue.transient-reflush.json)。NDF 11.x のコードはこの値を使わないため、このファイルは削除した。リンクは削除前のもの）
+- サービスの確定仕様 `ndf-factory-dev-loops.md`: NDF を呼び出す Web サービス（Factory）の開発ループが、利用上限の回復を待つ値（NDF 10.x の方針 [`supervise.limit-retry`](https://github.com/devbasex/ai-plugins/blob/86a28c3c08cda2f5ebdb3de18934c3951dcac2e8/plugins/ndf/contracts/limits/supervise.limit-retry.json) と同じ値にしていた。NDF 11.x はこの方針を使わないため削除した。リンクは削除前のもの）
 - [ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md): 期限で打ち切った実行の状態の持ち主と片付け
 - [用語集](../glossary.md)

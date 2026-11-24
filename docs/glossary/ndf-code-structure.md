@@ -17,8 +17,8 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | 未設定のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | コントラクトの一覧 | `contract_registry` | エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と保存先を持つ、リポジトリで 1 つの設定 | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
-| 名前の対応表 | `internal-names` | 同じ意味の値の 1 つの名前と、消した別名と、使う種類を持つ表（plugins/ndf/contracts/data/internal-names.json。#2339） | — | — | — |
-| 読み手の指定 | `read_by` | 上限の設定の方針が持つ、その方針を引くモジュールの名前（read_by。#3684） | — | — | — |
+| 名前の対応表 | `internal-names` | 同じ意味の値の 1 つの名前と、消した別名と、使う種類を持つ表（plugins/ndf/contracts/data/internal-names.json。#2339） | — | — | `docs/specifications/ndf-internal-data-versions.md` |
+| 読み手の指定 | `read_by` | 上限の設定の方針が持つ、その方針を引くモジュールの名前（read_by。#3684） | — | — | `docs/specifications/ndf-contract-fact-checks.md` |
 | 受け渡しのファイル | `handoff_file` | あるエントリポイントが書き、別のエントリポイントか Skill の手順が読むファイル（状態・記録・結果）。1 つのエントリポイントの中で作って消す一時ファイルは含まない | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 例外リスト | `allow_list` | 構造チェックとリポジトリ前提の検査が違反として数えない今の外れを 1 項目 1 ファイルで持つ保存先。チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/・scripts/repo-assumptions-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える | 許可の一覧 | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 移行の読み | `migration_read` | 1 か所へ寄せた設定の値を、新しい保存先に無いときだけ古い保存先から読むこと。コントラクトの一覧の設定ファイルの項目に migrate_from として書く | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
@@ -30,7 +30,7 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | 兆候の基準ファイル | — | `scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON | — | — | — |
 | 抑制コメント | `suppressions` | 握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える | 印（単独） | — | — |
 | 判定データ | — | 分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別 | — | — | — |
-| ラチェット | — | 基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない | — | — | — |
+| ラチェット | — | 基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない | — | — | `docs/specifications/ndf-contract-fact-checks.md` |
 | アダプター | — | 外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別 | — | — | — |
 | 事実の表 | — | 1 つの事実（例: ランタイムの一覧）を行と列で持つコントラクトの JSON。`contracts/facts/` の 1 ファイル | — | — | — |
 | オーナーのモジュール | — | 1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する | — | — | — |
