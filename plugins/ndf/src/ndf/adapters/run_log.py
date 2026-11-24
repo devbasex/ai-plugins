@@ -36,6 +36,12 @@ RUNS_DIR = "runs"
 SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY", re.IGNORECASE)
 SECRET_MIN = 8
 MASK = "[REDACTED]"
+# 公開の書き先で秘密のほかに伏せた所の固定の文（`publish.scrub` が置く）
+PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
+HOME_TEXT = "（利用者のホーム）"
+EMAIL_TEXT = "（メール）"
+ACCOUNT_TEXT = "（アカウント名）"
+_MASKED = re.compile("|".join(re.escape(t) for t in (MASK, PRIVATE_REF_TEXT, HOME_TEXT, EMAIL_TEXT, ACCOUNT_TEXT)), re.IGNORECASE)
 # 環境変数に無い秘密も、トークンの形で伏せる（I5）。規則は plugins/ndf/scripts/lib/secret_redact.py の _PATTERNS と同じ
 # （ndf-next は ndf のスクリプトを読み込めないため写す）
 SECRET_SHAPES = (
@@ -87,6 +93,21 @@ def _mask(text: str, secrets: list[str]) -> str:
     for pattern, repl in SECRET_SHAPES:
         text = pattern.sub(repl, text)
     return text
+
+
+def covers(masked: str, text: str) -> bool:
+    """`masked` が `text` の一部を伏せた本文とみなせるか（伏せた所のほかが、同じ順にすべて一致する）。伏せた所が無ければ偽。"""
+    head, *rest = _MASKED.split(masked)
+    if not rest or not text.startswith(head):
+        return False
+    at = len(head)
+    *middle, tail = rest
+    for part in middle:
+        found = text.find(part, at)
+        if found < 0:
+            return False
+        at = found + len(part)
+    return len(text) - at >= len(tail) and text.endswith(tail)
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:

@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
@@ -86,12 +86,19 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     hub = gh.GitHub(slug, gh.client(gate=gate), gate=gate)
     publisher = publish.Publisher(hub)
     ports: dict[int, threads.GitHubPort] = {}
+    # 1 回の公開で、記録のコメントの一覧の値を伏せるときに読んだ参照の公開範囲。続く投稿の最初の検査だけが使う
+    seen: dict[str, str] = {}
+
+    def taken() -> dict[str, str]:
+        held = dict(seen)
+        seen.clear()
+        return held
 
     def comment(pr: int, body: str, previous: Optional[str]) -> str:
         cid = report_decide.comment_id(previous)
         if cid is None:
-            return str(threads.patient(lambda: publisher.comment(pr, body), gh.GitHubError, block=gate.block).url)
-        (safe,), _ = publisher.guarded(body)
+            return str(threads.patient(lambda: publisher.comment(pr, body, taken()), gh.GitHubError, block=gate.block).url)
+        (safe,), _ = publisher.guarded(body, seen=taken())
         path = f"/repos/{slug}/issues/comments/{cid}"
         patched = threads.patient(lambda: hub.rest("PATCH", path, {"body": safe}), gh.GitHubError, block=gate.block)
         return str(patched["html_url"])
@@ -103,10 +110,14 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         return ports[pr]
 
     def clean(texts: Sequence[str]) -> list[str]:
-        return [str(t) for t in publisher.guarded(*texts)[0]] if texts else []
+        return [str(t) for t in publisher.guarded(*texts, seen=seen)[0]] if texts else []
 
-    def publishing(pr: int) -> ContextManager[Any]:
-        return write_gate.pr_lock(slug, pr)
+    @contextlib.contextmanager
+    def publishing(pr: int) -> Iterator[None]:
+        with write_gate.pr_lock(slug, pr):
+            # 前の公開（失敗したものを含む）で読んだ公開範囲を使わない
+            seen.clear()
+            yield
 
     return Hub(comment, port, port, clean, publishing)
 

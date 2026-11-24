@@ -25,12 +25,8 @@ from typing import NamedTuple, Optional
 
 from ndf.adapters import run_log
 from ndf.adapters.github import PUBLIC, UNKNOWN, GitHub, same_repo
+from ndf.adapters.run_log import ACCOUNT_TEXT, EMAIL_TEXT, HOME_TEXT, PRIVATE_REF_TEXT
 
-# 落とした所の固定の文
-PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
-HOME_TEXT = "（利用者のホーム）"
-EMAIL_TEXT = "（メール）"
-ACCOUNT_TEXT = "（アカウント名）"
 # 公開のリポジトリへ書いてよいメール。公開してよいと確かめたアドレスだけを完全な形で並べる（GitHub の SSH の利用者・
 # GitHub と Claude の送信専用のアドレス）。ローカル部だけでは許さない（`git@<社内のホスト>` は社内の情報を出す）
 PUBLIC_EMAILS = frozenset({"git@github.com", "noreply@github.com", "noreply@anthropic.com"})
@@ -194,9 +190,6 @@ class Publisher:
     hub: GitHub
     accounts: frozenset[str] = field(default_factory=local_accounts)
     _visibility: Optional[str] = field(default=None, init=False)
-    # 本文に出た参照の公開範囲（1 つのエントリポイントで 1 つの参照を 1 回だけ読む。記録のコメントは、一覧の値と本文の全体を
-    # 続けて検査する）
-    _seen: dict[str, str] = field(default_factory=dict, init=False)
 
     def visibility(self) -> str:
         """書き先の公開範囲（1 つのエントリポイントで 1 回だけ読む）。"""
@@ -208,20 +201,22 @@ class Publisher:
         """書き先へ公開の書き先と同じ検査をかけるか。公開か、公開範囲を読めない（`UNKNOWN`）なら真。"""
         return self.visibility() in SCRUBBED_VISIBILITIES
 
-    def _private_refs(self, texts: Sequence[str]) -> set[str]:
-        """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。"""
+    def _private_refs(self, texts: Sequence[str], seen: dict[str, str]) -> set[str]:
+        """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。
+        `seen` にある参照は読み直さず、読んだ公開範囲を `seen` に足す。"""
         if not self.exposed():
             return set()
         refs = {r for t in texts for r in repo_refs(t) if not same_repo(r, self.hub.repo)}
-        unread = refs - self._seen.keys()
+        unread = refs - seen.keys()
         if unread:
-            self._seen.update(self.hub.visibilities(unread))
-        return {r for r in refs if self._seen.get(r) != PUBLIC}
+            seen.update(self.hub.visibilities(unread))
+        return {r for r in refs if seen.get(r) != PUBLIC}
 
-    def guarded(self, *texts: str) -> tuple[list[str], dict[str, int]]:
-        """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。"""
+    def guarded(self, *texts: str, seen: Optional[dict[str, str]] = None) -> tuple[list[str], dict[str, int]]:
+        """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。`seen`（参照 → 公開範囲）は、1 つの投稿の
+        本文を分けて検査するときだけ渡す（同じ参照を 2 回読まない）。渡さなければ毎回読む（非公開に変わった参照を次の投稿で伏せる）。"""
         exposed = self.exposed()
-        private = self._private_refs(texts)
+        private = self._private_refs(texts, {} if seen is None else seen)
         got = [scrub(text, exposed, private, self.accounts) for text in texts]
         return [g.text for g in got], dict(sum((Counter(g.dropped) for g in got), Counter()))
 
@@ -242,8 +237,8 @@ class Publisher:
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues", {"title": safe_title, "body": safe_body, "labels": list(labels)})
         return Published(int(made["number"]), str(made["html_url"]), dropped)
 
-    def comment(self, number: int, body: str) -> Published:
-        (safe,), dropped = self.guarded(body)
+    def comment(self, number: int, body: str, seen: Optional[dict[str, str]] = None) -> Published:
+        (safe,), dropped = self.guarded(body, seen=seen)
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": safe})
         return Published(int(number), str(made["html_url"]), dropped)
 

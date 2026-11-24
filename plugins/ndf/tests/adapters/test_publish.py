@@ -8,7 +8,7 @@ import re
 import httpx
 import pytest
 
-from ndf.adapters import publish
+from ndf.adapters import publish, run_log
 
 from ._github_helpers import hub
 
@@ -131,20 +131,38 @@ def test_publisher_reads_visibilities_once_and_drops_private_refs_on_a_public_ta
     assert len(fake.queries) == 2
 
 
-def test_publisher_reads_the_same_reference_once_across_checks() -> None:
-    """#4076: 記録のコメントは、一覧の値と本文の全体を続けて検査する。同じ参照の公開範囲は 1 回だけ読む。"""
+def test_publisher_reads_the_same_reference_once_only_when_the_checks_share_what_they_read() -> None:
+    """#4076: 読んだ公開範囲を渡した検査だけが使い回す。渡さない投稿は読み直し、非公開に変わった参照を伏せる。"""
     fake = FakeGitHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", PRIVATE_REPO: "PRIVATE", "other-owner/open": "PUBLIC"})
     publisher = publish.Publisher(fake.hub, ACCOUNTS)
     text = f"{PRIVATE_REPO}#3 と other-owner/open#4"
-    assert publisher.guarded(text)[0] == [f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4"]
-    publisher.comment(4, text)
+    seen: dict[str, str] = {}
+    assert publisher.guarded(text, seen=seen)[0] == [f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4"]
+    publisher.comment(4, text, seen)
     assert fake.writes[0][2] == {"body": f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4"}
     assert len(fake.queries) == 2
     # まだ読んでいない参照だけを読む
-    assert publisher.guarded(f"{text} と other-owner/unknown#5")[0] == [
+    assert publisher.guarded(f"{text} と other-owner/unknown#5", seen=seen)[0] == [
         f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4 と {publish.PRIVATE_REF_TEXT}"
     ]
     assert len(fake.queries) == 3 and "other-owner" in fake.queries[2] and "private-repo" not in fake.queries[2]
+    fake.visibility["other-owner/open"] = "PRIVATE"
+    publisher.comment(4, text)
+    assert fake.writes[1][2] == {"body": f"{publish.PRIVATE_REF_TEXT} と {publish.PRIVATE_REF_TEXT}"}
+
+
+@pytest.mark.parametrize(
+    ("masked", "text", "same"),
+    [
+        (f"a {publish.HOME_TEXT} b", "a /home/x b", True),
+        (f"{publish.EMAIL_TEXT} と [redacted]", "p@q.example と s3cr3t", True),
+        (f"a {publish.HOME_TEXT} b", "a /home/x c", False),
+        (f"ab{publish.HOME_TEXT}bc", "abc", False),
+        ("a b", "a b", False),
+    ],
+)
+def test_masked_text_covers_the_text_it_was_made_from(masked: str, text: str, same: bool) -> None:
+    assert run_log.covers(masked, text) is same
 
 
 def test_publisher_treats_unreadable_repos_as_not_public() -> None:

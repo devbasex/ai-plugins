@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, report_decide, store, threads
@@ -358,6 +360,54 @@ def test_reader_and_writer_share_one_port_per_pr(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
     made = cli._github_hub(None, None, Path("."))
     assert made.reader(7) is made.threads(7) and made.reader(7) is not made.threads(8)
+
+
+class _VisibleHub(_RestHub):
+    """参照の公開範囲を記録して回答し、コメントの本文を残す偽物（書き先は公開）。"""
+
+    repo = "o/r"
+
+    def __init__(self):
+        super().__init__()
+        self.reads: list[list[str]] = []
+        self.bodies: list[str] = []
+        self.other = "PUBLIC"
+
+    def visibilities(self, repos):
+        wanted = sorted(repos)
+        self.reads.append(wanted)
+        return {r: "PUBLIC" if r == self.repo else self.other for r in wanted}
+
+    def rest(self, method, path, payload=None, params=None):
+        self.bodies.append(payload["body"])
+        return {"html_url": f"https://github.com/o/r/pull/7#issuecomment-{len(self.bodies)}"}
+
+
+@pytest.mark.parametrize("previous", [None, "https://github.com/o/r/pull/7#issuecomment-1"])
+def test_visibility_read_for_one_record_is_not_used_by_the_next(previous, monkeypatch, tmp_path: Path) -> None:
+    """#4076: 一覧の値と本文で同じ参照を 1 回だけ読み、次の公開では読み直して、非公開に変わった参照を伏せる。"""
+    import types
+
+    from ndf.adapters import write_gate
+    from ndf.domains.crossreview import cli, repo
+
+    monkeypatch.setattr(write_gate, "gate_path", lambda: tmp_path / "write-gate.json")
+    hub = _VisibleHub()
+    gh = types.SimpleNamespace(GitHub=lambda slug, client, gate=None: hub, client=lambda **_: None, GitHubError=_Refused)
+    monkeypatch.setattr(cli, "load_github", lambda: gh)
+    monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
+    made = cli._github_hub(None, None, Path("."))
+    with made.publishing(7):
+        assert made.clean(["a/b#1"]) == ["a/b#1"]
+        made.comment(7, "a/b#1", previous)
+    assert hub.reads == [["o/r"], ["a/b"]] and hub.bodies == ["a/b#1"]
+    # 伏せた後に投稿しなかった公開を挟んでも、次の公開は読み直す
+    with made.publishing(7):
+        made.clean(["a/b#1"])
+    hub.other = "PRIVATE"
+    with made.publishing(7):
+        made.comment(7, "a/b#1", previous)
+    assert "a/b" not in hub.bodies[1]
 
 
 def test_revived_finding_moves_to_its_new_place_and_replies_with_the_later_fix() -> None:
