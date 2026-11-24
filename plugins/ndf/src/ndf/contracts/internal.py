@@ -192,7 +192,7 @@ def _require(kind: str, row: Row) -> None:
         e.message
         if e.validator in ("required", "additionalProperties")
         else f"{'/'.join(str(p) for p in e.absolute_path)} が {e.validator} に合わない"
-        for e in _validator(KINDS[kind].schema).iter_errors(row)
+        for e in _validator(_kind(kind).schema).iter_errors(row)
     ]
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
