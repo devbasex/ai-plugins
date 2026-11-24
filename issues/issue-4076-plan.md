@@ -96,14 +96,14 @@
 ### Task 7: 基準 5 の指示と、起動の始めのスナップショットとベースのコミットの固定
 
 - **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
-- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を MVV を読むブランチのリモート追跡参照で呼び（`--base` がリモート名つき・コミットの SHA のときの決め方は #4076 の詳細設計の「MVV の写し」の手順）、`settings.RunConfig` に足す `base_commit` を `dataclasses.replace` で差分の起点に固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
+- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、#4076 の詳細設計（正本）の「MVV の写し」の節の `drive._start`（MVV を読むブランチは、`--base` がブランチ名ならその名前、`<リモート>/<ブランチ>` ならリモート名を外した名前、コミットの SHA などなら PR のマージ先 `baseRefName`。`sync_worktree` の `base_branch` にそのブランチを渡し、`current` をそのブランチのリモート追跡参照で呼ぶ。`settings.RunConfig` に足す `base_commit` を `dataclasses.replace` で差分の起点に固定する。差分の起点は、`--base` がブランチなら `snap.commit`、SHA などなら渡されたコミット。`MvvError` か `baseRefName` を読めないときは相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
 - **満たす受け入れ条件:** 4076:1、4076:2、4076:8（テスト設計の 4090-9・4090-11 の指示の側）
 - **進め方:** 失敗するテスト（承認済みの MVV があるのに指示に基準 5 とスナップショットのパスが無い）→ 通す最小実装 → 整理
 
 ### Task 8: MVV の識別子と収束の再利用・詳細レビュー済みのセクション
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`
-- **変更内容:** `Basis.mvv`（識別子は状態・バージョン・sha256・共通原則の sha256）、`read_by_all_head`・`reviewed_of`・`state_scope`、`cmd_scope` がネットワークに出ずに手元の参照から識別子を得る、ラウンドの記録に識別子を書く（`_prepare_round`・`_reusable`）
+- **変更内容:** `Basis.mvv`（識別子は状態・バージョン・sha256・共通原則の sha256）、`read_by_all_head`・`reviewed_of`・`state_scope`、`cmd_scope` がネットワークに出ずに手元の `<リモート>/<MVV を読むブランチ>`（`--base` が SHA のときは `run` が残したマージ先のブランチ）から識別子を得る、ラウンドの記録に識別子を書く（`_prepare_round`・`_reusable`）
 - **満たす受け入れ条件:** 4076:2（テスト設計の 4076 の 2 の再利用と 4090-1・4090-11 の `review-scope` の側）
 - **進め方:** 失敗するテスト（MVV のバージョンが上がった後の起動が前の収束を返す）→ 通す最小実装 → 整理
 
