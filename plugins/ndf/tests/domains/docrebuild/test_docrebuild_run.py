@@ -462,20 +462,27 @@ def test_drive_reads_items_from_the_result_file_not_stdout(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("worker", "kind"),
+    ("worker", "kind", "detail"),
     [
-        (FakeWorker(_report([{"text": "a", "doc": "docs/other.md"}], readers=[])), "bad_report"),
-        (FakeWorker(_report(readers=[])), "incomplete"),
-        (FakeWorker(_report(readers=[_reader(DESIGN), _reader(DESIGN)])), "incomplete"),
-        (FakeWorker(None), "bad_report"),
-        (FakeWorker(_report(), stdout="壊れた出力\n"), "bad_report"),
+        (
+            FakeWorker(_report([{"text": "a", "doc": "docs/other.md"}], readers=[])),
+            "bad_report",
+            "items の 0 番目の doc が対象の文書でない",
+        ),
+        (FakeWorker(_report(readers=[])), "incomplete", "確かめの記録が欠けた文書が 1 件ある"),
+        (FakeWorker(_report(readers=[_reader(DESIGN), _reader(DESIGN)])), "incomplete", "確かめの記録が欠けた文書が 1 件ある"),
+        (FakeWorker(None), "bad_report", "worker の結果ファイル "),
+        (FakeWorker(_report(), stdout="壊れた出力\n"), "bad_report", "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
+        (FakeWorker(_report(), stdout=""), "bad_report", "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
     ],
 )
-def test_drive_stops_on_bad_reports(tmp_path: Path, worker: FakeWorker, kind: str) -> None:
+def test_drive_stops_on_bad_reports(tmp_path: Path, worker: FakeWorker, kind: str, detail: str) -> None:
+    """worker の出力・結果ファイル・足すべき内容・確かめの記録の誤りは `stopped` で、何が誤りかを説明に書く。"""
     _write(tmp_path, DESIGN)
     fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
     got = _run(tmp_path, fake, worker)
     assert got["status"] == "stopped" and got["cause"]["kind"] == kind
+    assert got["cause"]["detail"].startswith(detail)
     if kind == "incomplete":
         assert got["gaps"][0]["name"] == DESIGN
 
@@ -625,29 +632,13 @@ def test_drive_stops_when_the_state_dir_is_unwritable(tmp_path: Path) -> None:
     assert worker.argv == []
 
 
-@pytest.mark.parametrize(
-    ("worker", "detail"),
-    [
-        (FakeWorker(_report(), stdout="壊れた出力\n"), "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
-        (FakeWorker(_report(), stdout=""), "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
-        (FakeWorker(None), "worker の結果ファイル "),
-        (FakeWorker([1, 2]), "worker の結果ファイル "),  # type: ignore[arg-type]
-        (FakeWorker(_report([{"text": "a", "doc": "docs/other.md"}])), "items の 0 番目の doc が対象の文書でない"),
-    ],
-)
-def test_drive_names_why_the_report_is_bad(tmp_path: Path, worker: FakeWorker, detail: str) -> None:
-    """worker の出力・結果ファイル・足すべき内容の形の誤りは `stopped`（bad_report）で、何が誤りかを説明に書く。"""
-    _write(tmp_path, DESIGN)
-    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
-    assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
-    assert got["cause"]["detail"].startswith(detail)
-
-
 def test_drive_reports_a_non_object_result_file(tmp_path: Path) -> None:
     """結果ファイルの中身がオブジェクトでなければ、そう書いた `stopped`（bad_report）。"""
     _write(tmp_path, DESIGN)
     got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), FakeWorker([1, 2]))  # type: ignore[arg-type]
-    assert got["cause"]["kind"] == "bad_report" and got["cause"]["detail"].endswith("の中身がオブジェクトでない")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
+    assert got["cause"]["detail"].startswith("worker の結果ファイル ")
+    assert got["cause"]["detail"].endswith("の中身がオブジェクトでない")
 
 
 # --- エントリポイント ---
