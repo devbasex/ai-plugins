@@ -256,9 +256,9 @@ bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-バックグラウンドの作業が残っていると、ラッパーの Stop hook（guard `relay-marker`）は `ndf-next` のシグナルファイルを書かない。そのときは
-Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `ndf plan queue` のように
-止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
+supervisor や `ndf plan queue` のような作業が残っていると、ラッパーの Stop hook（guard `relay-marker`）は `ndf-next` の
+シグナルファイルを書かず、件数を知らせて変更を要求する。止めずに終わりを待ってから `ndf-next` を出し直す。
+`ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけの監視は、残っていても切り替わる（[relay-background.md](relay-background.md) の「作業と監視を見分ける」）。
 
 ## hook
 

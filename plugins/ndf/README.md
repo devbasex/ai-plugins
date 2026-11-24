@@ -136,7 +136,8 @@ guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts
 | `read-repeat` | PreToolUse（Read） | 同じファイルの同じ範囲を続けて読むのを止め、Grep を勧める |
 | `ask-forward` | PreToolUse（AskUserQuestion） | 質問を中継とオーガナイザーへ渡し、待ちの知らせを送信待ちへ書く |
 | `stop-wait` | Stop | 最後の応答が AskUserQuestion を使わずに本文で回答を待つなら書き直しを求める |
-| `relay-marker` | Stop | 中継の下で、最後の応答の `ndf-next` のブロックを中継へ渡す |
+| `relay-busy` | SessionStart・PreToolUse | 中継の下で、バックグラウンドの作業の開始を中継へ記録する。記録を書けない開始を止める |
+| `relay-marker` | Stop | 中継の下で、残るバックグラウンドの作業の件数を記録し、最後の応答の `ndf-next` のブロックを中継へ渡す（作業が残る間は渡さずに書き直しを求める） |
 | `turn`・`session`・`unattended` | UserPromptSubmit・SessionStart ほか | 数え手の数え直し・hook の予算の検査・人のいない実行の報告 |
 
 **guard を止めるのは環境変数 `NDF_HOOK_OFF` だけです。** 名前をカンマでつなぐか、`all` ですべてを止めます

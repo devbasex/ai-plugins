@@ -590,11 +590,35 @@
     {
       "term": "シグナルファイル",
       "context": "ndf-relay",
-      "meaning": "ラッパーへ知らせるファイル（`next.json` と `stop`）",
+      "meaning": "ラッパーへ知らせるファイル（`next.json`・`stop`・バックグラウンドの作業の記録）",
       "deprecated": [
         "合図"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "バックグラウンドの作業",
+      "context": "ndf-relay",
+      "meaning": "Claude Code が会話の外で動かし、終わると会話へ知らせるもの（バックグラウンドの Agent・`run_in_background` の Bash・Monitor など）。Stop の hook の入力の `background_tasks` に載る。作業と監視に分かれる",
+      "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
+    },
+    {
+      "term": "監視",
+      "context": "ndf-relay",
+      "meaning": "バックグラウンドの作業のうち、待つだけで止めてよいもの。コマンドが `ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけでできた Monitor とバックグラウンドの Bash",
+      "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
+    },
+    {
+      "term": "作業",
+      "context": "ndf-relay",
+      "meaning": "バックグラウンドの作業のうち監視でないもの。止めると成果が失われる。見分けられないものも作業とする",
+      "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
+    },
+    {
+      "term": "バックグラウンドの作業の記録",
+      "context": "ndf-relay",
+      "meaning": "子の起動ごとに、作業と監視の件数を子の会話の hook（会話の起動・作業を始める前・Stop）が書き、ラッパーが読むシグナルファイル（`busy-<起動の ID>.json`）",
+      "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
     },
     {
       "term": "アナウンス",
@@ -4841,6 +4865,12 @@
       "context": "ndf-code-structure",
       "meaning": "エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と保存先を持つ、リポジトリで 1 つの設定",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "環境変数のキー",
+      "context": "ndf-code-structure",
+      "meaning": "環境変数のコントラクト（plugins/ndf/contracts/domains/env.json）の行の `key` の列の値。コードはこのキーから名前を引き、名前を文字列リテラルで書かない",
+      "pending_source": "issues/issue-4126-design.md"
     },
     {
       "term": "原因の型",

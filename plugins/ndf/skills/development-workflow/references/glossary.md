@@ -177,7 +177,9 @@ flowchart TB
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「保存先と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`ndf records handoff check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
-| シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、Stop の hook の guard `relay-marker` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
+| シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop` と、バックグラウンドの作業の記録。ラッパーはこれを受けてセッションを切り替え、子を止めるかを決める | `next.json`、`stop`、`busy-<起動の ID>.json`、hook の guard `relay-marker`・`relay-busy` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
+| バックグラウンドの作業 | Claude Code が会話の外で動かし、終わると会話へ知らせるもの。止めると成果を失う作業と、待つだけで止めてよい監視に分かれる | Stop の入力の `background_tasks` | [relay-background.md](relay-background.md) の「作業と監視を見分ける」 |
+| バックグラウンドの作業の記録 | 子の起動ごとの、作業と監視の件数。子の会話の hook が書き、ラッパーが読む | `busy-<起動の ID>.json` | [relay-background.md](relay-background.md) の「起動ごとの記録」 |
 | アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `ndf relay notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | アイドル | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | `NDF_RELAY_QUIET`（既定 5） | [relay.md](relay.md) の「上限」 |
 | パススルー | ラッパーを挟まず、本物の claude をそのまま起動すること | `NDF_RELAY=0`、`claude -p` | [relay.md](relay.md) の「ラッパーを挟まない起動」 |
