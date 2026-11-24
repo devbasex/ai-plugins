@@ -325,7 +325,7 @@ plugins/ndf/
 
 | 入口 | 取得の API | 返る型 |
 | --- | --- | --- |
-| 起こす hook（`rewake`・`keep_cache.ratios` へ渡す） | `hooks/tables.policy_value(name, key)`（今のまま。方針の 1 つの値を JSON のまま返す） | `ratios` は `dict[str, float]`、`versions` は `list[str]`、ほかは数 |
+| 起こす hook（`rewake`・`keep_cache.ratios` へ渡す） | `hooks/tables.policy_value(name, key)`（今のまま。方針の 1 つの値を JSON のまま返す） | `ratios` は `dict[str, float]`、ほかは数。`cache.rewake` の `versions` は読まない（版の一覧を読むのはラッパーの `limits.texts` だけで、`cache.rewake` の `read_by` は `ndf.domains.relay.wrapper` だけ） |
 | 集計（`cli_cache`） | 読まない。起こす hook が `tables.policy_value` で読んで行に書いた倍率（`w_1h`・`w_5m`・`w`・`r`・`out`）を使う | — |
 | ラッパー（`wrapper._start`） | 新設の `contracts/limits.texts(name, key) -> tuple[str, ...]`（版の一覧を返す API はこの名前だけ。`text` は作らない） | `tuple[str, ...]`（`versions`） |
 

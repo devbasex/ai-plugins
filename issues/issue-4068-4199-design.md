@@ -361,7 +361,7 @@ UserPromptSubmit の guard（今の `turn` に足す）は、中継の下（`ses
 
   | 読み手 | 読み方 |
   | --- | --- |
-  | 起こす hook | `hooks/tables.policy_value(name, key)` で読む。行の 1 つの値を JSON のまま返すので、`ratios` は辞書、`versions` は文字列の配列で届く |
+  | 起こす hook | `hooks/tables.policy_value(name, key)` で読む。行の 1 つの値を JSON のまま返すので、`ratios` は辞書で届く。版の一覧（`cache.rewake` の `versions`）は読まない |
   | ラッパー | `contracts/limits` で同じ行を読む。今の `limits.value` は数だけを返す前提なので、文字列の配列を返す `limits.texts(name, key)` を足し、`value` は数でない値に `LimitsError` を上げる |
   | 判定の関数（`keep_cache.ratios`） | `(name, key) -> 値` の取得の関数を受ける |
   | 集計 | 上限の設定を読み直さず、hook が行に書いた倍率で費用を出す（値を直した後も、過去の行の費用は書いた時点の値のまま） |
@@ -554,7 +554,7 @@ UserPromptSubmit の guard（今の `turn` に足す）は、中継の下（`ses
 | 10 | 決定 10 で決めた形で、起きた応答の UserPromptSubmit が数え手を数え直さない | 見分けないと落ちる |
 | 11 | 待ち 1 つで `wait_start`・`wake`・`wake_result`・`wait_end` が `wait_id` でつながり、`wake` と `wake_result` が `wake_id` でつながり、各行が「データ構造」の項目を持つ。起こす直前のマーカーか状態が書けない順では `k`・`pending` が残らず 0 | 項目を落とす・`wait_id` か `wake_id` を付けない・失敗の後に印を残すと落ちる |
 | 12 | 見本の記録から、待ちの数・起こした回数（`wake_result` の欠けた `wake` を含む）・当たりの率（分母は `wake` と結べた `wake_result`）・起こす文の起床だけの `d` の中央値（寿命別の書き込みの費用 `+ output × out`）・起床の実費（読み出しを含む）・待ちの長さの分布・避けた書き直し（1 つの待ちで 1 回まで。`wait_end` の `tokens` と行の倍率で、実費を差し引いて計算）を返す。起床 0 回で寿命を越えて自然に当たった待ちは避けた書き直しに数えない。`wake_result` の欠けた `wake` を持つ待ちは避けた書き直しに入れず `unpriced_waits` に数える。`--since` が途中を指す待ちを集計に入れず数える。待ちを明けた入力の最初の呼び出しが外れ（読み出し 20,000）、その後の Tool の呼び出しが当たった（読み出し 101,000）見本では、`wait_end` の `hit` が偽で避けた書き直しに数えない。寿命 1 時間の待ちで、待ちを明けた入力が待ちの始まりから 3,590 秒、その応答の Stop が 3,650 秒の見本では、待ちの長さは 3,590 秒で寿命を越えず、避けた書き直しに数えない | 当たった起床ごとに書き直しを数える・自然に当たった待ちを数える・費用の差で読み出しを引かない・引継ぎの起床を `d` に混ぜる・結べない `wake` を起こした回数から落とす・今の倍率で計算し直す・途中の待ちを混ぜる・待ちを明けた応答の最後の呼び出しで当たりを決める・Stop の時刻まで待ちに数えると落ちる |
-| 13 | 値はすべて上限の設定から読む。`contracts/limits/` の方針のファイル（`cache.*.json`）を差し替えたテストで、hook（`tables.policy_value`）・ラッパー（`limits.texts`）の入口から、`ratios` の辞書と `versions` の文字列の配列が差し替えた値で届き、hook が行に書いた倍率で集計が費用を出すことを確かめる。あわせて、`ndf check` の規則 `limit-readers` が、`limits.texts`・`keep_cache.ratios.get`・`rewake_budget` の読み口と各方針の `read_by` の突き合わせで破れ 0 件（CI の検査。詳細設計の「読み手の突き合わせ」） | 定数を埋め込む・読み手ごとに別の値になる・集計が今の値で計算し直す・読み口を `rules.json` に足さない・`read_by` を実際の読み手と違うモジュールにすると落ちる |
+| 13 | 値はすべて上限の設定から読む。`contracts/limits/` の方針のファイル（`cache.*.json`）を差し替えたテストで、hook（`tables.policy_value`）の入口から `ratios` の辞書が、ラッパー（`limits.texts`）の入口から `versions` の文字列の配列が、差し替えた値で届き（版の一覧を読むのはラッパーだけ）、hook が行に書いた倍率で集計が費用を出すことを確かめる。あわせて、`ndf check` の規則 `limit-readers` が、`limits.texts`・`keep_cache.ratios.get`・`rewake_budget` の読み口と各方針の `read_by` の突き合わせで破れ 0 件（CI の検査。詳細設計の「読み手の突き合わせ」） | 定数を埋め込む・読み手ごとに別の値になる・集計が今の値で計算し直す・読み口を `rules.json` に足さない・`read_by` を実際の読み手と違うモジュールにすると落ちる |
 | 14 | 起きた応答が Tool を呼んでも、次の起こす時点はその応答の Stop の最後の応答から数える | 起こした時刻から数えると落ちる |
 
 #4199 の受け入れ条件（#4068 の受け入れ条件 1〜14 の行は文言のまま通る。#4199 の 12 はその行が確かめる）:
