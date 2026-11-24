@@ -89,12 +89,10 @@ def test_the_key_changes_with_what_the_person_reads(change: dict) -> None:
     assert rd.question_key([{**QUESTION, **change}]) != rd.question_key([QUESTION])
 
 
-def test_the_key_ignores_the_header_and_outer_spaces() -> None:
+def test_the_key_ignores_the_header_and_outer_spaces_and_keeps_the_boundary_of_the_texts() -> None:
     padded = {**QUESTION, "header": "別", "question": f" {QUESTION['question']}\n"}
     assert rd.question_key([padded]) == rd.question_key([QUESTION])
 
-
-def test_the_key_keeps_the_boundary_of_the_texts() -> None:
     def one(label: str, description: str) -> str:
         return rd.question_key([{"question": "q", "options": [{"label": label, "description": description}]}])
 

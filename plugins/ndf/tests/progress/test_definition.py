@@ -84,6 +84,12 @@ def test_modes_are_ordered_by_height():
 
 
 def test_gate_steps_name_which_gate_they_are():
+    # 承認ゲートの工程は承認ゲートを 1 つと数え、before はゲートの直前のステップを返す（#4446 の Task 1）
+    for name, gate in (("設計", "design"), ("デプロイ", "release")):
+        stage = definition.load_definition("standard").stage(name)
+        ids = [st.id for st in stage.steps]
+        at = next(st.id for st in stage.steps if st.kind == "gate")
+        assert stage.gates == (gate,) and stage.before(at) == ids[ids.index(at) - 1] and stage.before(ids[0]) is None
     # #1516: 設計の承認ゲートと本番の承認ゲートを書き分ける語が、ステップの定義から引ける
     snap = definition.load_definition("standard")
     gates = {st.gate: model.gate_label(st.gate) for st in snap.steps() if st.kind == "gate"}

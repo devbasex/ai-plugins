@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reading-docs.schema.json",
+  "title": "読み手役に読ませたものの記録の 1 行",
+  "description": "読み手役に読ませたもの（文書・承認資料・質問の文）を中身のハッシュごとに追記する記録の行（表 ndf-files の reading-docs。#4446 の決定 4）。書き手は ndf document-rebuild の run と gate。文書の本文・質問の文は入れない。kind が read の行は読ませた 1 回、done は確認の完了、review_pending・review_resolved・review_cancelled は設計のレビューへ戻す再レビュー待ちの行とその解消、sent_back は変更要求（PR の題か本文の直しを求めて工程を止めた）",
+  "type": "object",
+  "required": ["version", "at", "kind", "repo"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "記録した時刻"},
+    "kind": {"enum": ["read", "done", "review_pending", "review_resolved", "review_cancelled", "sent_back"], "description": "行の種類"},
+    "repo": {"type": "string", "minLength": 1, "description": "リポジトリ（owner/name）"},
+    "check": {"type": "string", "minLength": 1, "description": "確認の id（1 回の run か gate の実行ごと）"},
+    "branch": {"type": ["string", "null"], "description": "作業場所のブランチか PR の head のブランチ"},
+    "gate": {"enum": ["design", "release", null], "description": "承認ゲートの種類（run では null）"},
+    "pr": {"type": ["integer", "null"], "minimum": 1, "description": "承認する PR の番号（run では null）"},
+    "name": {"type": "string", "minLength": 1, "description": "文書のパスか、question（質問の文）・material（承認資料）"},
+    "hash": {"type": "string", "minLength": 1, "description": "読ませた対象の全体の中身のハッシュ（文書は blob の SHA、承認資料は残した文のセクションを除いた本文の SHA-256、質問の文は質問のキー）"},
+    "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
+    "round": {"enum": [1, 2], "description": "その立場で何回目の読みか（確認ごとに 1 から数える）"},
+    "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格（直して次の回へ）・2 回目にも残った"},
+    "quotes": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["quote", "why"], "properties": {"quote": {"type": "string", "minLength": 1, "description": "残った文の引用"}, "why": {"type": "string", "description": "読み手がつまずく理由"}}}, "description": "verdict が remained の行の、残った文の引用と理由"},
+    "question_key": {"type": ["string", "null"], "description": "done の行: 記録した質問のキー"},
+    "head": {"type": ["string", "null"], "description": "done の行: 基準の head"},
+    "material_sha256": {"type": ["string", "null"], "description": "done の行: 承認資料の、読ませた本文のハッシュ（残した文のセクションを除く）"},
+    "material_file_sha256": {"type": ["string", "null"], "description": "done の行: 承認資料のファイル全体のハッシュ"},
+    "body_sha256": {"type": ["string", "null"], "description": "done の行: PR の本文の経路で、確認を始めた時点の PR の本文のハッシュ"},
+    "fingerprint": {"type": ["string", "null"], "description": "done の行: reading-checks.jsonl へ追記した行の指紋"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "再レビュー待ちの行: push するコミット"},
+    "docs": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "再レビュー待ちの行: 直した文書のパス"},
+    "targets": {"type": "array", "items": {"enum": ["title", "body"]}, "description": "変更要求の行: 直す対象"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "read"}}}, "then": {"required": ["check", "branch", "gate", "pr", "name", "hash", "reader", "round", "verdict"]}},
+    {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}}, "required": ["verdict"]}, "then": {"required": ["quotes"], "properties": {"round": {"const": 2}}}},
+    {"if": {"properties": {"kind": {"const": "done"}}}, "then": {"required": ["check", "branch", "gate", "pr", "question_key", "head", "material_sha256", "material_file_sha256", "body_sha256", "fingerprint"]}},
+    {"if": {"properties": {"kind": {"enum": ["review_pending", "review_resolved", "review_cancelled"]}}}, "then": {"required": ["branch", "commit"]}},
+    {"if": {"properties": {"kind": {"const": "review_pending"}}}, "then": {"required": ["check", "docs"]}},
+    {"if": {"properties": {"kind": {"const": "sent_back"}}}, "then": {"required": ["check", "gate", "pr", "targets"]}}
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "gated": {"enum": ["question", "material"], "description": "ゲートと PR で引く対象の名前（question は質問の文、material は承認資料）。ほかの名前は文書のパス"},
+    "done_values": {"enum": ["question_key", "head", "material_sha256", "material_file_sha256", "body_sha256", "fingerprint"], "description": "完了の行が持つ値の名前（run は値を持たず、すべて null）"}
+  }
+}

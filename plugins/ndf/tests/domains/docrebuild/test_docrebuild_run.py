@@ -5,6 +5,7 @@ git と `ndf worker run` は偽物に替える。
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -20,6 +21,7 @@ from ndf.adapters import git
 from ndf.contracts import causes
 from ndf.domains.crossreview import finish_decide
 from ndf.domains.docrebuild import cli, drive
+from ndf.domains.records import reading
 from ndf.domains.docrebuild.select_decide import Target
 
 HEAD = "a" * 40
@@ -30,6 +32,13 @@ OTHER_DESIGN = "issues/issue-4000-design.md"
 REQ = "issues/issue-75-requirements.md"
 PLAN = "issues/issue-75-plan.md"
 OMITTED_PLAN = "# 計画\n\n省いた文書: 設計書（課題 1・公開インタフェース 変わらない）\n\n## 修正対象\n"
+
+
+@pytest.fixture(autouse=True)
+def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """読ませたものの記録の保存先（テストごと）。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    return tmp_path / "mvv-state"
 
 
 class FakeGit:
@@ -56,6 +65,13 @@ class FakeGit:
             return git.Completed(0, sha + "\n", "") if sha else git.Completed(1, "", "")
         if args == ["remote"]:
             return git.Completed(0, "".join(f"{r}\n" for r in self.remotes), "")
+        if args[:2] == ["remote", "get-url"]:
+            return git.Completed(0, "https://github.com/o/r.git\n", "")
+        if args == ["branch", "--show-current"]:
+            return git.Completed(0, "design/x\n", "")
+        if args[0] == "hash-object":
+            paths = args[args.index("--") + 1 :]
+            return git.Completed(0, "".join(blob_of(p) + "\n" for p in paths), "")
         if args[0] == "diff":
             if self.diff_code:
                 return git.Completed(self.diff_code, "", "fatal: no merge base\n")
@@ -64,6 +80,11 @@ class FakeGit:
 
     def git_of(self, cwd: Path) -> git.Git:
         return git.Git(cwd, self)
+
+
+def blob_of(path: str) -> str:
+    """偽の git が返す、文書の blob の SHA（HEAD の SHA と違う値）。"""
+    return hashlib.sha1(path.encode()).hexdigest()
 
 
 def _write(root: Path, rel: str, text: str = "# 文書\n") -> None:
@@ -265,11 +286,6 @@ FAIL_THEN_PASS = [{"verdict": "fail", "restatements": ["x"], "reason": "質問 1
     "readers",
     [
         [_reader(DESIGN), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md", "self", reason="AI への手順書")],
-        [
-            _reader(DESIGN, "not_run", reason="Tool が無い"),
-            _reader(PLAN, "self", reason="実装計画"),
-            _reader("docs/a.md", "not_run", reason="Tool が無い"),
-        ],
         [_reader(DESIGN, "pass", FAIL_THEN_PASS), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md")],
         [
             _reader(DESIGN, "fail", [FAIL_THEN_PASS[0]], reason="2 回目を立てられない"),
@@ -308,6 +324,8 @@ def _gap_for(readers: list, target: Target = Target(DESIGN, "design")) -> list[d
             Target(DESIGN, "design"),
         ),
         ([_reader(DESIGN, "not_run")], Target(DESIGN, "design")),
+        ([_reader(DESIGN, "not_run", reason="Tool が無い")], Target(DESIGN, "design")),
+        ([_reader("docs/a.md", "not_run", reason="Tool が無い")], Target("docs/a.md", "manuscript")),
         ([_reader("docs/a.md", "self")], Target("docs/a.md", "manuscript")),
         ([_reader(DESIGN, "not_run", checks=[{"verdict": "pass", "restatements": ["a"]}], reason="x")], Target(DESIGN, "design")),
         ([_reader(DESIGN, "fail", [{"verdict": "fail", "restatements": ["a"], "reason": "r"}])], Target(DESIGN, "design")),
@@ -428,7 +446,7 @@ def test_drive_launches_only_git_reads_and_worker_run(tmp_path: Path) -> None:
     fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
     worker = FakeWorker(_report())
     _run(tmp_path, fake, worker)
-    assert {c[0] for c in fake.calls} <= {"rev-parse", "remote", "diff"}
+    assert {c[0] for c in fake.calls} <= {"rev-parse", "remote", "diff", "branch", "hash-object"}
     assert len(worker.argv) == 1 and worker.argv[0][1:4] == ["worker", "run", "--kind"]
     assert "push も Pull Request の作成・更新もしない" in worker.prompt
 
@@ -719,3 +737,49 @@ def test_main_rejects_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(
         ["run", "--base", "main", "--remote", "o", "--issue", "1", "--kind", "other", "--state-dir", "s", "--out", "o"]
     ) == causes.exit_code("invalid")
+
+
+# --- 読ませた文書の記録（#4446 の Task 3。受け入れ条件 1・5） ---
+
+TWICE = [FAIL_THEN_PASS[0], {"verdict": "fail", "restatements": ["z"], "reason": "質問 2 が誤読された"}]
+
+
+@pytest.mark.parametrize(
+    ("readers", "kinds", "wanted"),
+    [
+        ([_reader(DESIGN, "pass", FAIL_THEN_PASS)], ("design",), [(1, "failed", None), (2, "passed", None)]),
+        (
+            [_reader(DESIGN, "fail", TWICE)],
+            ("design",),
+            [(1, "failed", None), (2, "remained", [{"quote": "質問 2 が誤読された", "why": ""}])],
+        ),
+        # worker 自身が読み直した実装計画は書かない
+        ([_reader(DESIGN), _reader(PLAN, "self", reason="実装計画")], ("design", "plan"), [(1, "passed", None)]),
+        # 条件 5: 読み手役を立てられなければ ok に進まず、記録も書かない
+        ([_reader(DESIGN, "not_run", reason="Tool が無い")], ("design",), "precondition"),
+    ],
+)
+def test_drive_records_each_read_document_by_its_blob(tmp_path: Path, readers: list, kinds: tuple, wanted: Any) -> None:
+    """条件 1: 読み手役が読んだ文書を、確認の id・ブランチ・パス・blob・立場・回・合否で追記し、完了の行を書く。"""
+    _write(tmp_path, DESIGN)
+    _write(tmp_path, PLAN, OMITTED_PLAN)
+    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN, PLAN])
+    got = _run(tmp_path, fake, FakeWorker(_report(readers=readers)), kinds=kinds)
+    rows = reading.doc_rows()
+    if wanted == "precondition":
+        assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition" and DESIGN in got["cause"]["detail"], got
+        assert rows == []
+        return
+    assert got["status"] == "ok", got
+    reads = [r for r in rows if r["kind"] == "read"]
+    assert [(r["round"], r["verdict"], r.get("quotes")) for r in reads] == wanted
+    assert {(r["repo"], r["branch"], r["gate"], r["pr"], r["name"], r["hash"], r["reader"]) for r in reads} == {
+        ("o/r", "design/x", None, None, DESIGN, blob_of(DESIGN), reading.ENGINEER)
+    }
+    (done,) = [r for r in rows if r["kind"] == "done"]
+    assert done["check"] == reads[0]["check"] and done["question_key"] is None and done["fingerprint"] is None
+    # 記録を書けなければ ok にしない
+    (tmp_path / "mvv-state").rename(tmp_path / "moved")
+    (tmp_path / "mvv-state").write_text("ディレクトリにできない", encoding="utf-8")
+    again = _run(tmp_path, fake, FakeWorker(_report(readers=readers)), kinds=kinds)
+    assert again["status"] == "stopped" and again["cause"]["kind"] == "precondition", again

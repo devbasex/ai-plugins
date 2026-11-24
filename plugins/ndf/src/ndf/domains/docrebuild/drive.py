@@ -12,6 +12,7 @@ import os
 import stat
 import string
 import subprocess
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from ndf.adapters import git
 from ndf.contracts import result
 from ndf.core import issue_docs
 from ndf.domains.docrebuild import select_decide as sd
+from ndf.domains.records import reading
 from ndf.domains.docrebuild.select_decide import Inspection, Target
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
+
+# 読み手役を立てられなかった記録の verdict と、その欠けの理由の頭（#4446 の決定 5。ok で進めずに止める）
+NOT_RUN = "not_run"
+NOT_RUN_GAP = "読み手役を立てられなかった"
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -309,6 +315,9 @@ def _record_gap(rec: Mapping[str, Any], kind: str) -> Optional[str]:
     usable_kind = kind == "manuscript" or (kind == "plan") == (verdict == "self")
     if not usable_kind:
         return f"{kind} に {verdict} は使えない"
+    if verdict == NOT_RUN:
+        why = rec.get("reason") if _filled(rec.get("reason")) else "理由なし"
+        return f"{NOT_RUN_GAP}（{why}）"
     if verdict not in CHECKED:
         if checks:
             return f"{verdict} の checks が空でない"
@@ -431,12 +440,65 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
     metrics = report.get("metrics")
     raw = metrics.get("readers") if isinstance(metrics, dict) else None
     gaps = reader_gaps(raw, targets)
+    not_run = [g["name"] for g in gaps if g["reason"].startswith(NOT_RUN_GAP)]
+    if not_run:
+        detail = f"{NOT_RUN_GAP}文書がある: {'・'.join(not_run)}。読み手役を立てられる環境に直してから打ち直す"
+        return result.stopped(TOOL, "precondition", detail)
     if gaps:
         return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
     readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
     summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格 {len(found)} 件）"
     return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
+
+
+def new_check_id() -> str:
+    """確認の id（1 回の実行ごと）。"""
+    return uuid.uuid4().hex
+
+
+def record_reads(g: git.Git, branch: str, report: Mapping[str, Any], targets: Sequence[Target], *, remote: str) -> None:
+    """読み手役が読んだ文書を読ませたものの記録へ追記し、完了の行を書く（#4446 の Task 3。受け入れ条件 1）。
+
+    文書は作業場所のブランチで引けるよう `branch` を付け、中身は `git hash-object` の blob の SHA で持つ。worker 自身が読み直した
+    文書（`self`）は書かない。書けなければ `Precondition`（完了の行が無いので、次の gate は全体を読ませる）。
+    """
+    metrics = report.get("metrics")
+    raw = metrics.get("readers") if isinstance(metrics, dict) else []
+    read = [(t.path, _records_of(raw, t.path)[0]) for t in targets]
+    read = [(path, rec) for path, rec in read if rec["verdict"] in CHECKED]
+    try:
+        repo = g.remote_repo(remote)
+        blobs = g.run("hash-object", "--", *(path for path, _ in read)).split() if read else []
+        check = new_check_id()
+        base = {"repo": repo, "check": check, "branch": branch, "gate": None, "pr": None}
+        for (path, rec), blob in zip(read, blobs, strict=True):
+            for row in _read_rows(rec):
+                reading.append_doc({"kind": "read", **base, "name": path, "hash": blob, "reader": reading.ENGINEER, **row})
+        reading.append_doc(reading.done_row(base))
+    except (git.GitError, OSError, ValueError, reading.ReadingInvalid) as exc:
+        raise Precondition(f"読ませた文書を記録できない: {exc}") from None
+
+
+def _read_rows(rec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """確かめ 1 件の記録を、回ごとの行（回・合否・残った文の引用）にする。2 回目の不合格は `remained`。"""
+    out: list[dict[str, Any]] = []
+    for i, check in enumerate(rec["checks"], 1):
+        if check["verdict"] == "pass":
+            out.append({"round": i, "verdict": "passed"})
+        elif i == 2:
+            out.append({"round": 2, "verdict": "remained", "quotes": [{"quote": check["reason"], "why": ""}]})
+        else:
+            out.append({"round": i, "verdict": "failed"})
+    return out
+
+
+def checked_out(g: git.Git) -> str:
+    """作業場所のブランチの名前。読めなければ `Precondition`。"""
+    try:
+        return g.run("branch", "--show-current").strip()
+    except git.GitError as exc:
+        raise Precondition(f"作業場所のブランチを読めない: {exc}") from None
 
 
 def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str]]:
@@ -458,8 +520,9 @@ def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str
 
 def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]:
     """起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す。"""
+    g = git_of(args.cwd)
     try:
-        ref, changed = start_and_changes(git_of(args.cwd), args.base, args.remote)
+        ref, changed = start_and_changes(g, args.base, args.remote)
         found = sd.candidates(changed, args.issues, args.kinds)
         chosen = sd.select(found, inspect(args.cwd, found))
         log.info("組み直す文書を選んだ", extra={"start_ref": ref, "candidates": len(found), "targets": len(chosen.targets)})
@@ -473,6 +536,9 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         if out.get("status") != result.OK:
             return _worker_stopped(out)
         report = _read_report(result_file)
+        got = _checked(report, chosen.targets, chosen.skipped)
+        if got["status"] == result.OK:
+            record_reads(g, checked_out(g), report, chosen.targets, remote=args.remote)
     except Stop as exc:
         return result.stopped(TOOL, exc.kind, exc.detail)
-    return _checked(report, chosen.targets, chosen.skipped)
+    return got
