@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
@@ -22,12 +21,11 @@ from ndf import cli
 from ndf.adapters import git
 from ndf.adapters.git import GitError
 from ndf.contracts import result
+from ndf.core import issue_docs
 from ndf.domains.loop import design_tests_decide as dt
 
 # 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
-# 複数の課題を 1 つの設計で扱う `issue-7-8-design.md` も、番号のどれかが指定と合えば読む（PR 3537 の指摘）
-DESIGN_FILE = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$")
 
 Grep = Callable[[Sequence[str], Sequence[str]], Optional[set[str]]]
 
@@ -127,7 +125,7 @@ def _designs(g: git.Git, root: Path, a: argparse.Namespace) -> list[tuple[str, s
     rels = [
         r
         for r in g.run("ls-tree", "-r", "--name-only", "HEAD", "--", "issues").splitlines()
-        if (m := DESIGN_FILE.match(r)) and want & {int(n) for n in m.group(1).split("-")}
+        if want & issue_docs.design_issues(r)
     ]
     return [(rel, g.run("show", f"HEAD:{rel}")) for rel in rels]
 
