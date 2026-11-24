@@ -33,6 +33,9 @@ REVIEWED_MVV = "reviewed_mvv"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"
+# MVV の記録にある、通常の指摘を直した記録で解ける保留のキー（`{"pr": <番号>, "keys": [...]}`）。別の状態ディレクトリで見送った
+# 指摘の保留を、この状態ディレクトリで直したときに解くため、印の無い直しが初めて出たときに 1 回だけ記録から読んで覚える（#3959）
+MVV_PLAIN_HOLDS = "mvv_plain_holds"
 
 
 class StateBroken(Exception):

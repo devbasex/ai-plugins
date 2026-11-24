@@ -358,9 +358,23 @@ def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str, *, holds: bool 
     return out
 
 
+def plain_row(row: Mapping[str, Any]) -> bool:
+    """MVV で判定していない通常の指摘（項目・判定・レッドラインが無く、NDF が作った指摘でない）か。"""
+    return not (row.get(REVIEW_JUDGED) is not None or REVIEW_ITEM in row or row.get("by") == BY_NDF or row.get(REVIEW_REDLINE))
+
+
+def plain_holds(rows: Iterable[Mapping[str, Any]], repo: str, pr: int) -> set[str]:
+    """記録 `rows`（`mvv-review` の行）のうち、PR `pr` の、通常の指摘を直した記録で解ける保留のキー（`plain_fix_clears`）。"""
+    keyed: dict[Any, list[Mapping[str, Any]]] = {}
+    mine = [r for r in rows if r.get("kind") == MVV_REVIEW and r.get("repo") == repo and r.get("pr") == pr]
+    for r in sorted(mine, key=lambda r: internal.epoch(str(r.get("at")))):
+        keyed.setdefault(r.get("key"), []).append(r)
+    return {str(k) for k, seq in keyed.items() if plain_fix_clears(seq)}
+
+
 def _plain_hold(row: Mapping[str, Any]) -> bool:
     """MVV で判定していない通常の指摘で、承認ゲートの保留を作る見送りか、保留を解く直した指摘か。"""
-    if row.get(REVIEW_JUDGED) is not None or REVIEW_ITEM in row or row.get("by") == BY_NDF or row.get(REVIEW_REDLINE):
+    if not plain_row(row):
         return False
     if row.get("outcome") == REVIEW_FIXED:
         return row.get(REVIEW_HELD) is True
@@ -378,6 +392,11 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]]) -> bool:
     解けるのは通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りが最後の記録で、直っていないレッドラインが無いときだけ。
     前の MVV でレッドラインだった指摘は、MVV が変わると通常の指摘として扱われるが、その直しではレッドラインの保留を解かない。
     """
+    # 自由記述を伏せて書いた直しの記録（自由記述の無い直しには付けないが、前の版が付けた）は、補って書き直せるよう外して読む
+    end = len(seq)
+    while end and seq[end - 1].get("outcome") == REVIEW_FIXED and seq[end - 1].get("withheld"):
+        end -= 1
+    seq = seq[:end]
     if not seq:
         return False
     lines = [n for n, r in enumerate(seq) if r.get("outcome") == REVIEW_REDLINE]
@@ -388,7 +407,9 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]]) -> bool:
 
 
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
-    """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。"""
+    """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。
+
+    自由記述の無い指摘（直した通常の指摘など）は、伏せるものが無いので `withheld` を置かない（後で補う記録にしない）。"""
     out: dict[str, Any] = {"id": str(found.row["id"]), "outcome": found.outcome}
     if found.item is not None:
         out["item"] = found.item
@@ -396,7 +417,7 @@ def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str,
     if found.outcome == REVIEW_DEFERRED and found.row.get(REVIEW_DEFER) in DEFERS:
         out[REVIEW_DEFER] = found.row[REVIEW_DEFER]
     if shown is None:
-        return out | {"withheld": True}
+        return out | ({"withheld": True} if found.free_fields else {})
     return out | {k: shown[v] for k, v in found.free_fields.items()}
 
 

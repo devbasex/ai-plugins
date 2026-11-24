@@ -546,6 +546,14 @@ def _review_rows_of(repo: str, pr: int, head: str, snapshot: Snapshot, found: Se
     return [{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in ordered]
 
 
+def stored_plain_holds(repo: str, pr: int) -> set[str]:
+    """記録にある、PR `pr` の通常の指摘を直した記録で解ける保留のキー（`md.plain_holds`）。記録が無ければ空。
+
+    読むだけなのでロックを取らない。読めなければ `validation_rows` の例外をそのまま投げる。"""
+    rows, _ = validation_rows(Path(repo))
+    return md.plain_holds(review_rows(rows), repo, pr)
+
+
 def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
     """記録を書く前に止まった（呼び手が記録の `repo` を解けない）結果。今の MVV で判定した必須の行をすべて欠けとする。"""
     found = md.judged_findings(rows, snapshot.identity, holds=True)

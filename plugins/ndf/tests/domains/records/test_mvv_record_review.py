@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import git_sandbox
@@ -187,6 +188,63 @@ def test_a_plain_finding_left_to_the_user_holds_the_design_gate_until_it_is_fixe
     assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == []
     # 記録を書く前に止まったら、通常の指摘の見送りも欠けた必須の行に数える
     assert [e["outcome"] for e in mvv.unwritable(snap, [plain], "止まった").missing] == ["deferred"]
+
+
+PLAIN = {"id": "r1-9", "text": "普通の指摘", "by": "codex", "outcome": "deferred", "reason": "利用者が決める"}
+
+
+def _plain_holds(root: Path) -> list[str]:
+    snap = _snapshot()
+    return [h for h in md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-") if "r1-9" in h]
+
+
+def test_a_plain_fix_is_not_withheld_and_an_old_withheld_fix_is_completed(root: Path) -> None:
+    """#3959: 自由記述の無い直しは、同じ起動で別の指摘の自由記述を伏せても `withheld` を付けずに書き、保留を解く。"""
+    snap = _snapshot()
+    assert mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list).written == 1
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    other = {**_deferred(), "judged_mvv": snap.identity}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed, other], None).cause is None
+    assert [r.get("withheld") for r in _reviews() if r["outcome"] == "fixed"] == [None]
+    assert _plain_holds(root) == []
+
+
+def test_a_fix_withheld_by_an_earlier_version_is_written_again(root: Path) -> None:
+    """前の版が自由記述の無い直しに `withheld` を付けて書いた記録は、次の起動で伏せずに書き直して保留を解く。"""
+    snap = _snapshot()
+    mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
+    [held] = _reviews()
+    later = {**held, "at": "2099-01-01T00:00:00+00:00", "id": "r2-1", "outcome": "fixed", "withheld": True}
+    jsonl.append_locked(
+        mvv.record_path("mvv-validation"), {k: v for k, v in later.items() if k not in ("reason", "version")}, kind="mvv-validation"
+    )
+    assert _plain_holds(root) != []
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list).written == 1
+    assert _reviews()[-1].get("withheld") is None
+
+
+def test_a_hold_from_another_state_dir_is_cleared_by_a_fix_without_the_mark(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3959: 別の状態ディレクトリで見送った指摘が再掲されて直されたら、記録の保留を 1 回だけ読んで解く。"""
+    from ndf.domains.crossreview import drive, store
+
+    snap = _snapshot()
+    mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
+    reads: list[Any] = []
+    real = mvv.validation_rows
+    monkeypatch.setattr(mvv, "validation_rows", lambda *a: (reads.append(a), real(*a))[1])
+    run = SimpleNamespace(ref=SimpleNamespace(current_pr=PR), data={})
+    # 印の無い直しが無ければ、記録を読まない
+    assert drive._with_stored_holds(run, str(root), [PLAIN]) == ([PLAIN], set()) and reads == [] and run.data == {}
+    fixed = {**PLAIN, "id": "r1-1", "outcome": "fixed", "reason": None}
+    rows, cleared = drive._with_stored_holds(run, str(root), [fixed])
+    assert rows[0][md.REVIEW_HELD] is True and cleared == {mvv.record_key(PLAIN["text"])} and len(reads) == 1
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, rows, list).written == 1
+    assert _plain_holds(root) == []
+    drive._forget_holds(run, cleared)
+    # 覚えたキーを使い、2 回目からは記録を読まない
+    assert run.data[store.MVV_PLAIN_HOLDS] == {"pr": PR, "keys": []}
+    assert drive._with_stored_holds(run, str(root), [fixed]) == ([fixed], set()) and len(reads) == 1
 
 
 def test_broken_shape_is_refused(root: Path) -> None:
