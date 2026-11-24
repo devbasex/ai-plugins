@@ -19,7 +19,7 @@
     "AD1+": {"issue": 3288, "packages": [], "needs": ["AD1", "D1+", "T1+"], "order": 4, "lane": "lr-fix-a", "closed": false},
     "AD2": {"issue": 3289, "packages": ["ndf.adapters.claude_usage", "ndf.adapters.http", "ndf.adapters.markdown", "ndf.adapters.notify", "ndf.adapters.paths"], "needs": ["X0", "T1"], "order": 3, "lane": "lr-data", "closed": true},
     "AD2+": {"issue": 3289, "packages": [], "needs": ["AD2", "T1+"], "order": 4, "lane": "lr-data", "closed": true},
-    "AD3": {"issue": 3290, "packages": ["ndf.adapters.agents", "ndf.adapters.claude", "ndf.adapters.cli", "ndf.adapters.cli_floor", "ndf.adapters.launch_slot", "ndf.adapters.llm", "ndf.adapters.run_log", "ndf.adapters.training", "ndf.adapters.training_cache"], "needs": ["D1", "T1"], "order": 3, "lane": "lr-fix-b", "closed": true},
+    "AD3": {"issue": 3290, "packages": ["ndf.adapters.agents", "ndf.adapters.claude", "ndf.adapters.cli", "ndf.adapters.cli_floor", "ndf.adapters.launch_slot", "ndf.adapters.llm", "ndf.adapters.run_log", "ndf.adapters.training", "ndf.adapters.training_cache", "ndf.adapters.transcript"], "needs": ["D1", "T1"], "order": 3, "lane": "lr-fix-b", "closed": true},
     "AD3+": {"issue": 3290, "packages": [], "needs": ["AD3", "D1+", "T1+"], "order": 4, "lane": "lr-fix-b", "closed": false},
     "C2": {"issue": 3291, "packages": ["ndf.core.plan"], "needs": ["C1", "C1+", "D1", "D1+", "T1", "T1+", "AD1", "AD3"], "order": 4, "lane": "lr-flow", "closed": true},
     "P1a": {"issue": 3369, "packages": ["ndf.progress.backup", "ndf.progress.command", "ndf.progress.definition", "ndf.progress.model", "ndf.progress.stages", "ndf.progress.store"], "needs": ["D1", "D1+", "D2", "C1+", "T1", "T1+", "AD1", "B1"], "order": 4, "lane": "lr-rf", "closed": true},

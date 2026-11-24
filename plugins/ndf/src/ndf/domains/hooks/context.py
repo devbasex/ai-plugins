@@ -14,6 +14,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
+from ndf.adapters.transcript import ASSISTANT, read_tail
 from ndf.domains.hooks import reply_wait, tables
 from ndf.domains.hooks.strict import _SHELLS
 
@@ -785,20 +786,6 @@ def _in_background(node: Any) -> bool:
     return False
 
 
-def read_tail(path: str, size: int) -> str:
-    """会話の記録の末尾 `size` バイト（行の途中から始まる先頭の 1 行は捨てる）。読めなければ空。"""
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            end = f.tell()
-            f.seek(max(0, end - size))
-            raw = f.read()
-    except OSError:  # noqa: NDF401 ファイル: 会話の記録が無い・読めないときは空として扱う
-        return ""
-    text = raw.decode("utf-8", "replace")
-    return text.split("\n", 1)[1] if end > size and "\n" in text else text
-
-
 def asked_since_prompt(tail: str) -> bool:
     """会話の記録の末尾を後ろから読み、利用者の入力に当たる前に `AskUserQuestion` の呼び出しがあれば真。
 
@@ -955,7 +942,7 @@ def _last_assistant_text(tail: str) -> str:
 def _last_assistant_uuid(tail: str) -> Optional[str]:
     for line in reversed(tail.splitlines()):
         rec = tables.json_object(line) if '"assistant"' in line else None
-        if rec and rec.get("type") == "assistant":
+        if rec and rec.get("type") == ASSISTANT:
             uuid = rec.get("uuid")
             return uuid if isinstance(uuid, str) else None
     return None

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
 
 from ndf import identity, process_group
-from ndf.adapters import cli_floor, launch_slot
+from ndf.adapters import cli_floor, launch_slot, transcript
 from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
@@ -48,9 +48,9 @@ ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
 # 続けようとした会話が無いときに claude が出す文言（2026-11-21 に claude 2.1.330 で確かめた。#4013）
 NO_CONVERSATION = "No conversation found with session ID"
 # 自動の要約が起きたことを示す出力の行（`type: system` の `subtype`）
-COMPACT_BOUNDARY = "compact_boundary"
+COMPACT_BOUNDARY = transcript.COMPACT_SUBTYPE
 # 結果の行の 1 回の呼び出しで文脈に入ったトークンの項目
-CONTEXT_FIELDS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+CONTEXT_FIELDS = transcript.USAGE_KEYS
 # 主モデルを選ぶときに足すトークンの項目（`modelUsage` のモデルごとの値）
 MODEL_TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
 # API キーの子（`key:<名前>` と API キーの設定の従量の接続）にキーを渡せる起動の形（`launch_form` の値）。別冊

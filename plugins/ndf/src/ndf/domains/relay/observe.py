@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import agents, claude
+from ndf.adapters.transcript import TIMESTAMP
 from ndf.domains.relay import signals
 
 # 認証の失敗の引き金（Claude Code 2.1.330 の端末の実測。#3864 の判断 13）。これだけでは替えず、会話の記録で確かめる。
@@ -253,7 +254,7 @@ def credential_failure(path: Path, size: int, since: float) -> Optional[bool]:
         return False
     if last.get("error") != CREDENTIAL_ERROR and last.get("apiErrorStatus") != CREDENTIAL_STATUS:
         return False
-    at = _time(last.get("timestamp"))
+    at = _time(last.get(TIMESTAMP))
     return at is not None and at > since
 
 
@@ -269,7 +270,7 @@ def api_error_since(path: Path, size: int, since: Optional[float]) -> bool:
     if not rows:
         return False
     last = rows[-1]
-    at = _time(last.get("timestamp"))
+    at = _time(last.get(TIMESTAMP))
     return last["type"] == "assistant" and last.get("isApiErrorMessage") is True and at is not None and (since is None or at > since)
 
 
@@ -310,7 +311,7 @@ def _turn(path: Path, size: int) -> Optional[tuple[bool, Optional[float], Option
     last = rows[-1]
     if last["type"] != "assistant" or last["message"].get("stop_reason") not in ENDED or _pending(rows):
         return (False, None, reply)
-    return (True, _time(last.get("timestamp")), reply)
+    return (True, _time(last.get(TIMESTAMP)), reply)
 
 
 def _time(value: Any) -> Optional[float]:
