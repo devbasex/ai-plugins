@@ -137,12 +137,12 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 - Codex の相当機能は `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false`
   である。`scripts/build-runtime-plugins.sh` が `disable-model-invocation: true` の Skill に対して
   このファイルを自動生成するため、共通編集元では frontmatter だけを書けばよい
-  （[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-8）
+  （[棚卸の計画](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/ndf-development-skills/07-tasks.md) の Task 0-8）
 - 「常時注入のみ」に相当する機能は Codex と Kiro と agy にない。3 つとも
   `user-invocable: false` を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象で
   ある `ndf-policies` は Codex へもデプロイしている（`plugins/ndf/manifests/`）ため、
   Codex では暗黙起動されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
-  実行しない」旨を明記する**（[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-10）
+  実行しない」旨を明記する**（[棚卸の計画](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/ndf-development-skills/07-tasks.md) の Task 0-10）
 - **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
   へ載らず、`user-invocable: false` は載る。Codex と Kiro と agy にはこのキーがなく
   `description` は常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
@@ -252,7 +252,7 @@ Skill 名の部分だからである。ただし導入先のランタイムに�
 実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
 ようにしたが、Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」の
 ようなリクエストでは常に組み込み側が選ばれる（実測は
-[08-verification.md](../../../issues/old/ndf-development-skills/08-verification.md)
+[08-verification.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/ndf-development-skills/08-verification.md)
 「自然文からの発動の実測」）。同名・同用途の組み込み Skill があるランタイムでは、
 `description` を差別化しても勝てないことがある。明示起動で使う前提に切り替えるか、
 用途が重ならない名前へ寄せる。この Skill は後者を採り、v6.0.0 で `pr-review` へ改名した。
@@ -398,7 +398,7 @@ file path."*）。Claude Code の公式記述は *"a listing of skill names and 
 
 利用者の環境には複数のプラグインが同時に入るため、family 単位で見ると超過を見逃す。
 ただし片方しか入れない利用者もいるので、`--report` は family 別の内訳も出す。
-Skill ごとの実測値は [`issues/old/skill-frontmatter-by-runtime.csv`](../../../issues/old/skill-frontmatter-by-runtime.csv)
+Skill ごとの実測値は [`issues/old/skill-frontmatter-by-runtime.csv`](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/skill-frontmatter-by-runtime.csv)
 にある。
 
 運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、

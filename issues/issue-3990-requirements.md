@@ -10,7 +10,7 @@ NDF（このリポジトリが配る開発支援のプラグイン）のスク�
 
 ## 今の姿
 
-確定仕様へ移した `issues/` の文書は、`ndf records spec finalize` で消すと決まっている（[issues/README.md](https://github.com/devbasex/ai-plugins/blob/main/issues/README.md)）。36 本のそれぞれの移し先は、確定仕様の対応表（[docs/specifications/ndf-rebuild.md](https://github.com/devbasex/ai-plugins/blob/main/docs/specifications/ndf-rebuild.md)）にある。消し方と、リンクを固める（ブランチではなく特定のコミットの 40 桁の SHA を指すように書き換え、ファイルを消した後も開けるようにする）手順は、#3412 の詳細設計書（[issues/issue-3412-design-detail.md の「確定仕様化」](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3412-design-detail.md#確定仕様化)）の手順 7・8 が決めている。
+確定仕様へ移した `issues/` の文書は、`ndf records spec finalize` で消すと決まっている（[issues/README.md](https://github.com/devbasex/ai-plugins/blob/main/issues/README.md)）。36 本のそれぞれの移し先は、確定仕様の対応表（[docs/specifications/ndf-rebuild.md](https://github.com/devbasex/ai-plugins/blob/main/docs/specifications/ndf-rebuild.md)）にある。消し方と、リンクを固める（ブランチではなく特定のコミットの 40 桁の SHA を指すように書き換え、ファイルを消した後も開けるようにする）手順は、#3412 の詳細設計書（[issues/issue-3412-design-detail.md の「確定仕様化」](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3412-design-detail.md#確定仕様化)）の手順 7・8 が決めている。
 
 2026-11-24 に `main` で数えた結果は次のとおりである。
 
@@ -199,7 +199,7 @@ git grep -n -e issue-1142- -e issue-3347- -e issue-3395- -e issue-3388- -- \
 
 > ## 目的
 >
-> #3412（#1142 の作り直しの仕様を確定仕様 6 本へ移し、入れ替えの前後を同じ物差しで測る）の実装計画 [issues/issue-3412-plan.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3412-plan.md) の単位 u7（Task 10）を受け持つ。作り直しの設計文書 36 本（`issues/issue-1142-*`・`issue-3347-*`・`issue-3395-*`・`issue-3388-*`）を消し、それらを指す開いている Issue のリンクを固定リンクへ替える。
+> #3412（#1142 の作り直しの仕様を確定仕様 6 本へ移し、入れ替えの前後を同じ物差しで測る）の実装計画 [issues/issue-3412-plan.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3412-plan.md) の単位 u7（Task 10）を受け持つ。作り直しの設計文書 36 本（`issues/issue-1142-*`・`issue-3347-*`・`issue-3395-*`・`issue-3388-*`）を消し、それらを指す開いている Issue のリンクを固定リンクへ替える。
 >
 > ## 経緯
 >
@@ -209,7 +209,7 @@ git grep -n -e issue-1142- -e issue-3347- -e issue-3395- -e issue-3388- -- \
 >
 > ## 対象範囲
 >
-> - 含む: 実装計画の Task 10（詳細設計書 [issues/issue-3412-design-detail.md](https://github.com/devbasex/ai-plugins/blob/main/issues/issue-3412-design-detail.md) の手順 7・8）。置換案を作り、PR 本文に Issue の番号と替えるリンクの数の表と適用のコマンドを載せる。消す直前に 36 本の未コミットの変更が 0 行であることを確かめ、`ndf records spec finalize` で消す。`docs/glossary/glossary.json`・`docs/glossary/ndf-rebuild.md` の生成の更新
+> - 含む: 実装計画の Task 10（詳細設計書 [issues/issue-3412-design-detail.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3412-design-detail.md) の手順 7・8）。置換案を作り、PR 本文に Issue の番号と替えるリンクの数の表と適用のコマンドを載せる。消す直前に 36 本の未コミットの変更が 0 行であることを確かめ、`ndf records spec finalize` で消す。`docs/glossary/glossary.json`・`docs/glossary/ndf-rebuild.md` の生成の更新
 > - 含まない: 確定仕様の本文（#3412 の u4・u5 で済み）・`plugins/ndf` の参照の書き換え（#3960）・計測（#3412 の u8）
 >
 > ## 着手の条件

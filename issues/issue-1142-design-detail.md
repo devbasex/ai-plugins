@@ -12,7 +12,7 @@
 | data | [issue-1142-design-data-design-detail.md](issue-1142-design-data-design-detail.md) | DC1〜DC8（設計文書の移行ステップ DT1〜DT8 との対応は data の詳細設計の冒頭の表） |
 | scripted-flow | [issue-1142-design-scripted-flow-design-detail.md](issue-1142-design-scripted-flow-design-detail.md) | SF1a・SF1b・SF2〜SF13（SF3 は既存の #3153） |
 | 前の企画の残り | [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md) | K1〜K3・W1〜W8（旧 K4 は A1a にまとめた） |
-| リファクタリング計画の 8 件 | [issue-2963-design-detail.md](issue-2963-design-detail.md) | RF1・RF1b・RF2・RF3・RF4・RF5a・RF5b・RF6a・RF6b・RF7・RF8 |
+| リファクタリング計画の 8 件 | [issue-2963-design-detail.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-2963-design-detail.md) | RF1・RF1b・RF2・RF3・RF4・RF5a・RF5b・RF6a・RF6b・RF7・RF8 |
 | ラベル `rebuild-1142` の残り | [issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) | N1・N2a・N2b・N3〜N7・N8a・N8b・N9〜N12 |
 
 子 Issue は 72 本で、22 の順番に分けて流す。ラベル `rebuild-1142` の開いている Issue 283 件のうち 277 件を子 Issue の変更で閉じ、6 件は閉じられない（行き先の表は [issue-1142-design-labels.md](issue-1142-design-labels.md) ）。

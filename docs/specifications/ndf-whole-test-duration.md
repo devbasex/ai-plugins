@@ -106,7 +106,7 @@ cross-refactoring の駆動・worktree のテスト環境の結合テストに�
 起動の秒（`--help` を 10 回流した中央値。開始時の load average 9.73 と 10.7 で、参考の値）は、`supervise.py` 409.7 → 328.6 ms・
 `sprint-state.py` 302.9 → 228.8 ms・`glossary.py` 162.2 → 114.2 ms だった。
 
-計測の記録と台帳は [issues/old/issue-2309-test-ledger.md](../../issues/old/issue-2309-test-ledger.md) と
+計測の記録と台帳は [issues/old/issue-2309-test-ledger.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-2309-test-ledger.md) と
 `issues/old/issue-2309-timing/` にある。
 
 ### テストを書く・消すとき

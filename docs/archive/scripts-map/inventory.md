@@ -405,7 +405,7 @@
 
 | ファイル | 行 | 関数 | クラス | 副命令 | 役割 | 利用先 | 利用元 | 名前での参照 | テスト | 循環 |
 | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | ---: | ---: |
-| `project_lib/__init__.py` | 34 | 0 | 0 | — | プロジェクトの宣言の解析（project-decl.py）の中身（#1333）。設計は issues/old/issue-1333-design.md にある。 | project_decl.py, repo.py | project-decl.py, project_lib/fingerprint.py, project_lib/merge.py | コード 8 / 契約 4 / Skill 1 / 文書 5 | 13 |  |
+| `project_lib/__init__.py` | 34 | 0 | 0 | — | プロジェクトの宣言の解析（project-decl.py）の中身（#1333）。設計は [issues/old/issue-1333-design.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-1333-design.md) にある。 | project_decl.py, repo.py | project-decl.py, project_lib/fingerprint.py, project_lib/merge.py | コード 8 / 契約 4 / Skill 1 / 文書 5 | 13 |  |
 | `project_lib/compose.py` | 47 | 4 | 0 | — | compose のファイルの `services:` を YAML を読まずに字下げで拾う。標準ライブラリだけで動く。 | — | project_lib/measure_repo.py | — | 0 |  |
 | `project_lib/fingerprint.py` | 115 | 8 | 0 | — | 入力の指紋（決定 6・I9）: 入力のパスの表に当たる追跡ファイルの HEAD の blob と、ブランチの構成。 | limits.py, project_lib/__init__.py | project-decl.py, project_lib/measure_repo.py | コード 3 / Skill 1 | 0 |  |
 | `project_lib/measure_ci.py` | 297 | 16 | 2（4） | — | CI と GitHub から測る項目（P3・P4・P6 の PR の宛先・P8 の GitHub の分）。標準ライブラリと `gh` だけで動く。 | ci_workflows.py, estimate_stats.py, junit.py, project_lib/measure_repo.py, repo.py, run_metrics.py | project-decl.py | コード 2 / 文書 4 | 4 |  |

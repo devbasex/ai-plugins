@@ -481,7 +481,7 @@ graph TD
 
 導入の鍵は取得元の名前とプラグイン名である。そのため利用者は登録し直さず、`plugin update` で新しい版が届く。
 
-**外からの参照は向け直す。** `plugins/ndf/` の外で `plugins/ndf/` の中を名指すファイルは 813 本ある（2026-11-17）。workflow・宣言・ISSUE_TEMPLATE・指示書・根の検査・Python の設定の 147 組を対応表に並べ、入れ替えで消えるパスを指す 94 組を書き換えるか消す。書き換えの表と検査は前の子 R0 で入れ替えより先に `main` へ入れ、入れ替えの PR が表を当てる。許可ファイルなどの生成物は作り直し、文書は行き先の表どおりに直す。表と順番は [issue-3341-design-refs.md](issue-3341-design-refs.md) と [issue-3341-design-swap.md](issue-3341-design-swap.md) にある（#3341 の決定 1・2・9）。
+**外からの参照は向け直す。** `plugins/ndf/` の外で `plugins/ndf/` の中を名指すファイルは 813 本ある（2026-11-17）。workflow・宣言・ISSUE_TEMPLATE・指示書・根の検査・Python の設定の 147 組を対応表に並べ、入れ替えで消えるパスを指す 94 組を書き換えるか消す。書き換えの表と検査は前の子 R0 で入れ替えより先に `main` へ入れ、入れ替えの PR が表を当てる。許可ファイルなどの生成物は作り直し、文書は行き先の表どおりに直す。表と順番は [issue-3341-design-refs.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-refs.md) と [issue-3341-design-swap.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-swap.md) にある（#3341 の決定 1・2・9）。
 
 - 採らない案 1: `plugins/ndf-next/` を残し、マーケットプレイスの `source` だけを差し替える。外からの参照は 147 組のうち `plugins/ndf/` のまま残る 53 組も向け直すことになり、漏れると検査が空のディレクトリを見て 0 件で通る
 - 採らない案 2: `ndf-next` の名前のまま配る。利用者が再導入し、Skill の前置き `ndf:` が変わる
@@ -529,7 +529,7 @@ graph TD
 
 ### 決定 79: 状態のホームとチェックアウトの置き場の旧い分だけを、入れ替えの後の最初の起動で 1 つの規則で退避する
 
-旧い置き場（10 系の NDF が状態を書く置き場）は 14 種ある。新しい NDF が同じパスへ書く 5 つのうち、退避するのは状態を持つ `~/.local/state/ndf`（状態のホーム）と `<git の共通ディレクトリ>/ndf/state`（チェックアウトの置き場）の 2 つである。一覧と根拠は [issue-3341-design-places.md](issue-3341-design-places.md) にある（#3341 の決定 3）。
+旧い置き場（10 系の NDF が状態を書く置き場）は 14 種ある。新しい NDF が同じパスへ書く 5 つのうち、退避するのは状態を持つ `~/.local/state/ndf`（状態のホーム）と `<git の共通ディレクトリ>/ndf/state`（チェックアウトの置き場）の 2 つである。一覧と根拠は [issue-3341-design-places.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-places.md) にある（#3341 の決定 3）。
 
 - 退避するのは、この 2 つのうち `format.json` が無いか番号が自分より小さいものだけである。退避先は `<元の名前>.v<旧い形の版>-<YYYYMMDD>` で、旧い形の版は `format.json` の番号、無ければ `10` とする（決定 85 の表の `state.v0-<日付>` もこの式で `state.v10-<日付>` になる）
 - 退避は名前の変更だけで行い、消さない。退避先が既にあれば何も変えずに止まる（`retire_target_exists`）
@@ -859,7 +859,7 @@ Codex の Stop は `hookSpecificOutput` を許さない（外部の調査 HK6）
 | --- | --- | --- |
 | #1142 の 3 主題 | [issue-1142-design-smells.md](issue-1142-design-smells.md)・[issue-1142-design-data.md](issue-1142-design-data.md)・[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) と各詳細設計 | 規則・表・関数の仕様を使う。移行ステップ（ラチェット・読み替えの経路・分割の順序）は使わない |
 | 前の企画の設計 | [issue-1142-design-modules.md](issue-1142-design-modules.md)・[issue-1142-design-dbos.md](issue-1142-design-dbos.md)・[issue-1142-design-libraries.md](issue-1142-design-libraries.md)・[issue-1142-design-decisions.md](issue-1142-design-decisions.md) | モジュールの分け方とライブラリの選択を使う。[issue-1142-design-migration.md](issue-1142-design-migration.md) は使わない |
-| リファクタリング計画 | [issue-2963-design.md](issue-2963-design.md)・[issue-2963-design-detail.md](issue-2963-design-detail.md) | 判断の関数と耐久の殻の形（RF1）を核の土台にする |
+| リファクタリング計画 | [issue-2963-design.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-2963-design.md)・[issue-2963-design-detail.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-2963-design-detail.md) | 判断の関数と耐久の殻の形（RF1）を核の土台にする |
 | ラベルの残り | [issue-1142-design-fixes.md](issue-1142-design-fixes.md)・[issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) | N 系の振る舞いを新しい部品の仕様として使う |
 | 工程の進行表 | [issue-3092-design.md](issue-3092-design.md)・[issue-3092-design-runtime.md](issue-3092-design-runtime.md)・[issue-3092-design-detail.md](issue-3092-design-detail.md)・[issue-3092-design-dbos-behavior.md](issue-3092-design-dbos-behavior.md) | データの形・工程の定義の書式・DBOS の使い方を使う。互換と `adopt` は使わない（決定 76）。決定 2 の「DBOS の記録の同居」と決定 18 は決定 81 で、決定 21 の契機は決定 84 で置き換える |
 | PR #3247 の指摘 | 閉じたときのコメントと指摘のスレッド 35 件 | 「工程から作業を呼ぶ層」（上の節）の要件にする |

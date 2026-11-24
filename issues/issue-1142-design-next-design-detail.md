@@ -148,7 +148,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 **入れ替え（S2）**
 
-**入れ替えの手順は [issue-3341-design-swap.md](issue-3341-design-swap.md) が持つ（#3341 で書き直した）。** 前の子（R0 の外からの参照の検査と書き換えの表・R1 の退避の直し）、当日の手順 S2-0〜S2-15（版上げの PR `release/v11.0.0` で `main` へ出し、マージキューを迂回しない）、利用者の手順 U1〜U5、戻し方 B1〜B6 がそこにある。判断は [issue-3341-design.md](issue-3341-design.md)、外からの参照の対応表は [issue-3341-design-refs.md](issue-3341-design-refs.md)、状態の置き場の一覧と退避の規則は [issue-3341-design-places.md](issue-3341-design-places.md) にある。
+**入れ替えの手順は [issue-3341-design-swap.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-swap.md) が持つ（#3341 で書き直した）。** 前の子（R0 の外からの参照の検査と書き換えの表・R1 の退避の直し）、当日の手順 S2-0〜S2-15（版上げの PR `release/v11.0.0` で `main` へ出し、マージキューを迂回しない）、利用者の手順 U1〜U5、戻し方 B1〜B6 がそこにある。判断は [issue-3341-design.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design.md)、外からの参照の対応表は [issue-3341-design-refs.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-refs.md)、状態の置き場の一覧と退避の規則は [issue-3341-design-places.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-places.md) にある。
 
 ここにあった手順 1〜9（`develop` へ入れて開発版としてデプロイし、`11.0.0-dev.1` を経て出す形と、「入れ替えの PR を revert すれば戻る」）は、#3672（ai-plugins を trunk にし `develop` のチャネルをやめた）と #3341 の決定に合わない。#3304 を実装するレーンは、この節でなく上の手順を読む。revert で戻るのはツリーだけで、戻し方は issue-3341-design-swap.md の「戻し方」にある。
 
