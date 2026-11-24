@@ -52,7 +52,9 @@ class Unverified(TooOld):
 
     def __init__(self, name: str, path: Optional[str], floor: str) -> None:
         where = path if path is not None else "実行ファイルが見つからない"
-        self._fill(f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない", name, where, "", floor)
+        self._fill(
+            f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない", name, where, "", floor
+        )
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
