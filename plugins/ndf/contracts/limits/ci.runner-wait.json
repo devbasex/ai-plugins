@@ -1,4 +1,7 @@
 {
   "summary": "CI の待ちで、必須のチェックがランナーの割り当てを待つ（queued）だけの間の上限の秒。この間は呼ぶ側が渡す待ちの予算に数えず、超えたら infra_wait で止まる",
-  "seconds": 1800
+  "seconds": 1800,
+  "read_by": [
+    "ndf.adapters.ci"
+  ]
 }

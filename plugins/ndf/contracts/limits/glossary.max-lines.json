@@ -1,0 +1,7 @@
+{
+  "summary": "用語集の設定に max_lines が無いときの、用語集の文書 1 ファイルの上限の行数",
+  "count": 500,
+  "read_by": [
+    "ndf.domains.records.glossary"
+  ]
+}

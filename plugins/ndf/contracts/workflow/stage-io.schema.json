@@ -31,10 +31,10 @@
       ]
     },
     "release-result": {
-      "description": "リリースのステップの出力。出したバージョンを工程どうしで渡す値（outputs の version）に持つ統一 JSON レポート。プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる",
+      "description": "リリースのステップの出力。出したバージョンを工程どうしで渡す値（outputs の product_version）に持つ統一 JSON レポート。プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる",
       "allOf": [
         {"$ref": "#/$defs/report"},
-        {"type": "object", "required": ["outputs"], "properties": {"outputs": {"type": "object", "required": ["version"]}}}
+        {"type": "object", "required": ["outputs"], "properties": {"outputs": {"type": "object", "required": ["product_version"]}}}
       ]
     }
   }

@@ -791,12 +791,12 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
     # PR 3464 の指摘: プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる
     work = tmp_path / "w"
     inv = plan_runner.prepare(tmp_path / "root", _plan_file(tmp_path, "release"), None, str(work), tmp_path)
-    plan_records._add_outputs(work, {"version": "11.0.0"})
+    plan_records._add_outputs(work, {"product_version": "11.0.0"})
     out = plan_runner.final_result(inv, {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 2}, "SUCCESS")
     step = next(s for s in _stage("デプロイ").steps if s.id == "release")
-    assert "version" not in out["metrics"]
+    assert "product_version" not in out["metrics"]
     assert definition.validate_io(step.output_ref, out) == []
-    assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"version": "11.0.0"}))
+    assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"product_version": "11.0.0"}))
 
 
 def _stopped_at(step: str, kind: str):

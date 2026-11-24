@@ -1,6 +1,0 @@
-{
-  "summary": "上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒",
-  "seconds": 900,
-  "interval": 30,
-  "same_cause": 31
-}

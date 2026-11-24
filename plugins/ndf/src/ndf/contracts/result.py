@@ -12,7 +12,7 @@ import sys
 from typing import Any, Optional, TextIO
 
 from ndf import contracts, identity
-from ndf.contracts import causes, exit_codes, facts
+from ndf.contracts import causes, exit_codes, facts, internal
 
 # 結果の status の語彙は exit_codes が持ち、ここから result.OK などとしても引ける
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
@@ -26,6 +26,8 @@ _LISTS = ("gaps", "process", "decisions", "warnings")
 _OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next", "outputs", "run_id")
 # routes のキーの語彙を持つ事実の表
 ANSWERS = "answers"
+# items の severity の語彙を持つ事実の表
+SEVERITIES = "severities"
 # エントリポイントの短い名前（next・routes のコマンドの先頭。パスとバージョンを含めない）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
 
@@ -89,11 +91,25 @@ def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
 
 
 def answer_errors(routes: object) -> list[str]:
-    """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの。形の誤りはスキーマが報告する。"""
+    """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの（1 つにつき 1 行。キーは文に入れない）。形の誤りはスキーマが報告する。"""
     if not isinstance(routes, dict):
         return []
     known = set(facts.ids(ANSWERS))
-    return [f"routes のキー {key!r} は回答の語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
+    return [f"routes のキーが回答の語彙（facts/{ANSWERS}.json）に無い" for _ in set(routes) - known]
+
+
+def severity_errors(items: object) -> list[str]:
+    """items の `severity` のうち、重さの表（事実の表 severities）に無いもの（値は文に入れない）。形の誤り（文字列でない・空）はスキーマが報告する。"""
+    rows = items if isinstance(items, list) else []
+    given = [(i, row["severity"]) for i, row in enumerate(rows) if isinstance(row, dict) and "severity" in row]
+    words = [(i, word) for i, word in given if isinstance(word, str) and word]
+    known = set(facts.ids(SEVERITIES)) if words else set()
+    return [f"items/{i}/severity が重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
+
+
+def item_fields() -> frozenset[str]:
+    """結果のコントラクトが items の要素に形を決めた欄の名前。"""
+    return frozenset(contracts.load_json(SCHEMA)["$defs"]["item"]["properties"])
 
 
 def code_for(obj: Any) -> Optional[int]:
@@ -111,8 +127,19 @@ def code_for(obj: Any) -> Optional[int]:
 
 
 def errors(obj: Any, code: Optional[int] = None) -> list[str]:
-    """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。"""
-    errs = contracts.schema_errors(obj, SCHEMA)
+    """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。スキーマの誤りの文は結果の値を含む
+    （`emit` が外へ出す文は `_safe_errors`）。"""
+    return contracts.schema_errors(obj, SCHEMA) + _table_errors(obj, code)
+
+
+def _safe_errors(obj: Any, code: Optional[int]) -> list[str]:
+    """結果の値もキーも含まない誤りの文（誤り 1 件につき 1 つ）。スキーマの誤りは、スキーマの場所と規則の名前にする。"""
+    return contracts.broken_rules(obj, SCHEMA) + _table_errors(obj, code)
+
+
+def _table_errors(obj: Any, code: Optional[int]) -> list[str]:
+    """スキーマでは見ない誤り（表に無い語・バージョン・終了コード）。文は結果の値もキーも含まない。"""
+    errs: list[str] = []
     if not isinstance(obj, dict):
         return errs
     if "cause" in obj:
@@ -120,19 +147,46 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
         errs += causes.kind_errors(obj["cause"])
     if "routes" in obj:
         errs += answer_errors(obj["routes"])
+    if "items" in obj:
+        errs += severity_errors(obj["items"])
+    if newer(obj):
+        errs.append("version が読めるバージョンより新しい")
     if code is not None and obj.get("status") in STATUSES:
         errs += _code_errors(obj, code)
     return errs
 
 
+def newer(obj: Any) -> bool:
+    """結果の形のバージョンが、読めるバージョンより新しいか（バージョンの無い結果は 1）。整数でないバージョンは形の誤りで、ここでは見ない。"""
+    found = obj.get("version") if isinstance(obj, dict) else None
+    if isinstance(found, bool) or not isinstance(found, (int, float)):
+        return False
+    return found > internal.version() and found % 1 == 0  # JSON の 2.0 はスキーマでは整数
+
+
+def received(obj: Any) -> Optional[dict[str, Any]]:
+    """ほかのプロセスや Skill から受けた結果。新しいバージョンなら代わりの `stopped`（precondition）、形が違えば None。"""
+    refused = refused_newer(obj)
+    if refused is not None:
+        return refused
+    return obj if not errors(obj) else None
+
+
+def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
+    """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。"""
+    if not newer(obj):
+        return None
+    return stopped(ENTRY, "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
+
+
 def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
-    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。"""
+    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。渡された終了コードは文に入れない。"""
     errs: list[str] = []
     if not exit_codes.matches(obj["status"], code):
-        errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+        errs.append(f"status {obj['status']} と終了コードが合わない")
     expected = code_for(obj)
     if obj["status"] == STOPPED and expected is not None and code != expected:
-        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
+        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected} で、渡された終了コードと合わない")
     return errs
 
 
@@ -142,15 +196,28 @@ def dumps_line(obj: Any) -> str:
 
 
 def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
-    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば出さずに誤りを標準エラーへ書き、invalid の終了コードを返す。"""
+    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、値を含まない誤りの文を標準エラーへ書き、代わりの `stopped`（invalid）を
+    1 行で出して invalid の終了コードを返す。"""
     if code is None:
         code = code_for(obj)
-    errs = errors(obj, code)
+    errs = _safe_errors(obj, code)
     if errs or code is None:
-        for line in errs or ["終了コードを決められない（stopped に cause が無い）"]:
-            print(f"結果の形の誤り: {line}", file=sys.stderr)
-        return causes.exit_code("invalid")
+        return _emit_instead(errs or ["終了コードを決められない（stopped に cause が無い）"], stream)
     print(dumps_line(obj), file=stream or sys.stdout)
+    return code
+
+
+def _emit_instead(errs: list[str], stream: Optional[TextIO]) -> int:
+    """形の違う結果の誤りの文（値を含まないもの）を標準エラーへ書き、代わりの `stopped`（invalid）を 1 行で出す。元の結果の値は `tool` も入れない。"""
+    lines = list(dict.fromkeys(errs))
+    for line in lines:
+        print(f"結果の形の誤り: {line}", file=sys.stderr)
+    detail = "・".join([f"結果 JSON の形が違う（{len(errs)} 件）", *lines])
+    try:
+        instead, code = stopped(ENTRY, "invalid", detail), causes.exit_code("invalid")
+    except (contracts.ContractError, ValueError):  # 停止理由の表が読めないか、種類が無い
+        return emit_unchecked(ENTRY, "invalid", detail)
+    print(dumps_line(instead), file=stream or sys.stdout)
     return code
 
 

@@ -438,7 +438,7 @@ def test_assemble_writes_changelog_and_runs_steps_from_the_release_settings(tmp_
         {"head": "a" * 40, "state": "approved", "writer": "answer"},
         {"state": "approved", "head": "b" * 40},
         {"records": True, "production_sha": "c" * 40, "admin": False, "sync_pr": 12, "admin_record": "https://example.test/c"},
-        {"version": "11.0.1", "included": [3798, 3800]},
+        {"product_version": "11.0.1", "included": [3798, 3800]},
         {"release": None, "verifications": []},
         {"action": "fast-forward"},
     ],

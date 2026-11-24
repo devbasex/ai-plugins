@@ -1,4 +1,7 @@
 {
   "summary": "PR ごとの CI の一覧（最大 100 件）を添えて読むときに、1 回のクエリへまとめる PR の件数。100 件では GitHub が 504 を返した（11.0.1 の組み立て）",
-  "count": 25
+  "count": 25,
+  "read_by": [
+    "ndf.domains.release.gather"
+  ]
 }

@@ -42,9 +42,9 @@ def test_issue_2344_the_plan_holds_a_reference_and_reads_the_value_just_before_r
     # #2344: プランを組んだ時点の値でなく、流す直前の値を使う
     plan = {"name": "release", "refs": {"version": {"kind": "version", "of": "bump.state"}}}
     ctx, src = refs.Context((), (), tmp_path), refs.RepoSources(graphql_hub(_closing_answer))
-    write_result(tmp_path / "bump.state", OK, {"version": "10.27.64"}, key="k-1")
+    write_result(tmp_path / "bump.state", OK, {"product_version": "10.27.64"}, key="k-1")
     assert refs.resolve_plan(plan, ctx, src).values == {"version": "10.27.64"}
-    write_result(tmp_path / "bump.state", OK, {"version": "10.27.65"}, key="k-2")
+    write_result(tmp_path / "bump.state", OK, {"product_version": "10.27.65"}, key="k-2")
     assert refs.resolve_plan(plan, ctx, src).values == {"version": "10.27.65"}
     assert plan == {"name": "release", "refs": {"version": {"kind": "version", "of": "bump.state"}}}
 
@@ -109,7 +109,7 @@ def test_issue_2638_a_question_during_reclosing_a_held_lap_finds_its_lap() -> No
 
 def test_issue_2648_results_outside_the_current_run_resolve_the_same_on_reclose_and_resume(tmp_path: Path) -> None:
     # #2648: ループの 1 回とプランが今の起動の外にある成果を参照せず、締め直しと再開で食い違った
-    write_result(tmp_path / "bump.state", OK, {"version": "10.27.66"})
+    write_result(tmp_path / "bump.state", OK, {"product_version": "10.27.66"})
     write_progress(tmp_path / "check.state", [{"event": "step", "step": "review", "counts": {"findings": 1}}])
     plan = {
         "name": "close",

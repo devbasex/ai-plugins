@@ -1,4 +1,7 @@
 {
   "summary": "ラッパーが文脈の量を読む会話の記録の末尾の大きさ（バイト）",
-  "count": 262144
+  "count": 262144,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
 }

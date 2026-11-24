@@ -14,7 +14,7 @@ def _at(seconds: float) -> str:
 
 
 def test_records_drop_old_and_excess_rows(tmp_path, monkeypatch):
-    monkeypatch.setattr(records, "KEEP_ROWS", 5)
+    monkeypatch.setattr(records, "keep_rows", lambda: 5)
     now = time.time()
     old = {"at": _at(now - 31 * 86400), "result": "finished"}
     recent = {"at": _at(now - 60), "result": "finished"}

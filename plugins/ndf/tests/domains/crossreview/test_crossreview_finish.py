@@ -105,6 +105,21 @@ def test_unfixed_citation_errors_and_a_failed_check_stop_the_review(tmp_path: Pa
         assert not names or got["cause"]["kind"] == "mvv_unresolved"
 
 
+def test_secrets_in_findings_do_not_reach_the_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """指摘の本文・見送った理由の中の秘密は結果 JSON に出さない。根拠の記述の誤りの本文（文書のパスと根拠欄の中身）は載せない。"""
+    token = "ghp_" + "a" * 20
+    left = {"id": "F1", "text": f"止まる {token}", "outcome": fin.UNRESOLVED, "severity": "major"}
+    wrong = {"id": "r1-n1", "text": "secret.md の「owner/private」", "outcome": fin.UNRESOLVED, "severity": "major", "by_ndf": True}
+    done = {"id": "R1", "text": "足す", "outcome": fin.SKIPPED, "reason": f"別で扱う {token}"}
+    rebuild = _rebuild(tmp_path, [{"id": "R1", "text": f"足す {token}"}])
+    for findings in ([left, done], [left, wrong, done]):
+        path = _summary(tmp_path, fin.MAX_ROUNDS, 2, findings)
+        code, got = run_cli(capsys, "finish", "--summary", str(path), "--findings", str(rebuild))
+        shown = json.dumps(got, ensure_ascii=False)
+        assert result.errors(got, code) == [] and "止まる" in shown and "別で扱う" in shown
+        assert not [word for word in (token, "secret.md", "owner/private") if word in shown]
+
+
 def test_unread_reviewer_with_findings_left_is_still_a_valid_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """相手役が差分を読めずに止まったときの欠けは、結果 JSON の outputs にだけ載せる（最上位の gaps は incomplete だけが持てる）。"""
     left = {"id": "F1", "text": "止まる", "outcome": fin.UNRESOLVED, "severity": "major"}

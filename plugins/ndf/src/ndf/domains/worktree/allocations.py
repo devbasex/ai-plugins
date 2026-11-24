@@ -19,11 +19,12 @@ from filelock import FileLock
 
 from ndf import identity
 from ndf.adapters.git import Git
+from ndf.contracts import limits
 from ndf.domains.worktree import atomic, testenv_decide
 
-# 割り当て表のファイル名（git の共通ディレクトリの下の、プラグイン名の保存先に置く）と、排他を待つ上限の秒
+# 割り当て表のファイル名（git の共通ディレクトリの下の、プラグイン名の保存先に置く）と、排他を待つ上限の方針（contracts/limits/）
 ALLOCATIONS_FILE = "worktree-registry.json"
-LOCK_WAIT = 30
+LOCK_POLICY = "worktree.allocations-lock"
 Row = dict[str, Any]
 # 割り当て表の時刻の書式（書く側の `now` と、読む側の `testenv_sweep` が同じ書式を使う）
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
@@ -70,7 +71,7 @@ class Allocations:
     def editing(self) -> Iterator[list[Row]]:
         """排他を取り、行を読んで渡し、抜けるときに書き戻す（同じディレクトリの一時ファイルから付け替える）。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(str(self.path) + ".lock", timeout=LOCK_WAIT):
+        with FileLock(str(self.path) + ".lock", timeout=limits.seconds(LOCK_POLICY)):
             rows = self.rows()
             yield rows
             atomic.write_text(self.path, json.dumps({"assignments": rows}, ensure_ascii=False, indent=1))

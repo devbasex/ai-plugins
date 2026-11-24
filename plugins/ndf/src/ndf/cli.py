@@ -9,7 +9,8 @@
 動いていれば `store_in_use`、退避先が既にあれば `precondition`、ほかは `config_broken`）。
 使い方の表示（サブコマンドなし・`--help`）と知らないサブコマンドは保存先に触れない。
 
-どのサブコマンドも結果 JSON を 1 行出して終わる。サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
+どのサブコマンドも結果 JSON を 1 行出して終わる。内部データの読み書きの例外は `stopped`（種類は `InternalError.kind`）、ほかの
+サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
 （argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
 
 サブコマンドを子プロセスで打つ所は `ndf_command` で argv を組む。`bin/start.py` が `PYTHONPATH` を呼び出し元の値へ
@@ -32,7 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 from ndf import contracts, identity
-from ndf.contracts import result
+from ndf.contracts import internal, result
 
 log = logging.getLogger(__name__)
 
@@ -192,6 +193,8 @@ def _call(name: str, module: str, argv: list[str]) -> int:
         return _stop(name, "invalid", f"{name} の引数の誤り（使い方は標準エラーに出した）")
     except contracts.ContractError:
         raise
+    except internal.InternalError as exc:  # 内部データの形が違う・種類が無い・新しいバージョン（種類は例外が持つ）
+        return _stop(name, exc.kind, str(exc))
     except Exception as exc:  # サブコマンドが捕まえない例外も結果 JSON（stopped/unknown）で終える
         log.exception("サブコマンドが捕まえない例外で止まった: %s", name)
         return _stop(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}")

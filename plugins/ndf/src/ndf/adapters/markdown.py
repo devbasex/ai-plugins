@@ -15,7 +15,7 @@ from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
-from pygments.lexers import get_lexer_by_name
+from pygments.lexers import get_lexer_for_filename
 from pygments.token import Comment
 
 # 行の種類。入れ子は外側を優先する（引用の中の表は quote）
@@ -30,8 +30,8 @@ _KIND_OF_TOKEN = {
     "table_open": "table",
 }
 
-# コメントを空白にする拡張子 → pygments の字句解析器の名前
-COMMENT_LEXERS = {".py": "python", ".sh": "bash", ".js": "javascript", ".ts": "typescript"}
+# コメントを空白にする拡張子（字句解析器は pygments が拡張子から選ぶ）
+COMMENT_SUFFIXES = (".py", ".sh", ".js", ".ts")
 
 
 class Heading(NamedTuple):
@@ -101,13 +101,12 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
     """コードの行のコメントを同じ幅の空白に置き換える。
 
     戻り値の行の数と各行の長さは入力と同じ。pygments の `Comment` の字だけが空白になり、文字列の中の `#` は
-    残る。`COMMENT_LEXERS` に無い拡張子は入力をそのまま返す。
+    残る。`COMMENT_SUFFIXES` に無い拡張子は入力をそのまま返す。
     """
-    name = COMMENT_LEXERS.get(suffix)
-    if name is None:
+    if suffix not in COMMENT_SUFFIXES:
         return list(lines)
     text = "\n".join(lines)
-    lexer = get_lexer_by_name(name, stripnl=False, ensurenl=False)
+    lexer = get_lexer_for_filename(f"code{suffix}", stripnl=False, ensurenl=False)
     chars = list(text)
     # 行末のコメントを改行までと読む字句解析器があるため、末尾に改行を足して読む（位置は変わらない）
     for start, kind, value in lexer.get_tokens_unprocessed(text + "\n"):

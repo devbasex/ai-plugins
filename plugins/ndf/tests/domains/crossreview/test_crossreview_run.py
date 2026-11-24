@@ -492,6 +492,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
             {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義", **made_by_reviewer},
         ],
         "mvv_checked": True,
+        "unsent_citations": 0,
         "pr": PR,
         "rounds": 2,
     }

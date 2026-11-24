@@ -137,6 +137,7 @@ PR が足した MVV の根拠の記述の誤り（NDF が機械で確かめて�
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（ジャーナルへ入れるときに下げた後の値）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。引き継いだ指摘の行は記録された `severity` だけを持つ |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |
+| `unsent_citations` | 最後に残った手元のコミットが PR に届いていないときだけ、そのコミット（`head`）で見つけた MVV の根拠の記述の誤り（`errors`。確かめられなければ null と `detail` の原因）。PR の記録と結果 JSON には載せず、件数だけを判定に使う。状態ファイルは所有者だけが読める権限で置く |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
 | `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
 | `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。スレッドを書き切れなかったときは残さない |

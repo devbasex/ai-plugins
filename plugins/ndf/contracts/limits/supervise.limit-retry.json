@@ -1,4 +1,0 @@
-{
-  "summary": "claude の利用上限のリセット時刻が読めないときの待ち。計画の limit_retry_seconds で上書きする",
-  "seconds": 900
-}

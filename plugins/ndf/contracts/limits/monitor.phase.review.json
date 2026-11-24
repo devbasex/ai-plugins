@@ -1,4 +1,9 @@
 {
   "summary": "レビューの工程の監視の上限",
-  "seconds": 1200
+  "seconds": 1200,
+  "read_by": [
+    "ndf.core.converge.participants",
+    "ndf.domains.crossrefactor.launch",
+    "ndf.domains.crossreview.drive"
+  ]
 }

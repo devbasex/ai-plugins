@@ -8,7 +8,6 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
-import shutil
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from urllib.request import url2pathname
@@ -19,39 +18,6 @@ from ndf.checks import run, spec_docs, spec_model, spec_render
 from ndf.checks.model import CheckError, Scope, Source, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-COPIED = ("contracts", "docs", "bin", "skills", "agents", "manifests")
-
-
-class Copy:
-    def __init__(self, tmp: Path) -> None:
-        self.repo = tmp / "repo"
-        self.root = self.repo / "plugins" / "p"
-        for name in COPIED:
-            shutil.copytree(PLUGIN_ROOT / name, self.root / name, ignore=shutil.ignore_patterns("__pycache__"))
-
-    def path(self, rel: str) -> Path:
-        return self.root / rel
-
-    def edit_json(self, rel: str, change) -> None:
-        path = self.path(rel)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        change(data)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    def write(self, rel: str, text: str) -> None:
-        path = self.path(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-
-    def findings(self, write_spec: bool = False):
-        scope = Scope(self.repo, self.root, "p")
-        scope.sources = run.collect(self.root, self.repo)
-        return spec_docs.check(scope, load_rules(), write_spec)
-
-
-@pytest.fixture
-def copy(tmp_path: Path) -> Copy:
-    return Copy(tmp_path)
 
 
 def _rows(found, rule):
@@ -76,6 +42,16 @@ def test_hand_edit_of_a_page_is_caught_and_write_spec_restores_it(copy):
     assert {f.path.rsplit("/", 1)[-1] for f in found if f.rule == spec_docs.DOCS} == {"env.md", "stale.md"}
     assert copy.findings(write_spec=True) == []
     assert not copy.path("docs/contracts/stale.md").exists()
+
+
+def test_issue_3684_one_changed_character_of_a_page_is_caught(copy):
+    """#3684 の受け入れ条件 3: コントラクトのページの 1 文字を置き換えると、そのページと行を挙げて落とす。"""
+    page = copy.path("docs/contracts/env.md")
+    text = page.read_text(encoding="utf-8")
+    at = len(text) // 2
+    page.write_text(text[:at] + ("い" if text[at] == "あ" else "あ") + text[at + 1 :], encoding="utf-8")
+    found = [(f.rule, f.path.rsplit("/", 1)[-1], f.line) for f in copy.findings()]
+    assert found == [(spec_docs.DOCS, "env.md", text[:at].count("\n") + 1)]
 
 
 def test_a_key_only_in_the_files_table_names_the_ndf_settings_and_key(copy):

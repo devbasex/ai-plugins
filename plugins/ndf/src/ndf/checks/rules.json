@@ -64,7 +64,27 @@
   },
   "facts": {
     "min_str": 4,
-    "contracts_dir": "contracts"
+    "contracts_dir": "contracts",
+    "generated_schemas": ["schemas/io/*.args.schema.json"],
+    "limit_kinds": [
+      {"words": ["TIMEOUT", "WAIT", "SECONDS", "GRACE"], "keys": ["seconds", "timeout", "deadline"]},
+      {"words": ["INTERVAL"], "keys": ["interval", "max_interval"]},
+      {"words": ["MAX", "LIMIT", "CAP", "KEEP", "BUDGET"], "keys": ["count"]},
+      {"words": ["RETRY", "ATTEMPT"], "keys": ["attempts"]},
+      {"words": ["DAYS"], "keys": ["count"]}
+    ],
+    "limit_constants": [
+      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（#3394 の決定 60）で 2 回に固定した値で、運用で変えない"},
+      {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},
+      {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
+      {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
+      {"name": "ndf.domains.release.land.QUEUE_POLL_SECONDS", "kind": "implementation", "reason": "マージキューの PR を読み直す間隔。待ちの上限は別に持ち、間隔は問い合わせの都合で決めた"},
+      {"name": "ndf.domains.statusline.settings.REFRESH_INTERVAL", "kind": "implementation", "reason": "statusLine の設定へ書く再描画の間隔。表示の都合で決めた"},
+      {"name": "ndf.domains.worktree.guard_decide.MAX_LISTED", "kind": "implementation", "reason": "案内の文に並べるパスの件数。表示の都合で決めた"},
+      {"name": "ndf.progress.lane.machine.LOCK_POLL_SECONDS", "kind": "implementation", "reason": "起動の排他を取り直す間隔。待ちの上限は方針 parallel-machine.admit-lock が持つ"},
+      {"name": "ndf.testing.records.SECONDS_PER_DAY", "kind": "external", "reason": "1 日の秒数（単位の換算）"},
+      {"name": "ndf.testing.slots.POLL_SECONDS", "kind": "implementation", "reason": "スロットとメモリを確かめる間隔。待ちの上限は方針 test-slots.wait が持つ"}
+    ]
   },
   "words": {
     "glossary_config": "glossary.json",
@@ -135,10 +155,57 @@
         "reason": "入れ替え（#3304）で 10 系から移した実地の検証の記録で、書いた時点の文のまま残す"
       },
       "src/ndf/checks/rules.json": {
-        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け", "区間", "契約", "節", "問い", "答え", "版", "副命令", "依頼", "枠", "印", "段", "置き場", "宣言", "土台", "配布", "その場で直す", "ミッション", "上限の中断", "主ディレクトリ", "作業ツリー", "元からの失敗", "共通層", "取り込ま", "取り込み", "取り込む", "取り込ん", "告知", "導入確認", "差し戻し", "戻り先", "手入れ", "控え", "提示物", "改修計画", "文脈量", "正本", "照合", "起こさ", "起こし", "越えない線", "途中の通知", "進行の記録", "進行側", "鍵", "閉じる語", "骨組み"],
-        "reason": "この除外のデータそのものが、外す語を持つ"
+        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け", "区間", "契約", "節", "問い", "答え", "版", "副命令", "依頼", "枠", "印", "段", "置き場", "宣言", "土台", "配布", "その場で直す", "ミッション", "上限の中断", "主ディレクトリ", "作業ツリー", "元からの失敗", "共通層", "取り込ま", "取り込み", "取り込む", "取り込ん", "告知", "導入確認", "差し戻し", "戻り先", "手入れ", "控え", "提示物", "改修計画", "文脈量", "正本", "照合", "起こさ", "起こし", "越えない線", "途中の通知", "進行の記録", "進行側", "鍵", "閉じる語", "骨組み", "行き先"],
+        "reason": "この除外のデータそのものが、外す語を持つ。設計レビューの項目の表と 11.x の対応表の見出しも、文書と同じ文字列に保つ"
       }
     }
+  },
+  "limits": {
+    "readers": {
+      "ndf.contracts.limits.policy": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.value": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.seconds": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.scaled": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.from_env": {"arg": "policy_name", "index": 2},
+      "ndf.domains.hooks.tables.policy_value": {"arg": "name", "index": 0},
+      "ndf.domains.hooks.tables.policy": {"arg": "name", "index": 0},
+      "ndf.adapters.github._batches": {"arg": "batch", "index": 1},
+      "ndf.adapters.github.GitHub.aliased": {"arg": "batch", "index": 1},
+      "ndf.adapters.github.GitHub.nodes": {"arg": "batch", "index": 3},
+      "ndf.adapters.github._page_cap": {"arg": "name", "index": 0},
+      "ndf.adapters.github._Counted": {"arg": "cap", "index": 2},
+      "ndf.adapters.training.Endpoint": {"arg": "policy", "index": 1},
+      "ndf.adapters.write_gate._window": {"arg": "name", "index": 0},
+      "ndf.domains.gws.call": {"arg": "limit_name", "index": 1},
+      "ndf.domains.records.gws.auth_status": {"arg": "limit", "index": 0},
+      "ndf.domains.relay.context_thresholds.thresholds.value": {"arg": "name", "index": 0},
+      "ndf.process_group._grace": {"arg": "grace_key", "index": 0},
+      "ndf.process_group.stop_group": {"arg": "grace_key", "index": 1},
+      "ndf.process_group.stop_detached_group": {"arg": "grace_key", "index": 1},
+      "ndf.slot_pool.weight_mib": {"arg": "kind", "index": 0, "template": "launch.weight.{}"}
+    },
+    "tables": ["ndf.contracts.limits.table", "ndf.contracts.limits.NDF_SETTINGS"],
+    "whole": [
+      {"module": "ndf.checks.model", "reason": "検査が共有する上限の設定。規則 limit-readers は読み手の指定だけ、規則 const-fact は定数と比べる数の一覧だけを読む"},
+      {"module": "ndf.contracts.cli", "reason": "事実の表が指す方針の名前の有無だけを確かめる"}
+    ],
+    "dynamic": [
+      {"at": "ndf.adapters.agents.stall_seconds", "expr": "f\"monitor.stall.{agent}\"", "template": "monitor.stall.{}", "vocabulary": "domains/runtimes.json#/rows/*/id", "reason": "担当の CLI ごとの無進捗の許容を、担当の名前から引く"},
+      {"at": "ndf.contracts.causes._policy_errors", "expr": "row.retry", "template": "{}", "vocabulary": "causes#/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.contracts.causes.policy_of", "expr": "row(kind).retry", "template": "{}", "vocabulary": "causes#/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.domains.crossrefactor.launch.phase_limit", "expr": "f\"monitor.phase.{phase}\"", "template": "monitor.phase.{}", "vocabulary": "domains/loop-phases.json#/rows/*/id", "reason": "工程の監視の上限を、工程の名前から引く"},
+      {"at": "ndf.domains.hooks.budget._budget_policy", "expr": "f\"hook.budget.{spec['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
+      {"at": "ndf.domains.hooks.budget._pair_errors", "expr": "guard['limits']", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
+    ]
+  },
+  "copy_dup": {
+    "min_files": 4,
+    "min_chars": 8,
+    "max_chars": 80,
+    "allow_names": ["check", "main"]
+  },
+  "internal_names": {
+    "writers": {"write_record": 0, "append": null, "append_locked": null}
   },
   "child_deps": {
     "max_per_slot": 2
@@ -156,7 +223,11 @@
     "summary": "テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数が、リポジトリの設定の budget の上限を超えた"
   },
   "spec": {
-    "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
-    "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]
+    "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public", "review-items"],
+    "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"],
+    "review_items_source": "issues/issue-1142-design-review-routing.md",
+    "review_items_columns": {"id": "項目", "text": "要旨", "routed_to": "行き先の子", "order": "順番", "kind": "新設か追補か", "requirement_line": "要求の行", "release": "版"},
+    "correspondence_columns": {"id": "行", "routed_to": "11.x の行き先"},
+    "correspondence_routes": "Z[0-9]+|#[0-9]+|作らない"
   }
 }

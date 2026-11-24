@@ -1,4 +1,7 @@
 {
   "summary": "従量の接続（Bedrock）を確かめるコマンドの上限",
-  "seconds": 60
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.relay.account_metered"
+  ]
 }

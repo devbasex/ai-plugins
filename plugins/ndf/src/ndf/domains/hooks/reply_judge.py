@@ -25,7 +25,7 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf.domains.hooks import reply_wait, tables
@@ -39,8 +39,8 @@ THINKING_OFF = {"MAX_THINKING_TOKENS": "0"}
 REST_NAME = "judge-rest.json"
 # 休みのマーカーの更新を直列にする錠のファイルの名前（`.` で始まる名前は `metrics.prune_state` が消さない）
 REST_LOCK_NAME = ".judge-rest.lock"
-# 組へ SIGTERM を送った後、SIGKILL までに待つ秒
-GROUP_GRACE = 0.2
+# 組へ SIGTERM を送った後、SIGKILL までに待つ秒の方針（contracts/limits/）
+KILL_GRACE = "hook.stop-wait.kill-grace"
 # 子の標準出力を 1 回に読む上限のバイト数
 READ_CHUNK = 65536
 # 子の標準入力へ 1 回に書くバイト数（書ける状態と分かった後なら止まらない上限）
@@ -70,6 +70,11 @@ class Judged(NamedTuple):
 def judge_setting(key: str) -> Any:
     """判定の設定（`contracts/limits/hook.stop-wait.judge.json`）の 1 つの値。"""
     return tables.policy_value("hook.stop-wait.judge", key)
+
+
+def kill_grace() -> float:
+    """組へ SIGTERM を送った後、SIGKILL までに待つ秒。"""
+    return tables.policy_value(KILL_GRACE, "seconds")
 
 
 def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
@@ -138,6 +143,14 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
+def _is_cli(exe: str, patterns: Iterable[str]) -> bool:
+    """実行ファイルの実パスが Claude Code のパターンに当たる。
+
+    パスの要素ごとに右から突き合わせる。`fnmatch` の `*` は `/` にも当たり、導入先の下の階層の実行ファイルまで当たってしまう。
+    """
+    return any(PurePosixPath(exe).match(pattern) for pattern in patterns)
+
+
 def _found(current: int, exe: str, read: Callable[..., bytes], stat: Callable[..., os.stat_result]) -> Optional[Launch]:
     """Claude Code と分かった親の起動引数と実行ファイルの同一性。プロジェクトの根は呼び手が入れる。
 
@@ -169,10 +182,10 @@ def _claude_launch(
         for _ in range(int(endpoint["ancestors"])):
             current = _ppid(read, current)
             exe = readlink(_proc_file(current, "exe"))
-            if _matches(exe, endpoint["cli_exe"]):
-                return _found(current, exe, read, stat)
             if _matches(os.path.basename(exe), endpoint["script_hosts"]):
                 return None
+            if _is_cli(exe, endpoint["cli_exe"]):
+                return _found(current, exe, read, stat)
     except (OSError, ValueError):  # noqa: NDF401 ファイル: /proc を読めない環境（macOS を含む）では親を確かめない
         return None
     return None
@@ -235,14 +248,14 @@ def _stop_group(proc: Any, killpg: Callable[[int, int], None], gentle: bool) -> 
     """組を止めてから組のリーダー（判定の子）を回収する。
 
     リーダーを回収するまでは組の番号が再利用されないので、組への送信は必ず回収の前に済ませる。リーダーが先に
-    終わっても組に `claude` が残りうるため、`gentle` なら SIGTERM の後に `GROUP_GRACE` 秒おき、どの経路でも
+    終わっても組に `claude` が残りうるため、`gentle` なら SIGTERM の後に `KILL_GRACE` の秒だけおき、どの経路でも
     最後に組へ SIGKILL を送ってから回収する。
     """
     try:
         try:
             if gentle:
                 _signal_group(proc.pid, signal.SIGTERM, killpg)
-                _pause(GROUP_GRACE)
+                _pause(kill_grace())
         finally:
             # 猶予の待ちが締め切りの SIGALRM などで破られても、SIGKILL を送ってから回収する
             _signal_group(proc.pid, signal.SIGKILL, killpg)

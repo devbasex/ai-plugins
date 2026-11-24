@@ -1,4 +1,7 @@
 {
   "summary": "ログインの 2 回目が待機中のログインの終了を待つ上限",
-  "seconds": 60
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.relay.account_login"
+  ]
 }

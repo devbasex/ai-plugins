@@ -272,7 +272,7 @@ def test_ask_kills_the_group_on_timeout_even_if_the_leader_already_ended() -> No
     # 偽の wait はすぐ返る（判定の子だけが SIGTERM で先に終わった）。組に残る claude へ SIGKILL が届いてから回収する
     judged, _, _, log = ask_with("", finished=False, seconds=0.0)
     assert judged.kind is None and judged.failure == "timeout"
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_stops_the_group_and_reraises_an_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,7 +288,7 @@ def test_ask_stops_the_group_and_reraises_an_interrupt(monkeypatch: pytest.Monke
             reply_judge.ask("本文", 5.0, {}, LAUNCH, popen=Spawner(proc), killpg=Killer(log))
     finally:
         proc.close()
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_kills_the_group_before_reaping_when_the_grace_is_interrupted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +306,7 @@ def test_ask_kills_the_group_before_reaping_when_the_grace_is_interrupted(monkey
             reply_judge.ask("本文", 0.0, {}, LAUNCH, popen=Spawner(proc), killpg=Killer(log))
     finally:
         proc.close()
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_reports_a_launch_failure() -> None:
@@ -393,7 +393,7 @@ def test_awaited_stops_gently_on_timeout_and_closes_the_streams_after_reaping(mo
     judged, proc, log, _ = awaited_with(monkeypatch, lambda: None, code=-signal.SIGTERM)
     assert isinstance(judged, reply_judge.Judged)
     assert (judged.kind, judged.failure, judged.calls) == (None, "timeout", 0) and judged.ms >= 0
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, WAIT_OPEN]
     assert proc.stdin.closed and proc.stdout.closed
 
 
@@ -404,7 +404,7 @@ def test_awaited_stops_gently_and_reraises_the_same_error(monkeypatch: pytest.Mo
 
     raised, proc, log, _ = awaited_with(monkeypatch, broken)
     assert raised is error
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, WAIT_OPEN]
     assert proc.stdin.closed and proc.stdout.closed
 
 
@@ -448,6 +448,23 @@ def test_parent_launch_stops_at_a_node_launch(script: str) -> None:
     assert reply_judge.parent_launch(ENV, HOOK_PID, **readers) is None
     # node の起動引数は読まない
     assert "/proc/101/cmdline" not in seen
+
+
+def test_parent_launch_refuses_a_script_host_before_the_claude_executable() -> None:
+    # Claude Code の導入先にある node も、実行ファイルのパターンより先にスクリプトホストとして拒む
+    tree = {
+        HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3"]),
+        101: Proc(ppid=1, exe="/home/u/.local/share/claude/versions/node", cmdline=["node", "x.js"], comm="node"),
+    }
+    assert launch_of(ENV, tree) is None
+
+
+@pytest.mark.parametrize("below", ["2.1.330/bin/tool", "tools/tool"])
+def test_parent_launch_does_not_take_an_executable_below_the_versions(below: str) -> None:
+    # 導入先の直下のファイルだけを Claude Code と認め、下の階層の実行ファイルは認めない
+    tree = {HOOK_PID: Proc(ppid=101, exe="/usr/bin/python3", cmdline=["python3"])}
+    tree[101] = Proc(ppid=1, exe=f"/home/u/.local/share/claude/versions/{below}", cmdline=["tool"], comm="tool")
+    assert launch_of(ENV, tree) is None
 
 
 @pytest.mark.parametrize(("depth", "wanted"), [(8, ["claude", "-p"]), (9, None)])

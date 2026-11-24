@@ -1,4 +1,8 @@
 {
   "summary": "閾値 B。7 日の窓の使用率がこれより下のアカウントを余裕の組に入れる。カットポイントと替え先の選び方だけに効く（百分率）",
-  "count": 70
+  "count": 70,
+  "read_by": [
+    "ndf.domains.relay.account_choice",
+    "ndf.domains.relay.cli"
+  ]
 }

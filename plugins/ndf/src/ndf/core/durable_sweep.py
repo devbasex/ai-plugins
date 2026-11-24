@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ndf.contracts import limits
 from ndf.core import durable_locks as locks
 from ndf.core.durable_runs import _forget_run, _runs
 from ndf.core.durable_locks import maint_lock, sa
@@ -23,8 +24,8 @@ from ndf.core.durable_locks import maint_lock, sa
 # 殻（durable）から分けた後も、片付けのログは殻の logger に出す
 log = logging.getLogger("ndf.core.durable")
 
-# retired/・broken/ と URL の終わった実行を消すまでの日数（決定 83）
-KEEP_DAYS = 14
+# retired/・broken/ と URL の終わった実行を消すまでの日数の方針（contracts/limits/）
+KEEP = "durable.keep"
 # quick_check と片付けの走査の間隔（決定 82・83）
 CHECK_INTERVAL = timedelta(hours=24)
 
@@ -62,6 +63,11 @@ class SweepResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def keep_days() -> int:
+    """retired/・broken/ と URL の終わった実行を消すまでの日数。"""
+    return int(limits.value(KEEP, "count"))
+
+
 def _dbos_dir(root: Path) -> Path:
     return root / DBOS_DIR
 
@@ -97,7 +103,7 @@ def touch_mark(mark: Path, now: datetime) -> None:
 def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Path:
     """キーのファイルの本体と `-wal`・`-shm`・`-journal` をそろえて移し、目印 `.checked` と最後に `.lock` を消す。
 
-    移した時刻を更新時刻にし、`KEEP_DAYS` を移した時から数える。時刻は移す前に付ける。移した後に付けると、
+    移した時刻を更新時刻にし、`KEEP` の日数を移した時から数える。時刻は移す前に付ける。移した後に付けると、
     その間は元の古い時刻で退避先に見え、別のキーの `sweep` が退避したばかりのファイルを消せる。
     `.lock` を消すのは呼び手が `run_lock` を持つときだけ。
     """
@@ -162,7 +168,7 @@ def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, S
 
 
 def sweep(root: Path, records: Records, now: datetime | None = None) -> SweepResult:
-    """終わったキーのファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
+    """終わったキーのファイルを retired/ へ移し、retired/・broken/ の `KEEP` の日数より古いファイルを消す（決定 83・A5）。
 
     24 時間に 1 回だけ走査する。開いているプロセスがいるキー（`run_lock` を待たずに取れないキー）は触らない。
     """
@@ -212,7 +218,7 @@ def _drop_orphans(root: Path) -> None:
 
 
 def _sweep_kept(dbos_dir: Path, now: datetime, out: SweepResult) -> None:
-    cutoff = (now - timedelta(days=KEEP_DAYS)).timestamp()
+    cutoff = (now - timedelta(days=keep_days())).timestamp()
     for kept in (dbos_dir / RETIRED_DIR, dbos_dir / BROKEN_DIR, dbos_dir / BACKUP_DIR):
         if not kept.is_dir():
             continue
@@ -233,7 +239,7 @@ def _expired(records: list[Any], started_at: datetime, cutoff: datetime) -> bool
 
 
 def sweep_url(root: Path, database_url: str, records: Records, now: datetime | None = None) -> SweepResult:
-    """実行の一覧のキーのうち、実行（子を含む）がすべて終わって `KEEP_DAYS` を過ぎたキーの実行と実行の一覧の行を消す（A6・A12）。
+    """実行の一覧のキーのうち、実行（子を含む）がすべて終わって `KEEP` の日数を過ぎたキーの実行と実行の一覧の行を消す（A6・A12）。
 
     目印と排他は `sweep` と同じ。キーごとに DB 側のキーのロックを待たずに試し、取れないキーは触らない（I13）。
     消すときは集めた ID をすべて並べて `delete_workflows` を呼び、`delete_children` には頼らない（I8）。
@@ -245,7 +251,7 @@ def sweep_url(root: Path, database_url: str, records: Records, now: datetime | N
         except sa.exc.SQLAlchemyError as exc:
             out.warnings.append(f"実行の一覧を読めない: {exc}")
             rows = []
-        cutoff = now - timedelta(days=KEEP_DAYS)
+        cutoff = now - timedelta(days=keep_days())
         for row in rows:
             try:
                 _sweep_url_run(database_url, row.run_name, row.started_at, cutoff, records, out)

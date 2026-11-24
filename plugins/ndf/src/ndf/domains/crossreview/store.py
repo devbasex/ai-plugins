@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -64,11 +65,17 @@ def read_object(path: Path) -> dict[str, Any]:
 
 
 def write_object(path: Path, value: dict[str, Any]) -> None:
-    """一時の名前へ書いてから置き換える（読む側に書きかけを見せない。打ち直しても同じ中身）。"""
+    """一時の名前へ書いてから置き換える（読む側に書きかけを見せない。打ち直しても同じ中身）。PR に届いていないコミットの文書の名前や
+    本文を含むので、umask や前のファイルの権限によらず所有者だけが読める権限（`mkstemp` の 0600）で置く。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with open(fd, "w", encoding="utf-8") as out:
+            out.write(json.dumps(value, ensure_ascii=False, sort_keys=True))
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def _ref_of(path: Path, data: dict[str, Any], fallback: int) -> StateRef:

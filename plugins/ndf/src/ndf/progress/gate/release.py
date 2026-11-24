@@ -105,11 +105,11 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
 
 
 # まとめたリリースの回答のキー → スプリントの文脈のキー（デプロイの出力）
-RELEASED_OUTPUTS = {"version": "version", "release": "release_pr"}
+RELEASED_OUTPUTS = {"version": "product_version", "release": "release_pr"}
 
 
 def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
-    """出した回答が持つバージョンとリリース記録の PR（文脈の `version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
+    """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
     文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。"""
     if value != run.APPROVED:
         return {}

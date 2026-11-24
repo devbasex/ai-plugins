@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -265,14 +266,14 @@ def test_only_empty_files_are_read_as_empty(tree: Path) -> None:
 )
 def test_lines_are_counted_the_way_the_markdown_parser_counts_them(text: str) -> None:
     """本文の行を Markdown の解析と同じ数え方で並べる（コードの行の番号と、差分の行の番号を対応させる）。"""
-    lines = changes._markdown_lines(text)
+    lines = changes._markdown_rows(text)
     assert len(lines) == len(markdown.code_lines(text))
     rows = text.split("\n")
     assert all(line in rows[no - 1] for no, line in lines)
 
 
 def test_a_line_after_a_carriage_return_keeps_its_line_number_in_the_diff() -> None:
-    assert changes._markdown_lines("a\rb\r\nc\n") == [(1, "a"), (1, "b"), (2, "c")]
+    assert changes._markdown_rows("a\rb\r\nc\n") == [(1, "a"), (1, "b"), (2, "c")]
 
 
 # --- ラウンドの準備 ---------------------------------------------------------------------------
@@ -440,6 +441,26 @@ def test_issue_4090_4_failed_round_is_checked_again_before_the_verdict(repos: Re
     assert _state(fake.state_dir)["threads"]["r1-n1"]["comment"]
 
 
+def test_round_checked_only_at_the_end_is_reused_on_the_same_head(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """ラウンドの中の確かめに失敗しても、同じ head の最後の確かめに成功して収束したら、打ち直しは相手役を起動せずに前回の結果を返す。"""
+    _push_base(repos)
+    _push_pr(repos, "doc.md", "# 設計", RIGHT)
+    read, reviewed = changes._diff_files, drive._review
+    _git_fails(monkeypatch, "_diff_files")
+
+    def review_then_recover(*args: Any) -> Any:
+        monkeypatch.setattr(changes, "_diff_files", read)
+        return reviewed(*args)
+
+    monkeypatch.setattr(drive, "_review", review_then_recover)
+    code, got = _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt), wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert [r["mvv_checked"] for r in _state(tmp_path / "st")["rounds"]] == [True]
+    again = Fixer(tmp_path / "st", wt)
+    code, got = _base(capsys, monkeypatch, again, wt)
+    assert (code, got["status"], again.calls) == (0, "ok", [])
+
+
 def test_issue_4090_4_last_fix_is_checked_on_the_new_commit(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """最後のラウンドの修正で足した誤りは、終わり方を決める前に新しいコミットで拾い、止まる。同じ状態ディレクトリの
     打ち直しは、その指摘を最初のラウンドから修正担当へ渡す。"""
@@ -477,14 +498,74 @@ def test_last_fix_is_settled_only_by_the_check_of_its_commit(
     assert [f["outcome"] for f in _by_ndf(fake.state_dir)] == [fin.UNRESOLVED if broken else fin.FIXED]
 
 
-def test_failed_push_is_checked_on_the_local_commit(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """修正を送れなかったときは、作業場所に残ったコミットを確かめる（次の起動と後の手順が送るのはそのコミットである）。"""
+def _refuse_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(drive.push, "push_fix", lambda *a: drive.push.PushResult(False, False, None, None, "断られた", ()))
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_failed_push_keeps_the_local_errors_out_of_the_pr(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub, readable: bool
+) -> None:
+    """修正を送れなかったときは、手元に残ったコミットの誤り（確かめられなければその原因）で止まるが、未公開の文書の名前と本文は手元の
+    状態ファイルだけに残し、指摘・PR の記録・結果 JSON に載せない。"""
     _push_base(repos)
     fake = Fixer(tmp_path / "st", wt, ("new.md", f"# 新しい\n{WRONG}\n"), script={"codex": [[MAJOR]], "kiro": [[]]})
-    monkeypatch.setattr(drive.push, "push_fix", lambda *a: drive.push.PushResult(False, False, None, None, "断られた", ()))
+    _refuse_push(monkeypatch)
+    if not readable:
+
+        def fail(*args: Any) -> Any:
+            raise git.GitError("new.md を読めない")
+
+        monkeypatch.setattr(changes, "_final_target", lambda run, head: run.last_target if head == run.last_target.head else fail())
     _, got = _base(capsys, monkeypatch, fake, wt)
+    assert got["cause"]["kind"] == "mvv_unresolved" and _by_ndf(fake.state_dir) == []
+    names = [g["name"] for g in got["outputs"]["gaps"] if g["kind"] == fin.GAP_MVV]
+    assert names == [fin.UNSENT_CITATIONS if readable else fin.CITATION_CHECK]
+    held = _state(fake.state_dir)["unsent_citations"]
+    assert held["head"] == sh(wt, "rev-parse", "HEAD").strip()
+    assert [e["path"] for e in held["errors"]] == ["new.md"] if readable else held["errors"] is None and "new.md" in held["detail"][0]
+    assert "new.md" not in json.dumps(got, ensure_ascii=False) and not [c for c in hub.comments if "new.md" in c[2]]
+    finished = fin.finish(fin.as_review(store.read_object(fake.state_dir / drive.SUMMARY_NAME)))
+    assert finished.kind == "mvv_unresolved"
+
+
+def test_commit_left_by_a_fixer_without_a_result_stays_out_of_the_pr(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """修正の記録の無い未送信のコミット（修正担当がコミットだけを残して終わった）の誤りは、ラウンドの始めにも指摘にせず、手元の状態
+    ファイルだけに残して止まる。打ち直しはその収束を使い回さず、送れば普通の指摘になる。"""
+    _push_base(repos)
+    commit(wt, "new.md", f"# 新しい\n{WRONG}\n", "送られなかった修正")
+    state_dir = tmp_path / "st"
+    for _ in range(2):
+        again = Fixer(state_dir, wt)
+        _, got = _base(capsys, monkeypatch, again, wt)
+        assert got["cause"]["kind"] == "mvv_unresolved" and sorted(again.calls) == ["codex", "kiro"]
+        assert [g["name"] for g in got["outputs"]["gaps"]] == [fin.UNSENT_CITATIONS]
+        assert _by_ndf(state_dir) == [] and _state(state_dir)["rounds"][-1]["mvv_checked"] is False
+        assert [e["path"] for e in _state(state_dir)["unsent_citations"]["errors"]] == ["new.md"]
+        assert "new.md" not in json.dumps(got, ensure_ascii=False) and not [c for c in hub.comments if "new.md" in c[2]]
+    sh(wt, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    code, got = _base(capsys, monkeypatch, Fixer(state_dir, wt, ("new.md", f"{RIGHT}\n")), wt)
+    assert (code, got["status"], [f["path"] for f in _by_ndf(state_dir)]) == (0, "ok", ["new.md"])
+
+
+def test_failed_push_does_not_settle_the_error_left_in_the_pr(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """手元のコミットで誤りが直っていても、送れなければ PR の誤りは未解決のまま止まる。次の起動が送り直すと解決し、手元の記録も消える。"""
+    _push_base(repos)
+    _push_pr(repos, "doc.md", "# 設計", WRONG)
+    with monkeypatch.context() as refused:
+        _refuse_push(refused)
+        _, got = _base(capsys, refused, Fixer(tmp_path / "st", wt, ("doc.md", f"# 設計\n{RIGHT}\n")), wt)
     assert got["cause"]["kind"] == "mvv_unresolved"
-    assert [f["path"] for f in _by_ndf(fake.state_dir)] == ["new.md"]
+    [gap] = got["outputs"]["gaps"]
+    assert (gap["kind"], gap["name"]) == (fin.GAP_MVV, "r1-n1")
+    assert "doc.md" not in gap["reason"] and "Value 1" not in gap["reason"]
+    assert [f["outcome"] for f in _by_ndf(tmp_path / "st")] == [fin.UNRESOLVED]
+    code, got = _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt), wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert [f["outcome"] for f in _by_ndf(tmp_path / "st")] == [fin.FIXED]
+    assert "unsent_citations" not in _state(tmp_path / "st")
 
 
 def test_issue_4090_4_converged_review_is_reused_without_checking_again(
@@ -549,7 +630,7 @@ def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Rep
     order: list[Any] = []
     save, check = drive._save, drive._check_final_head
 
-    def checked(*args: Any) -> bool:
+    def checked(*args: Any) -> Any:
         calls = count_git(monkeypatch)
         got = check(*args)
         order.append(calls)
@@ -712,6 +793,18 @@ def test_issue_4090_3_new_commit_at_the_end_takes_four_git_runs(tree: Path, monk
     errors = changes.final_citations(run, head)
     assert errors is not None and len(errors) == 2 * count
     assert (len(calls), run.checked_head) == (4, head)
+
+
+def test_added_lines_are_collected_once_per_file_however_many_citations(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """根拠の記述が何行あっても、足した行を求める差分の走査はファイルごとに 1 回で済む。"""
+    base = _commit(tree)
+    commit(tree, "many.md", "\n".join([*[WRONG] * 5, ""]), "足す")
+    calls: list[str] = []
+    read = DiffFile.added.fget
+    assert read is not None
+    monkeypatch.setattr(DiffFile, "added", property(lambda file: calls.append(file.path) or read(file)))
+    assert len(_found(tree, base)) == 5
+    assert calls == ["many.md"]
 
 
 def test_issue_4090_3_another_mvv_is_checked_again(tree: Path) -> None:

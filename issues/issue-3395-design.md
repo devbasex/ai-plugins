@@ -323,6 +323,8 @@ G2 の目標は、機械で決まる分を移すと一覧が見込む半分で�
 
 ## `review_items` の形
 
+**この節の形と規則は、実装では [ndf-contract-fact-checks.md](../docs/specifications/ndf-contract-fact-checks.md) の「設計レビューの指摘の対応先」が置き換えた。** `review_items` は項目の配列で、`text_sha` は、Issue の本文ではなく表の要旨から計算する（本文は起票の後に書き直されるため）。下は #3395 の設計の時点の記録である。
+
 `children.json` に `review_items` を足す。中身は手で写さず、正本の表と入力の Issue の本文から生成のコマンド（`ndf check review-items --write`）で作る。正本の表は [issue-1142-design-review-routing.md](issue-1142-design-review-routing.md) の「行き先の表」で、生成のコマンドは X1+ が作る。最初の生成は X1+ の PR が行い、以後は表を変えた設計 PR のマージの後にオーガナイザーが生成し直す（#3347 の設計の EG2 と同じ書き手）。子の表で、追補の単位へ置き換えた子と分けた子の行に `superseded_by` を足し、規則が見分けられるようにする。
 
 ```json

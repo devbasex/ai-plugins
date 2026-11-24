@@ -1,4 +1,7 @@
 {
   "summary": "cross-review が相手役へ渡す既存の PR のコメント 1 件の本文の上限（字）。超えた分は切る",
-  "count": 600
+  "count": 600,
+  "read_by": [
+    "ndf.domains.crossreview.drive"
+  ]
 }

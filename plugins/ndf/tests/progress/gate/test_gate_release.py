@@ -75,7 +75,7 @@ def test_the_organizers_release_writes_the_version_and_the_record_pr_into_the_sp
         plan.record_release(conn, pid, [sent["request"]], plan.ReleaseAnswer(plan.RELEASED, "出した", "11.0.0", "https://x/pull/9"))
     gate.take_reply(st, tid, {})
     v = run.read(st, tid)
-    assert v.context()["version"] == "11.0.0" and v.context()["release_pr"] == "https://x/pull/9"
+    assert v.context()["product_version"] == "11.0.0" and v.context()["release_pr"] == "https://x/pull/9"
     kinds = [e.draft.kind for e in v.events][-2:]
     assert kinds == ["answered", "outputs_recorded"]
 

@@ -32,13 +32,13 @@ from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
 from ndf.domains.crossreview import changes, drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import (
-    DEFAULT_MAX_ROUNDS,
+    MAX_ROUNDS,
     DriveStopped,
     ReviewSettings,
     RunConfig,
@@ -387,13 +387,14 @@ def _review(path: str) -> fin.Review:
 
 def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
     """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
-    gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。"""
+    gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。指摘の本文や理由を含む値は、結果を
+    集めるログへ秘密を写さないよう、ここで伏せる。"""
     warnings = [*extra.pop("warnings", ()), *verdict.warnings]
-    shared = {"decisions": list(verdict.decisions), "warnings": warnings, "outputs": {"gaps": list(verdict.gaps)}, **extra}
+    summary, decisions, gaps, warnings = run_log.redact([verdict.summary, verdict.decisions, verdict.gaps, warnings])
+    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps}, **extra}
     if verdict.status == fin.OK:
-        return _ok(verdict.summary, **shared)
-    gaps = list(verdict.gaps) if verdict.kind == "incomplete" else None
-    return _stop(str(verdict.kind), verdict.summary, gaps=gaps, **shared)
+        return _ok(summary, **shared)
+    return _stop(str(verdict.kind), summary, gaps=gaps if verdict.kind == "incomplete" else None, **shared)
 
 
 def cmd_finish(args: argparse.Namespace) -> int:
@@ -673,7 +674,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--branch")
     r.add_argument("--purpose", default=TOOL)
     r.add_argument("--reviewer", action="append")
-    r.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
+    r.add_argument("--max-rounds", type=int, default=int(limits.value(MAX_ROUNDS, "count")))
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
 

@@ -198,8 +198,7 @@
           "type": "string"
         },
         "--timeout": {
-          "type": "number",
-          "default": 3600.0
+          "type": "number"
         },
         "--result-dir-id": {
           "type": "string"

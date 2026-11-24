@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usage.schema.json",
+  "title": "使用量の記録の 1 行",
+  "description": "使用量ログ（表 ndf-files の usage-log-file）の行。書き手は ndf.domains.records.usage。launch_id から後ろの欄は claude -p の呼び手（record_cli の meta）が足す",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "caller", "usage"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
+    "caller": {"type": "string", "description": "呼び手の区分（subagent・claude-p）"},
+    "agent_id": {"type": "string", "description": "サブエージェントの id"},
+    "transcript": {"type": "string", "description": "サブエージェントの会話の記録のパス"},
+    "usage": {"description": "使用量（token）。読めなければ unknown", "oneOf": [{"const": "unknown"}, {"type": "object", "additionalProperties": false, "required": ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"], "properties": {"input_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}, "cache_creation_input_tokens": {"type": "integer", "minimum": 0}, "cache_read_input_tokens": {"type": "integer", "minimum": 0}}}]},
+    "launch_id": {"type": "string", "description": "起動ごとに一意な値（プランの進捗の記録の行と突き合わせる値）"},
+    "run_id": {"type": "string", "description": "プランの実行の id"},
+    "step": {"type": "string", "description": "プランのステップの名前"},
+    "attempt": {"type": "integer", "minimum": 0, "description": "ステップの試行の番号"},
+    "launched_at": {"$ref": "common.schema.json#/$defs/time", "description": "起動した時刻（書いた時刻とは別の値）"},
+    "repo": {"type": "string", "description": "対象のリポジトリ（<所有者>/<リポジトリ>）"},
+    "session_id": {"type": "string", "description": "起動した会話のセッション"},
+    "parent_session_id": {"type": "string", "description": "起動した側のセッション"},
+    "model": {"type": "string", "description": "主のモデル"},
+    "seconds": {"type": "number", "minimum": 0, "description": "かかった秒"},
+    "model_usage": {"type": "object", "description": "モデルの名前 → そのモデルの使用量（token）", "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}}
+  }
+}
