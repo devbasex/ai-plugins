@@ -454,6 +454,25 @@ def test_issue_4090_7_free_text_and_paths_are_hidden_in_one_call_and_kept_in_the
     assert out["findings"] == [{"id": "r1-4", "item": "Value 1", "by": "kiro", "outcome": "unresolved"}] and len(calls) == 1
 
 
+def test_plain_reasons_kept_only_in_the_records_are_cleaned_in_the_same_call() -> None:
+    """#3959: 記録だけに書く通常の指摘の見送りの理由も、結果 JSON と同じ 1 回の照会で伏せ、結果 JSON には載せない。"""
+    calls: list[list[str]] = []
+
+    def clean(texts: Any) -> list[str]:
+        calls.append(list(texts))
+        return list(texts)
+
+    snap = Snapshot("approved", 11, "a" * 64, None, (), {}, HEAD1, "c" * 64, None)
+    judged = {"id": "r1-1", "text": "a", "mvv": "Value 5", "outcome": "deferred", "reason": "MVV の理由", "judged_mvv": snap.identity}
+    plain = {"id": "r1-2", "text": "b", "by": "codex", "outcome": "deferred", "reason": "通常の理由"}
+    once = publish.once(clean)
+    out = report_decide.mvv_outputs([judged, plain], snap, HEAD1, once)
+    assert [d["id"] for d in out["disputed"]] == ["r1-1"] and out["findings"] == []
+    assert calls == [["MVV の理由", "通常の理由"]]
+    # 記録の側が同じ値を伏せても、照会し直さない
+    assert once(["通常の理由"]) == ["通常の理由"] and len(calls) == 1
+
+
 def test_same_value_is_cleaned_once() -> None:
     calls: list[list[str]] = []
 

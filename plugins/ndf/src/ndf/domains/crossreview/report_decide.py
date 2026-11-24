@@ -93,10 +93,13 @@ def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str
     """結果 JSON の `outputs.mvv`: MVV `snapshot` で判定した指摘の一覧。`head` はレビューしたコミット。
 
     見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りのパスと引いた項目は、`clean` に 1 回で通して出す。
+    同じ 1 回に、記録だけに書く通常の指摘の見送りの理由も通す（`clean` が `publish.once` なら、記録の側は照会し直さない）。
     """
-    found = mvv_decide.judged_findings(rows, snapshot.identity)
+    # 記録（`mvv.record_review`）だけに書く通常の指摘の自由記述も同じ 1 回で伏せ、公開範囲の照会を 1 回にまとめる
+    everything = mvv_decide.judged_findings(rows, snapshot.identity, holds=True)
+    found = [f for f in everything if not f.plain]
     cited = [f.row for f in found if f.item is None]
-    texts = [t for f in found for t in f.free_texts]
+    texts = [t for f in everything for t in f.free_texts]
     texts += [t for row in cited for t in (row.get("path"), *store.list_of(row, "unknown")) if isinstance(t, str)]
     shown: dict[Any, str] = dict(zip(texts, clean(texts), strict=True)) if texts else {}
     out: dict[str, Any] = {"version": snapshot.version, "sha256": snapshot.sha256, "head": head}
