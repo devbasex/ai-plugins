@@ -20,12 +20,12 @@ supervise.py がプランをキューで流し、ステップを進めて結果�
 | 決定 | — | judge のステップが返す、次に取る手 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | step / alive / worker / attention | — | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | done | — | キューが終わったときに書く結果の JSON。wait は done か attention の行まで待つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 資源のタグ | `resource_tag` | ステップが使う、共有する外部のスロットの名前（今は graphql だけ） | — | — | — |
-| 資源のクォータ | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | — |
+| 資源のタグ | `resource_tag` | ステップが使う、共有する外部のスロットの名前（今は graphql だけ） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 資源のクォータ | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | `docs/specifications/ndf-rebuild.md` |
 | 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルに等しいファイルの設定を持つか、同じ共有の一覧に当たるもの。ディレクトリの設定は判定に使わない。同時には流さない | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
 | 偽の重なり | — | 重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組 | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
 | ディレクトリの設定 | — | 触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
-| 共有の一覧 | `shared_list` | 複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く | — | — | — |
+| 共有の一覧 | `shared_list` | 複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
 | 除外の行 | `concurrent_rule` | queue が実装の担当の指示文の末尾に足す 1 行。担当を起動する時点で走っている他のプランの触るファイルのうち、ディレクトリでないものを変えないよう求める | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
