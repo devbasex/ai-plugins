@@ -1,4 +1,7 @@
-"""形の番号の上げ忘れを落とす（決定 84）。耐久ワークフローの関数のソースの hash を FORMAT_SOURCE_HASH と比べる。"""
+"""形の番号の上げ忘れを落とす（docs/specifications/ndf-rebuild.md の決定 84）。
+
+耐久ワークフローの関数のソースの hash を FORMAT_SOURCE_HASH と比べる。
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 {
-  "summary": "AskUserQuestion の判定で中継へのシグナルファイルを書く排他の待ちの上限。転送は中継が待ち、hook は待たない（決定 93）",
+  "summary": "AskUserQuestion の判定で中継へのシグナルファイルを書く排他の待ちの上限。転送は中継が待ち、hook は待たない（docs/specifications/ndf-rebuild.md の決定 93）",
   "seconds": 0.3,
   "read_by": [
     "ndf.domains.hooks.budget",

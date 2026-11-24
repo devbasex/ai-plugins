@@ -1,4 +1,6 @@
-"""DBOS の殻を通した判断のループ（耐久を通す代表）と、キーの名前・アプリのバージョン（決定 81・84）。"""
+"""DBOS の殻を通した判断のループ（耐久を通す代表）と、キーの名前・アプリのバージョン
+（docs/specifications/ndf-rebuild.md の決定 81・84）。
+"""
 
 from __future__ import annotations
 

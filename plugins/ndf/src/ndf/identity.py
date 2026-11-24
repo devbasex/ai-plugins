@@ -1,4 +1,4 @@
-"""自分のディレクトリ・プラグイン名・Skill の前置き・状態の保存先を求める（#1142 の決定 75・決定 79）。
+"""自分のディレクトリ・プラグイン名・Skill の前置き・状態の保存先を求める（docs/specifications/ndf-rebuild.md の決定 75・79）。
 
 プラグイン名は `plugin.json` の `name` だけから求め、コードは自分の名前を文文字列で持たない。
 入れ替えで書き換えるのは `plugin.json` 2 本の `name` と `version` だけになる。
@@ -50,14 +50,15 @@ log = logging.getLogger(__name__)
 
 # プラグインの根（このファイルから 3 つ上）。根を求めるのはここだけ
 ROOT = Path(__file__).resolve().parents[2]
-# 入れ替え（S2）の後のプラグイン名（#3347 の決定 101）。検査の I1 は今の名前とこの名前の両方を検証する
+# 入れ替え（S2）の後のプラグイン名（docs/specifications/ndf-rebuild.md の決定 101）。検査の I1 は今の名前とこの名前の両方を検証する
 FINAL_NAME = "ndf"
 # worker（`ndf worker run`）が起動する子へ作業種別を渡す環境変数。hook の guard はこれで worker の中かを見分ける（#3112）
 WORKER_KIND_ENV = "NDF_WORKER_KIND"
 # worker（`ndf worker run`）が開いた結果の保存先を、子の `ndf contracts emit --out` へ渡す環境変数（`<st_dev>:<st_ino>:<絶対パス>`）。
 # 子は同じパスを開き直したとき、開いたディレクトリが親の保持しているものかを突き合わせる（#3877）
 WORKER_RESULT_DIR_ENV = "NDF_WORKER_RESULT_DIR"
-# プラグイン名から求めない固定の語の表（#3347 の決定 101）。I1 はこの表の定義の行だけを通し、コードはここから引く
+# プラグイン名から求めない固定の語の表（docs/specifications/ndf-rebuild.md の決定 101）。
+# I1 はこの表の定義の行だけを通し、コードはここから引く
 FIXED_WORDS = {
     # 利用先のリポジトリの設定の保存先（`.ndf/project.json` など）
     "ndf_settings_dir": ".ndf",
@@ -216,7 +217,7 @@ def _state_home() -> Path:
 def legacy_state_root(environ: Mapping[str, str]) -> Path:
     """旧い NDF の状態の根（`NDF_STATE_HOME` → `XDG_STATE_HOME/ndf` → `~/.local/state/ndf`）。
 
-    旧い NDF のプラグイン名は入れ替えの後の名前 `FINAL_NAME` と同じ（#1142 の決定 73）。
+    旧い NDF のプラグイン名は入れ替えの後の名前 `FINAL_NAME` と同じ（docs/specifications/ndf-rebuild.md の決定 73）。
     """
     explicit = environ.get("NDF_STATE_HOME")
     if explicit:
