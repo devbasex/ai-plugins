@@ -18,7 +18,9 @@
    検査は [parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) の「検査」）、計画を始めて `ndf lanes run <計画名>` を
    切り離して起動する（`metrics.run_pid`。出力は計画の記録の保存先の `run.log`）。区切りで止めた計画なら、止めた所から続ける
 2. `ndf lanes wait p1` を背景で打ち、完了の通知を待つ（[waiting.md](waiting.md) の形。前景の sleep で待たない）
-3. 返った `items`（知らせ）ごとに下の表の手を打ち、結果の `next`（`ndf lanes wait p1 --after <番号> [--known-stalls ...]`）を背景で打ち直す
+3. 返った `items`（知らせ）ごとに下の表の手を打ち、`items` の有無にかかわらず `metrics.new_stalls` も表のとおりに扱ってから、
+   結果の `next`（`ndf lanes wait p1 --after <番号> [--known-stalls ...]`）を背景で打ち直す。`next` の `--known-stalls` は今回の止まりも
+   通知済みに数えるので、扱わずに打つと二度と返らない
 
 `wait` は、`--after` の番号より後の計画の事象のうち、リクエストが開いた（`request_opened`）・計画が完了した（`plan_completed`）ものを
 すべて返す。閉じたリクエストは返さない。知らせが無くても、計画が終わった（完了か中止）か、まだ知らせていない止まり（`metrics.new_stalls`）が
@@ -32,7 +34,7 @@
 | `request_opened`・`lane_stalled` | 実行中の行のレーンが止まった（生死の判定が `stalled`・`ended`）。中身に最後に動いた時刻と起動の試みの回数が載る。`ndf lanes status p1` とレーンの画面（下の「レーンの画面を見るとき」）で確かめて利用者へ伝える。レーンが動き出せば耐久ワークフローが閉じる |
 | `request_opened`・`halt_failed` | 最後の行が終わったレーンのラッパーを止められなかった。`ndf relay stop <ラッパー>` で止めてから、リクエストを閉じる。閉じるまで計画は完了しない |
 | `plan_completed`、または `metrics.state` が終わり | レーンごとの結果を要約し、`[ndf-parallel] finished p1` の行を出して終える |
-| 知らせが無く、`metrics.new_stalls` がある | 回答が載った後に、レーンの conductor がスプリントを続けないまま猶予を過ぎた行である。`ndf lanes status p1` の行の `awaiting_next` を読み、利用者へ伝える |
+| `metrics.new_stalls` がある（`items` があっても） | 回答が載った後に、レーンの conductor がスプリントを続けないまま猶予を過ぎた行である。`ndf lanes status p1` の行の `awaiting_next` を読み、利用者へ伝える |
 
 レーンの様子は `ndf lanes status p1` で読む。レーンごとに状態・`after`・行（キー・状態・入力・スプリントのステートマシンの ID）を返し、
 実行中の行を持つレーンには生死の判定（`liveness`）、マシン全体の稼働中の数の上限で起動を待つレーンには `machine_wait`（理由と数）が載り、集計の `metrics.machine` にマシンの稼働中の数と上限が載る
