@@ -26,7 +26,6 @@ READER = {
 RESTATE = {
     "requirements": "言い直しには、次の 2 つへの回答を含める。(a) 何が起きて誰が困ったか。(b) 何を満たせば終わりか。",
     "design": "言い直しには、次の 2 つへの回答を含める。(a) どう解くか。(b) 何を採らなかったか、なぜか。",
-    "design-detail": "言い直しには、構成要素ごとに、次の 2 つへの回答を含める。(a) どこに何を作るか。(b) 失敗したときにどう扱うか（書いてあれば）。",
 }
 PROMPT_KEYS = {"files", "reader", "questions_kind"}
 ADD_KEYS = {"questions", "prs", "reads"}
