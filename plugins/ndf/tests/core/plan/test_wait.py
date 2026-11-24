@@ -147,6 +147,14 @@ def test_wait_reads_the_gate_marker_and_then_the_result(waiting, capsys):
     assert code == 0 and out["summary"] == "1 本のプランが終わった" and "next" not in out
 
 
+def test_a_stored_result_of_a_newer_version_is_watched_as_stopped(tmp_path):
+    plan, sdir = tmp_path / "w.json", tmp_path / "sd"
+    plan.write_text(json.dumps({"name": "w", "steps": [H.py_step("s", "pass")]}), encoding="utf-8")
+    _finished(sdir, _started(sdir), {"status": "gate", "version": 2, "routes": {"approved": None}})
+    got = plan_cli._watched(plan, str(sdir))
+    assert (got.status, got.kind, got.routes) == ("stopped", "precondition", None)
+
+
 class _Clock:
     """`time.monotonic` と `time.sleep` の代わり。眠った分だけ進み、眠った秒を記録する。"""
 

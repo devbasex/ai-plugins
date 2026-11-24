@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import identity
-from ndf.contracts import causes, exit_codes, limits, result
+from ndf.contracts import causes, exit_codes, internal, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
@@ -128,7 +128,10 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
     if record is None:
         return wait_decide.Watched(plan.name, None)
     run = durable.run_name(record["key"])
-    done = runner.stored_result(sdir, run)
+    try:
+        done = runner.stored_result(sdir, run)
+    except internal.InternalError as exc:
+        return wait_decide.Watched(plan.name, STOPPED, exc.kind, str(exc))
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))

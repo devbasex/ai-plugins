@@ -40,7 +40,7 @@ from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, limits, result, worker_paths
+from ndf.contracts import facts, internal, limits, result, worker_paths
 from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
@@ -721,7 +721,7 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
 
 
 def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None）。"""
+    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None。新しいバージョンなら `InternalError`）。"""
     record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
     if record is None:
         return None, None
@@ -841,7 +841,7 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
-PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError)
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError, internal.InternalError)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -869,6 +869,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
         return result.stopped(
             PLAN, "precondition", f"プラン {name} の保存先のファイル（{VALUES_FILE} など）を安全に読み書きできない: {exc}"
         )
+    if isinstance(exc, internal.InternalError):
+        return result.stopped(PLAN, exc.kind, f"プラン {name} の前の回の結果を読めない: {exc}")
     return None
 
 

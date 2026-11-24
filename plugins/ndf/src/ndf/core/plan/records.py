@@ -37,8 +37,10 @@ def _stored_outputs(state_dir: Path) -> Optional[dict[str, Any]]:
 
 
 def read_result(path: Path) -> Optional[dict[str, Any]]:
-    """結果のバックアップ `path`。無ければ None。旧い形の outputs は今の形へ移す。"""
+    """結果のバックアップ `path`。無ければ None。旧い形の outputs は今の形へ移す。新しいバージョンなら `InternalError`（precondition）。"""
     found = read_json(path)
+    if result.newer(found):
+        raise internal.InternalError("precondition", f"新しいバージョンの保存済みの結果 {path} を古い NDF が読んだ。プラグインを更新する")
     if found is None or not isinstance(found.get("outputs"), dict):
         return found
     return {**found, "outputs": internal.plan_outputs(found["outputs"])}

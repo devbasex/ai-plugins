@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol, Union
 
 from ndf.adapters import github
+from ndf.contracts import internal
 from ndf.contracts.exit_codes import OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import queue_decide
@@ -64,7 +65,7 @@ class RefError(ValueError):
 
 
 class Unreadable(Exception):
-    """外の値を読めなかった（GitHub の失敗・上限）。`cause` は停止理由の種類。"""
+    """外の値を読めなかった（GitHub の失敗・上限、新しいバージョンの保存済みの結果）。`cause` は停止理由の種類。"""
 
     def __init__(self, cause: str, reason: str) -> None:
         super().__init__(reason)
@@ -383,7 +384,10 @@ class RepoSources:
         run = read_json(state_dir / RUN_FILE)
         if run is None or not isinstance(run.get("key"), str):
             return None
-        found = stored_result(state_dir, durable.run_name(run["key"]))
+        try:
+            found = stored_result(state_dir, durable.run_name(run["key"]))
+        except internal.InternalError as exc:
+            raise Unreadable(exc.kind, str(exc)) from None
         if found is None:
             return None
         outputs = found["outputs"] if isinstance(found.get("outputs"), dict) else {}

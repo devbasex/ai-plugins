@@ -116,7 +116,7 @@ def result_path(state_dir: Path, run: str) -> Path:
 
 
 def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
-    """回 `run`（キーの名前）の結果のバックアップ（今の形）。終わっていなければ None。"""
+    """回 `run`（キーの名前）の結果のバックアップ（今の形）。終わっていなければ None、新しいバージョンなら `InternalError`。"""
     return read_result(result_path(state_dir, run))
 
 

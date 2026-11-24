@@ -422,6 +422,8 @@ plugins/ndf/
 
 後の 2 つの移し方は `internal.plan_outputs` だけが持つ。プランの出力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。
 
+`stored_result` は、移す前に保存済みの結果の形の版を確かめる。今の版より大きければ `InternalError`（`precondition`）を投げ、`routes` も `outputs` も返さない（プラグインを戻した後に、新しい版の `routes` で後続のステップを流さない）。`ndf plan next` は `ndf.cli` が、`ndf plan wait` は `_watched` が、参照は `RepoSources.plan_record`（`Unreadable`）が、工程は `invoke.plan_failure` が `precondition` の停止にする。
+
 確かめ（単体テスト）: `cmd_record` の結果 → `invoke.finished`（`deploy` の出力の定義で拾う）→ `outputs_recorded` → `compose_context` → `release-verification` の入力の解決、を 1 本の流れで通し、入力に `product_version` の文字列が渡ることを見る。旧いスナップショット（入力が `version`）と旧い `deploy` の出力を持つ、出荷済みのスプリントを再開した場合も同じ値が渡ることを見る。
 
 ### 結果の版と、形の違う結果

@@ -240,6 +240,13 @@ def test_version_reads_a_result_backed_up_before_the_rename(tmp_path: Path) -> N
     assert got.values == {"v": "1.2.3"}
 
 
+def test_version_does_not_read_a_stored_result_of_a_newer_version(tmp_path: Path) -> None:
+    write_result(tmp_path / "rel", OK, {"product_version": "1.2.3"}, version=2)
+    src = refs.RepoSources(failing_hub(500))
+    got = refs.resolve([refs.Ref("v", refs.VERSION, "rel")], refs.Context((), (), tmp_path), src)
+    assert got.values == {} and got.unresolved["v"].cause == "precondition"
+
+
 def test_repo_sources_skip_a_half_written_progress_line(tmp_path: Path) -> None:
     write_progress(tmp_path / "c", [{"event": "step", "step": "s", "counts": {"n": 1}}], tail='{"event": "st')
     src = refs.RepoSources(failing_hub(500))
