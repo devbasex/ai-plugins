@@ -239,7 +239,7 @@ def test_current_rejections_path_raises_the_identity_error_and_the_copy_turns_it
     q = _waiting(st, tid)
     monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
     a = gate.Answer(q.id, "approved", "人が回答した", BY, KEY)
-    with monkeypatch.context() as m:  # フィクスチャの後片付けも identity を読むので、差し替えはここだけにする
+    with monkeypatch.context() as m:  # フィクスチャの後始末も identity を読むので、差し替えはここだけにする
         m.setattr(identity, "load", _unresolvable_identity)
         with pytest.raises(identity.IdentityError, match="状態の保存先を解けない"):
             gate.rejections_path()

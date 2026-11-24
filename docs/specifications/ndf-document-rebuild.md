@@ -7,6 +7,8 @@
 
 **要求仕様と設計書の読み手役の確かめ（課題と解き方の言い直しの合否と、最大 2 回の読み直し）は #3868 で変わった。** 変わった点と理由は [ndf-development-document-roles.md](ndf-development-document-roles.md) が正で、この文書の該当する記述より優先する。
 
+**読み手役に渡すもの・返させるもの・合格の条件・回数と、言葉の選び方は #4285 で変わった。** 今の手順は [document-rebuild の「読み手役に読ませる」](../../plugins/ndf/skills/document-rebuild/SKILL.md#読み手役に読ませる)、読み手と通じない文の見分け方は [writing-criteria.md](../../plugins/ndf/contracts/data/writing-criteria.md) が正で、この文書の該当する記述より優先する。
+
 例: 次の文書を組み直すと、手順 0 で読む参照は文書ごとに次のようになる。
 
 ```text

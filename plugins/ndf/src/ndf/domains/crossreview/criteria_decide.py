@@ -192,7 +192,7 @@ def document_block(role: str, documents: bool, previous: Optional[Previous] = No
     """文書を含む PR（`documents`）の指示に足す「文書の指摘の基準」のセクション（#4285 の決定 4〜6）。含まなければ空。
 
     `role` は `REVIEWER`（相手役）か `FIXER`（修正担当）。`previous` は今回の相手役の全員が読んだ
-    前のラウンドで、無ければ None（1 ラウンド目か、全差分を読み直すラウンド）。基準の本文を読めなければ `writing.CriteriaBroken`。"""
+    前のラウンドで、比較元に使える前のラウンドが無ければ None。基準の本文を読めなければ `writing.CriteriaBroken`。"""
     if not documents:
         return []
     doc = _table()["document"]

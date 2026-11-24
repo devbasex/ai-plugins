@@ -14,7 +14,8 @@ from ndf.domains.crossreview import scope_decide
 
 
 def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[str]:
-    """今回の `basis` と合う、相手役の全員が読めた最後のラウンドの head。無いか、`head` の祖先でなければ None（PR の全差分を読む）。"""
+    """相手役の一部が読めなかったラウンドを除いた最後のラウンドの head。今回の `basis` と合わないか、`head` の祖先でなければ、
+    それより前のラウンドへは戻らずに None（PR の全差分を読む）。"""
     prev = scope_decide.read_by_all_head(state, basis)
     return prev if prev is not None and _reachable_from(g, prev, head) else None
 

@@ -43,7 +43,7 @@
 | `Wrapper._on_switch`・`_on_resume`・`_on_handover`・`_halt_broken` | 子を止める手（`switch`・`account`・`restart`・`handover`・設定が壊れたときの終わり）。どれも `_stop_if_clear` を通ったときだけ子を止める |
 | `Wrapper._start` | 子ごとに起動の ID を作り、今の起動として記録し、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す（保存先と会話の ID も `launch_env` で一緒に渡す） |
 | `signals`（`plugins/ndf/src/ndf/domains/relay/signals.py`） | 質問のファイルの読み（`read_question`・`question_present`・`question_id`）と書き（`write_question`）、ロックの中で消す（`drop_question`）、今の起動の記録（`set_launch`・`current_launch`・`launch_env`・`relay_launch`） |
-| hook `ask-forward`（`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`） | 中継の下では、ロックの中で今の起動の質問として書けたときだけ `AskUserQuestion` を通し、書けなければ拒否する |
+| hook `ask-forward`（`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`） | 中継の下では、ロックの中で今の起動の質問として書けたときだけ `AskUserQuestion` を通し、書けなければ拒否する。先に動いた guard（`reading-check`。読み手役の確認の記録が無い質問を止める。#4285）が質問を止めていれば、何も書かない |
 | hook `ask-answered`・`ask-closed`（`plugins/ndf/src/ndf/domains/hooks/guards/ask_clear.py`） | 質問が閉じたら、ロックの中で質問のファイルを消す。いつも通す |
 | `dispatch.run`・`_call`・エントリポイントの締め切りの経路（`plugins/ndf/src/ndf/domains/hooks/dispatch.py`・`main.py`） | guard の表の列 `fail_closed` が真の guard を、締め切り・例外・拒否の数えで通す側へ倒さない |
 
