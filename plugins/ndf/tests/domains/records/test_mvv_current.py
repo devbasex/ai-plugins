@@ -205,11 +205,13 @@ def test_current_without_mvv_settings_is_absent(repo: Path) -> None:
     assert _snapshots(repo) == []
 
 
-def test_current_of_an_unapproved_mvv_writes_no_snapshot(repo: Path) -> None:
-    head = _commit(repo, json.dumps({"versions": []}))
+@pytest.mark.parametrize("decl", [{"versions": []}, {"versions": [], "body": "../x.md"}])
+def test_current_of_an_unapproved_mvv_reads_no_body_and_writes_no_snapshot(repo: Path, decl: dict[str, Any]) -> None:
+    """承認の記録が無い設定は、本文が無くても `body` が不正でも `unapproved`（設定だけを先に置いたプロジェクトを止めない）。"""
+    head = _commit(repo, json.dumps(decl), body=None)
     got = mvv.current(repo, "main")
     assert got == mvv.Snapshot("unapproved", None, None, None, (), got.blobs, head, "", None)
-    assert len(got.blobs) == 2 and _snapshots(repo) == []
+    assert list(got.blobs) == [".ndf/mvv.json"] and _snapshots(repo) == []
 
 
 def test_mismatch_stops_unless_it_is_allowed(repo: Path) -> None:

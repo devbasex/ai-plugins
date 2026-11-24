@@ -23,20 +23,13 @@
 `## Mission`・`## Vision`・`## Value`（番号つきの項目）が必須、`## NDF の共通原則との関係`・`## 必ず人の承認が要る操作`
 （`| P1 | 操作 | 理由 |` の表）・`## 改訂` は任意である。MVV 判定は共通原則とこの本文の表からレッドラインを引き、材料の先に置く。
 
-`.ndf/mvv.json` は `version`（`1`）と `versions`（1 件以上）を持つ。`versions` の 1 件は `version`・`sha256`（改行を LF にそろえた本文の sha256）・
+`.ndf/mvv.json` は `version`（`1`）と `versions`（1 件以上）を持つ。`versions` の 1 件は `version`・`sha256`（本文の sha256）・
 `approved_at`・`approved_by`・`reason`・`validation`・`changes`・`body` を持ち、**最後の 1 件が承認された今の本文**である。
-`sha256` は次のコマンドで求める（LF と CRLF が混ざった本文でも、Git が改行を変えた後と合う。本文の保存先を変えていればそのパスを渡す）。
-
-```bash
-python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read().replace(b"\r\n",b"\n")).hexdigest())' < .ndf/mvv.md
-```
-
 任意の `settings.revise_after` で改訂の兆候の閾値（下）を変える。
 
 ## 状態と手順 0 での扱い（`ndf records preflight`）
 
-状態は、`.ndf/mvv.json` の最後のバージョンの `sha256` と本文の sha256 で決まる。本文の全行が LF か全行が CRLF の
-記録は、本文の改行が LF・CRLF・混在のどれでも、改行だけの違いなら `approved` になる。
+状態は、`.ndf/mvv.json` の最後のバージョンの `sha256` と本文の sha256 で決まる。本文の改行が LF か CRLF かだけの違い（Git の改行の変換）は、同じ本文として扱う。
 
 | 状態 | 条件 | 手順 0 の確かめ | MVV 判定 |
 | --- | --- | --- | --- |
@@ -47,14 +40,6 @@ python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read().repl
 | `unreadable` | 設定か本文を読めない | 止まる | 省かない |
 
 旧い形のキーが残る `.ndf/mvv.json` も、手順 0 の確かめが止まる。
-
-**LF と CRLF が混ざった本文をそのままのバイト列の sha256 で承認した記録は、Git が改行をそろえると `mismatch` になり、再承認が要る。**
-次の順に直す。
-
-1. 最後のバージョンの `body`（承認した本文）と今の本文を、改行を LF にそろえて比べる。改行のほかに違いがあれば、本文を承認した形へ戻すか、
-   変えた本文として承認を求める
-2. 改行だけの違いなら、そのことを示して利用者の承認を得て、`versions` に新しいバージョン（`sha256` は上のコマンドの値）を足し、
-   通常の Pull Request で届ける。前のバージョンの `sha256` は書き換えない
 
 ## 改訂の兆候
 
