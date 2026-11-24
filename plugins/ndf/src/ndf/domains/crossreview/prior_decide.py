@@ -40,6 +40,8 @@ class Remark(NamedTuple):
     trusted: bool = False
     # 最終更新の時刻（ISO 8601。PR コメントだけ。記録のコメントは打ち直しで書き換わるので、最新の記録はこれで選ぶ。PR 3944 の r2-5）
     updated: str = ""
+    # コメントの URL（PR コメントだけ）
+    url: str = ""
 
 
 class Thread(NamedTuple):
@@ -186,14 +188,20 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
     )
 
 
-def recorded(remarks: Iterable[Remark]) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
+def recorded(
+    remarks: Iterable[Remark], own: Optional[str] = None, held: Collection[str] = ()
+) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
     スレッドのある指摘の MVV の判定（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
-    コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。"""
+    コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
+
+    それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や
+    手元のパスを伏せてあり、状態ファイルの本文と一致しないので、本文で比べると同じ指摘が 2 件になる。"""
     mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.updated or r.at)
     out: list[Carried] = []
     marks: dict[int, Mapping[str, Any]] = {}
+    known = held if mine and mine[-1].url and mine[-1].url == own else ()
     for item in report_decide.open_items(mine[-1].body) if mine else ():
         judged = _marks_of(item)
         one = _recorded_one(item, judged)
@@ -203,5 +211,6 @@ def recorded(remarks: Iterable[Remark]) -> tuple[list[Carried], dict[int, Mappin
             marks[one.thread] = judged
             if one.by != report_decide.BY_NDF:
                 continue
-        out.append(one)
+        if _opt_text(item.get("id")) not in known:
+            out.append(one)
     return out, marks

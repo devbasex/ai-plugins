@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import pytest
 
-from ndf.adapters import git, markdown
+from ndf.adapters import agents, git, markdown
 from ndf.contracts import result
 from ndf.domains.crossreview import changes, drive, fixer, store
 from ndf.domains.crossreview import finish_decide as fin
@@ -551,6 +551,37 @@ def test_commit_left_by_a_fixer_without_a_result_stays_out_of_the_pr(
     sh(wt, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     code, got = _base(capsys, monkeypatch, Fixer(state_dir, wt, ("new.md", f"{RIGHT}\n")), wt)
     assert (code, got["status"], [f["path"] for f in _by_ndf(state_dir)]) == (0, "ok", ["new.md"])
+
+
+class SilentFixer(Fixer):
+    """修正のコミットだけを残し、結果を書かずに終わる偽物。"""
+
+    def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+        done = super()._fix(spec)
+        store.fix_result_path(self.state_dir, store.state_pr(self.state_dir, PR)).unlink()
+        return done
+
+
+class IdleFixer(Fixer):
+    """直すものが無いとして、コミットを作らずに結果だけを書く偽物。"""
+
+    def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+        out = {"pr": PR, "commit": None, "findings": [{"id": "r1-n1", "outcome": fin.FIXED}]}
+        store.write_object(store.fix_result_path(self.state_dir, store.state_pr(self.state_dir, PR)), out)
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+
+def test_fix_left_by_a_fixer_without_a_result_is_sent_by_the_next_run(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR にある誤りを直すコミットだけを残して修正担当が終わったら、次の起動は、修正担当が新しいコミットを作らなくてもそのコミットを送り、
+    誤りを閉じる。"""
+    _push_base(repos)
+    _push_pr(repos, "doc.md", "# 設計", WRONG)
+    _, got = _base(capsys, monkeypatch, SilentFixer(tmp_path / "st", wt, ("doc.md", f"# 設計\n{RIGHT}\n")), wt)
+    assert got["cause"]["kind"] == "mvv_unresolved" and [f["id"] for f in _by_ndf(tmp_path / "st")] == ["r1-n1"]
+    assert WRONG in sh(repos.origin, "show", f"{BRANCH}:doc.md")
+    code, got = _base(capsys, monkeypatch, IdleFixer(tmp_path / "st", wt), wt)
+    assert (code, got["status"], [f["outcome"] for f in _by_ndf(tmp_path / "st")]) == (0, "ok", [fin.FIXED])
+    assert RIGHT in sh(repos.origin, "show", f"{BRANCH}:doc.md")
 
 
 def test_failed_push_does_not_settle_the_error_left_in_the_pr(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

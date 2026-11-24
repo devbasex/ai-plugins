@@ -207,9 +207,9 @@ def _keep_fixer(run: FixRun, session: claude.Session, status: agents.AgentStatus
 
 
 def send_fix(run: FixRun, round_no: int, reviewed_head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
-    """修正のコミットを送る。コミットが無ければ送らない。送れなければ、このラウンドで直したとした指摘を未解決へ戻し
-    （PR に届いていない）、注意に載せて False。"""
-    if run.g.rev_parse("HEAD") == reviewed_head:
+    """修正のコミットを送る。前の起動の修正担当が結果を残さずに終えたコミットが手元に残っていれば、それも送る。送るコミットが
+    無ければ送らない。送れなければ、このラウンドで直したとした指摘を未解決へ戻し（PR に届いていない）、注意に載せて False。"""
+    if run.g.rev_parse("HEAD") == reviewed_head == run.sent:
         return True
     commit = fix.get("commit") if check_commit and isinstance(fix.get("commit"), str) else None
     sent = push.push_fix(run.g, run.cfg.branch, commit)

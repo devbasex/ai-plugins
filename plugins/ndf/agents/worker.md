@@ -34,3 +34,5 @@ NDF の 3 層（conductor → supervisor → worker）の worker である。sup
 8. 作業場所のリポジトリの `.ndf/project.json` に CI テストの設定（`test.ci.only: true`）があれば、テストを手元で打たない
    （打つと hook が止める）。合否は PR の CI の結果を `gh pr checks <PR>` で読む。静的解析は手元で走らせてよい。
    決まりの SSOT は `development-workflow` の「テストを CI に寄せる（CI テストの設定）」にある
+9. 起動指示の MVV の欄にスナップショットのパスがあれば、本文と共通原則の全体を作業の前に読む。判断が MVV に反する
+   疑いがあれば、進めずに `結果: 判断が要る` で返す

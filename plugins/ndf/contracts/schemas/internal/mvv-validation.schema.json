@@ -23,7 +23,7 @@
     "usd": {"type": ["number", "null"], "description": "判定の費用（USD）。取れなければ null"},
     "seconds": {"type": ["number", "null"], "description": "判定の秒"},
     "pr": {"type": "integer", "description": "レビューした PR の番号"},
-    "head": {"type": "string", "description": "レビューした head の SHA"},
+    "head": {"type": "string", "description": "PR に届いた最後のコミットの SHA"},
     "id": {"type": "string", "description": "指摘の番号（起動ごとに変わるので、表示だけに使う）"},
     "item": {"type": "string", "description": "反する MVV の項目か、根拠の記述の誤りが引いた項目（伏せた後の値）"},
     "outcome": {"type": "string", "enum": ["fixed", "unresolved", "deferred", "redline"], "description": "指摘の終わり方。redline は、必ず人の承認が要る操作に当たる指摘"},

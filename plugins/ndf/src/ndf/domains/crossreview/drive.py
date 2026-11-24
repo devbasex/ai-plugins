@@ -356,7 +356,7 @@ def _carry(run: _Run, prior: _Prior) -> None:
     done = run.data.setdefault(threads.THREADS, {})
     settled = _settle_resolved(run, prior.threads, done)
     tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
-    listed, marks = prior_decide.recorded(prior.comments)
+    listed, marks = prior_decide.recorded(prior.comments, run.data.get(report_decide.COMMENT_KEY), run.journal.rows)
     carried = prior_decide.carried(prior.threads, tracked, marks)
     held = tracked | {c.comment for c in carried}
     carried += [c for c in listed if c.thread is None or c.thread not in held]

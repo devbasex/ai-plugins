@@ -309,6 +309,27 @@ def test_issue_4090_5_redline_still_waits_for_a_person_after_starting_over(
     assert not any("MVV" in p["result"] for p in got["process"] if p["run"] == "start")
 
 
+def test_issue_4076_finding_hidden_in_the_own_record_is_not_doubled(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """同じ保存先の打ち直しは、自分の記録のコメントで本文が伏せられたスレッドの無い指摘を、別の指摘として重ねない。"""
+    monkeypatch.setenv("NDF_TEST_API_TOKEN", SECRET)
+    _push_base(repos, text=REDLINE_BODY)
+    text = f"{SECRET} を文書に書いた"
+    held = {"text": text, "severity": "minor", "impact": IMPACT, "mvv": "P1"}
+    first = Recording(tmp_path / "st", {"codex": [[held]], "kiro": [[]]}, decide=lambda fid: None)
+    _run(capsys, monkeypatch, first, wt, "--base", "main")
+    body, own = hub.comments[-1][2], _state(tmp_path / "st")[report_decide.COMMENT_KEY]
+    assert text not in body
+    hub.port.existing = [Remark("comment", "ndf", body, trusted=True, url=own)]
+    again = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]}, decide=lambda fid: None)
+    _, got = _run(capsys, monkeypatch, again, wt, "--base", "main")
+    assert [r["id"] for r in _state(tmp_path / "st")["findings"]] == ["r1-1"] and "人の承認を待つ 1" in got["summary"]
+    # 別の保存先は、同じコメントから引き継ぐ
+    _run(capsys, monkeypatch, Recording(tmp_path / "st2", {"codex": [[]], "kiro": [[]]}), wt, "--base", "main")
+    assert [r["id"] for r in _state(tmp_path / "st2")["findings"]] == ["p-r1-1"]
+
+
 def test_warning_about_a_carried_item_reaches_the_result(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """記録のコメントにある項目が、同じ MVV の項目に無ければ、普通の指摘として引き継いだことを結果の注意に残す。"""
     _push_base(repos)

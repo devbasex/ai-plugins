@@ -567,6 +567,7 @@ class GitHubPort:
                 at=_text(r.get("created_at")),
                 trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user")),
                 updated=_text(r.get("updated_at")),
+                url=_text(r.get("html_url")),
             )
             for r in self._pages(f"/repos/{self.hub.repo}/issues/{self.pr}/comments")
         ]

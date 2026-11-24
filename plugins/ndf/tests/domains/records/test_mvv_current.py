@@ -251,7 +251,7 @@ def test_current_without_mvv_settings_is_absent(repo: Path) -> None:
 
 
 @pytest.mark.parametrize("decl", [{"versions": []}, {"versions": [], "body": "../x.md"}])
-def test_current_of_an_unapproved_mvv_reads_no_body_and_writes_no_snapshot(repo: Path, decl: dict[str, Any]) -> None:
+def test_current_of_an_unapproved_mvv_uses_no_body_and_writes_no_snapshot(repo: Path, decl: dict[str, Any]) -> None:
     """承認の記録が無い設定は、本文が無くても `body` が不正でも `unapproved`（設定だけを先に置いたプロジェクトを止めない）。"""
     head = _commit(repo, json.dumps(decl), body=None)
     got = mvv.current(repo, "main")
