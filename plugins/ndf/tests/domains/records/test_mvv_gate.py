@@ -333,6 +333,13 @@ def test_an_unchanged_pr_is_read_once_more_only_before_the_note(no_git: Path, no
     assert (hub.reads, ask.launches, out["verdict"], [n for n, _ in notes]) == (2, 1, FOLLOW, [5])
 
 
+def test_an_unchanged_pr_is_read_again_before_the_retry(no_git: Path, notes: list[tuple[int, str]]) -> None:
+    # 打ち直してから投稿する場合は、打ち直しの直前の 1 回を含めて計 3 回読む
+    hub, ask = Hub(5, DOCS), Ask(FOLLOW, retry=True)
+    out = mvv_gate.gate(no_git, "design", _inputs(), lambda root, remote: hub, ask)
+    assert (hub.reads, ask.launches, out["verdict"], [n for n, _ in notes]) == (3, 2, FOLLOW, [5])
+
+
 @pytest.mark.parametrize(("change", "kind"), MOVES)
 def test_a_pr_that_moved_before_the_retry_does_not_relaunch(no_git: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
     # 1 回目の回答が形に合わず打ち直す直前の読み直しで、head・マージ先・本文が変わった・読めない → 打ち直さず、コメントも書かない
