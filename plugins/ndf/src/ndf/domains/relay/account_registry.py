@@ -187,7 +187,7 @@ def shared_config_dir(environ: Mapping[str, str]) -> Path:
     if "NDF_SHARED_CONFIG_DIR" in environ:
         shared = environ["NDF_SHARED_CONFIG_DIR"]
         return Path(shared) if shared else Path.home() / ".claude"
-    return signals.claude_config_root(environ)
+    return identity.claude_config_root(environ)
 
 
 def store_dir(environ: Mapping[str, str]) -> Path:

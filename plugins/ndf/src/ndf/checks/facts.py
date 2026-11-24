@@ -259,15 +259,17 @@ def _env_name_calls(tree: ast.Module) -> list[ast.Call]:
     return [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) in names] if names else []
 
 
-def _env_rows(path: Path) -> tuple[str, list[Any] | None]:
+def _env_rows(scope: Scope, path: Path) -> tuple[str, list[Any] | None]:
     """環境変数の表の本文と行。無い・JSON として読めない・`rows` が配列でなければ行は `None`。"""
+    if not path.is_file():
+        return "", None
+    src = scope.source(path)
     try:
-        text = path.read_text(encoding="utf-8")
-        data = json.loads(text)
-    except (OSError, ValueError):  # 表の誤りは fact-table と、呼び出しの行の env-key が言う
+        data = src.contract("環境変数の表を読めない")
+    except CheckError:  # 表の誤りは fact-table と、呼び出しの行の env-key が言う
         return "", None
     rows = data.get("rows") if isinstance(data, dict) else None
-    return text, rows if isinstance(rows, list) else None
+    return src.text, rows if isinstance(rows, list) else None
 
 
 def _filled(value: object) -> bool:
@@ -307,7 +309,7 @@ def _call_fault(call: ast.Call, keys: set[str] | None) -> str | None:
 def env_key_findings(scope: Scope, contracts_dir: str) -> list[Finding]:
     """環境変数の表のキーの重なりと型、コードの `identity.env_name` の呼び出しのキーの違反（`env-key`）。"""
     path = scope.plugin_root / contracts_dir / ENV_TABLE
-    text, rows = _env_rows(path)
+    text, rows = _env_rows(scope, path)
     keys, found = (None, []) if rows is None else _env_row_keys(scope.rel(path), text, rows)
     for src in scope.code():
         faults = [(call.lineno, _call_fault(call, keys)) for call in _env_name_calls(src.tree)]

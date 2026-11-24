@@ -79,6 +79,11 @@ def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
     return path if path is not None and path.is_dir() else None
 
 
+def under_relay(env: Mapping[str, str]) -> bool:
+    """中継のラッパーの下か。保存先が在るかは見ない。"""
+    return bool(env.get(identity.env_name("relay-dir")))
+
+
 def launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]:
     """子のセッションへ渡す、セグメントのやり取りの保存先・起動の ID・子の会話の ID の環境変数。"""
     return {
@@ -119,11 +124,6 @@ def organizer_question_path(env: Mapping[str, str]) -> Optional[Path]:
     if not root or not lane or not NAME_RE.match(lane):
         return None
     return Path(root) / "questions" / f"{lane}.json"
-
-
-def claude_config_root(environ: Mapping[str, str]) -> Path:
-    """Claude Code の設定の保存先（規則は `identity.claude_config_root`）。"""
-    return identity.claude_config_root(environ)
 
 
 def now_iso() -> str:

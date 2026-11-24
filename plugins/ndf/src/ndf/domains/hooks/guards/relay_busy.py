@@ -18,9 +18,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from ndf import identity
 from ndf.domains.hooks import tables
-from ndf.domains.hooks.context import ShellCommand, only_commands
+from ndf.domains.hooks.context import HookContext, ShellCommand, only_commands
 from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.verdict import Verdict, deny
 from ndf.domains.relay import signals
@@ -44,7 +43,7 @@ _CUT_MARK = "… [+"
 
 
 def check(ctx, svc) -> Optional[Verdict]:
-    if ctx.event == "SessionStart":
+    if ctx.event != "PreToolUse":  # SessionStart
         if ctx.payload.get("source") in _FRESH_SOURCES and _target(ctx.env, ctx.session_id):
             record_count(ctx.env, ctx.session_id, 0, "session")
         return None
@@ -58,12 +57,14 @@ def check(ctx, svc) -> Optional[Verdict]:
 
 def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
     """エントリポイントの締め切りを過ぎたときの拒否の理由。記録し終えていない子の会話の作業の開始だけを拒否し、ほかは None（通す）。"""
-    tool, tool_input = payload.get("tool_name"), payload.get("tool_input")
-    if payload.get("hook_event_name") != "PreToolUse" or not _may_start(tool, tool_input):
+    if payload.get("hook_event_name") != "PreToolUse":
         return None
-    if not _target(env, payload.get("session_id")) or _recorded is payload:
+    ctx = HookContext("", "PreToolUse", payload, env=dict(env))
+    if not _may_start(ctx.tool, ctx.tool_input):
         return None
-    return BUSY_START_FAILED if _starts_background(tool, tool_input, table_params()) else None
+    if not _target(env, ctx.session_id) or _recorded is payload:
+        return None
+    return BUSY_START_FAILED if _starts_background(ctx.tool, ctx.tool_input, table_params()) else None
 
 
 def table_params() -> Mapping[str, Any]:
@@ -109,7 +110,7 @@ def _target(env: Mapping[str, str], session_id: Any) -> bool:
 
     保存先が在るかは見ない（保存先が消えた子の会話を、中継の外と取り違えて作業を始めさせない）。
     """
-    if not signals.keys_known() or not env.get(identity.env_name("relay-dir")):
+    if not signals.keys_known() or not signals.under_relay(env):
         return False
     child = signals.relay_session(env)
     return child is not None and session_id == child
@@ -136,12 +137,12 @@ def task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str:
         return "work"
     try:
         waits = [tuple(name.split()) for name in params["wait_commands"]]
-        return "monitor" if only_commands(command, lambda cmd: _is_wait(cmd, waits)) else "work"
+        return "monitor" if only_commands(command, lambda cmd: _waits_only(cmd, waits)) else "work"
     except Exception:  # noqa: BLE001,NDF401 利用者の入力: 確かめられないコマンドは作業として待つ（監視と取り違えると作業を失う）
         return "work"
 
 
-def _is_wait(cmd: ShellCommand, waits: list[tuple[str, ...]]) -> bool:
+def _waits_only(cmd: ShellCommand, waits: list[tuple[str, ...]]) -> bool:
     """ラッパーを外したコマンドの先頭が、待つコマンドのどれかか（1 語目はパスを外した名前で比べる）。"""
     words = (cmd.body_name, *cmd.body_argv[1:])
     return any(wait and words[: len(wait)] == wait for wait in waits)
