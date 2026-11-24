@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -117,12 +117,18 @@ class _Table:
 
     def errors(self) -> Iterator[tuple[Path, str]]:
         """違反のパスと中身。"""
+        names = yield from self._directory_errors()
+        if names is not None:
+            yield from self._item_errors(names)
+
+    def _directory_errors(self) -> Generator[tuple[Path, str], None, list[str] | None]:
+        """ディレクトリの形の違反を出し、直下のエントリ名を返す。項目を読める形でなければ `None` を返す。"""
         # 列挙と読み取りの前に、親のディレクトリのリンクも含めて解決先を確かめる（外のエントリ名を指摘に載せない）
         try:
             contracts.require_inside(self.root, self.files.plugin_root)
         except contracts.ContractError as exc:
             yield self.root, str(exc)
-            return
+            return None
         old = self.root.with_name(f"{self.root.name}.json")
         # リンク先の有無で結果を変えない（プラグインの外のファイルの有無を指摘から判別させない）
         if os.path.lexists(old):
@@ -130,12 +136,16 @@ class _Table:
         # リンクのディレクトリへは、検査がファイルを集めるときも降りない
         if self.root.is_symlink() or not self.root.is_dir():
             yield self.root, "分けた表のディレクトリが無い"
-            return
+            return None
         names = sorted(p.name for p in self.root.iterdir())
         try:
             contracts.item_keys(names)
         except contracts.ContractError as exc:
             yield self.root, f"分けた表に{exc}"
+        return names
+
+    def _item_errors(self, names: list[str]) -> Iterator[tuple[Path, str]]:
+        """エントリ名 `names` のうち項目のファイルの違反。項目のスキーマを読めなければ、その違反だけを出す。"""
         try:
             object_fields = _object_fields(self.files.text(self.schema))
         except contracts.ContractError as exc:
