@@ -324,6 +324,25 @@ def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
     assert call[0] == "diff" and "--no-renames" in call
 
 
+def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path) -> None:
+    """手元に無い blob を git grep が飛ばしたら、本文の無い文書とみなさずに止める。空のファイルは行が無くてよい。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes, settings
+
+    empty = settings.blob_id(b"", 40)
+    trees = {"empty.md": empty, "a.md": "a" * 40}
+
+    def changed(*paths: str) -> list[str]:
+        listed = "".join(f"100644 blob {trees[p]}\t{p}\0" for p in paths)
+        out = {"diff": git.Completed(0, "\0".join(paths), ""), "ls-tree": git.Completed(0, listed, "")}
+        skipped = git.Completed(1, "", "error: unable to read")
+        return changes.changed_sections(git.Git(tmp_path, lambda args, cwd: out.get(args[0], skipped)), "b", tmp_path)
+
+    assert changed("empty.md") == []
+    with pytest.raises(git.GitError, match=r"本文を読めない: a\.md"):
+        changed("empty.md", "a.md")
+
+
 def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
     渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
