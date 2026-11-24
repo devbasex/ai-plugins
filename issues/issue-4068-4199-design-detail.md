@@ -81,7 +81,7 @@ plugins/ndf/
 | `wake_reply` | 同上 | 新設 | `wake_reply(tail: str, after_id: str) -> Reply` | `tail` は `last_turn` と同じ `read_tail` の文字列（読み直さない）。`after_id` の応答の直後にある最初の入力の行だけを見る（Tool の結果の行は入力に数えない）。起床の文の形（設計の決定 7 の実測 8 で決めた形を `is_wake_input` に閉じる）なら、その次から次の入力の手前（無ければ末尾）までの `assistant` の `message.id` をその起床の呼び出しとし、`Reply("wake", <最初の呼び出しの読み出し>, <全呼び出しの Usage>)`。最初の呼び出しの書き込みが両方 0 でも `wake` で返す。利用者の入力か背景の作業の知らせの形なら、その先を探さずに `Reply("preempted", None, None)`。どちらとも決められないなら `Reply("unknown", None, None)`。`after_id` の応答が `tail` に無い（起床の後の大きな Tool の結果で、読み取りの上限の外へ押し出された）なら `Reply("truncated", None, None)`。`after_id` が `tail` に在れば、その後の行は末尾まで連続して `tail` に在るので、途中の呼び出しだけが欠けることは無い |
 | `opening` | 同上 | 新設 | `opening(tail: str, message_id: str) -> Opening` | `message_id` の応答を始めた入力（さかのぼって最初の、Tool の結果でない入力の行）と、その入力の直後の最初のモデル呼び出しを返す。`kind` はその入力に `is_wake_input` を打った値から `wake`（起床の文）・`normal`（通常の入力）・`unknown`（決められない・入力の行が `tail` に無い）。`normal` のときだけ `at`（入力の行の `timestamp` の UNIX 秒）と `first_read`（最初の呼び出しの読み出し）を持つ。`_settle` が待ちを明けるかと、`wait_end` の当たり・時刻を決めるのに使う。今回の応答の最後の呼び出しや Stop の時刻は使わない |
 | `is_wake_input` | 同上 | 新設 | `is_wake_input(line: Mapping[str, Any]) -> Optional[bool]` | 入力の行 1 つが起床の文なら真、通常の入力なら偽、決められなければ None。実測 8 の形だけを知る関数で、実測の前は常に None（バージョンの門も閉じている） |
-| `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から引数の `ttl` の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境、`cache.handoff` の `calls`・`count`・`start`。辞書でない・数でない値は `tables.TableError`。確かめる間隔（`cache.wake.interval`）が 0 以下か、待ち 1 回の確かめの回数 `ceil((TTL_SECONDS["1h"] − seconds) / interval)` が `MAX_CHECKS` を越えるか、余白（`cache.wake.seconds`）が 0 未満か 1 時間の寿命（`TTL_SECONDS["1h"]`）以上でも `tables.TableError`（スキーマの `interval`・`seconds` はほかの方針と共通で 0 を許すので、ここで拒む。`_wait` が休まずに世代を読み続けない） |
+| `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から引数の `ttl` の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境、`cache.handoff` の `calls`・`count`・`start`。辞書でない・数でない値は `tables.TableError`。費用の式の分母（`n_max` の `r × S + d`）が正になるよう、書き込み・読み出し・出力の倍率（`ratios` の各値と `default`）が 0 以下か、`d`（`cache.wake-cost.count`）が 1 未満（スキーマの `count` と同じ下限）でも `tables.TableError`（hook は `tables.policy_value` で JSON のまま読み、スキーマの検査を通らない宣言も届き得るので、実行時にも拒む）。確かめる間隔（`cache.wake.interval`）が 0 以下か、待ち 1 回の確かめの回数 `ceil((TTL_SECONDS["1h"] − seconds) / interval)` が `MAX_CHECKS` を越えるか、余白（`cache.wake.seconds`）が 0 未満か 1 時間の寿命（`TTL_SECONDS["1h"]`）以上でも `tables.TableError`（スキーマの `interval`・`seconds` はほかの方針と共通で 0 を許すので、ここで拒む。`_wait` が休まずに世代を読み続けない） |
 | `wake_at` | 同上 | 新設 | `wake_at(at: float, ttl: str, margin: float) -> Optional[float]` | `ttl` が `1h` でなければ、余白によらず None（5 分の寿命は常に起こさない。設計の決定 2）。`1h` なら `at + TTL_SECONDS["1h"] − margin`。`ttl` は `_settle` が補った寿命（未定のまま呼ばない）。余白の範囲（0 以上 1 時間未満）は `ratios` が確かめる。到達条件（`budget.rewake_reach`）は `3600 − 余白 + 間隔 + margin ≤ timeout`（上限 3,300）なので、宣言の余白は 300 秒を越える値に限られるが、5 分を除くのはこの関数の規則で、到達条件には頼らない |
 | `n_max` | 同上 | 新設 | `n_max(tokens: int, q: Ratios) -> int` | `floor((w − r) × S / (r × S + d))`。0 未満にしない |
 | `handoff_fits` | 同上 | 新設 | `handoff_fits(spent: float, tokens: int, q: Ratios) -> bool` | 引継ぎの起床の費用 `C_h(S) = calls × r × S + count + w × start` として、`spent + C_h(S) <= (w − r) × S`（`S` は判定の時の `tokens`）。待ちの始まりの `S` は使わない（設計の決定 5） |
@@ -113,7 +113,7 @@ plugins/ndf/
 | `last_turn` | 次の応答を読んだ | 遅れて動いた古い hook | 応答の時刻と `started` の比べ | `reason` `newer` | 無し（呼び手は何も書かずに 0） | — |
 | `wake_reply` | 起床の呼び出しが末尾の範囲に無い | 起床の後の大きな Tool の結果が `hook.transcript-tail` の大きさを越えた | `after_id` の応答が `tail` に無い | `kind` `truncated` | 無し（呼び手が `hit` null・`priced` 偽の `wake_result` を書いてフラグを消す。止めない） | — |
 | `wake_reply` | 寿命別の書き込みが読めない | 記録の形の変化・和の食い違い | 各呼び出しの `cache_creation` の突き合わせ | `Usage.priced` 偽 | 無し（集計が費用から外して `unpriced_waits` に数える） | 読み方を直す |
-| `ratios` | 行が無い・値が数でない・間隔が 0 以下・確かめの回数が上限を越える・余白が範囲の外 | 上限の設定の壊れ・利用者の宣言 | 型と範囲の突き合わせ | `tables.TableError` を投げる | 無し（呼び手が起こさない） | 上限の設定を直す（`ndf check` が落とす） |
+| `ratios` | 行が無い・値が数でない・倍率が 0 以下・`d` が 1 未満・間隔が 0 以下・確かめの回数が上限を越える・余白が範囲の外 | 上限の設定の壊れ・利用者の宣言 | 型と範囲の突き合わせ | `tables.TableError` を投げる | 無し（呼び手が起こさない） | 上限の設定を直す（`ndf check` が落とす） |
 
 ### 単体テストの観点
 
@@ -122,7 +122,7 @@ plugins/ndf/
 | `last_turn` | 実測の形の見本を読める。最後の `assistant` の行に `usage` が無い見本では、前の行が完全でも `form` で、`ref` が採用行の `message.id` と時刻。同じ見本で採用行の時刻が `started` の 1 秒後なら `form` でなく `newer`。採用行の `timestamp` が無い見本では `form` で `ref` が None。`output_tokens` だけが欠けた見本（`last_context` は `current`）でも `form` と `ref`。完全な前の応答だけが残り `last_message` が違う見本では `unrecorded`。`last_message` が None でも `unrecorded`。同じ文で時刻が `started` の 1 秒後なら `newer`、`started` と同じなら読める。空の文字列（`read_tail` が読めなかった）で `unrecorded`。寿命: 1 時間が正で `1h`、5 分だけ正で `5m`、両方 0 で None（引数に状態の寿命を取らない）、`cache_creation` が無い・負で `form` |
 | `wake_reply` | 起床の文の後の応答を返す。Tool を 2 回使った起床の見本では `first_read` が最初の呼び出しの読み出し、`usage.calls` が 3 で合計が 3 つの和、Tool の結果の行で区切らない。1 回目が 1 時間へ 300・2 回目が 5 分へ 1,000 書いた見本で `cache_write_1h` 300・`cache_write_5m` 1,000・`priced` 真。最初の呼び出しの書き込みが両方 0 の見本でも `wake` で `first_read` を返す。どれかの呼び出しの寿命別の項目が欠ける・整数でない・負・和が合計と違う見本で `priced` 偽・2 つの合計が None。起床の後に利用者の入力が続く見本では、その入力の後の応答を含めない。フラグの直後の最初の入力が利用者の入力の見本では、その後に起床の文の応答があっても `preempted`。最初の入力の形を決められない見本では `unknown`。引継ぎの起床で 2 回目の Tool の結果が `tail` の大きさを越え、`after_id` の応答が `tail` の外へ押し出された見本では `truncated`。同じ大きな結果でも `after_id` が `tail` に残る大きさでは `wake` で 3 つの和 |
 | `opening` | 利用者の入力で始まり Tool を使った応答で `normal`（Tool の結果の行を飛ばす）、`at` が入力の行の時刻、`first_read` が入力の直後の最初の呼び出しの読み出し（最初の呼び出しの読み出し 20,000・後の Tool の呼び出しの読み出し 101,000 の見本で 20,000）。起床の文で始まった応答で `wake`。形を決められない入力・入力の行が `tail` に無い見本で `unknown` |
-| `ratios` | `cache.wake` の `interval` を 0・-1 にした見本、`seconds` 600 で `interval` を 0.01・9 にした見本（300,000 回・334 回）、`seconds` 550・`interval` 10 の見本（305 回）、`seconds` を -1・3,600 にした見本で `tables.TableError`（hook は眠らずに 0）。`seconds` 600 で `interval` 10（300 回）・60 で通る |
+| `ratios` | `cache.wake` の `interval` を 0・-1 にした見本、`seconds` 600 で `interval` を 0.01・9 にした見本（300,000 回・334 回）、`seconds` 550・`interval` 10 の見本（305 回）、`seconds` を -1・3,600 にした見本、`cache.read-ratio` の `default` か表の値を 0・-0.05 にした見本、読み出しの倍率 0 と `d` 0 を合わせた見本、`cache.write-ratio` の `1h` を 0 にした見本、`cache.wake-cost` の `count` を 0・-1 にした見本で `tables.TableError`（hook は眠らずに 0。`n_max` に分母 0 が渡らない）。`ndf check` も同じ値の方針のファイルをスキーマで破れとする。`seconds` 600 で `interval` 10（300 回）・60 で通る |
 | `n_max` | Opus 5.5・`1h`・`d` 2,000 で `S` 400,000 → 35、500,000 → 36、20,000 → 13。読み出し 0.1 で 400,000 → 18 |
 | `wake_at` | `1h`・余白 600 で `at + 3000`、`5m` で None。余白 240（5 分の寿命より短い）でも `5m` は None、`1h` は `at + 3360` |
 | `handoff_fits` | Opus 5.5・`1h`・`d` 2,000・`calls` 4・`count` 25,000・`start` 60,000 で、`S` 250,000・`spent` 292,500 → 真（487,500 ちょうど）、292,501 → 偽。`count` を 400,000 にすると `spent` 0 でも偽 |
@@ -354,8 +354,8 @@ plugins/ndf/
 
 | 項目 | `limits.schema.json` の形 | `Policy` の型 |
 | --- | --- | --- |
-| `ratios` | 文字列から数への表 | `Optional[dict[str, float]]` |
-| `default` | 数 | `Optional[float]` |
+| `ratios` | 文字列から 0 より大きい数への表 | `Optional[dict[str, float]]` |
+| `default` | 0 より大きい数 | `Optional[float]` |
 | `ratio` | 0 より大きく 1 以下 | `Optional[float]` |
 | `versions` | `数.数.数` の文字列の配列。重複なし。空も可 | `Optional[tuple[str, ...]]` |
 | `calls` | 1 以上の整数 | `Optional[int]` |
