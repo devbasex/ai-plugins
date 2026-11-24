@@ -210,8 +210,9 @@ def select(
     Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
     """
     alone = {**CONTRACT_RULES, **SETTINGS_RULES, **PARTIAL_RULES, **SELECTED_RULES}
-    if only and set(only) <= alone.keys() and not write_spec:
-        if set(only) & SELECTED_RULES.keys():
+    named = set(only or ())
+    if only and named <= alone.keys() and not write_spec:
+        if named & SELECTED_RULES.keys():
             scope.sources = collect(scope.plugin_root, scope.repo_root)
             unparsable(scope)
         return _gather(_chosen(alone, scope, rules, only), only)
