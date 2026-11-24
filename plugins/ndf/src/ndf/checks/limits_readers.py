@@ -308,12 +308,17 @@ class _Walker(ast.NodeVisitor):
         at_module = self._binder(node.id) is None and (node.id in self.mod.defs or node.id in self.mod.consts)
         return f"{self.mod.name}.{node.id}" if at_module else None
 
-    def _constant(self, node: ast.expr) -> Optional[ast.expr]:
-        """名前か属性が指す、モジュールの最上位の代入の右辺（import の先は 1 階層だけ）。"""
+    def _split(self, node: ast.expr) -> tuple[Optional[str], Optional[_Module], str]:
+        """式が指す完全な名前と、その名前を持つモジュール（見ているモジュールでなければ None）と、その中の属性の名前。"""
         name = self.full_name(node)
         owner, _, attr = (name if name is not None else "").rpartition(".")
-        found = self.modules[owner].consts.get(attr) if owner in self.modules else None
-        if owner != self.mod.name or not isinstance(found, (ast.Name, ast.Attribute)):
+        return name, self.modules[owner] if owner in self.modules else None, attr
+
+    def _constant(self, node: ast.expr) -> Optional[ast.expr]:
+        """名前か属性が指す、モジュールの最上位の代入の右辺（import の先は 1 階層だけ）。"""
+        _, mod, attr = self._split(node)
+        found = mod.consts.get(attr) if mod is not None else None
+        if mod is not self.mod or not isinstance(found, (ast.Name, ast.Attribute)):
             return found
         with self._written_in(()):
             return self._constant(found)
@@ -407,9 +412,7 @@ class _Walker(ast.NodeVisitor):
 
     def _returned(self, func: ast.expr) -> Optional[str]:
         """呼び先がクラスならその名前、関数なら戻り値の注釈のクラス。"""
-        name = self.full_name(func)
-        owner, _, attr = (name if name is not None else "").rpartition(".")
-        mod = self.modules[owner] if owner in self.modules else None
+        name, mod, attr = self._split(func)
         found = mod.defs[attr] if mod is not None and attr in mod.defs else None
         if mod is None or isinstance(found, ast.ClassDef):
             return name if mod is not None else None
@@ -508,12 +511,10 @@ class _Walker(ast.NodeVisitor):
 
     def _has_default(self, func: ast.expr, reader: Reader) -> bool:
         """呼び先が方針の名前の引数に既定値を持つ（既定値は定義したモジュールの読みに数える）。"""
-        name = self.full_name(func)
-        owner, _, attr = (name if name is not None else "").rpartition(".")
-        if owner not in self.modules:  # メソッドは定義の側で既定値を数える
+        _, mod, attr = self._split(func)
+        if mod is None:  # メソッドは定義の側で既定値を数える
             return True
-        defs = self.modules[owner].defs
-        return attr in defs and _default(defs[attr], reader.arg) is not None
+        return attr in mod.defs and _default(mod.defs[attr], reader.arg) is not None
 
     # ---------------------------------------------------------------- 読み口と表の参照
 
