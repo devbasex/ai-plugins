@@ -18,6 +18,7 @@ import stat
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional
 
+from ndf import identity
 from ndf.domains.relay import signals
 
 NDF_COMMAND = "bash ~/.claude/ndf-statusline.sh"
@@ -66,7 +67,7 @@ class Switched(NamedTuple):
 
 def paths(environ: Mapping[str, str], home: Optional[Path] = None) -> Paths:
     """`settings.json`（symlink なら参照先）・バックアップ・排他・表示の本体の保存先。壊れた symlink は `StatuslineError`。"""
-    link = signals.claude_config_root(environ) / SETTINGS_NAME
+    link = identity.claude_config_root(environ) / SETTINGS_NAME
     settings = link.resolve(strict=False) if link.is_symlink() else link
     if link.is_symlink() and not settings.parent.is_dir():
         raise StatuslineError("invalid", f"{link} の参照先の保存先が無い: {settings}")

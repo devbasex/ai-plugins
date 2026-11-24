@@ -39,9 +39,9 @@
 | `switch_decide.decide`（`plugins/ndf/src/ndf/domains/relay/switch_decide.py`） | 質問があれば最初に見て、転送していなければ `forward`、転送していれば `wait` を返す。何も読まない純粋な関数 |
 | `Wrapper._question`・`_state`（`plugins/ndf/src/ndf/domains/relay/wrapper.py`） | 見回りごとに質問のファイルを読み、子が終わった・今の子のものでない質問を消し、回答待ちか・転送したか・質問の ID を判断へ渡す。壊れた・読めないファイルは回答待ちとして渡す |
 | `Wrapper._on_wait_like` | 質問を転送し、転送した質問の ID を残す。質問のファイルは消さない |
-| `Wrapper._stop_if_clear`・`_stop_child` | ロックを待たずに取り、質問のファイルが無いと確かめ、ロックを持ったまま子を強制終了し、今の起動の記録を外す |
+| `StopSteps._stop_if_clear`・`_stop_child`（`plugins/ndf/src/ndf/domains/relay/wrapper_stop.py`） | ロックを待たずに取り、質問のファイルが無いと確かめ、ロックを持ったまま子を強制終了し、今の起動の記録を外す。引継ぎ・止まりの起動し直し・見回りの切り替えでは、同じロックの中でバックグラウンドの作業の記録も読み直す（[ndf-relay-background-wait.md](ndf-relay-background-wait.md)） |
 | `Wrapper._on_switch`・`_on_resume`・`_on_handover`・`_halt_broken` | 子を止める手（`switch`・`account`・`restart`・`handover`・設定が壊れたときの終わり）。どれも `_stop_if_clear` を通ったときだけ子を止める |
-| `Wrapper._start` | 子ごとに起動の ID を作り、今の起動として記録し、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す |
+| `Wrapper._start` | 子ごとに起動の ID を作り、今の起動として記録し、環境変数 `NDF_RELAY_LAUNCH` で子へ渡す（保存先と会話の ID も `launch_env` で一緒に渡す） |
 | `signals`（`plugins/ndf/src/ndf/domains/relay/signals.py`） | 質問のファイルの読み（`read_question`・`question_present`・`question_id`）と書き（`write_question`）、ロックの中で消す（`drop_question`）、今の起動の記録（`set_launch`・`current_launch`・`launch_env`・`relay_launch`） |
 | hook `ask-forward`（`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`） | 中継の下では、ロックの中で今の起動の質問として書けたときだけ `AskUserQuestion` を通し、書けなければ拒否する |
 | hook `ask-answered`・`ask-closed`（`plugins/ndf/src/ndf/domains/hooks/guards/ask_clear.py`） | 質問が閉じたら、ロックの中で質問のファイルを消す。いつも通す |
@@ -115,8 +115,8 @@ hook とラッパーの順番をロックでそろえることである。
 
 ### 判断の順と質問の分岐
 
-判断の順（質問 → 利用上限と認証の失敗 → マーカー → 子の終わり → 文脈の上限 → 出力の止まり）と各分岐の手は、
-[relay.md の「承認ゲートを越えない守り」](../../plugins/ndf/skills/development-workflow/references/relay.md#承認ゲートを越えない守り)の表が正である。
+判断の順（質問 → 利用上限と認証の失敗 → マーカー → 子の終わり → 見回りの切り替え → 文脈の上限 → 出力の止まり）と各分岐の手は、
+[relay.md の「承認ゲートを越えない守り」](../../plugins/ndf/skills/development-workflow/references/relay.md#承認ゲートを越えない守り)の表が正である。見回りの切り替えは子が動いている間だけ判断するので、子の終わりと重ならない。
 質問の分岐は次のとおりで、質問が無いときの分岐は質問の扱いを足す前と同じである。
 
 | 判断への入力 | 手と理由の文 |
@@ -182,7 +182,7 @@ sequenceDiagram
 
 ### 引継ぎ
 
-文脈の量が上限を超えて静かなときは、上と同じ手順で子を止め、同じ会話を `claude --resume <同じ ID> <引継ぎを頼む文>` で
+文脈の量が上限以上で静かで、バックグラウンドの作業が残っていないときは、上と同じ手順で子を止め、同じ会話を `claude --resume <同じ ID> <引継ぎを頼む文>` で
 起動し直す。新しい子は引数の文を最初の入力として受け取るので、選択肢が出ている画面へ改行が届くことは無い。
 起動し直した子は引継ぎを頼んだ（`handover_asked`）として続き、起動し直しの回数には数えない。`account`・`restart` で同じセグメントを
 起動し直したときも、前の子の `handover_asked` を引き継ぐ（同じセグメントで引継ぎを 2 回頼まない）。
@@ -196,7 +196,7 @@ sequenceDiagram
 
 ### hook の締め切りと例外
 
-guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` が真の guard（`ask-forward` だけ）は、次のように扱う。
+guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` が真の guard（`ask-forward` と `relay-busy`）は、次のように扱う。
 
 | 経路 | `fail_closed` が偽（ほかの guard） | `fail_closed` が真 |
 | --- | --- | --- |
@@ -207,13 +207,14 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 
 `ask-forward` の `on_deadline` は、中継の外なら通す。同じ実行の `check` が中継へ記録し終えていれば、その後の転送の途中の
 割り込みなので通す（記録した質問は消さない）。記録の途中の割り込みなら、同じ `tool_use_id` の質問をロックを待たずに消して拒否する。
-`ask-forward` は、記録の後のオーガナイザーへの書き込みと待ちの知らせの例外を自分で捕まえて通し、例外の種類を計測の `forward_errors` に残す。
+`ask-forward` は、中継の環境変数の名前をコントラクト（`contracts/domains/env.json`）から引けなければ、どこにも書かずに通す（#4126）。
+記録の後のオーガナイザーへの書き込みと待ちの知らせの例外を自分で捕まえて通し、例外の種類を計測の `forward_errors` に残す。
 
 ### ドメインイベント
 
 | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- |
-| マーカーを書いた | 最後の応答が `ndf-next` のブロックを持ち、背景の作業が無い | 背景の作業が残る: 変更を要求して書かない | — |
+| マーカーを書いた | 最後の応答が `ndf-next` のブロックを持ち、バックグラウンドの作業が無い（監視は残っていてもよい） | 作業が残る: 変更を要求して書かない | — |
 | 子が質問を出した | `ask-forward` がロックの中で質問のファイルを書いた | ロックを取れない・書けない: 拒否し、選択肢は出ない | — |
 | 質問を転送した | 見回りで転送していない質問を見つけた | 計画のリクエストへ載せられない: 理由を状態と `log.jsonl` に書く。ID は残す | 子が質問を出した |
 | 質問が閉じた | 回答（PostToolUse）・回答せずに閉じた後の Stop か UserPromptSubmit | — | 子が質問を出した |
@@ -227,7 +228,7 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 | ファイル | 書き手 | 中身 |
 | --- | --- | --- |
 | `question.json` | `ask-forward`（`write_question`、原子的な置き換え） | `session_id`・`tool_use_id`・`questions`・`cwd`・`at`（ISO 8601）・`launch`（起動の ID。hook の環境に起動の ID がある書き込みだけ） |
-| `question.json.lock` | `ask-forward`・`ask-answered`・`ask-closed`・ラッパー | 排他のロックのファイル |
+| `question.json.lock` | `ask-forward`・`ask-answered`・`ask-closed`・`relay-busy`・ラッパー | 排他のロックのファイル（`signals.STOP_LOCK`）。`relay-busy` は作業と監視の開始の記録で取る |
 | `launch.json` | ラッパー（`set_launch`） | `{"launch": <起動の ID か null>}` |
 | `.question.forward.json` | ラッパー（`_ask_plan`） | 計画のリクエストへ渡す質問のコピー。渡し終えたら消す |
 
@@ -243,7 +244,7 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 
 | 名前 | 書き手 | 意味 |
 | --- | --- | --- |
-| `NDF_RELAY_LAUNCH` | ラッパーが子を起動するとき（`launch_env`。`NDF_RELAY_DIR` と並べる） | その子の起動の ID |
+| `NDF_RELAY_LAUNCH` | ラッパーが子を起動するとき（`launch_env`。`NDF_RELAY_DIR`・`NDF_RELAY_SESSION` と並べる） | その子の起動の ID |
 
 ### `log.jsonl` の行
 
@@ -262,7 +263,7 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 | --- | --- |
 | `plugins/ndf/contracts/limits/` の `hook.ask-forward` | 0.3 秒。hook がロックを待つ上限（`ask-forward`・`ask-answered`・`ask-closed` で共通） |
 | 同 `relay.child-exit` | 5 秒。強制終了が偽を返した後に子の終わりを待つ上限 |
-| `guards.json` の `fail_closed` | どの行も必須の列。真は `ask-forward` だけ |
+| `guards.json` の `fail_closed` | どの行も必須の列。真は `ask-forward` と `relay-busy` |
 | `guards.json` の `ask-answered` / `ask-closed` | PostToolUse・Tool `AskUserQuestion`・`order` 60 / Stop と UserPromptSubmit・Tool なし・`order` 10（`relay-marker` より前） |
 | `plugins/ndf/contracts/hooks/runtimes.json` | Claude Code の PostToolUse の `optional` に `tool_use_id`。Codex の `skipped` に `ask-answered`・`ask-closed`（AskUserQuestion の Tool が無い） |
 | `ndf relay decide` の入力 | `question_forwarded`（既定で偽）・`question_id`（既定で null）。無い入力の JSON も読める |
@@ -319,7 +320,7 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 | 消し損ねを拾い直す仕組みを置かない | 拾い直す記録を足すたびに、記録と質問の置き換わりの競合が生じた。消し損ねは止めない側で待ち、選択肢を越えない |
 | 引継ぎは子の端末へ書かず、同じ会話の起動し直しで頼む | 子の端末へ書いた入力を子がいつ読むかはラッパーから決められず、選択肢の後に読まれれば改行が回答を決める |
 | 壊れた・読めない質問のファイルは回答待ちとして扱い、設定が壊れたときもロックの確かめを通ってから止める | 質問の状態を読めないときに子を止めると、表示中の質問を消しうる。止めない側へ倒す |
-| `ask-forward` だけを `fail_closed` にし、エントリポイントの締め切りでも拒否する | 枠組みの 3 つの経路とエントリポイントの締め切りは、どれも質問を記録しないまま通していた。ほかの guard の振る舞いは変えない |
+| 質問を記録する guard のうち `ask-forward` を `fail_closed` にし、エントリポイントの締め切りでも拒否する | 枠組みの 3 つの経路とエントリポイントの締め切りは、どれも質問を記録しないまま通していた。ほかの guard の振る舞いは変えない |
 | hook の環境変数に起動の ID が無く `launch.json` も無ければ照らさずに書く | 起動の ID を渡さない前のバージョンのラッパーの下で、質問をいつも拒否しないため。今のラッパーは起動の前に必ず記録を書くので、その下の振る舞いは変わらない |
 | 記録の後の転送・知らせの失敗では拒否しない | 拒否すると、書いた質問のファイルが表示されない質問の回答待ちとして残り、ラッパーが子を止められなくなる |
 
@@ -349,5 +350,5 @@ guard の表（`plugins/ndf/contracts/hooks/guards.json`）の列 `fail_closed` 
 
 - 課題: [#3814](https://github.com/devbasex/ai-plugins/issues/3814)
 - 範囲の外として残る記述の直し: [#3897](https://github.com/devbasex/ai-plugins/issues/3897)（relay.md の冒頭の例と「止め方」の表）・[#3900](https://github.com/devbasex/ai-plugins/issues/3900)（hook の締め切りを書いた確定仕様）・[#3901](https://github.com/devbasex/ai-plugins/issues/3901)（`ndf-relay-segment-restart.md`・`ndf-relay-install-and-restart.md` の 10 系の守り）
-- [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)・[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)・[ndf-relay-plugin-update.md](ndf-relay-plugin-update.md)・[ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md)
+- [ndf-relay-background-wait.md](ndf-relay-background-wait.md)・[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)・[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)・[ndf-relay-plugin-update.md](ndf-relay-plugin-update.md)・[ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md)
 - [Claude Code の hook](https://code.claude.com/docs/en/hooks)

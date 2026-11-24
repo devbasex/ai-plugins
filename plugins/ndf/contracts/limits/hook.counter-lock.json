@@ -4,6 +4,7 @@
   "read_by": [
     "ndf.domains.hooks.budget",
     "ndf.domains.hooks.counter",
+    "ndf.domains.hooks.guards.relay_busy",
     "ndf.domains.hooks.guards.relay_mark"
   ]
 }

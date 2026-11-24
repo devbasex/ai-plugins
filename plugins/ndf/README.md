@@ -136,7 +136,8 @@ guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts
 | `read-repeat` | PreToolUse（Read） | 同じファイルの同じ範囲を続けて読むのを止め、Grep を勧める |
 | `ask-forward` | PreToolUse（AskUserQuestion） | 質問を中継とオーガナイザーへ渡し、待ちの知らせを送信待ちへ書く |
 | `stop-wait` | Stop | 最後の応答が AskUserQuestion を使わずに本文で回答を待つなら書き直しを求める |
-| `relay-marker` | Stop | 中継の下で、最後の応答の `ndf-next` のブロックを中継へ渡す |
+| `relay-busy` | SessionStart・PreToolUse | 中継の下で、バックグラウンドの作業と監視の開始を記録する。作業の開始を記録できないときは、その呼び出しを拒否する |
+| `relay-marker` | Stop | 中継の下で、残るバックグラウンドの作業の件数を記録し、最後の応答の `ndf-next` のブロックを中継へ渡す（作業が残る間は渡さずに応答を続けさせる） |
 | `turn`・`session`・`unattended` | UserPromptSubmit・SessionStart ほか | 数え手の数え直し・hook の予算の検査・人のいない実行の報告 |
 
 **guard を止めるのは環境変数 `NDF_HOOK_OFF` だけです。** 名前をカンマでつなぐか、`all` ですべてを止めます
@@ -244,14 +245,14 @@ agy models   # 認証確認
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.28/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.29/skills/deploy/SKILL.md
 ```
 
 実体のパスは `codex plugin list` で確かめます。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  11.0.28  <path>
+# => ndf@ai-plugins  installed, enabled  11.0.29  <path>
 ```
 
 Claude Code では `disable-model-invocation: true` と `/ndf:deploy` のスラッシュコマンドで同じ役割を果たします。

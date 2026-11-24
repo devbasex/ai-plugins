@@ -144,12 +144,17 @@ def _mark(session_id: str) -> int:
 def _decide() -> int:
     try:
         data = json.loads(sys.stdin.read())
-        pick = data.pop("limit_pick", None)
-        state = switch_decide.SectionState(**data, limit_pick=account_decide.Pick(**pick) if pick else None)
+        pick, found = data.pop("limit_pick", None), data.pop("background", None)
+        state = switch_decide.SectionState(
+            **data,
+            limit_pick=account_decide.Pick(**pick) if pick else None,
+            background=switch_decide.Background(**found) if found else None,
+        )
     except (ValueError, TypeError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"セグメントの状態の JSON の形が違う: {exc}"))
-    step = switch_decide.decide(state)
-    return result.emit(result.result(TOOL, result.OK, step.reason, items=[step._asdict()]))
+    step = switch_decide.decide(state)._asdict()
+    del step["busy"]  # 子を止める直前の読み直しの条件はラッパーの中だけの値
+    return result.emit(result.result(TOOL, result.OK, step["reason"], items=[step]))
 
 
 def hub_context(environ: Mapping[str, str]) -> hub.Context:
@@ -290,7 +295,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         cwd=cwd,
         env=session_env.tool_env(environ),
         timeout=limits.seconds("relay.plugin-update"),
-        lock=signals.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
+        lock=identity.claude_config_root(environ) / facts.value("locations", "relay-plugin-update", "path"),
         version=raw if isinstance(raw, str) else None,
     )
     return wrapper.Settings(
@@ -336,6 +341,10 @@ def _run(args: argparse.Namespace) -> int:
     parsed = claude_args.parse(args.rest, os.environ, sys.stdin.isatty() and sys.stdout.isatty())
     if parsed.passthrough:
         return _passthrough(args.rest, parsed)
+    try:  # 起動の副作用（`launch.json`・子の起動）の前に、子へ渡す名前をコントラクトから引けることを確かめる（#4126 の決定 3）
+        signals.require_keys()
+    except identity.EnvNameError as exc:
+        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
     tty_in = sys.stdin.isatty()
     saved = termios.tcgetattr(sys.stdin.fileno()) if tty_in else None
     if tty_in:

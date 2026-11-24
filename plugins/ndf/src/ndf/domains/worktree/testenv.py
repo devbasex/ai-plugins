@@ -85,8 +85,8 @@ def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Targ
 def environment_name(t: Target, branch: Optional[str]) -> str:
     """環境名。`branch` は今のブランチ（detached HEAD なら `None`）。"""
     if branch is not None:
-        return testenv_decide.env_name(t.main_dir.name, branch)
-    return testenv_decide.env_name(t.main_dir.name, f"detached-{t.path.name}", t.key)
+        return testenv_decide.testenv_name(t.main_dir.name, branch)
+    return testenv_decide.testenv_name(t.main_dir.name, f"detached-{t.path.name}", t.key)
 
 
 def assign(t: Target) -> dict[str, Any]:

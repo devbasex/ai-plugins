@@ -6,6 +6,7 @@
 中継の下では、ロックの中で今の起動（`NDF_RELAY_LAUNCH` と `launch.json`）の質問として書けたときだけ通し、書けなければ
 拒否する（#3814 の I7）。拒否にするのはこの記録の失敗だけで、オーガナイザーへの書き込みと待ちの知らせの失敗（例外を含む）は
 通し、例外の種類を計測の `forward_errors` に残す（guard の表の `fail_closed` で例外が拒否にならないよう、ここで捕まえる）。
+コントラクトの誤りで中継の変数の名前を引けなければ（`signals.keys_known`）、どこにも書かずに通す（#4126 の決定 3）。
 中継へ記録できた後に締め切りの割り込みが来たとき（オーガナイザーのロックの待ちなど）も、記録済みの質問は消さずに通す。
 """
 
@@ -38,6 +39,8 @@ def _first_question(tool_input: dict) -> str:
 
 def check(ctx, svc) -> Verdict:
     global _recorded
+    if not signals.keys_known():
+        return passing(forwarded=[])
     wait = forward_wait()
     forwarded: list[str] = []
     relay = signals.relay_dir(ctx.env)
@@ -63,6 +66,8 @@ def on_deadline(env, payload) -> Optional[str]:
     割り込みが質問を書いた後に来たときに備え、同じ `tool_use_id` の質問をロックを待たずに消す（取れなければ残し、
     `ask-closed` が閉じた質問として消す）。
     """
+    if not signals.keys_known():
+        return None
     relay = signals.relay_dir(env)
     if relay is None or (_recorded is not None and _recorded is payload):
         return None
