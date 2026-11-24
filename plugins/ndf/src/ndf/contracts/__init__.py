@@ -274,8 +274,9 @@ def broken_rules(instance: Any, rel: str) -> list[str]:
 
 
 def broken_rule(error: ValidationError) -> str:
-    """破ったスキーマの場所と規則の名前。入力の値もキーも含まない。"""
-    return f"{'/'.join(str(p) for p in error.absolute_schema_path)}（{error.validator}）"
+    """破ったスキーマの場所と規則の名前。入力の値もキーも含まない。欠けた欄（`required`）の文はスキーマにある欄の名前だけを含むので添える。"""
+    rule = f"{'/'.join(str(p) for p in error.absolute_schema_path)}（{error.validator}）"
+    return f"{rule}: {error.message}" if error.validator == "required" else rule
 
 
 def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:

@@ -125,7 +125,9 @@ hook（Claude Code と Codex が決まった時点で呼ぶ NDF の処理）の�
 | 1 つのモジュールだけが使う語の一覧 | `StrEnum` | `relay/context_thresholds.py` の `Verdict`・`Reason` |
 | 運用で決める上限・回数・待ち時間 | 上限の設定の方針にする | `supervise.worker-run` を読む `core/worker.py` の `work_timeout` |
 
-`pace` は開発の進め方で、`fast` と `auto` では、プロジェクトの判断基準（MVV: Mission・Vision・Value）に沿うと判定された変更の承認を省ける。`MVV_PACES` はこの 2 つだけを持つ。
+`pace` は開発の進め方で、`fast` と `auto` では、設計とリリースの承認ゲートに限り、プロジェクトの判断基準（MVV: Mission・Vision・Value）による判定で承認を省けることがある。
+省くには、承認済みの MVV とそのハッシュの一致、レッドラインに触れないこと、判定の記録などの条件がすべて要る。条件の正本は
+[`pace.md` の「MVV 判定」](../../plugins/ndf/skills/development-workflow/references/pace.md#mvv-判定) である。`MVV_PACES` は `fast` と `auto` の 2 つだけを持つ。
 `normal` を含む `pace` の全体から作ると、通常の進め方でも承認を省いてしまう。
 
 ### コピーで増えた重複（`copy-dup`）
@@ -189,7 +191,7 @@ NDF を 11.0 へ作り直したときの設計レビューの指摘 182 件に�
 | NDF の検査が読むファイル（`NDF_PATHS`） | `ndf check --ratchet-base HEAD^1` |
 | `NDF_PATHS` に含まれない、指摘の一覧表（`REVIEW_ITEMS_PATHS`） | `ndf check --only review-items` |
 | `NDF_PATHS` に含まれない、ワークフロー（`TOOLCHAIN_PATHS`） | `ndf check --only toolchain --only budget-ci-jobs`（Python と uv のバージョンの指定と、CI のジョブの数の上限） |
-| 指摘の一覧表とワークフローの両方 | 2 つの `--only` を並べて `ndf check` を 1 回 |
+| `NDF_PATHS` に含まれるファイルは変えず、指摘の一覧表とワークフローの両方 | `ndf check --only review-items --only toolchain --only budget-ci-jobs`（1 回の起動で 3 つの規則を渡す） |
 
 どのファイルが当たるかは `.github/workflows/script-structure.yml` にある。
 

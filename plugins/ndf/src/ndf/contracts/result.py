@@ -94,20 +94,20 @@ def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
 
 
 def answer_errors(routes: object) -> list[str]:
-    """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの。形の誤りはスキーマが報告する。"""
+    """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの（1 つにつき 1 行。キーは文に入れない）。形の誤りはスキーマが報告する。"""
     if not isinstance(routes, dict):
         return []
     known = set(facts.ids(ANSWERS))
-    return [f"routes のキー {key!r} は回答の語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
+    return [f"routes のキーが回答の語彙（facts/{ANSWERS}.json）に無い" for _ in set(routes) - known]
 
 
 def severity_errors(items: object) -> list[str]:
-    """items の `severity` のうち、重さの表（事実の表 severities）に無いもの。形の誤り（文字列でない・空）はスキーマが報告する。"""
+    """items の `severity` のうち、重さの表（事実の表 severities）に無いもの（値は文に入れない）。形の誤り（文字列でない・空）はスキーマが報告する。"""
     rows = items if isinstance(items, list) else []
     given = [(i, row["severity"]) for i, row in enumerate(rows) if isinstance(row, dict) and "severity" in row]
     words = [(i, word) for i, word in given if isinstance(word, str) and word]
     known = set(facts.ids(SEVERITIES)) if words else set()
-    return [f"items/{i}/severity: {word!r} は重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
+    return [f"items/{i}/severity が重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
 
 
 def item_fields() -> frozenset[str]:
@@ -130,8 +130,19 @@ def code_for(obj: Any) -> Optional[int]:
 
 
 def errors(obj: Any, code: Optional[int] = None) -> list[str]:
-    """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。"""
-    errs = contracts.schema_errors(obj, SCHEMA)
+    """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。スキーマの誤りの文は結果の値を含む
+    （外へ出す文は `_safe_errors`）。"""
+    return contracts.schema_errors(obj, SCHEMA) + _table_errors(obj, code)
+
+
+def _safe_errors(obj: Any, code: Optional[int]) -> list[str]:
+    """結果の値もキーも含まない誤りの文（重複なし）。スキーマの誤りは、スキーマの場所と規則の名前にする。"""
+    return list(dict.fromkeys([*contracts.broken_rules(obj, SCHEMA), *_table_errors(obj, code)]))
+
+
+def _table_errors(obj: Any, code: Optional[int]) -> list[str]:
+    """スキーマでは見ない誤り（表に無い語・バージョン・終了コード）。文は結果の値もキーも含まない。"""
+    errs: list[str] = []
     if not isinstance(obj, dict):
         return errs
     if "cause" in obj:
@@ -194,16 +205,15 @@ def dumps_line(obj: Any) -> str:
 
 
 def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
-    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、誤りを標準エラーへ書き、代わりの `stopped`（invalid）を
+    """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、値を含まない誤りの文を標準エラーへ書き、代わりの `stopped`（invalid）を
     1 行で出して invalid の終了コードを返す。"""
     if code is None:
         code = code_for(obj)
     errs = errors(obj, code)
     if errs or code is None:
-        errs = errs or ["終了コードを決められない（stopped に cause が無い）"]
-        for line in errs:
+        for line in _safe_errors(obj, code) or ["終了コードを決められない（stopped に cause が無い）"]:
             print(f"結果の形の誤り: {line}", file=sys.stderr)
-        return _emit_instead(obj, len(errs), stream)
+        return _emit_instead(obj, len(errs) or 1, stream)
     print(dumps_line(obj), file=stream or sys.stdout)
     return code
 

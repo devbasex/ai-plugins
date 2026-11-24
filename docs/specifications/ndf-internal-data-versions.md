@@ -48,7 +48,7 @@ sequenceDiagram
   participant Core as ndf.contracts.internal
   participant File as 記録のファイル
   W->>Core: write_record(種類, 行)
-  Core-->>W: version と at を入れた行、または InternalError
+  Core-->>W: version と、at の欄を持つ種類なら at を入れた行、または InternalError
   W->>File: 追記する
   File->>Core: read_record(種類, 行)
   Core->>Core: 古い形式なら今の形式へ変換する
@@ -92,7 +92,7 @@ sequenceDiagram
 
 | 関数 | すること |
 | --- | --- |
-| `write_record(kind, row)` | `version` と、渡されなければ `at`（今の時刻）を入れ、スキーマで確かめて返す。合わなければ `InternalError` を投げ、何も書かない |
+| `write_record(kind, row)` | `version` を入れ、`at` の欄を持つ種類で `at` が渡されなければ今の時刻を入れ、スキーマで確かめて返す。`at` の欄を持たない `context` と `stage-snapshot` には `at` を入れない。合わなければ `InternalError` を投げ、何も書かない |
 | `read_record(kind, raw)`・`read_line(kind, line)` | 今の形式へ変換し、スキーマで確かめて返す |
 | `migrate(kind, raw)` | 今の形式へ変換するだけで、確かめない |
 | `readable_version(kind, raw)` | 形式のバージョンを返す。今より新しければ `InternalError` |
@@ -162,7 +162,8 @@ sequenceDiagram
 | 保存したプランの結果を読む（`stored_result`） | `InternalError`（`precondition`） | 確かめない |
 
 代わりの結果には元の値を入れない。`detail` は誤りの件数とスキーマの中の場所だけで作り、`tool` は元の値が `[a-z][a-z0-9-]*` に合うときだけ引き継ぐ
-（合わなければ `ndf`）。値を含むエラーの文は標準エラーに出す。停止理由の表（`contracts/causes/`）の `invalid` が読めないときも、代わりの結果を 1 行で出す（`emit_unchecked`）。
+（合わなければ `ndf`）。標準エラーに出す誤りの文にも元の値とキーを入れず、スキーマの中の場所と規則の名前だけを書く
+（`required` は欠けた欄の名前を添える）。スキーマでは見ない誤り（表に無い `cause.kind`・`severity`・`routes` のキー、新しい `version`、終了コードの食い違い）も、欄の名前と NDF の語彙にある語だけで書く。停止理由の表（`contracts/causes/`）の `invalid` が読めないときも、代わりの結果を 1 行で出す（`emit_unchecked`）。
 
 ### キーの名前（名前の対応表と規則 `internal-names`）
 
@@ -188,7 +189,7 @@ sequenceDiagram
 | I2 | 古い形式の変換の仕方は `ndf.contracts.internal`（`KINDS` と `stage_values`）だけが持つ。ほかのコードはその関数を呼ぶ | レビューで確かめる |
 | I3 | 新しい形式のデータを、古い NDF が途中まで読んで判断しない | `precondition` で止まる |
 | I4 | 内部データのキーは、名前の対応表でその種類に許したものである | `internal-names` が落ちる |
-| I5 | エラーの文と代わりの結果に、元の値が出ない | `contracts/test_internal.py`・`test_result.py` が落ちる |
+| I5 | エラーの文（標準エラーに出す文を含む）と代わりの結果に、元の値が出ない | `contracts/test_internal.py`・`test_result.py` が落ちる |
 
 ## 決定と理由
 
@@ -210,7 +211,7 @@ sequenceDiagram
 | 古い形式と今の形式が混ざった記録から、開発ループの状態を復元できること | `domains/loop/test_loop_store.py` |
 | 更新前にリリースしたスプリントの再開、新しい形式の文脈とスナップショット | `progress/test_context_version.py` |
 | 工程が受け取った結果のバージョン | `progress/test_invoke_result_version.py` |
-| 代わりの結果に元の値が無いこと | `contracts/test_result.py` |
+| 代わりの結果と標準エラーの文に元の値が無いこと | `contracts/test_result.py` |
 | MVV の判定を使い回すかどうかと、飛ばした行 | `domains/records/test_mvv_gate.py` |
 | 名前の対応表に無いキー | `checks/test_internal_names.py` |
 

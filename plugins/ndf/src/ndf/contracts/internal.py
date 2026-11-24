@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple, Optional
 
-from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+from jsonschema import Draft202012Validator, FormatChecker
 
 from ndf import contracts
 
@@ -225,15 +225,9 @@ def _validator(schema: str) -> Draft202012Validator:
 def _require(kind: str, row: Row) -> None:
     """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（キーが値を持つ辞書と、スキーマに無い
     キーがあるため、行の値もキーも含まない）。"""
-    errors = {_broken(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
+    errors = {contracts.broken_rule(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
-
-
-def _broken(error: ValidationError) -> str:
-    """破った規則。欠けた欄（`required`）の文はスキーマにある欄の名前だけを含むので添える。"""
-    rule = contracts.broken_rule(error)
-    return f"{rule}: {error.message}" if error.validator == "required" else rule
 
 
 @contracts.cached_reader

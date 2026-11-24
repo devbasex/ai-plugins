@@ -85,7 +85,7 @@ def test_command_builds_the_argv_with_the_entry_name():
 
 def test_answer_words_are_the_answers_table(contracts_copy):
     routes = {"approved": GO, "hold": GO}
-    assert result.answer_errors(routes) == ["routes のキー 'hold' は回答の語彙（facts/answers.json）に無い"]
+    assert result.answer_errors(routes) == ["routes のキーが回答の語彙（facts/answers.json）に無い"]
     contracts_copy("facts/answers.json", lambda t: {**t, "rows": [*t["rows"], {"id": "hold", "label": "保留する"}]})
     assert result.answer_errors(routes) == []
 
@@ -139,8 +139,10 @@ SECRET = "sk-test-secret"
         SECRET,
     ],
 )
-def test_the_result_put_out_instead_has_no_value_of_the_wrong_one(obj):
+def test_the_result_put_out_instead_and_the_errors_have_no_value_of_the_wrong_one(obj, capsys):
     assert SECRET not in json.dumps(_instead(obj, 0), ensure_ascii=False)
+    err = capsys.readouterr().err
+    assert "結果の形の誤り" in err and SECRET not in err
 
 
 @pytest.mark.parametrize(

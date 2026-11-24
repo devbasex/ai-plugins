@@ -140,7 +140,7 @@ graph TD
 | I2 | 上限の設定 | 設定が無い・壊れている・引いた方針の名前が無い・引いた値が方針に無いとき、部品は組み込みの値へ戻らない | `LimitsError`。エントリポイントは終了コード 1 で止まる |
 | I3 | 上限の設定 | テストと実験版を除く `plugins/ndf/` の Python のコードに、上限の数字のリテラルが無い | 構造チェックの `limit-literal` が落とす |
 | I4 | 上限の設定 | コードに書いた方針の名前はすべて設定にある。方針の `read_by` は、実際にその方針を使うモジュールと一致し、使われない方針は無い | 無い名前はコントラクトの検査が、`read_by` の食い違いは `ndf check` の `limit-readers` が落とす |
-| I5 | 上限の設定 | 監視の工程と担当のすべての組で、無進捗の許容 < 監視の上限 < CLI の上限 | `limits.py check` が組を出して終了コード 1 |
+| I5 | 上限の設定 | 監視の工程と担当（表に無い担当の既定 `monitor.stall-default` を含む）のすべての組で、無進捗の許容 < 監視の上限。CLI 自身の時間の上限を渡す起動では、監視の上限 < CLI の上限 | 変更の手順（「上限の値を変える・足すとき」の 3・4）で確かめる。NDF 10.x の `limits.py check` は NDF 11.x には無い |
 | I6 | 1 回の再試行 | 眠りのループは `lib/waits.py` と、例外リストに理由つきで載った待ちのループだけにある | 構造チェックの `sleep-loop` が落とす |
 | I7 | 1 回の再試行 | `tenacity` を import するのは `lib/waits.py` だけ | 構造チェックの `wrapped` が落とす |
 | I8 | 1 回の再試行 | 同じ原因の鍵の失敗の回数が方針の `same_cause` に達したら、待ちの合計の上限が残っていても打ち直さない。原因の鍵が違う失敗は別に数える | 打ち直さずに `Waited`（`stop` が `same-cause`）を返す |
@@ -174,7 +174,7 @@ graph TD
 | `phases()` / `stalls()` / `stall_default()` / `cli_margin()` | — | 工程 → 秒、担当 → 秒、秒 | 設定の誤り → `LimitsError` |
 | `monitor_timeout(phase, agent, explicit=None)`・`stall_timeout`・`cli_timeout`・`resolve_cli_timeout` | 工程・担当・明示の値 | 環境変数を解決した秒 | 表に無い工程 → `KeyError`。設定の誤り → `LimitsError` |
 | `use(path)` | 設定のパス（`None` でプラグインの設定へ戻す） | — | 読み込み先を差し替え、読んだ設定を捨てる。テストが使う |
-| CLI `cli-timeout` / `monitor-timeout` / `check` | 工程・担当・`--override`・`--no-floor` | 秒を 1 行 / 崩れた組 | 設定の誤りは理由を標準エラーへ 1 行出して終了コード 1 |
+| CLI `cli-timeout` / `monitor-timeout` / `check`（NDF 10.x。11.x には無い） | 工程・担当・`--override`・`--no-floor` | 秒を 1 行 / 崩れた組 | 設定の誤りは理由を標準エラーへ 1 行出して終了コード 1 |
 
 `Policy` は値オブジェクト（`NamedTuple`）で、方針に無い値は `None` である。計算で上限を縮める呼び出し元（設計の結果の読み取りの
 残りの予算など）は `policy._replace(seconds=<計算した値>)` で渡す。
@@ -332,8 +332,22 @@ contracts/limits/
 
 1. 設定の方針の値を変える。新しい上限は、方針の名前を決めて `summary`・値・`read_by`（使うモジュール）を足し、コードから `limits.policy`・`limits.seconds`・`limits.value` で読む。使うモジュールを変えたら `read_by` も直し、使うモジュールが無くなった方針は削除する
 2. `plugins/ndf/bin/ndf check --only limit-readers --only const-fact` で、`read_by` の食い違いと、上限と同じ数を持つ定数が無いことを確かめる
-3. 監視の値を変えたときは、進捗の無い時間の許容（`monitor.stall.<担当>`）が、監視の上限（`monitor.phase.<工程>`）より短いこと（I5）を確かめる
-4. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す
+3. 監視の値を変えたときは、進捗の無い時間の許容（`monitor.stall*`）の最大が、監視の上限（`monitor.phase.*`）の最小より短いこと（I5。全組で成り立つことと同じ）を、次のコマンドが終了コード 0 で終わることで確かめる
+
+   ```bash
+   test "$(jq -s 'map(.seconds) | max' plugins/ndf/contracts/limits/monitor.stall*.json)" -lt \
+     "$(jq -s 'map(.seconds) | min' plugins/ndf/contracts/limits/monitor.phase.*.json)"
+   ```
+
+4. CLI 自身の時間の上限を渡す起動では、その値が監視の上限より長いこと（I5）を確かめる。どの経路が渡すかは次の表のとおりである
+
+   | 起動の経路 | 起動の外から時間を切るもの | CLI 自身の上限 |
+   | --- | --- | --- |
+   | NDF のコードが起動する（`ndf.adapters.agents`。cross-review・cross-refactoring） | `watch` が、無進捗の許容と、監視の上限（`monitor.phase.<工程>` か、呼び出し元が渡した秒）で止める | 渡さない。`contracts/domains/runtimes.json` の `review_args` に時間の上限の引数を足すときは、監視の上限より長くする |
+   | 工程の Skill を動かす（`ndf.progress.invoke`） | `claude.call_claude` に渡す `monitor.phase.implement` で止める（無進捗は見ない） | 渡さない |
+   | Skill `external-ai` の手順で手で起動する | `timeout` が `monitor.phase.<工程>` + 120 秒で止める（無進捗は見ない） | agy の `--print-timeout` だけ。`monitor.phase.<工程>` + 120 秒を渡す |
+
+5. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す
 
 ### 制約
 
@@ -358,7 +372,7 @@ contracts/limits/
 | 条件が揃わない値を返し続ける `wait_until` が期限の時刻に最後の照会を打つこと（上限 30 秒・間隔 10 秒・照会 2 秒で 0・12・24・30 秒）。理由に待った秒・照会の回数・上限の秒が出ること | `test_lib_waits.py` |
 | 設定に無い方針の名前をコードに書くと、コントラクトの検査が落ちること | `python3 scripts/check-ndf-contracts.py` |
 | 使われない方針と、`read_by` の食い違いで `limit-readers` が落ちること | `plugins/ndf/tests/checks/test_limits_readers.py` |
-| `limits.py check` が設定の値で全組を判定し、無進捗の許容を監視の上限より長くした設定で組を出して終了コード 1 になること | `test_limits.py`・`test_limits_declaration.py` |
+| `limits.py check` が設定の値で全組を判定し、無進捗の許容を監視の上限より長くした設定で組を出して終了コード 1 になること（NDF 10.x。11.x は「上限の値を変える・足すとき」の 3・4 で確かめる） | `test_limits.py`・`test_limits_declaration.py` |
 
 ## 関連リンク
 

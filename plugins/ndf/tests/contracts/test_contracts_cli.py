@@ -218,8 +218,8 @@ def test_emit_explicit_code_writes_out(capsys, tmp_path):
             ("--cause", "infra_wait", "d", "--code", "2"),
             "結果の形の誤り: cause.kind infra_wait の終了コードは 75（渡された値 2）\n",
         ),
-        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind 'nope' は停止理由の表に無い\n"),
-        ("gate", (), "結果の形の誤り: (最上位): 'routes' is a required property\n"),
+        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind が停止理由の表に無い\n"),
+        ("gate", (), "結果の形の誤り: allOf/1/then/required（required）: 'routes' is a required property\n"),
     ],
 )
 def test_emit_refusals_write_no_file(capsys, tmp_path, status, extra, err):
