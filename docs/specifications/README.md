@@ -212,5 +212,7 @@
 | [ndf-worker-report-prepare.md](ndf-worker-report-prepare.md) | worker の報告の保存先。supervisor が `ndf worker prepare` の 1 回の呼び出しでパスを決めて前の完了マーカーと結果ファイルを始末し、報告の書き込みと読み取りを `ndf worker append --done`・`ndf worker collect` に寄せ、空になりうる変数を渡す `rm` を guard が止めること（保存先を開けないときの `invalid`・追記の排他・置き換えのアクセス権）（#3877） |
 | [ndf-stage-plan-work-prompts.md](ndf-stage-plan-work-prompts.md) | 工程のプランが worker の起動指示を組んで流れる仕組み。差し込み `worker` の既定・作業ごとの定義（`contracts/worker/kinds.json`）と共通のテンプレート・作業が読む値の受け渡し（`values.json` と単発のプランの `work_values`）・決められない差し込みで工程を始めずに返すこと・必須の出力（`--require-output`）と欠け（`step-gaps.json`）の受け渡し・欠けた文脈のキーの取り場所（`x-source`）（#3908） |
 | [ndf-lane-idle-conductor.md](ndf-lane-idle-conductor.md) | レーンの生死の判定に足した「conductor が応答を終え、バックグラウンドの作業が 0 件のまま 10 分が過ぎた」止まり（`idle_conductor`）。Stop の hook が書く活動の記録と `ndf relay ls --activity` での観測、`lane_stalled` のリクエストへ載せる最後に動いた時刻とバックグラウンドの作業の数（#4036） |
+| [ndf-split-tables-toolchain-and-budget.md](ndf-split-tables-toolchain-and-budget.md) | 上限と停止理由の表を 1 項目 1 ファイルに分けた形と読み手、NDF が動く Python と uv の設定、テスト・CI のジョブ・使われない依存・置き換えられる自作の件数の上限、実験版の保存先、依存を用意できないときの結果と、それぞれの `ndf check` の規則 |
+| [ndf-live-samples-verify.md](ndf-live-samples-verify.md) | テストの見本を相手の公開する記述と毎日突き合わせる `ndf samples verify` と、失敗と食い違いを課題にするジョブ。見本の定義・食い違いの種類・取得の上限・終了コード |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

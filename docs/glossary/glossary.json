@@ -688,25 +688,25 @@
       "term": "テストダブル",
       "context": "ndf-ci-test",
       "meaning": "テストが本物の代わりに差し込む偽の相手",
-      "pending_source": "issues/issue-3687-design.md"
+      "source": "docs/specifications/ndf-live-samples-verify.md"
     },
     {
       "term": "見本",
       "context": "ndf-ci-test",
       "meaning": "本物の相手の入出力を記録した JSON。テストダブルはこれだけから応答を組み立てる",
-      "pending_source": "issues/issue-3687-design.md"
+      "source": "docs/specifications/ndf-live-samples-verify.md"
     },
     {
       "term": "分割した表",
       "context": "ndf-code-structure",
       "meaning": "1 項目 1 ファイルへ分けたコントラクトの表。ディレクトリの名前がもとの表の名前で、ファイル名が項目のキーになる",
-      "pending_source": "issues/issue-3687-design.md"
+      "source": "docs/specifications/ndf-split-tables-toolchain-and-budget.md"
     },
     {
       "term": "テストと CI の予算",
       "context": "ndf-ci-test",
       "meaning": "テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数の上限",
-      "pending_source": "issues/issue-3687-design.md"
+      "source": "docs/specifications/ndf-split-tables-toolchain-and-budget.md"
     },
     {
       "term": "系統（決定番号の）",
