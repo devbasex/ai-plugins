@@ -235,9 +235,19 @@ def _sum_usage(calls: list) -> Usage:
     )
 
 
+def _reply_positions(rows: list, message_id: str) -> list[int]:
+    """`message_id` の応答の行の位置をファイルの順に並べる。"""
+    return [i for i, rec in enumerate(rows) if transcript.is_reply_line(rec) and transcript.message_id(rec) == message_id]
+
+
+def _first_read(calls: list) -> int:
+    """呼び出しの列の最初の呼び出しの読み出しの量。"""
+    return _amount(_usage_row(calls[0]), _READ)
+
+
 def _wake_start(rows: list, after_id: str) -> Any:
     """`after_id` の応答の直後の最初の入力が起床の文ならその位置、ほかは返す `Reply`。"""
-    ends = [i for i, rec in enumerate(rows) if transcript.is_reply_line(rec) and transcript.message_id(rec) == after_id]
+    ends = _reply_positions(rows, after_id)
     if not ends:
         return Reply("truncated", None, None)
     for i in range(ends[-1] + 1, len(rows)):
@@ -275,15 +285,16 @@ def wake_reply(tail: str, after_id: str) -> Reply:
     calls = _call_rows(body)
     if not calls:
         return Reply("unknown", None, None)
-    return Reply("wake", _amount(_usage_row(calls[0]), _READ), _sum_usage(calls))
+    return Reply("wake", _first_read(calls), _sum_usage(calls))
 
 
 def wake_opening(tail: str, message_id: str) -> Opening:
     """`message_id` の応答を始めた入力と、その入力の直後の最初の呼び出しの読み出しを返す。"""
     rows = _parsed_tail(tail)
-    first = next((i for i, rec in enumerate(rows) if transcript.is_reply_line(rec) and transcript.message_id(rec) == message_id), None)
-    if first is None:
+    positions = _reply_positions(rows, message_id)
+    if not positions:
         return Opening("unknown")
+    first = positions[0]
     for i in range(first - 1, -1, -1):
         if transcript.is_boundary(rows[i]):
             return Opening("unknown")
@@ -296,7 +307,7 @@ def wake_opening(tail: str, message_id: str) -> Opening:
         calls = _call_rows(rows[i + 1 :])
         if at is None or not calls:
             return Opening("unknown")
-        return Opening("normal", at, _amount(_usage_row(calls[0]), _READ))
+        return Opening("normal", at, _first_read(calls))
     return Opening("unknown")
 
 
