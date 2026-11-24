@@ -70,6 +70,7 @@ def test_record_without_the_monitor_count_reads_as_zero_monitors(tmp_path):
         {"count": None},
         {"monitors": -1},
         {"monitors": "1"},
+        {"source": "start"},  # 開始の記録の 0 件
         {"source": "other"},
         {"source": []},
         {"at": None},
