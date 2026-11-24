@@ -53,7 +53,7 @@ plugins/ndf/
 
 | ファイル | 種別 | 責務（1 文） | 依存 | 公開シンボル | 関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/relay/keep_cache.py` | 新設 | 起こす時点・上限・次の手を決め、渡された会話の記録の末尾から最後の応答・起床の呼び出し・待ちを明けた入力を読む | 標準ライブラリ・`adapters.transcript`（`last_context`・`timestamp_seconds`） | `LastTurn`・`TurnRead`・`Usage`・`Reply`・`Opening`・`Ratios`・`Step`・モジュール `keep_cache` | `last_turn`・`wake_reply`・`opening`・`is_wake_input`・`ratios`・`wake_at`・`n_max`・`n_handoff`・`next_step`・`hit`（新設） |
+| `src/ndf/domains/relay/keep_cache.py` | 新設 | 起こす時点・上限・次の手を決め、渡された会話の記録の末尾から最後の応答・起床の呼び出し・待ちを明けた入力を読む | 標準ライブラリ・`adapters.transcript`（`last_context`・`timestamp_seconds`） | `LastTurn`・`TurnRead`・`Usage`・`Reply`・`Opening`・`Ratios`・`Step`・モジュール `keep_cache` | `last_turn`・`wake_reply`・`opening`・`is_wake_input`・`ratios`・`wake_at`・`n_max`・`handoff_fits`・`next_step`・`hit`（新設） |
 | `src/ndf/domains/hooks/rewake.py` | 新設 | Stop の背景で起動し、今回の応答を確かめて世代を書き、眠って確かめ直し、起こすなら終了コード 2 で終わる | `keep_cache`・`signals`・`markers`・`hooks.tables`・`relay_busy`・`adapters.transcript`（`read_tail`） | モジュール `rewake` | `run`・`_target`・`_settle`・`_wait`・`_finish`（新設） |
 | `src/ndf/domains/hooks/guards/turn.py` | 変更 | 中継の下の UserPromptSubmit で、今の起動を照らしてから起こす状態の世代を入力の時刻に書き換え（状態が無ければ世代だけの状態を作る）、起こす文の入力を中継の入力と見分ける（決定 10 の実測で決めた形） | `signals`・`keep_cache` | — | `check`（変更） |
 | `hooks/entry.py` | 変更 | `argv[3]` が `rewake` なら `rewake.run` の終了コードを返す | — | — | `main`（変更） |
@@ -87,9 +87,9 @@ plugins/ndf/
 | `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から待ちの寿命の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境、`cache.handoff` の `calls`・`count`・`start`。辞書でない・数でない値は `tables.TableError` |
 | `wake_at` | 同上 | 新設 | `wake_at(at: float, ttl: str, margin: float) -> Optional[float]` | `at + TTL_SECONDS[ttl] − margin`。`ttl` は `_settle` が補った寿命（未定のまま呼ばない）。`margin` が寿命以上なら None（5 分の寿命は起こさない） |
 | `n_max` | 同上 | 新設 | `n_max(tokens: int, q: Ratios) -> int` | `floor((w − r) × S / (r × S + d))`。0 未満にしない |
-| `n_handoff` | 同上 | 新設 | `n_handoff(tokens: int, q: Ratios) -> Optional[int]` | 引継ぎの起床の費用 `C_h = calls × r × S + count + w × start` として、`(w − r) × S < C_h` なら None。ほかは `floor(((w − r) × S − C_h) / (r × S + d)) + 1` を `n_max` で頭打ちにした値（設計の決定 5） |
+| `handoff_fits` | 同上 | 新設 | `handoff_fits(spent: float, tokens: int, q: Ratios) -> bool` | 引継ぎの起床の費用 `C_h(S) = calls × r × S + count + w × start` として、`spent + C_h(S) <= (w − r) × S`（`S` は判定の時の `tokens`）。待ちの始まりの `S` は使わない（設計の決定 5） |
 | `hit` | 同上 | 新設 | `hit(read: int, before: int, ratio: float) -> bool` | `read >= before × ratio`。`read` は起床か待ちを明けた入力の最初の呼び出しの読み出し |
-| `next_step` | 同上 | 新設 | `next_step(k: int, limit: int, handoff: Optional[int], monitors_only: bool, tokens: int, decide_from: int) -> Step` | `k + 1 > limit` → `stop`。`handoff` が None でなく `k + 1 == handoff` かつ `monitors_only` かつ `tokens >= decide_from` → `end_wait`。ほかは `wake`。`limit`・`handoff` は待ちの始まりの `S` で決めた状態の `n_max`・`n_handoff`、`tokens` は判定の時の（今回の応答の）`S` |
+| `next_step` | 同上 | 新設 | `next_step(k: int, limit: int, spent: float, monitors_only: bool, tokens: int, decide_from: int, q: Ratios) -> Step` | `k + 1 > limit` → `stop`。`monitors_only` かつ `tokens >= decide_from` かつ `handoff_fits(spent, tokens, q)` で、`k + 1 == limit` か `not handoff_fits(spent + r × tokens + d, tokens, q)`（もう 1 回起こすと収まらない）なら `end_wait`。ほかは `wake`。`limit` は待ちの始まりの `S` で決めた状態の `n_max`、`spent` は状態の累計、`tokens` は判定の時の（今回の応答の）`S` |
 
 ### 内部のデータと定数
 
@@ -126,8 +126,8 @@ plugins/ndf/
 | `opening` | 利用者の入力で始まり Tool を使った応答で `normal`（Tool の結果の行を飛ばす）、`at` が入力の行の時刻、`first_read` が入力の直後の最初の呼び出しの読み出し（最初の呼び出しの読み出し 20,000・後の Tool の呼び出しの読み出し 101,000 の見本で 20,000）。起床の文で始まった応答で `wake`。形を決められない入力・入力の行が `tail` に無い見本で `unknown` |
 | `n_max` | Opus 5.5・`1h`・`d` 2,000 で `S` 400,000 → 35、500,000 → 36、20,000 → 13。読み出し 0.1 で 400,000 → 18 |
 | `wake_at` | `1h`・余白 600 で `at + 3000`、`5m` で None |
-| `n_handoff` | Opus 5.5・`1h`・`d` 2,000・`calls` 4・`count` 25,000・`start` 60,000 で `S` 250,000 → 21（`C_h` 195,000）。`count` を 400,000 にすると None。結果が `n_max` を越える値の組では `n_max` |
-| `next_step` | `limit` 33・`handoff` 21 で `k` 19 → `wake`、`k` 20 → 監視だけ・`tokens` 250,000・`decide_from` 250,000 なら `end_wait`・`tokens` 249,999 なら `wake`、`k` 32 → `wake`、`k` 33 → `stop`。作業の子は `k` 20 でも `wake`。`handoff` None なら監視だけでも `k` 20 で `wake`。`limit` 0 → `stop`（純粋な関数の境界。`limit` を式から作る組の試験は設計のテスト設計の 5） |
+| `handoff_fits` | Opus 5.5・`1h`・`d` 2,000・`calls` 4・`count` 25,000・`start` 60,000 で、`S` 250,000・`spent` 292,500 → 真（487,500 ちょうど）、292,501 → 偽。`count` を 400,000 にすると `spent` 0 でも偽 |
+| `next_step` | 同じ値・`limit` 33 で、`tokens` 250,000 のまま `k` 19・`spent` 275,500 → `wake`、`k` 20・`spent` 290,000 → 監視だけ・`decide_from` 250,000 なら `end_wait`・`tokens` 249,999 なら `wake`。`tokens` が起床ごとに 300 増える列（`k` 20・`spent` 292,850・`tokens` 256,000）でも `end_wait`、`k` 19・`spent` 278,065・`tokens` 255,700 は `wake`。`k` 32 → `wake`、`k` 33 → `stop`。作業の子は `k` 20 でも `wake`。`count` 400,000 なら監視だけでも `k` 20 で `wake`。`limit` 0 → `stop`（純粋な関数の境界。`limit` を式から作る組の試験は設計のテスト設計の 5） |
 
 ## 起こす hook（`hooks/rewake.py`）
 
@@ -137,9 +137,9 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `run` | `src/ndf/domains/hooks/rewake.py` | 新設 | `run(argv: list[str], stdin: TextIO = sys.stdin, stderr: TextIO = sys.stderr, environ: Mapping[str, str] = os.environ, clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep) -> int` | 終了コード。起こすなら標準エラーへ文を書いて 2、ほかは 0。例外はすべて 0（Stop を壊さない）。最初に `clock()` を打ち、その値を動き始めの時刻（`started`）として `Target` に持たせる。`started` は Claude Code が hook を起動した時刻より遅れ得る（インタプリタの立ち上がり）ので、今回の応答の照らしは `started` だけに頼らず、`_settle` の取り合いの照らしを重ねる |
 | `_target` | 同上 | 新設 | `_target(payload: Mapping[str, Any], environ: Mapping[str, str]) -> Optional[Target]` | 最初に `environ` の `NDF_RELAY_REWAKE` が `1` かを確かめ、違えば None（ラッパーが登録を渡した起動でだけ渡す変数。設計の決定 7。登録の無い起動から入口を直接呼んでも眠らない）。続いて、中継の保存先（`NDF_RELAY_DIR`）・起動の ID・会話の ID・`transcript_path` がそろい、入力の `session_id` が #4049 の `signals.relay_session(environ)`（`NDF_RELAY_SESSION`）と同じで、会話の ID が UUID の形（`SESSION_ID_RE`）のときだけ `Target`（`background_tasks` を #4049 の `task_kind` で分けた作業と監視の件数、`last_assistant_message`、起動のたびに作る `hook_id`（`uuid4().hex`）・`started` を持つ）。ほかは None（入れ子の claude は `--settings` の登録を受け継がないのでこの hook が起動しない。起動しても `session_id` が違うので通らない） |
-| `_settle` | 同上 | 新設 | `_settle(t: Target, turn: LastTurn, tail: str, q_for, clock) -> Settled` | 子を止める排他を取り、その中で次を 1 つの区間で、この順に行う。(1) `signals.current_launch` が `t.launch` でなければ、世代も含めて何も書かずに `Settled(stale=True)`。(2) `bump_generation(Generation(at=turn.at, by=t.hook_id, message_id=turn.message_id))`。より新しい世代か同じ時刻の先の書き手があれば、何も書かずに `stale`。世代の `message_id` が `turn.message_id` と同じで書き手が別なら、世代の `by` を `contested` に替えるだけで、ほかは何も書かずに `stale`（同じ応答の取り合い。どちらの hook も起こさない。設計の決定 4）。(3) 状態を読み直し、寿命を決める。`turn.ttl` が在ればそれ、None なら状態の `ttl`。それも無ければ寿命は未定で、(5) と (6) の待ちの始まりを書かない。決まった寿命は状態の `ttl` に書き、未定なら `ttl` を書き換えない。以下の `turn` は寿命を補った値で、`Settled.turn` に入れて返す。(4) 起こした印があれば `wake_reply(tail, <印の ID>)` で照らす。`wake` なら `wake_result`（`hit` は `hit(Reply.first_read, <印の S>, q.hit)`、`first_read`・`calls`・`cache_read`・`cache_write_1h`・`cache_write_5m`・`output`・`priced` は `Reply`、`w_1h`・`w_5m`・`r`・`out` は待ちの寿命とモデルの倍率、`text` は印から）を書いて、当たらなければ `stopped`。`preempted` なら判じずに印を消す。`unknown` なら判じずに印を消して `wait_stop` を「起床を照らせない」にする。`truncated` なら `hit` null・`priced` 偽の `wake_result` を書いて印を消し、`stopped` も `wait_stop` も書かない。(5) 待ちがあれば `opening(tail, turn.message_id)` を打つ。`kind` が `normal` のときだけ待ちを明ける。`wait_end` の `tokens`・`ttl`・`model` は更新前の状態の `last`、`w`・`r` はその寿命とモデルの倍率、`hit` は `hit(Opening.first_read, last.tokens, q.hit)`、`cache_read` は `Opening.first_read`、`opened_at` は `Opening.at`、`age` は `Opening.at − last.at` で書き、`wait_id`・`k`・`n_max`・`n_handoff`・`wait_stop` を消す。`wake`・`unknown` なら、今の Stop が待つ子でなくても（背景の作業が 0 件でも）待ちを明けず、`k`・`n_max`・`n_handoff`・`wait_stop` を保つ（(4) で立てた「起床を照らせない」も消えない。背景の件数より、今回の応答を始めた入力の照らしを先にする）。(6) 待つ子で待ちが無く、(3) で寿命が決まったときだけ、`wait_id` を世代の時刻、`k` を 0、`n_max`・`n_handoff` を式の値にして `wait_start` を書く。寿命が未定なら、`noted` に「寿命がまだ分からない」が無いときだけ `stop_waking`（`scope` `once`）を書いて `noted` に足し、待ちを始めない。(5) で待ちを明けなかった Stop では、待ちが残るので書かない。(7) 最後に `last` を `turn` にする（`wait_end` を書いた後。寿命が未定なら `last.ttl` は None で、待ちは無い）。新しい状態・補った `turn`・起こさない理由を返す |
+| `_settle` | 同上 | 新設 | `_settle(t: Target, turn: LastTurn, tail: str, q_for, clock) -> Settled` | 子を止める排他を取り、その中で次を 1 つの区間で、この順に行う。(1) `signals.current_launch` が `t.launch` でなければ、世代も含めて何も書かずに `Settled(stale=True)`。(2) `bump_generation(Generation(at=turn.at, by=t.hook_id, message_id=turn.message_id))`。より新しい世代か同じ時刻の先の書き手があれば、何も書かずに `stale`。世代の `message_id` が `turn.message_id` と同じで書き手が別なら、世代の `by` を `contested` に替えるだけで、ほかは何も書かずに `stale`（同じ応答の取り合い。どちらの hook も起こさない。設計の決定 4）。(3) 状態を読み直し、寿命を決める。`turn.ttl` が在ればそれ、None なら状態の `ttl`。それも無ければ寿命は未定で、(5) と (6) の待ちの始まりを書かない。決まった寿命は状態の `ttl` に書き、未定なら `ttl` を書き換えない。以下の `turn` は寿命を補った値で、`Settled.turn` に入れて返す。(4) 起こした印があれば `wake_reply(tail, <印の ID>)` で照らす。`wake` なら `wake_result`（`hit` は `hit(Reply.first_read, <印の S>, q.hit)`、`first_read`・`calls`・`cache_read`・`cache_write_1h`・`cache_write_5m`・`output`・`priced` は `Reply`、`w_1h`・`w_5m`・`r`・`out` は待ちの寿命とモデルの倍率、`text` は印から）を書いて、当たらなければ `stopped`。`preempted` なら判じずに印を消す。`unknown` なら判じずに印を消して `wait_stop` を「起床を照らせない」にする。`truncated` なら `hit` null・`priced` 偽の `wake_result` を書いて印を消し、`stopped` も `wait_stop` も書かない。(5) 待ちがあれば `opening(tail, turn.message_id)` を打つ。`kind` が `normal` のときだけ待ちを明ける。`wait_end` の `tokens`・`ttl`・`model` は更新前の状態の `last`、`w`・`r` はその寿命とモデルの倍率、`hit` は `hit(Opening.first_read, last.tokens, q.hit)`、`cache_read` は `Opening.first_read`、`opened_at` は `Opening.at`、`age` は `Opening.at − last.at` で書き、`wait_id`・`k`・`n_max`・`spent`・`wait_stop` を消す。`wake`・`unknown` なら、今の Stop が待つ子でなくても（背景の作業が 0 件でも）待ちを明けず、`k`・`n_max`・`spent`・`wait_stop` を保つ（(4) で立てた「起床を照らせない」も消えない。背景の件数より、今回の応答を始めた入力の照らしを先にする）。(6) 待つ子で待ちが無く、(3) で寿命が決まったときだけ、`wait_id` を世代の時刻、`k` と `spent` を 0、`n_max` を式の値にして `wait_start` を書く。寿命が未定なら、`noted` に「寿命がまだ分からない」が無いときだけ `stop_waking`（`scope` `once`）を書いて `noted` に足し、待ちを始めない。(5) で待ちを明けなかった Stop では、待ちが残るので書かない。(7) 最後に `last` を `turn` にする（`wait_end` を書いた後。寿命が未定なら `last.ttl` は None で、待ちは無い）。新しい状態・補った `turn`・起こさない理由を返す |
 | `_wait` | 同上 | 新設 | `_wait(t: Target, gen: Generation, until: float, interval: float, clock, sleep) -> bool` | `until` まで `interval` ごとに世代だけを読み、自分のままなら真。会話の記録は読まない |
-| `_finish` | 同上 | 新設 | `_finish(t: Target, gen: Generation, turn: LastTurn, stderr: TextIO, clock) -> int` | 子を止める排他を取り、その中で 世代（`by` が自分か。`contested` なら外れ）・起動・質問のファイル を照らし、外れたら何も書かずに 0。そろえば状態を読み直して `next_step(k, n_max, n_handoff, monitors_only, turn.tokens, decide_from)` で手を決める。`stop` なら `wait_stop` を「上限」にして `stop_waking`（`scope` `wait`）を書いて 0。`wake`・`end_wait` なら設計の決定 6 の順で (1) 中継の入力の印（決定 10 でマーカーの形のとき） (2) 起こした印（`wake_id`）・`k + 1`・世代（起こした時刻）・`end_wait` なら `stopped` に「引継ぎを求めた」 (3) `wake` の行 を書き、文を出して 2 |
+| `_finish` | 同上 | 新設 | `_finish(t: Target, gen: Generation, turn: LastTurn, stderr: TextIO, clock) -> int` | 子を止める排他を取り、その中で 世代（`by` が自分か。`contested` なら外れ）・起動・質問のファイル を照らし、外れたら何も書かずに 0。そろえば状態を読み直して `next_step(k, n_max, spent, monitors_only, turn.tokens, decide_from, q)` で手を決める。`stop` なら `wait_stop` を「上限」にして `stop_waking`（`scope` `wait`）を書いて 0。`wake`・`end_wait` なら設計の決定 6 の順で (1) 中継の入力の印（決定 10 でマーカーの形のとき） (2) 起こした印（`wake_id`）・`k + 1`・`spent + r × turn.tokens + d`・世代（起こした時刻）・`end_wait` なら `stopped` に「引継ぎを求めた」 (3) `wake` の行 を書き、文を出して 2 |
 
 内部の型（どれも `NamedTuple`）:
 
@@ -184,8 +184,8 @@ plugins/ndf/
 
 | 出来事 | 出力先 | 項目 |
 | --- | --- | --- |
-| 待ちの始まり | `cache-log.jsonl` | `kind: wait_start`・`wait_id`・`tokens`・`ttl`・`model`・`n_max`・`n_handoff` |
-| 起こした | 同上 | `kind: wake`・`wait_id`・`wake_id`（`uuid4().hex`。状態の `pending` にも置く）・`tokens`・`age`・`k`・`n_max`・`n_handoff`・`text`（`wake`・`end_wait`） |
+| 待ちの始まり | `cache-log.jsonl` | `kind: wait_start`・`wait_id`・`tokens`・`ttl`・`model`・`n_max` |
+| 起こした | 同上 | `kind: wake`・`wait_id`・`wake_id`（`uuid4().hex`。状態の `pending` にも置く）・`tokens`・`age`・`k`・`n_max`・`spent`（この起床を足した後）・`text`（`wake`・`end_wait`） |
 | 起きた応答 | 同上 | `kind: wake_result`・`wait_id`・`wake_id`・`text`（印から）・`hit`（最初の呼び出しの読み出しで決める。`truncated` なら null）・`tokens`（印の `S`）・`first_read`・`calls`・`cache_read`・`cache_write_1h`・`cache_write_5m`・`output`（起床に属する全呼び出しの合計。`priced` が偽なら `cache_write_1h`・`cache_write_5m` を書かない）・`priced`・`model`・`ttl`（待ちの寿命）・`w_1h`・`w_5m`・`r`・`out` |
 | 待ちの終わり | 同上 | `kind: wait_end`・`wait_id`・`opened_at`（待ちを明けた入力の行の時刻）・`age`（`opened_at − last.at`）・`k`・`hit`（待ちを明けた最初の呼び出しの読み出しが `tokens` の `cache.hit.ratio` 以上か）・`cache_read`（その読み出し）・`tokens`・`ttl`・`model`（どれも更新前の状態の `last`。待ちの終わりの直前の応答）・`w`・`r`（`last.ttl` の書き込みの倍率と `last.model` の読み出しの倍率）。待ちを明けた応答の書き込み・出力は書かない（設計の決定 15） |
 | やめた・一時的に起こさなかった | 同上 | `kind: stop_waking`・`wait_id`・`reason`・`scope`（`session`・`wait`・`once`）・`k`・`n_max` |
@@ -208,8 +208,8 @@ plugins/ndf/
 | 関数 | 観点 |
 | --- | --- |
 | `run` | `NDF_RELAY_REWAKE` の無い環境（登録の無い起動から入口を直接呼んだ）では、中継の保存先・起動・会話の ID がそろっていても、眠りの関数 0 回・状態と記録の読み取り 0 回で 0。中継の保存先の変数なしで眠りの関数 0 回・記録の読み取り 0 回で 0。`session_id` が `NDF_RELAY_SESSION` と違う入力・UUID の形でない会話の ID では、状態を読まず書かずに 0。状態も待ちも無い Stop で読み取り 0 回。待つ子で 3,000 秒後に 2、標準エラーに起こす文。眠る間に新しい Stop・UserPromptSubmit で世代が替わると 0。古い応答の時刻を持つ Stop の hook が guard の後に動くと、世代を戻さず何も書かずに 0。質問のファイルが在ると 0。2 つの hook を同じ時刻まで眠らせても 2 は 1 つ。完全な前の応答だけが残り `last_assistant_message` が違う入力では、眠りの関数 0 回・`stopped` 無しで 0。起こす時点が過去になる見本でも 0。作業 1 件の Stop の hook の `started` の後に、作業 0 件の Stop の同じ文の応答が記録された見本では、古い hook が世代も状態も書かずに 0 で、新しい hook が作業 0 件で決める（その応答は起床の文で始まったので、待ちを明けず眠らない）。古い hook の `started` をその応答の時刻より後にずらした見本（動き始めが遅れた）では、古い hook と新しい hook のどちらを先に流しても世代が `contested` になり、2 は 0 個。末尾の読み取りは `read_tail` を 1 回だけ呼び、大きさは差し替えた `hook.transcript-tail` の値 |
-| `_settle` | 起こす文から始まった応答の最初の呼び出しの読み出しが前の `S` の 0.89 倍で `stopped`、0.9 倍で `hit`。最初の呼び出しの書き込みが両方 0 でも `wake_result` が 1 行で、`hit` は読み出しで決まる。Tool を使った引継ぎの起床で `wake_result` の `cache_read`・`cache_write_1h`・`cache_write_5m`・`output` が全呼び出しの合計で、`w_1h`・`w_5m` を持つ。寿命別の項目の欠けた呼び出しを含む起床で `priced` 偽・2 つの合計が無い。`wake_reply` が `truncated` の見本で `hit` null・`priced` 偽の `wake_result` が 1 行、印が消え、`stopped` も `wait_stop` も無い。印の直後の入力が通常の入力なら判じない。形を決められなければ判じず `wait_stop` を立て、同じ Stop で `wait_end` も `wait_start` も書かず、`k`・`n_max`・`wait_stop` が残る。その Stop の作業も監視も 0 件（待つ子でない）でも同じで、`wait_end` を書かない。続く Stop で `opening` が `wake`・`unknown` の間も、背景の件数に依らず残り、`normal` の Stop で初めて `wait_end`。通常の入力で始まった待ちの後の Stop で `wait_end` が 1 行で、`tokens`・`ttl`・`model`・`w`・`r` が更新前の `last`（1 時間・Opus 5.5・100,000 の `last` と、5 分へ書いた別のモデルの今回の応答の見本で 100,000・`1h`・Opus 5.5・2.0・0.05）、`cache_read` と `hit` が待ちを明けた最初の呼び出し（最初が 20,000・後の Tool の呼び出しが 101,000 の見本で 20,000・偽）、`opened_at` が入力の行の時刻（Stop の時刻でない）。`wait_end` の後に `last` が今回の応答になる。`wait_end` の後の待つ子の Stop で `k` 0・`n_max`・`n_handoff` を決め直した `wait_start`。寿命: `turn.ttl` が None で状態の `ttl` が `1h` なら `1h` で待ちを始め、状態にも無ければ `wait_start` も `n_max` も無く、`stop_waking`（`once`）が会話で 1 行、状態の `ttl` は書き換わらない。`turn.ttl` が `1h` なら状態の `ttl` が `5m` でも `1h`。排他の外の読み取りの後に別の hook が状態の `ttl` を `1h` にした順で、`_settle` は `1h` で補う。同じ `message.id` の世代を別の hook が持つ状態で打つと、世代の `by` が `contested` になり、ほかは何も変わらない。新しい世代がある状態で打つと、`pending`・`wait_stop`・起こす記録のどれも変えない。`current_launch` が別の起動の状態で打つと、世代も含めて何も変えない（世代が新しい時刻でも） |
-| `_finish` | `n_handoff` の回の `end_wait` の後の Stop で、次の待ちでも起こさない。世代が `contested` の状態で眠りから戻ると、何も書かずに 0。上限の `stop` は `wait_stop` だけを書き、`stopped` を書かない。新しい世代がある状態で眠りから戻ると、上限でも `wait_stop`・`stop_waking` を書かない。マーカーが書けない順で状態も記録も変わらず 0、状態が書けない順でマーカーが消えて 0 |
+| `_settle` | 起こす文から始まった応答の最初の呼び出しの読み出しが前の `S` の 0.89 倍で `stopped`、0.9 倍で `hit`。最初の呼び出しの書き込みが両方 0 でも `wake_result` が 1 行で、`hit` は読み出しで決まる。Tool を使った引継ぎの起床で `wake_result` の `cache_read`・`cache_write_1h`・`cache_write_5m`・`output` が全呼び出しの合計で、`w_1h`・`w_5m` を持つ。寿命別の項目の欠けた呼び出しを含む起床で `priced` 偽・2 つの合計が無い。`wake_reply` が `truncated` の見本で `hit` null・`priced` 偽の `wake_result` が 1 行、印が消え、`stopped` も `wait_stop` も無い。印の直後の入力が通常の入力なら判じない。形を決められなければ判じず `wait_stop` を立て、同じ Stop で `wait_end` も `wait_start` も書かず、`k`・`n_max`・`wait_stop` が残る。その Stop の作業も監視も 0 件（待つ子でない）でも同じで、`wait_end` を書かない。続く Stop で `opening` が `wake`・`unknown` の間も、背景の件数に依らず残り、`normal` の Stop で初めて `wait_end`。通常の入力で始まった待ちの後の Stop で `wait_end` が 1 行で、`tokens`・`ttl`・`model`・`w`・`r` が更新前の `last`（1 時間・Opus 5.5・100,000 の `last` と、5 分へ書いた別のモデルの今回の応答の見本で 100,000・`1h`・Opus 5.5・2.0・0.05）、`cache_read` と `hit` が待ちを明けた最初の呼び出し（最初が 20,000・後の Tool の呼び出しが 101,000 の見本で 20,000・偽）、`opened_at` が入力の行の時刻（Stop の時刻でない）。`wait_end` の後に `last` が今回の応答になる。`wait_end` の後の待つ子の Stop で `k` 0・`spent` 0・`n_max` を決め直した `wait_start`。寿命: `turn.ttl` が None で状態の `ttl` が `1h` なら `1h` で待ちを始め、状態にも無ければ `wait_start` も `n_max` も無く、`stop_waking`（`once`）が会話で 1 行、状態の `ttl` は書き換わらない。`turn.ttl` が `1h` なら状態の `ttl` が `5m` でも `1h`。排他の外の読み取りの後に別の hook が状態の `ttl` を `1h` にした順で、`_settle` は `1h` で補う。同じ `message.id` の世代を別の hook が持つ状態で打つと、世代の `by` が `contested` になり、ほかは何も変わらない。新しい世代がある状態で打つと、`pending`・`wait_stop`・起こす記録のどれも変えない。`current_launch` が別の起動の状態で打つと、世代も含めて何も変えない（世代が新しい時刻でも） |
+| `_finish` | 起こすたびに `spent` が判定の時の `S` の `r × S + d` だけ増える。`end_wait` の後の Stop で、次の待ちでも起こさない。世代が `contested` の状態で眠りから戻ると、何も書かずに 0。上限の `stop` は `wait_stop` だけを書き、`stopped` を書かない。新しい世代がある状態で眠りから戻ると、上限でも `wait_stop`・`stop_waking` を書かない。マーカーが書けない順で状態も記録も変わらず 0、状態が書けない順でマーカーが消えて 0 |
 
 ## hook の登録（`registration`・`runtimes.json`・`entry.py`）
 
@@ -226,7 +226,7 @@ plugins/ndf/
   | `p95_ms` | 500（待つ子でない Stop で終わるまで） |
   | `inject_chars` | 1,000（起こす文の長さの上限） |
 
-- `budget` に `rewake_budget(runtime, event, limits=None) -> Optional[Budget]` を足す。事象の行の `async_rewake.budget` から `hook.budget.<名前>` を引く（`policy_name` と同じくランタイム別の行を先に見る）。`async_rewake` の無い事象は None
+- `budget` に `rewake_budget(runtime, event, limits=None) -> Optional[Budget]` を足す。事象の行（`tables.event_spec(runtime, event)` の `spec`）の `async_rewake.budget` から、`tables.policy(f"hook.budget.{spec['async_rewake']['budget']}")` で引く（式の綴りは「読み手の突き合わせ」の動的な読み口の `expr` と同じにする）。`async_rewake` の無い事象は None
 - `registration.rewake_entry(runtime: str, event: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, Any]` を足す。返す値は次の形である
   - `{"type": "command", "command": <command>, "asyncRewake": true, "timeout": <rewake_budget の timeout>}`
   - `<command>` は今の command と同じ文で、プラグインの根を環境変数でなく plugin_root の絶対パス（shlex.quote）にし、末尾に rewake を足したもの
@@ -300,7 +300,7 @@ plugins/ndf/
 
 | ファイル | 形（`summary`・`read_by` を除く） | `read_by` |
 | --- | --- | --- |
-| `cache.wake.json` | `{"seconds": 600, "interval": 60}` | `ndf.domains.hooks.rewake` |
+| `cache.wake.json` | `{"seconds": 600, "interval": 60}` | `ndf.domains.relay.keep_cache`（`ratios` の中で方針の名前を文字列リテラルで書いて `get` を呼ぶ。下の「読み手の突き合わせ」） |
 | `cache.write-ratio.json` | `{"ratios": {"1h": 2.0, "5m": 1.25}}` | 同上 |
 | `cache.read-ratio.json` | `{"default": 0.1, "ratios": {"claude-opus-5-5": 0.05, "claude-sonnet-5-5": 0.05, "claude-fable-5-1": 0.025, "claude-fable-5-2": 0.025, "claude-mythos-5-1": 0.025, "claude-mythos-5-2": 0.025}}` | 同上 |
 | `cache.output-ratio.json` | `{"default": 5}` | 同上 |
@@ -308,7 +308,7 @@ plugins/ndf/
 | `cache.hit.json` | `{"ratio": 0.9}` | 同上 |
 | `cache.handoff.json` | `{"calls": 4, "count": 25000, "start": 60000}` | 同上 |
 | `cache.rewake.json` | `{"versions": []}`（実装の最初の実測の後に、通った版を一覧に書く。新しい版は測り直して通ってから一覧に足す） | `ndf.domains.relay.wrapper` |
-| `hook.budget.stop-rewake.json` | 今の `hook.budget.*` の形で `timeout` 3,300 | `ndf.domains.hooks.budget`・`ndf.domains.hooks.registration` |
+| `hook.budget.stop-rewake.json` | 今の `hook.budget.*` の形で `timeout` 3,300 | `ndf.domains.hooks.budget`（`rewake_budget` の動的な読み口。`registration` は `rewake_budget` を呼ぶだけで方針を引かない） |
 
 `limits.schema.json` の方針の形と、`contracts/limits.py` の `Policy` に、次の項目を足す。
 
@@ -328,6 +328,19 @@ plugins/ndf/
 | 起こす hook（`rewake`・`keep_cache.ratios` へ渡す） | `hooks/tables.policy_value(name, key)`（今のまま。方針の 1 つの値を JSON のまま返す） | `ratios` は `dict[str, float]`、`versions` は `list[str]`、ほかは数 |
 | 集計（`cli_cache`） | 読まない。起こす hook が `tables.policy_value` で読んで行に書いた倍率（`w_1h`・`w_5m`・`w`・`r`・`out`）を使う | — |
 | ラッパー（`wrapper._start`） | 新設の `contracts/limits.texts(name, key) -> tuple[str, ...]`（版の一覧を返す API はこの名前だけ。`text` は作らない） | `tuple[str, ...]`（`versions`） |
+
+### 読み手の突き合わせ（規則 `limit-readers`）
+
+`ndf check` の規則 `limit-readers`（`src/ndf/checks/limits_readers.py`）は、方針の `read_by` と、方針を引く読み口（`src/ndf/checks/rules.json` の `limits`）の呼び手を突き合わせる。新しい読み口と読み手は、次のとおり `rules.json` と `read_by` に足す。
+
+| 引く箇所 | `rules.json` の `limits` に足す行 | 読み手に数えるモジュール（`read_by`） |
+| --- | --- | --- |
+| ラッパーの版の一覧（`limits.texts("cache.rewake", "versions")`） | `readers` に `"ndf.contracts.limits.texts": {"arg": "name", "index": 0}`（`value`・`seconds` と同じ形） | `ndf.domains.relay.wrapper`（`cache.rewake`） |
+| `keep_cache.ratios` の中の `get("cache.write-ratio", "ratios")` など | `readers` に `"ndf.domains.relay.keep_cache.ratios.get": {"arg": "name", "index": 0}`（引数で受けた読み口。前例は `ndf.domains.relay.context_thresholds.thresholds.value`） | `ndf.domains.relay.keep_cache`（方針の名前を文字列リテラルで書く `ratios` のモジュール。`cache.wake`・`cache.write-ratio`・`cache.read-ratio`・`cache.output-ratio`・`cache.wake-cost`・`cache.hit`・`cache.handoff`）。`rewake` は `tables.policy_value` を関数のまま渡すだけで、方針の名前を書かないので読み手に数えない |
+| 末尾の大きさ（`rewake` の `tables.policy_value("hook.transcript-tail", "count")`） | 足さない（`tables.policy_value` は今の読み口） | `ndf.domains.hooks.rewake` を `hook.transcript-tail` に足す |
+| 背景の予算（`budget.rewake_budget` の `tables.policy(f"hook.budget.{spec['async_rewake']['budget']}")`） | `dynamic` に `{"at": "ndf.domains.hooks.budget.rewake_budget", "expr": "f\"hook.budget.{spec['async_rewake']['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/claude/events/Stop/async_rewake/budget", "reason": "背景の登録の予算を、ランタイムのコントラクト表の async_rewake の予算のキーから引く"}`。語彙は `*` を使わずに Stop の行を指す（`async_rewake` を持たない事象で語彙を引けずに検査が止まらないように）。今の `_budget_policy` の行の語彙（`events/*/budget`）は変えない | `ndf.domains.hooks.budget`（`hook.budget.stop-rewake`） |
+
+`keep_cache.ratios` と `rewake_budget` の中で方針の名前を引く式は、上の表の `expr` と同じ綴りで書く（綴りが違えば規則が読み口を解けない）。実装の完了の条件に、方針のファイルを差し替えるテスト（下）に加えて、`ndf check` の規則 `limit-readers` が破れ 0 件で通ること（PR の CI の検査）を入れる。
 
 `limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、差し替えた `contracts/limits/` の方針のファイル（`cache.write-ratio.json`・`cache.read-ratio.json`・`cache.handoff.json`・`cache.rewake.json`）を入口にして、次の 4 つが差し替えた値どおりになることを確かめる。
 
