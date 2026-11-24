@@ -478,7 +478,9 @@ def _answer(args: argparse.Namespace) -> dict:
     except (KeyError, TypeError, ValueError):
         return _refused_answer(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
     if not held.same(now):
-        return _refused_answer(f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number)
+        return _refused_answer(
+            f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number
+        )
     row = merge_approval.MergeRow(
         str(answer),
         merge_approval.USER_BY,

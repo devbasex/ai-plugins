@@ -104,7 +104,9 @@ def migration_drafts(v: View) -> list[model.EventDraft]:
     order = _new_order(v)
     if order is None:
         return []
-    moved = model.EventDraft(DEFINITION_MIGRATED, ACTOR, None, reason="クリーンアップをデプロイの後へ移した", payload={"order": order}, rev=v.rev)
+    moved = model.EventDraft(
+        DEFINITION_MIGRATED, ACTOR, None, reason="クリーンアップをデプロイの後へ移した", payload={"order": order}, rev=v.rev
+    )
     cleanup = next(s.name for s in v.snap.stages if s.id == CLEANUP_STAGE_ID)
     row = v.rows.get(cleanup)
     if row is None or row.state != FAILED:

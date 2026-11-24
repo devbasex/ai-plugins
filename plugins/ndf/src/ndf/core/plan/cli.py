@@ -64,7 +64,9 @@ def _exit_with(out: dict[str, Any]) -> NoReturn:
 
 def _cmd_next(a: argparse.Namespace) -> int:
     if a.by is not None and not actors.ACTORS.match(a.by):
-        return result.emit(result.stopped(TOOL, "invalid", f"回答した者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）"))
+        return result.emit(
+            result.stopped(TOOL, "invalid", f"回答した者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）")
+        )
     root = _root()
     cwd = Path.cwd()
     try:

@@ -33,6 +33,7 @@ from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLim
 from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
 from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, RuleFacts, Verified
+
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import BYPASS_ORDER as BYPASS_ORDER
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
@@ -293,16 +294,22 @@ def _file_at(repo: dict, key: str) -> FileAt:
 
 def _verified(repo: dict) -> Verified:
     node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
-    return Verified(text_of(node.get("baseRefName")), text_of(node.get("headRefOid")), text_of(repo.get("nameWithOwner")), _file_at(repo, "config"))
+    return Verified(
+        text_of(node.get("baseRefName")), text_of(node.get("headRefOid")), text_of(repo.get("nameWithOwner")), _file_at(repo, "config")
+    )
 
 
 def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
     """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD・ベースリポジトリが違えば `refused`。
     設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を足さない）。送ってよければ None。"""
     if fresh.base != expect.base:
-        return MergeOutcome(False, "refused", f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head)
+        return MergeOutcome(
+            False, "refused", f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
+        )
     if not git.sha_matches(expect.head, fresh.head):
-        return MergeOutcome(False, "refused", f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
+        return MergeOutcome(
+            False, "refused", f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head
+        )
     if not same_repo(fresh.repo, repo):
         return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
     if fresh.config.oid != expect.config_oid:
@@ -835,7 +842,9 @@ class GitHub:
         if chosen is None:
             return _method_refusal(pull, number, method, allowed)
         if expect is not None:
-            fresh = _verified(self.repository(github_merge.VERIFY_QUERY, {"number": int(number), "expr": f"{expect.base}:{expect.config_path}"}))
+            fresh = _verified(
+                self.repository(github_merge.VERIFY_QUERY, {"number": int(number), "expr": f"{expect.base}:{expect.config_path}"})
+            )
             stop = _verify(number, fresh, expect, self.repo)
             if stop is not None:
                 return stop
@@ -852,7 +861,9 @@ class GitHub:
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
-    def _enqueue(self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None) -> Optional[MergeOutcome]:
+    def _enqueue(
+        self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None
+    ) -> Optional[MergeOutcome]:
         """基底がマージキューを持てば PR を HEAD のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。

@@ -626,7 +626,11 @@ def test_pick_merge_method(declared: str | None, allowed: list[str], chosen: str
 
 def test_merge_methods_keep_their_order_and_landing_checks() -> None:
     # 現状固定: 設定が無いときに選ぶ順と、方式ごとの「基底に含まれたか」の確かめ方
-    assert list(github_merge.MERGE_METHODS.items()) == [("squash", github_merge.MERGED), ("merge", github_merge.ANCESTRY), ("rebase", github_merge.MERGED)]
+    assert list(github_merge.MERGE_METHODS.items()) == [
+        ("squash", github_merge.MERGED),
+        ("merge", github_merge.ANCESTRY),
+        ("rebase", github_merge.MERGED),
+    ]
 
 
 def _allowed(rules: object, settings: object, branch: str = "develop") -> tuple[list[str], list[str]]:
