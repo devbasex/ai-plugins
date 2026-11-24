@@ -417,17 +417,24 @@ def record_start(directory: Path, launch: str, session_id: str, wait: float) -> 
 def record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool:
     """`record_start` と同じ排他の中で、今の起動の記録の作業の件数を保ったまま監視を 1 件以上にする。書けなければ偽（#4049）。
 
+    既に監視が記録されていれば、排他を取らずに真を返す（書くものが無い監視の開始を、排他の競合で遅らせない）。
     記録が無ければ書かない（作業の件数が分からないので、0 件と書くとラッパーが作業を抱えた子を止めうる）。
     """
+    if _has_monitors(read_busy(directory, launch, session_id)):
+        return True
     try:
         with held(directory / STOP_LOCK, wait) as got:
             found = read_busy(directory, launch, session_id) if got and current_launch(directory) == launch else None
             if found is None:
                 return False
-            count, source, _at, monitors = found
-            return monitors > 0 or write_busy(directory, launch, session_id, count, source, 1)
+            return _has_monitors(found) or write_busy(directory, launch, session_id, found[0], found[1], 1)
     except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返す（監視の開始は止めない）
         return False
+
+
+def _has_monitors(found: Optional[tuple[int, str, str, int]]) -> bool:
+    """`read_busy` の返りが監視を 1 件以上持つか。"""
+    return found is not None and found[3] > 0
 
 
 def read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str, int]]:

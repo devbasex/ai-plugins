@@ -57,7 +57,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: str, session_id: str, count: int, source: str, monitors: int = 0) -> bool` | `busy-<launch>.json` を `{"launch", "session_id", "count", "monitors", "source", "at"}` で置き換え（`count` は作業の件数、`monitors` は監視の件数）、書けたら真 |
 | `record_start` | 同上 | 新設 | `record_start(directory: Path, launch: str, session_id: str, wait: float) -> bool` | 子を止める排他 `STOP_LOCK` を `wait` 秒まで待って取り、その中で今の起動が `launch` のときだけ `write_busy(…, 1, "start")` を打ち、書けたら真 |
-| `record_monitor` | 同上 | 新設 | `record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool` | `record_start` と同じ排他の中で、今の起動が `launch` で記録があるときだけ、`count` と `source` を保って `monitors` を 1 以上にする。書けなければ偽 |
+| `record_monitor` | 同上 | 新設 | `record_monitor(directory: Path, launch: str, session_id: str, wait: float) -> bool` | `record_start` と同じ排他の中で、今の起動が `launch` で記録があるときだけ、`count` と `source` を保って `monitors` を 1 以上にする（排他の中で読み直した値を使う）。既に `monitors` が 1 以上なら排他を取らずに真。書けなければ偽 |
 | `read_busy` | 同上 | 新設 | `read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str, int]]` | `busy-<launch>.json` が今の起動・今の会話の記録で形が合えば `(count, source, at, monitors)`（`monitors` が無ければ 0）、ほかは None（不明） |
 | `drop_other_busy` | 同上 | 新設 | `drop_other_busy(directory: Path, launch: str) -> None` | `busy-*.json` のうち `launch` のもの以外を消す |
 | `relay_session` | 同上 | 新設 | `relay_session(env: Mapping[str, str]) -> Optional[str]` | 環境の `NDF_RELAY_SESSION`。無い・空なら None |
