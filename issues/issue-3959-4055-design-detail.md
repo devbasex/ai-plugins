@@ -43,12 +43,15 @@ plugins/ndf/
 ├── src/ndf/progress/gate/checks.py             … MvvFacts.review_holds・check_review_holds・区分ごとの検査・note
 ├── src/ndf/progress/gate/asking.py             … プランの承認資料に「MVV 判定」の節（mvv_lines）
 ├── src/ndf/progress/gate/entry.py              … present が承認資料を書く前に PR の今の head を読む
+├── src/ndf/progress/gate/answering.py          … github_observe が今の head の資料のハッシュを返す
+├── src/ndf/progress/store.py                   … 保存先の閲覧範囲を限る・限れない保存先では mvv_gate の自由記述を伏せて書く
 ├── src/ndf/progress/stage_inputs.py *          … stage_inputs_of（ID から判定のステップの入力。リポジトリを照合する）
 ├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・hold_checked・mvv_skip・mvv_answer_void（リリース承認ゲートと、保留を確かめていない判定で省かない）
 ├── src/ndf/progress/run.py                     … _running_move・_consume が数えない service:mvv の回答を読まず、それで済んだ承認ゲートを開き直す
 ├── src/ndf/progress/gate/records.py            … approved_head が区分の外の service:mvv の回答を承認にしない
 ├── contracts/domains/ndf-files.json            … 診断の記録 mvv-gate-failures の行
 ├── contracts/schemas/internal/mvv-gate-failure.schema.json * … 診断の記録の行の形
+├── contracts/schemas/internal/mvv-validation.schema.json     … mvv-review の行に任意の欄 defer
 ├── src/ndf/contracts/internal.py               … 記録の種類 mvv-gate-failure
 ├── src/ndf/adapters/publish.py                  … 秘密を含む参照を公開範囲の照会へ送らず伏せる・秘密と参照の重なる範囲を 1 回で伏せる
 ├── src/ndf/adapters/run_log.py                  … secret_spans（秘密の一致範囲）
@@ -59,6 +62,7 @@ plugins/ndf/
 │   └── cli.py                                   … cmd_run が record_failed を渡す
 └── tests/
     ├── adapters/test_publish.py
+    ├── adapters/test_cli_run_log.py
     ├── domains/records/test_mvv_gate.py
     ├── domains/records/test_mvv_review_holds.py *
     ├── domains/records/test_mvv_cite.py *
@@ -100,6 +104,7 @@ plugins/ndf/
 | `src/ndf/adapters/run_log.py` | 変更 | 秘密の伏せ字 | — | — | `secret_spans`（新設。秘密の一致範囲を返し、`redact` もそれで置き換える） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv` | `Outcome`（変更） | `_summary`・`_record_mvv`（変更。状態ファイルへ書く原因を伏せる） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | — | `Journal`（変更） | `apply_fix`（見送りの区分 `defer` を持つ） |
+| `contracts/schemas/internal/mvv-validation.schema.json` | 変更 | MVV の記録の行の形 | — | — | 種類 `mvv-review` の行に任意の欄 `defer`（`needs_user`・`filed`・`not_applicable`）。知らない欄を拒むので、足さないと `record_review` が書けない（「レビューの保留」） |
 | `contracts/data/review-criteria.json` | 変更 | 指摘の基準の文 | — | — | 見送りの区分の選び方 |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `finish`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `finish_decide` | モジュール | `cmd_run`（変更） |
