@@ -91,8 +91,9 @@ plugins/ndf/
 
 `reading.check` の手順:
 
-1. 記録に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決める（hook と同じ設定を読む）。fetch が失敗しても続け、記録に PR が無ければ fetch しない
-2. `GitHub.pulls` で、記録の PR と承認する PR の head をまとめて読み、`missing` に渡す
+1. `heads` を空にして `missing` を呼ぶ。足りないもの（`no_record`・`no_pr`）があるか、使う記録の行に PR が無ければ、fetch も GitHub の読み取りもせずに、その結果を返す
+2. 使う記録の行に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決める（hook と同じ設定を読む）。fetch が失敗しても続ける
+3. `GitHub.pulls` で、使う記録の行の PR の head をまとめて読み、`missing` に渡す（1 で、承認する PR がすべてこの行にあることを確かめてある）
 
 | 語 | 条件 |
 | --- | --- |

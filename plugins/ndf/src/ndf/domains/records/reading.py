@@ -100,7 +100,7 @@ def rows() -> list[dict[str, Any]]:
 def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]:
     """承認の手順用: 質問を出す前に足りないもの（`reading_decide.missing`）。PR の今の head は GitHub から読む。
 
-    後で動く hook が新しい head と比べられるように、先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
+    記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
     GitHub を読めなければ `GitHubError`。
     """
     _require_keys(entry, CHECK_KEYS)
@@ -110,15 +110,14 @@ def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -
     git = Git(root)
     repo, found = git.remote_repo(), rows()
     row = rd.used_row(key, repo, found)
-    recorded = row["prs"] if row is not None else []
-    if recorded:
-        remote = git.remote()
-        git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in recorded))
-    numbers = {*prs, *(pr["number"] for pr in recorded)}
-    heads: dict[int, str] = {}
-    if numbers:
-        heads = {n: pull.head_sha for n, pull in hub(root).pulls(numbers).items() if pull is not None}
-    return rd.missing(key, repo, found, heads, prs)
+    short = rd.missing(key, repo, found, {}, prs)
+    if short or row is None or not row["prs"]:
+        return short
+    remote = git.remote()
+    git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in row["prs"]))
+    # 足りないものが無いので、承認する PR はすべて記録の行にある
+    pulls = hub(root).pulls({pr["number"] for pr in row["prs"]})
+    return rd.missing(key, repo, found, {n: pull.head_sha for n, pull in pulls.items() if pull is not None}, prs)
 
 
 def _key(questions: Any) -> str:

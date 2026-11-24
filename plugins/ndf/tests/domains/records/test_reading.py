@@ -199,17 +199,29 @@ def test_rows_stop_on_a_newer_version(repo: Path) -> None:
 # --- 承認の手順の確かめ ---------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("head", "prs", "words"), [(HEAD, [7], []), (MOVED, [7], [rd.HEAD_MOVED]), (HEAD, [7, 8], ["no_pr"])])
+@pytest.mark.parametrize(("head", "words"), [(HEAD, []), (MOVED, [rd.HEAD_MOVED])])
 def test_check_compares_with_the_heads_on_github(
-    head: str, prs: list[int], words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
+    head: str, words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
 ) -> None:
     reading.add(ENTRY, repo)
-    asked = _hub(monkeypatch, {7: head, 8: HEAD})
-    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
-    assert asked == [{7, *prs}]
+    asked = _hub(monkeypatch, {7: head})
+    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
+    assert asked == [{7}]
     assert fetched == [("origin", "+refs/heads/design/x:refs/remotes/origin/design/x")]
     assert [i["missing"] for i in got["items"]] == words
     assert (code == 0) is (words == []) and ("cause" not in got or got["cause"]["kind"] == "precondition")
+
+
+@pytest.mark.parametrize(("recorded", "prs", "word"), [(False, [7], rd.NO_RECORD), (True, [7, 8], "no_pr")])
+def test_check_returns_what_the_record_lacks_without_reading_github(
+    recorded: bool, prs: list[int], word: str, repo: Path, capsys, last_result, monkeypatch, fetched
+) -> None:
+    if recorded:
+        reading.add(ENTRY, repo)
+    asked = _hub(monkeypatch, {7: HEAD, 8: HEAD})
+    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
+    assert got["items"] == [{"missing": word}] and got["cause"]["kind"] == "precondition"
+    assert (asked, fetched) == ([], [])
 
 
 def test_check_without_a_pull_request_does_not_read_github(repo: Path, capsys, last_result, monkeypatch, fetched) -> None:
