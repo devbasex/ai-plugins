@@ -96,13 +96,13 @@ def select(found: Sequence[Target], seen: Inspection) -> Selection:
     for t in found:
         if t.path not in seen.regular:
             if t.kind != "plan" or t.path in seen.present:
-                skipped.append(f"{t.path}: {seen.excluded.get(t.path, '通常ファイルでない')}")
+                skipped.append(f"{t.path}: {seen.excluded[t.path]}")
             continue
         if t.kind == "plan":
             if t.path in seen.unreadable:
                 skipped.append(f"{t.path}: {seen.unreadable[t.path]}")
                 continue
-            if not omits_design(seen.plans.get(t.path, "")):
+            if not omits_design(seen.plans[t.path]):
                 continue
         targets.append(t)
     return Selection(tuple(targets), tuple(skipped))

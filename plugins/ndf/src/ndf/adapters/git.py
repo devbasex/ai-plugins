@@ -253,6 +253,19 @@ class Git:
             raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
         return sha
 
+    def commit_or_none(self, ref: str) -> Optional[str]:
+        """参照のコミットの完全な SHA。参照を読めなければ None（`rev-parse` の終了コード 1）、git の失敗は `GitError`（#4337）。"""
+        args = ("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}")
+        done = self.attempt(*args)
+        if done.returncode == 1:
+            return None
+        if done.returncode != 0:
+            raise _failed(args, done.returncode, done.stderr)
+        sha = done.stdout.strip()
+        if not FULL_SHA.match(sha):
+            raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
+        return sha
+
     def blobs(self, *names: str) -> list[Optional[bytes]]:
         """blob の元のバイト列を、何件でも git を 1 回だけ起動して `names`（`<コミット>:<パス>` か id）の順に返す。無い・blob でないものは None。"""
         rest = self.run_bytes("cat-file", "--batch", stdin="".join(f"{n}\n" for n in names).encode("utf-8"))
