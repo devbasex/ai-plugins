@@ -288,7 +288,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_drop_inputs` | `domains/crossreview/drive.py` | 新設 | `_drop_inputs(run: _Run) -> None` | `run.input_dir` があれば消す（`shutil.rmtree(…, ignore_errors=True)`）。`drive` の終わりに、止まったときも含めて呼ぶ |
 | `_write_diff`・`_remarks_file` | `domains/crossreview/drive.py` | 変更（書き先だけ） | 今のまま | `_round_stem` でなく `_input_path` に書く |
 | `_seat_launch` | `domains/crossreview/drive.py` | 新設 | `_seat_launch(run: _Run, seat: str, prompt: str, stem: Path) -> agents.Launch` | 席の起動。claude の席は `participants.read_only_launch`（読める場所は `run.input_dir` だけ、上限は `REVIEW_TIMEOUT`）、ほかは `participants.review_launch(runtime_of(seat), …)` |
-| `_reviewer_findings` | `domains/crossreview/drive.py` | 変更 | `_reviewer_findings(status: agents.AgentStatus, out: Path, runtime: str) -> Optional[list[dict[str, Any]]]` | claude の席は `participants.answer_text` の本文から、ほかは今のとおり出力の全文から `findings` を取り出す |
+| `_reviewer_findings` | `domains/crossreview/drive.py` | 変更 | `_reviewer_findings(status: agents.AgentStatus, out: Path, runtime: str) -> Optional[list[dict[str, Any]]]` | 今のとおり、`status.state` が `AgentState.DONE` のときだけ出力を読む。ほかの状態では、出力に有効な `{"findings": []}` があっても None（結果が無い）を返す。`DONE` のとき、claude の席は `participants.answer_text` の本文から、ほかは今のとおり出力の全文から `findings` を取り出す |
 | `_unread_hint` | `domains/crossreview/drive.py` | 変更（責務） | 今のまま（1 つ目の引数を席の名前として受ける） | 表の行を `runtime_of(seat)` で引き、行の頭には席の名前を書く |
 | `_launch_reviewers` | `domains/crossreview/drive.py` | 変更 | `_launch_reviewers(run: _Run, round_no: int, prompts: Mapping[str, str], launch: Launcher, suffix: str = "") -> tuple[list[dict[str, Any]], dict[str, _Unread]]` | 席ごとの依頼文で並べて起動する。出力の名前・指摘の担当（`by`）・注意・過程には席の名前を使う |
 | `_review` | `domains/crossreview/drive.py` | 変更 | `_review(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], launch: Launcher) -> _Reviewed` | 今の席を起動し、claude 以外の結果の無い席だけを 1 度起動し直し、`fill_targets` が返す席を `_fill` で埋める |
@@ -397,7 +397,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_reusable`・`_reused_warnings` | 埋めた席で収束した同じ head の打ち直しで前回の結果を返し、注意が載る。前回 `codex`・`claude（kiro の代わり）` で、`allowed` を claude と codex に絞った打ち直しでも前回の結果を返す | 前回 `kiro`・`claude（codex の代わり）` で、`allowed` を claude と codex に変えた打ち直しで前回の結果を返さない | 名指し 1 者の打ち直しで代わりに数えない |
 | `_seat_launch` | `claude-2` の起動の `agent` が `claude`、出力の名前が `round<n>-claude-2` | 依頼文が指すファイルがすべて `run.input_dir` の下 | — |
 | `_input_path`・`_drop_inputs` | 1 回の実行の資料が 1 つのディレクトリにそろい、`--add-dir` がそのディレクトリを指す | 同じ保存先に前の実行の `review-input-*` のディレクトリ（別の PR の差分のファイル入り）と、`review-input-` で始まるシンボリックリンクを置いてから実行すると、`--add-dir` はどちらとも違う新しいディレクトリを指し、そこに前の実行のファイルが無い | 実行が `precondition` で止まっても、資料のディレクトリが消えている |
-| `_reviewer_findings` | `{"findings": []}` は成功 | — | 終了コード 0 でも `findings` が無ければ結果が無い |
+| `_reviewer_findings` | 状態が `DONE` で `{"findings": []}` は成功 | — | 終了コード 0 でも `findings` が無ければ結果が無い。状態が `FAILED`・`STALLED`・`TIMEOUT`・`USAGE_LIMIT` で、出力に有効な `{"findings": []}` があっても結果が無い（claude の席でもほかの席でも同じ） |
 
 ## 記録のコメントの「相手役」の列（report_decide.py）
 
