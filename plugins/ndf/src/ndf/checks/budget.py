@@ -177,22 +177,35 @@ def _imported(sources: list[Source]) -> set[str]:
     return found
 
 
-def unused_deps(scope: Scope) -> list[str]:
-    """`toolchain.plugin_pyprojects` の直接の実行時の依存のうち、使われないものの名前（昇順）。"""
-    rels = _section(scope, "toolchain")
-    rels = rels["plugin_pyprojects"] if "plugin_pyprojects" in rels else []
+def _dep_settings(scope: Scope) -> tuple[list[str], dict[str, str], set[str]]:
+    """調べる依存の定義のパス・依存の名前から import の名前への対応・数えない依存の名前（名前は正規化した形）。"""
+    toolchain = _section(scope, "toolchain")
+    rels = toolchain["plugin_pyprojects"] if "plugin_pyprojects" in toolchain else []
     settings = _budget_settings(scope)
     modules = {normalize(k): v for k, v in (settings["dep_modules"] if "dep_modules" in settings else {}).items()}
     exempt = {normalize(k) for k in (settings["dep_exempt"] if "dep_exempt" in settings else {})}
+    return rels, modules, exempt
+
+
+def _unused_in(scope: Scope, rel: str, modules: dict[str, str], exempt: set[str]) -> set[str]:
+    """依存の定義 1 つの、使われない依存の名前。"""
+    pyproject = scope.repo_file(rel, "依存の定義")
+    locked = _locked(scope.repo_file(scope.rel(pyproject.with_name(LOCK_NAME)), "依存の lock "))
+    used = _imported(scope.python_under(pyproject.parent / SRC_DIR))
+    unused: set[str] = set()
+    for name in _declared(pyproject):
+        module = modules[name] if name in modules else name.replace("-", "_")
+        if name in locked and name not in exempt and module not in used:
+            unused.add(name)
+    return unused
+
+
+def unused_deps(scope: Scope) -> list[str]:
+    """`toolchain.plugin_pyprojects` の直接の実行時の依存のうち、使われないものの名前（昇順）。"""
+    rels, modules, exempt = _dep_settings(scope)
     unused: set[str] = set()
     for rel in rels:
-        pyproject = scope.repo_file(rel, "依存の定義")
-        locked = _locked(scope.repo_file(scope.rel(pyproject.with_name(LOCK_NAME)), "依存の lock "))
-        used = _imported(scope.python_under(pyproject.parent / SRC_DIR))
-        for name in _declared(pyproject):
-            module = modules[name] if name in modules else name.replace("-", "_")
-            if name in locked and name not in exempt and module not in used:
-                unused.add(name)
+        unused |= _unused_in(scope, rel, modules, exempt)
     return sorted(unused)
 
 
