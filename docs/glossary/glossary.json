@@ -1999,13 +1999,19 @@
     {
       "term": "MVV 判定",
       "context": "ndf-loop",
-      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
+      "meaning": "承認ゲートの手前で、LLM が PR の本文と差分を NDF の共通原則・プロジェクト MVV と突き合わせる判定（ndf records mvv gate）。どの進め方でも打ち、判定・理由・レッドライン・レビューの保留を PR のコメントと承認資料に載せる。fast・auto では設計承認ゲートを省くかの材料にもなる。結論は従う・従わない・判定できないのどれかで、判定結果を得られなければ verdict が null になり、判定できなかった理由の種類を stopped_by に置く",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/old/issue-1400-design.md",
       "deprecated": [
         "照合"
       ],
       "code": "mvv_validation"
+    },
+    {
+      "term": "レビューの保留",
+      "context": "ndf-loop",
+      "meaning": "対象の PR の cross-review の記録（mvv-validation.jsonl の mvv-review の行）に残る、直っていないレッドラインの指摘と、利用者の判断が要る今のバージョンの未解消の見送り。1 件でもあれば承認ゲートを省かない。MVV 判定の出力 holds に載る",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "助言の MVV 判定",

@@ -146,7 +146,7 @@ ndf route render implement --set branch=<単位のブランチ> --set base=<ス�
 | `description` | `<フェーズ>: <課題番号を空白区切り>`（例 `設計: #550 #657`）。フェーズの後ろは半角の `:` と空白 1 つ |
 | `subagent_type` | その supervisor が最初に通す工程で選ぶ。収束ループ（リファクタリング・コードレビュー・ドキュメントレビュー）から始めるなら `ndf:supervisor-waits`（キャッシュの寿命 1 時間）、それ以外は `ndf:supervisor`（寿命 5 分）。定義が使えないときは省く（`general-purpose`）。選び方の全体は [context-window.md](context-window.md) の「supervisor の定義を選ぶ」 |
 | `model` | 省く（conductor と同じモデルで動く） |
-| `prompt` | 下の 10 項目と、守る規則 16 個 |
+| `prompt` | 下の 10 項目と、守る規則 18 個 |
 
 **`description` の先頭語は規約である。** 測定（`skill-stats --agents`）は先頭語からフェーズと
 作業種別を読む。語彙に無い語で始めた記録は `その他` に落ち、どのフェーズが幾らの
@@ -206,14 +206,68 @@ supervisor が守る規則:
 10. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す。`到達点` が置き直されていて、その到達点に達したときは、承認ゲートを返さずに `結果: 完了`・`次のフェーズ: 無し` で返す
 11. **作業ファイル（スクリプト・初期化の出力・プロンプト）は、起動指示の「作業ディレクトリ」の中に置く。** conductor の scratchpad の直下には置かない（並行する supervisor と同じ名前で上書きし合う）。worker へ渡す `保存先` も、この作業ディレクトリの下のパスにする
 12. 収束ループの工程（リファクタリング・コードレビュー・ドキュメントレビュー）の Skill を起動して hook に止められたら、同じ起動をやり直さずに `結果: スイッチポイント`・`次の工程: <その工程>` で返す。起動の前に済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく。**スイッチポイントを自分で決めない。** hook が通したら、そのまま続ける
-13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める
+13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める。承認資料を返す前に `ndf records mvv cite` で根拠の行を確かめ、結果の分岐に従う（[approval-request.md の「承認資料を組んだら」](approval-request.md#承認資料を組んだら)）
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
-15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。実装の `gathered` は、すべての単位の PR をスプリントブランチへマージした後にスプリントブランチの worktree で `ndf progress gathered` を打ち、結果の `outputs.gathered` をそのまま写す（マージ先がスプリントブランチの開いた Pull Request が 1 つでもある・worktree がマージしていないときは止まるので、直してから打ち直す）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く。**書いた後に `ndf progress check <ステートマシンの ID> "<工程>" --output <パス>` を打ち、`ok` になってから `終えた工程` に足す。** `check` は conductor の `ndf progress finish` と同じ規則で確かめ、ステートマシンへは書かない。`metrics.outputs` がその工程の置いてよいキーで、`warnings` は `finish` が捨てるキーである。`refused` なら `cause.detail` の誤りに従って出力を直し、打ち直す。起動指示がこの規則を渡さなくても行う
+15. **工程を終えるたびに、その工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートの `終えた工程` に工程とパスを足す。** 値は `ndf progress show` のその行の `outputs` のキーに、工程で得た実際の値を入れる（例 設計は `design_pr` に Pull Request の番号・`mvv_gate` に判定の結果のオブジェクト）。実装の `gathered` は、すべての単位の PR をスプリントブランチへマージした後にスプリントブランチの worktree で `ndf progress gathered` を打ち、結果の `outputs.gathered` をそのまま写す（マージ先がスプリントブランチの開いた Pull Request が 1 つでもある・worktree がマージしていないときは止まるので、直してから打ち直す）。途中で返す（`止まった`・`スイッチポイント`）ときも、終えた工程の分だけを載せる。形は工程の出力の規約（[stage-io.schema.json](../../../contracts/workflow/stage-io.schema.json) の `stage-out`）で、`steps` と `summary` が要る。`outputs` が空の工程は `outputs` を省く。**書いた後に `ndf progress check <ステートマシンの ID> "<工程>" --output <パス>` を打ち、`ok` になってから `終えた工程` に足す。** `check` は conductor の `ndf progress finish` と同じ規則で確かめ、ステートマシンへは書かない。`metrics.outputs` がその工程の置いてよいキーで、`warnings` は `finish` が捨てるキーである。`refused` なら `cause.detail` の誤りに従って出力を直し、打ち直す。起動指示がこの規則を渡さなくても行う。設計の `mvv_gate` は出力の JSON ファイルにだけ置き、フェーズレポートの本文へ写さない。出力の JSON ファイルは `mktemp` で作った新しいファイルに書いてから置き換える（下の「承認ゲートの前の MVV 判定」）
 16. **起動指示の MVV の欄にあるスナップショット（本文と共通原則）の全体を、作業の前に読む。** 判断への使い方と人へ戻す形は [project-mvv.md の「工程での読み方」](project-mvv.md#工程での読み方) に従う。worker へは、起動指示の MVV の欄の 1 行をそのままコピーして渡す
+17. **設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打つ。** 結果は作業ディレクトリの `mvv-gate-design.json` に保存し、`outputs.mvv_gate` を設計の工程の出力と承認資料の「MVV 判定」の欄に載せる（下の「承認ゲートの前の MVV 判定」）。プランの経路では打たない
+18. **リリース承認ゲートを手動の経路で返す前に、承認する PR を先に決め、`ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打つ。** 結果は作業ディレクトリの `mvv-gate-release.json` に保存し、承認資料の「MVV 判定」の欄にだけ載せる（下の「承認ゲートの前の MVV 判定」）。プランの経路では打たない
 
 ```json
 {"steps": [], "summary": "<工程> を supervisor が終えた", "outputs": {"worktree": "/work/repo/.worktrees/fix/x", "branch": "fix/x"}}
 ```
+
+#### 承認ゲートの前の MVV 判定（規則 17・18）
+
+**プランを使わずに承認ゲートを返す supervisor は、自分で MVV 判定を打ち、結果を承認資料に載せる。** プランの経路
+（判定のステップ `design-mvv`・`release-mvv` を持つプラン）では判定のステップが打つので、打たない。判定の条件は
+[pace.md の「MVV 判定」](pace.md#mvv-判定)、承認資料への載せ方は [approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄) にある。
+
+打つ場所と保存先は、どちらの承認ゲートでも同じである。
+
+- **打つ場所**: 起動指示の「作業場所」の worktree で打つ。設計承認ゲートでは、判定する PR がその worktree のブランチの開いた PR に決まる
+- **保存先**: 起動指示の「作業ディレクトリ」の下の `mvv-gate-design.json`・`mvv-gate-release.json`。結果 JSON は PR から取った
+  自由記述（判定の理由・保留の文）を含むので、コミットの対象になる worktree の中に置かない。作業ディレクトリが作業場所の worktree の
+  下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 判断が要る` で返す（`理由` に作業ディレクトリが
+  worktree の中にあることを書く）
+- **書き方**: `mktemp` で作った新しいファイル（0600）に書いてから、所定のパスへ `mv` で置き換える。判定が `stopped` で終わったとき
+  （終了コードが 0 でない）も置き換えるよう、判定のコマンドと `mv` を `&&` でつながない。打ち直しで同じパスへ書くときも、既にある
+  ファイルの権限を引き継がない
+
+```bash
+tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && { ndf records mvv gate --gate design --machine <ステートマシンの ID> > "$tmp"; mv -f "$tmp" "<作業ディレクトリ>/mvv-gate-design.json"; }
+```
+
+規則 15 の工程の出力の JSON ファイルも、同じく `mktemp` で作ったファイルに書いてから置き換える。
+
+**設計承認ゲート（規則 17）:**
+
+1. 上のコマンドで判定を打ち、作業ディレクトリの `mvv-gate-design.json` に保存する
+2. 結果の `outputs.mvv_gate` を、設計の工程の出力の JSON ファイル（規則 15）の `outputs.mvv_gate` へそのまま載せる
+3. 承認資料の「MVV 判定」の欄を、同じ値から組む（[approval-request.md の「MVV 判定の欄」](approval-request.md#mvv-判定の欄)）
+4. 承認資料の根拠の行を `ndf records mvv cite --gate design` で確かめる（[approval-request.md の「承認資料を組んだら」](approval-request.md#承認資料を組んだら)）
+
+**リリース承認ゲート（規則 18。プランを使わず、本番系へ届く操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）:**
+
+1. **承認する PR を先に決める。** このリリースで承認する人がマージを承認する PR で、承認資料の「対象を開くためのもの」に載せる PR である
+
+   | 場合 | 承認する PR | 判定のコマンドに渡すもの |
+   | --- | --- | --- |
+   | このリリースで `ndf release-steps assemble` を打ち、`ok` の結果 JSON に `outputs.pr` がある（版上げの PR を組み立てた） | `outputs.pr` の PR | `--expect-pr <outputs.pr>` |
+   | ブランチ戦略がリリース用の PR を作らない（`ndf release-steps assemble` を打たない。`trunk` の `production_pr` など） | スプリントの PR そのもの | 渡さない（判定する PR が承認する PR である） |
+   | リリース用の PR を作る戦略なのに、`ndf release-steps assemble` の結果が `ok` でない・`outputs.pr` が無い（`not_applicable` を含む） | 決められない | 判定を打たず、承認も求めない。`結果: 判断が要る` で返し、`理由` に「承認するリリース用の PR を特定できない」と `ndf release-steps assemble` の結果 JSON のパスを書く |
+
+   文脈のキー `release_pr` は使わない（承認ゲートの時点ではまだ無い）。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
+2. 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、上の書き方で
+   作業ディレクトリの `mvv-gate-release.json` に保存する。`--expect-pr` を渡すと、判定のコマンドが判定に使う入力の PR と比べ、違えば
+   判定せずに（LLM を呼ばず、PR にコメントを書かずに）`not_applicable` で止まる
+3. 結果で承認資料の「MVV 判定」の欄を組む。`ok` なら「MVV 判定の欄」の手順で、`ok` でなければ同じセクションの「判定の結果 JSON が `ok` でないとき」の
+   文で載せる。どの結果でも承認ゲートは返す。結果の `outputs.mvv_gate` は工程の出力へは載せない
+4. 承認資料の根拠の行を `ndf records mvv cite --gate release` で確かめる
+
+**判定の中身を、フェーズレポートの本文へ写さない。** `終えた工程` にはファイルのパスだけを書き、`outputs.mvv_gate` の中身（判定の理由・
+レッドライン・`why`・`holds`）を `理由` などへ写さない。conductor はパスを `ndf progress finish --output` へ渡すだけで、中身を読んで人へ
+転送しない。`mvv-gate-<区分>.json` は手元の記録で、呼び出し元へは返さない。
 
 **`ndf plan next` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「`ndf plan` の進捗ログ」に従う。**
 
