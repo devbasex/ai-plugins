@@ -199,16 +199,12 @@ def _input_kind(rec: Any) -> Optional[str]:
 
 def _call_rows(rows: list) -> list:
     """応答の行の列から、呼び出しごとの採用行（同じ `message.id` の最も新しい物理の行）をファイルの順に並べる。"""
-    order: list = []
     adopted: dict = {}
     for i, rec in enumerate(rows):
-        if not transcript.is_reply_line(rec):
-            continue
-        key = transcript.message_id(rec) or ("row", i)
-        if key not in adopted:
-            order.append(key)
-        adopted[key] = rec
-    return [adopted[k] for k in order]
+        if transcript.is_reply_line(rec):
+            # 辞書は最初に入れた位置を保つので、上書きしても順は最初に現れた位置のまま
+            adopted[transcript.message_id(rec) or ("row", i)] = rec
+    return list(adopted.values())
 
 
 def _count(usage: Mapping[str, Any], key: str, absent_zero: bool) -> bool:
