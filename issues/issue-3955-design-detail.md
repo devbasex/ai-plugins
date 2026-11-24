@@ -220,7 +220,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `permission_args` | 読める場所 1 つで、`--restricted`・`--add-dir <場所>`・`--permission-mode dontAsk` があり `acceptEdits` が無い。`--tools` と `--allowed-tools` の値が Tool の名前だけ | 読める場所が空なら今と同じ引数。最後の 2 つが `--permission-mode dontAsk` | — |
+| `permission_args` | 読める場所を 1 つ渡すと、`--restricted`・`--add-dir <場所>`・`--permission-mode dontAsk` があり、`acceptEdits` が無い。`--tools` と `--allowed-tools` の値は Tool の名前だけである。権限の引数の末尾は `--permission-mode dontAsk` になる | 読める場所が空なら、引数は既存の引数と一致する（`acceptEdits` のまま） | — |
 | `ClaudeCall` | — | — | 権限 `JUDGE` で読める場所を渡すと `ValueError` |
 | `read_only_launch` | `agent` が `claude`、会話の指定が無く `--no-session-persistence` がある | 読める場所を渡さないと cross-refactoring の今の引数と同じ | — |
 | `answer_text` | claude の外側の JSON の `result` | codex は `agents.tail` | 外側が JSON でなければそのまま |
