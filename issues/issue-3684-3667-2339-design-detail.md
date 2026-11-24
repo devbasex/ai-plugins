@@ -419,8 +419,9 @@ plugins/ndf/
 | スナップショット | `read_record("stage-snapshot", ...)` |
 | プランの出力の記録 `outputs.json` | `core/plan/records.py` の `_stored_outputs`（`recorded_outputs`・`_add_outputs` が通す） |
 | プランの結果のバックアップ `results/<回>.json` の `outputs` | `core/plan/runner.py` の `stored_result`（`_stored`・`RepoSources.plan_record`・`invoke._previous`・`ndf plan wait` が通す） |
+| 工程の入力の写し `values.json` の `inputs` | `contracts/worker_kinds.py` の `values_of`（`read_values`・`ndf answer work` の `values_in` が通す） |
 
-後の 2 つの移し方は `internal.plan_outputs` だけが持つ。プランの出力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。
+後の 3 つの移し方は `internal.stage_values` だけが持つ。プランの出力と工程の入力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。プランの参照（`refs`）が明示した `key: "version"` は、`refs._output` が同じ対応（`internal.stage_value_key`）で `product_version` を引く。
 
 `stored_result` は、移す前に保存済みの結果の形の版を確かめる。今の版より大きければ `InternalError`（`precondition`）を投げ、`routes` も `outputs` も返さない（プラグインを戻した後に、新しい版の `routes` で後続のステップを流さない）。`ndf plan next` は `ndf.cli` が、`ndf plan wait` は `_watched` が、参照は `RepoSources.plan_record`（`Unreadable`）が、工程は `invoke.plan_failure` が `precondition` の停止にする。
 
