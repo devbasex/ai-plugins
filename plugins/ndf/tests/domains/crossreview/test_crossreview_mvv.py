@@ -382,6 +382,7 @@ def test_review_scope_finds_the_same_mvv_offline(
     head = sh(wt, "rev-parse", "HEAD").strip()
     written = sorted(mvv_state.rglob("*"))
     monkeypatch.setattr(git.Git, "fetch", lambda *a: pytest.fail("review-scope がリモートから取得した"))
+    monkeypatch.setattr(git.Git, "remote", lambda *a: pytest.fail("review-scope が git worktree list を打ち直した"))
     for path in written:
         if path.is_file():
             path.unlink()

@@ -105,7 +105,8 @@
 全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残り、MVV が変われば通し直す。範囲だけを読むときは
 `ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N> [--reviewer <R> ...]` を打つ（読むだけ）。
 `--reviewer` は `run` へ渡すものと同じにする（省けば `run` と同じ既定の相手役で決める）。このコマンドは GitHub にもリモートにも
-問い合わせず、取得済みのベースブランチの MVV を読む。MVV を確かめられなければ全差分を返し、理由を `warnings` に載せる。
+問い合わせず、取得済みのベースブランチの MVV を読む。MVV か変わったセクションを手元のオブジェクトだけで
+確かめられなければ全差分を返し、理由を `warnings` に載せる。
 
 ## 判定
 

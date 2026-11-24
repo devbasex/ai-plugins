@@ -241,7 +241,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     設定がツリーに無いと確かめられたときだけ `absent`。参照・設定・本文を読めないときと、本文が承認の記録と合わない
     とき（`allow_mismatch` でない）は `MvvError`、スナップショットを書けないときは `OSError`。
     """
-    snap, body, shared = _read(root, ref, allow_mismatch)
+    snap, body, shared = _read(git_mod.Git(root), root, ref, allow_mismatch)
     if snap.state != md.State.APPROVED or snap.sha256 is None:
         return snap
     found = items(_text(body, list(snap.blobs)[-1]), shared.decode("utf-8"))
@@ -255,13 +255,13 @@ def identity_at(root: Path, ref: str) -> str:
     """参照 `ref`（取得済みの参照かコミット）の MVV を見分ける値（`Snapshot.identity`）。スナップショットを書かない。
 
     `current` と同じ読み方で求める。参照・設定・本文を読めないときと、本文が承認の記録と合わないときは `MvvError`。
+    ネットワークに出ない（部分クローンで設定や本文が手元に無ければ、取得せずに `MvvError`）。
     """
-    return _read(root, ref, False)[0].identity
+    return _read(git_mod.Git.offline(root), root, ref, False)[0].identity
 
 
-def _read(root: Path, ref: str, allow_mismatch: bool) -> tuple[Snapshot, bytes, bytes]:
-    """参照 `ref` の MVV を読んだ結果（スナップショットのパスと項目は空）と、承認済みのときの本文と共通原則（ほかは空）。"""
-    g = git_mod.Git(root)
+def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[Snapshot, bytes, bytes]:
+    """参照 `ref` の MVV を `g` で読んだ結果（スナップショットのパスと項目は空）と、承認済みのときの本文と共通原則（ほかは空）。"""
     commit = ref if git_mod.FULL_SHA.match(ref) else _commit_of(g, ref)
     held = _decl_blob(g, commit)
     if held is None:
