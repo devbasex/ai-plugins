@@ -224,7 +224,7 @@ plugins/ndf/
    | `Opening.kind` と状態 | 扱い |
    | --- | --- |
    | `normal` | 待ちを終える。`wait_end` の `tokens`・`ttl`・`model` は更新前の状態の `last`、`w`・`r` はその寿命とモデルの倍率、`hit` は `hit(Opening.first_read, last.tokens, q.hit)`、`cache_read` は `Opening.first_read`、`opened_at` は `Opening.at`、`age` は `Opening.at − last.at` で書く |
-   | `unknown` で、状態の `opened`（guard が待ちの間の通常の入力で書いた時刻）が `last.at` より後 | 待ちを終える。`wait_end` の `opened_at` は `opened`、`age` は `opened − last.at`、`hit` と `cache_read` は null（費用と当たりの証拠が無いので推し量らない）。ほかの項目は `normal` と同じ |
+   | `unknown` で、状態の `opened`（guard が待ちの間の通常の入力で書いた時刻）が `last.at` より後 | 待ちを終える（#4068 の受け入れ条件 4 の「ただし」。記録の入力の行は見分けられないが、guard の証拠がある）。`wait_end` の `opened_at` は `opened`、`age` は `opened − last.at`、`hit` と `cache_read` は null（費用と当たりの証拠が無いので推し量らない）。ほかの項目は `normal` と同じ |
    | `wake`、または `opened` の無い `unknown` | 待ちを終えない。今の Stop が待つ子でなくても（バックグラウンドの作業が 0 件でも）、`k`・`n_max`・`spent`・`wait_stop`（(4) で立てた「起床を突き合わせられない」を含む）を保つ。バックグラウンドの件数より、今回の応答を始めた入力の突き合わせを先にする |
 
    待ちを終えたら、`wait_id`・`k`・`n_max`・`spent`・`wait_stop`・`opened` を消す
