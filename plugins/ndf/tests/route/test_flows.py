@@ -7,7 +7,7 @@ import pytest
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan.transition_decide import Outcome
 
-from ndf.domains.crossreview import drive
+from ndf.domains.crossreview import changes
 
 from ._flow import fake_bin, gate, git, plan_of, repo_with_base, run_step, step_of, stopped, walk
 
@@ -405,4 +405,4 @@ def test_cross_review_takes_a_remote_ref_or_a_commit_as_the_base(tmp_path):
     repo = repo_with_base(tmp_path, {"doc.md": "# 見出し\n"})
     sha = git(repo, "rev-parse", "origin/develop").strip()
     for base in ("origin/develop", sha):
-        assert drive.changed_sections(drive.git.Git(repo), base, repo) == ["doc.md#見出し"]
+        assert changes.changed_sections(changes.git.Git(repo), base, repo) == ["doc.md#見出し"]
