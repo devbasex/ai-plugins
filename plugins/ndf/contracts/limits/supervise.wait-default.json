@@ -1,0 +1,7 @@
+{
+  "summary": "ndf plan wait・ndf progress wait の待ちの上限の既定の秒（--timeout の既定）",
+  "seconds": 600,
+  "read_by": [
+    "ndf.core.plan.cli"
+  ]
+}

@@ -9,7 +9,8 @@
 - SessionStart のとき、根の目印を書き、環境の用意を切り離して起動する（待たない）。前の用意が失敗していれば
   1 行の案内を出す
 
-バージョンがシステムの `python3` の下限（`contracts/hooks/imports.json` の `boot.python`）より古ければ何もせずに 0。
+バージョンがシステムの `python3` の下限（配る構成の設定 `contracts/data/toolchain.json` の `python.hook_floor`）より古ければ
+何もせずに 0。hook の経路は `ndf.contracts` を import しないため、表は `tables` が標準ライブラリで読む。
 """
 
 from __future__ import annotations
@@ -17,9 +18,15 @@ from __future__ import annotations
 import os
 import sys
 import time
-from typing import List, Optional, TextIO
+from typing import List, Optional, TextIO, Tuple
 
 from ndf.domains.hooks import metrics, tables
+
+
+def hook_floor() -> Tuple[int, int]:
+    """システムの python3 の下限（`3.9` → `(3, 9)`）。表は `ndf.contracts.toolchain` の `TABLE` と同じファイル。"""
+    major, minor = tables.load("data/toolchain.json")["python"]["hook_floor"].split(".")
+    return int(major), int(minor)
 
 
 def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
@@ -28,7 +35,7 @@ def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[T
     out = stdout or sys.stdout
     record = metrics.new_record("boot")
     try:
-        if sys.version_info[:2] < tuple(tables.load("hooks/imports.json")["boot"]["python"]):
+        if sys.version_info[:2] < hook_floor():
             return 0
         runtime, event = argv[1], argv[2]
         record.update(runtime=runtime, event=event)

@@ -8,8 +8,8 @@ hook の閉包の外で動く（hook の側はモジュール名の文字列で�
 - `main`: 標準入力の判定の入力を読み、送信先を確かめてから `classify` を打ち、1 行の JSON を書く
 - `run_cases`: 判定の例の組を周の数だけ判定する（`ndf hooks judge-cases`。決定 9）
 
-設定（モデル・秒・周の数・認証の失敗の文言・送信先の確かめの値）は `limits.json` の `hook.stop-wait.judge`
-から `setting` が読む。値をこのモジュールへ写さない。
+設定（モデル・秒・周の数・認証の失敗の文言・送信先の確かめの値）は `contracts/limits/hook.stop-wait.judge.json`
+から `setting` が読む。値をこのモジュールへコピーしない。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from ndf.contracts import facts, limits
 from ndf.domains.hooks import reply_judge, tables
 from ndf.domains.relay import account_dir, claude_args
 
-# 判定の設定の方針の名前（`contracts/limits.json`）
+# 判定の設定の方針の名前（`contracts/limits/`）
 POLICY = "hook.stop-wait.judge"
 # 送信先の確かめの値のキーと、その形（上限の設定のスキーマの 1 部分）
 ENDPOINT = "endpoint"
@@ -79,7 +79,7 @@ class JudgeRefused(RuntimeError):
 
 
 def setting(key: str) -> Any:
-    """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。
+    """判定の設定（`contracts/limits/hook.stop-wait.judge.json`）の 1 つの値。
 
     方針の行を読む口はここ 1 つで、値をこのモジュールへ写さない。hook と同じ表の読み（1 プロセスに 1 回・全方針の
     スキーマの検証なし）を通し、Stop のたびに検証の時間を足さない。送信先の確かめの値だけは、形の誤りで確かめが緩まないように

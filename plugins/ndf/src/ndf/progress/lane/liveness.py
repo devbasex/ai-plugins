@@ -51,7 +51,7 @@ IDLE, RESUMING, WAITING_ANSWER, UNKNOWN, STALLED, ALIVE, WORKING, ENDED = (
 IDLE_CONDUCTOR = "idle_conductor"
 # 止まりとして知らせる判定
 STALL_KINDS = (STALLED, ENDED, IDLE_CONDUCTOR)
-# 何もしていないとみなすまでの秒を持つ方針（`contracts/limits.json`）
+# 何もしていないとみなすまでの秒を持つ方針（`contracts/limits/parallel-run.idle.json`）
 IDLE_POLICY = "parallel-run.idle"
 # スプリントのステートマシンの待ち（`sprint_wait` が `ndf progress wait` の結果から決める）
 SPRINT_GATE, SPRINT_WORKING, SPRINT_IDLE, SPRINT_UNKNOWN = "gate", "working", "idle", "unknown"
@@ -98,7 +98,7 @@ class Activity:
 
 
 def idle_after() -> float:
-    """何もしていないとみなすまでの秒（`contracts/limits.json` の `parallel-run.idle`）。"""
+    """何もしていないとみなすまでの秒（`contracts/limits/parallel-run.idle.json`）。"""
     return limits.seconds(IDLE_POLICY)
 
 

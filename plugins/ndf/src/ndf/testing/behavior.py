@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ndf.contracts import limits
 
-# 1 件の確認の費用の上限（USD）の方針（contracts/limits.json）
+# 1 件の確認の費用の上限（USD）の方針（contracts/limits/）
 BUDGET_POLICY = "behavior-check.budget"
 
 

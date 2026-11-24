@@ -1,0 +1,8 @@
+{
+  "summary": "登録済みアカウントの子の関所を開けてから、claude になれたかの知らせ（execvp の成否）を待つ上限（#3604）",
+  "seconds": 10,
+  "read_by": [
+    "ndf.adapters.claude",
+    "ndf.domains.relay.launch_target"
+  ]
+}

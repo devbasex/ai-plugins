@@ -22,7 +22,7 @@ from ndf.adapters.git import Git
 from ndf.contracts import limits
 from ndf.domains.worktree import atomic, testenv_decide
 
-# 割り当て表のファイル名（git の共通ディレクトリの下の、プラグイン名の保存先に置く）と、排他を待つ上限の方針（contracts/limits.json）
+# 割り当て表のファイル名（git の共通ディレクトリの下の、プラグイン名の保存先に置く）と、排他を待つ上限の方針（contracts/limits/）
 ALLOCATIONS_FILE = "worktree-registry.json"
 LOCK_POLICY = "worktree.allocations-lock"
 Row = dict[str, Any]

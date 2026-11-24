@@ -1,0 +1,7 @@
+{
+  "summary": "ステートマシンの DB（SQLite）の書き込みの待ちの上限の秒（busy_timeout）",
+  "seconds": 30,
+  "read_by": [
+    "ndf.progress.store"
+  ]
+}

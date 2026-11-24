@@ -1,0 +1,7 @@
+{
+  "summary": "中継の保存先の問い合わせの間隔",
+  "interval": 0.5,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "summary": "codex の学習の設定を読み書きするコマンドの上限",
+  "seconds": 3,
+  "read_by": [
+    "ndf.adapters.training"
+  ]
+}

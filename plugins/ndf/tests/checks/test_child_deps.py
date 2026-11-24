@@ -76,12 +76,12 @@ def test_closed_child_order_is_not_checked(plugin):
 
 
 def test_parallel_writers_of_one_table_fail(plugin):
-    tables = {"contracts/limits.json": ["A", "C"]}
+    tables = {"contracts/limits/": ["A", "C"]}
     assert findings(plugin, BASE, tables) == []
-    found = findings(plugin, BASE, {"contracts/limits.json": ["C", "D"]})
-    assert len(found) == 1 and "表 contracts/limits.json へ C と D が並行で書く" in found[0][2]
+    found = findings(plugin, BASE, {"contracts/limits/": ["C", "D"]})
+    assert len(found) == 1 and "表 contracts/limits/ へ C と D が並行で書く" in found[0][2]
     closed = {**BASE, "D": row(["ndf.d"], order=2, lane="b", closed=True)}
-    assert findings(plugin, closed, {"contracts/limits.json": ["C", "D"]}) == []
+    assert findings(plugin, closed, {"contracts/limits/": ["C", "D"]}) == []
 
 
 def test_cycle_in_needs_stops(plugin):

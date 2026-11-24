@@ -12,7 +12,7 @@
 | --- | --- |
 | 利用者向けの案内（変更が効く時点・端末の 1 行への対処・`log.jsonl` の行の種類と `jq` の例） | `plugins/ndf/skills/development-workflow/references/relay.md` の「プラグインの更新とラッパーのバージョン」「落ちたときの続け方」「記録の読み方」 |
 | Claude Code の自動更新の止め方・戻し方と、ラッパーが自分で上げる経路をリリース後に確かめる手順 | 同じ文書の「自動更新を止めて、ラッパーが自分で上げる経路を確かめる」 |
-| 更新の上限と錠の保存先 | `plugins/ndf/contracts/limits.json` の `relay.plugin-update`、`plugins/ndf/contracts/domains/locations.json` の `relay-plugin-update` |
+| 更新の上限とロックの保存先 | `plugins/ndf/contracts/limits/` の `relay.plugin-update`、`plugins/ndf/contracts/domains/locations.json` の `relay-plugin-update` |
 | リレーハブの受付箱などの置き場所（`relay-hub-request` は `requests-v2/<id>.json`） | `plugins/ndf/contracts/domains/ndf-files.json` |
 | リレーハブ（`spawn`・`restart`・`ls`）の入出力 | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md)（10 系の `relay.py` の文書。11 系との違いはこの文書の「リレーハブは頼んだ側の導入で起動する」） |
 
@@ -357,7 +357,7 @@ sequenceDiagram
 
 | 設定 | 値 | 置き場 |
 | --- | --- | --- |
-| `relay.plugin-update` | 120 秒（更新のコマンド 1 回ずつと、錠を待つ上限） | `plugins/ndf/contracts/limits.json` |
+| `relay.plugin-update` | 120 秒（更新のコマンド 1 回ずつと、ロックを待つ上限） | `plugins/ndf/contracts/limits/` |
 | `relay-plugin-update` | `root: config`・`path: ndf/plugin-update.lock`（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/plugin-update.lock`） | `plugins/ndf/contracts/domains/locations.json` |
 | `claude-plugins.list` | 30 秒（導入の一覧の上限） | `plugins/ndf/contracts/limits.json` |
 

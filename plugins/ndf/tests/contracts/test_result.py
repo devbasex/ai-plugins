@@ -151,7 +151,7 @@ def test_the_result_put_out_instead_keeps_only_a_tool_of_the_known_form(tool, ke
 
 
 def test_emit_puts_out_an_unchecked_result_when_the_causes_are_unreadable(contracts_copy, capsys):
-    contracts_copy("causes.json", text="{")
+    contracts_copy("causes/invalid.json", text="{")
     code = result.emit({**result.result("t", "ok", "済んだ"), "extra": SECRET})
     (line,) = capsys.readouterr().out.splitlines()
     assert code == exit_codes.unreadable_code() and json.loads(line)["cause"]["kind"] == "invalid" and SECRET not in line

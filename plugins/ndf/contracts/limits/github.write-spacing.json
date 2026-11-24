@@ -1,0 +1,7 @@
+{
+  "summary": "NDF の GitHub への書き込みを、マシン全体で前の書き込みから空ける秒（#4016 の決定 3）。予約の時刻と前の書き込みを送り終えた時刻の両方から数える",
+  "interval": 1,
+  "read_by": [
+    "ndf.adapters.write_gate"
+  ]
+}

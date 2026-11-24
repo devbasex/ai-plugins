@@ -26,7 +26,7 @@ from ndf.adapters.run_log import diag
 from ndf.contracts import facts, limits
 
 TABLE = "cli-floors"
-# `--version` を待つ上限の方針（contracts/limits.json）。過ぎたら読めないとして起動を通す
+# `--version` を待つ上限の方針（contracts/limits/）。過ぎたら読めないとして起動を通す
 VERSION_POLICY = "cli-floor.version"
 # (実パス, st_mtime_ns, st_size) → 読めたバージョン（読めなければ None）
 _SEEN: dict[tuple[str, int, int], Optional[str]] = {}

@@ -1,0 +1,7 @@
+{
+  "summary": "受け入れ条件の記録を書いた後の読み直しで、自分の記録がそろわないときに当て直す回数（最初の 1 回を含まない）",
+  "count": 3,
+  "read_by": [
+    "ndf.domains.loop.acceptance"
+  ]
+}

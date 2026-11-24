@@ -1,5 +1,5 @@
 {
-  "summary": "PR の必須のチェックを読んだ結果（ndf.adapters.ci の Reading.verdict。上の行を優先する）と停止理由の種類（contracts/causes.json の kind）。ndf.adapters.ci の Verdict の語彙はこの表の id から組み立てる",
+  "summary": "PR の必須のチェックを読んだ結果（ndf.adapters.ci の Reading.verdict。上の行を優先する）と停止理由の種類（contracts/causes/ の kind）。ndf.adapters.ci の Verdict の語彙はこの表の id から組み立てる",
   "owner": "D2（contracts/domains）",
   "shared_names": true,
   "columns": {

@@ -17,7 +17,7 @@ GitHub が待ちの秒を返さない二次レート制限の打ち直しは、6
 | 二次レート制限の見分けと待ちの秒・応答のフック・githubkit の打ち直しの判断 | [`github_limits.py`](../../plugins/ndf/src/ndf/adapters/github_limits.py) の冒頭の説明 |
 | 指摘のスレッドの書き方（レビューのまとめ・クローズの理由・PR からの復元） | [`threads.py`](../../plugins/ndf/src/ndf/domains/crossreview/threads.py) の冒頭の説明 |
 | PR に残る記録の利用者向けの説明 | [`cross-review` の修正と巻き直し](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の「終わり方」 |
-| 間隔・ウィンドウの上限・ロック・打ち直しの値 | [上限の宣言](../../plugins/ndf/contracts/limits.json) の方針 `github.write-spacing`・`github.content-window.minute`・`github.content-window.hour`・`github.write-send-lock`・`github.pr-publish-lock`・`cross-review.secondary-rate-limit` |
+| 間隔・ウィンドウの上限・ロック・打ち直しの値 | [上限の設定](../../plugins/ndf/contracts/limits/) の方針 `github.write-spacing`・`github.content-window.minute`・`github.content-window.hour`・`github.write-send-lock`・`github.pr-publish-lock`・`cross-review.secondary-rate-limit` |
 
 コードのコメントの「決定 N」「I1〜I6」「E1〜E6」は、この文書の「決定と理由」「常に成り立つ条件」「ドメインイベント」の番号を指す。
 
@@ -368,7 +368,7 @@ sequenceDiagram
 ロックは取るたびに `slot_pool.lock` で別の `FileLock` を作る。1 つの `FileLock` をスレッドで共有すると、別のスレッドの取得が
 再入として通る。カーネルのロックなので、ロックを持つプロセスが消えると解ける。
 
-上限の宣言（`contracts/limits.json`）:
+上限の設定（`contracts/limits/`）:
 
 | 方針 | 値 | 意味 |
 | --- | --- | --- |
@@ -385,7 +385,7 @@ sequenceDiagram
 
 | ファイル | 変えること |
 | --- | --- |
-| `plugins/ndf/contracts/limits.json` | `github.content-spacing` を消し、`github.content-window.minute`（`seconds` 60・`count` 80）と `github.content-window.hour`（`seconds` 3600・`count` 500）を足す。`github.write-spacing` と `github.pr-publish-lock` の `summary` から 7.2 秒の記述を除く |
+| `plugins/ndf/contracts/limits/` | `github.content-spacing` を消し、`github.content-window.minute`（`seconds` 60・`count` 80）と `github.content-window.hour`（`seconds` 3600・`count` 500）を足す。`github.write-spacing` と `github.pr-publish-lock` の `summary` から 7.2 秒の記述を除く |
 | `plugins/ndf/src/ndf/adapters/write_gate.py` | `CONTENT_SPACING` を 2 つのウィンドウの方針に替える。記録の形を `version` 2（`content` の一覧）にし、予約・置き換え・`withdraw`・送り終え・最短の送信時刻・壁時計の戻り・I5 のプロセスの中の記録で一覧を扱う。冒頭の説明を直す |
 | `plugins/ndf/src/ndf/domains/crossreview/threads.py`・`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md` | 冒頭の説明の方針の名前と、「内容を作る書き込みどうしの間隔」の 1 文を、2 つのウィンドウの方針へ |
 | `plugins/ndf/tests/adapters/test_write_gate.py`・`test_write_gate_budget.py`・`test_write_gate_window.py`（新設。ウィンドウの観点を分けた） | 「テスト観点」の表のとおり |
@@ -495,6 +495,6 @@ GitHub の文書:
 
 - Issue: #4016（GitHub の二次レート制限: 書き込みをまとめ、マシン全体で間隔を空ける）。関連: #3939（cross-review が PR に記録を残す）・#3941・#3956
 - 決定 11 は、スプリントの PR（https://github.com/devbasex/ai-plugins/pull/4273 ）のリリース承認ゲートでの差し戻し（2026-11-23。「均等割りすべきではない」）で、7.2 秒の均等割りを置き換えた
-- [上限の宣言と再試行の方針](ndf-limits-declaration-and-retry-policy.md)
+- [上限の設定と再試行の方針](ndf-limits-declaration-and-retry-policy.md)
 - [cross-review の投稿の一時的な失敗](cross-review-transient-post-failure.md)
 - [用語集: NDF の実行の基盤](../glossary/ndf-durable.md)

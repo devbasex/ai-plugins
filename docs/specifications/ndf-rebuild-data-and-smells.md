@@ -97,7 +97,7 @@ Pull Request では差分が NDF の検査の入力（ワークフローの `NDF
 - 1 つの事実を 1 つのファイルに置き、行の `id` が事実の値である。部分集合は列で表し、別の定数へ写さない
 - 表の名前はファイル名の拡張子を除いた部分で、`facts/` と `domains/` をまたいで 1 つに決まる。読み手は名前だけで引く（保存先を知らない）
 - 表は `owner`（書き換えてよい子とパッケージ）を持つ。ほかの子は読むだけ
-- 列の `ref` は外部キーで、2 つの形がある。`limits.json#<接頭辞>`（例 `limits.json#monitor.phase.` は `limits.json` の `monitor.phase.<id>` の方針を指す）と、`<保存先>/<表>`（別の表の `id`）
+- 列の `ref` は外部キーで、2 つの形がある。`limits#<接頭辞>`（例 `limits#monitor.phase.` は `contracts/limits/` の `monitor.phase.<id>` の方針を指す）と、`<保存先>/<表>`（別の表の `id`）
 - 工程とモードは事実の表でなく `plugins/ndf/contracts/workflow/` の文書が持ち、設計文書の種類は `contracts/domains/ndf-files.json` の行が持つ（決定 49）
 
 読み手の関数（`ndf.contracts.facts`）:
@@ -114,7 +114,7 @@ Pull Request では差分が NDF の検査の入力（ワークフローの `NDF
 数字だけは整数、ほかは文字列として条件にする。配列の値は 1 行に 1 要素で出す。`ndf contracts check` は、事実の表の `ref` の先・停止理由の表・
 上限の設定・スキーマ・コントラクトのバージョンをまとめて確かめ、誤りがあれば `stopped`（`invalid`）で止まる。
 
-hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しない。hook が読む表（`contracts/limits.json`・`contracts/hooks/*.json`）は
+hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しない。hook が読む表（`contracts/limits/`・`contracts/hooks/*.json`）は
 `ndf.domains.hooks.tables` が標準ライブラリの `json` で直に読み、形は CI のテストが確かめる。
 
 ### 事実の重複の規則
@@ -209,7 +209,7 @@ for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 �
 | IA5 | `scripts/measure/ai-smells.py` の数え方は、作り直しの前の計測（2026-11-13）から後の測り直しまで変えない | 振り返りで前の出力と見比べる |
 | I-DT1 | 1 つの事実は、1 つの表か 1 つの持ち主のモジュールの定数にだけ文字列で書かれる。ほかは引くか import する | `ndf check` の `const-fact` が落とす |
 | I-DT2 | 表は `contracts/facts/fact.schema.json` と列の設定から作る行の形を満たし、`id` が表の中で重ならない。表の名前は 2 つの保存先で重ならない | `ndf check` の `fact-table` が落とす。実行時の読み手は `FactsError` で止まる |
-| I-DT3 | 表の列の `ref` が指す値は、相手（`limits.json` の方針か別の表の `id`）にある | `ndf contracts check` が `invalid` で止まる。コントラクトの写しで `check_all()` が空であることをテストが確かめる |
+| I-DT3 | 表の列の `ref` が指す値は、相手（`contracts/limits/` の方針か別の表の `id`）にある | `ndf contracts check` が `invalid` で止まる。コントラクトのコピーで `check_all()` が空であることをテストが確かめる |
 
 ## データ・設定
 
@@ -310,7 +310,7 @@ pylint の `R0801` でコピーの重複を見る（依存が増える）。
 ### 決定 41: 外部の呼び出しを件数に比例させないため、ループの中の `gh`・`git` を 1 回のクエリへまとめ、まとめない箇所には上限を抑制コメントに残す
 
 番号やブランチごとの GitHub の読み取りは、GraphQL のフィールドのエイリアスで 1 回のクエリにまとめる（`ndf.adapters.github` の `aliased`。
-1 回にまとめる件数は `limits.json` の `github.graphql-batch`）。まとめる部品はアダプターに置き、コンテキストのモジュールに書かない。
+1 回にまとめる件数は `contracts/limits/` の `github.graphql-batch`）。まとめる部品はアダプターに置き、コンテキストのモジュールに書かない。
 ループが上限の小さい回数で済む箇所は直さず `# noqa: NDF201 上限: <件数と根拠>` を残す。PR へのコメントのように 1 回へまとめられない書き込みは、
 境界の種類「外部コマンド」か「ネットワーク」の抑制コメントに理由を書く。
 
@@ -370,7 +370,7 @@ import 1 つで済むものにファイルと読み手の呼び出しが増え�
 
 読み手は表を 1 プロセスに 1 回読み（`contracts.cached_reader`）、共通の形と列の設定から作った行の形を確かめ、合わなければ `FactsError` で止まる。
 表ごとの読み手を作らず、部分集合は `ids(name, **where)` の条件で引いて定数へ写さない。hook の経路は `ndf.contracts` を import せず、
-hook の表（`contracts/limits.json`・`contracts/hooks/*.json`）を標準ライブラリの `json` で読む（`ndf.domains.hooks.tables`）。
+hook の表（`contracts/limits/`・`contracts/hooks/*.json`）を標準ライブラリの `json` で読む（`ndf.domains.hooks.tables`）。
 
 採らなかった案: 実行時の読み手を標準ライブラリの `json` だけにし、形の検査を CI に任せる（hook の経路は自分の表を `json` で読むので、ほかの読み手まで縛る理由が無い）。
 `pydantic` で表ごとに型付きの読み手を作る（読み方が表の数だけ増える）。
@@ -443,7 +443,7 @@ hook の表（`contracts/limits.json`・`contracts/hooks/*.json`）を標準ラ�
 - IA1: 兆候を 1 件足したツリーで `ndf check` が `stopped`・`check_failed`・終了コード 1 を返し、構文の誤りのある `.py` では `invalid`・終了コード 2 を返す
 - I-DT1: 事実の表の `id` を 2 つ含む集まりの定数か、`id` に等しい 4 字以上の文字列の定数を足すと `const-fact` が落とす。`shared_names` が真の表では落とさない。2 つのファイルの同じ文字列・同じ集まり・含まれる集まり・要素・同じ名前と数の定数を、それぞれの種類で落とす
 - I-DT2: `id` の重なる表・列の型の違う行・設定に無い列を持つ行・2 つの保存先で名前の重なる表を `fact-table` が落とし、実行時の読み手は `FactsError` で止まる
-- I-DT3: 列の `ref` の先に無い値（`limits.json` に無い方針・別の表に無い `id`）を `ndf contracts check` が誤りに挙げ、コントラクトの写しでは誤りが 0 件である
+- I-DT3: 列の `ref` の先に無い値（`contracts/limits/` に無い方針・別の表に無い `id`）を `ndf contracts check` が誤りに挙げ、コントラクトのコピーでは誤りが 0 件である
 - 値を足すときに直すファイルが 1 つになる: ランタイムの表に行を 1 つ足すだけで、`default_seat` の条件で引く読み手の結果に現れる
 - シェルの読み手: `ndf contracts fact-ids exit-codes status=gate` が条件に合う `id` だけを改行区切りで返し、`fact-value` が配列を 1 行に 1 要素、真偽を `true`・`false` で返す
 - IA5: `scripts/measure/ai-smells.py` の出力を読む側のテストは置かない。測り直しで前の値と並べて残す
@@ -455,4 +455,4 @@ hook の表（`contracts/limits.json`・`contracts/hooks/*.json`）を標準ラ�
 - `plugins/ndf/src/ndf/checks/README.md`: `ndf check` の規則の全体（構造・子の表・規約・禁止語・不変条件）
 - `plugins/ndf/src/ndf/checks/rules.json`・`plugins/ndf/contracts/facts/fact.schema.json`: 規則のデータと表の共通の形
 - [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md): Skill の入出力・起動スクリプト・手書きの引数の表
-- [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md): 上限の設定（`limits.json`）
+- [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md): 上限の設定（`contracts/limits/`）

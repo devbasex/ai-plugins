@@ -24,7 +24,7 @@ from ndf.core.durable_locks import maint_lock, sa
 # 殻（durable）から分けた後も、片付けのログは殻の logger に出す
 log = logging.getLogger("ndf.core.durable")
 
-# retired/・broken/ と URL の終わった実行を消すまでの日数の方針（contracts/limits.json）
+# retired/・broken/ と URL の終わった実行を消すまでの日数の方針（contracts/limits/）
 KEEP = "durable.keep"
 # quick_check と片付けの走査の間隔（決定 82・83）
 CHECK_INTERVAL = timedelta(hours=24)

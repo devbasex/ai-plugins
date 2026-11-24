@@ -24,12 +24,12 @@ CPUS_PER_RUN = 4
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
 FLOOR_RATIO = 0.10
-# 待ちの上限の既定の方針（contracts/limits.json）
+# 待ちの上限の既定の方針（contracts/limits/）
 WAIT_POLICY = "test-slots.wait"
 
 
 def test_weight_mib() -> int:
-    """テスト 1 本の重み（`contracts/limits.json` の `launch.weight.test`）。"""
+    """テスト 1 本の重み（`contracts/limits/launch.weight.test.json`）。"""
     return slot_pool.weight_mib("test")
 
 

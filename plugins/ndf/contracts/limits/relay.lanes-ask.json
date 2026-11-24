@@ -1,0 +1,7 @@
+{
+  "summary": "計画のレーンの質問を計画のリクエストとして載せるサブコマンド（ndf lanes question）を待つ上限",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
+}

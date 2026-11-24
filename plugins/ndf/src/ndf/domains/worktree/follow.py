@@ -19,7 +19,7 @@ from ndf.adapters.git import Git
 from ndf.contracts import limits
 from ndf.domains.worktree import ndf_settings, mainlock, repo, session_decide
 
-# セッションの開始で排他を待つ上限の方針（contracts/limits.json）
+# セッションの開始で排他を待つ上限の方針（contracts/limits/）
 LOCK_POLICY = "worktree.follow-lock"
 
 

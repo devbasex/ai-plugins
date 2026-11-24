@@ -1,6 +1,7 @@
 """hook の予算の読み手と、上限の順序の検査（#3345 の決定 90・IH3）。
 
-予算は `limits.json` の `hook.budget.<事象>`（ランタイムで違う事象は `hook.budget.<事象>.<ランタイム>` が先）にある。
+予算は上限の設定の方針 `hook.budget.<イベント>`（ランタイムで違うイベントは `hook.budget.<イベント>.<ランタイム>` が先）にある。
+使う方針のファイルだけを読む（hook の起動のたびに全件を読まない）。
 検査はキーをまたぐ順序を見る（JSON Schema では書けない）:
 
 - guard の部品の上限（guard の表の `limits` の秒）≤ 締め切り − 余白
@@ -17,7 +18,7 @@ from typing import Any, Optional
 
 from ndf.domains.hooks import tables
 
-# Budget の値のキー（limits.json の hook.budget.* の行が持つもの）
+# Budget の値のキー（hook.budget.* の方針が持つもの）
 BUDGET_KEYS = ("p95_ms", "deadline", "margin", "timeout", "inject_chars")
 
 
@@ -38,18 +39,32 @@ class Budget:
         return self.deadline - self.margin
 
 
-def budget_for(runtime: str, event: str) -> Optional[Budget]:
-    """事象の予算。コントラクト表に無い事象と、予算の行が欠けた事象は None。"""
+def _budget_policy(runtime: str, event: str) -> Optional[tuple[str, Optional[dict[str, Any]]]]:
+    """イベントの予算の方針の名前と中身（ランタイム固有の方針が先）。コントラクト表に無いイベントは None。"""
     spec = tables.event_spec(runtime, event)
     if spec is None:
         return None
     specific = f"hook.budget.{spec['budget']}.{runtime}"
     common = f"hook.budget.{spec['budget']}"
-    own = tables.policy_row(specific)
-    name, row = (specific, own) if own is not None else (common, tables.policy_row(common))
+    own = tables.policy(specific)
+    return (specific, own) if own is not None else (common, tables.policy(common))
+
+
+def budget_for(runtime: str, event: str) -> Optional[Budget]:
+    """事象の予算。コントラクト表に無い事象と、予算の行が欠けた事象は None。"""
+    found = _budget_policy(runtime, event)
+    if found is None:
+        return None
+    name, row = found
     if row is None or any(k not in row for k in BUDGET_KEYS):
         return None
     return Budget(name, *(row[k] for k in BUDGET_KEYS))
+
+
+def missing_budget(runtime: str, event: str) -> str:
+    """予算の無いイベントの文。直す先のファイルを示す。"""
+    found = _budget_policy(runtime, event)
+    return f"{runtime} の {event} の予算が {tables.policy_path(found[0]) if found else 'コントラクト表'} に無い"
 
 
 def budget_registrations(runtime: Optional[str] = None) -> list[dict[str, Any]]:
@@ -106,8 +121,8 @@ def _pair_errors(guard: dict[str, Any], runtime: str, event: str) -> list[str]:
     """1 組（guard・ランタイム・事象）の破れの文。予算の行が無ければその文、あれば部品ごとの文（守れていれば空）。"""
     found = budget_for(runtime, event)
     if found is None:
-        return [f"{runtime} の {event} の予算が limits.json に無い"] if tables.event_spec(runtime, event) is not None else []
-    return [_component_error(guard["name"], name, tables.policy_row(name), found, runtime, event) for name in guard["limits"]]
+        return [missing_budget(runtime, event)] if tables.event_spec(runtime, event) is not None else []
+    return [_component_error(guard["name"], name, tables.policy(name), found, runtime, event) for name in guard["limits"]]
 
 
 def _component_error(guard: str, name: str, row: Optional[dict[str, Any]], found: Budget, runtime: str, event: str) -> str:
@@ -117,7 +132,7 @@ def _component_error(guard: str, name: str, row: Optional[dict[str, Any]], found
     `hook.stop-wait.judge` は Claude Code だけでモデルを呼ぶ）。
     """
     if row is None:
-        return f"{guard} の部品の上限 {name} が limits.json に無い"
+        return f"{guard} の部品の上限 {tables.policy_path(name)} が無い"
     runtimes = row.get("runtimes")
     if runtimes is not None and runtime not in runtimes:
         return ""

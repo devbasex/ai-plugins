@@ -1,0 +1,10 @@
+{
+  "summary": "停止理由 transient（5xx・接続の切断・Cloudflare の HTML の 403・529 overloaded・secondary rate limit）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒",
+  "attempts": 5,
+  "interval": 2,
+  "factor": 2,
+  "max_interval": 60,
+  "read_by": [
+    "ndf.contracts.causes"
+  ]
+}

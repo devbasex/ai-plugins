@@ -1,0 +1,8 @@
+{
+  "summary": "会話の記録の末尾を読む大きさ（バイト）。最後の応答と文脈の量が入る大きさ",
+  "count": 262144,
+  "read_by": [
+    "ndf.domains.hooks.main",
+    "ndf.domains.relay.hub"
+  ]
+}

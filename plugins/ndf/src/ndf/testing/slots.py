@@ -58,9 +58,9 @@ SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
 # スロットとメモリを確かめる間隔
 POLL_SECONDS = 2.0
-# 1 回の下限割れで止めた後、次に止めるまで空ける秒の方針（contracts/limits.json。I6）
+# 1 回の下限割れで止めた後、次に止めるまで空ける秒の方針（contracts/limits/test-slots.stop-interval.json。I6）
 STOP_INTERVAL = "test-slots.stop-interval"
-# テストの組を止める猶予と間隔の方針（contracts/limits.json）
+# テストの組を止める猶予と間隔の方針（contracts/limits/procs.stop-test.json）
 STOP_TEST = "procs.stop-test"
 STOP_FILE = "stop.json"
 

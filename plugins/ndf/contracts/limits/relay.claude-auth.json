@@ -1,0 +1,7 @@
+{
+  "summary": "claude auth のサブコマンドの上限",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.relay.account_login"
+  ]
+}

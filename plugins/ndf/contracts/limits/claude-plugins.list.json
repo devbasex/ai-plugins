@@ -1,0 +1,7 @@
+{
+  "summary": "導入済みのプラグインの一覧（claude plugin list）を読む時間の上限の秒（#3617）",
+  "seconds": 30,
+  "read_by": [
+    "ndf.adapters.claude"
+  ]
+}

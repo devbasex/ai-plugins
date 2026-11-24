@@ -1,0 +1,8 @@
+{
+  "summary": "トークンを更新する API の応答を、更新の排他の中で待つ上限（決定 4）",
+  "seconds": 3,
+  "read_by": [
+    "ndf.domains.relay.account_dir",
+    "ndf.domains.relay.accounts"
+  ]
+}

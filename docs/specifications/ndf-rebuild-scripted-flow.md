@@ -16,7 +16,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 | 2 | 遷移の判断がステップの `on_cause` `{"test_failed": "repeat-check", "base_conflict": "base-sync"}` を引き、`repeat-check`（`ndf route repeat`。同じ原因の続いた回数を数える）へ進む。`summary` の文は読まない |
 | 3 | 選んだルートを選択の記録 `{"event": "route_chosen", "rule": "R03", "chooser": "script", "from": "ci", "to": "repeat-check", "cause": "test_failed", …}` として状態の保存先の `progress.jsonl` へ 1 行書く |
 | 4 | `repeat-check` の後に worker の `ci-fix`、落ちたテストだけを手元で打つ `ci-local`、`push-fixed` を通り、`ci` へ戻る |
-| 5 | Runner が付かず `ndf ci watch` が `infra_wait` で止まったら、`on_cause` に無いので表の既定のルート `retry` を引き、上限の宣言 `cause.infra-wait`（3 回・600 秒から倍）の待ちの後に同じステップを打ち直す。打ち直しはステップの数に数えない |
+| 5 | Runner が付かず `ndf ci watch` が `infra_wait` で止まったら、`on_cause` に無いので表の既定のルート `retry` を引き、上限の設定 `cause.infra-wait`（3 回・600 秒から倍）の待ちの後に同じステップを打ち直す。打ち直しはステップの数に数えない |
 | 6 | 3 回を使い切ると表の `exhausted`（`step`）へ進む。`ci` は `on_fail` を持たないので conductor へ戻り、プランの結果は `infra_wait` の `stopped` と、止まったステップから続ける `next`（`ndf plan next <プラン> --from ci`）を持つ |
 | 7 | 同じ原因が上限（`supervise.step-rerun` の `same_cause` 2 回）を超えて続けば、`ndf route repeat` が `fix_limit` で止まり、表の既定のルート `human` で人へ戻る |
 
@@ -24,9 +24,9 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 
 | 要素 | 責務 |
 | --- | --- |
-| 停止理由の表（`plugins/ndf/contracts/causes.json`） | 種類ごとの意味・標準の誤りの型・終了コード（終了コードの表の id）・既定のルート・再試行の方針の名前・打ち直さないときのルート。データだけを持つ |
+| 停止理由の表（`plugins/ndf/contracts/causes/`） | 種類ごとの意味・標準の誤りの型・終了コード（終了コードの表の id）・既定のルート・再試行の方針の名前・打ち直さないときのルート。データだけを持つ |
 | 形（`contracts/schemas/causes.schema.json`・`result.schema.json`・`route-chosen.schema.json`） | 表・結果 JSON（`cause`・`routes` を含む）・選択の記録の JSON Schema |
-| 終了コードの表（`contracts/facts/exit-codes.json`）・上限の宣言（`contracts/limits.json`） | 終了コードの値と区分、再試行の方針 `cause.<名前>` の回数・間隔・倍率・頭打ち。値はそれぞれここだけが持つ |
+| 終了コードの表（`contracts/facts/exit-codes.json`）・上限の設定（`contracts/limits/`） | 終了コードの値と区分、再試行の方針 `cause.<名前>` の回数・間隔・倍率・頭打ち。値はそれぞれここだけが持つ |
 | 回答の語彙（`contracts/facts/answers.json`） | 結果 JSON の `routes` のキーとプランの `on_answer` の回答に使える語 |
 | `ndf.contracts.causes` | 表の唯一の読み手。`cause` を組んで確かめ、種類から終了コードと方針を引く。ステートマシンの打ち直しの秒（`retry_delay`） |
 | `ndf.contracts.routing` | ルートを選ぶ純粋な関数 `pick` と待ちの計算 `backoff`。ルートの選び方はここだけが持つ |
@@ -80,21 +80,23 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 
 ### 停止理由の表
 
-`contracts/causes.json` は `owner` と `causes` の配列を持つ。1 行は `kind`・`meaning`・`std_type`・`exit`・`route`・`retry` を必ず持ち、
-`route` が `retry` の行は `exhausted` を、利用上限の行は `requires_retry_after: true` を持つ。33 種類あり、既定のルートで分けると次のとおりである。
+`contracts/causes/` は種類 1 つを 1 つのファイル（`<種類>.json`）に持ち、`_meta.json` が `owner` を持つ。1 つの種類は
+`meaning`・`std_type`・`exit`・`route`・`retry` を必ず持ち、`kind` はファイル名（拡張子 `.json` を除く）から読み手が足す。
+`route` が `retry` の種類は `exhausted` を、利用上限の種類は `requires_retry_after: true` を持つ。37 種類あり、既定のルートで
+分けると次のとおりである。
 
 | 既定のルート（`route` → `exhausted`） | 種類 |
 | --- | --- |
-| `step`（`on_fail` のステップ。無ければ conductor） | `test_failed`・`check_failed`・`push_rejected`・`base_conflict`・`work_stopped`・`unreviewed` |
+| `step`（`on_fail` のステップ。無ければ conductor） | `test_failed`・`check_failed`・`push_rejected`・`base_conflict`・`work_stopped`・`unreviewed`・`samples_mismatch` |
 | `retry` → `step` | `ci_pending`（`cause.ci-pending`）・`infra_wait`（`cause.infra-wait`）・`transient`（`cause.transient`）・`store_busy`（`cause.store-busy`）・`store_unreachable`（`cause.store-unreachable`） |
 | `retry` → `human`（`retry_after` があるときだけ打ち直す） | `usage_limit`（`cause.usage-limit`。1 回の待ちの頭打ちは `supervise.limit-wait-max`） |
 | `conductor`（会話の AI が結果の `next`・`routes` から次の手を選ぶ） | `incomplete`・`not_applicable`・`invalid`・`wait_timeout`・`interrupted`・`input_missing`・`bad_report`・`unknown` |
-| `human`（人へ問う） | `fix_limit`・`deploy_failed`・`precondition`・`deps_missing`・`refused`・`not_ci`・`needs_human`・`config_broken`・`store_broken`・`store_in_use`・`restore_unsupported`・`format_newer`・`format_mismatch` |
+| `human`（人へ問う） | `fix_limit`・`deploy_failed`・`precondition`・`deps_missing`・`refused`・`not_ci`・`needs_human`・`config_broken`・`store_broken`・`store_in_use`・`restore_unsupported`・`format_newer`・`format_mismatch`・`account_unavailable`・`merge_method`・`spin` |
 
 - `std_type` は Serverless Workflow DSL 1.0.3 の標準の誤りの型 8 つ（configuration・validation・expression・authentication・authorization・timeout・communication・runtime）のどれかである
 - `exit` は終了コードの表の、`status` が `stopped` の行の id（`failed` 1・`unreadable` 2・`precondition` 3・`base_conflict` 4・`cd_failed` 5・`incomplete` 6・`deps_missing` 69・`infra_wait` 75）を指す。値は終了コードの表だけが持ち、読み手が引き直す
 - 終了コードは結果の `status` の区分を表すだけで、ルートの判定に使わない。終了コード 3 は前提の欠け・正常な否定の結果・待ちの上限など 8 種類が共有し、プランは種類で分ける
-- `retry` は上限の宣言の方針の名前で、方針は `attempts` を持ち、`retry_after` を待たない種類は `interval` も持つ（読み手が確かめる）
+- `retry` は上限の設定の方針の名前で、方針は `attempts` を持ち、`retry_after` を待たない種類は `interval` も持つ（読み手が確かめる）
 
 ### 結果 JSON の `cause` と `routes`
 
@@ -116,7 +118,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 | --- | --- | --- |
 | `on_cause` | `{"<種類>": "<ステップの id>" \| "end" \| "stop" \| "retry"}` | 種類ごとのルート。当て順の最初に引く |
 | `on_fail` | ステップの id | 既定のルートが `step` の種類（と打ち直しを使い切った後の `exhausted: step`）が進むステップ |
-| `retry` | `{"<種類>": {"attempts", "interval", "factor", "max_interval"}}` | 再試行の方針をこのステップだけ上書きする。キーは上限の宣言の方針と同じ |
+| `retry` | `{"<種類>": {"attempts", "interval", "factor", "max_interval"}}` | 再試行の方針をこのステップだけ上書きする。キーは上限の設定の方針と同じ |
 | `exit_cause` | `{"<終了コード>": "<種類>"}` | 結果 JSON を出さないコマンド（`sh -c`・`git` など）の終了コードを種類に対応づける。結果 JSON を出したステップでは読まない |
 | `on_answer` | `{"<回答>": "<ステップの id>" \| "end" \| "stop"}` | 承認ゲートを返したステップの、回答ごとのルート。無ければプランを承認ゲートで終える |
 
@@ -239,7 +241,7 @@ R27 は判定が会話の本文に残って Tool の呼び出しにならない�
 | IS2 | 結果 JSON | `stopped` は必ず `cause` を持ち、`ok` と `gate` は持たない | `result.schema.json` の `allOf` で `emit` が出さない |
 | IS3 | プランの実行 | `on_cause`・`retry`・`exit_cause` の種類は表にあり、`next`・`on_fail`・`on_cause`・`on_answer` のルートはステップの id か許した語（`on_cause` は `end`・`stop`・`retry`、ほかは `end`・`stop`）で、`on_answer` の回答は回答の語彙にある | `model.parse` が `PlanError` で流す前に断る |
 | IS4 | プランの実行 | 止まったステップのルートは「当て順」の 1〜5 の順で最初に当たったもので決まる。既定のルートが `conductor`・`human` の種類は `on_fail` へ進まない | `routing.pick` だけがルートを返し、遷移の判断はほかに分岐を持たない |
-| IS5a | プランの実行 | 打ち直しの回数は、種類ごとの方針（ステップの `retry` か上限の宣言）の `attempts` を超えない | `pick` が上限に当たった後は `retry` を返さない |
+| IS5a | プランの実行 | 打ち直しの回数は、種類ごとの方針（ステップの `retry` か上限の設定）の `attempts` を超えない | `pick` が上限に当たった後は `retry` を返さない |
 | IS5b | プランの実行 | 打ち直しを使い切った後のルートは表の `exhausted` で決まる | IS4 と同じ関数が返す |
 | IS6a | 判断の呼び出し | 選択肢のモードの回答は `decision`・`reason`・`basis` の形に合い、`decision` が選択肢の中にある | 1 回だけ打ち直し、なお合わなければ `needs_human` で止まる |
 | IS6b | 判断の呼び出し | 任意の JSON のモードの回答は、渡したスキーマだけに合えばよい | IS6a と同じ |
@@ -257,7 +259,7 @@ R27 は判定が会話の本文に残って Tool の呼び出しにならない�
 止まったときに読む値が `summary` と出力の文しかないと、AI が文を読んでルートを決める（R01）。種類を 1 語で返せば、プランと
 ステートマシンは語の一致だけで表を引ける。項目は `kind`・`detail`・`instance` の形にし、Serverless Workflow の `Error` と
 RFC 9457 の Problem Details（種類と人の読む文を分け、知らない拡張の項目は受け手が無視する）にそろえる。種類の語彙は表のデータ
-（`contracts/causes.json`）にだけ置き、コードは種類を `cause("<種類>", …)` の引数の文字列でだけ書く（[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) の決定 42）。
+（`contracts/causes/`）にだけ置き、コードは種類を `cause("<種類>", …)` の引数の文字列でだけ書く（[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) の決定 42）。
 
 - 採らなかった案: `metrics` の中に種類を置く。`metrics` の中身はスクリプトごとに自由で、形の検査（IS1）を掛けられない
 - 採らなかった案: 種類を URI（標準の `type`）で持つ。NDF の中で読み書きする語が長くなり、標準との対応は表の `std_type` の列で足りる
@@ -288,7 +290,7 @@ AWS Step Functions の `Retry` → `Catch` のように当てる順を決めた�
 
 10 系で基盤の待ちの文を読んだ回は 408 回、`gh run rerun` の手打ちは 27 回あった（R09）。いずれも待ってから同じステップを打ち直せば
 済む。Temporal の再試行の方針と同じく、待てば解ける種類（`ci_pending`・`infra_wait`・`transient`・`store_busy`・`store_unreachable`・`usage_limit`）
-だけに打ち直しを持たせ、ほかは打ち直さない。回数と間隔の値は上限の宣言の `cause.<名前>` にだけ置き、表は方針の名前だけを持つ。
+だけに打ち直しを持たせ、ほかは打ち直さない。回数と間隔の値は上限の設定の `cause.<名前>` にだけ置き、表は方針の名前だけを持つ。
 待ちはステップの再試行ではなく、プランの耐久ワークフローの中の受信待ち（`durable.recv`）で行う。ステップは 1 回の試行ごとに記録を
 残すため、再試行をステップの中に隠すと試行の記録が 1 つにまとまる。ステートマシンの `work` も同じ方針の秒（`causes.retry_delay`）で打ち直す。
 
@@ -363,7 +365,7 @@ workflow と LangGraph の条件つきの辺のとおり、流れはコードが
 
 テストは `plugins/ndf/tests/contracts/`（`test_causes.py`・`test_routing.py`・`test_result.py`・`test_chosen.py`）・`tests/core/plan/`・`tests/adapters/test_llm.py` が持つ。
 
-- 表の各行が標準の型と `stopped` の終了コードの id を持ち、終了コードの値は終了コードの表にだけある。打ち直しの種類の方針が上限の宣言にあり、`interval` の無い方針は `retry_after` を待つ種類だけが持てる（IS10・IS11）
+- 表の各項目が標準の型と `stopped` の終了コードの id を持ち、終了コードの値は終了コードの表にだけある。打ち直しの種類の方針が上限の設定にあり、`interval` の無い方針は `retry_after` を待つ種類だけが持てる（IS10・IS11）
 - 表に無い `kind`・空の `detail`・`ok` に添えた `cause`・`cause` の無い `stopped`・種類と違う終了コード・`gaps` があるのに `incomplete` でない結果・`routes` の無い承認ゲート・回答の語彙に無い `routes` のキーを、`emit` が出さずに 2 で終える（IS1・IS2・IS9・IS12）
 - `pick` は `on_cause` を最初に当て、`on_cause` の `retry` は種類の方針で打ち直す。打ち直しは回数の内で行い、上限の後は `exhausted` へ進む。呼び手が解いた方針を種類の既定より優先する（IS4・IS5a・IS5b）
 - `usage_limit` は `retry_after` が無ければ人へ、`transient` は倍の間隔で打ち直して人へ止まらない。既定が `conductor`・`human` の種類は `on_fail` を見ない。既定が `step` の種類は `on_fail`、無ければ `conductor` へ進む（IS4・IS8）
@@ -378,5 +380,5 @@ workflow と LangGraph の条件つきの辺のとおり、流れはコードが
 ## 関連リンク
 
 - [ndf-rebuild.md](ndf-rebuild.md)（作り直しの索引・子の記号・番号の対応表）・[ndf-rebuild-measure.md](ndf-rebuild-measure.md)（物差し G1〜G3 と規則の表）・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)（DBOS の殻・決定 65）・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)（判定データと事実の表）・[ndf-rebuild-review-scope.md](ndf-rebuild-review-scope.md)（11.0.0 と 11.x の範囲）
-- `plugins/ndf/contracts/causes.json`・`plugins/ndf/contracts/schemas/result.schema.json`・`plugins/ndf/contracts/schemas/route-chosen.schema.json`・`plugins/ndf/docs/contracts/exit-codes.md`
+- `plugins/ndf/contracts/causes/`・`plugins/ndf/contracts/schemas/result.schema.json`・`plugins/ndf/contracts/schemas/route-chosen.schema.json`・`plugins/ndf/docs/contracts/exit-codes.md`
 - [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3152](https://github.com/devbasex/ai-plugins/issues/3152)（AI の判断からスクリプトへ）・[#3153](https://github.com/devbasex/ai-plugins/issues/3153)（CI の監視の読み違い）・[#3092](https://github.com/devbasex/ai-plugins/issues/3092)（ステートマシン）・[#3395](https://github.com/devbasex/ai-plugins/issues/3395)（選択の記録）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）

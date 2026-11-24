@@ -58,7 +58,7 @@ WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
-# 承認の回答を 1 回に待つ秒の方針（contracts/limits.json）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
+# 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
 ANSWER_WAIT = "supervise.answer-wait"
 POLL = durable.POLL
 

@@ -1,0 +1,7 @@
+{
+  "summary": "hook の計測の記録を残す秒（14 日）。SessionStart のエントリポイントだけが古い日のファイルを消す（決定 94）",
+  "seconds": 1209600,
+  "read_by": [
+    "ndf.domains.hooks.metrics"
+  ]
+}

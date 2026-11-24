@@ -1,0 +1,8 @@
+{
+  "summary": "外から耐久ワークフローを待つ問い合わせの間隔",
+  "interval": 1,
+  "read_by": [
+    "ndf.core.plan.cli",
+    "ndf.progress.run"
+  ]
+}

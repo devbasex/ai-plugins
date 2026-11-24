@@ -1,0 +1,7 @@
+{
+  "summary": "キーチェーンを読むコマンドの上限",
+  "seconds": 2,
+  "read_by": [
+    "ndf.adapters.training_cache"
+  ]
+}

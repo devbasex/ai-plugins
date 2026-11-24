@@ -1,0 +1,8 @@
+{
+  "summary": "排他つきで 1 行足すときのロックの待ちの上限",
+  "seconds": 5,
+  "read_by": [
+    "ndf.domains.loop.acceptance",
+    "ndf.domains.records.jsonl"
+  ]
+}

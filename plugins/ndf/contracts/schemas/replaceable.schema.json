@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "replaceable.schema.json",
+  "title": "置き換えの規則 1 件",
+  "description": "lock の部品で置き換えられる自作を構文木で見つける形と、置き換えの先。contracts/replaceable/<名前>.json の 1 ファイルが 1 規則で、ndf check の規則 budget が数える",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "find", "replace_with", "exempt"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "description": "見つける自作と、置き換えの先の 1 文"},
+    "find": {
+      "description": "構文木で見つける形。kind ごとに持つキーが違う",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": {"const": "call", "description": "呼び先の名前が name と同じ呼び出し"},
+            "name": {"type": "string", "minLength": 1, "description": "点で区切った呼び先の名前（例: fcntl.flock）"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "separator"],
+          "properties": {
+            "kind": {"const": "join", "description": "文字列リテラル separator の join の呼び出し"},
+            "separator": {"type": "string", "minLength": 1, "description": "join を呼ぶ文字列リテラル（例: \" | \"）"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "callee"],
+          "properties": {
+            "kind": {"const": "loop", "description": "本体に try と callee の呼び出しを持つ for・while の繰り返し"},
+            "callee": {"type": "string", "minLength": 1, "description": "呼び先の名前の最後の部分（例: sleep）"}
+          }
+        }
+      ]
+    },
+    "replace_with": {"type": "string", "minLength": 1, "description": "置き換えの先の依存の名前"},
+    "exempt": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true,
+      "description": "数えない保存先（プラグインの根からの相対のパス）。hook の経路のように標準ライブラリだけで動く縛りがあって置き換えられないもの"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "meaning": "テストのチェック（CI か手元）が落ちた",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "step",
+  "retry": null
+}

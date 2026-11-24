@@ -1,0 +1,11 @@
+{
+  "summary": "hook の予算（PermissionRequest）",
+  "p95_ms": 100,
+  "deadline": 1,
+  "margin": 0.5,
+  "timeout": 3,
+  "inject_chars": 600,
+  "read_by": [
+    "ndf.domains.hooks.budget"
+  ]
+}

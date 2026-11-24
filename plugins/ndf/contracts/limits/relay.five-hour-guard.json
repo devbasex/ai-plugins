@@ -1,0 +1,8 @@
+{
+  "summary": "閾値 A。5 時間の窓の使用率がこれ以上のアカウントを使い切りの組に入れ、見回りで替える（百分率。#3864 の決定 5）",
+  "count": 85,
+  "read_by": [
+    "ndf.domains.relay.account_choice",
+    "ndf.domains.relay.cli"
+  ]
+}

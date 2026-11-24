@@ -29,8 +29,8 @@ def rules_of(readers=(), dynamic=(), whole=(), tables=("ndf.contracts.limits.tab
 
 
 def source_in(base: Path):
-    """保存先 `base` のコントラクトのファイルを返す関数。"""
-    return lambda rel: Source(base / rel, rel)
+    """保存先 `base` のコントラクトのファイルの値を返す関数。"""
+    return lambda rel: Source(base / rel, rel).contract("動的な読み口の語彙を読めない")
 
 
 def synthetic(tmp_path, files: dict[str, str], rules=None):
@@ -297,8 +297,8 @@ def with_limits(plugin):
     """上限の設定を `policies` にした plugin。"""
 
     def write(**policies):
-        rows = {name.replace("_", "."): row for name, row in policies.items()}
-        plugin.write("contracts/limits.json", json.dumps({"owner": "o", "policies": rows}, indent=1))
+        for name, row in policies.items():
+            plugin.write(f"contracts/limits/{name.replace('_', '.')}.json", json.dumps(row, indent=1))
         return plugin
 
     return write
@@ -312,8 +312,8 @@ def findings(plugin, rules=None) -> list[tuple[str, int, str]]:
 
 def test_declared_returns_the_readers_of_each_policy(with_limits):
     plugin = with_limits(a_b=policy("ndf.m"), c_d=policy("ndf.m", "ndf.n"))
-    raw = json.loads((plugin.root / "contracts/limits.json").read_text())
-    assert limits_readers.declared(limits.validate(raw)) == {"a.b": frozenset({"ndf.m"}), "c.d": frozenset({"ndf.m", "ndf.n"})}
+    settings = plugin.scope().limit_settings
+    assert limits_readers.declared(settings.policies) == {"a.b": frozenset({"ndf.m"}), "c.d": frozenset({"ndf.m", "ndf.n"})}
 
 
 def test_no_findings_when_the_readers_match(with_limits):
@@ -325,7 +325,7 @@ def test_no_findings_when_the_readers_match(with_limits):
 def test_a_declared_reader_that_does_not_read_is_unread(with_limits):
     plugin = with_limits(a_b=policy("ndf.m"))
     [(path, line, detail)] = findings(plugin)
-    assert path == "limits.json" and line == 4
+    assert path == "a.b.json" and line == 4
     assert detail.startswith("unread:") and "a.b" in detail and "ndf.m" in detail
 
 
@@ -351,7 +351,7 @@ def test_a_policy_outside_the_vocabulary_of_a_dynamic_reader_is_unread(with_limi
     plugin.write("contracts/r.json", json.dumps(BUDGETS))
     plugin.write("src/ndf/budget.py", BUDGET_CODE)
     [(path, _, detail)] = findings(plugin, rules_of(dynamic=DYNAMIC))
-    assert path == "limits.json" and detail.startswith("unread:") and "hook.budget.unused" in detail
+    assert path == "hook.budget.unused.json" and detail.startswith("unread:") and "hook.budget.unused" in detail
 
 
 def test_broken_settings_stop_and_a_plugin_without_settings_is_skipped(plugin, with_limits):
@@ -360,12 +360,11 @@ def test_broken_settings_stop_and_a_plugin_without_settings_is_skipped(plugin, w
     with_limits(a_b={"summary": "s", "seconds": 1})
     with pytest.raises(CheckError, match="read_by"):
         findings(plugin)
-    plugin.write("contracts/limits.json", "{")
+    plugin.write("contracts/limits/a.b.json", "{")
     with pytest.raises(CheckError, match="上限の設定を読めない"):
         findings(plugin)
-    # 実行時の読み手と同じく、同じ方針を 2 つ書いた設定を断る
-    row = json.dumps(policy("ndf.m"))
-    plugin.write("contracts/limits.json", f'{{"owner": "o", "policies": {{"a.b": {row}, "a.b": {row}}}}}')
+    # 実行時の読み手と同じく、同じキーを 2 つ書いた方針を断る
+    plugin.write("contracts/limits/a.b.json", '{"summary": "s", "summary": "t"}')
     with pytest.raises(CheckError, match="同じキーが 2 つある"):
         findings(plugin)
 
@@ -395,11 +394,11 @@ def test_the_check_reads_each_contract_file_and_validates_the_limits_once(with_l
     monkeypatch.setattr(limits, "validate", lambda raw: validated.append(raw) or validate(raw))
     rules["limits"] = rules_of(dynamic=DYNAMIC)["limits"]
     run.check(plugin.scope(), rules)
-    assert sorted(opened) == ["a.schema.json", "limits.json", "r.json"] and len(validated) == 1
+    assert sorted(opened) == ["a.b.json", "a.schema.json", "r.json"] and len(validated) == 1
 
 
 @pytest.mark.usefixtures("synthetic_checks")
 def test_the_rule_runs_in_the_check(with_limits, rules):
     plugin = with_limits(a_b=policy("ndf.m"))
     rules["limits"] = rules_of()["limits"]
-    assert [f.path.rsplit("/", 1)[-1] for f in run.check(plugin.scope(), rules) if f.rule == "limit-readers"] == ["limits.json"]
+    assert [f.path.rsplit("/", 1)[-1] for f in run.check(plugin.scope(), rules) if f.rule == "limit-readers"] == ["a.b.json"]

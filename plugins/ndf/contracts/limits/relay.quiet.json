@@ -1,0 +1,7 @@
+{
+  "summary": "子の応答が止まってから次のセグメントへ切り替える・アカウントを替えるまでの静かな時間",
+  "seconds": 5,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
+}

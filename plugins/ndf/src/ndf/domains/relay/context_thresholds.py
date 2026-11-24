@@ -1,6 +1,6 @@
 """文脈の切り替えの 2 つの値（判断開始の値・運用上限）を 1 つの規則で解く（#3995 の決定 1・5）。
 
-値は上限の設定（`contracts/limits.json` の `context.decide-from`・`context.limit`）の 1 か所に置き、環境変数
+値は上限の設定（`contracts/limits/context.decide-from.json`・`contracts/limits/context.limit.json`）だけに置き、環境変数
 `NDF_CONTEXT_LIMIT` が運用上限を替える。判断開始の値が運用上限を上回れば同じ値へ下げる。上限の設定の引き方は
 呼び出し元が渡す（hook と `ndf relay context` は検証を通さず直に読む `hooks.tables.policy_value`。上限の設定の形は `ndf check`
 と CI が確かめる。中継のラッパーは `ndf.contracts.limits.value`）。判定の記録の語

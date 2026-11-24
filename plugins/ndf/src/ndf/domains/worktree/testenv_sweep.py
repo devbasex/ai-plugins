@@ -26,7 +26,7 @@ from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
 DEFAULT_TTL = "8h"
-# 公開を開く・閉じる操作の排他（割り当て表の隣の保存先）と、その待ちの上限の方針（contracts/limits.json）
+# 公開を開く・閉じる操作の排他（割り当て表の隣の保存先）と、その待ちの上限の方針（contracts/limits/）
 EXPOSE_LOCK = "expose.lock"
 EXPOSE_LOCK_POLICY = "worktree.expose-lock"
 

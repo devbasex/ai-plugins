@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 DB_NAME = "progress.sqlite"
 # ステートマシンの DB の検査の目印（保存先の中）
 CHECKED_MARK = "progress.checked"
-# 書き込みの待ちの上限の方針（contracts/limits.json）
+# 書き込みの待ちの上限の方針（contracts/limits/）
 BUSY_TIMEOUT = "progress.busy-timeout"
 # SQLite のエラーの文言で取り合い（StoreBusy）と破損（StoreBroken）を見分ける語
 BUSY_MARKERS = ("locked", "busy")

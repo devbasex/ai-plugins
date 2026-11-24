@@ -14,7 +14,7 @@ from pathlib import Path
 from ndf import slot_pool
 from ndf.contracts import limits
 
-# 記録を残す日数と行数、記録と停止の時刻のロックを待つ上限の方針（contracts/limits.json）
+# 記録を残す日数と行数、記録と停止の時刻のロックを待つ上限の方針（contracts/limits/）
 KEEP_DAYS = "test-slots.keep-days"
 KEEP_ROWS = "test-slots.keep-rows"
 RECORD_LOCK = "test-slots.record-lock"

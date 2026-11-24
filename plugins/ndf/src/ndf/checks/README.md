@@ -17,10 +17,10 @@ plugins/ndf/bin/ndf check
 | 違反が無い | `ok` | 無し | 0 |
 | 違反がある | `stopped` | `check_failed` | 1 |
 | 構文の誤りで読めない `.py` がある | `stopped` | `invalid` | 2 |
-| 規則のデータ・子の表・ラチェットの基準・用語集・git・PR の事象の JSON が読めない | `stopped` | `config_broken` | 2 |
+| 規則のデータ・子の表・ラチェットの基準・用語集・git・PR のイベントの JSON が読めない。コントラクトのファイルがプラグインの外を指す・コントラクトの下にディレクトリのリンクがある | `stopped` | `config_broken` | 2 |
 | `--write-spec` がラチェットの基準を書けない | `stopped` | `unknown` | 1 |
 
-`cause.detail` は `summary` と同じ文である。違反の一覧は `items`、規則ごとの件数は `metrics.findings` にある。
+`cause.detail` は `summary` と同じ文である。違反の一覧は `items`、規則ごとの件数は `metrics.findings` にある。途中の規則が止まった（`config_broken`）ときも、その前に当てた規則の違反は `items` に残る。
 
 ## 見る範囲
 
@@ -32,6 +32,9 @@ plugins/ndf/bin/ndf check
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public）・内部データの名前（種類のスキーマ） |
 | 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
+| 分ける表の一覧（`contracts/domains/split-tables.json`）が挙げる表のディレクトリ `contracts/<表>/` と項目のスキーマ `contracts/schemas/<表>.schema.json`、分ける前の 1 ファイル `contracts/<表>.json` | `contracts-split`（表が 1 項目 1 ファイルのままで、分ける前の 1 ファイルが残っていないか。一覧を持たないプラグインでは何も見ない） |
+| リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフロー・`pyproject.toml`・ランチャー（プラグインの外も見る） | `toolchain`（Python と uv の指定が配る構成の設定 `contracts/data/toolchain.json` と合うか。設定に `toolchain` が無ければ何も見ない） |
+| テストのファイル・製品のコード・リポジトリの設定（`.ndf/project.json` の `toolchain`）が挙げるワークフローと `pyproject.toml`（プラグインの外も見る） | `budget`（テストの関数・CI のジョブ・使われない依存・置き換えの規則 `contracts/replaceable/` に当たる箇所を数え、設定の `budget` の上限と比べる。件数は違反の有無にかかわらず `metrics.budget` に出す。上限のキーが無い項目は比べない）。`--only budget-ci-jobs` は、プラグインのファイルを読まずに CI のジョブの上限だけを比べる |
 
 ## 兆候の規則
 
@@ -118,7 +121,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `limit-readers` | 上限の設定（`contracts/limits.json`）の方針の読み手の指定（`read_by`）と、`src/` のコードが実際に方針を引くモジュールの食い違い。種類は `unread`（指定した読み手がその方針を引いていない。指摘は上限の設定の行）・`undeclared`（方針の `read_by` に無いモジュールが引いている。指摘は呼び出しの行）・`unresolved`（方針の名前を解けない読み口。指摘は呼び出しの行） |
+| `limit-readers` | 上限の設定（`contracts/limits/`）の方針の読み手の指定（`read_by`）と、`src/` のコードが実際に方針を引くモジュールの食い違い。種類は `unread`（指定した読み手がその方針を引いていない。指摘は方針のファイルの `read_by` の行）・`undeclared`（方針の `read_by` に無いモジュールが引いている。指摘は呼び出しの行）・`unresolved`（方針の名前を解けない読み口。指摘は呼び出しの行） |
 
 方針を足すときは、引くモジュールの名前を `read_by` に書く。どのコードからも引かれない方針は置けない。
 

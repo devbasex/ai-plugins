@@ -22,7 +22,7 @@
 
 `wait` は、`--after` の番号より後の計画の事象のうち、リクエストが開いた（`request_opened`）・計画が完了した（`plan_completed`）ものを
 すべて返す。閉じたリクエストは返さない。知らせが無くても、計画が終わった（完了か中止）か、まだ知らせていない止まり（`metrics.new_stalls`）が
-出たら返る。上限（`contracts/limits.json` の `parallel-wait.poll`）を過ぎたら知らせの無いまま同じ番号で返るので、`next` を打ち直す。
+出たら返る。上限（`contracts/limits/parallel-wait.poll.json`）を過ぎたら知らせの無いまま同じ番号で返るので、`next` を打ち直す。
 
 | 知らせ（`items` の `kind`・`payload.body.kind`） | すること |
 | --- | --- |

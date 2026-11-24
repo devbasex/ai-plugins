@@ -13,7 +13,7 @@ from ndf.contracts import limits
 from ndf.domains.records import files, jsonfile
 from ndf.domains.records import glossary_decide as gd
 
-# 設定に max_lines が無いときの 1 ファイルの上限の行数の方針（contracts/limits.json）
+# 設定に max_lines が無いときの 1 ファイルの上限の行数の方針（contracts/limits/）
 MAX_LINES = "glossary.max-lines"
 
 

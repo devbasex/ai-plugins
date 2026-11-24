@@ -1,0 +1,7 @@
+{
+  "summary": "指摘の同じさを本文の先頭で比べる文字数。投稿の重なりの判定と振動の検知が同じ値を使う",
+  "count": 80,
+  "read_by": [
+    "ndf.core.converge.oscillation"
+  ]
+}

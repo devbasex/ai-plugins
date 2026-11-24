@@ -1,0 +1,7 @@
+{
+  "summary": "停止理由 usage_limit（LLM の利用上限）の打ち直しの回数。待つのは結果の retry_after の秒で、1 回の待ちの上限は supervise.limit-wait-max",
+  "attempts": 1,
+  "read_by": [
+    "ndf.contracts.causes"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "meaning": "前提が無い（設定・認証・対象のファイル）",
+  "std_type": "configuration",
+  "exit": "precondition",
+  "route": "human",
+  "retry": null
+}

@@ -1,0 +1,7 @@
+{
+  "summary": "GraphQL のスロットが上限のとき、PR を REST のスロットで 1 件ずつ読み替える件数の上限。超えたら読み替えずに上限で止まる",
+  "count": 10,
+  "read_by": [
+    "ndf.adapters.github"
+  ]
+}

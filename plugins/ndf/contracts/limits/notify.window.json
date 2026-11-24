@@ -1,0 +1,7 @@
+{
+  "summary": "window が真の通知で、同じキーを重ねて送らない、送ってからの秒",
+  "seconds": 60,
+  "read_by": [
+    "ndf.adapters.notify"
+  ]
+}

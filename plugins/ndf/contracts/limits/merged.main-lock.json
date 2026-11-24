@@ -1,0 +1,7 @@
+{
+  "summary": "メインディレクトリの排他を待つ上限。クリーンアップ 1 件と pull は数十秒で終わる",
+  "seconds": 600,
+  "read_by": [
+    "ndf.domains.worktree.mainlock"
+  ]
+}

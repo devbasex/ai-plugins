@@ -1,0 +1,9 @@
+{
+  "summary": "オーガナイザーの wait が計画の知らせを待つ上限と、ステートマシンを読み直す間隔",
+  "seconds": 540,
+  "interval": 5,
+  "read_by": [
+    "ndf.progress.plan.cli",
+    "ndf.progress.plan.wait"
+  ]
+}

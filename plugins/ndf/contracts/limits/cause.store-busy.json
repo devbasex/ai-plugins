@@ -1,0 +1,10 @@
+{
+  "summary": "停止理由 store_busy（ステートマシンの DB の書き込みの待ちが busy_timeout を超えた）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒",
+  "attempts": 3,
+  "interval": 30,
+  "factor": 2,
+  "max_interval": 120,
+  "read_by": [
+    "ndf.contracts.causes"
+  ]
+}

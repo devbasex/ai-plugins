@@ -1,0 +1,7 @@
+{
+  "summary": "gws auth status（Google Workspace の CLI の認証の状態）を読む上限",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.records.gws"
+  ]
+}

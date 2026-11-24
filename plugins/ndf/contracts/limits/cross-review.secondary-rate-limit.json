@@ -1,0 +1,11 @@
+{
+  "summary": "GitHub の二次レート制限（403・429・GraphQL の誤り）に当たったときの打ち直しと、ほかのプロセスへ知らせる待ちの終わり。attempts は最初の 1 回を含む回数。GitHub が待ちの秒を返さないときの待ちは interval × factor^(回数 - 1) で、max_interval で頭打ち",
+  "attempts": 4,
+  "interval": 60,
+  "factor": 2,
+  "max_interval": 600,
+  "read_by": [
+    "ndf.adapters.github_limits",
+    "ndf.domains.crossreview.throttle_decide"
+  ]
+}

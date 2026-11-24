@@ -1,0 +1,7 @@
+{
+  "summary": "批評の工程の監視の上限",
+  "seconds": 1200,
+  "read_by": [
+    "ndf.domains.crossrefactor.launch"
+  ]
+}

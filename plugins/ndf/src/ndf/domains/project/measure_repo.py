@@ -25,7 +25,7 @@ from ndf.domains.project.items import MAX_EVIDENCE, measured, obj, question, seq
 from ndf.domains.project.secret import is_secret_path, redact
 
 MAX_READ = 512 * 1024
-# git・gh の 1 回の上限の方針（contracts/limits.json）
+# git・gh の 1 回の上限の方針（contracts/limits/）
 CALL_POLICY = "project.measure-call"
 LANG_EXT = {ext: row["id"] for row in facts.rows("languages", code=True) for ext in row["extensions"]}
 # 依存の名前とフレームワークの組（バージョンは依存の定義の主の数字）

@@ -1,0 +1,64 @@
+{
+  "summary": "stop-wait が本文の待ちを軽いモデルへ問う判定（#4000）。model は判定のモデル、seconds は判定の子を待つ上限（Stop の締め切り − 余白に収める）、max_chars は質問へ渡す本文の末尾の字数、rest_seconds は起動が失敗した後に子を起動しない秒、lock_seconds は休みのマーカーのロックを待つ上限、rounds は judge-cases が 1 つの例を打つ周の数、auth_markers は認証の失敗と読む本文の文字列、endpoint は送信先が同じかの確かめの値（env_names は前方一致。CLAUDE_CODE_SKIP_ は接続の認証の省略で、設定の層が出所なら拒む）、runtimes は判定する（モデルを呼ぶ）ランタイムで、seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ",
+  "model": "haiku",
+  "runtimes": [
+    "claude"
+  ],
+  "seconds": 8,
+  "max_chars": 1600,
+  "rest_seconds": 600,
+  "lock_seconds": 0.2,
+  "rounds": 3,
+  "auth_markers": [
+    "Not logged in",
+    "Invalid API key"
+  ],
+  "endpoint": {
+    "entrypoints": [
+      "cli",
+      "sdk-cli"
+    ],
+    "ancestors": 8,
+    "cli_exe": [
+      "*/claude/versions/*"
+    ],
+    "script_hosts": [
+      "node*"
+    ],
+    "flags": [
+      "--settings",
+      "--setting-sources"
+    ],
+    "keys": [
+      "awsAuthRefresh",
+      "awsCredentialExport",
+      "gcpAuthRefresh"
+    ],
+    "env_names": [
+      "ANTHROPIC_",
+      "CLAUDE_CODE_USE_",
+      "CLAUDE_CODE_SKIP_",
+      "CLAUDE_CONFIG_DIR",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_OAUTH_SCOPES",
+      "AWS_",
+      "GOOGLE_",
+      "CLOUD_ML_",
+      "VERTEX_",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY",
+      "https_proxy",
+      "http_proxy",
+      "all_proxy",
+      "no_proxy",
+      "NODE_EXTRA_CA_CERTS"
+    ]
+  },
+  "read_by": [
+    "ndf.domains.hooks.budget",
+    "ndf.domains.hooks.judge_child",
+    "ndf.domains.hooks.reply_judge"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "summary": "agy の無進捗の許容。err.log がほぼ無音",
+  "seconds": 480,
+  "read_by": [
+    "ndf.adapters.agents"
+  ]
+}

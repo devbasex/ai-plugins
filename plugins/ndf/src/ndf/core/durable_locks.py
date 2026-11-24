@@ -63,7 +63,7 @@ MAINT_LOCK = "maint.lock"
 RUN_LOCK_SPACE = 0x4E444652
 # SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
 SQLITE_PREFIX = "sqlite:///"
-# ロックを待つ上限の方針（contracts/limits.json）と、待つ間に試す間隔の秒。上限に当たるとオーナーを添えて `StoreInUse`（B11）
+# ロックを待つ上限の方針（contracts/limits/）と、待つ間に試す間隔の秒。上限に当たるとオーナーを添えて `StoreInUse`（B11）
 LOCK_WAIT = "durable.lock-wait"
 LOCK_POLL_SECONDS = 0.05
 # PostgreSQL の接続の keepalive（相手が消えた接続を 60 秒ほどで切る）と、NDF の接続の idle_session_timeout（ミリ秒）

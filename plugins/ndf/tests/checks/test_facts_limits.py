@@ -25,7 +25,8 @@ def found(plugin, rules):
 
     def run(code: str, allowed=()) -> list[str]:
         rows = {name: {"summary": "s", "read_by": ["ndf.a"], **row} for name, row in POLICIES.items()}
-        plugin.write("contracts/limits.json", json.dumps({"owner": "o", "policies": rows}))
+        for name, row in rows.items():
+            plugin.write(f"contracts/limits/{name}.json", json.dumps(row))
         plugin.write("src/ndf/a.py", code)
         rules["facts"]["limit_constants"] = list(allowed)
         return [f.detail.partition("（")[0] for f in facts.check(plugin.scope(), rules) if f.rule == "const-fact"]
@@ -89,9 +90,9 @@ def test_a_kept_constant_without_a_reason_or_a_known_kind_stops_the_check(found,
 def test_broken_limits_stop_the_check_and_a_plugin_without_limits_is_skipped(plugin, rules):
     plugin.write("src/ndf/a.py", "X_TIMEOUT = 1800\n")
     assert facts.check(plugin.scope(), rules) == []
-    plugin.write("contracts/limits.json", "{")
+    plugin.write("contracts/limits/a.b.json", "{")
     with pytest.raises(CheckError, match="上限の設定を読めない"):
         facts.check(plugin.scope(), rules)
-    plugin.write("contracts/limits.json", json.dumps({"owner": "o", "policies": {"a.b": {"summary": "s"}}}))
+    plugin.write("contracts/limits/a.b.json", json.dumps({"summary": "s"}))
     with pytest.raises(CheckError, match="read_by"):
         facts.check(plugin.scope(), rules)

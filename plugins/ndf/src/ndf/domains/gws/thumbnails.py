@@ -25,7 +25,7 @@ from ndf.domains.gws import GwsStop, Outcome, call, unauthenticated_gate
 from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import gws as records_gws
 
-# 上限の設定（contracts/limits.json）の名前。gws のスライドの操作・認証の状態の読み取り・curl に使う
+# 上限の設定（contracts/limits/）の名前。gws のスライドの操作・認証の状態の読み取り・curl に使う
 LIMIT = "google-workspace.thumbnails"
 # サムネイルの大きさ（引数の選択肢。結果のスキーマ gws.result から読み、引数のスキーマ gws.args はここから生成する）
 SIZES = contracts.schema_enum(contracts.schema_path("io/gws.result"), "/properties/metrics/properties/size")

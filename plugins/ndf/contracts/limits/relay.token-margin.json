@@ -1,0 +1,7 @@
+{
+  "summary": "残りがこの秒以下のアクセストークンを期限切れとみなす（決定 4）",
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.relay.accounts"
+  ]
+}

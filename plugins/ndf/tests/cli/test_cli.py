@@ -130,7 +130,7 @@ def test_no_args_prints_usage(capsys):
 
 
 def test_usage_lists_user_commands_but_not_developer_commands(capsys, monkeypatch):
-    """使い方の表示に NDF 自身の開発のサブコマンド（check・manifests）を出さず、名前で呼べば動く（#3617 の I11・I11a）。"""
+    """使い方の表示に NDF 自身の開発のサブコマンド（check・manifests・samples）を出さず、名前で呼べば動く（#3617 の I11・I11a）。"""
     assert cli.main(["--help"]) == 0
     listed = {line.strip() for line in capsys.readouterr().out.splitlines() if line.startswith("  ")}
     assert listed == set(cli.COMMANDS) - cli.DEVELOPER_COMMANDS

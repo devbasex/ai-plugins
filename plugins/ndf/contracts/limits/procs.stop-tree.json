@@ -1,0 +1,9 @@
+{
+  "summary": "プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔",
+  "seconds": 3,
+  "interval": 0.1,
+  "read_by": [
+    "ndf.domains.relay.account_login",
+    "ndf.process_group"
+  ]
+}

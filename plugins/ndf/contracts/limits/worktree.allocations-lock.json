@@ -1,0 +1,7 @@
+{
+  "summary": "worktree の割り当て表の排他を待つ上限の秒",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.worktree.allocations"
+  ]
+}

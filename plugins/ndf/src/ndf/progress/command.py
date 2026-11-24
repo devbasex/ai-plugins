@@ -50,7 +50,7 @@ from ndf.progress import definition, model, stages, store
 # 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
-# 番号のぶつかり（同時の追記）で読み直して書き直す回数の方針（contracts/limits.json）
+# 番号のぶつかり（同時の追記）で読み直して書き直す回数の方針（contracts/limits/）
 APPEND = "progress.append"
 PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 # プロジェクト MVV の設定（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）

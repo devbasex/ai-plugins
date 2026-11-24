@@ -34,7 +34,7 @@ from ndf.core import durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
-# 待ちの上限の既定と、見回りの間隔の方針（contracts/limits.json）
+# 待ちの上限の既定と、見回りの間隔の方針（contracts/limits/）
 WAIT_DEFAULT = "supervise.wait-default"
 WAIT_POLL = "durable.wait-from-poll"
 

@@ -17,7 +17,7 @@
 # 終了コードの表（contracts/facts/exit-codes.json）の deps_missing の終了コードで止まる。
 #
 # 呼び出し元の CLAUDE_PLUGIN_ROOT は、子へ自分の根を渡す前に NDF_CALLER_PLUGIN_ROOT へ写す（無ければ空）。
-# ほかに NDF と uv run が入れる UV_PROJECT_ENVIRONMENT・VIRTUAL_ENV・UV_RUN_RECURSION_DEPTH・PATH・PYTHONPATH は、
+# ほかに NDF と uv run が入れる UV_PROJECT_ENVIRONMENT・VIRTUAL_ENV・UV_RUN_RECURSION_DEPTH・PATH・PYTHONPATH と、NDF が消す UV_ISOLATED は、
 # 呼び出し元の値を NDF_CALLER_<名前> へ写す（あれば空でも写し、無ければ写しを消す。外側の ndf の写しを残さない）。
 # start.py は `python -m ndf` の前に、写しから呼び出し元の値へ戻す。NDF の子孫が利用先で打つ uv run が NDF の venv を
 # 書き換えない（#4029）。子が `ndf` を打てば、このファイルが毎回 NDF の venv を指し直す。
@@ -47,7 +47,9 @@ cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/$name"
 # emit_deps_missing で組む）。終了コードは終了コードの表の deps_missing の行から引き、python3 の終了コードをそのまま返す
 stop_deps_missing() {
   local code=0
-  python3 -c '
+  # -I: 呼び出し元のディレクトリ・PYTHONPATH・利用者の site を import の探索先に入れない（利用先の csv.py・json.py を読まない）。
+  # 結果 JSON は標準ライブラリだけで組むので、探索先にはプラグインの bin だけを足す
+  python3 -I -c '
 import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
@@ -87,12 +89,33 @@ if got != want:
 fi
 
 export NDF_CALLER_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-for held in UV_PROJECT_ENVIRONMENT VIRTUAL_ENV UV_RUN_RECURSION_DEPTH PATH PYTHONPATH; do
+for held in UV_PROJECT_ENVIRONMENT VIRTUAL_ENV UV_RUN_RECURSION_DEPTH PATH PYTHONPATH UV_ISOLATED; do
   if [ -n "${!held+set}" ]; then export "NDF_CALLER_$held=${!held}"; else unset "NDF_CALLER_$held"; fi
 done
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
+# UV_ISOLATED は uv sync が受けず uv run --no-sync だけが受ける（真なら同期した環境でなく空の一時の環境で動く）。
+# 同期と実行を同じ環境に揃えるため消す。呼び出し元の値は上で保存してあり、start.py が子へ戻す
+unset UV_ISOLATED
+# uv が真と読む値か（UV_NO_SYNC を uv と同じに読む）。外部コマンドを起動せずシェルの組み込みだけで比べる（bash 3.2 に ${var,,} は無い）
+truthy() {
+  case "${1:-}" in
+    1 | [Tt] | [Yy] | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss] | [Oo][Nn]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# 依存の同期は exec の前に 1 回だけ行う。取れない（ネットワークが無い・相手の障害）ときは、uv の出力のままにせず
+# 結果 JSON（stopped・deps_missing）で止まる（#3687）。lock は更新しない（--frozen。定義と lock の食い違いは CI の uv lock --check が落とす）。
+# 理由には uv の `error:` の行を載せる（最終行は `hint:` のことがある）。`error:` の行が無ければ最終行を載せる。
+# --inexact: 今までの uv run と同じに、lock に無い追加のパッケージを消さない（uv sync の既定は消す）。
+# 呼び出し元が UV_NO_SYNC で同期を止めていれば、今までの uv run と同じに同期しない（uv sync はこの変数を受けない）
+if ! truthy "${UV_NO_SYNC:-}" && ! log="$("$uv_bin" sync --frozen --no-dev --inexact --quiet --project "$root" 2>&1)"; then
+  stop_deps_missing "依存を用意できない（ネットワークを確かめる）: $(printf '%s\n' "$log" | grep -m 1 '^error:' || printf '%s' "$log" | tail -n 1)"
+fi
 # -P: 呼び出し元のディレクトリとこのディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）。
-# start.py は依存の環境の欠けを確かめてから `python -m ndf` と同じに呼ぶ（欠けていれば入れ直しの手順で止まる。#2447）
-exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P "$root/bin/start.py" "$@"
+# start.py は依存の環境の欠けを確かめてから `python -m ndf` と同じに呼ぶ（欠けていれば入れ直しの手順で止まる。#2447）。
+# --no-sync: 直前の同期で用意した同じ環境を使い、uv run が同期し直さない（同期の経路は 1 起動に 1 回）。
+# 環境の Python を直に呼ばず uv run を通すのは、環境ファイル（UV_ENV_FILE）の読み込みと uv run が入れる環境変数を
+# 今までどおり uv に任せるため（自前で作り直すと振る舞いが食い違う）
+exec "$uv_bin" run --no-sync --no-dev --quiet --project "$root" python -P "$root/bin/start.py" "$@"

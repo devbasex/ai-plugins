@@ -351,7 +351,7 @@ def test_i13_guard_comes_after_the_marker_question_and_limit_and_is_cut_by_the_s
         assert got.reason == "子が動いている"
 
 
-G = account_decide.Guards(85.0, 70.0, 90.0)  # 閾値 A・B・C（`contracts/limits.json` の既定）
+G = account_decide.Guards(85.0, 70.0, 90.0)  # 閾値 A・B・C（`contracts/limits/` の既定）
 R = 1_800_000_000.0  # 7 日の窓のリセットの時刻の基準
 GONE = Usage("gone", None, None, None, None, True)  # 使用率は分からないが上限
 

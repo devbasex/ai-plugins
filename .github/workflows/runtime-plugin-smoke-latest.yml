@@ -1,9 +1,11 @@
 name: Runtime plugin smoke (latest CLI)
 
-# 最新の版のスモーク（#1982）。リリースの経路のスモーク（runtime-plugin-smoke.yml）は
-# tests/runtime-smoke/cli-versions.env に書いた版の CLI だけを入れる。この workflow は 4 ランタイムの
-# その時点の最新の版を解決して同じ手順で試し、落ちたらランタイムごとに 1 件の課題に残す。
-# Pull Request と push では起動しない（必須のチェックに入れない。外部の版上げでデプロイを止めない）
+# 外部の相手の今の形へ毎日 1 回当てるワークフロー（#1982・#3687）。
+# - runtime-smoke-latest: リリースの経路のスモーク（runtime-plugin-smoke.yml）は tests/runtime-smoke/cli-versions.env に
+#   書いたバージョンの CLI だけを入れる。ここでは claude・codex のその時点の最新のバージョンを解決して同じ手順で試す
+# - live-samples: テストの見本を、相手が公開する記述と突き合わせる（ndf samples verify）
+# - report: スモークが落ちたか、見本が食い違った日だけ、課題を作るか、開いている課題へコメントを足す
+# Pull Request と push では起動しない（必須のチェックに入れない。外部の相手の変更でデプロイを止めない）
 on:
   schedule:
     # 毎日 06:00 JST。定期の起動は既定ブランチ（main）の workflow で動く
@@ -11,18 +13,18 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 試すブランチ（既定は次にデプロイする develop）
-        default: develop
+        description: 試すブランチ（既定は次にデプロイする main）
+        default: main
         required: false
       floors_ref:
-        description: 照らす下限の表（cli-floors.json と claude-cli.json）の ref。空か main なら main の表で照らす。検証器と打つ引数は常に main で、main の表に無い引数の見本は打たずに未検証として残す（main に入った後の定時の実行で照らす）
+        description: --help と突き合わせる下限の表（cli-floors.json と claude-cli.json）の ref。空か main なら main の表を使う。検証器と打つ引数は常に main で、main の表に無い引数の見本は打たずに未検証として残す（main に入った後の定時の実行で突き合わせる）
         default: ""
         required: false
 
-# 課題を作るのに要る権限だけ。秘密は渡さない（認証なしのスモークと同じ）
+# 読み取りだけ。課題へ書く権限は report のジョブだけが持つ（ほかのジョブは入力の ref のコードを動かす）。
+# 秘密は渡さない（認証なしのスモークと同じ）
 permissions:
   contents: read
-  issues: write
 
 # 定期と手の起動が重なっても 1 つずつ走らせ、同じ失敗の課題を 2 件にしない
 concurrency:
@@ -36,19 +38,24 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [claude, codex]
+    # ランタイムごとの結果。matrix の各ジョブは自分の名前の出力だけを書く（空の値はほかのジョブの値を上書きしない）
+    outputs:
+      claude: ${{ steps.outcome.outputs.claude }}
+      codex: ${{ steps.outcome.outputs.codex }}
     env:
       RUNTIME: ${{ matrix.runtime }}
       LATEST_VERSIONS: tmp/runtime-smoke-latest/cli-versions.env
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || 'develop' }}
+          # 式の比較は大文字・小文字を区別しない。report の条件が main とみなす値（Main など）では、必ず main を取り出す
+          ref: ${{ (inputs.ref || 'main') == 'main' && 'main' || inputs.ref }}
       - name: Resolve the latest CLI version
         run: |
           mkdir -p "$(dirname "$LATEST_VERSIONS")"
           python3 scripts/runtime-smoke-latest.py resolve --runtime "$RUNTIME" > "$LATEST_VERSIONS"
           {
-            echo "### 最新の版（$RUNTIME）"
+            echo "### 最新のバージョン（$RUNTIME）"
             echo '```text'
             cat "$LATEST_VERSIONS"
             echo '```'
@@ -57,17 +64,10 @@ jobs:
         run: >-
           bash scripts/runtime-smoke-test.sh --runtime "$RUNTIME" --with-secrets=off
           --cli-versions "$LATEST_VERSIONS"
-      - name: Upload smoke artifacts
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: runtime-smoke-latest-${{ matrix.runtime }}
-          path: tmp/runtime-smoke/${{ matrix.runtime }}
-          if-no-files-found: ignore
-      # --help の照らし合わせ（#3691 の受け入れ条件 3）。検証器は入力で変えず main の先端から取り、
-      # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない（このジョブは issues: write を持つ）。
-      # 打つ実行ファイルと引数は main の表で固定し、floors_ref の表からは照らす名前だけを読む（--floors）。
-      # main の表に無い引数の見本は打たずに結果へ untested として残し、マージ後の定時の実行で照らす
+      # --help の突き合わせ（#3691 の受け入れ条件 3）。検証器は入力で変えず main の先端から取り、
+      # floors_ref の作業ツリーからは表の JSON を読むだけでコードを動かさない。
+      # 打つ実行ファイルと引数は main の表で固定し、floors_ref の表からは突き合わせる名前だけを読む（--floors）。
+      # main の表に無い引数の見本は打たずに結果へ untested として残し、マージ後の定時の実行で突き合わせる
       - name: Check out the floors checker from main
         if: ${{ !cancelled() }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,11 +105,106 @@ jobs:
         env:
           FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
         run: python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root tmp/deps-tool --floors "$FLOORS_ROOT" --runtime gh
-      - name: Report the failure as an issue
-        if: failure()
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: runtime-smoke-latest-${{ matrix.runtime }}
+          path: tmp/runtime-smoke/${{ matrix.runtime }}
+          if-no-files-found: ignore
+      # needs.<job>.result は matrix の全体で 1 つの値なので、どのランタイムが落ちたかはジョブの出力で report へ渡す。
+      # 成果物のアップロードの失敗も job.status に含めるため、最後の手順にする
+      - name: Pass the outcome to the report job
+        id: outcome
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          versions=""
+          if [ -f "$LATEST_VERSIONS" ]; then versions="$(cat "$LATEST_VERSIONS")"; fi
+          outcome="$(jq -nc --arg status "$STATUS" --arg versions "$versions" '{status: $status, versions: $versions}')"
+          echo "$RUNTIME=$outcome" >> "$GITHUB_OUTPUT"
+
+  live-samples:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # この試行が食い違いを見つけて上げた成果物の ID。食い違いが無い・上げていないときは空
+    outputs:
+      mismatch-artifact-id: ${{ steps.verify.outputs.mismatch == 'true' && steps.upload.outputs.artifact-id || '' }}
+    steps:
+      # 見本と定義は入力の ref に依らず main のものを使う
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf/uv.lock
+      # 結果 JSON（標準出力の最後の 1 行）を残してから、突き合わせの終了コードでこの手順を終える
+      - name: Verify the samples against the published descriptions
+        id: verify
+        run: |
+          code=0
+          out="$(plugins/ndf/bin/ndf samples verify --peer github)" || code=$?
+          if [ -n "$out" ]; then
+            printf '%s\n' "$out"
+            mkdir -p tmp/live-samples
+            printf '%s\n' "${out##*$'\n'}" > tmp/live-samples/result.json
+            # 食い違いは終了コード 1。1 はほかの失敗でも出るので、結果の種類も確かめる
+            if [ "$code" -eq 1 ] && jq -e 'any(.items[]?; .kind == "mismatch")' tmp/live-samples/result.json > /dev/null; then
+              echo "mismatch=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          exit "$code"
+      - name: Upload the result
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: live-samples
+          path: tmp/live-samples/result.json
+          if-no-files-found: ignore
+
+  # 課題へ書くのは、検証したコードがすべて main の実行だけ。任意の ref か floors_ref を試した手の起動では動かさない
+  # （matrix のジョブがその ref のコードを動かし、成果物と出力を書けるため）
+  report:
+    needs: [runtime-smoke-latest, live-samples]
+    if: ${{ !cancelled() && (needs.runtime-smoke-latest.result == 'failure' || needs.live-samples.outputs.mismatch-artifact-id != '') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the reporter from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: scripts/runtime-smoke-latest.py
+      # 名前で探すと、再実行のとき前の試行の結果を読む。検証のジョブが上げた成果物の ID で落とす
+      - name: Download the result of the samples
+        if: ${{ !cancelled() && needs.live-samples.outputs.mismatch-artifact-id != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.live-samples.outputs.mismatch-artifact-id }}
+          path: tmp/report/samples
+          merge-multiple: true
+      # 見本の成果物を落とせなくても、ランタイムの分は報告する（落とせなかった手順の失敗でジョブは失敗のまま終わる）
+      - name: Report the failures as issues
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
+          OUTCOMES: ${{ needs.runtime-smoke-latest.result != 'success' && toJSON(needs.runtime-smoke-latest.outputs) || '' }}
         run: >-
-          python3 scripts/runtime-smoke-latest.py report --runtime "$RUNTIME"
+          python3 scripts/runtime-smoke-latest.py report
           --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          --versions "$LATEST_VERSIONS"
+          --outcomes "$OUTCOMES"
+          --samples tmp/report/samples/result.json

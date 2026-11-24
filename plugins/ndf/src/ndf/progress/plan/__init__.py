@@ -34,7 +34,7 @@ TOOL = top.tool_of(f"{__name__}.cli")
 # 計画の設定とレーンの設定の形（レーンは同じファイルの $defs）
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
-# 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒の方針（contracts/limits.json）
+# 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒の方針（contracts/limits/）
 ANSWER_NEXT = "parallel-run.answer-next"
 # リクエストの行のキーの接頭辞（request-1・request-2…）
 REQUEST_PREFIX = "request-"

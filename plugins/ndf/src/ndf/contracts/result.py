@@ -124,7 +124,7 @@ def code_for(obj: Any) -> Optional[int]:
         return exit_codes.first_code(status)
     if status == STOPPED:
         kind = causes.kind_of(obj.get("cause"))
-        if kind is not None and kind in causes.table():
+        if kind is not None and causes.has(kind):
             return causes.exit_code(kind)
     return None
 

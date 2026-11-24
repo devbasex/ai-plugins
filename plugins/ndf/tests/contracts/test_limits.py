@@ -34,39 +34,41 @@ def test_scaled_follows_long_measurements():
 
 
 @pytest.mark.parametrize(
-    "change",
+    ("rel", "change"),
     [
-        lambda d: {**d, "version": 1},
-        lambda d: {k: v for k, v in d.items() if k != "owner"},
-        lambda d: {**d, "policies": {}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["ndf.a"]}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["ndf.a"], "seconds": -1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["ndf.a"], "attempts": 1.5}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["ndf.a"], "seconds": 1, "weird": 1}}},
-        lambda d: {**d, "policies": {"nodot": {"summary": "x", "read_by": ["ndf.a"], "seconds": 1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": " ", "read_by": ["ndf.a"], "seconds": 1}}},
+        ("_meta.json", lambda d: {**d, "version": 1}),
+        ("_meta.json", lambda d: {k: v for k, v in d.items() if k != "owner"}),
+        ("_meta.json", lambda d: {**d, "owner": ""}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"]}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "seconds": -1}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "attempts": 1.5}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "seconds": 1, "weird": 1}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "retries": -1}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "max_bytes": 0}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "peers": {"github": "2"}}),
+        ("nodot.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "seconds": 1}),
+        ("a.b.json", lambda _: {"summary": " ", "read_by": ["ndf.a"], "seconds": 1}),
         # 読み手の指定（read_by）は必須で、`ndf.` で始まるモジュールの名前を 1 つ以上持つ（#3684）
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "seconds": 1, "interval": 1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": [], "seconds": 1}}},
-        lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["os.path"], "seconds": 1}}},
+        ("a.b.json", lambda _: {"summary": "x", "seconds": 1, "interval": 1}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": [], "seconds": 1}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["os.path"], "seconds": 1}),
     ],
 )
-def test_wrong_shape_stops(contracts_copy, change):
-    contracts_copy("limits.json", change)
+def test_wrong_shape_stops(contracts_copy, rel, change):
+    contracts_copy(f"limits/{rel}", change)
     with pytest.raises(limits.LimitsError):
         limits.table()
 
 
-def test_duplicate_policy_names_stop(contracts_copy):
-    contracts_copy(
-        "limits.json", text='{"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}'
-    )
+def test_duplicate_keys_in_a_policy_stop(contracts_copy):
+    contracts_copy("limits/a.b.json", text='{"summary": "x", "seconds": 1, "seconds": 2}')
     with pytest.raises(limits.LimitsError, match="a.b"):
         limits.table()
 
 
-def test_missing_ndf_settings_stops(contracts_copy):
-    (contracts_copy.root / "limits.json").unlink()
+@pytest.mark.parametrize("pattern", ["limits/_meta.json", "limits/[!_]*.json"], ids=["no-meta", "no-policy"])
+def test_missing_ndf_settings_stops(contracts_copy, pattern):
+    contracts_copy.remove(pattern)
     with pytest.raises(limits.LimitsError):
         limits.table()
 
@@ -94,21 +96,23 @@ _SCHEMA_VALUE_KEYS = (
     "rest_seconds",
     "lock_seconds",
     "rounds",
+    "retries",
+    "max_bytes",
 )
-# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint）。`limits.value` では引かない
-_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint")
+# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint と `samples.fetch` の peers）。`limits.value` では引かない
+_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint", "peers")
 
 
 def test_value_keys_match_policy_fields_and_schema():
     schema = contracts.load_json(limits.SCHEMA)
-    declared = schema["properties"]["policies"]["additionalProperties"]["properties"]
+    declared = schema["properties"]
     assert set(declared) - {"summary", "read_by"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
     assert set(limits.Policy._fields) - {"name", "summary", "read_by"} == set(_SCHEMA_VALUE_KEYS) | set(_SCHEMA_OTHER_KEYS)
     assert set(limits.VALUE_KEYS) == set(_SCHEMA_VALUE_KEYS)
 
 
 def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
-    """プラグインの `limits.json` に判定の行があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
+    """プラグインの `contracts/limits/` に判定の方針があり、hook の表（`tables.policy_value`）が差し替えなしで読める（#4000）。"""
     from ndf.domains.hooks import reply_judge
 
     assert reply_judge.judge_setting("model") == "haiku"
@@ -119,7 +123,7 @@ def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
 
 @pytest.mark.parametrize("key", _SCHEMA_VALUE_KEYS)
 def test_value_reads_every_value_key(contracts_copy, key):
-    contracts_copy("limits.json", lambda d: {**d, "policies": {"a.b": {"summary": "x", "read_by": ["ndf.a"], key: 7}}})
+    contracts_copy("limits/a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], key: 7})
     assert limits.value("a.b", key) == 7
     assert getattr(limits.policy("a.b"), key) == 7
     others = [k for k in _SCHEMA_VALUE_KEYS if k != key]
@@ -133,6 +137,17 @@ def test_value_rejects_non_value_keys(key):
 
 
 def test_validate_builds_policies_with_name_and_absent_values_as_none():
-    got = limits.validate({"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2, "read_by": ["ndf.a"]}}})
+    got = limits.validate({"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2, "read_by": ["ndf.a"]}})
     assert got == {"a.b": limits.Policy(name="a.b", summary="x", seconds=1.5, attempts=2, read_by=("ndf.a",))}
     assert got["a.b"].interval is None
+
+
+def test_table_keeps_representative_values():
+    # #3687: 表を方針ごとのファイルへ分けても、読みの結果は分ける前と同じ値を返す
+    table = limits.table()
+    assert limits.value("test-run.test", "seconds") == 900
+    assert limits.value("test-run.test", "factor") == 3
+    assert limits.value("launch.weight.test", "gib") == 14
+    fetch = limits.policy("samples.fetch")
+    assert (fetch.seconds, fetch.retries, fetch.max_bytes, fetch.peers) == (60, 0, 64 * 1024 * 1024, {"github": 2})
+    assert table["test-run.test"].name == "test-run.test"

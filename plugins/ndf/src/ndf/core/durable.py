@@ -140,7 +140,7 @@ PROGRESS_LOCK = "progress.sqlite.lock"
 # 旧い保存先を退避する前に取る錠（キーのロックとステートマシンの DB のロック）。保存先からの glob の形
 STORE_LEGACY_LOCKS = (f"{DBOS_DIR}/*{LOCK_SUFFIX}", PROGRESS_LOCK)
 WAITING = ("PENDING", "ENQUEUED", "DELAYED")
-# 保存先の退避で番号を読み直す回数の上限の方針（contracts/limits.json）
+# 保存先の退避で番号を読み直す回数の上限の方針（contracts/limits/）
 PREPARE = "durable.prepare"
 # 保存先の format.json に並べる DBOS の記録のキー（B12）。記録の保存先（durable_sweep.DBOS_DIR）と同じ名前を使う
 FORMAT_DBOS_KEY = DBOS_DIR

@@ -357,24 +357,23 @@ def page_commands(model: SpecModel) -> str:
 
 def page_exit_codes(model: SpecModel) -> str:
     """終了コードの表と停止理由の表の全行。"""
-    codes = {r["id"]: r for r in model.exit_codes}
     ranges = [
         [code(r["id"]), str(r["code"]) + (f"〜{r['last']}" if "last" in r else ""), r["status"], r["label"]] for r in model.exit_codes
     ]
     causes = [
         [
-            code(c["kind"]),
-            c["meaning"],
-            c["std_type"],
-            f"{codes[c['exit']]['code']}（{c['exit']}）" if c["exit"] in codes else c["exit"],
-            c["route"],
-            c["retry"] if c.get("retry") else NONE,
-            c["exhausted"] if c.get("exhausted") else NONE,
+            code(c.kind),
+            c.meaning,
+            c.std_type,
+            f"{c.exit}（{c.exit_id}）",
+            c.route,
+            c.retry if c.retry else NONE,
+            c.exhausted if c.exhausted else NONE,
         ]
         for c in model.causes
     ]
     intro = (
-        "結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（停止理由）である。SSOT は `contracts/facts/exit-codes.json` と `contracts/causes.json`。"
+        "結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（停止理由）である。SSOT は `contracts/facts/exit-codes.json` と `contracts/causes/`（1 種類 1 ファイル）。"
         "ルートは `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである"
     )
     body = [

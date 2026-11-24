@@ -59,7 +59,7 @@ from ndf.testing import declared, scoped
 
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
-# ラウンドの上限の既定の方針（contracts/limits.json）
+# ラウンドの上限の既定の方針（contracts/limits/）
 MAX_ROUNDS = "cross-review.max-rounds"
 # ラウンドの判定（指摘が無くなったラウンドは finish_decide.CONVERGED）
 CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED

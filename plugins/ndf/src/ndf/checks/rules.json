@@ -168,7 +168,7 @@
       "ndf.contracts.limits.scaled": {"arg": "name", "index": 0},
       "ndf.contracts.limits.from_env": {"arg": "policy_name", "index": 2},
       "ndf.domains.hooks.tables.policy_value": {"arg": "name", "index": 0},
-      "ndf.domains.hooks.tables.policy_row": {"arg": "name", "index": 0},
+      "ndf.domains.hooks.tables.policy": {"arg": "name", "index": 0},
       "ndf.adapters.github._batches": {"arg": "batch", "index": 1},
       "ndf.adapters.github.GitHub.aliased": {"arg": "batch", "index": 1},
       "ndf.adapters.github.GitHub.nodes": {"arg": "batch", "index": 3},
@@ -184,18 +184,18 @@
       "ndf.process_group.stop_detached_group": {"arg": "grace_key", "index": 1},
       "ndf.slot_pool.weight_mib": {"arg": "kind", "index": 0, "template": "launch.weight.{}"}
     },
-    "tables": ["ndf.contracts.limits.table", "ndf.contracts.limits.NDF_SETTINGS", "ndf.domains.hooks.tables.policies"],
+    "tables": ["ndf.contracts.limits.table", "ndf.contracts.limits.NDF_SETTINGS"],
     "whole": [
       {"module": "ndf.checks.model", "reason": "検査が共有する上限の設定。規則 limit-readers は読み手の指定だけ、規則 const-fact は定数と比べる数の一覧だけを読む"},
       {"module": "ndf.contracts.cli", "reason": "事実の表が指す方針の名前の有無だけを確かめる"}
     ],
     "dynamic": [
       {"at": "ndf.adapters.agents.stall_seconds", "expr": "f\"monitor.stall.{agent}\"", "template": "monitor.stall.{}", "vocabulary": "domains/runtimes.json#/rows/*/id", "reason": "担当の CLI ごとの無進捗の許容を、担当の名前から引く"},
-      {"at": "ndf.contracts.causes._policy_errors", "expr": "row.retry", "template": "{}", "vocabulary": "causes.json#/causes/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
-      {"at": "ndf.contracts.causes.policy_of", "expr": "row(kind).retry", "template": "{}", "vocabulary": "causes.json#/causes/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.contracts.causes._policy_errors", "expr": "row.retry", "template": "{}", "vocabulary": "causes#/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
+      {"at": "ndf.contracts.causes.policy_of", "expr": "row(kind).retry", "template": "{}", "vocabulary": "causes#/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
       {"at": "ndf.domains.crossrefactor.launch.phase_limit", "expr": "f\"monitor.phase.{phase}\"", "template": "monitor.phase.{}", "vocabulary": "domains/loop-phases.json#/rows/*/id", "reason": "工程の監視の上限を、工程の名前から引く"},
-      {"at": "ndf.domains.hooks.budget.budget_for", "expr": "f\"hook.budget.{spec['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
-      {"at": "ndf.domains.hooks.budget.budget_for", "expr": "f\"hook.budget.{spec['budget']}.{runtime}\"", "template": "hook.budget.{}.{1}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "ランタイムで違う事象の予算を、予算のキーとランタイムの名前から引く"},
+      {"at": "ndf.domains.hooks.budget._budget_policy", "expr": "f\"hook.budget.{spec['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
+      {"at": "ndf.domains.hooks.budget._budget_policy", "expr": "f\"hook.budget.{spec['budget']}.{runtime}\"", "template": "hook.budget.{}.{1}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "ランタイムで違う事象の予算を、予算のキーとランタイムの名前から引く"},
       {"at": "ndf.domains.hooks.budget._pair_errors", "expr": "guard['limits']", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
     ]
   },
@@ -210,6 +210,18 @@
   },
   "child_deps": {
     "max_per_slot": 2
+  },
+  "contracts_split": {
+    "summary": "分ける表の一覧に挙げた表が、1 項目 1 ファイルの形でない"
+  },
+  "experimental": {
+    "summary": "既定で動くもの（プラグインの根の下で配るファイル）が実験版の保存先を参照する"
+  },
+  "toolchain": {
+    "summary": "Python と uv の指定が、配る構成の設定とリポジトリの設定の toolchain に合わない"
+  },
+  "budget": {
+    "summary": "テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数が、リポジトリの設定の budget の上限を超えた"
   },
   "spec": {
     "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public", "review-items"],

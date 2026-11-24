@@ -1,0 +1,7 @@
+{
+  "summary": "ブランチ戦略の設定を書くロックの待ちの上限（#3672。write・migrate・remove が共有する）",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.project.strategy_write"
+  ]
+}

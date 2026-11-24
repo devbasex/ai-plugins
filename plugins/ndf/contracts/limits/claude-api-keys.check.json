@@ -1,0 +1,7 @@
+{
+  "summary": "API キーの確かめの要求（Messages API への 1 回）の HTTP の上限",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.relay.account_metered"
+  ]
+}

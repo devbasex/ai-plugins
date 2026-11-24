@@ -14,10 +14,15 @@ def test_the_settings_are_validated_once_for_three_reads(monkeypatch):
         checked.append(rel)
         return real(instance, rel)
 
+    contracts.use_dir(None)
     monkeypatch.setattr(contracts, "schema_errors", counting)
-    assert limits.table() is limits.table() is limits.table()
-    assert checked == [limits.SCHEMA]
+    first = limits.table()
+    once = len(checked)
+    assert limits.table() is first and limits.table() is first
+    assert once > 0 and len(checked) == once
+    # 全件を読んだ後の 1 方針の参照も、確かめ直さない
+    assert limits.policy("test-run.test") is first["test-run.test"] and len(checked) == once
     # 保存先を読み直せば、もう 1 回確かめる
     contracts.use_dir(None)
     limits.table()
-    assert checked == [limits.SCHEMA] * 2
+    assert len(checked) == once * 2

@@ -23,7 +23,7 @@ from ndf.core import durable
 # バックアップの保存先の名前は耐久の記録のバックアップと同じ
 BACKUP_DIR = durable.BACKUP_DIR
 BACKUP_PREFIX = "progress-"
-# 残すバックアップの本数の方針（contracts/limits.json。超えた分は最も古いものから消す）
+# 残すバックアップの本数の方針（contracts/limits/。超えた分は最も古いものから消す）
 KEEP_BACKUPS = "progress.keep-backups"
 # 戻すときの一時名の接尾辞と、退避の名前のマーカー
 RESTORING_SUFFIX = ".restoring"

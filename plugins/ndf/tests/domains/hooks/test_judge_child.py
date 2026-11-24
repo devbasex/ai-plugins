@@ -1,7 +1,7 @@
 """判定の子（#4000 の u4）。詳細設計書の「判定の子」の「単体テストの観点」の行を縛る。
 
 実時間の経過と実プロセスの起動をテストに書かない（偽の `call`・偽の時計・偽の `resolve`・一時ディレクトリの
-設定ファイルで縛り、実の `/etc` と利用者の設定を読まない）。設定はプラグインの `limits.json` の判定の行を読む。
+設定ファイルで縛り、実の `/etc` と利用者の設定を読まない）。設定はプラグインの `contracts/limits/hook.stop-wait.judge.json` を読む。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from ndf.domains.relay import account_dir
 
 @pytest.fixture
 def judge_settings(monkeypatch):
-    """設定の値を替えるテストの上書き。書いていないキーはプラグインの `limits.json` の判定の行から読む。"""
+    """設定の値を替えるテストの上書き。書いていないキーはプラグインの `contracts/limits/hook.stop-wait.judge.json` から読む。"""
     overrides: dict = {}
     real = rj.setting
     monkeypatch.setattr(rj, "setting", lambda key: overrides[key] if key in overrides else real(key))

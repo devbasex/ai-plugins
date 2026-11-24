@@ -1,0 +1,7 @@
+{
+  "meaning": "改修・収束の回数の上限",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}

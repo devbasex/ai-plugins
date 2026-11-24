@@ -32,7 +32,7 @@ from ndf.testing import testenv as placement
 SECTION = ndf_settings.TESTENV
 # 証跡の保存先（worktree の下。共通の git ディレクトリの info/exclude で追跡から外す）
 EVIDENCE = ".ndf-evidence"
-# 同じテスト環境の実行の目印を待つ上限の方針（contracts/limits.json）
+# 同じテスト環境の実行の目印を待つ上限の方針（contracts/limits/）
 INUSE_LOCK = "worktree.inuse-lock"
 
 

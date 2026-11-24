@@ -15,7 +15,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | コードレビュー | — | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | 実装レビュー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 進捗記録 | — | 工程に入った時点で 1 回打つ記録。リリース後テストだけは、受け入れ条件ごとの記録を投稿してその工程を終えた時点で打つ。課題の本文の「進行」も同じ 1 回で更新される | 進行の記録、記録のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | フェーズレポート | — | supervisor（またはプラン）が最後に返す報告 | フェーズの報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/` | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/ndf/`（配るディレクトリの `plugins/ndf/` の外） | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | SSOT | `source` | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | 正本 | — | `docs/specifications/doc-consistency-checks.md` |

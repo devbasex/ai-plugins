@@ -1,0 +1,7 @@
+{
+  "summary": "大整理の 1 回の秒の上限の既定（.ndf/backlog.json の depths.overhaul.seconds で上書きする）",
+  "seconds": 5400,
+  "read_by": [
+    "ndf.domains.backlog.depth"
+  ]
+}

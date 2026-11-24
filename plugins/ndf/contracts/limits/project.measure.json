@@ -1,0 +1,7 @@
+{
+  "summary": "プロジェクトの設定の測定の締め切り（ndf project measure の --budget の既定）",
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.project.cli"
+  ]
+}

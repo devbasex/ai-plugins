@@ -1,0 +1,10 @@
+{
+  "summary": "停止理由 infra_wait（Runner が付かない・GitHub の API の上限・作業マシンのメモリが足りない）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒",
+  "attempts": 3,
+  "interval": 600,
+  "factor": 2,
+  "max_interval": 3600,
+  "read_by": [
+    "ndf.contracts.causes"
+  ]
+}

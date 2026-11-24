@@ -1,61 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "limits.schema.json",
-  "title": "上限の設定",
-  "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["owner", "policies"],
-  "properties": {
-    "owner": {"type": "string", "minLength": 1, "description": "設定を書き換えてよいオーナー（子 Issue の記号とパッケージ）"},
-    "policies": {
-      "type": "object",
-      "minProperties": 1,
-      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"},
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["summary", "read_by"],
-        "minProperties": 3,
-        "properties": {
-          "summary": {"type": "string", "pattern": "\\S"},
-          "read_by": {
-            "type": "array",
-            "items": {"type": "string", "pattern": "^ndf(\\.[a-z_][a-z0-9_]*)+$"},
-            "minItems": 1,
-            "uniqueItems": true,
-            "description": "読み手の指定: この方針を引くモジュールの名前。実際の読み手との食い違いは規則 limit-readers が落とす"
-          },
-          "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
-          "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
-          "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
-          "max_interval": {"type": "number", "minimum": 0, "description": "伸ばした間隔の頭打ちの秒"},
-          "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
-          "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
-          "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
-          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"},
-          "p95_ms": {"type": "number", "minimum": 0, "description": "hook の予算: 所要の目標の p95 のミリ秒"},
-          "deadline": {"type": "number", "minimum": 0, "description": "hook の予算: 処理を打ち切る締め切りの秒"},
-          "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
-          "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
-          "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
-          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本がスロットから取るメモリの重み（GiB）"},
-          "lock": {"type": "number", "minimum": 0, "description": "錠を待つ上限の秒"},
-          "gate": {"type": "number", "minimum": 0, "description": "関所の hook の timeout の秒"},
-          "first": {"type": "number", "minimum": 0, "description": "最初の払い出しを待つ上限の秒"},
-          "model": {"type": "string", "minLength": 1, "description": "判定に使うモデルの名前（hook.stop-wait.judge）"},
-          "runtimes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "判定する（モデルを呼ぶ）ランタイム。seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ（hook.stop-wait.judge）"},
-          "max_chars": {"type": "integer", "minimum": 1, "description": "判定へ渡す本文の上限の字数（hook.stop-wait.judge）"},
-          "rest_seconds": {"type": "number", "minimum": 0, "description": "起動が失敗した後に休む秒（hook.stop-wait.judge）"},
-          "lock_seconds": {"type": "number", "minimum": 0, "description": "休みのマーカーの錠を待つ上限の秒（hook.stop-wait.judge）"},
-          "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
-          "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
-          "endpoint": {"$ref": "#/$defs/endpoint"}
-        }
-      }
-    }
-  },
+  "title": "上限の設定の方針 1 つ",
+  "description": "contracts/limits/<方針の名前>.json の形（説明と値）。ファイル名（拡張子 .json を除く）が方針の名前で、名前の形は $defs の name。同じキーの重なりは読み手（ndf.contracts.limits）が断る",
   "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"},
     "endpoint": {
       "type": "object",
       "additionalProperties": false,
@@ -71,5 +20,53 @@
         "env_names": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "ANTHROPIC_"}}, {"contains": {"const": "CLAUDE_CODE_USE_"}}, {"contains": {"const": "CLAUDE_CODE_SKIP_"}}, {"contains": {"const": "CLAUDE_CONFIG_DIR"}}, {"contains": {"const": "CLAUDE_CODE_OAUTH_TOKEN"}}, {"contains": {"const": "CLAUDE_CODE_OAUTH_SCOPES"}}, {"contains": {"const": "AWS_"}}, {"contains": {"const": "GOOGLE_"}}, {"contains": {"const": "CLOUD_ML_"}}, {"contains": {"const": "VERTEX_"}}, {"contains": {"const": "HTTPS_PROXY"}}, {"contains": {"const": "HTTP_PROXY"}}, {"contains": {"const": "ALL_PROXY"}}, {"contains": {"const": "NO_PROXY"}}, {"contains": {"const": "https_proxy"}}, {"contains": {"const": "http_proxy"}}, {"contains": {"const": "all_proxy"}}, {"contains": {"const": "no_proxy"}}, {"contains": {"const": "NODE_EXTRA_CA_CERTS"}}]}
       }
     }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "read_by"],
+  "minProperties": 3,
+  "properties": {
+    "summary": {"type": "string", "pattern": "\\S"},
+    "read_by": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^ndf(\\.[a-z_][a-z0-9_]*)+$"},
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "読み手の指定: この方針を引くモジュールの名前。実際の読み手との食い違いは規則 limit-readers が落とす"
+    },
+    "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
+    "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
+    "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
+    "max_interval": {"type": "number", "minimum": 0, "description": "伸ばした間隔の頭打ちの秒"},
+    "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
+    "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
+    "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
+    "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"},
+    "p95_ms": {"type": "number", "minimum": 0, "description": "hook の予算: 所要の目標の p95 のミリ秒"},
+    "deadline": {"type": "number", "minimum": 0, "description": "hook の予算: 処理を打ち切る締め切りの秒"},
+    "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
+    "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
+    "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
+    "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本がスロットから取るメモリの重み（GiB）"},
+    "lock": {"type": "number", "minimum": 0, "description": "ロックを待つ上限の秒"},
+    "gate": {"type": "number", "minimum": 0, "description": "関所の hook の timeout の秒"},
+    "first": {"type": "number", "minimum": 0, "description": "最初の払い出しを待つ上限の秒"},
+    "model": {"type": "string", "minLength": 1, "description": "判定に使うモデルの名前（hook.stop-wait.judge）"},
+    "runtimes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "判定する（モデルを呼ぶ）ランタイム。seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ（hook.stop-wait.judge）"},
+    "max_chars": {"type": "integer", "minimum": 1, "description": "判定へ渡す本文の上限の字数（hook.stop-wait.judge）"},
+    "rest_seconds": {"type": "number", "minimum": 0, "description": "起動が失敗した後に休む秒（hook.stop-wait.judge）"},
+    "lock_seconds": {"type": "number", "minimum": 0, "description": "休みのマーカーのロックを待つ上限の秒（hook.stop-wait.judge）"},
+    "retries": {"type": "integer", "minimum": 0, "description": "打ち直しの回数（最初の 1 回を含まない。samples.fetch）"},
+    "max_bytes": {"type": "integer", "minimum": 1, "description": "取得する本文の上限のバイト数（samples.fetch）"},
+    "peers": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z0-9-]+$"},
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "相手ごとの要求の数の上限（samples.fetch）"
+    },
+    "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
+    "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
+    "endpoint": {"$ref": "#/$defs/endpoint"}
   }
 }

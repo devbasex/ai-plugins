@@ -1,0 +1,7 @@
+{
+  "summary": "gws のコマンドの上限",
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.gws.check"
+  ]
+}

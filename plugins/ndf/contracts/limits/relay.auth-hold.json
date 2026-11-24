@@ -1,0 +1,7 @@
+{
+  "summary": "認証の失敗で、そのアカウントを替え先と指定の候補から外す秒（#3864）",
+  "seconds": 3600,
+  "read_by": [
+    "ndf.domains.relay.wrapper_auth"
+  ]
+}

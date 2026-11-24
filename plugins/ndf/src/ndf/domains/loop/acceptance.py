@@ -31,7 +31,7 @@ from ndf.domains.loop import acceptance_decide as acc
 
 # 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
-# 書いた後の読み直しで自分の記録がそろわないときに当て直す回数の方針（contracts/limits.json）
+# 書いた後の読み直しで自分の記録がそろわないときに当て直す回数の方針（contracts/limits/）
 REAPPLY = "loop.acceptance-reapply"
 # `issueOrPullRequest`（union）から本文を選ぶ選択
 BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"

@@ -1,0 +1,7 @@
+{
+  "summary": "リレーハブが打つ tmux のサブコマンドの上限",
+  "seconds": 10,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
+}

@@ -33,7 +33,7 @@ from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
 CLAUDE = facts.value("runtimes", "claude", "executable")
-# 導入済みのプラグインの一覧を読む時間の上限の方針（contracts/limits.json）
+# 導入済みのプラグインの一覧を読む時間の上限の方針（contracts/limits/）
 PLUGIN_LIST = "claude-plugins.list"
 # 一覧を読めなかったときの知らせ（導入先のパスを含む CLI の出力は載せない）
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"

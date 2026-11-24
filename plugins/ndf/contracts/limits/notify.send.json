@@ -1,0 +1,10 @@
+{
+  "summary": "送り手が通知 1 件を送る打ち直し（接続の失敗・上限の時間・429・5xx・Slack の ratelimited）。回数（最初の 1 回を含む）・最初の間隔・間隔の倍率・頭打ちの秒",
+  "attempts": 4,
+  "interval": 2,
+  "factor": 2,
+  "max_interval": 30,
+  "read_by": [
+    "ndf.adapters.notify"
+  ]
+}

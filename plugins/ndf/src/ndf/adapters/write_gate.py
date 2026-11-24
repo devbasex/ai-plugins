@@ -58,7 +58,7 @@ from ndf.contracts import limits
 T = TypeVar("T")
 # 書き込みの種類: どの書き込みも空ける・内容を作る書き込み（REST の POST と create・add で始まる mutation）
 WRITE, CONTENT = "write", "content"
-# 間隔・ウィンドウ・ロックの待ちの方針（contracts/limits.json）
+# 間隔・ウィンドウ・ロックの待ちの方針（contracts/limits/）
 WRITE_SPACING = "github.write-spacing"
 CONTENT_MINUTE = "github.content-window.minute"
 CONTENT_HOUR = "github.content-window.hour"

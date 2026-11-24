@@ -1,0 +1,7 @@
+{
+  "summary": ".claude.json の排他の待ちの上限",
+  "seconds": 2,
+  "read_by": [
+    "ndf.domains.relay.account_sync"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "summary": "判定役が返すステップの打ち直しの同じ原因の上限",
+  "same_cause": 2,
+  "read_by": [
+    "ndf.core.route"
+  ]
+}

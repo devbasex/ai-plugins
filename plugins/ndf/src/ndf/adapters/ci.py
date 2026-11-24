@@ -1,7 +1,7 @@
 """CI の結果の読み取りと、落ちたチェックの分類（外部との接続の層。SF3・SF4）。
 
 読み手は CI の状態を `gh pr checks` の文や Markdown から読まず、この関数が返す停止理由の種類だけで次の手を
-決める。種類とルートは停止理由の表（`contracts/causes.json`）が持つ。
+決める。種類とルートは停止理由の表（`contracts/causes/`）が持つ。
 
 | 読んだ結果 | 種類 |
 | --- | --- |
@@ -509,7 +509,7 @@ def failed_tests_of(github: GitHub, checks: Iterable[Check], source: FailedTestS
     cap = int(limits.value("github.failed-logs", "count"))
     listed = list(checks)
     assembly = _Assembly(github, source, cap)
-    # 上限: ジョブ github.failed-logs 件まで（limits.json）
+    # 上限: ジョブ github.failed-logs 件まで（contracts/limits/github.failed-logs.json）
     reads = [assembly.read(c) for c in listed[:cap]]
     over = f"読むチェックの上限 github.failed-logs（{cap} 件）を超えた"
     reads += [FailedTestRead.unread(c.name, None, None, over) for c in listed[cap:]]

@@ -1,0 +1,7 @@
+{
+  "summary": "安全網の上限 = 実効の予算 × この倍率（分）。コーディングの CLI の起動ごとの秒の累計に置き、当たったら取り消さずに止めて人へ渡す",
+  "factor": 2,
+  "read_by": [
+    "ndf.domains.crossrefactor.budget_decide"
+  ]
+}

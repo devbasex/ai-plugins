@@ -1,0 +1,7 @@
+{
+  "summary": "監視の見回りの間隔（MONITOR_POLL で上書きできる）",
+  "interval": 15,
+  "read_by": [
+    "ndf.adapters.agents"
+  ]
+}

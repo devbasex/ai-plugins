@@ -47,7 +47,7 @@ from ndf.domains.backlog import selection_decide as sel
 from ndf.domains.backlog.cli_input import Ranked, Stop, ndf_settings, rank_board, read_json
 
 TOOL = top.tool_of(__name__)
-# 集める候補の件数の上限の既定の方針（contracts/limits.json）
+# 集める候補の件数の上限の既定の方針（contracts/limits/）
 CANDIDATES = "backlog.candidates"
 PLAN_KEYS = {"repo", "rank", "rejected", "reschedule", "reparent", "actions", "create"}
 

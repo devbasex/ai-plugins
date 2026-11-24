@@ -1,0 +1,11 @@
+{
+  "summary": "hook の予算（Stop。Claude Code）。注入の上限は人のいない実行の変更要求（形の説明を含めて約 1,400 字）が収まる字数。締め切りは stop-wait の軽いモデルの判定（hook.stop-wait.judge の seconds）が締め切り − 余白に収まる秒（#4000）",
+  "p95_ms": 5000,
+  "deadline": 10,
+  "margin": 1.5,
+  "timeout": 12,
+  "inject_chars": 2000,
+  "read_by": [
+    "ndf.domains.hooks.budget"
+  ]
+}

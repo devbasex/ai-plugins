@@ -1,0 +1,12 @@
+{
+  "summary": "ndf samples verify が公開の記述を取る上限。seconds は記述 1 件の取得の秒、retries は打ち直しの回数、max_bytes は本文の上限（64 MiB。GitHub の記述は 2026-11-23 の実測で 14395662 バイト）、peers は 1 回の実行で相手ごとに送ってよい要求の数",
+  "seconds": 60,
+  "retries": 0,
+  "max_bytes": 67108864,
+  "peers": {
+    "github": 2
+  },
+  "read_by": [
+    "ndf.domains.samples.verify"
+  ]
+}

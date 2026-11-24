@@ -1,0 +1,11 @@
+{
+  "summary": "hook の予算（SessionEnd。Codex は timeout の上限が 3 秒）",
+  "p95_ms": 300,
+  "deadline": 2,
+  "margin": 0.5,
+  "timeout": 3,
+  "inject_chars": 0,
+  "read_by": [
+    "ndf.domains.hooks.budget"
+  ]
+}

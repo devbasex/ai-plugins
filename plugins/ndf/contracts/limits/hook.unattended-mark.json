@@ -1,0 +1,7 @@
+{
+  "summary": "人のいない実行のマーカーのうち、SessionEnd で消し残したものを次の SessionStart が消すまでの秒（7 日）",
+  "seconds": 604800,
+  "read_by": [
+    "ndf.domains.hooks.guards.unattended"
+  ]
+}

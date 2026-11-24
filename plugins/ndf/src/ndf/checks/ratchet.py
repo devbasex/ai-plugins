@@ -43,7 +43,7 @@ COLUMNS = frozenset(f.name for f in fields(Baseline))
 def limits_of(data: bytes, where: str) -> dict[str, Baseline]:
     """基準のファイルの中身 `data` の、規則ごとの基準。壊れている・知らないバージョン・形が違うときは `CheckError`（`where` は出所）。"""
     try:
-        doc = contracts.parse_json(Path(where), data.decode("utf-8"))
+        doc = contracts.parse_file(Path(where), data.decode("utf-8"))
     except (contracts.ContractError, UnicodeDecodeError) as exc:
         raise CheckError(f"ラチェットの基準を読めない: {where}: {exc}") from exc
     if not isinstance(doc, dict) or type(doc.get("version")) is not int or doc["version"] != RATCHET_VERSION:

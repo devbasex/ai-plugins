@@ -1,5 +1,5 @@
 {
-  "summary": "`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）と、呼び手ごとの停止理由の種類（contracts/causes.json の kind）。ndf.adapters.claude の Failure の語彙はこの表の id から組み立てる",
+  "summary": "`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）と、呼び手ごとの停止理由の種類（contracts/causes/ の kind）。ndf.adapters.claude の Failure の語彙はこの表の id から組み立てる",
   "owner": "D2（contracts/domains）",
   "shared_names": true,
   "columns": {
