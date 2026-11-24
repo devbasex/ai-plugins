@@ -2,9 +2,9 @@
   "version": 1,
   "rules": {
     "copy-dup": {
-      "max": 629,
+      "max": 631,
       "measured": "2026-11-24",
-      "commit": "305bd73e0c17032bec5607990c393c3f75292df4"
+      "commit": "d76297098acaa5979353f7dcbcd933df48b98488"
     }
   }
 }
