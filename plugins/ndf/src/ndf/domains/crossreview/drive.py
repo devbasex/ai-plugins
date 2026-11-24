@@ -503,8 +503,8 @@ def _review_round(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[P
     if retry:
         more, again = seats.launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
         raised += more
-        kept = {s: unread[s] for s in unread if s not in retry}
-        unread = {s: kept[s] if s in kept else again[s] for s in run.seats if s in kept or s in again}
+        merged = {**again, **{s: unread[s] for s in unread if s not in retry}}
+        unread = {s: merged[s] for s in run.seats if s in merged}
     if len(unread) == len(run.seats):
         return _Reviewed(raised, unread, True)
     targets = participants.fill_targets(run.seats, unread)
