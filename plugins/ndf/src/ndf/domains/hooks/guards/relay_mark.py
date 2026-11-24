@@ -30,18 +30,26 @@ def check(ctx, svc) -> Verdict | None:
     if directory is None:
         return None
     tasks = ctx.payload.get("background_tasks")
-    # 一覧を観測できない（`tasks: null`）記録は読む側が使わないので、会話の記録を開いて uuid を読まない
-    reply = ctx.last_reply_id if isinstance(tasks, list) else None
-    signals.write_activity(directory, tasks, ctx.payload.get("session_id"), reply)
-    counted = relay_busy.work_count(tasks, relay_busy.table_params()) if _counts(ctx, tasks) else None
-    notes = {}
-    if counted is not None:
-        notes["relay_busy"] = relay_busy.record_count(ctx.env, ctx.session_id, counted[0], "stop", counted[1])
+    counted, notes = _write_stop(ctx, directory, tasks)
     block = blocks.last_block(ctx.last_reply, svc.params["fence"]) if ctx.last_reply else None
     if block is None:
         return passing(**notes)
-    if counted is None:
-        counted = relay_busy.work_count(tasks, relay_busy.table_params()) if isinstance(tasks, list) else _recorded(ctx, directory)
+    return _mark(ctx, directory, block, counted if counted is not None else _remaining(ctx, directory, tasks), notes)
+
+
+def _write_stop(ctx, directory: Path, tasks) -> tuple[tuple[int, int] | None, dict]:
+    """活動と起動ごとの記録を書く。起動ごとの記録へ書いた（作業の件数, 監視の件数）（書かない Stop は None）と、判定へ添える記録。"""
+    # 一覧を観測できない（`tasks: null`）記録は読む側が使わないので、会話の記録を開いて uuid を読まない
+    reply = ctx.last_reply_id if isinstance(tasks, list) else None
+    signals.write_activity(directory, tasks, ctx.payload.get("session_id"), reply)
+    if not _counts(ctx, tasks):
+        return None, {}
+    work, monitors = _remaining(ctx, directory, tasks)
+    return (work, monitors), {"relay_busy": relay_busy.record_count(ctx.env, ctx.session_id, work, "stop", monitors)}
+
+
+def _mark(ctx, directory: Path, block: str, counted: tuple[int, int], notes: dict) -> Verdict:
+    """次のセグメントのマーカーを書く。作業が残る間は書かずに変更要求する。"""
     work, monitors = counted
     if work:
         return pushback(
@@ -52,6 +60,11 @@ def check(ctx, svc) -> Verdict | None:
     wait = float(tables.policy_value("hook.counter-lock", "seconds"))
     written = signals.write_next(directory, ctx.session_id, block, ctx.stop_hook_active, wait)
     return passing(relay_next=written, goal_active=ctx.stop_hook_active, **notes)
+
+
+def _remaining(ctx, directory: Path, tasks) -> tuple[int, int]:
+    """残る（作業の件数, 監視の件数）。一覧を観測できなければ起動ごとの記録から読む。"""
+    return relay_busy.work_count(tasks, relay_busy.table_params()) if isinstance(tasks, list) else _recorded(ctx, directory)
 
 
 def _recorded(ctx, directory: Path) -> tuple[int, int]:
