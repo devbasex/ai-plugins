@@ -194,7 +194,7 @@ def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
     usage_transcript(tmp_path, 450_000)
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_0"))
     size = _memo_size(tmp_path)
-    usage_transcript(tmp_path, 400_000)
+    usage_transcript(tmp_path, 500_000)
     for i in range(10):
         assert _tool(tmp_path, "PreToolUse", f"toolu_{i + 1}") is None
         assert _tool(tmp_path, "PostToolUse", f"toolu_{i + 1}") is None
@@ -202,14 +202,14 @@ def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
     usage_transcript(tmp_path, 600_000)
     assert deny_reason(_tool(tmp_path, "PreToolUse", "toolu_x")) is not None
     assert _memo_size(tmp_path) == size
-    usage_transcript(tmp_path, 400_000)
+    usage_transcript(tmp_path, 500_000)
     _user_input(tmp_path)
     _tool(tmp_path, "PreToolUse", "toolu_y")
     assert _memo_size(tmp_path) == 1
 
 
 def test_context_limit_skips_the_post_tool_use_of_a_subagent(tmp_path, counted_tail):
-    # #3995 の 3995:15: agent_id があれば 300,000 の PostToolUse も知らせず、会話の記録を読まない
+    # #3995 の 3995:15: agent_id があれば 500,000 の PostToolUse も知らせず、会話の記録を読まない
     usage_transcript(tmp_path, 500_000)
     payload = {**sample("claude", "PostToolUse", tmp_path), "agent_id": "a0123"}
     assert call_entry("claude", "PostToolUse", payload) is None

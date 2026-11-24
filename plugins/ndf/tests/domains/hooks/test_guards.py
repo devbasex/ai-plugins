@@ -696,7 +696,7 @@ def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
     # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
     usage_transcript(tmp_path, 600_000)
     first = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
-    usage_transcript(tmp_path, 600_000)
+    usage_transcript(tmp_path, 700_000)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) == first
 
 
