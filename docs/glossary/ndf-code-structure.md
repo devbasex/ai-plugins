@@ -17,6 +17,7 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | 未設定のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | コントラクトの一覧 | `contract_registry` | エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と保存先を持つ、リポジトリで 1 つの設定 | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
+| 環境変数のキー | — | 環境変数のコントラクト（plugins/ndf/contracts/domains/env.json）の各項目が持つ `key` の値。コードはこのキーから環境変数名を引き、環境変数名を文字列リテラルで書かない | — | — | — |
 | 名前の対応表 | `internal-names` | 同じ意味の値の 1 つの名前と、消した別名と、使う種類を持つ表（plugins/ndf/contracts/data/internal-names.json。#2339） | — | — | `docs/specifications/ndf-internal-data-versions.md` |
 | 読み手の指定 | `read_by` | 上限の設定の方針が持つ、その方針を引くモジュールの名前（read_by。#3684） | — | — | `docs/specifications/ndf-contract-fact-checks.md` |
 | 受け渡しのファイル | `handoff_file` | あるエントリポイントが書き、別のエントリポイントか Skill の手順が読むファイル（状態・記録・結果）。1 つのエントリポイントの中で作って消す一時ファイルは含まない | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |

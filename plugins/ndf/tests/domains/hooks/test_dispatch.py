@@ -216,8 +216,8 @@ def test_i7_fail_closed_guard_runs_after_the_deadline(tmp_path, fake_guards):
     assert out.stopped == "deadline" and [r.name for r in out.runs] == ["slow", "ask"] and out.verdict.kind == "deny"
 
 
-def test_only_ask_forward_is_fail_closed_in_the_table():
-    assert {s.name for s in dispatch.load_specs() if s.fail_closed} == {"ask-forward"}
+def test_only_the_relay_records_are_fail_closed_in_the_table():
+    assert {s.name for s in dispatch.load_specs() if s.fail_closed} == {"ask-forward", "relay-busy"}
 
 
 def _run_on(tmp_path, ctx, specs, counter):
@@ -262,7 +262,7 @@ def test_context_limit_is_the_first_guard_selected(tmp_path, tool):
         else sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": "a"})
     )
     names = [s.name for s in dispatch.select(dispatch.load_specs(), HookContext("claude", "PreToolUse", payload), frozenset())]
-    assert names[0] == "context-limit"
+    assert names[0] == "context-limit" and names[-1] == "relay-busy"
 
 
 def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkeypatch):
@@ -285,7 +285,8 @@ def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkey
         specs = dispatch.select(dispatch.load_specs(), ctx, frozenset())
         svc = dispatch.GuardServices(tmp_path, Counter.unusable(), 0.0)
         outs.append(dispatch.run(ctx, specs, found, svc, clock=lambda: now[0]))
-    assert [[r.name for r in out.runs] for out in outs] == [["context-limit"], ["context-limit"]]
+    # relay-busy は fail_closed なので、締め切りを越えても最後に呼ばれる（#4049）
+    assert [[r.name for r in out.runs] for out in outs] == [["context-limit", "relay-busy"]] * 2
     assert outs[0].stopped == "deadline" and [out.verdict.kind for out in outs] == ["deny", "pass"]
 
 

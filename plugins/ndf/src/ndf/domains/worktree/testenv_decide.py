@@ -29,7 +29,7 @@ def slug(text: str) -> str:
     return re.sub(r"-+", "-", _SLUG.sub("-", text.lower())).strip("-")
 
 
-def env_name(repo_name: str, branch: str, source: Optional[str] = None) -> str:
+def testenv_name(repo_name: str, branch: str, source: Optional[str] = None) -> str:
     """環境名。`source` は要約値の元（省けばブランチ名）。"""
     digest = hashlib.sha1((source if source is not None else branch).encode("utf-8"), usedforsecurity=False).hexdigest()[:DIGEST_LEN]
     head = f"{slug(repo_name)}-wt-{slug(branch)}"[: NAME_MAX - DIGEST_LEN - 1].rstrip("-")

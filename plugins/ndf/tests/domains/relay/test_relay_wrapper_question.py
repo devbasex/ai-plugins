@@ -19,6 +19,7 @@ from relay_children import (
     AskingChild,
     FakeChild,
     log_rows,
+    no_work,
     put_usages,
     register,
     rows_of,
@@ -140,6 +141,7 @@ def _race_setup(kind: str, first: FakeChild, monkeypatch) -> tuple[dict, object]
     """`kind` の手が出る形（設定の変更・マーカー・使用率・文脈の量）を返す。"""
     if kind == "handover":
         _over_context(monkeypatch)
+        no_work(first)
         return {}, None
     if kind == "switch":
 
@@ -246,7 +248,7 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
     # I6・受け入れ条件 2: 引継ぎは子の端末へ書かず、子を止めて --resume <同じ ID> <引継ぎを頼む文> で起動し直す。
     # 起動し直しの回数には数えず、次の子では引継ぎを頼み直さない。起動ごとに起動の ID が違う
     _over_context(monkeypatch)
-    first = FakeChild([b"working\r\n"], None)
+    first = no_work(FakeChild([b"working\r\n"], None))
     ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)])
     assert ended.cause == ""
     (one, one_env), (two, two_env) = spawn.calls
@@ -260,7 +262,7 @@ def test_i6_handover_restarts_the_same_conversation_without_writing_to_the_child
 def test_a_resume_in_the_same_section_keeps_the_handover_asked(tmp_path, monkeypatch):
     # 引継ぎを頼んだ後に同じセグメントで起動し直しても、文脈の量が上限を超えたままなら引継ぎを頼み直さない
     _over_context(monkeypatch)
-    children = [FakeChild([b"working\r\n"], None), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], 1)]
+    children = [no_work(FakeChild([b"working\r\n"], None)), FakeChild([b"working\r\n"], 1), FakeChild([b"working\r\n"], 1)]
     ended, spawn, w = run_wrapper(tmp_path, children, stall=3.0, spin=switch_decide.Spin(3, 120.0))
     assert ended.cause == "spin" and len(spawn.calls) == 3
     assert spawn.calls[2][0][-1] != switch_decide.HANDOVER_PROMPT
