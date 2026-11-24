@@ -29,7 +29,7 @@ plugins/ndf/
   tests/ の対応するファイル
 ```
 
-依存の向き: `ndf.contracts.writing` は最も下の層にあり、cross-review・`core/worker`・`records` から import する。guard は `records` の `reading_decide` だけを import し（標準ライブラリだけで書いてある）、`records` は hook のモジュールを import しない。hook からは `ndf.contracts`（jsonschema を読む）を import しない決まり（`contracts/hooks/imports.json` の `forbidden`）なので、guard は `reading.rows` を呼ばず、記録のファイルを `reading_decide.light_rows` で読む。`reading.rows` は、記録の種類のスキーマで行を確かめる読み手で、`ndf records reading check` が使う。
+依存の向き: `ndf.contracts.writing` は最も下の層にあり、cross-review・`core/worker`・`records` から import する。guard は `records` の `reading_decide` だけを import し（標準ライブラリだけで書いてある）、`records` は hook のモジュールを import しない。hook からは `ndf.contracts`（jsonschema を読む）を import しない決まり（`contracts/hooks/imports.json` の `forbidden`）なので、guard は `reading.rows` を呼ばず、記録のファイルを `reading_decide.light_rows` で読む。`reading.rows` は記録を読み、各行をスキーマで検証する。`ndf records reading check` はこの関数を使う。
 
 下の表のパスは `plugins/ndf/src/ndf/` から書く。
 
@@ -56,7 +56,7 @@ plugins/ndf/
 | `writing.types_section` | 新設 | `() -> str` | 4 つの型の節だけを返す。見出しが無ければ `ContractError` |
 | `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`previous` は前のラウンドの head（`head`）と、その head から今の head までの差分のファイル（`diff`）で、`round_scope.previous_head` が `None` なら `None` |
 | `round_scope.previous_head` | 新設 | `(g, state, basis, head) -> Optional[str]` | 比較元にする前のラウンドの head を返す。レビュアーの一部が読めなかったラウンドを除き、残りのうち最後のラウンドだけを調べる。そのラウンドを今回のレビュアー全員が読み、比較基点とレビューの重点が今回と一致し、その head が今回の head の祖先であれば、その head を返す。1 つでも満たさなければ、それより前のラウンドには戻らず `None` を返し、範囲は全差分になる |
-| `round_scope.descended` | `drive.py` から移す | `(g, scope, head) -> Scope` | `review-scope` 用。前の head からの差分の範囲だけ、前の head が今の head の祖先かを確かめ、祖先でなければ全差分に戻す。全差分の範囲では git を起動しない |
+| `round_scope.descended` | `drive.py` から移す | `(g, scope, head) -> Scope` | `review-scope` 用。範囲が `SINCE`（前の head からの差分）の場合だけ、前の head が今の head の祖先かを git で確かめる。祖先でなければ全差分（`FULL`）を返す。入力が `FULL` なら、そのまま返す |
 | `_prepare_round` | 変更 | 変えない | Pull Request の全体の差分（`cfg.base...HEAD`）に Markdown のファイルがあるかを `_Run.documents` に入れる（ラウンドごとの差分では決めない）。前のラウンドの head からの差分を、`previous` としてレビュアーの全員に渡す。ラウンドの差分が前の head からの差分なら、同じファイルを使う。設計の PR で全差分を渡すラウンドだけ、別のファイルに 1 回作る |
 | `_review_prompt`・`_fix_prompt` | 変更 | `_review_prompt` は `_Prepared` を受け取る | `document_block` の行を指示に加える |
 | `worker.system_prompt` | 変更 | 変えない | `document-style` を読む作業（`kinds.json`）では、手順書の節の後に `writing.criteria()` を続ける |
@@ -83,10 +83,15 @@ plugins/ndf/
 | `reading.prompt` | 新設 | `(entry: Mapping[str, Any]) -> str` | 読み手役への指示を返す。`files`・`reader`・`questions_kind` と、4 つの型・2 つの区分の見分け方・返す形を入れる。文書は加工しない。「エンジニア向けの補足」を外した文書や、直した部分だけの文書は、担当が先に別のファイルへ作る |
 | `reading.add` | 新設 | `(entry: Mapping[str, Any], root: Path) -> dict[str, Any]` | 担当が書いた記録を確かめ、足りない値を補って 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` を送出し、追記しない。GitHub を読まない |
 | `reading.rows` | 新設 | `() -> list[dict[str, Any]]` | 記録を古い順に返す。壊れた行は無いものとして扱い、今の NDF より新しいバージョンの行があれば `InternalError` を送出する。ファイルが無ければ空。ファイルを開けなければ `OSError` を送出する |
-| `reading.check` | 新設 | `(questions, prs: Sequence[int], root: Path) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを、先に `git fetch` で取り込む（失敗しても続ける）。後で動く hook が、新しい head と比べられるようにするためである。リモートは `Git(root).remote()` で決める。hook と同じく、メインディレクトリの `.ndf/worktree.json` の設定を `git.remote_of` で読むので、hook が読むリモートと一致する。取り込み先は、hook が読む `refs/remotes/<リモート>/<ブランチ>` を明示する（`Git.fetch(リモート, "+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>", …)`。複数のブランチも 1 回で取る）。引数の無い fetch は、既定のリモートや設定された範囲だけを更新するので使わない。記録に PR が無ければ fetch しない。その後、`GitHub.pulls` で PR の head をまとめて読み、`missing` に渡す。GitHub を読めなければ `GitHubError` を送出する |
+| `reading.check` | 新設 | `(questions, prs: Sequence[int], root: Path) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを取り込んでから、GitHub の head と記録を `missing` で比べる。GitHub を読めなければ `GitHubError` を送出する。手順は表の下にある |
 | `reading_decide.question_key` | 新設 | `(questions: Sequence[Mapping[str, Any]]) -> str` | 質問ごとの「質問の文・複数選択か・選択肢の名前と説明」だけを残した JSON（キーの順を固定し、文字列の前後の空白を除く）の SHA-256。区分などは含めない |
 | `reading_decide.light_rows` | 新設 | `(text: str, version: int) -> list[dict[str, Any]]` | 記録のファイルの本文から、使う欄の形が合う行を古い順に返す。壊れた行は無いものとして扱う。`version` より新しい行があれば `NewerRow` を送出する。hook が使う |
 | `reading_decide.missing` | 新設 | `(key: str, repo: str, rows, heads: Mapping[int, str], prs: Sequence[int] = ()) -> list[str]` | 足りないものを表す語（下の表）を返す。空なら通す。`heads` は PR の番号から今の head（SHA）への対応、`prs` は承認の手順で渡す、承認する PR の番号 |
+
+`reading.check` の手順:
+
+1. 記録に書かれた PR のブランチごとに、`+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を組み立て、すべてを 1 回の `Git.fetch` に渡す。後で動く hook が、新しくなったリモート追跡ブランチを読めるようにするためである。リモートは `Git(root).remote()` で決める（hook と同じ設定を読む）。fetch が失敗しても続け、記録に PR が無ければ fetch しない
+2. `GitHub.pulls` で、記録の PR と承認する PR の head をまとめて読み、`missing` に渡す
 
 | 語 | 条件 |
 | --- | --- |
@@ -131,7 +136,7 @@ plugins/ndf/
 | 4 | `missing` が空でない | 止める |
 | 5 | 上のどれでもない（git が失敗したときと、PR のリモート追跡ブランチが手元に無いときも、ここに当たる） | 通す。head を読めない PR があれば、hook の計測の記録に `reading: no_head` を残す |
 
-- `ndf-gate:` の質問で、一致する記録に PR があるときだけ、git を 1 回起動し、その PR のブランチの `refs/remotes/<リモート>/<ブランチ>` をまとめて読む（`git for-each-ref`）。リモートの名前は `git.remote_of`（メインディレクトリの `.ndf/worktree.json` の設定）で決める。リポジトリの名前は、git を起動せずに、リポジトリの git の設定のそのリモートの URL から決める（本番へのマージを見る guard `merge-production` と同じ読み方）。読めたものだけを `heads` に入れる。時間の上限は `hook.git-rev-parse` の 0.4 秒とする（この上限は #3684 で使われなくなって消えたので、guard を読み手として書いて戻す）
+- `ndf-gate:` の質問で、一致する記録に PR があるときだけ、git を 1 回起動し、その PR のブランチの `refs/remotes/<リモート>/<ブランチ>` をまとめて読む（`git for-each-ref`）。リモートの名前は `git.remote_of`（メインディレクトリの `.ndf/worktree.json` の設定）で決める。リポジトリの名前は、git を起動せずに、リポジトリの git の設定のそのリモートの URL から決める（本番へのマージを見る guard `merge-production` と同じ読み方）。読めたものだけを `heads` に入れる。時間の上限は `hook.git-rev-parse` の 0.4 秒とする（この上限の定義は、使う hook が無くなって消えていた（ https://github.com/devbasex/ai-plugins/issues/3684 ）。この guard が使うので、`contracts/limits/hook.git-rev-parse.json` に作り直す）
 - `guards.json` の行: イベント `PreToolUse`・Tool `AskUserQuestion`・`order` 55（質問を転送する `ask-forward` の 60 より前）・`fail_closed` 偽・`deny_key` は `reason`・`limits` は `hook.git-rev-parse` と `hook.counter-lock`
 - 止める理由の文は、区分と、足りないものの語（`no_record` など）だけで決まる固定の文とし、記録を作るコマンドを添える。質問の文やハッシュ値を入れない。同じ理由の拒否を数える今の仕組み（`hook.deny-repeat` の 2 回）が、区分と語の組ごとに数えるようにするためである。2 回止めた後は、同じ区分の別の質問でも、同じ理由であれば、止めずに注意を添えて通す
 
