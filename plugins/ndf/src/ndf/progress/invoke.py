@@ -159,6 +159,8 @@ class StageRun:
     again: bool = False
     # 同じ工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`。`gate.Target.as_dict` の形）。無ければ None（#4409）
     approved: Optional[dict[str, Any]] = None
+    # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
+    gated: bool = False
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
         out = {**os.environ, **extra}
@@ -248,7 +250,7 @@ def stage_run(stage: stages.StageDef, step: stages.StepDef, inputs: Mapping[str,
         raise model.Refused(f"工程 {stage.name} のステップ {step.id} の call {step.call} は呼べない")
     kind = kind_of(step)
     name = _named(kind, step.args)
-    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args))
+    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args), gated=bool(stage.gates))
 
 
 def _named(kind: str, args: Mapping[str, Any]) -> str:
@@ -651,7 +653,9 @@ def _fill_production_gate(t: route.Template, run: StageRun) -> dict[str, route.V
     """
     out: dict[str, route.Value] = {}
     if "production_gate" in t.params and t.name in PRODUCTION_GATE:
-        out["production_gate"] = PRODUCTION_GATE[t.name]
+        # 承認ゲートを持たない工程（light の設計）は質問し直す承認ゲートが無いので、承認をデプロイへ先送りする
+        held = PRODUCTION_GATE[t.name]
+        out["production_gate"] = held if held != "stale" or run.gated else "defer"
     if "approved_head" in t.params:
         out.update(_approved_target(run))
     return out

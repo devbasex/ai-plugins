@@ -24,7 +24,7 @@ import hashlib
 import json
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -60,6 +60,12 @@ STEP_EVENT = _event("step_recorded")
 ANSWERED = _event("answered")
 FAILED = _event("failed")
 FINISHED = _event("finished")
+# 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
+RETRY_EVENT = _event("retry")
+# 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
+DEFINITION_MIGRATED = _event("definition_migrated")
+# 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
+CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
 # 回答の語（承認・変更要求・承認しない）
 APPROVED = invoke.APPROVED
 REQUEST_CHANGES = _answer("request_changes")
@@ -108,7 +114,59 @@ def payload_of(ev: model.Event) -> dict[str, Any]:
 
 def view(conn: Any, machine_id: str) -> View:
     rev, raw, snap, events = command.read_current(conn, machine_id)
-    return View(machine_id, rev, snap, raw, events)
+    return View(machine_id, rev, _migrated_order(snap, events), raw, events)
+
+
+def _migrated_order(snap: stages.Snapshot, events: Sequence[model.Event]) -> stages.Snapshot:
+    """事象 `definition_migrated` があれば、その工程の順に並べ替えた写し。無い・工程の名前の集合が合わなければ写しのまま。
+
+    写しそのもの（`sha256`・`definition_version`）は書き換えない（写しの由来を残す）。
+    """
+    held = next((payload_of(e).get("order") for e in events if e.draft.kind == DEFINITION_MIGRATED), None)
+    by_name = {s.name: s for s in snap.stages}
+    if not isinstance(held, list) or sorted(map(str, held)) != sorted(by_name) or len(held) != len(by_name):
+        return snap
+    return replace(snap, stages=tuple(by_name[str(n)] for n in held))
+
+
+def _new_order(v: View) -> Optional[list[str]]:
+    """古い順（クリーンアップ → デプロイ）の写しで、デプロイが始まっておらず、クリーンアップが終わっていなければ、
+    クリーンアップをデプロイの直後へ移した工程の名前の並び。移さないなら None。"""
+    if any(e.draft.kind == DEFINITION_MIGRATED for e in v.events):
+        return None
+    ids = [s.id for s in v.snap.stages]
+    if CLEANUP_STAGE_ID not in ids or DEPLOY_STAGE_ID not in ids or ids.index(CLEANUP_STAGE_ID) > ids.index(DEPLOY_STAGE_ID):
+        return None
+    cleanup, deploy = (v.snap.stages[ids.index(i)] for i in (CLEANUP_STAGE_ID, DEPLOY_STAGE_ID))
+    if v.row_events(deploy.name) and any(e.draft.kind == STARTED for e in v.row_events(deploy.name)):
+        return None
+    row = v.rows.get(cleanup.name)
+    if row is not None and row.state == FINISHED:
+        return None
+    names = [s.name for s in v.snap.stages if s.name != cleanup.name]
+    names.insert(names.index(deploy.name) + 1, cleanup.name)
+    return names
+
+
+def migrate_definition(st: store.Store, machine_id: str) -> Optional[int]:
+    """このリリースの前に始めた状態機械の写しで、クリーンアップをデプロイの直後へ移す事象を 1 回だけ書き、その番号を返す
+    （#4409 の決定 6）。クリーンアップが開いた PR で止まった（`precondition` の失敗）状態機械も移す。移さなければ None。"""
+
+    def build(v: View) -> list[model.EventDraft]:
+        order = _new_order(v)
+        if order is None:
+            return []
+        moved = model.EventDraft(DEFINITION_MIGRATED, ACTOR, None, reason="クリーンアップをデプロイの後へ移した", payload={"order": order}, rev=v.rev)
+        cleanup = next(s.name for s in v.snap.stages if s.id == CLEANUP_STAGE_ID)
+        row = v.rows.get(cleanup)
+        if row is None or row.state != FAILED:
+            return [moved]
+        # 開いた PR で止まったクリーンアップは、デプロイの後に流し直すまで結果を使わない（失敗を待ちへ戻す）
+        why = "クリーンアップをデプロイの後へ移したので、デプロイの後に流し直す"
+        return [moved, model.EventDraft(RETRY_EVENT, CONDUCTOR, cleanup, reason=why, rev=v.rev)]
+
+    seqs = append(st, machine_id, build)
+    return seqs[0] if seqs else None
 
 
 def read(st: store.Store, machine_id: str) -> View:
@@ -657,6 +715,7 @@ def advance(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, 
         summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
         return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
     with store.run_lock(st, machine_id):
+        migrate_definition(st, machine_id)
         return _drive(Drive(st, machine_id, cwd, env, inline=False))
 
 

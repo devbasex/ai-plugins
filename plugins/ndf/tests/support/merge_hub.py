@@ -113,4 +113,5 @@ class MergeHub:
                 if stop is not None:
                     return stop
         self.merged.append(number)
+        self.pulls_of[number] = self.pulls_of[number]._replace(merged=True, state="closed")
         return MergeOutcome(True, None, f"#{number} をマージした", now.head_sha)

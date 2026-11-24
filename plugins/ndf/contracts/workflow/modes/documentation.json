@@ -144,22 +144,22 @@
       }
     },
     {
-      "クリーンアップ": {
+      "デプロイ": {
         "run": {
           "workflow": {
             "namespace": "ndf",
-            "name": "cleanup",
+            "name": "deploy",
             "version": "1.0.0"
           }
         }
       }
     },
     {
-      "デプロイ": {
+      "クリーンアップ": {
         "run": {
           "workflow": {
             "namespace": "ndf",
-            "name": "deploy",
+            "name": "cleanup",
             "version": "1.0.0"
           }
         }
