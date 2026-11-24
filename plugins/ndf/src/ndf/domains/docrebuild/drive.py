@@ -339,14 +339,22 @@ def reader_gaps(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]:
     """確かめの記録（`metrics.readers`）の欠けを、対象の文書ごとの `gaps` の要素にする（I4）。対象の外の記録は見ない。"""
     gaps = []
     for t in targets:
-        if not isinstance(raw, list):
-            reason: Optional[str] = "記録（metrics.readers）が並びでない"
-        else:
-            recs = _records_of(raw, t.path)
-            reason = "記録が無い" if not recs else "記録が 2 件以上ある" if len(recs) > 1 else _record_gap(recs[0], t.kind)
+        reason = _reader_gap(raw, t)
         if reason is not None:
             gaps.append({"kind": "reader", "name": t.path, "reason": reason})
     return gaps
+
+
+def _reader_gap(raw: Any, target: Target) -> Optional[str]:
+    """文書 1 件ぶんの確かめの記録の欠けの理由。欠けが無ければ None。"""
+    if not isinstance(raw, list):
+        return "記録（metrics.readers）が並びでない"
+    recs = _records_of(raw, target.path)
+    if not recs:
+        return "記録が無い"
+    if len(recs) > 1:
+        return "記録が 2 件以上ある"
+    return _record_gap(recs[0], target.kind)
 
 
 def _clean(rec: Mapping[str, Any]) -> dict[str, Any]:
