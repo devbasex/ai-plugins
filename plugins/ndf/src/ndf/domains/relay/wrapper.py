@@ -58,6 +58,7 @@ from ndf.domains.relay import (
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
 from ndf.domains.relay.wrapper_auth import AuthSteps
+from ndf.domains.relay.wrapper_busy import _BUSY_ALLOW, BusySteps
 from ndf.domains.relay.wrapper_fetch import FetchSteps
 from ndf.domains.relay.wrapper_guard import GuardSteps
 from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
@@ -85,7 +86,6 @@ NOT_FOUND = "子の PATH に {exe} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
-# 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
 # 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
 # `again` は端末のラッパーなら AGAIN_RUN、名前つきのラッパー（NDF_RELAY_SPAWNED）なら AGAIN_RESTART（起動引数の中身は出さない）
 SPIN_LINE = (
@@ -262,7 +262,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
+class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -384,7 +384,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
         guard = self._guard_pick(sec, self.wall.now()) if not sec.must_end and limit is None and auth is None and alive else None
         safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
-        return switch_decide.SectionState(
+        state = switch_decide.SectionState(
             question=question,
             question_forwarded=forwarded,
             question_id=qid,
@@ -410,6 +410,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
             drift_pick=self._revoked_pick(sec, self.wall.now()) if stopped else None,
             metered=account_decide.metered(sec.account),
         )
+        return self._with_background(sec, state)
 
     @staticmethod
     def _length(sec: Section, now: float) -> float:
@@ -565,7 +566,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
                 self._log({"kind": "account_recheck", "account": sec.choice.names[0] if sec.choice else None, "reason": why})
                 return None
         # キーの子は `_stop_revoked` が止め、`_revoked_pick` が止める直前の確かめも済ませてある
-        stopped = "stopped" if sec.must_end else self._stop_if_clear(sec)
+        stopped = "stopped" if sec.must_end else self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
@@ -585,7 +586,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         # 子の端末へは書かず、子を止めて同じ会話を引継ぎを頼む文（HANDOVER_PROMPT）で起動し直す。起動し直しの回数には数えない（I6）
-        stopped = self._stop_if_clear(sec)
+        stopped = self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
@@ -619,6 +620,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
     _ACTIONS: ClassVar[dict[str, Callable[[Wrapper, switch_decide.Step, Section], Optional[Ended]]]] = {
         "forward": _on_wait_like,
         "wait_reset": _on_wait_like,
+        "wait_background": _on_wait_like,
+        "active": BusySteps._on_active,
         "stalled": _on_wait_like,
         "switch": _on_switch,
         "account": _on_resume,
@@ -653,6 +656,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
+        signals.drop_other_busy(self.dir, launch)  # 今の起動の記録は子の SessionStart の hook が書く（#4049）
         try:
             got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once], launch)
         except Halt as halt:

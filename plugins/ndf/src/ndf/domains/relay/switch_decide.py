@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple, Optional
 
 from ndf import identity
@@ -29,8 +29,23 @@ GUARD_RESUME_PROMPT = "利用上限の手前でアカウントを替えた。中
 GUARD_BACK_PROMPT = "利用上限が解けたアカウントへ戻した。中断したところから続ける"
 # 認証の失敗で替えた先のアカウントで再開するときに送る 1 行（#3864 の決定 6）
 AUTH_RESUME_PROMPT = "認証の失敗でアカウントを替えた。中断したところから続ける"
+# 見回りで替えた先の最初の入力に足す 1 行（子を止めると監視も終わるが、起動し直した会話はそれを知らない。#4049 の決定 9）
+MONITOR_RESUME = (
+    "バックグラウンドの監視（ndf lanes wait・ndf plan wait・ndf ci watch・Monitor）は替えで終わった。"
+    "張っていた監視は、直前に受けたカーソル（ndf lanes wait の --after など）から張り直してから待つ"
+)
+# 止めるものも待つものも無い見回りの理由
+ACTIVE = "子が動いている"
 # 見回りの替えで、止めてよい時点を待つ理由（I13）
-GUARD_WAIT = "閾値を越えた。止めてよい時点を待つ"
+GUARD_POINT = f"{ACTIVE}。閾値を越えた。止めてよい時点を待つ"
+# バックグラウンドの作業と監視を待つ理由（#4049 の決定 4・5）。開始の記録は「少なくとも 1 件」だけを示す
+BACKGROUND_WAIT = (
+    "バックグラウンドの作業 {count} 件の終わりを待つ（監視 {monitors} 件は数えない。記録 {at}）。"
+    "子を止めず、引継ぎ・起動し直し・利用上限の手前の替えもしない"
+)
+BACKGROUND_LEAST = "バックグラウンドの作業 1 件以上の終わりを待つ（開始の記録 {at}）。子を止めず、引継ぎも起動し直しもしない"
+MONITOR_WAIT = "監視 {monitors} 件の終わりを待つ（記録 {at}）。止まりでは起動し直さない（起動し直すと監視を張り直さない）"
+BACKGROUND_UNKNOWN = "バックグラウンドの作業を確かめられないので、引継ぎと利用上限の手前の替えを待つ（止まりは子の出力と端末の入力で見る）"
 # 質問を転送する理由。質問の ID を入れて、直前と同じ理由を省く記録でも別の質問の行を残す（#3814）
 FORWARD = "AskUserQuestion の質問 {id} を人かオーガナイザーへ転送する（hook は待たない）"
 # 質問の ID が分からないときの理由（今の入力の JSON の文）
@@ -44,6 +59,18 @@ END_WAIT = "API キーの設定が変わった。止められる時点を待つ"
 REVOKED = "API キーの子を止めた。替える先が無い"
 # 既定のログイン（アカウントの指定が無い）の起動先の値。登録の名前に使えない括弧を含むので重ならない
 DEFAULT_TARGET = "(default)"
+
+
+class Background(NamedTuple):
+    """今の起動のバックグラウンドの作業の記録（`signals.read_busy`）。`count` は作業、`monitors` は監視の件数。
+
+    `source` は書いた事象（`start` なら `count` は「少なくとも 1 件」）、`at` は書いた時刻。
+    """
+
+    count: int
+    source: str
+    at: str
+    monitors: int
 
 
 @dataclass(frozen=True)
@@ -66,6 +93,7 @@ class SectionState:
     - `must_end`・`end_ready`・`drift_pick`: API キーの子で止める必要が立ったか・この見回りで旧子の終わりを確かめたか・
       止めた後に取り直した替え先の判断（`end_ready` が偽の間は None。#3864 の決定 12）
     - `metered`: 今の起動先が従量の接続か（見回りで戻るときの 1 行を選ぶ。#3864 の決定 8）
+    - `background`: 今の起動のバックグラウンドの作業の記録。None は不明か、読んでいない（`needs_background`。#4049）
     """
 
     question: bool
@@ -92,18 +120,22 @@ class SectionState:
     end_ready: bool = False
     drift_pick: Optional[Pick] = None
     metered: bool = False
+    background: Optional[Background] = None
 
 
 class Step(NamedTuple):
-    """次の手。`kind` は `wait`・`forward`・`switch`・`account`・`wait_reset`・`stalled`・`handover`・`restart`・`finish`・`spin`・`revoked`。
+    """次の手。`kind` は `wait`・`active`・`forward`・`switch`・`account`・`wait_reset`・`wait_background`・`stalled`・`handover`・
+    `restart`・`finish`・`spin`・`revoked`。
 
-    `prompt` は子へ送る 1 行、`account` は次に使うアカウント（替えないときは None）。
+    `prompt` は子へ送る 1 行、`account` は次に使うアカウント（替えないときは None）。`busy` は子を止める直前に記録を読み直す条件
+    （`zero` は作業 0 件、`none_running` は作業も監視も 0 件か不明のときだけ止める。None は読み直さない。#4049）。
     """
 
     kind: str
     reason: str
     prompt: str = ""
     account: Optional[str] = None
+    busy: Optional[str] = None
 
 
 class Spin(NamedTuple):
@@ -155,8 +187,14 @@ def _spun(state: SectionState, kind: str, account: Optional[str]) -> bool:
 def _spin_or(state: SectionState, step: Step) -> Step:
     """検出に当たれば手を `spin` に替える（理由は元の理由に `SPIN_REASON` を足す）。"""
     if _spun(state, step.kind, step.account):
-        return Step("spin", f"{step.reason}。{SPIN_REASON}")
+        return Step("spin", f"{step.reason}。{SPIN_REASON}", busy=step.busy)
     return step
+
+
+def needs_background(state: SectionState) -> bool:
+    """この見回りで選ばれる判定が、バックグラウンドの作業の件数を要るか（要る見回りだけ記録を読む。#4049）。"""
+    step = decide(replace(state, background=None))
+    return step.kind == "wait_background" or step.busy is not None
 
 
 def decide(state: SectionState) -> Step:
@@ -182,13 +220,13 @@ def decide(state: SectionState) -> Step:
             state, Step("switch", "最後の応答が次のセグメントのブロックを持つ（/goal が未達でも切り替える）", prompt=state.next_block)
         )
     guarded = _guard(state)
-    if guarded is not None and guarded.kind != "wait":
+    if guarded is not None and guarded.kind != "active":
         return guarded
     if not state.child_alive:
         return _ended(state)
     step = _alive(state, quiet)
     # 止めてよい時点を待つ間も、文脈の上限の引継ぎと出力の止まりの再起動は先に打つ（tool_use のままハングした子を残さない）
-    return guarded if guarded is not None and step.kind == "wait" else step
+    return guarded if guarded is not None and step.kind == "active" else step
 
 
 def _revoked(state: SectionState) -> Optional[Step]:
@@ -204,17 +242,30 @@ def _revoked(state: SectionState) -> Optional[Step]:
 
 
 def _guard(state: SectionState) -> Optional[Step]:
-    """見回りの替え。閾値を越えて替え先があれば、止めてよい時点で `account`、それまでは `wait`（決定 11・I13）。
+    """見回りの替え。閾値を越えて替え先があれば、止めてよい時点で `account`、それまでは `active`（決定 11・I13）。
 
-    `wait` は `decide` が子の生き死にと `_alive` の判断の後に回す（引継ぎ・再起動が当たればそちらを打つ）。
+    `active` は `decide` が子の生き死にと `_alive` の判断の後に回す（引継ぎ・再起動が当たればそちらを打つ）。
+    作業が残るか確かめられなければ替えずに待つ。確かめられない子が止まっていれば `_alive` の起動し直しに任せる（#4049 の決定 8）。
     """
     pick = state.guard_pick
     if pick is None or pick.kind != "switch":
         return None
     if not state.safe:
-        return Step("wait", GUARD_WAIT)
+        return Step("active", GUARD_POINT)
+    if state.background is None and _stalled(state):
+        return None
+    if state.background is None or state.background.count:
+        return _wait_background(state.background)
     prompt = GUARD_BACK_PROMPT if state.metered else GUARD_RESUME_PROMPT
-    return _spin_or(state, Step("account", pick.reason, prompt=prompt, account=pick.account))
+    return _spin_or(state, Step("account", pick.reason, prompt=f"{prompt}。{MONITOR_RESUME}", account=pick.account, busy="zero"))
+
+
+def _wait_background(found: Optional[Background]) -> Step:
+    """作業の終わりを待つ手（None は確かめられない）。"""
+    if found is None:
+        return Step("wait_background", BACKGROUND_UNKNOWN)
+    reason = BACKGROUND_LEAST if found.source == "start" else BACKGROUND_WAIT
+    return Step("wait_background", reason.format(**found._asdict()))
 
 
 def _limit_or_auth(state: SectionState) -> Optional[Step]:
@@ -241,16 +292,30 @@ def _ended(state: SectionState) -> Step:
     return _restart_or_stop(state, f"子が終了コード {state.child_exit} で終わった")
 
 
+def _over(state: SectionState) -> bool:
+    """文脈の量が上限以上か。"""
+    return state.context_limit is not None and state.context_tokens is not None and state.context_tokens >= state.context_limit
+
+
+def _stalled(state: SectionState) -> bool:
+    """子の出力と端末の入力が、止まりとみなす秒だけ無いか。"""
+    return state.stall_seconds > 0 and state.idle_seconds >= state.stall_seconds
+
+
 def _alive(state: SectionState, quiet: bool) -> Step:
-    over = state.context_limit is not None and state.context_tokens is not None and state.context_tokens >= state.context_limit
-    if over and quiet and not state.handover_asked:
-        return _spin_or(
-            state, Step("handover", f"文脈の量 {state.context_tokens} が上限 {state.context_limit} を超えた", prompt=HANDOVER_PROMPT)
-        )
-    if state.stall_seconds and state.idle_seconds >= state.stall_seconds:
-        return _restart_or_stop(state, f"子の出力が {state.idle_seconds:g} 秒止まっている")
-    return Step("wait", "子が動いている")
+    """動いている子の手。作業が残る子は止めない。止まりでは監視だけの子も止めない（#4049 の決定 4・9）。"""
+    ask, stalled, found = _over(state) and quiet and not state.handover_asked, _stalled(state), state.background
+    if found is not None and found.count and (ask or stalled):
+        return _wait_background(found)
+    if ask and found is not None:
+        reason = f"文脈の量 {state.context_tokens} が上限 {state.context_limit} を超えた"
+        return _spin_or(state, Step("handover", reason, prompt=HANDOVER_PROMPT, busy="zero"))
+    if stalled and found is not None and found.monitors:
+        return Step("wait_background", MONITOR_WAIT.format(**found._asdict()))
+    if stalled:
+        return _restart_or_stop(state, f"子の出力が {state.idle_seconds:g} 秒止まっている", busy="none_running")
+    return _wait_background(None) if ask else Step("active", ACTIVE)
 
 
-def _restart_or_stop(state: SectionState, why: str) -> Step:
-    return _spin_or(state, Step("restart", why))
+def _restart_or_stop(state: SectionState, why: str, busy: Optional[str] = None) -> Step:
+    return _spin_or(state, Step("restart", why, busy=busy))
