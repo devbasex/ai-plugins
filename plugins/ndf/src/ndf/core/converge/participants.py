@@ -257,7 +257,7 @@ def claude_answer(out: Path) -> ClaudeAnswer:
     try:
         payload = json.loads(raw)
     except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
-        return ClaudeAnswer(raw, ())
+        payload = None
     if not isinstance(payload, dict):
         return ClaudeAnswer(raw, ())
     body = payload.get("result")
