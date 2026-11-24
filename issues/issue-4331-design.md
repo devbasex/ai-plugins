@@ -418,6 +418,8 @@ NDF の配布物で変わるのはテストの `conftest.py` だけで、利用�
 
 ## 設計の結果
 
+詳細設計は [issue-4331-design-detail.md](./issue-4331-design-detail.md) にある。新設する関数が 2 つ以上あり、既存の関数のシグネチャを 1 つ（`scripts/pytest_shard.py` の `_file_of`）変えるため、別ファイルにした。
+
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #4331 | 実装する | — | `.github/workflows/pytest.yml`、`scripts/pytest_shard.py`、`scripts/pytest-shard-seconds.json`、`scripts/ci_test_durations.py`（新設）、`scripts/ci-test-duration.json`（新設）、`scripts/tests/test_pytest_shard.py`（新設）、`scripts/tests/test_ci_test_durations.py`（新設）、`plugins/ndf/tests/conftest.py`、`plugins/ndf/tests/test_ok_tools_record.py`（新設）、`.ndf/project.json`、`docs/specifications/ndf-split-tables-toolchain-and-budget.md` |
