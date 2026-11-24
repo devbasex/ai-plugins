@@ -69,7 +69,7 @@ PR に載せずに `mvv_unresolved` で止める。次の起動は、始めに�
 | `converged`・`max_rounds`・`oscillating`・`errored` | MVV に反する指摘か MVV の根拠の行の誤りの未解決・根拠の行を最後のコミットで確かめられない・PR に届いていない手元のコミットの根拠の行の誤り | `status: stopped`・`mvv_unresolved`。次の工程へ進まずに人へ戻す。欠けは最上位の `gaps` でなく `outputs.gaps` に載る |
 | `incomplete_reviewers`（起動し直しても読めない相手役がいた） | どれでも | `status: stopped`・`work_stopped`。相手役ごとの理由は `warnings`。直して同じコマンドを打ち直せば次のラウンドから続く |
 | `errored` で 1 ラウンドも終わらなかった | — | `status: stopped`・`work_stopped` |
-| どれでも（承認ゲートの判定に要るレビューの記録の行 `redline`・`deferred` を書けなかった） | どれでも | `status: stopped`・`mvv_record_failed`。記録が無いと承認ゲートが PR を省けるため、ほかの行より優先する。本来の終わり方は `summary`、原因は状態ファイルの `mvv_record_error` に載る。記録の保存先を直して同じコマンドを打ち直す |
+| どれでも（承認ゲートの判定に要るレビューの記録の行 `redline`・`deferred` を書けなかった） | どれでも | `status: stopped`・`mvv_record_failed`。記録が無いと、人の承認が必要な PR でも設計承認ゲートを自動で省くおそれがあるため、ほかの行より優先してレビューを停止する。本来の終わり方は `summary`、原因は状態ファイルの `mvv_record_error` に載る。記録の保存先を直して同じコマンドを打ち直す |
 
 `minor`・`nit` の未解決の指摘は欠けにしない。`summary` に「軽い指摘 <件数>」と載る。必ず人の承認が要る操作に当たる指摘も欠けにせず、「人の承認を待つ <件数>」と載る。
 
