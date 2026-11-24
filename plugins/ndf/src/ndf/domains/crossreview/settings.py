@@ -141,7 +141,7 @@ def outside_checkout(cfg: RunConfig) -> RunConfig:
     リンクを通ると、同期でリンクが置き換わった後に別の場所を読み書きする。PR 3944 の r8-1）。"""
     state = Path(os.path.realpath(cfg.state_dir))
     tree = Path(os.path.realpath(cfg.worktree))
-    if state == tree or tree in state.parents:
+    if _inside(state, tree):
         raise DriveStopped(
             "precondition",
             f"状態の保存先 {cfg.state_dir} がレビューする worktree {cfg.worktree} の中にある。PR のチェックアウトが書き換えられる"
