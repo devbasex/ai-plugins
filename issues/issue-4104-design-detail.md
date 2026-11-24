@@ -7,7 +7,7 @@
 | 新設する関数が 4 つ | `read_pr_target`・`PrTarget.item`・`records/cli.py` の `_fix_result`・`core/plan/records.py` の `approved_after` |
 | シグネチャを変える関数と型が 11 個 | `gate`・`_judged`・`pr_number`・`note`・`GitHub.merge`・`_merge_with`・`_preflight`・`_enqueue`・`chosen.record`・`transition_decide.Choice`・`transition_decide.Outcome`（`ndf ci watch` の引数 `--pr-of`・`--out` は CLI の追加で、関数のシグネチャは変えない） |
 
-前提は #3959 の実装が main へ入った後の形である。使う部品は [issue-3959-4055-design-detail.md](./issue-3959-4055-design-detail.md) の `gate`・`_judged` の手順 (1)〜(9)・`judgeable`・`CHECKS_BY_GATE`・`refusals(f, gate)`・`may_skip(f, verdict, gate)`・`review_prs`・`snapshot_facts` である。
+前提は #3959 の実装が main へ入った後の形である。使う部品は [issue-3959-4055-design-detail.md](../docs/specifications/ndf-mvv-gate-every-pace.md) の `gate`・`_judged` の手順 (1)〜(9)・`judgeable`・`CHECKS_BY_GATE`・`refusals(f, gate)`・`may_skip(f, verdict, gate)`・`review_prs`・`snapshot_facts` である。
 
 ## 地図
 
