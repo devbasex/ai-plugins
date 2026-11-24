@@ -521,7 +521,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
     assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
-        {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::"},
+        {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::", "held_for_user": True},
     ]
     prompts = {name: p for _, name, p in fake.prompts}
     assert "見送り済み" not in prompts["round1-codex.out"]

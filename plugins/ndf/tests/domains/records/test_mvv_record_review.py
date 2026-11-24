@@ -132,15 +132,32 @@ def test_every_judged_finding_is_recorded_and_only_deferred_ones_are_signs(root:
     assert "item" not in _reviews()[-1] and _reviews()[-1]["outcome"] == "unresolved"
 
 
-def test_findings_judged_under_another_mvv_or_settled_plain_ones_are_not_recorded(root: Path) -> None:
+def test_findings_judged_under_another_mvv_or_settled_plain_ones_are_not_recorded(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     other = {**_deferred(), "judged_mvv": _snapshot(10).identity}
     plain = {"id": "r1-9", "text": "普通の指摘", "outcome": "deferred", "reason": "範囲の外"}
     snap = _snapshot()
-    # 区分が filed・not_applicable の通常の見送りと、保留の記録の無い通常の指摘を直した記録は書かない
+    # 区分が filed・not_applicable の通常の見送りと、利用者に委ねた見送りの印の無い通常の指摘の直しは、記録を読まずに何も書かない
     filed = {**plain, "defer": "filed"}
     fixed = {**plain, "id": "r1-8", "text": "直した普通の指摘", "outcome": "fixed", "reason": None}
+    reads: list[Any] = []
+    real = jsonl.read_rows
+    monkeypatch.setattr(jsonl, "read_rows", lambda *a, **kw: (reads.append(a), real(*a, **kw))[1])
     assert mvv.record_review(str(root), PR, HEAD, snap, [other, filed, fixed], list) == (0, (), None)
+    assert reads == []
+    # 印があっても、同じキーの保留の記録が無ければ書かない
+    assert mvv.record_review(str(root), PR, HEAD, snap, [{**fixed, md.REVIEW_HELD: True}], list) == (0, (), None)
     assert _reviews() == [] and _signals() == []
+
+
+def test_fixing_a_plain_finding_does_not_clear_a_redline_of_an_earlier_mvv(root: Path) -> None:
+    """前の MVV でレッドラインだった指摘は、MVV が変わると通常の指摘として扱われるが、その直しではレッドラインの保留を解かない。"""
+    old = _snapshot(10, "b")
+    _record(root, {**REDLINE, "text": "人に聞く操作"}, snap=old)
+    snap = _snapshot()
+    plain = {"id": "r2-1", "text": "人に聞く操作", "by": "kiro", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [plain], list).written == 0
+    holds = md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-")
+    assert holds == [f"PR #{PR} の P1・C7（redline）: 人に聞く操作"]
 
 
 @pytest.mark.parametrize("defer", [{"defer": "needs_user"}, {}])
@@ -164,8 +181,8 @@ def test_a_plain_finding_left_to_the_user_holds_the_design_gate_until_it_is_fixe
     assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == [
         f"PR #{PR} の 指摘 r1-9（deferred・{kind}）: 利用者が決める"
     ]
-    # 後の起動で直せば、保留の記録があるので直した記録を書き、保留が外れる
-    fixed = {**plain, "id": "r2-1", "outcome": "fixed", "reason": None}
+    # 後の起動で直せば、利用者に委ねた見送りの印（修正担当の結果を取り込むときに付く）と保留の記録があるので、直した記録を書き、保留が外れる
+    fixed = {**plain, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_HELD: True}
     assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list).written == 1
     assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == []
     # 記録を書く前に止まったら、通常の指摘の見送りも欠けた必須の行に数える

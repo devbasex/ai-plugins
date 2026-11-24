@@ -16,7 +16,7 @@ from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
-from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, State
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_HELD, State, defer_holds
 
 
 def _text(value: object) -> Optional[str]:
@@ -448,6 +448,8 @@ class FindingJournal:
                 row[SKIPPED_MVV] = mvv
             if item["outcome"] == fin.SKIPPED and item.get(REVIEW_DEFER) in DEFERS:
                 row[REVIEW_DEFER] = item[REVIEW_DEFER]
+            if item["outcome"] == fin.SKIPPED and defer_holds(row.get(REVIEW_DEFER)):
+                row[REVIEW_HELD] = True
         return taken
 
     def reopen(self, fids: Sequence[str]) -> None:
