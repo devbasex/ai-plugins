@@ -427,6 +427,8 @@ def read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[i
     monitors = data["monitors"] if "monitors" in data else 0
     if not (_is_count(count) and _is_count(monitors) and source in BUSY_SOURCES and _is_zoned(at)):
         return None
+    if source == "start" and count == 0:  # 開始の記録は「少なくとも 1 件」なので、0 件は矛盾
+        return None
     return count, source, at, monitors
 
 
@@ -443,8 +445,9 @@ def _is_zoned(value: Any) -> bool:
 
 
 def drop_other_busy(directory: Path, launch: str) -> None:
-    """ほかの起動の記録を消す。消せないものは残して続ける。"""
+    """ほかの起動の記録を消す。起動の ID の形でない名前のファイルには触れず、消せないものは残して続ける。"""
     for path in list(directory.glob(f"{BUSY_PREFIX}*.json")):
-        if path.name != f"{BUSY_PREFIX}{launch}.json":
+        other = path.stem.removeprefix(BUSY_PREFIX)
+        if other != launch and LAUNCH_ID_RE.fullmatch(other):
             with suppress(OSError):  # noqa: NDF402 ファイル: 残っても起動ごとの名前なので読まれず、次の起動が消し直す
                 drop(directory, path.name)
