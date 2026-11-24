@@ -42,6 +42,31 @@ OLD_DECISION = {
     "margin": 50_000,
     "config_error": None,
 }
+SNAPSHOT = {
+    "mode": "standard",
+    "definition_version": "1.0.0",
+    "sha256": "ab",
+    "height": 4,
+    "stages": [
+        {
+            "id": "deploy",
+            "name": "デプロイ",
+            "phase": "release",
+            "steps": [{"id": "release", "call": "ndf.plan", "kind": "release", "range": "sprint_diff", "gate": None, "args": {}}],
+            "inputs": ["pr"],
+            "outputs": ["delivery", "product_version"],
+        },
+        {"id": "verify", "name": "リリース後テスト", "phase": "release", "steps": [], "inputs": ["product_version"], "outputs": []},
+    ],
+    "context": {"issues": [1]},
+    "enablement": {"デプロイ": {"enabled": True, "reason": None, "source": "definition"}},
+}
+# 製品のバージョンを version で書いた工程の入出力（バージョン 0）
+OLD_STAGES = [
+    {**SNAPSHOT["stages"][0], "outputs": ["delivery", "version"]},
+    {**SNAPSHOT["stages"][1], "inputs": ["version"]},
+]
+OLD_SNAPSHOT = {**{k: v for k, v in SNAPSHOT.items() if k != "definition_version"}, "version": "1.0.0", "stages": OLD_STAGES}
 OLD_COLUMNS = ("schema", "policy", "margin", "config_error")
 
 
@@ -70,6 +95,9 @@ def kind_of(exc: pytest.ExceptionInfo[internal.InternalError]) -> str:
         ),
         ("context-records", OLD_DECISION, {k: v for k, v in OLD_DECISION.items() if k not in OLD_COLUMNS}),
         ("context-records", {k: v for k, v in DECISION.items() if k != "event"}, {**DECISION, "event": cr.EVENT_DECISION}),
+        ("context", {"pace": "auto", "version": "11.0.23"}, {"pace": "auto", "product_version": "11.0.23"}),
+        ("context", {"pace": "auto"}, {"pace": "auto"}),
+        ("stage-snapshot", OLD_SNAPSHOT, SNAPSHOT),
         ("loop-event", {"at": 1795400000.123456, **ANSWERED}, {"at": "2026-11-23T02:13:20.123456+00:00", **ANSWERED}),
         ("loop-event", {"at": 1795400000, **LEASE}, {"at": "2026-11-23T02:13:20.000000+00:00", **LEASE}),
         # バージョン 0 の出荷のイベントの `version` は製品のバージョン（文字列）で、形のバージョンではない
@@ -95,6 +123,8 @@ def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
         ("mvv-validation", md.reuse_row(VALIDATION, AT, "/m")),
         ("context-records", DECISION),
         ("context-records", cr.record_row(None, "", APPLIED, None, "手動")),
+        ("context", {"issues": [1], "product_version": "11.0.23"}),
+        ("stage-snapshot", SNAPSHOT),
     ],
 )  # fmt: skip
 def test_a_row_of_each_writer_is_written_and_read_back_unchanged(kind, row):
@@ -189,7 +219,24 @@ def test_write_refuses_a_row_that_does_not_fit(row):
 def test_the_refusal_shows_the_place_in_the_schema_and_not_the_row(change, where):
     with pytest.raises(internal.InternalError) as exc:
         internal.write_record("usage", {**USAGE, **change})
-    assert "sk-test-secret" not in str(exc.value) and f"{where} に合わない" in str(exc.value)
+    assert "sk-test-secret" not in str(exc.value) and f"{where}（" in str(exc.value)
+
+
+def test_the_refusal_names_the_missing_field():
+    with pytest.raises(internal.InternalError, match="caller"):
+        internal.write_record("usage", {k: v for k, v in USAGE.items() if k != "caller"})
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ({"version": "11.0.23", "pr": 3}, {"product_version": "11.0.23", "pr": 3}),
+        ({"version": "11.0.22", "product_version": "11.0.23"}, {"product_version": "11.0.23"}),
+        ({"pr": 3}, {"pr": 3}),
+    ],
+)
+def test_plan_outputs_move_the_product_version(old, new):
+    assert internal.plan_outputs(old) == new
 
 
 @pytest.mark.parametrize("at", [AT, "2026-11-23T01:00:00Z", "2026-11-23T01:00:00.123456+00:00"])

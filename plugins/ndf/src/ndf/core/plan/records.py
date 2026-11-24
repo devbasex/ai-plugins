@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import chosen, result
+from ndf.contracts import chosen, internal, result
 from ndf.core.plan.files import read_json, write_json
 
 # ステップの結果が載せた PR の番号を、回をまたいで集める記録（プランの結果の items へ載せる）
@@ -26,13 +26,29 @@ PROGRESS_FILE = "progress.jsonl"
 
 
 def _add_outputs(state_dir: Path, outputs: dict[str, Any]) -> None:
-    found = read_json(state_dir / OUTPUTS_FILE)
+    found = _stored_outputs(state_dir)
     write_json(state_dir / OUTPUTS_FILE, {**(found if found is not None else {}), **outputs})
+
+
+def _stored_outputs(state_dir: Path) -> Optional[dict[str, Any]]:
+    """`outputs.json` の outputs。旧い形は今の形へ移す。"""
+    found = read_json(state_dir / OUTPUTS_FILE)
+    return None if found is None else internal.plan_outputs(found)
+
+
+def read_result(path: Path) -> Optional[dict[str, Any]]:
+    """結果のバックアップ `path`。無ければ None。旧い形の outputs は今の形へ移す。新しいバージョンなら `InternalError`（precondition）。"""
+    found = read_json(path)
+    if result.newer(found):
+        raise internal.InternalError("precondition", f"新しいバージョンの保存済みの結果 {path} を古い NDF が読んだ。プラグインを更新する")
+    if found is None or not isinstance(found.get("outputs"), dict):
+        return found
+    return {**found, "outputs": internal.plan_outputs(found["outputs"])}
 
 
 def recorded_outputs(state_dir: Path) -> tuple[Optional[dict[str, Any]], list[str]]:
     """プランのステップが渡した outputs と、結果 JSON の形に合わないときの注意。形が違えば outputs を載せない。"""
-    found = read_json(state_dir / OUTPUTS_FILE)
+    found = _stored_outputs(state_dir)
     if not found:
         return None, []
     errs = contracts.schema_errors(found, OUTPUTS_SCHEMA)

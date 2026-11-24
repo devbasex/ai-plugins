@@ -98,7 +98,7 @@ def cmd_assemble(args: argparse.Namespace) -> dict:
 
 def assembled(built: assemble.Built) -> dict:
     """組み立ての結果。URL は要約に載せる（`outputs` はコントラクトの閉じた語彙で、`url` を持たない）。"""
-    outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
+    outputs = {"pr": built.pr, "branch": built.branch, "product_version": built.version}
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
     )
@@ -196,7 +196,7 @@ def cmd_record(args: argparse.Namespace) -> dict:
     formats = names_decide.formats_of(_strategy(args).section["release"])
     made, written = record.write(_hub(args), args.pr, args.production, formats, args.production_sha)
     count = sum(1 for w in written if w.result == record.WRITTEN)
-    outputs = {"version": made.version, "included": list(made.included)}
+    outputs = {"product_version": made.version, "included": list(made.included)}
     detail = f"v{made.version} のリリース記録を {count} 件書いた（含めた PR {len(written)} 本。既にあった {len(written) - count} 本）"
     return result.result(TOOL, result.OK, detail, [w.item() for w in written], outputs=outputs)
 

@@ -24,8 +24,7 @@ import sqlalchemy as sa
 
 from ndf import cli as top
 from ndf import contracts
-from ndf.contracts import limits, result
-from ndf.contracts import named_cap
+from ndf.contracts import internal, limits, named_cap, result
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -49,11 +48,14 @@ class PlanInputError(contracts.ContractError):
 
 
 def read_doc(path: Path, schema: str, label: str) -> dict[str, Any]:
-    """設定の JSON を読み、形を確かめて返す。"""
+    """設定の JSON を読み、形を確かめて返す。形のバージョンが読めるバージョンより新しければ `InternalError`（precondition）。"""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise PlanInputError(f"{label} {path} を JSON として読めない: {exc}") from exc
+    found = doc.get("version") if isinstance(doc, dict) else None
+    if type(found) is int and found > contracts.load_schema(PLAN_SCHEMA)["properties"]["version"]["const"]:
+        raise internal.InternalError("precondition", f"新しいバージョンの{label} {path} を古い NDF が読んだ。プラグインを更新する")
     errs = contracts.schema_errors(doc, schema)
     if errs:
         raise PlanInputError(f"{label} {path} の形が違う: {'; '.join(errs)}")

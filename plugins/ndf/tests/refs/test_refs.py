@@ -81,7 +81,7 @@ def test_resolve_plan_returns_a_broken_ndf_settings_as_invalid(tmp_path: Path) -
 
 
 def test_version_resolves_from_the_outputs_of_the_referenced_plan(tmp_path: Path) -> None:
-    src = FakeSources(records={tmp_path / "rel": refs.PlanRecord(OK, {"version": "10.27.65"})})
+    src = FakeSources(records={tmp_path / "rel": refs.PlanRecord(OK, {"product_version": "10.27.65"})})
     out = refs.resolve([refs.Ref("v", "version", "rel")], _ctx(tmp_path), src)
     assert (out.values, out.decision) == ({"v": "10.27.65"}, OK)
     assert out.sources["v"] == str(tmp_path / "rel")
@@ -91,10 +91,10 @@ def test_version_resolves_from_the_outputs_of_the_referenced_plan(tmp_path: Path
     ("record", "reason"),
     [
         (None, "前の回の結果が無い"),
-        (refs.PlanRecord(STOPPED, {"version": "1.2.3"}), "完了でない"),
-        (refs.PlanRecord(OK, {"version": "v-next"}), "バージョンの形でない"),
-        (refs.PlanRecord(OK, {"version": "unknown"}), "が無いか空"),
-        (refs.PlanRecord(OK, {"version": "0.0.0"}), "が無いか空"),
+        (refs.PlanRecord(STOPPED, {"product_version": "1.2.3"}), "完了でない"),
+        (refs.PlanRecord(OK, {"product_version": "v-next"}), "バージョンの形でない"),
+        (refs.PlanRecord(OK, {"product_version": "unknown"}), "が無いか空"),
+        (refs.PlanRecord(OK, {"product_version": "0.0.0"}), "が無いか空"),
         (refs.PlanRecord(OK, {}), "が無いか空"),
     ],
 )
@@ -131,7 +131,7 @@ def test_plan_result_without_a_key_is_invalid(tmp_path: Path) -> None:
 
 def test_absolute_of_is_read_as_is(tmp_path: Path) -> None:
     where = tmp_path / "elsewhere" / "rel"
-    src = FakeSources(records={where: refs.PlanRecord(OK, {"version": "1.0.0"})})
+    src = FakeSources(records={where: refs.PlanRecord(OK, {"product_version": "1.0.0"})})
     assert refs.resolve([refs.Ref("v", "version", str(where))], _ctx(tmp_path / "base"), src).values == {"v": "1.0.0"}
 
 
@@ -227,10 +227,24 @@ def test_question_target_ignores_done_and_plain_held_laps() -> None:
 
 
 def test_repo_sources_read_the_last_result_of_the_plan(tmp_path: Path) -> None:
+    write_result(tmp_path / "rel", OK, {"product_version": "1.2.3"})
+    src = refs.RepoSources(failing_hub(500))
+    assert src.plan_record(tmp_path / "rel") == refs.PlanRecord(OK, {"product_version": "1.2.3"})
+    assert src.plan_record(tmp_path / "none") is None
+
+
+def test_version_reads_a_result_backed_up_before_the_rename(tmp_path: Path) -> None:
     write_result(tmp_path / "rel", OK, {"version": "1.2.3"})
     src = refs.RepoSources(failing_hub(500))
-    assert src.plan_record(tmp_path / "rel") == refs.PlanRecord(OK, {"version": "1.2.3"})
-    assert src.plan_record(tmp_path / "none") is None
+    got = refs.resolve([refs.Ref("v", refs.VERSION, "rel")], refs.Context((), (), tmp_path), src)
+    assert got.values == {"v": "1.2.3"}
+
+
+def test_version_does_not_read_a_stored_result_of_a_newer_version(tmp_path: Path) -> None:
+    write_result(tmp_path / "rel", OK, {"product_version": "1.2.3"}, version=2)
+    src = refs.RepoSources(failing_hub(500))
+    got = refs.resolve([refs.Ref("v", refs.VERSION, "rel")], refs.Context((), (), tmp_path), src)
+    assert got.values == {} and got.unresolved["v"].cause == "precondition"
 
 
 def test_repo_sources_skip_a_half_written_progress_line(tmp_path: Path) -> None:

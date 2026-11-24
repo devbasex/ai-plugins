@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
+from jsonschema.exceptions import SchemaError, ValidationError
 
 from ndf.identity import ROOT
 
@@ -154,6 +154,17 @@ def schema_errors(instance: Any, rel: str) -> list[str]:
 def _errors(validator: Draft202012Validator, instance: Any) -> list[str]:
     found = sorted(("/".join(str(p) for p in e.absolute_path) or "(最上位)", e.message) for e in validator.iter_errors(instance))
     return [f"{where}: {message}" for where, message in found]
+
+
+def broken_rules(instance: Any, rel: str) -> list[str]:
+    """`instance` が破った `contracts/<rel>` のスキーマの場所と規則の名前（重複なし・昇順）。値を含まない。"""
+    found = _schema_validator(rel).iter_errors(instance)
+    return sorted({broken_rule(e) for e in found})
+
+
+def broken_rule(error: ValidationError) -> str:
+    """破ったスキーマの場所と規則の名前。入力の値もキーも含まない。"""
+    return f"{'/'.join(str(p) for p in error.absolute_schema_path)}（{error.validator}）"
 
 
 def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:

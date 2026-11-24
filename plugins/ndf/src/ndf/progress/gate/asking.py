@@ -216,8 +216,8 @@ def material(v: run.View, q: Question) -> str:
         lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
     if q.target.head:
         lines.append(f"- 見る head: {q.target.head}")
-    if q.gate == RELEASE_GATE and isinstance(ctx.get("version"), str):
-        lines.append(f"- 出すバージョン: {ctx['version']}")
+    if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
+        lines.append(f"- 出すバージョン: {ctx['product_version']}")
     lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
     lines += ["", "## 回答", "", *[f"- {c}" for c in q.choices]]
     return "\n".join(lines) + "\n"

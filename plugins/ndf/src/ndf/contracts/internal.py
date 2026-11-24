@@ -13,13 +13,15 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple, Optional
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from ndf import contracts
 
 NAMES = "data/internal-names.json"
 NAMES_SCHEMA = contracts.schema_path("internal-names")
 COMMON = contracts.schema_path("internal/common")
+# 工程の文脈のスキーマ
+CONTEXT = "workflow/context.schema.json"
 # 名前の対応表の、書いた時刻の意味
 TIME = "書いた時刻"
 
@@ -65,6 +67,34 @@ def _decision_v1(row: Row) -> Row:
     return {"event": "判定", **kept}
 
 
+def _renamed(row: Row, old: str, new: str) -> Row:
+    return {new if k == old else k: v for k, v in row.items()}
+
+
+def _context_v1(row: Row) -> Row:
+    """`version` は出した製品のバージョンだった。"""
+    return _renamed(row, "version", "product_version")
+
+
+def plan_outputs(raw: Mapping[str, Any]) -> Row:
+    """保存済みのプランの出力（結果の `outputs`。形のバージョンを持たない）を今の形へ移す。旧い `version` は出した製品のバージョンだった。"""
+    moved = {k: v for k, v in raw.items() if k != "version"}
+    return {"product_version": raw["version"], **moved} if "version" in raw else moved
+
+
+def _snapshot_v1(row: Row) -> Row:
+    """`version` は工程の定義の文書のバージョンで、工程の入出力のキーの `version` は出した製品のバージョンだった。"""
+    moved = _renamed(row, "version", "definition_version")
+    if isinstance(moved.get("stages"), list):
+        moved["stages"] = [_stage_v1(s) if isinstance(s, dict) else s for s in moved["stages"]]
+    return moved
+
+
+def _stage_v1(stage: Row) -> Row:
+    keys = {k: stage[k] for k in ("inputs", "outputs") if isinstance(stage.get(k), list)}
+    return {**stage, **{k: ["product_version" if name == "version" else name for name in names] for k, names in keys.items()}}
+
+
 def _loop_event_v1(row: Row) -> Row:
     """`at` は UNIX 時刻の秒で、文字列の `version` はリリースした製品のバージョンだった。"""
     out = {"product_version" if k == "version" and isinstance(v, str) else k: v for k, v in row.items()}
@@ -78,6 +108,8 @@ KINDS: dict[str, Kind] = {
     "mvv-signals": Kind(contracts.schema_path("internal/mvv-signals"), (_signal_v1,), marker="mvv_version"),
     "mvv-validation": Kind(contracts.schema_path("internal/mvv-validation"), (_time_to_at,)),
     "context-records": Kind(contracts.schema_path("internal/context-records"), (_decision_v1,)),
+    "context": Kind(CONTEXT, (_context_v1,)),
+    "stage-snapshot": Kind(contracts.schema_path("internal/stage-snapshot"), (_snapshot_v1,)),
     "loop-event": Kind(contracts.schema_path("internal/loop-event"), (_loop_event_v1,)),
 }
 
@@ -187,14 +219,17 @@ def _validator(schema: str) -> Draft202012Validator:
 
 
 def _require(kind: str, row: Row) -> None:
-    """種類のスキーマに合わなければ `InternalError`。誤りの文は行の値とキーを含まず、スキーマの中の位置だけで組む（キーが値を持つ辞書と、
-    スキーマに無いキーがあるため）。"""
-    errors = {
-        e.message if e.validator == "required" else f"{'/'.join(str(p) for p in e.absolute_schema_path)} に合わない"
-        for e in _validator(_kind(kind).schema).iter_errors(row)
-    }
+    """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（キーが値を持つ辞書と、スキーマに無い
+    キーがあるため、行の値もキーも含まない）。"""
+    errors = {_broken(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
+
+
+def _broken(error: ValidationError) -> str:
+    """破った規則。欠けた欄（`required`）の文はスキーマにある欄の名前だけを含むので添える。"""
+    rule = contracts.broken_rule(error)
+    return f"{rule}: {error.message}" if error.validator == "required" else rule
 
 
 @contracts.cached_reader
