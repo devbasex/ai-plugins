@@ -17,8 +17,9 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf.domains.hooks import budget, env, tables
 
@@ -58,6 +59,33 @@ def render(runtime: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, An
         entry = {"type": "command", "command": command(runtime, event, plugin_root), "timeout": found.timeout}
         hooks[event] = [{"hooks": [entry]}]
     return {"hooks": hooks}
+
+
+def rewake_entry(runtime: str, event: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, Any]:
+    """起床の hook のバックグラウンドの登録 1 つ（`asyncRewake`）。ラッパーが中継の子へ `--settings` で渡す（#4068）。
+
+    `--settings` の hook にはプラグインの根の環境変数が渡らないので、`hooks/entry.py` を絶対パスで書く。timeout は
+    `budget.rewake_budget` の値。事象に `async_rewake` が無い・予算が欠けていれば `tables.TableError`。
+    """
+    found = budget.rewake_budget(runtime, event)
+    if found is None:
+        raise tables.TableError(f"{runtime} の {event} にバックグラウンドの登録の予算（async_rewake）が無い")
+    entry = shlex.quote(str(plugin_root.resolve() / ENTRY))
+    line = f"sh -c '{SCRIPT}' {python_word(plugin_root)} {entry} {runtime} {event} rewake"
+    return {"type": "command", "command": line, "asyncRewake": True, "timeout": found.timeout}
+
+
+def rewake_settings(plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, Any]:
+    """中継の子へ `--settings` で渡す、起床の hook の登録だけを持つ設定。プラグインの登録（`render`）には足さない。"""
+    return {"hooks": {"Stop": [{"hooks": [rewake_entry("claude", "Stop", plugin_root)]}]}}
+
+
+def rewake_unreachable() -> Optional[str]:
+    """`cache.wake` の起床の時点がバックグラウンドの登録の timeout の内に届かなければ理由の文（`budget.rewake_reach`）。"""
+    found = budget.rewake_budget("claude", "Stop")
+    if found is None:
+        return "claude の Stop にバックグラウンドの登録の予算（async_rewake）が無い"
+    return budget.rewake_reach(found)
 
 
 def text(runtime: str, plugin_root: Path = tables.PLUGIN_ROOT) -> str:

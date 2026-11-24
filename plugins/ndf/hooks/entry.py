@@ -2,6 +2,7 @@
 
 登録の command（`hooks/<ランタイム>.json`。`ndf hooks render` が作る）が、用意済みの環境の python でこのファイルを起動する。
 `argv[1]` がランタイム、`argv[2]` が事象、標準入力が payload で、本体は `ndf.domains.hooks.main.run_entry` にある。
+`argv[3]` が `rewake` なら、中継が子へ渡した起床の hook（`ndf.domains.hooks.rewake.run`。#4068）を呼ぶ。
 エントリポイントのシェルのスクリプトと `uv run` は通らない。本体を読めないときも、出力なし・終了コード 0 で通す。
 """
 
@@ -26,7 +27,9 @@ def call(module: str, func: str, argv: List[str]) -> int:
 
 
 def main(argv: List[str]) -> int:
-    """いつも 0。"""
+    """同期の登録はいつも 0。起床の hook（`argv[3]` が `rewake`）は `rewake.run` の終了コード（起床させるなら 2）。"""
+    if len(argv) > 3 and argv[3] == "rewake":
+        return call("ndf.domains.hooks.rewake", "run", argv)
     return call("ndf.domains.hooks.main", "run_entry", argv)
 
 
