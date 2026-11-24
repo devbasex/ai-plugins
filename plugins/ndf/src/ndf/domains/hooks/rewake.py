@@ -172,12 +172,12 @@ def _arrival(t: Target, reason: str) -> None:
             signals.update_keep(t.relay_dir, t.session_id, keep)
 
 
-def _stop_form(t: Target, keep: dict) -> None:
-    """記録の形が違う会話で、書いていなければ `stopped` と `stop_waking`（`scope` `session`）を書く。"""
+def _stop_session(t: Target, keep: dict, reason: str) -> None:
+    """会話を止める理由（`form` / `miss`）で、書いていなければ `stopped` と `stop_waking`（`scope` `session`）を書く。"""
     if keep.get("stopped"):
         return
-    keep["stopped"] = FORM
-    _stop_waking(t, keep, FORM, "session")
+    keep["stopped"] = reason
+    _stop_waking(t, keep, reason, "session")
 
 
 def _formed(t: Target, ref: Optional[tuple], tail: str, q_for: QFor) -> None:
@@ -193,7 +193,7 @@ def _formed(t: Target, ref: Optional[tuple], tail: str, q_for: QFor) -> None:
                 return
             if keep.get("pending"):
                 keep = _reconcile(t, keep, tail, q_for)
-        _stop_form(t, keep)
+        _stop_session(t, keep, FORM)
         signals.update_keep(t.relay_dir, t.session_id, keep)
 
 
@@ -226,9 +226,8 @@ def _reconcile(t: Target, keep: dict, tail: str, q_for: QFor) -> dict:
     else:
         row.update(priced=False)
     _cache_row(t, "wake_result", keep.get("wait_id"), outcome="woke" if reply.kind == "wake" else reply.kind, **row)
-    if reply.kind == "wake" and not row["hit"] and not keep.get("stopped"):
-        keep["stopped"] = MISS
-        _stop_waking(t, keep, MISS, "session")
+    if reply.kind == "wake" and not row["hit"]:
+        _stop_session(t, keep, MISS)
     if reply.kind == "unknown" and "wait_id" in keep:
         keep["wait_stop"] = UNMATCHED
         _stop_waking(t, keep, UNMATCHED, "wait")
