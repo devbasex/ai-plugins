@@ -53,7 +53,7 @@ plugins/ndf/
 | `src/ndf/progress/invoke.py` | 変更 | `rebuild` を、作業場所から求める差し込み（`route.derived_locally`。`base`・`remote` など）より先に決める。値が欠けたときの `items` の `rebuild` の行に 3 つのキーを載せる | `ndf.progress.rebuild_values` | `TemplateValuesMissing`、モジュール | `TemplateValuesMissing.__init__`・`TemplateValuesMissing.items`（変更）、`template_values`（変更）、定数 `PROJECT_KEYS`（`rebuild` の道を `rebuild_values.SETTING_PATH` から読む） |
 | `src/ndf/domains/docrebuild/__init__.py` | 新設 | パッケージの説明だけを持つ | — | — | — |
 | `src/ndf/domains/docrebuild/select_decide.py` | 新設 | 差分のパスと課題の番号から候補を挙げ、通常ファイルと実装計画の頭で対象を決める | `ndf.core.issue_docs` | モジュール | `Target`・`Selection`・`kind_of`・`plan_paths`・`omits_design`・`candidates`・`select`（すべて新設） |
-| `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`changed_paths`・`inspect`・`prompt_text`・`launch_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
+| `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`changed_paths`・`contained`・`inspect`・`prompt_text`・`launch_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 新設 | `ndf document-rebuild run` の引数を定義し、`drive` を呼び、`--out` と標準出力へ同じ結果を書く | `ndf.cli`・`ndf.identity`・`ndf.contracts.result`・`ndf.contracts.causes`・`drive` | モジュール | `_parser`・`main`（新設） |
 | `src/ndf/cli.py` | 変更 | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を足す | — | `COMMANDS` | — |
 | `src/ndf/checks/children.json` | 変更 | 新しいモジュールの持ち主を足す（設計書の「設計の結果」の段落） | — | — | — |
@@ -222,8 +222,8 @@ plugins/ndf/
   - 事後条件: 並びは差分の順（`design`・`manuscript`）の後に `plan_paths` の順。同じパスは 1 回だけ。差分にある実装計画は `kind_of` が `None` を返すので、`plan` は差分によらず番号からだけ入る（決定 9）
 - `select`
   - 事前条件
-    - `regular`: `lstat` で通常ファイルと分かった候補のパス
-    - `present`: 作業場所に何かがある（`lstat` が成功した）パス
+    - `regular`: `drive.contained` が作業場所の中の通常ファイルと確かめた候補のパス
+    - `present`: 作業場所に何かがあるパス（親ディレクトリにリンクがあるものを含む）
     - `plans`: 通常ファイルの `plan` の候補の本文
   - 事後条件: `targets` は通常ファイルだけ（I1）。`skipped` は、差分から来た候補で通常ファイルでないもの（リンク・サブモジュール・作業場所に無いもの）と、`plan` の候補で `present` にあるが通常ファイルでないもの。`plan` の候補で作業場所に無いもの（実装計画を書かない課題）と、省いた行を持たないものは `skipped` に入れない（選ぶ条件に合わないだけで、外したのではない）
 
@@ -257,7 +257,7 @@ plugins/ndf/
 | `kind_of` | 課題の設計書・`documentation` の原稿 | 課題 433 と `issue-4337-design.md`、`issue-7-8-design.md` と課題 8 | 別の課題の設計書・要求仕様のコピー・実装計画 → `None` |
 | `omits_design` | 判定表の真の 2 行 | `##` の直前の行・本文の 1 行目 | 判定表の偽の 3 行 |
 | `candidates` | 工程「設計」で設計書だけ（条件 6）。モード `documentation` で原稿、モード `standard` で `docs/` を含まない（条件 7・8） | 差分が空でも `plan_paths` が入る（決定 9） | — |
-| `select` | 省いた行を持つ実装計画が残る（条件 9） | 実装計画が作業場所に無い → `skipped` に入らない | 差分の `.md` のリンクと、リンクの実装計画が外れ `skipped` に出る（I1） |
+| `select` | 省いた行を持つ実装計画が残る（条件 9） | 実装計画が作業場所に無い → `skipped` に入らない | 差分の `.md` のリンク・リンクの実装計画・`issues/` がリンクの設計書と実装計画が外れ `skipped` に出る（I1） |
 
 ## 組み直しの駆動（`ndf.domains.docrebuild.drive`）
 
@@ -272,7 +272,8 @@ plugins/ndf/
 | `BadReport` | 同上 | 新設 | `class BadReport(Exception)`、属性 `detail: str` | worker の足すべき内容（結果ファイルの `items` に書く、対象の外で直すべきこと）の形の誤りを表す |
 | `start_point` | 同上 | 新設 | `(g: git.Git, base: str, remote: str) -> str` | 設計書の「処理の流れ」の表どおりに起点の参照を決め、その SHA を返す |
 | `changed_paths` | 同上 | 新設 | `(g: git.Git, start: str, head: str) -> list[str]` | 3 ドット差分の消していないパスを返す |
-| `inspect` | 同上 | 新設 | `(cwd: Path, found: Sequence[Target]) -> tuple[set[str], set[str], dict[str, str]]` | 候補を `lstat` し、通常ファイル・作業場所にあるもの・通常ファイルの実装計画の本文を返す |
+| `contained` | 同上 | 新設 | `(root: Path, rel: str) -> Optional[str]` | パスが作業場所の中の通常ファイルなら `None`、違えば外す理由（`作業場所に無い`・`親ディレクトリにリンクがある`・`通常ファイルでない`）を返す |
+| `inspect` | 同上 | 新設 | `(cwd: Path, found: Sequence[Target]) -> tuple[set[str], set[str], dict[str, str]]` | 候補を `contained` で確かめ、通常ファイル・作業場所にあるもの・通常ファイルの実装計画の本文を返す |
 | `prompt_text` | 同上 | 新設 | `(targets: Sequence[Target], requirements: Sequence[str], skill: Path) -> str` | 起動指示のテンプレートへ対象・要求仕様のコピー・手順書のパスを差し込む |
 | `launch_worker` | 同上 | 新設 | `(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]` | 起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す |
 | `added_items` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | worker の `items` を確かめ、`id` を `add-<番号>` に振り直す |
@@ -287,8 +288,15 @@ plugins/ndf/
   - 事前条件: `start`・`head` は `rev_parse` で解いた SHA
   - 事後条件: `git diff --name-only -z --diff-filter=d <start>...<head>` の出力を NUL で分けた並び（空要素を除く）。`git merge-base` は打たない
   - 副作用: `git diff` を 1 回
+- `contained`
+  - 事後条件: 次の 2 つがどちらも成り立つときだけ `None` を返す。`root` は `root.resolve(strict=True)` で解いたものを使う
+    - `rel` の親ディレクトリを `resolve(strict=True)` で解いた結果が、`root` に `rel` の親をつないだパスと同じである（途中のディレクトリにリンクが無く、作業場所の外を指さない）。違えば `親ディレクトリにリンクがある`
+    - 末尾を `os.lstat` した結果が通常ファイルである（末尾がリンク・ディレクトリ・サブモジュールでない）。違えば `通常ファイルでない`
+  - 親ディレクトリを解けないときと、末尾の `lstat` が `FileNotFoundError` のときは `作業場所に無い` を返す
+  - 副作用: 親ディレクトリの解決と、末尾の `os.lstat` を 1 回ずつ。git を打たない
 - `inspect`
-  - 副作用: 候補ごとに `os.lstat` を 1 回。通常ファイルの `plan` だけ本文を読む（UTF-8）。git を打たない
+  - 事後条件: `contained` が `None` を返した候補だけを通常ファイルとする。`作業場所に無い` 以外の理由の候補は、作業場所にあるもの（`present`）に入れる
+  - 副作用: 候補ごとに `contained` を 1 回。通常ファイルの `plan` だけ本文を読む（UTF-8）。読むときは `os.open` に `O_NOFOLLOW` を付け、確かめた後に末尾がリンクへ替わっていても辿らない。git を打たない
 - `launch_worker`
   - 事後条件: 起動指示は `<state_dir>/document-rebuild.prompt.md`、worker の結果ファイルは `<state_dir>/document-rebuild.result.json`。argv は `[ndf, "worker", "run", "--kind", "document-rebuild", "--prompt-file", <起動指示>, "--result-file", <結果>, "--cwd", <cwd>, "--state-dir", <state_dir>]`
   - 副作用: 起動指示のファイルを書く。子プロセス `ndf worker run` を 1 回（その下で `claude -p`）
@@ -357,7 +365,7 @@ plugins/ndf/
 | `WORK_KIND` | 定数 | `src/ndf/domains/docrebuild/drive.py` | `"document-rebuild"`（`ndf worker run --kind` の値と、保存先のファイル名の頭） |
 | `PROMPT_TEMPLATE` | 定数 | 同上 | `contracts/worker/document-rebuild.md`（`identity.load().root` からの相対） |
 | `SKILL` | 定数 | 同上 | `skills/document-rebuild/SKILL.md`（同上） |
-| `REQUIREMENTS_FILE` | 定数 | 同上 | `"issues/issue-{number}-requirements.md"`。`inspect` と同じく `lstat` で通常ファイルのものだけを起動指示に載せる |
+| `REQUIREMENTS_FILE` | 定数 | 同上 | `"issues/issue-{number}-requirements.md"`。`inspect` と同じく `contained` が `None` を返したものだけを起動指示に載せる。外したものは `warnings` に理由を載せる |
 | `ADD_PREFIX`・`READER_PREFIX` | 定数 | 同上 | `"add"`・`"reader"`（I6） |
 | `NO_MERGE_BASE` | 定数 | 同上 | `128`（`git diff A...B` の分岐点の無いときの終了コード。設計書の実測） |
 
@@ -388,6 +396,7 @@ plugins/ndf/
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
 | `reader_gaps` | `plan` の `fixed`（`checks` 1）・設計書の `fail`（`checks` 2）・3 種類の `not_run` | 設計書の `fail` で `checks` 1 と `reason` | 対象の行が無い・`restatements` が無い・原稿に `checks` 2・`not_run` に理由が無いか `checks` が空でない（I4） |
 | `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件（I5） | `fail` が無ければ空 | — |
+| `contained` | 作業場所の通常ファイル | 作業場所の根そのものがリンクで、その先の通常ファイル | 末尾がリンク・`issues/` がリンクで作業場所の外を指す・途中のディレクトリがリンクで作業場所の中を指す・存在しない（どれも理由を返す） |
 | `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `launch_worker` を呼ばない（条件 10） | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
 | `drive` | 起動する子が `git` の読み取りと `ndf worker run` だけで、`push`・`commit` を含まない（条件 13） | — | — |
 
