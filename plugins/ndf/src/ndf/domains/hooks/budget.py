@@ -55,7 +55,11 @@ def budget_for(runtime: str, event: str) -> Optional[Budget]:
     found = _budget_policy(runtime, event)
     if found is None:
         return None
-    name, row = found
+    return _budget_of_row(*found)
+
+
+def _budget_of_row(name: str, row: Optional[dict[str, Any]]) -> Optional[Budget]:
+    """方針の名前と予算の行から作る Budget。行が無いか値のキーが欠ければ None。"""
     if row is None or any(k not in row for k in BUDGET_KEYS):
         return None
     return Budget(name, *(row[k] for k in BUDGET_KEYS))
@@ -66,10 +70,8 @@ def rewake_budget(runtime: str, event: str) -> Optional[Budget]:
     spec = tables.event_spec(runtime, event)
     if spec is None or "async_rewake" not in spec:
         return None
-    row = tables.policy(f"hook.budget.{spec['async_rewake']['budget']}")
-    if row is None or any(k not in row for k in BUDGET_KEYS):
-        return None
-    return Budget(f"hook.budget.{spec['async_rewake']['budget']}", *(row[k] for k in BUDGET_KEYS))
+    name = f"hook.budget.{spec['async_rewake']['budget']}"
+    return _budget_of_row(name, tables.policy(name))
 
 
 def rewake_reach(found: Budget) -> Optional[str]:
