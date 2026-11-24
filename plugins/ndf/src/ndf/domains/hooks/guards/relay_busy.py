@@ -16,6 +16,7 @@ SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ndf.domains.hooks import tables
@@ -78,18 +79,15 @@ def table_params() -> Mapping[str, Any]:
 
 def record_count(env: Mapping[str, str], session_id: str, count: int, source: str, monitors: int = 0) -> bool:
     """子の会話の作業の件数を書けたか。保存先か起動の ID が無ければ書かずに偽（記録はラッパーが不明として読む）。"""
-    directory, launch = signals.relay_dir(env), signals.relay_launch(env)
-    if directory is None or launch is None:
-        return False
-    return signals.write_busy(directory, launch, session_id, count, source, monitors)
+    found = _launch_record(env)
+    return found is not None and signals.write_busy(*found, session_id, count, source, monitors)
 
 
 def _record_start(ctx) -> Optional[Verdict]:
     """作業の開始を記録する。保存先か起動の ID が無いか、書けなければ拒否。"""
     global _recorded
-    directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
-    wait = float(tables.policy_value("hook.counter-lock", "seconds"))
-    if directory is None or launch is None or not signals.record_start(directory, launch, ctx.session_id, wait):
+    found, wait = _launch_record(ctx.env), _lock_wait()
+    if found is None or not signals.record_start(*found, ctx.session_id, wait):
         return deny(BUSY_START_FAILED)
     _recorded = ctx.payload
     return None
@@ -98,11 +96,22 @@ def _record_start(ctx) -> Optional[Verdict]:
 def _record_monitor(ctx) -> None:
     """監視の開始を記録する。書けなくても監視は始める（止めてよく、打ち直せば同じ知らせを受け取れる）。"""
     try:
-        directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
-        if directory is not None and launch is not None:
-            signals.record_monitor(directory, launch, ctx.session_id, float(tables.policy_value("hook.counter-lock", "seconds")))
+        found = _launch_record(ctx.env)
+        if found is not None:
+            signals.record_monitor(*found, ctx.session_id, _lock_wait())
     except Exception:  # noqa: BLE001,S110 ファイル: fail_closed の行なので、ここで上げると監視の開始を拒否してしまう
         pass
+
+
+def _launch_record(env: Mapping[str, str]) -> Optional[tuple[Path, str]]:
+    """起動の記録の（保存先, 起動の ID）。どちらかが無ければ None。"""
+    directory, launch = signals.relay_dir(env), signals.relay_launch(env)
+    return None if directory is None or launch is None else (directory, launch)
+
+
+def _lock_wait() -> float:
+    """子を止める排他を待つ秒数。表を読めなければ例外を呼び手へ上げる。"""
+    return float(tables.policy_value("hook.counter-lock", "seconds"))
 
 
 def _target(env: Mapping[str, str], session_id: Any) -> bool:
