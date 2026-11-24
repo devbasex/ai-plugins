@@ -142,19 +142,20 @@ def _squeeze(text: str) -> str:
     return "".join(text.split())
 
 
-def _whole(value: Any) -> bool:
+def is_int(value: Any) -> bool:
+    """bool を除いた整数か。"""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def usage_tokens(rec: Mapping[str, Any]) -> Optional[int]:
     """採用行の `usage` の 3 つの項目の和。形が違えば None（キャッシュの項目は無ければ 0）。"""
     usage = _message(rec).get("usage")
-    if not isinstance(usage, dict) or not _whole(usage.get("input_tokens")):
+    if not isinstance(usage, dict) or not is_int(usage.get("input_tokens")):
         return None
     total = 0
     for key in USAGE_KEYS:
         value = usage[key] if key in usage else 0
-        if not _whole(value):
+        if not is_int(value):
             return None
         total += value
     return total
