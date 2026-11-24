@@ -870,3 +870,86 @@ def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severi
     assert "- r1-2: 認可が抜ける（major）— 起きること: 他人の記録が読める" in fix
     assert "r1-3" not in fix
     assert [r["severity"] for r in _state(fake.state_dir)["findings"]] == ["major", "major", "minor"]
+
+
+# --- 現状固定テスト: 修正必須と判定した後の処理（drive._round の後半。I-001） ---
+
+
+def test_i001_round_is_saved_as_changes_required_before_the_fixer_starts(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正担当を起動する前に、修正必須のラウンドと未解決の指摘を状態ファイルへ書く（修正の記録はまだ無い）。"""
+    seen: list[dict] = []
+
+    class Peek(Fake):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            seen.append(_state(self.state_dir))
+            return super()._fix(spec)
+
+    fake = Peek(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    (before,) = seen
+    assert [(r["round"], r["verdict"], "fix" in r) for r in before["rounds"]] == [(1, drive.CHANGES_REQUIRED, False)]
+    assert [(f["id"], f["outcome"]) for f in before["findings"]] == [("r1-1", fin.UNRESOLVED)]
+
+
+def test_i001_fix_is_recorded_pushed_and_the_result_file_set_aside(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正の結果を読めたら、ラウンドに修正の記録（commit・reported・fixed・pushed）を置き、結果ファイルを
+    `-round<番号>` の名前へ移し、送ってから次のラウンドへ進む（ラウンドの判定は修正必須のまま）。"""
+    fake = Fake(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"], got["metrics"]["rounds"]) == (0, "ok", 2)
+    state = _state(fake.state_dir)
+    first = state["rounds"][0]
+    assert first["verdict"] == drive.CHANGES_REQUIRED
+    assert sorted(first["fix"]) == ["commit", "fixed", "pushed", "reported"]
+    assert (first["fix"]["reported"], first["fix"]["fixed"]) == (1, ["r1-1"])
+    assert first["fix"]["pushed"] == first["fix"]["commit"] == sh(repos.origin, "rev-parse", BRANCH).strip()
+    result_path = store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))
+    assert not result_path.is_file()
+    assert (fake.state_dir / f"{result_path.stem}-round1.json").is_file()
+    assert {"run": "round 1 claude", "result": f"指摘 1 件を扱った（新しい会話: {drive.UNSAVED}）"} in got["process"]
+
+
+def test_i001_fix_without_a_commit_is_not_pushed_and_the_loop_goes_on(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正担当がコミットせずに結果だけ書いたら（HEAD がレビューした head のまま）送らずに次のラウンドへ進む。"""
+    pushed: list[Any] = []
+    monkeypatch.setattr(drive.push, "push_fix", lambda *a, **k: pushed.append(a))
+
+    class NoCommit(Fake):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            ref = store.state_pr(self.state_dir, PR)
+            ids = _ID.findall(spec.argv[-1])
+            out = {"pr": ref.origin_pr, "findings": [{"id": i, "outcome": fin.SKIPPED, "reason": "直さない"} for i in ids]}
+            store.fix_result_path(self.state_dir, ref).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+            return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    fake = NoCommit(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert pushed == []
+    rounds = _state(fake.state_dir)["rounds"]
+    assert [r["verdict"] for r in rounds] == [drive.CHANGES_REQUIRED, fin.CONVERGED]
+    assert rounds[0]["fix"] == {"commit": None, "reported": 1, "fixed": []}
+
+
+def test_i001_refused_push_ends_errored_with_the_fix_kept(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """送れなければ、ラウンドは修正必須と修正の記録（pushed 無し）のまま残し、結果ファイルは移したうえで、注意と過程に
+    載せて errored で止める（次のラウンドへ進まない）。"""
+
+    def refused(*_args: Any, **_kwargs: Any) -> Any:
+        return drive.push.PushResult(False, True, None, None, drive.push.REJECTED_TWICE, ("a.txt",))
+
+    monkeypatch.setattr(drive.push, "push_fix", refused)
+    fake = Fake(tmp_path / "st", {"codex": [["直す"], ["もう一つ"]], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["status"] == "stopped"
+    assert got["warnings"][-1] == f"round 1 の修正を送れなかった: {drive.push.REJECTED_TWICE}（衝突: a.txt）"
+    assert got["process"][-1] == {"run": "round 1 push", "result": f"送れない（{drive.push.REJECTED_TWICE}）"}
+    state = _state(fake.state_dir)
+    assert [(r["round"], r["verdict"]) for r in state["rounds"]] == [(1, drive.CHANGES_REQUIRED)]
+    assert "pushed" not in state["rounds"][0]["fix"] and state["rounds"][0]["fix"]["fixed"] == ["r1-1"]
+    assert [(f["id"], f["outcome"]) for f in state["findings"]] == [("r1-1", fin.UNRESOLVED)]
+    assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
+    result_path = store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))
+    assert not result_path.is_file() and (fake.state_dir / f"{result_path.stem}-round1.json").is_file()
+    assert sorted(fake.calls) == ["claude", "codex", "kiro"]
