@@ -10,7 +10,8 @@ from typing import Any
 import git_sandbox
 from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の設定（10 系のテストも同じファイルを読む）
 
-from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts
+from ndf.adapters.github_merge import rule_facts_of
 from ndf.core.branch_strategy import Strategy
 
 HEAD = "a" * 40

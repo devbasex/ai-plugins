@@ -15,7 +15,7 @@ import pytest
 from githubkit.exception import RateLimitExceeded, RequestFailed
 from githubkit.response import Response
 
-from ndf.adapters import git, github
+from ndf.adapters import git, github, github_merge
 
 from ._github_helpers import RouteServer, graphql_pull_node, hub, pull_json
 
@@ -309,7 +309,7 @@ def test_nodes_refuses_unknown_node() -> None:
     ],
 )
 def test_premerge_risks(body: str, risks: list[str]) -> None:
-    assert github.premerge_risks(body) == risks
+    assert github_merge.premerge_risks(body) == risks
 
 
 def test_token_prefers_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -612,7 +612,7 @@ def test_visibilities_read_every_repo_in_one_query_and_unknown_is_not_public() -
     ],
 )  # fmt: skip
 def test_ruleset_merge_methods(rules: list[dict], methods: list[str] | None) -> None:
-    assert github.ruleset_merge_methods(rules) == methods
+    assert github_merge.ruleset_merge_methods(rules) == methods
 
 
 @pytest.mark.parametrize(
@@ -621,12 +621,12 @@ def test_ruleset_merge_methods(rules: list[dict], methods: list[str] | None) -> 
      ("squash", ["merge"], None), (None, [], None)],
 )  # fmt: skip
 def test_pick_merge_method(declared: str | None, allowed: list[str], chosen: str | None) -> None:
-    assert github.pick_merge_method(declared, allowed) == chosen
+    assert github_merge.pick_merge_method(declared, allowed) == chosen
 
 
 def test_merge_methods_keep_their_order_and_landing_checks() -> None:
     # 現状固定: 設定が無いときに選ぶ順と、方式ごとの「基底に含まれたか」の確かめ方
-    assert list(github.MERGE_METHODS.items()) == [("squash", github.MERGED), ("merge", github.ANCESTRY), ("rebase", github.MERGED)]
+    assert list(github_merge.MERGE_METHODS.items()) == [("squash", github_merge.MERGED), ("merge", github_merge.ANCESTRY), ("rebase", github_merge.MERGED)]
 
 
 def _allowed(rules: object, settings: object, branch: str = "develop") -> tuple[list[str], list[str]]:
@@ -752,7 +752,7 @@ def test_merge_refuses_a_declared_method_the_branch_does_not_allow() -> None:
         ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=rules)],
     })  # fmt: skip
     out = _hub(server).merge(7, method="merge")
-    assert (out.merged, out.kind) == (False, github.METHOD_REFUSED) and "squash" in out.detail
+    assert (out.merged, out.kind) == (False, github_merge.METHOD_REFUSED) and "squash" in out.detail
     assert server.sent("PUT") == []
 
 
@@ -963,7 +963,7 @@ def test_rule_facts_reads_rulesets_and_bypass() -> None:
 
 def test_rule_facts_without_rules_or_protection_is_absent_and_unreadable_is_none() -> None:
     absent = RouteServer(_rule_routes([], None, {"protection": {"enabled": False}}, httpx.Response(404)))
-    assert _hub(absent).rule_facts("main") == github.NO_RULES
+    assert _hub(absent).rule_facts("main") == github_merge.NO_RULES
     # 従来の保護がある（か有無を読めない）のに詳細を読めなければ None（比べずに入れない）
     hidden = RouteServer(_rule_routes([], None, {"protection": {"enabled": True}}, httpx.Response(404, json={"message": "no"})))
     assert _hub(hidden).rule_facts("main") is None
@@ -975,7 +975,7 @@ def test_rule_facts_merges_classic_protection_with_the_stricter_values() -> None
     assert _hub(server).rule_facts("main") == github.RuleFacts(True, 2, False, False, "never")
     a = github.RuleFacts(True, 1, True, False, "always", "SQUASH")
     b = github.RuleFacts(True, 2, False, True, "exempt")
-    assert github.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
+    assert github_merge.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
 
 
 def test_nodes_uses_the_named_batch_size(monkeypatch) -> None:
