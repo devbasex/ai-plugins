@@ -83,7 +83,7 @@ def stage_value_key(key: str) -> str:
 
 def stage_values(raw: Mapping[str, Any]) -> Row:
     """保存済みの、工程どうしで渡す値を今の形へ移す。旧い名前と今の名前の両方があれば今の名前の値を残す。"""
-    return {stage_value_key(k): v for k, v in raw.items() if stage_value_key(k) == k or stage_value_key(k) not in raw}
+    return {new: v for k, v in raw.items() if (new := stage_value_key(k)) == k or new not in raw}
 
 
 def _snapshot_v1(row: Row) -> Row:
