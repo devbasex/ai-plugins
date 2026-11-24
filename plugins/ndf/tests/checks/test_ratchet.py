@@ -128,6 +128,34 @@ def _file(text: str) -> bytes:
     return _object("blob", text)
 
 
+@pytest.mark.parametrize(
+    ("out", "found"),
+    [
+        (b"", []),
+        (_file("abc"), [b"abc"]),
+        (_file(""), [b""]),  # 空の本文は「無い」ではない
+        (_file("\na\n\n"), [b"\na\n\n"]),
+        (_file("日本語"), ["日本語".encode()]),
+        (_object("blob", "x missing\ny ambiguous\n"), [b"x missing\ny ambiguous\n"]),  # 本文の中の同じ語
+        (b"HEAD:a b.json missing\n", [None]),
+        (b"b1de ambiguous\n", [None]),
+        (b"HEAD:a.json missing", [None]),  # 末尾の改行が無い
+        (b"x missing\ny ambiguous\nz missing\n", [None, None, None]),
+        (_file("a") + b"x missing\n" + _file("") + b"y ambiguous\n" + _file("b\n"), [b"a", None, b"", None, b"b\n"]),
+        (b"b1de blob 5\nabc", [b"abc"]),  # 途中で切れた本文
+        (b"b1de blob 3\nabc", [b"abc"]),  # 本文の後の改行が無い
+    ],
+)
+def test_each_batch_answer_is_its_body_or_none(out, found):
+    assert run._git_objects(out) == found
+
+
+@pytest.mark.parametrize("out", [b"b1de blob x\n", b"\n", b"missing\n", _file("a") + b"b1de submodule\n"])
+def test_a_batch_answer_without_a_size_raises(out):
+    with pytest.raises(ValueError):
+        run._git_objects(out)
+
+
 @pytest.fixture
 def checked(plugin, monkeypatch, capsys, last_result):
     """`ndf check` を打ち（ruff と規約の規則を除く）、終了コードと結果 JSON を返す関数。"""
