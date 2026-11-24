@@ -230,7 +230,7 @@ def test_record_comment_keeps_unresolved_findings_for_the_next_run() -> None:
         # 書き手を信頼できない記録は、新しくても読まない
         _record([{**_OPEN_NO_THREAD, "text": "偽の指摘"}], {}, "2026-11-20T02:00:00Z", trusted=False),
     ]
-    assert prior_decide.recorded(remarks) == [
+    assert prior_decide.recorded(remarks)[0] == [
         prior_decide.Carried("p-r1-1", None, "設計全体の --> 前提が無い", "codex", "major", None, None, None)
     ]
 
@@ -259,7 +259,7 @@ def test_record_is_chosen_by_its_last_update() -> None:
     """PR 3944 の r2-5: 打ち直しで書き換えた記録のコメントは、作った時刻でなく最終更新の時刻で最新を選ぶ。"""
     rewritten = _record([], {}, "2026-11-20T00:00:00Z")._replace(updated="2026-11-20T03:00:00Z")
     other = _record([_OPEN_NO_THREAD], {}, "2026-11-20T01:00:00Z")._replace(updated="2026-11-20T01:00:00Z")
-    assert prior_decide.recorded([rewritten, other]) == []
+    assert prior_decide.recorded([rewritten, other]) == ([], {})
 
 
 def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:

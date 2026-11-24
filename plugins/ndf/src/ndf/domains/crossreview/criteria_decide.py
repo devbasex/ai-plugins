@@ -84,13 +84,14 @@ def _has_impact(impact: object) -> bool:
     return isinstance(impact, str) and bool(impact.strip())
 
 
-def effective_severity(severity: Optional[str], impact: object) -> str:
+def effective_severity(severity: Optional[str], impact: object, *, redline: bool = False) -> str:
     """ジャーナルの行に書く重要度（#4014）。`severity` は `severity_of` を通した値。1 文の無い収束の妨げになる重さと
     重要度の無い指摘は、妨げにならない重さのうち最も重いもの（minor）へ下げ、1 文のある重要度の無い指摘は妨げになる
-    重さのうち最も軽いもの（major）にする。妨げにならない重さは 1 文の有無によらずそのまま。"""
+    重さのうち最も軽いもの（major）にする。妨げにならない重さは 1 文の有無によらずそのまま。必ず人の承認が要る操作に
+    当たる指摘（`redline`）は、1 文が無くても下げない（#4076）。"""
     if severity is not None and not blocking(severity):
         return severity
-    if not _has_impact(impact):
+    if not redline and not _has_impact(impact):
         return _heaviest_light()
     return severity if severity is not None else _lightest_blocking()
 
@@ -151,9 +152,9 @@ def mvv_item(value: object, items: Sequence[str]) -> Optional[str]:
     return item if item in items else None
 
 
-def redline(item: str) -> bool:
+def redline(item: Optional[str]) -> bool:
     """MVV の項目（`mvv_item` の値）が、必ず人の承認が要る操作か。"""
-    return _REDLINE.fullmatch(item) is not None
+    return item is not None and _REDLINE.fullmatch(item) is not None
 
 
 def _mvv_lines(who: str, mvv: Optional[Snapshot]) -> list[str]:

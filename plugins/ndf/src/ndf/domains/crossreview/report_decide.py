@@ -22,6 +22,21 @@ MARKER = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-report -->"
 OPEN_MARK = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-open "
 # 本文の最後の行だけに当てる（表の自由記述に同じ形があっても読まない。PR 3944 の r2-4）
 _OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>[^\n]*) -->")
+# 指摘がプロジェクト MVV に反するときの欄（#4076。ジャーナルの指摘と、記録のコメントに埋める一覧の両方が持つ）。下の識別子は、
+# どの MVV かを表す文字列（`records.mvv.Snapshot.identity`）
+# 反する項目（`Value 5`・`P1` など）
+MVV = "mvv"
+# 重さを、修正担当へ渡す重さに固定したか（`Value`・`Vision`・`Mission` に反する指摘）と、固定する前の重さ
+PINNED = "mvv_pinned"
+UNPINNED = "unpinned_severity"
+# 相手役が挙げた、必ず人の承認が要る操作の番号（`P1`・`C7`）
+REDLINE_ITEMS = "redline_items"
+# 上の 4 つを決めたときの MVV の識別子
+JUDGED = "judged_mvv"
+# 上の 5 つの欄
+MARKS = (MVV, PINNED, REDLINE_ITEMS, JUDGED, UNPINNED)
+# NDF が機械で確かめて作った指摘の `by`
+BY_NDF = identity.FIXED_WORDS["entrypoint"]
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
 COMMENT_KEY = "report_comment"
 # 状態ファイルのキー（記録のコメントへ公開できた状態の要約 `published_state`。同じなら書き直さない。PR 3944 の r3-2）
@@ -217,18 +232,20 @@ def _open_value(value: Any) -> str:
 
 
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
-    """未解決の重い指摘の一覧を HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初の
-    コメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
+    """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
+    HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
     1 回で受けて同じ順に返す）へ値ごとに通し、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
     （PR 3944 の r6-4）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
     for f in store.list_of(data, store.FINDINGS):
-        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED or _light(f):
+        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED:
+            continue
+        if _light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF:
             continue
         mark = done.get(f.get("id"))
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
-        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section")}
+        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

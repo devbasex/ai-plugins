@@ -7,16 +7,18 @@
   今の実行の認証の login と同じで、resolve されていない）を、
   別の保存先で始めた実行が未解決の指摘として引き継ぐ。状態ファイルの `threads` が既に持つスレッドは引き継がない
 - 記録のコメントから戻す指摘: 有効な位置が無くスレッドにならなかった未解決の指摘は、最新の記録のコメント（書き手が
-  信頼できるもの）に埋めた一覧（`report_decide.open_items`）から戻す（`recorded`）
+  信頼できるもの）に埋めた一覧（`report_decide.open_items`）から戻す（`recorded`）。NDF が機械で確かめて作った指摘は、直ったかを
+  次の確かめだけが決めるので、スレッドがあっても（resolve 済みでも）戻す。指摘がプロジェクト MVV に反するという判定は、
+  スレッドの本文に書かず、この一覧だけが持つ（#4090）
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Iterable, Sequence
-from typing import NamedTuple, Optional
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, NamedTuple, Optional
 
-from ndf.domains.crossreview import report_decide
+from ndf.domains.crossreview import criteria_decide, report_decide
 
 # スレッドの最初のコメント（`threads.opening`）の見出しと本文
 _OPENING = re.compile(
@@ -56,7 +58,8 @@ class Thread(NamedTuple):
 
 class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
-    戻したスレッドの無い指摘は None）。"""
+    戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
+    `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。"""
 
     id: str
     comment: Optional[int]
@@ -66,6 +69,12 @@ class Carried(NamedTuple):
     path: Optional[str]
     line: Optional[int]
     section: Optional[str] = None
+    mvv: Optional[str] = None
+    mvv_pinned: Optional[bool] = None
+    redline_items: Optional[Sequence[str]] = None
+    judged_mvv: Optional[str] = None
+    unpinned_severity: Optional[str] = None
+    thread: Optional[int] = None
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -122,8 +131,11 @@ def remark_lines(remarks: Sequence[Remark], chars: int, total: Optional[int] = N
     return head + kept[::-1]
 
 
-def carried(threads: Iterable[Thread], tracked: Collection[int]) -> list[Carried]:
-    """引き継ぐ指摘。自分のスレッド（`MARKER` で始まり、書き手が信頼できる）で resolve されておらず、`tracked`（状態ファイルが
+_NO_MARKS: Mapping[int, Mapping[str, Any]] = {}
+
+
+def carried(threads: Iterable[Thread], tracked: Collection[int], marks: Mapping[int, Mapping[str, Any]] = _NO_MARKS) -> list[Carried]:
+    """引き継ぐ指摘。`marks`（`recorded` が返す）に同じスレッドの MVV の判定があれば重ねる。自分のスレッド（`MARKER` で始まり、書き手が信頼できる）で resolve されておらず、`tracked`（状態ファイルが
     持つスレッドの最初のコメント）に無いもの。書き手を確かめないと、PR にコメントできる人が同じ書式で書いた本文が修正担当へ渡る。"""
     out = []
     for t in threads:
@@ -132,9 +144,9 @@ def carried(threads: Iterable[Thread], tracked: Collection[int]) -> list[Carried
         found = _OPENING.search(t.body)
         if found is None or not found.group("text").strip():
             continue
-        out.append(
-            Carried(f"t{t.comment}", t.comment, found.group("text").strip(), found.group("by"), found.group("severity"), t.path, t.line)
-        )
+        text, by, severity = found.group("text").strip(), found.group("by"), found.group("severity")
+        judged = marks[t.comment] if t.comment in marks else {}
+        out.append(Carried(f"t{t.comment}", t.comment, text, by, severity, t.path, t.line, **judged))
     return out
 
 
@@ -142,29 +154,49 @@ def _opt_text(value: object) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def recorded(remarks: Iterable[Remark]) -> list[Carried]:
+def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
+    """一覧の 1 件が持つ MVV の判定（形の違う値は None）。"""
+    redlines = item.get(report_decide.REDLINE_ITEMS)
+    return {
+        report_decide.MVV: _opt_text(item.get(report_decide.MVV)),
+        report_decide.PINNED: True if item.get(report_decide.PINNED) is True else None,
+        report_decide.REDLINE_ITEMS: [i for i in redlines if isinstance(i, str)] if isinstance(redlines, list) else None,
+        report_decide.JUDGED: _opt_text(item.get(report_decide.JUDGED)),
+        report_decide.UNPINNED: criteria_decide.severity_of(item.get(report_decide.UNPINNED)),
+    }
+
+
+def recorded(remarks: Iterable[Remark]) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
-    未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）。同じ保存先の打ち直しは記録の
+    未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
+    スレッドのある指摘の MVV の判定（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。"""
     mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.updated or r.at)
-    if not mine:
-        return []
-    out = []
-    for item in report_decide.open_items(mine[-1].body):
+    out: list[Carried] = []
+    marks: dict[int, Mapping[str, Any]] = {}
+    for item in report_decide.open_items(mine[-1].body) if mine else ():
         fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
-        if fid is None or text is None or type(item.get("thread")) is int:
+        if fid is None or text is None:
             continue
+        judged, by = _marks_of(item), _opt_text(item.get("by"))
+        thread = item["thread"] if type(item.get("thread")) is int else None
+        if thread is not None:
+            marks[thread] = judged
+            if by != report_decide.BY_NDF:
+                continue
         line = item.get("line")
         out.append(
             Carried(
                 fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
                 None,
                 text,
-                _opt_text(item.get("by")),
+                by,
                 _opt_text(item.get("severity")),
                 _opt_text(item.get("path")),
                 line if type(line) is int and line > 0 else None,
                 _opt_text(item.get("section")),
+                **judged,
+                thread=thread,
             )
         )
-    return out
+    return out, marks
