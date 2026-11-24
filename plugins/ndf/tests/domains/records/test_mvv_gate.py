@@ -169,10 +169,10 @@ def _inputs(**extra: Any) -> dict[str, Any]:
 
 
 def _hub(number: int, case: dict[str, Any]):
-    return lambda root: Hub(number, case)
+    return lambda root, remote=None: Hub(number, case)
 
 
-def _no_hub(root: Path) -> Hub:
+def _no_hub(root: Path, remote: Optional[str] = None) -> Hub:
     raise AssertionError("判定を打たないときは GitHub を読まない")
 
 
@@ -197,11 +197,15 @@ def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes
     assert (out["noted"], out["note_url"]) == (True, "https://github.com/o/r/pull/5#issuecomment-1")
     ((number, text),) = notes
     assert number == 5 and "Value 1 に沿う" in text and NORMAL in text
+    # 判定した head をコメントに載せ、読む人が PR の今の HEAD と見比べられる
+    assert f"判定したコミット（PR の head）: {HEAD}" in text
 
 
-def test_fast_skips_only_the_design_gate(repo: Path) -> None:
+def test_fast_does_not_skip_while_the_holds_are_unchecked(repo: Path) -> None:
+    # 保留を読まない判定（holds が null）は、進行の側（model.mvv_skip）と同じく省けると書かず、理由を why に載せる
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
-    assert (out["skip"], out["why"], out["holds"]) == (True, [], None)
+    assert (out["skip"], out["why"], out["holds"]) == (False, [mm.HOLDS_UNCHECKED], None)
+    assert not model.mvv_skip({"step": {"outputs": {model.MVV_KEY: out}}}, "step", "design")
     # 決定 3: リリース承認ゲートは fast でも省かず、#4105 の理由を why に載せる
     out = mvv_gate.gate(repo, "release", _inputs(pr=5), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["skip"], out["why"], out["verdict"]) == (False, [mvv_gate.RELEASE_KEPT], FOLLOW)
@@ -285,9 +289,9 @@ def test_the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo
         return {"files": DOCS["files"]}
 
     monkeypatch.setattr(hub, "rest", advance_then_answer)
-    out = mvv_gate.gate(repo, "design", _inputs(), lambda root: hub, Ask(FOLLOW))
+    out = mvv_gate.gate(repo, "design", _inputs(), lambda root, remote: hub, Ask(FOLLOW))
     assert fetched == [("origin", "+refs/heads/main:refs/remotes/origin/main")]
-    assert hub.paths == [f"/repos/o/r/compare/{base}...{HEAD}"] and out["skip"] is True
+    assert hub.paths == [f"/repos/o/r/compare/{base}...{HEAD}"] and out["verdict"] == FOLLOW
 
 
 @pytest.mark.parametrize(
@@ -298,13 +302,14 @@ def test_the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo
         ([github.GitHubError("読めない", 502)], "pr_reread_failed"),
     ],
 )
-def test_a_pr_that_moves_while_reading_is_not_judged_or_noted(
+def test_a_pr_that_moves_before_the_note_is_not_judged_or_noted(
     repo: Path, reads: list[Any], kind: str, notes: list[tuple[int, str]]
 ) -> None:
+    # LLM の回答を待つ間に PR が動いたら、判定を捨ててコメントを書かない（書く直前に 1 回だけ読み直す）
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": reads}), ask)
     assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
-    assert ask.calls == [] and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+    assert len(ask.calls) == 1 and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
 
 
 @pytest.mark.parametrize("failure", [github.GitHubError("比較を読めない", 502), {"no_files": True}])
@@ -399,13 +404,13 @@ def test_a_mode_without_the_design_gate_is_not_judged(repo: Path, mode: str) -> 
     assert mvv_gate.has_gate(mode, "release") and mvv_gate.has_gate("standard", "design")
 
 
-def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, notes: list[tuple[int, str]]) -> None:
+def test_follow_without_redlines_is_noted_and_the_record_is_reused(repo: Path, notes: list[tuple[int, str]]) -> None:
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
-    assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], HEAD)
-    # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
+    assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (False, [mm.HOLDS_UNCHECKED], [], HEAD)
+    # 省かない理由（保留を確かめていない）を、判定の理由と一緒に PR のコメントへ残す
     ((number, text),) = notes
-    assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
+    assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text and mm.HOLDS_UNCHECKED in text
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert {**again, "note_url": ""} == {**out, "note_url": ""} and len(ask.calls) == 1
@@ -463,7 +468,7 @@ def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(tmp_path: P
 
 
 def _raising(exc: Exception) -> Any:
-    def open_hub(root: Path) -> Hub:
+    def open_hub(root: Path, remote: str) -> Hub:
         raise exc
 
     return open_hub
@@ -495,7 +500,7 @@ def test_the_mode_without_the_gate_is_told_first(tmp_path: Path) -> None:
 
 
 def test_the_release_gate_needs_the_pr_in_the_context(repo: Path) -> None:
-    out = mvv_gate.gate(repo, "release", _inputs(), lambda root: SimpleNamespace(), Ask(FOLLOW))
+    out = mvv_gate.gate(repo, "release", _inputs(), lambda root, remote: SimpleNamespace(), Ask(FOLLOW))
     assert out["skip"] is False and _stopped(out) == "no_pr"
     assert "pr" in _failures()[0]["cause"]
 
@@ -555,6 +560,18 @@ def test_diff_rows_reads_added_removed_modified_and_renamed_files() -> None:
     assert mm.incomplete_patches(rows) == ["差分の全体を材料に載せられない: bin"]
 
 
+def test_diff_rows_keeps_mode_changes_in_the_patch() -> None:
+    # 実行権限の変更はハンクの外にあるので、patch の先頭へ写す。モードだけの変更も同じ形にする
+    text = (
+        "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n"
+        "diff --git a/do.sh b/do.sh\nold mode 100644\nnew mode 100755\nindex 1..2\n--- a/do.sh\n+++ b/do.sh\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    assert mm.diff_rows(text) == [
+        {"filename": "run.sh", "status": "modified", "changes": 0, "patch": "old mode 100644\nnew mode 100755"},
+        {"filename": "do.sh", "status": "modified", "changes": 2, "patch": "old mode 100644\nnew mode 100755\n@@ -1,1 +1,1 @@\n-a\n+b"},
+    ]
+
+
 def test_diff_rows_restores_quoted_paths() -> None:
     text = (
         'diff --git "a/\\346\\227\\245.md" "b/\\346\\227\\245.md"\nindex 1..2 100644\n'
@@ -581,9 +598,10 @@ def _plan_inputs(repo: Path, **context: Any) -> dict[str, Any]:
 
 
 def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[int, str]]) -> None:
-    # Task 1: プランが組む平らな入力で、今の形の mvv_gate を返す（fast で検査を通り「従う」なら省く）
+    # Task 1: プランが組む平らな入力で、今の形の mvv_gate を返す（fast で検査を通り「従う」でも、保留を読むまでは省かない）
     out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, DOCS), Ask(FOLLOW))
-    assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", HEAD)
+    expected = ("design", False, [mm.HOLDS_UNCHECKED], "follow", HEAD)
+    assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == expected
     assert [n for n, _ in notes] == [5]
 
 
@@ -751,7 +769,7 @@ def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
     assert seen[0] == seen[1] and "design_pr" not in seen[0]
     # 今回のコメントの URL だけが違う（どちらの起動もコメントを 1 件書く）
     same = [{**out["outputs"]["mvv_gate"], "note_url": None} for out in (by_machine, by_env)]
-    assert same[0] == same[1] and by_env["outputs"]["mvv_gate"]["skip"] is True
+    assert same[0] == same[1] and by_env["outputs"]["mvv_gate"]["verdict"]["verdict"] == "follow"
     assert [n for n, _ in notes] == [5, 5]
 
 

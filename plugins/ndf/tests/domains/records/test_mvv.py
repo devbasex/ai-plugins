@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import git_sandbox
 import pytest
@@ -295,12 +295,16 @@ class CompareHub:
 
     repo = "o/r"
 
-    def __init__(self, files: list[dict[str, Any]]) -> None:
-        self.files = files
+    def __init__(self, files: list[dict[str, Any]], refused: Optional[GitHubError] = None) -> None:
+        self.files, self.refused = files, refused
         self.paths: list[str] = []
+        self.params: list[Any] = []
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
         self.paths.append(path)
+        self.params.append(params)
+        if self.refused is not None:
+            raise self.refused
         return {"files": self.files}
 
 
@@ -331,6 +335,8 @@ def test_compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> No
     hub, g = CompareHub(_files(mvv.COMPARE_FILES_CAP - 1)), CountingGit(git.Completed(0, "", ""))
     assert mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40) == hub.files  # type: ignore[arg-type]
     assert hub.paths == [f"/repos/o/r/compare/{'b' * 40}...{'h' * 40}"] and g.calls == []
+    # ページを指定し、使わないコミットの一覧を 1 件に抑える（files は 1 ページ目に比較の全体の分が載る）
+    assert hub.params == [{"page": 1, "per_page": 1}]
     hub = CompareHub(_files(mvv.COMPARE_FILES_CAP))
     rows = mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
     assert [r["filename"] for r in rows] == ["x"]
@@ -344,6 +350,22 @@ def test_compare_files_refuses_a_head_it_cannot_fetch_without_reading_the_diff()
     with pytest.raises(git.GitError, match="取得できない"):
         mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
     assert [c[0] for c in g.calls] == ["fetch"]
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_compare_files_reads_with_git_when_the_api_token_cannot_read_the_comparison(status: int) -> None:
+    # 非公開のリポジトリで、API の認証情報に Contents の読み取りが無い: 同じ SHA の組を手元の git で読む
+    hub, g = CompareHub([], refused=GitHubError("読めない", status)), CountingGit(git.Completed(0, "", ""))
+    rows = mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+    assert [r["filename"] for r in rows] == ["x"]
+    assert g.calls == [("fetch", "origin", "h" * 40), ("diff", "b" * 40, "h" * 40, *mvv.LOCAL_DIFF)]
+
+
+def test_compare_files_does_not_read_with_git_on_other_failures() -> None:
+    g = CountingGit(git.Completed(0, "", ""))
+    with pytest.raises(GitHubError):
+        mvv.compare_files(CompareHub([], refused=GitHubError("落ちた", 502)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+    assert g.calls == []
 
 
 def test_compare_files_refuses_an_answer_without_files() -> None:

@@ -20,6 +20,7 @@ import unidiff
 
 from ndf import contracts
 from ndf.progress.gate.checks import Changed, MvvFacts, sections
+from ndf.progress.model import hold_checked
 
 # ステップの結果の区分（「テスト」のセクションの列）
 PASSED, FAILED, BRANCHED = "通った", "落ちた", "分岐した"
@@ -31,6 +32,8 @@ OUTPUT_LINES = 20
 # 失敗の種類 → PR のコメントと承認資料へ載せてよい定型文（contracts/data/mvv-stop-reasons.json。#3959）。例外の全文は手元の
 # 診断の記録（mvv-gate-failures.jsonl）にだけ残し、文には記録の識別子を添える（mvv_gate.failure_text）
 STOP_REASONS: dict[str, str] = contracts.load_json("data/mvv-stop-reasons.json")["reasons"]
+# 保留を確かめていない判定（`holds` が null か保留がある）が省けると書かないときに why へ足す理由（`model.hold_checked`）
+HOLDS_UNCHECKED = "レビューの保留を確かめていないため、承認ゲートを省かない"
 
 
 @dataclass(frozen=True)
@@ -181,9 +184,13 @@ def gate_outcome(
 
     `holds` はレビューの保留（読まなかったら None）で、キーは常に置く。`noted` は今回のコメントを書いたか（既定は偽。書けたら
     `mvv_gate._recorded` が置き換える）。
+    `skip` は、進行の側（`model.mvv_skip`）と同じく `hold_checked` が真のときだけ立てる。保留を確かめずに省けると渡されたら、
+    偽にして `HOLDS_UNCHECKED` を why に足す（出力の skip と、進行が承認ゲートを省くかを一致させる。#3959）。
     """
     held = verdict if isinstance(verdict, dict) else None
     out: dict[str, Any] = {"gate": gate, "skip": skip, "verdict": held, "why": list(why), "holds": None if holds is None else list(holds)}
+    if skip and not hold_checked(out):
+        out["skip"], out["why"] = False, [*out["why"], HOLDS_UNCHECKED]
     out["noted"] = False
     return {**out, "head": head} if head is not None else out
 
@@ -204,6 +211,8 @@ class DiffError(ValueError):
 
 # 差分の頭で、名前の付いた行（`rename from <パス>`）
 _RENAME_FROM, _RENAME_TO = "rename from ", "rename to "
+# 差分の頭で、モードの変更を示す行
+_MODE_LINES = ("old mode ", "new mode ")
 
 
 def unquote_path(name: str) -> str:
@@ -238,6 +247,8 @@ def _rename_pair(info: Sequence[str]) -> Optional[tuple[str, str]]:
 
 def _diff_row(pf: unidiff.PatchedFile) -> dict[str, Any]:
     info = [str(line) for line in pf.patch_info]
+    # 実行権限などのモードの変更（`old mode`・`new mode`）はハンクの外にあるので、`patch` の先頭へ写す。モードだけの変更も同じ形にする
+    modes = [line.rstrip("\n") for line in info if line.startswith(_MODE_LINES)]
     moved = _rename_pair(info)
     row: dict[str, Any]
     if moved is not None:
@@ -249,7 +260,7 @@ def _diff_row(pf: unidiff.PatchedFile) -> dict[str, Any]:
     if pf.is_binary_file:
         return {**row, "changes": 1}
     row["changes"] = pf.added + pf.removed
-    patch = "".join(str(h) for h in pf).rstrip("\n")
+    patch = "\n".join([*modes, "".join(str(h) for h in pf).rstrip("\n")]).strip("\n")
     return {**row, "patch": patch} if patch else row
 
 

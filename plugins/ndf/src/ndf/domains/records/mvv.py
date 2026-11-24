@@ -529,6 +529,8 @@ def mvv_validate_sprint(
 
 # 比較の API が `files` を返す上限の件数（GitHub REST API の「Working with large comparisons」）
 COMPARE_FILES_CAP = 300
+# 比較の API を読む権限が無いときの HTTP の状態。非公開のリポジトリで権限が無いと 404、明示の拒否は 403（手元の git で読む）
+COMPARE_DENIED = (403, 404)
 # 手元の git で比較を読み直すときの差分の形（手元の Git の設定で出力の形が変わらないよう固定する。#3959）
 LOCAL_DIFF = (
     "--merge-base", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
@@ -539,16 +541,29 @@ LOCAL_DIFF = (
 def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:
     """コミット `base` と `head`（どちらも SHA）の 3 点の比較で変えたファイル（GitHub の files の行の形）。
 
-    比較の REST を 1 回打つ。`files` が `COMPARE_FILES_CAP` 件に届いたときだけ、head を取得して同じ組を手元の git
-    （`--merge-base`）で読み直す。基点を SHA で固定するので、読む間にマージ先が進んでも差分は変わらない。
+    比較の REST を 1 回打つ。ページを指定すると `files` は 1 ページ目に比較の全体の分（`COMPARE_FILES_CAP` 件まで）が載り、
+    コミットの一覧だけがページで区切られるので、`page=1&per_page=1` で使わないコミットの一覧を 1 件に抑える。
+    `files` が `COMPARE_FILES_CAP` 件に届いたときと、比較の API の認証情報に権限が無い（`COMPARE_DENIED`。非公開のリポジトリで
+    Contents の読み取りを持たない API の認証情報）ときは、head を取得して同じ組を手元の git（`--merge-base`）で読み直す。
+    基点を SHA で固定するので、読む間にマージ先が進んでも差分は変わらない。
     比較を読めなければ `GitHubError`、手元で読めなければ `GitError`・`mvv_material_decide.DiffError`。
     """
-    got = hub.rest("GET", f"/repos/{hub.repo}/compare/{base}...{head}")
+    try:
+        got = hub.rest("GET", f"/repos/{hub.repo}/compare/{base}...{head}", params={"page": 1, "per_page": 1})
+    except GitHubError as exc:
+        if exc.status not in COMPARE_DENIED:
+            raise
+        return _local_files(g, remote, base, head)
     files = got.get("files") if isinstance(got, dict) else None
     if not isinstance(files, list):
         raise GitHubError(f"比較 {base}...{head} の応答に files が無い")
     if len(files) < COMPARE_FILES_CAP:
         return files
+    return _local_files(g, remote, base, head)
+
+
+def _local_files(g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:
+    """head を取得し、`base` と `head` の組を手元の git で読む（`compare_files` の手元の経路）。"""
     done = g.fetch(remote, head)
     if done.returncode != 0:
         raise git_mod.GitError(f"{remote} から {head} を取得できない: {done.stderr.strip()}")

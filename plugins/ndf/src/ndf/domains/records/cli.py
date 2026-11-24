@@ -54,8 +54,9 @@ def _root(args: argparse.Namespace) -> Path:
     return Path(Git(where).run("rev-parse", "--show-toplevel").strip())
 
 
-def _hub(root: Path) -> github_mod.GitHub:
-    return _repo_hub(Git(root).remote_repo())
+def _hub(root: Path, remote: str | None = None) -> github_mod.GitHub:
+    """`root` のリモート（`remote` を省けば解く）の GitHub。解き済みのリモート名を渡すと解き直さない。"""
+    return _repo_hub(Git(root).remote_repo(remote))
 
 
 def _repo_hub(repo: str) -> github_mod.GitHub:

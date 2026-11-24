@@ -7,6 +7,7 @@
 承認ゲートのステップ（`ndf.progress.run`）はその結果だけを読み、省けるなら回答した者 `service:mvv` の承認で通す。
 
 MVV とレッドラインのパスは PR のベースのコミットから 1 度だけ読み（worktree のファイルは読まない）、差分も同じコミットと head の組から読む。
+差分を読んだ後の結果は、PR のコメントへ書く直前に PR を読み直し、head かマージ先が変わっていれば書かずに止める。コメントには判定した head を載せる。
 判定の材料は、共通原則の本文（`contracts/data/ndf-common-principles.md`）・プロジェクト MVV の本文・PR の本文と差分。
 レッドライン（必ず人の承認が要る操作）は共通原則とプロジェクト MVV の表から引き、材料の先に置く。
 判定を打てないときは承認ゲートを省かず、理由を `why` に書いて人へ問う。失敗の原因は定型文と手元の診断の記録の識別子だけを
@@ -45,6 +46,8 @@ GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答）。テストはスタブへ差し替える
 Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
+# 判定するリポジトリ（root）と解いたリモート名から、GitHub の接続先を開く。テストは偽物へ差し替える
+OpenHub = Callable[[Path, str], GitHub]
 
 
 class GateError(Exception):
@@ -191,32 +194,38 @@ class _Judging:
         out = mm.stop_outcome(self.gate, kind, why, self.pull.head_sha)
         return _recorded(self.hub, self.number, out, self.where) if noted else out
 
+    def posted_if_current(self, out: dict[str, Any]) -> dict[str, Any]:
+        """手順 (9): PR を読み直し、head とマージ先が (1) のままなら結果 `out` を PR のコメントへ書く。
 
-def _base_snapshot(j: _Judging, inputs: Mapping[str, Any]) -> tuple[str, mvv.Snapshot, MvvFacts, str]:
-    """手順 (2): PR のマージ先を取得し、ベースの MVV を 1 度だけ読んで事実を作る（リモート・MVV・事実・MVV の本文）。"""
-    g = Git(j.root)
-    remote = g.remote()
-    g.fetch_branch_or_raise(remote, j.pull.base_ref)
+        差分を読んだ後の結果（判定・材料に載らない差分・LLM の無回答）は、LLM を待つ間に PR が更新されうるので、書く直前に
+        1 回だけ読み直す。動いていた・読めなければ結果を捨て、コメントを書かずに止める（更新前の差分への判定を今の変更への判定と
+        読ませない。#3959）。
+        """
+        try:
+            again = self.hub.pull(self.number)
+        except GitHubError as exc:
+            why = ["判定の後に PR を読み直せない: " + self.text("pr_reread_failed", exc)]
+            return self.stopped("pr_reread_failed", why, noted=False)
+        if (again.head_sha, again.base_ref) != (self.pull.head_sha, self.pull.base_ref):
+            moved = f"{self.pull.base_ref}@{self.pull.head_sha} → {again.base_ref}@{again.head_sha}"
+            return self.stopped("pr_moved", [self.text("pr_moved", moved)], noted=False)
+        return _recorded(self.hub, self.number, out, self.where)
+
+
+def _base_snapshot(j: _Judging, remote: str, inputs: Mapping[str, Any]) -> tuple[mvv.Snapshot, MvvFacts, str]:
+    """手順 (2): PR のマージ先をリモート `remote` から取得し、ベースの MVV を 1 度だけ読んで事実を作る（MVV・事実・MVV の本文）。"""
+    Git(j.root).fetch_branch_or_raise(remote, j.pull.base_ref)
     snap = mvv.current(j.root, md.signals_ref(j.pull.base_ref, remote), allow_mismatch=True)
     facts, project = snapshot_facts(j.root, snap, inputs)
-    return remote, snap, facts, project
+    return snap, facts, project
 
 
 def _diff(j: _Judging, remote: str, snap: mvv.Snapshot) -> tuple[Optional[list[dict[str, Any]]], Optional[dict[str, Any]]]:
-    """手順 (4): `snap.commit` と head の組の差分と、読み終えた後に PR が動いていないかの確かめ。止まるなら（None, 結果）。"""
+    """手順 (4): `snap.commit` と head の組の差分。読めなければ（None, 結果）。PR が動いたかは書く直前に確かめる（手順 (9)）。"""
     try:
-        rows = mvv.compare_files(j.hub, Git(j.root), remote, snap.commit, j.pull.head_sha)
+        return mvv.compare_files(j.hub, Git(j.root), remote, snap.commit, j.pull.head_sha), None
     except (GitHubError, GitError, mm.DiffError) as exc:
         return None, j.stopped("diff_unreadable", ["変えたファイルを読めない: " + j.text("diff_unreadable", exc)])
-    try:
-        again = j.hub.pull(j.number)
-    except GitHubError as exc:
-        why = ["判定の材料を読んだ後に PR を読み直せない: " + j.text("pr_reread_failed", exc)]
-        return None, j.stopped("pr_reread_failed", why, noted=False)
-    if (again.head_sha, again.base_ref) != (j.pull.head_sha, j.pull.base_ref):
-        moved = f"{j.pull.base_ref}@{j.pull.head_sha} → {again.base_ref}@{again.head_sha}"
-        return None, j.stopped("pr_moved", [j.text("pr_moved", moved)], noted=False)
-    return rows, None
 
 
 def _read_records(j: _Judging, warnings: list[dict[str, Any]]) -> tuple[Optional[list[dict[str, Any]]], list[jsonl.Broken]]:
@@ -233,14 +242,16 @@ def _read_records(j: _Judging, warnings: list[dict[str, Any]]) -> tuple[Optional
 
 
 def _judged(
-    root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Callable[[Path], GitHub], ask: Ask, warnings: list[dict[str, Any]]
+    root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: OpenHub, ask: Ask, warnings: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    # 手順 (1): 判定する PR と head を決める。ここまでの失敗は `gate` が受ける（書く先の PR が決まっていない）
-    hub = open_hub(root)
+    # 手順 (1): 判定する PR と head を決める。ここまでの失敗は `gate` が受ける（書く先の PR が決まっていない）。
+    # リモート名は 1 度だけ解き、GitHub の接続先とベースの取得の両方に使う
+    remote = Git(root).remote()
+    hub = open_hub(root, remote)
     number = pr_number(root, gate_name, inputs, hub)
     j = _Judging(root, gate_name, hub, number, hub.pull(number))
     try:
-        remote, snap, facts, project = _base_snapshot(j, inputs)
+        snap, facts, project = _base_snapshot(j, remote, inputs)
     except (GitError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
         return j.stopped("base_unreadable", ["ベースの MVV を読めない: " + j.text("base_unreadable", exc)])
     # 手順 (3): 検査 1 だけが判定を止める。承認済みの MVV が無いリポジトリの出力と PR を今と同じにする（コメントを書かない）
@@ -256,7 +267,7 @@ def _judged(
     # 手順 (6): 差分の全体が材料に載らない PR は、省いた部分を判定できないため LLM を呼ばずに人へ問う
     cut = mm.incomplete_patches(rows)
     if cut:
-        return j.stopped("incomplete_patches", [*refusals(facts, gate_name), *cut])
+        return j.posted_if_current(j.stopped("incomplete_patches", [*refusals(facts, gate_name), *cut], noted=False))
     shared = mvv.principles().decode("utf-8")
     materials = {
         "NDF の共通原則": shared,
@@ -269,7 +280,8 @@ def _judged(
     try:
         row, unrecorded = mvv.mvv_validate_sprint(root, asked, judge_with(ask), reuse=held is not None, rows=held, broken=broken)
     except GateError as exc:
-        return j.stopped("llm_no_answer", ["MVV 判定を打てない: " + j.text("llm_no_answer", exc), *refusals(facts, gate_name)])
+        why = ["MVV 判定を打てない: " + j.text("llm_no_answer", exc), *refusals(facts, gate_name)]
+        return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False))
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
     # 手順 (8): 進め方と区分は省くかだけを決める。記録に行の無い判定では省かない
@@ -280,7 +292,8 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, j.pull.head_sha), j.where)
+    # 保留はまだ読まない（holds は null）。`gate_outcome` が保留を確かめていない判定の skip を偽にする
+    return j.posted_if_current(mm.gate_outcome(gate_name, verdict, skip, why, j.pull.head_sha))
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:
@@ -294,7 +307,7 @@ def _recorded(hub: GitHub, number: int, outcome: dict[str, Any], where: Mapping[
     書けなければ判定を保ったまま省かない側へ倒し、`noted` を偽にする（原因は `failure_text` の定型文と識別子だけ）。
     """
     try:
-        made = post_note(hub, number, note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"]))
+        made = post_note(hub, number, note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"], outcome.get("head")))
     except GitHubError as exc:
         why = [*outcome["why"], "判定の記録を PR に書けない: " + failure_text("note_unwritten", exc, where)]
         return {**outcome, "skip": False, "why": why, "noted": False}
@@ -312,7 +325,7 @@ def gate(
     root: Path,
     gate_name: str,
     inputs: Mapping[str, Any],
-    hub: Callable[[Path], GitHub],
+    hub: OpenHub,
     ask: Ask = llm.ask,
     warnings: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:

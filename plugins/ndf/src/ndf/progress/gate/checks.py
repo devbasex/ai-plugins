@@ -200,12 +200,17 @@ def may_skip(f: MvvFacts, verdict: Any, gate: str = "design") -> tuple[bool, lis
     return True, []
 
 
-def note(gate: str, verdict: Any, why: Sequence[str], holds: Optional[Sequence[str]] = None) -> str:
-    """MVV 判定の記録（PR のコメントと承認資料に載せる Markdown）。レッドラインの中身（#2950）とレビューの保留も載せる。"""
+def note(gate: str, verdict: Any, why: Sequence[str], holds: Optional[Sequence[str]] = None, head: Optional[str] = None) -> str:
+    """MVV 判定の記録（PR のコメントと承認資料に載せる Markdown）。レッドラインの中身（#2950）とレビューの保留も載せる。
+
+    `head` は判定した PR の head のコミット。載せると、読む人が今の変更への判定かを PR の今の HEAD と見比べられる（#3959）。
+    """
     v = verdict if isinstance(verdict, dict) else {}
     reasons = [str(r) for r in v["reasons"]] if isinstance(v.get("reasons"), list) else []
     boundary = [str(b) for b in v["boundary"]] if isinstance(v.get("boundary"), list) else []
     lines = [f"## MVV 判定（{model.gate_label(gate)}）", "", f"- 判定: {v['verdict'] if 'verdict' in v else '無し'}"]
+    if head is not None:
+        lines.append(f"- 判定したコミット（PR の head）: {head}")
     lines += ["", "### 理由", "", *bullets(reasons)]
     lines += ["", "### レッドライン", "", *bullets(boundary)]
     if why:
