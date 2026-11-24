@@ -270,6 +270,7 @@
 | `ndf records gws-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records handoff check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`path`（string・必須・位置）<br>`--trim`（boolean・任意）: テンプレートに無いセクションを退避先へ移してから確かめる<br>`--history`（string・任意）: 退避先（--trim のとき要る） |
 | `ndf records mvv answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--version`（integer・任意）: 回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン） |
+| `ndf records mvv cite` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--gate`（string・必須・値 `design`・`release`）: 資料を返す承認ゲートの区分（design なら「目指す姿の根拠」のセクションと、決定ごとの根拠の行の有無も確かめる）<br>`--base`（string・必須）: ベースブランチ（取得して承認済みの MVV を読む）<br>`files`（array of string・必須・位置）: 確かめる承認資料 |
 | `ndf records mvv current` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ<br>`--allow-mismatch`（boolean・任意）: 本文が承認の記録と合わなくても止まらず、警告を付けて状態だけを返す |
 | `ndf records mvv gate` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--gate`（string・必須・値 `design`・`release`）: 承認ゲートの区分<br>`--machine`（string・任意）: ステートマシンの ID（プランの外で打つとき。環境変数 NDF_STAGE_INPUT の代わりに文脈から入力を組み、両方は渡せない）。NDF_STAGE_INPUT は工程の入力の規約 stage-in の平らな形で、外れれば invalid、キーが足りなければ input_missing で止まる<br>`--expect-pr`（integer・任意）: 承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに not_applicable で止まる |
 | `ndf records mvv signals` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ |

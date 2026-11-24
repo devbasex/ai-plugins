@@ -71,8 +71,9 @@ _CITED_VERSION = re.compile(r"（MVV バージョン ([0-9]+)(?:・スプリン�
 _ITEM_SEPARATOR = re.compile(r" / |・")
 # プロジェクト MVV の項目でないので突き合わせない項目（スプリント MVV の項目と、当たる項目が無いことの明記）
 _SPRINT_ITEM, _NO_ITEM = "スプリント", "根拠なし"
-# 根拠の記述の誤りの種類: 承認済みでないバージョン・そのバージョンに無い項目・バージョンを読めない
-CITATION_VERSION, CITATION_UNKNOWN, CITATION_FORMAT = "version", "unknown", "format"
+# 根拠の記述の誤りの種類: 承認済みでないバージョン・そのバージョンに無い項目・バージョンを読めない・承認資料の見出しから外れた
+# （`mvv.cite`。#3959）
+CITATION_VERSION, CITATION_UNKNOWN, CITATION_FORMAT, CITATION_HEADING = "version", "unknown", "format", "heading"
 
 
 class MvvError(ValueError):

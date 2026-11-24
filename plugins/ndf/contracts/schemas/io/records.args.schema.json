@@ -170,6 +170,46 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "mvv cite",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--gate": {
+          "type": "string",
+          "enum": [
+            "design",
+            "release"
+          ],
+          "description": "資料を返す承認ゲートの区分（design なら「目指す姿の根拠」のセクションと、決定ごとの根拠の行の有無も確かめる）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（取得して承認済みの MVV を読む）"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "確かめる承認資料",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "--gate",
+        "--base",
+        "files"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "mvv current",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
