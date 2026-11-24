@@ -44,8 +44,9 @@ GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
-# 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答）。テストはスタブへ差し替える
-Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
+# 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答。キーワード `before_retry` は打ち直しの起動の直前に呼ぶ
+# 確かめ。`llm.ask` と同じ）。テストはスタブへ差し替える
+Ask = Callable[..., llm.JudgeAnswer]
 # 判定するリポジトリ（root）と解いたリモート名から、GitHub の接続先を開く。テストは偽物へ差し替える
 OpenHub = Callable[[Path, str], GitHub]
 
@@ -55,7 +56,7 @@ class GateError(Exception):
 
 
 class _Moved(Exception):
-    """LLM を起動する直前に PR が動いていた・読み直せなかった。`outcome` は止まった結果（コメントを書かない）。"""
+    """LLM の打ち直しを起動する直前に PR が動いていた・読み直せなかった。`outcome` は止まった結果（コメントを書かない）。"""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         super().__init__(outcome["stopped_by"]["kind"])
@@ -170,17 +171,15 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     return f"{text}（診断の記録 {ident}）"
 
 
-def judge_with(ask: Ask, before: Optional[Callable[[], None]] = None) -> mvv.Judge:
+def judge_with(ask: Ask, before_retry: Optional[Callable[[], None]] = None) -> mvv.Judge:
     """`mvv.mvv_validate_sprint` へ渡す判定の関数。回答の判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。
 
-    `before` は LLM を起動する直前に呼ぶ確かめ（記録を再利用して LLM を呼ばないときは呼ばない）。例外で起動を止める。
+    `before_retry` は、回答が形に合わず `ask` が LLM を起動し直す直前に呼ぶ確かめ（`ask` へそのまま渡す）。例外で打ち直しを止める。
     """
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
-        if before is not None:
-            before()
-        got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT))
+        got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT), before_retry=before_retry)
         if not got.ok:
             raise GateError(f"MVV 判定の回答が無い: {got.cause}")
         return str(got.answer["verdict"]), {"usd": got.cost, **{k: got.answer[k] for k in md.VERDICT_DETAILS}}
@@ -227,7 +226,12 @@ class _Judging:
         return self.stopped("pr_moved", [self.text("pr_moved", moved)], noted=False)
 
     def still_current(self) -> None:
-        """手順 (7) の前: LLM を起動する直前に `moved` で確かめ、動いていれば `_Moved` で起動を止める。"""
+        """手順 (7): LLM の打ち直しを起動する直前に `moved` で確かめ、動いていれば `_Moved` で起動を止める。
+
+        1 回目の起動の前は確かめない。差分を読み終えてから 1 回目を起動するまでは数秒で、その間に PR が動くことはまれである。
+        確かめると LLM で判定するたびに PR の読み取りが 1 回増えるが、起動を省ける場面はほとんど無い。打ち直しは 1 回目の回答を
+        待った後なので PR が動いていることがあり、読み取りが増えるのも打ち直すときだけである（#3959）。
+        """
         stop = self.moved()
         if stop is not None:
             raise _Moved(stop)
@@ -306,10 +310,10 @@ def _judged(
         "変えたファイルと差分": mm.patch_material(rows),
     }
     asked = {"gate": gate_name, "question": mm.SYSTEM, "material": mm.prompt(mm.redlines(shared, project), materials)}
-    # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）。LLM を起動する直前に PR を照らし、
-    # 動いていれば起動しない（記録を再利用するときは LLM を起動しないので照らさない）
+    # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）。LLM の打ち直しを起動する直前に PR を
+    # 照らし、動いていれば打ち直さない
     try:
-        judge = judge_with(ask, before=j.still_current)
+        judge = judge_with(ask, before_retry=j.still_current)
         row, unrecorded = mvv.mvv_validate_sprint(root, asked, judge, reuse=held is not None, rows=held, broken=broken)
     except _Moved as stop:
         return stop.outcome

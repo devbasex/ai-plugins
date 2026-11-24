@@ -24,7 +24,9 @@ from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
+from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
+from ndf.progress.gate.checks import MvvFacts
 
 from ._mvv_gate_records import HOST
 from ._mvv_gate_records import failures as _failures
@@ -150,14 +152,23 @@ HEAD = "h" * 40
 
 
 class Ask:
-    """LLM のアダプターのスタブ。質問・材料・スキーマを残し、渡した回答を返す。"""
+    """LLM のアダプターのスタブ。質問・材料・スキーマを残し、渡した回答を返す。
 
-    def __init__(self, answer: Any, ok: bool = True) -> None:
-        self.answer, self.ok = answer, ok
+    `retry` なら、1 回目の回答が形に合わなかったものとして、打ち直しの前の確かめ `before_retry` を呼んでから回答する
+    （`launches` は起動した回数。確かめが例外を投げれば打ち直さない）。
+    """
+
+    def __init__(self, answer: Any, ok: bool = True, retry: bool = False) -> None:
+        self.answer, self.ok, self.retry = answer, ok, retry
         self.calls: list[tuple[str, str, dict]] = []
+        self.launches = 0
 
-    def __call__(self, question: str, material: str, schema: dict, timeout: float) -> llm.JudgeAnswer:
+    def __call__(self, question: str, material: str, schema: dict, timeout: float, before_retry: Any = None) -> llm.JudgeAnswer:
         self.calls.append((question, material, schema))
+        self.launches += 1
+        if self.retry and before_retry is not None:
+            before_retry()
+            self.launches += 1
         if not self.ok:
             return llm.JudgeAnswer(False, None, causes.cause("needs_human", "形が合わない"), 2, 0.2)
         assert not llm.check_answer(self.answer, schema)
@@ -302,22 +313,42 @@ MOVES = [
 ]
 
 
-@pytest.mark.parametrize(("change", "kind"), MOVES)
-def test_a_pr_that_moved_before_the_llm_does_not_start_it(repo: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
-    # 2 回目の読み取り（LLM を起動する直前）で head・マージ先・本文が変わった・読めない → LLM を起動せず、コメントも書かない
-    ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": [change]}), ask)
-    assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
-    assert ask.calls == [] and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+@pytest.fixture
+def no_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """PR の読み直しの分岐だけを確かめる判定の場所。ベースと差分の取得・リモート名・記録のキーをスタブにし、Git を起動しない。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    monkeypatch.setattr(git.Git, "remote", lambda self: "origin")
+    monkeypatch.setattr(mvv, "repo_key", lambda root: "o__r")
+    monkeypatch.setattr(mvv_gate, "pr_number", lambda root, gate, inputs, hub: 5)
+    facts = MvvFacts(md.State.APPROVED, SHA, SHA, SHA, "standard")
+    monkeypatch.setattr(mvv_gate, "_base_snapshot", lambda j, remote, inputs: (SimpleNamespace(commit="b" * 40), facts, BODY))
+    monkeypatch.setattr(mvv_gate, "_diff", lambda j, remote, snap: (DOCS["files"], None))
+    return tmp_path
+
+
+def test_an_unchanged_pr_is_read_once_more_only_before_the_note(no_git: Path, notes: list[tuple[int, str]]) -> None:
+    # LLM の 1 回目の起動の前には読み直さない。読み直しはコメントを書く直前の 1 回だけ
+    hub, ask = Hub(5, DOCS), Ask(FOLLOW)
+    out = mvv_gate.gate(no_git, "design", _inputs(), lambda root, remote: hub, ask)
+    assert (hub.reads, ask.launches, out["verdict"], [n for n, _ in notes]) == (2, 1, FOLLOW, [5])
 
 
 @pytest.mark.parametrize(("change", "kind"), MOVES)
-def test_a_pr_that_moves_while_the_llm_answers_is_not_noted(repo: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
-    # 3 回目の読み取り（コメントを書く直前）で変わった → 判定を捨ててコメントを書かない
-    ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": [{}, change]}), ask)
+def test_a_pr_that_moved_before_the_retry_does_not_relaunch(no_git: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
+    # 1 回目の回答が形に合わず打ち直す直前の読み直しで、head・マージ先・本文が変わった・読めない → 打ち直さず、コメントも書かない
+    ask = Ask(FOLLOW, retry=True)
+    out = mvv_gate.gate(no_git, "design", _inputs(), _hub(5, {**DOCS, "reads": [change]}), ask)
     assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
-    assert len(ask.calls) == 1 and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+    assert ask.launches == 1 and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+
+
+@pytest.mark.parametrize(("change", "kind"), MOVES)
+def test_a_pr_that_moves_while_the_llm_answers_is_not_noted(no_git: Path, change: Any, kind: str, notes: list[tuple[int, str]]) -> None:
+    # コメントを書く直前の読み直しで変わった → 判定を捨ててコメントを書かない
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(no_git, "design", _inputs(), _hub(5, {**DOCS, "reads": [change]}), ask)
+    assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
+    assert ask.launches == 1 and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
 
 
 @pytest.mark.parametrize("failure", [github.GitHubError("比較を読めない", 502), {"no_files": True}])

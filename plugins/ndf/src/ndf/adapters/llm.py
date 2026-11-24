@@ -100,12 +100,20 @@ def _head(reply: claude.ClaudeReply) -> str:
     return shown[:ANSWER_HEAD]
 
 
-def ask(question: str, material: str, schema: dict, timeout: float, call: Optional[Caller] = None) -> JudgeAnswer:
+def ask(
+    question: str,
+    material: str,
+    schema: dict,
+    timeout: float,
+    call: Optional[Caller] = None,
+    before_retry: Optional[Callable[[], None]] = None,
+) -> JudgeAnswer:
     """質問と材料を `claude -p --json-schema` で渡し、回答を確かめる。合わなければ 1 回だけ打ち直す。
 
     `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の回答の先頭を
     `detail` に持つ。claude が誤りで終えた・出力が JSON でないときは 1 回の外れと数える。起動できない・期限切れ・
-    利用上限はその回で止め、打ち直さない。
+    利用上限はその回で止め、打ち直さない。`before_retry` は打ち直しの起動の直前に呼ぶ（1 回目の回答を待つ間に材料が
+    古くなっていないかを呼び手が確かめる）。例外を投げれば打ち直さず、例外をそのまま外へ出す。
     """
     run = call if call is not None else claude.call_claude
     argv = claude.claude_args(claude.ClaudeCall(system=SYSTEM, permission=claude.Permission.JUDGE, json_schema=schema))
@@ -113,6 +121,8 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
     heads: list[str] = []
     cost = 0.0
     for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 回
+        if attempt > 1 and before_retry is not None:
+            before_retry()
         reply = run(argv, _prompt(question, material, errors), timeout)
         cost += reply.cost
         if reply.failure is not None:
