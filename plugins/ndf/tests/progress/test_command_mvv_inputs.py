@@ -61,7 +61,8 @@ def test_a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_resu
     assert "design_pr" not in stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
 
 
-def test_an_unknown_machine_is_refused(repo):
+def test_an_unknown_machine_is_refused(repo, st):
+    # 保存先と空の DB はある（st が用意する）が、その ID のステートマシンが無い
     with pytest.raises(model.Refused, match="無い"):
         stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
 
@@ -105,20 +106,27 @@ def test_a_context_without_an_input_key_is_missing_it(repo, capsys, last_result)
     assert caught.value.keys == ("worktree",)
 
 
-def test_a_missing_store_is_not_created_and_stops(repo):
+def _store_at(monkeypatch, tmp_path: Path) -> Path:
+    """保存先の位置をテストの一時ディレクトリに固定する（Git で解かない）。"""
+    root = tmp_path / "common" / "ndf" / "state"
+    monkeypatch.setattr(command, "store_root_of", lambda cwd: root)
+    return root
+
+
+def test_a_missing_store_is_not_created_and_stops(tmp_path, monkeypatch):
     # 判定の入力を読むだけの経路は、保存先を作らずに止まる
-    root = command.store_root_of(repo)
+    root = _store_at(monkeypatch, tmp_path)
     with pytest.raises(store.StoreNotReady):
-        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+        stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
     assert not root.exists()
 
 
-def test_a_legacy_store_is_neither_retired_nor_changed(repo):
+def test_a_legacy_store_is_neither_retired_nor_changed(tmp_path, monkeypatch):
     # 旧い形の保存先（format.json が無い）は退避せず、中身も変えずに止まる
-    root = command.store_root_of(repo)
+    root = _store_at(monkeypatch, tmp_path)
     root.mkdir(parents=True)
     (root / "old.txt").write_text("旧い保存先")
     before = sorted(p.name for p in root.parent.iterdir())
     with pytest.raises(store.StoreNotReady):
-        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+        stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
     assert sorted(p.name for p in root.parent.iterdir()) == before and sorted(p.name for p in root.iterdir()) == ["old.txt"]
