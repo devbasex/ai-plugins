@@ -16,6 +16,7 @@
 | --- | --- |
 | `plugins/ndf/contracts/workflow/stage-io.schema.json` | `$defs.stage-in` を文脈のスキーマへの参照（平らな object）にする |
 | `plugins/ndf/contracts/workflow/context.schema.json` | `$defs.mvv_gate` に任意のキー `holds`・`noted` |
+| `plugins/ndf/contracts/schemas/internal/mvv-validation.schema.json` | 種類 `mvv-review` の行に任意の欄 `defer`（`needs_user`・`filed`・`not_applicable`） |
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
 | `plugins/ndf/src/ndf/progress/stage_inputs.py`（新設） | `stage_inputs_of`（新設）。詳細設計書の保存先は `progress/command.py` だが、`command.py` は計画 p9 の lsplit のスプリントブランチで 971 行あり、足すと `ndf check` の構造の規則（1,000 行）を超えるので新しいモジュールに置く |
@@ -23,7 +24,7 @@
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節） |
 | `plugins/ndf/src/ndf/progress/gate/checks.py` | `MvvFacts.review_holds`・`check_review_holds`・`refusals`・`judgeable`・`may_skip`・`note`・`CHECKS_BY_GATE` |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `--machine`・`_mvv_inputs`・`_env_inputs`・`_mvv_cite` |
-| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`・`snapshot_facts`・`review_prs`・`GATE_STEPS`・`GATE_STAGES`。`base_facts` は消す |
+| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`・`snapshot_facts`・`review_prs`・`public_cause`・`GATE_STEPS`・`GATE_STAGES`。`base_facts` は消す |
 | `plugins/ndf/src/ndf/domains/records/mvv.py` | `validation_rows`・`review_rows`・`mvv_validate_sprint`・`ReviewWrite`・`record_review`・`cite`・`compare_files`。`cite` が呼ぶ `decision_lines`・`fenced_lines` は、#4076 の計画の U7 がこのモジュールに置く（判断のモジュールは `ndf.adapters` を読めないため。#4076 の計画の「修正対象」） |
 | `plugins/ndf/src/ndf/domains/records/mvv_decide.py` | `review_holds`（新設） |
 | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `gate_outcome`・`diff_rows`・`DiffError` |
@@ -73,15 +74,15 @@
 
 ### Task 5: レビューの保留を読み、記録の欠落で cross-review を止める
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`review_rows`・`ReviewWrite`・`record_review`）、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`（`check_review_holds`・`MvvFacts`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（保留の配線）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`（#4076 の計画の U12 が作る。この単位は書き足す）、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
-- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は、直っていないレッドラインと、見送りの区分が `needs_user`（または区分の無い）見送りだけを保留にし、伏せた記録（`withheld: true`。#4076 の計画の U12 が書く）の 3 つ目の規則を含む（設計の決定 2・11）。修正担当が見送るときに区分を書き（`drive.py` の結果の形・`review-criteria.json`）、ジャーナル（`journal.py`）が持ち、`record_review` が記録に書く。`record_review` の重ねない判定は、今の規則（比べる全項目と、伏せた記録の 2 つの規則）に `defer` の比較を足したもので、全項目は詳細設計書にある。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`review_rows`・`ReviewWrite`・`record_review`）、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`（`check_review_holds`・`MvvFacts`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（保留の配線）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/schemas/internal/mvv-validation.schema.json`（欄 `defer`）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`（#4076 の計画の U12 が作る。この単位は書き足す）、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
+- **変更内容:** 詳細設計書の「レビューの保留」。`review_holds` は、直っていないレッドラインと、見送りの区分が `needs_user`（または区分の無い）見送りだけを保留にし、伏せた記録（`withheld: true`。#4076 の計画の U12 が書く）の 3 つ目の規則を含む（設計の決定 2・11）。修正担当が見送るときに区分を書き（`drive.py` の結果の形・`review-criteria.json`）、ジャーナル（`journal.py`）が持ち、`record_review` が記録に書く。`record_review` の重ねない判定は、今の規則（比べる全項目と、伏せた記録の 2 つの規則）に `defer` の比較を足したもので、全項目は詳細設計書にある。今の `jsonl.append` は行を種類 `kind` の内部の規約（`mvv-validation.schema.json`。知らない欄を拒む）で確かめてから書くので、このタスクでスキーマに欄 `defer` を足す。足さないと `defer` を持つ行を書けず、通常の cross-review が `mvv_record_failed` で止まる。テストでは、`defer` を持つ `deferred` の行（通常の行と伏せた行）を実際のファイルへ `record_review` で追記し、`validation_rows` で読み戻して `defer` が残ることを確かめる（追記の関数をスタブにしない）。Task 4 の保留なしの経路に、`_judged` の手順 (5) の `review_prs` → `review_rows` → `review_holds` と記録を読めないときの保留 1 件、`MvvFacts.review_holds`・`check_review_holds` を足し、`holds` を読んだ結果の配列（無ければ `[]`）にする
 - **満たす受け入れ条件:** 4・5
 - **進め方:** 失敗するテスト（`fast` で保留があっても `skip: true`）→ 通す最小実装 → 整理
 
 ### Task 6: 承認資料の根拠の行を確かめるコマンド
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`cite`）、`plugins/ndf/src/ndf/domains/records/cli.py`（`_mvv_cite`）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`（新設）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`）、`plugins/ndf/tests/adapters/test_publish.py`
-- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`cite`）、`plugins/ndf/src/ndf/domains/records/cli.py`（`_mvv_cite`）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`（新設）
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。伏せる処理（`Publisher._private_refs`・`scrub`・`secret_spans`・`public_cause`）は Task 9 が作ったものを使い、このタスクでは変えない。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
 - **満たす受け入れ条件:** 7（承認資料の側。`decisions.md` の例は #4076 の実装が直す）
 - **進め方:** 失敗するテスト（バージョン 1 を引いた行で `refused` にならない）→ 通す最小実装 → 整理
 
@@ -99,21 +100,28 @@
 - **満たす受け入れ条件:** 3（プランの経路の承認資料）
 - **進め方:** 失敗するテスト（承認資料に「MVV 判定」の節が無い）→ 通す最小実装 → 整理
 
+### Task 9: 秘密と参照の伏せ方を直し、結果に入れる原因の文を伏せる関数を作る
+
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/run_log.py`（`secret_spans`。`redact` もそれで置き換える）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`・`scrub`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`public_cause`）、`plugins/ndf/tests/adapters/test_publish.py`、`plugins/ndf/tests/adapters/test_cli_run_log.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`（`public_cause`）
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」の「伏せ方」のうち `Publisher` と `scrub` の部分と、「判定を打つ条件と省く条件」の `public_cause`。秘密を含む参照を照会へ送らず、秘密の一致範囲と非公開の参照の一致範囲の和を原文の上で 1 回で置き換える。秘密が参照の境界をまたぐ場合と、`ssh://git@github.com/<所有者>/<リポジトリ>` の形の参照の両方を、同じタスクのテストで確かめる。`run_log.redact` だけを変えて `scrub` を変えない（またはその逆の）途中の状態を作らないため、`run_log.py` と `publish.py` を同じタスクで変える
+- **満たす受け入れ条件:** 3・7（PR のコメントと `cite` の結果に秘密の断片を残さない）
+- **進め方:** 失敗するテスト（秘密の前半が参照の中、後半が参照の外にある文で、`scrub` の結果に秘密の後半が残る）→ 通す最小実装 → 整理
+
 ## レビューの単位
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| 1 工程の入力とプランの外のエントリポイント | Task 1・2・3 | 3959:8・3959:9 | 約 400 | （実装の後に書き足す） |
+| 1 工程の入力とプランの外のエントリポイント、伏せ方 | Task 1・2・3・9 | 3959:3・3959:7・3959:8・3959:9 | 約 550（伏せ方の `run_log.py`・`publish.py`・`public_cause` を含む） | （実装の後に書き足す） |
 | 2 判定を打つ条件と省く条件 | Task 4 | 3959:1・3959:2・3959:3 | 約 850（比較の API の 300 件の経路と差分の固定を含む） | |
 | 3 レビューの保留と記録の欠落 | Task 5 | 3959:4・3959:5 | 約 750（見送りの区分を含む） | |
-| 4 根拠の行の確かめ | Task 6 | 3959:7 | 約 350（伏せる処理の `publish.py` を含む） | |
+| 4 根拠の行の確かめ | Task 6 | 3959:7 | 約 200 | |
 | 6 プランの承認資料 | Task 8 | 3959:3 | 約 250 | |
 | 5 手順書と用語集 | Task 7 | 3959:1・3959:3・3959:4・3959:7・3959:8 | 約 200 | |
 
 - 行数は追加と削除の和で、`git diff --shortstat <ベース>...HEAD` で数える。数えないパスは無い（ロックファイルと再生成のファイルを触らない。`docs/glossary.md` は再生成だが、数えても 1,000 行を超えない）
 - どの単位も `.ndf/` のファイルを触らない
 - 実行の順:
-  - 単位 1 を最初に流す（#4076 の部品を使わないので、#4076 の実装の前でも始められる。#4076 の計画の U3・U4 と `records/mvv_gate.py`・`records/cli.py`・`docs/contracts/commands.md` を共有するが、触る関数と項目は分かれ、後に入る PR が取り込みで解く）。
+  - 単位 1 を最初に流す（#4076 の部品を使わないので、#4076 の実装の前でも始められる。Task 9 の伏せ方と `public_cause` もこの単位に入れるので、それを使う単位 2（`_judged` の原因の文）と単位 4（`_mvv_cite` の伏せ方と `precondition` の要約）は、直した後の伏せ方の上に作る。#4076 の計画の U3・U4 と `records/mvv_gate.py`・`records/cli.py`・`docs/contracts/commands.md` を共有するが、触る関数と項目は分かれ、後に入る PR が取り込みで解く）。
   - 単位 2〜4 は #4076 の実装が main へ入った後に始める。
   - 単位 3 は単位 2 の後（`_judged` の配線と `checks.py` を単位 2 が変える。単位 2 は保留を読まない経路で単体で動き、単位 3 が保留の関数とフィールドを足して配線する。上の Task 4・Task 5 の範囲）。
   - 単位 4 は単位 1 の後（`records/cli.py` を単位 1 が変える）で、単位 2・3 と並列にしてよい（`mvv.py` は関数ごとに分かれ、衝突は取り込みで解ける）。
@@ -145,7 +153,7 @@
 | --- | --- |
 | #4076 の実装が #4090・#4099 の直しと違う形で入る | 単位 2 を始める前に、#4076 の部品のシグネチャを詳細設計書の前提と突き合わせ、違えば設計の該当の箇所を直してから進める |
 | 計画 p9 のレーン lz1-contract（#3684 #3667 #2339）が同じファイルを触る。U3 が `progress/model.py`（`MVV_PACES`）と `context.schema.json`（`pace` の分け方）、U7 が `stage-io.schema.json`・`context.schema.json`・`progress/command.py`・`progress/invoke.py`・`progress/gate/asking.py`、U5 が `records/mvv.py`（記録の読み書きに種類を渡す） | 単位 1・2・6 を始める前に、そのレーンの単位が main へ入ったかを確かめ、入っていれば取り込んでから始める。入っていなければ後に入る PR が base-sync で解く。重なりの一覧はこの計画を出した PR の本文にある |
-| lz1-contract の U5 が `mvv-validation.jsonl` の記録を種類ごとのスキーマ（`contracts/schemas/internal/mvv-validation.schema.json`）で確かめるようにする。単位 3 が足す見送りの区分（`defer`）と、#4076 の U12 が書く `withheld: true` の記録がスキーマに無いと書けずに落ちる | 単位 3 を始める前に lz1-contract の U5 が main へ入ったかを確かめ、入っていればスキーマに欄を足す（触るファイルが 1 つ増える） |
+| `mvv-validation.jsonl` の記録は、今の `jsonl.append` がすでに種類ごとのスキーマ（`contracts/schemas/internal/mvv-validation.schema.json`）で確かめている。単位 3 が足す見送りの区分（`defer`）がスキーマに無いと書けずに落ちる | Task 5 でスキーマに欄 `defer` を足し、実際のファイルへの追記と読み戻しをテストで確かめる（`withheld` の欄はスキーマに既にある） |
 | `progress/invoke.py` が lsplit と lz1-contract の U7 の変更の後に 1,000 行を超える | 単位 1 を始める前に `wc -l` で測り、Task 2 の変更で超えるなら `resolve_inputs` の入力の確かめを `progress/stage_inputs.py` へ移す |
 | 単位 2 の後・単位 3 の前の main では、`normal` でも判定を打つがレビューの保留を読まない | バージョンを上げるのは単位 1〜6 の後なので、利用者の手元には出ない（決定 7） |
 

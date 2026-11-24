@@ -151,8 +151,8 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 | E5 | LLM が判定した | E4 | LLM が回答しなければ `verdict: null` で人へ問う | E3 |
 | E6 | 承認ゲートを省くかを決めた | E5 | 省かないときは、外れた理由を `why` に載せて人へ問う（受け入れ条件 1・2・4） | E4・E5 |
 | E7 | 判定を PR のコメントに書いた | E6 | 書けなくても判定は捨てず、承認ゲートを省かずに人へ問う（扱いは設計の異常系の表） | E6 |
-| E8 | 承認資料の根拠の行（MVV のバージョンと番号）を確かめた | 承認資料を出す担当が、出す前に確かめのコマンドを打った | バージョンか番号が外れれば `refused` で止め、資料を出さない（受け入れ条件 7） | E6 |
-| E9 | 承認資料を人へ出した | E8 | 出し方はこの Issue で変えない | E8 |
+| E8 | 設計文書の根拠の行を写した承認資料で、根拠の行（MVV のバージョンと番号）を確かめた | supervisor が手で組んだ承認資料（設計文書の根拠の行を写す資料）を、出す前に確かめのコマンドで確かめた。プランが自動で組む承認資料は根拠の行を写さないので、確かめない | バージョンか番号が外れれば `refused` で止め、資料を出さない（受け入れ条件 7） | E6 |
+| E9 | 承認資料を人へ出した | supervisor が組んだ資料は E8 の後。プランが組む資料は E6 の後 | 出し方はこの Issue で変えない | supervisor が組んだ資料は E8、プランが組む資料は E6 |
 
 ## 検証手段
 
@@ -223,14 +223,14 @@ MVV（プロジェクトの目指す姿を書いた `.ndf/mvv.md`。Mission・Vi
 - 人の承認との関係: ゲートで人が承認しても記録を書き換えず、承認を表す行も作らない。その PR を対象にする後の設計承認ゲート（同じゲートの打ち直し）は、レッドラインの後に同じキーの `fixed` が記録されるか、見送りが解消されるまで同じ保留を返し、`fast`・`auto` でも人に問う（余分な人の承認は許す）。リリース承認ゲートは #4105 まで保留を読まないが、省かないので人が答える。保留はその PR を対象にするゲートにだけ掛かる
 - 「最後」の決め方: キーごとの行の順は `at` の古い順で、`at` が同じ（`jsonl.now()` は秒精度）ときは `mvv-validation.jsonl` の追記順に従う。`record_review` の重ねない判定もこの順の最後の行を使う
 - 記録の欠落: `record_review` が `redline`・`deferred` の行（承認ゲートの判定に要る行）を書けなかったら、その起動は収束にせず止める（`STOPPED`・`cause.kind: mvv_record_failed`）。`fixed`・`unresolved` の行だけが書けなかったときは注意に留める
-- 呼ぶ順序と最終の判定: `_summary` は要約を書いた後に、終わり方を判定した head で `record_review` を呼び、承認ゲートの判定に要る行を書けなかったら `Outcome.mvv_record_failed` に書けなかった行と原因を入れる（判定は作らない）。`cli.cmd_run` は今の `fin.finish(got.review, cfg.handed)` を `fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed)` に変え、この 1 回の呼び出しの `Verdict` だけを最終の判定にする（`_summary` の中で判定を作って CLI が作り直す二重の経路を作らない）。`finish` は `handed` を含む普段の判定を終えた後に、`record_failed` があれば status を `STOPPED`・kind を `mvv_record_failed` にし、本来の kind と要約を `summary` の後ろに足し、`gaps`・`decisions` はそのまま、`warnings` に原因を足す（`mvv_unresolved` を含むどの終わり方より優先する。記録が無いとゲートが PR を省けるため）。この `Verdict` を今の `_emit_verdict` が結果 JSON と終了コードにする。`ndf cross-review finish`（記録を書かない）は `record_failed` を渡さない。保存先を直して打ち直すと、`record_review` が欠けた行だけを書き、書ければ `finish` の普段の判定（`mvv_unresolved` なら `STOPPED`、欠け無しなら収束）がそのまま終わり方になる
+- 呼ぶ順序と最終の判定: `_summary` は要約を書いた後に、終わり方を判定した head で `record_review` を呼び、承認ゲートの判定に要る行を書けなかったら `Outcome.mvv_record_failed` に書けなかった行と原因の固定の文を入れる（判定は作らない）。原因の固定の文は、今の `_record_mvv` の注意 `RECORDS_UNWRITTEN` と同じく「MVV の記録を書けない。原因は状態ファイルの `mvv_record_error` にある」の形で、例外の原文を含めない。例外の原文（保存先の絶対パスやリモートの認証情報を含みうる）は、今どおり手元の状態ファイルの `mvv_record_error` だけに残す。`cli.cmd_run` は今の `fin.finish(got.review, cfg.handed)` を `fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed)` に変え、この 1 回の呼び出しの `Verdict` だけを最終の判定にする（`_summary` の中で判定を作って CLI が作り直す二重の経路を作らない）。`finish` は `handed` を含む普段の判定を終えた後に、`record_failed` があれば status を `STOPPED`・kind を `mvv_record_failed` にし、本来の kind と要約を `summary` の後ろに足し、`gaps`・`decisions` はそのまま、`warnings` に原因の固定の文を足す（`mvv_unresolved` を含むどの終わり方より優先する。記録が無いとゲートが PR を省けるため）。この `Verdict` を今の `_emit_verdict` が結果 JSON と終了コードにする。`ndf cross-review finish`（記録を書かない）は `record_failed` を渡さない。保存先を直して打ち直すと、`record_review` が欠けた行だけを書き、書ければ `finish` の普段の判定（`mvv_unresolved` なら `STOPPED`、欠け無しなら収束）がそのまま終わり方になる
 - 承認ゲートでの使い方（`mvv_gate._judged`）: 設計承認ゲートは設計 PR の番号を `prs` に、ゲートが判定に使う MVV の（`mvv_version`・`sha256`）を `mvv` にして、`review_rows` の行と読めなかった行の数で `review_holds` を呼び、`MvvFacts.review_holds` に入れる。`review_rows` が `OSError` を投げたら `review_holds` を呼ばず、`MvvFacts.review_holds` を「MVV の記録（mvv-validation.jsonl）を読めない: <原因>」の 1 件にする（読めない記録を「該当なし」と扱わない）。`refusals` の検査の並びに `check_review_holds` を足し、理由があれば `may_skip` は偽になって `service:mvv` の承認を書かない（`progress/run.py` の `_consume` は今のまま人の回答を待ち、理由は承認依頼の「MVV 判定」の行に載る）。リリース承認ゲートは #4105 まで `review_holds` を呼ばない（読む PR は空）。保留の検査そのものは LLM を呼ばない。ただし検査が外れた PR にも LLM の判定を 1 回打つ（設計の決定 1）ので、`fast`・`auto` で検査が外れた PR では、今は打たない判定の費用がかかる
 
 ### 異常系
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `record_review` | `redline`・`deferred` の行を書けない | 保存先の権限 | `OSError` | 収束にせず止める（承認ゲートが記録の無い PR を省けるため） | 終了コード `STOPPED`・`cause.kind: mvv_record_failed`、`warnings` に原因 | 保存先を直して `ndf cross-review run` を打ち直す（終わりにまた書く。重ねない） |
+| `record_review` | `redline`・`deferred` の行を書けない | 保存先の権限 | `OSError` | 収束にせず止める（承認ゲートが記録の無い PR を省けるため） | 終了コード `STOPPED`・`cause.kind: mvv_record_failed`、`warnings` に原因の固定の文（例外の原文は手元の状態ファイルだけ） | 保存先を直して `ndf cross-review run` を打ち直す（終わりにまた書く。重ねない） |
 | `review_rows` | `mvv-validation.jsonl` を読めない | 権限・容量・壊れた符号 | `OSError`（`mvv_gate._judged` が受ける） | 「該当なし」にせず、読めない理由を `MvvFacts.review_holds` の 1 件にする | ゲートが省かれず、承認依頼の「MVV 判定」の行に理由 | 原因を直せば次のゲートの判定で読み直す |
 | `review_holds` | 読めない行がある | 書き込みの途中の中断・手で壊した | `jsonl.read_rows` の読めなかった行の数 | どの repo・PR の行か分からないので、その数を保留の 1 件にする | 同上（「mvv-validation.jsonl に読めない行が N 件ある」） | 壊れた行を直すか消せば次のゲートの判定で外れる |
 
