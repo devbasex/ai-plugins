@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Callable, Optional
@@ -357,9 +358,10 @@ def test_issue_3955_old_or_unknown_claude_refuses_only_the_seat(wt: Path, tmp_pa
 
 
 class _Denied(Fake):
-    """席の claude の出力の外側の JSON に、`target`（リクエストで渡した差分のファイルのパスを受け取る）の Read の拒否を足す偽物。"""
+    """席の claude の出力の外側の JSON に Read の拒否を足す偽物。`target` はリクエストで渡した差分のファイルのパスと claude の
+    作業ディレクトリから、拒否された引数のパスを作る。"""
 
-    def __init__(self, state_dir: Path, script: dict, target: Callable[[str], str]):
+    def __init__(self, state_dir: Path, script: dict, target: Callable[[str, Path], str]):
         super().__init__(state_dir, script)
         self.target = target
 
@@ -370,20 +372,24 @@ class _Denied(Fake):
             assert found is not None
             body = json.loads(spec.paths.out.read_text(encoding="utf-8"))
             body["permission_denials"] = [
-                {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": self.target(found.group(1))}}
+                {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": self.target(found.group(1), spec.cwd)}}
             ]
             spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         return status
 
 
-def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 4461 の r1-1: 埋めた claude が渡した差分のファイルの Read を拒否されたら、`{"findings": []}` で完了しても結果が無い席と
-    数え、収束にせず incomplete_reviewers で止まる。拒否が差分のファイルでなければ回答として扱う。"""
+@pytest.mark.parametrize("target", [lambda diff, cwd: diff, lambda diff, cwd: os.path.relpath(diff, cwd)])
+def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path: Path, capsys, monkeypatch, target) -> None:
+    """PR 4461 の r1-1・r2-1・r2-3: 埋めた claude が渡した差分のファイルの Read を拒否されたら（引数が作業ディレクトリからの相対パスでも）、
+    `{"findings": []}` で完了しても結果が無い席と数え、収束にせず incomplete_reviewers で止まる。PR に載る注意には差分のファイルの
+    名前だけを書き、絶対パスは過程にだけ残す。拒否が差分のファイルでなければ回答として扱う。"""
     script = {"codex": [[]], "kiro": [FAIL, FAIL], "claude": [[]]}
-    fake = _Denied(tmp_path / "st", script, lambda diff: diff)
+    fake = _Denied(tmp_path / "st", script, target)
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert fin.INCOMPLETE_REVIEWERS in got["summary"] and fake.seat_calls == ["claude"]
-    assert any("相手役 claude が差分を読めなかった" in w and drive.DENIED_READ in w for w in got["warnings"])
-    other = _Denied(tmp_path / "st2", script, lambda diff: "/etc/passwd")
+    assert any("相手役 claude が差分を読めなかった" in w and f"{drive.DENIED_READ}: round1-full.diff" in w for w in got["warnings"])
+    assert fake.input_dir is not None and not any(str(fake.input_dir) in w for w in got["warnings"])
+    assert any(str(fake.input_dir / "round1.diff") in p["result"] for p in got["process"])
+    other = _Denied(tmp_path / "st2", script, lambda diff, cwd: "/etc/passwd")
     code, got = _run(capsys, monkeypatch, other, wt)
     assert (code, got["status"]) == (0, "ok")

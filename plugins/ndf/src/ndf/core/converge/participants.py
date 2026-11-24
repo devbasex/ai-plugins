@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -229,43 +229,56 @@ def read_only_launch(
     return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), limit)
 
 
-def answer_text(runtime: str, out: Path) -> str:
-    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは出力の末尾。"""
-    if runtime != FIXER:
-        return agents.tail(out)
+class ClaudeAnswer(NamedTuple):
+    """claude の `--output-format json` の出力を 1 回読んだもの。`text` は結果を探す本文（外側の JSON の `result`。外側が JSON で
+    なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。"""
+
+    text: str
+    denials: tuple[dict[str, Any], ...]
+
+
+def claude_answer(out: Path) -> ClaudeAnswer:
+    """claude の出力を 1 回だけ読み、本文と拒否を取り出す（読めなければ `OSError`）。"""
     raw = out.read_text(encoding="utf-8", errors="replace")
     try:
         payload = json.loads(raw)
     except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
-        return raw
-    body = payload.get("result") if isinstance(payload, dict) else None
-    return body if isinstance(body, str) else raw
+        return ClaudeAnswer(raw, ())
+    if not isinstance(payload, dict):
+        return ClaudeAnswer(raw, ())
+    body = payload.get("result")
+    denials = payload.get("permission_denials")
+    found = tuple(d for d in denials if isinstance(d, dict)) if isinstance(denials, list) else ()
+    return ClaudeAnswer(body if isinstance(body, str) else raw, found)
 
 
-def denied_reads(out: Path, required: Sequence[Path]) -> tuple[str, ...]:
-    """claude の出力の外側の JSON の `permission_denials` のうち、`required` のファイル（か、それを含むディレクトリ）を読む
-    `READ_TOOLS` の呼び出しが拒否されたもののパス。拒否が無い・外側が JSON でなければ空（PR 4461 の r1-1）。"""
-    try:
-        payload = json.loads(out.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 出力の無い・途中で切れた claude は拒否を確かめられない（呼び手が回答の有無で扱う）
-        return ()
-    denials = payload.get("permission_denials") if isinstance(payload, dict) else None
-    if not isinstance(denials, list):
-        return ()
-    wanted = [Path(os.path.abspath(p)) for p in required]
-    tools = READ_TOOLS.split(",")
-    found: list[str] = []
+def answer_text(runtime: str, out: Path) -> str:
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは出力の末尾。"""
+    if runtime != FIXER:
+        return agents.tail(out)
+    return claude_answer(out).text
+
+
+# `READ_TOOLS` の Tool ごとの、読む場所を指す引数の名前（相対パスは claude の作業ディレクトリから解決される）
+READ_PATH_ARGS = {"Read": ("file_path",), "Grep": ("path",), "Glob": ("path",)}
+
+
+def denied_reads(denials: Sequence[Mapping[str, Any]], required: Sequence[Path], workdir: Path) -> tuple[Path, ...]:
+    """`denials`（`ClaudeAnswer.denials`）のうち、`READ_TOOLS` で `required` のファイル（か、それを含むディレクトリ）を読む
+    呼び出しが拒否された `required` のファイル。引数のパスは claude の作業ディレクトリ `workdir` から解決する（PR 4461 の r1-1・r2-3）。"""
+    wanted = [Path(os.path.normpath(os.path.abspath(p))) for p in required]
+    hit: set[Path] = set()
     for d in denials:
-        if not isinstance(d, dict) or d.get("tool_name") not in tools or not isinstance(d.get("tool_input"), dict):
+        names = READ_PATH_ARGS.get(str(d.get("tool_name")), ())
+        args = d.get("tool_input")
+        if not isinstance(args, dict):
             continue
-        for value in d["tool_input"].values():
-            if isinstance(value, str) and value and any(_covers(Path(os.path.abspath(value)), w) for w in wanted):
-                found.append(value)
-    return tuple(dict.fromkeys(found))
-
-
-def _covers(denied: Path, wanted: Path) -> bool:
-    return denied == wanted or denied in wanted.parents
+        for name in names:
+            value = args.get(name)
+            if isinstance(value, str) and value:
+                denied = Path(os.path.normpath(Path(workdir, value)))
+                hit |= {w for w in wanted if denied == w or denied in w.parents}
+    return tuple(w for w in wanted if w in hit)
 
 
 def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:

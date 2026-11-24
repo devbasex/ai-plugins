@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,24 @@ def test_issue_3955_answer_text_is_the_outer_result_for_claude(tmp_path: Path) -
     out.write_text("切れた {", encoding="utf-8")
     assert participants.answer_text("claude", out) == "切れた {"
     assert participants.answer_text("codex", out) == "切れた {"
+
+
+def test_pr_4461_denied_reads_resolves_tool_paths_from_the_claude_workdir(tmp_path: Path) -> None:
+    """PR 4461 の r2-3・r2-4: 1 回読んだ出力から本文と拒否を取り出し、Tool ごとのパスの引数だけを claude の作業ディレクトリから解決する。"""
+    work, inputs = tmp_path / "wt", tmp_path / "in"
+    diff, since = inputs / "round2.diff", inputs / "round2-since.diff"
+    denials = [
+        {"tool_name": "Read", "tool_input": {"file_path": "../in/round2.diff"}},
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "other")}},
+        {"tool_name": "Grep", "tool_input": {"pattern": str(since), "path": "src"}},
+    ]
+    out = tmp_path / "o"
+    out.write_text(json.dumps({"result": "本文", "permission_denials": [*denials, "壊れた要素"]}), encoding="utf-8")
+    answer = participants.claude_answer(out)
+    assert answer.text == "本文" and list(answer.denials) == denials
+    assert participants.denied_reads(answer.denials, (diff, since), work) == (diff,)
+    glob = [{"tool_name": "Glob", "tool_input": {"path": str(inputs)}}]
+    assert participants.denied_reads(glob, (diff, since), work) == (diff, since)
 
 
 @pytest.mark.parametrize(
