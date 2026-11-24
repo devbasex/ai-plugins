@@ -11,7 +11,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -239,10 +239,10 @@ class Git:
             raise _failed(args, done.returncode, done.stderr)
         return done.stdout
 
-    def run_bytes(self, *args: str, stdin: Optional[bytes] = None) -> bytes:
-        """git を起動して標準出力を元のバイト列のまま返す（改行を変えない）。終了コードが 0 でなければ `GitError`。"""
+    def run_bytes(self, *args: str, stdin: Optional[bytes] = None, codes: Sequence[int] = (0,)) -> bytes:
+        """git を起動して標準出力を元のバイト列のまま返す（改行を変えない）。終了コードが `codes` に無ければ `GitError`。"""
         done = _start(list(args), self.cwd, text=False, stdin=stdin, env=self.env)
-        if done.returncode != 0:
+        if done.returncode not in codes:
             raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
