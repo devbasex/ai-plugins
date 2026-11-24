@@ -452,14 +452,14 @@ sequenceDiagram
 | 結果の有無の定義 | 相手役が終了コード 0 で終わっても出力に `findings` 配列が無いと、その席を結果が無いとして扱い（起動し直し・埋める）、`{"findings": []}` を返した席は成功として埋めない | 起動の失敗だけを結果が無いとして扱う・空の指摘を失敗と数えると落ちる |
 | 埋めた claude の差分（4 の続き） | round 1 で codex と kiro が両方結果を返し、round 2 で初めて kiro が起動し直しても結果を返さないと、round 2 の codex には前の head からの差分が、埋めた claude には `--base` からの全差分が渡る。round 2 の記録の `reviewers` が `codex`・`claude` で、round 3 は両者に round 2 の head からの差分が渡る | 埋めた claude にそのラウンドの差分をそのまま渡す・埋める前の席を記録すると落ちる |
 | 起動し直しの回数（決定 4） | (a) `allowed` が claude だけで `claude-2` が結果を返さないと、`claude-2` を起動し直さずに `incomplete_reviewers` で止まり、claude の起動はラウンドで席ごとに 1 回である。(b) round 1 で kiro の席を埋め、round 2 で座り続けた claude が結果を返さないと、起動し直さずに `incomplete_reviewers` で止まる | claude の席にも起動し直しを当てると落ちる |
-| 始める前の確かめ | (a)〜(d) と (f) は、駆動から呼ぶ `participants.refusals` を差し替え、断るランタイムをキー、理由を値とする対応を返させる。(e) は、ランタイムごとに確かめた回数を数えるため、`refusals` の中で呼ぶ `training.ensure` を差し替える。(a) kiro だけを断ると、kiro を起動せずに席が `codex`・`claude` になり、`filled` の `reason` が `unready: ` で始まる、(b) codex と kiro を両方断ると、席が `claude`・`claude-2` になる、(c) 修正担当の claude を断ると、どの担当も起動せずに `precondition` で止まる、(d) `--reviewer kiro` で kiro を断ると、埋めずに `precondition` で止まる、(e) `allowed` が claude だけで席が `claude`・`claude-2` のとき、学習の設定の確かめは claude について 1 回だけ呼ばれる、(f) 最後のラウンドが同じ head で収束しているとき、kiro を断る設定でも学習の設定を確かめずに前回の結果（`converged`）を返す | 断られた相手役を起動する・断られた席を埋めずに止める・修正担当を断られても進む・同じランタイムを 2 回確かめる・再利用の判定より先に確かめると落ちる |
+| 始める前の確かめ（受け入れ条件 15） | (a)〜(d) と (f) は、駆動から呼ぶ `participants.refusals` を差し替え、断るランタイムをキー、理由を値とする対応を返させる。(e) は、ランタイムごとに確かめた回数を数えるため、`refusals` の中で呼ぶ `training.ensure` を差し替える。(a) kiro だけを断ると、kiro を起動せずに席が `codex`・`claude` になり、`filled` の `reason` が `unready: ` で始まる、(b) codex と kiro を両方断ると、席が `claude`・`claude-2` になる、(c) 修正担当の claude を断ると、どの担当も起動せずに `precondition` で止まる、(d) `--reviewer kiro` で kiro を断ると、埋めずに `precondition` で止まる、(e) `allowed` が claude だけで席が `claude`・`claude-2` のとき、学習の設定の確かめは claude について 1 回だけ呼ばれる、(f) 最後のラウンドが同じ head で収束しているとき、kiro を断る設定でも学習の設定を確かめずに前回の結果（`converged`）を返す | 断られた相手役を起動する・断られた席を埋めずに止める・修正担当を断られても進む・同じランタイムを 2 回確かめる・再利用の判定より先に確かめると落ちる |
 | `refusals` | 断られたランタイムだけが理由と組で返り、`unready` は同じ入力で今と同じ理由の並びを返す | 返り値に断られなかったランタイムを含める・`unready` の返り値を変えると落ちる |
 | 埋めた claude の差分と記録の範囲 | 「埋めた claude の差分」の実行で、round 2 の記録の `scope` が前の head からの差分のままで、詳細にレビューした節（`store.REVIEWED`）が round 2 で増えない | 埋めた claude のためにラウンドの範囲を全差分へ差し替えると落ちる |
 | 分岐の順の 0 行目 | codex と kiro が両方結果を返すと、埋める処理を呼ばず、claude を相手役として起動しない（9 と同じ実行で縛る） | 結果の無い席が 0 のときに 3 行目へ進むと落ちる |
 | 12 | `--reviewer codex` で codex が読めないと、claude を起動せずに `precondition` で止まり、codex が読めれば 1 者で判定する | 名指し 1 者でも埋めると落ちる |
 | 13 | cross-refactoring の相手役の選び方（`assign` の既定・名指し・`allowed`）と、読むだけの claude の起動の引数と本文の取り出しが今と同じ | `assign` の振る舞いを変える・移した関数の引数を変えると既存の cross-refactoring のテストが落ちる |
-| 14 | 手順書の相手役の説明と終わり方の表を、1〜12 の振る舞いに合わせて書き直す（`.md` の文言を照合するテストは書かない。cross-review の設計 PR のレビューと、実装の PR のレビューで確かめる） | — |
-| I1 | 1〜12 のどの経路でも、名指し 1 者を除いて、判定に使ったラウンドの記録の `reviewers` が 2 つ以上ある | 1 つの席で判定へ進むと 1・5・11 のどれかが落ちる |
+| 14 | 手順書の相手役の説明と終わり方の表を、1〜12 と 15 の振る舞いに合わせて書き直す（`.md` の文言を照合するテストは書かない。cross-review の設計 PR のレビューと、実装の PR のレビューで確かめる） | — |
+| I1 | 1〜12 と 15 のどの経路でも、名指し 1 者を除いて、判定に使ったラウンドの記録の `reviewers` が 2 つ以上ある | 1 つの席で判定へ進むと 1・5・11 のどれかが落ちる |
 
 ## 設計の結果
 

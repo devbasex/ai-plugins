@@ -162,7 +162,7 @@ NDF 11.0.13・Claude Code・Linux（2026-11-21）。相手役の選び方は NDF
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf -q -n 4`（相手役の起動を偽物にしたテストで、受け入れ条件 1〜13 を確かめる） |
+| テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf -q -n 4`（相手役の起動を偽物にしたテストで、受け入れ条件 1〜13 と 15 を確かめる。15 は設計のテスト設計の「始める前の確かめ」の行） |
 | 静的解析・型検査 | `ndf check`（CI と同じ検査） |
 | 手動確認 | リリース後、kiro が未ログインの環境で実際の PR に cross-review を回し、codex と claude の 2 者でレビューされ、記録のコメントに kiro の席を claude で埋めたことが載るのを見る（リリース後テスト） |
 
