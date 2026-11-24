@@ -101,7 +101,8 @@ graph LR
 | --- | --- |
 | `ndf document-rebuild gate`（新設のサブコマンド） | 承認ゲートの 1 つ前に打つ。PR の head を固定し、決まった形の質問を作り、読ませるものを決め、読み手役の worker を `ndf worker run` で起動する。worker が直した承認資料・PR の題・文書を PR へ反映し、push したときは CI を待つ。結果を 2 つの記録へ書き、最後に確認の完了を記録する |
 | 読み手役の worker の起動指示（`contracts/worker/document-rebuild-gate.md`。新設） | 承認資料・質問の文・文書の変わった部分を読み手役に読ませる。不合格なら、承認資料のファイル・PR の題の案・文書を直して 2 回目を読ませる。直してよいのは、gate のサブコマンドが起動の前に決めたファイルだけである。直した後に、事実が変わっていないことを差分で確かめる。読み手役の起動の許可は組み直しの worker と同じ例外に置く |
-| 承認の質問の組み立て（`ndf.domains.records.reading` に足す） | ゲートの種類（`design`・`release`）・PR の番号・PR の題から、`AskUserQuestion` に渡す `questions` を決まった形で作る。PR の無いリリース承認の形も持つ |
+| 承認の質問の組み立て（`ndf.domains.records.reading` に足す） | ゲートの種類（`design`・`release`）・PR の番号・PR の題から、`AskUserQuestion` に渡す `questions` を決まった形で作る。PR の無いリリース承認の形も持つ。リリースの質問の操作は、リリースの形の表の列 `approve` から入れる |
+| リリースの形の表（`contracts/domains/release-forms.json`。変更） | 列 `approve`（承認の質問で問う操作）を足す |
 | `ndf records reading check`（変更） | 引数 `--gate <種類>` と PR の番号を受けたときは、PR を 1 回だけ取得し、その題で質問を作り直してファイルへ書き、同じ取得の head と本文で照合する。今の照合に、承認資料の照合を足す。完了した確認の記録の承認資料の SHA-256 と、今の PR の本文か渡された承認資料のファイルの SHA-256 が違えば、足りないもの `material_changed` を返す |
 | 読ませたものの記録（`reading-docs.jsonl`。新設） | 読み手役に読ませたもの（文書・承認資料・質問の文）ごとに、確認の id・中身のハッシュ・立場・回・合否を追記で持つ。確認を終えたら、完了の行を 1 行足す。保存先は `reading-checks.jsonl` と同じ |
 | 承認資料の写し（`reading-materials/<ゲート>-<PR の番号>.md`。新設） | 最後に完了した確認で読ませた承認資料の中身を、PR ごとに 1 版だけ残す。次に承認資料が変わったときに、差分を作る元と、前に残った文を引き継ぐ元にする |
@@ -202,10 +203,22 @@ PR の要否は、引数と工程の入力だけで決まり、リポジトリ�
 | ゲート | 質問の文 | 選択肢 |
 | --- | --- | --- |
 | `design` | `設計 Pull Request #<番号>（<題>）をマージしてよいですか` | `承認する`・`変更を求める` |
-| `release`（PR あり） | `リリースの Pull Request #<番号>（<題>）を本番へ出してよいですか` | `承認する`・`変更を求める` |
-| `release`（PR なし） | `示した承認資料のとおりに、本番へ出してよいですか` | `承認する`・`変更を求める` |
+| `release`（PR あり） | `リリースの Pull Request #<番号>（<題>）を承認し、<承認する操作>してよいですか` | `承認する`・`変更を求める` |
+| `release`（PR なし） | `承認資料のとおり、<承認する操作>してよいですか` | `承認する`・`変更を求める` |
 
 選択肢の説明の文も決まった形で持つ。
+
+**リリースの質問は、承認すると実行される操作をリリースの形から書く。** 「本番へ出す」とまとめて書くと、ストアへの提出を承認する人は、審査への提出と利用者への公開のどちらを許すのかを質問から判断できない。そこで、リリースの形の表（`plugins/ndf/contracts/domains/release-forms.json`）に列 `approve`（承認の質問で問う操作）を足し、`<承認する操作>` にその値を入れる。形は、プロジェクトの宣言（`.ndf/project.json` の `branch_strategy.release.form`）から読む。`gate` と `check` は同じ宣言と同じ表から質問を作るので、質問のキーは一致する。
+
+| リリースの形 | `approve` の値（質問の文の例） |
+| --- | --- |
+| `mobile` | `アプリをストアの審査に提出`（承認資料のとおり、アプリをストアの審査に提出してよいですか） |
+| `service` | `本番ブランチへマージして環境へ反映` |
+| `package-plugin` | `タグと GitHub Release を作って公開` |
+| `procedure` | `設定の手順で配布` |
+| `document` | `置き先のシステムへ提出` |
+
+形の宣言が無いか、表の行が扱わない形（`supported` が偽）なら、`gate` と `check` は質問を作らずに `stopped`（`precondition`）で終える。`release-steps` もこの形では止まるので、質問を出す場面は無い。
 
 **`metadata.source` は質問のキーに入らないので、問う側が付ける。** Claude Code では、設計承認の質問に `ndf-gate:1`、リリース承認の質問に `ndf-gate:2` を付ける。hook はこの値で承認の質問を識別し、記録の PR の head を照合する。付けないと、hook は区分の無い質問として照合せずに通す。`ndf-ask:` は承認ゲートの外の判断の質問を識別する印で、ここでは使わない。
 
@@ -401,7 +414,7 @@ sequenceDiagram
 ## 影響と危険
 
 - **働く範囲**: 利用先のリポジトリでも働く。設計のステージとデプロイのステージを流すすべてのリポジトリで、承認ゲートの前に読み手役のステップが走る
-- **プロジェクトごとに違うもの**: 無し。読み手の立場は文書の種類で決まり、設定を足さない。PR の要否は引数と工程の入力で決まる。組み直しのコマンドの設定（`workflow.launch.rebuild`）は `gate` に使わない
+- **プロジェクトごとに違うもの**: リリースの質問で問う操作だけである。宣言 `branch_strategy.release.form` の値で、リリースの形の表の行を引いて決める（「承認の質問の決まった形」）。読み手の立場は文書の種類で決まり、設定を足さない。PR の要否は引数と工程の入力で決まる。組み直しのコマンドの設定（`workflow.launch.rebuild`）は `gate` に使わない
 - **当たるモード**: `standard`・`legacy-refactor`・`documentation`（設計承認ゲートを持つモード）と、リリース承認ゲートを通るすべてのモード
 - **リリースをまたぐスプリント**: 承認を問う側は、手順を版で選ばず、待っている承認ゲートの状態で選ぶ。同じ工程の中に、そのゲートの前の読み手役のステップの済んだ結果があれば、記録した質問を出す。無ければ（新しい版を入れる前に工程の定義を読み込んだスプリントや、既に承認ゲートで待っているスプリント）、問う側が `ndf document-rebuild gate --gate <種類> --pr <番号>` を 1 回打ち、「承認を問う側の手順」の 1 から問う。どちらでも読み手役を起動するのは gate のサブコマンドだけで、問う側が読み手役を直接起動する手順は残さない
 - **同じファイルを触る別の変更**: #4337 の実装（`docrebuild/drive.py`・`contracts/worker/document-rebuild.md`）と重なる。#4337 がマージされた後の形の上に足す
@@ -412,7 +425,7 @@ sequenceDiagram
 | 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |
 | --- | --- | --- | --- |
 | Web サービス | 設計のステージとデプロイのステージを流し、リリースは本番ブランチへの PR | 設計承認ゲートとリリース承認ゲートの前に読み手役のステップが走り、問う側は記録した質問を出す | 無し |
-| モバイルアプリ | リリースはストアへの提出を届け先に持つ | リリースの承認資料（`materials` の出力）と質問の文が、提出の承認の前に読まれる。PR を伴わない提出の承認は、PR の無い質問の形で記録する | 無し |
+| モバイルアプリ | リリースはストアへの提出を届け先に持つ | リリースの承認資料（`materials` の出力）と質問の文が、提出の承認の前に読まれる。PR を伴わない提出の承認は、PR の無い質問の形で記録する。質問は「アプリをストアの審査に提出してよいか」を問い、公開の承認とは取り違えない | 無し |
 | 業務文書だけ | `documentation` で設計承認ゲート（企画承認）と提出の承認を持つ | 企画承認の前に PR の本文と質問の文が読まれ、原稿は組み直しで読ませた後に変わった部分だけが読まれる | 無し |
 
 ### このリポジトリだけの事情
@@ -446,6 +459,7 @@ sequenceDiagram
 | 3 | 回答のコマンドは PR の本文のハッシュを固定し、質問の後に本文だけが変わると、`recheck` が承認ゲートを待ちへ戻す | 本文の変わった PR に回答を適用すると落ちる |
 | 4 | `release-reading`（`--material` なし）が、工程の入力の `pr` の本文と質問の文を読ませて記録する。デプロイのステージの定義で `release-reading` が `release-gate` の前にある | 本文でなくゲートの承認資料のファイルを読むと落ちる |
 | 4 | `--gate release --material <ファイル>` が、そのファイルと質問の文を読ませ、PR の本文を読まない。`--pr` が無ければ PR の無い質問の形で `prs` を空にして記録する。PR があるとき、ファイルの行 `提示したコミット:` が固定した head と違えば読ませる前に止まり、worker がその行を変えると `stopped`（`incomplete`）で終える。PR が無いときは対象のコミットの行を確かめず、写しも残さない | ファイルを読まずに PR の本文を読むと落ちる。PR が無いのに止めると落ちる。対象のコミットの行が変わった資料を `outputs.material` に返すと落ちる |
+| 4 | リリースの質問の文は、宣言のリリースの形の行の `approve` を操作として入れる（`mobile` なら「アプリをストアの審査に提出してよいですか」）。`gate` と `check` が同じ宣言から同じキーの質問を作る | 形にかかわらず決まった操作の文にすると落ちる。`check` だけが表を読まずに作ると、キーが食い違って落ちる |
 | 4 | `outputs.material` の `file_sha256` は「読み手役が残した文」のセクションを含めて計算し、`sha256` は含めずに計算する | セクションだけが変わったときに `file_sha256` が変わらないと落ちる |
 | 5 | worker の記録に `not_run` があると、`run` と `gate` が `stopped`（`precondition`）で終える | `not_run` を ok で通すと落ちる |
 | 6 | 対象ごとに記録と比べる。文書の blob が同じなら読ませず、違えば差分の部分だけを読ませる。承認資料だけが変わったら、承認資料の差分だけを読ませ、質問の文は読ませない。前の blob や写しが無ければ全体を読ませる | 同じ中身でも worker を起動すると落ちる（起動の回数を数える）。差分でなく全体を渡すと落ちる。質問の文も渡すと落ちる |
@@ -458,7 +472,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4446 | 実装する | — | `plugins/ndf/src/ndf/domains/docrebuild/gate.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/hooks/guards/reading_check.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/contracts/worker/document-rebuild.md`、`plugins/ndf/contracts/worker/document-rebuild-gate.md`（新設）、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/deploy.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/reading-docs.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_gate.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`、`plugins/ndf/tests/domains/records/test_reading.py`、`plugins/ndf/tests/domains/hooks/test_reading_check.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/gate/test_gate_answer.py` |
+| #4446 | 実装する | — | `plugins/ndf/src/ndf/domains/docrebuild/gate.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/hooks/guards/reading_check.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/contracts/worker/document-rebuild.md`、`plugins/ndf/contracts/worker/document-rebuild-gate.md`（新設）、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/deploy.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/release-forms.json`、`plugins/ndf/src/ndf/domains/release/forms_decide.py`、`plugins/ndf/contracts/schemas/internal/reading-docs.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_gate.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`、`plugins/ndf/tests/domains/records/test_reading.py`、`plugins/ndf/tests/domains/hooks/test_reading_check.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/gate/test_gate_answer.py` |
 
 ## 未確認のまま残ること
 
