@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import re
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -301,34 +301,36 @@ class _Checker:
         bad = [v for v in value.split() if v not in ok]
         return [self.finding(rel, line, f"python-version {' '.join(bad)} は {sorted(ok)} に無い")] if bad else []
 
-    def pyprojects(self) -> list[Finding]:
-        want = (*self.floor, 0)
+    def listed(self, key: str, judge: Callable[[str, Path], list[Finding]]) -> list[Finding]:
+        """設定の `key` が挙げたファイルごとの `judge` の指摘。無いファイルは 1 件の指摘にする（挙げた順のまま）。"""
         found = []
-        for rel, path in self.files(_items(self.settings, "plugin_pyprojects")):
-            if path is None:
-                found.append(self.finding(rel, 1, "設定が挙げたファイルが無い"))
-                continue
-            floor, line = pyproject_floor(path)
-            if floor != want:
-                have = "無し" if floor is None else ".".join(map(str, floor))
-                found.append(
-                    self.finding(rel, line, f"requires-python が許す最も古い Python {have} が下限 {'.'.join(map(str, want))} と違う")
-                )
+        for rel, path in self.files(_items(self.settings, key)):
+            found += [self.finding(rel, 1, "設定が挙げたファイルが無い")] if path is None else judge(rel, path)
         return found
 
+    def pyprojects(self) -> list[Finding]:
+        return self.listed("plugin_pyprojects", self._pyproject)
+
+    def _pyproject(self, rel: str, path: Path) -> list[Finding]:
+        want = (*self.floor, 0)
+        floor, line = pyproject_floor(path)
+        if floor == want:
+            return []
+        have = "無し" if floor is None else ".".join(map(str, floor))
+        return [self.finding(rel, line, f"requires-python が許す最も古い Python {have} が下限 {'.'.join(map(str, want))} と違う")]
+
     def launchers(self) -> list[Finding]:
+        return self.listed("launchers", self._launcher)
+
+    def _launcher(self, rel: str, path: Path) -> list[Finding]:
         want = {"UV_VERSION": self.uv, "UV_INSTALLER_SHA256": self.digest}
+        seen = _launcher_lines(path)
         found = []
-        for rel, path in self.files(_items(self.settings, "launchers")):
-            if path is None:
-                found.append(self.finding(rel, 1, "設定が挙げたファイルが無い"))
-                continue
-            seen = _launcher_lines(path)
-            for name, value in want.items():
-                if name not in seen:
-                    found.append(self.finding(rel, 1, f"{name}= の行が無い"))
-                elif seen[name][0] != value:
-                    found.append(self.finding(rel, seen[name][1], f"{name} が配る構成の設定の {value} と違う"))
+        for name, value in want.items():
+            if name not in seen:
+                found.append(self.finding(rel, 1, f"{name}= の行が無い"))
+            elif seen[name][0] != value:
+                found.append(self.finding(rel, seen[name][1], f"{name} が配る構成の設定の {value} と違う"))
         return found
 
 
