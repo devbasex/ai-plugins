@@ -284,8 +284,12 @@ def _verdict_lines(out: Mapping[str, Any], private: bool) -> list[str]:
     ]
     if not private:
         return [*lines, f"- 理由 {len(reasons)} 件・レッドライン {len(boundary)} 件"]
-    lines += ["- 理由:", *[f"  - {r}" for r in reasons or ["（無し）"]]]
-    return [*lines, "- レッドライン:", *[f"  - {b}" for b in boundary or ["（無し）"]]]
+    return [*lines, *_labeled_bullets("理由", reasons), *_labeled_bullets("レッドライン", boundary)]
+
+
+def _labeled_bullets(label: str, items: list[str]) -> list[str]:
+    """見出しの行と、字下げした箇条書きの行。空なら「（無し）」の 1 行。"""
+    return [f"- {label}:", *[f"  - {x}" for x in items or ["（無し）"]]]
 
 
 def _where_lines(out: Mapping[str, Any], private: bool) -> list[str]:
