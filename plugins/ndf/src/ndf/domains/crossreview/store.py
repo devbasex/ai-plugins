@@ -33,6 +33,8 @@ REVIEWED_MVV = "reviewed_mvv"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"
+# 修正担当が作り、PR に届いていないコミットの範囲（`base`・`head`）。利用者が手元に留めたコミットと見分ける（#4076）
+UNSENT_FIX = "unsent_fix"
 
 
 class StateBroken(Exception):

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from ndf.adapters import git
+from ndf.core.converge import worktree
 from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
@@ -177,6 +178,24 @@ def test_issue_4090_9_base_moved_during_the_run_is_not_used(repos: Repos, wt: Pa
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
     assert (code, got["status"]) == (0, "ok")
     assert [r["base"] for r in _state(fake.state_dir)["rounds"]] == [fixed, fixed]
+
+
+def test_base_moved_right_after_the_sync_does_not_change_the_mvv(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """同期の直後に別の fetch がベースの追跡参照を進めても、MVV は同期で得たコミットから読む。"""
+    _push_base(repos, 11)
+    sync = worktree.sync_worktree
+
+    def synced(*args: Any, **named: Any) -> Any:
+        got = sync(*args, **named)
+        _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
+        sh(wt, "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+        assert sh(wt, "rev-parse", "origin/main").strip() != got.base
+        return got
+
+    monkeypatch.setattr(worktree, "sync_worktree", synced)
+    fake = _fixing(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert "バージョン 11" in _prompt(fake, "codex") and "バージョン 12" not in _prompt(fake, "codex")
 
 
 def _gathered_in_sprint_branch(repos: Repos) -> str:

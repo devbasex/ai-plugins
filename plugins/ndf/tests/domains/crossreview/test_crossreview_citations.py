@@ -21,7 +21,7 @@ from ndf.domains.records.mvv_decide import State
 
 from ._repos import BRANCH, Repos, commit, count_git, sh
 from .test_crossreview_mvv import MAJOR, _push_base
-from .test_crossreview_run import PR, Fake, Recording, _run, _state
+from .test_crossreview_run import _ID, PR, Fake, Recording, _run, _state
 
 # 囲みの中に根拠の行を持つ文書（囲みの外の行を多くして、書き換えても改名とみなされるようにする）
 FILLER = [f"本文 {n}" for n in range(1, 21)]
@@ -566,7 +566,8 @@ class IdleFixer(Fixer):
     """直すものが無いとして、コミットを作らずに結果だけを書く偽物。"""
 
     def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
-        out = {"pr": PR, "commit": None, "findings": [{"id": "r1-n1", "outcome": fin.FIXED}]}
+        ids = _ID.findall(spec.argv[-1])
+        out = {"pr": PR, "commit": None, "findings": [{"id": i, "outcome": fin.FIXED} for i in ids]}
         store.write_object(store.fix_result_path(self.state_dir, store.state_pr(self.state_dir, PR)), out)
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
 
@@ -581,7 +582,30 @@ def test_fix_left_by_a_fixer_without_a_result_is_sent_by_the_next_run(repos: Rep
     assert WRONG in sh(repos.origin, "show", f"{BRANCH}:doc.md")
     code, got = _base(capsys, monkeypatch, IdleFixer(tmp_path / "st", wt), wt)
     assert (code, got["status"], [f["outcome"] for f in _by_ndf(tmp_path / "st")]) == (0, "ok", [fin.FIXED])
-    assert RIGHT in sh(repos.origin, "show", f"{BRANCH}:doc.md")
+    assert RIGHT in sh(repos.origin, "show", f"{BRANCH}:doc.md") and "unsent_fix" not in _state(tmp_path / "st")
+
+
+def test_commit_kept_by_the_user_is_not_sent_without_a_new_fix(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正担当が新しいコミットを作らなければ、利用者が手元に留めたコミットを、そのラウンドでも次の起動の始めでも送らない。直したとした
+    指摘は、PR に届いたと言えないので未解決のまま止まる。"""
+    commit(wt, "memo.md", "手元だけ\n", "手元に留める")
+    for _ in range(2):
+        _, got = _base(capsys, monkeypatch, IdleFixer(tmp_path / "st", wt, script={"codex": [[MAJOR]], "kiro": [[]]}), wt)
+        assert got["status"] != "ok" and [f["outcome"] for f in _state(tmp_path / "st")["findings"]] == [fin.UNRESOLVED]
+        assert "memo.md" not in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
+
+
+def test_commit_added_after_the_left_fix_keeps_both_out_of_the_pr(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正担当が残したコミットの後に利用者がコミットを足したら、修正担当のものと確かめられないので送らない。"""
+    _push_base(repos)
+    _push_pr(repos, "doc.md", "# 設計", WRONG)
+    _base(capsys, monkeypatch, SilentFixer(tmp_path / "st", wt, ("doc.md", f"# 設計\n{RIGHT}\n")), wt)
+    assert _state(tmp_path / "st")["unsent_fix"]["head"] == sh(wt, "rev-parse", "HEAD").strip()
+    commit(wt, "memo.md", "手元だけ\n", "手元に留める")
+    _, got = _base(capsys, monkeypatch, IdleFixer(tmp_path / "st", wt), wt)
+    assert got["status"] != "ok" and "unsent_fix" not in _state(tmp_path / "st")
+    assert WRONG in sh(repos.origin, "show", f"{BRANCH}:doc.md")
+    assert "memo.md" not in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
 
 
 def test_failed_push_does_not_settle_the_error_left_in_the_pr(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
