@@ -15,7 +15,7 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/contracts/workflow/stage-io.schema.json` | `$defs.stage-in` を文脈のスキーマへの参照（平らな object）にする |
-| `plugins/ndf/contracts/workflow/context.schema.json` | `$defs.mvv_gate` に任意のキー `holds`・`noted` |
+| `plugins/ndf/contracts/workflow/context.schema.json` | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`note_url` |
 | `plugins/ndf/contracts/schemas/internal/mvv-validation.schema.json` | 種類 `mvv-review` の行に任意の欄 `defer`（`needs_user`・`filed`・`not_applicable`） |
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
