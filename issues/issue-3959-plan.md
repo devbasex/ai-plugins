@@ -29,7 +29,7 @@
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
 | `plugins/ndf/src/ndf/progress/stage_inputs.py`（新設） | `stage_inputs_of`（新設）。詳細設計書の保存先は `progress/command.py` だが、`command.py` は計画 p9 の lsplit のスプリントブランチで 971 行あり、足すと `ndf check` の構造の規則（1,000 行）を超えるので新しいモジュールに置く |
-| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`mvv_answer_void`（新設）・`mvv_skip` |
+| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`hold_checked`・`mvv_answer_void`（新設）・`mvv_skip` |
 | `plugins/ndf/src/ndf/progress/run.py` | `_running_move`・`_consume`（区分の外の `service:mvv` の回答を数えない） |
 | `plugins/ndf/src/ndf/progress/gate/records.py` | `approved_head`（区分の外の `service:mvv` の回答を承認にしない） |
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節） |
@@ -109,7 +109,7 @@
   - `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`
   - `plugins/ndf/src/ndf/domains/records/mvv.py`（`validation_rows`・`mvv_validate_sprint`・`compare_files`）
   - `plugins/ndf/src/ndf/progress/gate/checks.py`（`judgeable`・`refusals`・`may_skip`・`note`・`CHECKS_BY_GATE`）
-  - `plugins/ndf/src/ndf/progress/model.py`（`MVV_SKIP_GATES`・`mvv_skip`・`mvv_answer_void`）
+  - `plugins/ndf/src/ndf/progress/model.py`（`MVV_SKIP_GATES`・`hold_checked`・`mvv_skip`・`mvv_answer_void`）
   - `plugins/ndf/src/ndf/progress/run.py`（`_running_move`・`_consume`）
   - `plugins/ndf/src/ndf/progress/gate/records.py`（`approved_head`）
   - `plugins/ndf/contracts/workflow/context.schema.json`
@@ -123,7 +123,8 @@
   - MVV とレッドラインのパスをベースから 1 度だけ読む（`fetch_branch_or_raise` で取得し、#4076 の `current` と `Snapshot.commit` を使う）
   - 差分は `snap.commit` と head の組から読む（`current`・`Snapshot.commit` は #4076 の計画の U3 が作る）。比較の `files` が 300 件に届いたときだけ、同じ組を手元の git で読み直す
   - 失敗の原因は Task 9 の `failure_text` で定型文と診断の記録の識別子にし、例外の文を `why`・`holds`・PR のコメントへ入れない
-  - 回答の読み口（`_running_move`・`_consume`・`approved_head`）は、`mvv_answer_void` で区分の外の `service:mvv` の回答を数えない
+  - 回答の読み口（`_running_move`・`_consume`・`approved_head`）は、`mvv_answer_void` で区分の外の `service:mvv` の回答と、判定の写しが保留を確かめた証拠（`holds: []`）を持たない回答を数えない。`mvv_skip` も同じ証拠（`hold_checked`）の無い `skip: true` を採らない。この単位では `holds` が常に `null` なので、設計承認ゲートも MVV 判定で省かない（単位 3 が `holds` を配列にした後に省ける）
+  - 古いバージョンの回答で済んだ承認ゲートのステップは、後ろのステップが済んでいなければ `_running_move` が開き直す（詳細設計書の「消費済みの回答の開き直し」）
   - 古いバージョンが書く形の記録（リリースの判定のステップの `skip: true` と未消費の `service:mvv` の承認）を置いたステートマシンで、`ndf progress next` が人へ問い、人の `ndf answer` の後に進むことをテストで確かめる（設計の決定 3）
   - プランの承認資料に載せる部分は Task 8 が持つ
 - **この単位で作る `_judged` の手順 (5) の範囲（保留なしの経路）:**
@@ -290,8 +291,19 @@
 
 ## 切り戻し手順
 
-- データの移行は無い。単位ごとの PR を revert すれば戻る。単位 3 を戻すときは単位 5 の手順書の保留の記述も戻す
-- 移行の手順は要らない。更新の前に古いバージョンがリリース承認ゲートへ書いた `service:mvv` の回答は、読み口が数えず人へ問い直す（設計の決定 3）。単位 2 を revert すると、その回答を再び承認として消費する形に戻る
+データの移行は無い。単位ごとの PR を revert して戻すが、後の単位が前の単位の関数を呼ぶので、依存する単位から先に戻す。戻す単位だけを revert して版を出すと、残った単位が消えた関数を呼ぶ。
+
+| 戻す単位 | 先に（同じ PR で）戻す単位 | 理由 |
+| --- | --- | --- |
+| 1 工程の入力とプランの外のエントリポイント、伏せ方 | 5・4・6・3・2 | 単位 2 の `_judged` と単位 4 の `_mvv_cite` が、単位 1 の `failure_text` と伏せ方を呼ぶ。単位 5 の手順書が `--machine` を呼ぶ |
+| 2 判定を打つ条件と省く条件 | 5・6・3 | 単位 3 が `_judged` の手順 (5) と `checks.py` を、単位 6 が判定の出力の `holds`・`noted` を使う。単位 5 の手順書が `normal` でも判定する前提で書く |
+| 3 レビューの保留と記録の欠落 | 5（保留の記述） | 単位 5 の手順書が保留（`holds`）の載せ方を書く |
+| 4 根拠の行の確かめ | 5 | 単位 5 の手順書（`approval-request.md`・`agent-layers.md`）が `ndf records mvv cite` を必ず呼ぶ。単位 4 だけを戻すと、配った手順が無いコマンドを呼び、設計承認資料を渡せなくなる |
+| 6 プランの承認資料 | 無し | ほかの単位から呼ばれない |
+| 5 手順書と用語集 | 無し | ほかの単位から呼ばれない |
+
+- レッドラインの保護を戻す場合の運用: 単位 3（レビューの保留）だけを戻しても、単位 2 の `hold_checked` が残るので、判定の出力の `holds` が `null` になり、`fast`・`auto` の設計承認ゲートは MVV 判定で省かれない（判定は打ち、人が答える）。保護は弱まらないので、追加の操作は要らない。単位 2（判定を打つ条件と省く条件）を戻すと、`MVV_SKIP_GATES`・`hold_checked`・`mvv_answer_void` が消え、レッドラインの指摘が残る PR を省ける形と、古いバージョンの `service:mvv` の回答を承認として消費する形に戻る。そこで単位 2 を戻す PR では、同じ PR で `progress/model.py` の `mvv_skip` を常に None を返す形にし、どの承認ゲートも MVV 判定で省かないようにしてから版を出す。単位 2 を入れ直す PR でこの変更を戻す
+- 移行の手順は要らない。更新の前に古いバージョンが書いた `service:mvv` の回答は、リリース承認ゲートでも設計承認ゲートでも読み口が数えず、人へ問い直す。消費済みでも、後ろのステップが済んでいなければ承認ゲートを開き直す（設計の決定 3）
 
 ## 完了の定義
 
