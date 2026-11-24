@@ -97,7 +97,10 @@ def test_other_calls_touch_neither_the_record_nor_its_place(relay_child, tmp_pat
     assert signals.read_busy(relay_child, LAUNCH, "s1")[0] == 0
 
 
-@pytest.mark.parametrize("source, expected", [("startup", (0, 0, "session")), ("resume", (0, 0, "session")), ("compact", None), ("clear", None)])
+ZERO = (0, 0, "session")
+
+
+@pytest.mark.parametrize("source, expected", [("startup", ZERO), ("resume", ZERO), ("compact", None), ("clear", None)])
 def test_a_started_conversation_is_recorded_as_having_no_work(relay_child, tmp_path, source, expected):
     session_start(tmp_path, source)
     assert busy(relay_child) == expected
