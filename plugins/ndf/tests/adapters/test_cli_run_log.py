@@ -301,6 +301,14 @@ def test_secret_spans_are_the_ranges_redact_replaces(monkeypatch):
     assert run_log.redact(text) == f"a {run_log.MASK} b https://{run_log.MASK}@github.com/o/r Authorization: {run_log.MASK}"
 
 
+def test_overlapping_matches_of_a_repeating_secret_are_all_masked():
+    # 繰り返しのある秘密が重なって現れても、後の一致の末尾を伏せ字から漏らさない
+    secret = "abcabcab"
+    text = "x abcabcabcab y"
+    assert run_log.secret_spans(text, [secret]) == [(2, 13)]
+    assert run_log.redact(text, [secret]) == f"x {run_log.MASK} y"
+
+
 @pytest.mark.parametrize(
     ("text", "kept"),
     [

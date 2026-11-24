@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
 
 SHA = "a" * 64
@@ -61,9 +62,16 @@ def test_a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_resu
     assert "design_pr" not in stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
 
 
-def test_an_unknown_machine_is_refused(repo):
-    with pytest.raises(model.Refused, match="無い"):
-        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+def test_an_unknown_machine_is_refused(tmp_path, monkeypatch):
+    # 保存先と空の DB はあるが、その ID のステートマシンが無い。保存先は一時ディレクトリに作り、Git で解かない
+    root = _store_at(monkeypatch, tmp_path)
+    durable.prepare_store(root)
+    try:
+        store.open_store(store.default_url(root), root).close()  # 表だけの空の DB を作る
+        with pytest.raises(model.Refused, match="無い"):
+            stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
+    finally:
+        durable.release_store(root)
 
 
 def test_a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, last_result, tmp_path, monkeypatch):
@@ -82,7 +90,11 @@ def test_a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, la
     with pytest.raises(model.Refused) as caught:
         stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
     assert "このリポジトリのものでない" in str(caught.value)
-    assert "secret-owner" not in str(caught.value) and str(repo) not in str(caught.value)
+    assert "secret-owner" not in str(caught.value) and command.repo_id(repo, root) not in str(caught.value)
+    # 存在しない ID の文言とは必ず違う（ID を除いた文で比べる）。どちらにも所属を載せない
+    with pytest.raises(model.Refused) as unknown:
+        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+    assert str(caught.value).replace(tid, "") != str(unknown.value).replace("sprint:none", "")
 
 
 def test_a_step_the_definition_does_not_have_is_refused(repo, capsys, last_result, tmp_path):
@@ -99,3 +111,29 @@ def test_a_context_without_an_input_key_is_missing_it(repo, capsys, last_result)
     with pytest.raises(invoke.StageInputMissing) as caught:
         stage_inputs.stage_inputs_of(repo, made["metrics"]["machine_id"], "design-mvv")
     assert caught.value.keys == ("worktree",)
+
+
+def _store_at(monkeypatch, tmp_path: Path) -> Path:
+    """保存先の位置をテストの一時ディレクトリに固定する（Git で解かない）。"""
+    root = tmp_path / "common" / "ndf" / "state"
+    monkeypatch.setattr(command, "store_root_of", lambda cwd: root)
+    return root
+
+
+def test_a_missing_store_is_not_created_and_stops(tmp_path, monkeypatch):
+    # 判定の入力を読むだけの経路は、保存先を作らずに止まる
+    root = _store_at(monkeypatch, tmp_path)
+    with pytest.raises(store.StoreNotReady):
+        stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
+    assert not root.exists()
+
+
+def test_a_legacy_store_is_neither_retired_nor_changed(tmp_path, monkeypatch):
+    # 旧い形の保存先（format.json が無い）は退避せず、中身も変えずに止まる
+    root = _store_at(monkeypatch, tmp_path)
+    root.mkdir(parents=True)
+    (root / "old.txt").write_text("旧い保存先")
+    before = sorted(p.name for p in root.parent.iterdir())
+    with pytest.raises(store.StoreNotReady):
+        stage_inputs.stage_inputs_of(tmp_path, "sprint:none", "design-mvv")
+    assert sorted(p.name for p in root.parent.iterdir()) == before and sorted(p.name for p in root.iterdir()) == ["old.txt"]

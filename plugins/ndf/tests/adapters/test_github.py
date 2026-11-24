@@ -293,6 +293,30 @@ def test_pulls_by_head_batches_branches() -> None:
     assert sorted(got) == sorted(["feat/a", 'feat/"b"']) and all(len(v) == 1 for v in got.values())
 
 
+def test_open_pulls_of_head_pages_until_two_same_repo_candidates() -> None:
+    # 開いた PR だけを取得し、フォークの同名ブランチを除いた候補が 2 件そろうまでページを送る
+    pages = [
+        ([7, 8], True, "c1"),  # 新しい 2 件はフォーク
+        ([5], True, "c2"),
+        ([4, 3], True, "c3"),  # 2 件目がそろった後のページは読まない
+        ([2], False, None),
+    ]
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        assert "states: [OPEN]" in sent["query"]
+        seen.append(sent["variables"])
+        numbers, more, cursor = pages[len(seen) - 1]
+        nodes = [{**_pr_node(n), "isCrossRepository": n in (7, 8)} for n in numbers]
+        conn = {"pageInfo": {"hasNextPage": more, "endCursor": cursor}, "nodes": nodes}
+        return httpx.Response(200, json={"data": {"repository": {"pullRequests": conn}}})
+
+    got = _hub(handler).open_pulls_of_head("design/x", enough=2)
+    assert [p.number for p in got] == [5, 4]
+    assert [v["after"] for v in seen] == [None, "c1", "c2"] and all(v["head"] == "design/x" for v in seen)
+
+
 def test_nodes_refuses_unknown_node() -> None:
     hub, _ = _hub_graphql(lambda q: {})
     with pytest.raises(ValueError):

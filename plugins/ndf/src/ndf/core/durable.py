@@ -557,6 +557,28 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
             pending_count = _report_retired(root, moved)
 
 
+def hold_existing_store(root: Path) -> bool:
+    """保存先が既に今の形なら、何も書かずに共有のロックを持って（プロセスが終わるまで）真を返す（読むだけの経路。#3959）。
+
+    無い・空・形が古い保存先は、作成も退避もせずに偽。新しすぎれば `StoreFormatNewer`。`prepare_store` と違い、
+    `format.json` の DBOS の記録もそろえない。
+    """
+    if root in _held_stores:
+        return True
+    found = _read_format(root)
+    _refuse_newer(root, found)
+    if found != STORE_FORMAT:
+        return False
+    shared = _hold_shared(root)
+    found = _read_format(root)  # 共有を取る間に退避されていないか読み直す
+    if found == STORE_FORMAT:
+        _held_stores[root] = shared
+        return True
+    shared.close()
+    _refuse_newer(root, found)
+    return False
+
+
 def _hold_if_current(root: Path) -> bool:
     """保存先のロックを共有で取り、番号が自分と同じなら持ったまま真を返す。違えば放し、新しすぎれば `StoreFormatNewer`。
 

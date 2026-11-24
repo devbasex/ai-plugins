@@ -7,8 +7,11 @@ boundary 空の「従う」になって承認ゲートを省けた（#3017）。
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
+import stat
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,13 +19,14 @@ from typing import Any, Optional
 
 import git_sandbox
 import pytest
+import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
-from ndf.domains.records import cli, jsonl, mvv, mvv_gate
-from ndf.progress import command, definition, invoke, model
+from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
+from ndf.progress import command, definition, invoke, model, stage_inputs, store
 from ndf.domains.records import mvv_material_decide as mm
 
 BODY = "# MVV\n\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | リリース対象の取得元・バージョンの規則を変える | 利用者全員に効く |\n"
@@ -117,9 +121,11 @@ class Hub:
         self.paths: list[str] = []
         self.reads = 0
 
-    def pulls_by_head(self, branches: list[str]) -> dict[str, list[SimpleNamespace]]:
+    def open_pulls_of_head(self, branch: str, enough: int) -> list[SimpleNamespace]:
+        # 本物と同じく、開いた同じリポジトリの PR を `enough` 件まで返す
         opened = [SimpleNamespace(number=self.number, state="open", cross_repository=False)]
-        return {b: list(self.case.get("pulls", opened)) if b == "design/x" else [] for b in branches}
+        pulls = list(self.case.get("pulls", opened)) if branch == "design/x" else []
+        return [p for p in pulls if p.state == "open" and not p.cross_repository][:enough]
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
@@ -683,6 +689,24 @@ def test_the_cli_stops_without_judging_when_the_machine_gives_no_input(
     assert (out["status"], out["cause"]["kind"]) == ("stopped", kind)
 
 
+def test_a_db_error_while_reading_the_machine_shows_only_its_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 共有 DB への照会の失敗は、SQL 文・バインド値・接続先を結果へ載せず、例外の種類だけを出す（ndf progress と同じ）。
+    # 故障は stage_inputs_of で起こすので、リポジトリは Git で作らず、CLI のリポジトリの解決も差し替える
+    def fail(*_a: Any) -> dict[str, Any]:
+        raise sa.exc.ProgrammingError("SELECT * FROM ndf_progress_machines WHERE id = ?", ("secret-bind",), Exception("db.internal"))
+
+    monkeypatch.setattr(cli, "_root", lambda args: tmp_path)
+    monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", fail)
+    monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("入力を組めないのに判定を打った"))
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    out = _cli_gate(tmp_path, capsys, "release", "--machine", "sprint:x")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", store.StoreUnreachable.kind)
+    shown = json.dumps(out, ensure_ascii=False)
+    assert "SELECT" not in shown and "secret-bind" not in shown and "db.internal" not in shown
+
+
 def test_the_cli_refuses_a_nested_context_in_the_environment_without_judging(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -750,6 +774,27 @@ def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(
         mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, twice))
 
 
+class _BranchOnlyGit:
+    """ブランチ名だけを返す Git の偽物（子プロセスを起動しない）。ほかの問い合わせはテストを落とす。"""
+
+    def __init__(self, where: Path) -> None:
+        self.where = where
+
+    def run(self, *args: str) -> str:
+        assert args == ("rev-parse", "--abbrev-ref", "HEAD"), f"想定しない Git の呼び出し: {args}"
+        return "design/x\n"
+
+
+def test_a_worktree_at_the_same_path_is_not_checked_with_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 作業場所と起動元が同じパスなら、共通ディレクトリを Git に問わない
+    def no_git(where: Path) -> str:
+        raise AssertionError("同じパスで共通ディレクトリを問うた")
+
+    monkeypatch.setattr(mvv_gate, "_common_dir", no_git)
+    monkeypatch.setattr(mvv_gate, "Git", _BranchOnlyGit)
+    assert mvv_gate.pr_number(tmp_path, "design", _plan_inputs(tmp_path, worktree=str(tmp_path)), Hub(5, {})) == 5
+
+
 # --- #3959 Task 9: 失敗の原因を定型文と手元の診断の記録に分ける ---
 
 HOST = "git.corp-internal.example.jp"
@@ -794,3 +839,211 @@ def test_every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr() -> N
         "cite_precondition", "cite_lookup_failed",
     }  # fmt: skip
     assert all(text and "{" not in text for text in mm.STOP_REASONS.values())
+
+
+# --- #3959: 診断の記録は 0600 に限ったファイル記述子へだけ追記する（record_failure） ---
+
+
+class _Fd:
+    """`os.open`・`os.fstat`・`os.fchmod`・`os.write` を、診断の記録のパスとその記述子だけ差し替える（錠のファイルは本物へ通す）。"""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, fail_open: Any = None, st: Any = None, fchmod_error: Any = None) -> None:
+        self.path = str(mvv.record_path("mvv-gate-failures"))
+        self.opened: list[tuple[int, int]] = []
+        self.written: list[int] = []
+        real_open, real_fstat, real_fchmod, real_write = os.open, os.fstat, os.fchmod, os.write
+
+        def fake_open(path: Any, flags: int, mode: int = 0o777, **kw: Any) -> int:
+            if str(path) != self.path:
+                return real_open(path, flags, mode, **kw)
+            if fail_open is not None:
+                raise fail_open
+            fd = real_open(path, flags, mode, **kw)
+            self.opened.append((fd, flags))
+            return fd
+
+        def fake_fstat(fd: int) -> Any:
+            got = real_fstat(fd)
+            if st is None or fd not in self.fds():
+                return got
+            return SimpleNamespace(st_mode=st.get("st_mode", got.st_mode), st_uid=st.get("st_uid", got.st_uid))
+
+        def fake_fchmod(fd: int, mode: int) -> None:
+            if fchmod_error is not None and fd in self.fds():
+                raise fchmod_error
+            real_fchmod(fd, mode)
+
+        def fake_write(fd: int, data: bytes) -> int:
+            if fd in self.fds():
+                self.written.append(fd)
+            return real_write(fd, data)
+
+        for name, fn in (("open", fake_open), ("fstat", fake_fstat), ("fchmod", fake_fchmod), ("write", fake_write)):
+            monkeypatch.setattr(os, name, fn)
+
+    def fds(self) -> set[int]:
+        return {fd for fd, _ in self.opened}
+
+
+def _unwritable(got: str) -> bool:
+    return got == f"{mm.STOP_REASONS['base_unreadable']}（診断の記録に書けない）"
+
+
+@pytest.fixture
+def umask_022() -> Any:
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
+
+
+def test_record_failure_creates_the_directory_0700_and_the_file_0600(repo: Path, umask_022: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    fd = _Fd(monkeypatch)
+    got = mvv_gate.failure_text("base_unreadable", f"fetch {HOST}", {"gate": "design"})
+    path = mvv.record_path("mvv-gate-failures")
+    assert not _unwritable(got) and HOST in path.read_text(encoding="utf-8")
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700 and stat.S_IMODE(path.stat().st_mode) == 0o600
+    # 権限を確かめた記述子へ書く（パスを開き直さない）。開くときは FIFO で止まらず、リンクをたどらない
+    ((opened, flags),) = fd.opened
+    assert fd.written and set(fd.written) == {opened} and flags & os.O_NONBLOCK and flags & os.O_NOFOLLOW
+
+
+def test_record_failure_narrows_an_existing_wider_file(repo: Path, umask_022: None) -> None:
+    path = mvv.record_path("mvv-gate-failures")
+    path.parent.mkdir(parents=True)
+    path.write_text("")
+    path.chmod(0o644)
+    mvv_gate.failure_text("base_unreadable", HOST, {})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and HOST in path.read_text(encoding="utf-8")
+
+
+def _existing(mode: int = 0o644) -> Path:
+    path = mvv.record_path("mvv-gate-failures")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("前の行\n")
+    path.chmod(mode)
+    return path
+
+
+@pytest.mark.parametrize(
+    "stubbed",
+    [
+        {"fchmod_error": PermissionError(1, "許されない")},
+        {"st": {"st_uid": os.geteuid() + 1}},
+        {"st": {"st_mode": stat.S_IFIFO | 0o600}},
+    ],
+)
+def test_record_failure_writes_nothing_when_the_file_cannot_be_kept_private(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, stubbed: dict[str, Any]
+) -> None:
+    path = _existing()
+    _Fd(monkeypatch, **stubbed)
+    got = mvv_gate.failure_text("base_unreadable", HOST, {})
+    assert _unwritable(got) and path.read_text(encoding="utf-8") == "前の行\n"
+
+
+def test_record_failure_does_not_follow_a_symlink(repo: Path, tmp_path: Path) -> None:
+    target = tmp_path / "other.txt"
+    target.write_text("別のファイル\n")
+    path = mvv.record_path("mvv-gate-failures")
+    path.parent.mkdir(parents=True)
+    path.symlink_to(target)
+    assert _unwritable(mvv_gate.failure_text("base_unreadable", HOST, {}))
+    assert target.read_text(encoding="utf-8") == "別のファイル\n"
+
+
+def test_record_failure_does_not_wait_on_a_fifo_without_a_reader(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 本物の FIFO は作らない。読み手の無い FIFO を O_NONBLOCK で開いたときの ENXIO をスタブで返す
+    _Fd(monkeypatch, fail_open=OSError(errno.ENXIO, "No such device or address"))
+    assert _unwritable(mvv_gate.failure_text("base_unreadable", HOST, {}))
+
+
+# --- #3959 決定 5: --expect-pr（承認する PR と、判定に使う入力の PR を判定の前に比べる） ---
+
+
+def _release_machine(repo: Path, capsys: pytest.CaptureFixture[str], pr: int) -> str:
+    """文脈の pr を持つステートマシンを作り、ID を返す（リリース承認ゲートの判定の入力を --machine で組める）。"""
+    monkey = pytest.MonkeyPatch()
+    monkey.chdir(repo)
+    try:
+        assert command.main(["new", "s1", "--mode", "standard", "--issues", "3959", "--pace", "fast"]) == 0
+        tid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["machine_id"]
+        _set_pr(repo, capsys, tid, pr)
+    finally:
+        monkey.undo()
+    return tid
+
+
+def _set_pr(repo: Path, capsys: pytest.CaptureFixture[str], tid: str, pr: int) -> None:
+    monkey = pytest.MonkeyPatch()
+    monkey.chdir(repo)
+    try:
+        out_file = repo.parent / f"pr-{pr}.json"
+        out_file.write_text(json.dumps({"steps": [], "summary": "PR を作った", "outputs": {"pr": pr}}))
+        assert command.main(["finish", tid, "Pull Request", "--output", str(out_file), "--reason", "手で"]) == 0
+        capsys.readouterr()
+    finally:
+        monkey.undo()
+
+
+class _UnreadHub(Hub):
+    def pull(self, number: int) -> SimpleNamespace:
+        raise AssertionError("判定しないのに PR を読んだ")
+
+
+def _no_judging(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 承認する PR と比べるだけなら GitHub へつながない（認証の無い環境でも not_applicable を返す）
+    monkeypatch.setattr(cli, "_hub", lambda root: pytest.fail("PR を比べる前に GitHub へつないだ"))
+    monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("判定する PR が承認する PR と違うのに判定した"))
+    monkeypatch.setattr(mvv_gate.llm, "ask", lambda *a, **k: pytest.fail("LLM を呼んだ"))
+
+
+def test_expect_pr_judges_when_the_input_pr_is_the_pr_to_approve(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tid = _release_machine(repo, capsys, 12)
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    monkeypatch.setattr(cli, "_hub", lambda root: _UnreadHub(12, {}))
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli.mvv_gate, "gate", lambda root, g, inputs, hub, warnings: seen.append(dict(inputs)) or mm.gate_outcome(g, None, False, ["x"])
+    )
+    out = _cli_gate(repo, capsys, "release", "--machine", tid, "--expect-pr", "12")
+    assert out["status"] == "ok" and [s["pr"] for s in seen] == [12]
+
+
+def test_expect_pr_of_another_pr_stops_without_reading_judging_or_commenting(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], notes: list[tuple[int, str]]
+) -> None:
+    tid = _release_machine(repo, capsys, 12)
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    _no_judging(monkeypatch)
+    out = _cli_gate(repo, capsys, "release", "--machine", tid, "--expect-pr", "34")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "not_applicable") and notes == []
+    shown = json.dumps([out["summary"], out.get("warnings", []), out["cause"]], ensure_ascii=False)
+    assert "12" not in shown and "34" not in shown
+    # 承認する PR を 12 と決めた後、判定の前に文脈の pr が 56 に変わった → 打った時点の入力と比べるので判定しない
+    # （文脈の pr を書く工程は 1 回しか終えられないので、打った時点で文脈から組んだ入力をスタブで 56 にする）
+    built = {**stage_inputs.stage_inputs_of(repo, tid, mvv_gate.GATE_STEPS["release"]), "pr": 56}
+    monkeypatch.setattr(cli.stage_inputs, "stage_inputs_of", lambda root, mid, step: dict(built))
+    out = _cli_gate(repo, capsys, "release", "--machine", tid, "--expect-pr", "12")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "not_applicable") and notes == []
+    assert "56" not in out["summary"] and "12" not in out["summary"]
+
+
+def test_expect_pr_is_invalid_for_the_design_gate(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _no_judging(monkeypatch)
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_plan_inputs(repo)))
+    out = _cli_gate(repo, capsys, "design", "--expect-pr", "5")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "invalid")
+
+
+def test_expect_pr_without_the_pr_in_the_context_is_input_missing(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(repo)
+    assert command.main(["new", "s1", "--mode", "standard", "--issues", "3959", "--pace", "fast"]) == 0
+    tid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["machine_id"]
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    _no_judging(monkeypatch)
+    out = _cli_gate(repo, capsys, "release", "--machine", tid, "--expect-pr", "12")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "input_missing")

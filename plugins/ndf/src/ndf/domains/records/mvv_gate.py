@@ -87,6 +87,23 @@ def _common_dir(where: Path) -> str:
     return Git(where).run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
 
 
+def _same_repo(where: Path, root: Path) -> bool:
+    """作業場所 `where` が `root` と同じリポジトリか。同じパスなら Git を呼ばず、違うパスのときだけ共通ディレクトリを比べる。"""
+    try:
+        if where.resolve() == root.resolve():
+            return True
+        return _common_dir(where) == _common_dir(root)
+    except (GitError, OSError):
+        return False
+
+
+def release_pr(inputs: Mapping[str, Any]) -> int:
+    """リリースの承認ゲートで判定する PR の番号（文脈の `pr`）。GitHub へつながない。無ければ `GateError`。"""
+    if not isinstance(inputs.get("pr"), int):
+        raise GateError("文脈にスプリントの PR の番号（pr）が無い")
+    return int(inputs["pr"])
+
+
 def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> int:
     """判定する PR の番号。無い・決められなければ `GateError`。
 
@@ -96,18 +113,12 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
     同じリポジトリのもの（フォークの同名ブランチを除く）を数え、1 件に決まらなければ止める（どれにもコメントを書かない）。
     """
     if gate == RELEASE:
-        if not isinstance(inputs.get("pr"), int):
-            raise GateError("文脈にスプリントの PR の番号（pr）が無い")
-        return int(inputs["pr"])
+        return release_pr(inputs)
     where = Path(inputs["worktree"]) if isinstance(inputs.get("worktree"), str) else root
-    try:
-        same = _common_dir(where) == _common_dir(root)
-    except GitError:
-        same = False
-    if not same:
+    if not _same_repo(where, root):
         raise GateError(f"作業場所 {where} が判定するリポジトリの worktree でない")
     branch = Git(where).run("rev-parse", "--abbrev-ref", "HEAD").strip()
-    opened = [p for p in hub.pulls_by_head([branch])[branch] if p.state == "open" and not p.cross_repository]
+    opened = hub.open_pulls_of_head(branch, enough=2)
     if not opened:
         raise GateError(f"ブランチ {branch} の開いた設計の PR が無い")
     if len(opened) > 1:

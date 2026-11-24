@@ -84,10 +84,11 @@ def secret_values() -> list[str]:
 
 
 def _occurrences(text: str, value: str) -> list[tuple[int, int]]:
+    """`value` の一致範囲をすべて返す。重なる一致も拾い（次は一致の開始の 1 字後から探す）、和は `union_spans` がまとめる。"""
     found, at = [], text.find(value)
     while at >= 0:
         found.append((at, at + len(value)))
-        at = text.find(value, at + len(value))
+        at = text.find(value, at + 1)
     return found
 
 
