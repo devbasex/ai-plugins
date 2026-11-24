@@ -34,16 +34,12 @@ class CheckError(Exception):
 
 @dataclass(frozen=True)
 class Finding:
-    """1 つの規則が 1 つの箇所で見つけた違反。`path` はリポジトリの根からの相対のパス。
-
-    `key` は、変更の前と同じ指摘かを見分ける値（行が動いても変わらない。ラチェットを当てる規則だけが持ち、結果に出さない）。
-    """
+    """1 つの規則が 1 つの箇所で見つけた違反。`path` はリポジトリの根からの相対のパス。"""
 
     rule: str
     path: str
     line: int
     detail: str
-    key: str = ""
 
     def as_item(self) -> dict[str, Any]:
         return {"rule": self.rule, "path": self.path, "line": self.line, "detail": self.detail}

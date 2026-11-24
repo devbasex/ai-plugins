@@ -5,30 +5,26 @@
 `--only` があれば、その規則の指摘だけを違反にする。`--only review-items` だけなら、その規則の入力だけを読み、ほかの規則を当てない。`--write-spec` があれば、規約の
 生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書き、減った件数へラチェットの基準を下げてから検査する。
 `--ratchet-base` があれば、ラチェットの基準が、その commit の基準より上がっていないかも見る（CI はマージ先の先頭を渡す）。件数が
-基準を超えた規則は、その commit に無い指摘だけを出す（`--only` に規則を渡せばすべて出す）。
+基準を超えた規則は件数だけを出す（指摘の全件は `--only` に規則を渡したときに出す）。
 結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
 import os
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple, Optional
+from pathlib import Path
+from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.checks import (
     child_deps,
     copy_dup,
     facts,
-    git_objects,
     internal_names,
     invariants,
     limits_readers,
@@ -40,19 +36,17 @@ from ndf.checks import (
     suppressions,
     words,
 )
-from ndf.checks.model import RULES_PATH, SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, contained, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, contained, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
-# ラチェットを当てる規則と、その規則の関数（件数が基準と同じなら違反にしない）。ほかの規則は 0 件を保つ
-RATCHETED = {copy_dup.RULE: copy_dup.check}
-# 規則のデータの保存先（プラグインの根からの相対パス。基準のファイルと同じディレクトリ）
-RULES_REL = PurePosixPath(ratchet.RATCHET_REL).with_name(RULES_PATH.name)
+# ラチェットを当てる規則（件数が基準と同じなら違反にしない）。ほかの規則は 0 件を保つ
+RATCHETED = frozenset({copy_dup.RULE})
 # 件数が基準を超えた規則の理由に添える、箇所の見方
-LISTING = "増えた箇所は --ratchet-base <変更の前の commit>、全件は --only {rule} で出る"
+LISTING = "指摘の全件は --only {rule} で出る（変更の前のコードの出力と比べる）"
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
 
 
@@ -127,98 +121,39 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     return sorted(found, key=_order)
 
 
-class Base(NamedTuple):
-    """変更の前の commit の名前と、その中身を読む関数（1 つの git から読む）。"""
+def _git_objects(out: bytes) -> list[Optional[bytes]]:
+    """`git cat-file --batch` の出力の、求めたものごとの中身（無いものは None）。"""
+    found: list[Optional[bytes]] = []
+    while out:
+        head, _, out = out.partition(b"\n")
+        size = None if head.endswith((b" missing", b" ambiguous")) else int(head.rpartition(b" ")[2])
+        found.append(None if size is None else out[:size])
+        out = out if size is None else out[size + 1 :]
+    return found
 
-    ref: str
-    read: git_objects.ReadObject
 
-
-@contextlib.contextmanager
-def _base_of(scope: Scope, ref: Optional[str]) -> Iterator[Optional[Base]]:
-    """commit `ref` を読む `Base`。`ref` が無ければ git を起動せずに None。"""
+def _ratchet_base(scope: Scope, path: Path, ref: Optional[str]) -> dict[str, ratchet.Baseline]:
+    """commit `ref` のラチェットの基準。`ref` が無いか基準のファイルを持たなければ空、`ref` を読めなければ `CheckError`。"""
     if ref is None:
-        yield None
-        return
-    with git_objects.opened(scope.repo_root) as read:
-        yield Base(ref, read)
-
-
-def _ratchet_base(scope: Scope, path: Path, base: Optional[Base]) -> dict[str, ratchet.Baseline]:
-    """変更の前のラチェットの基準。`base` が無いか、その commit が基準のファイルを持たなければ空、commit を読めなければ `CheckError`。"""
-    if base is None:
         return {}
-    if base.read(f"{base.ref}^{{{git_objects.COMMIT}}}") is None:
-        raise CheckError(f"ラチェットの変更の前の commit を読めない: {base.ref}")
-    where = f"{base.ref}:{scope.rel(path)}"
-    found = base.read(where)
-    return ratchet.limits_of(found.data, where) if found is not None else {}
-
-
-def _base_files(scope: Scope, base: Base) -> dict[str, Source]:
-    """変更の前の製品のコードの `.py` と規則のデータ。今と同じ本文のファイルは今の `Source`（構文木を作り直さない）を使い、変わったか
-    消えたファイルの本文だけを git から読む。"""
-    now = {src.rel: src for src in scope.sources}
-    src_rel, rules_rel = (scope.rel(scope.plugin_root / rel) for rel in (SRC_DIR, RULES_REL))
-    blobs = git_objects.files_under(base.read, f"{base.ref}:{src_rel}", src_rel)
-    wanted = {rel: oid for rel, oid in blobs.items() if rel.endswith(".py") or rel == rules_rel}
-    return {rel: _base_source(scope, base, now.get(rel), rel, oid) for rel, oid in wanted.items()}
-
-
-def _base_source(scope: Scope, base: Base, now: Optional[Source], rel: str, oid: str) -> Source:
-    """変更の前のファイル 1 本。今のファイル `now` と本文が同じ（id が同じ）なら `now`。"""
-    if now is not None and git_objects.blob_id(now.text, oid) == oid:
-        return now
-    found = base.read(oid)
-    if found is None:
-        raise CheckError(f"変更の前のファイルを読めない: {base.ref}:{rel}")
-    src = Source(scope.repo_root / rel, rel)
-    src.text = found.data.decode("utf-8", "replace")
-    return src
-
-
-def _base_scope(scope: Scope, files: Mapping[str, Source]) -> Scope:
-    """変更の前の製品のコード。構文の誤りで読めないファイルは除く。"""
-    base = Scope(scope.repo_root, scope.plugin_root, scope.plugin_name, list(files.values()))
-    base.sources = base.code()
-    unparsable(base)
-    return base
-
-
-def _base_rules(scope: Scope, files: Mapping[str, Source], rules: dict[str, Any]) -> dict[str, Any]:
-    """変更の前の規則のデータ。変更の前に無いキーは今の値にする（今の規則の関数が読む）。"""
-    rel = scope.rel(scope.plugin_root / RULES_REL)
-    if rel not in files:
-        return rules
-    try:
-        old = json.loads(files[rel].text)
-    except ValueError as exc:
-        raise CheckError(f"変更の前の規則のデータを読めない: {rel}: {exc}") from exc
-    merged = {key: {**value, **old[key]} for key, value in rules.items() if key in old and isinstance(value, dict)}
-    return {**rules, **old, **merged}
-
-
-def _added(scope: Scope, found: list[Finding], rules: dict[str, Any], base: Optional[Base]) -> list[Finding]:
-    """`found` のうち、変更の前のコードを変更の前の規則のデータで見たときに無い指摘。`base` が無ければ増えた分を見分けられないので空。"""
-    if base is None or not found:
-        return []
-    files = _base_files(scope, base)
-    old_scope, old_rules = _base_scope(scope, files), _base_rules(scope, files, rules)
-    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](old_scope, old_rules)}
-    return [f for f in found if (f.rule, f.key) not in before]
+    where = f"{ref}:{scope.rel(path)}"
+    objects = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=f"{ref}^{{commit}}\n{where}\n"))
+    if len(objects) != 2 or objects[0] is None:
+        raise CheckError(f"ラチェットの変更の前の commit を読めない: {ref}")
+    return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
 
 
 def ratcheted(
-    scope: Scope, found: list[Finding], rules: dict[str, Any], only: list[str] | None, written: list[str] | None, base_ref: Optional[str]
+    scope: Scope, found: list[Finding], only: list[str] | None, written: list[str] | None, base_ref: Optional[str]
 ) -> list[Finding]:
     """ラチェットを当てる規則の指摘を、基準と比べた結果に置き換える。`written` があれば、減った件数へ基準を下げ、パスを足す。
 
-    件数が基準と同じ規則の指摘は外す。増えた規則は、commit `base_ref` に無い指摘だけを残し（既にある指摘で増えた箇所が埋もれない）、
-    `only` があればすべて残す（呼び手が `only` で絞る）。構文の誤りで読めないファイルがあれば、件数が足りないので比べない。
-    `only` がラチェットを当てる規則を 1 つも選んでいなければ、基準を読まず、比べず、下げない。
+    件数が基準と同じ規則の指摘は外す。増えた規則は理由と件数だけにし、`only` があれば指摘もすべて残す（呼び手が `only` で絞る）。
+    構文の誤りで読めないファイルがあれば、件数が足りないので比べない。`only` がラチェットを当てる規則を 1 つも選んでいなければ、
+    基準を読まず、比べず、下げない。
     """
     kept = [f for f in found if f.rule not in RATCHETED]
-    watched = [rule for rule in RATCHETED if not only or rule in only]
+    watched = sorted(rule for rule in RATCHETED if not only or rule in only)
     if not watched or any(f.rule == "syntax" for f in kept):
         return kept
     path = contained(scope.plugin_root, ratchet.RATCHET_REL)
@@ -228,11 +163,10 @@ def ratcheted(
         commit = _git_stdout(scope.repo_root, "rev-parse", "HEAD").decode().strip()
         limits = ratchet.lower(path, counts, limits, commit, datetime.now(timezone.utc).date().isoformat())
         written.append(ratchet.RATCHET_REL)
-    with _base_of(scope, base_ref) as base:
-        why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base))
-        over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
-        listed = [f for f in found if f.rule in over]
-        kept += listed if only else _added(scope, listed, rules, base)
+    why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base_ref))
+    over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
+    if only:
+        kept += [f for f in found if f.rule in over]
     return sorted(kept + [Finding(rule, scope.rel(path), 1, text) for rule, text in {**why, **over}.items()], key=_order)
 
 
@@ -246,14 +180,14 @@ def select(
     if only and set(only) == {spec_docs.REVIEW_ITEMS} and written is None:
         return spec_docs.check_review_items(scope, rules)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    found = ratcheted(scope, check(scope, rules, written is not None, written), rules, only, written, base_ref)
+    found = ratcheted(scope, check(scope, rules, written is not None, written), only, written, base_ref)
     return [f for f in found if not only or f.rule in only]
 
 
-def _git_stdout(root: Path, *args: str) -> bytes:
+def _git_stdout(root: Path, *args: str, stdin: str = "") -> bytes:
     """git の標準出力。起動できない・失敗したときは `CheckError`。"""
     try:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=True).stdout
+        return subprocess.run(["git", "-C", str(root), *args], input=stdin.encode(), capture_output=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git の worktree で実行する: {root}: git {' '.join(args)}") from exc
 

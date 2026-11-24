@@ -38,7 +38,6 @@ def _findings(places: Places, min_files: int, what: str) -> list[Finding]:
             min(files),
             files[min(files)],
             f"{what} {key!r} が {len(files)} ファイルにある: {', '.join(sorted(files))}",
-            f"{what} {key}",
         )
         for key, files in places.items()
         if len(files) >= min_files

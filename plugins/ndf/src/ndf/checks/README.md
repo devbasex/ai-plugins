@@ -26,7 +26,7 @@ plugins/ndf/bin/ndf check
 
 | 範囲 | 当てる規則 |
 | --- | --- |
-| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・コピーで生まれた重複・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
+| `src/` の下の `.py` | 兆候・構造・輪・事実の重複・コピーで生まれた重複・内部データの名前・子の表・I1・I3・禁止語・環境変数の読み（spec-io） |
 | `tests/` の下の `.py` | 行数の上限・I3・禁止語 |
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
@@ -104,11 +104,11 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 | 場合 | 結果 |
 | --- | --- |
 | 件数が基準と同じ | 通る |
-| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出し、`--ratchet-base <commit>` を渡したときは、その commit のコードを、その commit の `rules.json` で見たときに無い指摘（増えた箇所）も出すので減らす。その規則の指摘の全件は `--only copy-dup` を渡したときだけ出す |
+| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出す。指摘の全件は `--only copy-dup` を渡したときだけ出すので、変更の前のコードの出力と比べて増えた分を減らす |
 | 件数が基準より少ない（重複を減らして基準を据え置いた） | 落ちる。`ndf check --write-spec` が基準を今の件数へ下げるので、`ratchet.json` を同じ Pull Request に含める |
 | 基準が、変更の前の基準より大きい（`--ratchet-base <commit>` を渡したとき） | 落ちる。基準を上げる経路は無い |
 
-- CI は `--ratchet-base` に、Pull Request と merge queue では `HEAD^1`（マージ先の先頭と、1 つ前の項目のマージ）、push では push の前の先頭（`github.event.before`。複数のコミットの push では `HEAD^1` と違う）を渡す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
+- CI は `--ratchet-base HEAD^1`（Pull Request・merge queue・push のどれも、変更の前の先頭）を渡す。その commit に `ratchet.json` が無ければ引き上げを見ない。commit を読めなければ検査を止める（`config_broken`）
 - `measured` と `commit` は、基準を書いた日と、その時の `HEAD` である
 - 構文の誤りで読めないファイルがあれば、件数が足りないので比べず、基準も下げない
 - `--only` がラチェットを当てる規則を選んでいなければ、基準を読まず、比べず、`--write-spec` でも下げない

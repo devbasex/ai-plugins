@@ -186,8 +186,7 @@ plugins/ndf/
 | `check` | `src/ndf/checks/copy_dup.py` | 新設 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | 上の 2 つを並べて返す（既存の規則と同じ入口の形） |
 | `baseline` | `src/ndf/checks/ratchet.py` | 新設 | `baseline() -> dict[str, int]` | 規則ごとの基準の数 |
 | `verdicts` | `src/ndf/checks/ratchet.py` | 新設 | `verdicts(counts: Mapping[str, int], base: Mapping[str, int] \| None) -> list[str]` | 今の件数が基準と違う規則と、基準を前の値より上げた規則を文にする（空なら通る） |
-| `below` | `src/ndf/checks/ratchet.py` | 新設 | `below(counts: Mapping[str, int], current: Mapping[str, Baseline]) -> list[str]` | 基準を下回った規則の名前を返す（空なら `lower` も `HEAD` の取得もしない） |
-| `lower` | `src/ndf/checks/ratchet.py` | 新設 | `lower(path: Path, counts: Mapping[str, int], current: Mapping[str, Baseline], commit: str, day: str) -> dict[str, Baseline]` | 基準を下回った規則の基準を書き直し、書いた後の基準を返す |
+| `lower` | `src/ndf/checks/ratchet.py` | 新設 | `lower(counts: Mapping[str, int], commit: str, day: str) -> list[str]` | 基準を下回った規則の基準を書き直し、書いた規則の名前を返す |
 
 - `top_functions`
   - 事前条件: `trees` は `src/` の下の `.py` だけ
@@ -197,7 +196,7 @@ plugins/ndf/
   - 事後条件: docstring を除く。4 ファイル以上に出る文字列 1 つにつき 1 件
 - `verdicts`
   - 事後条件: 3 つの場合を違反にする。(1) 今の件数が基準の `max` を超える（増やした）。(2) 今の件数が基準の `max` を下回る（減らしたのに基準を据え置いた。理由に「`ndf check --write-spec` で基準を下げてコミットする」を出す）。(3) `base`（変更の前の `ratchet.json` の `max`）があり、今の `max` がそれを上回る（基準を引き上げた）。つまり CI を通るのは「件数 = 基準 ≤ 変更の前の基準」のときだけで、重複を減らす PR は基準の更新を同じ PR に含めることになり、基準を上げて増加を通す PR は落ちる
-  - `base` の出所: CI のジョブ `script-structure-check` は 2 世代を取っている（Pull Request と merge queue では `HEAD^1` が変更の前の先頭）。push では push の前の先頭（`github.event.before`）を取得して渡す。`ndf check --ratchet-base <変更の前>` を打ち、引数で受けた commit の `<変更の前>:plugins/ndf/src/ndf/checks/ratchet.json` を読む（`HEAD^1` に決め打ちしない。基準と、増えた箇所を調べるときの変更の前の木・本文は、1 つの `git cat-file --batch` から読む。`checks/git_objects.py`）。宛先に `ratchet.json` が無い（規則を足す PR 自身）ときと、手元で `--ratchet-base` を付けないときは `base` を `None` にし、(3) だけを見ない
+  - `base` の出所: CI のジョブ `script-structure-check` は 2 世代を取っている（`HEAD^1` が宛先の先頭）。`ndf check --ratchet-base HEAD^1` を打ち、`git show HEAD^1:plugins/ndf/src/ndf/checks/ratchet.json` を読む（git の呼び出しは 1 回）。宛先に `ratchet.json` が無い（規則を足す PR 自身）ときと、手元で `--ratchet-base` を付けないときは `base` を `None` にし、(3) だけを見ない
   - 基準を上げる経路は持たない（決定 4。規則の数え方を変えて件数が増えるときは、数え方を変える PR で重複も減らすか、規則の `rules.json` の除外を足す）
 - `lower`
   - 事前条件: `ndf check --write-spec` のときだけ呼ばれる（検査だけのときは基準を書き換えない）。CI は `--write-spec` を付けずに打ち、基準を据え置いた PR は `verdicts` の (2) で落ちるので、重複を減らした人は手元で `--write-spec` を打って `ratchet.json` を同じ PR にコミットする
@@ -420,9 +419,8 @@ plugins/ndf/
 | スナップショット | `read_record("stage-snapshot", ...)` |
 | プランの出力の記録 `outputs.json` | `core/plan/records.py` の `_stored_outputs`（`recorded_outputs`・`_add_outputs` が通す） |
 | プランの結果のバックアップ `results/<回>.json` の `outputs` | `core/plan/runner.py` の `stored_result`（`_stored`・`RepoSources.plan_record`・`invoke._previous`・`ndf plan wait` が通す） |
-| 工程の入力の写し `values.json` の `inputs` | `contracts/worker_kinds.py` の `values_of`（`read_values`・`ndf answer work` の `values_in` が通す） |
 
-後の 3 つの移し方は `internal.stage_values` だけが持つ。プランの出力と工程の入力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。プランの参照（`refs`）が明示した `key: "version"` は、`refs._output` が同じ対応（`internal.stage_value_key`）で `product_version` を引く。
+後の 2 つの移し方は `internal.plan_outputs` だけが持つ。プランの出力は形の版を持たず、`version` を持てば旧い形と見る（`product_version` もあればそちらを残す）。
 
 `stored_result` は、移す前に保存済みの結果の形の版を確かめる。今の版より大きければ `InternalError`（`precondition`）を投げ、`routes` も `outputs` も返さない（プラグインを戻した後に、新しい版の `routes` で後続のステップを流さない）。`ndf plan next` は `ndf.cli` が、`ndf plan wait` は `_watched` が、参照は `RepoSources.plan_record`（`Unreadable`）が、工程は `invoke.plan_failure` が `precondition` の停止にする。
 
@@ -430,9 +428,8 @@ plugins/ndf/
 
 ### 結果の版と、形の違う結果
 
-- **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は固定の `ndf`・`cause.kind` は `invalid`。元の `tool` は形が合っても秘密を含みうるので引き継がない。`result.refused_newer` の代わりの結果も同じ）を 1 行で出し、`invalid` の終了コードを返す。**代わりの結果の `detail` には、確かめた値も `ValidationError.message` も入れない。** `schema_errors` の文は値やオブジェクト全体を含みうるので、それを標準出力へ移すと、元の結果を出さない措置が効かず、不正な結果に混ざった秘密や利用者のデータが工程や閲覧者へ渡る。`detail` は固定の文「結果 JSON の形が違う（<件数> 件）」に、誤りごとのスキーマの側の場所（`absolute_schema_path`。スキーマのキーと番号だけで値を含まない）と規則の名前（`validator`。例 `required`・`enum`）を足して組む。値を含む誤りの文は、今と同じく標準エラーにだけ書く。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
-- **読む側（プランのステップ。`core/plan/steps.py` の `last_json`）:** 部分的な結果 JSON も受けるので `result.errors` では確かめず、今の版より大きい `version` の結果だけを代わりの `stopped`・`precondition`（`result.refused_newer`）に替える。`outputs`・`routes` を使う前に替わるので、後続のステップへ進まない。ステップの結果に `newer` を付け、`transition_decide` がプランの `on_cause`・`on_fail`・`retry` より前にそのステップで止める（ふつうの `precondition` と同じルートに載せると、`end`・別のステップ・打ち直しへ進む）。代わりの `stopped` は `cause.instance` に `result-newer`（`result.NEWER_INSTANCE`）を持ち、ステップのコマンドの中（`ndf worker run`・別のプランの `ndf plan next`）で受けて止まった結果と、`ndf plan next` が新しい版の保存済みの結果を読んで止まった結果（`InternalError.instance`）も同じ値を持つので、`steps.outcome_of` はそれも `newer` と見る（`result.stopped_by_newer`）
-- **読む側（worker の結果ファイル。`core/worker.py` の `_deliver`）:** `status`・`outputs`・`routes` を読む前に今の版より大きい `version` を見て、`precondition`（`cause.instance` は `result-newer`）で止める。探した記録の欠けでの再起動（`_missing_record`）もしない
+- **書く側（`result.emit`）:** 今は形が違うと標準エラーへ書いて終了コードだけを返し、結果 JSON を出さない。呼び手（工程を流す `invoke`）は結果の欠けを `bad_report` にするので、受け入れ条件 #2339 の 1 の「書かずに `stopped` を返す」にならない。`emit` は形が違うとき、元の結果を出さずに、代わりの `stopped` の結果（`tool` は元の `tool` が `^[a-z][a-z0-9-]*$` に合う文字列ならそれ、無ければ `ndf`・`cause.kind` は `invalid`）を 1 行で出し、`invalid` の終了コードを返す。**代わりの結果の `detail` には、確かめた値も `ValidationError.message` も入れない。** `schema_errors` の文は値やオブジェクト全体を含みうるので、それを標準出力へ移すと、元の結果を出さない措置が効かず、不正な結果に混ざった秘密や利用者のデータが工程や閲覧者へ渡る。`detail` は固定の文「結果 JSON の形が違う（<件数> 件）」に、誤りごとのスキーマの側の場所（`absolute_schema_path`。スキーマのキーと番号だけで値を含まない）と規則の名前（`validator`。例 `required`・`enum`）を足して組む。値を含む誤りの文は、今と同じく標準エラーにだけ書く。代わりの結果も形が合わない（`causes` の表が読めない）ときだけ、今の `emit_unchecked` の経路で出す
+- **読む側（プランのステップ。`core/plan/steps.py` の `last_json`）:** 部分的な結果 JSON も受けるので `result.errors` では確かめず、今の版より大きい `version` の結果だけを代わりの `stopped`・`precondition`（`result.refused_newer`）に替える。`outputs`・`routes` を使う前に替わるので、後続のステップへ進まない
 - **読む側（`invoke.read_report`・`_call_skill`）:** 結果の `version` が無ければ版 1、1 なら今の版として `result.errors` で確かめる（今と同じ）。今の版より大きい版は形の違い（`bad_report`）と分け、`stopped`・`precondition`（「新しい版の結果を古い NDF が受け取った。プラグインを更新する」）の `StageResult` にする。整数でない `version` は形の違いとして今の `bad_report` に入れる
 
 ### 関数の仕様

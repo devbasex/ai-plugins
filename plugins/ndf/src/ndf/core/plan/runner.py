@@ -165,8 +165,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     """手を実行する。ステップは耐久ステップ、待ちは耐久の recv で行う。"""
     if isinstance(act, RunStep):
         out = run_step(spec, act.step, act.attempt)
-        # 更新の前に済んだ耐久ステップの記録は newer を持たない
-        return Outcome(out["status"], out["kind"], out["retry_after"], newer=out.get("newer") is True)
+        return Outcome(out["status"], out["kind"], out["retry_after"])
     if isinstance(act, Sleep):
         durable.recv(TOPIC_RETRY, act.seconds)
         return Outcome(SLEPT)
@@ -194,8 +193,7 @@ def plan_workflow(spec: dict[str, Any]) -> dict[str, Any]:
     plan = model.parse(spec["plan"])
     state = transition_decide.start_state(plan, spec["start"], spec["prelude"])
     final = loop.run(functools.partial(_decide_and_record, spec, plan), functools.partial(_perform, spec), state)
-    said = {"status": final.status, "kind": final.kind, "detail": final.detail, "last": final.last, "count": final.count}
-    return {**said, "newer": final.newer}
+    return {"status": final.status, "kind": final.kind, "detail": final.detail, "last": final.last, "count": final.count}
 
 
 # --- 組み立て -----------------------------------------------------------------------------
@@ -452,9 +450,7 @@ def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optiona
         if final["last"] in rec.step_gaps:
             # 工程の failed の理由はこの説明をそのまま載せるので、欠けの名前を末尾に添える（#3908）
             detail = f"{detail}（欠け: {', '.join(sorted({g['name'] for g in rec.step_gaps[final['last']]}))}）"
-        # 更新の前に終わった回の記録は newer を持たない
-        instance = result.NEWER_INSTANCE if final.get("newer") is True else None
-        return result.stopped(TOOL, final["kind"], detail, instance=instance, items=items, metrics=metrics, next=again, gaps=gaps, **shared)
+        return result.stopped(TOOL, final["kind"], detail, items=items, metrics=metrics, next=again, gaps=gaps, **shared)
     after = inv.plan.following(final["last"])
     cont = result.command(TOOL, "next", *_with_start(inv.again, after)) if after else None
     return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None}, **shared)

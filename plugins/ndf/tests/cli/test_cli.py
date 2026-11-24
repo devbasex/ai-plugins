@@ -9,9 +9,8 @@ from pathlib import Path
 import pytest
 
 from ndf import cli, identity
-from ndf.contracts import causes, result
+from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
-from ndf.core.plan import records
 from ndf.domains.relay import accounts
 from ndf.testing import isolation
 
@@ -189,16 +188,6 @@ def test_internal_data_error_ends_with_a_stopped_result_of_its_kind(monkeypatch,
     assert cli.main(["fake"]) == causes.exit_code(kind)
     report = last_result(capsys.readouterr().out)
     assert (report["tool"], report["status"], report["cause"]) == ("fake", "stopped", {"kind": kind, "detail": "内部データの形が違う"})
-
-
-def test_a_newer_stored_result_is_told_to_the_outer_plan(monkeypatch, capsys, last_result, tmp_path):
-    # PR 4358 の r6-1: 新しいバージョンの保存済みの結果で止まった結果を、外のプランがふつうの precondition と見分ける
-    path = tmp_path / "r.json"
-    path.write_text('{"version": 2, "status": "ok"}', encoding="utf-8")
-    _fake_subcommand(monkeypatch, lambda argv: records.read_result(path))
-
-    assert cli.main(["fake"]) == causes.exit_code("precondition")
-    assert result.stopped_by_newer(last_result(capsys.readouterr().out))
 
 
 def test_usage_error_of_a_subcommand_ends_with_an_invalid_result(monkeypatch, capsys, last_result):

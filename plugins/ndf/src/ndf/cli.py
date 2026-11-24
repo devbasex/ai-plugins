@@ -131,9 +131,9 @@ def main(argv: list[str] | None = None) -> int:
         return result.emit_unchecked(TOOL, "config_broken", f"コントラクトのファイルが読めない: {exc}")
 
 
-def _stop(tool: str, kind: str, detail: str, items: list[dict[str, str]] | None = None, instance: str | None = None) -> int:
+def _stop(tool: str, kind: str, detail: str, items: list[dict[str, str]] | None = None) -> int:
     """止まった結果 JSON を出し、その終了コードを返す。"""
-    return result.emit(result.stopped(tool, kind, detail, items=items, instance=instance))
+    return result.emit(result.stopped(tool, kind, detail, items=items))
 
 
 def _print_retired(items: list[dict[str, str]]) -> None:
@@ -193,7 +193,7 @@ def _call(name: str, module: str, argv: list[str]) -> int:
     except contracts.ContractError:
         raise
     except internal.InternalError as exc:  # 内部データの形が違う・種類が無い・新しいバージョン（種類は例外が持つ）
-        return _stop(name, exc.kind, str(exc), instance=exc.instance)
+        return _stop(name, exc.kind, str(exc))
     except Exception as exc:  # サブコマンドが捕まえない例外も結果 JSON（stopped/unknown）で終える
         log.exception("サブコマンドが捕まえない例外で止まった: %s", name)
         return _stop(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}")

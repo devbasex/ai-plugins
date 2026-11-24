@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from ndf.core import loop
 from ndf.core.plan import model, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Choice, Outcome, RunStep, Sleep
@@ -51,23 +49,6 @@ def test_on_cause_picks_the_step_for_the_kind():
     acts, final = _drive(plan, {"a": [Outcome("stopped", "test_failed")]})
     assert _ran(acts) == ["a", "fix"]
     assert final.status == "ok"
-
-
-@pytest.mark.parametrize(
-    "routes",
-    [
-        {"on_cause": {"precondition": "fix"}},
-        {"on_cause": {"precondition": "end"}},
-        {"on_cause": {"precondition": "retry"}, "retry": {"precondition": {"attempts": 2, "interval": 5}}},
-        {"on_fail": "fix"},
-    ],
-)
-def test_a_result_of_a_newer_version_stops_before_the_routes_of_the_plan(routes):
-    plan = _plan({"id": "a", **routes}, {"id": "b"}, {"id": "fix", "next": "end"})
-    acts, final = _drive(plan, {"a": [Outcome("stopped", "precondition", newer=True)]})
-    assert acts == [RunStep("a", 0)] and (final.status, final.kind) == ("stopped", "precondition")
-    assert final.newer
-    assert [(c.frm, c.to, c.cause) for c in final.choices] == [("a", "stop", "precondition")]
 
 
 def test_retry_waits_then_reruns_the_same_step_without_counting_it():

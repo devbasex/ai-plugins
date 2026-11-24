@@ -226,24 +226,6 @@ def test_run_checks_the_outputs_it_is_told_to_require(tmp_path, monkeypatch, cap
     assert out["cause"]["kind"] == "incomplete" and [g["name"] for g in out["gaps"]] == ["worktree", "branch"]
 
 
-@pytest.mark.parametrize("status", ["ok", "gate", "まだ無い語"])
-@pytest.mark.parametrize("kind", ["worktree", "ci-fix"])
-def test_run_stops_at_a_result_file_of_a_newer_version(tmp_path, monkeypatch, capsys, kind, status):
-    # PR 4358 の r4-4: 出力もルートも読まず、探した記録を求める再起動もせずに止める
-    body = {"version": 2, "status": status, "summary": "済んだ", "outputs": {"worktree": "/r/w"}, "routes": {"approved": None}}
-    calls = []
-
-    def call(argv, prompt, timeout, cwd):
-        calls.append(prompt)
-        (tmp_path / "out.json").write_text(json.dumps(body), encoding="utf-8")
-        return claude.ClaudeReply(True, None, "終えた", 0.5)
-
-    assert _run_with(tmp_path, monkeypatch, call, kind=kind) == causes.exit_code("precondition")
-    out = json.loads(capsys.readouterr().out)
-    assert out["cause"]["kind"] == "precondition" and "outputs" not in out and "routes" not in out and len(calls) == 1
-    assert result.stopped_by_newer(out)
-
-
 SEARCHED = {"terms": ["詳細設計"], "files": ["tests/test_stage_check.py"]}
 
 
