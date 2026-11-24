@@ -128,7 +128,7 @@ graph LR
 
 ### 記録のコメントの一覧（足す欄）
 
-`open_block` の 1 件（`id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread`）に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足す。`by: ndf` の指摘の照合キー（`citation_key`）は手元のジャーナルだけに持ち、載せない。未解決の重い指摘に加えて、`redline` の指摘と `by: ndf` の指摘は重さによらず載せる。
+`open_block` の 1 件（`id`・`text`・`by`・`severity`・`path`・`line`・`section`・`thread`）に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity`・`record_id`（MVV の記録のキー。内容から作らない乱数の値）を足す。`by: ndf` の指摘の照合キー（`citation_key`）は手元のジャーナルだけに持ち、載せない。未解決の重い指摘に加えて、`redline` の指摘と `by: ndf` の指摘は重さによらず載せる。
 
 ### cross-review の結果 JSON（足すキー）
 
@@ -328,10 +328,10 @@ sequenceDiagram
 | 3（4090-4） | NDF の指摘が 0 件の PR で、最後の確かめの `git diff` が失敗すると `mvv_unresolved` で止まる。そのラウンドの記録は `mvv_checked: false` で、打ち直しの起動はその head を収束として再利用しない。最後のラウンドで修正を push した後は新しい head で読み直す。`mvv_checked: true` の収束がある打ち直しは、確かめを重ねずに収束を返す | 指摘が無いと止まらない・失敗したラウンドの収束を返す・push 前の古い対象で確かめる・再利用の経路で `checked_head` が無く止まる |
 | 3（4090-12） | 未解決の `by: ndf` の指摘のスレッドを別の実行が resolve しても、`_settle_resolved` の後も `unresolved` のまま | resolve で `fixed` にする |
 | 4 | `P`・`C` の `mvv` の指摘は修正担当へ渡らず `redlines` に載り、`mvv_unresolved` にも `unresolved_finding` にもならない。MVV の指摘の未解決が上限で残ると `mvv_unresolved` で止まる側の結果になる | レッドラインを修正担当へ渡す・レッドラインで止まる・未解決が `incomplete` で進む |
-| 4（4090-5） | 未解決の `Value 5`・`P1` のレッドライン・`by: ndf` の指摘を持つ記録のコメントを残し、空の状態ディレクトリから再開すると、3 つが分類と `judged_mvv` を持って戻る。識別子の違う指摘は分類を外し、重さを `unpinned_severity` へ戻す。人が resolve した `by: ndf` のスレッドの指摘も戻り、確かめが失敗した起動では未解決のまま。一覧に照合キーが無く、同じ誤りの再検出で元の指摘が `fixed` になり新しい指摘が 1 回だけ足される。検出から再開と `outputs.mvv.citations`・MVV の記録までを 1 本で通す | 普通の指摘として戻る・`minor` のレッドラインが一覧に載らない・固定した重さのまま戻る・resolve で消える・`by: ndf` の指摘に `judged_mvv` が無い・一覧に照合キーを載せる |
+| 4（4090-5） | 未解決の `Value 5`・`P1` のレッドライン・`by: ndf` の指摘を持つ記録のコメントを残し、空の状態ディレクトリから再開すると、3 つが分類と `judged_mvv` を持って戻る。識別子の違う指摘は分類を外し、重さを `unpinned_severity` へ戻す。人が resolve した `by: ndf` のスレッドの指摘も戻り、確かめが失敗した起動では未解決のまま。一覧に照合キーが無く、`record_id` は戻り、同じ誤りの再検出で元の指摘が元の記録のキーで `fixed` になり新しい指摘が 1 回だけ足される。検出から再開と `outputs.mvv.citations`・MVV の記録までを 1 本で通す | 普通の指摘として戻る・`minor` のレッドラインが一覧に載らない・固定した重さのまま戻る・resolve で消える・`by: ndf` の指摘に `judged_mvv` が無い・一覧に照合キーを載せる |
 | 4（4090-6） | 前のバージョンで `P1` とされた指摘が新しいバージョンで `Value 5` として出し直されると、レッドラインでなくなり、`major` で修正担当へ渡り、収束を止める。前の分類は `mvv_history` に残る。出し直されない前のバージョンの `fixed`・`unresolved`・`redline` の指摘は今回の `outputs.mvv` と `record_review` に載らない | 前のバージョンのレッドラインが今回の記録に載る・前の分類で差し戻しを抑える・履歴を消す |
 | 4（4090-7） | 見送りの理由・レッドラインの本文・根拠の行の項目に偽の秘密を入れても、`outputs.mvv` と `mvv-validation.jsonl`・`mvv-signals.jsonl` の `key` を含むどの欄にも原文もその小文字の形も無く、同じ指摘の再実行で記録が増えない。別々の非公開リポジトリへの参照だけが違う 2 つの見送りは `review_disputed` が 2 件になる。参照先の公開範囲を照会できない起動でも結果が返り、`withheld: true` の記録と `review_disputed` が書かれ、次の起動で同じ指摘が直されても `count_signals` で 1 件のまま（`fast` の設計承認ゲートを省かないことは #3959 の実装で縛る） | 伏せずに書く・`key` に本文の断片を書く・伏せた後の値で別々の指摘を 1 つにする・`format` の `cited` に行の原文を入れる・照会の失敗で結果を返さないか記録を書かない |
-| 5 | MVV の指摘ごとに `mvv-review` の行が書かれ、見送りは `review_disputed` として `count_signals` の「判定できない」に数えられる。別の起動で id が変わっても同じ指摘は 1 件、新しい版では記録と兆候の両方が書かれる | 見送りが数えられない・根拠の行の誤りが数えられる・id で重ねる・旧版の行が新しい版の記録を抑える |
+| 5 | MVV の指摘ごとに `mvv-review` の行が書かれ、見送りは `review_disputed` として `count_signals` の「判定できない」に数えられる。記録のコメントから戻して id が変わっても同じ指摘は 1 件、新しい版では記録と兆候の両方が書かれる | 見送りが数えられない・根拠の行の誤りが数えられる・id で重ねる・旧版の行が新しい版の記録を抑える |
 | 6 | 4 つの参照のアンカーが `project-mvv.md` の節を指す（リンクの検査 `check-markdown-links.py`） | 節の見出しを変えて参照が切れる |
 | 7 | 手動確認（リリースの後）。要求仕様の「リリース後の確認の計画」 | — |
 
