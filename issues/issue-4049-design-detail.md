@@ -72,7 +72,7 @@ plugins/ndf/
   - 副作用: `STOP_LOCK` を `held` で取る（`drop_question` と同じ取り方）。`OSError` は偽にして外へ出さない
 - `record_monitor`
   - 事後条件: 真を返したとき、今の起動・今の会話の記録の `monitors` は 1 以上で、`count` と `source` は排他の中で読み直した値のまま（既に 1 以上なら排他を取らず、ファイルに触れない）。記録が無い・排他を `wait` 秒で取れない・今の起動が `launch` でない・`write_busy` が偽なら偽で、ファイルは呼ぶ前のまま
-  - 副作用: `record_start` と同じ
+  - 副作用: 監視が 0 件のときだけ、`record_start` と同じ取り方で `STOP_LOCK` を取る。`OSError` は偽にして外へ出さない
 - `read_busy`
   - 副作用: 無し（読むだけ）。`launch` が `LAUNCH_ID_RE` に合わない・ファイルが無い・`OSError`・`UnicodeDecodeError`・JSON が壊れた・JSON の `launch` が引数の `launch` と違うか無い・`session_id` が違う・`count` が `bool` か負か整数でない・`source` が 3 つのどれでもない・`at` が文字列でないか `datetime.fromisoformat` で読めないかタイムゾーンを持たない（`now_iso` の形でない）ときは None。例外を外へ出さない（見回りの `SignalError` の止まり（`_halt_broken`）へ流さない）
 - `drop_other_busy`
@@ -107,7 +107,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | ラッパーが 0 件を読んでから子を止めるまでと、子の開始の記録（端末の入力・背景の作業の知らせ・予定の起床で子が動いた応答） | `busy-<起動>.json`・`launch.json` | 子を止める排他 `STOP_LOCK` で直列にする。`record_start` は排他の中で今の起動を照らして書き、ラッパーの `_stop_if_clear` は排他の中で記録を読み直し、0 件（止まりの起動し直しは 0 件か不明）でなければ子に何もしない。ラッパーが先に排他を取れば、子を止めて起動を外した後に `record_start` が今の起動の違いで偽になり、開始は拒否される（止めた子の開始は始まらない）。`record_start` が先なら、ラッパーは読み直しで 1 件以上を見て止めない | 排他を取れなかったラッパーは何もせず次の見回りで決め直す |
 | 同じ応答の並ぶ PreToolUse（Agent を 2 つ同時に起動） | `busy-<起動>.json` | `STOP_LOCK` を順に取る。どちらも件数 1・`start` を置き換えで書く | 同じ値を何度書いても同じ |
-| 監視の開始と作業の開始の並ぶ PreToolUse | 同上 | どちらも `STOP_LOCK` を順に取る。監視の開始は排他の中で読み直した作業の件数を保つ | 作業の開始が後なら監視は 0 に戻るが、作業が 1 件以上なので待つ。次の Stop が両方を書き直す |
+| 監視の開始と作業の開始の並ぶ PreToolUse | 同上 | 作業の開始（`record_start`）は必ず `STOP_LOCK` を取る。監視の開始（`record_monitor`）は、まず排他なしで記録を読み、監視が既に 1 件以上なら排他を取らずに真を返す。監視が 0 件のときだけ `STOP_LOCK` を取って記録を読み直し、読み直した作業の件数を保って監視を 1 件以上にする | 作業の開始が後なら（監視の開始が排他なしで読んだ後に書く場合を含む）監視は 0 に戻るが、作業が 1 件以上なので待つ。次の Stop が両方を書き直す |
 | PreToolUse と Stop | 同上 | Stop は排他を取らない。Claude Code は応答の Tool の呼び出しを終えてから Stop を発火し、Stop の hook を終えてから次の応答へ進む | Stop が後に書いて正しい件数に置き換わる |
 | 止めた子の遅れた hook と新しい起動 | 起動ごとのファイル | 取らない。遅れた hook は旧い起動のファイルにしか書けない | 旧い起動のファイルは次の起動の `drop_other_busy` が消す |
 | 入れ子の claude の hook と子の hook | 同上 | 取らない。入れ子の claude は `session_id` が違うので書かない | — |
@@ -155,7 +155,7 @@ plugins/ndf/
   - 事前条件: 表の行の `events` は `["SessionStart", "PreToolUse"]`、`tools` は `[]`（SessionStart は Tool の名前を持たず、`GuardSpec.applies` は `tools` が空のときだけ当てるので、Tool の絞り込みは `_starts_background` が行う）
   - 事後条件（先に行う判定）: 次の順で照らし、どれかに当たれば None（(c) の監視の開始だけは、下の `_record_monitor` で監視を記録してから None。ほかは記録に触れない）。(a) SessionStart で `source` が `startup`・`resume` でない（`compact`・`clear` は背景の作業が残りうるので 0 件を書かない）。(b) `_target(os.environ, ctx.session_id)` が偽（中継の外・旧いラッパーの下で `NDF_RELAY_SESSION` が無い・入れ子の claude）。(c) PreToolUse で `_starts_background(ctx.tool, ctx.tool_input, svc.params)` が偽。(b) より先に、Tool の名前と Bash の `run_in_background` の値の比べだけの `_may_start` で、作業を始め得ない呼び出し（Read・フォアグラウンドの Bash など）を通す（(b) が環境変数のコントラクトを読むため。`on_deadline` も同じ）。(b) を (c) より先に照らすので、中継の外と入れ子の claude の PreToolUse は `task_kind` の構文解析を打たない（構文解析を打つのは、対象の子の会話の背景の Bash と Monitor だけ）。(a) と (b) は環境変数と入力の値の比べだけで、(c) は `task_kind` が例外を外へ出さないので、どれも例外を上げる経路（ファイル・JSON・正規表現の照らし）に入らない。`tools` が空の `fail_closed` の行なので、ここで例外が出ると中継の内外を問わずすべての PreToolUse が `GUARD_FAILED` で拒否される。この並びはそれを避けるための約束である
   - 事後条件（中継の対象の子の会話）: `directory = relay_dir(os.environ)`・`launch = relay_launch(os.environ)` を求める。SessionStart なら、どちらかが None のときは書かずに None（記録が無いので、ラッパーは不明として読む）、ほかは `write_busy(directory, launch, session, 0, "session")` を書いて結果を問わず None。PreToolUse なら、どちらかが None（子の保存先が消えた・起動の ID が無い）か `record_start(directory, launch, session, wait)` が偽のときは `deny(BUSY_START_FAILED)`、真ならこの実行の payload をモジュールの `_recorded` に残して None。`wait` は `hook.counter-lock` の秒（`relay_mark` と同じ取り方）。監視の開始（(c) で偽になる Monitor と背景の Bash）は、`_record_monitor` が `record_monitor(directory, launch, session, wait)` を打ち、保存先か起動の ID が無い・書けない・例外のどれでも None（監視の開始は拒否しない）
-  - 副作用: `busy-<起動>.json` を書く。PreToolUse では `STOP_LOCK` を取る
+  - 副作用: `busy-<起動>.json` を書く。PreToolUse では `STOP_LOCK` を取る（監視の開始は、監視が 0 件のときだけ）
 - `on_deadline`
   - 事後条件: 事象が PreToolUse で、次の順にすべて当たるときだけ `BUSY_START_FAILED` を返す。(1) `_may_start(tool, tool_input)` が真（作業を始め得る呼び出し。Read・フォアグラウンドの Bash などはここで通し、(2) の環境変数のコントラクトを読まない）。(2) `_target(env, session_id)` が真（子の会話）。(3) `_recorded is not payload`（この実行の `check` が書き終えていない）。(4) `_starts_background(tool, tool_input, table_params())` が真（作業の開始）。`table_params()` の読み込みと `task_kind` の構文解析は (1)〜(3) を通った呼び出しだけで行い、作業を始め得ない呼び出し・中継の外・入れ子の claude・書き終えた呼び出しでは行わない。ほかは None（通す。SessionStart の締め切りは書かずに通し、ラッパーは不明として読む）。`check` の分類の結果は受け取らず、同じ `table_params()` の宣言で分け直す（先の guard の実行中に締め切りを迎え、`check` がまだ呼ばれていなくても同じ結果になる）。`ask.on_deadline` と同じ型。先に行う判定と同じく例外を上げる経路に入らない（`table_params` と `task_kind` は例外を外へ出さない）
   - 副作用: 無し
