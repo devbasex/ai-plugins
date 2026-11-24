@@ -141,9 +141,16 @@ def test_records_of_other_launches_are_dropped(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == [busy(tmp_path, B).name]
 
 
+@pytest.mark.parametrize("name", ["notes", "A" * 32, "a" * 31, "a" * 33])
+def test_file_not_named_by_a_launch_id_is_not_dropped(tmp_path, name):
+    busy(tmp_path, name).write_text("{}", encoding="utf-8")
+    signals.drop_other_busy(tmp_path, B)
+    assert busy(tmp_path, name).exists()
+
+
 def test_record_that_cannot_be_dropped_does_not_keep_the_rest(tmp_path):
-    (tmp_path / "busy-0.json").mkdir()  # ディレクトリは unlink できない
+    busy(tmp_path, "0" * 32).mkdir()  # ディレクトリは unlink できない
     for launch in (A, "c" * 32):
         assert signals.write_busy(tmp_path, launch, "s1", 0, "stop")
     signals.drop_other_busy(tmp_path, B)
-    assert [p.name for p in tmp_path.iterdir()] == ["busy-0.json"]
+    assert [p.name for p in tmp_path.iterdir()] == [busy(tmp_path, "0" * 32).name]
