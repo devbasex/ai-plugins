@@ -51,15 +51,15 @@ def _parser() -> argparse.ArgumentParser:
 def adopt(obj: dict[str, Any]) -> tuple[dict[str, Any], int]:
     """結果を共通の結果スキーマと専用の結果スキーマで確かめ、書き出す結果と終了コードを決める。"""
     code = result.code_for(obj)
-    common = result.errors(obj, code)
+    # 共通の検査は 1 回だけ打ち、値を含まない文を判定・件数・標準エラーに使い回す
+    common = result.safe_errors(obj, code)
     own = sorted(contracts.broken_rule(e) for e in _own_validator().iter_errors(obj))
     if not common and not own and code is not None:
         return obj, code
-    # 共通の検査だけで止まったときも、何を直すかが分かるように、値を含まない文を全件書く
-    lines = [*result.safe_errors(obj, code), *own, *([result.NO_CODE] if code is None else [])]
+    lines = [*common, *own, *([result.NO_CODE] if code is None else [])]
     for line in dict.fromkeys(lines):
         print(f"結果の形の誤り: {line}", file=sys.stderr)
-    count = len(common) + len(own) + (code is None)
+    count = len(lines)
     return result.stopped(ENTRY, "invalid", f"結果 JSON の形が違う（{count} 件）"), causes.exit_code("invalid")
 
 

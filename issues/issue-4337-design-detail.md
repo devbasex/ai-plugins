@@ -445,11 +445,11 @@ plugins/ndf/
 
 - `adopt`
   - 事後条件: 次の 3 つの誤りが無ければ `(obj, result.code_for(obj))` を返す。1 つでもあれば `result.stopped(ENTRY, "invalid", <誤りの件数>)` と `causes.exit_code("invalid")` を返す
-    - `result.errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応）
+    - `result.safe_errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応。`result.errors` と同じ検査で、文に結果の値を含まない）
     - `contracts.broken_rules(obj, RESULT_SCHEMA)`（専用の結果スキーマ `io/document-rebuild.result`。`items` の `doc`・`metrics.readers` の形）
     - `result.code_for(obj)` が `None`（`stopped` に `cause` が無い）
-  - 副作用: 誤りがあれば、`invalid` に差し替える原因のすべてについて、結果の値を含まない文を `結果の形の誤り: <文>` の形で標準エラーへ 1 行ずつ書く。共通の検査だけで差し替えたときも、担当者が直す箇所を見つけられるようにするためである。書く文は次の 3 つで、同じ文は 1 回だけ書く。`result.errors` の文は結果の値を含むので書かない
-    - 共通の検査の文: `result.safe_errors(obj, code)`（`result.emit` が使っていた `_safe_errors` を公開に改める。スキーマの場所と規則の名前と、`status` と停止理由の対応の誤り）
+  - 副作用: 誤りがあれば、`invalid` に差し替える原因のすべてについて、結果の値を含まない文を `結果の形の誤り: <文>` の形で標準エラーへ 1 行ずつ書く。共通の検査だけで差し替えたときも、担当者が直す箇所を見つけられるようにするためである。書く文は次の 3 つで、同じ文は 1 回だけ書く。共通の検査は 1 回だけ打ち、事後条件で得た文を差し替えの判定・件数・標準エラーに使い回す。`result.errors` は呼ばない（文が結果の値を含み、同じ検査を 2 回打つことになる）
+    - 共通の検査の文: 事後条件の `result.safe_errors` の文（`result.emit` が使っていた `_safe_errors` を公開に改めたもの。スキーマの場所と規則の名前と、`status` と停止理由の対応の誤り）
     - 専用の結果スキーマの文: `contracts.broken_rule` の文
     - 終了コードを決められないとき: `result.NO_CODE`（`emit` と同じ文）
 - `main`
