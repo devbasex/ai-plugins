@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import pytest
 
+from ndf.adapters import publish
 from ndf.adapters.github import GitHubError
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
@@ -300,7 +301,6 @@ def test_legacy_record_without_an_owner_is_not_reused_after_a_rewind() -> None:
 def test_open_items_survive_the_publishing_scrub_and_hide_secrets(monkeypatch) -> None:
     """PR 3944 の r6-4: 未解決の指摘の自由記述を値ごとに伏せてから JSON にし、本文全体の公開の伏せ字が一覧の構造
     （閉じ括弧・`-->`）を壊さない。JSON の escape で表し方の変わる秘密も原文のうちに伏せる。"""
-    from ndf.adapters import publish
 
     secret = 'quote"back\\slash-secret'
     monkeypatch.setenv("NDF_TEST_API_TOKEN", secret)
@@ -461,7 +461,7 @@ def test_same_value_is_cleaned_once() -> None:
         calls.append(list(texts))
         return [t.upper() for t in texts]
 
-    once = report_decide.once(clean)
+    once = publish.once(clean)
     assert (once(["a", "b", "a"]), once(["b", "c"]), once([])) == (["A", "B", "A"], ["B", "C"], [])
     assert (calls, once.failure) == ([["a", "b"], ["c"]], None)
 
@@ -487,8 +487,8 @@ def test_issue_4090_7_failure_hides_every_value_and_the_message(error: Exception
             raise raised
         return texts
 
-    once = report_decide.once(clean)
+    once = publish.once(clean)
     assert once(["a"]) == ["a"]
     raised = error
-    assert (once(["a", "b"]), once(["c"])) == ([report_decide.WITHHELD] * 2, [report_decide.WITHHELD])
+    assert (once(["a", "b"]), once(["c"])) == ([publish.WITHHELD] * 2, [publish.WITHHELD])
     assert (once.failure, calls) == (cause, 2)

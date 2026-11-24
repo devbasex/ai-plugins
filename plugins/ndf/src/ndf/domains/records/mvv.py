@@ -45,6 +45,11 @@ _NAME_SHA = 12
 # 設計文書の決定の見出し（`### 決定 4: 題`）のレベルと題の始まり
 _DECISION_LEVEL = 3
 _DECISION = re.compile(r"決定 [0-9]+\b")
+# 承認資料の「目指す姿の根拠」のセクションの題と、セクションにする見出しの深さの上限（決定の見出しが 3 の深さなので 2 まで）
+BASIS_TITLE = "目指す姿の根拠"
+_BASIS_LEVEL = 2
+# 設計文書ごとのまとまりの見出し（深さ 1 の `# <設計文書の H1>（#<課題番号>）`）
+_BLOCK = re.compile(r".*[（(]#[0-9]+[）)]$")
 
 
 class Snapshot(NamedTuple):
@@ -321,6 +326,107 @@ def decision_lines(text: str) -> frozenset[int]:
         if head.level == _DECISION_LEVEL and _DECISION.match(head.title):
             got.update(range(head.line + 2, end + 1))
     return frozenset(got)
+
+
+class Cited(NamedTuple):
+    """`cite` の結果。`errors` は根拠の行の誤り（`citation_errors` の形）、`checked` は確かめた根拠の行の数（誤りが 0 件でも数える）。"""
+
+    errors: list[dict[str, Any]]
+    checked: int
+
+    def metrics(self, snap: Snapshot) -> dict[str, Any]:
+        """結果 JSON の `metrics`: 確かめた MVV のバージョンとベースのコミット、確かめた根拠の行の数。"""
+        return {"mvv_version": snap.version, "commit": snap.commit, "checked": self.checked}
+
+
+def _material_lines(text: str) -> list[str]:
+    """本文の行（Markdown の解析と同じく `\\r\\n`・`\\r`・`\\n` で区切る）。並びの n 番目が n 行目。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def cite(snap: Snapshot, files: Sequence[Path], require_basis: bool = False) -> Cited:
+    """承認資料 `files` の全体の根拠の行を、承認済みの MVV `snap` で確かめる（cross-review の `_citations` と同じ関数・同じ規則。#3959）。
+
+    先に `files` のすべてを UTF-8 で読み（読めなければ `OSError`・`UnicodeDecodeError`）、MVV が承認済みでなければ確かめずに
+    `Cited([], 0)`。
+    """
+    texts = [(str(path), path.read_bytes().decode("utf-8")) for path in files]
+    if snap.state != md.State.APPROVED or snap.version is None:
+        return Cited([], 0)
+    errors: list[dict[str, Any]] = []
+    checked = 0
+    for path, text in texts:
+        code, decisions = fenced_lines(text), decision_lines(text)
+        lines = [(path, no, line, no in decisions) for no, line in enumerate(_material_lines(text), 1) if no not in code]
+        checked += sum(1 for _, _, line, decision in lines if md.parse_citation(line, decision) is not None)
+        found = md.citation_errors(lines, {snap.version: snap.items}) + _Material(path, text).errors(require_basis)
+        errors += sorted(found, key=lambda e: int(e["line"]))
+    return Cited(errors, checked)
+
+
+class _Material:
+    """承認資料 1 つの見出しのコントラクト（「目指す姿の根拠」のセクション・決定の見出し・設計文書ごとのまとまり）の確かめ。行の番号は 1 始まり。"""
+
+    def __init__(self, path: str, text: str) -> None:
+        self.path, self.rows = path, _material_lines(text)
+        self.code, self.decisions = fenced_lines(text), decision_lines(text)
+        self.heads = markdown.atx_headings(text)
+        self.total = len(markdown.code_lines(text))
+
+    def _end(self, at: int, closes: Callable[[markdown.Heading], bool]) -> int:
+        """`at` 番目の見出しの範囲の最後の行（`closes` に当たる次の見出しの前の行。無ければ文書の最後の行）。"""
+        return next((h.line for h in self.heads[at + 1 :] if closes(h)), self.total)
+
+    def _basis(self, no: int) -> bool:
+        """`no` 行目が、コードブロックの外の根拠の行の形（`parse_citation` が決定の根拠の行として候補を返す行）か。"""
+        return no not in self.code and md.parse_citation(self.rows[no - 1], True) is not None
+
+    def _error(self, no: int) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "line": no,
+            "cited": self.rows[no - 1].strip(),
+            "kind": md.CITATION_HEADING,
+            "version": None,
+            "unknown": [],
+        }
+
+    def _sections(self) -> list[tuple[int, int]]:
+        """「目指す姿の根拠」のセクション（見出しの行・最後の行）。同じ深さか上位の次の見出しで閉じる。"""
+        return [
+            (h.line + 1, self._end(i, lambda g, h=h: g.level <= h.level))
+            for i, h in enumerate(self.heads)
+            if h.level <= _BASIS_LEVEL and h.title.strip() == BASIS_TITLE
+        ]
+
+    def _decisions(self, start: int, end: int) -> list[tuple[int, int]]:
+        """行 `start`〜`end` の決定の見出し（見出しの行・その下の最後の行）。"""
+        return [
+            (h.line + 1, self._end(i, lambda g: True))
+            for i, h in enumerate(self.heads)
+            if start <= h.line + 1 <= end and h.level == _DECISION_LEVEL and _DECISION.match(h.title)
+        ]
+
+    def _blocks(self) -> list[tuple[int, int]]:
+        """設計文書ごとのまとまり（見出しの行・最後の行）。まとまりの見出しが無ければ文書の全体を 1 つにする。"""
+        at = [i for i, h in enumerate(self.heads) if h.level == 1 and _BLOCK.match(h.title.strip())]
+        if not at:
+            return [(1, self.total)]
+        return [(self.heads[i].line + 1, self._end(i, lambda g: g.level == 1 and _BLOCK.match(g.title.strip()) is not None)) for i in at]
+
+    def errors(self, require_basis: bool) -> list[dict[str, Any]]:
+        """見出しのコントラクトの誤り。`require_basis`（設計承認ゲート）なら、セクションの無いまとまりと根拠の行の無い決定も誤りにする。"""
+        out: list[dict[str, Any]] = []
+        sections = self._sections()
+        for start, end in sections:
+            decisions = self._decisions(start, end)
+            out += [] if decisions else [self._error(start)]
+            out += [self._error(no) for no in range(start + 1, end + 1) if no not in self.decisions and self._basis(no)]
+            if require_basis:
+                out += [self._error(head) for head, last in decisions if not any(self._basis(no) for no in range(head + 1, last + 1))]
+        if require_basis:
+            out += [self._error(first) for first, last in self._blocks() if not any(first <= s <= last for s, _ in sections)]
+        return out
 
 
 def signals(root: Path, base_branch: str, *, warnings: list[dict[str, Any]]) -> md.Signals:
