@@ -47,7 +47,7 @@ def read_rows(
             continue
         raw: Any = None
         try:
-            raw = _object(line)
+            raw = internal.parse_line(line)
             if wanted(raw):
                 rows.append(internal.read_record(kind, raw))
             else:
@@ -57,16 +57,6 @@ def read_rows(
                 raise
             broken.append(Broken(number, str(exc), len(rows), raw))
     return rows, broken
-
-
-def _object(line: str) -> dict[str, Any]:
-    try:
-        raw = json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise internal.InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
-    if not isinstance(raw, dict):
-        raise internal.InternalError("invalid", "辞書でない")
-    return raw
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
