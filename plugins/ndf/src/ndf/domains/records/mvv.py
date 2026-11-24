@@ -13,14 +13,14 @@ import re
 import secrets
 import stat
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import git as git_mod
-from ndf.adapters import markdown, run_log
+from ndf.adapters import markdown, publish, run_log
 from ndf.adapters.github import GitHub, GitHubError, Pull
 from ndf.contracts import internal, worker_paths
 from ndf.core.converge import oscillation
@@ -517,6 +517,42 @@ def record_key(text: str) -> str:
     return _sha256(oscillation.finding_key(str(run_log.redact(text))).encode("utf-8"))
 
 
+class ReviewWrite(NamedTuple):
+    """`record_review` の結果。`written` は足した行の数、`missing` は記録に無いままの必須の行（`redline`・`deferred`）、
+    `cause` は最初の失敗の原因（`failure_cause` の形。失敗が無ければ None）。"""
+
+    written: int
+    missing: tuple[Mapping[str, Any], ...]
+    cause: Optional[str]
+
+
+# 記録の書き込みで止める失敗（どれも外へ出さず `ReviewWrite` にする）
+_WRITE_ERRORS = (OSError, UnicodeDecodeError, internal.InternalError, identity.IdentityError, MvvError)
+
+
+def failure_cause(step: str, exc: BaseException) -> str:
+    """記録を書けなかった原因（`<操作>: <例外の型>: <伏せた文>`）。秘密と認証情報の付いた URL の全体を伏せ、保存先のパスは残す。"""
+    return f"{step}: {type(exc).__name__}: {publish.scrub(str(exc), False).text}"
+
+
+def _review_rows_of(repo: str, pr: int, head: str, snapshot: Snapshot, found: Sequence[md.Judged], clean: Any) -> list[dict[str, Any]]:
+    shared = {"at": jsonl.now(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
+    texts = [t for f in found for t in f.free_texts] if clean is not None else []
+    shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
+    keyed = [(record_key(str(f.row["text"])), f) for f in found]
+    reviews = [{**md.review_entry(f, shown if clean is not None else None), "key": key} for key, f in keyed]
+    # 必須の行を先に書く（後の通常の行の失敗で、必須の行が欠けない）
+    ordered = sorted(md.one_per_key(reviews), key=lambda e: e["outcome"] not in md.REVIEW_REQUIRED)
+    return [{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in ordered]
+
+
+def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
+    """記録を書く前に止まった（呼び手が記録の `repo` を解けない）結果。今の MVV で判定した必須の行をすべて欠けとする。"""
+    found = md.judged_findings(rows, snapshot.identity)
+    keyed = [{"key": record_key(str(f.row["text"])), "outcome": f.outcome} for f in found]
+    return ReviewWrite(0, tuple(e for e in md.one_per_key(keyed) if e["outcome"] in md.REVIEW_REQUIRED), cause)
+
+
 def record_review(
     repo: str,
     pr: int,
@@ -524,25 +560,26 @@ def record_review(
     snapshot: Snapshot,
     rows: Sequence[Mapping[str, Any]],
     clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
-) -> int:
-    """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書き、書いた件数を返す。
+) -> ReviewWrite:
+    """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書く。
 
     `repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
     自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
     `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
-    書けなければ `OSError`・`MvvError`・`internal.InternalError`。
+    書けなくても例外を出さず、記録に無いままの必須の行と原因を返す（#3959。打ち直すと欠けた行だけを書く）。
     """
     found = md.judged_findings(rows, snapshot.identity)
     if not found:
-        return 0
-    shared = {"at": jsonl.now(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
-    texts = [t for f in found for t in f.free_texts] if clean is not None else []
-    shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
-    keyed = [(record_key(str(f.row["text"])), f) for f in found]
-    reviews = [{**md.review_entry(f, shown if clean is not None else None), "key": key} for key, f in keyed]
-    wrote = _append_reviews([{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in md.one_per_key(reviews)])
-    disputed = {key: str(f.row["id"]) for key, f in keyed if f.outcome == md.REVIEW_DEFERRED}
-    return wrote + _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": key, "id": fid} for key, fid in disputed.items()])
+        return ReviewWrite(0, (), None)
+    entries = _review_rows_of(repo, pr, head, snapshot, found, clean)
+    wrote, left, cause = _append_reviews(entries)
+    missing = tuple(e for e in left if e["outcome"] in md.REVIEW_REQUIRED)
+    if cause is not None:
+        return ReviewWrite(wrote, missing, cause)
+    shared = {k: entries[0][k] for k in ("at", "repo", "pr", "mvv_version", "sha256")}
+    disputed = {record_key(str(f.row["text"])): str(f.row["id"]) for f in found if f.outcome == md.REVIEW_DEFERRED}
+    more, _, cause = _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": k, "id": fid} for k, fid in disputed.items()])
+    return ReviewWrite(wrote + more, missing, cause)
 
 
 def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
@@ -550,19 +587,34 @@ def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
     return lambda row: all(row.get(k) == entry[k] for k in ("kind", "repo", "pr"))
 
 
-def _append_missing(kind: str, entries: list[dict[str, Any]], missing: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]) -> int:
-    """記録 `kind` をロックし、`entries` と同じ種類・リポジトリ・PR の記録から `missing` が選んだ記録だけを足して、足した件数を返す。"""
-    path = record_path(kind)
-    with jsonl.lock(path):
-        held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
-        new = missing(held)
-        for e in new:
-            jsonl.append(path, e, kind=kind)
-    return len(new)
+def _append_missing(
+    kind: str, entries: list[dict[str, Any]], missing: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """記録 `kind` をロックし、`entries` と同じ種類・リポジトリ・PR の記録から `missing` が選んだ記録だけを足す。
+
+    足す行を確定してから 1 行ずつ追記する。返すのは足した件数・記録に無いままの行・失敗の原因（無ければ None）。追記の前に
+    失敗したら、どの行が記録にあるか分からないので `entries` のすべてを記録に無い行とする。
+    """
+    step, new, done = "保存先の決定", list(entries), 0
+    where = "" if kind == "mvv-validation" else f"{kind}.jsonl の"
+    try:
+        path = record_path(kind)
+        step = "ロックの取得"
+        with jsonl.lock(path):
+            step = "既存の行の読み取り"
+            held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
+            new = missing(held)
+            step = "追記"
+            for e in new:
+                jsonl.append(path, e, kind=kind)
+                done += 1
+    except _WRITE_ERRORS as exc:
+        return done, new[done:], failure_cause(where + step, exc)
+    return done, [], None
 
 
-def _append_reviews(entries: list[dict[str, Any]]) -> int:
-    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足し、足した件数を返す。"""
+def _append_reviews(entries: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。"""
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         last = {r["key"]: r for r in sorted(held, key=lambda r: internal.epoch(r["at"]))}
@@ -571,16 +623,21 @@ def _append_reviews(entries: list[dict[str, Any]]) -> int:
     return _append_missing("mvv-validation", entries, missing)
 
 
-def _append_disputed(entries: list[dict[str, Any]]) -> int:
-    """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足し、足した件数を返す。"""
+def _append_disputed(entries: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足す。"""
     if not entries:
-        return 0
+        return 0, [], None
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         known = {(r.get("key"), r["mvv_version"], r.get("sha256")) for r in held}
         return [e for e in entries if (e["key"], e["mvv_version"], e["sha256"]) not in known]
 
     return _append_missing("mvv-signals", entries, missing)
+
+
+def review_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """`validation_rows` の行のうち、cross-review の指摘の記録（種類 `mvv-review`）だけ（#3959）。"""
+    return [dict(r) for r in rows if r.get("kind") == md.MVV_REVIEW]
 
 
 def validation_rows(root: Path) -> tuple[list[dict[str, Any]], list[jsonl.Broken]]:

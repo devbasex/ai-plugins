@@ -95,7 +95,8 @@ class Outcome(NamedTuple):
     今回の起動で相手役の全員が読めた最後のラウンドの HEAD（最後のラウンドの修正のコミットは含まない。#3879。そのような
     ラウンドが無ければ None。一部の相手役が読めなかったラウンドの HEAD は出さない。PR 3944 の r2-3）。`reused` は
     相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。`mvv` は結果 JSON の `outputs.mvv`
-    （承認済みのプロジェクト MVV が無ければ None。#4076）。"""
+    （承認済みのプロジェクト MVV が無ければ None。#4076）。`mvv_record_failed` は承認ゲートの判定に要る記録の行を書けなかったとき
+    の、書けなかった行（`key`・`outcome`）と固定の注意（`finish_decide.finish` の `record_failed`。#3959）。"""
 
     review: fin.Review
     summary_path: Path
@@ -104,6 +105,7 @@ class Outcome(NamedTuple):
     reviewed_head: Optional[str] = None
     reused: bool = False
     mvv: Optional[dict[str, Any]] = None
+    mvv_record_failed: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -613,46 +615,54 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
-def _record_mvv(run: _Run, snap: mvv.Snapshot, rows: Sequence[Mapping[str, Any]], clean: Optional[report_decide.Cleaner]) -> bool:
-    """MVV の記録を書き、書けたかを返す。書けなければ固定の注意を足し、例外の文（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
-    error = None
+def _record_mvv(
+    run: _Run, snap: mvv.Snapshot, rows: Sequence[Mapping[str, Any]], clean: Optional[report_decide.Cleaner]
+) -> mvv.ReviewWrite:
+    """MVV の記録を書き、結果を返す。書けなければ固定の注意を足し、伏せた原因（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
+    step = "メインディレクトリの解決"
     try:
         # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
         repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
-        mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean)
+        step = "記録の書き込み"
+        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean)
     except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
-        error = f"{type(exc).__name__}: {exc}"
+        # 記録を書く前に止まった。どの行が記録にあるか分からないので、必須の行をすべて欠けとする
+        got = mvv.unwritable(snap, rows, mvv.failure_cause(step, exc))
+    if got.cause is not None:
         run.warnings.append(RECORDS_UNWRITTEN)
     held = run.data.pop(store.MVV_RECORD_ERROR, None)
-    if error is not None:
-        run.data[store.MVV_RECORD_ERROR] = error
-    if error != held:
+    if got.cause is not None:
+        run.data[store.MVV_RECORD_ERROR] = got.cause
+    if got.cause != held:
         try:
             _save(run)
         except OSError:
             # 空き容量の不足では状態ファイルも書けない。レビューの結果は返す
             run.warnings.append(CAUSE_UNSAVED)
-    return error is None
+    return got
 
 
-def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
-    """MVV に反するとした指摘と根拠の記述の誤りを MVV の記録に残し、結果 JSON の `outputs.mvv` を返す（承認済みの MVV が無ければ None）。
+def _mvv_results(run: _Run) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    """MVV に反するとした指摘と根拠の記述の誤りを MVV の記録に残し、結果 JSON の `outputs.mvv` と、承認ゲートの判定に要る行を
+    書けなかったときの `Outcome.mvv_record_failed` を返す（承認済みの MVV が無ければどちらも None）。
 
     対象のコミットは、PR に届いた最後のコミット（指摘にする誤りは、このコミットで確かめたものだけである）。自由記述を伏せられない
-    ときも、記録を書けないときも、レビューの終わり方は変えず、注意に載せる。
+    ときも、通常の行（`fixed`・`unresolved`）を書けないときも、レビューの終わり方は変えず、注意に載せる。
     """
     snap = criteria_decide.approved(run.snapshot)
     if snap is None:
-        return None
+        return None, None
     rows, seen = list(run.journal.rows.values()), publish.once(run.clean)
     out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
     if seen.failure is not None:
         run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")
-    wrote = _record_mvv(run, snap, rows, seen if seen.failure is None else None)
-    if wrote and seen.failure is not None:
+    got = _record_mvv(run, snap, rows, seen if seen.failure is None else None)
+    if got.cause is None and seen.failure is not None:
         later = "次の起動で書き直す。それまで設計承認ゲートは省かない"
         run.warnings.append(f"MVV の記録（mvv-validation.jsonl）の自由記述を伏せて書いた（{later}）: {seen.failure}")
-    return out
+    if not got.missing:
+        return out, None
+    return out, {"rows": [{"key": r["key"], "outcome": r["outcome"]} for r in got.missing], "cause": RECORDS_UNWRITTEN}
 
 
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
@@ -662,8 +672,9 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
-    results = _mvv_results(run)
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused, results)
+    results, failed = _mvv_results(run)
+    read = _read_by_all_this_run(run, rounds)
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed)
 
 
 class _Prepared(NamedTuple):

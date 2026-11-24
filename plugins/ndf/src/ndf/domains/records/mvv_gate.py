@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import llm, publish, run_log
@@ -43,6 +44,8 @@ GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
+# 記録を読めないときの保留の頭（#3959）
+RECORDS_UNREADABLE = "MVV の記録（mvv-validation.jsonl）を読めない: "
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答）。テストはスタブへ差し替える
 Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
 
@@ -126,6 +129,11 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
     return opened[0].number
 
 
+def review_prs(gate_name: str, number: int) -> list[int]:
+    """保留を読む PR。設計は判定する PR、リリースは #4105 まで空（読まない。省かないので人が回答する）。"""
+    return [number] if gate_name == DESIGN else []
+
+
 def _repo_of(where: Mapping[str, Any]) -> Optional[str]:
     root = where.get("root")
     if root is None:
@@ -186,9 +194,9 @@ class _Judging:
     def text(self, kind: str, exc: BaseException | str) -> str:
         return failure_text(kind, exc, self.where)
 
-    def stopped(self, kind: str, why: list[str], noted: bool = True) -> dict[str, Any]:
+    def stopped(self, kind: str, why: list[str], noted: bool = True, holds: Optional[list[str]] = None) -> dict[str, Any]:
         """判定を持たずに終わる。`noted` なら判定の記録を PR のコメントへ書く（材料が今の PR に属さないときは書かない）。"""
-        out = mm.stop_outcome(self.gate, kind, why, pull=(self.number, self.pull.head_sha))
+        out = mm.stop_outcome(self.gate, kind, why, holds, pull=(self.number, self.pull.head_sha))
         return _recorded(self.hub, self.number, out, self.where) if noted else out
 
 
@@ -219,17 +227,29 @@ def _diff(j: _Judging, remote: str, snap: mvv.Snapshot) -> tuple[Optional[list[d
     return rows, None
 
 
-def _read_records(j: _Judging, warnings: list[dict[str, Any]]) -> tuple[Optional[list[dict[str, Any]]], list[jsonl.Broken]]:
-    """手順 (5): 記録を 1 回だけ読む（再利用にだけ使う）。読めなければ None で、判定は再利用を省いて LLM で打つ。
+class _Records(NamedTuple):
+    """手順 (5) で読んだ記録（読めなければ `rows` が None）と、保留（読まない区分では None）。"""
 
-    保留（`review_rows`・`review_holds`）は読まない（#3959 の実装計画の単位 3 が足す）。
-    """
+    rows: Optional[list[dict[str, Any]]]
+    broken: list[jsonl.Broken]
+    holds: Optional[list[str]]
+
+
+def _read_records(j: _Judging, snap: mvv.Snapshot, warnings: list[dict[str, Any]]) -> _Records:
+    """手順 (5): 記録を 1 回だけ読み、保留を求める（同じ行を判定の再利用にも渡す）。
+
+    読めなければ判定を止めず、保留を読めない理由の 1 件にして、判定は再利用を省いて LLM で打つ。"""
+    prs = review_prs(j.gate, j.number)
     try:
         rows, broken = mvv.validation_rows(j.root)
-    except (OSError, UnicodeDecodeError, internal.InternalError):
-        return None, []
+        repo = mvv.repo_key(j.root) if prs else ""
+    except (OSError, UnicodeDecodeError, internal.InternalError, mvv.MvvError, identity.IdentityError) as exc:
+        return _Records(None, [], [RECORDS_UNREADABLE + j.text("records_unreadable", exc)] if prs else None)
     warnings += jsonl.broken_items(mvv.record_path("mvv-validation"), broken)
-    return rows, broken
+    if not prs:
+        return _Records(rows, broken, None)
+    found = md.review_holds(mvv.review_rows(rows), len(broken), repo, prs, (snap.version, snap.sha256), hidden=publish.WITHHELD)
+    return _Records(rows, broken, found)
 
 
 def _judged(
@@ -252,11 +272,12 @@ def _judged(
         assert stop is not None
         return stop
     facts = mvv.pr_facts(hub, number, facts, rows, j.pull)
-    held, broken = _read_records(j, warnings)
+    rec = _read_records(j, snap, warnings)
+    facts = replace(facts, review_holds=tuple(rec.holds) if rec.holds is not None else ())
     # 手順 (6): 差分の全体が材料に載らない PR は、省いた部分を判定できないため LLM を呼ばずに人へ問う
     cut = mm.incomplete_patches(rows)
     if cut:
-        return j.stopped("incomplete_patches", [*refusals(facts, gate_name), *cut])
+        return j.stopped("incomplete_patches", [*refusals(facts, gate_name), *cut], holds=rec.holds)
     shared = mvv.principles().decode("utf-8")
     materials = {
         "NDF の共通原則": shared,
@@ -267,9 +288,12 @@ def _judged(
     asked = {"gate": gate_name, "question": mm.SYSTEM, "material": mm.prompt(mm.redlines(shared, project), materials)}
     # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）
     try:
-        row, unrecorded = mvv.mvv_validate_sprint(root, asked, judge_with(ask), reuse=held is not None, rows=held, broken=broken)
+        row, unrecorded = mvv.mvv_validate_sprint(
+            root, asked, judge_with(ask), reuse=rec.rows is not None, rows=rec.rows, broken=rec.broken
+        )
     except GateError as exc:
-        return j.stopped("llm_no_answer", ["MVV 判定を打てない: " + j.text("llm_no_answer", exc), *refusals(facts, gate_name)])
+        why = ["MVV 判定を打てない: " + j.text("llm_no_answer", exc), *refusals(facts, gate_name)]
+        return j.stopped("llm_no_answer", why, holds=rec.holds)
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
     # 手順 (8): 進め方と区分は省くかだけを決める。記録に行の無い判定では省かない
@@ -280,7 +304,7 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull=(number, j.pull.head_sha)), j.where)
+    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)), j.where)
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:

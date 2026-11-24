@@ -47,7 +47,7 @@ class MvvFacts:
 
     `current` は今の MVV のファイルの sha256、`approved` は利用者の承認の記録の sha256、`referenced` はスプリントの
     状態が持つ参照の sha256。`boundary_paths` は進め方の設定のレッドラインのパス。`body` は PR 本文（Markdown）、`claimed` は
-    出し直しの指摘への対応表が「記載した」と書くセクションの見出し（#2853）。
+    出し直しの指摘への対応表が「記載した」と書くセクションの見出し（#2853）。`review_holds` はレビューの記録の保留（#3959）。
     """
 
     status: str
@@ -59,6 +59,7 @@ class MvvFacts:
     boundary_paths: tuple[str, ...] = ()
     body: Optional[str] = None
     claimed: tuple[str, ...] = ()
+    review_holds: tuple[str, ...] = ()
 
 
 def check_mvv_hash(f: MvvFacts) -> Optional[str]:
@@ -144,6 +145,14 @@ def check_claimed_sections(f: MvvFacts) -> Optional[str]:
     return "対応表が記載したと書くセクションに中身が無い: " + " / ".join(empty) if empty else None
 
 
+def check_review_holds(f: MvvFacts) -> Optional[str]:
+    """検査 7: レビューの記録に保留（直っていないレッドライン・利用者の判断が要る見送り・読めない記録）が無い（#3959）。
+
+    保留の文（見送りの理由・指摘の本文・読めない原因）は出力の `holds` にだけ置き、ここでは件数の固定の文だけを返す。"""
+    n = len(f.review_holds)
+    return f"レビューの保留が {n} 件ある（内容は保留の欄）" if n else None
+
+
 # 機械の検査を当てる順
 CHECKS: tuple[Callable[[MvvFacts], Optional[str]], ...] = (
     check_mvv_hash,
@@ -152,10 +161,11 @@ CHECKS: tuple[Callable[[MvvFacts], Optional[str]], ...] = (
     check_boundary,
     check_mvv_decl,
     check_claimed_sections,
+    check_review_holds,
 )
 
 
-# 区分 → 省かない理由の検査（設計・リリースとも検査 1〜6 をこの順に当てる。検査 1 だけが判定を止める。#3959）
+# 区分 → 省かない理由の検査（設計・リリースとも検査 1〜7 をこの順に当てる。リリースは #4105 まで保留を読まないので検査 7 は何も返さない。検査 1 だけが判定を止める。#3959）
 CHECKS_BY_GATE: dict[str, tuple[Callable[[MvvFacts], Optional[str]], ...]] = {gate: CHECKS for gate in model.MVV_GATE_STEPS}
 
 

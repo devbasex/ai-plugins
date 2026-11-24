@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
@@ -69,7 +70,9 @@ def _record(
 ) -> int:
     """今の MVV で判定した指摘 `rows` を記録する。"""
     snap = snap if snap is not None else _snapshot()
-    return mvv.record_review(str(root), pr, head, snap, [{"judged_mvv": snap.identity, **r} for r in rows], clean)
+    got = mvv.record_review(str(root), pr, head, snap, [{"judged_mvv": snap.identity, **r} for r in rows], clean)
+    assert (got.missing, got.cause) == ((), None)
+    return got.written
 
 
 def _rows(kind: str) -> list[dict[str, Any]]:
@@ -123,22 +126,18 @@ def test_every_judged_finding_is_recorded_and_only_deferred_ones_are_signs(root:
         "r1-n1": ("Value 99", "fixed", None, None),
     }
     assert _signals() == [] and _unknowns(root) == 0
+    # 記録のコメントから引き継いだ根拠の記述の誤りは、引いた項目を持たない
+    carried = {k: v for k, v in CITATION.items() if k not in ("cited", "unknown", "path")}
+    _record(root, {**carried, "id": "p-r1", "text": "引き継いだ誤り", "outcome": "unresolved"})
+    assert "item" not in _reviews()[-1] and _reviews()[-1]["outcome"] == "unresolved"
 
 
 def test_findings_judged_under_another_mvv_or_not_at_all_are_not_recorded(root: Path) -> None:
     other = {**_deferred(), "judged_mvv": _snapshot(10).identity}
     plain = {"id": "r1-9", "text": "普通の指摘", "outcome": "deferred", "reason": "範囲の外"}
     snap = _snapshot()
-    assert mvv.record_review(str(root), PR, HEAD, snap, [other, plain], list) == 0
+    assert mvv.record_review(str(root), PR, HEAD, snap, [other, plain], list) == (0, (), None)
     assert _reviews() == [] and _signals() == []
-
-
-def test_carried_citation_error_without_the_cited_item_is_recorded(root: Path) -> None:
-    """記録のコメントから引き継いだ根拠の記述の誤りは、引いた項目を持たない。"""
-    carried = {k: v for k, v in CITATION.items() if k not in ("cited", "unknown", "path")}
-    _record(root, {**carried, "outcome": "unresolved"})
-    [review] = _reviews()
-    assert "item" not in review and review["outcome"] == "unresolved"
 
 
 def test_broken_shape_is_refused(root: Path) -> None:
@@ -178,18 +177,16 @@ def test_changed_result_is_recorded_once_without_another_sign(root: Path, change
     assert (len(_reviews()) - 1, len(_signals()) - 1) == added
 
 
-def test_finding_deferred_again_after_a_fix_is_recorded_again(root: Path) -> None:
+def test_finding_deferred_again_after_a_fix_or_a_redline_on_another_item_or_head_is_recorded(root: Path) -> None:
     """同じ head で「見送った・直した・見送った」と戻れば 3 件になる（最後の記録と比べる）。"""
     for row in (_deferred(), {**VALUE, "outcome": "fixed", "reason": None}, _deferred()):
         _record(root, row)
     assert [r["outcome"] for r in _reviews()] == ["deferred", "fixed", "deferred"]
-
-
-def test_redline_with_another_item_or_another_head_is_recorded(root: Path) -> None:
+    # レッドラインは、項目か head が変われば書く
     _record(root, {**REDLINE, "redline_items": ["P1"]})
     _record(root, REDLINE)
     _record(root, REDLINE, head=NEXT_HEAD)
-    assert [(r["item"], r["head"]) for r in _reviews()] == [("P1", HEAD), ("P1・C7", HEAD), ("P1・C7", NEXT_HEAD)]
+    assert [(r["item"], r["head"]) for r in _reviews()[3:]] == [("P1", HEAD), ("P1・C7", HEAD), ("P1・C7", NEXT_HEAD)]
 
 
 @pytest.mark.parametrize("snap", [_snapshot(12), _snapshot(11, "b")])
@@ -199,16 +196,13 @@ def test_new_mvv_is_recorded_and_counted_apart(root: Path, snap: mvv.Snapshot) -
     assert _record(root, _deferred(), snap=snap) == 2
 
 
-def test_missing_sign_is_added_when_only_the_record_was_written(root: Path) -> None:
+def test_missing_sign_is_added_and_another_pull_request_does_not_hide_one(root: Path) -> None:
     _record(root, _deferred())
     mvv.record_path("mvv-signals").unlink()
     assert _record(root, _deferred()) == 1
     assert len(_reviews()) == 1 and _unknowns(root) == 1
-
-
-def test_records_of_another_pull_request_do_not_hide_this_one(root: Path) -> None:
+    # 別の PR の記録は、この PR の記録と兆候を隠さない
     _record(root, _deferred(), pr=PR + 1)
-    assert _record(root, _deferred()) == 2
     assert _unknowns(root) == 2
 
 
@@ -309,9 +303,117 @@ def test_issue_4090_7_withheld_record_is_completed_and_does_not_replace_a_comple
     assert len(_signals()) == 1
     # 結果が変わっていれば、伏せてでも書く
     assert _record(root, *ALL, clean=None, head=NEXT_HEAD) == 3
-
-
-def test_issue_4090_7_finding_fixed_after_a_withheld_record_is_counted_once(root: Path) -> None:
-    _record(root, _deferred(), clean=None)
+    # 伏せた見送りの後に直しても、兆候は 1 件のまま
     _record(root, {**VALUE, "outcome": "fixed", "reason": None}, head=NEXT_HEAD)
-    assert [r["outcome"] for r in _reviews()] == ["deferred", "fixed"] and _unknowns(root) == 1
+    assert _reviews()[-1]["outcome"] == "fixed" and _unknowns(root) == 1
+
+
+# --- 見送りの区分と、承認ゲートの判定に要る行の欠け（#3959） ------------------------------------------------
+
+
+def _holds(root: Path) -> list[str]:
+    rows, broken = mvv.validation_rows(root)
+    return md.review_holds(mvv.review_rows(rows), len(broken), str(root), [PR], (11, "a" * 64), hidden="（伏せた）")
+
+
+@pytest.mark.parametrize(
+    ("steps", "outcomes"),
+    [
+        # 区分だけが変わった見送りは、通常の行も伏せた行も書き、利用者の判断が要る区分なら保留になる
+        ([("filed", list), ("needs_user", list)], [("filed", None), ("needs_user", None)]),
+        ([("filed", None), ("needs_user", None)], [("filed", True), ("needs_user", True)]),
+        # 伏せずに書いた後の同じ区分の伏せた行は書かず、伏せた行の後の伏せない行は書く（記録の復旧）
+        ([("needs_user", list), ("needs_user", None)], [("needs_user", None)]),
+        ([("filed", None), ("filed", list)], [("filed", True), ("filed", None)]),
+        # 知らない区分はジャーナルが持たないので、区分の無い見送りとして書く
+        ([("later", list)], [(None, None)]),
+    ],
+)
+def test_defer_is_written_on_deferred_rows_and_read_back(root: Path, steps: list[tuple[str, Any]], outcomes: list[tuple]) -> None:
+    for defer, clean in steps:
+        _record(root, _deferred(defer=defer) if defer in md.DEFERS else _deferred(), clean=clean)
+    rows, broken = mvv.validation_rows(root)
+    assert broken == [] and [(r.get("defer"), r.get("withheld")) for r in mvv.review_rows(rows)] == outcomes
+    last, held = outcomes[-1], _holds(root)
+    expected = last[0] in (None, "needs_user")
+    assert len(held) == int(expected) and (not held or ("記録の自由記述が未完了" in held[0]) is bool(last[1]))
+
+
+class Fail:
+    """記録の追記の偽物。`at` 回目（1 から）の追記で `OSError` を投げ、ほかは本物で書く。"""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, at: int, kind: str = "mvv-validation"):
+        self.n, self.at, self.kind, real = 0, at, kind, jsonl.append
+
+        def append(path: Path, row: Any, *, kind: str) -> Any:
+            if kind == self.kind:
+                self.n += 1
+                if self.n == self.at:
+                    raise OSError(f"{path} に空きが無い https://x-access-token:{SECRET}@github.com/o/r.git")
+            return real(path, row, kind=kind)
+
+        monkeypatch.setattr(jsonl, "append", append)
+
+
+FIXED = {**VALUE, "id": "r1-3", "text": "直した指摘", "outcome": "fixed", "reason": None}
+
+
+def _broken_bytes() -> None:
+    path = mvv.record_path("mvv-validation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe\n")
+
+
+def _newer() -> None:
+    path = mvv.record_path("mvv-validation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": 999, "kind": "mvv-review", "repo": "x", "pr": PR}) + "\n", encoding="utf-8")
+
+
+def _no_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def lock(path: Path) -> Any:
+        raise OSError("ロックの時間切れ")
+
+    monkeypatch.setattr(jsonl, "lock", lock)
+
+
+@pytest.mark.parametrize(
+    ("rows", "prepare", "missing", "step"),
+    [
+        # 渡した順が fixed・redline でも必須の行を先に書くので、通常の行の失敗は欠けを作らない
+        ([FIXED, REDLINE], lambda m: Fail(m, 2), [], "追記"),
+        ([FIXED, REDLINE, _deferred()], lambda m: Fail(m, 1), ["redline", "deferred"], "追記"),
+        ([REDLINE], lambda m: Fail(m, 1, "mvv-signals"), [], None),
+        ([_deferred()], lambda m: Fail(m, 1, "mvv-signals"), [], "mvv-signals.jsonl の追記"),
+        ([REDLINE, _deferred(), FIXED], lambda m: _broken_bytes(), ["redline", "deferred"], "既存の行の読み取り"),
+        ([FIXED], lambda m: _broken_bytes(), [], "既存の行の読み取り"),
+        ([REDLINE, _deferred()], lambda m: _newer(), ["redline", "deferred"], "既存の行の読み取り"),
+        ([REDLINE, _deferred()], _no_lock, ["redline", "deferred"], "ロックの取得"),
+    ],
+)
+def test_rows_that_cannot_be_written_are_returned_without_raising(
+    root: Path, monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]], prepare: Any, missing: list[str], step: Optional[str]
+) -> None:
+    monkeypatch.setenv("NDF_TEST_API_TOKEN", SECRET)
+    prepare(monkeypatch)
+    path = mvv.record_path("mvv-validation")
+    before = path.read_bytes() if path.is_file() else None
+    snap = _snapshot()
+    got = mvv.record_review(str(root), PR, HEAD, snap, [{"judged_mvv": snap.identity, **r} for r in rows], list)
+    assert [m["outcome"] for m in got.missing] == missing
+    assert (got.cause is None, (got.cause or "").split(": ")[0]) == (step is None, step or "")
+    assert SECRET not in (got.cause or "")
+    if before is not None:
+        assert path.read_bytes() == before
+
+
+def test_a_retry_writes_only_the_rows_left_missing(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """先頭の必須の行の追記が失敗しても、後ろの同じ必須の行が既に記録にあれば欠けと報告しない。打ち直しは欠けた行だけを書く。"""
+    _record(root, REDLINE)
+    with monkeypatch.context() as m:
+        Fail(m, 1)
+        snap = _snapshot()
+        got = mvv.record_review(str(root), PR, HEAD, snap, [{"judged_mvv": snap.identity, **r} for r in (_deferred(), REDLINE)], list)
+    assert [r["outcome"] for r in got.missing] == ["deferred"] and got.cause is not None
+    assert _record(root, _deferred(), REDLINE) == 2
+    assert [r["outcome"] for r in _reviews()] == ["redline", "deferred"]

@@ -138,14 +138,33 @@ def test_redlines_are_not_gaps_but_are_counted(tmp_path: Path, capsys: pytest.Ca
     assert got["summary"].endswith("指摘 2 件（直した 0・見送った 1・未解決 0・人の承認を待つ 1）")
 
 
-def test_error_before_any_round_is_work_stopped() -> None:
-    assert fin.finish(fin.Review(fin.ERROR, 0, ())).kind == "work_stopped"
+FAILED = {"rows": [{"key": "k", "outcome": "redline"}], "cause": "MVV の記録を書けない"}
+OPEN_MVV = fin.Finding("F1", "反する", fin.UNRESOLVED, None, "major", "Value 5")
 
 
-@pytest.mark.parametrize(("final", "outcome"), [("done", fin.FIXED), (fin.CONVERGED, "maybe")])
-def test_unknown_words_are_invalid(final: str, outcome: str) -> None:
-    review = fin.Review(final, 1, (fin.Finding("F1", "x", outcome, None),))
-    assert fin.finish(review).kind == "invalid"
+@pytest.mark.parametrize(
+    ("findings", "handed", "failed", "kind", "within", "gaps"),
+    [
+        ((), (), None, None, "converged", []),
+        # 受け入れ条件 5: 収束でも、承認ゲートの判定に要る記録を書けなければ止まる
+        ((), (), FAILED, fin.RECORD_FAILED, "本来の終わり方は ok", []),
+        ((OPEN_MVV,), (), FAILED, fin.RECORD_FAILED, "本来の終わり方は mvv_unresolved", ["F1"]),
+        ((), (fin.Handed("R1", "足す"),), FAILED, fin.RECORD_FAILED, "本来の終わり方は incomplete", ["R1"]),
+    ],
+)
+def test_rows_left_unwritten_stop_before_any_other_ending(findings, handed, failed, kind, within, gaps) -> None:
+    got = fin.finish(fin.Review(fin.CONVERGED, 2, findings), handed, record_failed=failed)
+    assert (got.kind, [g["name"] for g in got.gaps]) == (kind, gaps) and within in got.summary
+    assert ("MVV の記録を書けない" in got.warnings) is (failed is not None)
+
+
+@pytest.mark.parametrize(
+    ("final", "rounds", "outcome", "kind"),
+    [("done", 1, fin.FIXED, "invalid"), (fin.CONVERGED, 1, "maybe", "invalid"), (fin.ERROR, 0, fin.FIXED, "work_stopped")],
+)
+def test_unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped(final: str, rounds: int, outcome: str, kind: str) -> None:
+    review = fin.Review(final, rounds, (fin.Finding("F1", "x", outcome, None),) if rounds else ())
+    assert fin.finish(review).kind == kind
 
 
 def test_malformed_summary_is_invalid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -406,7 +406,8 @@ def _emit_verdict(verdict: fin.Verdict, mvv: Optional[dict[str, Any]] = None, **
     """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
     gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。指摘の本文や理由を含む値は、結果を
     集めるログへ秘密を写さないよう、ここで伏せる。`mvv` は outputs の mvv（自由記述を伏せ終えたもの。承認済みの MVV が無ければ None）。"""
-    warnings = [*extra.pop("warnings", ()), *verdict.warnings]
+    # 記録の欠けの注意は駆動の注意と同じ文なので 1 つにする
+    warnings = list(dict.fromkeys([*extra.pop("warnings", ()), *verdict.warnings]))
     summary, decisions, gaps, warnings = run_log.redact([verdict.summary, verdict.decisions, verdict.gaps, warnings])
     shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps, **({"mvv": mvv} if mvv is not None else {})}, **extra}
     if verdict.status == fin.OK:
@@ -638,7 +639,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     except writing.CriteriaBroken as exc:
         # 文書の基準の本文を読めない（指示を作る前。#4285）
         return _stop("invalid", str(exc))
-    verdict = fin.finish(got.review, cfg.handed)
+    verdict = fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
     items, warnings = _report(cfg, got, hub_once)

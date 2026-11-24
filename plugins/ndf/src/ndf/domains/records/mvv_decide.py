@@ -21,7 +21,7 @@ from pathlib import PurePosixPath
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
-from ndf.contracts import facts
+from ndf.contracts import facts, internal
 from ndf.domains.records import files
 from ndf.domains.records import mvv_material_decide as mm
 
@@ -46,12 +46,20 @@ REVIEW_ITEM, REVIEW_JUDGED, REVIEW_REDLINE, REVIEW_REDLINE_ITEMS = "mvv", "judge
 REVIEW_FIXED, REVIEW_DEFERRED, REVIEW_UNRESOLVED = "fixed", "deferred", "unresolved"
 # 同じキーの指摘が 2 件あるとき、後のものほど優先して記録する終わり方の順
 _REVIEW_ORDER = (REVIEW_FIXED, REVIEW_UNRESOLVED, REVIEW_DEFERRED, REVIEW_REDLINE)
+# 承認ゲートの判定に要る（書けなければ cross-review を止める）終わり方（#3959）
+REVIEW_REQUIRED = (REVIEW_REDLINE, REVIEW_DEFERRED)
+# 見送りの区分（修正担当が見送るときに書く。#3959 の決定 2）: 利用者の判断が要る・範囲外として起票した・基準に当たらない
+REVIEW_DEFER = "defer"
+DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE = "needs_user", "filed", "not_applicable"
+DEFERS = (DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE)
+# 保留にしない見送りの区分
+_SETTLED_DEFERS = (DEFER_FILED, DEFER_NOT_APPLICABLE)
 # NDF が機械で確かめて作った指摘（根拠の記述の誤り）の `by`
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 # 終わり方ごとの、記録に残す自由記述の欄
 _REVIEW_NOTES = {REVIEW_DEFERRED: "reason", REVIEW_REDLINE: "text"}
 # 前の記録と比べる欄（最初の組は MVV と指摘の状態、次の組は記録の中身）
-_REVIEW_STATE = ("head", "outcome", "mvv_version", "sha256")
+_REVIEW_STATE = ("head", "outcome", "mvv_version", "sha256", REVIEW_DEFER)
 _REVIEW_CONTENT = ("item", "reason", "text", "withheld")
 # 判定の行が持つ、判定の中身（承認ゲートの判定が読む。再利用の行へも写す）
 VERDICT_DETAILS = ("reasons", "boundary", "basis")
@@ -341,6 +349,9 @@ def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str,
     out: dict[str, Any] = {"id": str(found.row["id"]), "outcome": found.outcome}
     if found.item is not None:
         out["item"] = found.item
+    # 区分は自由記述でないので、伏せた記録にも書く
+    if found.outcome == REVIEW_DEFERRED and found.row.get(REVIEW_DEFER) in DEFERS:
+        out[REVIEW_DEFER] = found.row[REVIEW_DEFER]
     if shown is None:
         return out | {"withheld": True}
     return out | {k: shown[v] for k, v in found.free_fields.items()}
@@ -365,6 +376,60 @@ def review_recorded(last: Optional[Mapping[str, Any]], entry: Mapping[str, Any])
         return False
     keys = _REVIEW_STATE if entry.get("withheld") and not last.get("withheld") else _REVIEW_STATE + _REVIEW_CONTENT
     return all(last.get(k) == entry.get(k) for k in keys)
+
+
+def review_holds(
+    rows: Iterable[Mapping[str, Any]], broken: int, repo: str, prs: Iterable[int], mvv: tuple[int, str], *, hidden: str
+) -> list[str]:
+    """PR `prs` のレビューの記録 `rows`（`mvv-review` の行）のうち、承認ゲートを省かない保留（#3959 の決定 2・11）。
+
+    指摘のキーごとに記録の順（時刻の順。同じ時刻なら追記の順）で、多くても 1 件を次の優先順で返す。head で行を選ばない。
+    (1) 最後の `redline` の行より後に同じキーの `fixed` が無い（バージョンを問わない）。(2) 最後の行が今の MVV（`mvv` の
+    （バージョン, sha256）の組）の伏せた行。(3) 今の MVV の `deferred` のうち区分が `needs_user`・無い・知らない値のものがあり、
+    その後に今の MVV の `fixed` が無い。伏せた行の本文・理由の代わりに `hidden` を載せる。`broken` は読めなかった行の数。
+    """
+    wanted = set(prs)
+    mine = [r for r in rows if r.get("kind") == MVV_REVIEW and r.get("repo") == repo and r.get("pr") in wanted]
+    keyed: dict[tuple[Any, Any], list[Mapping[str, Any]]] = {}
+    for r in sorted(mine, key=lambda r: internal.epoch(str(r.get("at")))):
+        keyed.setdefault((r.get("pr"), r.get("key")), []).append(r)
+    out = [f"mvv-validation.jsonl に読めない行が {broken} 件ある"] if broken else []
+    for (pr, _), seq in keyed.items():
+        hold = _key_hold(seq, mvv, hidden)
+        if hold is not None:
+            out.append(f"PR #{pr} の {hold}")
+    return out
+
+
+def _note(row: Mapping[str, Any], name: str) -> str:
+    """記録の自由記述の欄（無ければ空の文字列）。"""
+    return str(row[name]) if name in row else ""
+
+
+def _named(row: Mapping[str, Any]) -> str:
+    return str(row["item"]) if isinstance(row.get("item"), str) else f"指摘 {row.get('id')}"
+
+
+def _key_hold(seq: Sequence[Mapping[str, Any]], mvv: tuple[int, str], hidden: str) -> Optional[str]:
+    """1 つのキーの記録の並びの保留（無ければ None）。優先順はレッドライン・伏せた行・見送り。"""
+    lines = [n for n, r in enumerate(seq) if r.get("outcome") == REVIEW_REDLINE]
+    if lines and not any(r.get("outcome") == REVIEW_FIXED for r in seq[lines[-1] + 1 :]):
+        items = dict.fromkeys(i for n in lines for i in _named(seq[n]).split("・"))
+        last = seq[lines[-1]]
+        return f"{'・'.join(items)}（redline）: {hidden if last.get('withheld') else _note(last, 'text')}"
+    current = [r for r in seq if (r.get("mvv_version"), r.get("sha256")) == mvv]
+    if seq[-1].get("withheld") and current and current[-1] is seq[-1]:
+        return f"{_named(seq[-1])}（記録の自由記述が未完了）"
+    held: Optional[Mapping[str, Any]] = None
+    for r in current:
+        if r.get("outcome") == REVIEW_DEFERRED and r.get(REVIEW_DEFER) not in _SETTLED_DEFERS:
+            held = r
+        elif r.get("outcome") == REVIEW_FIXED:
+            held = None
+    if held is None:
+        return None
+    kind = held[REVIEW_DEFER] if isinstance(held.get(REVIEW_DEFER), str) else "区分なし"
+    return f"{_named(held)}（deferred・{kind}）: {hidden if held.get('withheld') else _note(held, 'reason')}"
 
 
 def signals_ref(base_branch: str, remote: str) -> str:

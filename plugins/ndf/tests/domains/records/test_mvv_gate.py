@@ -193,7 +193,7 @@ def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, gate_name, _inputs(pace="normal", pr=5), _hub(5, DOCS), ask)
     assert len(ask.calls) == 1 and out["verdict"] == FOLLOW and out["skip"] is False
-    assert out["why"][0] == NORMAL and out["head"] == HEAD and out["holds"] is None and "stopped_by" not in out
+    assert (out["why"][0], out["head"], out["holds"], "stopped_by" in out) == (NORMAL, HEAD, None if gate_name == "release" else [], False)
     assert (out["noted"], out["note_url"]) == (True, "https://github.com/o/r/pull/5#issuecomment-1")
     ((number, text),) = notes
     assert number == 5 and "Value 1 に沿う" in text and NORMAL in text
@@ -201,7 +201,7 @@ def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes
 
 def test_fast_skips_only_the_design_gate(repo: Path) -> None:
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
-    assert (out["skip"], out["why"], out["holds"]) == (True, [], None)
+    assert (out["skip"], out["why"], out["holds"]) == (True, [], [])
     # 決定 3: リリース承認ゲートは fast でも省かず、#4105 の理由を why に載せる
     out = mvv_gate.gate(repo, "release", _inputs(pr=5), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["skip"], out["why"], out["verdict"]) == (False, [mvv_gate.RELEASE_KEPT], FOLLOW)
@@ -317,7 +317,7 @@ def test_a_diff_that_cannot_be_read_is_noted_without_a_verdict(repo: Path, failu
 
 def test_a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, notes: list[tuple[int, str]]) -> None:
     out = mvv_gate.gate(repo, "design", _inputs(mvv_ref=None), _hub(5, DOCS), Ask(None, ok=False))
-    assert (out["verdict"], out["skip"], _stopped(out), out["head"], out["holds"]) == (None, False, "llm_no_answer", HEAD, None)
+    assert (out["verdict"], out["skip"], _stopped(out), out["head"], out["holds"]) == (None, False, "llm_no_answer", HEAD, [])
     assert out["why"][0].startswith("MVV 判定を打てない: " + mm.STOP_REASONS["llm_no_answer"])
     assert out["why"][1] == "スプリントの状態に承認済み MVV の参照が無い" and len(notes) == 1
     assert "形が合わない" not in json.dumps(out, ensure_ascii=False)

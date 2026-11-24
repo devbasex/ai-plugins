@@ -79,7 +79,7 @@ def test_apply_fix_takes_decided_outcomes_and_ignores_unknown_ids() -> None:
         {"id": "r1-1", "outcome": fin.FIXED, "reason": "  "},
         {"id": "r1-2", "outcome": fin.UNRESOLVED},
         {"id": "nope", "outcome": fin.FIXED},
-        {"id": "rebuild-1", "outcome": fin.SKIPPED, "reason": "後で"},
+        {"id": "rebuild-1", "outcome": fin.SKIPPED, "reason": "後で", "defer": "filed"},
         "x",
     ]
     reported = journal.apply_fix(items, [fin.Handed("rebuild-1", "足す")], 2)
@@ -97,6 +97,7 @@ def test_apply_fix_takes_decided_outcomes_and_ignores_unknown_ids() -> None:
             "outcome": fin.SKIPPED,
             "reason": "後で",
             "by": "rebuild",
+            "defer": "filed",
         },
     ]
 
