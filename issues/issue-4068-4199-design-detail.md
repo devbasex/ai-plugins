@@ -372,7 +372,7 @@ plugins/ndf/
 | やめた・一時的に起こさなかった | 同上 | `kind: stop_waking`・`wait_id`・`reason`・`scope`（`session`・`wait`・`once`）・`k`・`n_max` |
 | 待ちを取り消した | 同上 | `kind: wait_void`・`wait_id`・`reason`（`contested`）。取り合った応答で始めた、起こしていない待ち（`_settle` の (2a)） |
 | 取り合い | 同上 | `kind: contest`・`wait_id`（その時点の状態の待ち。無ければ null）・`message_id`（取り合った応答）・`works`（後から来た hook の作業の件数）。世代の `by` を `contested` に替えたときに 1 行（`_settle` の (2a)・「処理の手順」の 3 の `form` の分岐） |
-| 作業を待つ Stop | 同上 | `kind: work_stop`・`message_id`。作業が 1 件以上の Stop の hook が世代を取ったときに 1 行（`_settle` の (2c)）。取り合いの率の分母に使う |
+| 作業を待つ Stop | 同上 | `kind: work_stop`・`message_id`。作業が 1 件以上の Stop の hook が世代を取ったときに 1 行（`_settle` の (2c)）。取り合いの率の分母に使い、同じ応答に `contest` の行があれば分子にも入れる（先に取った側が作業を待っていた取り合い） |
 
 どの行も `at`・`launch`・`session_id`・`claude_version` を持つ。`claude_version` は、ロックの中で `signals.launch_version` が `launch.json` から読んだ今の起動の版（ラッパーが「ラッパー」の節の 6 で `set_launch` に渡した値。読めなければ null）で、集計が版ごとに分けるのに使う。ラッパーの `log.jsonl` には書かない（書き込み元を 1 つにする）。
 
@@ -501,7 +501,7 @@ plugins/ndf/
 
 | 関数 | 新設/変更 | シグネチャ | 返り値・副作用 |
 | --- | --- | --- | --- |
-| `report` | 新設 | `report(rows: Iterable[Mapping[str, Any]], since: Optional[float] = None) -> dict[str, Any]` | `wait_id`（と `session_id`）で待ちにまとめ、`wake` と `wake_result` を `wake_id` で結ぶ。出す値と分母は次の表のとおり。倍率は各行の `w`・`r`・`out` を使う。`since` があれば `wait_start` の `at` がそれ以後の待ちだけを集める。`wait_void` の行を持つ待ちは、どの集計にも入れず `metrics` の `voided_waits` に数える。`metrics` に `partial_waits`（`wait_start` が `since` より前か無い待ち。どの集計にも入れない）・`unmatched_wakes`（`wake_result` の無い `wake`。記録の欠け）・`preempted_wakes`（`outcome` が `preempted` の `wake_result`。割り込みで起床の呼び出しが無かった）・`orphan_results`（`wake` の無い `wake_result`）・`unpriced_waits`（`wake_result` の無い `wake` か、`priced` が偽の `wake_result`（`truncated`・`unknown` と寿命別の項目の欠けた `woke`）を持つ待ち。`preempted` だけの待ちは入れない）を出す。あわせて `metrics.by_version` に、行の `claude_version`（null は `"unknown"`）ごとの取り合いの数を出す。`contests` は `contest` の行の数、`work_stops` は `work_stop` の行の数と `works` が 1 以上の `contest` の行の数の和（作業を待つ Stop の数。取り合いで負けた hook の Stop も入れる）、`contest_ratio` は `contests ÷ work_stops`（`work_stops` が 0 なら null）である。全ラッパーの行を合わせてから版で分けるので、複数の版が混ざる環境でも版ごとの率になる。`since` は行の `at` に当てる |
+| `report` | 新設 | `report(rows: Iterable[Mapping[str, Any]], since: Optional[float] = None) -> dict[str, Any]` | `wait_id`（と `session_id`）で待ちにまとめ、`wake` と `wake_result` を `wake_id` で結ぶ。出す値と分母は次の表のとおり。倍率は各行の `w`・`r`・`out` を使う。`since` があれば `wait_start` の `at` がそれ以後の待ちだけを集める。`wait_void` の行を持つ待ちは、どの集計にも入れず `metrics` の `voided_waits` に数える。`metrics` に `partial_waits`（`wait_start` が `since` より前か無い待ち。どの集計にも入れない）・`unmatched_wakes`（`wake_result` の無い `wake`。記録の欠け）・`preempted_wakes`（`outcome` が `preempted` の `wake_result`。割り込みで起床の呼び出しが無かった）・`orphan_results`（`wake` の無い `wake_result`）・`unpriced_waits`（`wake_result` の無い `wake` か、`priced` が偽の `wake_result`（`truncated`・`unknown` と寿命別の項目の欠けた `woke`）を持つ待ち。`preempted` だけの待ちは入れない）を出す。あわせて `metrics.by_version` に、行の `claude_version`（null は `"unknown"`）ごとの取り合いの数を出す。母集団は作業を待つ Stop で、`work_stop` の行（世代を取った hook の Stop）と、`works` が 1 以上の `contest` の行（後から来て取り合った hook の Stop）の 2 種類の行をそれぞれ 1 つの Stop に数える。`work_stops` はその数である。`contested_work_stops` は、そのうち同じ会話の同じ応答（`session_id` と `message_id` の組）に `contest` の行がある Stop の数（分子）である。`works` が 1 以上の `contest` の行はいつも数え、`work_stop` の行は同じ応答に `contest` の行があるときだけ数える（先に世代を取った側が作業を待っていた取り合い）。`contest_ratio` は `contested_work_stops ÷ work_stops`（`work_stops` が 0 なら null）で、分子は分母の部分集合である。どちらの側も作業を待っていない取り合い（`works` 0 の `contest` の行で、同じ応答に `work_stop` の行が無い）は分子に入れない。作業待ちを取り消していないためである。`contests` は `contest` の行の数で、参考に出すだけで率には使わない。全ラッパーの行を合わせてから版で分けるので、複数の版が混ざる環境でも版ごとの率になる。`since` は行の `at` に当てる |
 | `run` | 新設 | `run(args: argparse.Namespace) -> int` | 中継の保存先の全ラッパーの `cache-log.jsonl` を読み、`--since` の日時を `report` に渡し、統一の JSON レポート（`{"tool": "relay", "status", "summary", "items", "metrics"}`）で返す。読めない行は数えて `metrics.skipped` に出す。費用は行の倍率で出すので上限の設定を読まない |
 
 | 値 | 何から出すか |
@@ -522,7 +522,7 @@ plugins/ndf/
 
 この記録では、起こした回数は 3（`a`・`b`・`c`）、`unmatched_wakes` 1・`orphan_results` 1 である。`wake` の行の数（2）で数えると落ちる。
 
-取り合いの率の見本: 版 `2.1.330` の行に `work_stop` 8 行・`contest` 2 行（`works` 1 と 0）、版 `2.1.332` の行に `work_stop` 10 行と、既にある待ちの上の `contest` 1 行（`works` 1。`wait_void` は無い）がある記録では、`by_version` は `2.1.330` が `contests` 2・`work_stops` 9・`contest_ratio` 約 0.22、`2.1.332` が `contests` 1・`work_stops` 11・約 0.09 である。版を合わせて数える・`wait_void` で取り合いを数える（`2.1.332` が 0 になる）と落ちる。
+取り合いの率の見本: 版 `2.1.330` の行に、`work_stop` 8 行（うち 2 行が応答 `m1`・`m2`）と、`contest` 3 行（`m1` で `works` 1、`m2` で `works` 0、`m3` で `works` 0。`m3` の `work_stop` の行は無い）がある。版 `2.1.332` の行に、`work_stop` 10 行（うち 1 行が応答 `m4`）と、既にある待ちの上の `contest` 1 行（`m4` で `works` 1。`wait_void` は無い）がある。この記録では、`by_version` は次のとおりである。`2.1.330` は `contests` 3・`work_stops` 9（8 + `m1` の `contest`）・`contested_work_stops` 3（`m1` の `work_stop` と `contest`、`m2` の `work_stop`）・`contest_ratio` 約 0.33。`2.1.332` は `contests` 1・`work_stops` 11・`contested_work_stops` 2・約 0.18。版を合わせて数える・`wait_void` で取り合いを数える（`2.1.332` が 0 になる）・どちらも作業を待たない `m3` を分子に入れる（`2.1.330` が 4）・`contest` の行の数を分子にする（`2.1.332` が 1）と落ちる。
 
 ## 上限の設定の方針のファイル（`contracts/limits/<方針の名前>.json`）
 
