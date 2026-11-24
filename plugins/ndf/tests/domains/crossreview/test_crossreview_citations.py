@@ -43,7 +43,7 @@ def _diff(tree: Path, base: str) -> str:
 
 
 def _files(tree: Path, base: str) -> dict[str, DiffFile]:
-    return {f.path: f for f in changes._diff_files(_diff(tree, base))}
+    return {f.path: f for f in changes._diff_files(_diff(tree, base)) if f.path is not None}
 
 
 # --- 改名したファイルのベースの本文 -----------------------------------------------------------
@@ -161,7 +161,7 @@ def test_paths_are_read_as_they_are(tree: Path, name: str) -> None:
 
 
 def test_files_without_readable_lines_are_skipped(tree: Path) -> None:
-    """消した文書・バイナリ・実行権限だけの変更・空の文書は返さない。中身を変えない改名は、変わった行の無いファイルとして返す。"""
+    """バイナリ・実行権限だけの変更・空の文書は返さない。消した文書は head のパスを持たない。中身を変えない改名は、変わった行の無いファイルとして返す。"""
     for name, body in {"gone.md": b"x\n", "bin.dat": b"\0\1", "mode.sh": b"x\n", "moved.md": b"same\n"}.items():
         _bytes(tree, name, body)
     base = _commit(tree)
@@ -171,7 +171,9 @@ def test_files_without_readable_lines_are_skipped(tree: Path) -> None:
     _bytes(tree, "empty.md", b"")
     (tree / "mode.sh").chmod(0o755)
     _commit(tree)
-    assert list(_files(tree, base).values()) == [DiffFile("after.md", "moved.md", ())]
+    gone, moved = changes._diff_files(_diff(tree, base))
+    assert (gone.path, gone.base_path, gone.removed) == (None, "gone.md", ["x"])
+    assert moved == DiffFile("after.md", "moved.md", ())
 
 
 def test_lines_that_look_like_headers_are_read_as_content(tree: Path) -> None:
@@ -218,6 +220,79 @@ def test_lines_map_across_hunks_with_no_lines_on_one_side() -> None:
     (file,) = changes._diff_files(text)
     assert [changes._base_lines(file.hunks, no) for no in range(1, 7)] == [1, 2, 5, 6, None, 7]
     assert file.added == {5: "x"}
+
+
+# --- 置き換えた行の中の変わっていない行 ---------------------------------------------------------
+
+
+def _hunks(base: str, head: str) -> tuple[changes.Hunk, ...]:
+    """`base` の本文全部を `head` に置き換える hunk。"""
+    old = [changes.Line(n, None, t) for n, t in enumerate(base.removesuffix("\n").split("\n"), 1)]
+    new = [changes.Line(None, n, t) for n, t in enumerate(head.removesuffix("\n").split("\n"), 1)]
+    return (changes.Hunk(1, (*old, *new)),)
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "same"),
+    [
+        # 隣の説明だけを直した（根拠の行は変わっていない）
+        (f"古い\r{CITED}\n", f"新しい\r{CITED}\n", {(1, 1): (1, 1)}),
+        # 説明を足して、行の中の位置がずれた
+        (f"説明\r{CITED}\n", f"説明\r足した\r{CITED}\n", {(1, 0): (1, 0), (1, 2): (1, 1)}),
+        # 改行を LF に変えた
+        ("a\rb\n", "a\nb\n", {(1, 0): (1, 0), (2, 0): (1, 1)}),
+        # 根拠の行を足した・変えた
+        ("説明\n", f"説明\r{CITED}\n", {(1, 0): (1, 0)}),
+        (f"説明\r{CITED}\n", f"説明\r{CITED}。\n", {(1, 0): (1, 0)}),
+    ],
+)
+def test_unchanged_rows_inside_replaced_lines_are_found(base: str, head: str, same: dict) -> None:
+    """単独の CR で区切った 1 行の一部を編集しても、変わっていない Markdown の行をベースの位置に対応させる。"""
+    assert changes._same_rows(_hunks(base, head)) == same
+
+
+def test_rows_are_compared_only_inside_the_same_run_of_replaced_lines() -> None:
+    text = "diff --git a/n b/n\n--- a/n\n+++ b/n\n@@ -1,3 +1,3 @@\n-x\ra\n same\n-b\n+c\ra\n+b\n"
+    (file,) = changes._diff_files(text)
+    assert changes._same_rows(file.hunks) == {(3, 0): (3, 0)}
+
+
+# --- 改名の検出の上限を超えた差分 ---------------------------------------------------------------
+
+
+def _added(path: str, body: str) -> DiffFile:
+    (hunk,) = _hunks("", body)
+    return DiffFile(path, None, (changes.Hunk(1, tuple(x for x in hunk.lines if x.base is None)),))
+
+
+def _gone(path: str, body: str) -> DiffFile:
+    (hunk,) = _hunks(body, "")
+    return DiffFile(None, path, (changes.Hunk(1, tuple(x for x in hunk.lines if x.head is None)),))
+
+
+def _cites(row: str) -> bool:
+    return row == CITED
+
+
+def test_renames_split_by_the_limit_are_paired_and_keep_unchanged_rows() -> None:
+    """改名が足したファイルと消したファイルに分かれて出ても、同じ行の多いものどうしを組み、変わっていない根拠の行を見分ける。"""
+    other = "\n".join([CITED, *(f"別 {n}" for n in range(20))])
+    new = _added("new.md", "\n".join([*UNFENCED[:-1], "足した行"]))
+    files = [_gone("other.md", other), _gone("old.md", "\n".join(FENCED)), new, _added("other2.md", other)]
+    paired = {f.path: f for f in changes._pair_renames(files, _cites)}
+    assert {path: f.base_path for path, f in paired.items()} == {"new.md": "old.md", "other2.md": "other.md"}
+    same = changes._same_rows(paired["new.md"].hunks)
+    assert [same[no, 0] for no, line in enumerate(UNFENCED, 1) if line == CITED] == [(4, 0), (27, 0)]
+    assert [no for no, _ in paired["new.md"].added.items() if (no, 0) not in same] == [len(UNFENCED)]
+
+
+@pytest.mark.parametrize("old", [CITED + "\n" + "\n".join(f"別 {n}" for n in range(20)), "\n".join(FILLER)])
+def test_files_that_do_not_look_renamed_are_not_paired(old: str) -> None:
+    """行の半分も同じでない文書と、根拠の行を持たない文書は組まない。1 つの消した文書は 1 つにだけ組む。"""
+    new = _added("new.md", "\n".join(UNFENCED))
+    assert changes._pair_renames([_gone("old.md", old), new], _cites) == [_gone("old.md", old), new]
+    twice = changes._pair_renames([_gone("old.md", "\n".join(FENCED)), new, new._replace(path="copy.md")], _cites)
+    assert [(f.path, f.base_path) for f in twice] == [("new.md", "old.md"), ("copy.md", None)]
 
 
 # --- コミットの本文 ---------------------------------------------------------------------------

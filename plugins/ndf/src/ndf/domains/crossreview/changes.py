@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from difflib import SequenceMatcher
+from itertools import groupby
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -156,10 +159,10 @@ class Hunk(NamedTuple):
 
 
 class DiffFile(NamedTuple):
-    """差分の 1 つのファイル。`path` は head のパス、`base_path` はベースのパス（改名なら改名前。足したファイルなら None）。
-    行の番号は git の数え方。行の本文は CRLF の `\\r` を残す。"""
+    """差分の 1 つのファイル。`path` は head のパス（消したファイルなら None）、`base_path` はベースのパス（改名なら改名前。
+    足したファイルなら None）。行の番号は git の数え方。行の本文は CRLF の `\\r` を残す。"""
 
-    path: str
+    path: Optional[str]
     base_path: Optional[str]
     hunks: tuple[Hunk, ...]
 
@@ -228,8 +231,8 @@ def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
 
 
 def _diff_files(text: str) -> list[DiffFile]:
-    """`review_diff` の差分を、ファイルごとに分ける。消したファイルと、パスの行の無いファイル（バイナリ・実行権限だけの変更・
-    空のファイル）は返さない。"""
+    """`review_diff` の差分を、ファイルごとに分ける。パスの行の無いファイル（バイナリ・実行権限だけの変更・空のファイル）は
+    返さない。"""
     files: list[tuple[dict[bool, Optional[str]], list[Hunk]]] = []
     rest = iter(text.split("\n"))
     for line in rest:
@@ -240,7 +243,7 @@ def _diff_files(text: str) -> list[DiffFile]:
             files[-1][1].append(_hunk(header, rest))
         elif files:
             _read_name(line, files[-1][0])
-    return [DiffFile(path, names.get(True), tuple(hunks)) for names, hunks in files if (path := names.get(False)) is not None]
+    return [DiffFile(names.get(False), names.get(True), tuple(hunks)) for names, hunks in files if names]
 
 
 def _base_lines(hunks: Sequence[Hunk], head_line: int) -> Optional[int]:
@@ -266,3 +269,59 @@ def _markdown_lines(text: str) -> list[tuple[int, str]]:
             out.append((no, row[1]))
             no += row[2].endswith("\n")
     return out
+
+
+def _rows(lines: Iterable[Line], of_base: bool) -> list[tuple[tuple[int, int], str]]:
+    """差分の行のうちベース（`of_base`）か head の側にあるものを Markdown の行に分け、（git の行の番号, その行の中で何番目か。
+    0 始まり）と本文を返す。"""
+    out: list[tuple[tuple[int, int], str]] = []
+    for line in lines:
+        no = line.base if of_base else line.head
+        if no is not None:
+            out += [((no, nth), text) for nth, (_, text) in enumerate(_markdown_lines(line.text + "\n"))]
+    return out
+
+
+def _same_rows(hunks: Sequence[Hunk]) -> dict[tuple[int, int], tuple[int, int]]:
+    """置き換えた git の行の中で変わっていない Markdown の行の、head の位置からベースの位置（位置は `_rows`）。git は `\\r` だけで
+    区切った文書の 1 か所の変更を、つながった行全部の置き換えとして出す。"""
+    out: dict[tuple[int, int], tuple[int, int]] = {}
+    for hunk in hunks:
+        for replaced, run in groupby(hunk.lines, key=lambda x: x.base is None or x.head is None):
+            if not replaced:
+                continue
+            lines = list(run)
+            base, head = _rows(lines, True), _rows(lines, False)
+            match = SequenceMatcher(None, [t for _, t in base], [t for _, t in head], autojunk=False)
+            for i, j, size in match.get_matching_blocks():
+                out |= {head[j + n][0]: base[i + n][0] for n in range(size)}
+    return out
+
+
+def _pair_renames(files: Sequence[DiffFile], cited: Callable[[str], bool]) -> list[DiffFile]:
+    """改名の検出の上限を超えた差分で、足したファイルと消したファイルに分かれて出た改名を、git を起動せずに 1 つに戻す。
+    `cited` に当たる Markdown の行を持つファイルどうしを、同じ行の多い順に 1 対 1 で組む（行の半分以上が同じときだけ）。
+    戻したファイルは全部の行を置き換えた形で、変わっていない行は `_same_rows` が返す。"""
+
+    def rows(file: DiffFile) -> list[str]:
+        of_base = file.path is None
+        return [t for hunk in file.hunks for _, t in _rows(hunk.lines, of_base)]
+
+    counted = {i: Counter(rows(f)) for i, f in enumerate(files) if None in (f.path, f.base_path)}
+    citing = {i: c for i, c in counted.items() if any(map(cited, c))}
+    pairs = [
+        (same, new, gone)
+        for new, a in citing.items()
+        for gone, b in citing.items()
+        if files[new].base_path is None
+        and files[gone].path is None
+        # 空の行は数えない
+        and 2 * (same := sum(n for t, n in (a & b).items() if t.strip())) >= max(sum(n for t, n in c.items() if t.strip()) for c in (a, b))
+    ]
+    out: dict[int, DiffFile] = dict(enumerate(files))
+    for _, new, gone in sorted(pairs, key=lambda x: -x[0]):
+        if gone in out and out[new].base_path is None:
+            old = out.pop(gone)
+            lines = [x for f in (old, files[new]) for hunk in f.hunks for x in hunk.lines]
+            out[new] = DiffFile(files[new].path, old.base_path, (Hunk(1, tuple(lines)),))
+    return list(out.values())
