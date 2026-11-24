@@ -146,5 +146,5 @@ def test_split_tables_lists_limits_and_causes_with_where_the_key_comes_from():
     assert tables["causes"]["source_key"] == "causes"
     assert tables["causes"]["key_field"] == "kind"
     assert "key_field" not in tables["limits"]
-    # 一覧は事実の表の形で書き、事実の表の読み手でも同じ行を読める
+    # 一覧は事実の表の形で書き、事実の表の読み手でも同じ項目を読める
     assert facts.ids("split-tables") == ("limits", "causes")

@@ -81,7 +81,7 @@ NDF は JSON Schema と生成した文書という文書化された形式を出
 
 規約の検査はどの集約の持ち主でもなく、読んで突き合わせるだけである。環境変数・受け渡しのファイル・hook・終了コード・
 止まった理由は、それぞれの正本の表（`contracts/domains/env.json`・`ndf-files.json`・`contracts/hooks/runtimes.json`・
-`contracts/facts/exit-codes.json`・`contracts/causes/`）を読むだけで、ページへは写さずに生成する。
+`contracts/facts/exit-codes.json`・`contracts/causes/`）を読むだけで、ページへ値をコピーせずに生成する。
 
 ### 常に成り立つ条件
 

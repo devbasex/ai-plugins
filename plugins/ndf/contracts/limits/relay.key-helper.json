@@ -1,5 +1,5 @@
 {
-  "summary": "API キーの helper の払い出し。1 つの helper の ID でキーを出すのは seconds 秒の間に attempts 回まで。lock は記録の錠を待つ秒、gate は config-gate の hook の timeout の秒、first は起動から最初の払い出しまで会話を残す秒（#3864 の決定 12）",
+  "summary": "API キーの helper の払い出し。1 つの helper の ID でキーを出すのは seconds 秒の間に attempts 回まで。lock は記録のロックを待つ秒、gate は config-gate の hook の timeout の秒、first は起動から最初の払い出しまで会話を残す秒（#3864 の決定 12）",
   "seconds": 60,
   "attempts": 3,
   "lock": 0.5,

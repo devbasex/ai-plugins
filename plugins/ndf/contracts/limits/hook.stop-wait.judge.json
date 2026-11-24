@@ -1,5 +1,5 @@
 {
-  "summary": "stop-wait が本文の待ちを軽いモデルへ問う判定（#4000）。model は判定のモデル、seconds は判定の子を待つ上限（Stop の締め切り − 余白に収める）、max_chars は質問へ渡す本文の末尾の字数、rest_seconds は起動が失敗した後に子を起動しない秒、lock_seconds は休みのマーカーの錠を待つ上限、rounds は judge-cases が 1 つの例を打つ周の数、auth_markers は認証の失敗と読む本文の文字列、endpoint は送信先が同じかの確かめの値（env_names は前方一致。CLAUDE_CODE_SKIP_ は接続の認証の省略で、設定の層が出所なら拒む）、runtimes は判定する（モデルを呼ぶ）ランタイムで、seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ",
+  "summary": "stop-wait が本文の待ちを軽いモデルへ問う判定（#4000）。model は判定のモデル、seconds は判定の子を待つ上限（Stop の締め切り − 余白に収める）、max_chars は質問へ渡す本文の末尾の字数、rest_seconds は起動が失敗した後に子を起動しない秒、lock_seconds は休みのマーカーのロックを待つ上限、rounds は judge-cases が 1 つの例を打つ周の数、auth_markers は認証の失敗と読む本文の文字列、endpoint は送信先が同じかの確かめの値（env_names は前方一致。CLAUDE_CODE_SKIP_ は接続の認証の省略で、設定の層が出所なら拒む）、runtimes は判定する（モデルを呼ぶ）ランタイムで、seconds を締め切り − 余白と比べるのもこのランタイムの予算だけ",
   "model": "haiku",
   "runtimes": [
     "claude"

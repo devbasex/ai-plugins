@@ -116,7 +116,7 @@ def _tests_in(body: list[ast.stmt]) -> int:
 
 
 def is_test_file(rel: str) -> bool:
-    """表 `test-files` の役割がテストの行（列 `role` を省いた行）のどれかに当たるか。名前はファイル名全体、保存先はディレクトリの名前と比べる。"""
+    """表 `test-files` の役割がテストの項目（列 `role` を省いた項目）のどれかに当たるか。名前はファイル名全体、保存先はディレクトリの名前と比べる。"""
     p = PurePosixPath(rel)
     # 表の名前と、テストとして数えない役割（`conftest.py` などテストを支えるファイル）は `crossrefactor.tests_decide` の定数と同じ。
     # 検査は領域を読まないため、最上位の定数として持たない（const-fact）

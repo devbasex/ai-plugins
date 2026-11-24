@@ -17,7 +17,7 @@ TABLE = experimental.table_rel()
 
 
 def _needle() -> str:
-    """実験版の保存先のパス（保存先の表の実験版の行から得る）。"""
+    """実験版の保存先のパス（保存先の表の実験版の項目から得る）。"""
     rows = json.loads((PLUGIN_ROOT / TABLE).read_text(encoding="utf-8"))["rows"]
     return next(r["path"] for r in rows if r["id"] == experimental.ROW_ID)
 

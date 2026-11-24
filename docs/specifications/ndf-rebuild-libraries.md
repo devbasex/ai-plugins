@@ -67,7 +67,7 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | ファイルロック | filelock | `ndf.slot_pool`・`ndf.adapters.launch_slot`・`ndf.domains.worktree` ほか | — |
 | シェルの構文 | tree-sitter・tree-sitter-bash | `ndf.domains.hooks.context`・`ndf.domains.worktree.write_target` | `shparse.py` |
 | 版数 | semver | `ndf.domains.release` | `versions.py` |
-| Python の版数の条件（PEP 440） | packaging | `ndf.checks.toolchain` | — |
+| Python のバージョンの条件（PEP 440） | packaging | `ndf.checks.toolchain` | — |
 | パスのパターン | pathspec | `ndf.adapters.paths` ほか | `pathmatch.py` |
 | unified diff | unidiff | `ndf.domains.crossrefactor` | — |
 | コードのコメント | pygments | `ndf.adapters.markdown` | — |

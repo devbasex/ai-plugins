@@ -220,7 +220,7 @@ def _candidates(specs: SpecifierSet) -> list[tuple[int, int, int]]:
 
 
 def _admits(specs: SpecifierSet, version: tuple[int, int, int]) -> bool:
-    """正式リリース `version` を `3.11.0` の形の字で条件のすべてに照らす（`===` は字の一致で比べる）。"""
+    """正式リリース `version` を `3.11.0` の形の文字列で条件のすべてと比べる（`===` は字の一致で比べる）。"""
     return specs.contains(".".join(map(str, version)))
 
 

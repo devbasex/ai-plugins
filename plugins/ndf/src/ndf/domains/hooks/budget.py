@@ -40,7 +40,7 @@ class Budget:
 
 
 def _policy_names(spec: dict[str, Any], runtime: str) -> tuple[str, str]:
-    """事象のコントラクトの予算の方針の名前（ランタイム固有・共通）。"""
+    """イベントのコントラクトの予算の方針の名前（ランタイム固有・共通）。"""
     return f"hook.budget.{spec['budget']}.{runtime}", f"hook.budget.{spec['budget']}"
 
 
@@ -108,7 +108,7 @@ def _file_registrations(runtime: str, path: Path) -> list[dict[str, Any]]:
 
 
 def checked_policies() -> dict[str, dict[str, Any]]:
-    """`check_budget` が照らす方針（名前 → 値）。ランタイムの事象の予算と、guard の部品の上限のファイルだけを読む。"""
+    """`check_budget` が確かめる方針（名前 → 値）。ランタイムのイベントの予算と、guard の部品の上限のファイルだけを読む。"""
     budgets = {n for name, rt in tables.runtimes().items() for spec in rt["events"].values() for n in _policy_names(spec, name)}
     return tables.policies(budgets | {n for guard in tables.guards() for n in guard["limits"]})
 

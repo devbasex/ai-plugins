@@ -66,7 +66,7 @@ class Policy(NamedTuple):
 
 
 # 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ・相手ごとの
-# 上限）は `value` で引かず、判定の子・hook の表・見本の突き合わせが行から読む
+# 上限）は `value` で引かず、判定の子・hook の表・見本の突き合わせが項目から読む
 VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 

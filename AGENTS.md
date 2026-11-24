@@ -80,7 +80,7 @@ Pull Request ごとには上げない。担い手と時期の決まりは `relea
 | 経路 | `development-workflow` のモードどおり | その場で実装し、手元で 1 回使ってから PR → CI → マージ。モードは `light` として扱い、課題は起票しない |
 | 記録 | 課題と Pull Request | 11.x の台帳は未定。10 系の台帳は [docs/archive/ndf-experiments.md](docs/archive/ndf-experiments.md) にある |
 
-- **実験版の保存先は、保存先の表（`plugins/ndf/contracts/domains/locations.json` の行 `experimental`）が持つ。** Claude Code も Codex も `plugins/ndf/` を丸ごと配るため、その外に置く。呼ぶときは `python3 experimental/ndf/<名前>.py` と打ち、`bin/` にエントリポイントを置かない
+- **実験版の保存先は、保存先の表（`plugins/ndf/contracts/domains/locations.json` の項目 `experimental`）が持つ。** Claude Code も Codex も `plugins/ndf/` を丸ごと配るため、その外に置く。呼ぶときは `python3 experimental/ndf/<名前>.py` と打ち、`bin/` にエントリポイントを置かない
 - **実験版は、マージの前から worktree のパスで呼んでよい。** リリースを待たずに実践で使うためである
 - **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。参照は `ndf check` の規則 `experimental` が落とす。README と CHANGELOG は利用者向けの説明なので、実験版の保存先を紹介してよい
 - **効いた実験版は安定版の経路で本体へ移す。** 使われなかった実験版は消す。どちらも台帳の「行き先」に書く

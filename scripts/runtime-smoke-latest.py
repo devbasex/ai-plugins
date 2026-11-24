@@ -228,7 +228,7 @@ def samples_body(peer: str, run_url: str, lines: list[str]) -> str:
             "```",
             "",
             "見本を録り直し、定義（`plugins/ndf/contracts/live-samples/`）の `absent_keys` を合わせる。"
-            f"`ndf samples verify --peer {peer}` が通ることを確かめ、直す PR でこの課題を閉じる。",
+            f"`ndf samples verify --peer {peer}` が通ることを確かめ、直す PR でこの課題をクローズする。",
         ]
     )
 

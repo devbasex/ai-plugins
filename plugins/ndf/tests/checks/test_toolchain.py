@@ -69,7 +69,7 @@ class Repo:
 
 @pytest.fixture
 def repo(tmp_path) -> Repo:
-    """設定と 3 つの指定箇所がそろったリポジトリ（`pyproject.toml` は本物の写し）。"""
+    """設定と 3 つの指定箇所がそろったリポジトリ（`pyproject.toml` は本物のコピー）。"""
     r = Repo(tmp_path)
     (tmp_path / PYPROJECT).parent.mkdir(parents=True)
     shutil.copy(PLUGIN_ROOT / "pyproject.toml", tmp_path / PYPROJECT)

@@ -205,7 +205,7 @@ for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 �
 | IA5 | `scripts/measure/ai-smells.py` の数え方は、作り直しの前の計測（2026-11-13）から後の測り直しまで変えない | 振り返りで前の出力と見比べる |
 | I-DT1 | 1 つの事実は、1 つの表か 1 つの持ち主のモジュールの定数にだけ文字列で書かれる。ほかは引くか import する | `ndf check` の `const-fact` が落とす |
 | I-DT2 | 表は `contracts/facts/fact.schema.json` と列の設定から作る行の形を満たし、`id` が表の中で重ならない。表の名前は 2 つの保存先で重ならない | `ndf check` の `fact-table` が落とす。実行時の読み手は `FactsError` で止まる |
-| I-DT3 | 表の列の `ref` が指す値は、相手（`contracts/limits/` の方針か別の表の `id`）にある | `ndf contracts check` が `invalid` で止まる。コントラクトの写しで `check_all()` が空であることをテストが確かめる |
+| I-DT3 | 表の列の `ref` が指す値は、相手（`contracts/limits/` の方針か別の表の `id`）にある | `ndf contracts check` が `invalid` で止まる。コントラクトのコピーで `check_all()` が空であることをテストが確かめる |
 
 ## データ・設定
 
@@ -439,7 +439,7 @@ hook の表（`contracts/limits/`・`contracts/hooks/*.json`）を標準ライ�
 - IA1: 兆候を 1 件足したツリーで `ndf check` が `stopped`・`check_failed`・終了コード 1 を返し、構文の誤りのある `.py` では `invalid`・終了コード 2 を返す
 - I-DT1: 事実の表の `id` を 2 つ含む集まりの定数か、`id` に等しい 4 字以上の文字列の定数を足すと `const-fact` が落とす。`shared_names` が真の表では落とさない。2 つのファイルの同じ文字列・同じ集まり・含まれる集まり・要素・同じ名前と数の定数を、それぞれの種類で落とす
 - I-DT2: `id` の重なる表・列の型の違う行・設定に無い列を持つ行・2 つの保存先で名前の重なる表を `fact-table` が落とし、実行時の読み手は `FactsError` で止まる
-- I-DT3: 列の `ref` の先に無い値（`contracts/limits/` に無い方針・別の表に無い `id`）を `ndf contracts check` が誤りに挙げ、コントラクトの写しでは誤りが 0 件である
+- I-DT3: 列の `ref` の先に無い値（`contracts/limits/` に無い方針・別の表に無い `id`）を `ndf contracts check` が誤りに挙げ、コントラクトのコピーでは誤りが 0 件である
 - 値を足すときに直すファイルが 1 つになる: ランタイムの表に行を 1 つ足すだけで、`default_seat` の条件で引く読み手の結果に現れる
 - シェルの読み手: `ndf contracts fact-ids exit-codes status=gate` が条件に合う `id` だけを改行区切りで返し、`fact-value` が配列を 1 行に 1 要素、真偽を `true`・`false` で返す
 - IA5: `scripts/measure/ai-smells.py` の出力を読む側のテストは置かない。測り直しで前の値と並べて残す

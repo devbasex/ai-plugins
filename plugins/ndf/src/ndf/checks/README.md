@@ -17,7 +17,7 @@ plugins/ndf/bin/ndf check
 | 違反が無い | `ok` | 無し | 0 |
 | 違反がある | `stopped` | `check_failed` | 1 |
 | 構文の誤りで読めない `.py` がある | `stopped` | `invalid` | 2 |
-| 規則のデータ・子の表・用語集・git・PR の事象の JSON が読めない。コントラクトのファイルがプラグインの外を指す・コントラクトの下にディレクトリのリンクがある | `stopped` | `config_broken` | 2 |
+| 規則のデータ・子の表・用語集・git・PR のイベントの JSON が読めない。コントラクトのファイルがプラグインの外を指す・コントラクトの下にディレクトリのリンクがある | `stopped` | `config_broken` | 2 |
 
 `cause.detail` は `summary` と同じ文である。違反の一覧は `items`、規則ごとの件数は `metrics.findings` にある。途中の規則が止まった（`config_broken`）ときも、その前に当てた規則の違反は `items` に残る。
 

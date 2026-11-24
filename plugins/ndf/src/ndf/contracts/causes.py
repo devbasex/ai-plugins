@@ -58,7 +58,7 @@ def _with_kind(kind: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rows_of(raw: dict[str, Any]) -> dict[str, CauseRow]:
-    """種類（ファイル名）→ 中身の辞書の形と、exit が終了コードの表の stopped の id を指すことを確かめ、種類ごとの行を返す。"""
+    """種類（ファイル名）→ 中身の辞書の形と、exit が終了コードの表の stopped の id を指すことを確かめ、種類ごとの項目を返す。"""
     items = [_with_kind(kind, body) for kind, body in raw.items()]
     shape = [f"{item['kind']}: {e}" for item in items for e in contracts.schema_errors(item, SCHEMA)]
     if shape:
@@ -82,14 +82,14 @@ def _raise_errors(errs: list[str]) -> None:
 
 
 def _with_policies_checked(found: dict[str, CauseRow]) -> dict[str, CauseRow]:
-    """行が指す再試行の方針の有無と値を確かめる。方針のファイルを読む。"""
+    """項目が指す再試行の方針の有無と値を確かめる。方針のファイルを読む。"""
     _raise_errors([e for item in found.values() for e in _policy_errors(item)])
     return found
 
 
 @contracts.cached_reader
 def rows() -> dict[str, CauseRow]:
-    """表の全件を 1 プロセスに 1 回読み、種類ごとの行を返す（一覧に使う）。再試行の方針は名前だけを返し、そのファイルを読まない。"""
+    """表の全件を 1 プロセスに 1 回読み、種類ごとの項目を返す（一覧に使う）。再試行の方針は名前だけを返し、そのファイルを読まない。"""
     with contracts.raised_as(CausesError):
         return _rows_of(contracts.load_table(TABLE, CausesError, "停止理由の表"))
 
@@ -109,7 +109,7 @@ def has(kind: str) -> bool:
 
 @contracts.cached_reader
 def row(kind: str) -> CauseRow:
-    """種類 1 つの行。その種類のファイルだけを 1 プロセスに 1 回読む。無ければ `CausesError`。"""
+    """種類 1 つの項目。その種類のファイルだけを 1 プロセスに 1 回読む。無ければ `CausesError`。"""
     with contracts.raised_as(CausesError):
         body = contracts.load_item(TABLE, kind)
         if body is None:

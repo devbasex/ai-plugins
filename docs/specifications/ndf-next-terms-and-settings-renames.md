@@ -200,7 +200,7 @@ sequenceDiagram
 
 ## エラー処理
 
-原因の種類は `contracts/causes/` の既存の行で、終了コードは `contracts/facts/exit-codes.json` が決める。
+原因の種類は `contracts/causes/` の既存の項目で、終了コードは `contracts/facts/exit-codes.json` が決める。
 
 | 場面 | 原因の種類 | 終了コード | 行き先 |
 | --- | --- | --- | --- |

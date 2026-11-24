@@ -96,7 +96,7 @@ export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
 # UV_ISOLATED は uv sync が受けず uv run --no-sync だけが受ける（真なら同期した環境でなく空の一時の環境で動く）。
-# 同期と実行を同じ環境に揃えるため消す。呼び出し元の値は上で写してあり、start.py が子へ戻す
+# 同期と実行を同じ環境に揃えるため消す。呼び出し元の値は上で保存してあり、start.py が子へ戻す
 unset UV_ISOLATED
 # uv が真と読む値か（UV_NO_SYNC を uv と同じに読む）。外部コマンドを起動せずシェルの組み込みだけで比べる（bash 3.2 に ${var,,} は無い）
 truthy() {

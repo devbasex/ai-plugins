@@ -10,7 +10,7 @@ from ndf import contracts
 
 
 def copy_contract_files(root: Path, rels: Iterable[str]) -> None:
-    """`rels`（`contracts/` からの相対パス）のファイルだけを `root` へ写し、`root` を読み先にする。"""
+    """`rels`（`contracts/` からの相対パス）のファイルだけを `root` へコピーし、`root` を読み先にする。"""
     for rel in rels:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)

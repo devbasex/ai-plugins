@@ -1,4 +1,4 @@
 {
-  "summary": "JEV に届くかの確かめの上限",
+  "summary": "JEV に接続できるかの確かめの上限",
   "seconds": 10
 }

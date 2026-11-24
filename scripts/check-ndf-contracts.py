@@ -8,7 +8,7 @@
   方針のファイルが無い（`contracts_lib/limits_decl.py`。#2343）
 
 サブコマンドの引数・環境変数・設定のキー・受け渡しのファイル・公開する面と生成した規約のページは、NDF の検査の
-規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。宣言の形（上限の設定の中身を含む）は `ndf contracts check` が見る。
+規約の規則（spec-io・spec-decl・spec-public・spec-docs）が見る。設定の形（上限の設定の中身を含む）は `ndf contracts check` が見る。
 
     python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [<ファイル>...]
 

@@ -27,7 +27,7 @@ CI の修正の後の手元の確かめ（`ndf route test --failed-from`）が�
 | 語 | 意味 |
 | --- | --- |
 | 読み取りの記録 | 落ちたテストのチェック 1 件について、どこから読んだか（`junit`・`log`・`none`）・何件読めたか・読めなかった理由を持つ 1 行。CI の結果 JSON の `metrics.failed_test_reads` の 1 要素 |
-| 取得の枠 | 1 回の組み立てで取得してよい成果物の ZIP の本数。`contracts/limits/` の `github.failed-logs` の `count` で、読むチェックの数の上限と同じ値 |
+| 取得の上限の本数 | 1 回の組み立てで取得してよい成果物の ZIP の本数。`contracts/limits/` の `github.failed-logs` の `count` で、読むチェックの数の上限と同じ値 |
 
 ## 背景
 
@@ -133,7 +133,7 @@ sequenceDiagram
 チェックで使い回す。次をすべて満たす実行を「成果物から読めた」とし、その実行のチェックはすべて読み元 `junit` になる。
 
 - glob（`fnmatch` の大文字小文字を区別する照合）に当たり、`expired` でない成果物が 1 本以上ある
-- 当たる本数が残りの取得の枠以内で、どの成果物も 50 MiB（一覧の `size_in_bytes`）以下
+- 当たる本数が残りの取得の上限の本数以内で、どの成果物も 50 MiB（一覧の `size_in_bytes`）以下
 - 全本を取得して読め、落ちた testcase が 1 件以上、ファイルを決められない testcase が 0 件
 
 決められない testcase が 1 件でもあれば、読めた分を使わずにその実行のチェックをすべてログへ移す。一部のファイルだけを

@@ -365,7 +365,7 @@ workflow と LangGraph の条件つきの辺のとおり、流れはコードが
 
 テストは `plugins/ndf/tests/contracts/`（`test_causes.py`・`test_routing.py`・`test_result.py`・`test_chosen.py`）・`tests/core/plan/`・`tests/adapters/test_llm.py` が持つ。
 
-- 表の各行が標準の型と `stopped` の終了コードの id を持ち、終了コードの値は終了コードの表にだけある。打ち直しの種類の方針が上限の設定にあり、`interval` の無い方針は `retry_after` を待つ種類だけが持てる（IS10・IS11）
+- 表の各項目が標準の型と `stopped` の終了コードの id を持ち、終了コードの値は終了コードの表にだけある。打ち直しの種類の方針が上限の設定にあり、`interval` の無い方針は `retry_after` を待つ種類だけが持てる（IS10・IS11）
 - 表に無い `kind`・空の `detail`・`ok` に添えた `cause`・`cause` の無い `stopped`・種類と違う終了コード・`gaps` があるのに `incomplete` でない結果・`routes` の無い承認ゲート・回答の語彙に無い `routes` のキーを、`emit` が出さずに 2 で終える（IS1・IS2・IS9・IS12）
 - `pick` は `on_cause` を最初に当て、`on_cause` の `retry` は種類の方針で打ち直す。打ち直しは回数の内で行い、上限の後は `exhausted` へ進む。呼び手が解いた方針を種類の既定より優先する（IS4・IS5a・IS5b）
 - `usage_limit` は `retry_after` が無ければ人へ、`transient` は倍の間隔で打ち直して人へ止まらない。既定が `conductor`・`human` の種類は `on_fail` を見ない。既定が `step` の種類は `on_fail`、無ければ `conductor` へ進む（IS4・IS8）

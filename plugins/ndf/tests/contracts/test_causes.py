@@ -115,7 +115,7 @@ def test_errors(value, count):
 
 
 def test_table_keeps_every_kind_and_representative_row():
-    # #3687: 表を停止理由ごとのファイルへ分けても、読みの結果は分ける前と同じ件数（と、その後に足した samples_mismatch）と行を返す
+    # #3687: 表を停止理由ごとのファイルへ分けても、読みの結果は分ける前と同じ件数（と、その後に足した samples_mismatch）と項目を返す
     assert len(causes.table()) == 37
     row = causes.row("ci_pending")
     assert (row.kind, row.std_type, row.exit_id, row.route, row.retry, row.exhausted) == (

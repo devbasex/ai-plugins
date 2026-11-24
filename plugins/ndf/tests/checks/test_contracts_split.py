@@ -85,7 +85,7 @@ def _text(rel: str, value: object) -> Callable[[Path], object]:
 
 
 def test_the_split_tables_have_no_findings(rules):
-    # 実物の表の全件は、写さずにそのまま読む
+    # 実物の表の全件は、コピーせずにそのまま読む
     scope = Scope(PLUGIN_ROOT.parents[1], PLUGIN_ROOT, "p")
     scope.sources = run.collect(PLUGIN_ROOT / DIR, scope.repo_root)
     assert contracts_split.check(scope, rules) == []

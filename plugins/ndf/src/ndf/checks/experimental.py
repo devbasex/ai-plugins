@@ -1,6 +1,6 @@
 """規則 experimental: 既定で動くものから実験版の保存先への参照を違反にする。
 
-実験版はプラグインの根（取得元が配るディレクトリ）の外の保存先（保存先の表 `locations` の行 `experimental`）に置き、`ndf` のパッケージに
+実験版はプラグインの根（取得元が配るディレクトリ）の外の保存先（保存先の表 `locations` の項目 `experimental`）に置き、`ndf` のパッケージに
 入らない。そのため import の形は見ず、プラグインの根の下の見るファイル（検査が集めた文字のファイル）の本文に保存先のパスが
 現れることを参照とみなす。
 利用者向けの説明（`README.md`・`CHANGELOG.md`・`docs/`）は実験版を紹介してよく、保存先のパスを持つのが役目のもの
@@ -18,7 +18,7 @@ from ndf import contracts
 from ndf.checks.model import CheckError, Finding, Scope, Source
 from ndf.contracts import facts
 
-# 規則の名前と、保存先の表の実験版の行の id は、どちらもこのモジュールの名前（表の id を文字列リテラルで写さない）
+# 規則の名前と、保存先の表の実験版の項目の id は、どちらもこのモジュールの名前（表の id を文字列リテラルで書かない）
 RULE = ROW_ID = __name__.rsplit(".", 1)[-1]
 # 保存先の表の名前
 TABLE = "locations"
@@ -42,7 +42,7 @@ EXEMPT_VALUES: dict[str, tuple[str, ...]] = {
 
 
 def _needle(sources: list[Source], table: Path) -> str | None:
-    """保存先の表の、実験版の行の保存先。表かその行が無ければ `None`、表が読めなければ `CheckError`。"""
+    """保存先の表の、実験版の項目の保存先。表かその項目が無ければ `None`、表が読めなければ `CheckError`。"""
     src = next((s for s in sources if s.path == table), None)
     if src is None:
         return None
