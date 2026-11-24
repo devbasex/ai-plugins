@@ -103,7 +103,7 @@ def _drop_object(repo: Path, rev: str) -> None:
 def test_current_snapshots_the_approved_body_of_the_ref_not_of_the_worktree(repo: Path) -> None:
     decl = _decl(BODY)
     head = _commit(repo, decl)
-    (repo / ".ndf" / "mvv.md").write_text("作業場所で変えた本文", encoding="utf-8")
+    (repo / BODY_AT).write_text("作業場所で変えた本文", encoding="utf-8")
     got = mvv.current(repo, "main")
     principles = (contracts.contracts_dir() / mvv.PRINCIPLES).read_bytes()
     assert (got.state, got.version, got.sha256, got.commit) == ("approved", 11, _sha(BODY), head)
@@ -163,7 +163,7 @@ LF, CRLF = BODY.replace("\r\n", "\n"), BODY
 def test_line_ending_conversion_does_not_split_preflight_and_current(repo: Path, approved: str, committed: str, checked_out: str) -> None:
     """`core.autocrlf`・`eol=crlf` で作業場所と blob の改行が違っても、どちらで承認した記録も両方が承認済みにする。"""
     _commit(repo, _decl(approved), committed)
-    (repo / ".ndf" / "mvv.md").write_bytes(checked_out.encode("utf-8"))
+    (repo / BODY_AT).write_bytes(checked_out.encode("utf-8"))
     got = mvv.current(repo, "main")
     assert (preflight.mvv_state(repo), got.state, got.sha256) == ("approved", "approved", _sha(approved))
     assert got.path is not None and got.path.read_bytes() == approved.encode("utf-8")
@@ -173,7 +173,7 @@ def test_line_ending_conversion_does_not_split_preflight_and_current(repo: Path,
 def test_a_record_of_the_lf_body_covers_mixed_line_endings(repo: Path) -> None:
     """LF にそろえた sha256 の記録は、LF と CRLF が混ざった作業場所と、Git が LF にそろえた blob の両方を承認済みにする。"""
     _commit(repo, _decl(LF), LF)
-    (repo / ".ndf" / "mvv.md").write_bytes(CRLF.replace("\r\n", "\n", 3).encode("utf-8"))
+    (repo / BODY_AT).write_bytes(CRLF.replace("\r\n", "\n", 3).encode("utf-8"))
     assert (preflight.mvv_state(repo), mvv.current(repo, "main").state) == ("approved", "approved")
 
 
@@ -269,7 +269,7 @@ def test_broken_settings_and_unreadable_bodies_are_errors(repo: Path, decl: str)
 def test_undecodable_settings_and_bodies_are_errors(repo: Path) -> None:
     raw = b"\xff"
     _commit(repo, json.dumps({"versions": [{"version": 1, "sha256": hashlib.sha256(raw).hexdigest()}]}))
-    (repo / ".ndf" / "mvv.md").write_bytes(raw)
+    (repo / BODY_AT).write_bytes(raw)
     _commit(repo, None, None)
     with pytest.raises(mvv.MvvError):
         mvv.current(repo, "main")
