@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -207,6 +209,28 @@ def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys,
     cli.main(["report", "--state-dir", str(state_dir), "--pr", "7"])
     assert len(hub.port.opened) == 3
     assert hub.comments[-1][3] == "https://github.com/acme/repo/pull/7#issuecomment-1"
+
+
+@pytest.mark.parametrize("recovered", [False, True])
+def test_report_tells_the_mvv_record_error_of_the_state_read_in_the_lock(tmp_path: Path, monkeypatch, hub, recovered: bool) -> None:
+    """MVV の記録の失敗の注意は、公開のロックの中で読み直した状態から載せる。ロックを待つ間に書けていれば載せない。"""
+    from ndf.domains.crossreview import cli, drive
+
+    path, state = tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"}
+    store.write_object(path, {**state, store.MVV_RECORD_ERROR: "OSError: 書けない"})
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        if recovered:
+            store.write_object(path, state)
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    assert cli.main(["report", "--state-dir", str(tmp_path), "--pr", "7"]) == 0
+    assert (drive.RECORDS_UNWRITTEN in hub.comments[-1][2]) is not recovered
+    notices = [] if recovered else [drive.RECORDS_UNWRITTEN]
+    data = store.read_object(path)
+    assert data[report_decide.PUBLISHED_KEY] == report_decide.published_state(7, data, report_decide.final_of(data), notices)
 
 
 def test_comment_id_reads_the_id_from_the_url() -> None:

@@ -191,14 +191,19 @@ def test_records_that_cannot_be_written_do_not_change_the_result(review: Review,
 
 
 def test_cause_that_cannot_be_saved_does_not_change_the_result(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
-    """MVV の記録と状態ファイルの両方に書けなくても、結果を返し、固定の注意を 2 つ載せる。"""
-    save = drive._save
+    """MVV の記録と状態ファイルの両方に書けなくても、結果を返し、固定の注意を 2 つ載せる。同じ head の打ち直しで初めて失敗しても、
+    PR のコメントに注意を載せる（載せた後は、同じ失敗で書き直さない）。"""
+    review.run(Visibility())
+    written, save = len(review.hub.comments), drive._save
     monkeypatch.setattr(mvv, "record_review", _refuse)
     monkeypatch.setattr(drive, "_save", lambda run: _refuse() if store.MVV_RECORD_ERROR in run.data else save(run))
     got = review.run(Visibility())
     assert len(got["outputs"]["mvv"]["citations"]) == 1
     assert {drive.RECORDS_UNWRITTEN, drive.CAUSE_UNSAVED} <= set(got["warnings"])
-    assert FULL not in json.dumps(got, ensure_ascii=False) + review.hub.comments[-1][2]
+    body = review.hub.comments[-1][2]
+    assert drive.RECORDS_UNWRITTEN in body and FULL not in json.dumps(got, ensure_ascii=False) + body
+    review.run(Visibility())
+    assert (review.calls, len(review.hub.comments)) == ([], written + 1)
 
 
 def test_findings_of_an_earlier_mvv_are_left_out(review: Review, repos: Repos) -> None:

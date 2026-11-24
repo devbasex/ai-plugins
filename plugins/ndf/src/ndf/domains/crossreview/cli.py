@@ -486,10 +486,18 @@ class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
-def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, hub_of: Callable[[], Hub]) -> tuple[str, list[str]]:
+def _mvv_notices(warnings: Sequence[str]) -> list[str]:
+    """コメントに載せる注意のうち、公開済みかの比較に使うもの（MVV の記録の失敗）。"""
+    return [w for w in drive.MVV_NOTICES if w in warnings]
+
+
+def _post_report(
+    state_dir: Path, pr: int, final: Optional[str], warnings: Optional[Sequence[str]], hub_of: Callable[[], Hub]
+) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    `warnings` はコメントに載せる注意（None なら、公開のロックの中で読み直した状態ファイルから作る）。
     `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
@@ -504,9 +512,12 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub) -> tuple[str, list[str]]:
+def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
+    if warnings is None:
+        # ロックを待つ間に別の起動が MVV の記録を書けていれば、失敗の注意を載せない
+        warnings = [drive.RECORDS_UNWRITTEN] if store.MVV_RECORD_ERROR in data else []
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     if journal.with_occurrences(data):
@@ -523,7 +534,7 @@ def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub)
     if notes:
         data.pop(report_decide.PUBLISHED_KEY, None)
     else:
-        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
+        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final, _mvv_notices(warnings))
     store.write_object(ref.path, data)
     return url, notes
 
@@ -533,10 +544,9 @@ def cmd_report(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     ref = store.state_pr(state_dir, args.pr)
     data = store.read_state(ref)
-    unwritten = (drive.RECORDS_UNWRITTEN,) if store.MVV_RECORD_ERROR in data else ()
     try:
         url, notes = _post_report(
-            state_dir, args.pr, report_decide.final_of(data), unwritten, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+            state_dir, args.pr, report_decide.final_of(data), None, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
@@ -619,7 +629,9 @@ def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tu
     data = store.read_state(ref)
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     previous = data.get(report_decide.COMMENT_KEY)
-    published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
+    # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
+    now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
+    published = data.get(report_decide.PUBLISHED_KEY) == now
     if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings

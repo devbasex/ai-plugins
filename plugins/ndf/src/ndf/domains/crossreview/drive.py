@@ -70,6 +70,8 @@ UNSENT_UNCHECKED = "PR に届いていない手元のコミットの根拠の記
 # MVV の記録を書けなかった注意と、その原因を状態ファイルへ残せない（消せない）注意（PR へ載るので、保存先のパスを含む例外の文を入れない）
 RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原因は状態ファイルの {store.MVV_RECORD_ERROR} にある）"
 CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
+# 出た・消えたときに、指摘が同じでも PR の記録を書き直す注意
+MVV_NOTICES = (RECORDS_UNWRITTEN, CAUSE_UNSAVED)
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
