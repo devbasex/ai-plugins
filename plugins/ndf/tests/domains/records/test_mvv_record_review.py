@@ -258,13 +258,57 @@ def test_a_hold_added_by_another_state_dir_after_the_last_check_is_cleared_by_a_
     assert len(reads) == 1 and _plain_holds(root) == []
 
 
-def test_the_check_time_is_kept_per_pr() -> None:
+def test_a_plain_fix_does_not_hide_a_redline_with_the_same_key(root: Path) -> None:
+    """#3959: 伏せた後に同じキーになる通常の直しとレッドラインが同居しても、レッドラインは保留の照合に掛けずに書く。"""
+    snap = _snapshot()
+    fixed = {"id": "r1-1", "text": REDLINE["text"], "by": "codex", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
+    got = mvv.record_review(str(root), PR, HEAD, snap, [fixed, {"judged_mvv": snap.identity, **REDLINE}], list)
+    assert (got.missing, got.cause) == ((), None)
+    assert [r["outcome"] for r in _reviews()] == ["redline"]
+
+
+def test_a_fix_in_the_same_second_as_the_deferral_or_the_last_check_is_told_apart(root: Path) -> None:
+    """#3959: 見送りの記録・照らし終えた時刻と同じ秒の中で後に直した指摘も、保留を解く候補にする。"""
+    snap = _snapshot()
+    mvv.record_review(str(root), PR, HEAD, snap, [PLAIN], list)
+    since = jsonl.now_exact()
+    fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: jsonl.now_exact()}
+    assert [f.row["id"] for f in md.judged_findings([fixed], snap.identity, holds=True, since=since)] == ["r2-1"]
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list, since).written == 1
+    assert _plain_holds(root) == []
+
+
+def test_the_hold_candidates_skip_rereading_until_another_state_dir_adds_a_hold(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3959: 保留が変わらない間は、直した通常の指摘が出ても記録をロックして読み直さない。別の状態ディレクトリが保留を足せば、
+    足された行だけを読んで気付き、追記の前の読み取りで解く。"""
+    snap = _snapshot()
+    _record(root, {**VALUE, "outcome": "fixed", "reason": None})
+    index = mvv.HoldIndex(PR)
+    first = {**PLAIN, "id": "r1-1", "text": "一つ目", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
+    # 初回は確かめていないので、追記の前の読み取りで候補を確かめる
+    assert mvv.record_review(str(root), PR, HEAD, snap, [first], list, None, index).written == 0
+    assert index.size > 0 and index.keys == set()
+    locks: list[Any] = []
+    real_lock = jsonl.lock
+    monkeypatch.setattr(jsonl, "lock", lambda path: (locks.append(path), real_lock(path))[1])
+    second = {**first, "id": "r2-1", "text": "二つ目"}
+    assert mvv.record_review(str(root), PR, HEAD, snap, [second], list, None, index) == (0, (), None) and locks == []
+    # 別の状態ディレクトリが同じ PR に保留を足す（ここでロックを 1 回取る）
+    mvv.record_review(str(root), PR, HEAD, snap, [{**PLAIN, "text": "三つ目"}], list)
+    third = {**first, "id": "r3-1", "text": "三つ目"}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [third], list, None, index).written == 1
+    assert len(locks) == 2 and mvv.record_key("三つ目") not in index.keys
+    assert md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-") == []
+
+
+def test_the_check_time_and_the_candidates_are_kept_per_pr() -> None:
     from ndf.domains.crossreview import drive, store
 
-    run = SimpleNamespace(ref=SimpleNamespace(current_pr=PR), data={store.MVV_FIXES_CHECKED: {"pr": PR, "at": EARLIER}})
-    assert drive._fixes_checked(run) == EARLIER
-    # 巻き直した後の別の PR では、前の PR の時刻を使わない
-    assert drive._fixes_checked(SimpleNamespace(ref=SimpleNamespace(current_pr=PR + 1), data=run.data)) is None
+    state = {store.MVV_FIXES_CHECKED: {"pr": PR, "at": EARLIER, "size": 10, "keys": ["k"]}}
+    since, index = drive._fixes_checked(SimpleNamespace(ref=SimpleNamespace(current_pr=PR), data=state))
+    assert (since, index) == (EARLIER, mvv.HoldIndex(PR, 10, {"k"}))
+    # 巻き直した後の別の PR では、前の PR の時刻と候補を使わない
+    assert drive._fixes_checked(SimpleNamespace(ref=SimpleNamespace(current_pr=PR + 1), data=state)) == (None, mvv.HoldIndex(PR + 1))
 
 
 def test_broken_shape_is_refused(root: Path) -> None:

@@ -402,6 +402,18 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
     return internal.epoch(str(last.get("at"))) < internal.epoch(fixed_at)
 
 
+def holding_keys(seqs: Mapping[str, Sequence[Mapping[str, Any]]]) -> set[str]:
+    """キー → 記録の並び（記録の順）`seqs` のうち、通常の指摘の、利用者の判断に委ねた見送りが（伏せた直しを除いて）最後の記録の
+    キー。通常の指摘を直した記録で解ける保留の候補である（実際に解けるかは `plain_fix_clears` が決める）。"""
+    out = set()
+    for key, seq in seqs.items():
+        rest = [r for r in seq if not (r.get("outcome") == REVIEW_FIXED and r.get("withheld"))]
+        last = rest[-1] if rest else None
+        if last is not None and last.get("outcome") == REVIEW_DEFERRED and defer_holds(last.get(REVIEW_DEFER)) and "item" not in last:
+            out.add(key)
+    return out
+
+
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
     """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。
 

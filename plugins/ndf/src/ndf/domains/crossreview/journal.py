@@ -452,7 +452,7 @@ class FindingJournal:
             # 直した時刻は、別の状態ディレクトリが記録した見送りとの前後を照らすために残す（#3959）
             row.pop(REVIEW_FIXED_AT, None)
             if item["outcome"] == fin.FIXED:
-                row[REVIEW_FIXED_AT] = jsonl.now()
+                row[REVIEW_FIXED_AT] = jsonl.now_exact()
         return taken
 
     def reopen(self, fids: Sequence[str]) -> None:

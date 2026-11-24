@@ -616,11 +616,21 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
-def _fixes_checked(run: _Run) -> Optional[str]:
-    """今の PR で、直した通常の指摘を記録の保留と照らし終えた時刻（無ければ None）。"""
+def _fixes_checked(run: _Run) -> tuple[Optional[str], mvv.HoldIndex]:
+    """今の PR で、直した通常の指摘を記録の保留と照らし終えた時刻（無ければ None）と、保留の候補（無ければ未確認）。"""
+    pr = run.ref.current_pr
     held = run.data.get(store.MVV_FIXES_CHECKED)
-    ok = isinstance(held, dict) and held.get("pr") == run.ref.current_pr and isinstance(held.get("at"), str)
-    return held["at"] if ok else None
+    if not (isinstance(held, dict) and held.get("pr") == pr):
+        return None, mvv.HoldIndex(pr)
+    at = held["at"] if isinstance(held.get("at"), str) else None
+    size, keys = held.get("size"), held.get("keys")
+    if type(size) is not int or not isinstance(keys, list):
+        return at, mvv.HoldIndex(pr)
+    return at, mvv.HoldIndex(pr, size, {k for k in keys if isinstance(k, str)})
+
+
+def _checked_state(pr: int, at: Optional[str], index: mvv.HoldIndex) -> dict[str, Any]:
+    return {"pr": pr, "at": at, "size": index.size, "keys": sorted(index.keys)}
 
 
 def _record_mvv(
@@ -628,17 +638,18 @@ def _record_mvv(
 ) -> mvv.ReviewWrite:
     """MVV の記録を書き、結果を返す。書けなければ固定の注意を足し、伏せた原因（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
     step = "メインディレクトリの解決"
-    since = _fixes_checked(run)
-    # 前の起動より後に直した通常の指摘があれば、照らし終えた時刻を進めて状態ファイルに残す
+    since, index = _fixes_checked(run)
+    before = _checked_state(run.ref.current_pr, since, index)
+    # 前の起動より後に直した通常の指摘があれば、照らし終えた時刻を進めて状態ファイルに残す（同じ秒の中でも前後を見分ける）
     fresh = any(f.plain and f.outcome == fin.FIXED for f in md.judged_findings(rows, snap.identity, holds=True, since=since))
-    checked = jsonl.now()
+    checked = jsonl.now_exact()
     try:
         # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
         repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
         step = "記録の書き込み"
-        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean, since)
-        if got.cause is None and fresh:
-            run.data[store.MVV_FIXES_CHECKED] = {"pr": run.ref.current_pr, "at": checked}
+        got = mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean, since, index)
+        if got.cause is None:
+            run.data[store.MVV_FIXES_CHECKED] = _checked_state(run.ref.current_pr, checked if fresh else since, index)
     except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
         # 記録を書く前に止まった。どの行が記録にあるか分からないので、必須の行をすべて欠けとする
         got = mvv.unwritable(snap, rows, mvv.failure_cause(step, exc))
@@ -647,7 +658,7 @@ def _record_mvv(
     held = run.data.pop(store.MVV_RECORD_ERROR, None)
     if got.cause is not None:
         run.data[store.MVV_RECORD_ERROR] = got.cause
-    if got.cause != held or _fixes_checked(run) != since:
+    if got.cause != held or run.data.get(store.MVV_FIXES_CHECKED, before) != before:
         try:
             _save(run)
         except OSError:
