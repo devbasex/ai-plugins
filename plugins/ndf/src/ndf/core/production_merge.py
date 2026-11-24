@@ -74,7 +74,7 @@ def judge(section: object, base: str) -> Verdict:
     return automatic_rows(section)
 
 
-def judge_text(text: Optional[str], base: str) -> Verdict:
+def judge_project_text(text: Optional[str], base: str) -> Verdict:
     """マージ先のブランチの設定のファイルの本文 `text`（無ければ None）での `judge`。読めなければ `UNKNOWN`。"""
     if text is None:
         return Verdict.UNKNOWN

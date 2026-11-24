@@ -17,21 +17,21 @@ ACTOR = invoke.ACTOR
 CONDUCTOR, ORGANIZER = "conductor", "organizer"
 
 
-def _event(kind: str) -> str:
+def _event_kind(kind: str) -> str:
     """進行の事象の種類（コントラクト `workflow/progress.json` のスプリントの行）。表に無ければ import の時点で `KeyError`。"""
     return model.rules()[("sprint", kind)].kind
 
 
 # 事象の種類。行を終える事象の種類は、終えた行の状態とステップの記録の status にも使う
-STARTED = _event("started")
-STEP_EVENT = _event("step_recorded")
-ANSWERED = _event("answered")
-FAILED = _event("failed")
-FINISHED = _event("finished")
+STARTED = _event_kind("started")
+STEP_EVENT = _event_kind("step_recorded")
+ANSWERED = _event_kind("answered")
+FAILED = _event_kind("failed")
+FINISHED = _event_kind("finished")
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
-RETRY_EVENT = _event("retry")
+RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
-DEFINITION_MIGRATED = _event("definition_migrated")
+DEFINITION_MIGRATED = _event_kind("definition_migrated")
 # 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
 CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
 
@@ -62,7 +62,7 @@ class View:
         return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
 
 
-def payload_of(ev: model.Event) -> dict[str, Any]:
+def event_payload(ev: model.Event) -> dict[str, Any]:
     """事象の payload。無ければ空。"""
     return ev.draft.payload if ev.draft.payload is not None else {}
 
@@ -72,7 +72,7 @@ def migrated_order(snap: stages.Snapshot, events: Sequence[model.Event]) -> stag
 
     写しそのもの（`sha256`・`definition_version`）は書き換えない（写しの由来を残す）。
     """
-    held = next((payload_of(e).get("order") for e in events if e.draft.kind == DEFINITION_MIGRATED), None)
+    held = next((event_payload(e).get("order") for e in events if e.draft.kind == DEFINITION_MIGRATED), None)
     by_name = {s.name: s for s in snap.stages}
     if not isinstance(held, list) or sorted(map(str, held)) != sorted(by_name) or len(held) != len(by_name):
         return snap

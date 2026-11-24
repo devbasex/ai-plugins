@@ -49,7 +49,7 @@ from ndf.progress.run_view import (
     View,
     migrated_order,
     migration_drafts,
-    payload_of,
+    event_payload,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -142,13 +142,13 @@ class StepProgress:
         return None
 
     def answer_value(self) -> Optional[str]:
-        return str(payload_of(self.answer)["answer"]) if self.answer is not None else None
+        return str(event_payload(self.answer)["answer"]) if self.answer is not None else None
 
     def see(self, ev: model.Event) -> None:
         """事象 1 つを読んで進みを書き換える。変更要求（承認ゲートの request_changes）なら世代を上げてステップを初めから流し直す。"""
         handle = _SEES.get(ev.draft.kind)
         if handle is not None:
-            handle(self, ev, payload_of(ev))
+            handle(self, ev, event_payload(ev))
 
     def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
         """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
@@ -334,7 +334,7 @@ def _metrics(v: View, m: Move) -> dict[str, Any]:
 
 def _failed_report(v: View, m: Move) -> dict[str, Any]:
     assert m.stage is not None
-    p = payload_of(m.event) if m.event is not None else {}
+    p = event_payload(m.event) if m.event is not None else {}
     cause = p["cause"] if isinstance(p.get("cause"), dict) else {}
     kind = causes.kind_of(cause)
     kind = kind if kind is not None and causes.has(kind) else "unknown"
@@ -548,7 +548,7 @@ def _launched(d: Drive, v: View, m: Move) -> dict[str, Any]:
 
 def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
     """承認ゲートのステップの出力（回答を持つ結果 JSON）。"""
-    p = payload_of(answer)
+    p = event_payload(answer)
     summary = f"承認ゲート {step.gate} の回答: {p['answer']}（{answer.draft.reason}）"
     return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
 
@@ -567,7 +567,7 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         summary = f"{reason}。回答は検証を通してから読むので next を打つ"
         return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.machine_id))
-    if payload_of(m.event)["answer"] == APPROVED:
+    if event_payload(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
         payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
@@ -798,7 +798,7 @@ def approved_seen(v: View, stage: str) -> Optional[dict[str, Any]]:
     利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。
     """
     for ev in reversed(v.events):
-        p = payload_of(ev)
+        p = event_payload(ev)
         if ev.draft.kind == ANSWERED and ev.draft.row_key == stage and p.get("answer") == APPROVED:
             seen = p.get("seen")
             return dict(seen) if isinstance(seen, dict) else None

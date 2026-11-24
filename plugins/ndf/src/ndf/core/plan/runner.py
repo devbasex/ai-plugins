@@ -123,7 +123,7 @@ def answer_path(state_dir: Path, step: str) -> Path:
     return state_dir / ANSWERS_DIR / f"{step}.json"
 
 
-def presented_path(state_dir: Path, step: str) -> Path:
+def step_presented_path(state_dir: Path, step: str) -> Path:
     """承認待ちで止まったステップ `step` の提示の識別子（ステップの結果の `metrics.presented_id`）の写し。"""
     return state_dir / PRESENTED_DIR / f"{step}.json"
 
@@ -144,7 +144,7 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
-        write_json(presented_path(ctx.state_dir, step_id), {"step": step_id, "presented_id": out.get("presented_id")})
+        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "presented_id": out.get("presented_id")})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
@@ -361,7 +361,7 @@ def _record_answer(inv: Invocation, baseline: dict[str, Any], answer: str, by: s
     一時ファイルから置き換えて書く。書けなければ `OSError`。
     """
     step = str(baseline["step"])
-    shown = read_json(presented_path(inv.state_dir, step))
+    shown = read_json(step_presented_path(inv.state_dir, step))
     record = {
         "step": step,
         "answer": answer,

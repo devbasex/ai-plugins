@@ -359,7 +359,7 @@ def test_routes_answer_with_the_user_as_the_actor(gated):
 
 
 def test_the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
-    runner.write_json(runner.presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p1"})
+    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p1"})
     runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "approved", "human")
     got = json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))
     assert (got["step"], got["answer"], got["by"], got["run"], got["presented_id"]) == ("merge", "approved", "human", gated.run_id, "p1")

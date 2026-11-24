@@ -88,7 +88,7 @@ def _parser() -> argparse.ArgumentParser:
     a.add_argument("--branch", required=True, help="PR の head のブランチ")
     a.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
     a.add_argument("--presented-out", required=True, help="承認の対象を書くファイル（ndf ci answer が読む）")
-    a.set_defaults(run=_ask)
+    a.set_defaults(run=_ask_approval)
     w2 = sub.add_parser("answer", help="プランの実行の回答の記録を、提示した承認の対象と照らしてマージの承認の証跡に書く")
     w2.add_argument("--branch", required=True, help="PR の head のブランチ")
     w2.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
@@ -218,7 +218,7 @@ def _open_pull(hub: GitHub, branch: str) -> Optional[Pull]:
     return opened[0] if opened else None
 
 
-def _merge_target(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget:
+def _pr_target(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget:
     """読んだ PR の承認の対象（ベースリポジトリ・番号・マージ先・HEAD）。"""
     return merge_approval.MergeTarget(hub.repo, pull.number, pull.base_ref, pull.head_sha)
 
@@ -227,7 +227,7 @@ def _verdict_of(hub: GitHub, base: str, text: Optional[str], repo: str) -> Verdi
     """マージ先の設定の本文の判定。読めない・別のリポジトリから読んだなら `UNKNOWN`。"""
     if not github_mod.same_repo(repo, hub.repo):
         return Verdict.UNKNOWN
-    return production_merge.judge_text(text, base)
+    return production_merge.judge_project_text(text, base)
 
 
 def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:
@@ -241,7 +241,7 @@ def _approval(hub: GitHub, target: merge_approval.MergeTarget) -> Optional[merge
     return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer_login()), target)
 
 
-def _material(target: merge_approval.MergeTarget, production: bool) -> str:
+def _approval_material(target: merge_approval.MergeTarget, production: bool) -> str:
     """承認資料。本番へ反映され得るなら、その行を書く（承認する人が本番への反映を知らずに承認しない）。"""
     lines = [
         f"# PR {target.number} のマージの承認",
@@ -263,11 +263,11 @@ def _presented(path: Path, target: merge_approval.MergeTarget, production: bool)
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
-    path.with_suffix(".md").write_text(_material(target, production), encoding="utf-8")
+    path.with_suffix(".md").write_text(_approval_material(target, production), encoding="utf-8")
     return presented_id
 
 
-def _pr_items(number: int) -> list[dict]:
+def _pr_item_list(number: int) -> list[dict]:
     return [{"kind": "pr", "number": number}]
 
 
@@ -279,9 +279,9 @@ def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[
         try:
             metrics["presented_id"] = _presented(Path(out), target, production)
         except OSError as exc:
-            return result.stopped(TOOL, "precondition", f"承認の対象を {out} へ書けない: {exc}", items=_pr_items(target.number))
+            return result.stopped(TOOL, "precondition", f"承認の対象を {out} へ書けない: {exc}", items=_pr_item_list(target.number))
     routes = {approval_words.APPROVED: None, approval_words.REJECTED: None}
-    return result.result(TOOL, result.GATE, summary, items=_pr_items(target.number), metrics=metrics, routes=routes)
+    return result.result(TOOL, result.GATE, summary, items=_pr_item_list(target.number), metrics=metrics, routes=routes)
 
 
 def _stale(target: merge_approval.MergeTarget, detail: str, verdict: Optional[Verdict] = None) -> dict:
@@ -289,7 +289,7 @@ def _stale(target: merge_approval.MergeTarget, detail: str, verdict: Optional[Ve
     metrics: dict[str, Any] = {"gate": GATE_NAME}
     if verdict is not None:
         metrics["verdict"] = verdict.value
-    return result.stopped(TOOL, "approval_stale", detail, instance=target.head, items=_pr_items(target.number), metrics=metrics)
+    return result.stopped(TOOL, "approval_stale", detail, instance=target.head, items=_pr_item_list(target.number), metrics=metrics)
 
 
 def _unapproved(args: argparse.Namespace, target: merge_approval.MergeTarget, verdict: Verdict) -> dict:
@@ -298,7 +298,7 @@ def _unapproved(args: argparse.Namespace, target: merge_approval.MergeTarget, ve
     if args.production_gate == production_merge.DEFER:
         metrics = {"gate": GATE_NAME, "merge": "deferred", "verdict": verdict.value}
         summary = f"{where} は本番チャネルへの承認の証跡が無いので、マージをリリース承認ゲートの後へ先送りした"
-        return result.result(TOOL, result.OK, summary, items=_pr_items(target.number), metrics=metrics)
+        return result.result(TOOL, result.OK, summary, items=_pr_item_list(target.number), metrics=metrics)
     if args.production_gate == production_merge.STALE:
         return _stale(target, f"{where} に、今の HEAD とマージ先への本番チャネルの承認の証跡が無い（承認ゲートから質問し直す）", verdict)
     return _asking(target, verdict, args.presented_out, f"{where} は本番チャネルへのマージなので承認の回答を待つ")
@@ -333,7 +333,7 @@ def _merge_pull(args: argparse.Namespace, hub: GitHub) -> tuple[Optional[Pull], 
             return None, result.stopped(TOOL, "precondition", f"#{args.pr} は PR でない")
         if pull.merged:
             summary = f"#{pull.number} は既にマージ済み"
-            return None, result.result(TOOL, result.OK, summary, items=_pr_items(pull.number), metrics={"merge": "already"})
+            return None, result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"merge": "already"})
         if pull.state != "open":
             return None, result.stopped(TOOL, "precondition", f"#{pull.number} は閉じている")
         return pull, None
@@ -383,7 +383,7 @@ def _merged(
     args: argparse.Namespace, target: merge_approval.MergeTarget, outcome: MergeOutcome, verdict: Verdict, approved_by: Optional[str]
 ) -> dict:
     """`GitHub.merge` の結果から結果 JSON を組む。"""
-    items = _pr_items(target.number)
+    items = _pr_item_list(target.number)
     if outcome.kind == _REJUDGED:
         return _unapproved(args, target, Verdict(outcome.detail))
     if outcome.merged:
@@ -413,7 +413,7 @@ def _merge(args: argparse.Namespace) -> dict:
     pull, done = _merge_pull(args, hub)
     if pull is None:
         return done if done is not None else result.stopped(TOOL, "unknown", "PR を決められない")
-    target = _merge_target(hub, pull)
+    target = _pr_target(hub, pull)
     stopped = _held_mismatch(args, pull, target)
     if stopped is not None:
         return stopped
@@ -435,19 +435,19 @@ def _merge(args: argparse.Namespace) -> dict:
     return _merged(args, target, outcome, verdict, approved_by)
 
 
-def _ask(args: argparse.Namespace) -> dict:
+def _ask_approval(args: argparse.Namespace) -> dict:
     """`--branch` の PR の承認の対象を承認資料と提示のファイルに書き、承認の回答を待つ（プランの中の承認ゲート `{{gate}}`）。"""
     hub = _hub(args)
     pull = _open_pull(hub, args.branch)
     if pull is None:
         return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
     verdict, _ = _judge_pr(hub, pull)
-    target = _merge_target(hub, pull)
+    target = _pr_target(hub, pull)
     return _asking(target, verdict, args.presented_out, f"#{pull.number} のマージの承認の回答を待つ")
 
 
-def _refuse(detail: str, number: Optional[int] = None) -> dict:
-    return result.stopped(TOOL, "refused", detail, items=_pr_items(number) if number is not None else [])
+def _refused_answer(detail: str, number: Optional[int] = None) -> dict:
+    return result.stopped(TOOL, "refused", detail, items=_pr_item_list(number) if number is not None else [])
 
 
 def _answer(args: argparse.Namespace) -> dict:
@@ -458,27 +458,27 @@ def _answer(args: argparse.Namespace) -> dict:
     """
     record = _read_json(args.answer_record)
     if record is None:
-        return _refuse(f"回答の記録 {args.answer_record} が無い（ndf plan next --answer <回答> --by human で回答する）")
+        return _refused_answer(f"回答の記録 {args.answer_record} が無い（ndf plan next --answer <回答> --by human で回答する）")
     if record.get("by") != actors.HUMAN:
-        return _refuse(f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない")
+        return _refused_answer(f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない")
     answer = record.get("answer")
     if answer not in approval_words.ANSWERS:
-        return _refuse(f"回答 {answer} は {' / '.join(approval_words.ANSWERS)} のどれでもない")
+        return _refused_answer(f"回答 {answer} は {' / '.join(approval_words.ANSWERS)} のどれでもない")
     shown = _read_json(args.presented)
     presented_id = record.get("presented_id")
     if shown is None or not presented_id or shown.get("presented_id") != presented_id:
-        return _refuse("回答の記録が今の提示（承認の対象のファイル）への回答でない（プランを流し直して回答し直す）")
+        return _refused_answer("回答の記録が今の提示（承認の対象のファイル）への回答でない（プランを流し直して回答し直す）")
     hub = _hub(args)
     pull = _open_pull(hub, args.branch)
     if pull is None:
         return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
-    now = _merge_target(hub, pull)
+    now = _pr_target(hub, pull)
     try:
         held = merge_approval.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
     except (KeyError, TypeError, ValueError):
-        return _refuse(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
+        return _refused_answer(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
     if not held.same(now):
-        return _refuse(f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number)
+        return _refused_answer(f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number)
     row = merge_approval.MergeRow(
         str(answer),
         merge_approval.USER_BY,
@@ -488,7 +488,7 @@ def _answer(args: argparse.Namespace) -> dict:
     )
     written = merge_approval.write_merge_row(hub, row, hub.viewer_login())
     summary = f"#{pull.number} へ回答 {answer} のマージの承認の証跡を{'書いた' if written else '既に書いてあった'}"
-    return result.result(TOOL, result.OK, summary, items=_pr_items(pull.number), metrics={"answer": answer, "written": written})
+    return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"answer": answer, "written": written})
 
 
 def main(argv: list[str]) -> int:

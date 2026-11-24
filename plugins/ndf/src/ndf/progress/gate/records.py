@@ -72,7 +72,7 @@ def record_answer(v: run.View, q: Question, a: Answer, where: Callable[[], Path]
 
 def rejections(events: Iterable[model.Event]) -> dict[str, int]:
     """承認しなかった回答（承認しない・変更要求）を承認ゲートの区分ごとに数える（gate-rejections の SSOT は事象）。"""
-    answered = (run.payload_of(ev) for ev in events if ev.draft.kind == run.ANSWERED)
+    answered = (run.event_payload(ev) for ev in events if ev.draft.kind == run.ANSWERED)
     unapproved = (p for p in answered if p.get("answer") in REJECTING and p.get("kind") == invoke.LISTEN)
     return dict(Counter(str(p["gate"]) if p.get("gate") else "plan" for p in unapproved))
 
@@ -86,7 +86,7 @@ def answers(v: run.View) -> list[dict[str, Any]]:
     for ev in v.events:
         if ev.draft.kind != run.ANSWERED:
             continue
-        p = run.payload_of(ev)
+        p = run.event_payload(ev)
         out.append(
             {
                 "seq": ev.seq,

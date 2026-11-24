@@ -97,7 +97,7 @@ def test_the_answer_writes_the_trail_before_it_is_recorded(repo, st, env, capsys
     )
     (ev,) = _answered(st, q)
     # 回答の事象の seen は承認の対象を持つ（デプロイのマージが読む）
-    seen = run.payload_of(ev)["seen"]
+    seen = run.event_payload(ev)["seen"]
     assert (seen["repo"], seen["pr"], seen["base"], seen["head"], seen["production"]) == ("o/r", 7, "main", HEAD, True)
 
 

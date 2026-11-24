@@ -72,7 +72,7 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
             found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
         except (GitHubError, GitError) as exc:
             raise model.Refused(f"PR #{q.pr} の head を読めない（マージ先も読めない）ので、回答と対象を照らせない: {exc}") from None
-        verdict = production_merge.judge_text(found.text, pull.base_ref) if found.repo.lower() == hub.repo.lower() else None
+        verdict = production_merge.judge_project_text(found.text, pull.base_ref) if found.repo.lower() == hub.repo.lower() else None
         production = production_merge.reaches_production(verdict if verdict is not None else production_merge.Verdict.UNKNOWN)
         return Target(pull.head_sha, material, hub.repo, pull.number, pull.base_ref, production)
 
@@ -102,7 +102,7 @@ def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
 
 def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
     for ev in v.events:
-        p = run.payload_of(ev)
+        p = run.event_payload(ev)
         if ev.draft.kind == run.ANSWERED and p.get("key") == key and ev.draft.rev == v.rev:
             return ev
     return None
@@ -188,7 +188,7 @@ def _trail_by(conn: Any, q: Question, a: Answer, seen: Target) -> Optional[str]:
     if seen.binding() is None or q.gate not in (DESIGN_GATE, RELEASE_GATE) or a.by == MVV_BY:
         return None
     role = a.by.split(":", 1)[0]
-    if role == actors.HUMAN or (role == "organizer" and _relayed(conn, q, a)):
+    if role == actors.HUMAN or (role == "organizer" and _relayed_by_organizer(conn, q, a)):
         return merge_approval.USER_BY
     if seen.production:
         raise model.Refused(
@@ -198,7 +198,7 @@ def _trail_by(conn: Any, q: Question, a: Answer, seen: Target) -> Optional[str]:
     return None
 
 
-def _relayed(conn: Any, q: Question, a: Answer) -> bool:
+def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
     """`organizer` の回答が、質問のリリースのリクエストに記録された利用者の同じ回答の中継か。"""
     found = release_request_of(conn, q) if q.gate == RELEASE_GATE else None
     held = found[2] if found is not None else None
@@ -280,7 +280,7 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
 
 def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
     """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。"""
-    p = run.payload_of(held)
+    p = run.event_payload(held)
     seen = Target.from_dict(p.get("seen"))
     gate = p.get("gate")
     if seen.binding() is None or not isinstance(p.get("gate_id"), str):
@@ -292,7 +292,7 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
 
 
 def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], None] = lambda: None) -> dict[str, Any]:
-    p = run.payload_of(held)
+    p = run.event_payload(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等のキー {a.key} は別の回答（{p.get('answer')}・質問 {p.get('gate_id')}）に使った")
     ensure()
@@ -359,7 +359,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     m = run.decide(v)
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
-    p = run.payload_of(m.event)
+    p = run.event_payload(m.event)
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))
@@ -394,7 +394,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
 def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.EventDraft]:
     """待ちへ戻した回答が外した課題を、今のスプリントの文脈の `issues` へ戻す事象（回答の前の値。`_dropped` の逆）。"""
-    if not run.payload_of(answered).get("dropped"):
+    if not run.event_payload(answered).get("dropped"):
         return []
     earlier = [ev for ev in v.events if ev.seq < answered.seq]
     before = stages.compose_context(v.doc["context"], stages.recorded_outputs(earlier, v.rev))
