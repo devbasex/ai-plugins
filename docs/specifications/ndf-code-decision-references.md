@@ -60,7 +60,7 @@
 
 | もの | SSOT | 置き場の理由 |
 | --- | --- | --- |
-| 子の表（子ごとのサブパッケージ・先に要る子・順番・レーン・閉じたか、共有の表の書き込み元） | `plugins/ndf/src/ndf/checks/children.json`。変え方は `plugins/ndf/src/ndf/checks/README.md` の「子の表の規則」 | 値を 1 か所にするため、検査が読む JSON を正にした。[ndf-rebuild.md の「子の記号」](ndf-rebuild.md#子の記号) は読み手のために記号・Issue・中身だけを持つので、子の記号・Issue・中身のいずれかを足す・変える・消すときは、同じ Pull Request で 2 か所を揃えて直す |
+| 子の表（子ごとのサブパッケージ・先に要る子・順番・レーン・閉じたか、共有の表の書き込み元） | `plugins/ndf/src/ndf/checks/children.json`。変え方は `plugins/ndf/src/ndf/checks/README.md` の「子の表の規則」 | 値を 1 か所にするため、検査が読む JSON を正にした。[ndf-rebuild.md の「子の記号」](ndf-rebuild.md#子の記号) は読み手のために記号・Issue・中身だけを持つので、子の記号か Issue を足す・変える・消すときは、同じ Pull Request で 2 か所を揃えて直す。`children.json` は中身を持たないので、中身の説明だけを変えるときは「子の記号」の表だけを直す |
 | 設計レビューの項目 182 件の表 | [ndf-review-items.md](ndf-review-items.md)（`checks/rules.json` の `spec.review_items_source` が指す） | 設計文書を消しても規則が入力を読めるようにするため。名前を `ndf-rebuild` で始めないのは、決定の番号を持つ 6 本の数え方を変えないためである。`plugins/ndf` の中に置かないのは、利用者へ配る量を増やさないためである |
 | 11.x へ回した 72 行の行き先の表 | [ndf-review-items-11x.md](ndf-review-items-11x.md) | 11.x の行のリンクが表そのものに着くよう、182 件の表と別の文書にした |
 
