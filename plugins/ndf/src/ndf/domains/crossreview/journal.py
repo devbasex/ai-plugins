@@ -105,12 +105,13 @@ def _located(item: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _raised(item: dict[str, Any]) -> dict[str, Any]:
-    """相手役の 1 件から、行に足す位置・下げた後の重要度（`severity`）・元の重要度（`raised_severity`。尺度に無い・無いときは
-    null）・起きることの 1 文（`impact`。あるときだけ）。#4014"""
+def _raised(item: dict[str, Any], named: Optional[str] = None) -> dict[str, Any]:
+    """相手役の 1 件（反する MVV の項目は `named`）から、行に足す位置・下げた後の重要度（`severity`）・元の重要度
+    （`raised_severity`。尺度に無い・無いときは null）・起きることの 1 文（`impact`。あるときだけ）。#4014"""
     raised = criteria_decide.severity_of(item.get("severity"))
     out = {k: v for k, v in _located(item).items() if k != "severity"}
-    out |= {"severity": criteria_decide.effective_severity(raised, item.get("impact")), "raised_severity": raised}
+    effective = criteria_decide.effective_severity(raised, item.get("impact"), redline=criteria_decide.redline(named))
+    out |= {"severity": effective, "raised_severity": raised}
     impact = _text(item.get("impact"))
     if impact is not None:
         out["impact"] = impact.strip()
@@ -171,7 +172,7 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
     指摘（修正担当が見送りを決められない）が当たる。"""
     if row.get("outcome") != fin.SKIPPED:
         return False
-    redline = named is not None and criteria_decide.redline(named) and not row.get(fin.REDLINE)
+    redline = criteria_decide.redline(named) and not row.get(fin.REDLINE)
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
 
 
@@ -229,13 +230,14 @@ class FindingJournal:
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
-                known = self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section"))) | _raised(item)
+                row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
+                known = self.rows[fid] = row | _raised(item, named)
                 by_key[key] = known
             else:
                 self._raised_again(known, item, round_no, named, mvv)
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
-                if known.get(PINNED) and "impact" not in _raised(item):
+                if _text(item.get("impact")) is None:
                     unexplained.append(str(known["id"]))
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
@@ -247,7 +249,7 @@ class FindingJournal:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。"""
-        new = _raised(item)
+        new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):

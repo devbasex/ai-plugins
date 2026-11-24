@@ -248,7 +248,7 @@ ITEMS = ("Mission", "Value 1", "Value 5", "P1", "C7")
 V11, V12, ABSENT = "approved:11:aaa:ccc", "approved:12:bbb:ccc", "absent:::"
 
 
-def _named(text: str, mvv: object = None, severity: str = "major", **more: object) -> dict:
+def _named(text: str, mvv: object = None, severity: str | None = "major", **more: object) -> dict:
     """相手役の指摘。`mvv` があれば、反する MVV の項目として書く。"""
     named = {} if mvv is None else {"mvv": mvv}
     return {"text": text, "severity": severity, "impact": IMPACT, "by": "codex", **named, **more}
@@ -282,6 +282,27 @@ def test_mvv_finding_without_impact_is_not_lowered_but_warned(severity: str) -> 
     assert (row["severity"], row["unpinned_severity"]) == (severity, "minor")
     [warning] = journal.warnings
     assert "r1-1" in warning and "起きること" in warning
+
+
+@pytest.mark.parametrize(("raised", "kept"), [("major", "major"), ("critical", "critical"), (None, "major")])
+@pytest.mark.parametrize("item", ["P1", "C7"])
+def test_redline_without_impact_is_not_lowered_but_warned(item: str, raised: str | None, kept: str) -> None:
+    journal = _entered(_named("A", item, raised, impact=" "))
+    [row] = journal.rows.values()
+    assert (row["severity"], row["raised_severity"], row["redline"]) == (kept, raised, True)
+    assert not criteria_decide.downgraded(row)
+    [warning] = journal.warnings
+    assert "r1-1" in warning and "起きること" in warning
+
+
+@pytest.mark.parametrize("order", [("Value 5", "P1"), ("P1", "Value 5"), (None, "P1"), ("P1", None)])
+def test_redline_without_impact_keeps_its_severity_in_any_order(order: tuple[str | None, ...]) -> None:
+    journal = _entered(*(_named("A", m, impact=None) for m in order))
+    [row] = journal.rows.values()
+    assert (row["severity"], row["redline"]) == ("major", True)
+    assert not {"mvv_pinned", "unpinned_severity"} & set(row)
+    [warning] = journal.warnings
+    assert warning.count("r1-1") == 1
 
 
 @pytest.mark.parametrize("value", ["P9", "Value", 5, ["Value 5"]])
