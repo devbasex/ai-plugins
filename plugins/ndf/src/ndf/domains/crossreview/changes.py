@@ -336,10 +336,16 @@ def _numbered(text: str) -> dict[int, list[int]]:
 def _cited_rows(file: DiffFile, text: str) -> list[_Row]:
     """head の本文 `text` の、コードブロックの外にある根拠の記述。"""
     code, decisions = mvv.fenced_lines(text), mvv.decision_lines(text)
-    lines = _markdown_rows(text)
-    places = [(no, part, at) for no, parts in _numbered(text).items() for part, at in enumerate(parts)]
-    rows = [_Row(file, no, part, lines[at - 1][1], at in decisions) for no, part, at in places if at not in code]
-    return [row for row in rows if mvv_decide.parse_citation(row.text, row.decision) is not None]
+    rows: list[_Row] = []
+    last_no = part = 0
+    for at, (no, line) in enumerate(_markdown_rows(text), 1):
+        # git の番号は減らないので、前の行と同じ番号なら同じ git の行の続き
+        part = part + 1 if no == last_no else 0
+        last_no = no
+        decision = at in decisions
+        if at not in code and mvv_decide.parse_citation(line, decision) is not None:
+            rows.append(_Row(file, no, part, line, decision))
+    return rows
 
 
 def _came_out(g: git.Git, commit: str, rows: Sequence[_Row]) -> list[_Row]:
