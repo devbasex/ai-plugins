@@ -6,6 +6,7 @@
     ndf records handoff check <文書> [--trim --history <退避先>]
     ndf records usage stop                         # SubagentStop の hook の入力（標準入力）を使用量ログへ 1 行書く
     ndf records usage report --since <日付> --until <日付>   # JST の日付の期間の合計と閉じた課題の数
+    ndf records mvv current --base <ブランチ> [--allow-mismatch]   # ベースブランチの承認済みの MVV を読み、本文をファイルに書く
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
@@ -37,6 +38,7 @@ from ndf.progress import invoke, model
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
+from ndf.domains.records.mvv_decide import State
 
 TOOL = cli.tool_of(__name__)
 # リリース後テストの記録のスキーマ（contracts/schemas/release-verification.schema.json）
@@ -133,6 +135,25 @@ def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     hub = _hub(root)
     got = usage.report(path, args.since, args.until, lambda q: usage.closed_count(hub, q))
     return result.result(TOOL, result.OK, f"使用量: {got['since']}..{got['until']}", [got])
+
+
+def _mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    g = Git(root)
+    remote = g.remote()
+    try:
+        # 取得先の参照まで指定して取得する。別のブランチだけを clone した作業場所でも、直前にリモートで承認された MVV を読む
+        g.fetch_branch_or_raise(remote, args.base)
+        snap = mvv.current(root, f"refs/remotes/{remote}/{args.base}", allow_mismatch=args.allow_mismatch)
+    except GitError as exc:
+        return result.stopped(TOOL, "precondition", f"MVV を読むベースブランチを取得できない: {exc}")
+    except (mvv.MvvError, OSError) as exc:
+        return result.stopped(TOOL, "precondition", str(exc))
+    out: dict[str, Any] = {"state": snap.state}
+    if snap.state == State.APPROVED:
+        out |= {"version": snap.version, "sha256": snap.sha256, "path": str(snap.path)}
+        out |= {"principles_path": str(snap.principles_path), "items": list(snap.items)}
+    warnings = [mvv.mismatch_detail(snap.blobs)] if snap.state == State.MISMATCH else []
+    return result.result(TOOL, result.OK, f"{args.base} の MVV: {snap.state}", outputs={"mvv": out}, warnings=warnings)
 
 
 def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -248,6 +269,10 @@ def _add_usage(sub: Any) -> None:
 
 def _add_mvv(sub: Any) -> None:
     m = sub.add_parser("mvv").add_subparsers(dest="action", required=True)
+    current = m.add_parser("current")
+    current.add_argument("--base", required=True, help="ベースブランチ")
+    current.add_argument("--allow-mismatch", action="store_true", help="本文が承認の記録と合わなくても止まらず、警告を付けて状態だけを返す")
+    current.set_defaults(handler=_mvv_current)
     signals = m.add_parser("signals")
     signals.add_argument("--base", required=True, help="ベースブランチ")
     signals.set_defaults(handler=_mvv_signals)
