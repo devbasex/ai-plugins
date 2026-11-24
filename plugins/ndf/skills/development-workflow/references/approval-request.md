@@ -230,6 +230,48 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 前者は branch protection、後者は ruleset である。保護が無いと前者は `Branch not protected`（HTTP 404）で終わる。
 
+## 読み手役の確認
+
+**承認や判断を求める質問を出す前に、読み手役が質問の文と文書を読んで確かめる。** 読み手役・合格の条件・回数・直し方は
+[document-rebuild の「読み手役に読ませる」](../../document-rebuild/SKILL.md#読み手役に読ませる) にある。MVV 判定で承認ゲートを通し、
+人に尋ねないときは行わない。
+
+1. **読ませるものを決める。** 質問の文と、その直前に示す材料（承認資料）は、必ず読ませる。`ndf-ask:` の質問は、この 2 つだけを読ませる。承認の質問では、承認する Pull Request の対象の文書も次の表のとおりに読ませる
+
+   | 文書の状態 | 読ませるもの |
+   | --- | --- |
+   | 一度も読ませていない | 全体（新しい確認の 1 回目） |
+   | 1 回目が不合格だった | 全体（2 回目） |
+   | 確認を終えた後に直した | 直した部分とその前後の段落だけを、別のファイルに作って（新しい確認の 1 回目） |
+   | 確認を終えた後に直していない | 読ませない |
+
+2. **読み手役に読ませ、合格するか 2 回目が終わるまで直す。** 読ませるのは、質問を出す AI である。作業を自動実行（`ndf plan`）で流したときは conductor が読ませる。supervisor が設計を進めたときは、文書と承認資料は supervisor が、質問の文は conductor が読ませる。オーガナイザーがまとめて出す質問の文は、オーガナイザーが読ませる
+3. **読み手役の指摘で直した差分を確かめる。** 承認を求める担当が、事実（数・日付・条件・決定など）が変わっていないことを差分で 1 回確かめ、確かめたコミットを承認資料に書く。確かめられれば、レビュー全体をやり直さない。レビューの上限に達した後の最後の直しがあるときは、最後の直しで変わった部分も読み手役に読ませ、2 つの直しを合わせた差分を 1 回で確かめる
+4. **2 回目に挙がった「判断や作業を誤らせる文」と、直さなかった「読みにくいだけの文」を承認資料に書く。** 書き方は document-rebuild の表の「2 回目にも残った文」「読みにくいだけの文」のとおり
+5. **記録する。** 出す質問と同じ `questions` を JSON ファイルに書き、`ndf records reading add --file <JSON>` を打つ。`reads` には、読ませたものと立場ごとに 1 行を書く。`result` は、合格なら `passed`、2 回目にも残ったなら `remained`。`head` は、確認を終えた時点（指摘で直したときは、その直しを含むコミット）の 40 桁の SHA。判断の質問と、Pull Request の無い承認では `prs` を空の配列にする
+
+   ```json
+   {
+     "questions": [{"question": "<質問の文>", "header": "設計", "multiSelect": false, "options": [{"label": "承認する", "description": "<説明>"}]}],
+     "prs": [{"number": 12, "branch": "design/12-x", "head": "<40 桁の SHA>"}],
+     "reads": [
+       {"name": "question", "reader": "承認する人", "round": 1, "result": "passed"},
+       {"name": "material", "reader": "承認する人", "round": 2, "result": "remained"},
+       {"name": "issues/issue-12-design.md", "reader": "エンジニア", "round": 1, "result": "passed"}
+     ]
+   }
+   ```
+
+6. **承認の質問では、質問を出す直前に調べる。** `questions` と、承認する Pull Request の番号の配列 `prs` を書いた JSON で `ndf records reading check --file <JSON>` を打つ。`ok` なら質問を出す。`stopped` の `precondition` なら、足りないものの語に従って直す。`unknown`（GitHub を読めない）なら、調べられなかったことを承認資料に書いて進む
+
+   | 足りないもの | すること |
+   | --- | --- |
+   | `no_record` | 出す質問と同じ文の記録が無い。質問の文を読ませて記録する |
+   | `no_pr` | 記録に無い Pull Request を承認しようとしている。その文書を読ませ、記録し直す |
+   | `head_moved` | 確認の後に Pull Request のファイルが変わった。変わった部分を読ませ、記録し直す |
+
+7. **質問を出す。** 記録した `questions` を 1 字も変えずに `AskUserQuestion` へ渡す。変えると、記録と合わずに hook が質問を止める（[asking.md](asking.md) の「質問の前に調べること」）
+
 ## 止まる手段
 
 **`AskUserQuestion` に限る。** `/goal` は停止の判定をターンの終わりに行うため、文中に
@@ -237,7 +279,7 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 `AskUserQuestion` はツールの呼び出しでターンを終えないため、判定そのものが走らない。
 
 **質問には承認ゲートの区分を付ける。** `AskUserQuestion` の入力に `"metadata": {"source": "ndf-gate:1"}`（設計 Pull Request のマージ）か
-`"ndf-gate:2"`（本番系へ届く操作・制作物承認）を入れる。区分の無い質問は hook が止める。区分の SSOT は [asking.md](asking.md) にある。
+`"ndf-gate:2"`（本番系へ届く操作・制作物承認）を入れる。区分の無い質問は出さない。読み手役の記録が無い質問は hook が止める。区分の SSOT は [asking.md](asking.md) にある。
 
 **承認ゲートに限らず、判断を求めるときは先に材料を示す**（何を決めるか・分かったこと・根拠の場所・
 選択肢ごとに何が変わるか・推奨とその理由）。形は `decision-request` が定める。この文書の承認資料は、

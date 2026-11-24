@@ -4528,7 +4528,7 @@
     {
       "term": "読み手役",
       "context": "ndf-document",
-      "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
+      "meaning": "文書と、想定した読み手の説明と、通じない文の 4 つの型だけを渡され、会話や経緯を知らずに読む AI（サブエージェントか external-ai で呼ぶ別の CLI）。要点の言い直しと、読み手に通じない文の引用を返す",
       "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
     },
     {
