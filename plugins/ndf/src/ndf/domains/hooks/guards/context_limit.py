@@ -366,6 +366,13 @@ def _cwd_digest(cwd: str) -> str:
     return hashlib.sha256(cwd.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _remember(ctx, svc, tokens: int) -> None:
+    """この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために文脈の量と `cwd` のダイジェストを覚える。"""
+    item = _tool_use_id(ctx)
+    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
+        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
+
+
 def _remembered(ctx, svc) -> Optional[int]:
     """同じ呼び出し・同じ `cwd` の PreToolUse が覚えた文脈の量（取り出して消す）。無ければ None。
 
@@ -421,10 +428,7 @@ def check(ctx, svc) -> Verdict | None:
     tokens = context_tokens(ctx.transcript_tail)
     if tokens is None:
         return None
-    item = _tool_use_id(ctx)
-    if item is not None and svc.counter.data["counts"].get(NOTICE_KEY, 0) == 0:  # noqa: NDF502 ファイル: 知らせる前は 0 回
-        # この入力の後にまだ知らせていなければ、同じ呼び出しの PostToolUse のために値と cwd のダイジェストを覚える
-        svc.counter.remember(MEMO_KEY, item, {"tokens": tokens, "cwd": _cwd_digest(ctx.cwd)}, MEMO_KEEP)
+    _remember(ctx, svc, tokens)
     t = thresholds(ctx.env, tables.policy_value)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
