@@ -130,9 +130,9 @@ def test_table_keeps_every_kind_and_representative_row():
     assert causes.exit_code("samples_mismatch") == 1
 
 
-def _retry_kind(contracts_copy, **values) -> None:
+def _retry_kind(retry_contracts, **values) -> None:
     """種類 ci_pending の打ち直しの方針を `values` だけにする（プラグインの上限の値に寄らない）。"""
-    contracts_copy("limits/cause.ci-pending.json", lambda _: {"summary": "s", **values})
+    retry_contracts("limits/cause.ci-pending.json", lambda _: {"summary": "s", **values})
 
 
 @pytest.mark.parametrize(
@@ -155,13 +155,13 @@ def _retry_kind(contracts_copy, **values) -> None:
         ({"attempts": 4, "interval": 10, "factor": 3}, 5, None),
     ],
 )
-def test_retry_delay_grows_by_the_policy_until_attempts_run_out(contracts_copy, values, used, delay):
-    _retry_kind(contracts_copy, **values)
+def test_retry_delay_grows_by_the_policy_until_attempts_run_out(retry_contracts, values, used, delay):
+    _retry_kind(retry_contracts, **values)
     assert causes.retry_delay(causes.cause("ci_pending", "x"), used) == delay
 
 
-def test_retry_delay_ignores_retry_after_unless_the_kind_requires_it(contracts_copy):
-    _retry_kind(contracts_copy, attempts=2, interval=10)
+def test_retry_delay_ignores_retry_after_unless_the_kind_requires_it(retry_contracts):
+    _retry_kind(retry_contracts, attempts=2, interval=10)
     assert causes.retry_delay(causes.cause("ci_pending", "x", retry_after=99), 0) == 10
 
 
@@ -180,9 +180,9 @@ def test_retry_delay_ignores_retry_after_unless_the_kind_requires_it(contracts_c
         ({"retry_after": 99}, 2, None),
     ],
 )
-def test_retry_delay_waits_only_retry_after_for_the_kind_that_requires_it(contracts_copy, extra, used, delay):
-    _retry_kind(contracts_copy, attempts=2, interval=10, factor=3, max_interval=50)
-    contracts_copy("causes/ci_pending.json", lambda c: {**c, "requires_retry_after": True})
+def test_retry_delay_waits_only_retry_after_for_the_kind_that_requires_it(retry_contracts, extra, used, delay):
+    _retry_kind(retry_contracts, attempts=2, interval=10, factor=3, max_interval=50)
+    retry_contracts("causes/ci_pending.json", lambda c: {**c, "requires_retry_after": True})
     got = causes.retry_delay({"kind": "ci_pending", "detail": "x", **extra}, used)
     assert got == delay and (delay is None or isinstance(got, float))
 
@@ -195,7 +195,7 @@ def test_retry_delay_is_none_without_a_retry_kind(value):
     assert causes.retry_delay(value, 0) is None
 
 
-def test_retry_delay_stops_on_a_wrong_policy(contracts_copy):
-    _retry_kind(contracts_copy, interval=10)
+def test_retry_delay_stops_on_a_wrong_policy(retry_contracts):
+    _retry_kind(retry_contracts, interval=10)
     with pytest.raises(causes.CausesError, match="attempts"):
         causes.retry_delay(causes.build("ci_pending", "x"), 0)

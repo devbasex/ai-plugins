@@ -6,12 +6,32 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from contract_files import copy_contract_files
 
 from ndf import cli
 from ndf.adapters import http
 from ndf.domains.samples import verify
 
 from ._world import SECRET_KEY, SECRET_VALUE, URL, World, document, sample
+
+
+@pytest.fixture
+def world(world: World) -> World:
+    """突き合わせが読むファイルに、結果 JSON と終了コードを決めるのに読むファイルを足す。"""
+    copy_contract_files(
+        world.root / "contracts",
+        [
+            *(f"causes/{kind}.json" for kind in ("config_broken", "infra_wait", "precondition", "samples_mismatch")),
+            "facts/exit-codes.json",
+            "facts/fact.schema.json",
+            "limits/cause.infra-wait.json",
+            "schemas/causes.schema.json",
+            # 無いと、結果 JSON を出す 1 か所の確かめ（`tests/conftest.py`）が結果のスキーマを見ずに通る
+            "schemas/io/samples.result.schema.json",
+            "schemas/result.schema.json",
+        ],
+    )
+    return world
 
 
 def _unreachable(w: World) -> None:

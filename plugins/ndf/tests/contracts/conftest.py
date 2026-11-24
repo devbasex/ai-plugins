@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from contract_files import copy_contract_files
 
 from ndf import contracts
 
@@ -62,6 +63,25 @@ def contracts_copy(tmp_path: Path) -> ContractsCopy:
     root = tmp_path / "contracts"
     shutil.copytree(contracts.DEFAULT_DIR, root)
     contracts.use_dir(root)
+    return ContractsCopy(root)
+
+
+@pytest.fixture
+def retry_contracts(tmp_path: Path) -> ContractsCopy:
+    """種類 ci_pending の打ち直しの待ちを求めるのに読むファイルだけの `contracts_copy`。"""
+    root = tmp_path / "contracts"
+    copy_contract_files(
+        root,
+        [
+            "causes/ci_pending.json",
+            "facts/exit-codes.json",
+            "facts/fact.schema.json",
+            "limits/cause.ci-pending.json",
+            "schemas/causes.schema.json",
+            "schemas/limits.schema.json",
+            "schemas/result.schema.json",
+        ],
+    )
     return ContractsCopy(root)
 
 
