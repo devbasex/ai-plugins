@@ -74,7 +74,7 @@
       {"words": ["DAYS"], "keys": ["count"]}
     ],
     "limit_constants": [
-      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（docs/specifications/ndf-rebuild-scripted-flow.md の決定 60）で 2 回に固定した値で、運用で変えない"},
+      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの、初回を含む試行回数の上限（回答の形が合わないときの打ち直しは 1 回まで）。形の確かめの設計（docs/specifications/ndf-rebuild-scripted-flow.md の決定 60）で 2 回に固定した値で、運用で変えない"},
       {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},
       {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
       {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
