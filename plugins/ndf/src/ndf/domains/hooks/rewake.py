@@ -360,8 +360,8 @@ def _finish(t: Target, gen: Generation, turn: LastTurn, q: Ratios, stderr: TextI
         return 2
 
 
-def _wake_row(t: Target, keep: Mapping[str, Any], wake_id: str, turn: LastTurn, now: float, limit: int) -> bool:
-    """`wake` の行を書けたか。書けなくても状態は起床を持つので起床させる（集計は `wake` の無い `wake_result` を数える）。"""
+def _wake_row(t: Target, keep: Mapping[str, Any], wake_id: str, turn: LastTurn, now: float, limit: int) -> None:
+    """`wake` の行を書く。書けなくても状態は起床を持つので起床させる（集計は `wake` の無い `wake_result` を数える）。"""
     try:
         _cache_row(
             t,
@@ -375,5 +375,4 @@ def _wake_row(t: Target, keep: Mapping[str, Any], wake_id: str, turn: LastTurn, 
             spent=keep["spent"],
         )
     except OSError:  # noqa: NDF401 ファイル: 記録を書けなくても起床は状態のフラグで突き合わせる
-        return False
-    return True
+        pass
