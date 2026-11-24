@@ -109,15 +109,18 @@ MVV の欄が `MVV: 無し` なら、MVV と突き合わせずに作業を進め
 
 ## 改訂の兆候
 
-承認ゲートの回答が直前の MVV 判定と食い違ったことを記録し、閾値を超えたら改訂を提案する材料にする。
+承認ゲートの回答が直前の MVV 判定と食い違ったことと、cross-review で MVV に反するとされた指摘を修正担当が「反しない」として見送ったことを
+記録し、閾値を超えたら改訂を提案する材料にする。
 
 | 兆候 | 記録 | 書き手 |
 | --- | --- | --- |
 | 覆し（「従う」を退けた `override_reject`・「従わない」を通した `override_pass`）・「判定できない」を人が通した `unknown_pass`（覆しに数えない）・「判定できない」の `unknown`（人の回答によらず） | MVV の記録の保存先の `mvv-signals.jsonl` | `ndf records mvv answer [--version <バージョン>]`。標準入力の JSON `{"verdict", "approved", "state", "gate", "pr"}` を受け、食い違うときと「判定できない」のときだけ書く |
+| cross-review の指摘の見送り（`review_disputed`。「判定できない」と合わせて数える） | 同じ `mvv-signals.jsonl` | `ndf cross-review run` |
 | MVV 判定 | 同じ保存先の `mvv-validation.jsonl` | `ndf records mvv gate` |
+| MVV に反するとされた指摘の終わり方（`mvv-review`。直した・見送った・未解決・人の承認を待つ） | 同じ `mvv-validation.jsonl` | `ndf cross-review run` |
 
 `ndf records mvv signals --base <ベースブランチ>` は、ベースブランチの `.ndf/mvv.json` の今のバージョンの行だけを数え
-（同じスプリント・承認ゲート・PR の組は 1 件）、`settings.revise_after`（既定 覆し 3・「判定できない」5）と比べて `metrics.revision_due` を返す。
+（同じスプリント・承認ゲート・PR の組は 1 件、`review_disputed` は同じ PR・指摘の組を 1 件）、`settings.revise_after`（既定 覆し 3・「判定できない」5）と比べて `metrics.revision_due` を返す。
 真なら、振り返りなどで利用者へ改訂を問う。記録の保存先は状態の保存先の下で、`NDF_MVV_STATE_DIR` で変えられる。
 
 ## 人へ示す文面のテンプレート（MVV の提示・改訂の提案・承認ゲートの資料）
