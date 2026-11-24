@@ -7513,7 +7513,7 @@
     {
       "term": "子の表",
       "context": "ndf-rebuild",
-      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`）",
+      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・サブパッケージ・先に要る子・順番・レーン・閉じたかで持ち、共有の表の書き込み元も持つ表（`plugins/ndf/src/ndf/checks/children.json`）。この表が SSOT である",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
