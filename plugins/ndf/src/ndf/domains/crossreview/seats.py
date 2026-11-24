@@ -66,9 +66,10 @@ def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequ
     return _SeatResult(None, denied) if denied else _SeatResult(participants.findings_of(answer.text))
 
 
-def _unread_hint(seat: str, cause: str, err: str) -> str:
-    """読めなかった席 1 つの理由と直し方の 1 行。直し方は席のランタイムで引く。`err` は標準エラーのログの示し方
-    （PR のコメントに載る注意にはファイル名、手元の precondition の詳細には絶対パス。PR 4461 の r3-1）。"""
+def _unread_hint(seat: str, cause: str, err: Path) -> tuple[str, str]:
+    """読めなかった席 1 つの理由と直し方の 1 行を、PR のコメント用と手元用の組で返す。直し方は席のランタイムで引き、
+    文は 1 度だけ組み立てる。標準エラーのログ `err` は、PR のコメントに載る注意にはファイル名、手元の precondition の
+    詳細には絶対パスで示す（PR 4461 の r3-1）。"""
     row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
     if cause.startswith(DENIED_READ):
         fix = DENIED_FIX
@@ -79,7 +80,8 @@ def _unread_hint(seat: str, cause: str, err: str) -> str:
         )
     else:
         fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
-    return f"- {seat}: {cause}。{fix}（標準エラー: {err}）"
+    line = f"- {seat}: {cause}。{fix}（標準エラー: "
+    return f"{line}{err.name}）", f"{line}{err}）"
 
 
 class Unread(NamedTuple):
@@ -126,8 +128,8 @@ def launch_reviewers(
                 cause = f"{status.state}: {status.detail}"
             warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{cause}）"
             run.note(round_no, seat, f"回答無し{again}（{kind}）", warning)
-            err = spec.paths.err
-            unread[seat] = Unread(_unread_hint(seat, cause, err.name), cause, _unread_hint(seat, cause, str(err)))
+            hint, local = _unread_hint(seat, cause, spec.paths.err)
+            unread[seat] = Unread(hint, cause, local)
             continue
         run.note(round_no, seat, f"指摘 {len(found)} 件{again}")
         raised += [{**f, "by": seat} for f in found]
