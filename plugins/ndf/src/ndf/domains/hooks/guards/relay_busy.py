@@ -86,7 +86,7 @@ def record_count(env: Mapping[str, str], session_id: str, count: int, source: st
 def _record_start(ctx) -> Optional[Verdict]:
     """作業の開始を記録する。保存先か起動の ID が無いか、書けなければ拒否。"""
     global _recorded
-    found, wait = _launch_record(ctx.env), _lock_wait()
+    found, wait = _launch_record(ctx.env), lock_wait()
     if found is None or not signals.record_start(*found, ctx.session_id, wait):
         return deny(BUSY_START_FAILED)
     _recorded = ctx.payload
@@ -98,7 +98,7 @@ def _record_monitor(ctx) -> None:
     try:
         found = _launch_record(ctx.env)
         if found is not None:
-            signals.record_monitor(*found, ctx.session_id, _lock_wait())
+            signals.record_monitor(*found, ctx.session_id, lock_wait())
     except Exception:  # noqa: BLE001,S110 ファイル: fail_closed の行なので、ここで上げると監視の開始を拒否してしまう
         pass
 
@@ -109,7 +109,7 @@ def _launch_record(env: Mapping[str, str]) -> Optional[tuple[Path, str]]:
     return None if directory is None or launch is None else (directory, launch)
 
 
-def _lock_wait() -> float:
+def lock_wait() -> float:
     """子を止める排他を待つ秒数。表を読めなければ例外を呼び手へ上げる。"""
     return float(tables.policy_value("hook.counter-lock", "seconds"))
 

@@ -217,7 +217,9 @@ def _sum_usage(calls: list) -> Usage:
     priced = all(s is not None and sum(s) == _amount(u, _WRITE) and _WRITE in u for s, u in zip(split, usages))
     one_hour = sum(s[0] for s in split) if priced else None
     five_min = sum(s[1] for s in split) if priced else None
-    return Usage(len(calls), sum(_amount(u, _READ) for u in usages), sum(_amount(u, "output_tokens") for u in usages), one_hour, five_min, priced)
+    return Usage(
+        len(calls), sum(_amount(u, _READ) for u in usages), sum(_amount(u, "output_tokens") for u in usages), one_hour, five_min, priced
+    )
 
 
 def _wake_start(rows: list, after_id: str) -> Any:

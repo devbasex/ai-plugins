@@ -24,7 +24,12 @@ def stamp(at: float) -> str:
 
 
 def use(read=0, w1h=0, w5m=0, inp=1, out=7, total=None, split=True):
-    u = {"input_tokens": inp, "cache_read_input_tokens": read, "cache_creation_input_tokens": w1h + w5m if total is None else total, "output_tokens": out}
+    u = {
+        "input_tokens": inp,
+        "cache_read_input_tokens": read,
+        "cache_creation_input_tokens": w1h + w5m if total is None else total,
+        "output_tokens": out,
+    }
     if split:
         u["cache_creation"] = {"ephemeral_1h_input_tokens": w1h, "ephemeral_5m_input_tokens": w5m}
     return u
@@ -142,7 +147,11 @@ def test_wake_reply_first_call_with_no_writes_is_still_a_wake(wake_head):
 
 @pytest.mark.parametrize(
     "bad",
-    [use(split=False), use(w1h=1, total=5), {**use(), "cache_creation": {"ephemeral_1h_input_tokens": 1.5, "ephemeral_5m_input_tokens": 0}}],
+    [
+        use(split=False),
+        use(w1h=1, total=5),
+        {**use(), "cache_creation": {"ephemeral_1h_input_tokens": 1.5, "ephemeral_5m_input_tokens": 0}},
+    ],
 )
 def test_wake_reply_unpriced_when_a_split_is_missing_or_wrong(wake_head, bad):
     rows = tail(said("x"), call("m0"), said(WAKE), call("w1", usage=use(read=10)), call("w2", usage=bad))
@@ -306,3 +315,88 @@ def test_next_step_count_and_cost():
     assert keep_cache.wake_step(18, 36, 911_000, 500_000, cheaper) == Step("stop", "cost")
     assert keep_cache.wake_step(20, 33, 280_000, 150_000, q) == Step("wake")
     assert keep_cache.wake_step(20, 33, 290_000, 150_000, q) == Step("stop", "cost")
+
+
+# ---------------------------------------------------------------- 起床の状態と記録（signals）
+
+from ndf.domains.relay import signals  # noqa: E402
+from ndf.domains.relay.signals import Generation  # noqa: E402
+
+SID = "0f0e0d0c-0b0a-4908-8706-050403020100"
+LAUNCH = "a" * 32
+
+
+@pytest.fixture
+def relay_dir(tmp_path):
+    signals.set_launch(tmp_path, LAUNCH, rewake=True, claude_version="2.1.330")
+    return tmp_path
+
+
+def _log(directory) -> list:
+    path = directory / signals.CACHE_LOG
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+def test_launch_record_holds_rewake_and_version(relay_dir):
+    assert signals.rewake_on(relay_dir, LAUNCH) and not signals.rewake_on(relay_dir, "b" * 32)
+    assert signals.launch_version(relay_dir) == "2.1.330" and signals.current_launch(relay_dir) == LAUNCH
+    signals.set_launch(relay_dir, LAUNCH)
+    assert not signals.rewake_on(relay_dir, LAUNCH) and signals.launch_version(relay_dir) is None
+
+
+def test_keep_path_needs_a_uuid_session(relay_dir):
+    assert signals.keep_path(relay_dir, SID) == relay_dir / f"keep-{SID}.json"
+    for bad in ("s1", "../x", None, SID.upper()):
+        assert signals.keep_path(relay_dir, bad) is None and signals.read_keep(relay_dir, bad) is None
+    with pytest.raises(signals.SignalError):
+        signals.update_keep(relay_dir, "s1", {})
+
+
+def test_bump_generation_takes_only_newer_times(relay_dir):
+    assert signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "turn"))[0] == "taken"
+    assert signals.read_keep(relay_dir, SID) == {"generation": {"at": T0, "by": "turn", "message_id": None, "sleeps": False}}
+    assert signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "h1", "m1"))[0] == "older"
+    assert signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0 - 1, "h1", "m1"))[0] == "older"
+    assert _log(relay_dir) == []
+    got, keep = signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0 + 1, "h1", "m1"), works=1)
+    assert got == "taken" and keep["generation"]["by"] == "h1"
+    rows = _log(relay_dir)
+    assert [r["kind"] for r in rows] == ["work_stop"] and rows[0]["message_id"] == "m1"
+    assert {k: rows[0][k] for k in ("launch", "session_id", "claude_version", "wait_id")} == {
+        "launch": LAUNCH,
+        "session_id": SID,
+        "claude_version": "2.1.330",
+        "wait_id": None,
+    }
+
+
+def test_contested_reply_voids_a_wait_that_has_not_woken(relay_dir):
+    signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "h1", "m1"))
+    keep = signals.read_keep(relay_dir, SID)
+    signals.update_keep(relay_dir, SID, {**keep, "wait_id": T0, "k": 0, "n_max": 33, "spent": 0, "ttl": "1h", "last": {"x": 1}})
+    got, keep = signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "h2", "m1"), works=0)
+    assert got == "contested" and keep["generation"] == {"at": T0, "by": "contested", "message_id": "m1", "sleeps": False}
+    assert "wait_id" not in keep and keep["ttl"] == "1h" and keep["last"] == {"x": 1}
+    assert [(r["kind"], r.get("reason")) for r in _log(relay_dir)] == [("wait_void", "contested"), ("contest", None)]
+    # 既に contested なら書かない
+    assert signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0 + 5, "h3", "m1"))[0] == "contested"
+    assert len(_log(relay_dir)) == 2
+
+
+@pytest.mark.parametrize("change", [{"k": 1}, {"pending": {"wake_id": "w"}}, {"wait_id": T0 - 9}])
+def test_contested_keeps_a_wait_that_already_woke_or_started_elsewhere(relay_dir, change):
+    signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "h1", "m1"))
+    keep = {**signals.read_keep(relay_dir, SID), "wait_id": T0, "k": 0, "n_max": 33, "spent": 0, **change}
+    signals.update_keep(relay_dir, SID, keep)
+    _, after = signals.bump_generation(relay_dir, LAUNCH, SID, Generation(T0, "h2", "m1"))
+    assert after["wait_id"] == keep["wait_id"] and [r["kind"] for r in _log(relay_dir)] == ["contest"]
+
+
+def test_revoke_generation_only_for_a_live_reservation():
+    sleeping = {"generation": Generation(T0, "h1", "m1", True)._asdict()}
+    assert not signals.revoke_generation(dict(sleeping), T0)
+    keep = dict(sleeping)
+    assert signals.revoke_generation(keep, T0 + 1) and keep["generation"] == {"at": T0, "by": "arrival", "message_id": "m1", "sleeps": True}
+    for by, sleeps in (("h1", False), ("turn", False), ("contested", True), ("arrival", True)):
+        assert not signals.revoke_generation({"generation": Generation(T0, by, "m1", sleeps)._asdict()}, T0 + 1)
+    assert not signals.revoke_generation({}, T0 + 1)

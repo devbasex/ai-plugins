@@ -51,6 +51,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `projects` | `ndf` repo:.ndf | `projects.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-busy` | `relay-wrappers` state:relay/wrappers | `<名前>/busy-<起動>.json` | exchange | — | 子の会話の SessionStart・PreToolUse・Stop の hook（M3a）。中継のラッパーはほかの起動のものを消す | run | 内部（予告なく変えてよい） |
+| `relay-cache-log` | `relay-wrappers` state:relay/wrappers | `<名前>/cache-log.jsonl` | record | — | 子の会話の Stop の起床の hook と UserPromptSubmit の guard（#4068） | cleanup | 内部（予告なく変えてよい） |
 | `relay-copy-launcher` | `relay-copy` config:ndf | `relay.py` | exchange | — | 人（ndf relay install） | replaced | 内部（予告なく変えてよい） |
 | `relay-copy-root` | `relay-copy` config:ndf | `relay.root` | exchange | — | 中継（M3b）・SessionStart hook（更新後の向け直し） | replaced | 内部（予告なく変えてよい） |
 | `relay-hub-log` | `relay-hub` state:relay/hub | `hub-log.jsonl` | record | — | 中継のリレーハブ（M3） | cleanup | 内部（予告なく変えてよい） |
@@ -58,6 +59,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-hub-request` | `relay-hub` state:relay/hub | `requests-v2/<id>.json` | exchange | — | 中継の頼む側（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-result` | `relay-hub` state:relay/hub | `results/<id>.json` | exchange | — | 中継のリレーハブ（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-state` | `relay-hub` state:relay/hub | `hub.json` | exchange | — | 中継（M3） | replaced | 内部（予告なく変えてよい） |
+| `relay-keep` | `relay-wrappers` state:relay/wrappers | `<名前>/keep-<会話>.json` | exchange | — | 子の会話の Stop の起床の hook と UserPromptSubmit の guard（#4068） | cleanup | 内部（予告なく変えてよい） |
 | `relay-marker` | `relay-markers` state:relay/markers | `<id>.json` | exchange | — | 中継のラッパー（M3b） | run | 内部（予告なく変えてよい） |
 | `relay-next` | `relay-wrappers` state:relay/wrappers | `<名前>/next.json` | exchange | — | Stop の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | ndf_settings | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |
