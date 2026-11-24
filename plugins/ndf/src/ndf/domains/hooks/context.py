@@ -199,7 +199,7 @@ def _is_steady(node: Any, cmd: ShellCommand) -> bool:
 
     `env -S` で分けた語はセクションと対応しないので偽。
     """
-    skipped = _skipped_words(cmd)
+    skipped = len(cmd.source) - len(cmd.body_source)
     if skipped < 0 or cmd.source[skipped:] != cmd.body_source:
         return False
     names = {os.path.basename(shell_value(text)) for text in cmd.source[:skipped]}
@@ -213,17 +213,12 @@ def _fixed_inner(node: Any, cmd: ShellCommand) -> bool:
     シェルは、`-c` までの語がすべて起動ファイルを読まない 1 語のオプションで（`bash x.sh -c …` は `x.sh` を、`bash -lc …` は
     起動ファイルを動かす）、`-c` の語とその次の語の値が決まるときだけ真。`eval` は引数のすべての値が決まるときだけ真。
     """
-    body = _word_groups(node)[_skipped_words(cmd) :]
+    body = _word_groups(node)[len(cmd.source) - len(cmd.body_source) :]
     position = _c_option_position(cmd)
     if position is None:
         return _all_fixed(body[1:])
     steady = cmd.body_name in _STEADY_SHELLS and all(_STEADY_OPTION.fullmatch(word) for word in cmd.body_argv[1 : position + 1])
     return steady and _all_fixed(body[1 : position + 2])
-
-
-def _skipped_words(cmd: ShellCommand) -> int:
-    """外したラッパーの語数（`env -S` で語が増えたときは負になる）。"""
-    return len(cmd.source) - len(cmd.body_source)
 
 
 def _all_fixed(groups: list[list[Any]]) -> bool:

@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from typing import Optional
 
 from ndf.domains.hooks import outbox, tables
@@ -74,8 +73,10 @@ def on_deadline(env, payload) -> Optional[str]:
         return None
     tool_use_id = payload.get("tool_use_id")
     if isinstance(tool_use_id, str) and tool_use_id:
-        with suppress(OSError):  # 消せなくても拒否は出す（残った質問は ask-closed が消す）
+        try:
             signals.drop_question(relay, {"tool_use_id": tool_use_id}, 0, launch=signals.relay_launch(env))
+        except OSError:  # 消せなくても拒否は出す（残った質問は ask-closed が消す）
+            return QUESTION_NOT_RECORDED
     return QUESTION_NOT_RECORDED
 
 

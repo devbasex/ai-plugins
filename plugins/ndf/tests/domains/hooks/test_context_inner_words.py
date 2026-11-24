@@ -1,6 +1,6 @@
 """ラッパーを外した後の語の位置と、シェルの `-c` の語の位置の読み方（`only_commands` と `waits`）。
 
-I-008 で 2 つの位置の求め方を補助関数にして `_is_steady`・`_fixed_inner`・`_inner_scripts` で共有する前に、今の振る舞いを固定する。
+`_is_steady`・`_fixed_inner`・`_inner_scripts` が、同じ語の位置を読むことを確かめる。
 """
 
 from __future__ import annotations
