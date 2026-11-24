@@ -160,7 +160,7 @@ tests/
 - `check`
   - 事前条件: 入力に `tool_use_id` が無い（空の）呼び出しは `ToolUse("")` を渡し、突き合わせは必ず外れる（`behind` か `none`）
   - 事後条件: イベントごとに下の 2 つの表のとおり。`state` が `none` の量は「量が読めない」（None）として扱う。`passing`・`deny`・`advise` の `notes` は `context_tokens` と `context_state` を持つ
-  - 副作用: PreToolUse で覚える値を `{"tokens": …, "state": …}` にする（#3995 の詳細設計の `remember` の `value`）。PostToolUse は `take` が返した値の `state` を使い、無ければ `behind` とみなす。覚える条件・消す規則は #3995 のまま
+  - 副作用: PreToolUse で覚える値を、今の `_remember` の `{"tokens": …, "cwd": <_cwd_digest(ctx.cwd)>}` に `state` を足した `{"tokens": …, "cwd": …, "state": …}` にする（#3995 の詳細設計の `remember` の `value`。`cwd` のダイジェストは落とさない）。PostToolUse は今の `_remembered` と同じく、`take` が返した値の `cwd` が `_cwd_digest(ctx.cwd)` と同じで `tokens` が整数のときだけ有効な保存値として再利用する。有効な保存値の `state` が `current`・`behind` のどちらでもなければ（無い・別の値）`behind` とみなす。`cwd` が違う・`tokens` が整数でない保存値は今のとおり無効で、覚えた値が無いときと同じく会話の記録を読む。覚える条件・消す規則は #3995 のまま
   - `state` を覚える目的: 判定（止める・知らせる）は状態を問わず量だけで決まる（設計文書の決定 5）。`state` は判定に使わず、PostToolUse の判定の記録（`notes` の `context_state`）に、読み直さずに PreToolUse の時点の古さを残すためだけに覚える。古い量で止めた・知らせた回数を後から記録で数え、決定 5 の代償（古い量は厳密な下限でない）を見直す材料にする
 
 PreToolUse（運用上限の止め）:
@@ -170,7 +170,7 @@ PreToolUse（運用上限の止め）:
 | 入力に `agent_id` がある | None（#3995 のまま） |
 | `_main(ctx.cwd)` が None | None（会話の記録を読まない。#3995 のまま） |
 | `last_context(ctx.transcript_tail, ToolUse(id))` が `none` | None |
-| 読めた・入力に `tool_use_id` がある・この入力の後にまだ知らせていない | `remember(MEMO_KEY, id, {"tokens", "state"}, MEMO_KEEP)` で覚えてから下の行を判定する。当たらなければ覚えずに下の行を判定する（#3995 のまま） |
+| 読めた・入力に `tool_use_id` がある・この入力の後にまだ知らせていない | `remember(MEMO_KEY, id, {"tokens", "cwd", "state"}, MEMO_KEEP)`（`cwd` は今の `_cwd_digest(ctx.cwd)`）で覚えてから下の行を判定する。当たらなければ覚えずに下の行を判定する（#3995 のまま） |
 | `tokens ≥ limit`・`_passes` が偽（状態は問わない） | `deny(_reason(...))`。notes は `context_tokens`・`context_state`・`under_relay` |
 | `tokens ≥ limit`・`_passes` が真 | `passing`（notes は `context_tokens`・`context_state`） |
 | `tokens < limit`（`current`・`behind` とも） | `passing`（同上） |
@@ -182,8 +182,8 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | 入力に `agent_id` がある | None（#3995 のまま） |
 | `_main(ctx.cwd)` が None | None（会話の記録を読まない。#3995 のまま） |
 | 数え手が使えないか、この入力の後に知らせ済み | None（会話の記録を読まない。#3995 のまま） |
-| `take(MEMO_KEY, 入力の tool_use_id)` が値を返す | 覚えた `tokens` と `state`（無ければ `behind`）で下の行を判定する（会話の記録を読まない） |
-| 覚えた値が無い・ID が無い | `last_context(ctx.transcript_tail, ToolUse(id))` で読む。`none` なら None |
+| `take(MEMO_KEY, 入力の tool_use_id)` が値を返し、その `cwd` が `_cwd_digest(ctx.cwd)` と同じで `tokens` が整数（今の `_remembered` の照合） | 覚えた `tokens` と `state`（無いか別の値なら `behind`）で下の行を判定する（会話の記録を読まない） |
+| 覚えた値が無い・ID が無い・照合に外れた（`cwd` が違う・`tokens` が整数でない） | `last_context(ctx.transcript_tail, ToolUse(id))` で読む。`none` なら None |
 | `decide_from ≤ tokens < limit`・`bump(NOTICE_KEY) == 1` | `advise(_notice(...), notes={context_tokens, context_state})` |
 | ほか（`tokens ≥ limit` を含む） | `passing`（notes は `context_tokens`・`context_state`）。上限以上でも PostToolUse は止めず知らせない（#3995 のまま） |
 
@@ -197,7 +197,7 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 設計文書のテスト設計 9・10・14 | 上限 − 1・上限、判断開始の値 − 1・判断開始の値、上限 − 1 の PostToolUse で知らせ、上限の PostToolUse（`current`・`behind` とも）は `deny` でなく `passing`。知らせ済みの PostToolUse と覚えた値の無い PostToolUse は #3995 のテストのまま（読み取り 0 回と 1 回） | `none`（`compacted`・`partial`・`form`）で None |
+| `check` | 設計文書のテスト設計 9・10・14 | 上限 − 1・上限、判断開始の値 − 1・判断開始の値、上限 − 1 の PostToolUse で知らせ、上限の PostToolUse（`current`・`behind` とも）は `deny` でなく `passing`。知らせ済みの PostToolUse と覚えた値の無い PostToolUse は #3995 のテストのまま（読み取り 0 回と 1 回）。同じ `cwd` の PreToolUse が覚えた値（`tokens`・`cwd`・`state`）で、PostToolUse の会話の記録の読み取りが 0 回で、`notes` の `context_state` が覚えた `state`。PreToolUse と `cwd` が違う PostToolUse では覚えた値を使わず読み取り 1 回。`state` の無い保存値で `behind` | `none`（`compacted`・`partial`・`form`）で None |
 
 ## ラッパーの読み取り（`wrapper.py`）
 
