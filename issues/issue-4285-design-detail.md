@@ -34,7 +34,7 @@ src/ndf/
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `changed`・`fixwords` | モジュール | `_check_words`・`_relaunch_words`（新設）、`_start`・`_round`・`_resend`・`_fix_prompt`・`_launch_fixer`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | 読み先の名前の変更だけ | `changed` | モジュール | —（import だけ） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 語の指摘の行の規則 | — | `FindingJournal` | `enter_words`・`settle_words`（新設） |
-| `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 修正担当への指示の文 | — | モジュール | `fixer_docs`（新設） |
+| `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 修正担当への指示の文 | — | モジュール | `fixer_docs`・`fixer_words`（新設） |
 | `src/ndf/progress/gate/words.py` | 新設 | 承認資料の前の検査 | `core.words`・`adapters.github`・`adapters.git` | モジュール | `github_words`（新設） |
 | `src/ndf/progress/gate/entry.py` | 変更 | 承認ゲートの待ちの結果 | `gate.words` | モジュール | `present`・`_progress`（変更） |
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認資料の文 | — | モジュール | `material`・`material_text`（`material_text` は新設） |
@@ -51,7 +51,7 @@ src/ndf/
 | `words_of` | `core/words/rules_decide.py` | 新設 | `words_of(glossary: Mapping[str, Any]) -> tuple[Word, ...]` | すべての項目の廃止した語を、語ごとに 1 つの規則へまとめる |
 | `term_words` | 同上 | 新設 | `term_words(term: Mapping[str, Any]) -> tuple[Word, ...]` | 1 つの項目の要素（文字列かオブジェクト）を規則の形にする |
 | `Finder` | 同上 | 新設 | `Finder(words: Sequence[Word], live: Iterable[str] = (), code: bool = True)` | 正規表現を 1 度だけ組み、行ごとの当たりを返す。`code` が真ならインラインコードを外し、`live` の語の内側を外す |
-| `Finder.find` | 同上 | 新設 | `find(line: str) -> list[Found]` | 1 行の当たり（語・当たった文字列・置き換え先）を出てくる順に返す |
+| `Finder.find` | 同上 | 新設 | `find(line: str, heading: bool = False) -> list[Found]` | 1 行の当たり（語・当たった文字列・置き換え先）を出てくる順に返す |
 | `bad_replaces` | 同上 | 新設 | `bad_replaces(glossary: Mapping[str, Any]) -> list[dict[str, str]]` | 置き換え先の文に別の廃止した語が残る登録を返す |
 | `mask_code` | 同上 | 新設 | `mask_code(text: str) -> str` | インラインコード（同じ数のバッククォートで囲んだ範囲）を同じ長さの空白にする |
 | `banned_words` | `checks/words.py` | 変更 | `banned_words(source: Optional[Source]) -> BannedWords` | `added_only` でない語と禁止語から、`Finder` と語 → 理由を作る |
@@ -60,7 +60,7 @@ src/ndf/
 | `_deprecated` | 同上 | 変更 | `_deprecated(term: Mapping[str, Any]) -> list[str]` | 文書の列に、語・（単独）・置き換え先（`replace` があるときだけ `（→ …）`）を並べる |
 
 - `Finder.find`
-  - 事後条件: 長い形から当てる。`except` の出現と重なる当たり、`live` の語の出現の内側にある当たりを返さない。1 つの位置の当たりは 1 件
+  - 事後条件: 長い形から当てる。`except` の出現と重なる当たり、`live` の語の出現の内側にある当たり、`heading` が真のときの `skip_headings` の語を返さない。1 つの位置の当たりは 1 件
 - `banned_words`
   - 事後条件: 文字列の要素だけの用語集で、今の当たりと理由の文が変わらない
 
@@ -74,7 +74,7 @@ src/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Word` | 型（`word`・`forms`・`excepts`・`replaces`・`standalone`・`added_only`） | `core/words/rules_decide.py` | — |
+| `Word` | 型（`word`・`forms`・`excepts`・`skip_headings`・`replaces`・`standalone`・`added_only`） | `core/words/rules_decide.py` | — |
 | `Found` | 型（`word`・`text`・`replaces`・`start`） | 同上 | — |
 | 漢字・カタカナの範囲 | 定数 | 同上（`checks/words.py` と `glossary_decide.py` から移し、1 か所にする） | 今の値 |
 
@@ -90,7 +90,7 @@ src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `words_of` | 文字列・オブジェクトの混ざった配列を 1 つの規則にまとめる | 同じ語が 2 項目にある（`forms`・`except` の和・`added_only` は全部が真のときだけ真） | 知らないキー・空の `word` で `WordsInvalid` |
-| `Finder.find` | 活用形が当たる・長い語が先に当たる | 単独の語の前後の漢字・`except` と重なる当たり・生きた語の内側と外側・カタカナと ASCII の境界 | 語が無ければ空 |
+| `Finder.find` | 活用形が当たる・長い語が先に当たる | 単独の語の前後の漢字・`except` と重なる当たり・`skip_headings` の見出しと本文・生きた語の内側と外側・カタカナと ASCII の境界 | 語が無ければ空 |
 | `bad_replaces` | 置き換え先に別の語が残る登録を返す | 置き換え先が自分の語を含む（当てる） | — |
 
 ## 用語集の読み取り
@@ -144,7 +144,7 @@ src/ndf/
   - 事前条件: `base` と `head` のコミットが手元にある。`head` を含む分岐点からの差分は呼ぶ側が `merge_base` で求めて渡す（cross-review は修正担当を起動する前の HEAD をそのまま渡す）
   - 副作用: 外部コマンド `git diff`（`--no-renames --no-ext-diff --no-color --no-textconv -U1000000`、`-c core.quotePath=false`）を 1 回
 - `in_text`・`in_diff`
-  - 事後条件: Markdown（`.md`）のコードブロックの行（`markdown.code_lines`）と、左の空白を除いて `>` で始まる行は見ない。`Source.examples` のファイルと語の組は返さない
+  - 事後条件: Markdown（`.md`）のコードブロックの行（`markdown.code_lines`）と、左の空白を除いて `>` で始まる行は見ない。見出しの行（`markdown.block_kinds` の `heading`）は `heading=True` で当てる。`Source.examples` のファイルと語の組は返さない
 
 ### 異常系の処理
 
@@ -171,7 +171,7 @@ src/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `added_files` | `Git.diff_between`・`unidiff` | `git grep -n "diff" -- plugins/ndf/src/ndf/adapters/git.py` | 使う |
-| `in_text` | `adapters/markdown.code_lines`・`block_kinds` | 読んで確かめた | `code_lines` を使う。`block_kinds` の引用は継続行を含むので使わない |
+| `in_text` | `adapters/markdown.code_lines`・`block_kinds` | 読んで確かめた | `code_lines` と、`block_kinds` の見出しを使う。`block_kinds` の引用は継続行を含むので使わない |
 | `Source.covers` | `pathspec`（`gate/checks.py` が使う） | `git grep -n pathspec -- plugins/ndf/src` | 使う |
 
 ### 単体テストの観点
@@ -192,13 +192,14 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `scan` | `crossreview/fixwords.py` | 新設 | `scan(g: Git, base: str) -> Optional[list[Hit]]` | HEAD の用語集で `base` から HEAD の足した行の当たりを返す。設定が無ければ None |
-| `relaunch_items` | 同上 | 新設 | `relaunch_items(hits: Sequence[Hit], reference: Path) -> list[dict[str, Any]]` | 当たりをファイルごとの指摘の項目（`id` は `w<通し番号>`・`text`・`path`・`line`・`severity`）にする。`text` は語の数と `reference` のパスだけで、置き換え先の文を持たない |
+| `relaunch_items` | 同上 | 新設 | `relaunch_items(hits: Sequence[Hit], reference: Path) -> list[dict[str, Any]]` | 当たりをファイルごとの指摘の項目（`id` は `w<通し番号>`・`text`・`path`・`line`・`severity`）にする。`text` は語の数・`reference` のパス・`review-criteria.json` の起動し直しの文（言い換える・話題にする行のほかは囲まない・用語集と設定を変えない）で、置き換え先の文を持たない |
 | `write_reference` | 同上 | 新設 | `write_reference(path: Path, hits: Sequence[Hit]) -> None` | 当たりの一覧を JSON で書く |
 | `record_of` | 同上 | 新設 | `record_of(found: Sequence[Hit], left: Sequence[Hit]) -> dict[str, Any]` | 状態ファイルの `rounds[].words` の形にする |
-| `remaining` | 同上 | 新設 | `remaining(rows: Iterable[Mapping[str, Any]], texts: Mapping[str, str]) -> dict[str, bool]` | 語の指摘の行ごとに、当たった行の中身が head のファイルに残るかを返す |
-| `enter_words` | `crossreview/journal.py` | 新設 | `enter_words(round_no: int, hits: Sequence[Hit]) -> None` | 残った当たりをファイルごとの未解決の指摘の行（`by: words`・重さ major・`words`）として足す |
-| `settle_words` | 同上 | 新設 | `settle_words(left: Mapping[str, bool]) -> None` | 語の指摘の行の終わり方を、行が残れば未解決、消えれば直したにする |
-| `fixer_docs` | `crossreview/criteria_decide.py` | 新設 | `fixer_docs(skill: Path) -> str` | 文書のファイルを直すときの規則への参照の 1 文を `review-criteria.json` の `fixer_docs` から組む |
+| `remaining` | 同上 | 新設 | `remaining(g: Git, rows: Iterable[Mapping[str, Any]]) -> dict[str, bool]` | 語の指摘の行ごとに、`words_base` から HEAD までを検査し直し、同じ語と中身の当たりがどのファイルかに残るかを返す |
+| `enter_words` | `crossreview/journal.py` | 新設 | `enter_words(round_no: int, hits: Sequence[Hit], base: str) -> None` | 残った当たりをファイルごとの未解決の指摘の行（`by: words`・重さ major・`words`・`words_base`）として足す |
+| `settle_words` | 同上 | 新設 | `settle_words(left: Mapping[str, bool]) -> None` | 語の指摘の行の終わり方を、当たりが残れば未解決、無ければ直したにする |
+| `fixer_words` | `crossreview/criteria_decide.py` | 新設 | `fixer_words() -> str` | 起動し直しの項目に添える文を返す |
+| `fixer_docs` | 同上 | 新設 | `fixer_docs(skill: Path) -> str` | 文書のファイルを直すときの規則への参照の 1 文を `review-criteria.json` の `fixer_docs` から組む |
 | `_check_words` | `crossreview/drive.py` | 新設 | `_check_words(run: _Run, round_no: int, base: str, launch: Optional[Launcher]) -> None` | 検査・起動し直し・記録・指摘の更新を順に行う。`launch` が None なら起動し直さない |
 | `_relaunch_words` | 同上 | 新設 | `_relaunch_words(run: _Run, round_no: int, hits: Sequence[Hit], launch: Launcher) -> None` | 当たりだけを渡して修正担当を 1 回起動し、結果の `commit` をラウンドの修正の記録に書く |
 | `_round` | 同上 | 変更 | 変わらない | 修正の結果ファイルを移した後・`_push` の前に `_check_words(run, round_no, prep.head, launch)` を呼ぶ |
@@ -232,7 +233,7 @@ src/ndf/
 | `_check_words` | 当たりがあり `launch` が無い（送り直し） | `left` は `found` と同じ |
 | `_check_words` | `left` が空でない | `enter_words` で未解決の指摘にする |
 
-- `remaining` が読むファイルの本文は、語の指摘の行のファイルだけをまとめて 1 回で読む（`changed.committed_texts`）
+- `remaining` は、起点（`words_base`）が同じ指摘をまとめて差分を 1 回だけ読む。起点が HEAD の祖先でなければ、その指摘が指すファイルの本文（`changed.committed_texts`）の全行に `in_text` と同じ規則を当てる
 
 ### ログと記録の出力
 
@@ -248,8 +249,8 @@ src/ndf/
 | `enter_words` | `_journal_row`・`_located` | `journal.py` を読んで確かめた | 使う |
 | `_relaunch_words` | `_fix_prompt`・`_launch_fixer`・`_take_fix`・`_consume` | `drive.py` を読んで確かめた | 使う（指示の組み立てを増やさない。項目の id がジャーナルに無いので、結果は語の指摘の終わり方に効かない） |
 | `write_reference` | `store.write_object`・`_remarks_file` | 同上 | `store.write_object` を使う |
-| `remaining` | `drive._committed_texts` | 同上 | 使う（`changed.py` へ移す） |
-| `fixer_docs` | `fixer_ci_only` | `criteria_decide.py` を読んで確かめた | 同じ形で足す |
+| `remaining` | `in_diff`・`Git.is_ancestor`・`drive._committed_texts` | 同上 | 使う（`_committed_texts` は `changed.py` へ移す） |
+| `fixer_docs`・`fixer_words` | `fixer_ci_only` | `criteria_decide.py` を読んで確かめた | 同じ形で足す |
 
 ### 単体テストの観点
 
@@ -257,7 +258,7 @@ src/ndf/
 | --- | --- | --- | --- |
 | `_check_words` | 直しの直後に当たり、起動し直して 0 件なら指摘が増えず push する | 最後のラウンドで残ると `gaps` に入る・用語集が無ければ起動の回数が変わらない | 修正の後に用語集が壊れると push せずに止まる |
 | `_relaunch_words` | 起動が 1 回だけ増え、出力の名前が分かれる | — | 結果ファイルが無くても検査へ進む |
-| `settle_words`・`remaining` | 行が消えれば直した、残れば未解決 | 見送りと申告した行・別のファイルへ移った行 | 読めないファイル（消えた）は直した |
+| `settle_words`・`remaining` | 当たりが無くなれば直した、残れば未解決 | 見送りと申告した行・別のファイルへ移した行（残る）・コードブロックへ入れた行（直した）・前からある同じ中身の行（直した） | 起点が祖先でない・ファイルが消えた（直した） |
 | `_resend` | 送り直しの前に検査して指摘にする | 当たりが無い | — |
 | `_fix_prompt` | 参照の文と開ける絶対パスが入る | 用語集が無いリポジトリでも入る | — |
 
@@ -319,7 +320,7 @@ src/ndf/
 | `skills/design/references/design-template.md` | 「どこを変えるか」の定型文の `畳む` を「まとめる」にする |
 | `skills/development-workflow/references/approval-request.md` | 「提示を組み立てる前に」へ検査のコマンドと、当たりがあれば提示しないことを足す |
 | `skills/cross-review/SKILL.md`・`docs/02-fix-and-rotation.md` | 語の検査・起動し直し・指摘の終わり方・`config_broken` を足す |
-| `contracts/data/review-criteria.json` | `fixer_docs` の文を足す（語の一覧は持たない） |
+| `contracts/data/review-criteria.json` | `fixer_docs` と起動し直しの文 `fixer_words` を足す（語の一覧は持たない） |
 | `.github/workflows/glossary.yml` | 説明のコメントを直す（ジョブは増やさない） |
 
 ### 単体テストの観点
