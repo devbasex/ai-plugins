@@ -21,7 +21,7 @@
 | `issues/issue-4076-design.md`・`issues/issue-4076-design-detail.md` | #4090 #4099 の設計の「#4076 の文書のどこを置き換えるか」の表の 15 か所と、上の保存先の 3 つの変更 | U1 |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py`（新設） | `drive.py` から移す `Changed`・`_regular_blobs`・`_local_text`・`_committed_texts`・`changed`・`sections`・`changed_sections`（U2。別のモジュールから読む名前は下線を外した）。`_committed_texts` がコミットを引数に取る・`_Target`・`_review_diff`・`_diff_files`・`_base_lines`（U8）。`_citations`・`_final_target`・`_final_citations`（U10） | U2・U8・U10 |
 | `plugins/ndf/src/ndf/domains/crossreview/settings.py`（新設） | `drive.py` から移す `ReviewSettings`・`settings_path`・`_inside`・`read_settings`・`blob_id`・`proposed_differs`・`outside_checkout` と、`outside_checkout` が使う `RunConfig`・`DriveStopped`・`DEFAULT_MAX_ROUNDS`（U2。別のモジュールから読む名前は下線を外した）。`RunConfig` に欄 `base_commit: Optional[str] = None` を足す（U5） | U2・U5 |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 移した関数を呼ぶ形にする（U2）。`_start` がスナップショットを得てベースをコミットに固定し、失敗は `refused`（U5）。`_review_prompt`・`_fix_prompt` に基準 5 とパス（U5）。`_prepare_round`・`_reusable`・ラウンドの記録の MVV の識別子（U6）。`_Prepared` に `docs`・`full_diff`（U8）。修正担当へ `handable` を渡す（U9）。`_round` の確かめ・`last_target`・`_settle_resolved` が `by: ndf` の指摘を飛ばす・ラウンドの記録の `mvv_checked`（U10）。`_start` の引継ぎと `restate`（U11）。`_Run.clean`・`_summary` が `mvv_outputs`・`record_review` を呼ぶ（U12） | U2・U5・U6・U8〜U12 |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 移した関数を呼ぶ形にする（U2）。`_start` がスナップショットを得てベースをコミットに固定し、失敗は `refused`（U5）。`_review_prompt`・`_fix_prompt` に基準 5 とパス（U5）。`_prepare_round`・`_reusable`・ラウンドの記録の MVV の識別子（U6）。`_Prepared` に `docs`・`full_diff`（U8）。修正担当へ `handable` を渡す・引継ぎの後に `restate` を打つ（U9）。`_round` の確かめ・`last_target`・`_settle_resolved` が `by: ndf` の指摘を飛ばす・ラウンドの記録の `mvv_checked`（U10）。`_start` の引継ぎ（U11）。`_Run.clean`・`_summary` が `mvv_outputs`・`record_review` を呼ぶ（U12） | U2・U5・U6・U8〜U12 |
 | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | `changed_sections`・`read_settings` の呼び先（U2）。`Basis` に MVV の識別子・`cmd_scope` がベースのコミットと共通原則の sha256 を求める（U6） | U2・U6 |
 | `plugins/ndf/src/ndf/adapters/git.py` | `Git.run_bytes`（新設） | U3 |
 | `plugins/ndf/src/ndf/core/converge/worktree.py` | `fetch_head`・`sync_worktree` に `base_branch` | U3 |
@@ -34,10 +34,10 @@
 | `plugins/ndf/contracts/data/review-criteria.json` | キー `mvv_criterion`・`mvv_number`・`mvv`（`reviewer`・`fixer`・`citation`） | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | `criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item` | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | `Basis.mvv`・`read_by_all_head`・`reviewed_of`・`state_scope`（U6）。`read_by_all_head` が `mvv_checked` を見る（U10） | U6・U10 |
-| `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `ingest`・`handable`・`skipped_texts`・`apply_fix`・`enter`・`restate`（U9）。`ingest_citations`・`citation_key`・`apply_fix` が `by: ndf` の指摘の終わり方を変えない（U10）。`carry`（U11） | U9・U10・U11 |
+| `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `handable`・`skipped_texts`・`apply_fix`（`by: ndf` の指摘の終わり方を変えず、返す件に入れない。#4109）・`enter`・`restate`（U9）。`ingest_citations`・`citation_key`（U10）。`carry`（U11） | U9・U10・U11 |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | `_finding_gaps` がレッドラインを除き MVV の指摘の未解決を `mvv_unresolved` にする（U9）。`mvv_checked` の引数と `by: ndf` の未解決・`finish` が止まる側になる（U10） | U9・U10 |
 | `plugins/ndf/src/ndf/domains/crossreview/prior_decide.py` | `Carried` の欄・`recorded`・`carried` | U11 |
-| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | `open_block`（U11）。`mvv_outputs`・`once`（U12） | U11・U12 |
+| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 記録のコメントの「人の承認を待つ」件数と表示（U9）。`open_block`（U11）。`mvv_outputs`・`once`（U12） | U9・U11・U12 |
 | `plugins/ndf/skills/development-workflow/references/project-mvv.md` | 節「工程での読み方」 | U13 |
 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` | 起動指示の項目に「MVV」、守る規則に「MVV の欄のスナップショットを作業の前に読む」 | U13 |
 | `plugins/ndf/skills/design/SKILL.md`・`design/references/decisions.md`・`tdd-cycle/SKILL.md`・`requirements-design/SKILL.md` | 参照を `project-mvv.md#工程での読み方` へ直す。`decisions.md` の例のバージョンを `current` のバージョンを書く形にし、「根拠の行」の表に `・` の区切りと引用文の形を足す | U13 |
@@ -122,21 +122,21 @@
 ### Task 11: ジャーナルの MVV の分類とレッドライン
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`
-- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（U5 が先に入れた `mvv`・`redline`・`redline_items` の上に、`ingest`・`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
+- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（U5 が先に入れた `mvv`・`redline`・`redline_items` の上に、`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。U5 が先に入れた、レッドラインを未解決の欠けとして止める形は置き換える。`apply_fix` は `by: ndf` の指摘の終わり方を変えず、返す件に入れない（#4109 の設計）。`drive` は引継ぎの後に `restate` を打つ。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
 - **満たす受け入れ条件:** 4076:2、4076:4（テスト設計の 4090-6）
 - **進め方:** 失敗するテスト（`P1` の指摘が収束を止める。修正担当へ渡らないことは U5 のテストが縛る）→ 通す最小実装 → 整理
 
 ### Task 12: 根拠の行の確かめの配線と確かめの成否
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/changes.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`
-- **変更内容:** `_citations`（鍵 `(merge_base, head, 識別子)` で使い回す・候補のファイルの (a) と (b)）・`_final_target`・`_final_citations` を `changes.py` に置き、`_round` と終わり方の判定の直前に打つ。`ingest_citations`・`citation_key`、`apply_fix` が `by: ndf` の指摘の終わり方を変えない、`_settle_resolved` が `by: ndf` の指摘を飛ばす。`_finding_gaps` の `mvv_checked`、`finish` が `mvv_unresolved` で止まる側になる、`read_by_all_head` が `mvv_checked` の真のラウンドだけを返す
+- **変更内容:** `_citations`（鍵 `(merge_base, head, 識別子)` で使い回す・候補のファイルの (a) と (b)）・`_final_target`・`_final_citations` を `changes.py` に置き、`_round` と終わり方の判定の直前に打つ。`ingest_citations`・`citation_key`、`_settle_resolved` が `by: ndf` の指摘を飛ばす。`_finding_gaps` の `mvv_checked`、`finish` が `mvv_unresolved` で止まる側になる、`read_by_all_head` が `mvv_checked` の真のラウンドだけを返す
 - **満たす受け入れ条件:** 4076:3（テスト設計の 4090-3・4090-4・4090-12・4099-1 の配線の側）
 - **進め方:** 失敗するテスト（バージョン 11 のリポジトリで「根拠: Value 5（MVV バージョン 1）」を足した PR が収束する）→ 通す最小実装 → 整理
 
 ### Task 13: 記録のコメントからの MVV の分類の引継ぎ
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`
-- **変更内容:** #4090 #4099 の詳細設計の「ジャーナルと引継ぎ」の引継ぎの部分（`Carried` の欄、`recorded`・`carried`、`open_block`、`carry`、`drive._start` が resolve 済みの `by: ndf` の件も戻す、`carry` の後に `restate` を 1 回打つ）
+- **変更内容:** #4090 #4099 の詳細設計の「ジャーナルと引継ぎ」の引継ぎの部分（`Carried` の欄、`recorded`・`carried`、`open_block`、`carry`、`drive._start` が resolve 済みの `by: ndf` の件も戻す。`carry` の後の `restate` の呼び出しは Task 11 で入れた）
 - **満たす受け入れ条件:** 4076:4（テスト設計の 4090-5）
 - **進め方:** 失敗するテスト（空の状態ディレクトリから再開すると `P1` のレッドラインが普通の指摘に戻る）→ 通す最小実装 → 整理
 

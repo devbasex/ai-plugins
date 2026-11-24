@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, store, threads
+from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
+from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
 from ._repos import BRANCH, Repos, commit, sh
@@ -61,6 +62,11 @@ def _fixing(tmp_path: Path) -> Recording:
 
 def _prompt(fake: Recording, agent: str) -> str:
     return next(p for a, _, p in fake.prompts if a == agent)
+
+
+def _prompt_of(fake: Recording, out: str) -> str:
+    """出力の名前が `out` の起動へ渡した指示。"""
+    return next(p for _, name, p in fake.prompts if name == out)
 
 
 def _criterion_paths(prompt: str, mvv_state: Path) -> list[Path]:
@@ -238,17 +244,50 @@ def test_merge_target_is_the_base_of_the_pull_request() -> None:
         threads.GitHubPort(hub, None, PR, RuntimeError).base()
 
 
+REDLINE_BODY = BODY + "\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | 消す | 戻せない |\n"
+
+
+@pytest.mark.parametrize("severity", ["minor", "major"])
 @pytest.mark.parametrize("item", ["P1", "C1"])
-def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, item: str) -> None:
-    """必ず人の承認が要る操作の指摘は、軽い重さでも修正担当へ渡さず、未解決の欠けとして止めて人の判断へ戻す。"""
-    body = BODY + "\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | 消す | 戻せない |\n"
-    _push_base(repos, body=body)
-    held = {"text": "人に聞く操作", "severity": "minor", "mvv": item}
-    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}, held], []], "kiro": [[], []]})
-    _, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
-    assert (got["status"], got["cause"]["kind"]) == ("stopped", "incomplete")
-    assert [g["reason"] for g in got["gaps"]] == ["人に聞く操作"]
+def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, item: str, severity: str) -> None:
+    """必ず人の承認が要る操作の指摘は、どの重さでも修正担当へ渡さず、収束を止めず、結果と PR の記録に残す。"""
+    _push_base(repos, body=REDLINE_BODY)
+    held = {"text": "人に聞く操作", "severity": severity, "impact": IMPACT, "mvv": item}
+    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}, held], [held]], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert (code, got["status"], got["outputs"]["gaps"]) == (0, "ok", [])
+    assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 1・見送った 0・未解決 0・人の承認を待つ 1）"
     assert "止まる" in _prompt(fake, "claude") and "人に聞く操作" not in _prompt(fake, "claude")
-    assert any(item in w and "人の判断" in w for w in got["warnings"])
     rows = {r["text"]: r for r in _state(fake.state_dir)["findings"]}
-    assert (rows["人に聞く操作"]["mvv"], rows["止まる"]["mvv"], rows["止まる"]["outcome"]) == (item, "Value 1", "fixed")
+    assert (rows["人に聞く操作"]["mvv"], rows["人に聞く操作"]["outcome"]) == (item, fin.UNRESOLVED)
+    assert (rows["止まる"]["mvv"], rows["止まる"]["outcome"]) == ("Value 1", fin.FIXED)
+    body = report_decide.comment(PR, _state(fake.state_dir), fin.CONVERGED)
+    assert "未解決 0・人の承認を待つ 1）" in body
+    assert [line for line in body.splitlines() if "人に聞く操作" in line and report_decide.REDLINE_LABEL in line]
+
+
+def test_new_mvv_drops_the_judgement_made_under_the_earlier_one(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """新しい MVV が承認された後の起動は、前の MVV で必ず人の承認が要る操作だった指摘の分類を外し、残りを普通の指摘として修正担当へ渡す。
+    前の MVV での見送りは「出し直さない」の一覧に載せない。"""
+    _push_base(repos, body=REDLINE_BODY)
+    raised = [{"text": "人に聞く操作", "severity": "major", "impact": IMPACT, "mvv": "P1"}, {**MAJOR, "mvv": "Value 1"}]
+    skip = {"outcome": fin.SKIPPED, "reason": "反しない"}
+    fake = Recording(tmp_path / "st", {"codex": [raised, []], "kiro": [[], []]}, decide=lambda fid: skip)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert "見送り済みの指摘（出し直さない）:\n- 止まる\n" in _prompt_of(fake, "round2-codex.out")
+    _push_base(repos, 12)
+    again = Recording(tmp_path / "st", {"codex": [["別の指摘"], []], "kiro": [[], []]})
+    _, got = _run(capsys, monkeypatch, again, wt, "--base", "main")
+    assert "見送り済みの指摘（出し直さない）" not in _prompt(again, "codex")
+    assert "人に聞く操作" in _prompt(again, "claude")
+    assert any("MVV" in p["result"] and "2 件" in p["result"] for p in got["process"] if p["run"] == "start")
+    rows = {r["text"]: r for r in _state(again.state_dir)["findings"]}
+    assert (rows["人に聞く操作"]["outcome"], rows["止まる"]["outcome"]) == (fin.FIXED, fin.SKIPPED)
+    assert [len(rows[t]["mvv_history"]) for t in ("人に聞く操作", "止まる")] == [1, 1]
+
+
+def test_warnings_about_mvv_items_reach_the_result(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    _push_base(repos)
+    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "P9"}], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert code == 0 and [w for w in got["warnings"] if "r1-1" in w and "MVV の項目" in w]

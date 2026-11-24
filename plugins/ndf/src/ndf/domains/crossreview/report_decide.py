@@ -53,6 +53,8 @@ FINAL_LABEL = {
 OUTCOME_LABEL = {fin.FIXED: "直した", fin.SKIPPED: "見送った", fin.UNRESOLVED: "未解決"}
 # 収束の妨げにならない重さで残した指摘の表示（修正担当へ渡さない。#3941）
 LIGHT_LABEL = "軽い（直さずに残した）"
+# 必ず人の承認が要る操作に当たる指摘の表示（修正担当へ渡さない。#4076）
+REDLINE_LABEL = "人の承認を待つ（直さずに残した）"
 
 
 # 一覧の文字列の中で JSON の文字の escape にする文字。公開の検査（`publish.scrub`）の形（URL の資格情報・認証ヘッダー・
@@ -161,8 +163,8 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
     for f in findings:
         outcome = f.get("outcome")
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
-        if outcome == fin.UNRESOLVED and _light(f):
-            shown = LIGHT_LABEL
+        if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
+            shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
         rows.append(
             f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {_cell(criteria_decide.severity_of(f.get('severity')))} | {_cell(_place(f))} "
             f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(f.get('reason'))} |"
@@ -175,10 +177,10 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     自由記述を JSON にする前に通す伏せ字（`open_block`）。"""
     rounds = [r for r in store.list_of(data, store.ROUNDS) if isinstance(r, Mapping)]
     findings = [f for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping)]
-    counts = {
-        key: sum(1 for f in findings if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL
-    }
-    light = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and _light(f))
+    waiting = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and f.get(fin.REDLINE))
+    rest = [f for f in findings if f.get("outcome") != fin.UNRESOLVED or not f.get(fin.REDLINE)]
+    counts = {key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL}
+    light = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and _light(f))
     label = FINAL_LABEL[final] if final in FINAL_LABEL else "途中（終わり方の記録が無い）"
     lines = [
         MARKER,
@@ -187,6 +189,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         f"終わり方: {label}。ラウンド {len(rounds)}・指摘 {len(findings)}"
         f"（直した {counts[fin.FIXED]}・見送った {counts[fin.SKIPPED]}・未解決 {counts[fin.UNRESOLVED]}"
         + (f"・軽い {light}" if light else "")
+        + (f"・人の承認を待つ {waiting}" if waiting else "")
         + "）",
         "",
         "### ラウンドと修正",

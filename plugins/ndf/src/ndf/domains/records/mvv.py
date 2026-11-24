@@ -58,6 +58,13 @@ class Snapshot(NamedTuple):
     principles_sha256: str
     principles_path: Optional[Path]
 
+    @property
+    def identity(self) -> str:
+        """どの MVV かを表す識別子。承認済みでなければ状態だけで決まる（共通原則を担当へ渡さないので、NDF が変わっても同じ）。"""
+        if self.state != md.State.APPROVED:
+            return f"{self.state}:::"
+        return f"{self.state}:{self.version}:{self.sha256}:{self.principles_sha256}"
+
 
 def _state_dir() -> Path:
     var = facts.value("locations", "mvv-state", "env")
