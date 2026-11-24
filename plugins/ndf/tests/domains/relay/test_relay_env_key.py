@@ -38,6 +38,7 @@ def _run(tmp_path, monkeypatch):
     real_wrapper, real_parse = wrapper.Wrapper, claude_args.parse
     monkeypatch.setattr(claude_args, "parse", lambda args, environ, tty: real_parse(args, environ, True))
     monkeypatch.setattr(cli, "wrapper_settings", lambda name, rest, parsed: make_settings(tmp_path))
+    monkeypatch.setattr(wrapper.cli_floor, "require", lambda *a, **k: None)  # 実の `claude --version` を打たない
     monkeypatch.setattr(wrapper, "Wrapper", lambda s, **kw: real_wrapper(s, spawn=spawn, clock=clock_ticks(), **kw))
     try:
         return cli.main(["run", "--name", "t1"]), spawn.calls
