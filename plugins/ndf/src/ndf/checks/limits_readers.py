@@ -536,16 +536,24 @@ class _Walker(ast.NodeVisitor):
 
     # ---------------------------------------------------------------- 囲み
 
+    def _here(self) -> str:
+        """今の囲みの名前。どの囲みの中でもなければモジュールの名前。"""
+        return self.scopes[-1].name if self.scopes else self.mod.name
+
+    @contextmanager
+    def _inside(self, scope: _Scope) -> Iterator[None]:
+        """今の囲みの 1 つ内側の囲み `scope` で読む。"""
+        with self._written_in([*self.scopes, scope]):
+            yield
+
     def _enter(self, node: ast.AST, name: str, params: frozenset[str], is_class: bool = False) -> None:
-        owner = self.scopes[-1].name if self.scopes else self.mod.name
-        full = f"{owner}.{name}"
+        full = f"{self._here()}.{name}"
         reader = self.conf.readers.get(full)
         default = _default(node, reader.arg) if reader is not None else None
         if reader is not None and default is not None:
             self._record_argument(default.lineno, default, reader)
-        self.scopes.append(_Scope(node, full, params, is_class, self.mod.bindings(node)))
-        self.generic_visit(node)
-        self.scopes.pop()
+        with self._inside(_Scope(node, full, params, is_class, self.mod.bindings(node))):
+            self.generic_visit(node)
 
     def generic_visit(self, node: ast.AST) -> None:
         if not isinstance(node, COMPREHENSIONS):
@@ -554,11 +562,10 @@ class _Walker(ast.NodeVisitor):
         # 最初の並びは内包表記の外で、ほかは内包表記の囲みで読む
         first = node.generators[0]
         self.visit(first.iter)
-        self.scopes.append(_Scope(node, self.scopes[-1].name if self.scopes else self.mod.name, NO_NAMES))
-        for child in ast.iter_child_nodes(node):
-            for part in [first.target, *first.ifs] if child is first else [child]:
-                self.visit(part)
-        self.scopes.pop()
+        with self._inside(_Scope(node, self._here(), NO_NAMES)):
+            for child in ast.iter_child_nodes(node):
+                for part in [first.target, *first.ifs] if child is first else [child]:
+                    self.visit(part)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._enter(node, node.name, _params(node.args))
