@@ -1,6 +1,11 @@
 # #4068 の詳細設計: 起こす hook と起こす記録
 
-設計文書 [issue-4068-4199-design.md](./issue-4068-4199-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。#3995・lracct（#3604・#3864）・#4049 の実装の後に、その上で実装する（判断開始の値は `context_thresholds.thresholds` の返り、背景の作業の分け方は #4049 の `relay_busy.task_kind`・`work_count`）。
+設計文書 [issue-4068-4199-design.md](./issue-4068-4199-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。#3995・lracct（#3604・#3864）・#4049 の実装の後に、その上で実装する。使うものは次のとおりである。
+
+| 使うもの | 取り方 |
+| --- | --- |
+| 判断開始の値 | `context_thresholds.thresholds` の返り |
+| 背景の作業の分け方 | #4049 の `relay_busy.task_kind`・`work_count` |
 
 ## 地図
 
@@ -35,7 +40,14 @@ plugins/ndf/
 （`cli_floor` のテストは今の置き場の `tests/` の下のファイルに足す）
 ```
 
-依存の向き: `hooks/rewake.py` → `relay/keep_cache.py`・`relay/signals.py`・`relay/markers.py`・`relay/observe.py`（hook → 中継の向きで、今の `hooks/guards/turn.py` → `relay/markers.py` と同じ）。`keep_cache.py` は標準ライブラリだけで書き、判定を純粋な関数に閉じる。`cli_cache.py` は `keep_cache.py` と `signals` を使い、費用は行に書かれた倍率で出す。`relay/wrapper.py` → `hooks/registration.py`（`rewake_settings`）は中継 → hook の向きの唯一の依存で、`registration` は `relay` を読まないので輪にならない。
+依存の向き:
+
+| 依存 | 向きと決まり |
+| --- | --- |
+| `hooks/rewake.py` → `relay/keep_cache.py`・`relay/signals.py`・`relay/markers.py`・`relay/observe.py` | hook → 中継の向きで、今の `hooks/guards/turn.py` → `relay/markers.py` と同じ |
+| `keep_cache.py` | 標準ライブラリだけで書き、判定を純粋な関数に閉じる |
+| `cli_cache.py` → `keep_cache.py`・`signals` | 費用は行に書かれた倍率で出す |
+| `relay/wrapper.py` → `hooks/registration.py`（`rewake_settings`） | 中継 → hook の向きの唯一の依存。`registration` は `relay` を読まないので輪にならない |
 
 | ファイル | 種別 | 責務（1 文） | 依存 | 公開シンボル | 関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -57,7 +69,6 @@ plugins/ndf/
 | `hooks/claude.json`・`docs/contracts/*.md` | 変更（再生成） | `ndf hooks render`・`ndf check --write-spec` で作り直す | — | — | — |
 | `skills/development-workflow/references/relay.md` | 変更 | hook の一覧に起こす hook、記録の種類に起こす記録、見直しの手順（20 件ごと）を足す | — | — | — |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更（`glossary.md` は再生成） | 要求の用語 7 語と設計の 2 語を足す | — | — | — |
-
 
 ## 判定（`keep_cache`）
 
@@ -123,7 +134,13 @@ plugins/ndf/
 | `_wait` | 同上 | 新設 | `_wait(t: Target, gen: Generation, until: float, interval: float, clock, sleep) -> bool` | `until` まで `interval` ごとに世代だけを読み、自分のままなら真。会話の記録は読まない |
 | `_finish` | 同上 | 新設 | `_finish(t: Target, gen: Generation, turn: LastTurn, stderr: TextIO, clock) -> int` | 子を止める排他を取り、その中で 世代・起動・質問のファイル を照らし、外れたら何も書かずに 0。そろえば状態を読み直して `next_step` で手を決める。`stop` なら `wait_stop` を「上限」にして `stop_waking`（`scope` `wait`）を書いて 0。`wake`・`end_wait` なら設計の決定 6 の順で (1) 中継の入力の印（決定 10 でマーカーの形のとき） (2) 起こした印（`wake_id`）・`k + 1`・世代（起こした時刻）・`end_wait` なら `stopped` に「引継ぎを求めた」 (3) `wake` の行 を書き、文を出して 2 |
 
-`Target` は `relay_dir`・`launch`・`session_id`・`transcript`・`works`・`monitors`・`last_message`・`hook_id`・`started` を持つ（`NamedTuple`）。`Generation` は `at`・`by` を持つ。`Settled` は `keep`・`stale`・`reason` を持つ。
+内部の型（どれも `NamedTuple`）:
+
+| 型 | 項目 |
+| --- | --- |
+| `Target` | `relay_dir`・`launch`・`session_id`・`transcript`・`works`・`monitors`・`last_message`・`hook_id`・`started` |
+| `Generation` | `at`・`by` |
+| `Settled` | `keep`・`stale`・`reason` |
 
 ### 処理の手順
 
@@ -149,7 +166,10 @@ plugins/ndf/
 ### 並行と排他
 
 - 世代・状態・起こした印・起こす記録の読み書きは、すべて子を止める排他（`signals.STOP_LOCK`。#4049 で `wrapper.QUESTION_LOCK` から移す）の中で行う。ラッパーが子を止めるのと、UserPromptSubmit の guard の世代の書き換えと直列にする。書き込みのある区間は、どれも同じ区間の初めに起動、次に世代を照らす（`_settle`・`_finish`・手順 3 の `stop_waking`・guard の世代の書き換え）。起動が外れたら世代も書かない。排他を出てから書く経路は無い
-- 世代は時刻と書き手の ID の組で、時刻が状態のものより新しいときだけ書き換える（`bump_generation`）。同じ時刻なら先に書いた書き手を残す。時刻の取得元は、起こす hook の Stop では今回の応答と確かめた行の `timestamp`、UserPromptSubmit の guard では guard の `clock()`、起床では排他の中の `clock()` である（設計の決定 6）。hook が動いた時刻は使わない
+- 世代は時刻と書き手の ID の組で、時刻が状態のものより新しいときだけ書き換える（`bump_generation`）。同じ時刻なら先に書いた書き手を残す。時刻の取得元は次の 3 つである（設計の決定 6）。hook が動いた時刻は使わない
+  - 起こす hook の Stop: 今回の応答と確かめた行の `timestamp`
+  - UserPromptSubmit の guard: guard の `clock()`
+  - 起床: 排他の中の `clock()`
 - 待つ子かは Stop の入力の `background_tasks` を自分で分けて決める。同じ Stop で動く #4049 の同期の guard（`relay-marker`）が書く記録のファイルは読まないので、2 つの hook の実行の順に依らない
 - 眠る hook は世代のファイルを `interval` ごとに読むだけで、排他を取らない（読み違えても、起こす直前に排他の中で照らし直す）
 
@@ -189,11 +209,24 @@ plugins/ndf/
 起こす hook はプラグインの登録（`hooks/claude.json`）に足さず、ラッパーが中継の子の起動にだけ `--settings` で渡す。中継の外の会話の Stop では、この hook のプロセスは起動しない（設計の決定 1）。
 
 - `runtimes.json` の claude の `Stop` に `"async_rewake": {"budget": "stop-rewake", "timeout_max": 3300}` を足す。`timeout_max` は背景の登録だけの上限で、事象の `timeout_max`（同期の Stop の登録の上限。ランタイムの 600）は変えない。この行は `render` が読まず、`rewake_entry` と予算の検査だけが読む
-- `limits.json` に `hook.budget.stop-rewake` を今の `hook.budget.*` の形（`p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）で置く。`timeout` 3,300 秒（起こす時点の最大 3,000 秒 + 確かめる間隔 60 秒 + 余り 240 秒）・`deadline` 3,300・`margin` 240・`p95_ms` 500（待つ子でない Stop で終わるまで）・`inject_chars` 1,000（起こす文の長さの上限）。3,300 秒を受け付けない版では、設計の決定 7 のとおり版の範囲に入れない
+- `limits.json` に `hook.budget.stop-rewake` を今の `hook.budget.*` の形（`p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）で置く。値は次のとおりである。3,300 秒を受け付けない版では、設計の決定 7 のとおり版の範囲に入れない
+
+  | 項目 | 値 |
+  | --- | --- |
+  | `timeout` | 3,300 秒（起こす時点の最大 3,000 秒 + 確かめる間隔 60 秒 + 余り 240 秒） |
+  | `deadline` | 3,300 |
+  | `margin` | 240 |
+  | `p95_ms` | 500（待つ子でない Stop で終わるまで） |
+  | `inject_chars` | 1,000（起こす文の長さの上限） |
+
 - `budget` に `rewake_budget(runtime, event, limits=None) -> Optional[Budget]` を足す。事象の行の `async_rewake.budget` から `hook.budget.<名前>` を引く（`policy_name` と同じくランタイム別の行を先に見る）。`async_rewake` の無い事象は None
-- `registration.rewake_entry(runtime: str, event: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, Any]` を足す。`{"type": "command", "command": <command と同じ文で、プラグインの根を環境変数でなく plugin_root の絶対パス（shlex.quote）にし、末尾に rewake を足したもの>, "asyncRewake": true, "timeout": <rewake_budget の timeout>}`。`--settings` の hook にはプラグインの根の環境変数が渡らないので、絶対パスで書く。timeout は宣言（`limits.json`）から読み、3,300 を埋め込まない。事象の行に `async_rewake` が無い・`rewake_budget` が None なら `tables.TableError`
-- `registration.rewake_settings(plugin_root: Path) -> dict[str, Any]` は `{"hooks": {"Stop": [{"hooks": [rewake_entry("claude", "Stop", plugin_root)]}]}}` を返す。`render` は変えない（プラグインの登録に `asyncRewake` は現れない）
-- 検査: `budget_registrations` は、`async_rewake` を持つ事象に背景の行を 1 つ足す（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`）。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、背景の行では `rewake_budget` の締め切りと `async_rewake.timeout_max` で照らし、ほかの行は今のとおり事象の予算と `timeout_max` で照らす。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）
+- `registration.rewake_entry(runtime: str, event: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, Any]` を足す。返す値は次の形である
+  - `{"type": "command", "command": <command>, "asyncRewake": true, "timeout": <rewake_budget の timeout>}`
+  - `<command>` は今の command と同じ文で、プラグインの根を環境変数でなく plugin_root の絶対パス（shlex.quote）にし、末尾に rewake を足したもの
+
+  `--settings` の hook にはプラグインの根の環境変数が渡らないので、絶対パスで書く。timeout は宣言（`limits.json`）から読み、3,300 を埋め込まない。事象の行に `async_rewake` が無い・`rewake_budget` が None なら `tables.TableError`
+- `registration.rewake_settings(plugin_root: Path) -> dict[str, Any]` を足す。返す値は `{"hooks": {"Stop": [{"hooks": [rewake_entry("claude", "Stop", plugin_root)]}]}}` である。`render` は変えない（プラグインの登録に `asyncRewake` は現れない）
+- 検査: `budget_registrations` は、`async_rewake` を持つ事象に背景の行を 1 つ足す（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`）。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、背景の行を `rewake_budget` の締め切りと `async_rewake.timeout_max` で照らす。ほかの行は今のとおり事象の予算と `timeout_max` で照らす。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）
 - `entry.py` は `argv[3] == "rewake"` なら `call("ndf.domains.hooks.rewake", "run", argv)` の値を返す（ほかは今のとおり 0）
 
 | 観点 | テスト |
@@ -205,7 +238,11 @@ plugins/ndf/
 
 ## UserPromptSubmit の guard（`turn`）
 
-- 中継の下（中継の保存先と起動の ID（`NDF_RELAY_LAUNCH`）があり、入力の `session_id` が `NDF_RELAY_SESSION` と同じで、会話の ID が `SESSION_ID_RE` の形）の UserPromptSubmit で、子を止める排他の中で次を行う。(1) `signals.rewake_on(<保存先>, <自分の起動の ID>)` が偽なら何も書かない。今の起動（`launch.json`）が自分の起動でない（起動し直した後の旧い起動の guard が、新しい起動の予約を失効させない）か、今の起動に起こす hook の登録を渡していない（版の範囲の外の子で状態を作らない）ときである。(2) `bump_generation(Generation(at=clock(), by="turn"))` を打つ（眠る hook の予約を失効させる）。状態のファイルが無い会話では、世代だけを持つ状態を作る（最初の待ちで背景の hook より先に入力が届いても、後から動く hook は入力より古い応答の時刻しか持たず、世代を取れない）
+- 中継の下の UserPromptSubmit で、子を止める排他の中で次の 2 つを行う。中継の下とは、中継の保存先と起動の ID（`NDF_RELAY_LAUNCH`）があり、入力の `session_id` が `NDF_RELAY_SESSION` と同じで、会話の ID が `SESSION_ID_RE` の形のときである
+  1. `signals.rewake_on(<保存先>, <自分の起動の ID>)` が偽なら何も書かない。偽になるのは次の 2 つのときである
+     - 今の起動（`launch.json`）が自分の起動でない（起動し直した後の旧い起動の guard が、新しい起動の予約を失効させない）
+     - 今の起動に起こす hook の登録を渡していない（版の範囲の外の子で状態を作らない）
+  2. `bump_generation(Generation(at=clock(), by="turn"))` を打つ（眠る hook の予約を失効させる）。状態のファイルが無い会話では、世代だけを持つ状態を作る。最初の待ちで背景の hook より先に入力が届いても、後から動く hook は入力より古い応答の時刻しか持たず、世代を取れない
 - この guard はプラグインの登録の今の UserPromptSubmit の上で動くので、プロセスは増えない。状態のファイルを作るのは、起こす hook の登録を渡した中継の子だけである
 - 起こす文の見分け: 設計の決定 10 の実測で、入力の `prompt` に起こす文が載ると分かれば、頭が `WAKE_HEAD` の入力を中継の入力として数え直さない。載らなければ今の `markers.take` のままにする
 
@@ -220,7 +257,11 @@ plugins/ndf/
 ## ラッパー（`wrapper._start`）
 
 - `adapters/cli_floor.require(name, argv0, env, cwd) -> Optional[str]` に変える。下限の確かめ（古ければ `TooOld`）は今のまま保ち、確かめに使った版（`_version` が同じ実パス・更新時刻・大きさで持つ値。表に無い名前・見つからない・読めないなら None）を返す。`refuse_old` は返り値を捨てるだけで変えない。`--version` の起動は増えない
-- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。版の文字列が `limits.texts("cache.rewake", "versions")` のどれかと完全に一致し（`semver` の大小では比べない）、受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無いなら、起動の引数の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。`<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。一覧に無い・None・一覧が空・利用者の `--settings` があるなら足さない。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかを `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く（UserPromptSubmit の guard が `signals.rewake_on` で読む）
+- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。次の 2 つがそろえば、起動の引数の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す
+  - 版の文字列が `limits.texts("cache.rewake", "versions")` のどれかと完全に一致する（`semver` の大小では比べない）
+  - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
+
+  `<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。一覧に無い・None・一覧が空・利用者の `--settings` があるなら足さない。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかは `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く。UserPromptSubmit の guard が `signals.rewake_on` で読む
 - 見回りでは版を読まない
 
 | 観点 | テスト |
@@ -259,7 +300,14 @@ plugins/ndf/
 | `cache.rewake` | `{"summary": …, "versions": []}`（実装の最初の実測の後に、通った版を一覧に書く。新しい版は測り直して通ってから一覧に足す） |
 | `hook.budget.stop-rewake` | 今の `hook.budget.*` の形で `timeout` 3,300 |
 
-`limits.schema.json` の行の形に `ratios`（文字列から数への表）・`default`（数）・`ratio`（0 より大きく 1 以下）・`versions`（`数.数.数` の文字列の配列。重複なし。空も可）を足し、`contracts/limits.py` の `Policy` に同じ項目（`ratios: Optional[dict[str, float]]`・`default: Optional[float]`・`ratio: Optional[float]`・`versions: Optional[tuple[str, ...]]`）を足す。
+`limits.schema.json` の行の形と、`contracts/limits.py` の `Policy` に、次の項目を足す。
+
+| 項目 | `limits.schema.json` の形 | `Policy` の型 |
+| --- | --- | --- |
+| `ratios` | 文字列から数への表 | `Optional[dict[str, float]]` |
+| `default` | 数 | `Optional[float]` |
+| `ratio` | 0 より大きく 1 以下 | `Optional[float]` |
+| `versions` | `数.数.数` の文字列の配列。重複なし。空も可 | `Optional[tuple[str, ...]]` |
 
 読み手は入口ごとに次のとおり決める。
 
@@ -269,4 +317,9 @@ plugins/ndf/
 | 集計（`cli_cache`） | 読まない。起こす hook が `tables.policy_value` で読んで行に書いた倍率（`w`・`r`・`out`）を使う | — |
 | ラッパー（`wrapper._start`） | 新設の `contracts/limits.texts(name, key) -> tuple[str, ...]` | `tuple[str, ...]`（`versions`） |
 
-`limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、1 つの差し替えた `limits.json` から、hook の `ratios` の結果（辞書の `ratios` と `default`）・hook が書いた行の倍率・その行から集計が出す費用・ラッパーの版の門（文字列の配列の `versions`）が、差し替えた値どおりになることを確かめる。
+`limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、1 つの差し替えた `limits.json` から、次の 4 つが差し替えた値どおりになることを確かめる。
+
+- hook の `ratios` の結果（辞書の `ratios` と `default`）
+- hook が書いた行の倍率
+- その行から集計が出す費用
+- ラッパーの版の門（文字列の配列の `versions`）
