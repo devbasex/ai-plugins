@@ -19,22 +19,22 @@
 | 欠け | `gaps` | 結果 JSON の gaps の 1 件。出すはずだったのに出せなかった材料・記録、届かなかった目標を、種類・名前・理由で書く | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 過程の項目 | `process` | 結果 JSON の process。スクリプトが実行したこと（コマンド・操作）と、その結果の要旨を順に並べる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 判断の項目 | `decisions` | 結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
-| 実行の核 | `run_core` | エントリポイント・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335） | — | — | — |
-| 実行の識別子 | `run_id` | 1 回のエントリポイントの実行に実行の核が振る識別子。記録・オーナーの記録・耐久の記録をつなぐ（#2335） | — | — | — |
-| 実行の記録 | `run_log` | 1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338） | — | — | — |
-| 起点の実行 | — | 親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338） | — | — | — |
-| 子の実行 | — | 実行の核を通るエントリポイントが子プロセスとして起動した、核を通るエントリポイントの実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338） | — | — | — |
-| 診断 | — | スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338） | — | — | — |
-| 出力先 | — | 実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338） | — | — | — |
-| 全文ファイル | — | 実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338） | — | — | — |
-| 上限の設定 | `limits_declaration` | 上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに 1 ファイルで持つデータ（plugins/ndf/contracts/limits/。#2335） | — | — | — |
+| 実行の核 | `run_core` | エントリポイント・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
+| 実行の識別子 | `run_id` | 1 回のエントリポイントの実行に実行の核が振る識別子。記録・オーナーの記録・耐久の記録をつなぐ（#2335） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
+| 実行の記録 | `run_log` | 1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338） | — | — | `docs/specifications/ndf-rebuild-review-scope.md` |
+| 起点の実行 | — | 親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 子の実行 | — | 実行の核を通るエントリポイントが子プロセスとして起動した、核を通るエントリポイントの実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 診断 | — | スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 出力先 | — | 実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 全文ファイル | — | 実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338） | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 上限の設定 | `limits_declaration` | 上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに 1 ファイルで持つデータ（plugins/ndf/contracts/limits/。#2335） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | 方針の名前 | — | 上限の設定の 1 行を指す名前。エントリポイントのコントラクトと部品の呼び出しが、値でなくこの名前で上限を引く（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | 原因のキー | — | 失敗が前回と同じ原因かを見る値。例外の型と、数字・時刻・パスを伏せた失敗の理由の文から作る（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | 再試行 | — | 失敗した同じ呼び出しを、同じプロセスの中で間隔を置いて打ち直すこと。条件が揃うまで繰り返し確かめる待ちとは別である（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | ステップの打ち直し | — | プランの判定役（judge）が、失敗したステップを同じステップのまま流し直すと返すこと（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | 眠りのループ | — | 本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
 | 最後の照会 | — | 待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343） | — | — | `docs/specifications/ndf-limits-declaration-and-retry-policy.md` |
-| 本体 | — | エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337） | — | — | — |
+| 本体 | — | エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
 | ステートマシン | `machine_id` | 工程の並びと、それぞれの状態を持つ表。計画のステートマシン・レーンのステートマシン・スプリントのステートマシンの 3 つの階層がある。今の `sprint.json` を置き換える | 進行表 | — | — |
 | スプリントのステートマシン | — | スプリント 1 つの工程の行と状態を持つステートマシン。スプリント 1 つにつき 1 つ | — | — | — |
 | レーンのステートマシン | — | レーン 1 つの中のスプリントの順番表を持つステートマシン。レーンの conductor が持つ | — | — | — |
@@ -53,10 +53,10 @@
 | ルート | `route` | 止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか | 行き先 | — | — |
 | 判断の呼び出し | — | スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、回答をスキーマで確かめる操作。今の `type: judge` のステップを置き換える | — | — | — |
 | 回答ごとのルート | — | 承認ゲートと人への質問の結果に添える、回答の値から次に打つコマンドへの表（結果 JSON の `routes`） | — | — | — |
-| 遷移の判断 | — | プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く | — | — | — |
-| 判断の関数 | — | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。保存先のモジュールの名前は _decide.py で終わる | — | — | — |
-| 耐久の層 | — | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | — | — | — |
-| 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起動しない実行器になる | — | — | — |
+| 遷移の判断 | — | プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く | — | — | `docs/specifications/ndf-rebuild-scripted-flow.md` |
+| 判断の関数 | — | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。保存先のモジュールの名前は _decide.py で終わる | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 耐久の層 | — | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
+| 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起動しない実行器になる | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 実行の一覧 | `durable_runs` | PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 工程の出力の確かめ | — | 工程の出力の JSON を、ステートマシンへ書かずに ndf progress finish と同じ規則で確かめること（ndf progress check） | — | — | `docs/specifications/ndf-progress-check-stage-output.md` |
 | 書き込みの順番の記録 | `write-gate` | NDF の GitHub への書き込みがマシン全体で順番を取るための記録（<OS のユーザーのホーム>/.local/state/ndf-github/write-gate.json）。次の書き込みの時刻・内容を作る書き込みの時刻の一覧・待ちの終わりを持つ | — | — | `docs/specifications/ndf-github-write-gate.md` |

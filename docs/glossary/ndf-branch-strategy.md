@@ -26,7 +26,7 @@
 | 対象の差分 | — | レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 掛けるレビュー | — | レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
-| リリース方式 | `release_strategy` | スプリントの変更を本番チャネルへ入れる方法。ブランチ戦略の設定の `branch_strategy.release_strategy`。`merge_base_branch` はベースブランチを丸ごと、`release_branch` は選んだスプリントブランチだけをリリースブランチへ集めて入れ、`trunk` はスプリントブランチを本番ブランチへ直接入れる | 取り込み方 | — | — |
+| リリース方式 | `release_strategy` | スプリントの変更を本番チャネルへ入れる方法。ブランチ戦略の設定の `branch_strategy.release_strategy`。`merge_base_branch` はベースブランチを丸ごと、`release_branch` は選んだスプリントブランチだけをリリースブランチへ集めて入れ、`trunk` はスプリントブランチを本番ブランチへ直接入れる | 取り込み方 | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
 | 環境ブランチ | — | 検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request のマージ先になる | — | — | — |
 | 短命ブランチ | — | 環境ブランチの HEAD から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す | — | — | — |
 | ブランチ戦略の一覧 | — | 選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧 | 取り込み方の表、取り込み方の行 | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |

@@ -24,8 +24,8 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | 例外リスト | `allow_list` | 構造チェックとリポジトリ前提の検査が違反として数えない今の外れを 1 項目 1 ファイルで持つ保存先。チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/・scripts/repo-assumptions-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える | 許可の一覧 | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 移行の読み | `migration_read` | 1 か所へ寄せた設定の値を、新しい保存先に無いときだけ古い保存先から読むこと。コントラクトの一覧の設定ファイルの項目に migrate_from として書く | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 設定の保存先 | `setting_place` | .ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、コントラクトの一覧の設定ファイルの項目の place が決める | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
-| 呼び手 | — | 関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・テンプレート・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える | — | — | — |
-| 残す関数の一覧 | — | 関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。保存先は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの | — | — | — |
+| 呼び手 | — | 関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・テンプレート・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
+| 残す関数の一覧 | — | 関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。保存先は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 旧い値の読み替え | — | バージョンを上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 兆候 | — | AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない | — | — | — |
 | 兆候の基準ファイル | — | `scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON | — | — | — |

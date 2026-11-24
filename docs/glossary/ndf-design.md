@@ -29,8 +29,8 @@
 | 確かめられなかったこと | — | 外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519） | — | — | `plugins/ndf/skills/design/references/external-survey.md` |
 | 作り方 | — | 設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
 | 比べた候補 | — | 設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
-| 承認済みのコミット | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの HEAD のときだけ行う | 承認した head、承認した先端 | — | — |
-| マージの結果 | — | 承認した設計 Pull Request をマージ先へマージする 1 回の試みの結果。マージした・マージ済み・HEAD が動いた・マーカーが無い・検査が緑でない・衝突・マージ先が本番・失敗のどれか | — | — | — |
+| 承認済みのコミット | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの HEAD のときだけ行う | 承認した head、承認した先端 | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
+| マージの結果 | — | 承認した設計 Pull Request をマージ先へマージする 1 回の試みの結果。マージした・マージ済み・HEAD が動いた・マーカーが無い・検査が緑でない・衝突・マージ先が本番・失敗のどれか | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 扱い | — | 設計の結果の列。課題ごとに `実装する` / `マージする` / `閉じる` のどれかを書く | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
 | 統合先 | — | 設計の結果の列。扱いが `マージする` の課題を、どの課題の実装へ含めるかを課題の番号で書く | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
 | 触るファイル | — | 設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |

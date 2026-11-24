@@ -47,8 +47,8 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 人の判断待ち | — | 着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずにマーカーとして出す | — | — | — |
 | 候補の上限 | — | 1 回の棚卸しで区分を決める候補の数の上限。candidates の --limit、.ndf/backlog.json の candidate_limit、既定 10 の順に決まる | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 持ち越し | — | 候補の上限を超えたため、その回で区分を決めずに残した候補。candidates の metrics.deferred に番号だけが載る | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
-| 原因の型 | — | 課題を原因で分けた A〜I の区分。A 失敗の判定・B 記録とログ・C 回復と再開・D 待ちと上限・E 解決の時点・F 並行の衝突・G 機能と方針・H 文書・I その他（#2335） | — | — | — |
-| 柱 | — | 大方針の子で、根本原因の仕組みごとに直す課題。#2335 では P0〜P8（#2336〜#2344）（#2315） | — | — | — |
+| 原因の型 | — | 課題を原因で分けた A〜I の区分。A 失敗の判定・B 記録とログ・C 回復と再開・D 待ちと上限・E 解決の時点・F 並行の衝突・G 機能と方針・H 文書・I その他（#2335） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 柱 | — | 大方針の子で、根本原因の仕組みごとに直す課題。#2335 では P0〜P8（#2336〜#2344）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 差分の棚卸し | — | 開発ループでは数回のループの 1 回に 1 回（既定 3 回。`.ndf/backlog.json` の `depths.diff.every`）、ループの外では毎スプリントのまとめで行う棚卸しの深さ。振り返りの範囲の変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・その範囲で起票した課題（振り返りの範囲の始まりの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315・#2914） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 振り返りの範囲 | — | 1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回（深さの記録の `diff` の `not_due` の行）と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は次に開発ループで走らせる回まで残る。深さの記録の `diff` の `due` の行の `values.scope` に残る（#2914） | — | — | `docs/specifications/ndf-sprint-close-plan-cost.md` |
 | 起動の判定 | — | 棚卸しの深さごとに、その回で走らせるかを決める判定。`upkeep.py depth due <深さ>` が終了コード 0（起動する）か 3（起動しない）を返し、深さの記録へ判定の行を残す（#2315・#2914） | — | — | `docs/specifications/ndf-sprint-close-plan-cost.md` |
@@ -64,7 +64,7 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 棚卸しの深さ | — | 1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff\|review\|overhaul`（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
-| 深さの記録 | — | 棚卸しの深さごとの起動の判定と実行を 1 行ずつ残す記録。メインディレクトリの `.ndf/backlog/depths.jsonl` で、コミットしない。差分の棚卸しの行は、棚卸しのステップの秒・ドル・言語モデルの名前を持つ（#2315） | — | — | — |
+| 深さの記録 | — | 棚卸しの深さごとの起動の判定と実行を 1 行ずつ残す記録。メインディレクトリの `.ndf/backlog/depths.jsonl` で、コミットしない。差分の棚卸しの行は、棚卸しのステップの秒・ドル・言語モデルの名前を持つ（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | Issue の種類 | — | 不具合・機能・調査・運用など、記載すべき項目の組を決める Issue の区分 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 記載項目 | — | Issue の本文（または課題の保存先の欄）に書く 1 つの事柄。例: 受け入れ条件・再現手順・担当者 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 必須の項目 | — | その種類の Issue で、欠けると起票の前の検査で止まる項目 | — | — | `docs/specifications/ndf-issue-items.md` |

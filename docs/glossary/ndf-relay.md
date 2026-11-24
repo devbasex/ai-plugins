@@ -27,7 +27,7 @@
 | 再起動ループ | — | 起動から短い時間（既定 120 秒）で次のセグメントへ移ったセグメントが 3 つ続き、進まずに起動だけが重なる状態。ラッパーは次のセグメントを起動しない。続きの中で初めて使う起動先へアカウントを替えたセグメントは数えない | — | — | `docs/specifications/ndf-relay-segment-restart.md` |
 | 再開コマンド | — | 新しい会話の最初に入力すれば、その工程から再開できるコマンド。ndf-next のブロックの中身 | 再開用のコマンド、引継ぎの 1 行 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる | — | — | — |
+| 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる | — | — | `plugins/ndf/skills/development-workflow/references/handoff.md` |
 | 引継ぎの履歴 | — | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md | — | — | — |
 | ndf-next | — | 次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ランチャー | `relay_launcher` | ~/.claude/ndf/relay.py（ndf relay install が置く複製）。隣の relay.root が指すプラグインの bin/ndf relay を呼ぶだけのエントリポイント | — | — | `docs/specifications/ndf-relay-docs-match-11-wrapper.md` |
