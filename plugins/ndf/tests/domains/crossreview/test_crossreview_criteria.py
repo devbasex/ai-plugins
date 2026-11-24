@@ -275,7 +275,7 @@ def test_runtimes_allowed_narrows_the_reviewers(wt: Path, tmp_path: Path, capsys
     policy = main / ".ndf" / "runtimes.json"
     policy.write_text(json.dumps({"allowed": ["claude", "kiro"]}), encoding="utf-8")
     base = ["run", "--pr", str(PR), "--state-dir", str(tmp_path / "st"), "--base", "origin/main", "--worktree", str(wt)]
-    assert cli._run_config(cli._parser().parse_args(base)).reviewers == ("kiro",)
+    assert cli._run_config(cli._parser().parse_args(base)).reviewers == ("kiro", "claude")
     code, got = run_cli(capsys, *base, "--reviewer", "codex")
     assert got["cause"]["kind"] == "invalid" and "codex" in got["cause"]["detail"]
     policy.write_text(json.dumps({"allowed": ["claude"], "review_seats": ["claude", "claude-2"]}), encoding="utf-8")

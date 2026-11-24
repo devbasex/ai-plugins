@@ -301,9 +301,9 @@ def test_only_the_round_that_reads_the_whole_diff_keeps_it(repos: Repos, wt: Pat
     assert (second.scope.kind, second_target.full_diff) == ("since", None)
     body = sh(wt, "show", f"origin/{BRANCH}:doc.md")
     assert first_target.docs == second_target.docs == {"doc.md": body}
-    (file,) = changes._diff_files(first.diff.read_text(encoding="utf-8"))
+    (file,) = changes._diff_files(fake.inputs[first.diff.name])
     assert (file.path, file.base_path) == ("doc.md", "doc.md") and "足した" in file.added.values()
-    assert [f.path for f in changes._diff_files(second.diff.read_text(encoding="utf-8"))] == ["fix0.txt"]
+    assert [f.path for f in changes._diff_files(fake.inputs[second.diff.name])] == ["fix0.txt"]
 
 
 # --- 根拠の記述の確かめ（収束ループの中） ----------------------------------------------------------

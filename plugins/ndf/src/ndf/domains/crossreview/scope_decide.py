@@ -21,6 +21,8 @@ SINCE = "since"
 BASE = "base"
 # ラウンドの記録のキー（そのラウンドを読んだ相手役の並び。PR 3944 の r2-2）
 REVIEWERS = "reviewers"
+# ラウンドの記録のキー（そのラウンドに claude が座っている、埋めた席の並び。`Filled.record()` の形。#3955）
+FILLED = "filled"
 # ラウンドの記録のキー（そのラウンドで相手役へ渡したレビューの重点。重点を変えた打ち直しは前の収束も差分の起点も使わない。
 # PR 3944 の r4-3）
 FOCUS = "focus"
@@ -88,15 +90,60 @@ def mvv_branch(state: Mapping[str, Any]) -> Optional[str]:
     return next((n for n in reversed(names) if isinstance(n, str) and n), None)
 
 
+class Filled(NamedTuple):
+    """埋めた席 1 件。`seat` は席の名前、`absent` は欠けた相手役（`allowed` のために起動の前に埋めたときは None）、`reason` は理由。"""
+
+    seat: str
+    absent: Optional[str]
+    reason: str
+
+    def record(self) -> dict[str, Any]:
+        return {"seat": self.seat, "for": self.absent, "reason": self.reason}
+
+
+def filled_of(record: Mapping[str, Any]) -> list[Filled]:
+    """ラウンドの記録の埋めた席（形の違う要素は飛ばす）。"""
+    out = []
+    for f in store.list_of(record, FILLED):
+        if isinstance(f, Mapping) and isinstance(f.get("seat"), str):
+            absent, reason = f.get("for"), f.get("reason")
+            out.append(Filled(f["seat"], absent if isinstance(absent, str) else None, reason if isinstance(reason, str) else ""))
+    return out
+
+
+def stand_ins(record: Mapping[str, Any]) -> list[frozenset[str]]:
+    """ラウンドの席ごとの、割り当ててよい今回の席の名前の候補（埋めた席で欠けた相手役があれば、席の名前とその相手役）。"""
+    absent = {f.seat: f.absent for f in filled_of(record) if f.absent is not None}
+    return [frozenset({s, absent[s]} if s in absent else {s}) for s in store.list_of(record, REVIEWERS) if isinstance(s, str)]
+
+
+def assignable(seats: Collection[str], options: Sequence[Collection[str]]) -> bool:
+    """`seats` の全員を、名前を候補に含む `options` の別々の要素へ割り当てられるか（2 部グラフの最大マッチング）。"""
+    owner: dict[int, str] = {}
+
+    def place(seat: str, seen: set[int]) -> bool:
+        for i, names in enumerate(options):
+            if seat in names and i not in seen:
+                seen.add(i)
+                if i not in owner or place(owner[i], seen):
+                    owner[i] = seat
+                    return True
+        return False
+
+    return all(place(s, set()) for s in seats)
+
+
 class Basis(NamedTuple):
     """前のラウンドの head を差分の起点や収束の再利用に使える条件（今回の値。None は確かめない）。`base` は比較基点
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
-    MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。"""
+    MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
+    欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
     focus: Optional[Sequence[str]] = None
     mvv: Optional[str] = None
+    stand_in: bool = False
 
 
 def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
@@ -105,7 +152,7 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
-    if basis.reviewers is not None and not set(basis.reviewers) <= set(store.list_of(record, REVIEWERS)):
+    if basis.reviewers is not None and not _seated_read(record, basis):
         return False
     if basis.focus is not None and store.list_of(record, FOCUS) != list(basis.focus):
         return False
@@ -114,6 +161,14 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     if _known(_mvv_record(record).get(MVV_ID)) != basis.mvv:
         return False
     return not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+
+
+def _seated_read(record: Mapping[str, Any], basis: Basis) -> bool:
+    """今回の席（`basis.reviewers`）の全員がそのラウンドを読んだか。"""
+    seats = set(basis.reviewers) if basis.reviewers is not None else set()
+    if basis.stand_in:
+        return assignable(seats, stand_ins(record))
+    return seats <= set(store.list_of(record, REVIEWERS))
 
 
 def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Optional[str]:

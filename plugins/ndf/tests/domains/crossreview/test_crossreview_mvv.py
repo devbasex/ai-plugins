@@ -164,7 +164,7 @@ def test_issue_4090_9_stale_local_base_is_not_used(base: str, repos: Repos, wt: 
     assert sh(wt, "rev-parse", "main").strip() == sh(wt, "rev-parse", "origin/main").strip() != remote
     fake = _fixing(tmp_path)
     _run(capsys, monkeypatch, fake, wt, "--base", base)
-    diff = (fake.state_dir / "round1.diff").read_text(encoding="utf-8")
+    diff = fake.inputs["round1.diff"]
     assert "セクション B" in diff and "mvv" not in diff
     state = _state(fake.state_dir)
     assert [r["base"] for r in state["rounds"]] == [remote, remote]
@@ -235,7 +235,7 @@ def test_base_given_as_a_commit_reads_the_mvv_from_the_merge_target(
     body, _ = _criterion_paths(_prompt(fake, "codex"), mvv_state)
     assert "バージョン 11" in _prompt(fake, "codex") and body.read_text(encoding="utf-8") == BODY
     assert [r["base"] for r in _state(fake.state_dir)["rounds"]] == [gathered, gathered]
-    diff = (fake.state_dir / "round1.diff").read_text(encoding="utf-8")
+    diff = fake.inputs["round1.diff"]
     assert "after.md" in diff and "unit.md" not in diff and "mvv" not in diff
     assert hub.port.base_reads == 1
 

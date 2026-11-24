@@ -59,10 +59,10 @@ def test_carried_reads_our_open_threads_only() -> None:
     assert got == [prior_decide.Carried("t77", 77, "A が止まる", "codex", "major", "a.py", 9)]
 
 
-def _remarks_of(prompt: str) -> str:
-    """相手役のプロンプトが指す既存のコメントのファイルの中身（無ければ空）。"""
+def _remarks_of(prompt: str, fake: Fake) -> str:
+    """相手役のプロンプトが指す既存のコメントのファイルの中身（無ければ空）。資料は実行の終わりに消えるので、偽物が写したものから読む。"""
     found = re.search(r"PR に既にあるコメントは (\S+) にある", prompt)
-    return Path(found.group(1)).read_text(encoding="utf-8") if found else ""
+    return fake.inputs[Path(found.group(1)).name] if found else ""
 
 
 def test_existing_comments_reach_every_round_prompt(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -80,7 +80,7 @@ def test_existing_comments_reach_every_round_prompt(wt: Path, tmp_path: Path, ca
     fake = Recording(tmp_path / "st", {"codex": [["一つ目"], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     reviews = [p for a, _, p in fake.prompts if a != "claude"]
-    handed = [_remarks_of(p) for p in reviews]
+    handed = [_remarks_of(p, fake) for p in reviews]
     assert len(reviews) == 4 and all("- alice（comment）: セクション B の根拠が無い" in h for h in handed)
     assert not any("セクション B の根拠が無い" in p or "Bearer" in p for p in reviews)
     assert all("abcdef" not in h and "s3cr3t-value" not in h and "Authorization: [REDACTED]" in h for h in handed)
@@ -285,7 +285,7 @@ def test_comments_are_chosen_from_the_files_of_the_diff_handed_over(wt: Path, tm
     fake = Recording(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     first, second = ([p for a, name, p in fake.prompts if a == "codex" and name.startswith(f"round{n}-")] for n in (1, 2))
-    assert "セクション B の書き方" in _remarks_of(first[0]) and "セクション B の書き方" not in _remarks_of(second[0])
+    assert "セクション B の書き方" in _remarks_of(first[0], fake) and "セクション B の書き方" not in _remarks_of(second[0], fake)
 
 
 def test_reused_result_skips_the_reference_reads_and_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:

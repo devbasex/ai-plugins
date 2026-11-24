@@ -117,3 +117,65 @@ def test_issue_3955_answer_text_is_the_outer_result_for_claude(tmp_path: Path) -
     out.write_text("切れた {", encoding="utf-8")
     assert participants.answer_text("claude", out) == "切れた {"
     assert participants.answer_text("codex", out) == "切れた {"
+
+
+@pytest.mark.parametrize(
+    ("requested", "allowed", "names", "added", "reason", "may_fill"),
+    [
+        ((), None, ("codex", "kiro"), (), None, True),
+        ((), {"claude", "codex"}, ("codex", "claude"), ("claude",), "allowed の相手役 1（codex）", True),
+        ((), {"claude"}, ("claude", "claude-2"), ("claude", "claude-2"), "allowed の相手役 0", True),
+        (("codex", "codex"), None, ("codex",), (), None, False),
+        (("codex", "kiro"), None, ("codex", "kiro"), (), None, True),
+        (("codex",), {"claude", "codex"}, ("codex",), (), None, False),
+    ],
+)
+def test_issue_3955_review_seats(requested, allowed, names, added, reason, may_fill) -> None:
+    """受け入れ条件 5・6・12: 名指しが無ければ足りない席を claude・claude-2 で埋め、名指しは重なりを除いた数で 1 者かを決める。"""
+    assert participants.review_seats(requested, allowed) == participants.Seats(names, added, reason, may_fill)
+
+
+def test_issue_3955_review_seats_refuse_like_assign() -> None:
+    with pytest.raises(participants.FixerNotAllowed):
+        participants.review_seats((), {"codex"})
+    with pytest.raises(participants.UnknownParticipant):
+        participants.review_seats(("claude",), None)
+
+
+def test_issue_3955_seat_names() -> None:
+    assert [participants.runtime_of(s) for s in ("codex", "claude", "claude-2", "kiro")] == ["codex", "claude", "claude", "kiro"]
+    assert participants.free_seat(()) == "claude"
+    assert participants.free_seat(("codex", "claude")) == "claude-2"
+    assert participants.free_seat(("claude", "claude-2")) == "claude-3"
+
+
+@pytest.mark.parametrize(
+    ("seats", "unread", "want"),
+    [
+        (("codex", "kiro"), (), ()),
+        (("codex", "kiro"), ("kiro",), ("kiro",)),
+        (("codex", "claude"), ("claude",), ()),
+        (("codex", "claude"), ("codex", "claude"), ()),
+        (("codex", "kiro"), ("codex", "kiro"), ()),
+        (("codex", "claude"), ("codex",), ("codex",)),
+    ],
+)
+def test_issue_3955_fill_targets(seats, unread, want) -> None:
+    assert participants.fill_targets(seats, unread) == want
+
+
+def test_issue_3955_refused_runtimes_check_each_runtime_once(monkeypatch) -> None:
+    """受け入れ条件 15: 断られたランタイムと理由の組を返し、同じランタイムは 1 回だけ確かめる。unready は今の返り値のまま。"""
+    from ndf.adapters import training
+
+    asked: list[str] = []
+
+    def ensure(runtime, env=None, now=None, read=None):
+        asked.append(runtime)
+        return "学習に使う設定" if runtime == "kiro" else None
+
+    monkeypatch.setattr(training, "ensure", ensure)
+    assert participants.refused_runtimes(("claude", "kiro", "claude", "codex")) == {"kiro": "学習に使う設定"}
+    assert asked == ["claude", "kiro", "codex"]
+    assert participants.unready(("kiro", "claude")) == ["学習に使う設定"]
+    assert participants.unready(("codex",)) == []

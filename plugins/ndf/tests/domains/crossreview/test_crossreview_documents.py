@@ -60,7 +60,7 @@ def test_issue_4285_documents_are_read_from_the_whole_diff(repos: Repos, wt: Pat
     """2 ラウンド目の差分に Markdown が無くても（修正は fix0.txt だけ）、PR の全差分にあれば基準を渡す。"""
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
-    assert ".md" not in (fake.state_dir / "round2.diff").read_text(encoding="utf-8")
+    assert ".md" not in fake.inputs["round2.diff"]
     assert writing.criteria().rstrip() in _prompt(fake, "round2-codex.out")
 
 
@@ -69,11 +69,11 @@ def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: P
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     head = _state(fake.state_dir)["rounds"][0]["head"]
-    limit = _limit(head, fake.state_dir / "round2.diff")
+    limit = _limit(head, fake.input_dir / "round2.diff")
     assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
     assert all(limit not in p for _, out, p in fake.prompts if not out.startswith("round2-"))
     # 渡した差分が前の head からのものなら、同じファイルを指す（差分を作り直さない）
-    assert not (fake.state_dir / "round2-since.diff").exists()
+    assert "round2-since.diff" not in fake.inputs
 
 
 def _resume(capsys, monkeypatch, state_dir: Path, wt: Path, *extra: str) -> Recording:
@@ -122,11 +122,11 @@ def test_issue_4285_a_full_round_shares_one_diff_since_the_last_head(wt: Path, t
     data[store.REVIEWED] = []
     store.write_object(store.state_pr(state_dir, PR).path, data)
     fake = _resume(capsys, monkeypatch, state_dir, wt, "--purpose", "design")
-    since = state_dir / "round2-since.diff"
-    limit = _limit(data["rounds"][0]["head"], since)
+    limit = _limit(data["rounds"][0]["head"], fake.input_dir / "round2-since.diff")
     assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
-    assert "fix0.txt" in since.read_text(encoding="utf-8") and "doc.md" not in since.read_text(encoding="utf-8")
-    assert "doc.md" in (state_dir / "round2.diff").read_text(encoding="utf-8")
+    since = fake.inputs["round2-since.diff"]
+    assert "fix0.txt" in since and "doc.md" not in since
+    assert "doc.md" in fake.inputs["round2.diff"]
 
 
 def test_issue_4285_major_without_impact_becomes_minor_and_is_not_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:

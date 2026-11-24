@@ -283,7 +283,7 @@ def permission_args(permission: Permission, tools: Optional[str] = None, readabl
     """権限ごとの、使える Tool と許可のモードの引数。権限の引数はここだけが持つ。
 
     `readable` が空でなければ、Tool をその場所と作業ディレクトリへ閉じ込め（`--restricted`・`--add-dir`）、許していない操作を
-    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろの依頼文を `--add-dir` の値と読ませない（#3955）。"""
+    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。"""
     if permission is Permission.FULL:
         return [*ACCEPT_EDITS, "--allowed-tools", FULL_TOOLS]
     if permission is Permission.TOOLS:

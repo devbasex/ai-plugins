@@ -11,6 +11,8 @@
   選び、外の名前を名指せば `UnknownParticipant`。修正担当が外なら起動の前に `FixerNotAllowed`（#3941。`declared_allowed`）
 - 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
   それでも起動できない担当があれば、提案やレビューを流す前に止める（#3907）
+- cross-review の席（`review_seats`）: 名指しが無く、`allowed` の中の相手役が `SEAT_COUNT` に満たなければ、足りない席を
+  claude の読むだけの起動（席の名前 `claude`・`claude-2`…）で埋める。席の名前からランタイムを引くのは `runtime_of` だけ（#3955）
 - claude の読むだけの起動（`read_only_launch`）と、その出力から本文を取り出す処理（`answer_text`）は cross-refactoring と
   cross-review の席の claude が共有する（#3955）
 """
@@ -21,7 +23,7 @@ import json
 import os
 from collections.abc import Collection, Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import agents, claude, training
@@ -36,6 +38,8 @@ FIXER = next(r["id"] for r in facts.rows(RUNTIMES) if r["executable"] == claude.
 REVIEW_TIMEOUT = "monitor.phase.review"
 # 読むだけの claude に許す Tool
 READ_TOOLS = "Read,Grep,Glob"
+# cross-review の 1 ラウンドの席の数（10 系の #1598 の利用者の決定。#3955）
+SEAT_COUNT = 2
 
 
 class UnknownParticipant(ValueError):
@@ -53,23 +57,88 @@ def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
         raise UnknownParticipant(f"相手役 {'・'.join(bad)} はランタイムの表に無いか、読むだけの起動を持たない（{'・'.join(able)}）")
 
 
+def _able(allowed: Optional[Collection[str]]) -> list[str]:
+    """ランタイムの表の行の順に、読むだけの起動の引数を持ち `allowed` の中にある名前（`assign` と `review_seats` の母集合）。"""
+    return [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r and (allowed is None or r["id"] in allowed)]
+
+
+def _fixer_allowed(fixer: str, allowed: Optional[Collection[str]]) -> None:
+    if allowed is not None and fixer not in allowed:
+        raise FixerNotAllowed(f"修正担当 {fixer} がランタイムの設定の allowed（{'・'.join(sorted(allowed))}）に無い")
+
+
+def _defaults(able: Sequence[str], fixer: str) -> tuple[str, ...]:
+    seats = set(facts.ids(RUNTIMES, default_seat=True))
+    return tuple(r for r in able if r in seats and r != fixer)
+
+
 def assign(requested: Sequence[str] = (), fixer: str = FIXER, allowed: Optional[Collection[str]] = None) -> tuple[str, ...]:
     """相手役を決める。`requested` が空なら表の既定の席から、読むだけの起動を持つものを修正担当を除いて並べる。
     `allowed`（`.ndf/runtimes.json` の `allowed`）を渡すと、その外の相手役を選ばず、名指せば `UnknownParticipant`。
     選べる相手役が残らなければ `UnknownParticipant`。修正担当 `fixer` が `allowed` の外なら `FixerNotAllowed`
     （どの担当も起動する前に止める）。"""
-    if allowed is not None and fixer not in allowed:
-        raise FixerNotAllowed(f"修正担当 {fixer} がランタイムの設定の allowed（{'・'.join(sorted(allowed))}）に無い")
-    able = [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r and (allowed is None or r["id"] in allowed)]
+    _fixer_allowed(fixer, allowed)
+    able = _able(allowed)
     if requested:
         _check_requested(requested, able)
         return tuple(dict.fromkeys(r for r in requested if r != fixer))
-    seats = set(facts.ids(RUNTIMES, default_seat=True))
-    chosen = tuple(r for r in able if r in seats and r != fixer)
+    chosen = _defaults(able, fixer)
     if not chosen:
         names = "・".join(sorted(allowed)) if allowed is not None else "—"
         raise UnknownParticipant(f"ランタイムの設定の allowed（{names}）に、既定の席の相手役が無い")
     return chosen
+
+
+class Seats(NamedTuple):
+    """cross-review の起動の前に決めた席。`added` は `allowed` のために足した claude の席、`reason` は足した理由、
+    `may_fill` は以後に席を埋めてよいか（名指しが 1 者なら偽）。"""
+
+    names: tuple[str, ...]
+    added: tuple[str, ...] = ()
+    reason: Optional[str] = None
+    may_fill: bool = True
+
+
+def runtime_of(seat: str) -> str:
+    """席の名前のランタイム（`claude-<数>` は claude、ほかはそのまま）。"""
+    head, _, num = seat.rpartition("-")
+    return FIXER if head == FIXER and num.isdigit() else seat
+
+
+def free_seat(taken: Collection[str]) -> str:
+    """`claude`・`claude-2`・`claude-3`… のうち `taken` に無い最初の席の名前。"""
+    n = 1
+    while (name := FIXER if n == 1 else f"{FIXER}-{n}") in taken:
+        n += 1
+    return name
+
+
+def review_seats(requested: Sequence[str], allowed: Optional[Collection[str]], fixer: str = FIXER) -> Seats:
+    """cross-review の起動の前の席。名指しがあれば重なりと修正担当を除いた名指し（埋めない。1 者なら以後も埋めない）。
+    無ければ既定の席に、`SEAT_COUNT` に足りない分の claude の席を続ける（選べる相手役が 0 でも投げない）。"""
+    _fixer_allowed(fixer, allowed)
+    able = _able(allowed)
+    if requested:
+        _check_requested(requested, able)
+        names = tuple(dict.fromkeys(r for r in requested if r != fixer))
+        return Seats(names, may_fill=len(names) != 1)
+    chosen = _defaults(able, fixer)
+    added: list[str] = []
+    while len(chosen) + len(added) < SEAT_COUNT:
+        added.append(free_seat((*chosen, *added)))
+    if not added:
+        return Seats(chosen)
+    reason = f"allowed の相手役 {len(chosen)}" + (f"（{'・'.join(chosen)}）" if chosen else "")
+    return Seats((*chosen, *added), tuple(added), reason)
+
+
+def fill_targets(seats: Sequence[str], unread: Collection[str]) -> tuple[str, ...]:
+    """起動し直しの後に claude で埋める席（`seats` の順）。結果の無い席が 0 か全員か、claude の席を含めば空
+    （全員なら precondition、claude の席を含めば incomplete_reviewers を呼び手が決める）。"""
+    missing = tuple(s for s in seats if s in unread)
+    if not missing or len(missing) == len(seats) or any(runtime_of(s) == FIXER for s in missing):
+        return ()
+    return missing
 
 
 # リポジトリのランタイムの設定（表 ndf-files の行）と形
@@ -116,10 +185,16 @@ def declared_allowed(main: Path) -> Optional[frozenset[str]]:
     return frozenset(raw["allowed"])
 
 
+def refused_runtimes(runtimes: Sequence[str]) -> dict[str, str]:
+    """起動を断られたランタイムから理由への対応（渡した順。断られなかったものは含まない）。同じランタイムは 1 回だけ確かめる。
+    学習の設定のバックアップが無いか期限切れなら、その場で確かめて記録する。"""
+    checked = {rt: training.ensure(rt) for rt in dict.fromkeys(runtimes)}
+    return {rt: why for rt, why in checked.items() if why is not None}
+
+
 def unready(runtimes: Sequence[str]) -> list[str]:
-    """起動できない担当の理由の並び（すべて起動できれば空）。学習の設定のバックアップが無いか期限切れなら、その場で確かめて記録する。"""
-    reasons = (training.ensure(rt) for rt in dict.fromkeys(runtimes))
-    return [why for why in reasons if why is not None]
+    """起動できない担当の理由の並び（すべて起動できれば空）。"""
+    return list(refused_runtimes(runtimes).values())
 
 
 def _sandbox_args(row: dict[str, Any]) -> list[str]:
@@ -144,11 +219,14 @@ def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: 
     return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
 
 
-def read_only_launch(system: str, workdir: Path, prompt: str, stem: Path, timeout: float, readable: Sequence[Path] = ()) -> agents.Launch:
+def read_only_launch(
+    system: str, workdir: Path, prompt: str, stem: Path, timeout: Optional[float] = None, readable: Sequence[Path] = ()
+) -> agents.Launch:
     """`READ_TOOLS` だけを許した、会話を残さない最小構成の `claude -p` の 1 回の起動（修正担当とは別のプロセスと会話）。
-    `readable` を渡すと、読める場所を `workdir` とそれらだけに限る（#3955）。"""
+    `readable` を渡すと、読める場所を `workdir` とそれらだけに限る（#3955）。`timeout` を省けば相手役の監視の上限。"""
     call = claude.ClaudeCall(system=system, permission=claude.Permission.TOOLS, tools=READ_TOOLS, readable=tuple(readable))
-    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), timeout)
+    limit = timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
+    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), limit)
 
 
 def answer_text(runtime: str, out: Path) -> str:

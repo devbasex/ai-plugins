@@ -426,3 +426,48 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path,
         "c.md#セクション c.md",
     ]
     assert sum("grep" in c for c in calls) == 1 and not any("cat-file" in c for c in calls)
+
+
+# ---------------------------------------------------------------- #3955: 埋めた席の記録と、前回の席への割り当て
+
+
+def test_issue_3955_filled_round_trips_and_skips_broken_items() -> None:
+    f = scope_decide.Filled("claude", "kiro", "failed: 落ちた")
+    assert f.record() == {"seat": "claude", "for": "kiro", "reason": "failed: 落ちた"}
+    none = scope_decide.Filled("claude-2", None, "allowed の相手役 0")
+    record = {scope_decide.FILLED: [f.record(), none.record(), "x", {"for": "kiro"}, {"seat": 1}]}
+    assert scope_decide.filled_of(record) == [f, none]
+    assert scope_decide.filled_of({scope_decide.FILLED: "x"}) == []
+    assert scope_decide.filled_of({}) == []
+
+
+def test_issue_3955_stand_ins_add_the_absent_reviewer() -> None:
+    record = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "r"}]}
+    assert scope_decide.stand_ins(record) == [frozenset({"codex"}), frozenset({"claude", "kiro"})]
+    before = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": None, "reason": "r"}]}
+    assert scope_decide.stand_ins(before) == [frozenset({"codex"}), frozenset({"claude"})]
+
+
+@pytest.mark.parametrize(
+    ("seats", "options", "want"),
+    [
+        (("codex", "kiro"), [{"codex"}, {"claude", "kiro"}], True),
+        (("codex", "claude"), [{"codex"}, {"claude", "kiro"}], True),
+        (("codex", "claude"), [{"kiro"}, {"claude", "codex"}], False),
+        (("codex", "kiro", "claude"), [{"codex"}, {"claude", "kiro"}], False),
+        ((), [], True),
+    ],
+)
+def test_issue_3955_assignable_uses_each_previous_seat_once(seats, options, want) -> None:
+    assert scope_decide.assignable(seats, options) is want
+
+
+def test_issue_3955_read_by_all_head_counts_a_filled_seat_only_with_stand_in() -> None:
+    rec = {"head": "h1", "verdict": fin.CONVERGED, "reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "r"}]}
+    state = {"rounds": [rec]}
+    for seats in (("codex", "kiro"), ("codex", "claude")):
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=seats, stand_in=True)) == "h1"
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "kiro"))) is None
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "claude"))) == "h1"
+    swapped = {**rec, "reviewers": ["kiro", "claude"], "filled": [{"seat": "claude", "for": "codex", "reason": "r"}]}
+    assert scope_decide.read_by_all_head({"rounds": [swapped]}, scope_decide.Basis(reviewers=("codex", "claude"), stand_in=True)) is None

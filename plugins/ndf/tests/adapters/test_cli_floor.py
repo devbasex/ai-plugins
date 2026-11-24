@@ -42,11 +42,11 @@ def test_a_missing_executable_passes():
     cli_floor.require("claude", "claude", {"PATH": "/nonexistent"})
 
 
-RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "dontAsk", "依頼")
+RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "dontAsk", "リクエスト")
 
 
 def _claude_at(monkeypatch, found):
-    """claude の実行ファイルを `/bin/claude` に見せ、`--version` を `found`（None は読めない）と答えさせる（子のプロセスを起動しない）。"""
+    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にする（子のプロセスを起動しない）。"""
     monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: "/bin/claude")
     monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
 
@@ -74,7 +74,7 @@ def test_issue_3955_common_floor_still_refuses_either_launch(monkeypatch):
 
 
 def test_issue_3955_unreadable_version_refuses_only_the_restricted_launch(monkeypatch):
-    """版を確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す。"""
+    """バージョンを確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す。"""
     _claude_at(monkeypatch, None)
     with pytest.raises(cli_floor.Unverified) as caught:
         cli_floor.require("claude", "claude", args=RESTRICTED)

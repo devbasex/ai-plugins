@@ -7,8 +7,8 @@
 - バージョンを読めない（出力の形が違う・起動できない・期限切れ）ときは標準エラーへ 1 行を出して起動を通す。
   CLI が無い・壊れているときの扱いは、今の起動の箇所が持つ
 - 表に無い名前（kiro・agy）は何も打たない
-- 行の `flag_floors`（引数の名前から下限）の引数を起動の引数 `args` が含めば、その下限と比べる。このときは版を確かめられなくても
-  起動を通さず `Unverified` を上げる（`--restricted` の読み取りの境界を頼れない版で起動しない。#3955）
+- 行の `flag_floors`（引数の名前から下限）の引数を起動の引数 `args` が含めば、その下限と比べる。このときはバージョンを確かめられなくても
+  起動を通さず `Unverified` を上げる（`--restricted` の読み取りの境界を頼れないバージョンで起動しない。#3955）
 """
 
 from __future__ import annotations
@@ -44,11 +44,12 @@ class TooOld(Exception):
 
 
 class Unverified(TooOld):
-    """引数ごとの下限（`flag_floors`）を当てる起動で、外部 CLI の版を確かめられない（見つからない・`--version` を読めない）。"""
+    """引数ごとの下限（`flag_floors`）を当てる起動で、外部 CLI のバージョンを確かめられない（見つからない・`--version` を読めない）。"""
 
     def __init__(self, name: str, path: Optional[str], floor: str) -> None:
-        Exception.__init__(self, f"{name} の版を確かめられない（{path or '実行ファイルが見つからない'}）。下限 {floor} 以上かを確かめられないので起動しない")
-        self.name, self.path, self.found, self.floor = name, path or "", "", floor
+        where = path if path is not None else "実行ファイルが見つからない"
+        Exception.__init__(self, f"{name} のバージョンを確かめられない（{where}）。下限 {floor} 以上かを確かめられないので起動しない")
+        self.name, self.path, self.found, self.floor = name, where, "", floor
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
@@ -139,7 +140,7 @@ def _flag_floor(row: Mapping[str, object], args: Sequence[str]) -> Optional[str]
 
 def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None, args: Sequence[str] = ()) -> None:
     """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。
-    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、版を確かめられなければ `Unverified`（#3955）。"""
+    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、バージョンを確かめられなければ `Unverified`（#3955）。"""
     if name not in facts.ids(TABLE):
         return
     row = facts.row(TABLE, name)
