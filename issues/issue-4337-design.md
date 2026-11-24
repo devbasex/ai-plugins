@@ -228,7 +228,7 @@ worker の `gate` は `stopped` にする。ステップの結果の `routes` �
 | --- | --- | --- | --- |
 | `not_run` | `design`・`manuscript` | 0（空の並び）。空でない `reason` が要る | — |
 | `self` | `plan`・`manuscript` | 0（空の並び）。空でない `reason` が要る | — |
-| `pass`・`fail` | `design`・`manuscript` | 1 回目が合格なら 1。不合格なら直して読み直した 2（両方を残す）。2 回目を行えなければ 1 と `reason` | 最後の `checks` の `verdict` |
+| `pass`・`fail` | `design`・`manuscript` | 1 回目が合格なら 1。不合格なら直して読み直した 2（両方を残す）。2 のときは先頭が `fail` でなければ欠け。2 回目を行えなければ 1 と `reason` | 最後の `checks` の `verdict` |
 
 **不合格の扱い**: `document-rebuild` の手順は、2 回目も不合格なら直さずに報告し、進めるかを承認する人が判断すると定める。コードは承認ゲートを足さず、判断の材料を後ろの工程へ渡すだけにする（I5）。
 
@@ -507,7 +507,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | 1・14（決定 7） | 設計のプランの差し込み `base` と、`rebuild` の `--base` が同じ値で、差し込み `remote` と `--remote` も同じ値である。ブランチ戦略の設定を読むのと `Git.remote()` を呼ぶのは 1 回ずつである | `rebuild_values` と `derived_locally` がそれぞれ読む |
 | 14 | `branch_strategy` の無いリポジトリで、2 つの工程とも、記録を書かずに `reason`・`setting`・`shape` を持つ行が返る | 既定の失敗を `RouteError` のまま上げる |
 | 15 | 設定があるリポジトリで、2 つの工程とも設定のコマンドが入る（今のテストを残す） | 設定より既定を先に使う |
-| I4 | `readers` に対象の文書の行が無い・`checks` の言い直しが無い・`checks` の数が合わない・`not_run` か `self` で理由が無いか `checks` が空でない・`plan` に `self` 以外・`design` に `self` の結果は `incomplete` になり、欠けた文書が `gaps` に出る。`design` と `manuscript` の `not_run`、`plan` と `manuscript` の `self`、設計書と原稿の `fail`（`checks` 2 つ）は欠けにならない | 記録を確かめない。実装計画にも読み手役の記録を求める。`not_run` と `self` に回数を求める |
+| I4 | `readers` に対象の文書の行が無い・`checks` の言い直しが無い・`checks` の数が合わない・`not_run` か `self` で理由が無いか `checks` が空でない・`checks` が 2 つで先頭が `pass`・`plan` に `self` 以外・`design` に `self` の結果は `incomplete` になり、欠けた文書が `gaps` に出る。`design` と `manuscript` の `not_run`、`plan` と `manuscript` の `self`、設計書と原稿の `fail`（`checks` 2 つ）は欠けにならない | 記録を確かめない。実装計画にも読み手役の記録を求める。`not_run` と `self` に回数を求める。2 つの `checks` で最後だけを見る |
 | I5 | `fail` の文書がある `ok` の報告は、どちらの工程の既定のコマンドでも `ok` になり、`items` に文書のパス・質問・理由を含む `reader-1` が入り、`warnings` にその文書が出る | `fail` を記録があるだけで通す。`items` に足さない |
 | I6 | worker の `items` が同じ `id` を 2 件持つ・`reader-1` を持つ・`id` を持たないとき、結果の `items` は全件が残り、`id` が重ならない。レビューの読み取り（`as_handed`）でも別々の項目になる | worker の `id` をそのまま使う |
 | I7・「worker の終わりの読み方」 | `ndf worker run` が `stopped` か `gate` なら、結果ファイルを読まずに `stopped` が返り、`kind`・`gaps` が載る。`ok` なら標準出力のセッション情報でなく結果ファイルの `items` が渡る | `gate` をそのまま返す。標準出力の `items` を足すべき内容として読む |

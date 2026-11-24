@@ -348,7 +348,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `design`・`manuscript` | `not_run` | `checks` が空の並びで、`reason` が空でない文字列 |
 | `plan`・`manuscript` | `self` | `checks` が空の並びで、`reason` が空でない文字列（読み手役の対象でないと判断した文書の種類） |
-| `design`・`manuscript` | `pass`・`fail` | `checks` が 1 か 2。最後の `checks` の要素の `verdict` が、記録の `verdict` と同じ。`checks` が 1 で記録の `verdict` が `fail` なら、記録の `reason` が要る |
+| `design`・`manuscript` | `pass`・`fail` | `checks` が 1 か 2。最後の `checks` の要素の `verdict` が、記録の `verdict` と同じ。`checks` が 2 なら先頭の要素の `verdict` が `fail`（2 回目は 1 回目が不合格のときだけ行う）。`checks` が 1 で記録の `verdict` が `fail` なら、記録の `reason` が要る |
 | `design` | `self` | 欠け（設計書は必ず読み手役の対象） |
 | `plan` | `self` 以外 | 欠け（実装計画は手順書で書いた担当が読み直す文書） |
 | どれでも | ほかの値 | 欠け |
@@ -404,7 +404,7 @@ plugins/ndf/
 | `start_point` | リモート追跡ブランチが読める。ベースブランチが `trunk`、リモートが `up` でも同じ（条件 5） | 登録済みでリモート追跡が無い・リモートが 1 つも無い → 手元 | 両方読めない・ほかの名前だけ → `Precondition`（偽の git） |
 | `changed_paths` | 日本語と空白を含むパス、消したファイルが出ない | 空の差分 | 終了コード 128 → `Precondition`。`merge-base` を打たない |
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
-| `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason` | 対象の行が無い・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
+| `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason` | 対象の行が無い・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`checks` 2 の先頭が `pass`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
 | `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件（I5） | `fail` が無ければ空 | — |
 | `contained` | 作業場所の通常ファイル | 作業場所の根そのものがリンクで、その先の通常ファイル | 末尾がリンク・`issues/` がリンクで作業場所の外を指す・途中のディレクトリがリンクで作業場所の中を指す・存在しない（どれも理由を返す） |
 | `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `launch_worker` を呼ばない（条件 10） | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
