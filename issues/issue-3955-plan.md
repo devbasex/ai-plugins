@@ -4,7 +4,7 @@
 
 - 要求仕様: [issue-3955-requirements.md](./issue-3955-requirements.md)（正は #3955 https://github.com/devbasex/ai-plugins/issues/3955 の本文）。受け入れ条件は番号で指す
 - 設計書: [issue-3955-design.md](./issue-3955-design.md)、詳細設計書: [issue-3955-design-detail.md](./issue-3955-design-detail.md)
-- 同じ移動を予定している計画: #4076（cross-review の指示に MVV を入れる課題 https://github.com/devbasex/ai-plugins/issues/4076 ）の実装計画 [issue-4076-plan.md](./issue-4076-plan.md) の U2 が、この計画の単位 1 と同じ移動（`drive.py` から `changes.py`・`settings.py` へ）を行う。先に main へ入ったほうの形に、後から入るほうが取り込みで合わせる
+- 同じ移動を予定している計画: #4076（cross-review の指示に MVV を入れる課題 https://github.com/devbasex/ai-plugins/issues/4076 ）の実装計画（実装の後に消し、確定仕様 [cross-review-project-mvv.md](../docs/specifications/cross-review-project-mvv.md) へ移した）の U2 が、この計画の単位 1 と同じ移動（`drive.py` から `changes.py`・`settings.py` へ）を行う。先に main へ入ったほうの形に、後から入るほうが取り込みで合わせる
 - モード: `standard`（要求仕様の「影響」の表で公開インタフェースが「変わる（互換あり）」で、触るファイルが 20 あるため、実装計画を省けない）
 
 ## 修正対象

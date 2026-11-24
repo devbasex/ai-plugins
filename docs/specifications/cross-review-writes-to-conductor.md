@@ -27,7 +27,7 @@
 本文は左の業務用語で書く。識別子は表・コードブロック・業務用語の初出の括弧書きにだけ置く。
 担当・スロット・起動結果の語は
 [起動結果](cross-review-launch-outcome.md#用語)と
-[利用可能な参加者だけで始める収束ループ](cross-review-participants-and-seats.md#用語)と同じ意味で使う。
+[利用可能な参加者だけで始める収束ループ](cross-review-participants-and-seats-10x.md#用語)と同じ意味で使う。
 
 | 業務用語 | 識別子 | 何を指すか |
 | --- | --- | --- |
