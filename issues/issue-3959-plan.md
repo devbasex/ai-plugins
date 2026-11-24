@@ -24,7 +24,7 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/contracts/workflow/stage-io.schema.json` | `$defs.stage-in` を文脈のスキーマへの参照（平らな object）にする |
-| `plugins/ndf/contracts/workflow/context.schema.json` | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`note_url`・`stopped_by` |
+| `plugins/ndf/contracts/workflow/context.schema.json` | `$defs.mvv_gate` に任意のキー `pr`・`holds`・`noted`・`note_url`・`stopped_by` |
 | `plugins/ndf/contracts/schemas/internal/mvv-validation.schema.json` | 種類 `mvv-review` の行に任意の欄 `defer`（`needs_user`・`filed`・`not_applicable`） |
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
@@ -33,6 +33,7 @@
 | `plugins/ndf/src/ndf/progress/run.py` | `_running_move`・`_consume`（区分の外の `service:mvv` の回答を数えない） |
 | `plugins/ndf/src/ndf/progress/gate/records.py` | `approved_head`（区分の外の `service:mvv` の回答を承認にしない） |
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節） |
+| `plugins/ndf/src/ndf/progress/gate/entry.py` | `present`（承認資料を書く前に PR の今の head を読み、判定の head と照らせるようにする） |
 | `plugins/ndf/src/ndf/progress/gate/checks.py` | `MvvFacts.review_holds`・`check_review_holds`・`refusals`・`judgeable`・`may_skip`・`note`・`CHECKS_BY_GATE` |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `--machine`・`_mvv_inputs`・`_env_inputs`・`_mvv_cite` |
 | `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`・`snapshot_facts`・`review_prs`・`failure_text`・`GATE_STEPS`・`GATE_STAGES`。`base_facts` は消す |
@@ -200,12 +201,15 @@
 
 - **対象ファイル:**
   - `plugins/ndf/src/ndf/progress/gate/asking.py`（`mvv_lines`・`material`）
+  - `plugins/ndf/src/ndf/progress/gate/entry.py`（`present` が資料を書く前に PR の今の head を読む）
+  - `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`（`gate_outcome` の出力に判定した PR の番号 `pr`）と `plugins/ndf/contracts/workflow/context.schema.json`（`$defs.mvv_gate` の `pr`）
   - `plugins/ndf/tests/progress/gate/test_gate_present.py`
 - **変更内容:**
   - 詳細設計書の「手順書」の「プランの経路の承認資料の生成」
   - プランの承認資料（`asking.material`）に今回の判定・`why`・保留の欄を載せる
   - 判定は文脈でなく、待っている工程の判定のステップの `step_recorded` の `outputs.mvv_gate` から読む
   - `holds` が `null`（Task 4 の保留なしの経路）でも、配列（Task 5 の後）でも資料を組む
+  - 判定の `pr`・`head` が質問の PR と資料を書く時点の head と違えば、前の判定を載せず「今の head の判定はまだ無い」と載せる
 - **満たす受け入れ条件:** 3（プランの経路の承認資料）
 - **進め方:** 失敗するテスト（承認資料に「MVV 判定」の節が無い）→ 通す最小実装 → 整理
 
