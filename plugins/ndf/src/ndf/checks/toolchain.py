@@ -286,11 +286,15 @@ class _Checker:
         return found
 
     def _tool(self, rel: str, tool: ToolUse, ok: set[str]) -> list[Finding]:
-        if tool.action == SETUP_UV:
-            if "version" not in tool.values:
-                return [self.finding(rel, tool.line, f"setup-uv に version（{self.uv}）が無い")]
-            value, line = tool.values["version"]
-            return [] if value == self.uv else [self.finding(rel, line, f"setup-uv の version {value} が {self.uv} と違う")]
+        return self._setup_uv(rel, tool) if tool.action == SETUP_UV else self._setup_python(rel, tool, ok)
+
+    def _setup_uv(self, rel: str, tool: ToolUse) -> list[Finding]:
+        if "version" not in tool.values:
+            return [self.finding(rel, tool.line, f"setup-uv に version（{self.uv}）が無い")]
+        value, line = tool.values["version"]
+        return [] if value == self.uv else [self.finding(rel, line, f"setup-uv の version {value} が {self.uv} と違う")]
+
+    def _setup_python(self, rel: str, tool: ToolUse, ok: set[str]) -> list[Finding]:
         if "python-version" not in tool.values:
             # python-version-file の参照先・指定なしの既定は python_ci の値と比べられないので、書いた値を求める
             return [self.finding(rel, tool.line, f"setup-python に python-version（{sorted(ok)} のどれか）が無い")]
