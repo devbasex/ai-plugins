@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -94,6 +95,14 @@ def _stage_v1(stage: Row) -> Row:
     return {**stage, **{k: ["product_version" if name == "version" else name for name in names] for k, names in keys.items()}}
 
 
+def _loop_event_v1(row: Row) -> Row:
+    """`at` は UNIX 時刻の秒で、文字列の `version` はリリースした製品のバージョンだった。"""
+    out = {"product_version" if k == "version" and isinstance(v, str) else k: v for k, v in row.items()}
+    if "at" in out and type(out["at"]) in (int, float):
+        out["at"] = stamp(out["at"])
+    return out
+
+
 KINDS: dict[str, Kind] = {
     "usage": Kind(contracts.schema_path("internal/usage"), (dict,)),
     "mvv-signals": Kind(contracts.schema_path("internal/mvv-signals"), (_signal_v1,), marker="mvv_version"),
@@ -101,6 +110,7 @@ KINDS: dict[str, Kind] = {
     "context-records": Kind(contracts.schema_path("internal/context-records"), (_decision_v1,)),
     "context": Kind(CONTEXT, (_context_v1,)),
     "stage-snapshot": Kind(contracts.schema_path("internal/stage-snapshot"), (_snapshot_v1,)),
+    "loop-event": Kind(contracts.schema_path("internal/loop-event"), (_loop_event_v1,)),
 }
 
 
@@ -118,6 +128,22 @@ def read_record(kind: str, raw: Mapping[str, Any]) -> Row:
     row = migrate(kind, raw)
     _require(kind, row)
     return row
+
+
+def read_line(kind: str, line: str) -> Row:
+    """JSONL の 1 行を読む。JSON として読めない・辞書でない行も `InternalError`（`invalid`）。"""
+    return read_record(kind, parse_line(line))
+
+
+def parse_line(line: str) -> dict[str, Any]:
+    """JSONL の 1 行を辞書にする。JSON として読めない・辞書でないなら `InternalError`（`invalid`）。"""
+    try:
+        raw = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
+    if not isinstance(raw, dict):
+        raise InternalError("invalid", "辞書でない")
+    return raw
 
 
 def write_record(kind: str, row: Mapping[str, Any]) -> Row:
@@ -193,7 +219,8 @@ def _validator(schema: str) -> Draft202012Validator:
 
 
 def _require(kind: str, row: Row) -> None:
-    """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（入力の値もキーも含まない）。"""
+    """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（キーが値を持つ辞書と、スキーマに無い
+    キーがあるため、行の値もキーも含まない）。"""
     errors = {_broken(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
@@ -217,8 +244,11 @@ def names() -> Mapping[str, Mapping[str, Any]]:
 
 
 def stamp(seconds: float) -> str:
-    """秒（UNIX 時刻）→ `at` の文字列（UTC・マイクロ秒まで）。"""
-    return datetime.fromtimestamp(seconds, UTC).isoformat(timespec="microseconds")
+    """秒（UNIX 時刻）→ `at` の文字列（UTC・マイクロ秒まで）。時刻にできない数なら `InternalError`。"""
+    try:
+        return datetime.fromtimestamp(seconds, UTC).isoformat(timespec="microseconds")
+    except (ValueError, OverflowError, OSError) as exc:
+        raise InternalError("invalid", "秒を時刻にできない") from exc
 
 
 def epoch(at: str) -> float:

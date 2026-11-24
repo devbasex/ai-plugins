@@ -254,7 +254,13 @@ def _run(a: argparse.Namespace) -> dict[str, Any]:
     a.cwd = Path(os.path.realpath(a.cwd if a.cwd is not None else Path.cwd()))
     try:
         return a.handler(a)
-    except (select_decide.CandidateError, sprint_decide.SprintError, store.StoreError, acceptance_decide.AcceptanceError) as exc:
+    except (
+        select_decide.CandidateError,
+        sprint_decide.SprintError,
+        store.StoreError,
+        rec.RecordError,
+        acceptance_decide.AcceptanceError,
+    ) as exc:
         return result.stopped(TOOL, ctl.INVALID, str(exc))
     except Timeout as exc:
         return result.stopped(TOOL, "store_in_use", f"開発ループの記録の排他を取れない: {exc}")

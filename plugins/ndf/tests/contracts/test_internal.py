@@ -21,6 +21,8 @@ USAGE = {"at": AT, "caller": usage.SUBAGENT, "agent_id": "a", "transcript": "/t.
 SIGNAL = {"at": AT, "kind": md.OVERRIDE_PASS, "repo": "/m", "state": "s", "gate": "g", "pr": 1}
 VALIDATION = md.judged_row("k", md.FOLLOW, AT, "/m", {"usd": None, "reasons": ["r"], "boundary": [], "basis": ["Value 1"]})
 DECISION = {**cr.record_row("s1", "#1", APPLIED, cr.MARK_HANDOFF, None), "at": AT}
+ANSWERED = {"kind": "gate-answered", "lap": 2, "pr": 4301, "answer": "approved", "head": "abc", "note": ""}
+LEASE = {"kind": "lease-taken", "session": "s1", "until": 1795400600.0}
 # 旧いプラグインの hook が書いた行（バージョン 0）
 OLD_DECISION = {
     **DECISION,
@@ -96,6 +98,14 @@ def kind_of(exc: pytest.ExceptionInfo[internal.InternalError]) -> str:
         ("context", {"pace": "auto", "version": "11.0.23"}, {"pace": "auto", "product_version": "11.0.23"}),
         ("context", {"pace": "auto"}, {"pace": "auto"}),
         ("stage-snapshot", OLD_SNAPSHOT, SNAPSHOT),
+        ("loop-event", {"at": 1795400000.123456, **ANSWERED}, {"at": "2026-11-23T02:13:20.123456+00:00", **ANSWERED}),
+        ("loop-event", {"at": 1795400000, **LEASE}, {"at": "2026-11-23T02:13:20.000000+00:00", **LEASE}),
+        # バージョン 0 の出荷のイベントの `version` は製品のバージョン（文字列）で、形のバージョンではない
+        (
+            "loop-event",
+            {"at": 1795400000.0, "kind": "version-shipped", "lap": 2, "version": "11.0.23"},
+            {"at": "2026-11-23T02:13:20.000000+00:00", "kind": "version-shipped", "lap": 2, "product_version": "11.0.23"},
+        ),
     ],
 )
 def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
@@ -163,6 +173,13 @@ def test_migrate_runs_the_steps_from_the_version_of_the_row(contracts_copy, monk
     assert kind_of(exc) == "precondition"
 
 
+@pytest.mark.parametrize("line", ["{not json", "[1]", "1", "null"])
+def test_read_line_refuses_a_line_that_is_not_an_object(line):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.read_line("usage", line)
+    assert kind_of(exc) == "invalid"
+
+
 # ---------------------------------------------------------------- 型の確かめ
 
 
@@ -188,25 +205,21 @@ def test_write_refuses_a_row_that_does_not_fit(row):
     assert kind_of(exc) == "invalid"
 
 
-def test_the_refusal_does_not_show_the_values():
-    with pytest.raises(internal.InternalError) as exc:
-        internal.write_record("usage", {**USAGE, "agent_id": ["sk-test-secret"], "usage": "sk-test-secret"})
-    assert "sk-test-secret" not in str(exc.value) and "agent_id" in str(exc.value)
-
-
 @pytest.mark.parametrize(
-    "extra",
+    ("change", "where"),
     [
-        {"sk-test-secret": 1},
-        {"model_usage": {"sk-test-secret": 1}},
-        {"model_usage": {"m": {"sk-test-secret": "x"}}},
-        {"usage": {**TOKENS, "sk-test-secret": 1}},
+        ({"agent_id": ["sk-test-secret"]}, "properties/agent_id/type"),
+        ({"usage": "sk-test-secret"}, "properties/usage/oneOf"),
+        ({"at": "sk-test-secret"}, "properties/at/format"),
+        ({"sk-test-secret": 1}, "additionalProperties"),
+        ({"model_usage": {"sk-test-secret": 1}}, "properties/model_usage/additionalProperties/type"),
+        ({"model_usage": {"m": {"sk-test-secret": -1}}}, "properties/model_usage/additionalProperties/additionalProperties/minimum"),
     ],
 )
-def test_the_refusal_does_not_show_the_keys_of_the_input(extra):
+def test_the_refusal_shows_the_place_in_the_schema_and_not_the_row(change, where):
     with pytest.raises(internal.InternalError) as exc:
-        internal.write_record("usage", {**USAGE, **extra})
-    assert "sk-test-secret" not in str(exc.value)
+        internal.write_record("usage", {**USAGE, **change})
+    assert "sk-test-secret" not in str(exc.value) and f"{where}（" in str(exc.value)
 
 
 def test_the_refusal_names_the_missing_field():
@@ -253,6 +266,13 @@ def test_epoch_takes_back_the_stamp_to_the_microsecond(seconds):
 def test_stamp_keeps_the_order_within_a_second():
     assert internal.stamp(1795400000.1) < internal.stamp(1795400000.100001)
     assert internal.stamp(1795400000.0).endswith(".000000+00:00")
+
+
+@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), 1e300])
+def test_stamp_refuses_seconds_that_are_not_a_time(seconds):
+    with pytest.raises(internal.InternalError) as exc:
+        internal.stamp(seconds)
+    assert kind_of(exc) == "invalid"
 
 
 @pytest.mark.parametrize("at", ["2026-11-23T10:00:00+09:00", "2026-11-23T01:00:00", "2026-02-30T00:00:00Z", "読めない"])
