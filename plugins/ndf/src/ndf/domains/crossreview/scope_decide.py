@@ -99,28 +99,33 @@ class Basis(NamedTuple):
     mvv: Optional[str] = None
 
 
+def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
+    """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
+    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
+    そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
+    if basis.base is not None and record.get(BASE) != basis.base:
+        return False
+    if basis.reviewers is not None and not set(basis.reviewers) <= set(store.list_of(record, REVIEWERS)):
+        return False
+    if basis.focus is not None and store.list_of(record, FOCUS) != list(basis.focus):
+        return False
+    if basis.mvv is None:
+        return True
+    if _known(_mvv_record(record).get(MVV_ID)) != basis.mvv:
+        return False
+    return not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+
+
 def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Optional[str]:
     """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
-    読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。`basis` の値があれば、そのラウンドの
-    比較基点（`BASE`）が違う・そのラウンドを読んだ相手役（`REVIEWERS`）に無い相手役がいる・そのラウンドの重点（`FOCUS`）か
-    MVV（`MVV`）が違うときは None（PR の全差分を今回の相手役と重点と MVV で読み直す）。承認済みの MVV があるのに、そのラウンドの
-    head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも None（#4090）。"""
+    読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。そのラウンドの記録が `basis` に合わなければ
+    （`_matches`）None（PR の全差分を今回の相手役と重点と MVV で読み直す）。"""
     for r in reversed(store.list_of(state, store.ROUNDS)):
         if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
             continue
         head = r.get("head")
-        if basis.base is not None and r.get(BASE) != basis.base:
-            return None
-        if basis.reviewers is not None and not set(basis.reviewers) <= set(store.list_of(r, REVIEWERS)):
-            return None
-        if basis.focus is not None and store.list_of(r, FOCUS) != list(basis.focus):
-            return None
-        if basis.mvv is not None and _known(_mvv_record(r).get(MVV_ID)) != basis.mvv:
-            return None
-        if basis.mvv is not None and basis.mvv.startswith(_APPROVED) and r.get(fin.MVV_CHECKED) is not True:
-            return None
-        return head if isinstance(head, str) and head else None
+        return head if _matches(r, basis) and isinstance(head, str) and head else None
     return None
 
 
