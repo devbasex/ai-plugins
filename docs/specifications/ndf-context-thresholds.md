@@ -66,7 +66,7 @@ supervisor のスイッチポイント、Codex の扱いは含まない。
 | `hooks/dispatch.py` | `deny_key` が `none` の行の拒否を数えず、案内へ下げない。`sole` の付いた拒否があれば、まとめた判定の文をその文だけにする |
 | `hooks/counter.py` の `Counter.remember`・`Counter.take` | PreToolUse が読んだ文脈の量を `tool_use_id` ごとに覚え、同じ呼び出しの PostToolUse が取り出す |
 | guard `script-chain`（`hooks/guards/chain.py`） | 引継ぎに要る `ndf` のコマンドだけをつないだ Bash を、`context_limit.handoff_bash` で見分けて止めない |
-| 中継のラッパー | 起動の時に `thresholds(environ, contracts.limits.value).limit` を 1 度読み、子の文脈の量がそれ以上で子が静かになったら、1 セグメントに 1 度、子を止めて `HANDOVER_PROMPT` で起動し直す |
+| 中継のラッパー | 起動の時に `thresholds(environ, contracts.limits.value).limit` を 1 度読み、子の文脈の量がそれ以上で子が静かになり、バックグラウンドの作業が残っていないと確かめたら、1 セグメントに 1 度、子を止めて `HANDOVER_PROMPT` で起動し直す |
 | `ndf relay context resolve`・`record`（`cli_context.py`） | `thresholds(os.environ, tables.policy_value)` の値を出す・判定の記録の行へ書く |
 
 ### 常に成り立つ条件
