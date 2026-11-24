@@ -1,6 +1,6 @@
 """収束ループの駆動（サブコマンド `ndf cross-review run`）。1 回の起動でラウンドを上限まで回す。
 
-始める前に担当すべてを起動できるか（学習の設定のバックアップ）を確かめ、できない担当があれば `precondition` で止める（#3907）。
+始める前に担当すべてを起動できるか（学習の設定のバックアップ）を確かめ、修正担当か名指し 1 者が断られれば `precondition` で止め、ほかの断られた相手役の席は claude で埋める（#3907・#3955）。席の起動と埋めは `seats` が持つ。
 
 1 ラウンドは次の順に進む:
 
@@ -11,7 +11,8 @@
    指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（起動の始めに 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
    コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
    同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
-   ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
+   ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）。起動し直しても結果の無い席が claude 以外だけなら、その席を
+   claude の読むだけの起動で埋め、2 者の指摘で判定する。埋めた席は以後のラウンドも座り続ける（`participants.fill_targets`。#3955）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
    無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は、修正担当へ渡さず、収束も止めず、
@@ -30,15 +31,16 @@ merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そ
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import facts, internal, limits
+from ndf.contracts import internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
@@ -50,6 +52,7 @@ from ndf.domains.crossreview import (
     resume_decide,
     round_scope,
     scope_decide,
+    seats,
     settings,
     store,
     threads,
@@ -57,6 +60,7 @@ from ndf.domains.crossreview import (
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
+from ndf.domains.crossreview.scope_decide import Filled
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import mvv
 
@@ -73,6 +77,10 @@ RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原
 CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
 # 出た・消えたときに、指摘が同じでも PR の記録を書き直す注意
 MVV_NOTICES = (RECORDS_UNWRITTEN, CAUSE_UNSAVED)
+# 相手役へ渡す資料を置く、実行ごとのディレクトリの名前の頭（後ろは mkdtemp のランダムな文字列。#3955）
+INPUT_PREFIX = "review-input-"
+# `--base` からの全差分のファイルの名前の後ろ（`round<n>-full.diff`。前の head からの差分を渡すラウンドで、根拠の確かめと埋めた席が使う）
+FULL_DIFF_SUFFIX = "-full.diff"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -139,6 +147,10 @@ class _Run:
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
     documents: bool = False  # PR の全差分に Markdown のファイルがあるか（文書の基準を指示に入れる。#4285）
+    # 今の席・この実行で座っている埋めた席・この実行の資料のディレクトリ（#3955）
+    seats: list[str] = field(default_factory=list)
+    filled: list[Filled] = field(default_factory=list)
+    input_dir: Optional[Path] = None
 
     @property
     def mvv_items(self) -> tuple[str, ...]:
@@ -148,6 +160,12 @@ class _Run:
     def round_stem(self, round_no: int, suffix: str) -> Path:
         """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
         return self.cfg.state_dir / f"round{round_no}{suffix}"
+
+    def input_path(self, round_no: int, suffix: str) -> Path:
+        """相手役へ渡す資料のパス。資料のディレクトリは実行ごとに新しく作り、既存のものを使わない（#3955 の決定 2）。"""
+        if self.input_dir is None:
+            self.input_dir = Path(tempfile.mkdtemp(prefix=INPUT_PREFIX, dir=self.cfg.state_dir))
+        return self.input_dir / f"round{round_no}{suffix}"
 
     def note(self, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
         """過程へ 1 行足す。`warning` があれば先に注意へも足す。"""
@@ -280,6 +298,8 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         mvv_branch=based.branch,
         sent=synced.remote,
         clean=clean,
+        seats=list(cfg.reviewers),
+        filled=list(cfg.prefilled),
     )
     if rebound:
         _save(run)
@@ -435,7 +455,7 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
     引数に載せずファイルのパスだけをプロンプトへ書く（PR 3944 の r6-5）。"""
     if not lines:
         return None
-    path = run.round_stem(round_no, REMARKS_SUFFIX)
+    path = run.input_path(round_no, REMARKS_SUFFIX)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -465,62 +485,62 @@ def _review_prompt(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[
     return "\n".join(lines)
 
 
-def _reviewer_findings(status: agents.AgentStatus, out: Path) -> Optional[list[dict[str, Any]]]:
-    if status.state != agents.AgentState.DONE:
-        return None
-    try:
-        text = out.read_text(encoding="utf-8", errors="replace")
-    except OSError:  # noqa: NDF401 ファイル: 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
-        return None
-    return participants.findings_of(text)
+class _Reviewed(NamedTuple):
+    """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。"""
+
+    raised: list[dict[str, Any]]
+    unread: dict[str, seats.Unread]
+    silent: bool
 
 
-def _unread_hint(agent: str, cause: str, err: Path) -> str:
-    """読めなかった相手役 1 人の理由と直し方（precondition の詳細の 1 行）。"""
-    row = facts.row(participants.RUNTIMES, agent)
-    if cause.startswith(agents.SANDBOX_FAILED):
-        fix = (
-            "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、外で隔離された環境で打つ"
-            "（`unshare -Ur true` が通らない環境では NDF がサンドボックスを外して起動する）"
-        )
-    else:
-        fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
-    return f"- {agent}: {cause}。{fix}（標準エラー: {err}）"
-
-
-def _launch_reviewers(
-    run: _Run, round_no: int, prompt: str, launch: Launcher, reviewers: Sequence[str], suffix: str = ""
-) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    """相手役を並べて起動し、指摘と、読めなかった相手役ごとの理由と直し方を返す。読めなかった相手役は注意と過程に載せる。"""
-    cfg = run.cfg
-    specs = [participants.review_launch(a, cfg.worktree, prompt, run.round_stem(round_no, f"-{a}{suffix}")) for a in reviewers]
-    with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
-        statuses = list(pool.map(launch, specs))
-    raised: list[dict[str, Any]] = []
-    unread: dict[str, str] = {}
-    again = "（起動し直した）" if suffix else ""
-    for spec, status in zip(specs, statuses):
-        sandbox = agents.sandbox_failed(spec.paths)
-        found = None if sandbox is not None else _reviewer_findings(status, spec.paths.out)
-        if found is None:
-            cause = sandbox if sandbox is not None else f"{status.state}: {status.detail}"
-            warning = f"round {round_no} の相手役 {spec.agent} が差分を読めなかった{again}（{cause}）"
-            run.note(round_no, spec.agent, f"回答無し{again}（{'sandbox' if sandbox is not None else status.state}）", warning)
-            unread[spec.agent] = _unread_hint(spec.agent, cause, spec.paths.err)
-            continue
-        run.note(round_no, spec.agent, f"指摘 {len(found)} 件{again}")
-        raised += [{**f, "by": spec.agent} for f in found]
-    return raised, unread
-
-
-def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    """相手役を並べて起動し、読めなかった相手役は同じラウンドで 1 度だけ起動し直す（#3941）。指摘と、起動し直しても
-    読めなかった相手役ごとの理由と直し方を返す。"""
-    raised, unread = _launch_reviewers(run, round_no, prompt, launch, run.cfg.reviewers)
-    if unread:
-        more, unread = _launch_reviewers(run, round_no, prompt, launch, tuple(unread), RETRY_SUFFIX)
+def _review_round(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], launch: Launcher) -> _Reviewed:
+    """今の席を並べて起動し、結果の無い claude 以外の席だけを同じラウンドで 1 度だけ起動し直す（#3941）。それでも結果の無い席が
+    どれも claude 以外なら、その席を claude の読むだけの起動で埋める（`participants.fill_targets`。#3955）。"""
+    prompt = _review_prompt(run, round_no, prep, remarks)
+    required = _prompt_diffs(run, prep)
+    raised, unread = seats.launch_reviewers(run, round_no, dict.fromkeys(run.seats, prompt), required, launch)
+    retry = [s for s in unread if participants.runtime_of(s) != participants.FIXER]
+    if retry:
+        more, again = seats.launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
         raised += more
-    return raised, unread
+        merged = {**again, **{s: unread[s] for s in unread if s not in retry}}
+        unread = {s: merged[s] for s in run.seats if s in merged}
+    if len(unread) == len(run.seats):
+        return _Reviewed(raised, unread, True)
+    targets = participants.fill_targets(run.seats, unread)
+    if not targets:
+        return _Reviewed(raised, unread, False)
+    more, left = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
+    return _Reviewed(raised + more, left, False)
+
+
+def _fill_seats(
+    run: _Run, round_no: int, prep: _Prepared, remarks: Optional[Path], targets: Mapping[str, seats.Unread], launch: Launcher
+) -> tuple[list[dict[str, Any]], dict[str, seats.Unread]]:
+    """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。埋めた claude はこの実行で初めて加わるので、前回の情報を含まない
+    リクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。"""
+    full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
+    fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
+    prompt = _review_prompt(run, round_no, fresh, remarks)
+    prompts: dict[str, str] = {}
+    for absent, why in targets.items():
+        prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
+    return seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch)
+
+
+def _prompt_diffs(run: _Run, prep: _Prepared) -> tuple[Path, ...]:
+    """相手役のリクエスト（`_review_prompt`）が読ませる差分のファイル。ラウンドの差分と、文書を含む PR で前のラウンドがあれば
+    `criteria_decide.document_block` が読ませる前の head からの差分（PR 4461 の r2-2）。"""
+    since = (prep.previous.diff,) if run.documents and prep.previous is not None else ()
+    return tuple(dict.fromkeys((prep.diff, *since)))
+
+
+def _full_diff(run: _Run, round_no: int, prep: _Prepared) -> Path:
+    """`--base` からの全差分のファイル。根拠の確かめのために同じラウンドで書いてあれば、それを使う（PR 4461 の r1-2）。"""
+    target = run.last_target
+    if target is not None and target.full_diff is not None and (target.merge_base, target.head) == (prep.base, prep.head):
+        return target.full_diff
+    return _write_diff(run, round_no, FULL_DIFF_SUFFIX, prep.base, prep.head)
 
 
 # --- 記録 -------------------------------------------------------------------------------
@@ -691,7 +711,7 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 def _write_diff(run: _Run, round_no: int, suffix: str, base: str, head: str) -> Path:
     """`base...head` の差分をラウンドのファイルへ書く（`base` と `head` が同じなら空のファイル）。"""
-    path = run.round_stem(round_no, suffix)
+    path = run.input_path(round_no, suffix)
     # 同じ SHA どうしの差分は空なので Git を起動しない
     path.write_text("" if base == head else changes.review_diff(run.g, base, head), encoding="utf-8")
     return path
@@ -716,12 +736,24 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
         since = _write_diff(run, round_no, "-since.diff", prev, head)
     previous = None if prev is None else criteria_decide.Previous(prev, since)
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
+    if full_diff is None and _reads_full_diff(run, merge_base, head):
+        # 根拠の確かめが全差分を読むので、ここで 1 回だけファイルへ書き、席を埋めるときにも使う（Git を 2 回起動しない。PR 4461 の r1-2）
+        try:
+            full_diff = _write_diff(run, round_no, FULL_DIFF_SUFFIX, merge_base, head)
+        except (git.GitError, OSError):  # 書けなければ確かめが git から読み直し、失敗を注意に載せる
+            full_diff = None
     run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
     if head == run.sent or criteria_decide.approved(run.snapshot) is None:
         _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     else:
         _check_unsent(run, head)
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous)
+
+
+def _reads_full_diff(run: _Run, merge_base: str, head: str) -> bool:
+    """このラウンドの根拠の確かめが `merge_base...head` の全差分を Git から読むか（承認済みの MVV があり、同じ対象をまだ確かめていない）。"""
+    snap = criteria_decide.approved(run.snapshot)
+    return snap is not None and snap.version is not None and (merge_base, head, snap.identity) not in run.citations
 
 
 def _merge_base(run: _Run, head: str) -> str:
@@ -731,9 +763,9 @@ def _merge_base(run: _Run, head: str) -> str:
     return run.merge_bases[head]
 
 
-def _basis(run: _Run, head: str) -> scope_decide.Basis:
-    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値）。"""
-    return scope_decide.Basis(_merge_base(run, head), run.cfg.reviewers, run.cfg.settings.focus, run.mvv)
+def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
+    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -764,27 +796,33 @@ def _detach_revived(run: _Run) -> None:
 
 def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
     """状態ファイルに残すラウンドの記録。判定と修正の結果は、決まってから呼び手が足す。"""
-    return {
+    record = {
         "round": round_no,
         "head": prep.head,
         scope_decide.BASE: prep.base,
-        scope_decide.REVIEWERS: list(run.cfg.reviewers),
+        scope_decide.REVIEWERS: list(run.seats),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
         fin.MVV_CHECKED: _mvv_checked(run, prep.head),
         "scope": prep.scope.kind,
     }
+    if run.filled:
+        # 埋めた後のすべてのラウンドに書く（#3955）
+        record[scope_decide.FILLED] = [f.record() for f in run.filled]
+    return record
 
 
 def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    prompt = _review_prompt(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)))
-    raised, unread = _review(run, round_no, prompt, launch)
-    if len(unread) == len(run.cfg.reviewers):
-        # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
-        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
+    got = _review_round(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)), launch)
+    raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
+    if got.silent:
+        # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く。
+        # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
+        local = [u.local for u in got.unread.values()]
+        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
     _detach_revived(run)
@@ -795,7 +833,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         record["verdict"] = fin.INCOMPLETE_REVIEWERS
         names = "・".join(unread)
         run.warnings.append(
-            f"round {round_no} は相手役 {names} が起動し直しても差分を読めなかったので、収束に数えずに止める:\n"
+            f"round {round_no} は相手役 {names} が起動し直しても（claude の席は起動し直さない）差分を読めなかったので、収束に数えずに止める:\n"
             + "\n".join(unread.values())
         )
         return fin.INCOMPLETE_REVIEWERS
@@ -827,7 +865,8 @@ def _reusable(run: _Run) -> bool:
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
     head = run.g.rev_parse("HEAD")
-    if scope_decide.read_by_all_head(run.data, _basis(run, head)) != head:
+    # 前回埋めた席を欠けた相手役の代わりにも数える（名指しが 1 者なら数えない。#3955）
+    if scope_decide.read_by_all_head(run.data, _basis(run, head, run.cfg.may_fill)) != head:
         return False
     open_, handed = run.journal.pending(run.cfg.handed)
     return not open_ and not handed
@@ -850,6 +889,16 @@ def drive(
         # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
     run = _start(cfg, reader_for, clean)
+    try:
+        return _drive_rounds(run, launch, reader_for)
+    finally:
+        # 止まったときも資料を消す。消せなくても結果は変えない（次の実行は新しいディレクトリを作る。#3955）
+        if run.input_dir is not None:
+            shutil.rmtree(run.input_dir, ignore_errors=True)
+
+
+def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) -> Outcome:
+    cfg = run.cfg
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)
@@ -858,12 +907,11 @@ def drive(
         # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）
         n = len(store.list_of(run.data, store.ROUNDS))
         run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
+        seats.reused_warnings(run)
         return _summary(run, fin.CONVERGED, n, reused=True)
     run.remarks = [*prior.comments, *_read_reviews(prs, run.warnings)]
-    blocked = participants.unready((*cfg.reviewers, cfg.fixer))
-    if blocked:
-        # レビューを流す前に止める。断られた担当を相手役が読めなかったと数えない（#3907）
-        raise DriveStopped("precondition", "担当を起動できない: " + " / ".join(blocked))
+    run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
+    seats.fill_refused(run)
     final, done = fin.MAX_ROUNDS, 0
     first = len(store.list_of(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):

@@ -12,7 +12,7 @@ from ndf.domains.crossreview import criteria_decide, drive, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, sh
-from .test_crossreview_run import PR, Recording, _run, _state
+from .test_crossreview_run import FAIL, PR, Recording, _run, _state
 
 IMPACT = "承認する人が、何を承認するのかを取り違える"
 MAJOR = {"text": "「語の決まり」が読み取れない", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
@@ -60,7 +60,7 @@ def test_issue_4285_documents_are_read_from_the_whole_diff(repos: Repos, wt: Pat
     """2 ラウンド目の差分に Markdown が無くても（修正は fix0.txt だけ）、PR の全差分にあれば基準を渡す。"""
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
-    assert ".md" not in (fake.state_dir / "round2.diff").read_text(encoding="utf-8")
+    assert ".md" not in fake.inputs["round2.diff"]
     assert writing.criteria().rstrip() in _prompt(fake, "round2-codex.out")
 
 
@@ -69,11 +69,11 @@ def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: P
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     head = _state(fake.state_dir)["rounds"][0]["head"]
-    limit = _limit(head, fake.state_dir / "round2.diff")
+    limit = _limit(head, fake.input_dir / "round2.diff")
     assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
     assert all(limit not in p for _, out, p in fake.prompts if not out.startswith("round2-"))
     # 渡した差分が前の head からのものなら、同じファイルを指す（差分を作り直さない）
-    assert not (fake.state_dir / "round2-since.diff").exists()
+    assert "round2-since.diff" not in fake.inputs
 
 
 def _resume(capsys, monkeypatch, state_dir: Path, wt: Path, *extra: str) -> Recording:
@@ -122,11 +122,11 @@ def test_issue_4285_a_full_round_shares_one_diff_since_the_last_head(wt: Path, t
     data[store.REVIEWED] = []
     store.write_object(store.state_pr(state_dir, PR).path, data)
     fake = _resume(capsys, monkeypatch, state_dir, wt, "--purpose", "design")
-    since = state_dir / "round2-since.diff"
-    limit = _limit(data["rounds"][0]["head"], since)
+    limit = _limit(data["rounds"][0]["head"], fake.input_dir / "round2-since.diff")
     assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
-    assert "fix0.txt" in since.read_text(encoding="utf-8") and "doc.md" not in since.read_text(encoding="utf-8")
-    assert "doc.md" in (state_dir / "round2.diff").read_text(encoding="utf-8")
+    since = fake.inputs["round2-since.diff"]
+    assert "fix0.txt" in since and "doc.md" not in since
+    assert "doc.md" in fake.inputs["round2.diff"]
 
 
 def test_issue_4285_major_without_impact_becomes_minor_and_is_not_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -175,3 +175,19 @@ def test_issue_4285_unreadable_criteria_stop_before_any_launch(wt: Path, tmp_pat
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
     assert fake.calls == []
     assert issubclass(writing.CriteriaBroken, contracts.ContractError)
+
+
+def test_issue_3955_claude_first_seated_in_a_full_round_is_not_limited(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """#3955 の「埋めた claude のリクエストの文」: 設計の PR で round 2 も全差分で前の head があるとき、codex のリクエストは major を
+    前回以降に限り、round 2 で初めて加わった claude のリクエストはその制限を含まない。"""
+    state_dir = tmp_path / "st"
+    data = _first_round(capsys, monkeypatch, state_dir, wt)
+    data[store.REVIEWED] = []
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    fake = Recording(state_dir, {"codex": [[]], "kiro": [FAIL, FAIL], "claude": [[]]})
+    _run(capsys, monkeypatch, fake, wt, "--purpose", "design")
+    limit = _limit(data["rounds"][0]["head"], fake.input_dir / "round2-since.diff")
+    assert limit in _prompt(fake, "round2-codex.out")
+    seat = _prompt(fake, "round2-claude.out")
+    assert criteria_decide._table()["document"]["since"].split("{")[0] not in seat
+    assert _state(state_dir)["rounds"][-1]["scope"] == "full"

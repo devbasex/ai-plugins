@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -76,3 +77,114 @@ def test_sandbox_failed_reads_only_lines_that_start_with_bwrap(tmp_path: Path, e
     paths = agents.AgentPaths(tmp_path / "o", tmp_path / "e", tmp_path / "l", tmp_path / "p")
     paths.err.write_text(err, encoding="utf-8")
     assert agents.sandbox_failed(paths) == line
+
+
+# ---------------------------------------------------------------- #3955: 席を決める・読むだけの claude
+
+
+def test_issue_3955_read_only_claude(tmp_path: Path) -> None:
+    """受け入れ条件 7・8: 修正担当の会話を持たない最小構成で、読む Tool だけを許す。読める場所を渡すと境界を足す。
+    本文は claude なら外側の JSON の `result`（JSON でなければ出力のまま）、ほかは出力の末尾。PR 4461 の r2-3・r2-4: 1 回読んだ
+    出力から本文と拒否を取り出し、Tool ごとのパスの引数だけを claude の作業ディレクトリから解決する。"""
+    plain = participants.read_only_launch("sys", tmp_path, "読む", tmp_path / "s", 30.0)
+    assert plain.agent == participants.FIXER and plain.argv[-1] == "読む"
+    assert "--no-session-persistence" in plain.argv and "--resume" not in plain.argv and "--session-id" not in plain.argv
+    assert plain.argv[plain.argv.index("--tools") + 1] == participants.READ_TOOLS == "Read,Grep,Glob"
+    assert "--restricted" not in plain.argv
+    place = tmp_path / "in"
+    bound = participants.read_only_launch("sys", tmp_path, "読む", tmp_path / "s", 30.0, (place,))
+    assert bound.argv[-3:] == ("--permission-mode", "dontAsk", "読む")
+    assert "--restricted" in bound.argv and bound.argv[bound.argv.index("--add-dir") + 1] == str(place)
+    assert "acceptEdits" not in bound.argv
+
+    out = tmp_path / "o"
+    out.write_text('{"result": "本文"}', encoding="utf-8")
+    assert participants.answer_text("claude", out) == "本文"
+    out.write_text("切れた {", encoding="utf-8")
+    assert participants.answer_text("claude", out) == "切れた {"
+    assert participants.answer_text("codex", out) == "切れた {"
+
+    work, inputs = tmp_path / "wt", tmp_path / "in"
+    diff, since = inputs / "round2.diff", inputs / "round2-since.diff"
+    denials = [
+        {"tool_name": "Read", "tool_input": {"file_path": "../in/round2.diff"}},
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "other")}},
+        {"tool_name": "Grep", "tool_input": {"pattern": str(since), "path": "src"}},
+    ]
+    out.write_text(json.dumps({"result": "本文", "permission_denials": [*denials, "壊れた要素"]}), encoding="utf-8")
+    answer = participants.claude_answer(out)
+    assert answer.text == "本文" and list(answer.denials) == denials
+    assert participants.denied_reads(answer.denials, (diff, since), work) == (diff,)
+    glob = [{"tool_name": "Glob", "tool_input": {"path": str(inputs)}}]
+    assert participants.denied_reads(glob, (diff, since), work) == (diff, since)
+
+
+@pytest.mark.parametrize(
+    ("requested", "allowed", "want"),
+    [
+        ((), None, participants.Seats(("codex", "kiro"), (), None, True)),
+        ((), {"claude", "codex"}, participants.Seats(("codex", "claude"), ("claude",), "allowed の相手役 1（codex）", True)),
+        ((), {"claude"}, participants.Seats(("claude", "claude-2"), ("claude", "claude-2"), "allowed の相手役 0", True)),
+        (("codex", "codex"), None, participants.Seats(("codex",), (), None, False)),
+        (("codex", "kiro"), None, participants.Seats(("codex", "kiro"), (), None, True)),
+        (("codex",), {"claude", "codex"}, participants.Seats(("codex",), (), None, False)),
+        # assign と同じく断る
+        ((), {"codex"}, participants.FixerNotAllowed),
+        (("claude",), None, participants.UnknownParticipant),
+    ],
+)
+def test_issue_3955_review_seats(requested, allowed, want) -> None:
+    """受け入れ条件 5・6・12: 名指しが無ければ足りない席を claude・claude-2 で埋め、名指しは重なりを除いた数で 1 者かを決める。"""
+    if isinstance(want, participants.Seats):
+        assert participants.review_seats(requested, allowed) == want
+        return
+    with pytest.raises(want):
+        participants.review_seats(requested, allowed)
+
+
+# (席, 結果の無い席, 埋める席)
+FILL_TARGETS = [
+    (("codex", "kiro"), (), ()),
+    (("codex", "kiro"), ("kiro",), ("kiro",)),
+    (("codex", "claude"), ("claude",), ()),
+    (("codex", "claude"), ("codex", "claude"), ()),
+    (("codex", "kiro"), ("codex", "kiro"), ()),
+    (("codex", "claude"), ("codex",), ("codex",)),
+]
+
+
+def test_issue_3955_seat_helpers(monkeypatch) -> None:
+    """受け入れ条件 13: cross-refactoring の相手役の選び方（既定・名指し・allowed）は変えない。席の名前のランタイム・空いた名前・
+    埋める席を決める。受け入れ条件 15: 断られたランタイムと理由の組を返し、同じランタイムは 1 回だけ確かめる。unready は今の
+    返り値のまま。"""
+    from ndf.adapters import training
+
+    assert participants.assign() == ("codex", "kiro")
+    assert participants.assign(("kiro", "kiro", "codex")) == ("kiro", "codex")
+    assert participants.assign(allowed={"claude", "codex"}) == ("codex",)
+    for requested, allowed, error in (
+        ((), {"claude"}, participants.UnknownParticipant),
+        (("kiro",), {"claude", "codex"}, participants.UnknownParticipant),
+        (("claude",), None, participants.UnknownParticipant),
+        ((), {"codex"}, participants.FixerNotAllowed),
+    ):
+        with pytest.raises(error):
+            participants.assign(requested, allowed=allowed)
+
+    assert [participants.runtime_of(s) for s in ("codex", "claude", "claude-2", "kiro")] == ["codex", "claude", "claude", "kiro"]
+    assert participants.free_seat(()) == "claude"
+    assert participants.free_seat(("codex", "claude")) == "claude-2"
+    assert participants.free_seat(("claude", "claude-2")) == "claude-3"
+    assert [participants.fill_targets(seats, unread) for seats, unread, _ in FILL_TARGETS] == [want for _, _, want in FILL_TARGETS]
+
+    asked: list[str] = []
+
+    def ensure(runtime, env=None, now=None, read=None):
+        asked.append(runtime)
+        return "学習に使う設定" if runtime == "kiro" else None
+
+    monkeypatch.setattr(training, "ensure", ensure)
+    assert participants.refused_runtimes(("claude", "kiro", "claude", "codex")) == {"kiro": "学習に使う設定"}
+    assert asked == ["claude", "kiro", "codex"]
+    assert participants.unready(("kiro", "claude")) == ["学習に使う設定"]
+    assert participants.unready(("codex",)) == []

@@ -190,3 +190,25 @@ def test_full_launch_carries_the_notice_when_the_list_is_unreadable(tmp_path, mo
     assert full.notice == claude.LIST_UNREADABLE
     assert full.args == claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
     assert claude.claude_launch(claude.ClaudeCall(system="sys")).notice is None
+
+
+# ---------------------------------------------------------------- #3955: 読める場所を限った読むだけの起動
+
+
+def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
+    """読める場所を渡すと `--restricted`・`--add-dir`・`dontAsk` を組み、`acceptEdits` を使わない。Tool の値は名前だけ。渡さなければ
+    今の引数のまま。`ClaudeCall` を通しても同じで、読める場所は Tool を限った起動（`Permission.TOOLS`）にしか渡せない。"""
+    place = tmp_path / "review-input-x"
+    got = claude.permission_args(claude.Permission.TOOLS, "Read,Grep,Glob", (place,))
+    assert got == [
+        "--tools", "Read,Grep,Glob", "--allowed-tools", "Read,Grep,Glob",
+        "--restricted", "--add-dir", str(place), "--permission-mode", "dontAsk",
+    ]  # fmt: skip
+    assert "acceptEdits" not in got
+    assert claude.permission_args(claude.Permission.TOOLS, "Read") == [
+        "--tools", "Read", "--allowed-tools", "Read", "--permission-mode", "acceptEdits",
+    ]  # fmt: skip
+    argv = claude.claude_args(claude.ClaudeCall(system="s", permission=claude.Permission.TOOLS, tools="Read", readable=(tmp_path,)))
+    assert argv[argv.index("--add-dir") + 1] == str(tmp_path) and argv[-2:] == ["--permission-mode", "dontAsk"]
+    with pytest.raises(ValueError):
+        claude.ClaudeCall(system="s", readable=(tmp_path,))

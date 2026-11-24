@@ -149,7 +149,7 @@ def run_fixer(
     prompt = _fix_prompt(run, open_, handed, result_path)
     status, how = _launch_fixer(run, round_no, prompt, result_path, launch)
     if not result_path.is_file():
-        warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
+        warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.shown}）"
         run.note(round_no, run.cfg.fixer, f"結果無し（{status.state}）{how}", warning)
         return None
     try:
