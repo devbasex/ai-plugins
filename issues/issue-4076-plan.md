@@ -14,6 +14,7 @@
 
 - `drive.py` の今の「範囲」（変更の読み取り）と設定の読み取りを、新しい `changes.py`・`settings.py` へ先に移す。全差分と本文の読み取り（`_Target`・`_review_diff`・`_diff_files`・`_base_lines`）と根拠の行の確かめ（`_citations`・`_final_target`・`_final_citations`）も `changes.py` に置く。`drive.py` は今 998 行で、`ndf check` の構造の規則（`checks/rules.json` の `structure.max_lines` 1,000 行）を足すだけで超えるため
 - `fenced_lines`・`decision_lines` は `records/mvv_decide.py` でなく `records/mvv.py` に置く。名前が `_decide` で終わるモジュールは `ndf.adapters` を読めない（`structure.decide_forbidden_imports`）ため、`adapters.markdown.code_lines`・`atx_headings` を呼ぶ関数を判断のモジュールに置けない。`parse_citation`・`citation_errors` は本文を読まない純粋な関数なので `mvv_decide.py` に残す
+- `drive.py` の「修正担当」の区切り（修正担当の起動・結果の読み込み・修正のコミットの送り）は、U12 の最初のコミットで新しい `fixer.py` へ移す（「リスクと対処」の 1 件目）
 - cross-review の起動を通すテストは、`test_crossreview_run.py`（今 872 行）へ足さずに `test_crossreview_mvv.py`・`test_crossreview_citations.py` を新設して置く（同じ 1,000 行の規則がテストのファイルにも当たる）
 
 | ファイル | 変える中身 | 単位 |

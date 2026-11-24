@@ -35,7 +35,7 @@ from ndf.adapters import agents, git, run_log
 from ndf.contracts import limits, result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import changes, drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import changes, drive, fixer, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import (
     MAX_ROUNDS,
@@ -53,7 +53,7 @@ CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
 # 相手役と修正担当の起動（テストは偽物に差し替える）
-LAUNCH: drive.Launcher = agents.run_agent
+LAUNCH: fixer.Launcher = agents.run_agent
 
 
 def _redacted(texts: Sequence[str]) -> list[str]:
@@ -277,9 +277,9 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
+    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `fixer.merge_fix` で行う。"""
     try:
-        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
+        round_no = fixer.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
     except (store.FixResultMismatch, ValueError) as exc:
         return _stop("invalid", str(exc))
     ref = store.state_pr(Path(args.state_dir), args.pr)
