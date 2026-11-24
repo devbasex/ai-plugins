@@ -86,23 +86,33 @@ def candidates(changed: Sequence[str], issues: Sequence[int], kinds: Sequence[st
     return tuple(found.values())
 
 
+def judge(t: Target, seen: Inspection) -> tuple[Optional[str], bool]:
+    """候補 1 件の外す理由（`<パス>: <理由>`。外さないなら None）と、選ぶかどうか。
+
+    作業場所に無い実装計画（書かない課題）と、省いた行を持たない実装計画は選ぶ条件に合わないだけなので理由を返さない。
+    """
+    if t.path not in seen.regular:
+        if t.kind != "plan" or t.path in seen.present:
+            return f"{t.path}: {seen.excluded[t.path]}", False
+        return None, False
+    if t.kind == "plan":
+        if t.path in seen.unreadable:
+            return f"{t.path}: {seen.unreadable[t.path]}", False
+        return None, omits_design(seen.plans[t.path])
+    return None, True
+
+
 def select(found: Sequence[Target], seen: Inspection) -> Selection:
     """通常ファイルでない候補と本文を読めなかった実装計画を理由とともに外し、実装計画は設計書を省いたものだけを残す。
 
-    作業場所に無い実装計画（書かない課題）と、省いた行を持たない実装計画は選ぶ条件に合わないだけなので `skipped` に入れない。
+    候補ごとの判定は `judge` に任せ、ここでは対象と外した理由を集めるだけにする。
     """
     targets: list[Target] = []
     skipped: list[str] = []
     for t in found:
-        if t.path not in seen.regular:
-            if t.kind != "plan" or t.path in seen.present:
-                skipped.append(f"{t.path}: {seen.excluded[t.path]}")
-            continue
-        if t.kind == "plan":
-            if t.path in seen.unreadable:
-                skipped.append(f"{t.path}: {seen.unreadable[t.path]}")
-                continue
-            if not omits_design(seen.plans[t.path]):
-                continue
-        targets.append(t)
+        reason, chosen = judge(t, seen)
+        if reason is not None:
+            skipped.append(reason)
+        if chosen:
+            targets.append(t)
     return Selection(tuple(targets), tuple(skipped))
