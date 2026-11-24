@@ -79,8 +79,8 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの前の判定 | `checks`・`mvv`・`mvv_decide`・`mvv_material_decide` | モジュール | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`（変更）・`snapshot_facts`・`review_prs`・`failure_text`・`stored_view`（新設）・定数 `GATE_STEPS`・`GATE_STAGES`（新設）。`base_facts` は消す |
-| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`hold_checked`・`mvv_answer_void`（新設）・`mvv_skip`（変更） |
+| `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの前の判定 | `checks`・`mvv`・`mvv_decide`・`mvv_material_decide` | モジュール | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`（変更）・`snapshot_facts`・`review_prs`・`failure_text`（新設）・定数 `GATE_STEPS`・`GATE_STAGES`（新設）。`base_facts` は消す |
+| `src/ndf/progress/model.py` | 変更 | ステートマシンの型と規則 | — | モジュール | 定数 `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`hold_checked`・`mvv_answer_void`・`mvv_stored_view`（新設）・`mvv_skip`（変更） |
 | `src/ndf/progress/run.py` | 変更 | ステートマシンを読んで工程を流す | `model` | モジュール | `_running_move`・`_consume`（変更） |
 | `src/ndf/progress/gate/records.py` | 変更 | 承認ゲートの回答の記録の読み手 | `model` | モジュール | `approved_head`（変更） |
 | `src/ndf/progress/gate/checks.py` | 変更 | 省かない理由の検査 | — | `MvvFacts`（変更） | `check_review_holds`（新設）・`refusals`（変更）・`judgeable`（新設）・`may_skip`・`note`（変更）・定数 `CHECKS_BY_GATE`（新設） |
@@ -95,7 +95,7 @@ plugins/ndf/
 | `src/ndf/progress/stage_inputs.py` | 新設 | ステートマシンの ID から判定のステップの入力を組む | `store`・`invoke` | モジュール | `stage_inputs_of`（新設）。`progress/command.py` に置くと、ファイルの行数が `ndf check` の構造の規則の上限（1,000 行）を超えるので、新しいモジュールに置く（実装計画 `issues/issue-3959-plan.md` の「修正対象」） |
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認ゲートの質問と承認資料 | — | モジュール | `mvv_lines`（新設）・`material`・`material_path`（変更。資料を作る時点の head ごとに別のファイル）・`write_material`（変更。0600 で、別名の一時ファイルから置き換えずに置く） |
 | `src/ndf/progress/gate/entry.py`・`src/ndf/progress/gate/answering.py` | 変更 | 承認ゲートの待ちを質問と承認資料に差し替える・回答と対象を照らす | `asking` | モジュール | `present`（変更。PR の今の head を読んでから、その head の資料を使うか書く）・`github_observe`（変更。今の head の資料のハッシュを返す） |
-| `src/ndf/progress/store.py` | 変更 | ステートマシンの保存 | — | モジュール | 保存先を開くとき、ディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルを 0600 にする（「手元のファイルの閲覧範囲」） |
+| `src/ndf/progress/store.py` | 変更 | ステートマシンの保存 | `model` | `Store`（変更）、モジュール | 保存先を開くとき、ディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルと既にある副ファイルを 0600 にし、限れたかを `Store.private` と `conn.info["ndf_private"]` に持つ。`append_events`（変更。限れない保存先では `mvv_gate` を `model.mvv_stored_view` に通して書く）（「手元のファイルの閲覧範囲」） |
 | `src/ndf/adapters/publish.py` | 変更 | 書き先へ出す本文の検査 | `run_log` | `Publisher`（変更） | `Publisher.guarded`（変更。引数 `assume_public: bool = False` を足し、真なら書き先の公開範囲を照会せず公開として伏せる。呼び手は `_mvv_cite` だけ）・`Publisher._private_refs`（変更。秘密を含む参照を照会しない）・`scrub`（変更。秘密と参照の一致範囲の和を 1 回で置き換える） |
 | `src/ndf/adapters/run_log.py` | 変更 | 秘密の伏せ字 | — | — | `secret_spans`（新設。秘密の一致範囲を返し、`redact` もそれで置き換える） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv` | `Outcome`（変更） | `_summary`・`_record_mvv`（変更。状態ファイルへ書く原因を伏せる） |
@@ -567,7 +567,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `stage_inputs_of` | `progress/stage_inputs.py` | 新設 | `stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]` | ステートマシンの最新の定義から `step_id` のステップを持つ工程を引き、`machine_context` に `invoke.resolve_inputs` を当てた入力を返す。プランが `NDF_STAGE_INPUT` に渡すものと同じ値だけで、文脈のほかのキー（`design_pr` など）は足さない |
 | `_mvv_inputs` | `records/cli.py` | 新設 | `_mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 区分ごとに入力を決める（下の表）。決められなければ `_InputError`（`invalid`・`refused`） |
 | `_env_inputs` | `records/cli.py` | 新設 | `_env_inputs(gate: str, inputs: Mapping[str, Any]) -> dict[str, Any]` | `NDF_STAGE_INPUT` の object を、プランが組むのと同じ規則で確かめる。下の手順 |
-| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。ステートマシンの保存先が SQLite でない（`store.default_url(root)` が SQLite の URL でない）ときは、出力の `outputs.mvv_gate` を `mvv_gate.stored_view` に通してから返す（「手元のファイルの閲覧範囲」） |
+| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。出力は伏せずに返す（自由記述を伏せるのは、閲覧範囲を限れない DB へ保存するときの `store.append_events` だけ。「手元のファイルの閲覧範囲」） |
 
 | 区分 | `NDF_STAGE_INPUT` | `--machine` | 入力 |
 | --- | --- | --- | --- |
@@ -664,12 +664,15 @@ PR を読む前の失敗（`gate` が受ける）:
 | 一致しない理由 | 見分け方 | 欄に載せる文 |
 | --- | --- | --- |
 | PR を特定する前に判定が止まった | `out` に `pr` も `head` も無く、`stopped_by` がある | 「対象の PR を特定できなかったため、MVV 判定は済んでいない。<`stopped_by.text`>」。比べる相手が無いので、PR と head を並べない |
-| 判定が対象を確かめられない形で残っている | `out` に `head` はあるが `pr` が無い（このバージョンより前の判定）、または資料を作る時点の head を読めていない（`q.target.head` が無い） | 「残っている判定が、承認を求める PR #<質問の PR> の今の head に対するものかを確かめられない。判定のステップを打ち直すと、今の head で判定する」 |
-| 別の PR か別の head の判定がある | `out` の `pr` と `head` があり、どちらかが質問の値と違う | 「承認を求める PR #<質問の PR>・head <質問の head> の判定はまだ無い。今ある判定は PR #<判定の pr>・head <判定の head> に対するもの（判定の後に PR が更新されたか、別の PR を判定した）。判定のステップを打ち直すと、今の head で判定する」 |
+| 判定が対象を確かめられない形で残っている | `out` に `head` はあるが `pr` が無い（このバージョンより前の判定）、または資料を作る時点の head を読めていない（`q.target.head` が無い） | 「残っている判定が、承認を求める PR #<質問の PR> の今の変更に対するものかを確かめられません。この変更に対する判定はまだありません。承認せず、「変更を求める」の回答で判定のやり直しを依頼してください」 |
+| 別の PR か別の head の判定がある | `out` の `pr` と `head` があり、どちらかが質問の値と違う | 「承認を求める PR #<質問の PR>・head <質問の head> の判定はまだ無い。今ある判定は PR #<判定の pr>・head <判定の head> に対するもの（判定の後に PR が更新されたか、別の PR を判定した）。この変更に対する判定はまだありません。承認せず、「変更を求める」の回答で判定のやり直しを依頼してください」 |
 
+  - 表の 2 行目と 3 行目で承認する人が「変更を求める」と答えたとき、判定をやり直すのは担当者の側で、承認する人は操作しない。経路ごとの手順は次のとおりである
+    - プランの経路: 変更を求める回答で、待っている工程が初めから流れ直す（`run` の `_answered` が世代を上げ、済んだステップを空にする）。判定のステップ（`design-mvv`・`release-mvv`）もその中で今の head に対して打たれるので、担当者が別のコマンドを打つ必要は無い
+    - supervisor の経路: supervisor が同じ作業場所で `ndf records mvv gate --gate <区分> --machine <ステートマシンの ID>` を打ち直し、結果で承認資料を組み直してから、もう一度承認を求める
   - 一致すれば、節の先頭に「判定した PR: #<pr>・head <head>」を載せる
   - プランの経路の資料は、資料を作る時点の head ごとに別のファイルにする（下の「プランの経路の承認資料の生成」の `material_path`）。質問を表示し直す時点で head が進んでいれば、その head 用の資料を新しく作り、古い head の資料を渡さない
-  - supervisor の経路でも、資料に「判定した PR: #<pr>・head <head>」を載せ、同じ表で照らす。承認ゲートを返す直前に、承認を求める PR の今の head を 1 回読み（`gh pr view <番号> --json headRefOid`）、その値を承認依頼にも載せる。読んだ head が判定の `head` と違えば、上の表の 3 行目の文にし、判定の件数・`stopped_by.text`・コメントへの案内を載せない。`--machine` を打ち直して一致すれば、その結果で資料を組み直してよい。返した後の push は、承認する人が承認依頼の head と PR の今の head を見比べて気づけるよう、承認依頼に「この head と PR の今の head が違えば承認せずに返す」を添える
+  - supervisor の経路でも、資料に「判定した PR: #<pr>・head <head>」を載せ、同じ表で照らす。承認ゲートを返す直前に、承認を求める PR の今の head を 1 回読み（`gh pr view <番号> --json headRefOid`）、その値を承認依頼にも載せる。承認依頼の中で head を使う所（設計文書へのリンク・判定との照合・承認依頼に示す head）は、すべてこの最後に読んだ値にそろえる。設計文書へのリンクを先に組んでいた場合は、組んだときの head がこの値と同じときだけそのリンクを使い、違えばこの値でリンクを組み直す（資料のリンクから古い設計文書を読んで新しい変更を承認させないため）。読んだ head が判定の `head` と違えば、上の表の 3 行目の文にし、判定の件数・`stopped_by.text`・コメントへの案内を載せない。`--machine` を打ち直して一致すれば、その結果で資料を組み直してよい。返した後の push は、承認する人が承認依頼の head と PR の今の head を見比べて気づけるよう、承認依頼に「この head と PR の今の head が違えば承認せずに返す」を添える
   - `verdict` があれば判定・理由・根拠の項目・レッドライン、null なら「判定できない: <`why`>」。どちらでも `why` の省かない理由を 1 件残らず載せる。この載せ方はプランの経路の資料のものである。supervisor の経路の資料は、下の「承認資料の開示の範囲」の表のとおり件数だけを載せる。
   - 保留は `holds` の値で 3 通りに分ける: 空でない配列なら 1 件残らず載せる、空の配列 `[]` なら「レビューの保留: 無し（レビューの記録に保留が無い。記録がまだ作られていない場合を含む）」、`null` かキーが無いなら「レビューの保留: 未確認（<理由>）」。
   - `[]` は、記録を読めて保留が 0 件のときと、記録がまだ作られていない（cross-review が MVV の指摘を 1 件も記録していない）ときの両方で出る。`validation_rows` は 2 つを同じ空の結果にし、出力も区別しない。そこで表示は両方に当てはまる文にし、記録を読んで確かめたとは書かない。既存の記録を読めないときは `[]` にならず、読めない理由の 1 件が載る
@@ -689,12 +692,24 @@ PR を読む前の失敗（`gate` が受ける）:
   - 保留は、この PR の cross-review の記録から作られ、見送りの理由とレッドラインの指摘本文は、記録に書く時点で `record_review` の `clean` が公開範囲を照会して伏せてある（照会できなければ伏せた行で、`WITHHELD` の文になる）
   - 書き込む前に閲覧できる人を限れる経路では自由記述を載せ、結果を別の場所へ転送する経路（supervisor が呼び出し元へ返す本文）では自由記述を伏せる。閲覧できる人を限れる経路は、所有者だけが読めるファイル（下の「手元のファイルの閲覧範囲」）と、書き先の公開範囲を照会する PR のコメントである
   - 手元のファイルの閲覧範囲: 判定の自由記述を保存する手元の場所は、中身を書く前に、判定を打った OS の利用者だけが読めるようにする。ファイルが Git ディレクトリの中にあることや、worktree の外にあることは、閲覧できる人を限らない（同じ端末のほかの OS の利用者も、既定の umask の 022 では読める）。判定を打った OS の利用者は PR を読んだ GitHub の認証を持つので、その利用者だけが読めるなら、GitHub で閲覧を許されていない人へ新しく開示しない。保存先ごとの規則は次のとおりである
-    - ステートマシンの保存先（`Store.root`。既定は `<Git ディレクトリ>/ndf/state/`）: 判定の出力 `outputs.mvv_gate` は、ステップの記録（`step_recorded`）と `ndf progress finish` の工程の出力として DB に保存される。そこで `store` が保存先を開くたびに、DB へ接続する前に保存先のディレクトリを 0700 にする（無ければ `mkdir(mode=0o700)`、あれば `chmod(0o700)`）。ディレクトリの権限で守るので、中のファイルの権限によらず、ほかの OS の利用者は読めない。対象は、SQLite の DB（`progress.sqlite`）とその副ファイル（`-wal`・`-shm`・`.lock`）、バックアップ（`BACKUP_DIR` の下）、プランの承認資料（`progress-work/` の下）である。戻しやバックアップで新しいファイルができても外れない
-    - `NDF_PROGRESS_DB` で SQLite のファイルを保存先の外に置くとき: 接続する前に DB のファイルを 0600 にする（無ければ `os.open(path, os.O_CREAT | os.O_WRONLY, 0o600)` で空のファイルを作り、あれば `chmod(0o600)`）。SQLite は副ファイル（`-wal`・`-shm`）を DB のファイルと同じ権限で作る。バックアップは保存先の下に置くので、上の行の規則で守られる
-    - `NDF_PROGRESS_DB` が PostgreSQL のとき: 読める人は DB の認証情報を持つ人で、NDF は限れない。そこで `ndf records mvv gate` は、保存先が SQLite でない（`store.default_url` が SQLite の URL でない）とき、出力の `outputs.mvv_gate` の自由記述を、保存される前に伏せる（`mvv_gate.stored_view`。新設）。伏せるのは `verdict.reasons`・レッドラインの本文・`holds` の各要素・`why` の各要素で、件数を保ったまま固定の文「伏せた（全文は今回の判定のコメントで読む）」に置き換える。`skip`・`verdict.verdict`・根拠の項目の名前・`holds` が空の配列かどうか・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない。プランの資料は、理由の代わりに件数とコメントの URL を示すことになる（supervisor の経路の載せ方と同じ）
-    - プランの承認資料（`write_material`）: 上の保存先の規則に加え、ファイル自体も 0600 で作る。一時ファイルは `tempfile.mkstemp(dir=<資料のディレクトリ>, suffix=".tmp")` で、呼び出しごとに別名・排他的・0600 で作る。中身を書いて閉じた後、`os.link(tmp, path)` で所定のパスに置き、一時ファイルを消す。`os.link` は置き先が既にあれば `FileExistsError` になる。そのときは、同時に走った別の呼び出しが先に完成させた資料をそのまま使い、自分の一時ファイルを消す。`replace` で上書きしない（先に完成した資料を、別の呼び出しが質問と一緒に返した後で書き換えないため）。資料のディレクトリを新しく作るときは `mkdir(mode=0o700)` にする
-    - supervisor が作業ディレクトリに書く結果 JSON（`mvv-gate-<区分>.json`）と、規則 15 の工程の出力の JSON ファイル: 打ち直しで同じパスへ書くときも、既存のファイルの権限を引き継がないように、新しいファイルへ書いてから置き換える。`tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && ndf records mvv gate … > "$tmp" && mv -f "$tmp" "<作業ディレクトリ>/mvv-gate-design.json"` の形にする。`mktemp` は umask によらず 0600 の新しいファイルを排他的に作る。`mv` は置き先を新しいファイルに入れ替えるので、既存のファイルの権限が広くても、新しい中身はそのファイルに書かれない（`>` で既存のファイルを開き直すと、umask を 077 にしても権限は変わらない）。`agent-layers.md` の supervisor の規則に、このコマンドの形を書く
-    - 同じ OS の利用者を複数の人で共有する構成は扱わない。その構成では、どの人も PR を読んだ GitHub の認証そのものを使えるので、ファイルの権限では防げない
+    - ステートマシンの保存先: 判定の出力 `outputs.mvv_gate` は、ステップの記録（`step_recorded`）と `ndf progress finish` の工程の出力（`outputs_recorded`）として DB に保存される。`store` は保存先を開くたびに、DB へ接続する前に閲覧範囲を限り、限れたかどうかを `Store.private`（真偽値）に持つ。保存先の種類ごとの規則は次の表のとおりで、どの規則も失敗したら `private` を偽にする（開くこと自体は止めない）
+
+| 保存先 | 接続の前にすること | `private` が真になる条件 |
+| --- | --- | --- |
+| 既定の SQLite（`Store.root`。既定は `<Git ディレクトリ>/ndf/state/`） | 保存先のディレクトリを 0700 にする（無ければ `mkdir(mode=0o700)`、あれば `chmod(0o700)`）。ディレクトリの権限で守るので、中のファイルの権限によらず、ほかの OS の利用者は読めない。対象は、SQLite の DB（`progress.sqlite`）とその副ファイル（`-wal`・`-shm`・`.lock`）、バックアップ（`BACKUP_DIR` の下）、プランの承認資料（`progress-work/` の下）である。戻しやバックアップで新しいファイルができても外れない | `chmod`・`mkdir` が成功した |
+| `NDF_PROGRESS_DB` で保存先の外に置いた SQLite のファイル | DB のファイルを 0600 にする（無ければ `os.open(path, os.O_CREAT \| os.O_WRONLY, 0o600)` で空のファイルを作り、あれば `chmod(0o600)`）。続けて、既にある副ファイル（`<DB>-wal`・`<DB>-shm`・`<DB>-journal`）もすべて `chmod(0o600)` する。ほかのプロセスの接続が残した副ファイルは、DB のファイルの権限を変えても元の権限のまま残るためである。SQLite がこれから作る副ファイルは、DB のファイルと同じ権限になる。バックアップは保存先の下に置くので、上の行の規則で守られる | DB のファイルと、既にある副ファイルのすべての `chmod` が成功した（所有者でないなどで 1 つでも失敗すれば偽） |
+| `NDF_PROGRESS_DB` の PostgreSQL | 何もしない。読める人は DB の認証情報を持つ人で、NDF は限れない | 常に偽 |
+
+  - `private` が偽の保存先には、判定の自由記述を保存しない。伏せるのは DB へ渡す値だけで、`ndf records mvv gate` の出力（結果 JSON）は伏せない（supervisor が作業ディレクトリに置く結果 JSON には全文が残る）
+    - `Store` は `private` を、接続ごとの `conn.info["ndf_private"]`（SQLAlchemy の `Connection.info`）に置く。`store.append_events` は、`step_recorded` と `outputs_recorded` の事象を書く前にこの値を読み、偽か値が無ければ、payload の `mvv_gate` を `model.mvv_stored_view`（新設）に通してから書く
+    - `mvv_stored_view` は、`verdict.reasons`・レッドラインの本文・`holds` の各要素・`why` の各要素を、件数を保ったまま固定の文「伏せた（全文は今回の判定のコメントで読む）」に置き換える。`skip`・`verdict.verdict`・根拠の項目の名前・`holds` が空の配列かどうか・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない
+    - DB から読んで組むプランの承認資料は、理由と保留の本文の代わりに、件数と今回の判定のコメントへの案内を載せる（supervisor の経路の載せ方と同じ）。承認する人が全文を読める場所は、今回の判定のコメントだけになる。そこで資料に次の文を載せ、読めないときは承認させずに判定のやり直しへ回す
+      - `noted` が真: 「理由と保留の全文は、今回の判定のコメント <note_url> で読めます。コメントを開けない場合や、判断に必要な理由が伏せ字で読めない場合は、承認せず、『変更を求める』の回答で判定のやり直しを依頼してください」
+      - `noted` が真でない（コメントの投稿に失敗した・コメントを書かない終わり方）: 「理由と保留の全文を読める場所がありません。承認せず、『変更を求める』の回答で判定のやり直しを依頼してください」。この終わり方では `_recorded` が `skip` を偽にしているので、`fast`・`auto` でも承認ゲートは省かれず、承認する人に届く
+      - 変更を求める回答の後は、上の「載せ方」の担当者の手順と同じく、工程が初めから流れ直して判定のステップが打ち直される
+  - プランの承認資料（`write_material`）: 上の保存先の規則に加え、ファイル自体も 0600 で作る。一時ファイルは `tempfile.mkstemp(dir=<資料のディレクトリ>, suffix=".tmp")` で、呼び出しごとに別名・排他的・0600 で作る。中身を書いて閉じた後、`os.link(tmp, path)` で所定のパスに置き、一時ファイルを消す。`os.link` は置き先が既にあれば `FileExistsError` になる。そのときは、同時に走った別の呼び出しが先に完成させた資料をそのまま使い、自分の一時ファイルを消す。`replace` で上書きしない（先に完成した資料を、別の呼び出しが質問と一緒に返した後で書き換えないため）。資料のディレクトリを新しく作るときは `mkdir(mode=0o700)` にする
+  - supervisor が作業ディレクトリに書く結果 JSON（`mvv-gate-<区分>.json`）と、規則 15 の工程の出力の JSON ファイル: 打ち直しで同じパスへ書くときも、既存のファイルの権限を引き継がないように、新しいファイルへ書いてから置き換える。`tmp=$(mktemp "<作業ディレクトリ>/.mvv-gate-design.XXXXXX") && ndf records mvv gate … > "$tmp" && mv -f "$tmp" "<作業ディレクトリ>/mvv-gate-design.json"` の形にする。`mktemp` は umask によらず 0600 の新しいファイルを排他的に作る。`mv` は置き先を新しいファイルに入れ替えるので、既存のファイルの権限が広くても、新しい中身はそのファイルに書かれない（`>` で既存のファイルを開き直すと、umask を 077 にしても権限は変わらない）。`agent-layers.md` の supervisor の規則に、このコマンドの形を書く
+  - 同じ OS の利用者を複数の人で共有する構成は扱わない。その構成では、どの人も PR を読んだ GitHub の認証そのものを使えるので、ファイルの権限では防げない
   - 経路ごとの条件は次の表のとおりである
 
 | 経路 | 資料を置く場所・渡す先 | その場所で既に読めるもの | 欄の自由記述の扱い |
@@ -742,8 +757,9 @@ PR を読む前の失敗（`gate` が受ける）:
 | `mvv_lines` | 判定・`why`・保留 2 件 → すべて載る | `holds: []` → 「無し（レビューの記録に保留が無い。記録がまだ作られていない場合を含む）」で、「記録を読んで確かめた」とは書かない。`holds: null`（ベースの取得の失敗）→ 「未確認」と止まった理由。`release` の `holds: null` → #4105 の理由。`design` で `verdict` あり・`holds: null`・`why: []`（実装計画の単位 2 が入り単位 3 がまだの間に、`fast` で検査がすべて通った判定）→ 例外を出さず「未確認（この判定は保留を読んでいない）」で、「止まった」と書かない。`verdict: null`・`why: []` → 例外を出さず「保留を読む前に判定が止まった」。`noted: false` → 「今回は PR に判定のコメントを載せていない」の添え書きで、コメントの URL を載せない。`noted: true`・`note_url` あり → 「今回の判定のコメント: <note_url>」。`out` の `pr`・`head` が引数と同じ → 節の先頭に「判定した PR」の行と、head が違えば未確認とする添え書き | `out` が None → 「判定できない」と「未確認」。`out` の `head` が引数の `head` と違う（判定の後に push された）→ 判定の理由・レッドライン・保留・`why` のどれも載せず、「承認を求める PR … の判定はまだ無い」と「未確認（今の head の判定が無い）」。`out` の `pr` が引数の `pr` と違う → 同じ。`out` に `pr` が無い（古いバージョンの判定）・引数の `head` が None → 「確かめられない」の文で、判定の PR と head を並べない。`out` に `pr`・`head` が無く `stopped_by` がある（PR を特定する前に止まった）→ 「対象の PR を特定できなかったため、MVV 判定は済んでいない。<`stopped_by.text`>」で、「今ある判定は」の文を載せない |
 | `material` | 設計の工程の途中（`design-mvv` の `step_recorded` だけがあり、工程の出力は未記録）の設計承認ゲートの資料に「## MVV 判定」の節があり、その記録の `holds` と `why` が載る。`entry.present` で、`observe` のスタブが返す head が判定の `head` と同じ → 判定が載り、`observe` は 1 回だけ呼ばれ、返す結果の `Target` の承認資料の sha256 が書いたファイルのもの。同じ質問を同じ head で表示し直す → `write_material` も `material_sha256` も呼ばず、`observe` が返したハッシュを使う | `design-mvv` の済んだ後に PR の head が進んだ（`observe` のスタブが別の head を返す）→ 新しい head の名前の資料ができ、前の head の判定の理由と保留が無く、「判定はまだ無い」が載る。前の head の資料は残る。push の前に一度表示した質問を push の後に表示し直す → 前の head の資料を返さず、新しい head の資料を返す。前の head の資料のハッシュで回答する → 断る。判定のステップを持たないモード → 節が無い。文脈に設計の工程の `mvv_gate`（`verdict` あり）が残り、deploy の工程の `release-mvv` がまだ済んでいないリリース承認ゲート → 設計の判定を載せず「判定できない」。判定・根拠の項目・保留を持つ `mvv_gate` で組んだ資料を、`cite` と同じ確かめ（`fenced_lines`・`decision_lines`・`citation_errors` と「目指す姿の根拠」の節の中の検査。`require_basis=False`。プランの資料は節を持たないので、節の有無は問わない）に通す → 誤り 0 件 | — |
 | `write_material` | 書いた承認資料と一時ファイルの権限が 0600（umask を 022 にしたテストでも） | 資料のディレクトリが無い → 0700 で作る。一時ファイルを置く直前に、別の呼び出しが同じ資料を置いた（`os.link` のスタブが `FileExistsError`）→ 例外を出さず先にある資料のパスを返し、その中身を書き換えず、自分の一時ファイルが残らない | 同じ質問・同じ head の資料が既にある → 書き直さず、権限も変えない |
-| `store`（保存先の権限） | 既定の保存先を開く → ディレクトリが 0700（既に 0755 で在っても） | `NDF_PROGRESS_DB` の SQLite のファイルが無い → 0600 で作る。0644 で在る → 0600 にする | — |
-| `stored_view` | 理由 2 件・レッドライン 1 件・保留 2 件・`why` 3 件の出力 → 件数は同じで、どの要素にも元の文が無い。`skip`・`verdict.verdict`・`pr`・`head`・`note_url` は同じ | `holds: []` → `[]` のまま。`holds: null` → `null` のまま | — |
+| `store`（保存先の権限） | 既定の保存先を開く → ディレクトリが 0700（既に 0755 で在っても）で `private` が真 | `NDF_PROGRESS_DB` の SQLite のファイルが無い → 0600 で作る。0644 で在る → 0600 にする。0644 の `-wal`・`-shm` が既に在る → どちらも 0600 になり `private` が真 | 副ファイルの `chmod` が `PermissionError`（スタブ）→ 開くのは止めず `private` が偽。PostgreSQL の URL → `private` が偽 |
+| `append_events`（判定の保存） | `private` が真の接続で `step_recorded` を書く → `mvv_gate` は全文のまま | — | `private` が偽の接続・`conn.info` に値が無い接続で書く → 保存された `mvv_gate` の理由・保留・`why` が伏せた文で、件数は同じ。同じ判定の `ndf records mvv gate` の結果 JSON は全文のまま |
+| `mvv_stored_view` | 理由 2 件・レッドライン 1 件・保留 2 件・`why` 3 件の出力 → 件数は同じで、どの要素にも元の文が無い。`skip`・`verdict.verdict`・`pr`・`head`・`note_url` は同じ | `holds: []` → `[]` のまま。`holds: null` → `null` のまま | — |
 
 ## 工程の入力のコントラクト
 

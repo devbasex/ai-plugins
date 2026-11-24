@@ -34,7 +34,7 @@
 | `plugins/ndf/src/ndf/progress/gate/records.py` | `approved_head`（区分の外の `service:mvv` の回答を承認にしない） |
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節）・`material_path`（head ごとに別のファイル）・`write_material`（0600 で、別名の一時ファイルから上書きせずに置く） |
 | `plugins/ndf/src/ndf/progress/gate/answering.py` | `github_observe`（今の head の資料のハッシュを返す） |
-| `plugins/ndf/src/ndf/progress/store.py` | 保存先を開くとき、ディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルを 0600 にする |
+| `plugins/ndf/src/ndf/progress/store.py` | 保存先を開くとき、ディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルと既にある副ファイルを 0600 にする。限れない保存先では `append_events` が `mvv_gate` の自由記述を伏せて書く |
 | `plugins/ndf/src/ndf/progress/gate/entry.py` | `present`（承認資料を書く前に PR の今の head を読み、その head の資料があれば書かずにハッシュも使い直す） |
 | `plugins/ndf/src/ndf/progress/gate/checks.py` | `MvvFacts.review_holds`・`check_review_holds`・`refusals`・`judgeable`・`may_skip`・`note`・`CHECKS_BY_GATE` |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `--machine`・`_mvv_inputs`・`_env_inputs`・`_mvv_cite` |
@@ -204,7 +204,7 @@
 - **対象ファイル:**
   - `plugins/ndf/src/ndf/progress/gate/asking.py`（`mvv_lines`・`material`）
   - `plugins/ndf/src/ndf/progress/gate/entry.py`（`present` が資料を書く前に PR の今の head を読み、その head の資料を使うか書く）と `plugins/ndf/src/ndf/progress/gate/answering.py`（`github_observe` が今の head の資料のハッシュを返す）
-  - `plugins/ndf/src/ndf/progress/store.py`（保存先のディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルを 0600 にする）と `plugins/ndf/src/ndf/domains/records/mvv_gate.py`・`records/cli.py`（PostgreSQL の保存先では `stored_view` で自由記述を伏せる）
+  - `plugins/ndf/src/ndf/progress/store.py`（保存先のディレクトリを 0700、`NDF_PROGRESS_DB` の SQLite のファイルと既にある副ファイルを 0600 にし、限れない保存先では `append_events` が `mvv_gate` の自由記述を伏せて書く）と `plugins/ndf/src/ndf/progress/model.py`（`mvv_stored_view`）
   - `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`（`gate_outcome` の出力に判定した PR の番号 `pr`）と `plugins/ndf/contracts/workflow/context.schema.json`（`$defs.mvv_gate` の `pr`）
   - `plugins/ndf/tests/progress/gate/test_gate_present.py`
 - **変更内容:**
