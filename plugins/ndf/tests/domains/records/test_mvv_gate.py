@@ -293,6 +293,9 @@ def test_without_any_mvv_setting_the_gate_reads_neither_github_nor_the_base(tmp_
     plain = tmp_path / "plain"
     git_sandbox.sh(tmp_path, "init", "-q", "-b", "main", str(plain))
     _commit(plain, {"README.md": "x\n"})
+    # コミットしていない設定の下書きは数えない（#3959 の r3-2）
+    (plain / ".ndf").mkdir()
+    (plain / ".ndf" / "mvv.json").write_text(json.dumps({"body": "mvv.md", "versions": []}), encoding="utf-8")
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(plain, "design", _inputs(), _no_hub, ask)
     assert (_stopped(out), out["skip"], out["why"], ask.calls) == ("mvv_unapproved", False, [mvv_gate.NO_DECL], [])

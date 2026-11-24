@@ -93,25 +93,65 @@ def boundary_paths(root: Path, ref: str) -> tuple[str, ...]:
 
 
 def mvv_declared_locally(root: Path, remote: str) -> bool:
-    """手元の worktree・HEAD・リモート `remote` の追跡ブランチのどれかに MVV の設定があるか（ネットワークに出ない。#3959）。
+    """手元の HEAD かリモート `remote` の追跡ブランチのどれかのコミットに、MVV の設定があるか（ネットワークに出ない。#3959）。
 
-    どこにも無ければ、PR のベースにも承認済みの MVV は無いと見て、PR の取得とベースの取得を省く。手元が古くて見落としても、
-    判定を打たずに人へ問うだけで、承認ゲートを省く側へは倒れない。
-    - worktree に設定のファイルがあれば、git を起動せずに真（MVV を導入したリポジトリで起動を増やさない）
-    - 無いときだけ、取得しない `Git.offline` で HEAD と追跡ブランチの指すコミットを見る（git の起動 2 回）。部分クローンで手元に無い
-      設定の blob は、取得せずに無いと扱う（判定を打たずに人へ問う側）
-    - git が失敗して確かめられなければ真にし、今までどおり PR とベースを取得する経路へ進む
+    どこにも無いと確かめられたときだけ偽にし、PR の取得とベースの取得を省く。手元が古くて見落としても、判定を打たずに人へ
+    問うだけで、承認ゲートを省く側へは倒れない。どれも取得しない `Git.offline` で、blob を読まずにツリーだけでパスの有無を見る
+    （部分クローンで未取得の blob を無いと読まない）。worktree の未追跡の下書きは数えない。
+    - `git ls-tree HEAD -- <パス>` が行を返せば真（MVV を導入したリポジトリでは、git の起動はこの 1 回）
+    - 無ければ、追跡ブランチの指すコミットのツリーをパスの階層ごとにたどる（`_in_trees`）
+    - git が失敗した・ツリーが手元に無くて確かめられなければ真にし、今までどおり PR とベースを取得する経路へ進む
     """
-    if (root / mvv.decl_path()).is_file():
-        return True
     g = Git.offline(root)
+    path = mvv.decl_path()
     try:
+        if g.run("ls-tree", "HEAD", "--", path).strip():
+            return True
         tips = g.run("rev-parse", f"--remotes={remote}").split()
-        names = "".join(f"{ref}:{mvv.decl_path()}\n" for ref in ["HEAD", *tips]).encode("utf-8")
-        found = g.run_bytes("cat-file", "--batch-check=%(objectname)", stdin=names)
+        return _in_trees(g, tips, path) is not False
     except GitError:  # noqa: NDF401 外部コマンド: 手元で確かめられなければ、MVV があるものとして今までの経路（PR とベースの取得）へ進む
         return True
-    return any(not line.endswith(b" missing") for line in found.splitlines())
+
+
+def _in_trees(g: Git, commits: list[str], path: str) -> Optional[bool]:
+    """コミット `commits` のどれかのツリーに `path` があれば真、どれにも無いと確かめられれば偽、手元のツリーが欠けて
+    確かめられないコミットがあれば None。階層ごとに `git cat-file --batch` を 1 回起動し、ツリーだけを読む。"""
+    wanted = [f"{c}^{{tree}}" for c in commits]
+    unsure = False
+    for depth, name in enumerate(path.split("/")):
+        if not wanted:
+            break
+        found = _tree_entries(g.run_bytes("cat-file", "--batch", stdin="".join(f"{w}\n" for w in wanted).encode("utf-8")), len(wanted))
+        unsure = unsure or any(entries is None for entries in found)
+        hits = [entries[name.encode("utf-8")] for entries in found if entries is not None and name.encode("utf-8") in entries]
+        if depth == len(path.split("/")) - 1:
+            return True if hits else (None if unsure else False)
+        wanted = [oid for oid, kind in hits if kind == b"tree"]
+    return None if unsure else False
+
+
+def _tree_entries(raw: bytes, count: int) -> list[Optional[dict[bytes, tuple[str, bytes]]]]:
+    """`git cat-file --batch` の `count` 件の応答を、ツリーごとの名前 →（オブジェクト ID, 種類）にする。手元に無い・ツリーでない応答は None。"""
+    out: list[Optional[dict[bytes, tuple[str, bytes]]]] = []
+    for _ in range(count):
+        line, _, raw = raw.partition(b"\n")
+        head = line.split(b" ")
+        if len(head) != 3:  # `<名前> missing` など、本体の続かない応答
+            out.append(None)
+            continue
+        size, width = int(head[2]), len(head[0]) // 2
+        body, raw = raw[:size], raw[size + 1 :]
+        if head[1] != b"tree":
+            out.append(None)
+            continue
+        entries: dict[bytes, tuple[str, bytes]] = {}
+        while body:
+            mode, _, body = body.partition(b" ")
+            name, _, body = body.partition(b"\0")
+            entries[name] = (body[:width].hex(), b"tree" if mode == b"40000" else b"blob")
+            body = body[width:]
+        out.append(entries)
+    return out
 
 
 def snapshot_facts(root: Path, snap: mvv.Snapshot, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
