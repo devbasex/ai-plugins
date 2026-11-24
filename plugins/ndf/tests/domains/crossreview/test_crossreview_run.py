@@ -18,7 +18,7 @@ import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, store
+from ndf.domains.crossreview import cli, drive, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
@@ -821,8 +821,8 @@ def test_state_dir_reached_through_a_link_in_the_worktree_uses_the_checked_real_
     real = tmp_path / "real"
     real.mkdir()
     (wt / "link").symlink_to(real)
-    cfg = drive.RunConfig(wt, BRANCH, "origin/main", PR, wt / "link" / "st", False, ("codex",))
-    got = drive.outside_checkout(cfg)
+    cfg = settings.RunConfig(wt, BRANCH, "origin/main", PR, wt / "link" / "st", False, ("codex",))
+    got = settings.outside_checkout(cfg)
     assert got.state_dir == real.resolve() / "st"
     (wt / "link").unlink()
     (wt / "link").symlink_to(tmp_path / "elsewhere")
