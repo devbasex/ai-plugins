@@ -38,7 +38,7 @@ graph TD
 | --- | --- | --- |
 | MVV のコピー | `current(root, ref) -> Snapshot`。ベースブランチの承認済みの MVV のバージョン・sha256・コピーのパス・項目の一覧（`items`）・解決したコミット（`commit`）を返す。ベースの本文が承認の記録と合わなければ `MvvError`。CLI は `ndf records mvv current --base` | `records/mvv.py` |
 | 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py`（`citation_errors`）、`records/mvv.py`（`fenced_lines`・`decision_lines`） |
-| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
+| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`mvv_version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
 | 共通原則の本文 | `principles()` を `mvv_gate.py` から `mvv.py` へ移す | `records/mvv.py` |
 
 ## 文脈と制約
@@ -281,7 +281,7 @@ graph LR
 ### 決定 11: #4076 の直しと食い違わない部品を作るため、#4090・#4099 の決定 16 の 5 点をこの設計に入れる
 
 - **質問**: #4090・#4099 の設計（PR #4121）が決めた、#3959 と重なる 5 点（`Snapshot.commit`・`cite` の `mismatch`・`cite` が使う確かめの関数・`record_review` の契約・`review_holds` の規則）を、いつ #3959 の文書に入れるか
-- **選んだ案**: この設計で入れる。`Snapshot.commit` は #4076 の実装が足すので使うだけにし、`cite` は `mismatch` の分岐を持たず、`decision_lines` で 4 要素を作って `citation_errors` を呼ぶ。`record_review` は `clean`・`mvv` の引数と `ReviewWrite` の返り値を両方持ち、伏せた行の追記の失敗も `missing` に載せる。`review_holds` は今のバージョンの `withheld: true` の行で終わるキーも保留する（承認資料には伏せた理由の代わりに `WITHHELD` の文を載せる）
+- **選んだ案**: この設計で入れる。`Snapshot.commit` は #4076 の実装が足すので使うだけにし、`cite` は `mismatch` の分岐を持たず、`decision_lines` で 4 要素を作って `citation_errors` を呼ぶ。`record_review` は今の引数（`repo`・`pr`・`head`・`snapshot`・`rows`・`clean`）のまま返り値を `ReviewWrite` に変え、伏せた行の追記の失敗も `missing` に載せる。`review_holds` は今のバージョンの `withheld: true` の行で終わるキーも保留する（承認資料には伏せた理由の代わりに `WITHHELD` の文を載せる）
 - 採らなかった案: 決定 16 のとおり実装の PR で読み替える（実装する人が 2 つの設計を突き合わせて読み替えることになり、設計承認ゲートで見ていない形が実装に入る。実装計画のレビューの単位も、読み替えた後の関数で数えられない）
 - **代償**: この設計 PR が #4090・#4099 の設計を前提にする。#4076 の実装が #4090・#4099 の直しと違う形で入れば、この設計の該当の行を直す
 - 根拠: Value 11 / Value 14（MVV バージョン 11）
