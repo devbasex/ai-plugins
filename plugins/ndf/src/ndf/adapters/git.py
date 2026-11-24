@@ -27,6 +27,9 @@ _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:,
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
 _BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
+# git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
+_URL_USERINFO = re.compile(r"(?<=://)[^\s/?#]*@")
+_URL_QUERY = re.compile(r"(://[^\s?#]*[?#])\S+")
 # `git log --format` で各コミットの行の先頭に置くマーカー（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
@@ -112,8 +115,13 @@ def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
     return Completed(proc.returncode, proc.stdout, proc.stderr)
 
 
+def _masked(text: str) -> str:
+    """git の誤りの文から、URL の認証情報とクエリを伏せる（結果 JSON・ログに出すため）。"""
+    return _URL_QUERY.sub(r"\1***", _URL_USERINFO.sub("***@", text))
+
+
 def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
-    return GitError(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}")
+    return GitError(_masked(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -396,4 +404,4 @@ class Git:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} をマージできない: {done.stderr.strip()}")
+            raise GitError(f"{remote} の {name} をマージできない: {_masked(done.stderr.strip())}")

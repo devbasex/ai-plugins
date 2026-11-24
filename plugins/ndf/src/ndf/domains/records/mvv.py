@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from collections.abc import Callable, Mapping
@@ -39,6 +40,9 @@ PRINCIPLES = "data/ndf-common-principles.md"
 SNAPSHOT_DIR = "snapshots"
 # ファイル名に入れる sha256 の先頭の文字数
 _NAME_SHA = 12
+# 設計文書の決定の見出し（`### 決定 4: 題`）のレベルと題の始まり
+_DECISION_LEVEL = 3
+_DECISION = re.compile(r"決定 [0-9]+\b")
 
 
 class Snapshot(NamedTuple):
@@ -208,6 +212,11 @@ def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
     return path
 
 
+def mismatch_detail(blobs: Mapping[str, str]) -> str:
+    """本文が承認の後に変わったことを伝える文。`blobs` は `Snapshot.blobs`（最後が本文）。"""
+    return f"ベースの MVV の本文が承認の記録と合わない: {list(blobs)[-1]}"
+
+
 def items(body: str, shared: str) -> tuple[str, ...]:
     """MVV の本文と共通原則に実在する項目（`mvv_decide.items_of`）。コードブロックの中の例は数えない。"""
     return md.items_of(_without_code(body), _without_code(shared))
@@ -247,7 +256,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     sha = _sha256(body)
     state = md.status(decl, sha)
     if state == md.State.MISMATCH and not allow_mismatch:
-        raise MvvError(f"ベースの MVV の本文が承認の記録と合わない: {path}")
+        raise MvvError(mismatch_detail(blobs))
     if state != md.State.APPROVED:
         return Snapshot(state, None, None, None, (), blobs, commit, "", None)
     version = md.current_version(decl)
@@ -266,6 +275,22 @@ def _text(body: bytes, path: str) -> str:
         return body.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise MvvError(f"MVV の本文 {path} を UTF-8 で読めない: {exc}") from exc
+
+
+def fenced_lines(text: str) -> frozenset[int]:
+    """Markdown の本文 `text` の、コードブロック（囲みの記号の行とインデントも含む）の行の番号（1 始まり）。"""
+    return frozenset(no for no, inside in enumerate(markdown.code_lines(text), 1) if inside)
+
+
+def decision_lines(text: str) -> frozenset[int]:
+    """Markdown の本文 `text` の、決定の見出し（`### 決定 <数>`）の次の行から次の見出しの前までの行の番号（1 始まり）。"""
+    heads = markdown.atx_headings(text)
+    ends = [h.line for h in heads[1:]] + [len(markdown.code_lines(text))]
+    got: set[int] = set()
+    for head, end in zip(heads, ends, strict=False):
+        if head.level == _DECISION_LEVEL and _DECISION.match(head.title):
+            got.update(range(head.line + 2, end + 1))
+    return frozenset(got)
 
 
 def signals(root: Path, base_branch: str) -> md.Signals:

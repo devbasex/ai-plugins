@@ -210,7 +210,7 @@ graph TD
 ### 決定 9: 古いローカルのベースで既に入った変更を検査し直さないため、取得したベースをコミット 1 つに固定してすべてへ渡す
 
 - **質問**: `current` と差分の起点が別の参照を読む食い違いを、どう無くすか（#4090 の事象 9）
-- **選んだ案**: `drive._start` は同期（head とベースの 1 回の fetch）の後に `current(root, <リモート>/<ベース>)` を呼び、返った `Snapshot.commit`（`current` が手順 (1) で解いたコミット）を `RunConfig` の `base_commit` に置く。`_changed`・`_merge_base`・相手役の差分の起点（`scope.base or base_commit`）・`Basis` はすべて `base_commit` を使い、`cfg.base`（名前）は表示と取得にだけ使う。`review-scope` も手元の `<リモート>/<ベース>` を 1 回コミットに解いて同じく渡す。`Snapshot.commit` は #3959 の詳細設計が足す欄と同じものを、この設計で先に足す。`--base` が `<リモート>/<ブランチ>` の形ならリモート名を外した名前をブランチとして扱い、コミットの SHA などブランチに解けない値なら、MVV は Pull Request のマージ先のブランチ（`baseRefName`）のリモートの先端から読み、差分の起点は渡されたコミットのままにする（2026-11-24 の補足。要求仕様の前提 1 のとおり、レビュー中のブランチ自身の MVV を確かめに使わないため）
+- **選んだ案**: `drive._start` は同期（head とベースの 1 回の fetch）の後に `current(root, <リモート>/<ベース>)` を呼び、返った `Snapshot.commit`（`current` が手順 (1) で解いたコミット）を `RunConfig` の `base_commit` に置く。`_changed`・`_merge_base`・相手役の差分の起点（`scope.base or base_commit`）・`Basis` はすべて `base_commit` を使い、`cfg.base`（名前）は表示と取得にだけ使う。`review-scope` も手元の `<リモート>/<ベース>` を 1 回コミットに解いて同じく渡す。`Snapshot.commit` は #3959 の詳細設計が足す欄と同じものを、この設計で先に足す。`--base` の先頭が `<g.remote() の値>/` と一致するときだけその部分を外した名前をブランチとして扱い（`sprint/…` のようにスラッシュを含むブランチ名はそのまま使う）、コミットの SHA などブランチに解けない値なら、MVV は Pull Request のマージ先のブランチ（`baseRefName`）のリモートの先端から読み、差分の起点は渡されたコミットのままにする（2026-11-24 の補足。要求仕様の前提 1 のとおり、レビュー中のブランチ自身の MVV を確かめに使わないため）
 - 採らなかった案: `cfg.base` を `<リモート>/<ベース>` の名前に書き換える（名前は起動の途中で別のセッションの fetch に動かされうる。コミットで固定しないと、差分と MVV が別の時点を読む）
 - **代償**: `RunConfig` に欄が 1 つ増える
 - 根拠: Value 3 / Value 7（MVV バージョン 11）
@@ -280,7 +280,7 @@ graph TD
   | --- | --- | --- | --- |
   | `Snapshot.commit` | #3959 が欄を足し、cross-review は読まない | #4076 の実装で足す（決定 9）。cross-review が差分の起点に読む | 欄を足さずに使う |
   | `cite` の `mismatch` | `cite` が `MvvError` を投げる | `current` が先に `MvvError` を投げる（決定 15） | `cite` の `mismatch` の分岐を書かない。テストの期待（`precondition`）は変わらない |
-  | `cite` が使う `fenced_lines`・`citation_errors` | #4076 の形。`citation_errors` に（パス・行の番号・本文）の 3 要素を渡す | `code_lines` で内外を決め、誤りに `kind`（`format` を含む）が付く（決定 2・8）。`citation_errors` は（パス・行の番号・本文・決定の根拠の行か）の 4 要素を受け、4 番目に既定値を持たない。4 番目は `mvv_decide.decision_lines(text)`（`### 決定 <数>` の見出しの下で次の見出しまでの行）に行の番号があるかで決める | 各ファイルの本文に `decision_lines` を当てて 4 要素を作る（cross-review の `_citations` と同じ関数・同じ規則。`False` を決め打ちしない）。`summary` の「根拠の行の誤り N 件」に `format` を含めて数える |
+  | `cite` が使う `fenced_lines`・`citation_errors` | #4076 の形。`citation_errors` に（パス・行の番号・本文）の 3 要素を渡す | `code_lines` で内外を決め、誤りに `kind`（`format` を含む）が付く（決定 2・8）。`citation_errors` は（パス・行の番号・本文・決定の根拠の行か）の 4 要素を受け、4 番目に既定値を持たない。4 番目は `mvv.decision_lines(text)`（`### 決定 <数>` の見出しの下で次の見出しまでの行）に行の番号があるかで決める | 各ファイルの本文に `decision_lines` を当てて 4 要素を作る（cross-review の `_citations` と同じ関数・同じ規則。`False` を決め打ちしない）。`summary` の「根拠の行の誤り N 件」に `format` を含めて数える |
   | `record_review` の契約 | 返り値を `ReviewWrite` に変える | 引数 `clean` を足し、`judged_mvv` が今回の識別子と同じ行だけを書く（決定 6・7）。`clean` が None なら自由記述を持たない `withheld: true` の行を書く | `ReviewWrite` の変更と `clean` の引数を両方持つ。伏せた行の追記の失敗も `missing` に載せる |
 | `review_holds` の規則 | `redline` と、今の版の解除されない `deferred` の 2 つ | キーの最後の行が今の版の `withheld: true` の行なら、終わり方によらず「記録の自由記述が未完了」で保留する（決定 7） | 3 つ目の規則を足し、承認資料には伏せた行の理由・本文の代わりに `WITHHELD` の文を写す |
 
