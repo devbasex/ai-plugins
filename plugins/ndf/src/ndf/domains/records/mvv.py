@@ -90,9 +90,7 @@ def signals(root: Path, base_branch: str, *, warnings: list[dict[str, Any]]) -> 
     記録に読めない行があれば `warnings` へ足す。
     """
     decl = decl_at(root, md.signals_ref(base_branch, git_mod.Git(root).remote()))
-    path = record_path("mvv-signals")
-    rows, broken = jsonl.read_rows(path, kind="mvv-signals")
-    warnings += jsonl.broken_items(path, broken)
+    rows, _ = jsonl.read_rows_warned(record_path("mvv-signals"), kind="mvv-signals", warnings=warnings)
     return md.count_signals(rows, decl, repo_key(root))
 
 
@@ -138,8 +136,7 @@ def mvv_validate_sprint(
     key = md.mvv_validation_key(inputs)
     path = record_path("mvv-validation")
     repo = repo_key(root)
-    rows, broken = jsonl.read_rows(path, kind="mvv-validation")
-    warnings += jsonl.broken_items(path, broken)
+    rows, broken = jsonl.read_rows_warned(path, kind="mvv-validation", warnings=warnings)
     origin = md.reusable(rows, key, [(b.before, b.raw) for b in broken]) if reuse else None
     if origin is not None:
         row = md.reuse_row(origin, jsonl.now(), repo)

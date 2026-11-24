@@ -64,6 +64,15 @@ def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
     return [{"kind": "broken_rows", "path": str(path), "lines": [b.line for b in broken]}] if broken else []
 
 
+def read_rows_warned(
+    path: Path, *, kind: str, warnings: list[dict[str, Any]], wanted: Callable[[Mapping[str, Any]], bool] = lambda row: True
+) -> tuple[list[dict[str, Any]], list[Broken]]:
+    """`read_rows` で読み、除いた行があれば `broken_items` の警告を `warnings` へ足す。"""
+    rows, broken = read_rows(path, kind=kind, wanted=wanted)
+    warnings += broken_items(path, broken)
+    return rows, broken
+
+
 def parse_lines(lines: Iterable[str]) -> tuple[list[dict[str, Any]], int]:
     """JSONL の行を読む: 辞書の行と、読めなかった行（壊れた JSON・辞書でない）の数。空の行は数えない。"""
     rows: list[dict[str, Any]] = []

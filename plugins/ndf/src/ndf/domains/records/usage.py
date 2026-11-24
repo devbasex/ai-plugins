@@ -77,8 +77,7 @@ def record_subagent(
         path = usage_log_path(env)
         with jsonl.lock(path):
             total = transcript_usage(Path(transcript))
-            prior, broken = jsonl.read_rows(path, kind="usage", wanted=lambda r: r.get("agent_id") == agent)
-            warnings += jsonl.broken_items(path, broken)
+            prior, _ = jsonl.read_rows_warned(path, kind="usage", warnings=warnings, wanted=lambda r: r.get("agent_id") == agent)
             usage: Any = ud.stop_delta(prior, agent, total).as_dict() if isinstance(total, ud.Usage) else ud.UNKNOWN
             row = {"at": jsonl.now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}
             return jsonl.append(path, row, kind="usage")
