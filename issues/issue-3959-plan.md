@@ -27,7 +27,8 @@
 | `plugins/ndf/src/ndf/domains/records/mvv.py` | `validation_rows`・`review_rows`・`mvv_validate_sprint`・`ReviewWrite`・`record_review`・`cite`・`compare_files`。`cite` が呼ぶ `decision_lines`・`fenced_lines` は、#4076 の計画の U7 がこのモジュールに置く（判断のモジュールは `ndf.adapters` を読めないため。#4076 の計画の「修正対象」） |
 | `plugins/ndf/src/ndf/domains/records/mvv_decide.py` | `review_holds`（新設） |
 | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `gate_outcome`・`diff_rows`・`DiffError` |
-| `plugins/ndf/src/ndf/adapters/publish.py` | `Publisher._private_refs`（秘密を含む参照を照会しない） |
+| `plugins/ndf/src/ndf/adapters/publish.py` | `Publisher._private_refs`（秘密を含む参照を照会しない）・`scrub`（秘密と参照の重なる範囲を 1 回で伏せる） |
+| `plugins/ndf/src/ndf/adapters/run_log.py` | `secret_spans`（秘密の一致範囲） |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | `Outcome`・`_summary` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | `finish(record_failed=…)` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | `apply_fix`（見送りの区分 `defer` を持つ） |
