@@ -164,11 +164,15 @@ def _is_key(decl: Decl) -> bool:
     return not decl[1] and reg.metered_kind(decl[0]) == reg.API_KEY_KIND
 
 
-def key_child(env: Mapping[str, str], target: str, store: Path) -> bool:
-    """キーの子か（登録簿の API キーの子と、環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。"""
+def key_child(env: Mapping[str, str], target: str, store: Path, decl: Optional[Decl] = None) -> bool:
+    """キーの子か（登録簿の API キーの子と、環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。
+
+    `decl` は呼び手が候補ごとに 1 回だけ読んだ従量の接続の設定（在れば読み直さない。#4068）。
+    """
     if target.startswith(KEY_PREFIX):
         return True
-    decl = metered_decl(store, env) if target == reg.METERED else None
+    if decl is None:
+        decl = metered_decl(store, env) if target == reg.METERED else None
     return isinstance(decl, tuple) and _is_key(decl)
 
 
@@ -320,6 +324,41 @@ def _key_build(
     child = _pinned(session_env.key_env(env, name), f"{KEY_PREFIX}{name}:{gen}")
     got = _with_helper(child, argv, [name, "--generation", gen], tail, src)
     return got if isinstance(got, str) else got._replace(generation=gen)
+
+
+def metered_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
+    """従量の接続の設定。無い・読めない・検証に外れれば理由の符号。ラッパーは候補ごとに 1 回だけ読んで用意とバージョンの判定へ渡す（#4068）。"""
+    return _decl_of(store, env)
+
+
+def with_settings(argv: list[str], settings: str) -> list[str]:
+    """起動の引数の頭（`claude` と `--session-id`・`--resume` の 2 語）の直後に `--settings <JSON>` を差し込む。"""
+    return [*argv[:3], "--settings", settings, *argv[3:]]
+
+
+def merged_settings(argv: list[str], settings: str) -> list[str]:
+    """キーの子の 1 つの `--settings` の JSON の `hooks.Stop` に、起床の hook の登録を足す（`--settings` を 2 つにしない）。"""
+    at = argv.index("--settings") + 1
+    got = json.loads(argv[at])
+    hooks = got.setdefault("hooks", {})
+    hooks["Stop"] = [*hooks.get("Stop", []), *json.loads(settings)["hooks"]["Stop"]]  # noqa: NDF502 利用者の入力: Stop の無い設定は空の並び
+    return [*argv[:at], json.dumps(got), *argv[at + 1 :]]
+
+
+def has_settings(args: Sequence[str]) -> bool:
+    """受け継ぐ引数に利用者の `--settings`（`--settings <値>` と `--settings=<値>`）があるか。"""
+    return any(a == "--settings" or a.startswith("--settings=") for a in args)
+
+
+def version_env(env: Mapping[str, str], decl: Optional[Decl]) -> dict[str, str]:
+    """起動する claude のバージョンを読む環境（#4068）。従量の接続なら親の認証の変数と比べる変数を外し、設定の `PATH` だけを重ねる。
+
+    設定の資格情報と接続先は重ねない（`--version` は認証も接続も要らない）。従量の接続でなければ `env` のまま。
+    """
+    if decl is None:
+        return dict(env)
+    extra, _ = decl
+    return session_env.metered_env(env, {k: v for k, v in extra.items() if k == "PATH"}, saved=True)
 
 
 def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:

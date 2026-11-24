@@ -141,6 +141,19 @@ def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
     return version_at(name, resolve(argv0, env, cwd), env, cwd) if name in facts.ids(TABLE) else None
 
 
+def record_key(path: Optional[str]) -> Optional[tuple[tuple[str, int, int], bool]]:
+    """実行ファイルのバージョンの記録のキー（実パス・更新時刻・大きさ）と、そのキーが記録に在るか。`--version` を打たない。無ければ None（#4068）。"""
+    if path is None:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:  # noqa: NDF401 ファイル: 消えた実行ファイルには記録のキーが無い
+        return None
+    key = (path, st.st_mtime_ns, st.st_size)
+    with _LOCK:
+        return key, key in _SEEN
+
+
 def version_at(name: str, path: Optional[str], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
     """解決済みの実パス `path` の外部 CLI `name` のバージョン（`version` と同じ記録を使う。`PATH` を探し直さない）。"""
     if name not in facts.ids(TABLE) or path is None:

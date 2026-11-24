@@ -162,3 +162,22 @@ def test_i12_bin_scripts_exec_a_table_cli_only_after_launch_args():
         if m and "launch-args" not in text[: m.start()]:
             bad.append(p.name)
     assert bad == []
+
+
+def test_record_key_reports_the_key_and_whether_it_is_recorded(tmp_path, monkeypatch):
+    # #4068: バージョンの記録のキー（実パス・更新時刻・大きさ）と、記録に在るかを `--version` を打たずに返す
+    exe = tmp_path / "claude"
+    exe.write_text("#!/bin/sh\necho '2.1.330 (Claude Code)'\n", encoding="utf-8")
+    exe.chmod(0o755)
+    ran = []
+    real = cli_floor._read_version
+    monkeypatch.setattr(cli_floor, "_read_version", lambda *a: ran.append(a) or real(*a))
+    st = exe.stat()
+    assert cli_floor.record_key(str(exe)) == ((str(exe), st.st_mtime_ns, st.st_size), False)
+    assert ran == []
+    assert cli_floor.version_at("claude", str(exe)) == "2.1.330"
+    assert cli_floor.record_key(str(exe))[1] is True
+    exe.write_text("#!/bin/sh\necho '2.1.331 (Claude Code)'  \n", encoding="utf-8")
+    assert cli_floor.record_key(str(exe))[1] is False
+    assert cli_floor.record_key(str(tmp_path / "none")) is None and cli_floor.record_key(None) is None
+    assert len(ran) == 1
