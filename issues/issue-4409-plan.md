@@ -15,7 +15,11 @@
 | `src/ndf/core/production_merge.py`（新設） | 判定の部品 `Verdict`・`judge`・`automatic_rows`・`needs_approval`・`reaches_production` |
 | `src/ndf/domains/hooks/strict.py` | `_judge`・`_deliveries` が部品を呼ぶ。`_writes_merge_mark` を足し、`_automatic_production` を消す |
 | `contracts/hooks/imports.json` | hook の import の表に `ndf.core`・`ndf.core.production_merge` を足す |
-| `src/ndf/domains/release/trail.py` | `MergeTarget`・`MergeRow`・`MERGE_MARK`・`render_merge_row`・`merge_rows`・`merge_judgment`・`write_merge_row` を足す |
+| `src/ndf/core/merge_approval.py`（新設） | `MergeTarget`・`MergeRow`・`MERGE_MARK`・`render_merge_row`・`merge_rows`・`merge_judgment`・`write_merge_row` を足し、担い手の語・`BY_LINE`・`TrailError` を `domains/release/trail.py` から移す。工程（`progress/gate`）とドメイン（`domains/release`・`domains/records`）の両方が読むので、層の規則（`ndf check` の規則 `layer`）に合わせて両方より下の `ndf.core` に置く |
+| `src/ndf/core/approval_words.py`（新設） | 回答の語 `APPROVED`・`REJECTED`・`ANSWERS` と、承認資料が対象にしたコミットの行の見出し `HEAD_LINE` を `domains/release/approval_decide.py` から移す |
+| `src/ndf/core/actors.py`（新設） | 回答した者の形 `ACTORS`・`HUMAN`（`ndf answer --by` と `ndf plan next --by` が共有する） |
+| `src/ndf/domains/release/trail.py`・`approval_decide.py`・`cli.py` | 担い手の語・`TrailError`・回答の語を `ndf.core` から読む。振る舞いは変えない |
+| `src/ndf/checks/children.json` | 新設したモジュール（`ndf.core.actors`・`ndf.core.approval_words`・`ndf.core.merge_approval`・`ndf.core.production_merge`）のオーナーの子 `PM1` と、それを読む子の先に要る子を足す（設計書の「子の表の変更」） |
 | `contracts/causes/approval_stale.json`（新設） | 停止理由 `approval_stale` の定義 |
 | `src/ndf/adapters/github.py` | `branch_file`・`viewer_login`・`_verify` を足し、`merge`・`_merge_with`・`_enqueue` に `expect` を足す |
 | `src/ndf/ci_cli.py` | `ndf ci merge` に判定・照合・証跡の確かめと `--production-gate` を足し、`ndf ci ask`・`ndf ci answer` を足す |
@@ -54,8 +58,8 @@
 
 ### Task 4: マージの承認の証跡を読み書きする
 
-- **対象ファイル:** `src/ndf/domains/release/trail.py`、`contracts/causes/approval_stale.json`（新設）、`tests/domains/release/test_trail.py`
-- **変更内容:** 詳細設計書の「承認の対象とマージの承認の証跡」の関数を足す。`tests/domains/release/test_trail.py` は設計書では既存の扱いだが、今は無いので新設する（`trail.py` を直に読むテストが今は無いため）
+- **対象ファイル:** `src/ndf/core/merge_approval.py`（新設）、`src/ndf/core/approval_words.py`（新設）、`src/ndf/core/actors.py`（新設）、`src/ndf/domains/release/trail.py`・`approval_decide.py`・`cli.py`（読む先の付け替え）、`src/ndf/checks/children.json`、`contracts/causes/approval_stale.json`（新設）、`tests/domains/release/test_trail.py`
+- **変更内容:** 詳細設計書の「承認の対象とマージの承認の証跡」の関数を `core/merge_approval.py` に足す。`domains/release/trail.py` には置かない。工程の側（`progress/gate`）が読むので、`domains` に置くと層の規則（`ndf check` の規則 `layer`）に反するためである。担い手の語と `TrailError` は `core/merge_approval.py` へ、回答の語は `core/approval_words.py` へ移し、`domains/release` はそこから読む。新設したモジュールは `checks/children.json` に子 `PM1` として載せる。`tests/domains/release/test_trail.py` は設計書では既存の扱いだが、今は無いので新設し、`core/merge_approval.py` の証跡の読み書きと、`trail.read` が証跡を数えないことをまとめて確かめる
 - **満たす受け入れ条件:** 4409:5（書き手・後からの却下・本番へ反映されるか）、設計の決定 7（CD の workflow との境界）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
