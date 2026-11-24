@@ -207,7 +207,7 @@
     },
     "workflow": {
       "type": "object",
-      "description": "工程の有効・無効の設定（stages）",
+      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）",
       "properties": {
         "stages": {
           "type": "object",
@@ -215,6 +215,40 @@
           "additionalProperties": {
             "$ref": "#/$defs/StageToggle"
           }
+        },
+        "launch": {
+          "type": "object",
+          "description": "工程から呼ぶプランのテンプレートの起動。値は語の並びで、テンプレートの差し込みの同じ名前の値になる",
+          "properties": {
+            "review": {
+              "type": "array",
+              "description": "差し込み review の起動のコマンド（語の並び）",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "rebuild": {
+              "type": "array",
+              "description": "差し込み rebuild の起動のコマンド（語の並び）",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "refactor": {
+              "type": "array",
+              "description": "差し込み refactor の起動のコマンド（語の並び）",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
