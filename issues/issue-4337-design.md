@@ -162,14 +162,16 @@ flowchart TD
 
 | 終わり方 | 結果 |
 | --- | --- |
-| 組み直した | `ok`。`items` は足すべき内容の `{"id", "text", "doc"}`、`metrics` は `targets`（対象のパス）・`readers`（文書ごとの確かめの記録） |
+| 組み直した | `ok`。`items` は足すべき内容の `{"id", "text", "doc"}`、`metrics` は `targets`（対象のパス）・`readers`（文書ごとの確かめの記録）・`worker_status`（`ok`） |
 | 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点）」、`items` は空、`metrics.targets` は空。worker を起動しない |
 | 起点を決められない | `stopped`（`precondition`）。`summary` に読めない参照の名前（ほかの名前のリモートだけがあるときは、求めた名前と設定のキー `.ndf/worktree.json` の `remote`）。分岐点が無いとき（`git diff A...B` の 3 ドット差分の失敗）も同じで、参照の名前と git の文を載せる。worker を起動しない。条件 11 が挙げるのは参照が読めないときだけで、ほかの 2 つは要求仕様の E4 の行にある |
-| worker が作業を残した・起動に失敗した・判断を求めた | `stopped`。`ndf worker run` の結果の `kind`・`gaps` を載せる（I7。下の「worker の終わりの読み方」） |
+| worker が作業を残した・起動に失敗した・判断を求めた | `stopped`。`ndf worker run` の結果の `kind`・`gaps` を載せる（I7。下の「worker の終わりの読み方」）。`metrics.worker_status` に `ndf worker run` の `status`（`gate` か `stopped`）を写す |
 | 足すべき内容の形が違う（`text` が無い、`doc` が対象の文書でない） | `stopped`（`bad_report`） |
-| 確かめの記録が欠けた文書がある | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件で、`kind` は `reader`、`name` は文書のパス、`reason` は欠けた内容（I4）。worker が作業を残したとき（I7）も同じ `incomplete` になるので、`kind` を固定して見分けられるようにする |
+| 確かめの記録が欠けた文書がある | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件で、`kind` は `reader`、`name` は文書のパス、`reason` は欠けた内容（I4）。`metrics.worker_status` は `ok` |
 | 読み手役が不合格とした文書がある | `ok`。`items` に不合格の文書を 1 件ずつ（`id` は `reader-<番号>`、`text` は文書・不合格の質問・理由）足し、`warnings` にも文書ごとに 1 件載せる（I5） |
 | 読み手役を 1 回も立てられなかった文書（`not_run`）がある | `ok`。読み手役の確認が済んでいないので合格と同じには扱わず、不合格の文書と同じく `items`（`text` は文書・立てられなかった理由）と `warnings` に 1 件ずつ載せる（I5） |
+
+worker を起動した終わり方では、`metrics.worker_status` に、`ndf worker run` が標準出力に返した検査後の `status`（`ok`・`gate`・`stopped`）を写す。worker が作業を残したとき（I7）も、確かめの記録が欠けたとき（I4）も `stopped`（`incomplete`）になり、`gaps` の `kind` は worker が自由に書けるので、`cause` と `gaps` だけでは見分けられないからである。worker の結果ファイルの `status` は使わない。結果ファイルが `ok` でも、`gaps` や必須の `outputs` の欠けがあれば、`ndf worker run` は `stopped`（`incomplete`）を返すからである（`core/worker_outcome.py` の `outcome_of`）。worker を起動しなかった終わり方（対象が 0 件、起点を決められない）では `metrics.worker_status` を書かない。
 
 どの終わり方でも、標準出力の最後の 1 行と `--out` に同じ結果 JSON を書く。書く前に結果を共通の結果スキーマと専用の結果スキーマで確かめ、形が違えば両方とも `stopped`（`invalid`）に差し替える。標準出力だけを差し替えると、プランが止まったと判断した回の項目を、`--out` を読むレビューが引き継ぐからである。
 
@@ -469,7 +471,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | I4 | `readers` に対象の文書の行が無い・同じ対象の文書の行が 2 件ある・`checks` の言い直しが無い・`checks` の数が合わない・`not_run` か `self` で理由が無いか `checks` が空でない・`checks` が 2 つで先頭が `pass`・`plan` に `self` 以外・`design` に `self` の結果は `incomplete` になり、欠けた文書が `kind` が `reader`、`name` が文書のパスの項目として `gaps` に出る。`design` と `manuscript` の `not_run`、`plan` と `manuscript` の `self`、設計書と原稿の `fail`（`checks` 2 つ）は欠けにならない | 記録を確かめない。実装計画にも読み手役の記録を求める。`not_run` と `self` に回数を求める。2 つの `checks` で最後だけを見る |
 | I5 | `fail` か `not_run` の文書がある `ok` の報告は、どちらの工程の既定のコマンドでも `ok` になり、`items` に `reader-1` が入り、`warnings` にその文書が出る。`reader-1` の `text` は、`fail` なら文書のパス・不合格の質問・理由、`not_run` なら文書のパス・読み手役を起動できなかった理由を含む（`not_run` は `checks` が空なので質問を求めない）。対象の外の文書の記録は、`fail` でも形が違っても、`items` にも `metrics.readers` にも出ず、`ok` のまま書かれる | `fail` か `not_run` を記録があるだけで通す。`items` に足さない。対象の外の記録まで項目にする |
 | I6 | worker の `items` が同じ `id` を 2 件持つ・`reader-1` を持つ・`id` を持たないとき、結果の `items` は全件が残り、`id` が重ならない。レビューの読み取り（`as_handed`）でも別々の項目になる | worker の `id` をそのまま使う |
-| I7・「worker の終わりの読み方」 | `ndf worker run` が `stopped` か `gate` なら、結果ファイルを読まずに `stopped` が返り、`kind`・`gaps` が載る。`ok` なら標準出力のセッション情報でなく結果ファイルの `items` が渡る | `gate` をそのまま返す。標準出力の `items` を足すべき内容として読む |
+| I7・「worker の終わりの読み方」 | `ndf worker run` が `stopped` か `gate` なら、結果ファイルを読まずに `stopped` が返り、`kind`・`gaps` と、`metrics.worker_status` に `ndf worker run` の `status` が載る。結果ファイルが `ok` で `gaps` がある worker は `metrics.worker_status` が `stopped` になる。I4 の `incomplete` では `metrics.worker_status` が `ok` になる。`ok` なら標準出力のセッション情報でなく結果ファイルの `items` が渡る | `gate` をそのまま返す。標準出力の `items` を足すべき内容として読む |
 | 16 | 使い捨ての worktree で、実物の worker に設計書 1 本を組み直させ、`--out` の `metrics.readers` と、同じ実行の会話記録を読む（手で確かめる）。読み手役を実際に起動できたか（A。会話記録に起動と応答が無ければ未確認）と、起動できなかったことが記録に残るか（B）を別々に判定し、両方をスプリントの PR の本文に書く（「未確認のまま残ること」） | `not_run` が残っただけで、読み手役を起動できることまで確かめたと書く。会話記録を見ずに `metrics.readers` の `pass` だけで A を確認済みにする |
 | 17・移行性 | 決定 8 の PR のマージの後、`main` に設定とスクリプトが無いことを見る（手で確かめる） | — |
 
@@ -528,14 +530,14 @@ B の判定は、会話記録の結果と、結果ファイルにある対象の
 
 B が未確認のときも、PR の本文に「未確認」と書き、理由を添える。
 
-A・B の表と条件 16 の合否は、worker が `ok` で終わった実行にだけ当てはめる。worker が `ok` で終わる前に止まった実行は、読み手役の記録を確かめる所まで進んでいないので、設計書の記録が無くても記録の処理の不具合ではない。この実行では A・B・条件 16 のどれも判定せず、停止の理由を直して確認をやり直す。当たるのは次の場合である。
+A・B の表と条件 16 の合否は、`ndf worker run` が `ok` を返した実行にだけ当てはめる。`ndf worker run` が `ok` を返す前に止まった実行は、読み手役の記録を確かめる所まで進んでいないので、設計書の記録が無くても記録の処理の不具合ではない。この実行では A・B・条件 16 のどれも判定せず、停止の理由を直して確認をやり直す。当たるのは次の場合である。
 
 - 起点の参照を決められず、worker を起動しなかった（`stopped`（`precondition`））
 - worker が作業を残した、起動に失敗した、または判断を求めた（I7）。読み手役を呼ぶ前に止まり、会話記録が終了まで残っていても同じである
 
-worker が `ok` で終わったかは、同じ実行で worker が書いた結果ファイル（起動指示の「結果ファイル」の行にあるパス）の `status` で確かめる。`--out` だけでは見分けられない。I4 と I7 のどちらも `stopped`（`incomplete`）で、`gaps` に文書のパスが載ることがあるからである。
+`ndf worker run` が `ok` を返したかは、同じ実行の `--out` の `metrics.worker_status` で確かめる。この値は、`ndf document-rebuild run` が `ndf worker run` の標準出力から写した検査後の `status` である（「終わり方」の表の下）。`ok` なら判定に進み、`gate` か `stopped` なら判定せずにやり直す。値が無ければ worker を起動していないので、これも判定せずにやり直す。worker が書いた結果ファイルの `status` や、`cause` と `gaps` では見分けない。結果ファイルが `ok` でも `ndf worker run` は `stopped` を返すことがあり、I4 と I7 はどちらも `stopped`（`incomplete`）になるからである。
 
-worker が `ok` で終わった実行では、A・B の判定とは別に、`--out` だけで条件 16 の不合格を決められる。要求仕様の条件 16 は「確かめの結果か、立てられなかった理由が残る」ことである。次のどれかに当たれば、条件 16 が求める出力が欠けているので、条件 16 は不合格とし、記録の処理を直す。会話記録が欠けていても、この判定は変わらない。
+`metrics.worker_status` が `ok` の実行では、A・B の判定とは別に、`--out` だけで条件 16 の不合格を決められる。要求仕様の条件 16 は「確かめの結果か、立てられなかった理由が残る」ことである。次のどれかに当たれば、条件 16 が求める出力が欠けているので、条件 16 は不合格とし、記録の処理を直す。会話記録が欠けていても、この判定は変わらない。
 
 - `--out` の `metrics.readers` に対象の設計書の記録が無い
 - 記録が `pass` か `fail` なのに、`checks` に読み手役による設計書の言い直しが無い
