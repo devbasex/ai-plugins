@@ -10,7 +10,8 @@ from typing import Any, Optional
 import git_sandbox
 import pytest
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import context, dispatch, tables
+from ndf.domains.hooks.counter import Counter
 from ndf.domains.hooks.guards import reading_check as rc
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
@@ -33,7 +34,8 @@ GATE, ASK = "ndf-gate:1", "ndf-ask:redline:C7"
 
 @pytest.fixture
 def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """リモート origin が owner/repo のリポジトリ。記録の保存先は一時のディレクトリ。"""
+    """リモート origin が owner/repo のリポジトリ。記録の保存先は一時のディレクトリ。締め切りまでの残りは減らない。"""
+    monkeypatch.setattr(rc, "monotonic", lambda: 0.0)
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "state"))
     return make_repo(tmp_path / "r")
 
@@ -57,7 +59,7 @@ def _refs(monkeypatch: pytest.MonkeyPatch, sha: Optional[str]) -> list[list[str]
     """手元のリモート追跡ブランチ（None なら無い）。git へ渡した参照の名前を残す。"""
     asked: list[list[str]] = []
 
-    def refs(root: Path, names: list[str]) -> dict[str, str]:
+    def refs(root: Path, names: list[str], seconds: float) -> dict[str, str]:
         asked.append(names)
         return {"refs/remotes/origin/design/x": sha} if sha is not None else {}
 
@@ -66,7 +68,7 @@ def _refs(monkeypatch: pytest.MonkeyPatch, sha: Optional[str]) -> list[list[str]
 
 
 def _no_git(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refs(root: Path, names: list[str]) -> dict[str, str]:
+    def refs(root: Path, names: list[str], seconds: float) -> dict[str, str]:
         raise AssertionError("git を起動しない")
 
     monkeypatch.setattr(rc, "_refs", refs)
@@ -168,13 +170,32 @@ def test_a_missing_tracking_branch_passes(root: Path, monkeypatch) -> None:
 def test_a_failing_git_passes(root: Path, monkeypatch, error: Exception) -> None:
     """順 5: git が失敗した。"""
 
-    def refs(root: Path, names: list[str]) -> dict[str, str]:
+    def refs(root: Path, names: list[str], seconds: float) -> dict[str, str]:
         raise error
 
     _record((PR,))
     monkeypatch.setattr(rc, "_refs", refs)
     assert _call(root, GATE) is None
     assert records()[-1]["notes"]["reading"] == "no_head"
+
+
+@pytest.mark.parametrize(("left", "seconds"), [(5.0, 0.4), (0.1, 0.1), (0.0, None), (-1.0, None)])
+def test_git_leaves_the_margin_for_the_forwarding(root: Path, monkeypatch, left: float, seconds: Optional[float]) -> None:
+    """git に使うのは締め切りから余白を引いた残りまで。残りが無ければ起動せず、head を読めない PR として通す。"""
+    used: list[float] = []
+
+    def refs(root: Path, names: list[str], seconds: float) -> dict[str, str]:
+        used.append(seconds)
+        return {"refs/remotes/origin/design/x": HEAD}
+
+    _record((PR,))
+    monkeypatch.setattr(rc, "_refs", refs)
+    tool_input = {"questions": QUESTIONS, "metadata": {"source": GATE}}
+    ctx = context.HookContext("claude", "PreToolUse", sample("claude", "PreToolUse", root, tool_input=tool_input))
+    deadline = tables.policy_value("hook.budget.pre-tool-use", "margin") + left
+    got = rc.check(ctx, dispatch.GuardServices(reading.checks_path().parent, Counter.unusable(), deadline))
+    assert got.kind == "pass" and got.notes == ({"reading": "no_head"} if seconds is None else {})
+    assert used == ([] if seconds is None else [pytest.approx(seconds)])
 
 
 def test_the_third_denial_of_the_same_reason_becomes_advice(root: Path) -> None:
@@ -223,5 +244,5 @@ def test_the_tracking_branches_are_read_by_exact_name(tmp_path: Path, monkeypatc
     sha = git_sandbox.sh(repo, "rev-parse", "HEAD").strip()
     for name in ("design/x", "sprint/a"):
         git_sandbox.sh(repo, "update-ref", f"refs/remotes/origin/{name}", sha)
-    assert rc._refs(repo, ["refs/remotes/origin/design/x", "refs/remotes/origin/none"]) == {"refs/remotes/origin/design/x": sha}
-    assert rc._refs(repo, ["refs/remotes/origin/sprint"]) == {"refs/remotes/origin/sprint/a": sha}
+    assert rc._refs(repo, ["refs/remotes/origin/design/x", "refs/remotes/origin/none"], 10) == {"refs/remotes/origin/design/x": sha}
+    assert rc._refs(repo, ["refs/remotes/origin/sprint"], 10) == {"refs/remotes/origin/sprint/a": sha}

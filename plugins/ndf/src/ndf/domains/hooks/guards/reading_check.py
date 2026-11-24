@@ -9,22 +9,27 @@
 4. 同じ質問の記録が無い、または承認する PR の head が記録と違えば止める
 5. ほかは通す。head を読めない PR があれば計測に `reading: no_head` を残す
 
-PR の head は、手元のリモート追跡ブランチから git を 1 回だけ起動して読む。
+PR の head は、手元のリモート追跡ブランチから git を 1 回だけ起動して読む。後の guard が質問を転送する時間を残すため、git に使うのは
+hook の締め切りから余白を引いた残りまでとし、残りが無ければ起動しない（head を読めない PR として扱う）。
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import git as git_mod
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import budget, tables
 from ndf.domains.hooks.strict import _git_dir, _remote_slug, _repo_root
 from ndf.domains.hooks.verdict import Verdict, deny, passing
 from ndf.domains.records import reading_decide as rd
+
+# 締め切りの時計（`svc.deadline` と同じ基準）。テストで差し替える
+monotonic = time.monotonic
 
 GATE = "ndf-gate:"
 ASK = "ndf-ask:"
@@ -50,9 +55,10 @@ def check(ctx, svc) -> Verdict:
     if root is None or repo is None or rows is None:
         return passing(reading="unreadable")
     key = rd.question_key(ctx.tool_input.get("questions"))
-    prs = _pulls_of(kind, rd.used_row(key, repo, rows))
-    heads = _tracked(root, prs) if prs else {}
-    words = rd.missing(key, repo, rows, heads)
+    row = rd.used_row(key, repo, rows)
+    prs = _pulls_of(kind, row)
+    heads = _tracked(root, prs, _git_seconds(ctx, svc)) if prs else {}
+    words = rd.missing(key, repo, [row] if row is not None else [], heads)
     if words:
         return deny(denial(kind, words))
     return passing(reading="no_head") if len(heads) < len(prs) else passing()
@@ -96,23 +102,33 @@ def _pulls_of(kind: str, row: Optional[Mapping[str, Any]]) -> list[dict[str, Any
     return list(row["prs"]) if kind == GATE and row is not None else []
 
 
-def _tracked(root: Path, prs: Sequence[Mapping[str, Any]]) -> dict[int, str]:
-    """PR の番号から、手元のリモート追跡ブランチの head。読めなかった PR は持たない。"""
+def _git_seconds(ctx, svc) -> float:
+    """git に使える秒: 締め切りから余白を引いた残りと、git を 1 回起動する上限の小さい方。予算が無ければ 0。"""
+    found = budget.budget_for(ctx.runtime, ctx.event)
+    if found is None:
+        return 0.0
+    return min(svc.deadline - found.margin - monotonic(), float(tables.policy_value("hook.git-rev-parse", "seconds")))
+
+
+def _tracked(root: Path, prs: Sequence[Mapping[str, Any]], seconds: float) -> dict[int, str]:
+    """PR の番号から、手元のリモート追跡ブランチの head。読めなかった PR は持たない（使える秒が無ければ空）。"""
+    if seconds <= 0:
+        return {}
     git_dir = _git_dir(root)
     try:
         remote = git_mod.remote_of(git_dir.parent if git_dir is not None else root)
         refs = {pr["number"]: f"refs/remotes/{remote}/{pr['branch']}" for pr in prs}
-        found = _refs(root, sorted(set(refs.values())))
+        found = _refs(root, sorted(set(refs.values())), seconds)
     except (OSError, subprocess.SubprocessError, git_mod.RemoteError):  # git の失敗では質問を止めない（決定 11）
         return {}
     return {number: found[ref] for number, ref in refs.items() if ref in found}
 
 
-def _refs(root: Path, names: Sequence[str]) -> dict[str, str]:
+def _refs(root: Path, names: Sequence[str], seconds: float) -> dict[str, str]:
     """参照の名前から SHA。`for-each-ref` の指定は配下の参照にも当たるので、名前が同じものは呼び手が選ぶ。"""
     done = subprocess.run(
         ["git", "for-each-ref", "--format=%(objectname) %(refname)", *names],
-        cwd=root, capture_output=True, text=True, check=True, timeout=float(tables.policy_value("hook.git-rev-parse", "seconds")),
+        cwd=root, capture_output=True, text=True, check=True, timeout=seconds,
         env={**os.environ, **git_mod.NO_PROMPT},
     )  # fmt: skip
     pairs = [line.split(" ", 1) for line in done.stdout.splitlines()]
