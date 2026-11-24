@@ -79,8 +79,9 @@ jobs:
   #
   # NDF（plugins/ndf/）のテストは同じジョブの後の手順で、プラグインの根を起点にその依存の環境（plugins/ndf/pyproject.toml と
   # uv.lock。docs/specifications/ndf-rebuild.md の決定 78）で回す。根の pytest は plugins/ndf を収集しない（根の conftest.py）。ファイルの割り当ては
-  # 同じ scripts/pytest_shard.py で、重さはファイルの項目数（scripts/pytest-shard-seconds.json は根から見たパスの実測秒で、
-  # プラグインの根から収集した id と合わない）
+  # 同じ scripts/pytest_shard.py を pytest のプラグイン（-p pytest_shard）として読み込み、収集の前に実測秒で決める（#4331 の決定 6）
+  #
+  # 根と NDF の JUnit XML（テスト 1 件ごとの秒）を成果物に残す。成果物の名前は scripts/pytest_shard.py も同じ値を持つ
   pytest-shard:
     name: pytest (${{ matrix.shard }}/6)
     needs: ci-scope
@@ -122,8 +123,12 @@ jobs:
         run: |
           command -v tmux || { sudo apt-get update && sudo apt-get install -y tmux; }
           tmux -V
+      # 成果物が最新の試行のものかを、中央値のジョブがジョブの一覧の run_attempt と照合する（#4331）
+      - name: 試行の番号
+        run: echo "${{ github.run_attempt }}" > shard-attempt-${{ matrix.shard }}.txt
       # 項目ごとの名前と結果を JUnit XML に残す（ログは -q で件数だけ。#2346）
-      - run: uv run --frozen --project . --all-extras pytest . -q -n auto --junitxml=pytest-junit-${{ matrix.shard }}.xml
+      - name: 根のテスト
+        run: uv run --frozen --project . --all-extras pytest . -q -n auto --junitxml=pytest-junit-${{ matrix.shard }}.xml
         env:
           SHARD_TOTAL: 6
           SHARD_INDEX: ${{ matrix.shard }}
@@ -131,33 +136,44 @@ jobs:
         if: always()
         with:
           name: pytest-junit-${{ matrix.shard }}
-          path: pytest-junit-${{ matrix.shard }}.xml
+          path: |
+            pytest-junit-${{ matrix.shard }}.xml
+            shard-attempt-${{ matrix.shard }}.txt
+          overwrite: true
           if-no-files-found: warn
-      # 根のテストが落ちても回す（どちらの失敗も 1 回の実行で見えるようにする）
-      - name: NDF のテストのファイルを決める
-        if: ${{ !cancelled() }}
-        working-directory: plugins/ndf
-        env:
-          SHARD_INDEX: ${{ matrix.shard }}
-        run: |
-          uv run --frozen --project . pytest --collect-only -q > "$RUNNER_TEMP/ndf-collected.txt"
-          python3 ../../scripts/pytest_shard.py files --total 6 --index "$SHARD_INDEX" < "$RUNNER_TEMP/ndf-collected.txt" > "$RUNNER_TEMP/ndf-files.txt"
-          wc -l < "$RUNNER_TEMP/ndf-files.txt"
+      # 根のテストが落ちても回す（どちらの失敗も 1 回の実行で見えるようにする）。
       # ok の出力を確かめた副命令の名前を書き出し、pytest-ndf-ok-tools が 6 つを合わせて確かめる
-      # （ファイルを渡す実行は全体の実行でないため、plugins/ndf/tests/conftest.py は自分では確かめない）
+      # （NDF_OK_TOOLS_OUT を渡された実行は記録を書くだけで、plugins/ndf/tests/conftest.py は自分では確かめない）。
+      # JUnit XML はワークスペースの根に書き、成果物の中の配置を根の成果物とそろえる
       - name: NDF のテスト
         if: ${{ !cancelled() }}
         working-directory: plugins/ndf
         env:
+          SHARD_TOTAL: 6
+          SHARD_INDEX: ${{ matrix.shard }}
           NDF_OK_TOOLS_OUT: ${{ runner.temp }}/ok-tools-${{ matrix.shard }}.txt
-        run: xargs -r -a "$RUNNER_TEMP/ndf-files.txt" uv run --frozen --project . pytest -q -n auto
+          PYTHONPATH: ${{ github.workspace }}/scripts
+        run: uv run --frozen --project . pytest -q -n auto -p pytest_shard --junitxml=../../pytest-ndf-junit-${{ matrix.shard }}.xml
+      # 所要を測るためだけに上げる。転送が落ちても必須のチェックを落とさない
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: pytest-ndf-junit-${{ matrix.shard }}
+          path: |
+            pytest-ndf-junit-${{ matrix.shard }}.xml
+            shard-attempt-${{ matrix.shard }}.txt
+          overwrite: true
+          if-no-files-found: warn
+      # 保存期間は失敗したジョブだけを再実行できる 30 日にそろえる（成功していたジョブの記録が期限切れにならない）
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: ndf-ok-tools-${{ matrix.shard }}
           path: ${{ runner.temp }}/ok-tools-${{ matrix.shard }}.txt
+          overwrite: true
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
 
   # NDF のテストの全体の実行の終わりの確かめ（ok の出力を 1 度も確かめなかった副命令で落とす。plugins/ndf/tests/conftest.py）を、
   # 分けたジョブの記録を合わせて行う。結果は集約のジョブ pytest が返す

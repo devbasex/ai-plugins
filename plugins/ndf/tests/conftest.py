@@ -7,7 +7,8 @@
 スキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）で確かめる（fixture `_checked_emit`。#3518 の決定 9）。
 形の誤った結果をわざと作るテストはマーカー `ndf_bad_result` を付ける。全体の実行の終わりに、ok の出力を 1 度も確かめなかった
 サブコマンドがあれば、その名前を出して落とす（`pytest_sessionfinish`）。CI はテストをファイル単位で 6 つのジョブへ分けるため、
-各ジョブは環境変数 `NDF_OK_TOOLS_OUT` のファイルへ記録を書き、後のジョブ `ndf-next-ok-tools` が合わせて確かめる。
+環境変数 `NDF_OK_TOOLS_OUT` を渡された実行は記録を書くだけで、自分では確かめない。合わせて確かめるのは後のジョブ
+`pytest (NDF の ok の出力)` である。
 
 使い捨ての PostgreSQL は `initdb` と `pg_ctl` で起動する（fixture `start_postgres`。実体は `support/postgres_server.py`）。GitHub Actions の ubuntu の Runner は
 PostgreSQL を入れてある（サービスは止まっている）。手元に無ければ飛ばし、CI（環境変数 `CI`）では落とす。
@@ -103,14 +104,17 @@ def pytest_testnodedown(node, error) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """worker は記録を controller へ渡す。controller（か並列でない実行）は、全体の実行のときだけ ok の無いサブコマンドで落とす。"""
+    """worker は記録を controller へ渡す。controller（か並列でない実行）は、`NDF_OK_TOOLS_OUT` があれば記録を書いて終わり、
+    無ければ全体の実行のときだけ ok の無いサブコマンドで落とす。"""
     config = session.config
     if hasattr(config, "workeroutput"):
         config.workeroutput[OK_TOOLS_KEY] = sorted(_ok_tools)
         return
     out = os.environ.get(OK_TOOLS_OUT_ENV)
     if out:
+        # 分けたジョブの記録は、後のジョブ pytest (NDF の ok の出力) が 6 つを合わせて確かめる
         Path(out).write_text("".join(f"{t}\n" for t in sorted(_ok_tools)), encoding="utf-8")
+        return
     if not is_full_run(config) or exitstatus != 0:
         return
     missing = sorted(set(cli.COMMANDS) - _ok_tools)

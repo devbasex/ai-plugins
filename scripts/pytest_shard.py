@@ -7,21 +7,44 @@
 `files` は収集した項目の id（`<ファイル>::<名前>`）を標準入力から読み、そのジョブが受け持つファイルを 1 行ずつ出す。
 重さは `--seconds` の実測秒（無いファイルは中央値）、指定が無ければファイルの項目数で数える。
 値が古くても割り当ては成り立ち、偏りが戻るだけである。偏ってきたら `seconds` を打ち直す。
-`seconds` が書く実測秒のパスはリポジトリの根から見たもので、プラグインの根から収集した NDF のテストの id と合わない。
-NDF のテストは `--seconds` を渡さず、ファイルの項目数で分ける。
+
+`seconds` は成果物の名前で根（`pytest-junit-<番号>`）と NDF（`pytest-ndf-junit-<番号>`）の XML を見分け、
+どちらもリポジトリのルートから見たパスをキーにする。
+
+NDF のテストは、このモジュールを pytest のプラグインとして読み込み、収集の前に持ち分でないファイルを外す（#4331 の決定 6）。
+
+    cd plugins/ndf && SHARD_TOTAL=6 SHARD_INDEX=0 PYTHONPATH=<リポジトリ>/scripts uv run --frozen --project . pytest -p pytest_shard
+
+割り当ては xdist の controller（か並列でない実行）が 1 回だけ実測秒の表から決め、worker へ `workerinput` で渡す。
+pytest はフックの中でだけ import するので、pytest の無い `python3` でも `files` と `seconds` を打てる。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
+from collections.abc import Mapping
+from fnmatch import fnmatch
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SECONDS = ROOT / "scripts" / "pytest-shard-seconds.json"
+NDF_ROOT = ROOT / "plugins" / "ndf"
+# NDF のテストの JUnit XML を見分ける成果物の名前の頭（.github/workflows/pytest.yml と同じ値）
+NDF_JUNIT = "pytest-ndf-junit-"
+# 割り当てを controller から worker へ渡す workerinput のキー
+OWNER_KEY = "pytest_shard_owner"
+SHARD_TOTAL_ENV = "SHARD_TOTAL"
+SHARD_INDEX_ENV = "SHARD_INDEX"
+_KEYS: tuple[Any, Any] | None = None
 
 
 def assign_files(files: list[str], total: int, weight: dict[str, float]) -> dict[str, int]:
@@ -45,29 +68,128 @@ def read_seconds(path: Path = SECONDS) -> dict[str, float]:
         return {}
 
 
-def _file_of(classname: str) -> str | None:
-    """`a.b.test_x.TestY` を、リポジトリにある `a/b/test_x.py` へ戻す。"""
+def shard_env(environ: Mapping[str, str]) -> tuple[int, int] | None:
+    """`(index, total)` を返す。`SHARD_TOTAL` が無ければ `None`（分けない）。"""
+    total = environ.get(SHARD_TOTAL_ENV, "")
+    if total == "":
+        return None
+    index = environ.get(SHARD_INDEX_ENV, "")
+    if not (total.isdigit() and index.isdigit() and int(index) < int(total)):
+        import pytest
+
+        raise pytest.UsageError(
+            f"{SHARD_TOTAL_ENV}={total!r} / {SHARD_INDEX_ENV}={index!r}: "
+            f"0 <= {SHARD_INDEX_ENV} < {SHARD_TOTAL_ENV} の整数を指定してください"
+        )
+    return int(index), int(total)
+
+
+def _stash_keys() -> tuple[pytest.StashKey[dict[str, int]], pytest.StashKey[int]]:
+    """`config.stash` のキー（割り当て・このジョブの番号）。最初の呼び出しで作り、以後は同じキーを返す。"""
+    global _KEYS
+    if _KEYS is None:
+        import pytest
+
+        _KEYS = (pytest.StashKey[dict[str, int]](), pytest.StashKey[int]())
+    return _KEYS
+
+
+def _rel(path: Path) -> str:
+    """リポジトリのルートから見たパス。外のパスは絶対パス。"""
+    path = path.resolve()
+    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+
+
+def _is_test_file(name: str, config: pytest.Config) -> bool:
+    return any(fnmatch(name, p) for p in config.getini("python_files"))
+
+
+def _test_files(config: pytest.Config) -> list[str]:
+    """`testpaths` の下で `python_files` に当たるファイルを、リポジトリのルートから見たパスで辞書順に並べる。"""
+    norecurse = config.getini("norecursedirs")
+    found: set[str] = set()
+    for t in config.getini("testpaths") or ["."]:
+        for top, dirs, names in os.walk(config.rootpath / t):
+            dirs[:] = [d for d in dirs if not any(fnmatch(d, p) for p in norecurse)]
+            found.update(_rel(Path(top) / n) for n in names if _is_test_file(n, config))
+    return sorted(found)
+
+
+class _XdistHooks:
+    """xdist があるときだけ登録するフック（xdist が無い環境で未知のフックにならないようにクラスへ置く）。"""
+
+    def __init__(self, config: pytest.Config) -> None:
+        self.config = config
+
+    def pytest_configure_node(self, node: Any) -> None:
+        owner = self.config.stash.get(_stash_keys()[0], None)
+        if owner is not None:
+            node.workerinput[OWNER_KEY] = owner
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """割り当てを決めて（worker は controller から受け取って）`config.stash` に置く。"""
+    shard = shard_env(os.environ)
+    if shard is None:
+        return
+    index, total = shard
+    owner_key, index_key = _stash_keys()
+    workerinput = getattr(config, "workerinput", None)
+    if workerinput is not None:
+        owner = workerinput.get(OWNER_KEY)
+        if owner is None:
+            import pytest
+
+            raise pytest.UsageError("pytest_shard: controller から割り当てを受け取れなかった")
+    else:
+        owner = assign_files(_test_files(config), total, read_seconds(SECONDS))
+        if config.pluginmanager.hasplugin("xdist"):
+            config.pluginmanager.register(_XdistHooks(config))
+    config.stash[owner_key] = owner
+    config.stash[index_key] = index
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """持ち分でないテストのファイルを収集から外す。`False` は返さない（ほかのフックの判断を打ち消すため）。"""
+    owner_key, index_key = _stash_keys()
+    owner = config.stash.get(owner_key, None)
+    if owner is None or collection_path.is_dir() or not _is_test_file(collection_path.name, config):
+        return None
+    if owner.get(_rel(collection_path), 0) != config.stash[index_key]:
+        return True
+    return None
+
+
+def _file_of(classname: str, base: Path) -> str | None:
+    """`a.b.test_x.TestY` を、`base` の下にある `a/b/test_x.py` へ戻し、リポジトリのルートから見たパスで返す。"""
     parts = classname.split(".")
     for n in range(len(parts), 0, -1):
-        rel = "/".join(parts[:n]) + ".py"
-        if (ROOT / rel).is_file():
-            return rel
+        path = base / ("/".join(parts[:n]) + ".py")
+        if path.is_file():
+            return _rel(path)
     return None
 
 
 def _seconds(a) -> int:
     seconds: Counter[str] = Counter()
-    for xml in sorted(Path(a.junit).rglob("*.xml")):
-        for case in ET.parse(xml).getroot().iter("testcase"):
-            rel = _file_of(case.get("classname", ""))
+    junit = Path(a.junit)
+    for xml in sorted(junit.rglob("*.xml")):
+        base = NDF_ROOT if NDF_JUNIT in xml.relative_to(junit).as_posix() else ROOT
+        try:
+            cases = list(ET.parse(xml).getroot().iter("testcase"))
+        except ET.ParseError as e:
+            sys.stderr.write(f"{xml} を読めない: {e}\n")
+            return 1
+        for case in cases:
+            rel = _file_of(case.get("classname", ""), base)
             if rel:
                 seconds[rel] += float(case.get("time") or 0)
     if not seconds:
         sys.stderr.write(f"{a.junit} に JUnit XML の項目が無い\n")
         return 1
     body = {
-        "summary": "テストのファイルごとの実測秒（CI の JUnit XML の合計）。根の conftest.py がジョブの割り当てに使う。"
-        "作り直しは scripts/pytest_shard.py seconds",
+        "summary": "テストのファイルごとの実測秒（CI の JUnit XML の合計）。根の conftest.py と NDF のテストの手順のプラグインが"
+        "ジョブの割り当てに使う。作り直しは scripts/pytest_shard.py seconds",
         "seconds": {k: round(v, 1) for k, v in sorted(seconds.items())},
     }
     SECONDS.write_text(json.dumps(body, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
