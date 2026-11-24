@@ -47,7 +47,7 @@ PLUGIN = "plugins/ndf"
 NEXT = "plugins/ndf-next"
 # プラグインの根からの公開のエントリポイント（副命令の行き先はこれを通して呼ばれる）
 ENTRYPOINT = "bin/ndf"
-# 実行する参照を探す範囲（issues/issue-3341-design-refs.md の「数え方」のコマンドはこの並びを写したもの）
+# 実行する参照を探す範囲（https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-refs.md の「数え方」のコマンドはこの並びを写したもの）
 SCAN_PATHSPEC = (
     ".github",
     ".ndf",

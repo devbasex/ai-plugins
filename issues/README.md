@@ -6,10 +6,9 @@
 | 場所 | 中身 |
 | --- | --- |
 | `issues/*.md` | 未完了の issue の実装計画・研究メモ。1 issue = 1 ファイル |
-| `issues/old/` | 11.0.x までに完了した issue の計画・実機試行の記録・報告書・調査資料。新しく足さない |
 
-`old/` の中身は履歴として読むためのもので、運用判断の根拠には使わない。確定した仕様は
-[docs/specifications/](../docs/specifications/) を、リリース済みの変更点は [CHANGELOG.md](../CHANGELOG.md) を参照する。
+11.0.x までに完了した課題の記録を置いていた `old/` は #4474 で消した。消す前の版は [eb4d652de の `issues/old/`](https://github.com/devbasex/ai-plugins/tree/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old) にある。
+確定した仕様は [docs/specifications/](../docs/specifications/) を、リリース済みの変更点は [CHANGELOG.md](../CHANGELOG.md) を参照する。
 
 ## 完了した課題の扱い
 
@@ -37,25 +36,6 @@ git cat-file -e "HEAD:issues/<消す文書>.md"
 git status --short --untracked-files=all --ignored=matching -- issues/<消す文書>.md docs/glossary.md docs/glossary/glossary.json 'docs/glossary/*.md'
 ```
 
-**`old/` は 11.0.x までに移したものの保管で、新しく足さない。** 下の節は、そこに残る文書の参照を
-直すときのためにある。
-
-## old/ へ移すときの参照
-
-**`old/` へ移すと、相対パスで書いた参照が壊れる。** 移した文書から見た深さが 1 段変わり、
-移していない文書から移した文書への参照も行き先を失う。`issues/` は `docs/` と同じくリンクの
-検査（`scripts/check-markdown-links.py`）の走査に入っているため、移した Pull Request の検査が
-`missing link target` で落ちる。
-
-**直すときは `](` と `)` の間だけを変える。** 角括弧の中の文言と行の他の部分は、当時の記述の
-まま残す。記録が何を指していたかは変わらず、読み手を運ぶ道筋だけが直る。
-
-| 壊れ方 | 直し方の例 |
-| --- | --- |
-| 移した文書から `docs/` を指す | `../docs/x.md` を `../../docs/x.md` にする |
-| 移した文書から、一緒に移した文書を指す | `old/y.md` を `y.md` にする |
-| 移していない文書から、移した文書を指す | `y.md` を `old/y.md` にする |
-
 ## いま開いている課題を見る
 
 **課題の一覧はここに置かない。** 開閉は GitHub 側で起き、書き写した一覧はその事実を
@@ -70,7 +50,6 @@ gh issue list --milestone "<まとまりの名前>"   # まとまりごと
 
 ```bash
 ls issues/*.md | grep -v '^issues/README\.md$'   # 進行中のもの
-ls issues/old/                                   # 完了したもの
 ```
 
 着手するときに `/ndf:implementation-plan` で `issues/issue-<番号>-<内容>.md` を 1 ファイル
@@ -83,9 +62,6 @@ ls issues/old/                                   # 完了したもの
 **実行計画はコミットしない。** 見直しのたびに Pull Request を通すと、計画の更新がマージを待つ。
 すべてマージされたら、測定を書き足した全文を最後にマージした Pull Request へコメントとして投稿し、
 ファイルを消す。形と手順は `issue-plan-strategy` の `references/execution-plan.md` が持つ。
-
-`old/parallel-batch-<連番>/` は 2026-09-02 までの進め方の記録である。全体指示書を主ディレクトリへ
-コミットする運用は `develop` への直接のコミットの禁止と両立しないため、実行計画へ置き換えた。
 
 ## ファイル名の付け方
 

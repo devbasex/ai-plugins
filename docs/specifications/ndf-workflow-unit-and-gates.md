@@ -178,6 +178,24 @@ v10.5.0 は 22 件を 5 本の Pull Request へ束ねて通した。束の中の
 （届く先が本番系か）の判定は一致する。** チャネルは系の一種であるため、既存の判定は
 変わらない。
 
+**承認ゲートでマージしてよいのは、承認で見た Pull Request の head（承認済みのコミット）だけである。** 設計承認ゲートでは
+設計 Pull Request の先頭のコミットに当たる。回答は見た head を持ち、マージの側は `ndf answer head <ステートマシン> --gate <design か release>`
+で読んで GitHub のマージに添え、今の head と違えばマージしない。回答を読む前にも今の head と比べ、承認の後に進んでいれば
+待ちへ戻して問い直す（MVV 判定で省いた回答も同じ）。承認の後に入ったコミットを、人も判定も見ないまま入れないためである。
+
+ただし、リリース承認ゲートでは、承認の後に文書だけが加わった場合は問い直さない。条件は次の 4 つがすべてそろうことである。
+
+- 今の承認資料のハッシュが取れた場合は、承認したときに記録したハッシュと一致する。今のハッシュが取れなければ、この条件は判定に使わず、残りの 3 つの条件で判断する（`progress/gate/answering.py` の `_docs_only_after`）
+- 承認したときの head が今の head の祖先である（履歴を書き換えた PR では問い直す）
+- プロジェクトが `.ndf/project.json` の `docs.behavior`（振る舞いを決める文書のパターンの配列）を宣言している。宣言ありとは、文字列の配列が書いてあることで、空の配列 `"behavior": []`（振る舞いを決める文書は無いという宣言）も含む。キーを省いたときは、どの文書が振る舞いを決めるか分からないので問い直す（`progress/command.py` の `behavior_declared`）
+- 承認したときの head から今の head までの差分が、文書だけの変更である。文書かどうかは拡張子ではなく、`.ndf/project.json` の `docs.files`（文書とみなすパスのパターン）で判定する。`docs.files` を省いたときは `**/*.md` を使う（`progress/command.py` の `DOC_FILES`）。`docs.files` と `docs.behavior` のパターンは、どちらもリポジトリのルートからのパスに対する Git の glob として評価し、`!` で始まるパターンは一致したパスを結果から除外する（`progress/command.py` の `_pathspecs` が `git diff` の pathspec の `:(exclude,glob)` に変える）。変わったファイルが 1 件以上あり、そのすべてが `docs.files` の結果に含まれ、`docs.behavior` の結果に含まれるファイルが 1 件も無ければ、この条件を満たす（工程の条件 `docs_only_diff` と同じ判定）。空のコミットや、変更を打ち消すコミットで head だけが進み、変わったファイルが 0 件のときは問い直す
+
+どれか 1 つでも欠けるか、git の履歴を読めなければ、問い直す側に倒す（`progress/gate/answering.py` の `git_docs_only`）。
+
+このときは、今の head を承認済みの head として記録し、承認を出し直さずに進める（`progress/gate/answering.py` の `recheck`）。
+マージの側が照合する head は、記録した今の head である（`ndf answer head` が返す。`progress/gate/records.py` の `approved_head`）。
+設計承認ゲートにはこの例外が無く、head が進めば必ず問い直す。
+
 ### 設計 Pull Request の本文の決めたこと
 
 `plugins/ndf/scripts/pr-body-decisions.sh` が、本文の `## 決めたこと` の節と、設計文書の決定の

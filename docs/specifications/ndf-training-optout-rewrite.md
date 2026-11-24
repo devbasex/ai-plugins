@@ -369,6 +369,6 @@ claude の書き込みは 202 を返す。HTTP の 202 は受け付けただけ�
 - 用語集: [docs/glossary/ndf-training-optout.md](../glossary/ndf-training-optout.md)
 - 利用者向けの説明: [plugins/ndf/README.md](../../plugins/ndf/README.md) の「学習の設定を確かめる」
 - 実装: [training.py](../../plugins/ndf/src/ndf/adapters/training.py)・[training_cache.py](../../plugins/ndf/src/ndf/adapters/training_cache.py)
-- 10 系の書き換えの決定: [issues/old/issue-1597-design-decisions.md](../../issues/old/issue-1597-design-decisions.md)
+- 10 系の書き換えの決定: [issues/old/issue-1597-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-1597-design-decisions.md)
 - RFC 9110 の 15.3.3「202 Accepted」: https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3
 - Issue: https://github.com/devbasex/ai-plugins/issues/3907（設計 PR #3926、実装 PR #3929）

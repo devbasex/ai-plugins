@@ -64,7 +64,7 @@
 | チェックアウトの置き場 | DBOS の殻が形の番号を確かめて用意する | `<git の共通ディレクトリ>/<プラグイン名>/state/` |
 | 子の表 | 実装 PR（設計書の「子の表の変更」の行のとおりに直す。設計 PR は `children.json` を変えない。`review_items` は `ndf check --write-spec` が生成する） | `src/ndf/checks/children.json` |
 
-**層の向きは `contracts` → `adapters` → `core` → `progress` → `domains` の 1 方向で、`ndf check` の規則 `structure` が逆向きの import を落とす。** 名前が `_decide` で終わるモジュールは判断だけを持ち、入出力のモジュールを import しない。
+**層の向きは `contracts` → `adapters` → `core` → `progress` → `domains` の 1 方向で、`ndf check` の規則 `structure` が逆向きの import を落とす。** 名前が `_decide` で終わるモジュールは判断だけを持ち、入出力のモジュールを import しない。同じ層の中でも import の輪を持たない。`ndf check` の規則 `cycle` は、関数の中の import（遅延の import）も辺に数えて輪を落とす。import を関数の中へ移して輪を見えなくしても依存は残るため、輪をほどく作業を手順に頼らず CI で止める（#2963「supervise のステップの遷移の判断を耐久の起動から切り離す」で決めた）。
 
 ### 配置
 
@@ -88,7 +88,7 @@
 ### 入れ替え（S2 #3304）の結果
 
 - `plugins/ndf/` を消してから `git mv plugins/ndf-next plugins/ndf` を打ち、版上げの PR で 11.0.0 を出した。プラグイン名は `ndf`、取得元は `./plugins/ndf` のまま（決定 73）。新しいディレクトリの中で書き換えたのは `plugin.json` 2 本と、名前から作る生成物（hook の登録・Codex の定義）だけである（決定 75）
-- 外から `plugins/ndf/` の中を名指す参照は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる
+- 外からの参照（`plugins/ndf/` の外にあって、中のパスを名指す workflow・宣言・根の検査・指示書など）は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる。入れ替えで消えた 10 系のパスを指す確定仕様のリンクは、入れ替えの起点のコミット（入れ替えの PR #3793 が分かれた `main` のコミット `30f9608fd`。10 系のプラグインと `plugins/ndf-next/` が並んで残る）の固定の URL を指す
 - 開発の間のジョブ（`plugins/ndf-next/**` だけを見るもの）は消し、`ndf check` は `script-structure.yml` が打つ
 - 旧い状態の置き場の退避と、中継の複製の版の記録は R1 #3758 が入れた（決定 79）
 - 子の表 `children.json`（設計レビューの項目 `review_items` も持つ）と規則 `child-deps` は残り、コードの import の向きと、完了していない子の順番・レーン（並行して進める組）が表のとおりかを調べる
@@ -446,7 +446,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 
 **番号の規則。** 決定と不変条件の番号は `ndf-rebuild` で始まる 6 本を通して一意で、設計の材料で重なった番号は最大の次へ振り直した。番号は再利用しない。新しく足す番号は 6 本の最大の次を取る。11.x の子（#3388）は自分の設計と確定仕様に自分の番号を持ち、この系統の番号を使わない。決定 102 の「系統ごとの名前空間」と不変条件 IG6 は、この規則（#3412 の決定 3）が置き換えた。
 
-設計の材料（2026-11-21 に消す前のコミット）: https://github.com/devbasex/ai-plugins/tree/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues
+設計の材料（2026-11-21 に消す前のコミット）: https://github.com/devbasex/ai-plugins/tree/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues（材料は #3990 で `issues/` から消した。ほかの読み方と消すときの決定は [removed-rebuild-design-docs.md](removed-rebuild-design-docs.md)）
 
 元の系統は材料の文書のまとまりで、`design`（前の企画の頭の設計）・`decisions`・`libraries`・`dbos`・`next`・`#3347`・`fixes`・`review-routing`・`#3388` などである。表に無い番号は、元の系統の番号のまま確定仕様にある。
 
@@ -497,4 +497,4 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 ## 関連リンク
 
 - [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)・[版とリリース](../versioning-and-distribution.md)（ランタイムごとの取得と導入）・`plugins/ndf/src/ndf/checks/README.md`（`ndf check` の規則）
-- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）
+- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）・[#3990](https://github.com/devbasex/ai-plugins/issues/3990)（設計の材料を消す）
