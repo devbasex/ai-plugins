@@ -299,6 +299,38 @@ def test_the_findings_remain_when_a_later_rule_stops_on_the_broken_table(own_con
     assert _item_paths(root, report) == [f"{DIR}/causes", f"{DIR}/causes.json"]
 
 
+def _link_parent_outside(root: Path) -> None:
+    """コントラクトの保存先はリポジトリの外を指し、一覧だけがプラグインの中へ戻る。"""
+    outside = root.parents[2] / "outside"
+    shutil.move(root / DIR, outside)
+    (root / DIR).symlink_to(outside)
+    shutil.move(outside / "domains", root / "domains")
+    (outside / "domains").symlink_to(root / "domains")
+    (outside / "limits" / "SECRET.txt").write_text("x", encoding="utf-8")
+
+
+def _link_item_out_of_the_plugin(root: Path) -> None:
+    """項目が、リポジトリの中だがプラグインの外のファイルを指す。"""
+    outside = root.parents[1] / "outside.json"
+    outside.write_text('{"SECRET": 1, "SECRET": 2}', encoding="utf-8")
+    (root / ITEM).unlink()
+    (root / ITEM).symlink_to(outside)
+
+
+@pytest.mark.parametrize("collected", [True, False], ids=["collected", "alone"])
+@pytest.mark.parametrize(
+    ("break_", "paths"),
+    [(_link_item_out_of_the_plugin, [ITEM]), (_link_parent_outside, [f"{DIR}/limits", f"{DIR}/causes"])],
+    ids=["item-in-the-repository", "parent-directory"],
+)
+def test_nothing_outside_the_plugin_is_read_or_listed(root, rules, break_, paths, collected):
+    break_(root)
+    scope = _scope(root) if collected else Scope(root.parents[1], root, "p")
+    found = contracts_split.check(scope, rules)
+    assert _paths(root, found) == paths
+    assert "SECRET" not in str(found)
+
+
 @pytest.mark.parametrize("linked", [True, False], ids=["linked-outside", "not-utf8"])
 def test_the_cause_of_the_result_is_not_read_from_outside_or_from_broken_bytes(own_contracts, capsys, last_result, linked):
     root = own_contracts

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ndf import cli, identity
 from ndf.checks import model, run
 from ndf.contracts import exit_codes, result
@@ -174,3 +176,20 @@ def test_only_settings_rules_skip_collecting_and_the_other_rules(tmp_path, monke
     monkeypatch.setattr(run, "check", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ほかの規則を当てた")))
     scope = model.Scope(tmp_path, tmp_path / "p", "p")
     assert [f.rule for f in run.select(scope, {}, ["S1"])] == ["S1"]
+
+
+def test_the_findings_of_each_rule_remain_when_the_next_rule_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    for module, name in ((run.structure, "check"), (run.structure, "cycles"), (run.facts, "check"), (run.words, "check")):
+        rule = f"{module.__name__}.{name}"
+        monkeypatch.setattr(module, name, lambda *args, rule=rule: [model.Finding(rule, rule, 1, "d")])
+
+    def stop(*args):
+        raise model.CheckError("pyproject.toml を読めない")
+
+    monkeypatch.setattr(run.invariants, "check", stop)
+    monkeypatch.setattr(run, "CONTRACT_RULES", {})
+    with pytest.raises(run.Halted, match="pyproject.toml") as caught:
+        run.check(model.Scope(tmp_path, tmp_path / "p", "p"), {})
+    expected = ["ndf.checks.facts.check", "ndf.checks.structure.check", "ndf.checks.structure.cycles", "ndf.checks.words.check"]
+    assert [f.rule for f in caught.value.found] == expected

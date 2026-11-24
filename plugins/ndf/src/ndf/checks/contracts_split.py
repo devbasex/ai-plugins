@@ -44,17 +44,17 @@ def _tables(text: str) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class _Files:
-    """規則が読むファイル。検査が集めたもの（`sources`。パス → ファイル）は読み直さず、ほかはリポジトリの中のものだけを読む。"""
+    """規則が読むファイル。検査が集めたもの（`sources`。パス → ファイル）は読み直さない。どちらもプラグインの中のものだけを読む。"""
 
     repo_root: Path
+    plugin_root: Path
     sources: dict[Path, Source]
 
     def text(self, path: Path) -> str:
-        """`path` の本文。リポジトリの外を指す・ファイルでない・UTF-8 でなければ `ContractError`。"""
+        """`path` の本文。プラグインの外を指す・ファイルでない・UTF-8 でなければ `ContractError`。"""
+        contracts.require_inside(path, self.plugin_root)
         src = self.sources[path] if path in self.sources else None
         if src is None:
-            if not path.resolve().is_relative_to(self.repo_root.resolve()):
-                raise contracts.ContractError("リポジトリの外を指す")
             if not path.is_file():
                 raise contracts.ContractError("ファイルが無い")
             src = Source(path, path.relative_to(self.repo_root).as_posix())
@@ -116,10 +116,16 @@ class _Table:
 
     def errors(self) -> Iterator[tuple[Path, str]]:
         """違反のパスと中身。"""
+        # 列挙と読み取りの前に、親のディレクトリのリンクも含めて解決先を確かめる（外のエントリ名を指摘に載せない）
+        try:
+            contracts.require_inside(self.root, self.files.plugin_root)
+        except contracts.ContractError as exc:
+            yield self.root, str(exc)
+            return
         old = self.root.with_name(f"{self.root.name}.json")
         if old.exists():
             yield old, f"分ける前の 1 ファイルが在る（項目は {self.root.name}/ に 1 項目 1 ファイルで置く）"
-        # リンクの先はリポジトリの外でありうるので、一覧も取らない（検査がファイルを集めるときもリンクのディレクトリへ降りない）
+        # リンクのディレクトリへは、検査がファイルを集めるときも降りない
         if self.root.is_symlink() or not self.root.is_dir():
             yield self.root, "分けた表のディレクトリが無い"
             return
@@ -145,9 +151,9 @@ class _Table:
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """分けた表の形の違反を返す。分ける表の一覧を持たないプラグインでは空。"""
     top = scope.plugin_root / rules["facts"]["contracts_dir"]
-    files = _Files(scope.repo_root, {s.path: s for s in scope.sources})
+    files = _Files(scope.repo_root, scope.plugin_root, {s.path: s for s in scope.sources})
     listed = top / contracts.SPLIT_TABLES
-    # 読めない一覧（リポジトリの外を指す・先の無いリンクなど）を、一覧の無いプラグインと取り違えない
+    # 読めない一覧（プラグインの外を指す・先の無いリンクなど）を、一覧の無いプラグインと取り違えない
     if not (listed.is_symlink() or listed.exists()):
         return []
     errors: list[tuple[Path, str]] = []
