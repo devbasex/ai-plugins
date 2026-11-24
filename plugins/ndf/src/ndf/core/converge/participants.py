@@ -57,6 +57,12 @@ def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
         raise UnknownParticipant(f"相手役 {'・'.join(bad)} はランタイムの表に無いか、読むだけの起動を持たない（{'・'.join(able)}）")
 
 
+def _named(requested: Sequence[str], able: Sequence[str], fixer: str) -> tuple[str, ...]:
+    """名指しを確かめ（`_check_requested`）、重なりと修正担当を除いて名指しの順に並べる。"""
+    _check_requested(requested, able)
+    return tuple(dict.fromkeys(r for r in requested if r != fixer))
+
+
 def _able(allowed: Optional[Collection[str]]) -> list[str]:
     """ランタイムの表の行の順に、読むだけの起動の引数を持ち `allowed` の中にある名前（`assign` と `review_seats` の母集合）。"""
     return [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r and (allowed is None or r["id"] in allowed)]
@@ -119,8 +125,7 @@ def review_seats(requested: Sequence[str], allowed: Optional[Collection[str]], f
     _fixer_allowed(fixer, allowed)
     able = _able(allowed)
     if requested:
-        _check_requested(requested, able)
-        names = tuple(dict.fromkeys(r for r in requested if r != fixer))
+        names = _named(requested, able, fixer)
         return Seats(names, may_fill=len(names) != 1)
     chosen = _defaults(able, fixer)
     added: list[str] = []
