@@ -9,7 +9,7 @@
     ndf records mvv current --base <ブランチ> [--allow-mismatch]   # ベースブランチの承認済みの MVV を読み、本文をファイルに書く
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
-    ndf records mvv gate --gate design|release [--machine <ID>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
+    ndf records mvv gate --gate design|release [--machine <ID>] [--expect-pr <番号>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
@@ -230,13 +230,30 @@ def _mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return _env_inputs(args.gate, parsed)
 
 
+# --expect-pr の番号が判定する PR と違うときの要約。どちらの PR の番号も載せない（結果は承認資料へ写されうる）
+OTHER_PR = "判定する PR が承認する PR と違うので判定しない"
+
+
 def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    if args.expect_pr is not None and args.gate != mvv_gate.RELEASE:
+        return result.stopped(TOOL, "invalid", f"--expect-pr は --gate {mvv_gate.RELEASE} のときだけ渡せる")
     try:
         inputs = _mvv_inputs(args, root)
     except _InputError as exc:
         return result.stopped(TOOL, exc.kind, exc.summary)
+    open_hub: Callable[[Path], github_mod.GitHub] = _hub
+    if args.expect_pr is not None:
+        # 判定に使う入力そのものと比べる（gate の中は変えない）。release の pr_number は文脈の pr を読むだけで GitHub を呼ばない
+        hub = _hub(root)
+        open_hub = lambda _root: hub  # noqa: E731
+        try:
+            judged = mvv_gate.pr_number(root, mvv_gate.RELEASE, inputs, hub)
+        except mvv_gate.GateError:
+            judged = None  # 判定する PR を決められなければ、今どおり gate が停止理由を返す
+        if judged is not None and judged != args.expect_pr:
+            return result.stopped(TOOL, "not_applicable", OTHER_PR)
     warnings: list[dict[str, Any]] = []
-    out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
+    out = mvv_gate.gate(root, args.gate, inputs, open_hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
     return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
 
@@ -377,6 +394,13 @@ def _add_mvv(sub: Any) -> None:
         default=None,
         help="ステートマシンの ID（プランの外で打つとき。環境変数 NDF_STAGE_INPUT の代わりに文脈から入力を組み、両方は渡せない）。"
         "NDF_STAGE_INPUT は工程の入力の規約 stage-in の平らな形で、外れれば invalid、キーが足りなければ input_missing で止まる",
+    )
+    gate.add_argument(
+        "--expect-pr",
+        type=int,
+        default=None,
+        help="承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに"
+        " not_applicable で止まる",
     )
     gate.set_defaults(handler=_mvv_gate)
 

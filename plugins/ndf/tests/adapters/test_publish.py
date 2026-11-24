@@ -186,6 +186,60 @@ def test_assume_public_scrubs_without_reading_the_target_visibility() -> None:
     assert stub.asked == []
 
 
+SELF_REFS = (f"{PRIVATE_REPO}#12", f"https://github.com/{PRIVATE_REPO}/pull/34")
+
+
+@pytest.mark.parametrize(("visibility", "kept"), [("PRIVATE", False), ("PUBLIC", True)])
+def test_assume_public_looks_up_references_to_the_target_itself(visibility: str, kept: bool) -> None:
+    # 結果の受け手は対象のリポジトリを読めるとは限らないので、自身への参照も公開と確かめられたときだけ残す
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: visibility})
+    texts, _ = publish.Publisher(stub, ACCOUNTS).guarded(*SELF_REFS, assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [[PRIVATE_REPO]]
+    if kept:
+        assert texts == list(SELF_REFS)
+    else:
+        assert texts == [publish.PRIVATE_REF_TEXT] * 2 and all("#12" not in t and "34" not in t for t in texts)
+
+
+def test_without_assume_public_references_to_the_target_itself_are_kept_unasked() -> None:
+    # PR のコメントの経路（書き先そのものが閲覧の範囲を決める）は、自身への参照を照会せずに残す
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PUBLIC"})
+    text = f"{SELF_REFS[0]} と {SELF_REFS[1]} と {PRIVATE_REPO}"
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(text)  # type: ignore[arg-type]
+    assert got == text and stub.asked == [[PRIVATE_REPO]]
+
+
+BARE_HIDDEN = [
+    (f"{PRIVATE_REPO}", "{}"),
+    (PRIVATE_REPO.upper(), "{}"),
+    (f"Fix this in {PRIVATE_REPO}.", "Fix this in {}."),
+    (f"{PRIVATE_REPO}、", "{}、"),
+    (f"({PRIVATE_REPO})", "({})"),
+    (f"{PRIVATE_REPO}/", "{}/"),
+    (f"{PRIVATE_REPO}.git", "{}"),
+]
+BARE_KEPT = [f"{PRIVATE_REPO}-2", f"{PRIVATE_REPO}.js", f"{PRIVATE_REPO}/sub", f"other-{PRIVATE_REPO}", f"z{PRIVATE_REPO}"]
+
+
+@pytest.mark.parametrize(("visibility", "hidden"), [("PRIVATE", True), ("PUBLIC", False)])
+def test_assume_public_hides_the_bare_full_name_of_a_private_target(visibility: str, hidden: bool) -> None:
+    # 単独の完全名は repo_refs が拾わない。照会の候補に対象のリポジトリを入れ、公開でなければ名前の範囲だけを伏せる
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: visibility})
+    texts = [given for given, _ in BARE_HIDDEN] + BARE_KEPT
+    got, _ = publish.Publisher(stub, ACCOUNTS).guarded(*texts, assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [[PRIVATE_REPO]]
+    expected = [shape.format(publish.PRIVATE_REF_TEXT) for _, shape in BARE_HIDDEN] if hidden else [g for g, _ in BARE_HIDDEN]
+    assert got == expected + BARE_KEPT
+
+
+def test_the_bare_name_pattern_matches_only_the_name_and_its_git_suffix() -> None:
+    pattern = publish._bare_repo(PRIVATE_REPO)
+    assert [m.group() for m in pattern.finditer(f"{PRIVATE_REPO}.git と {PRIVATE_REPO}. と {PRIVATE_REPO}.js")] == [
+        f"{PRIVATE_REPO}.git",
+        PRIVATE_REPO,
+    ]
+
+
 def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:
     assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
 

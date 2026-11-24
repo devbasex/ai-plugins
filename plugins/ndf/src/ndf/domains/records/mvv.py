@@ -363,13 +363,42 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     return [jsonl.append_locked(path, row, kind="mvv-signals") for row in rows]
 
 
+# 診断の記録を開くフラグ。リンクをたどらず、読み手の無い FIFO を置かれても待たない（ENXIO で失敗する）
+_PRIVATE_APPEND = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def _append_private(path: Path, line: bytes) -> None:
+    """`path` を所有者だけが読めるファイルに限ってから 1 行足す。限れなければ書かずに `OSError`。
+
+    権限を確かめた記述子へそのまま書く。パスで権限を変えてから開き直すと、その間にファイル名を差し替えられうるためである。
+    """
+    fd = os.open(path, _PRIVATE_APPEND, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+            raise OSError(f"診断の記録が自分の通常のファイルでない: {path}")
+        if st.st_mode & 0o077:
+            os.fchmod(fd, 0o600)
+        view = memoryview(line)
+        while view:
+            view = view[os.write(fd, view) :]
+    finally:
+        os.close(fd)
+
+
 def record_failure(row: Mapping[str, Any]) -> str:
     """失敗の診断の記録（表 ndf-files の mvv-gate-failures）へ 1 行足し、行の識別子を返す。書けなければ例外をそのまま投げる。
 
-    識別子は乱数で、PR の値も例外の文も含まない（PR のコメントと承認資料はこの識別子で記録を指す。#3959）。
+    識別子は乱数で、PR の値も例外の文も含まない（PR のコメントと承認資料はこの識別子で記録を指す。#3959）。行の `cause` は
+    社内のホスト名や手元のパスを含むので、判定を打った OS の利用者だけが読めるファイル（0600）にだけ書く。親のディレクトリは
+    無ければ 0700 で作り、既にあるディレクトリの権限は変えない。
     """
     ident = secrets.token_hex(8)
-    jsonl.append_locked(record_path("mvv-gate-failures"), {**row, "id": ident}, kind="mvv-gate-failure")
+    out = internal.write_record("mvv-gate-failure", {**row, "id": ident})
+    path = record_path("mvv-gate-failures")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with jsonl.lock(path):
+        _append_private(path, (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
     return ident
 
 

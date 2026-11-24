@@ -129,7 +129,18 @@ def _overlaps(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
     return any(start < span[1] and span[0] < end for start, end in spans)
 
 
-def _hidden_spans(text: str, private: set[str]) -> list[tuple[int, int, bool]]:
+def _bare_repo(repo: str) -> re.Pattern[str]:
+    """対象のリポジトリの完全名 `repo` が単独で現れる所（`.git` の接尾辞ごと）に一致する正規表現（#3959）。
+
+    前は URL や別の名前の一部でないこと、後ろは名前の続きが来ないことだけを境界にする（文末の `.`・`/`・読点・括弧は外に残す）。
+    """
+    return re.compile(
+        r"(?<![A-Za-z0-9._/-])" + re.escape(repo) + r"(?:\.git)?(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])(?!/[A-Za-z0-9._-])",
+        re.IGNORECASE,
+    )
+
+
+def _hidden_spans(text: str, private: set[str], bare: Optional[str] = None) -> list[tuple[int, int, bool]]:
     """原文の上で伏せる範囲と、秘密を含むか（真なら秘密の伏せ字、偽なら非公開の参照の文）。重なる範囲は和にまとめる。
 
     秘密の範囲（`run_log.secret_spans`）と、秘密と重なる URL の全体（認証情報の付いた URL）と、`private` の参照の範囲を
@@ -145,6 +156,8 @@ def _hidden_spans(text: str, private: set[str]) -> list[tuple[int, int, bool]]:
                 marked.append((m.start(), m.end(), True))
             elif m["repo"].lower() in lowered:
                 marked.append((m.start(), m.end(), False))
+    if bare is not None and bare.lower() in lowered:
+        marked += [(m.start(), m.end(), False) for m in _bare_repo(bare).finditer(text)]
     out: list[tuple[int, int, bool]] = []
     for start, end, secret in sorted(marked):
         if out and start < out[-1][1]:
@@ -155,9 +168,9 @@ def _hidden_spans(text: str, private: set[str]) -> list[tuple[int, int, bool]]:
     return out
 
 
-def _drop_hidden(text: str, private: set[str]) -> tuple[str, dict[str, int]]:
+def _drop_hidden(text: str, private: set[str], bare: Optional[str] = None) -> tuple[str, dict[str, int]]:
     pieces, at, dropped = [], 0, Counter[str]()
-    for start, end, secret in _hidden_spans(text, private):
+    for start, end, secret in _hidden_spans(text, private, bare):
         pieces += [text[at:start], run_log.MASK if secret else PRIVATE_REF_TEXT]
         dropped[DropKind.SECRET if secret else DropKind.PRIVATE_REF] += 1
         at = end
@@ -188,12 +201,13 @@ def _drop_accounts(text: str, accounts: Iterable[str]) -> tuple[str, int]:
     return pattern.subn(ACCOUNT_TEXT, text)
 
 
-def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: Iterable[str] = ()) -> Scrubbed:
+def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: Iterable[str] = (), bare: Optional[str] = None) -> Scrubbed:
     """書く本文から、書き先に出してはいけないものを落とす（上の表）。`public` は書き先が公開か。
 
-    秘密（認証情報の付いた URL は全体）は書き先によらず落とし、非公開の参照は公開の書き先でだけ落とす。
+    秘密（認証情報の付いた URL は全体）は書き先によらず落とし、非公開の参照は公開の書き先でだけ落とす。`bare` のリポジトリが
+    `private_repos` にあれば、その完全名が単独で現れる所も参照と同じに落とす（`_bare_repo`）。
     """
-    text, dropped = _drop_hidden(text, set(private_repos) if public else set())
+    text, dropped = _drop_hidden(text, set(private_repos) if public else set(), bare)
     if public:
         steps = (
             (DropKind.HOME, lambda t: _HOME.subn(HOME_TEXT, t)),
@@ -225,11 +239,12 @@ class Publisher:
         """書き先へ公開の書き先と同じ検査をかけるか。公開か、公開範囲を読めない（`UNKNOWN`）なら真。"""
         return self.visibility() in SCRUBBED_VISIBILITIES
 
-    def _private_refs(self, texts: Sequence[str], exposed: bool) -> set[str]:
+    def _private_refs(self, texts: Sequence[str], exposed: bool, assume_public: bool = False) -> set[str]:
         """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。
 
         秘密を含む参照（参照そのものを伏せると変わるか、原文の一致の範囲が秘密の範囲と重なる）は、秘密の値を GitHub へ
-        送らないよう照会せず、公開でないものとして返す（#3959）。
+        送らないよう照会せず、公開でないものとして返す（#3959）。`assume_public` が真なら、書き先のリポジトリ自身への参照と
+        その完全名が単独で現れる所も同じ 1 回の照会に入れる（受け手が書き先を読めるとは限らないため）。
         """
         if not exposed:
             return set()
@@ -238,9 +253,11 @@ class Publisher:
         for text in texts:
             secrets = run_log.secret_spans(text)
             for m in (m for pattern in _REPO_PATTERNS for m in pattern.finditer(text)):
-                if not same_repo(m["repo"], self.hub.repo):
+                if assume_public or not same_repo(m["repo"], self.hub.repo):
                     bad = run_log.redact(m["repo"]) != m["repo"] or _overlaps(m.span(), secrets)
                     (tainted if bad else clean).add(m["repo"])
+            if assume_public and not any(same_repo(r, self.hub.repo) for r in clean | tainted) and _bare_repo(self.hub.repo).search(text):
+                clean.add(self.hub.repo)
         asked = clean - tainted
         seen = self.hub.visibilities(asked) if asked else {}
         return tainted | {r for r, v in seen.items() if v != PUBLIC}
@@ -251,8 +268,9 @@ class Publisher:
         `assume_public` が真なら書き先の公開範囲を照会せず、公開の書き先として伏せる（受け手が書き先の閲覧者と限らない結果）。
         """
         exposed = True if assume_public else self.exposed()
-        private = self._private_refs(texts, exposed)
-        got = [scrub(text, exposed, private, self.accounts) for text in texts]
+        private = self._private_refs(texts, exposed, assume_public)
+        bare = next((r for r in private if same_repo(r, self.hub.repo)), None) if assume_public else None
+        got = [scrub(text, exposed, private, self.accounts, bare) for text in texts]
         return [g.text for g in got], dict(sum((Counter(g.dropped) for g in got), Counter()))
 
     def origin(self, origin: str, source_repo: str) -> str:

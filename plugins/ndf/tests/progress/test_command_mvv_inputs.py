@@ -82,7 +82,11 @@ def test_a_machine_of_another_repo_is_refused_before_reading_it(repo, capsys, la
     with pytest.raises(model.Refused) as caught:
         stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
     assert "このリポジトリのものでない" in str(caught.value)
-    assert "secret-owner" not in str(caught.value) and str(repo) not in str(caught.value)
+    assert "secret-owner" not in str(caught.value) and command.repo_id(repo, root) not in str(caught.value)
+    # 存在しない ID の文言とは必ず違う（ID を除いた文で比べる）。どちらにも所属を載せない
+    with pytest.raises(model.Refused) as unknown:
+        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+    assert str(caught.value).replace(tid, "") != str(unknown.value).replace("sprint:none", "")
 
 
 def test_a_step_the_definition_does_not_have_is_refused(repo, capsys, last_result, tmp_path):
