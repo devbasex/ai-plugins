@@ -336,6 +336,10 @@ def _run(args: argparse.Namespace) -> int:
     parsed = claude_args.parse(args.rest, os.environ, sys.stdin.isatty() and sys.stdout.isatty())
     if parsed.passthrough:
         return _passthrough(args.rest, parsed)
+    try:  # 起動の副作用（`launch.json`・子の起動）の前に、子へ渡す名前をコントラクトから引けることを確かめる（#4126 の決定 3）
+        signals.require_keys()
+    except identity.EnvNameError as exc:
+        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
     tty_in = sys.stdin.isatty()
     saved = termios.tcgetattr(sys.stdin.fileno()) if tty_in else None
     if tty_in:

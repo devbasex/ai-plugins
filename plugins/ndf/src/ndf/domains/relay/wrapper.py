@@ -644,7 +644,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
         if missing is not None:
             return missing
         try:
-            cli_floor.require("claude", CLAUDE, self._env_for(None, launch), self.s.cwd)
+            cli_floor.require("claude", CLAUDE, self._env_for(None, launch, req.session_id), self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         begun = self.wall.now()  # 子が記録を書くより前（認証の失敗の確かめは、この時刻より後の記録だけを読む）
@@ -688,12 +688,12 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
         again = AGAIN_RESTART.format(name=self.s.name) if self.s.environ.get("NDF_RELAY_SPAWNED") else AGAIN_RUN
         return SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count, again=again)
 
-    def _env_for(self, account: Optional[str], launch: str) -> dict[str, str]:
-        """起動先を確定した子の環境の基になる環境（`child_env(decided=True)`・起動先の NDF の `PATH`・起動の ID）。"""
+    def _env_for(self, account: Optional[str], launch: str, session_id: str) -> dict[str, str]:
+        """起動先を確定した子の環境の基になる環境（`child_env(decided=True)`・起動先の NDF の `PATH`・起動の ID・会話の ID）。"""
         env = session_env.child_env(self.s.environ, self.s.state_dir, account, decided=True)
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
-        return {**env, **signals.launch_env(self.dir, launch)}
+        return {**env, **signals.launch_env(self.dir, launch, session_id)}
 
     def _inputs(self, now: float, need_candidates: bool) -> launch_inputs.Inputs:
         return self.reader.read(now, need_candidates)
