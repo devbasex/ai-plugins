@@ -43,6 +43,31 @@ $ claude -p --permission-mode bypassPermissions < prompt.md
 
 ローカルの非 root 環境でだけ動作確認すると、CI / コンテナで初めて詰まる。
 
+## 読むだけの起動（読み手役）
+
+文書を読ませるだけの起動では、上の「非対話実行」の形（コマンドの実行とファイルの編集を許す）を使わない。文書に埋め込まれた指示に従っても、
+文書のほかに何も読めず、どこにも書けず、外へ送れないように、読ませるファイルのコピーだけを置いた新しいディレクトリで、Read だけを持たせて起動する。
+
+```bash
+D=$(mktemp -d) && R=$(mktemp -d)
+cp <読ませるファイル>... "$D"/          # 同じ名前のファイルは、重ならない名前に変える。シンボリックリンクを置かない
+# 指示の files には、コピーしたファイルの名前（$D からの相対パス）を書く。指示と結果は $R に置く
+(cd "$D" && timeout 1320 claude -p --restricted --safe-mode --strict-mcp-config --tools Read \
+    --permission-mode dontAsk --no-session-persistence --output-format json \
+    < "$R/prompt.md" > "$R/out.json" 2> "$R/err.log")
+```
+
+| 指定 | 止めるもの |
+| --- | --- |
+| `--restricted` | `$D` の外のファイルの読み取り（シンボリックリンクの先を含む）。利用者・プロジェクト・ローカルの設定（許したツールの設定を含む）の読み込み |
+| `--tools Read` | コマンドの実行・ファイルの編集・Web の取得と検索・サブエージェント |
+| `--strict-mcp-config` | MCP サーバー |
+| `--safe-mode` | プラグイン・hook・Skill・`CLAUDE.md`（文書を書いた経緯を渡さないためでもある） |
+| `--permission-mode dontAsk` | 許されていない操作。確認を求めずに拒む |
+
+2.1.331 で実測した。使えるツールは Read だけで、`$D` の外のファイルと、外を指すシンボリックリンクの読み取りは拒まれた。
+**どれかの指定を受け付けないバージョンでは、指定を外して起動しない。** 起動できないものとして扱う。結果は `$R/out.json` の `result` から読む。
+
 ## 完了検知は JSON で確定する
 
 `--output-format json` を使えば**完了マーカーのファイルは要らない**。

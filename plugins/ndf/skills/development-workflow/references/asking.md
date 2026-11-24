@@ -154,4 +154,4 @@ Factory の実行ジョブ（環境変数 `NDF_FACTORY_RUN` が空でない `cla
 
 ## ランタイムごとの扱い
 
-読み手役の記録を調べて質問を止める hook は Claude Code だけで働く。ほかのランタイムでは、承認の前に `ndf records reading check` を打って調べる（[approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認)）。区分に当たらない質問は、どのランタイムの hook も止めない。この文書の規則（区分に当たらない質問は出さず、決めて報告に書く）で守る。区分に当たる質問は本文か各ランタイムの問い合わせの Tool で出し、区分の名前を質問の先頭に書く。確かめた結果は `docs/ndf-plugin-reference.md` の hook のセクションにある。
+読み手役の記録を調べて質問を止める hook は Claude Code だけで働く。ほかのランタイムでは、承認の前に `ndf records reading check` を打って調べる（[approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認)）。区分に当たらない質問は、どのランタイムの hook も止めない。この文書の規則（区分に当たらない質問は出さず、決めて報告に書く）で守る。区分に当たる質問は各ランタイムの問い合わせの Tool か、無ければ本文で出し、区分の名前を質問の先頭に書く。承認の質問を出した後は、利用者の回答が届くまで承認ゲートの先へ進まない（待ち方と、回答として扱うものは [approval-request.md の「Claude Code のほかのランタイム」](approval-request.md#claude-code-のほかのランタイム)）。確かめた結果は `docs/ndf-plugin-reference.md` の hook のセクションにある。

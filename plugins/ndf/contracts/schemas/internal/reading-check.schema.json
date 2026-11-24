@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "reading-check.schema.json",
   "title": "読み手役が確認した記録の 1 行",
-  "description": "承認と判断の質問を出す前に、読み手役が質問の文と文書を確認した記録の行（表 ndf-files の reading-checks）。書き手は ndf.domains.records.reading。文書の本文・質問の文・残った文の引用は入れない",
+  "description": "承認と判断の質問を出す前に、読み手役が質問の文と文書を確認した記録の行（表 ndf-files の reading-checks）。書き手は ndf.domains.records.reading。文書の本文・質問の文・残った文の引用は入れない。読み手役を起動できずに書いた担当が読み直しただけのものは書かない（承認を求める条件は承認の手順が持つ）",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "at", "repo", "question_key", "prs", "reads"],
@@ -38,7 +38,7 @@
           "name": {"type": "string", "minLength": 1, "description": "文書のパスか、question（質問の文）・material（質問の直前に示す材料か承認資料）"},
           "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
           "round": {"enum": [1, 2], "description": "その立場で何回目の読みか"},
-          "result": {"enum": ["passed", "remained"], "description": "合格か、2 回目にも残ったか"}
+          "result": {"enum": ["passed", "remained"], "description": "読み手役の結果。合格か、2 回目にも残ったか"}
         },
         "if": {"properties": {"result": {"const": "remained"}}, "required": ["result"]},
         "then": {"properties": {"round": {"const": 2}}}
