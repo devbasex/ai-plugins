@@ -194,6 +194,9 @@ class Publisher:
     hub: GitHub
     accounts: frozenset[str] = field(default_factory=local_accounts)
     _visibility: Optional[str] = field(default=None, init=False)
+    # 本文に出た参照の公開範囲（1 つのエントリポイントで 1 つの参照を 1 回だけ読む。記録のコメントは、一覧の値と本文の全体を
+    # 続けて検査する）
+    _seen: dict[str, str] = field(default_factory=dict, init=False)
 
     def visibility(self) -> str:
         """書き先の公開範囲（1 つのエントリポイントで 1 回だけ読む）。"""
@@ -210,8 +213,10 @@ class Publisher:
         if not self.exposed():
             return set()
         refs = {r for t in texts for r in repo_refs(t) if not same_repo(r, self.hub.repo)}
-        seen = self.hub.visibilities(refs) if refs else {}
-        return {r for r, v in seen.items() if v != PUBLIC}
+        unread = refs - self._seen.keys()
+        if unread:
+            self._seen.update(self.hub.visibilities(unread))
+        return {r for r in refs if self._seen.get(r) != PUBLIC}
 
     def guarded(self, *texts: str) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。"""

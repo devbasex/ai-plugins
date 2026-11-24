@@ -131,6 +131,22 @@ def test_publisher_reads_visibilities_once_and_drops_private_refs_on_a_public_ta
     assert len(fake.queries) == 2
 
 
+def test_publisher_reads_the_same_reference_once_across_checks() -> None:
+    """#4076: 記録のコメントは、一覧の値と本文の全体を続けて検査する。同じ参照の公開範囲は 1 回だけ読む。"""
+    fake = FakeGitHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", PRIVATE_REPO: "PRIVATE", "other-owner/open": "PUBLIC"})
+    publisher = publish.Publisher(fake.hub, ACCOUNTS)
+    text = f"{PRIVATE_REPO}#3 と other-owner/open#4"
+    assert publisher.guarded(text)[0] == [f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4"]
+    publisher.comment(4, text)
+    assert fake.writes[0][2] == {"body": f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4"}
+    assert len(fake.queries) == 2
+    # まだ読んでいない参照だけを読む
+    assert publisher.guarded(f"{text} と other-owner/unknown#5")[0] == [
+        f"{publish.PRIVATE_REF_TEXT} と other-owner/open#4 と {publish.PRIVATE_REF_TEXT}"
+    ]
+    assert len(fake.queries) == 3 and "other-owner" in fake.queries[2] and "private-repo" not in fake.queries[2]
+
+
 def test_publisher_treats_unreadable_repos_as_not_public() -> None:
     fake = FakeGitHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC"})
     out = publish.Publisher(fake.hub, ACCOUNTS).comment(4, "other-owner/unknown#5 を見た")
