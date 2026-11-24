@@ -64,7 +64,7 @@
 | チェックアウトの置き場 | DBOS の殻が形の番号を確かめて用意する | `<git の共通ディレクトリ>/<プラグイン名>/state/` |
 | 子の表 | 実装 PR（設計書の「子の表の変更」の行のとおりに直す。設計 PR は `children.json` を変えない。`review_items` は `ndf check --write-spec` が生成する） | `src/ndf/checks/children.json` |
 
-**層の向きは `contracts` → `adapters` → `core` → `progress` → `domains` の 1 方向で、`ndf check` の規則 `structure` が逆向きの import を落とす。** 名前が `_decide` で終わるモジュールは判断だけを持ち、入出力のモジュールを import しない。
+**層の向きは `contracts` → `adapters` → `core` → `progress` → `domains` の 1 方向で、`ndf check` の規則 `structure` が逆向きの import を落とす。** 名前が `_decide` で終わるモジュールは判断だけを持ち、入出力のモジュールを import しない。同じ層の中でも import の輪を持たない。`ndf check` の規則 `cycle` は、関数の中の import（遅延の import）も辺に数えて輪を落とす。import を関数の中へ移して輪を見えなくしても依存は残るため、輪をほどく作業を手順に頼らず CI で止める（#2963「supervise のステップの遷移の判断を耐久の起動から切り離す」で決めた）。
 
 ### 配置
 
@@ -88,7 +88,7 @@
 ### 入れ替え（S2 #3304）の結果
 
 - `plugins/ndf/` を消してから `git mv plugins/ndf-next plugins/ndf` を打ち、版上げの PR で 11.0.0 を出した。プラグイン名は `ndf`、取得元は `./plugins/ndf` のまま（決定 73）。新しいディレクトリの中で書き換えたのは `plugin.json` 2 本と、名前から作る生成物（hook の登録・Codex の定義）だけである（決定 75）
-- 外から `plugins/ndf/` の中を名指す参照は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる
+- 外からの参照（`plugins/ndf/` の外にあって、中のパスを名指す workflow・宣言・根の検査・指示書など）は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる。入れ替えで消えた 10 系のパスを指す確定仕様のリンクは、入れ替えの起点のコミット（入れ替えの PR #3793 が分かれた `main` のコミット `30f9608fd`。10 系のプラグインと `plugins/ndf-next/` が並んで残る）の固定の URL を指す
 - 開発の間のジョブ（`plugins/ndf-next/**` だけを見るもの）は消し、`ndf check` は `script-structure.yml` が打つ
 - 旧い状態の置き場の退避と、中継の複製の版の記録は R1 #3758 が入れた（決定 79）
 - 子の表 `children.json`（設計レビューの項目 `review_items` も持つ）と規則 `child-deps` は残り、コードの import の向きと、完了していない子の順番・レーン（並行して進める組）が表のとおりかを調べる
