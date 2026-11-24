@@ -208,6 +208,28 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"
 
 
+# 閲覧範囲を限れない保存先へ書く判定の自由記述の置き換え（件数は保つ。#3959）
+MVV_WITHHELD = "伏せた（全文は今回の判定のコメントで読む）"
+
+
+def mvv_stored_view(held: Any) -> Any:
+    """判定の出力 `held` から自由記述（理由・レッドライン・保留・`why` の各要素）を `MVV_WITHHELD` に置き換えた写し。
+
+    件数・`skip`・判定の語・根拠の項目の名前・`holds` が空の配列か null か・`stopped_by`・`noted`・`note_url`・`pr`・`head` は
+    残すので、`mvv_skip` と `hold_checked` の結果は変わらない。object でなければそのまま返す。"""
+    if not isinstance(held, dict):
+        return held
+
+    def hidden(raw: Any) -> Any:
+        return [MVV_WITHHELD for _ in raw] if isinstance(raw, list) else raw
+
+    out = {**held, **{k: hidden(held[k]) for k in ("why", "holds") if k in held}}
+    verdict = held.get("verdict")
+    if isinstance(verdict, dict):
+        out["verdict"] = {**verdict, **{k: hidden(verdict[k]) for k in ("reasons", "boundary") if k in verdict}}
+    return out
+
+
 def branch_prefix(kind: str) -> str:
     """ブランチの接頭辞（sprint・issue・design・release）。"""
     return table()["branch_prefixes"][kind]

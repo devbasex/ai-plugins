@@ -20,7 +20,7 @@ import logging
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, Optional
@@ -31,7 +31,7 @@ from sqlalchemy import event as sa_event
 from ndf.contracts import limits
 from ndf.core import durable
 from ndf.progress import backup as _backup
-from ndf.progress import model
+from ndf.progress import model, stages
 
 # バックアップと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
 from ndf.progress.backup import (  # noqa: F401
@@ -210,6 +210,8 @@ class Store:
     path: Optional[Path]
     warnings: list[str] = field(default_factory=list)
     stack: ExitStack = field(default_factory=ExitStack)
+    # 保存先の閲覧範囲を開いた OS の利用者だけに限れたか（`restrict`）。偽なら判定の自由記述を伏せて書く（#3959）
+    private: bool = False
 
     def close(self) -> None:
         self.engine.dispose()
@@ -326,6 +328,33 @@ def _check_and_backup(store: Store, now: datetime) -> None:
         durable.touch_mark(mark, now)
 
 
+# SQLite の副ファイルの接尾辞（WAL・共有メモリ・ロールバックの記録）
+SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
+# 接続の `info` に置く、保存先の閲覧範囲を限れたか（`Store.private`）のキー
+PRIVATE_KEY = "ndf_private"
+
+
+def restrict(root: Path, path: Optional[Path]) -> bool:
+    """接続の前に、保存先の閲覧範囲を開いた OS の利用者だけに限り、限れたかを返す（失敗しても開くことは止めない。#3959）。
+
+    SQLite は保存先のディレクトリを 0700 にする。保存先の外の DB のファイル（`NDF_PROGRESS_DB`）は 0600 にし（無ければ 0600 で
+    作る）、既にある副ファイルも 0600 にする。PostgreSQL（`path` が None）は限れない。"""
+    if path is None:
+        return False
+    try:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(root, 0o700)
+        if not path.is_relative_to(os.path.realpath(root)):
+            os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+            for f in (path, *(Path(f"{path}{x}") for x in SIDE_SUFFIXES)):
+                if f == path or f.exists():
+                    os.chmod(f, 0o600)
+    except OSError as exc:
+        log.warning("ステートマシンの保存先の閲覧範囲を限れない", extra={"root": str(root), "error": type(exc).__name__})
+        return False
+    return True
+
+
 def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
     """ステートマシンの DB を開き、表を用意して返す。呼び手は使い終えたら `close` する（`with` で使える）。
 
@@ -340,8 +369,9 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
             store = Store(url, root, sa.create_engine(durable.sa_url(url), poolclass=sa.NullPool), None, stack=stack)
             ensure_schema(store, now)
             return store
+        private = restrict(root, path)
         stack.enter_context(db_lock(path, exclusive=False))
-        store = Store(url, root, _sqlite_engine(path), path, stack=stack)
+        store = Store(url, root, _sqlite_engine(path), path, stack=stack, private=private)
         if durable.is_fresh(root / CHECKED_MARK, now):
             ensure_schema(store, now)
         else:
@@ -415,8 +445,9 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
 
 @contextmanager
 def transaction(store: Store) -> Iterator[sa.Connection]:
-    """1 つのトランザクション。例外で抜ければ何も残らない。"""
+    """1 つのトランザクション。例外で抜ければ何も残らない。接続に保存先の閲覧範囲（`PRIVATE_KEY`）を置く。"""
     with _translated(store), store.engine.begin() as conn:
+        conn.info[PRIVATE_KEY] = store.private
         yield conn
 
 
@@ -478,7 +509,32 @@ def append_events(
     if last != expect_seq:
         raise Conflict(f"ステートマシン {machine_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
     ctx = _Append(conn, machine_id, level, events, now or datetime.now(UTC))
-    return _write_drafts(ctx, drafts)
+    kept = drafts if conn.info.get(PRIVATE_KEY) is True else [_withheld(d) for d in drafts]
+    return _write_drafts(ctx, kept)
+
+
+# 判定の出力（`model.MVV_KEY`）を payload に持つ事象の種類 → 出力を持つ object までの payload のキー
+_MVV_HOLDERS = {
+    model.rules()[("sprint", "step_recorded")].kind: ("report", "outputs"),
+    stages.OUTPUTS_EVENT: ("outputs",),
+    model.rules()[("sprint", "answered")].kind: (),
+}
+
+
+def _withheld(draft: model.EventDraft) -> model.EventDraft:
+    """閲覧範囲を限れない保存先へ書く下書き。判定の出力を `model.mvv_stored_view` に通す（ほかの値は変えない。#3959）。"""
+    keys = _MVV_HOLDERS.get(draft.kind)
+    if keys is None or draft.payload is None:
+        return draft
+
+    def walk(part: Any, rest: tuple[str, ...]) -> Any:
+        if not isinstance(part, dict):
+            return part
+        if not rest:
+            return {**part, model.MVV_KEY: model.mvv_stored_view(part[model.MVV_KEY])} if model.MVV_KEY in part else part
+        return {**part, rest[0]: walk(part[rest[0]], rest[1:])} if rest[0] in part else part
+
+    return replace(draft, payload=walk(draft.payload, keys))
 
 
 @dataclass(frozen=True)

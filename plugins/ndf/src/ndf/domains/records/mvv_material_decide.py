@@ -175,9 +175,16 @@ def incomplete_patches(files: Sequence[Mapping[str, Any]]) -> list[str]:
 
 
 def gate_outcome(
-    gate: str, verdict: Any, skip: bool, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None
+    gate: str,
+    verdict: Any,
+    skip: bool,
+    why: Sequence[str],
+    head: Optional[str] = None,
+    holds: Optional[Sequence[str]] = None,
+    *,
+    pr: Optional[int] = None,
 ) -> dict[str, Any]:
-    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`head` は判定した PR の head（PR を読む前に止めたら無い）。
+    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`pr`・`head` は判定した PR の番号と head（PR を読む前に止めたら無い）。
 
     `holds` はレビューの保留（読まなかったら None）で、キーは常に置く。`noted` は今回のコメントを書いたか（既定は偽。書けたら
     `mvv_gate._recorded` が置き換える）。
@@ -185,14 +192,15 @@ def gate_outcome(
     held = verdict if isinstance(verdict, dict) else None
     out: dict[str, Any] = {"gate": gate, "skip": skip, "verdict": held, "why": list(why), "holds": None if holds is None else list(holds)}
     out["noted"] = False
-    return {**out, "head": head} if head is not None else out
+    return {**out, **{k: v for k, v in (("pr", pr), ("head", head)) if v is not None}}
 
 
 def stop_outcome(
-    gate: str, stop: str, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None
+    gate: str, stop: str, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None, *, pr: Optional[int] = None
 ) -> dict[str, Any]:
     """判定を持たずに終わった出力。判定できなかった理由の種類 `stop` と、その定型文（`STOP_REASONS`）を `stopped_by` に置く。"""
-    return {**gate_outcome(gate, None, False, why, head, holds), "stopped_by": {"kind": stop, "text": STOP_REASONS[stop]}}
+    held = gate_outcome(gate, None, False, why, head, holds, pr=pr)
+    return {**held, "stopped_by": {"kind": stop, "text": STOP_REASONS[stop]}}
 
 
 # --- 手元の git の差分を、GitHub の比較の files の行の形にする（#3959） -----------------------------------------

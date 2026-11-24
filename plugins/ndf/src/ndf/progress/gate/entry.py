@@ -32,7 +32,16 @@ from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_d
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
-from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, question, write_material
+from ndf.progress.gate.asking import (
+    RELEASE_GATE,
+    TOOL,
+    Target,
+    gate_result,
+    material_path,
+    material_sha256,
+    question,
+    write_material,
+)
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
@@ -52,8 +61,15 @@ def present(
     except GitError:
         repo = None
     asked = question(v, m, repo=repo)
-    path = write_material(st.root, v, asked)
-    q = replace(asked, target=observe(asked))
+    # 資料を書く前に PR の今の head を読み、その head の資料があれば書かずにハッシュも使い直す（#3959）
+    seen = observe(asked)
+    q = replace(asked, target=Target(seen.head))
+    if seen.material is None:
+        path = write_material(st.root, v, q, private=st.private)
+        seen = Target(seen.head, material_sha256(path))
+    else:
+        path = material_path(st.root, q)
+    q = replace(q, target=seen)
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:
