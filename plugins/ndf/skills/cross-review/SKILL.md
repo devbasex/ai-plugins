@@ -36,7 +36,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 反する指摘か根拠の行の誤りが残ったまま終わるか、根拠の行を最後のコミットで確かめられなければ、`mvv_unresolved` で止まる。
 
 /goal の引数として、または development-workflow の工程として呼ばれた場合は、`status: ok` になるまで同じコマンドを打ち直す。
-  * `work_stopped`・`mvv_unresolved`・`precondition`・`invalid` で止まったら異常終了とする
+  * `work_stopped`・`mvv_unresolved`・`mvv_record_failed`・`precondition`・`invalid` で止まったら異常終了とする
 
 詳細は `docs/` 配下に分割している。収束ループは `ndf cross-review run` が 1 回の起動で回す:
 
