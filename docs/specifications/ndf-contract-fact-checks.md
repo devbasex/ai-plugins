@@ -149,7 +149,7 @@ hook（Claude Code と Codex が決まった時点で呼ぶ NDF の処理）の�
 
 ### 設計レビューの指摘の対応先（`review-items`）
 
-NDF を 11.0 へ作り直したときの設計レビューの指摘 182 件について、一覧表 [issue-1142-design-review-routing.md](../../issues/issue-1142-design-review-routing.md)
+NDF を 11.0 へ作り直したときの設計レビューの指摘 182 件について、一覧表 [ndf-review-items.md](ndf-review-items.md)
 が、どの作業で対応するかを記録している。`ndf check --write-spec` は、この表から、作り直しの作業の一覧 `src/ndf/checks/children.json` の
 `review_items` を生成する（作り直しを分けた 1 件ずつの作業を「子」と呼ぶ）。
 
@@ -166,7 +166,7 @@ NDF を 11.0 へ作り直したときの設計レビューの指摘 182 件に�
 次を違反にする。
 
 - 対応先が空の指摘
-- 11.0 より後に回した指摘（版が `11.x`）のうち、もう 1 つの表（[issue-3388-design-routing.md](../../issues/issue-3388-design-routing.md)）に
+- 11.0 より後に回した指摘（版が `11.x`）のうち、もう 1 つの表（[ndf-review-items-11x.md](ndf-review-items-11x.md)）に
   行が無いか、その行の対応先が `Z<数>`（作業の記号）・`#<Issue 番号>`・`作らない` のどれでもないもの
 - 表から生成し直した内容と違う `children.json`
 
