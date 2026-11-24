@@ -150,19 +150,17 @@ def _collected(tmp_path: Path, runtime: str, output: str):
     return seen[0], got
 
 
-def test_issue_3955_read_only_claude_launch_is_unchanged(tmp_path: Path):
-    spec, got = _collected(tmp_path, "claude", json.dumps({"result": 'メモ\n{"proposals": [{"id": "p1"}]}'}))
-    assert list(spec.argv) == READ_ONLY_CLAUDE and spec.agent == "claude"
-    assert got == {"proposals": [{"id": "p1"}]}
-
-
 @pytest.mark.parametrize(
     ("runtime", "output", "want"),
     [
+        ("claude", json.dumps({"result": 'メモ\n{"proposals": [{"id": "p1"}]}'}), [{"id": "p1"}]),
         ("claude", '途中で切れた {"proposals": [{"id": "p2"}]}', [{"id": "p2"}]),
         ("codex", 'ログ\n{"proposals": [{"id": "p3"}]}\n', [{"id": "p3"}]),
     ],
 )
-def test_issue_3955_answer_text_reads_the_outer_result_or_the_tail(tmp_path: Path, runtime, output, want):
-    _, got = _collected(tmp_path, runtime, output)
-    assert got == {"proposals": want}
+def test_issue_3955_read_only_launch_is_unchanged(tmp_path: Path, runtime, output, want):
+    """claude の起動の引数は変えず、本文は claude なら外側の JSON の result（JSON でなければ出力のまま）、ほかは出力の末尾から取る。"""
+    spec, got = _collected(tmp_path, runtime, output)
+    assert got == {"proposals": want} and spec.agent == runtime
+    if runtime == "claude":
+        assert list(spec.argv) == READ_ONLY_CLAUDE

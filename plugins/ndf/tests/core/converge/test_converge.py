@@ -82,23 +82,10 @@ def test_sandbox_failed_reads_only_lines_that_start_with_bwrap(tmp_path: Path, e
 # ---------------------------------------------------------------- #3955: 席を決める・読むだけの claude
 
 
-def test_issue_3955_assign_is_unchanged_for_cross_refactoring() -> None:
-    """受け入れ条件 13: cross-refactoring の相手役の選び方（既定・名指し・allowed）は変えない。"""
-    assert participants.assign() == ("codex", "kiro")
-    assert participants.assign(("kiro", "kiro", "codex")) == ("kiro", "codex")
-    assert participants.assign(allowed={"claude", "codex"}) == ("codex",)
-    with pytest.raises(participants.UnknownParticipant):
-        participants.assign(allowed={"claude"})
-    with pytest.raises(participants.UnknownParticipant):
-        participants.assign(("kiro",), allowed={"claude", "codex"})
-    with pytest.raises(participants.UnknownParticipant):
-        participants.assign(("claude",))
-    with pytest.raises(participants.FixerNotAllowed):
-        participants.assign(allowed={"codex"})
-
-
-def test_issue_3955_read_only_launch_is_a_separate_minimal_claude(tmp_path: Path) -> None:
-    """受け入れ条件 7・8: 修正担当の会話を持たない最小構成で、読む Tool だけを許す。読める場所を渡すと境界を足す。"""
+def test_issue_3955_read_only_claude(tmp_path: Path) -> None:
+    """受け入れ条件 7・8: 修正担当の会話を持たない最小構成で、読む Tool だけを許す。読める場所を渡すと境界を足す。
+    本文は claude なら外側の JSON の `result`（JSON でなければ出力のまま）、ほかは出力の末尾。PR 4461 の r2-3・r2-4: 1 回読んだ
+    出力から本文と拒否を取り出し、Tool ごとのパスの引数だけを claude の作業ディレクトリから解決する。"""
     plain = participants.read_only_launch("sys", tmp_path, "読む", tmp_path / "s", 30.0)
     assert plain.agent == participants.FIXER and plain.argv[-1] == "読む"
     assert "--no-session-persistence" in plain.argv and "--resume" not in plain.argv and "--session-id" not in plain.argv
@@ -110,8 +97,6 @@ def test_issue_3955_read_only_launch_is_a_separate_minimal_claude(tmp_path: Path
     assert "--restricted" in bound.argv and bound.argv[bound.argv.index("--add-dir") + 1] == str(place)
     assert "acceptEdits" not in bound.argv
 
-
-def test_issue_3955_answer_text_is_the_outer_result_for_claude(tmp_path: Path) -> None:
     out = tmp_path / "o"
     out.write_text('{"result": "本文"}', encoding="utf-8")
     assert participants.answer_text("claude", out) == "本文"
@@ -119,9 +104,6 @@ def test_issue_3955_answer_text_is_the_outer_result_for_claude(tmp_path: Path) -
     assert participants.answer_text("claude", out) == "切れた {"
     assert participants.answer_text("codex", out) == "切れた {"
 
-
-def test_pr_4461_denied_reads_resolves_tool_paths_from_the_claude_workdir(tmp_path: Path) -> None:
-    """PR 4461 の r2-3・r2-4: 1 回読んだ出力から本文と拒否を取り出し、Tool ごとのパスの引数だけを claude の作業ディレクトリから解決する。"""
     work, inputs = tmp_path / "wt", tmp_path / "in"
     diff, since = inputs / "round2.diff", inputs / "round2-since.diff"
     denials = [
@@ -129,7 +111,6 @@ def test_pr_4461_denied_reads_resolves_tool_paths_from_the_claude_workdir(tmp_pa
         {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "other")}},
         {"tool_name": "Grep", "tool_input": {"pattern": str(since), "path": "src"}},
     ]
-    out = tmp_path / "o"
     out.write_text(json.dumps({"result": "本文", "permission_denials": [*denials, "壊れた要素"]}), encoding="utf-8")
     answer = participants.claude_answer(out)
     assert answer.text == "本文" and list(answer.denials) == denials
@@ -139,53 +120,62 @@ def test_pr_4461_denied_reads_resolves_tool_paths_from_the_claude_workdir(tmp_pa
 
 
 @pytest.mark.parametrize(
-    ("requested", "allowed", "names", "added", "reason", "may_fill"),
+    ("requested", "allowed", "want"),
     [
-        ((), None, ("codex", "kiro"), (), None, True),
-        ((), {"claude", "codex"}, ("codex", "claude"), ("claude",), "allowed の相手役 1（codex）", True),
-        ((), {"claude"}, ("claude", "claude-2"), ("claude", "claude-2"), "allowed の相手役 0", True),
-        (("codex", "codex"), None, ("codex",), (), None, False),
-        (("codex", "kiro"), None, ("codex", "kiro"), (), None, True),
-        (("codex",), {"claude", "codex"}, ("codex",), (), None, False),
+        ((), None, participants.Seats(("codex", "kiro"), (), None, True)),
+        ((), {"claude", "codex"}, participants.Seats(("codex", "claude"), ("claude",), "allowed の相手役 1（codex）", True)),
+        ((), {"claude"}, participants.Seats(("claude", "claude-2"), ("claude", "claude-2"), "allowed の相手役 0", True)),
+        (("codex", "codex"), None, participants.Seats(("codex",), (), None, False)),
+        (("codex", "kiro"), None, participants.Seats(("codex", "kiro"), (), None, True)),
+        (("codex",), {"claude", "codex"}, participants.Seats(("codex",), (), None, False)),
+        # assign と同じく断る
+        ((), {"codex"}, participants.FixerNotAllowed),
+        (("claude",), None, participants.UnknownParticipant),
     ],
 )
-def test_issue_3955_review_seats(requested, allowed, names, added, reason, may_fill) -> None:
+def test_issue_3955_review_seats(requested, allowed, want) -> None:
     """受け入れ条件 5・6・12: 名指しが無ければ足りない席を claude・claude-2 で埋め、名指しは重なりを除いた数で 1 者かを決める。"""
-    assert participants.review_seats(requested, allowed) == participants.Seats(names, added, reason, may_fill)
+    if isinstance(want, participants.Seats):
+        assert participants.review_seats(requested, allowed) == want
+        return
+    with pytest.raises(want):
+        participants.review_seats(requested, allowed)
 
 
-def test_issue_3955_review_seats_refuse_like_assign() -> None:
-    with pytest.raises(participants.FixerNotAllowed):
-        participants.review_seats((), {"codex"})
-    with pytest.raises(participants.UnknownParticipant):
-        participants.review_seats(("claude",), None)
+# (席, 結果の無い席, 埋める席)
+FILL_TARGETS = [
+    (("codex", "kiro"), (), ()),
+    (("codex", "kiro"), ("kiro",), ("kiro",)),
+    (("codex", "claude"), ("claude",), ()),
+    (("codex", "claude"), ("codex", "claude"), ()),
+    (("codex", "kiro"), ("codex", "kiro"), ()),
+    (("codex", "claude"), ("codex",), ("codex",)),
+]
 
 
-def test_issue_3955_seat_names() -> None:
+def test_issue_3955_seat_helpers(monkeypatch) -> None:
+    """受け入れ条件 13: cross-refactoring の相手役の選び方（既定・名指し・allowed）は変えない。席の名前のランタイム・空いた名前・
+    埋める席を決める。受け入れ条件 15: 断られたランタイムと理由の組を返し、同じランタイムは 1 回だけ確かめる。unready は今の
+    返り値のまま。"""
+    from ndf.adapters import training
+
+    assert participants.assign() == ("codex", "kiro")
+    assert participants.assign(("kiro", "kiro", "codex")) == ("kiro", "codex")
+    assert participants.assign(allowed={"claude", "codex"}) == ("codex",)
+    for requested, allowed, error in (
+        ((), {"claude"}, participants.UnknownParticipant),
+        (("kiro",), {"claude", "codex"}, participants.UnknownParticipant),
+        (("claude",), None, participants.UnknownParticipant),
+        ((), {"codex"}, participants.FixerNotAllowed),
+    ):
+        with pytest.raises(error):
+            participants.assign(requested, allowed=allowed)
+
     assert [participants.runtime_of(s) for s in ("codex", "claude", "claude-2", "kiro")] == ["codex", "claude", "claude", "kiro"]
     assert participants.free_seat(()) == "claude"
     assert participants.free_seat(("codex", "claude")) == "claude-2"
     assert participants.free_seat(("claude", "claude-2")) == "claude-3"
-
-
-@pytest.mark.parametrize(
-    ("seats", "unread", "want"),
-    [
-        (("codex", "kiro"), (), ()),
-        (("codex", "kiro"), ("kiro",), ("kiro",)),
-        (("codex", "claude"), ("claude",), ()),
-        (("codex", "claude"), ("codex", "claude"), ()),
-        (("codex", "kiro"), ("codex", "kiro"), ()),
-        (("codex", "claude"), ("codex",), ("codex",)),
-    ],
-)
-def test_issue_3955_fill_targets(seats, unread, want) -> None:
-    assert participants.fill_targets(seats, unread) == want
-
-
-def test_issue_3955_refused_runtimes_check_each_runtime_once(monkeypatch) -> None:
-    """受け入れ条件 15: 断られたランタイムと理由の組を返し、同じランタイムは 1 回だけ確かめる。unready は今の返り値のまま。"""
-    from ndf.adapters import training
+    assert [participants.fill_targets(seats, unread) for seats, unread, _ in FILL_TARGETS] == [want for _, _, want in FILL_TARGETS]
 
     asked: list[str] = []
 

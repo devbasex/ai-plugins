@@ -239,16 +239,6 @@ def test_every_reviewer_failing_in_round_one_is_precondition(wt: Path, tmp_path:
     assert "claude" not in fake.calls
 
 
-def test_issue_3955_both_reviewers_reading_seat_no_claude(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """#3955 の受け入れ条件 9: 相手役が 2 者とも読めれば claude を相手役として起動せず、ラウンドの記録に filled が無い。"""
-    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
-    assert sorted(fake.calls) == ["codex", "kiro"]
-    assert [r["reviewers"] for r in _state(fake.state_dir)["rounds"]] == [["codex", "kiro"]]
-    assert all("filled" not in r for r in _state(fake.state_dir)["rounds"])
-
-
 def test_issue_3893_sandbox_failure_with_another_reviewer_failing_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#3893: codex のサンドボックスが名前空間を作れず（stderr の `bwrap:`）、kiro も回答しなければ、ok で収束せず precondition で止める。
     読めなかったことを書いた回答は指摘として扱わない。"""

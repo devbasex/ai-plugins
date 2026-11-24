@@ -196,7 +196,8 @@ def test_full_launch_carries_the_notice_when_the_list_is_unreadable(tmp_path, mo
 
 
 def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
-    """読める場所を渡すと `--restricted`・`--add-dir`・`dontAsk` を組み、`acceptEdits` を使わない。Tool の値は名前だけ。"""
+    """読める場所を渡すと `--restricted`・`--add-dir`・`dontAsk` を組み、`acceptEdits` を使わない。Tool の値は名前だけ。渡さなければ
+    今の引数のまま。`ClaudeCall` を通しても同じで、読める場所は Tool を限った起動（`Permission.TOOLS`）にしか渡せない。"""
     place = tmp_path / "review-input-x"
     got = claude.permission_args(claude.Permission.TOOLS, "Read,Grep,Glob", (place,))
     assert got == [
@@ -204,24 +205,10 @@ def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
         "--restricted", "--add-dir", str(place), "--permission-mode", "dontAsk",
     ]  # fmt: skip
     assert "acceptEdits" not in got
-
-
-def test_issue_3955_no_readable_places_keep_the_current_args():
     assert claude.permission_args(claude.Permission.TOOLS, "Read") == [
-        "--tools",
-        "Read",
-        "--allowed-tools",
-        "Read",
-        "--permission-mode",
-        "acceptEdits",
-    ]
-
-
-def test_issue_3955_readable_places_go_through_claude_call(tmp_path):
+        "--tools", "Read", "--allowed-tools", "Read", "--permission-mode", "acceptEdits",
+    ]  # fmt: skip
     argv = claude.claude_args(claude.ClaudeCall(system="s", permission=claude.Permission.TOOLS, tools="Read", readable=(tmp_path,)))
     assert argv[argv.index("--add-dir") + 1] == str(tmp_path) and argv[-2:] == ["--permission-mode", "dontAsk"]
-
-
-def test_issue_3955_readable_places_need_the_tools_permission(tmp_path):
     with pytest.raises(ValueError):
         claude.ClaudeCall(system="s", readable=(tmp_path,))

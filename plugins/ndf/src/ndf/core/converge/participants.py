@@ -243,13 +243,20 @@ def read_only_launch(
     return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), _review_limit(timeout))
 
 
+class ClaudeReader(NamedTuple):
+    """claude の席の読むだけの起動だけが使う値（`read_only_launch` の `system`・`readable`）。"""
+
+    system: str
+    readable: Sequence[Path] = ()
+
+
 def reading_launch(
-    seat: str, system: str, workdir: Path, prompt: str, stem: Path, timeout: Optional[float] = None, readable: Sequence[Path] = ()
+    seat: str, reader: ClaudeReader, workdir: Path, prompt: str, stem: Path, timeout: Optional[float] = None
 ) -> agents.Launch:
-    """席 `seat` の読むだけの 1 回の起動。claude の席は `read_only_launch`（`system`・`readable` を使う）、ほかは `review_launch`。"""
+    """席 `seat` の読むだけの 1 回の起動。claude の席は `read_only_launch`（`reader` を使う）、ほかは `review_launch`。"""
     if runtime_of(seat) != FIXER:
         return review_launch(seat, workdir, prompt, stem, timeout)
-    return read_only_launch(system, workdir, prompt, stem, timeout, readable=readable)
+    return read_only_launch(reader.system, workdir, prompt, stem, timeout, readable=reader.readable)
 
 
 class ClaudeAnswer(NamedTuple):
@@ -293,7 +300,7 @@ def denied_reads(denials: Sequence[Mapping[str, Any]], required: Sequence[Path],
     hit: set[Path] = set()
     for d in denials:
         tool = str(d.get("tool_name"))
-        names = READ_PATH_ARGS.get(tool, ())
+        names = READ_PATH_ARGS[tool] if tool in READ_PATH_ARGS else ()
         args = d.get("tool_input")
         if not isinstance(args, dict):
             continue

@@ -51,48 +51,44 @@ def _claude_at(monkeypatch, found):
     monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
 
 
-def test_issue_3955_restricted_launch_needs_the_flag_floor(monkeypatch):
-    """#3955 の決定 2: `--restricted` を含む起動だけに 2.1.316 を当てる。含まない起動は共通の下限のまま。"""
-    _claude_at(monkeypatch, "2.1.315")
-    with pytest.raises(cli_floor.TooOld):
-        cli_floor.require("claude", "claude", args=RESTRICTED)
-    cli_floor.require("claude", "claude", args=("-p", "--permission-mode", "acceptEdits"))
-    cli_floor.require("claude", "claude")
+# 見つからない実行ファイル（`_claude_at` を当てず、PATH に無い）
+MISSING = "missing"
 
 
-def test_issue_3955_flag_floor_is_met_at_its_version(monkeypatch):
-    _claude_at(monkeypatch, "2.1.316")
-    cli_floor.require("claude", "claude", args=RESTRICTED)
-    cli_floor.require("claude", "claude")
-
-
-def test_issue_3955_common_floor_still_refuses_either_launch(monkeypatch):
-    _claude_at(monkeypatch, "2.1.267")
-    for args in (RESTRICTED, ()):
-        with pytest.raises(cli_floor.TooOld):
-            cli_floor.require("claude", "claude", args=args)
-
-
-def test_issue_3955_unreadable_version_refuses_only_the_restricted_launch(monkeypatch):
-    """バージョンを確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す。"""
-    _claude_at(monkeypatch, None)
-    with pytest.raises(cli_floor.Unverified) as caught:
-        cli_floor.require("claude", "claude", args=RESTRICTED)
-    assert isinstance(caught.value, cli_floor.TooOld)
-    cli_floor.require("claude", "claude", args=("-p",))
-
-
-def test_issue_3955_missing_executable_refuses_the_restricted_launch():
-    with pytest.raises(cli_floor.Unverified):
-        cli_floor.require("claude", "claude", {"PATH": "/nonexistent"}, args=RESTRICTED)
-
-
-def test_issue_3955_flag_floors_are_not_below_the_row_floor():
+@pytest.mark.parametrize(
+    ("found", "args", "refused"),
+    [
+        # #3955 の決定 2: `--restricted` を含む起動だけに 2.1.316 を当てる。含まない起動は共通の下限のまま
+        ("2.1.315", RESTRICTED, cli_floor.TooOld),
+        ("2.1.315", ("-p", "--permission-mode", "acceptEdits"), None),
+        ("2.1.315", (), None),
+        ("2.1.316", RESTRICTED, None),
+        ("2.1.316", (), None),
+        # 共通の下限は、どちらの起動も断る
+        ("2.1.267", RESTRICTED, cli_floor.TooOld),
+        ("2.1.267", (), cli_floor.TooOld),
+        # バージョンを確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す
+        (None, RESTRICTED, cli_floor.Unverified),
+        (None, ("-p",), None),
+        (MISSING, RESTRICTED, cli_floor.Unverified),
+    ],
+)
+def test_issue_3955_flag_floor(monkeypatch, found, args, refused):
     import semver
 
+    assert issubclass(cli_floor.Unverified, cli_floor.TooOld)
+    # 起動の引数ごとの下限は、行の下限より下にない
     for name in FLOOR:
         for floor in facts.row("cli-floors", name).get("flag_floors", {}).values():
             assert semver.Version.parse(floor) >= semver.Version.parse(FLOOR[name])
+    env = {"PATH": "/nonexistent"} if found == MISSING else None
+    if found != MISSING:
+        _claude_at(monkeypatch, found)
+    if refused is None:
+        cli_floor.require("claude", "claude", env, args=args)
+        return
+    with pytest.raises(refused):
+        cli_floor.require("claude", "claude", env, args=args)
 
 
 # ---------------------------------------------------------------- 起動の箇所を探す（I12）

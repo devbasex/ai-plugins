@@ -64,8 +64,8 @@ def _limit(req: Request) -> float:
 
 
 def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
-    system = f"{launch_decide.SKILL} の {req.phase} の担当"
-    return participants.reading_launch(req.runtime, system, workdir, req.prompt, paths_stem, _limit(req))
+    reader = participants.ClaudeReader(f"{launch_decide.SKILL} の {req.phase} の担当")
+    return participants.reading_launch(req.runtime, reader, workdir, req.prompt, paths_stem, _limit(req))
 
 
 def _coding(req: Request, workdir: Path, paths_stem: Path, location: launch_decide.ResultPlace) -> agents.Launch:

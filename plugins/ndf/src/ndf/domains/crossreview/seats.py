@@ -96,7 +96,7 @@ class Unread(NamedTuple):
 def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path) -> agents.Launch:
     """席の 1 回の起動。claude の席は読める場所をこの実行の資料のディレクトリに限った読むだけの起動（#3955 の決定 2・3）。"""
     readable = () if run.input_dir is None else (run.input_dir,)
-    return participants.reading_launch(seat, SEAT_SYSTEM, run.cfg.worktree, prompt, stem, readable=readable)
+    return participants.reading_launch(seat, participants.ClaudeReader(SEAT_SYSTEM, readable), run.cfg.worktree, prompt, stem)
 
 
 def _unread_cause(sandbox: Optional[str], got: _SeatResult, status: agents.AgentStatus) -> tuple[str, str]:
