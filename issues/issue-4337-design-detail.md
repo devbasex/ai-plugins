@@ -11,8 +11,9 @@ plugins/ndf/
 ├── src/ndf/
 │   ├── cli.py                         COMMANDS に document-rebuild を足す
 │   ├── core/
-│   │   └── issue_docs.py *            設計書の名前の正規表現と、名前に含む課題の番号
+│   │   └── issue_docs.py *            設計書の名前の正規表現・名前に含む課題の番号・実装計画のパスの書式
 │   ├── progress/
+│   │   ├── refactor_values.py         実装計画のパスの書式を core.issue_docs から読む
 │   │   ├── invoke.py                  rebuild を derived_locally より先に決める。欠けの行に 3 つのキーを足す
 │   │   └── rebuild_values.py *        設定が無いときの既定のコマンドを組む
 │   ├── domains/
@@ -39,12 +40,14 @@ plugins/ndf/
 
 - `progress.invoke` → `progress.rebuild_values` → `core.branch_strategy`・`adapters.git`・`core.route`
 - `domains.docrebuild.cli` → `drive` → `select_decide` → `core.issue_docs`
+- `progress.refactor_values` → `core.issue_docs`（実装計画のパスの書式だけ）
 
 `progress.rebuild_values` は `domains.docrebuild` を読まず、コマンドの語の並びだけを組む（設計書の「コンテキスト」の上流と下流）。`domains.docrebuild` は `progress` を読まない（設計書の「コンテキスト」）。`domains.loop.design_tests` は `core.issue_docs` を読むだけで、`domains.docrebuild` とはつながらない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/core/issue_docs.py` | 新設 | 設計書のパスの形と、名前に含む課題の番号を 1 か所で持つ | `re` | モジュール `ndf.core.issue_docs` | `DESIGN_FILE`（新設）、`design_issues`（新設） |
+| `src/ndf/core/issue_docs.py` | 新設 | 設計書のパスの形・名前に含む課題の番号・実装計画のパスの書式を 1 か所で持つ | `re` | モジュール `ndf.core.issue_docs` | `DESIGN_FILE`・`PLAN_FILE`・`design_issues`（すべて新設） |
+| `src/ndf/progress/refactor_values.py` | 変更 | 実装計画のパスの書式を `core.issue_docs` から読む | `ndf.core.issue_docs` | モジュール | 定数 `PLAN_FILE` を消し、55 行目の参照を `issue_docs.PLAN_FILE` に替える |
 | `src/ndf/domains/loop/design_tests.py` | 変更 | 正規表現を `core.issue_docs` から読む | `ndf.core.issue_docs` | モジュール | `_designs`（中身だけ変える） |
 | `src/ndf/progress/rebuild_values.py` | 新設 | 設定が無いときの `rebuild`・`base`・`remote` を組み、決められなければ理由を返す | `ndf.core.route`・`ndf.core.branch_strategy`・`ndf.adapters.git`・`ndf.identity` | モジュール `ndf.progress.rebuild_values` | `Undecided`・`Filled`・`kinds_for`・`launch`・`fill`（すべて新設） |
 | `src/ndf/progress/invoke.py` | 変更 | `rebuild` を、作業場所から求める差し込み（`route.derived_locally`。`base`・`remote` など）より先に決める。値が欠けたときの `items` の `rebuild` の行に 3 つのキーを載せる | `ndf.progress.rebuild_values` | `TemplateValuesMissing`、モジュール | `TemplateValuesMissing.__init__`・`TemplateValuesMissing.items`（変更）、`template_values`（変更）、定数 `PROJECT_KEYS`（`rebuild` の道を `rebuild_values.SETTING_PATH` から読む） |
@@ -77,8 +80,10 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `DESIGN_FILE` | `src/ndf/core/issue_docs.py` | 新設（`design_tests.py` の 30 行目から移す） | `re.Pattern[str]`、値は `^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$` | 設計書のパスの形を 1 か所で持つ |
+| `PLAN_FILE` | `src/ndf/core/issue_docs.py` | 新設（`progress/refactor_values.py` の 20 行目から移す） | `str`、値は `"issues/issue-{number}-plan.md"` | 実装計画のパスの書式を 1 か所で持つ。リファクタリングの既定とドキュメント再構成の両方がここを読む |
 | `design_issues` | `src/ndf/core/issue_docs.py` | 新設 | `(path: str) -> frozenset[int]` | パスが設計書の形なら名前の番号の並びを整数の集合で、違えば空集合を返す |
 | `_designs` | `src/ndf/domains/loop/design_tests.py` | 変更（シグネチャは変えない） | 今のまま | 内包の条件を `want & issue_docs.design_issues(r)` に替え、モジュールの `DESIGN_FILE` を消す |
+| `refactor_values` の実装計画の読み取り | `src/ndf/progress/refactor_values.py` | 変更（シグネチャは変えない） | 今のまま | `PLAN_FILE` を消し、`issue_docs.PLAN_FILE.format(number=number)` を読む |
 
 `domains/materials/collect.py` の 25 行目にも同じ名前の正規表現があるが、番号 1 つだけを受ける別の形で、設計書の触るファイルに含まないので変えない。
 
@@ -88,7 +93,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `design_issues` | `issues/issue-4337-design.md` → `{4337}`、`issues/issue-7-8-design-detail.md` → `{7, 8}` | 課題 433 の照合で `issue-4337-design.md` が当たらない（集合で比べる） | `issues/sub/issue-1-design.md`・`issues/issue-1-requirements.md`・`docs/issue-1-design.md` → 空集合 |
 
-`_designs` は既存の `ndf loop design-tests` のテストが今のまま通ることで見る。
+`_designs` は既存の `ndf loop design-tests` のテストが、`refactor_values` は既存のリファクタリングの既定のテストが、今のまま通ることで見る。
 
 ## 既定の組み立て（`ndf.progress.rebuild_values`）
 
@@ -242,7 +247,6 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `KINDS` | 定数 | `src/ndf/domains/docrebuild/select_decide.py` | `("design", "plan", "manuscript")`。`cli._parser` の `--kind` の `choices` もこれを読む |
-| `PLAN_FILE` | 定数 | 同上 | `"issues/issue-{number}-plan.md"`（`progress/refactor_values.py` にも同じ値がある。層の向きで `domains` は `progress` を読まない決まりにしたので（設計書の「コンテキスト」）、ここに持つ。`core.issue_docs` へ移すと 2 か所が 1 つになるが、`refactor_values` は設計書の触るファイルに無いので、この課題では移さない） |
 | `OMITTED` | 定数 | 同上 | `"省いた文書: 設計書"` |
 | `ISSUES_DIR` | 定数 | 同上 | `"issues/"` |
 
