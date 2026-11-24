@@ -538,6 +538,19 @@ AI は、全試行の行を含むこのファイルを PR の本文へ貼る。�
 | 7. 語が確定仕様を出所に持つ | 削除する 36 本のどれかを暫定的な出所（`pending_source`）として登録していた 51 語のすべてが、`source` に `docs/specifications/` のファイルを持ち、`pending_source` を持たない | `--source-of` を 1 語でも渡し忘れると、コマンドが消さずに止まる |
 | 8. 退行しない | `ndf records glossary render --check` が `ok`。`scripts/check-markdown-links.py`（36 本を `--removing` で渡す形も含む）・`scripts/check-doc-staleness.py`・`ndf check`・CI の必須のジョブが通る | 用語集の文書を作り直さないと `--check` が食い違いを返す。確定仕様のリンクを壊すと検査が落ちる |
 
+## どこを変えるか
+
+詳細設計はこのセクションに畳む。新設する関数 0・シグネチャを変える関数 0 のためである。この作業はコードを変えず、置換のコマンドはリポジトリに置かずに PR の本文に載せる（決定 4）。
+
+| ファイル | 変える中身 | 決定 |
+| --- | --- | --- |
+| `docs/specifications/ndf-review-items.md` | 6 行・16 行・18 行の 3 か所で、ファイル名とファイルへのリンクを、課題の番号と表の名前の文と、コミットの `issues/` の一覧へのリンクに替える（決定 3 の対応表の 1〜3 行目）。「列の読み方」の表と前書きの行だけを書き換え、`ndf check` の規則 `review-items` が読む「行き先の表」は変えない。手順 3 でコミットする | 決定 3 |
+| `docs/specifications/ndf-review-items-11x.md` | 5 行の 2 か所（ファイル名とファイルへのリンク）を、決定 3 の対応表の 4 行目のとおり替える。手順 3 でコミットする | 決定 3 |
+| `docs/specifications/ndf-code-decision-references.md` | 74 行のファイル名の型 2 つを、「作り直しの設計文書（#1142・#3347・#3388・#3395 の設計文書）へのパス」という文に替える。リンクは付けない。手順 3 でコミットする | 決定 3 |
+| `docs/glossary/glossary.json` | 36 本を暫定的な出所（`pending_source`）に持つ 51 語の出所を、確定仕様へ替える。手で直さず、手順 4 の `ndf records spec finalize` が書く。`--spec` には決定 2 の一式（2026-11-24 の実測で 8 本）、`--source-of` には「用語集の語の出所」の 35 語を渡す | 決定 2 |
+| `docs/glossary/ndf-rebuild.md`、`docs/glossary/ndf-code-structure.md`、`docs/glossary/ndf-durable.md`、`docs/glossary/ndf-supervise.md`、`docs/glossary/ndf-design.md`、`docs/glossary/ndf-cross-review.md` | 用語集の正本から作り直した文書。手で直さず、手順 4 の `ndf records spec finalize` が作り直す。`ndf records glossary render --check` が `ok` になることで確かめる | 決定 2 |
+| `issues/issue-1142-design-base-design-detail.md`、`issues/issue-1142-design-data-design-detail.md`、`issues/issue-1142-design-data.md`、`issues/issue-1142-design-dbos.md`、`issues/issue-1142-design-decisions.md`、`issues/issue-1142-design-detail.md`、`issues/issue-1142-design-fixes-design-detail.md`、`issues/issue-1142-design-fixes.md`、`issues/issue-1142-design-labels.md`、`issues/issue-1142-design-libraries.md`、`issues/issue-1142-design-migration.md`、`issues/issue-1142-design-modules.md`、`issues/issue-1142-design-next-design-detail.md`、`issues/issue-1142-design-next.md`、`issues/issue-1142-design-review-routing.md`、`issues/issue-1142-design-scripted-flow-design-detail.md`、`issues/issue-1142-design-scripted-flow.md`、`issues/issue-1142-design-smells-design-detail.md`、`issues/issue-1142-design-smells.md`、`issues/issue-1142-design.md`、`issues/issue-1142-requirements.md`、`issues/issue-3347-design-detail.md`、`issues/issue-3347-design.md`、`issues/issue-3347-requirements.md`、`issues/issue-3347-source-note.md`、`issues/issue-3388-design-children.md`、`issues/issue-3388-design-detail.md`、`issues/issue-3388-design-routing.md`、`issues/issue-3388-design.md`、`issues/issue-3388-requirements.md`、`issues/issue-3395-design-bugs.md`、`issues/issue-3395-design-decisions.md`、`issues/issue-3395-design-detail.md`、`issues/issue-3395-design-scope.md`、`issues/issue-3395-design.md`、`issues/issue-3395-requirements.md` | 消す 36 本。手順 4 の `ndf records spec finalize` が `--remove` で消してコミットする。開いている Issue のリンクは、消す前に手順 1 の固めるコミットへ固めておく（手順 2・5） | 決定 1・決定 4・決定 5 |
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
