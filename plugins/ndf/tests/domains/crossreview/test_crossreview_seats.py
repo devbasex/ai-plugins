@@ -387,7 +387,10 @@ def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path
     fake = _Denied(tmp_path / "st", script, target)
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert fin.INCOMPLETE_REVIEWERS in got["summary"] and fake.seat_calls == ["claude"]
-    assert any("相手役 claude が差分を読めなかった" in w and f"{drive.DENIED_READ}: round1-full.diff" in w for w in got["warnings"])
+    assert any(
+        "相手役 claude が差分を読めなかった" in w and f"{drive.DENIED_READ}: round1.diff" in w and drive.DENIED_FIX in w
+        for w in got["warnings"]
+    )
     assert fake.input_dir is not None and not any(str(fake.input_dir) in w for w in got["warnings"])
     assert any(str(fake.input_dir / "round1.diff") in p["result"] for p in got["process"])
     other = _Denied(tmp_path / "st2", script, lambda diff, cwd: "/etc/passwd")
