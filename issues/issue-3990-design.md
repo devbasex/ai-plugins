@@ -241,7 +241,11 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 **1 段目（`--spec` の一式を確定する）**: 確定仕様 6 本だけで判定する。
 
-- 対象は、語も括弧を除いた語も 6 本のどれにも現れない語である。その語ごとに、6 本以外の確定仕様で語が最も多く現れる 1 本を選ぶ。6 本以外の確定仕様は、`docs/specifications/` の `README.md` を除く `.md` である。語が無ければ括弧を除いた語で数える。最も多い回数の本が 2 本以上あれば、ファイル名の昇順で先の 1 本にする
+- 1 段目では、6 本に現れない語ごとに、6 本以外の確定仕様から語が最も多く現れる 1 本を選ぶ。ただし、語も括弧を除いた語も 1 回以上現れる確定仕様が無ければ、ファイルを選ばない。その語は 2 段目の (e) で `ndf-rebuild.md` に決まる
+  - 対象は、語も括弧を除いた語も 6 本のどれにも現れない語である
+  - 6 本以外の確定仕様は、`docs/specifications/` の `README.md` を除く `.md` である
+  - 語が 1 回以上現れる確定仕様があれば、語の回数で比べる。無ければ、括弧を除いた語の回数で比べる。どちらも 0 回なら、上のとおりファイルを選ばない
+  - 最も多い回数の本が 2 本以上あれば、ファイル名の昇順で先の 1 本にする
 - 6 本に、1 段目で選んだファイルを足したものを一式とする。2026-11-24 の実測では足すファイルが 2 本で、計 8 本になる。以下の「一式」は、この確定した一式を指す
 
 **2 段目（語ごとの出所を選ぶ）**: 一式の中で、(a) から順に当て、当たった所で決める。
@@ -295,7 +299,7 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 
 | 記号 | すること |
 | --- | --- |
-| a | 取り直し: `gh api repos/devbasex/ai-plugins/issues/<番号>` で、書き込む直前の本文を取り直す |
+| a | 取り直し: `gh api repos/devbasex/ai-plugins/issues/<番号>` で、書き込む直前の本文と状態（応答の `state`）を取り直す |
 | b | 置換: a の本文に置き換えを当て、書き込む本文を作る。手元で置き換えるだけで、API は呼ばない |
 | c | 書き込み: `gh issue edit <番号> --repo devbasex/ai-plugins --body-file <b の本文>` で書く |
 | d | 書いた後の取り直し: もう一度本文を取り、c で送った本文と照らす |
@@ -326,7 +330,7 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 **訂正**: 確認済みの対象には、40 桁の SHA を指すリンクを直す「訂正の組」（Issue の番号・今のリンク・訂正したリンク）も入れられる。手順 6 で書いた後のリンクに不備が見つかったときは、AI が訂正の組を足し、書き込む動作を打ち直して直す。訂正したリンクも、替えた後のリンクの検証を通してから埋め込む。通常の置き換えは 40 桁の SHA のリンクを替えないので、訂正の組は次のとおり別の経路で対象に入れる
 
 - 訂正の組を対象に加えるかは、対象を集めるとき（書き込まない動作・書き込む動作の 1）と、Issue ごとの a の取り直しの後の両方で見る。訂正の組の Issue の番号の本文に、組の「今のリンク」と同じ URL があれば、それを対象に加える。置き換え後のリンクは、組に埋め込んだ「訂正したリンク」である
-- 訂正の組の Issue は、開いている Issue の列挙に加えて、`gh api repos/devbasex/ai-plugins/issues/<番号>` で番号から取る。書いた後に閉じて列挙から外れた Issue も、これで訂正できる
+- 訂正の組の Issue は、開いている Issue の列挙に加えて、`gh api repos/devbasex/ai-plugins/issues/<番号>` で番号から取る。書いた後に閉じて列挙から外れた Issue も、これで訂正できる。閉じた Issue を書き換えるのは、この訂正の組に限る。通常の置き換えは開いている Issue だけに当てる（動作の 5）
 - 「今のリンク」が本文に無い組は書かず、差として出す
 
 **動作**: 既定は書き込まない動作で、取り直した対象を Issue ごとに（番号・替える前のリンク・替えた後のリンク）で出し、確認済みの対象との差と、検証の結果も出す。書き込む動作は明示の引数で選び、次の順に進む
@@ -335,7 +339,7 @@ env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv run --frozen --project . --all-e
 2. 対象に、確認済みの対象に無い Issue かリンクが 1 つでもあれば、1 件も書かずに止め、差を出す。AI は手順 2 からやり直して確認済みの対象と PR の本文を作り直す
 3. 対象の替えた後のリンクを、替えた後のリンクの検証にかける。1 つでも通らなければ、1 件も書かずに止める。AI は手順 2 からやり直して訂正したリンクを決める
 4. 確認済みの対象にあって、取り直した本文には無くなったリンク（ほかの編集が先に直したなど）は書かず、差として出す
-5. Issue ごとに、上の表の a〜d（取り直し・置換・書き込み・書いた後の取り直しと照合）を行う。b の置換は、通常の置き換えと訂正の組の両方を当てる。a の取り直しで、その Issue の対象が確認済みの対象を超えたら、その Issue を書かずに全体を止める。d の照合は次のとおりに行う
+5. Issue ごとに、上の表の a〜d（取り直し・置換・書き込み・書いた後の取り直しと照合）を行う。b の置換は、Issue が開いていれば、通常の置き換えと訂正の組の両方を当てる。a の応答の `state` が `open` でなければ（一覧を取った後に閉じられたなど）、通常の置き換えは当てず、その Issue の通常の置き換えの対象は書かずに差として出す。閉じた Issue に当てるのは、確認済みの対象に埋め込んだ訂正の組だけである。当てる訂正の組が無ければ、その Issue は書かず、記録の結果を「替えるリンクが無い」とする。a の取り直しで、その Issue の対象が確認済みの対象を超えたら、その Issue を書かずに全体を止める。d の照合は次のとおりに行う
    - d では、取り直した本文を正規化した sha256 を、記録の「送った本文のハッシュ」と比べる。一致すれば「書いた」、違えば「書いた後に変わった」とする。違うのは、c の書き込みから d の取り直しまでの間に、ほかの編集が本文を書いたときである（GitHub が保存のときに本文を変えたときも違う。「未確認のまま残ること」）。そのときも置換の書き込みは本文に入っており、上書きしていないので書き直さない
 
 **本文の正規化**: 本文のハッシュを比べるときは、どこでも、改行を LF にそろえ、本文の末尾の空白と改行を除いてから sha256 を取る。比べるのは、c で送った本文・d で取った本文・編集の履歴の各版の本文（`diff`）である。末尾を除くのは、GitHub が保存のときに末尾の改行を変えても、同じ本文として比べるためである（「未確認のまま残ること」）
@@ -515,7 +519,7 @@ repository(owner: "devbasex", name: "ai-plugins") { issue(number: <番号>) { us
 | `docs/specifications/ndf-code-decision-references.md` | 74 行のファイル名の型 2 つを、「作り直しの設計文書（#1142・#3347・#3388・#3395 の設計文書）へのパス」という文に替える。リンクは付けない。手順 3 でコミットする | 決定 3 |
 | `docs/glossary/glossary.json` | 36 本を暫定的な出所（`pending_source`）に持つ 51 語の出所を、確定仕様へ替える。手で直さず、手順 4 の `ndf records spec finalize` が書く。`--spec` には決定 2 の一式（2026-11-24 の実測で 8 本）、`--source-of` には「用語集の語の出所」の 35 語を渡す | 決定 2 |
 | `docs/glossary/ndf-rebuild.md`、`docs/glossary/ndf-code-structure.md`、`docs/glossary/ndf-durable.md`、`docs/glossary/ndf-supervise.md`、`docs/glossary/ndf-design.md`、`docs/glossary/ndf-cross-review.md` | 用語集の正本から作り直した文書。手で直さず、手順 4 の `ndf records spec finalize` が作り直す。`ndf records glossary render --check` が `ok` になることで確かめる | 決定 2 |
-| `issues/issue-1142-design-base-design-detail.md`、`issues/issue-1142-design-data-design-detail.md`、`issues/issue-1142-design-data.md`、`issues/issue-1142-design-dbos.md`、`issues/issue-1142-design-decisions.md`、`issues/issue-1142-design-detail.md`、`issues/issue-1142-design-fixes-design-detail.md`、`issues/issue-1142-design-fixes.md`、`issues/issue-1142-design-labels.md`、`issues/issue-1142-design-libraries.md`、`issues/issue-1142-design-migration.md`、`issues/issue-1142-design-modules.md`、`issues/issue-1142-design-next-design-detail.md`、`issues/issue-1142-design-next.md`、`issues/issue-1142-design-review-routing.md`、`issues/issue-1142-design-scripted-flow-design-detail.md`、`issues/issue-1142-design-scripted-flow.md`、`issues/issue-1142-design-smells-design-detail.md`、`issues/issue-1142-design-smells.md`、`issues/issue-1142-design.md`、`issues/issue-1142-requirements.md`、`issues/issue-3347-design-detail.md`、`issues/issue-3347-design.md`、`issues/issue-3347-requirements.md`、`issues/issue-3347-source-note.md`、`issues/issue-3388-design-children.md`、`issues/issue-3388-design-detail.md`、`issues/issue-3388-design-routing.md`、`issues/issue-3388-design.md`、`issues/issue-3388-requirements.md`、`issues/issue-3395-design-bugs.md`、`issues/issue-3395-design-decisions.md`、`issues/issue-3395-design-detail.md`、`issues/issue-3395-design-scope.md`、`issues/issue-3395-design.md`、`issues/issue-3395-requirements.md` | 消す 36 本。手順 4 の `ndf records spec finalize` が `--remove` で消してコミットする。開いている Issue のリンクは、消す前に手順 1 の固めるコミットへ固めておく（手順 2・5） | 決定 1・決定 4・決定 5 |
+| `issues/issue-1142-design-base-design-detail.md`、`issues/issue-1142-design-data-design-detail.md`、`issues/issue-1142-design-data.md`、`issues/issue-1142-design-dbos.md`、`issues/issue-1142-design-decisions.md`、`issues/issue-1142-design-detail.md`、`issues/issue-1142-design-fixes-design-detail.md`、`issues/issue-1142-design-fixes.md`、`issues/issue-1142-design-labels.md`、`issues/issue-1142-design-libraries.md`、`issues/issue-1142-design-migration.md`、`issues/issue-1142-design-modules.md`、`issues/issue-1142-design-next-design-detail.md`、`issues/issue-1142-design-next.md`、`issues/issue-1142-design-review-routing.md`、`issues/issue-1142-design-scripted-flow-design-detail.md`、`issues/issue-1142-design-scripted-flow.md`、`issues/issue-1142-design-smells-design-detail.md`、`issues/issue-1142-design-smells.md`、`issues/issue-1142-design.md`、`issues/issue-1142-requirements.md`、`issues/issue-3347-design-detail.md`、`issues/issue-3347-design.md`、`issues/issue-3347-requirements.md`、`issues/issue-3347-source-note.md`、`issues/issue-3388-design-children.md`、`issues/issue-3388-design-detail.md`、`issues/issue-3388-design-routing.md`、`issues/issue-3388-design.md`、`issues/issue-3388-requirements.md`、`issues/issue-3395-design-bugs.md`、`issues/issue-3395-design-decisions.md`、`issues/issue-3395-design-detail.md`、`issues/issue-3395-design-scope.md`、`issues/issue-3395-design.md`、`issues/issue-3395-requirements.md` | 消す 36 本。手順 4 で、`ndf records spec finalize` が `--remove` で作業ブランチから消してコミットする。開いている Issue のリンクを手順 1 の固めるコミットへ替える作業（手順 2・5）は、手順 4 の前でも後でもよい。この PR を `main` へマージする前に、置換と検証（手順 5〜7）を終える | 決定 1・決定 4・決定 5 |
 
 ## 設計の結果
 
