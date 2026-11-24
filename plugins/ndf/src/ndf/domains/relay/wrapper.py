@@ -37,7 +37,6 @@ from ptyprocess import PtyProcess
 from ndf import identity
 from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
-from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
     account_registry,
