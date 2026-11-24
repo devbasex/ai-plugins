@@ -1,6 +1,6 @@
 # #4068 の詳細設計: 起こす hook と起こす記録
 
-設計文書 [issue-4068-design.md](./issue-4068-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。#3995・lracct（#3604・#3864）・#4049 の実装の後に、その上で実装する（判断開始の値は `context_thresholds.thresholds` の返り、背景の作業の分け方は #4049 の `relay_busy.task_kind`・`work_count`）。
+設計文書 [issue-4068-4199-design.md](./issue-4068-4199-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは `plugins/ndf/` からの相対で書く。#3995・lracct（#3604・#3864）・#4049 の実装の後に、その上で実装する（判断開始の値は `context_thresholds.thresholds` の返り、背景の作業の分け方は #4049 の `relay_busy.task_kind`・`work_count`）。
 
 ## 地図
 
