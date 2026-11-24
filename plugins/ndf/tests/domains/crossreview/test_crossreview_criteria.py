@@ -171,6 +171,31 @@ def test_issue_4030_without_ci_only_the_fixer_prompt_is_unchanged(
     assert _between_findings_and_result(lines) == criteria_decide.fixer_block(())
 
 
+@pytest.mark.parametrize("focus", [(), ("処理の回数",)])
+def test_issue_4076_without_an_approved_mvv_the_criteria_are_the_table_ones(
+    focus: tuple[str, ...], repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役と修正担当の指示の基準は表の基準（重点があれば
+    基準 3 を足す）だけで、MVV の文は 1 行も現れない。"""
+    if focus:
+        (repos.main / ".ndf").mkdir(exist_ok=True)
+        (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": list(focus)}), encoding="utf-8")
+    major = {"text": "止まる", "severity": "major", "impact": IMPACT}
+    fake = Recording(tmp_path / "st", {"codex": [[major], []], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, wt)
+    table = criteria_decide._table()
+    want = {n: text for n, text in table["criteria"].items() if n in ("1", "2", "4")}
+    if focus:
+        want["3"] = f"{table['focus_label']}: {' / '.join(focus)}"
+    # 基準のほかの行の数（見出し・前置き・書かないものなど）。前と後ろの行は起動ごとに違う
+    for agent, build, others in (("codex", criteria_decide.reviewer_block, 5), ("claude", criteria_decide.fixer_block, 4)):
+        lines = next(p for a, _, p in fake.prompts if a == agent).splitlines()
+        block = lines[lines.index("## 指摘の基準") : -1]
+        assert block == build(focus) and len(block) == len(want) + others
+        assert dict(x.split(". ", 1) for x in block if x[:1].isdigit()) == want
+        assert not any("mvv" in x.lower() for x in (*block, lines[-1].replace(str(tmp_path), "")))
+
+
 def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     (repos.main / ".ndf").mkdir(exist_ok=True)
     (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["処理の回数"]}), encoding="utf-8")

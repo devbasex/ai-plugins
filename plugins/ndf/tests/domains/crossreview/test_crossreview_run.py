@@ -870,3 +870,25 @@ def test_issue_4014_impact_reaches_the_fixer_and_rates_findings_without_a_severi
     assert "- r1-2: 認可が抜ける（major）— 起きること: 他人の記録が読める" in fix
     assert "r1-3" not in fix
     assert [r["severity"] for r in _state(fake.state_dir)["findings"]] == ["major", "major", "minor"]
+
+
+def test_issue_4076_without_an_approved_mvv_the_journal_and_outputs_keep_their_shape(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役が MVV の項目を添えても重さも記録のキーも変わらず、
+    ジャーナルの指摘と結果 JSON の `outputs` のキーは MVV の無い形のままである。"""
+    said = [
+        {"text": "止まる", "severity": "major", "impact": IMPACT, "mvv": "Value 5"},
+        {"text": "語が揺れる", "severity": "minor", "mvv": "P1"},
+    ]
+    fake = Recording(tmp_path / "st", {"codex": [said, []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert got["outputs"] == {"gaps": []}
+    assert [i for i in got["items"] if i["kind"] == "finding"] == [
+        {"kind": "finding", "id": "r1-1", "outcome": fin.FIXED},
+        {"kind": "finding", "id": "r1-2", "outcome": fin.UNRESOLVED},
+    ]
+    state = _state(fake.state_dir)
+    light = _entry("r1-2", "codex", "語が揺れる", fin.UNRESOLVED, 1) | {"severity": "minor", "raised_severity": "minor"}
+    del light["impact"]
+    assert _findings(state) == [_entry("r1-1", "codex", "止まる", fin.FIXED, 1) | {"raised_severity": "major"}, light]
+    assert "r1-2" not in next(p for a, _, p in fake.prompts if a == "claude")
