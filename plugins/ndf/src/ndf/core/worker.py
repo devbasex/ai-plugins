@@ -242,7 +242,7 @@ def system_prompt(kind: str, state_dir: Path, skills_dir: Path, sources: Sequenc
     parts = [rules, procedure, skills_section(kind, skills_dir)]
     if WRITING_SKILL in worker_kinds.work_kinds().get(kind, {}).get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
         try:
-            parts.append(writing.text())
+            parts.append(writing.criteria())
         except writing.CriteriaBroken as exc:
             raise WorkerError("precondition", str(exc)) from None
     if sources:

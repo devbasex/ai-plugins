@@ -20,8 +20,8 @@
 | --- | --- | --- |
 | `contracts/data/writing-criteria.md`（新設） | 文書の基準の本文 | U1 |
 | `contracts/data/ndf-common-principles.md` | 「人と AI の対話」の節に、「文書は、想定した読み手に通じる言葉で書く」の 1 文 | U1 |
-| `contracts/data/review-criteria.json` | 基準 6 と指示の文、`not_written` と `impact.reviewer` | U1 |
-| `src/ndf/contracts/writing.py`（新設） | `text`・`types_section` | U1 |
+| `contracts/data/review-criteria.json` | 基準 6 と指示の文（`document`）、`not_written` | U1 |
+| `src/ndf/contracts/writing.py`（新設） | `criteria`・`types_section` | U1 |
 | `src/ndf/domains/crossreview/criteria_decide.py` | `document_block` | U1 |
 | `src/ndf/domains/crossreview/drive.py` | `_Run.documents`・`_prepare_round`・`_review_prompt`・`_fix_prompt` | U1 |
 | `src/ndf/core/worker.py` | `system_prompt` | U1 |
@@ -59,7 +59,7 @@
 ### Task 3: 基準の本文と、それを読む関数
 
 - **対象ファイル:** `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/data/ndf-common-principles.md`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/tests/contracts/test_writing.py`（新設）
-- **変更内容:** 基準の本文は、開発者の手元の `.ndf/handoff/writing-criteria.md`（メインディレクトリにある。Git では管理していない）の全文から、読み手役の手順の 7 節と、案であることの前書きを除いて移す。設計書の「文書の基準」のうち、全文に無いもの（「判断や作業を誤らせる文」と「読みにくいだけの文」の見分け方、利用者が差し戻した 3 つの文を直した例）を加える。食い違う所は全文に合わせる（設計書の「文書の基準」）。型 B は、日本語以外の文書では「その言語として不自然な文」と読み替えることを書く。手元のファイルが無いときは、設計書の「文書の基準」から書き起こし、PR の本文にそのことを書く。`writing.text` は全文、`writing.types_section` は 4 つの型と 2 つの区分の節を返し、見出しが無ければ `ContractError` を出す
+- **変更内容:** 基準の本文は、開発者の手元の `.ndf/handoff/writing-criteria.md`（メインディレクトリにある。Git では管理していない）の全文から、読み手役の手順の 7 節と、案であることの前書きを除いて移す。設計書の「文書の基準」のうち、全文に無いもの（「判断や作業を誤らせる文」と「読みにくいだけの文」の見分け方、利用者が差し戻した 3 つの文を直した例）を加える。食い違う所は全文に合わせる（設計書の「文書の基準」）。型 B は、日本語以外の文書では「その言語として不自然な文」と読み替えることを書く。手元のファイルが無いときは、設計書の「文書の基準」から書き起こし、PR の本文にそのことを書く。`writing.criteria` は全文、`writing.types_section` は 4 つの型と 2 つの区分の節を返し、見出しが無ければ `ContractError` を出す
 - **満たす受け入れ条件:** 1、2、5、6、20
 - **進め方:** 失敗するテスト（基準のファイルが無い・見出しが無いときに `ContractError` になる）→ 通す最小実装 → 整理。本文の中身は、読んで確かめる
 
@@ -73,7 +73,7 @@
 ### Task 5: 文書を書く worker の指示に、基準を入れる
 
 - **対象ファイル:** `plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/tests/worker/test_rules.py`
-- **変更内容:** `system_prompt` が、`document-style` を読む作業（`kinds.json`）の手順書の節の後に `writing.text()` を続ける。基準を読めないときは、`skills_section` と同じ停止理由で worker を起動しない。`worker.py` は今 991 行なので、足す行は 9 行以内に収める
+- **変更内容:** `system_prompt` が、`document-style` を読む作業（`kinds.json`）の手順書の節の後に `writing.criteria()` を続ける。基準を読めないときは、`skills_section` と同じ停止理由で worker を起動しない。`worker.py` は今 991 行なので、足す行は 9 行以内に収める
 - **満たす受け入れ条件:** 7、11
 - **進め方:** 失敗するテスト（`document-style` を読む作業だけに本文が入る）→ 通す最小実装 → 整理
 

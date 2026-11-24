@@ -51,9 +51,9 @@ def test_issue_4285_only_kinds_that_read_document_style_get_the_criteria(tmp_pat
     # 受け入れ条件 7・11: 文書を書く作業（kinds.json で document-style を読む作業）だけに、文書の基準の全文を渡す
     for kind, row in worker_kinds.work_kinds().items():
         text = worker.system_prompt(kind, tmp_path / "state", _SKILLS)
-        assert (writing.text() in text) is ("document-style" in row["skills"]), kind
+        assert (writing.criteria() in text) is ("document-style" in row["skills"]), kind
     # 作業の定義に無い作業種別の規則文は、規則と手順書だけのまま
-    assert writing.text() not in worker.system_prompt("sweep", tmp_path / "state", _SKILLS)
+    assert writing.criteria() not in worker.system_prompt("sweep", tmp_path / "state", _SKILLS)
 
 
 def test_issue_4285_the_rules_of_a_kind_without_documents_are_unchanged(tmp_path):
@@ -67,7 +67,7 @@ def test_issue_4285_unreadable_criteria_stop_before_launch(tmp_path, monkeypatch
     def broken():
         raise writing.CriteriaBroken("文書の基準を読めない")
 
-    monkeypatch.setattr(writing, "text", broken)
+    monkeypatch.setattr(writing, "criteria", broken)
     with pytest.raises(worker.WorkerError) as err:
         worker.system_prompt("design", tmp_path, tmp_path / "skills")
     assert err.value.kind == "precondition"

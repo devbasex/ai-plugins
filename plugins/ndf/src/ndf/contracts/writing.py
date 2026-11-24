@@ -18,7 +18,7 @@ class CriteriaBroken(contracts.ContractError):
 
 
 @contracts.cached_reader
-def text() -> str:
+def criteria() -> str:
     """基準の全文。読めなければ `CriteriaBroken`。"""
     with contracts.raised_as(CriteriaBroken):
         return contracts.load_text(CRITERIA)
@@ -26,7 +26,7 @@ def text() -> str:
 
 def types_section() -> str:
     """通じない文の 4 つの型と 2 つの区分のセクション（見出しから次の `## ` の見出しの前まで）。見出しが無ければ `CriteriaBroken`。"""
-    lines = text().splitlines()
+    lines = criteria().splitlines()
     if TYPES_HEADING not in lines:
         raise CriteriaBroken(f"文書の基準 {CRITERIA} に見出し「{TYPES_HEADING}」が無い")
     start = lines.index(TYPES_HEADING)

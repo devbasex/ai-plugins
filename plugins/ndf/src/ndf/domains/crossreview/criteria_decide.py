@@ -195,4 +195,4 @@ def document_block(role: str, documents: bool, since: Optional[str] = None) -> l
             lines.append(doc["since"].format(since=since))
     else:
         lines.append(doc["fixer"])
-    return [*lines, writing.text().rstrip()]
+    return [*lines, writing.criteria().rstrip()]

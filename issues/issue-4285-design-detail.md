@@ -34,7 +34,7 @@ plugins/ndf/
 
 | パス | 種類 | 役割 | 関数 |
 | --- | --- | --- | --- |
-| `contracts/writing.py` | 新設 | 基準の本文を読む | `text`・`types_section` |
+| `contracts/writing.py` | 新設 | 基準の本文を読む | `criteria`・`types_section` |
 | `domains/crossreview/criteria_decide.py` | 変更 | 指示の行を作る | `document_block`（新設） |
 | `domains/crossreview/drive.py` | 変更 | 指示に行を加える | `_prepare_round`・`_review_prompt`・`_fix_prompt` |
 | `core/worker.py` | 変更 | worker の指示に本文を入れる | `system_prompt` |
@@ -49,12 +49,12 @@ plugins/ndf/
 
 | 関数 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- |
-| `writing.text` | 新設 | `() -> str` | `writing-criteria.md` の全文を返す。読めなければ `ContractError` |
+| `writing.criteria` | 新設 | `() -> str` | `writing-criteria.md` の全文を返す。読めなければ `ContractError` |
 | `writing.types_section` | 新設 | `() -> str` | 4 つの型の節だけを返す。見出しが無ければ `ContractError` |
-| `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, since: str = "") -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`since` は前のラウンドの head で、1 ラウンド目は空 |
+| `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, since: Optional[str] = None) -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`since` は前のラウンド（相手役の全員が差分を読めたもの）の head で、1 ラウンド目は `None` |
 | `_prepare_round` | 変更 | 変えない | Pull Request の全体の差分（`cfg.base...HEAD`）に Markdown のファイルがあるかを `_Run.documents` に入れる（ラウンドごとの差分では決めない） |
 | `_review_prompt`・`_fix_prompt` | 変更 | 変えない | `document_block` の行を指示に加える |
-| `worker.system_prompt` | 変更 | 変えない | `document-style` を読む作業（`kinds.json`）では、手順書の節の後に `writing.text()` を続ける |
+| `worker.system_prompt` | 変更 | 変えない | `document-style` を読む作業（`kinds.json`）では、手順書の節の後に `writing.criteria()` を続ける |
 
 | `role` | `document_block` が返すもの（上から順） | 出所 |
 | --- | --- | --- |
@@ -66,7 +66,7 @@ plugins/ndf/
 
 - `writing-criteria.md` を読めないときは、指示を作る前に止める。cross-review は `invalid` で終わり、worker は起動しない
 - `drive.py` に加える行は、`_Run.documents` の定義と、それを設定する 1 行の、合わせて 2 行である。2 つの指示に行を加える変更は、今ある行に `+ document_block(...)` を続けるので、行数は増えない。1,000 行を超えるときは、先に `_regular_blobs`・`_local_text`・`_committed_texts`・`_changed`・`_sections`・`changed_sections` を、新しいファイル `changed_docs.py` へ移す
-- 基準 6 の指摘も、`impact` の無い major は minor に下げる今の規則に従う。`review-criteria.json` の `impact.reviewer` に「基準 6 では、どの読み手が何を取り違えるか」を加える
+- 基準 6 の指摘も、`impact` の無い major は minor に下げる今の規則に従う。`impact` に書く中身（どの読み手が何を取り違えるか）は、`review-criteria.json` の `document.fields` に書く。文書を含まない PR の指示を変えないために（受け入れ条件 11）、どの PR の指示にも入る `impact.reviewer` には書かない
 - `not_written` の「字句や言い回し」を「読み手に通じる文の、好みの言い換え」に変える
 
 ## 読み手役の指示と確かめの記録

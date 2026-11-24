@@ -47,7 +47,7 @@ def test_issue_4285_document_pr_gives_the_criteria_to_both_prompts(wt: Path, tmp
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
-    assert all(writing.text().rstrip() in p for _, _, p in fake.prompts)
+    assert all(writing.criteria().rstrip() in p for _, _, p in fake.prompts)
     number = criteria_decide._table()["document"]["number"]
     assert all(f"\n{number}. " in p for _, _, p in fake.prompts)
 
@@ -57,7 +57,7 @@ def test_issue_4285_documents_are_read_from_the_whole_diff(repos: Repos, wt: Pat
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     assert ".md" not in (fake.state_dir / "round2.diff").read_text(encoding="utf-8")
-    assert writing.text().rstrip() in _prompt(fake, "round2-codex.out")
+    assert writing.criteria().rstrip() in _prompt(fake, "round2-codex.out")
 
 
 def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -103,7 +103,7 @@ def test_issue_4285_document_block_by_role_and_round() -> None:
     assert [line for line in second if line not in first] == [doc["since"].format(since="abc")]
     assert set(doc["fields"]) <= set(first) and not set(doc["fields"]) & set(fixer)
     assert doc["fixer"] in fixer and doc["fixer"] not in first
-    assert first[-1] == second[-1] == fixer[-1] == writing.text().rstrip()
+    assert first[-1] == second[-1] == fixer[-1] == writing.criteria().rstrip()
 
 
 def test_issue_4285_unreadable_criteria_stop_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -112,7 +112,7 @@ def test_issue_4285_unreadable_criteria_stop_before_any_launch(wt: Path, tmp_pat
     def broken() -> str:
         raise writing.CriteriaBroken("文書の基準を読めない")
 
-    monkeypatch.setattr(writing, "text", broken)
+    monkeypatch.setattr(writing, "criteria", broken)
     fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
