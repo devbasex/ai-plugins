@@ -1,16 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "mvv-validation.schema.json",
-  "title": "MVV 判定の記録の 1 行",
-  "description": "MVV 判定の結論の行（表 ndf-files の mvv-validation）。書き手は ndf.domains.records.mvv",
+  "title": "MVV 判定と、MVV に反するとした cross-review の指摘の記録の 1 行",
+  "description": "MVV 判定の結論の行と、cross-review の指摘ごとの行（kind が mvv-review）。表 ndf-files の mvv-validation。書き手は ndf.domains.records.mvv",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "at", "kind", "key", "verdict", "repo"],
+  "required": ["version", "at", "kind", "key", "repo"],
+  "if": {"properties": {"kind": {"const": "mvv-review"}}},
+  "then": {"required": ["pr", "head", "id", "outcome", "mvv_version", "sha256"]},
+  "else": {"required": ["verdict"]},
   "properties": {
     "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
     "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
     "kind": {"type": "string", "description": "判定の種類"},
-    "key": {"type": "string", "description": "MVV 判定の入力の全体の sha256"},
+    "key": {"type": "string", "description": "MVV 判定の入力の全体の sha256。cross-review の指摘では、秘密を伏せた本文の sha256"},
     "verdict": {"type": "string", "description": "判定の結論"},
     "repo": {"type": "string", "description": "メインディレクトリの絶対パス"},
     "reused_from": {"$ref": "common.schema.json#/$defs/time", "description": "再利用の元の判定を書いた時刻"},
@@ -18,6 +21,16 @@
     "boundary": {"type": "array", "items": {"type": "string"}, "description": "当たるレッドライン"},
     "basis": {"type": "array", "items": {"type": "string"}, "description": "根拠にした項目"},
     "usd": {"type": ["number", "null"], "description": "判定の費用（USD）。取れなければ null"},
-    "seconds": {"type": ["number", "null"], "description": "判定の秒"}
+    "seconds": {"type": ["number", "null"], "description": "判定の秒"},
+    "pr": {"type": "integer", "description": "レビューした PR の番号"},
+    "head": {"type": "string", "description": "PR に届いた最後のコミットの SHA"},
+    "id": {"type": "string", "description": "指摘の番号（起動ごとに変わるので、表示だけに使う）"},
+    "item": {"type": "string", "description": "反する MVV の項目か、根拠の記述の誤りが引いた項目（伏せた後の値）"},
+    "outcome": {"type": "string", "enum": ["fixed", "unresolved", "deferred", "redline"], "description": "指摘の終わり方。redline は、必ず人の承認が要る操作に当たる指摘"},
+    "reason": {"type": "string", "description": "見送りの理由（伏せた後の値）"},
+    "text": {"type": "string", "description": "必ず人の承認が要る操作に当たる指摘の本文（伏せた後の値）"},
+    "withheld": {"const": true, "description": "伏せる所を確かめられず、自由記述を書かなかった"},
+    "mvv_version": {"type": ["integer", "null"], "description": "指摘を判定した MVV の設定のバージョン"},
+    "sha256": {"type": ["string", "null"], "description": "指摘を判定した MVV の本文の sha256"}
   }
 }

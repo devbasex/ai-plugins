@@ -203,7 +203,7 @@ NDF 10.x は、記録の `verdict: failed` の行にある異なる `head` の�
 
 cross-review の修正担当は `claude -p --setting-sources ''` で起動するため hook が働かず、上の hook の拒否（I9）の外にいる（#4030）。
 そこで、修正担当の worktree の `.ndf/project.json` が `test.ci.only: true` のときだけ、修正担当への指示の「指摘の基準」の後に
-次の文を足す（`ndf.domains.crossreview.drive._fix_prompt` が `scoped.ci_only(declared.test_section(worktree))` で決める）。
+次の文を足す（`ndf.domains.crossreview.fixer._fix_prompt` が `scoped.ci_only(declared.test_section(worktree))` で決める）。
 
 > このリポジトリはテストを CI に寄せる設定（`.ndf/project.json` の `test.ci.only`）が真なので、テストを手元で打たない（全体の suite だけでなく、個別のテスト・範囲を絞ったテストも打たない）。静的解析（lint などの検査）は打ってよく、テストの合否は PR の CI が決める。
 

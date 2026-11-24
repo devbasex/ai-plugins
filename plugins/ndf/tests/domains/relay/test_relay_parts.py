@@ -262,7 +262,7 @@ def test_i5_drop_question_fails_without_raising_for_a_directory(tmp_path, match)
 
 
 def test_relay_mark_is_taken_once(tmp_path):
-    # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take でマーカーを消す
+    # 中継が送った入力では hook の数え手が数え直さない（docs/specifications/ndf-rebuild.md の決定 92）。hook は take でマーカーを消す
     markers.mark(tmp_path, "sess-1")
     assert markers.take(tmp_path, "sess-1") is True
     assert markers.take(tmp_path, "sess-1") is False

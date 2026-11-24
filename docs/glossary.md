@@ -7,7 +7,7 @@
 | プロジェクトの用語集（`project-glossary`） | 各プロジェクトが持つユビキタス言語。語・意味・コンテキスト・廃止した語・SSOT | 15 | `docs/glossary/project-glossary.md` |
 | NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ | 134 | `docs/glossary/ndf-workflow.md` |
 | NDF の並列の計画（`ndf-parallel`） | 並列の計画がレーンを同時に進め、オーガナイザーがレーンのリクエストへ答え、エピックを進めるときの語。レーン・一時レーン・計画のジャーナル・マシンの上限 | 117 | `docs/glossary/ndf-parallel.md` |
-| NDF の開発ループと MVV（`ndf-loop`） | 開発ループがスプリントを続けて選び、pace と MVV 判定で承認ゲートを通すときの語。選定・予算・止まる条件・出し直しの指摘・MVV | 52 | `docs/glossary/ndf-loop.md` |
+| NDF の開発ループと MVV（`ndf-loop`） | 開発ループがスプリントを続けて選び、pace と MVV 判定で承認ゲートを通すときの語。選定・予算・止まる条件・出し直しの指摘・MVV | 53 | `docs/glossary/ndf-loop.md` |
 | NDF のプランの実行（`ndf-supervise`） | supervise.py がプランをキューで流し、ステップを進めて結果を残すときの語。プラン・ステップ・ステージ・上限・進捗ログ | 65 | `docs/glossary/ndf-supervise.md` |
 | NDF の実行の基盤（`ndf-durable`） | 耐久ワークフロー・ステートマシン・実行の核が、実行を記録し、止まった理由と次のルートを決めるときの語。結果 JSON・停止理由・判断の関数 | 59 | `docs/glossary/ndf-durable.md` |
 | NDF の CI とテスト（`ndf-ci-test`） | テストの戦略・範囲テストと全体テスト・CI のチェックの待ちと必須のチェックの突き合わせ・差分の種類の語 | 50 | `docs/glossary/ndf-ci-test.md` |
@@ -19,7 +19,7 @@
 | NDF の作り直し（`ndf-rebuild`） | #1142 の作り直し（ndf-next）と、旧いプラグインからの入れ替えの語。子の表・振り分け表・11.x の子 | 30 | `docs/glossary/ndf-rebuild.md` |
 | NDF の Slack 通知（`ndf-notification`） | 利用者の手を待つ時点・その種類・通知の本文と復帰先 | 5 | `docs/glossary/ndf-notification.md` |
 | NDF の外部 CLI 委譲（`ndf-agent-cli`） | cross-review / cross-refactoring が参加者の CLI を選び、起動し、監視し、結果を読むときの語。ランタイム・ホスト・参加者プール・起動結果 | 36 | `docs/glossary/ndf-agent-cli.md` |
-| NDF の cross-review（`ndf-cross-review`） | Pull Request のレビューを CLI へ委譲し、新しい指摘が出なくなるまで回す収束ループの語。指摘・反証・総評・修正担当 | 43 | `docs/glossary/ndf-cross-review.md` |
+| NDF の cross-review（`ndf-cross-review`） | Pull Request のレビューを CLI へ委譲し、新しい指摘が出なくなるまで回す収束ループの語。指摘・反証・総評・修正担当 | 45 | `docs/glossary/ndf-cross-review.md` |
 | NDF の cross-refactoring（`ndf-cross-refactoring`） | 想定最大時間に収まるリファクタリング計画を立てて通す語。改善候補・改善項目・配分テーブル・最終ゲート | 83 | `docs/glossary/ndf-cross-refactoring.md` |
 | NDF のラッパー（`ndf-relay`） | ラッパーがセッションを切り替え、シェルの設定へ組み込まれるときの語 | 102 | `docs/glossary/ndf-relay.md` |
 | NDF のリリース（`ndf-release`） | release が走らせるリリースの種別・リリースコマンド・公開操作・リリース記録の語 | 124 | `docs/glossary/ndf-release.md` |

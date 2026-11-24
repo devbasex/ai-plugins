@@ -77,8 +77,9 @@ def test_repo_of_url(url: str, repo: str | None) -> None:
 
 
 def test_remote_repo_refuses_non_github_remote() -> None:
-    with pytest.raises(git.GitError, match="GitHub"):
-        git.Git(runner=_fake(stdout="https://gitlab.com/x/y.git\n")).remote_repo("origin")
+    with pytest.raises(git.GitError, match="GitHub") as exc:
+        git.Git(runner=_fake(stdout="https://user:s3cret@gitlab.com/x/y.git\n")).remote_repo("origin")
+    assert "s3cret" not in str(exc.value)
 
 
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:
@@ -280,6 +281,22 @@ def test_remote_repo_passes_remote_name_and_propagates_failure() -> None:
     assert str(exc.value) == "git remote get-url -- up が失敗（終了コード 2）: no such remote"
 
 
+@pytest.mark.parametrize(
+    ("url", "shown"),
+    [
+        ("https://h/o/r.git?access_token=dummy&x=1", "https://h/o/r.git?***"),
+        ("https://user:dummy@h/o/r.git", "https://***@h/o/r.git"),
+        ("https://dummy@h/o/r.git?t=dummy@x", "https://***@h/o/r.git?***"),
+        ("https://h/o/r.git", "https://h/o/r.git"),
+    ],
+)
+@pytest.mark.parametrize("call", [lambda g: g.fetch_branch_or_raise("origin", "main"), lambda g: g.run("cat-file", "blob", "x")])
+def test_failure_message_masks_credentials_and_query_of_urls(call, url: str, shown: str) -> None:
+    with pytest.raises(git.GitError) as exc:
+        call(git.Git(runner=_fake(128, stderr=f"fatal: unable to access {url} : Could not resolve host")))
+    assert str(exc.value).endswith(f"fatal: unable to access {shown} : Could not resolve host")
+
+
 def test_run_git_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict = {}
 
@@ -299,6 +316,54 @@ def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(git.GitError, match="git を起動できない"):
         git.run_git(["status"], None)
+
+
+def test_run_bytes_returns_stdout_without_newline_conversion(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    raw = b"\xef\xbb\xbf1\r\n2\xff\r\n"
+    (path / "raw").write_bytes(raw)
+    oid = git_sandbox.sh(path, "hash-object", "-w", "--no-filters", "raw", strip=True)
+    assert git.Git(path).run_bytes("cat-file", "blob", oid) == raw
+    with pytest.raises(git.GitError, match="git cat-file blob nope が失敗（終了コード 128）: fatal"):
+        git.Git(path).run_bytes("cat-file", "blob", "nope")
+
+
+def test_blobs_reads_every_name_in_one_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict] = []
+    oid = b"a" * 40
+    out = oid + b" blob 2\na\n\n" + b"HEAD:nope missing\n" + oid + b" tree 3\n\x00\n1\n" + oid + b" blob 4\nb\r\n\n\n"
+
+    def fake_run(cmd, **kwargs):
+        seen.append({"cmd": cmd, **kwargs})
+        return subprocess.CompletedProcess(cmd, 0, out, b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.Git(Path("/w")).blobs("HEAD:a", "HEAD:nope", "HEAD:d", "HEAD:b") == [b"a\n", None, None, b"b\r\n\n"]
+    assert [(s["cmd"], s["input"]) for s in seen] == [(["git", "cat-file", "--batch"], b"HEAD:a\nHEAD:nope\nHEAD:d\nHEAD:b\n")]
+
+
+@pytest.mark.parametrize(
+    ("ref", "want"), [("", "a" * 40), ("refs/tags/v1", "a" * 40), ("refs/heads/v1", None), ("refs/remotes/origin/v1", None), (None, None)]
+)
+def test_commit_named_resolves_commits_that_are_not_branches(ref: str | None, want: str | None) -> None:
+    def runner(args: list[str], cwd: Path | None) -> git.Completed:
+        if "--symbolic-full-name" not in args:
+            return git.Completed(0, "a" * 40 + "\n", "")
+        return git.Completed(1, "", "") if ref is None else git.Completed(0, ref + "\n", "")
+
+    assert git.Git(Path("/w"), runner).commit_named("v1") == want
+
+
+def test_run_bytes_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs, cmd=cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"o", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.Git(Path("/w")).run_bytes("status") == b"o"
+    assert seen["cmd"] == ["git", "status"] and seen["cwd"] == Path("/w") and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def test_common_dir_is_real_main_git_dir_from_main_and_linked_worktree(tmp_path: Path) -> None:
@@ -455,3 +520,13 @@ def test_remote_repo_uses_the_declared_remote(tmp_path: Path) -> None:
     assert git.Git(path).remote_repo() == "o/up"
     with pytest.raises(git.GitError):
         git.Git(path).remote_repo("origin")
+
+
+def test_commit_or_none_tells_unreadable_refs_from_git_failures() -> None:
+    """#4337: 読めない参照（終了コード 1）は None、ほかの終了コードは `GitError`。"""
+    runner = _fake_cwd(stdout=FULL + "\n")
+    assert git.Git(Path("/w"), runner).commit_or_none("refs/remotes/up/trunk") == FULL
+    assert runner.calls == [(["rev-parse", "--verify", "--quiet", "--end-of-options", "refs/remotes/up/trunk^{commit}"], Path("/w"))]
+    assert git.Git(runner=_fake_cwd(1)).commit_or_none("x") is None
+    with pytest.raises(git.GitError, match="終了コード 128"):
+        git.Git(runner=_fake_cwd(128, stderr="fatal\n")).commit_or_none("x")

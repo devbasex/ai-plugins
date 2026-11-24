@@ -3,7 +3,7 @@
 **この文書は 10 系の `context-policy.py` の時点（[#2262](https://github.com/devbasex/ai-plugins/issues/2262)、2026-11-02 承認）の記録である。**
 11.0.20 の次の版で入った [#3995](https://github.com/devbasex/ai-plugins/issues/3995) が、再起動の方針（現行方式と試行方式）・その値
 （200,000・400,000・容量の余白 50,000）・設定 `.ndf/context.json`・環境変数 `NDF_CONTEXT_POLICY` と `NDF_CONTEXT_GUARD` を消した。
-**文脈の切り替えの閾値（判断開始の値 250,000・運用上限 500,000）、その置き場と読み手、guard `context-limit` の知らせと止め方、
+**文脈の切り替えの閾値（判断開始の値 450,000・運用上限 600,000）、その置き場と読み手、guard `context-limit` の知らせと止め方、
 `NDF_CONTEXT_LIMIT` と止める口は [ndf-context-thresholds.md](ndf-context-thresholds.md) が正である。**
 
 この文書に残すのは、方針に依らない判定の記録・印・費用の見込み・較正・集計の契約と、そう決めた理由である。

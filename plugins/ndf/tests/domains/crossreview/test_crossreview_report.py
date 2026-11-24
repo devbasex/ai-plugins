@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, Optional
 
+import pytest
+
+from ndf.adapters.github import GitHubError
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, report_decide, store, threads
+from ndf.domains.records.mvv import Snapshot
 
 from .conftest import FakePort
 from .test_crossreview_run import PR, Fake, _run
@@ -66,7 +73,7 @@ def test_comment_carries_rounds_fix_commits_and_every_finding() -> None:
     assert body.startswith(report_decide.MARKER)
     assert "ラウンドの上限で止まった。ラウンド 2・指摘 3（直した 1・見送った 1・未解決 1）" in body
     # 修正の記録: コミット・送ったか・直した指摘
-    assert f"| 1 | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
+    assert f"| 1 | — | `{HEAD1[:9]}` | full | changes_required | `{FIX1[:9]}` | 送った | r1-1 |" in body
     # 表のセルは改行と縦棒で崩れない。見送った理由が載る
     assert "| r1-2 | kiro | — | src/b.py#g | 命名が \\| 揃わない 2 行目 | 見送った | 設計で決めた範囲の外 |" in body
     assert "| r2-1 | codex | — | doc.md#セクション | 根拠が無い | 未解決 | — |" in body
@@ -202,6 +209,28 @@ def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys,
     cli.main(["report", "--state-dir", str(state_dir), "--pr", "7"])
     assert len(hub.port.opened) == 3
     assert hub.comments[-1][3] == "https://github.com/acme/repo/pull/7#issuecomment-1"
+
+
+@pytest.mark.parametrize("recovered", [False, True])
+def test_report_tells_the_mvv_record_error_of_the_state_read_in_the_lock(tmp_path: Path, monkeypatch, hub, recovered: bool) -> None:
+    """MVV の記録の失敗の注意は、公開のロックの中で読み直した状態から載せる。ロックを待つ間に書けていれば載せない。"""
+    from ndf.domains.crossreview import cli, drive
+
+    path, state = tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"}
+    store.write_object(path, {**state, store.MVV_RECORD_ERROR: "OSError: 書けない"})
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        if recovered:
+            store.write_object(path, state)
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    assert cli.main(["report", "--state-dir", str(tmp_path), "--pr", "7"]) == 0
+    assert (drive.RECORDS_UNWRITTEN in hub.comments[-1][2]) is not recovered
+    notices = [] if recovered else [drive.RECORDS_UNWRITTEN]
+    data = store.read_object(path)
+    assert data[report_decide.PUBLISHED_KEY] == report_decide.published_state(7, data, report_decide.final_of(data), notices)
 
 
 def test_comment_id_reads_the_id_from_the_url() -> None:
@@ -391,3 +420,88 @@ def test_revived_finding_drops_the_old_section_when_the_new_one_has_none() -> No
     row = journal.rows["r1-1"]
     assert row.get("section") is None and "path" not in row and "line" not in row
     assert threads.location(row) == (None, None)
+
+
+# --- 結果 JSON の MVV の判定 -------------------------------------------------------------------
+
+
+def _mvv_outputs(rows: list[dict[str, Any]], clean: Any) -> dict[str, Any]:
+    snap = Snapshot("approved", 11, "a" * 64, None, (), {}, HEAD1, "c" * 64, None)
+    return report_decide.mvv_outputs([{"judged_mvv": snap.identity, **r} for r in rows], snap, HEAD1, clean)
+
+
+def test_issue_4090_7_free_text_and_paths_are_hidden_in_one_call_and_kept_in_the_journal() -> None:
+    """理由・本文・根拠の記述の誤りのパスと引いた項目を、1 回でまとめて伏せる。ジャーナルの指摘は書き換えない。"""
+    calls: list[list[str]] = []
+
+    def clean(texts: Any) -> list[str]:
+        calls.append(list(texts))
+        return [t.replace("秘密", "***") for t in texts]
+
+    rows = [
+        {"id": "r1-1", "text": "a", "mvv": "Value 5", "outcome": "deferred", "reason": "秘密の理由"},
+        {"id": "r1-2", "text": "秘密の操作", "mvv": "P1", "redline": True, "redline_items": ["P1", "C7"], "outcome": "unresolved"},
+        {"id": "r1-n1", "text": "b", "by": "ndf", "path": "秘密.md", "line": 3, "cited": "秘密", "unknown": ["秘密"], "outcome": "fixed"},
+        {"id": "r1-3", "text": "c", "mvv": "Value 5", "outcome": "deferred", "reason": "前の MVV", "judged_mvv": "approved:10:b:c"},
+    ]
+    out = _mvv_outputs(rows, clean)
+    assert out["disputed"] == [{"id": "r1-1", "item": "Value 5", "reason": "***の理由"}]
+    assert out["redlines"] == [{"id": "r1-2", "item": "P1・C7", "text": "***の操作"}]
+    assert out["citations"] == [{"id": "r1-n1", "path": "***.md", "line": 3, "cited": "***", "unknown": ["***"], "outcome": "fixed"}]
+    assert len(calls) == 1 and rows[2]["path"] == "秘密.md"
+    # 伏せる値が無ければ、照会もしない
+    out = _mvv_outputs([{"id": "r1-4", "text": "d", "by": "kiro", "mvv": "Value 1", "outcome": "unresolved"}], clean)
+    assert out["findings"] == [{"id": "r1-4", "item": "Value 1", "by": "kiro", "outcome": "unresolved"}] and len(calls) == 1
+
+
+def test_same_value_is_cleaned_once() -> None:
+    calls: list[list[str]] = []
+
+    def clean(texts: Any) -> list[str]:
+        calls.append(list(texts))
+        return [t.upper() for t in texts]
+
+    once = report_decide.once(clean)
+    assert (once(["a", "b", "a"]), once(["b", "c"]), once([])) == (["A", "B", "A"], ["B", "C"], [])
+    assert (calls, once.failure) == ([["a", "b"], ["c"]], None)
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (GitHubError("o/hidden", quota="graphql"), "レート制限"),
+        (GitHubError("o/hidden", unreached=True), "通信の障害"),
+        (GitHubError("o/hidden", status=403), "GitHub が照会を断った（HTTP 403）"),
+        (ValueError("o/hidden"), "照会の失敗（ValueError）"),
+    ],
+)
+def test_issue_4090_7_failure_hides_every_value_and_the_message(error: Exception, cause: str) -> None:
+    """照会に失敗したら、伏せ終えた値も含めて固定の文にし、照会し直さない。原因に例外の文（リポジトリの名前を含みうる）を使わない。"""
+    raised: Optional[Exception] = None
+    calls = 0
+
+    def clean(texts: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if raised is not None:
+            raise raised
+        return texts
+
+    once = report_decide.once(clean)
+    assert once(["a"]) == ["a"]
+    raised = error
+    assert (once(["a", "b"]), once(["c"])) == ([report_decide.WITHHELD] * 2, [report_decide.WITHHELD])
+    assert (once.failure, calls) == (cause, 2)
+
+
+def test_issue_3955_round_table_names_the_seats_and_whose_seat_was_filled() -> None:
+    """受け入れ条件 3: ラウンドの表に「相手役」の列があり、埋めた席は欠けた相手役を添える。列の数は見出しと行でそろう。"""
+    filled = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "failed: 1"}]}
+    assert report_decide._seats_cell(filled) == "codex・claude（kiro の席）"
+    before = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": None, "reason": "allowed の相手役 1（codex）"}]}
+    assert report_decide._seats_cell(before) == "codex・claude"
+    assert report_decide._seats_cell({}) == "—"
+    rows = report_decide._round_rows([{"round": 1, **filled}, {"round": 2}])
+    assert rows[0].startswith("| ラウンド | 相手役 |")
+    assert "| codex・claude（kiro の席） |" in rows[2]
+    assert len({r.count(" | ") for r in rows}) == 1

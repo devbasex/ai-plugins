@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import git_sandbox
 import pytest
 from git_sandbox import sh
 from result_json import last_result
 
+from ndf.adapters import git
 from ndf.domains.crossreview import cli
 
 BRANCH = "feat/x"
@@ -34,6 +36,19 @@ class Repos:
     def add_worktree(self, path: Path) -> Path:
         sh(self.main, "worktree", "add", "-q", "-B", f"review/{path.name}", str(path), f"origin/{BRANCH}")
         return path
+
+
+def count_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """以後の git の起動の引数を、起動のたびに足すリスト（出力をバイト列で読む起動も数える）。"""
+    calls: list[list[str]] = []
+    start = git._start
+
+    def counted(args: list[str], *rest: Any, **named: Any) -> Any:
+        calls.append(args)
+        return start(args, *rest, **named)
+
+    monkeypatch.setattr(git, "_start", counted)
+    return calls
 
 
 def make_repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:

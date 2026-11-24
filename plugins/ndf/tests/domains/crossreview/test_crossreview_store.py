@@ -35,6 +35,19 @@ def test_issue_2770_state_file_is_found_from_the_number_after_reopening(tmp_path
     assert store.state_pr(tmp_path, 1).origin_pr == 1
 
 
+def test_state_file_is_readable_only_by_its_owner(tmp_path: Path) -> None:
+    """未公開の中身を持つので、umask や前のファイルの権限によらず所有者だけが読める権限で置き、一時のファイルを残さない。"""
+    path = tmp_path / store.STATE_NAME.format(pr=ORIGIN)
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o644)
+    for value in ({"pr": 1}, {"pr": 2}):
+        store.write_object(path, value)
+        assert path.stat().st_mode & 0o777 == 0o600 and store.read_object(path) == value
+    with pytest.raises(TypeError):
+        store.write_object(path, {"pr": object()})
+    assert store.read_object(path) == {"pr": 2} and list(tmp_path.iterdir()) == [path]
+
+
 def test_record_current_writes_the_new_number(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _state(tmp_path)
     code, got = run_cli(capsys, "state-file", "--state-dir", str(tmp_path), "--pr", str(ORIGIN), "--current", str(CURRENT))

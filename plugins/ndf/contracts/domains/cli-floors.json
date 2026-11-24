@@ -6,6 +6,7 @@
     "version_args": {"type": "array", "summary": "バージョンを出す引数（実行ファイルの後ろ）"},
     "version_pattern": {"type": "string", "summary": "出力からバージョン（接尾辞を含む）を 1 番目の組で取り出す正規表現。比べは semver で行い、下限と同じ数字のプレリリースは下限に満たない"},
     "min_version": {"type": "string", "summary": "下限。NDF が使う引数・サブコマンドがすべて入った最初のバージョン（各 CLI の変更履歴で決めた。根拠は #3691 の単位 8 の PR 本文）"},
+    "flag_floors": {"type": "object", "summary": "引数の名前から下限への対応。その引数で NDF が頼る振る舞いの不具合が直った最初のバージョンで、行の min_version 以上。起動の引数にその引数があればこの下限と比べ、バージョンを確かめられなければ起動しない。行に無ければ min_version だけで比べる。claude の --restricted は、席の claude の読み取りの境界（2.1.315 以前は作業ディレクトリの外のファイルをアップロードしうる。#3955）", "optional": true},
     "help": {"type": "array", "items": "object", "summary": "--help の照らし合わせの見本（scripts/plugin-deps.py の cli-help が毎日の最新の CLI で照らす）。各要素は {\"args\": [--help を打つ引数], \"flags\": [その出力にあるべき引数とサブコマンドの名前]} か、flags の代わりに {\"table\": \"data/<名前>.json\"}（その表の value・optional・variadic・flags・subcommands を照らす）。src/ndf が渡すサブコマンドとフラグはすべてここにある（scripts/tests/test_plugin_deps.py が縛る）"}
   },
   "rows": [
@@ -27,6 +28,7 @@
       "version_args": ["--version"],
       "version_pattern": "(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?) \\(Claude Code\\)",
       "min_version": "2.1.268",
+      "flag_floors": {"--restricted": "2.1.316"},
       "help": [
         {"args": ["--help"], "table": "data/claude-cli.json"},
         {"args": ["auth", "--help"], "flags": ["login", "logout", "status"]},

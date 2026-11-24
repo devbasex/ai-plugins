@@ -45,6 +45,9 @@ PRINT_JSON = ["-p", "--output-format", "json"]
 PRINT_STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
 # Tool を許す起動の許可のモード
 ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
+# 読める場所を限った起動の許可のモード（事前に許していない操作を尋ねずに断る。#3955）と、作業ディレクトリへ閉じ込める引数
+DONT_ASK = ["--permission-mode", "dontAsk"]
+RESTRICTED = "--restricted"
 # 続けようとした会話が無いときに claude が出す文言（2026-11-21 に claude 2.1.330 で確かめた。#4013）
 NO_CONVERSATION = "No conversation found with session ID"
 # 自動の要約が起きたことを示す出力の行（`type: system` の `subtype`）
@@ -93,6 +96,7 @@ class ClaudeCall:
     `permission` は起動の権限（`Permission`）。`tools` は `tools` の権限で許す Tool で、ほかの権限では渡さない。
     `session` は会話の指定（None なら最小構成は会話を残さない。#4013）。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
     行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
+    `readable` は作業ディレクトリのほかに読める場所で、`tools` の権限でだけ渡す。渡すと読める場所を限った起動になる（#3955）。
     """
 
     system: str
@@ -102,10 +106,13 @@ class ClaudeCall:
     json_schema: Optional[dict] = None
     model: Optional[str] = None
     stream: bool = False
+    readable: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         if (self.permission is Permission.TOOLS) != bool(self.tools):
             raise ValueError(f"tools は権限 {Permission.TOOLS} のときだけ、空でなく渡す（権限 {self.permission}）")
+        if self.readable and self.permission is not Permission.TOOLS:
+            raise ValueError(f"readable は権限 {Permission.TOOLS} のときだけ渡す（権限 {self.permission}）")
 
 
 class PluginArgs(NamedTuple):
@@ -272,13 +279,19 @@ def minimal_args(system: str, stream: bool = False, session: Optional[Session] =
     return head + ["--disable-slash-commands", "--system-prompt", system, *session_args(session)]
 
 
-def permission_args(permission: Permission, tools: Optional[str] = None) -> list[str]:
-    """権限ごとの、使える Tool と許可のモードの引数。権限の引数はここだけが持つ。"""
+def permission_args(permission: Permission, tools: Optional[str] = None, readable: Sequence[Path] = ()) -> list[str]:
+    """権限ごとの、使える Tool と許可のモードの引数。権限の引数はここだけが持つ。
+
+    `readable` が空でなければ、Tool をその場所と作業ディレクトリへ閉じ込め（`--restricted`・`--add-dir`）、許していない操作を
+    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。"""
     if permission is Permission.FULL:
         return [*ACCEPT_EDITS, "--allowed-tools", FULL_TOOLS]
     if permission is Permission.TOOLS:
         if not tools:
             raise ValueError(f"権限 {Permission.TOOLS} は許す Tool を要る")
+        if readable:
+            places = [a for p in readable for a in ("--add-dir", str(p))]
+            return ["--tools", tools, "--allowed-tools", tools, RESTRICTED, *places, *DONT_ASK]
         return ["--tools", tools, "--allowed-tools", tools, *ACCEPT_EDITS]
     return ["--tools", ""]
 
@@ -305,7 +318,7 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
     if call.permission is Permission.FULL:
         args, notice = _full_args(call, root if root is not None else identity.load().root, cwd)
     else:
-        args = minimal_args(call.system, call.stream, call.session) + permission_args(call.permission, call.tools)
+        args = minimal_args(call.system, call.stream, call.session) + permission_args(call.permission, call.tools, call.readable)
     if call.json_schema is not None:
         args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
     if call.model:

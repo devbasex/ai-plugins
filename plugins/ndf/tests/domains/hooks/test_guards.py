@@ -235,16 +235,16 @@ def test_context_limit_does_not_record_relay_when_it_did_not_judge(tmp_path):
 @pytest.mark.parametrize(
     ("tokens", "env", "denied"),
     [
-        (249_999, None, False),
-        (250_000, None, False),
-        (499_999, None, False),
-        (500_000, None, True),
-        (299_999, "300000", False),
-        (300_000, "300000", True),
+        (449_999, None, False),
+        (450_000, None, False),
+        (599_999, None, False),
+        (600_000, None, True),
+        (499_999, "500000", False),
+        (500_000, "500000", True),
     ],
 )
 def test_context_limit_stops_at_the_operating_limit(tmp_path, monkeypatch, tokens, env, denied):
-    # #3995 の 3995:4・3995:9: PreToolUse は運用上限（500,000。NDF_CONTEXT_LIMIT で替える）から止め、判断開始の値（250,000）では止めない
+    # #3995 の 3995:4・3995:9: PreToolUse は運用上限（600,000。NDF_CONTEXT_LIMIT で替える）から止め、判断開始の値（450,000）では止めない
     if env is not None:
         monkeypatch.setenv("NDF_CONTEXT_LIMIT", env)
     usage_transcript(tmp_path, tokens)
@@ -540,7 +540,7 @@ def test_passes_expands_a_quoted_tilde_like_the_cli(handoff_repos, monkeypatch):
 
 def test_handoff_bash_judges_once_per_tool_call(tmp_path, monkeypatch):
     # #3995: 運用上限で通す連結は context-limit と script-chain の両方が見るが、判定は同じ呼び出しの中で 1 回だけ
-    usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 600_000)
     (tmp_path / ".ndf" / "handoff").mkdir()
     calls = []
     real = context_limit._handoff_bash
@@ -600,7 +600,7 @@ def test_ndf_args_pass_matches_where_the_cli_writes(tmp_path, monkeypatch, capsy
 
 def test_context_limit_passes_the_handoff_calls_at_the_operating_limit(tmp_path):
     # #3995 の 3995:6: 運用上限で、引継ぎ文書の Read・TaskStop・引継ぎ文書の確かめは通り、ほかの呼び出しは止まる
-    usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 600_000)
     (tmp_path / ".ndf" / "handoff").mkdir()
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": ".ndf/handoff/next.md"})
     stop_task = sample("claude", "PreToolUse", tmp_path, tool_name="TaskStop", tool_input={"task_id": "x"})
@@ -624,7 +624,7 @@ def test_script_chain_still_stops_other_ndf_chains_below_the_limit(tmp_path):
 
 def test_context_limit_keeps_denying_different_calls(tmp_path):
     # #3995 の 3995:6・決定 6: 運用上限の拒否は数えず、同じ入力の中で違う呼び出しを 3 回続けても 3 回とも止める
-    usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 600_000)
     read = sample("claude", "PreToolUse", tmp_path, tool_name="Read", tool_input={"file_path": str(tmp_path / "README.md")})
     for payload in (bash(tmp_path, "ls"), bash(tmp_path, "pwd"), read):
         assert deny_reason(call_entry("claude", "PreToolUse", payload)) is not None
@@ -694,9 +694,9 @@ def test_context_limit_reason_reaches_the_end_with_a_quoted_main_directory_outsi
 
 def test_context_limit_reason_does_not_carry_the_context_size(tmp_path):
     # #3995: 拒否の文に文脈の量を入れない（呼び出しごとに同じ文）
-    usage_transcript(tmp_path, 500_000)
-    first = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
     usage_transcript(tmp_path, 600_000)
+    first = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
+    usage_transcript(tmp_path, 700_000)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) == first
 
 

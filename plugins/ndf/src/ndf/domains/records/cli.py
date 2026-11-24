@@ -6,6 +6,7 @@
     ndf records handoff check <文書> [--trim --history <退避先>]
     ndf records usage stop                         # SubagentStop の hook の入力（標準入力）を使用量ログへ 1 行書く
     ndf records usage report --since <日付> --until <日付>   # JST の日付の期間の合計と閉じた課題の数
+    ndf records mvv current --base <ブランチ> [--allow-mismatch]   # ベースブランチの承認済みの MVV を読み、本文をファイルに書く
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
@@ -13,6 +14,7 @@
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
     ndf records gws-check                          # gws の認証を確かめる
+    ndf records reading prompt|add|check --file <JSON>   # 読み手役への指示・確認の記録・質問を出す前に足りないもの
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 """
@@ -32,11 +34,12 @@ from ndf import cli, contracts
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
-from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, spec, usage
+from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
 from ndf.progress import invoke, model
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
+from ndf.domains.records.mvv_decide import State
 
 TOOL = cli.tool_of(__name__)
 # リリース後テストの記録のスキーマ（contracts/schemas/release-verification.schema.json）
@@ -49,7 +52,11 @@ def _root(args: argparse.Namespace) -> Path:
 
 
 def _hub(root: Path) -> github_mod.GitHub:
-    return github_mod.GitHub(Git(root).remote_repo(), github_mod.client())
+    return _repo_hub(Git(root).remote_repo())
+
+
+def _repo_hub(repo: str) -> github_mod.GitHub:
+    return github_mod.GitHub(repo, github_mod.client())
 
 
 def _stdin_json() -> Any:
@@ -137,6 +144,25 @@ def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"使用量: {got['since']}..{got['until']}", [got])
 
 
+def _mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    g = Git(root)
+    remote = g.remote()
+    try:
+        # 取得先の参照まで指定して取得する。別のブランチだけを clone した作業場所でも、直前にリモートで承認された MVV を読む
+        g.fetch_branch_or_raise(remote, args.base)
+        snap = mvv.current(root, f"refs/remotes/{remote}/{args.base}", allow_mismatch=args.allow_mismatch)
+    except GitError as exc:
+        return result.stopped(TOOL, "precondition", f"MVV を読むベースブランチを取得できない: {exc}")
+    except (mvv.MvvError, OSError) as exc:
+        return result.stopped(TOOL, "precondition", str(exc))
+    out: dict[str, Any] = {"state": snap.state}
+    if snap.state == State.APPROVED:
+        out |= {"version": snap.version, "sha256": snap.sha256, "path": str(snap.path)}
+        out |= {"principles_path": str(snap.principles_path), "items": list(snap.items)}
+    warnings = [mvv.mismatch_detail(snap.blobs)] if snap.state == State.MISMATCH else []
+    return result.result(TOOL, result.OK, f"{args.base} の MVV: {snap.state}", outputs={"mvv": out}, warnings=warnings)
+
+
 def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     try:
@@ -220,6 +246,41 @@ def _gws_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, "gws は認証済み")
 
 
+def _reading(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    try:
+        # 相対パスは対象のリポジトリ（--cwd）の根から解く（引継ぎ文書と同じ）
+        entry = json.loads((root / args.file.expanduser()).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return result.stopped(TOOL, "precondition", f"入力の JSON を読めない: {exc}")
+    try:
+        return _READING[args.action](entry, root)
+    except reading.ReadingInvalid as exc:
+        return result.stopped(TOOL, "invalid", f"入力の形が違う: {exc}", items=[{"error": str(exc)}])
+    except OSError as exc:
+        return result.stopped(TOOL, "precondition", f"読み手役が確認した記録を読み書きできない: {exc}")
+    except (github_mod.GitHubError, reading.HeadUnknown) as exc:
+        return result.stopped(TOOL, "unknown", f"承認する PR の今の head を GitHub から読めない: {exc}")
+
+
+def _reading_prompt(entry: Any, root: Path) -> dict[str, Any]:
+    return result.result(TOOL, result.OK, "読み手役への指示を作った", metrics={"prompt": reading.prompt(entry)})
+
+
+def _reading_add(entry: Any, root: Path) -> dict[str, Any]:
+    return result.result(TOOL, result.OK, "読み手役が確認した記録を 1 行足した", [reading.add(entry, root)])
+
+
+def _reading_check(entry: Any, root: Path) -> dict[str, Any]:
+    missing = reading.check(entry, root, _repo_hub)
+    if missing:
+        detail = "読み手役が確認した記録が足りない: " + "・".join(missing)
+        return result.stopped(TOOL, "precondition", detail, items=[{"missing": word} for word in missing])
+    return result.result(TOOL, result.OK, "読み手役が確認した記録は、質問と承認する PR に合う")
+
+
+_READING: dict[str, Callable[[Any, Path], dict[str, Any]]] = {"prompt": _reading_prompt, "add": _reading_add, "check": _reading_check}
+
+
 def _preflight(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return preflight.check(root)
 
@@ -252,6 +313,10 @@ def _add_usage(sub: Any) -> None:
 
 def _add_mvv(sub: Any) -> None:
     m = sub.add_parser("mvv").add_subparsers(dest="action", required=True)
+    current = m.add_parser("current")
+    current.add_argument("--base", required=True, help="ベースブランチ")
+    current.add_argument("--allow-mismatch", action="store_true", help="本文が承認の記録と合わなくても止まらず、警告を付けて状態だけを返す")
+    current.set_defaults(handler=_mvv_current)
     signals = m.add_parser("signals")
     signals.add_argument("--base", required=True, help="ベースブランチ")
     signals.set_defaults(handler=_mvv_signals)
@@ -263,6 +328,14 @@ def _add_mvv(sub: Any) -> None:
     gate = m.add_parser("gate")
     gate.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの区分")
     gate.set_defaults(handler=_mvv_gate)
+
+
+def _add_reading(sub: Any) -> None:
+    r = sub.add_parser("reading").add_subparsers(dest="action", required=True)
+    for action in _READING:
+        a = r.add_parser(action)
+        a.add_argument("--file", type=Path, required=True, help="入力の JSON のファイル")
+        a.set_defaults(handler=_reading)
 
 
 def _add_close_check(sub: Any) -> None:
@@ -290,6 +363,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     c.set_defaults(handler=_cleanup_stage)
     _add_close_check(sub)
+    _add_reading(sub)
     sub.add_parser("preflight").set_defaults(handler=_preflight)
     sub.add_parser("gws-check").set_defaults(handler=_gws_check)
     return p

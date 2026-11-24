@@ -7,6 +7,8 @@
 - バージョンを読めない（出力の形が違う・起動できない・期限切れ）ときは標準エラーへ 1 行を出して起動を通す。
   CLI が無い・壊れているときの扱いは、今の起動の箇所が持つ
 - 表に無い名前（kiro・agy）は何も打たない
+- 行の `flag_floors`（引数の名前から下限）の引数を起動の引数 `args` が含めば、その下限と比べる。このときはバージョンを確かめられなくても
+  起動を通さず `Unverified` を上げる（`--restricted` の読み取りの境界を頼れないバージョンで起動しない。#3955）
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 import semver
 
@@ -34,11 +36,29 @@ _LOCK = threading.Lock()
 
 
 class TooOld(Exception):
-    """外部 CLI が下限より古い。`name`・`path`（実パス）・`found`（見つけたバージョン）・`floor`（下限）を持つ。"""
+    """外部 CLI が下限より古い。`name`・`path`（実パス）・`found`（見つけたバージョン）・`floor`（下限）を持つ。
+    `public` は実パスを除いた文面（PR のコメントなど公開される場所へ載せる。PR 4461 の r1-1）。"""
 
     def __init__(self, name: str, path: str, found: str, floor: str) -> None:
-        super().__init__(f"{name} {found}（{path}）は下限 {floor} より古い。{floor} 以上へ上げる")
+        tail = f"は下限 {floor} より古い。{floor} 以上へ上げる"
+        self._fill(f"{name} {found}（{path}）{tail}", f"{name} {found} {tail}", name, path, found, floor)
+
+    def _fill(self, message: str, public: str, name: str, path: str, found: str, floor: str) -> None:
+        """例外の文面・公開用の文面と 4 属性をまとめて設定する（`TooOld` と派生の初期化が共有する）。"""
+        Exception.__init__(self, message)
+        self.public = public
         self.name, self.path, self.found, self.floor = name, path, found, floor
+
+
+class Unverified(TooOld):
+    """引数ごとの下限（`flag_floors`）を当てる起動で、外部 CLI のバージョンを確かめられない（見つからない・`--version` を読めない）。"""
+
+    def __init__(self, name: str, path: Optional[str], floor: str) -> None:
+        missing = "実行ファイルが見つからない"
+        where = path if path is not None else missing
+        tail = f"。下限 {floor} 以上かを確かめられないので起動しない"
+        public = f"{name} のバージョンを確かめられない" + (f"（{missing}）" if path is None else "") + tail
+        self._fill(f"{name} のバージョンを確かめられない（{where}）{tail}", public, name, where, "", floor)
 
 
 def locate(argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:
@@ -120,18 +140,29 @@ def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapp
         raise error(str(exc)) from None
 
 
-def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
-    """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。"""
+def _flag_floor(row: Mapping[str, object], args: Sequence[str]) -> Optional[str]:
+    """起動の引数 `args` が含む、行の `flag_floors` の引数の下限のうち最も高いもの。含まなければ None。"""
+    floors = row.get("flag_floors")
+    found = [str(v) for k, v in floors.items() if k in args] if isinstance(floors, Mapping) else []
+    return max(found, key=semver.Version.parse) if found else None
+
+
+def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None, args: Sequence[str] = ()) -> None:
+    """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。
+    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、バージョンを確かめられなければ `Unverified`（#3955）。"""
     if name not in facts.ids(TABLE):
         return
-    path = resolve(argv0, env, cwd)
-    if path is None:
-        return
     row = facts.row(TABLE, name)
-    found = _version(name, path, row, env, cwd)
-    floor = str(row["min_version"])
-    if found is not None and semver.Version.parse(found) < semver.Version.parse(floor):
-        raise TooOld(name, path, found, floor)
+    strict = _flag_floor(row, args)
+    floor = strict if strict is not None else str(row["min_version"])
+    path = resolve(argv0, env, cwd)
+    found = _version(name, path, row, env, cwd) if path is not None else None
+    if found is None:
+        if strict is not None:
+            raise Unverified(name, path, strict)
+        return
+    if semver.Version.parse(found) < semver.Version.parse(floor):
+        raise TooOld(name, str(path), found, floor)
 
 
 def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:

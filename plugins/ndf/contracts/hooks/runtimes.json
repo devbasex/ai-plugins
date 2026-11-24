@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "ランタイムの hook の入出力のコントラクト表（#3345 の決定 95）。ランタイムごとに持つイベント・予算のキー（contracts/limits/hook.budget.<budget>.json）・NDF が読む入力のキー（reads は無ければ input_shape として通す・optional は無くてよい）・判定ごとの出力の形・timeout の上限・hook の command へプラグインの根を渡す環境変数（plugin_root_env。登録の command をシェルが展開する）を持つ。出力の形の {reason} と {context} は判定の文に置き換わる。形の無い判定は何も出さない。skipped はそのランタイムで働かない guard と理由",
+  "summary": "ランタイムの hook の入出力のコントラクト表（docs/specifications/ndf-rebuild.md の決定 95）。ランタイムごとに持つイベント・予算のキー（contracts/limits/hook.budget.<budget>.json）・NDF が読む入力のキー（reads は無ければ input_shape として通す・optional は無くてよい）・判定ごとの出力の形・timeout の上限・hook の command へプラグインの根を渡す環境変数（plugin_root_env。登録の command をシェルが展開する）を持つ。出力の形の {reason} と {context} は判定の文に置き換わる。形の無い判定は何も出さない。skipped はそのランタイムで働かない guard と理由",
   "runtimes": {
     "claude": {
       "summary": "Claude Code（https://code.claude.com/docs/en/hooks）",
@@ -79,6 +79,7 @@
       "timeout_max": 600,
       "skipped": {
         "read-repeat": "Codex には Read の Tool が無く、ファイルはシェルで読む",
+        "reading-check": "Codex には AskUserQuestion の Tool が無い",
         "ask-forward": "Codex には AskUserQuestion の Tool が無い",
         "ask-answered": "Codex には AskUserQuestion の Tool が無い",
         "ask-closed": "Codex には AskUserQuestion の Tool が無い",

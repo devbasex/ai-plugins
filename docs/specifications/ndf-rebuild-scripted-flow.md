@@ -82,7 +82,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 
 `contracts/causes/` は種類 1 つを 1 つのファイル（`<種類>.json`）に持ち、`_meta.json` が `owner` を持つ。1 つの種類は
 `meaning`・`std_type`・`exit`・`route`・`retry` を必ず持ち、`kind` はファイル名（拡張子 `.json` を除く）から読み手が足す。
-`route` が `retry` の種類は `exhausted` を、利用上限の種類は `requires_retry_after: true` を持つ。37 種類あり、既定のルートで
+`route` が `retry` の種類は `exhausted` を、利用上限の種類は `requires_retry_after: true` を持つ。38 種類あり、既定のルートで
 分けると次のとおりである。
 
 | 既定のルート（`route` → `exhausted`） | 種類 |
@@ -90,7 +90,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 | `step`（`on_fail` のステップ。無ければ conductor） | `test_failed`・`check_failed`・`push_rejected`・`base_conflict`・`work_stopped`・`unreviewed`・`samples_mismatch` |
 | `retry` → `step` | `ci_pending`（`cause.ci-pending`）・`infra_wait`（`cause.infra-wait`）・`transient`（`cause.transient`）・`store_busy`（`cause.store-busy`）・`store_unreachable`（`cause.store-unreachable`） |
 | `retry` → `human`（`retry_after` があるときだけ打ち直す） | `usage_limit`（`cause.usage-limit`。1 回の待ちの頭打ちは `supervise.limit-wait-max`） |
-| `conductor`（会話の AI が結果の `next`・`routes` から次の手を選ぶ） | `incomplete`・`not_applicable`・`invalid`・`wait_timeout`・`interrupted`・`input_missing`・`bad_report`・`unknown` |
+| `conductor`（会話の AI が結果の `next`・`routes` から次の手を選ぶ） | `incomplete`・`not_applicable`・`invalid`・`wait_timeout`・`interrupted`・`input_missing`・`bad_report`・`mvv_unresolved`・`unknown` |
 | `human`（人へ問う） | `fix_limit`・`deploy_failed`・`precondition`・`deps_missing`・`refused`・`not_ci`・`needs_human`・`config_broken`・`store_broken`・`store_in_use`・`restore_unsupported`・`format_newer`・`format_mismatch`・`account_unavailable`・`merge_method`・`spin` |
 
 - `std_type` は Serverless Workflow DSL 1.0.3 の標準の誤りの型 8 つ（configuration・validation・expression・authentication・authorization・timeout・communication・runtime）のどれかである

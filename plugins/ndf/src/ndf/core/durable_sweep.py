@@ -1,4 +1,5 @@
-"""キーごとのファイルの検査の目印と退避、保存先（SQLite）と URL（PostgreSQL）の片付け（決定 82・83・I12・I13）。DBOS は import しない。
+"""キーごとのファイルの検査の目印と退避、保存先（SQLite）と URL（PostgreSQL）の片付け
+（docs/specifications/ndf-rebuild.md の決定 82・83・I12・I13）。DBOS は import しない。
 
 DBOS の記録を読む口と消す口（`Records`）は、DBOS を読める殻（`ndf.core.durable`）が渡す。殻は `sweep`・`sweep_url`・
 `retire`・`SweepResult` を再び公開し、呼び手は殻から使う。
@@ -26,7 +27,7 @@ log = logging.getLogger("ndf.core.durable")
 
 # retired/・broken/ と URL の終わった実行を消すまでの日数の方針（contracts/limits/）
 KEEP = "durable.keep"
-# quick_check と片付けの走査の間隔（決定 82・83）
+# quick_check と片付けの走査の間隔（docs/specifications/ndf-rebuild.md の決定 82・83）
 CHECK_INTERVAL = timedelta(hours=24)
 
 DBOS_DIR = "dbos"
@@ -84,7 +85,7 @@ def _free_name(base: Path, now: datetime) -> Path:
     return candidate
 
 
-# --- キーごとのファイルの検査と退避（決定 82・83） -----------------------------------------
+# --- キーごとのファイルの検査と退避（docs/specifications/ndf-rebuild.md の決定 82・83） -----------------------------------------
 
 
 def is_fresh(mark: Path, now: datetime) -> bool:
@@ -168,7 +169,8 @@ def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, S
 
 
 def sweep(root: Path, records: Records, now: datetime | None = None) -> SweepResult:
-    """終わったキーのファイルを retired/ へ移し、retired/・broken/ の `KEEP` の日数より古いファイルを消す（決定 83・A5）。
+    """終わったキーのファイルを retired/ へ移し、retired/・broken/ の `KEEP` の日数より古いファイルを消す
+    （docs/specifications/ndf-rebuild.md の決定 83・A5）。
 
     24 時間に 1 回だけ走査する。開いているプロセスがいるキー（`run_lock` を待たずに取れないキー）は触らない。
     """
@@ -228,7 +230,7 @@ def _sweep_kept(dbos_dir: Path, now: datetime, out: SweepResult) -> None:
                 out.deleted.append(str(path))
 
 
-# --- URL（PostgreSQL）の実行の一覧と片付け（決定 83・I12・I13） ---------------------------------
+# --- URL（PostgreSQL）の実行の一覧と片付け（docs/specifications/ndf-rebuild.md の決定 83・I12・I13） ---------------------------------
 
 
 def _expired(records: list[Any], started_at: datetime, cutoff: datetime) -> bool:

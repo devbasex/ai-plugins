@@ -1,4 +1,4 @@
-"""AskUserQuestion の guard（#3345 の決定 88・93・#3035）。
+"""AskUserQuestion の guard（docs/specifications/ndf-rebuild.md の決定 88・93・#3035）。
 
 質問を中継のシグナルファイル（中継の下）とオーガナイザーの質問の保存先（オーガナイザーのレーン）へ書き、待ちの知らせを
 送信待ちへ書く。転送を待つのは中継とオーガナイザーで、hook は待たない。
@@ -39,7 +39,7 @@ def _first_question(tool_input: dict) -> str:
 
 def check(ctx, svc) -> Verdict:
     global _recorded
-    if not signals.keys_known():
+    if svc.decided or not signals.keys_known():  # 前の guard が止めた質問は人へ出ないので、どこへも書かない（#4285）
         return passing(forwarded=[])
     wait = forward_wait()
     forwarded: list[str] = []

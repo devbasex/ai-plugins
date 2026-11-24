@@ -22,6 +22,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 総評だけの指摘 | — | 差分の行に付くスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる | — | — | `docs/specifications/cross-review-body-findings.md` |
 | 決着 | — | 指摘が直した・見送った・却下したのどれかに振り分けられ、マージ（修正のラウンドの merge-fix か最終スイープの verify-sweep）が記録したこと。スレッドの指摘ではスレッドの解決も含む | — | — | `docs/specifications/cross-review-body-findings.md` |
 | 決着の記録 | — | 状態ファイルの body_settlements[] の 1 要素。総評だけの指摘 1 件の振り分け（fixed / deferred / waived / separate_pr / rejected）と、記録したラウンドと経路（修正のラウンドの merge-fix か最終スイープの verify-sweep か）を持ち、追記だけで書き換えない | — | — | `docs/specifications/cross-review-body-findings.md` |
+| 根拠の行の確かめ | — | Pull Request が足した MVV の根拠の行（指示と結果での呼び名は「根拠の記述」）について、書いたバージョンが承認済みの今のバージョンか、項目がそのバージョンにあるかを、ndf cross-review run が機械で確かめること。誤りは直るまで残り、見送れない | — | — | `plugins/ndf/skills/cross-review/SKILL.md` |
+| MVV に反する指摘 | — | cross-review の指摘のうち、承認済みのプロジェクト MVV に反するもの（指摘の基準 5）。Mission・Vision・Value に反するものは修正担当へ渡り、必ず人の承認が要る操作に当たるものは渡さずに人の承認を待つ | — | — | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
 | 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（設定があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | `docs/specifications/cross-review-review-profile.md` |
@@ -39,7 +41,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | ラウンドを足す | — | final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 最終ステータス | `review_status` | cross-review の収束の終わり方を表す 1 語（approved / unverified / final の値 / unknown）。loop_drive.review_status が状態ファイルから決める | — | — | — |
 | 回答ファイル | — | 駆動が止まりで示す items[0].result_file。止まりへの回答を書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別 | — | — | — |
-| 席 | — | cross-review の 1 ラウンドの 2 つの担当のスロット。名前は kiro / kiro-2 の形（SEAT_PATTERN） | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
+| 席 | — | cross-review の 1 ラウンドの 2 つのレビュー担当のスロット。席の名前は相手役の名前で、claude の読むだけの起動で埋めた 2 つ目の席は claude-2 と呼ぶ | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
 | 未解決のスレッド | — | Pull Request のレビュースレッドのうち、解決済みのマーカーが付いていないもの。`gh_parts.py pr-info --with threads` が返す | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 本来の判定 | `intent` | レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む | — | — | `docs/specifications/pr-review-steps-script.md` |
 | レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | `docs/specifications/pr-review-steps-script.md` |

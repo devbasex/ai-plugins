@@ -42,6 +42,55 @@ def test_a_missing_executable_passes():
     cli_floor.require("claude", "claude", {"PATH": "/nonexistent"})
 
 
+RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "dontAsk", "リクエスト")
+
+
+def _claude_at(monkeypatch, found):
+    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にする（子のプロセスを起動しない）。"""
+    monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: "/bin/claude")
+    monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
+
+
+# 見つからない実行ファイル（`_claude_at` を当てず、PATH に無い）
+MISSING = "missing"
+
+
+@pytest.mark.parametrize(
+    ("found", "args", "refused"),
+    [
+        # #3955 の決定 2: `--restricted` を含む起動だけに 2.1.316 を当てる。含まない起動は共通の下限のまま
+        ("2.1.315", RESTRICTED, cli_floor.TooOld),
+        ("2.1.315", ("-p", "--permission-mode", "acceptEdits"), None),
+        ("2.1.315", (), None),
+        ("2.1.316", RESTRICTED, None),
+        ("2.1.316", (), None),
+        # 共通の下限は、どちらの起動も断る
+        ("2.1.267", RESTRICTED, cli_floor.TooOld),
+        ("2.1.267", (), cli_floor.TooOld),
+        # バージョンを確かめられないとき、`--restricted` の起動は `Unverified`（`TooOld` の派生）で断り、ほかは今のとおり通す
+        (None, RESTRICTED, cli_floor.Unverified),
+        (None, ("-p",), None),
+        (MISSING, RESTRICTED, cli_floor.Unverified),
+    ],
+)
+def test_issue_3955_flag_floor(monkeypatch, found, args, refused):
+    import semver
+
+    assert issubclass(cli_floor.Unverified, cli_floor.TooOld)
+    # 起動の引数ごとの下限は、行の下限より下にない
+    for name in FLOOR:
+        for floor in facts.row("cli-floors", name).get("flag_floors", {}).values():
+            assert semver.Version.parse(floor) >= semver.Version.parse(FLOOR[name])
+    env = {"PATH": "/nonexistent"} if found == MISSING else None
+    if found != MISSING:
+        _claude_at(monkeypatch, found)
+    if refused is None:
+        cli_floor.require("claude", "claude", env, args=args)
+        return
+    with pytest.raises(refused):
+        cli_floor.require("claude", "claude", env, args=args)
+
+
 # ---------------------------------------------------------------- 起動の箇所を探す（I12）
 
 TABLE_EXECUTABLES = {facts.value("cli-floors", n, "executable") for n in FLOOR}

@@ -115,6 +115,7 @@ KINDS: dict[str, Kind] = {
     "context": Kind(CONTEXT, (_context_v1,)),
     "stage-snapshot": Kind(contracts.schema_path("internal/stage-snapshot"), (_snapshot_v1,)),
     "loop-event": Kind(contracts.schema_path("internal/loop-event"), (_loop_event_v1,)),
+    "reading-check": Kind(contracts.schema_path("internal/reading-check"), (dict,)),
 }
 
 

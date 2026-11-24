@@ -1,4 +1,4 @@
-"""hook の 1 回の事象の文脈（#3345 の決定 88・IH1）。
+"""hook の 1 回の事象の文脈（docs/specifications/ndf-rebuild.md の決定 88・IH1）。
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
 ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の
@@ -16,7 +16,7 @@ from typing import Any, Callable, NamedTuple, Optional
 
 from ndf.adapters.transcript import ASSISTANT, read_tail
 from ndf.domains.hooks import reply_wait, tables
-from ndf.domains.hooks.strict import _SHELLS
+from ndf.domains.hooks.strict import _SHELLS, TOOL_INPUT
 
 # 待ちのループ（本体と条件の位置を持たせる。`until` も `while_statement` として読まれる。`for` は数えない）
 _WAIT_LOOPS = frozenset({"while_statement"})
@@ -849,7 +849,7 @@ class HookContext:
 
     @property
     def tool_input(self) -> dict[str, Any]:
-        value = self.payload.get("tool_input")
+        value = self.payload.get(TOOL_INPUT)
         return value if isinstance(value, dict) else {}
 
     @property

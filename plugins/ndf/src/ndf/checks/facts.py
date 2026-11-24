@@ -2,7 +2,9 @@
 環境変数のキー（`env-key`。#4126 の決定 3）。
 
 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の設定から作る行の形を
-`jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
+`jsonschema`（draft 2020-12）で確かめる
+（docs/specifications/ndf-rebuild-data-and-smells.md の決定 46・47。実行時の読み手 `ndf.contracts.facts` も読み込み時に表と行の形を確かめ、違えば `FactsError` で拒む）。
+表の `id` を定数へ写したものも重複に数える。
 ただし `shared_names` が真の表は、`id` が他の名前空間と共有する名前なので、定数との検証（`table-set`・`table-str`）から外す（形は確かめる）。
 
 手書きのスキーマの `enum`（`enum-set`・`enum-subset`）と、上限の設定の数（`limit-num`）の写しも重複に数える。上限の設定の数と比べるのは、

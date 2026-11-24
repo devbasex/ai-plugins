@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "summary": "hook のエントリポイントが import してよいモジュールの表（#3345 の決定 89・IH2）。entry は環境の python のエントリポイント（ndf.domains.hooks.main）とそこから import でたどれるもの（guard の表の module を含む）が収まる先で、標準ライブラリのほかは dependencies の依存と ndf の中の modules（末尾の .* は下のすべて）だけを許す。forbidden は閉包に入ってはならないもの（依存を入れ直す処理・通信のアダプター・耐久の殻）。stdlib_only のエントリポイントからの閉包は標準ライブラリと stdlib_only の中のモジュールだけ。環境が無いときのエントリポイントが動くシステムの python3 の下限は配る構成の設定（data/toolchain.json の python.hook_floor）が持つ",
+  "summary": "hook のエントリポイントが import してよいモジュールの表（docs/specifications/ndf-rebuild.md の決定 89・IH2）。entry は環境の python のエントリポイント（ndf.domains.hooks.main）とそこから import でたどれるもの（guard の表の module を含む）が収まる先で、標準ライブラリのほかは dependencies の依存と ndf の中の modules（末尾の .* は下のすべて）だけを許す。forbidden は閉包に入ってはならないもの（依存を入れ直す処理・通信のアダプター・耐久の殻）。stdlib_only のエントリポイントからの閉包は標準ライブラリと stdlib_only の中のモジュールだけ。環境が無いときのエントリポイントが動くシステムの python3 の下限は配る構成の設定（data/toolchain.json の python.hook_floor）が持つ",
   "entry": {
     "roots": ["ndf.domains.hooks.main"],
     "dependencies": ["tree_sitter", "tree_sitter_bash", "markdown_it", "mdit_py_plugins", "pygments"],
-    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.git", "ndf.adapters.markdown", "ndf.adapters.transcript", "ndf.domains", "ndf.domains.hooks", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.keep_cache", "ndf.domains.relay.claude_options", "ndf.domains.relay.context_thresholds", "ndf.domains.relay.install", "ndf.domains.relay.markers", "ndf.domains.relay.blocks", "ndf.testing", "ndf.testing.declared", "ndf.testing.weight"],
+    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.git", "ndf.adapters.markdown", "ndf.adapters.transcript", "ndf.domains", "ndf.domains.hooks", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.keep_cache", "ndf.domains.relay.claude_options", "ndf.domains.relay.context_thresholds", "ndf.domains.relay.install", "ndf.domains.relay.markers", "ndf.domains.relay.blocks", "ndf.domains.records", "ndf.domains.records.reading_decide", "ndf.testing", "ndf.testing.declared", "ndf.testing.weight"],
     "forbidden": ["ndf.core.durable", "ndf.contracts", "ndf.adapters.notify", "ndf.adapters.github", "ndf.adapters.llm", "ndf.adapters.ci", "ndf.adapters.claude", "dbos", "httpx", "githubkit", "slack_sdk", "jsonschema"]
   },
   "stdlib_only": [

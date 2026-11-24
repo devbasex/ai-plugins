@@ -11,8 +11,10 @@
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
     ndf relay context resolve | record | calibrate | report   # 文脈の切り替えの 2 つの値・判定の記録・見込み・作業ごとの集計
     ndf relay cache report [--since <日時>]                   # 起床の記録の集計（#4068）
-    ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
-    ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる（決定 92）
+    ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧
+                                                              # （docs/specifications/ndf-rebuild.md の決定 86）
+    ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる
+                                                              # （docs/specifications/ndf-rebuild.md の決定 92）
     ndf relay decide < セグメントの状態の JSON                       # セグメントを切り替えるかの判断（#2962）
 
 サブコマンドの説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS`・`cli_cache` の `CACHE_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
