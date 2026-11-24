@@ -20,14 +20,17 @@
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
 | `plugins/ndf/src/ndf/progress/stage_inputs.py`（新設） | `stage_inputs_of`（新設）。詳細設計書の保存先は `progress/command.py` だが、`command.py` は計画 p9 の lsplit のスプリントブランチで 971 行あり、足すと `ndf check` の構造の規則（1,000 行）を超えるので新しいモジュールに置く |
-| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`（新設）・`mvv_skip` |
+| `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`mvv_answer_void`（新設）・`mvv_skip` |
+| `plugins/ndf/src/ndf/progress/run.py` | `_running_move`・`_consume`（区分の外の `service:mvv` の回答を数えない） |
+| `plugins/ndf/src/ndf/progress/gate/records.py` | `approved_head`（区分の外の `service:mvv` の回答を承認にしない） |
 | `plugins/ndf/src/ndf/progress/gate/asking.py` | `mvv_lines`（新設）・`material`（プランの承認資料に「MVV 判定」の節） |
 | `plugins/ndf/src/ndf/progress/gate/checks.py` | `MvvFacts.review_holds`・`check_review_holds`・`refusals`・`judgeable`・`may_skip`・`note`・`CHECKS_BY_GATE` |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `--machine`・`_mvv_inputs`・`_env_inputs`・`_mvv_cite` |
-| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`・`snapshot_facts`・`review_prs`・`public_cause`・`GATE_STEPS`・`GATE_STAGES`。`base_facts` は消す |
-| `plugins/ndf/src/ndf/domains/records/mvv.py` | `validation_rows`・`review_rows`・`mvv_validate_sprint`・`ReviewWrite`・`record_review`・`cite`・`compare_files`。`cite` が呼ぶ `decision_lines`・`fenced_lines` は、#4076 の計画の U7 がこのモジュールに置く（判断のモジュールは `ndf.adapters` を読めないため。#4076 の計画の「修正対象」） |
+| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `gate`・`_judged`・`pr_number`・`boundary_paths`・`_recorded`・`snapshot_facts`・`review_prs`・`failure_text`・`GATE_STEPS`・`GATE_STAGES`。`base_facts` は消す |
+| `plugins/ndf/src/ndf/domains/records/mvv.py` | `validation_rows`・`review_rows`・`mvv_validate_sprint`・`ReviewWrite`・`record_review`・`cite`・`record_failure`・`compare_files`。`cite` が呼ぶ `decision_lines`・`fenced_lines` は、#4076 の計画の U7 がこのモジュールに置く（判断のモジュールは `ndf.adapters` を読めないため。#4076 の計画の「修正対象」） |
 | `plugins/ndf/src/ndf/domains/records/mvv_decide.py` | `review_holds`（新設） |
-| `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `gate_outcome`・`diff_rows`・`DiffError` |
+| `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `gate_outcome`・`diff_rows`・`DiffError`・`STOP_REASONS` |
+| `plugins/ndf/contracts/domains/ndf-files.json`・`plugins/ndf/contracts/schemas/internal/mvv-gate-failure.schema.json`（新設）・`plugins/ndf/src/ndf/contracts/internal.py` | 診断の記録 `mvv-gate-failures.jsonl` の置き場と行の形（種類 `mvv-gate-failure`） |
 | `plugins/ndf/src/ndf/adapters/publish.py` | `Publisher._private_refs`（秘密を含む参照を照会しない）・`scrub`（秘密と参照の重なる範囲を 1 回で伏せる） |
 | `plugins/ndf/src/ndf/adapters/run_log.py` | `secret_spans`（秘密の一致範囲） |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | `Outcome`・`_summary` |
@@ -66,11 +69,11 @@
 
 ### Task 4: 判定を打つ条件と省く条件を分け、リリース承認ゲートを省かない
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`（`validation_rows`・`mvv_validate_sprint`・`compare_files`）、`plugins/ndf/src/ndf/progress/gate/checks.py`（`judgeable`・`refusals`・`may_skip`・`note`・`CHECKS_BY_GATE`）、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`
-- **変更内容:** 詳細設計書の「判定を打つ条件と省く条件」と「リリース承認ゲートの省略の止め」。MVV とレッドラインのパスをベースから 1 度だけ読み（`fetch_branch_or_raise` で取得し、#4076 の `current` と `Snapshot.commit` を使う）、差分は `snap.commit` と head の組から読む（`current`・`Snapshot.commit` は #4076 の計画の U3 が作る）（比較の `files` が 300 件に届いたときだけ、同じ組を手元の git で読み直す）。プランの承認資料に載せる部分は Task 8 が持つ
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`（`validation_rows`・`mvv_validate_sprint`・`compare_files`）、`plugins/ndf/src/ndf/progress/gate/checks.py`（`judgeable`・`refusals`・`may_skip`・`note`・`CHECKS_BY_GATE`）、`plugins/ndf/src/ndf/progress/model.py`（`MVV_SKIP_GATES`・`mvv_skip`・`mvv_answer_void`）、`plugins/ndf/src/ndf/progress/run.py`（`_running_move`・`_consume`）、`plugins/ndf/src/ndf/progress/gate/records.py`（`approved_head`）、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/gate/test_gate_after_approval.py`
+- **変更内容:** 詳細設計書の「判定を打つ条件と省く条件」と「リリース承認ゲートの省略の止め」。MVV とレッドラインのパスをベースから 1 度だけ読み（`fetch_branch_or_raise` で取得し、#4076 の `current` と `Snapshot.commit` を使う）、差分は `snap.commit` と head の組から読む（`current`・`Snapshot.commit` は #4076 の計画の U3 が作る）（比較の `files` が 300 件に届いたときだけ、同じ組を手元の git で読み直す）。失敗の原因は Task 9 の `failure_text` で定型文と診断の記録の識別子にし、例外の文を `why`・`holds`・PR のコメントへ入れない。回答の読み口（`_running_move`・`_consume`・`approved_head`）は、`mvv_answer_void` で区分の外の `service:mvv` の回答を数えない。古いバージョンが書く形の記録（リリースの判定のステップの `skip: true` と未消費の `service:mvv` の承認）を置いたステートマシンで、`ndf progress next` が人へ問い、人の `ndf answer` の後に進むことをテストで確かめる（設計の決定 3）。プランの承認資料に載せる部分は Task 8 が持つ
 - **この単位で作る `_judged` の手順 (5) の範囲（保留なしの経路）:** `validation_rows` で記録を 1 回読み、手順 (7) の再利用にだけ渡す（読めなければ再利用を省いて LLM で判定する）。保留は読まず、出力の `holds` は常に `null`（承認資料は「レビューの保留: 未確認」。判定を打てた（`verdict` がある）ときの理由は「この判定は保留を読んでいない」で、途中で止まった扱いにしない。`fast` で検査がすべて通ると `why` は空なので、Task 8 の `mvv_lines` は空の `why` でも資料を組む。詳細設計書の「手順書」の「載せ方」）。`review_rows`・`review_holds`・`review_prs`・`MvvFacts.review_holds`・`check_review_holds` は参照しない（Task 5 が足す）。詳細設計書の手順のうち保留に関わる部分（(5) の保留の算出と「読めない」保留、`holds` の配列、保留による `skip` 偽）は Task 5 で足す
-- **満たす受け入れ条件:** 1・2・3（判定と PR のコメント）
-- **進め方:** 失敗するテスト（`normal` で LLM のスタブが呼ばれない）→ 通す最小実装 → 整理
+- **満たす受け入れ条件:** 1・2・3（判定と PR のコメント）。決定 3（古いバージョンの記録から再開してもリリース承認ゲートを省かない）
+- **進め方:** 失敗するテスト（`normal` で LLM のスタブが呼ばれない。古いバージョンの `service:mvv` の回答でリリース承認ゲートのステップが済む）→ 通す最小実装 → 整理
 
 ### Task 5: レビューの保留を読み、記録の欠落で cross-review を止める
 
@@ -82,7 +85,7 @@
 ### Task 6: 承認資料の根拠の行を確かめるコマンド
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`cite`）、`plugins/ndf/src/ndf/domains/records/cli.py`（`_mvv_cite`）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`（新設）
-- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。伏せる処理（`Publisher._private_refs`・`scrub`・`secret_spans`・`public_cause`）は Task 9 が作ったものを使い、このタスクでは変えない。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。伏せる処理（`Publisher._private_refs`・`scrub`・`secret_spans`）と失敗の原因の文（`failure_text`）は Task 9 が作ったものを使い、このタスクでは変えない。`precondition` の `summary` と照会の失敗の注意は、`failure_text` の定型文と診断の記録の識別子にする。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
 - **満たす受け入れ条件:** 7（承認資料の側。`decisions.md` の例は #4076 の実装が直す）
 - **進め方:** 失敗するテスト（バージョン 1 を引いた行で `refused` にならない）→ 通す最小実装 → 整理
 
@@ -100,19 +103,19 @@
 - **満たす受け入れ条件:** 3（プランの経路の承認資料）
 - **進め方:** 失敗するテスト（承認資料に「MVV 判定」の節が無い）→ 通す最小実装 → 整理
 
-### Task 9: 秘密と参照の伏せ方を直し、結果に入れる原因の文を伏せる関数を作る
+### Task 9: 秘密と参照の伏せ方を直し、失敗の原因を定型文と手元の診断の記録に分ける関数を作る
 
-- **対象ファイル:** `plugins/ndf/src/ndf/adapters/run_log.py`（`secret_spans`。`redact` もそれで置き換える）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`・`scrub`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`public_cause`）、`plugins/ndf/tests/adapters/test_publish.py`、`plugins/ndf/tests/adapters/test_cli_run_log.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`（`public_cause`）
-- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」の「伏せ方」のうち `Publisher` と `scrub` の部分と、「判定を打つ条件と省く条件」の `public_cause`。秘密を含む参照を照会へ送らず、秘密の一致範囲と非公開の参照の一致範囲の和を原文の上で 1 回で置き換える。`publish._REPO_URL` を、認証情報付きの URL と `***@` に伏せ字済みの URL も参照として拾う形に変え、URL の全体を伏せる。認証情報付きの URL の全体を伏せる処理は、書き先の公開範囲によらず（`scrub` の `public` が偽でも）かける。`secret_spans` は固定の SSH の利用者名（スキームが `ssh`・利用者名が `git`・ホストが `github.com` の 3 つがそろう `ssh://git@github.com/` の `git@` だけ）を秘密の範囲に入れず、公開のリポジトリの SSH の URL は今どおり所有者名とリポジトリ名を残す。秘密が参照の境界をまたぐ場合と、`ssh://git@github.com/<所有者>/<リポジトリ>` の形の参照の両方を、同じタスクのテストで確かめる。`run_log.redact` だけを変えて `scrub` を変えない（またはその逆の）途中の状態を作らないため、`run_log.py` と `publish.py` を同じタスクで変える
-- **満たす受け入れ条件:** 3・7（PR のコメントと `cite` の結果に秘密の断片を残さない）
-- **進め方:** 失敗するテスト（秘密の前半が参照の中、後半が参照の外にある文で、`scrub` の結果に秘密の後半が残る）→ 通す最小実装 → 整理
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/run_log.py`（`secret_spans`。`redact` もそれで置き換える）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`・`scrub`）、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`（`failure_text`）、`plugins/ndf/src/ndf/domains/records/mvv.py`（`record_failure`）、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`（`STOP_REASONS`）、`plugins/ndf/contracts/domains/ndf-files.json`（`mvv-gate-failures`）、`plugins/ndf/contracts/schemas/internal/mvv-gate-failure.schema.json`（新設）、`plugins/ndf/src/ndf/contracts/internal.py`（種類 `mvv-gate-failure`）、`plugins/ndf/tests/adapters/test_publish.py`、`plugins/ndf/tests/adapters/test_cli_run_log.py`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`（`failure_text`・`record_failure`）
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」の「伏せ方」のうち `Publisher` と `scrub` の部分と、「判定を打つ条件と省く条件」の `failure_text`・`record_failure`・`STOP_REASONS` と「結果に入れる原因の文」。`failure_text` は定型文と診断の記録の識別子だけを返し、例外の全文（秘密の値だけを伏せる）を状態の保存先の `mvv-gate-failures.jsonl` へ書く。偽の社内の Git ホスト名を含む例外で、返す文にホスト名が無く、診断の記録に残ることを確かめる。秘密を含む参照を照会へ送らず、秘密の一致範囲と非公開の参照の一致範囲の和を原文の上で 1 回で置き換える。`publish._REPO_URL` を、認証情報付きの URL と `***@` に伏せ字済みの URL も参照として拾う形に変え、URL の全体を伏せる。認証情報付きの URL の全体を伏せる処理は、書き先の公開範囲によらず（`scrub` の `public` が偽でも）かける。`secret_spans` は固定の SSH の利用者名（スキームが `ssh`・利用者名が `git`・ホストが `github.com` の 3 つがそろう `ssh://git@github.com/` の `git@` だけ）を秘密の範囲に入れず、公開のリポジトリの SSH の URL は今どおり所有者名とリポジトリ名を残す。秘密が参照の境界をまたぐ場合と、`ssh://git@github.com/<所有者>/<リポジトリ>` の形の参照の両方を、同じタスクのテストで確かめる。`run_log.redact` だけを変えて `scrub` を変えない（またはその逆の）途中の状態を作らないため、`run_log.py` と `publish.py` を同じタスクで変える
+- **満たす受け入れ条件:** 3・7（PR のコメントと `cite` の結果に秘密の断片と例外の文を残さない）
+- **進め方:** 失敗するテスト（秘密の前半が参照の中、後半が参照の外にある文で、`scrub` の結果に秘密の後半が残る。社内の Git ホスト名を含む例外の文が原因の文に残る）→ 通す最小実装 → 整理
 
 ## レビューの単位
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| 1 工程の入力とプランの外のエントリポイント、伏せ方 | Task 1・2・3・9 | 3959:3・3959:7・3959:8・3959:9 | 約 550（伏せ方の `run_log.py`・`publish.py`・`public_cause` を含む） | （実装の後に書き足す） |
-| 2 判定を打つ条件と省く条件 | Task 4 | 3959:1・3959:2・3959:3 | 約 850（比較の API の 300 件の経路と差分の固定を含む） | |
+| 1 工程の入力とプランの外のエントリポイント、伏せ方 | Task 1・2・3・9 | 3959:3・3959:7・3959:8・3959:9 | 約 600（伏せ方の `run_log.py`・`publish.py`・`failure_text`・診断の記録を含む） | （実装の後に書き足す） |
+| 2 判定を打つ条件と省く条件 | Task 4 | 3959:1・3959:2・3959:3 | 約 950（比較の API の 300 件の経路と差分の固定、回答の読み口を含む） | |
 | 3 レビューの保留と記録の欠落 | Task 5 | 3959:4・3959:5 | 約 750（見送りの区分を含む） | |
 | 4 根拠の行の確かめ | Task 6 | 3959:7 | 約 200 | |
 | 6 プランの承認資料 | Task 8 | 3959:3 | 約 250 | |
@@ -121,7 +124,7 @@
 - 行数は追加と削除の和で、`git diff --shortstat <ベース>...HEAD` で数える。数えないパスは無い（ロックファイルと再生成のファイルを触らない。`docs/glossary.md` は再生成だが、数えても 1,000 行を超えない）
 - どの単位も `.ndf/` のファイルを触らない
 - 実行の順:
-  - 単位 1 を最初に流す（#4076 の部品を使わないので、#4076 の実装の前でも始められる。Task 9 の伏せ方と `public_cause` もこの単位に入れるので、それを使う単位 2（`_judged` の原因の文）と単位 4（`_mvv_cite` の伏せ方と `precondition` の要約）は、直した後の伏せ方の上に作る。#4076 の計画の U3・U4 と `records/mvv_gate.py`・`records/cli.py`・`docs/contracts/commands.md` を共有するが、触る関数と項目は分かれ、後に入る PR が取り込みで解く）。
+  - 単位 1 を最初に流す（#4076 の部品を使わないので、#4076 の実装の前でも始められる。Task 9 の伏せ方と `failure_text` もこの単位に入れるので、それを使う単位 2（`_judged` の原因の文）と単位 4（`_mvv_cite` の伏せ方と `precondition` の要約）は、直した後の伏せ方の上に作る。#4076 の計画の U3・U4 と `records/mvv_gate.py`・`records/cli.py`・`docs/contracts/commands.md` を共有するが、触る関数と項目は分かれ、後に入る PR が取り込みで解く）。
   - 単位 2〜4 は #4076 の実装が main へ入った後に始める。
   - 単位 3 は単位 2 の後（`_judged` の配線と `checks.py` を単位 2 が変える。単位 2 は保留を読まない経路で単体で動き、単位 3 が保留の関数とフィールドを足して配線する。上の Task 4・Task 5 の範囲）。
   - 単位 4 は単位 1 の後（`records/cli.py` を単位 1 が変える）で、単位 2・3 と並列にしてよい（`mvv.py` は関数ごとに分かれ、衝突は取り込みで解ける）。
@@ -143,7 +146,7 @@
 
 | 時機 | 対象 | 理由 |
 | --- | --- | --- |
-| 実装の前（準備のリファクタリング） | しない | 触る主なファイルは `mvv_gate.py` 168 行・`mvv.py` 171 行・`checks.py` 202 行・`records/cli.py` 308 行で小さい（2026-11-23 の main）。1,000 行の規則に近いのは 3 つで、`crossreview/drive.py` 998 行は #4076 の計画の U2 が先に約 800 行へ分ける。`progress/command.py` は計画 p9 の lsplit のスプリントブランチで 971 行なので、Task 3 の `stage_inputs_of` を新しい `progress/stage_inputs.py` に置いて足さない。`progress/invoke.py` は同じブランチで 965 行（開いている #4307 で 970 行）で、Task 2 は `resolve_inputs` の数行を置き換えるだけ。8 タスクのうちこの 3 ファイルを触るのは 2 つ（Task 2・5） |
+| 実装の前（準備のリファクタリング） | しない | 触る主なファイルは `mvv_gate.py` 168 行・`mvv.py` 171 行・`checks.py` 202 行・`records/cli.py` 308 行で小さい（2026-11-23 の main）。1,000 行の規則に近いのは 3 つで、`crossreview/drive.py` 998 行は #4076 の計画の U2 が先に約 800 行へ分ける。`progress/command.py` は計画 p9 の lsplit のスプリントブランチで 971 行なので、Task 3 の `stage_inputs_of` を新しい `progress/stage_inputs.py` に置いて足さない。`progress/invoke.py` は同じブランチで 965 行（開いている #4307 で 970 行）で、Task 2 は `resolve_inputs` の数行を置き換えるだけ。8 タスクのうちこの 3 ファイルを触るのは 2 つ（Task 2・5）。`progress/run.py` は 934 行（2026-11-24 の作業場所）で、Task 4 は `_running_move`・`_consume` へ数行を足すだけ |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
 | スプリントの終わり（cross-refactoring） | `records/cli.py` の `_env_inputs` と `progress/stage_inputs.py` の `stage_inputs_of` の、工程の定義を引く処理の重なり（単位 1）と、`mvv_gate._judged` と `cite` がどちらも `current` を呼ぶ前の取得の手順（単位 2・4） | 単位をまたいで同じ形の処理が 2 か所にできうる |
 
@@ -160,7 +163,7 @@
 ## 切り戻し手順
 
 - データの移行は無い。単位ごとの PR を revert すれば戻る。単位 3 を戻すときは単位 5 の手順書の保留の記述も戻す
-- 更新の前にリリース承認ゲートまで進んでいたスプリントは、`ndf progress cancel` してから作り直す（設計の決定 3。実装の PR の `## 移行の手順` に書く）
+- 移行の手順は要らない。更新の前に古いバージョンがリリース承認ゲートへ書いた `service:mvv` の回答は、読み口が数えず人へ問い直す（設計の決定 3）。単位 2 を revert すると、その回答を再び承認として消費する形に戻る
 
 ## 完了の定義
 

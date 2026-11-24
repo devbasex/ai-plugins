@@ -79,7 +79,7 @@ graph LR
 
 - `ndf records mvv gate` は、承認済みの MVV があり PR の材料がそろえば、進め方と機械の検査によらず LLM の判定を打つ。進め方・機械の検査・判定・レビューの保留は「省くか」だけを決め、`normal` は常に省かない。リリース承認ゲートは #4105 まで省かない
 - 判定の記録（判定・理由・レッドライン・レビューの保留・省かない理由）は PR のコメントに載る。承認資料の「MVV 判定」の欄は、PR のコメントでなく今回の判定の出力（`outputs.mvv_gate`）を載せる（今回のコメントが無い終わり方でも、前回の判定を人へ渡さない）
-- `service:mvv` は、MVV 判定が承認ゲートを省いてよいと判断したとき、人の代わりに承認ゲートへ書き込まれる承認の回答である。この回答を使うときは、判定した PR の head が今の PR の head と同じかだけを確かめる。宛先のブランチやその先端の変化は確かめない。それを確かめる仕組みは #4106 が足す（決定 9）。リリース承認ゲートは #4105 まで、ゲートの側でも省かない（決定 3）
+- `service:mvv` は、MVV 判定が承認ゲートを省いてよいと判断したとき、人の代わりに承認ゲートへ書き込まれる承認の回答である。この回答を使うときは、判定した PR の head が今の PR の head と同じかだけを確かめる。宛先のブランチやその先端の変化は確かめない。それを確かめる仕組みは #4106 が足す（決定 9）。リリース承認ゲートは #4105 まで、ゲートの側でも省かず、古いバージョンが書いた `service:mvv` の回答も承認として数えない（決定 3）
 - 設計承認ゲートは、設計 PR の cross-review の記録に次のどちらかがあれば省かない
   - 直っていないレッドラインの指摘
   - 利用者の判断が要る今のバージョンの未解消の見送り（見送りの区分が `needs_user`）
@@ -93,14 +93,14 @@ graph LR
 | 要素 | 責務 |
 | --- | --- |
 | 判定のエントリポイント（`records/cli.py`） | 工程の入力を `NDF_STAGE_INPUT` か `--machine` のどちらか 1 つから得る。`NDF_STAGE_INPUT` は `validate_stage_input` で確かめる。`cite` のサブコマンドを足す |
-| 判定の本体（`records/mvv_gate.py`） | 判定を打つ条件と省く条件を分ける。MVV とレッドラインのパスを PR のベースから読む。設計 PR のレビューの記録を読んで保留を事実に入れる |
+| 判定の本体（`records/mvv_gate.py`） | 判定を打つ条件と省く条件を分ける。MVV とレッドラインのパスを PR のベースから読む。設計 PR のレビューの記録を読んで保留を事実に入れる。失敗の原因を定型文と診断の記録の識別子に変え、例外の全文を手元の診断の記録へ書く（`failure_text`） |
 | 機械の検査（`progress/gate/checks.py`） | 省かない理由の検査に `check_review_holds` を足す。判定の記録（`note`）に保留を載せる |
 | レビューの記録の読み手（`records/mvv.py`・`mvv_decide.py`） | `mvv-review` の行を読み（`review_rows`）、PR ごとの保留を決める（`review_holds`）。#4076 から移した規則を、直っていないレッドラインと利用者の判断が要る見送りに絞った形 |
 | 見送りの区分（`crossreview/drive.py`・`journal.py`・`contracts/data/review-criteria.json`・`records/mvv.py`） | 修正担当が見送るときに区分 `defer`（`needs_user`・`filed`・`not_applicable`）を書き、ジャーナルが理由とともに持ち、`record_review` が `mvv-review` の `deferred` の行に書く |
 | cross-review の終わり方（`crossreview/drive.py`・`finish_decide.py`・`cli.py`） | 承認ゲートの判定に要る記録を書けなければ `mvv_record_failed` で止まる。#4076 から移した規則 |
 | 工程の入力のコントラクト（`stage-io.schema.json`・`progress/definition.py`・`progress/invoke.py`） | `stage-in` をプランが渡す平らな形にし、`validate_stage_input` をその形で確かめる。`resolve_inputs` と判定のエントリポイントが同じ関数で確かめる |
 | ステートマシンの文脈の読み手（`progress/command.py`） | ID から、判定のステップを持つ工程の入力をプランと同じ規則で組む |
-| リリース承認ゲートの省略の止め（`progress/model.py`） | 省いてよい承認ゲートの区分（`MVV_SKIP_GATES`）を設計承認ゲートだけにし、判定の出力によらずリリース承認ゲートを省かない（#4105 まで） |
+| リリース承認ゲートの省略の止め（`progress/model.py`・`progress/run.py`・`progress/gate/records.py`） | 省いてよい承認ゲートの区分（`MVV_SKIP_GATES`）を設計承認ゲートだけにし、判定の出力によらずリリース承認ゲートを省かない（#4105 まで）。回答の読み口（`_running_move`・`_consume`・`approved_head`）は、区分の外の `service:mvv` の回答を数えず人の回答を待つ |
 | 手順書（`pace.md`・`approval-request.md`・`agent-layers.md`・`project-mvv.md`） | 進め方によらず判定すること、承認資料が今回の判定の出力から保留と判定を載せること、根拠の行の確かめ、supervisor が設計承認ゲートと手動のリリース承認ゲートの前に `--machine` で打つ手順 |
 
 ## 入出力のコントラクト
@@ -138,8 +138,10 @@ MVV の事実（検査 1・判定の材料・保留のバージョン）は、�
 | --- | --- |
 | `holds` | 保留。常にキーを置く。記録を読んで保留が無ければ空の配列 `[]`、保留があれば保留の配列、記録を読む段階で失敗したら読めない理由を含む配列になる。保留を読む前に終わったときとリリース承認ゲートでは `null` になる（下の表）。承認資料は `[]` を「無し」、`null` を「未確認」と分けて載せる |
 | `noted` | 今回の判定を PR のコメントに書いたかを示す。判定を打つ処理まで進んだ出力には常にキーを置く。今回コメントを書けたときだけ `true`、書かなかった・書けなかったときは `false` である（検査 1 が外れた・差分を読む間に PR が動いた・差分の後に PR を読み直せない・投稿に失敗した、など。コメントの有無は下の表）。キーが無い出力（モードがその承認ゲートを持たないなど）も、書かなかったものとして扱う。承認資料は `noted` が `true` のとき `note_url` の今回のコメントを指し、`true` でないとき「今回は PR に判定のコメントを載せていない。PR に既存の判定のコメントがあっても、今回の結果はここで確かめる」を添える。前回の判定が PR にあるとは書かない（承認済みの MVV が無いリポジトリでは、初回から一度もコメントを書かない）。書かなかった理由（検査 1 が外れた・投稿に失敗した）は `why` で伝える |
-| `stopped_by` | `verdict` が null のときだけ置く、判定できなかった理由の種類（`kind`）と定型文（`text`）。定型文は PR から取った値を含まず、承認する人が次に確かめることを書く（種類と文の表は詳細設計の `stopped_by`）。承認資料を PR の閲覧権限を確かめられない先へ渡すときは、`why` の代わりにこの文を載せる |
+| `stopped_by` | `verdict` が null のときだけ置く、判定できなかった理由の種類（`kind`）と定型文（`text`）。定型文の表（`STOP_REASONS`）は、`why`・`holds` の失敗の原因の文も作る（下の段落）。定型文は PR から取った値を含まず、承認する人が次に確かめることを書く（種類と文の表は詳細設計の `stopped_by`）。承認資料を PR の閲覧権限を確かめられない先へ渡すときは、`why` の代わりにこの文を載せる |
 | `note_url` | `noted` が `true` のときだけ置く、今回書いたコメントの URL。投稿の応答から取るので、GitHub の呼び出しは増えない。承認資料はこの URL だけを今回の判定のコメントとして示し、PR の既存のコメントを指さない |
+
+`why` と `holds` に入る失敗の原因（ベースを取得できない・差分を読めない・記録を読み書きできない・LLM が回答しない・PR へ書けない、など）は、失敗の種類ごとに決めた定型文と、手元の診断の記録の識別子だけにする。例外の全文は載せない。例外の文には、`git fetch` の標準エラーに出る社内の Git ホスト名のように、伏せる処理（`publish.scrub`。GitHub の URL と課題番号付きの参照を見分ける）が見分けられない値が入りうる。`why` と `holds` は PR のコメントと承認資料に写されるので、伏せて残さず、初めから載せない。例外の全文は、判定を打った実行環境の状態の保存先（リポジトリの外）の診断の記録 `mvv-gate-failures.jsonl` にだけ書き、秘密の値だけを伏せる。原因を直す人は、識別子でその行を読む。`ndf records mvv cite` の `precondition` の要約も同じ形にする（形と表は詳細設計の「結果に入れる原因の文」と `STOP_REASONS`）。
 
 判定した PR の番号・宛先を出力に足し、`service:mvv` の承認を消費の時点で今の PR と照合する仕組みは #4106 が足す（決定 9）。
 
@@ -273,17 +275,25 @@ graph LR
   - 判定は打ち、判定の記録は PR のコメントと承認資料に載る
   - `why` に「リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない」を入れ、保留は読まない（`review_prs` は空）
   - 判定の出力だけに頼らず、ゲートの側にも置く。省いてよい区分の表 `MVV_SKIP_GATES` を `design` だけにし、`mvv_skip` はほかの区分を省かない。#4105 は表に `release` を足す
-  - 古いバージョンの NDF が書いた状態から、実行中のスプリントを再開する場合は扱わない。その状態とは、更新の前に済ませた判定の `skip: true` と、まだ読まれていない `service:mvv` の回答である。実装の PR の `## 移行の手順` に「更新の前にリリース承認ゲートまで進んでいたスプリントは `ndf progress cancel` してから作り直す」を書く
+  - 回答の読み口でも、表に無い区分の承認ゲートでは、回答した者が `service:mvv` の回答を回答として数えない。古いバージョンの NDF が書いた状態（更新の前に済ませた判定の `skip: true` と、まだ読まれていない `service:mvv` の回答）から再開しても、リリース承認ゲートは人の回答を待つ
+    - 今のコードでは、`mvv_skip` が None でも、記録に残った回答は消費される。`progress/run.py` の `_running_move` は、回答（`prog.answer`）があれば `mvv_skip` を見ずに消費の手（`CONSUME`）を返す。`_consume` は回答した者を見ずに承認として読み、ステップを済みにする。`progress/gate/records.py` の `approved_head` も、区分の最後の承認の head をマージの側へ渡す
+    - そこで、回答を数えるかを決める 1 つの関数 `model.mvv_answer_void(payload, gate)` を足す。回答の payload の `by` が `service:mvv` で、承認ゲートの区分が `MVV_SKIP_GATES` に無ければ真を返す。`by` は ndf 11.0.0 から `mvv_answer` が必ず書く（`ndf--v11.0.0` と `ndf--v11.0.31` のタグの `progress/model.py` で確かめた）ので、古いバージョンの回答も見分けられる
+    - `_running_move` は、この関数が真の回答を無いものとして扱う。手は承認ゲートの待ち（`GATE`）になり、`ndf progress next` は人へ問う。待っている質問（`asking.waiting`）も同じ `decide` から作るので、人は `ndf answer` で同じ質問に答えられる。人の回答は後の事象なので、それが読む回答になる
+    - `_consume` は消費の前に同じ関数で確かめ、真なら回答を読まずに `GATE` の結果を返す。`_running_move` を通らない呼び方が足されても、`service:mvv` の回答をリリース承認ゲートの承認にしないためである
+    - `approved_head` は、区分の最後の回答がこの関数で真なら、承認が無いとして None を返す。マージの側が、古いバージョンの省いた回答の head でマージしないためである
+    - 記録の事象は消さない。読み口が数えないだけなので、#4105 が表に `release` を足した後に書かれる新しい回答は今どおり数える
   - 回答を判定の対象と消費の時点で照合する仕組みは #4106 が持つ
   - 設計承認ゲートの保留は、対象が設計 PR の 1 件で決まるので、この Issue で読む
 - 採らなかった案: 判定の出力だけで止め、ゲートの側は変えない（新しいバージョンの判定でも、出力を読む側が区分を見ないと、判定の手違い 1 つでリリース承認ゲートが省かれる。#4093 の指摘 r4-3）
-- 採らなかった案: 古いバージョンの状態から再開する実行も扱う。`progress` の回答の読み口へ、次の変更が広がる（#4093 の cross-review の 7・8 ラウンドで指摘が続いた。r7-1・r7-3 → r8-1〜r8-4。利用者の方針「普及フェーズに入るまで後方互換は不要」（2026-11-16）と突き合わせ、2026-11-22 に conductor が扱わないと決めた）
-  - 古いバージョンの未消費の回答を、消費の経路と承認済みの head の読み口の両方で採らない
-  - 消費済みの回答を有効とみなす
-  - accepted ファイルを回答に結び付ける
+- 採らなかった案: 古いバージョンの状態から再開する実行は扱わず、実装の PR の `## 移行の手順` に「更新の前にリリース承認ゲートまで進んでいたスプリントは `ndf progress cancel` してから作り直す」と書くだけにする（2026-11-22 に conductor が選んだ前の案。手順を読まずに更新した利用者の手元では、古いバージョンが書いた `service:mvv` の回答を、`_running_move` と `_consume` がリリース承認ゲートの承認として消費する。r9-1 の危険が更新の後も残る。#3959 の設計 PR の cross-review の指摘 r1-1・r2-2 と、2026-11-24 の設計承認ゲートの利用者の差し戻し B が critical とした）
+- 採らなかった案: 古いバージョンの回答を事象の畳み込み（`run.StepProgress._answered`）で捨てる（畳み込みは承認ゲートの区分を知らず、回答の payload の `gate` に頼ることになる。読み口の `_running_move` はステップの区分 `step.gate` を持つので、`mvv_skip` と同じ出所で決められる）
+- 採らなかった案: 更新の時に、古いバージョンの未消費の回答を取り消す事象を書く移行の処理を足す（処理を走らせることを利用者に頼る。読み口で数えない形なら、走らせ忘れが無い）
+- 採らなかった案: #4093 の cross-review の 7・8 ラウンドの指摘（r7-1・r7-3 → r8-1〜r8-4）の全体を扱う。次の 2 つは、リリース承認ゲートを省かないことに要らないので採らない
+  - 消費済みの回答を有効とみなすかを決め直す（消費済みの回答は、更新の前にステップが済んでいる。読み口を変えても済んだステップは戻らない）
+  - accepted ファイルを回答に結び付ける（`approved_head` が区分の最後の回答で止めるので、数えない回答に結び付いた accepted ファイルは読まれない）
 - 採らなかった案: リリースの PR 自体（文脈の `pr`）の保留だけを読み、省く条件に使う（単位の PR が、バージョンを上げる PR の差分に現れない戦略がある。`trunk` の `release_pr` がそれに当たり、単位の PR に残るレッドラインを読まずに省く。#4076 の cross-review の指摘 r9-1 と #4093 の指摘 r1-3 の危険を開ける）
 - 採らなかった案: 範囲の決め方を #3959 に残したまま収束させる（#4093 の cross-review の 3 ラウンドで、範囲の決め方への指摘が毎ラウンド続いた。指摘は CHANGELOG の集め方や組み立てのコミットの記録へ広がった。conductor が 2026-11-22 に範囲を分けると決めた）
-- **代償**: `fast`・`auto` でもリリース承認ゲートは毎回人が答える。リリースの自動化は #4105 まで止まる。更新の時点でリリース承認ゲートまで進んでいた実行中のスプリントは、利用者が作り直す。作り直さずに再開すると、古いバージョンが書いた `service:mvv` の回答でリリース承認ゲートを通りうる。r9-1 の危険（レッドラインの指摘が残る変更が自動で省かれる）は、作り直したスプリントでは開かない
+- **代償**: `fast`・`auto` でもリリース承認ゲートは毎回人が答える。リリースの自動化は #4105 まで止まる。更新の時点でリリース承認ゲートまで進み、古いバージョンが `service:mvv` の回答を書いていたスプリントは、再開すると人へ問い直す（その回答で一度省いたつもりの承認を、人がもう一度答える）。読み口が数えない回答も事象として記録に残るので、回答の一覧（`progress/gate/records.py` の `answers`）には載る。#4105 が表に `release` を足すと、残っている古いバージョンの回答も再び数える形になるので、#4105 は足す前にその扱いを決める
 - 根拠: Value 1 / Value 7 / Value 6（MVV バージョン 11）
 
 ### 決定 4: 承認資料の根拠の行を出す前に止めるため、#4076 の確かめの関数をファイルに当てるコマンド `ndf records mvv cite` を足す
@@ -346,10 +356,10 @@ graph LR
   - #4093 の cross-review の 4〜6 ラウンドで、この仕組みへの指摘が毎ラウンド続いた（r4-2 → r5-2・r5-3 → r6-1〜r6-6）
   - 宛先の変更や、判定の後のベースの変化を見落とす隙は、今の `fast`・`auto` にもともとある。#3959 の変更が生んだものでなく、#3959 の目的（`normal` でも判定する・保留・`cite`・`--machine`）と別の仕組みである
   - 指摘と設計の内容を #4106 の本文へコピーし、この Issue の照合は今のまま head だけにする
-  - リリース承認ゲートを省かない止め（決定 3）は、区分の条件（`MVV_SKIP_GATES`）で `mvv_skip` が新たに省くかを決めるところだけを、この Issue に残す
-  - 回答の読み口（`_running_move` の消費と承認済みの head の取得）は変えない。古いバージョンが書いた未消費の `service:mvv` の回答は、区分の条件で拒まない（古いバージョンの状態から再開する実行は扱わず、移行の手順で作り直す。決定 3）
+  - リリース承認ゲートを省かない止め（決定 3）は、区分の条件（`MVV_SKIP_GATES`）だけでこの Issue に残す。`mvv_skip` が新たに省くかを決めるところと、回答の読み口（`_running_move`・`_consume` の消費と `approved_head`）が区分の外の `service:mvv` の回答を数えないところである
+  - 区分の中（設計承認ゲート）の `service:mvv` の回答の読み口は変えず、今どおり head だけを照合する
 - 採らなかった案: この Issue に残してラウンドを足す（直すたびに、`ndf progress` のエントリポイントの照合・消費の排他・`ndf answer head`・表示と待機の取得経路へ変更が広がる。残す範囲の承認まで遅れる）
-- **代償**: 設計承認ゲートを `fast`・`auto` で省くとき、判定の後に宛先を変える・ベースが進む隙は、#4106 まで今と同じ形で残る。リリース承認ゲートは決定 3 で省かないので当たらない。ただし更新の前に古いバージョンが書いた未消費の回答は拒まないので、決定 3 の代償のとおり、実行中のスプリントは作り直す
+- **代償**: 設計承認ゲートを `fast`・`auto` で省くとき、判定の後に宛先を変える・ベースが進む隙は、#4106 まで今と同じ形で残る。リリース承認ゲートは決定 3 で省かず、古いバージョンが書いた `service:mvv` の回答も数えないので当たらない
 - 根拠: Value 5 / Value 9（MVV バージョン 11）
 
 ### 決定 10: 形の違う入力で判定が黙って抜けないため、工程の入力の規則をコントラクトの `stage-in` 1 つにし、判定のエントリポイントもそれで確かめる
@@ -411,7 +421,7 @@ graph LR
 | `fast`・`auto` で判定まで済む・差分の全体が材料に載らない | 呼ぶ | 呼ぶ | 無し |
 | どの進め方でも、検査 1 が外れる（承認済みの MVV が無いリポジトリを含む）・差分を読む間に PR が動く・差分の後に PR を読み直せない・PR を読む前に失敗する | 呼ばない | 呼ばない | 無し |
 
-  - 結果に入れる原因の文を伏せる処理（詳細設計の `public_cause`）は手元の処理だけで、GitHub の呼び出しを増やさない
+  - 失敗の原因を定型文に変える処理（詳細設計の `failure_text`）は手元の処理だけで、GitHub の呼び出しを増やさない。失敗 1 件につき、手元の診断の記録（`mvv-gate-failures.jsonl`）への追記が 1 回増える
   - 既存の案と比べると、今の `fast`・`auto` でコメントを書く判定は、今も `post_note`（`Publisher.comment`）を通るので回数は変わらない。増えるのは上の表で「呼ばない」から「呼ぶ」に変わる終わり方だけである。`normal` ではコメントを書かず承認資料にだけ載せる案なら、この増分は無い。ただし判定の記録の置き場が進め方で 2 つに分かれる（決定 1 で採らなかった、`normal` 用に別の書き方を持つ案と同じ問題）ので採らない
 - **承認資料の確かめ（`ndf records mvv cite`）の費用**: 承認資料を渡す前の確かめ 1 回と、誤りを直した後の確かめ直し 1 回ごとに、次が増える。LLM は呼ばない
   - `ndf` の起動 1 回と、ベースブランチの `git fetch` 1 回
@@ -464,12 +474,14 @@ graph LR
 | 4（記録を読めない） | 不正なバイトを含む実際の `mvv-validation.jsonl` で、実物の `mvv_validate_sprint` を通しても判定が打たれ（再利用を省く）、`holds` に読めない理由が載り `skip` は偽。追記も失敗すると判定・保留・記録に書けない理由がそろう | 判定の再利用の読み直しで例外が出て止まる・読めない記録で再利用する |
 | 承認資料 | 手順書が `outputs.mvv_gate` を出所にし、`verdict: null`・`noted: false` でも今回の理由と保留を載せる（プランの経路は本文を、supervisor の経路は `stopped_by` の定型文と件数と全文の参照先を載せる） | PR のコメントの前回の判定を載せる |
 | 決定 3 | リリース承認ゲートでは判定の出力が `skip: true` でも `mvv_skip` が None で、`service:mvv` の回答を書かずに人を待つ | 判定の出力だけで止め、区分を見ない |
+| 決定 3（古いバージョンの記録から再開） | 古いバージョンが書いた形の記録（リリースの判定のステップの `skip: true` と、未消費の `service:mvv` の承認の回答）を事象として置いたステートマシンで、`decide` が `GATE` を返し、`ndf progress next` が人へ問う。`_consume` に直接渡しても承認として読まず、ステップは済みにならない。`approved_head` は None。その後に人が `ndf answer` で承認すると、その回答を消費し、`approved_head` は人の回答の head を返す。設計承認ゲートの同じ形の回答は今どおり消費する | 記録に残った `service:mvv` の回答でリリース承認ゲートを通す・人の回答を受けない・設計承認ゲートの省いた回答まで数えない |
 | 8 | `--machine` で文脈から組んだ入力が、同じ文脈でプランが組む入力（`resolve_inputs`）と同じで、両方のエントリポイントが同じ PR と判定結果を選ぶ。環境変数と両方 → `invalid`。無い ID → `refused` | 文脈の `mvv_ref` を落とす・両方あるときに片方を選ぶ・`design_pr` で別の PR を判定する |
 | 9 | `{"context": {...}}` の `NDF_STAGE_INPUT` で `stopped`・`invalid`、`mode` の無い入力で `input_missing`、どちらも LLM のスタブと `gate` を呼ばない。プランが組む入力（`resolve_inputs` の結果）は今どおり通る。`validate_stage_input` が平らな形を確かめる | 形の違う入力で `ok` のまま判定を打たない・プランの入力が落ちる・`resolve_inputs` と判定のエントリポイントが別の規則で確かめる |
 | 4（伏せた行） | キーの最後の行が今のバージョンの `withheld: true` の行なら、`fast` でも保留になり `skip` は偽。承認資料に `WITHHELD` の文が載る | 伏せた行を保留にせず省く |
 | 4（ハッシュだけが違う行） | `mvv_version` が同じで `sha256` の違う `fixed` は、今の `needs_user` の保留を外さない | バージョンの番号だけで比べ、別の本文の `fixed` で省く |
 | 5（追記の前の失敗） | 既存の `mvv-validation.jsonl` が不正な UTF-8 のとき、書けていない `redline` が `missing` に入り、`cmd_run` の結果が `STOPPED`・`mvv_record_failed` | 追記の失敗だけを捕まえ、警告だけで収束する |
 | 前提 2 | 承認済みの MVV が無いリポジトリで `design`・`release` の出力が今の形（`verdict: null`） | 形が変わる |
+| 3（失敗の原因の開示） | 社内の Git ホスト名・ホームのパス・秘密・認証情報付きの URL を含む例外で判定が失敗したとき、PR のコメントの本文・出力の `why` と `holds`・プランの承認資料の行に、どれも無く、失敗の種類の定型文と診断の記録の識別子だけが載る。診断の記録のその識別子の行に例外の全文（秘密は伏せ字）がある | 例外の文を伏せる処理に通して PR へ書く・診断の記録に全文を残さない |
 
 ## どこを変えるか
 
@@ -479,7 +491,7 @@ graph LR
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3959 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/adapters/publish.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/progress/test_command_mvv_inputs.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/adapters/test_publish.py` |
+| #3959 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/adapters/publish.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/mvv-gate-failure.schema.json`、`plugins/ndf/src/ndf/contracts/internal.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/progress/test_command_mvv_inputs.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/gate/test_gate_after_approval.py`、`plugins/ndf/tests/adapters/test_publish.py` |
 | #4055 | 統合する | #3959 | 上と同じ（`records/cli.py`・`progress/command.py`） |
 
 ## 未確認のまま残ること
