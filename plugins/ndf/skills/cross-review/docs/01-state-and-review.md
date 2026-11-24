@@ -142,9 +142,10 @@ PR が足した MVV の根拠の記述の誤り（NDF が機械で確かめて�
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |
 | `unsent_citations` | 最後に残った手元のコミットが PR に届いていないときだけ、そのコミット（`head`）で見つけた MVV の根拠の記述の誤り（`errors`。確かめられなければ null と `detail` の原因）。PR の記録と結果 JSON には載せず、件数だけを判定に使う。状態ファイルは所有者だけが読める権限で置く |
+| `mvv_record_error` | MVV の記録を書けなかった原因（保存先のパスを含む）。書けたら消す。PR の記録と結果 JSON の注意には、書けなかったことだけを載せる。前に載せた失敗の注意と今回の注意が違う起動は、指摘が同じでも PR の記録を書き直す |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
 | `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
-| `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。スレッドを書き切れなかったときは残さない |
+| `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッドと、コメントに載せた MVV の記録の失敗の注意）の要約。スレッドを書き切れなかったときは残さない |
 | `report_pr` | `threads`・`report_comment`・`report_published` が属する PR の番号。今の番号と違えば（巻き直しの後）、その 3 つを `report_earlier` の旧 PR の番号の下へ移し、今の PR へ記録とスレッドを書き直す（旧 PR のコメントを書き換えず、旧スレッドの id を使わない） |
 | `report_earlier` | 巻き直しの前の PR の番号ごとの `threads`・`report_comment`・`report_published` |
 

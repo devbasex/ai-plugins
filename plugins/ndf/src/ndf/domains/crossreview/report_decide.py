@@ -183,8 +183,8 @@ def bind_pr(data: dict[str, Any], pr: int, origin: int) -> bool:
     return True
 
 
-def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> str:
-    """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。公開できたときに `PUBLISHED_KEY` へ
+def published_state(pr: int, data: Mapping[str, Any], final: Optional[str], notices: Sequence[str] = ()) -> str:
+    """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッドと、MVV の記録の失敗の注意 `notices`）の要約。公開できたときに `PUBLISHED_KEY` へ
     書き、前回の収束を返す打ち直しは、これが今の状態と同じときだけ公開を省く（古いラウンドの記録を残さない。PR 3944 の r3-2）。"""
     shown = {
         "pr": pr,
@@ -193,6 +193,9 @@ def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> s
         "findings": store.list_of(data, store.FINDINGS),
         "threads": data.get(THREADS),
     }
+    # 注意が無ければキーを足さず、注意を比べないバージョンの要約と同じ値にする
+    if notices:
+        shown["notices"] = list(notices)
     return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 

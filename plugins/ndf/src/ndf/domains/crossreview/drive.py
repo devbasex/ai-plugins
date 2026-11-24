@@ -67,6 +67,11 @@ CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 RETRY_SUFFIX = "-retry"
 # PR に届いていないコミットの根拠の記述を確かめられなかった注意（PR へ載るので、原因は状態ファイルにだけ残す）
 UNSENT_UNCHECKED = "PR に届いていない手元のコミットの根拠の記述を確かめられない（原因は状態ファイルの unsent_citations にある）"
+# MVV の記録を書けなかった注意と、その原因を状態ファイルへ残せない（消せない）注意（PR へ載るので、保存先のパスを含む例外の文を入れない）
+RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原因は状態ファイルの {store.MVV_RECORD_ERROR} にある）"
+CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
+# 出た・消えたときに、指摘が同じでも PR の記録を書き直す注意
+MVV_NOTICES = (RECORDS_UNWRITTEN, CAUSE_UNSAVED)
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -601,6 +606,28 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
+def _record_mvv(run: _Run, snap: mvv.Snapshot, rows: Sequence[Mapping[str, Any]], clean: Optional[report_decide.Cleaner]) -> bool:
+    """MVV の記録を書き、書けたかを返す。書けなければ固定の注意を足し、例外の文（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
+    error = None
+    try:
+        # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
+        repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
+        mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean)
+    except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run.warnings.append(RECORDS_UNWRITTEN)
+    held = run.data.pop(store.MVV_RECORD_ERROR, None)
+    if error is not None:
+        run.data[store.MVV_RECORD_ERROR] = error
+    if error != held:
+        try:
+            _save(run)
+        except OSError:
+            # 空き容量の不足では状態ファイルも書けない。レビューの結果は返す
+            run.warnings.append(CAUSE_UNSAVED)
+    return error is None
+
+
 def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
     """MVV に反するとした指摘と根拠の記述の誤りを MVV の記録に残し、結果 JSON の `outputs.mvv` を返す（承認済みの MVV が無ければ None）。
 
@@ -614,12 +641,8 @@ def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
     out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
     if seen.failure is not None:
         run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")
-    try:
-        mvv.record_review(run.cfg.worktree, run.ref.current_pr, run.sent, snap, rows, seen if seen.failure is None else None)
-    except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
-        run.warnings.append(f"MVV の記録を書けない（次の起動で書く）: {exc}")
-        return out
-    if seen.failure is not None:
+    wrote = _record_mvv(run, snap, rows, seen if seen.failure is None else None)
+    if wrote and seen.failure is not None:
         later = "次の起動で書き直す。それまで設計承認ゲートは省かない"
         run.warnings.append(f"MVV の記録（mvv-validation.jsonl）の自由記述を伏せて書いた（{later}）: {seen.failure}")
     return out
