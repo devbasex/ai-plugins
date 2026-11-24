@@ -58,8 +58,9 @@ def _strings(value: Any, route: tuple[str, ...] = ()) -> Iterator[tuple[tuple[st
     """JSON の値の中の文字列（キーを含む）と、そこまでのキーの道筋。"""
     if isinstance(value, dict):
         for key, item in value.items():
-            yield (*route, key), key
-            yield from _strings(item, (*route, key))
+            inner = (*route, key)
+            yield inner, key
+            yield from _strings(item, inner)
     elif isinstance(value, list):
         for i, item in enumerate(value):
             step = item["id"] if isinstance(item, dict) and isinstance(item.get("id"), str) else str(i)
