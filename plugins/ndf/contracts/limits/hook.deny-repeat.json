@@ -1,5 +1,5 @@
 {
-  "summary": "同じ guard・理由・対象の拒否を、利用者の入力ごとに返す回数の上限。超えたら案内へ下げる（決定 92）",
+  "summary": "同じ guard・理由・対象の拒否を、利用者の入力ごとに返す回数の上限。超えたら案内へ下げる（docs/specifications/ndf-rebuild.md の決定 92）",
   "attempts": 2,
   "read_by": [
     "ndf.domains.hooks.counter"

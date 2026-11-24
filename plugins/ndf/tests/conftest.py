@@ -1,7 +1,7 @@
 """作り直しの NDF のテストに共通する前提。
 
-テストはプラグインの根の依存の環境（`pyproject.toml` と `uv.lock`）で流す（決定 78）。リポジトリの根から
-`pytest .` で流したときは、根の環境にこのディレクトリの依存が無いため収集しない。
+テストはプラグインの根の依存の環境（`pyproject.toml` と `uv.lock`）で流す（docs/specifications/ndf-rebuild.md の決定 78）。
+リポジトリの根から `pytest .` で流したときは、根の環境にこのディレクトリの依存が無いため収集しない。
 
 テストの間にサブコマンドが出す結果 JSON は、すべて結果のコントラクト（形と、状態・停止理由と終了コードの対応）とサブコマンドの結果の
 スキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）で確かめる（fixture `_checked_emit`。#3518 の決定 9）。

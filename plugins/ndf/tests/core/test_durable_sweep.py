@@ -1,4 +1,4 @@
-"""キーごとのファイルの検査・退避・片付けと、待ちの一覧（SQLite。決定 82・83・86・I6・I8）。"""
+"""キーごとのファイルの検査・退避・片付けと、待ちの一覧（SQLite。docs/specifications/ndf-rebuild.md の決定 82・83・86・I6・I8）。"""
 
 from __future__ import annotations
 
