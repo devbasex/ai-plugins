@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -233,10 +234,18 @@ def shard_jobs(jobs: list[dict]) -> tuple[int, dict[int, dict]]:
     return total, by
 
 
+def _case_seconds(text: str | None) -> float:
+    """`testcase` の `time` を秒にする。無ければ 0。有限の非負の数でなければ `ValueError`。"""
+    seconds = float(text or 0)
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError(f"time={text!r} は有限の非負の秒でない")
+    return seconds
+
+
 def parse_junit(data: bytes) -> list[tuple[str, float]]:
-    """`testcase` ごとに、テストの id（`classname::name`）と秒を返す。壊れた XML は `ET.ParseError`。"""
+    """`testcase` ごとに、テストの id（`classname::name`）と秒を返す。壊れた XML は `ET.ParseError`、壊れた秒は `ValueError`。"""
     root = ET.fromstring(data)
-    return [(f"{c.get('classname', '')}::{c.get('name', '')}", float(c.get("time") or 0)) for c in root.iter("testcase")]
+    return [(f"{c.get('classname', '')}::{c.get('name', '')}", _case_seconds(c.get("time"))) for c in root.iter("testcase")]
 
 
 def read_parts(xml_dir: Path) -> dict[tuple[str, int], Part]:
@@ -259,7 +268,7 @@ def read_parts(xml_dir: Path) -> dict[tuple[str, int], Part]:
         for xml in xmls:
             try:
                 part.cases.extend(parse_junit(xml.read_bytes()))
-            except (OSError, ET.ParseError) as e:
+            except (OSError, ET.ParseError, ValueError) as e:
                 part.error = f"{xml.name} を読めない（{e}）"
                 break
         parts[(part.kind, part.index)] = part

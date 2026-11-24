@@ -164,6 +164,22 @@ def test_parse_junit() -> None:
         ctd.parse_junit(b"<testsuites><testcase")
 
 
+@pytest.mark.parametrize("value", ["abc", "nan", "inf", "-1"])
+def test_parse_junit_rejects_broken_seconds(value) -> None:
+    with pytest.raises(ValueError):
+        ctd.parse_junit(xml_of(("tests.test_a", "t", value)).encode())
+
+
+def test_read_parts_treats_broken_seconds_as_missing(tmp_path) -> None:
+    write_part(tmp_path, "root", 0, 1)
+    write_part(tmp_path, "ndf", 0, 1, xml=xml_of(("ndf.test_0", "t", "abc")))
+
+    parts = ctd.read_parts(tmp_path)
+
+    assert parts[("root", 0)].error is None and parts[("root", 0)].cases == [("root.test_0::t", 1.0)]
+    assert parts[("ndf", 0)].error and "abc" in parts[("ndf", 0)].error
+
+
 def test_read_parts(tmp_path) -> None:
     write_part(tmp_path, "root", 0, 2)
     write_part(tmp_path, "ndf", 0, None)

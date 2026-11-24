@@ -274,7 +274,7 @@ scripts/
 | `Gh.get`・`Gh.raw` | 認証できない・API の呼び出しの失敗・`CALL_TIMEOUT` を過ぎた | トークン切れ・権限不足・GitHub の障害 | 終了コードが 0 でない・`TimeoutExpired` | 呼び出し元へ返す（`GhError`。標準エラーの先頭の 1 行を持つ）。再試行しない | 呼び出し元の行のとおり | 再実行できる |
 | `Gh.get` | 応答が JSON でない | API の応答の変化 | `json.loads` | 呼び出し元へ返す（`GhError`） | 呼び出し元の行のとおり | 再実行できる |
 | `read_config` | 設定が無い・JSON でない・キーが無い・型が違う（`runs`・`top` が 1 以上の整数でない、`limit_seconds` が正の数でない） | 設定ファイルの誤り | `read_config` | 止める（`ConfigError`） | 標準エラーへファイルのパスと誤りを書き、`run`・`trend` とも 2 | 設定を直して再実行できる |
-| `read_parts` | XML が壊れている | 取得の途中で切れた・書き出しの途中で落ちた | `parse_junit` の `ET.ParseError` | 既定値で続ける（その部品の `error` に理由を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
+| `read_parts` | XML が壊れている、または `time` が有限の非負の数でない | 取得の途中で切れた・書き出しの途中で落ちた・計測値が壊れた | `parse_junit` の `ET.ParseError`・`ValueError` | 既定値で続ける（その部品の `error` に理由を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
 | `read_parts` | XML が 1 本も無い | pytest が XML を書く前に止まり、試行の番号のファイルだけが上がった | `read_parts`（`*.xml` の数が 0） | 既定値で続ける（その部品の `error` に「JUnit XML が無い」を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
 | `current_total` | ジョブの一覧が取れない | `GhError`・`GhUnavailable` | `current_total` | 既定値で続ける（無効な集計。`reason` は「ジョブの一覧を取れない」） | `::warning title=テストの所要の読み取り::` の行。終了コード 0 | 再実行で作り直せる |
 | `current_total` | 組がそろわない | 一部のジョブの成果物が無い・古い試行・落ちたジョブ・壊れた XML | `match_attempts` | 既定値で続ける（無効な集計。`reason` に欠けた番号・古い試行の番号・読めない XML を並べる） | `::warning title=テストの所要の読み取り::` に番号を書く。終了コード 0 | 再実行で作り直せる |
@@ -407,7 +407,7 @@ scripts/
 | --- | --- | --- | --- |
 | `read_config` | 3 つのキーを読む | `limit_seconds` に整数を書いても数として読む。`runs` が 1 でも通る | キーが無い・`runs` が 0・JSON でないと `ConfigError` |
 | `shard_jobs` | `pytest (0/6)`〜`pytest (5/6)` から総数 6 と 6 つのジョブを返す | `pytest (所要)` と `pytest (NDF の ok の出力)` を拾わない | 該当が無いと総数 0 |
-| `parse_junit` | `classname::name` と `time` の組を返す | `time` が無い項目は 0 秒 | 壊れた XML で `ET.ParseError` |
+| `parse_junit` | `classname::name` と `time` の組を返す | `time` が無い項目は 0 秒 | 壊れた XML で `ET.ParseError`。`time` が数でない・無限・NaN・負なら `ValueError` |
 | `read_parts` | 根と NDF のディレクトリを見分け、試行の番号を読む | `shard-attempt-<番号>.txt` が無いと `attempt` が `None` | 壊れた XML の部品は `error` を持つ。試行の番号のファイルだけがあり XML が無い部品も `error` を持つ |
 | `match_attempts` | 6 つとも試行が一致し成功なら `accepted` が 6 つ | 試行の番号が 1 つだけ違うジョブは `stale` に入る。`conclusion` が `failure` のジョブは `accepted` と `failed` の両方に入る | 根だけあって NDF が無いジョブは `missing`。NDF の部品が試行の番号のファイルだけを持ち、その番号が一覧の `run_attempt` と一致しても `missing` に入り、`accepted` に入らない |
 | `current_total` | 組がそろうと `valid` が真で、根・NDF・合計の秒を持つ | `shard_attempts` が番号 0〜5 の順に並ぶ | 試行の番号が違う・ジョブの一覧が取れない・XML が壊れている、のどれでも `valid` が偽、秒が `None`、`reason` を持ち、`--out` のファイルは書かれる |
