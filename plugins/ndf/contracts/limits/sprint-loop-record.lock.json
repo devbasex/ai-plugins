@@ -1,4 +1,7 @@
 {
   "summary": "開発ループの記録の排他を待つ上限",
-  "seconds": 60
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.loop.store"
+  ]
 }

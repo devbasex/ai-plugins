@@ -23,10 +23,6 @@ from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.project.strategy_measure import default_branch
 
-# リリース方式 → 足りないキーを埋める既定の行
-FILL_KIND = {"merge_base_branch": "web-develop", "release_branch": "mobile", "trunk": "web-trunk"}
-FILL_KIND_BY_FORM = {"package-plugin": "plugin", "document": "docs"}
-
 
 def _section_rel(pointer: str) -> str:
     return pointer[len("/" + bs.SECTION) :]
@@ -51,14 +47,16 @@ def _implied_strategy(declared: dict, default: Optional[str]) -> str:
     return "trunk" if base and base == production else "merge_base_branch"
 
 
-def _kind_for_form(form: Optional[str], default: str) -> str:
+def _kind_for_form(form: Optional[str], default: str, presets: dict) -> str:
     """リリースの形に対応する種類の行。表に無い形（無いときを含む）は `default`。"""
-    return FILL_KIND_BY_FORM[form] if form in FILL_KIND_BY_FORM else default
+    by_form = presets["fill_kinds"]["by_form"]
+    return by_form[form] if form in by_form else default
 
 
-def _fill_kind(rs: str, form: Optional[str]) -> str:
+def _fill_kind(rs: str, form: Optional[str], presets: dict) -> str:
     """足りないキーを埋める種類の行。trunk はリリースの形で選び、ほかはリリース方式で選ぶ。"""
-    return _kind_for_form(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
+    kind = presets["fill_kinds"]["by_release_strategy"][rs]
+    return _kind_for_form(form, kind, presets) if rs == "trunk" else kind
 
 
 def _fill_release(rel: dict, section: dict, form: Optional[str], kind: str, presets: dict, existing: dict) -> None:
@@ -69,7 +67,7 @@ def _fill_release(rel: dict, section: dict, form: Optional[str], kind: str, pres
     if files and rel["version_store"]["kind"] != "none":
         rel["version_store"]["files"] = files
     rel["cd"] = _cd_of(rel.get("deliveries"))
-    with_cd = presets["kinds"][_kind_for_form(form, kind)]["with_cd"]
+    with_cd = presets["kinds"][_kind_for_form(form, kind, presets)]["with_cd"]
     rel["tag"], rel["github_release"] = (with_cd["tag"], with_cd["github_release"]) if rel["cd"] else (None, False)
     if rel["version_store"]["kind"] == "none":
         rel["tag"], rel["github_release"] = None, False
@@ -92,7 +90,7 @@ def _fill(section: dict, presets: dict, existing: Optional[dict] = None, default
     declared = {**obj(existing.get("branches")), **obj(section.get("branches"))}
     rs = section.get("release_strategy") or existing.get("release_strategy") or _implied_strategy(declared, default)
     form = obj(section.get("release")).get("form") or obj(existing.get("release")).get("form")
-    kind = _fill_kind(rs, form)
+    kind = _fill_kind(rs, form, presets)
     out = copy.deepcopy(existing) if existing else copy.deepcopy(presets["kinds"][kind]["section"])
     out["release_strategy"] = rs
     out["kind"] = "custom"

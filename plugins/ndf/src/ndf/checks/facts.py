@@ -3,6 +3,10 @@
 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の設定から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
 ただし `shared_names` が真の表は、`id` が他の名前空間と共有する名前なので、定数との検証（`table-set`・`table-str`）から外す（形は確かめる）。
+
+手書きのスキーマの `enum`（`enum-set`・`enum-subset`）と、上限の設定の数（`limit-num`）の写しも重複に数える。上限の設定の数と比べるのは、
+名前が上限・回数・待ちを表す定数だけで、語と値のキーの対応は `rules.json` の `facts.limit_kinds`、定数のまま置く値と理由は
+`facts.limit_constants` が持つ。
 """
 
 from __future__ import annotations
@@ -11,7 +15,9 @@ import ast
 import json
 import re
 from collections import defaultdict
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -19,7 +25,8 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from ndf.checks.model import CheckError, Finding, Scope
+from ndf.checks.model import CheckError, Finding, Scope, Source, module_name, module_rel
+from ndf.contracts import limits
 from ndf.contracts.facts import FACTS_DIR, SCHEMA_FILE, TABLE_DIRS
 from ndf.contracts.facts import row_schema as contract_row_schema
 
@@ -56,6 +63,12 @@ def lit(node: ast.expr) -> object:
     return lit(node.args[0]) if is_set_call and len(node.args) == 1 else None
 
 
+def dict_values(node: ast.expr) -> frozenset[str] | None:
+    """辞書の定数の値の集まり。値がすべて文字列で、集まりが 2 つ以上のときだけ返す。"""
+    values = _strings(node.values) if isinstance(node, ast.Dict) else None
+    return values if values is not None and len(values) >= 2 else None
+
+
 def _targets(node: ast.stmt) -> list[ast.expr]:
     """文が値を代入する先。代入（`Assign`）と値のある注釈付きの代入（`AnnAssign`）のほかは空。"""
     if isinstance(node, ast.Assign):
@@ -66,12 +79,14 @@ def _targets(node: ast.stmt) -> list[ast.expr]:
 
 
 def consts(tree: ast.Module, rel: str) -> list[Const]:
-    """モジュールの最上位の大文字の定数のうち、`lit` が読めたもの。"""
+    """モジュールの最上位の大文字の定数のうち、`lit` が読めたもの。辞書の定数は、値の集まりを `<名前>.values` として足す。"""
     found = []
     for node in tree.body:
         names = [t.id for t in _targets(node) if isinstance(t, ast.Name) and CONST.match(t.id)]
-        value = lit(node.value) if names else None
-        found += [Const(rel, node.lineno, n, value) for n in names if value is not None]
+        if not names:
+            continue
+        read = (("", lit(node.value)), (".values", dict_values(node.value)))
+        found += [Const(rel, node.lineno, n + suffix, value) for n in names for suffix, value in read if value is not None]
     return found
 
 
@@ -228,8 +243,116 @@ def table_hits(all_consts: list[Const], machine_ids: dict[str, list[str]], min_s
     return found
 
 
+def _enums(node: Any, pointer: str) -> Iterator[tuple[str, frozenset[str]]]:
+    """スキーマの中の `enum` の JSON Pointer と文字列の集まり（2 つ以上）。"""
+    if isinstance(node, list):
+        for i, child in enumerate(node):
+            yield from _enums(child, f"{pointer}/{i}")
+    if not isinstance(node, dict):
+        return
+    enum = node.get("enum")
+    values = frozenset(v for v in enum if isinstance(v, str)) if isinstance(enum, list) else frozenset()
+    if len(values) >= 2:
+        yield pointer, values
+    for key, child in node.items():
+        yield from _enums(child, f"{pointer}/{key}")
+
+
+def _schemas(scope: Scope, contracts_dir: Path) -> Iterator[tuple[str, Source]]:
+    """見る範囲のうち `contracts_dir` の下のスキーマ（そこからの相対パスとファイル）。"""
+    for src in scope.sources:
+        if src.path.name.endswith(".schema.json") and src.path.is_relative_to(contracts_dir):
+            yield src.path.relative_to(contracts_dir).as_posix(), src
+
+
+def enum_sets(scope: Scope, contracts_dir: Path, generated: list[str]) -> dict[str, frozenset[str]]:
+    """手書きのスキーマの `enum` の集まり（`<スキーマ>#<JSON Pointer>` → 値）。`generated` の形のスキーマ（生成物）は除く。"""
+    found: dict[str, frozenset[str]] = {}
+    for rel, src in _schemas(scope, contracts_dir):
+        if not any(fnmatch(rel, pattern) for pattern in generated):
+            found.update({f"{rel}#{ptr}": values for ptr, values in _enums(src.contract("スキーマを読めない"), "")})
+    return found
+
+
+def _enum_dups(sets: list[Const], enums: Mapping[str, frozenset[str]]) -> list[Finding]:
+    """スキーマの `enum` と同じ集まり（`enum-set`）か、その一部（`enum-subset`）の定数。定数 1 つに 1 件。"""
+    found = []
+    for c in sets:
+        where = [k for k, values in enums.items() if c.value <= values]
+        if where:
+            kind = "enum-set" if any(c.value == enums[k] for k in where) else "enum-subset"
+            found.append(Finding("const-fact", c.rel, c.line, f"{kind}: {c.name} がスキーマの enum を写す（{'・'.join(where)}）"))
+    return found
+
+
+def limit_numbers(policies: Mapping[str, limits.Policy]) -> dict[tuple[str, float], list[str]]:
+    """上限の設定の値のキーと数 → その数を持つ方針の名前。"""
+    found: dict[tuple[str, float], list[str]] = defaultdict(list)
+    for name, policy in policies.items():
+        for key in limits.VALUE_KEYS:
+            if getattr(policy, key) is not None:
+                found[key, getattr(policy, key)].append(name)
+    return dict(found)
+
+
+def limit_constants(conf: dict[str, Any]) -> frozenset[str]:
+    """定数のまま置く値の名前（`facts.limit_constants`）。行の形が違うか理由が空なら `CheckError`。"""
+    for row in conf["limit_constants"]:
+        ok = set(row) == {"name", "kind", "reason"} and row["kind"] in ("external", "implementation") and row["reason"].strip()
+        if not ok:
+            raise CheckError(
+                f"facts.limit_constants の行の形が違う（name・kind（external か implementation）・空でない reason を書く）: {row}"
+            )
+    return frozenset(row["name"] for row in conf["limit_constants"])
+
+
+def _same_limits(c: Const, numbers: Mapping[tuple[str, float], list[str]], kinds: list[dict[str, list[str]]]) -> list[str]:
+    """定数の名前の語に対応する値のキーに、同じ数を持つ方針（`<方針>.<キー>`）。"""
+    keys = [key for row in kinds if any(word in c.name for word in row["words"]) for key in row["keys"]]
+    return [f"{name}.{key}" for key in dict.fromkeys(keys) if (key, c.value) in numbers for name in numbers[key, c.value]]
+
+
+def _limit_dups(
+    nums: Mapping[str, Const], numbers: Mapping[tuple[str, float], list[str]], conf: dict[str, Any], rules_rel: str
+) -> list[Finding]:
+    """上限の設定の数と同じで、名前が上限・回数・待ちを表す定数（`limit-num`）と、当たらなくなった除外の行（`stale`）。
+
+    `nums` は `<モジュール>.<定数>` → 数の定数。
+    """
+    allowed = limit_constants(conf)
+    hits = {full: same for full, c in nums.items() if (same := _same_limits(c, numbers, conf["limit_kinds"]))}
+    found = [
+        Finding(
+            "const-fact",
+            nums[full].rel,
+            nums[full].line,
+            f"limit-num: {nums[full].name} が上限の設定の数を写す（{'・'.join(same[:3])} など {len(same)} 件。方針でなければ facts.limit_constants に理由を書く）",
+        )
+        for full, same in hits.items()
+        if full not in allowed
+    ]
+    return found + [
+        Finding("const-fact", rules_rel, 1, f"stale: facts.limit_constants の {full} は上限の設定の数に当たる定数でない（行を消す）")
+        for full in sorted(allowed - set(hits))
+    ]
+
+
+def _contract_dups(scope: Scope, conf: dict[str, Any], by_source: Mapping[str, list[Const]]) -> list[Finding]:
+    """スキーマの `enum` と上限の設定の写し。上限の設定を持たないプラグインには `_limit_dups` を当てない。"""
+    contracts_dir = scope.plugin_root / conf["contracts_dir"]
+    sets = [c for cs in by_source.values() for c in cs if isinstance(c.value, frozenset)]
+    found = _enum_dups(sets, enum_sets(scope, contracts_dir, conf["generated_schemas"]))
+    if scope.limit_settings is None:
+        return found
+    nums = {f"{module}.{c.name}": c for module, cs in by_source.items() for c in cs if isinstance(c.value, (int, float))}
+    rules_rel = scope.rel(scope.plugin_root / module_rel(f"{__package__}.rules", ".json"))
+    return found + _limit_dups(nums, limit_numbers(scope.limit_settings.policies), conf, rules_rel)
+
+
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["facts"]
-    all_consts = [c for src in scope.code() for c in consts(src.tree, src.rel)]
+    by_source = {module_name(scope, src): consts(src.tree, src.rel) for src in scope.code()}
+    all_consts = [c for cs in by_source.values() for c in cs]
     machine_ids, found = tables(scope, conf["contracts_dir"])
-    return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, machine_ids, conf["min_str"])
+    found += groups(all_consts, conf["min_str"]) + table_hits(all_consts, machine_ids, conf["min_str"])
+    return found + _contract_dups(scope, conf, by_source)

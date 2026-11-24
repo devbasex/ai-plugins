@@ -1,4 +1,7 @@
 {
   "summary": "根の目印から指されない依存の環境を残す秒（7 日）。.last-used の更新時刻から数える（決定 89）",
-  "seconds": 604800
+  "seconds": 604800,
+  "read_by": [
+    "ndf.domains.hooks.env"
+  ]
 }

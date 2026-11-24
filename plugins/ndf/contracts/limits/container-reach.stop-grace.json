@@ -1,4 +1,0 @@
-{
-  "summary": "打ち切った起動の、SIGTERM から SIGKILL までの猶予",
-  "seconds": 5
-}

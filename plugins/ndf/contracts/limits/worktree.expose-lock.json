@@ -1,0 +1,7 @@
+{
+  "summary": "公開を開く・閉じる操作の排他を待つ上限の秒（開く手段の所要を含む）",
+  "seconds": 300,
+  "read_by": [
+    "ndf.domains.worktree.testenv_sweep"
+  ]
+}

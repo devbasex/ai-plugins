@@ -30,7 +30,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import cli, contracts
 from ndf.adapters import git
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.domains.project import check, measure_ci, measure_repo, secret, strategy_cli, write
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import STATUSES, obj, seq, unknown
@@ -138,8 +138,9 @@ def _measure(args: argparse.Namespace) -> int:
     out = Path(args.out).resolve()
     if out.is_relative_to(root):
         return result.emit(result.stopped(TOOL, "check_failed", f"--out はリポジトリの外（一時ディレクトリ）に置く: {out}"))
+    budget = args.budget if args.budget is not None else limits.seconds("project.measure")
     try:
-        data = secret.mask(measure_project(root, args.budget))  # 素材の README の冒頭・テストの scripts の値も伏せてから書く
+        data = secret.mask(measure_project(root, budget))  # 素材の README の冒頭・テストの scripts の値も伏せてから書く
     except (check.CheckError, jsonfile.JsonFileError) as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"測れない: {exc}"))
     try:
@@ -241,7 +242,7 @@ def _parser() -> argparse.ArgumentParser:
     c.set_defaults(handler=_check)
     m = sub.add_parser("measure", help="リポジトリと CI を測り、測定の結果を --out へ書く")
     m.add_argument("--out", required=True, help="測定の結果の保存先（リポジトリの外の一時ディレクトリ）")
-    m.add_argument("--budget", type=float, default=120.0, help="締め切りの秒（既定 120）")
+    m.add_argument("--budget", type=float, help="締め切りの秒（省けば上限の設定の project.measure）")
     m.add_argument("--root", default=".", help="リポジトリの作業場所")
     m.set_defaults(handler=_measure)
     w = sub.add_parser("write", help="測定の結果と回答から設定を書き出す")

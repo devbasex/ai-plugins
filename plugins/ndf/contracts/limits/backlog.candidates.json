@@ -1,0 +1,7 @@
+{
+  "summary": "ndf backlog candidates が集める候補の件数の上限の既定（--limit の既定）",
+  "count": 10,
+  "read_by": [
+    "ndf.domains.backlog.cli"
+  ]
+}

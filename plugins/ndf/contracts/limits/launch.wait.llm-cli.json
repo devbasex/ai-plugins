@@ -1,5 +1,8 @@
 {
   "summary": "LLM の CLI の起動が重い起動のスロットの空きとメモリの下限を待つ上限と、確かめる間隔。越えたら理由つきで止める",
   "seconds": 1800,
-  "interval": 2
+  "interval": 2,
+  "read_by": [
+    "ndf.adapters.launch_slot"
+  ]
 }

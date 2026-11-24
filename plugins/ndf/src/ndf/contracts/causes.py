@@ -143,9 +143,9 @@ def kind_of(value: object) -> Optional[str]:
 
 
 def unknown_kind_errors(kind: str, label: str) -> list[str]:
-    """種類 `kind` が停止理由の表に無いときの 1 行（`label` は誤りの文で種類を指す名前）。"""
+    """種類 `kind` が停止理由の表に無いときの 1 行（`label` は誤りの文で種類を指す名前）。種類の値は、秘密の値を含みうるので入れない。"""
     if not has(kind):
-        return [f"{label} {kind!r} は停止理由の表に無い"]
+        return [f"{label} が停止理由の表に無い"]
     return []
 
 

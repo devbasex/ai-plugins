@@ -1,0 +1,7 @@
+{
+  "summary": "上限を書かないプランの、打つステップの数の上限（ステップの数の倍）",
+  "count": 3,
+  "read_by": [
+    "ndf.core.plan.model"
+  ]
+}

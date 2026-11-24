@@ -1,0 +1,7 @@
+{
+  "summary": "保存先の退避で形の番号を読み直す回数の上限（決定 85 の手順の (5)）",
+  "attempts": 3,
+  "read_by": [
+    "ndf.core.durable"
+  ]
+}

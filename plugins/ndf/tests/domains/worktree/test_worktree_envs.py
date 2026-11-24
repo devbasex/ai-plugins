@@ -579,7 +579,7 @@ def test_expose_and_unexpose_wait_for_the_other(tmp_path: Path, monkeypatch: pyt
 
     t = _sweep_target(tmp_path, FakeShell(), EXPOSE)
     _assigned(t)
-    monkeypatch.setattr(testenv_sweep, "EXPOSE_LOCK_WAIT", 0)
+    monkeypatch.setattr(testenv_sweep, "expose_lock_seconds", lambda: 0)
     with FileLock(str(tmp_path / testenv_sweep.EXPOSE_LOCK)):
         for op in (testenv_sweep.expose, testenv_sweep.unexpose):
             with pytest.raises(testenv.TestenvError, match="別の公開操作"):

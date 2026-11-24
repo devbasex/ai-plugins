@@ -40,7 +40,7 @@ left as an argument and ignored.
 ```
 
 次の形で起動する（`timeout <秒>` で包む）。`--print-timeout` は
-工程の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
+`timeout` の値 + 120 秒（工程の上限 + 240 秒）、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
 使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `response` のキーから
 読む。
 
@@ -97,7 +97,7 @@ invalid value "900" for flag -print-timeout: time: missing unit in duration "900
 
 既定の 5 分は、収束ループの監視の上限（上限の表 [contracts/limits/](../../../contracts/limits/) の `monitor.phase.*`。レビュー・反証・提案は
 1200 秒、適用・修正は 3600 秒）より短い。**CLI が先に打ち切ると結果ファイルが残らず、起動できなかった
-場合と区別が付かない。** 工程の上限 + 120 秒（`monitor.cli-margin`）を渡す。
+場合と区別が付かない。** 外側の `timeout`（工程の上限 + 120 秒）が先に切れるように、その値 + 120 秒を渡す。
 
 ## 出力ストリーム
 

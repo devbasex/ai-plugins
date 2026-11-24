@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mvv-validation.schema.json",
+  "title": "MVV 判定の記録の 1 行",
+  "description": "MVV 判定の結論の行（表 ndf-files の mvv-validation）。書き手は ndf.domains.records.mvv",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "kind", "key", "verdict", "repo"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
+    "kind": {"type": "string", "description": "判定の種類"},
+    "key": {"type": "string", "description": "MVV 判定の入力の全体の sha256"},
+    "verdict": {"type": "string", "description": "判定の結論"},
+    "repo": {"type": "string", "description": "メインディレクトリの絶対パス"},
+    "reused_from": {"$ref": "common.schema.json#/$defs/time", "description": "再利用の元の判定を書いた時刻"},
+    "reasons": {"type": "array", "items": {"type": "string"}, "description": "判定の理由"},
+    "boundary": {"type": "array", "items": {"type": "string"}, "description": "当たるレッドライン"},
+    "basis": {"type": "array", "items": {"type": "string"}, "description": "根拠にした項目"},
+    "usd": {"type": ["number", "null"], "description": "判定の費用（USD）。取れなければ null"},
+    "seconds": {"type": ["number", "null"], "description": "判定の秒"}
+  }
+}

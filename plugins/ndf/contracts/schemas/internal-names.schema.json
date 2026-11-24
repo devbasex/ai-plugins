@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "internal-names.schema.json",
+  "title": "内部データの名前の対応表",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["names"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "summary": {"type": "string"},
+    "names": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["key", "aliases_removed", "where"], "properties": {"key": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "使う 1 つの名前"}, "aliases_removed": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"}, "description": "消した別名"}, "where": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"}, "minItems": 1, "description": "使ってよい内部データの種類"}}}}
+  }
+}

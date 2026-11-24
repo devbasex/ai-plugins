@@ -1,4 +1,0 @@
-{
-  "summary": "動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる）",
-  "seconds": 3600
-}

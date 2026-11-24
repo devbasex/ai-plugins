@@ -161,7 +161,7 @@ def _get(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def _close_plan(a: argparse.Namespace) -> dict[str, Any]:
-    paces = contracts.load_json(definition.CONTEXT)["properties"]["pace"]["enum"]
+    paces = [p for name in ("plain_pace", "mvv_pace") for p in contracts.schema_enum(definition.CONTEXT, f"/$defs/{name}")]
     facts = sprint_decide.CloseFacts(a.pace, tuple(a.route), a.mvv, a.record_pr, a.retrospective_due)
     plan = sprint_decide.close_plan(facts, paces)
     metrics = {"record_pr": plan.record_pr, "verify": plan.verify, "pace": plan.pace}
@@ -254,7 +254,13 @@ def _run(a: argparse.Namespace) -> dict[str, Any]:
     a.cwd = Path(os.path.realpath(a.cwd if a.cwd is not None else Path.cwd()))
     try:
         return a.handler(a)
-    except (select_decide.CandidateError, sprint_decide.SprintError, store.StoreError, acceptance_decide.AcceptanceError) as exc:
+    except (
+        select_decide.CandidateError,
+        sprint_decide.SprintError,
+        store.StoreError,
+        rec.RecordError,
+        acceptance_decide.AcceptanceError,
+    ) as exc:
         return result.stopped(TOOL, ctl.INVALID, str(exc))
     except Timeout as exc:
         return result.stopped(TOOL, "store_in_use", f"開発ループの記録の排他を取れない: {exc}")

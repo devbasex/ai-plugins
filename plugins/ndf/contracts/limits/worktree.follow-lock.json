@@ -1,0 +1,7 @@
+{
+  "summary": "セッションの開始でメインディレクトリの排他を待つ上限の秒（開始を長く止めない）",
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.worktree.follow"
+  ]
+}

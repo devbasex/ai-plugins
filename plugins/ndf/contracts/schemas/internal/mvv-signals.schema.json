@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mvv-signals.schema.json",
+  "title": "MVV の改訂の兆候の 1 行",
+  "description": "承認ゲートの回答から書く兆候の行（表 ndf-files の mvv-signals）。書き手は ndf.domains.records.mvv",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "kind", "mvv_version", "repo"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
+    "kind": {"type": "string", "description": "兆候の種類"},
+    "mvv_version": {"type": ["integer", "null"], "description": "回答したときの MVV の設定のバージョン（無ければ null）"},
+    "repo": {"type": "string", "description": "メインディレクトリの絶対パス"},
+    "state": {"type": ["string", "null"], "description": "スプリント状態の名前"},
+    "gate": {"type": ["string", "null"], "description": "承認ゲートの区分"},
+    "pr": {"type": ["integer", "null"], "description": "PR の番号"}
+  }
+}

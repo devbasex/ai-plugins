@@ -1,4 +1,8 @@
 {
   "summary": "cross-refactoring の実装の工程の監視の上限の下限。駆動が予算から導いた上限を --timeout で渡す",
-  "seconds": 3600
+  "seconds": 3600,
+  "read_by": [
+    "ndf.domains.crossrefactor.launch",
+    "ndf.progress.invoke"
+  ]
 }

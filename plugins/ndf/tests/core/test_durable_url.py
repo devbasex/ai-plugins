@@ -63,10 +63,10 @@ def test_launch_writes_the_key_to_the_runs_and_sweep_deletes_it_after_keep_days(
     assert name in _runs(pg_url)
     assert _ids(pg_url, "url-done") == {"wf-url-done"}
 
-    assert _sweep(pg_url, root, durable.KEEP_DAYS - 1).deleted == []
+    assert _sweep(pg_url, root, durable.keep_days() - 1).deleted == []
     assert _ids(pg_url, "url-done") == {"wf-url-done"}
 
-    result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
+    result = _sweep(pg_url, root, durable.keep_days() + 1)
     assert "wf-url-done" in result.deleted
     assert _ids(pg_url, "url-done") == set()
     assert name not in _runs(pg_url)
@@ -77,7 +77,7 @@ def test_key_with_a_pending_child_is_kept_whole(pg_url, root):  # noqa: F811
     _run(root, "url-child", "child-wait", pg_url)
     assert _ids(pg_url, "url-child") == {"wf-url-child", "wf-url-child-child"}
 
-    result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
+    result = _sweep(pg_url, root, durable.keep_days() + 1)
     assert not {"wf-url-child", "wf-url-child-child"} & set(result.deleted)
     assert _ids(pg_url, "url-child") == {"wf-url-child", "wf-url-child-child"}
     assert durable.run_name("url-child") in _runs(pg_url)
@@ -91,7 +91,7 @@ def test_sweep_leaves_runs_of_applications_not_in_the_runs(pg_url, root):  # noq
     with _engine(pg_url) as engine, engine.begin() as conn:
         conn.execute(sa.text(f"DELETE FROM {durable.RUNS_TABLE} WHERE run_name = :n"), {"n": durable.run_name("url-other")})
 
-    _sweep(pg_url, root, durable.KEEP_DAYS + 1)
+    _sweep(pg_url, root, durable.keep_days() + 1)
     assert _ids(pg_url, "url-other") == {"wf-url-other"}
 
 
@@ -102,12 +102,12 @@ def test_sweep_leaves_a_key_whose_lock_is_held(pg_url, root):  # noqa: F811
 
     with durable.run_lock(root, "url-held", pg_url) as held:
         assert held is not None
-        result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
+        result = _sweep(pg_url, root, durable.keep_days() + 1)
         assert result.busy >= 1
         assert _ids(pg_url, "url-held") == {"wf-url-held"}
         assert durable.run_name("url-held") in _runs(pg_url)
 
-    _sweep(pg_url, root, durable.KEEP_DAYS + 1)
+    _sweep(pg_url, root, durable.keep_days() + 1)
     assert _ids(pg_url, "url-held") == set()
 
 
@@ -130,7 +130,7 @@ def test_url_sweep_runs_once_a_day(pg_url, root):  # noqa: F811
 
 def test_waiting_run_lock_times_out_with_the_owner(pg_url, root, monkeypatch):  # noqa: F811
     """待つキーのロックは上限で止まり、オーナー（接続の application_name のホストと pid）を添える（B11）。"""
-    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.3)
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 0.3)
     with durable.run_lock(root, "busy", pg_url):
         with pytest.raises(durable.StoreInUse) as err, durable.run_lock(root, "busy", pg_url):
             pass

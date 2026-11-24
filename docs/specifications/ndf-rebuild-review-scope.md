@@ -53,7 +53,7 @@
 
 | #3395 の設計のうち 11.x にしたもの | 今の姿 |
 | --- | --- |
-| 振り分け表と子の表のコピーを突き合わせる検査（項目 3395-2） | 無い。`plugins/ndf/src/ndf/checks/children.json` は `summary`・`children`・`tables` だけを持つ |
+| 設計レビューの指摘の一覧（振り分け表）と、作り直しの作業（子）の一覧 `children.json` を比べる検査（指摘の番号は 3395-2） | 11.0.0 の後に作った。`ndf check --write-spec` が振り分け表から `plugins/ndf/src/ndf/checks/children.json` の `review_items` を生成し、規則 `review-items` が、表との違いと対応先の無い項目を見つけて落とす（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)） |
 | テストの数と CI の所要の予算を縛る検査（3395-10） | 無い（「テストと CI の予算」） |
 | lock にある部品への置き換え（3395-9） | 新しく書く箇所は lock の部品を使い、残った自作は「ロックと打ち直しの部品」の表にある |
 
@@ -159,7 +159,7 @@ done
 項目ごとに行き先の子・順番・新設か追補か・要求の行・版を 1 行で持ち、抜き出しのコマンドの出力（182 件）と表の 1 列目を突き合わせて漏れを 0 件にした。行き先は各子の Issue の本文の受け入れ条件へ写し、11.x の行は #3388 へ移した。
 
 - 採らなかった案: 項目を分類ごとの Issue の本文に残し、子の本文から指す。項目と子の対応が 2 か所に分かれ、どちらが正か決まらない
-- 採らなかった案: 子の表のコピー `children.json` に項目を生成して置き、規則 `review-items` で表と本文を突き合わせる（#3395 の初めの形）。11.x へ回し（決定 123）、今のコピーは項目を持たない
+- 11.0.0 の後に足した検査: 振り分け表の項目を子の表のコピー `children.json` に生成し、規則 `review-items` で表と比べる（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)）。要旨のハッシュ（`text_sha`）は、Issue の本文ではなく表の要旨から計算する
 
 ### 決定 110: 閉じた子の範囲を閉じたまま追えるよう、閉じた子への作業は追補の単位にする
 
@@ -187,10 +187,10 @@ done
 
 ### 決定 115: 要求と実装の食い違いを実装の決定に沿って解くため、行数の上限と Python の下限は要求を書き換える
 
-ファイルの行数の上限は `checks/rules.json` の `structure.max_lines` の 1,000 で（[ndf-rebuild.md](ndf-rebuild.md) の I22）、Python の下限は `plugins/ndf/pyproject.toml` の `requires-python = ">=3.11"` である。Python 3.10 は 2026-10-01 に保守を終えた（PEP 619）。AI が陥りやすい作りの種類 6（コピーで生まれた重複）は検査で落とさない（[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) の決定 44）。
+ファイルの行数の上限は `checks/rules.json` の `structure.max_lines` の 1,000 で（[ndf-rebuild.md](ndf-rebuild.md) の I22）、Python の下限は `plugins/ndf/pyproject.toml` の `requires-python = ">=3.11"` である。Python 3.10 は 2026-10-01 に保守を終えた（PEP 619）。AI が陥りやすい作りの種類 6（コピーで生まれた重複）は、件数が保存した基準と違う変更を規則 `copy-dup` が落とす（[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md) の決定 44）。
 
 - 採らなかった案: Python の下限を 3.10 へ戻す。保守の終わった版のために、filelock の脆弱性の 14 件（#3380）を抱えることになる
-- 採らなかった案: 種類 6 の規則を `rules.json` に足す（#3395 の初めの形）。11.x の範囲で、今の `smells` は種類 2・3・4・5・7 の 14 規則を持つ
+- `rules.json` の `smells` は種類 2・3・4・5・7 の 14 規則を持つ。種類 6 は `smells` ではなく `copy_dup` に置き、件数を保存した基準と比べる
 
 ### 決定 116: 要求の全行を作り直しの設計と矛盾させないため、食い違う 13 か所と構造の条件 3 か所を #1142 の本文で書き換える
 
@@ -284,6 +284,6 @@ S1a #3303 は本文を移し、スクリプトのパスとコマンドを `bin/n
 
 ## 関連リンク
 
-- [ndf-rebuild.md](ndf-rebuild.md)（作り直しの索引・子の記号・番号の対応表）・[ndf-rebuild-measure.md](ndf-rebuild-measure.md)（目的の物差し）・[ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md)（選択の記録）・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)（外部ライブラリと依存の宣言）・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)（決定 44: 種類 6）
+- [ndf-rebuild.md](ndf-rebuild.md)（作り直しの索引・子の記号・番号の対応表）・[ndf-rebuild-measure.md](ndf-rebuild-measure.md)（目的の物差し）・[ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md)（選択の記録）・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)（外部ライブラリと依存の宣言）・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)（決定 44: 種類 6）・[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)（規則 `review-items`・`copy-dup`）
 - [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)・[NDF のリリースの用語集](../glossary/ndf-release.md)・`scripts/ndf-next-parity/README.md`（機能の対応表の行と書き換えてよい場合）
 - [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3395](https://github.com/devbasex/ai-plugins/issues/3395)（設計レビューの全項目の行き先と範囲）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3370](https://github.com/devbasex/ai-plugins/issues/3370)（依存の更新）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）

@@ -1,4 +1,9 @@
 {
   "summary": "ラッパーが子を強制終了した後、子の終わりを確かめるまで待つ上限。終わらなければ次の子を起動せずに止める（#3814）",
-  "seconds": 5
+  "seconds": 5,
+  "read_by": [
+    "ndf.domains.relay.launch_target",
+    "ndf.domains.relay.wrapper_launch",
+    "ndf.domains.relay.wrapper_stop"
+  ]
 }

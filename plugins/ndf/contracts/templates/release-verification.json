@@ -1,7 +1,7 @@
 {
   "template": "release-verification",
   "purpose": "release_verification",
-  "summary": "リリース後テスト: worker が出したバージョン（入力の version）を実際に使って受け入れ条件を確かめる",
+  "summary": "リリース後テスト: worker が出したバージョン（入力の product_version）を実際に使って受け入れ条件を確かめる",
   "params": ["repo", "worker"],
   "plan": {
     "name": "release-verification",

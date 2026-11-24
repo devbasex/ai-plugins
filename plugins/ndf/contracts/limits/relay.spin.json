@@ -1,5 +1,8 @@
 {
   "summary": "再起動ループの検出。起動から seconds 秒未満で次のセグメントへ移ったセグメントが count 続いたら次のセグメントを起動しない（NDF_RELAY_SPIN で秒を替え、0 で切る。#3864）",
   "count": 3,
-  "seconds": 120
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.relay.hub"
+  ]
 }

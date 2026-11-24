@@ -4,6 +4,8 @@
   "title": "工程の定義の metadata.ndf",
   "description": "モードの文書・工程の文書・工程の中のステップが metadata.ndf に書ける語（閉じた語彙）。知らない語は断る。inputs・optional_inputs・outputs のキーがスプリントの文脈のスキーマ（context.schema.json）にあることは、読み手（ndf.progress.definition）が確かめる",
   "$defs": {
+    "diff_word": {"enum": ["code_in_diff", "docs_only_diff", "behavior_docs_in_diff"], "description": "スプリントの差分の種類を問う条件の語"},
+    "checked_kind": {"enum": ["review", "test"], "description": "範囲を差分に限るステップの種類"},
     "mode": {
       "type": "object",
       "additionalProperties": false,
@@ -22,7 +24,7 @@
         "when": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"enum": ["code_in_diff", "code_in_unreviewed_diff", "docs_only_diff", "behavior_docs_in_diff", "ci_declared", "prod_branch", "release_record", "retro_enabled", "design_pr"]},
+          "items": {"anyOf": [{"$ref": "#/$defs/diff_word"}, {"enum": ["code_in_unreviewed_diff", "ci_declared", "prod_branch", "release_record", "retro_enabled", "design_pr"]}]},
           "description": "すべてが真のときだけ工程を流す条件。偽の語があれば、最初の偽の語を理由に無効にする。code_in_unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）にコードのファイルがあるか（gathered が無ければ真）"
         },
         "per_issue": {"const": true, "description": "進め方 fast で、課題ごとの子の行にする工程"},
@@ -36,7 +38,7 @@
       "additionalProperties": false,
       "required": ["kind", "range"],
       "properties": {
-        "kind": {"enum": ["review", "test", "release", "verify", "merge", "work", "gate", "record"], "description": "順序の決まりの対象を決める種類。verify はリリースしたバージョンを確かめるステップで、マージの前の検査（review・test）と分ける"},
+        "kind": {"anyOf": [{"$ref": "#/$defs/checked_kind"}, {"enum": ["release", "verify", "merge", "work", "gate", "record"]}], "description": "順序の決まりの対象を決める種類。verify はリリースしたバージョンを確かめるステップで、マージの前の検査（review・test）と分ける"},
         "range": {"enum": ["sprint_diff", "issue_diff", "unreviewed_diff", "released", "lane", "none"], "description": "ステップの入力の範囲。review と test は sprint_diff・issue_diff・unreviewed_diff のどれか、verify は released だけ。unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）で、sprint_diff の一部として同じリリースで届く"},
         "subject": {"enum": ["code", "docs", "design"], "description": "レビューの対象。kind が review のときだけ書く"},
         "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate のときだけ書く。語の表示は progress.json の gates が持つ"},

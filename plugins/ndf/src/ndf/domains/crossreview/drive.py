@@ -59,8 +59,8 @@ from ndf.testing import declared, scoped
 
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
-# ラウンドの上限の既定
-DEFAULT_MAX_ROUNDS = 3
+# ラウンドの上限の既定の方針（contracts/limits/）
+MAX_ROUNDS = "cross-review.max-rounds"
 # ラウンドの判定（指摘が無くなったラウンドは finish_decide.CONVERGED）
 CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 # 修正担当に許す Tool
@@ -113,7 +113,7 @@ class RunConfig:
     state_dir: Path
     every_section: bool
     reviewers: tuple[str, ...]
-    max_rounds: int = DEFAULT_MAX_ROUNDS
+    max_rounds: int = field(default_factory=lambda: int(limits.value(MAX_ROUNDS, "count")))
     handed: tuple[fin.Handed, ...] = ()
     fixer: str = participants.FIXER
     # 実行者のメインディレクトリと、そこから同期の前に読んだレビューの設定（認可と同じ解決を使う。PR 3944 の r4-1・r4-4）

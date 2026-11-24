@@ -1,4 +1,7 @@
 {
   "summary": "レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く（#2999 の決定 4）",
-  "seconds": 10
+  "seconds": 10,
+  "read_by": [
+    "ndf.progress.lane.machine"
+  ]
 }

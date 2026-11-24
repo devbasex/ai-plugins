@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from ndf.contracts import internal
 from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import lap_decide
 from ndf.domains.loop import record_decide as rec
@@ -250,7 +251,7 @@ def test_candidates_reject_bad_rows() -> None:
     assert sel.rows_of([{"issue": 2, "needs": [3]}]) == [sel.Row(2, needs=(3,))]
 
 
-# --- 現状固定: 周に付く事象の当て方（record_decide._with_lap / _lap / _apply_lap） ---
+# --- 現状固定: 周に付く事象の当て方（record_decide._changed_lap / _apply_lap） ---
 
 
 def _two_laps() -> rec.LoopState:
@@ -272,7 +273,7 @@ def _two_laps() -> rec.LoopState:
         # 重複は記録済みの番号とだけ比べ、同じ事象の中の重複は残す（今の振る舞い）
         (rec.event(rec.ISSUES_CREATED, 5, lap=2, issues=["9", 9, 8]), {"created": (9, 9, 8)}),
         (rec.event(rec.GATE_SHOWN, 5, lap=2, pr="77", head="h1"), {"gates": ((77, "h1"),)}),
-        (rec.event(rec.VERSION_SHIPPED, 5, lap=2, version=1), {"released": ("1",)}),
+        (rec.event(rec.VERSION_SHIPPED, 5, lap=2, product_version=1), {"released": ("1",)}),
         (rec.event(rec.LAP_CLOSED, 5, lap=2, outcome=rec.FAILED, reason="ci"), {"outcome": rec.FAILED, "reason": "ci"}),
     ],
 )
@@ -288,7 +289,7 @@ def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str
 
 def test_answer_event_is_appended_with_typed_fields() -> None:
     before = _two_laps()
-    after = rec.apply(before, rec.event(rec.GATE_ANSWERED, "6", lap="2", pr="77", answer="request_changes", head=None, note="n"))
+    after = rec.apply(before, rec.event(rec.GATE_ANSWERED, 6, lap="2", pr="77", answer="request_changes", head=None, note="n"))
     assert after.laps[1].answers == (rec.Answer(77, "request_changes", None, "n", 6.0),)
     assert after.laps[0].answers == ()
 
@@ -301,8 +302,8 @@ def test_lap_events_accumulate_in_order() -> None:
         rec.event(rec.ISSUES_CREATED, 6, lap=2, issues=[10, 11]),
         rec.event(rec.GATE_SHOWN, 7, lap=2, pr=77, head="h1"),
         rec.event(rec.GATE_SHOWN, 8, lap=2, pr=77, head="h2"),
-        rec.event(rec.VERSION_SHIPPED, 9, lap=2, version="1.0.0"),
-        rec.event(rec.VERSION_SHIPPED, 9, lap=2, version="1.0.0"),
+        rec.event(rec.VERSION_SHIPPED, 9, lap=2, product_version="1.0.0"),
+        rec.event(rec.VERSION_SHIPPED, 9, lap=2, product_version="1.0.0"),
         rec.event(rec.ISSUE_EXCLUDED, 10, lap=2, issue=2, reason="x"),
     ):
         state = rec.apply(state, ev)
@@ -316,7 +317,7 @@ def test_lap_events_accumulate_in_order() -> None:
 
 def test_closed_lap_still_accepts_lap_events() -> None:
     """締めた周への事象も断らずに当てる（今の振る舞い）。"""
-    after = rec.apply(_two_laps(), rec.event(rec.VERSION_SHIPPED, 5, lap=1, version="0.9"))
+    after = rec.apply(_two_laps(), rec.event(rec.VERSION_SHIPPED, 5, lap=1, product_version="0.9"))
     assert after.laps[0].released == ("0.9",) and after.laps[0].outcome == rec.DONE
 
 
@@ -328,7 +329,7 @@ def test_closed_lap_still_accepts_lap_events() -> None:
         rec.event(rec.ISSUES_CREATED, 5, lap=3, issues=[1]),
         rec.event(rec.GATE_SHOWN, 5, lap=3, pr=1, head="h"),
         rec.event(rec.GATE_ANSWERED, 5, lap=3, pr=1, answer="approved", head="h", note=""),
-        rec.event(rec.VERSION_SHIPPED, 5, lap=3, version="1"),
+        rec.event(rec.VERSION_SHIPPED, 5, lap=3, product_version="1"),
         rec.event(rec.LAP_CLOSED, 5, lap=3, outcome=rec.DONE, reason=""),
     ],
 )
@@ -360,8 +361,8 @@ def test_close_lap_events_order_and_fields() -> None:
     d = ctl.close_lap(state, _ctx(now=40.0), lap_decide.LapFacts(released=("1.0", "2.0", "2.0", "3.0")), TTL)
     assert not d.refused
     assert _kinds(d) == [rec.VERSION_SHIPPED, rec.VERSION_SHIPPED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
-    assert [ev.get("version") for ev in d.events[:2]] == ["2.0", "3.0"]
-    assert all(ev["at"] == 40.0 for ev in d.events)
+    assert [ev["product_version"] for ev in d.events[:2]] == ["2.0", "3.0"]
+    assert all(ev["at"] == internal.stamp(40.0) for ev in d.events)
     assert all(ev["lap"] == 1 for ev in d.events[:3])
     closed = d.events[2]
     assert closed["outcome"] == rec.DONE and closed["reason"] == "バージョンをリリースした（1.0・2.0・3.0）"

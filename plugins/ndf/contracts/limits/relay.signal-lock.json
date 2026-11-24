@@ -1,4 +1,7 @@
 {
   "summary": "シグナルファイル（次のセグメントのマーカー・質問）の排他を待つ上限。hook の締め切りの中に収める",
-  "seconds": 0.3
+  "seconds": 0.3,
+  "read_by": [
+    "ndf.domains.relay.accounts"
+  ]
 }

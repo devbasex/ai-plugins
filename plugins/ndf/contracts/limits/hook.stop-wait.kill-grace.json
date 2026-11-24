@@ -1,0 +1,7 @@
+{
+  "summary": "stop-wait の判定の組へ SIGTERM を送った後、SIGKILL までに待つ秒（#4000）",
+  "seconds": 0.2,
+  "read_by": [
+    "ndf.domains.hooks.reply_judge"
+  ]
+}

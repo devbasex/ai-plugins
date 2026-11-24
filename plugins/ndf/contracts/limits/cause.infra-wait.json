@@ -3,5 +3,8 @@
   "attempts": 3,
   "interval": 600,
   "factor": 2,
-  "max_interval": 3600
+  "max_interval": 3600,
+  "read_by": [
+    "ndf.contracts.causes"
+  ]
 }

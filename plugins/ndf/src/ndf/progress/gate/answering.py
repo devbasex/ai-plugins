@@ -292,10 +292,8 @@ def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.Eve
     """待ちへ戻した回答が外した課題を、今のスプリントの文脈の `issues` へ戻す事象（回答の前の値。`_dropped` の逆）。"""
     if not run.payload_of(answered).get("dropped"):
         return []
-    before = dict(v.doc["context"])
-    for ev in v.events:
-        if ev.seq < answered.seq and ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == v.rev:
-            before.update(run.payload_of(ev)["outputs"])
+    earlier = [ev for ev in v.events if ev.seq < answered.seq]
+    before = stages.compose_context(v.doc["context"], stages.recorded_outputs(earlier, v.rev))
     payload = {"outputs": {"issues": before["issues"]}}
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, stage, payload=payload, rev=v.rev)]
 

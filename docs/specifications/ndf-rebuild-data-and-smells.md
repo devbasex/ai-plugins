@@ -133,8 +133,12 @@ hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しな�
 | `member` | 文字列が別のファイルの集まりの要素 |
 | `table-set` | 事実の表の `id` を 2 つ以上含む集まり |
 | `table-str` | 事実の表の `id` に等しい 4 字以上の文字列 |
+| `enum-set` | 手書きのスキーマの `enum`（2 つ以上の値）と同じ集まり。生成されるスキーマ（`rules.json` の `facts.generated_schemas`）とは比べない |
+| `enum-subset` | 手書きのスキーマの `enum` の一部の集まり |
+| `limit-num` | 名前が上限・回数・待ちを表し（`facts.limit_kinds` の語）、その語に対応する値のキーの数が上限の設定にある定数。定数のまま置く値は `facts.limit_constants` に理由つきで載せる |
+| `stale` | `facts.limit_constants` の行の定数が無いか、上限の設定の数に当たらない |
 
-- 定数として読むのは、文字列・数・文字列だけの集まり（tuple・list・set・dict の鍵・`set(...)` などの呼び出し）である
+- 定数として読むのは、文字列・数・文字列だけの集まり（tuple・list・set・dict の鍵・`set(...)` などの呼び出し）である。dict は値の集まりも `<名前>.values` として読む
 - `shared_names` が真の表（`id` が他の名前空間と共有する名前。`ndf-files`・`release-forms`・`skill-io`）は、`table-set`・`table-str` の照合から外し、形だけを確かめる
 - 重複は基準に残さない。片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）
 
@@ -159,7 +163,7 @@ hook の経路は `ndf.contracts`（`jsonschema` を読む）を import しな�
 | 7 | `PLR0913` | 引数が 6 を超える関数（`self`・`cls` を数えない） | ruff | 受けない |
 
 種類の番号は要求の 7 種類である（1 定数の重複・2 ループの中の外部呼び出し・3 分岐の多用・4 例外の握りつぶし・5 フォールバックの多用・
-6 コピーで生まれた重複・7 長い関数と多い引数）。種類 1 は事実の重複の規則が見る。種類 6 は検査で落とさない（決定 44）。
+6 コピーで生まれた重複・7 長い関数と多い引数）。種類 1 は規則 `const-fact`（「事実の重複の規則」）が、種類 6 は規則 `copy-dup` が見る（決定 44）。
 
 ruff は見るファイルすべてへ 1 回だけ、`--isolated --no-cache --ignore-noqa --output-format=json --preview --select=<ruff の規則>` と
 `rules.json` の `ruff.config` のしきい値で起動する。ruff が `except` の兆候を型の式の行へ置いても、構文木の `except` の行へ揃えてから
@@ -333,15 +337,15 @@ pylint の `R0801` でコピーの重複を見る（依存が増える）。
 
 代償: 検査の規則を変える Pull Request は、そのとき動いているすべての子のコードに当たる。
 
-### 決定 44: 同じ検査を 2 つ作らないため、種類 1 は事実の重複の規則で見て、種類 6 は検査で落とさない
+### 決定 44: 同じ検査を 2 つ作らないため、種類 1 は規則 `const-fact` で、種類 6 は規則 `copy-dup` で見る
 
 種類 1（定数の重複）は同じ `ndf check` の `const-fact` が見る。兆候の規則でも数えると、同じ違反が 2 つの規則で落ちる。
-種類 6（コピーで生まれた重複）のうち 4 つ以上のファイルに出る文字列は、大半が `argparse` の説明と案内の文で、同じ事実は種類 1 が定数として拾う。
-種類 6 は `scripts/measure/ai-smells.py` で前後を比べるだけにする。
+種類 6（コピーで生まれた重複）は、今のコードに残っていて 0 件にできない。件数が保存した基準と違う変更を落とす。増えたら重複を減らし、
+減ったら `ndf check --write-spec` で基準を下げると通る（ラチェット。数え方と理由は [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)）。`scripts/measure/ai-smells.py` は、作り直しの前後の比較に使う。
 
 採らなかった案: 兆候の検査で 7 種類すべてを数える（上の重なりを生む）。
 
-代償: 2 つ以上のファイルの同じ本体の関数は CI で落ちない。
+代償: 2 つ以上のファイルに同じ本体の関数があっても、名前が違えば CI で落ちない。
 
 ### 決定 45: 事実を文字列で書く場所を 1 つにするため、2 つ以上のモジュールか言語が読む事実は事実の表に、1 つのモジュールだけが読む事実は持ち主のモジュールの定数に置く
 
@@ -452,3 +456,4 @@ hook の表（`contracts/limits/`・`contracts/hooks/*.json`）を標準ライ�
 - `plugins/ndf/src/ndf/checks/rules.json`・`plugins/ndf/contracts/facts/fact.schema.json`: 規則のデータと表の共通の形
 - [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md): Skill の入出力・起動スクリプト・手書きの引数の表
 - [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md): 上限の設定（`contracts/limits/`）
+- [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md): 使われない上限・コントラクトと同じ値を持つ定数・コピーで増えた重複の検査

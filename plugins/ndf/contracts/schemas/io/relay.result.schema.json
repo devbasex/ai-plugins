@@ -43,7 +43,11 @@
         },
         "skipped": {
           "type": "integer",
-          "description": "読めずに飛ばした判定の記録の行の数（context report）"
+          "description": "読めずに飛ばした判定の記録の行の数（context calibrate・report）"
+        },
+        "usage_skipped": {
+          "type": "integer",
+          "description": "読めずに飛ばした使用量ログの行の数（context report）"
         },
         "accounts": {
           "type": "integer",
@@ -216,10 +220,6 @@
           "sources": {
             "type": "object",
             "description": "値ごとの出所（context resolve・record）"
-          },
-          "schema": {
-            "type": "integer",
-            "description": "判定の記録の行のバージョン（context record）"
           },
           "at": {
             "type": "string",
