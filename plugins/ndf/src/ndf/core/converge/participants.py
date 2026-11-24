@@ -221,6 +221,11 @@ def _review_args(row: dict[str, Any], worktree: Path) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _review_limit(timeout: Optional[float]) -> float:
+    """監視の上限。`timeout` を省けば相手役の監視の上限（`REVIEW_TIMEOUT`）。"""
+    return timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
+
+
 def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: Optional[float] = None) -> agents.Launch:
     """相手役 `agent` の読むだけの 1 回の起動。出力は `stem` の名前のファイルへ書く。"""
     row = facts.row(RUNTIMES, agent)
@@ -235,8 +240,7 @@ def read_only_launch(
     """`READ_TOOLS` だけを許した、会話を残さない最小構成の `claude -p` の 1 回の起動（修正担当とは別のプロセスと会話）。
     `readable` を渡すと、読める場所を `workdir` とそれらだけに限る（#3955）。`timeout` を省けば相手役の監視の上限。"""
     call = claude.ClaudeCall(system=system, permission=claude.Permission.TOOLS, tools=READ_TOOLS, readable=tuple(readable))
-    limit = timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
-    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), limit)
+    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), _review_limit(timeout))
 
 
 def reading_launch(
