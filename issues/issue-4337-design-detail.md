@@ -76,11 +76,11 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `DESIGN_FILE` | `src/ndf/core/issue_docs.py` | 新設（`design_tests.py` の 30 行から移す） | `re.Pattern[str]`、値は `^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$` | 設計書のパスの形を 1 か所で持つ |
+| `DESIGN_FILE` | `src/ndf/core/issue_docs.py` | 新設（`design_tests.py` の 30 行目から移す） | `re.Pattern[str]`、値は `^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$` | 設計書のパスの形を 1 か所で持つ |
 | `design_issues` | `src/ndf/core/issue_docs.py` | 新設 | `(path: str) -> frozenset[int]` | パスが設計書の形なら名前の番号の並びを整数の集合で、違えば空集合を返す |
 | `_designs` | `src/ndf/domains/loop/design_tests.py` | 変更（シグネチャは変えない） | 今のまま | 内包の条件を `want & issue_docs.design_issues(r)` に替え、モジュールの `DESIGN_FILE` を消す |
 
-`domains/materials/collect.py` の 25 行にも同じ名前の正規表現があるが、番号 1 つだけを受ける別の形で、設計書の触るファイルに含まないので変えない。
+`domains/materials/collect.py` の 25 行目にも同じ名前の正規表現があるが、番号 1 つだけを受ける別の形で、設計書の触るファイルに含まないので変えない。
 
 ### 単体テストの観点
 
@@ -149,10 +149,10 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `fill` のマージ先 | `route.default_base(repo)` | `core/route/__init__.py` の 530 行を読んだ | 使えない。ファイルを読み直し、`RouteError` の文に理由を埋めてしまう。読み込み済みの `project` を渡す `branch_strategy.of_project` を使う（`refactor_values._default_launch` と同じ） |
-| `fill` のリモート | `route._remote_of_repo`・`Git.remote()` | 同ファイルの 566 行、`adapters/git.py` の 361 行を読んだ | `Git.remote()` を使う。`_remote_of_repo` は非公開で、`RouteError` に包んで理由の型を失う |
+| `fill` のマージ先 | `route.default_base(repo)` | `core/route/__init__.py` の 530 行目を読んだ | 使えない。ファイルを読み直し、`RouteError` の文に理由を埋めてしまう。読み込み済みの `project` を渡す `branch_strategy.of_project` を使う（`refactor_values._default_launch` と同じ） |
+| `fill` のリモート | `route._remote_of_repo`・`Git.remote()` | 同ファイルの 566 行目、`adapters/git.py` の 361 行目を読んだ | `Git.remote()` を使う。`_remote_of_repo` は非公開で、`RouteError` に包んで理由の型を失う |
 | `launch` | `route.review_launch`・`route.refactor_launch` | `grep -n "def .*_launch" core/route/__init__.py` | 使えない（コマンドが違う）。語の先頭を `identity.FIXED_WORDS["entrypoint"]` で取る形だけをそろえる |
-| `Undecided` | `route.RouteError` | 同ファイルの 131 行 | 使えない。例外にすると `invoke` の側で文から設定のキーを切り出すことになる（決定 7 の採らなかった案） |
+| `Undecided` | `route.RouteError` | 同ファイルの 131 行目 | 使えない。例外にすると `invoke` の側で文から設定のキーを切り出すことになる（決定 7 の採らなかった案） |
 
 ### 単体テストの観点
 
@@ -361,19 +361,19 @@ plugins/ndf/
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `drive` | 起点の参照の名前・候補と対象の数・worker の終わりの `status` | `logging` の `info`（`log.info(…, extra=…)`。`core/worker.py` の 717 行と同じ形） | 起動指示の本文・文書の本文 |
+| `drive` | 起点の参照の名前・候補と対象の数・worker の終わりの `status` | `logging` の `info`（`log.info(…, extra=…)`。`core/worker.py` の 717 行目と同じ形） | 起動指示の本文・文書の本文 |
 | `drive` | 結果 JSON | 標準出力の最後の 1 行と `--out`（`cli.main`） | — |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `start_point` | `Git.rev_parse`・`Git.has_ref`・`command.base_ref` | `adapters/git.py` の 249・300 行、`progress/command.py` の `base_ref` | `HEAD` は `rev_parse` を使う。起点の参照は `Git.attempt` で打つ。`rev_parse` は読めないときと git の失敗をどちらも `GitError` にして見分けず、`has_ref` は `git show-ref` を別に打つので子プロセスの回数（設計書の表）が増える。`base_ref` は手元を先に使う規則なので使わない（決定 3） |
-| `changed_paths` | `Git.diff_between`・`Git.run` | `adapters/git.py` の 308 行 | 使えない。`diff_between` は 2 つの引数で 3 ドットを組めず、`run` は終了コード 128 を見分けない。`Git.attempt` で打って終了コードを読む |
-| `launch_worker` | `progress.invoke.run_command`・`read_report`、`progress.gate.entry` の起動 | `progress/invoke.py` の 199・262 行、`grep -rn "worker run" src/ndf` | 使えない。`domains.docrebuild` は `progress` を読まない（設計書の「コンテキスト」）。最後の行を読む処理は `contracts.result.received` を使い、その前の数行だけを書く |
-| `added_items` | `crossreview.finish_decide.as_handed` | `domains/crossreview/finish_decide.py` の 267 行 | 結果を読む側なので使わない。テストで `--out` の `items` を `as_handed` に通して読めることを見る（条件 12） |
+| `start_point` | `Git.rev_parse`・`Git.has_ref`・`command.base_ref` | `adapters/git.py` の 249・300 行目、`progress/command.py` の `base_ref` | `HEAD` は `rev_parse` を使う。起点の参照は `Git.attempt` で打つ。`rev_parse` は読めないときと git の失敗をどちらも `GitError` にして見分けず、`has_ref` は `git show-ref` を別に打つので子プロセスの回数（設計書の表）が増える。`base_ref` は手元を先に使う規則なので使わない（決定 3） |
+| `changed_paths` | `Git.diff_between`・`Git.run` | `adapters/git.py` の 308 行目 | 使えない。`diff_between` は 2 つの引数で 3 ドットを組めず、`run` は終了コード 128 を見分けない。`Git.attempt` で打って終了コードを読む |
+| `launch_worker` | `progress.invoke.run_command`・`read_report`、`progress.gate.entry` の起動 | `progress/invoke.py` の 199・262 行目、`grep -rn "worker run" src/ndf` | 使えない。`domains.docrebuild` は `progress` を読まない（設計書の「コンテキスト」）。最後の行を読む処理は `contracts.result.received` を使い、その前の数行だけを書く |
+| `added_items` | `crossreview.finish_decide.as_handed` | `domains/crossreview/finish_decide.py` の 267 行目 | 結果を読む側なので使わない。テストで `--out` の `items` を `as_handed` に通して読めることを見る（条件 12） |
 | `prompt_text` | `string.Template`・`contracts/worker/prompt.md` | `contracts/worker/prompt.md` を読んだ | `string.Template.substitute` を使う。`prompt.md` は規則 1 で起動を禁じるので使わない（決定 5） |
-| `reader_gaps` | `core.worker_outcome.gaps_of` | `core/worker_outcome.py` の 36 行 | 使えない（worker の `gaps` の形を見る処理で、`readers` を見ない）。`gaps` の要素の形（`kind`・`name`・`reason`）だけをそろえる |
+| `reader_gaps` | `core.worker_outcome.gaps_of` | `core/worker_outcome.py` の 36 行目 | 使えない（worker の `gaps` の形を見る処理で、`readers` を見ない）。`gaps` の要素の形（`kind`・`name`・`reason`）だけをそろえる |
 
 ### 単体テストの観点
 
