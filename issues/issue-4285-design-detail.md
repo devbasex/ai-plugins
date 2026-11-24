@@ -20,7 +20,8 @@ plugins/ndf/
   contracts/domains/ndf-files.json               記録のファイルを登録する
   src/ndf/contracts/writing.py *
   src/ndf/contracts/internal.py                  記録の種類「reading-check」を登録する
-  src/ndf/domains/crossreview/{criteria_decide,drive}.py
+  src/ndf/domains/crossreview/{criteria_decide,drive,cli,scope_decide}.py
+  src/ndf/domains/crossreview/round_scope.py *
   src/ndf/core/worker.py
   src/ndf/domains/records/{reading_decide,reading}.py *
   src/ndf/domains/records/cli.py
@@ -37,6 +38,8 @@ plugins/ndf/
 | `contracts/writing.py` | 新設 | 基準の本文を読む | `criteria`・`types_section` |
 | `domains/crossreview/criteria_decide.py` | 変更 | 指示の行を作る | `document_block`（新設） |
 | `domains/crossreview/drive.py` | 変更 | 指示に行を加える | `_prepare_round`・`_review_prompt`・`_fix_prompt` |
+| `domains/crossreview/round_scope.py` | 新設 | ラウンドで渡す差分の範囲と、文書の指摘の制限の両方に使う、前のラウンドの head を決める | `previous_head` |
+| `domains/crossreview/{cli,scope_decide}.py` | 変更 | `review-scope` が `previous_head` を使う。使われなくなった `state_scope` を消す | `cmd_scope` |
 | `core/worker.py` | 変更 | worker の指示に本文を入れる | `system_prompt` |
 | `domains/records/reading_decide.py` | 新設 | 質問を通すか止めるかを決める純粋関数 | `question_key`・`missing`・`light_rows` |
 | `domains/records/reading.py` | 新設 | 読み手役への指示を作り、記録を書き、読む | `prompt`・`add`・`rows`・`check` |
@@ -51,21 +54,22 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `writing.criteria` | 新設 | `() -> str` | `writing-criteria.md` の全文を返す。読めなければ `ContractError` |
 | `writing.types_section` | 新設 | `() -> str` | 4 つの型の節だけを返す。見出しが無ければ `ContractError` |
-| `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, since: Optional[str] = None) -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`since` は前のラウンド（相手役の全員が差分を読めたもの）の head で、1 ラウンド目は `None` |
-| `_prepare_round` | 変更 | 変えない | Pull Request の全体の差分（`cfg.base...HEAD`）に Markdown のファイルがあるかを `_Run.documents` に入れる（ラウンドごとの差分では決めない） |
-| `_review_prompt`・`_fix_prompt` | 変更 | 変えない | `document_block` の行を指示に加える |
+| `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`previous` は前のラウンドの head（`head`）と、その head から今の head までの差分のファイル（`diff`）で、`round_scope.previous_head` が `None` なら `None` |
+| `round_scope.previous_head` | 新設 | `(g, state, basis, head) -> Optional[str]` | 前のラウンドの head を返す。今回のレビュアーの全員が読み、比較基点とレビューの重点が今回と同じで、今の head の祖先であるラウンドに限る。当てはまるラウンドが無ければ `None` を返し、範囲は全差分になる |
+| `_prepare_round` | 変更 | 変えない | Pull Request の全体の差分（`cfg.base...HEAD`）に Markdown のファイルがあるかを `_Run.documents` に入れる（ラウンドごとの差分では決めない）。前のラウンドの head からの差分を、`previous` としてレビュアーの全員に渡す。ラウンドの差分が前の head からの差分なら、同じファイルを使う。設計の PR で全差分を渡すラウンドだけ、別のファイルに 1 回作る |
+| `_review_prompt`・`_fix_prompt` | 変更 | `_review_prompt` は `_Prepared` を受け取る | `document_block` の行を指示に加える |
 | `worker.system_prompt` | 変更 | 変えない | `document-style` を読む作業（`kinds.json`）では、手順書の節の後に `writing.criteria()` を続ける |
 
 | `role` | `document_block` が返すもの（上から順） | 出所 |
 | --- | --- | --- |
 | `reviewer` | 指摘の基準 6「文書の読み手に通じない文」と、重要度の決め方（誤らせる文は major、読みにくいだけの文は minor） | `review-criteria.json` |
 | `reviewer` | 指摘に書かせる項目（引用・型・つまずく理由・書き直した案） | `review-criteria.json` |
-| `reviewer` | 2 ラウンド目以降だけ: 基準 6 を major にしてよい範囲と、前のラウンドの head（SHA） | `review-criteria.json` |
+| `reviewer` | `previous` があるときだけ（1 ラウンド目と、レビュアーや重点を変えたり巻き直したりして全差分を読み直すラウンドでは入れない）: 基準 6 を major にしてよい範囲、前のラウンドの head（SHA）、その head からの差分のファイル | `review-criteria.json` |
 | `reviewer`・`fixer` | 基準の全文 | `writing-criteria.md` |
 | `fixer` | 文や段落を書き直し、前後の段落と一緒に読み直す、という指示 | `review-criteria.json` |
 
 - `writing-criteria.md` を読めないときは、指示を作る前に止める。cross-review は `invalid` で終わり、worker は起動しない
-- `drive.py` に加える行は、`_Run.documents` の定義と、それを設定する 1 行の、合わせて 2 行である。2 つの指示に行を加える変更は、今ある行に `+ document_block(...)` を続けるので、行数は増えない。1,000 行を超えるときは、先に `_regular_blobs`・`_local_text`・`_committed_texts`・`_changed`・`_sections`・`changed_sections` を、新しいファイル `changed_docs.py` へ移す
+- `drive.py` は 1,000 行の上限に近い。今ある `descended` を `round_scope.py` へ移し、前のラウンドの差分を渡す処理を加えても 1,000 行以内に収める。1,000 行を超えるときは、先に `_regular_blobs`・`_local_text`・`_committed_texts`・`_changed`・`_sections`・`changed_sections` を、新しいファイル `changed_docs.py` へ移す
 - 基準 6 の指摘も、`impact` の無い major は minor に下げる今の規則に従う。`impact` に書く中身（どの読み手が何を取り違えるか）は、`review-criteria.json` の `document.fields` に書く。文書を含まない PR の指示を変えないために（受け入れ条件 11）、どの PR の指示にも入る `impact.reviewer` には書かない
 - `not_written` の「字句や言い回し」を「読み手に通じる文の、好みの言い換え」に変える
 
@@ -78,7 +82,7 @@ plugins/ndf/
 | `reading.prompt` | 新設 | `(entry: Mapping[str, Any]) -> str` | 読み手役への指示を返す。`files`・`reader`・`questions_kind` と、4 つの型・2 つの区分の見分け方・返す形を入れる。文書は加工しない。「エンジニア向けの補足」を外した文書や、直した部分だけの文書は、担当が先に別のファイルへ作る |
 | `reading.add` | 新設 | `(entry: Mapping[str, Any], root: Path) -> dict[str, Any]` | 担当が書いた記録を確かめ、足りない値を補って 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` を送出し、追記しない。GitHub を読まない |
 | `reading.rows` | 新設 | `() -> list[dict[str, Any]]` | 記録を古い順に返す。壊れた行は無いものとして扱い、今の NDF より新しいバージョンの行があれば `InternalError` を送出する。ファイルが無ければ空。ファイルを開けなければ `OSError` を送出する |
-| `reading.check` | 新設 | `(questions, prs: Sequence[int], root: Path) -> list[str]` | 承認の手順用。後で動く hook が新しい head と比べられるように、先に `git fetch` を打つ（失敗しても続ける）。その後、`GitHub.pulls` で PR の head をまとめて読み、`missing` に渡す。GitHub を読めなければ `GitHubError` を送出する |
+| `reading.check` | 新設 | `(questions, prs: Sequence[int], root: Path) -> list[str]` | 承認の手順用。質問の記録に書かれた PR のブランチを、先に `git fetch` で取り込む（失敗しても続ける）。後で動く hook が、新しい head と比べられるようにするためである。リモートは `Git(root).remote()` で決める。hook と同じく、メインディレクトリの `.ndf/worktree.json` の設定を `git.remote_of` で読むので、hook が読むリモートと一致する。取り込み先は、hook が読む `refs/remotes/<リモート>/<ブランチ>` を明示する（`Git.fetch(リモート, "+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>", …)`。複数のブランチも 1 回で取る）。引数の無い fetch は、既定のリモートや設定された範囲だけを更新するので使わない。記録に PR が無ければ fetch しない。その後、`GitHub.pulls` で PR の head をまとめて読み、`missing` に渡す。GitHub を読めなければ `GitHubError` を送出する |
 | `reading_decide.question_key` | 新設 | `(questions: Sequence[Mapping[str, Any]]) -> str` | 質問ごとの「質問の文・複数選択か・選択肢の名前と説明」だけを残した JSON（キーの順を固定し、文字列の前後の空白を除く）の SHA-256。区分などは含めない |
 | `reading_decide.light_rows` | 新設 | `(text: str, version: int) -> list[dict[str, Any]]` | 記録のファイルの本文から、使う欄の形が合う行を古い順に返す。壊れた行は無いものとして扱う。`version` より新しい行があれば `NewerRow` を送出する。hook が使う |
 | `reading_decide.missing` | 新設 | `(key: str, repo: str, rows, heads: Mapping[int, str], prs: Sequence[int] = ()) -> list[str]` | 足りないものを表す語（下の表）を返す。空なら通す。`heads` は PR の番号から今の head（SHA）への対応、`prs` は承認の手順で渡す、承認する PR の番号 |
@@ -154,8 +158,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 異常 |
 | --- | --- | --- |
-| `document_block` | `role`・`documents`・`since` の組み合わせごとに、返す行が変わる | 基準を読めないと例外 |
+| `document_block` | `role`・`documents`・`previous` の組み合わせごとに、返す行が変わる | 基準を読めないと例外 |
 | `worker.system_prompt` | `document-style` を読む作業だけに本文が入る | 基準を読めないと worker を起動しない |
+| `round_scope.previous_head` | 全差分を渡す設計の PR でも、条件に合う前のラウンドの head を返す | レビュアーを加えたときと、前の head が祖先でないときは `None` を返す |
 | `question_key` | 選択肢の説明・複数選択かどうか・文の境界が変わると値が変わる。区分だけが変わっても変わらない | — |
 | `missing` | 一致すれば空。`no_record`・`no_pr`・`head_moved` の条件ごとにその語を返す。別のリポジトリの記録は数えない | `heads` に無い PR では `head_moved` を返さない |
 | `reading.add` | 値を補って 1 行追記する | `question` の無い記録で `ReadingInvalid`。複数行と引用符を含む値をそのまま受ける |

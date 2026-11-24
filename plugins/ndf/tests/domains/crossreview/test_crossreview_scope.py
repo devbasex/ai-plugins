@@ -193,14 +193,14 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
     from ndf.domains.crossreview import finish_decide as fin
 
     only_incomplete = {"rounds": [{"round": 1, "head": "h1", "verdict": fin.INCOMPLETE_REVIEWERS}]}
-    assert scope_decide.state_scope(only_incomplete, False, 2, []).kind == scope_decide.FULL
+    assert scope_decide.read_by_all_head(only_incomplete) is None
     after_full = {
         "rounds": [
             {"round": 1, "head": "h1", "verdict": "changes_required"},
             {"round": 2, "head": "h2", "verdict": fin.INCOMPLETE_REVIEWERS},
         ]
     }
-    assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
+    assert scope_decide.read_by_all_head(after_full) == "h1"
 
 
 def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
