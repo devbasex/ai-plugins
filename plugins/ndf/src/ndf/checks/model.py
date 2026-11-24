@@ -296,6 +296,7 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
             "facts",
             "words",
             "child_deps",
+            "contracts_split",
             "experimental",
             "toolchain",
             "budget",
