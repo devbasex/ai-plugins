@@ -77,7 +77,8 @@ class Posts:
 
 
 def _give(st, q: gate.Question, value: str = "approved", by: str = "human", key: str = "k1", post=None, observe=None) -> dict:
-    a = gate.Answer(q.id, value, "回答した", by, key, seen=gate.Target(head=HEAD))
+    # 回答は承認ゲートの結果の routes と同じく、見た提示の識別子を持つ
+    a = gate.Answer(q.id, value, "回答した", by, key, seen=gate.Target(head=HEAD, presentation=q.target.presentation))
     return gate.answer(st, q.machine_id, a, observe or (lambda _q: _target()), post or Posts())
 
 
@@ -170,10 +171,26 @@ def _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it(repo, s
     assert posts.rows == [] and _answered(st, q) == []
     v = run.read(st, q.machine_id)
     asking.write_material(st.root, v, replace(q, target=_target(head=moved)))
-    assert asking.read_presented(st.root, q).head == moved
+    again = asking.read_presented(st.root, q)
+    assert again.head == moved
     assert moved in asking.material_path(st.root, q).read_text(encoding="utf-8")
+    a = replace(a, seen=gate.Target(head=moved, presentation=again.presentation))
     gate.answer(st, q.machine_id, a, lambda _q: _target(head=moved), posts)
     assert [r.target.head for r in posts.rows] == [moved]
+
+
+def _an_answer_to_an_earlier_presentation_of_the_same_target_is_refused(repo, st, env, capsys):
+    """r4-1: 承認の対象が A → B → A と戻って同じ内容の資料を出し直しても、最初の提示を見た回答は受けない。"""
+    q = _asked(st, repo, env, capsys)
+    v = run.read(st, q.machine_id)
+    for target in (_target(head="f" * 40), _target()):
+        asking.write_material(st.root, v, replace(q, target=target))
+    posts = Posts()
+    with pytest.raises(model.Refused, match="今の提示"):
+        _give(st, q, post=posts)
+    assert posts.rows == [] and _answered(st, q) == []
+    _give(st, replace(q, target=asking.read_presented(st.root, q)), post=posts)
+    assert len(posts.rows) == 1 and len(_answered(st, q)) == 1
 
 
 def _a_production_change_after_the_question_is_refused(repo, st, env, capsys):
@@ -252,6 +269,10 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
         scenes.scene(
             _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it,
             id="a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it",
+        ),
+        scenes.scene(
+            _an_answer_to_an_earlier_presentation_of_the_same_target_is_refused,
+            id="an_answer_to_an_earlier_presentation_of_the_same_target_is_refused",
         ),
         scenes.scene(_a_production_change_after_the_question_is_refused, id="a_production_change_after_the_question_is_refused"),
         scenes.scene(_each_presentation_has_its_own_request_and_trail_ids, id="each_presentation_has_its_own_request_and_trail_ids"),

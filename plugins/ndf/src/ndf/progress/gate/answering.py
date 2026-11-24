@@ -119,7 +119,8 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     """回答を受けられるかを確かめ、待っている質問と、照らした対象を返す。断るなら `model.Refused`（行は待ちのまま残る）。
 
     提示した承認の対象（`read_presented`）があれば、照らした対象はその対象そのもので、今の承認の対象か回答した者の見た
-    HEAD と違えば断る（質問の後に HEAD かマージ先が変わった。#4409）。本番へ反映されるかが提示から変わったときも断る。無ければ（旧版の質問）回答した者の見た head を返す。"""
+    HEAD と違えば断る（質問の後に HEAD かマージ先が変わった。#4409）。回答が見た提示の識別子と、本番へ反映されるかが
+    提示と違うときも断る（`_check_presented`）。無ければ（旧版の質問）回答した者の見た head を返す。"""
     q = waiting(v)
     if q is None:
         raise model.Refused(f"ステートマシン {v.machine_id} は回答を待っていない（実行の前か、済んだ回答）")
@@ -136,20 +137,34 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     if changed:
         raise model.Refused(f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}")
     shown = read_presented(root, q) if root is not None else Target()
-    held = shown.binding()
-    if held is None:
+    if shown.binding() is None:
         return q, shown.presented(a.seen if a.seen.head is not None else now)
-    # 照らすのは提示した時点の承認の対象そのもの（回答の経路の HEAD で上書きしない。古い資料への回答を新しい HEAD の承認にしない）
-    current = now.binding()
-    if (current is not None and not held.same(current)) or (a.seen.head is not None and a.seen.head != held.head):
+    _check_presented(shown, now, a.seen)
+    return q, replace(shown, material=now.material if now.material is not None else a.seen.material)
+
+
+def _check_presented(shown: Target, now: Target, seen: Target) -> None:
+    """提示した承認の対象 `shown` を、今の対象 `now` と回答した者の見た対象 `seen` に照らす。違えば `model.Refused`。
+
+    照らすのは提示した時点の承認の対象そのもの（回答の経路の HEAD で上書きしない。古い資料への回答を新しい HEAD の承認にしない）。
+    """
+    held, current = shown.binding(), now.binding()
+    if held is None:
+        return
+    if (current is not None and not held.same(current)) or (seen.head is not None and seen.head != held.head):
         raise model.Refused(f"質問の後に承認の対象が変わった（今は {now.base} 宛て、HEAD {now.head}）。今の対象で質問し直す")
+    # 回答は見た資料の提示に結び付ける。承認の対象が A → B → A と戻って同じ内容の資料を出し直しても、最初の提示への回答を受けない
+    if shown.presentation and seen.presentation != shown.presentation:
+        raise model.Refused(
+            f"回答が今の提示（{shown.presentation}）への回答でない（見た提示 {seen.presentation or '無し'}）。"
+            "資料を出し直したので、今の資料で回答し直す"
+        )
     # PR・HEAD・マージ先が同じでも、マージ先の設定が変わって本番へ反映されるかが変われば、古い資料への回答を受けない
     if current is not None and now.production is not None and shown.production != now.production:
         reach = "反映される" if now.production else "反映されない"
         raise model.Refused(
             f"質問の後にマージ先の設定が変わり、このマージは本番へ{reach}ようになった。資料を出し直すので、今の資料で回答し直す"
         )
-    return q, replace(shown, material=now.material if now.material is not None else a.seen.material)
 
 
 def _kept(v: run.View, drop: Sequence[int]) -> list[int]:

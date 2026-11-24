@@ -2,6 +2,7 @@
 
 ndf answer <ステートマシン> --gate <質問の id> --result <回答> --reason <理由> --by <回答した者> --key <冪等のキー>
            [--notes <指摘ファイル>] [--head <見た head の SHA>] [--material-sha256 <見た承認資料の sha256>]
+           [--presentation <見た資料の提示の識別子>]
            [--drop <課題の番号>...]
 ndf answer ask [--gate design|release]   # プランの中の承認ゲート（テンプレートの {{gate}}）。回答を待つ結果 JSON を返す
 ndf answer list <ステートマシン>                 # 書いた回答（選択肢・指摘・理由・回答した者・時刻）を古い順に返す
@@ -394,7 +395,7 @@ def _shared_hub(cwd: Path) -> Callable[[], GitHub]:
 
 
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    seen = Target(a.head, a.material_sha256)
+    seen = Target(a.head, a.material_sha256, presentation=a.presentation)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
     hub = _shared_hub(cwd)
     return answer(st, a.machine_id, given, github_observe(cwd, st.root, hub), github_post(cwd, hub))
@@ -411,6 +412,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--notes", help="変更要求（request_changes）の指摘ファイル")
     ap.add_argument("--head", help="見た PR の head の SHA")
     ap.add_argument("--material-sha256", help="見た承認資料の sha256")
+    ap.add_argument("--presentation", help="見た資料の提示の識別子（承認ゲートの結果の routes が固定する。資料を出し直すと変わる）")
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
     return ap
 

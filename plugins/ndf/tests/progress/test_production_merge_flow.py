@@ -198,7 +198,8 @@ def _turn(st, tid: str, repo: Path, flow: SimpleNamespace, hub: merge_hub.MergeH
     asking.write_material(st.root, v, q)
     gates.append((str(q.gate), list(hub.merged)))
     post = gate.github_post(repo, hub=lambda: hub)  # type: ignore[arg-type,return-value]
-    a = gate.Answer(q.id, "approved", "人が回答した", "human", f"test-{q.id}", seen=gate.Target(head=merge_hub.HEAD))
+    shown = asking.read_presented(st.root, q).presentation
+    a = gate.Answer(q.id, "approved", "人が回答した", "human", f"test-{q.id}", seen=gate.Target(head=merge_hub.HEAD, presentation=shown))
     gate.answer(st, tid, a, _observe, post)
     return out
 

@@ -179,6 +179,8 @@ def routes(q: Question) -> dict[str, Any]:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
+    if q.target.presentation:
+        seen += ["--presentation", q.target.presentation]
     return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
 
 
