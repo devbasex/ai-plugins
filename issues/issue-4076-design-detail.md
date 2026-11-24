@@ -103,7 +103,7 @@ plugins/ndf/
   - 手順: `drive._start` は `remote = g.remote()` を 1 回求め、MVV を読むブランチを決める。`--base` がブランチ名ならその名前、`<リモート>/<ブランチ>` ならリモート名を外した名前である。コミットの SHA などブランチに解けない値なら、Pull Request のマージ先のブランチ（`baseRefName`。既に PR を読んでいる呼び出しがあればその応答から取る）を使い、読めなければ `MvvError` と同じ扱いで相手役を起動せずに止める。`worktree.sync_worktree(g, cfg.branch, remote, base_branch=<そのブランチ>)` を打ち、同期が成功した後に `snap = current(root, <そのブランチのリモート追跡参照>)` を呼び（この参照は直前の fetch で更新したリモート追跡参照で、取得し直さない。`allow_mismatch` を渡さない）、`cfg = dataclasses.replace(cfg, base_commit=<差分の起点>)` とする。差分の起点は、`--base` がブランチなら `snap.commit`、SHA などなら渡されたコミットで、MVV を読んだコミット（`snap.commit`）とは別の値として持つ。`RunConfig` に `base_commit: Optional[str] = None` を足す。以後の `changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）・`Basis` はこのコミットを使い、`cfg.base`（名前）は表示と取得にだけ使う。`crossreview/cli.py` の同期のコマンド（`worktree.sync_worktree(git.Git(Path(args.worktree)), args.branch)`）も `--base` を受けるときは同じく `base_branch` を渡す（後に打つ `review-scope` が読む参照を新しくする）
   - 取得の失敗: ベースの refspec も同じ `git fetch` に入るので、ベースを取れないときは同期ごと失敗し、今の同期の失敗と同じく `GitError` で `run` が止まる。古いベースの参照を読んで続けない
   - 他の呼び手（`crossrefactor` の `workspace`・`final_gate`・`drive`、`crossreview/push.py` の `_rebase_onto_origin`）は `base_branch` を渡さず、今と同じ
-- `cmd_scope`（`review-scope`）: 手元の `<リモート>/<MVV を読むブランチ>`（`--base` が SHA のときは `run` が残したマージ先のブランチ）を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。承認済みのハッシュの無い設定は、本文を見ずに `unapproved` の識別子にする。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「再利用の条件に MVV を足す」）。ネットワークに出ずスナップショットを書かない
+- `cmd_scope`（`review-scope`）: 手元の `<リモート>/<MVV を読むブランチ>`（`--base` が SHA のときは `run` が残したマージ先のブランチ）を `git rev-parse` で 1 回コミットに解き、そのコミットを `mvv.identity_at` に渡して識別子を得る。`identity_at` は、`current` からスナップショットの書き込みを除いた読み取り（`_read`）を `current` と共有するので、本文のパスの決め方・承認済みのハッシュの無い設定の扱い・共通原則の sha256 を求める条件は `current` と同じになる（識別子の規則は「再利用の条件に MVV を足す」）。ネットワークに出ずスナップショットを書かない。マージ先のブランチは、ラウンドの記録の `mvv`（`{"id": <識別子>, "branch": <MVV を読んだブランチ>}`）の `branch` のうち最後のものを使い、項目を別に増やさない。`branch` の記録が無ければ、渡されたコミットの MVV で代用せずに全差分（`FULL`）を返す。差分の比較元も、`run` と同じく、`--base` がブランチなら手元の `<リモート>/<ベース>` のコミット、コミットならそのコミットにする
 - `items_of`
   - 事後条件: `## Value` の下の行頭の `<番号>.` から `Value <番号>` を作る。`## 必ず人の承認が要る操作` の表と共通原則の表から `P<番号>`・`C<番号>` を作る（`mvv_material_decide.redlines` を使う）。`## Mission`・`## Vision` があれば `Mission`・`Vision` を作る。重複を除き、出た順。呼び手（`mvv.items`）がコードブロックの行を空にしてから渡す（例の見出しと番号を項目にしない）
 - `preflight.mvv_state`・`mvv_checked`（手順 0 と承認ゲート）
@@ -185,14 +185,17 @@ plugins/ndf/
 | `Basis` | `scope_decide.py` | 変更 | `NamedTuple(base, reviewers, focus, mvv: Optional[str] = None)` | `mvv` は MVV の識別子。承認済みは `"approved:<version>:<sha256>:<共通原則の sha256>"`。承認済みでない（`absent`・`unapproved`）は `"<state>:::"` で、共通原則の sha256 を含めない |
 | `read_by_all_head` | `scope_decide.py` | 変更 | （同じ） | ラウンドの記録の `MVV` が `basis.mvv` と違えば None（全差分を読み直し、収束を再利用しない）。`basis.mvv` が承認済みの識別子で、ラウンドの記録の `mvv_checked` が真でない（無い・偽）ときも None |
 | `reviewed_of` | `scope_decide.py` | 変更 | `reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None) -> set[str]` | 状態ファイルの `reviewed_mvv` が `mvv` と違えば空の集合（前の MVV で通ったセクションを今回の基準では通っていないとみなす） |
-| `cmd_scope` | `crossreview/cli.py` | 変更 | （同じ） | 識別子を `Basis` と同じ規則で作る。共通原則の sha256 をプラグインのファイルから求めるのは、ベースが承認済みのときだけ |
+| `identity_of` | `records/mvv_decide.py` | 新設 | `identity_of(state: str, version: Optional[int] = None, sha256: Optional[str] = None, principles_sha256: str = "") -> str` | 上の規則で識別子を作る純粋な関数。`Snapshot.identity` が呼ぶ |
+| `identity_at` | `records/mvv.py` | 新設 | `identity_at(root: Path, ref: str) -> str` | スナップショットを書かずに参照の MVV の識別子を返す。参照・設定・本文を読めないときと、本文が承認の記録と合わないときは `MvvError` |
+| `mvv_branch` | `scope_decide.py` | 新設 | `mvv_branch(state: Mapping[str, Any]) -> Optional[str]` | ラウンドの記録から、最後に MVV を読んだブランチを返す |
+| `cmd_scope` | `crossreview/cli.py` | 変更 | （同じ） | 識別子を `identity_at` で得る。共通原則の sha256 をプラグインのファイルから求めるのは、ベースが承認済みのときだけ |
 
 - 守る振る舞い: ラウンドの記録と詳細レビュー済みのセクションと見送りに、その時の MVV の識別子をひも付ける。今回の識別子と違う記録は、収束の再利用・詳細レビュー済み・「出し直さない」の一覧のどれにも使わない（前の MVV の基準で通ったものを、今回の基準 5 で通ったとみなさない）
 - 承認済みでない識別子に共通原則の sha256 を含めないのは、基準 5 が無く共通原則を渡さないためである。含めると NDF のバージョンを上げるたびに、MVV を持たない全利用先で前の収束と詳細レビュー済みを再利用できなくなる
 - 識別子の無い前の記録（この変更より前の状態ファイル）は、今回が `absent` のときだけ同じとみなす
-- `run` は起動の始めの同期でベースブランチも取得し、取得した参照から識別子を得る。`review-scope` はネットワークに出ず写しも書かず、手元の参照の MVV のファイルの blob の id を最後のラウンドの記録と照らして識別子を得る。確かめられなければ、狭い範囲を返さず全差分（`FULL`）を返す
+- `run` は起動の始めの同期でベースブランチも取得し、取得した参照から識別子を得る。`review-scope` はネットワークに出ずスナップショットも書かず、手元の参照の MVV を `run` と同じ関数で読んで識別子を得る（blob の id を記録と比べる形にすると、バージョンと本文を変えずに設定だけを変えたときに `run` と違う範囲を返す）。確かめられなければ（本文が承認の記録と合わない・参照が無い・MVV を読むブランチの記録が無い）、どの記録とも違う識別子（`UNKNOWN_MVV`）として全差分（`FULL`）を返し、理由を `warnings` に載せる
 - 壊し方（テストで落とす）: MVV のバージョンが上がった後の起動が前の収束を返す。前の MVV で詳細レビューを通ったセクションが `unreviewed` に並ばない。前の MVV の見送りが「出し直さない」に載る。`review-scope` がネットワークに出るかスナップショットを書く。承認済みのベースで、共通原則の本文を変えた後の起動が前の収束を返す。基準 5 の指示に共通原則のスナップショットのパスが無い。`absent` のベースで、共通原則の本文を変えた後の起動が前の収束を再利用しない
-- 記録のキーの名前・Git の起動の回数の削り方は、実装（`tdd-cycle`）で走らせて決める。blob の id は元のバイト列から作る
+- 記録のキーは、ラウンドの記録の `mvv`（`id`・`branch`）と状態ファイルの `reviewed_mvv`（識別子）にした。`review-scope` が Git を起動する回数は、MVV を読む分で `git ls-tree` と `git cat-file --batch` の 2 回と、参照が SHA でないときの `git rev-parse` の 1 回である
 
 ### 内部のデータと定数
 
@@ -364,6 +367,8 @@ plugins/ndf/
 | ジャーナルの指摘 | `mvv_history` | 配列か無い | 識別子が変わって外した分類（`judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv`）。追記だけ | 分類を外すとき |
 | ジャーナルの指摘（`by: ndf`） | `cited`・`unknown` | 文字列・配列 | 引いた項目の部分と一覧に無い項目（生の値。`mvv` の代わりに持つ） | `ingest_citations` が指摘を作るとき |
 | ジャーナルの指摘（`by: ndf`） | `citation_key` | 文字列か無い | 根拠の行の誤りの照合キー。手元の状態ファイルだけに持つ | `ingest_citations` が指摘を作るとき |
+| ラウンドの記録 | `mvv` | オブジェクト | `id`（識別子）と `branch`（MVV を読んだブランチ） | ラウンドの記録を書くとき |
+| 状態ファイル | `reviewed_mvv` | 文字列か無い | `reviewed_sections` のセクションを読んだときの識別子 | `reviewed_sections` を書くとき |
 | ラウンドの記録 | `mvv_checked` | 真偽値 | このラウンドの head で根拠の行の確かめが成功したか | ラウンドの記録を書くとき |
 | 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` | ジャーナルの指摘と同じ | 再開で分類・固定前の重さを戻すため | 記録のコメントを書くとき |
 
