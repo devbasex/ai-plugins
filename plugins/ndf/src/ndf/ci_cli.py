@@ -46,13 +46,13 @@ PRODUCTION_GATES = ("stop", "defer", "stale")
 # `metrics.gate` の値（`ndf ci merge` の承認待ち・先送りと `ndf ci ask` が共有する）
 GATE_NAME = "production-merge"
 # 判定に読むマージ先の設定のファイル（PR のベースリポジトリのマージ先のブランチ）
-PROJECT_FILE = ".ndf/project.json"
+PROJECT_FILE = production_merge.PROJECT_FILE
 # 直前の照合で判定をやり直した結果が承認待ちになったことを `GitHub.merge` から受ける種類
 _REJUDGED = "production_gate"
 # 回答の記録の回答した者のうち、証跡を書けるもの（利用者が直に答えたときだけ）
 HUMAN = "human"
 # 承認資料の、本番へ反映され得ることを示す行
-PRODUCTION_LINE = "この承認で PR がマージされ、本番へ反映され得る"
+PRODUCTION_LINE = trail.PRODUCTION_MATERIAL_LINE
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -228,13 +228,9 @@ def _merge_target(hub: GitHub, pull: Pull) -> trail.MergeTarget:
 
 def _verdict_of(hub: GitHub, base: str, text: Optional[str], repo: str) -> Verdict:
     """マージ先の設定の本文の判定。読めない・別のリポジトリから読んだなら `UNKNOWN`。"""
-    if text is None or not github_mod.same_repo(repo, hub.repo):
+    if not github_mod.same_repo(repo, hub.repo):
         return Verdict.UNKNOWN
-    try:
-        data = json.loads(text)
-    except ValueError:  # noqa: NDF401 ファイル: 読めない設定は届け方が分からないので承認を求める
-        return Verdict.UNKNOWN
-    return production_merge.judge(data.get("branch_strategy") if isinstance(data, dict) else None, base)
+    return production_merge.judge_text(text, base)
 
 
 def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:

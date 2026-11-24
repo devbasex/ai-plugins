@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.progress import lane, model, plan, run, store
-from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
+from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
     RELEASE_KIND,
@@ -116,7 +116,9 @@ def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
     return {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
 
 
-def take_reply(st: store.Store, machine_id: str, env: Mapping[str, str], observe: Observe = no_observe) -> Optional[dict[str, Any]]:
+def take_reply(
+    st: store.Store, machine_id: str, env: Mapping[str, str], observe: Observe = no_observe, post: Post = no_post
+) -> Optional[dict[str, Any]]:
     """リリース承認ゲートが待つリクエストに回答があれば、承認ゲートの回答（`organizer`）として書く。書いた結果を返す。
 
     見た対象はリクエストを出したときの対象で、その後に PR の head が変わっていれば回答は断られる（今の対象との検証は `answer`）。
@@ -135,4 +137,4 @@ def take_reply(st: store.Store, machine_id: str, env: Mapping[str, str], observe
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの回答（{reply['result']}）"
     target = Target.from_dict(seen)
     given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target, outputs=_released(reply, value))
-    return answer(st, machine_id, given, observe)
+    return answer(st, machine_id, given, observe, post)

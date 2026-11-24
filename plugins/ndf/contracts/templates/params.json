@@ -24,6 +24,10 @@
     "review": {"summary": "レビューの起動の引数の並び。省けば ndf route がブランチの PR の cross-review を組む（起点は base、実装のプランは <remote>/<base>）。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る。実装のプランは後ろに --reviewed-out <ファイル> を足して打ち、レビュー担当が最後に読んだ HEAD を記録する。その後のコミットは、後ろに --base <レビューした HEAD> と別の --state-dir を足して打ち直す", "list": true},
     "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す。工程から組むときに設定（workflow.launch.rebuild）が無ければ、ndf document-rebuild run を組む（起点は base、リモートは remote、選ぶ文書の種類は工程とモードから決める）", "list": true},
     "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
-    "gate": {"summary": "承認ゲートの資料を作って人の回答を待つ起動の引数の並び（承認ゲートの結果 JSON を返す）。既定は工程の外でテンプレートを使うときの値で、ndf progress の工程から呼ぶプランでは承認を工程の承認ゲートが決めるため、待たずに通す起動を入れる", "list": true, "default": ["ndf", "answer", "ask"]}
+    "gate": {"summary": "承認ゲートの資料を作って人の回答を待つ起動の引数の並び（承認ゲートの結果 JSON を返す）。既定は工程の外でテンプレートを使うときの値で、ndf progress の工程から呼ぶプランでは承認を工程の承認ゲートが決めるため、待たずに通す起動を入れる", "list": true, "default": ["ndf", "ci", "ask", "--branch", "{{branch}}", "--presented-out", "{state_dir}/presented-merge-gate.json"]},
+    "production_gate": {"summary": "ndf ci merge --production-gate。マージ先が自動反映の本番チャネルで承認の証跡が無いときの終え方（stop は承認待ちで止まる、defer はマージせずに ok で先へ進む、stale は approval_stale で止まる）。既定は単発のプランの stop。ndf progress の工程から組むプランでは、Pull Request・ドキュメントレビュー・確定仕様化は defer、設計 PR のマージとデプロイは stale にする（#4409）", "default": "stop"},
+    "pr": {"summary": "デプロイの工程の入力の PR の番号（スプリントの PR）。テンプレート release の最初のステップがマージする"},
+    "approved_head": {"summary": "リリース承認ゲートで承認した PR の HEAD。ndf progress がリリース承認ゲートの回答の事象から入れる（旧版の回答なら空で、マージは approval_stale で止まる）"},
+    "approved_base": {"summary": "リリース承認ゲートで承認したマージ先。approved_head と同じ所から入れる"}
   }
 }

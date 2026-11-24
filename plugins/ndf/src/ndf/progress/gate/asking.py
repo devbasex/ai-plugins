@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli
 from ndf.contracts import result
+from ndf.domains.release import trail
 from ndf.progress import lane, model, run
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -42,10 +44,24 @@ MATERIAL_DIR = "gate-materials"
 
 @dataclass(frozen=True)
 class Target:
-    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。"""
+    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。
+
+    `repo`・`pr`・`base` は承認の対象（ベースリポジトリ・PR の番号・マージ先）、`production` は承認でマージが本番へ
+    反映され得るか（判定の部品の `reaches_production`）。マージの承認の証跡はこの組に結び付ける（#4409 の決定 7）。
+    """
 
     head: Optional[str] = None
     material: Optional[str] = None
+    repo: Optional[str] = None
+    pr: Optional[int] = None
+    base: Optional[str] = None
+    production: Optional[bool] = None
+
+    def binding(self) -> Optional[trail.MergeTarget]:
+        """承認の対象の 4 つの値がそろえば `trail.MergeTarget`、欠ければ None。"""
+        if not self.repo or self.pr is None or not self.base or not self.head:
+            return None
+        return trail.MergeTarget(self.repo, int(self.pr), self.base, self.head)
 
     def differs(self, seen: Target) -> list[str]:
         """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
@@ -55,16 +71,30 @@ class Target:
                 out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
         return out
 
-    def as_dict(self) -> dict[str, Optional[str]]:
-        """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。"""
-        return {"head": self.head, "material_sha256": self.material}
+    def as_dict(self) -> dict[str, Any]:
+        """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。承認の対象の値は分かるときだけ置く。"""
+        extra = {"repo": self.repo, "pr": self.pr, "base": self.base, "production": self.production}
+        return {"head": self.head, "material_sha256": self.material, **{k: v for k, v in extra.items() if v is not None}}
 
     @classmethod
     def from_dict(cls, raw: Any) -> Target:
-        """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。"""
+        """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。旧版の形（無いキー）は None で読む。"""
         if not isinstance(raw, dict):
             return cls()
-        return cls(raw.get("head"), raw.get("material_sha256"))
+        pr = raw.get("pr")
+        production = raw.get("production")
+        return cls(
+            raw.get("head"),
+            raw.get("material_sha256"),
+            raw.get("repo") if isinstance(raw.get("repo"), str) else None,
+            pr if isinstance(pr, int) and not isinstance(pr, bool) else None,
+            raw.get("base") if isinstance(raw.get("base"), str) else None,
+            production if isinstance(production, bool) else None,
+        )
+
+    def presented(self, now: "Target") -> "Target":
+        """提示した対象（承認の対象と本番へ反映されるか）に、回答した者が見た `now` の head と承認資料を重ねた対象。"""
+        return replace(self, head=now.head, material=now.material)
 
 
 @dataclass(frozen=True)
@@ -216,6 +246,10 @@ def material(v: run.View, q: Question) -> str:
         lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
     if q.target.head:
         lines.append(f"- 見る head: {q.target.head}")
+    if q.target.base:
+        lines.append(f"- マージ先: {q.target.base}")
+    if q.target.production:
+        lines.append(f"- {PRODUCTION_LINE}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
         lines.append(f"- 出すバージョン: {ctx['product_version']}")
     lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
@@ -224,14 +258,41 @@ def material(v: run.View, q: Question) -> str:
 
 
 def write_material(root: Path, v: run.View, q: Question) -> Path:
-    """承認資料を書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。"""
+    """承認資料を書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。
+
+    質問の対象（`q.target`）を、提示した承認の対象として隣（`presented_path`）へ同じく 1 度だけ書く（#4409 の決定 7）。
+    """
     path = material_path(root, q)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(material(v, q), encoding="utf-8")
         tmp.replace(path)
+    shown = presented_path(root, q)
+    if not shown.exists():
+        tmp = shown.with_name(f".{shown.name}.tmp")
+        tmp.write_text(json.dumps(q.target.as_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(shown)
     return path
+
+
+# 提示した承認の対象の保存先（承認資料の隣）
+PRESENTED_SUFFIX = ".target.json"
+# 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
+PRODUCTION_LINE = trail.PRODUCTION_MATERIAL_LINE
+
+
+def presented_path(root: Path, q: Question) -> Path:
+    """質問で提示した承認の対象（`Target.as_dict` の形）の保存先。"""
+    return run.work_root(root, q.machine_id) / MATERIAL_DIR / f"{q.id}{PRESENTED_SUFFIX}"
+
+
+def read_presented(root: Path, q: Question) -> Target:
+    """質問で提示した承認の対象。無い・読めなければ空の対象（旧版で出した質問）。"""
+    try:
+        return Target.from_dict(json.loads(presented_path(root, q).read_text(encoding="utf-8")))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 提示の記録の無い質問は、承認の対象の無い質問として扱う
+        return Target()
 
 
 # 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）

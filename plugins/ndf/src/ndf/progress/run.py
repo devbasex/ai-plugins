@@ -329,6 +329,23 @@ def failed_routes(machine_id: str, stage: str) -> dict[str, Any]:
     }
 
 
+# 承認の後に承認の対象が変わった・有効な承認が無いマージの停止理由（`ndf ci merge --production-gate stale`。#4409）
+APPROVAL_STALE = "approval_stale"
+
+
+def stale_routes(machine_id: str, stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """`approval_stale` で止まった工程の経路。工程を最初から流し直す記録（routes の retry。理由は approval_stale）と、
+    記録した工程を流して承認ゲートに今の承認の対象で質問し直させる `ndf progress next`（結果の next）をこの順で返す。
+
+    `ndf ci merge` は状態機械の ID と工程を知らないので、止まったプランの結果からは写さず、ここで組む（#4409 の決定 4・5）。
+    """
+    routes = {
+        "retry": _cmd("retry", machine_id, stage, "--reason", APPROVAL_STALE),
+        "cancel": _cmd("cancel", machine_id, ask=("reason",)),
+    }
+    return routes, _cmd("next", machine_id)
+
+
 def _metrics(v: View, m: Move) -> dict[str, Any]:
     out: dict[str, Any] = {"machine_id": v.machine_id, "rev": v.rev, "state": v.whole, "move": m.action}
     if m.stage is not None:
@@ -346,6 +363,10 @@ def _failed_report(v: View, m: Move) -> dict[str, Any]:
     kind = kind if kind is not None and causes.has(kind) else "unknown"
     detail = cause["detail"] if isinstance(cause.get("detail"), str) and cause["detail"] else f"工程 {m.stage.name} が失敗した"
     summary = f"工程 {m.stage.name} が失敗した: {detail}"
+    if kind == APPROVAL_STALE:
+        routes, nxt = stale_routes(v.machine_id, m.stage.name)
+        summary = f"{summary}。routes の retry で工程を最初から流し直す記録を書き、next で承認ゲートから質問し直す"
+        return result.stopped(TOOL, kind, detail, summary=summary, metrics=_metrics(v, m), routes=routes, next=nxt)
     return result.stopped(TOOL, kind, detail, summary=summary, metrics=_metrics(v, m), routes=failed_routes(v.machine_id, m.stage.name))
 
 
@@ -518,7 +539,7 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    run = invoke.stage_run(s, step, inputs)
+    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name))
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
     try:
@@ -793,6 +814,19 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
+def approved_seen(v: View, stage: str) -> Optional[dict[str, Any]]:
+    """工程 `stage` の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
+
+    利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。
+    """
+    for ev in reversed(v.events):
+        p = payload_of(ev)
+        if ev.draft.kind == ANSWERED and ev.draft.row_key == stage and p.get("answer") == APPROVED:
+            seen = p.get("seen")
+            return dict(seen) if isinstance(seen, dict) else None
+    return None
+
+
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
     """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。"""
     prog = step_progress(v, s.name)
@@ -800,7 +834,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return _failed(s, step.id, v.rev, exc.kind, str(exc))
-    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)
+    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved_seen(v, s.name))
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)

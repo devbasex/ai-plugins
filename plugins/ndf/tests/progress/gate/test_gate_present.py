@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from ndf.adapters.github import GitHubError
+from ndf.adapters.github import FileAt, GitHubError
 from ndf.contracts import result
 from ndf.progress import gate, invoke, model, run
 
@@ -53,8 +55,14 @@ def test_a_result_that_is_not_a_listen_gate_is_left_as_it_is(st, repo, new_table
     assert gate.present(st, tid, repo, out, gate.no_observe) is out
 
 
-def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head))
+def _hub(head, text=None):
+    """PR（HEAD `head`・develop 宛て）とマージ先の設定（本文 `text`。省けば本番チャネルでない設定）を読む偽の GitHub。"""
+    config = text if text is not None else json.dumps({"branch_strategy": {"branches": {"base": "develop", "production": "main"}}})
+    return SimpleNamespace(
+        repo="o/r",
+        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="develop", number=n),
+        branch_file=lambda base, path: FileAt("o/r", config, "c1"),
+    )
 
 
 def _answered(st, tid, head):
@@ -91,7 +99,9 @@ def test_github_observe_reads_the_head_and_refuses_when_it_cannot(st, repo, new_
     flow.turn(tid)
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.pr == 7
-    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == gate.Target(head="abc")
+    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == gate.Target("abc", None, "o/r", 7, "develop", False)
+    # マージ先が本番チャネルで設定を読めなければ、本番へ反映され得るとして読む（#4409）
+    assert gate.github_observe(repo, st.root, lambda: _hub("abc", "壊れた"))(q).production is True
 
     def broken():
         def pull(n):

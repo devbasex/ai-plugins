@@ -177,7 +177,7 @@ def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "design.json").read_text()) == {"name": "design", "steps": STEPS}
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path)
     assert argv[argv.index("--set") + 1] == "issues=[1, 2]"
-    assert argv[-2:] == ["--answer", "approved"]
+    assert argv[-4:] == ["--answer", "approved", "--by", invoke.PLAN_ANSWER_BY]
     assert argv[1] == "-I"
 
 

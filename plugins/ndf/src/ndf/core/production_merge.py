@@ -7,7 +7,13 @@ hook は環境が無いときシステムの python3 で動くため、標準ラ
 
 from __future__ import annotations
 
+import json
 from enum import Enum
+from typing import Optional
+
+# 判定に読むマージ先の設定のファイル（リポジトリの根からのパス）と、その中のセクション
+PROJECT_FILE = ".ndf/project.json"
+SECTION = "branch_strategy"
 
 
 class Verdict(str, Enum):
@@ -60,6 +66,17 @@ def judge(section: object, base: str) -> Verdict:
     if base != production:
         return Verdict.NOT_PRODUCTION
     return automatic_rows(section)
+
+
+def judge_text(text: Optional[str], base: str) -> Verdict:
+    """マージ先のブランチの設定のファイルの本文 `text`（無ければ None）での `judge`。読めなければ `UNKNOWN`。"""
+    if text is None:
+        return Verdict.UNKNOWN
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return Verdict.UNKNOWN
+    return judge(data.get(SECTION) if isinstance(data, dict) else None, base)
 
 
 def needs_approval(v: Verdict) -> bool:

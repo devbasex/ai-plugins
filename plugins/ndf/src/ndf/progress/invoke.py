@@ -157,6 +157,8 @@ class StageRun:
     # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
     retries: int = 0
     again: bool = False
+    # 同じ工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`。`gate.Target.as_dict` の形）。無ければ None（#4409）
+    approved: Optional[dict[str, Any]] = None
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
         out = {**os.environ, **extra}
@@ -319,6 +321,12 @@ FROM_STAGE = "工程の承認ゲート（モードが置く listen のステッ�
 # listen のステップ）が持つため、プランの中では待たずに通す（終了コード 0 で結果 JSON を出さない手は ok）。
 # `params.json` の既定（`ndf answer ask`）は工程の外でテンプレートを使うときの値で、工程から使うと承認待ちを足してしまう
 STAGE_GATE = ["true"]
+# 工程がプランへ回答を渡すときの回答した者（`ndf plan next --by`）
+PLAN_ANSWER_BY = "service:progress"
+# 工程から組むプランの `ndf ci merge --production-gate`（#4409 の決定 4・決定 5）。承認ゲートの無い工程（Pull Request・
+# ドキュメントレビュー・確定仕様化）は承認の無いマージをデプロイへ先送りし、承認ゲートを持つ工程（設計・デプロイ）は
+# 承認の後に対象が変わっていれば approval_stale で止めて質問し直す。表に無いテンプレートは既定の stop のまま組む
+PRODUCTION_GATE = {"merge": "defer", "plan-to-spec": "defer", "design-merge": "stale", "release": "stale"}
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,
@@ -496,6 +504,7 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
+    values = {**values, **_fill_production_gate(t, run)}
     filled = rebuild_values.fill(t, values, _issue_numbers(run), run.inputs.get("mode"), cwd, project=project)
     if filled.undecided is not None:
         raise TemplateValuesMissing(t.name, {"rebuild": FROM_PROJECT}, {"rebuild": filled.undecided.fields()})
@@ -632,6 +641,28 @@ def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Va
     """ブランチの出所の差し込みの値（決まらなければ含めない）。"""
     branch = _branch_of(run) if "branch" in wanted else None
     return {"branch": branch} if branch is not None else {}
+
+
+def _fill_production_gate(t: route.Template, run: StageRun) -> dict[str, route.Value]:
+    """工程から組むプランの `production_gate`（`PRODUCTION_GATE`）と、デプロイの `approved_head`・`approved_base`。
+
+    `production_gate` を使うテンプレートが表に無ければ値を入れず、既定の stop（承認待ちで止まる）のまま組む。
+    本番チャネルへのマージを承認の前に進めない側へ倒すためである。
+    """
+    out: dict[str, route.Value] = {}
+    if "production_gate" in t.params and t.name in PRODUCTION_GATE:
+        out["production_gate"] = PRODUCTION_GATE[t.name]
+    if "approved_head" in t.params:
+        out.update(_approved_target(run))
+    return out
+
+
+def _approved_target(run: StageRun) -> dict[str, route.Value]:
+    """同じ工程の承認ゲートの最新の承認の回答が見た HEAD とマージ先。旧版の回答（マージ先が無い）は空文字で、
+    `ndf ci merge` がマージ先の違いとして approval_stale で止め、承認ゲートが質問し直す（#4409 の「影響と危険」）。"""
+    seen = run.approved if run.approved is not None else {}
+    head, base = seen.get("head"), seen.get("base")
+    return {"approved_head": head if isinstance(head, str) else "", "approved_base": base if isinstance(base, str) else ""}
 
 
 def _fill_gate(wanted: Mapping[str, str]) -> dict[str, route.Value]:
@@ -804,7 +835,8 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
             argv += ["--set", f"{key}={_set_value(value)}"]
     if attempt:
         argv += ["--set", f"{ATTEMPT_SET}={attempt}"]
-    return argv + (["--answer", answer] if answer else [])
+    # 工程の承認ゲートが受けた回答をプランへ渡す（回答した者は工程の進行。プランの承認待ちの証跡は書かれない。#4409）
+    return argv + (["--answer", answer, "--by", PLAN_ANSWER_BY] if answer else [])
 
 
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:

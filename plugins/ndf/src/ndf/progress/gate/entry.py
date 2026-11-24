@@ -31,8 +31,19 @@ from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
-from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
-from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, question, write_material
+from ndf.progress.gate.answering import (
+    Answer,
+    Observe,
+    Post,
+    answer,
+    git_docs_only,
+    github_observe,
+    github_post,
+    lane_env,
+    no_post,
+    recheck,
+)
+from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, material_sha256, question, write_material
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
@@ -51,9 +62,12 @@ def present(
         repo: Optional[str] = Git(cwd).remote_repo()
     except GitError:
         repo = None
-    asked = question(v, m, repo=repo)
+    # 対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）
+    first = question(v, m, repo=repo)
+    seen = observe(first)
+    asked = replace(first, target=replace(seen, material=None))
     path = write_material(st.root, v, asked)
-    q = replace(asked, target=observe(asked))
+    q = replace(asked, target=replace(seen, material=material_sha256(path)))
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:
@@ -355,7 +369,7 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     seen = Target(a.head, a.material_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
-    return answer(st, a.machine_id, given, github_observe(cwd, st.root))
+    return answer(st, a.machine_id, given, github_observe(cwd, st.root), github_post(cwd))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -411,16 +425,16 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     """`ndf progress` の工程を流すサブコマンド。レーンの行を終える `Env` で流し、回答を読む前に対象を見直し、承認ゲートの
     待ちは質問と回答ごとのルートの結果にする。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
-    took = _took(st, a.machine_id, seen)
+    took = _took(st, a.machine_id, seen, github_post(cwd) if observe is None else no_post)
     why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
     out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
 
 
-def _took(st: store.Store, machine_id: str, observe: Observe) -> Optional[str]:
+def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_post) -> Optional[str]:
     """リリースのリクエストへの回答を承認ゲートの回答として書く。書けなければ理由を警告に返す（待ちは残る）。"""
     try:
-        got = take_reply(st, machine_id, os.environ, observe)
+        got = take_reply(st, machine_id, os.environ, observe, post)
     except (model.Refused, external.ExchangeError) as exc:
         return f"リリースのリクエストへの回答を承認ゲートの回答にできなかった: {exc}"
     return got["summary"] if got is not None else None

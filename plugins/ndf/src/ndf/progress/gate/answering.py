@@ -17,6 +17,8 @@ from typing import Any, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
+from ndf.core import actors, production_merge
+from ndf.domains.release import approval_decide, trail
 from ndf.progress import command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     DESIGN_GATE,
@@ -30,13 +32,14 @@ from ndf.progress.gate.asking import (
     material_path,
     material_sha256,
     question,
+    read_presented,
     release_request_of,
     waiting,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 
-# 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`）
-ACTORS = re.compile(r"^(human|conductor|organizer|service):[A-Za-z0-9._@/-]+$|^(human|conductor|organizer)$")
+# 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`。プランの承認待ちと共有する）
+ACTORS = actors.ACTORS
 
 # --- 回答 ---------------------------------------------------------------------------------------
 
@@ -60,16 +63,42 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
         return made[0]
 
     def observe(q: Question) -> Target:
-        head = None
-        if q.pr is not None:
-            try:
-                head = _hub().pull(q.pr).head_sha
-            except (GitHubError, GitError) as exc:
-                raise model.Refused(f"PR #{q.pr} の head を読めないので、回答と対象を照らせない: {exc}") from None
         path = material_path(root, q)
-        return Target(head, material_sha256(path) if path.exists() else None)
+        material = material_sha256(path) if path.exists() else None
+        if q.pr is None:
+            return Target(None, material)
+        try:
+            hub = _hub()
+            pull = hub.pull(q.pr)
+            found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
+        except (GitHubError, GitError) as exc:
+            raise model.Refused(f"PR #{q.pr} の head を読めない（マージ先も読めない）ので、回答と対象を照らせない: {exc}") from None
+        verdict = production_merge.judge_text(found.text, pull.base_ref) if found.repo.lower() == hub.repo.lower() else None
+        production = production_merge.reaches_production(verdict if verdict is not None else production_merge.Verdict.UNKNOWN)
+        return Target(pull.head_sha, material, hub.repo, pull.number, pull.base_ref, production)
 
     return observe
+
+
+# マージの承認の証跡を書く口（行を渡し、書いたら真、同じ記録の証跡が既にあれば偽）
+Post = Callable[[trail.MergeRow], bool]
+
+
+def no_post(row: trail.MergeRow) -> bool:
+    """証跡を書かない口（PR を読まないテストと、承認の対象を持たない質問）。"""
+    return False
+
+
+def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
+    """`trail.write_merge_row` を token の利用者の login で呼ぶ口。GitHub は 1 つだけ作る。"""
+    made: list[GitHub] = []
+
+    def post(row: trail.MergeRow) -> bool:
+        if not made:
+            made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
+        return trail.write_merge_row(made[0], row, made[0].viewer_login())
+
+    return post
 
 
 def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
@@ -80,8 +109,10 @@ def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
     return None
 
 
-def _refusal(v: run.View, a: Answer, observe: Observe) -> Question:
-    """回答を受けられるかを確かめ、待っている質問を返す。断るなら `model.Refused`（行は待ちのまま残る）。"""
+def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = None) -> tuple[Question, Target]:
+    """回答を受けられるかを確かめ、待っている質問と、照らした対象（提示した承認の対象に回答した者の見た head を重ねたもの）を
+    返す。断るなら `model.Refused`（行は待ちのまま残る）。提示した承認の対象（`read_presented`）があれば、今の承認の対象と
+    違うときも断る（質問の後にマージ先が変わった。#4409）。"""
     q = waiting(v)
     if q is None:
         raise model.Refused(f"ステートマシン {v.machine_id} は回答を待っていない（実行の前か、済んだ回答）")
@@ -93,10 +124,15 @@ def _refusal(v: run.View, a: Answer, observe: Observe) -> Question:
         raise model.Refused("課題を外せるのは設計承認ゲートの承認だけ")
     if a.drop:
         _kept(v, a.drop)
-    changed = observe(q).differs(a.seen)
+    now = observe(q)
+    changed = now.differs(a.seen)
     if changed:
         raise model.Refused(f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}")
-    return q
+    shown = read_presented(root, q) if root is not None else Target()
+    seen = shown.presented(a.seen if a.seen.head is not None else now)
+    if shown.binding() is not None and now.binding() is not None and not seen.binding() == now.binding():
+        raise model.Refused(f"質問の後に承認の対象が変わった（今は {now.base} 宛て、HEAD {now.head}）。今の対象で質問し直す")
+    return q, seen
 
 
 def _kept(v: run.View, drop: Sequence[int]) -> list[int]:
@@ -133,9 +169,59 @@ def _carry(conn: Any, machine_id: str, issues: Sequence[int], reason: str) -> Op
     return lane.carry_issues(conn, plan_id, name, row.key, list(issues), reason)
 
 
-def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe) -> dict[str, Any]:
+# 証跡を書く回答 → 証跡の回答（変更要求は承認しない回答なので、先の承認を取り消す却下として書く）
+_TRAIL_ANSWERS = {run.APPROVED: approval_decide.APPROVED, run.REJECTED: approval_decide.REJECTED, run.REQUEST_CHANGES: approval_decide.REJECTED}
+# MVV 判定が通した回答（証跡は `mvv_gate.py` が判定の記録と同じコメントに書くので、ここでは書かない）
+MVV_BY = model.MVV_SERVICE
+
+
+def _trail_by(conn: Any, q: Question, a: Answer, seen: Target) -> Optional[str]:
+    """回答した者から証跡の担い手を決める。書かないなら None、断るなら `model.Refused`（#4409 の決定 7）。
+
+    承認の対象がそろった（`seen.binding()`）PR を持つ承認ゲートでだけ書く。利用者（`human`）と、利用者の回答を中継したと
+    確かめられた `organizer` は `user`。`service:mvv` は書かない。ほかの回答した者（`conductor`・ほかの `service:<主体>`）は、
+    承認でマージが本番へ反映され得るなら断り（AI の判断で担い手 `user` の証跡を作らない）、反映されないなら書かない。
+    """
+    if seen.binding() is None or q.gate not in (DESIGN_GATE, RELEASE_GATE) or a.by == MVV_BY:
+        return None
+    role = a.by.split(":", 1)[0]
+    if role == actors.HUMAN or (role == "organizer" and _relayed(conn, q, a)):
+        return trail.USER_BY
+    if seen.production:
+        raise model.Refused(
+            f"回答した者 {a.by} の承認は、本番へ反映されるマージの証跡にならない（利用者が --by human で回答する。"
+            "オーガナイザーはリクエストに記録された利用者の回答だけを中継する）"
+        )
+    return None
+
+
+def _relayed(conn: Any, q: Question, a: Answer) -> bool:
+    """`organizer` の回答が、質問のリリースのリクエストに記録された利用者の同じ回答の中継か。"""
+    found = release_request_of(conn, q) if q.gate == RELEASE_GATE else None
+    held = found[2] if found is not None else None
+    reply = held.release if held is not None and held.release is not None else None
+    if not isinstance(reply, dict):
+        return False
+    from ndf.progress.gate.release import ORGANIZER_ANSWERS  # noqa: PLC0415 輪を避ける（release は answering を読む）
+
+    return ORGANIZER_ANSWERS.get(str(reply.get("result"))) == a.value
+
+
+def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> None:
+    """照らした承認の対象と質問の id で証跡の行を作り、`post` で書く（同じ質問の id の証跡があれば書かない）。"""
+    target = seen.binding()
+    if target is None or a.value not in _TRAIL_ANSWERS:
+        return
+    post(trail.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, q.id))
+
+
+def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
-    同じ冪等のキーは書かずに同じ結果を返す。"""
+    同じ冪等のキーは書かずに同じ結果を返す。
+
+    承認の対象を持つ質問への承認・却下は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
+    決定 7）。証跡を書けなければ回答を記録せず、同じ回答を送り直すと続きから回復する。同じ冪等のキーの回答が既に
+    記録されていても、証跡が無ければ書いてから戻る。"""
     if not ACTORS.match(a.by):
         raise model.Refused(f"回答した者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）")
     text = run.notes_text(a.value, a.notes)
@@ -143,8 +229,11 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
         v = run.view(conn, machine_id)
         held = _answered_with_key(v, a.key)
         if held is not None:
-            return _same(held, a, machine_id)
-        q = _refusal(v, a, observe)
+            return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
+        q, seen = _refusal(v, a, observe, st.root)
+        by = _trail_by(conn, q, a, seen)
+        if by is not None:
+            _post_trail(q, a, seen, by, post)
         carried = _carry(conn, machine_id, a.drop, a.reason)
         rejected = _reject_release(conn, q, a)
         extra = {
@@ -152,7 +241,7 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             "gate": q.gate,
             "by": a.by,
             "key": a.key,
-            "seen": a.seen.as_dict(),
+            "seen": seen.as_dict(),
             "dropped": list(a.drop),
             "carried_row": carried,
             "release_request": rejected,
@@ -188,10 +277,24 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload={"outputs": kept}, rev=v.rev)]
 
 
-def _same(held: model.Event, a: Answer, machine_id: str) -> dict[str, Any]:
+def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
+    """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。"""
+    p = run.payload_of(held)
+    seen = Target.from_dict(p.get("seen"))
+    gate = p.get("gate")
+    if seen.binding() is None or not isinstance(p.get("gate_id"), str):
+        return
+    q = Question(str(p["gate_id"]), v.machine_id, str(held.draft.row_key), str(p.get("step")), gate if isinstance(gate, str) else None, ())
+    by = _trail_by(conn, q, a, seen)
+    if by is not None:
+        _post_trail(q, a, seen, by, post)
+
+
+def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], None] = lambda: None) -> dict[str, Any]:
     p = run.payload_of(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等のキー {a.key} は別の回答（{p.get('answer')}・質問 {p.get('gate_id')}）に使った")
+    ensure()
     summary = f"冪等のキー {a.key} の回答は書いてある（事象 {held.seq}）"
     metrics = {"machine_id": machine_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}
     return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
@@ -263,7 +366,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     changed = now.differs(seen)
     if not changed:
         return None
-    if _docs_only_after(q, seen, now, docs_only):
+    if not seen.production and _docs_only_after(q, seen, now, docs_only):
         _accept(st.root, q, now)
         return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
     why = "回答した後に対象が変わった: " + " / ".join(changed)

@@ -31,7 +31,7 @@ from ndf import cli
 from ndf.adapters import git
 from ndf.contracts import chosen, limits, result, routing, worker_kinds, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import durable, durable_locks, loop
+from ndf.core import actors, durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
 from ndf.core.plan.files import read_json, write_json
 from ndf.core.plan.records import (
@@ -56,6 +56,9 @@ RESULTS_DIR = "results"
 # 差し込み `{work_base}` の保存先（状態の保存先の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
+# 承認待ちへの回答の記録と、承認待ちで止まったステップの提示の識別子の控えの保存先（状態の保存先の下）
+ANSWERS_DIR = "answers"
+PRESENTED_DIR = "presented"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
 # 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
@@ -115,6 +118,16 @@ def result_path(state_dir: Path, run: str) -> Path:
     return state_dir / RESULTS_DIR / f"{run}.json"
 
 
+def answer_path(state_dir: Path, step: str) -> Path:
+    """承認待ちのステップ `step` への回答の記録（`ndf ci answer` が読む。#4409 の決定 7）。"""
+    return state_dir / ANSWERS_DIR / f"{step}.json"
+
+
+def presented_path(state_dir: Path, step: str) -> Path:
+    """承認待ちで止まったステップ `step` の提示の識別子（ステップの結果の `metrics.presented_id`）の控え。"""
+    return state_dir / PRESENTED_DIR / f"{step}.json"
+
+
 def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     """回 `run`（キーの名前）の結果のバックアップ（今の形）。終わっていなければ None、新しいバージョンなら `InternalError`。"""
     return read_result(result_path(state_dir, run))
@@ -130,6 +143,8 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]))
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
+    if out["status"] == GATE:
+        write_json(presented_path(ctx.state_dir, step_id), {"step": step_id, "presented_id": out.get("presented_id")})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
@@ -332,7 +347,30 @@ def _recorded_key(root: Path, key: str) -> bool:
 
 def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
     """承認の回答を待つステップごとの、回答 → 次に打つコマンド（結果 JSON の command の形）。"""
-    return {s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a) for a in s.on_answer} for s in inv.plan.steps if s.on_answer}
+    return {
+        s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a, "--by", actors.HUMAN) for a in s.on_answer}
+        for s in inv.plan.steps
+        if s.on_answer
+    }
+
+
+def _record_answer(inv: Invocation, baseline: dict[str, Any], answer: str, by: str) -> None:
+    """待っていたステップへの回答の記録を書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。
+
+    提示の識別子は、待っていたステップの結果の `metrics.presented_id` の控えから写す。無ければ null（`ndf ci answer` が断る）。
+    一時ファイルから置き換えて書く。書けなければ `OSError`。
+    """
+    step = str(baseline["step"])
+    shown = read_json(presented_path(inv.state_dir, step))
+    record = {
+        "step": step,
+        "answer": answer,
+        "by": by,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run": inv.run_id,
+        "presented_id": shown.get("presented_id") if isinstance(shown, dict) else None,
+    }
+    write_json(answer_path(inv.state_dir, step), record)
 
 
 def _spec(inv: Invocation) -> dict[str, Any]:
@@ -483,13 +521,20 @@ def _finish(inv: Invocation) -> dict[str, Any]:
 
 
 def advance(
-    root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None
+    root: Path,
+    inv: Invocation,
+    answer: Optional[str],
+    on_gate: Callable[[dict[str, Any]], None],
+    url: Optional[str] = None,
+    by: Optional[str] = None,
 ) -> dict[str, Any]:
     """回を始めるか続け、終わるか承認の回答を待つ所まで進める。
 
     待つ所に来たら `on_gate(結果)` を DBOS を開いたまま呼ぶ。`on_gate` は結果を出してプロセスを抜ける（戻らない）。
     終わった回（retired/）なら流さずにバックアップの結果を返す（B4）。プランが worker の入力（`worker_kinds.PLAN_KEY`）を
     持てば、流す前にこの回の保存先の `values.json` へ書く（書けなければ流さずに precondition）。
+    承認の回答（`answer`）は回答した者（`by`）と組で受け、送る前に回答の記録（`answer_path`）を書く。`by` が無ければ
+    回答を送らずに invalid で止まる（承認待ちのステップの証跡は、回答した者の分かる回答の記録からだけ書く。#4409）。
     """
     if _finished(root, inv.key):
         return _stored(inv)
@@ -507,6 +552,13 @@ def advance(
         elif answer is not None:
             if baseline is None:
                 return result.stopped(TOOL, "invalid", f"{inv.plan.name} は承認の回答を待っていない")
+            if by is None:
+                detail = f"{inv.plan.name} への回答に回答した者（--by）が無い。返された経路（--answer <回答> --by human）で打ち直す"
+                return result.stopped(TOOL, "invalid", detail)
+            try:
+                _record_answer(inv, baseline, answer, by)
+            except OSError as exc:
+                return result.stopped(TOOL, "precondition", f"{inv.plan.name} の回答の記録を書けない: {exc}")
             durable.send(inv.workflow_id, answer, TOPIC_ANSWER)
         else:
             baseline = None

@@ -1,6 +1,6 @@
 """サブコマンド `plan`: プランの実行の回を流す・待つ・待ちの一覧を出す。
 
-ndf plan next <plan.json> [--from <ステップ>] [--state-dir <保存先>] [--answer <回答>] [--set <名前>=<値>]... [--fresh]
+ndf plan next <plan.json> [--from <ステップ>] [--state-dir <保存先>] [--answer <回答> --by <回答した者>] [--set <名前>=<値>]... [--fresh]
     回を始めるか続け、終わるか承認の回答を待つ所まで進める。回答を待つ所では承認ゲートの結果（routes）を出して抜ける。
     `--fresh` は前の回の耐久の記録に戻らず、新しい回で先頭のステップから流す
 ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--fresh] [--queue-dir <保存先>]
@@ -30,7 +30,7 @@ from typing import Any, NamedTuple, NoReturn, Optional
 from ndf import identity
 from ndf.contracts import causes, exit_codes, internal, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import durable
+from ndf.core import actors, durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
@@ -63,12 +63,14 @@ def _exit_with(out: dict[str, Any]) -> NoReturn:
 
 
 def _cmd_next(a: argparse.Namespace) -> int:
+    if a.by is not None and not actors.ACTORS.match(a.by):
+        return result.emit(result.stopped(TOOL, "invalid", f"回答した者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）"))
     root = _root()
     cwd = Path.cwd()
     try:
         with runner.plan_lock(runner.state_dir_of(Path(a.plan), a.state_dir, cwd)):
             inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, runner.RunOptions(_pairs(a.sets, "--set"), a.fresh))
-            return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
+            return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url(), a.by))
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except durable.StoreStopped as exc:
@@ -219,6 +221,7 @@ def _parser() -> argparse.ArgumentParser:
     nx.add_argument("--from", dest="start")
     nx.add_argument("--state-dir")
     nx.add_argument("--answer")
+    nx.add_argument("--by", help="回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す")
     nx.add_argument("--set", dest="sets", action="append")
     nx.add_argument("--fresh", action="store_true")
     nx.set_defaults(fn=_cmd_next)
