@@ -53,9 +53,9 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `mvv_material_decide.redlines` | `Citation`（新設）、モジュール | `items_of`・`body_path`・`parse_citation`・`citation_errors`（新設）・`count_signals`（変更） |
+| `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | `mvv_material_decide.redlines` | `MvvError`（`mvv.py` から移す。`mvv.MvvError` は同じクラスを指す。`mvv` を読めない `body_path` が送出するため）・`Citation`（新設）、モジュール | `items_of`・`body_path`・`parse_citation`・`citation_errors`（新設）・`count_signals`（変更） |
 | `src/ndf/domains/records/mvv.py` | 変更 | MVV の設定・本文・記録の読み書き | `git`・`adapters.markdown`・`mvv_decide`・`contracts` | `Snapshot`（新設）、モジュール | `current`・`decl_from`・`_write_verified`・`fenced_lines`・`decision_lines`・`record_review`・`record_key`（新設）・`principles`（`mvv_gate` から移す） |
-| `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ） |
+| `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。正しいパスなら返す値は同じ）・`mvv_state`・`mvv_checked`（変更。不正なパスを既存の停止結果へ変える） |
 | `src/ndf/adapters/git.py` | 変更 | Git の起動 | — | `Git`（変更） | `run_bytes`（新設。標準出力をバイト列のまま返す） |
 | `src/ndf/core/converge/worktree.py` | 変更 | PR の worktree の同期 | `git` | モジュール | `fetch_head`・`sync_worktree`（変更。`base_branch` があれば同じ 1 回の fetch でベースも取る） |
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | 承認ゲートの直前の判定 | `mvv` | モジュール | `principles` を消し `mvv.principles` を呼ぶ |
@@ -105,6 +105,10 @@ plugins/ndf/
 - `cmd_scope`（`review-scope`）: 手元の `<リモート>/<ベース>` を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。承認済みのハッシュの無い設定は、本文を見ずに `unapproved` の識別子にする。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「再利用の条件に MVV を足す」）。ネットワークに出ずスナップショットを書かない
 - `items_of`
   - 事後条件: `## Value` の下の行頭の `<番号>.` から `Value <番号>` を作る。`## 必ず人の承認が要る操作` の表と共通原則の表から `P<番号>`・`C<番号>` を作る（`mvv_material_decide.redlines` を使う）。`## Mission`・`## Vision` があれば `Mission`・`Vision` を作る。重複を除き、出た順
+- `preflight.mvv_state`・`mvv_checked`（手順 0 と承認ゲート）
+  - `mvv_state` は、`mvv_decide.status(decl, None)` が `unapproved` なら本文のパスを解かずに返す（今と同じ）。それ以外で `mvv_body` が `MvvError` を送出したら `unreadable` にする。例外を外へ出さない
+  - `mvv_checked` は、状態が `unreadable` で設定を読めているとき、`body_path(decl)` の `MvvError` の文（設定のパスと `body` の値）を `stopped`（`precondition`）の `summary` に使う。`MvvError` でなければ今の文
+  - 承認ゲートの `mvv_gate.base_facts` は `mvv_state` が `approved` のときだけ `mvv_body` を呼ぶので、不正なパスは状態 `unreadable` の事実になり、機械の検査 1 が今どおり承認ゲートを省かない側へ倒す（`mvv_gate` に受ける箇所を足さない）
 
 ### 異常系の処理
 
@@ -114,7 +118,7 @@ plugins/ndf/
 | `current` | 設定が無い | 解決したコミットのツリーに `.ndf/mvv.json` のエントリが無い | `git ls-tree` が成功して出力が空 | 状態 `absent` を返す | `ok`・`outputs.mvv.state: absent` | 無し |
 | `current` | 設定の有無を確かめられない | `git ls-tree` の失敗・設定のエントリが通常のファイルでない・設定の blob の欠損 | `ls-tree` の終了コードと出力・`git show` の失敗 | `MvvError`（`absent` にしない） | `refused`（`precondition`）、`summary` に `.ndf/mvv.json` とコミット | 直して打ち直す |
 | `current` | 承認済みのハッシュがあるのに本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
-| `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
+| `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError`。`current` はそのまま返し、`preflight.mvv_state` は `unreadable` に変える | `current` は `refused`（`precondition`）、手順 0 は `stopped`（`precondition`）で、どちらも `summary` に設定のパスと値。承認ゲートは省かずに人へ問う | 設定を直して打ち直す |
 | `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）の結果を書く。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
 | `current` | 設定が壊れている・旧い形 | JSON でない・`_refuse_legacy` | `decl_at` | `MvvError` を呼び出し元へ返す | `refused`（`precondition`）、`summary` に理由 | 設定を直して打ち直す |
 | `_mvv_current` | 取得に失敗した | ネットワーク・リモートの名前 | `fetch_branch_or_raise` の `GitError` | 古い参照を読まずに止める | `refused`（`precondition`）、`summary` に取得の誤り | 打ち直せる |
@@ -150,6 +154,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
 | `current` | ベースの承認済みの本文からスナップショットを書き、バージョン 11・項目を返す。作業場所の本文が違ってもスナップショットはベースの中身。既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身で 2 回打つと書き直さずファイルは 1 つ。同じ名前で違う中身のファイルは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | 解決できない参照・設定はあるが本文が無い・壊れた設定・設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない）。`mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・スナップショットなし）。承認済みのハッシュの無い設定だけがあり本文が無いベース → `unapproved`（止まらず本文も読まない） |
+| `mvv_state`・`mvv_checked` | 既定外の正しいパス → 今と同じ状態 | 承認済みのハッシュの無い設定は、パスが不正でも `unapproved` | 承認済みのハッシュがあり `body` が絶対パス・`../x.md`・空 → `mvv_state` は `unreadable`、`mvv_checked` は `stopped` で `summary` に `body` の値、`base_facts` は例外を出さず状態 `unreadable` |
 | `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しいバージョンを返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
 | `sync_worktree`・`fetch_head` | `base_branch` を渡すと 1 回の `git fetch` に head とベースの 2 本の refspec が並び、リモート追跡参照のベースが新しくなる。`drive._start` はその後に `current` を `<リモート>/<ベース>` で呼ぶ（手元のベースが古く、リモートで新しい MVV が承認済みのとき、新しい版を読み、前の収束を再利用しない） | `base_branch` が None か head と同じ → refspec は 1 本（今と同じ） | ベースを取れない → 同期ごと失敗し、`current` を呼ばない |
 | `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |
