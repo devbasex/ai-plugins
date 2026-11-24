@@ -538,12 +538,12 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `review_items` | `src/ndf/checks/spec_render.py` | 新設 | `review_items(root: Path) -> list[dict[str, Any]]` | 項目の表（`issues/issue-1142-design-review-routing.md`）の行から、項目ごとの行き先の並びを組み立てる |
+| `review_items` | `src/ndf/checks/spec_render.py` | 新設 | `review_items(source: Path, columns: Mapping[str, str]) -> list[dict[str, Any]]` | 項目の表（`issues/issue-1142-design-review-routing.md`）の行から、項目ごとの行き先の並びを組み立てる |
 | `check` | `src/ndf/checks/spec_docs.py` | 変更 | `check(scope, rules, write_spec, written)`（変えない） | 生成した `review_items` と、`children.json` に書かれた中身の差分を指摘にする。行き先の無い項目も指摘にする |
 
 - `review_items`
-  - 事前条件: 項目の表が「列の読み方」の 6 列（項目・行き先の子・順番・新設か追補か・要求の行・版）を持つ
-  - 事後条件: 1 項目につき `{"id", "text_sha", "routed_to", "order", "kind", "requirement_line", "release"}` の 1 行。`routed_to` が空の項目は、値を空のまま返す（落とすのは `check` の役目）
+  - 事前条件: 項目の表が「列の読み方」の 7 列（項目・要旨・行き先の子・順番・新設か追補か・要求の行・版）を持つ
+  - 事後条件: 1 項目につき `{"id", "text_sha", "routed_to", "order", "kind", "requirement_line", "release"}` の 1 行（項目の配列）。`text_sha` は表の要旨のセル（前後の空白を除いた UTF-8）の sha256 の 16 進の先頭 12 文字で、Issue の本文は使わない。`routed_to` が空か仮の `—` の項目は、値を空のまま返す（落とすのは `check` の役目）
   - 副作用: 無し（表を読むだけ）
 
 ### 異常系の処理
@@ -552,7 +552,9 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `review_items` | 項目の表を読めない | ファイルが無い・列が足りない | `review_items` | 止める | `ndf check` が `stopped`・`config_broken`・終了コード 2 | 表を直してから打ち直す |
 | `check` | 行き先の無い項目がある | 表の「行き先の子」の列が空 | `spec_docs.check` | 違反にする（項目の番号を挙げる） | `ndf check` が `stopped`・`check_failed`・終了コード 1 | 表に行き先を書いてから打ち直す |
+| `check` | 11.x へ回した項目の対応表の行き先が、子の記号（`Z<数>`）・`#<Issue 番号>`・`作らない` のどれでもない | 対応表の「11.x の行き先」の列が空・仮の `—`・別の語 | 同上 | 違反にする（項目の番号を挙げる） | 同上 | 対応表に行き先を書いてから打ち直す |
 | `check` | 生成物と `children.json` が食い違う | 手で写した・表を直して生成し直していない | 同上 | 違反にする | 同上 | `ndf check --write-spec` で生成し直す |
+| `check` | 項目の表・対応表・`children.json`・書き込み先がリポジトリ（プラグイン）の外を指すか、シンボリックリンクを通る | リンクの書き換え | `model.contained` | 止める（読み書きしない） | `ndf check` が `stopped`・`config_broken`・終了コード 2 | リンクを直してから打ち直す |
 
 ### 内部のデータと定数
 
@@ -561,7 +563,7 @@ plugins/ndf/
 | `spec.review_items_source` | 設定値（項目の表のパス） | `src/ndf/checks/rules.json` | `issues/issue-1142-design-review-routing.md` |
 | `review_items` | データ（生成物） | `src/ndf/checks/children.json` | 生成する（手で書かない） |
 
-**項目の表はリリース対象の外（`issues/`）にあるため、検査の見る範囲（`NDF_PATHS`）へ足す。** 足さないと CI が表の変更で動かない。
+**項目の表と対応表はリリース対象の外（`issues/`）にあるため、ワークフローの `REVIEW_ITEMS_PATHS` に置き、表だけを変える PR では `ndf check --only review-items` だけを打つ。** 置かないと CI が表の変更で動かず、`NDF_PATHS` へ足すと表だけの PR で全体の検査が走る。`--only review-items` だけのときは、項目の表・対応表・`children.json` だけを読む。
 
 ### 単体テストの観点
 

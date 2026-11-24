@@ -62,6 +62,8 @@ env:
   # NDF の検査の入力（リポジトリの根から）。Pull Request の差分がこれに当たるときだけ NDF の検査を打つ。
   # ndf check は根の .ndf/*.json（宣言のスキーマ）と、.ndf/glossary.json の source の用語集（禁止語）も読む
   NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
+  # ndf check の規則 review-items だけが読む表（設計レビューの項目の表と 11.x の対応表）。これだけに当たる Pull Request では、その規則だけを打つ
+  REVIEW_ITEMS_PATHS: issues/issue-1142-design-review-routing.md issues/issue-3388-design-routing.md
 
 jobs:
   script-structure-check:
@@ -75,7 +77,7 @@ jobs:
         id: scope
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            for out in ndf lock_root lock_ndf lock_playwright; do
+            for out in ndf review_items lock_root lock_ndf lock_playwright; do
               echo "$out=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -84,6 +86,8 @@ jobs:
           touched() { [ -n "$(git diff --name-only HEAD^1 HEAD -- "$@")" ] && echo true || echo false; }
           # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
           echo "ndf=$(touched $NDF_PATHS)" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2086 # 同上
+          echo "review_items=$(touched $REVIEW_ITEMS_PATHS)" >> "$GITHUB_OUTPUT"
           pw=plugins/playwright-kit/skills/playwright-kit-ops
           {
             echo "lock_root=$(touched pyproject.toml uv.lock "$pw/pyproject.toml" "$pw/uv.lock")"
@@ -148,6 +152,10 @@ jobs:
       - name: Check the NDF plugin
         if: steps.scope.outputs.ndf == 'true'
         run: plugins/ndf/bin/ndf check
+      # 表だけの差分では全体の検査を打たず、行き先と生成済みの review_items の照合だけを打つ（全体の検査は同じ規則を含む）
+      - name: Check the design review items
+        if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.review_items == 'true'
+        run: plugins/ndf/bin/ndf check --only review-items
       # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
       - name: Check that the root lock matches its declaration
         if: steps.scope.outputs.lock_root == 'true'

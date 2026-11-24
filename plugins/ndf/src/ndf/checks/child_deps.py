@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope, Source, module_rel, read_json_text, source_imports
+from ndf.checks.model import CheckError, Finding, Scope, Source, contained, module_rel, read_json_text, source_imports
 
 RULE = "child-deps"
 # 子の表のコピーの保存先（プラグインの根からの相対パス）
@@ -232,5 +232,5 @@ def check(scope: Scope, children: Children, max_per_slot: int) -> list[Finding]:
 
 def apply(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """見る範囲のプラグインの `children.json` を読み、規則 `child-deps` を当てる（検査のエントリポイントが呼ぶ）。"""
-    path = scope.plugin_root / CHILDREN_REL
-    return check(scope, load_children(path, scope.rel(path)), rules["child_deps"]["max_per_slot"])
+    path = contained(scope.plugin_root, CHILDREN_REL)
+    return check(scope, load_children(path, scope.rel(scope.plugin_root / CHILDREN_REL)), rules["child_deps"]["max_per_slot"])

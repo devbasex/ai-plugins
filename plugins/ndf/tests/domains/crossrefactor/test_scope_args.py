@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossrefactor import cli, range_decide, scope
+from ndf.domains.crossrefactor import cli, range_decide, scope, store, workspace
 
 
 def test_scope_keeps_code_files_and_drops_documents_and_covered_items() -> None:
@@ -34,6 +34,17 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
     got = last_result(capsys.readouterr().out)
     assert code == 0 and got["status"] == "ok"
     assert got["items"][0]["kind"] == "state" and got["metrics"]["open"] == 0
+
+
+def test_state_command_drops_contract_fields_of_items_saved_before_the_update(gitwork, capsys, last_result, monkeypatch, tmp_path) -> None:
+    root = tmp_path / "rf3"
+    monkeypatch.setattr(workspace, "root_of", lambda *_: root)
+    gitwork.make({"a.py": "a = 1\n"})
+    kept = {"id": "I-001", "path": "a.py", "symbol": "f", "title": "t", "status": "open", "tier": "high"}
+    store.save(store.path_of(root), {"items": [{**kept, "severity": "high", "acceptance": "全部"}]})
+    code = cli.main(["state", "--pr", "3", "--work", str(gitwork.work)])
+    got = last_result(capsys.readouterr().out)
+    assert code == 0 and got["items"][1] == {"kind": "item", **kept}
 
 
 # 現状固定: 設定のテストの置く場所の扱い（strip は判定だけに使い、採るときは末尾の / だけを除く）
