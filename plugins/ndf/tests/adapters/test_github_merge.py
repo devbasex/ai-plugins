@@ -120,10 +120,11 @@ def _merge_with_expect_verifies_right_before_sending_and_does_not_reread_the_pul
     ]
 
 
-def _merge_refuses_when_the_pr_changed_after_the_verdict(verify):
+def _merge_refuses_when_the_pr_changed_after_the_verdict(verify, kind):
+    """r1-6: マージ先か HEAD が動いたら `TARGET_MOVED`（呼び手が承認を取り直す）、ベースリポジトリが違えば `refused`。"""
     wire = Wire(verify=verify)
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
-    assert (out.merged, out.kind) == (False, "refused")
+    assert (out.merged, out.kind) == (False, kind)
     assert ("PUT", f"/repos/{REPO}/pulls/7/merge") not in wire.seen
 
 
@@ -163,14 +164,14 @@ def _queue_is_verified_in_the_same_request_and_reread_after_enqueue():
 def _queue_refuses_when_the_base_changed_before_enqueue():
     wire = Wire(queue=_queue_data(base="release"), put=_queue_refusal())
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
-    assert (out.merged, out.kind) == (False, "refused")
+    assert (out.merged, out.kind) == (False, github.github_merge.TARGET_MOVED)
     assert ("GRAPHQL", "enqueue") not in wire.seen
 
 
 def _queue_dequeues_when_the_base_changed_after_enqueue():
     wire = Wire(queue=_queue_data(), put=_queue_refusal(), after=_pull(base="release"))
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
-    assert (out.merged, out.kind) == (False, "refused")
+    assert (out.merged, out.kind) == (False, github.github_merge.TARGET_MOVED)
     assert ("GRAPHQL", "dequeue") in wire.seen
 
 
@@ -211,10 +212,12 @@ def _viewer_login_after_branch_file_sends_no_request():
                 _merge_refuses_when_the_pr_changed_after_the_verdict,
                 id=f"merge_refuses_when_the_pr_changed_after_the_verdict-{label}",
                 verify=v,
+                kind=k,
             )
-            for label, v in zip(
+            for label, v, k in zip(
                 ["base-changed", "head-changed", "other-repo"],
                 [_verify_data(base="release"), _verify_data(head=OTHER), _verify_data(repo="o/other")],
+                [github.github_merge.TARGET_MOVED, github.github_merge.TARGET_MOVED, "refused"],
                 strict=True,
             )
         ],

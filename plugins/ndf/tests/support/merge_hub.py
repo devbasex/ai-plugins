@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from ndf.adapters import github_merge
 from ndf.adapters.github import Authored, FileAt, MergeExpect, MergeOutcome, Pull
 
 REPO = "o/r"
@@ -106,7 +107,7 @@ class MergeHub:
         now = self.pull_at_merge or self.pulls_of[number]
         if expect is not None:
             if now.base_ref != expect.base or now.head_sha != expect.head:
-                return MergeOutcome(False, "refused", "確かめで変わった", now.head_sha)
+                return MergeOutcome(False, github_merge.TARGET_MOVED, "確かめで変わった", now.head_sha)
             text, oid = (self.files_at_merge or self.files).get(expect.base, (None, None))
             if oid != expect.config_oid:
                 stop = expect.rejudge(text)

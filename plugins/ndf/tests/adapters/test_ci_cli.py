@@ -477,6 +477,15 @@ def _merge_without_a_login_stops_apart_from_approval_stale(monkeypatch, capsys, 
     assert hub.merged == [] and hub.dequeued == [7] and "login" in _out(capsys, last_result)["cause"]["detail"]
 
 
+def _merge_moved_right_before_sending_is_approval_stale(monkeypatch, capsys, last_result, gate, code):
+    """r1-6: 直前の照合で HEAD が動いたら、承認の対象を持つ呼び手は approval_stale、持たない呼び手は refused で止まる。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pull_at_merge=merge_hub.pull(head="f" * 40)))
+    _approve(hub)
+    approved = ["--approved-head", merge_hub.HEAD, "--approved-base", "main"] if gate == "stale" else []
+    assert ci_cli.main(["merge", "--pr", "7", "--production-gate", gate, *approved]) == causes.exit_code(code)
+    assert hub.merged == []
+
+
 def _merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, last_result):
     """決定 3: 別のリポジトリから読んだ設定（自動反映の行が無くても）は unknown として承認を求める。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c1")}))
@@ -674,6 +683,15 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
             )
         ],
         scenes.scene(_merge_does_not_count_trails_of_another_login, id="merge_does_not_count_trails_of_another_login"),
+        *[
+            scenes.scene(
+                _merge_moved_right_before_sending_is_approval_stale,
+                id=scenes.label("merge_moved_right_before_sending_is_approval_stale", i, (g,)),
+                gate=g,
+                code=c,
+            )
+            for i, (g, c) in enumerate([("stale", "approval_stale"), ("defer", "refused")])
+        ],
         scenes.scene(_merge_without_a_login_stops_apart_from_approval_stale, id="merge_without_a_login_stops_apart_from_approval_stale"),
         scenes.scene(_merge_reads_the_base_branch_of_the_pr_repository, id="merge_reads_the_base_branch_of_the_pr_repository"),
         scenes.scene(_merge_rejudges_when_the_config_changed_before_sending, id="merge_rejudges_when_the_config_changed_before_sending"),

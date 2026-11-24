@@ -304,16 +304,16 @@ def _verified(repo: dict) -> Verified:
 
 
 def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
-    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD・ベースリポジトリが違えば `refused`。
-    設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を足さない）。送ってよければ None。"""
+    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD が違えば `github_merge.TARGET_MOVED`、
+    ベースリポジトリが違えば `refused`。設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を
+    足さない）。送ってよければ None。"""
+    moved = github_merge.TARGET_MOVED
     if fresh.base != expect.base:
         return MergeOutcome(
-            False, "refused", f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
+            False, moved, f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
         )
     if not git.sha_matches(expect.head, fresh.head):
-        return MergeOutcome(
-            False, "refused", f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head
-        )
+        return MergeOutcome(False, moved, f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
     if not same_repo(fresh.repo, repo):
         return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
     if fresh.config.oid != expect.config_oid:
@@ -915,7 +915,8 @@ class GitHub:
         return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, variables)
 
     def _put_in_queue(self, pull: Pull, node_id: Any, jump: bool, expect: Optional[MergeExpect]) -> Optional[MergeOutcome]:
-        """PR を HEAD のままキューへ入れる。`expect` があれば入れた後に読み直し、マージ先が変わっていれば外して断る。"""
+        """PR を HEAD のままキューへ入れる。`expect` があれば入れた後に読み直し、マージ先が変わっていれば外して
+        `github_merge.TARGET_MOVED` で断る。"""
         self.graphql(github_merge.ENQUEUE_MUTATION, {"id": node_id, "head": pull.head_sha, "jump": bool(jump)})
         if expect is None:
             return None
@@ -924,7 +925,7 @@ class GitHub:
             return None
         self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node_id})
         detail = f"#{pull.number} のマージ先がキューへ入れた後に {expect.base} から {after.base_ref} へ変わった。キューから外した"
-        return MergeOutcome(False, "refused", detail, after.head_sha)
+        return MergeOutcome(False, github_merge.TARGET_MOVED, detail, after.head_sha)
 
     def in_merge_queue(self, number: int) -> bool:
         """PR `number` が今マージキューに入っているか（キューが外したら偽）。"""

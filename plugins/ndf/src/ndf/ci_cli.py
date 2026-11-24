@@ -21,6 +21,7 @@ from typing import Any, Optional
 from ndf import cli
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
+from ndf.adapters import github_merge
 from ndf.adapters.ci import (
     Classifier,
     FailedTestSource,
@@ -396,6 +397,11 @@ def _merged(
     items = _pr_item_list(target.number)
     if outcome.kind == _REJUDGED:
         return _unapproved(args, target, Verdict(outcome.detail))
+    if outcome.kind == github_merge.TARGET_MOVED:
+        # 承認の対象を持つ呼び手（承認ゲートの後のマージ・stale）は、初めの読み取りで見つけたときと同じく承認を取り直す
+        if args.approved_head is not None or args.production_gate == production_merge.STALE:
+            return _stale(target, f"{outcome.detail}（承認ゲートから質問し直す）")
+        return result.stopped(TOOL, "refused", outcome.detail, instance=outcome.head_sha, items=items)
     if outcome.merged:
         metrics: dict[str, Any] = {"merge": "merged", "verdict": verdict.value}
         if approved_by is not None:

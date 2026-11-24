@@ -136,7 +136,7 @@ plugins/ndf/
 | `_merge` | 承認の時点と違う | `--approved-head`・`--approved-base` が今の HEAD・マージ先と違う。`--approved-base` が空 | 照合（判定の前） | 止める | `stopped`（`approval_stale`） | 工程の実行側が `stale_routes` を載せる |
 | `_merge` | 設定を読めない | ファイルが無い・JSON でない・GraphQL の応答のリポジトリが違う | `_judge_pr` | 既定値で続ける（`UNKNOWN` として承認を求める） | 承認が要るときの出力 | 再実行できる |
 | `_merge` | GitHub に届かない | 通信・上限 | `GitHubError` | 呼び出し元へ返す（`main` の既存の変換） | `stopped`（`infra_wait` か `unknown`） | 再実行できる |
-| `_merge` | 判定の後にマージ先か HEAD が変わった | 直前の照合が違いを見つけた | `GitHub.merge` の照合 | 止める | `stopped`（`refused`） | 再実行で判定からやり直す |
+| `_merge` | 判定の後にマージ先か HEAD が変わった | 直前の照合が違いを見つけた（`github_merge.TARGET_MOVED`） | `GitHub.merge` の照合 | 止める | 承認の対象を持つ呼び出し（`--approved-head` か `--production-gate stale`）は `stopped`（`approval_stale`）、ほかは `stopped`（`refused`） | `approval_stale` は工程が承認を取り直す。`refused` は再実行で判定からやり直す |
 | `_unapproved` | 提示のファイルを書けない | 保存先の権限・容量 | `OSError` | 止める | `stopped`（`precondition`） | 再実行できる |
 
 ### 処理の手順
@@ -462,7 +462,7 @@ plugins/ndf/
 | `merge` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False, expect: Optional[MergeExpect] = None) -> MergeOutcome` | `expect` があれば、要求を送る直前に照らす |
 | `_merge_with` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str], method: Optional[str], route: _MergeRoute, expect: Optional[MergeExpect] = None) -> MergeOutcome` | 最初の PR の読み直しをやめ、方式の問い合わせの後・送る直前に `_verify` を呼ぶ。`expect` が無ければ今と同じ |
 | `_enqueue` | `adapters/github.py` | 変更 | `(self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None) -> Optional[MergeOutcome]` | キューの状態の問い合わせに `baseRefName`・HEAD・設定の oid と本文を足して照らし、投入の後に PR を読み直してマージ先が変わればキューから外す |
-| `_verify` | `adapters/github.py` | 新設 | `(self, fresh: Verified, expect: MergeExpect) -> Optional[MergeOutcome]` | 照合の応答と期待を比べ、マージ先か HEAD が違えば `refused`。oid だけが違えば `expect.rejudge(本文)` の結果を返す |
+| `_verify` | `adapters/github.py` | 新設 | `(self, fresh: Verified, expect: MergeExpect) -> Optional[MergeOutcome]` | 照合の応答と期待を比べ、マージ先か HEAD が違えば `github_merge.TARGET_MOVED`、ベースリポジトリが違えば `refused`。oid だけが違えば `expect.rejudge(本文)` の結果を返す |
 
 - `merge`
   - 事前条件: `expect.base`・`expect.head` は `ndf ci merge` が判定に使った値
@@ -474,9 +474,9 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `merge` | 照合で断る・GitHub が断る | 下の行の原因と、今と同じ断り（`base_conflict`・`not_ci` など） | `_verify`・送信 | 呼び出し元へ返す（`MergeOutcome`） | `ndf ci merge` の `stopped` | 再実行で判定からやり直す |
-| `_verify` | マージ先か HEAD が違う | 判定の後に PR が変わった | 照合 | 止める | `MergeOutcome(False, "refused", …)` | 再実行で判定からやり直す |
+| `_verify` | マージ先か HEAD が違う | 判定の後に PR が変わった | 照合 | 止める | `MergeOutcome(False, github_merge.TARGET_MOVED, …)`。`ndf ci merge` が `approval_stale` か `refused` に写す | 再実行で判定からやり直す |
 | `_verify` | 設定の oid が違い、やり直した判定で承認が要って証跡が無い | 判定の後に設定が変わった | `rejudge` | 止める | `rejudge` が返した結果（`--production-gate` の形） | 同上 |
-| `_enqueue` | 投入の後にマージ先が変わった | キューへ入れた後の変更 | 投入の後の読み直し | 止める（`dequeue` してから） | `refused` | 同上 |
+| `_enqueue` | 投入の後にマージ先が変わった | キューへ入れた後の変更 | 投入の後の読み直し | 止める（`dequeue` してから） | `github_merge.TARGET_MOVED` | 同上 |
 | `branch_file` | リポジトリが違う | PR の応答と読んだリポジトリが違う | 応答の `nameWithOwner` | 呼び出し元へ返す（`FileAt.repo` を呼び手が比べ `UNKNOWN`） | 無し | — |
 
 ### 内部のデータと定数
@@ -506,7 +506,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `merge` | 照合が同じで送る。要求の数が決定 3 の表と同じ | `expect` が無い呼び出しは今と同じ要求の数 | 方式の問い合わせの間・キューの状態の問い合わせの間のマージ先の変更で `refused` |
+| `merge` | 照合が同じで送る。要求の数が決定 3 の表と同じ | `expect` が無い呼び出しは今と同じ要求の数 | 方式の問い合わせの間・キューの状態の問い合わせの間のマージ先の変更で `github_merge.TARGET_MOVED` |
 | `_verify` | oid が違い `rejudge` が `None` でそのまま送る | oid の違いで設定を読み直す要求を足さない | `rejudge` が結果を返すと送らない |
 | `_enqueue` | 投入して `ci_pending` | 既にキューにあれば入れ直さない | 投入の後のマージ先の変更で `dequeue` |
 
