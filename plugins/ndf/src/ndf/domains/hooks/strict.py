@@ -53,6 +53,8 @@ _MAX_DEPTH = 8
 _URL_RE = re.compile(r"^https?://[^/]+/([^/]+/[^/]+)/pull/\d+")
 # gh が `-R` の代わりに対象のリポジトリとして読む環境変数（https://cli.github.com/manual/gh_help_environment）
 _GH_REPO = "GH_REPO"
+# hook の入力の、Tool の引数のキー（`context.HookContext.tool_input` も読む）
+TOOL_INPUT = "tool_input"
 # 作業ディレクトリを移す語のうち、移った先を字句から決められないもの
 _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
 # ファイルのスクリプトを今のシェルで読む語
@@ -280,7 +282,7 @@ def _call_verdict(ctx: ShellContext, words: List[str]) -> Optional[Verdict]:
 def _command_text(raw: object) -> Optional[str]:
     if not isinstance(raw, dict) or raw.get("hook_event_name") != "PreToolUse" or raw.get("tool_name") != "Bash":
         return None
-    tool_input = raw.get("tool_input")
+    tool_input = raw.get(TOOL_INPUT)
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     return command if isinstance(command, str) else None
 

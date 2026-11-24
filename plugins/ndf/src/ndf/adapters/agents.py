@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -202,7 +203,8 @@ class AgentState(StrEnum):
 
 
 class AgentStatus(NamedTuple):
-    """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。"""
+    """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。
+    `public` は `detail` が手元のパスを含むときの公開用の文面（無ければ `detail` をそのまま公開してよい。PR 4461 の r1-1）。"""
 
     agent: str
     state: str
@@ -210,6 +212,12 @@ class AgentStatus(NamedTuple):
     detail: str
     warnings: tuple[str, ...]
     restore: Optional[str] = None
+    public: Optional[str] = None
+
+    @property
+    def shown(self) -> str:
+        """PR のコメントなど公開される場所へ載せる文面。"""
+        return self.detail if self.public is None else self.public
 
 
 def stall_seconds(agent: str) -> float:
@@ -295,13 +303,20 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
         proc = _start(spec)
     except OSError as exc:
-        return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", ())
+        # 文面はログ・実行ファイルの絶対パスを含み得るので、公開用はファイル名と理由だけにする（PR 4461 の r2-1）
+        return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", (), public=f"起動できない: {_os_error_public(exc)}")
     return watch(proc, spec, poll)
 
 
-def _not_started(spec: Launch, state: AgentState, detail: str) -> AgentStatus:
+def _os_error_public(exc: OSError) -> str:
+    """`OSError` の、パスをファイル名だけに縮めた文面。"""
+    why = exc.strerror or type(exc).__name__
+    return why if exc.filename is None else f"{why}: {Path(os.fsdecode(exc.filename)).name}"
+
+
+def _not_started(spec: Launch, state: AgentState, detail: str, public: Optional[str] = None) -> AgentStatus:
     record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
-    return AgentStatus(spec.agent, state, None, detail, ())
+    return AgentStatus(spec.agent, state, None, detail, (), public=public)
 
 
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
@@ -319,9 +334,9 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
 
 def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
-        cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd)
+        cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd, args=spec.argv[1:])
     except cli_floor.TooOld as exc:
-        return _not_started(spec, AgentState.REFUSED, str(exc))
+        return _not_started(spec, AgentState.REFUSED, str(exc), exc.public)
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)

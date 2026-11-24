@@ -369,7 +369,7 @@ def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resol
         # 全差分に決まっているので、範囲を変えない MVV を読まない
         return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
     now, unsure = _local_mvv(wt, based.mvv_ref)
-    basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
+    basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now)
     prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
     found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
@@ -459,25 +459,26 @@ def _policy(wt: Path) -> Policy:
     return Policy(main, participants.declared_allowed(main))
 
 
-def _reviewers(requested: Optional[list[str]], policy: Policy) -> tuple[str, ...]:
-    """今回の相手役（`--reviewer` の名指しと、メインディレクトリの `allowed` の中の既定）。`run` と `review-scope` が同じに決める。"""
-    return participants.assign(requested if requested else (), allowed=policy.allowed)  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
+def _reviewers(requested: Optional[list[str]], policy: Policy) -> participants.Seats:
+    """今回の席（`--reviewer` の名指しと、メインディレクトリの `allowed` の中の既定。足りない席は claude で埋める。#3955）。
+    `run` と `review-scope` が同じに決める。"""
+    return participants.review_seats(requested if requested else (), policy.allowed)  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
 
 
 class Resolved(NamedTuple):
     """実行者の設定から決まる値（`run` と `review-scope` が同じに決める。PR 3944 の r3-4・r4-3）。"""
 
     policy: Policy
-    reviewers: tuple[str, ...]
+    seats: participants.Seats
     settings: ReviewSettings
 
 
 def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
     """メインディレクトリと `allowed`、今回の相手役、レビューの設定を求める。"""
     policy = _policy(wt)
-    reviewers = _reviewers(requested, policy)
+    seats = _reviewers(requested, policy)
     # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-    return Resolved(policy, reviewers, read_settings(policy.main, wt))
+    return Resolved(policy, seats, read_settings(policy.main, wt))
 
 
 def _run_config(args: argparse.Namespace) -> RunConfig:
@@ -491,7 +492,9 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=got.reviewers,
+        reviewers=got.seats.names,
+        may_fill=got.seats.may_fill,
+        prefilled=tuple(scope_decide.Filled(s, None, str(got.seats.reason)) for s in got.seats.added),
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
         main=got.policy.main,
@@ -740,7 +743,8 @@ def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
     merge = _with_state(add("merge-fix"))
     merge.add_argument("--file", required=True)
     merge.add_argument("--findings")
-    scope = add("review-scope")
+    # 範囲は起動の前に分かる席（名指しと allowed）で決め、始める前の確かめやラウンドの中で埋める席は含まない（#3955）
+    scope = add("review-scope", help="次のラウンドの範囲。起動の前に分かる席で決め、始める前の確かめやラウンドの中で埋める席は含まない")
     scope.add_argument("worktree")
     scope.add_argument("--purpose", required=True)
     scope.add_argument("--base", required=True)

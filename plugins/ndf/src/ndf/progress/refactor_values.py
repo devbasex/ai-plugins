@@ -11,13 +11,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters.git import Git
-from ndf.core import branch_strategy, route
+from ndf.core import branch_strategy, issue_docs, route
 from ndf.core.plan import inputs_decide as plan_inputs
 from ndf.progress import command, definition
 
 
 REFACTOR_CANDIDATES = "refactor-candidates.md"
-PLAN_FILE = "issues/issue-{number}-plan.md"
 # implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
 TIMING_HEADING = "リファクタリングの時機"
 SPRINT_END = "スプリントの終わり"
@@ -52,7 +51,7 @@ def _candidates(worktree: str, issues: Sequence[Any]) -> list[str]:
     """課題の実装計画のスプリントの終わりの行を、課題の番号を添えた候補の行にしたもの。"""
     lines: list[str] = []
     for number in issues:
-        plan = Path(worktree) / PLAN_FILE.format(number=number)
+        plan = Path(worktree) / issue_docs.PLAN_FILE.format(number=number)
         if plan.is_file():
             lines += [
                 f"- #{number}: {target}" + (f"（理由: {why}）" if why else "")

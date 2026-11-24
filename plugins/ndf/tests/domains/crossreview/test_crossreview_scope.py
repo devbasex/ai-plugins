@@ -426,3 +426,43 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path,
         "c.md#セクション c.md",
     ]
     assert sum("grep" in c for c in calls) == 1 and not any("cat-file" in c for c in calls)
+
+
+# ---------------------------------------------------------------- #3955: 埋めた席の記録と、前回の席への割り当て
+
+
+# (席, 前回の席ごとに数えられる相手役, 割り当てられるか)
+ASSIGNABLE = [
+    (("codex", "kiro"), [{"codex"}, {"claude", "kiro"}], True),
+    (("codex", "claude"), [{"codex"}, {"claude", "kiro"}], True),
+    (("codex", "claude"), [{"kiro"}, {"claude", "codex"}], False),
+    (("codex", "kiro", "claude"), [{"codex"}, {"claude", "kiro"}], False),
+    ((), [], True),
+]
+
+
+def test_issue_3955_filled_seats_and_previous_seats() -> None:
+    """埋めた席の記録は往復し、壊れた要素を飛ばす。前回の席は欠けた相手役の代わりにも数え、1 つの席は 1 者にしか割り当てない。
+    全員が読んだ head は、代わりを数える起動でだけ埋めた席を欠けた相手役に数える。"""
+    f = scope_decide.Filled("claude", "kiro", "failed: 落ちた")
+    assert f.record() == {"seat": "claude", "for": "kiro", "reason": "failed: 落ちた"}
+    none = scope_decide.Filled("claude-2", None, "allowed の相手役 0")
+    record = {scope_decide.FILLED: [f.record(), none.record(), "x", {"for": "kiro"}, {"seat": 1}]}
+    assert scope_decide.filled_of(record) == [f, none]
+    assert scope_decide.filled_of({scope_decide.FILLED: "x"}) == []
+    assert scope_decide.filled_of({}) == []
+
+    rec = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": "kiro", "reason": "r"}]}
+    assert scope_decide.stand_ins(rec) == [frozenset({"codex"}), frozenset({"claude", "kiro"})]
+    before = {"reviewers": ["codex", "claude"], "filled": [{"seat": "claude", "for": None, "reason": "r"}]}
+    assert scope_decide.stand_ins(before) == [frozenset({"codex"}), frozenset({"claude"})]
+
+    assert [scope_decide.assignable(seats, options) for seats, options, _ in ASSIGNABLE] == [want for _, _, want in ASSIGNABLE]
+
+    state = {"rounds": [{**rec, "head": "h1", "verdict": fin.CONVERGED}]}
+    for seats in (("codex", "kiro"), ("codex", "claude")):
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=seats, stand_in=True)) == "h1"
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "kiro"))) is None
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "claude"))) == "h1"
+    swapped = {**state["rounds"][0], "reviewers": ["kiro", "claude"], "filled": [{"seat": "claude", "for": "codex", "reason": "r"}]}
+    assert scope_decide.read_by_all_head({"rounds": [swapped]}, scope_decide.Basis(reviewers=("codex", "claude"), stand_in=True)) is None

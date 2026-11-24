@@ -71,6 +71,16 @@
 
 結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`remote`（string）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
+## `ndf document-rebuild`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/document-rebuild.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/document-rebuild.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf document-rebuild run` | `--base`（string・必須）: ベースブランチの名前（スプリントの PR のマージ先）<br>`--remote`（string・必須）: 起点の参照を探すリモートの名前<br>`--issue`（array of integer・必須）: 工程が扱う課題の番号（1 回以上）<br>`--kind`（array of string・必須・値 `design`・`plan`・`manuscript`）: 選ぶ文書の種類（1 回以上）<br>`--state-dir`（string・必須）: 起動指示と worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
+
+結果の `metrics`: `readers`（array of reader）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
+
 ## `ndf gws`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/gws.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/gws.result.schema.json)
@@ -219,7 +229,7 @@
 | `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
 | `ndf plan pending` | 引数を受けない |
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--max`（integer・任意）: 同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）<br>`--queue-dir`（string・任意） |
-| `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `600.0`） |
+| `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `3000.0`） |
 
 結果の `metrics`: `gates`（integer）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
 

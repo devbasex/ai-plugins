@@ -1,6 +1,6 @@
 {
-  "summary": "ndf plan wait・ndf progress wait の待ちの上限の既定の秒（--timeout の既定）",
-  "seconds": 600,
+  "summary": "ndf plan wait・ndf progress wait の待ちの上限の既定の秒（--timeout の既定）。何も来ないときだけ効くので、プロンプトのキャッシュの寿命（1 時間）の内で長くとる（#4463）",
+  "seconds": 3000,
   "read_by": [
     "ndf.core.plan.cli"
   ]
