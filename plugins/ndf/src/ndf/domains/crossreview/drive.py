@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -667,7 +667,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
 
 class _Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
-    PR の全差分で変わったファイル・比較基点の merge-base の SHA）。"""
+    PR の全差分で変わったファイル・比較基点の merge-base の SHA・head の Markdown の本文・全差分のファイル（差分のファイルが
+    PR の全差分でなければ None））。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -676,6 +677,8 @@ class _Prepared(NamedTuple):
     diff: Path
     files: tuple[str, ...]
     base: str
+    docs: Mapping[str, str]
+    full_diff: Optional[Path]
 
 
 def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
@@ -698,8 +701,9 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     merge_base = _merge_base(run, head)
     scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, _basis(run, head)), head)
     diff = _round_stem(run, round_no, ".diff")
-    diff.write_text(run.g.run("diff", f"{scope.base or merge_base}...HEAD"), encoding="utf-8")
-    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
+    diff.write_text(changes.review_diff(run.g, scope.base or merge_base, head), encoding="utf-8")
+    full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
+    return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, changed.docs, full_diff)
 
 
 def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:

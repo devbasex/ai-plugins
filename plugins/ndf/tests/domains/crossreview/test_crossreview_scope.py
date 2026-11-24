@@ -9,7 +9,7 @@ import pytest
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
 
-from ._repos import Repos, commit, run_cli, sh
+from ._repos import Repos, commit, count_git, run_cli, sh
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
@@ -299,7 +299,7 @@ def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     assert changes.changed_sections(git.Git(wt), "origin/main", wt) == ["docs/real.md#本物"]
 
 
-def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path) -> None:
+def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """PR 3944 の r7-4: 改行を CRLF で取り出した Markdown は作業場所のファイルから読み（git を起動しない）、作業場所と
     違う Markdown は何件あってもコミットの本文を 1 回の git の起動で読む。"""
     from ndf.adapters import git
@@ -310,13 +310,8 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path)
         (wt / name).write_text("" if name == "empty.md" else f"# {name}\n\n## セクション {name}\n", encoding="utf-8")
     sh(wt, "add", ".")
     sh(wt, "commit", "-q", "-m", "文書")
-    calls: list[list[str]] = []
-
-    def counted(args, cwd):
-        calls.append(args)
-        return git.run_git(args, cwd)
-
-    g = git.Git(wt, counted)
+    calls = count_git(monkeypatch)
+    g = git.Git(wt)
     (wt / "a.md").write_bytes("# a.md\r\n\r\n## セクション a.md\r\n".encode("utf-8"))
     assert changes.changed_sections(g, "origin/main", wt) == [
         "a.md#a.md",
