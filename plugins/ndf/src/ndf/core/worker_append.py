@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
-import time
 from collections.abc import Iterator
 
 from ndf import identity
@@ -44,13 +43,11 @@ def _held(paths: worker_paths.ReportPaths) -> Iterator[None]:
         worker_paths.check_unshared(state)
         fd = worker_paths.open_lock(state, LOCK_FILE)
     try:
-        limit = durable_locks.lock_wait_seconds()
-        deadline = time.monotonic() + limit
-        while not _try_lock(fd):
-            if time.monotonic() >= deadline:
-                detail = f"報告のロックを {limit:g} 秒待っても取れない: {paths.report}"
-                raise durable_locks.StoreInUse(detail, (paths.report,))
-            time.sleep(durable_locks.LOCK_POLL_SECONDS)
+        durable_locks.wait_lock(
+            lambda: _try_lock(fd),
+            paths.report,
+            lambda limit: f"報告のロックを {limit:g} 秒待っても取れない: {paths.report}",
+        )
         yield
     finally:
         os.close(fd)

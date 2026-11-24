@@ -20,7 +20,7 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -193,21 +193,37 @@ def lock_wait_seconds() -> float:
     return limits.seconds(LOCK_WAIT)
 
 
+def wait_lock(try_once: Callable[[], bool], path: Path, detail: Callable[[float], str]) -> None:
+    """`try_once` が真を返すまで、間隔を空けて `LOCK_WAIT` まで試す。上限を越える待ちの後にも 1 回試す。
+
+    取れなければ、上限の秒から `detail` が作る文と `path` を添えて `StoreInUse`。
+    """
+    if try_once():
+        return
+    limit = lock_wait_seconds()
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        time.sleep(LOCK_POLL_SECONDS)
+        if try_once():
+            return
+    raise StoreInUse(detail(limit), (path,))
+
+
 def lock(handle: IO[str], mode: int, wait: bool, path: Path) -> bool:
     """`wait` なら `LOCK_WAIT` まで待って真、そうでなければ待たずに試して取れたかを返す。
 
     待って取れなければオーナー（排他で持ったプロセスがファイルに書いたホスト・pid・時刻）を添えて `StoreInUse`。
     排他で取れたら、自分をオーナーとしてファイルに書く（B11）。
     """
-    got = try_flock(handle, mode)
-    if wait and not got:
-        limit = lock_wait_seconds()
-        deadline = time.monotonic() + limit
-        while not got and time.monotonic() < deadline:
-            time.sleep(LOCK_POLL_SECONDS)
-            got = try_flock(handle, mode)
-        if not got:
-            raise StoreInUse(f"ロックを {limit:g} 秒待っても取れない: {path}（オーナー: {lock_owner(path)}）", (path,))
+    if wait:
+        wait_lock(
+            lambda: try_flock(handle, mode),
+            path,
+            lambda limit: f"ロックを {limit:g} 秒待っても取れない: {path}（オーナー: {lock_owner(path)}）",
+        )
+        got = True
+    else:
+        got = try_flock(handle, mode)
     if got and mode == fcntl.LOCK_EX:
         write_owner(handle)
     return got
