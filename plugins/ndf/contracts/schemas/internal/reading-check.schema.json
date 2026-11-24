@@ -10,7 +10,7 @@
     "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
     "at": {"$ref": "common.schema.json#/$defs/time", "description": "記録した時刻"},
     "repo": {"type": "string", "minLength": 1, "description": "リポジトリ（owner/name）"},
-    "question_key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "質問の文の SHA-256（reading_decide.question_key）"},
+    "question_key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "質問ごとの文・複数選択か・選択肢の名前と説明だけを残し、キーの順を固定した JSON の SHA-256。計算は reading_decide.question_key を使う"},
     "prs": {
       "type": "array",
       "description": "承認する PR。判断の質問と、PR の無い承認では空",
