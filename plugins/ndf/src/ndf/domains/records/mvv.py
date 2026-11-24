@@ -548,7 +548,7 @@ def _review_rows_of(repo: str, pr: int, head: str, snapshot: Snapshot, found: Se
 
 def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
     """記録を書く前に止まった（呼び手が記録の `repo` を解けない）結果。今の MVV で判定した必須の行をすべて欠けとする。"""
-    found = md.judged_findings(rows, snapshot.identity)
+    found = md.judged_findings(rows, snapshot.identity, holds=True)
     keyed = [{"key": record_key(str(f.row["text"])), "outcome": f.outcome} for f in found]
     return ReviewWrite(0, tuple(e for e in md.one_per_key(keyed) if e["outcome"] in md.REVIEW_REQUIRED), cause)
 
@@ -568,16 +568,18 @@ def record_review(
     `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
     書けなくても例外を出さず、記録に無いままの必須の行と原因を返す（#3959。打ち直すと欠けた行だけを書く）。
     """
-    found = md.judged_findings(rows, snapshot.identity)
+    found = md.judged_findings(rows, snapshot.identity, holds=True)
     if not found:
         return ReviewWrite(0, (), None)
     entries = _review_rows_of(repo, pr, head, snapshot, found, clean)
-    wrote, left, cause = _append_reviews(entries)
+    # 通常の指摘を直した記録は、同じキーの保留の記録があるときだけ書く（直した通常の指摘をすべて記録に積まない）
+    resolving = frozenset(record_key(str(f.row["text"])) for f in found if f.plain and f.outcome == md.REVIEW_FIXED)
+    wrote, left, cause = _append_reviews(entries, resolving)
     missing = tuple(e for e in left if e["outcome"] in md.REVIEW_REQUIRED)
     if cause is not None:
         return ReviewWrite(wrote, missing, cause)
     shared = {k: entries[0][k] for k in ("at", "repo", "pr", "mvv_version", "sha256")}
-    disputed = {record_key(str(f.row["text"])): str(f.row["id"]) for f in found if f.outcome == md.REVIEW_DEFERRED}
+    disputed = {record_key(str(f.row["text"])): str(f.row["id"]) for f in found if f.outcome == md.REVIEW_DEFERRED and not f.plain}
     more, _, cause = _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": k, "id": fid} for k, fid in disputed.items()])
     return ReviewWrite(wrote + more, missing, cause)
 
@@ -613,12 +615,16 @@ def _append_missing(
     return done, [], None
 
 
-def _append_reviews(entries: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], Optional[str]]:
-    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。"""
+def _append_reviews(
+    entries: list[dict[str, Any]], resolving: frozenset[str] = frozenset()
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。キーが `resolving` の記録は、
+    同じキーの記録が既にあるときだけ足す。"""
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         last = {r["key"]: r for r in sorted(held, key=lambda r: internal.epoch(r["at"]))}
-        return [e for e in entries if not md.review_recorded(last.get(e["key"]), e)]
+        wanted = [e for e in entries if e["key"] not in resolving or e["key"] in last]
+        return [e for e in wanted if not md.review_recorded(last.get(e["key"]), e)]
 
     return _append_missing("mvv-validation", entries, missing)
 

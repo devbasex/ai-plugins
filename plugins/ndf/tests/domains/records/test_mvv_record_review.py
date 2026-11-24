@@ -132,12 +132,44 @@ def test_every_judged_finding_is_recorded_and_only_deferred_ones_are_signs(root:
     assert "item" not in _reviews()[-1] and _reviews()[-1]["outcome"] == "unresolved"
 
 
-def test_findings_judged_under_another_mvv_or_not_at_all_are_not_recorded(root: Path) -> None:
+def test_findings_judged_under_another_mvv_or_settled_plain_ones_are_not_recorded(root: Path) -> None:
     other = {**_deferred(), "judged_mvv": _snapshot(10).identity}
     plain = {"id": "r1-9", "text": "普通の指摘", "outcome": "deferred", "reason": "範囲の外"}
     snap = _snapshot()
-    assert mvv.record_review(str(root), PR, HEAD, snap, [other, plain], list) == (0, (), None)
+    # 区分が filed・not_applicable の通常の見送りと、保留の記録の無い通常の指摘を直した記録は書かない
+    filed = {**plain, "defer": "filed"}
+    fixed = {**plain, "id": "r1-8", "text": "直した普通の指摘", "outcome": "fixed", "reason": None}
+    assert mvv.record_review(str(root), PR, HEAD, snap, [other, filed, fixed], list) == (0, (), None)
     assert _reviews() == [] and _signals() == []
+
+
+@pytest.mark.parametrize("defer", [{"defer": "needs_user"}, {}])
+def test_a_plain_finding_left_to_the_user_holds_the_design_gate_until_it_is_fixed(root: Path, defer: dict[str, Any]) -> None:
+    """MVV の項目の無い通常の指摘でも、利用者の判断に委ねた見送り（区分 needs_user・区分なし）は承認ゲートの保留にする（#3959）。"""
+    plain = {"id": "r1-9", "text": "普通の指摘", "by": "codex", "outcome": "deferred", "reason": "利用者が決める", **defer}
+    snap = _snapshot()
+    mine = (snap.version, snap.sha256)
+    got = mvv.record_review(str(root), PR, HEAD, snap, [plain], list)
+    assert (got.written, got.missing, got.cause) == (1, (), None)
+    [review] = _reviews()
+    assert (review["outcome"], review.get(md.REVIEW_DEFER), review["reason"], "item" in review) == (
+        "deferred",
+        defer.get("defer"),
+        "利用者が決める",
+        False,
+    )
+    # 通常の指摘の見送りは、MVV の改訂の兆候に数えない
+    assert _signals() == []
+    kind = defer.get("defer", "区分なし")
+    assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == [
+        f"PR #{PR} の 指摘 r1-9（deferred・{kind}）: 利用者が決める"
+    ]
+    # 後の起動で直せば、保留の記録があるので直した記録を書き、保留が外れる
+    fixed = {**plain, "id": "r2-1", "outcome": "fixed", "reason": None}
+    assert mvv.record_review(str(root), PR, NEXT_HEAD, snap, [fixed], list).written == 1
+    assert md.review_holds(_reviews(), 0, str(root), [PR], mine, hidden="-") == []
+    # 記録を書く前に止まったら、通常の指摘の見送りも欠けた必須の行に数える
+    assert [e["outcome"] for e in mvv.unwritable(snap, [plain], "止まった").missing] == ["deferred"]
 
 
 def test_broken_shape_is_refused(root: Path) -> None:

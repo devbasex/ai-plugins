@@ -313,6 +313,8 @@ class Judged(NamedTuple):
     row: Mapping[str, Any]
     outcome: str
     item: Optional[str]
+    # MVV の項目の無い通常の指摘（承認ゲートの保留を決めるためだけに記録する。`judged_findings` の `holds`）
+    plain: bool = False
 
     @property
     def free_fields(self) -> dict[str, str]:
@@ -320,7 +322,7 @@ class Judged(NamedTuple):
 
         根拠の記述の誤りが引いた項目、見送りの理由、必ず人の承認が要る操作に当たる指摘の本文のうち、文字列のもの。
         """
-        held = {"item": self.row.get("cited")} if self.item is None else {}
+        held = {"item": self.row.get("cited")} if self.item is None and not self.plain else {}
         note = _REVIEW_NOTES.get(self.outcome)
         held |= {note: self.row.get(note)} if note is not None else {}
         return {k: v for k, v in held.items() if isinstance(v, str)}
@@ -331,17 +333,35 @@ class Judged(NamedTuple):
         return list(self.free_fields.values())
 
 
-def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str) -> list[Judged]:
-    """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。"""
+def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str, *, holds: bool = False) -> list[Judged]:
+    """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。
+
+    `holds` なら、MVV で判定していない通常の指摘のうち、承認ゲートの保留に関わるもの（`plain` が真）も返す。区分が
+    `needs_user`・無い・知らない値の見送りと、保留を解く直した指摘である（記録に残す MVV の記録の呼び手が使う。#3959）。
+    """
     out = []
     for row in rows:
-        if row.get(REVIEW_JUDGED) != mvv or row.get("outcome") not in _REVIEW_ORDER:
+        if row.get("outcome") not in _REVIEW_ORDER:
+            continue
+        if holds and _plain_hold(row):
+            out.append(Judged(row, row["outcome"], None, True))
+            continue
+        if row.get(REVIEW_JUDGED) != mvv:
             continue
         if row.get(REVIEW_REDLINE):
             out.append(Judged(row, REVIEW_REDLINE, "・".join(row[REVIEW_REDLINE_ITEMS])))
         elif REVIEW_ITEM in row or row.get("by") == BY_NDF:
             out.append(Judged(row, row["outcome"], row.get(REVIEW_ITEM)))
     return out
+
+
+def _plain_hold(row: Mapping[str, Any]) -> bool:
+    """MVV で判定していない通常の指摘で、承認ゲートの保留を作る見送りか、保留を解く直した指摘か。"""
+    if row.get(REVIEW_JUDGED) is not None or REVIEW_ITEM in row or row.get("by") == BY_NDF or row.get(REVIEW_REDLINE):
+        return False
+    if row.get("outcome") == REVIEW_FIXED:
+        return True
+    return row.get("outcome") == REVIEW_DEFERRED and row.get(REVIEW_DEFER) not in _SETTLED_DEFERS
 
 
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
