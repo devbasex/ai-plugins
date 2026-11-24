@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -302,6 +303,24 @@ def test_identity_of_a_mismatched_or_unreadable_mvv_is_an_error(repo: Path) -> N
     for ref in ("main", "origin/nope"):
         with pytest.raises(mvv.MvvError):
             mvv.identity_at(repo, ref)
+
+
+def test_identity_does_not_fetch_objects_missing_from_a_partial_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """部分クローンで MVV の設定が手元に無ければ、リモートから取得せずに `MvvError`（git の起動すべてで遅延取得を止める）。"""
+    started: list[tuple[str, Optional[str]]] = []
+
+    def fake_run(cmd, **kwargs):
+        started.append((cmd[1], kwargs["env"].get("GIT_NO_LAZY_FETCH")))
+        if cmd[1] == "ls-tree":
+            return subprocess.CompletedProcess(cmd, 0, f"100644 blob {'b' * 40}\t.ndf/mvv.json\0", "")
+        names = kwargs["input"].splitlines()
+        return subprocess.CompletedProcess(cmd, 0, b"".join(n + b" missing\n" for n in names), b"")
+
+    monkeypatch.delenv("GIT_NO_LAZY_FETCH", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(mvv.MvvError, match="読めない"):
+        mvv.identity_at(tmp_path, "a" * 40)
+    assert started == [("ls-tree", "1"), ("cat-file", "1")]
 
 
 def test_unresolved_ref_is_an_error_not_absent(repo: Path) -> None:
