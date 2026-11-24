@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.contracts import result
 from ndf.progress import gate, invoke, lane, model, run, store
 
@@ -205,6 +205,46 @@ def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, fl
     (got,) = gate.answers(run.read(st, tid))
     assert got["answer"] == "request_changes" and got["notes"] == "セクション 2 の根拠が足りない" and got["reason"] == "人が回答した"
     assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"
+
+
+# --- 現状固定: rejections_path の保存先（I-001。mvv-state の解決を mvv.record_path と共有する前） ------------------
+
+
+def _unresolvable_identity():
+    raise identity.IdentityError("状態の保存先を解けない")
+
+
+def test_current_rejections_path_uses_the_environment_without_reading_the_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
+    monkeypatch.setattr(identity, "load", _unresolvable_identity)
+    assert gate.rejections_path() == tmp_path / "m" / "gate-rejections.jsonl"
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", "rel")  # 相対のパスは解決せずそのまま使う
+    assert str(gate.rejections_path()) == "rel/gate-rejections.jsonl"
+    assert not (tmp_path / "m").exists()  # パスを返すだけで、ディレクトリは作らない
+
+
+@pytest.mark.parametrize("env", [None, ""])
+def test_current_rejections_path_falls_back_to_the_state_dir(monkeypatch, env):
+    if env is None:
+        monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
+    else:
+        monkeypatch.setenv("NDF_MVV_STATE_DIR", env)
+    assert gate.rejections_path() == identity.load().state_dir / "gate-rejections.jsonl"
+
+
+def test_current_rejections_path_raises_the_identity_error_and_the_copy_turns_it_into_a_warning(st, new_table, flow, monkeypatch):
+    tid = new_table()
+    flow.turn(tid)
+    v = run.read(st, tid)
+    q = _waiting(st, tid)
+    monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
+    a = gate.Answer(q.id, "approved", "人が回答した", BY, KEY)
+    with monkeypatch.context() as m:  # フィクスチャの後片付けも identity を読むので、差し替えはここだけにする
+        m.setattr(identity, "load", _unresolvable_identity)
+        with pytest.raises(identity.IdentityError, match="状態の保存先を解けない"):
+            gate.rejections_path()
+        (warning,) = gate.record_answer(v, q, a, gate.rejections_path)
+    assert "gate-rejections" in warning and "状態の保存先を解けない" in warning
 
 
 # --- 現状固定: gate.rejections（I-014。承認しなかった承認ゲートの回答を区分ごとに数える） -------------------
