@@ -1,0 +1,15 @@
+{
+  "summary": "キャッシュの読み出しの倍率（入力の単価に掛ける。モデルごと。表に無いモデルは default）",
+  "default": 0.1,
+  "ratios": {
+    "claude-opus-5-5": 0.05,
+    "claude-sonnet-5-5": 0.05,
+    "claude-fable-5-1": 0.025,
+    "claude-fable-5-2": 0.025,
+    "claude-mythos-5-1": 0.025,
+    "claude-mythos-5-2": 0.025
+  },
+  "read_by": [
+    "ndf.domains.relay.keep_cache"
+  ]
+}

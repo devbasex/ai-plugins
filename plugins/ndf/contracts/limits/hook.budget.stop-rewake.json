@@ -1,0 +1,11 @@
+{
+  "summary": "hook の予算（Stop のバックグラウンドの起床の hook。Claude Code）。timeout は起床の時点（1 時間の寿命 − cache.wake の余白）と確かめる間隔と余白（margin）が収まる秒。締め切りは timeout − 余白。注入の上限は起床の文が収まる字数",
+  "p95_ms": 5000,
+  "deadline": 3060,
+  "margin": 240,
+  "timeout": 3300,
+  "inject_chars": 2000,
+  "read_by": [
+    "ndf.domains.hooks.budget"
+  ]
+}

@@ -165,6 +165,7 @@
       "ndf.contracts.limits.policy": {"arg": "name", "index": 0},
       "ndf.contracts.limits.value": {"arg": "name", "index": 0},
       "ndf.contracts.limits.seconds": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.texts": {"arg": "name", "index": 0},
       "ndf.contracts.limits.scaled": {"arg": "name", "index": 0},
       "ndf.contracts.limits.from_env": {"arg": "policy_name", "index": 2},
       "ndf.domains.hooks.tables.policy_value": {"arg": "name", "index": 0},
