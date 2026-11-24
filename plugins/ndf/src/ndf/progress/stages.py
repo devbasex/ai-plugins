@@ -135,7 +135,7 @@ def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
 
 
 # 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースしたバージョン
-CHECKED_KINDS = ("review", "test")
+CHECKED_KINDS = contracts.schema_enum(model.NDF_SCHEMA, "/$defs/checked_kind")
 # つなぎ目（文脈の gathered から後のコミット。#3879）
 UNREVIEWED_DIFF = "unreviewed_diff"
 DIFF_RANGES = ("sprint_diff", "issue_diff", UNREVIEWED_DIFF)

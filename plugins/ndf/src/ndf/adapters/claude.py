@@ -33,8 +33,8 @@ from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
 CLAUDE = facts.value("runtimes", "claude", "executable")
-# 導入済みのプラグインの一覧を読む時間の上限（秒）
-PLUGIN_LIST_TIMEOUT = 30
+# 導入済みのプラグインの一覧を読む時間の上限の方針（contracts/limits.json）
+PLUGIN_LIST = "claude-plugins.list"
 # 一覧を読めなかったときの知らせ（導入先のパスを含む CLI の出力は載せない）
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"
 # full の起動で許す Tool
@@ -73,16 +73,10 @@ class Permission(StrEnum):
     FULL = "full"
 
 
-class Failure(StrEnum):
-    """`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）。"""
-
-    LAUNCH = "launch"
-    TIMEOUT = "timeout"
-    USAGE_LIMIT = "usage_limit"
-    # 学習に使わない設定と確かめられていないか、claude が下限より古いので起動しなかった
-    REFUSED = "refused"
-    # 重い起動のスロットが待ちの上限までに空かなかった
-    NO_SLOT = "no_slot"
+# `claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）。語彙・意味・呼び手ごとの停止理由は表が持つ
+# （members の名前は id の大文字）
+FAILURES = "claude-failures"
+Failure = StrEnum("Failure", [(i.upper(), i) for i in facts.ids(FAILURES)])
 
 
 class Session(NamedTuple):
@@ -167,7 +161,7 @@ def list_plugins(
         argv = [CLAUDE, "plugin", "list", "--json"]
         child_env = None if env is None else dict(env)
         cli_floor.require("claude", CLAUDE, child_env, cwd)
-        done = run(argv, capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False, cwd=cwd, env=child_env)
+        done = run(argv, capture_output=True, text=True, timeout=limits.seconds(PLUGIN_LIST), check=False, cwd=cwd, env=child_env)
     except (OSError, subprocess.SubprocessError, cli_floor.TooOld):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8。古い claude は起動の側の比べが止める）
         return None
     if done.returncode != 0:

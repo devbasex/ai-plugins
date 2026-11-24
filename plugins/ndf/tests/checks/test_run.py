@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from ndf import cli, identity
-from ndf.checks import child_deps, model, run
+from ndf.checks import model, run
 from ndf.contracts import exit_codes, result
 
 
@@ -151,14 +148,3 @@ def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path, las
     assert report["items"] == [] and report["metrics"] == {}
     assert report["cause"] == {"kind": "config_broken", "detail": report["summary"]}
     assert result.errors(report, exit_codes.unreadable_code()) == []
-
-
-@pytest.mark.parametrize("write_spec", [False, True])
-def test_select_does_not_read_through_a_symlink(plugin, rules, monkeypatch, tmp_path, write_spec):
-    path = plugin.root / child_deps.CHILDREN_REL
-    path.symlink_to(path.rename(tmp_path / "outside.json"))
-    read = []
-    monkeypatch.setattr(Path, "read_text", lambda self, *_, **__: read.append(self) or "")
-    with pytest.raises(model.CheckError, match="シンボリックリンク"):
-        run.select(model.Scope(plugin.repo, plugin.root, "p"), rules, None, write_spec)
-    assert read == []

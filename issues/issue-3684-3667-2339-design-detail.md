@@ -55,7 +55,7 @@ plugins/ndf/
 │   ├── domains/crossrefactor/flaky_decide.py MAX_ATTEMPTS を上限の設定から
 │   ├── domains/records/jsonl.py              記録の読み書き（read_rows・append・append_locked）に種類を渡し核へ通す
 │   ├── domains/records/usage.py              jsonl へ種類 usage を渡す
-│   ├── domains/records/mvv.py                jsonl へ種類 mvv-signals・mvv-validation を渡す・version を product_version へ
+│   ├── domains/records/mvv.py                jsonl へ種類 mvv-signals・mvv-validation を渡す・兆候の version（MVV の設定の版）を mvv_version へ
 │   ├── domains/relay/context_records.py      jsonl へ種類を渡す
 │   ├── domains/relay/context_report.py       同上
 │   ├── domains/loop/store.py                 LoopStore.read・append を核へ通す
@@ -83,7 +83,7 @@ plugins/ndf/
 | `src/ndf/checks/internal_names.py` | 新設 | 内部データのスキーマと書き手が、名前の対応表に無い別名を使っていないかを見る | `ndf.contracts`、`checks.model` | モジュール | `allowed`・`check`（新設） |
 | `src/ndf/checks/ratchet.py` | 新設 | 規則ごとの基準の数を読み、超えた規則を違反にし、下回ったら基準を書き直す | `ndf.contracts`（読み込みのみ） | モジュール | `baseline`・`verdicts`・`lower`（新設） |
 | `src/ndf/checks/facts.py` | 変更 | `const-fact` の照合の相手に、スキーマの `enum`・上限の設定の数・辞書の値を足す | `ndf.contracts.limits`、`ndf.contracts.facts` | モジュール | `consts`（変更）・`dict_values`・`enum_sets`・`limit_numbers`・`_enum_dups`・`_limit_dups`（新設） |
-| `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`VERSION`（新設） |
+| `src/ndf/contracts/internal.py` | 新設 | 内部データを種類ごとのスキーマで読み書きし、古い版を移行の関数で受ける | `ndf.contracts` | モジュール | `read_record`・`write_record`・`migrate`・`readable_version`・`VERSION`（新設） |
 | `src/ndf/checks/spec_render.py` | 変更 | 設計レビューの項目の表から、項目ごとの行き先の並び（`review_items`）を組み立てる | `checks.spec_model` | モジュール | `review_items`（新設） |
 | `src/ndf/checks/spec_docs.py` | 変更 | 生成した `review_items` と `children.json` の差分と、行き先の無い項目を指摘にする | `checks.spec_render` | モジュール | `check`（変更） |
 | `src/ndf/checks/run.py` | 変更 | 新しい規則を規則の並びへ足し、ラチェットのある規則の件数を照らす | 上の 4 つ | モジュール | `_rules`（変更） |
@@ -366,7 +366,7 @@ plugins/ndf/
 
 | 種類 | 核での種類の名前 | スキーマ | 書く入口 | 読む入口 |
 | --- | --- | --- | --- | --- |
-| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読む）・`usage.py:110`・`domains/relay/context_report.py:57`） |
+| 記録（使用量） | `usage` | `internal/usage.schema.json`（新設） | `domains/records/jsonl.py` の `append`・`append_locked`（呼び手は `domains/records/usage.py:80・92`） | `jsonl.read_rows`（呼び手は `usage.py:77`（`record_subagent` の差分の計算。錠の内側で読み、形はその `agent_id` の行だけ確かめる）・`usage.py:110`・`domains/relay/context_report.py:57`） |
 | 記録（MVV の兆候・検証） | `mvv-signals`・`mvv-validation` | `internal/mvv-signals.schema.json`・`internal/mvv-validation.schema.json`（新設） | `jsonl.append_locked`（呼び手は `domains/records/mvv.py:122・142`） | `jsonl.read_rows`（`mvv.py:90・135`） |
 | 記録（文脈の記録） | `context-records` | `internal/context-records.schema.json`（新設） | 書き手のモジュール（実装の単位 4 で `jsonl` へ寄せる） | `jsonl.read_rows`（`domains/relay/context_records.py:168`） |
 | 実行の状態（開発ループ） | `loop-event` | `internal/loop-event.schema.json`（新設） | `domains/loop/store.py` の `LoopStore.append`。`version-shipped` のイベントを組む 2 か所（`control_decide.py:284` の出荷の取り込みと `:321` の明示の出荷）はどちらも `version=` を `product_version=` に変える。旧い欄 `version`（文字列）を `product_version` へ移すのは、既存の行を読む `migrate` だけで、書き手に読み替えを置かない | `LoopStore.read`（核の後に今の `record_decide.check` を通す） |
@@ -382,12 +382,12 @@ plugins/ndf/
 
 | 行の状態 | `read_rows` の扱い |
 | --- | --- |
-| JSON として壊れている・辞書でない（書きかけを含む） | 除いて、`Broken(line, reason)` を返す（今の `broken` の数を、行番号と理由の並びにする） |
+| JSON として壊れている・辞書でない（書きかけを含む） | 除いて、`Broken(line, reason)` を返す（今の `broken` の数を、行番号と理由の並びにする。MVV 判定の再利用が古い判定へさかのぼらないよう、前にある読めた行の数 `before` と辞書として読めた中身 `raw` も持つ） |
 | `read_record` が `InternalError`（形に合わない・項目の欠け・時刻の書式） | 同上（理由は `InternalError` の文） |
 | `read_record` が `precondition`（今の版より新しい版） | 止める（呼び手へ伝える）。新しい NDF が書いた記録を古い NDF が部分的に読んで判断しない |
 | 知らない種類（`config_broken`） | 止める（呼び手の綴りの誤り） |
 
-`read_rows` の戻り値は `tuple[list[dict[str, Any]], list[Broken]]` にする。呼び手は、除いた行を結果 JSON に出す: 使用量の集計（`usage.py:110`）は今の `broken_rows` に数を、文脈の記録（`context_records.py:168`）は今の `skipped` に足し、MVV（`mvv.py:90・135`）と使用量の差分（`usage.py:77`）は今は捨てているので、結果の `items` の警告（`{"kind": "broken_rows", "path": ..., "lines": [...]}`）に出す。
+`read_rows` の戻り値は `tuple[list[dict[str, Any]], list[Broken]]` にする。呼び手は、除いた行を結果 JSON に出す: 使用量の集計（`usage.py:110`）は今の `broken_rows` に数を、文脈の記録（`context_records.py:168`）は今の `skipped` に足し（集計と較正の両方）、MVV（`mvv.py:90・135`）と使用量の差分（`usage.py:77`）は今は捨てているので、結果の `items` の警告（`{"kind": "broken_rows", "path": ..., "lines": [...]}`）に出す。
 
 ### 工程の文脈の版
 
@@ -427,11 +427,12 @@ plugins/ndf/
 | `read_record` | `src/ndf/contracts/internal.py` | 新設 | `read_record(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]` | 1 行を読み、古い版は移行してから種類のスキーマで確かめる |
 | `write_record` | `src/ndf/contracts/internal.py` | 新設 | `write_record(kind: str, row: Mapping[str, Any]) -> dict[str, Any]` | 書く前に今の版の形で確かめ、`version` と `at` を埋めて返す |
 | `migrate` | `src/ndf/contracts/internal.py` | 新設 | `migrate(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]` | 古い版の行を今の版の形へ移す（種類ごとに 1 か所） |
+| `readable_version` | `src/ndf/contracts/internal.py` | 新設 | `readable_version(kind: str, raw: Mapping[str, Any]) -> int` | 行の版だけを返す（移さず、形も確かめない。新しい版なら止める）。対象外の行を読み飛ばす `jsonl.read_rows` が使う |
 | `stamp`・`epoch` | `src/ndf/contracts/internal.py` | 新設 | `stamp(seconds: float) -> str`・`epoch(at: str) -> float` | 秒（`time.time()`）と `at` の文字列（UTC・マイクロ秒まで）を行き来する |
 
 - `read_record`
   - 事前条件: `kind` は上の表の「核での種類の名前」のどれか
-  - 事後条件: 返る行は今の版の形。**版の見分け: `version` が整数ならその版、`version` が無いか整数でない（文字列の製品の版）なら版 0（旧形）** として `migrate` を通す。版 0 は「版を持つ前の形」で、今の版 1 とは別の版である
+  - 事後条件: 返る行は今の版の形。**版の見分け: `version` が整数ならその版、`version` が無いか整数でない（文字列の製品の版）なら版 0（旧形）** として `migrate` を通す。`mvv-signals` は旧形の `version` も整数（MVV の設定の版）なので、`mvv_version` の欄が無い行を版 0 とする。版 0 は「版を持つ前の形」で、今の版 1 とは別の版である
   - 副作用: 無し
 - `write_record`
   - 事前条件: `row` の欄は、その種類のスキーマの `properties` に載る名前だけ（スキーマは `additionalProperties: false`）
@@ -445,7 +446,7 @@ plugins/ndf/
 | `loop-event`（出荷） | `{"at": 1795400000.0, "kind": "version-shipped", "lap": 2, "version": "11.0.23"}` | 上に加え、文字列の `version` を `product_version` へ移す（形の版と衝突させない） | `{"version": 1, "at": "...", "kind": "version-shipped", "lap": 2, "product_version": "11.0.23"}` |
 | `loop-event`（貸し出し） | `{"at": 1795400000.0, "kind": "lease-taken", "session": "s1", "until": 1795400600.0}` | `at` だけを直す。`until` は書いた時刻ではなく期限（名前の対応表で別の意味）なので秒のまま | `{"version": 1, "at": "...", "kind": "lease-taken", "session": "s1", "until": 1795400600.0}` |
 | `usage` | `{"at": "2026-11-23T01:00:00+00:00", "caller": "claude-cli", "usage": {...}}` | `version` を足すだけ（`at` は既に `jsonl.now()` の UTC の文字列） | `{"version": 1, ...}` |
-| `mvv-signals` | `{"at": "...", "kind": "revise", "version": "11.0.22", "repo": "..."}` | 文字列の `version` を `product_version` へ移す | `{"version": 1, "at": "...", "kind": "revise", "product_version": "11.0.22", "repo": "..."}` |
+| `mvv-signals` | `{"at": "...", "kind": "override_pass", "version": 2, "repo": "...", "state": "...", "gate": "design", "pr": 1}` | `version` は MVV の設定の版（整数か null。製品の版ではない）なので、`mvv_version` へ移す（無ければ null） | `{"version": 1, "at": "...", "kind": "override_pass", "mvv_version": 2, "repo": "...", "state": "...", "gate": "design", "pr": 1}` |
 | `mvv-validation`・`context-records` | 今の書き手の行 | `version` を足すだけ（時刻の欄が `at` でない行は、名前の対応表の消した別名から `at` へ移す） | 同左 |
 | `context` | `{"pace": "auto", "version": "11.0.23", ...}` | 文字列の `version` を `product_version` へ移す。`version` が無い文脈はそのまま版 1 にする（未出荷のまま。`release_record` は `product_version` を見るので満たさない） | `{"version": 1, "pace": "auto", "product_version": "11.0.23", ...}` |
 
@@ -464,7 +465,7 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `read_record` | `version` が無いか整数でない | 版 0 として `migrate` を通し、版 1 のスキーマで確かめる |
+| `read_record` | `version` が無いか整数でない（`mvv-signals` は `mvv_version` の欄が無い） | 版 0 として `migrate` を通し、版 1 のスキーマで確かめる |
 | `read_record` | `version` が今の版 | そのままスキーマで確かめる |
 | `read_record` | `version` が 1 以上で今の版より小さい | `migrate` を通してから確かめる（今の版は 1 なので、この経路は版 2 を足したときに初めて通る。合成したスキーマでテストする） |
 | `read_record` | `version` が今の版より大きい | `precondition` で止める |
@@ -476,7 +477,7 @@ plugins/ndf/
 | `VERSION` | 定数（今の版） | `src/ndf/contracts/internal.py` | 1 |
 | 書式の検査器 | 関数（`date-time` の検査。`datetime.fromisoformat` で読めて時差が 0） | `src/ndf/contracts/internal.py` | `jsonschema.FormatChecker()` に登録し、核の検証器だけに渡す（`ndf.contracts.schema_errors` は変えない） |
 | 読める版 | データ | `contracts/schemas/internal/<種類>.schema.json` の `properties.version.enum` | `[1]` |
-| 名前の対応表 | データ | `contracts/data/internal-names.json` | 時刻は `at`、結果は `status`、形の版は `version`、製品の版は `product_version`、工程の定義の文書の版は `definition_version`（別の意味）、期限は `until`（別の意味） |
+| 名前の対応表 | データ | `contracts/data/internal-names.json` | 時刻は `at`、結果は `status`、形の版は `version`、製品の版は `product_version`、MVV の設定の版は `mvv_version`、工程の定義の文書の版は `definition_version`（別の意味）、期限は `until`（別の意味） |
 
 ### 単体テストの観点
 

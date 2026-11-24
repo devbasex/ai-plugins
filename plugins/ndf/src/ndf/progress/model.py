@@ -26,6 +26,8 @@ REPO_KEY_LENGTH = 12
 WORKFLOW_ACTOR = "workflow"
 # スプリントの文脈のスキーマ
 CONTEXT = internal.CONTEXT
+# 工程の定義の `metadata.ndf` の形
+NDF_SCHEMA = "workflow/ndf.schema.json"
 # 承認ゲートを MVV 判定で省ける進め方（文脈の pace の一部）・省いた回答の回答した者・判定の結果を持つ文脈のキー
 MVV_PACES = contracts.schema_enum(CONTEXT, "/$defs/mvv_pace")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"

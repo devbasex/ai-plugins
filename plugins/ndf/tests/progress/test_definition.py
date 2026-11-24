@@ -332,7 +332,8 @@ def test_context_schema_holds_the_closed_vocabulary():
         "release_pr",
         "gathered",
     }
-    assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
+    modes = [m for name in ("mvv_mode", "gated_mode") for m in contracts.schema_enum(definition.CONTEXT, f"/$defs/{name}")]
+    assert sorted(modes) == sorted(definition.modes())
 
 
 def test_snapshot_round_trips_through_json():

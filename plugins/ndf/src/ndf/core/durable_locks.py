@@ -1,6 +1,6 @@
 """DBOS の殻が使うロックと、記録の DB（SQLite・PostgreSQL）への接続。DBOS は import しない。
 
-- 待つロックはすべて `LOCK_WAIT_SECONDS` を上限にし、当たればオーナーを添えて `StoreInUse` で止まる（B11）。
+- 待つロックはすべて `LOCK_WAIT` を上限にし、当たればオーナーを添えて `StoreInUse` で止まる（B11）。
   排他で取ったプロセスは、ロックのファイルにオーナー（ホスト・pid・時刻）を書く。PostgreSQL の advisory lock は、
   接続の `application_name` にオーナーを書く
 - PostgreSQL の接続は keepalive と idle_session_timeout を持つ。キーのロックを持つ接続は間隔ごとに問い合わせを打ち、
@@ -27,7 +27,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import IO, TYPE_CHECKING, Any
 
-from ndf.contracts import result
+from ndf.contracts import limits, result
 
 log = logging.getLogger(__name__)
 
@@ -63,8 +63,8 @@ MAINT_LOCK = "maint.lock"
 RUN_LOCK_SPACE = 0x4E444652
 # SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
 SQLITE_PREFIX = "sqlite:///"
-# ロックを待つ上限の秒と、待つ間に試す間隔の秒。上限に当たるとオーナーを添えて `StoreInUse`（B11）
-LOCK_WAIT_SECONDS = 300.0
+# ロックを待つ上限の方針（contracts/limits.json）と、待つ間に試す間隔の秒。上限に当たるとオーナーを添えて `StoreInUse`（B11）
+LOCK_WAIT = "durable.lock-wait"
 LOCK_POLL_SECONDS = 0.05
 # PostgreSQL の接続の keepalive（相手が消えた接続を 60 秒ほどで切る）と、NDF の接続の idle_session_timeout（ミリ秒）
 PG_KEEPALIVE = {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3}
@@ -188,20 +188,26 @@ def try_flock(handle: IO[str], mode: int) -> bool:
     return True
 
 
+def lock_wait_seconds() -> float:
+    """ロックを待つ上限の秒。"""
+    return limits.seconds(LOCK_WAIT)
+
+
 def lock(handle: IO[str], mode: int, wait: bool, path: Path) -> bool:
-    """`wait` なら `LOCK_WAIT_SECONDS` まで待って真、そうでなければ待たずに試して取れたかを返す。
+    """`wait` なら `LOCK_WAIT` まで待って真、そうでなければ待たずに試して取れたかを返す。
 
     待って取れなければオーナー（排他で持ったプロセスがファイルに書いたホスト・pid・時刻）を添えて `StoreInUse`。
     排他で取れたら、自分をオーナーとしてファイルに書く（B11）。
     """
     got = try_flock(handle, mode)
     if wait and not got:
-        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        limit = lock_wait_seconds()
+        deadline = time.monotonic() + limit
         while not got and time.monotonic() < deadline:
             time.sleep(LOCK_POLL_SECONDS)
             got = try_flock(handle, mode)
         if not got:
-            raise StoreInUse(f"ロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない: {path}（オーナー: {lock_owner(path)}）", (path,))
+            raise StoreInUse(f"ロックを {limit:g} 秒待っても取れない: {path}（オーナー: {lock_owner(path)}）", (path,))
     if got and mode == fcntl.LOCK_EX:
         write_owner(handle)
     return got
@@ -324,12 +330,13 @@ def pg_run_lock(database_url: str, name: str, wait: bool) -> Iterator[str | None
     with open_engine(database_url, owner) as engine, engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         params = {"space": RUN_LOCK_SPACE, "key": lock_key(name)}
         if wait:
-            conn.execute(sa.text(f"SET lock_timeout = '{int(LOCK_WAIT_SECONDS * 1000)}ms'"))
+            limit = lock_wait_seconds()
+            conn.execute(sa.text(f"SET lock_timeout = '{int(limit * 1000)}ms'"))
             try:
                 conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
             except sa.exc.OperationalError as exc:
                 raise StoreInUse(
-                    f"キー {name} のロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない（オーナー: {_pg_lock_owner(database_url, params)}）"
+                    f"キー {name} のロックを {limit:g} 秒待っても取れない（オーナー: {_pg_lock_owner(database_url, params)}）"
                 ) from exc
             conn.execute(sa.text("SET lock_timeout = 0"))
         elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():

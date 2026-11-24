@@ -34,9 +34,14 @@ from ndf.core import durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
-# 待ちの上限の既定（秒）と、見回りの間隔の設定
-WAIT_DEFAULT_SECONDS = 600.0
+# 待ちの上限の既定と、見回りの間隔の方針（contracts/limits.json）
+WAIT_DEFAULT = "supervise.wait-default"
 WAIT_POLL = "durable.wait-from-poll"
+
+
+def wait_default_seconds() -> float:
+    """待ちの上限の既定の秒。"""
+    return float(limits.seconds(WAIT_DEFAULT))
 
 
 def _root() -> Path:
@@ -226,7 +231,7 @@ def _parser() -> argparse.ArgumentParser:
     wt = sub.add_parser("wait", help="流れている回を見回る")
     wt.add_argument("plans", nargs="+")
     wt.add_argument("--state-dir")
-    wt.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
+    wt.add_argument("--timeout", type=float, default=wait_default_seconds())
     wt.set_defaults(fn=_cmd_wait)
     pd = sub.add_parser("pending", help="待ちを抱えた実行を並べる")
     pd.set_defaults(fn=_cmd_pending)

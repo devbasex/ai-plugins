@@ -132,14 +132,15 @@ def mvv_validate_sprint(
     """スプリント MVV を MVV 判定し、記録に足した行を返す。
 
     `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。記録が無い・壊れた行を
-    含んでも止まらず LLM で判定し、読めない行は `warnings` へ足す。`project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
+    含んでも止まらず LLM で判定し、読めない行は `warnings` へ足す。同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。
+    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
     """
     key = md.mvv_validation_key(inputs)
     path = record_path("mvv-validation")
     repo = repo_key(root)
     rows, broken = jsonl.read_rows(path, kind="mvv-validation")
     warnings += jsonl.broken_items(path, broken)
-    origin = md.reusable(rows, key) if reuse else None
+    origin = md.reusable(rows, key, [(b.before, b.raw) for b in broken]) if reuse else None
     if origin is not None:
         row = md.reuse_row(origin, jsonl.now(), repo)
     else:

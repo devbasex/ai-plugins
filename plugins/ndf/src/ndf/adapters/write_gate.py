@@ -65,8 +65,8 @@ CONTENT_HOUR = "github.content-window.hour"
 WINDOWS = (CONTENT_MINUTE, CONTENT_HOUR)
 SEND_LOCK = "github.write-send-lock"
 PR_LOCK = "github.pr-publish-lock"
-# 記録のロックを待つ上限の秒。ロックの中では読み・計算・書きだけを行う
-LOCK_SECONDS = 10.0
+# 記録のロックを待つ上限の方針
+RECORD_LOCK = "github.write-record-lock"
 # 記録を最後に書いた時刻が今よりこの秒を越えて先なら、壁時計が戻ったとみなす
 CLOCK_SLACK = 1.0
 GATE_FILE = "write-gate.json"
@@ -795,8 +795,8 @@ class WriteGate(BaseThrottler):
         return self.path.with_name(self.path.name + ".lock")
 
     def _record_lock(self, remaining: Optional[Callable[[], float]] = None) -> Optional[FileLock]:
-        """記録のロック。`LOCK_SECONDS` の時間切れは None（I5）、予算で縛った待ちの時間切れは `Busy`。"""
-        wait, budgeted = _bounded(remaining, LOCK_SECONDS)
+        """記録のロック。`RECORD_LOCK` の時間切れは None（I5）、予算で縛った待ちの時間切れは `Busy`。"""
+        wait, budgeted = _bounded(remaining, limits.value(RECORD_LOCK, "lock"))
         held = slot_pool.lock(self._record_lock_path())
         try:
             held.acquire(timeout=wait)

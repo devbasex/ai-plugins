@@ -120,7 +120,7 @@ def test_unreadable_transcript_writes_unknown_without_raising(tmp_path: Path) ->
 def test_a_row_that_does_not_fit_is_reported_and_a_newer_version_stops_the_write(tmp_path: Path) -> None:
     env = {"NDF_USAGE_DIR": str(tmp_path)}
     path = usage.usage_log_path(env)
-    path.write_text('{"at": "2026-11-14T01:00:00Z"}\n', encoding="utf-8")
+    path.write_text('{"at": "2026-11-14T01:00:00Z", "agent_id": "a"}\n', encoding="utf-8")
     payload = {"agent_id": "a", "agent_transcript_path": str(tmp_path / "missing.jsonl")}
     warnings: list[dict] = []
     assert usage.record_subagent(payload, env, warnings=warnings) is not None

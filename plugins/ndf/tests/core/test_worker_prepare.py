@@ -212,7 +212,7 @@ def test_append_reads_again_when_another_append_published_before_the_lock(tmp_pa
 def test_append_stops_without_writing_while_another_append_holds_the_report(tmp_path, capsys, monkeypatch):
     report = _prepared(tmp_path, capsys)
     monkeypatch.setattr(worker_append, "_try_lock", lambda fd: False)
-    monkeypatch.setattr(worker_append.durable_locks, "LOCK_WAIT_SECONDS", 0.0)
+    monkeypatch.setattr(worker_append.durable_locks, "lock_wait_seconds", lambda: 0.0)
     code, out = _append(capsys, monkeypatch, report, "本文\n", "--done")
     assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
     assert report.read_text(encoding="utf-8") == "" and not Path(f"{report}.done").exists()

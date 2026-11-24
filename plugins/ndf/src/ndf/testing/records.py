@@ -12,13 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ndf import slot_pool
+from ndf.contracts import limits
 
-# 記録を残す期間と行数（I11）
-KEEP_DAYS = 30
-KEEP_ROWS = 10_000
+# 記録を残す日数と行数、記録と停止の時刻のロックを待つ上限の方針（contracts/limits.json）
+KEEP_DAYS = "test-slots.keep-days"
+KEEP_ROWS = "test-slots.keep-rows"
+RECORD_LOCK = "test-slots.record-lock"
 SECONDS_PER_DAY = 86400
-# 記録と停止の時刻のロックを待つ上限
-RECORD_LOCK_SECONDS = 10.0
 
 EVENTS_FILE = "events.jsonl"
 
@@ -42,28 +42,39 @@ def _parse_iso(text: object) -> float | None:
         return None
 
 
+def record_lock_seconds() -> float:
+    """記録と停止の時刻のロックを待つ上限の秒。"""
+    return limits.seconds(RECORD_LOCK)
+
+
+def keep_rows() -> int:
+    """記録を残す行数。"""
+    return int(limits.value(KEEP_ROWS, "count"))
+
+
 def append_event(directory: Path, row: Mapping[str, object], now: float | None = None) -> None:
-    """記録へ 1 行を足す。30 日より古い行と 10,000 行を超えた分は、足すときに古い方から消す（I11）。"""
+    """記録へ 1 行を足す。`KEEP_DAYS` の日数より古い行と `KEEP_ROWS` の行数を超えた分は、足すときに古い方から消す（I11）。"""
     now = time.time() if now is None else now
     path = directory / EVENTS_FILE
     line = json.dumps(row, ensure_ascii=False)
-    with slot_pool.lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+    with slot_pool.lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=record_lock_seconds()):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
             lines = []
         kept = _prune(lines, now)
-        if len(kept) == len(lines) and len(lines) < KEEP_ROWS:
+        rows = keep_rows()
+        if len(kept) == len(lines) and len(lines) < rows:
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
             return
-        kept = (kept + [line])[-KEEP_ROWS:]
+        kept = (kept + [line])[-rows:]
         slot_pool.replace_text(path, "".join(ln + "\n" for ln in kept))
 
 
 def _prune(lines: list[str], now: float) -> list[str]:
-    """30 日より古い行を除いた行（時刻の読めない行は残す）。"""
-    cutoff = now - KEEP_DAYS * SECONDS_PER_DAY
+    """`KEEP_DAYS` の日数より古い行を除いた行（時刻の読めない行は残す）。"""
+    cutoff = now - limits.value(KEEP_DAYS, "count") * SECONDS_PER_DAY
     return [ln for ln in lines if (_parse_iso(_loads(ln).get("at")) or now) >= cutoff]
 
 

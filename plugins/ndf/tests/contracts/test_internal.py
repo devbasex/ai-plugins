@@ -132,7 +132,7 @@ def test_read_stops_on_a_newer_version(version):
         internal.read_record("mvv-signals", {**SIGNAL, "mvv_version": 1, "version": version})
 
 
-@pytest.mark.parametrize("fn", [internal.read_record, internal.write_record, internal.migrate])
+@pytest.mark.parametrize("fn", [internal.read_record, internal.write_record, internal.migrate, internal.readable_version])
 def test_an_unknown_kind_is_config_broken(fn):
     with pytest.raises(internal.InternalError) as exc:
         fn("usege", USAGE)

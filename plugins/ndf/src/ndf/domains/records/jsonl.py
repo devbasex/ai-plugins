@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from filelock import FileLock
 
@@ -23,38 +23,50 @@ def now() -> str:
 
 
 class Broken(NamedTuple):
-    """読めずに除いた行: 行番号（1 から）と理由。"""
+    """読めずに除いた行: 行番号（1 から）・理由・それより前にある読めた行の数・辞書として読めた中身（読めなければ None）。"""
 
     line: int
     reason: str
+    before: int
+    raw: Optional[dict[str, Any]]
 
 
-def read_rows(path: Path, *, kind: str) -> tuple[list[dict[str, Any]], list[Broken]]:
-    """種類 `kind` の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。"""
+def read_rows(
+    path: Path, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool] = lambda row: True
+) -> tuple[list[dict[str, Any]], list[Broken]]:
+    """種類 `kind` の `wanted` が真の行（今のバージョンの形）と、読めずに除いた行。ファイルが無ければ空。新しいバージョンの行があれば `InternalError`。
+
+    `wanted` が偽の行はバージョンだけを見て、移さず、形も確かめない（錠の中で一部の行だけを使う読み手が、全部の行の移行と検証を払わない）。
+    """
+    if not path.is_file():
+        return [], []
     rows: list[dict[str, Any]] = []
     broken: list[Broken] = []
-    if not path.is_file():
-        return rows, broken
     for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
+        raw: Any = None
         try:
-            rows.append(_row(kind, line))
+            raw = _object(line)
+            if wanted(raw):
+                rows.append(internal.read_record(kind, raw))
+            else:
+                internal.readable_version(kind, raw)
         except internal.InternalError as exc:
             if exc.kind != "invalid":
                 raise
-            broken.append(Broken(number, str(exc)))
+            broken.append(Broken(number, str(exc), len(rows), raw))
     return rows, broken
 
 
-def _row(kind: str, line: str) -> dict[str, Any]:
+def _object(line: str) -> dict[str, Any]:
     try:
         raw = json.loads(line)
     except json.JSONDecodeError as exc:
         raise internal.InternalError("invalid", f"JSON として読めない（{exc.msg}）") from exc
     if not isinstance(raw, dict):
         raise internal.InternalError("invalid", "辞書でない")
-    return internal.read_record(kind, raw)
+    return raw
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:

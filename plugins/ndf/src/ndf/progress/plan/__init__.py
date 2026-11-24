@@ -24,7 +24,7 @@ import sqlalchemy as sa
 
 from ndf import cli as top
 from ndf import contracts
-from ndf.contracts import internal, named_cap, result
+from ndf.contracts import internal, limits, named_cap, result
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -34,8 +34,8 @@ TOOL = top.tool_of(f"{__name__}.cli")
 # 計画の設定とレーンの設定の形（レーンは同じファイルの $defs）
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
-# 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
-ANSWER_NEXT_GRACE_SECONDS = 600
+# 回答が載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒の方針（contracts/limits.json）
+ANSWER_NEXT = "parallel-run.answer-next"
 # リクエストの行のキーの接頭辞（request-1・request-2…）
 REQUEST_PREFIX = "request-"
 
@@ -349,12 +349,17 @@ def complete_plan(conn: sa.Connection, pid: str) -> bool:
 # --- 状態の表示 -----------------------------------------------------------------------------------
 
 
+def answer_next_grace() -> float:
+    """回答が載ってから止まりとして知らせるまでの秒。"""
+    return limits.seconds(ANSWER_NEXT)
+
+
 def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     item = {"row": row.key, "state": row.state, "label": model.label(row.state), "input": row.input, "sprint_id": row.sprint_id}
     if row.awaiting_next:
         item["awaiting_next"] = {
             "since": row.answered_at.isoformat() if row.answered_at else None,
-            "stalled": row.stalled(now, ANSWER_NEXT_GRACE_SECONDS),
+            "stalled": row.stalled(now, answer_next_grace()),
             "actor": "conductor",
             "next": result.command("progress", "next", row.sprint_id) if row.sprint_id else None,
         }

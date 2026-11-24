@@ -1,5 +1,5 @@
 {
-  "summary": "代表のリポジトリの種類の既定（#3672 の決定 5）。各行の section は新規のリポジトリ（ワークフローが無い）で init が書く値で、release.cd は null、タグは null、Release は偽（R10）。CD のワークフローを測ったときは with_cd のタグと Release を書く。dev_channel が真の行は、開発版のワークフローを測ったときだけ dev のチャネル（ref はベースブランチ）を足す。merge_method_without_queue がある行は、merge queue を使えないと測ったときにその方式へ替え、分からなければ 2 つを候補に問う。main と develop は既定の名前で、init は測った既定ブランチの名前で置き換える。SSOT は plugins/ndf/contracts/data/branch-strategy-presets.json、10 系の scripts/data/branch-strategy-presets.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
+  "summary": "代表のリポジトリの種類の既定（#3672 の決定 5）。各行の section は新規のリポジトリ（ワークフローが無い）で init が書く値で、release.cd は null、タグは null、Release は偽（R10）。CD のワークフローを測ったときは with_cd のタグと Release を書く。dev_channel が真の行は、開発版のワークフローを測ったときだけ dev のチャネル（ref はベースブランチ）を足す。fill_kinds は旧い設定を移すとき、足りないキーを埋める行の選び方（リリース方式ごと。trunk はリリースの形に当たる行を先に選ぶ）。merge_method_without_queue がある行は、merge queue を使えないと測ったときにその方式へ替え、分からなければ 2 つを候補に問う。main と develop は既定の名前で、init は測った既定ブランチの名前で置き換える。SSOT は plugins/ndf/contracts/data/branch-strategy-presets.json、10 系の scripts/data/branch-strategy-presets.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
   "default_names": {
     "production": "main",
     "base": "develop"
@@ -41,6 +41,10 @@
       "/verify",
       "/release/deliveries"
     ]
+  },
+  "fill_kinds": {
+    "by_release_strategy": {"merge_base_branch": "web-develop", "release_branch": "mobile", "trunk": "web-trunk"},
+    "by_form": {"package-plugin": "plugin", "document": "docs"}
   },
   "kinds": {
     "web-develop": {

@@ -25,13 +25,11 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ndf import cli, contracts, identity
-from ndf.checks.model import CheckError, read_json
+from ndf.checks.model import CONTRACTS, CheckError, read_json
 from ndf.checks.spec_args import ArgTree, extract, from_manual
 from ndf.contracts import exit_codes, facts
 
 DECL_KIND = "ndf_settings"
-# プラグインの根からのコントラクトの保存先（`ndf.contracts` の既定の保存先の名前）
-CONTRACTS = contracts.DEFAULT_DIR.name
 # コントラクトの保存先からの相対パス
 DECL_SCHEMA_DIR = f"{contracts.SCHEMAS}/ndf-settings"
 IO_SCHEMA_DIR = f"{contracts.SCHEMAS}/io"
