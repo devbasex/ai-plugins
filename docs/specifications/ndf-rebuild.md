@@ -62,7 +62,7 @@
 | 進行表 | `progress` の書き手 | 進行表の DB |
 | 耐久の記録 | DBOS の殻（ほかは殻の関数を通してだけ読み書きする） | 実行の鍵の記録（SQLite は鍵ごとのファイル、URL は鍵ごとの `application_name`） |
 | チェックアウトの置き場 | DBOS の殻が形の番号を確かめて用意する | `<git の共通ディレクトリ>/<プラグイン名>/state/` |
-| 子の表 | 設計 PR（表を変える設計を先に通す） | `src/ndf/checks/children.json` |
+| 子の表 | 実装 PR（設計書の「子の表の変更」の行のとおりに直す。設計 PR は `children.json` を変えない。`review_items` は `ndf check --write-spec` が生成する） | `src/ndf/checks/children.json` |
 
 **層の向きは `contracts` → `adapters` → `core` → `progress` → `domains` の 1 方向で、`ndf check` の規則 `structure` が逆向きの import を落とす。** 名前が `_decide` で終わるモジュールは判断だけを持ち、入出力のモジュールを import しない。
 
@@ -388,7 +388,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 
 ### 決定 97: 子が依存を迷わないため、先に要るものを「import する部品の持ち主」から引き、表に無い import を検査で落とす
 
-子 A の先に要るものは、A のサブパッケージが import する部品の持ち主の子と、A の作業が出力を読む子である。表を `children.json` へ写し、規則 `child-deps` が `ndf check` の構文木から import の向きを読み、推移の閉包に無い向きを落とす。
+子 A の先に要るものは、A のサブパッケージが import する部品の持ち主の子と、A の作業が出力を読む子である。先に要るものは `children.json` の `needs` に直接書き（別の依存の表を設計文書に作らない。変え方は `plugins/ndf/src/ndf/checks/README.md` の「子の表の規則」）、規則 `child-deps` が `ndf check` の構文木から import の向きを読み、推移の閉包に無い向きを落とす。
 
 - 採らなかった案: 推移を見ずに直の依存だけを許す。当たり前の向きまで表に並べることになる
 
