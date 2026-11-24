@@ -166,20 +166,24 @@ class _Changed(NamedTuple):
     docs: dict[str, str]
 
 
+def _tree_entries(g: git.Git, rev: str, paths: Sequence[str]) -> dict[str, tuple[str, str, str]]:
+    """`rev` のツリーの `paths` の、パスから（モード, 種別, オブジェクトの ID）。`git ls-tree` を 1 回だけ打つ。"""
+    out: dict[str, tuple[str, str, str]] = {}
+    for entry in g.run("ls-tree", "--full-tree", "-z", rev, "--", *paths).split("\0"):
+        if not entry:
+            continue
+        meta, path = entry.split("\t", 1)
+        mode, kind, oid = meta.split()
+        out[path] = (mode, kind, oid)
+    return out
+
+
 def _regular_blobs(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
     """HEAD のツリーで通常のファイル（シンボリックリンク・サブモジュールでない）の `paths` の、パスから blob の ID。
     `git ls-tree` を 1 回だけ打つ。"""
     if not paths:
         return {}
-    out: dict[str, str] = {}
-    for entry in g.run("ls-tree", "--full-tree", "-z", "HEAD", "--", *paths).split("\0"):
-        if not entry:
-            continue
-        meta, path = entry.split("\t", 1)
-        mode, kind, oid = meta.split()
-        if kind == "blob" and mode in _REGULAR_MODES:
-            out[path] = oid
-    return out
+    return {path: oid for path, (mode, kind, oid) in _tree_entries(g, "HEAD", paths).items() if kind == "blob" and mode in _REGULAR_MODES}
 
 
 def _local_text(root: Path, path: str, oid: str) -> Optional[str]:
@@ -365,10 +369,10 @@ def _proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     隠す。PR 3944 の r5-4）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
     開かずにツリーの種別と blob の ID で比べる（シンボリックリンクをたどらず、中身を設定として解釈しない。PR 3944 の r4-2）。"""
     rel = _settings_path(Path(), "review").as_posix()
-    entry = g.run("ls-tree", "--full-tree", "-z", head, "--", rel).rstrip("\0")
-    if not entry:
+    entry = _tree_entries(g, head, [rel]).get(rel)
+    if entry is None:
         return raw is not None
-    mode, kind, oid = entry.split("\t", 1)[0].split()
+    mode, kind, oid = entry
     if raw is None or kind != "blob" or mode not in _REGULAR_MODES:
         return True
     return oid != _blob_id(raw, len(oid))
