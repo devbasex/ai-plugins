@@ -266,14 +266,7 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 def read_report(stdout: str) -> Optional[dict[str, Any]]:
     """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
-    lines = [line for line in stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    try:
-        obj = json.loads(lines[-1])
-    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を返さない作業は None で bad_report にする
-        return None
-    return result.received(obj)
+    return result.last_line(stdout)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:

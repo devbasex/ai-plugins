@@ -222,11 +222,10 @@ def prompt_text(targets: Sequence[Target], requirements: Mapping[str, Sequence[s
 
 def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     """`ndf worker run` の標準出力の最後の空でない行の結果 JSON。無いか形が違えば `BadReport`。"""
-    lines = [ln for ln in done.stdout.splitlines() if ln.strip()]
     tail = " / ".join(done.stderr.strip().splitlines()[-5:])
     detail = f"ndf worker run の標準出力に結果 JSON が無い（終了コード {done.returncode}）: {tail}"
     try:
-        got = result.received(json.loads(lines[-1])) if lines else None
+        got = result.last_line(done.stdout)
     except ValueError:
         raise BadReport(detail) from None
     if got is None:

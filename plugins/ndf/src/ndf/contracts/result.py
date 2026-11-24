@@ -172,6 +172,18 @@ def received(obj: Any) -> Optional[dict[str, Any]]:
     return obj if not errors(obj) else None
 
 
+def last_line(stdout: str) -> Optional[dict[str, Any]]:
+    """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`received`）。読めないか形が違えば None。"""
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        obj = json.loads(lines[-1])
+    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を返さない作業は None で呼ぶ側が bad_report にする
+        return None
+    return received(obj)
+
+
 def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
     """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。"""
     if not newer(obj):
