@@ -217,7 +217,7 @@ def test_args_without_candidates_keep_the_order_recorded_by_earlier_runs(world) 
     # 完了の記録と未完了の状態はこの並びで比べる。並びが変わると、前のバージョンで終えた実行を再利用できない
     cfg = world.config(symbols=("src/geo.py:area",), participants=("codex",), budget_minutes=30)
     assert cfg.args() == [
-        world.base, "src", "--required", "pytest", "--ci-test", "pytest", "--symbols", "src/geo.py:area",
+        "origin/main", "src", "--required", "pytest", "--ci-test", "pytest", "--symbols", "src/geo.py:area",
         "--participants", "codex", "--max-fix", "2", "--budget-minutes", "30",
     ]  # fmt: skip
 
@@ -227,7 +227,7 @@ SECOND = "- #12: `command.py` の作成の関数\n"
 
 
 def _run_args(world: World, candidates: Path) -> drive.RunConfig:
-    argv = ["run", "--pr", "7", "--branch", "feat/x", "--base", world.base, "--scope", "src", "--required", "pytest"]
+    argv = ["run", "--pr", "7", "--branch", "feat/x", "--base", "origin/main", "--scope", "src", "--required", "pytest"]
     return cli.run_config(cli._parser().parse_args([*argv, "--candidates", str(candidates), "--work", str(world.main)]))
 
 

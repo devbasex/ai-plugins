@@ -58,45 +58,59 @@ def ndf_settings_checked(root: Path) -> pd.Checked:
     return pd.Checked(pd.NDF_SETTINGS, result.result(TOOL, result.OK, "プロジェクトの設定を読めた", warnings=warnings))
 
 
-def sha256_of(path: Path) -> Optional[str]:
+def sha256_of(path: Path, decl: Mapping[str, Any]) -> Optional[str]:
+    """本文の sha256（改行は承認の記録と合う形にそろえる。`mvv_decide.approved_form`）。"""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return hashlib.sha256(md.approved_form(decl, path.read_bytes())).hexdigest()
     except OSError:  # noqa: NDF401 ファイル: 読めない本文は sha256 の無い unreadable の状態にする
         return None
 
 
 def mvv_body(root: Path, decl: Mapping[str, Any]) -> Path:
-    """プロジェクト MVV の本文のパス（設定の `body`、無ければ表 ndf-files の mvv-body。設定と同じ保存先）。"""
-    body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
-    return files.path(root, "mvv").parent / body
+    """プロジェクト MVV の本文のパス（解き方は `mvv_decide.body_path`。パスが不正なら `MvvError`）。"""
+    return root / md.body_path(decl)
+
+
+def _mvv_decl(root: Path) -> Optional[dict[str, Any]]:
+    """MVV の設定。無ければ None（読めない・object でなければ `JsonFileError`）。"""
+    path = files.path(root, "mvv")
+    return jsonfile.read_object(path) if path.is_file() else None
+
+
+def _mvv_state_of(root: Path, decl: Optional[Mapping[str, Any]]) -> tuple[str, Optional[str]]:
+    """読んだ設定から決めた MVV の状態と、設定の `body` が不正なパスのときだけ、設定の直し方が分かる停止理由。"""
+    if decl is None or md.status(decl, None) == md.State.UNAPPROVED:
+        return md.status(decl, None), None
+    try:
+        body = mvv_body(root, decl)
+    except md.MvvError as exc:
+        return md.State.UNREADABLE, f"{files.relpath('mvv')}: {exc}"
+    return md.status(decl, sha256_of(body, decl)), None
 
 
 def mvv_state(root: Path) -> str:
     """MVV の状態（absent・unapproved・approved・mismatch・unreadable）。"""
-    path = files.path(root, "mvv")
-    if not path.is_file():
-        return md.status(None, None)
     try:
-        decl = jsonfile.read_object(path)
+        decl = _mvv_decl(root)
     except jsonfile.JsonFileError:
         return md.State.UNREADABLE
-    return md.status(decl, sha256_of(mvv_body(root, decl)))
+    return _mvv_state_of(root, decl)[0]
 
 
 def mvv_checked(root: Path) -> pd.Checked:
     """MVV の状態を確かめる。旧いキーが残る・本文が承認の記録と違う・読めなければ止まる。旧いキーは本文より先に見る。"""
-    path = files.path(root, "mvv")
     try:
-        decl = jsonfile.read_object(path) if path.is_file() else None
+        decl = _mvv_decl(root)
     except jsonfile.JsonFileError:
-        decl = None  # 読めない設定は下の mvv_state が unreadable にして止める
-    legacy = renames.legacy_detail("mvv", decl, root) if decl is not None else None
-    if legacy is not None:
-        return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", legacy))
-    state = mvv_state(root)
+        state, bad_body = md.State.UNREADABLE, None
+    else:
+        legacy = renames.legacy_detail("mvv", decl, root) if decl is not None else None
+        if legacy is not None:
+            return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", legacy))
+        state, bad_body = _mvv_state_of(root, decl)
     if state in (md.State.MISMATCH, md.State.UNREADABLE):
-        detail = f"プロジェクト MVV の状態が {state}（本文を承認し直すか、承認した本文へ戻す）"
-        return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", detail))
+        why = bad_body or f"プロジェクト MVV の状態が {state}（本文を承認し直すか、承認した本文へ戻す）"
+        return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", why))
     return pd.Checked(pd.MVV, result.result(TOOL, result.OK, f"プロジェクト MVV: {state}"))
 
 

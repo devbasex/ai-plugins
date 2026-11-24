@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -134,7 +135,7 @@ def test_a_provisional_route_is_no_route(copy):
 def test_a_correspondence_outside_the_repository_is_not_read(copy, tmp_path, absolute):
     outside = tmp_path / "outside.md"
     outside.write_text("秘密\n", encoding="utf-8")
-    link = str(outside) if absolute else "../../outside.md"
+    link = str(outside) if absolute else os.path.relpath(outside, copy.table.parent)
     copy.write_items(("1-2", "後で解く", f"[表]({link})", "—", "—", "無し", "11.x"))
     with pytest.raises(CheckError, match="外を指すか") as caught:
         copy.findings()

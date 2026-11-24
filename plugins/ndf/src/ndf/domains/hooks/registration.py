@@ -1,11 +1,13 @@
-"""hook の登録（`hooks/<ランタイム>.json`）を、ランタイムのコントラクト表と予算から作る（#3345 の決定 88〜90・IH1〜IH3）。
+"""hook の登録（`hooks/<ランタイム>.json`）を、ランタイムのコントラクト表と予算から作る
+（docs/specifications/ndf-rebuild.md の決定 88・89・90・IH1〜IH3）。
 
     ndf hooks render [--check]
 
 - 事象ごとに登録 1 行。事象はランタイムのコントラクト表（`contracts/hooks/runtimes.json`）の並びで、どの登録にも予算
   （上限の設定の方針 `hook.budget.*`）の timeout を付ける。matcher は付けない（どの Tool の呼び出しでも起動し、guard の表が
   Tool で絞る）
-- 登録の command は `SCRIPT` を `sh -c` で打つ。引数は環境の python・`hooks/entry.py`・ランタイム・事象（決定 89）
+- 登録の command は `SCRIPT` を `sh -c` で打つ。引数は環境の python・`hooks/entry.py`・ランタイム・事象
+  （docs/specifications/ndf-rebuild.md の決定 89）
 - 環境の python のパスは、`env.venv_python` と同じ保存先（プラグイン名と `uv.lock` の hash で決まる）を指す。キャッシュの根は
   起動の時点の `XDG_CACHE_HOME`（無ければ `$HOME/.cache`）をシェルが展開する
 - プラグインの根は、ランタイムが hook の command へ渡す環境変数（コントラクト表の `plugin_root_env`）をシェルが展開する

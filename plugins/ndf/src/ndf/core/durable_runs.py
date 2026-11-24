@@ -1,4 +1,5 @@
-"""URL（PostgreSQL）のときに NDF が起動した実行のキーを書く実行の一覧 `ndf_runs`（決定 83・I12・I13）。DBOS は import しない。
+"""URL（PostgreSQL）のときに NDF が起動した実行のキーを書く実行の一覧 `ndf_runs`
+（docs/specifications/ndf-rebuild.md の決定 83・I12・I13）。DBOS は import しない。
 
 実行の一覧はステートマシンと同じ DB に置き、DBOS の表ではない。DBOS の殻（`ndf.core.durable`）が起動の前にキーを書き、片付けで読んで消す。
 """

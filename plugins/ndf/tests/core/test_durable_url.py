@@ -1,4 +1,4 @@
-"""URL（PostgreSQL）を渡したときの実行の一覧と片付け（決定 83・I8・I12・I13）。
+"""URL（PostgreSQL）を渡したときの実行の一覧と片付け（docs/specifications/ndf-rebuild.md の決定 83・I8・I12・I13）。
 
 使い捨ての PostgreSQL を `initdb` と `pg_ctl` で起動する。GitHub Actions の ubuntu の Runner は PostgreSQL を
 入れてある（サービスは止まっている）。手元に無ければ飛ばし、CI（環境変数 `CI`）では落とす。

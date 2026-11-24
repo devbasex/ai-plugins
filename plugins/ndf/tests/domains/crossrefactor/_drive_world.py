@@ -38,10 +38,10 @@ class World:
     main: Path
     base: str
 
-    def config(self, **over: Any) -> drive.RunConfig:
+    def config(self, base: str = "origin/main", **over: Any) -> drive.RunConfig:
         kw: dict[str, Any] = {"scope": ("src",), "required": ("pytest",), "tests": ("pytest",)}
         kw.update(over)
-        return drive.RunConfig(self.main, PR, BRANCH, self.base, **kw)
+        return drive.RunConfig(self.main, PR, BRANCH, base, **kw)
 
     def root(self) -> Path:
         return self.main.resolve() / ".worktrees" / ".ndf" / f"rf{PR}"

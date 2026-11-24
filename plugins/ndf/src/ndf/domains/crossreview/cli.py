@@ -28,15 +28,37 @@ import contextlib
 import importlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, ContextManager, NamedTuple, Optional
+from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
 from ndf.contracts import limits, result, writing
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, round_scope, scope_decide, store, threads
+from ndf.domains.crossreview import (
+    changes,
+    drive,
+    fixer,
+    fixgate_decide,
+    journal,
+    push,
+    repo,
+    report_decide,
+    round_scope,
+    scope_decide,
+    store,
+    threads,
+)
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.settings import (
+    MAX_ROUNDS,
+    DriveStopped,
+    ReviewSettings,
+    RunConfig,
+    outside_checkout,
+    read_settings,
+)
+from ndf.domains.records import mvv
 
 TOOL = cli.tool_of(__name__)
 # 作業の名前（lock の理由に載せる）
@@ -44,7 +66,9 @@ CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
 # 相手役と修正担当の起動（テストは偽物に差し替える）
-LAUNCH: drive.Launcher = agents.run_agent
+LAUNCH: fixer.Launcher = agents.run_agent
+
+T = TypeVar("T")
 
 
 def _redacted(texts: Sequence[str]) -> list[str]:
@@ -268,9 +292,9 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
+    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `fixer.merge_fix` で行う。"""
     try:
-        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
+        round_no = fixer.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
     except (store.FixResultMismatch, ValueError) as exc:
         return _stop("invalid", str(exc))
     ref = store.state_pr(Path(args.state_dir), args.pr)
@@ -285,30 +309,87 @@ def _every_section(purpose: str) -> bool:
     return purpose == route.templates()["design"].purpose
 
 
+class _LocalBase(NamedTuple):
+    """取得済みの参照だけから決めた、差分の比較元のコミットと、MVV を読む参照（決められなければ None）。"""
+
+    commit: str
+    mvv_ref: Optional[str]
+
+
+def _local_base(g: git.Git, remote: str, base: str, branch: Optional[str]) -> _LocalBase:
+    """`run` の起動の始めと同じ決め方で、リモートから取得せずに比較元と MVV を読む参照を決める。
+
+    `--base` がブランチなら、取得済みのリモートのブランチの先頭が両方になる。コミット（SHA・タグなど）なら、MVV は PR の
+    マージ先のブランチから読むので、`run` がラウンドの記録に残した `branch` を使う。記録が無ければ MVV を読む参照は決められない。
+    """
+    tracking = f"refs/remotes/{remote}"
+    commit = base if git.FULL_SHA.match(base) else None
+    if commit is None:
+        try:
+            tip = g.rev_parse(f"{tracking}/{base.removeprefix(f'{remote}/')}")
+            return _LocalBase(tip, tip)
+        except git.GitError:
+            commit = g.commit_named(base)
+    if commit is None:
+        # リモートに無い手元だけのブランチ。`run` は止まるので、MVV を読む先も無い
+        return _LocalBase(base, None)
+    return _LocalBase(commit, f"{tracking}/{branch}" if branch is not None else None)
+
+
+def _local_mvv(wt: Path, ref: Optional[str]) -> tuple[str, list[str]]:
+    """参照 `ref` の MVV を見分ける値と注意。確かめられなければ `scope_decide.UNKNOWN_MVV`（全差分になる）。"""
+    if ref is None:
+        why = "MVV を読むブランチを決められない（`--base` は取得済みのリモートのブランチか、`run` に渡したコミットにする）"
+    else:
+        try:
+            return mvv.identity_at(wt, ref), []
+        except mvv.MvvError as exc:
+            why = str(exc)
+    return scope_decide.UNKNOWN_MVV, [f"前のラウンドと MVV が同じかを確かめられないので、全差分を範囲にした: {why}"]
+
+
+def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optional[str]]:
+    """変わった Markdown のセクション。手元のオブジェクトだけで読めなければ、読めない理由（全差分になる）。"""
+    try:
+        return changes.changed_sections(g, base, wt), None
+    except git.GitError as exc:
+        return [], f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"
+
+
+def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resolved: Resolved) -> tuple[scope_decide.Scope, list[str]]:
+    """次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録 `data` から決める（リモートから取得しない）。"""
+    rounds = store.list_of(data, store.ROUNDS)
+    g = git.Git.offline(wt)
+    # `_resolve` が求めたメインディレクトリから読む（`g.remote()` は `git worktree list` を打ち直す）
+    based = _local_base(g, git.remote_of(resolved.policy.main), args.base, scope_decide.mvv_branch(data))
+    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）。`--base` の誤りは、セクションを読む前にここで止まる
+    merge_base = g.merge_base(based.commit, "HEAD")
+    sections, unread = _local_sections(g, based.commit, wt)
+    if unread is not None:
+        # 全差分に決まっているので、範囲を変えない MVV を読まない
+        return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
+    now, unsure = _local_mvv(wt, based.mvv_ref)
+    basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
+    found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
+    got = round_scope.descended(g, found, "HEAD")
+    return got, unsure if rounds else []
+
+
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     data = store.read_state(ref)
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
-    try:
-        # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
-        # 全差分。PR 3944 の r3-4・r4-3）
-        resolved = _resolve(wt, args.reviewer)
-    except ValueError as exc:
-        return _stop("invalid", str(exc))
-    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
-        return _stop("precondition", str(exc))
-    except worktree.WorktreeUnregistered as exc:
-        return _unregistered(exc, str(exc.worktree))
-    g = git.Git(wt)
-    sections = drive.changed_sections(g, args.base, wt)
-    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
-    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data)
-    found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
-    got = round_scope.descended(g, found, "HEAD")
+    # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
+    # 全差分。PR 3944 の r3-4・r4-3）
+    resolved = _or_stop(lambda: _resolve(wt, args.reviewer))
+    if isinstance(resolved, int):
+        return resolved
+    got, warnings = _local_scope(wt, args, data, resolved)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
-    return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
+    summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
+    return _ok(summary, [item], **({"warnings": warnings} if warnings else {}))
 
 
 def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:
@@ -321,13 +402,16 @@ def _review(path: str) -> fin.Review:
     return fin.as_review(store.read_object(Path(path)))
 
 
-def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
-    """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。"""
+def _emit_verdict(verdict: fin.Verdict, mvv: Optional[dict[str, Any]] = None, **extra: Any) -> int:
+    """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
+    gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。指摘の本文や理由を含む値は、結果を
+    集めるログへ秘密を写さないよう、ここで伏せる。`mvv` は outputs の mvv（自由記述を伏せ終えたもの。承認済みの MVV が無ければ None）。"""
     warnings = [*extra.pop("warnings", ()), *verdict.warnings]
-    shared = {"decisions": list(verdict.decisions), "warnings": warnings, "outputs": {"gaps": list(verdict.gaps)}, **extra}
+    summary, decisions, gaps, warnings = run_log.redact([verdict.summary, verdict.decisions, verdict.gaps, warnings])
+    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps, **({"mvv": mvv} if mvv is not None else {})}, **extra}
     if verdict.status == fin.OK:
-        return _ok(verdict.summary, **shared)
-    return _stop(str(verdict.kind), verdict.summary, gaps=list(verdict.gaps), **shared)
+        return _ok(summary, **shared)
+    return _stop(str(verdict.kind), summary, gaps=gaps if verdict.kind == "incomplete" else None, **shared)
 
 
 def cmd_finish(args: argparse.Namespace) -> int:
@@ -385,7 +469,7 @@ class Resolved(NamedTuple):
 
     policy: Policy
     reviewers: tuple[str, ...]
-    settings: drive.ReviewSettings
+    settings: ReviewSettings
 
 
 def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
@@ -393,14 +477,14 @@ def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
     policy = _policy(wt)
     reviewers = _reviewers(requested, policy)
     # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-    return Resolved(policy, reviewers, drive.read_settings(policy.main, wt))
+    return Resolved(policy, reviewers, read_settings(policy.main, wt))
 
 
-def _run_config(args: argparse.Namespace) -> drive.RunConfig:
+def _run_config(args: argparse.Namespace) -> RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
     got = _resolve(wt, args.reviewer)
-    return drive.RunConfig(
+    return RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
         base=args.base,
@@ -415,14 +499,38 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
     )
 
 
+def _or_stop(resolve: Callable[[], T]) -> T | int:
+    """`_resolve` を呼ぶ `resolve` の値。決められなければ、止まった結果を出した終了コードを返す（`run` と `review-scope` で共有する）。"""
+    try:
+        return resolve()
+    except ValueError as exc:
+        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
+        return _stop("invalid", str(exc))
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
+        # 止める（PR 3944 の r1-4・r2-7）
+        return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
+
+
 class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
-def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, hub_of: Callable[[], Hub]) -> tuple[str, list[str]]:
+def _mvv_notices(warnings: Sequence[str]) -> list[str]:
+    """コメントに載せる注意のうち、公開済みかの比較に使うもの（MVV の記録の失敗）。"""
+    return [w for w in drive.MVV_NOTICES if w in warnings]
+
+
+def _post_report(
+    state_dir: Path, pr: int, final: Optional[str], warnings: Optional[Sequence[str]], hub_of: Callable[[], Hub]
+) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    `warnings` はコメントに載せる注意（None なら、公開のロックの中で読み直した状態ファイルから作る）。
     `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
@@ -437,9 +545,12 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub) -> tuple[str, list[str]]:
+def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
+    if warnings is None:
+        # ロックを待つ間に別の起動が MVV の記録を書けていれば、失敗の注意を載せない
+        warnings = [drive.RECORDS_UNWRITTEN] if store.MVV_RECORD_ERROR in data else []
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     if journal.with_occurrences(data):
@@ -456,7 +567,7 @@ def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub)
     if notes:
         data.pop(report_decide.PUBLISHED_KEY, None)
     else:
-        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
+        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final, _mvv_notices(warnings))
     store.write_object(ref.path, data)
     return url, notes
 
@@ -468,31 +579,22 @@ def cmd_report(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     try:
         url, notes = _post_report(
-            state_dir, args.pr, report_decide.final_of(data), (), lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+            state_dir, args.pr, report_decide.final_of(data), None, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
 
 
-def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | int:
+def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
     """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
-    try:
-        cfg = _run_config(args)
-    except ValueError as exc:
-        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
-        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
-        return _stop("invalid", str(exc))
-    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
-        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
-        # 止める（PR 3944 の r1-4・r2-7）
-        return _stop("precondition", str(exc))
-    except worktree.WorktreeUnregistered as exc:
-        return _unregistered(exc, str(exc.worktree))
+    cfg = _or_stop(lambda: _run_config(args))
+    if isinstance(cfg, int):
+        return cfg
     try:
         # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
-        cfg = drive.outside_checkout(cfg)
-    except drive.DriveStopped as exc:
+        cfg = outside_checkout(cfg)
+    except DriveStopped as exc:
         return _stop(exc.kind, str(exc))
     try:
         state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
@@ -526,12 +628,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         return made[0]
 
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr))
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
         return _stop("precondition", str(exc))
-    except drive.DriveStopped as exc:
+    except DriveStopped as exc:
         return _stop(exc.kind, str(exc))
     except writing.CriteriaBroken as exc:
         # 文書の基準の本文を読めない（指示を作る前。#4285）
@@ -541,10 +643,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+    return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
-def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
+def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
     """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、今の PR へ今と同じ状態の
     記録を公開できていれば書き直さない（PR 3944 の r2-10・r3-2。URL があるだけでは、最新のラウンドの公開に失敗した後の
     古い記録かもしれない）。"""
@@ -554,7 +656,9 @@ def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub])
     data = store.read_state(ref)
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     previous = data.get(report_decide.COMMENT_KEY)
-    published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
+    # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
+    now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
+    published = data.get(report_decide.PUBLISHED_KEY) == now
     if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings
@@ -610,7 +714,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--branch")
     r.add_argument("--purpose", default=TOOL)
     r.add_argument("--reviewer", action="append")
-    r.add_argument("--max-rounds", type=int, default=int(limits.value(drive.MAX_ROUNDS, "count")))
+    r.add_argument("--max-rounds", type=int, default=int(limits.value(MAX_ROUNDS, "count")))
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
 

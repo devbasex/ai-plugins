@@ -1,7 +1,7 @@
-"""規則 `child-deps`: 子の表のコピー（`children.json`）と、import の向き・順番・レーン・表の書き手を照らす。
+"""規則 `child-deps`: 子の表（`children.json`）と、import の向き・順番・レーン・表の書き手を照らす。
 
-#3347 の決定 97（先に要るものを import のオーナーから引く）・不変条件 IG1・IG2 と、#3378 の 3378-6（1 つの表へ複数の子が
-並行で書く）を CI で縛る。
+docs/specifications/ndf-rebuild.md の決定 97（先に要るものを import のオーナーから引く）・不変条件 IG1・IG2 と、
+#3378 の 3378-6（1 つの表へ複数の子が並行で書く）を CI で縛る。
 
 - オーナー: `src/` のモジュールのオーナーは、`packages` が最も長く一致する子である。オーナーの無いモジュール（パッケージの
   `__init__` を除く）は指摘する。表を直す設計 PR を先に通してから、モジュールを足す
@@ -11,7 +11,7 @@
 - 表の書き手: 同じ表（`tables`）へ書く閉じていない子どうしは、どちらかが他方の閉包に入る。並行で書かず、後に流れる子が
   先の子のマージをマージしてから衝突を解く
 
-入れ替え（S2）がこのモジュールと `children.json` を消す。
+`children.json` は子の表の SSOT で、規則 `child-deps` は入れ替え（S2）の後も使う。
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from ndf.checks import imports
 from ndf.checks.model import CheckError, Finding, Scope, Source, contained, module_rel, read_json_text, source_imports
 
 RULE = "child-deps"
-# 子の表のコピーの保存先（プラグインの根からの相対パス）
+# 子の表の保存先（プラグインの根からの相対パス）
 CHILDREN_REL = module_rel(__name__.rpartition(".")[0], "/children.json")
-# 追補の単位の記号は、元の子の記号の後ろにこの文字を付ける（#3395 の決定 110）
+# 追補の単位の記号は、元の子の記号の後ろにこの文字を付ける（docs/specifications/ndf-rebuild-review-scope.md の決定 110）
 ADDENDUM_MARK = "+"
 
 

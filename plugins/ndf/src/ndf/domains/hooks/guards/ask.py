@@ -1,4 +1,4 @@
-"""AskUserQuestion の guard（#3345 の決定 88・93・#3035）。
+"""AskUserQuestion の guard（docs/specifications/ndf-rebuild.md の決定 88・93・#3035）。
 
 質問を中継のシグナルファイル（中継の下）とオーガナイザーの質問の保存先（オーガナイザーのレーン）へ書き、待ちの知らせを
 送信待ちへ書く。転送を待つのは中継とオーガナイザーで、hook は待たない。

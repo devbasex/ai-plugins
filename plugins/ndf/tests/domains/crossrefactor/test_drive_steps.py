@@ -65,6 +65,53 @@ def test_an_item_planned_without_tests_does_not_launch_add_tests(world) -> None:
     assert "add-tests" not in {phase for _, phase, _, _ in fake.seen}
 
 
+def _proposing(*proposals):
+    return lambda spec, submit: {"proposals": list(proposals)}
+
+
+def _planning(*items):
+    return lambda spec, submit: {"items": list(items)}
+
+
+_AREA = {"path": "src/geo.py", "symbol": "area", "title": "計画が選んだ題", "reason": "r", "tier": "high", "technique": "extract_variable"}
+_UNTOUCHED = dict(_AREA, symbol="untouched")
+_PROPOSED = {"path": "src/geo.py", "symbol": "area", "title": "提案の題", "reason": "r"}
+_PROPOSED_UNTOUCHED = dict(_PROPOSED, symbol="untouched")
+
+
+@pytest.mark.parametrize(
+    ("plan", "titles", "skipped", "fallback"),
+    [
+        pytest.param(no_plan, ["提案の題"], ["提案の題"], True, id="結果が無ければ提案を項目にする"),
+        pytest.param(_planning(_AREA), ["計画が選んだ題"], [], False, id="結果があれば計画だけを項目にする"),
+        pytest.param(_planning(), [], [], False, id="空の計画は提案に戻さない"),
+        pytest.param(_planning(_UNTOUCHED), [], ["計画が選んだ題"], False, id="範囲外だけの計画は提案に戻さない"),
+        pytest.param(_planning({"path": "src/geo.py"}), [], [], False, id="形の違う項目だけの計画は提案に戻さない"),
+    ],
+)
+def test_only_a_planner_without_a_result_falls_back_to_the_proposals(world, plan, titles, skipped, fallback) -> None:
+    fake = FakeAgents(_acts(propose=_proposing(_PROPOSED, _PROPOSED_UNTOUCHED), plan=plan))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), Comments(), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    state = _state(world)
+    assert [i["title"] for i in state["items"]] == titles
+    assert [s["title"] for s in state["skipped"]] == skipped
+    assert state["plan_fallback"] is fallback
+    assert [agent for agent, phase, _, _ in fake.seen if phase == "plan"] == ["claude"]
+
+
+@pytest.mark.parametrize("propose", [_proposing(), _proposing({"path": "src/geo.py"}), no_plan], ids=["空", "形が違う", "結果が無い"])
+def test_without_proposals_the_planner_is_not_launched_and_it_is_not_a_fallback(world, propose) -> None:
+    # 計画の担当が結果を返す状態でも起動しない。工程の起点は起動の有無に依らず記録する
+    fake = FakeAgents(_acts(propose=propose, plan=_planning(_AREA)))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), Comments(), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    assert {phase for _, phase, _, _ in fake.seen} == {"propose"}
+    state = _state(world)
+    assert (state["items"], state["skipped"], state["plan_fallback"]) == ([], [], False)
+    assert "plan" in state["phases"] and "plan" not in state["phase_seconds"]
+
+
 def test_a_broken_allocation_declaration_stops_the_plan(world) -> None:
     (world.main / ".ndf").mkdir(exist_ok=True)
     (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"nope": 1}}), encoding="utf-8")

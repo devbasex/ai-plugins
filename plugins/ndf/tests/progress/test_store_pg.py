@@ -1,4 +1,4 @@
-"""PostgreSQL の URL を渡したときに行わないこと（P1-4。#3344 の決定 82）。Factory はこの形で開く。"""
+"""PostgreSQL の URL を渡したときに行わないこと（P1-4。docs/specifications/ndf-rebuild.md の決定 82）。Factory はこの形で開く。"""
 
 from __future__ import annotations
 

@@ -22,6 +22,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 総評だけの指摘 | — | 差分の行に付くスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる | — | — | `docs/specifications/cross-review-body-findings.md` |
 | 決着 | — | 指摘が直した・見送った・却下したのどれかに振り分けられ、マージ（修正のラウンドの merge-fix か最終スイープの verify-sweep）が記録したこと。スレッドの指摘ではスレッドの解決も含む | — | — | `docs/specifications/cross-review-body-findings.md` |
 | 決着の記録 | — | 状態ファイルの body_settlements[] の 1 要素。総評だけの指摘 1 件の振り分け（fixed / deferred / waived / separate_pr / rejected）と、記録したラウンドと経路（修正のラウンドの merge-fix か最終スイープの verify-sweep か）を持ち、追記だけで書き換えない | — | — | `docs/specifications/cross-review-body-findings.md` |
+| 根拠の行の確かめ | — | Pull Request が足した MVV の根拠の行（指示と結果での呼び名は「根拠の記述」）について、書いたバージョンが承認済みの今のバージョンか、項目がそのバージョンにあるかを、ndf cross-review run が機械で確かめること。誤りは直るまで残り、見送れない | — | — | `plugins/ndf/skills/cross-review/SKILL.md` |
+| MVV に反する指摘 | — | cross-review の指摘のうち、承認済みのプロジェクト MVV に反するもの（指摘の基準 5）。Mission・Vision・Value に反するものは修正担当へ渡り、必ず人の承認が要る操作に当たるものは渡さずに人の承認を待つ | — | — | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
 | 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（設定があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | `docs/specifications/cross-review-review-profile.md` |

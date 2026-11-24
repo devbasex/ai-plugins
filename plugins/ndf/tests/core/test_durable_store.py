@@ -1,4 +1,4 @@
-"""チェックアウトの保存先の形の番号と、保存先のロック（決定 85・I10・I11）。"""
+"""チェックアウトの保存先の形の番号と、保存先のロック（docs/specifications/ndf-rebuild.md の決定 85・I10・I11）。"""
 
 from __future__ import annotations
 

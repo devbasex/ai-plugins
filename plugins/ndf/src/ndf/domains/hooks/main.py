@@ -1,4 +1,4 @@
-"""環境の python の hook のエントリポイントの本体（#3345 の決定 88〜94）。
+"""環境の python の hook のエントリポイントの本体（docs/specifications/ndf-rebuild.md の決定 88・89・90・91・92・93・94）。
 
 登録の command が用意済みの環境の python で `hooks/entry.py` を起動し、`hooks/entry.py` が `run_entry(sys.argv)` を
 呼ぶ。`argv[1]` がランタイム、`argv[2]` が事象、標準入力が payload である。
@@ -232,7 +232,7 @@ def _follow_relay() -> None:
 
 
 def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
-    """変更要求の上限で通した Stop の待ちの知らせを送信待ちへ書く（決定 92）。"""
+    """変更要求の上限で通した Stop の待ちの知らせを送信待ちへ書く（docs/specifications/ndf-rebuild.md の決定 92）。"""
     from ndf.domains.hooks import outbox
 
     if not outbox.notify_configured(os.environ):

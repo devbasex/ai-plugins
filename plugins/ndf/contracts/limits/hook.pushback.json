@@ -1,5 +1,5 @@
 {
-  "summary": "利用者の入力ごとに Stop を変更を要求する回数の合計の上限。理由をまたいで数える（決定 92）",
+  "summary": "利用者の入力ごとに Stop を変更を要求する回数の合計の上限。理由をまたいで数える（docs/specifications/ndf-rebuild.md の決定 92）",
   "attempts": 2,
   "read_by": [
     "ndf.domains.hooks.counter",

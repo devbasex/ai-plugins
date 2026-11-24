@@ -22,12 +22,15 @@ from __future__ import annotations
 
 import re
 import socket
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, TypeVar
 
 from ndf import identity
 from ndf.adapters import git
+
+T = TypeVar("T")
 
 # lock の理由の前置き（NDF が掛けた lock だけを片付けで外す）
 LOCK_PREFIX = f"{identity.FIXED_WORDS['entrypoint']} "
@@ -68,13 +71,22 @@ class Registration(NamedTuple):
 
 class SyncResult(NamedTuple):
     """同期の前後の HEAD・載せ直したコミットの数・衝突したファイル（衝突したら `after` は `before`）・取得した PR の
-    ブランチの先頭（未送信のコミットを載せ直す前。PR の内容そのものを見るときに使う）。"""
+    ブランチの先頭（未送信のコミットを載せ直す前。PR の内容そのものを見るときに使う）・同じ取得で得たベースの先頭のコミット
+    （ベースを取らなければ空）。"""
 
     before: str
     after: str
     replayed: int
     conflicts: tuple[str, ...]
     remote: str
+    base: str = ""
+
+
+class Base(NamedTuple):
+    """引数 `--base` から決めたベース。`branch` は MVV を読むブランチ、`commit` は `--base` が指すコミット（ブランチなら None）。"""
+
+    branch: str
+    commit: Optional[str]
 
 
 class Release(NamedTuple):
@@ -245,11 +257,42 @@ def conflicted_files(g: git.Git) -> tuple[str, ...]:
     return tuple(p for p in g.run("diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p)
 
 
-def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None) -> str:
-    """リモート名のリモートの PR のブランチを取り、その先頭のコミットを返す。`remote` を省けば `g.remote()`。"""
+def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> str:
+    """リモート名のリモートの PR のブランチを取り、その先頭のコミットを返す。`remote` を省けば `g.remote()`。
+
+    `base_branch` があれば同じ 1 回の取得でベースのリモート追跡参照も新しくする。どちらかを取れなければ `GitError`。
+    """
+    return fetch_tips(g, head_branch, remote, base_branch)[0]
+
+
+def fetch_tips(g: git.Git, head_branch: str, remote: Optional[str], base_branch: Optional[str]) -> tuple[str, str]:
+    """`fetch_head` の取得を打ち、PR のブランチとベースの先頭のコミットを返す（ベースを取らなければ空）。"""
     remote = remote if remote is not None else g.remote()
-    g.run("fetch", "--", remote, f"+refs/heads/{head_branch}:refs/remotes/{remote}/{head_branch}")
-    return g.rev_parse(f"refs/remotes/{remote}/{head_branch}")
+    branches = dict.fromkeys(b for b in (head_branch, base_branch) if b is not None)
+    g.run("fetch", "--", remote, *(f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in branches))
+    tips = dict(zip(branches, g.commits_of(*(f"refs/remotes/{remote}/{b}" for b in branches)), strict=True))
+    return tips[head_branch], tips[base_branch] if base_branch is not None else ""
+
+
+def fetch_base(g: git.Git, base: str, remote: str, fetch: Callable[[str], T], target: Callable[[], str]) -> tuple[T, Base]:
+    """引数 `--base` の値 `base` からベースブランチを決めて `fetch` へ渡し、その結果と決めたベースを返す。
+
+    `base` がブランチ（`<リモート>/<ブランチ>` の形も受ける）なら、そのブランチを取得する。コミット（SHA・短縮した SHA・タグなど）
+    なら、PR のマージ先のブランチ（`target`）を取得する。渡されたコミットは PR のブランチの途中のことがあり、そこから MVV を読むと、
+    PR が自分で書き換えた MVV で自分を確かめることになる。完全な SHA でなければブランチとして取得し、取得できずに手元でブランチで
+    ないコミットを指すときだけコミットとして扱う（ブランチ名の起動で Git を余計に打たない）。
+    """
+    commit = base if git.FULL_SHA.match(base) else None
+    if commit is None:
+        branch = base.removeprefix(f"{remote}/")
+        try:
+            return fetch(branch), Base(branch, None)
+        except git.GitError:
+            commit = g.commit_named(base)
+            if commit is None:
+                raise
+    branch = target()
+    return fetch(branch), Base(branch, commit)
 
 
 def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
@@ -292,24 +335,27 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
         )
 
 
-def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None) -> SyncResult:
-    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。"""
+def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> SyncResult:
+    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。
+
+    `base_branch` があれば同じ 1 回の取得でベースも取り、その先頭のコミットを `base` に返す。
+    """
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
-    remote = fetch_head(g, head_branch, remote)
-    _refuse_lossy_sync(g, remote, before)
-    own = own_commits(g, remote, before)
-    g.run("reset", "--hard", remote)
+    tip, base = fetch_tips(g, head_branch, remote, base_branch)
+    _refuse_lossy_sync(g, tip, before)
+    own = own_commits(g, tip, before)
+    g.run("reset", "--hard", tip)
     if not own:
-        return SyncResult(before, remote, 0, (), remote)
+        return SyncResult(before, tip, 0, (), tip, base)
     picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
-        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote)
+        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), tip, base)
     conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
     if not conflicts:
         # 空になったコミットなど、衝突のファイル無しで載せ直せなかった。origin へ合っていないので成功とは返さない
         raise SyncRefused(f"自分の未送信のコミットを origin の先頭へ載せ直せないので {before} へ戻した: {picked.stderr.strip()}")
-    return SyncResult(before, before, 0, conflicts, remote)
+    return SyncResult(before, before, 0, conflicts, tip, base)

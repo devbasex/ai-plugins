@@ -11,6 +11,8 @@ import pytest
 from ndf.contracts import facts
 from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records.mvv import Snapshot
+from ndf.domains.records.mvv_decide import State
 
 from ._repos import Repos, run_cli
 from .test_crossreview_run import PR, Fake, Recording, _run, _state
@@ -78,6 +80,34 @@ def test_focus_reads_version_1_only() -> None:
     assert [line.split(".")[0] for line in criteria_decide.criteria_lines(("速さ",))] == ["1", "2", "3", "4"]
 
 
+def _snapshot(state: str) -> Snapshot:
+    path = Path("/s/v11.md"), Path("/s/principles.md")
+    if state != State.APPROVED:
+        return Snapshot(state, None, None, None, (), {}, "c" * 40, "", None)
+    return Snapshot(state, 11, "a" * 64, path[0], ("Value 5",), {}, "c" * 40, "b" * 64, path[1])
+
+
+def test_issue_4076_criterion_5_appears_only_with_the_approved_mvv() -> None:
+    """承認済みの MVV があるときだけ、基準 5 と、相手役・修正担当への MVV の文が指示に足される。"""
+    approved = _snapshot(State.APPROVED)
+    assert [x.split(".")[0] for x in criteria_decide.criteria_lines(("速さ",), approved)] == ["1", "2", "3", "4", "5"]
+    last = criteria_decide.criteria_lines((), approved)[-1]
+    assert all(x in last for x in ("バージョン 11", "/s/v11.md", "/s/principles.md"))
+    for build in (criteria_decide.reviewer_block, criteria_decide.fixer_block):
+        plain = build(())
+        more = [x for x in build((), approved) if x not in plain]
+        assert len(more) == 2 and last in more and not any("{" in x for x in more)
+        for state in (State.ABSENT, State.UNAPPROVED):
+            assert build((), _snapshot(state)) == plain
+    assert criteria_decide.mvv_shape(_snapshot(State.ABSENT)) == criteria_decide.mvv_shape(None) == ""
+    assert '"mvv": ' in criteria_decide.mvv_shape(approved)
+
+
+@pytest.mark.parametrize("value, want", [("Value 5", "Value 5"), (" Value 5\n", "Value 5"), ("Value 99", None), (None, None), (5, None)])
+def test_issue_4076_mvv_item_is_one_of_the_items(value: object, want: str | None) -> None:
+    assert criteria_decide.mvv_item(value, ("Mission", "Value 5")) == want
+
+
 def test_issue_4013_fixer_sessions_reads_a_boolean_and_defaults_to_false() -> None:
     """#4013: `fixer_sessions` は真偽値だけを読み、キーが無ければ偽。"""
     assert criteria_decide.fixer_sessions_of({"version": 1, "focus": []}, "r") is False
@@ -124,6 +154,23 @@ def test_light_findings_do_not_block_and_are_not_handed_to_the_fixer(wt: Path, t
     assert f"| r1-1 | codex | nit | doc.md:3 | 語の揺れ | {report_decide.LIGHT_LABEL} | — |" in hub.comments[-1][2]
 
 
+def _assert_only_table_criteria(fake: Recording, focus: tuple[str, ...], tmp_path: Path) -> None:
+    """#4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役と修正担当の指示の基準は表の基準（重点があれば
+    基準 3 を足す）だけで、MVV の文は 1 行も現れない。"""
+    table = criteria_decide._table()
+    want = {n: text for n, text in table["criteria"].items() if n in ("1", "2", "4")}
+    if focus:
+        want["3"] = f"{table['focus_label']}: {' / '.join(focus)}"
+    # 基準のほかの行の数（見出し・前置き・書かないものなど）。前と後ろの行は起動ごとに違う
+    for agent, build, others in (("codex", criteria_decide.reviewer_block, 5), ("claude", criteria_decide.fixer_block, 4)):
+        lines = next(p for a, _, p in fake.prompts if a == agent).splitlines()
+        # `wt` は doc.md を変えるので、表の基準の後ろに文書の基準（#4285）が続く
+        block = lines[lines.index("## 指摘の基準") : lines.index("## 文書の指摘の基準")]
+        assert block == build(focus) and len(block) == len(want) + others
+        assert dict(x.split(". ", 1) for x in block if x[:1].isdigit()) == want
+        assert not any("mvv" in x.lower() for x in (*block, lines[-1].replace(str(tmp_path), "")))
+
+
 def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """基準と重要度を相手役へ渡し、重い指摘だけを修正担当へ基準つきで渡す。スレッドは相手役が返した path・line に付ける。"""
     major = {"text": "止まる", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
@@ -136,6 +183,7 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
     fix = next(p for a, _, p in fake.prompts if a == "claude")
     assert f"- r1-1: 止まる（major・doc.md:5）— 起きること: {IMPACT}" in fix and "r1-2" not in fix
     assert all(line in fix for line in criteria_decide.fixer_block(()))
+    _assert_only_table_criteria(fake, (), tmp_path)
     assert [(path, line) for path, line, _, _ in hub.port.opened] == [("doc.md", 5)]
     assert threads.location({"path": "doc.md", "line": 5, "section": "x.md#y"}) == ("doc.md", 5)
 
@@ -191,6 +239,7 @@ def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path
     _run(capsys, monkeypatch, fake, wt)
     [focus_line] = [line for line in criteria_decide.criteria_lines(("処理の回数",)) if line.startswith("3.")]
     assert all(focus_line in p for a, _, p in fake.prompts)
+    _assert_only_table_criteria(fake, ("処理の回数",), tmp_path)
 
 
 def test_review_json_with_profiles_is_invalid(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
