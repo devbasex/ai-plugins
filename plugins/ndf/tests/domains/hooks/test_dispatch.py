@@ -267,7 +267,7 @@ def test_context_limit_is_the_first_guard_selected(tmp_path, tool):
 
 def test_context_limit_verdict_survives_the_deadline_inside_run(tmp_path, monkeypatch):
     # #3995 の決定 6: context-limit の判定の中で締め切りを越えても、その判定は残る（後の guard だけが飛ばされる）
-    _limit_repo(tmp_path, 500_000)
+    _limit_repo(tmp_path, 600_000)
     found = budget.budget_for("claude", "PreToolUse")
     now = [0.0]
     real = context_limit.check
@@ -296,7 +296,7 @@ def _deadline(payload):
 
 def test_deadline_out_drops_the_context_limit_verdict_only_for_that_call(tmp_path):
     # #3995 の決定 6: プロセスの締め切りを過ぎた 1 回は通るが、続く締め切りを過ぎない呼び出しは止まる
-    _limit_repo(tmp_path, 500_000)
+    _limit_repo(tmp_path, 600_000)
     assert _deadline(bash(tmp_path, "ls")) == "" and _deadline(_handoff_write(tmp_path)) == ""
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls"))) is not None
 
@@ -332,7 +332,7 @@ def test_deadline_before_the_output_drops_a_plain_guard_deny(tmp_path, monkeypat
 
 def test_deadline_out_keeps_only_the_fail_closed_deny(tmp_path, monkeypatch):
     # #3995 の決定 6: 運用上限の中継の下でも、締め切りの後に残るのは ask-forward の on_deadline の拒否だけ
-    _limit_repo(tmp_path, 500_000)
+    _limit_repo(tmp_path, 600_000)
     relay = tmp_path / "relay"
     relay.mkdir()
     signals.set_launch(relay, "L1")

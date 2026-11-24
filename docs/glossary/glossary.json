@@ -5382,13 +5382,13 @@
     {
       "term": "判断開始の値",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 250,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
+      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 450,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
       "source": "docs/specifications/ndf-context-thresholds.md"
     },
     {
       "term": "運用上限",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 500,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
+      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 600,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
       "source": "docs/specifications/ndf-context-thresholds.md",
       "deprecated": [
         "再起動の方針",

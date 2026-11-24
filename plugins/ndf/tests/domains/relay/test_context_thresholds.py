@@ -29,11 +29,11 @@ def _value(decide_from: int, limit: int):
 
 @pytest.mark.parametrize("value", [limits.value, tables.policy_value], ids=["limits", "tables"])
 def test_defaults_come_from_the_limits_table(value):
-    # 環境変数が無ければ、上限の設定の 2 つの値（250,000・500,000）と出所 default（ラッパーと guard の引き方のどちらでも）
+    # 環境変数が無ければ、上限の設定の 2 つの値（450,000・600,000）と出所 default（ラッパーと guard の引き方のどちらでも）
     got = thresholds({}, value)
-    assert (got.decide_from, got.limit) == (250_000, 500_000)
+    assert (got.decide_from, got.limit) == (450_000, 600_000)
     assert got.sources == {"decide_from": "default", "limit": "default"}
-    assert got.as_dict() == {"decide_from": 250_000, "limit": 500_000, "sources": got.sources}
+    assert got.as_dict() == {"decide_from": 450_000, "limit": 600_000, "sources": got.sources}
 
 
 def test_values_follow_the_given_table():
@@ -45,9 +45,9 @@ def test_values_follow_the_given_table():
 @pytest.mark.parametrize(
     ("raw", "decide_from", "limit", "decide_source"),
     [
-        ("300000", 250_000, 300_000, "default"),
-        ("250000", 250_000, 250_000, "default"),
-        ("249999", 249_999, 249_999, "env"),
+        ("500000", 450_000, 500_000, "default"),
+        ("450000", 450_000, 450_000, "default"),
+        ("449999", 449_999, 449_999, "env"),
     ],
 )
 def test_env_overrides_the_limit_and_lowers_the_decide_from(raw, decide_from, limit, decide_source):
@@ -61,7 +61,7 @@ def test_env_overrides_the_limit_and_lowers_the_decide_from(raw, decide_from, li
 def test_env_that_is_not_a_positive_integer_is_ignored(raw):
     # 正の整数でない値は無視して既定で続け、出所に ignored を書く（guard とラッパーを落とさない）
     got = thresholds({"NDF_CONTEXT_LIMIT": raw}, limits.value)
-    assert (got.decide_from, got.limit) == (250_000, 500_000)
+    assert (got.decide_from, got.limit) == (450_000, 600_000)
     assert got.sources == {"decide_from": "default", "limit": "default", "ignored": "NDF_CONTEXT_LIMIT"}
 
 
@@ -94,13 +94,13 @@ def _resolve(monkeypatch, capsys, env: str | None) -> dict:
 
 
 def test_resolve_returns_the_two_defaults(monkeypatch, capsys):
-    # 設定も環境変数も無ければ、判断開始の値 250,000・運用上限 500,000・出所 default
+    # 設定も環境変数も無ければ、判断開始の値 450,000・運用上限 600,000・出所 default
     got = _resolve(monkeypatch, capsys, None)
-    assert got["items"] == [{"decide_from": 250_000, "limit": 500_000, "sources": {"decide_from": "default", "limit": "default"}}]
-    assert got["metrics"] == {"decide_from": 250_000, "limit": 500_000}
+    assert got["items"] == [{"decide_from": 450_000, "limit": 600_000, "sources": {"decide_from": "default", "limit": "default"}}]
+    assert got["metrics"] == {"decide_from": 450_000, "limit": 600_000}
 
 
-@pytest.mark.parametrize(("raw", "decide_from", "limit"), [("300000", 250_000, 300_000), ("200000", 200_000, 200_000)])
+@pytest.mark.parametrize(("raw", "decide_from", "limit"), [("500000", 450_000, 500_000), ("200000", 200_000, 200_000)])
 def test_resolve_reads_the_env_limit(monkeypatch, capsys, raw, decide_from, limit):
     # NDF_CONTEXT_LIMIT は resolve の運用上限も替え、判断開始の値を同じ値まで下げる
     got = _resolve(monkeypatch, capsys, raw)

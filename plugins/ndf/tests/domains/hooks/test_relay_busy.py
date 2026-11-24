@@ -182,7 +182,7 @@ def test_an_error_while_recording_denies_the_start(relay_child, tmp_path, monkey
 
 def test_the_context_limit_verdict_and_the_record_survive_the_used_up_budget(relay_child, tmp_path, monkeypatch):
     # 先に拒否された開始も「1 件以上」に書く（多めに倒し、その応答の Stop が書き直す）
-    usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 600_000)
     found, now, real = budget.budget_for("claude", "PreToolUse"), [0.0], context_limit.check
 
     def slow(ctx, svc):

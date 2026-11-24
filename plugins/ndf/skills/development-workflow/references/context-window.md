@@ -39,8 +39,8 @@ worker の 3 層）は [agent-layers.md](agent-layers.md) が持つ。
 
 | 値 | 既定 | 文脈の量がこれ以上になったら |
 | --- | --- | --- |
-| 判断開始の値（上限の設定の `context.decide-from`） | 250,000 | hook が conductor に知らせ、conductor は次の切りどころで引継ぎ文書を書いて切る。工程の途中の Tool は止めない |
-| 運用上限（上限の設定の `context.limit`） | 500,000 | hook が引継ぎに要る呼び出しを除いて止め続け、中継のラッパーが子に引継ぎを頼む |
+| 判断開始の値（上限の設定の `context.decide-from`） | 450,000 | hook が conductor に知らせ、conductor は次の切りどころで引継ぎ文書を書いて切る。工程の途中の Tool は止めない |
+| 運用上限（上限の設定の `context.limit`） | 600,000 | hook が引継ぎに要る呼び出しを除いて止め続け、中継のラッパーが子に引継ぎを頼む |
 
 2 つの値は `contracts/limits/` の方針 `context.decide-from`・`context.limit` だけにあり、hook・ラッパー・`ndf relay context resolve` が同じ値を読む。
 
@@ -242,7 +242,7 @@ NDF が起動した分・引継ぎの期間・復元の期間で、同じ呼び�
 （会話・サブエージェント・使用量の使用量ログ）と記録の行だけを数える。1 つのフェーズの費用を、作業の全体から切り出して見るときに使う。
 
 **statusline の色と hook の値は意味が違う。** statusline の赤は窓に対して危険な水準（500K、窓が 200K 以下のモデルは
-150K）を示す表示の警告で、hook の運用上限（既定 500,000。`NDF_CONTEXT_LIMIT` で変わる）とは別の値である。
+150K）を示す表示の警告で、hook の運用上限（既定 600,000。`NDF_CONTEXT_LIMIT` で変わる）とは別の値である。
 
 ## 新しい会話で戻す
 
