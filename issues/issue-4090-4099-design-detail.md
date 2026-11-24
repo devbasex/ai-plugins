@@ -13,13 +13,13 @@
 | `src/ndf/domains/records/preflight.py` | 変更 | 手順 0 の確かめ | `mvv_decide` | モジュール | `mvv_body`（`body_path` を呼ぶ。返す値は同じ）・`sha256_of`（設定を受け `approved_form` を通す） |
 | `src/ndf/domains/records/cli.py` | 変更 | `ndf records` の入口 | `mvv`・`git` | モジュール | `_mvv_current`（取得を置き換え・`--allow-mismatch` を足す） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 収束ループの駆動 | `records.mvv`・`journal` | `RunConfig`・`_Run`（欄 `clean` を足す）・`_Prepared`（欄を足す）・`_Target`（新設） | `_start`・`_prepare_round`・`_merge_base`・`_committed_texts`・`_citations`（置き換え）・`_final_target`・`_final_citations`・`_review_diff`・`_diff_files`・`_base_lines`（新設）・`_settle_resolved`・`_summary`（変更） |
-| `src/ndf/core/route/__init__.py` | 変更 | `{{review}}` の既定の起動 | — | モジュール | `REVIEW_WITH_PR`（`baseRefName` を同じ `gh pr view` で読み `--target` に渡す） |
+| `src/ndf/core/route/__init__.py` | 変更 | `{{review}}` の既定の起動 | — | モジュール | `review_launch`（`--branch` で起動し、PR の番号を読む包みを使わない）・`REVIEW_WITH_PR`（消す） |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 指摘のジャーナル | `criteria_decide` | `FindingJournal` | `ingest`・`enter`・`carry`・`ingest_citations`（変更）・`restate`・`citation_key`（新設） |
 | `src/ndf/domains/crossreview/prior_decide.py` | 変更 | 前の実行から引き継ぐ指摘 | `report_decide` | `Carried`（欄を足す） | `carried`・`recorded`（変更） |
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントと結果 JSON | — | モジュール | `open_block`（変更）・`mvv_outputs`（引数を足す）・`once`（新設） |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `_finding_gaps`・`finish`（引数を足す） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | 差分の範囲と再利用の条件 | — | モジュール | `read_by_all_head`（変更） |
-| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `Hub`（欄 `target` を足す）・`cmd_run`（`--target` と `Hub.target` を `drive.drive` へ渡す）・`cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
+| `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` の入口 | `records.mvv` | モジュール | `Hub`（欄 `find`・`target` を足す）・`cmd_run`（`--pr` が無ければ `Hub.find` で開いた PR を読み、`Hub.target` を `drive.drive` へ渡す）・`cmd_scope`（ベースのコミットと共通原則の sha256 を求める） |
 
 依存の向きは #4076 のままで、`mvv_decide` が `adapters.markdown`（git もファイルも読まない純粋な解析）を読むことだけが増える。循環は無い。
 
@@ -46,9 +46,10 @@
   5. 承認済みなら、本文（`approved_form` の形。sha256 は承認の記録と同じ）の写しと共通原則の写し（`mvv.principles` のバイト列から sha256 を求め、`principles-<先頭 12 文字>.md`）を `_write_verified` で書き、`items_of` で項目の一覧を作る。`blobs` の鍵は設定のパスと `body_path` のパス
   - 副作用: `git rev-parse`・`git ls-tree` を 1 回ずつ、`git show`（`run_bytes`）を 2 回（`absent` では 0 回）。写しのファイルを 2 つまで読み、違えば書く
 - `drive._start`（#4076 の手順を置き換える）。`--base`（`cfg.base`）は差分の起点で、ブランチ名（`main`）・リモート追跡参照（`origin/main`。実装のテンプレートの `{{review}}`）・コミット（`review-delta` のレビュー済み HEAD）のどれでもよい。MVV を読むのは PR のマージ先ブランチで、`--base` の文字列から作らない
-  1. マージ先ブランチ `target`: 呼び出し元が PR を読んだ経路ではその値を使い、読んでいない経路だけが照会する
-     - `run` に引数 `--target <マージ先ブランチ>`（任意）を足す。既定の `{{review}}`（`core/route` の `REVIEW_WITH_PR`）は、今も PR の番号を読むために打つ `gh pr view` の 1 回の `--json` に `baseRefName` を足し（`--json number,baseRefName`）、`--pr` と `--target` を並べて渡す。`gh` の起動の数は増えない。`review-delta` とつなぎ目のレビュー（`gathered`）も同じ `{{review}}` に `--base` を足すだけなので `--target` を受け取る
-     - `--target` が無い起動（単独の `ndf cross-review run`・設定 `workflow.launch.review` の起動・`ndf loop review-args` の並び）と、状態ファイルの今の PR の番号が `--pr` と違う起動（巻き直しの後。`--target` は別の PR の値である）だけが、`target_of(<今の PR の番号>)` で GitHub を 1 回読む。`target_of: Callable[[int], str]` は `drive.drive` の引数で、`cmd_run` が `Hub` に足す欄 `target`（`GitHub.pull(pr).base_ref`。`run` の口と同じクライアント）を渡す
+  1. マージ先ブランチ `target`: いつも、この起動の中で GitHub から読んだ今の PR の `base_ref` を使う。マージ先を受け取る引数・環境変数・設定は作らない（呼び出し元の値を採ると、誤った値や PR の付け替えで古くなった値で、マージ先の承認済みの MVV とレッドラインを外したまま収束できる）
+     - 既定の `{{review}}`: `core/route` の `review_launch` は、`gh pr view` で番号を読む包み（`REVIEW_WITH_PR`）をやめ、`ndf cross-review run --branch <ブランチ> --state-dir … --base … --purpose …` を返す。`run` の `--pr` を任意にし、無ければ `cmd_run` が設定と保存先の検査の後・状態ファイルを読む前に、`Hub` に足す欄 `find`（`GitHub.pulls_by_head([<ブランチ>])` の 1 回のクエリ）で開いた PR を読み、番号とマージ先を同じ応答の 1 つの `Pull` から取る。開いた PR がちょうど 1 件でなければ、`refused`（`precondition`。`summary` に件数と「`--pr` で指す」）で止まる。`gh` の起動は 1 回減り、GitHub の照会は 1 回のまま。`review-delta` とつなぎ目のレビュー（`gathered`）も同じ `{{review}}` に `--base` を足すだけなので同じ経路を通る
+     - `--pr` を渡した起動（単独の `ndf cross-review run`・設定 `workflow.launch.review` の起動・`ndf loop review-args` の並び）: `GitHub.pull(pr).base_ref` を 1 回読む
+     - どちらも `drive.drive` の引数 `target_of: Callable[[int], str]` に、`Hub` に足す欄 `target` を渡す。`Hub.target(pr)` は、同じ `Hub`（同じリポジトリ）の `find` が読んだ `Pull` の番号が `pr` ならその `base_ref` を返し、ほか（`--pr` の起動・巻き直しの後で状態ファイルの今の PR の番号が違う起動・状態ファイルのリポジトリが違い `Hub` を作り直した起動）は `GitHub.pull(pr)` を読む。読んだ `Pull` はこの起動のプロセスの中だけで引き渡し、状態ファイルや引数を通さない
      - 照会できなければ、fetch も相手役の起動もせずに `refused`（`GitHubError` の `unreached` が真なら `transient`、ほかは `precondition`。`cmd_head` と同じ分け方）で止める。前の起動が状態ファイルに書いた値は使わない（PR のマージ先は変えられる）
      - 決めた値を状態ファイルの最上位 `merge_target` に書く（`review-scope` がネットワークに出ずに読む）
   2. `remote = g.remote()`、`sync_worktree(g, cfg.branch, remote, base_branch=target)` を打つ
@@ -68,7 +69,8 @@
 | `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
 | `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）で写す。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
 | `_write_verified` | 写しを書けない | 権限・容量 | `OSError` | `current` は `OSError` のまま返す。`drive._start` は `DriveStopped("precondition", …)` に、`_mvv_current` は `precondition` の結果に変える | `refused`（`precondition`）、`summary` に写しの置き場のパスと原因。相手役を起動しない | 打ち直せる |
-| `drive._start` | マージ先ブランチを読めない（`--target` を使えない起動だけ） | GitHub の障害・権限・PR が無い | `target_of` の例外 | `DriveStopped`。`--base` の文字列から推し量らない | `refused`（`unreached` なら `transient`、ほかは `precondition`） | 打ち直せる |
+| `cmd_run`（`Hub.find`） | `--pr` が無い起動で PR を 1 件に決められない | ブランチの開いた PR が 0 件か 2 件以上（別のフォークの同名のブランチを含む）・GitHub の障害 | `pulls_by_head` の結果の件数・`GitHubError` | 止める（新しい方を選ばない） | `refused`（件数は `precondition`、`unreached` なら `transient`） | PR を作るか `--pr` を渡して打ち直す |
+| `drive._start` | マージ先ブランチを読めない | GitHub の障害・権限・PR が無い | `target_of` の例外 | `DriveStopped`。`--base` の文字列から推し量らない | `refused`（`unreached` なら `transient`、ほかは `precondition`） | 打ち直せる |
 | `drive._start` | 差分の起点を解けない | `--base` の参照・コミットが手元に無い | `g.rev_parse` の `GitError` | そのまま返す（今の `GitError` と同じ） | `refused`（`precondition`） | 起点を直して打ち直す |
 | `_mvv_current` | 取得に失敗した | ネットワーク・リモートの名前 | `fetch_branch_or_raise` の `GitError` | 古い参照を読まずに止める | `refused`（`precondition`）、`summary` に取得の誤り | 打ち直せる |
 
@@ -85,7 +87,7 @@
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
 | `current` | 既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身で 0600 の写しは書き直さない。違う中身・0600 より緩い権限の写しは、検証済みの中身の 0600 になる（umask 022 でも）。承認・blob・作業場所の改行が LF と CRLF のどの組でも、`preflight.mvv_state` と `current` がともに承認済み（改行のほかの違いはどちらも `mismatch`）。ツリーに `.ndf/mvv.json` が無い → `absent` | `mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・写しなし）。`unapproved` → 状態を返す。設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない） |
 | `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しい版を返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
-| `drive._start` | ローカルの `main` が古くても、`--base main` と `--base origin/main` の merge-base・差分・`Basis.base` がリモートのコミットから作られる。fetch の refspec のブランチは、`--base` が `origin/main` でも SHA でもマージ先ブランチ（`refs/heads/origin/main` や `refs/heads/<SHA>` を取らない）。`--base <レビュー済み HEAD の SHA>` の差分はその SHA からで、MVV はマージ先ブランチの版。`--target` を渡した起動は `target_of` を呼ばない（前回の収束を返す起動も 0 回）。`--target` が無い起動と、今の PR の番号が `--pr` と違う起動は 1 回だけ呼ぶ。既定の `{{review}}` の `gh` の起動は 1 回のまま。マージ先が進んでも merge-base と MVV の識別子が同じなら、前回の収束を返す | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError`・`current` の `OSError`（写しを書けない）・マージ先ブランチを読めない → 相手役を起動せず `refused` |
+| `drive._start` | ローカルの `main` が古くても、`--base main` と `--base origin/main` の merge-base・差分・`Basis.base` がリモートのコミットから作られる。fetch の refspec のブランチは、`--base` が `origin/main` でも SHA でもマージ先ブランチ（`refs/heads/origin/main` や `refs/heads/<SHA>` を取らない）。`--base <レビュー済み HEAD の SHA>` の差分はその SHA からで、MVV はマージ先ブランチの版。`--pr` の無い起動は `find` の 1 回だけで、`GitHub.pull` を読まない（前回の収束を返す起動も同じ）。`--pr` の起動と、今の PR の番号が `find` の番号と違う起動は `GitHub.pull` を 1 回だけ読む。PR を付け替えた後の打ち直しは、状態ファイルの `merge_target` が古くても今のマージ先の MVV を読む。マージ先が進んでも merge-base と MVV の識別子が同じなら、前回の収束を返す | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError`・`current` の `OSError`（写しを書けない）・マージ先ブランチを読めない・`--pr` が無くブランチの開いた PR が 0 件か 2 件 → 相手役を起動せず `refused` |
 
 ## 基準 5 と識別子
 

@@ -22,7 +22,7 @@
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py`（新設） | `drive.py` から移す `Changed`・`_regular_blobs`・`_local_text`・`_committed_texts`・`changed`・`sections`・`changed_sections`（U2。別のモジュールから読む名前は下線を外した）。`_committed_texts` がコミットを引数に取る・`_Target`・`_review_diff`・`_diff_files`・`_base_lines`（U8）。`_citations`・`_final_target`・`_final_citations`（U10） | U2・U8・U10 |
 | `plugins/ndf/src/ndf/domains/crossreview/settings.py`（新設） | `drive.py` から移す `ReviewSettings`・`settings_path`・`_inside`・`read_settings`・`blob_id`・`proposed_differs`・`outside_checkout` と、`outside_checkout` が使う `RunConfig`・`DriveStopped`・`DEFAULT_MAX_ROUNDS`（U2。別のモジュールから読む名前は下線を外した）。`RunConfig` に欄 `base_commit: Optional[str] = None` と、差分の起点を決める `base_commit` の関数を足す（U5） | U2・U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 移した関数を呼ぶ形にする（U2）。`_start` がスナップショットを得てベースをコミットに固定し、失敗は `refused`（U5）。`_review_prompt`・`_fix_prompt` に基準 5 とパス（U5）。`_prepare_round`・`_reusable`・ラウンドの記録の MVV の識別子（U6）。`_Prepared` に `docs`・`full_diff`（U8）。修正担当へ `handable` を渡す（U9）。`_round` の確かめ・`last_target`・`_settle_resolved` が `by: ndf` の指摘を飛ばす・ラウンドの記録の `mvv_checked`（U10）。`_start` の引継ぎと `restate`（U11）。`_Run.clean`・`_summary` が `mvv_outputs`・`record_review` を呼ぶ（U12） | U2・U5・U6・U8〜U12 |
-| `plugins/ndf/src/ndf/domains/crossreview/cli.py` | `changed_sections`・`read_settings` の呼び先（U2）。`--target`・`Hub.target` と `cmd_run` がマージ先ブランチを渡す（U5）。`Basis` に MVV の識別子・`cmd_scope` がベースのコミットと共通原則の sha256 を求める（U6） | U2・U5・U6 |
+| `plugins/ndf/src/ndf/domains/crossreview/cli.py` | `changed_sections`・`read_settings` の呼び先（U2）。`run` の `--pr` を任意にし、`Hub.find`・`Hub.target` と `cmd_run` が今の PR の番号とマージ先ブランチを渡す（U5）。`Basis` に MVV の識別子・`cmd_scope` がベースのコミットと共通原則の sha256 を求める（U6） | U2・U5・U6 |
 | `plugins/ndf/src/ndf/adapters/git.py` | `Git.run_bytes`（新設） | U3 |
 | `plugins/ndf/src/ndf/core/converge/worktree.py` | `fetch_head`・`sync_worktree` に `base_branch` | U3 |
 | `plugins/ndf/src/ndf/domains/records/mvv.py` | `Snapshot`・`current`・`_write_verified`・`decl_from`・`principles`（`mvv_gate` から移す）（U3）。`fenced_lines`・`decision_lines`（U7）。`record_review`・`record_key`（U12） | U3・U7・U12 |
@@ -30,9 +30,9 @@
 | `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | `principles` を消し `mvv.principles` を呼ぶ | U3 |
 | `plugins/ndf/src/ndf/domains/records/preflight.py` | `mvv_body` が `body_path` を呼ぶ（返す値は同じ）。`sha256_of` が `approved_form` を通す | U3 |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `_mvv_current`（`fetch_branch_or_raise`・`--allow-mismatch`） | U4 |
-| `plugins/ndf/docs/contracts/commands.md` | `ndf records mvv current` の項目（U4）。`ndf cross-review run` の `--target`（U5） | U4・U5 |
-| `plugins/ndf/contracts/schemas/io/cross-review.args.schema.json` | `--target`（生成物） | U5 |
-| `plugins/ndf/src/ndf/core/route/__init__.py` | `REVIEW_WITH_PR` が `baseRefName` を読み `--target` に渡す | U5 |
+| `plugins/ndf/docs/contracts/commands.md` | `ndf records mvv current` の項目（U4）。`ndf cross-review run` の `--pr` が任意になる（U5） | U4・U5 |
+| `plugins/ndf/contracts/schemas/io/cross-review.args.schema.json` | `run` の `--pr` が任意になる（生成物） | U5 |
+| `plugins/ndf/src/ndf/core/route/__init__.py` | `review_launch` が `--branch` で起動し、`REVIEW_WITH_PR` を消す | U5 |
 | `plugins/ndf/contracts/data/review-criteria.json` | キー `mvv_criterion`・`mvv_number`・`mvv`（`reviewer`・`fixer`・`citation`） | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | `criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item` | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | `Basis.mvv`・`read_by_all_head`・`reviewed_of`・`state_scope`（U6）。`read_by_all_head` が `mvv_checked` を見る（U10） | U6・U10 |
@@ -96,7 +96,7 @@
 ### Task 7: 基準 5 の指示と、起動の始めのスナップショットとベースのコミットの固定
 
 - **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/docs/contracts/commands.md`・`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`（生成物）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
-- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（PR のマージ先ブランチを `--target` から、無ければ `Hub.target` から読み、`sync_worktree` の `base_branch` と `current` の `<リモート>/<マージ先>` に使う。差分の起点は `settings.base_commit` で決め、`settings.RunConfig` に足す `base_commit` に固定する。`MvvError` と `current` の `OSError` は相手役を起動せず `refused`。マージ先は状態ファイルの `merge_target` に書く。`core/route` の `REVIEW_WITH_PR` は同じ `gh pr view` で `baseRefName` を読み `--target` に渡す。引数を足すのでコントラクトの生成物を `ndf check --write-spec` で書き直す）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
+- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（PR のマージ先ブランチを `Hub.target` から読み、`sync_worktree` の `base_branch` と `current` の `<リモート>/<マージ先>` に使う。差分の起点は `settings.base_commit` で決め、`settings.RunConfig` に足す `base_commit` に固定する。`MvvError` と `current` の `OSError` は相手役を起動せず `refused`。マージ先は状態ファイルの `merge_target` に書く。`run` の `--pr` を任意にし、無ければ `Hub.find` でブランチの開いた PR の番号とマージ先を 1 つの応答から取る。`core/route` の `review_launch` は `--branch` で起動し、`REVIEW_WITH_PR` を消す。引数が変わるのでコントラクトの生成物を `ndf check --write-spec` で書き直す）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
 - **満たす受け入れ条件:** 4076:1、4076:2、4076:8（テスト設計の 4090-9・4090-11 の指示の側）
 - **進め方:** 失敗するテスト（承認済みの MVV があるのに指示に基準 5 とスナップショットのパスが無い）→ 通す最小実装 → 整理
 
