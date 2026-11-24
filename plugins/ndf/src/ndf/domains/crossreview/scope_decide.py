@@ -84,12 +84,6 @@ def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Option
     return None
 
 
-def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str], basis: Basis = Basis()) -> Scope:
-    """状態ファイルの中身（相手役の全員が読めた最後のラウンドの head・詳細レビューを通ったセクション）から、ラウンド `round_no` の範囲を決める。
-    前のラウンドと `basis`（比較基点・相手役・重点）が合わなければ全差分。"""
-    return review_scope(every_section, round_no, read_by_all_head(state, basis), sections, reviewed_of(state))
-
-
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:
     """ラウンド `round_no`（1 から）の範囲。`every_section`（設計の PR）なら、`reviewed`（前のラウンドまでに詳細レビューを
     通ったセクション）に無いセクションが残る間は全差分を見る。"""

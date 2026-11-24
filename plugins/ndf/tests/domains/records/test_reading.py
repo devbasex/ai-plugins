@@ -40,8 +40,15 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git_sandbox.sh(tmp_path, "init", "-q", str(root))
     git_sandbox.sh(root, "remote", "add", "origin", "https://github.com/o/r.git")
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(reading.Git, "fetch", lambda self, remote, *refs: None)
     return root
+
+
+@pytest.fixture(autouse=True)
+def fetched(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """`git fetch` へ渡したリモートと refspec（打たずに残す）。"""
+    asked: list[tuple[str, ...]] = []
+    monkeypatch.setattr(reading.Git, "fetch", lambda self, remote, *refs: asked.append((remote, *refs)))
+    return asked
 
 
 def _hub(monkeypatch: pytest.MonkeyPatch, heads: dict[int, str]) -> list[set[int]]:
@@ -179,21 +186,22 @@ def test_rows_stop_on_a_newer_version(repo: Path) -> None:
 
 @pytest.mark.parametrize(("head", "prs", "words"), [(HEAD, [7], []), (MOVED, [7], [rd.HEAD_MOVED]), (HEAD, [7, 8], ["no_pr"])])
 def test_check_compares_with_the_heads_on_github(
-    head: str, prs: list[int], words: list[str], repo: Path, capsys, last_result, monkeypatch
+    head: str, prs: list[int], words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
 ) -> None:
     reading.add(ENTRY, repo)
     asked = _hub(monkeypatch, {7: head, 8: HEAD})
     code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
     assert asked == [{7, *prs}]
+    assert fetched == [("origin", "+refs/heads/design/x:refs/remotes/origin/design/x")]
     assert [i["missing"] for i in got["items"]] == words
     assert (code == 0) is (words == []) and ("cause" not in got or got["cause"]["kind"] == "precondition")
 
 
-def test_check_without_a_pull_request_does_not_read_github(repo: Path, capsys, last_result, monkeypatch) -> None:
+def test_check_without_a_pull_request_does_not_read_github(repo: Path, capsys, last_result, monkeypatch, fetched) -> None:
     reading.add({**ENTRY, "prs": []}, repo)
     asked = _hub(monkeypatch, {})
     code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": []})
-    assert (code, got["status"], asked) == (0, "ok", [])
+    assert (code, got["status"], asked, fetched) == (0, "ok", [], [])
 
 
 def test_check_stops_as_unknown_when_github_cannot_be_read(repo: Path, capsys, last_result, monkeypatch) -> None:

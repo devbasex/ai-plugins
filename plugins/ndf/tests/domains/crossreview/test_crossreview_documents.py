@@ -8,11 +8,11 @@ import pytest
 
 from ndf import contracts
 from ndf.contracts import writing
-from ndf.domains.crossreview import criteria_decide, drive
+from ndf.domains.crossreview import criteria_decide, drive, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, sh
-from .test_crossreview_run import Recording, _run, _state
+from .test_crossreview_run import PR, Recording, _run, _state
 
 IMPACT = "承認する人が、何を承認するのかを取り違える"
 MAJOR = {"text": "「語の決まり」が読み取れない", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
@@ -25,6 +25,10 @@ def code_wt(repos: Repos, tmp_path: Path) -> Path:
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(repos.main, "fetch", "-q", "origin")
     return repos.add_worktree(tmp_path / "code")
+
+
+def _limit(head: str, diff: Path) -> str:
+    return criteria_decide._table()["document"]["since"].format(since=head, diff=diff)
 
 
 def _prompt(fake: Recording, name: str) -> str:
@@ -65,10 +69,64 @@ def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: P
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     head = _state(fake.state_dir)["rounds"][0]["head"]
-    limit = criteria_decide._table()["document"]["since"].format(since=head)
+    limit = _limit(head, fake.state_dir / "round2.diff")
     assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
     assert all(limit not in p for _, out, p in fake.prompts if not out.startswith("round2-"))
-    assert f"git diff {head}...HEAD" in limit
+    # 渡した差分が前の head からのものなら、同じファイルを指す（差分を作り直さない）
+    assert not (fake.state_dir / "round2-since.diff").exists()
+
+
+def _resume(capsys, monkeypatch, state_dir: Path, wt: Path, *extra: str) -> Recording:
+    """次の起動（どの相手役も指摘しない）の記録。"""
+    fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt, *extra)
+    return fake
+
+
+def _first_round(capsys, monkeypatch, state_dir: Path, wt: Path) -> dict:
+    """major を 1 件直して 1 ラウンドで止めた後の状態。"""
+    fake = Recording(state_dir, {"codex": [[MAJOR]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1")
+    return _state(state_dir)
+
+
+def test_issue_4285_an_added_reviewer_is_not_limited(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """前のラウンドを読んでいないレビュアーを足した再開では、全差分を渡し、major の範囲を限らない。"""
+    state_dir = tmp_path / "st"
+    data = _first_round(capsys, monkeypatch, state_dir, wt)
+    data["rounds"][0]["reviewers"] = ["codex"]
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    fake = _resume(capsys, monkeypatch, state_dir, wt)
+    assert _state(state_dir)["rounds"][1]["scope"] == "full"
+    assert data["rounds"][0]["head"] not in _prompt(fake, "round2-codex.out")
+    assert data["rounds"][0]["head"] not in _prompt(fake, "round2-kiro.out")
+
+
+def test_issue_4285_a_rewound_head_does_not_limit(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """前のラウンドの head が今の head の祖先でなくなったら、全差分を渡し、major の範囲を限らない。"""
+    state_dir = tmp_path / "st"
+    data = _first_round(capsys, monkeypatch, state_dir, wt)
+    tree, base = (sh(wt, "rev-parse", r).strip() for r in ("HEAD^{tree}", "origin/main"))
+    gone = sh(wt, "commit-tree", tree, "-p", base, "-m", "取り除いたコミット").strip()
+    data["rounds"][0]["head"] = gone
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    fake = _resume(capsys, monkeypatch, state_dir, wt)
+    assert _state(state_dir)["rounds"][1]["scope"] == "full"
+    assert gone not in _prompt(fake, "round2-codex.out")
+
+
+def test_issue_4285_a_full_round_shares_one_diff_since_the_last_head(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """設計の PR で全差分を見続けるラウンドは、前の head からの差分を 1 つ作り、どのレビュアーにも同じファイルを示す。"""
+    state_dir = tmp_path / "st"
+    data = _first_round(capsys, monkeypatch, state_dir, wt)
+    data[store.REVIEWED] = []
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    fake = _resume(capsys, monkeypatch, state_dir, wt, "--purpose", "design")
+    since = state_dir / "round2-since.diff"
+    limit = _limit(data["rounds"][0]["head"], since)
+    assert limit in _prompt(fake, "round2-codex.out") and limit in _prompt(fake, "round2-kiro.out")
+    assert "fix0.txt" in since.read_text(encoding="utf-8") and "doc.md" not in since.read_text(encoding="utf-8")
+    assert "doc.md" in (state_dir / "round2.diff").read_text(encoding="utf-8")
 
 
 def test_issue_4285_major_without_impact_becomes_minor_and_is_not_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -92,13 +150,14 @@ def test_issue_4285_a_deferred_finding_is_not_left(wt: Path, tmp_path: Path, cap
 
 
 def test_issue_4285_document_block_by_role_and_round() -> None:
-    assert criteria_decide.document_block(criteria_decide.REVIEWER, False, "abc") == []
+    previous = criteria_decide.Previous("abc", Path("round2.diff"))
+    assert criteria_decide.document_block(criteria_decide.REVIEWER, False, previous) == []
     assert criteria_decide.document_block(criteria_decide.FIXER, False) == []
     doc = criteria_decide._table()["document"]
     first = criteria_decide.document_block(criteria_decide.REVIEWER, True)
-    second = criteria_decide.document_block(criteria_decide.REVIEWER, True, "abc")
+    second = criteria_decide.document_block(criteria_decide.REVIEWER, True, previous)
     fixer = criteria_decide.document_block(criteria_decide.FIXER, True)
-    assert [line for line in second if line not in first] == [doc["since"].format(since="abc")]
+    assert [line for line in second if line not in first] == [_limit("abc", Path("round2.diff"))]
     assert set(doc["fields"]) <= set(first) and not set(doc["fields"]) & set(fixer)
     assert doc["fixer"] in fixer and doc["fixer"] not in first
     assert first[-1] == second[-1] == fixer[-1] == writing.criteria().rstrip()
