@@ -564,7 +564,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `stage_inputs_of` | `progress/stage_inputs.py` | 新設 | `stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]` | ステートマシンの最新の定義から `step_id` のステップを持つ工程を引き、`machine_context` に `invoke.resolve_inputs` を当てた入力を返す。プランが `NDF_STAGE_INPUT` に渡すものと同じ値だけで、文脈のほかのキー（`design_pr` など）は足さない |
 | `_mvv_inputs` | `records/cli.py` | 新設 | `_mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 区分ごとに入力を決める（下の表）。決められなければ `_InputError`（`invalid`・`refused`） |
 | `_env_inputs` | `records/cli.py` | 新設 | `_env_inputs(gate: str, inputs: Mapping[str, Any]) -> dict[str, Any]` | `NDF_STAGE_INPUT` の object を、プランが組むのと同じ規則で確かめる。下の手順 |
-| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` と `--expect-pr <番号>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。`--expect-pr` があれば、`gate` を呼ぶ前に、同じ入力で `mvv_gate.pr_number(root, "release", inputs, hub)` を呼んで判定する PR を求める（`release` では文脈の `pr` を読むだけで GitHub を呼ばない）。番号が違えば `gate` を呼ばずに `stopped`・`not_applicable`（`summary` は定型文だけで PR の番号を載せない）を返す。`--expect-pr` を `--gate design` で渡せば `invalid`（上の「手順書」のリリース承認ゲートの箇条）。出力は伏せずに返す（自由記述を伏せるのは、閲覧範囲を限れない DB へ保存するときの `store.append_events` だけ。「手元のファイルの閲覧範囲」） |
+| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` と `--expect-pr <番号>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。`--expect-pr` があれば、`gate` を呼ぶ前にこの関数の中で（`gate` の中は変えない）、同じ入力で `mvv_gate.pr_number(root, "release", inputs, hub)` を呼んで判定する PR を求める（`release` では文脈の `pr` を読むだけで GitHub を呼ばない）。番号が違えば `gate` を呼ばずに `stopped`・`not_applicable`（`summary` は定型文だけで PR の番号を載せない）を返す。`--expect-pr` を `--gate design` で渡せば `invalid`（上の「手順書」のリリース承認ゲートの箇条）。出力は伏せずに返す（自由記述を伏せるのは、閲覧範囲を限れない DB へ保存するときの `store.append_events` だけ。「手元のファイルの閲覧範囲」） |
 
 | 区分 | `NDF_STAGE_INPUT` | `--machine` | 入力 |
 | --- | --- | --- | --- |
@@ -592,7 +592,7 @@ PR を読む前の失敗（`gate` が受ける）:
   - (1) `store_root_of(cwd)` の保存先を開き、1 つの読み取りのトランザクションで、最初に `store.read_machine(conn, machine_id)` でマシンの行だけを読む。
     - 行が無ければ `model.Refused`（「ステートマシン <ID> は無い」）
     - 行の `repo` を起動元の `repo_id(cwd, store_root_of(cwd))` と比べ、違えば、定義もイベントも読まずにそこで `model.Refused`（「ステートマシン <ID> はこのリポジトリのものでない」）を返す
-    - 拒否の文には行の `repo`（別のリポジトリのリモートの URL か、リモートの無いリポジトリのメインディレクトリの絶対パス）を載せず、起動元の `repo_id` も載せない（共有する DB を使う別のリポジトリの呼び手に、所属を漏らさない。拒否の文は、無い ID のときの文と別の文にしてよい。ただし所属は含めない）
+    - 拒否の文には行の `repo`（別のリポジトリのリモートの URL か、リモートの無いリポジトリのメインディレクトリの絶対パス）を載せず、起動元の `repo_id` も載せない（共有する DB を使う別のリポジトリの呼び手に、所属を漏らさない。拒否の文言は、存在しない ID のときの文言とは必ず違う文言にする。ただし所属は含めない）
   - (1') 一致したときだけ `read_current(conn, machine_id)` で定義とイベントを読む。`NDF_PROGRESS_DB` で共有する DB では、`read_current` が ID だけで読む。後続の `gate` は起動元の GitHub 接続で PR へ書く。そのため、定義と文脈を読む前に照合する（比べる値は `--carry` の `_check_carry` と同じ `repo`。ただし `_check_carry` と違い、拒否の文に相手の `repo` を出さない）。
   - (2) `snapshot.stages` から、ステップの id が `step_id` の工程を引く。無ければ `model.Refused`（「ステートマシンのモードは承認ゲート <区分> を持たない」）。
   - (3) `invoke.resolve_inputs(stage, machine_context(current))`。入力のキーが文脈に無ければ `StageInputMissing` をそのまま返す（プランと同じく判定しない）。文脈の `design_pr` は足さない: 設計の工程の入力（`design.json`）に無いので、足すとプランの経路と判定する PR が分かれる。どちらの経路も `pr_number` が `worktree` のブランチの開いた PR を選ぶ
@@ -602,7 +602,7 @@ PR を読む前の失敗（`gate` が受ける）:
   - 定義の id を変えたら表も変える（テストで、`GATE_STAGES` の工程の文書の中に `GATE_STEPS` の id のステップがあることを縛る）
 - 手順書: `agent-layers.md` の supervisor が守る規則に次の 2 つを足す。2 つの場所の使い分けは、どちらの区分でも同じである。
   - コマンドは、起動指示の「作業場所」に示された対象リポジトリの worktree で打つ（`pr_number` がそのブランチの PR を選ぶ）
-  - 結果 JSON は、起動指示の「作業ディレクトリ」の絶対パスの下に保存する。作業ディレクトリは担当ごとに与えられる手元の保存先で、作業場所の worktree の外にある（上の「用語」）。結果 JSON は PR から取った自由記述（判定の理由・保留の文）を含むので、コミットの対象になる worktree の中には置かない。作業ディレクトリが作業場所の worktree の下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 判断が要る` で返す。worktree の外であることだけでは、読める人を限らない。そのため結果 JSON と工程の出力の JSON は、`mktemp` で作った 0600 の新しいファイルに書いてから所定のパスへ `mv` で置き換える（打ち直しでも既存のファイルの権限を引き継がない）（下の「承認資料の開示の範囲」の「手元のファイルの閲覧範囲」）
+  - 結果 JSON は、起動指示の「作業ディレクトリ」の絶対パスの下に保存する。作業ディレクトリは担当ごとに与えられる手元の保存先で、作業場所の worktree の外にある（下の「用語」）。結果 JSON は PR から取った自由記述（判定の理由・保留の文）を含むので、コミットの対象になる worktree の中には置かない。作業ディレクトリが作業場所の worktree の下にある（`git -C <作業場所> rev-parse --show-toplevel` の下）なら、保存せずに `結果: 判断が要る` で返す。worktree の外であることだけでは、読める人を限らない。そのため結果 JSON と工程の出力の JSON は、`mktemp` で作った 0600 の新しいファイルに書いてから所定のパスへ `mv` で置き換える（打ち直しでも既存のファイルの権限を引き継がない）（下の「承認資料の開示の範囲」の「手元のファイルの閲覧範囲」）
   - 設計承認ゲート（`結果: 承認ゲート`）を返す前に、作業場所で `ndf records mvv gate --gate design --machine <ステートマシンの ID>` を打つ。結果 JSON は、そのまま作業ディレクトリの `mvv-gate-design.json` に保存する（承認資料の全文の参照先。下の「承認資料の開示の範囲」）。
     - 結果の `outputs.mvv_gate` を、設計の工程の出力の JSON ファイル（規則 15 で作業ディレクトリに書くファイル。規則 15 は、工程を終えるたびに工程の出力の JSON を作業ディレクトリへ書き、フェーズレポートにそのパスを足す規則）の `mvv_gate` へそのまま載せる
     - 承認資料の「MVV 判定」の欄にも同じ値を載せる（下の「承認資料の出所」）
@@ -612,12 +612,12 @@ PR を読む前の失敗（`gate` が受ける）:
     - 承認資料の欄と、レポートの本文に判定を書くときは、下の「承認資料の開示の範囲」の supervisor の経路の行のとおり自由記述を伏せる
   - リリース承認ゲート（プランを使わず、本番に反映される操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、承認する PR を先に決め、その番号を判定のコマンドに渡す。判定のコマンドは、自分が組んだ入力の判定する PR がその番号と同じときだけ判定する。判定を打った後で対象の違いに気づいて結果を捨てると、使わない判定（LLM の呼び出し）と PR へのコメントが、ゲートごとに 1 回ずつ無駄になる。比べる相手を別のコマンド（`ndf progress show`）で先に読むと、読んだ後で判定の前に文脈の `pr` が変わったときに同じ無駄が起きる。そこで、比べるのは判定のコマンドの中で、判定に使う入力そのものと比べる
     - 承認する PR: このリリースで承認する人がマージを承認する PR で、承認資料の「対象を開くためのもの」に載せる PR である。取得元は次の 1 つに決める
-      - このリリースで supervisor が `ndf release assemble` を打った（リリース用の PR を組み立てた）なら、その結果 JSON の `outputs.pr`（組み立てた PR の番号）である。ブランチ戦略が `trunk` で版上げの PR を作る運用では版上げの PR（版数と CHANGELOG だけの PR）、`merge_base_branch` で版数の保存先が `none` の運用ではベースブランチから本番ブランチへ変更を取り込む PR になる。版上げの PR は `ndf release assemble` が新しいブランチから作る PR なので、`trunk` ではスプリントの実装を取り込んだ PR（文脈の `pr`）と常に違う。後者の運用でも、スプリントの PR と別になりうる
-      - ブランチ戦略がリリース用の PR を作らない（ブランチ戦略の判定 `route_decide` が返す真偽値 `release_pr` が偽で、`ndf release assemble` を打たない）なら、承認する PR はスプリントの PR そのもので、番号を渡さずに判定を打つ（判定する PR が承認する PR なので比べる必要が無い）
+      - このリリースで supervisor が `ndf release assemble` を打った（リリース用の PR を組み立てた）なら、その結果 JSON の `outputs.pr`（組み立てた PR の番号）である。`ndf release assemble` が PR を組み立てるのは版数を持つリリース方式だけで、ブランチ戦略が `trunk` で版上げの PR を作る運用では版上げの PR（版数と CHANGELOG だけの PR）になる。版上げの PR は `ndf release assemble` が新しいブランチから作る PR なので、スプリントの実装を取り込んだ PR（文脈の `pr`）と常に違う。`merge_base_branch` で版数の保存先が `none` の運用と `production_pr` の運用では、`ndf release assemble` は組み立てずに `NoReleasePr`（結果は `stopped`・`not_applicable`）で終わる（`src/ndf/domains/release/assemble.py` の `assemble`。`setting.kind` が `PR` か `setting.versioned` が偽のとき）。`merge_base_branch` で版数の保存先が `none` の運用の承認する PR はベースブランチから本番ブランチへの PR だが、`ndf release assemble` の結果から番号を得られないので、下の「承認する PR を決められない」に当たる
+      - ブランチ戦略がリリース用の PR を作らない（ブランチ戦略の判定 `route_decide` が返す真偽値 `release_pr` が偽で、`ndf release assemble` を打たない。`trunk` の `production_pr`）なら、承認する PR はスプリントの PR そのもので、番号を渡さずに判定を打つ（判定する PR が承認する PR なので比べる必要が無い）
       - 文脈のキー `release_pr`（承認の回答が書く、リリース記録を書いた PR の番号。上の `route_decide` の真偽値とは別）は使わない。承認ゲートの時点ではまだ無いためである。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
-    - 承認する PR を決められない（`ndf release assemble` を打つ戦略なのに、その結果 JSON に `outputs.pr` が無い・`ndf release assemble` が `ok` でない）: 判定を打たず、承認も求めない。承認する人に確認する PR を示せないまま承認させないためである。`結果: 判断が要る` で呼び出し元へ返し、`理由` に「承認するリリース用の PR を特定できない」と、`ndf release assemble` の結果 JSON のパスを書く
+    - 承認する PR を決められない（`route_decide` の `release_pr` が真の戦略なのに、`ndf release assemble` の結果 JSON に `outputs.pr` が無い・`ndf release assemble` が `ok` でない。`merge_base_branch` で版数の保存先が `none` の運用の `not_applicable` を含む）: 判定を打たず、承認も求めない。承認する人に確認する PR を示せないまま承認させないためである。`結果: 判断が要る` で呼び出し元へ返し、`理由` に「承認するリリース用の PR を特定できない」と、`ndf release assemble` の結果 JSON のパスを書く
     - 判定のコマンド: 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、結果 JSON を作業ディレクトリの `mvv-gate-release.json` に保存する
-      - `--expect-pr`（新設。`--gate release` のときだけ受け、`design` では `invalid`）: `_mvv_gate` は、入力を組んで `pr_number` で判定する PR を決めた直後、`gate` の `_judged` の手順 (1) の `hub.pull` より前に、その番号と比べる。違えば、PR を読まず、LLM も呼ばず、PR にコメントも書かずに、`stopped`・`not_applicable`（`exit-codes.md` の既存の種類。正常な否定の結果）を返す。`summary` は定型の「判定する PR が承認する PR と違うので判定しない」だけにし、どちらの PR の番号も載せない（判定する PR は承認の対象でなく、結果が承認資料へ写されうるため）。`pr_number` は文脈の値を読むだけで GitHub を呼ばないので、比べるための呼び出しは増えない
+      - `--expect-pr`（新設。`--gate release` のときだけ受け、`design` では `invalid`）: 比べるのは `gate` を呼ぶ前の `_mvv_gate` の中で、`gate`（`_judged` を含む）の中は変えない。`_mvv_gate` は、入力を組んだ後、`gate` を呼ぶ前に、同じ入力で `pr_number` を呼んで判定する PR を決め、その番号と比べる。違えば、PR を読まず、LLM も呼ばず、PR にコメントも書かずに、`stopped`・`not_applicable`（`exit-codes.md` の既存の種類。正常な否定の結果）を返す。`summary` は定型の「判定する PR が承認する PR と違うので判定しない」だけにし、どちらの PR の番号も載せない（判定する PR は承認の対象でなく、結果が承認資料へ写されうるため）。`pr_number` は文脈の値を読むだけで GitHub を呼ばないので、比べるための呼び出しは増えない
       - 文脈に `pr` が無いなど、判定する PR を決められないときは、今どおり `input_missing` などで止まる（下の「結果が `ok` でないとき」）
     - 結果が `ok`: 以下の箇条のとおり承認資料に載せる
     - 結果が `not_applicable`（判定する PR が承認する PR と違った）: 承認資料の「MVV 判定」の欄には、承認する人が自分で何を確認するかが分かる次の文だけを載せ、人へ問う
