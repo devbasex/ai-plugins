@@ -25,7 +25,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 根拠の行の確かめ | — | Pull Request が足した MVV の根拠の行（指示と結果での呼び名は「根拠の記述」）について、書いたバージョンが承認済みの今のバージョンか、項目がそのバージョンにあるかを、ndf cross-review run が機械で確かめること。誤りは直るまで残り、見送れない | — | — | `plugins/ndf/skills/cross-review/SKILL.md` |
 | MVV に反する指摘 | — | cross-review の指摘のうち、承認済みのプロジェクト MVV に反するもの（指摘の基準 5）。Mission・Vision・Value に反するものは修正担当へ渡り、必ず人の承認が要る操作に当たるものは渡さずに人の承認を待つ | — | — | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
+| drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | `docs/specifications/ndf-rebuild.md` |
 | 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（設定があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | `docs/specifications/cross-review-review-profile.md` |
 | レビューの重点 | — | プロジェクトが .ndf/review.json で定義した、指摘の基準 3 に使う観点。設定が無ければ基準 3 は無い | — | — | — |
 | 見送りの返信 | — | 修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。テンプレート（既定か、レビューのプロファイルの reply）の {inner} に見送りの種類の名前を入れて組む。既定のテンプレートは直す条件（使って困る場面が出たら直す）を定型文で書く | — | — | `docs/specifications/cross-review-review-profile.md` |
