@@ -68,13 +68,15 @@ class Registration(NamedTuple):
 
 class SyncResult(NamedTuple):
     """同期の前後の HEAD・載せ直したコミットの数・衝突したファイル（衝突したら `after` は `before`）・取得した PR の
-    ブランチの先頭（未送信のコミットを載せ直す前。PR の内容そのものを見るときに使う）。"""
+    ブランチの先頭（未送信のコミットを載せ直す前。PR の内容そのものを見るときに使う）・同じ取得で得たベースの先頭のコミット
+    （ベースを取らなければ空）。"""
 
     before: str
     after: str
     replayed: int
     conflicts: tuple[str, ...]
     remote: str
+    base: str = ""
 
 
 class Release(NamedTuple):
@@ -250,10 +252,16 @@ def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None, base_
 
     `base_branch` があれば同じ 1 回の取得でベースのリモート追跡参照も新しくする。どちらかを取れなければ `GitError`。
     """
+    return _fetch_tips(g, head_branch, remote, base_branch)[0]
+
+
+def _fetch_tips(g: git.Git, head_branch: str, remote: Optional[str], base_branch: Optional[str]) -> tuple[str, str]:
+    """`fetch_head` の取得を打ち、PR のブランチとベースの先頭のコミットを返す（ベースを取らなければ空）。"""
     remote = remote if remote is not None else g.remote()
     branches = dict.fromkeys(b for b in (head_branch, base_branch) if b is not None)
     g.run("fetch", "--", remote, *(f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in branches))
-    return g.rev_parse(f"refs/remotes/{remote}/{head_branch}")
+    tips = dict(zip(branches, g.commits_of(*(f"refs/remotes/{remote}/{b}" for b in branches)), strict=True))
+    return tips[head_branch], tips[base_branch] if base_branch is not None else ""
 
 
 def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
@@ -299,24 +307,24 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
 def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> SyncResult:
     """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。
 
-    `base_branch` は `fetch_head` へ渡す（同じ 1 回の取得でベースも取る）。
+    `base_branch` があれば同じ 1 回の取得でベースも取り、その先頭のコミットを `base` に返す。
     """
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
-    remote = fetch_head(g, head_branch, remote, base_branch)
+    remote, base = _fetch_tips(g, head_branch, remote, base_branch)
     _refuse_lossy_sync(g, remote, before)
     own = own_commits(g, remote, before)
     g.run("reset", "--hard", remote)
     if not own:
-        return SyncResult(before, remote, 0, (), remote)
+        return SyncResult(before, remote, 0, (), remote, base)
     picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
-        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote)
+        return SyncResult(before, g.rev_parse("HEAD"), len(own), (), remote, base)
     conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
     if not conflicts:
         # 空になったコミットなど、衝突のファイル無しで載せ直せなかった。origin へ合っていないので成功とは返さない
         raise SyncRefused(f"自分の未送信のコミットを origin の先頭へ載せ直せないので {before} へ戻した: {picked.stderr.strip()}")
-    return SyncResult(before, before, 0, conflicts, remote)
+    return SyncResult(before, before, 0, conflicts, remote, base)

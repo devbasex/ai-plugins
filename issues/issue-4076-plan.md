@@ -124,9 +124,9 @@
 ### Task 11: ジャーナルの MVV の分類とレッドライン
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`
-- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（`ingest`・`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
+- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（U5 が先に入れた `mvv`・`redline`・`redline_items` の上に、`ingest`・`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
 - **満たす受け入れ条件:** 4076:2、4076:4（テスト設計の 4090-6）
-- **進め方:** 失敗するテスト（`P1` の指摘が修正担当へ渡る）→ 通す最小実装 → 整理
+- **進め方:** 失敗するテスト（`P1` の指摘が収束を止める。修正担当へ渡らないことは U5 のテストが縛る）→ 通す最小実装 → 整理
 
 ### Task 12: 根拠の行の確かめの配線と確かめの成否
 

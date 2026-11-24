@@ -119,13 +119,16 @@ def test_current_snapshots_the_approved_body_of_the_ref_not_of_the_worktree(repo
 
 
 def test_current_reads_each_object_once(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _commit(repo, _decl(BODY))
+    head = _commit(repo, _decl(BODY))
     calls: list[str] = []
     for name in ("run", "run_bytes"):
         real = getattr(git.Git, name)
-        monkeypatch.setattr(git.Git, name, lambda self, *a, _real=real: (calls.append(a[0]), _real(self, *a))[1])
+        monkeypatch.setattr(git.Git, name, lambda self, *a, _real=real, **k: (calls.append(a[0]), _real(self, *a, **k))[1])
     mvv.current(repo, "main")
-    assert calls == ["rev-parse", "ls-tree", "cat-file", "cat-file"]
+    assert calls == ["rev-parse", "ls-tree", "cat-file"]
+    calls.clear()
+    mvv.current(repo, head)
+    assert calls == ["ls-tree", "cat-file"]
 
 
 def test_current_keeps_a_matching_snapshot_and_replaces_a_different_one(repo: Path) -> None:
@@ -181,6 +184,44 @@ def test_a_change_other_than_line_endings_is_a_mismatch_for_both(repo: Path) -> 
     _commit(repo, _decl(LF), CRLF.replace("使命", "別の使命"))
     assert preflight.mvv_state(repo) == "mismatch"
     assert mvv.current(repo, "main", allow_mismatch=True).state == "mismatch"
+
+
+def test_snapshots_are_not_written_where_another_user_can_replace_them(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """担当が後で開くパスなので、ほかの利用者が項目を差し替えられる保存先（途中のディレクトリを含む）には書かない。"""
+    _commit(repo, _decl(BODY))
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(shared / "mvv-state"))
+    with pytest.raises(mvv.MvvError, match="差し替えられる"):
+        mvv.current(repo, "main")
+    assert not list(shared.rglob("*.md"))
+
+
+def test_snapshots_are_not_written_inside_the_reviewed_worktree(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """保存先がリンクを通って `outside` の中を指すときも書かない。"""
+    _commit(repo, _decl(BODY))
+    (repo / "held").mkdir()
+    (tmp_path / "link").symlink_to(repo / "held")
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "link"))
+    with pytest.raises(mvv.MvvError, match="worktree"):
+        mvv.current(repo, "main", outside=repo)
+    assert not list((repo / "held").iterdir())
+
+
+def test_snapshot_path_is_the_real_path(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """保存先のリンクを後で別の場所へ向けても、担当へ渡したパスは変わらない。"""
+    _commit(repo, _decl(BODY))
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "link"))
+    got = mvv.current(repo, "main")
+    assert got.path is not None and got.path.parent == (tmp_path / "real").resolve() / mvv.SNAPSHOT_DIR
+
+
+def test_items_ignore_examples_in_code_blocks() -> None:
+    body = "## Mission\r\n\r\n使命\r\n\r\n## Value\r\n\r\n1. **一つ目**\r\n\r\n```markdown\r\n99. 例\r\n## Vision\r\n```\r\n\r\n2. **二つ目**\r\n"
+    assert mvv.items(body, "```\n| C9 | 例 | x |\n```\n\n| C1 | 秘密 | x |\n") == ("Mission", "Value 1", "Value 2", "C1")
 
 
 def test_failed_write_leaves_no_temporary_file(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

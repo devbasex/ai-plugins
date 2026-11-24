@@ -33,7 +33,10 @@ class DriveStopped(Exception):
 
 @dataclass(frozen=True)
 class RunConfig:
-    """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose ならセクションを必ず詳細レビューへ通す）。"""
+    """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose ならセクションを必ず詳細レビューへ通す）。
+    `base_commit` は起動の始めに `base` が指していたコミット（#4090。MVV を読むコミットとは違うことがある）。差分と
+    前回の結果を再利用できるかはこれで決め、
+    名前の `base` は取得と表示にだけ使う。"""
 
     worktree: Path
     branch: str
@@ -48,6 +51,7 @@ class RunConfig:
     # 実行者のメインディレクトリと、そこから同期の前に読んだレビューの設定（認可と同じ解決を使う。PR 3944 の r4-1・r4-4）
     main: Optional[Path] = None
     settings: ReviewSettings = field(default_factory=lambda: ReviewSettings())
+    base_commit: Optional[str] = None
 
 
 def settings_path(root: Path, file_id: str) -> Path:

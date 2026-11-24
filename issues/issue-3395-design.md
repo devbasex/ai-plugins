@@ -172,6 +172,7 @@
 | M3a | M3 #3297 を分けた hook（#3297 の番号を使う。M3-H1〜H14 を持つ） | M3b・D2・AD2・AD3・T1 | 5 | 新設 | 11.0.0 |
 | M3b+ | M3b の追補（Issue は #3604）。中継のアカウントの切り替え（#3604 #3864）で `session_env` ほかの M3b のモジュールが `account_registry`（S1e）を読む。持つサブパッケージは無い（U1 の PR #4018 で `children.json` に足し、ここへ写した）。レーン lr-relay | M3b・S1e | 9 | 追補 | 11.x |
 | X9 | #3604 #3864 の U12 で足した子（Issue は #3604）。エントリポイント `ndf.__main__` を持ち、起動時に `adapters/claude.py` の口（`RelayChecks`・`set_relay_checks`）へ `domains/relay/plan_claude` を差し込む（`adapters` は `domains` を読めないため）。`ndf.__main__` を X0 から外した（X0 の `needs` に AD3・M3b を足すと X0 → AD3 → D1 → X0 の輪になる）。レーンは lracct（このレーンで足した子なので、既存の M3b+ の lr-relay にそろえない）。2026-11-22 に利用者が選んだ（PR #4131） | X0・AD3・M3b | 9 | 新設 | 11.x |
+| M5+ | M5 の追補（Issue は #4076）。cross-review が、承認済みのプロジェクト MVV を読むために M7 の `ndf.domains.records` を読む。持つサブパッケージは無い（`children.json` に足し、ここへ書き写した）。レーン lr-flow | M5・M7 | 8 | 追補 | 11.x |
 | M8 | worktree のコンテキストとディスクの片付け | AD1+・M3a | 6 | 新設 | 11.0.0 |
 | C3+ | #3292 の追補（Issue は #3474）。工程の定義が呼ぶのに route に無いプランの雛形 13 個を足し、`ndf progress next` が 1 スプリントを流し切れるようにする。雛形の `test_command` の `ci.only`・失敗テストの再実行・`workflow.launch` の宣言スキーマ（#3473）を持つ（オーガナイザーの決定、2026-11-14） | C3・P1b | 6 | 追補 | 11.0.0 |
 | S1a | S1 #3303 を分けた Skill 本文とエージェント定義（#3303 の番号を使う）。本文は今のまま移し、スクリプトのパスとコマンドだけを直す（決定 126） | M1〜M8・C3+・C5 | 8 | 新設 | 11.0.0 |

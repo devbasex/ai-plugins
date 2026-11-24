@@ -133,12 +133,12 @@ def test_converged_review_runs_again_when_the_merge_base_moves(wt: Path, tmp_pat
     """PR 3944 の r1-10・r2-1: 比較基点は `--base` の名前でなく merge-base の SHA で比べる。同じ名前でも参照先が動いて
     merge-base が変われば、同じ head でも前回の収束を返さず全差分から読み直す。"""
     state_dir = tmp_path / "st"
-    sh(wt, "branch", "stack", "origin/main")
+    sh(wt, "push", "-q", "origin", "origin/main:refs/heads/stack")
     _run_with(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, "stack")
     same = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     _run_with(capsys, monkeypatch, same, wt, "stack")
     assert same.calls == []
-    sh(wt, "branch", "-f", "stack", "HEAD")
+    sh(wt, "push", "-q", "origin", "HEAD:refs/heads/stack")
     moved = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     _run_with(capsys, monkeypatch, moved, wt, "stack")
     assert sorted(moved.calls) == ["codex", "kiro"]

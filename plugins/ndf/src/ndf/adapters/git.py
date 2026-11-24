@@ -25,6 +25,8 @@ SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 # リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+# `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
+_BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
 # git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
 _URL_USERINFO = re.compile(r"(?<=://)[^\s/?#]*@")
 _URL_QUERY = re.compile(r"(://[^\s?#]*[?#])\S+")
@@ -32,6 +34,8 @@ _URL_QUERY = re.compile(r"(://[^\s?#]*[?#])\S+")
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
+# タグの参照の接頭辞
+TAGS = "refs/tags/"
 # リモート名の既定を持つ唯一の保存先（スキーマの `default`）。値はここに書かない（#3617 の I7a）
 REMOTE_SCHEMA = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
 # リモート名を書く設定（メインディレクトリからの相対）
@@ -96,10 +100,11 @@ class Completed(NamedTuple):
 Runner = Callable[[list[str], Optional[Path]], Completed]
 
 
-def _start(args: list[str], cwd: Optional[Path], text: bool) -> subprocess.CompletedProcess[Any]:
-    """git を 1 回起動する。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
+def _start(args: list[str], cwd: Optional[Path], text: bool, stdin: Optional[bytes] = None) -> subprocess.CompletedProcess[Any]:
+    """git を 1 回起動する。認証の入力を端末へ求めない（`NO_PROMPT`）。`stdin` があれば標準入力へ渡す。"""
+    env = {**os.environ, **NO_PROMPT}
     try:
-        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=text, check=False, env={**os.environ, **NO_PROMPT})
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=text, check=False, env=env, input=stdin)
     except OSError as exc:
         raise GitError(f"git を起動できない: {exc}") from None
 
@@ -222,9 +227,9 @@ class Git:
             raise _failed(args, done.returncode, done.stderr)
         return done.stdout
 
-    def run_bytes(self, *args: str) -> bytes:
+    def run_bytes(self, *args: str, stdin: Optional[bytes] = None) -> bytes:
         """git を起動して標準出力を元のバイト列のまま返す（改行を変えない）。終了コードが 0 でなければ `GitError`。"""
-        done = _start(list(args), self.cwd, text=False)
+        done = _start(list(args), self.cwd, text=False, stdin=stdin)
         if done.returncode != 0:
             raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
@@ -235,6 +240,36 @@ class Git:
         if not FULL_SHA.match(sha):
             raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
         return sha
+
+    def blobs(self, *names: str) -> list[Optional[bytes]]:
+        """blob の元のバイト列を、何件でも git を 1 回だけ起動して `names`（`<コミット>:<パス>` か id）の順に返す。無い・blob でないものは None。"""
+        rest = self.run_bytes("cat-file", "--batch", stdin="".join(f"{n}\n" for n in names).encode("utf-8"))
+        out: list[Optional[bytes]] = []
+        for _ in names:
+            line, _, rest = rest.partition(b"\n")
+            head = _BATCH_HEAD.match(line)
+            if head is None:
+                out.append(None)
+                continue
+            size = int(head.group(2))
+            out.append(rest[:size] if head.group(1) == b"blob" else None)
+            rest = rest[size + 1 :]
+        return out
+
+    def commits_of(self, *refs: str) -> list[str]:
+        """参照（`refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。"""
+        got = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
+        if len(got) != len(refs) or not all(FULL_SHA.match(sha) for sha in got):
+            raise GitError(f"{', '.join(refs)} をコミットへ解決できない: {got!r}")
+        return got
+
+    def commit_named(self, name: str) -> Optional[str]:
+        """`name` がブランチでない手元のコミット（短縮した SHA・タグ・`HEAD~3` など）を指せば完全な SHA。ブランチか、解決できなければ None。"""
+        try:
+            ref = self.run("rev-parse", "--verify", "--quiet", "--symbolic-full-name", END_OF_OPTIONS, name).strip()
+            return None if ref and not ref.startswith(TAGS) else self.rev_parse(name)
+        except GitError:  # noqa: NDF401 外部コマンド: コミットを指さない名前は None で呼び手へ返す（呼び手は元の失敗を出す）
+            return None
 
     def merge_base(self, a: str, b: str) -> str:
         return self.run("merge-base", "--", a, b).strip()

@@ -13,7 +13,8 @@
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
-   無ければ収束。前々ラウンドの指摘が戻っていれば振動で止める
+   無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は修正担当へ渡さず、未解決のまま欠けにして
+   人の判断へ戻す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
@@ -32,10 +33,11 @@ import os
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from ndf import identity
 from ndf.adapters import agents, claude, git, run_log
 from ndf.contracts import facts, limits
 from ndf.core.converge import oscillation, participants, worktree
@@ -53,8 +55,9 @@ from ndf.domains.crossreview import (
     threads,
 )
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.journal import FindingJournal
+from ndf.domains.crossreview.journal import REDLINE_ITEMS, FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
+from ndf.domains.records import mvv
 from ndf.testing import declared, scoped
 
 # 終わったときの要約（`finish_decide` が読む）
@@ -74,11 +77,11 @@ MISSING = "前の会話が見つからない"
 UNSAVED = "会話を保存しない設定"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
-# 相手役のレビューの最後の行に出させる findings の JSON の形
+# 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
 FINDINGS_SHAPE = (
     '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", '
     '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "path": "<ファイルのパス か 空>", '
-    '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
+    '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"%s}]} だけを出す。指摘が無ければ空の配列。'
 )
 
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
@@ -120,6 +123,8 @@ class _Run:
     history: list[frozenset[str]]
     # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
+    # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
+    snapshot: Optional[mvv.Snapshot] = None
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
@@ -171,12 +176,71 @@ class _Prior(NamedTuple):
     comments: Sequence[prior_decide.Remark] = ()
 
 
-def _start(cfg: RunConfig) -> _Run:
+def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
+    """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
+
+    `--base` がコミット（SHA・タグなど）のときだけ使う。そのコミットはレビュー中のブランチの途中のことがあり、そこから MVV を読むと、
+    レビュー中のブランチが自分で書き換えた MVV で自分を確かめることになる。
+    """
+    pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
+    if reader_for is None:
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い（--base がコミットなので要る）")
+    try:
+        return reader_for(pr).base()
+    except Exception as exc:
+        # 認証・通信・応答のどの失敗でも、MVV を決められないので止める
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
+
+
+class _Based(NamedTuple):
+    """起動の始めの同期の結果と、MVV を読むブランチ・差分の比較元のコミット。"""
+
+    synced: worktree.SyncResult
+    branch: str
+    commit: str
+
+
+def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
+    """PR のブランチと MVV を読むブランチを 1 回で取得して同期する。
+
+    `--base` がブランチ（`<リモート>/<ブランチ>` の形も受ける）なら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。
+    コミット（SHA・短縮した SHA・タグなど）なら、比較元はそのコミットのまま、MVV は PR のマージ先から読む（スプリントブランチへ
+    単位の PR を集めた後のレビューは、集めた時点のコミットを渡す）。完全な SHA でなければブランチとして取得し、取得できずに
+    手元でブランチでないコミットを指すときだけコミットとして扱う（ブランチ名の起動で Git を余計に打たない）。
+    """
+    remote = g.remote()
+    commit = cfg.base if git.FULL_SHA.match(cfg.base) else None
+    if commit is None:
+        branch = cfg.base.removeprefix(f"{remote}/")
+        try:
+            synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
+            return _Based(synced, branch, synced.base)
+        except git.GitError:
+            commit = g.commit_named(cfg.base)
+            if commit is None:
+                raise
+    target = _merge_target(cfg, reader_for)
+    return _Based(worktree.sync_worktree(g, cfg.branch, remote, base_branch=target), target, commit)
+
+
+def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
+    """同期で取得したコミットの MVV を読む。読めなければ、MVV を確かめないレビューにならないよう担当の起動前に止める（#4076）。"""
+    try:
+        return mvv.current(cfg.worktree, based.synced.base, outside=cfg.worktree)
+    except (mvv.MvvError, identity.IdentityError, OSError) as exc:
+        raise DriveStopped("precondition", f"{based.branch} の MVV を読めない: {exc}") from exc
+
+
+def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
-    synced = worktree.sync_worktree(g, cfg.branch)
+    based = _sync(cfg, g, reader_for)
+    synced = based.synced
     if synced.conflicts:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
+    snap = _snapshot(cfg, based)
+    # 差分の比較元をコミットで持つ。起動の途中で別のセッションがベースを取得しても、比べる相手は変わらない（#4090）
+    cfg = replace(cfg, base_commit=based.commit)
     warnings: list[str] = []
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
@@ -186,7 +250,7 @@ def _start(cfg: RunConfig) -> _Run:
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
-    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [])
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), warnings, [], [], snapshot=snap)
     if rebound:
         _save(run)
     _ingest_pending(run)
@@ -325,7 +389,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
     ]
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
-    lines += criteria_decide.reviewer_block(run.cfg.settings.focus)
+    lines += criteria_decide.reviewer_block(run.cfg.settings.focus, run.snapshot)
     if handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
@@ -336,7 +400,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
             "そのコメントにかかわらず、今の差分で問題を確かめたら報告する（「直した」「対応済み」と書かれた論点も、"
             "今の差分で残っていれば報告する）。確かめていない論点をコメントだけを根拠に書かない。",
         ]
-    lines.append(FINDINGS_SHAPE)
+    lines.append(FINDINGS_SHAPE % criteria_decide.mvv_shape(run.snapshot))
     return "\n".join(lines)
 
 
@@ -419,7 +483,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
         + str(run.ref.origin_pr)
         + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
     )
-    lines += criteria_decide.fixer_block(run.cfg.settings.focus)
+    lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
     if scoped.ci_only(declared.test_section(run.cfg.worktree)):
         lines.append(criteria_decide.fixer_ci_only())
@@ -588,6 +652,9 @@ def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。"""
     findings = run.journal.findings()
+    for row in run.journal.redlines():
+        named = "・".join(row[REDLINE_ITEMS])
+        run.warnings.append(f"指摘 {row['id']} は必ず人の承認が要る操作（{named}）に当たるので、修正担当へ渡さず人の判断に残した")
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -619,7 +686,7 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     """範囲を決めて差分のファイルを書く。"""
     cfg = run.cfg
-    changed = changes.changed(run.g, cfg.base, cfg.worktree)
+    changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     reviewed = scope_decide.reviewed_of(run.data)
     sections = changes.sections(changed.docs)
@@ -628,7 +695,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     basis = scope_decide.Basis(merge_base, cfg.reviewers, cfg.settings.focus)
     scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, basis), head)
     diff = _round_stem(run, round_no, ".diff")
-    diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
+    diff.write_text(run.g.run("diff", f"{scope.base or merge_base}...HEAD"), encoding="utf-8")
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base)
 
 
@@ -647,10 +714,9 @@ def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.
 
 
 def _merge_base(run: _Run, head: str) -> str:
-    """`--base` と `head` の merge-base の SHA。同じ head の間は 1 回の起動で 1 回だけ求める（PR 3944 の r3-5）。
-    `--base` の参照は起動の始めの同期の後に動かない（修正の送り直しが取るのは PR のブランチだけ）ので、head だけで見分ける。"""
+    """起動の始めに決めたベースのコミットと `head` の merge-base の SHA。`head` が同じなら 1 回の起動で 1 回だけ求める。"""
     if head not in run.merge_bases:
-        run.merge_bases[head] = run.g.merge_base(run.cfg.base, head)
+        run.merge_bases[head] = run.g.merge_base(run.cfg.base_commit, head)
     return run.merge_bases[head]
 
 
@@ -689,7 +755,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
-    run.history.append(run.journal.enter(round_no, raised))
+    run.history.append(run.journal.enter(round_no, raised, run.snapshot.items if run.snapshot is not None else ()))
     _detach_revived(run)
     record: dict[str, Any] = {
         "round": round_no,
@@ -745,14 +811,14 @@ def _reusable(run: _Run) -> bool:
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
-    run = _start(cfg)
+    run = _start(cfg, reader_for)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)

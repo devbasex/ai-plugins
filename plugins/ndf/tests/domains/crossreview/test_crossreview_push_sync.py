@@ -230,10 +230,12 @@ def test_sync_fetches_the_base_branch_in_the_same_fetch(repos: Repos, tmp_path: 
     sh(repos.other, "push", "-q", "origin", "HEAD:refs/heads/main")
     calls: list[list[str]] = []
     got = worktree.sync_worktree(git.Git(wt, _counting(calls)), BRANCH, "origin", base_branch="main")
-    assert got.remote == got.after == head
+    assert got.remote == got.after == head and got.base == base
     assert sh(wt, "rev-parse", "refs/remotes/origin/main").strip() == base
     refspecs = [f"+refs/heads/{b}:refs/remotes/origin/{b}" for b in (BRANCH, "main")]
     assert [c for c in calls if c[0] == "fetch"] == [["fetch", "--", "origin", *refspecs]]
+    # 2 本の先頭は 1 回の起動で読む（ほかの 1 回は同期の前の HEAD）
+    assert len([c for c in calls if c[0] == "rev-parse"]) == 2
 
 
 @pytest.mark.parametrize("base", [None, BRANCH])
