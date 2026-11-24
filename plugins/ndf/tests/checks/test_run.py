@@ -190,6 +190,28 @@ def test_the_findings_of_each_rule_remain_when_the_next_rule_stops(tmp_path, mon
     monkeypatch.setattr(run.invariants, "check", stop)
     monkeypatch.setattr(run, "CONTRACT_RULES", {})
     with pytest.raises(run.Halted, match="pyproject.toml") as caught:
-        run.check(model.Scope(tmp_path, tmp_path / "p", "p"), {})
+        run.check(model.Scope(tmp_path, tmp_path / "p", "p"), {"facts": {"contracts_dir": "contracts"}})
     expected = ["ndf.checks.facts.check", "ndf.checks.structure.check", "ndf.checks.structure.cycles", "ndf.checks.words.check"]
     assert [f.rule for f in caught.value.found] == expected
+
+
+@pytest.mark.parametrize(
+    ("rel", "directory"),
+    [("domains/split-tables.json", False), ("facts/fact.schema.json", False), ("schemas/x.schema.json", False), ("facts", True)],
+    ids=["table", "common-schema", "schema", "directory"],
+)
+def test_no_rule_reads_contracts_outside_the_plugin(tmp_path, monkeypatch, rel, directory):
+    root = tmp_path / "repo" / "p"
+    link = root / "contracts" / rel
+    link.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    if directory:
+        outside.mkdir()
+    else:
+        outside.write_text('{"rows": "SECRET"}', encoding="utf-8")
+    link.symlink_to(outside)
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    monkeypatch.setattr(run.facts, "check", lambda *args: pytest.fail("事実の表を読んだ"))
+    with pytest.raises(run.Halted, match="プラグインの外を指す") as caught:
+        run.check(model.Scope(root.parent, root, "p"), model.load_rules())
+    assert "SECRET" not in f"{caught.value} {caught.value.found}"

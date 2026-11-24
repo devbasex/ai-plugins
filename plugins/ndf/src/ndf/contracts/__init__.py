@@ -9,6 +9,7 @@ D1 を閉じた後のコントラクトの変更は #3284 の追補（D1+）の 
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -83,6 +84,15 @@ def require_inside(path: Path, plugin_root: Path) -> Path:
     if not path.resolve().is_relative_to(plugin_root.resolve()):
         raise ContractError(f"コントラクト {path} がプラグインの外を指す")
     return path
+
+
+def require_tree_inside(top: Path, plugin_root: Path) -> None:
+    """コントラクトの保存先 `top` とその下のシンボリックリンク（ディレクトリのものを含む）を `require_inside` で確かめる。本文は読まない。"""
+    require_inside(top, plugin_root)
+    for parent, dirs, files in os.walk(top):
+        for path in (Path(parent, name) for name in sorted(dirs + files)):
+            if path.is_symlink():
+                require_inside(path, plugin_root)
 
 
 def load_json(rel: str) -> Any:

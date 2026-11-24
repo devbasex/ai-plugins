@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from ndf import cli, identity
+from ndf import cli, contracts, identity
 from ndf.checks import (
     budget,
     child_deps,
@@ -128,6 +128,17 @@ def _gather(parts: Iterable[list[Finding]], only: list[str] | None) -> list[Find
     return sorted(found, key=_order)
 
 
+def _require_own_contracts(scope: Scope, rules: dict[str, Any]) -> None:
+    """コントラクトのファイルがプラグインの外を指せば `CheckError`。
+
+    事実の表・スキーマ・規約を読む規則はスキーマ違反の値を指摘に載せるので、どの規則が列挙・読み取りをするより前に 1 回だけ確かめる。
+    """
+    try:
+        contracts.require_tree_inside(scope.plugin_root / rules["facts"]["contracts_dir"], scope.plugin_root)
+    except ContractError as exc:
+        raise CheckError(str(exc)) from None
+
+
 def _chosen(
     table: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]], scope: Scope, rules: dict[str, Any], only: list[str] | None
 ) -> Iterator[list[Finding]]:
@@ -153,6 +164,7 @@ def _parts(
     yield unparsable(scope)
     yield from _chosen(CONTRACT_RULES, scope, rules, only)
     yield smell_findings(scope, rules)
+    _require_own_contracts(scope, rules)
     # 規則ごとに返す（後の規則が止まっても、先に当てた規則の指摘を残す）
     yield structure.check(scope, rules)
     yield structure.cycles(scope)
