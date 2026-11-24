@@ -62,19 +62,6 @@ def plan_items(planned: Iterable[Mapping[str, Any]], touched: symbols_decide.Tou
     return items, [{**p, "reason": why} for p, why in skipped]
 
 
-def against_mvv(answer: Mapping[str, Any] | None, ids: Iterable[str]) -> dict[str, str] | None:
-    """今の MVV での確かめの回答（`prompt_decide.mvv_check`）から、MVV に反する項目の番号 → 理由。
-
-    回答が無いか、`ids` のどれかの判定が欠けていれば None。
-    """
-    rows = answer["items"] if answer is not None and isinstance(answer.get("items"), list) else []
-    said = {r["item"]: r for r in rows if isinstance(r, Mapping) and isinstance(r.get("item"), str) and isinstance(r.get("keep"), bool)}
-    wanted = list(ids)
-    if any(i not in said for i in wanted):
-        return None
-    return {i: _reason(said[i]) for i in wanted if not said[i]["keep"]}
-
-
 def next_open(items: Iterable[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """未着手の最初の項目。無ければ None。"""
     return next((i for i in items if i["status"] == Status.OPEN.value), None)

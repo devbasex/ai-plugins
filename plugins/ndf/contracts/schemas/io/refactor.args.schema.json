@@ -112,9 +112,6 @@
         "--candidates": {
           "type": "string"
         },
-        "--target-branch": {
-          "type": "string"
-        },
         "--work": {
           "type": "string",
           "default": "."

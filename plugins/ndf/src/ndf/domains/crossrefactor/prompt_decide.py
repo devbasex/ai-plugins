@@ -81,20 +81,6 @@ def plan(pr: int, proposals: Sequence[Mapping[str, Any]], mvv: str = "") -> str:
     )
 
 
-def mvv_check(pr: int, items: Sequence[Mapping[str, Any]], mvv: str) -> str:
-    """計画の後に MVV が変わった再開で、未着手の項目を今の MVV で確かめる指示文。`mvv` は `mvv_text` の文。"""
-    lines = [f"- {item_text(i)}" + (f"（{i['reason']}）" if i.get("reason") else "") for i in items]
-    return (
-        f"PR #{pr} のリファクタリング計画の次の項目は、計画した後に MVV が変わった（か、MVV を読まずに計画した）。"
-        "項目ごとに、今の MVV に反しないかを確かめる。ファイルは変えない。\n"
-        + "\n".join(lines)
-        + "\n"
-        + mvv
-        + '最後の行に JSON {"items": [{"item": "<項目の番号>", "keep": <反しなければ true|反すれば false>, "reason": "<理由>"}]} を、'
-        "すべての項目について出す。"
-    )
-
-
 def add_tests(item: Mapping[str, Any]) -> str:
     return (
         f"{item_text(item)} を直す前に、今の振る舞いを固定するテストを足してコミットする（push しない）。"

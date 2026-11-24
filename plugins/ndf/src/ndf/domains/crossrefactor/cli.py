@@ -5,8 +5,7 @@
     ndf refactor collected --paths <ファイル>... [--timeout <秒>] [--work <dir>]
     ndf refactor run --pr <N> --branch <head> --base <起点> --scope <保存先>... --required <チェック>... [--ci-test <名前>...]
                      [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>]
-                     [--budget-minutes <分>] [--safety-net-minutes <分>] [--candidates <ファイル>]
-                     [--target-branch <マージ先のブランチ>] [--work <dir>]
+                     [--budget-minutes <分>] [--safety-net-minutes <分>] [--candidates <ファイル>] [--work <dir>]
     ndf refactor state --pr <N> [--work <dir>]
     ndf refactor scope-args --base <起点> [--tests <保存先>...] [--scope <保存先>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
@@ -18,8 +17,7 @@
 - `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける。
   `--budget-minutes` は採る項目を選ぶ実装の予算、`--safety-net-minutes` はコードを書く工程の起動の秒の累計の上限
   （無ければ実効の予算 × 設定の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける。`--candidates` は実装計画が
-  挙げたスプリントの終わりの候補のファイルで、提案の指示文に載る。中身が前回と違えば前回の結果も未完了の状態も使わない。
-  `--target-branch` は PR のマージ先のブランチで、`--base` がコミットのときに渡すと、MVV を読むブランチを GitHub から読まない
+  挙げたスプリントの終わりの候補のファイルで、提案の指示文に載る。中身が前回と違えば前回の結果も未完了の状態も使わない
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
 - `release`: 作業場所を片付ける（NDF の lock だけを外す）
@@ -94,7 +92,6 @@ def run_config(a: argparse.Namespace) -> drive.RunConfig:
         budget_minutes=a.budget_minutes,
         safety_net_minutes=a.safety_net_minutes,
         candidates=candidates,
-        target_branch=a.target_branch,
     )
 
 
@@ -191,7 +188,6 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     r.add_argument("--budget-minutes", type=int)
     r.add_argument("--safety-net-minutes", type=float)
     r.add_argument("--candidates")
-    r.add_argument("--target-branch")
     st = sub.add_parser("state", help="状態ファイルの中身")
     rl = sub.add_parser("release", help="作業場所を片付ける")
     for each in (st, rl):

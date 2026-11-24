@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from ndf.adapters import git
 from ndf.core.converge import location, worktree
@@ -84,10 +83,10 @@ def prepare(repo: git.Git, pr: int, head: str, runtimes: Sequence[str]) -> Works
     return ws
 
 
-def refresh_readers(ws: Workspace, runtimes: Optional[Sequence[str]] = None) -> str:
-    """担当 `runtimes`（省けば全員）の読み取り用ディレクトリを書き込み用の作業ディレクトリの HEAD へ合わせ、その HEAD を返す。"""
+def refresh_readers(ws: Workspace) -> str:
+    """読み取り用ディレクトリを書き込み用の作業ディレクトリの HEAD へ合わせ、その HEAD を返す。"""
     head = git.Git(ws.work).rev_parse("HEAD")
-    for runtime in runtimes if runtimes is not None else ws.runtimes:  # noqa: NDF201 上限: 担当の数（ランタイムの表の既定の席）
+    for runtime in ws.runtimes:  # noqa: NDF201 上限: 担当の数（ランタイムの表の既定の席）
         worktree.detach_clean(git.Git(ws.reader(runtime)), head)
     return head
 

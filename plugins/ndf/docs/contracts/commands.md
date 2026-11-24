@@ -288,7 +288,7 @@
 | --- | --- |
 | `ndf refactor collected` | `--paths`（array of string・必須）<br>`--timeout`（number・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor release` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
-| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--target-branch`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor scope-args` | `--base`（string・必須）<br>`--tests`（array of string・任意）<br>`--scope`（array of string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor state` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor tests` | `--changed`（array of string・必須）<br>`--work`（string・任意・既定 `"."`） |
