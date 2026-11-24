@@ -5,7 +5,7 @@
     "claude": {
       "summary": "Claude Code（https://code.claude.com/docs/en/hooks）",
       "plugin_root_env": "CLAUDE_PLUGIN_ROOT",
-      "samples": ["2.1.325"],
+      "samples": ["2.1.325", "2.1.331"],
       "timeout_max": 600,
       "skipped": {},
       "events": {
@@ -81,7 +81,8 @@
         "ask-forward": "Codex には AskUserQuestion の Tool が無い",
         "ask-answered": "Codex には AskUserQuestion の Tool が無い",
         "ask-closed": "Codex には AskUserQuestion の Tool が無い",
-        "context-limit": "Codex の会話の記録は文脈の量（usage）を同じ形で持たない"
+        "context-limit": "Codex の会話の記録は文脈の量（usage）を同じ形で持たない",
+        "relay-busy": "中継のラッパーは Claude Code だけを包む"
       },
       "events": {
         "PreToolUse": {
