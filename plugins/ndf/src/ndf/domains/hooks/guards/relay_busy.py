@@ -27,8 +27,8 @@ from ndf.domains.relay import signals
 
 GUARD_NAME = "relay-busy"
 BUSY_START_FAILED = (
-    "バックグラウンドの作業の開始を中継へ記録できなかったので、始めない。もう一度呼ぶ"
-    "（中継のラッパーは記録の無いバックグラウンドの作業を守れない）"
+    "バックグラウンドの作業の開始を記録できなかったので、この呼び出しを拒否した。もう一度呼び出す"
+    "（記録が無いと、中継のラッパーが作業の途中で claude を終了させることがある）"
 )
 
 _recorded: Optional[dict] = None

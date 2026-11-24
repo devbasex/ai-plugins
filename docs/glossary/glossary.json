@@ -590,7 +590,7 @@
     {
       "term": "シグナルファイル",
       "context": "ndf-relay",
-      "meaning": "ラッパーへ知らせるファイル（`next.json`・`stop`・バックグラウンドの作業の記録）",
+      "meaning": "中継のラッパーが動きを決めるために読むファイル（次のセグメントへ切り替える `next.json`・次のセッションを起動させない `stop`・バックグラウンドの作業の記録など）",
       "deprecated": [
         "合図"
       ],
@@ -605,19 +605,19 @@
     {
       "term": "監視",
       "context": "ndf-relay",
-      "meaning": "バックグラウンドの作業のうち、待つだけで止めてよいもの。コマンドが `ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけでできた Monitor とバックグラウンドの Bash",
+      "meaning": "バックグラウンドの作業のうち、待つだけで止めてよいもの。実行するコマンドが `ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけの、Monitor とバックグラウンドの Bash",
       "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
     },
     {
       "term": "作業",
       "context": "ndf-relay",
-      "meaning": "バックグラウンドの作業のうち監視でないもの。止めると成果が失われる。見分けられないものも作業とする",
+      "meaning": "バックグラウンドの作業のうち、監視でないもの。止めると成果が失われる。監視だと確かめられないものも作業とする",
       "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
     },
     {
       "term": "バックグラウンドの作業の記録",
       "context": "ndf-relay",
-      "meaning": "子の起動ごとに、作業と監視の件数を子の会話の hook（会話の起動・作業を始める前・Stop）が書き、ラッパーが読むシグナルファイル（`busy-<起動の ID>.json`）",
+      "meaning": "中継のラッパーが起動した claude（子）ごとに、残っている作業と監視の件数を書くシグナルファイル（`busy-<起動の ID>.json`。起動の ID はラッパーが起動のたびに振る）。子の会話の hook（SessionStart・PreToolUse・Stop）が書き、ラッパーが読む",
       "source": "plugins/ndf/skills/development-workflow/references/relay-background.md"
     },
     {
@@ -4869,7 +4869,7 @@
     {
       "term": "環境変数のキー",
       "context": "ndf-code-structure",
-      "meaning": "環境変数のコントラクト（plugins/ndf/contracts/domains/env.json）の行の `key` の列の値。コードはこのキーから名前を引き、名前を文字列リテラルで書かない",
+      "meaning": "環境変数のコントラクト（plugins/ndf/contracts/domains/env.json）の各項目が持つ `key` の値。コードはこのキーから環境変数名を引き、環境変数名を文字列リテラルで書かない",
       "pending_source": "issues/issue-4126-design.md"
     },
     {

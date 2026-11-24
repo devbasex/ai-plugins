@@ -45,8 +45,8 @@ def check(ctx, svc) -> Verdict | None:
     work, monitors = counted
     if work:
         return pushback(
-            f"バックグラウンドの作業が {work} 件残っているため、次のセグメントへ切り替えない（監視 {monitors} 件は数えない）。"
-            "終わるのを待ってから、次のセグメントのブロックを書いて終える",
+            f"バックグラウンドの作業が {work} 件残っているため、次のセグメントへ切り替えない（ほかに監視 {monitors} 件。監視は残っていてもよい）。"
+            "作業が終わるのを待ってから、次のセグメントのブロックをもう一度書いて応答を終える",
             notes,
         )
     wait = float(tables.policy_value("hook.counter-lock", "seconds"))
