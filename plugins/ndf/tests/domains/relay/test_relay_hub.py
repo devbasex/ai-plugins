@@ -1,4 +1,5 @@
-"""リレーハブ: 受付箱・起動の確かめ・再起動の順・バージョンの混ざり・待ちの一覧（#2563・#2583・#2753・3341-2・決定 86）。
+"""リレーハブ: 受付箱・起動の確かめ・再起動の順・バージョンの混ざり・待ちの一覧
+（#2563・#2583・#2753・3341-2・docs/specifications/ndf-rebuild.md の決定 86）。
 
 再起動は名前つきのラッパーの数だけで断り、1 日の起動の回数を持たない（#3864 の決定 13・I15）。
 
@@ -162,7 +163,7 @@ def test_missing_wrapper_location_says_how_to_recover(ctx):
 
 
 def test_restart_at_the_limit_goes_through_and_lists_pending_runs(ctx):
-    # 上限 2 で 2 本が動いているとき、そのうち 1 本の restart は通る（#2753）。待ちの一覧を載せる（決定 86）
+    # 上限 2 で 2 本が動くとき、そのうち 1 本の restart は通る（#2753）。待ちの一覧を載せる（docs/specifications/ndf-rebuild.md の決定 86）
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
     assert hub.submit(ctx, {"kind": "spawn", "name": "t2"}).ok
     assert hub.submit(ctx, {"kind": "spawn", "name": "t3"}).cause == "refused"
