@@ -51,19 +51,38 @@ def test_a_work_left_asks_for_a_change_counting_only_the_work(relay_child, tmp_p
     assert signals.read_next(relay_child) is None
 
 
-@pytest.mark.parametrize("tasks", [None, "x"], ids=["null", "text"])
-def test_an_unobserved_list_keeps_the_previous_record_and_writes_the_marker(relay_child, tmp_path, tasks):
-    ended(tmp_path, [SUBAGENT], "続ける")
-    assert ended(tmp_path, tasks) is None
-    assert busy(relay_child) == (1, 0, "stop") and signals.read_next(relay_child) is not None
+def unobserved(cwd, tasks):
+    """一覧を観測できなかった Stop（`tasks` が `absent` なら項目が無い）。"""
+    payload = stop(cwd, FENCE, session_id="s1", background_tasks=tasks)
+    if tasks == "absent":
+        del payload["background_tasks"]
+    return call_entry("claude", "Stop", payload)
 
 
-def test_a_stop_without_the_list_keeps_the_previous_record(relay_child, tmp_path):
+not_observed = pytest.mark.parametrize("tasks", [None, "x", "absent"], ids=["null", "text", "absent"])
+
+
+@not_observed
+def test_an_unobserved_list_keeps_the_record_and_holds_the_marker_while_a_work_remains(relay_child, tmp_path, tasks):
+    ended(tmp_path, [SUBAGENT, WATCH], "続ける")
+    assert "作業が 1 件" in unobserved(tmp_path, tasks)["reason"]
+    assert busy(relay_child) == (1, 1, "stop") and signals.read_next(relay_child) is None
+
+
+@not_observed
+@pytest.mark.parametrize("before", [[], [WATCH], None], ids=["no-work", "monitor", "no-record"])
+def test_an_unobserved_list_without_a_recorded_work_writes_the_marker(relay_child, tmp_path, tasks, before):
+    if before is not None:
+        ended(tmp_path, before, "続ける")
+    recorded = busy(relay_child)
+    assert unobserved(tmp_path, tasks) is None
+    assert busy(relay_child) == recorded and signals.read_next(relay_child) is not None
+
+
+def test_an_unobserved_list_without_the_launch_writes_the_marker(relay_child, tmp_path, monkeypatch):
     ended(tmp_path, [SUBAGENT], "続ける")
-    payload = stop(tmp_path, "続ける", session_id="s1")
-    del payload["background_tasks"]
-    call_entry("claude", "Stop", payload)
-    assert busy(relay_child) == (1, 0, "stop")
+    monkeypatch.delenv("NDF_RELAY_LAUNCH")
+    assert ended(tmp_path, None) is None and signals.read_next(relay_child) is not None
 
 
 @pytest.mark.parametrize("name, value", [("NDF_RELAY_SESSION", "s0"), ("NDF_HOOK_OFF", "relay-busy")], ids=["nested", "off"])
