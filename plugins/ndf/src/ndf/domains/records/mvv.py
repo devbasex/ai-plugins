@@ -365,7 +365,7 @@ def record_key(text: str) -> str:
 
 
 def record_review(
-    root: Path,
+    repo: str,
     pr: int,
     head: str,
     snapshot: Snapshot,
@@ -374,6 +374,7 @@ def record_review(
 ) -> int:
     """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書き、書いた件数を返す。
 
+    `repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
     自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
     `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
     書けなければ `OSError`・`MvvError`・`internal.InternalError`。
@@ -381,7 +382,7 @@ def record_review(
     found = md.judged_findings(rows, snapshot.identity)
     if not found:
         return 0
-    shared = {"at": jsonl.now(), "repo": repo_key(root), "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
+    shared = {"at": jsonl.now(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
     texts = [t for f in found for t in f.free_texts] if clean is not None else []
     shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
     keyed = [(record_key(str(f.row["text"])), f) for f in found]

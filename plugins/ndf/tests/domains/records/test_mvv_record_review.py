@@ -30,7 +30,6 @@ def _snapshot(version: int = 11, sha: str = "a") -> mvv.Snapshot:
 def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git_sandbox.isolate_git(tmp_path, monkeypatch)
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
-    monkeypatch.setattr(mvv, "repo_key", lambda at: str(tmp_path))
     return tmp_path
 
 
@@ -53,7 +52,7 @@ def _deferred(reason: Optional[str] = "範囲の外", **how: Any) -> dict[str, A
 def _record(root: Path, *rows: dict[str, Any], snap: Optional[mvv.Snapshot] = None, head: str = HEAD, clean: Any = list, pr: int = PR) -> int:
     """今の MVV で判定した指摘 `rows` を記録する。"""
     snap = snap if snap is not None else _snapshot()
-    return mvv.record_review(root, pr, head, snap, [{"judged_mvv": snap.identity, **r} for r in rows], clean)
+    return mvv.record_review(str(root), pr, head, snap, [{"judged_mvv": snap.identity, **r} for r in rows], clean)
 
 
 def _rows(kind: str) -> list[dict[str, Any]]:
@@ -104,7 +103,7 @@ def test_findings_judged_under_another_mvv_or_not_at_all_are_not_recorded(root: 
     other = {**_deferred(), "judged_mvv": _snapshot(10).identity}
     plain = {"id": "r1-9", "text": "普通の指摘", "outcome": "deferred", "reason": "範囲の外"}
     snap = _snapshot()
-    assert mvv.record_review(root, PR, HEAD, snap, [other, plain], list) == 0
+    assert mvv.record_review(str(root), PR, HEAD, snap, [other, plain], list) == 0
     assert _reviews() == [] and _signals() == []
 
 
