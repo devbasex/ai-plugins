@@ -213,11 +213,11 @@ def _emit_instead(obj: Any, count: int, stream: Optional[TextIO]) -> int:
     detail = "・".join([f"結果 JSON の形が違う（{count} 件）", *contracts.broken_rules(obj, SCHEMA)])
     tool = _safe_tool(obj)
     try:
-        instead = stopped(tool, "invalid", detail)
+        instead, code = stopped(tool, "invalid", detail), causes.exit_code("invalid")
     except (contracts.ContractError, ValueError):  # 停止理由の表が読めないか、種類が無い
         return emit_unchecked(tool, "invalid", detail)
     print(dumps_line(instead), file=stream or sys.stdout)
-    return causes.exit_code("invalid")
+    return code
 
 
 def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
