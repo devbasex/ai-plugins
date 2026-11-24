@@ -34,7 +34,7 @@
 - **不具合（#4409）はまだ直っていない。** 工程「Pull Request」の後に `ndf progress next` を打つと、続けて自動で流れる工程「確定仕様化」が、開いたままのスプリントの Pull Request をリリースの承認の前にマージすることがある。直るまでの避け方は次のとおりである
   1. 工程「Pull Request」が終わったら、`ndf progress next` を打たない
   2. 確定仕様の文書を自分で（または AI に頼んで）書き、スプリントのブランチへ push する。スプリントの Pull Request はマージしない
-  3. `ndf progress finish <ステートマシンの ID> 確定仕様化` を打って、工程を終えたことにする
+  3. `ndf progress finish <ステートマシンの ID> 確定仕様化 --reason "<理由>" --output <工程の出力の JSON>` を打って、工程を終えたことにする
 
 ## [ndf 11.0.32] - 2026-11-24
 
