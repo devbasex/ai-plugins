@@ -120,10 +120,6 @@ class Scope:
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
 
-    def _in_repo(self, path: Path) -> bool:
-        """シンボリックリンクを解いた先がリポジトリの中か。"""
-        return path.resolve().is_relative_to(self.repo_root.resolve())
-
     def repo_files(self, glob: str) -> list[Path]:
         """`repo_root` からの相対のグロブに当たるファイル（プラグインの外も引ける）。並びは昇順。
 
@@ -137,7 +133,7 @@ class Scope:
             matched = list(self.repo_root.glob(glob))
         except (ValueError, NotImplementedError) as exc:
             raise CheckError(f"グロブを解けない: {glob!r}: {exc}") from exc
-        return sorted(p for p in matched if p.is_file() and p.resolve().is_relative_to(root))
+        return sorted(p for p in matched if p.is_file() and _resolves_under(p, root))
 
     def repo_file(self, rel: str, label: str) -> Path:
         """`rel` に当たるただ 1 つのファイル。`repo_files` と同じ確かめをし、1 つに決まらなければ読む前に `CheckError`。"""
@@ -153,13 +149,14 @@ class Scope:
         """
         if top.is_relative_to(self.plugin_root):
             return [s for s in self.python() if s.path.is_relative_to(top)]
-        if not self._in_repo(top):
+        root = self.repo_root.resolve()
+        if not _resolves_under(top, root):
             return []
         found = [s for s in self.python() if s.path.is_relative_to(top)]
         for path in walk(top):
             if path.suffix != ".py" or path.is_relative_to(self.plugin_root):
                 continue
-            if self._in_repo(path) and path.is_file():
+            if _resolves_under(path, root) and path.is_file():
                 found.append(_parsed(Source(path, self.rel(path))))
         return found
 
@@ -224,6 +221,11 @@ def walk(top: Path) -> list[Path]:
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         found += [Path(parent, name) for name in files]
     return found
+
+
+def _resolves_under(path: Path, root: Path) -> bool:
+    """シンボリックリンクを解いた先が `root` の中か。`root` は解決済みで渡す（ファイルごとに解決し直さない）。"""
+    return path.resolve().is_relative_to(root)
 
 
 def _parsed(src: Source) -> Source:
