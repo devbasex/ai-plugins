@@ -23,6 +23,8 @@
 - 利用上限に当たったアカウントから別のアカウントへ子を切り替える仕組み（#3604・#3864）
 - バックグラウンドの作業と監視の分け方（#4049）
 
+**成果物の分け方。** この詳細設計の実装は、無効のまま入れる「実装の PR」である。`cache.rewake` の `versions` は空、`is_wake_input` は常に None のままマージし、どの子にも起こす hook を登録しない。設計の決定 7 の 11 の実測は、マージした実装を使って続きの「有効化の PR」で行い、そこで `is_wake_input` と `versions` を直す（設計の決定 7 の「一覧に載せる手順」）。
+
 **#4089（会話の記録の末尾を読む部品）との順序。** #4089 は未実装で、この実装の前でも後でもよい。
 
 - この実装が先のとき: 下の表の #4089 の部品（`src/ndf/adapters/transcript.py`）を、#4089 の詳細設計の「記録の読み手」のとおりにこの実装の中で作る。`read_tail` は `domains/hooks/context.py` から移して import に替える。呼び手（guard・ラッパー・`observe`）の置き換えは #4089 の実装に残す
@@ -123,7 +125,7 @@ plugins/ndf/
 | `last_turn` | `src/ndf/domains/relay/keep_cache.py` | 新設 | `last_turn(tail: str, last_message: Optional[str], started: float) -> TurnRead` | 今回の Stop の応答を末尾から読む。返す値は下の「`last_turn` の返し方」の表。ロックの外で動くので、状態を読まず、状態の寿命も受けない |
 | `wake_reply` | 同上 | 新設 | `wake_reply(tail: str, after_id: str) -> Reply` | `tail` は `last_turn` と同じ `read_tail` の文字列（読み直さない）。`after_id` の応答の直後にある最初の入力の行だけを見る（Tool の結果の行は入力に数えない）。起床の文の形（設計の決定 7 の実測 8 で決めた形を `is_wake_input` に閉じる）なら、その次から次の入力の手前（無ければ末尾）までの `assistant` の `message.id` をその起床の呼び出しとし、`Reply("wake", <最初の呼び出しの読み出し>, <全呼び出しの Usage>)`。最初の呼び出しの書き込みが両方 0 でも `wake` で返す。利用者の入力かバックグラウンドの作業の知らせの形なら、その先を探さずに `Reply("preempted", None, None)`。どちらとも決められないなら `Reply("unknown", None, None)`。`after_id` の応答が `tail` に無い（起床の後の大きな Tool の結果で、読み取りの上限の外へ押し出された）なら `Reply("truncated", None, None)`。`after_id` が `tail` に在れば、その後の行は末尾まで連続して `tail` に在るので、途中の呼び出しだけが欠けることは無い |
 | `opening` | 同上 | 新設 | `opening(tail: str, message_id: str) -> Opening` | `message_id` の応答を始めた入力（さかのぼって最初の、Tool の結果でない入力の行）と、その入力の直後の最初のモデル呼び出しを返す。`kind` はその入力に `is_wake_input` を当てた結果から `wake`（起床の文）・`normal`（通常の入力）・`unknown`（決められない・入力の行が `tail` に無い）。`normal` のときだけ `at`（入力の行の `timestamp` の UNIX 秒）と `first_read`（最初の呼び出しの読み出し）を持つ。`_settle` が待ちを終えるかと、`wait_end` の当たり・時刻を決めるのに使う。今回の応答の最後の呼び出しや Stop の時刻は使わない |
-| `is_wake_input` | 同上 | 新設 | `is_wake_input(line: Mapping[str, Any]) -> Optional[bool]` | 入力の行 1 つが起床の文なら真、通常の入力なら偽、決められなければ None。起床の文が会話の記録の入力の行にどう載るかは、まだ測っていない（設計の決定 7 の実測 8）。この関数はその形だけを知り、測るまでは常に None を返す。版の一覧（`cache.rewake` の `versions`）も測るまで空なので、この実装をマージしても、起こす hook はどの子にも登録されず、機能は働かない（今の振る舞いのまま）。実測 8 の後に、この関数と版の一覧を一緒に直す |
+| `is_wake_input` | 同上 | 新設 | `is_wake_input(line: Mapping[str, Any]) -> Optional[bool]` | 入力の行 1 つが起床の文なら真、通常の入力なら偽、決められなければ None。起床の文が会話の記録の入力の行にどう載るかは、まだ測っていない（設計の決定 7 の実測 8）。この関数はその形だけを知る。実装の PR では常に None を返し、版の一覧（`cache.rewake` の `versions`）も空のままマージする。そのため起こす hook はどの子にも登録されず、機能は働かない（今の振る舞いのまま）。この関数と版の一覧は、有効化の PR で一緒に直す（実測 8 を先に測り、その形でこの関数を直してから残りを測る。設計の決定 7 の「一覧に載せる手順」） |
 | `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から引数の `ttl` の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境。辞書でない・数でない値は `tables.TableError`。費用の式の分母（`n_max` の `r × S + d`）が正になるよう、書き込み・読み出し・出力の倍率（`ratios` の各値と `default`）が 0 以下か、`d`（`cache.wake-cost.count`）が 1 未満（スキーマの `count` と同じ下限）でも `tables.TableError`（hook は `tables.policy_value` で JSON のまま読み、スキーマの検査を通らない宣言も届き得るので、実行時にも拒む）。確かめる間隔（`cache.wake.interval`）が 0 以下か、1 回の眠りの確かめの回数 `ceil((TTL_SECONDS["1h"] − seconds) / interval)` が `MAX_CHECKS` を越えるか、余白（`cache.wake.seconds`）が 0 未満か 1 時間の寿命（`TTL_SECONDS["1h"]`）以上でも `tables.TableError`（スキーマの `interval`・`seconds` はほかの方針と共通で 0 を許すので、ここで拒む。`_wait` が休まずに世代を読み続けない） |
 | `wake_at` | 同上 | 新設 | `wake_at(at: float, ttl: str, wake_margin: float) -> Optional[float]` | `wake_margin` は起こす時点の余白（`cache.wake.seconds`）である。`ttl` が `1h` でなければ、余白によらず None（5 分の寿命は常に起こさない。設計の決定 2）。`1h` なら `at + TTL_SECONDS["1h"] − wake_margin`。`ttl` は `_settle` が補った寿命（未定のまま呼ばない）。余白の範囲（0 以上 1 時間未満）は `ratios` が確かめる。到達条件（`budget.rewake_reach`）は `3600 − 余白 + 確かめる間隔 + budget.margin ≤ timeout` である（`budget.margin` はバックグラウンドの hook の予算の余りの秒で、余白とは別の値）。既定の間隔 60・`budget.margin` 240・`timeout` 3,300 では、余白は 600 秒以上に限られる。それでも、5 分を除くのはこの関数の規則で、到達条件には頼らない |
 | `n_max` | 同上 | 新設 | `n_max(tokens: int, q: Ratios) -> int` | `floor((w − r) × S / (r × S + d))`。`S` は引数の `tokens`（待ちの始まりの応答の文脈の量）、`w`・`r`・`d` は `q` の値。0 未満にしない |
@@ -461,7 +463,7 @@ plugins/ndf/
 | `cache.output-ratio.json` | `{"default": 5}` | 同上 |
 | `cache.wake-cost.json` | `{"count": 2000}` | 同上 |
 | `cache.hit.json` | `{"ratio": 0.9}` | 同上 |
-| `cache.rewake.json` | `{"versions": []}`（実装の最初の実測の後に、通ったバージョンを一覧に書く。新しいバージョンは測り直して通ってから一覧に足す） | `ndf.domains.relay.wrapper` |
+| `cache.rewake.json` | `{"versions": []}`（実装の PR では空のまま。有効化の PR で、マージした実装で測って通ったバージョンを一覧に書く。新しいバージョンは測り直して通ってから一覧に足す。設計の決定 7 の「一覧に載せる手順」） | `ndf.domains.relay.wrapper` |
 | `hook.budget.stop-rewake.json` | 今の `hook.budget.*` の形で `timeout` 3,300 | `ndf.domains.hooks.budget`（`rewake_budget` の動的な読み口。`registration` は `rewake_budget` を呼ぶだけで方針を引かない） |
 
 `limits.schema.json` の方針の形と、`contracts/limits.py` の `Policy` に、次の項目を足す。
