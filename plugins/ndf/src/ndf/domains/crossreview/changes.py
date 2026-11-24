@@ -110,5 +110,5 @@ def sections(docs: dict[str, str]) -> list[str]:
 
 def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
     """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。改名を調べない（調べると部分クローンで前の本文が
-    要る。改名前のパスは HEAD に無く、セクションは同じになる）。"""
-    return sections(_docs(g, g.changed_files(base, "HEAD", "--no-renames"), root))
+    要る。改名前のパスは HEAD に無く、セクションは同じになる）。HEAD に無いパスは、ツリーを読まなくて済むように除く。"""
+    return sections(_docs(g, g.changed_files(base, "HEAD", "--no-renames", "--diff-filter=d"), root))

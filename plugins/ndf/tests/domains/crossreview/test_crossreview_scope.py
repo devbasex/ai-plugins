@@ -309,7 +309,7 @@ def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
 
 
 def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
-    """変わったセクションは改名を調べずに読む（調べると部分クローンで前の本文の取得が要る）。"""
+    """変わったセクションは改名を調べずに読み（調べると部分クローンで前の本文の取得が要る）、改名前と消えたパスを除く。"""
     from ndf.adapters import git
     from ndf.domains.crossreview import changes
 
@@ -321,7 +321,7 @@ def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
 
     assert changes.changed_sections(git.Git(tmp_path, runner), "b", tmp_path) == []
     [call] = calls
-    assert call[0] == "diff" and "--no-renames" in call
+    assert call[0] == "diff" and {"--no-renames", "--diff-filter=d"} <= set(call)
 
 
 def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path) -> None:
