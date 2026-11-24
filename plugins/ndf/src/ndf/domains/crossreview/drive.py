@@ -175,29 +175,22 @@ def _ingest_pending(run: _Run) -> None:
 
 
 def _resend(run: _Run, synced: worktree.SyncResult) -> None:
-    """前の起動が送れなかった修正のコミット（載せ直した自分のコミット）があれば送る。送れなければ記録して止める。"""
+    """前の起動が送れなかった修正のコミット（載せ直した自分のコミット）があれば送る。送れないか、
+    修正担当が作ったと確かめられないコミットが混ざっていれば、直したとした指摘を未解決へ戻して止める。"""
     fix = store.last_round(run.data).get("fix")
     if synced.replayed == 0 or not isinstance(fix, dict) or "pushed" in fix:
         return
-    if not (_made_commit(store.last_round(run.data), fix) or fixer.by_fixer(run, synced.after)):
-        # 修正担当はコミットを作っていない。載せ直したのは、利用者が手元に留めたコミットのことがある
-        return
+    if not fixer.sendable(run, synced.after):
+        fixer.keep_reported(run, synced)
     round_no = len(store.list_of(run.data, store.ROUNDS))
-    remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
-    sent = fixer.send_fix(run, round_no, remote, synced.after, fix, check_commit=False)
+    sent = fixer.send_fix(run, round_no, synced.after, fix, check_commit=False)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
         run.journal.restore_fixed(store.list_of(fix, "fixed"))
     _save(run)
     if not sent:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
-
-
-def _made_commit(last: Mapping[str, Any], fix: Mapping[str, Any]) -> bool:
-    """修正担当が、ラウンドでレビューした head より後のコミットを報告したか（短縮した SHA も受ける）。"""
-    commit = fix.get("commit")
-    return isinstance(commit, str) and commit != "" and not str(last.get("head")).startswith(commit)
 
 
 class _Prior(NamedTuple):
@@ -813,6 +806,11 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
+    if not fixer.sendable(run, prep.head):
+        # 修正を重ねても、手元に留めたコミットごとでなければ送れない。修正担当を起動せずに止める
+        record["verdict"] = fin.ERROR
+        fixer.hold_back(run, round_no)
+        return fin.ERROR
     _save(run)
     fix = fixer.run_fixer(run, round_no, open_, handed, launch)
     head = run.g.rev_parse("HEAD")
@@ -824,7 +822,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["fix"] = fix
     _save(run)
     fixer.consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if fixer.send_fix(run, round_no, prep.head, head, fix) else fin.ERROR
+    return None if fixer.send_fix(run, round_no, head, fix) else fin.ERROR
 
 
 def _reusable(run: _Run) -> bool:

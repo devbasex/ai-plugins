@@ -32,10 +32,10 @@ MISSING = "前の会話が見つからない"
 UNSAVED = "会話を保存しない設定"
 # 修正担当が会話を続けるときの文脈の窓の手前の余白（#4013）
 RESUME_MARGIN = "cross-review.fixer.resume-margin"
-# 未送信のコミットを送らなかった注意（PR へ載るので、コミットの中身を入れない）
-HELD_BACK = (
-    "修正担当が新しいコミットを作らず、手元の未送信のコミットは修正担当が作ったと確かめられないので送っていない（送るか外して打ち直す）"
-)
+# 未送信のコミットがあるので修正を始めない・送らない注意（PR へ載るので、コミットの中身を入れない）
+HELD_BACK = "手元の未送信のコミットを修正担当が作ったと確かめられないので、修正を始めず、送りもしない（PR へ送るか外して打ち直す）"
+# 修正担当が報告したコミットを HEAD と比べるときの、短縮した SHA の最小の長さ
+SHORT_SHA = 7
 
 # 担当の起動（テストは偽物に差し替える）
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
@@ -224,11 +224,28 @@ def keep_unsent(run: FixRun, reviewed_head: str, head: str) -> None:
 
 def keep_replayed(run: FixRun, synced: worktree.SyncResult) -> bool:
     """前の起動の修正担当が残したコミットの範囲を、同期で載せ直した後の範囲へ移す（変わったら真。保存は呼び手）。その後に
-    別のコミットが足された・範囲の起点が PR のブランチから外れた（載せ直しに、修正担当の作っていないコミットが混ざる）なら捨てる。"""
+    別のコミットが足されたか、範囲の起点が PR のブランチから外れたなら捨てる。"""
     held = run.data.pop(store.UNSENT_FIX, None)
-    if synced.replayed and _is_head(held, synced.before) and _in_remote(run, held["base"], synced.remote):
-        run.data[store.UNSENT_FIX] = {"base": synced.remote, "head": synced.after}
+    if _is_head(held, synced.before):
+        _move(run, held["base"], synced)
     return bool(held != run.data.get(store.UNSENT_FIX))
+
+
+def keep_reported(run: FixRun, synced: worktree.SyncResult) -> None:
+    """駆動が落ちて範囲を残せなかった修正（結果ファイルからマージしたもの）の範囲を、同期で載せ直した後の範囲として置く。
+    起点はラウンドの head で、報告されたコミットが同期の前の HEAD と同じときだけ置く（その後に別のコミットが足されていない）。"""
+    last = store.last_round(run.data)
+    fix, base = last.get("fix"), last.get("head")
+    commit = fix.get("commit") if isinstance(fix, dict) else None
+    if isinstance(base, str) and isinstance(commit, str) and len(commit) >= SHORT_SHA and synced.before.startswith(commit):
+        _move(run, base, synced)
+
+
+def _move(run: FixRun, base: str, synced: worktree.SyncResult) -> None:
+    """`base` からの修正担当のコミットの範囲を、載せ直した後の範囲として置く。`base` が PR のブランチに無ければ、載せ直しに
+    修正担当の作っていないコミットが混ざるので置かない。"""
+    if synced.replayed and _in_remote(run, base, synced.remote):
+        run.data[store.UNSENT_FIX] = {"base": synced.remote, "head": synced.after}
 
 
 def _is_head(held: Any, head: str) -> bool:
@@ -243,19 +260,27 @@ def _in_remote(run: FixRun, base: str, remote: str) -> bool:
         return False
 
 
-def by_fixer(run: FixRun, head: str) -> bool:
-    """`head` までの未送信のコミットが、すべて修正担当の作ったものと確かめられるか。"""
-    return _is_head(run.data.get(store.UNSENT_FIX), head)
+def sendable(run: FixRun, head: str) -> bool:
+    """`head` までに未送信のコミットが無いか、すべて修正担当の作ったものと確かめられるか。"""
+    return head == run.sent or _is_head(run.data.get(store.UNSENT_FIX), head)
 
 
-def send_fix(run: FixRun, round_no: int, reviewed_head: str, head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
-    """作業場所の `head` にある修正のコミットを送る。新しいコミットが無ければ、前の起動の修正担当が残したと確かめられるコミットだけを
-    送る（利用者が手元に留めたコミットを公開しない）。送れなければ、このラウンドで直したとした指摘を未解決へ戻し
-    （PR に届いていない）、注意に載せて False。"""
-    if head == reviewed_head == run.sent:
+def hold_back(run: FixRun, round_no: int) -> None:
+    """修正担当が作ったと確かめられない未送信のコミットを、利用者が手元に留めたものとして残し、注意に載せる。"""
+    run.note(round_no, "push", "送らない（修正担当のコミットと確かめられない）", HELD_BACK)
+
+
+def send_fix(run: FixRun, round_no: int, head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
+    """作業場所の `head` までの修正のコミットを送る（`head` が PR に届いていれば送らない）。送る範囲のすべてを修正担当が作ったと
+    確かめられなければ送らない（利用者が手元に留めたコミットを公開しない）。送らない・送れないときは、このラウンドで直したとした指摘を
+    未解決へ戻し（PR に届いていない）、注意に載せて False。"""
+    if head == run.sent:
+        fix["pushed"] = head
         return True
-    if head == reviewed_head and not by_fixer(run, head):
-        return _hold_back(run, round_no, fix)
+    if not sendable(run, head):
+        run.journal.reopen(store.list_of(fix, "fixed"))
+        hold_back(run, round_no)
+        return False
     commit = fix.get("commit") if check_commit and isinstance(fix.get("commit"), str) else None
     sent = push.push_fix(run.g, run.cfg.branch, commit)
     if sent.ok:
@@ -263,16 +288,10 @@ def send_fix(run: FixRun, round_no: int, reviewed_head: str, head: str, fix: dic
         run.sent = str(sent.head)
         run.data.pop(store.UNSENT_FIX, None)
         return True
+    if sent.rebased and sent.origin_head is not None and sent.head is not None:
+        # 載せ直した後に拒まれた。HEAD が変わったので、次の起動が確かめる範囲も移す
+        run.data[store.UNSENT_FIX] = {"base": sent.origin_head, "head": sent.head}
     run.journal.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     run.note(round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
-
-
-def _hold_back(run: FixRun, round_no: int, fix: dict[str, Any]) -> bool:
-    """修正担当が作ったと確かめられない未送信のコミットを送らずに残し、注意に載せる。直したとした指摘があれば、PR に届いたと
-    言えないので未解決へ戻して False。"""
-    fixed = store.list_of(fix, "fixed")
-    run.journal.reopen(fixed)
-    run.note(round_no, "push", "送らない（修正担当のコミットと確かめられない）", None if HELD_BACK in run.warnings else HELD_BACK)
-    return not fixed
