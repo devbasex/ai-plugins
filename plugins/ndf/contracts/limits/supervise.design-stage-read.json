@@ -1,7 +1,0 @@
-{
-  "summary": "設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち",
-  "seconds": 120,
-  "per_call": 30,
-  "interval": 15,
-  "same_cause": 3
-}

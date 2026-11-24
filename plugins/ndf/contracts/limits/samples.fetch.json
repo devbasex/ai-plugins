@@ -5,5 +5,8 @@
   "max_bytes": 67108864,
   "peers": {
     "github": 2
-  }
+  },
+  "read_by": [
+    "ndf.domains.samples.verify"
+  ]
 }

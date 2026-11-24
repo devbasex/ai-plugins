@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "stage-snapshot.schema.json",
+  "title": "工程の定義のスナップショット",
+  "description": "ステートマシンの定義の改訂の文書。書き手は ndf progress new（ndf.progress.command）、読み手は ndf.progress.command の read_current",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "mode", "definition_version", "sha256", "height", "stages", "context", "enablement"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "文書の形のバージョン"},
+    "mode": {"type": "string", "minLength": 1, "description": "モードの名前（開発ループの行は loop）"},
+    "definition_version": {"type": "string", "minLength": 1, "description": "モードの定義の文書のバージョン"},
+    "sha256": {"type": "string", "description": "モードの定義と工程の定義の指紋（開発ループの行は空）"},
+    "height": {"type": "integer", "minimum": 0, "description": "モードの重さの順"},
+    "stages": {"type": "array", "items": {"$ref": "#/$defs/stage"}, "description": "工程の定義（並びの順）"},
+    "context": {"type": "object", "description": "作成の時点の文脈（形は workflow/context.schema.json で、内部データの種類 context として読む）"},
+    "enablement": {"type": "object", "additionalProperties": {"$ref": "#/$defs/enablement"}, "description": "工程の名前 → 有効と無効"}
+  },
+  "$defs": {
+    "keys": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "optional_text": {"type": ["string", "null"], "minLength": 1},
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "phase", "steps"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "phase": {"type": "string", "minLength": 1},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "when": {"$ref": "#/$defs/keys"},
+        "per_issue": {"type": "boolean"},
+        "inputs": {"$ref": "#/$defs/keys"},
+        "outputs": {"$ref": "#/$defs/keys"},
+        "optional_inputs": {"$ref": "#/$defs/keys"},
+        "input_ref": {"$ref": "#/$defs/optional_text"},
+        "output_ref": {"$ref": "#/$defs/optional_text"}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "call", "kind", "range"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "call": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "range": {"type": "string", "minLength": 1},
+        "subject": {"$ref": "#/$defs/optional_text"},
+        "gate": {"$ref": "#/$defs/optional_text"},
+        "args": {"type": "object"},
+        "output_ref": {"$ref": "#/$defs/optional_text"}
+      }
+    },
+    "enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "reason", "source"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]},
+        "source": {"enum": ["definition", "project", "sprint"]}
+      }
+    }
+  }
+}

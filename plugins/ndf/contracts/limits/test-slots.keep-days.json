@@ -1,0 +1,7 @@
+{
+  "summary": "テストのスロットの記録の行を残す日数（I11）",
+  "count": 30,
+  "read_by": [
+    "ndf.testing.records"
+  ]
+}

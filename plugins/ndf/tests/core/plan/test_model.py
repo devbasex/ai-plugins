@@ -15,7 +15,7 @@ def test_parse_reads_the_plan():
     plan = model.parse({**_raw(on_cause={"test_failed": "b"}, retry={"ci_pending": {"attempts": 1}}), "touches": ["src/"]})
     assert plan.order == ("a", "b")
     assert plan.touches == ("src/",)
-    assert plan.limit == 2 * model.LIMIT_PER_STEP
+    assert plan.limit == 2 * model.limit_per_step()
     assert plan.step("a").retry["ci_pending"].attempts == 1
     assert plan.following("a") == "b"
     assert plan.following("b") is None

@@ -1,4 +1,7 @@
 {
   "summary": "同じファイルの同じ範囲を読むのを許す回数。超えたら拒否する（拒否の繰り返しは hook.deny-repeat が案内へ下げる）",
-  "attempts": 2
+  "attempts": 2,
+  "read_by": [
+    "ndf.domains.hooks.guards.read_repeat"
+  ]
 }

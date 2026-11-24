@@ -132,7 +132,7 @@ def test_table_keeps_every_kind_and_representative_row():
 
 def _retry_kind(retry_contracts, **values) -> None:
     """種類 ci_pending の打ち直しの方針を `values` だけにする（プラグインの上限の値に寄らない）。"""
-    retry_contracts("limits/cause.ci-pending.json", lambda _: {"summary": "s", **values})
+    retry_contracts("limits/cause.ci-pending.json", lambda _: {"summary": "s", "read_by": ["ndf.a"], **values})
 
 
 @pytest.mark.parametrize(

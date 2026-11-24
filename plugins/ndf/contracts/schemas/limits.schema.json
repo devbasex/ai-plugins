@@ -4,14 +4,36 @@
   "title": "上限の設定の方針 1 つ",
   "description": "contracts/limits/<方針の名前>.json の形（説明と値）。ファイル名（拡張子 .json を除く）が方針の名前で、名前の形は $defs の name。同じキーの重なりは読み手（ndf.contracts.limits）が断る",
   "$defs": {
-    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"}
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"},
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoints", "ancestors", "cli_exe", "script_hosts", "flags", "keys", "env_names"],
+      "description": "送信先が同じかの確かめの値（hook.stop-wait.judge）。contains は、欠けると違う送信先を見落とす値（足してよいが外せない）",
+      "properties": {
+        "entrypoints": {"type": "array", "items": {"type": "string"}},
+        "ancestors": {"type": "integer", "minimum": 1},
+        "cli_exe": {"type": "array", "items": {"type": "string", "pattern": "^[^?\\[\\]]*/claude/versions/[^/?\\[\\]]+$"}, "description": "Claude Code の実行ファイルのパターン。導入先のディレクトリ /claude/versions/ を字のとおりに持つものだけ"},
+        "script_hosts": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "node*"}}]},
+        "flags": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "--settings"}}, {"contains": {"const": "--setting-sources"}}]},
+        "keys": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "awsAuthRefresh"}}, {"contains": {"const": "awsCredentialExport"}}, {"contains": {"const": "gcpAuthRefresh"}}]},
+        "env_names": {"type": "array", "items": {"type": "string", "minLength": 1}, "allOf": [{"contains": {"const": "ANTHROPIC_"}}, {"contains": {"const": "CLAUDE_CODE_USE_"}}, {"contains": {"const": "CLAUDE_CODE_SKIP_"}}, {"contains": {"const": "CLAUDE_CONFIG_DIR"}}, {"contains": {"const": "CLAUDE_CODE_OAUTH_TOKEN"}}, {"contains": {"const": "CLAUDE_CODE_OAUTH_SCOPES"}}, {"contains": {"const": "AWS_"}}, {"contains": {"const": "GOOGLE_"}}, {"contains": {"const": "CLOUD_ML_"}}, {"contains": {"const": "VERTEX_"}}, {"contains": {"const": "HTTPS_PROXY"}}, {"contains": {"const": "HTTP_PROXY"}}, {"contains": {"const": "ALL_PROXY"}}, {"contains": {"const": "NO_PROXY"}}, {"contains": {"const": "https_proxy"}}, {"contains": {"const": "http_proxy"}}, {"contains": {"const": "all_proxy"}}, {"contains": {"const": "no_proxy"}}, {"contains": {"const": "NODE_EXTRA_CA_CERTS"}}]}
+      }
+    }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary"],
-  "minProperties": 2,
+  "required": ["summary", "read_by"],
+  "minProperties": 3,
   "properties": {
     "summary": {"type": "string", "pattern": "\\S"},
+    "read_by": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^ndf(\\.[a-z_][a-z0-9_]*)+$"},
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "読み手の指定: この方針を引くモジュールの名前。実際の読み手との食い違いは規則 limit-readers が落とす"
+    },
     "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
     "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
     "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
@@ -45,20 +67,6 @@
     },
     "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
     "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
-    "endpoint": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["entrypoints", "ancestors", "cli_exe", "script_hosts", "flags", "keys", "env_names"],
-      "description": "送信先が同じかの確かめの値（hook.stop-wait.judge）",
-      "properties": {
-        "entrypoints": {"type": "array", "items": {"type": "string"}},
-        "ancestors": {"type": "integer", "minimum": 1},
-        "cli_exe": {"type": "array", "items": {"type": "string"}},
-        "script_hosts": {"type": "array", "items": {"type": "string"}},
-        "flags": {"type": "array", "items": {"type": "string"}},
-        "keys": {"type": "array", "items": {"type": "string"}},
-        "env_names": {"type": "array", "items": {"type": "string"}}
-      }
-    }
+    "endpoint": {"$ref": "#/$defs/endpoint"}
   }
 }

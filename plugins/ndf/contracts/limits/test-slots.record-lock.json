@@ -1,0 +1,7 @@
+{
+  "summary": "テストのスロットの記録と停止の時刻のロックを待つ上限の秒",
+  "seconds": 10,
+  "read_by": [
+    "ndf.testing.records"
+  ]
+}

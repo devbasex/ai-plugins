@@ -139,15 +139,15 @@ def test_output_that_breaks_the_contract_is_caught():
     stage = definition.load_definition("standard").stage("デプロイ")
     assert (
         definition.validate_stage_output(
-            stage, {"steps": [], "summary": "出した", "outputs": {"delivery": DELIVERY, "version": "1.2.3", "mvv_gate": MVV_GATE}}
+            stage, {"steps": [], "summary": "出した", "outputs": {"delivery": DELIVERY, "product_version": "1.2.3", "mvv_gate": MVV_GATE}}
         )
         == []
     )
-    bad = {"steps": [], "summary": "出した", "outputs": {"delivery": {**DELIVERY, "channel": "prod"}, "version": "1.2.3"}}
+    bad = {"steps": [], "summary": "出した", "outputs": {"delivery": {**DELIVERY, "channel": "prod"}, "product_version": "1.2.3"}}
     assert any("delivery/channel" in e for e in definition.validate_stage_output(stage, bad))
-    errs = definition.validate_stage_output(stage, {"steps": [], "outputs": {"version": 3}})
+    errs = definition.validate_stage_output(stage, {"steps": [], "outputs": {"product_version": 3}})
     assert any("summary" in e for e in errs)
-    assert any("version" in e for e in errs)
+    assert any("product_version" in e for e in errs)
     assert any("delivery" in e for e in errs)
 
 
@@ -170,7 +170,7 @@ def test_context_source_is_none_without_x_source_or_outside_the_schema(key):
 
 def test_missing_key_line_carries_the_source_only_when_the_key_has_one():
     stage = definition.load_definition("standard").stage("デプロイ")
-    errs = definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"version": "1.2.3"}})
+    errs = definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"product_version": "1.2.3"}})
     assert f"outputs: 文脈のキー delivery が無い（取り場所: {definition.context_source('delivery')}）" in errs
     design = definition.load_definition("standard").stage("設計")
     assert "outputs: 文脈のキー design_pr が無い" in definition.validate_stage_output(design, {"steps": [], "summary": "x"})
@@ -328,10 +328,12 @@ def test_context_schema_holds_the_closed_vocabulary():
         "pr",
         "delivery",
         "version",
+        "product_version",
         "release_pr",
         "gathered",
     }
-    assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
+    modes = [m for name in ("mvv_mode", "gated_mode") for m in contracts.schema_enum(definition.CONTEXT, f"/$defs/{name}")]
+    assert sorted(modes) == sorted(definition.modes())
 
 
 def test_snapshot_round_trips_through_json():

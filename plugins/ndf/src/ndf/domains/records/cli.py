@@ -120,9 +120,11 @@ def _handoff(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 def _usage_stop(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     payload = _stdin_json()
-    row = usage.record_subagent(payload if isinstance(payload, dict) else {})
+    warnings: list[dict[str, Any]] = []
+    row = usage.record_subagent(payload if isinstance(payload, dict) else {}, warnings=warnings)
     # hook を落とさない（書けなかった理由は標準エラーへ出した）
-    return result.result(TOOL, result.OK, "使用量の使用量ログへ書いた" if row else "使用量の使用量ログへ書かなかった", [row] if row else [])
+    summary = "使用量の使用量ログへ書いた" if row else "使用量の使用量ログへ書かなかった"
+    return result.result(TOOL, result.OK, summary, ([row] if row else []) + warnings)
 
 
 def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -136,13 +138,14 @@ def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 
 def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    warnings: list[dict[str, Any]] = []
     try:
-        s = mvv.signals(root, args.base)
+        s = mvv.signals(root, args.base, warnings=warnings)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
     item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revision_due"}
     summary = "MVV の改訂を提案する兆候がある" if s.revision_due else "MVV の改訂の兆候は閾値に届かない"
-    return result.result(TOOL, result.OK, summary, [item], {"revision_due": s.revision_due})
+    return result.result(TOOL, result.OK, summary, [item, *warnings], {"revision_due": s.revision_due})
 
 
 def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -161,9 +164,10 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     inputs = invoke.stage_inputs(os.environ)
     if inputs is None:
         return result.stopped(TOOL, "invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object）が無い")
-    out = mvv_gate.gate(root, args.gate, inputs, _hub)
+    warnings: list[dict[str, Any]] = []
+    out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
-    return result.result(TOOL, result.OK, summary, outputs={model.MVV_KEY: out})
+    return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
 
 
 def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:

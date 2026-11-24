@@ -281,9 +281,11 @@ def _closing_events(lap: rec.Lap, facts: lap_decide.LapFacts, now: float) -> lis
     結果は記録のバージョンと、ここで残すバージョンを合わせて決める。
     """
     shipped = [
-        rec.event(rec.VERSION_SHIPPED, now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released
+        rec.event(rec.VERSION_SHIPPED, now, lap=lap.number, product_version=v)
+        for v in dict.fromkeys(facts.released)
+        if v not in lap.released
     ]
-    closing, _, _ = _close_event(lap, replace(facts, released=(*lap.released, *(e["version"] for e in shipped))), now)
+    closing, _, _ = _close_event(lap, replace(facts, released=(*lap.released, *(e["product_version"] for e in shipped))), now)
     return [*shipped, closing]
 
 
@@ -318,7 +320,7 @@ def released(state: rec.LoopState, c: Ctx, version: str) -> Decision:
     if refusal is not None:
         return refusal
     assert lap is not None
-    ev = rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, version=version)
+    ev = rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, product_version=version)
     return Decision(f"周 {lap.number} のリリース {version} を記録した", (ev,))
 
 

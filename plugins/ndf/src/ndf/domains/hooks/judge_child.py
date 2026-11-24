@@ -26,11 +26,14 @@ from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional, S
 from ndf import contracts
 from ndf.adapters import claude
 from ndf.contracts import facts, limits
-from ndf.domains.hooks import reply_judge
+from ndf.domains.hooks import reply_judge, tables
 from ndf.domains.relay import account_dir, claude_args
 
 # 判定の設定の方針の名前（`contracts/limits/`）
 POLICY = "hook.stop-wait.judge"
+# 送信先の確かめの値のキーと、その形（上限の設定のスキーマの 1 部分）
+ENDPOINT = "endpoint"
+ENDPOINT_SCHEMA = f"{limits.SCHEMA}#/$defs/endpoint"
 # 判定の例の組（`contracts/` からの相対）
 CASES = "hooks/reply-judge-cases.json"
 # 相対パスなら送信先を確かめられないとみなす設定ディレクトリの変数（判定用の `claude` はセッションと違う
@@ -78,12 +81,17 @@ class JudgeRefused(RuntimeError):
 def setting(key: str) -> Any:
     """判定の設定（`contracts/limits/hook.stop-wait.judge.json`）の 1 つの値。
 
-    方針の項目を `ndf.contracts` から読む関数はここ 1 つで、値をこのモジュールへコピーしない。
+    方針の行を読む口はここ 1 つで、値をこのモジュールへ写さない。hook と同じ表の読み（1 プロセスに 1 回・全方針の
+    スキーマの検証なし）を通し、Stop のたびに検証の時間を足さない。送信先の確かめの値だけは、形の誤りで確かめが緩まないように
+    スキーマの 1 部分で形と必須の値を確かめる（スキーマ自体は CI が確かめる。合わなければ `JudgeSettingError` で、判定を起動しない）。
     """
-    row = contracts.load_as(f"{limits.NDF_SETTINGS}/{POLICY}.json", JudgeSettingError)
-    if not isinstance(row, dict) or key not in row:
-        raise JudgeSettingError(f"上限の設定の方針 {POLICY} に {key} が無い")
-    return row[key]
+    try:
+        got = tables.policy_value(POLICY, key)
+    except tables.TableError as exc:
+        raise JudgeSettingError(str(exc)) from exc
+    if key == ENDPOINT:
+        contracts.require_shipped(got, ENDPOINT_SCHEMA, JudgeSettingError, f"判定の設定 {POLICY} の {ENDPOINT}")
+    return got
 
 
 def cases_path() -> Path:
@@ -107,7 +115,7 @@ def endpoint_refusal(
     相対パスの設定ディレクトリ（`RELATIVE_REFUSED`）は、セッションと判定用の `claude` の作業ディレクトリが違うと
     別のディレクトリに解けるので、同じ送信先と確かめられないとみなす。
     """
-    endpoint = setting("endpoint")
+    endpoint = setting(ENDPOINT)
     names = {name for name, _ in claude_args.options(list(parent_argv)[1:])}
     flagged = next((f for f in endpoint["flags"] if f in names), None)
     if flagged is not None:

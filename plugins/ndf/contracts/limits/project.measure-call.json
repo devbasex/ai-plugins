@@ -1,0 +1,7 @@
+{
+  "summary": "プロジェクトの設定の測定で打つ git・gh の 1 回の上限の秒（測定の締め切りの残りが短ければそちら）",
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.project.measure_repo"
+  ]
+}

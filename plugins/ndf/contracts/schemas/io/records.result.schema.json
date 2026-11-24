@@ -55,12 +55,18 @@
             "description": "意味の説明に残った廃止した語（glossary meanings）"
           },
           "lines": {
-            "type": "integer",
-            "description": "文脈の文書の行の数（glossary render が上限で止まったとき）"
+            "type": [
+              "integer",
+              "array"
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "description": "文脈の文書の行の数（glossary render が上限で止まったとき）か、読めずに除いた記録の行番号の並び（usage stop・mvv signals・mvv gate の broken_rows）"
           },
           "path": {
             "type": "string",
-            "description": "書いた・今と違うファイルか、コミットに入れるパス（glossary render・spec）"
+            "description": "書いた・今と違うファイルか、コミットに入れるパス（glossary render・spec）か、読めない行のある記録のパス（usage stop・mvv signals・mvv gate）"
           },
           "reason": {
             "type": "string",
@@ -128,12 +134,16 @@
             "type": "integer",
             "description": "期間に閉じた課題の数（usage report）"
           },
-          "version": {
+          "mvv_version": {
             "type": [
               "integer",
               "null"
             ],
             "description": "MVV の設定のバージョン（mvv signals・mvv answer）"
+          },
+          "version": {
+            "type": "integer",
+            "description": "記録の行の形のバージョン（usage stop・mvv answer）"
           },
           "overrides": {
             "type": "integer",
@@ -149,7 +159,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "改訂の兆候の種類（mvv answer）"
+            "description": "改訂の兆候の種類（mvv answer）か、記録に読めない行があること（broken_rows。usage stop・mvv signals・mvv gate）"
           },
           "repo": {
             "type": "string",

@@ -100,7 +100,7 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | アプリの版 | `format-<FORMAT>-<キーの名前>`。NDF の版が上がっても途中の実行を回復する（`ndf-rebuild.md` の決定 84） |
 | DBOS の読み込み | 起動するか記録を読むときに初めて import する（`_load`）。`workflow`・`step` のデコレータは `_Deferred` が覚え、`launch` の前に当てる |
 | 秘密 | 秘密は耐久ワークフローの入力・耐久化するステップの結果・メッセージに入れず、要るステップの中で環境変数から読む。serializer（`_RedactingSerializer`）は記録へ書く前の安全網で、伏せるのは文字列（秘密の環境変数の値とトークンの形。`ndf.adapters.run_log.redact` の文字列の規則）と、辞書の値・配列・タプル（名前つきタプルを含む）・例外の引数と属性の中の文字列だけである。辞書のキー・バイト列・集合・dataclass などほかの型の値は伏せずにそのまま書く。伏せるのは記録だけで、流れている呼び出しには元の値が渡るが、回復で記録から読んだ値は伏せた後の値になる。伏せた値を認証に使わない |
-| 片付け | 終わったキーのファイルは `dbos/retired/`、壊れたファイルは `dbos/broken/` へ移し、`KEEP_DAYS` で消す |
+| 片付け | 終わったキーのファイルは `dbos/retired/`、壊れたファイルは `dbos/broken/` へ移し、上限の設定の `durable.keep`（14 日）で消す |
 | 使う層 | 耐久ワークフローは `plan_workflow`（`ndf.core.plan.runner`）と `lanes_workflow`（`ndf.progress.plan.run`）。打ち直しの待ちと承認の回答の待ちは `durable.recv` |
 
 ### 常に成り立つ条件
@@ -110,7 +110,7 @@ NDF の作り直し（#1142）のうち、汎用の処理を外部ライブラ�
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I16 | `dbos` を import するのは `ndf.core.durable` だけで、ほかのモジュールは殻の関数とデコレータだけを使う | `ndf check` の `durable-boundary` が落とす（`plugins/ndf/src/ndf/checks/rules.json` の `structure.durable_module`・`durable_imports`） |
-| I17 | 1 つの SQLite の記録のファイルを開くプロセスは同時に 1 つだけで、`executor_id` は実行のキーの名前と同じ。作り直しの I5・I6 が同じ条件を記録の分け方の側から持つ | 2 つ目の起動は `run_lock` を `LOCK_WAIT_SECONDS`（300 秒）まで待ち、取れなければオーナー（ホスト・pid・時刻）を添えて `StoreInUse` で止まる |
+| I17 | 1 つの SQLite の記録のファイルを開くプロセスは同時に 1 つだけで、`executor_id` は実行のキーの名前と同じ。作り直しの I5・I6 が同じ条件を記録の分け方の側から持つ | 2 つ目の起動は `run_lock` を上限の設定の `durable.lock-wait`（300 秒）まで待ち、取れなければオーナー（ホスト・pid・時刻）を添えて `StoreInUse` で止まる |
 | I18 | 耐久ワークフローの中の DBOS の呼び出しの順序は、形の番号（`durable.FORMAT`）が同じ間は変えない。変えたら形の番号を上げる | 耐久ワークフローの関数のソースの sha256 と `FORMAT_SOURCE_HASH` を比べるテストが落とす。形の番号の違う記録の扱いは `ndf-rebuild.md` の決定 84 と I7 |
 | I20 | 同じキューの同じステップで、`触るファイル` が同じファイルを持つ 2 本は同時に流れない。`触るファイル` の無いプランはすべてのプランと重なるものとして扱う。`/` で終わる値（ディレクトリ）は重なりに数えない | キューの判断（`ndf.core.plan.queue_decide`）が組を分け、後の組を前の組の後に流す |
 

@@ -1,4 +1,7 @@
 {
   "summary": "計画を進める耐久ワークフローが計画とレーンのステートマシンを読み直す間隔（NDF_PARALLEL_POLL で秒を変えられる）",
-  "interval": 60
+  "interval": 60,
+  "read_by": [
+    "ndf.progress.plan.run"
+  ]
 }

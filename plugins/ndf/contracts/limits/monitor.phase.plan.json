@@ -1,4 +1,7 @@
 {
   "summary": "cross-refactoring の計画の工程の監視の上限。提案と同じ桁",
-  "seconds": 1200
+  "seconds": 1200,
+  "read_by": [
+    "ndf.domains.crossrefactor.launch"
+  ]
 }

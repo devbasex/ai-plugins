@@ -8,7 +8,7 @@
 起動は判断の権限（`claude.Permission.JUDGE`。Tool を使わせない）で行う（#3364）。
 
 claude を起動できない・期限を超えた・利用上限・学習の設定のスナップショットが無い・重い起動のスロットが空かないは、打ち直しても直らないので打ち直さず、それぞれの停止理由
-（`FAILURE_CAUSES`）で返す（#3394）。どの理由で止まるかと回答の形はこのモジュールが決め、呼び手の LLM に決めさせない。
+（表 `claude-failures` の `judge_cause`）で返す（#3394）。どの理由で止まるかと回答の形はこのモジュールが決め、呼び手の LLM に決めさせない。
 """
 
 from __future__ import annotations
@@ -22,20 +22,12 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ndf.adapters import claude, run_log
-from ndf.contracts import causes
+from ndf.contracts import causes, facts
 
 # 打つ回数（最初の 1 回を含む）。上限の設定ではなく決定 60 で固定した回数
 ATTEMPTS = 2
 # needs_human の説明に載せる、回答の先頭の字数
 ANSWER_HEAD = 200
-# 打ち直さない失敗の、停止理由の種類（`contracts/causes/`）
-FAILURE_CAUSES: dict[claude.Failure, str] = {
-    claude.Failure.LAUNCH: "precondition",
-    claude.Failure.TIMEOUT: "interrupted",
-    claude.Failure.USAGE_LIMIT: "usage_limit",
-    claude.Failure.REFUSED: "precondition",
-    claude.Failure.NO_SLOT: "infra_wait",
-}
 SYSTEM = "あなたは判断の呼び出しに回答する。渡したスキーマに合う JSON だけを返す。前置きや説明の文を足さない。"
 
 # 選択肢のモードの回答の形。`decision` の `enum` は呼ぶときに選択肢で埋める
@@ -62,7 +54,7 @@ class AnswerSchemaError(Exception):
 class JudgeAnswer(NamedTuple):
     """判断の呼び出しの結果。`ok` が真なら `answer` はスキーマに合う。
 
-    偽なら `cause` の種類は、回答が 2 回とも合わなければ `needs_human`、打ち直さない失敗なら `FAILURE_CAUSES` の値。
+    偽なら `cause` の種類は、回答が 2 回とも合わなければ `needs_human`、打ち直さない失敗なら表 `claude-failures` の `judge_cause`。
     """
 
     ok: bool
@@ -125,7 +117,7 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
         cost += reply.cost
         if reply.failure is not None:
             run_log.record("judge", attempts=attempt, valid=False, cost=cost, failure=str(reply.failure))
-            kind = FAILURE_CAUSES[reply.failure]
+            kind = facts.value(claude.FAILURES, reply.failure, "judge_cause")
             return JudgeAnswer(False, None, causes.cause(kind, reply.error or str(reply.failure)), attempt, cost)
         errors = [reply.error] if reply.error else check_answer(reply.answer, schema)
         if not errors:

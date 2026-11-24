@@ -1,0 +1,7 @@
+{
+  "summary": "worker 1 本の全体の上限（ndf worker run の --timeout の既定）",
+  "seconds": 3600,
+  "read_by": [
+    "ndf.core.worker"
+  ]
+}

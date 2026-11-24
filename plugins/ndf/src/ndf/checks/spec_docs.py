@@ -10,6 +10,7 @@
 | spec-skill | 実体のある配る Skill が Skill の入出力の表に行を持つ・Skill の本文とエージェント定義に書かれた `ndf` の呼び出しが規約のサブコマンドと引数に当たる |
 | spec-public | 公開する面の表の行が規約の項目に当たる・規約の保存先の行が実在のディレクトリを指す |
 | spec-docs | コミットされた生成物が、生成し直した中身と 1 字も違わない |
+| review-items | 設計レビューの項目の表のどの項目もルートを持ち、11.x へ回した項目は 11.x の対応表にも決まった形のルートのある行を持つ。子の表 `children.json` の `review_items` が、表から生成し直した中身と違わない |
 
 コントラクトの保存先（`contracts/`）を持たないプラグインには当てない（検査のテストが作る小さなプラグイン）。
 """
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -27,13 +29,17 @@ from jsonschema import Draft202012Validator
 
 from ndf import identity
 from ndf.checks import spec_model, spec_render
-from ndf.checks.model import CheckError, Finding, Scope
+from ndf.checks.child_deps import CHILDREN_REL
+from ndf.checks.model import CheckError, Finding, Scope, contained, read_json
 from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, NdfSettingsSpec, SpecModel, opt
 from ndf.contracts import facts
 from ndf.domains.settings import renames
 
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
+REVIEW_ITEMS = "review-items"
+# ルートを対応表が持つ項目の `release`
+ROUTED_ELSEWHERE = "11.x"
 # キーの型の語（どれか 1 つを持てば型がある）
 TYPE_WORDS = ("type", "$ref", "anyOf", "oneOf", "const", "enum")
 # 規約の保存先（公開する面の表の種類 spec の行が指す、プラグインの根からの相対パス）
@@ -53,7 +59,7 @@ def _table_rel(rel: Rel, name: str) -> str:
 
 
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
-    """規約の 5 つの規則の指摘を返す。`write_spec` なら生成物を書いてから比べ、書いたパスを `written` へ足す。"""
+    """規約の 5 つの規則と `review-items` の指摘を返す。`write_spec` なら生成物を書いてから比べ、書いたパスを `written` へ足す。"""
     if "spec" not in rules:
         raise CheckError("規則のデータにキー spec が無い")
     conf = rules["spec"]
@@ -62,8 +68,10 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
         return []
     model = spec_model.load(root)
     rendered = spec_render.render(model)
+    # 表を読めない・リポジトリの外を指すときは、生成物を書く前に止める
+    children, routes = _review_items(scope, conf)
     if write_spec:
-        done = write(rendered, root, conf["generated"])
+        done = write({**rendered, CHILDREN_REL: children}, root, conf["generated"])
         if written is not None:
             written += done
 
@@ -72,7 +80,27 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 
     found = decl_findings(model, scope.repo_root, rel) + io_findings(model, scope, rel) + skill_findings(model, scope, rel)
     found += public_findings(model, root, rel) + docs_findings(rendered, root, conf["generated"], rel)
-    return found
+    return found + _children_findings(children, scope) + routes
+
+
+def check_review_items(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
+    """規則 `review-items` の指摘。項目の表・対応表・`children.json` だけを読む（ほかの規則の入力を読まない）。"""
+    children, routes = _review_items(scope, rules["spec"])
+    return _children_findings(children, scope) + routes
+
+
+def _children_findings(children: str, scope: Scope) -> list[Finding]:
+    """コミットされた `children.json` と、生成し直した本文 `children` の違い。"""
+    root = scope.plugin_root
+    return docs_findings({CHILDREN_REL: children}, root, [], lambda path: scope.rel(root / path), REVIEW_ITEMS)
+
+
+def _review_items(scope: Scope, conf: dict[str, Any]) -> tuple[str, list[Finding]]:
+    """項目の表から組み立てた `review_items` を入れた `children.json` の本文と、ルートの指摘（対応表まで読む）。"""
+    source = contained(scope.repo_root, conf["review_items_source"])
+    items = spec_render.review_items(source, conf["review_items_columns"])
+    held = read_json(contained(scope.plugin_root, CHILDREN_REL), "children.json を読めない")
+    return spec_render.children(held, items), review_findings(items, scope.repo_root, conf)
 
 
 # --- spec-decl ---
@@ -451,30 +479,36 @@ def _first_diff(want: str, have: str) -> int:
     return min(len(want.splitlines()), len(have.splitlines())) + 1
 
 
-def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[str], rel: Rel) -> list[Finding]:
+def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[str], rel: Rel, rule: str = DOCS) -> list[Finding]:
     """描画した中身とコミットされた生成物の違い（無い・違う・読めない）と、描画に無い生成物の残り。"""
     hint = "。ndf check --write-spec で生成し直す"
     found = []
     for path in sorted(rendered):
         target = plugin_root / path
         if not target.is_file():
-            found.append(Finding(DOCS, rel(path), 1, "生成物が無い" + hint))
+            found.append(Finding(rule, rel(path), 1, "生成物が無い" + hint))
             continue
         try:
             have = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            found.append(Finding(DOCS, rel(path), 1, f"生成物を読めない: {exc}{hint}"))
+            found.append(Finding(rule, rel(path), 1, f"生成物を読めない: {exc}{hint}"))
             continue
         if have != rendered[path]:
-            found.append(Finding(DOCS, rel(path), _first_diff(rendered[path], have), "生成し直した中身と違う" + hint))
+            found.append(Finding(rule, rel(path), _first_diff(rendered[path], have), "生成し直した中身と違う" + hint))
     found += [
-        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の保存先に残る" + hint) for p in _stale(rendered, plugin_root, patterns)
+        Finding(rule, rel(p), 1, "生成されないファイルが生成物の保存先に残る" + hint) for p in _stale(rendered, plugin_root, patterns)
     ]
     return found
 
 
 def write(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> list[str]:
-    """描画した中身を書き、描画に無い生成物を消す。中身の同じファイルは書かない。書いた・消したパスを返す。"""
+    """描画した中身を書き、描画に無い生成物を消す。中身の同じファイルは書かない。書いた・消したパスを返す。
+
+    シンボリックリンクを通るパスが 1 つでもあれば、何も書かずに `CheckError`（リンクをたどって外のファイルを書き換えない）。
+    """
+    stale = _stale(rendered, plugin_root, patterns)
+    for path in [*rendered, *stale]:
+        contained(plugin_root, path)
     done = []
     try:
         for path in sorted(rendered):
@@ -484,9 +518,35 @@ def write(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> l
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(rendered[path], encoding="utf-8")
             done.append(path)
-        for path in _stale(rendered, plugin_root, patterns):
+        for path in stale:
             (plugin_root / path).unlink()
             done.append(path)
     except OSError as exc:
         raise CheckError(f"生成物を書けない: {exc}") from exc
     return done
+
+
+# --- review-items ---
+
+
+def _routed_ids(repo_root: Path, rel: Path, conf: dict[str, Any]) -> set[str]:
+    """対応表 `rel`（リポジトリの根からのパス）で、ルートが `correspondence_routes` の形に当たる項目の番号。"""
+    rows = spec_render.table_rows(contained(repo_root, rel), conf["correspondence_columns"])
+    return {row["id"] for row in rows if re.fullmatch(conf["correspondence_routes"], row["routed_to"])}
+
+
+def review_findings(items: list[dict[str, Any]], repo_root: Path, conf: dict[str, Any]) -> list[Finding]:
+    """ルートの無い項目（項目の番号を挙げる）。11.x へ回した項目は、ルートが指す対応表のルートの形まで見る。"""
+    source = conf["review_items_source"]
+    tables: dict[str, set[str]] = {}
+    found = []
+    for item in items:
+        if not item["routed_to"]:
+            found.append(Finding(REVIEW_ITEMS, source, 1, f"項目 {item['id']} にルートが無い"))
+        elif item["release"] == ROUTED_ELSEWHERE:
+            table = item["routed_to"][0]
+            if table not in tables:
+                tables[table] = _routed_ids(repo_root, Path(source).parent / table, conf)
+            if item["id"] not in tables[table]:
+                found.append(Finding(REVIEW_ITEMS, source, 1, f"項目 {item['id']} の決まった形のルートが対応表 {table} に無い"))
+    return found

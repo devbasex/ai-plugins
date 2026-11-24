@@ -3,5 +3,9 @@
   "attempts": 4,
   "interval": 60,
   "factor": 2,
-  "max_interval": 600
+  "max_interval": 600,
+  "read_by": [
+    "ndf.adapters.github_limits",
+    "ndf.domains.crossreview.throttle_decide"
+  ]
 }

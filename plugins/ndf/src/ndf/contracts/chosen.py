@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any, Optional
 
 from ndf import contracts
@@ -16,9 +17,9 @@ from ndf.contracts import causes
 
 SCHEMA = contracts.schema_path("route-chosen")
 EVENT = "route_chosen"
-# 選んだ主体の語彙（スキーマの chooser の enum と同じ。テストが照らす）
-SCRIPT, CONDUCTOR, HUMAN = "script", "conductor", "human"
-CHOOSERS = (SCRIPT, CONDUCTOR, HUMAN)
+# 選んだ主体の語彙（スキーマの chooser の enum から組み立てる。members の名前は値の大文字）
+Chooser = StrEnum("Chooser", [(v.upper(), v) for v in contracts.schema_enum(SCHEMA, "/properties/chooser")])
+CHOOSERS = tuple(Chooser)
 
 
 def _follows(suggested: dict[str, Any], taken: Sequence[str]) -> bool:
@@ -32,13 +33,13 @@ def _follows(suggested: dict[str, Any], taken: Sequence[str]) -> bool:
     return len(rest) % 2 == 0 and len(flags) == len(set(flags)) and set(flags) <= asked
 
 
-def chooser(suggested: Optional[dict[str, Any]], taken: Sequence[str], *, answered_by_human: bool = False) -> str:
+def chooser(suggested: Optional[dict[str, Any]], taken: Sequence[str], *, answered_by_human: bool = False) -> Chooser:
     """選んだ主体。`suggested` は結果の `next`、`taken` は実際に打った引数、`answered_by_human` は承認ゲートの人の回答か。"""
     if answered_by_human:
-        return HUMAN
+        return Chooser.HUMAN
     if suggested is not None and _follows(suggested, taken):
-        return SCRIPT
-    return CONDUCTOR
+        return Chooser.SCRIPT
+    return Chooser.CONDUCTOR
 
 
 def errors(obj: Any) -> list[str]:

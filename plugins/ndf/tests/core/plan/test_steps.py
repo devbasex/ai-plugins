@@ -34,6 +34,17 @@ def test_outcome_reads_the_last_result_line():
     assert (out["status"], out["kind"], out["retry_after"]) == ("stopped", "usage_limit", 30)
 
 
+@pytest.mark.parametrize("status", ["ok", "gate", "まだ無い語"])
+def test_outcome_of_a_newer_version_is_stopped_before_its_values_are_used(status):
+    line = json.dumps({"version": 2, "tool": "t", "status": status, "summary": "s", "outputs": {"pr": 3}, "routes": {"approved": "x"}})
+    out = steps.outcome_of(_step(), 0, line)
+    assert (out["status"], out["kind"], out["outputs"], out["routes"]) == ("stopped", "precondition", None, None)
+
+
+def test_outcome_ignores_the_version_of_json_that_is_not_a_result():
+    assert steps.outcome_of(_step(), 0, json.dumps({"version": 2, "name": "x"}))["status"] == "ok"
+
+
 def test_outcome_without_json_uses_the_exit_code():
     step = _step(exit_cause={"1": "check_failed"})
     assert steps.outcome_of(step, 0, "no json")["status"] == "ok"

@@ -1,0 +1,8 @@
+{
+  "summary": "cross-review のラウンドの上限の既定（--max-rounds の既定）",
+  "count": 3,
+  "read_by": [
+    "ndf.domains.crossreview.cli",
+    "ndf.domains.crossreview.drive"
+  ]
+}

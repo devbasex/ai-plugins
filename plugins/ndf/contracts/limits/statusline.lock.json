@@ -1,4 +1,7 @@
 {
   "summary": "statusline の設定の排他（.ndf-statusline.lock）を待つ上限。旧い statusline-switch.sh の flock と同じロックで待ち合う",
-  "seconds": 10
+  "seconds": 10,
+  "read_by": [
+    "ndf.domains.statusline.cli"
+  ]
 }

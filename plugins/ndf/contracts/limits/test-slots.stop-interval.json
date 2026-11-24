@@ -1,0 +1,7 @@
+{
+  "summary": "メモリの下限割れで 1 回止めた後、次に止めるまで空ける秒（I6）",
+  "interval": 30,
+  "read_by": [
+    "ndf.testing.slots"
+  ]
+}

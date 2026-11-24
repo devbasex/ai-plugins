@@ -214,5 +214,7 @@
 | [ndf-lane-idle-conductor.md](ndf-lane-idle-conductor.md) | レーンの生死の判定に足した「conductor が応答を終え、バックグラウンドの作業が 0 件のまま 10 分が過ぎた」止まり（`idle_conductor`）。Stop の hook が書く活動の記録と `ndf relay ls --activity` での観測、`lane_stalled` のリクエストへ載せる最後に動いた時刻とバックグラウンドの作業の数（#4036） |
 | [ndf-split-tables-toolchain-and-budget.md](ndf-split-tables-toolchain-and-budget.md) | 上限と停止理由の表を 1 項目 1 ファイルに分けた形と読み手、NDF が動く Python と uv の設定、テスト・CI のジョブ・使われない依存・置き換えられる自作の件数の上限、実験版の保存先、依存を用意できないときの結果と、それぞれの `ndf check` の規則 |
 | [ndf-live-samples-verify.md](ndf-live-samples-verify.md) | テストの見本を相手の公開する記述と毎日突き合わせる `ndf samples verify` と、失敗と食い違いを課題にするジョブ。見本の定義・食い違いの種類・取得の上限・終了コード |
+| [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) | `ndf check` が落とす 4 つ。使うモジュールの無い上限（`read_by` と規則 `limit-readers`）、スキーマの `enum` や上限と同じ値を持つ定数（`const-fact`）、コピーで増えた重複（`copy-dup` とラチェット）、対応先の無い設計レビューの指摘（`review-items`）。見つかった定数の直し方と、結果 JSON の `items` の欄も持つ |
+| [ndf-internal-data-versions.md](ndf-internal-data-versions.md) | NDF が書いて後で自分で読む記録（使用量・MVV・開発ループのイベント・工程どうしで引き継ぐ値など）の型とバージョン。古い形を読むときの変換、新しい形を読んだときの止まり方、製品のバージョンのキー `product_version`、キーの名前をそろえる規則 `internal-names` |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

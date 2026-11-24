@@ -30,7 +30,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 | 回答の語彙（`contracts/facts/answers.json`） | 結果 JSON の `routes` のキーとプランの `on_answer` の回答に使える語 |
 | `ndf.contracts.causes` | 表の唯一の読み手。`cause` を組んで確かめ、種類から終了コードと方針を引く。ステートマシンの打ち直しの秒（`retry_delay`） |
 | `ndf.contracts.routing` | ルートを選ぶ純粋な関数 `pick` と待ちの計算 `backoff`。ルートの選び方はここだけが持つ |
-| `ndf.contracts.result` | 結果 JSON を組み、形と終了コードを確かめて 1 行で出す（`emit`）。形が違えば出さずに `invalid` の終了コード 2 |
+| `ndf.contracts.result` | 結果 JSON を組み、形と終了コードを確かめて 1 行で出す（`emit`）。形が違えば代わりの `stopped`（`invalid`）を 1 行で出し、終了コード 2 |
 | `ndf.contracts.chosen` | 選択の記録の組み立てと確かめと、選んだ主体の決め方（`chooser`） |
 | `ndf.core.plan`（`model`・`transition_decide`・`steps`・`runner`） | プランの形の確かめ（IS3）、遷移の判断（`pick` を呼ぶ）、ステップの結果の読み取り、耐久の待ちと選択の記録の書き込み |
 | `ndf.progress.run` | ステートマシンの工程を流す `work` の中で打ち直し、ほかの止まりを事象 `failed` に `cause` つきで残し、`next` に `routes` を載せる |
@@ -106,7 +106,7 @@ NDF の作り直し（#1142）のうち「分岐と例外のルートをスク�
 | `routes` | `gate` では必須。`ok` には置かない。`stopped` には置ける | キーは回答の語彙（`approved`・`rejected`・`request_changes`・`retry`・`finish`・`cancel`）。値は打てるコマンド `{"argv": ["ndf", …], "ask": [<打つ側が埋めるキー>]}` か `null`（何も打たない） |
 | `gaps` | `cause.kind` が `incomplete` の結果だけ（その結果には必須） | 欠けの配列 |
 
-- 結果は `ndf.contracts.result.emit` が出す。形の誤り（スキーマ・表に無い種類・回答の語彙に無いキー）や、`stopped` の終了コードが種類のものと違えば、出さずに標準エラーへ誤りを書き、`invalid` の終了コード 2 で終える
+- 結果は `ndf.contracts.result.emit` が出す。形の誤り（スキーマ・表に無い種類・回答の語彙に無いキー）があるか、`stopped` の終了コードが `cause.kind` に決めたものと違えば、元の結果を出さずに、元の値を含まないエラーの文を標準エラーへ書き、元の値を含まない代わりの `stopped`（`invalid`）を 1 行で出して終了コード 2 で終える
 - `next` は次に打つコマンド 1 つで、`routes` の値と同じ形である。打つ側は `argv` をそのまま打ち、`ask` のキーごとに `--<キー> <値>` を末尾へ足す
 - 承認ゲートで止まったプランの結果は `routes` `{"approved": <続きの ndf plan next>, "rejected": null}`、止まったプランの結果は止まったステップから続ける `next` を持つ
 

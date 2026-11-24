@@ -1,4 +1,7 @@
 {
   "summary": "落ちたテストのジョブのログを読んで落ちたテストを拾うジョブの数の上限",
-  "count": 5
+  "count": 5,
+  "read_by": [
+    "ndf.adapters.ci"
+  ]
 }

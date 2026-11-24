@@ -1,4 +1,7 @@
 {
   "summary": "API キーの子で止める必要が立ってから、止めてよい時点を待つ上限の秒。過ぎたら子の状態によらず止める（#3864 の決定 12）",
-  "seconds": 60
+  "seconds": 60,
+  "read_by": [
+    "ndf.domains.relay.wrapper_stop"
+  ]
 }

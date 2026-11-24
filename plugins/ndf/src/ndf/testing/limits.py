@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ndf import slot_pool
+from ndf.contracts import limits as policies
 from ndf.testing import machine
 from ndf.testing.declared import find_setting
 
@@ -23,8 +24,8 @@ CPUS_PER_RUN = 4
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
 FLOOR_RATIO = 0.10
-# 待ちの上限の既定（全体テストの上限と同じ）
-DEFAULT_WAIT_LIMIT_SECONDS = 1800
+# 待ちの上限の既定の方針（contracts/limits/）
+WAIT_POLICY = "test-slots.wait"
 
 
 def test_weight_mib() -> int:
@@ -61,7 +62,7 @@ def default_limits(cpus: int, total_mib: int | None) -> Limits:
     by_cpu = cpus // CPUS_PER_RUN
     by_memory = by_cpu if total_mib is None else total_mib // test_weight_mib()
     floor = FLOOR_MIN_MIB if total_mib is None else max(FLOOR_MIN_MIB, int(total_mib * FLOOR_RATIO))
-    return Limits(max(1, min(by_cpu, by_memory)), floor, DEFAULT_WAIT_LIMIT_SECONDS)
+    return Limits(max(1, min(by_cpu, by_memory)), floor, int(policies.seconds(WAIT_POLICY)))
 
 
 def _positive(section: Mapping[str, object], key: str, path: Path, errors: list[str]) -> int | None:

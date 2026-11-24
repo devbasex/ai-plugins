@@ -249,13 +249,14 @@ def test_mvv_answer_writes_only_an_override_and_signals_count_it(
     assert code == 0 and got["status"] == "ok" and got["summary"] == "覆しではないので書かなかった" and got["items"] == []
     code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "main")
     assert code == 0 and got["summary"] == "MVV の改訂の兆候は閾値に届かない" and got["metrics"] == {"revision_due": False}
-    assert got["items"] == [{"version": 1, "overrides": 0, "unknown_pass": 0, "unknown": 0}]
+    assert got["items"] == [{"mvv_version": 1, "overrides": 0, "unknown_pass": 0, "unknown": 0}]
     answer = {"verdict": "not_follow", "approved": True, "state": "s", "gate": "g", "pr": 3, "extra": "x"}
     code, got = _answer(monkeypatch, capsys, last_result, mvv_repo, json.dumps(answer), "--version", "1")
     row = got["items"][0]
     assert code == 0 and got["summary"] == f"覆しの記録: {row['kind']}"
-    assert {k: row[k] for k in ("version", "repo", "state", "gate", "pr")} == {
+    assert {k: row[k] for k in ("version", "mvv_version", "repo", "state", "gate", "pr")} == {
         "version": 1,
+        "mvv_version": 1,
         "repo": str(mvv_repo.resolve()),
         "state": "s",
         "gate": "g",
@@ -264,7 +265,7 @@ def test_mvv_answer_writes_only_an_override_and_signals_count_it(
     assert "extra" not in row
     code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "main")
     assert code == 0 and got["summary"] == "MVV の改訂を提案する兆候がある" and got["metrics"] == {"revision_due": True}
-    assert got["items"] == [{"version": 1, "overrides": 1, "unknown_pass": 0, "unknown": 0}]
+    assert got["items"] == [{"mvv_version": 1, "overrides": 1, "unknown_pass": 0, "unknown": 0}]
 
 
 def test_mvv_signals_stops_when_the_base_branch_has_no_ndf_settings(mvv_repo: Path, capsys, last_result) -> None:

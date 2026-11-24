@@ -118,7 +118,7 @@
           }
         },
         "Stop": {
-          "budget": "stop",
+          "budget": "stop.codex",
           "reads": ["session_id", "cwd", "hook_event_name", "stop_hook_active"],
           "optional": ["transcript_path", "turn_id", "last_assistant_message"],
           "outputs": {
@@ -134,7 +134,7 @@
             "advise": {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "{context}"}}
           }
         },
-        "SessionEnd": {"budget": "session-end", "timeout_max": 3, "reads": ["session_id", "hook_event_name"], "optional": ["cwd", "reason"], "outputs": {}}
+        "SessionEnd": {"budget": "session-end.codex", "timeout_max": 3, "reads": ["session_id", "hook_event_name"], "optional": ["cwd", "reason"], "outputs": {}}
       }
     }
   }
