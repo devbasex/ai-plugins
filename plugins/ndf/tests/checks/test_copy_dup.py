@@ -23,6 +23,34 @@ def test_the_same_function_name_in_two_files_is_one_finding():
     assert found(copy_dup.top_functions(dict(reversed(given.items())), CONF)) == [("copy-dup", "src/b.py", 3)]
 
 
+def test_a_finding_names_its_first_file_and_lists_every_file_in_text_order():
+    """代表と並びはパスの文字列の順（`.` は `/` より前）で、行は代表のファイルの最初の行。"""
+    given = {
+        "src/b.py": ast.parse("def _load(): ...\n"),
+        "src/a/z.py": ast.parse("def _load(): ...\n"),
+        "src/a.py": ast.parse("x = 1\ny = 2\ndef _load(): ...\ndef _load(): ...\n"),
+    }
+    assert [(f.path, f.line, f.detail) for f in copy_dup.top_functions(given, CONF)] == [
+        ("src/a.py", 3, "同じ名前の関数 '_load' が 3 ファイルにある: src/a.py, src/a/z.py, src/b.py")
+    ]
+
+
+def test_findings_keep_the_order_of_first_appearance():
+    """指摘の順は代表のパスでなく、名前か文字列が最初に出た順。数に満たないものは並べない。"""
+    names = trees("def f(): ...\ndef h(): ...\n", "def z(): ...\ndef g(): ...\ndef f(): ...\n", "def g(): ...\ndef z(): ...\n")
+    backward = dict(reversed(names.items()))
+    assert [f.detail for f in copy_dup.top_functions(backward, CONF)] == [
+        "同じ名前の関数 'g' が 2 ファイルにある: src/b.py, src/c.py",
+        "同じ名前の関数 'z' が 2 ファイルにある: src/b.py, src/c.py",
+        "同じ名前の関数 'f' が 2 ファイルにある: src/a.py, src/b.py",
+    ]
+    strings = trees(*["x = 'the second'\n"] * 2, *["y = 'it\\'s the first'\nx = 'the second'\n"] * 4)
+    assert [(f.path, f.line, f.detail) for f in copy_dup.repeated_strings(dict(reversed(strings.items())), CONF)] == [
+        ("src/c.py", 1, '同じ文字列 "it\'s the first" が 4 ファイルにある: src/c.py, src/d.py, src/e.py, src/f.py'),
+        ("src/a.py", 1, f"同じ文字列 'the second' が 6 ファイルにある: {', '.join(strings)}"),
+    ]
+
+
 @pytest.mark.parametrize(
     "texts",
     [
