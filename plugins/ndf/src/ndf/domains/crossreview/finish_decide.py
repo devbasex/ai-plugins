@@ -126,7 +126,7 @@ def _finding_gaps(findings: Sequence[Finding], *, mvv_checked: bool = True, unse
         reason = "PR が足した根拠の記述が承認済みの MVV に合うかを、最後のコミットで確かめられなかった（原因は注意にある）"
         gaps.append(_gap(GAP_MVV, CITATION_CHECK, reason))
     if unsent_citations:
-        reason = f"PR に届いていない手元のコミットに、根拠の記述の誤りが {unsent_citations} 件ある（中身は状態ファイルにある）"
+        reason = f"PR に届いていない手元のコミットに、根拠の記述の誤りが {unsent_citations} 件ある（中身は状態ファイルにある。直すか送って打ち直す）"
         gaps.append(_gap(GAP_MVV, UNSENT_CITATIONS, reason))
     return gaps
 

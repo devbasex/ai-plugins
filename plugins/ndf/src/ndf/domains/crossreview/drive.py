@@ -684,8 +684,9 @@ def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_n
 
 
 def _mvv_checked(run: _Run, head: str) -> bool:
-    """`head` で根拠の記述を確かめ終えたか（承認済みの MVV が無ければ真）。"""
-    return criteria_decide.approved(run.snapshot) is None or run.checked_head == head
+    """`head` で根拠の記述を確かめ終えたか（承認済みの MVV が無ければ真）。PR に届いていない `head` は、確かめても偽にする
+    （打ち直しが、手元だけのコミットの収束を使わない）。"""
+    return criteria_decide.approved(run.snapshot) is None or run.checked_head == head == run.sent
 
 
 def _final_head(run: _Run, final: str, rounds: int) -> str:
@@ -740,7 +741,7 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     detail = run.warnings[seen:]
     run.data[fin.UNSENT_CITATIONS] = {"head": head, "errors": errors, "detail": detail}
     if errors is None:
-        run.warnings[seen:] = [UNSENT_UNCHECKED]
+        run.warnings[seen:] = [] if UNSENT_UNCHECKED in run.warnings[:seen] else [UNSENT_UNCHECKED]
         return None
     return len(errors)
 
@@ -781,7 +782,8 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
-    """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。"""
+    """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。head が PR に届いていなければ（前の起動の修正担当が
+    コミットだけを残して終わった）、結果を指摘にせず手元の状態ファイルだけに残す。"""
     cfg = run.cfg
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
@@ -794,7 +796,10 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     diff.write_text(changes.review_diff(run.g, scope.base or merge_base, head), encoding="utf-8")
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
     run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
-    _ingest_citations(run, changes.citations(run, run.last_target), round_no)
+    if head == run.sent or criteria_decide.approved(run.snapshot) is None:
+        _ingest_citations(run, changes.citations(run, run.last_target), round_no)
+    else:
+        _check_unsent(run, head)
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, changed.docs, full_diff)
 
 
