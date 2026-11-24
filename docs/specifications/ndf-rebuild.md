@@ -484,6 +484,21 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 | `#3395` | 決定 114 | 移した（物差しの決定） | [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | 決定 114 |
 | `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 移さない（決定 121 は入れ替えの前だけの進め方、IY4 は要求の無い項目を範囲の一覧に載せる条件で、確定仕様に残す対象が無い）。IY6（`review_items` は表から生成した結果と一致する）は、11.0.0 の後に [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) の I5 として作った。IY1（項目は表に 1 行だけ）・IY2（対応先は決めた語のどれか）・IY7（完了した子を対応先にしない）は検査を作っていない（11.x の項目の対応先の形だけは I5 が見る） | — | — |
 
+### 設計の材料を消した後の読み方（#3990）
+
+設計の材料 36 本（`issues/` の #1142・#3347・#3388・#3395 の要求仕様と設計文書）は #3990 で消し、作り直しの正本はこの 6 本だけになった。消した 36 本は次の 2 つのリンクから読める。どちらもファイルではなくコミットの `issues/` の一覧を指すので、消した後も開ける（GitHub のコミットを指す URL は内容が変わらない）。
+
+| リンク | 指すコミット | 見える版 |
+| --- | --- | --- |
+| この節の頭の「設計の材料」 | `784110e5`（2026-11-21） | 36 本のすべて。2 本（#1142 の設計レビューの振り分け表と #3395 の設計）は、その後に書き換わる前の版 |
+| [ndf-review-items.md](ndf-review-items.md) と [ndf-review-items-11x.md](ndf-review-items-11x.md) の「出所」の「消す前のコミット」 | `eb4d652d`（2026-11-24。#3990 のブランチが分かれた元の `main`） | 消す直前の版 |
+
+消すときに決めたことは次の 3 つである。
+
+- **Issue と Pull Request の本文にある 36 本へのリンクは書き換えない**（利用者の判断、2026-11-24）。ブランチを指すリンクは、`main` を指すものは #3990 が入った時点で、`develop` を指すものは `develop` を消した時点で開けなくなる。読み手は上の表のリンクか git の履歴から元の文書を探す。書き換えを安全に行う手順（書き込む間に入ったほかの編集を上書きしない・書き換える組を人が許したかを確かめる）を設計で閉じられなかったためである。GitHub の Issue の更新には条件付きの書き込みが無い。#3412 の受け入れ条件 6（開いている Issue のリンクを固める）は満たしていない
+- **確定仕様の本文は、36 本のファイル名を書かない。** ファイル名の代わりに「#3388 の設計の対応表」のように課題の番号と表の名前を文で書き、リンクはコミットの `issues/` の一覧へ向ける。`docs/` などでファイル名を文字の並びで数える #3412 の受け入れ条件 5 の検査を、除外を広げずに通すためである。リンクを消して文だけにすると、読み手が元の表を開けなくなる。代わりに、読み手は一覧から目当てのファイルを選ぶ
+- **用語集で 36 本を出所に持っていた 51 語は、誰が打っても同じ出所になる規則で確定仕様へ移した。** 6 本に現れない語は、ほかの確定仕様で最も多く現れる 1 本にした。6 本の 2 本以上に現れる語は最も多く現れる 1 本（同数なら上の索引の並びで先の本）にし、どこにも現れない語はこの文書にした。語ごとに意味を読んで選ぶと、選ぶ人ごとに結果が変わるためである。代償として、この文書を出所に持つ語のうち 8 語（「一時コピーの検査」「drive の状態」など）は、この文書の本文に現れない。使われなくなった語を廃止するかは、語の意味と存否を変える判断なので決めていない
+
 ## テスト観点
 
 - I1〜I13・IH1〜IH10・IG1〜IG5・I22・I23 は、表の「破れたときの扱い」のテストか検査で縛る。所要時間を合格の条件にしない
@@ -492,9 +507,10 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 - 新しいテストは詳細設計の単体テストの観点から書き、10 系のテストを安全網にしない。利用者から見た振る舞い（Skill の手順・hook・プランの流れ）は、新しいテストと入れ替えの前の試走（T2 #3411）で確かめた
 - `bash scripts/build-runtime-plugins.sh --check` と `claude plugin validate .` が通り、Codex の導入先に新しいモジュールが入る
 - 中継の複製 `~/.claude/ndf/relay.py` が、プラグインを更新しても 1 回の導入で動き続ける
+- 設計の材料 36 本のファイル名（#1142・#3347・#3388・#3395 の番号を `issue-<番号>-` の形で頭に持つ名前）を含む行が、`plugins`・`scripts`・`docs`・`.github`・`AGENTS.md`・`CLAUDE.md` に無い（`docs/archive`・`docs/ndf-12-survey`・`scripts/ndf-next-parity`・`CHANGELOG.md` を除く）。`ndf records glossary render --check` が `ok` を返す
 - 番号の一意: `grep -hoE '^#{2,4} 決定 [0-9]+' docs/specifications/ndf-rebuild*.md | grep -oE '[0-9]+$' | sort -n | uniq -d` が 0 行
 
 ## 関連リンク
 
 - [用語集: NDF の作り直し](../glossary/ndf-rebuild.md)・[ndf-rebuild-libraries.md](ndf-rebuild-libraries.md)・[ndf-rebuild-data-and-smells.md](ndf-rebuild-data-and-smells.md)・[版とリリース](../versioning-and-distribution.md)（ランタイムごとの取得と導入）・`plugins/ndf/src/ndf/checks/README.md`（`ndf check` の規則）
-- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）
+- [#1142](https://github.com/devbasex/ai-plugins/issues/1142)（作り直しの傘）・[#3304](https://github.com/devbasex/ai-plugins/issues/3304)（入れ替え）・[#3388](https://github.com/devbasex/ai-plugins/issues/3388)（11.x）・[#3412](https://github.com/devbasex/ai-plugins/issues/3412)（確定仕様化と測り直し）・[#3990](https://github.com/devbasex/ai-plugins/issues/3990)（設計の材料を消す）
