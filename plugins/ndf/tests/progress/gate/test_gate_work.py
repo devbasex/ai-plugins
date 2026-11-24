@@ -18,7 +18,7 @@ from ndf.progress import gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
-# `agent-layers.md` の「supervisor → worker」が定める起動指示の 7 項目（見出しでそろう）
+# プランが組み立てる worker の起動指示の 7 項目（見出しでそろう。`agent-layers.md` の「supervisor → worker」の項目から MVV を除く）
 PROMPT_ITEMS = ("作業", "入力", "手順", "読む Skill", "返す形", "保存先", "作業の結果ファイル")
 
 

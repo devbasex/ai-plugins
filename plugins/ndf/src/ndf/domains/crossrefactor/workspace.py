@@ -69,11 +69,11 @@ def _add(repo: git.Git, path: Path, commit: str, pr: int) -> None:
     worktree.lock_review_worktree(repo, path, launch_decide.SKILL, pr)
 
 
-def prepare(repo: git.Git, pr: int, branch: str, runtimes: Sequence[str]) -> Workspace:
-    """作業場所を用意する（再開なら登録を確かめて使う）。`repo` はリポジトリのどこかの作業場所の git。"""
+def prepare(repo: git.Git, pr: int, head: str, runtimes: Sequence[str]) -> Workspace:
+    """取得済みの PR の先頭のコミット `head` から作業場所を用意する（再開なら登録を確かめて使う）。`repo` はリポジトリのどこかの
+    作業場所の git。"""
     worktree.sweep_orphans(repo)
     ws = layout(root_of(repo, pr), runtimes)
-    head = worktree.fetch_head(repo, branch)
     _add(repo, ws.work, head, pr)
     work_head = git.Git(ws.work).rev_parse("HEAD")
     for runtime in ws.runtimes:

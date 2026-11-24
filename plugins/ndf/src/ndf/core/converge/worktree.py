@@ -22,12 +22,15 @@ from __future__ import annotations
 
 import re
 import socket
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, TypeVar
 
 from ndf import identity
 from ndf.adapters import git
+
+T = TypeVar("T")
 
 # lock の理由の前置き（NDF が掛けた lock だけを片付けで外す）
 LOCK_PREFIX = f"{identity.FIXED_WORDS['entrypoint']} "
@@ -77,6 +80,13 @@ class SyncResult(NamedTuple):
     conflicts: tuple[str, ...]
     remote: str
     base: str = ""
+
+
+class Base(NamedTuple):
+    """引数 `--base` から決めたベース。`branch` は MVV を読むブランチ、`commit` は `--base` が指すコミット（ブランチなら None）。"""
+
+    branch: str
+    commit: Optional[str]
 
 
 class Release(NamedTuple):
@@ -252,16 +262,37 @@ def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None, base_
 
     `base_branch` があれば同じ 1 回の取得でベースのリモート追跡参照も新しくする。どちらかを取れなければ `GitError`。
     """
-    return _fetch_tips(g, head_branch, remote, base_branch)[0]
+    return fetch_tips(g, head_branch, remote, base_branch)[0]
 
 
-def _fetch_tips(g: git.Git, head_branch: str, remote: Optional[str], base_branch: Optional[str]) -> tuple[str, str]:
+def fetch_tips(g: git.Git, head_branch: str, remote: Optional[str], base_branch: Optional[str]) -> tuple[str, str]:
     """`fetch_head` の取得を打ち、PR のブランチとベースの先頭のコミットを返す（ベースを取らなければ空）。"""
     remote = remote if remote is not None else g.remote()
     branches = dict.fromkeys(b for b in (head_branch, base_branch) if b is not None)
     g.run("fetch", "--", remote, *(f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in branches))
     tips = dict(zip(branches, g.commits_of(*(f"refs/remotes/{remote}/{b}" for b in branches)), strict=True))
     return tips[head_branch], tips[base_branch] if base_branch is not None else ""
+
+
+def fetch_base(g: git.Git, base: str, remote: str, fetch: Callable[[str], T], target: Callable[[], str]) -> tuple[T, Base]:
+    """引数 `--base` の値 `base` からベースブランチを決めて `fetch` へ渡し、その結果と決めたベースを返す。
+
+    `base` がブランチ（`<リモート>/<ブランチ>` の形も受ける）なら、そのブランチを取得する。コミット（SHA・短縮した SHA・タグなど）
+    なら、PR のマージ先のブランチ（`target`）を取得する。渡されたコミットは PR のブランチの途中のことがあり、そこから MVV を読むと、
+    PR が自分で書き換えた MVV で自分を確かめることになる。完全な SHA でなければブランチとして取得し、取得できずに手元でブランチで
+    ないコミットを指すときだけコミットとして扱う（ブランチ名の起動で Git を余計に打たない）。
+    """
+    commit = base if git.FULL_SHA.match(base) else None
+    if commit is None:
+        branch = base.removeprefix(f"{remote}/")
+        try:
+            return fetch(branch), Base(branch, None)
+        except git.GitError:
+            commit = g.commit_named(base)
+            if commit is None:
+                raise
+    branch = target()
+    return fetch(branch), Base(branch, commit)
 
 
 def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
@@ -312,7 +343,7 @@ def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, ba
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
-    remote, base = _fetch_tips(g, head_branch, remote, base_branch)
+    remote, base = fetch_tips(g, head_branch, remote, base_branch)
     _refuse_lossy_sync(g, remote, before)
     own = own_commits(g, remote, before)
     g.run("reset", "--hard", remote)

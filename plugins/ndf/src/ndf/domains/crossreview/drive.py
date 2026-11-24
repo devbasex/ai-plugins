@@ -196,8 +196,7 @@ class _Prior(NamedTuple):
 def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
     """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
 
-    `--base` がコミット（SHA・タグなど）のときだけ使う。そのコミットはレビュー中のブランチの途中のことがあり、そこから MVV を読むと、
-    レビュー中のブランチが自分で書き換えた MVV で自分を確かめることになる。
+    `--base` がコミット（SHA・タグなど）のときだけ使う（理由は `worktree.fetch_base` にある）。
     """
     pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
     if reader_for is None:
@@ -218,34 +217,26 @@ class _Based(NamedTuple):
 
 
 def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
-    """PR のブランチと MVV を読むブランチを 1 回で取得して同期する。
+    """PR のブランチと MVV を読むブランチを 1 回で取得して同期する（ブランチの決め方は `worktree.fetch_base`）。
 
-    `--base` がブランチ（`<リモート>/<ブランチ>` の形も受ける）なら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。
-    コミット（SHA・短縮した SHA・タグなど）なら、比較元はそのコミットのまま、MVV は PR のマージ先から読む（スプリントブランチへ
-    単位の PR を集めた後のレビューは、集めた時点のコミットを渡す）。完全な SHA でなければブランチとして取得し、取得できずに
-    手元でブランチでないコミットを指すときだけコミットとして扱う（ブランチ名の起動で Git を余計に打たない）。
+    `--base` がブランチなら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。コミットなら、比較元はそのコミットの
+    まま、MVV は PR のマージ先から読む（スプリントブランチへ単位の PR を集めた後のレビューは、集めた時点のコミットを渡す）。
     """
     remote = g.remote()
-    commit = cfg.base if git.FULL_SHA.match(cfg.base) else None
-    if commit is None:
-        branch = cfg.base.removeprefix(f"{remote}/")
-        try:
-            synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
-            return _Based(synced, branch, synced.base)
-        except git.GitError:
-            commit = g.commit_named(cfg.base)
-            if commit is None:
-                raise
-    target = _merge_target(cfg, reader_for)
-    return _Based(worktree.sync_worktree(g, cfg.branch, remote, base_branch=target), target, commit)
+
+    def sync(branch: str) -> worktree.SyncResult:
+        return worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
+
+    synced, base = worktree.fetch_base(g, cfg.base, remote, sync, lambda: _merge_target(cfg, reader_for))
+    return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base)
 
 
 def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
     """同期で取得したコミットの MVV を読む。読めなければ、MVV を確かめないレビューにならないよう担当の起動前に止める（#4076）。"""
     try:
-        return mvv.current(cfg.worktree, based.synced.base, outside=cfg.worktree)
-    except (mvv.MvvError, identity.IdentityError, OSError) as exc:
-        raise DriveStopped("precondition", f"{based.branch} の MVV を読めない: {exc}") from exc
+        return mvv.of_base(cfg.worktree, based.branch, based.synced.base, cfg.worktree)
+    except mvv.MvvError as exc:
+        raise DriveStopped("precondition", str(exc)) from exc
 
 
 def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide.Cleaner) -> _Run:
