@@ -303,7 +303,7 @@ plugins/ndf/
 | `bump_generation` | 書けない・ロックを取れない | 権限・ディスク・ラッパーが子を止める最中 | `signals.held`・`replace_json` | 0 を返す（世代の無い hook は古い hook と見分けられないので眠らない） | 無し | 次の Stop |
 | `_finish` | ロックを取れない | ラッパーが子を止める最中 | `signals.held` | 起こさずに 0 | 無し | 次の起動で始め直る |
 | `_finish` | 状態を書けない | 権限・ディスク | `replace_json` | 何も書かずに 0（`k`・`pending` は書かれていない） | 無し | 次の Stop |
-| `_finish` | `wake` の行を書けない | 権限・ディスク | `append_cache_log` | 2 のまま（状態は起こしたことを持つ。集計は `wake` の無い `wake_result` を数え、当たりの率と `d` から外す） | 無し | — |
+| `_finish` | `wake` の行を書けない | 権限・ディスク | `append_cache_log` | 2 のまま（状態は起こしたことを持つ。集計は `wake` の無い `wake_result` を起こした回数に数え（`wake_id` の重複を除いた数）、当たりの率と `d` から外す） | 無し | — |
 | `_settle`・`_finish` | 突き合わせが外れた | 新しい世代・起動の替わり | ロックの中の突き合わせ | 状態も起こす記録も書かずに 0 | 無し | — |
 
 ### 並行とロック
@@ -447,12 +447,14 @@ plugins/ndf/
 | 値 | 何から出すか |
 | --- | --- |
 | 待ちの数・上限で止めた待ちの数・突き合わせられずに止めた待ちの数 | `wait_start`・`stop_waking`（`scope` `wait`・`reason` が上限）・`wake_result`（`outcome` `unknown`。この止め方では `stop_waking` を書かない） |
-| 起こした回数 | `wake` の行の数（結べない `wake` も数える） |
+| 起こした回数 | `wake` の行と `wake_result` の行に出る `wake_id` の、重複を除いた数。`wake_result` の無い `wake`（記録の欠け）も、`wake` の無い `wake_result`（`_finish` が終了コード 2 を返したが `wake` の行を書けなかった。下の見本）も 1 回に数え、両方そろった起床も 1 回である |
 | `age` の幅（30・45・50・55・60 分）ごとの当たりの率 | 結べた組のうち `outcome` が `woke` で `hit` が null でないものだけ。`age` は `wake`、`hit` は `wake_result`、分母はその組の数 |
 | `d` の中央値 | 結べた組のうち `outcome` が `woke` で `priced` が真のものの `cache_write_1h × w_1h + cache_write_5m × w_5m + output × out`（起床に属する全呼び出しの合計。`priced` が偽の起床は入れない） |
 | 起床 1 回の実費の中央値 | 結べた組のうち `outcome` が `woke` で `priced` が真のものの `cache_read × r + cache_write_1h × w_1h + cache_write_5m × w_5m + output × out`（全呼び出しの合計。読み出しを含む） |
 | 待ちの長さの中央・75・90 パーセンタイル | `wait_id`（待ちが始まった応答の時刻）から `wait_end` の `opened_at`（待ちを終えた入力の時刻）まで。`wait_end` の行の `at`（Stop の時刻）は使わない |
 | 避けた書き直しの推定（1 つの待ちで最大 1 回。項目の名前と `summary` に「推定」を付ける） | 待ちの長さ（上の行）が `wait_start` の `ttl` の寿命を越え、その待ちに `hit` が真の `wake_result`（結べた組）が 1 つ以上あり、最後に当たった起床（その組の `wake` の行の `at`）から `wait_end` の `opened_at` までが `wait_end` の `ttl` の寿命以内で、`wait_end` の `hit`（待ちを終えた最初の呼び出しの読み出し）が真の待ちだけ。最後に当たった起床から寿命を越えて当たった待ちは、当たりを起床に帰せないので数えない。反実仮想の推定で、前提は設計の決定 9 にある。`unpriced_waits` の待ちは入れない。`preempted` の `wake_result` を持つだけでは外さない（費用 0）。token は `wait_end` の `tokens`、費用の差は `(w − r) × tokens` − その待ちの全ての `wake_result`（`wake` の無いものも含む。`preempted` は 0）の実費の合計。`wake` の無いまま寿命を越えて自然に当たった待ちは数えない |
+
+起こした回数の見本: 1 つの待ちに、`wake_id` `a` の `wake` と `wake_result`、`wake_id` `b` の `wake` だけ（起きた応答の前に会話が終わった）、`wake_id` `c` の `wake_result` だけ（`wake` の行を書けなかった）がある記録では、起こした回数は 3（`a`・`b`・`c`）、`unmatched_wakes` 1・`orphan_results` 1 である。`wake` の行の数（2）で数えると落ちる。
 
 ## 上限の設定の方針のファイル（`contracts/limits/<方針の名前>.json`）
 
