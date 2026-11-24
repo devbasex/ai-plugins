@@ -1,10 +1,20 @@
-# #3960 の確かめのコマンド: 参照・子の表・構文木・値が受け入れ条件のとおりかを終了コードで返す
+# #3960 の確かめのコマンド: 参照・子の表・移した表・構文木・値が受け入れ条件のとおりかを終了コードで返す
 
-[issue-3960-design.md](./issue-3960-design.md) の決定 4 とテスト設計が使う 4 つのコマンドである。どれもリポジトリの根で打つ。`<base>` は変更の前のコミットで、`main` を取り込んだ後は `git merge-base HEAD origin/main` である。
+[issue-3960-design.md](./issue-3960-design.md) の決定 4 とテスト設計が使う 5 つのコマンドである。どれもリポジトリの根で打つ。`<base>` は変更の前のコミットで、`main` を取り込んだ後は `git merge-base HEAD origin/main` である。
+
+## 検証用のディレクトリ
+
+スクリプトと分類済みの一覧は、worktree ごとに 1 回だけ作る非公開のディレクトリに置く。固定のパスは使わない（並行する検証が互いの一覧を上書きするため）。
+
+```bash
+W=$(mktemp -d) && echo "$W"
+```
+
+出たパスを控え、別のシェルから続けるときは `W=<控えたパス>` を打ってから使う。作り直すと埋めた分類を引き継げないので、PR に一覧を載せ終えるまで消さない。下の Python のブロックは、書いてある名前で全部このディレクトリに置く（`gitread.py` は同じディレクトリから読み込まれる）。
 
 ## 共通の読み込み
 
-下を `/tmp/gitread.py` に置く。変更の前の中身は、ファイルの数によらず `git cat-file --batch` の 1 回で読む。git の起動は、参照の `list` が 2 回・`check` が 3 回、構文木が 4 回、値が 2 回、子の表が 1 回である。
+下を `$W/gitread.py` に置く。変更の前の中身は、ファイルの数によらず `git cat-file --batch` の 1 回で読む。git の起動は、参照の `list` が 2 回・`check` が 3 回、構文木が 4 回、値が 2 回、子の表が 1 回、移した表が 1 回である。
 
 ```python
 import subprocess
@@ -26,11 +36,11 @@ def blobs(rev, names):
 
 ## 参照の確かめ（条件 1・2・3・5・6）
 
-下を `/tmp/refs.py` に置く。`list` で一覧のひな形を作り、分類を埋めてから `check` を打つ。`main` を取り込んで候補が変わったら `list` を打ち直す。埋めた分類は引き継ぎ、増えた行だけが空で出る。
+下を `$W/refs.py` に置く。`list` で一覧のひな形を作り、分類を埋めてから `check` を打つ。`main` を取り込んで候補が変わったら `list` を打ち直す。埋めた分類は引き継ぎ、増えた行だけが空で出る。
 
 ```bash
-python3 /tmp/refs.py list <base> /tmp/refs.tsv > /tmp/refs.new && mv /tmp/refs.new /tmp/refs.tsv
-python3 /tmp/refs.py check <base> /tmp/refs.tsv
+python3 "$W/refs.py" list <base> "$W/refs.tsv" > "$W/refs.new" && mv "$W/refs.new" "$W/refs.tsv"
+python3 "$W/refs.py" check <base> "$W/refs.tsv"
 ```
 
 ```python
@@ -196,7 +206,7 @@ sys.exit(bool(bad))
 
 ## 子の表の確かめ（条件 7）
 
-下を `/tmp/kids.py` に置き、`python3 /tmp/kids.py <base>` を打つ。`children` と `tables` は変更の前から全項目が変わらないこと、先に要る子・順番・レーン・Issue は変更の前の「子の記号」の 52 件とも合うことを見る。確定仕様の側は、52 件の記号・Issue・中身が変わらないことと、R0・R1 が表の直前の段落に `R0 #3757「<変更の前の中身>」` の形で移ったことを見る。
+下を `$W/kids.py` に置き、`python3 "$W/kids.py" <base>` を打つ。`children` と `tables` は変更の前から全項目が変わらないこと、先に要る子・順番・レーン・Issue は変更の前の「子の記号」の 52 件とも合うことを見る。確定仕様の側は、52 件の記号・Issue・中身が変わらないことと、R0・R1 が表の直前の段落に `R0 #3757「<変更の前の中身>」` の形で移ったことを見る。
 
 ```python
 import json, sys
@@ -249,9 +259,63 @@ sys.exit(bool(bad))
 - その上で C2 の `needs`・C4 の `packages`・`contracts/limits/` の書き込み元・X9 を 1 つずつ削ったとき: どれも 1
 - X3 の中身を変えた・R0 か R1 の文を消した・変えた・行を重ねた・X9 の中身を空にしたとき: どれも 1
 
+## 移した表の確かめ（条件 11）
+
+下を `$W/moved.py` に置き、`python3 "$W/moved.py" <base>` を打つ。移す 2 つの表を、行の ID ごとに全部のセルで変更の前と比べる。規則 `review-items` は 11.x の行き先の形と ID の有無だけを見るので、`Z10` を別の有効な記号に変えた誤りはこのコマンドが拾う。許す差は、182 項目の表のリンク先の文書の名前だけである。
+
+```python
+import collections, pathlib, sys
+from gitread import blobs
+base = sys.argv[1]
+OLD11, NEW11 = "issue-3388-design-routing.md", "ndf-review-items-11x.md"
+TABLES = (("issues/issue-1142-design-review-routing.md", "docs/specifications/ndf-review-items.md", "項目", 182),
+          (f"issues/{OLD11}", f"docs/specifications/{NEW11}", "行", 72))
+def table(text, key):
+    """見出しの先頭の列が `key` で 3 列を超える表（読み方の表は 2 列）。（見出し・行）の並び。"""
+    found, rows = [], None
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not line.startswith("|"):
+            rows = None
+        elif rows is not None:
+            rows.append(cells)
+        elif cells[0] == key and len(cells) > 3:
+            rows = []
+            found.append((cells, rows))
+    return [(head, rows[1:]) for head, rows in found]
+bad, total = [], 0
+before = blobs(base, [t[0] for t in TABLES])
+for source, moved, key, count in TABLES:
+    (head, want), *_ = table(before[source].decode().replace(f"]({OLD11})", f"]({NEW11})"), key)
+    tables = table(pathlib.Path(moved).read_text(encoding="utf-8"), key) if pathlib.Path(moved).is_file() else []
+    now_head, now = tables[0] if len(tables) == 1 else ([], [])
+    if len(want) != count:
+        bad.append(f"変更の前の表が {count} 行でない: {source} {len(want)} 行")
+    if now_head != head:
+        bad.append(f"列が違うか、表が 1 つでない: {moved} {now_head}")
+    if [r[0] for r in now] != [r[0] for r in want]:
+        bad.append(f"行の並びか過不足が違う: {moved} {len(want)} 行 → {len(now)} 行")
+    held = collections.defaultdict(list)
+    for r in now:
+        held[r[0]].append(r)
+    for r in want:
+        if held[r[0]] != [r]:
+            bad.append(f"セルが違う: {moved} {r} → {held[r[0]]}")
+    total += len(want)
+print("\n".join(bad))
+print("比べた行", total, "件・違反", len(bad), "件")
+sys.exit(bool(bad))
+```
+
+- 変更の前（移した 2 本が無い）: 1
+- 2 つの表を、リンク先の文書の名前だけを替えて移したとき: 0（`比べた行 254 件・違反 0 件`）
+- 対応表の `3342-10` の行き先を `Z10` から `Z9` に、`要求 338` の行き先を `Z10` から `Z1` に変えたとき: どれも 1
+- 対応表の行を落とす・重ねる・要旨か見出しを変えたとき: どれも 1
+- 182 項目の表の要求の行かリンク先を変えたとき: どれも 1
+
 ## 構文木の確かめ（条件 10）
 
-下を `/tmp/tree.py` に置き、`python3 /tmp/tree.py <base>` を打つ。ファイルの集合は全体で比べ、中身は `git diff` が挙げた `.py` だけを読む。
+下を `$W/tree.py` に置き、`python3 "$W/tree.py" <base>` を打つ。ファイルの集合は全体で比べ、中身は `git diff` が挙げた `.py` だけを読む。
 
 ```python
 import ast, sys
@@ -280,7 +344,7 @@ sys.exit(bool(bad))
 
 ## `.py` のほかの値の確かめ（条件 10）
 
-下を `/tmp/values.py` に置き、`python3 /tmp/values.py <base>` を打つ。許す差は次だけで、ほかの値・ファイルの追加と削除・実行権の変更は違反にする。
+下を `$W/values.py` に置き、`python3 "$W/values.py" <base>` を打つ。許す差は次だけで、ほかの値・ファイルの追加と削除・実行権の変更は違反にする。
 
 | ファイル | 許す差 |
 | --- | --- |
