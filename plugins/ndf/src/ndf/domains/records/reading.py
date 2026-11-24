@@ -104,7 +104,8 @@ def rows() -> list[dict[str, Any]]:
 def check(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]:
     """承認の手順用: 質問を出す前に足りないもの（`reading_decide.missing`）。PR の今の head は GitHub から読む。
 
-    記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
+    記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、
+    先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
     GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown`（足りないものがあればそちらを返す）。
     """
     _require_keys(entry, CHECK_KEYS)
