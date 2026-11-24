@@ -1,6 +1,6 @@
 # #4446 の詳細設計: 承認資料と質問の文を、承認ゲートの前の工程で読み手役に確かめさせる
 
-設計書 [issue-4446-design.md](./issue-4446-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。読み手は、実装する人とコードレビュー担当のエンジニアである。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるので、設計書に畳まずに別ファイルにした（`design` の手順 6 の条件）。
+設計書 [issue-4446-design.md](./issue-4446-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。読み手は、実装する人とコードレビュー担当のエンジニアである。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変える。そのため、設計書に畳まずに別ファイルにした（`design` の手順 6 の条件）。
 
 **設計書の「未確認のまま残ること」の 2 行は、この文書でも決めていない。** 工程「計画」で決める点は、該当する行に「計画で決める」と書いて残した。特に、PR の題と本文の書き戻し（設計書の「処理の流れ」の手順 8）は、計画で直し方が決まるまで実装しない。そのため、書き戻しの関数は名前と責務だけを置き、異常系の扱いは決めていない。
 
@@ -41,7 +41,7 @@ plugins/ndf/
 └── tests/ (下の「単体テストの観点」の各ファイル)
 ```
 
-依存の向き: `ndf.progress` → `ndf.domains.docrebuild` は呼ばない。工程を進める仕組みは、`ndf document-rebuild gate` をステップのコマンド（`ndf.script`）として子のプロセスで打つ。`ndf.domains.docrebuild.gate` → `ndf.domains.records.reading`（質問の組み立て・2 つの記録の読み書き）→ `ndf.domains.release.forms_decide`（リリースの形の表）の一方向である。`ndf.domains.records.reading` は `ndf.progress` を読まない。`ndf.progress.gate.answering` → `ndf.progress.run` の向きは今のままで、新しい `reread` も `answering` に置く（`run` から `answering` を読むと循環するため）。型の関係は設計書の「構成要素」の図を指し、ここでは描き直さない。
+依存の向き: `ndf.progress` → `ndf.domains.docrebuild` は呼ばない。工程を進める仕組みは、`ndf document-rebuild gate` をステップのコマンド（`ndf.script`）として子のプロセスで打つ。`ndf.domains.docrebuild.gate` → `ndf.domains.records.reading`（質問の組み立て・2 つの記録の読み書き）→ `ndf.domains.release.forms_decide`（リリースの形の表）の一方向である。`ndf.domains.records.reading` は `ndf.progress` を読まない。`ndf.progress.gate.answering` → `ndf.progress.run` の向きは今のままである。新しい `reread` も `answering` に置く（`run` から `answering` を読むと循環するため）。型の関係は設計書の「構成要素」の図を指し、ここでは描き直さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ plugins/ndf/
 | `contracts/workflow/ndf.schema.json`・`parallel-plan.schema.json` | 変更 | ステップの種類 `reading` と行の入力 `kind: release` | — | — | — |
 | `contracts/schemas/internal/reading-docs.schema.json` | 新設 | 読ませたものの記録の行の形 | — | — | — |
 | `contracts/schemas/io/document-rebuild.args.schema.json`・`document-rebuild.result.schema.json` | 変更 | `gate` の引数と結果 | — | — | — |
-| `contracts/domains/ndf-files.json`・`release-forms.json` | 変更 | 記録の置き場と、リリースの形の列 `approve` | — | — | — |
+| `contracts/domains/ndf-files.json`・`release-forms.json` | 変更 | 記録の保存先と、リリースの形の列 `approve` | — | — | — |
 | `contracts/worker/document-rebuild.md`・`document-rebuild-gate.md` | 変更・新設 | worker の起動指示 | — | — | — |
 
 `src/ndf/progress/stages.py`・`src/ndf/progress/gate/release.py`・`src/ndf/progress/gate/entry.py` は、設計書の「設計の結果」の触るファイルに無かった。詳細設計で関数を下ろすと要るので、設計書の触るファイルにも足した（理由は各構成要素の小見出し）。
@@ -102,7 +102,7 @@ plugins/ndf/
 - `drive_gate`
   - 事前条件: `args.gate` は `design` か `release`。`--material` は `release` のときだけ。引数の形は `document-rebuild.args.schema.json` が確かめ済み
   - 事後条件: `ok` なら、`reading-docs.jsonl` に今回の確認の行と完了の行があり、`review_again` が無ければ `reading-checks.jsonl` に 1 行が足されている。`stopped` なら、完了の行は無い
-  - 副作用: GitHub の PR の取得（2 回）・更新（`rewrite_pr` が要るときだけ）、`ndf worker run` の子のプロセス 1 回、`git commit`・`git push`・`ndf ci watch`（文書を直したときだけ）、2 つの記録と写しのファイルへの追記と置き換え
+  - 副作用: GitHub の PR の取得（2 回）・更新（`rewrite_pr` が要るときだけ）、`ndf worker run` の子のプロセス 1 回、`git commit`・`git push`・`ndf ci watch`（文書を直したときだけ）、2 つの記録とコピーのファイルへの追記と置き換え
 - `fix_head`
   - 事前条件: `--pr` が無ければ、経路ごとの決め方（設計書の「承認する PR と承認資料」の表）で PR が決まる
   - 事後条件: `Fixed` は PR の番号・ブランチ・head・題・本文・ベースを持ち、以後の基準になる。設計のステージでは、作業場所の HEAD が head と同じで、変更が無い
@@ -169,7 +169,7 @@ plugins/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 別のレーンの `gate`・`run`・`check` | `reading-docs.jsonl`・`reading-checks.jsonl` | 今の `jsonl.append_locked` のロックで 1 行ずつ追記する | 確認の id と完了の行で、途中で止まった確認を使わない（設計書の「確認の id と完了の行」） |
-| 同じ PR への `gate` の 2 本 | 写しのファイル `reading-materials/<ゲート>-<PR>.md` | 一時ファイルへ書いてから `os.replace` で置き換える | 写しは最後の完了の行の 2 つのハッシュと合うときだけ差分の元にする |
+| 同じ PR への `gate` の 2 本 | コピーのファイル `reading-materials/<ゲート>-<PR>.md` | 一時ファイルへ書いてから `os.replace` で置き換える | コピーは最後の完了の行の 2 つのハッシュと合うときだけ差分の元にする |
 | `gate` と人の PR の編集 | PR の題と本文 | `refetch_check` と、書き換えの後の照合（計画で決める） | 止めて打ち直す |
 
 ### ログと記録の出力
@@ -197,7 +197,7 @@ plugins/ndf/
 | `push_fixed` | `ndf ci watch`（`ndf.ci_cli`） | `grep -n "\"ci\"" src/ndf/cli.py` | 子のプロセスで打つ。テストは `ci_watch` を差し替える |
 | `refetch_check` | `adapters.github.GitHub.pull` | 同上 | 使う |
 | `rewrite_pr` | `adapters.github.GitHub.graphql` | `grep -n "def graphql" src/ndf/adapters/github.py` | 書き換えの後の問い合わせに使う。更新の口は計画で決める |
-| `record` | `records.reading.add`・`append_doc`。写しの置き換えは `os.replace`（`core/worker.py` と同じ形） | `grep -rn "os.replace" src/ndf/core` | 使う。原子的に書く共通の関数は無い（`grep -rn "def write_atomic\|def atomic_write" src/ndf` で 0 件） |
+| `record` | `records.reading.add`・`append_doc`。コピーの置き換えは `os.replace`（`core/worker.py` と同じ形） | `grep -rn "os.replace" src/ndf/core` | 使う。原子的に書く共通の関数は無い（`grep -rn "def write_atomic\|def atomic_write" src/ndf` で 0 件） |
 
 ### 単体テストの観点
 
@@ -233,7 +233,7 @@ plugins/ndf/
 
 満たす決定: 決定 7・8、受け入れ条件 8・9
 
-関数は持たない。セクションの中身は、承認資料を書く → 読み手役に読ませる → 直す → 差分で事実を確かめる、の順の手順である。資料に載せる項目は `approval-request.md` の「承認資料は 2 層に分ける」「承認ゲートごとの違い」を指し、写さない。記録は worker が書かず、gate のサブコマンドが書く。description のトリガーに「承認資料」の語を足し、`python3 scripts/check-skill-frontmatter.py` で確かめる。
+関数は持たない。セクションの中身は、承認資料を書く → 読み手役に読ませる → 直す → 差分で事実を確かめる、の順の手順である。資料に載せる項目は `approval-request.md` の「承認資料は 2 層に分ける」「承認ゲートごとの違い」を指し、コピーしない。記録は worker が書かず、gate のサブコマンドが書く。description のトリガーに「承認資料」の語を足し、`python3 scripts/check-skill-frontmatter.py` で確かめる。
 
 ## 承認の質問の組み立て（`ndf.domains.records.reading`）
 
@@ -312,7 +312,7 @@ plugins/ndf/
   - 事後条件: 足りないものは `no_record`・`no_pr`・`head_moved`・`material_changed` のどれか。判定の順は設計書の「確認の id と完了の行」の 1〜3
   - 副作用: GitHub の PR の取得 1 回・`git fetch`（今と同じ）
 
-`gate` と `check` が同じ値を出すよう、`material_hashes` は `gate.strip_marks` を呼ぶのではなく、`gate.strip_marks` が `material_hashes` の除き方を使う（`records` から `docrebuild` を読まない向きを保つ）。
+`gate` と `check` が同じ値を出すよう、2 つは同じ除き方を使う。`material_hashes` が `gate.strip_marks` を呼ぶのではなく、`gate.strip_marks` が `material_hashes` の除き方を使う（`records` から `docrebuild` を読まない向きを保つ）。
 
 ### 異常系の処理
 
@@ -339,7 +339,7 @@ plugins/ndf/
 | `material_hashes` | セクションを除いた値と全体の値が違う | 印が 2 組 → 何も除かない | — |
 | `row_fingerprint` | キーの順が違っても同じ値 | — | — |
 
-## 読ませたものの記録（`reading-docs.jsonl`）と承認資料の写し
+## 読ませたものの記録（`reading-docs.jsonl`）と承認資料のコピー
 
 満たす決定: 決定 4、受け入れ条件 1・6
 
@@ -348,7 +348,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `docs_path` | `records/reading.py` | 新設 | `docs_path() -> Path` | `reading-docs.jsonl` のパス（表 `ndf-files` の行 `reading-docs`） |
-| `materials_path` | `records/reading.py` | 新設 | `materials_path(gate: str, number: int) -> Path` | 写しのパス（表 `ndf-files` の行 `reading-materials`） |
+| `materials_path` | `records/reading.py` | 新設 | `materials_path(gate: str, number: int) -> Path` | コピーのパス（表 `ndf-files` の行 `reading-materials`） |
 | `append_doc` | `records/reading.py` | 新設 | `append_doc(row: Mapping[str, Any]) -> dict[str, Any]` | 1 行を `jsonl.append_locked` で追記する。形は `reading-docs.schema.json` |
 | `completed` | `records/reading.py` | 新設 | `completed(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]` | 確認の id から完了の行 |
 | `latest_read` | `records/reading.py` | 新設 | `latest_read(rows, key: tuple[str, ...]) -> Optional[Mapping[str, Any]]` | 設計書の「読ませるものの決め方」のキーで、完了した確認の最後の読ませた行を引く |
@@ -439,7 +439,7 @@ plugins/ndf/
 
 満たす決定: 決定 2、受け入れ条件 3・4
 
-ステップの種類 `reading` は、`call` を `ndf.script`（argv は `ndf document-rebuild gate --gate <種類>`）とし、`metadata.ndf.kind` を `reading`、`metadata.ndf.gate` にどのゲートの前かを書く。`invoke.CALLS` に新しい呼び方を足さないためである。`ndf.schema.json` は、`kind` の値に `reading` を足し、`gate` を書いてよい種類を `gate` と `reading` にする。
+ステップの種類 `reading` は、`call` を `ndf.script`（argv は `ndf document-rebuild gate --gate <種類>`）とする。`metadata.ndf.kind` は `reading` にし、`metadata.ndf.gate` にどのゲートの前かを書く。`invoke.CALLS` に新しい呼び方を足さないためである。`ndf.schema.json` は、`kind` の値に `reading` を足し、`gate` を書いてよい種類を `gate` と `reading` にする。
 
 ### 関数の仕様
 
@@ -449,7 +449,7 @@ plugins/ndf/
 | `StageDef.mvv_before` | `progress/stages.py` | 新設 | `mvv_before(self, step_id: str) -> Optional[str]` | 承認ゲートの直前のステップの id。種類 `reading` のステップを飛ばす |
 | `StageDef.reading_for` | `progress/stages.py` | 新設 | `reading_for(self, gate: str) -> Optional[StepDef]` | 同じ工程で、そのゲートの前の種類 `reading` のステップ |
 
-`stages.py` を触るのは、`gates` が `st.gate` を持つステップをすべて数えるため、`reading` のステップを足すと承認ゲートが 2 つに数えられ、工程を無効にできるかの判定（`_refuse_disabled_gate`）と表示（`command._row`）が変わるからである。
+`stages.py` を触るのは、`gates` が `st.gate` を持つステップをすべて数えるからである。`reading` のステップを足すと、承認ゲートが 2 つに数えられる。すると、工程を無効にできるかの判定（`_refuse_disabled_gate`）と表示（`command._row`）が変わる。
 
 ### 既存の部品の再利用
 
@@ -491,7 +491,7 @@ plugins/ndf/
 | `_cmd_reread`・`reread_parser` | `progress/gate/entry.py` | 新設 | `_cmd_reread(a, cwd, st) -> dict[str, Any]`・`reread_parser() -> argparse.ArgumentParser` | `ndf progress reread <ID>` を受ける |
 | `progress_main` | `progress/gate/entry.py` | 変更 | 今のまま | `reread` を `_cmd_reread` へ渡す |
 
-`reread` を `answering.py` に置き、受け口を `entry.py` に置くのは、`run.py` から `answering` を読むと循環するためである（`answering` は `run` を読む）。
+`reread` は `answering.py` に置き、受け口は `entry.py` に置く。`run.py` から `answering` を読むと循環するためである（`answering` は `run` を読む）。
 
 - `reread`
   - 事前条件: 承認ゲートが人の回答を待っている
@@ -610,7 +610,7 @@ plugins/ndf/
 
 満たす決定: 決定 9、受け入れ条件 10
 
-工程「版上げ」のステップの並びは設計書の「版上げのスプリント」の表のとおりで、`stages/release-bump.json` に書く。`bump-assemble` はテンプレート `release-bump`（`contracts/templates/release-bump.json`）のプランで、範囲の引数を作るコマンド・`ndf release-steps materials`・`assemble` を並べる。`bump-present`・`bump-record` は `ndf.script` のステップである。
+工程「版上げ」のステップの並びは設計書の「版上げのスプリント」の表のとおりで、`stages/release-bump.json` に書く。`bump-assemble` は、テンプレート `release-bump`（`contracts/templates/release-bump.json`）のプランである。このプランは、範囲の引数を作るコマンド・`ndf release-steps materials`・`assemble` を並べる。`bump-present`・`bump-record` は `ndf.script` のステップである。
 
 ### 関数の仕様
 
@@ -623,7 +623,7 @@ plugins/ndf/
 | `_sprint_new`・`_cmd_new` | `progress/command.py` | 変更 | 今のまま | `--release-requests` を受け、モード `release-bump` は `--issues` 無しで作る。ほかのモードに `--release-requests` を渡したら断る |
 | `_request_fields`・`_plan_request` | `progress/gate/release.py` | 変更 | 今のまま | モードが `release-bump` なら種類 `bump-release` で、版上げの PR・`outputs.material` のパス・まとめたリクエストを書く |
 
-リクエストを書くのは `asking.py` ではなく `gate/release.py` の `_plan_request` なので、設計書の「設計の結果」の触るファイルに `gate/release.py` を足した。
+リクエストを書くのは、`asking.py` ではなく `gate/release.py` の `_plan_request` である。そのため、設計書の「設計の結果」の触るファイルに `gate/release.py` を足した。
 
 ### 異常系の処理
 
