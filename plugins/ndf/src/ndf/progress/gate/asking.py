@@ -267,7 +267,7 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
     """
     path = material_path(root, q)
     shown = presented_path(root, q)
-    if _moved(read_presented(root, q), q.target):
+    if _presented_target_moved(read_presented(root, q), q.target):
         path.unlink(missing_ok=True)
         shown.unlink(missing_ok=True)
     if not path.exists():
@@ -288,7 +288,7 @@ PRESENTED_SUFFIX = ".target.json"
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
-def _moved(held: Target, now: Target) -> bool:
+def _presented_target_moved(held: Target, now: Target) -> bool:
     """提示した承認の対象 `held` と今の対象 `now` の、承認の対象か「本番へ反映されるか」が違うか（両方がそろうときだけ比べる）。"""
     then, current = held.binding(), now.binding()
     if then is None or current is None:

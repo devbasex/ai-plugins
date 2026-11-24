@@ -166,7 +166,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
         "presented_id": _presented_id(found),
         "presentation_path": _presentation_path(found),
-        "production": _production(found),
+        "production": _gate_reaches_production(found),
     }
 
 
@@ -183,7 +183,7 @@ def _presentation_path(found: dict[str, Any]) -> Optional[str]:
     return got if found["status"] == GATE and isinstance(got, str) and got else None
 
 
-def _production(found: dict[str, Any]) -> Optional[bool]:
+def _gate_reaches_production(found: dict[str, Any]) -> Optional[bool]:
     """承認待ちの結果の「この承認でマージが本番へ反映され得るか」（`metrics.production`）。無ければ None。"""
     metrics = found.get("metrics")
     got = metrics.get("production") if isinstance(metrics, dict) else None

@@ -478,7 +478,7 @@ def _merge_without_a_login_stops_apart_from_approval_stale(monkeypatch, capsys, 
 
 
 def _merge_moved_right_before_sending_is_approval_stale(monkeypatch, capsys, last_result, gate, code):
-    """r1-6: 直前の照合で HEAD が動いたら、承認の対象を持つ呼び手は approval_stale、持たない呼び手は refused で止まる。"""
+    """r1-6: マージの直前の確かめで HEAD が動いたら、承認の対象を持つ呼び手は approval_stale、持たない呼び手は refused で止まる。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pull_at_merge=merge_hub.pull(head="f" * 40)))
     _approve(hub)
     approved = ["--approved-head", merge_hub.HEAD, "--approved-base", "main"] if gate == "stale" else []
