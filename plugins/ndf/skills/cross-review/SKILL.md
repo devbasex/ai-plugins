@@ -21,12 +21,22 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 その並びで回し、表に無い名前や読むだけの起動を持たない名前は `invalid` で止まる。メインディレクトリの `.ndf/runtimes.json` の
 `allowed` があれば、相手役はその中から選び、外の名前を名指せば `invalid` で止まる。修正担当（claude）が `allowed` に無ければ、どの担当も起動する前に `precondition` で止まる。
 
-相手役は指摘の基準（利用者の経路の誤動作・秘密や戻せない操作・`.ndf/review.json` の重点・設計の食い違い）に当たる指摘だけを
+相手役は指摘の基準（利用者の経路の誤動作・秘密や戻せない操作・`.ndf/review.json` の重点・設計の食い違い・プロジェクト MVV に反する変更）に当たる指摘だけを
 重要度つきで書き、`minor`・`nit` の指摘は収束を止めず修正担当へ渡らない。相手役へは PR に既にあるコメントも渡し、
 同じ論点を出し直させない。基準と重要度の扱いは [docs/01](docs/01-state-and-review.md) の「指摘の基準」にある。
 
+**マージ先のブランチに承認済みのプロジェクト MVV があれば、`run` は MVV も確かめる。** 無いリポジトリでは何も変わらない。
+
+| 見つけたもの | 扱い |
+| --- | --- |
+| Mission・Vision・Value に反する指摘（基準 5） | `major` 以上として修正担当へ渡す。修正担当は直すか、反しない理由を書いて見送る |
+| 必ず人の承認が要る操作（MVV の `P<番号>`・共通原則の `C<番号>`）に当たる指摘（基準 5） | 修正担当へ渡さず、直さずに残す。収束は止めない。要約と記録のコメントに「人の承認を待つ」と出る |
+| PR が足した MVV の根拠の行の誤り（違うバージョン・実在しない項目・読み取れない形） | 相手役ではなく NDF が見つけ、修正担当へ渡す。見送れず、直るまで残る。cross-review の指示と結果では「根拠の記述」と呼ぶ |
+
+反する指摘か根拠の行の誤りが残ったまま終わるか、根拠の行を最後のコミットで確かめられなければ、`mvv_unresolved` で止まる。
+
 /goal の引数として、または development-workflow の工程として呼ばれた場合は、`status: ok` になるまで同じコマンドを打ち直す。
-  * `work_stopped`・`precondition`・`invalid` で止まったら異常終了とする
+  * `work_stopped`・`mvv_unresolved`・`precondition`・`invalid` で止まったら異常終了とする
 
 詳細は `docs/` 配下に分割している。収束ループは `ndf cross-review run` が 1 回の起動で回す:
 
@@ -103,8 +113,9 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 | --- | --- | --- |
 | `ok` | 終わり方に欠けが無い（収束、または上限・振動・誤りで終わったが欠け 0 件。理由は `decisions`） | `items`・`metrics`・`decisions` を「作業完了報告」へ写す |
 | `stopped`・`incomplete` | 未解決の指摘・扱わなかった足すべき内容・理由の無い見送りが残る（`gaps`） | `gaps` を報告する。続けるなら同じコマンドを打ち直す |
+| `stopped`・`mvv_unresolved` | 上限のラウンドまで回しても、MVV に反する指摘か根拠の行の誤りが残った・根拠の行を最後のコミットで確かめられなかった（欠けは `outputs.gaps`。理由は `warnings`） | 次の工程へ進まない。残った指摘と反する項目を報告して人へ戻す。PR を直した後に同じコマンドを打ち直す |
 | `stopped`・`work_stopped` | 1 ラウンドも終えずに誤りで終わった・前の起動の修正を送れない・一部の相手役が起動し直しても差分を読めなかった（`incomplete_reviewers`。相手役ごとの直し方は `warnings`） | `summary` と `warnings` を報告して止まる |
-| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・`.ndf/runtimes.json` の外の相手役・`.ndf/review.json` が `version: 1` でない・相手役が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。相手役ごとの直し方は `cause.detail`） | `summary` を報告して止まる。原因を取り除いて打ち直す |
+| `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・`.ndf/runtimes.json` の外の相手役・`.ndf/review.json` が `version: 1` でない・マージ先のブランチの MVV を読めない（本文が承認の記録と合わないときも同じ）・相手役が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。相手役ごとの直し方は `cause.detail`） | `summary` を報告して止まる。原因を取り除いて打ち直す |
 
 **修正はメインで書かない。** 修正担当（claude）は `run` が起動し、送るのも `run` が行う（[docs/02](docs/02-fix-and-rotation.md)）。
 
@@ -121,7 +132,9 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 - **終わり方**（`summary` と `decisions`）・**ラウンド数**（`metrics.rounds`）・**指摘の数**（`metrics.findings`）
 - **各ラウンドの表**（round・head・範囲・判定・修正のコミットと送れたか。状態ファイルの `rounds[]`）
 - **指摘ごとの終わり方**（`items` の `id` と `outcome`。見送りは理由を状態ファイルの `findings[]` から写す）
-- **欠け**（`gaps`）と**注意**（`warnings`。回答しなかった相手役・修正担当が結果を書かなかった・送れなかった）
+- **MVV**（`outputs.mvv`。承認済みの MVV があるときだけ）: 確かめた MVV の `version`、`findings` と `citations` の終わり方、`disputed`
+  （修正担当が反しないとして見送った指摘）の理由、`redlines`（人の承認を待つ指摘）の番号と本文。キーは [docs/02](docs/02-fix-and-rotation.md) の「終わり方」にある
+- **欠け**（`gaps`。`mvv_unresolved` では `outputs.gaps`）と**注意**（`warnings`。回答しなかった相手役・修正担当が結果を書かなかった・送れなかった）
 - **最終 PR URL** と **記録のコメントの URL**（`items` の `kind: comment`）
 - **検証**: CI のチェックの名前と結論（`gh pr checks <PR>`）
 

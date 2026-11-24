@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -66,6 +67,9 @@ class FakePort:
         self.review_reads = 0
         self.thread_reads = 0
         self.changed_reads = 0
+        # PR のマージ先のブランチ（None なら読み取りに失敗する）と、読んだ回数
+        self.base_ref: str | None = "main"
+        self.base_reads = 0
 
     def at(self, pr: int) -> "FakePort":
         """PR を切り替える（作ったスレッドは PR ごとに読む）。"""
@@ -83,6 +87,12 @@ class FakePort:
     def changed(self):
         self.changed_reads += 1
         return _Everything() if self.files is None else frozenset(self.files)
+
+    def base(self):
+        self.base_reads += 1
+        if self.base_ref is None:
+            raise RuntimeError("PR を読めない")
+        return self.base_ref
 
     def open_threads(self):
         self.thread_reads += 1
@@ -130,10 +140,13 @@ class FakeHub:
     ロックのファイルを書かない）。"""
 
     def __init__(self):
+        from ndf.domains.crossreview import cli
+
         self.comments: list[tuple[str, int, str]] = []
         self.port = FakePort()
         self.slug = ""
         self.made = 0
+        self.clean: Any = cli._redacted
 
     def make(self, repo_arg, state_repo, cwd):
         from ndf.domains.crossreview import cli
@@ -146,7 +159,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, self.port.at, self.port.at, publishing=lambda pr: contextlib.nullcontext())
+        return cli.Hub(comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext())
 
 
 @pytest.fixture(autouse=True)

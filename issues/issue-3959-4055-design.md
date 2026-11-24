@@ -37,8 +37,8 @@ graph TD
 | #4076 が作る部品 | 振る舞い | 場所 |
 | --- | --- | --- |
 | MVV のコピー | `current(root, ref) -> Snapshot`。ベースブランチの承認済みの MVV のバージョン・sha256・コピーのパス・項目の一覧（`items`）・解決したコミット（`commit`）を返す。ベースの本文が承認の記録と合わなければ `MvvError`。CLI は `ndf records mvv current --base` | `records/mvv.py` |
-| 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py` |
-| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
+| 根拠の行の確かめ | `citation_errors`（パス・行の番号・本文・決定の根拠の行か、の 4 要素を受ける）・`fenced_lines`・`decision_lines`（`### 決定 <数>` の見出しの下の行の番号）。純粋な関数。誤りは `kind`（`format` を含む）を持つ | `records/mvv_decide.py`（`citation_errors`）、`records/mvv.py`（`fenced_lines`・`decision_lines`） |
+| cross-review の MVV の記録 | `record_review` が `mvv-validation.jsonl` に種類 `mvv-review` の行（`repo`・`pr`・`head`・`key`・`id`・`item`・`outcome`・`mvv_version`・`sha256`・`at`、`deferred` は `reason`、`redline` は `text`）を書く。引数 `clean` が None（伏せる照会に失敗）なら自由記述を持たない `withheld: true` の行を書く。書けなければ注意に留める（#4076 の時点の形。この Issue は決定 2 で、必須の行を書けなければ止める形に変える） | `records/mvv.py`、`crossreview/drive.py` の `_summary` |
 | 共通原則の本文 | `principles()` を `mvv_gate.py` から `mvv.py` へ移す | `records/mvv.py` |
 
 ## 文脈と制約
@@ -131,7 +131,7 @@ MVV の事実（検査 1・判定の材料・保留のバージョン）は、�
 
 ### cross-review の結果（#4076 から移した変更）
 
-`ndf cross-review run` は、`record_review` が `redline`・`deferred` の行を書けなかったら、終わり方を `STOPPED`・`cause.kind: mvv_record_failed` にする。`fixed`・`unresolved` の行だけが書けなかったときは今どおり注意に留める。
+`ndf cross-review run` は、`record_review` が `redline`・`deferred` の行を書けなかったら（追記の失敗だけでなく、ロックの取得と既存の行の読み取りの失敗を含む）、終わり方を `STOPPED`・`cause.kind: mvv_record_failed` にする。`fixed`・`unresolved` の行だけが書けなかったときは今どおり注意に留める。
 
 ## 処理の流れ
 
@@ -196,7 +196,7 @@ graph LR
 ### 決定 2: レッドラインの指摘が残る PR を人が見るため、承認ゲートの省略の条件に cross-review の記録を足す
 
 - **質問**: #4076 から移した「レビューの記録を読んで省かない」仕組みを、どの形で承認ゲートと承認資料に入れるか
-- **選んだ案**: #4076 の詳細設計で決まった規則（#3959 の本文の「#4076 の設計から移した仕組み」）を、2026-11-23 の設計承認ゲートで利用者が絞った形で採る（伏せた行を保留にする 3 つ目の規則は、後の #4090・#4099 の設計が足したもので、決定 11 で入れる）。`review_rows` が `mvv-validation.jsonl` の `mvv-review` の行と読めなかった行の数を返す。`review_holds` は対象の PR ごとに、最後の `redline` の行より後に同じキーの `fixed` が無いキー（直っていないレッドライン）と、今のバージョンの `deferred` のうち見送りの区分 `defer` が `needs_user` か区分が無く、後に同じキー・同じバージョンの `fixed` が無いキー（利用者の判断が要る見送り）を保留として返す。区分が `filed`・`not_applicable` の見送りは保留にしない。区分は修正担当が見送るときに書き、cross-review のジャーナルが理由とともに持ち、`record_review` が行に書く。head で行を選ばない。保留は検査 7 として `refusals` に入り、承認資料の「MVV 判定」の欄と PR のコメントにも同じ結果が載る。記録を読めないときと読めない行があるときも保留にする。cross-review は `redline`・`deferred` の行を書けなければ `mvv_record_failed` で止まる
+- **選んだ案**: #4076 の詳細設計で決まった規則（#3959 の本文の「#4076 の設計から移した仕組み」）を、2026-11-23 の設計承認ゲートで利用者が絞った形で採る（伏せた行を保留にする 3 つ目の規則は、後の #4090・#4099 の設計が足したもので、決定 11 で入れる）。`review_rows` が `mvv-validation.jsonl` の `mvv-review` の行と読めなかった行の数を返す。`review_holds` は対象の PR ごとに、最後の `redline` の行より後に同じキーの `fixed` が無いキー（直っていないレッドライン）と、（`mvv_version`, `sha256`）の組がゲートの使う MVV と一致する（今のバージョンの）`deferred` のうち見送りの区分 `defer` が `needs_user` か区分が無く、後に同じキーで同じ組の `fixed` が無いキー（利用者の判断が要る見送り）を保留として返す。番号が同じでも `sha256` が違う行は、今のバージョンの行として数えず、`deferred` の保留の解除にも使わない（組の一致を求めるのは `deferred` の保留と伏せた行の保留だけで、レッドラインの保留は MVV のバージョンや `sha256` を問わず後の同じキーの `fixed` で外す）。区分が `filed`・`not_applicable` の見送りは保留にしない。区分は修正担当が見送るときに書き、cross-review のジャーナルが理由とともに持ち、`record_review` が行に書く。head で行を選ばない。保留は検査 7 として `refusals` に入り、承認資料の「MVV 判定」の欄と PR のコメントにも同じ結果が載る。記録を読めないときと読めない行があるときも保留にする。cross-review は `redline`・`deferred` の行を書けなければ `mvv_record_failed` で止まる
 - 採らなかった案: 承認資料に載せるだけで、`fast`・`auto` の省略の条件には足さない（人が資料を読まない `service:mvv` の承認で、レッドラインの指摘が残る PR が通る。#4076 の cross-review の指摘 r1-5 が critical とした危険が残る）
 - 採らなかった案: 判定の LLM の材料に cross-review の記録を足し、LLM に省くかを決めさせる（同じ記録でも判定が揺れ、記録を読めないときに省かない側へ倒す決まりを LLM に任せることになる）
 - 採らなかった案: #4076 から移したままの規則（`redline` の行が 1 行でもあるキーを外さず、今のバージョンの `deferred` をすべて保留にする）にする（直した後もレッドラインがずっと保留になり、cross-review はほとんどの PR で何かを見送るので、事実上どの PR も承認ゲートを省けない。2026-11-23 の設計承認ゲートで利用者が差し戻し、保留を絞ると決めた）
@@ -281,7 +281,7 @@ graph LR
 ### 決定 11: #4076 の直しと食い違わない部品を作るため、#4090・#4099 の決定 16 の 5 点をこの設計に入れる
 
 - **質問**: #4090・#4099 の設計（PR #4121）が決めた、#3959 と重なる 5 点（`Snapshot.commit`・`cite` の `mismatch`・`cite` が使う確かめの関数・`record_review` の契約・`review_holds` の規則）を、いつ #3959 の文書に入れるか
-- **選んだ案**: この設計で入れる。`Snapshot.commit` は #4076 の実装が足すので使うだけにし、`cite` は `mismatch` の分岐を持たず、`decision_lines` で 4 要素を作って `citation_errors` を呼ぶ。`record_review` は `clean`・`mvv` の引数と `ReviewWrite` の返り値を両方持ち、伏せた行の追記の失敗も `missing` に載せる。`review_holds` は今のバージョンの `withheld: true` の行で終わるキーも保留する（承認資料には伏せた理由の代わりに `WITHHELD` の文を載せる）
+- **選んだ案**: この設計で入れる。`Snapshot.commit` は #4076 の実装が足すので使うだけにし、`cite` は `mismatch` の分岐を持たず、`decision_lines` で 4 要素を作って `citation_errors` を呼ぶ。`record_review` は今の引数（`repo`・`pr`・`head`・`snapshot`・`rows`・`clean`）のまま返り値を `ReviewWrite` に変え、伏せた行の追記の失敗も、その行が必須の行（`redline`・`deferred`）なら `missing` に載せる（`withheld` によらず必須かは `outcome` で決まり、伏せた `fixed`・`unresolved` の追記の失敗は `missing` に載せず、`cause` を返して注意に留める）。`review_holds` は、（`mvv_version`, `sha256`）の組がゲートの使う MVV と一致する `withheld: true` の行で終わるキーも保留する（承認資料には伏せた理由の代わりに `WITHHELD` の文を載せる）
 - 採らなかった案: 決定 16 のとおり実装の PR で読み替える（実装する人が 2 つの設計を突き合わせて読み替えることになり、設計承認ゲートで見ていない形が実装に入る。実装計画のレビューの単位も、読み替えた後の関数で数えられない）
 - **代償**: この設計 PR が #4090・#4099 の設計を前提にする。#4076 の実装が #4090・#4099 の直しと違う形で入れば、この設計の該当の行を直す
 - 根拠: Value 11 / Value 14（MVV バージョン 11）
@@ -334,6 +334,8 @@ graph LR
 | 8 | `--machine` で文脈から組んだ入力が、同じ文脈でプランが組む入力（`resolve_inputs`）と同じで、両方のエントリポイントが同じ PR と判定結果を選ぶ。環境変数と両方 → `invalid`。無い ID → `refused` | 文脈の `mvv_ref` を落とす・両方あるときに片方を選ぶ・`design_pr` で別の PR を判定する |
 | 9 | `{"context": {...}}` の `NDF_STAGE_INPUT` で `stopped`・`invalid`、`mode` の無い入力で `input_missing`、どちらも LLM のスタブと `gate` を呼ばない。プランが組む入力（`resolve_inputs` の結果）は今どおり通る。`validate_stage_input` が平らな形を確かめる | 形の違う入力で `ok` のまま判定を打たない・プランの入力が落ちる・`resolve_inputs` と判定のエントリポイントが別の規則で確かめる |
 | 4（伏せた行） | キーの最後の行が今のバージョンの `withheld: true` の行なら、`fast` でも保留になり `skip` は偽。承認資料に `WITHHELD` の文が載る | 伏せた行を保留にせず省く |
+| 4（ハッシュだけが違う行） | `mvv_version` が同じで `sha256` の違う `fixed` は、今の `needs_user` の保留を外さない | バージョンの番号だけで比べ、別の本文の `fixed` で省く |
+| 5（追記の前の失敗） | 既存の `mvv-validation.jsonl` が不正な UTF-8 のとき、書けていない `redline` が `missing` に入り、`cmd_run` の結果が `STOPPED`・`mvv_record_failed` | 追記の失敗だけを捕まえ、警告だけで収束する |
 | 前提 2 | 承認済みの MVV が無いリポジトリで `design`・`release` の出力が今の形（`verdict: null`） | 形が変わる |
 
 ## どこを変えるか

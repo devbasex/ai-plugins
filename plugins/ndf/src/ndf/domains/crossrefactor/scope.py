@@ -39,12 +39,12 @@ def tracked(work: Path, scope: Sequence[str]) -> list[str]:
 
 
 def touched(work: Path, base: str, head: str, scope: Sequence[str]) -> Touched:
-    """`base..head` の差分が触る関数を、範囲の中のファイルごとに返す。読めなければ `ScopeError`（ファイル単位へ倒さない）。"""
+    """`base` と `head` の分岐点から `head` までの差分（`base...head`）が触る関数を、範囲の中のファイルごとに返す。読めなければ `ScopeError`（ファイル単位へ倒さない）。"""
     git = _git(work)
     try:
         if git.rev_parse(head) != git.rev_parse("HEAD"):
             raise ScopeError(f"{head} は作業場所の HEAD でない（中身を作業場所のファイルから読むため）")
-        diff = git.run("diff", "-U0", "--no-color", "--no-ext-diff", f"{base}..{head}", "--", *scope)
+        diff = git.run("diff", "-U0", "--no-color", "--no-ext-diff", f"{base}...{head}", "--", *scope)
         changes = diff_decide.file_changes(diff)
     except (GitError, diff_decide.DiffError) as exc:
         raise ScopeError(str(exc)) from exc

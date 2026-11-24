@@ -40,6 +40,7 @@ ndf plan wait <プラン>.json
 | `ndf progress show` | スプリントのステートマシンの今の状態を出す |
 | `ndf answer` | 承認ゲートの回答（承認・変更要求・不承認）をステートマシンへ書く。打つ場面は [approval-request.md](approval-request.md) の「回答を記録する」 |
 | `ndf answer list` | 書いた回答を古い順に出す |
+| `ndf records mvv current` | supervisor の起動指示の MVV の欄を書くために、マージ先のブランチの承認済みの MVV を読む（`--base <マージ先のブランチ>`。[project-mvv.md](project-mvv.md) の「工程での読み方」） |
 | `ndf records mvv gate` | 承認ゲートの前に MVV の判定の材料を出す（`--gate <design か release>`。[pace.md](pace.md) の「MVV 判定」） |
 | `ndf records mvv signals` | プロジェクト MVV の改訂の兆候を出す。手順は [project-mvv.md](project-mvv.md) |
 

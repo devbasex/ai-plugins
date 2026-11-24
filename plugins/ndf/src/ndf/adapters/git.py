@@ -11,10 +11,10 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 
@@ -25,16 +25,26 @@ SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 # リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+# `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
+_BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
+# git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
+_URL_USERINFO = re.compile(r"(?<=://)[^\s/?#]*@")
+_URL_QUERY = re.compile(r"(://[^\s?#]*[?#])\S+")
 # `git log --format` で各コミットの行の先頭に置くマーカー（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
+# タグの参照の接頭辞
+TAGS = "refs/tags/"
 # リモート名の既定を持つ唯一の保存先（スキーマの `default`）。値はここに書かない（#3617 の I7a）
 REMOTE_SCHEMA = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
 # リモート名を書く設定（メインディレクトリからの相対）
 WORKTREE_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
+# 部分クローン（`--filter`）で手元に無いオブジェクトを、読み取りの途中でリモートから取得させない環境変数。
+# `GIT_NO_LAZY_FETCH` を読まないバージョン（2.43.0・2.44.0 など）も、通信の手段を 1 つも許さなければ取得が通信の前に失敗する
+NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
 # （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
 # 前に置き、checkout は SHA へ解決してから渡し、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
@@ -93,13 +103,30 @@ class Completed(NamedTuple):
 Runner = Callable[[list[str], Optional[Path]], Completed]
 
 
-def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
-    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
+def _start(
+    args: list[str], cwd: Optional[Path], text: bool, stdin: Optional[bytes] = None, env: Optional[Mapping[str, str]] = None
+) -> subprocess.CompletedProcess[Any]:
+    """git を 1 回起動する。認証の入力を端末へ求めない（`NO_PROMPT`）。`stdin` があれば標準入力へ渡し、`env` があれば環境変数に足す。"""
+    full = {**os.environ, **NO_PROMPT, **(env if env is not None else {})}
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False, env={**os.environ, **NO_PROMPT})
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=text, check=False, env=full, input=stdin)
     except OSError as exc:
         raise GitError(f"git を起動できない: {exc}") from None
+
+
+def run_git(args: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str]] = None) -> Completed:
+    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
+    proc = _start(args, cwd, text=True, env=env)
     return Completed(proc.returncode, proc.stdout, proc.stderr)
+
+
+def _mask_urls(text: str) -> str:
+    """git の誤りの文から、URL の認証情報とクエリを伏せる（結果 JSON・ログに出すため）。"""
+    return _URL_QUERY.sub(r"\1***", _URL_USERINFO.sub("***@", text))
+
+
+def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
+    return GitError(_mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -193,6 +220,13 @@ class Git:
 
     cwd: Optional[Path] = None
     runner: Runner = run_git
+    # git の環境変数に足す値（`run_bytes` の起動。`attempt` の起動は `runner` が足す）
+    env: Optional[Mapping[str, str]] = None
+
+    @classmethod
+    def offline(cls, cwd: Optional[Path]) -> Git:
+        """手元に無いオブジェクトをリモートから取得しない `Git`（`NO_LAZY_FETCH`）。欠けたオブジェクトは、git のバージョンと操作により、無いものとして読むか `GitError`。"""
+        return cls(cwd, functools.partial(run_git, env=NO_LAZY_FETCH), NO_LAZY_FETCH)
 
     def attempt(self, *args: str) -> Completed:
         """git を起動して結果をそのまま返す（失敗でも例外にしない。成否を読むのは呼び手）。"""
@@ -202,7 +236,14 @@ class Git:
         """git を起動して標準出力を返す。終了コードが 0 でなければ `GitError`。"""
         done = self.attempt(*args)
         if done.returncode != 0:
-            raise GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
+            raise _failed(args, done.returncode, done.stderr)
+        return done.stdout
+
+    def run_bytes(self, *args: str, stdin: Optional[bytes] = None, codes: Sequence[int] = (0,)) -> bytes:
+        """git を起動して標準出力を元のバイト列のまま返す（改行を変えない）。終了コードが `codes` に無ければ `GitError`。"""
+        done = _start(list(args), self.cwd, text=False, stdin=stdin, env=self.env)
+        if done.returncode not in codes:
+            raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
     def rev_parse(self, ref: str) -> str:
@@ -211,6 +252,36 @@ class Git:
         if not FULL_SHA.match(sha):
             raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
         return sha
+
+    def blobs(self, *names: str) -> list[Optional[bytes]]:
+        """blob の元のバイト列を、何件でも git を 1 回だけ起動して `names`（`<コミット>:<パス>` か id）の順に返す。無い・blob でないものは None。"""
+        rest = self.run_bytes("cat-file", "--batch", stdin="".join(f"{n}\n" for n in names).encode("utf-8"))
+        out: list[Optional[bytes]] = []
+        for _ in names:
+            line, _, rest = rest.partition(b"\n")
+            head = _BATCH_HEAD.match(line)
+            if head is None:
+                out.append(None)
+                continue
+            size = int(head.group(2))
+            out.append(rest[:size] if head.group(1) == b"blob" else None)
+            rest = rest[size + 1 :]
+        return out
+
+    def commits_of(self, *refs: str) -> list[str]:
+        """参照（`refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。"""
+        got = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
+        if len(got) != len(refs) or not all(FULL_SHA.match(sha) for sha in got):
+            raise GitError(f"{', '.join(refs)} をコミットへ解決できない: {got!r}")
+        return got
+
+    def commit_named(self, name: str) -> Optional[str]:
+        """`name` がブランチでない手元のコミット（短縮した SHA・タグ・`HEAD~3` など）を指せば完全な SHA。ブランチか、解決できなければ None。"""
+        try:
+            ref = self.run("rev-parse", "--verify", "--quiet", "--symbolic-full-name", END_OF_OPTIONS, name).strip()
+            return None if ref and not ref.startswith(TAGS) else self.rev_parse(name)
+        except GitError:  # noqa: NDF401 外部コマンド: コミットを指さない名前は None で呼び手へ返す（呼び手は元の失敗を出す）
+            return None
 
     def merge_base(self, a: str, b: str) -> str:
         return self.run("merge-base", "--", a, b).strip()
@@ -254,13 +325,13 @@ class Git:
         """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
         return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
-    def changed_files(self, base: str, head: str) -> list[str]:
-        """`base...head`（分岐点から head まで）で変わったファイルのパス。
+    def changed_files(self, base: str, head: str, *options: str) -> list[str]:
+        """`base...head`（分岐点から head まで）で変わったファイルのパス。`options` は `git diff` に足す引数。
 
         `-z` で NUL 区切りに読む。改行区切りでは、既定の `core.quotePath` が日本語・タブ・引用符を含むパスを
         引用・エスケープした文字列のまま返し、呼び手が実際のファイルを開けない。
         """
-        return [p for p in self.run("diff", "--name-only", "-z", END_OF_OPTIONS, f"{base}...{head}").split("\0") if p]
+        return [p for p in self.run("diff", "--name-only", "-z", *options, END_OF_OPTIONS, f"{base}...{head}").split("\0") if p]
 
     def changed_lines(self, base: str, head: str, exclude: Iterable[str] = ()) -> int:
         """`base..head` の first-parent の各コミットの変更行数の和。`exclude` のコミットの分は数えない（#3087）。
@@ -347,4 +418,4 @@ class Git:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} をマージできない: {done.stderr.strip()}")
+            raise GitError(f"{remote} の {name} をマージできない: {_mask_urls(done.stderr.strip())}")

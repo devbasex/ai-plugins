@@ -88,7 +88,10 @@ class Port(Protocol):
 
 class Reader(Protocol):
     """PR のコメントを読む口（テストは偽物）。失敗は例外。`comments` は PR コメント（引き継ぎの確かめに要る記録のコメントを
-    含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。"""
+    含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。`base` は PR の
+    マージ先のブランチの名前。"""
+
+    def base(self) -> str: ...
 
     def comments(self) -> list[prior_decide.Remark]: ...
 
@@ -443,6 +446,9 @@ class GitHubPort:
         self._pr_head: Optional[str] = None
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
+        self._base: Optional[str] = None
+        # `base` が先に読んだスレッド（次の `open_threads` が 1 回だけ使う）
+        self._ahead: Optional[list[prior_decide.Thread]] = None
 
     def _write(self, call: Callable[[], T]) -> T:
         return patient(call, self.errors, self.sleep, self.block)
@@ -497,6 +503,14 @@ class GitHubPort:
         if self._pr_head is None:
             self._pr_head = str(self.hub.rest("GET", f"/repos/{self.hub.repo}/pulls/{self.pr}")["head"]["sha"])
         return self._pr_head
+
+    def base(self) -> str:
+        """PR のマージ先のブランチの名前。スレッドの一覧と同じ応答から読み、次の `open_threads` は取り直さない。"""
+        if self._base is None:
+            self._ahead = self.open_threads()
+        if not self._base:
+            raise self.errors(f"PR #{self.pr} のマージ先のブランチを読めない（応答に無い）")
+        return self._base
 
     def changed(self) -> frozenset[str]:
         """PR の変更ファイル（1 回だけ読み、`open_thread` と共有する）。"""
@@ -553,6 +567,7 @@ class GitHubPort:
                 at=_text(r.get("created_at")),
                 trusted=_marked(_text(r.get("body"))) and self._trusted(r.get("user")),
                 updated=_text(r.get("updated_at")),
+                url=_text(r.get("html_url")),
             )
             for r in self._pages(f"/repos/{self.hub.repo}/issues/{self.pr}/comments")
         ]
@@ -570,6 +585,9 @@ class GitHubPort:
     def open_threads(self) -> list[prior_decide.Thread]:
         """PR のレビューのスレッド（最初のコメントの id と本文、resolve 済みか、付いた場所、書き手を信頼できるか、自分の返信）。
         書き手の権限は cross-review の書式（`MARKER`）で始まるスレッドだけ確かめる（ほかは使わないので要求を増やさない）。"""
+        if self._ahead is not None:
+            ahead, self._ahead = self._ahead, None
+            return ahead
         out = []
         # 読んだ一覧を resolve でも使う（起動の始めに読んだスレッドを書く側で取り直さない。PR 3944 の r6-8）
         self._threads = {}
@@ -621,7 +639,9 @@ class GitHubPort:
         after: Optional[str] = None
         while True:
             repo = self.hub.repository(THREADS_QUERY, {"pr": self.pr, "after": after})
-            page = repo["pullRequest"]["reviewThreads"]
+            pull = repo["pullRequest"]
+            self._base = _text(pull.get("baseRefName"))
+            page = pull["reviewThreads"]
             for node in page["nodes"]:
                 first = node["comments"]["nodes"]
                 if first:
@@ -662,7 +682,7 @@ FILES_PAGE = 100
 # 一覧を読み切るページの上限の方針
 LIST_PAGES = "github.list-pages"
 THREADS_QUERY = """query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){
-pullRequest(number:$pr){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
+pullRequest(number:$pr){baseRefName reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
 nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login}}}
 replies:comments(last:20){nodes{databaseId body author{login}}}}}}}}"""
 # 行の位置の誤りの理由（1 件ずつなら書ける。`pull_request_review_thread.path` の `could not be resolved` を含む）

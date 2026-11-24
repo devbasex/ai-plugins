@@ -77,6 +77,67 @@ def test_pr_3462_incomplete_review_keeps_gaps_in_its_result_json(tmp_path: Path,
     assert got["outputs"] == {"gaps": got["gaps"]}
 
 
+def test_mvv_findings_left_open_are_a_gap_of_their_own(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """MVV に反する指摘の未解決は、ほかの未解決と別の種類の欠けにする。"""
+    mvv = {"id": "F1", "text": "反する", "outcome": fin.UNRESOLVED, "severity": "major", "mvv": "Value 5"}
+    other = {"id": "F2", "text": "止まる", "outcome": fin.UNRESOLVED, "severity": "major"}
+    deferred = {**mvv, "id": "F3", "outcome": fin.SKIPPED, "reason": "反しない"}
+    _, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.MAX_ROUNDS, 2, [mvv, other, deferred])))
+    assert [(g["kind"], g["name"]) for g in got["outputs"]["gaps"]] == [(fin.GAP_MVV, "F1"), (fin.GAP_UNRESOLVED, "F2")]
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "mvv_unresolved") and "F1（Value 5）" in got["summary"]
+
+
+@pytest.mark.parametrize("final", [fin.CONVERGED, fin.MAX_ROUNDS])
+def test_unfixed_citation_errors_and_a_failed_check_stop_the_review(tmp_path: Path, capsys: pytest.CaptureFixture[str], final: str) -> None:
+    """根拠の記述の誤りが残るか、最後のコミットで確かめられなければ、指摘が 0 件でも止まる。直っていれば止まらない。"""
+    wrong = {"id": "r1-n1", "text": "誤り", "outcome": fin.UNRESOLVED, "severity": "major", "by_ndf": True}
+    for findings, checked, names in [
+        ([wrong], True, ["r1-n1"]),
+        ([], False, [fin.CITATION_CHECK]),
+        ([wrong], False, ["r1-n1", fin.CITATION_CHECK]),
+        ([{**wrong, "outcome": fin.FIXED}], True, []),
+    ]:
+        path = _summary(tmp_path, final, 2, findings)
+        path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "mvv_checked": checked}), encoding="utf-8")
+        _, got = run_cli(capsys, "finish", "--summary", str(path))
+        assert [(g["kind"], g["name"]) for g in got["outputs"]["gaps"]] == [(fin.GAP_MVV, n) for n in names]
+        assert got["status"] == ("stopped" if names else "ok")
+        assert not names or got["cause"]["kind"] == "mvv_unresolved"
+
+
+def test_secrets_in_findings_do_not_reach_the_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """指摘の本文・見送った理由の中の秘密は結果 JSON に出さない。根拠の記述の誤りの本文（文書のパスと根拠欄の中身）は載せない。"""
+    token = "ghp_" + "a" * 20
+    left = {"id": "F1", "text": f"止まる {token}", "outcome": fin.UNRESOLVED, "severity": "major"}
+    wrong = {"id": "r1-n1", "text": "secret.md の「owner/private」", "outcome": fin.UNRESOLVED, "severity": "major", "by_ndf": True}
+    done = {"id": "R1", "text": "足す", "outcome": fin.SKIPPED, "reason": f"別で扱う {token}"}
+    rebuild = _rebuild(tmp_path, [{"id": "R1", "text": f"足す {token}"}])
+    for findings in ([left, done], [left, wrong, done]):
+        path = _summary(tmp_path, fin.MAX_ROUNDS, 2, findings)
+        code, got = run_cli(capsys, "finish", "--summary", str(path), "--findings", str(rebuild))
+        shown = json.dumps(got, ensure_ascii=False)
+        assert result.errors(got, code) == [] and "止まる" in shown and "別で扱う" in shown
+        assert not [word for word in (token, "secret.md", "owner/private") if word in shown]
+
+
+def test_unread_reviewer_with_findings_left_is_still_a_valid_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """相手役が差分を読めずに止まったときの欠けは、結果 JSON の outputs にだけ載せる（最上位の gaps は incomplete だけが持てる）。"""
+    left = {"id": "F1", "text": "止まる", "outcome": fin.UNRESOLVED, "severity": "major"}
+    code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.INCOMPLETE_REVIEWERS, 1, [left])))
+    assert result.errors(got, code) == [] and got["cause"]["kind"] == "work_stopped"
+    assert [g["name"] for g in got["outputs"]["gaps"]] == ["F1"]
+
+
+@pytest.mark.parametrize("severity", ["major", "minor"])
+def test_redlines_are_not_gaps_but_are_counted(tmp_path: Path, capsys: pytest.CaptureFixture[str], severity: str) -> None:
+    """必ず人の承認が要る操作の指摘だけが残っていれば収束とし、件数を要約に載せる。"""
+    left = {"id": "F1", "text": "消す", "outcome": fin.UNRESOLVED, "severity": severity, "mvv": "P1", "redline": True}
+    shown = {**left, "id": "F2", "outcome": fin.SKIPPED}
+    code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, [left, shown])))
+    assert (code, got["status"]) == (0, "ok")
+    assert got["summary"].endswith("指摘 2 件（直した 0・見送った 1・未解決 0・人の承認を待つ 1）")
+
+
 def test_error_before_any_round_is_work_stopped() -> None:
     assert fin.finish(fin.Review(fin.ERROR, 0, ())).kind == "work_stopped"
 

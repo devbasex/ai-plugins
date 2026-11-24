@@ -10,11 +10,15 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
 from ndf.domains.crossreview import criteria_decide, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records import mvv_decide
+
+if TYPE_CHECKING:
+    from ndf.domains.records.mvv import Snapshot
 
 # コメントの先頭のマーカー（ほかのコメントと見分ける）
 MARKER = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-report -->"
@@ -22,6 +26,21 @@ MARKER = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-report -->"
 OPEN_MARK = f"<!-- {identity.FIXED_WORDS['entrypoint']}:cross-review-open "
 # 本文の最後の行だけに当てる（表の自由記述に同じ形があっても読まない。PR 3944 の r2-4）
 _OPEN = re.compile(re.escape(OPEN_MARK) + r"(?P<json>[^\n]*) -->")
+# 指摘がプロジェクト MVV に反するときの欄（#4076。ジャーナルの指摘と、記録のコメントに埋める一覧の両方が持つ）。下の識別子は、
+# どの MVV かを表す文字列（`records.mvv.Snapshot.identity`）
+# 反する項目（`Value 5`・`P1` など）
+MVV = mvv_decide.REVIEW_ITEM
+# 重さを、修正担当へ渡す重さに固定したか（`Value`・`Vision`・`Mission` に反する指摘）と、固定する前の重さ
+PINNED = "mvv_pinned"
+UNPINNED = "unpinned_severity"
+# 相手役が挙げた、必ず人の承認が要る操作の番号（`P1`・`C7`）
+REDLINE_ITEMS = mvv_decide.REVIEW_REDLINE_ITEMS
+# 上の 4 つを決めたときの MVV の識別子
+JUDGED = mvv_decide.REVIEW_JUDGED
+# 上の 5 つの欄
+MARKS = (MVV, PINNED, REDLINE_ITEMS, JUDGED, UNPINNED)
+# NDF が機械で確かめて作った指摘の `by`
+BY_NDF = mvv_decide.BY_NDF
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
 COMMENT_KEY = "report_comment"
 # 状態ファイルのキー（記録のコメントへ公開できた状態の要約 `published_state`。同じなら書き直さない。PR 3944 の r3-2）
@@ -53,6 +72,8 @@ FINAL_LABEL = {
 OUTCOME_LABEL = {fin.FIXED: "直した", fin.SKIPPED: "見送った", fin.UNRESOLVED: "未解決"}
 # 収束の妨げにならない重さで残した指摘の表示（修正担当へ渡さない。#3941）
 LIGHT_LABEL = "軽い（直さずに残した）"
+# 必ず人の承認が要る操作に当たる指摘の表示（修正担当へ渡さない。#4076）
+REDLINE_LABEL = "人の承認を待つ（直さずに残した）"
 
 
 # 一覧の文字列の中で JSON の文字の escape にする文字。公開の検査（`publish.scrub`）の形（URL の資格情報・認証ヘッダー・
@@ -66,6 +87,71 @@ Cleaner = Callable[[Sequence[str]], Sequence[str]]
 
 def _same(texts: Sequence[str]) -> Sequence[str]:
     return texts
+
+
+# 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
+WITHHELD = "（参照先の公開範囲を確かめられず伏せた）"
+
+
+def _query_failure(exc: Exception) -> str:
+    """伏せる処理の失敗の原因。例外の文は、照会した先のリポジトリの名前を含みうるので使わない（GitHub の失敗は
+    `adapters.github.GitHubError` の欄だけから決める）。"""
+    if not all(hasattr(exc, k) for k in ("quota", "unreached", "status")):
+        return f"照会の失敗（{type(exc).__name__}）"
+    if exc.quota:
+        return "レート制限"
+    return "通信の障害" if exc.unreached else f"GitHub が照会を断った（HTTP {exc.status}）"
+
+
+class Once:
+    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ。失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因
+    （無ければ None）。"""
+
+    def __init__(self, clean: Cleaner) -> None:
+        self._clean = clean
+        self._done: dict[str, str] = {}
+        self.failure: Optional[str] = None
+
+    def __call__(self, texts: Sequence[str]) -> list[str]:
+        new = [t for t in dict.fromkeys(texts) if t not in self._done]
+        if new and self.failure is None:
+            try:
+                self._done |= dict(zip(new, self._clean(new), strict=True))
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 照会できなくてもレビューの結果は返し、自由記述を伏せる
+                self.failure = _query_failure(exc)
+        return [WITHHELD if self.failure is not None else self._done[t] for t in texts]
+
+
+def once(clean: Cleaner) -> Once:
+    """レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み。"""
+    return Once(clean)
+
+
+def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str, clean: Cleaner = _same) -> dict[str, Any]:
+    """結果 JSON の `outputs.mvv`: MVV `snapshot` で判定した指摘の一覧。`head` はレビューしたコミット。
+
+    見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りのパスと引いた項目は、`clean` に 1 回で通して出す。
+    """
+    found = mvv_decide.judged_findings(rows, snapshot.identity)
+    cited = [f.row for f in found if f.item is None]
+    texts = [t for f in found for t in f.free_texts]
+    texts += [t for row in cited for t in (row.get("path"), *store.list_of(row, "unknown")) if isinstance(t, str)]
+    shown: dict[Any, str] = dict(zip(texts, clean(texts), strict=True)) if texts else {}
+    out: dict[str, Any] = {"version": snapshot.version, "sha256": snapshot.sha256, "head": head}
+    out |= {"findings": [], "citations": [], "redlines": [], "disputed": []}
+    for f in found:
+        ident = {"id": f.row["id"], "item": f.item}
+        if f.item is None:
+            place = {"path": shown.get(f.row.get("path")), "line": f.row.get("line"), "cited": shown.get(f.row.get("cited"))}
+            unknown = [shown[t] for t in store.list_of(f.row, "unknown")]
+            out["citations"].append({"id": f.row["id"], **place, "unknown": unknown, "outcome": f.outcome})
+        elif f.outcome == fin.REDLINE:
+            out["redlines"].append({**ident, "text": shown[f.row["text"]]})
+        elif f.outcome == fin.SKIPPED:
+            out["disputed"].append({**ident, "reason": shown.get(f.row.get("reason"))})
+        else:
+            out["findings"].append({**ident, "by": f.row.get("by"), "outcome": f.outcome})
+    return out
 
 
 def comment_id(url: Optional[str]) -> Optional[int]:
@@ -97,8 +183,8 @@ def bind_pr(data: dict[str, Any], pr: int, origin: int) -> bool:
     return True
 
 
-def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> str:
-    """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。公開できたときに `PUBLISHED_KEY` へ
+def published_state(pr: int, data: Mapping[str, Any], final: Optional[str], notices: Sequence[str] = ()) -> str:
+    """記録のコメントに載る状態（PR の番号・終わり方・ラウンド・指摘・スレッドと、MVV の記録の失敗の注意 `notices`）の要約。公開できたときに `PUBLISHED_KEY` へ
     書き、前回の収束を返す打ち直しは、これが今の状態と同じときだけ公開を省く（古いラウンドの記録を残さない。PR 3944 の r3-2）。"""
     shown = {
         "pr": pr,
@@ -107,6 +193,9 @@ def published_state(pr: int, data: Mapping[str, Any], final: Optional[str]) -> s
         "findings": store.list_of(data, store.FINDINGS),
         "threads": data.get(THREADS),
     }
+    # 注意が無ければキーを足さず、注意を比べないバージョンの要約と同じ値にする
+    if notices:
+        shown["notices"] = list(notices)
     return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -161,8 +250,8 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
     for f in findings:
         outcome = f.get("outcome")
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
-        if outcome == fin.UNRESOLVED and _light(f):
-            shown = LIGHT_LABEL
+        if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
+            shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
         rows.append(
             f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {_cell(criteria_decide.severity_of(f.get('severity')))} | {_cell(_place(f))} "
             f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(f.get('reason'))} |"
@@ -175,10 +264,10 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     自由記述を JSON にする前に通す伏せ字（`open_block`）。"""
     rounds = [r for r in store.list_of(data, store.ROUNDS) if isinstance(r, Mapping)]
     findings = [f for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping)]
-    counts = {
-        key: sum(1 for f in findings if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL
-    }
-    light = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and _light(f))
+    waiting = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and f.get(fin.REDLINE))
+    rest = [f for f in findings if f.get("outcome") != fin.UNRESOLVED or not f.get(fin.REDLINE)]
+    counts = {key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL}
+    light = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and _light(f))
     label = FINAL_LABEL[final] if final in FINAL_LABEL else "途中（終わり方の記録が無い）"
     lines = [
         MARKER,
@@ -187,6 +276,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         f"終わり方: {label}。ラウンド {len(rounds)}・指摘 {len(findings)}"
         f"（直した {counts[fin.FIXED]}・見送った {counts[fin.SKIPPED]}・未解決 {counts[fin.UNRESOLVED]}"
         + (f"・軽い {light}" if light else "")
+        + (f"・人の承認を待つ {waiting}" if waiting else "")
         + "）",
         "",
         "### ラウンドと修正",
@@ -214,18 +304,20 @@ def _open_value(value: Any) -> str:
 
 
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
-    """未解決の重い指摘の一覧を HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初の
-    コメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
+    """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
+    HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
     1 回で受けて同じ順に返す）へ値ごとに通し、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
     （PR 3944 の r6-4）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
     for f in store.list_of(data, store.FINDINGS):
-        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED or _light(f):
+        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED:
+            continue
+        if _light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF:
             continue
         mark = done.get(f.get("id"))
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
-        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section")}
+        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
