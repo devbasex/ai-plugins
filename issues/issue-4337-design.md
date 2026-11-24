@@ -535,7 +535,7 @@ A・B の表と条件 16 の合否は、`ndf worker run` が `ok` を返した�
 - 起点の参照を決められず、worker を起動しなかった（`stopped`（`precondition`））
 - worker が作業を残した、起動に失敗した、または判断を求めた（I7）。読み手役を呼ぶ前に止まり、会話記録が終了まで残っていても同じである
 
-`ndf worker run` が `ok` を返したかは、同じ実行の `--out` の `metrics.worker_status` で確かめる。この値は、`ndf document-rebuild run` が `ndf worker run` の標準出力から写した検査後の `status` である（「終わり方」の表の下）。`ok` なら判定に進み、`gate` か `stopped` なら判定せずにやり直す。値が無ければ worker を起動していないので、これも判定せずにやり直す。worker が書いた結果ファイルの `status` や、`cause` と `gaps` では見分けない。結果ファイルが `ok` でも `ndf worker run` は `stopped` を返すことがあり、I4 と I7 はどちらも `stopped`（`incomplete`）になるからである。
+`ndf worker run` が `ok` を返したかは、同じ実行の `--out` の `metrics.worker_status` で確かめる。この値は、`ndf document-rebuild run` が `ndf worker run` の標準出力から写した検査後の `status` である（「終わり方」の表の下）。`ok` なら判定に進み、`gate` か `stopped` なら判定せずにやり直す。`metrics.worker_status` が無い場合は、判定せずに `cause.kind` と停止理由を確認する。`invalid` なら、結果の形の検査で止まり元の `metrics` が残っていないので、標準エラーに出た出力の検査エラーを調べて直してからやり直す。対象が 0 件だった場合や起点を決められなかった場合は worker を起動していないので、対象と起点を確認してやり直す。worker が書いた結果ファイルの `status` や、`cause` と `gaps` では見分けない。結果ファイルが `ok` でも `ndf worker run` は `stopped` を返すことがあり、I4 と I7 はどちらも `stopped`（`incomplete`）になるからである。
 
 `metrics.worker_status` が `ok` の実行では、A・B の判定とは別に、`--out` だけで条件 16 の不合格を決められる。要求仕様の条件 16 は「確かめの結果か、立てられなかった理由が残る」ことである。次のどれかに当たれば、条件 16 が求める出力が欠けているので、条件 16 は不合格とし、記録の処理を直す。会話記録が欠けていても、この判定は変わらない。
 
