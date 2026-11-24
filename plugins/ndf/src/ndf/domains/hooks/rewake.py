@@ -252,8 +252,7 @@ def _end_wait(t: Target, keep: dict, turn: LastTurn, tail: str, q_for: QFor) -> 
     hit = None if first is None else keep_cache.cache_hit(first, last["tokens"], q.hit)
     fields = {"opened_at": at, "age": at - last["at"], "k": keep.get("k"), "hit": hit, "cache_read": first}
     _cache_row(t, "wait_end", keep["wait_id"], **fields, tokens=last["tokens"], ttl=last["ttl"], model=last["model"], w=q.w, r=q.r)
-    for key in signals.WAIT_KEYS:
-        keep.pop(key, None)
+    signals.drop_wait(keep)
 
 
 def _start_wait(t: Target, keep: dict, turn: LastTurn, gen: Generation, q_for: QFor) -> Optional[str]:

@@ -592,9 +592,14 @@ def void_wait(keep: dict[str, Any], at: float) -> bool:
     """`at` で始まった、まだ起床させていない待ち（`k` 0・`pending` 無し）なら、待ちの項目を消して真。"""
     if keep.get("wait_id") != at or keep.get("k") != 0 or keep.get("pending"):
         return False
+    drop_wait(keep)
+    return True
+
+
+def drop_wait(keep: dict[str, Any]) -> None:
+    """待ちの項目（`WAIT_KEYS`）を状態から消す。"""
     for key in WAIT_KEYS:
         keep.pop(key, None)
-    return True
 
 
 def bump_generation(directory: Path, launch: str, session_id: str, gen: Generation, works: int = 0) -> tuple[str, dict[str, Any]]:
