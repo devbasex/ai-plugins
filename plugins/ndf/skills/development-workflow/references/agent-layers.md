@@ -34,11 +34,7 @@ conductor へ伝えれば次のフェーズから反映する。
 **着手の判定は conductor が行う。** 課題の組み方・スプリントのモード・到達点の
 置き直しは、最初のプランを流す（または最初の supervisor を起動する）前に決める。課題が多く本文の読解が conductor の
 context window を埋めるときは、**読解だけを worker へ出す**。判定そのものは conductor が行う。
-
-**conductor が worker を直接起動してよいのは、この読解と、承認や判断を求める前の読み手役の 2 つだけである。** 読み手役は、新しく起動した `ndf:worker` が
-文書と質問の文を読み手の立場で読む役で、手順は [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。supervisor も、自分の書いた文書と
-承認資料のために読み手役を起動してよい。読み手役の `prompt` は `ndf records reading prompt` が作った文だけにし、「supervisor → worker」の 7 項目を足さない
-（文書を書いた経緯を渡さないため）。`description` は `検証: 読み手役（<文書>・<立場>）` とし、返った文をそのまま使う（報告コピーと作業の結果ファイルを求めない）。
+**conductor が worker を直接起動してよいのは、この読解と、承認や判断を求める前の読み手役の 2 つだけである。** 読み手役の手順と `prompt` の決まりは [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
 
 ## フェーズ
 
