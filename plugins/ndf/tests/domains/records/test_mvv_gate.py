@@ -399,14 +399,14 @@ def test_a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, no
 
 def test_a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 記録は読めるが判定の行の追記だけが OSError: verdict は保ち、skip は偽で、may_skip の結果で上書きしない
-    real = jsonl.append_locked
+    real = mvv._append_record
 
-    def append(path: Path, row: Any, *, kind: str) -> dict:
+    def append(path: Path, row: Any, kind: str) -> dict:
         if kind == "mvv-validation":
             raise OSError(f"/home/someone/{HOST} に書けない")
-        return real(path, row, kind=kind)
+        return real(path, row, kind)
 
-    monkeypatch.setattr(jsonl, "append_locked", append)
+    monkeypatch.setattr(mvv, "_append_record", append)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["verdict"], out["skip"]) == (FOLLOW, False) and len(out["why"]) == 1
     assert out["why"][0].startswith("判定を記録（mvv-validation.jsonl）に書けない: " + mm.STOP_REASONS["records_unwritable"])
@@ -527,13 +527,13 @@ def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
     assert mm.incomplete_patches([{"filename": "b.py", "status": "renamed", "changes": 0}]) == []
 
 
-def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def newer(*args: Any) -> dict:
         raise InternalError("precondition", "新しいバージョンの記録")
 
     monkeypatch.setattr(mvv_gate, "_judged", newer)
     with pytest.raises(InternalError):
-        mvv_gate.gate(tmp_path, "design", _inputs(), _no_hub, Ask(FOLLOW))
+        mvv_gate.gate(repo, "design", _inputs(), _no_hub, Ask(FOLLOW))
 
 
 def _raising(exc: Exception) -> Any:

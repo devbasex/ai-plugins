@@ -514,19 +514,19 @@ def test_defer_is_written_on_deferred_rows_and_read_back(root: Path, steps: list
 
 
 class Fail:
-    """記録の追記の偽物。`at` 回目（1 から）の追記で `OSError` を投げ、ほかは本物で書く。"""
+    """記録の追記（0600 で書く `mvv._append_record`）の偽物。`at` 回目（1 から）の追記で `OSError` を投げ、ほかは本物で書く。"""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, at: int, kind: str = "mvv-validation"):
-        self.n, self.at, self.kind, real = 0, at, kind, jsonl.append
+        self.n, self.at, self.kind, real = 0, at, kind, mvv._append_record
 
-        def append(path: Path, row: Any, *, kind: str) -> Any:
+        def append(path: Path, row: Any, kind: str) -> Any:
             if kind == self.kind:
                 self.n += 1
                 if self.n == self.at:
                     raise OSError(f"{path} に空きが無い https://x-access-token:{SECRET}@github.com/o/r.git")
-            return real(path, row, kind=kind)
+            return real(path, row, kind)
 
-        monkeypatch.setattr(jsonl, "append", append)
+        monkeypatch.setattr(mvv, "_append_record", append)
 
 
 FIXED = {**VALUE, "id": "r1-3", "text": "直した指摘", "outcome": "fixed", "reason": None}

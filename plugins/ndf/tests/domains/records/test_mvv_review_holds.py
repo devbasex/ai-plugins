@@ -117,9 +117,10 @@ GATES = {
     "redline-fixed": (lambda: _write([_redline(1), _row("fixed", 2)]), True, 0, False),
     "filed": (lambda: _write([_deferred(1, "filed")]), True, 0, False),
     "needs-user": (lambda: _write([_deferred(1)]), False, 1, False),
-    # 読めない記録は保留の 1 件にし、判定は再利用せずに LLM で打つ。ディレクトリは判定の行の追記もできない
+    # 読めない記録は保留の 1 件にし、判定は再利用せずに LLM で打つ。ディレクトリと壊れたシンボリックリンクは判定の行の追記もできない
+    # （判定の記録は 0600 の追記でリンクをたどらない）
     "directory": (_unreadable("directory"), False, 1, True),
-    "dangling-symlink": (_unreadable("dangling"), False, 1, False),
+    "dangling-symlink": (_unreadable("dangling"), False, 1, True),
     "invalid-bytes": (_unreadable("bytes"), False, 1, False),
     "newer-version": (_unreadable("newer"), False, 1, False),
 }
@@ -170,10 +171,16 @@ class GateGit:
     def __init__(self, root: Path) -> None:
         self.root = root
 
+    @classmethod
+    def offline(cls, root: Path) -> "GateGit":
+        return cls(root)
+
     def remote(self) -> str:
         return "origin"
 
     def run(self, *args: str) -> str:
+        if args[:2] == ("ls-tree", "HEAD"):  # MVV の有無の事前確認: HEAD に MVV の設定がある
+            return f"100644 blob {'0' * 40}\t{args[-1]}\n"
         assert args == ("rev-parse", "--abbrev-ref", "HEAD")
         return "design/x\n"
 

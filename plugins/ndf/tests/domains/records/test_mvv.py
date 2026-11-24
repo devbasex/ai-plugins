@@ -277,7 +277,7 @@ def test_mvv_validate_sprint_returns_the_row_and_the_cause_when_it_cannot_append
     def fail(*_a: Any, **_k: Any) -> dict:
         raise OSError("書けない")
 
-    monkeypatch.setattr(jsonl, "append_locked", fail)
+    monkeypatch.setattr(mvv, "_append_record", fail)
     row, cause = mvv.mvv_validate_sprint(repo, INPUTS, _follow([]), rows=[])
     assert (row["verdict"], cause) == (md.FOLLOW, "書けない")
 
