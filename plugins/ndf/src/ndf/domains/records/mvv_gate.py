@@ -156,6 +156,11 @@ def has_gate(mode: Any, gate_name: str) -> bool:
     return any(st.kind == "gate" and st.gate == gate_name for st in definition.load_definition(str(mode)).steps())
 
 
+def _unskipped(gate_name: str, why: str) -> dict[str, Any]:
+    """判定の回答を持たずに承認ゲートを省かない結果。"""
+    return mm.gate_outcome(gate_name, None, False, [why])
+
+
 def gate(
     root: Path,
     gate_name: str,
@@ -170,10 +175,10 @@ def gate(
     MVV 判定の記録に読めない行があれば `warnings` へ足す。新しいバージョンの行があれば、人へ問わずに `InternalError`（呼び手が止める）。
     """
     if not has_gate(inputs.get("mode"), gate_name):
-        return mm.gate_outcome(gate_name, None, False, [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])
+        return _unskipped(gate_name, f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない")
     if inputs.get("pace") not in MVV_PACES:
-        return mm.gate_outcome(gate_name, None, False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない"])
+        return _unskipped(gate_name, f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない")
     try:
         return _judged(root, gate_name, inputs, hub, ask, [] if warnings is None else warnings)
     except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
-        return mm.gate_outcome(gate_name, None, False, [f"MVV 判定を打てない: {exc}"])
+        return _unskipped(gate_name, f"MVV 判定を打てない: {exc}")
