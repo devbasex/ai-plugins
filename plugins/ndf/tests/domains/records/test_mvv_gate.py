@@ -25,7 +25,7 @@ from ndf import contracts, identity
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
-from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
+from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
 from ndf.domains.records import mvv_material_decide as mm
 
