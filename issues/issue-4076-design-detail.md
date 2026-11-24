@@ -281,7 +281,7 @@ plugins/ndf/
   - 未解決の `by: ndf` の指摘で誤りのキーに当たらないものは、`judged_mvv` によらず `fixed`（`judged_mvv = mvv`）にする。`by: ndf` の指摘を解決するのはこの経路だけである（直しの決定 12）
   - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`_citations`（`_final_citations`）が返した誤りと `run.mvv`（今回の識別子）を渡す。`hub.clean` は `run.clean` として記録のコメントと `_summary`（`mvv_outputs`・`record_review`）だけが使い、`_citations` と `ingest_citations` は使わない
 - 指摘の `text` は `review-criteria.json` の `mvv.citation` から作り、行の番号を含めない。パスと引いた本文だけで作るので、行がずれても同じ文になる
-- `apply_fix`: 修正担当の結果のうち `by: ndf` の指摘への `fixed`・`deferred` は終わり方を変えない（理由は `fixer_reason` に残す）。返す件にも入れない（#4109。送り直しの後に `restore_fixed` が未解決の指摘を `fixed` へ戻さないため）。解決は次の `ingest_citations` だけが決める。`redline` の指摘への結果も同じく終わり方を変えず、返す件に入れない（人の承認を待つ）
+- `apply_fix`: 修正担当の結果のうち `by: ndf` の指摘への `fixed`・`deferred` は終わり方を変えない（理由は `fixer_reason` に残す）。返す件にも入れない（#4109。送り直しの後に `restore_fixed` が未解決の指摘を `fixed` へ戻さないため）。解決は次の `ingest_citations` だけが決める。`redline` の指摘への結果も同じく終わり方を変えず、返す件に入れない（人の承認を待つ）。`restore_fixed` も `redline` の指摘は `fixed` へ戻さない
 - 確かめる時点: 毎ラウンド、相手役を起動する前に `_prepare_round` が `_citations` → `ingest_citations` を打つ。加えて、終わり方を判定する直前（最後のラウンドの修正を送った後、または収束と判定する前）に、その時点の head で `_prepare_round` を通さず `_final_citations` → `ingest_citations` をもう 1 回打つ。これで修正担当の最後の修正も機械が確かめ、確かめられなければ `mvv_checked` が偽になって `mvv_unresolved` で止まる
 - ラウンドの記録: 書くときに `mvv_checked = (承認済みの MVV が無い) or (run.checked_head == そのラウンドの head)` を足す
 

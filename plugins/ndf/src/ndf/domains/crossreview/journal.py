@@ -336,10 +336,12 @@ class FindingJournal:
                 self.rows[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
 
     def restore_fixed(self, fids: Sequence[str]) -> None:
-        """送れずに未解決へ戻した指摘を、送り直せた後に直したへ戻す（未解決のままの行だけ）。"""
+        """送れずに未解決へ戻した指摘を、送り直せた後に直したへ戻す（未解決のままの行だけ。必ず人の承認が要る操作に当たる
+        指摘は、承認を待つまま残す）。"""
         for fid in fids:
-            if fid in self.rows and self.rows[fid].get("outcome") == fin.UNRESOLVED:
-                self.rows[fid] |= {"outcome": fin.FIXED, "reason": None}
+            row = self.rows.get(fid)
+            if row is not None and row.get("outcome") == fin.UNRESOLVED and not row.get(fin.REDLINE):
+                row |= {"outcome": fin.FIXED, "reason": None}
 
     def findings(self) -> tuple[fin.Finding, ...]:
         """要約に載せる指摘（終わり方を知っている行）。"""
