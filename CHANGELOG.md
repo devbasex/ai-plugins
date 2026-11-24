@@ -11,6 +11,29 @@
 
 ## [Unreleased]
 
+## [ndf 11.0.35] - 2026-11-25
+
+### 利用者向けの変化
+
+- 中継（`ndf relay`）の下で裏の作業を待つ子のキャッシュを寿命の手前で起こし、起こす費用を寿命別に数える仕組み（起床の hook）が入った（#4068・#4199・#4432）。**この版では働かない。** 働かせてよい Claude Code の版の一覧（`contracts/limits/cache.rewake.json` の `versions`）が空なので、どの子にも起床の hook を登録せず、中継の子の振る舞いは 11.0.34 と同じである。版ごとに測って一覧へ足し、働かせるのは後の版の Pull Request で行う
+- `ndf relay cache report` を足した。起床の記録（待ちの数・起こした回数・当たりの率・避けた書き直し・費用を数えられなかった待ち）を集計する。この版では起床が働かないので、集計する記録は無い
+- 上限の設定に `cache.*`（余白・寿命別の書き込みの倍率・モデル別の読み出しの倍率・起こす応答 1 回の費用・出力の倍率・当たりの判定・働かせる版）と `hook.budget.stop-rewake` が増えた。起床の hook を登録した子にだけ渡す環境変数 `NDF_RELAY_REWAKE` が増えた
+
+### 手順書の変化
+
+- 起床の hook の仕組みと集計のしかたを `development-workflow` の `references/relay-cache.md` に置き、`references/relay.md` に目次と hook の一覧の 1 行を足した（#4432）
+
+### その他の変化
+
+NDF の配布元のリポジトリ（devbasex/ai-plugins）の文書と設定だけを変えた。利用者の手元の NDF の動きは変えない。
+
+- 作業が終わった課題の設計を確定仕様へ移した。cross-review のレビュー役の席を読むだけの claude で埋める変更（#3955）を `docs/specifications/cross-review-participants-and-seats.md` へ（#4468）、文書の組み直しの既定の起動（#4337）を `docs/specifications/ndf-document-rebuild-default-launch.md` へ（#4465）、起床の hook（#4068・#4199）を `docs/specifications/ndf-relay-cache-rewake.md`・`ndf-relay-cache-rewake-records.md` へ（#4432）
+- 配布元のリポジトリの設定 `.ndf/project.json` の `budget.tests`（`ndf check` の規則 `budget` が見るテストの件数の上限）を 6,000 から 7,000 へ上げた（#4432）。テストが 6,106 件になったためである。利用者のリポジトリの設定は変わらない
+
+### この版に入った設計（まだ実装していない）
+
+- テストの量を件数ではなく CI でのテストの実行時間で測り、増え方を見えるようにする設計（#4331・#4497）。実装すると、配布元のリポジトリの設定から `budget.tests` のキーを外す。規則 `budget` の件数の上限は NDF の機能として残る
+
 ## [ndf 11.0.34] - 2026-11-25
 
 ### 利用者向けの変化
