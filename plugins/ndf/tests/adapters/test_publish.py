@@ -132,6 +132,8 @@ def test_a_secret_crossing_the_end_of_a_reference_leaves_no_fragment(monkeypatch
         f"https://x-access-token:{TOKEN}@github.com/{PRIVATE_REPO}.git",
         f"https://***@github.com/{PRIVATE_REPO}",
         f"https://git@github.com/{PUBLIC_REPO}",
+        f"HTTPS://user:pa55@GitHub.COM/{PRIVATE_REPO}",
+        f"Ssh://deploy@WWW.github.com/{PRIVATE_REPO}.git",
     ],
 )
 def test_a_url_with_credentials_is_masked_whole_on_any_target(url: str, public: bool) -> None:
