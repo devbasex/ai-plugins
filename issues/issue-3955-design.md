@@ -337,7 +337,7 @@ sequenceDiagram
     - 許可のモードを `acceptEdits` から `dontAsk`（事前に許していない操作を尋ねずに断る）に替える。席の claude は書き換えないので、編集を受けるモードは要らない
   - `--tools` と `--allowed-tools` には、今のとおり同じ Tool の名前（`Read,Grep,Glob`）だけを渡し、場所を限った規則は使わない。`Permission.TOOLS` を 2 つの値に分ける作業は要らない。理由は次のとおりである。今の `Permission.TOOLS` は、同じ文字列を `--tools`（使える Tool）と `--allowed-tools`（許可の規則）の両方に渡す。場所を限った規則（`Read(//<パス>/**)` など）を同じ文字列に入れると、`--tools` に Tool の名前でない値が渡る。読める場所は、claude の起動の部品（`adapters/claude.py` の `ClaudeCall`）に足す一覧で受ける。空でないときだけ上の 3 つの引数を組み立てる。権限の引数は今のとおり `permission_args` の 1 か所で組み立てる
   - 共有する関数は、読める場所を引数で受ける。cross-refactoring は場所を渡さず、今と同じ引数になる（受け入れ条件 13）
-  - 範囲の外を本当に断るかは、実装の PR で実際の claude を起動して手で確かめる（「未確認のまま残ること」）。断らなければ実装の PR をマージせず、設計に戻す
+  - 範囲の外を本当に断るかは、実装の PR で実際の claude を起動して手で確かめる（「未確認のまま残ること」の「読み取りの境界の実機確認」）。範囲の外のファイルの内容か名前を Claude が取れた場合は、実装の PR のマージを止めて設計に戻す
 - **`--restricted` を付けた claude の起動にだけ、下限 2.1.316 を当てる。claude の共通の下限（2.1.268）は変えない。** `--restricted` の読み取りの境界は、2.1.316 より前のバージョンでは保てないためである
   - 2.1.315 以前には、`--restricted` のセッションでも、作業ディレクトリの外のファイルをアップロードしてしまう不具合があった。当たるのは、読み取りの許可の規則がそのファイルに当たるときで、2.1.316 で直った
   - 変更履歴の文は「`--restricted` sessions uploading files from outside the working directories when a Read allow rule covered them」である。送り先は書いていない。出典は [Claude Code の変更履歴の 2.1.316](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21316) である
@@ -510,7 +510,7 @@ sequenceDiagram
 
 断ったかどうかは、`claude -p` の出力の全体（`result` だけでなく、`--output-format json` の出力のすべて）で判定する。範囲の外の決まった文字列も、`probe.txt` と修正担当の結果に見立てたファイルの名前も出ていなければ、断ったとみなす。結果は、Tool ごと・対象ごとの表と、確かめた claude のバージョンを、実装の PR の本文に書く。
 
-範囲の外のどれかが通れば、実装の PR をマージせず設計に戻す。
+「断るべき」の列のどれか 1 つでも、Claude が範囲の外のファイルの内容か名前を取れた場合は、実装の PR のマージを止めて設計に戻す。「読めるべき」の列のどれかが読めなかった場合も、席の claude が差分を開けないので、マージを止めて設計に戻す。
 
 ## 外部の調査
 
