@@ -195,6 +195,8 @@ def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
         return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
     raw = _blob(g, held, f"{commit} の MVV の設定（{decl_path()}）")
     decl = decl_from(raw, commit, root)
+    if md.status(decl, None) == md.State.UNAPPROVED:
+        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
     path = md.body_path(decl)
     body = _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
     blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
