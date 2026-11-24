@@ -19,6 +19,8 @@ from ndf import contracts
 NAMES = "data/internal-names.json"
 NAMES_SCHEMA = contracts.schema_path("internal-names")
 COMMON = contracts.schema_path("internal/common")
+# 工程の文脈のスキーマ
+CONTEXT = "workflow/context.schema.json"
 # 名前の対応表の、書いた時刻の意味
 TIME = "書いた時刻"
 
@@ -64,11 +66,35 @@ def _decision_v1(row: Row) -> Row:
     return {"event": "判定", **kept}
 
 
+def _renamed(row: Row, old: str, new: str) -> Row:
+    return {new if k == old else k: v for k, v in row.items()}
+
+
+def _context_v1(row: Row) -> Row:
+    """`version` は出した製品のバージョンだった。"""
+    return _renamed(row, "version", "product_version")
+
+
+def _snapshot_v1(row: Row) -> Row:
+    """`version` は工程の定義の文書のバージョンで、工程の入出力のキーの `version` は出した製品のバージョンだった。"""
+    moved = _renamed(row, "version", "definition_version")
+    if isinstance(moved.get("stages"), list):
+        moved["stages"] = [_stage_v1(s) if isinstance(s, dict) else s for s in moved["stages"]]
+    return moved
+
+
+def _stage_v1(stage: Row) -> Row:
+    keys = {k: stage[k] for k in ("inputs", "outputs") if isinstance(stage.get(k), list)}
+    return {**stage, **{k: ["product_version" if name == "version" else name for name in names] for k, names in keys.items()}}
+
+
 KINDS: dict[str, Kind] = {
     "usage": Kind(contracts.schema_path("internal/usage"), (dict,)),
     "mvv-signals": Kind(contracts.schema_path("internal/mvv-signals"), (_signal_v1,), marker="mvv_version"),
     "mvv-validation": Kind(contracts.schema_path("internal/mvv-validation"), (_time_to_at,)),
     "context-records": Kind(contracts.schema_path("internal/context-records"), (_decision_v1,)),
+    "context": Kind(CONTEXT, (_context_v1,)),
+    "stage-snapshot": Kind(contracts.schema_path("internal/stage-snapshot"), (_snapshot_v1,)),
 }
 
 

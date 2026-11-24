@@ -347,7 +347,8 @@ def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys, last
     table, doc = _stored(out["metrics"]["machine_id"])
     assert table["parent_id"] == "lane:abc:l1" and table["level"] == "sprint" and table["name"] == "s1"
     # MVV の設定が無いリポジトリでは、承認済み MVV の参照は null（#3745）
-    assert doc["context"] == {"issues": [1, 2], "mode": "standard", "pace": "fast", "mvv_ref": None}
+    assert doc["context"] == {"version": 1, "issues": [1, 2], "mode": "standard", "pace": "fast", "mvv_ref": None}
+    assert doc["version"] == 1 and doc["definition_version"] == "1.0.0"
     assert doc["mode"] == "standard" and [s["name"] for s in doc["stages"]] == [r["stage"] for r in out["items"]]
     en = doc["enablement"]
     assert en["振り返り"] == {"enabled": False, "reason": "不要", "source": "sprint"}

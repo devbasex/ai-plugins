@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts
+from ndf.contracts import internal
 from ndf.progress import model
 
 
@@ -67,7 +68,7 @@ class Snapshot:
     """モードの定義のスナップショット。ステートマシンの定義の改訂に JSON で残す。"""
 
     mode: str
-    version: str
+    definition_version: str
     sha256: str
     height: int
     stages: tuple[StageDef, ...]
@@ -115,8 +116,9 @@ def _stage_from(raw: Mapping[str, Any]) -> StageDef:
 def snapshot_dict(snap: Snapshot) -> dict[str, Any]:
     """スナップショットを JSON の形にする（定義の改訂に書く）。"""
     return {
+        "version": internal.version(),
         "mode": snap.mode,
-        "version": snap.version,
+        "definition_version": snap.definition_version,
         "sha256": snap.sha256,
         "height": snap.height,
         "stages": [_stage_dict(s) for s in snap.stages],
@@ -124,8 +126,9 @@ def snapshot_dict(snap: Snapshot) -> dict[str, Any]:
 
 
 def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
-    """`snapshot_dict` の逆。"""
-    return Snapshot(raw["mode"], raw["version"], raw["sha256"], raw["height"], tuple(_stage_from(s) for s in raw["stages"]))
+    """`snapshot_dict` の逆。`raw` は核（`internal.read_record` の `stage-snapshot`）を通した今の形。"""
+    defs = tuple(_stage_from(s) for s in raw["stages"])
+    return Snapshot(raw["mode"], raw["definition_version"], raw["sha256"], raw["height"], defs)
 
 
 # --- 順序の決まり（I8〜I10） ---------------------------------------------------------------
@@ -267,6 +270,23 @@ def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
 
 
 OUTPUTS_EVENT = "outputs_recorded"  # 工程の出力をスプリントの文脈へ書く事象
+
+
+def recorded_outputs(events: Iterable[model.Event], rev: int) -> list[Mapping[str, Any]]:
+    """改訂 `rev` で工程が書いた出力（古い順）。"""
+    drafts = [ev.draft for ev in events if ev.draft.kind == OUTPUTS_EVENT and ev.draft.rev == rev]
+    return [d.payload["outputs"] for d in drafts if d.payload is not None]
+
+
+def compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """スプリントの文脈。作成の時点の値に、工程が書いた出力を順に重ねる。どちらも核が今の形へ移し、新しいバージョンなら `InternalError`。
+
+    出力は文脈の一部のキーだけで形のバージョンを持たないので、文脈のバージョンは作成の時点の値のものにする。"""
+    out = internal.read_record("context", initial)
+    version = out["version"]
+    for raw in outputs:
+        out.update(internal.migrate("context", raw))
+    return {**out, "version": version}
 
 
 def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:

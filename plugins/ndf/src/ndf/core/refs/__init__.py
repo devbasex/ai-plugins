@@ -43,6 +43,8 @@ from ndf.core.refs.resume import SKIP, DesignPr
 KIND, OF, KEY, WHEN_EMPTY = "kind", "of", "key", "when_empty"
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
+# 参照 `version` が読む outputs のキー（出した製品のバージョン）
+PRODUCT_VERSION = "product_version"
 QUEUE_PRS_KIND = QUEUE_PRS
 # 空に解けたら飛ばす実行条件の値（`when_empty`）。流す前の判断の「流さない」と同じ語（`resume.SKIP`）
 WHEN_EMPTY_SKIP = SKIP
@@ -245,7 +247,7 @@ def _result_text(got: Any) -> str:
 
 
 def _version(ref: Ref, ctx: Context, src: Sources) -> Got:
-    return _checked(ref, ctx, src, VERSION, _version_text)
+    return _checked(ref, ctx, src, PRODUCT_VERSION, _version_text)
 
 
 def _record_pr(ref: Ref, ctx: Context, src: Sources) -> Got:

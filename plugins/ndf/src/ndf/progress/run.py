@@ -101,11 +101,7 @@ class View:
 
     def context(self) -> dict[str, Any]:
         """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-        out = dict(self.doc["context"])
-        for ev in self.events:
-            if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == self.rev:
-                out.update(payload_of(ev)["outputs"])
-        return out
+        return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
 
 
 def payload_of(ev: model.Event) -> dict[str, Any]:

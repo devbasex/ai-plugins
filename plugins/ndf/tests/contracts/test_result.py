@@ -27,7 +27,7 @@ def _stopped(kind="test_failed", **extra):
         (result.result("t", "gate", "判断を待つ", routes={"request_changes": result.command("loop", "answer", ask=("comment",))}), 20),
         (_stopped("fix_limit", routes={"retry": result.command("retry")}), 1),
         (_stopped("wait_timeout", next=result.command("test-slot", "run", "--", "pytest")), 3),
-        (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "version": "11.0.0-dev.3"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "product_version": "11.0.0-dev.3"}), 0),
         (result.result("t", "ok", "済んだ", run_id="r1"), 0),
     ],
 )
@@ -52,7 +52,8 @@ def test_valid_results(obj, code):
         # outputs は閉じた語彙の型付きの欄（#3367）
         (result.result("t", "ok", "済んだ", outputs={"pr": "12"}), 0),
         (result.result("t", "ok", "済んだ", outputs={"anything": 1}), 0),
-        (result.result("t", "ok", "済んだ", outputs={"version": "ndf v11.0.0"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"product_version": "ndf v11.0.0"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"version": "11.0.0"}), 0),
         (_stopped(gaps=[GAP]), 1),
         (_stopped("incomplete"), 6),
         (_stopped("no_such_kind"), 1),

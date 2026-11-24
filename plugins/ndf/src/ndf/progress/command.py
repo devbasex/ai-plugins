@@ -43,7 +43,7 @@ import sqlalchemy as sa
 from ndf import contracts, identity
 from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import causes, facts, result
+from ndf.contracts import causes, facts, internal, result
 from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
 
@@ -61,7 +61,7 @@ TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 DONE_AT_CREATION = "ステートマシンの作成の時点で済んでいる"
 REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了のマーカーを付ける工程（工程表の行名）
 # 開発ループの行のステートマシンの定義（工程を持たない。モードの名前の代わりに置く）
-LOOP_SNAPSHOT = stages.Snapshot(mode="loop", version="1.0.0", sha256="", height=0, stages=())
+LOOP_SNAPSHOT = stages.Snapshot(mode="loop", definition_version="1.0.0", sha256="", height=0, stages=())
 
 
 # --- 保存先とリポジトリ ------------------------------------------------------------------
@@ -371,7 +371,7 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
         "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: separate_production(cwd),
-        "release_record": lambda: "version" in context,
+        "release_record": lambda: "product_version" in context,
         "design_pr": lambda: "design_pr" in context,
     }
     unknown = [w for w in words if w not in known]
@@ -428,7 +428,8 @@ def read_current(conn: Any, machine_id: str) -> Current:
     """ステートマシンの最新の改訂・定義の文書・定義・事象。ステートマシンが無ければ `model.Refused`。"""
     if store.read_machine(conn, machine_id) is None:
         raise model.Refused(f"ステートマシン {machine_id} は無い")
-    rev, raw = store.read_definition(conn, machine_id)
+    rev, saved = store.read_definition(conn, machine_id)
+    raw = internal.read_record("stage-snapshot", saved)
     return Current(rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id))
 
 
@@ -525,11 +526,7 @@ class Carry(NamedTuple):
 
 def machine_context(current: Current) -> dict[str, Any]:
     """スプリントの文脈。作成の時点の値に、最新の改訂で工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-    out = dict(current.raw["context"])
-    for ev in current.events:
-        if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == current.rev and ev.draft.payload is not None:
-            out.update(ev.draft.payload["outputs"])
-    return out
+    return stages.compose_context(current.raw["context"], stages.recorded_outputs(current.events, current.rev))
 
 
 def _read_carry(st: store.Store, machine_id: str) -> Carry:
@@ -573,6 +570,13 @@ def _carried(a: argparse.Namespace, snap: stages.Snapshot, disables: Mapping[str
     return {key: source[key] for _, key in keyed}
 
 
+def _new_doc(snap: stages.Snapshot, context: dict[str, Any], enabled: Mapping[str, stages.Enablement]) -> dict[str, Any]:
+    """保存する定義の改訂の文書。文脈も文書も核で今の形を確かめてから返す（形が違えば書かずに `InternalError`）。"""
+    written = internal.write_record("context", context)
+    enablement = {k: vars(v) for k, v in enabled.items()}
+    return internal.write_record("stage-snapshot", {**stages.snapshot_dict(snap), "context": written, "enablement": enablement})
+
+
 def _prepare_new(
     a: argparse.Namespace, cwd: Path, snap: stages.Snapshot, carry: Carry | None = None, repo: str = ""
 ) -> tuple[dict[str, Any], list[model.EventDraft]]:
@@ -588,8 +592,7 @@ def _prepare_new(
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
-    doc = {**stages.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
-    return doc, _new_drafts(snap, enabled, _requirements(snap, a.requirements))
+    return _new_doc(snap, context, enabled), _new_drafts(snap, enabled, _requirements(snap, a.requirements))
 
 
 def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
@@ -609,8 +612,7 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
         raise definition.WorkflowDefError([f"--loop は {', '.join(mixed)} と一緒に渡せない"])
     if a.parent is None:
         raise definition.WorkflowDefError(["--loop にはレーンのステートマシン（--parent）が要る"])
-    doc = {**stages.snapshot_dict(LOOP_SNAPSHOT), "context": {"issues": []}, "enablement": {}}
-    return LOOP_SNAPSHOT, doc, []
+    return LOOP_SNAPSHOT, _new_doc(LOOP_SNAPSHOT, {"issues": []}, {}), []
 
 
 def _sprint_new(
@@ -898,6 +900,7 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
 STOPPABLE = (
     model.Refused,
     durable.StoreStopped,
+    internal.InternalError,
     contracts.ContractError,
     GitError,
     identity.IdentityError,
@@ -931,6 +934,7 @@ _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ..
     (sa.exc.SQLAlchemyError, functools.partial(stopped_db, TOOL)),
     (model.Refused, functools.partial(stopped_refused, TOOL)),
     (durable.StoreStopped, lambda exc: exc.stopped(TOOL)),
+    (internal.InternalError, lambda exc: result.stopped(TOOL, exc.kind, str(exc))),
     # WorkflowDefError は ContractError の子なので、理由の語だけの行より前で受ける
     (definition.WorkflowDefError, _workflow_def_error),
     (contracts.ContractError, _cause_only("invalid")),

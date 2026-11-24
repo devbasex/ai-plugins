@@ -13,7 +13,7 @@
 | 3 | プランのステップが `ndf answer work --state-dir <保存先> requirements` を打つ |
 | 4 | `ndf answer work` が `values.json`・作業の定義（`contracts/worker/kinds.json`）・共通のテンプレート（`contracts/worker/prompt.md`）から起動指示を組み、`<保存先>/requirements.prompt.md` へ書く |
 | 5 | 同じプロセスが `ndf worker run --kind requirements --prompt-file …` へ置き換わり、作業の定義の `cwd`（`requirements` は `repo`）が指す場所で `claude -p` を起動する |
-| 6 | worker が書いた結果ファイルの `status` が `ndf worker run` の結果になり、プランの結果を通って工程へ返る。必須の出力を持つ作業（`worktree` の `worktree`・`branch`、`release` の `delivery`・`version`）では、`--require-output` で確かめた値も工程の出力へ渡る |
+| 6 | worker が書いた結果ファイルの `status` が `ndf worker run` の結果になり、プランの結果を通って工程へ返る。必須の出力を持つ作業（`worktree` の `worktree`・`branch`、`release` の `delivery`・`product_version`）では、`--require-output` で確かめた値も工程の出力へ渡る |
 
 差し込みを決められない工程は、行に `started` も `failed` も書かずに `stopped`（`precondition`）で返し、決まらない名前とその値の出所を結果の `items` に並べる。手で閉じるときの出力の値の取り場所は、スプリントの文脈のスキーマの `x-source` が持ち、`ndf progress check` が欠けたキーの行に添える。
 
@@ -159,7 +159,7 @@ flowchart TD
 
 ### 作業の出力をプランの結果へ渡す
 
-`ndf answer work` は、作業の定義の `outputs` の名前ごとに `--require-output <名前>` を `ndf worker run` へ渡す（作業 `worktree` なら `worktree` と `branch`、作業 `release` なら `delivery` と `version`）。`ndf worker run` は作業の定義を読まず、必須の名前を引数で受ける。
+`ndf answer work` は、作業の定義の `outputs` の名前ごとに `--require-output <名前>` を `ndf worker run` へ渡す（作業 `worktree` なら `worktree` と `branch`、作業 `release` なら `delivery` と `product_version`）。`ndf worker run` は作業の定義を読まず、必須の名前を引数で受ける。
 
 結果ファイルが `ok` のとき、`core/worker_outcome.py` の `require_outputs` が名前ごとに確かめる。
 
@@ -240,7 +240,7 @@ Pull Request の番号と差分は前の工程（実装の Pull Request の作�
 | `summary` | string | 起動指示の「作業」の 1 行 |
 | `skills` | array | 読む Skill の名前。無ければ空 |
 | `excerpt` | string / null | 手順の抜粋のパス（プラグインの根からの相対）。無ければ `null` |
-| `inputs` | array | 作業が読む値の名前（`issue`・`issues`・`branch`・`acceptance`・`mode`・`pr`・`version` など） |
+| `inputs` | array | 作業が読む値の名前（`issue`・`issues`・`branch`・`acceptance`・`mode`・`pr`・`product_version` など） |
 | `cwd` | string | worker が動く場所を指す差し込みの名前（`worktree` か `repo`） |
 | `outputs` | array | 結果ファイルに必ず入れる `outputs` のキー。無ければ空 |
 

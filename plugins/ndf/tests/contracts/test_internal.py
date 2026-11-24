@@ -40,6 +40,31 @@ OLD_DECISION = {
     "margin": 50_000,
     "config_error": None,
 }
+SNAPSHOT = {
+    "mode": "standard",
+    "definition_version": "1.0.0",
+    "sha256": "ab",
+    "height": 4,
+    "stages": [
+        {
+            "id": "deploy",
+            "name": "デプロイ",
+            "phase": "release",
+            "steps": [{"id": "release", "call": "ndf.plan", "kind": "release", "range": "sprint_diff", "gate": None, "args": {}}],
+            "inputs": ["pr"],
+            "outputs": ["delivery", "product_version"],
+        },
+        {"id": "verify", "name": "リリース後テスト", "phase": "release", "steps": [], "inputs": ["product_version"], "outputs": []},
+    ],
+    "context": {"issues": [1]},
+    "enablement": {"デプロイ": {"enabled": True, "reason": None, "source": "definition"}},
+}
+# 製品のバージョンを version で書いた工程の入出力（バージョン 0）
+OLD_STAGES = [
+    {**SNAPSHOT["stages"][0], "outputs": ["delivery", "version"]},
+    {**SNAPSHOT["stages"][1], "inputs": ["version"]},
+]
+OLD_SNAPSHOT = {**{k: v for k, v in SNAPSHOT.items() if k != "definition_version"}, "version": "1.0.0", "stages": OLD_STAGES}
 OLD_COLUMNS = ("schema", "policy", "margin", "config_error")
 
 
@@ -68,6 +93,9 @@ def kind_of(exc: pytest.ExceptionInfo[internal.InternalError]) -> str:
         ),
         ("context-records", OLD_DECISION, {k: v for k, v in OLD_DECISION.items() if k not in OLD_COLUMNS}),
         ("context-records", {k: v for k, v in DECISION.items() if k != "event"}, {**DECISION, "event": cr.EVENT_DECISION}),
+        ("context", {"pace": "auto", "version": "11.0.23"}, {"pace": "auto", "product_version": "11.0.23"}),
+        ("context", {"pace": "auto"}, {"pace": "auto"}),
+        ("stage-snapshot", OLD_SNAPSHOT, SNAPSHOT),
     ],
 )
 def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
@@ -85,6 +113,8 @@ def test_read_moves_a_version_zero_row_to_version_one(kind, old, new):
         ("mvv-validation", md.reuse_row(VALIDATION, AT, "/m")),
         ("context-records", DECISION),
         ("context-records", cr.record_row(None, "", APPLIED, None, "手動")),
+        ("context", {"issues": [1], "product_version": "11.0.23"}),
+        ("stage-snapshot", SNAPSHOT),
     ],
 )  # fmt: skip
 def test_a_row_of_each_writer_is_written_and_read_back_unchanged(kind, row):

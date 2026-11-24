@@ -6,6 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "version": {"type": "integer", "minimum": 1, "description": "文脈の形のバージョン。ステートマシンの作成が書く。工程の出力は持たない"},
     "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。ステートマシンの作成が書く"},
     "mode": {"enum": ["light", "operation", "legacy-refactor", "standard", "documentation"], "description": "モード。モード判定が書く"},
     "pace": {"anyOf": [{"$ref": "#/$defs/plain_pace"}, {"$ref": "#/$defs/mvv_pace"}], "description": "進め方。モード判定が書く"},
@@ -16,7 +17,7 @@
     "design_pr": {"type": "integer", "minimum": 1, "description": "設計の Pull Request の番号"},
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
     "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、キーの型と kind・channel の取りうる値を確かめてから渡す（3364-7）", "x-source": ".ndf/project.json の branch_strategy.release.deliveries の 1 行に result を足す"},
-    "version": {"type": "string", "minLength": 1, "description": "出したバージョン。デプロイが書く", "x-source": "ステートマシンの release のステップの outputs の version。手でリリースしたら、記録の Pull Request（リリースの Pull Request、Pull Request を作らない形ではスプリントの最後にマージした Pull Request）の本文とコメントにある `## リリース記録` のうち、最後の本番の記録（release Skill の references/release-steps.md の「デプロイの後にリリース記録を置く」でデプロイの後にコメントで足したもの。`ndf release-steps records --pr <PR>` で読む）の `バージョン:` の行の → の後の値から、括弧内の根拠（例: `（MINOR: 機能追加）`）を除いた新しいバージョン"},
+    "product_version": {"type": "string", "minLength": 1, "description": "出したバージョン。デプロイが書く", "x-source": "ステートマシンの release のステップの outputs の product_version。手でリリースしたら、記録の Pull Request（リリースの Pull Request、Pull Request を作らない形ではスプリントの最後にマージした Pull Request）の本文とコメントにある `## リリース記録` のうち、最後の本番の記録（release Skill の references/release-steps.md の「デプロイの後にリリース記録を置く」でデプロイの後にコメントで足したもの。`ndf release-steps records --pr <PR>` で読む）の `バージョン:` の行の → の後の値から、括弧内の根拠（例: `（MINOR: 機能追加）`）を除いた新しいバージョン"},
     "release_pr": {"type": "string", "minLength": 1, "description": "出したバージョンのリリース記録を書いた Pull Request。まとめたリリースの回答をリリース承認ゲートが書き、閉じとリリース後テストはここから読む"},
     "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。実装が書き、コードレビューはここから後のコミット（つなぎ目）だけを読む"}
   },
