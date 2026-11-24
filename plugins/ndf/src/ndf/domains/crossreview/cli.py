@@ -28,7 +28,7 @@ import contextlib
 import importlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, ContextManager, NamedTuple, Optional
+from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
@@ -54,6 +54,8 @@ CROSS_REVIEW = TOOL
 GITHUB_MODULE = "ndf.adapters.github"
 # 相手役と修正担当の起動（テストは偽物に差し替える）
 LAUNCH: fixer.Launcher = agents.run_agent
+
+T = TypeVar("T")
 
 
 def _redacted(texts: Sequence[str]) -> list[str]:
@@ -341,21 +343,9 @@ def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optiona
         return [], f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"
 
 
-def cmd_scope(args: argparse.Namespace) -> int:
-    ref = store.state_pr(Path(args.state_dir), args.pr)
-    data = store.read_state(ref)
+def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resolved: Resolved) -> tuple[scope_decide.Scope, list[str]]:
+    """次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録 `data` から決める（リモートから取得しない）。"""
     rounds = store.list_of(data, store.ROUNDS)
-    wt = Path(args.worktree)
-    try:
-        # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
-        # 全差分。PR 3944 の r3-4・r4-3）
-        resolved = _resolve(wt, args.reviewer)
-    except ValueError as exc:
-        return _stop("invalid", str(exc))
-    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
-        return _stop("precondition", str(exc))
-    except worktree.WorktreeUnregistered as exc:
-        return _unregistered(exc, str(exc.worktree))
     g = git.Git.offline(wt)
     # `_resolve` が求めたメインディレクトリから読む（`g.remote()` は `git worktree list` を打ち直す）
     based = _local_base(g, git.remote_of(resolved.policy.main), args.base, scope_decide.mvv_branch(data))
@@ -364,12 +354,24 @@ def cmd_scope(args: argparse.Namespace) -> int:
     sections, unread = _local_sections(g, based.commit, wt)
     if unread is not None:
         # 全差分に決まっているので、範囲を変えない MVV を読まない
-        got, warnings = scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
-    else:
-        now, unsure = _local_mvv(wt, based.mvv_ref)
-        warnings = unsure if rounds else []
-        basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
-        got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
+        return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
+    now, unsure = _local_mvv(wt, based.mvv_ref)
+    basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
+    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
+    return got, unsure if rounds else []
+
+
+def cmd_scope(args: argparse.Namespace) -> int:
+    ref = store.state_pr(Path(args.state_dir), args.pr)
+    data = store.read_state(ref)
+    rounds = store.list_of(data, store.ROUNDS)
+    wt = Path(args.worktree)
+    # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
+    # 全差分。PR 3944 の r3-4・r4-3）
+    resolved = _or_stop(lambda: _resolve(wt, args.reviewer))
+    if isinstance(resolved, int):
+        return resolved
+    got, warnings = _local_scope(wt, args, data, resolved)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
     return _ok(summary, [item], **({"warnings": warnings} if warnings else {}))
@@ -482,6 +484,22 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
     )
 
 
+def _or_stop(resolve: Callable[[], T]) -> T | int:
+    """`_resolve` を呼ぶ `resolve` の値。決められなければ、止まった結果を出した終了コードを返す（`run` と `review-scope` で共有する）。"""
+    try:
+        return resolve()
+    except ValueError as exc:
+        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
+        return _stop("invalid", str(exc))
+    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
+        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
+        # 止める（PR 3944 の r1-4・r2-7）
+        return _stop("precondition", str(exc))
+    except worktree.WorktreeUnregistered as exc:
+        return _unregistered(exc, str(exc.worktree))
+
+
 class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
@@ -555,18 +573,9 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
     """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
-    try:
-        cfg = _run_config(args)
-    except ValueError as exc:
-        # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
-        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
-        return _stop("invalid", str(exc))
-    except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
-        # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
-        # 止める（PR 3944 の r1-4・r2-7）
-        return _stop("precondition", str(exc))
-    except worktree.WorktreeUnregistered as exc:
-        return _unregistered(exc, str(exc.worktree))
+    cfg = _or_stop(lambda: _run_config(args))
+    if isinstance(cfg, int):
+        return cfg
     try:
         # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
         cfg = outside_checkout(cfg)
