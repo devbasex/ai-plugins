@@ -243,6 +243,15 @@ def test_assume_public_does_not_look_up_a_bare_name_holding_a_secret(monkeypatch
     assert stub.asked == [] and secret not in got and "acme" not in got
 
 
+def test_spellings_of_one_repository_are_looked_up_once() -> None:
+    # 大文字・小文字の違う同じリポジトリの参照は、照会の前にまとめて 1 件だけ問う。どの表記も伏せる
+    stub = StubHub(PRIVATE_REPO, {})
+    text = f"{PRIVATE_REPO.upper()}#1 と https://github.com/{PRIVATE_REPO.title()}/pull/2 と {PRIVATE_REPO}"
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(text, assume_public=True)  # type: ignore[arg-type]
+    assert len(stub.asked) == 1 and len(stub.asked[0]) == 1 and stub.asked[0][0].lower() == PRIVATE_REPO
+    assert got == f"{publish.PRIVATE_REF_TEXT} と {publish.PRIVATE_REF_TEXT} と {publish.PRIVATE_REF_TEXT}"
+
+
 def test_the_bare_name_pattern_matches_only_the_name_and_its_git_suffix() -> None:
     pattern = publish._bare_repo(PRIVATE_REPO)
     assert [m.group() for m in pattern.finditer(f"{PRIVATE_REPO}.git と {PRIVATE_REPO}. と {PRIVATE_REPO}.js")] == [
