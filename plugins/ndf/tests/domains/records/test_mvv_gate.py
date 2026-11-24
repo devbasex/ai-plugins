@@ -87,9 +87,11 @@ class Hub:
     def __init__(self, number: int, case: dict[str, Any]) -> None:
         self.number, self.case = number, case
 
-    def pulls_by_head(self, branches: list[str]) -> dict[str, list[SimpleNamespace]]:
+    def open_pulls_of_head(self, branch: str, enough: int) -> list[SimpleNamespace]:
+        # 本物と同じく、開いた同じリポジトリの PR を `enough` 件まで返す
         opened = [SimpleNamespace(number=self.number, state="open", cross_repository=False)]
-        return {b: list(self.case.get("pulls", opened)) if b == "design/x" else [] for b in branches}
+        pulls = list(self.case.get("pulls", opened)) if branch == "design/x" else []
+        return [p for p in pulls if p.state == "open" and not p.cross_repository][:enough]
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
@@ -215,7 +217,7 @@ def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
     ("inputs", "hub", "ask", "why"),
     [
         (_inputs(), _hub(5, {"body": "", "files": []}), Ask(None, ok=False), "MVV 判定の回答が無い"),
-        (_inputs(), lambda root: SimpleNamespace(pulls_by_head=lambda b: {b[0]: []}), Ask(FOLLOW), "開いた設計の PR が無い"),
+        (_inputs(), lambda root: SimpleNamespace(open_pulls_of_head=lambda b, enough: []), Ask(FOLLOW), "開いた設計の PR が無い"),
     ],
 )
 def test_a_verdict_that_cannot_be_had_asks_a_human(repo: Path, inputs: dict, hub: Any, ask: Ask, why: str) -> None:
@@ -517,6 +519,15 @@ def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(
     twice = {**case, "pulls": [mine, SimpleNamespace(number=6, state="open", cross_repository=False)]}
     with pytest.raises(mvv_gate.GateError, match="複数"):
         mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, twice))
+
+
+def test_a_worktree_at_the_same_path_is_not_checked_with_git(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 作業場所と起動元が同じパスなら、共通ディレクトリを Git に問わない
+    def no_git(where: Path) -> str:
+        raise AssertionError("同じパスで共通ディレクトリを問うた")
+
+    monkeypatch.setattr(mvv_gate, "_common_dir", no_git)
+    assert mvv_gate.pr_number(repo, "design", _plan_inputs(repo, worktree=str(repo)), Hub(5, {})) == 5
 
 
 # --- #3959 Task 9: 失敗の原因を定型文と手元の診断の記録に分ける ---
