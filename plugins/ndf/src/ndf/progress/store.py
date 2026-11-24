@@ -525,7 +525,10 @@ _MVV_HOLDERS = {
 
 
 def _withheld(draft: model.EventDraft) -> model.EventDraft:
-    """閲覧範囲を限れない保存先へ書く下書き。判定の出力を `model.mvv_stored_view` に通す（ほかの値は変えない。#3959）。"""
+    """閲覧範囲を限れない保存先へ書く下書き。判定の出力を `model.mvv_stored_view` に通す（#3959）。
+
+    判定の出力を持つ結果 JSON の要約（`summary`）も、判定の `why` をつないだ文なので `model.MVV_WITHHELD` に置き換える。
+    ほかの値は変えない。"""
     keys = _MVV_HOLDERS.get(draft.kind)
     if keys is None or draft.payload is None:
         return draft
@@ -535,7 +538,13 @@ def _withheld(draft: model.EventDraft) -> model.EventDraft:
             return part
         if not rest:
             return {**part, model.MVV_KEY: model.mvv_stored_view(part[model.MVV_KEY])} if model.MVV_KEY in part else part
-        return {**part, rest[0]: walk(part[rest[0]], rest[1:])} if rest[0] in part else part
+        if rest[0] not in part:
+            return part
+        inner = part[rest[0]]
+        out = {**part, rest[0]: walk(inner, rest[1:])}
+        if rest == ("outputs",) and isinstance(inner, dict) and model.MVV_KEY in inner and isinstance(part.get("summary"), str):
+            out["summary"] = model.MVV_WITHHELD
+        return out
 
     return replace(draft, payload=walk(draft.payload, keys))
 

@@ -85,8 +85,8 @@ def _held(kind: str, **extra) -> dict:
     }
 
 
-def _held_step(held: dict):
-    return lambda r: invoke.finished(r, result.result("script", "ok", "MVV 判定", outputs={"mvv_gate": held}))
+def _held_step(held: dict, summary: str = "MVV 判定"):
+    return lambda r: invoke.finished(r, result.result("script", "ok", summary, outputs={"mvv_gate": held}))
 
 
 def _answers(st, tid) -> list[model.Event]:
@@ -276,9 +276,13 @@ FREE = {
 }
 
 
-def _recorded_mvv(st, tid, step: str) -> dict:
+def _recorded_report(st, tid, step: str) -> dict:
     ev = [e for e in run.read(st, tid).events if e.draft.kind == "step_recorded" and e.draft.payload["step"] == step][-1]
-    return ev.draft.payload["report"]["outputs"]["mvv_gate"]
+    return ev.draft.payload["report"]
+
+
+def _recorded_mvv(st, tid, step: str) -> dict:
+    return _recorded_report(st, tid, step)["outputs"]["mvv_gate"]
 
 
 def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answer(repo, st, env, capsys):
@@ -286,10 +290,12 @@ def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answ
 
     st.private = False
     tid = _new(capsys)
-    env.fake.script["design-mvv"] = [_held_step(_held("design", holds=[], **FREE))]
+    # 結果 JSON の要約は判定の why をつないだ文なので、要約も伏せる
+    env.fake.script["design-mvv"] = [_held_step(_held("design", holds=[], **FREE), "承認ゲートを人へ問う: 省かない 1")]
     lanes.turn(st, tid, repo, env.env)
     stored = _recorded_mvv(st, tid, "design-mvv")
     assert stored["verdict"]["reasons"] == [model.MVV_WITHHELD] * 2 and stored["why"] == [model.MVV_WITHHELD] and stored["holds"] == []
+    assert _recorded_report(st, tid, "design-mvv")["summary"] == model.MVV_WITHHELD
     (ans,) = _answers(st, tid)
     p = ans.draft.payload
     assert p["mvv_gate"]["verdict"]["boundary"] == [model.MVV_WITHHELD] and p["mvv_gate"]["verdict"]["basis"] == ["Value 1"]
