@@ -18,9 +18,9 @@
    検査は [parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) の「検査」）、計画を始めて `ndf lanes run <計画名>` を
    切り離して起動する（`metrics.run_pid`。出力は計画の記録の保存先の `run.log`）。区切りで止めた計画なら、止めた所から続ける
 2. `ndf lanes wait p1` を背景で打ち、完了の通知を待つ（[waiting.md](waiting.md) の形。前景の sleep で待たない）
-3. 返った `items`（知らせ）ごとに下の表の手を打ち、`items` の有無にかかわらず `metrics.new_stalls` も表のとおりに扱ってから、
-   結果の `next`（`ndf lanes wait p1 --after <番号> [--known-stalls ...]`）を背景で打ち直す。`next` の `--known-stalls` は今回の止まりも
-   通知済みに数えるので、扱わずに打つと二度と返らない
+3. 返った `items`（知らせ）ごとに下の表のとおりに対応し、`items` の有無にかかわらず `metrics.new_stalls` にも対応してから、
+   結果の `next`（`ndf lanes wait p1 --after <番号> [--known-stalls ...]`）を背景で打ち直す。`next` の `--known-stalls` は、今回返った止まりを
+   通知済みとして扱う。対応せずに `next` を打つと、その止まりは二度と知らされない
 
 `wait` は、`--after` の番号より後の計画の事象のうち、リクエストが開いた（`request_opened`）・計画が完了した（`plan_completed`）ものを
 すべて返す。閉じたリクエストは返さない。知らせが無くても、計画が終わった（完了か中止）か、まだ知らせていない止まり（`metrics.new_stalls`）が
