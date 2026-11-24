@@ -11,79 +11,43 @@ from pathlib import Path
 
 import pytest
 
-from ndf.progress import model, store
+from ndf.progress import store
 
 
 def _mode(path: Path) -> int:
     return path.stat().st_mode & 0o777
 
 
-def test_the_default_store_directory_becomes_owner_only(root):
-    os.chmod(root, 0o755)
-    with store.open_store(store.default_url(root), root) as st:
-        assert st.private is True and _mode(root) == 0o700
-
-
-def test_an_outside_sqlite_file_is_created_owner_only(root, tmp_path):
-    db = tmp_path / "outside" / "p.sqlite"
-    db.parent.mkdir()
-    old = os.umask(0o022)
-    try:
-        with store.open_store(f"sqlite:///{db}", root) as st:
-            assert st.private is True and _mode(db) == 0o600
-    finally:
-        os.umask(old)
-
-
-def test_an_outside_sqlite_file_and_its_side_files_become_owner_only(root, tmp_path):
+@pytest.mark.parametrize("where", ["default", "outside-missing", "outside-with-sides", "side-refused", "postgresql"])
+def test_opening_the_store_restricts_it_to_the_owner_or_marks_it_not_private(root, tmp_path, monkeypatch, request, where):
     db = tmp_path / "p.sqlite"
     sides = [Path(f"{db}{x}") for x in ("-wal", "-shm")]
-    for f in (db, *sides):
-        f.write_bytes(b"")
-        os.chmod(f, 0o644)
-    assert store.restrict(root, db) is True
-    assert [_mode(f) for f in (db, *sides)] == [0o600] * 3
+    urls = {"default": lambda: store.default_url(root), "postgresql": lambda: request.getfixturevalue("pg_url")}
+    url = urls[where]() if where in urls else f"sqlite:///{db}"
+    if where == "default":
+        os.chmod(root, 0o755)
+    if where in ("outside-with-sides", "side-refused"):
+        for f in (db, *sides):
+            f.write_bytes(b"")
+            os.chmod(f, 0o644)
+    if where == "outside-with-sides":
+        # 開いた後は SQLite が副ファイルを作り直すので、接続の前の制限を直接確かめる
+        assert store.restrict(root, db) is True and [_mode(f) for f in (db, *sides)] == [0o600] * 3
+    if where == "side-refused":
+        real = os.chmod
+        monkeypatch.setattr(os, "chmod", lambda p, m, *a, **k: _refuse() if str(p) == str(sides[0]) else real(p, m, *a, **k))
+    old = os.umask(0o022)
+    try:
+        with store.open_store(url, root) as st:
+            private = st.private
+    finally:
+        os.umask(old)
+    assert private is (where not in ("side-refused", "postgresql"))
+    if where == "default":
+        assert _mode(root) == 0o700
+    if where.startswith("outside"):
+        assert _mode(db) == 0o600
 
 
-def test_a_side_file_that_cannot_be_restricted_opens_the_store_as_not_private(root, tmp_path, monkeypatch):
-    db = tmp_path / "p.sqlite"
-    side = Path(f"{db}-wal")
-    side.write_bytes(b"")
-    real = os.chmod
-
-    def refuse(path, mode, *a, **k):
-        if str(path) == str(side):
-            raise PermissionError("所有者でない")
-        return real(path, mode, *a, **k)
-
-    monkeypatch.setattr(os, "chmod", refuse)
-    with store.open_store(f"sqlite:///{db}", root) as st:
-        assert st.private is False
-
-
-def test_postgresql_is_never_private(pg_url, root):
-    with store.open_store(pg_url, root) as st:
-        assert st.private is False
-
-
-@pytest.mark.parametrize("holds", [[], None])
-def test_the_stored_view_keeps_counts_and_every_mark_of_the_verdict(holds):
-    held = {
-        "gate": "design",
-        "skip": True,
-        "verdict": {"verdict": "not_follow", "reasons": ["r1", "r2"], "boundary": ["b1"], "basis": ["Value 2"]},
-        "why": ["w1", "w2", "w3"],
-        "holds": ["h1", "h2"],
-        "noted": True,
-        "note_url": "https://github.com/o/r/pull/1#issuecomment-1",
-        "pr": 1,
-        "head": "abc",
-        "stopped_by": {"kind": "pr_moved", "text": "定型文"},
-    }
-    got = model.mvv_stored_view(held)
-    w = model.MVV_WITHHELD
-    assert got["verdict"]["reasons"] == [w, w] and got["verdict"]["boundary"] == [w] and got["why"] == [w] * 3 and got["holds"] == [w, w]
-    for key in ("skip", "pr", "head", "note_url", "noted", "stopped_by", "gate"):
-        assert got[key] == held[key]
-    assert (got["verdict"]["verdict"], got["verdict"]["basis"]) == ("not_follow", ["Value 2"])
-    assert model.mvv_stored_view({**held, "holds": holds})["holds"] == holds
+def _refuse():
+    raise PermissionError("所有者でない")

@@ -31,6 +31,7 @@ from ndf.progress.gate.answering import (
     never_docs_only,
     no_observe,
     recheck,
+    seen_material,
 )
 from ndf.progress.gate.asking import (
     MATERIAL_DIR,
@@ -130,6 +131,7 @@ __all__ = [
     "request_release",
     "routes",
     "sections",
+    "seen_material",
     "take_reply",
     "unconfirmed",
     "waiting",

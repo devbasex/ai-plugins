@@ -328,8 +328,6 @@ def _check_and_backup(store: Store, now: datetime) -> None:
         durable.touch_mark(mark, now)
 
 
-# SQLite の副ファイルの接尾辞（WAL・共有メモリ・ロールバックの記録）
-SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
 # 接続の `info` に置く、保存先の閲覧範囲を限れたか（`Store.private`）のキー
 PRIVATE_KEY = "ndf_private"
 
@@ -345,14 +343,19 @@ def restrict(root: Path, path: Optional[Path]) -> bool:
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(root, 0o700)
         if not path.is_relative_to(os.path.realpath(root)):
-            os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
-            for f in (path, *(Path(f"{path}{x}") for x in SIDE_SUFFIXES)):
-                if f == path or f.exists():
-                    os.chmod(f, 0o600)
+            _owner_only(path)
     except OSError as exc:
         log.warning("ステートマシンの保存先の閲覧範囲を限れない", extra={"root": str(root), "error": type(exc).__name__})
         return False
     return True
+
+
+def _owner_only(path: Path) -> None:
+    """保存先の外の SQLite のファイルを 0600 にし（無ければ 0600 で作る）、既にある副ファイルも 0600 にする。"""
+    os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+    sides = [Path(f"{path}{x}") for x in durable.SIDE_SUFFIXES]
+    for f in (path, *[side for side in sides if side.exists()]):
+        os.chmod(f, 0o600)
 
 
 def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:

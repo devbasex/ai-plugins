@@ -179,12 +179,12 @@ def gate_outcome(
     verdict: Any,
     skip: bool,
     why: Sequence[str],
-    head: Optional[str] = None,
     holds: Optional[Sequence[str]] = None,
     *,
-    pr: Optional[int] = None,
+    pull: Optional[tuple[int, str]] = None,
 ) -> dict[str, Any]:
-    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`pr`・`head` は判定した PR の番号と head（PR を読む前に止めたら無い）。
+    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`pull` は判定した PR の（番号, head）で、キー `pr`・`head` に置く
+    （PR を読む前に止めたら無い。承認資料が質問の PR と head に照らす。#3959）。
 
     `holds` はレビューの保留（読まなかったら None）で、キーは常に置く。`noted` は今回のコメントを書いたか（既定は偽。書けたら
     `mvv_gate._recorded` が置き換える）。
@@ -192,15 +192,14 @@ def gate_outcome(
     held = verdict if isinstance(verdict, dict) else None
     out: dict[str, Any] = {"gate": gate, "skip": skip, "verdict": held, "why": list(why), "holds": None if holds is None else list(holds)}
     out["noted"] = False
-    return {**out, **{k: v for k, v in (("pr", pr), ("head", head)) if v is not None}}
+    return {**out, "pr": pull[0], "head": pull[1]} if pull is not None else out
 
 
 def stop_outcome(
-    gate: str, stop: str, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None, *, pr: Optional[int] = None
+    gate: str, stop: str, why: Sequence[str], holds: Optional[Sequence[str]] = None, *, pull: Optional[tuple[int, str]] = None
 ) -> dict[str, Any]:
     """判定を持たずに終わった出力。判定できなかった理由の種類 `stop` と、その定型文（`STOP_REASONS`）を `stopped_by` に置く。"""
-    held = gate_outcome(gate, None, False, why, head, holds, pr=pr)
-    return {**held, "stopped_by": {"kind": stop, "text": STOP_REASONS[stop]}}
+    return {**gate_outcome(gate, None, False, why, holds, pull=pull), "stopped_by": {"kind": stop, "text": STOP_REASONS[stop]}}
 
 
 # --- 手元の git の差分を、GitHub の比較の files の行の形にする（#3959） -----------------------------------------

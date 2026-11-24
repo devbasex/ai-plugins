@@ -268,7 +268,10 @@ def test_mvv_skip_takes_only_a_design_verdict_that_checked_the_holds():
 
 # --- 閲覧範囲を限れない保存先へ書く判定（#3959 の「手元のファイルの閲覧範囲」） ------------------------------------
 
-FREE = {"verdict": {"verdict": "follow", "reasons": ["理由 1", "理由 2"], "boundary": ["線 1"], "basis": ["Value 1"]}, "why": ["省かない 1"]}
+FREE = {
+    "verdict": {"verdict": "follow", "reasons": ["理由 1", "理由 2"], "boundary": ["線 1"], "basis": ["Value 1"]},
+    "why": ["省かない 1"],
+}
 
 
 def _recorded_mvv(st, tid, step: str) -> dict:
@@ -276,7 +279,9 @@ def _recorded_mvv(st, tid, step: str) -> dict:
     return ev.draft.payload["report"]["outputs"]["mvv_gate"]
 
 
-def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_service_answer(repo, st, env, capsys):
+def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_answer(repo, st, env, capsys):
+    from ndf.progress import stages, store
+
     st.private = False
     tid = _new(capsys)
     env.fake.script["design-mvv"] = [_held_step(_held("design", holds=[], **FREE))]
@@ -288,16 +293,18 @@ def test_an_unrestricted_store_withholds_the_free_text_and_still_counts_the_serv
     assert p["mvv_gate"]["verdict"]["boundary"] == [model.MVV_WITHHELD] and p["mvv_gate"]["verdict"]["basis"] == ["Value 1"]
     assert (p["by"], p["answer"], p["gate"], p["seen"]["head"]) == ("service:mvv", "approved", "design", JUDGED)
     assert not model.mvv_answer_void(p, "design") and gate.approved_head(run.read(st, tid), "design") == JUDGED
-
-
-def test_an_unrestricted_store_keeps_a_hold_counted_as_a_hold(repo, st, env, capsys):
-    st.private = False
-    tid = _new(capsys)
+    # 保留 1 件を写した回答は、伏せても保留 1 件のまま数えない
     held = _held("design", holds=["直っていないレッドライン"])
-    env.fake.script["design-mvv"] = [_held_step(held)]
-    lanes.turn(st, tid, repo, env.env)
-    p = _old_mvv_answer(st, tid, held).draft.payload
-    assert p["mvv_gate"]["holds"] == [model.MVV_WITHHELD] and model.mvv_answer_void(p, "design")
+    assert model.mvv_answer_void(model.mvv_answer("design-gate", "listen", "approved", model.mvv_stored_view(held), "x")[0], "design")
+    # 閲覧範囲の値（conn.info）を持たない接続で書いた工程の出力も伏せる
+    v = run.read(st, tid)
+    draft = model.EventDraft(
+        stages.OUTPUTS_EVENT, run.CONDUCTOR, "設計", payload={"outputs": {"mvv_gate": _held("design", **FREE)}}, rev=v.rev
+    )
+    with st.engine.begin() as conn:
+        store.append_events(conn, tid, [draft], v.events[-1].seq)
+    got = run.read(st, tid).events[-1].draft.payload["outputs"]["mvv_gate"]
+    assert got["verdict"]["reasons"] == [model.MVV_WITHHELD] * 2 and got["why"] == [model.MVV_WITHHELD] and got["head"] == JUDGED
 
 
 def test_a_restricted_store_keeps_the_full_verdict(repo, st, env, capsys):
@@ -306,17 +313,3 @@ def test_a_restricted_store_keeps_the_full_verdict(repo, st, env, capsys):
     env.fake.script["design-mvv"] = [_held_step(_held("design", holds=None, **FREE))]
     lanes.turn(st, tid, repo, env.env)
     assert _recorded_mvv(st, tid, "design-mvv")["verdict"]["reasons"] == ["理由 1", "理由 2"]
-
-
-def test_a_connection_without_the_private_mark_withholds_the_stage_outputs(repo, st, env, capsys):
-    from ndf.progress import stages, store
-
-    tid = _new(capsys)
-    env.fake.script["design-mvv"] = [_held_step(_held("design", holds=None, **FREE))]
-    lanes.turn(st, tid, repo, env.env)
-    v = run.read(st, tid)
-    draft = model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, "設計", payload={"outputs": {"mvv_gate": _held("design", **FREE)}}, rev=v.rev)
-    with st.engine.begin() as conn:
-        store.append_events(conn, tid, [draft], v.events[-1].seq)
-    got = run.read(st, tid).events[-1].draft.payload["outputs"]["mvv_gate"]
-    assert got["verdict"]["reasons"] == [model.MVV_WITHHELD] * 2 and got["why"] == [model.MVV_WITHHELD] and got["head"] == JUDGED

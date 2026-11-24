@@ -113,8 +113,8 @@ def test_pr_facts_reads_the_body_and_changed_files_of_the_pr() -> None:
 
 def test_the_gate_outcome_carries_the_judged_pr_and_a_stop_before_the_pr_has_none() -> None:
     # 承認資料が判定の PR を質問の PR と照らすため、判定した PR の番号を出力に持つ（#3959）
-    judged = mm.gate_outcome("design", {"verdict": "follow"}, False, [], "h1", pr=7)
+    judged = mm.gate_outcome("design", {"verdict": "follow"}, False, [], pull=(7, "h1"))
     assert (judged["pr"], judged["head"]) == (7, "h1")
-    stopped = mm.stop_outcome("design", "pr_moved", ["x"], "h1", pr=7)
+    stopped = mm.stop_outcome("design", "pr_moved", ["x"], pull=(7, "h1"))
     assert (stopped["pr"], stopped["head"], stopped["stopped_by"]["kind"]) == (7, "h1", "pr_moved")
     assert "pr" not in mm.stop_outcome("design", "no_pr", ["x"]) and "head" not in mm.stop_outcome("design", "no_pr", ["x"])

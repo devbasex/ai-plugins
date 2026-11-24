@@ -188,7 +188,7 @@ class _Judging:
 
     def stopped(self, kind: str, why: list[str], noted: bool = True) -> dict[str, Any]:
         """判定を持たずに終わる。`noted` なら判定の記録を PR のコメントへ書く（材料が今の PR に属さないときは書かない）。"""
-        out = mm.stop_outcome(self.gate, kind, why, self.pull.head_sha, pr=self.number)
+        out = mm.stop_outcome(self.gate, kind, why, pull=(self.number, self.pull.head_sha))
         return _recorded(self.hub, self.number, out, self.where) if noted else out
 
 
@@ -280,7 +280,7 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, j.pull.head_sha, pr=number), j.where)
+    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull=(number, j.pull.head_sha)), j.where)
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:

@@ -236,11 +236,32 @@ def git_docs_only(cwd: Path) -> DocsOnly:
     return docs_only
 
 
-def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly) -> bool:
-    """リリース承認ゲートで、違いが PR の head だけで、加わった範囲が文書だけか（出し直さない。#3020）。"""
-    if q.gate != RELEASE_GATE or (now.material is not None and now.material != seen.material):
+def seen_material(root: Path, q: Question, seen: Target) -> Optional[str]:
+    """回答した者が見た承認資料の sha256。見た head の資料（新しい名前）、無ければ更新前の名前 `<質問の id>.md` の順に探し、
+    最初に見つかった 1 つだけを読む。どちらも無ければ None（#3959）。"""
+    paths = [material_path(root, replace(q, target=Target(seen.head)))] if seen.head else []
+    for path in (*paths, material_path(root, replace(q, target=Target()))):
+        if path.exists():
+            return material_sha256(path)
+    return None
+
+
+def _material_moved(root: Path, q: Question, seen: Target) -> Optional[str]:
+    """回答した者が見た資料が、その後に変わったか消えたなら違いの文（突き合わせられなければ変わったと扱う）。ハッシュを記録しない
+    回答（`service:mvv` の回答など）は資料で比べない。"""
+    if seen.material is None:
+        return None
+    got = seen_material(root, q, seen)
+    return None if got == seen.material else f"承認資料の sha256（見た値 {seen.material}・今の値 {got or '無し'}）"
+
+
+def _docs_only_after(root: Path, q: Question, seen: Target, now: Target, docs_only: DocsOnly) -> bool:
+    """リリース承認ゲートで、加わった範囲が文書だけで、承認した者が見た資料が変わっていないか（出し直さない。#3020）。
+
+    新しい head の資料は比べない（表示済みかどうかで結論を変えないため。#3959）。"""
+    if q.gate != RELEASE_GATE or seen.head is None or now.head is None or not docs_only(seen.head, now.head):
         return False
-    return seen.head is not None and now.head is not None and docs_only(seen.head, now.head)
+    return _material_moved(root, q, seen) is None
 
 
 def _accept(root: Path, q: Question, now: Target) -> None:
@@ -265,14 +286,18 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))
-    seen, now = Target.from_dict(p.get("seen")), observe(q)
-    changed = now.differs(seen)
-    if not changed:
-        return None
-    if _docs_only_after(q, seen, now, docs_only):
+    # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）
+    seen, now = Target.from_dict(p.get("seen")), observe(q, material=False)
+    if seen.head is None or now.head is None or seen.head == now.head:
+        changed = _material_moved(st.root, q, seen)
+        if changed is None:
+            return None
+    elif _docs_only_after(st.root, q, seen, now, docs_only):
         _accept(st.root, q, now)
         return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
-    why = "回答した後に対象が変わった: " + " / ".join(changed)
+    else:
+        changed = f"head の SHA（見た値 {seen.head}・今の値 {now.head}）"
+    why = "回答した後に対象が変わった: " + changed
     payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
     draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
     # 比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）書かない
