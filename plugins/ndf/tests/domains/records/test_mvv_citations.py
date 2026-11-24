@@ -97,7 +97,7 @@ def test_parse_citation_reads_the_items_and_the_version(line: str, items: tuple[
 @pytest.mark.parametrize(
     ("line", "decision"),
     [
-        ("- 根拠: Value 3「…」（MVV 版 11）", False),
+        ("- 根拠: Value 3「…」（MVV ver 11）", False),
         ("- 根拠: Value 5（MVV バージョン 11x）", False),
         ("- 根拠: Value 5（MVV バージョン 11", False),
         ("- 根拠: Value 5（MVV バージョン）", False),
@@ -141,7 +141,7 @@ def test_parse_citation_skips_lines_that_are_not_citations(line: str, decision: 
         ("- 根拠: Value 3（MVV バージョン 12）", True, _error("Value 3", "version", 12)),
         ("- 根拠: Value 18 / Value 3（MVV バージョン 11）", True, _error("Value 18 / Value 3", "unknown", 11, ("Value 18",))),
         ("- 根拠: （MVV バージョン 11）", True, _error("", "unknown", 11, ("",))),
-        ("- 根拠: Value 3「…」（MVV 版 11）", False, _error("Value 3", "format")),
+        ("- 根拠: Value 3「…」（MVV ver 11）", False, _error("Value 3", "format")),
         ("- 根拠: Value 5（MVV バージョン 11x）", False, _error("Value 5", "format")),
         ("- 根拠: Value 5（MVV バージョン 11", False, _error("Value 5", "format")),
         ("- 根拠: 根拠なし（MVV なし）", False, _error("根拠なし", "format")),
@@ -173,7 +173,7 @@ def test_citation_errors_look_up_the_items_of_the_cited_version() -> None:
 
 
 def test_breaking_the_version_notation_does_not_hide_a_wrong_version() -> None:
-    before, after = _errors("- 根拠: Value 3（MVV バージョン 1）"), _errors("- 根拠: Value 3（MVV 版 1）")
+    before, after = _errors("- 根拠: Value 3（MVV バージョン 1）"), _errors("- 根拠: Value 3（MVV ver 1）")
     assert [e["kind"] for e in before + after] == ["version", "format"]
 
 
