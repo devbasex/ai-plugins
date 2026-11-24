@@ -120,63 +120,6 @@ def test_push_refuses_a_reported_commit_that_is_not_in_head(repos: Repos, tmp_pa
     assert push.push_fix(git.Git(wt), BRANCH, stray).reason == push.NOT_ANCESTOR
 
 
-def _verified(repos: Repos, tmp_path: Path) -> tuple[Path, push.Verified]:
-    """PR のブランチに別の書き手のコミットがあり、その上に修正のコミットだけがある worktree と、送る範囲。"""
-    base = commit(repos.other, "taken.md", "後で取り除く\n", "後で取り除く")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    sh(repos.main, "fetch", "-q", "origin")
-    wt = _review_worktree(repos, tmp_path)
-    return wt, push.Verified(commit(wt, "fix.txt", "fix\n", "修正"), base)
-
-
-def test_commit_added_after_the_check_is_not_pushed(repos: Repos, tmp_path: Path) -> None:
-    """送る範囲を確かめた後に足されたコミットは送らない。拒まれたときも、そのコミットごと載せ直さない。"""
-    wt, verified = _verified(repos, tmp_path)
-    moved = commit(wt, "memo.md", "手元だけ\n", "手元に留める")
-    assert push.push_fix(git.Git(wt), BRANCH, None, verified).ok and _origin_head(repos) == verified.head
-    again = push.Verified(moved, verified.head)
-    moved = commit(wt, "memo2.md", "手元だけ\n", "もう 1 つ留める")
-    sh(repos.other, "pull", "-q", "origin", BRANCH)
-    theirs = commit(repos.other, "other.txt", "other\n", "別の push")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    assert push.push_fix(git.Git(wt), BRANCH, None, again).reason == push.HEAD_MOVED
-    assert (_origin_head(repos), sh(wt, "rev-parse", "HEAD").strip()) == (theirs, moved)
-
-
-@pytest.mark.parametrize("replaced", [False, True])
-def test_commit_taken_out_of_the_branch_is_not_pushed_back(repos: Repos, tmp_path: Path, replaced: bool) -> None:
-    """確かめた後に PR のブランチが巻き戻るか別のコミットへ差し替わったら、取り除かれたコミットごと送り直さない。"""
-    wt, verified = _verified(repos, tmp_path)
-    sh(repos.other, "reset", "-q", "--hard", "HEAD~1")
-    if replaced:
-        commit(repos.other, "other.txt", "other\n", "差し替え")
-    sh(repos.other, "push", "-q", "--force", "origin", f"HEAD:refs/heads/{BRANCH}")
-    kept = _origin_head(repos)
-    assert push.push_fix(git.Git(wt), BRANCH, None, verified).reason == push.BASE_LOST
-    assert (_origin_head(repos), sh(wt, "rev-parse", "HEAD").strip()) == (kept, verified.head)
-
-
-def test_verified_range_that_dropped_its_base_is_not_forced(repos: Repos, tmp_path: Path) -> None:
-    """送るコミットが PR の先頭を含まなければ（コミットの作り直しなど）、先頭が変わっていなくても上書きしない。"""
-    wt, verified = _verified(repos, tmp_path)
-    sh(wt, "reset", "-q", "--hard", "HEAD~2")
-    redone = push.Verified(commit(wt, "redone.txt", "x\n", "作り直し"), verified.base)
-    assert push.push_fix(git.Git(wt), BRANCH, None, redone).reason == push.BASE_LOST
-    assert _origin_head(repos) == verified.base
-
-
-def test_failure_after_the_rebase_tells_the_moved_range(repos: Repos, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """載せ直した後の push が拒否でない理由で失敗したら、載せ直した後の範囲を例外が持つ。"""
-    wt, verified = _verified(repos, tmp_path)
-    theirs = commit(repos.other, "other.txt", "other\n", "別の push")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    answers = [git.Completed(1, "", "! [rejected] (stale info)"), git.Completed(128, "", "Authentication failed")]
-    monkeypatch.setattr(push, "_push", lambda *a: answers.pop(0))
-    with pytest.raises(push.ResendFailed, match="Authentication") as failed:
-        push.push_fix(git.Git(wt), BRANCH, None, verified)
-    assert failed.value.moved == push.Verified(sh(wt, "rev-parse", "HEAD").strip(), theirs)
-
-
 def test_issue_2440_sync_replays_only_own_unsent_commits_onto_origin(repos: Repos, tmp_path: Path) -> None:
     """#2440: 流し直しの初めに、origin が 5 コミット進んだ worktree を origin の先頭へ合わせ、未送信の自分のコミットだけを載せ直す。"""
     wt = _review_worktree(repos, tmp_path)

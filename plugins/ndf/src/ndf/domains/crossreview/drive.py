@@ -174,36 +174,18 @@ def _ingest_pending(run: _Run) -> None:
         fixer.consume(pending, len(rounds))
 
 
-def _send_kept(run: _Run, round_no: int, head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
-    """修正のコミットを送る。git の失敗で止まるときも、載せ直した後の範囲を状態ファイルに残す（次の起動が送り直せる）。"""
-    try:
-        return fixer.send_fix(run, round_no, head, fix, check_commit)
-    except git.GitError:
-        _save(run)
-        raise
-
-
 def _resend(run: _Run, synced: worktree.SyncResult) -> None:
-    """前の起動が送れなかった修正のコミット（載せ直した自分のコミット）があれば送る。送れないか、
-    修正担当が作ったと確かめられないコミットが混ざっていれば、直したとした指摘を未解決へ戻して止める。"""
+    """前の起動が送れなかった修正のコミット（載せ直した自分のコミット）があれば送る。送れなければ記録して止める。"""
     fix = store.last_round(run.data).get("fix")
     if synced.replayed == 0 or not isinstance(fix, dict) or "pushed" in fix:
         return
-    if not fixer.sendable(run, synced.after):
-        fixer.keep_reported(run, synced)
-    fixed = store.list_of(fix, "fixed")
-    if not fixer.sendable(run, synced.after) and not (fixed and isinstance(fix.get("commit"), str)):
-        # 送れなかった修正と言えるコミットの報告が無い（全件を見送ったなど）。載せ直したコミットは、ラウンドの中で扱う
-        if fixed:
-            run.journal.reopen(fixed)
-            _save(run)
-        return
     round_no = len(store.list_of(run.data, store.ROUNDS))
+    remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
-    sent = _send_kept(run, round_no, synced.after, fix, check_commit=False)
+    sent = fixer.send_fix(run, round_no, remote, fix, check_commit=False)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
-        run.journal.restore_fixed(fixed)
+        run.journal.restore_fixed(store.list_of(fix, "fixed"))
     _save(run)
     if not sent:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
@@ -297,8 +279,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         sent=synced.remote,
         clean=clean,
     )
-    moved = fixer.keep_replayed(run, synced)
-    if rebound or moved:
+    if rebound:
         _save(run)
     _ingest_pending(run)
     _resend(run, synced)
@@ -822,15 +803,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
-    if not fixer.sendable(run, prep.head):
-        # 修正を重ねても、手元に留めたコミットごとでなければ送れない。修正担当を起動せずに止める
-        record["verdict"] = fin.ERROR
-        fixer.hold_back(run, round_no)
-        return fin.ERROR
     _save(run)
     fix = fixer.run_fixer(run, round_no, open_, handed, launch)
-    head = run.g.rev_parse("HEAD")
-    fixer.keep_unsent(run, prep.head, head)
     if fix is None:
         # 修正必須のまま残すと、次の起動が修正の記録の欠けで止まり続ける。errored で残し、次の起動で修正担当をもう一度起動する
         record["verdict"] = fin.ERROR
@@ -838,7 +812,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["fix"] = fix
     _save(run)
     fixer.consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if _send_kept(run, round_no, head, fix) else fin.ERROR
+    return None if fixer.send_fix(run, round_no, prep.head, fix) else fin.ERROR
 
 
 def _reusable(run: _Run) -> bool:

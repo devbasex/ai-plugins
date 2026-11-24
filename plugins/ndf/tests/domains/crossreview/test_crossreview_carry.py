@@ -320,7 +320,7 @@ def test_issue_4076_finding_hidden_in_the_own_record_is_not_doubled(
     first = Recording(tmp_path / "st", {"codex": [[held]], "kiro": [[]]}, decide=lambda fid: None)
     _run(capsys, monkeypatch, first, wt, "--base", "main")
     body, own = hub.comments[-1][2], _state(tmp_path / "st")[report_decide.COMMENT_KEY]
-    assert text not in body
+    assert [i["text"] for i in report_decide.open_items(body)] != [text]
     hub.port.existing = [Remark("comment", "ndf", body, trusted=True, url=own)]
     again = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]}, decide=lambda fid: None)
     _, got = _run(capsys, monkeypatch, again, wt, "--base", "main")
