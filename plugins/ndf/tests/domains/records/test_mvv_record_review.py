@@ -18,8 +18,23 @@ HEAD, NEXT_HEAD = "1" * 40, "2" * 40
 PR = 41
 SECRET = "AbCdEf0123456789-GhIj"
 VALUE = {"id": "r1-1", "text": "方針に反する", "by": "codex", "mvv": "Value 5", "mvv_pinned": True}
-REDLINE = {"id": "r1-2", "text": "人に聞く操作", "by": "kiro", "mvv": "P1", "redline": True, "redline_items": ["P1", "C7"], "outcome": "unresolved"}
-CITATION = {"id": "r1-n1", "text": "doc.md の根拠の記述 Value 99 が承認済みの MVV に無い", "by": "ndf", "path": "doc.md", "cited": "Value 99", "unknown": ["Value 99"]}
+REDLINE = {
+    "id": "r1-2",
+    "text": "人に聞く操作",
+    "by": "kiro",
+    "mvv": "P1",
+    "redline": True,
+    "redline_items": ["P1", "C7"],
+    "outcome": "unresolved",
+}
+CITATION = {
+    "id": "r1-n1",
+    "text": "doc.md の根拠の記述 Value 99 が承認済みの MVV に無い",
+    "by": "ndf",
+    "path": "doc.md",
+    "cited": "Value 99",
+    "unknown": ["Value 99"],
+}
 
 
 def _snapshot(version: int = 11, sha: str = "a") -> mvv.Snapshot:
@@ -50,7 +65,9 @@ def _deferred(reason: Optional[str] = "範囲の外", **how: Any) -> dict[str, A
     return {**VALUE, "outcome": "deferred", "reason": reason, **how}
 
 
-def _record(root: Path, *rows: dict[str, Any], snap: Optional[mvv.Snapshot] = None, head: str = HEAD, clean: Any = list, pr: int = PR) -> int:
+def _record(
+    root: Path, *rows: dict[str, Any], snap: Optional[mvv.Snapshot] = None, head: str = HEAD, clean: Any = list, pr: int = PR
+) -> int:
     """今の MVV で判定した指摘 `rows` を記録する。"""
     snap = snap if snap is not None else _snapshot()
     return mvv.record_review(root, pr, head, snap, [{"judged_mvv": snap.identity, **r} for r in rows], clean)
@@ -82,7 +99,16 @@ def test_deferred_finding_is_recorded_and_counted_as_a_sign_of_revision(root: Pa
     assert _record(root, _deferred()) == 2
     [review], [signal] = _reviews(), _signals()
     key = mvv.record_key(VALUE["text"])
-    shared = {"version": 1, "repo": str(root), "pr": PR, "key": key, "id": "r1-1", "mvv_version": 11, "sha256": "a" * 64, "at": review["at"]}
+    shared = {
+        "version": 1,
+        "repo": str(root),
+        "pr": PR,
+        "key": key,
+        "id": "r1-1",
+        "mvv_version": 11,
+        "sha256": "a" * 64,
+        "at": review["at"],
+    }
     assert review == {**shared, "kind": "mvv-review", "head": HEAD, "item": "Value 5", "outcome": "deferred", "reason": "範囲の外"}
     assert signal == {**shared, "kind": md.REVIEW_DISPUTED}
     assert _unknowns(root) == 1
