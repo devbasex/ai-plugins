@@ -112,7 +112,7 @@ flowchart LR
 - 起動する claude の版が `cache.rewake` の `versions` のどれかと完全に一致する
 - 受け継ぐ引数（`claude_args` の `carried`）に利用者の `--settings` が無い。`--settings <値>` と `--settings=<値>` のどちらの形も指定ありとみなす
 
-利用者の `--settings` があるときは登録を足さず、利用者の引数をそのまま初回の起動と再開に渡す（決定 7）。中身は Stop の `asyncRewake: true` の登録 1 つで、プラグインの登録と並んで動く。プラグインの根の環境変数は `--settings` の hook に渡らないので、command は `hooks/entry.py` の絶対パスで書く。登録を足した起動にだけ、子の環境へ `NDF_RELAY_REWAKE=1` を足す（登録を足さない起動では渡さない）。hook はこの変数を自分で確かめ、無ければすぐ終わる（#4068 の受け入れ条件 3）。登録と変数の両方で限るのは、登録だけでは、登録の無い起動から `rewake` の入口を直接呼んだときに眠りを防げないためである。対象の会話は #4049 の `NDF_RELAY_SESSION` でも限る。
+利用者の `--settings` があるときは登録を足さず、利用者の引数をそのまま初回の起動と再開に渡す（決定 7）。登録は、起動先を決める前の起動引数（`_launch_target` へ渡す引数）に足す。API キーの従量の子では、今の `account_choice._compose` がその起動引数の `--settings`（1 つだけ）を読み、`apiKeyHelper` と `ConfigChange` の hook を合わせた 1 つの `--settings` に作り直すので、起こす登録も同じ 1 つに残る。起動先を決めた後に別の `--settings` を足すことはしない（`--settings` は最後の 1 つだけが効くので、子の認証の設定か起こす登録のどちらかが効かなくなる）。中身は Stop の `asyncRewake: true` の登録 1 つで、プラグインの登録と並んで動く。プラグインの根の環境変数は `--settings` の hook に渡らないので、command は `hooks/entry.py` の絶対パスで書く。登録を足した起動にだけ、子の環境へ `NDF_RELAY_REWAKE=1` を足す（登録を足さない起動では渡さない）。hook はこの変数を自分で確かめ、無ければすぐ終わる（#4068 の受け入れ条件 3）。登録と変数の両方で限るのは、登録だけでは、登録の無い起動から `rewake` の入口を直接呼んだときに眠りを防げないためである。対象の会話は #4049 の `NDF_RELAY_SESSION` でも限る。
 
 ## 処理の流れ
 

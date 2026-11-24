@@ -264,7 +264,7 @@ plugins/ndf/
 ## ラッパー（`wrapper._start`）
 
 - `adapters/cli_floor.require(name, argv0, env, cwd) -> Optional[str]` に変える。下限の確かめ（古ければ `TooOld`）は今のまま保ち、確かめに使った版（`_version` が同じ実パス・更新時刻・大きさで持つ値。表に無い名前・見つからない・読めないなら None）を返す。`refuse_old` は返り値を捨てるだけで変えない。`--version` の起動は増えない
-- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。次の 2 つがそろえば、起動の引数の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す
+- `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。次の 2 つがそろえば、`_launch_target` へ渡す起動の引数（`[CLAUDE, *head, *self.s.args, *once]`）の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。起動先を決めた後の `Target.argv` には足さない。API キーの従量の子では、`account_choice._source` がこの 1 つの `--settings` を元の設定として読み、`_compose` が `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直すので、`hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。キーでない子は足した引数をそのまま受ける
   - 版の文字列が `limits.texts("cache.rewake", "versions")`（`contracts/limits/cache.rewake.json` を読む）のどれかと完全に一致する（`semver` の大小では比べない）
   - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
 
@@ -275,6 +275,7 @@ plugins/ndf/
 | --- | --- |
 | 版の門 | `versions` を `["2.1.330", "2.1.332"]` にした値で、版 2.1.330 と 2.1.332 は足す・2.1.331（両端の間の測っていない版）・2.1.329・2.1.333 は足さない。読めない・一覧が空でも足さない。足した引数の JSON が `rewake_settings` と同じ。足した起動の子の環境に `NDF_RELAY_REWAKE=1` があり、足さない起動（一覧に無い版・利用者の `--settings`）では、親の環境に `NDF_RELAY_REWAKE=1` があっても子の環境に無い |
 | 利用者の `--settings` | 版が一覧に在り、受け継ぐ引数に `--settings=x.json` があるときと `--settings x.json` があるときのどちらも、初回の起動と `--resume` の再開の引数に `--settings` が 1 つだけで、利用者の値がそのまま並び、`rewake_settings` の JSON が無い。今の起動の記録の `rewake` が偽 |
+| 従量キーの子 | 版が一覧に在り、利用者の `--settings` が無く、起動先が API キーの従量の接続の子のとき、初回の起動と `--resume` の再開のどちらでも、子の起動の引数に `--settings` が 1 つだけで、その JSON が `apiKeyHelper`・`hooks.ConfigChange` の `config-gate` の hook・`hooks.Stop` の `rewake_settings` の登録の 3 つをすべて持つ。起動先の理由が `key_unresolved`・`key_overridden` にならない |
 | 版の取得 | `require` が下限の確かめに読んだ版を返し、下限より古ければ今のとおり `TooOld`。`_start` から通した 1 回の起動で、差し替えた `--version` の実行が 1 回だけ |
 
 ## 集計（`ndf relay cache report`）
