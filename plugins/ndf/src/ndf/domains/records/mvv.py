@@ -357,10 +357,10 @@ def cite(snap: Snapshot, files: Sequence[Path], require_basis: bool = False) -> 
     errors: list[dict[str, Any]] = []
     checked = 0
     for path, text in texts:
-        code, decisions = fenced_lines(text), decision_lines(text)
-        lines = [(path, no, line, no in decisions) for no, line in enumerate(_material_lines(text), 1) if no not in code]
+        material = _Material(path, text)
+        lines = [(path, no, line, no in material.decisions) for no, line in enumerate(material.rows, 1) if no not in material.code]
         checked += sum(1 for _, _, line, decision in lines if md.parse_citation(line, decision) is not None)
-        found = md.citation_errors(lines, {snap.version: snap.items}) + _Material(path, text).errors(require_basis)
+        found = md.citation_errors(lines, {snap.version: snap.items}) + material.errors(require_basis)
         errors += sorted(found, key=lambda e: int(e["line"]))
     return Cited(errors, checked)
 
