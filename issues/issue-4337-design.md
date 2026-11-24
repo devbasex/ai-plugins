@@ -28,7 +28,7 @@ flowchart TD
 - 設計書は、工程を始める前の準備の時点ではまだ無い。対象の文書は、組み直すステップを打った時点でしか決められない
 - 組み直すステップの形は、テンプレートが `[<rebuild>, "--out", "{state_dir}/rebuild.json"]` と決めている。設定のコマンドも既定のコマンドも、同じ引数を受ける（条件 15）
 - 工程の入力に、スプリントブランチの名前と設計 PR のマージ先は無い
-- 影響の表の「worker を 1 回ずつ起動する」は、組み直すステップ 1 回が打つ `ndf worker run` を 1 回まで（対象が 0 件なら 0 回）とする意味に読む。読み手役の確かめのために 2 本目の `ndf worker run` を打たない。worker の下で立てる読み手役のサブエージェントは、この回数に数えず別に数える（「影響と危険」の Claude の起動の行）
+- 影響の表の「既存の振る舞い」のとおり、組み直すステップ 1 回が打つ `ndf worker run` は 1 回まで（対象が 0 件なら 0 回）で、worker の下で立てる読み手役はこの回数に数えない。読み手役の確かめのために 2 本目の `ndf worker run` を打たない。読み手役の回数は「影響と危険」の Claude の起動の行で別に数える
 - 差し込み `base` を決める処理は、ブランチ戦略の設定が無いと先に別の理由（`invalid`）で止まる。条件 14 の理由を出すには、`rebuild` をそれより先に決める
 - `invoke.py` は 982 行で、1 ファイル 1,000 行の上限に近い。既定を組む処理は別のモジュールに置く
 - `ndf` のモジュールの層は下から `contracts`・`adapters`・`core`・`progress`・`domains` で、下の層は上の層を読まない
@@ -104,11 +104,13 @@ flowchart TD
 | --- | --- |
 | 既定の組み立て（新設。`ndf.progress.rebuild_values`） | 設定が無いときの既定のコマンドを組む。工程とモードから文書の種類への対応を持つ。ベースブランチは、値がまだ無ければ読み込み済みの設定から 1 回だけ決め、テンプレートが `base` を使うなら `base` の値としても返す。リモートの名前も、値がまだ無ければ `Git.remote()` で 1 回だけ求め、`remote` の値としても返す。決められなければ理由・設定のキー・値の形を返す |
 | 差し込みの値を集める処理（変更。`ndf.progress.invoke`） | `rebuild` を、打った場所の値より先に埋める。打った場所の値とは、`route.derived_locally` が作業場所の git と設定から求める差し込み（`base`・`remote` など）である。`rebuild_values.fill` が返した `base` と `remote` も差し込みに入れる。`derived_locally` は値のある `base`・`remote` を求め直さないので、設計のプランの `rebuild` と `base` は同じ解決済みのマージ先になり、ブランチ戦略の設定の読み込みと検証、`Git.remote()` の `git worktree list` はそれぞれ 1 回で済む。欠けの `items` に上の 3 つを載せる |
-| サブコマンド `ndf document-rebuild run`（新設。`ndf.domains.docrebuild`） | 起点を決め、対象を選び、起動指示を組み、`ndf worker run` を打ち、結果を確かめ、`--out` と標準出力へ出す。コミット・`push`・GitHub への書き込みを持たない |
+| サブコマンドの入口（新設。`ndf.domains.docrebuild.cli`。`__init__.py` はパッケージの説明だけ） | `ndf document-rebuild run` の引数を定義し、`drive` を呼ぶ。`ndf/cli.py` の `COMMANDS` に登録する。引数のスキーマ `document-rebuild.args.schema.json` と `docs/contracts/commands.md` は、規約の生成（`checks/spec_render.py`）が、`checks/spec_model.py` の読んだこの引数の定義から作る。手では書かない |
+| 組み直しの駆動（新設。`ndf.domains.docrebuild.drive`） | 起点を決め、git から差分を読み、`select_decide` で対象を選び、起動指示を組み、`ndf worker run` を打ち、結果を確かめ、`--out` と標準出力へ出す。コミット・`push`・GitHub への書き込みを持たない |
 | 対象の選択（新設。`ndf.domains.docrebuild.select_decide`） | 差分のパス・実装計画の頭・通常ファイルかどうかから対象を選ぶ。ファイルも git も読まない純粋な処理 |
 | 課題の文書の名前（新設。`ndf.core.issue_docs`） | 設計書のパスの形と、名前に含む課題の番号。`ndf loop design-tests` が持つ同じ正規表現をここへ移し、両方が読む |
 | 起動指示のテンプレート（新設。`contracts/worker/document-rebuild.md`） | 組み直す worker への指示。差し込みは `string.Template` の `$名前` |
-| 工程の定義（変更。`contracts/workflow/stages/document-rebuild.json`） | 入力に `mode` を足す |
+| 工程の定義（変更。`contracts/workflow/stages/document-rebuild.json`） | `metadata.ndf.inputs` に `mode` を足す。値はスプリントの文脈の `mode` で、`ndf progress new --mode` がステートマシンの作成時に書き（`progress/command.py` の 597 行）、どの工程も出力で上書きしない。工程を始めるとき、`invoke.resolve_inputs` が定義の `inputs` のキーを文脈から取り（`invoke.py` の 215〜224 行、呼び出しは `run.py` の 492 行）、`invoke.stage_run` が `StageRun.inputs` に入れる（`invoke.py` の 238〜244 行）。工程「設計」の定義は既に `mode` を持つ。値を入れるコードは足さず、`rebuild_values.fill` が `run.inputs["mode"]` を読む。テンプレートの `params` に `mode` は無いので、差し込みの値（`values.json`）には入らない（`invoke.py` の 548 行） |
+| 差し込みの説明（変更。`contracts/templates/params.json`） | `rebuild` の説明に、工程では設定が無ければ既定のコマンド `ndf document-rebuild run` を組むことを、`review` の説明（「省けば …を組む」）と同じ形で書き足す |
 | worker の規則（変更。`development-workflow` の `agent-layers.md`） | 読み手役を立ててよい worker の例外を 1 つ足す（決定 5） |
 
 ```mermaid
@@ -135,7 +137,7 @@ flowchart TD
 | 項目 | 内容 |
 | --- | --- |
 | `--base <ブランチ>`（必須） | ベースブランチの名前（スプリントの PR のマージ先） |
-| `--remote <名前>`（必須） | リモートの名前。ステップは求め直さない。既定のコマンドでは、準備の時点で `rebuild_values.fill` が `Git.remote()`（`adapters/git.py`）で求めた値を入れる。`Git.remote()` はメインディレクトリの `.ndf/worktree.json` の `remote` を読み、設定かキーが無ければ既存の既定値（`default_remote()`）を使う。作業場所の worktree にある設定は読まない。値の形が誤っている（`RemoteError`）ときは、既定を決められないものとして準備で止める（条件 14 の行）。ステップは、リモート追跡の参照 `refs/remotes/<名前>/<ベース>` が読めれば、登録を確かめずにそれを使う。読めないときだけ登録済みのリモートの一覧を読み、その名前が登録済みか、リモートが 1 つも無ければ手元の参照 `refs/heads/<ベース>` を使う。ほかの名前のリモートだけがあるときと、手元の参照も読めないときに `stopped`（`precondition`）にする（「処理の流れ」の表）。名前が未登録でも、リモートの無いリポジトリでは止まらない |
+| `--remote <名前>`（必須） | 起点の参照を探すリモートの名前。既定のコマンドでは、準備の時点で `rebuild_values.fill` が求めた値を入れ、ステップは求め直さない。求め方は「処理の流れ」、起点の決め方は同じ節の表にある |
 | `--issue <番号>`（1 回以上） | 工程が扱う課題 |
 | `--kind <design・plan・manuscript>`（1 回以上） | 選ぶ文書の種類（下の表） |
 | `--state-dir <保存先>`（必須） | 起動指示と worker の結果ファイルの保存先。既定のコマンドでは `{state_dir}`。この文字列は `values.json` とプランにはそのまま残り、プランの実行（`core/plan`）がステップを打つ時に絶対パスへ置き換える |
@@ -146,7 +148,7 @@ flowchart TD
 
 | `--kind` | 選ぶ文書 |
 | --- | --- |
-| `design` | `issues/issue-<番号の並び>-design` で始まる Markdown（前提 1）のうち、番号の並びに `--issue` の番号のどれかを含むもの |
+| `design` | `issues/issue-<番号の並び>-design` で始まる Markdown（前提 1）のうち、番号の並びを `-` で区切った番号の 1 つが `--issue` の番号のどれかと一致するもの。名前の形は `core.issue_docs` の正規表現 `^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$` で、1 つ目のグループを `-` で分けて整数で比べる（課題 433 は `issue-4337-design.md` に当たらない） |
 | `plan` | `--issue` の番号ごとの `issues/issue-<番号>-plan.md` のうち、設計書を省いた行を持つもの。差分にあるかは見ない（決定 9） |
 | `manuscript` | `issues/` の外の Markdown（`*.md`） |
 
@@ -190,7 +192,7 @@ worker の `gate` は `stopped` にする。ステップの結果の `routes` �
 | `checks` | 確かめの並び（行った順）。要素は `{"verdict": "pass・fail", "restatements": [質問ごとの言い直し], "reason": "不合格の質問と理由"}`。`restatements` は必須、`reason` は `fail` のとき必須。`not_run` では空 |
 | `reason` | `not_run` では立てられなかった理由、`fail` の設計書で 2 回目を行えなかったときはその理由。どちらも必須 |
 
-`document-rebuild` の手順の回数に合わせ、`checks` の数を種類ごとに確かめる。合わなければ記録の欠け（I4）とする。`verdict` が `not_run` の行は、先に最初の行で確かめ、種類の行を当てない。`fixed` は `items` にも `warnings` にも足さず、記録（`metrics.readers`）にだけ残す。`document-rebuild` の手順は実装計画と原稿を読み直させないので、`fixed` は「直したが読み直していない」と記録に残す形で、確かめた範囲を偽らない（Value 13）。直した箇所は、続くレビューが差分で読む。
+`document-rebuild` の手順の回数に合わせ、`checks` の数を種類ごとに確かめる。合わなければ記録の欠け（I4）とする。`verdict` が `not_run` なら、種類ごとの `checks` の数は見ず、`checks` が空で `reason` があるかだけを見る（下の表の 1 行目）。`fixed` は `items` にも `warnings` にも足さず、記録（`metrics.readers`）にだけ残す。`document-rebuild` の手順は実装計画と原稿を読み直させないので、`fixed` は「直したが読み直していない」と記録に残す形で、確かめた範囲を偽らない（Value 13）。直した箇所は、続くレビューが差分で読む。
 
 | 種類 | `checks` の数 | 最後の結果 |
 | --- | --- | --- |
@@ -261,7 +263,7 @@ sequenceDiagram
     end
 ```
 
-起点は、下の表で決めた参照と `HEAD` との分岐点である。`Git.remote()` は値の形だけを確かめ、その名前のリモートがあるかを見ない。そこで、リモート追跡の参照 `refs/remotes/<リモート>/<ベース>` が読めないときだけ、登録済みのリモートの一覧（`git remote`）を読んで分ける。
+リモートの名前は `Git.remote()`（`adapters/git.py`）で求める。メインディレクトリの `.ndf/worktree.json` の `remote` を読み、設定かキーが無ければ既存の既定値（`default_remote()`）を使う。作業場所の worktree にある設定は読まない。値の形が誤っている（`RemoteError`）ときは、既定を決められないものとして準備で止める（条件 14 の行）。起点は、下の表で決めた参照と `HEAD` との分岐点である。`Git.remote()` は値の形だけを確かめ、その名前のリモートがあるかを見ない。そこで、リモート追跡の参照 `refs/remotes/<リモート>/<ベース>` が読めないときだけ、登録済みのリモートの一覧（`git remote`）を読んで分ける。
 
 | リモート追跡の参照 | 登録済みのリモート | 起点の参照 |
 | --- | --- | --- |
@@ -295,14 +297,13 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 | 読めない参照を `git merge-base` に渡す | 終了コード 128。渡す前に `git rev-parse -q --verify <参照>^{commit}`（読めなければ終了コード 1）で読めるものだけにする |
 | 履歴を共有しない 2 つのブランチ | 分岐点が無い（`git diff <SHA>...HEAD` は終了コード 128、`no merge base`） |
 | 差分に `.md` のシンボリックリンクがある | パスが差分に出る（`--name-only` では通常ファイルと見分けられないので、`lstat` で外す） |
-| 消したファイルと、日本語と空白を含むファイルがある差分を、三点差分に `--diff-filter=d -z` を付けて読む | 消したファイルは出ず、名前は引用されない |
-| 日本語と空白を含むファイル名 | `-z` を付けると引用されずに読める |
+| 消したファイルと、日本語と空白を含むファイルがある差分を、三点差分に `--diff-filter=d -z` を付けて読む | 消したファイルは出ず、名前は引用されない（`-z` を付けると引用されずに読める） |
 
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 移行性 | ai-plugins の代わりの設定とスクリプトを消した後も、既定を持たない NDF（11.0.28 以前）で動いている ai-plugins のスプリントが、設計の始めで止まらない。利用者のリポジトリで要る移行は無い | 消す変更をリリースの後の別の PR に分ける（決定 8）。設定とスクリプトは作業場所のリポジトリの根から読むので、消す前に切った作業場所には残る | PR をマージする前に、決定 8 の 2 つの条件を確かめて PR の本文に書く |
+| 移行性 | ai-plugins の代わりの設定とスクリプトを消した後も、既定を持つ版より前の NDF で動いている ai-plugins のスプリントが、設計の始めで止まらない。利用者のリポジトリで要る移行は無い | 消す変更をリリースの後の別の PR に分ける（決定 8）。設定とスクリプトは作業場所のリポジトリの根から読むので、消す前に切った作業場所には残る | PR をマージする前に、決定 8 の確認 1・確認 2 を確かめて PR の本文に書く |
 
 ## 決定の記録
 
@@ -343,7 +344,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 ### 決定 4: 工程の入力を増やさずに原稿を見つけるため、原稿は差分から選び、`documentation` だけに限る
 
 - **質問**: 原稿のパスを差分から決めるか、工程の入力で受け取るか（要求の未決）
-- **選んだ案**: 差分の `issues/` の外の Markdown を原稿とする。工程「ドキュメント再構成」の入力に `mode` を足し、`documentation` のときだけ選ぶ
+- **選んだ案**: 差分の `issues/` の外の Markdown を原稿とする。工程「ドキュメント再構成」の入力に `mode` を足し（値の出どころは「構成要素」の工程の定義の行）、`documentation` のときだけ選ぶ
 - 採らなかった案: 工程の入力に原稿のパスを足す（どの工程の出力もパスを書かないので、conductor が毎回手で入れることになる）
 - 採らなかった案: `documentation` では設計書を選ばない（設計の後に直した設計書が、`standard` と違って組み直されない）
 - 採らなかった案: 原稿を、コミットの件名の課題の番号や、スプリントブランチへ直接積んだコミットかどうかで絞る（件名に番号の無いコミットや、PR で取り込んだ自分の原稿が、知らせなく対象から落ちる。組み直されないまま `ok` で進む害のほうが大きい）
@@ -364,7 +365,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 
     `agents/worker.md` は変えない。この定義が効くのは `subagent_type: ndf:worker` で起動したときだけで、CLI の起動は通らないからである。起動指示に「立ててよい」と書いても、`ndf:worker` では Tool が無く立てられない。supervisor が工程を代行するときは、今のとおり `document-rebuild` の「立てられないとき」の扱いになる。`agent-layers.md` に足す文にも、例外が `ndf worker run` の組み直しの worker だけであることを書く。組み直しの起動指示は `contracts/worker/prompt.md`（規則 1 で起動を禁じる）から作らず、`contracts/worker/document-rebuild.md` から作る
 - 採らなかった案: `agents/worker.md` から `Agent` の禁止を外す（組み直しのほかの作業の worker までサブエージェントを立てられる）
-- 採らなかった案: サブコマンドが読み手役を `claude -p` で起動し、答えを渡して worker を続ける（ステップが打つ `ndf worker run` が 2 回になり、要求の影響の「1 回ずつ」に反する。合否の判定と直しの手順をコードに書くことになり、`document-rebuild` の手順と 2 か所になる）
+- 採らなかった案: サブコマンドが読み手役を `claude -p` で起動し、答えを渡して worker を続ける（ステップが打つ `ndf worker run` が 2 回になり、要求の影響の「既存の振る舞い」（ステップ 1 回につき worker 1 回）に反する。合否の判定と直しの手順をコードに書くことになり、`document-rebuild` の手順と 2 か所になる）
 - 採らなかった案: 外部の CLI（`external-ai`）を読み手役にする（別の CLI が導入されていないリポジトリでは立てられない）
 - 採らなかった案: 記録を起動指示で頼むだけにする（PR #4379 で、指示の書き方ひとつで確かめが省かれた）
 - 採らなかった案: 工程「ドキュメント再構成」で不合格が残ればプランを承認ゲートで止め、承認の材料をプランの結果へ表示する（承認ゲートを足すことになり、ゲートの数と置き場所は `development-workflow` だけが持つ。表示のためにプランの実行の部品も変わる）
@@ -392,12 +393,12 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 ### 決定 8: 動いているスプリントを止めないため、代わりの設定とスクリプトはリリースの後の別の PR で消す
 
 - **質問**: 代わりの設定とスクリプトを消す変更を、既定を足す PR に含めるか（要求の未決、条件 17）
-- **選んだ案**: 既定を足す PR では消さない。既定を持つバージョンのリリース後テスト（条件 1・2）が通った後に、`.ndf/project.json` の `workflow.launch.rebuild` と `scripts/launch-document-rebuild.sh` だけを消す PR を出す。`workflow`・`workflow.launch` は、ほかのキーが残っていれば消さない（空になったときだけ一緒に消す）。この PR をマージしてからスプリントを閉じる。マージの前に次の 2 つを確かめ、PR の本文に書く
+- **選んだ案**: 既定を足す PR では消さない。既定を持つバージョンのリリース後テスト（条件 1・2）が通った後に、`.ndf/project.json` の `workflow.launch.rebuild` と `scripts/launch-document-rebuild.sh` だけを消す PR を出す。`workflow`・`workflow.launch` は、ほかのキーが残っていれば消さない（空になったときだけ一緒に消す）。この PR をマージしてから #4337 を閉じる。既定を足すスプリントは、普段どおりスプリントの PR のマージとリリースまで進めて閉じ、#4337 だけを消す PR のマージまで開いたままにする（条件 17）。消す PR のマージの前に、次の 2 つ（確認 1・確認 2）を確かめ、PR の本文に書く
     1. ai-plugins の各レーンのセッションが使う `ndf` のバージョンが、既定を持つバージョン以上である
     2. 既定を持たないバージョンで始めた ai-plugins のスプリントに、工程「ドキュメント再構成」を終えていないものが無い。あるなら、その作業場所は消す前に切ったもので、`main` を取り込む予定が無い
 
-    確かめるセッションは、メインディレクトリの conductor と、各レーン（計画が並行して動かす conductor のセッション。[ndf-parallel-model.md](../docs/ndf-parallel-model.md)）である。条件 1 は、確かめる時点の各レーンの版だけを見る。条件 2 は、その時点では動いていなくても、後で旧版の実行環境から再開されるスプリントと、その作業場所が設定とスクリプトを持ち続けるかを見る。条件 1 を満たしても、止めてあるスプリントは条件 1 に現れないので、条件 2 も要る。満たせないときは、消す PR をマージせずに保留し、#4337 も閉じずに待つ。条件 17 は課題を閉じる時点の条件なので、保留しても衝突しない
-- 採らなかった案: 既定を足す PR に含める（マージの時点では、どのセッションもまだ 11.0.28 以前で動いている。消した後の `main` から切った作業場所の設計が止まる）
+    確かめるセッションは、メインディレクトリの conductor と、各レーン（計画が並行して動かす conductor のセッション。[ndf-parallel-model.md](../docs/ndf-parallel-model.md)）である。確認 1 は、確かめる時点の各レーンの版だけを見る。確認 2 は、その時点では動いていなくても、後で旧版の実行環境から再開されるスプリントと、その作業場所が設定とスクリプトを持ち続けるかを見る。確認 1 を満たしても、止めてあるスプリントは確認 1 に現れないので、確認 2 も要る。満たせないときは、消す PR をマージせずに保留し、#4337 も閉じずに待つ。条件 17 は課題を閉じる時点の条件なので、保留しても衝突しない
+- 採らなかった案: 既定を足す PR に含める（マージの時点では、どのセッションもまだ既定を持つ版より前で動いている。消した後の `main` から切った作業場所の設計が止まる）
 - 採らなかった案: リリースの PR に含める（導入済みのセッションが新しいバージョンへ切り替わるのは、リリースの後である）
 - **代償**: PR が 1 本増える。消すまで、ai-plugins のスプリントでは既定のコマンドが使われない
 - 根拠: 要求仕様の非機能の条件（移行性）。Value 3・Value 6「使うほど散らからない」（MVV バージョン 11）
@@ -432,7 +433,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 
 ### 代表のリポジトリでの振る舞い
 
-`branch_strategy` の設定が無いリポジトリは、どの種類でも既定を決められず、2 つの工程は条件 14 の理由を示して始まらない。今もこの 2 つの工程は始まらないので、この変更で扱えなくなるものではない。表の「無し」は `branch_strategy` があるときを指す。
+この表は `branch_strategy` を持つリポジトリについて書く。`branch_strategy` の設定が無いリポジトリは、どの種類でも既定を決められず、2 つの工程は条件 14 の理由を示して始まらない。今もこの 2 つの工程は始まらず、工程「作業場所の用意」もこの設定が無いと止まるので、この変更で扱えなくなるものではない。
 
 | 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |
 | --- | --- | --- | --- |
@@ -468,7 +469,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | 11・I2（決定 3） | `remote` の名前が未登録でほかのリモートだけがあるとき、手元の参照が読めても `stopped`（`precondition`）で、名前と設定のキーが返る。名前が登録済みで追跡の参照が無いときと、リモートが 1 つも無いときは手元の参照を使う（git の読み取りは偽物に替える） | 追跡の参照が読めないだけで手元へ切り替える |
 | 12・I3 | `--out` の `items` が `id` と `text` を持ち、レビューの読み取り（`as_handed`。`ndf cross-review` が結果の `items` を、直すか見送る項目に変える関数）が読む。`text` の無い項目と、`doc` が対象に無い項目は `bad_report` になる | worker の結果をそのまま `--out` へ書く |
 | 13 | `run` の起動する子が、`git` の読み取りと `ndf worker run` だけで、push もコミットも含まない。起動指示に、作業場所でコミットし push と Pull Request を行わないことがある（git と worker は偽物に替える） | push の呼び出しを足す |
-| 2（決定 7） | 設計のプランの差し込み `base` と、`rebuild` の `--base` が同じ値で、差し込み `remote` と `--remote` も同じ値である。ブランチ戦略の設定を読むのと `Git.remote()` を呼ぶのは 1 回ずつである | `rebuild_values` と `derived_locally` がそれぞれ読む |
+| 1・14（決定 7） | 設計のプランの差し込み `base` と、`rebuild` の `--base` が同じ値で、差し込み `remote` と `--remote` も同じ値である。ブランチ戦略の設定を読むのと `Git.remote()` を呼ぶのは 1 回ずつである | `rebuild_values` と `derived_locally` がそれぞれ読む |
 | 14 | `branch_strategy` の無いリポジトリで、2 つの工程とも、記録を書かずに `reason`・`setting`・`shape` を持つ行が返る | 既定の失敗を `RouteError` のまま上げる |
 | 15 | 設定があるリポジトリで、2 つの工程とも設定のコマンドが入る（今のテストを残す） | 設定より既定を先に使う |
 | I4 | `readers` に対象の文書の行が無い・`checks` の言い直しが無い・`checks` の数が種類に合わない・`not_run` で理由が無いか `checks` が空でない結果は `incomplete` になり、欠けた文書が `gaps` に出る。`design`・`plan`・`manuscript` のそれぞれで、`checks` が空で理由のある `not_run` が通る。`plan` の `fixed`（`checks` 1 つ）と、設計書の `fail`（`checks` 2 つ）は欠けにならない | 記録を確かめない。設計書の回数を原稿にも求める。`not_run` に種類の回数を求める |
@@ -484,7 +485,7 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | --- | --- | --- | --- |
 | #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
 
-`plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。このファイルは、ndf の作り直し（#3347）でモジュールを受け持つ子の課題の表で、各行の持ち主はその子の呼び名である。`ndf.progress.rebuild_values` を `P1b`（#3092。`ndf.progress.invoke` などプランの実行の準備の持ち主）、`ndf.domains.docrebuild` と `ndf.core.issue_docs` を `M1`（#3300。`ndf.domains.loop` の持ち主）の `packages` に足す。`needs` は変えない。
+`plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。このファイルは、ndf の作り直し（#3347）でモジュールを受け持つ子の課題の表で、各行の持ち主はその子の呼び名である。`ndf.progress.rebuild_values` を `P1b`（#3092。`ndf.progress.invoke` などプランの実行の準備の持ち主）、`ndf.domains.docrebuild` と `ndf.core.issue_docs` を `M1`（#3300。`ndf.domains.loop` の持ち主）の `packages` に足す。持ち主は、新しいモジュールと同じ層で同じ部品を使うモジュールの持ち主から選んだ。`rebuild_values` は `invoke` と同じく工程を始める前の準備なので `P1b` にする。`docrebuild` は、`loop` と同じ domains 層で worker を起動して結果を読むので、`ndf.core.worker` の持ち主 `C5` を `needs` に既に持つ `M1` にする。`issue_docs` は `M1` の `ndf.domains.loop.design_tests` から正規表現を移すので、同じ `M1` にする。`needs` は変えない。
 
 `plugins/ndf/agents/worker.md` は変えない（決定 5）。プランのテンプレート（`contracts/templates/document-rebuild.json`・`design.json`）、プランの実行（`core/plan/`）、工程の結果（`progress/run.py`・`progress.result.schema.json`）も変えない。`.ndf/project.json` と `scripts/launch-document-rebuild.sh` は、決定 8 のリリースの後の PR で変える。
 
