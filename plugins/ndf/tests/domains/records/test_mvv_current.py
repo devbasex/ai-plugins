@@ -18,6 +18,9 @@ from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import preflight
 
+# 作業場所に作る MVV の本文のパス（このリポジトリ自身の MVV の文書は読まない）
+NDF_DIR = ".ndf"
+BODY_AT = f"{NDF_DIR}/mvv.md"
 BODY = """# 見本の MVV
 
 ## Mission
@@ -77,7 +80,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return main
 
 
-def _commit(repo: Path, decl: Optional[str], body: Optional[str] = BODY, body_at: str = ".ndf/mvv.md") -> str:
+def _commit(repo: Path, decl: Optional[str], body: Optional[str] = BODY, body_at: str = BODY_AT) -> str:
     for name, text in ((".ndf/mvv.json", decl), (body_at, body)):
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         if text is not None:
@@ -111,8 +114,8 @@ def test_current_snapshots_the_approved_body_of_the_ref_not_of_the_worktree(repo
     assert got.path.name == f"v11-{_sha(BODY)[:12]}.md"
     assert got.principles_path.name == f"principles-{got.principles_sha256[:12]}.md"
     assert got.items[:5] == ("Mission", "Vision", "Value 1", "Value 2", "P1") and "C1" in got.items
-    assert got.blobs == {".ndf/mvv.json": _blob_id(decl.encode("utf-8")), ".ndf/mvv.md": _blob_id(BODY.encode("utf-8"))}
-    assert got.blobs[".ndf/mvv.md"] == sh(repo, "rev-parse", "HEAD:.ndf/mvv.md", strip=True)
+    assert got.blobs == {".ndf/mvv.json": _blob_id(decl.encode("utf-8")), BODY_AT: _blob_id(BODY.encode("utf-8"))}
+    assert got.blobs[BODY_AT] == sh(repo, "rev-parse", f"HEAD:{BODY_AT}", strip=True)
 
 
 def test_current_reads_each_object_once(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,7 +167,7 @@ def test_line_ending_conversion_does_not_split_preflight_and_current(repo: Path,
     got = mvv.current(repo, "main")
     assert (preflight.mvv_state(repo), got.state, got.sha256) == ("approved", "approved", _sha(approved))
     assert got.path is not None and got.path.read_bytes() == approved.encode("utf-8")
-    assert got.blobs[".ndf/mvv.md"] == _blob_id(committed.encode("utf-8"))
+    assert got.blobs[BODY_AT] == _blob_id(committed.encode("utf-8"))
 
 
 def test_a_record_of_the_lf_body_covers_mixed_line_endings(repo: Path) -> None:
@@ -230,7 +233,7 @@ def test_unresolved_ref_is_an_error_not_absent(repo: Path) -> None:
         mvv.current(repo, "origin/nope")
 
 
-@pytest.mark.parametrize("missing", ["HEAD:.ndf/mvv.json", "HEAD:.ndf/mvv.md", "HEAD:.ndf", "HEAD^{tree}"])
+@pytest.mark.parametrize("missing", ["HEAD:.ndf/mvv.json", f"HEAD:{BODY_AT}", "HEAD:.ndf", "HEAD^{tree}"])
 def test_missing_objects_are_errors_not_absent(repo: Path, missing: str) -> None:
     """4099-2: 設定と本文の blob・ツリーの読み取りの失敗を `absent` に落とさない。"""
     _commit(repo, _decl(BODY))
@@ -276,7 +279,7 @@ def test_undecodable_settings_and_bodies_are_errors(repo: Path) -> None:
         mvv.current(repo, "main")
 
 
-@pytest.mark.parametrize(("decl", "want"), [({}, ".ndf/mvv.md"), ({"body": 1}, ".ndf/mvv.md"), ({"body": "docs/x.md"}, ".ndf/docs/x.md")])
+@pytest.mark.parametrize(("decl", "want"), [({}, BODY_AT), ({"body": 1}, BODY_AT), ({"body": "docs/x.md"}, ".ndf/docs/x.md")])
 def test_body_path_resolves_from_the_settings_directory(decl: dict, want: str) -> None:
     assert md.body_path(decl) == want
 
