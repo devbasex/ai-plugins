@@ -453,6 +453,24 @@ def test_result_for_a_finding_made_by_ndf_is_not_taken_as_its_outcome() -> None:
     assert (journal.rows["n2"]["fixer_reason"], "skipped_mvv" in journal.rows["n2"]) == ("誤りでない", False)
 
 
+@pytest.mark.parametrize("outcome", [fin.FIXED, fin.SKIPPED])
+def test_result_for_a_redline_is_not_taken_as_its_outcome(outcome: str) -> None:
+    """必ず人の承認が要る操作に当たる指摘は、修正担当の結果では閉じず、人の承認を待つまま残る。"""
+    journal = _entered(_named("A", "P1"), _named("B"))
+    items = [{"id": "r1-1", "outcome": outcome, "reason": "ついでに扱った"}, {"id": "r1-2", "outcome": fin.FIXED}]
+    assert journal.apply_fix(items, (), 1, mvv=V11) == [items[1]]
+    row = journal.rows["r1-1"]
+    assert (row["outcome"], row["reason"], row["redline"]) == (fin.UNRESOLVED, None, True)
+    assert (row["fixer_reason"], "skipped_mvv" in row) == ("ついでに扱った", False)
+
+
+def test_resent_fix_does_not_restore_a_redline() -> None:
+    """送り直した修正の記録に id があっても、必ず人の承認が要る操作に当たる指摘は直したへ戻さない。"""
+    journal = _entered(_named("A", "P1"), _named("B"))
+    journal.restore_fixed(["r1-1", "r1-2", "nope"])
+    assert [r["outcome"] for r in journal.rows.values()] == [fin.UNRESOLVED, fin.FIXED]
+
+
 def test_reviewer_finding_with_the_same_text_does_not_classify_a_finding_made_by_ndf() -> None:
     row = _row("n1", "根拠の行の誤り", 1, by="ndf")
     journal = journal_mod.FindingJournal([row])

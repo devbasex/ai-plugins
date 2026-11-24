@@ -83,6 +83,7 @@ USER_SETTINGS = {
     "diff.mnemonicPrefix": "true",
     "diff.srcPrefix": "old/",
     "diff.context": "0",
+    "diff.interHunkContext": "20",
     "diff.suppressBlankEmpty": "true",
     "diff.relative": "true",
     "diff.renames": "false",
@@ -104,33 +105,39 @@ def _submodule(tree: Path, commit_id: str) -> str:
 
 
 def _many_changes(tree: Path) -> str:
-    """書き換えて改名した 2 つの文書と、変えた日本語のパスの文書とサブモジュールを持つ PR。ベースのコミットを返す。"""
+    """書き換えて改名した 2 つの文書と、変えた日本語のパスの文書、離れた 2 行を変えた文書、サブモジュールを持つ PR。ベースのコミットを返す。"""
     for name in ("a", "b"):
         _bytes(tree, f"{name}.md", "\n".join(f"{name} の本文 {n}" for n in range(30)).encode())
     _bytes(tree, "日本語.md", b"one\n\ntwo\n")
+    _bytes(tree, "far.md", _numbered(*range(1, 31)))
     _commit(tree)
     base = _submodule(tree, "1" * 40)
     for name in ("a", "b"):
         sh(tree, "mv", f"{name}.md", f"{name}{name}.md")
         _bytes(tree, f"{name}{name}.md", "\n".join(f"{name} の本文 {n}" for n in range(1, 30)).encode())
     _bytes(tree, "日本語.md", b"one\n\nthree\n")
+    _bytes(tree, "far.md", _numbered(*(f"変えた {n}" if n in (4, 22) else n for n in range(1, 31))))
     _commit(tree)
     _submodule(tree, "2" * 40)
     return base
 
 
-@pytest.mark.parametrize("key", sorted(USER_SETTINGS))
-def test_user_settings_do_not_change_the_diff(tree: Path, key: str) -> None:
-    """接頭辞・前後の行数・改名の検出・差分の変換などの利用者の設定があっても、同じ差分が出る。"""
+def test_user_settings_do_not_change_the_diff(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """接頭辞・前後の行数・改名の検出・差分の変換などの利用者の設定のどれか 1 つがあっても、同じ差分が出る。"""
     base = _many_changes(tree)
     plain = _diff(tree, base)
     attributes = Path(sh(tree, "rev-parse", "--path-format=absolute", "--git-path", "info/attributes").strip())
     attributes.parent.mkdir(parents=True, exist_ok=True)
     attributes.write_text("*.md diff=up\n", encoding="utf-8")
-    sh(tree, "config", key, USER_SETTINGS[key])
-    assert _diff(tree, base) == plain
+    # 設定は環境変数で 1 つずつ置く（履歴と基準の差分を使い回し、設定のたびに git を起動しない）
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    for key, value in USER_SETTINGS.items():
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", key)
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", value)
+        assert _diff(tree, base) == plain, key
     assert "--- a/日本語.md\n+++ b/日本語.md\n@@ -1,3 +1,3 @@\n one\n \n-two\n+three\n" in plain
     assert plain.count("rename from ") == 2 and "+++ b/sub\n" in plain
+    assert "@@ -1,7 +1,7 @@\n" in plain and "@@ -19,7 +19,7 @@" in plain
 
 
 def test_diff_keeps_carriage_returns_and_survives_other_encodings(tree: Path) -> None:

@@ -301,13 +301,12 @@ class _LocalBase(NamedTuple):
     mvv_ref: Optional[str]
 
 
-def _local_base(g: git.Git, base: str, branch: Optional[str]) -> _LocalBase:
+def _local_base(g: git.Git, remote: str, base: str, branch: Optional[str]) -> _LocalBase:
     """`run` の起動の始めと同じ決め方で、リモートから取得せずに比較元と MVV を読む参照を決める。
 
     `--base` がブランチなら、取得済みのリモートのブランチの先頭が両方になる。コミット（SHA・タグなど）なら、MVV は PR の
     マージ先のブランチから読むので、`run` がラウンドの記録に残した `branch` を使う。記録が無ければ MVV を読む参照は決められない。
     """
-    remote = g.remote()
     tracking = f"refs/remotes/{remote}"
     commit = base if git.FULL_SHA.match(base) else None
     if commit is None:
@@ -334,6 +333,14 @@ def _local_mvv(wt: Path, ref: Optional[str]) -> tuple[str, list[str]]:
     return scope_decide.UNKNOWN_MVV, [f"前のラウンドと MVV が同じかを確かめられないので、全差分を範囲にした: {why}"]
 
 
+def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optional[str]]:
+    """変わった Markdown のセクション。手元のオブジェクトだけで読めなければ、読めない理由（全差分になる）。"""
+    try:
+        return changes.changed_sections(g, base, wt), None
+    except git.GitError as exc:
+        return [], f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"
+
+
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     data = store.read_state(ref)
@@ -349,16 +356,23 @@ def cmd_scope(args: argparse.Namespace) -> int:
         return _stop("precondition", str(exc))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
-    g = git.Git(wt)
-    based = _local_base(g, args.base, scope_decide.mvv_branch(data))
-    sections = changes.changed_sections(g, based.commit, wt)
-    now, unsure = _local_mvv(wt, based.mvv_ref)
-    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    basis = scope_decide.Basis(g.merge_base(based.commit, "HEAD"), resolved.reviewers, resolved.settings.focus, now)
-    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
+    g = git.Git.offline(wt)
+    # `_resolve` が求めたメインディレクトリから読む（`g.remote()` は `git worktree list` を打ち直す）
+    based = _local_base(g, git.remote_of(resolved.policy.main), args.base, scope_decide.mvv_branch(data))
+    # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）。`--base` の誤りは、セクションを読む前にここで止まる
+    merge_base = g.merge_base(based.commit, "HEAD")
+    sections, unread = _local_sections(g, based.commit, wt)
+    if unread is not None:
+        # 全差分に決まっているので、範囲を変えない MVV を読まない
+        got, warnings = scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
+    else:
+        now, unsure = _local_mvv(wt, based.mvv_ref)
+        warnings = unsure if rounds else []
+        basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
+        got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
-    return _ok(summary, [item], **({"warnings": unsure} if unsure and rounds else {}))
+    return _ok(summary, [item], **({"warnings": warnings} if warnings else {}))
 
 
 def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:

@@ -9,6 +9,7 @@ import pytest
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records import mvv
 
 from ._repos import Repos, commit, count_git, run_cli, sh
 
@@ -290,6 +291,70 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
     assert run_cli(capsys, *base, "--reviewer", "codex", "--reviewer", "kiro")[1]["items"][0]["scope"] == scope_decide.FULL
     assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.FULL
+
+
+def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
+    repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。
+    範囲を変えない MVV は読まない。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    commit(wt, "a.txt", "x", "文書でない")
+    state = tmp_path / "state"
+    sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
+    data = {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}]}
+    store.write_object(state / store.STATE_NAME.format(pr=8), _with_merge_base(data, sha))
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
+    assert run_cli(capsys, *base)[1]["items"][0]["scope"] == scope_decide.SINCE
+    used: list[git.Git] = []
+
+    def missing(g: git.Git, *args: object) -> list[str]:
+        used.append(g)
+        raise git.GitError("could not fetch from promisor remote")
+
+    monkeypatch.setattr(changes, "changed_sections", missing)
+    monkeypatch.setattr(mvv, "identity_at", lambda *a: pytest.fail("全差分に決まった後に MVV を読んだ"))
+    code, got = run_cli(capsys, *base)
+    assert (code, got["items"][0]["scope"], got["items"][0]["base"]) == (0, scope_decide.FULL, None)
+    assert "promisor" in got["warnings"][0] and [g.env for g in used] == [git.NO_LAZY_FETCH]
+
+
+def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
+    """変わったセクションは改名を調べずに読み（調べると部分クローンで前の本文の取得が要る）、改名前と消えたパスを除く。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes
+
+    calls: list[list[str]] = []
+
+    def runner(args: list[str], cwd: Path | None) -> git.Completed:
+        calls.append(args)
+        return git.Completed(0, "a.txt\0", "")
+
+    assert changes.changed_sections(git.Git(tmp_path, runner), "b", tmp_path) == []
+    [call] = calls
+    assert call[0] == "diff" and {"--no-renames", "--diff-filter=d"} <= set(call)
+
+
+def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path, monkeypatch) -> None:
+    """手元に無い blob を git grep が飛ばしたら、本文の無い文書とみなさずに止める。空のファイルは行が無くてよい。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import changes, settings
+
+    empty = settings.blob_id(b"", 40)
+    trees = {"empty.md": empty, "a.md": "a" * 40}
+    monkeypatch.setattr(git.Git, "run_bytes", lambda self, *args, **kw: b"")
+
+    def changed(*paths: str) -> list[str]:
+        listed = "".join(f"100644 blob {trees[p]}\t{p}\0" for p in paths)
+        out = {"diff": git.Completed(0, "\0".join(paths), ""), "ls-tree": git.Completed(0, listed, "")}
+        return changes.changed_sections(git.Git(tmp_path, lambda args, cwd: out[args[0]]), "b", tmp_path)
+
+    assert changed("empty.md") == []
+    with pytest.raises(git.GitError, match=r"本文を読めない: a\.md"):
+        changed("empty.md", "a.md")
 
 
 def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
