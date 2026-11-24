@@ -29,6 +29,8 @@ RECORD_PREFIXES = (
     "issues/",
     "docs/development-history/",
     "docs/presentations/",
+    # 版ごとのトークン消費の記録。集計した時点の値をスクリプトが 1 組（.md / .json）で書き、以後は追随しない
+    "docs/metrics/ndf-token-usage/",
 )
 
 # 書式が 1 ファイルであることを前提にする文書。理由を値に書く。
