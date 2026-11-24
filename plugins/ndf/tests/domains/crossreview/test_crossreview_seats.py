@@ -396,3 +396,70 @@ def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path
     other = _Denied(tmp_path / "st2", script, lambda diff, cwd: "/etc/passwd")
     code, got = _run(capsys, monkeypatch, other, wt)
     assert (code, got["status"]) == (0, "ok")
+
+
+class _SeatRun:
+    """`seats.fill_refused` が読み書きする値だけを持つ起動（`SeatRun`）。"""
+
+    def __init__(self, seats_: list[str], fixer: str = "claude", may_fill: bool = True):
+        from types import SimpleNamespace
+
+        self.cfg = SimpleNamespace(fixer=fixer, may_fill=may_fill)
+        self.seats = seats_
+        self.filled: list = []
+        self.warnings: list[str] = []
+
+
+@pytest.mark.parametrize(
+    ("before", "refused", "after", "filled"),
+    [
+        (["codex", "kiro"], {"kiro": "k"}, ["codex", "claude"], [("claude", "kiro", "unready: k")]),
+        (["kiro", "codex"], {"kiro": "k"}, ["claude", "codex"], [("claude", "kiro", "unready: k")]),
+        (
+            ["codex", "kiro"],
+            {"kiro": "k", "codex": "c"},
+            ["claude", "claude-2"],
+            [("claude", "codex", "unready: c"), ("claude-2", "kiro", "unready: k")],
+        ),
+        (["codex", "claude"], {"codex": "c"}, ["claude-2", "claude"], [("claude-2", "codex", "unready: c")]),
+        (["codex", "kiro"], {}, ["codex", "kiro"], []),
+    ],
+)
+def test_i001_fill_refused_numbers_replaces_in_place_and_records(monkeypatch, before, refused, after, filled) -> None:
+    """I-001 の前の固定: 断られた席を同じ位置で、その時点の席に無い最初の claude の名前（claude・claude-2…）に置き換え、席の順に
+    埋めた席（`unready: <理由>`）と「起動の前に」の注意を残す。断られた席が無ければ何も変えない。"""
+    from ndf.domains.crossreview.scope_decide import Filled
+
+    _refuse(monkeypatch, refused)
+    run = _SeatRun(list(before))
+    seats.fill_refused(run)
+    assert run.seats == after
+    assert run.filled == [Filled(*f) for f in filled]
+    assert run.warnings == [
+        f"起動の前に相手役 {absent} の席を claude の読むだけの起動（{seat}）で埋めた（理由: {reason}）" for seat, absent, reason in filled
+    ]
+
+
+@pytest.mark.parametrize(("refused", "fixer", "may_fill"), [({"claude": "c"}, "claude", True), ({"kiro": "k"}, "claude", False)])
+def test_i001_fill_refused_stops_without_touching_the_seats(monkeypatch, refused, fixer, may_fill) -> None:
+    """I-001 の前の固定: 修正担当が断られたか、埋めてはいけない起動で断られたら、席と記録を変えずに precondition で止める。"""
+    _refuse(monkeypatch, refused)
+    run = _SeatRun(["kiro"] if not may_fill else ["codex", "kiro"], fixer=fixer, may_fill=may_fill)
+    before = list(run.seats)
+    with pytest.raises(seats.DriveStopped) as stopped:
+        seats.fill_refused(run)
+    assert stopped.value.kind == "precondition" and "担当を起動できない: " in str(stopped.value)
+    assert (run.seats, run.filled, run.warnings) == (before, [], [])
+
+
+def test_i001_round_fill_numbers_against_the_current_seats(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """I-001 の前の固定（`drive._fill_seats`）: 席が codex と claude で codex が読めないと、codex の位置を claude-2 で埋め、
+    記録の席の並び・埋めた席・「round 1 に」の注意が残る。"""
+    _allow(wt, "claude", "codex")
+    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "claude": [[]], "claude-2": [[]]})
+    code, got = _run_seats(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    record = _state(fake.state_dir)["rounds"][0]
+    assert record["reviewers"] == ["claude-2", "claude"]
+    assert record["filled"][-1] == {"seat": "claude-2", "for": "codex", "reason": "failed: 落ちた"}
+    assert "round 1に相手役 codex の席を claude の読むだけの起動（claude-2）で埋めた（理由: failed: 落ちた）" in got["warnings"]
