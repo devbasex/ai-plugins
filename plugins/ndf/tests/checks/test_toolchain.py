@@ -162,6 +162,70 @@ def test_setup_uv_without_or_with_another_version_is_a_finding(repo, rules, step
     assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", line)]
 
 
+def test_a_setup_uv_version_that_differs_is_reported_at_its_value_with_both_versions(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow(_uv("0.0.1")))
+    (found,) = repo.check(rules)
+    assert found.line == 11
+    assert "0.0.1" in found.detail
+    assert table.uv_version() in found.detail
+
+
+@pytest.mark.parametrize("value", ['""', '" "', f'" {table.uv_version()}"', f'"{table.uv_version()} 0.0.1"'])
+def test_setup_uv_version_is_compared_as_a_whole(repo, rules, value):
+    # setup-python と違い、空の値も空白で分けた値も書いたとおりに比べる
+    repo.file(".github/workflows/ci.yml", _workflow(_uv(value)))
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 11)]
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_blank_python_version_is_the_missing_finding_at_its_value(repo, rules, value):
+    repo.file(".github/workflows/ci.yml", _workflow(f"- uses: {PY}"))
+    (missing,) = repo.check(rules)
+    repo.file(".github/workflows/ci.yml", _workflow(_py(value)))
+    (blank,) = repo.check(rules)
+    assert (missing.line, blank.line) == (8, 10)
+    assert blank.detail == missing.detail
+
+
+def test_every_listed_python_version_is_checked_in_one_finding(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow(_py("3.11 3.13")))
+    assert repo.check(rules) == []
+    repo.file(".github/workflows/ci.yml", _workflow(_py("3.8 3.11 3.9")))
+    (found,) = repo.check(rules)
+    assert found.line == 10
+    # 許す値は、書いた値の並びから除いて示す
+    assert "3.8 3.9" in found.detail
+
+
+@pytest.mark.parametrize("with_", ["", '\n        with:\n          python-version: "3.9"'])
+def test_the_allowed_python_versions_are_shown_sorted(repo, rules, with_):
+    repo.settings({**SETTINGS, "python_ci": ["3.13", "3.11"]})
+    for rel, allowed in ((".github/workflows/ci.yml", ["3.11", "3.13"]), (COMPAT, ["3.10", "3.11", "3.13"])):
+        repo.file(rel, _workflow(f"- uses: {PY}{with_}"))
+        assert [str(allowed) in f.detail for f in repo.check(rules) if f.path == rel] == [True]
+
+
+def test_each_action_is_checked_only_for_its_own_input(repo, rules):
+    uv = _uv() + '\n          python-version: "3.9"'
+    py = _py("3.13") + "\n          version: 0.0.1"
+    repo.file(".github/workflows/ci.yml", _workflow(uv, py))
+    assert repo.check(rules) == []
+    # もう一方の入力は自分の入力の代わりにならない
+    repo.file(
+        ".github/workflows/ci.yml",
+        _workflow(
+            f'- uses: {UV}\n        with:\n          python-version: "3.13"',
+            f"- uses: {PY}\n        with:\n          version: {table.uv_version()}",
+        ),
+    )
+    assert _lines(repo.check(rules)) == [(".github/workflows/ci.yml", 8), (".github/workflows/ci.yml", 11)]
+
+
+def test_findings_follow_the_steps_and_then_the_run_commands(repo, rules):
+    repo.file(".github/workflows/ci.yml", _workflow("- run: pip install uv", _py("3.9"), f"- uses: {UV}", f"- uses: {PY}", _uv("0.0.1")))
+    assert [line for _, line in _lines(repo.check(rules))] == [11, 12, 13, 17, 8]
+
+
 @pytest.mark.parametrize(
     "body",
     [
