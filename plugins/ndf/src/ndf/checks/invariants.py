@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.checks.model import SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, module_rel
+from ndf.checks.model import SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, module_rel, string_constants
 
 OWN_PACKAGE = __name__.split(".")[0]
 LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
@@ -37,17 +37,6 @@ def _name_pattern(names: set[str]) -> re.Pattern[str]:
     """名前をパスの一部（`/<名前>`・`<名前>/`）か Skill の前置き（`<名前>:`）として持つ箇所。"""
     alts = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
     return re.compile(rf"(?<![\w-])(?:{alts})(?=[:/])|(?<=/)(?:{alts})(?![\w-])")
-
-
-def _docstrings(tree: ast.Module) -> set[int]:
-    owners = [tree, *(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))]
-    return {id(o.body[0].value) for o in owners if o.body and isinstance(o.body[0], ast.Expr) and isinstance(o.body[0].value, ast.Constant)}
-
-
-def _strings(tree: ast.Module) -> list[tuple[int, str]]:
-    """文字列の定数（docstring を除く）を行とともに返す。"""
-    docs = _docstrings(tree)
-    return [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
 
 
 def _shell_lines(src: Source) -> list[tuple[int, str]]:
@@ -82,7 +71,7 @@ def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
     rel = scope.plugin_rel(src)
     if src.is_python and rel.startswith(SRC_DIR + "/"):
         skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
-        return [(no, text) for no, text in _strings(src.tree) if no not in skip]
+        return [(no, text) for no, text in string_constants(src.tree) if no not in skip]
     if rel.startswith(SCRIPT_PREFIXES) and src.path.suffix != ".json":
         return _shell_lines(src)
     return []
