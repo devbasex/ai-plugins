@@ -187,13 +187,12 @@ def _validator(schema: str) -> Draft202012Validator:
 
 
 def _require(kind: str, row: Row) -> None:
-    """種類のスキーマに合わなければ `InternalError`。誤りの文は値を含まないもの（欄の名前とスキーマの語）だけで組む。"""
-    errors = [
-        e.message
-        if e.validator in ("required", "additionalProperties")
-        else f"{'/'.join(str(p) for p in e.absolute_path)} が {e.validator} に合わない"
+    """種類のスキーマに合わなければ `InternalError`。誤りの文は行の値とキーを含まず、スキーマの中の位置だけで組む（キーが値を持つ辞書と、
+    スキーマに無いキーがあるため）。"""
+    errors = {
+        e.message if e.validator == "required" else f"{'/'.join(str(p) for p in e.absolute_schema_path)} に合わない"
         for e in _validator(_kind(kind).schema).iter_errors(row)
-    ]
+    }
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
 

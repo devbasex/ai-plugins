@@ -124,6 +124,20 @@ def test_read_stops_with_the_line_of_a_row_that_does_not_fit(tmp_path: Path, bad
         _loop(tmp_path, [OLD[0], bad]).read()
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {**OLD[2], "sk-test-secret": "x"},
+        {"at": T0, "kind": "sk-test-secret"},
+        {"at": T0, "kind": "lap-closed", "lap": 1, "outcome": "sk-test-secret", "reason": "r"},
+    ],
+)
+def test_the_error_of_a_bad_row_does_not_show_the_row(tmp_path: Path, bad: dict[str, Any]) -> None:
+    with pytest.raises(store.StoreError) as exc:
+        _loop(tmp_path, [bad]).read()
+    assert "sk-test-secret" not in str(exc.value)
+
+
 def test_read_stops_on_a_newer_version(tmp_path: Path) -> None:
     with pytest.raises(internal.InternalError) as exc:
         _loop(tmp_path, [{**_new(OLD[0]), "version": internal.version() + 1}]).read()

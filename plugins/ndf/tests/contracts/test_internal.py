@@ -175,10 +175,21 @@ def test_write_refuses_a_row_that_does_not_fit(row):
     assert kind_of(exc) == "invalid"
 
 
-def test_the_refusal_does_not_show_the_values():
+@pytest.mark.parametrize(
+    ("change", "where"),
+    [
+        ({"agent_id": ["sk-test-secret"]}, "properties/agent_id/type"),
+        ({"usage": "sk-test-secret"}, "properties/usage/oneOf"),
+        ({"at": "sk-test-secret"}, "properties/at/format"),
+        ({"sk-test-secret": 1}, "additionalProperties"),
+        ({"model_usage": {"sk-test-secret": 1}}, "properties/model_usage/additionalProperties/type"),
+        ({"model_usage": {"m": {"sk-test-secret": -1}}}, "properties/model_usage/additionalProperties/additionalProperties/minimum"),
+    ],
+)
+def test_the_refusal_shows_the_place_in_the_schema_and_not_the_row(change, where):
     with pytest.raises(internal.InternalError) as exc:
-        internal.write_record("usage", {**USAGE, "agent_id": ["sk-test-secret"], "usage": "sk-test-secret"})
-    assert "sk-test-secret" not in str(exc.value) and "agent_id" in str(exc.value)
+        internal.write_record("usage", {**USAGE, **change})
+    assert "sk-test-secret" not in str(exc.value) and f"{where} に合わない" in str(exc.value)
 
 
 @pytest.mark.parametrize("at", [AT, "2026-11-23T01:00:00Z", "2026-11-23T01:00:00.123456+00:00"])

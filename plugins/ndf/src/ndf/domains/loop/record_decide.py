@@ -186,15 +186,15 @@ def _at(ev: Mapping[str, Any]) -> float:
 
 
 def check(ev: Mapping[str, Any]) -> None:
-    """事象 1 件の形を確かめる。"""
+    """事象 1 件の形を確かめる。誤りの文は事象の値を含まない。"""
     kind = ev["kind"] if "kind" in ev else None
     if kind not in REQUIRED:
-        raise RecordError(f"開発ループの記録の知らない事象: {kind!r}")
+        raise RecordError(f"開発ループの記録の知らない事象（kind は {'・'.join(REQUIRED)} のどれか）")
     missing = [k for k in ("at", *REQUIRED[kind]) if k not in ev]
     if missing:
         raise RecordError(f"事象 {kind} にキー {', '.join(missing)} が無い")
     if kind == LAP_CLOSED and ev["outcome"] not in OUTCOMES:
-        raise RecordError(f"周の結果 {ev['outcome']!r} は {'・'.join(OUTCOMES)} のどれでもない")
+        raise RecordError(f"周の結果 outcome が {'・'.join(OUTCOMES)} のどれでもない")
 
 
 def _lap_index(state: LoopState, number: int) -> int:
