@@ -34,7 +34,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, NamedTuple, Optional, cast
 
 from ndf.adapters import agents, git, github, publish
 from ndf.contracts import limits
@@ -713,7 +713,16 @@ def _base_of_pr(cfg: RunConfig, ports: Ports, repo: git.Git) -> str:
         raise DriveStopped("precondition", f"PR #{cfg.pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
 
 
-def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, str, str, str]:
+class _Fetched(NamedTuple):
+    """`_fetch_both` の戻り値。"""
+
+    head: str  # PR の先頭のコミット
+    base_branch: str  # MVV を読むブランチ
+    base_tip: str  # MVV を読むブランチの先頭のコミット
+    diff_base: str  # 差分の起点のコミット
+
+
+def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> _Fetched:
     """PR のブランチと MVV を読むブランチを 1 回で取得し、PR の先頭・MVV を読むブランチ・その先頭のコミット・差分の起点の
     コミットを返す。取得が進めるのはリモート追跡参照だけなので、差分の起点に手元のブランチの名前は使わない。"""
     remote = repo.remote()
@@ -722,7 +731,12 @@ def _fetch_both(cfg: RunConfig, ports: Ports, repo: git.Git) -> tuple[str, str, 
         return worktree.fetch_tips(repo, cfg.branch, remote, branch)
 
     (head, tip), base = worktree.fetch_base(repo, cfg.base, remote, fetch, lambda: _base_of_pr(cfg, ports, repo))
-    return head, base.branch, tip, base.commit if base.commit is not None else tip
+    return _Fetched(
+        head=head,
+        base_branch=base.branch,
+        base_tip=tip,
+        diff_base=base.commit if base.commit is not None else tip,
+    )
 
 
 def _read_mvv(run: _Run) -> str:
@@ -749,11 +763,11 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
         return None, mismatch
     runtimes = (*participants.assign(cfg.participants), participants.FIXER)
     try:
-        head, base_branch, base_tip, diff_base = _fetch_both(cfg, ports, repo)
+        fetched = _fetch_both(cfg, ports, repo)
     except DriveStopped as exc:
         return None, Finish(exc.kind, exc.detail)
-    ws = workspace.prepare(repo, cfg.pr, head, runtimes)
-    return _Run(cfg, ports, ws, state, path, base_branch, base_tip, diff_base), None
+    ws = workspace.prepare(repo, cfg.pr, fetched.head, runtimes)
+    return _Run(cfg, ports, ws, state, path, fetched.base_branch, fetched.base_tip, fetched.diff_base), None
 
 
 def _ready(run: _Run) -> None:
