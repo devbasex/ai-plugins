@@ -337,6 +337,23 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "cache report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--since": {
+          "type": "string",
+          "description": "この日時（ISO 8601）以後に始まった待ちと、以後の Stop の行だけを集計する"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "cap",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

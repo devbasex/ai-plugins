@@ -28,6 +28,7 @@ from pathlib import Path
 from filelock import FileLock, Timeout
 
 from ndf.contracts import limits
+from ndf.values import is_int
 
 SLOT_PREFIX = "slot-"
 POOL_LOCK = "pool.lock"
@@ -125,11 +126,6 @@ def parent_index(directory: Path, environ: Mapping[str, str]) -> int | None:
     except OSError:  # noqa: NDF401 ファイル: パスを解けなければ親のスロットとして扱わない
         return None
     return slot_index(path) if same else None
-
-
-def is_int(value: object) -> bool:
-    """`value` が整数か（真偽値は整数に数えない）。"""
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 @dataclass

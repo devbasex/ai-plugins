@@ -1,0 +1,7 @@
+{
+  "summary": "起床の hook を登録してよい Claude Code のバージョンの一覧（測って通ったバージョンだけ。空ならどの子にも登録しない）",
+  "versions": [],
+  "read_by": [
+    "ndf.domains.relay.wrapper_launch"
+  ]
+}
