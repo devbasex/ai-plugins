@@ -320,9 +320,9 @@ def _cites(text: str) -> bool:
     return any(mvv_decide.parse_citation(line, True) is not None for _, line in _markdown_lines(text))
 
 
-def _fence_changed(file: DiffFile) -> bool:
-    """コードブロックの囲みの行を足したか消したか。"""
-    return any(_FENCE.match(line) for text in (*file.added.values(), *file.removed) for _, line in _markdown_lines(text))
+def _fence_changed(file: DiffFile, added: Mapping[int, str]) -> bool:
+    """コードブロックの囲みの行を足したか（`added` は足した行）消したか。"""
+    return any(_FENCE.match(line) for text in (*added.values(), *file.removed) for _, line in _markdown_lines(text))
 
 
 def _numbered(text: str) -> dict[int, list[int]]:
@@ -364,13 +364,16 @@ def _new_rows(g: git.Git, target: Target) -> list[_Row]:
     """PR で本文に増えた根拠の記述: 足した行と、変わっていないがコードブロックの囲みを変えたので本文に出た行。"""
     held = target.full_diff.read_bytes().decode("utf-8") if target.full_diff is not None else None
     diff = held if held is not None else review_diff(g, target.merge_base, target.head)
-    marked = [(file, _fence_changed(file)) for file in _diff_files(diff)]
-    files = [(file, fenced) for file, fenced in marked if fenced or any(_cites(text) for text in file.added.values())]
+    changed_files = _diff_files(diff)
+    # 足した行はファイルごとに 1 回だけ求める（候補の行ごとに全 hunk を走査しない）
+    new = {file.path: file.added for file in changed_files}
+    marked = [(file, _fence_changed(file, new[file.path])) for file in changed_files]
+    files = [(file, fenced) for file, fenced in marked if fenced or any(_cites(text) for text in new[file.path].values())]
     missing = [file.path for file, _ in files if file.path not in target.docs]
     texts = {**target.docs, **(_committed_texts(g, target.head, missing) if missing else {})}
     found = [(row, fenced) for file, fenced in files for row in _cited_rows(file, texts[file.path])]
-    added = [row for row, _ in found if row.line in row.file.added]
-    kept = [row for row, fenced in found if fenced and row.line not in row.file.added]
+    added = [row for row, _ in found if row.line in new[row.file.path]]
+    kept = [row for row, fenced in found if fenced and row.line not in new[row.file.path]]
     return sorted([*added, *_came_out(g, target.merge_base, kept)], key=lambda row: (row.file.path, row.line, row.part))
 
 

@@ -76,6 +76,8 @@ FRESH_SUFFIX = FIX_SUFFIX + "-new"
 # 修正担当の会話を続けない理由のうち、駆動が決めるもの（#4013）
 MISSING = "前の会話が見つからない"
 UNSAVED = "会話を保存しない設定"
+# PR に届いていないコミットの根拠の記述を確かめられなかった注意（PR へ載るので、原因は状態ファイルにだけ残す）
+UNSENT_UNCHECKED = "PR に届いていない手元のコミットの根拠の記述を確かめられない（原因は状態ファイルの unsent_citations にある）"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -129,6 +131,8 @@ class _Run:
     # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
+    # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
+    sent: str = ""
     # PR が足した根拠の記述の確かめ（`changes.CitationRun`）
     checked_head: Optional[str] = None
     last_target: Optional[changes.Target] = None
@@ -259,7 +263,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     journal = FindingJournal(store.list_of(data, store.FINDINGS))
-    run = _Run(cfg, g, ref, data, journal, warnings, [], [], snapshot=snap, mvv=snap.identity, mvv_branch=based.branch)
+    run = _Run(cfg, g, ref, data, journal, warnings, [], [], snapshot=snap, mvv=snap.identity, mvv_branch=based.branch, sent=synced.remote)
     if rebound:
         _save(run)
     _ingest_pending(run)
@@ -644,6 +648,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
     sent = push.push_fix(run.g, run.cfg.branch, commit)
     if sent.ok:
         fix["pushed"] = sent.head
+        run.sent = str(sent.head)
         return True
     run.journal.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
@@ -684,7 +689,7 @@ def _mvv_checked(run: _Run, head: str) -> bool:
 
 
 def _final_head(run: _Run, final: str, rounds: int) -> str:
-    """終わり方を決めるコミット。修正を送っていればそのコミット、送れなかったか修正担当が途中で終わったなら作業場所のコミット。"""
+    """作業場所に残る最後のコミット。修正を送っていればそのコミット、送れなかったか修正担当が途中で終わったなら作業場所の HEAD。"""
     last = store.last_round(run.data)
     if rounds == 0 or final == fin.ERROR:
         return run.g.rev_parse("HEAD")
@@ -692,26 +697,60 @@ def _final_head(run: _Run, final: str, rounds: int) -> str:
     return str(fix["pushed"] if isinstance(fix, dict) and "pushed" in fix else last["head"])
 
 
-def _check_final_head(run: _Run, final: str, rounds: int) -> bool:
-    """終わり方を決めるコミットで根拠の記述を確かめ、確かめ終えたかを返す。最後の修正で増えた・直った誤りを、判定の前に状態ファイルへ
-    残す（変わらなければ書かない）。"""
+class _FinalCheck(NamedTuple):
+    """終わり方を決める前の確かめの結果。確かめ終えたかと、PR に届いていないコミットで見つけた誤りの件数。"""
+
+    checked: bool
+    unsent: int = 0
+
+
+def _check_final_head(run: _Run, final: str, rounds: int) -> _FinalCheck:
+    """終わり方を決める前に根拠の記述を確かめる。最後の修正で増えた・直った誤りを、判定の前に状態ファイルへ残す（変わらなければ
+    書かない）。指摘にするのは PR に届いたコミットの誤りだけで、手元だけに残ったコミットの誤りは別に確かめて件数だけを判定に使う。"""
     if criteria_decide.approved(run.snapshot) is None:
-        return True
-    head = _final_head(run, final, rounds)
-    n = len(store.list_of(run.data, store.ROUNDS))
-    recorded = store.last_round(run.data).get("head") == head
-    # 記録の無いコミットで見つけた誤りは、次の起動の最初のラウンドの指摘にする
-    if _ingest_citations(run, changes.final_citations(run, head), n if recorded else n + 1, recorded):
+        return _FinalCheck(True)
+    local = _final_head(run, final, rounds)
+    checked, wrote = _check_sent(run, rounds)
+    held = run.data.pop(fin.UNSENT_CITATIONS, None)
+    unsent = _check_unsent(run, local) if local != run.sent else 0
+    if wrote or held != run.data.get(fin.UNSENT_CITATIONS):
         _save(run)
-    return _mvv_checked(run, head)
+    return _FinalCheck(False) if unsent is None else _FinalCheck(checked, unsent)
+
+
+def _check_sent(run: _Run, rounds: int) -> tuple[bool, bool]:
+    """PR に届いた最後のコミットを確かめ、結果を指摘にする。確かめ終えたかと、状態が変わったかを返す。"""
+    last = store.last_round(run.data)
+    n = len(store.list_of(run.data, store.ROUNDS))
+    recorded = last.get("head") == run.sent
+    # 記録の無いコミットで見つけた誤りは、次の起動の最初のラウンドの指摘にする
+    wrote = _ingest_citations(run, changes.final_citations(run, run.sent), n if recorded else n + 1, recorded)
+    checked = _mvv_checked(run, run.sent)
+    if checked and recorded and rounds > 0 and last.get(fin.MVV_CHECKED) is not True:
+        # ラウンドの中の確かめに失敗していた。同じ head を確かめ終えたので、打ち直しが収束を使えるようにする
+        last[fin.MVV_CHECKED] = wrote = True
+    return checked, wrote
+
+
+def _check_unsent(run: _Run, head: str) -> Optional[int]:
+    """PR に届いていないコミット `head` を確かめ、誤りの件数（確かめられなければ None）を返す。誤りと失敗の理由は未公開のファイルの
+    名前や本文を含むので、PR へ載せる指摘と注意には入れず、手元の状態ファイルだけに残す。"""
+    seen = len(run.warnings)
+    errors = changes.final_citations(run, head)
+    detail = run.warnings[seen:]
+    run.data[fin.UNSENT_CITATIONS] = {"head": head, "errors": errors, "detail": detail}
+    if errors is None:
+        run.warnings[seen:] = [UNSENT_UNCHECKED]
+        return None
+    return len(errors)
 
 
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。
     前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
-    checked = reused or _check_final_head(run, final, rounds)
+    check = _FinalCheck(True) if reused else _check_final_head(run, final, rounds)
     path = run.cfg.state_dir / SUMMARY_NAME
-    review = fin.Review(final, rounds, run.journal.findings(), checked)
+    review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
     return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused)
 
