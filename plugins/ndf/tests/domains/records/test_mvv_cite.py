@@ -311,7 +311,8 @@ def test_a_base_or_file_that_cannot_be_read_is_a_precondition_without_the_cause(
     assert all(word not in _shown(out) for word in (SECRET, HOST, "other-owner"))
     rows = mvv.record_path("mvv-gate-failures").read_text(encoding="utf-8").splitlines()
     assert HOST in json.loads(rows[-1])["cause"]
-    run.fetch_error, run.current_error = None, mvv.MvvError(mvv.mismatch_detail({"a": "1", ".ndf/mvv.md": "2"}))
+    # 本文のパスは作り物（本物の MVV の文書を読まない）
+    run.fetch_error, run.current_error = None, mvv.MvvError(mvv.mismatch_detail({"a": "1", "本文.md": "2"}))
     assert run.run(run.material("Value 3"))["cause"]["kind"] == "precondition"
     run.current_error = None
     assert run.run(run.root / "無い.md")["cause"]["kind"] == "precondition"

@@ -201,12 +201,14 @@ JUDGED = "a" * 40
 
 
 def _mvv(kind: str, skip: bool, why: list[str]):
-    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR の head は JUDGED。レビューの保留を確かめて 0 件）。"""
+    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR は設計の PR で head は JUDGED。レビューの保留を
+    確かめて 0 件）。"""
     held = {
         "gate": kind,
         "skip": skip,
         "verdict": {"verdict": "follow", "reasons": ["Value 1"], "boundary": []},
         "why": why,
+        "pr": lanes.values(Path(), "sprint/s1")["design_pr"],
         "head": JUDGED,
         "holds": [],
     }

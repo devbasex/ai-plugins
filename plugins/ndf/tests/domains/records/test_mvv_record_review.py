@@ -194,9 +194,12 @@ EARLIER, LATER = "2000-01-01T00:00:00+00:00", "2099-01-01T00:00:00+00:00"
 PLAIN = {"id": "r1-9", "text": "普通の指摘", "by": "codex", "outcome": "deferred", "reason": "利用者が決める"}
 
 
-def _plain_holds(root: Path) -> list[str]:
+def _plain_holds(root: Path, *ids: str) -> list[str]:
+    """指摘 `ids`（既定は `PLAIN` の r1-9）の名前で出た保留。伏せた行の保留は、その行の指摘の名前で出る。"""
     snap = _snapshot()
-    return [h for h in md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-") if "r1-9" in h]
+    named = [f"指摘 {i}（" for i in ids or ("r1-9",)]
+    holds = md.review_holds(_reviews(), 0, str(root), [PR], (snap.version, snap.sha256), hidden="-")
+    return [h for h in holds if any(n in h for n in named)]
 
 
 def _a_plain_fix_is_not_withheld_and_an_old_withheld_fix_is_completed(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -215,14 +218,17 @@ def _a_fix_withheld_by_an_earlier_version_is_written_again(root: Path, monkeypat
     snap = _snapshot()
     mvv.record_review(mvv.ReviewTarget(str(root), PR, HEAD), snap, [PLAIN], list)
     [held] = _reviews()
-    later = {**held, "at": "2098-01-01T00:00:00+00:00", "id": "r2-1", "outcome": "fixed", "withheld": True}
+    # 伏せた直しは見送りと同じ時刻に書いた（同じ時刻は追記の順で並ぶ）。書き直しはその後になる
+    later = {**held, "id": "r2-1", "outcome": "fixed", "withheld": True}
     jsonl.append_locked(
         mvv.record_path("mvv-validation"), {k: v for k, v in later.items() if k not in ("reason", "version")}, kind="mvv-validation"
     )
-    assert _plain_holds(root) != []
+    # 伏せた行がキーの最後の行なので、その行（r2-1）の名前で保留が出る
+    assert _plain_holds(root, "r2-1") != []
     fixed = {**PLAIN, "id": "r2-1", "outcome": "fixed", "reason": None, md.REVIEW_FIXED_AT: LATER}
     assert mvv.record_review(mvv.ReviewTarget(str(root), PR, NEXT_HEAD), snap, [fixed], list).written == 1
     assert _reviews()[-1].get("withheld") is None
+    assert _plain_holds(root, "r1-9", "r2-1") == []
 
 
 def _a_fix_made_before_another_state_dir_deferred_it_does_not_clear_the_hold(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

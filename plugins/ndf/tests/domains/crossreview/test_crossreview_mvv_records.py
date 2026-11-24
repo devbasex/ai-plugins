@@ -215,13 +215,17 @@ def test_cause_that_cannot_be_saved_still_stops_the_review(review: Review, monke
 
 
 def test_findings_of_an_earlier_mvv_are_left_out(review: Review, repos: Repos) -> None:
-    """新しい MVV が承認された後の起動は、前の MVV で判定した指摘を結果と記録に載せない。"""
+    """新しい MVV が承認された後の起動は、前の MVV で判定した指摘を結果と記録に載せない。
+
+    前の MVV で判定を外した見送りは、項目の無い通常の指摘の見送り（区分が無いので承認ゲートの保留）として記録に残る（#3959）。"""
     review.run(Visibility())
     _push_base(repos, 12)
     _, got = _base(review.capsys, review.monkeypatch, Fixer(review.state, review.wt), review.wt)
     out = got["outputs"]["mvv"]
     assert (out["version"], out["findings"], out["redlines"], out["disputed"]) == (12, [], [], [])
-    assert [r["id"] for r in _reviews() if r["mvv_version"] == 12] == [c["id"] for c in out["citations"]] == ["r3-n1"]
+    now = [r for r in _reviews() if r["mvv_version"] == 12]
+    assert [r["id"] for r in now if "item" in r] == [c["id"] for c in out["citations"]] == ["r3-n1"]
+    assert [(r["id"], r["outcome"], "defer" in r) for r in now if "item" not in r] == [("r1-1", "deferred", False)]
 
 
 def test_issue_4090_5_citation_error_reaches_the_result_and_the_records_after_starting_over(

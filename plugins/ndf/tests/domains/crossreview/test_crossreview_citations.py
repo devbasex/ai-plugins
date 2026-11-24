@@ -627,7 +627,9 @@ def test_without_an_approved_mvv_nothing_is_checked(repos: Repos, wt: Path, tmp_
 
 
 def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """最後のラウンドと同じ head の確かめ直しは、Git を打たず、状態ファイルも書き直さない。"""
+    """最後のラウンドと同じ head の確かめ直しは、Git を打たず、状態ファイルも書き直さない。
+
+    確かめ直しの後の保存は、MVV の記録の側（直した指摘を保留と照らし終えた時刻。#3959）のもので、ここでは見ない。"""
     _push_base(repos)
     _push_pr(repos, "doc.md", "# 設計", WRONG)
     order: list[Any] = []
@@ -635,6 +637,7 @@ def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Rep
 
     def checked(*args: Any) -> Any:
         calls = count_git(monkeypatch)
+        order.append("check")
         got = check(*args)
         order.append(list(calls))
         return got
@@ -642,7 +645,8 @@ def test_state_is_not_saved_again_when_the_last_check_changes_nothing(repos: Rep
     monkeypatch.setattr(drive, "_save", lambda run: order.append("save") or save(run))
     monkeypatch.setattr(drive, "_check_final_head", checked)
     _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt, ("doc.md", f"# 設計\n{RIGHT}\n")), wt)
-    assert order[-2:] == ["save", []]
+    last = len(order) - 1 - order[::-1].index("check")
+    assert order[last - 1 : last + 2] == ["save", "check", []]
 
 
 # --- 確かめる行と git の起動の数 ----------------------------------------------------------------
