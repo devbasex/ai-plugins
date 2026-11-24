@@ -12,7 +12,7 @@ import pytest
 
 from ndf.adapters import agents, claude, git
 from ndf.core.converge import participants
-from ndf.domains.crossreview import cli, criteria_decide, drive, resume_decide, settings, store
+from ndf.domains.crossreview import cli, criteria_decide, drive, fixer, resume_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, run_cli
@@ -117,7 +117,7 @@ def _fixer_notes(got: dict) -> list[str]:
 def _margin() -> int:
     from ndf.contracts import limits
 
-    return int(limits.value(drive.RESUME_MARGIN, "count"))
+    return int(limits.value(fixer.RESUME_MARGIN, "count"))
 
 
 SAVED = {"version": 1, "focus": [], "fixer_sessions": True}
@@ -212,10 +212,10 @@ def test_issue_4013_a_missing_conversation_is_relaunched_once_as_a_new_one(
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
     fixers = [s for s in fake.launches if s.agent == "claude"]
-    assert [s.paths.out.name for s in fixers] == ["round1-fix.out", "round2-fix.out", f"round2{drive.FRESH_SUFFIX}.out"]
+    assert [s.paths.out.name for s in fixers] == ["round1-fix.out", "round2-fix.out", f"round2{fixer.FRESH_SUFFIX}.out"]
     assert [_session_of(list(s.argv))[0] for s in fixers] == ["--session-id", "--resume", "--session-id"]
     assert len({_session_of(list(s.argv))[1] for s in fixers}) == 2
-    assert _fixer_notes(got)[1] == f"指摘 1 件を扱った（新しい会話: {drive.MISSING}）"
+    assert _fixer_notes(got)[1] == f"指摘 1 件を扱った（新しい会話: {fixer.MISSING}）"
     assert [f["outcome"] for f in _state(fake.state_dir)["findings"]] == [fin.FIXED, fin.FIXED]
 
 
@@ -243,7 +243,7 @@ def test_issue_4013_without_saved_sessions_a_missing_mark_is_not_relaunched(
     fake.missing = {0}
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert len(_fixer_argvs(fake)) == 1
-    assert _fixer_notes(got) == [f"結果無し（failed）（新しい会話: {drive.UNSAVED}）"]
+    assert _fixer_notes(got) == [f"結果無し（failed）（新しい会話: {fixer.UNSAVED}）"]
 
 
 def test_issue_4013_review_settings_default_to_not_saving() -> None:
@@ -298,11 +298,11 @@ def test_issue_4013_fixer_launch_carries_the_session_and_the_output_name(repos: 
     """#4013: `_fixer_launch` は渡した会話の指定を引数に載せ、出力の名前を `round<n><suffix>` にする。"""
     cfg = settings.RunConfig(wt, BRANCH, "origin/main", PR, tmp_path / "st", False, ("codex",))
     run = drive._Run(cfg, git.Git(wt), store.state_pr(cfg.state_dir, PR), {}, None, [], [], [])  # type: ignore[arg-type]
-    plain = drive._fixer_launch(run, 2, "質問", None)
+    plain = fixer._fixer_launch(run, 2, "質問", None)
     assert plain.paths.out.name == "round2-fix.out" and "--no-session-persistence" in plain.argv
     assert _session_of(list(plain.argv)) == (None, None)
-    fresh = drive._fixer_launch(run, 2, "質問", claude.Session("abc", False), drive.FRESH_SUFFIX)
-    assert fresh.paths.out.name == f"round2{drive.FRESH_SUFFIX}.out" and _session_of(list(fresh.argv)) == ("--session-id", "abc")
+    fresh = fixer._fixer_launch(run, 2, "質問", claude.Session("abc", False), fixer.FRESH_SUFFIX)
+    assert fresh.paths.out.name == f"round2{fixer.FRESH_SUFFIX}.out" and _session_of(list(fresh.argv)) == ("--session-id", "abc")
 
 
 # --- _launch_fixer が増分の起点（引き継いだ文脈）に使う前回記録（リファクタリングの前の振る舞いの固定） ---------------
@@ -352,7 +352,7 @@ def test_launch_fixer_resumed_conversation_measures_growth_from_the_previous_con
     """続けた会話の増分は、前回記録の文脈からの差。前回記録は今回の会話の ID と文脈で置き換わる。"""
     run = _unit_run(tmp_path, wt, _taken(100000))
     launch = _ScriptedLaunch((130000,))
-    status, how = drive._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
+    status, how = fixer._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
     assert status.state == agents.AgentState.DONE and how == "（会話を続けた）"
     assert _session_of(list(launch.specs[0].argv)) == ("--resume", "prev-id")
     assert run.fixer_growth == 30000
@@ -362,14 +362,14 @@ def test_launch_fixer_resumed_conversation_measures_growth_from_the_previous_con
 def test_launch_fixer_resumed_growth_keeps_the_larger_earlier_maximum(wt: Path, tmp_path: Path) -> None:
     """続けた会話の増分が前の最大より小さければ、前の最大を残す。"""
     run = _unit_run(tmp_path, wt, _taken(100000), growth=50000)
-    drive._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((130000,)))
+    fixer._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((130000,)))
     assert run.fixer_growth == 50000
 
 
 def test_launch_fixer_resumed_growth_does_not_go_negative(wt: Path, tmp_path: Path) -> None:
     """続けた会話の文脈が前回記録より小さければ、増分は 0。"""
     run = _unit_run(tmp_path, wt, _taken(100000))
-    drive._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((90000,)))
+    fixer._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((90000,)))
     assert run.fixer_growth == 0
 
 
@@ -378,7 +378,7 @@ def test_launch_fixer_new_conversation_ignores_the_previous_context(wt: Path, tm
     previous = resume_decide.Previous("prev-id", True, False, False, 100000, 1000000)
     run = _unit_run(tmp_path, wt, previous)
     launch = _ScriptedLaunch((130000,))
-    _, how = drive._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
+    _, how = fixer._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
     assert how == f"（新しい会話: {resume_decide.NOT_TAKEN}）"
     flag, sid = _session_of(list(launch.specs[0].argv))
     assert flag == "--session-id" and sid != "prev-id"
@@ -389,7 +389,7 @@ def test_launch_fixer_new_conversation_ignores_the_previous_context(wt: Path, tm
 def test_launch_fixer_first_launch_counts_the_whole_context(wt: Path, tmp_path: Path) -> None:
     """前回記録が無い最初の起動は、今回の文脈を丸ごと増分にする。"""
     run = _unit_run(tmp_path, wt, None)
-    _, how = drive._launch_fixer(run, 1, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((70000,)))
+    _, how = fixer._launch_fixer(run, 1, "質問", tmp_path / "st" / "none.json", _ScriptedLaunch((70000,)))
     assert how == f"（新しい会話: {resume_decide.FIRST}）"
     assert run.fixer_growth == 70000
 
@@ -399,10 +399,10 @@ def test_launch_fixer_relaunch_after_missing_conversation_does_not_use_the_previ
     増分にし、前回記録も起動し直した方にする。"""
     run = _unit_run(tmp_path, wt, _taken(100000))
     launch = _ScriptedLaunch((0, 130000), missing=frozenset({0}))
-    status, how = drive._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
-    assert status.state == agents.AgentState.DONE and how == f"（新しい会話: {drive.MISSING}）"
+    status, how = fixer._launch_fixer(run, 2, "質問", tmp_path / "st" / "none.json", launch)
+    assert status.state == agents.AgentState.DONE and how == f"（新しい会話: {fixer.MISSING}）"
     assert [_session_of(list(s.argv))[0] for s in launch.specs] == ["--resume", "--session-id"]
-    assert launch.specs[1].paths.out.name == f"round2{drive.FRESH_SUFFIX}.out"
+    assert launch.specs[1].paths.out.name == f"round2{fixer.FRESH_SUFFIX}.out"
     assert run.fixer_growth == 130000
     fresh_id = _session_of(list(launch.specs[1].argv))[1]
     assert run.fixer_last == resume_decide.Previous(fresh_id, True, False, False, 130000, 1000000)

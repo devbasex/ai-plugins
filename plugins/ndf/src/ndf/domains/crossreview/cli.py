@@ -35,7 +35,7 @@ from ndf.adapters import agents, git, run_log
 from ndf.contracts import limits, result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import changes, drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import changes, drive, fixer, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import (
     MAX_ROUNDS,
@@ -53,7 +53,7 @@ CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
 # 相手役と修正担当の起動（テストは偽物に差し替える）
-LAUNCH: drive.Launcher = agents.run_agent
+LAUNCH: fixer.Launcher = agents.run_agent
 
 
 def _redacted(texts: Sequence[str]) -> list[str]:
@@ -277,9 +277,9 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
+    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `fixer.merge_fix` で行う。"""
     try:
-        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
+        round_no = fixer.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
     except (store.FixResultMismatch, ValueError) as exc:
         return _stop("invalid", str(exc))
     ref = store.state_pr(Path(args.state_dir), args.pr)
@@ -385,13 +385,13 @@ def _review(path: str) -> fin.Review:
     return fin.as_review(store.read_object(Path(path)))
 
 
-def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
+def _emit_verdict(verdict: fin.Verdict, mvv: Optional[dict[str, Any]] = None, **extra: Any) -> int:
     """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
     gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。指摘の本文や理由を含む値は、結果を
-    集めるログへ秘密を写さないよう、ここで伏せる。"""
+    集めるログへ秘密を写さないよう、ここで伏せる。`mvv` は outputs の mvv（自由記述を伏せ終えたもの。承認済みの MVV が無ければ None）。"""
     warnings = [*extra.pop("warnings", ()), *verdict.warnings]
     summary, decisions, gaps, warnings = run_log.redact([verdict.summary, verdict.decisions, verdict.gaps, warnings])
-    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps}, **extra}
+    shared = {"decisions": decisions, "warnings": warnings, "outputs": {"gaps": gaps, **({"mvv": mvv} if mvv is not None else {})}, **extra}
     if verdict.status == fin.OK:
         return _ok(summary, **shared)
     return _stop(str(verdict.kind), summary, gaps=gaps if verdict.kind == "incomplete" else None, **shared)
@@ -486,10 +486,18 @@ class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
-def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, hub_of: Callable[[], Hub]) -> tuple[str, list[str]]:
+def _mvv_notices(warnings: Sequence[str]) -> list[str]:
+    """コメントに載せる注意のうち、公開済みかの比較に使うもの（MVV の記録の失敗）。"""
+    return [w for w in drive.MVV_NOTICES if w in warnings]
+
+
+def _post_report(
+    state_dir: Path, pr: int, final: Optional[str], warnings: Optional[Sequence[str]], hub_of: Callable[[], Hub]
+) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
     返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    `warnings` はコメントに載せる注意（None なら、公開のロックの中で読み直した状態ファイルから作る）。
     `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
     ref = store.state_pr(state_dir, pr)
@@ -504,9 +512,12 @@ def _post_report(state_dir: Path, pr: int, final: Optional[str], warnings: Any, 
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub) -> tuple[str, list[str]]:
+def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
+    if warnings is None:
+        # ロックを待つ間に別の起動が MVV の記録を書けていれば、失敗の注意を載せない
+        warnings = [drive.RECORDS_UNWRITTEN] if store.MVV_RECORD_ERROR in data else []
     # 巻き直しの後は旧 PR のコメントとスレッドを使わず、今の PR へ書き直す（PR 3944 の r4-5）
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     if journal.with_occurrences(data):
@@ -523,7 +534,7 @@ def _publish(ref: store.StateRef, final: Optional[str], warnings: Any, hub: Hub)
     if notes:
         data.pop(report_decide.PUBLISHED_KEY, None)
     else:
-        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final)
+        data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final, _mvv_notices(warnings))
     store.write_object(ref.path, data)
     return url, notes
 
@@ -535,7 +546,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     try:
         url, notes = _post_report(
-            state_dir, args.pr, report_decide.final_of(data), (), lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+            state_dir, args.pr, report_decide.final_of(data), None, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
@@ -593,7 +604,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return made[0]
 
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr))
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts))
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
@@ -605,7 +616,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
-    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+    return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
 def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -618,7 +629,9 @@ def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tu
     data = store.read_state(ref)
     report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     previous = data.get(report_decide.COMMENT_KEY)
-    published = data.get(report_decide.PUBLISHED_KEY) == report_decide.published_state(ref.current_pr, data, got.review.final)
+    # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
+    now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
+    published = data.get(report_decide.PUBLISHED_KEY) == now
     if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings

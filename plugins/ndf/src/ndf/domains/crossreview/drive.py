@@ -20,7 +20,7 @@
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
-確かめてから `summary.json`（`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
+確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
 自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
 merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
@@ -30,8 +30,6 @@ merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そ
 
 from __future__ import annotations
 
-import os
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -39,15 +37,15 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
-from ndf.adapters import agents, claude, git, run_log
-from ndf.contracts import facts, limits
+from ndf.adapters import agents, git, run_log
+from ndf.contracts import facts, internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
     criteria_decide,
+    fixer,
     fixgate_decide,
     prior_decide,
-    push,
     report_decide,
     resume_decide,
     scope_decide,
@@ -56,28 +54,24 @@ from ndf.domains.crossreview import (
     threads,
 )
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import mvv
-from ndf.testing import declared, scoped
 
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
 # ラウンドの判定（指摘が無くなったラウンドは finish_decide.CONVERGED）
 CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
-# 修正担当に許す Tool
-FIXER_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # 起動し直した相手役の出力の名前の後ろ（`round<n>-<相手役>-retry`）
 RETRY_SUFFIX = "-retry"
-# 修正担当の出力の名前の後ろ（`round<n>-fix`）
-FIX_SUFFIX = "-fix"
-# 会話が見つからず新しい会話で起動し直した修正担当の出力の名前の後ろ（`round<n>-fix-new`。#4013）
-FRESH_SUFFIX = FIX_SUFFIX + "-new"
-# 修正担当の会話を続けない理由のうち、駆動が決めるもの（#4013）
-MISSING = "前の会話が見つからない"
-UNSAVED = "会話を保存しない設定"
 # PR に届いていないコミットの根拠の記述を確かめられなかった注意（PR へ載るので、原因は状態ファイルにだけ残す）
 UNSENT_UNCHECKED = "PR に届いていない手元のコミットの根拠の記述を確かめられない（原因は状態ファイルの unsent_citations にある）"
+# MVV の記録を書けなかった注意と、その原因を状態ファイルへ残せない（消せない）注意（PR へ載るので、保存先のパスを含む例外の文を入れない）
+RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原因は状態ファイルの {store.MVV_RECORD_ERROR} にある）"
+CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
+# 出た・消えたときに、指摘が同じでも PR の記録を書き直す注意
+MVV_NOTICES = (RECORDS_UNWRITTEN, CAUSE_UNSAVED)
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -87,13 +81,10 @@ FINDINGS_SHAPE = (
     '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"%s}]} だけを出す。指摘が無ければ空の配列。'
 )
 
-Launcher = Callable[[agents.Launch], agents.AgentStatus]
 # PR のコメントを読む口を PR の番号から作る（作れなければ例外。注意に載せて読まずに進む）
 ReaderFor = Callable[[int], threads.Reader]
 # 設計文書の行数の上限・既存のコメント 1 件と全体の字数の上限
 DOC_LINES = "cross-review.design-doc-lines"
-# 修正担当が会話を続けるときの文脈の窓の手前の余白（#4013）
-RESUME_MARGIN = "cross-review.fixer.resume-margin"
 REMARK_CHARS = "cross-review.remark-chars"
 REMARKS_TOTAL = "cross-review.remarks-total"
 
@@ -102,7 +93,8 @@ class Outcome(NamedTuple):
     """駆動の結果。`review` は `finish_decide.finish` へ渡す形、`process` は起動ごとの過程、`reviewed_head` は
     今回の起動で相手役の全員が読めた最後のラウンドの HEAD（最後のラウンドの修正のコミットは含まない。#3879。そのような
     ラウンドが無ければ None。一部の相手役が読めなかったラウンドの HEAD は出さない。PR 3944 の r2-3）。`reused` は
-    相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。"""
+    相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。`mvv` は結果 JSON の `outputs.mvv`
+    （承認済みのプロジェクト MVV が無ければ None。#4076）。"""
 
     review: fin.Review
     summary_path: Path
@@ -110,6 +102,7 @@ class Outcome(NamedTuple):
     process: tuple[dict[str, str], ...]
     reviewed_head: Optional[str] = None
     reused: bool = False
+    mvv: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -137,11 +130,23 @@ class _Run:
     checked_head: Optional[str] = None
     last_target: Optional[changes.Target] = None
     citations: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
+    # 結果と MVV の記録に残す自由記述を伏せる処理（PR に書く記録のコメントと同じもの）
+    clean: report_decide.Cleaner = run_log.redact
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
+
+    def round_stem(self, round_no: int, suffix: str) -> Path:
+        """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
+        return self.cfg.state_dir / f"round{round_no}{suffix}"
+
+    def note(self, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
+        """過程へ 1 行足す。`warning` があれば先に注意へも足す。"""
+        if warning is not None:
+            self.warnings.append(warning)
+        self.process.append({"run": f"round {round_no} {who}", "result": result})
 
 
 # --- 始め ------------------------------------------------------------------------------
@@ -157,11 +162,11 @@ def _ingest_pending(run: _Run) -> None:
         raise DriveStopped("work_stopped", str(gate.reason))
     if gate.kind == fixgate_decide.INGEST and pending is not None:
         try:
-            last["fix"] = _take_fix(run, pending, len(rounds))
+            last["fix"] = fixer.take_fix(run, pending, len(rounds))
         except store.FixResultMismatch as exc:
             raise DriveStopped("invalid", f"前の起動が残した修正の結果を読み込めない: {exc}") from exc
         _save(run)
-        _consume(pending, len(rounds))
+        fixer.consume(pending, len(rounds))
 
 
 def _resend(run: _Run, synced: worktree.SyncResult) -> None:
@@ -172,7 +177,7 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
     round_no = len(store.list_of(run.data, store.ROUNDS))
     remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
-    sent = _push(run, round_no, remote, fix, check_commit=False)
+    sent = fixer.send_fix(run, round_no, remote, fix, check_commit=False)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
         run.journal.restore_fixed(store.list_of(fix, "fixed"))
@@ -243,7 +248,7 @@ def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
         raise DriveStopped("precondition", f"{based.branch} の MVV を読めない: {exc}") from exc
 
 
-def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
+def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide.Cleaner) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     based = _sync(cfg, g, reader_for)
@@ -263,7 +268,21 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
     journal = FindingJournal(store.list_of(data, store.FINDINGS))
-    run = _Run(cfg, g, ref, data, journal, warnings, [], [], snapshot=snap, mvv=snap.identity, mvv_branch=based.branch, sent=synced.remote)
+    run = _Run(
+        cfg,
+        g,
+        ref,
+        data,
+        journal,
+        warnings,
+        [],
+        [],
+        snapshot=snap,
+        mvv=snap.identity,
+        mvv_branch=based.branch,
+        sent=synced.remote,
+        clean=clean,
+    )
     if rebound:
         _save(run)
     _ingest_pending(run)
@@ -393,18 +412,6 @@ def _restate(run: _Run) -> None:
         _save(run)
 
 
-def _round_stem(run: _Run, round_no: int, suffix: str) -> Path:
-    """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
-    return run.cfg.state_dir / f"round{round_no}{suffix}"
-
-
-def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
-    """過程へ 1 行足す。`warning` があれば先に注意へも足す。"""
-    if warning is not None:
-        run.warnings.append(warning)
-    run.process.append({"run": f"round {round_no} {who}", "result": result})
-
-
 # --- 相手役 -----------------------------------------------------------------------------
 
 
@@ -431,7 +438,7 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
     引数に載せずファイルのパスだけをプロンプトへ書く（PR 3944 の r6-5）。"""
     if not lines:
         return None
-    path = _round_stem(run, round_no, REMARKS_SUFFIX)
+    path = run.round_stem(round_no, REMARKS_SUFFIX)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -488,7 +495,7 @@ def _launch_reviewers(
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """相手役を並べて起動し、指摘と、読めなかった相手役ごとの理由と直し方を返す。読めなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
-    specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}{suffix}")) for a in reviewers]
+    specs = [participants.review_launch(a, cfg.worktree, prompt, run.round_stem(round_no, f"-{a}{suffix}")) for a in reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
         statuses = list(pool.map(launch, specs))
     raised: list[dict[str, Any]] = []
@@ -500,10 +507,10 @@ def _launch_reviewers(
         if found is None:
             cause = sandbox if sandbox is not None else f"{status.state}: {status.detail}"
             warning = f"round {round_no} の相手役 {spec.agent} が差分を読めなかった{again}（{cause}）"
-            _note(run, round_no, spec.agent, f"回答無し{again}（{'sandbox' if sandbox is not None else status.state}）", warning)
+            run.note(round_no, spec.agent, f"回答無し{again}（{'sandbox' if sandbox is not None else status.state}）", warning)
             unread[spec.agent] = _unread_hint(spec.agent, cause, spec.paths.err)
             continue
-        _note(run, round_no, spec.agent, f"指摘 {len(found)} 件{again}")
+        run.note(round_no, spec.agent, f"指摘 {len(found)} 件{again}")
         raised += [{**f, "by": spec.agent} for f in found]
     return raised, unread
 
@@ -516,176 +523,6 @@ def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[li
         more, unread = _launch_reviewers(run, round_no, prompt, launch, tuple(unread), RETRY_SUFFIX)
         raised += more
     return raised, unread
-
-
-# --- 修正担当 ---------------------------------------------------------------------------
-
-
-def _where(f: dict[str, Any]) -> str:
-    """修正担当へ渡す指摘の場所と重要度の括弧（無ければ空）。"""
-    place = f"{f['path']}:{f['line']}" if f.get("path") and f.get("line") else f.get("path") or f.get("section")
-    parts = [p for p in (criteria_decide.severity_of(f.get("severity")), place) if p]
-    return f"（{'・'.join(parts)}）" if parts else ""
-
-
-def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], result_path: Path) -> str:
-    lines = [
-        f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"
-    ]
-    lines += [f"- {f['id']}: {f['text']}" + _where(f) + criteria_decide.fixer_impact(f) for f in open_]
-    lines += [f"- {h.id}: 足すべき内容 {h.text}" for h in handed]
-    shape = (
-        '{"pr": '
-        + str(run.ref.origin_pr)
-        + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
-    )
-    lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
-    # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
-    if scoped.ci_only(declared.test_section(run.cfg.worktree)):
-        lines.append(criteria_decide.fixer_ci_only())
-    lines.append(f"終えたら {result_path} へ JSON {shape} を書く。すべての id を載せる。")
-    return "\n".join(lines)
-
-
-def _fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = FIX_SUFFIX) -> agents.Launch:
-    """修正担当の 1 回の起動。`session` は会話の指定（None なら会話を残さない。#4013）、出力の名前は `round<n><suffix>`。"""
-    # 結果はファイルで受けるので標準出力を逐次にし、作業中の修正担当を無進捗と誤って止めない（#3945）
-    call = claude.ClaudeCall(
-        system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS, stream=True, session=session
-    )
-    paths = agents.AgentPaths.at(_round_stem(run, round_no, suffix))
-    return agents.Launch(
-        run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)
-    )
-
-
-def _fix_record(
-    journal: FindingJournal, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int, mvv: Optional[str] = None
-) -> dict[str, Any]:
-    """修正の結果ファイルを読んでジャーナルへ読み込み、ラウンドの修正の記録（commit・reported・fixed）を返す。`mvv` は
-    修正担当を起動したときの MVV の識別子（前の起動が残した結果では、どの MVV での結果か決められないので None）。番号が合わなければ `store.FixResultMismatch`。"""
-    found = store.read_fix_result(path, ref)
-    reported = journal.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no, mvv=mvv)
-    fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
-    return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
-
-
-def _take_fix(run: _Run, path: Path, round_no: int, mvv: Optional[str] = None) -> dict[str, Any]:
-    """修正の結果をジャーナルへ読み込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
-    return _fix_record(run.journal, run.ref, path, run.cfg.handed, round_no, mvv)
-
-
-def _consume(path: Path, round_no: int, label: str = "round") -> None:
-    """マージした（またはマージできなかった）結果ファイルを `<label><ラウンド>` の名前へ移す（次の起動が残りと読み違えない）。
-    状態ファイルへ書いた後に呼ぶ。"""
-    os.replace(path, path.with_name(f"{path.stem}-{label}{round_no}.json"))
-
-
-def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed] = ()) -> int:
-    """駆動の外で残った修正の結果ファイルを、最後のラウンドへ `run` と同じ形でマージする（`merge-fix`。#2770）。
-    ジャーナルへ反映して状態ファイルへ書いてから結果ファイルを移し、マージしたラウンドの番号を返す。`handed` は `run` へ
-    渡した足すべき内容（`--findings`）で、その id の決定もジャーナルの行にする。
-    番号が合わなければ `store.FixResultMismatch`（何も書かない）。"""
-    ref = store.state_pr(state_dir, pr)
-    data = store.read_state(ref)
-    rounds = data.setdefault(store.ROUNDS, [])
-    if not rounds:
-        rounds.append({"round": 1})
-    round_no = rounds[-1].get("round") or len(rounds)
-    journal = FindingJournal(store.list_of(data, store.FINDINGS))
-    rounds[-1]["fix"] = _fix_record(journal, ref, path, handed, round_no)
-    data[store.FINDINGS] = list(journal.rows.values())
-    store.write_object(ref.path, data)
-    _consume(path, round_no)
-    return round_no
-
-
-def _fix(
-    run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher
-) -> Optional[dict[str, Any]]:
-    """修正担当を起動して結果を読み込む。結果ファイルが無ければ注意に載せて None。
-    起動の前に残っている結果ファイルは退避する（前の起動の結果を今のラウンドの結果と読み違えない）。修正担当が
-    DONE で終わらなくても（タイムアウトなど）結果ファイルを書き終えていればマージする（直した・見送ったを失わない）。"""
-    result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
-    if result_path.is_file():
-        _consume(result_path, round_no, "stale-round")
-    prompt = _fix_prompt(run, open_, handed, result_path)
-    status, how = _launch_fixer(run, round_no, prompt, result_path, launch)
-    if not result_path.is_file():
-        warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
-        _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）{how}", warning)
-        return None
-    try:
-        fix = _take_fix(run, result_path, round_no, run.mvv)
-    except (store.FixResultMismatch, store.StateBroken) as exc:
-        # 合わない・書きかけ（DONE でない修正担当）のファイルを残すと、次の起動が同じファイルを読み込もうとして
-        # 止まり続けるので、退避する
-        _consume(result_path, round_no, "mismatch-round")
-        run.warnings.append(f"round {round_no} の修正の結果を読み込めない: {exc}")
-        return None
-    if run.fixer_last is not None:
-        run.fixer_last = run.fixer_last._replace(taken=True)
-    _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った{how}")
-    return fix
-
-
-def _how(reason: Optional[str]) -> str:
-    """過程の行の後ろに付ける会話の扱い（続けたか、新しい会話の理由）。"""
-    return "（会話を続けた）" if reason is None else f"（新しい会話: {reason}）"
-
-
-def _launch_fixer(run: _Run, round_no: int, prompt: str, result_path: Path, launch: Launcher) -> tuple[agents.AgentStatus, str]:
-    """会話の指定を決めて修正担当を起動し、続けた会話が見つからなければ 1 度だけ新しい会話で起動し直す（#4013）。
-    最後に起動した方の記録を `run.fixer_last`・`run.fixer_growth` に置き、状態と過程の行の後ろを返す。"""
-    if not run.cfg.settings.fixer_sessions:
-        return launch(_fixer_launch(run, round_no, prompt, None)), _how(UNSAVED)
-    choice = resume_decide.choose(run.fixer_last, run.fixer_growth, int(limits.value(RESUME_MARGIN, "count")))
-    last = run.fixer_last if choice.resume else None
-    session = _new_session() if last is None else claude.Session(last.session_id, True)
-    spec = _fixer_launch(run, round_no, prompt, session)
-    status, reason = launch(spec), choice.reason
-    if (
-        session.resume
-        and not result_path.is_file()
-        and claude.conversation_missing(agents.tail(spec.paths.out), agents.tail(spec.paths.err))
-    ):
-        session, reason = _new_session(), MISSING
-        spec = _fixer_launch(run, round_no, prompt, session, FRESH_SUFFIX)
-        status = launch(spec)
-    carried = last.context if last is not None and session.resume else None
-    _keep_fixer(run, session, status, spec.paths.out, carried)
-    return status, _how(reason)
-
-
-def _new_session() -> claude.Session:
-    return claude.Session(str(uuid.uuid4()), False)
-
-
-def _keep_fixer(run: _Run, session: claude.Session, status: agents.AgentStatus, out: Path, carried: Optional[int]) -> None:
-    """最後に起動した修正担当の記録（結果をマージできたかは呼び手が後で真にする）と、1 ラウンドの増分の最大を置く。"""
-    result = claude.result_line(agents.tail(out))
-    squeezed = claude.compacted(out)
-    context, window = claude.context_tokens(result), claude.context_window(result)
-    finished = status.state == agents.AgentState.DONE
-    run.fixer_last = resume_decide.Previous(session.id, finished, False, squeezed, context, window)
-    run.fixer_growth = max(run.fixer_growth, resume_decide.grown(context, carried, squeezed, window))
-
-
-def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
-    """修正のコミットを送る。コミットが無ければ送らない。送れなければ、このラウンドで直したとした指摘を未解決へ戻し
-    （PR に届いていない）、注意に載せて False。"""
-    if run.g.rev_parse("HEAD") == reviewed_head:
-        return True
-    commit = fix.get("commit") if check_commit and isinstance(fix.get("commit"), str) else None
-    sent = push.push_fix(run.g, run.cfg.branch, commit)
-    if sent.ok:
-        fix["pushed"] = sent.head
-        run.sent = str(sent.head)
-        return True
-    run.journal.reopen(store.list_of(fix, "fixed"))
-    tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
-    _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
-    return False
 
 
 # --- 記録 -------------------------------------------------------------------------------
@@ -778,6 +615,48 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     return len(errors)
 
 
+def _record_mvv(run: _Run, snap: mvv.Snapshot, rows: Sequence[Mapping[str, Any]], clean: Optional[report_decide.Cleaner]) -> bool:
+    """MVV の記録を書き、書けたかを返す。書けなければ固定の注意を足し、例外の文（保存先の絶対パスを含む）は手元の状態ファイルだけに残す。"""
+    error = None
+    try:
+        # 起動の始めに解決した主 worktree を使う（`git worktree list` を打ち直さない）
+        repo = mvv.repo_key(run.cfg.worktree) if run.cfg.main is None else str(run.cfg.main)
+        mvv.record_review(repo, run.ref.current_pr, run.sent, snap, rows, clean)
+    except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        run.warnings.append(RECORDS_UNWRITTEN)
+    held = run.data.pop(store.MVV_RECORD_ERROR, None)
+    if error is not None:
+        run.data[store.MVV_RECORD_ERROR] = error
+    if error != held:
+        try:
+            _save(run)
+        except OSError:
+            # 空き容量の不足では状態ファイルも書けない。レビューの結果は返す
+            run.warnings.append(CAUSE_UNSAVED)
+    return error is None
+
+
+def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
+    """MVV に反するとした指摘と根拠の記述の誤りを MVV の記録に残し、結果 JSON の `outputs.mvv` を返す（承認済みの MVV が無ければ None）。
+
+    対象のコミットは、PR に届いた最後のコミット（指摘にする誤りは、このコミットで確かめたものだけである）。自由記述を伏せられない
+    ときも、記録を書けないときも、レビューの終わり方は変えず、注意に載せる。
+    """
+    snap = criteria_decide.approved(run.snapshot)
+    if snap is None:
+        return None
+    rows, seen = list(run.journal.rows.values()), report_decide.once(run.clean)
+    out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
+    if seen.failure is not None:
+        run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")
+    wrote = _record_mvv(run, snap, rows, seen if seen.failure is None else None)
+    if wrote and seen.failure is not None:
+        later = "次の起動で書き直す。それまで設計承認ゲートは省かない"
+        run.warnings.append(f"MVV の記録（mvv-validation.jsonl）の自由記述を伏せて書いた（{later}）: {seen.failure}")
+    return out
+
+
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。
     前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
@@ -785,7 +664,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused)
+    results = _mvv_results(run)
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused, results)
 
 
 class _Prepared(NamedTuple):
@@ -824,7 +704,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
     scope = descended(run.g, scope_decide.state_scope(run.data, cfg.every_section, round_no, sections, _basis(run, head)), head)
-    diff = _round_stem(run, round_no, ".diff")
+    diff = run.round_stem(round_no, ".diff")
     diff.write_text(changes.review_diff(run.g, scope.base or merge_base, head), encoding="utf-8")
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
     run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
@@ -928,15 +808,15 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
     _save(run)
-    fix = _fix(run, round_no, open_, handed, launch)
+    fix = fixer.run_fixer(run, round_no, open_, handed, launch)
     if fix is None:
         # 修正必須のまま残すと、次の起動が修正の記録の欠けで止まり続ける。errored で残し、次の起動で修正担当をもう一度起動する
         record["verdict"] = fin.ERROR
         return fin.ERROR
     record["fix"] = fix
     _save(run)
-    _consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if _push(run, round_no, prep.head, fix) else fin.ERROR
+    fixer.consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
+    return None if fixer.send_fix(run, round_no, prep.head, fix) else fin.ERROR
 
 
 def _reusable(run: _Run) -> bool:
@@ -954,17 +834,23 @@ def _reusable(run: _Run) -> bool:
     return not open_ and not handed
 
 
-def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
+def drive(
+    cfg: RunConfig,
+    launch: Launcher = agents.run_agent,
+    reader_for: Optional[ReaderFor] = None,
+    clean: report_decide.Cleaner = run_log.redact,
+) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。
+    `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
-    run = _start(cfg, reader_for)
+    run = _start(cfg, reader_for, clean)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)

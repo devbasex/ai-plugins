@@ -4,6 +4,6 @@
   "read_by": [
     "ndf.core.converge.participants",
     "ndf.domains.crossrefactor.launch",
-    "ndf.domains.crossreview.drive"
+    "ndf.domains.crossreview.fixer"
   ]
 }

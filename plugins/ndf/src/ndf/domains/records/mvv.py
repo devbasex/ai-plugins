@@ -12,16 +12,17 @@ import os
 import re
 import stat
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import git as git_mod
-from ndf.adapters import markdown
+from ndf.adapters import markdown, run_log
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import facts, limits, worker_paths
+from ndf.contracts import facts, internal, limits, worker_paths
+from ndf.core.converge import oscillation
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -352,6 +353,74 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     rows = [{"at": at, "kind": kind, "mvv_version": got, "repo": repo, **pair} for kind in kinds]
     path = record_path("mvv-signals")
     return [jsonl.append_locked(path, row, kind="mvv-signals") for row in rows]
+
+
+def record_key(text: str) -> str:
+    """cross-review の指摘の本文 `text` を見分ける値。起動をまたいで同じ指摘に同じ値になる。
+
+    秘密を伏せてから、空白と大文字小文字の違いを除いて切り詰めた本文の SHA-256 にする。順を逆にすると、小文字にした秘密や切り詰めで
+    分かれた秘密が伏せられずに残る。
+    """
+    return _sha256(oscillation.finding_key(str(run_log.redact(text))).encode("utf-8"))
+
+
+def record_review(
+    repo: str,
+    pr: int,
+    head: str,
+    snapshot: Snapshot,
+    rows: Sequence[Mapping[str, Any]],
+    clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
+) -> int:
+    """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書き、書いた件数を返す。
+
+    `repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
+    自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
+    `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
+    書けなければ `OSError`・`MvvError`・`internal.InternalError`。
+    """
+    found = md.judged_findings(rows, snapshot.identity)
+    if not found:
+        return 0
+    shared = {"at": jsonl.now(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
+    texts = [t for f in found for t in f.free_texts] if clean is not None else []
+    shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
+    keyed = [(record_key(str(f.row["text"])), f) for f in found]
+    reviews = [{**md.review_entry(f, shown if clean is not None else None), "key": key} for key, f in keyed]
+    wrote = _append_reviews([{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in md.one_per_key(reviews)])
+    disputed = {key: str(f.row["id"]) for key, f in keyed if f.outcome == md.REVIEW_DEFERRED}
+    return wrote + _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": key, "id": fid} for key, fid in disputed.items()])
+
+
+def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
+    """`entry` と同じ種類・リポジトリ・PR の記録か。"""
+    return lambda row: all(row.get(k) == entry[k] for k in ("kind", "repo", "pr"))
+
+
+def _append_reviews(entries: list[dict[str, Any]]) -> int:
+    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足し、足した件数を返す。"""
+    path = record_path("mvv-validation")
+    with jsonl.lock(path):
+        held, _ = jsonl.read_rows(path, kind="mvv-validation", wanted=_of_pr(entries[0]))
+        last = {r["key"]: r for r in sorted(held, key=lambda r: internal.epoch(r["at"]))}
+        new = [e for e in entries if not md.review_recorded(last.get(e["key"]), e)]
+        for e in new:
+            jsonl.append(path, e, kind="mvv-validation")
+    return len(new)
+
+
+def _append_disputed(entries: list[dict[str, Any]]) -> int:
+    """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足し、足した件数を返す。"""
+    if not entries:
+        return 0
+    path = record_path("mvv-signals")
+    with jsonl.lock(path):
+        held, _ = jsonl.read_rows(path, kind="mvv-signals", wanted=_of_pr(entries[0]))
+        known = {(r.get("key"), r["mvv_version"], r.get("sha256")) for r in held}
+        new = [e for e in entries if (e["key"], e["mvv_version"], e["sha256"]) not in known]
+        for e in new:
+            jsonl.append(path, e, kind="mvv-signals")
+    return len(new)
 
 
 def mvv_validate_sprint(

@@ -18,7 +18,7 @@ import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, report_decide, settings, store
+from ndf.domains.crossreview import cli, drive, fixer, report_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
@@ -289,19 +289,19 @@ def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_pat
 def test_push_error_keeps_the_fix_record_and_the_restart_sends_it(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR #3466 の指摘: push が例外（hook・通信）で止まっても修正の記録は状態ファイルに残り、次の起動は未送信の
     修正を送ってから次のラウンドへ進む。"""
-    sent = drive.push.push_fix
+    sent = fixer.push.push_fix
 
     def broken(*_args: Any, **_kwargs: Any) -> Any:
         raise git.GitError("pre-push の hook が拒んだ")
 
-    monkeypatch.setattr(drive.push, "push_fix", broken)
+    monkeypatch.setattr(fixer.push, "push_fix", broken)
     first = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, first, wt)
     assert got["cause"]["kind"] == "precondition"
     ref = store.state_pr(first.state_dir, PR)
     assert _state(first.state_dir)["rounds"][0]["fix"]["fixed"] == ["r1-1"]
     assert store.pending_fix_result(first.state_dir, ref) is None
-    monkeypatch.setattr(drive.push, "push_fix", sent)
+    monkeypatch.setattr(fixer.push, "push_fix", sent)
     again = Fake(first.state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, again, wt)
     assert (code, got["status"]) == (0, "ok")
@@ -312,16 +312,16 @@ def test_push_error_keeps_the_fix_record_and_the_restart_sends_it(repos: Repos, 
 
 def test_resend_after_a_refused_push_restores_the_fixed_findings(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR #3466 の指摘: 送れずに未解決へ戻した指摘は、次の起動の送り直しが届いたら直したへ戻し、修正担当へ渡し直さない。"""
-    sent = drive.push.push_fix
+    sent = fixer.push.push_fix
 
     def refused(*_args: Any, **_kwargs: Any) -> Any:
-        return drive.push.PushResult(False, True, None, None, drive.push.REJECTED_TWICE, ())
+        return fixer.push.PushResult(False, True, None, None, fixer.push.REJECTED_TWICE, ())
 
-    monkeypatch.setattr(drive.push, "push_fix", refused)
+    monkeypatch.setattr(fixer.push, "push_fix", refused)
     first = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
     _run(capsys, monkeypatch, first, wt)
     assert _state(first.state_dir)["findings"][0]["outcome"] == fin.UNRESOLVED
-    monkeypatch.setattr(drive.push, "push_fix", sent)
+    monkeypatch.setattr(fixer.push, "push_fix", sent)
     again = Fake(first.state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, again, wt)
     assert (code, got["status"]) == (0, "ok")
@@ -341,7 +341,7 @@ def test_issue_4109_resend_does_not_restore_a_finding_made_by_ndf(repos: Repos, 
     path = store.fix_result_path(state_dir, ref)
     found = [{"id": i, "outcome": fin.FIXED, "reason": f"{i} を直した"} for i, _ in MADE_BY]
     path.write_text(json.dumps({"pr": PR, "commit": sha, "findings": found}, ensure_ascii=False), encoding="utf-8")
-    drive.merge_fix(state_dir, PR, path)
+    fixer.merge_fix(state_dir, PR, path)
     taken = _state(state_dir)
     assert taken["rounds"][0]["fix"] == {"commit": sha, "reported": 1, "fixed": ["r1-1"]}
     assert (taken["findings"][0]["outcome"], taken["findings"][0]["fixer_reason"]) == (fin.UNRESOLVED, "n1 を直した")
@@ -461,7 +461,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert got["process"] == [
         {"run": "round 1 codex", "result": "指摘 1 件"},
         {"run": "round 1 kiro", "result": "指摘 2 件"},
-        {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {drive.UNSAVED}）"},
+        {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {fixer.UNSAVED}）"},
         {"run": "round 2 codex", "result": "指摘 0 件"},
         {"run": "round 2 kiro", "result": "指摘 0 件"},
     ]
@@ -562,7 +562,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert got["summary"] == "1 ラウンドで errored。指摘 1 件（直した 0・見送った 0・未解決 1）・欠け 1 件"
     assert got["warnings"] == ["round 1 の修正担当が結果を書かなかった（failed: 落ちた）"]
-    assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {drive.UNSAVED}）"}
+    assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {fixer.UNSAVED}）"}
     state = _state(fake.state_dir)
     assert _findings(state) == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
     assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
