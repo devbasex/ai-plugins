@@ -43,7 +43,7 @@ def _diff(tree: Path, base: str) -> str:
 
 
 def _files(tree: Path, base: str) -> dict[str, DiffFile]:
-    return {f.path: f for f in changes._diff_files(_diff(tree, base)) if f.path is not None}
+    return {f.path: f for f in changes._diff_files(_diff(tree, base))}
 
 
 # --- 改名したファイルのベースの本文 -----------------------------------------------------------
@@ -161,7 +161,7 @@ def test_paths_are_read_as_they_are(tree: Path, name: str) -> None:
 
 
 def test_files_without_readable_lines_are_skipped(tree: Path) -> None:
-    """バイナリ・実行権限だけの変更・空の文書は返さない。消した文書は head のパスを持たない。中身を変えない改名は、変わった行の無いファイルとして返す。"""
+    """消した文書・バイナリ・実行権限だけの変更・空の文書は返さない。中身を変えない改名は、変わった行の無いファイルとして返す。"""
     for name, body in {"gone.md": b"x\n", "bin.dat": b"\0\1", "mode.sh": b"x\n", "moved.md": b"same\n"}.items():
         _bytes(tree, name, body)
     base = _commit(tree)
@@ -171,9 +171,7 @@ def test_files_without_readable_lines_are_skipped(tree: Path) -> None:
     _bytes(tree, "empty.md", b"")
     (tree / "mode.sh").chmod(0o755)
     _commit(tree)
-    gone, moved = changes._diff_files(_diff(tree, base))
-    assert (gone.path, gone.base_path, gone.removed) == (None, "gone.md", ["x"])
-    assert moved == DiffFile("after.md", "moved.md", ())
+    assert list(_files(tree, base).values()) == [DiffFile("after.md", "moved.md", ())]
 
 
 def test_lines_that_look_like_headers_are_read_as_content(tree: Path) -> None:
@@ -257,42 +255,24 @@ def test_rows_are_compared_only_inside_the_same_run_of_replaced_lines() -> None:
     assert changes._same_rows(file.hunks) == {(3, 0): (3, 0)}
 
 
-# --- 改名の検出の上限を超えた差分 ---------------------------------------------------------------
+@pytest.mark.parametrize(("count", "found"), [(50, 50), (200, 0)])
+def test_repeated_rows_are_compared_only_up_to_the_limit(count: int, found: int) -> None:
+    """前後の行が違う繰り返しの行は、行の組の数の上限までだけ照合し、超えれば対応させない。"""
+    rows = [CITED] * count
+    assert len(changes._matched(["古い", *rows, "前"], ["新しい", *rows, "後"])) == found
 
 
-def _added(path: str, body: str) -> DiffFile:
-    (hunk,) = _hunks("", body)
-    return DiffFile(path, None, (changes.Hunk(1, tuple(x for x in hunk.lines if x.base is None)),))
+def test_repeated_rows_around_an_edit_are_matched_whatever_their_number() -> None:
+    """同じ行が上限を超えて並ぶ中の説明を 1 行変えても、前後の行はすべて対応する。"""
+    rows = [CITED] * 5000
+    assert sorted(changes._matched([*rows, "古い", *rows], [*rows, "新しい", *rows])) == [(n, n) for n in range(10001) if n != 5000]
 
 
-def _gone(path: str, body: str) -> DiffFile:
-    (hunk,) = _hunks(body, "")
-    return DiffFile(None, path, (changes.Hunk(1, tuple(x for x in hunk.lines if x.head is None)),))
-
-
-def _cites(row: str) -> bool:
-    return row == CITED
-
-
-def test_renames_split_by_the_limit_are_paired_and_keep_unchanged_rows() -> None:
-    """改名が足したファイルと消したファイルに分かれて出ても、同じ行の多いものどうしを組み、変わっていない根拠の行を見分ける。"""
-    other = "\n".join([CITED, *(f"別 {n}" for n in range(20))])
-    new = _added("new.md", "\n".join([*UNFENCED[:-1], "足した行"]))
-    files = [_gone("other.md", other), _gone("old.md", "\n".join(FENCED)), new, _added("other2.md", other)]
-    paired = {f.path: f for f in changes._pair_renames(files, _cites)}
-    assert {path: f.base_path for path, f in paired.items()} == {"new.md": "old.md", "other2.md": "other.md"}
-    same = changes._same_rows(paired["new.md"].hunks)
-    assert [same[no, 0] for no, line in enumerate(UNFENCED, 1) if line == CITED] == [(4, 0), (27, 0)]
-    assert [no for no, _ in paired["new.md"].added.items() if (no, 0) not in same] == [len(UNFENCED)]
-
-
-@pytest.mark.parametrize("old", [CITED + "\n" + "\n".join(f"別 {n}" for n in range(20)), "\n".join(FILLER)])
-def test_files_that_do_not_look_renamed_are_not_paired(old: str) -> None:
-    """行の半分も同じでない文書と、根拠の行を持たない文書は組まない。1 つの消した文書は 1 つにだけ組む。"""
-    new = _added("new.md", "\n".join(UNFENCED))
-    assert changes._pair_renames([_gone("old.md", old), new], _cites) == [_gone("old.md", old), new]
-    twice = changes._pair_renames([_gone("old.md", "\n".join(FENCED)), new, new._replace(path="copy.md")], _cites)
-    assert [(f.path, f.base_path) for f in twice] == [("new.md", "old.md"), ("copy.md", None)]
+def test_rows_that_appear_once_divide_the_comparison() -> None:
+    """入れ替えた行は順序を保つ側だけを対応させ、1 回だけ現れる行の間の、繰り返す行も対応させる。"""
+    assert sorted(changes._matched(list("a=b=c"), list("a=1=c"))) == [(0, 0), (1, 1), (3, 3), (4, 4)]
+    assert sorted(changes._matched(list("abcd"), list("bcad"))) == [(1, 0), (2, 1), (3, 3)]
+    assert changes._matched([], list("ab")) == []
 
 
 # --- コミットの本文 ---------------------------------------------------------------------------
