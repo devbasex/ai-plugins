@@ -14,6 +14,7 @@
     "判定の結論": {"key": "verdict", "aliases_removed": [], "where": ["mvv-validation", "context-records"]},
     "スプリント状態の名前": {"key": "state", "aliases_removed": [], "where": ["mvv-signals"]},
     "ループの 1 回の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["loop-event"]},
-    "cross-review の指摘の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["mvv-validation"]}
+    "cross-review の指摘の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["mvv-validation"]},
+    "読み手役の確認の結果": {"key": "result", "aliases_removed": [], "where": ["reading-check"]}
   }
 }

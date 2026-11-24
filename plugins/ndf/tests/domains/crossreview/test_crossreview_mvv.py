@@ -72,9 +72,18 @@ def _prompt_of(fake: Recording, out: str) -> str:
     return next(p for _, name, p in fake.prompts if name == out)
 
 
+def _criterion_5() -> str:
+    """基準 5 の行の始まり（文書の基準（#4285）の本文にも「5. 」で始まる行があるので、番号だけで選ばない）。"""
+    table = criteria_decide._table()
+    return f"{table['mvv_number']}. " + table["mvv_criterion"].split("{", 1)[0]
+
+
+_CRITERION_5 = _criterion_5()
+
+
 def _criterion_paths(prompt: str, mvv_state: Path) -> list[Path]:
     """指示の基準 5 の行に書かれたスナップショットのパス。"""
-    [line] = [x for x in prompt.splitlines() if x.startswith("5. ")]
+    [line] = [x for x in prompt.splitlines() if x.startswith(_CRITERION_5)]
     return [Path(p) for p in re.findall(re.escape(str(mvv_state)) + r"/[^）\s]+\.md", line)]
 
 
@@ -105,7 +114,7 @@ def test_unapproved_mvv_adds_nothing_to_the_prompts(repos: Repos, wt: Path, tmp_
     fake = _fixing(tmp_path)
     _run(capsys, monkeypatch, fake, wt, "--base", "main")
     assert all(line in _prompt(fake, "codex") for line in criteria_decide.reviewer_block(()))
-    assert not any(x.startswith("5. ") for _, _, p in fake.prompts for x in p.splitlines())
+    assert not any(x.startswith(_CRITERION_5) for _, _, p in fake.prompts for x in p.splitlines())
     assert '"mvv"' not in _prompt(fake, "codex")
     assert not mvv_state.exists()
 

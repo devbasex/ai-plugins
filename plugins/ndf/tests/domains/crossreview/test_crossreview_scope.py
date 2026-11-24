@@ -282,7 +282,9 @@ def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | 
     if recorded:
         state[store.REVIEWED_MVV] = recorded
     assert scope_decide.reviewed_of(state, now) == reviewed
-    got = scope_decide.state_scope(state, True, 2, [A, B], scope_decide.Basis(mvv=now))
+    basis = scope_decide.Basis(mvv=now)
+    prev = scope_decide.read_by_all_head(state, basis)
+    got = scope_decide.review_scope(True, 2, prev, [A, B], scope_decide.reviewed_of(state, basis.mvv))
     assert got == (scope_decide.Scope(scope_decide.SINCE, "h1", ()) if reviewed else scope_decide.Scope(scope_decide.FULL, None, (A, B)))
 
 

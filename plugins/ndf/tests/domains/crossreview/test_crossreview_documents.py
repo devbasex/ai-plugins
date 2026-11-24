@@ -40,7 +40,7 @@ def test_issue_4285_prompts_of_a_pr_without_documents_are_unchanged(code_wt: Pat
     finding = {"text": "止まる", "severity": "major", "impact": "保存が止まる"}
     fake = Recording(tmp_path / "st", {"codex": [[finding], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, code_wt)
-    reviewer = [*criteria_decide.reviewer_block(()), drive.FINDINGS_SHAPE]
+    reviewer = [*criteria_decide.reviewer_block(()), drive.FINDINGS_SHAPE % criteria_decide.mvv_shape(None)]
     for n in (1, 2):
         assert _prompt(fake, f"round{n}-codex.out").splitlines()[2:] == reviewer
     assert _prompt(fake, "round1-fix.out").splitlines()[2:-1] == criteria_decide.fixer_block(())

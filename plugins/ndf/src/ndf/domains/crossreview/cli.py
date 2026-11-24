@@ -35,7 +35,20 @@ from ndf.adapters import agents, git, run_log
 from ndf.contracts import limits, result, writing
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import changes, drive, fixer, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import (
+    changes,
+    drive,
+    fixer,
+    fixgate_decide,
+    journal,
+    push,
+    repo,
+    report_decide,
+    round_scope,
+    scope_decide,
+    store,
+    threads,
+)
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import (
     MAX_ROUNDS,
@@ -357,7 +370,9 @@ def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resol
         return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
     now, unsure = _local_mvv(wt, based.mvv_ref)
     basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
-    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
+    found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
+    got = round_scope.descended(g, found, "HEAD")
     return got, unsure if rounds else []
 
 

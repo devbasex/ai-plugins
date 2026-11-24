@@ -164,7 +164,8 @@ def _assert_only_table_criteria(fake: Recording, focus: tuple[str, ...], tmp_pat
     # 基準のほかの行の数（見出し・前置き・書かないものなど）。前と後ろの行は起動ごとに違う
     for agent, build, others in (("codex", criteria_decide.reviewer_block, 5), ("claude", criteria_decide.fixer_block, 4)):
         lines = next(p for a, _, p in fake.prompts if a == agent).splitlines()
-        block = lines[lines.index("## 指摘の基準") : -1]
+        # `wt` は doc.md を変えるので、表の基準の後ろに文書の基準（#4285）が続く
+        block = lines[lines.index("## 指摘の基準") : lines.index("## 文書の指摘の基準")]
         assert block == build(focus) and len(block) == len(want) + others
         assert dict(x.split(". ", 1) for x in block if x[:1].isdigit()) == want
         assert not any("mvv" in x.lower() for x in (*block, lines[-1].replace(str(tmp_path), "")))

@@ -21,12 +21,11 @@ from ndf import contracts, identity
 from ndf.adapters import git as git_mod
 from ndf.adapters import markdown, run_log
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import facts, internal, limits, worker_paths
+from ndf.contracts import internal, limits, worker_paths
 from ndf.core.converge import oscillation
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
-from ndf.domains.records import usage_decide as ud
 from ndf.domains.records.mvv_decide import MvvError
 from ndf.domains.settings import renames
 from ndf.progress.gate import records
@@ -38,7 +37,7 @@ Judge = Callable[[Mapping[str, str]], tuple[str, Mapping[str, Any]]]
 
 # 共通原則の本文（コントラクトの保存先からの相対）
 PRINCIPLES = "data/ndf-common-principles.md"
-# 本文と共通原則のスナップショットのディレクトリ（`_state_dir()` の下）
+# 本文と共通原則のスナップショットのディレクトリ（`records.mvv_state_dir()` の下）
 SNAPSHOT_DIR = "snapshots"
 # ファイル名に入れる sha256 の先頭の文字数
 _NAME_SHA = 12
@@ -185,7 +184,7 @@ def _snapshot_dir(outside: Optional[Path]) -> Path:
     担当はこのパスを後で開くので、確かめた後に中身を差し替えられる場所（`outside` の中・ほかの利用者が根までのどこかの
     項目を差し替えられる場所）なら `MvvError`。
     """
-    where = Path(os.path.realpath(_state_dir() / SNAPSHOT_DIR))
+    where = Path(os.path.realpath(records.mvv_state_dir() / SNAPSHOT_DIR))
     if outside is not None and where.is_relative_to(os.path.realpath(outside)):
         raise MvvError(f"MVV のスナップショットの保存先 {where} がレビューする worktree {outside} の中にある。worktree の外にする")
     try:
