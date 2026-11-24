@@ -86,9 +86,6 @@ CLEARS = {
 @pytest.mark.parametrize(("seq", "fixed", "expected"), CLEARS.values(), ids=CLEARS.keys())
 def test_plain_fix_clears_only_a_later_fix_of_a_plain_user_deferral(seq: list[dict[str, Any]], fixed: int, expected: bool) -> None:
     assert md.plain_fix_clears(seq, AT.format(fixed)) is expected
-
-
-@pytest.mark.parametrize(("seq", "fixed", "expected"), CLEARS.values(), ids=CLEARS.keys())
-def test_plain_fix_clears_implies_the_key_is_a_holding_candidate(seq: list[dict[str, Any]], fixed: int, expected: bool) -> None:
-    if md.plain_fix_clears(seq, AT.format(fixed)):
+    # 解いてよい並びは、保留の候補でもある
+    if expected:
         assert md.holding_keys({"k": seq}) == {"k"}
