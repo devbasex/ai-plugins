@@ -234,7 +234,7 @@ plugins/ndf/
 
 ## hook の登録（`registration`・`runtimes.json`・`entry.py`）
 
-起こす hook はプラグインの登録（`hooks/claude.json`）に足さず、ラッパーが中継の子の起動にだけ `--settings` で渡す。中継の外の会話の Stop では、この hook のプロセスは起動しない（設計の決定 1）。
+起こす hook はプラグインの登録（`hooks/claude.json`）に足さず、ラッパーが中継の子の起動にだけ `--settings` で渡す。中継の外の会話の Stop では、この hook のプロセスは起動しない（設計の決定 1）。登録を渡した子では、背景の作業も予約も無い応答を含めて Stop ごとに 1 回起動する。Stop の登録は `matcher` を取らず、登録の条件で対象外の Stop を除けないためである（手順 2 の早期終了は起動の後に効く）。この追加の費用は、設計の決定 7 の実測 11（短い応答を 50 回続ける中継で、hook の起動から終了までの 95 パーセンタイルと応答 1 回の所要時間を、登録ありとなしで比べる）で測り、通ったバージョンだけを `cache.rewake` の `versions` に入れる。
 
 - `runtimes.json` の claude の `Stop` に `"async_rewake": {"budget": "stop-rewake", "timeout_max": 3300}` を足す。`timeout_max` は背景の登録だけの上限で、事象の `timeout_max`（同期の Stop の登録の上限。ランタイムの 600）は変えない。この行は `render` が読まず、`rewake_entry` と予算の検査だけが読む
 - 方針のファイル `contracts/limits/hook.budget.stop-rewake.json` を今の `hook.budget.*` の形（`p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）で置く。値は次のとおりである。3,300 秒を受け付けないバージョンでは、設計の決定 7 のとおりバージョンの範囲に入れない
