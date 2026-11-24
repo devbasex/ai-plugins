@@ -86,6 +86,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 | --- | --- |
 | `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない |
 | `fact-table` | 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`。`*.schema.json` を除く）が、`contracts/facts/fact.schema.json`（表の共通の形）に合わない・読めない・行の並び `rows` が無い・行に文字列の `id` が無い・`id` が重なる・表の名前が 2 つの保存先で重なる |
+| `env-key` | 環境変数の表（`contracts/domains/env.json`）の `key` を 2 つ以上の行が持つ。`key` を持つ行の `key` か `id` が空でない文字列でない。コードの `identity.env_name` の呼び出しの引数が 1 つの文字列リテラルでないか、そのキーを持つ行が無い。呼び出しがあるのに表が無い・JSON として読めない・`rows` が配列でない（呼び出しの行を指す） |
 
 重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）。
 
