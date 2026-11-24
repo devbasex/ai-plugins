@@ -64,7 +64,7 @@ def _refuse(what):
 def no_wait_no_child(monkeypatch):
     """本物の時間の待ちと子のプロセスの起動を、呼ばれたら落ちる偽にする。"""
     # DBOS が使う croniter は、初めて読み込むときに子のプロセス（`file`）を起動する。偽にする前に読み込んでおく
-    import dbos  # noqa: F401
+    durable._load()
 
     monkeypatch.setattr(time, "sleep", _refuse("time.sleep"))
     monkeypatch.setattr(subprocess, "Popen", _refuse("subprocess.Popen"))
