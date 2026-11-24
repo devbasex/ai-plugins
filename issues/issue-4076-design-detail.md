@@ -86,7 +86,7 @@ plugins/ndf/
 | `_write_verified` | `records/mvv.py` | 新設 | `_write_verified(path: Path, data: bytes, sha256: str) -> Path` | `path` が無いか、通常のファイルでないか、所有者のほかに権限を与えているか、中身の SHA-256 が `sha256` と違えば、`data` を同じディレクトリの一時ファイル（0600）へ書いて `os.replace` で置き換える。中身も権限も同じなら書かない（本文は非公開のリポジトリのものを含む） |
 | `approved_form` | `records/mvv_decide.py` | 新設 | `approved_form(decl: Optional[Mapping[str, Any]], body: bytes) -> bytes` | 本文を、元の形・LF・CRLF のうち sha256 が承認の記録と合う形にして返す（どれも合わなければ元のまま）。`preflight.sha256_of` と `current` の両方がこれを通すので、`core.autocrlf`・`eol=crlf` で作業場所と Git の blob の改行だけが違っても判定がそろう |
 | `items_of` | `records/mvv_decide.py` | 新設 | `items_of(body: str, principles: str) -> tuple[str, ...]` | 本文と共通原則から実在する項目の一覧を作る |
-| `_mvv_current` | `records/cli.py` | 新設 | `_mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]` | `ndf records mvv current --base`（`--allow-mismatch` を受ける）の結果 JSON。`git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, <リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ |
+| `_mvv_current` | `records/cli.py` | 新設 | `_mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]` | `ndf records mvv current --base`（`--allow-mismatch` を受ける）の結果 JSON。`git.Git(root).fetch_branch_or_raise(<リモート>, <ブランチ>)` を打ってから `current(root, refs/remotes/<リモート>/<ブランチ>, allow_mismatch=<引数>)` を呼ぶ（同じ名前の手元のブランチを読まないよう、参照の全体を渡す） |
 
 - `current`
   - 事前条件: `ref` は取得済みの参照（`<リモート>/<ブランチ>`）かコミット
@@ -461,4 +461,5 @@ plugins/ndf/
 | `skills/cross-refactoring/SKILL.md` | `$RF_MVV` を `current` の結果の 1 行と写しを読む指示で埋める手順 |
 | `skills/cross-review/SKILL.md`・`skills/fix/SKILL.md` | 基準 5・`mvv_unresolved`・`outputs.mvv` の説明。`fix` の「指摘の基準」の表に基準 5 の写し |
 | `docs/contracts/commands.md` | `ndf records mvv current` の行 |
+| `contracts/schemas/result.schema.json`・`contracts/version.json` | 結果 JSON の `outputs` のキーに `mvv` を足し、コントラクトのバージョンを 1 つ上げる（`outputs` は決めたキーだけを許す） |
 | `docs/glossary/glossary.json` | 語「MVV の写し」「根拠の行の確かめ」「MVV に反する指摘」を追加し、`ndf records glossary render` で `docs/glossary.md` を作り直す |
