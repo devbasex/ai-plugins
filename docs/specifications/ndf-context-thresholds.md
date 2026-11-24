@@ -8,7 +8,7 @@
 | 値 | 上限の設定の行 | 既定 | 振る舞い |
 | --- | --- | --- | --- |
 | 判断開始の値（タイミングを見て再起動） | `context.decide-from` | 250,000 | guard が Tool の実行の後に、超えたことと役ごとの切りどころを利用者の入力ごとに 1 度知らせる。Tool は止めない。conductor は次の切りどころで引継ぎ文書を書いて切る |
-| 運用上限（速やかに再起動） | `context.limit` | 500,000 | guard が引継ぎに要る呼び出しを除くすべての Tool の呼び出しを止め続ける。中継のラッパーは子が静かになったら子を止め、引継ぎを頼む文で起動し直す |
+| 運用上限（速やかに再起動） | `context.limit` | 500,000 | guard が引継ぎに要る呼び出しを除くすべての Tool の呼び出しを止め続ける。中継のラッパーは、子が静かで、バックグラウンドの作業が残っていなければ、子を止めて引継ぎを頼む文で起動し直す |
 
 例（オーガナイザーが計画 p12 の `ndf lanes wait` を背景で張っている会話）:
 
@@ -185,7 +185,7 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 - 手順（役ごとの切りどころ・止められた後の引継ぎ・値を変える口）は `plugins/ndf/skills/development-workflow/references/context-window.md` の「運用上限で hook が止める」が、オーガナイザーの切り替えは `references/parallel.md` の「セッションの切り替え」が正である
 - いま効く 2 つの値と出所は `ndf relay context resolve` で見る
 - ラッパーは起動の時に 1 度だけ値を読むので、動いているラッパーの下で `NDF_CONTEXT_LIMIT` を変えても値は変わらない
-- ラッパーは子が静かなら、背景で supervisor が動く子も止める。この扱いは #4049 が持つ
+- ラッパーは、supervisor などのバックグラウンドの作業が残る子を止めずに待つ。監視（`ndf lanes wait` など）だけが残る子は待たない（[ndf-relay-background-wait.md](ndf-relay-background-wait.md)）
 
 ## テスト観点
 
@@ -200,7 +200,7 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 | 違う呼び出しを続けても止め続ける | `test_guards.py`（`test_context_limit_keeps_denying_different_calls`） |
 | 止める理由の文が手順を含み、文脈の量を含まず、ほかの拒否と同時でも単独で届く | `test_guards.py`（`test_context_limit_reason_*`） |
 | 判断開始の値で入力ごとに 1 度知らせ、記録の読み取りが呼び出しごとに 1 回以内 | `tests/domains/hooks/test_context_notice.py` |
-| ラッパーが 500,000 で 1 度だけ引継ぎを頼み、499,999 では頼まない | `test_relay_decide.py`（`test_context_over_the_limit_asks_for_a_handover_once`・`test_wrapper_settings_hand_the_operating_limit_to_the_handover`・`test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document`） |
+| 作業の残っていない子に、ラッパーが 500,000 で 1 度だけ引継ぎを頼み、499,999 では頼まない | `test_relay_decide.py`（`test_context_over_the_limit_asks_for_a_handover_once`・`test_wrapper_settings_hand_the_operating_limit_to_the_handover`・`test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document`） |
 | サブエージェント・NDF の外・`usage` の無い会話は判定しない。`agent_type` だけなら判定する | `test_guards.py`（`test_context_limit_skips_a_subagent`・`test_context_limit_judges_with_only_the_agent_type`・`test_context_limit_passes_without_usage`・`test_context_limit_skips_conversations_outside_ndf_without_reading`） |
 | `NDF_HOOK_OFF=context-limit` で判定も知らせもしない | `test_guards.py`（`test_hook_off_context_limit_neither_judges_nor_notifies`） |
 | `context-limit` が dispatch の並びの先頭で、締め切りで判定を失わない | `tests/domains/hooks/test_dispatch.py`（`test_context_limit_is_the_first_guard_selected`・`test_context_limit_verdict_survives_the_deadline_inside_run`） |
@@ -213,4 +213,4 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 - [ndf-context-restart-policy.md](ndf-context-restart-policy.md) — 判定の記録・較正・集計（10 系の再起動の方針の記録）
 - [ndf-context-continue-or-cut-measurement.md](ndf-context-continue-or-cut-measurement.md) — 続けるか切るかの計測
 - [#2908](https://github.com/devbasex/ai-plugins/issues/2908) — 切る閾値を実測で見直す調査
-- [#4049](https://github.com/devbasex/ai-plugins/issues/4049) — 背景の作業が残る子をラッパーが止める扱い
+- [ndf-relay-background-wait.md](ndf-relay-background-wait.md) — バックグラウンドの作業が残る子をラッパーが止めずに待つ扱い（[#4049](https://github.com/devbasex/ai-plugins/issues/4049)）
