@@ -463,3 +463,114 @@ def test_i001_round_fill_numbers_against_the_current_seats(wt: Path, tmp_path: P
     assert record["reviewers"] == ["claude-2", "claude"]
     assert record["filled"][-1] == {"seat": "claude-2", "for": "codex", "reason": "failed: 落ちた"}
     assert "round 1に相手役 codex の席を claude の読むだけの起動（claude-2）で埋めた（理由: failed: 落ちた）" in got["warnings"]
+
+
+class _LaunchRun:
+    """`seats.launch_reviewers` が読み書きする値だけを持つ起動（`SeatRun`）。`notes` は `note` の引数の並び。"""
+
+    def __init__(self, root: Path):
+        from types import SimpleNamespace
+
+        self.cfg = SimpleNamespace(worktree=root)
+        self.input_dir: Optional[Path] = None
+        self.root = root
+        self.notes: list[tuple[int, str, str, Optional[str]]] = []
+
+    def round_stem(self, round_no: int, suffix: str) -> Path:
+        return self.root / f"round{round_no}{suffix}"
+
+    def note(self, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
+        self.notes.append((round_no, who, result, warning))
+
+
+def _seat_launcher(
+    outcomes: dict[str, tuple[str, str, str, str]],
+) -> Callable[[agents.Launch], agents.AgentStatus]:
+    """席の出力の名前（`round<n>-<席>`）ごとに (状態, 詳細, 標準出力, 標準エラー) を書いて返す偽の起動。空の文字列は書かない。"""
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        seat = next(n for n in outcomes if spec.paths.out.name.removesuffix(".out").split("-", 1)[1] in (n, f"{n}-retry"))
+        state, detail, out, err = outcomes[seat]
+        if out:
+            spec.paths.out.write_text(out, encoding="utf-8")
+        if err:
+            spec.paths.err.write_text(err, encoding="utf-8")
+        return agents.AgentStatus(spec.agent, state, 0, detail, ())
+
+    return launch
+
+
+def _claude_out(findings: list, denied: Optional[Path] = None) -> str:
+    body: dict = {"result": json.dumps({"findings": findings})}
+    if denied is not None:
+        body["permission_denials"] = [{"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": str(denied)}}]
+    return json.dumps(body)
+
+
+@pytest.mark.parametrize("suffix", ["", "-retry"])
+def test_i004_launch_reviewers_kind_and_cause_per_branch(tmp_path: Path, suffix: str) -> None:
+    """I-004 の前の固定: 結果の無い席の過程の種類（kind）と理由（cause）を決める 3 分岐。
+    (1) 標準エラーにサンドボックスの失敗があれば、完了して指摘があっても kind は `sandbox`・cause はその行。
+    (2) claude の席が渡した差分のファイルの読み取りを拒否されたら、kind は `permission_denials: <絶対パス>`・cause は
+    `permission_denials: <ファイル名>`。(3) それ以外は kind が状態・cause が `<状態>: <詳細>`。サンドボックスは拒否より先に見る。
+    指摘を返した席は結果の無い席に入らず、指摘に席の名前が付く。"""
+    diff = tmp_path / "in" / "round1.diff"
+    other = tmp_path / "in" / "round1-full.diff"
+    sandbox_line = f"{agents.SANDBOX_FAILED} No permissions to create a new namespace"
+    done, failed = str(agents.AgentState.DONE), str(agents.AgentState.FAILED)
+    outcomes = {
+        "codex": (done, "", '{"findings": [{"title": "x"}]}', f"前置き\n{sandbox_line}\n後ろ"),
+        "claude": (done, "", _claude_out([], diff), ""),
+        "claude-2": (done, "", _claude_out([], diff), f"{sandbox_line}\n"),
+        "kiro": (failed, "落ちた", "", ""),
+        "claude-3": (done, "", _claude_out([{"title": "y"}]), ""),
+    }
+    run = _LaunchRun(tmp_path)
+    prompts = dict.fromkeys(outcomes, "見て")
+    raised, unread = seats.launch_reviewers(run, 1, prompts, [diff, other], _seat_launcher(outcomes), suffix)
+    again = "（起動し直した）" if suffix else ""
+    want = {
+        "codex": ("sandbox", sandbox_line),
+        "claude": (f"{seats.DENIED_READ}: {diff}", f"{seats.DENIED_READ}: round1.diff"),
+        "claude-2": ("sandbox", sandbox_line),
+        "kiro": ("failed", "failed: 落ちた"),
+    }
+    assert raised == [{"title": "y", "by": "claude-3"}]
+    assert run.notes == [
+        *(
+            (1, seat, f"回答無し{again}（{kind}）", f"round 1 の相手役 {seat} が差分を読めなかった{again}（{cause}）")
+            for seat, (kind, cause) in want.items()
+        ),
+        (1, "claude-3", f"指摘 1 件{again}", None),
+    ]
+    assert list(unread) == list(want)
+    for seat, (_, cause) in want.items():
+        err = tmp_path / f"round1-{seat}{suffix}.err.log"
+        hint, local = seats._unread_hint(seat, cause, err)
+        assert unread[seat] == seats.Unread(hint, cause, local)
+    assert f"- claude: {seats.DENIED_READ}: round1.diff。{seats.DENIED_FIX}" in unread["claude"].hint
+    assert unread["codex"].hint.startswith(f"- codex: {sandbox_line}。サンドボックスが名前空間を作れない")
+    assert unread["kiro"].hint.startswith("- kiro: failed: 落ちた。ログインを `")
+    assert unread["kiro"].hint.endswith(f"（標準エラー: round1-kiro{suffix}.err.log）")
+    assert unread["kiro"].local.endswith(f"（標準エラー: {tmp_path / f'round1-kiro{suffix}.err.log'}）")
+
+
+def test_i004_launch_reviewers_denied_lists_every_denied_diff(tmp_path: Path) -> None:
+    """I-004 の前の固定: 拒否された差分のファイルが 2 つなら、`required` の順に cause は名前を、kind は絶対パスを ` / ` でつなぐ。
+    指摘が無い完了でない席（出力無し）は状態と詳細を cause にする。"""
+    first, second = tmp_path / "in" / "a.diff", tmp_path / "in" / "b.diff"
+    body = {
+        "result": json.dumps({"findings": []}),
+        "permission_denials": [
+            {"tool_name": "Read", "tool_use_id": "t2", "tool_input": {"file_path": str(second)}},
+            {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": str(first)}},
+        ],
+    }
+    done, stalled = str(agents.AgentState.DONE), str(agents.AgentState.STALLED)
+    outcomes = {"claude": (done, "", json.dumps(body), ""), "codex": (stalled, "止まった", "", "")}
+    run = _LaunchRun(tmp_path)
+    raised, unread = seats.launch_reviewers(run, 2, dict.fromkeys(outcomes, "見て"), [first, second], _seat_launcher(outcomes))
+    assert raised == []
+    assert [n[2] for n in run.notes] == [f"回答無し（{seats.DENIED_READ}: {first} / {second}）", "回答無し（stalled）"]
+    assert unread["claude"].cause == f"{seats.DENIED_READ}: a.diff / b.diff"
+    assert unread["codex"].cause == "stalled: 止まった"
