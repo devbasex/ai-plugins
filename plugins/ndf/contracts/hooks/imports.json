@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "hook のエントリポイントが import してよいモジュールの表（#3345 の決定 89・IH2）。entry は環境の python のエントリポイント（ndf.domains.hooks.main）とそこから import でたどれるもの（guard の表の module を含む）が収まる先で、標準ライブラリのほかは dependencies の依存と ndf の中の modules（末尾の .* は下のすべて）だけを許す。forbidden は閉包に入ってはならないもの（依存を入れ直す処理・通信のアダプター・耐久の殻）。stdlib_only のエントリポイントからの閉包は標準ライブラリと stdlib_only の中のモジュールだけ。boot.python は環境が無いときのエントリポイントが動くシステムの python3 の下限",
+  "summary": "hook のエントリポイントが import してよいモジュールの表（#3345 の決定 89・IH2）。entry は環境の python のエントリポイント（ndf.domains.hooks.main）とそこから import でたどれるもの（guard の表の module を含む）が収まる先で、標準ライブラリのほかは dependencies の依存と ndf の中の modules（末尾の .* は下のすべて）だけを許す。forbidden は閉包に入ってはならないもの（依存を入れ直す処理・通信のアダプター・耐久の殻）。stdlib_only のエントリポイントからの閉包は標準ライブラリと stdlib_only の中のモジュールだけ。環境が無いときのエントリポイントが動くシステムの python3 の下限は配る構成の設定（data/toolchain.json の python.hook_floor）が持つ",
   "entry": {
     "roots": ["ndf.domains.hooks.main"],
     "dependencies": ["tree_sitter", "tree_sitter_bash", "markdown_it", "mdit_py_plugins", "pygments"],
@@ -25,6 +25,5 @@
     "ndf.testing.weight"
   ],
   "stdlib_roots": ["ndf.domains.hooks.strict", "ndf.domains.hooks.env", "ndf.domains.hooks.boot"],
-  "scripts": ["hooks/boot.py", "hooks/prepare.py"],
-  "boot": {"python": [3, 9]}
+  "scripts": ["hooks/boot.py", "hooks/prepare.py"]
 }

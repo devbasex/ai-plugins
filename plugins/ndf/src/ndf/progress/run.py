@@ -350,7 +350,7 @@ def _failed_report(v: View, m: Move) -> dict[str, Any]:
     p = payload_of(m.event) if m.event is not None else {}
     cause = p["cause"] if isinstance(p.get("cause"), dict) else {}
     kind = causes.kind_of(cause)
-    kind = kind if kind is not None and kind in causes.table() else "unknown"
+    kind = kind if kind is not None and causes.has(kind) else "unknown"
     detail = cause["detail"] if isinstance(cause.get("detail"), str) and cause["detail"] else f"工程 {m.stage.name} が失敗した"
     summary = f"工程 {m.stage.name} が失敗した: {detail}"
     return result.stopped(TOOL, kind, detail, summary=summary, metrics=_metrics(v, m), routes=failed_routes(v.machine_id, m.stage.name))

@@ -1,0 +1,7 @@
+{
+  "meaning": "呼んだ作業が結果 JSON を返さなかった・形が違った",
+  "std_type": "validation",
+  "exit": "unreadable",
+  "route": "conductor",
+  "retry": null
+}

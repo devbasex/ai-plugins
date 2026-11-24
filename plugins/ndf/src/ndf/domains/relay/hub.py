@@ -56,7 +56,7 @@ UNKNOWN_KIND = "知らないリクエスト"
 
 
 class Outcome(NamedTuple):
-    """リクエスト 1 本の結果。`cause` は断った・失敗した理由の種類（`contracts/causes.json`）。"""
+    """リクエスト 1 本の結果。`cause` は断った・失敗した理由の種類（`contracts/causes/`）。"""
 
     ok: bool
     summary: str

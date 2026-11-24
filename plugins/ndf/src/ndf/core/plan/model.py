@@ -152,10 +152,10 @@ def _target_errors(step: Step, ids: set[str]) -> list[str]:
     ]
 
 
-def _kind_errors(step: Step, table: Mapping[str, Any]) -> list[str]:
+def _kind_errors(step: Step) -> list[str]:
     """停止理由の種類の誤り（IS3）。"""
     kinds = [*step.on_cause, *step.retry, *step.exit_cause.values()]
-    return [f"ステップ {step.id} が知らない停止理由の種類を持つ: {k}" for k in kinds if k not in table]
+    return [f"ステップ {step.id} が知らない停止理由の種類を持つ: {k}" for k in kinds if not causes.has(k)]
 
 
 def _answer_errors(step: Step, answers: set[str]) -> list[str]:
@@ -167,11 +167,10 @@ def errors(plan: Plan) -> list[str]:
     """プランの形の誤り。空なら流せる。"""
     ids = [s.id for s in plan.steps]
     errs = [f"ステップの id が重なる: {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
-    table = causes.table()
     answers = set(facts.ids(result.ANSWERS))
     for step in plan.steps:
         errs += _target_errors(step, set(ids))
-        errs += _kind_errors(step, table)
+        errs += _kind_errors(step)
         errs += _answer_errors(step, answers)
         if step.location not in LOCATIONS:
             errs.append(f"ステップ {step.id} の in は {' か '.join(LOCATIONS)}: {step.location}")

@@ -1,0 +1,4 @@
+{
+  "summary": "merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout",
+  "factor": 1.5
+}

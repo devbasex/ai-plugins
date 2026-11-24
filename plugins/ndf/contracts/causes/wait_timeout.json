@@ -1,0 +1,7 @@
+{
+  "meaning": "待ちの上限に達しただけで、待つ相手は動いている。conductor は結果の next の同じ待ちを打つ",
+  "std_type": "timeout",
+  "exit": "precondition",
+  "route": "conductor",
+  "retry": null
+}

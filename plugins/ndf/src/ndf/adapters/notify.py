@@ -5,7 +5,7 @@
 - `drain` は送信待ち（`outbox_dir`）の通知を送る送り手で、排他で 1 つだけ動き、通りうる失敗を打ち直す。
   サブコマンド `notify send` がこれを呼ぶ
 
-上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits/`）から引いて渡す。テストは `transport` に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 
 送信待ちの 1 件は、通知 1 件を 1 ファイル（`<時刻>-<任意>.json`）として一時の名前で書いてから名前を変えたもので、

@@ -1,0 +1,4 @@
+{
+  "summary": "判定役（judge）の呼び出しの上限。ステップの timeout で上書きする",
+  "seconds": 600
+}

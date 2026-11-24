@@ -44,7 +44,7 @@ The authenticated GitHub workflow passes only `ANTHROPIC_API_KEY` and `OPENAI_AP
 
 `scripts/runtime-smoke-test.sh` は一覧の各行を `--build-arg` で像の作成へ渡し、`--cli-versions <パス>` で別の一覧を受ける。像の作成は、取得・`--version` の出力から取り出した版数と一覧の版数の完全一致のどれかが落ちたら失敗する。
 
-配布の経路のスモーク（`runtime-plugin-smoke.yml` の `runtime-smoke (<ランタイム>)`）と認証つきのスモークは、一覧の版だけを入れる。その時点の最新の版は、別の workflow `runtime-plugin-smoke-latest.yml` が毎日 06:00 JST に develop の上で試す（Actions の画面から手でも起動できる。PR と push では走らず、必須のチェックに入らない）。落ちたら、題が `最新の版のスモークが落ちた: <ランタイム>` の課題をランタイムごとに 1 件作り、開いていればコメントを足す。課題には入れた版と実行の URL が載る。
+配布の経路のスモーク（`runtime-plugin-smoke.yml` の `runtime-smoke (<ランタイム>)`）と認証つきのスモークは、一覧のバージョンだけを入れる。その時点の最新のバージョンは、別の workflow `runtime-plugin-smoke-latest.yml` が毎日 06:00 JST に main の上で試す（Actions の画面から手でも起動できる。PR と push では走らず、必須のチェックに入らない）。落ちたら、題が `最新の版のスモークが落ちた: <ランタイム>` の課題をランタイムごとに 1 件作り、開いていればコメントを足す。課題には入れたバージョンと実行の URL が載る。
 
 ### 版を上げる
 

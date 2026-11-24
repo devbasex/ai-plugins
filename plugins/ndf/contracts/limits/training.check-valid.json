@@ -1,0 +1,4 @@
+{
+  "summary": "学習に使わない設定の確認（ndf training check）のバックアップの期限。LLM と外部 CLI の起動の口は期限内のバックアップだけを読む",
+  "seconds": 86400
+}

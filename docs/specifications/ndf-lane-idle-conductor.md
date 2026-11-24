@@ -43,7 +43,7 @@
 - Stop の hook（`relay-marker` guard）が書く活動の記録（`activity.json`）
 - `ndf relay ls --activity` が行に載せる活動（`turn_done`・`moved`・`background`）と、ラッパーが `wrapper.json` に書く会話の記録の場所
 - `lane_stalled` のリクエストに載る最後に動いた時刻とバックグラウンドの作業の数
-- 閾値の設定（`plugins/ndf/contracts/limits.json` の `parallel-run.idle`）
+- 閾値の設定（`plugins/ndf/contracts/limits/` の `parallel-run.idle`）
 
 含まない:
 
@@ -66,7 +66,7 @@
 | `plugins/ndf/src/ndf/progress/lane/liveness.py` | 判定。`Activity`・`idle_after`・`IDLE_CONDUCTOR`・`STALL_KINDS`・`Probes.activity`・`judge`・`judge_lanes`・`Liveness` の `moved_at`・`background` |
 | `plugins/ndf/src/ndf/progress/plan/run.py` | `lane_activity`（一覧の行の値を `Activity` へコピーする）・`probes`（活動つきの一覧に結ぶ）・`_judge`・`_moved` |
 | `plugins/ndf/src/ndf/progress/plan/run_decide.py` | `Stall`・`_stall_report`。最後に動いた時刻を ISO 8601 へ直し、バックグラウンドの作業の数をリクエストの中身に載せる |
-| `plugins/ndf/contracts/limits.json` | 閾値 `parallel-run.idle`（600 秒）の唯一の保存先 |
+| `plugins/ndf/contracts/limits/` | 閾値 `parallel-run.idle`（600 秒）の唯一の保存先 |
 
 活動を観測する処理は `ndf.domains.relay` に置き、`ndf relay ls --activity` の行を通して `ndf.progress` へ渡す。層の規則（`plugins/ndf/src/ndf/checks/rules.json` の `layers`）では `progress` から `domains` を読めず、子の表（`checks/children.json`）でも `ndf.progress.plan` の先に `ndf.domains.relay` は無い。`progress` は以前からラッパーの一覧を `ndf relay ls` の出力で読んでいるので、同じ経路に載せた。
 
@@ -78,7 +78,7 @@
 | 承認ゲートや質問の回答を待つ行と、回答が載った後に `next` を待つ行は、閾値を過ぎても止まりにならない | 新しい条件は判定の 6 番目にあり、2 番目（`resuming`）・3 番目（`waiting_answer`）が先に当たる。テストが落とす |
 | バックグラウンドの作業が 1 件以上の行は、閾値を過ぎても `alive` である | テストが落とす |
 | 活動を読めない行（会話の記録が無い・活動の記録が今の応答のものと確かめられない・シェルの生死を確かめられない）は、今までどおり `alive` である。止まりと知らせる側へ倒さない | テストが落とす |
-| 閾値の秒は `contracts/limits.json` だけが持ち、判定のコードは方針の名前（`parallel-run.idle`）だけを持つ | テストが落とす |
+| 閾値の秒は `contracts/limits/` だけが持ち、判定のコードは方針の名前（`parallel-run.idle`）だけを持つ | テストが落とす |
 | 判定は DB もプロセスもファイルも読まない純粋な関数で、時刻を引数（`now`）で受け取る | テストが落とす。時間で区切った試験は行わず、閾値の境目は時刻を与えるテストで確かめる |
 | 活動の記録を書けなくても conductor の応答は止まらない | `write_activity` は例外を外へ出さずに偽を返し、hook はそれまでの判定を続ける |
 | 活動を読むのは `ndf relay ls --activity` のときだけである。起動の許可（`machine.admitted`）など稼働の本数しか使わない一覧は活動を読まない | テストが落とす |
@@ -126,7 +126,7 @@
 
 | 読むもの | 1 周あたりの量 |
 | --- | --- |
-| conductor の会話の記録 | レーンごとに末尾 262,144 バイト（`limits.json` の `hook.transcript-tail` の `count`）。記録が伸びても読む量は増えない |
+| conductor の会話の記録 | レーンごとに末尾 262,144 バイト（`contracts/limits/` の `hook.transcript-tail` の `count`）。記録が伸びても読む量は増えない |
 | 活動の記録 | レーンごとに 1 ファイル |
 | サブエージェントの会話の記録 | 一覧の `subagent` の要素ごとに末尾を 1 回 |
 | `/proc/<pid>/stat` | シェルの生死を確かめる行まで進んだ周で 1 度だけ全体を組み、全行で共有する（レーンの数を掛けない） |
@@ -159,7 +159,7 @@ Stop の hook が書き、`ndf relay ls --activity` が読む。
 
 `transcript` に、子の会話の記録の絶対パスを書く。ラッパーが子に渡した環境変数（従量接続・登録済みキーでは共有の `CLAUDE_CONFIG_DIR` に切り替わる）で組み、相対のパスは子の作業ディレクトリを基準に絶対化する。**一覧を読む側は、自分の環境変数や `session_id`・作業ディレクトリからパスを組み直さない。** 耐久ワークフローと起動先の設定ディレクトリが違うレーンでも、起動先の記録を読むためである。
 
-### 閾値（`plugins/ndf/contracts/limits.json`）
+### 閾値（`plugins/ndf/contracts/limits/`）
 
 | 名前 | 値 | 説明 |
 | --- | --- | --- |
@@ -207,7 +207,7 @@ Stop の hook が書き、`ndf relay ls --activity` が読む。
 | サブエージェントの会話の記録を読めない・`id` がファイル名に使えない形 | その要素を走っているとみなす。判定は `alive` |
 | `/proc` が無い・行に `pid` が無い・`claude` が見つからない・`cmdline` を読めない | `background` が `null` で判定は `alive`。一覧が空でも 0 と数えない（一覧に載っていないシェルが走っていることがある） |
 | `shells-ended.json` を書けない | その周は読む時刻を使う（止まりにならない）。次の周が書き直す |
-| 閾値を読めない（`limits.json` が壊れている） | `ContractError` で、呼び手のサブコマンドが原因 `config_broken` で止まる |
+| 閾値を読めない（`contracts/limits/` が壊れている） | `ContractError` で、呼び手のサブコマンドが原因 `config_broken` で止まる |
 | 活動の記録のパスを組めない（ラッパーの名前の形が違う） | 今までどおり `RegistryError`。この変更で増やさない |
 
 ## セキュリティ
@@ -220,7 +220,7 @@ Stop の hook が書き、`ndf relay ls --activity` が読む。
 
 ## 運用
 
-**閾値を変える手段は `plugins/ndf/contracts/limits.json` の `parallel-run.idle` の 1 行である。** 引数でも環境変数でもリポジトリの設定でも受けない。
+**閾値を変える手段は `plugins/ndf/contracts/limits/` の `parallel-run.idle` の 1 つの方針である。** 引数でも環境変数でもリポジトリの設定でも受けない。
 
 **この判定が増えたことで、これまで `alive` と出ていた行の一部が止まりになる。** conductor が `AskUserQuestion` を使わずに本文で問いかけて応答を終えた行は、バックグラウンドの作業が 0 件なら閾値を過ぎて `idle_conductor` になる。人の答えを待って止まっていることに変わりはないので、知らせとして正しい。`AskUserQuestion` の質問とスプリントの承認ゲートを待つ行は、今までどおり止まりにならない。
 
@@ -244,7 +244,7 @@ Stop の hook が書き、`ndf relay ls --activity` が読む。
 | 承認ゲートを待つ行と、回答が載った後に `next` を待つ行は、閾値を過ぎても止まりにならない | 新しい条件を 2 番目・3 番目より前に置くと落ちる |
 | 活動を渡さない呼び手では、ほかの 8 つの判定が変わらない | 既定の判定を変えると落ちる |
 | `idle_conductor` の `lane_stalled` のリクエストに、ISO 8601 へ直した最後に動いた時刻とバックグラウンドの作業の数 0 が載る | バックグラウンドの作業の数を載せずに書くと落ちる。UNIX 時刻をそのまま載せても落ちる |
-| 閾値は `contracts/limits.json` の `parallel-run.idle` から来る | 判定のコードに秒を書くと落ちる |
+| 閾値は `contracts/limits/` の `parallel-run.idle` から来る | 判定のコードに秒を書くと落ちる |
 | 会話の記録を読めない行・活動の記録が今の応答のものと確かめられない行は `alive` | 読めないときに止まりとすると落ちる |
 | Stop の hook が、入力のバックグラウンドの作業の一覧の `id`・`type` と `session_id`・応答の `uuid` を書く。明示の空のリストと観測できなかった値を書き分ける | 正規化の後の値を書くと落ちる |
 | Stop の hook は早い戻りより前に書き、書けなくても今までの判定を返す | 書き込みの失敗で例外を上げると落ちる |

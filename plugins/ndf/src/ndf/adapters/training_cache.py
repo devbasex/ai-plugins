@@ -2,7 +2,7 @@
 
 バックアップは状態の保存先の `training.json` に、`ndf training check`（`training.py`）が時刻つきで書く。LLM と外部 CLI の
 起動の口（`launch_slot.gate`）は `refusal` でバックアップを読むだけで、学習に使う・バックアップが無い・期限切れ
-（`contracts/limits.json` の `training.check-valid`）・読めないなら起動を断り、理由に確認のサブコマンドを載せる。
+（`contracts/limits/training.check-valid.json`）・読めないなら起動を断り、理由に確認のサブコマンドを載せる。
 
 バックアップは確かめたときの認証の文脈（設定の保存先・アカウントの識別子・確かめに使う認証情報・認証の環境変数）の
 ハッシュ（`context`）を持ち、起動先の環境から求めた文脈と違えば（アカウントや保存先を切り替えた後・トークンを更新した後）
@@ -42,7 +42,7 @@ UNSUPPORTED = "unsupported"
 # バックアップを読んで起動を断ったときの記録の値
 REFUSED = "refused"
 CACHE_FILE = "training.json"
-# バックアップの期限の方針（contracts/limits.json）
+# バックアップの期限の方針（contracts/limits/training.check-valid.json）
 VALID_POLICY = "training.check-valid"
 # 確かめる口のある担当（表 runtimes の training_check。読み手は `training.reader`。ほかの担当は確かめず起動を通す）
 CHECKED_RUNTIMES = frozenset(facts.ids("runtimes", training_check=True))
@@ -64,7 +64,7 @@ CLAUDE_CREDENTIALS = ".credentials.json"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 # codex のログインの置き換えになる変数
 CODEX_FOREIGN_AUTH = ("OPENAI_API_KEY", "CODEX_API_KEY")
-# バックアップを書く排他の待ちの上限の方針（contracts/limits.json。#3907 の決定 11）
+# バックアップを書く排他の待ちの上限の方針（contracts/limits/training.save-lock.json。#3907 の決定 11）
 SAVE_LOCK_POLICY = "training.save-lock"
 
 

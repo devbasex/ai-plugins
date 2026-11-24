@@ -1,0 +1,7 @@
+{
+  "meaning": "依存の欠け",
+  "std_type": "configuration",
+  "exit": "deps_missing",
+  "route": "human",
+  "retry": null
+}

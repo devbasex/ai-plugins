@@ -1,0 +1,7 @@
+{
+  "meaning": "PostgreSQL の URL でステートマシンの DB の戻しを求めた。バックアップと戻しは DB の運用で行う",
+  "std_type": "configuration",
+  "exit": "precondition",
+  "route": "human",
+  "retry": null
+}

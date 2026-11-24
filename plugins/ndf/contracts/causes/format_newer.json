@@ -1,0 +1,7 @@
+{
+  "meaning": "保存先・ステートマシンの表・耐久の記録の形のバージョンが自分より新しい。何も書いていない。新しい NDF で打ち直す",
+  "std_type": "configuration",
+  "exit": "unreadable",
+  "route": "human",
+  "retry": null
+}

@@ -44,7 +44,7 @@ PULL_FIELDS = (
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
-# 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
+# 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
 PER_PAGE = 100
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
@@ -466,7 +466,7 @@ def _translated(exc: RequestFailed | RequestError | write_gate.Busy, label: str,
 
 
 def _page_cap(name: str) -> int:
-    """一覧を読むページ数の上限（limits.json の `name` の `count`）。"""
+    """一覧を読むページ数の上限（`contracts/limits/<name>.json` の `count`）。"""
     return int(limits.value(name, "count"))
 
 
@@ -480,7 +480,7 @@ class _Counted(NamedTuple):
 
     rows: str  # 行の配列のキー
     total: str  # 総件数のキー
-    cap: str  # ページ数の上限の名前（limits.json）
+    cap: str  # ページ数の上限の名前（contracts/limits/<名前>.json）
     what: str  # 上限を超えたときの文の主語と助詞
 
 

@@ -1,7 +1,7 @@
-# 上限の宣言と再試行の方針: 上限を 1 つの宣言から引き、同じ原因の打ち直しを決まった回数で止める
+# 上限の設定と再試行の方針: 上限を 1 つの設定から引き、同じ原因の打ち直しを決まった回数で止める
 
 NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含み、テストと実験版を除く）は、上限の秒・再試行の回数・待ちの間隔を
-コードに数字で書かず、**上限の宣言** [`plugins/ndf/contracts/limits.json`](../../plugins/ndf/contracts/limits.json) から
+コードに数字で書かず、**上限の設定** [`plugins/ndf/contracts/limits/`](../../plugins/ndf/contracts/limits/) から
 **方針の名前**で引く。再試行と待ちは待ちの部品 [`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py) だけが持ち、
 同じ原因の失敗を方針の回数で止め、待ちは期限の時刻に最後の照会を打ってから止まる。止まったときは、方針の名前・原因・回数・
 待った秒を含む理由の文が結果に出る。
@@ -15,13 +15,13 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | 3 | 2 回目の失敗。run の番号は違うが、数字を伏せた鍵は同じなので回数が 2 になる |
 | 4 | 判定役がまた同じステップを返す。回数が 2 に達したので、ステップを流さずにプランが「止まった」になる。理由は「ステップ release が同じ原因（exit=1: PR #<数> の CI が失敗: runtime-smoke (agy)（run <数>…）で 2 回失敗した（方針 supervise.step-rerun）。打ち直さずに止める」で、進捗の記録へ `kind: same-cause` の 1 行が書かれる |
 
-**方針と値の一覧は写さない。** 一覧の正本は宣言そのものと、契約の検査が描く逆引きの表である。
+**方針と値の一覧はコピーしない。** 一覧の正本は設定そのものと、契約の検査が描く逆引きの表である。
 
 | 何を | 正本 |
 | --- | --- |
-| 方針の名前と値 | [`plugins/ndf/contracts/limits.json`](../../plugins/ndf/contracts/limits.json) |
-| 方針ごとの値・何の上限か・引く関数の表（生成物） | [`plugins/ndf/contracts/index.md`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/index.md) の「上限の宣言」 |
-| 宣言の読み手と監視の工程 × 担当の引き方 | [`lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/limits.py) の冒頭の説明 |
+| 方針の名前と値 | [`plugins/ndf/contracts/limits/`](../../plugins/ndf/contracts/limits/) |
+| 方針ごとの値・何の上限か・引く関数の表（生成物） | [`plugins/ndf/contracts/index.md`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/contracts/index.md) の「上限の設定」 |
+| 設定の読み手と監視の工程 × 担当の引き方 | [`lib/limits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/limits.py) の冒頭の説明 |
 | 再試行と待ちの止まり方 | [`lib/waits.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/waits.py) の冒頭の説明 |
 | 開発ループの各上限の値の意味（監視の上限・無進捗の許容・時間予算など） | [ndf-development-loop-limits.md](ndf-development-loop-limits.md) |
 
@@ -31,14 +31,14 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| NDF の開発ワークフロー（`ndf-workflow`） | 上限の宣言・方針の名前・原因の鍵・再試行・ステップの打ち直し・眠りのループ・最後の照会 |
+| NDF の開発ワークフロー（`ndf-workflow`） | 上限の設定・方針の名前・原因の鍵・再試行・ステップの打ち直し・眠りのループ・最後の照会 |
 
-1 つのコンテキストに収まる。上限の宣言は契約の一覧（`plugins/ndf/contracts/`）の一部で、プランの実行・収束ループ・リリースなどの
+1 つのコンテキストに収まる。上限の設定は契約の一覧（`plugins/ndf/contracts/`）の一部で、プランの実行・収束ループ・リリースなどの
 各部品は方針の名前で値を引く。
 
 ## 用語
 
-この文書の用語（上限の宣言・方針の名前・原因の鍵・ステップの打ち直し・眠りのループ・最後の照会）の定義は
+この文書の用語（上限の設定・方針の名前・原因の鍵・ステップの打ち直し・眠りのループ・最後の照会）の定義は
 [用語集](../glossary.md) にある。
 
 ## 背景
@@ -56,23 +56,23 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 | `plugins/ndf/` の Python のコード（hook を含む）の上限の既定値 | テストと実験版（`plugins/ndf/scripts/experimental/`） |
 | 呼び出しの再試行・条件が揃うまでの待ち・判定役が返すステップの打ち直し | GitHub の利用上限の回復の時刻までの待ち（`gh_quota` と `Engine.gh_limit_wait` が持つ） |
 | 上限の数字のリテラル・眠りのループ・`tenacity` の import の構造チェック | シェルのスクリプトの数字（`statusline.sh` など。「決定と理由」の 8） |
-| | 上限の値の上書きの経路。今ある環境変数と引数（`MONITOR_TIMEOUT` など）をそのまま受け、宣言は既定値だけを持つ |
+| | 上限の値の上書きの経路。今ある環境変数と引数（`MONITOR_TIMEOUT` など）をそのまま受け、設定は既定値だけを持つ |
 
 ## 決定と理由
 
 | # | 決定 | 理由 |
 | --- | --- | --- |
-| 1 | 宣言は方針の名前 → 値の平らな表にする。監視の工程 × 担当の表も `monitor.phase.<工程>`・`monitor.stall.<担当>` の名前で同じ表に置き、読み手が接頭辞で数え上げる。1 つの部品が組で使う値（間隔・1 回の待ち・合計）は 1 つの方針にまとめる | 入れ子を持つのは監視の表だけで、ほかの上限に使われない形を読み手に持たせないため |
-| 2 | 読み手は標準ライブラリの `json` だけで 1 プロセスに 1 回読む。置き場はプラグインからの相対に固定し、上書きの環境変数を持たない | hook は `deps.require()` を呼べず pydantic を使えない。宣言の読み込みの費用は起動の中央値で 1 ms 未満（2026-11-04 の実測） |
-| 3 | 宣言が無い・壊れている・方針や値が無いときは、組み込みの値へ戻らず `LimitsError` で止める | 戻ると、宣言を直したつもりの値が使われないことが結果に出ない。宣言はリリース対象の一部で、壊れるのはリリース対象の不具合であり、CI の契約の検査が先に落とす |
+| 1 | 設定は方針の名前 → 値の平らな表にする。監視の工程 × 担当の表も `monitor.phase.<工程>`・`monitor.stall.<担当>` の名前で同じ表に置き、読み手が接頭辞で数え上げる。1 つの部品が組で使う値（間隔・1 回の待ち・合計）は 1 つの方針にまとめる | 入れ子を持つのは監視の表だけで、ほかの上限に使われない形を読み手に持たせないため |
+| 2 | 読み手は標準ライブラリの `json` だけで 1 プロセスに 1 回読む。読む先はプラグインからの相対に固定し、上書きの環境変数を持たない | hook は `deps.require()` を呼べず pydantic を使えない。設定の読み込みの費用は起動の中央値で 1 ms 未満（2026-11-04 の実測） |
+| 3 | 設定が無い・壊れている・方針や値が無いときは、組み込みの値へ戻らず `LimitsError` で止める | 戻ると、設定を直したつもりの値が使われないことが結果に出ない。設定はリリース対象の一部で、壊れるのはリリース対象の不具合であり、CI の契約の検査が先に落とす |
 | 4 | `limit-literal` は構文木で判定し、名前の規則とキーワードの表で当てる。0 は落とさない | 数字のリテラルをすべて落とすと、行数・終了コードなど上限でない数字が数百か所当たる。0 は「待たない・打ち直さない」で上限の値でない |
 | 5 | 再試行と待ちを見分けず、`lib/waits.py` の外の眠りのループをすべて落とす。待ちのループは例外リストに理由つきで載せる | 構文から「打ち直し」と「問い合わせ」を見分ける規則は呼ぶ関数の意味に頼るため外れる。名前（`retry` を含む関数）でも見分けられない |
 | 6 | 原因の鍵は種類と伏せた理由の文から作り、鍵ごとに数える。続いたかどうかは見ない | run の番号や時刻が違うだけの失敗を別の原因と数えないため。続けて起きた回数だけを数えると、交互に起きる 2 つの原因で上限に届かない |
 | 7 | ステップの打ち直しの同じ原因の上限は 2。呼び出しの再試行の `same_cause` は、方針ごとに今の間隔と合計から届く打つ回数と同じ値にする | 新しく止める所（ステップの打ち直し）だけ振る舞いを変える。再試行は一時的な失敗（上限・lock・502）を待つためのもので、同じ原因が続くのが通常である。全方針に共通の既定を読み手に持たせると、読み手に上限の数字が残る |
 | 8 | ステップの打ち直しは、判定役の入力を変えずに、判定の後にプランの実行が数えて止める | 判定は言語モデルの答えで同じ入力でも揃わず、止まるかを答えに任せるとテストで縛れない |
-| 9 | 待ちと再試行は次の眠りを残りの秒に縮め、期限の時刻に最後の 1 回を打つ。同じ規則を `retry_call` と `wait_until` の両方に当てる | 宣言した上限を使い切ってから止めるため。2 つの関数で規則が分かれると、同じ方針でも打つ回数が関数で変わる |
-| 10 | シェルのスクリプトの数字は検査に入れない | `statusline.sh` は表示のたびに動き、宣言を読むと Python の起動（21 ms）が毎回足される |
-| 11 | 方針の名前と宣言の対応の検査と、方針ごとに引く関数の表は契約の検査に置く | 構造チェックはコードの形を見る検査で、契約の一覧の逆引きの表を描く役割を持たない |
+| 9 | 待ちと再試行は次の眠りを残りの秒に縮め、期限の時刻に最後の 1 回を打つ。同じ規則を `retry_call` と `wait_until` の両方に当てる | 設定した上限を使い切ってから止めるため。2 つの関数で規則が分かれると、同じ方針でも打つ回数が関数で変わる |
+| 10 | シェルのスクリプトの数字は検査に入れない | `statusline.sh` は表示のたびに動き、設定を読むと Python の起動（21 ms）が毎回足される |
+| 11 | 方針の名前と設定の対応の検査と、方針ごとに引く関数の表は契約の検査に置く | 構造チェックはコードの形を見る検査で、契約の一覧の逆引きの表を描く役割を持たない |
 
 ## 仕様
 
@@ -80,7 +80,7 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 上限の宣言 | 宣言を変える Pull Request（実行時には誰も書かない。`lib/limits.py` は読むだけ） | `plugins/ndf/contracts/limits.json` | 方針（方針の名前で引く行） | 上限の秒・間隔・倍率・間隔の上限・1 回の呼び出しの待ち・打つ回数・同じ原因の上限 |
+| 上限の設定 | 設定を変える Pull Request（実行時には誰も書かない。`lib/limits.py` は読むだけ） | `plugins/ndf/contracts/limits/` | 方針（方針の名前で引くファイル） | 上限の秒・間隔・倍率・間隔の上限・1 回の呼び出しの待ち・打つ回数・同じ原因の上限 |
 | 1 回の再試行 | 待ちの部品（`lib/waits.py`）。1 回の `retry_call` / `wait_until` の呼び出しの間だけ生きる | 呼び出し | — | 原因の鍵・原因ごとの回数・待った秒・止まった理由（`Waited`） |
 | プランの実行 | プランの実行の部品（`supervise_lib/engine.py`）と記録（`supervise_lib/state.py`） | 状態の置き場 | ステップの結果 | 原因の鍵・ステップと原因ごとの回数 |
 
@@ -90,19 +90,19 @@ NDF のリリース対象（`plugins/ndf/` の Python のコード。hook を含
 
 | 要素 | 責務 |
 | --- | --- |
-| 上限の宣言（`plugins/ndf/contracts/limits.json`） | 方針の名前ごとに上限の値を持つ |
-| 上限の部品（`plugins/ndf/scripts/lib/limits.py`） | 宣言を 1 プロセスに 1 回読み、形を確かめ、`policy`・`seconds`・`value` で返す。監視の工程と担当の引き方（`monitor_timeout`・`stall_timeout`・`cli_timeout`）と `check` を持つ |
+| 上限の設定（`plugins/ndf/contracts/limits/`） | 方針の名前ごとに上限の値を持つ |
+| 上限の部品（`plugins/ndf/scripts/lib/limits.py`） | 設定を 1 プロセスに 1 回読み、形を確かめ、`policy`・`seconds`・`value` で返す。監視の工程と担当の引き方（`monitor_timeout`・`stall_timeout`・`cli_timeout`）と `check` を持つ |
 | 原因の鍵の部品（`plugins/ndf/scripts/lib/cause_key.py`） | 種類と理由の文から原因の鍵と要旨を作る。外の世界を触らない |
 | 待ちの部品（`plugins/ndf/scripts/lib/waits.py`） | `retry_call` / `wait_until` が方針を引数に取り、同じ原因の上限・打つ回数・最後の照会・止まった理由を受け持つ。数字の既定値を持たない。`tenacity` を import する唯一のモジュール |
 | ステップの打ち直しの上限（`plugins/ndf/scripts/supervise_lib/rerun.py`） | ステップの失敗ごとに原因の鍵を数え、判定役の打ち直しを方針 `supervise.step-rerun` の回数で止める。`state.py` の `RunState.record` と `engine.py` の `Engine._next_after_judge` から呼ばれる |
 | 構造チェック（`scripts/check-script-structure.py`・`scripts/structure_checks/limits_rules.py`） | 検査の種類 `limit-literal` と `sleep-loop` を持ち、`wrapped` の持ち主の表に `tenacity`（持ち主 `lib/waits.py`）を持つ |
-| 契約の検査（`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/limits_decl.py`） | 宣言の形と方針の名前の対応を確かめ、契約の一覧に「上限の宣言」の表を描く |
+| 契約の検査（`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/limits_decl.py`） | 設定の形と方針の名前の対応を確かめ、契約の一覧に「上限の設定」の表を描く |
 | 例外リスト（`scripts/script-structure-allow/`） | 待ちのループと、名前の規則に当たるが上限でない数字の行を理由つきで持つ |
 
 ```mermaid
 graph TD
-    subgraph 宣言
-        D[(上限の宣言<br/>limits.json)]
+    subgraph 設定
+        D[(上限の設定<br/>contracts/limits/)]
     end
     subgraph 読み手
         L[上限の部品<br/>limits.py]
@@ -134,11 +134,11 @@ graph TD
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 上限の宣言 | 方針の名前は一意で、各方針は `summary` と値を 1 つ以上持つ。秒・間隔は 0 以上の数、倍率は 1 以上の数、打つ回数と同じ原因の上限は 1 以上の整数で、知らないキーを持たない | 読み手が `LimitsError`（理由に宣言のパスと方針の名前）。CI では契約の検査が落とす |
-| I2 | 上限の宣言 | 宣言が無い・壊れている・引いた方針の名前が無い・引いた値が方針に無いとき、部品は組み込みの値へ戻らない | `LimitsError`。エントリポイントは終了コード 1 で止まる |
-| I3 | 上限の宣言 | テストと実験版を除く `plugins/ndf/` の Python のコードに、上限の数字のリテラルが無い | 構造チェックの `limit-literal` が落とす |
-| I4 | 上限の宣言 | コードが引く方針の名前はすべて宣言にあり、宣言の方針はすべてどこかのコードが引く（接頭辞で数え上げる `monitor.` の方針は引かれたものとする） | 契約の検査が落とす |
-| I5 | 上限の宣言 | 監視の工程と担当のすべての組で、無進捗の許容 < 監視の上限 < CLI の上限 | `limits.py check` が組を出して終了コード 1 |
+| I1 | 上限の設定 | 方針の名前は一意で、各方針は `summary` と値を 1 つ以上持つ。秒・間隔は 0 以上の数、倍率は 1 以上の数、打つ回数と同じ原因の上限は 1 以上の整数で、知らないキーを持たない | 読み手が `LimitsError`（理由に設定のパスと方針の名前）。CI では契約の検査が落とす |
+| I2 | 上限の設定 | 設定が無い・壊れている・引いた方針の名前が無い・引いた値が方針に無いとき、部品は組み込みの値へ戻らない | `LimitsError`。エントリポイントは終了コード 1 で止まる |
+| I3 | 上限の設定 | テストと実験版を除く `plugins/ndf/` の Python のコードに、上限の数字のリテラルが無い | 構造チェックの `limit-literal` が落とす |
+| I4 | 上限の設定 | コードが引く方針の名前はすべて設定にあり、設定の方針はすべてどこかのコードが引く（接頭辞で数え上げる `monitor.` の方針は引かれたものとする） | 契約の検査が落とす |
+| I5 | 上限の設定 | 監視の工程と担当のすべての組で、無進捗の許容 < 監視の上限 < CLI の上限 | `limits.py check` が組を出して終了コード 1 |
 | I6 | 1 回の再試行 | 眠りのループは `lib/waits.py` と、例外リストに理由つきで載った待ちのループだけにある | 構造チェックの `sleep-loop` が落とす |
 | I7 | 1 回の再試行 | `tenacity` を import するのは `lib/waits.py` だけ | 構造チェックの `wrapped` が落とす |
 | I8 | 1 回の再試行 | 同じ原因の鍵の失敗の回数が方針の `same_cause` に達したら、待ちの合計の上限が残っていても打ち直さない。原因の鍵が違う失敗は別に数える | 打ち直さずに `Waited`（`stop` が `same-cause`）を返す |
@@ -151,7 +151,7 @@ graph TD
 
 | イベント | 発生元 | 受け手 |
 | --- | --- | --- |
-| 上限の宣言を読んだ | 上限の部品（`limits.read_table`） | 待ちの部品・各部品 |
+| 上限の設定を読んだ | 上限の部品（`limits.read_table`） | 待ちの部品・各部品 |
 | 呼び出しが失敗した | 待ちの部品が呼んだ関数 | 待ちの部品 |
 | 失敗から原因の鍵を作った | 原因の鍵の部品 | 待ちの部品・プランの記録 |
 | 同じ原因の失敗を数えた | 待ちの部品 / プランの記録（`RunState.record`） | 待ちの部品 / プランの実行 |
@@ -167,21 +167,21 @@ graph TD
 
 | 呼び出し | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `policy(name)` | 方針の名前 | `Policy` | 宣言が無い・壊れている・名前が無い → `LimitsError`（理由に宣言のパスと方針の名前を含む 1 文） |
+| `policy(name)` | 方針の名前 | `Policy` | 設定が無い・壊れている・名前が無い → `LimitsError`（理由に設定のパスと方針の名前を含む 1 文） |
 | `seconds(name)` / `value(name, key)` | 方針の名前（とキー） | 数 | 上に加え、方針にその値が無い → `LimitsError` |
-| `phases()` / `stalls()` / `stall_default()` / `cli_margin()` | — | 工程 → 秒、担当 → 秒、秒 | 宣言の誤り → `LimitsError` |
-| `monitor_timeout(phase, agent, explicit=None)`・`stall_timeout`・`cli_timeout`・`resolve_cli_timeout` | 工程・担当・明示の値 | 環境変数を解決した秒 | 表に無い工程 → `KeyError`。宣言の誤り → `LimitsError` |
-| `use(path)` | 宣言のパス（`None` でプラグインの宣言へ戻す） | — | 読み込み先を差し替え、読んだ宣言を捨てる。テストが使う |
-| CLI `cli-timeout` / `monitor-timeout` / `check` | 工程・担当・`--override`・`--no-floor` | 秒を 1 行 / 崩れた組 | 宣言の誤りは理由を標準エラーへ 1 行出して終了コード 1 |
+| `phases()` / `stalls()` / `stall_default()` / `cli_margin()` | — | 工程 → 秒、担当 → 秒、秒 | 設定の誤り → `LimitsError` |
+| `monitor_timeout(phase, agent, explicit=None)`・`stall_timeout`・`cli_timeout`・`resolve_cli_timeout` | 工程・担当・明示の値 | 環境変数を解決した秒 | 表に無い工程 → `KeyError`。設定の誤り → `LimitsError` |
+| `use(path)` | 設定のパス（`None` でプラグインの設定へ戻す） | — | 読み込み先を差し替え、読んだ設定を捨てる。テストが使う |
+| CLI `cli-timeout` / `monitor-timeout` / `check` | 工程・担当・`--override`・`--no-floor` | 秒を 1 行 / 崩れた組 | 設定の誤りは理由を標準エラーへ 1 行出して終了コード 1 |
 
 `Policy` は値オブジェクト（`NamedTuple`）で、方針に無い値は `None` である。計算で上限を縮める呼び出し元（設計の結果の読み取りの
 残りの予算など）は `policy._replace(seconds=<計算した値>)` で渡す。
 
-宣言の置き場は、リリースしたプラグインでは `contracts/limits.json`、ラッパーの複製（バージョンディレクトリ）では `lib/` と並ぶ
-`contracts/limits.json` で、読み手は自分の置き場からの相対で見つける。
+上限の設定の保存先は、リリースしたプラグインでは `contracts/limits/`、ラッパーの複製（バージョンディレクトリ）では `lib/` と並ぶ
+`contracts/limits/` で、読み手は自分のディレクトリからの相対で見つける。
 
 `LimitsError` を捕まえて組み込みの値へ戻す処理は書かない。捕まえないエントリポイントは Python の既定で終了コード 1 になる。
-利用者の環境変数が数字でないときに警告して既定値を使う `safe_int_env` は、利用者の入力への扱いで、宣言の誤りとは別である。
+利用者の環境変数が数字でないときに警告して既定値を使う `safe_int_env` は、利用者の入力への扱いで、設定の誤りとは別である。
 
 #### 待ちの部品（`lib/waits.py`）
 
@@ -282,25 +282,34 @@ stateDiagram-v2
 
 ## データ・設定
 
-上限の宣言は 1 つの JSON のファイルで、実行時には読むだけである。
+上限の設定は、方針 1 つを 1 つの JSON のファイルに持ち、実行時には読むだけである。ファイル名（拡張子 `.json` を
+除く）が方針の名前になる。`_` で始まるファイルは設定そのものの値で、方針ではない（`_meta.json` が `owner` を持つ）。
+
+```
+contracts/limits/
+├── _meta.json                           # owner（設定を書き換えてよいもの）
+├── monitor.cli-margin.json
+├── supervise.design-stage-read.json
+├── supervise.step-rerun.json
+└── supervise.worktree-lock.json
+```
+
+`contracts/limits/supervise.design-stage-read.json`:
 
 ```json
 {
-  "version": 1,
-  "policies": {
-    "monitor.cli-margin": {"summary": "CLI の上限 = 監視の上限 + この秒数。…", "seconds": 120},
-    "supervise.design-stage-read": {"summary": "設計の結果の gh / git の一時的な失敗の打ち直し。…", "seconds": 120, "per_call": 30, "interval": 15, "same_cause": 3},
-    "supervise.worktree-lock": {"summary": ".git/config の lock で落ちた worktree の作成の打ち直し", "seconds": 5, "attempts": 6, "interval": 1, "same_cause": 6},
-    "supervise.step-rerun": {"summary": "判定役が返すステップの打ち直しの同じ原因の上限", "same_cause": 2}
-  }
+  "summary": "設計の結果の gh / git の一時的な失敗の打ち直し。…",
+  "seconds": 120,
+  "per_call": 30,
+  "interval": 15,
+  "same_cause": 3
 }
 ```
 
 | キー | 型 | 空の扱い | 意味 |
 | --- | --- | --- | --- |
-| `version` | int | 許さない | 宣言の形の版。1 |
-| `policies` | object | 許さない | 方針の名前 → 方針 |
-| 方針の名前 | str | — | `<領域>.<用途>`。領域は Skill の名前、`*_lib` の名前から `_lib` を除いたもの、`lib/` の部品はその部品の名前（例 `post-queue`）、エントリポイントのスクリプトはその名前。用途は小文字のケバブケース |
+| ファイル名（方針の名前） | str | — | `<領域>.<用途>`。領域は Skill の名前、`*_lib` の名前から `_lib` を除いたもの、`lib/` の部品はその部品の名前（例 `post-queue`）、エントリポイントのスクリプトはその名前。用途は小文字のケバブケース |
+| `owner`（`_meta.json`） | str | 許さない | 設定を書き換えてよいもの（子 Issue の記号とパッケージ） |
 | `summary` | str | 許さない | 何の上限か。理由の文と契約の一覧に出る |
 | `seconds` | number | 省略可 | 上限の秒。待ちと再試行では開始から期限までの秒（眠りと照会・呼び出しの時間を含む）、呼び出しでは `timeout` |
 | `interval` | number | 省略可 | 待ちの最初の間隔（秒）。再試行では毎回の間隔 |
@@ -311,14 +320,14 @@ stateDiagram-v2
 | `same_cause` | int | 省略可 | 同じ原因の鍵の失敗の上限の回数 |
 
 `lib/limits.py` の外では、方針の名前を文字列のリテラル（またはモジュールの最上位で文字列を代入した定数）で書く。契約の検査が
-構文木で `limits.policy(…)`・`limits.seconds(…)`・`limits.value(…)` の名前を集めて宣言と照らすためである。
+構文木で `limits.policy(…)`・`limits.seconds(…)`・`limits.value(…)` の名前を集めて設定と突き合わせるためである。
 
 ## 運用
 
 ### 上限の値を変える・足すとき
 
-1. 宣言の方針の値を変える。新しい上限は、方針の名前を決めて `summary` と値を足し、コードから `limits.policy`・`limits.seconds`・`limits.value` で引く
-2. `python3 scripts/check-ndf-contracts.py` で、形と名前の対応を確かめ、契約の一覧の「上限の宣言」の表を描き直す
+1. 設定の方針の値を変える。新しい上限は、方針の名前を決めて `summary` と値を足し、コードから `limits.policy`・`limits.seconds`・`limits.value` で引く
+2. `python3 scripts/check-ndf-contracts.py` で、形と名前の対応を確かめ、契約の一覧の「上限の設定」の表を描き直す
 3. 監視の工程と担当の値を変えたときは `python3 plugins/ndf/scripts/lib/limits.py check` で順序を確かめる
 4. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す
 
@@ -327,7 +336,7 @@ stateDiagram-v2
 | 項目 | 内容 |
 | --- | --- |
 | 眠りのループの検査の範囲 | `sleep-loop` はループの本体で直に `sleep` を呼ぶものだけを見る。眠りを別の関数に包んで呼ぶ打ち直し（`supervise_lib/claude.py` の利用上限の回復の時刻までの待ちを呼ぶループ）は落とさない |
-| シェルのスクリプトの数字 | `statusline.sh`・`progress-record.sh`・`workflow-common.sh`・`lock-common.sh`・`worktree-registry.sh`・`pr-body-decisions.sh` の上限の数字は検査の外にある。シェルのエントリポイントが実行の核の上で動くようになれば、核が宣言から引いた値を環境変数で渡せる |
+| シェルのスクリプトの数字 | `statusline.sh`・`progress-record.sh`・`workflow-common.sh`・`lock-common.sh`・`worktree-registry.sh`・`pr-body-decisions.sh` の上限の数字は検査の外にある。シェルのエントリポイントが実行の核の上で動くようになれば、核が設定から引いた値を環境変数で渡せる |
 | 例外リストの行の増加 | 行の増加をベースブランチと比べて落とす検査は無く、`sleep-loop` と `limit-literal` の行を足す差分はレビューが見る |
 | 実行の記録への書き込み | 止まった理由は、結果の `summary` とプランの進捗の記録に残る |
 
@@ -335,16 +344,16 @@ stateDiagram-v2
 
 | 観点 | テスト |
 | --- | --- |
-| 宣言を差し替えると、同じ方針を引く部品（`retry_call` の打つ回数・`monitor_timeout` の値）が変わること。負の秒・知らないキー・整数でない回数・同じ名前の重複を `LimitsError` で拒むこと | `plugins/ndf/scripts/tests/test_limits.py`・`test_limits_declaration.py` |
-| 宣言が無い・壊れた JSON・名前が無い・値が無いの 4 通りで、`limits.py` の CLI が終了コード 1 と、パスと名前を含む理由を出すこと | `test_limits_declaration.py` |
-| 移す前の値の表と、宣言から引いた値が一致すること | `test_limits_migration.py` |
+| 設定を差し替えると、同じ方針を引く部品（`retry_call` の打つ回数・`monitor_timeout` の値）が変わること。負の秒・知らないキー・整数でない回数・同じ名前の重複を `LimitsError` で拒むこと | `plugins/ndf/scripts/tests/test_limits.py`・`test_limits_declaration.py` |
+| 設定が無い・壊れた JSON・名前が無い・値が無いの 4 通りで、`limits.py` の CLI が終了コード 1 と、パスと名前を含む理由を出すこと | `test_limits_declaration.py` |
+| 移す前の値の表と、設定から引いた値が一致すること | `test_limits_migration.py` |
 | `timeout=600`・`FOO_TIMEOUT = 5`・`def f(timeout=5)` で `limit-literal` が落ち、`timeout=0` と `EXIT_WAIT = 75` は通ること | `scripts/tests/test_check_script_structure.py` |
 | `lib/waits.py` の外の `while True: …; time.sleep(1)` で `sleep-loop` が落ち、入れ子の関数の中の `sleep` だけなら落とさないこと。`lib/waits.py` の外の `import tenacity` で `wrapped` が落ちること | `scripts/tests/test_check_script_structure.py` |
 | 同じ理由の失敗が `same_cause` 回で止まり、待ちの合計まで眠らないこと。数字だけが違う理由は同じ原因、文が違えば別の原因として数えること | `test_lib_waits.py`・`test_cause_key.py` |
 | 毎回同じステップを返す判定役のプランが、2 回目の失敗の後の打ち直しで「止まった」になり、理由に原因の要旨と回数が出ること。別の失敗に変わったら流し続けること。再開の後も回数を引き継ぐこと | `test_supervise_step_rerun.py` |
 | 条件が揃わない値を返し続ける `wait_until` が期限の時刻に最後の照会を打つこと（上限 30 秒・間隔 10 秒・照会 2 秒で 0・12・24・30 秒）。理由に待った秒・照会の回数・上限の秒が出ること | `test_lib_waits.py` |
-| コードに宣言に無い方針の名前を書く・どこからも引かれない方針を足すと、契約の検査が落ちること | `python3 scripts/check-ndf-contracts.py` |
-| `limits.py check` が宣言の値で全組を判定し、無進捗の許容を監視の上限より長くした宣言で組を出して終了コード 1 になること | `test_limits.py`・`test_limits_declaration.py` |
+| コードに設定に無い方針の名前を書く・どこからも引かれない方針を足すと、契約の検査が落ちること | `python3 scripts/check-ndf-contracts.py` |
+| `limits.py check` が設定の値で全組を判定し、無進捗の許容を監視の上限より長くした設定で組を出して終了コード 1 になること | `test_limits.py`・`test_limits_declaration.py` |
 
 ## 関連リンク
 

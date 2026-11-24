@@ -479,7 +479,7 @@ function createDeck(opts) {
   };
 }
 
-// 生成スクリプトの入口。`node build-deck.js <出力>.pptx [<theme.json>]`
+// 生成スクリプトのエントリポイント。`node build-deck.js <出力>.pptx [<theme.json>]`
 // build(deck) でページを作り、保存まで行う。失敗は DeckError の code で終える
 function run(dir, opts, build) {
   const [out, themeArg] = process.argv.slice(2);

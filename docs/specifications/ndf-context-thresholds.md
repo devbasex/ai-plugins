@@ -2,7 +2,7 @@
 
 ## 概要
 
-**conductor の会話を文脈の量で切り替える閾値は 2 つで、上限の設定（`plugins/ndf/contracts/limits.json`）の 1 か所にだけ置く。**
+**conductor の会話を文脈の量で切り替える閾値は 2 つで、上限の設定（`plugins/ndf/contracts/limits/`）の 1 か所にだけ置く。**
 文脈の量の guard（`context-limit`）・中継のラッパー・`ndf relay context resolve` と判定の記録の行は、同じ 1 つの関数で同じ値を読む。
 
 | 値 | 上限の設定の行 | 既定 | 振る舞い |
@@ -60,7 +60,7 @@ supervisor のスイッチポイント、Codex の扱いは含まない。
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/contracts/limits.json` | `context.decide-from`（`count` 250,000）と `context.limit`（`count` 500,000）の 2 行。文脈の切り替えの値はここだけにある |
+| `plugins/ndf/contracts/limits/` | `context.decide-from`（`count` 250,000）と `context.limit`（`count` 500,000）の 2 つの方針。文脈の切り替えの値はここだけにある |
 | `context_thresholds.thresholds(environ, value)` | 2 つの値に `NDF_CONTEXT_LIMIT` を重ね、`Thresholds(decide_from, limit, sources)` を返す唯一の関数。上限の設定の引き方 `value` は呼び手が渡す。判定の記録の語（継続・拒否・再起動と再起動の理由）もここに置く |
 | guard `context-limit`（`guards.json` の行、`order` 20、`events` は PreToolUse と PostToolUse、`deny_key` は `none`、`fail_closed` は偽） | PostToolUse で知らせ、PreToolUse で止める。上限の設定は `hooks.tables.policy_value` で読む |
 | `hooks/dispatch.py` | `deny_key` が `none` の行の拒否を数えず、案内へ下げない。`sole` の付いた拒否があれば、まとめた判定の文をその文だけにする |
@@ -152,8 +152,8 @@ Bash は `&&`・`;`・パイプでつないでも、つないだ単純なコマ�
 
 | 名前 | 意味 |
 | --- | --- |
-| `context.decide-from`（`limits.json`） | 判断開始の値。既定 250,000 |
-| `context.limit`（`limits.json`） | 運用上限。既定 500,000 |
+| `context.decide-from`（`contracts/limits/`） | 判断開始の値。既定 250,000 |
+| `context.limit`（`contracts/limits/`） | 運用上限。既定 500,000 |
 | `NDF_CONTEXT_LIMIT` | 運用上限（正の整数）。guard・ラッパー・`resolve`・`record` の 4 つに効く。ラッパーは子へ同じ環境を渡すので、子の guard とラッパーは同じ値になる |
 | `NDF_HOOK_OFF=context-limit`（か `all`） | guard が判定も知らせもしない。動いている会話には効かず、claude を起動し直して効かせる |
 

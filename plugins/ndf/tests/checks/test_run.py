@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ndf import cli, identity
 from ndf.checks import model, run
 from ndf.contracts import exit_codes, result
@@ -47,6 +49,23 @@ def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, last_result):
     capsys.readouterr()
 
 
+def _settings_rule(scope, rules):
+    return [model.Finding("S1", "x", 1, str(scope.settings))]
+
+
+def test_only_without_a_settings_rule_does_not_read_a_broken_settings_file(plugin, monkeypatch, capsys, last_result):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    monkeypatch.setitem(run.SETTINGS_RULES, "S1", _settings_rule)
+    settings = plugin.repo / identity.FIXED_WORDS["ndf_settings_dir"] / "project.json"
+    settings.parent.mkdir()
+    settings.write_text("{", encoding="utf-8")
+    plugin.write("src/ndf/a.py", "import requests\n")
+    assert run.main(["--only", "I3"]) == exit_codes.code_of("failed")
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == ["I3"]
+    assert run.main(["--only", "S1"]) == exit_codes.unreadable_code()
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "config_broken"
+
+
 def _missing_rules(monkeypatch, tmp_path):
     missing = tmp_path / "missing.json"
     monkeypatch.setattr(run, "load_rules", lambda: model.load_rules(missing))
@@ -65,14 +84,14 @@ def test_collect_does_not_descend_into_skipped_dirs(plugin, monkeypatch):
     plugin.write("src/ndf/a.py", "x = 1\n")
     plugin.write(".venv/lib/site.py", "x = 1\n")
     walked = []
-    real_walk = run.os.walk
+    real_walk = model.os.walk
 
     def spy(top):
         for entry in real_walk(top):
             walked.append(entry[0])
             yield entry
 
-    monkeypatch.setattr(run.os, "walk", spy)
+    monkeypatch.setattr(model.os, "walk", spy)
     found = [s.rel.rsplit("/", 1)[-1] for s in run.collect(plugin.root, plugin.repo)]
     assert "a.py" in found and "site.py" not in found
     assert not any(".venv" in top for top in walked)
@@ -148,3 +167,67 @@ def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path, las
     assert report["items"] == [] and report["metrics"] == {}
     assert report["cause"] == {"kind": "config_broken", "detail": report["summary"]}
     assert result.errors(report, exit_codes.unreadable_code()) == []
+
+
+def test_only_settings_rules_skip_collecting_and_the_other_rules(tmp_path, monkeypatch):
+    # ワークフローだけを変えた Pull Request の `--only toolchain` は、プラグインのファイルを集めずにその規則だけを当てる
+    monkeypatch.setitem(run.SETTINGS_RULES, "S1", lambda scope, rules: [model.Finding("S1", "x", 1, "d")])
+    monkeypatch.setattr(run, "collect", lambda *a: (_ for _ in ()).throw(AssertionError("ファイルを集めた")))
+    monkeypatch.setattr(run, "check", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ほかの規則を当てた")))
+    scope = model.Scope(tmp_path, tmp_path / "p", "p")
+    assert [f.rule for f in run.select(scope, {}, ["S1"])] == ["S1"]
+
+
+def test_the_findings_of_each_rule_remain_when_the_next_rule_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    for module, name in ((run.structure, "check"), (run.structure, "cycles"), (run.facts, "check"), (run.words, "check")):
+        rule = f"{module.__name__}.{name}"
+        monkeypatch.setattr(module, name, lambda *args, rule=rule: [model.Finding(rule, rule, 1, "d")])
+
+    def stop(*args):
+        raise model.CheckError("pyproject.toml を読めない")
+
+    monkeypatch.setattr(run.invariants, "check", stop)
+    monkeypatch.setattr(run, "CONTRACT_RULES", {})
+    with pytest.raises(run.Halted, match="pyproject.toml") as caught:
+        run.check(model.Scope(tmp_path, tmp_path / "p", "p"), {"facts": {"contracts_dir": "contracts"}})
+    expected = ["ndf.checks.facts.check", "ndf.checks.structure.check", "ndf.checks.structure.cycles", "ndf.checks.words.check"]
+    assert [f.rule for f in caught.value.found] == expected
+
+
+@pytest.mark.parametrize(
+    ("rel", "directory"),
+    [("domains/split-tables.json", False), ("facts/fact.schema.json", False), ("schemas/x.schema.json", False), ("facts", True)],
+    ids=["table", "common-schema", "schema", "directory"],
+)
+def test_no_rule_reads_contracts_outside_the_plugin(tmp_path, monkeypatch, rel, directory):
+    root = tmp_path / "repo" / "p"
+    link = root / "contracts" / rel
+    link.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    if directory:
+        outside.mkdir()
+    else:
+        outside.write_text('{"rows": "SECRET"}', encoding="utf-8")
+    link.symlink_to(outside)
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    monkeypatch.setattr(run.facts, "check", lambda *args: pytest.fail("事実の表を読んだ"))
+    with pytest.raises(run.Halted, match="プラグインの外を指す") as caught:
+        run.check(model.Scope(root.parent, root, "p"), model.load_rules())
+    assert "SECRET" not in f"{caught.value} {caught.value.found}"
+
+
+def test_no_rule_reads_contracts_through_a_linked_directory(tmp_path, monkeypatch):
+    # リンクのディレクトリはプラグインの中にあり、その中の表だけがプラグインの外を指す
+    root = tmp_path / "repo" / "p"
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"rows": "SECRET"}', encoding="utf-8")
+    (root / "contracts").mkdir(parents=True)
+    (root / "tables").mkdir()
+    (root / "tables" / "x.json").symlink_to(outside)
+    (root / "contracts" / "domains").symlink_to(root / "tables")
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    monkeypatch.setattr(run.facts, "check", lambda *args: pytest.fail("事実の表を読んだ"))
+    with pytest.raises(run.Halted, match="ディレクトリのリンク") as caught:
+        run.check(model.Scope(root.parent, root, "p"), model.load_rules())
+    assert "SECRET" not in f"{caught.value} {caught.value.found}"

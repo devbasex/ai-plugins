@@ -1,0 +1,7 @@
+{
+  "summary": "停止理由 ci_pending（CI のチェックが終わっていない）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒",
+  "attempts": 10,
+  "interval": 60,
+  "factor": 1.5,
+  "max_interval": 600
+}

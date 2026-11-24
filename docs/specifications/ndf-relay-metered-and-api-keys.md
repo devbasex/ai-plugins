@@ -31,7 +31,7 @@
 | 替え先の環境・`--settings` の合成・起動の前の実効値の確かめ・起動の後の変更の検出 | `plugins/ndf/src/ndf/domains/relay/account_choice.py`（`fallbacks`・`build`・`verify`・`target_env`・`drift`）・`session_env.py`（`metered_env`・`key_env`） |
 | helper の記録・払い出しの上限・設定への固定・`config-gate` | `plugins/ndf/src/ndf/domains/relay/key_helper.py`・`cli_account.py`（`_acc_key_helper`・`_acc_config_gate`） |
 | キーの子の停止 | `plugins/ndf/src/ndf/domains/relay/wrapper_stop.py`（`_drift`・`_key_auth`・`_end_point`・`_stop_revoked`・`_on_revoked`） |
-| 待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `relay.key-helper`・`relay.end-wait`・`relay.child-exit`・`claude-api-keys.check` |
+| 待ちの上限 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `relay.key-helper`・`relay.end-wait`・`relay.child-exit`・`claude-api-keys.check` |
 
 ## 用語
 
@@ -185,7 +185,7 @@
   （API キーの宣言なら `api-key-helper metered <指紋>`。指紋は検証した宣言のキーの SHA-256）に、`--pin <固定のファイル>` と、
   ラッパーの起動では `--record <記録先> --id <helper の ID>` を続けたものである
 - hook は `{"type": "command", "command": <config-gate の文字列>, "timeout": <relay.key-helper の gate>, "onFailure": "block"}` である。
-  `timeout` は合成のたびに `contracts/limits.json` の `relay.key-helper` の `gate`（今は 5 秒）から読み、固定値を持たない。
+  `timeout` は合成のたびに `contracts/limits/` の `relay.key-helper` の `gate`（今は 5 秒）から読み、固定値を持たない。
   認証と宛先の変更を拒む `config-gate` の待ち時間は、契約の値の変更に追随する。`onFailure` が効く
   Claude Code 2.1.295（`account_choice.GATE_FLOOR`）より古い・版を読めないときは `key_gate` で起動しない。`disableAllHooks`・
   管理の設定の `allowManagedHooksOnly`・`--bare`・`--safe-mode`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE` で hook が働かない

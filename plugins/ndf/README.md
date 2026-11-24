@@ -122,7 +122,7 @@ Codex では `"${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/ndf/` の下の、�
 ## Hooks
 
 hook は Claude Code と Codex のどちらも `hooks/entry.py` の 1 つのエントリポイントから呼ばれ、事象と Tool が当たる guard を順に動かします。
-guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits.json` にあります。
+guard の一覧と順序は `contracts/hooks/guards.json`、閾値は `contracts/limits/`（1 方針 1 ファイル）にあります。
 
 | guard | 事象 | すること |
 | --- | --- | --- |
@@ -244,14 +244,14 @@ agy models   # 認証確認
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.26/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/11.0.27/skills/deploy/SKILL.md
 ```
 
 実体のパスは `codex plugin list` で確かめます。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  11.0.26  <path>
+# => ndf@ai-plugins  installed, enabled  11.0.27  <path>
 ```
 
 Claude Code では `disable-model-invocation: true` と `/ndf:deploy` のスラッシュコマンドで同じ役割を果たします。

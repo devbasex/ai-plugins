@@ -1,0 +1,7 @@
+{
+  "meaning": "レビューを経た HEAD の後に、レビューを通っていないコミットがある。ルートはプランの on_cause が書く",
+  "std_type": "validation",
+  "exit": "precondition",
+  "route": "step",
+  "retry": null
+}

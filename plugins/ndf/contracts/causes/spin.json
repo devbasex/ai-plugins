@@ -1,0 +1,7 @@
+{
+  "meaning": "中継のラッパーが再起動ループの検出（起動から間もないセグメントの続き）に当たり、次のセグメントを起動せずに止まった",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}
