@@ -1,6 +1,6 @@
 # 文書の組み直し: 起動の設定が無いリポジトリでも、設計とドキュメント再構成が流れる（#4337）
 
-文書を組み直すコマンド（差し込み `rebuild`）に既定が無く、設定を足していないリポジトリでは、工程「設計」と「ドキュメント再構成」のプランが始まらない。工程を始める前には既定のコマンドだけを組み、組み直すステップで新しいサブコマンド `ndf document-rebuild run` が、差分から文書を選んで worker を 1 回起動する。結果ファイルは、このサブコマンドが形を確かめてから書く。採らなかった案は「決定の記録」に、外部の調査を省いた理由は末尾にある。
+文書を組み直すコマンド（差し込み `rebuild`）に既定が無く、設定を足していないリポジトリでは、工程「設計」と「ドキュメント再構成」のプランが始まらない。工程を始める前には既定のコマンドだけを組み、組み直すステップで新しいサブコマンド `ndf document-rebuild run` が、文書を選んで、切り離した作業場所で worker を 1 回起動する。組み直した文書のコミットと結果ファイルは、このサブコマンドが確かめてから書く。採らなかった案は「決定の記録」に、外部の調査を省いた理由は末尾にある。
 
 ## 今の姿
 
@@ -43,18 +43,18 @@ flowchart TD
     P --> T["差分から対象の文書を選ぶ"]
     T -->|0 件| Z["ok（worker を起動しない）"]
     T -->|起点を読めない| E["stopped（precondition）"]
-    T -->|1 件以上| W["ndf worker run<br/>worker が組み直してコミット"]
-    W -->|ok| O["結果の形・読み手役の記録・<br/>コミットの有無を確かめる"]
+    T -->|1 件以上| W["ndf worker run<br/>worker が切り離した作業場所で組み直す"]
+    W -->|ok| O["結果の形・読み手役の記録を確かめ、<br/>対象の文書だけを取り込んでコミット"]
     W -->|stopped| X["そのまま返す"]
     W -->|gate| Y["stopped（incomplete）<br/>打ち直しだけが続きになる"]
-    O -->|対象の外の変更がある| G["gate<br/>承認まで push しない"]
     O -->|不合格の文書が無い| K["ok を --out へ書く"]
     O -->|不合格の文書がある| F["items に足し、--on-fail で ok か gate"]
 ```
 
 - 工程を始める前の準備は、ベースブランチ・リモートの名前・課題の番号・選ぶ文書の種類を引数に持つ既定のコマンドを組む。差分は読まない
 - `ndf document-rebuild run` は、起点から `HEAD` までの差分から、引数の課題の設計書と原稿だけを選ぶ。設計書を省いた実装計画は、差分によらず課題の番号で決まるパスから選ぶ。前の工程で確かめ済みで内容の変わっていない文書は外す。worker へは選んだ文書だけを渡す
-- worker は `document-rebuild` の手順を通して作業場所でコミットし、読み手役の確かめの記録を結果に残す。push と Pull Request は今のとおり後ろのステップが行う
+- worker は `document-rebuild` の手順を、切り離した作業場所（今の `HEAD` から作る一時の worktree）で通し、読み手役の確かめの記録を結果に残す。サブコマンドは対象の文書の中身だけをプランの作業場所へ取り込み、コミットする。worker のコミットと対象の外の変更は、スプリントのブランチに入らない（決定 11）
+- push と Pull Request は今のとおり後ろのステップが行う。工程「ドキュメント再構成」の push は、確かめた `HEAD` を指定して送る（「承認と push するコミット」）
 - 設定 `workflow.launch.rebuild` があれば、今のとおり設定のコマンドだけを使う
 
 ## ドメインモデル
@@ -80,13 +80,15 @@ flowchart TD
 | --- | --- | --- | --- |
 | I1 | 組み直しの実行 | worker に渡す文書は、引数の種類と課題に合う、作業場所の中の通常ファイルだけである。設計書と原稿は起点からの差分にあるものに限る（設計書を省いた実装計画は差分によらない。決定 9） | 選ばない |
 | I2 | 組み直しの実行 | 起点を決められなければ、対象を 0 件とみなさない | `stopped`（`precondition`） |
-| I3 | 組み直しの実行 | `ok` の結果は、足すべき内容を 1 件ずつ `id` と `text` で持つ | `stopped`（`bad_report`） |
+| I3 | 組み直しの実行 | `ok` の結果は、足すべき内容を 1 件ずつ `id` と `text` で持つ。worker の足すべき内容は、どの対象の文書のものか（`doc`）を持つ | `stopped`（`bad_report`） |
 | I4 | 組み直しの実行 | worker を起動した `ok` の結果は、対象の文書ごとに、読み手役の確かめの結果か、立てられなかった理由を持つ | `stopped`（`incomplete`。欠けた文書を `gaps` に挙げる） |
 | I5 | 組み直しの実行 | 読み手役が不合格（`fail`）とした文書は、`items` に 1 件ずつ現れる。判断する人のいない `ok` では終わらない | 工程「設計」は `ok`（レビューと設計承認ゲートが判断する）、「ドキュメント再構成」は `gate` |
-| I6 | 組み直しの実行 | worker の後に、対象の文書の未コミットの変更が作業場所に残っていない | `stopped`（`incomplete`。残った文書を `gaps` に挙げる） |
-| I7 | 組み直しの実行 | 対象の外のパスを変えたコミットは、人が確かめる前に push のステップへ進まない | `gate`（変えたパスを `warnings` に 1 件ずつ挙げる） |
-| I8 | 組み直しの実行 | worker が判断を求めて終えた組み直しは、承認だけで push のステップへ進まない | `stopped`（`incomplete`）。続きは組み直すステップの打ち直しだけで、I3〜I7 をすべて確かめ直す |
+| I6 | 組み直しの実行 | 対象の文書は、起動の前に未コミットの変更を持たず、終わりの後は通常ファイルとして残る。起動の後に作業場所で変わった文書を上書きしない | 起動の前は `stopped`（`precondition`）、後は `stopped`（`incomplete`。文書を `gaps` に挙げ、何も取り込まない） |
+| I7 | 組み直しの実行 | この実行が作るコミットは、対象の文書だけを変える | サブコマンドが対象のパスだけをコミットする（worker のコミットを取り込まない） |
+| I8 | 組み直しの実行 | worker が判断を求めて終えた組み直しは、答えを渡した worker の組み直しが I3〜I6 を満たすまで `ok` にも `gate` にもならない。対象が 0 件になっても同じである | `stopped`（`incomplete`）。続きは組み直すステップの打ち直しだけである |
 | I9 | 組み直しの実行 | `items` の `id` は 1 つの結果の中で重ならない | サブコマンドが `id` を振る（worker の `id` は使わない） |
+| I10 | 組み直しの実行 | 承認ゲートで終えた組み直しの後に push するコミットは、承認の対象に示した `HEAD` である | `stopped`（`unreviewed`）。組み直すステップへ戻り、確かめと承認を取り直す |
+| I11 | 組み直しの実行 | 同じステップの打ち直しで外した文書の足すべき内容と不合格は、その回の `items` に残る | 記録から `items` へ足す |
 
 ### ドメインイベント
 
@@ -97,7 +99,7 @@ flowchart TD
 | E3 | 設計書を書いてコミットした | 設計書を書く worker（作業 `design`） | 組み直すステップ |
 | E4 | 組み直す文書を選んだ | `ndf document-rebuild run` | worker の起動 |
 | E5 | 対象が無いと分かった | `ndf document-rebuild run` | プランの次のステップ |
-| E6 | 文書を組み直してコミットした | worker | `ndf document-rebuild run` |
+| E6 | 文書を組み直してコミットした | `ndf document-rebuild run`（worker は切り離した作業場所で組み直す） | プランの次のステップ |
 | E7 | 足すべき内容を結果に残した | `ndf document-rebuild run` | 設計のレビュー（`ndf cross-review run --findings`） |
 | E8 | 代わりの設定とスクリプトを消した | リリースの後の PR（決定 8） | ai-plugins のスプリント |
 
@@ -107,8 +109,11 @@ flowchart TD
 | --- | --- |
 | 既定の組み立て（新設。`ndf.progress.rebuild_values`） | 設定が無いときの既定のコマンドを組む。工程とモードから文書の種類と `--on-fail` への対応を持つ。ベースブランチは、値がまだ無ければ読み込み済みの設定から 1 回だけ決め、テンプレートが `base` を使うなら `base` の値としても返す。リモートの名前も、値がまだ無ければ `Git.remote()` で 1 回だけ求め、`remote` の値としても返す。決められなければ理由・設定のキー・値の形を返す |
 | 差し込みの値を集める処理（変更。`ndf.progress.invoke`） | `rebuild` を打った場所の値（`route.derived_locally`）より先に埋め、`rebuild_values.fill` が返した `base` と `remote` も差し込みに入れる。`derived_locally` は値のある `base`・`remote` を求め直さないので、設計のプランの `rebuild` と `base` は同じ解決済みのマージ先になり、ブランチ戦略の設定の読み込みと検証、`Git.remote()` の `git worktree list` はそれぞれ 1 回で済む。欠けの `items` に上の 3 つを載せる |
-| サブコマンド `ndf document-rebuild run`（新設。`ndf.domains.docrebuild`） | 起点を決め、対象を選び、起動指示を組み、`ndf worker run` を打ち、結果を確かめて `--out` と標準出力へ出す。`push` と GitHub への書き込みを持たない |
-| 対象の選択（新設。`ndf.domains.docrebuild.select_decide`） | 差分のパス・実装計画の頭・通常ファイルかどうか・確かめ済みの記録と今の内容のハッシュから対象を選ぶ。ファイルも git も読まない純粋な処理 |
+| サブコマンド `ndf document-rebuild run`（新設。`ndf.domains.docrebuild`） | 起点を決め、対象を選び、切り離した作業場所を作り、起動指示を組み、`ndf worker run` を打ち、結果を確かめ、対象の文書だけを取り込んでコミットし、`--out` と標準出力へ出す。`push` と GitHub への書き込みを持たない |
+| サブコマンド `ndf document-rebuild check`（新設。同上） | 承認ゲートで終えた組み直しの `HEAD` と今の `HEAD` を照らし、push するコミットの SHA を書く（「承認と push するコミット」） |
+| プランのテンプレート（変更。`contracts/templates/document-rebuild.json`） | 組み直しと push の間に `check` を足し、push が `check` の書いた SHA を送る。テンプレート `design` は変えない |
+| 切り離した作業場所 | 作成・lock・片付けは、リファクタリングが使う `ndf.core.converge` の `location.work_root` と `worktree`（`sweep_orphans`・`lock_review_worktree`・`resumable`・`detach_clean`・`release`）をそのまま使う |
+| 対象の選択（新設。`ndf.domains.docrebuild.select_decide`） | 差分のパス・実装計画の頭・通常ファイルかどうか・確かめ済みの記録・今の文書と要求仕様のコピーのハッシュ・判断待ちの記録から、対象と、記録から引き継ぐ結果を選ぶ。ファイルも git も読まない純粋な処理 |
 | プランの承認ゲートの表示（変更。`ndf.core.plan` の `steps`・`records`・`runner` と、`ndf.progress.run`） | `gate` を返したステップの `summary`・`items`・`warnings` を、プランの結果と `ndf progress next`・`wait`・`show` の結果へ引き継ぐ（「承認ゲートの表示」） |
 | 課題の文書の名前（新設。`ndf.core.issue_docs`） | 設計書のパスの形と、名前に含む課題の番号。`ndf loop design-tests` が持つ同じ正規表現をここへ移し、両方が読む |
 | 起動指示のテンプレート（新設。`contracts/worker/document-rebuild.md`） | 組み直す worker への指示。差し込みは `string.Template` の `$名前` |
@@ -124,6 +129,7 @@ flowchart TD
     subgraph 組み直すステップ
         C["domains.docrebuild"] --> SD["select_decide"]
         SD --> ID["core.issue_docs"]
+        C --> CV["core.converge"]
         C --> TP["worker/document-rebuild.md"]
         C --> WR["ndf worker run"]
     end
@@ -143,7 +149,7 @@ flowchart TD
 | `--issue <番号>`（1 回以上） | 工程が扱う課題 |
 | `--kind <design・plan・manuscript>`（1 回以上） | 選ぶ文書の種類（下の表） |
 | `--on-fail <items・gate>`（必須） | 読み手役が不合格とした文書があるときの終わり方。`items` は `items` に足して `ok`、`gate` は `items` に足して `gate` |
-| `--record <ファイル>`（任意） | 確かめ済みの文書の記録（「確かめ済みの文書の記録」）。既定のコマンドでは、スプリントの作業の保存先の `rebuilt.json`。無ければ、どの文書も外さない |
+| `--record <絶対パス>`（任意） | 確かめ済みの文書の記録。無ければ、ほかの工程の結果を使わず、どの文書も外さない。パスの決め方は「確かめ済みの文書の記録」にある |
 | `--state-dir <保存先>`（必須） | 起動指示と worker の結果ファイルの保存先。既定のコマンドでは `{state_dir}`。この文字列は `values.json` とプランにはそのまま残り、プランの実行（`core/plan`）がステップを打つ時に絶対パスへ置き換える |
 | `--out <ファイル>`（必須） | 結果 JSON を書くファイル。テンプレートが後ろに足す |
 | 作業場所 | 打った場所（プランの作業場所） |
@@ -162,62 +168,92 @@ flowchart TD
 
 **通常ファイルに限る**: 種類に合うパスのうち、作業場所で `lstat` した通常ファイルで、作業場所の根から親までのどのディレクトリもリンクでないものだけを対象にする。実装計画の頭は、リンクをたどらずに開いて読む。外したパス（シンボリックリンク・サブモジュール・作業場所に無いもの）は `warnings` に 1 件ずつ載せる。組になる要求仕様のコピーも同じ条件で確かめ、合うパスだけを起動指示に書く。起動指示には、挙げたパスのほかのリンク先を読まないことも書く。
 
-**確かめ済みの文書の記録**: `--record` のファイルは、文書のパスごとに、組み直した後の内容の SHA-256 を持つ。
+**確かめ済みの文書の記録**: `--record` のファイルは、文書のパスごとに次の値を持つ。
+
+| キー | 値 |
+| --- | --- |
+| `sha256` | 組み直した後の文書の内容の SHA-256 |
+| `requirements` | 読み手役に渡した要求仕様のコピーのパスと、その内容の SHA-256 の対応。設計書のほかと、コピーが 1 つも無いときは空 |
+| `step` | 書いたステップの `--state-dir` の絶対パス |
+| `reader` | 読み手役の記録 |
+| `items` | worker がその文書について残した足すべき内容の `text` の並び |
+
+文書の `sha256` と `requirements`（パスの一覧と内容の両方）が、選ぶ時点の作業場所から求めた値と同じときだけ、その文書は変わっていないとする。要求仕様のコピーを足した・消した・変えたときは、設計書が同じでも対象に残る。
 
 | 時点 | 扱い |
 | --- | --- |
-| 選ぶとき | 記録のハッシュが今の内容と同じ文書を対象から外し、`metrics.unchanged` に載せる。記録に無い文書と、ハッシュの違う文書は対象に残す。記録を読めないときは、記録が無いものとして扱う |
-| 終えたとき（I3・I4・I6 を満たした後） | 対象のうち `pass` と `fixed` の文書のハッシュを書く。`fail` と `not_run` の文書は記録から消すので、次の工程でも対象に残る |
+| 選ぶとき、別のステップ（工程）の記録 | `pass` と `fixed` の、変わっていない文書を対象から外し、`metrics.unchanged` に載せる。`items` は足さない（書いた工程のレビューへ渡し済みである） |
+| 選ぶとき、同じステップの記録（打ち直し） | `pass`・`fixed`・`fail` の、変わっていない文書を対象から外し、記録の `items`・`reader` を今回の結果へ足す。`fail` は不合格の項目にもなり、`--on-fail` を新しく確かめたときと同じに扱う（I11） |
+| 選ぶとき、そのほか | `not_run`・記録に無い・変わった文書は対象に残す。記録を読めないときは、記録が無いものとして扱う |
+| 終えたとき（対象の取り込みとコミットの後） | 対象の文書の値を書く |
 
-記録は、スプリントの作業の保存先（`ndf.progress.run.work_root`。工程のステップの保存先の 2 つ上）に 1 つ置き、スプリントの工程だけが読み書きする。git の共通ディレクトリの中なので、作業場所を作り直しても残る。失われたときは、文書をもう一度組み直すだけである（決定 10）。
+記録のパスは、準備の時点で `rebuild_values.fill` が絶対パスの文字列にしてコマンドに入れる。`values.json` とプランにもその文字列のまま残り、`{state_dir}` のような差し込みを含まない。求め方は `rebuild_values.record_path(work_dir) = work_dir.parents[1] / "rebuilt.json"` の 1 か所だけで、`work_dir` は `prepare_plan` が受けるステップの保存先（`run.step_dir` が返す絶対パス）である。`step_dir` は `<work_root>/<工程>/<ステップ>` なので、2 つ上は `run.work_root`（スプリントの作業の保存先）になる。2 つの工程と変更要求の後の世代が、同じファイルを指す。`invoke` は `run` を読めない（`run` が `invoke` を読む）ので `work_root` は呼ばず、一致をテストで確かめる。
+
+この場所は git の共通ディレクトリの中なので、作業場所を作り直しても残る。失われたときは、文書をもう一度組み直すだけである（決定 10）。
 
 **終わり方**:
 
 | 終わり方 | 結果 |
 | --- | --- |
-| 組み直した | `ok`。`items` は足すべき内容の `{"id", "text"}`、`metrics` は `targets`（対象のパス）・`unchanged`（確かめ済みで外したパス）・`readers`（文書ごとの読み手役の記録）・`touched`（worker のコミットが変えたパス） |
-| 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点・確かめ済みで外した件数）」、`items` は空、`metrics.targets` は空。worker を起動しない。前の打ち直しの起点の記録が残っていれば、対象の外の変更だけは確かめる（「対象の外の変更」） |
+| 組み直した | `ok`。`items` は足すべき内容の `{"id", "text", "doc"}`、`metrics` は `targets`（対象のパス）・`unchanged`（確かめ済みで外したパス）・`readers`（文書ごとの読み手役の記録）・`touched`（コミットした文書のパス） |
+| 対象が 0 件 | `ok`。`summary` は「組み直す文書が無い（種類・起点・確かめ済みで外した件数）」、`items` は同じステップの記録から引き継いだものだけ（無ければ空）、`metrics.targets` は空。worker を起動しない。引き継いだ不合格があれば `--on-fail` に従う。判断待ちの記録があれば `ok` にしない（「worker が判断を求めたとき」） |
 | 起点を決められない | `stopped`（`precondition`）。`summary` に読めない参照の名前（リモートが登録されていないときは、その名前と設定のキー `.ndf/worktree.json` の `remote`）。分岐点が無いとき（三点差分の失敗）も同じで、参照の名前と git の文を載せる。worker を起動しない |
 | worker が作業を残した・起動に失敗した | `ndf worker run` の `stopped` の種類（`kind`）・`gaps` をそのまま返す |
 | worker が判断を求めた | `gate` のまま返さず、`stopped`（`incomplete`）にする（「worker が判断を求めたとき」） |
-| 足すべき内容の形が違う | `stopped`（`bad_report`） |
+| 足すべき内容の形が違う（`text` が無い、`doc` が対象の文書でない） | `stopped`（`bad_report`） |
 | 読み手役の記録が欠けた文書がある | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件 |
-| 対象の文書の変更がコミットされていない | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件 |
-| 対象の外のパスを変えたコミットがある | `gate`。`warnings` にパスを 1 件ずつ、`summary` に件数とコミットの範囲。`--on-fail` と読み手役の結果によらない（「対象の外の変更」） |
-| 読み手役が不合格とした文書がある | `--on-fail items` は `ok`、`--on-fail gate` は `gate`。どちらも、`items` に文書ごとに 1 件（`id` は `reader-<番号>`、`text` は文書・不合格の質問・理由）を足す |
+| 起動の前に、対象の文書に未コミットの変更がある | `stopped`（`precondition`）。文書を挙げる。worker を起動しない |
+| 対象の文書が切り離した作業場所に通常ファイルとして無い、起動の後に作業場所で変わった、コミットに失敗した（hook が断ったなど） | `stopped`（`incomplete`）。`gaps` に文書ごとに 1 件。どの文書も取り込まず、書き込んだ後の失敗では元の内容へ戻す |
+| 読み手役が不合格とした文書がある | `--on-fail items` は `ok`、`--on-fail gate` は `gate`（`summary` に確かめた `HEAD` の SHA）。どちらも、`items` に不合格の文書をすべて 1 件ずつ（`id` は `reader-<番号>`、`text` は文書・不合格の質問・理由）足す。`gate` の理由はこの 1 つだけなので、ほかの理由の `gate` に不合格が隠れない |
 
 どの終わり方でも、標準出力の最後の 1 行と `--out` に同じ結果 JSON を書く。`gate` の `routes` は `approved` と `rejected` で、どちらも値は `null` である（続きのコマンドはプランの実行が決める）。
 
-**`items` の `id`**: worker の足すべき内容には、結果ファイルの並びの順に `add-1`・`add-2` …、読み手役の不合格には対象の順に `reader-1`・`reader-2` … を振る。worker が書いた `id` は使わない。レビューの指摘の結果は `id` をキーに数えるので、worker の `id` を残すと、重なった 2 件の片方の処置で両方が処置済みになるからである。接頭辞が違うので、worker の書き方によらず 1 つの結果の中で重ならず、どの項目も捨てない（I9）。
+**`items` の `id`**: worker の足すべき内容には、記録から引き継いだもの・結果ファイルの並びの順に `add-1`・`add-2` …、読み手役の不合格には文書のパスの順に `reader-1`・`reader-2` … を振る。worker が書いた `id` は使わない。レビューの指摘の結果は `id` をキーに数えるので、worker の `id` を残すと、重なった 2 件の片方の処置で両方が処置済みになるからである。接頭辞が違うので、worker の書き方によらず 1 つの結果の中で重ならず、どの項目も捨てない（I9）。
 
 **worker の終わりの読み方**: `ndf worker run` の標準出力と、worker が書いた結果ファイルは中身が違う。次の順に読む。
 
 1. 標準出力の結果 JSON を先に読む。`_cmd_run`（`core/worker.py`）が結果ファイルを検査した後の `status`・`kind`・`gaps` である。`stopped` ならこれをそのまま返し、`gate` なら下の「worker が判断を求めたとき」の `stopped` にする。どちらも結果ファイルを読まない
 2. 標準出力が `ok` のときだけ、worker の結果ファイルを読み、足すべき内容（`items`）と `metrics.readers` を取る。標準出力の `items` はセッションの情報（`{"kind": "session", …}`）なので、足すべき内容として読まない
 
-**worker が判断を求めたとき**: プランの実行（`runner._result_of`）は、ステップの `routes` によらず、`approved` の続きを次のステップ（push）にする。作業途中の worker の `gate` をそのまま返すと、承認だけで組み直しと確かめを飛ばして push に進む。そこで `stopped`（`incomplete`）にし、続きを組み直すステップの打ち直しだけにする。
+**worker が判断を求めたとき**: プランの実行（`runner._result_of`）は、ステップの `routes` によらず、`approved` の続きを次のステップ（push の側）にする。作業途中の worker の `gate` をそのまま返すと、承認だけで組み直しと確かめを飛ばして push に進む。そこで `stopped`（`incomplete`）にし、続きを組み直すステップの打ち直しだけにする。
 
 | 項目 | 決まり |
 | --- | --- |
+| 判断待ちの記録 | `<--state-dir>/rebuild-pending.json` に、渡した対象のパスと問いを書く |
 | `gaps` | 1 件。`kind` は `decision`、`name` は「worker が求めた判断: <worker の `summary`>（答えは <保存先>/rebuild-answer.md へ）」、`reason` も worker の `summary`。プランと工程の失敗の文が `name` を載せるので、問いと答えの書き先が読める |
 | 続け方 | 人の答えを `<--state-dir>/rebuild-answer.md` へ書き、`ndf progress retry` で打ち直す。プランは組み直すステップから新しい回を始める（工程「設計」でも設計を書く worker からやり直さない） |
-| 打ち直し | 対象を選び直し、答えのファイルがあればその中身を入力のデータとして起動指示に載せ、worker を新しく起動する。結果の形・読み手役の記録・コミット・対象の外の変更を、初回と同じく確かめる。`ok` で終えたら答えのファイルを消す |
+| 打ち直し | 判断待ちの記録があるのに答えのファイルが無ければ、worker を起動せず同じ `stopped` を返す。あれば、選び直した対象に記録の対象（今も通常ファイルで、種類と課題に合うもの）を足し、答えの中身を入力のデータとして起動指示に載せて worker を新しく起動する。この回は確かめ済みの記録でこれらの対象を外さない。足しても 0 件なら `stopped`（`precondition`）で記録の対象を挙げ、`ok` にしない。終わりの確かめは初回と同じである。判断待ちの記録と答えのファイルは、`ok` か読み手役の `gate` で終えたときに消す |
 
-**対象の外の変更**: 最初に worker を起動する前の `HEAD` と、渡した対象のパスを、`<--state-dir>/rebuild-start.json`（起点の記録）に残す。打ち直しは `HEAD` を変えずに対象だけを足すので、前の回が途中で止まっても、その回のコミットが確かめから漏れない。worker の後に、記録の `HEAD` から今の `HEAD` までに変わったパスを読み、記録の対象のほかがあれば `gate` で終える（I7）。`items` でなく `warnings` に載せるのは、`items` は工程「設計」のレビューが足すべき内容として読むからである。
+**切り離した作業場所と取り込み**: worker を起動するとき（対象が 1 件以上のとき）だけ、次の順に行う。
 
-| 回答 | 続き |
-| --- | --- |
-| `approved` | 変更を例外として認め、次のステップ（push）へ進む。取り消すべき変更は、答える前に作業場所で取り消しのコミットを作る |
-| `rejected` | 続けない。直した後に `ndf progress retry` で流し直す（承認ゲートで終えた回の打ち直しは、今もプランの先頭から始まる） |
+1. 対象の文書に未コミットの変更が無いことを `git status --porcelain` で確かめ、対象の内容のハッシュと今の `HEAD` を控える
+2. `location.work_root`（既定ではメインディレクトリの `.worktrees/.ndf` の下）に、`--state-dir` から決まる名前の worktree を、控えた `HEAD` から detached で作る。前の回のものが残っていれば、その `HEAD` へ合わせて中身を捨てる
+3. worker を `--cwd` にこの worktree を渡して起動する。起動指示には、対象のパス・コミットも push もしないこと・対象の外の変更は取り込まれないこと・対象の外で直すべきことは当たる対象の `doc` を添えて足すべき内容に書くことを書く
+4. 結果の形と読み手役の記録（I3・I4）を確かめた後、対象の文書を、リンクをたどらずに 1 つずつ読む。すべて通常ファイルで、作業場所の対象が控えたハッシュのままなら、内容の変わった文書だけを作業場所へ書き、`git commit --only -- <そのパス>` で 1 回コミットする。変わった文書が無ければコミットしない
+5. worktree は、どの終わり方でも片付ける。外せなければ理由を `warnings` に載せる
 
-起点の記録は、対象の外の変更が無い結果（`ok`、または読み手役の不合格だけの `gate`）で消す。対象の外の変更で終えた回には残すので、打ち直しで対象が 0 件になっても同じ変更を確かめ直す。
+コミットの件名は worker の結果ファイルの `metrics.subject`（1 行。リポジトリの記録の書き方に合わせる）を使う。無い・改行を含む・課題を閉じる語を含む（`core/worker.py` の `closing_words`）ときは `Docs: 文書を組み直す （#<番号>）` にする。
+
+worker のコミットは、この worktree の detached の `HEAD` にだけ積まれ、どのブランチからもたどれない。途中で止まった回の変更も同じで、打ち直しは作業場所の `HEAD` から始まる。対象の外の変更と、途中で書いて取り消した中身は、最終の差分にも履歴にも入らない。
+
+**承認と push するコミット**: 読み手役の不合格で `gate` を返すとき、`run` は確かめた `HEAD`（取り込みのコミットの後の SHA）を `<--state-dir>/rebuild-gate.json` に書く。`ok` で終えたら消す。プランの次のステップ `rebuild-check` が `ndf document-rebuild check --state-dir {state_dir} --out {state_dir}/push-head` を打つ。
+
+| `rebuild-gate.json` | 今の `HEAD` | 結果 |
+| --- | --- | --- |
+| 無い（`ok` で終えた・設定のコマンドを使った） | — | `ok`。今の `HEAD` の SHA を `--out` に書く |
+| ある（承認された） | 同じ | `ok`。その SHA を `--out` に書く |
+| ある（承認された） | 違う（回答までにコミットが加わった） | `stopped`（`unreviewed`）。テンプレートの `on_cause` が組み直すステップへ戻す。変わっていない文書は記録を使い、変わった文書だけを確かめ直す。不合格が残れば、新しい `HEAD` の `gate` を返して承認を取り直す |
+
+push のステップは、`HEAD` でなく `--out` の SHA を `refs/heads/<ブランチ>` へ送り、済んだかの確かめ（`probe`）も同じ SHA と照らす。push が断られて直した後（`fix-push`）は、push へ直に戻らず `rebuild-check` へ戻る。直しのコミットが加わっていれば、承認を取り直す。
+
+工程「設計」のプランは `--on-fail items` だけを使い、組み直しの承認ゲートを持たないので変えない。
 
 **不合格の扱い**: `document-rebuild` の手順は、2 回目も不合格なら直さずに報告し、進めるかを承認する人が判断すると定める。コードはこの判断の渡し先だけを決める。
 
 | 工程 | `--on-fail` | 判断する所 |
 | --- | --- | --- |
 | 設計 | `items` | 続くレビューが `--findings` で 1 件ずつ直すか見送り、残ったものを設計承認ゲートで承認する人が見る |
-| ドキュメント再構成 | `gate` | 後ろに `items` を読むステップが無いので、push の前にプランを承認ゲートで終える。`approved` なら次のステップ（push）から続き、`rejected` なら続けない（`ndf plan` が `rebuild` のステップの `gate` を今もそう扱う）。承認する人は、下の「承認ゲートの表示」で対象の文書・不合格の質問・理由を読んで答える。不合格が無ければ止まらない |
+| ドキュメント再構成 | `gate` | 後ろに `items` を読むステップが無いので、push の前にプランを承認ゲートで終える。`approved` なら次のステップ（`rebuild-check` → push）から続き、`rejected` なら続けない（`ndf plan` が `rebuild` のステップの `gate` を今もそう扱う）。承認する人は、下の「承認ゲートの表示」で対象の文書・不合格の質問・理由を読んで答える。不合格が無ければ止まらない |
 
 **承認ゲートの表示**: 今のプランの実行は、ステップの結果から `status`・`kind`・`outputs`・`gaps` などだけを取る。`gate` の `items` は捨て、`summary` もプランの結果へ渡さない。工程の結果（`ndf.progress.run` の `report`）も「ステップが回答を待っている」としか出さない。そこで次の順に引き継ぐ。
 
@@ -260,7 +296,7 @@ flowchart TD
 例（課題 4337・ベースブランチ `main` の工程「設計」）:
 
 ```text
-ndf document-rebuild run --base main --remote origin --issue 4337 --kind design --on-fail items --record <スプリントの作業の保存先>/rebuilt.json --state-dir {state_dir}
+ndf document-rebuild run --base main --remote origin --issue 4337 --kind design --on-fail items --record /work/repo/.git/ndf/state/progress-work/ae55c2f47e13/rebuilt.json --state-dir {state_dir}
 ```
 
 ### 既定を決められないときの `ndf progress next`
@@ -294,10 +330,11 @@ sequenceDiagram
         alt 0 件
             R-->>S: ok（worker を起動しない）
         else 1 件以上
-            R->>W: ndf worker run（起動指示）
+            R->>G: 対象の未コミットの変更・HEAD・切り離した作業場所の作成
+            R->>W: ndf worker run（起動指示。切り離した作業場所）
             W-->>R: 標準出力の結果（ok のときだけ結果ファイルも読む）
-            R->>G: 対象の未コミットの変更・worker のコミットが変えたパス
-            R->>R: items・readers・未コミット・対象の外の変更を確かめる
+            R->>R: items・readers・対象の文書を確かめる
+            R->>G: 対象の文書だけのコミット・切り離した作業場所の片付け
             R-->>S: ok か stopped か gate
         end
     end
@@ -321,8 +358,8 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 | 準備（`ndf progress next`）のリモートの名前 | `git worktree list`（今も `derived_locally` が打つ 1 回を移す） | ±0 |
 | ステップ: 対象を選ぶまで（0 件でも） | リモート追跡の参照の `git rev-parse`・三点差分の `git diff` | 2 |
 | ステップ: リモート追跡の参照が読めないとき | 上に加えて `git remote`・手元の参照の `git rev-parse` | +2 |
-| ステップ: worker を起動したとき | 起動の前の `HEAD` の `git rev-parse`（起点の記録があれば打たない）、終わりの後の `git status --porcelain`・`git diff --name-only` | 最大 +3 |
-| ステップ: 起点の記録が残り、対象が 0 件のとき | 対象の外の変更を読む `git diff --name-only` | +1 |
+| ステップ: worker を起動したとき | 起動の前の `git status`・`HEAD` の `git rev-parse`・共通ディレクトリの `git rev-parse`・残った lock の `git worktree list`・`git worktree add`・`lock`。終わりの後の `git commit`（変わった文書があるとき）・片付けの `git worktree list`・`unlock`・`remove`。前の回の worktree が残っていれば `add` と `lock` の代わりに `checkout`・`clean` | 最大 +10 |
+| ステップ `rebuild-check` | `HEAD` の `git rev-parse` | 1 |
 
 通常ファイルの確かめ・内容のハッシュ・実装計画の頭の読み取りは、ファイルを直に読むので git を打たない。
 
@@ -341,6 +378,7 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 | 差分に `.md` のシンボリックリンクがある | パスが差分に出る（`--name-only` では通常ファイルと見分けられないので、`lstat` で外す） |
 | 消したファイルと、日本語と空白を含むファイルがある差分を、三点差分に `--diff-filter=d -z` を付けて読む | 消したファイルは出ず、名前は引用されない |
 | 日本語と空白を含むファイル名 | `-z` を付けると引用されずに読める |
+| ほかのファイルを `git add` した作業場所で `git commit --only -- <対象>` を打つ | コミットに入るのは対象だけで、ほかのファイルは索引に残る |
 
 ## 非機能の実現方式
 
@@ -454,12 +492,21 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 ### 決定 10: 内容の変わらない文書を読み直さないため、確かめ済みの内容のハッシュをスプリントの作業の保存先で引き継ぐ
 
 - **質問**: 工程「設計」で組み直して確かめた設計書を、工程「ドキュメント再構成」でどう見分けて外すか
-- **選んだ案**: 「確かめ済みの文書の記録」。既定のコマンドが `--record` でパスを渡す。`rebuild_values.fill` はステップの保存先の 2 つ上をスプリントの作業の保存先とする
+- **選んだ案**: 「確かめ済みの文書の記録」。既定のコマンドが `--record` でパスを渡す。絶対パスの求め方は「確かめ済みの文書の記録」の 1 か所に置く
 - 採らなかった案: 工程の `outputs` に足してスプリントの文脈で渡す（工程の定義の `outputs` は終わりに必ず要るので、設定のコマンドを使うリポジトリと `ndf progress finish` で閉じる設計が止まる）
 - 採らなかった案: worker のコミットのトレーラに書く（組み直す所が無いとコミットが無く、squash でマージすると失われる）
 - 採らなかった案: 記録を持たず毎回組み直す（変わっていない設計書だけでも、スプリントあたり worker の起動が 1 回、設計書 1 件ごとに読み手役が最大 2 回増える）
-- **代償**: 記録のファイルが 1 つ増える。要求仕様のコピーだけが変わったときは、設計書を読み直さない。条件 8 は文書の種類の条件として読み、確かめ済みの設計書が無い作業場所で確かめる
+- **代償**: 記録のファイルが 1 つ増える。要求仕様のコピーの字句だけが変わっても、差分に残る設計書を 1 回読み直す。条件 8 は文書の種類の条件として読み、確かめ済みの設計書が無い作業場所で確かめる
 - 根拠: Value 2（MVV バージョン 11）
+
+### 決定 11: 対象の外の変更を push させないため、worker を切り離した作業場所で動かし、対象の文書だけをサブコマンドがコミットする
+
+- **質問**: worker が対象の外を書き換えても、確かめないまま push されないようにするには、どこで止めるか（条件 13）
+- **選んだ案**: 「切り離した作業場所と取り込み」。worker の履歴はスプリントのブランチに入らないので、コミットごとの検査も、対象の外の変更の承認も要らない。リファクタリングの `ndf.core.converge` の作業場所を使う
+- 採らなかった案: worker のコミットが変えたパスを調べ、対象の外があれば承認ゲートで止める（最終の差分だけでは、書いて取り消した秘密が履歴に残る。打ち直しのたびに、起動ごとの起点と対象を覚えてコミットと対応付け、取り消しには履歴の書き換えも要る）
+- 採らなかった案: 作業場所で動かし、worker にコミットだけを禁じる（指示に反したコミットと対象の外の変更が作業場所に残り、後の工程の worker がコミットしうる）
+- **代償**: worker を起動するたびに worktree を 1 つ作って消す。worker が作業を妨げる不具合を対象の外で直しても取り込まれず、足すべき内容としてだけ残る。途中で止まった回の組み直しは使われない。git の管理外のファイルは worker から見えない
+- 根拠: Value 3・Value 13（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -469,13 +516,14 @@ git の子プロセスの回数は次のとおりである。`Git.remote()` は�
 
 | 危険 | 扱い |
 | --- | --- |
-| 対象の外の文書を worker が書き換える | 起動指示に対象のパスだけを渡し、ほかを変えないと書く。worker は作業を妨げる不具合をその場で直してよい規則（`agent-layers.md` の worker の規則 7）なので、対象の外の変更がすべて誤りとは限らない。後続の push は worker のコミットをすべて送るので、対象の外のパスを変えたコミットがあれば push の前に `gate` で止め、人が変更を確かめて答える（I7）。未コミットの変更は push されないので止めない |
-| worker が対象を直したままコミットしない | worker の後に、対象のパスの未コミットの変更を `git status --porcelain` で 1 回読み、残っていれば `incomplete` で止める（I6）。コミットしなければ push されず、後続のどの工程も気づけないからである |
+| 対象の外の文書を worker が書き換える・コミットする | 切り離した作業場所の中にとどまり、取り込まない（I7・決定 11）。直すべきことは足すべき内容として残る |
+| 切り離した作業場所が残る | 次の回が中身を捨てて使い直す。NDF の lock を持つので、オーナーのいないものは `sweep_orphans` が片付ける |
+| 承認の回答を待つ間に、作業場所へコミットが加わる | `rebuild-check` が `HEAD` の違いで止めて組み直すステップへ戻し、push は確かめた SHA だけを送る（I10） |
 | 設計書を省いた変更の工程「設計」で、対象が 0 件になる | 前提 3 のとおり。`ok` で次へ進む |
 | 設計を終えて設計 PR をマージした後の工程「ドキュメント再構成」で、設計書が起点からの差分に無い | 設計書は、差分に無ければ選ばない。起点は変えない。差分から外れた設計書は、工程「設計」で組み直し・レビュー・設計承認ゲートを済ませてベースブランチに入ったものである。その後に書いた詳細設計書や、直した設計書は差分に出るので選ばれる。設計書を省いた実装計画は工程「設計」で組み直していないので、この根拠を使わず、差分によらずに選ぶ（決定 9）。どちらも無ければ、起点を読めたとき（I2）に限り、0 件の `ok` で進む |
 | 設計書がスプリントブランチの差分に残り、「設計」と「ドキュメント再構成」の両方で選ばれる（`doc_prs` が `sprint` のとき、設計 PR を squash でマージしたとき） | 工程「設計」で確かめ済みで、内容が変わっていない設計書は外す（決定 10）。レビューで直した設計書・後で書いた詳細設計書・不合格か未確認の設計書は、もう一度組み直す |
 | 文書の基準を worker の指示へ入れる #4285 が、`core/worker.py`・`document-rebuild` の SKILL.md・`agent-layers.md` を変える | この課題が変えるのは `agent-layers.md` の例外だけである。#4285 は conductor が読み手役を立ててよいことを足すので、例外の文は別の行に書く。後にマージする側が両方の文を残す |
-| ステップの実行 1 回ごとの git の子プロセス | 対象が 0 件でも 2 回、リモート追跡の参照が読めないときは 4 回、worker を起動するとさらに最大 3 回（「処理の流れ」）。`Git.remote()` の `git worktree list --porcelain -z` は準備で 1 回だけ打ち、今の回数から増えない。ネットワークと GitHub は使わない |
+| ステップの実行 1 回ごとの git の子プロセス | 対象が 0 件でも 2 回、リモート追跡の参照が読めないときは 4 回、worker を起動するとさらに最大 10 回、`rebuild-check` で 1 回（「処理の流れ」）。10 回のうち 6 回は、worker の起動 1 回につき worktree を 1 つ作って片付けるものである。`Git.remote()` の `git worktree list --porcelain -z` は準備で 1 回だけ打ち、今の回数から増えない。ネットワークと GitHub は使わない |
 | 進行中のスプリントの `values.json` | 形を変えない。始まった工程は組んだ値をそのまま使う |
 | 承認ゲートの表示を、ほかのプランの `gate` にも通す | 表示（`summary`・`items`）が増えるだけで、`status`・`routes`・続きのステップは変わらない。記録 `step-gates.json` の無い回は今の結果のまま |
 
@@ -512,22 +560,25 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 | 9 | 頭に `省いた文書: 設計書（課題 1・公開インタフェース 変わらない・…）` の行を持つ実装計画が渡る。行の無い実装計画・`##` より後に行がある実装計画・`省いた文書: 実行計画（…）` や `省いた文書: 詳細設計書（…）` だけの実装計画は渡らない | 行の有無を見ない。行全体を `省いた文書: 設計書` と照合する |
 | 9（決定 9） | 設計 PR をマージコミットで取り込み済み（三点差分が空。git の読み取りは偽物に替える）の作業場所で、工程「ドキュメント再構成」に省いた行を持つ実装計画が渡る。工程「設計」では渡らない | 実装計画も差分から選ぶ |
 | I1 | 差分にある `.md` のシンボリックリンク、リンクのディレクトリの下のパス、リンクの実装計画・要求仕様のコピーが、対象にも起動指示にも入らず、外した対象が `warnings` に出る | 拡張子だけで選ぶ。実装計画の頭をリンクをたどって読む |
-| 決定 10 | 記録と同じ内容の設計書は外れ、`unchanged` に出る（それだけなら worker を起動しない）。内容の変わった設計書・記録に無い設計書・`fail` と `not_run` の設計書は残る。壊れた記録では何も外さない | 記録を読まない。ハッシュを見ずにパスだけで外す |
+| 決定 10 | 別のステップの記録と同じ内容の設計書は外れ、`unchanged` に出て、`items` は足されない（それだけなら worker を起動しない）。内容の変わった設計書・記録に無い設計書・`fail` と `not_run` の設計書は残る。要求仕様のコピーを足した・消した・変えたときは、同じ内容の設計書も残る。壊れた記録では何も外さない | 記録を読まない。設計書のハッシュだけで外す |
+| 決定 10（パス） | `run.step_dir` の返す保存先から組んだ `--record` が、2 つの工程でも世代が違っても `run.work_root` の下の同じ絶対パスになり、`{` を含まない。`values.json` にも同じ文字列が残る | `{state_dir}/../..` を書く。工程ごとのパスにする |
+| I11 | 同じステップの打ち直しで外れた `pass` の文書の足すべき内容と、`fail` の文書の不合格が `items` に残る。対象が 0 件で引き継いだ不合格があれば、`--on-fail gate` で `gate` になる | 外した文書の記録を捨て、空の `items` を返す |
 | 10・I1 | 対象が 0 件なら worker を起動せず `ok` で、`summary` に対象が無かったことがある | 0 件でも worker を起動する |
 | 11・I2 | 起点の参照（リモート追跡・手元）がどちらも読めない作業場所と、三点差分が終了コード 128 で終わる（分岐点が無い）作業場所で、`stopped`（`precondition`）と参照の名前が返る。`git merge-base` を打たない（git の読み取りは偽物に替える） | 読めないときに 0 件とみなす |
 | 11・I2（決定 3） | `remote` の名前が未登録でほかのリモートだけがあるとき、手元の参照が読めても `stopped`（`precondition`）で、名前と設定のキーが返る。名前が登録済みで追跡の参照が無いときと、リモートが 1 つも無いときは手元の参照を使う（git の読み取りは偽物に替える） | 追跡の参照が読めないだけで手元へ切り替える |
-| 12・I3 | `--out` の `items` が `id` と `text` を持ち、レビューの読み取り（`as_handed`）が読む。`text` の無い項目は `bad_report` になる | worker の結果をそのまま `--out` へ書く |
-| 13 | サブコマンドの起動する子が `git` の読み取りと `ndf worker run` だけで、起動指示に push と Pull Request を行わないことがある | push の呼び出しを足す |
+| 12・I3 | `--out` の `items` が `id` と `text` を持ち、レビューの読み取り（`as_handed`）が読む。`text` の無い項目と、`doc` が対象に無い項目は `bad_report` になる | worker の結果をそのまま `--out` へ書く |
+| 13 | `run` の起動する子が、`git` の読み取り・worktree の作成と片付け・対象のパスだけの `git commit --only` と、`ndf worker run` だけで、push を含まない。起動指示に push と Pull Request を行わないことがある（git と worker は偽物に替える） | push の呼び出しを足す |
 | 2（決定 7） | 設計のプランの差し込み `base` と、`rebuild` の `--base` が同じ値で、差し込み `remote` と `--remote` も同じ値である。ブランチ戦略の設定を読むのと `Git.remote()` を呼ぶのは 1 回ずつである | `rebuild_values` と `derived_locally` がそれぞれ読む |
 | 14 | `branch_strategy` の無いリポジトリで、2 つの工程とも、記録を書かずに `reason`・`setting`・`shape` を持つ行が返る | 既定の失敗を `RouteError` のまま上げる |
 | 15 | 設定があるリポジトリで、2 つの工程とも設定のコマンドが入る（今のテストを残す） | 設定より既定を先に使う |
 | I4 | `readers` に対象の文書の行が無い・`checks` の言い直しが無い・`checks` の数が種類に合わない・`not_run` で理由が無いか `checks` が空でない結果は `incomplete` になり、欠けた文書が `gaps` に出る。`design`・`plan`・`manuscript` のそれぞれで、`checks` が空で理由のある `not_run` が通る。`plan` の `fixed`（`checks` 1 つ）と、設計書の `fail`（`checks` 2 つ）は欠けにならない | 記録を確かめない。設計書の回数を原稿にも求める。`not_run` に種類の回数を求める |
 | I5 | `fail` の文書がある `ok` の報告は、`--on-fail items` で `ok`、`--on-fail gate` で `gate` になり、どちらも `items` に、文書のパス・質問・理由を含む `reader-1` が入る | `fail` を記録があるだけで通す |
 | I5（承認ゲートの表示） | `items` と `warnings` を持つ `gate` のステップで終わった回の結果と、`ndf progress` の待ちの結果に、その `summary`・`items`・`warnings` が出る。`routes` は今のまま。打ち直して `ok` になったステップの記録は残らない | ステップの `items` を捨てる。`outputs.gaps` に入れる（承認の後に `incomplete` で終わる） |
-| I6 | 対象の文書に未コミットの変更があれば `incomplete`（git の読み取りは偽物に替える） | 未コミットを見ない |
-| I7 | 対象の外のパスを変えたコミットがあれば、`--on-fail` の値によらず `gate` で、`warnings` にパスが出て `items` には入らない。1 回目が `incomplete` で止まった後の打ち直しでも、1 回目のコミットの対象の外のパスで `gate` になる。対象のパスだけなら `gate` にならない（git の読み取りは偽物に替える） | 警告だけで `ok` にする。打ち直しのたびに起点の `HEAD` を取り直す |
-| I8 | `ndf worker run` の `gate` は `stopped`（`incomplete`）になり、`gaps` に問いと答えの書き先がある。答えのファイルを置いた打ち直しは、その中身を起動指示に載せて worker を起動し、I3〜I7 を確かめる。プランの続きは組み直すステップで、push でない | `gate` をそのまま返す。打ち直しで確かめを省く |
-| I9 | worker の `items` が同じ `id` を 2 件持つ・`reader-1` を持つ・`id` を持たないとき、結果の `items` は全件が残り、`id` が重ならない。レビューの読み取り（`as_handed`）でも別々の項目になる | worker の `id` をそのまま使う |
+| I6 | 起動の前に対象へ未コミットの変更があれば、worker を起動せず `precondition`。worker が対象を消す・動かす・リンクにする、起動の後に作業場所の対象が変わる、コミットが失敗する場合は `incomplete` で、作業場所の対象は元の内容のままである（git は偽物に替え、ファイルは一時ディレクトリに置く） | 消えた対象を飛ばして `ok` にする。失敗の後に書き込みを残す |
+| I7 | worker が対象の外のファイルを変え、コミットを積んで後のコミットで取り消しても、作業場所で変わるのは対象の文書だけで、コミットは対象のパスを並べた `git commit --only` の 1 回だけになる。起動の `--cwd` は切り離した作業場所である。1 回目が途中で止まっても、打ち直しは作業場所の `HEAD` から作り直した場所で始まる | 作業場所で worker を動かす。worker のコミットを取り込む |
+| I8 | `ndf worker run` の `gate` は `stopped`（`incomplete`）になり、`gaps` に問いと答えの書き先がある。答えが無い打ち直しは worker を起動せず同じ結果になる。答えのある打ち直しは、選び直した対象が 0 件でも記録の対象を渡し、答えを起動指示に載せて I3〜I6 を確かめる。記録の対象もすべて無ければ `ok` にならず `precondition`。プランの続きは組み直すステップで、push でない | `gate` をそのまま返す。対象が 0 件なら `ok` にする |
+| I9 | worker の `items` が同じ `id` を 2 件持つ・`reader-1` を持つ・`id` を持たないとき、記録から引き継いだ項目と合わせても、結果の `items` は全件が残り、`id` が重ならない。レビューの読み取り（`as_handed`）でも別々の項目になる | worker の `id` をそのまま使う |
+| I10 | `gate` の後に `HEAD` が同じなら `check` がその SHA を書き、違えば `unreviewed` で何も書かない。`rebuild-gate.json` が無ければ今の `HEAD` を書く。テンプレート `document-rebuild` の並びは 組み直し → `rebuild-check` → push で、push と `probe` は `push-head` の SHA を読み、`unreviewed` は組み直しへ、`fix-push` は `rebuild-check` へ戻る | push が `HEAD` を送る。`fix-push` が push へ直に戻る |
 | 「worker の終わりの読み方」 | `ndf worker run` が `stopped` なら結果ファイルを読まずにそのまま返る。`ok` なら標準出力のセッション情報でなく結果ファイルの `items` が渡る | 標準出力の `items` を足すべき内容として読む |
 | 16 | 使い捨ての worktree で、実物の worker に設計書 1 本を組み直させ、`--out` の `metrics.readers` を読む（手で確かめる） | — |
 | 17・移行性 | 決定 8 の PR のマージの後、`main` に設定とスクリプトが無いことを見る（手で確かめる） | — |
@@ -536,9 +587,9 @@ worker の起動は偽物に替え、渡った対象と結果を見る。条件 
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/progress.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/core/plan/test_steps.py`、`plugins/ndf/tests/core/plan/test_runner.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
+| #4337 | 実装する | — | `plugins/ndf/src/ndf/progress/rebuild_values.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/domains/docrebuild/__init__.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/cli.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/select_decide.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/workspace.py`（新設）、`plugins/ndf/src/ndf/domains/docrebuild/record.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`（新設）、`plugins/ndf/src/ndf/domains/loop/design_tests.py`、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/contracts/worker/document-rebuild.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/templates/document-rebuild.json`、`plugins/ndf/contracts/schemas/io/document-rebuild.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/document-rebuild.result.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/progress.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`（生成）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/progress/test_invoke_rebuild.py`（新設）、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/core/plan/test_steps.py`、`plugins/ndf/tests/core/plan/test_runner.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_select.py`（新設）、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`（新設） |
 
-`plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。`ndf.progress.rebuild_values` を `P1b`、`ndf.domains.docrebuild` と `ndf.core.issue_docs` を `M1`（`ndf.domains.loop` の持ち主）の `packages` に足す。
+`plugins/ndf/src/ndf/checks/children.json` を変えるのは、規則 `child-deps` が、持ち主の無いモジュールを指摘するからである。`ndf.progress.rebuild_values` を `P1b`、`ndf.domains.docrebuild` と `ndf.core.issue_docs` を `M1`（`ndf.domains.loop` の持ち主）の `packages` に足す。`ndf.domains.docrebuild` が `ndf.core.converge`（持ち主 `M4`）を読むので、`M1` の `needs` に `M4` を足す（`M4` の順番は `M1` より前で、輪はできない）。
 
 `plugins/ndf/agents/worker.md` は変えない（決定 5）。`.ndf/project.json` と `scripts/launch-document-rebuild.sh` は、決定 8 のリリースの後の PR で変える。
 
