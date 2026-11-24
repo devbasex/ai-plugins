@@ -181,13 +181,13 @@ def test_adopted_line_without_usage_is_form_and_keeps_id_and_time():
 
 def test_scans_stop_early(monkeypatch):
     loads = {"n": 0}
-    real = transcript._line_json
+    real = transcript.json_line
 
     def counted(line):
         loads["n"] += 1
         return real(line)
 
-    monkeypatch.setattr(transcript, "_line_json", counted)
+    monkeypatch.setattr(transcript, "json_line", counted)
     old = [user(f"古い {i}") for i in range(100)]
     rows = tail(*old, reply("m0", tool("deep")), user("次"), reply("m1", text("a")), reply("m1", tool("t1")))
     last_context(rows, Tail())

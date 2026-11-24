@@ -87,11 +87,11 @@ def read_tail(path: str, size: int) -> str:
     return raw.decode("utf-8", "replace")
 
 
-# JSON として読めない行の目印（`_line_json` の返り値）
+# JSON として読めない行の目印（`json_line` の返り値）
 BROKEN = object()
 
 
-def _line_json(line: str) -> Any:
+def json_line(line: str) -> Any:
     """1 行を JSON として読む。読めなければ目印の `BROKEN`。"""
     try:
         return json.loads(line)
@@ -170,7 +170,7 @@ def _scan_group(lines: list, idx: int, mid: Optional[str]) -> tuple:
     for j in range(idx - 1, -1, -1):
         if not lines[j].strip():
             continue
-        rec = _line_json(lines[j])
+        rec = json_line(lines[j])
         if is_boundary(rec):
             return group, None, None
         if _in_group(rec, mid):
@@ -190,7 +190,7 @@ def _find_tool(lines: list, stop: Optional[int], stop_rec: Any, tool_id: str) ->
         line = lines[j]
         if tool_id not in line and COMPACT_SUBTYPE not in line:
             continue
-        rec = _line_json(line)
+        rec = json_line(line)
         if is_boundary(rec):
             return False
         if is_reply_line(rec) and tool_id in _tool_ids(rec):
@@ -224,7 +224,7 @@ def last_context(tail: str, anchor: Anchor) -> ContextRead:
     for idx in range(len(lines) - 1, -1, -1):
         if not lines[idx].strip():
             continue
-        rec = _line_json(lines[idx])
+        rec = json_line(lines[idx])
         if rec is BROKEN:
             partial = True
             continue
