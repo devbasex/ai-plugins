@@ -39,9 +39,9 @@ def _memo_size(cwd):
     return len(data.get("memo", {}).get(context_limit.MEMO_KEY, {}))
 
 
-@pytest.mark.parametrize(("tokens", "notified"), [(249_999, False), (250_000, True), (499_999, True), (500_000, False)])
+@pytest.mark.parametrize(("tokens", "notified"), [(449_999, False), (450_000, True), (599_999, True), (600_000, False)])
 def test_context_limit_notices_from_the_decide_from_value_below_the_limit(tmp_path, tokens, notified):
-    # #3995 の 3995:5・3995:16: PostToolUse は判断開始の値（250,000）以上・運用上限（500,000）未満で知らせる
+    # #3995 の 3995:5・3995:16: PostToolUse は判断開始の値（450,000）以上・運用上限（600,000）未満で知らせる
     usage_transcript(tmp_path, tokens)
     out = _tool(tmp_path, "PostToolUse")
     assert _notice(out) is notified
@@ -50,7 +50,7 @@ def test_context_limit_notices_from_the_decide_from_value_below_the_limit(tmp_pa
 
 def test_context_limit_notices_once_per_user_input(tmp_path):
     # #3995 の 3995:5: 同じ入力の 2 回目は知らせず、利用者の入力の後は知らせ、中継が送った入力の後は知らせない
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_1"))
     assert _tool(tmp_path, "PostToolUse", "toolu_2") is None
     _user_input(tmp_path)
@@ -60,13 +60,13 @@ def test_context_limit_notices_once_per_user_input(tmp_path):
 
 
 def test_context_limit_does_not_notice_in_pre_tool_use(tmp_path):
-    usage_transcript(tmp_path, 300_000)
+    usage_transcript(tmp_path, 500_000)
     assert _tool(tmp_path, "PreToolUse") is None
 
 
 def test_context_limit_reads_nothing_after_the_notice(tmp_path, counted_tail):
     # #3995 の 3995:5: 知らせた後の同じ入力の PostToolUse は会話の記録を読まない
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_0"))
     counted_tail["n"] = 0
     for i in range(10):
@@ -75,7 +75,7 @@ def test_context_limit_reads_nothing_after_the_notice(tmp_path, counted_tail):
 
 
 def test_context_limit_neither_notices_nor_reads_without_a_usable_counter(tmp_path, counted_tail):
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     session = sample("claude", "PostToolUse", tmp_path)["session_id"]
     path = state_dir() / "hooks" / "sessions" / f"{session}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,13 +85,13 @@ def test_context_limit_neither_notices_nor_reads_without_a_usable_counter(tmp_pa
 
 
 def test_context_limit_reads_once_per_tool_call_below_the_decide_from_value(tmp_path, counted_tail):
-    # #3995 の 3995:5: 同じ ID の PreToolUse と PostToolUse の組は PreToolUse だけが読む。続く応答の usage が 250,000 なら知らせる
+    # #3995 の 3995:5: 同じ ID の PreToolUse と PostToolUse の組は PreToolUse だけが読む。続く応答の usage が 450,000 なら知らせる
     usage_transcript(tmp_path, 200_000)
     for i in range(10):
         assert _tool(tmp_path, "PreToolUse", f"toolu_{i}") is None
         assert _tool(tmp_path, "PostToolUse", f"toolu_{i}") is None
     assert counted_tail["n"] == 10
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _tool(tmp_path, "PreToolUse", "toolu_next") is None
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_next"))
     assert counted_tail["n"] == 11
@@ -111,7 +111,7 @@ def test_context_limit_reads_once_per_parallel_call(tmp_path, counted_tail, call
 @pytest.mark.parametrize("tool_use_id", ["toolu_other", None])
 def test_context_limit_reads_for_a_post_tool_use_without_its_pre_tool_use(tmp_path, counted_tail, tool_use_id):
     # PreToolUse の無い・ID の違う・ID の無い PostToolUse は 1 回読んで判定する
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _tool(tmp_path, "PreToolUse", "toolu_A") is None
     counted_tail["n"] = 0
     assert _notice(_tool(tmp_path, "PostToolUse", tool_use_id))
@@ -149,7 +149,7 @@ def test_context_limit_post_tool_use_reuses_the_pre_tool_use_check(tmp_path, cou
     counted_main["n"] = 0
     assert _tool(tmp_path, "PostToolUse") is None
     assert counted_main["n"] == 0
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_B"))
     counted_main["n"] = 0
     for i in range(3):
@@ -159,7 +159,7 @@ def test_context_limit_post_tool_use_reuses_the_pre_tool_use_check(tmp_path, cou
 
 def test_context_limit_post_tool_use_checks_again_for_another_cwd(tmp_path, counted_main):
     # 覚えた値の cwd と違う PostToolUse は、その cwd のリポジトリを探し直して判定する
-    usage_transcript(tmp_path, 300_000)
+    usage_transcript(tmp_path, 500_000)
     assert _tool(tmp_path, "PreToolUse") is None
     other = tmp_path / "sub"
     other.mkdir()
@@ -171,7 +171,7 @@ def test_context_limit_post_tool_use_checks_again_for_another_cwd(tmp_path, coun
 
 def test_context_limit_post_tool_use_checks_the_repo_again_before_the_notice(tmp_path):
     # Tool の実行で判定の対象から外れたら（PreToolUse の後に .ndf が無くなる）、覚えた値があっても知らせず、通知枠も使わない
-    usage_transcript(tmp_path, 300_000)
+    usage_transcript(tmp_path, 500_000)
     assert _tool(tmp_path, "PreToolUse") is None
     (tmp_path / ".ndf").rename(tmp_path / "ndf-off")
     assert _tool(tmp_path, "PostToolUse") is None
@@ -191,7 +191,7 @@ def test_context_limit_remembers_the_cwd_as_a_digest(tmp_path):
 
 def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
     # #3995 の 3995:5: 知らせた後の同じ入力の組は覚えた項目を増やさない。運用上限の判定は今のまま。利用者の入力の後は再び覚える
-    usage_transcript(tmp_path, 250_000)
+    usage_transcript(tmp_path, 450_000)
     assert _notice(_tool(tmp_path, "PostToolUse", "toolu_0"))
     size = _memo_size(tmp_path)
     usage_transcript(tmp_path, 400_000)
@@ -199,7 +199,7 @@ def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
         assert _tool(tmp_path, "PreToolUse", f"toolu_{i + 1}") is None
         assert _tool(tmp_path, "PostToolUse", f"toolu_{i + 1}") is None
     assert _memo_size(tmp_path) == size
-    usage_transcript(tmp_path, 500_000)
+    usage_transcript(tmp_path, 600_000)
     assert deny_reason(_tool(tmp_path, "PreToolUse", "toolu_x")) is not None
     assert _memo_size(tmp_path) == size
     usage_transcript(tmp_path, 400_000)
@@ -210,7 +210,7 @@ def test_context_limit_remembers_nothing_after_the_notice(tmp_path):
 
 def test_context_limit_skips_the_post_tool_use_of_a_subagent(tmp_path, counted_tail):
     # #3995 の 3995:15: agent_id があれば 300,000 の PostToolUse も知らせず、会話の記録を読まない
-    usage_transcript(tmp_path, 300_000)
+    usage_transcript(tmp_path, 500_000)
     payload = {**sample("claude", "PostToolUse", tmp_path), "agent_id": "a0123"}
     assert call_entry("claude", "PostToolUse", payload) is None
     assert counted_tail["n"] == 0
@@ -222,7 +222,7 @@ def test_context_limit_skips_post_tool_use_outside_ndf_without_reading(tmp_path,
     cwd.mkdir()
     if repo == "no-ndf":
         (cwd / ".git").mkdir()
-    line = {"type": "assistant", "message": {"usage": {"input_tokens": 300_000}}}
+    line = {"type": "assistant", "message": {"usage": {"input_tokens": 500_000}}}
     (cwd / "transcript.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
     assert _tool(cwd, "PostToolUse") is None
     assert counted_tail["n"] == 0
@@ -231,7 +231,7 @@ def test_context_limit_skips_post_tool_use_outside_ndf_without_reading(tmp_path,
 def test_context_limit_notice_names_the_values_and_the_cut_points():
     # #3995: 知らせの文は文脈の量・判断開始の値・運用上限と役ごとの切りどころを書き、注入の上限（600 字）以下
     t = thresholds({}, tables.policy_value)
-    text = context_limit._notice(499_999, t)
-    for part in (str(t.decide_from), str(t.limit), "499999", "カットポイント", "wait"):
+    text = context_limit._notice(599_999, t)
+    for part in (str(t.decide_from), str(t.limit), "599999", "カットポイント", "wait"):
         assert part in text
     assert len(text) <= tables.policy_value("hook.budget.post-tool-use", "inject_chars")
