@@ -50,8 +50,9 @@ def rule_facts_of(rules: Sequence[dict], bypasses: Sequence[Optional[str]]) -> R
     params = [(r.get("type"), r.get("parameters") if isinstance(r.get("parameters"), dict) else {}) for r in rules]
     reviews = [_review_count(p) for kind, p in params if kind == PULL_REQUEST_RULE]
     up_to_date = any(kind == "required_status_checks" and p.get("strict_required_status_checks_policy") for kind, p in params)
-    queue_method = next((p.get("merge_method") for kind, p in params if kind == "merge_queue"), None)
-    queue = any(kind == "merge_queue" for kind, _ in params)
+    queues = [p for kind, p in params if kind == "merge_queue"]
+    queue_method = queues[0].get("merge_method") if queues else None
+    queue = bool(queues)
     return RuleFacts(True, max(reviews) if reviews else 0, queue, bool(up_to_date), _weakest(bypasses), queue_method)
 
 
