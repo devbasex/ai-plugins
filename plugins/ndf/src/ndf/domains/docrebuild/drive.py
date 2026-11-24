@@ -42,6 +42,8 @@ WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
+# 読み手役の確かめが済んでいない記録の verdict（不合格と、1 回も立てられなかった）。`items` と `warnings` に残す
+UNFINISHED = ("fail", "not_run")
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -381,12 +383,18 @@ def _clean_check(check: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def reader_items(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]:
-    """`fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。"""
+    """`fail` と `not_run` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。
+
+    `not_run` は読み手役の確かめが済んでいない文書なので、合格と同じには扱わず、残った確かめとして次の工程へ渡す。
+    """
     items: list[dict[str, str]] = []
     warnings: list[str] = []
-    for rec in sorted((r for r in readers if r["verdict"] == "fail"), key=lambda r: r["doc"]):
-        why = "・".join(w for w in (rec["checks"][-1].get("reason"), rec.get("reason")) if isinstance(w, str) and w.strip())
-        text = f"読み手役が {rec['doc']} を不合格とした: {why}"
+    for rec in sorted((r for r in readers if r["verdict"] in UNFINISHED), key=lambda r: r["doc"]):
+        if rec["verdict"] == "not_run":
+            text = f"読み手役が {rec['doc']} をまだ確かめていない: {rec['reason']}"
+        else:
+            why = "・".join(w for w in (rec["checks"][-1].get("reason"), rec.get("reason")) if isinstance(w, str) and w.strip())
+            text = f"読み手役が {rec['doc']} を不合格とした: {why}"
         items.append({"id": f"{READER_PREFIX}-{len(items) + 1}", "text": text, "doc": rec["doc"]})
         warnings.append(text)
     return items, warnings
@@ -440,7 +448,7 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
         return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
     readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
-    summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格 {len(found)} 件）"
+    summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格か未確認 {len(found)} 件）"
     return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
 
 

@@ -81,7 +81,7 @@ def test_checked_builds_the_whole_ok_result() -> None:
     assert got == {
         "tool": drive.TOOL,
         "status": "ok",
-        "summary": "4 件の文書を組み直した（足すべき内容 2 件・読み手役の不合格 2 件）",
+        "summary": "4 件の文書を組み直した（足すべき内容 2 件・読み手役の不合格か未確認 2 件）",
         "items": [
             {"id": "add-1", "text": "足す 1", "doc": DOC_B},
             {"id": "add-2", "text": "足す 2", "doc": DESIGN},
@@ -128,7 +128,7 @@ def test_checked_without_warnings_omits_the_key_and_keeps_a_pass_reason() -> Non
     assert got == {
         "tool": drive.TOOL,
         "status": "ok",
-        "summary": "1 件の文書を組み直した（足すべき内容 0 件・読み手役の不合格 0 件）",
+        "summary": "1 件の文書を組み直した（足すべき内容 0 件・読み手役の不合格か未確認 0 件）",
         "items": [],
         "metrics": {
             "targets": [DESIGN],

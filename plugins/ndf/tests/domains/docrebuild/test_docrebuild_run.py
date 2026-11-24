@@ -351,6 +351,15 @@ def test_reader_items_turn_failures_into_items_and_warnings() -> None:
     assert drive.reader_items([_reader(DESIGN)]) == ([], [])
 
 
+def test_reader_items_keep_documents_the_reader_did_not_check() -> None:
+    """I5: 読み手役を 1 回も立てられなかった文書（`not_run`）も、合格と同じには扱わず項目と `warnings` に残す。"""
+    items, warnings = drive.reader_items(
+        [_reader(DESIGN, "not_run", reason="Tool が無い"), _reader("docs/a.md", "self", reason="実装計画")]
+    )
+    assert items == [{"id": "reader-1", "text": warnings[0], "doc": DESIGN}]
+    assert DESIGN in warnings[0] and "Tool が無い" in warnings[0]
+
+
 # --- 1 回の実行 ---
 
 
