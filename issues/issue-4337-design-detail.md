@@ -286,7 +286,7 @@ plugins/ndf/
 | `launch_worker` | 同上 | 新設 | `(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]` | 起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す |
 | `added_items` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | worker の `items` を確かめ、`id` を `add-<番号>` に振り直す |
 | `reader_gaps` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | 確かめの記録（`metrics.readers`。形は設計書の「確かめの記録」の表）の欠けを、対象の文書ごとの `gaps` の要素にする（I4） |
-| `reader_items` | 同上 | 新設 | `(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]` | `fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5） |
+| `reader_items` | 同上 | 新設 | `(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]` | `fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。渡すのは、`reader_gaps` を通った対象の文書の記録を 1 件ずつだけ |
 | `drive` | 同上 | 新設 | `(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]` | 起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す |
 
 - `start_point`
@@ -353,7 +353,9 @@ plugins/ndf/
 | `plan` | `self` 以外 | 欠け（実装計画は手順書で書いた担当が読み直す文書） |
 | どれでも | ほかの値 | 欠け |
 
-`checks` の各要素は、`verdict` が `pass` か `fail`、`restatements` が空でない文字列の並び、`fail` なら `reason` が空でない文字列であること。`readers` に対象の外の `doc` があっても欠けにせず、そのまま `metrics.readers` に残す。
+`checks` の各要素は、`verdict` が `pass` か `fail`、`restatements` が空でない文字列の並び、`fail` なら `reason` が空でない文字列であること。同じ対象の `doc` を持つ記録が 2 件以上あれば、どれが正しいか決められないので、その文書の欠け（`記録が 2 件以上ある`）にする。`readers` に対象の外の `doc` があっても欠けにせず、確かめもせずに、worker が書いたまま `metrics.readers` に残す。
+
+`drive` は、`reader_gaps` が空のときだけ `reader_items` を呼ぶ。渡すのは、`readers` から `doc` が対象のパスである記録だけを取り出した、対象の文書ごとに 1 件の並びである。対象の外の記録は渡さないので、`items` と `warnings` には、組み直した文書の不合格だけが現れる。
 
 `drive` の進み方:
 
@@ -404,8 +406,9 @@ plugins/ndf/
 | `start_point` | リモート追跡ブランチが読める。ベースブランチが `trunk`、リモートが `up` でも同じ（条件 5） | 登録済みでリモート追跡が無い・リモートが 1 つも無い → 手元 | 両方読めない・ほかの名前だけ → `Precondition`（偽の git） |
 | `changed_paths` | 日本語と空白を含むパス、消したファイルが出ない | 空の差分 | 終了コード 128 → `Precondition`。`merge-base` を打たない |
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
-| `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason` | 対象の行が無い・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`checks` 2 の先頭が `pass`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
+| `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason`。対象の外の `doc` の記録が形を問わず欠けにならない | 対象の行が無い・同じ対象の行が 2 件・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`checks` 2 の先頭が `pass`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
 | `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件（I5） | `fail` が無ければ空 | — |
+| `drive` | `readers` に対象の外の `doc` の `fail` があっても、`items` と `warnings` に出ず、`metrics.readers` には残る | — | 同じ対象の記録が 2 件 → `stopped`（`incomplete`） |
 | `contained` | 作業場所の通常ファイル | 作業場所の根そのものがリンクで、その先の通常ファイル | 末尾がリンク・`issues/` がリンクで作業場所の外を指す・途中のディレクトリがリンクで作業場所の中を指す・存在しない（どれも理由を返す） |
 | `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `launch_worker` を呼ばない（条件 10） | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
 | `drive` | 起動する子が `git` の読み取りと `ndf worker run` だけで、`push`・`commit` を含まない（条件 13） | — | — |
