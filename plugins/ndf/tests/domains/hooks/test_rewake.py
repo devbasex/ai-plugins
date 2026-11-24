@@ -383,6 +383,35 @@ def test_next_wait_after_a_five_minute_ending_reply_does_not_wake(child, wake_he
     assert keep(child)["ttl"] == "5m" and keep(child)["wait_id"] == at + 110
 
 
+@pytest.mark.parametrize("opened", [True, False])
+def test_unreadable_input_ends_the_wait_only_when_the_guard_wrote_opened(child, opened):
+    """#4068 の条件 4: 待ちを終えた応答の入力を記録から決められなくても、guard の `opened` があれば待ちを終え（当たりと読み出しは
+    null）、次の待ちを 0 回から数えて上限をその始まりの量で決め直す。`opened` が無ければ待ちを終えず、回数・上限・費用を保つ。"""
+
+    def halt(clock):
+        raise RuntimeError("眠りに入ったまま")
+
+    write_tail(child, said("x"), reply("m1"))
+    assert stop(child, clock=Clock(T0 + 1, halt))[0] == 0
+    waiting = {**keep(child), "k": 1, "spent": 7_000, **({"opened": T0 + 500} if opened else {})}
+    signals.update_keep(child, SID, waiting)
+    big = use(read=199_500, w1h=500)
+    write_tail(child, said("x"), reply("m1"), said("続けて", at=T0 + 500), reply("m2", "done", big, at=T0 + 510))
+    stop(child, last="done", clock=Clock(T0 + 511, halt))
+    ends = [r for r in log(child) if r["kind"] == "wait_end"]
+    starts = [(r["wait_id"], r["n_max"]) for r in log(child) if r["kind"] == "wait_start"]
+    if opened:
+        assert [(r["hit"], r["cache_read"], r["opened_at"], r["k"]) for r in ends] == [(None, None, T0 + 500, 1)]
+        again = keep_cache.n_max(200_001, rewake._q_for("claude-opus-5-5", "1h"))
+        assert starts == [(T0, waiting["n_max"]), (T0 + 510, again)] and again != waiting["n_max"]
+        assert (keep(child)["k"], keep(child)["spent"], keep(child)["n_max"]) == (0, 0, again)
+    else:
+        assert ends == [] and len(starts) == 1
+        assert {k: keep(child)[k] for k in ("wait_id", "k", "spent", "n_max")} == {
+            k: waiting[k] for k in ("wait_id", "k", "spent", "n_max")
+        }
+
+
 def test_unknown_input_after_a_wake_keeps_the_wait_and_stops_it(child, monkeypatch):
     write_tail(child, said("x"), reply("m1"))
     stop(child)
