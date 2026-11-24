@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -168,30 +170,70 @@ def test_one_more_finding_lists_all_the_places_only_when_the_rule_is_selected(pl
     assert checked("--only", "I3")[0] == 0
 
 
-def test_one_more_finding_lists_the_places_the_base_does_not_have(plugin, checked, monkeypatch):
-    limit = plugin.write(ratchet.RATCHET_REL, body(1)).relative_to(plugin.repo).as_posix()
-    src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
-    twice = "\n\ndef twice():\n    return 1\n"
+def _tar(files: dict[str, str]) -> bytes:
+    """`git archive` の出力。"""
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w") as tar:
+        for rel, text in files.items():
+            member = tarfile.TarInfo(rel)
+            member.size = len(text.encode())
+            tar.addfile(member, io.BytesIO(text.encode()))
+    return out.getvalue()
+
+
+@pytest.fixture
+def against(plugin, checked, monkeypatch):
+    """変更の前の `src/` を渡した中身（パス → 本文）にして `ndf check` を打つ関数。git の引数の並びも返す。"""
+
+    def call(limit: int, files: dict[str, str]):
+        plugin.write(ratchet.RATCHET_REL, body(limit))
+        src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
+        answers = {
+            "rev-parse": f"{plugin.repo}\n".encode(),
+            "cat-file": _object("commit", "tree x\n") + _file(body(limit)),
+            "archive": _tar({f"{src}/{rel}": text for rel, text in files.items()}),
+        }
+        asked = []
+
+        def git(_root, *args, stdin=""):
+            asked.append(args[0])
+            return answers[args[0]]
+
+        monkeypatch.setattr(run, "_git_stdout", git)
+        code, report = checked("--ratchet-base", "HEAD^1")
+        assert code == exit_codes.code_of("failed")
+        return report, asked
+
+    return call
+
+
+def test_one_more_finding_lists_the_places_the_base_does_not_have(plugin, against):
     # 変更の前: a.py・b.py に twice（行は今と違う）、broken.py は読めない
-    files = {f"{src}/ndf/a.py": twice, f"{src}/ndf/b.py": twice, f"{src}/ndf/broken.py": "def (:\n", f"{src}/ndf/x.json": "{}"}
-    blobs = {"HEAD^1^{commit}": _object("commit", "tree x\n"), f"HEAD^1:{limit}": _file(body(1))}
-    blobs.update({f"HEAD^1:{rel}": _file(text) for rel, text in files.items()})
-
-    def git(_root, *args, stdin=""):
-        if args[0] == "rev-parse":
-            return f"{plugin.repo}\n".encode()
-        if args[0] == "ls-tree":
-            assert args[-3:] == ("HEAD^1", "--", src)
-            return "".join(f"{rel}\0" for rel in files).encode()
-        return b"".join(blobs[name] for name in stdin.splitlines())
-
-    monkeypatch.setattr(run, "_git_stdout", git)
+    twice = "\n\ndef twice():\n    return 1\n"
     plugin.write("src/ndf/c.py", "def added():\n    return 1\n")
     plugin.write("src/ndf/d.py", "def added():\n    return 1\n")
-    code, report = checked("--ratchet-base", "HEAD^1")
-    assert code == exit_codes.code_of("failed") and _paths(report) == ["c.py", "ratchet.json"]
-    assert "2 件" in report["items"][1]["detail"]
+    report, asked = against(1, {"ndf/a.py": twice, "ndf/b.py": twice, "ndf/broken.py": "def (:\n", "ndf/x.json": "{}"})
+    assert _paths(report) == ["c.py", "ratchet.json"] and "2 件" in report["items"][1]["detail"]
     assert all(set(i) == {"rule", "path", "line", "detail"} for i in report["items"])
+    assert asked == ["rev-parse", "cat-file", "archive"]
+
+
+def test_a_finding_that_a_rule_change_adds_is_not_in_the_base(plugin, rules, against):
+    same = {"ndf/a.py": "def twice():\n    return 1\n", "ndf/b.py": "def twice():\n    return 1\n"}
+    assert _paths(against(0, same)[0]) == ["ratchet.json"]
+    # 変更の前の規則は twice の同名を認めていた
+    old = {"copy_dup": {**rules["copy_dup"], "allow_names": ["twice"]}}
+    assert _paths(against(0, {**same, "ndf/checks/rules.json": json.dumps(old)})[0]) == ["a.py", "ratchet.json"]
+
+
+def test_the_base_reuses_the_trees_of_the_unchanged_files(plugin):
+    a = plugin.write("src/ndf/a.py", "x = 1\n")
+    b = plugin.write("src/ndf/b.py", "x = 1\n")
+    scope = plugin.scope()
+    rel = {p: p.relative_to(plugin.repo).as_posix() for p in (a, b)}
+    base = run._base_scope(scope, {rel[a]: "x = 1\n", rel[b]: "x = 2\n"})
+    now = {s.rel: s for s in scope.sources}
+    assert [s is now[s.rel] for s in base.sources] == [True, False]
 
 
 def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):

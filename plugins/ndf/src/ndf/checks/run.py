@@ -12,12 +12,16 @@
 from __future__ import annotations
 
 import argparse
+import io
+import json
 import os
 import subprocess
 import sys
+import tarfile
 from collections import Counter
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from ndf import cli, identity
@@ -36,7 +40,7 @@ from ndf.checks import (
     suppressions,
     words,
 )
-from ndf.checks.model import SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, contained, load_rules
+from ndf.checks.model import RULES_PATH, SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, contained, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -45,6 +49,8 @@ TOOL = cli.tool_of(__name__)
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 # ラチェットを当てる規則と、その規則の関数（件数が基準と同じなら違反にしない）。ほかの規則は 0 件を保つ
 RATCHETED = {copy_dup.RULE: copy_dup.check}
+# 規則のデータの保存先（プラグインの根からの相対パス。基準のファイルと同じディレクトリ）
+RULES_REL = PurePosixPath(ratchet.RATCHET_REL).with_name(RULES_PATH.name)
 # 件数が基準を超えた規則の理由に添える、箇所の見方
 LISTING = "増えた箇所は --ratchet-base <変更の前の commit>、全件は --only {rule} で出る"
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
@@ -141,27 +147,49 @@ def _ratchet_base(scope: Scope, path: Path, ref: str) -> dict[str, ratchet.Basel
     return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
 
 
-def _base_scope(scope: Scope, ref: str) -> Scope:
-    """commit `ref` の製品のコード。構文の誤りで読めないファイルは除く。"""
-    src = scope.rel(scope.plugin_root / SRC_DIR)
-    names = os.fsdecode(_git_stdout(scope.repo_root, "ls-tree", "-r", "-z", "--name-only", ref, "--", src)).split("\0")
-    rels = [name for name in names if name.endswith(".py")]
-    blobs = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin="".join(f"{ref}:{rel}\n" for rel in rels)))
+def _base_files(scope: Scope, ref: str) -> dict[str, str]:
+    """commit `ref` の製品のコードのディレクトリの、ファイルごとの本文（git の起動は 1 回）。"""
+    out = _git_stdout(scope.repo_root, "archive", "--format=tar", ref, "--", scope.rel(scope.plugin_root / SRC_DIR))
+    with tarfile.open(fileobj=io.BytesIO(out)) as tar:
+        blobs = {member.name: tar.extractfile(member) for member in tar if member.isfile()}
+        return {rel: blob.read().decode("utf-8", "replace") for rel, blob in blobs.items() if blob is not None}
+
+
+def _base_scope(scope: Scope, files: Mapping[str, str]) -> Scope:
+    """変更の前の製品のコード。今と同じ本文のファイルは構文木を作り直さず、構文の誤りで読めないファイルは除く。"""
+    now = {src.rel: src for src in scope.code()}
     base = Scope(scope.repo_root, scope.plugin_root, scope.plugin_name)
-    for rel, blob in zip(rels, blobs, strict=True):
-        source = Source(scope.repo_root / rel, rel)
-        source.text = (blob or b"").decode("utf-8", "replace")
-        base.sources.append(source)
+    for rel, text in files.items():
+        same = now.get(rel)
+        if same is None or same.text != text:
+            same = Source(scope.repo_root / rel, rel)
+            same.text = text
+        base.sources.append(same)
+    base.sources = base.code()
     unparsable(base)
     return base
 
 
+def _base_rules(scope: Scope, files: Mapping[str, str], rules: dict[str, Any]) -> dict[str, Any]:
+    """変更の前の規則のデータ。変更の前に無いキーは今の値にする（今の規則の関数が読む）。"""
+    rel = scope.rel(scope.plugin_root / RULES_REL)
+    if rel not in files:
+        return rules
+    try:
+        old = json.loads(files[rel])
+    except ValueError as exc:
+        raise CheckError(f"変更の前の規則のデータを読めない: {rel}: {exc}") from exc
+    merged = {key: {**value, **old[key]} for key, value in rules.items() if key in old and isinstance(value, dict)}
+    return {**rules, **old, **merged}
+
+
 def _added(scope: Scope, found: list[Finding], rules: dict[str, Any], ref: Optional[str]) -> list[Finding]:
-    """`found` のうち、commit `ref` に無い指摘。`ref` が無ければ増えた分を見分けられないので空。"""
+    """`found` のうち、commit `ref` のコードを `ref` の規則のデータで見たときに無い指摘。`ref` が無ければ増えた分を見分けられないので空。"""
     if ref is None or not found:
         return []
-    base = _base_scope(scope, ref)
-    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](base, rules)}
+    files = _base_files(scope, ref)
+    base, old = _base_scope(scope, files), _base_rules(scope, files, rules)
+    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](base, old)}
     return [f for f in found if (f.rule, f.key) not in before]
 
 

@@ -104,7 +104,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 | 場合 | 結果 |
 | --- | --- |
 | 件数が基準と同じ | 通る |
-| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出し、`--ratchet-base <commit>` を渡したときは、その commit に無い指摘（増えた箇所）も出すので減らす。その規則の指摘の全件は `--only copy-dup` を渡したときだけ出す |
+| 件数が基準より多い（重複を増やした） | 落ちる。理由と件数を `ratchet.json` の行に出し、`--ratchet-base <commit>` を渡したときは、その commit のコードを、その commit の `rules.json` で見たときに無い指摘（増えた箇所）も出すので減らす。その規則の指摘の全件は `--only copy-dup` を渡したときだけ出す |
 | 件数が基準より少ない（重複を減らして基準を据え置いた） | 落ちる。`ndf check --write-spec` が基準を今の件数へ下げるので、`ratchet.json` を同じ Pull Request に含める |
 | 基準が、変更の前の基準より大きい（`--ratchet-base <commit>` を渡したとき） | 落ちる。基準を上げる経路は無い |
 
