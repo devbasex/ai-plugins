@@ -1,4 +1,5 @@
 """事実の重複の規則: 同じ事実を 2 つ以上のファイルの最上位の定数に持たない（`const-fact`）。事実の表の形（`fact-table`）。
+環境変数のキー（`env-key`。#4126 の決定 3）。
 
 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の設定から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
@@ -25,6 +26,9 @@ from ndf.contracts.facts import row_schema as contract_row_schema
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
+ENV_TABLE = "domains/env.json"
+# キーから名前を引く関数（`identity.env_name`）を呼べる import: import した名前 → 呼び出しの式がその名前に続けて書く文字列
+ENV_NAME_IMPORTS = {"ndf.identity": ".env_name", "ndf.identity.env_name": ""}
 
 
 @dataclass(frozen=True)
@@ -228,8 +232,77 @@ def table_hits(all_consts: list[Const], machine_ids: dict[str, list[str]], min_s
     return found
 
 
+def _env_name_calls(tree: ast.Module) -> list[ast.Call]:
+    """`identity.env_name` の呼び出し。別名の import（`from ndf.identity import env_name as en` など）も数える。"""
+    names = {
+        (a.asname or a.name) + ENV_NAME_IMPORTS[f"{node.module}.{a.name}"]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for a in node.names
+        if f"{node.module}.{a.name}" in ENV_NAME_IMPORTS
+    }
+    return [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) in names] if names else []
+
+
+def _env_rows(path: Path) -> tuple[str, list[Any] | None]:
+    """環境変数の表の本文と行。無い・JSON として読めない・`rows` が配列でなければ行は `None`。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text)
+    except (OSError, ValueError):  # 表の誤りは fact-table と、呼び出しの行の env-key が言う
+        return "", None
+    rows = data.get("rows") if isinstance(data, dict) else None
+    return text, rows if isinstance(rows, list) else None
+
+
+def _filled(value: object) -> bool:
+    return isinstance(value, str) and value != ""
+
+
+def _env_row_keys(rel: str, text: str, rows: list[Any]) -> tuple[set[str], list[Finding]]:
+    """行が持つキーの集まりと、行の違反（`key` か `id` が空でない文字列でない・キーの重なり）。"""
+    keys: set[str] = set()
+    found = []
+    lines = text.splitlines()
+    for row in (r for r in rows if isinstance(r, dict) and "key" in r):
+        mark = f'"id": {json.dumps(row.get("id"), ensure_ascii=False)}'
+        line = next((no for no, t in enumerate(lines, 1) if mark in t), 1)
+        key = row["key"]
+        if not (_filled(key) and _filled(row.get("id"))):
+            found.append(
+                Finding("env-key", rel, line, f"キーを持つ行の key と id は空でない文字列にする（key {key!r}・id {row.get('id')!r}）")
+            )
+        elif key in keys:
+            found.append(Finding("env-key", rel, line, f"キー {key} を 2 つ以上の行が持つ"))
+        else:
+            keys.add(key)
+    return keys, found
+
+
+def _call_fault(call: ast.Call, keys: set[str] | None) -> str | None:
+    """`identity.env_name` の呼び出し 1 つの誤り。無ければ `None`。`keys` の `None` は環境変数の表が読めない。"""
+    if keys is None:
+        return f"{ENV_TABLE} が無いか読めず、identity.env_name のキーを引けない"
+    arg = call.args[0] if len(call.args) == 1 and not call.keywords else None
+    if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+        return "identity.env_name の引数を 1 つの文字列リテラルにする"
+    return None if arg.value in keys else f"キー {arg.value} を持つ行が {ENV_TABLE} に無い"
+
+
+def env_key_findings(scope: Scope, contracts_dir: str) -> list[Finding]:
+    """環境変数の表のキーの重なりと型、コードの `identity.env_name` の呼び出しのキーの違反（`env-key`）。"""
+    path = scope.plugin_root / contracts_dir / ENV_TABLE
+    text, rows = _env_rows(path)
+    keys, found = (None, []) if rows is None else _env_row_keys(scope.rel(path), text, rows)
+    for src in scope.code():
+        faults = [(call.lineno, _call_fault(call, keys)) for call in _env_name_calls(src.tree)]
+        found += [Finding("env-key", src.rel, line, fault) for line, fault in faults if fault is not None]
+    return found
+
+
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["facts"]
     all_consts = [c for src in scope.code() for c in consts(src.tree, src.rel)]
     machine_ids, found = tables(scope, conf["contracts_dir"])
+    found += env_key_findings(scope, conf["contracts_dir"])
     return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, machine_ids, conf["min_str"])

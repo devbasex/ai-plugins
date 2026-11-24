@@ -42,6 +42,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -154,6 +155,44 @@ def _retired_items(retired: tuple[Retired, ...]) -> list[dict[str, str]]:
 def entrypoint(root: Path) -> Path:
     """プラグインの根 `root` の下のエントリポイント（`bin/ndf`）。"""
     return root / "bin" / FIXED_WORDS["entrypoint"]
+
+
+class EnvNameError(LookupError):
+    """環境変数のコントラクトが読めないか、キーの行が 1 行でない。"""
+
+
+def env_name(key: str) -> str:
+    """環境変数のコントラクト（`contracts/domains/env.json`）で `key` を持つただ 1 つの行の名前。既定の名前へ戻さない。
+
+    hook の経路から呼ぶので、`ndf.contracts`（jsonschema を読む）を通さずに標準ライブラリで読む。
+    """
+    names = _env_keys().get(key)
+    if names is None or len(names) != 1:
+        count = 0 if names is None else len(names)
+        raise EnvNameError(f"環境変数のコントラクトのキー {key} の行が {count} 行ある（1 行だけ要る）")
+    return names[0]
+
+
+@lru_cache(maxsize=1)
+def _env_keys() -> dict[str, tuple[str, ...]]:
+    """キー → そのキーを持つ行の名前（表の順）。1 プロセスに 1 回だけ読む。表の形が違えば `EnvNameError`。"""
+    path = ROOT / "contracts" / "domains" / "env.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise EnvNameError(f"環境変数のコントラクトを読めない（{path}）: {exc}") from exc
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise EnvNameError(f"環境変数のコントラクトの形が違う（{path}）")
+    found: dict[str, tuple[str, ...]] = {}
+    for row in rows:
+        if "key" not in row:
+            continue
+        key, name = row["key"], row.get("id")
+        if not (isinstance(key, str) and key and isinstance(name, str) and name):
+            raise EnvNameError(f"環境変数のコントラクトの行の key か id が空でない文字列でない（{path}）")
+        found[key] = (*found[key], name) if key in found else (name,)
+    return found
 
 
 def _env_dir(var: str, *default: str) -> Path:

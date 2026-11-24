@@ -50,21 +50,45 @@ class QuestionUnreadable(SignalError):
     """質問のファイルが在るが読めない（権限・ディレクトリ・I/O の誤り）。中身が壊れていることと見分ける（#3814）。"""
 
 
+def require_keys() -> None:
+    """中継の変数の名前をすべてコントラクトから引けることを確かめる。引けなければ `identity.EnvNameError`（#4126 の決定 3）。"""
+    identity.env_name("relay-dir")
+    identity.env_name("relay-session")
+
+
+def keys_known() -> bool:
+    """`require_keys` が通るか。通らないコントラクトでは、hook は中継へもオーガナイザーへも書かない側へ倒す。"""
+    try:
+        require_keys()
+    except identity.EnvNameError:  # noqa: NDF401 ファイル: コントラクトの誤りは hook の例外にせず、呼び手が対象外として扱う
+        return False
+    return True
+
+
 def relay_dir(env: Mapping[str, str]) -> Optional[Path]:
     """中継の下ならセグメントのやり取りの保存先。外か保存先が無ければ None。"""
-    value = env.get("NDF_RELAY_DIR")
+    value = env.get(identity.env_name("relay-dir"))
     path = Path(value) if value else None
     return path if path is not None and path.is_dir() else None
 
 
-def launch_env(directory: Path, launch: str) -> dict[str, str]:
-    """子のセッションへ渡す、セグメントのやり取りの保存先と起動の ID の環境変数。"""
-    return {"NDF_RELAY_DIR": str(directory), LAUNCH_ENV: launch}
+def launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]:
+    """子のセッションへ渡す、セグメントのやり取りの保存先・起動の ID・子の会話の ID の環境変数。"""
+    return {
+        identity.env_name("relay-dir"): str(directory),
+        LAUNCH_ENV: launch,
+        identity.env_name("relay-session"): session_id,
+    }
 
 
 def relay_launch(env: Mapping[str, str]) -> Optional[str]:
     """hook の環境の起動の ID。無ければ None。"""
     return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
+
+
+def relay_session(env: Mapping[str, str]) -> Optional[str]:
+    """hook の環境の子の会話の ID。無ければ None。"""
+    return env.get(identity.env_name("relay-session")) or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う
 
 
 def set_launch(directory: Path, launch: Optional[str]) -> None:

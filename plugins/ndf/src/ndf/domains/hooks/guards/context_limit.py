@@ -33,7 +33,7 @@ from ndf.domains.hooks.context import DQUOTE_ESCAPABLE, context_tokens
 from ndf.domains.hooks.guards.shell import background_call
 from ndf.domains.hooks.strict import _repo_root
 from ndf.domains.relay.context_thresholds import Thresholds, thresholds
-from ndf.domains.relay.signals import relay_dir
+from ndf.domains.relay.signals import keys_known, relay_dir
 from ndf.domains.hooks.verdict import Verdict, advise, deny, passing
 
 # 運用上限で通す Bash に許さない形: 変数の展開・コマンド置換（`$`・バッククォート）とプロセス置換
@@ -428,7 +428,8 @@ def check(ctx, svc) -> Verdict | None:
     t = thresholds(ctx.env, tables.policy_value)
     if tokens < t.limit or _passes(ctx, svc.params):
         return passing(context_tokens=tokens)
-    under = relay_dir(ctx.env) is not None
+    # コントラクトの誤りで名前を引けなければ、拒否は保ったまま中継の外の案内にする（#4126 の決定 3）
+    under = keys_known() and relay_dir(ctx.env) is not None
     # 引継ぎの手順はほかの guard の拒否より先に従い、連結で末尾（wait の行の扱い）が切れないよう単独で出す
     reason = _reason(t, under, main, svc.params["handoff_dir"])
     return deny(reason, notes={"context_tokens": tokens, "under_relay": under}, sole=True)
