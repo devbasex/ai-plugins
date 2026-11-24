@@ -273,7 +273,7 @@ plugins/ndf/
   - 誤りのキーは `citation_key(error)`（`[path, cited, kind]` の生の値の SHA-256）で、`by: ndf` の指摘を作るときに指摘の `citation_key` に書く。照合はこの欄だけで行い、表示用の `text` や `oscillation.finding_key(text)` を使わない（`text` は記録のコメントで伏せ字が入り得る）
   - キーは手元の状態ファイル（ジャーナル）だけに持つ。`open_block`・`Carried`・`recorded`・`carried` は持たず、記録のコメントの一覧とスレッドの引継ぎに載らない。公開しないので、伏せ字も鍵も通さない（直しの決定 7）
   - `citation_key` の無い `by: ndf` の指摘（記録のコメントから戻した指摘・この変更より前の記録から戻した指摘）はどの誤りにも当たらないので `fixed` になり、同じ誤りは新しい指摘として 1 回だけ足される。別の状態ディレクトリからの再開ではこの経路になる（直しの決定 7 の代償。誤りは落ちない）。同じ状態ディレクトリでの再開は、ジャーナルの指摘がキーを持つので元の指摘に当たる
-  - 誤りのキー（`citation_key`）に当たる既存の `by: ndf` の指摘は、終わり方が `fixed`・`deferred` でも `unresolved` にし、`judged_mvv = mvv` に置き直す。当たる指摘が無い誤りは新しい `by: ndf` の指摘（`major`・`judged_mvv = mvv`）として足す
+  - 誤りのキー（`citation_key`）に当たる既存の `by: ndf` の指摘は、終わり方が `fixed`・`deferred` でも `unresolved` にし、`judged_mvv = mvv` に置き直す。当たる指摘が無い誤りは新しい `by: ndf` の指摘（`major`・`judged_mvv = mvv`）として足す。引いた項目は `cited`・`unknown` に生のまま置き、`mvv`・`mvv_pinned`・`redline`・`redline_items` は置かない。`P1` を誤って引いた指摘も `handable` に入り、修正担当へ渡って収束を止める
   - 未解決の `by: ndf` の指摘で誤りのキーに当たらないものは、`judged_mvv` によらず `fixed`（`judged_mvv = mvv`）にする。`by: ndf` の指摘を解決するのはこの経路だけである（直しの決定 12）
   - 呼び手は `_prepare_round` と `_summary` の前の確かめで、`_citations`（`_final_citations`）が返した誤りと `run.mvv`（今回の識別子）を渡す。`hub.clean` は `run.clean` として記録のコメントと `_summary`（`mvv_outputs`・`record_review`）だけが使い、`_citations` と `ingest_citations` は使わない
 - 指摘の `text` は `review-criteria.json` の `mvv.citation` から作り、行の番号を含めない。パスと引いた本文だけで作るので、行がずれても同じ文になる
@@ -315,7 +315,7 @@ plugins/ndf/
 | `_base_lines` | hunk の前後の行を換算する | ファイルの先頭と末尾の hunk | 足した行 → None |
 | `_citations` | 足した行と、フェンスの行だけを消して本文に出た行を拾う。承認済みの MVV がある PR で、Markdown でないファイル（lockfile など）の `根拠:` を含まない 1 行だけを変えた → head の本文を読まない（全差分の後の Git が 0 回）。日本語のパスの文書と改名した文書でも拾う | ベースから本文の変わらない行を拾わない。ベースの本文は `merge_base` のコミットと元のパスで読む（head の本文を読まない）。同じ鍵の 2 回目は Git を打たず、1 回目と同じ結果を返す。同じ別リポジトリへの参照を含む誤りが 3 件ある確かめで、`clean` の呼び出しと公開範囲の照会（`hub.visibilities`）が 0 回。範囲が狭まったラウンドでは全差分を 1 回打つ。上の表の場合ごとの起動の数（0 回の 2 つの場合と、両側を読む場合の上限 3） | 失敗 → None、`checked_head` が変わらない |
 | `_final_target`・`_final_citations` | 最後のラウンドと同じ head → 既存の結果を使い Git を打たない。承認済みの MVV が無い PR で最後のラウンドの修正を push した → `git merge-base` を打たない（`_final_target` を作らない） | 最後のラウンドの後に push した head → そのコミットの差分と本文を読み（計 4 回まで）、新しい head の誤りを拾い `checked_head` がその head になる。最初のラウンドの確かめが失敗した後の終わり方の判定 → `last_target` があり、同じ head なら確かめ直す | merge-base の失敗 → 例外を外へ出さず None・警告・`mvv_unresolved`。`last_target` が無い → merge-base から対象を作る（`AttributeError` にならない） |
-| `citation_key`・`ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の指摘。消えた誤り → `fixed`。同じ状態ディレクトリでの再開で同じ誤りを再検出 → 元の指摘が未解決のまま置き直され、新しい指摘を足さない。`citation_key` は生の `[path, cited, kind]` だけで決まり、伏せ字の規則・秘密の環境変数・参照先の公開範囲を変えても同じ | 照合キーを持たない `by: ndf` の指摘（記録のコメントから戻した指摘）がある状態で同じ誤りを再検出 → 元の指摘が `fixed`・新しい指摘が 1 回だけ足される。識別子の違う既存の指摘も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
+| `citation_key`・`ingest_citations` | 新しい誤り → `judged_mvv` が今回の `by: ndf` の指摘。前のバージョンの `P1` を引いた誤り → `mvv` も `redline` も持たず `handable` に入り、残れば `mvv_unresolved`。消えた誤り → `fixed`。同じ状態ディレクトリでの再開で同じ誤りを再検出 → 元の指摘が未解決のまま置き直され、新しい指摘を足さない。`citation_key` は生の `[path, cited, kind]` だけで決まり、伏せ字の規則・秘密の環境変数・参照先の公開範囲を変えても同じ | 照合キーを持たない `by: ndf` の指摘（記録のコメントから戻した指摘）がある状態で同じ誤りを再検出 → 元の指摘が `fixed`・新しい指摘が 1 回だけ足される。識別子の違う既存の指摘も、誤りに当たれば今回の識別子へ、当たらなければ `fixed` | `errors` が None → 何も変えない |
 | `apply_fix` | `by: ndf` の指摘への `deferred` は終わり方を変えない | — | — |
 | `_settle_resolved` | 普通の指摘は今どおり `fixed` | `by: ndf` の指摘は `unresolved` のまま | — |
 
@@ -340,7 +340,7 @@ plugins/ndf/
 | `drive._start` の引継ぎ | `drive.py` | 変更 | — | `carried` の結果に、`recorded` の `by: ndf` の件のうち `thread` が開いたスレッドに無いもの（resolve 済み・消えたスレッド）を足して `carry` に渡す。開いたスレッドにある `by: ndf` の件は `carried` の側を使い、重ねない |
 | `open_block` | `report_decide.py` | 変更 | （同じ） | 1 件に `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` を足す。照合キー（`citation_key`）は載せない。`redline` の指摘と `by: ndf` の指摘は `_light` でも載せる。自由記述でない値なので `clean` を通さない |
 
-- 守る振る舞い: ジャーナルへ入れるときは、(1) `mvv_item` で `mvv` を確かめ（一覧に無ければ外して注意。以降は普通の指摘）、(2) 有効な `P`・`C` ならレッドラインの指摘、(3) 有効な `Value`・`Vision`・`Mission` なら重さを `major` 以上に固定した MVV の指摘、の順に分ける
+- 守る振る舞い: 相手役の指摘をジャーナルへ入れるときは（`by: ndf` の指摘は `mvv` を持たず、この分類を通さない）、(1) `mvv_item` で `mvv` を確かめ（一覧に無ければ外して注意。以降は普通の指摘）、(2) 有効な `P`・`C` ならレッドラインの指摘、(3) 有効な `Value`・`Vision`・`Mission` なら重さを `major` 以上に固定した MVV の指摘、の順に分ける
 - レッドラインの指摘は、受けた `P`・`C` の項目をすべて残し（重複を除き、項目の一覧の順に並べる）、修正担当へ渡さず、収束を止めず、振動の判定にも入れない。同じ指摘の申告の到着順（同じラウンドの別の相手役・後のラウンド）と、先に `Value` として見送ったかによらず、同じ識別子で `P`・`C` を一度でも受けた指摘はレッドラインになる
 - 識別子が変わったとき: `judged_mvv` が今回の識別子と違う指摘は、相手役が出し直したかと終わり方によらず、今回の判定・結果・記録に使う前に分類を外す（`restate`）。出し直された指摘は今回の申告だけで分類し直す
 - `restate` の外し方: 前の `judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv` を `mvv_history` へ追記し、`mvv`・`mvv_pinned`・`redline`・`redline_items`・`judged_mvv` を消し、`unpinned_severity` があれば `severity` をそれに戻して消す。終わり方が `fixed`・`deferred` の指摘は終わり方をそのまま残す（今回の結果と記録の対象からは `judged_mvv` が無いので外れる）。`unresolved` の指摘は普通の未解決の指摘として残る。`by: ndf` の指摘は外した後も `by: ndf` のままで、次の `ingest_citations` が今回の識別子で置き直すか `fixed` にする
@@ -361,6 +361,7 @@ plugins/ndf/
 | ジャーナルの指摘 | `judged_mvv` | 文字列か無い | 分類を決めたときの識別子。分類を持たない指摘は持たない | `ingest`・`enter`・`carry`・`ingest_citations` が分類を置くとき |
 | ジャーナルの指摘 | `unpinned_severity` | 重要度か無い | `mvv_pinned` で `major` 以上に固定する前の重さ（相手役の申告に `effective_severity` を当てた値） | 固定するとき |
 | ジャーナルの指摘 | `mvv_history` | 配列か無い | 識別子が変わって外した分類（`judged_mvv`・`mvv`・`redline_items`・`outcome`・`skipped_mvv`）。追記だけ | 分類を外すとき |
+| ジャーナルの指摘（`by: ndf`） | `cited`・`unknown` | 文字列・配列 | 引いた項目の部分と一覧に無い項目（生の値。`mvv` の代わりに持つ） | `ingest_citations` が指摘を作るとき |
 | ジャーナルの指摘（`by: ndf`） | `citation_key` | 文字列か無い | 根拠の行の誤りの照合キー。手元の状態ファイルだけに持つ | `ingest_citations` が指摘を作るとき |
 | ラウンドの記録 | `mvv_checked` | 真偽値 | このラウンドの head で根拠の行の確かめが成功したか | ラウンドの記録を書くとき |
 | 記録のコメントの一覧（`open_block` の 1 件） | `mvv`・`mvv_pinned`・`redline_items`・`judged_mvv`・`unpinned_severity` | ジャーナルの指摘と同じ | 再開で分類・固定前の重さを戻すため | 記録のコメントを書くとき |
