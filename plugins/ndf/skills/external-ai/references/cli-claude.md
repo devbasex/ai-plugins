@@ -48,25 +48,48 @@ $ claude -p --permission-mode bypassPermissions < prompt.md
 文書を読ませるだけの起動では、上の「非対話実行」の形（コマンドの実行とファイルの編集を許す）を使わない。文書に埋め込まれた指示に従っても、
 文書のほかに何も読めず、どこにも書けず、外へ送れないように、読ませるファイルのコピーだけを置いた新しいディレクトリで、Read だけを持たせて起動する。
 
+対象のリポジトリの中で、次の全体を 1 つの Bash の呼び出しで打つ。起動の前に、`external-ai` の「共通の実行手順」の 2（CLI の有無・認証・学習に使わない設定）を確かめる。
+
 ```bash
-D=$(mktemp -d) && R=$(mktemp -d)
-cp <読ませるファイル>... "$D"/          # 同じ名前のファイルは、重ならない名前に変える。シンボリックリンクを置かない
-# 指示の files には、コピーしたファイルの名前（$D からの相対パス）を書く。指示と結果は $R に置く
-(cd "$D" && timeout 1320 claude -p --restricted --safe-mode --strict-mcp-config --tools Read \
+(
+  set -u
+  # 使ってよいランタイムの設定（メインディレクトリの .ndf/runtimes.json）が claude を許していなければ、文書を写す前に止まる
+  MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p'); [ -n "$MAIN" ] || exit 1
+  POLICY="$MAIN/.ndf/runtimes.json"
+  if [ -e "$POLICY" ] || [ -L "$POLICY" ]; then
+    jq -e 'keys == ["allowed"] and (.allowed | type == "array" and index("claude") != null)' "$POLICY" > /dev/null || { echo "claude の起動を許していない" >&2; exit 1; }
+  fi
+  # 写し・指示・結果・エラーログは 1 つの一時ディレクトリに置き、成功でも失敗でも、終わるときに消す
+  W=$(mktemp -d) || exit 1
+  trap 'rm -rf "$W"' EXIT; trap 'exit 143' HUP INT TERM
+  mkdir "$W/docs" "$W/run" || exit 1
+  cp -L <読ませるファイル>... "$W/docs/" || exit 1   # 同じ名前のファイルは、重ならない名前に変えて写す
+  cat > "$W/run/entry.json" <<'JSON'
+<document-rebuild の形の JSON。files には、写したファイルの名前だけを書く>
+JSON
+  ndf records reading prompt --file "$W/run/entry.json" > "$W/run/made.json" || { cat "$W/run/made.json" >&2; exit 1; }
+  jq -er '.metrics.prompt' "$W/run/made.json" > "$W/run/prompt.md" || exit 1
+  cd "$W/docs" && timeout 1320 claude -p --restricted --safe-mode --strict-mcp-config --tools Read \
     --permission-mode dontAsk --no-session-persistence --output-format json \
-    < "$R/prompt.md" > "$R/out.json" 2> "$R/err.log")
+    < "$W/run/prompt.md" > "$W/run/out.json" 2> "$W/run/err.log"
+  # 返った文を標準出力に出す。失敗したら、理由を標準エラー出力に出して 0 以外で終わる
+  jq -er 'select(.is_error == false) | .result' "$W/run/out.json" || { tail -n 20 "$W/run/err.log" "$W/run/out.json" >&2; exit 1; }
+)
 ```
+
+終了コードが 0 なら、標準出力が読み手役の返した文である。0 以外なら、起動できないものとして扱う。質問の文や、一部だけを抜き出した文書のように、
+読ませるために新しく作るファイルも `$W/docs` の中に作る。返った文を一時ディレクトリの外のファイルへ写さない。
 
 | 指定 | 止めるもの |
 | --- | --- |
-| `--restricted` | `$D` の外のファイルの読み取り（シンボリックリンクの先を含む）。利用者・プロジェクト・ローカルの設定（許したツールの設定を含む）の読み込み |
+| `--restricted` | 写しのディレクトリ（`$W/docs`）の外のファイルの読み取り（シンボリックリンクの先を含む）。利用者・プロジェクト・ローカルの設定（許したツールの設定を含む）の読み込み |
 | `--tools Read` | コマンドの実行・ファイルの編集・Web の取得と検索・サブエージェント |
 | `--strict-mcp-config` | MCP サーバー |
 | `--safe-mode` | プラグイン・hook・Skill・`CLAUDE.md`（文書を書いた経緯を渡さないためでもある） |
 | `--permission-mode dontAsk` | 許されていない操作。確認を求めずに拒む |
 
-2.1.331 で実測した。使えるツールは Read だけで、`$D` の外のファイルと、外を指すシンボリックリンクの読み取りは拒まれた。
-**どれかの指定を受け付けないバージョンでは、指定を外して起動しない。** 起動できないものとして扱う。結果は `$R/out.json` の `result` から読む。
+2.1.331 で実測した。使えるツールは Read だけで、起動したディレクトリの外のファイルと、外を指すシンボリックリンクの読み取りは拒まれた。
+**どれかの指定を受け付けないバージョンでは、指定を外して起動しない。** 起動できないものとして扱う。
 
 ## 完了検知は JSON で確定する
 
