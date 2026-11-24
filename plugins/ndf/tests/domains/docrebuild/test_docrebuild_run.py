@@ -511,6 +511,145 @@ def test_drive_drops_the_reason_of_a_passed_check(tmp_path: Path, reason: Any) -
     assert written is got and code == 0
 
 
+# --- 止まる理由の種類と説明（drive の例外の受け方を変えても同じに保つ） ---
+
+
+class RaisingGit(FakeGit):
+    """`fail_on` の git（引数の先頭）を打つと、git を起動できないときと同じ `GitError` を投げる偽物。"""
+
+    def __init__(self, refs: Mapping[str, str], fail_on: str, **kw: Any) -> None:
+        super().__init__(refs, **kw)
+        self.fail_on = fail_on
+
+    def __call__(self, args: list[str], cwd: Optional[Path]) -> git.Completed:
+        if args[0] == self.fail_on:
+            self.calls.append(args)
+            raise git.GitError("git を起動できない: 無い")
+        return super().__call__(args, cwd)
+
+
+class BrokenRemoteGit(FakeGit):
+    """`git remote` だけ終了コード 2 で失敗する偽物。"""
+
+    def __call__(self, args: list[str], cwd: Optional[Path]) -> git.Completed:
+        if args == ["remote"]:
+            self.calls.append(args)
+            return git.Completed(2, "", "fatal: 壊れた設定\n")
+        return super().__call__(args, cwd)
+
+
+@pytest.mark.parametrize("cls", [drive.Precondition, drive.BadReport])
+def test_stop_exceptions_carry_their_detail(cls: type[Exception]) -> None:
+    """止まる理由の例外は説明を `detail` と `str()` の両方で持ち、互いに別の種類として受けられる。"""
+    exc = cls("説明")
+    assert exc.detail == "説明" and str(exc) == "説明"  # type: ignore[attr-defined]
+    assert isinstance(exc, Exception)
+    other = drive.BadReport if cls is drive.Precondition else drive.Precondition
+    assert not isinstance(exc, other)
+
+
+@pytest.mark.parametrize(
+    ("fake", "detail"),
+    [
+        (FakeGit({"refs/remotes/origin/main": BASE_SHA}), "HEAD を読めない: "),
+        (RaisingGit({"HEAD": HEAD}, "rev-parse"), "HEAD を読めない: git を起動できない: 無い"),
+        (
+            FakeGit({"HEAD": HEAD}, remotes=("upstream",)),
+            f"リモート origin が登録されていない（登録済み: upstream）。{drive.WORKTREE_REMOTE} を直す",
+        ),
+        (FakeGit({"HEAD": HEAD}), "起点の参照 refs/remotes/origin/main と refs/heads/main をどちらも読めない"),
+        (BrokenRemoteGit({"HEAD": HEAD}), "登録済みのリモートを読めない: "),
+        (
+            FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff_code=128),
+            "起点 refs/remotes/origin/main から差分を読めない: 分岐点が無い: fatal: no merge base",
+        ),
+        (
+            FakeGit({"HEAD": HEAD, "refs/heads/main": LOCAL_SHA}, remotes=(), diff_code=1),
+            "起点 refs/heads/main から差分を読めない: 差分を読めない（git の終了コード 1）: fatal: no merge base",
+        ),
+        (RaisingGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, "diff"), "git を打てない: git を起動できない: 無い"),
+    ],
+)
+def test_drive_names_why_the_start_or_diff_failed(tmp_path: Path, fake: FakeGit, detail: str) -> None:
+    """起点・差分を決められないときの説明。差分の失敗には起点の参照の名前を頭に付け、包まれない `GitError` は「git を打てない」にする。"""
+    worker = FakeWorker()
+    got = _run(tmp_path, fake, worker)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["cause"]["detail"].startswith(detail)
+    assert got["summary"] == got["cause"]["detail"]
+    assert worker.argv == []
+
+
+def test_drive_stops_before_diff_when_the_start_fails(tmp_path: Path) -> None:
+    """起点を決められなければ差分を読まない。"""
+    fake = FakeGit({"HEAD": HEAD}, remotes=("upstream",))
+    _run(tmp_path, fake, FakeWorker())
+    assert all(c[0] != "diff" for c in fake.calls)
+
+
+def test_drive_names_the_start_ref_when_nothing_is_chosen(tmp_path: Path) -> None:
+    """選んだ文書が無いときの要約は、種類と決めた起点の参照の名前を載せる。"""
+    fake = FakeGit({"HEAD": HEAD, "refs/heads/main": LOCAL_SHA}, remotes=())
+    got = _run(tmp_path, fake, FakeWorker(), kinds=("design", "plan"))
+    assert got["status"] == "ok" and got["items"] == []
+    assert got["summary"] == "組み直す文書が無い（種類: design・plan・起点: refs/heads/main）"
+
+
+def test_drive_diffs_from_the_start_sha_to_head(tmp_path: Path) -> None:
+    """差分は起点の SHA から HEAD の SHA までの 3 ドット差分で読む。"""
+    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA})
+    _run(tmp_path, fake, FakeWorker())
+    diffs = [c for c in fake.calls if c[0] == "diff"]
+    assert len(diffs) == 1 and f"{BASE_SHA}...{HEAD}" in diffs[0]
+
+
+def test_drive_stops_when_the_prompt_template_is_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """起動指示のテンプレートを読めなければ worker を起動せず `stopped`（precondition）。"""
+    _write(tmp_path, DESIGN)
+    monkeypatch.setattr(drive, "_root", lambda: tmp_path / "no-root")
+    worker = FakeWorker(_report())
+    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["cause"]["detail"].startswith(f"起動指示のテンプレート {tmp_path / 'no-root' / drive.PROMPT_TEMPLATE} を読めない: ")
+    assert worker.argv == []
+
+
+def test_drive_stops_when_the_state_dir_is_unwritable(tmp_path: Path) -> None:
+    """起動指示を保存先へ書けなければ worker を起動せず `stopped`（precondition）。"""
+    _write(tmp_path, DESIGN)
+    (tmp_path / "state").write_text("ファイル", encoding="utf-8")
+    worker = FakeWorker(_report())
+    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["cause"]["detail"].startswith("起動指示を保存先 ")
+    assert worker.argv == []
+
+
+@pytest.mark.parametrize(
+    ("worker", "detail"),
+    [
+        (FakeWorker(_report(), stdout="壊れた出力\n"), "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
+        (FakeWorker(_report(), stdout=""), "ndf worker run の標準出力に結果 JSON が無い（終了コード 0）"),
+        (FakeWorker(None), "worker の結果ファイル "),
+        (FakeWorker([1, 2]), "worker の結果ファイル "),  # type: ignore[arg-type]
+        (FakeWorker(_report([{"text": "a", "doc": "docs/other.md"}])), "items の 0 番目の doc が対象の文書でない"),
+    ],
+)
+def test_drive_names_why_the_report_is_bad(tmp_path: Path, worker: FakeWorker, detail: str) -> None:
+    """worker の出力・結果ファイル・足すべき内容の形の誤りは `stopped`（bad_report）で、何が誤りかを説明に書く。"""
+    _write(tmp_path, DESIGN)
+    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
+    assert got["cause"]["detail"].startswith(detail)
+
+
+def test_drive_reports_a_non_object_result_file(tmp_path: Path) -> None:
+    """結果ファイルの中身がオブジェクトでなければ、そう書いた `stopped`（bad_report）。"""
+    _write(tmp_path, DESIGN)
+    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), FakeWorker([1, 2]))  # type: ignore[arg-type]
+    assert got["cause"]["kind"] == "bad_report" and got["cause"]["detail"].endswith("の中身がオブジェクトでない")
+
+
 # --- エントリポイント ---
 
 
