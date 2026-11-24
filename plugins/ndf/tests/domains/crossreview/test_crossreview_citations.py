@@ -257,14 +257,14 @@ def test_only_empty_files_are_read_as_empty(tree: Path) -> None:
 )
 def test_lines_are_counted_the_way_the_markdown_parser_counts_them(text: str) -> None:
     """本文の行を Markdown の解析と同じ数え方で並べる（コードの行の番号と、差分の行の番号を対応させる）。"""
-    lines = changes._markdown_lines(text)
+    lines = changes._markdown_rows(text)
     assert len(lines) == len(markdown.code_lines(text))
     rows = text.split("\n")
     assert all(line in rows[no - 1] for no, line in lines)
 
 
 def test_a_line_after_a_carriage_return_keeps_its_line_number_in_the_diff() -> None:
-    assert changes._markdown_lines("a\rb\r\nc\n") == [(1, "a"), (1, "b"), (2, "c")]
+    assert changes._markdown_rows("a\rb\r\nc\n") == [(1, "a"), (1, "b"), (2, "c")]
 
 
 # --- ラウンドの準備 ---------------------------------------------------------------------------

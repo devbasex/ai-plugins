@@ -1,4 +1,7 @@
 {
   "summary": "プラグインの更新を反映する再起動の前に、待ちを抱えた実行の一覧（ndf plan pending）を読む上限",
-  "seconds": 30
+  "seconds": 30,
+  "read_by": [
+    "ndf.domains.relay.cli"
+  ]
 }

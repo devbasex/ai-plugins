@@ -1,4 +1,7 @@
 {
   "summary": "表に無い担当の無進捗の許容",
-  "seconds": 180
+  "seconds": 180,
+  "read_by": [
+    "ndf.adapters.agents"
+  ]
 }

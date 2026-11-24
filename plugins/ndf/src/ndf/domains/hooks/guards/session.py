@@ -7,7 +7,7 @@ from ndf.domains.hooks.verdict import Verdict, advise
 
 
 def check(ctx, svc) -> Verdict | None:
-    errors = budget.check_budget(budget.checked_policies(), budget.registrations_of(tables.PLUGIN_ROOT))
+    errors = budget.check_budget(budget.registrations_of(tables.PLUGIN_ROOT))
     if not errors:
         return None
     return advise(

@@ -1,0 +1,7 @@
+{
+  "summary": "耐久の記録のロックを待つ上限の秒。当たるとオーナーを添えて StoreInUse で止まる（B11）",
+  "seconds": 300,
+  "read_by": [
+    "ndf.core.durable_locks"
+  ]
+}

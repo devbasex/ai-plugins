@@ -190,8 +190,8 @@ CD のある場合（`cd-no-review`・`cd-review`）の検査のプランは、�
 | 置き場 | キー | 意味 |
 | --- | --- | --- |
 | `.ndf/supervise.json` | `release.dev_workflow` | 開発版の workflow のファイル名。ai-plugins は `release-dev.yml` |
-| `plugins/ndf/contracts/limits/` | `release-steps.trail-status` | 証跡を置いた後に `ndf/release-approval` が `success` になるまで待つ上限（600 秒） |
-| `plugins/ndf/contracts/limits/` | `release-steps.dev-workflow` | 開発版の workflow の実行の終わりを待つ上限（3900 秒） |
+| `plugins/ndf/contracts/limits/` | 削除した [`release-steps.trail-status`](https://github.com/devbasex/ai-plugins/blob/86a28c3c08cda2f5ebdb3de18934c3951dcac2e8/plugins/ndf/contracts/limits/release-steps.trail-status.json) | リリースの承認の記録（証跡）を PR に置いた後に、commit status `ndf/release-approval` が `success` になるまで待つ上限（600 秒）。NDF 11.x のコードは使わない。リンクは削除前のもの |
+| 同上 | 削除した [`release-steps.dev-workflow`](https://github.com/devbasex/ai-plugins/blob/86a28c3c08cda2f5ebdb3de18934c3951dcac2e8/plugins/ndf/contracts/limits/release-steps.dev-workflow.json) | 開発版の workflow の実行の終わりを待つ上限（3900 秒）。NDF 11.x のコードは使わない。リンクは削除前のもの |
 | `scripts/required-checks-allow.json` | `statuses` | API で付ける commit status の名前（`ndf/release-approval`）・付ける workflow・理由。`check-required-checks.py` はジョブの名前と同じく既知の必須として数える。証跡のチェックのジョブ（`approval-check`）そのものは必須にしない宣言に入れる |
 
 ## 外部連携

@@ -222,7 +222,7 @@ def mismatch_detail(blobs: Mapping[str, str]) -> str:
     return f"ベースの MVV の本文が承認の記録と合わない: {list(blobs)[-1]}"
 
 
-def items(body: str, shared: str) -> tuple[str, ...]:
+def items_in(body: str, shared: str) -> tuple[str, ...]:
     """MVV の本文と共通原則に実在する項目（`mvv_decide.items_of`）。コードブロックの中の例は数えない。"""
     return md.items_of(_without_code(body), _without_code(shared))
 
@@ -244,7 +244,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     snap, body, shared = _read(git_mod.Git(root), root, ref, allow_mismatch)
     if snap.state != md.State.APPROVED or snap.sha256 is None:
         return snap
-    found = items(_text(body, list(snap.blobs)[-1]), shared.decode("utf-8"))
+    found = items_in(_text(body, list(snap.blobs)[-1]), shared.decode("utf-8"))
     where = _snapshot_dir(outside)
     body_copy = _write_verified(where / f"v{snap.version}-{snap.sha256[:_NAME_SHA]}.md", body, snap.sha256)
     shared_copy = _write_verified(where / f"principles-{snap.principles_sha256[:_NAME_SHA]}.md", shared, snap.principles_sha256)
@@ -314,10 +314,13 @@ def decision_lines(text: str) -> frozenset[int]:
     return frozenset(got)
 
 
-def signals(root: Path, base_branch: str) -> md.Signals:
-    """ベースブランチの設定の現行のバージョンで、改訂の兆候を数える（本番のブランチの古いバージョンで数えない）。"""
+def signals(root: Path, base_branch: str, *, warnings: list[dict[str, Any]]) -> md.Signals:
+    """ベースブランチの設定の現行のバージョンで、改訂の兆候を数える（本番のブランチの古いバージョンで数えない）。
+
+    記録に読めない行があれば `warnings` へ足す。
+    """
     decl = decl_at(root, md.signals_ref(base_branch, git_mod.Git(root).remote()))
-    rows, _ = jsonl.read_rows(record_path("mvv-signals"))
+    rows, _ = jsonl.read_rows_warned(record_path("mvv-signals"), kind="mvv-signals", warnings=warnings)
     return md.count_signals(rows, decl, repo_key(root))
 
 
@@ -346,31 +349,31 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     at, repo = jsonl.now(), repo_key(root)
     got = version if version is not None else worktree_version(root)
     pair = {k: answer[k] for k in ("state", "gate", "pr") if k in answer}
-    rows = [{"at": at, "kind": kind, "version": got, "repo": repo, **pair} for kind in kinds]
+    rows = [{"at": at, "kind": kind, "mvv_version": got, "repo": repo, **pair} for kind in kinds]
     path = record_path("mvv-signals")
-    for row in rows:
-        jsonl.append_locked(path, row)
-    return rows
+    return [jsonl.append_locked(path, row, kind="mvv-signals") for row in rows]
 
 
-def mvv_validate_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True) -> dict[str, Any]:
+def mvv_validate_sprint(
+    root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True, *, warnings: list[dict[str, Any]]
+) -> dict[str, Any]:
     """スプリント MVV を MVV 判定し、記録に足した行を返す。
 
     `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。記録が無い・壊れた行を
-    含んでも止まらず LLM で判定する。`project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
+    含んでも止まらず LLM で判定し、読めない行は `warnings` へ足す。同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。
+    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
     """
     key = md.mvv_validation_key(inputs)
     path = record_path("mvv-validation")
     repo = repo_key(root)
-    rows, _ = jsonl.read_rows(path)
-    origin = md.reusable(rows, key) if reuse else None
+    rows, broken = jsonl.read_rows_warned(path, kind="mvv-validation", warnings=warnings)
+    origin = md.reusable(rows, key, [(b.before, b.raw) for b in broken]) if reuse else None
     if origin is not None:
         row = md.reuse_row(origin, jsonl.now(), repo)
     else:
         verdict, cost = judge(inputs)
         row = md.judged_row(key, verdict, jsonl.now(), repo, cost)
-    jsonl.append_locked(path, row)
-    return row
+    return jsonl.append_locked(path, row, kind="mvv-validation")
 
 
 def pr_files(hub: GitHub, number: int) -> list[dict[str, Any]]:

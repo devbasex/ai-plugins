@@ -27,8 +27,9 @@ def _stopped(kind="test_failed", **extra):
         (result.result("t", "gate", "判断を待つ", routes={"request_changes": result.command("loop", "answer", ask=("comment",))}), 20),
         (_stopped("fix_limit", routes={"retry": result.command("retry")}), 1),
         (_stopped("wait_timeout", next=result.command("test-slot", "run", "--", "pytest")), 3),
-        (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "version": "11.0.0-dev.3"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "product_version": "11.0.0-dev.3"}), 0),
         (result.result("t", "ok", "済んだ", run_id="r1"), 0),
+        ({**result.result("t", "ok", "済んだ"), "version": 1}, 0),
     ],
 )
 def test_valid_results(obj, code):
@@ -52,7 +53,8 @@ def test_valid_results(obj, code):
         # outputs は閉じた語彙の型付きの欄（#3367）
         (result.result("t", "ok", "済んだ", outputs={"pr": "12"}), 0),
         (result.result("t", "ok", "済んだ", outputs={"anything": 1}), 0),
-        (result.result("t", "ok", "済んだ", outputs={"version": "ndf v11.0.0"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"product_version": "ndf v11.0.0"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"version": "11.0.0"}), 0),
         (_stopped(gaps=[GAP]), 1),
         (_stopped("incomplete"), 6),
         (_stopped("no_such_kind"), 1),
@@ -60,6 +62,7 @@ def test_valid_results(obj, code):
         (_stopped(), 10),
         (result.result("t", "ok", "済んだ"), 1),
         ({**result.result("t", "ok", "済んだ"), "extra": 1}, 0),
+        *[({**result.result("t", "ok", "済んだ"), "version": v}, 0) for v in (0, 2, 2.0, "1", True, None)],
         ({"tool": "t", "status": "ok", "summary": "s", "items": []}, 0),
         (_stopped(process=[{"run": " ", "result": "x"}]), 1),
         ("not an object", None),
@@ -82,7 +85,7 @@ def test_command_builds_the_argv_with_the_entry_name():
 
 def test_answer_words_are_the_answers_table(contracts_copy):
     routes = {"approved": GO, "hold": GO}
-    assert result.answer_errors(routes) == ["routes のキー 'hold' は回答の語彙（facts/answers.json）に無い"]
+    assert result.answer_errors(routes) == ["routes のキーが回答の語彙（facts/answers.json）に無い"]
     contracts_copy("facts/answers.json", lambda t: {**t, "rows": [*t["rows"], {"id": "hold", "label": "保留する"}]})
     assert result.answer_errors(routes) == []
 
@@ -101,11 +104,60 @@ def test_emit_prints_one_line_and_returns_the_kind_code():
     assert len(lines) == 1 and json.loads(lines[0])["cause"]["kind"] == "base_conflict"
 
 
-def test_emit_refuses_wrong_shape(capsys):
+def _instead(obj, code=None):
+    """形の違う結果を出したときの、標準出力の 1 行（代わりの結果）。"""
     out = io.StringIO()
-    assert result.emit(result.result("t", "stopped", "理由なし"), stream=out) == 2
-    assert out.getvalue() == ""
+    assert result.emit(obj, code, stream=out) == 2
+    (line,) = out.getvalue().splitlines()
+    got = json.loads(line)
+    assert result.errors(got, 2) == [] and got["cause"]["kind"] == "invalid"
+    return got
+
+
+def test_emit_stops_instead_of_a_wrong_shape(capsys):
+    got = _instead(result.result("t", "stopped", "理由なし"))
+    assert got["tool"] == "ndf" and got["items"] == []
+    assert "形が違う（1 件）" in got["summary"] and "required" in got["summary"]
     assert "結果の形の誤り" in capsys.readouterr().err
+
+
+SECRET = "sk-test-secret"
+
+
+@pytest.mark.parametrize(
+    "obj",
+    [
+        result.result("t", SECRET, "済んだ"),
+        result.result("t", "ok", "済んだ", items=[SECRET]),
+        result.result("t", "ok", "済んだ", items=[{"severity": SECRET}]),
+        result.result("t", "ok", "済んだ", outputs={SECRET: SECRET}),
+        result.result("t", "ok", "済んだ", routes={SECRET: None}),
+        result.result("t", "stopped", SECRET, cause={"kind": SECRET, "detail": SECRET}),
+        {**result.result("t", "ok", "済んだ"), SECRET: {"token": SECRET}},
+        {**result.result("t", "ok", "済んだ"), "version": SECRET},
+        result.result(SECRET, "stopped", "理由なし"),
+        result.result(f"{SECRET} x", "ok", "済んだ", outputs={"pr": SECRET}),
+        SECRET,
+    ],
+)
+def test_the_result_put_out_instead_and_the_errors_have_no_value_of_the_wrong_one(obj, capsys):
+    assert SECRET not in json.dumps(_instead(obj, 0), ensure_ascii=False)
+    err = capsys.readouterr().err
+    assert "結果の形の誤り" in err and SECRET not in err
+
+
+def test_emit_puts_out_an_unchecked_result_when_the_causes_are_unreadable(contracts_copy, capsys):
+    contracts_copy("causes/invalid.json", text="{")
+    code = result.emit({**result.result("t", "ok", "済んだ"), "extra": SECRET})
+    (line,) = capsys.readouterr().out.splitlines()
+    assert code == exit_codes.unreadable_code() and json.loads(line)["cause"]["kind"] == "invalid" and SECRET not in line
+
+
+def test_a_result_of_a_newer_version_is_received_as_stopped():
+    got = result.received({**result.result("t", "ok", "済んだ"), "version": 2})
+    assert got is not None and got["tool"] == "ndf" and got["cause"]["kind"] == "precondition" and "プラグインを更新する" in got["summary"]
+    assert result.received(result.result("t", "ok", "済んだ")) == result.result("t", "ok", "済んだ")
+    assert result.received({**result.result("t", "ok", "済んだ"), "version": "1"}) is None
 
 
 @pytest.mark.parametrize(("version", "ok"), [("10.27.57", True), ("11.0.0-dev.2", True), ("ndf v10.27.57", False), ("v10.27.57", False)])

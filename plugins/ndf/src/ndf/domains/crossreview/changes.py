@@ -1,7 +1,7 @@
 """変更の読み取り（`drive.py` から分けた。#4076）。
 
 `base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。差分の行の番号は git の
-数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_lines` で対応させる。
+数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_rows` で対応させる。
 """
 
 from __future__ import annotations
@@ -267,7 +267,7 @@ def _base_lines(hunks: Sequence[Hunk], head_line: int) -> Optional[int]:
     return head_line + offset
 
 
-def _markdown_lines(text: str) -> list[tuple[int, str]]:
+def _markdown_rows(text: str) -> list[tuple[int, str]]:
     """本文の行を Markdown の解析と同じ数え方（`\\n`・`\\r\\n`・`\\r` で区切る）で並べ、git の行の番号（`\\n` だけで区切る）と
     本文を返す。並びの n 番目が Markdown の n 行目で、`\\r` だけの改行を含む文書では git の番号と違う。"""
     out: list[tuple[int, str]] = []

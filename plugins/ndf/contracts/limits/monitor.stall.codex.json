@@ -1,4 +1,7 @@
 {
   "summary": "codex の無進捗の許容。推論ログを逐次出す",
-  "seconds": 180
+  "seconds": 180,
+  "read_by": [
+    "ndf.adapters.agents"
+  ]
 }

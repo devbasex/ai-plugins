@@ -30,13 +30,14 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol, Union
 
 from ndf.adapters import github
+from ndf.contracts import internal
 from ndf.contracts.exit_codes import OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import queue_decide
 from ndf.core.plan.queue_run import QUEUE_PRS
 from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
-from ndf.core.plan.runner import RUN_FILE, result_path
+from ndf.core.plan.runner import RUN_FILE, stored_result
 from ndf.core.refs.resume import SKIP, DesignPr
 
 # 参照の設定のキー（種類・参照の先・読む outputs のキー・空に解けたときの実行条件）
@@ -64,7 +65,7 @@ class RefError(ValueError):
 
 
 class Unreadable(Exception):
-    """外の値を読めなかった（GitHub の失敗・上限）。`cause` は停止理由の種類。"""
+    """外の値を読めなかった（GitHub の失敗・上限、新しいバージョンの保存済みの結果）。`cause` は停止理由の種類。"""
 
     def __init__(self, cause: str, reason: str) -> None:
         super().__init__(reason)
@@ -204,8 +205,8 @@ def _target(ref: Ref, ctx: Context) -> Path:
 
 
 def _output(ref: Ref, ctx: Context, src: Sources, default_key: str) -> Union[Any, Unresolved, _Empty]:
-    """参照の先のプランの最後の回が完了で、outputs にキーがあればその値。"""
-    where, key = _target(ref, ctx), ref.key if ref.key is not None else default_key
+    """参照の先のプランの最後の回が完了で、outputs にキーがあればその値。プランが書いた旧いキーは、移した後の今の名前で引く。"""
+    where, key = _target(ref, ctx), internal.stage_value_key(ref.key if ref.key is not None else default_key)
     record = src.plan_record(where)
     if record is None:
         return Unresolved("input_missing", f"{where} に前の回の結果が無い")
@@ -245,7 +246,7 @@ def _result_text(got: Any) -> str:
 
 
 def _version(ref: Ref, ctx: Context, src: Sources) -> Got:
-    return _checked(ref, ctx, src, VERSION, _version_text)
+    return _checked(ref, ctx, src, "product_version", _version_text)
 
 
 def _record_pr(ref: Ref, ctx: Context, src: Sources) -> Got:
@@ -383,7 +384,10 @@ class RepoSources:
         run = read_json(state_dir / RUN_FILE)
         if run is None or not isinstance(run.get("key"), str):
             return None
-        found = read_json(result_path(state_dir, durable.run_name(run["key"])))
+        try:
+            found = stored_result(state_dir, durable.run_name(run["key"]))
+        except internal.InternalError as exc:
+            raise Unreadable(exc.kind, str(exc)) from None
         if found is None:
             return None
         outputs = found["outputs"] if isinstance(found.get("outputs"), dict) else {}

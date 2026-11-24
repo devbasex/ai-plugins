@@ -1,4 +1,7 @@
 {
   "summary": "範囲テストのテンプレートの試走の上限の下限。着手前のテストが上限の近くで通っても、試走はこの秒を使える（#2158）",
-  "seconds": 120
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.crossrefactor.probe_decide"
+  ]
 }

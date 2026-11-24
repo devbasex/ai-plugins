@@ -39,6 +39,7 @@ from ndf.core.plan.records import (
     _add_outputs,
     _add_prs,
     _keep_step_gaps,
+    read_result,
     recorded_outputs,
     recorded_prs,
     recorded_step_gaps,
@@ -57,8 +58,8 @@ WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
-# 承認の回答を 1 回に待つ秒。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
-ANSWER_WAIT_SECONDS = 86400.0
+# 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
+ANSWER_WAIT = "supervise.answer-wait"
 POLL = durable.POLL
 
 
@@ -114,6 +115,11 @@ def result_path(state_dir: Path, run: str) -> Path:
     return state_dir / RESULTS_DIR / f"{run}.json"
 
 
+def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
+    """回 `run`（キーの名前）の結果のバックアップ（今の形）。終わっていなければ None、新しいバージョンなら `InternalError`。"""
+    return read_result(result_path(state_dir, run))
+
+
 # --- 耐久ワークフロー ---------------------------------------------------------------------
 
 
@@ -165,7 +171,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
         return Outcome(SLEPT)
     if isinstance(act, AwaitAnswer):
         mark_waiting(spec["waiting"], act.step, act.seq, spec["routes"][act.step])
-        answer = durable.recv(TOPIC_ANSWER, ANSWER_WAIT_SECONDS)
+        answer = durable.recv(TOPIC_ANSWER, limits.seconds(ANSWER_WAIT))
         if answer is not None:
             clear_waiting(spec["waiting"])
         return Outcome(ANSWERED, answer=answer)
@@ -460,7 +466,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
 
 
 def _stored(inv: Invocation) -> dict[str, Any]:
-    found = read_json(inv.result_path)
+    found = stored_result(inv.state_dir, inv.run_id)
     if found is not None:
         return found
     items = [_run_item(inv)]

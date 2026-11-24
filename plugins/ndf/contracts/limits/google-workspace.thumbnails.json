@@ -1,4 +1,7 @@
 {
   "summary": "スライドのサムネイルを取るコマンドの上限",
-  "seconds": 120
+  "seconds": 120,
+  "read_by": [
+    "ndf.domains.gws.thumbnails"
+  ]
 }

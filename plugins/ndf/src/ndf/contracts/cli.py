@@ -134,7 +134,8 @@ def _cmd_emit(a: argparse.Namespace) -> int:
     buffer = io.StringIO()
     code = result.emit(obj, a.code, stream=buffer)
     line = buffer.getvalue()
-    if not line:
+    if line != result.dumps_line(obj) + "\n":  # 形の違う結果の代わりの stopped は、結果ファイルへ書かない
+        sys.stdout.write(line)
         return code
     # `Path` は末尾の `/`・`/.` を落とすので、ディレクトリとして指定された生の引数をファイルの書き込み先にしない
     if worker_paths.names_a_directory(a.out):

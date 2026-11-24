@@ -1,4 +1,11 @@
 {
   "summary": "一覧（Issue の番号・コメント）を読み切るページの上限（1 ページ 100 件）。超えたら途中で切らずに止まる",
-  "count": 50
+  "count": 50,
+  "read_by": [
+    "ndf.adapters.github",
+    "ndf.domains.backlog.issues_gh",
+    "ndf.domains.backlog.settle",
+    "ndf.domains.crossreview.threads",
+    "ndf.domains.records.mvv"
+  ]
 }

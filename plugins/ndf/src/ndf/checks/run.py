@@ -1,31 +1,39 @@
 """検査 1 本のエントリポイント（サブコマンド `check`）。見るファイルを集め、構文木を 1 回ずつ作り、すべての規則を当てる。
 
-    ndf check [--only <規則>]... [--write-spec]
+    ndf check [--only <規則>]... [--write-spec] [--ratchet-base <ref>]
 
 `--only` があれば、その規則の指摘だけを違反にする。`--write-spec` があれば、規約の
-生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。
+生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書き、減った件数へラチェットの基準を下げてから検査する。
+`--ratchet-base` があれば、ラチェットの基準が、その commit の基準より上がっていないかも見る（CI はマージ先の先頭を渡す）。件数が
+基準を超えた規則は件数だけを出す（指摘の全件は `--only` に規則を渡したときに出す）。
 結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken（止まる前の指摘は items に残す）で、終了コードは種類の終了コード（1・2・2）である。
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import cli, contracts, identity
 from ndf.checks import (
     budget,
     child_deps,
     contracts_split,
+    copy_dup,
     experimental,
     facts,
+    internal_names,
     invariants,
+    limits_readers,
     lint,
+    ratchet,
     suppressions,
     smells,
     spec_docs,
@@ -33,7 +41,7 @@ from ndf.checks import (
     toolchain,
     words,
 )
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, walk
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, contained, load_rules, walk
 from ndf.contracts import ContractError, causes, result
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -52,9 +60,20 @@ SETTINGS_RULES: dict[str, Rule] = {toolchain.RULE: toolchain.check}
 # ほかの規則はコントラクトの表（停止理由の表など）が壊れていると止まるため、その前に当てる
 CONTRACT_RULES: dict[str, Rule] = {contracts_split.RULE: contracts_split.check}
 # 検査が集めたプラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則
-SELECTED_RULES: dict[str, Rule] = {experimental.RULE: experimental.check}
+SELECTED_RULES: dict[str, Rule] = {
+    experimental.RULE: experimental.check,
+    limits_readers.RULE: limits_readers.check,
+    internal_names.RULE: internal_names.check,
+}
 # 規則の一部だけを当てる名前。全体の規則が同じ違反を出すので、`--only` に名前があるときだけ当てる
 PARTIAL_RULES: dict[str, Rule] = {budget.JOBS_RULE: budget.check_jobs}
+# 全体の検査では `spec_docs.check` が同じ名前の違反を出し、単独では要る入力（項目の表・対応表・`children.json`）だけを読む規則
+SPEC_RULES: dict[str, Rule] = {spec_docs.REVIEW_ITEMS: spec_docs.check_review_items}
+# ラチェットを当てる規則（件数が基準と同じなら違反にしない）: 規則の名前 → 規則。ほかの規則は 0 件を保つ。`--only` に名前が
+# 無ければ当てない（基準を読まず、下げない）
+RATCHETED: dict[str, Rule] = {copy_dup.RULE: copy_dup.check}
+# 件数が基準を超えた規則の理由に添える、箇所の見方
+LISTING = "指摘の全件は --only {rule} で出る（変更の前のコードの出力と比べる）"
 
 
 class Halted(CheckError):
@@ -149,20 +168,66 @@ def _chosen(table: dict[str, Rule], scope: Scope, rules: dict[str, Any], only: l
             yield rule(scope, rules)
 
 
+def _git_objects(out: bytes) -> list[Optional[bytes]]:
+    """`git cat-file --batch` の出力の、求めたものごとの中身（無いものは None）。"""
+    found: list[Optional[bytes]] = []
+    while out:
+        head, _, out = out.partition(b"\n")
+        if head.endswith((b" missing", b" ambiguous")):
+            found.append(None)
+            continue
+        size = int(head.rpartition(b" ")[2])
+        found.append(out[:size])
+        out = out[size + 1 :]
+    return found
+
+
+def _ratchet_base(scope: Scope, path: Path, ref: Optional[str]) -> dict[str, ratchet.Baseline]:
+    """commit `ref` のラチェットの基準。`ref` が無いか基準のファイルを持たなければ空、`ref` を読めなければ `CheckError`。"""
+    if ref is None:
+        return {}
+    where = f"{ref}:{scope.rel(path)}"
+    objects = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=f"{ref}^{{commit}}\n{where}\n"))
+    if len(objects) != 2 or objects[0] is None:
+        raise CheckError(f"ラチェットの変更の前の commit を読めない: {ref}")
+    return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
+
+
+def ratcheted(
+    scope: Scope, found: dict[str, list[Finding]], listed: bool, written: list[str] | None, base_ref: Optional[str]
+) -> list[Finding]:
+    """ラチェットを当てる規則ごとの指摘 `found` を基準と比べた結果。`written` があれば、減った件数へ基準を下げ、パスを足す。
+
+    件数が基準と同じ規則の指摘は外す。増えた規則は理由と件数だけにし、`listed` なら指摘もすべて残す。
+    """
+    path = contained(scope.plugin_root, ratchet.RATCHET_REL)
+    counts = {rule: len(hits) for rule, hits in found.items()}
+    limits = ratchet.baseline(path)
+    if written is not None and ratchet.below(counts, limits):
+        commit = _git_stdout(scope.repo_root, "rev-parse", "HEAD").decode().strip()
+        limits = ratchet.lower(path, counts, limits, commit, datetime.now(timezone.utc).date().isoformat())
+        written.append(ratchet.RATCHET_REL)
+    why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base_ref))
+    over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
+    kept = [f for rule in over for f in found[rule]] if listed else []
+    return kept + [Finding(rule, scope.rel(path), 1, text) for rule, text in {**why, **over}.items()]
+
+
 def _parts(
     scope: Scope,
     rules: dict[str, Any],
-    write_spec: bool,
-    written: list[str] | None,
     only: list[str] | None,
+    written: list[str] | None,
     metrics: dict[str, Any] | None,
+    base_ref: Optional[str],
 ) -> Iterator[list[Finding]]:
-    """見る範囲に規則を 1 つずつ当て、規則ごとの指摘を返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。
+    """見る範囲に規則を 1 つずつ当て、規則ごとの指摘を返す。`written` があれば規約の生成物を書き、パスを足す。
 
-    `CONTRACT_RULES`・`SELECTED_RULES`・`SETTINGS_RULES` の規則と規則 budget は、`only` が無いか `only` に名前があるときだけ当てる。
+    `CONTRACT_RULES`・`SELECTED_RULES`・`SETTINGS_RULES`・`RATCHETED` の規則と規則 budget は、`only` が無いか `only` に名前があるときだけ当てる。
     規則 budget を当てたときは、件数を違反の有無にかかわらず `metrics` の `budget` へ入れる。
     """
-    yield unparsable(scope)
+    broken = unparsable(scope)
+    yield broken
     yield from _chosen(CONTRACT_RULES, scope, rules, only)
     yield smell_findings(scope, rules)
     _require_own_contracts(scope, rules)
@@ -173,7 +238,11 @@ def _parts(
     yield words.check(scope, rules)
     yield invariants.check(scope, rules)
     yield child_deps.apply(scope, rules)
-    yield spec_docs.check(scope, rules, write_spec, written)
+    yield spec_docs.check(scope, rules, written is not None, written)
+    # 構文の誤りで読めないファイルがあれば、件数が足りないので基準と比べない
+    counted = {} if broken else {name: rule(scope, rules) for name, rule in RATCHETED.items() if not only or name in only}
+    if counted:
+        yield ratcheted(scope, counted, bool(only), written, base_ref)
     yield from _chosen({**SELECTED_RULES, **SETTINGS_RULES}, scope, rules, only)
     if not only or budget.RULE in only:
         counts = budget.measure(scope)
@@ -187,31 +256,31 @@ def _parts(
 def check(
     scope: Scope,
     rules: dict[str, Any],
-    write_spec: bool = False,
-    written: list[str] | None = None,
     only: list[str] | None = None,
+    written: list[str] | None = None,
     metrics: dict[str, Any] | None = None,
+    base_ref: Optional[str] = None,
 ) -> list[Finding]:
     """見る範囲に規則（`_parts`）を当て、`only` の規則の指摘（無ければすべて）を返す。途中の規則が止まれば `Halted`。"""
-    return _gather(_parts(scope, rules, write_spec, written, only, metrics), only)
+    return _gather(_parts(scope, rules, only, written, metrics, base_ref), only)
 
 
 def select(
     scope: Scope,
     rules: dict[str, Any],
     only: list[str] | None,
-    write_spec: bool = False,
     written: list[str] | None = None,
     metrics: dict[str, Any] | None = None,
+    base_ref: Optional[str] = None,
 ) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。計測値は `metrics` へ入れる（`check` と同じ）。途中の規則が止まれば `Halted`。
 
-    `only` がほかの規則なしで当てられる規則（`CONTRACT_RULES`・`SETTINGS_RULES`・`PARTIAL_RULES`・`SELECTED_RULES`）だけなら、ほかの規則を
-    当てない。そのうち集めたファイルを読まない規則（`SELECTED_RULES` のほか）だけなら、ファイルも集めない（ワークフローだけを変えた
-    Pull Request の `--only toolchain` を、その規則の分の読み取りで終える）。
+    `only` がほかの規則なしで当てられる規則（`CONTRACT_RULES`・`SETTINGS_RULES`・`PARTIAL_RULES`・`SPEC_RULES`・`SELECTED_RULES`）だけ
+    なら、ほかの規則を当てない。そのうち集めたファイルを読まない規則（`SELECTED_RULES` のほか）だけなら、ファイルも集めない
+    （ワークフローか項目の表だけを変えた Pull Request の `--only` を、その規則の分の読み取りで終える）。
     """
-    alone = {**CONTRACT_RULES, **SETTINGS_RULES, **PARTIAL_RULES, **SELECTED_RULES}
-    if only and not write_spec:
+    alone = {**CONTRACT_RULES, **SETTINGS_RULES, **PARTIAL_RULES, **SPEC_RULES, **SELECTED_RULES}
+    if only and written is None:
         named = set(only)
         if named <= alone.keys():
             if named & SELECTED_RULES.keys():
@@ -219,15 +288,19 @@ def select(
                 unparsable(scope)
             return _gather(_chosen(alone, scope, rules, only), only)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
-    return check(scope, rules, write_spec, written, only, metrics)
+    return check(scope, rules, only, written, metrics, base_ref)
+
+
+def _git_stdout(root: Path, *args: str, stdin: str = "") -> bytes:
+    """git の標準出力。起動できない・失敗したときは `CheckError`。"""
+    try:
+        return subprocess.run(["git", "-C", str(root), *args], input=stdin.encode(), capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise CheckError(f"git の worktree で実行する: {root}: git {' '.join(args)}") from exc
 
 
 def _repo_root(plugin_root: Path) -> Path:
-    try:
-        done = subprocess.run(["git", "-C", str(plugin_root), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise CheckError(f"git の worktree で実行する: {plugin_root}") from exc
-    return Path(done.stdout.strip()).resolve()
+    return Path(os.fsdecode(_git_stdout(plugin_root, "rev-parse", "--show-toplevel")).strip()).resolve()
 
 
 def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None) -> int:
@@ -255,8 +328,11 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="プラグインだけを見る検査")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
     parser.add_argument(
-        "--write-spec", action="store_true", help="規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する"
+        "--write-spec",
+        action="store_true",
+        help="規約の生成物（コントラクトのページと引数のスキーマ）を書き、減った件数へラチェットの基準を下げてから検査する",
     )
+    parser.add_argument("--ratchet-base", metavar="REF", help="ラチェットの基準が、この commit の基準より上がっていないかも見る")
     args = parser.parse_args(argv)
     written: list[str] | None = [] if args.write_spec else None
     measured: dict[str, Any] = {}
@@ -265,12 +341,14 @@ def main(argv: list[str]) -> int:
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name)
-        found = select(scope, rules, args.only, args.write_spec, written, measured)
+        found = select(scope, rules, args.only, written, measured, args.ratchet_base)
     except Halted as exc:
         _print_findings(exc.found)
         return emit(str(exc), [f.as_item() for f in exc.found], {}, "config_broken")
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
+    except ratchet.RatchetError as exc:
+        return emit(str(exc), [], {}, "unknown")
     _print_findings(found)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule, **measured}

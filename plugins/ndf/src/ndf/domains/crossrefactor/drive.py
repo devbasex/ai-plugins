@@ -536,7 +536,8 @@ def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_d
     """直しを起動し、違反があれば起点まで取り消して変更を要求する（上限まで）。最後の起動のコミットと結果の種類を返す。"""
     commits: list[flaky_decide.Commit] = []
     kind = flaky_decide.NONE
-    for _ in range(flaky_decide.MAX_ATTEMPTS):
+    max_attempts = int(limits.value("cross-refactoring.flaky-fix", "attempts"))
+    for _ in range(max_attempts):
         base = _record_phase(run, "flaky-fix")
         try:
             _launch(run, launch.Request("flaky-fix", participants.FIXER, prompt_decide.flaky(pending), "flaky"))
@@ -547,7 +548,7 @@ def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_d
         commits = flaky_decide.parse_log(run.work.run("log", "--reverse", "--name-only", flaky_decide.LOG_FORMAT, f"{base}..HEAD"))
         found = flaky_decide.violations(commits, pending["keys"], tests_decide.is_test_file)
         pending["attempts"] += 1
-        kind = flaky_decide.outcome(commits, found, pending["attempts"])
+        kind = flaky_decide.outcome(commits, found, pending["attempts"], max_attempts)
         if kind in (flaky_decide.SENDBACK, flaky_decide.REVERTED):
             _reset(run, base)
         if kind != flaky_decide.SENDBACK:

@@ -1,0 +1,7 @@
+{
+  "summary": "フレーキーなテストの直しを起動する回数の上限。当たれば直しを取り消す",
+  "attempts": 2,
+  "read_by": [
+    "ndf.domains.crossrefactor.drive"
+  ]
+}

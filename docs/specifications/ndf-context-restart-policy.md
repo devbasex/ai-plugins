@@ -138,7 +138,7 @@ Codex には hook が無いため、印と再起動の記録は Bash で打ち�
 | --- | --- | --- | --- |
 | `record --verdict 再起動 --reason <理由> --work <識別子> [--runtime claude\|codex] [--context <n>]` | 理由（7 つ）と作業の識別子 | 1 行（`source: record`・`stage: cut`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 `--verdict` が `再起動` でない・理由が 7 つ以外・`--verdict` と `--event` が両方か両方なし |
 | `record --event 引継ぎ開始\|復元完了 --work <識別子> [--runtime claude\|codex]` | 印と作業の識別子 | 印の 1 行（`event` が印、`verdict`・`stage`・`band` は `null`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 印が 2 つ以外 |
-| `calibrate [--days 30]` | 判定の記録・会話の記録 | 見込みのファイルを書き、`metrics.samples` に標本数を返す | 0 / 1 書けない |
+| `calibrate [--days 30]` | 判定の記録・会話の記録 | 見込みのファイルを書き、`metrics.samples` に標本数、`metrics.skipped` に飛ばした行の数を返す | 0 / 1 書けない |
 | `report --work <識別子> \| --all [--since YYYY-MM-DD] [--from <ISO 8601>] [--until <ISO 8601>] [--format json\|table]` | 判定の記録・会話の記録・使用量の帳簿 | 作業ごとに `work`・`sessions`・`parts`（4 区分ごとの `inp`・`out`・`read`・`w5`・`w1h`・`calls`・`seconds`・`cost`）・`unknown_parts`・`restores`・`restarts`（理由ごと）・`restart_count`・`auto_compacts`・`quality`。`--from`・`--until`（両端を含む）を渡すと、その間の呼び出しと判定の記録の行だけを数える。`table` は Markdown の表と作業ごとの 1 行を出す | 0（0 件でも 0）/ 2 `--work` と `--all` が両方か両方なし・`--since`・`--from`・`--until` の形の誤り |
 
 `record` のセッション ID は `--runtime claude` のときだけ `CLAUDE_CODE_SESSION_ID` から取り、無ければ `null` にする。
@@ -158,9 +158,12 @@ Codex には hook が無いため、印と再起動の記録は Bash で打ち�
 
 ### 判定の記録の 1 行
 
+形は `plugins/ndf/contracts/schemas/internal/context-records.schema.json` が持ち、書く前と読んだ後に確かめる（`ndf.contracts.internal`）。
+
 | 列 | 値 | 空の値の意味 |
 | --- | --- | --- |
-| `schema` | 1 | — |
+| `version` | 1（行の形のバージョン） | — |
+| `schema` | 1。`version` を持たない旧い行だけが持つ。読むときに外す | — |
 | `at` | UTC の ISO 8601 | — |
 | `runtime` | `claude` / `codex` | — |
 | `source` | `hook` / `record` / `sprint-state` | — |
@@ -218,7 +221,8 @@ classDiagram
 | 判定の記録・見込みのファイルに書けない | `record`・`calibrate` は終了コード 1。guard の判定は変わらない |
 | 見込みのファイルが無い・壊れている・標本不足 | 見込みを出さない |
 | 使用量の帳簿が読めない（`report`） | NDF が起動した分は会話の記録の分だけで数える |
-| 判定の記録の壊れた行 | 飛ばす |
+| 判定の記録の壊れた行・形の違う行 | 飛ばして `metrics.skipped` に数える |
+| 判定の記録に新しいバージョンの行がある | `report`・`calibrate` は `stopped`（`precondition`） |
 
 ## テスト観点
 

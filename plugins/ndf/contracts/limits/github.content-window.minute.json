@@ -1,5 +1,8 @@
 {
   "summary": "内容を作る書き込み（REST の POST と create・add で始まる mutation）をマシン全体で数える短いほうのウィンドウの長さの秒と上限の件数（GitHub の文書の 1 分 80 件。#4016 の決定 11）",
   "seconds": 60,
-  "count": 80
+  "count": 80,
+  "read_by": [
+    "ndf.adapters.write_gate"
+  ]
 }

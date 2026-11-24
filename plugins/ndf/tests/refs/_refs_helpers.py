@@ -49,13 +49,14 @@ class FakeSources:
         return self.designs[branch] if branch in self.designs else refs.DesignPr(None)
 
 
-def write_result(state_dir: Path, status: str, outputs: Mapping[str, Any], key: str = "k-1") -> None:
+def write_result(state_dir: Path, status: str, outputs: Mapping[str, Any], key: str = "k-1", **extra: Any) -> None:
     """プランの状態の保存先へ、最後の回のキー（run.json）と結果 JSON を書く（runner が書く形）。"""
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / RUN_FILE).write_text(json.dumps({"key": key, "name": "p", "round": 0, "heads": []}), encoding="utf-8")
     path = result_path(state_dir, durable.run_name(key))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"tool": "plan", "status": status, "summary": "s", "outputs": dict(outputs)}), encoding="utf-8")
+    found = {"tool": "plan", "status": status, "summary": "s", "outputs": dict(outputs), **extra}
+    path.write_text(json.dumps(found), encoding="utf-8")
 
 
 def write_progress(state_dir: Path, rows: Sequence[Mapping[str, Any]], tail: str = "") -> None:

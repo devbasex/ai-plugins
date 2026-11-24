@@ -1,0 +1,7 @@
+{
+  "summary": "ステートマシンの DB のバックアップを残す本数（超えた分は最も古いものから消す）",
+  "count": 7,
+  "read_by": [
+    "ndf.progress.backup"
+  ]
+}

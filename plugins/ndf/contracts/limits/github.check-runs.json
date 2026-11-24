@@ -1,4 +1,7 @@
 {
   "summary": "head の 1 つのコミットのチェックを読むページの上限（1 ページ 100 件）",
-  "count": 10
+  "count": 10,
+  "read_by": [
+    "ndf.adapters.github"
+  ]
 }

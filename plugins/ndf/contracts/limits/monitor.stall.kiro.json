@@ -1,4 +1,7 @@
 {
   "summary": "kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある",
-  "seconds": 480
+  "seconds": 480,
+  "read_by": [
+    "ndf.adapters.agents"
+  ]
 }

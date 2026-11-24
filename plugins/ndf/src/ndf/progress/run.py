@@ -64,12 +64,9 @@ FINISHED = _event("finished")
 APPROVED = invoke.APPROVED
 REQUEST_CHANGES = _answer("request_changes")
 REJECTED = _answer("rejected")
-# 番号のぶつかり（同時の追記）で読み直して書き直す回数
-APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも設定の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
-WAIT_DEFAULT_SECONDS = plan_cli.WAIT_DEFAULT_SECONDS
 # 作業の保存先（チェックアウトの保存先の下）と、起動した作業が排他を取るまで置く起動のマーカー（作業の保存先の下）
 WORK_DIR = "progress-work"
 LAUNCH_FILE = "launched.json"
@@ -101,11 +98,7 @@ class View:
 
     def context(self) -> dict[str, Any]:
         """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-        out = dict(self.doc["context"])
-        for ev in self.events:
-            if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == self.rev:
-                out.update(payload_of(ev)["outputs"])
-        return out
+        return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
 
 
 def payload_of(ev: model.Event) -> dict[str, Any]:
@@ -919,7 +912,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_parser(name, help=text).add_argument("machine_id")
     w = sub.add_parser("wait", help="工程を流す作業の終わりを待つ")
     w.add_argument("machine_id")
-    w.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
+    w.add_argument("--timeout", type=float, default=plan_cli.wait_default_seconds())
     ans = sub.add_parser("answer", help="回答を待つ工程へ回答を書く")
     command.add_stage_target(ans)
     ans.add_argument("--answer", required=True, choices=facts.ids(result.ANSWERS))

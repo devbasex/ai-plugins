@@ -1,0 +1,7 @@
+{
+  "summary": "重い起動のスロットを取る判定の排他を待つ上限の秒",
+  "seconds": 10,
+  "read_by": [
+    "ndf.slot_pool"
+  ]
+}

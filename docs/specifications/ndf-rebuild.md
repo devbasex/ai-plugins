@@ -73,13 +73,13 @@
 | `bin/ndf`・`bin/start.py` | エントリポイント 1 本と、依存の環境の欠けを確かめてから副命令の表（`src/ndf/cli.py` の `COMMANDS`）の各パッケージを呼ぶスクリプト |
 | `bin/ndf-claude` | このプラグインだけを読む claude の起動（`ndf launch-args` の値を使う。決定 74） |
 | `pyproject.toml`・`uv.lock` | 自分の依存の宣言と lock（決定 78） |
-| `contracts/` | 事実の表（`facts/`）・止まった理由（`causes/`）・結果 JSON のスキーマ・上限（`limits/`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
+| `contracts/` | 事実の表（`facts/`・`domains/`）・NDF の記録の型（`schemas/internal/`。[ndf-internal-data-versions.md](ndf-internal-data-versions.md)）・止まった理由（`causes/`）・結果 JSON のスキーマ・上限（`limits/`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
 | `src/ndf/adapters/` | GitHub・git・CI・Markdown・通知・LLM・外部 CLI の呼び出し |
 | `src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を `plugin.json` と環境から求め、旧い置き場を退避する |
 | `src/ndf/core/` | 判断のループ・DBOS の殻（`durable*.py`。置き場・鍵ごとの記録・ロック・退避と片付け・待ちの一覧で、DBOS を import するのはここだけ）・プランの実行（`plan/`）・行き先の選び方・参照・worker の受け渡し・ブランチ戦略 |
 | `src/ndf/progress/` | 工程の定義・進行表の型と保存・`next` と `answer`・承認ゲート・計画とレーン・組み換え |
 | `src/ndf/domains/` | 開発ループ・リリース・中継・hook の判定（決定 88〜96）・cross-refactoring・cross-review・棚卸し・記録・worktree ほか |
-| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`。CI では `script-structure.yml` が打つ）。I1・I3、子の表の規則 `child-deps`、兆候・構造・事実の規則 |
+| `src/ndf/checks/` | NDF だけを見る検査（`ndf check`。CI では `script-structure.yml` が打つ）。I1・I3、子の表の規則 `child-deps`、問題のある作り（兆候）・行数と import の向き（構造）・同じ値の重複（事実）・設定と入出力の文書の一致（規約）のほか、使われない上限・コピーで生まれた重複・記録のキーの名前の規則（一覧は `src/ndf/checks/README.md`） |
 | `src/ndf/testing/` | テスト基盤（隔離・揺れない待ち・同時実行の枠） |
 | `skills/`・`agents/`・`manifests/` | Skill 本文・エージェント定義・配る Skill の表 |
 | `hooks/` | hook の入口（`entry.py`・`boot.py`）と、`ndf hooks render` が作る登録（`claude.json`・`codex.json`） |
@@ -91,7 +91,7 @@
 - 外から `plugins/ndf/` の中を名指す参照は、R0 #3757 が入れ替えより先に検査と書き換えの表を入れ、入れ替えの PR が表を当てた。CI の `scripts/check-plugin-refs.py` が参照先の実在を確かめる
 - 開発の間のジョブ（`plugins/ndf-next/**` だけを見るもの）は消し、`ndf check` は `script-structure.yml` が打つ
 - 旧い状態の置き場の退避と、中継の複製の版の記録は R1 #3758 が入れた（決定 79）
-- 子の表のコピー `children.json` と規則 `child-deps` は残り、閉じていない子の import の向き・順番・レーンを照らす
+- 子の表のコピー `children.json`（設計レビューの項目 `review_items` も持つ）と規則 `child-deps` は残り、コードの import の向きと、完了していない子の順番・レーン（並行して進める組）が表のとおりかを調べる
 
 ### エントリポイント
 
@@ -115,7 +115,7 @@
 | I5 | 耐久の記録 | ある鍵の耐久ワークフローを取り出して流すのは、同じ鍵で起動したプロセスだけ（決定 81） | 2 つのプロセスが鍵違いで開くテストで、相手のキューを流したら落ちる |
 | I6 | 耐久の記録 | 1 つの鍵の記録を開くプロセスは同時に 1 つで、`executor_id` と `application_name` は鍵から求めた同じ値 | 2 つ目は鍵のロック（SQLite は `run_lock`、URL は DB 側の鍵のロック）で待つ。片付けは待たずに試し、取れた鍵だけを移す・消す |
 | I7 | 耐久の記録 | アプリの版は形の番号と鍵の名前だけで決まり（`format-<FORMAT>-<鍵の名前>`）、NDF の版とワークフローのソースでは変わらない（決定 84） | `plugin.json` の版だけを上げて起動し直すテストで、途中の実行が回復しなければ落ちる |
-| I8 | 耐久の記録 | SQLite では退避の単位は鍵のファイル全体で、鍵の耐久ワークフローがすべて終わった（`SUCCESS`・`ERROR`・`CANCELLED`）ときだけファイルごと `dbos/retired/` へ移す。同じ鍵に待ちを抱えた実行（`PENDING`・`ENQUEUED`・`DELAYED`）がある間は、終わったステップや実行の記録もファイルに残り、実行の単位で記録を取り除かない。待ちを抱えた実行は日数で消さない。URL では鍵の実行の 1 つでも待ちを抱えるか、終わってから `KEEP_DAYS` を過ぎていなければ 1 つも消さない（決定 83） | 退避と消去のテストで待ちの記録が消えたら落ちる |
+| I8 | 耐久の記録 | SQLite では退避の単位は鍵のファイル全体で、鍵の耐久ワークフローがすべて終わった（`SUCCESS`・`ERROR`・`CANCELLED`）ときだけファイルごと `dbos/retired/` へ移す。同じ鍵に待ちを抱えた実行（`PENDING`・`ENQUEUED`・`DELAYED`）がある間は、終わったステップや実行の記録もファイルに残り、実行の単位で記録を取り除かない。待ちを抱えた実行は日数で消さない。URL では鍵の実行の 1 つでも待ちを抱えるか、終わってから上限の設定の `durable.keep`（14 日）を過ぎていなければ 1 つも消さない（決定 83） | 退避と消去のテストで待ちの記録が消えたら落ちる |
 | I9 | チェックアウトの置き場 | 進行表の DB は DBOS の表を持たない。SQLite の進行表の DB は、`quick_check` が `ok` を返した目印（`state/progress.checked`）が 24 時間以内に無ければ、`ok` を返すまで書かない。書き込みが `SQLITE_CORRUPT` を受けたら目印を消す（決定 82） | 目印の無い壊したファイルを開くテストで、書き込みが起きたら落ちる |
 | I10 | チェックアウトの置き場 | 形の番号が自分と違う置き場へは書かない。古ければ置き場ごと退避し、新しければ止まる（決定 85） | 番号を上げた・下げた置き場を開くテスト |
 | I11 | チェックアウトの置き場 | 置き場を使うプロセスは `state.lock` を共有で持つ。置き場ごとの退避と進行表の DB の `restore` は、`state.lock` を排他で取れ、退避では旧い置き場の鍵のロックもすべて、`restore` では `<実ファイル>.lock` も取れたときだけ行う。進行表の DB を開くプロセスは、接続の前に `<実ファイル>.lock` を共有で取り、全接続を閉じるまで持つ（決定 82・85） | 共有で持つプロセスがいる間に退避・`restore` を打つテストで、名前の変更か控えの配置が起きたら落ちる |
@@ -263,13 +263,13 @@ SQLite では DBOS の記録を `state/dbos/<鍵の名前>.sqlite` に、進行�
 
 ### 決定 82: 進行表の DB が壊れても気づいて戻せるよう、その日の最初に開くときに `quick_check` を打ち、backup API で控えを取る
 
-SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `state/progress.checked` が 24 時間より古いか無ければ、`maint.lock` を排他で取って期限を読み直してから `PRAGMA quick_check` を打つ。`ok` でなければ書かずに止まり（`store_broken`）、最新の控えと戻す副命令（`ndf progress restore --from`）を返す。控えは Online Backup API で取り、新しい 7 本を残す（`progress/backup.py` の `KEEP_BACKUPS`）。鍵ごとのファイルも鍵ごとの目印で同じ検査を受け、壊れていれば `dbos/broken/` へ移す。`ndf` は呼ぶたびに新しいプロセスで動くため、検査を「プロセスで最初に開いたとき」にすると回数が呼び出しに比例する。URL ではどれも打たず、DB の運用に任せる。
+SQLite の進行表の DB は WAL・`busy_timeout` 30 秒で開き、目印 `state/progress.checked` が 24 時間より古いか無ければ、`maint.lock` を排他で取って期限を読み直してから `PRAGMA quick_check` を打つ。`ok` でなければ書かずに止まり（`store_broken`）、最新の控えと戻す副命令（`ndf progress restore --from`）を返す。控えは Online Backup API で取り、新しい 7 本を残す（上限の設定の `progress.keep-backups`）。鍵ごとのファイルも鍵ごとの目印で同じ検査を受け、壊れていれば `dbos/broken/` へ移す。`ndf` は呼ぶたびに新しいプロセスで動くため、検査を「プロセスで最初に開いたとき」にすると回数が呼び出しに比例する。URL ではどれも打たず、DB の運用に任せる。
 
 - 代償: 開いた後に壊れた分は、書き込みの失敗（`SQLITE_CORRUPT`）として呼び手に返る。壊れた DB を控えで自動では置き換えない
 
 ### 決定 83: 置き場が膨らみ続けないよう、終わった実行の鍵ごとのファイルを退避し、退避から 14 日で消す
 
-終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。鍵に終わっていない耐久ワークフローが 1 つでもあれば移さない（I8）。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` と、表の移行の前に取る鍵のファイルの控え `backup/` の 14 日（`durable_sweep.KEEP_DAYS`）より古いファイルを消す（`durable_sweep._sweep_kept`）。走査はどれも `maint.lock` を待たずに取れたときだけ流し（取れなければ飛ばす）、操作ごとの排他と時刻の基準は次のとおりである。
+終わった鍵のファイルは本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵の `.checked` と `.lock` を消す。鍵に終わっていない耐久ワークフローが 1 つでもあれば移さない（I8）。目印 `dbos/.swept` が 24 時間より古ければ、`retired/`・`broken/` と、表の移行の前に取る鍵のファイルの控え `backup/` の 14 日（上限の設定の `durable.keep`）より古いファイルを消す（`durable_sweep._sweep_kept`）。走査はどれも `maint.lock` を待たずに取れたときだけ流し（取れなければ飛ばす）、操作ごとの排他と時刻の基準は次のとおりである。
 
 | 操作 | 排他 | 時刻の基準 |
 | --- | --- | --- |
@@ -341,7 +341,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | SessionEnd・Notification・StopFailure | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 0 字 |
 | SessionEnd（Codex） | 300 ms | 2 秒 | 0.5 秒 | 3 秒 | 0 字 |
 
-値は `contracts/limits/` の `hook.budget.<イベント>`（ランタイムで違えば `.<ランタイム>`）にある。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
+値は `contracts/limits/` の `hook.budget.<予算のキー>` にある。キーは契約表 `contracts/hooks/runtimes.json` のイベントが持ち、ランタイムで予算が違うイベントは別のキー（`stop.codex` など）を指す。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
 
 ### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは宣言した guard だけにする
 
@@ -482,7 +482,7 @@ I1 の完全一致の照合は `plugin.json` の `name` と入れ替えの後の
 | `scripted-flow` | 決定 65 | 振り直した（`libraries` の決定 65 と重なる） | [ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md) | 決定 130 |
 | `scripted-flow` | 決定 64 | 移さない（子 Issue の流す順と PR の分け方の作業の決定。結果は各子の本文が持つ） | — | — |
 | `#3395` | 決定 114 | 移した（物差しの決定） | [ndf-rebuild-measure.md](ndf-rebuild-measure.md) | 決定 114 |
-| `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 落とした（決定 121 は入れ替えの前だけに当たる進め方、IY4 は範囲の一覧の条件、ほかは規則 `review-items` が無い。11.x の範囲） | — | — |
+| `#3395` | 決定 121・IY1・IY2・IY4・IY6・IY7 | 移さない（決定 121 は入れ替えの前だけの進め方、IY4 は要求の無い項目を範囲の一覧に載せる条件で、確定仕様に残す対象が無い）。IY6（`review_items` は表から生成した結果と一致する）は、11.0.0 の後に [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) の I5 として作った。IY1（項目は表に 1 行だけ）・IY2（対応先は決めた語のどれか）・IY7（完了した子を対応先にしない）は検査を作っていない（11.x の項目の対応先の形だけは I5 が見る） | — | — |
 
 ## テスト観点
 

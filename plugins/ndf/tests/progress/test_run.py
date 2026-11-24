@@ -451,7 +451,9 @@ def test_facts_of_reads_the_ndf_settings_and_the_context(repo):
     strategy_fixture.write(repo, "web-trunk")  # trunk はベースブランチと本番ブランチが同じ
     assert command.facts_of(words, {}, repo) == dict.fromkeys(words, False)
     strategy_fixture.write(repo, "web-develop", {"test": {"ci": {"only": True}}})
-    assert command.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+    assert command.facts_of(words, {"design_pr": 3, "product_version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+    # 文脈の形のバージョン（version）だけなら、まだ出していない
+    assert command.facts_of(("release_record",), {"version": 1}, repo) == {"release_record": False}
 
 
 @pytest.mark.parametrize("kind", strategy_fixture.KINDS)
@@ -687,7 +689,7 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     calls, builds[:] = conflicts(None), []
     with pytest.raises(store.Conflict):
         run.append(st, tid, lambda v: builds.append(v) or _started(v))
-    assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
+    assert calls["n"] == command.append_attempts() and len(builds) == command.append_attempts()
 
 
 def test_append_runs_after_in_the_same_transaction_and_a_failure_rolls_the_append_back(repo, st, capsys):

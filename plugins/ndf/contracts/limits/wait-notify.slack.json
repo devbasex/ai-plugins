@@ -1,4 +1,0 @@
-{
-  "summary": "待ちの知らせが Slack へ送る HTTP の上限",
-  "seconds": 10
-}

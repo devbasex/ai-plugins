@@ -7,7 +7,14 @@
   "additionalProperties": false,
   "required": ["kind", "key", "window", "text", "cwd", "created_at"],
   "properties": {
-    "kind": {"enum": ["question", "approval", "done"], "description": "知らせる事象。question は回答待ち・approval は承認待ち・done は完了"},
+    "kind": {
+      "oneOf": [
+        {"const": "question", "title": "回答待ち"},
+        {"const": "approval", "title": "承認待ち"},
+        {"const": "done", "title": "完了"}
+      ],
+      "description": "知らせる事象。title は送り手が本文の先頭に付ける見出し（無ければ値を見出しにする）"
+    },
     "key": {"type": "string", "minLength": 1, "description": "待ちのキー。同じキーの通知は重ねて送らない"},
     "window": {"type": "boolean", "description": "真なら同じキーを重ねないのは送ってから上限の設定の notify.window の秒の内だけ（利用者が応じると変わる値が取れないとき）"},
     "text": {"type": "string", "minLength": 1, "description": "本文。見出し（事象）とメンションは送り手が付ける"},

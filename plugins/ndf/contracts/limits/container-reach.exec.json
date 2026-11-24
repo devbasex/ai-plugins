@@ -1,4 +1,0 @@
-{
-  "summary": "compose exec の上限。コンテナの中の cat 1 回で足りる",
-  "seconds": 60
-}

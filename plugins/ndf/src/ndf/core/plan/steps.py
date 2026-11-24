@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 from ndf import process_group
 from ndf.adapters import git, run_log
-from ndf.contracts import exit_codes, limits
+from ndf.contracts import exit_codes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 from ndf.core.plan import assemble_decide
 from ndf.core.plan.files import write_json
@@ -104,7 +104,7 @@ def _write_pid(state_dir: Path, step_id: str, pid: int) -> Path:
 
 
 def last_json(stdout: str) -> Optional[dict[str, Any]]:
-    """標準出力の最後の空でない行が結果 JSON（`status` を持つ辞書）なら返す。"""
+    """標準出力の最後の空でない行が結果 JSON（`status` を持つ辞書）なら返す。新しいバージョンの結果は代わりの `stopped` にする。"""
     lines = [line for line in stdout.splitlines() if line.strip()]
     if not lines:
         return None
@@ -112,7 +112,14 @@ def last_json(stdout: str) -> Optional[dict[str, Any]]:
         found = json.loads(lines[-1])
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を出さないコマンド
         return None
-    return found if isinstance(found, dict) and found.get("status") in STATUSES else None
+    if not isinstance(found, dict):
+        return None
+    known = found.get("status") in STATUSES
+    # 新しいバージョンの結果は status の語彙も違いうるので、結果の欄（tool と status）があれば結果と見る
+    refused = result.refused_newer(found) if known or {"tool", "status"} <= found.keys() else None
+    if refused is not None:
+        return refused
+    return found if known else None
 
 
 def _prs(found: dict[str, Any]) -> list[int]:
