@@ -16,6 +16,8 @@ import strategy_fixture
 from ndf.core import route
 from ndf.progress import invoke, issue_values, merge_pending
 
+import scenes
+
 # 設定（`.ndf/project.json`）のうち、実装のプランの差し込みを埋める値（review の起動は持たない。既定の起動を補わせる）
 PROJECT = {
     "test": {"suites": [{"name": "pytest", "command": "pytest -q"}]},
@@ -236,27 +238,57 @@ def _stage_run(name: str, gated: bool = True, approved=None) -> _invoke.StageRun
     return _invoke.StageRun("plan", name, {}, (), "none", "s", {}, approved=approved, gated=gated)
 
 
-@pytest.mark.parametrize(
-    ("name", "gated", "want"),
-    [("merge", False, "defer"), ("plan-to-spec", False, "defer"), ("design-merge", True, "stale"), ("design-merge", False, "defer")],
-)
-def test_stage_plans_choose_how_an_unapproved_production_merge_ends(name, gated, want):
+def _stage_plans_choose_how_an_unapproved_production_merge_ends(name, gated, want):
     t = _route.templates()[name]
     assert _invoke._fill_production_gate(t, _stage_run(name, gated))["production_gate"] == want
 
 
-def test_templates_outside_the_table_keep_the_stop_default():
+def _templates_outside_the_table_keep_the_stop_default():
     assert "production_gate" not in _invoke._fill_production_gate(_route.templates()["fix"], _stage_run("fix"))
 
 
-def test_release_takes_the_approved_head_and_base_from_the_answer():
+def _release_takes_the_approved_head_and_base_from_the_answer():
     """利用者の回答と MVV 判定が通した回答（`service:mvv`）のどちらの seen からも同じ値を作る。旧版の回答は空。"""
     t = _route.templates()["release"]
     user = {"head": "h", "material_sha256": "m", "repo": "o/r", "pr": 8, "base": "main", "production": True}
-    held = {"gate": "release", "skip": True, "head": "h", "target": {"repo": "o/r", "pr": 8, "base": "main", "head": "h", "production": True}}
+    held = {
+        "gate": "release",
+        "skip": True,
+        "head": "h",
+        "target": {"repo": "o/r", "pr": 8, "base": "main", "head": "h", "production": True},
+    }
     mvv, _ = _model.mvv_answer("release-gate", "listen", "approved", held, "q")
     for seen in (user, mvv["seen"]):
         got = _invoke._fill_production_gate(t, _stage_run("release", approved=seen))
         assert (got["approved_head"], got["approved_base"]) == ("h", "main")
     old = _invoke._fill_production_gate(t, _stage_run("release", approved={"head": "h", "material_sha256": None}))
     assert (old["approved_head"], old["approved_base"]) == ("h", "")
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(
+                _stage_plans_choose_how_an_unapproved_production_merge_ends,
+                id=scenes.label("stage_plans_choose_how_an_unapproved_production_merge_ends", i, v),
+                **dict(zip(("name", "gated", "want"), v)),
+            )
+            for i, v in enumerate(
+                [
+                    ("merge", False, "defer"),
+                    ("plan-to-spec", False, "defer"),
+                    ("design-merge", True, "stale"),
+                    ("design-merge", False, "defer"),
+                ]
+            )
+        ],
+        scenes.scene(_templates_outside_the_table_keep_the_stop_default, id="templates_outside_the_table_keep_the_stop_default"),
+        scenes.scene(
+            _release_takes_the_approved_head_and_base_from_the_answer, id="release_takes_the_approved_head_and_base_from_the_answer"
+        ),
+    ],
+)
+def test_production_gate_value_scenes(request, scene, values):
+    """工程のプランが渡す本番チャネルの承認の終え方と承認した対象の場面（#4409）。"""
+    scenes.play(request, scene, values)

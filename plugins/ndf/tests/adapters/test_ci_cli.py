@@ -19,6 +19,8 @@ import merge_hub
 from ._ci_helpers import LOG, run
 from ._github_helpers import offline_client
 
+import scenes
+
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
 REPO = "devbasex/ai-plugins"
 
@@ -326,8 +328,7 @@ def _merge_with(monkeypatch: pytest.MonkeyPatch, head: str, merged: list[tuple[i
     monkeypatch.setattr(github, "client", lambda **_: None)
 
 
-@pytest.mark.parametrize("reviewed", [[], ["--reviewed", REVIEWED]])
-def test_cli_merge_at_the_reviewed_head_or_without_it_merges_as_before(monkeypatch, capsys, last_result, reviewed):
+def _cli_merge_at_the_reviewed_head_or_without_it_merges_as_before(monkeypatch, capsys, last_result, reviewed):
     merged: list[tuple[int, str]] = []
     _merge_with(monkeypatch, REVIEWED, merged)
     assert ci_cli.main(["merge", "--branch", "x", *reviewed]) == 0
@@ -335,7 +336,7 @@ def test_cli_merge_at_the_reviewed_head_or_without_it_merges_as_before(monkeypat
     assert merged == [(7, REVIEWED)]
 
 
-def test_cli_merge_refuses_a_head_other_than_the_reviewed_one(monkeypatch, capsys, last_result):
+def _cli_merge_refuses_a_head_other_than_the_reviewed_one(monkeypatch, capsys, last_result):
     merged: list[tuple[int, str]] = []
     _merge_with(monkeypatch, HEAD, merged)
     assert ci_cli.main(["merge", "--branch", "x", "--reviewed", REVIEWED]) == causes.exit_code("refused")
@@ -387,8 +388,7 @@ def _out(capsys, last_result) -> dict:
     return last_result(capsys.readouterr().out)
 
 
-@pytest.mark.parametrize("gate", ["stop", "defer", "stale"])
-def test_merge_to_a_non_production_base_merges_whatever_the_gate(monkeypatch, capsys, last_result, gate):
+def _merge_to_a_non_production_base_merges_whatever_the_gate(monkeypatch, capsys, last_result, gate):
     """受け入れ条件 7: develop 宛て（本番チャネルは main）の PR は止まらずにマージする。"""
     hub = _use(
         monkeypatch,
@@ -402,26 +402,14 @@ def test_merge_to_a_non_production_base_merges_whatever_the_gate(monkeypatch, ca
     assert _out(capsys, last_result)["metrics"]["verdict"] == "not_production"
 
 
-@pytest.mark.parametrize("deliveries", ["manual", []])
-def test_merge_to_production_without_automatic_rows_merges(monkeypatch, capsys, last_result, deliveries):
+def _merge_to_production_without_automatic_rows_merges(monkeypatch, capsys, last_result, deliveries):
     """受け入れ条件 8: 自動反映の行が無い本番チャネルへの PR はマージする。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (merge_hub.project_text(merge_hub.strategy(deliveries=deliveries)), "c1")}))
     assert ci_cli.main(["merge", "--branch", "sprint/x"]) == 0
     assert hub.merged == [7]
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        None,
-        "not json",
-        merge_hub.project_text(None),
-        merge_hub.project_text(merge_hub.strategy(deliveries="auto")),
-        merge_hub.project_text(merge_hub.strategy(deliveries=None, cd=None)),
-        merge_hub.project_text(merge_hub.strategy(deliveries="x")),
-    ],
-)
-def test_merge_without_approval_stops_for_automatic_unset_and_unknown(monkeypatch, capsys, last_result, tmp_path, text):
+def _merge_without_approval_stops_for_automatic_unset_and_unknown(monkeypatch, capsys, last_result, tmp_path, text):
     """受け入れ条件 4・9: 自動反映・設定が無い・読めないときは、証跡が無ければマージせず承認待ちで止まる。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (text, "c1")}))
     out_file = tmp_path / "presented-merge.json"
@@ -440,7 +428,7 @@ def test_merge_without_approval_stops_for_automatic_unset_and_unknown(monkeypatc
     assert ci_cli.PRODUCTION_LINE in out_file.with_suffix(".md").read_text(encoding="utf-8")
 
 
-def test_merge_defers_and_stales_without_approval(monkeypatch, capsys, last_result):
+def _merge_defers_and_stales_without_approval(monkeypatch, capsys, last_result):
     """受け入れ条件 1〜3: 工程の中は先送りで ok（マージしない）、design-merge・release-merge は approval_stale。"""
     hub = _use(monkeypatch, merge_hub.MergeHub())
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "defer"]) == 0
@@ -452,23 +440,14 @@ def test_merge_defers_and_stales_without_approval(monkeypatch, capsys, last_resu
     assert hub.merged == []
 
 
-def test_merge_with_a_valid_trail_merges(monkeypatch, capsys, last_result):
+def _merge_with_a_valid_trail_merges(monkeypatch, capsys, last_result):
     hub = _use(monkeypatch, merge_hub.MergeHub())
     _approve(hub)
     assert ci_cli.main(["merge", "--branch", "sprint/x"]) == 0
     assert hub.merged == [7] and _out(capsys, last_result)["metrics"]["approved_by"] == "user"
 
 
-@pytest.mark.parametrize(
-    "trail_kwargs",
-    [
-        {"head": merge_hub.OTHER},
-        {"base": "release"},
-        {"production": False},
-        {"by": "user", "answer": "rejected"},
-    ],
-)
-def test_merge_ignores_stale_rejected_or_not_production_trails(monkeypatch, capsys, last_result, trail_kwargs):
+def _merge_ignores_stale_rejected_or_not_production_trails(monkeypatch, capsys, last_result, trail_kwargs):
     """受け入れ条件 5・決定 7: 承認の後の HEAD・マージ先の変更、却下、「本番へ反映される: いいえ」ではマージしない。"""
     hub = _use(monkeypatch, merge_hub.MergeHub())
     _approve(hub)
@@ -481,7 +460,7 @@ def test_merge_ignores_stale_rejected_or_not_production_trails(monkeypatch, caps
     assert hub.merged == [] and _out(capsys, last_result)["metrics"]["merge"] == "deferred"
 
 
-def test_merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_result):
+def _merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_result):
     hub = _use(monkeypatch, merge_hub.MergeHub())
     _approve(hub)
     hub.login = "someone"
@@ -489,7 +468,7 @@ def test_merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_
     assert hub.merged == []
 
 
-def test_merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, last_result):
+def _merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, last_result):
     """決定 3: 別のリポジトリから読んだ設定（自動反映の行が無くても）は unknown として承認を求める。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c1")}))
     hub.file_repo = "o/other"
@@ -497,7 +476,7 @@ def test_merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, l
     assert hub.merged == [] and _out(capsys, last_result)["metrics"]["verdict"] == "unknown"
 
 
-def test_merge_rejudges_when_the_config_changed_before_sending(monkeypatch, capsys, last_result):
+def _merge_rejudges_when_the_config_changed_before_sending(monkeypatch, capsys, last_result):
     """決定 3・8: 判定の後にマージ先の設定へ自動反映の行が足されたら、確かめの本文で判定し直して止まる。"""
     manual = merge_hub.project_text(merge_hub.strategy(deliveries="manual"))
     auto = merge_hub.project_text(merge_hub.strategy(deliveries="auto"))
@@ -507,7 +486,7 @@ def test_merge_rejudges_when_the_config_changed_before_sending(monkeypatch, caps
     assert hub.merged == [] and found["metrics"]["merge"] == "deferred" and found["metrics"]["verdict"] == "automatic"
 
 
-def test_merge_by_pr_does_nothing_for_a_merged_pr(monkeypatch, capsys, last_result):
+def _merge_by_pr_does_nothing_for_a_merged_pr(monkeypatch, capsys, last_result):
     """決定 5: --pr の PR がマージ済みなら、設定の読み取りもマージもしない。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
     assert (
@@ -517,16 +496,7 @@ def test_merge_by_pr_does_nothing_for_a_merged_pr(monkeypatch, capsys, last_resu
     assert hub.calls == ["pulls"]
 
 
-@pytest.mark.parametrize(
-    ("head", "base", "files"),
-    [
-        (merge_hub.OTHER, "main", None),
-        (merge_hub.HEAD, "", None),
-        (merge_hub.HEAD, "develop", None),
-        (merge_hub.OTHER, "main", {"main": (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c1")}),
-    ],
-)
-def test_merge_by_pr_checks_the_approved_target_before_the_verdict(monkeypatch, capsys, last_result, head, base, files):
+def _merge_by_pr_checks_the_approved_target_before_the_verdict(monkeypatch, capsys, last_result, head, base, files):
     """受け入れ条件 5・決定 5: 承認の時点と HEAD かマージ先が違えば、判定で承認が要らなくても approval_stale で止まる。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(files=files) if files else merge_hub.MergeHub())
     _approve(hub)
@@ -535,7 +505,7 @@ def test_merge_by_pr_checks_the_approved_target_before_the_verdict(monkeypatch, 
     assert hub.merged == [] and "branch_file" not in hub.calls
 
 
-def test_merge_by_pr_with_the_approved_target_merges(monkeypatch, capsys, last_result):
+def _merge_by_pr_with_the_approved_target_merges(monkeypatch, capsys, last_result):
     hub = _use(monkeypatch, merge_hub.MergeHub())
     _approve(hub)
     args = ["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.HEAD, "--approved-base", "main"]
@@ -543,23 +513,14 @@ def test_merge_by_pr_with_the_approved_target_merges(monkeypatch, capsys, last_r
     assert hub.merged == [7]
 
 
-def test_merge_dequeues_a_queued_pr_that_now_needs_approval(monkeypatch, capsys, last_result):
+def _merge_dequeues_a_queued_pr_that_now_needs_approval(monkeypatch, capsys, last_result):
     """決定 8: キューの待ちの打ち直しで承認が要るのに証跡が無ければ、キューから外す。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(queued=True)}))
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "defer"]) == 0
     assert hub.dequeued == [7]
 
 
-@pytest.mark.parametrize(
-    ("text", "production"),
-    [
-        (merge_hub.project_text(merge_hub.strategy(deliveries="auto")), True),
-        (merge_hub.project_text(merge_hub.strategy(deliveries=None, cd=None)), True),
-        (None, True),
-        (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), False),
-    ],
-)
-def test_ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_result, tmp_path, text, production):
+def _ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_result, tmp_path, text, production):
     """受け入れ条件 6: ndf ci ask の承認資料は、判定が automatic・unset・unknown のときだけ本番へ反映され得る行を持つ。"""
     _use(monkeypatch, merge_hub.MergeHub(files={"main": (text, "c1")}))
     out_file = tmp_path / "presented-merge-gate.json"
@@ -569,7 +530,7 @@ def test_ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_
     assert (ci_cli.PRODUCTION_LINE in out_file.with_suffix(".md").read_text(encoding="utf-8")) is production
 
 
-def test_ask_stops_when_the_presented_file_cannot_be_written(monkeypatch, capsys, last_result, tmp_path):
+def _ask_stops_when_the_presented_file_cannot_be_written(monkeypatch, capsys, last_result, tmp_path):
     _use(monkeypatch, merge_hub.MergeHub())
     blocker = tmp_path / "file"
     blocker.write_text("x", encoding="utf-8")
@@ -594,8 +555,7 @@ def _answer_args(record: Path, presented: Path) -> list[str]:
     return ["answer", "--branch", "sprint/x", "--answer-record", str(record), "--presented", str(presented)]
 
 
-@pytest.mark.parametrize("answer", ["approved", "rejected"])
-def test_answer_writes_the_trail_once_and_merge_follows_it(monkeypatch, capsys, last_result, tmp_path, answer):
+def _answer_writes_the_trail_once_and_merge_follows_it(monkeypatch, capsys, last_result, tmp_path, answer):
     """受け入れ条件 4・5: 承認待ちの後の回答の記録から証跡を書き、承認なら続く merge がマージする。2 回打っても投稿は 1 回。"""
     hub = _use(monkeypatch, merge_hub.MergeHub())
     presented, presented_id = _asked(monkeypatch, capsys, last_result, tmp_path, hub)
@@ -609,8 +569,7 @@ def test_answer_writes_the_trail_once_and_merge_follows_it(monkeypatch, capsys, 
     assert code == (0 if answer == "approved" else 10)
 
 
-@pytest.mark.parametrize("case", ["no-record", "conductor", "organizer", "no-by", "other-id", "no-id", "moved-head", "moved-base"])
-def test_answer_refuses_without_writing(monkeypatch, capsys, last_result, tmp_path, case):
+def _answer_refuses_without_writing(monkeypatch, capsys, last_result, tmp_path, case):
     """受け入れ条件 5: 回答の記録を経ない・利用者でない・提示と結び付かない・質問の後に変わった回答は、証跡を書かずに refused。"""
     hub = _use(monkeypatch, merge_hub.MergeHub())
     presented, presented_id = _asked(monkeypatch, capsys, last_result, tmp_path, hub)
@@ -627,7 +586,7 @@ def test_answer_refuses_without_writing(monkeypatch, capsys, last_result, tmp_pa
     assert "post_comment" not in hub.calls
 
 
-def test_a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, last_result, tmp_path):
+def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, last_result, tmp_path):
     """受け入れ条件 5（提示と回答の結び付き）: 流し直しで提示が置き換わると、前の提示への回答では書かない。"""
     hub = _use(monkeypatch, merge_hub.MergeHub())
     presented, first = _asked(monkeypatch, capsys, last_result, tmp_path, hub)
@@ -637,3 +596,130 @@ def test_a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsy
     _asked(monkeypatch, capsys, last_result, tmp_path, hub)
     assert ci_cli.main(_answer_args(record, presented)) == causes.exit_code("refused")
     assert "post_comment" not in hub.calls
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(
+                _cli_merge_at_the_reviewed_head_or_without_it_merges_as_before,
+                id=f"cli_merge_at_the_reviewed_head_or_without_it_merges_as_before-{label}",
+                reviewed=v,
+            )
+            for label, v in zip(["without-reviewed", "at-reviewed-head"], [[], ["--reviewed", REVIEWED]], strict=True)
+        ],
+        scenes.scene(_cli_merge_refuses_a_head_other_than_the_reviewed_one, id="cli_merge_refuses_a_head_other_than_the_reviewed_one"),
+        *[
+            scenes.scene(
+                _merge_to_a_non_production_base_merges_whatever_the_gate,
+                id=scenes.label("merge_to_a_non_production_base_merges_whatever_the_gate", i, (v,)),
+                gate=v,
+            )
+            for i, v in enumerate(["stop", "defer", "stale"])
+        ],
+        *[
+            scenes.scene(
+                _merge_to_production_without_automatic_rows_merges,
+                id=f"merge_to_production_without_automatic_rows_merges-{label}",
+                deliveries=v,
+            )
+            for label, v in zip(["manual-delivery", "no-delivery"], ["manual", []], strict=True)
+        ],
+        *[
+            scenes.scene(
+                _merge_without_approval_stops_for_automatic_unset_and_unknown,
+                id=f"merge_without_approval_stops_for_automatic_unset_and_unknown-{label}",
+                text=v,
+            )
+            for label, v in zip(
+                ["no-config-file", "not-json", "no-strategy-section", "automatic", "unset", "broken-deliveries"],
+                [
+                    None,
+                    "not json",
+                    merge_hub.project_text(None),
+                    merge_hub.project_text(merge_hub.strategy(deliveries="auto")),
+                    merge_hub.project_text(merge_hub.strategy(deliveries=None, cd=None)),
+                    merge_hub.project_text(merge_hub.strategy(deliveries="x")),
+                ],
+                strict=True,
+            )
+        ],
+        scenes.scene(_merge_defers_and_stales_without_approval, id="merge_defers_and_stales_without_approval"),
+        scenes.scene(_merge_with_a_valid_trail_merges, id="merge_with_a_valid_trail_merges"),
+        *[
+            scenes.scene(
+                _merge_ignores_stale_rejected_or_not_production_trails,
+                id=f"merge_ignores_stale_rejected_or_not_production_trails-{label}",
+                trail_kwargs=v,
+            )
+            for label, v in zip(
+                ["head-moved", "base-moved", "not-production", "rejected-later"],
+                [
+                    {"head": merge_hub.OTHER},
+                    {"base": "release"},
+                    {"production": False},
+                    {"by": "user", "answer": "rejected"},
+                ],
+                strict=True,
+            )
+        ],
+        scenes.scene(_merge_does_not_count_trails_of_another_login, id="merge_does_not_count_trails_of_another_login"),
+        scenes.scene(_merge_reads_the_base_branch_of_the_pr_repository, id="merge_reads_the_base_branch_of_the_pr_repository"),
+        scenes.scene(_merge_rejudges_when_the_config_changed_before_sending, id="merge_rejudges_when_the_config_changed_before_sending"),
+        scenes.scene(_merge_by_pr_does_nothing_for_a_merged_pr, id="merge_by_pr_does_nothing_for_a_merged_pr"),
+        *[
+            scenes.scene(
+                _merge_by_pr_checks_the_approved_target_before_the_verdict,
+                id=f"merge_by_pr_checks_the_approved_target_before_the_verdict-{label}",
+                **dict(zip(("head", "base", "files"), v)),
+            )
+            for label, v in zip(
+                ["other-head", "empty-base", "other-base", "other-head-manual-base"],
+                [
+                    (merge_hub.OTHER, "main", None),
+                    (merge_hub.HEAD, "", None),
+                    (merge_hub.HEAD, "develop", None),
+                    (merge_hub.OTHER, "main", {"main": (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), "c1")}),
+                ],
+                strict=True,
+            )
+        ],
+        scenes.scene(_merge_by_pr_with_the_approved_target_merges, id="merge_by_pr_with_the_approved_target_merges"),
+        scenes.scene(_merge_dequeues_a_queued_pr_that_now_needs_approval, id="merge_dequeues_a_queued_pr_that_now_needs_approval"),
+        *[
+            scenes.scene(
+                _ask_writes_the_presented_target_and_material,
+                id=f"ask_writes_the_presented_target_and_material-{label}",
+                **dict(zip(("text", "production"), v)),
+            )
+            for label, v in zip(
+                ["automatic", "unset", "no-config-file", "manual"],
+                [
+                    (merge_hub.project_text(merge_hub.strategy(deliveries="auto")), True),
+                    (merge_hub.project_text(merge_hub.strategy(deliveries=None, cd=None)), True),
+                    (None, True),
+                    (merge_hub.project_text(merge_hub.strategy(deliveries="manual")), False),
+                ],
+                strict=True,
+            )
+        ],
+        scenes.scene(_ask_stops_when_the_presented_file_cannot_be_written, id="ask_stops_when_the_presented_file_cannot_be_written"),
+        *[
+            scenes.scene(
+                _answer_writes_the_trail_once_and_merge_follows_it,
+                id=scenes.label("answer_writes_the_trail_once_and_merge_follows_it", i, (v,)),
+                answer=v,
+            )
+            for i, v in enumerate(["approved", "rejected"])
+        ],
+        *[
+            scenes.scene(_answer_refuses_without_writing, id=scenes.label("answer_refuses_without_writing", i, (v,)), case=v)
+            for i, v in enumerate(["no-record", "conductor", "organizer", "no-by", "other-id", "no-id", "moved-head", "moved-base"])
+        ],
+        scenes.scene(_a_new_presentation_refuses_the_answer_to_the_old_one, id="a_new_presentation_refuses_the_answer_to_the_old_one"),
+    ],
+)
+def test_production_merge_scenes(request, scene, values):
+    """ndf ci merge・ask・answer の本番チャネルの判定と承認の証跡の場面（#4409）。"""
+    scenes.play(request, scene, values)

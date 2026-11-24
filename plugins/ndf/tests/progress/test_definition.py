@@ -10,6 +10,8 @@ import pytest
 from ndf import contracts
 from ndf.progress import definition, invoke, model, run, stages
 
+import scenes
+
 E = "file:///workflow/stage-io.schema.json#/$defs/"
 # .ndf/project.json の delivery の 1 行の形
 DELIVERY = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
@@ -51,8 +53,7 @@ def _errors(mode_doc: dict, stage_docs: dict) -> list[str]:
     return info.value.errors
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_all_modes_pass_every_check(mode):
+def _all_modes_pass_every_check(mode):
     snap = definition.load_definition(mode)
     assert snap.stages and len(snap.sha256) == 64
     assert snap.stages[-1].name == "棚卸し"
@@ -63,8 +64,7 @@ def test_all_modes_pass_every_check(mode):
         assert stage.steps and all(definition.ref_target(st.output_ref) is not None for st in stage.steps)
 
 
-@pytest.mark.parametrize("mode", ["legacy-refactor", "standard"])
-def test_refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
+def _refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
     # #3879 構成要素 2: 実装計画のスプリントの終わりの候補を読むため、工程「リファクタリング」は課題の一覧を受ける
     assert definition.load_definition(mode).stage("リファクタリング").inputs == ("worktree", "branch", "issues")
 
@@ -304,8 +304,7 @@ def test_optional_inputs_must_be_keys_of_the_sprint_context():
     assert definition.build(_mode_doc([("行", "x")]), {"x": good}).stage("行").optional_inputs == ("gathered",)
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_code_review_reviews_the_seam_after_gathering(mode):
+def _code_review_reviews_the_seam_after_gathering(mode):
     # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目にコードがあるときだけ流す
     snap = definition.load_definition(mode)
     stage = snap.stage("コードレビュー")
@@ -354,8 +353,7 @@ def _listen_steps(mode: str) -> list[stages.StepDef]:
     return [st for st in definition.load_definition(mode).steps() if st.call in invoke.CALLS and invoke.is_listen(st)]
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mode):
+def _current_listen_steps_offer_the_answer_enum_of_their_output_contract(mode):
     # 現状固定: 承認ゲートのステップの選択肢は出力の規約（gate-answer）の metrics.answer の enum の順
     listen = _listen_steps(mode)
     assert listen
@@ -403,12 +401,12 @@ def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report()
 _find_enum = definition.find_enum
 
 
-def test_current_find_enum_reads_the_own_property_before_the_children():
+def _current_find_enum_reads_the_own_property_before_the_children():
     tree = {"properties": {"answer": {"enum": ["a"]}, "inner": {"properties": {"answer": {"enum": ["b"]}}}}}
     assert _find_enum(tree, "answer") == ["a"]
 
 
-def test_current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first():
+def _current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first():
     tree = {
         "allOf": [
             {"properties": {"other": {"enum": ["x"]}}},
@@ -419,20 +417,82 @@ def test_current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_th
     assert _find_enum(tree, "answer") == ["first", "second"]
 
 
-def test_current_find_enum_without_the_property_or_its_enum_is_none():
+def _current_find_enum_without_the_property_or_its_enum_is_none():
     assert _find_enum({"properties": {"answer": {"type": "string"}}}, "answer") is None
     assert _find_enum({"properties": {"answer": "not a node"}, "items": [1, "s", None]}, "answer") is None
     assert _find_enum({"properties": ["answer"]}, "answer") is None
     assert _find_enum(None, "answer") is None and _find_enum([], "answer") is None
 
 
-def test_current_find_enum_keeps_an_empty_enum_and_stops_there():
+def _current_find_enum_keeps_an_empty_enum_and_stops_there():
     tree = {"items": [{"properties": {"answer": {"enum": []}}}, {"properties": {"answer": {"enum": ["later"]}}}]}
     assert _find_enum(tree, "answer") == []
 
 
-@pytest.mark.parametrize("mode", ["standard", "light", "operation", "documentation", "legacy-refactor"])
-def test_cleanup_runs_right_after_deploy(mode):
+def _cleanup_runs_right_after_deploy(mode):
     """#4409 の決定 6: 5 つのモードで、クリーンアップはデプロイの直後にある（スプリントの PR はデプロイでマージされる）。"""
     ids = [s.id for s in definition.load_definition(mode).stages]
     assert ids.index("cleanup") == ids.index("deploy") + 1
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(_all_modes_pass_every_check, id=scenes.label("all_modes_pass_every_check", i, (v,)), mode=v)
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(
+                _refactor_stage_takes_the_issues_to_read_their_implementation_plans,
+                id=scenes.label("refactor_stage_takes_the_issues_to_read_their_implementation_plans", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["legacy-refactor", "standard"])
+        ],
+        *[
+            scenes.scene(
+                _code_review_reviews_the_seam_after_gathering,
+                id=scenes.label("code_review_reviews_the_seam_after_gathering", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(
+                _current_listen_steps_offer_the_answer_enum_of_their_output_contract,
+                id=scenes.label("current_listen_steps_offer_the_answer_enum_of_their_output_contract", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(_cleanup_runs_right_after_deploy, id=scenes.label("cleanup_runs_right_after_deploy", i, (v,)), mode=v)
+            for i, v in enumerate(["standard", "light", "operation", "documentation", "legacy-refactor"])
+        ],
+    ],
+)
+def test_mode_definition_scenes(request, scene, values):
+    """モードごとの工程の定義の場面（検査・リファクタリングの入力・境目のレビュー・承認ゲートの回答・クリーンアップの位置）。"""
+    scenes.play(request, scene, values)
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(
+            _current_find_enum_reads_the_own_property_before_the_children, id="current_find_enum_reads_the_own_property_before_the_children"
+        ),
+        scenes.scene(
+            _current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first,
+            id="current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first",
+        ),
+        scenes.scene(
+            _current_find_enum_without_the_property_or_its_enum_is_none, id="current_find_enum_without_the_property_or_its_enum_is_none"
+        ),
+        scenes.scene(_current_find_enum_keeps_an_empty_enum_and_stops_there, id="current_find_enum_keeps_an_empty_enum_and_stops_there"),
+    ],
+)
+def test_find_enum_scenes(request, scene, values):
+    """出力のコントラクトの木から回答の enum を探す _find_enum の場面。"""
+    scenes.play(request, scene, values)

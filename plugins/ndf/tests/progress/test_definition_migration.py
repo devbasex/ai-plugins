@@ -13,6 +13,8 @@ import pytest
 from ndf.contracts import result
 from ndf.progress import command, definition, invoke, run, run_view, stages
 
+import scenes
+
 MODE = "light"
 
 
@@ -94,7 +96,7 @@ def _no_migration(monkeypatch):
     monkeypatch.setattr(run, "migrate_definition", lambda st, machine_id: None)
 
 
-def test_an_old_snapshot_is_migrated_once_and_reaches_the_release_gate(repo, st, capsys, monkeypatch):
+def _an_old_snapshot_is_migrated_once_and_reaches_the_release_gate(repo, st, capsys, monkeypatch):
     tid = _new_old(capsys, monkeypatch)
     assert _ids(st, tid).index("cleanup") < _ids(st, tid).index("deploy")
     _until_release_gate(st, tid, repo, _env(repo, set()))
@@ -110,7 +112,7 @@ def test_an_old_snapshot_is_migrated_once_and_reaches_the_release_gate(repo, st,
     assert run.migrate_definition(st, tid) is None and _migrations(st, tid) == 1
 
 
-def test_a_cleanup_stopped_on_an_open_pr_is_migrated_and_waits_for_deploy(repo, st, capsys, monkeypatch):
+def _a_cleanup_stopped_on_an_open_pr_is_migrated_and_waits_for_deploy(repo, st, capsys, monkeypatch):
     """旧版のクリーンアップが開いた PR で precondition で止まった状態機械も、next で移行されてデプロイへ進む。"""
     tid = _new_old(capsys, monkeypatch)
     with monkeypatch.context() as m:
@@ -128,7 +130,7 @@ def test_a_cleanup_stopped_on_an_open_pr_is_migrated_and_waits_for_deploy(repo, 
     assert _migrations(st, tid) == 1 and out["metrics"]["stage"] == "デプロイ"
 
 
-def test_a_finished_cleanup_or_a_started_deploy_is_not_migrated(repo, st, capsys, monkeypatch):
+def _a_finished_cleanup_or_a_started_deploy_is_not_migrated(repo, st, capsys, monkeypatch):
     tid = _new_old(capsys, monkeypatch)
     with monkeypatch.context() as m:
         _no_migration(m)
@@ -138,8 +140,28 @@ def test_a_finished_cleanup_or_a_started_deploy_is_not_migrated(repo, st, capsys
     assert ids.index("cleanup") < ids.index("deploy")
 
 
-def test_a_migration_event_with_other_stages_is_ignored():
+def _a_migration_event_with_other_stages_is_ignored():
     snap = _old_snapshot()
     draft = run.model.EventDraft(run_view.DEFINITION_MIGRATED, run.ACTOR, None, payload={"order": ["知らない工程"]}, rev=1)
     bad = run.model.Event(1, datetime.now(timezone.utc), draft)
     assert run_view.migrated_order(snap, [bad]) == snap
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(
+            _an_old_snapshot_is_migrated_once_and_reaches_the_release_gate,
+            id="an_old_snapshot_is_migrated_once_and_reaches_the_release_gate",
+        ),
+        scenes.scene(
+            _a_cleanup_stopped_on_an_open_pr_is_migrated_and_waits_for_deploy,
+            id="a_cleanup_stopped_on_an_open_pr_is_migrated_and_waits_for_deploy",
+        ),
+        scenes.scene(_a_finished_cleanup_or_a_started_deploy_is_not_migrated, id="a_finished_cleanup_or_a_started_deploy_is_not_migrated"),
+        scenes.scene(_a_migration_event_with_other_stages_is_ignored, id="a_migration_event_with_other_stages_is_ignored"),
+    ],
+)
+def test_definition_migration_scenes(request, scene, values):
+    """このリリースの前に始めた状態機械の写しの移行の場面（#4409 の決定 6）。"""
+    scenes.play(request, scene, values)

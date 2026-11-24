@@ -12,55 +12,62 @@ def _section(release, production="main"):
     return {"branches": {"base": "main", "production": production}, "release": release}
 
 
-@pytest.mark.parametrize(
-    ("release", "want"),
-    [
-        ({"deliveries": [{"channel": "production", "kind": "auto"}], "cd": None}, Verdict.AUTOMATIC),
-        ({"deliveries": [{"channel": "production", "kind": "manual"}], "cd": None}, Verdict.MANUAL),
-        ({"deliveries": [], "cd": None}, Verdict.MANUAL),
-        ({"deliveries": [{"channel": "staging", "kind": "auto"}], "cd": None}, Verdict.MANUAL),
-        ({"cd": {"workflow": "release.yml"}}, Verdict.AUTOMATIC),
-        ({"cd": None}, Verdict.UNSET),
-        ({}, Verdict.UNKNOWN),
-        ({"cd": "release.yml"}, Verdict.UNKNOWN),
-        ({"deliveries": "auto", "cd": None}, Verdict.UNKNOWN),
+_AUTO = {"deliveries": [{"channel": "production", "kind": "auto"}]}
+
+# （呼ぶ部品・引数・期待）。設計の表「判定の部品が返す値」の行ごとに 1 行
+CASES = [
+    pytest.param(pm.automatic_rows, (_section({**_AUTO, "cd": None}),), Verdict.AUTOMATIC, id="rows-auto-delivery"),
+    pytest.param(
+        pm.automatic_rows,
+        (_section({"deliveries": [{"channel": "production", "kind": "manual"}], "cd": None}),),
+        Verdict.MANUAL,
+        id="rows-manual-delivery",
+    ),
+    pytest.param(pm.automatic_rows, (_section({"deliveries": [], "cd": None}),), Verdict.MANUAL, id="rows-no-delivery"),
+    pytest.param(
+        pm.automatic_rows,
+        (_section({"deliveries": [{"channel": "staging", "kind": "auto"}], "cd": None}),),
+        Verdict.MANUAL,
+        id="rows-staging-only",
+    ),
+    pytest.param(pm.automatic_rows, (_section({"cd": {"workflow": "release.yml"}}),), Verdict.AUTOMATIC, id="rows-cd-workflow"),
+    pytest.param(pm.automatic_rows, (_section({"cd": None}),), Verdict.UNSET, id="rows-cd-null"),
+    pytest.param(pm.automatic_rows, (_section({}),), Verdict.UNKNOWN, id="rows-empty-release"),
+    pytest.param(pm.automatic_rows, (_section({"cd": "release.yml"}),), Verdict.UNKNOWN, id="rows-cd-string"),
+    pytest.param(pm.automatic_rows, (_section({"deliveries": "auto", "cd": None}),), Verdict.UNKNOWN, id="rows-deliveries-string"),
+    *[
+        pytest.param(pm.automatic_rows, (section,), Verdict.UNKNOWN, id=f"rows-broken-{name}")
+        for name, section in [
+            ("none", None),
+            ("list", []),
+            ("str", "x"),
+            ("release-list", {"release": []}),
+            ("release-none", {"release": None}),
+            ("empty", {}),
+        ]
     ],
-)
-def test_automatic_rows_follows_the_release_section(release, want):
-    assert pm.automatic_rows(_section(release)) is want
-
-
-@pytest.mark.parametrize("section", [None, [], "x", {"release": []}, {"release": None}, {}])
-def test_automatic_rows_is_unknown_for_broken_shapes(section):
-    assert pm.automatic_rows(section) is Verdict.UNKNOWN
-
-
-def test_judge_is_not_production_for_another_base():
-    section = _section({"deliveries": [{"channel": "production", "kind": "auto"}]})
-    assert pm.judge(section, "develop") is Verdict.NOT_PRODUCTION
-    assert pm.judge(section, "main") is Verdict.AUTOMATIC
-
-
-@pytest.mark.parametrize("production", ["", None, 3])
-def test_judge_is_unknown_without_a_production_branch(production):
-    assert pm.judge(_section({"cd": None}, production=production), "main") is Verdict.UNKNOWN
-
-
-def test_judge_is_unknown_for_no_section():
-    assert pm.judge(None, "main") is Verdict.UNKNOWN
-    assert pm.judge({"release": {"cd": None}}, "main") is Verdict.UNKNOWN
-
-
-@pytest.mark.parametrize(
-    ("verdict", "want"),
-    [
-        (Verdict.NOT_PRODUCTION, False),
-        (Verdict.MANUAL, False),
-        (Verdict.AUTOMATIC, True),
-        (Verdict.UNSET, True),
-        (Verdict.UNKNOWN, True),
+    pytest.param(pm.judge, (_section(_AUTO), "develop"), Verdict.NOT_PRODUCTION, id="judge-another-base"),
+    pytest.param(pm.judge, (_section(_AUTO), "main"), Verdict.AUTOMATIC, id="judge-production-base"),
+    *[
+        pytest.param(pm.judge, (_section({"cd": None}, production=p), "main"), Verdict.UNKNOWN, id=f"judge-production-{p!r}")
+        for p in ["", None, 3]
     ],
-)
-def test_needs_approval_and_reaches_production_match_the_table(verdict, want):
-    assert pm.needs_approval(verdict) is want
-    assert pm.reaches_production(verdict) is want
+    pytest.param(pm.judge, (None, "main"), Verdict.UNKNOWN, id="judge-no-section"),
+    pytest.param(pm.judge, ({"release": {"cd": None}}, "main"), Verdict.UNKNOWN, id="judge-no-branches"),
+    *[
+        pytest.param(fn, (verdict,), want, id=f"{fn.__name__}-{verdict.value}")
+        for verdict, want in [
+            (Verdict.NOT_PRODUCTION, False),
+            (Verdict.MANUAL, False),
+            (Verdict.AUTOMATIC, True),
+            (Verdict.UNSET, True),
+            (Verdict.UNKNOWN, True),
+        ]
+        for fn in (pm.needs_approval, pm.reaches_production)
+    ],
+]
+
+
+@pytest.mark.parametrize(("call", "args", "want"), CASES)
+def test_parts_follow_the_table(call, args, want):
+    assert call(*args) is want

@@ -12,6 +12,8 @@ import pytest
 from ndf.adapters import github
 from ndf.adapters.github import FileAt, GitHubError, MergeExpect, MergeOutcome, Pull
 
+import scenes
+
 REPO = "o/r"
 HEAD = "a" * 40
 OTHER = "b" * 40
@@ -94,30 +96,34 @@ def _expect(rejudge: Callable[[Optional[str]], Optional[MergeOutcome]] = lambda 
     return MergeExpect(_pull(), base, HEAD, PATH, "c1", rejudge)
 
 
-def test_merge_without_expect_keeps_the_request_count():
+def _merge_without_expect_keeps_the_request_count():
     wire = Wire()
     out = _hub(wire).merge(7, expect_head=HEAD)
     assert out.merged
     assert [s[0] for s in wire.seen] == ["GET", "GET", "GET", "PUT"]
 
 
-def test_merge_with_expect_verifies_right_before_sending_and_does_not_reread_the_pull():
+def _merge_with_expect_verifies_right_before_sending_and_does_not_reread_the_pull():
     wire = Wire()
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert out.merged
     # 最初の PR の読み直しは確かめへ移る（方式の問い合わせ 2 回の後、PUT の直前）
-    assert wire.seen == [("GET", f"/repos/{REPO}/rules/branches/main"), ("GET", f"/repos/{REPO}"), ("GRAPHQL", "verify"), ("PUT", f"/repos/{REPO}/pulls/7/merge")]
+    assert wire.seen == [
+        ("GET", f"/repos/{REPO}/rules/branches/main"),
+        ("GET", f"/repos/{REPO}"),
+        ("GRAPHQL", "verify"),
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"),
+    ]
 
 
-@pytest.mark.parametrize("verify", [_verify_data(base="release"), _verify_data(head=OTHER), _verify_data(repo="o/other")])
-def test_merge_refuses_when_the_pr_changed_after_the_verdict(verify):
+def _merge_refuses_when_the_pr_changed_after_the_verdict(verify):
     wire = Wire(verify=verify)
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert (out.merged, out.kind) == (False, "refused")
     assert ("PUT", f"/repos/{REPO}/pulls/7/merge") not in wire.seen
 
 
-def test_changed_config_is_rejudged_from_the_same_response():
+def _changed_config_is_rejudged_from_the_same_response():
     texts: list[Optional[str]] = []
 
     def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
@@ -133,7 +139,7 @@ def test_changed_config_is_rejudged_from_the_same_response():
     assert ("PUT", f"/repos/{REPO}/pulls/7/merge") not in wire.seen
 
 
-def test_changed_config_that_still_allows_the_merge_sends_it():
+def _changed_config_that_still_allows_the_merge_sends_it():
     wire = Wire(verify=_verify_data(oid="c2"))
     assert _hub(wire).merge(7, expect_head=HEAD, expect=_expect(lambda text: None)).merged
 
@@ -142,7 +148,7 @@ def _queue_refusal() -> GitHubError:
     return GitHubError("merge queue", 405)
 
 
-def test_queue_is_verified_in_the_same_request_and_reread_after_enqueue():
+def _queue_is_verified_in_the_same_request_and_reread_after_enqueue():
     wire = Wire(queue=_queue_data(), put=_queue_refusal())
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert (out.merged, out.kind) == (False, "ci_pending")
@@ -150,30 +156,69 @@ def test_queue_is_verified_in_the_same_request_and_reread_after_enqueue():
     assert wire.seen[-1] == ("GET", f"/repos/{REPO}/pulls/7")
 
 
-def test_queue_refuses_when_the_base_changed_before_enqueue():
+def _queue_refuses_when_the_base_changed_before_enqueue():
     wire = Wire(queue=_queue_data(base="release"), put=_queue_refusal())
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert (out.merged, out.kind) == (False, "refused")
     assert ("GRAPHQL", "enqueue") not in wire.seen
 
 
-def test_queue_dequeues_when_the_base_changed_after_enqueue():
+def _queue_dequeues_when_the_base_changed_after_enqueue():
     wire = Wire(queue=_queue_data(), put=_queue_refusal(), after=_pull(base="release"))
     out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
     assert (out.merged, out.kind) == (False, "refused")
     assert ("GRAPHQL", "dequeue") in wire.seen
 
 
-def test_branch_file_reads_text_and_oid_with_the_repository_name():
+def _branch_file_reads_text_and_oid_with_the_repository_name():
     wire = Wire()
     got = _hub(wire).branch_file("main", PATH)
     assert got == FileAt(REPO, "{}", "c1")
     assert wire.seen == [("GRAPHQL", "file")]
 
 
-def test_viewer_login_is_read_once():
+def _viewer_login_is_read_once():
     wire = Wire()
     hub = _hub(wire)
     assert hub.viewer_login() == "octocat"
     assert hub.viewer_login() == "octocat"
     assert wire.seen == [("GET", "/user")]
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(_merge_without_expect_keeps_the_request_count, id="merge_without_expect_keeps_the_request_count"),
+        scenes.scene(
+            _merge_with_expect_verifies_right_before_sending_and_does_not_reread_the_pull,
+            id="merge_with_expect_verifies_right_before_sending_and_does_not_reread_the_pull",
+        ),
+        *[
+            scenes.scene(
+                _merge_refuses_when_the_pr_changed_after_the_verdict,
+                id=f"merge_refuses_when_the_pr_changed_after_the_verdict-{label}",
+                verify=v,
+            )
+            for label, v in zip(
+                ["base-changed", "head-changed", "other-repo"],
+                [_verify_data(base="release"), _verify_data(head=OTHER), _verify_data(repo="o/other")],
+                strict=True,
+            )
+        ],
+        scenes.scene(_changed_config_is_rejudged_from_the_same_response, id="changed_config_is_rejudged_from_the_same_response"),
+        scenes.scene(_changed_config_that_still_allows_the_merge_sends_it, id="changed_config_that_still_allows_the_merge_sends_it"),
+        scenes.scene(
+            _queue_is_verified_in_the_same_request_and_reread_after_enqueue,
+            id="queue_is_verified_in_the_same_request_and_reread_after_enqueue",
+        ),
+        scenes.scene(_queue_refuses_when_the_base_changed_before_enqueue, id="queue_refuses_when_the_base_changed_before_enqueue"),
+        scenes.scene(_queue_dequeues_when_the_base_changed_after_enqueue, id="queue_dequeues_when_the_base_changed_after_enqueue"),
+        scenes.scene(
+            _branch_file_reads_text_and_oid_with_the_repository_name, id="branch_file_reads_text_and_oid_with_the_repository_name"
+        ),
+        scenes.scene(_viewer_login_is_read_once, id="viewer_login_is_read_once"),
+    ],
+)
+def test_merge_verification_scenes(request, scene, values):
+    """GitHub.merge の直前の確かめとマージ先の設定の読み取りの場面（#4409 の決定 3・決定 8）。"""
+    scenes.play(request, scene, values)

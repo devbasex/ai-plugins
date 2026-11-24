@@ -31,6 +31,8 @@ from ndf.core.plan.transition_decide import ANSWERED, AwaitAnswer, Outcome, RunS
 from ndf.progress import command, gate, invoke, issue_values, run, store
 from ndf.progress.gate import asking
 
+import scenes
+
 ISSUE = 4409
 BRANCH = "sprint/s1"
 DESIGN_PR, SPRINT_PR = 7, 8
@@ -103,7 +105,14 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
     subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
     gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
-    values = {"worktree": str(repo), "branch": BRANCH, "design_pr": DESIGN_PR, "pr": SPRINT_PR, "product_version": "11.0.0", "gathered": gathered}
+    values = {
+        "worktree": str(repo),
+        "branch": BRANCH,
+        "design_pr": DESIGN_PR,
+        "pr": SPRINT_PR,
+        "product_version": "11.0.0",
+        "gathered": gathered,
+    }
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     plans: list[str] = []
     # 工程が流したプランの名前と、そのとき既にマージされていた PR
@@ -150,7 +159,9 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
                 got = run_plan(Path(argv[argv.index("next") + 1]), work_dir)
                 outputs = {k: values[k] for k in r.outputs if k in values} or None
                 out = {**got, "outputs": outputs} if got["status"] == OK and outputs else got
-            return subprocess.CompletedProcess(argv, 0 if out["status"] == OK else 10 if out["status"] == GATE else 1, json.dumps(out) + "\n", "")
+            return subprocess.CompletedProcess(
+                argv, 0 if out["status"] == OK else 10 if out["status"] == GATE else 1, json.dumps(out) + "\n", ""
+            )
 
         return runner
 
@@ -199,8 +210,7 @@ def _new(capsys, mode: str) -> str:
     return out["metrics"]["machine_id"]
 
 
-@pytest.mark.parametrize("mode", ["standard", "light"])
-def test_the_sprint_pr_waits_for_the_release_gate_and_merges_in_deploy(repo, st, capsys, monkeypatch, mode):
+def _the_sprint_pr_waits_for_the_release_gate_and_merges_in_deploy(repo, st, capsys, monkeypatch, mode):
     """受け入れ条件 1・2・3・5・10・11・12: 工程「Pull Request」・ドキュメントレビュー・確定仕様化はスプリントの PR を
     マージせずに進み、デプロイのリリース承認ゲートが回答を待ち始めた時点で PR は開いたまま。承認の回答が証跡を書き、
     デプロイの最初のステップ（release-merge）が同じ PR をマージし、その後にクリーンアップが流れる。"""
@@ -227,7 +237,7 @@ def test_the_sprint_pr_waits_for_the_release_gate_and_merges_in_deploy(repo, st,
     assert SPRINT_PR in by_plan["merged"]
 
 
-def test_reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_gate(repo, st, capsys, monkeypatch):
+def _reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_gate(repo, st, capsys, monkeypatch):
     """受け入れ条件 12: 再現手順（自動反映の設定・Pull Request まで進めて PR を開いたまま・ndf progress next）で、
     リリース承認ゲートの前にスプリントの PR へのマージの呼び出しが 0 回である。直す前は確定仕様化のプランがマージを呼ぶ。"""
     hub = _hub()
@@ -243,3 +253,25 @@ def test_reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_g
         pytest.fail("リリース承認ゲートまで進まない")
     assert SPRINT_PR not in hub.merged
     assert {"pr", "merge", "plan-to-spec"} <= set(flow.plans)
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(
+                _the_sprint_pr_waits_for_the_release_gate_and_merges_in_deploy,
+                id=scenes.label("the_sprint_pr_waits_for_the_release_gate_and_merges_in_deploy", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["standard", "light"])
+        ],
+        scenes.scene(
+            _reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_gate,
+            id="reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_gate",
+        ),
+    ],
+)
+def test_production_merge_flow_scenes(request, scene, values):
+    """スプリントの PR を、リリース承認ゲートの前にマージしない流れの場面（#4409）。"""
+    scenes.play(request, scene, values)

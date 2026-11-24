@@ -14,6 +14,8 @@ from ndf.core.plan import assemble_decide, model, records, runner
 
 from . import _plan_helpers as H
 
+import scenes
+
 
 # --- 現状固定テスト: `runner.prepare` を同じプロセスで呼ぶ（DBOS を開かない） ---
 
@@ -352,36 +354,56 @@ def gated(in_repo) -> runner.Invocation:
     return inv
 
 
-def test_routes_answer_with_the_user_as_the_actor(gated):
+def _routes_answer_with_the_user_as_the_actor(gated):
     """受け入れ条件 4: 承認待ちの結果の経路は `ndf plan next <プラン> --answer <回答> --by human`。"""
     argv = runner._routes(gated)["merge"]["approved"]["argv"]
     assert argv[-4:] == ["--answer", "approved", "--by", "human"]
 
 
-def test_the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
+def _the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
     runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p1"})
     runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "approved", "human")
     got = json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))
     assert (got["step"], got["answer"], got["by"], got["run"], got["presented_id"]) == ("merge", "approved", "human", gated.run_id, "p1")
 
 
-def test_the_answer_record_without_a_presented_id_holds_null(gated):
+def _the_answer_record_without_a_presented_id_holds_null(gated):
     runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "rejected", "human")
     assert json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))["presented_id"] is None
 
 
-def test_the_step_result_carries_the_presented_id_of_a_gate():
+def _the_step_result_carries_the_presented_id_of_a_gate():
     from ndf.core.plan import steps
 
     step = model.Step(id="merge", run=["x"])
-    out = steps.outcome_of(step, 10, json.dumps(result.result("ci", "gate", "待つ", metrics={"presented_id": "p1"}, routes={"approved": None})) + "\n")
+    out = steps.outcome_of(
+        step, 10, json.dumps(result.result("ci", "gate", "待つ", metrics={"presented_id": "p1"}, routes={"approved": None})) + "\n"
+    )
     assert out["presented_id"] == "p1"
     ok = steps.outcome_of(step, 0, json.dumps(result.result("ci", "ok", "済んだ", metrics={"presented_id": "p1"})) + "\n")
     assert ok["presented_id"] is None
 
 
-def test_next_refuses_an_actor_of_the_wrong_shape(capsys):
+def _next_refuses_an_actor_of_the_wrong_shape(capsys):
     from ndf.core.plan import cli
 
     assert cli.main(["next", "p.json", "--answer", "approved", "--by", "人"]) != 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(_routes_answer_with_the_user_as_the_actor, id="routes_answer_with_the_user_as_the_actor"),
+        scenes.scene(
+            _the_answer_record_copies_the_presented_id_of_the_waiting_step,
+            id="the_answer_record_copies_the_presented_id_of_the_waiting_step",
+        ),
+        scenes.scene(_the_answer_record_without_a_presented_id_holds_null, id="the_answer_record_without_a_presented_id_holds_null"),
+        scenes.scene(_the_step_result_carries_the_presented_id_of_a_gate, id="the_step_result_carries_the_presented_id_of_a_gate"),
+        scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
+    ],
+)
+def test_answer_record_scenes(request, scene, values):
+    """承認ゲートの回答の記録と提示の識別子の場面（#4409 の決定 7）。"""
+    scenes.play(request, scene, values)
