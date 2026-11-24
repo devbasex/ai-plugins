@@ -30,10 +30,12 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない |
+| `ndf ci answer` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--answer-record`（string・必須）: ndf plan next --answer が書いた回答の記録<br>`--presented`（string・必須）: 承認待ちのステップが書いた承認の対象のファイル |
+| `ndf ci ask` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--presented-out`（string・必須）: 承認の対象を書くファイル（ndf ci answer が読む） |
+| `ndf ci merge` | `--branch`（string・任意）: PR の head のブランチ（作業場所の HEAD を添える）<br>`--pr`（integer・任意）: PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない<br>`--production-gate`（string・任意・既定 `"stop"`・値 `stop`・`defer`・`stale`）: 自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale<br>`--approved-head`（string・任意）: 工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）<br>`--approved-base`（string・任意）: 工程の承認ゲートで承認したマージ先<br>`--presented-out`（string・任意）: stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む） |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の HEAD の設定から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
-結果の `metrics`: `elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`junit_artifacts`（string）・`log_error`（string）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
+結果の `metrics`: `answer`（string）・`approved_by`（string）・`elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`gate`（const "production-merge"）・`junit_artifacts`（string）・`log_error`（string）・`merge`（string）・`presented_id`（string）・`production`（boolean）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）・`verdict`（string）・`written`（boolean）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
 
 ## `ndf contracts`
 
