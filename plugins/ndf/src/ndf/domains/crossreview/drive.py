@@ -758,6 +758,20 @@ def _detach_revived(run: _Run) -> None:
             settled.remove(fid)
 
 
+def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
+    """状態ファイルに残すラウンドの記録。判定と修正の結果は、決まってから呼び手が足す。"""
+    return {
+        "round": round_no,
+        "head": prep.head,
+        scope_decide.BASE: prep.base,
+        scope_decide.REVIEWERS: list(run.cfg.reviewers),
+        scope_decide.FOCUS: list(run.cfg.settings.focus),
+        scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
+        fin.MVV_CHECKED: _mvv_checked(run, prep.head),
+        "scope": prep.scope.kind,
+    }
+
+
 def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
@@ -771,16 +785,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.history.append(run.journal.enter(round_no, raised, items, run.mvv))
     run.warnings += run.journal.warnings
     _detach_revived(run)
-    record: dict[str, Any] = {
-        "round": round_no,
-        "head": prep.head,
-        scope_decide.BASE: prep.base,
-        scope_decide.REVIEWERS: list(run.cfg.reviewers),
-        scope_decide.FOCUS: list(run.cfg.settings.focus),
-        scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
-        fin.MVV_CHECKED: _mvv_checked(run, prep.head),
-        "scope": prep.scope.kind,
-    }
+    record = _round_record(run, round_no, prep)
     rounds.append(record)
     if unread:
         # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける
