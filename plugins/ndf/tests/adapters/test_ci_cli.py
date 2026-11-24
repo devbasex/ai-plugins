@@ -470,12 +470,12 @@ def _merge_does_not_count_trails_of_another_login(monkeypatch, capsys, last_resu
 
 
 def _merge_without_a_login_stops_apart_from_approval_stale(monkeypatch, capsys, last_result):
-    """r1-10: token の利用者の login を読めなければ、approval_stale でなく precondition で止まり、キューから外す。"""
+    """r1-10: token の利用者のアカウント ID を読めなければ、approval_stale でなく precondition で止まり、キューから外す。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(queued=True)}))
     _approve(hub)
     hub.login, hub.account_id = "", 0
     assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "stale"]) == causes.exit_code("precondition")
-    assert hub.merged == [] and hub.dequeued == [7] and "login" in _out(capsys, last_result)["cause"]["detail"]
+    assert hub.merged == [] and hub.dequeued == [7] and "アカウント ID" in _out(capsys, last_result)["cause"]["detail"]
 
 
 def _merge_moved_right_before_sending_is_approval_stale(monkeypatch, capsys, last_result, gate, code):
