@@ -128,3 +128,74 @@ def test_table_keeps_every_kind_and_representative_row():
     )
     assert row.exit == causes.exit_code("ci_pending")
     assert causes.exit_code("samples_mismatch") == 1
+
+
+def _retry_kind(contracts_copy, **values) -> None:
+    """種類 ci_pending の打ち直しの方針を `values` だけにする（プラグインの上限の値に寄らない）。"""
+    contracts_copy("limits/cause.ci-pending.json", lambda _: {"summary": "s", **values})
+
+
+@pytest.mark.parametrize(
+    ("values", "used", "delay"),
+    [
+        # 間隔 × 倍率 ^ 打ち直した回数
+        ({"attempts": 4, "interval": 10, "factor": 3}, 0, 10),
+        ({"attempts": 4, "interval": 10, "factor": 3}, 2, 90),
+        # 頭打ちの手前・超え
+        ({"attempts": 4, "interval": 10, "factor": 3, "max_interval": 50}, 1, 30),
+        ({"attempts": 4, "interval": 10, "factor": 3, "max_interval": 50}, 2, 50),
+        # 頭打ちは最初の間隔にも掛かり、0 も頭打ちとして扱う
+        ({"attempts": 4, "interval": 10, "max_interval": 5}, 0, 5),
+        ({"attempts": 4, "interval": 10, "max_interval": 0}, 0, 0),
+        # 倍率が無ければ間隔は伸びない。間隔 0 は待たずに打ち直す（None ではない）
+        ({"attempts": 4, "interval": 10}, 3, 10),
+        ({"attempts": 4, "interval": 0, "factor": 3}, 2, 0),
+        # 回数が尽きた
+        ({"attempts": 4, "interval": 10, "factor": 3}, 4, None),
+        ({"attempts": 4, "interval": 10, "factor": 3}, 5, None),
+    ],
+)
+def test_retry_delay_grows_by_the_policy_until_attempts_run_out(contracts_copy, values, used, delay):
+    _retry_kind(contracts_copy, **values)
+    assert causes.retry_delay(causes.cause("ci_pending", "x"), used) == delay
+
+
+def test_retry_delay_ignores_retry_after_unless_the_kind_requires_it(contracts_copy):
+    _retry_kind(contracts_copy, attempts=2, interval=10)
+    assert causes.retry_delay(causes.cause("ci_pending", "x", retry_after=99), 0) == 10
+
+
+@pytest.mark.parametrize(
+    ("extra", "used", "delay"),
+    [
+        # 間隔・倍率・頭打ちがあっても、待つのは retry_after の秒そのもの
+        ({"retry_after": 99}, 0, 99.0),
+        ({"retry_after": 99}, 1, 99.0),
+        ({"retry_after": 1.5}, 0, 1.5),
+        ({"retry_after": 0}, 0, 0.0),
+        # 待つ秒が無い・数でない・回数が尽きた
+        ({}, 0, None),
+        ({"retry_after": None}, 0, None),
+        ({"retry_after": "30"}, 0, None),
+        ({"retry_after": 99}, 2, None),
+    ],
+)
+def test_retry_delay_waits_only_retry_after_for_the_kind_that_requires_it(contracts_copy, extra, used, delay):
+    _retry_kind(contracts_copy, attempts=2, interval=10, factor=3, max_interval=50)
+    contracts_copy("causes/ci_pending.json", lambda c: {**c, "requires_retry_after": True})
+    got = causes.retry_delay({"kind": "ci_pending", "detail": "x", **extra}, used)
+    assert got == delay and (delay is None or isinstance(got, float))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, {}, {"detail": "x"}, {"kind": None}, {"kind": 1}, {"kind": "no_such", "retry_after": 5}, {"kind": "unknown", "retry_after": 5}],
+)
+def test_retry_delay_is_none_without_a_retry_kind(value):
+    assert causes.retry_delay(value, 0) is None
+
+
+def test_retry_delay_stops_on_a_wrong_policy(contracts_copy):
+    _retry_kind(contracts_copy, interval=10)
+    with pytest.raises(causes.CausesError, match="attempts"):
+        causes.retry_delay(causes.build("ci_pending", "x"), 0)
