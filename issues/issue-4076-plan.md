@@ -31,6 +31,8 @@
 | `plugins/ndf/src/ndf/domains/records/preflight.py` | `mvv_body` が `body_path` を呼ぶ（返す値は同じ） | U3 |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | `_mvv_current`（`fetch_branch_or_raise`・`--allow-mismatch`） | U4 |
 | `plugins/ndf/docs/contracts/commands.md` | `ndf records mvv current` の項目 | U4 |
+| `plugins/ndf/contracts/schemas/result.schema.json`・`plugins/ndf/contracts/version.json` | 結果 JSON の `outputs` のキーに `mvv` を足し、コントラクトのバージョンを 1 つ上げる | U4 |
+| `plugins/ndf/contracts/schemas/io/records.args.schema.json` | `ndf records mvv current` の引数（`ndf check --write-spec` が生成する） | U4 |
 | `plugins/ndf/contracts/data/review-criteria.json` | キー `mvv_criterion`・`mvv_number`・`mvv`（`reviewer`・`fixer`・`citation`） | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | `criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item` | U5 |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | `Basis.mvv`・`read_by_all_head`・`reviewed_of`・`state_scope`（U6）。`read_by_all_head` が `mvv_checked` を見る（U10） | U6・U10 |

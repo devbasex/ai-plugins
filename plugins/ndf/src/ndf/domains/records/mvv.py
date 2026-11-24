@@ -182,6 +182,11 @@ def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
     return path
 
 
+def mismatch_detail(blobs: Mapping[str, str]) -> str:
+    """本文が承認の後に変わったことを伝える文。`blobs` は `Snapshot.blobs`（最後が本文）。"""
+    return f"ベースの MVV の本文が承認の記録と合わない: {list(blobs)[-1]}"
+
+
 def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
     """参照 `ref`（取得済みの参照かコミット）の MVV を読み、承認済みなら本文と共通原則のスナップショットを書いて返す。
 
@@ -204,7 +209,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
     sha = _sha256(body)
     state = md.status(decl, sha)
     if state == md.State.MISMATCH and not allow_mismatch:
-        raise MvvError(f"ベースの MVV の本文が承認の記録と合わない: {path}")
+        raise MvvError(mismatch_detail(blobs))
     if state != md.State.APPROVED:
         return Snapshot(state, None, None, None, (), blobs, commit, "", None)
     version = md.current_version(decl)
