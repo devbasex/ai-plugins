@@ -16,6 +16,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
+import unidiff
+
 from ndf import contracts
 from ndf.progress.gate.checks import Changed, MvvFacts, sections
 
@@ -172,7 +174,91 @@ def incomplete_patches(files: Sequence[Mapping[str, Any]]) -> list[str]:
     return [f"差分の全体を材料に載せられない: {', '.join(held)}"] if held else []
 
 
-def gate_outcome(gate: str, verdict: Any, skip: bool, why: Sequence[str], head: Optional[str] = None) -> dict[str, Any]:
-    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`head` は判定した PR の head（PR を読む前に止めたら無い）。"""
-    out = {"gate": gate, "skip": skip, "verdict": verdict if isinstance(verdict, dict) else None, "why": list(why)}
+def gate_outcome(
+    gate: str, verdict: Any, skip: bool, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None
+) -> dict[str, Any]:
+    """判定のステップの出力（文脈のキー `mvv_gate` の値）。`head` は判定した PR の head（PR を読む前に止めたら無い）。
+
+    `holds` はレビューの保留（読まなかったら None）で、キーは常に置く。`noted` は今回のコメントを書いたか（既定は偽。書けたら
+    `mvv_gate._recorded` が置き換える）。
+    """
+    held = verdict if isinstance(verdict, dict) else None
+    out: dict[str, Any] = {"gate": gate, "skip": skip, "verdict": held, "why": list(why), "holds": None if holds is None else list(holds)}
+    out["noted"] = False
     return {**out, "head": head} if head is not None else out
+
+
+def stop_outcome(
+    gate: str, stop: str, why: Sequence[str], head: Optional[str] = None, holds: Optional[Sequence[str]] = None
+) -> dict[str, Any]:
+    """判定を持たずに終わった出力。判定できなかった理由の種類 `stop` と、その定型文（`STOP_REASONS`）を `stopped_by` に置く。"""
+    return {**gate_outcome(gate, None, False, why, head, holds), "stopped_by": {"kind": stop, "text": STOP_REASONS[stop]}}
+
+
+# --- 手元の git の差分を、GitHub の比較の files の行の形にする（#3959） -----------------------------------------
+
+
+class DiffError(ValueError):
+    """`git diff` の出力を読めない。"""
+
+
+# 差分の頭で、名前の付いた行（`rename from <パス>`）
+_RENAME_FROM, _RENAME_TO = "rename from ", "rename to "
+
+
+def unquote_path(name: str) -> str:
+    """git が `"` で囲んでエスケープしたパスを元のパスへ戻す。囲みが無ければそのまま。UTF-8 で読めなければ `DiffError`。
+
+    git は ASCII でないバイトを 8 進のエスケープにするので、囲みの中は ASCII だけである。エスケープを Python の
+    `unicode_escape` でバイトへ戻し（8 進は 1 バイトの文字になる）、UTF-8 で読む。
+    """
+    if len(name) < 2 or not (name.startswith('"') and name.endswith('"')):
+        return name
+    try:
+        return name[1:-1].encode("ascii").decode("unicode_escape").encode("latin-1").decode("utf-8")
+    except UnicodeError as exc:
+        raise DiffError(f"引用したパスを読めない: {name}") from exc
+
+
+def _diff_path(raw: str, prefix: str) -> str:
+    """`---`・`+++`・`diff --git` の名前（引用を戻し、`compare_files` が付けさせた頭 `prefix` を 1 回だけ外す）。"""
+    name = unquote_path(raw)
+    if not name.startswith(prefix):
+        raise DiffError(f"差分のパスに頭 {prefix} が無い: {raw}")
+    return name[len(prefix) :]
+
+
+def _rename_pair(info: Sequence[str]) -> Optional[tuple[str, str]]:
+    """改名の前と後のパス（頭を付けないので外さない）。改名でなければ None。"""
+    held = {
+        line[: len(k)]: unquote_path(line[len(k) :].rstrip("\n")) for line in info for k in (_RENAME_FROM, _RENAME_TO) if line.startswith(k)
+    }
+    return (held[_RENAME_FROM], held[_RENAME_TO]) if len(held) == 2 else None
+
+
+def _diff_row(pf: unidiff.PatchedFile) -> dict[str, Any]:
+    info = [str(line) for line in pf.patch_info]
+    moved = _rename_pair(info)
+    row: dict[str, Any]
+    if moved is not None:
+        row = {"filename": moved[1], "previous_filename": moved[0], "status": "renamed"}
+    elif pf.is_removed_file:
+        row = {"filename": _diff_path(pf.source_file, "a/"), "status": "removed"}
+    else:
+        row = {"filename": _diff_path(pf.target_file, "b/"), "status": "added" if pf.is_added_file else "modified"}
+    if pf.is_binary_file:
+        return {**row, "changes": 1}
+    row["changes"] = pf.added + pf.removed
+    patch = "".join(str(h) for h in pf).rstrip("\n")
+    return {**row, "patch": patch} if patch else row
+
+
+def diff_rows(text: str) -> list[dict[str, Any]]:
+    """`git diff` の出力（`mvv.compare_files` の手元の経路）を、GitHub の比較の `files` と同じ形の行にする。読めなければ `DiffError`。
+
+    バイナリのファイルは `patch` を持たず `changes` を 1 にする（`incomplete_patches` が数える）。
+    """
+    try:
+        return [_diff_row(pf) for pf in unidiff.PatchSet(text)]
+    except unidiff.UnidiffParseError as exc:
+        raise DiffError(f"差分を読めない: {exc}") from exc

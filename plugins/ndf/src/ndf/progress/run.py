@@ -262,7 +262,7 @@ def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> boo
 def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
     """数えない MVV 判定の回答で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959）。
 
-    更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に人へ問い直すためである。後ろのステップ（マージなど）
+    更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に改めて人へ質問するためである。後ろのステップ（マージなど）
     が済んでいれば、承認を取り直しても戻せないので開き直さない。記録の事象は書き換えない。
     """
     by_seq = {ev.seq: ev for ev in v.row_events(s.name) if ev.draft.kind == ANSWERED}

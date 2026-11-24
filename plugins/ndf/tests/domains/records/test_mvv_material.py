@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_material_decide as mm
@@ -103,13 +102,10 @@ class _Hub:
     def pull(self, number: int) -> SimpleNamespace:
         return SimpleNamespace(body=self.body)
 
-    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
-        assert path == "/repos/o/r/pulls/3/files"
-        return [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}, {"filename": "c.md", "status": "added"}]
-
 
 def test_pr_facts_reads_the_body_and_changed_files_of_the_pr() -> None:
     body = "## テスト\n\n通った\n\n## 出し直しの指摘への対応\n\n| a | 「テスト」のセクションに記載した |\n"
-    facts = mvv.pr_facts(_Hub(body), 3, BASE)  # type: ignore[arg-type]
+    rows = [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}, {"filename": "c.md", "status": "added"}]
+    facts = mvv.pr_facts(_Hub(body), 3, BASE, rows)  # type: ignore[arg-type]
     assert facts.claimed == ("テスト",) and check_claimed_sections(facts) is None
     assert facts.changed == (Changed("b.py", "a.py", True), Changed("c.md", None, False))

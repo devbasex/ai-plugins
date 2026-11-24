@@ -77,3 +77,27 @@ def test_current_an_empty_verdict_lists_none_under_the_reasons_and_the_boundary(
         "## MVV 判定（設計 Pull Request のマージ）\n\n- 判定: follow\n\n### 理由\n\n- （無し）\n\n### レッドライン\n\n- （無し）\n"
     )
     assert gate.note("release", None, []).startswith("## MVV 判定（本番系へ届く操作）\n\n- 判定: 無し\n\n### 理由\n\n- （無し）\n")
+
+
+# --- #3959 Task 4: 検査 1 だけが判定を止め、区分ごとの検査が省略だけを止める ---
+
+
+def test_only_the_first_check_stops_the_verdict():
+    assert gate.checks.judgeable(PASSING) is None
+    assert "承認済みでない" in str(gate.checks.judgeable(replace(PASSING, status="mismatch", current=None, approved=None)))
+    # 検査 2 が外れても判定は打てる（省くかだけが止まる）
+    assert gate.checks.judgeable(replace(PASSING, referenced=None)) is None
+
+
+@pytest.mark.parametrize("kind", ["design", "release"])
+def test_each_gate_has_the_checks_in_order(kind):
+    assert gate.checks.CHECKS_BY_GATE[kind] == gate.checks.CHECKS and gate.checks.CHECKS[0] is gate.checks.check_mvv_hash
+    hit = replace(PASSING, referenced=None)
+    assert gate.refusals(hit, kind) == ["スプリントの状態に承認済み MVV の参照が無い"]
+    assert gate.may_skip(hit, FOLLOW, kind) == (False, ["スプリントの状態に承認済み MVV の参照が無い"])
+
+
+def test_the_note_carries_the_holds_only_when_there_are_some():
+    assert "レビューの保留" not in gate.checks.note("design", FOLLOW, [])
+    text = gate.checks.note("design", FOLLOW, [], ["PR #5: 直っていないレッドライン"])
+    assert "### レビューの保留" in text and "- PR #5: 直っていないレッドライン" in text

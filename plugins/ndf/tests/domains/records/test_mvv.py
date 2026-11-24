@@ -10,6 +10,9 @@ import git_sandbox
 import pytest
 
 from ndf import identity
+from ndf.adapters import git
+from ndf.adapters.github import GitHubError
+from ndf.contracts.internal import InternalError
 from ndf.domains.records import jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 
@@ -158,13 +161,11 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた\n", encoding="utf-8")
     inputs = {"sprint": "本文", "project": "MVV", "principles": "原則", "prompt": "指示"}
-    warnings: list[dict] = []
-    first = mvv.mvv_validate_sprint(repo, inputs, judge, warnings=warnings)
-    assert warnings == [{"kind": "broken_rows", "path": str(path), "lines": [1]}]
-    second = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge, warnings=[])
+    first, _ = mvv.mvv_validate_sprint(repo, inputs, judge)
+    second, _ = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge)
     assert len(calls) == 1 and second["reused_from"] == first["at"]
-    mvv.mvv_validate_sprint(repo, {**inputs, "sprint": "変えた"}, judge, warnings=[])
-    mvv.mvv_validate_sprint(repo, inputs, judge, reuse=False, warnings=[])
+    mvv.mvv_validate_sprint(repo, {**inputs, "sprint": "変えた"}, judge)
+    mvv.mvv_validate_sprint(repo, inputs, judge, reuse=False)
     assert len(calls) == 3
     rows, broken = jsonl.read_rows(path, kind="mvv-validation")
     assert len(rows) == 4 and [b.line for b in broken] == [1]
@@ -177,10 +178,10 @@ def test_mvv_validate_sprint_judges_again_after_a_row_of_the_same_inputs_that_do
     def judge(_: Any) -> tuple[str, dict]:
         return verdicts.pop(0), {}
 
-    first = mvv.mvv_validate_sprint(main_dir, inputs, judge, warnings=[])
+    first, _ = mvv.mvv_validate_sprint(main_dir, inputs, judge)
     with mvv.record_path("mvv-validation").open("a", encoding="utf-8") as f:
         f.write(json.dumps({**first, "verdict": md.NOT_FOLLOW, "usd": "0.1"}) + "\n")
-    assert mvv.mvv_validate_sprint(main_dir, inputs, judge, warnings=[])["verdict"] == md.NOT_FOLLOW
+    assert mvv.mvv_validate_sprint(main_dir, inputs, judge)[0]["verdict"] == md.NOT_FOLLOW
     assert verdicts == []
 
 
@@ -221,3 +222,157 @@ def test_count_signals_counts_disputed_findings_by_their_key() -> None:
             {"repo": "/m", "mvv_version": 2, "kind": md.UNKNOWN, "state": "s", "gate": "g", "pr": 1}]  # fmt: skip
     got = md.count_signals(rows, _decl(2, {"unknowns": 4}), "/m")
     assert (got.overrides, got.unknown_pass, got.unknown, got.revision_due) == (0, 0, 4, True)
+
+
+# --- #3959 Task 4: 記録を 1 回だけ読む（validation_rows）・読み済みの行で判定する・比較の差分（compare_files） ---
+
+INPUTS = {"sprint": "本文"}
+
+
+def _follow(calls: list[int]) -> mvv.Judge:
+    def judge(_: Any) -> tuple[str, dict]:
+        calls.append(1)
+        return md.FOLLOW, {}
+
+    return judge
+
+
+def test_validation_rows_reads_nothing_before_the_record_exists_and_refuses_a_non_file(repo: Path) -> None:
+    assert mvv.validation_rows(repo) == ([], [])
+    path = mvv.record_path("mvv-validation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(path.parent / "どこにも無い")
+    with pytest.raises(OSError, match="ファイルでない"):
+        mvv.validation_rows(repo)
+    path.unlink()
+    path.mkdir()
+    with pytest.raises(OSError, match="ファイルでない"):
+        mvv.validation_rows(repo)
+
+
+def test_validation_rows_returns_every_row_and_the_broken_ones(repo: Path) -> None:
+    calls: list[int] = []
+    first, _ = mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls))
+    path = mvv.record_path("mvv-validation")
+    with path.open("a", encoding="utf-8") as f:
+        f.write("{壊れた\n")
+    rows, broken = mvv.validation_rows(repo)
+    assert rows == [first] and [(b.line, b.before) for b in broken] == [(2, 1)]
+    with path.open("ab") as f:
+        f.write(b'{"\xff"}\n')
+    with pytest.raises(UnicodeDecodeError):
+        mvv.validation_rows(repo)
+    path.write_text(json.dumps({**first, "version": 99}) + "\n", encoding="utf-8")
+    with pytest.raises(InternalError):
+        mvv.validation_rows(repo)
+
+
+def test_mvv_validate_sprint_reuses_from_the_given_rows_without_reading_the_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    first, _ = mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls))
+    rows, broken = mvv.validation_rows(repo)
+    monkeypatch.setattr(jsonl, "read_rows", lambda *a, **k: pytest.fail("渡した行があるのに記録を読み直した"))
+    again, cause = mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls), rows=rows, broken=broken)
+    assert (len(calls), again["reused_from"], cause) == (1, first["at"], None)
+    # 同じ材料の「従う」の後ろに読めない行があれば再利用しない
+    mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls), rows=rows, broken=[jsonl.Broken(2, "壊れた", 1, {"key": first["key"]})])
+    # reuse=False は記録を読まない（読めない記録でも止まらない）
+    mvv.mvv_validate_sprint(repo, INPUTS, _follow(calls), reuse=False)
+    assert len(calls) == 3
+
+
+def test_mvv_validate_sprint_returns_the_row_and_the_cause_when_it_cannot_append(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_a: Any, **_k: Any) -> dict:
+        raise OSError("書けない")
+
+    monkeypatch.setattr(jsonl, "append_locked", fail)
+    row, cause = mvv.mvv_validate_sprint(repo, INPUTS, _follow([]), rows=[])
+    assert (row["verdict"], cause) == (md.FOLLOW, "書けない")
+
+
+class CompareHub:
+    """比較の REST だけを返す GitHub の偽物。"""
+
+    repo = "o/r"
+
+    def __init__(self, files: list[dict[str, Any]]) -> None:
+        self.files = files
+        self.paths: list[str] = []
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
+        self.paths.append(path)
+        return {"files": self.files}
+
+
+class CountingGit:
+    """手元の git の偽物。`fetch` の結果と、呼んだ手を残す（子のプロセスは起動しない）。"""
+
+    def __init__(self, fetched: git.Completed) -> None:
+        self.fetched = fetched
+        self.calls: list[tuple[str, ...]] = []
+
+    def fetch(self, remote: str, *refspecs: str) -> git.Completed:
+        self.calls.append(("fetch", remote, *refspecs))
+        return self.fetched
+
+    def diff_between(self, a: str, b: str, *options: str) -> str:
+        self.calls.append(("diff", a, b, *options))
+        return "diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
+
+    def merge_base(self, *a: str) -> str:
+        raise AssertionError("merge-base を別に起動しない")
+
+
+def _files(n: int) -> list[dict[str, Any]]:
+    return [{"filename": f"f{i}", "status": "modified", "patch": "+x", "changes": 1} for i in range(n)]
+
+
+def test_compare_files_reads_the_comparison_once_and_git_only_at_the_cap() -> None:
+    hub, g = CompareHub(_files(mvv.COMPARE_FILES_CAP - 1)), CountingGit(git.Completed(0, "", ""))
+    assert mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40) == hub.files  # type: ignore[arg-type]
+    assert hub.paths == [f"/repos/o/r/compare/{'b' * 40}...{'h' * 40}"] and g.calls == []
+    hub = CompareHub(_files(mvv.COMPARE_FILES_CAP))
+    rows = mvv.compare_files(hub, g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+    assert [r["filename"] for r in rows] == ["x"]
+    assert g.calls == [("fetch", "origin", "h" * 40), ("diff", "b" * 40, "h" * 40, *mvv.LOCAL_DIFF)]
+    assert {"--merge-base", "--patch", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--submodule=short",
+            "--src-prefix=a/", "--dst-prefix=b/", "-M"} <= set(mvv.LOCAL_DIFF)  # fmt: skip
+
+
+def test_compare_files_refuses_a_head_it_cannot_fetch_without_reading_the_diff() -> None:
+    g = CountingGit(git.Completed(128, "", "取得できない"))
+    with pytest.raises(git.GitError, match="取得できない"):
+        mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), g, "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+    assert [c[0] for c in g.calls] == ["fetch"]
+
+
+def test_compare_files_refuses_an_answer_without_files() -> None:
+    hub = CompareHub([])
+    hub.rest = lambda *a, **k: {"message": "x"}  # type: ignore[method-assign]
+    with pytest.raises(GitHubError):
+        mvv.compare_files(hub, CountingGit(git.Completed(0, "", "")), "origin", "b" * 40, "h" * 40)  # type: ignore[arg-type]
+
+
+def test_compare_files_at_the_cap_reads_only_the_changes_of_the_pr_from_the_merge_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # マージ先だけが分岐の後に進んだ状態（本物の git）: マージ先だけの変更が載らず、両方で同じに変えたファイルが落ちない
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    origin, local = tmp_path / "origin", tmp_path / "local"
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "main", str(origin))
+
+    def commit(where: Path, files: dict[str, str]) -> str:
+        for name, text in files.items():
+            (where / name).write_text(text, encoding="utf-8")
+        git_sandbox.sh(where, "add", "-A")
+        git_sandbox.sh(where, "commit", "-q", "-m", "c")
+        return git_sandbox.sh(where, "rev-parse", "HEAD", strip=True)
+
+    commit(origin, {"both.txt": "0\n", "base.txt": "0\n"})
+    git_sandbox.sh(origin, "checkout", "-q", "-b", "pr")
+    head = commit(origin, {"both.txt": "1\n", "pr.txt": "1\n"})
+    git_sandbox.sh(origin, "checkout", "-q", "main")
+    base = commit(origin, {"both.txt": "1\n", "base.txt": "1\n"})
+    git_sandbox.sh(tmp_path, "clone", "-q", "--single-branch", "-b", "main", str(origin), str(local))
+    rows = mvv.compare_files(CompareHub(_files(mvv.COMPARE_FILES_CAP)), git.Git(local), "origin", base, head)  # type: ignore[arg-type]
+    assert sorted(r["filename"] for r in rows) == ["both.txt", "pr.txt"]

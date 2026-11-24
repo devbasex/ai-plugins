@@ -1,4 +1,4 @@
-"""承認ゲートの直前の MVV 判定（`ndf records mvv gate`。#3745・#3017）。LLM のアダプターはスタブにする。
+"""承認ゲートの直前の MVV 判定（`ndf records mvv gate`。#3745・#3017・#3959）。LLM のアダプターと GitHub はスタブにし、git は本物を使う。
 
 #2213・#2704 の再現: どちらもレッドライン（#2213 は C2・C4、#2704 は C3・C4）に当たる設計で、判定の指示文の変更の後に
 boundary 空の「従う」になって承認ゲートを省けた（#3017）。ここでは、判定の材料にレッドラインの一覧（共通原則の C1〜C8 と
@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import git_sandbox
 import pytest
@@ -20,10 +21,9 @@ from ndf import contracts, identity
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
-from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
+from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.progress import command, definition, invoke, model
 from ndf.domains.records import mvv_material_decide as mm
-from ndf.progress.gate.checks import note, refusals
 
 BODY = "# MVV\n\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | リリース対象の取得元・バージョンの規則を変える | 利用者全員に効く |\n"
 SHA = hashlib.sha256(BODY.encode("utf-8")).hexdigest()
@@ -56,33 +56,66 @@ DESIGN_2704 = {
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """設計のブランチ design/x の作業場所。マージ先 main は別のリポジトリ（リモート origin）にあり、承認済みの MVV を持つ。"""
     git_sandbox.isolate_git(tmp_path, monkeypatch)
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    origin = tmp_path / "origin"
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "main", str(origin))
+    _commit(origin, {".ndf/mvv.md": BODY, ".ndf/mvv.json": json.dumps({"body": "mvv.md", "versions": [{"version": 1, "sha256": SHA}]})})
     root = tmp_path / "main"
-    git_sandbox.sh(tmp_path, "init", "-q", "-b", "design/x", str(root))
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "mvv.md").write_text(BODY, encoding="utf-8")
-    (root / ".ndf" / "mvv.json").write_text(json.dumps({"body": "mvv.md", "versions": [{"version": 1, "sha256": SHA}]}), encoding="utf-8")
-    git_sandbox.sh(root, "add", "-A")
-    git_sandbox.sh(root, "commit", "-q", "-m", "mvv")
+    git_sandbox.sh(tmp_path, "clone", "-q", str(origin), str(root))
+    git_sandbox.sh(root, "checkout", "-q", "-b", "design/x")
     return root
+
+
+def _commit(where: Path, changes: dict[str, Optional[str]]) -> str:
+    """`where` に変更（パス → 中身。None なら消す）をコミットし、その SHA を返す。"""
+    for rel, text in changes.items():
+        path = where / rel
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    git_sandbox.sh(where, "add", "-A")
+    git_sandbox.sh(where, "commit", "-q", "-m", "変更")
+    return git_sandbox.sh(where, "rev-parse", "HEAD", strip=True)
+
+
+def _base(repo: Path, changes: dict[str, Optional[str]]) -> str:
+    """マージ先（リモートの main）に変更をコミットする。"""
+    return _commit(repo.parent / "origin", changes)
+
+
+def _base_sha(repo: Path) -> str:
+    return git_sandbox.sh(repo.parent / "origin", "rev-parse", "main", strip=True)
 
 
 @pytest.fixture(autouse=True)
 def notes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     """PR のコメントへ書く判定の記録（GitHub へは書かず、番号と本文を残す）。"""
     posted: list[tuple[int, str]] = []
-    monkeypatch.setattr(mvv_gate, "post_note", lambda hub, number, text: posted.append((number, text)))
+
+    def post(hub: Any, number: int, text: str) -> SimpleNamespace:
+        posted.append((number, text))
+        return SimpleNamespace(url=f"https://github.com/o/r/pull/{number}#issuecomment-{len(posted)}")
+
+    monkeypatch.setattr(mvv_gate, "post_note", post)
     return posted
 
 
 class Hub:
-    """GitHub の偽物。設計のブランチ design/x の開いた PR と、その本文・変えたファイルを返す。"""
+    """GitHub の偽物。設計のブランチ design/x の開いた PR と、その本文・マージ先 main・head と、比較の変えたファイルを返す。
+
+    `case["reads"]` は 2 回目以降の `pull` の値（head・マージ先）か投げる例外、`case["compare"]` は比較の応答か投げる例外。
+    """
 
     repo = "o/r"
 
     def __init__(self, number: int, case: dict[str, Any]) -> None:
         self.number, self.case = number, case
+        self.paths: list[str] = []
+        self.reads = 0
 
     def pulls_by_head(self, branches: list[str]) -> dict[str, list[SimpleNamespace]]:
         opened = [SimpleNamespace(number=self.number, state="open", cross_repository=False)]
@@ -90,11 +123,24 @@ class Hub:
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
-        return SimpleNamespace(body=self.case["body"], head_sha=self.case.get("head", "h" * 40))
+        self.reads += 1
+        later = self.case.get("reads", [])
+        moved = later[self.reads - 2] if self.reads >= 2 and len(later) >= self.reads - 1 else {}
+        if isinstance(moved, Exception):
+            raise moved
+        head = moved.get("head", self.case.get("head", HEAD))
+        return SimpleNamespace(body=self.case["body"], head_sha=head, base_ref=moved.get("base", "main"))
 
-    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
-        assert path == f"/repos/o/r/pulls/{self.number}/files"
-        return self.case["files"]
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
+        self.paths.append(path)
+        assert method == "GET" and path.startswith("/repos/o/r/compare/")
+        got = self.case.get("compare", {"files": self.case["files"]})
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+
+HEAD = "h" * 40
 
 
 class Ask:
@@ -124,11 +170,217 @@ def _no_hub(root: Path) -> Hub:
     raise AssertionError("判定を打たないときは GitHub を読まない")
 
 
-def test_normal_pace_asks_a_human_without_judging(repo: Path) -> None:
+def _stopped(out: dict[str, Any]) -> str:
+    return out["stopped_by"]["kind"] if "stopped_by" in out else ""
+
+
+DOCS = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
+NORMAL = "進め方 normal は承認ゲートを MVV 判定で省かない"
+
+
+# --- #3959 Task 4: 進め方によらず判定を打ち、進め方と区分は省くかだけを決める -----------------------------------
+
+
+@pytest.mark.parametrize("gate_name", ["design", "release"])
+def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes: list[tuple[int, str]]) -> None:
+    # 受け入れ条件 1: normal でも判定が verdict に載り、skip は偽のまま、判定の記録が PR のコメントに載る
     ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(pace="normal"), _no_hub, ask)
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["進め方 normal は承認ゲートを MVV 判定で省かない"]}
-    assert ask.calls == []
+    out = mvv_gate.gate(repo, gate_name, _inputs(pace="normal", pr=5), _hub(5, DOCS), ask)
+    assert len(ask.calls) == 1 and out["verdict"] == FOLLOW and out["skip"] is False
+    assert out["why"][0] == NORMAL and out["head"] == HEAD and out["holds"] is None and "stopped_by" not in out
+    assert (out["noted"], out["note_url"]) == (True, "https://github.com/o/r/pull/5#issuecomment-1")
+    ((number, text),) = notes
+    assert number == 5 and "Value 1 に沿う" in text and NORMAL in text
+
+
+def test_fast_skips_only_the_design_gate(repo: Path) -> None:
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["skip"], out["why"], out["holds"]) == (True, [], None)
+    # 決定 3: リリース承認ゲートは fast でも省かず、#4105 の理由を why に載せる
+    out = mvv_gate.gate(repo, "release", _inputs(pr=5), _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["skip"], out["why"], out["verdict"]) == (False, [mvv_gate.RELEASE_KEPT], FOLLOW)
+
+
+@pytest.mark.parametrize(
+    ("gate_name", "inputs", "case", "word"),
+    [
+        ("design", _inputs(mvv_ref="0" * 64), DOCS, "スプリントの状態の参照"),
+        ("design", _inputs(mvv_ref=None), DOCS, "スプリントの状態に承認済み MVV の参照が無い"),
+        ("release", _inputs(mode="operation", pr=5), DOCS, "モード operation は承認ゲートを省かない"),
+        ("design", _inputs(), {"body": "設定", "files": [{"filename": ".ndf/mvv.json", "status": "modified", "patch": "+x"}]}, "C7"),
+    ],
+)
+def test_machine_checks_after_the_first_do_not_stop_the_verdict(
+    repo: Path, gate_name: str, inputs: dict[str, Any], case: dict[str, Any], word: str, notes: list[tuple[int, str]]
+) -> None:
+    # 受け入れ条件 2: 検査 2〜6 が外れても判定は打たれ、skip は偽で、外れた理由が why と PR のコメントに載る
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, gate_name, inputs, _hub(5, case), ask)
+    assert len(ask.calls) == 1 and out["verdict"] == FOLLOW and out["skip"] is False
+    assert any(word in w for w in out["why"]) and any(word in text for _, text in notes)
+
+
+def test_the_boundary_paths_come_from_the_base_and_not_the_worktree(repo: Path, notes: list[tuple[int, str]]) -> None:
+    # 検査 4: ベースの規則が効く。worktree の .ndf/pace.json からパスを消しても外れる
+    _base(repo, {".ndf/pace.json": json.dumps({"version": 1, "boundary_paths": ["docs/**"]})})
+    (repo / ".ndf").mkdir(exist_ok=True)
+    (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": []}), encoding="utf-8")
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert len(ask.calls) == 1 and out["skip"] is False and out["why"] == ["レッドラインのパスに当たる: docs/a.md"]
+
+
+def test_a_broken_boundary_setting_on_the_base_is_a_base_failure(repo: Path, notes: list[tuple[int, str]]) -> None:
+    _base(repo, {".ndf/pace.json": "{壊れた"})
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert (out["verdict"], _stopped(out), out["head"], ask.calls) == (None, "base_unreadable", HEAD, [])
+    assert out["why"][0].startswith("ベースの MVV を読めない: " + mm.STOP_REASONS["base_unreadable"]) and len(notes) == 1
+
+
+@pytest.mark.parametrize("change", ["unapproved", "mismatch"])
+def test_without_an_approved_mvv_on_the_base_no_verdict_and_no_note(repo: Path, change: str, notes: list[tuple[int, str]]) -> None:
+    # 検査 1 だけが判定を止める。PR へも書かない（承認済みの MVV が無いリポジトリで今と同じ）
+    if change == "unapproved":
+        _base(repo, {".ndf/mvv.json": json.dumps({"body": "mvv.md", "versions": []})})
+    else:
+        _base(repo, {".ndf/mvv.md": BODY + "承認の後に足した行\n"})
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, "mvv_unapproved", HEAD)
+    assert "note_url" not in out and ask.calls == [] and notes == []
+
+
+def test_the_worktree_mvv_is_not_read(repo: Path) -> None:
+    # PR が MVV の設定を消しても、ベースが承認済みなら判定を打ち、検査 5 が外れる
+    git_sandbox.sh(repo, "rm", "-q", ".ndf/mvv.json")
+    case = {"body": "設定を消す", "files": [{"filename": ".ndf/mvv.json", "status": "removed", "patch": "-x"}]}
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
+    assert len(ask.calls) == 1 and out["skip"] is False and any("C7" in w for w in out["why"])
+
+
+def test_the_base_is_fetched_once_and_the_diff_is_read_from_the_base_commit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fetched: list[tuple[str, ...]] = []
+    real = git.Git.fetch
+
+    def fetch(self: git.Git, remote: str, *refspecs: str) -> git.Completed:
+        fetched.append((remote, *refspecs))
+        return real(self, remote, *refspecs)
+
+    monkeypatch.setattr(git.Git, "fetch", fetch)
+    base = _base_sha(repo)
+    hub = Hub(5, DOCS)
+
+    def advance_then_answer(method: str, path: str, payload: Any = None, params: Any = None) -> dict:
+        # 比較を返す前にマージ先が進んでも、比較の基点は判定の MVV を読んだコミットのまま
+        hub.paths.append(path)
+        _base(repo, {"docs/later.md": "後"})
+        return {"files": DOCS["files"]}
+
+    monkeypatch.setattr(hub, "rest", advance_then_answer)
+    out = mvv_gate.gate(repo, "design", _inputs(), lambda root: hub, Ask(FOLLOW))
+    assert fetched == [("origin", "+refs/heads/main:refs/remotes/origin/main")]
+    assert hub.paths == [f"/repos/o/r/compare/{base}...{HEAD}"] and out["skip"] is True
+
+
+@pytest.mark.parametrize(
+    ("reads", "kind"),
+    [
+        ([{"head": "b" * 40}], "pr_moved"),
+        ([{"base": "develop"}], "pr_moved"),
+        ([github.GitHubError("読めない", 502)], "pr_reread_failed"),
+    ],
+)
+def test_a_pr_that_moves_while_reading_is_not_judged_or_noted(
+    repo: Path, reads: list[Any], kind: str, notes: list[tuple[int, str]]
+) -> None:
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": reads}), ask)
+    assert (out["verdict"], out["skip"], out["noted"], _stopped(out), out["head"]) == (None, False, False, kind, HEAD)
+    assert ask.calls == [] and notes == [] and mm.STOP_REASONS[kind] in out["why"][-1]
+
+
+@pytest.mark.parametrize("failure", [github.GitHubError("比較を読めない", 502), {"no_files": True}])
+def test_a_diff_that_cannot_be_read_is_noted_without_a_verdict(repo: Path, failure: Any, notes: list[tuple[int, str]]) -> None:
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "compare": failure}), ask)
+    assert (out["verdict"], _stopped(out), out["head"], ask.calls, len(notes)) == (None, "diff_unreadable", HEAD, [], 1)
+    assert out["why"][0].startswith("変えたファイルを読めない: ")
+
+
+def test_a_verdict_the_llm_does_not_give_keeps_the_head_and_notes(repo: Path, notes: list[tuple[int, str]]) -> None:
+    out = mvv_gate.gate(repo, "design", _inputs(mvv_ref=None), _hub(5, DOCS), Ask(None, ok=False))
+    assert (out["verdict"], out["skip"], _stopped(out), out["head"], out["holds"]) == (None, False, "llm_no_answer", HEAD, None)
+    assert out["why"][0].startswith("MVV 判定を打てない: " + mm.STOP_REASONS["llm_no_answer"])
+    assert out["why"][1] == "スプリントの状態に承認済み MVV の参照が無い" and len(notes) == 1
+    assert "形が合わない" not in json.dumps(out, ensure_ascii=False)
+
+
+def test_a_verdict_that_cannot_be_recorded_is_kept_but_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 記録は読めるが判定の行の追記だけが OSError: verdict は保ち、skip は偽で、may_skip の結果で上書きしない
+    real = jsonl.append_locked
+
+    def append(path: Path, row: Any, *, kind: str) -> dict:
+        if kind == "mvv-validation":
+            raise OSError(f"/home/someone/{HOST} に書けない")
+        return real(path, row, kind=kind)
+
+    monkeypatch.setattr(jsonl, "append_locked", append)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["verdict"], out["skip"]) == (FOLLOW, False) and len(out["why"]) == 1
+    assert out["why"][0].startswith("判定を記録（mvv-validation.jsonl）に書けない: " + mm.STOP_REASONS["records_unwritable"])
+    assert HOST not in out["why"][0]
+
+
+def test_an_unreadable_record_judges_again_without_reuse(repo: Path) -> None:
+    ask = Ask(FOLLOW)
+    first = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    path = mvv.record_path("mvv-validation")
+    with path.open("ab") as f:
+        f.write(b'{"\xff\xfe"}\n')
+    again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert len(ask.calls) == 2 and again["verdict"] == first["verdict"]
+
+
+def test_broken_rows_of_the_record_are_warned_once(repo: Path) -> None:
+    path = mvv.record_path("mvv-validation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{壊れた\n", encoding="utf-8")
+    warnings: list[dict[str, Any]] = []
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW), warnings)
+    assert out["verdict"] == FOLLOW and warnings == [{"kind": "broken_rows", "path": str(path), "lines": [1]}]
+
+
+def test_a_note_that_cannot_be_posted_keeps_the_verdict_and_does_not_skip(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(hub: Any, number: int, text: str) -> None:
+        raise github.GitHubError(f"https://x-access-token:zz-fake@{HOST}/o/r に書けない", 403)
+
+    monkeypatch.setattr(mvv_gate, "post_note", fail)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["verdict"], out["skip"], out["noted"], out["head"]) == (FOLLOW, False, False, HEAD) and "note_url" not in out
+    assert out["why"][-1].startswith("判定の記録を PR に書けない: " + mm.STOP_REASONS["note_unwritten"])
+    assert HOST not in json.dumps(out, ensure_ascii=False)
+
+
+def test_the_cause_of_a_failure_stays_in_the_local_record(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, notes: list[tuple[int, str]]
+) -> None:
+    # 例外の文（社内のホスト名・ホームのパス・秘密・別のリポジトリ）は出力にも PR のコメントにも入らず、診断の記録にだけ残る
+    monkeypatch.setenv("NDF_TEST_TOKEN", "zz-fake-secret-88")
+    cause = f"fetch https://x-access-token:zz-fake-secret-88@github.com/other-owner/other-repo.git と {HOST} と /home/someone/x に失敗した"
+
+    def fail(self: git.Git, remote: str, name: str) -> None:
+        raise git.GitError(cause)
+
+    monkeypatch.setattr(git.Git, "fetch_branch_or_raise", fail)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    shown = json.dumps(out, ensure_ascii=False) + "".join(text for _, text in notes)
+    for leak in (HOST, "/home/someone", "zz-fake-secret-88", "other-owner", "other-repo"):
+        assert leak not in shown
+    (row,) = _failures()
+    assert out["why"] == [f"ベースの MVV を読めない: {mm.STOP_REASONS['base_unreadable']}（診断の記録 {row['id']}）"]
+    assert HOST in row["cause"] and "zz-fake-secret-88" not in row["cause"] and row["head"] == HEAD and row["pr"] == 5
 
 
 @pytest.mark.parametrize("mode", ["light", "operation"])
@@ -136,22 +388,21 @@ def test_a_mode_without_the_design_gate_is_not_judged(repo: Path, mode: str) -> 
     # 設計承認ゲートを持たないモードでも判定のステップは流れ、出力をそろえるが判定は打たない
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(mode=mode), _no_hub, ask)
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [f"モード {mode} は承認ゲート design を持たない"]}
-    assert ask.calls == []
+    assert out == mm.stop_outcome("design", "no_gate", [f"モード {mode} は承認ゲート design を持たない"])
+    assert ask.calls == [] and out["holds"] is None and out["noted"] is False
     assert mvv_gate.has_gate(mode, "release") and mvv_gate.has_gate("standard", "design")
 
 
 def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, notes: list[tuple[int, str]]) -> None:
-    case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
     ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
-    assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], "h" * 40)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], HEAD)
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
-    again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
-    assert again == out and len(ask.calls) == 1
+    again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
+    assert {**again, "note_url": ""} == {**out, "note_url": ""} and len(ask.calls) == 1
     rows, _ = jsonl.read_rows(mvv.record_path("mvv-validation"), kind="mvv-validation")
     assert [r["boundary"] for r in rows] == [[], []] and "reused_from" in rows[1]
 
@@ -163,7 +414,8 @@ def test_redlines_in_the_verdict_keep_the_gate_2213_2704(
     ask = Ask(case["verdict"])
     inputs = _inputs(pr=number) if gate == "release" else _inputs()
     out = mvv_gate.gate(repo, gate, inputs, _hub(number, case), ask)
-    assert out["skip"] is False and out["why"] == ["レッドラインに当たる: " + " / ".join(case["verdict"]["boundary"])]
+    redline = "レッドラインに当たる: " + " / ".join(case["verdict"]["boundary"])
+    assert out["skip"] is False and out["why"][0] == redline
     # 省かなかった判定も、レッドラインと省かない理由を PR のコメントへ残す
     ((posted, text),) = notes
     assert posted == number and case["verdict"]["boundary"][0] in text and "承認ゲートを省かない理由" in text
@@ -174,19 +426,6 @@ def test_redlines_in_the_verdict_keep_the_gate_2213_2704(
     assert all(r in material for r in redlines) and material.index("- P1:") < material.index("## NDF の共通原則")
     assert case["body"] in material and case["files"][0]["patch"] in material
     assert schema == contracts.load_json(contracts.schema_path(mvv_gate.VERDICT_SCHEMA))
-
-
-def test_a_follow_with_an_empty_boundary_is_judged_but_the_machine_checks_come_first(repo: Path) -> None:
-    ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(mvv_ref="0" * 64), _no_hub, ask)
-    assert out["skip"] is False and "スプリントの状態の参照" in out["why"][0] and ask.calls == []
-    # レッドラインのパスを変える PR は、判定が従う・boundary 空でも省かない（検査 4）
-    (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": ["docs/**"]}), encoding="utf-8")
-    case = {"body": "文書", "files": [{"filename": "docs/a.md", "status": "modified"}]}
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
-    assert out["skip"] is False and out["why"] == ["レッドラインのパスに当たる: docs/a.md"]
-    # PR を読んで決まる検査で止まるときも LLM を呼ばない
-    assert ask.calls == []
 
 
 @pytest.mark.parametrize(
@@ -203,21 +442,9 @@ def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files}), ask)
     assert out["skip"] is False and out["why"] == ["差分の全体を材料に載せられない: src/a.py"] and ask.calls == []
-    assert [n for n, _ in notes] == [5]
+    assert (_stopped(out), [n for n, _ in notes]) == ("incomplete_patches", [5])
     # 中身を変えない改名は patch を持たないが、省いた部分が無い
     assert mm.incomplete_patches([{"filename": "b.py", "status": "renamed", "changes": 0}]) == []
-
-
-@pytest.mark.parametrize(
-    ("inputs", "hub", "ask", "why"),
-    [
-        (_inputs(), _hub(5, {"body": "", "files": []}), Ask(None, ok=False), "MVV 判定の回答が無い"),
-        (_inputs(), lambda root: SimpleNamespace(pulls_by_head=lambda b: {b[0]: []}), Ask(FOLLOW), "開いた設計の PR が無い"),
-    ],
-)
-def test_a_verdict_that_cannot_be_had_asks_a_human(repo: Path, inputs: dict, hub: Any, ask: Ask, why: str) -> None:
-    out = mvv_gate.gate(repo, "design", inputs, hub, ask)
-    assert out["skip"] is False and out["verdict"] is None and why in out["why"][0]
 
 
 def test_a_record_of_a_newer_version_stops_instead_of_asking_a_human(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,23 +465,17 @@ def _raising(exc: Exception) -> Any:
 
 @pytest.mark.parametrize(
     "exc",
-    [
-        mvv_gate.GateError("理由"),
-        git.GitError("理由"),
-        github.GitHubError("理由", 500),
-        mvv.MvvError("理由"),
-        jsonfile.JsonFileError("理由"),
-        identity.IdentityError("理由"),
-        OSError("理由"),
-    ],
+    [mvv_gate.GateError("理由"), git.GitError("理由"), github.GitHubError("理由", 500), identity.IdentityError("理由"), OSError("理由")],
 )
 def test_a_failure_before_reading_the_pr_is_the_whole_outcome_without_the_head(
     repo: Path, exc: Exception, notes: list[tuple[int, str]]
 ) -> None:
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "release", _inputs(pr=5), _raising(exc), ask)
-    assert out == {"gate": "release", "skip": False, "verdict": None, "why": [f"MVV 判定を打てない: {exc}"]}
-    assert ask.calls == [] and notes == []
+    (row,) = _failures()
+    why = [f"MVV 判定を打てない: {mm.STOP_REASONS['no_pr']}（診断の記録 {row['id']}）"]
+    assert out == mm.stop_outcome("release", "no_pr", why) and "head" not in out
+    assert ask.calls == [] and notes == [] and row["cause"] == "理由"
 
 
 def test_an_unlisted_failure_is_not_turned_into_an_outcome(repo: Path) -> None:
@@ -262,74 +483,86 @@ def test_an_unlisted_failure_is_not_turned_into_an_outcome(repo: Path) -> None:
         mvv_gate.gate(repo, "design", _inputs(), _raising(KeyError("x")), Ask(FOLLOW))
 
 
-def test_machine_checks_before_the_pr_return_every_reason_without_the_head_or_a_note(repo: Path, notes: list[tuple[int, str]]) -> None:
-    out = mvv_gate.gate(repo, "design", _inputs(mvv_ref=None), _no_hub, Ask(FOLLOW))
-    facts, _ = mvv_gate.base_facts(repo, _inputs(mvv_ref=None))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": refusals(facts)} and out["why"]
-    assert notes == []
-
-
-@pytest.mark.parametrize(
-    ("files", "why"),
-    [
-        ([{"filename": "docs/a.md", "status": "modified"}], "レッドラインのパスに当たる: docs/a.md"),
-        ([{"filename": "src/a.py", "status": "modified", "changes": 3}], "差分の全体を材料に載せられない: src/a.py"),
-    ],
-)
-def test_checks_after_reading_the_pr_return_the_head_and_leave_a_note(
-    repo: Path, files: list[dict[str, Any]], why: str, notes: list[tuple[int, str]]
-) -> None:
-    (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": ["docs/**"]}), encoding="utf-8")
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files, "head": "a" * 40}), Ask(FOLLOW))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40}
-    assert notes == [(5, note("design", None, [why]))]
-
-
-def test_a_verdict_that_keeps_the_gate_returns_the_verdict_and_the_head(repo: Path, notes: list[tuple[int, str]]) -> None:
-    case = {"body": "変更", "files": [], "head": "a" * 40}
-    verdict = DESIGN_2213["verdict"]
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), Ask(verdict))
-    why = ["レッドラインに当たる: " + " / ".join(verdict["boundary"])]
-    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40}
-    assert notes == [(5, note("design", verdict, why))]
-
-
-def test_a_note_that_cannot_be_posted_turns_a_skip_into_an_outcome_without_the_verdict_or_the_head(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fail(hub: Any, number: int, text: str) -> None:
-        raise github.GitHubError("書けない", 403)
-
-    monkeypatch.setattr(mvv_gate, "post_note", fail)
-    ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": []}), ask)
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["MVV 判定を打てない: 書けない"]} and len(ask.calls) == 1
-
-
-def test_the_mode_without_the_gate_is_told_before_the_pace(tmp_path: Path) -> None:
+def test_the_mode_without_the_gate_is_told_first(tmp_path: Path) -> None:
     out = mvv_gate.gate(tmp_path, "design", {"pace": "normal"}, _no_hub, Ask(FOLLOW))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["モード None は承認ゲート design を持たない"]}
-    out = mvv_gate.gate(tmp_path, "design", {"mode": "standard"}, _no_hub, Ask(FOLLOW))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": ["進め方 None は承認ゲートを MVV 判定で省かない"]}
+    assert (out["verdict"], out["why"], _stopped(out)) == (None, ["モード None は承認ゲート design を持たない"], "no_gate")
 
 
 def test_the_release_gate_needs_the_pr_in_the_context(repo: Path) -> None:
-    out = mvv_gate.gate(repo, "release", _inputs(), _no_hub_release, Ask(FOLLOW))
-    assert out["skip"] is False and "pr" in out["why"][0]
-
-
-def _no_hub_release(root: Path) -> SimpleNamespace:
-    return SimpleNamespace()
+    out = mvv_gate.gate(repo, "release", _inputs(), lambda root: SimpleNamespace(), Ask(FOLLOW))
+    assert out["skip"] is False and _stopped(out) == "no_pr"
+    assert "pr" in _failures()[0]["cause"]
 
 
 def test_cli_writes_the_outcome_as_the_step_output(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(cli, "_hub", _hub(5, DOCS))
+    monkeypatch.setattr(mvv_gate, "gate", partial(mvv_gate.gate, ask=Ask(FOLLOW)))
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_plan_inputs(repo, pace="normal")))
     assert cli.main(["--cwd", str(repo), "mvv", "gate", "--gate", "design"]) == 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "ok" and out["outputs"]["mvv_gate"]["skip"] is False
+    assert out["outputs"]["mvv_gate"]["verdict"]["verdict"] == "follow"
     monkeypatch.delenv("NDF_STAGE_INPUT")
     assert cli.main(["--cwd", str(repo), "mvv", "gate", "--gate", "design"]) != 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+
+
+def test_the_outcome_fits_the_context_schema(repo: Path) -> None:
+    # 文脈のスキーマ（$defs.mvv_gate）が判定・止まった判定・判定しない出力のどれも受ける
+    outs = [
+        mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW)),
+        mvv_gate.gate(repo, "design", _inputs(), _hub(5, {**DOCS, "reads": [{"head": "b" * 40}]}), Ask(FOLLOW)),
+        mvv_gate.gate(repo, "design", _inputs(mode="light"), _no_hub, Ask(FOLLOW)),
+    ]
+    for out in outs:
+        assert contracts.schema_errors({"mvv_gate": out}, model.CONTEXT) == []
+
+
+# --- 手元の git の差分を、GitHub の比較の files の行の形にする（diff_rows・unquote_path） ---
+
+
+def test_diff_rows_reads_added_removed_modified_and_renamed_files() -> None:
+    text = (
+        "diff --git a/new b/new\nnew file mode 100644\nindex 0000000..8ba3a16\n--- /dev/null\n+++ b/new\n@@ -0,0 +1 @@\n+n\n"
+        "diff --git a/keep b/keep\ndeleted file mode 100644\nindex b68fde2..0000000\n--- a/keep\n+++ /dev/null\n@@ -1 +0,0 @@\n-k\n"
+        "diff --git a/m b/m\nindex 1..2 100644\n--- a/m\n+++ b/m\n@@ -1 +1,2 @@\n q\n+r\n"
+        "diff --git a/a/f b/b/g\nsimilarity index 100%\nrename from a/f\nrename to b/g\n"
+        "diff --git a/bin b/bin\nindex bdc955b..8835708 100644\nBinary files a/bin and b/bin differ\n"
+        "diff --git a/s b/s\nindex 1111111..2222222 160000\n--- a/s\n+++ b/s\n@@ -1 +1 @@\n-Subproject commit 1111111\n"
+        "+Subproject commit 2222222\n"
+    )
+    rows = mm.diff_rows(text)
+    assert rows == [
+        {"filename": "new", "status": "added", "changes": 1, "patch": "@@ -0,0 +1,1 @@\n+n"},
+        {"filename": "keep", "status": "removed", "changes": 1, "patch": "@@ -1,1 +0,0 @@\n-k"},
+        {"filename": "m", "status": "modified", "changes": 1, "patch": "@@ -1,1 +1,2 @@\n q\n+r"},
+        {"filename": "b/g", "previous_filename": "a/f", "status": "renamed", "changes": 0},
+        {"filename": "bin", "status": "modified", "changes": 1},
+        {
+            "filename": "s",
+            "status": "modified",
+            "changes": 2,
+            "patch": "@@ -1,1 +1,1 @@\n-Subproject commit 1111111\n+Subproject commit 2222222",
+        },
+    ]
+    # 中身を変えない改名は数えず、バイナリは差分の全体が載らないものとして数える
+    assert mm.incomplete_patches(rows) == ["差分の全体を材料に載せられない: bin"]
+
+
+def test_diff_rows_restores_quoted_paths() -> None:
+    text = (
+        'diff --git "a/\\346\\227\\245.md" "b/\\346\\227\\245.md"\nindex 1..2 100644\n'
+        '--- "a/\\346\\227\\245.md"\n+++ "b/\\346\\227\\245.md"\n@@ -1 +1 @@\n-x\n+y\n'
+        'diff --git "a/\\346\\227\\245" "b/q\\"t\\\\\\t"\nsimilarity index 100%\n'
+        'rename from "\\346\\227\\245"\nrename to "q\\"t\\\\\\t"\n'
+    )
+    rows = mm.diff_rows(text)
+    assert [(r["filename"], r.get("previous_filename")) for r in rows] == [("日.md", None), ('q"t\\\t', "日")]
+    assert mm.unquote_path("plain/path") == "plain/path"
+    with pytest.raises(mm.DiffError):
+        mm.unquote_path('"\\377"')
+    with pytest.raises(mm.DiffError):
+        mm.diff_rows("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-x\n")
 
 
 # --- #3959 単位 1: 今の判定の振る舞いを縛る（Task 1）・工程の入力の形（Task 2）・プランの外のエントリポイント（Task 3） ---
@@ -343,18 +576,17 @@ def _plan_inputs(repo: Path, **context: Any) -> dict[str, Any]:
 
 def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[int, str]]) -> None:
     # Task 1: プランが組む平らな入力で、今の形の mvv_gate を返す（fast で検査を通り「従う」なら省く）
-    case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
-    out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, case), Ask(FOLLOW))
-    assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", "h" * 40)
+    out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", HEAD)
     assert [n for n, _ in notes] == [5]
 
 
-def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path) -> None:
-    # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ問う
-    git_sandbox.sh(repo, "rm", "-q", ".ndf/mvv.json")
+def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes: list[tuple[int, str]]) -> None:
+    # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ質問し、PR へも書かない
+    _base(repo, {".ndf/mvv.json": None, ".ndf/mvv.md": None})
     ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _plan_inputs(repo, mvv_ref=None), _no_hub, ask)
-    assert out["skip"] is False and out["verdict"] is None and ask.calls == []
+    out = mvv_gate.gate(repo, "design", _plan_inputs(repo, mvv_ref=None), _hub(5, DOCS), ask)
+    assert out["skip"] is False and out["verdict"] is None and ask.calls == [] and notes == []
 
 
 def test_the_gate_steps_are_steps_of_the_named_stage_documents() -> None:
@@ -480,8 +712,7 @@ def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
     )
     assert command.main(["finish", tid, "設計", "--output", str(out_file), "--reason", "手で"]) == 0
     capsys.readouterr()
-    case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
-    monkeypatch.setattr(cli, "_hub", _hub(5, case))
+    monkeypatch.setattr(cli, "_hub", _hub(5, DOCS))
     seen: list[dict[str, Any]] = []
     real = mvv_gate.gate
 
@@ -494,7 +725,9 @@ def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(seen[0]))
     by_env = _cli_gate(repo, capsys, "design")
     assert seen[0] == seen[1] and "design_pr" not in seen[0]
-    assert by_machine["outputs"] == by_env["outputs"] and by_env["outputs"]["mvv_gate"]["skip"] is True
+    # 今回のコメントの URL だけが違う（どちらの起動もコメントを 1 件書く）
+    same = [{**out["outputs"]["mvv_gate"], "note_url": None} for out in (by_machine, by_env)]
+    assert same[0] == same[1] and by_env["outputs"]["mvv_gate"]["skip"] is True
     assert [n for n, _ in notes] == [5, 5]
 
 
@@ -505,7 +738,8 @@ def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(
     git_sandbox.sh(other, "commit", "-q", "--allow-empty", "-m", "x")
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _plan_inputs(repo, worktree=str(other)), _hub(5, {"body": "変更", "files": []}), ask)
-    assert out["verdict"] is None and "worktree でない" in out["why"][0] and ask.calls == []
+    assert out["verdict"] is None and _stopped(out) == "no_pr" and ask.calls == []
+    assert "worktree でない" in _failures()[0]["cause"] and "worktree でない" not in out["why"][0]
     # フォークの同名ブランチは数えず、同じリポジトリの開いた PR が 2 件なら決めない
     fork = SimpleNamespace(number=7, state="open", cross_repository=True)
     mine = SimpleNamespace(number=5, state="open", cross_repository=False)

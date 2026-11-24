@@ -77,6 +77,7 @@
       {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（#3394 の決定 60）で 2 回に固定した値で、運用で変えない"},
       {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},
       {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
+      {"name": "ndf.domains.records.mvv.COMPARE_FILES_CAP", "kind": "external", "reason": "GitHub の比較の API が files を返す上限の件数（GitHub REST API の仕様）"},
       {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
       {"name": "ndf.domains.release.land.QUEUE_POLL_SECONDS", "kind": "implementation", "reason": "マージキューの PR を読み直す間隔。待ちの上限は別に持ち、間隔は問い合わせの都合で決めた"},
       {"name": "ndf.domains.statusline.settings.REFRESH_INTERVAL", "kind": "implementation", "reason": "statusLine の設定へ書く再描画の間隔。表示の都合で決めた"},

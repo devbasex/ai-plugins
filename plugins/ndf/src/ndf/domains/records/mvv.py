@@ -21,8 +21,8 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts, identity
 from ndf.adapters import git as git_mod
 from ndf.adapters import markdown, run_log
-from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import internal, limits, worker_paths
+from ndf.adapters.github import GitHub, GitHubError, Pull
+from ndf.contracts import internal, worker_paths
 from ndf.core.converge import oscillation
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
@@ -448,38 +448,82 @@ def _append_disputed(entries: list[dict[str, Any]]) -> int:
     return _append_missing("mvv-signals", entries, missing)
 
 
-def mvv_validate_sprint(
-    root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True, *, warnings: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """スプリント MVV を MVV 判定し、記録に足した行を返す。
+def validation_rows(root: Path) -> tuple[list[dict[str, Any]], list[jsonl.Broken]]:
+    """記録 `mvv-validation.jsonl` のすべての種類の行と、読めずに除いた行（判定 1 回につき 1 回だけ読む。#3959）。
 
-    `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。記録が無い・壊れた行を
-    含んでも止まらず LLM で判定し、読めない行は `warnings` へ足す。同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。
-    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
+    記録がまだ作られていない（保存先のパスに何も無い）ときだけ空を返す。パスに通常のファイルでないものがあれば `OSError`。
+    読めなければ `OSError`・`UnicodeDecodeError`・`internal.InternalError`（新しい形式のバージョンの行）をそのまま投げる。
+    `root` は判定するリポジトリ（記録の保存先はリポジトリによらない）。
+    """
+    del root
+    path = record_path("mvv-validation")
+    if not os.path.lexists(path):
+        return [], []
+    if not path.is_file():
+        raise OSError(f"MVV の記録の保存先がファイルでない: {path}")
+    return jsonl.read_rows(path, kind="mvv-validation")
+
+
+def mvv_validate_sprint(
+    root: Path,
+    inputs: Mapping[str, str],
+    judge: Judge,
+    reuse: bool = True,
+    rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    broken: Sequence[jsonl.Broken] = (),
+) -> tuple[dict[str, Any], Optional[str]]:
+    """スプリント MVV を MVV 判定し、記録に足した行と、足せなかったときの原因（足せたら None）を返す。
+
+    `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。再利用の候補は読み済みの行 `rows`
+    （同じ読み取りで除いた行 `broken` も渡す）から選び、`rows` が None のときだけ記録を読む。
+    同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。`reuse` が偽なら記録を読まない。
+    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。追記の `OSError` は外へ出さず、原因として返す。
     """
     key = md.mvv_validation_key(inputs)
     path = record_path("mvv-validation")
     repo = repo_key(root)
-    rows, broken = jsonl.read_rows_warned(path, kind="mvv-validation", warnings=warnings)
-    origin = md.reusable(rows, key, [(b.before, b.raw) for b in broken]) if reuse else None
+    origin = None
+    if reuse:
+        if rows is None:
+            rows, broken = jsonl.read_rows(path, kind="mvv-validation")
+        origin = md.reusable(list(rows), key, [(b.before, b.raw) for b in broken])
     if origin is not None:
         row = md.reuse_row(origin, jsonl.now(), repo)
     else:
         verdict, cost = judge(inputs)
         row = md.judged_row(key, verdict, jsonl.now(), repo, cost)
-    return jsonl.append_locked(path, row, kind="mvv-validation")
+    try:
+        return jsonl.append_locked(path, row, kind="mvv-validation"), None
+    except OSError as exc:
+        return row, str(exc)
 
 
-def pr_files(hub: GitHub, number: int) -> list[dict[str, Any]]:
-    """PR の変えたファイル（GitHub の files の行。`github.list-pages` ページまで）。超えれば `GitHubError`。"""
-    pages = int(limits.value("github.list-pages", "count"))
-    out: list[dict[str, Any]] = []
-    for page in range(1, pages + 1):
-        got = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
-        out += got
-        if len(got) < PER_PAGE:
-            return out
-    raise GitHubError(f"PR #{number} の変更ファイルが {pages} ページを超えた（github.list-pages）")
+# 比較の API が `files` を返す上限の件数（GitHub REST API の「Working with large comparisons」）
+COMPARE_FILES_CAP = 300
+# 手元の git で比較を読み直すときの差分の形（手元の Git の設定で出力の形が変わらないよう固定する。#3959）
+LOCAL_DIFF = (
+    "--merge-base", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
+    "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/", "-M",
+)  # fmt: skip
+
+
+def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:
+    """コミット `base` と `head`（どちらも SHA）の 3 点の比較で変えたファイル（GitHub の files の行の形）。
+
+    比較の REST を 1 回打つ。`files` が `COMPARE_FILES_CAP` 件に届いたときだけ、head を取得して同じ組を手元の git
+    （`--merge-base`）で読み直す。基点を SHA で固定するので、読む間にマージ先が進んでも差分は変わらない。
+    比較を読めなければ `GitHubError`、手元で読めなければ `GitError`・`mvv_material_decide.DiffError`。
+    """
+    got = hub.rest("GET", f"/repos/{hub.repo}/compare/{base}...{head}")
+    files = got.get("files") if isinstance(got, dict) else None
+    if not isinstance(files, list):
+        raise GitHubError(f"比較 {base}...{head} の応答に files が無い")
+    if len(files) < COMPARE_FILES_CAP:
+        return files
+    done = g.fetch(remote, head)
+    if done.returncode != 0:
+        raise git_mod.GitError(f"{remote} から {head} を取得できない: {done.stderr.strip()}")
+    return mm.diff_rows(g.diff_between(base, head, *LOCAL_DIFF))
 
 
 def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
@@ -488,11 +532,9 @@ def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
                     f["status"] == "renamed") for f in rows]  # fmt: skip
 
 
-def pr_facts(
-    hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None, pull: Optional[Pull] = None
-) -> MvvFacts:
+def pr_facts(hub: GitHub, number: int, base: MvvFacts, rows: list[dict[str, Any]], pull: Optional[Pull] = None) -> MvvFacts:
     """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。
 
-    `rows` は読み済みの変えたファイル（`pr_files` の結果）、`pull` は読み済みの PR。無ければここで読む。"""
+    `rows` は読み済みの変えたファイル（`compare_files` の結果）、`pull` は読み済みの PR（無ければここで読む）。"""
     body = (pull if pull is not None else hub.pull(number)).body
-    return mm.facts_from_pr(base, body, changed_of(rows if rows is not None else pr_files(hub, number)))
+    return mm.facts_from_pr(base, body, changed_of(rows))

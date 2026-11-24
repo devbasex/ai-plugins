@@ -1,8 +1,9 @@
 """MVV 判定の前の機械の検査（`ndf.progress.gate` の部品）。
 
 承認済み MVV のハッシュ・承認の記録・モード・レッドラインのパス・MVV の設定を変えない、の 5 つ（3364-3）と、出し直しの
-指摘への対応表が「記載した」と書く PR 本文のセクションに中身があるか（#2853）。1 つでも外れれば
-LLM の判定を読まずに承認ゲートで人へ戻す。判定が「従う」でも、レッドラインがあれば省かない（`may_skip`。#3017）。
+指摘への対応表が「記載した」と書く PR 本文のセクションに中身があるか（#2853）。検査 1（承認済み MVV のハッシュ）だけが
+判定を止め（`judgeable`）、ほかは判定を止めずに承認ゲートの省略だけを止める（#3959）。判定が「従う」でも、レッドラインが
+あれば省かない（`may_skip`。#3017）。
 """
 
 from __future__ import annotations
@@ -154,9 +155,18 @@ CHECKS: tuple[Callable[[MvvFacts], Optional[str]], ...] = (
 )
 
 
-def refusals(f: MvvFacts) -> list[str]:
-    """外れた機械の検査の理由（空なら MVV 判定へ進める）。"""
-    return [why for check in CHECKS if (why := check(f)) is not None]
+# 区分 → 省かない理由の検査（設計・リリースとも検査 1〜6 をこの順に当てる。検査 1 だけが判定を止める。#3959）
+CHECKS_BY_GATE: dict[str, tuple[Callable[[MvvFacts], Optional[str]], ...]] = {gate: CHECKS for gate in model.MVV_GATE_STEPS}
+
+
+def judgeable(f: MvvFacts) -> Optional[str]:
+    """判定を打てない理由（検査 1。PR のベースの MVV が承認済みで本文が承認の記録と合う）。打てれば None。"""
+    return check_mvv_hash(f)
+
+
+def refusals(f: MvvFacts, gate: str = "design") -> list[str]:
+    """区分 `gate` の外れた機械の検査の理由（空なら承認ゲートを省ける候補）。"""
+    return [why for check in CHECKS_BY_GATE[gate] if (why := check(f)) is not None]
 
 
 def well_formed(verdict: Any) -> bool:
@@ -176,9 +186,9 @@ def well_formed(verdict: Any) -> bool:
     )
 
 
-def may_skip(f: MvvFacts, verdict: Any) -> tuple[bool, list[str]]:
+def may_skip(f: MvvFacts, verdict: Any, gate: str = "design") -> tuple[bool, list[str]]:
     """承認ゲートを省けるか（省けないときの理由）。外れた検査・形の違う判定・従わない判定・レッドラインがあれば省かない。"""
-    why = refusals(f)
+    why = refusals(f, gate)
     if why:
         return False, why
     if not well_formed(verdict):
@@ -190,8 +200,8 @@ def may_skip(f: MvvFacts, verdict: Any) -> tuple[bool, list[str]]:
     return True, []
 
 
-def note(gate: str, verdict: Any, why: Sequence[str]) -> str:
-    """MVV 判定の記録（PR のコメントと承認資料に載せる Markdown）。レッドラインの中身も載せる（#2950）。"""
+def note(gate: str, verdict: Any, why: Sequence[str], holds: Optional[Sequence[str]] = None) -> str:
+    """MVV 判定の記録（PR のコメントと承認資料に載せる Markdown）。レッドラインの中身（#2950）とレビューの保留も載せる。"""
     v = verdict if isinstance(verdict, dict) else {}
     reasons = [str(r) for r in v["reasons"]] if isinstance(v.get("reasons"), list) else []
     boundary = [str(b) for b in v["boundary"]] if isinstance(v.get("boundary"), list) else []
@@ -200,4 +210,6 @@ def note(gate: str, verdict: Any, why: Sequence[str]) -> str:
     lines += ["", "### レッドライン", "", *bullets(boundary)]
     if why:
         lines += ["", "### 承認ゲートを省かない理由", "", *[f"- {w}" for w in why]]
+    if holds:
+        lines += ["", "### レビューの保留", "", *[f"- {h}" for h in holds]]
     return "\n".join(lines) + "\n"
