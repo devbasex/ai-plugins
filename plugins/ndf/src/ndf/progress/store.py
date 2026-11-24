@@ -125,6 +125,12 @@ class UnsupportedUrl(durable.StoreStopped):
     kind = "invalid"
 
 
+class StoreNotReady(durable.StoreStopped):
+    """読むだけで開く経路で、保存先か DB が用意・移行されていない（`open_existing`）。何も変えていない。"""
+
+    kind = "precondition"
+
+
 class RestoreUnsupported(durable.StoreStopped):
     """PostgreSQL の URL で戻しを求めた。バックアップと戻しは DB の運用で行う。"""
 
@@ -340,6 +346,40 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
             ensure_schema(store, now)
         else:
             _check_and_backup(store, now)
+        return store
+    except BaseException:
+        stack.close()
+        raise
+
+
+# 読むだけの経路で、保存先か DB を用意・移行する必要があるときの停止理由（パスと接続先は載せない）
+NOT_READY = "ステートマシンの保存先か DB が無いか、今の NDF の形にそろっていない。ndf progress のコマンドで用意してから打ち直す"
+
+
+def open_existing(url: str, root: Path) -> Store:
+    """既にある保存先と DB を、変えずに開く（判定の入力を読むだけの経路。#3959）。
+
+    `open_store` と違い、保存先の作成・旧い形の退避・表の作成・`quick_check`・バックアップ・目印の更新をしない。
+    SQLite の保存先が今の形でなければ、DB の実ファイルか今のバージョンの表が無ければ、何も書かずに `StoreNotReady`。
+    表が新しすぎれば `StoreFormatNewer`。呼び手は使い終えたら `close` する（`with` で使える）。
+    """
+    path = sqlite_path(url)
+    stack = ExitStack()
+    try:
+        if path is None:
+            store = Store(url, root, sa.create_engine(durable.sa_url(url), poolclass=sa.NullPool), None, stack=stack)
+        else:
+            if not durable.hold_existing_store(root) or not path.is_file():
+                raise StoreNotReady(NOT_READY)
+            stack.enter_context(db_lock(path, exclusive=False))
+            store = Store(url, root, _sqlite_engine(path), path, stack=stack)
+        with _translated(store):
+            found = _read_version(store.engine)
+        if found is not None and found > SCHEMA_VERSION:
+            shown = store.engine.url.render_as_string(hide_password=True)
+            raise durable.StoreFormatNewer(f"ステートマシンの表のバージョン {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
+        if found != SCHEMA_VERSION:
+            raise StoreNotReady(NOT_READY)
         return store
     except BaseException:
         stack.close()

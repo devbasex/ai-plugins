@@ -103,3 +103,22 @@ def test_a_context_without_an_input_key_is_missing_it(repo, capsys, last_result)
     with pytest.raises(invoke.StageInputMissing) as caught:
         stage_inputs.stage_inputs_of(repo, made["metrics"]["machine_id"], "design-mvv")
     assert caught.value.keys == ("worktree",)
+
+
+def test_a_missing_store_is_not_created_and_stops(repo):
+    # 判定の入力を読むだけの経路は、保存先を作らずに止まる
+    root = command.store_root_of(repo)
+    with pytest.raises(store.StoreNotReady):
+        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+    assert not root.exists()
+
+
+def test_a_legacy_store_is_neither_retired_nor_changed(repo):
+    # 旧い形の保存先（format.json が無い）は退避せず、中身も変えずに止まる
+    root = command.store_root_of(repo)
+    root.mkdir(parents=True)
+    (root / "old.txt").write_text("旧い保存先")
+    before = sorted(p.name for p in root.parent.iterdir())
+    with pytest.raises(store.StoreNotReady):
+        stage_inputs.stage_inputs_of(repo, "sprint:none", "design-mvv")
+    assert sorted(p.name for p in root.parent.iterdir()) == before and sorted(p.name for p in root.iterdir()) == ["old.txt"]
