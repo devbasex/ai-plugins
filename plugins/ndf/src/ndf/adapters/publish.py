@@ -163,14 +163,12 @@ def _hidden_spans(text: str, private: set[str], bare: Optional[str] = None) -> l
 
 
 def _drop_hidden(text: str, private: set[str], bare: Optional[str] = None) -> tuple[str, dict[str, int]]:
-    pieces, at, dropped = [], 0, Counter[str]()
-    for start, end, secret in _hidden_spans(text, private, bare):
-        pieces += [text[at:start], run_log.MASK if secret else PRIVATE_REF_TEXT]
-        dropped[DropKind.SECRET if secret else DropKind.PRIVATE_REF] += 1
-        at = end
+    spans = _hidden_spans(text, private, bare)
+    dropped = Counter[str](DropKind.SECRET if secret else DropKind.PRIVATE_REF for _, _, secret in spans)
     if dropped[DropKind.SECRET]:
         dropped[DropKind.SECRET] = 1
-    return "".join(pieces) + text[at:], dict(dropped)
+    masked = run_log.replace_spans(text, [(start, end, run_log.MASK if secret else PRIVATE_REF_TEXT) for start, end, secret in spans])
+    return masked, dict(dropped)
 
 
 def _drop_emails(text: str) -> tuple[str, int]:

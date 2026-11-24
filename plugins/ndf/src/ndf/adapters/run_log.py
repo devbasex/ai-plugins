@@ -128,12 +128,17 @@ def secret_spans(text: str, secrets: Optional[list[str]] = None) -> list[tuple[i
     return union_spans(spans)
 
 
-def _mask(text: str, secrets: list[str]) -> str:
+def replace_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
+    """重ならない範囲（始まり・終わり・置き換える文。始まりの順）を順に置き換えてつなぐ。"""
     out, at = [], 0
-    for start, end in secret_spans(text, secrets):
-        out += [text[at:start], MASK]
+    for start, end, repl in spans:
+        out += [text[at:start], repl]
         at = end
     return "".join(out) + text[at:]
+
+
+def _mask(text: str, secrets: list[str]) -> str:
+    return replace_spans(text, [(start, end, MASK) for start, end in secret_spans(text, secrets)])
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
