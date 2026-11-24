@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -8,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.checks import ratchet, run
+from ndf.checks import git_objects, ratchet, run
 from ndf.checks.model import CheckError
 from ndf.contracts import exit_codes
 
@@ -109,26 +111,35 @@ def _refused(*_args, **_kwargs):
     raise PermissionError("denied")
 
 
-def _answer(monkeypatch, plugin, objects: bytes = b"") -> list[str]:
-    """git の応答を渡した値にする（`objects` は `cat-file --batch` の出力）。渡した標準入力を返す並びへ足す。"""
-    asked = []
-    answers = {"--show-toplevel": f"{plugin.repo}\n".encode(), "HEAD": b"c1\n", "--batch": objects}
+def _answer(monkeypatch, plugin) -> None:
+    """git の応答を渡した値にする。"""
+    answers = {"--show-toplevel": f"{plugin.repo}\n".encode(), "HEAD": b"c1\n"}
+    monkeypatch.setattr(run, "_git_stdout", lambda _root, *args: answers[args[-1]])
 
-    def git(_root, *args, stdin=""):
-        asked.append(stdin)
-        return answers[args[-1]]
 
-    monkeypatch.setattr(run, "_git_stdout", git)
+def _objects(monkeypatch, found: dict[str, git_objects.GitObject]) -> list[list[str]]:
+    """git のものを `found`（名前 → もの）にする。git を開くたびに、問われた名前の並びを返す並びへ足す。"""
+    asked: list[list[str]] = []
+
+    @contextlib.contextmanager
+    def opened(_root):
+        names: list[str] = []
+        asked.append(names)
+        yield lambda name: names.append(name) or found.get(name)
+
+    monkeypatch.setattr(git_objects, "opened", opened)
     return asked
 
 
-def _object(kind: str, text: str) -> bytes:
-    """`git cat-file --batch` が出す 1 つのもの（大きさはバイトの数）。"""
-    return f"b1de8b43d6a9186071e727fd5c9e0b1a79de193d {kind} {len(text.encode())}\n{text}\n".encode()
+def _file(text: str) -> git_objects.GitObject:
+    return git_objects.GitObject(git_objects.blob_id(text, "0" * 40), "blob", text.encode())
 
 
-def _file(text: str) -> bytes:
-    return _object("blob", text)
+COMMIT = git_objects.GitObject("c" * 40, "commit", b"tree x\n")
+
+
+def _limit_name(plugin) -> str:
+    return f"HEAD^1:{(plugin.root / ratchet.RATCHET_REL).relative_to(plugin.repo).as_posix()}"
 
 
 @pytest.fixture
@@ -168,36 +179,39 @@ def test_one_more_finding_lists_all_the_places_only_when_the_rule_is_selected(pl
     assert checked("--only", "I3")[0] == 0
 
 
-def _blob(text: str) -> str:
-    """git の blob の id。"""
-    data = text.encode()
-    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+def _tree(files: dict[str, str], found: dict[str, git_objects.GitObject]) -> git_objects.GitObject:
+    """`files`（パス → 本文）の木。中のものを id ごとに `found` へ足す。"""
+    below: dict[str, dict[str, str]] = {}
+    rows = [(b"120000", "link.py", "0" * 40), (b"160000", "module.py", "0" * 40)]
+    for rel, text in files.items():
+        head, _, rest = rel.partition("/")
+        if rest:
+            below.setdefault(head, {})[rest] = text
+        else:
+            found[_file(text).oid] = _file(text)
+            rows.append((b"100644", head, _file(text).oid))
+    rows += [(b"40000", name, _tree(inner, found).oid) for name, inner in below.items()]
+    data = b"".join(mode + b" " + name.encode() + b"\0" + bytes.fromhex(oid) for mode, name, oid in rows)
+    tree = git_objects.GitObject(hashlib.sha1(data, usedforsecurity=False).hexdigest(), "tree", data)
+    found[tree.oid] = tree
+    return tree
 
 
-def _base(monkeypatch, plugin, files: dict[str, str], commit: bytes = b"") -> list[tuple[str, str]]:
-    """git の応答を、変更の前の `src/` が `files`（パス → 本文）のものにする。git の（引数の先頭, 標準入力）を返す並びへ足す。"""
+def _base(monkeypatch, plugin, files: dict[str, str], limit: int = 0) -> list[list[str]]:
+    """変更の前の commit を、`src/` が `files`（パス → 本文）で基準が `limit` のものにする。問われた名前の並びを返す。"""
+    found = {"HEAD^1^{commit}": COMMIT, _limit_name(plugin): _file(body(limit))}
     src = (plugin.root / "src").relative_to(plugin.repo).as_posix()
-    bodies = {_blob(text): text for text in files.values()}
-    tree = "".join(f"100644 blob {_blob(text)}\t{src}/{rel}\0" for rel, text in files.items())
-    asked = []
-
-    def git(_root, *args, stdin=""):
-        asked.append((args[0], stdin))
-        if args[0] == "cat-file":
-            return commit if "^{commit}" in stdin else b"".join(_file(bodies[blob]) for blob in stdin.split())
-        return {"rev-parse": f"{plugin.repo}\n", "ls-tree": f"{tree}120000 blob {'0' * 40}\t{src}/ndf/link.py\0"}[args[0]].encode()
-
-    monkeypatch.setattr(run, "_git_stdout", git)
-    return asked
+    found[f"HEAD^1:{src}"] = _tree(files, found)
+    return _objects(monkeypatch, found)
 
 
 @pytest.fixture
 def against(plugin, checked, monkeypatch):
-    """変更の前の `src/` を渡した中身（パス → 本文）にして `ndf check` を打つ関数。git の引数と標準入力の並びも返す。"""
+    """変更の前の `src/` を渡した中身（パス → 本文）にして `ndf check` を打つ関数。git に問われた名前の並びも返す。"""
 
     def call(limit: int, files: dict[str, str]):
         plugin.write(ratchet.RATCHET_REL, body(limit))
-        asked = _base(monkeypatch, plugin, files, _object("commit", "tree x\n") + _file(body(limit)))
+        asked = _base(monkeypatch, plugin, files, limit)
         code, report = checked("--ratchet-base", "HEAD^1")
         assert code == exit_codes.code_of("failed")
         return report, asked
@@ -213,13 +227,12 @@ def test_one_more_finding_lists_the_places_the_base_does_not_have(plugin, agains
     report, asked = against(1, {"ndf/a.py": twice, "ndf/b.py": twice, "ndf/broken.py": "def (:\n", "ndf/x.json": "{}"})
     assert _paths(report) == ["c.py", "ratchet.json"] and "2 件" in report["items"][1]["detail"]
     assert all(set(i) == {"rule", "path", "line", "detail"} for i in report["items"])
-    assert [name for name, _ in asked] == ["rev-parse", "cat-file", "ls-tree", "cat-file"]
+    assert len(asked) == 1  # git の起動は 1 回（PR 4358 の r6-3）
 
 
 def test_a_finding_that_a_rule_change_adds_is_not_in_the_base(plugin, rules, against):
     same = {"ndf/a.py": "def twice():\n    return 1\n", "ndf/b.py": "def twice():\n    return 1\n"}
-    report, asked = against(0, same)
-    assert _paths(report) == ["ratchet.json"] and [name for name, _ in asked] == ["rev-parse", "cat-file", "ls-tree"]
+    assert _paths(against(0, same)[0]) == ["ratchet.json"]
     # 変更の前の規則は twice の同名を認めていた
     old = {"copy_dup": {**rules["copy_dup"], "allow_names": ["twice"]}}
     assert _paths(against(0, {**same, "ndf/checks/rules.json": json.dumps(old)})[0]) == ["a.py", "ratchet.json"]
@@ -232,11 +245,44 @@ def test_the_base_reads_only_the_changed_and_removed_files_and_reuses_the_others
     plugin.write("src/ndf/untracked.py", "x = 1\n")
     scope = plugin.scope()
     asked = _base(monkeypatch, plugin, {"ndf/a.py": "x = '日本語'\n", "ndf/b.py": "x = 2\n", "ndf/gone.py": "x = 3\n", "ndf/x.json": "{}"})
-    base = run._base_scope(scope, run._base_files(scope, "HEAD^1"))
+    with run._base_of(scope, "HEAD^1") as before:
+        base = run._base_scope(scope, run._base_files(scope, before))
     now = {s.rel: s for s in scope.sources}
     got = {s.path.name: (s.text, s is now.get(s.rel)) for s in base.sources}
     assert got == {"a.py": ("x = '日本語'\n", True), "b.py": ("x = 2\n", False), "gone.py": ("x = 3\n", False)}
-    assert asked[1:] == [("cat-file", f"{_blob('x = 2' + chr(10))}\n{_blob('x = 3' + chr(10))}\n")]
+    blobs = {_file(text).oid for text in ("x = '日本語'\n", "x = 1\n", "x = 2\n", "x = 3\n", "{}")}
+    assert [name for name in asked[0] if name in blobs] == [_file("x = 2\n").oid, _file("x = 3\n").oid]
+
+
+def _ask(answer: bytes, name: str):
+    ask = io.BytesIO()
+    return git_objects.read_object(ask, io.BytesIO(answer), name), ask.getvalue()
+
+
+def test_an_object_is_read_by_the_number_of_its_bytes():
+    oid, text = "a" * 40, "日本語の件名\n"
+    answer = f"{oid} blob {len(text.encode())}\n{text}\nnext".encode()
+    stream = io.BytesIO(answer)
+    assert git_objects.read_object(io.BytesIO(), stream, "HEAD:a") == git_objects.GitObject(oid, "blob", text.encode())
+    assert stream.read() == b"next"
+
+
+def test_a_name_that_git_does_not_have_is_none():
+    assert _ask("HEAD:a b missing\n".encode(), "HEAD:a b") == (None, b"HEAD:a b\n")
+    assert _ask(b"abcd ambiguous\n", "abcd") == (None, b"abcd\n")
+    assert _ask(b"", "a\nb") == (None, b"")  # 改行を含む名前は問わない
+
+
+def test_git_that_ends_without_an_answer_stops():
+    with pytest.raises(CheckError):
+        _ask(b"", "HEAD:a")
+
+
+def test_the_rows_of_a_sha256_tree_are_read():
+    blob = git_objects.GitObject("b" * 64, "tree", b"100755 a.py\0" + b"\x12" * 32)
+    assert git_objects.files_under({"t": blob}.get, "t", "src") == {"src/a.py": "12" * 32}
+    assert git_objects.files_under({}.get, "t", "src") == {}
+    assert len(git_objects.blob_id("x", "0" * 64)) == 64
 
 
 def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):
@@ -253,7 +299,7 @@ def test_a_kept_limit_fails_until_write_spec_lowers_it(plugin, checked):
 def test_write_spec_that_lowers_nothing_neither_asks_for_the_head_nor_reads_the_limits_twice(plugin, checked, monkeypatch):
     plugin.write(ratchet.RATCHET_REL, body(1))
     asked, read, real = [], [], ratchet.baseline
-    monkeypatch.setattr(run, "_git_stdout", lambda _root, *args, stdin="": asked.append(args[-1]) or f"{plugin.repo}\n".encode())
+    monkeypatch.setattr(run, "_git_stdout", lambda _root, *args: asked.append(args[-1]) or f"{plugin.repo}\n".encode())
     monkeypatch.setattr(ratchet, "baseline", lambda path: read.append(path) or real(path))
     code, report = checked("--write-spec")
     assert code == 0 and report["metrics"]["written"] == 0
@@ -296,19 +342,18 @@ def test_a_syntax_error_neither_judges_nor_lowers_the_limit(plugin, checked):
 
 @pytest.mark.parametrize(
     ("second", "code"),
-    [(_file(body(1)), 0), (_file(body(2)), 0), (_file(body(0)), 1), (b"HEAD^1:ratchet.json missing\n", 0), (_file("{"), 2)],
+    [(_file(body(1)), 0), (_file(body(2)), 0), (_file(body(0)), 1), (None, 0), (_file("{"), 2)],
 )
 def test_the_limit_is_compared_with_the_one_before_the_change(plugin, checked, monkeypatch, second, code):
     plugin.write(ratchet.RATCHET_REL, body(1))
-    asked = _answer(monkeypatch, plugin, _object("commit", "tree x\n\n日本語の件名\n") + second)
+    asked = _objects(monkeypatch, {"HEAD^1^{commit}": COMMIT, **({_limit_name(plugin): second} if second else {})})
     assert checked("--ratchet-base", "HEAD^1")[0] == code
-    rel = (plugin.root / ratchet.RATCHET_REL).relative_to(plugin.repo).as_posix()
-    assert [a for a in asked if a] == [f"HEAD^1^{{commit}}\nHEAD^1:{rel}\n"]
+    assert asked == [["HEAD^1^{commit}", _limit_name(plugin)]]
 
 
 def test_an_unknown_base_stops(plugin, checked, monkeypatch):
     plugin.write(ratchet.RATCHET_REL, body(1))
-    _answer(monkeypatch, plugin, b"nope^{commit} missing\nnope:ratchet.json missing\n")
+    _objects(monkeypatch, {})
     code, report = checked("--ratchet-base", "nope")
     assert code == exit_codes.unreadable_code() and "nope" in report["summary"]
 

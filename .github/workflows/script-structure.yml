@@ -168,7 +168,8 @@ jobs:
         env:
           BEFORE: ${{ github.event_name == 'push' && !github.event.created && github.event.before || '' }}
         run: |
-          if [ -n "$BEFORE" ] && ! git cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
+          # 2 世代の取得で手元にある親は、浅い履歴の端（.git/shallow）に並ぶ。そこに無いときだけ取得する
+          if [ -n "$BEFORE" ] && [[ "$(< .git/shallow)" != *"$BEFORE"* ]]; then
             git fetch -q --no-tags --depth=1 origin "$BEFORE"
           fi
           plugins/ndf/bin/ndf check --ratchet-base "${BEFORE:-HEAD^1}"

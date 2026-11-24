@@ -12,22 +12,23 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
+import contextlib
 import json
 import os
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.checks import (
     child_deps,
     copy_dup,
     facts,
+    git_objects,
     internal_names,
     invariants,
     limits_readers,
@@ -126,57 +127,54 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     return sorted(found, key=_order)
 
 
-def _git_objects(out: bytes) -> list[Optional[bytes]]:
-    """`git cat-file --batch` の出力の、求めたものごとの中身（無いものは None）。"""
-    found: list[Optional[bytes]] = []
-    while out:
-        head, _, out = out.partition(b"\n")
-        size = None if head.endswith((b" missing", b" ambiguous")) else int(head.rpartition(b" ")[2])
-        found.append(None if size is None else out[:size])
-        out = out if size is None else out[size + 1 :]
-    return found
+class Base(NamedTuple):
+    """変更の前の commit の名前と、その中身を読む関数（1 つの git から読む）。"""
+
+    ref: str
+    read: git_objects.ReadObject
 
 
-def _ratchet_base(scope: Scope, path: Path, ref: str) -> dict[str, ratchet.Baseline]:
-    """commit `ref` のラチェットの基準。`ref` が基準のファイルを持たなければ空、`ref` を読めなければ `CheckError`。"""
-    where = f"{ref}:{scope.rel(path)}"
-    objects = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=f"{ref}^{{commit}}\n{where}\n"))
-    if len(objects) != 2 or objects[0] is None:
-        raise CheckError(f"ラチェットの変更の前の commit を読めない: {ref}")
-    return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
+@contextlib.contextmanager
+def _base_of(scope: Scope, ref: Optional[str]) -> Iterator[Optional[Base]]:
+    """commit `ref` を読む `Base`。`ref` が無ければ git を起動せずに None。"""
+    if ref is None:
+        yield None
+        return
+    with git_objects.opened(scope.repo_root) as read:
+        yield Base(ref, read)
 
 
-def _base_blobs(scope: Scope, ref: str) -> dict[str, str]:
-    """commit `ref` の製品のコードの `.py` と規則のデータの、パスごとの blob の id（シンボリックリンクを除く）。本文は読まない。"""
-    out = _git_stdout(scope.repo_root, "ls-tree", "-r", "-z", ref, "--", scope.rel(scope.plugin_root / SRC_DIR))
-    rows = [os.fsdecode(row).partition("\t") for row in out.split(b"\0") if row]
-    found = {rel: meta.split() for meta, _, rel in rows}
-    rules_rel = scope.rel(scope.plugin_root / RULES_REL)
-    return {rel: blob for rel, (mode, _, blob) in found.items() if mode.startswith("100") and (rel.endswith(".py") or rel == rules_rel)}
+def _ratchet_base(scope: Scope, path: Path, base: Optional[Base]) -> dict[str, ratchet.Baseline]:
+    """変更の前のラチェットの基準。`base` が無いか、その commit が基準のファイルを持たなければ空、commit を読めなければ `CheckError`。"""
+    if base is None:
+        return {}
+    if base.read(f"{base.ref}^{{{git_objects.COMMIT}}}") is None:
+        raise CheckError(f"ラチェットの変更の前の commit を読めない: {base.ref}")
+    where = f"{base.ref}:{scope.rel(path)}"
+    found = base.read(where)
+    return ratchet.limits_of(found.data, where) if found is not None else {}
 
 
-def _is_blob(src: Source, blob: str) -> bool:
-    """本文が git の blob `blob` と同じか（id は本文から計算し、git を起動しない。64 桁なら SHA-256 のリポジトリ）。"""
-    data = src.text.encode()
-    made = hashlib.new("sha256" if len(blob) == 64 else "sha1", b"blob %d\0" % len(data) + data, usedforsecurity=False)
-    return made.hexdigest() == blob
-
-
-def _base_files(scope: Scope, ref: str) -> dict[str, Source]:
-    """commit `ref` の製品のコードの `.py` と規則のデータ。今と同じ本文のファイルは今の `Source`（構文木を作り直さない）を使い、変わったか
-    消えたファイルの本文だけを git から 1 回で読む。"""
+def _base_files(scope: Scope, base: Base) -> dict[str, Source]:
+    """変更の前の製品のコードの `.py` と規則のデータ。今と同じ本文のファイルは今の `Source`（構文木を作り直さない）を使い、変わったか
+    消えたファイルの本文だけを git から読む。"""
     now = {src.rel: src for src in scope.sources}
-    blobs = _base_blobs(scope, ref)
-    files = {rel: now[rel] for rel, blob in blobs.items() if rel in now and _is_blob(now[rel], blob)}
-    rest = {rel: blob for rel, blob in blobs.items() if rel not in files}
-    asked = "".join(f"{blob}\n" for blob in rest.values())
-    bodies = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=asked)) if rest else []
-    for rel, body in zip(rest, bodies, strict=True):
-        if body is None:
-            raise CheckError(f"変更の前のファイルを読めない: {ref}:{rel}")
-        files[rel] = Source(scope.repo_root / rel, rel)
-        files[rel].text = body.decode("utf-8", "replace")
-    return files
+    src_rel, rules_rel = (scope.rel(scope.plugin_root / rel) for rel in (SRC_DIR, RULES_REL))
+    blobs = git_objects.files_under(base.read, f"{base.ref}:{src_rel}", src_rel)
+    wanted = {rel: oid for rel, oid in blobs.items() if rel.endswith(".py") or rel == rules_rel}
+    return {rel: _base_source(scope, base, now.get(rel), rel, oid) for rel, oid in wanted.items()}
+
+
+def _base_source(scope: Scope, base: Base, now: Optional[Source], rel: str, oid: str) -> Source:
+    """変更の前のファイル 1 本。今のファイル `now` と本文が同じ（id が同じ）なら `now`。"""
+    if now is not None and git_objects.blob_id(now.text, oid) == oid:
+        return now
+    found = base.read(oid)
+    if found is None:
+        raise CheckError(f"変更の前のファイルを読めない: {base.ref}:{rel}")
+    src = Source(scope.repo_root / rel, rel)
+    src.text = found.data.decode("utf-8", "replace")
+    return src
 
 
 def _base_scope(scope: Scope, files: Mapping[str, Source]) -> Scope:
@@ -200,13 +198,13 @@ def _base_rules(scope: Scope, files: Mapping[str, Source], rules: dict[str, Any]
     return {**rules, **old, **merged}
 
 
-def _added(scope: Scope, found: list[Finding], rules: dict[str, Any], ref: Optional[str]) -> list[Finding]:
-    """`found` のうち、commit `ref` のコードを `ref` の規則のデータで見たときに無い指摘。`ref` が無ければ増えた分を見分けられないので空。"""
-    if ref is None or not found:
+def _added(scope: Scope, found: list[Finding], rules: dict[str, Any], base: Optional[Base]) -> list[Finding]:
+    """`found` のうち、変更の前のコードを変更の前の規則のデータで見たときに無い指摘。`base` が無ければ増えた分を見分けられないので空。"""
+    if base is None or not found:
         return []
-    files = _base_files(scope, ref)
-    base, old = _base_scope(scope, files), _base_rules(scope, files, rules)
-    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](base, old)}
+    files = _base_files(scope, base)
+    old_scope, old_rules = _base_scope(scope, files), _base_rules(scope, files, rules)
+    before = {(f.rule, f.key) for rule in {f.rule for f in found} for f in RATCHETED[rule](old_scope, old_rules)}
     return [f for f in found if (f.rule, f.key) not in before]
 
 
@@ -230,10 +228,11 @@ def ratcheted(
         commit = _git_stdout(scope.repo_root, "rev-parse", "HEAD").decode().strip()
         limits = ratchet.lower(path, counts, limits, commit, datetime.now(timezone.utc).date().isoformat())
         written.append(ratchet.RATCHET_REL)
-    why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base_ref) if base_ref is not None else {})
-    over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
-    listed = [f for f in found if f.rule in over]
-    kept += listed if only else _added(scope, listed, rules, base_ref)
+    with _base_of(scope, base_ref) as base:
+        why = ratchet.verdicts(counts, limits, _ratchet_base(scope, path, base))
+        over = {rule: f"{why[rule]}。{LISTING.format(rule=rule)}" for rule in why if counts[rule] > limits[rule].max}
+        listed = [f for f in found if f.rule in over]
+        kept += listed if only else _added(scope, listed, rules, base)
     return sorted(kept + [Finding(rule, scope.rel(path), 1, text) for rule, text in {**why, **over}.items()], key=_order)
 
 
@@ -251,10 +250,10 @@ def select(
     return [f for f in found if not only or f.rule in only]
 
 
-def _git_stdout(root: Path, *args: str, stdin: str = "") -> bytes:
+def _git_stdout(root: Path, *args: str) -> bytes:
     """git の標準出力。起動できない・失敗したときは `CheckError`。"""
     try:
-        return subprocess.run(["git", "-C", str(root), *args], input=stdin.encode(), capture_output=True, check=True).stdout
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git の worktree で実行する: {root}: git {' '.join(args)}") from exc
 

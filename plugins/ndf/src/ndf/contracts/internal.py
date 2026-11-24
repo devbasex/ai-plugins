@@ -29,11 +29,13 @@ Row = dict[str, Any]
 
 
 class InternalError(Exception):
-    """内部データの形が違う・種類が無い・新しいバージョン。`kind` は停止理由の種類で、文に欄の値を含まない。"""
+    """内部データの形が違う・種類が無い・新しいバージョン。`kind` は停止理由の種類、`instance` は止まった結果の `cause.instance` に
+    載せる値で、文に欄の値を含まない。"""
 
-    def __init__(self, kind: str, detail: str) -> None:
+    def __init__(self, kind: str, detail: str, instance: Optional[str] = None) -> None:
         super().__init__(detail)
         self.kind = kind
+        self.instance = instance
 
 
 class Kind(NamedTuple):
