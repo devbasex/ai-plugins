@@ -125,9 +125,12 @@ graph TD
 | 相手役を決める部品（`participants.py`。変える） | cross-review の席を決める `review_seats` と、席の名前からランタイムを引く `runtime_of` と、学習の設定で断られたランタイムと理由の組を返す `refusals` を足す（`unready` は `refusals` を使う形にし、返り値は変えない）。claude の読むだけの起動の組み立てと、claude の出力から本文を取り出す処理を cross-refactoring から移して持つ。`assign` は変えない |
 | cross-review の駆動（`drive.py`。変える） | 今の席を実行の間持ち、起動し直しの後に空いた席を埋める。ラウンドの記録に実際に座った席と埋めた席を書き、注意に埋めたことを載せる。起動・監視・認証の確かめにはランタイムの名前を、指摘の担当・出力の名前・記録には席の名前を使う。相手役へ渡す資料を保存先の下の `review-input/` に書く（決定 2）。同じ head の打ち直しで前回の結果を返すときは、前回埋めた席を数えて判定し、注意を作り直す（データ構造の節） |
 | cross-review の CLI（`cli.py`。変える） | `--reviewer` の名指しと `allowed` から `review_seats` で席を決め、名指しが 1 者かを駆動の設定に渡す。詳しくは下の「CLI の 2 つのコマンド」 |
+| ラウンドの範囲の判断（`scope_decide.py`。変える） | ラウンドの記録のキーに `filled` を足し、埋めた席 1 件の型と、前回の席が誰の代わりに読んだかを読む関数を持つ。同じ head の打ち直しの再利用の判定（`read_by_all_head`）で、埋めた席を欠けた相手役の代わりに数える |
 | 記録のコメント（`report_decide.py`。変える） | ラウンドの表に「相手役」の列を足し、埋めた席は欠けた相手役の名前を添えて示す |
 | claude の起動の部品（`adapters/claude.py`。変える） | 起動の設定（`ClaudeCall`）に読める場所の一覧を足す。空でないときだけ、`permission_args` で `--restricted`・`--add-dir`・`dontAsk` を組み立てる（決定 2）。空なら今と同じ引数を返す |
 | cross-refactoring の起動（`crossrefactor/launch.py`。変える） | claude の読むだけの起動と本文の取り出しを、相手役を決める部品の関数で行う（振る舞いは変えない） |
+
+ファイルと関数の粒度は、詳細設計の [issue-3955-design-detail.md](./issue-3955-design-detail.md) にある（新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるため、別ファイルにした）。
 
 ```mermaid
 graph LR
@@ -465,7 +468,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py` |
+| #3955 | 実装する | — | `plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`docs/specifications/cross-review-participants-and-seats.md`、`plugins/ndf/tests/core/converge/test_converge.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossrefactor/test_launch_and_phase.py`、`plugins/ndf/tests/adapters/test_claude_args.py` |
 
 ## 未確認のまま残ること
 
