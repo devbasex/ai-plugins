@@ -77,14 +77,22 @@ def _args(cwd: Path, *, base: str = "main", remote: str = "origin", issues=(4337
 
 
 def _worker_out(status: str = "ok", **extra: Any) -> dict[str, Any]:
-    out = {"tool": "worker", "status": status, "summary": "終えた", "items": [{"kind": "session", "session": "s"}], "metrics": {"attempts": 1}}
+    out = {
+        "tool": "worker",
+        "status": status,
+        "summary": "終えた",
+        "items": [{"kind": "session", "session": "s"}],
+        "metrics": {"attempts": 1},
+    }
     out.update(extra)
     return out
 
 
 def _reader(doc: str, verdict: str = "pass", checks: Optional[list] = None, reason: Optional[str] = None) -> dict[str, Any]:
     rec: dict[str, Any] = {"doc": doc, "verdict": verdict}
-    rec["checks"] = checks if checks is not None else ([{"verdict": verdict, "restatements": ["要点"]}] if verdict in ("pass", "fail") else [])
+    rec["checks"] = (
+        checks if checks is not None else ([{"verdict": verdict, "restatements": ["要点"]}] if verdict in ("pass", "fail") else [])
+    )
     if reason is not None:
         rec["reason"] = reason
     return rec
@@ -210,13 +218,20 @@ TARGETS = (Target(DESIGN, "design"), Target(PLAN, "plan"), Target("docs/a.md", "
 
 def test_added_items_renumber_ids_and_keep_every_item() -> None:
     """I6: worker の `id` は使わず、重なる `id`・`reader-1`・`id` 無しも全件を残す。"""
-    raw = [{"id": "R1", "text": "a", "doc": DESIGN}, {"id": "R1", "text": "b", "doc": PLAN}, {"id": "reader-1", "text": "c", "doc": DESIGN}, {"text": "d", "doc": DESIGN}]
+    raw = [
+        {"id": "R1", "text": "a", "doc": DESIGN},
+        {"id": "R1", "text": "b", "doc": PLAN},
+        {"id": "reader-1", "text": "c", "doc": DESIGN},
+        {"text": "d", "doc": DESIGN},
+    ]
     got = drive.added_items(raw, TARGETS)
     assert [i["id"] for i in got] == ["add-1", "add-2", "add-3", "add-4"]
     assert [i["text"] for i in got] == ["a", "b", "c", "d"]
 
 
-@pytest.mark.parametrize("raw", [[{"doc": DESIGN}], [{"text": " ", "doc": DESIGN}], [{"text": "a", "doc": "docs/other.md"}], ["a"], {"text": "a"}])
+@pytest.mark.parametrize(
+    "raw", [[{"doc": DESIGN}], [{"text": " ", "doc": DESIGN}], [{"text": "a", "doc": "docs/other.md"}], ["a"], {"text": "a"}]
+)
 def test_added_items_reject_bad_shapes(raw: Any) -> None:
     """I3: `text` が無い・`doc` が対象に無い項目は `BadReport`。"""
     with pytest.raises(drive.BadReport):
@@ -230,9 +245,17 @@ FAIL_THEN_PASS = [{"verdict": "fail", "restatements": ["x"], "reason": "質問 1
     "readers",
     [
         [_reader(DESIGN), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md", "self", reason="AI への手順書")],
-        [_reader(DESIGN, "not_run", reason="Tool が無い"), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md", "not_run", reason="Tool が無い")],
+        [
+            _reader(DESIGN, "not_run", reason="Tool が無い"),
+            _reader(PLAN, "self", reason="実装計画"),
+            _reader("docs/a.md", "not_run", reason="Tool が無い"),
+        ],
         [_reader(DESIGN, "pass", FAIL_THEN_PASS), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md")],
-        [_reader(DESIGN, "fail", [FAIL_THEN_PASS[0]], reason="2 回目を立てられない"), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md")],
+        [
+            _reader(DESIGN, "fail", [FAIL_THEN_PASS[0]], reason="2 回目を立てられない"),
+            _reader(PLAN, "self", reason="実装計画"),
+            _reader("docs/a.md"),
+        ],
         [
             _reader(DESIGN, "fail", [FAIL_THEN_PASS[0], {"verdict": "fail", "restatements": ["z"], "reason": "まだ誤読"}]),
             _reader(PLAN, "self", reason="実装計画"),
@@ -260,7 +283,10 @@ def _gap_for(readers: list, target: Target = Target(DESIGN, "design")) -> list[d
         ([_reader(PLAN)], Target(PLAN, "plan")),
         ([_reader(PLAN, "not_run", reason="x")], Target(PLAN, "plan")),
         ([_reader(DESIGN, "self", reason="設計書")], Target(DESIGN, "design")),
-        ([_reader(DESIGN, "pass", [{"verdict": "pass", "restatements": ["a"]}, {"verdict": "pass", "restatements": ["b"]}])], Target(DESIGN, "design")),
+        (
+            [_reader(DESIGN, "pass", [{"verdict": "pass", "restatements": ["a"]}, {"verdict": "pass", "restatements": ["b"]}])],
+            Target(DESIGN, "design"),
+        ),
         ([_reader(DESIGN, "not_run")], Target(DESIGN, "design")),
         ([_reader("docs/a.md", "self")], Target("docs/a.md", "manuscript")),
         ([_reader(DESIGN, "not_run", checks=[{"verdict": "pass", "restatements": ["a"]}], reason="x")], Target(DESIGN, "design")),
@@ -310,7 +336,7 @@ def test_drive_hands_only_this_issues_design(tmp_path: Path) -> None:
 def test_drive_on_the_sprint_branch_itself(tmp_path: Path, base: str, remote: str) -> None:
     """条件 4・5: 作業場所がスプリントブランチそのものでも、起点はベースブランチなので設計書が対象に入る。"""
     _write(tmp_path, DESIGN)
-    fake = FakeGit({"HEAD": HEAD, f"refs/remotes/{remote}/{base}": BASE_SHA, f"refs/heads/sprint": HEAD}, remotes=(remote,), diff=[DESIGN])
+    fake = FakeGit({"HEAD": HEAD, f"refs/remotes/{remote}/{base}": BASE_SHA, "refs/heads/sprint": HEAD}, remotes=(remote,), diff=[DESIGN])
     got = _run(tmp_path, fake, FakeWorker(_report()), base=base, remote=remote)
     assert got["status"] == "ok" and got["metrics"]["targets"] == [DESIGN]
     diff = next(c for c in fake.calls if c[0] == "diff")
@@ -378,7 +404,10 @@ def test_drive_launches_only_git_reads_and_worker_run(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("out", "kind"),
     [
-        (_worker_out("stopped", cause={"kind": "incomplete", "detail": "残した"}, gaps=[{"kind": "work", "name": "x", "reason": "y"}]), "incomplete"),
+        (
+            _worker_out("stopped", cause={"kind": "incomplete", "detail": "残した"}, gaps=[{"kind": "work", "name": "x", "reason": "y"}]),
+            "incomplete",
+        ),
         (_worker_out("stopped", cause={"kind": "work_stopped", "detail": "止めた"}), "work_stopped"),
         (_worker_out("gate", routes={"retry": None}), "work_stopped"),
     ],
@@ -424,7 +453,10 @@ def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Pa
     _write(tmp_path, DESIGN)
     fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
     fail = _reader(DESIGN, "fail", [FAIL_THEN_PASS[0], {"verdict": "fail", "restatements": ["z"], "reason": "質問 2 が誤読された"}])
-    outside = [_reader("docs/outside.md", "fail", [{"verdict": "fail", "restatements": ["q"], "reason": "外"}]), {"doc": "docs/x.md", "verdict": "?"}]
+    outside = [
+        _reader("docs/outside.md", "fail", [{"verdict": "fail", "restatements": ["q"], "reason": "外"}]),
+        {"doc": "docs/x.md", "verdict": "?"},
+    ]
     got = _run(tmp_path, fake, FakeWorker(_report(readers=[fail, *outside])))
     assert got["status"] == "ok"
     assert [i["id"] for i in got["items"]] == ["reader-1"]
@@ -439,9 +471,22 @@ def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Pa
 
 
 def test_adopt_keeps_a_correct_result() -> None:
-    ok = {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [{"id": "add-1", "text": "t", "doc": DESIGN}], "metrics": {"targets": [DESIGN]}}
+    ok = {
+        "tool": "document-rebuild",
+        "status": "ok",
+        "summary": "s",
+        "items": [{"id": "add-1", "text": "t", "doc": DESIGN}],
+        "metrics": {"targets": [DESIGN]},
+    }
     assert cli.adopt(ok) == (ok, 0)
-    stopped = {"tool": "document-rebuild", "status": "stopped", "summary": "s", "items": [], "metrics": {}, "cause": {"kind": "precondition", "detail": "d"}}
+    stopped = {
+        "tool": "document-rebuild",
+        "status": "stopped",
+        "summary": "s",
+        "items": [],
+        "metrics": {},
+        "cause": {"kind": "precondition", "detail": "d"},
+    }
     assert cli.adopt(stopped) == (stopped, causes.exit_code("precondition"))
 
 
@@ -464,14 +509,22 @@ def _main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, got: dict[str, Any]) 
     monkeypatch.setattr(drive, "drive", lambda args: got)
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        code = cli.main(["run", "--base", "main", "--remote", "origin", "--issue", "4337", "--kind", "design", "--state-dir", "st", "--out", "out.json"])
+        code = cli.main(
+            ["run", "--base", "main", "--remote", "origin", "--issue", "4337", "--kind", "design", "--state-dir", "st", "--out", "out.json"]
+        )
     written = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     return code, written, stdout.getvalue().strip().splitlines()[-1]
 
 
 def test_main_writes_the_same_result_to_out_and_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """条件 12: `--out` の `items` は `id` と `text` を持ち、設計のレビューの読み取り（`as_handed`）が読める。"""
-    got = {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [{"id": "add-1", "text": "t", "doc": DESIGN}], "metrics": {"targets": [DESIGN]}}
+    got = {
+        "tool": "document-rebuild",
+        "status": "ok",
+        "summary": "s",
+        "items": [{"id": "add-1", "text": "t", "doc": DESIGN}],
+        "metrics": {"targets": [DESIGN]},
+    }
     code, written, last = _main(tmp_path, monkeypatch, got)
     assert code == 0 and written == got and json.loads(last) == written
     assert [(h.id, h.text) for h in finish_decide.as_handed(written["items"])] == [("add-1", "t")]
@@ -486,5 +539,9 @@ def test_main_writes_the_replacement_to_both(tmp_path: Path, monkeypatch: pytest
 
 def test_main_rejects_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["run", "--base", "main"]) == causes.exit_code("invalid")
-    assert cli.main(["run", "--base", "main", "--remote", "o", "--issue", "x", "--kind", "design", "--state-dir", "s", "--out", "o"]) == causes.exit_code("invalid")
-    assert cli.main(["run", "--base", "main", "--remote", "o", "--issue", "1", "--kind", "other", "--state-dir", "s", "--out", "o"]) == causes.exit_code("invalid")
+    assert cli.main(
+        ["run", "--base", "main", "--remote", "o", "--issue", "x", "--kind", "design", "--state-dir", "s", "--out", "o"]
+    ) == causes.exit_code("invalid")
+    assert cli.main(
+        ["run", "--base", "main", "--remote", "o", "--issue", "1", "--kind", "other", "--state-dir", "s", "--out", "o"]
+    ) == causes.exit_code("invalid")

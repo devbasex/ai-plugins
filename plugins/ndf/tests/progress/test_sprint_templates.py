@@ -65,8 +65,8 @@ def early_sprint(repo, monkeypatch):
     return _sprint(repo, monkeypatch, "0" * 40)
 
 
-def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS) -> SimpleNamespace:
-    strategy_fixture.write(repo, "web-develop", PROJECT)
+def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS, project: dict = PROJECT) -> SimpleNamespace:
+    strategy_fixture.write(repo, "web-develop", project)
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
@@ -156,6 +156,39 @@ def test_next_carries_a_sprint_to_the_last_row_with_the_real_templates(repo, st,
     assert "{{" not in text and "ndf-worker" in text and "ndf-review" in text and f"#{ISSUE} の題" in text
     if mode == "standard":
         assert "ndf-refactor" in text and "ndf-rebuild" in text
+
+
+# `workflow.launch.rebuild` の無いリポジトリの設定（#4337）
+PROJECT_WITHOUT_REBUILD = {**PROJECT, "workflow": {"launch": {k: v for k, v in PROJECT["workflow"]["launch"].items() if k != "rebuild"}}}
+
+
+def _rebuild_step(plan: dict) -> list[str]:
+    return next(step["run"] for step in plan["steps"] if step["id"] == "rebuild")
+
+
+def test_standard_sprint_without_the_rebuild_setting_launches_the_default_command(repo, st, capsys, monkeypatch):
+    """#4337 の条件 1・2: 設定 `workflow.launch.rebuild` が無くても、工程「設計」と「ドキュメント再構成」のプランが組め、
+    組み直すステップに `ndf document-rebuild run` と `--out` が入る。"""
+    subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
+    gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    s = _sprint(repo, monkeypatch, gathered, project=PROJECT_WITHOUT_REBUILD)
+    tid = _new(capsys, "standard")
+    for _ in range(MAX_TURNS):
+        out = _turn(st, tid, repo, s.env)
+        assert out["status"] in ("ok", "gate"), out
+        if out["metrics"].get("state") == "completed":
+            break
+    plans = {p["name"].removesuffix(f"-{BRANCH}"): p for p in s.plans}
+    design, rebuild = _rebuild_step(plans["design"]), _rebuild_step(plans["document-rebuild"])
+    for argv in (design, rebuild):
+        assert argv[:3] == ["ndf", "document-rebuild", "run"] and argv[-2:] == ["--out", "{state_dir}/rebuild.json"]
+        assert argv[argv.index("--issue") + 1] == str(ISSUE) and argv[argv.index("--state-dir") + 1] == "{state_dir}"
+    assert [design[i + 1] for i, w in enumerate(design) if w == "--kind"] == ["design"]
+    assert [rebuild[i + 1] for i, w in enumerate(rebuild) if w == "--kind"] == ["design", "plan"]
+    assert design[design.index("--base") + 1] == "develop"
+    assert design[design.index("--remote") + 1] == "origin"
 
 
 def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint, capsys, monkeypatch):

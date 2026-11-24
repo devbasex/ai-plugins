@@ -122,11 +122,7 @@ def _designs(g: git.Git, root: Path, a: argparse.Namespace) -> list[tuple[str, s
             out.append((raw, path.read_text(encoding="utf-8")))
         return out
     want = {int(n) for n in a.issue}
-    rels = [
-        r
-        for r in g.run("ls-tree", "-r", "--name-only", "HEAD", "--", "issues").splitlines()
-        if want & issue_docs.design_issues(r)
-    ]
+    rels = [r for r in g.run("ls-tree", "-r", "--name-only", "HEAD", "--", "issues").splitlines() if want & issue_docs.design_issues(r)]
     return [(rel, g.run("show", f"HEAD:{rel}")) for rel in rels]
 
 
