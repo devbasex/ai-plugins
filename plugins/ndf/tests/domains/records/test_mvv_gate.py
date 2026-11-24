@@ -726,7 +726,8 @@ class _UnreadHub(Hub):
 
 
 def _no_judging(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "_hub", lambda root: _UnreadHub(12, {}))
+    # 承認する PR と比べるだけなら GitHub へつながない（認証の無い環境でも not_applicable を返す）
+    monkeypatch.setattr(cli, "_hub", lambda root: pytest.fail("PR を比べる前に GitHub へつないだ"))
     monkeypatch.setattr(cli.mvv_gate, "gate", lambda *a, **k: pytest.fail("判定する PR が承認する PR と違うのに判定した"))
     monkeypatch.setattr(mvv_gate.llm, "ask", lambda *a, **k: pytest.fail("LLM を呼んだ"))
 
