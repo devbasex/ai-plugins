@@ -265,14 +265,14 @@ def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
     更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に改めて人へ質問するためである。後ろのステップ（マージなど）
     が済んでいれば、承認を取り直しても戻せないので開き直さない。記録の事象は書き換えない。
     """
+    last = next((st for st in reversed(s.steps) if st.id in prog.done), None)
+    if last is None or not invoke.is_listen(last):
+        return
+    report = prog.done[last.id]
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
     by_seq = {ev.seq: ev for ev in v.row_events(s.name) if ev.draft.kind == ANSWERED}
-    for i, st in enumerate(s.steps):
-        report = prog.done.get(st.id)
-        if report is None or not invoke.is_listen(st) or any(later.id in prog.done for later in s.steps[i + 1 :]):
-            continue
-        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
-        if _void_answer(v, by_seq.get(metrics.get("seq")), st.gate):
-            del prog.done[st.id]
+    if _void_answer(v, by_seq.get(metrics.get("seq")), last.gate):
+        del prog.done[last.id]
 
 
 def _running_move(v: View, s: stages.StageDef) -> Move:
