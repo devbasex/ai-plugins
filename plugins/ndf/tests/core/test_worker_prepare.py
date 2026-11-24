@@ -7,7 +7,6 @@ import fcntl
 import io
 import json
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -249,11 +248,9 @@ def _another_append():
 
 
 @pytest.mark.parametrize("limit", [0.0, 0.1])
-def test_append_waits_to_the_limit_and_names_the_report(tmp_path, capsys, monkeypatch, limit):
+def test_append_waits_to_the_limit_and_names_the_report(tmp_path, capsys, monkeypatch, clock, limit):
     report = _prepared(tmp_path, capsys)
     _append(capsys, monkeypatch, report, "1 つ目\n")
-    sleeps, real = [], time.sleep
-    monkeypatch.setattr("time.sleep", lambda s: (sleeps.append(s), real(s)))
     monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: limit)
     paths = worker_paths.report_paths(report.parent, "n", resolve=False)
     with _another_append(), worker_paths.open_workdir(report.parent) as wd:
@@ -262,32 +259,29 @@ def test_append_waits_to_the_limit_and_names_the_report(tmp_path, capsys, monkey
         code, out = _append(capsys, monkeypatch, report, "2 つ目\n", "--done")
     assert str(err.value) == f"報告のロックを {limit:g} 秒待っても取れない: {report}" and err.value.paths == (report,)
     assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
-    assert set(sleeps) == ({durable_locks.LOCK_POLL_SECONDS} if limit else set())
+    assert set(clock.sleeps) == ({durable_locks.LOCK_POLL_SECONDS} if limit else set())
     assert report.read_text(encoding="utf-8") == "1 つ目\n" and not Path(f"{report}.done").exists()
     # 取れなかった追記はロックを残さず、放された後の追記は通る
     assert _append(capsys, monkeypatch, report, "3 つ目\n")[0] == 0
     assert report.read_text(encoding="utf-8") == "1 つ目\n3 つ目\n"
 
 
-def test_append_goes_on_after_another_append_publishes_and_releases_during_the_last_wait(tmp_path, capsys, monkeypatch):
+def test_append_goes_on_after_another_append_publishes_and_releases_during_the_last_wait(tmp_path, capsys, monkeypatch, clock):
     # 上限を越える待ちの後にも 1 回試す。報告はロックを取ってから読むので、待つ間に公開された本文の後ろへ足す
     report = _prepared(tmp_path, capsys)
     _append(capsys, monkeypatch, report, "")
-    sleeps, real = [], time.sleep
     monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: durable_locks.LOCK_POLL_SECONDS / 2)
     with _another_append() as held:
 
-        def publish_and_release(seconds):
-            sleeps.append(seconds)
+        def publish_and_release():
             with worker_paths.open_workdir(report.parent) as wd:
                 worker_paths.write_file(wd, report.name, "先の追記\n")
             fcntl.flock(held, fcntl.LOCK_UN)
-            real(seconds)
 
-        monkeypatch.setattr("time.sleep", publish_and_release)
+        clock.on_sleep = publish_and_release
         code, _ = _append(capsys, monkeypatch, report, "後の追記\n", "--done")
     assert code == 0 and report.read_text(encoding="utf-8") == "先の追記\n後の追記\n"
-    assert sleeps == [durable_locks.LOCK_POLL_SECONDS] and Path(f"{report}.done").exists()
+    assert clock.sleeps == [durable_locks.LOCK_POLL_SECONDS] and Path(f"{report}.done").exists()
 
 
 def test_append_holds_the_lock_while_writing_and_releases_it_on_failure(tmp_path, capsys, monkeypatch):

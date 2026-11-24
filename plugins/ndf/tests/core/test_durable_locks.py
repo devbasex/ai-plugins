@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 import socket
-from types import SimpleNamespace
 
 import pytest
 
@@ -76,21 +75,6 @@ def test_exclusive_store_lock_does_not_wait(root, monkeypatch):
 
 
 # --- 現状固定（4367 の I-001: ロックを上限まで待つループを 1 つの関数へまとめる前） ----------------------------------
-
-
-@pytest.fixture
-def clock(monkeypatch):
-    """`time.sleep` が進める偽の時計。`sleeps` は待った秒の並び、`on_sleep` は待つたびに呼ぶ関数。"""
-    fake = SimpleNamespace(now=100.0, sleeps=[], on_sleep=lambda: None)
-
-    def sleep(seconds):
-        fake.sleeps.append(seconds)
-        fake.now += seconds
-        fake.on_sleep()
-
-    monkeypatch.setattr("time.monotonic", lambda: fake.now)
-    monkeypatch.setattr("time.sleep", sleep)
-    return fake
 
 
 @pytest.mark.parametrize("mode", [fcntl.LOCK_EX, fcntl.LOCK_SH])
