@@ -350,8 +350,8 @@ def _settle_resolved(run: _Run, left: Sequence[prior_decide.Thread], done: dict[
 def _carry(run: _Run, prior: _Prior) -> None:
     """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
     結び（閉じたら返信して resolve する）、スレッドの無い指摘と、スレッドから引き継げなかった NDF の指摘（resolve 済みなど）は
-    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がず、そのうち別の実行が resolve したスレッドの
-    指摘は修正の対象から外す。"""
+    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がずに MVV の判定だけを重ね、そのうち別の実行が
+    resolve したスレッドの指摘は修正の対象から外す。"""
     done = run.data.setdefault(threads.THREADS, {})
     settled = _settle_resolved(run, prior.threads, done)
     tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
@@ -360,8 +360,11 @@ def _carry(run: _Run, prior: _Prior) -> None:
     held = tracked | {c.comment for c in carried}
     carried += [c for c in listed if c.thread is None or c.thread not in held]
     items = run.snapshot.items if run.snapshot is not None else ()
+    merged = _merge_tracked(run, prior.threads, done, marks, items)
     added = set(run.journal.carry(carried, items, run.mvv))
     run.warnings += run.journal.warnings
+    _detach_revived(run)
+    merged.update(run.journal.merged)
     for c in carried:
         if c.id in added and c.comment is not None:
             done[c.id] = {"comment": c.comment}
@@ -369,8 +372,31 @@ def _carry(run: _Run, prior: _Prior) -> None:
         run.process.append({"run": "start", "result": f"別の実行が resolve したスレッドの指摘 {settled} 件を修正の対象から外した"})
     if added:
         run.process.append({"run": "start", "result": f"PR に残った未解決の指摘 {len(added)} 件を引き継いだ"})
-    if settled or added:
+    if merged:
+        run.process.append({"run": "start", "result": f"記録のコメントにある MVV の判定を、既にある指摘 {len(merged)} 件に重ねた"})
+    if settled or added or merged:
         _save(run)
+
+
+def _merge_tracked(
+    run: _Run,
+    left: Sequence[prior_decide.Thread],
+    done: Mapping[str, Any],
+    marks: Mapping[int, Mapping[str, Any]],
+    items: Sequence[str],
+) -> set[str]:
+    """状態ファイルが追うスレッドの指摘に、記録のコメントにある同じスレッドの MVV の判定を重ね、変わった指摘の id を返す。
+    閉じた指摘には、スレッドが開いていると読めたときだけ重ねる（人が resolve した指摘を戻さない）。"""
+    opened = {t.comment for t in left if not t.resolved}
+    merged = set()
+    for fid, mark in done.items():
+        row = run.journal.rows.get(fid)
+        comment = mark.get("comment") if isinstance(mark, dict) else None
+        if row is None or comment not in marks or (row.get("outcome") != fin.UNRESOLVED and comment not in opened):
+            continue
+        if run.journal.merge_marks(fid, marks[comment], items, run.mvv):
+            merged.add(fid)
+    return merged
 
 
 def _restate(run: _Run) -> None:
