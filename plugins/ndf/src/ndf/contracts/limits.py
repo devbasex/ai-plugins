@@ -59,10 +59,14 @@ class Policy(NamedTuple):
     runtimes: Optional[list[str]] = None
     auth_markers: Optional[list[str]] = None
     endpoint: Optional[dict[str, Any]] = None
+    # 公開の記述の取得（`samples.fetch`。#3687）だけが持つ値
+    retries: Optional[int] = None
+    max_bytes: Optional[int] = None
+    peers: Optional[dict[str, int]] = None
 
 
-# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ）は
-# `value` で引かず、判定の子と hook の表が行から読む
+# 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ・相手ごとの
+# 上限）は `value` で引かず、判定の子・hook の表・見本の突き合わせが行から読む
 VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
 
 

@@ -34,6 +34,15 @@
     "max_chars": {"type": "integer", "minimum": 1, "description": "判定へ渡す本文の上限の字数（hook.stop-wait.judge）"},
     "rest_seconds": {"type": "number", "minimum": 0, "description": "起動が失敗した後に休む秒（hook.stop-wait.judge）"},
     "lock_seconds": {"type": "number", "minimum": 0, "description": "休みのマーカーのロックを待つ上限の秒（hook.stop-wait.judge）"},
+    "retries": {"type": "integer", "minimum": 0, "description": "打ち直しの回数（最初の 1 回を含まない。samples.fetch）"},
+    "max_bytes": {"type": "integer", "minimum": 1, "description": "取得する本文の上限のバイト数（samples.fetch）"},
+    "peers": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z0-9-]+$"},
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "相手ごとの要求の数の上限（samples.fetch）"
+    },
     "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
     "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
     "endpoint": {

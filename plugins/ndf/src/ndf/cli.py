@@ -91,6 +91,7 @@ COMMANDS: dict[str, str] = {
     "relay": "ndf.domains.relay.cli",
     "release-steps": "ndf.domains.release.cli",
     "route": "ndf.core.route",
+    "samples": "ndf.domains.samples.cli",
     "settings": "ndf.domains.settings.cli",
     "statusline": "ndf.domains.statusline.cli",
     "test-slot": "ndf.testing.command",
@@ -99,7 +100,7 @@ COMMANDS: dict[str, str] = {
     "worktree": "ndf.domains.worktree.cli",
 }
 # NDF 自身の開発のサブコマンド（使い方の表示に出さない。名前で呼べば動く。#3617 の決定 11）
-DEVELOPER_COMMANDS = frozenset({"check", "manifests"})
+DEVELOPER_COMMANDS = frozenset({"check", "manifests", "samples"})
 # モジュールのパス → サブコマンドの名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
 _TOOL_OF: dict[str, str] = {path: name for name, path in reversed(COMMANDS.items())}
 

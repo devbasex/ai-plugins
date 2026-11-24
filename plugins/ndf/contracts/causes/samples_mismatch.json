@@ -1,0 +1,7 @@
+{
+  "meaning": "見本が本物の公開の記述と食い違う（相手の API の形が変わったか、見本が古い）",
+  "std_type": "validation",
+  "exit": "failed",
+  "route": "step",
+  "retry": null
+}

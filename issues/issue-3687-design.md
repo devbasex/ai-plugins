@@ -203,7 +203,9 @@ flowchart LR
   "peer": "github",
   "sample": "tests/samples/github/rest/issue.json",
   "source": {"schema": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.json", "pointer": "#/components/schemas/issue"},
-  "absent_keys": ["body_html", "body_text", "user/starred_at"]
+  "absent_keys": ["body_html", "body_text", "user/starred_at"],
+  "extra_keys": [],
+  "known_mismatches": []
 }
 ```
 
@@ -211,10 +213,12 @@ flowchart LR
 | --- | --- |
 | `peer` | 相手（この変更では `github` だけ）。呼び出しの数は相手ごとに数える |
 | `sample` | 見本のファイル（プラグインの根からの相対）。テストダブルはこのファイルだけから応答を組み立てる |
-| `source` | 本物の取り方。`schema`（公開の記述の URL と JSON ポインタ）。記述は OpenAPI 3.1 の bundled 形式（`descriptions-next/`）を取る。3.1 のスキーマは JSON Schema 2020-12 と同じ書き方で、null を取る列は `type` の配列で書かれる（3.0 の `nullable` を持たない） |
+| `source` | 本物の取り方。`schema`（公開の記述の URL。認証情報・クエリ・フラグメントは書けない）と `pointer`（記述の中の定義を指す JSON ポインタ。`anyOf`・`oneOf` の定義を指せば、見本の型を受けるただ 1 つの枝と当てる）。記述は OpenAPI 3.1 の bundled 形式（`descriptions-next/`）を取る。3.1 のスキーマは JSON Schema 2020-12 と同じ書き方で、null を取る列は `type` の配列で書かれる（3.0 の `nullable` を持たない） |
 | `absent_keys` | 見本を録った時点の記述の定義にあり、見本（本物の応答）には無かったキーの一覧。見本の根からのパス（辞書のキーを `/` で区切り、配列の要素は `*`）で書く。見本のキーとこの一覧を合わせたものが「録った時点の形」（基準の形）で、取った記述の定義がこれより多いキーを持てば、相手がキーを足したとして落とす（詳細設計書の「足されたキーの判定」）。見本を録り直すときは、定義のキーから見本のキーを引いた残りを書き直す |
+| `extra_keys` | 見本（本物の応答）にあり、記述の定義に無いと分かっているキーの一覧。書き方は `absent_keys` と同じ。無ければ空の並びを書く。挙げたキーだけを (1) の向きの食い違いから除き、定義に載るか見本から消えれば食い違いにする |
+| `known_mismatches` | 本物の応答と記述が食い違うと分かっている所の説明（`archived_by: type` のような、突き合わせの説明 1 行そのまま）の一覧。無ければ空の並びを書く。この説明だけを除き、出なくなれば食い違いにする。定義に無いキーは `extra_keys` へ書く（件数の説明をここへ書くと、キーの入れ替わりを見逃す） |
 
-比べ方は 2 つの向きで 1 通りに決め、定義に比べ方のキーは置かない。(1) 見本が記述の定義に合うか（見本のキーが定義に無ければ、相手がキーを消したか改名した）。(2) 記述の定義のキーが基準の形（見本のキー + `absent_keys`）に収まるか（収まらなければ、相手がキーを足した）。GitHub の定義は `additionalProperties` を書かないため、(1) だけでは相手の応答にキーが足されても見本は通り続ける。記述の無い相手（ランタイムの CLI）を本物と当てる仕事は、既にある毎日のジョブの `cli-help`（`--help` を `contracts/domains/cli-floors.json` と突き合わせる）が持ち続ける。同じ `--help` を見本の側でも打つと、毎日の CLI の起動がランタイムごとに 1 回増えるためである。
+比べ方は 2 つの向きで 1 通りに決め、定義に置くのは基準の形（`absent_keys`）と既知の食い違い（`extra_keys`・`known_mismatches`）だけである。(1) 見本が記述の定義に合うか（見本のキーが定義に無ければ、相手がキーを消したか改名した）。(2) 記述の定義のキーが基準の形（見本のキー + `absent_keys`）に収まるか（収まらなければ、相手がキーを足した）。GitHub の定義は `additionalProperties` を書かないため、(1) だけでは相手の応答にキーが足されても見本は通り続ける。記述の無い相手（ランタイムの CLI）を本物と当てる仕事は、既にある毎日のジョブの `cli-help`（`--help` を `contracts/domains/cli-floors.json` と突き合わせる）が持ち続ける。同じ `--help` を見本の側でも打つと、毎日の CLI の起動がランタイムごとに 1 回増えるためである。
 
 **呼び出しの数は定義の自己申告にしない。** 相手ごとの上限は上限の表の 1 項目（`contracts/limits/samples.fetch.json` の `peers`。`{"github": 2}`）に置く。`ndf samples verify` は定義から相手ごとの異なる URL の数を求め、1 つの URL を 1 回だけ取る（同じ記述を指す見本が増えても呼び出しは増えない）。打ち直しは持たない（`retries` は 0。失敗は次の日のジョブに任せる）。取得は転送を追わない（3xx は取れないものとして扱い、転送の先へ要求を足さない）ので、1 URL は必ず 1 要求である。記述は大きい（GitHub は 2026-11-23 の実測で 14,395,662 バイト）ため、本文の上限は同じ項目の `max_bytes`（64 MiB）に置く。最悪の呼び出しの数（異なる URL の数 ×（1 + 打ち直し））が上限を超える定義では、1 回も呼ばずに止まる。実際に送った要求の数を相手ごとに数え、結果 JSON の `metrics.calls` に出す。
 
