@@ -40,7 +40,7 @@ from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, limits, result, worker_paths
+from ndf.contracts import facts, internal, limits, result, worker_paths
 from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
@@ -260,7 +260,7 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 
 def read_report(stdout: str) -> Optional[dict[str, Any]]:
-    """標準出力の最後の空でない行の結果 JSON。読めないか形が違えば None。"""
+    """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
     lines = [line for line in stdout.splitlines() if line.strip()]
     if not lines:
         return None
@@ -268,7 +268,7 @@ def read_report(stdout: str) -> Optional[dict[str, Any]]:
         obj = json.loads(lines[-1])
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を返さない作業は None で bad_report にする
         return None
-    return obj if not result.errors(obj) else None
+    return result.received(obj)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:
@@ -721,11 +721,11 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
 
 
 def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None）。"""
+    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None。新しいバージョンなら `InternalError`）。"""
     record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
     if record is None:
         return None, None
-    return record, plan_files.read_json(plan_runner.result_path(work_dir, durable.run_name(record["key"])))
+    return record, plan_runner.stored_result(work_dir, durable.run_name(record["key"]))
 
 
 def _from_of(command: Any) -> Optional[str]:
@@ -841,7 +841,7 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
-PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError)
+PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError, internal.InternalError)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -869,6 +869,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
         return result.stopped(
             PLAN, "precondition", f"プラン {name} の保存先のファイル（{VALUES_FILE} など）を安全に読み書きできない: {exc}"
         )
+    if isinstance(exc, internal.InternalError):
+        return result.stopped(PLAN, exc.kind, f"プラン {name} の前の回の結果を読めない: {exc}")
     return None
 
 
@@ -942,10 +944,9 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
-    elif not isinstance(reply.answer, dict) or result.errors(reply.answer):
-        got = bad_report(run, "回答が結果 JSON の形に合わない")
     else:
-        got = finished(run, reply.answer)
+        report = result.received(reply.answer)
+        got = finished(run, report) if report is not None else bad_report(run, "回答が結果 JSON の形に合わない")
     return got if notice is None else replace(got, warnings=(*got.warnings, notice))
 
 

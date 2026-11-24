@@ -36,13 +36,12 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
     assert got["items"][0]["kind"] == "state" and got["metrics"]["open"] == 0
 
 
-def test_state_command_drops_contract_fields_of_items_saved_before_the_update(gitwork, capsys, last_result, monkeypatch, tmp_path) -> None:
+def test_state_command_drops_contract_fields_of_items_saved_before_the_update(capsys, last_result, monkeypatch, tmp_path) -> None:
     root = tmp_path / "rf3"
     monkeypatch.setattr(workspace, "root_of", lambda *_: root)
-    gitwork.make({"a.py": "a = 1\n"})
     kept = {"id": "I-001", "path": "a.py", "symbol": "f", "title": "t", "status": "open", "tier": "high"}
     store.save(store.path_of(root), {"items": [{**kept, "severity": "high", "acceptance": "全部"}]})
-    code = cli.main(["state", "--pr", "3", "--work", str(gitwork.work)])
+    code = cli.main(["state", "--pr", "3", "--work", str(tmp_path)])
     got = last_result(capsys.readouterr().out)
     assert code == 0 and got["items"][1] == {"kind": "item", **kept}
 

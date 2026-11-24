@@ -1,7 +1,8 @@
 """開発ループの記録の保存先と読み書き。
 
 記録はチェックアウトの保存先（`<git の共通ディレクトリ>/<プラグイン名>/state`）の `loops/<ループの名前>/record.jsonl`
-に、事象を 1 行 1 件で追記する。読み・判断・追記は 1 つの排他（`record.lock`）の下で行い、2 つのセッションが同じ
+に、事象を 1 行 1 件で追記する。どの行も、型と移行の核（`ndf.contracts.internal`）と語彙（`record_decide.check`）を
+読み書きの両方で通す。読み・判断・追記は 1 つの排他（`record.lock`）の下で行い、2 つのセッションが同じ
 状態を読んで食い違う事象を書くことを防ぐ。排他を待つ上限はコントラクトの `sprint-loop-record.lock` の秒である。
 """
 
@@ -18,7 +19,7 @@ from typing import Any
 from filelock import FileLock
 
 from ndf import identity
-from ndf.contracts import limits
+from ndf.contracts import internal, limits
 from ndf.core import durable
 from ndf.domains.loop import record_decide as rec
 
@@ -47,28 +48,32 @@ class LoopStore:
         return self.directory / EVENTS_FILE
 
     def read(self) -> list[dict[str, Any]]:
-        """記録の事象を古い順に読む。記録が無ければ空。壊れた行があれば `StoreError`。"""
+        """記録の事象を古い順に読む（今のバージョンの形）。記録が無ければ空。形の違う行があれば `StoreError`、新しいバージョンの
+        行があれば `InternalError`。"""
         path = self.events_path
         if not path.is_file():
             return []
         out = []
-        for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for no, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
             if not line.strip():
                 continue
             try:
-                ev = json.loads(line)
+                ev = internal.read_line("loop-event", line)
                 rec.check(ev)
-            except (ValueError, KeyError, TypeError) as exc:
+            except (internal.InternalError, rec.RecordError) as exc:
+                if isinstance(exc, internal.InternalError) and exc.kind != "invalid":
+                    raise
                 raise StoreError(f"{path} の {no} 行目を読めない: {exc}") from None
             out.append(ev)
         return out
 
     def append(self, events: Sequence[dict[str, Any]]) -> None:
-        """事象を末尾へ足す（書き換えない）。"""
+        """事象を末尾へ足す（書き換えない）。形の違う事象が 1 件でもあれば、何も書かずに例外を投げる。"""
         if not events:
             return
+        rows = [_row(ev) for ev in events]
         self.directory.mkdir(parents=True, exist_ok=True)
-        text = "".join(json.dumps(ev, ensure_ascii=False, sort_keys=True) + "\n" for ev in events)
+        text = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
         with self.events_path.open("a", encoding="utf-8") as fh:
             fh.write(text)
 
@@ -78,6 +83,12 @@ class LoopStore:
         self.directory.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.directory / LOCK_FILE), timeout=limits.seconds(LOCK_POLICY)):
             yield
+
+
+def _row(ev: dict[str, Any]) -> dict[str, Any]:
+    """事象 1 件の書く形。語彙に無ければ `RecordError`、型に合わなければ `InternalError`。"""
+    rec.check(ev)
+    return internal.write_record("loop-event", ev)
 
 
 def check_name(name: str) -> str:

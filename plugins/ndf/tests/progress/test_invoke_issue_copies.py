@@ -158,3 +158,15 @@ def test_a_stored_result_others_can_replace_does_not_skip_the_run(tmp_path, monk
     got = invoke.invoke(run, tmp_path, work, "approved", runner=never)
     target.chmod(0o700)
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
+
+
+@pytest.mark.parametrize("answer", [None, "approved"])
+def test_a_stored_result_of_a_newer_version_stops_before_its_routes_are_used(tmp_path, monkeypatch, answer):
+    work = tmp_path / "w"
+    stored = _forged(work)
+    stored.write_text(json.dumps({**json.loads(stored.read_text(encoding="utf-8")), "version": 2}), encoding="utf-8")
+    plan = {"name": "design", "steps": [{"id": "a", "run": ["true"]}]}
+    monkeypatch.setattr(route, "templates", lambda: {"design": route.Template("design", "design", "試験のテンプレート", (), plan)})
+    run = invoke.StageRun(invoke.PLAN, "design", {"issues": [1]}, (), "none", "design")
+    got = invoke.invoke(run, tmp_path, work, answer, runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and got.outputs == {}

@@ -82,8 +82,19 @@ jobs:
             done
             exit 0
           fi
-          # 引数のパスのどれかが Pull Request の差分にあれば true
-          touched() { [ -n "$(git diff --name-only HEAD^1 HEAD -- "$@")" ] && echo true || echo false; }
+          # 差分の一覧は 1 回だけ取る。移動は移す前のパスも数える（--no-renames）
+          git diff --name-only --no-renames -z HEAD^1 HEAD > "$RUNNER_TEMP/changed-paths"
+          mapfile -d '' -t changed < "$RUNNER_TEMP/changed-paths"
+          # 引数のパス（ファイルかディレクトリ）のどれかが Pull Request の差分にあれば true
+          touched() {
+            local path want
+            for path in "${changed[@]}"; do
+              for want in "$@"; do
+                case "$path" in "$want" | "$want"/*) echo true; return ;; esac
+              done
+            done
+            echo false
+          }
           # shellcheck disable=SC2086 # NDF_PATHS はパスを空白で区切った一覧
           echo "ndf=$(touched $NDF_PATHS)" >> "$GITHUB_OUTPUT"
           # shellcheck disable=SC2086 # 同上

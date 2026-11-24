@@ -451,7 +451,9 @@ def test_facts_of_reads_the_ndf_settings_and_the_context(repo):
     strategy_fixture.write(repo, "web-trunk")  # trunk はベースブランチと本番ブランチが同じ
     assert command.facts_of(words, {}, repo) == dict.fromkeys(words, False)
     strategy_fixture.write(repo, "web-develop", {"test": {"ci": {"only": True}}})
-    assert command.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+    assert command.facts_of(words, {"design_pr": 3, "product_version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+    # 文脈の形のバージョン（version）だけなら、まだ出していない
+    assert command.facts_of(("release_record",), {"version": 1}, repo) == {"release_record": False}
 
 
 @pytest.mark.parametrize("kind", strategy_fixture.KINDS)
