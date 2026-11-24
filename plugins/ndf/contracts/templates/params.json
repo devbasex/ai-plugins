@@ -22,7 +22,7 @@
     "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
     "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
     "review": {"summary": "レビューの起動の引数の並び。省けば ndf route がブランチの PR の cross-review を組む（起点は base、実装のプランは <remote>/<base>）。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る。実装のプランは後ろに --reviewed-out <ファイル> を足して打ち、レビュー担当が最後に読んだ HEAD を記録する。その後のコミットは、後ろに --base <レビューした HEAD> と別の --state-dir を足して打ち直す", "list": true},
-    "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す", "list": true},
+    "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す。工程から組むときに設定（workflow.launch.rebuild）が無ければ、ndf document-rebuild run を組む（起点は base、リモートは remote、選ぶ文書の種類は工程とモードから決める）", "list": true},
     "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
     "gate": {"summary": "承認ゲートの資料を作って人の回答を待つ起動の引数の並び（承認ゲートの結果 JSON を返す）。既定は工程の外でテンプレートを使うときの値で、ndf progress の工程から呼ぶプランでは承認を工程の承認ゲートが決めるため、待たずに通す起動を入れる", "list": true, "default": ["ndf", "answer", "ask"]}
   }

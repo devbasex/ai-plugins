@@ -46,7 +46,7 @@ from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, merge_pending, model, refactor_values, stages
+from ndf.progress import definition, merge_pending, model, rebuild_values, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -111,16 +111,21 @@ class StageInputInvalid(StageInputError):
 
 
 class TemplateValuesMissing(route.RouteError):
-    """テンプレートの差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所。"""
+    """テンプレートの差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所、`details` は名前 →
+    行へ足すキー（#4337 の決定 7。`rebuild` の既定を決められない理由・設定のキー・値の形）。"""
 
-    def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
+    def __init__(self, template_name: str, missing: Mapping[str, str], details: Optional[Mapping[str, Mapping[str, str]]] = None) -> None:
         listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
         super().__init__(f"テンプレート {template_name} の差し込みの値が無い: {listed}")
         self.missing = dict(missing)
+        given = details if details is not None else {}
+        self.details = {n: dict(given[n]) for n in self.missing if n in given}
 
     @property
     def items(self) -> list[dict[str, str]]:
-        return [{"key": n, "source": s} for n, s in self.missing.items()]
+        return [
+            {"key": n, "source": s, **self.details[n]} if n in self.details else {"key": n, "source": s} for n, s in self.missing.items()
+        ]
 
 
 class KindInputsMissing(route.RouteError):
@@ -261,14 +266,7 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 def read_report(stdout: str) -> Optional[dict[str, Any]]:
     """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
-    lines = [line for line in stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    try:
-        obj = json.loads(lines[-1])
-    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を返さない作業は None で bad_report にする
-        return None
-    return result.received(obj)
+    return result.last_line(stdout)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:
@@ -338,7 +336,7 @@ FILL_SOURCES = {
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
-    "rebuild": ("workflow", "launch", "rebuild"),
+    "rebuild": rebuild_values.SETTING_PATH,
     "refactor": ("workflow", "launch", "refactor"),
 }
 # 設定の `workflow`（launch・stages）の形。読む側が確かめる（#3473）
@@ -482,6 +480,7 @@ def template_values(
     起動の補いと受け入れ条件の検査（`route.launched`。単発の経路と共有）の順に決め、最後に工程から組むときだけの補い
     （`_fill_review`）を通す。リファクタリングの起動（`_fill_refactor`）は、設定が無いときの既定を課題を読む前の欠けの検査
     （`_require_before_issue`）に見せるため、打った場所の値のすぐ後に決める（#3908 の決定 7）。
+    組み直しの起動（`rebuild_values.fill`）は、決めた `base`・`remote` を打った場所の値にも使うため、その前に決める（#4337 の決定 7）。
 
     課題は、課題に依存しない差し込みがそろってから読む（`_require_before_issue`）。試行の始まりにコピーを消すので、先に読むと
     手元の設定が足りずに止まるたび、打ち直しで GitHub の課題と作成者の権限を読み直すためである（PR 4289 の指摘）。
@@ -497,7 +496,10 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
-    values = route.derived_locally(t, values, cwd)
+    filled = rebuild_values.fill(t, values, _issue_numbers(run), run.inputs.get("mode"), cwd, project=project)
+    if filled.undecided is not None:
+        raise TemplateValuesMissing(t.name, {"rebuild": FROM_PROJECT}, {"rebuild": filled.undecided.fields()})
+    values = route.derived_locally(t, {**values, **filled.values}, cwd)
     route.check_acceptance(values)  # 渡した acceptance の誤りは、欠けより先に断る
     values = {**values, **_fill_refactor(t, values, run, work_dir, project=project)}
     _require_before_issue(t.name, names, values)

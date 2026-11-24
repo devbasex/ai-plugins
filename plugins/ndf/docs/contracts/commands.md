@@ -71,6 +71,16 @@
 
 結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`remote`（string）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
+## `ndf document-rebuild`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/document-rebuild.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/document-rebuild.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf document-rebuild run` | `--base`（string・必須）: ベースブランチの名前（スプリントの PR のマージ先）<br>`--remote`（string・必須）: 起点の参照を探すリモートの名前<br>`--issue`（array of integer・必須）: 工程が扱う課題の番号（1 回以上）<br>`--kind`（array of string・必須・値 `design`・`plan`・`manuscript`）: 選ぶ文書の種類（1 回以上）<br>`--state-dir`（string・必須）: 起動指示と worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
+
+結果の `metrics`: `readers`（array of reader）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
+
 ## `ndf gws`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/gws.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/gws.result.schema.json)

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/document-rebuild.args.schema.json",
+  "title": "ndf document-rebuild の引数",
+  "description": "ndf document-rebuild が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチの名前（スプリントの PR のマージ先）"
+        },
+        "--remote": {
+          "type": "string",
+          "description": "起点の参照を探すリモートの名前"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "工程が扱う課題の番号（1 回以上）"
+        },
+        "--kind": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "design",
+              "plan",
+              "manuscript"
+            ]
+          },
+          "description": "選ぶ文書の種類（1 回以上）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "起動指示と worker の結果ファイルの保存先"
+        },
+        "--out": {
+          "type": "string",
+          "description": "結果 JSON を書くファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base",
+        "--remote",
+        "--issue",
+        "--kind",
+        "--state-dir",
+        "--out"
+      ]
+    }
+  ]
+}
