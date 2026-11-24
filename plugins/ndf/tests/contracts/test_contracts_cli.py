@@ -226,7 +226,7 @@ def test_emit_refusals_write_no_file(capsys, tmp_path, status, extra, err):
     dest = tmp_path / "r.json"
     code, out, told = _emit(capsys, status, *extra, "--out", str(dest))
     assert (code, told) == (2, err)
-    assert json.loads(out)["tool"] == "w" and json.loads(out)["cause"]["kind"] == "invalid"
+    assert json.loads(out)["tool"] == "ndf" and json.loads(out)["cause"]["kind"] == "invalid"
     assert not dest.exists()
 
 

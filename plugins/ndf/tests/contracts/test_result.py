@@ -116,7 +116,7 @@ def _instead(obj, code=None):
 
 def test_emit_stops_instead_of_a_wrong_shape(capsys):
     got = _instead(result.result("t", "stopped", "理由なし"))
-    assert got["tool"] == "t" and got["items"] == []
+    assert got["tool"] == "ndf" and got["items"] == []
     assert "形が違う（1 件）" in got["summary"] and "required" in got["summary"]
     assert "結果の形の誤り" in capsys.readouterr().err
 
@@ -135,6 +135,7 @@ SECRET = "sk-test-secret"
         result.result("t", "stopped", SECRET, cause={"kind": SECRET, "detail": SECRET}),
         {**result.result("t", "ok", "済んだ"), SECRET: {"token": SECRET}},
         {**result.result("t", "ok", "済んだ"), "version": SECRET},
+        result.result(SECRET, "stopped", "理由なし"),
         result.result(f"{SECRET} x", "ok", "済んだ", outputs={"pr": SECRET}),
         SECRET,
     ],
@@ -143,13 +144,6 @@ def test_the_result_put_out_instead_and_the_errors_have_no_value_of_the_wrong_on
     assert SECRET not in json.dumps(_instead(obj, 0), ensure_ascii=False)
     err = capsys.readouterr().err
     assert "結果の形の誤り" in err and SECRET not in err
-
-
-@pytest.mark.parametrize(
-    ("tool", "kept"), [("some-tool", "some-tool"), ("T", "ndf"), ("a b", "ndf"), ("t\n", "ndf"), ("", "ndf"), (1, "ndf"), (None, "ndf")]
-)
-def test_the_result_put_out_instead_keeps_only_a_tool_of_the_known_form(tool, kept):
-    assert _instead({**result.result("t", "stopped", "理由なし"), "tool": tool})["tool"] == kept
 
 
 def test_emit_puts_out_an_unchecked_result_when_the_causes_are_unreadable(contracts_copy, capsys):
@@ -161,7 +155,7 @@ def test_emit_puts_out_an_unchecked_result_when_the_causes_are_unreadable(contra
 
 def test_a_result_of_a_newer_version_is_received_as_stopped():
     got = result.received({**result.result("t", "ok", "済んだ"), "version": 2})
-    assert got is not None and got["tool"] == "t" and got["cause"]["kind"] == "precondition" and "プラグインを更新する" in got["summary"]
+    assert got is not None and got["tool"] == "ndf" and got["cause"]["kind"] == "precondition" and "プラグインを更新する" in got["summary"]
     assert result.received(result.result("t", "ok", "済んだ")) == result.result("t", "ok", "済んだ")
     assert result.received({**result.result("t", "ok", "済んだ"), "version": "1"}) is None
 

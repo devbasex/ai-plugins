@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from typing import Any, Optional, TextIO
 
@@ -31,8 +30,6 @@ ANSWERS = "answers"
 SEVERITIES = "severities"
 # エントリポイントの短い名前（next・routes のコマンドの先頭。パスとバージョンを含めない）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
-# 形の確かめを通っていない結果から引き継いでよい `tool` の形
-_SAFE_TOOL = re.compile(r"[a-z][a-z0-9-]*")
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:
@@ -131,13 +128,13 @@ def code_for(obj: Any) -> Optional[int]:
 
 def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。スキーマの誤りの文は結果の値を含む
-    （外へ出す文は `_safe_errors`）。"""
+    （`emit` が外へ出す文は `_safe_errors`）。"""
     return contracts.schema_errors(obj, SCHEMA) + _table_errors(obj, code)
 
 
 def _safe_errors(obj: Any, code: Optional[int]) -> list[str]:
-    """結果の値もキーも含まない誤りの文（重複なし）。スキーマの誤りは、スキーマの場所と規則の名前にする。"""
-    return list(dict.fromkeys([*contracts.broken_rules(obj, SCHEMA), *_table_errors(obj, code)]))
+    """結果の値もキーも含まない誤りの文（誤り 1 件につき 1 つ）。スキーマの誤りは、スキーマの場所と規則の名前にする。"""
+    return contracts.broken_rules(obj, SCHEMA) + _table_errors(obj, code)
 
 
 def _table_errors(obj: Any, code: Optional[int]) -> list[str]:
@@ -179,13 +176,7 @@ def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
     """結果の形のバージョンが新しければ、代わりの `stopped`（precondition）。読めるバージョンなら None。"""
     if not newer(obj):
         return None
-    return stopped(_safe_tool(obj), "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
-
-
-def _safe_tool(obj: Any) -> str:
-    """形の違う結果から引き継ぐ `tool`。決めた形の文字列でなければエントリポイントの名前。"""
-    tool = obj.get("tool") if isinstance(obj, dict) else None
-    return tool if isinstance(tool, str) and _SAFE_TOOL.fullmatch(tool) else ENTRY
+    return stopped(ENTRY, "precondition", "新しいバージョンの結果を古い NDF が受け取った。プラグインを更新する")
 
 
 def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
@@ -209,23 +200,23 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
     1 行で出して invalid の終了コードを返す。"""
     if code is None:
         code = code_for(obj)
-    errs = errors(obj, code)
+    errs = _safe_errors(obj, code)
     if errs or code is None:
-        for line in _safe_errors(obj, code) or ["終了コードを決められない（stopped に cause が無い）"]:
-            print(f"結果の形の誤り: {line}", file=sys.stderr)
-        return _emit_instead(obj, len(errs) or 1, stream)
+        return _emit_instead(errs or ["終了コードを決められない（stopped に cause が無い）"], stream)
     print(dumps_line(obj), file=stream or sys.stdout)
     return code
 
 
-def _emit_instead(obj: Any, count: int, stream: Optional[TextIO]) -> int:
-    """形の違う結果の代わりの `stopped`（invalid）を 1 行で出す。元の結果の値も、値を含みうる誤りの文も入れない。"""
-    detail = "・".join([f"結果 JSON の形が違う（{count} 件）", *contracts.broken_rules(obj, SCHEMA)])
-    tool = _safe_tool(obj)
+def _emit_instead(errs: list[str], stream: Optional[TextIO]) -> int:
+    """形の違う結果の誤りの文（値を含まないもの）を標準エラーへ書き、代わりの `stopped`（invalid）を 1 行で出す。元の結果の値は `tool` も入れない。"""
+    lines = list(dict.fromkeys(errs))
+    for line in lines:
+        print(f"結果の形の誤り: {line}", file=sys.stderr)
+    detail = "・".join([f"結果 JSON の形が違う（{len(errs)} 件）", *lines])
     try:
-        instead, code = stopped(tool, "invalid", detail), causes.exit_code("invalid")
+        instead, code = stopped(ENTRY, "invalid", detail), causes.exit_code("invalid")
     except (contracts.ContractError, ValueError):  # 停止理由の表が読めないか、種類が無い
-        return emit_unchecked(tool, "invalid", detail)
+        return emit_unchecked(ENTRY, "invalid", detail)
     print(dumps_line(instead), file=stream or sys.stdout)
     return code
 

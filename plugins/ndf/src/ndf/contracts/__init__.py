@@ -268,9 +268,9 @@ def _errors(validator: Draft202012Validator, instance: Any) -> list[str]:
 
 
 def broken_rules(instance: Any, rel: str) -> list[str]:
-    """`instance` が破った `contracts/<rel>` のスキーマの場所と規則の名前（重複なし・昇順）。値を含まない。"""
+    """`instance` が破った `contracts/<rel>` のスキーマの場所と規則の名前（誤り 1 件につき 1 つ・昇順）。値を含まない。"""
     found = _schema_validator(rel).iter_errors(instance)
-    return sorted({broken_rule(e) for e in found})
+    return sorted(broken_rule(e) for e in found)
 
 
 def broken_rule(error: ValidationError) -> str:

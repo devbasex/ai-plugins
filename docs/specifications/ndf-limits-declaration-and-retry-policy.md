@@ -140,7 +140,7 @@ graph TD
 | I2 | 上限の設定 | 設定が無い・壊れている・引いた方針の名前が無い・引いた値が方針に無いとき、部品は組み込みの値へ戻らない | `LimitsError`。エントリポイントは終了コード 1 で止まる |
 | I3 | 上限の設定 | テストと実験版を除く `plugins/ndf/` の Python のコードに、上限の数字のリテラルが無い | 構造チェックの `limit-literal` が落とす |
 | I4 | 上限の設定 | コードに書いた方針の名前はすべて設定にある。方針の `read_by` は、実際にその方針を使うモジュールと一致し、使われない方針は無い | 無い名前はコントラクトの検査が、`read_by` の食い違いは `ndf check` の `limit-readers` が落とす |
-| I5 | 上限の設定 | 監視の工程と担当（表に無い担当の既定 `monitor.stall-default` を含む）のすべての組で、無進捗の許容 < 監視の上限。CLI 自身の時間の上限を渡す起動では、監視の上限 < CLI の上限 | 変更の手順（「上限の値を変える・足すとき」の 3・4）で確かめる。NDF 10.x の `limits.py check` は NDF 11.x には無い |
+| I5 | 上限の設定 | 監視の工程と担当（表に無い担当の既定 `monitor.stall-default` を含む）のすべての組で、無進捗の許容 < 監視の上限。CLI 自身の時間の上限を渡す起動では、起動の外から時間を切る値（監視の上限、手で起動するときは `timeout` の値）< CLI の上限 | 変更の手順（「上限の値を変える・足すとき」の 3・4）で確かめる。NDF 10.x の `limits.py check` は NDF 11.x には無い |
 | I6 | 1 回の再試行 | 眠りのループは `lib/waits.py` と、例外リストに理由つきで載った待ちのループだけにある | 構造チェックの `sleep-loop` が落とす |
 | I7 | 1 回の再試行 | `tenacity` を import するのは `lib/waits.py` だけ | 構造チェックの `wrapped` が落とす |
 | I8 | 1 回の再試行 | 同じ原因の鍵の失敗の回数が方針の `same_cause` に達したら、待ちの合計の上限が残っていても打ち直さない。原因の鍵が違う失敗は別に数える | 打ち直さずに `Waited`（`stop` が `same-cause`）を返す |
@@ -339,13 +339,13 @@ contracts/limits/
      "$(jq -s 'map(.seconds) | min' plugins/ndf/contracts/limits/monitor.phase.*.json)"
    ```
 
-4. CLI 自身の時間の上限を渡す起動では、その値が監視の上限より長いこと（I5）を確かめる。どの経路が渡すかは次の表のとおりである
+4. CLI 自身の時間の上限を渡す起動では、その値が、起動の外から時間を切る値（手で起動するときの `timeout` の値を含む）より長いこと（I5）を確かめる。どの経路が渡すかは次の表のとおりである
 
    | 起動の経路 | 起動の外から時間を切るもの | CLI 自身の上限 |
    | --- | --- | --- |
    | NDF のコードが起動する（`ndf.adapters.agents`。cross-review・cross-refactoring） | `watch` が、無進捗の許容と、監視の上限（`monitor.phase.<工程>` か、呼び出し元が渡した秒）で止める | 渡さない。`contracts/domains/runtimes.json` の `review_args` に時間の上限の引数を足すときは、監視の上限より長くする |
    | 工程の Skill を動かす（`ndf.progress.invoke`） | `claude.call_claude` に渡す `monitor.phase.implement` で止める（無進捗は見ない） | 渡さない |
-   | Skill `external-ai` の手順で手で起動する | `timeout` が `monitor.phase.<工程>` + 120 秒で止める（無進捗は見ない） | agy の `--print-timeout` だけ。`monitor.phase.<工程>` + 120 秒を渡す |
+   | Skill `external-ai` の手順で手で起動する | `timeout` が `monitor.phase.<工程>` + 120 秒で止める（無進捗は見ない） | agy の `--print-timeout` だけ。`timeout` の値 + 120 秒（`monitor.phase.<工程>` + 240 秒）を渡す |
 
 5. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す
 
