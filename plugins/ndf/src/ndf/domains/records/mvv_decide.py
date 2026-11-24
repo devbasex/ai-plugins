@@ -13,10 +13,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import facts
 from ndf.domains.records import files
@@ -43,6 +43,15 @@ _H2 = re.compile(r"^##[ \t]+(.+?)[ \t\r]*$", re.MULTILINE)
 _NUMBERED = re.compile(r"^([0-9]+)\.[ \t]", re.MULTILINE)
 # 項目を拾う本文のセクション
 MISSION, VISION, VALUE, REDLINES = "Mission", "Vision", "Value", "必ず人の承認が要る操作"
+# 根拠の記述（`- 根拠: Value 5（MVV バージョン 11）`）の始まりと、その中のバージョンの表記・項目の区切り
+_CITATION = re.compile(r"\s*(?:-\s+)?根拠:(.*)")
+_VERSION_MARK = "（MVV"
+_CITED_VERSION = re.compile(r"（MVV バージョン ([0-9]+)(?:・スプリント MVV [0-9a-f]{8})?）")
+_ITEM_SEPARATOR = re.compile(r" / |・")
+# プロジェクト MVV の項目でないので突き合わせない項目（スプリント MVV の項目と、当たる項目が無いことの明記）
+_SPRINT_ITEM, _NO_ITEM = "スプリント", "根拠なし"
+# 根拠の記述の誤りの種類: 承認済みでないバージョン・そのバージョンに無い項目・バージョンを読めない
+CITATION_VERSION, CITATION_UNKNOWN, CITATION_FORMAT = "version", "unknown", "format"
 
 
 class MvvError(ValueError):
@@ -127,6 +136,16 @@ def status(decl: Optional[Mapping[str, Any]], body_sha256: Optional[str]) -> str
     return State.APPROVED if last["sha256"] == body_sha256 else State.MISMATCH
 
 
+def identity_of(state: str, version: Optional[int] = None, sha256: Optional[str] = None, principles_sha256: str = "") -> str:
+    """読んだ MVV を見分ける値。承認済みなら状態・バージョン・本文の sha256・共通原則の sha256、ほかは状態だけで決まる。
+
+    承認済みでない MVV は共通原則をレビューに使わないので、共通原則（NDF の更新で変わる）が変わっても同じ値にする。
+    """
+    if state != State.APPROVED:
+        return f"{state}:::"
+    return f"{state}:{version}:{sha256}:{principles_sha256}"
+
+
 def approved_form(decl: Optional[Mapping[str, Any]], body: bytes) -> bytes:
     """本文のバイト列を、承認の記録の sha256 と合う改行の形にして返す（合う形が無ければ元のまま）。
 
@@ -169,6 +188,72 @@ def items_of(body: str, principles: str) -> tuple[str, ...]:
     ends = [h.start() for h in heads[1:]] + [len(body)]
     got = [i for h, end in zip(heads, ends, strict=True) for i in _section_items(h.group(1), body[h.end() : end])]
     return tuple(dict.fromkeys([*got, *mm.redlines(principles)]))
+
+
+class Citation(NamedTuple):
+    """根拠の記述を解析した結果。`cited` は引用文とバージョンの表記を除いた項目の部分、`version` は読めなければ None。"""
+
+    cited: str
+    items: tuple[str, ...]
+    version: Optional[int]
+
+
+def _without_quotes(text: str) -> str:
+    """`「` から対応する `」`（無ければ末尾）までを除く。引用文の中の `（` や区切りを項目の区切りと読まないため。"""
+    out, depth = [], 0
+    for ch in text:
+        if ch == "「":
+            depth += 1
+        if depth == 0:
+            out.append(ch)
+        if ch == "」" and depth:
+            depth -= 1
+    return "".join(out)
+
+
+def parse_citation(line: str, decision: bool) -> Optional[Citation]:
+    """1 行を根拠の記述として解析する。根拠の記述でなければ None。
+
+    根拠の記述は `根拠:` で始まる（前の空白と `- ` は除く）行のうち、`MVV` を含むか、決定の見出しの下にある（`decision`）もの。
+    `decision` があるので、バージョンの表記を消した決定も根拠の記述として残り、誤りになる。
+    """
+    found = _CITATION.match(line)
+    if found is None or not (decision or "MVV" in line):
+        return None
+    head, mark, tail = _without_quotes(found.group(1)).partition(_VERSION_MARK)
+    cited = head.strip()
+    # `）` までを形に合わせる（`（MVV バージョン 11x）` を 11 と読まない）。`）` の後ろの文は読まない
+    version = _CITED_VERSION.match(mark + tail)
+    named = (item.strip() for item in _ITEM_SEPARATOR.split(cited))
+    items = tuple(i for i in named if i != _NO_ITEM and not i.startswith(_SPRINT_ITEM))
+    return Citation(cited, items, int(version.group(1)) if version is not None else None)
+
+
+def _citation_error(catalog: Mapping[int, Sequence[str]], path: str, line: int, text: str, decision: bool) -> Optional[dict[str, Any]]:
+    got = parse_citation(text, decision)
+    if got is None:
+        return None
+    unknown: list[str] = []
+    if got.version is None:
+        kind = CITATION_FORMAT
+    elif got.version not in catalog:
+        kind = CITATION_VERSION
+    else:
+        kind = CITATION_UNKNOWN
+        unknown = [i for i in got.items if i not in catalog[got.version]]
+        if not unknown:
+            return None
+    return {"path": path, "line": line, "cited": got.cited, "kind": kind, "version": got.version, "unknown": unknown}
+
+
+def citation_errors(lines: Sequence[tuple[str, int, str, bool]], catalog: Mapping[int, Sequence[str]]) -> list[dict[str, Any]]:
+    """根拠の記述の誤りを、`lines` の順に返す。
+
+    `lines` は（パス・行の番号・1 行の文・決定の見出しの下か）、`catalog` は承認済みのバージョン → その項目。
+    `cited`・`unknown` は文書から取ったままの文字列なので、公開する前に呼び手が秘密の値を伏せる。
+    """
+    found = (_citation_error(catalog, *row) for row in lines)
+    return [error for error in found if error is not None]
 
 
 def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], repo: str) -> Signals:

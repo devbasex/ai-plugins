@@ -10,11 +10,12 @@ from typing import Any
 
 import pytest
 
+from ndf.adapters import git
 from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
-from ._repos import BRANCH, Repos, commit, sh
+from ._repos import BRANCH, Repos, commit, run_cli, sh
 from .test_crossreview_run import IMPACT, PR, Fake, Recording, _run, _state
 
 # 作業場所に作る MVV の本文のパス（このリポジトリ自身の MVV の文書は読まない）
@@ -32,11 +33,12 @@ def mvv_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return state
 
 
-def _approve(tree: Path, version: int, body: str = BODY, approved: str | None = None) -> None:
-    """`tree` のブランチへ、`version` で承認した MVV の設定と本文をコミットする。`approved` は、承認の記録に残す sha256 の元の本文（省けば `body`）。"""
-    sha = hashlib.sha256((approved if approved is not None else body).encode("utf-8")).hexdigest()
-    commit(tree, BODY_AT, body, "MVV の本文")
-    commit(tree, ".ndf/mvv.json", json.dumps({"versions": [{"version": version, "sha256": sha}]}), "MVV の設定")
+def _approve(tree: Path, version: int, text: str = BODY, approved: str | None = None, body_at: str = BODY_AT, **decl: Any) -> None:
+    """`tree` のブランチへ、`version` で承認した MVV の設定（`decl` のキーを足す）と本文 `text`（`body_at` に置く）をコミットする。
+    `approved` は、承認の記録に残す sha256 の元の本文（省けば `text`）。"""
+    sha = hashlib.sha256((approved if approved is not None else text).encode("utf-8")).hexdigest()
+    commit(tree, body_at, text, "MVV の本文")
+    commit(tree, ".ndf/mvv.json", json.dumps({**decl, "versions": [{"version": version, "sha256": sha}]}), "MVV の設定")
 
 
 def _push_base(repos: Repos, version: int = 11, **how: Any) -> None:
@@ -109,7 +111,7 @@ def test_unapproved_mvv_adds_nothing_to_the_prompts(repos: Repos, wt: Path, tmp_
 
 def test_mismatched_mvv_of_the_base_stops_before_any_agent(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """ベースブランチの MVV の本文が承認された内容と違えば、PR が本文を元に戻していても、担当を起動せずに止める。"""
-    _push_base(repos, body=BODY + "勝手に足した\n", approved=BODY)
+    _push_base(repos, text=BODY + "勝手に足した\n", approved=BODY)
     _merge_base_into_pr(repos)
     commit(repos.other, BODY_AT, BODY, "本文を戻す")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
@@ -251,7 +253,7 @@ REDLINE_BODY = BODY + "\n## 必ず人の承認が要る操作\n\n| # | 操作 | 
 @pytest.mark.parametrize("item", ["P1", "C1"])
 def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, item: str, severity: str) -> None:
     """必ず人の承認が要る操作の指摘は、どの重さでも修正担当へ渡さず、収束を止めず、結果と PR の記録に残す。"""
-    _push_base(repos, body=REDLINE_BODY)
+    _push_base(repos, text=REDLINE_BODY)
     held = {"text": "人に聞く操作", "severity": severity, "impact": IMPACT, "mvv": item}
     fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}, held], [held]], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
@@ -269,7 +271,7 @@ def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Pa
 def test_new_mvv_drops_the_judgement_made_under_the_earlier_one(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """新しい MVV が承認された後の起動は、前の MVV で必ず人の承認が要る操作だった指摘の分類を外し、残りを普通の指摘として修正担当へ渡す。
     前の MVV での見送りは「出し直さない」の一覧に載せない。"""
-    _push_base(repos, body=REDLINE_BODY)
+    _push_base(repos, text=REDLINE_BODY)
     raised = [{"text": "人に聞く操作", "severity": "major", "impact": IMPACT, "mvv": "P1"}, {**MAJOR, "mvv": "Value 1"}]
     skip = {"outcome": fin.SKIPPED, "reason": "反しない"}
     fake = Recording(tmp_path / "st", {"codex": [raised, []], "kiro": [[], []]}, decide=lambda fid: skip)
@@ -291,3 +293,162 @@ def test_warnings_about_mvv_items_reach_the_result(repos: Repos, wt: Path, tmp_p
     fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "P9"}], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
     assert code == 0 and [w for w in got["warnings"] if "r1-1" in w and "MVV の項目" in w]
+
+
+# --- 前回のレビューの結果を使えるか -----------------------------------------------------------
+
+
+def _clean(tmp_path: Path) -> Fake:
+    """指摘を 1 件も出さない相手役（1 ラウンドで収束する）。"""
+    return Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+
+
+def _scope_of(capsys, fake: Fake, wt: Path, *extra: str) -> dict[str, Any]:
+    """`review-scope` の結果。`--purpose` と `--base` は後に書いた方が効く。"""
+    argv = ["review-scope", str(wt), "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "main", "--purpose", "check"]
+    code, got = run_cli(capsys, *argv, "--reviewer", "codex", "--reviewer", "kiro", *extra)
+    assert (code, got["status"]) == (0, "ok")
+    return got
+
+
+def _identity(version: int, body: str = BODY) -> str:
+    return f"approved:{version}:{hashlib.sha256(body.encode('utf-8')).hexdigest()}:{hashlib.sha256(mvv.principles()).hexdigest()}"
+
+
+def test_converged_review_runs_again_after_a_new_mvv_is_approved(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """ベースブランチで新しい MVV が承認されたら、PR の head が同じでも前回の収束を返さず、全差分を読み直す。
+    前の MVV で詳細レビューを通ったセクションも通し直す。MVV が変わっていなければ前回の収束を返す。"""
+    design = ("--base", "main", "--purpose", "design")
+    _push_base(repos, 11)
+    _run(capsys, monkeypatch, _clean(tmp_path), wt, *design)
+    same = _clean(tmp_path)
+    _run(capsys, monkeypatch, same, wt, *design)
+    assert same.calls == []
+    _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
+    again = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, again, wt, *design)
+    assert sorted(again.calls) == ["codex", "kiro"]
+    assert "doc.md#セクション B" in _prompt(again, "codex")
+    state = _state(again.state_dir)
+    assert [(r["scope"], r["mvv"]) for r in state["rounds"]] == [
+        ("full", {"id": _identity(11), "mvv_branch": "main"}),
+        ("full", {"id": _identity(12, BODY + "3. **三つ目**\n"), "mvv_branch": "main"}),
+    ]
+    assert state["reviewed_mvv"] == state["rounds"][-1]["mvv"]["id"] and "doc.md#セクション B" in state["reviewed_sections"]
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_changed_common_principles_rerun_only_reviews_with_an_approved_mvv(
+    approved: bool, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """NDF の共通原則が変わったら、承認済みの MVV があるプロジェクトだけ前回の収束を使わない。"""
+    if approved:
+        _push_base(repos)
+    _run(capsys, monkeypatch, _clean(tmp_path), wt, "--base", "main")
+    monkeypatch.setattr(mvv, "principles", lambda: b"# changed\n")
+    again = _clean(tmp_path)
+    _run(capsys, monkeypatch, again, wt, "--base", "main")
+    assert sorted(again.calls) == (["codex", "kiro"] if approved else [])
+
+
+def test_review_without_an_mvv_record_is_reused_only_when_there_is_no_mvv(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """MVV の記録を持たない状態ファイル（前のバージョンの NDF が書いた）の収束は、MVV が無い間は使い、承認されたら使わない。"""
+    _run(capsys, monkeypatch, _clean(tmp_path), wt, "--base", "main")
+    path = store.state_pr(tmp_path / "st", PR).path
+    data = store.read_object(path)
+    del data["rounds"][0]["mvv"], data["reviewed_mvv"]
+    store.write_object(path, data)
+    same = _clean(tmp_path)
+    _run(capsys, monkeypatch, same, wt, "--base", "main")
+    assert same.calls == []
+    _push_base(repos)
+    again = _clean(tmp_path)
+    _run(capsys, monkeypatch, again, wt, "--base", "main")
+    assert sorted(again.calls) == ["codex", "kiro"]
+
+
+@pytest.mark.parametrize("decl", [None, {}, {"body": "docs/x.md"}])
+def test_review_scope_finds_the_same_mvv_offline(
+    decl: dict[str, str] | None, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path
+) -> None:
+    """`review-scope` は、リモートから取得せずスナップショットも書かずに、`run` と同じ MVV かを確かめて範囲を決める
+    （MVV が無い・本文が既定のパスにある・設定の `body` が指すパスにある、のどれでも）。"""
+    if decl is not None:
+        _push_base(repos, body_at=f"{NDF_DIR}/{decl['body']}" if decl else BODY_AT, **decl)
+    fake = _clean(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    head = sh(wt, "rev-parse", "HEAD").strip()
+    written = sorted(mvv_state.rglob("*"))
+    monkeypatch.setattr(git.Git, "fetch", lambda *a: pytest.fail("review-scope がリモートから取得した"))
+    for path in written:
+        if path.is_file():
+            path.unlink()
+    for base in ("main", "origin/main"):
+        got = _scope_of(capsys, fake, wt, "--base", base)
+        assert (got["items"][0]["scope"], got["items"][0]["base"]) == ("since", head)
+        assert "warnings" not in got
+    assert not [p for p in mvv_state.rglob("*") if p.is_file()]
+
+
+def test_review_scope_is_full_after_the_base_has_a_new_mvv(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """取得済みのベースブランチに新しい MVV があれば、`review-scope` は全差分を返し、設計の PR では全セクションを並べる。
+    手元の `main` が古くても、取得済みのリモートの `main` を読む。"""
+    fake = _clean(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main", "--purpose", "design")
+    assert _scope_of(capsys, fake, wt, "--purpose", "design")["items"][0]["scope"] == "since"
+    _push_base(repos)
+    sh(wt, "fetch", "-q", "origin")
+    item = _scope_of(capsys, fake, wt, "--purpose", "design")["items"][0]
+    assert (item["scope"], item["base"]) == ("full", None)
+    assert item["unreviewed"] == ["doc.md#設計", "doc.md#セクション A", "doc.md#セクション B"]
+
+
+def test_review_scope_compares_with_the_fetched_base(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """手元の `main` が古くても、`review-scope` の比較元は `run` と同じ取得済みのリモートの `main` である。"""
+    _push_base(repos)
+    _merge_base_into_pr(repos)
+    fake = _clean(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert sh(wt, "rev-parse", "main").strip() != sh(wt, "rev-parse", "origin/main").strip()
+    assert _scope_of(capsys, fake, wt)["items"][0]["scope"] == "since"
+
+
+def test_review_scope_is_full_when_the_mvv_cannot_be_read(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """ベースの MVV の本文が承認された内容と違えば、前回の範囲を使わずに全差分を返し、理由を注意に載せる。"""
+    _push_base(repos)
+    fake = _clean(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    _push_base(repos, 12, text=BODY + "勝手に足した\n", approved=BODY)
+    sh(wt, "fetch", "-q", "origin")
+    got = _scope_of(capsys, fake, wt)
+    assert got["items"][0]["scope"] == "full"
+    [warning] = got["warnings"]
+    assert "全差分" in warning and "承認の記録と合わない" in warning
+
+
+@pytest.mark.parametrize("form", ["full", "short"])
+def test_review_scope_of_a_commit_base_reads_the_branch_run_recorded(
+    form: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """`--base` がコミットなら、`review-scope` は `run` が記録した PR のマージ先のブランチの MVV を見る。記録が無ければ、
+    渡されたコミットの MVV で代用せずに全差分を返す。"""
+    gathered = _gathered_in_sprint_branch(repos)
+    sh(wt, "fetch", "-q", "origin")
+    base = gathered if form == "full" else gathered[:10]
+    fake = _clean(tmp_path)
+    _run(capsys, monkeypatch, fake, wt, "--base", base)
+    assert _state(fake.state_dir)["rounds"][0]["mvv"] == {"id": _identity(11), "mvv_branch": "main"}
+    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "since"
+    path = store.state_pr(fake.state_dir, PR).path
+    data = store.read_object(path)
+    del data["rounds"][0]["mvv"]["mvv_branch"]
+    store.write_object(path, data)
+    got = _scope_of(capsys, fake, wt, "--base", base)
+    assert got["items"][0]["scope"] == "full" and "ブランチ" in got["warnings"][0]
+    data["rounds"][0]["mvv"]["mvv_branch"] = "main"
+    store.write_object(path, data)
+    _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
+    sh(wt, "fetch", "-q", "origin")
+    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "full"

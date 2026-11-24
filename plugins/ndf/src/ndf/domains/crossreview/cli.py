@@ -45,6 +45,7 @@ from ndf.domains.crossreview.settings import (
     outside_checkout,
     read_settings,
 )
+from ndf.domains.records import mvv
 
 TOOL = cli.tool_of(__name__)
 # 作業の名前（lock の理由に載せる）
@@ -293,6 +294,46 @@ def _every_section(purpose: str) -> bool:
     return purpose == route.templates()["design"].purpose
 
 
+class _LocalBase(NamedTuple):
+    """取得済みの参照だけから決めた、差分の比較元のコミットと、MVV を読む参照（決められなければ None）。"""
+
+    commit: str
+    mvv_ref: Optional[str]
+
+
+def _local_base(g: git.Git, base: str, branch: Optional[str]) -> _LocalBase:
+    """`run` の起動の始めと同じ決め方で、リモートから取得せずに比較元と MVV を読む参照を決める。
+
+    `--base` がブランチなら、取得済みのリモートのブランチの先頭が両方になる。コミット（SHA・タグなど）なら、MVV は PR の
+    マージ先のブランチから読むので、`run` がラウンドの記録に残した `branch` を使う。記録が無ければ MVV を読む参照は決められない。
+    """
+    remote = g.remote()
+    tracking = f"refs/remotes/{remote}"
+    commit = base if git.FULL_SHA.match(base) else None
+    if commit is None:
+        try:
+            tip = g.rev_parse(f"{tracking}/{base.removeprefix(f'{remote}/')}")
+            return _LocalBase(tip, tip)
+        except git.GitError:
+            commit = g.commit_named(base)
+    if commit is None:
+        # リモートに無い手元だけのブランチ。`run` は止まるので、MVV を読む先も無い
+        return _LocalBase(base, None)
+    return _LocalBase(commit, f"{tracking}/{branch}" if branch is not None else None)
+
+
+def _local_mvv(wt: Path, ref: Optional[str]) -> tuple[str, list[str]]:
+    """参照 `ref` の MVV を見分ける値と注意。確かめられなければ `scope_decide.UNKNOWN_MVV`（全差分になる）。"""
+    if ref is None:
+        why = "MVV を読むブランチを決められない（`--base` は取得済みのリモートのブランチか、`run` に渡したコミットにする）"
+    else:
+        try:
+            return mvv.identity_at(wt, ref), []
+        except mvv.MvvError as exc:
+            why = str(exc)
+    return scope_decide.UNKNOWN_MVV, [f"前のラウンドと MVV が同じかを確かめられないので、全差分を範囲にした: {why}"]
+
+
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     data = store.read_state(ref)
@@ -309,12 +350,15 @@ def cmd_scope(args: argparse.Namespace) -> int:
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     g = git.Git(wt)
-    sections = changes.changed_sections(g, args.base, wt)
+    based = _local_base(g, args.base, scope_decide.mvv_branch(data))
+    sections = changes.changed_sections(g, based.commit, wt)
+    now, unsure = _local_mvv(wt, based.mvv_ref)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
-    basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
+    basis = scope_decide.Basis(g.merge_base(based.commit, "HEAD"), resolved.reviewers, resolved.settings.focus, now)
     got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
-    return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
+    summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
+    return _ok(summary, [item], **({"warnings": unsure} if unsure and rounds else {}))
 
 
 def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:

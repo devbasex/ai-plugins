@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from collections.abc import Callable, Mapping
@@ -39,6 +40,9 @@ PRINCIPLES = "data/ndf-common-principles.md"
 SNAPSHOT_DIR = "snapshots"
 # ファイル名に入れる sha256 の先頭の文字数
 _NAME_SHA = 12
+# 設計文書の決定の見出し（`### 決定 4: 題`）のレベルと題の始まり
+_DECISION_LEVEL = 3
+_DECISION = re.compile(r"決定 [0-9]+\b")
 
 
 class Snapshot(NamedTuple):
@@ -60,10 +64,8 @@ class Snapshot(NamedTuple):
 
     @property
     def identity(self) -> str:
-        """どの MVV かを表す識別子。承認済みでなければ状態だけで決まる（共通原則を担当へ渡さないので、NDF が変わっても同じ）。"""
-        if self.state != md.State.APPROVED:
-            return f"{self.state}:::"
-        return f"{self.state}:{self.version}:{self.sha256}:{self.principles_sha256}"
+        """この MVV を見分ける値（`mvv_decide.identity_of`）。"""
+        return md.identity_of(self.state, self.version, self.sha256, self.principles_sha256)
 
 
 def _state_dir() -> Path:
@@ -215,6 +217,11 @@ def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
     return path
 
 
+def mismatch_detail(blobs: Mapping[str, str]) -> str:
+    """本文が承認の後に変わったことを伝える文。`blobs` は `Snapshot.blobs`（最後が本文）。"""
+    return f"ベースの MVV の本文が承認の記録と合わない: {list(blobs)[-1]}"
+
+
 def items(body: str, shared: str) -> tuple[str, ...]:
     """MVV の本文と共通原則に実在する項目（`mvv_decide.items_of`）。コードブロックの中の例は数えない。"""
     return md.items_of(_without_code(body), _without_code(shared))
@@ -234,11 +241,31 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     設定がツリーに無いと確かめられたときだけ `absent`。参照・設定・本文を読めないときと、本文が承認の記録と合わない
     とき（`allow_mismatch` でない）は `MvvError`、スナップショットを書けないときは `OSError`。
     """
+    snap, body, shared = _read(root, ref, allow_mismatch)
+    if snap.state != md.State.APPROVED or snap.sha256 is None:
+        return snap
+    found = items(_text(body, list(snap.blobs)[-1]), shared.decode("utf-8"))
+    where = _snapshot_dir(outside)
+    body_copy = _write_verified(where / f"v{snap.version}-{snap.sha256[:_NAME_SHA]}.md", body, snap.sha256)
+    shared_copy = _write_verified(where / f"principles-{snap.principles_sha256[:_NAME_SHA]}.md", shared, snap.principles_sha256)
+    return snap._replace(path=body_copy, items=found, principles_path=shared_copy)
+
+
+def identity_at(root: Path, ref: str) -> str:
+    """参照 `ref`（取得済みの参照かコミット）の MVV を見分ける値（`Snapshot.identity`）。スナップショットを書かない。
+
+    `current` と同じ読み方で求める。参照・設定・本文を読めないときと、本文が承認の記録と合わないときは `MvvError`。
+    """
+    return _read(root, ref, False)[0].identity
+
+
+def _read(root: Path, ref: str, allow_mismatch: bool) -> tuple[Snapshot, bytes, bytes]:
+    """参照 `ref` の MVV を読んだ結果（スナップショットのパスと項目は空）と、承認済みのときの本文と共通原則（ほかは空）。"""
     g = git_mod.Git(root)
     commit = ref if git_mod.FULL_SHA.match(ref) else _commit_of(g, ref)
     held = _decl_blob(g, commit)
     if held is None:
-        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
+        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None), b"", b""
     usual = md.body_path({})
     # 本文は既定のパスにあると見込んで、設定と同じ 1 回の起動で読む
     raw, guess = _blobs(g, held, f"{commit}:{usual}")
@@ -246,7 +273,7 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
         raise MvvError(f"{commit} の MVV の設定（{decl_path()}）を読めない: {held}")
     decl = decl_from(raw, commit, root)
     if md.status(decl, None) == md.State.UNAPPROVED:
-        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
+        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None), b"", b""
     path = md.body_path(decl)
     body = guess if path == usual and guess is not None else _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
     blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
@@ -254,18 +281,14 @@ def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optiona
     sha = _sha256(body)
     state = md.status(decl, sha)
     if state == md.State.MISMATCH and not allow_mismatch:
-        raise MvvError(f"ベースの MVV の本文が承認の記録と合わない: {path}")
+        raise MvvError(mismatch_detail(blobs))
     if state != md.State.APPROVED:
-        return Snapshot(state, None, None, None, (), blobs, commit, "", None)
+        return Snapshot(state, None, None, None, (), blobs, commit, "", None), b"", b""
     version = md.current_version(decl)
     if version is None:
         raise MvvError(f"{commit} の MVV の設定の最後のバージョンに番号が無い: {decl_path()}")
     shared = principles()
-    found = items(_text(body, path), shared.decode("utf-8"))
-    shared_sha, where = _sha256(shared), _snapshot_dir(outside)
-    body_copy = _write_verified(where / f"v{version}-{sha[:_NAME_SHA]}.md", body, sha)
-    shared_copy = _write_verified(where / f"principles-{shared_sha[:_NAME_SHA]}.md", shared, shared_sha)
-    return Snapshot(state, version, sha, body_copy, found, blobs, commit, shared_sha, shared_copy)
+    return Snapshot(state, version, sha, None, (), blobs, commit, _sha256(shared), None), body, shared
 
 
 def _text(body: bytes, path: str) -> str:
@@ -273,6 +296,22 @@ def _text(body: bytes, path: str) -> str:
         return body.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise MvvError(f"MVV の本文 {path} を UTF-8 で読めない: {exc}") from exc
+
+
+def fenced_lines(text: str) -> frozenset[int]:
+    """Markdown の本文 `text` の、コードブロック（囲みの記号の行とインデントも含む）の行の番号（1 始まり）。"""
+    return frozenset(no for no, inside in enumerate(markdown.code_lines(text), 1) if inside)
+
+
+def decision_lines(text: str) -> frozenset[int]:
+    """Markdown の本文 `text` の、決定の見出し（`### 決定 <数>`）の次の行から次の見出しの前までの行の番号（1 始まり）。"""
+    heads = markdown.atx_headings(text)
+    ends = [h.line for h in heads[1:]] + [len(markdown.code_lines(text))]
+    got: set[int] = set()
+    for head, end in zip(heads, ends, strict=False):
+        if head.level == _DECISION_LEVEL and _DECISION.match(head.title):
+            got.update(range(head.line + 2, end + 1))
+    return frozenset(got)
 
 
 def signals(root: Path, base_branch: str) -> md.Signals:

@@ -80,7 +80,7 @@
 ### Task 6: 承認資料の根拠の行を確かめるコマンド
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/mvv.py`（`cite`）、`plugins/ndf/src/ndf/domains/records/cli.py`（`_mvv_cite`）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`（新設）、`plugins/ndf/src/ndf/adapters/publish.py`（`Publisher._private_refs`）、`plugins/ndf/tests/adapters/test_publish.py`
-- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く。設計の決定 16 の表の `mvv_decide.decision_lines` を読み替える）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
+- **変更内容:** 詳細設計書の「根拠の行の確かめ（`cite`）」。`mvv.decision_lines`（#4076 の計画の U7 が `records/mvv.py` に置く）で 4 要素を作り、`mismatch` の分岐は持たない。結果の `items`・`summary` を組む前に自由記述（`path`・`cited`・`unknown`）を伏せる。`ok` の結果の `summary` と `metrics` を資料に載せる形にする
 - **満たす受け入れ条件:** 7（承認資料の側。`decisions.md` の例は #4076 の実装が直す）
 - **進め方:** 失敗するテスト（バージョン 1 を引いた行で `refused` にならない）→ 通す最小実装 → 整理
 
