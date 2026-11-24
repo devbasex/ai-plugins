@@ -44,7 +44,7 @@ graph TD
 - cross-refactoring の相手役の選び方は変えない（受け入れ条件 13）。`participants.assign` の入出力は今のまま残す
 - 引数と結果 JSON のキーは足さない（要求の「影響」）。状態ファイルのラウンドの記録にはキーを 1 つ足す（移行は無い）
 - 相手役の全員がレビュー結果を返さなかったときは、今と同じく `precondition` で止める（前提 1）。埋めた claude も結果を返さなければ、埋め直さずに `incomplete_reviewers` で止める（前提 2）
-- 学習の設定による起動の制限（`participants.unready`）は保つ。断られた担当は起動しない
+- 学習の設定による起動の制限は保つ。断られた担当は起動しない。cross-review の駆動は、今の `participants.unready` に代えて、断られたランタイムと理由の組を返す `participants.refusals` で確かめる（処理の流れの「始める前の確かめ」）
 - 利用者が `--reviewer` で 1 者だけを名指したときは、起動の前にもラウンドの中でも席を埋めない（前提 4）
 - 実行の担い手は `ndf cross-review run` の 1 プロセスで、相手役の起動は今のとおり並べて行う。埋める起動は起動し直しの後の 1 回だけ足す
 
@@ -54,7 +54,7 @@ graph TD
 graph TD
   A["ndf cross-review run"] --> B["席を決める<br/>participants.review_seats"]
   B -->|"allowed の中の相手役が 2 未満<br/>（名指し 1 者を除く）"| B2["足りない席を claude で埋める<br/>claude / claude-2"]
-  B --> U["始める前の確かめ<br/>participants.unready"]
+  B --> U["始める前の確かめ<br/>participants.refusals"]
   B2 --> U
   U -->|"修正担当か、名指し 1 者が断られた"| X0["precondition（今と同じ）"]
   U -->|"claude 以外の相手役が断られた<br/>（名指し 1 者を除く）"| B3["断られた席を claude で埋める"]
@@ -171,7 +171,7 @@ graph LR
 | 埋めた時点 | `for` | `reason` の形 | 例 |
 | --- | --- | --- | --- |
 | ラウンドの中（起動し直しても結果が無い） | 欠けた相手役 | 結果が無かった理由（駆動が注意に載せる `<状態>: <詳細>` と同じ文字列） | `failed: 終了コード 1` |
-| 始める前の確かめで断られた | 断られた相手役 | `unready: ` に続けて `participants.unready` の理由 | `unready: <participants.unready が返した理由をそのまま>` |
+| 始める前の確かめで断られた | 断られた相手役 | `unready: ` に続けて、`participants.refusals` がそのランタイムについて返した理由 | `unready: <participants.refusals が返した理由をそのまま>` |
 | `allowed` のために足りない（起動の前） | null | `allowed の相手役 <数>（<名前を ・ で並べる>）`。0 のときは括弧を付けない | `allowed の相手役 1（codex）`・`allowed の相手役 0` |
 
 例（kiro が round 1 で読めず、round 2 も埋めた claude で続けたとき）:
@@ -217,9 +217,9 @@ graph LR
 | 2 | 名指しが 1 者で、その相手役 | 埋めない（決定 6） | `precondition`（今と同じ） |
 | 3 | 上のどれでもない claude 以外の相手役（1 つでも全員でも） | 断られた席を、空いている席の名前の claude で埋め、`filled` に `for` と `reason`（`unready: …`）を書く。断られた相手役は起動しない | ラウンドへ進む |
 
-3 行目で相手役が全員断られたときは、席が `claude`・`claude-2` になり、`allowed` が claude だけのときと同じ形で進む。全員が結果を返さないラウンドを止める I3 は、起動した結果の話なので、ここには当てはめない。断られるのは学習の設定の確かめが通らないときで、環境が壊れたことを示すものではないためである。
+3 行目で相手役が全員断られたときは、席が `claude`・`claude-2` になり、`allowed` が claude だけのときと同じ形で進む。全員が結果を返さないラウンドを止める I3 は、起動した結果の話なので、始める前の確かめには当てはめない（埋めた後のラウンドには当てはめる。次の段落）。断られるのは学習の設定の確かめが通らないときで、環境が壊れたことを示すものではないためである。
 
-3 行目で埋めた claude の席は、起動の前に埋めた席として扱う。ラウンドの中で結果を返さなければ、起動し直さずに、次の節の分岐の表の 2 行目で止まる。
+3 行目で埋めた claude の席は、起動の前に埋めた席として扱い、ラウンドの中で結果を返さなくても起動し直さない。その後は次の節の分岐の表を上から当てはめる。全員が結果を返さなければ 1 行目（`precondition`）、ほかの席が結果を返していれば 2 行目（`incomplete_reviewers`）である。たとえば codex と kiro を両方断られて `claude`・`claude-2` で始め、その両方が結果を返さなければ、`precondition` で止まる。
 
 ### 1 ラウンドの流れ
 
@@ -402,7 +402,7 @@ sequenceDiagram
 | 結果の有無の定義 | 相手役が終了コード 0 で終わっても出力に `findings` 配列が無いと、その席を結果が無いとして扱い（起動し直し・埋める）、`{"findings": []}` を返した席は成功として埋めない | 起動の失敗だけを結果が無いとして扱う・空の指摘を失敗と数えると落ちる |
 | 埋めた claude の差分（4 の続き） | round 1 で codex と kiro が両方結果を返し、round 2 で初めて kiro が起動し直しても結果を返さないと、round 2 の codex には前の head からの差分が、埋めた claude には `--base` からの全差分が渡る。round 2 の記録の `reviewers` が `codex`・`claude` で、round 3 は両者に round 2 の head からの差分が渡る | 埋めた claude にそのラウンドの差分をそのまま渡す・埋める前の席を記録すると落ちる |
 | 起動し直しの回数（決定 4） | (a) `allowed` が claude だけで `claude-2` が結果を返さないと、`claude-2` を起動し直さずに `incomplete_reviewers` で止まり、claude の起動はラウンドで席ごとに 1 回である。(b) round 1 で kiro の席を埋め、round 2 で座り続けた claude が結果を返さないと、起動し直さずに `incomplete_reviewers` で止まる | claude の席にも起動し直しを当てると落ちる |
-| 始める前の確かめ | 偽の `participants.unready` で、(a) kiro だけを断ると、kiro を起動せずに席が `codex`・`claude` になり、`filled` の `reason` が `unready: ` で始まる、(b) codex と kiro を両方断ると、席が `claude`・`claude-2` になる、(c) 修正担当の claude を断ると、どの担当も起動せずに `precondition` で止まる、(d) `--reviewer kiro` で kiro を断ると、埋めずに `precondition` で止まる、(e) `allowed` が claude だけで席が `claude`・`claude-2` のとき、学習の設定の確かめは claude について 1 回だけ呼ばれる、(f) 最後のラウンドが同じ head で収束しているとき、kiro を断る設定でも学習の設定を確かめずに前回の結果（`converged`）を返す | 断られた相手役を起動する・断られた席を埋めずに止める・修正担当を断られても進む・同じランタイムを 2 回確かめる・再利用の判定より先に確かめると落ちる |
+| 始める前の確かめ | (a)〜(d) と (f) は、駆動から呼ぶ `participants.refusals` を差し替え、断るランタイムをキー、理由を値とする対応を返させる。(e) は、ランタイムごとに確かめた回数を数えるため、`refusals` の中で呼ぶ `training.ensure` を差し替える。(a) kiro だけを断ると、kiro を起動せずに席が `codex`・`claude` になり、`filled` の `reason` が `unready: ` で始まる、(b) codex と kiro を両方断ると、席が `claude`・`claude-2` になる、(c) 修正担当の claude を断ると、どの担当も起動せずに `precondition` で止まる、(d) `--reviewer kiro` で kiro を断ると、埋めずに `precondition` で止まる、(e) `allowed` が claude だけで席が `claude`・`claude-2` のとき、学習の設定の確かめは claude について 1 回だけ呼ばれる、(f) 最後のラウンドが同じ head で収束しているとき、kiro を断る設定でも学習の設定を確かめずに前回の結果（`converged`）を返す | 断られた相手役を起動する・断られた席を埋めずに止める・修正担当を断られても進む・同じランタイムを 2 回確かめる・再利用の判定より先に確かめると落ちる |
 | `refusals` | 断られたランタイムだけが理由と組で返り、`unready` は同じ入力で今と同じ理由の並びを返す | 返り値に断られなかったランタイムを含める・`unready` の返り値を変えると落ちる |
 | 埋めた claude の差分と記録の範囲 | 「埋めた claude の差分」の実行で、round 2 の記録の `scope` が前の head からの差分のままで、詳細にレビューした節（`store.REVIEWED`）が round 2 で増えない | 埋めた claude のためにラウンドの範囲を全差分へ差し替えると落ちる |
 | 分岐の順の 0 行目 | codex と kiro が両方結果を返すと、埋める処理を呼ばず、claude を相手役として起動しない（9 と同じ実行で縛る） | 結果の無い席が 0 のときに 3 行目へ進むと落ちる |
