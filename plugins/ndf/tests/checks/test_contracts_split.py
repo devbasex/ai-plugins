@@ -331,6 +331,27 @@ def test_nothing_outside_the_plugin_is_read_or_listed(root, rules, break_, paths
     assert "SECRET" not in str(found)
 
 
+def _link_old_file(root: Path, outside: Path) -> None:
+    (root / DIR / "limits.json").symlink_to(outside / "x.json")
+
+
+def _link_directory_of_the_list(root: Path, outside: Path) -> None:
+    shutil.rmtree(root / DIR / "domains")
+    (root / DIR / "domains").symlink_to(outside)
+
+
+@pytest.mark.parametrize("exists", [True, False], ids=["target", "no-target"])
+@pytest.mark.parametrize(("break_", "path"), [(_link_old_file, f"{DIR}/limits.json"), (_link_directory_of_the_list, LIST)])
+def test_the_finding_does_not_tell_whether_a_file_outside_the_plugin_exists(root, rules, break_, path, exists):
+    outside = root.parents[2] / "outside"
+    outside.mkdir()
+    if exists:
+        for name in ("x.json", Path(LIST).name):
+            (outside / name).write_text("{}", encoding="utf-8")
+    break_(root, outside)
+    assert _paths(root, _check(root, rules)) == [path]
+
+
 @pytest.mark.parametrize("linked", [True, False], ids=["linked-outside", "not-utf8"])
 def test_the_cause_of_the_result_is_not_read_from_outside_or_from_broken_bytes(own_contracts, capsys, last_result, linked):
     root = own_contracts

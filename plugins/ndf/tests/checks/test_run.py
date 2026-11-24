@@ -215,3 +215,19 @@ def test_no_rule_reads_contracts_outside_the_plugin(tmp_path, monkeypatch, rel, 
     with pytest.raises(run.Halted, match="プラグインの外を指す") as caught:
         run.check(model.Scope(root.parent, root, "p"), model.load_rules())
     assert "SECRET" not in f"{caught.value} {caught.value.found}"
+
+
+def test_no_rule_reads_contracts_through_a_linked_directory(tmp_path, monkeypatch):
+    # リンクのディレクトリはプラグインの中にあり、その中の表だけがプラグインの外を指す
+    root = tmp_path / "repo" / "p"
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"rows": "SECRET"}', encoding="utf-8")
+    (root / "contracts").mkdir(parents=True)
+    (root / "tables").mkdir()
+    (root / "tables" / "x.json").symlink_to(outside)
+    (root / "contracts" / "domains").symlink_to(root / "tables")
+    monkeypatch.setattr(run, "smell_findings", lambda *args: [])
+    monkeypatch.setattr(run.facts, "check", lambda *args: pytest.fail("事実の表を読んだ"))
+    with pytest.raises(run.Halted, match="ディレクトリのリンク") as caught:
+        run.check(model.Scope(root.parent, root, "p"), model.load_rules())
+    assert "SECRET" not in f"{caught.value} {caught.value.found}"

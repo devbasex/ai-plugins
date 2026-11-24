@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -123,7 +124,8 @@ class _Table:
             yield self.root, str(exc)
             return
         old = self.root.with_name(f"{self.root.name}.json")
-        if old.exists():
+        # リンク先の有無で結果を変えない（プラグインの外のファイルの有無を指摘から判別させない）
+        if os.path.lexists(old):
             yield old, f"分ける前の 1 ファイルが在る（項目は {self.root.name}/ に 1 項目 1 ファイルで置く）"
         # リンクのディレクトリへは、検査がファイルを集めるときも降りない
         if self.root.is_symlink() or not self.root.is_dir():
@@ -153,11 +155,13 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     top = scope.plugin_root / rules["facts"]["contracts_dir"]
     files = _Files(scope.repo_root, scope.plugin_root, {s.path: s for s in scope.sources})
     listed = top / contracts.SPLIT_TABLES
-    # 読めない一覧（プラグインの外を指す・先の無いリンクなど）を、一覧の無いプラグインと取り違えない
-    if not (listed.is_symlink() or listed.exists()):
-        return []
     errors: list[tuple[Path, str]] = []
     try:
+        # 一覧の有無を見る前に、親のディレクトリのリンクの解決先を確かめる（外のファイルの有無で結果を変えない）
+        contracts.require_inside(listed.parent, scope.plugin_root)
+        # 読めない一覧（プラグインの外を指す・先の無いリンクなど）を、一覧の無いプラグインと取り違えない
+        if not os.path.lexists(listed):
+            return []
         for name, source_key in _tables(files.text(listed)).items():
             errors += _Table(top / name, top / contracts.schema_path(name), source_key, files).errors()
     except contracts.ContractError as exc:

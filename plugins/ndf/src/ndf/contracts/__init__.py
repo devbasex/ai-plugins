@@ -87,12 +87,16 @@ def require_inside(path: Path, plugin_root: Path) -> Path:
 
 
 def require_tree_inside(top: Path, plugin_root: Path) -> None:
-    """コントラクトの保存先 `top` とその下のシンボリックリンク（ディレクトリのものを含む）を `require_inside` で確かめる。本文は読まない。"""
+    """コントラクトの保存先 `top` とその下のシンボリックリンクを `require_inside` で確かめる。本文は読まない。
+
+    `top` の下のディレクトリのリンクは、プラグインの中を指しても断る。リンク先へは降りないので、その中にある外を指すリンクを確かめられない。
+    """
     require_inside(top, plugin_root)
     for parent, dirs, files in os.walk(top):
-        for path in (Path(parent, name) for name in sorted(dirs + files)):
-            if path.is_symlink():
-                require_inside(path, plugin_root)
+        for path in (p for p in (Path(parent, name) for name in sorted(dirs + files)) if p.is_symlink()):
+            require_inside(path, plugin_root)
+            if path.is_dir():
+                raise ContractError(f"コントラクト {path} がディレクトリのリンクである")
 
 
 def load_json(rel: str) -> Any:
