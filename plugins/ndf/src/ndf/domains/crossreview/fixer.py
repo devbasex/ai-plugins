@@ -219,7 +219,7 @@ def keep_unsent(run: FixRun, reviewed_head: str, head: str) -> None:
     held = run.data.pop(store.UNSENT_FIX, None)
     base = reviewed_head if reviewed_head == run.sent else held["base"] if _is_head(held, reviewed_head) else None
     if base is not None:
-        run.data[store.UNSENT_FIX] = {"base": base, "head": head}
+        _keep_range(run, base, head)
 
 
 def keep_replayed(run: FixRun, synced: worktree.SyncResult) -> bool:
@@ -245,7 +245,11 @@ def _move(run: FixRun, base: str, synced: worktree.SyncResult) -> None:
     """`base` からの修正担当のコミットの範囲を、載せ直した後の範囲として置く。`base` が PR のブランチに無ければ、載せ直しに
     修正担当の作っていないコミットが混ざるので置かない。"""
     if synced.replayed and _in_remote(run, base, synced.remote):
-        run.data[store.UNSENT_FIX] = {"base": synced.remote, "head": synced.after}
+        _keep_range(run, synced.remote, synced.after)
+
+
+def _keep_range(run: FixRun, base: str, head: str) -> None:
+    run.data[store.UNSENT_FIX] = {"base": base, "head": head}
 
 
 def _is_head(held: Any, head: str) -> bool:
@@ -272,7 +276,7 @@ def hold_back(run: FixRun, round_no: int) -> None:
 
 def send_fix(run: FixRun, round_no: int, head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
     """作業場所の `head` までの修正のコミットを送る（`head` が PR に届いていれば送らない）。送る範囲のすべてを修正担当が作ったと
-    確かめられなければ送らない（利用者が手元に留めたコミットを公開しない）。送らない・送れないときは、このラウンドで直したとした指摘を
+    確かめられなければ送らない（利用者が手元に留めたコミットを公開しない）。確かめた `head` だけを送る。送らない・送れないときは、このラウンドで直したとした指摘を
     未解決へ戻し（PR に届いていない）、注意に載せて False。"""
     if head == run.sent:
         fix["pushed"] = head
@@ -282,7 +286,11 @@ def send_fix(run: FixRun, round_no: int, head: str, fix: dict[str, Any], check_c
         hold_back(run, round_no)
         return False
     commit = fix.get("commit") if check_commit and isinstance(fix.get("commit"), str) else None
-    sent = push.push_fix(run.g, run.cfg.branch, commit)
+    try:
+        sent = push.push_fix(run.g, run.cfg.branch, commit, push.Verified(head, run.sent))
+    except push.ResendFailed as exc:
+        _keep_range(run, exc.moved.base, exc.moved.head)
+        raise
     if sent.ok:
         fix["pushed"] = sent.head
         run.sent = str(sent.head)
@@ -290,7 +298,7 @@ def send_fix(run: FixRun, round_no: int, head: str, fix: dict[str, Any], check_c
         return True
     if sent.rebased and sent.origin_head is not None and sent.head is not None:
         # 載せ直した後に拒まれた。HEAD が変わったので、次の起動が確かめる範囲も移す
-        run.data[store.UNSENT_FIX] = {"base": sent.origin_head, "head": sent.head}
+        _keep_range(run, sent.origin_head, sent.head)
     run.journal.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     run.note(round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")

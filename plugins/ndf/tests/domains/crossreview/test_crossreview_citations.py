@@ -629,8 +629,30 @@ def test_leftover_result_under_a_commit_of_the_user_is_unresolved(repos: Repos, 
     assert not {"memo.md", "fix.txt"} & set(sh(repos.origin, "ls-tree", "--name-only", BRANCH).split())
 
 
-def test_fix_rebased_and_refused_again_is_sent_by_the_next_run(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """載せ直した後の push も拒まれたら、範囲を載せ直した後のコミットへ移し、修正担当がコミットを報告していなくても次の起動が送る。"""
+def test_old_record_that_deferred_everything_does_not_stop_the_start(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """`pushed` を残さない旧いバージョンで全件を見送った記録は送り直しの対象にせず、手元に留めたコミットがあってもレビューへ進む。"""
+    state_dir = tmp_path / "st"
+    ref = store.state_pr(state_dir, PR)
+    head = sh(wt, "rev-parse", "HEAD").strip()
+    fix = {"commit": head, "reported": 1, "fixed": []}
+    row = {"id": "r1-1", "key": "k", "text": "直す", "section": None, "round": 1, "outcome": fin.SKIPPED, "reason": "目的の外"}
+    rounds = [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head, "fix": fix}]
+    store.write_object(ref.path, {"pr": PR, "rounds": rounds, "findings": [row]})
+    commit(wt, "memo.md", "手元だけ\n", "手元に留める")
+    fake = Fixer(state_dir, wt)
+    code, got = _base(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"], sorted(fake.calls)) == (0, "ok", ["codex", "kiro"])
+    assert "memo.md" not in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
+
+
+AGAIN = [(1, "! [rejected] (fetch first)"), (128, "Authentication failed")]
+
+
+@pytest.mark.parametrize(("code", "err"), AGAIN)
+def test_fix_rebased_and_refused_again_is_sent_by_the_next_run(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, code: int, err: str
+) -> None:
+    """載せ直した後の push も拒まれるか失敗したら、範囲を載せ直した後のコミットへ移し、修正担当がコミットを報告していなくても次の起動が送る。"""
 
     class Unreported(Fixer):
         def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
@@ -640,7 +662,8 @@ def test_fix_rebased_and_refused_again_is_sent_by_the_next_run(repos: Repos, wt:
             return done
 
     with monkeypatch.context() as refused:
-        refused.setattr(fixer.push, "_push", lambda *a: git.Completed(1, "", "! [rejected] (fetch first)"))
+        answers = [git.Completed(1, "", "! [rejected] (stale info)"), git.Completed(code, "", err)]
+        refused.setattr(fixer.push, "_push", lambda *a: answers.pop(0))
         fake = Unreported(tmp_path / "st", wt, script={"codex": [[MAJOR]], "kiro": [[]]})
         fake.after_commit = lambda: _push_pr(repos, "other.md", "別の更新")
         _base(capsys, refused, fake, wt)
