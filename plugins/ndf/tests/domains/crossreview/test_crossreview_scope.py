@@ -8,6 +8,7 @@ import pytest
 
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
 from ._repos import Repos, commit, count_git, run_cli, sh
@@ -191,8 +192,6 @@ def test_scope_is_full_when_the_last_head_is_not_an_ancestor(repos: Repos, tmp_p
 
 def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
     """PR 3944 の r1-1: 相手役の一部が読めなかったラウンドの head を起点にせず、全員が読めた最後のラウンドから。無ければ全差分。"""
-    from ndf.domains.crossreview import finish_decide as fin
-
     only_incomplete = {"rounds": [{"round": 1, "head": "h1", "verdict": fin.INCOMPLETE_REVIEWERS}]}
     assert scope_decide.state_scope(only_incomplete, False, 2, []).kind == scope_decide.FULL
     after_full = {
@@ -209,7 +208,7 @@ APPROVED = "approved:11:aaa:ccc"
 
 def _read_with(mvv: object) -> dict:
     """MVV の記録が `mvv`（None なら記録が無い）の 1 ラウンドを持つ状態ファイルの中身。"""
-    row = {"round": 1, "head": "h1", "verdict": "converged"}
+    row = {"round": 1, "head": "h1", "verdict": "converged", fin.MVV_CHECKED: True}
     return {"rounds": [row if mvv is None else {**row, scope_decide.MVV: mvv}]}
 
 
@@ -238,6 +237,18 @@ def _read_with(mvv: object) -> dict:
 def test_previous_round_is_reused_only_under_the_same_mvv(recorded: object, now: str, head: str | None) -> None:
     state = _read_with(recorded)
     assert scope_decide.read_by_all_head(state, scope_decide.Basis(mvv=now)) == head
+
+
+@pytest.mark.parametrize("checked", [True, False, None, "true"])
+def test_round_is_reused_under_an_approved_mvv_only_when_its_citations_were_checked(checked: object) -> None:
+    """承認済みの MVV があれば、根拠の記述を確かめ終えたラウンドだけを使う。MVV が無ければ確かめの成否を見ない。"""
+    for now in (APPROVED, "absent:::"):
+        state = _read_with({"id": now})
+        del state["rounds"][0][fin.MVV_CHECKED]
+        if checked is not None:
+            state["rounds"][0][fin.MVV_CHECKED] = checked
+        reused = now != APPROVED or checked is True
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(mvv=now)) == ("h1" if reused else None)
 
 
 @pytest.mark.parametrize(

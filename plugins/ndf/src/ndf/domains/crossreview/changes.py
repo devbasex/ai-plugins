@@ -1,7 +1,10 @@
-"""変更の読み取り（`drive.py` から分けた。#4076）。
+"""変更の読み取りと、PR が足した MVV の根拠の記述の確かめ（#4076）。
 
 `base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。差分の行の番号は git の
 数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_rows` で対応させる。
+
+根拠の記述は、`- 根拠: Value 5（MVV バージョン 11）` のように、決定がどの MVV の項目に基づくかを書いた行である。`citations` が、
+PR 全体の差分で本文に増えた根拠の記述を、ベースブランチの承認済みの MVV のバージョンと項目に突き合わせる。
 """
 
 from __future__ import annotations
@@ -10,10 +13,11 @@ import ast
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git
-from ndf.domains.crossreview import scope_decide, settings
+from ndf.domains.crossreview import criteria_decide, scope_decide, settings
+from ndf.domains.records import mvv, mvv_decide
 
 
 class Changed(NamedTuple):
@@ -277,3 +281,136 @@ def _markdown_rows(text: str) -> list[tuple[int, str]]:
             out.append((no, row[1]))
             no += row[2].endswith("\n")
     return out
+
+
+# --- 根拠の記述の確かめ -------------------------------------------------------------------------
+
+# コードブロックの囲みの行（引用の `>` とリストの行頭の記号の後ろも）
+_FENCE = re.compile(r"(?:[\s>]|[-*+](?=\s)|[0-9]+[.)](?=\s))*(?:`{3}|~{3})")
+
+
+class CitationRun(Protocol):
+    """確かめが読み書きする、1 回の起動の値（`drive._Run`）。`last_target` は最後のラウンドの確かめる対象、`checked_head` は
+    最後に確かめ終えた head、`citations` は（ベースとの共通の祖先・head・MVV を見分ける値）から、見つけた誤り。"""
+
+    g: git.Git
+    warnings: list[str]
+    snapshot: Optional[mvv.Snapshot]
+    checked_head: Optional[str]
+    last_target: Optional[Target]
+    citations: dict[tuple[str, str, str], list[dict[str, Any]]]
+
+    @property
+    def cfg(self) -> settings.RunConfig: ...
+
+
+class _Row(NamedTuple):
+    """head の文書の根拠の記述 1 行。`line` は git の行の番号、`part` はその中の `\\r` で区切った何番目の行か、`decision` は
+    決定の見出しの下にあるか。"""
+
+    file: DiffFile
+    line: int
+    part: int
+    text: str
+    decision: bool
+
+
+def _cites(text: str) -> bool:
+    """差分の行に、根拠の記述の書き出し（`根拠:`）があるか。"""
+    return any(mvv_decide.parse_citation(line, True) is not None for _, line in _markdown_rows(text))
+
+
+def _fence_changed(file: DiffFile, added: Mapping[int, str]) -> bool:
+    """コードブロックの囲みの行を足したか（`added` は足した行）消したか。"""
+    return any(_FENCE.match(line) for text in (*added.values(), *file.removed) for _, line in _markdown_rows(text))
+
+
+def _numbered(text: str) -> dict[int, list[int]]:
+    """git の行の番号から、その中の行の Markdown の番号の並び。"""
+    out: dict[int, list[int]] = {}
+    for at, (no, _) in enumerate(_markdown_rows(text), 1):
+        out.setdefault(no, []).append(at)
+    return out
+
+
+def _cited_rows(file: DiffFile, text: str) -> list[_Row]:
+    """head の本文 `text` の、コードブロックの外にある根拠の記述。"""
+    code, decisions = mvv.fenced_lines(text), mvv.decision_lines(text)
+    lines = _markdown_rows(text)
+    places = [(no, part, at) for no, parts in _numbered(text).items() for part, at in enumerate(parts)]
+    rows = [_Row(file, no, part, lines[at - 1][1], at in decisions) for no, part, at in places if at not in code]
+    return [row for row in rows if mvv_decide.parse_citation(row.text, row.decision) is not None]
+
+
+def _came_out(g: git.Git, commit: str, rows: Sequence[_Row]) -> list[_Row]:
+    """足していない行 `rows` のうち、ベース（`commit`）ではコードブロックの中にあったもの。ベースの本文は 1 回でまとめて読む。"""
+    paths = {row.file.base_path: None for row in rows if row.file.base_path is not None}
+    if not paths:
+        return []
+    texts = _committed_texts(g, commit, list(paths))
+    held = {path: (_numbered(text), mvv.fenced_lines(text)) for path, text in texts.items()}
+    out = []
+    for row in rows:
+        base_line = _base_lines(row.file.hunks, row.line)
+        if row.file.base_path is None or base_line is None:
+            continue
+        numbers, code = held[row.file.base_path]
+        if numbers[base_line][row.part] in code:
+            out.append(row)
+    return out
+
+
+def _new_rows(g: git.Git, target: Target) -> list[_Row]:
+    """PR で本文に増えた根拠の記述: 足した行と、変わっていないがコードブロックの囲みを変えたので本文に出た行。"""
+    held = target.full_diff.read_bytes().decode("utf-8") if target.full_diff is not None else None
+    diff = held if held is not None else review_diff(g, target.merge_base, target.head)
+    changed_files = _diff_files(diff)
+    # 足した行はファイルごとに 1 回だけ求める（候補の行ごとに全 hunk を走査しない）
+    new = {file.path: file.added for file in changed_files}
+    marked = [(file, _fence_changed(file, new[file.path])) for file in changed_files]
+    files = [(file, fenced) for file, fenced in marked if fenced or any(_cites(text) for text in new[file.path].values())]
+    missing = [file.path for file, _ in files if file.path not in target.docs]
+    texts = {**target.docs, **(_committed_texts(g, target.head, missing) if missing else {})}
+    found = [(row, fenced) for file, fenced in files for row in _cited_rows(file, texts[file.path])]
+    added = [row for row, _ in found if row.line in new[row.file.path]]
+    kept = [row for row, fenced in found if fenced and row.line not in new[row.file.path]]
+    return sorted([*added, *_came_out(g, target.merge_base, kept)], key=lambda row: (row.file.path, row.line, row.part))
+
+
+def _unchecked(run: CitationRun, exc: Exception) -> None:
+    run.warnings.append(f"PR が足した根拠の記述が承認済みの MVV に合うかを確かめられない: {exc}")
+
+
+def citations(run: CitationRun, target: Target) -> Optional[list[dict[str, Any]]]:
+    """PR が足した根拠の記述の誤り（`mvv_decide.citation_errors` の形に、指摘の文 `text` を足したもの）。確かめられなければ
+    注意に載せて None。承認済みの MVV が無ければ、git を起動せずに空。同じ対象と MVV の確かめは、1 回の起動で 1 回だけ打つ。"""
+    snap = criteria_decide.approved(run.snapshot)
+    if snap is None or snap.version is None:
+        return []
+    key = (target.merge_base, target.head, snap.identity)
+    if key not in run.citations:
+        try:
+            rows = _new_rows(run.g, target)
+        except (git.GitError, OSError, UnicodeDecodeError) as exc:
+            return _unchecked(run, exc)
+        lines = [(row.file.path, row.line, row.text, row.decision) for row in rows]
+        errors = mvv_decide.citation_errors(lines, {snap.version: snap.items})
+        run.citations[key] = [{**e, "text": criteria_decide.citation_text(e, snap.version)} for e in errors]
+    run.checked_head = target.head
+    return run.citations[key]
+
+
+def _final_target(run: CitationRun, head: str) -> Target:
+    """終わり方を決める head の確かめる対象。最後のラウンドと同じ head なら、そのラウンドの対象をそのまま使う。"""
+    if run.last_target is not None and run.last_target.head == head:
+        return run.last_target
+    return Target(run.g.merge_base(run.cfg.base_commit, head), head, {}, None)
+
+
+def final_citations(run: CitationRun, head: str) -> Optional[list[dict[str, Any]]]:
+    """終わり方を決める直前の確かめ（`citations` と同じ値）。呼び手は承認済みの MVV があるときだけ呼ぶ。"""
+    try:
+        target = _final_target(run, head)
+    except git.GitError as exc:
+        return _unchecked(run, exc)
+    return citations(run, target)

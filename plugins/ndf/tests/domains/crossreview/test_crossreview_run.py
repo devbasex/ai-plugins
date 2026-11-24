@@ -440,8 +440,8 @@ def _rounds_without_heads(state: dict) -> list[dict]:
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
-        assert r["mvv"] == {"id": "absent:::", "mvv_branch": "main"}
-        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv")}
+        assert (r["mvv"], r["mvv_checked"]) == ({"id": "absent:::", "mvv_branch": "main"}, True)
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         out.append(row)
@@ -477,6 +477,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
         {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
     ]
+    made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False}
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
@@ -486,11 +487,12 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
                 "reason": None,
                 "severity": "major",
                 "text": "セクション B の根拠が無い",
-                "mvv": None,
-                "redline": False,
+                **made_by_reviewer,
             },
-            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義", "mvv": None, "redline": False},
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義", **made_by_reviewer},
         ],
+        "mvv_checked": True,
+        "unsent_citations": 0,
         "pr": PR,
         "rounds": 2,
     }
