@@ -81,7 +81,8 @@ class Fake:
     def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
         self.fix_argv = list(spec.argv)
         prompt = spec.argv[-1]
-        ids = _ID.findall(prompt)
+        # 指摘の行は最初のセクションの前にある（後ろの文書の基準の箇条書きを id と読まない）
+        ids = _ID.findall(prompt.split("\n## ", 1)[0])
         n = self._fixes
         self._fixes += 1
         sha = commit(spec.cwd, f"fix{n}.txt", "\n".join(ids), f"直す {n}")

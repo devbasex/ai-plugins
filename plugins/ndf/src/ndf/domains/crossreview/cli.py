@@ -32,10 +32,10 @@ from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import limits, result
+from ndf.contracts import limits, result, writing
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, round_scope, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -304,7 +304,9 @@ def cmd_scope(args: argparse.Namespace) -> int:
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
     basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
-    got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data)
+    found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
+    got = round_scope.descended(g, found, "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
@@ -531,6 +533,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         return _stop("precondition", str(exc))
     except drive.DriveStopped as exc:
         return _stop(exc.kind, str(exc))
+    except writing.CriteriaBroken as exc:
+        # 文書の基準の本文を読めない（指示を作る前。#4285）
+        return _stop("invalid", str(exc))
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
