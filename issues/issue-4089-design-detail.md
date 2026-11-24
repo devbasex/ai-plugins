@@ -49,7 +49,7 @@ tests/
 
 - `last_context`
   - 事前条件: `tail` は `read_tail` の返した文字列。`anchor` は `ToolUse`・`Reply`・`Tail` のどれか（`Anchor = Union[ToolUse, Reply, Tail]`）
-  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` ならどれも None で `reason` がある。`current` のとき `reason` は None
+  - 事後条件: `state` が `current` か `behind` なら `tokens`・`message_id`・`timestamp`・`entry` がそろう。どれも最後の応答の採用行（最も新しい物理の行）から読んだ値で、`entry` はその行を `json.loads` した object そのものである。`timestamp_seconds(timestamp)` は None でない。`none` なら `reason` があり、`tokens` は None である。`none` の `form`（突き合わせを通った応答の採用行の形が違う）では、採用行の `message.id` が空でない文字列なら `message_id` に、`timestamp` が `timestamp_seconds` で直せる文字列なら `timestamp` に持ち、`entry` は採用行の object を持つ（読めない項目だけ None）。#4068 の `last_turn` が、この 2 つから Stop と応答を結ぶ `ref` を作る。`form` 以外の `none` では 3 つとも None。`current` のとき `reason` は None
   - 副作用: 無し（ファイルを開かない）
 - `timestamp_seconds`
   - 事後条件: 末尾の `Z` を `+00:00` に替えて `datetime.fromisoformat` で解く。時差を持つ時刻なら `.timestamp()` の値、`ValueError` か時差が無い（`tzinfo` が None）なら None。例外を投げない
@@ -62,7 +62,7 @@ tests/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `last_context` | 行が JSON でない | 書きかけの末尾・壊れた行 | `json.loads` の `ValueError` | 最後の応答より新しければ `none`（`partial`）、古ければ無視 | 無し | 次の読み取りで読み直せる |
-| `last_context` | 採用行の `usage` が object でない・`input_tokens` が整数でない・キャッシュの項目が整数以外の値、`message.id` が無い・空・文字列でない、`timestamp` が無い・文字列でない・`timestamp_seconds` が None（解けない・時差が無い） | 記録の形の変化 | 採用行の 1 行だけを確かめる | `current` の候補なら `none`（`form`）、`behind` の候補なら `none`（突き合わせの理由のまま） | 無し | 形が戻るまで量は無し |
+| `last_context` | 採用行の `usage` が object でない・`input_tokens` が整数でない・キャッシュの項目が整数以外の値、`message.id` が無い・空・文字列でない、`timestamp` が無い・文字列でない・`timestamp_seconds` が None（解けない・時差が無い） | 記録の形の変化 | 採用行の 1 行だけを確かめる | `current` の候補なら `none`（`form`。読めた `message_id`・`timestamp` と `entry` は持つ）、`behind` の候補なら `none`（突き合わせの理由のまま。どれも None） | 無し | 形が戻るまで量は無し |
 | `last_context` | 読む範囲に応答が無い | 圧縮の直後・末尾に収まらない大きな行・空の文字列 | 読み終えたとき | `none`（境に会ったなら `compacted`、それ以外は `empty`） | 無し | 次の応答の後に読める |
 | `read_tail` | 読めない | ファイルが無い・権限・入出力の失敗（`OSError`） | `open` | 空を返す | 無し | 次の読み取りで読み直せる |
 
@@ -226,10 +226,13 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 
 状態から `TurnRead` への対応は次のとおりで、ここが対応の唯一の保存先である。
 
-| `last_context` の結果 | `last_turn` の結果 |
+`ref` は、突き合わせを通った応答（`current` か `none` の `form`）の `(message_id, at)` の組で、`at` は `timestamp_seconds(ContextRead.timestamp)` である。`ContextRead.message_id` か `at` のどちらかが None なら `ref` は None。`current` では 2 つとも必ずそろう。照合の結果は `ContextRead.state`・`reason`、ID と時刻は `ContextRead.message_id`・`timestamp` が渡す（`form` でも読めた値を持つ。上の「記録の読み手」の事後条件）。
+
+| `last_context` の結果 | `last_turn` の結果（上から順に当てる） |
 | --- | --- |
-| `current` | 下の表の項目をすべて `ContextRead` とその `entry`（量と同じ採用行）から読む。項目の 1 つでも「欠け・型違い」に当たれば `TurnRead(None, "form")`。そろい、`at > started` なら `TurnRead(None, "newer")`、ほかは `TurnRead(LastTurn, None)`（`form` を `newer` より先に確かめる） |
-| `none`（`form`） | `TurnRead(None, "form")` |
+| `current` か `none`（`form`）で、`ref` が在り `ref.at > started` | `TurnRead(None, "newer")`（遅れて動いた古い hook が次の応答を読んだ。形の違いより先に確かめる。#4068 の詳細設計の `last_turn`） |
+| `none`（`form`） | `TurnRead(None, "form", ref)` |
+| `current` | 下の表の項目をすべて `ContextRead` とその `entry`（量と同じ採用行）から読む。項目の 1 つでも「欠け・型違い」に当たれば `TurnRead(None, "form", ref)`、ほかは `TurnRead(LastTurn, None)` |
 | `behind`・`none`（`unrecorded`・`compacted`・`partial`・`empty`） | `TurnRead(None, "unrecorded")`（一時的） |
 
 `current` のときの `LastTurn` の項目の取り出し元（`u` は `entry["message"]["usage"]`）:

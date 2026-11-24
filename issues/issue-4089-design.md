@@ -67,10 +67,10 @@ flowchart LR
 
 | 項目 | 型 | 意味 |
 | --- | --- | --- |
-| `tokens` | `Optional[int]` | 読んだ応答の文脈の量。`state` が `none` なら None |
-| `message_id` | `Optional[str]` | 読んだ応答の `message.id` |
-| `timestamp` | `Optional[str]` | 読んだ応答の最後の行の `timestamp`（記録のまま。`current`・`behind` なら `timestamp_seconds` で UNIX 秒に直せることを確かめ済み） |
-| `entry` | `Optional[Mapping[str, Any]]` | 採用行を `json.loads` した object（`state` が `none` なら None）。#4068 の `last_turn` が寿命・モデル・キャッシュ・出力の量をこの行から読むために持たせ、記録を読み直させない。比べと hash からは外す（`field(compare=False)`） |
+| `tokens` | `Optional[int]` | 読んだ応答の文脈の量。`state` が `none` なら None（`form` でも None） |
+| `message_id` | `Optional[str]` | 読んだ応答の採用行の `message.id`。`state` が `none` なら None。ただし `form` では、採用行の `message.id` が空でない文字列なら持つ（#4068 が Stop と応答を結ぶ `ref` を作るため） |
+| `timestamp` | `Optional[str]` | 読んだ応答の最後の行の `timestamp`（記録のまま。`current`・`behind` なら `timestamp_seconds` で UNIX 秒に直せることを確かめ済み）。`state` が `none` なら None。ただし `form` では、`timestamp_seconds` で直せる文字列なら持つ（`message_id` と同じ理由） |
+| `entry` | `Optional[Mapping[str, Any]]` | 採用行を `json.loads` した object（`state` が `none` なら None。`form` では採用行の object を持つ）。#4068 の `last_turn` が寿命・モデル・キャッシュ・出力の量をこの行から読むために持たせ、記録を読み直させない。比べと hash からは外す（`field(compare=False)`） |
 | `state` | `str` | `current`（手がかりに合う今の応答か、それより後の応答）・`behind`（今の応答より前の応答）・`none`（量が無い） |
 | `reason` | `Optional[str]` | `state` が `current` でない理由。`unrecorded`（手がかりに合う応答が無い）・`after`（`Tail` で、応答の後に利用者の行がある）・`compacted`（圧縮の境の後に応答が無い）・`partial`（応答より新しい行に、JSON として読めない行がある）・`empty`（末尾に応答が無い）・`form`（突き合わせを通った応答の採用行の形（`usage`・`message.id`・`timestamp`）が違う。突き合わせに外れた応答の形が違うときは、突き合わせの理由のまま `none`） |
 
@@ -255,7 +255,7 @@ flowchart TD
 | 13 | 読み手は渡された文字列だけを使い、ファイルを開かない（guard の 1 回の判定で `read_tail` の呼び出しは 1 回のまま） | 読み手の中で記録を読み直す |
 | 14 | 上限をまたぐ応答 R（前の応答 499,999・R 500,000）: R が未記録の記録で、R の Tool の PreToolUse は `behind` の 499,999 で通す。R が記録された後の R の Tool の PreToolUse は `current` の 500,000 で止める。R の後の応答が未記録の記録で、その応答の Tool の PreToolUse は `behind` の 500,000 で止める | 記録を待つ・未記録の間に止める・次の応答で止め損なう |
 | 15 | `read_tail`: 行の長さ 10 バイトの 3 行（`A…\n`・`B…\n`・`C…\n`）のファイルで、`size` 20（読み始めの直前が改行）は `B…\nC…\n`、`size` 15（行の途中）は `C…\n`、`size` 40（ファイルより大きい）は全体、改行を含まない 30 バイトの 1 行のファイルで `size` 10 は空。窓の先頭の行だけが応答で後を Tool の結果が占める記録で、ラッパーの `Tail` は上限の量を読んで引継ぎを求める | 行頭でも先頭の行を捨てる・切れた行を返す |
-| 16 | 採用行: 同じ `message.id` の 2 行の最後の行に `usage` が無い記録で、`Reply` が文に合えば `none`（`form`）、合わなければ `none`（`unrecorded`）。採用行の `message.id` が無い・数値、`timestamp` が無い・数値・`"yesterday"`（解けない文字列）・`"2026-11-22T12:00:00"`（時差が無い）の記録で、突き合わせを通れば `form`、外れれば突き合わせの理由の `none`。`"2026-11-22T12:00:00.123Z"` は読める。同じ応答の前の行の `usage` だけが壊れた記録は、採用行の量を返す | 前の行の `usage` へ替える・ID や時刻の欠けで `current` を返す |
+| 16 | 採用行: 同じ `message.id` の 2 行の最後の行に `usage` が無い記録で、`Reply` が文に合えば `none`（`form`）で `tokens` は None、`message_id`・`timestamp`・`entry` は採用行の値、合わなければ `none`（`unrecorded`）で 4 つとも None。採用行の `message.id` が無い・数値、`timestamp` が無い・数値・`"yesterday"`（解けない文字列）・`"2026-11-22T12:00:00"`（時差が無い）の記録で、突き合わせを通れば `form`、外れれば突き合わせの理由の `none`。`"2026-11-22T12:00:00.123Z"` は読める。同じ応答の前の行の `usage` だけが壊れた記録は、採用行の量を返す | 前の行の `usage` へ替える・ID や時刻の欠けで `current` を返す・`form` で読めた ID と時刻を捨てる |
 | 17 | 早い終わり: モジュールの `json.loads` を数える差し替え（monkeypatch）で、最も新しい応答の行の前に 100 行の古い会話の行を置いた見本を読む。`Tail` の解釈の回数は最も新しい応答の行までの行数で、古い 100 行を解釈しない。`Reply` は最後の応答のまとまりと、その前の別の応答の行 1 つまで。`ToolUse` は ID が最後の応答にあれば `Reply` と同じ回数で、無ければ古い 100 行のうち ID か `compact_boundary` の文字列を含む行だけを解釈する。`ToolUse("")` は古い行を探さずに `behind`（`unrecorded`） | 全行を解釈する・空の ID がすべての行に当たる |
 
 上限と判断開始の値は #3995 の関数が返す値（既定 500,000・250,000）を使い、境は − 1 と値で確かめる。時間で区切らず、.md の文言を突き合わせない。見本は「測った結果」の実測の記録の形から作る。
