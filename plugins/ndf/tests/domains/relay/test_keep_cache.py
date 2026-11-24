@@ -9,9 +9,11 @@ import json
 
 import pytest
 
+from ndf import identity
+from ndf.contracts import causes
 from ndf.domains.hooks import tables
 from ndf.domains.hooks.tables import TableError
-from ndf.domains.relay import keep_cache
+from ndf.domains.relay import cli, cli_cache, keep_cache, registry
 from ndf.domains.relay.keep_cache import LastTurn, Opening, Ratios, Reply, Step, TurnRead, Usage
 
 T0 = 1_795_000_000.0  # 2026-11-17 頃の UNIX 秒
@@ -400,3 +402,241 @@ def test_revoke_generation_only_for_a_live_reservation():
     for by, sleeps in (("h1", False), ("turn", False), ("contested", True), ("arrival", True)):
         assert not signals.revoke_generation({"generation": Generation(T0, by, "m1", sleeps)._asdict()}, T0 + 1)
     assert not signals.revoke_generation({}, T0 + 1)
+
+
+# --- 集計（`ndf relay cache report`。詳細設計の「集計」、設計書の「テスト設計」の 12・11・8 の行） ---
+
+W1H, W5M, RD, OUT = 2.0, 1.25, 0.1, 5.0
+
+
+def crow(kind, s, wait=T0, sid=SID, ver="2.1.330", **kw):
+    """起床の記録の 1 行（`at` は `T0 + s` 秒の時刻の文字列、`wait_id` は待ちの始まりの応答の時刻）。"""
+    return {"at": stamp(T0 + s), "kind": kind, "launch": LAUNCH, "session_id": sid, "claude_version": ver, "wait_id": wait, **kw}
+
+
+def start(wait=T0, ttl="1h", tokens=100_000, **kw):
+    return crow("wait_start", wait - T0, wait, tokens=tokens, ttl=ttl, model="claude-opus-5-5", n_max=9, **kw)
+
+
+def wake(wid, s, wait=T0, **kw):
+    return crow("wake", s, wait, wake_id=wid, tokens=100_000, age=s - (wait - T0), k=1, n_max=9, spent=1, **kw)
+
+
+def woke(wid, s, wait=T0, hit=True, read=100_000, w1h=0, w5m=0, out=10, priced=True, outcome="woke", ratios=None):
+    ratio = {"w_1h": W1H, "w_5m": W5M, "r": RD, "out": OUT, **(ratios or {})}
+    row = crow("wake_result", s, wait, wake_id=wid, outcome=outcome, hit=hit, tokens=100_000, first_read=read, calls=1)
+    row.update(cache_read=read, output=out, priced=priced, model="claude-opus-5-5", ttl="1h", **ratio)
+    if priced:
+        row.update(cache_write_1h=w1h, cache_write_5m=w5m)
+    return row
+
+
+def end(opened, wait=T0, hit=True, tokens=100_000, ttl="1h", w=W1H, r=RD):
+    """待ちを終えた入力が待ちの始まりから `opened` 秒（Stop はその 60 秒後）。"""
+    return crow(
+        "wait_end",
+        wait - T0 + opened + 60,
+        wait,
+        opened_at=wait + opened,
+        age=1,
+        k=1,
+        hit=hit,
+        cache_read=1,
+        tokens=tokens,
+        ttl=ttl,
+        model="m",
+        w=w,
+        r=r,
+    )
+
+
+def test_report_counts_wakes_by_distinct_wake_id_including_unmatched_and_orphans():
+    rows = [start(), wake("a", 3000), woke("a", 3100), wake("b", 3200), woke("c", 3300)]
+    got = cli_cache.report(rows)
+    assert (got["waits"], got["wakes"], got["unmatched_wakes"], got["orphan_results"]) == (1, 3, 1, 1)
+    # `wake_result` の欠けた `wake` を持つ待ちは費用が分からない
+    assert got["unpriced_waits"] == 1
+
+
+def test_report_prices_wakes_with_the_ratios_written_on_each_row():
+    rows = [
+        start(),
+        wake("a", 1700),
+        woke("a", 1710, read=100_000, w1h=1_000, w5m=400, out=20),
+        wake("b", 3200),
+        woke("b", 3210, read=100_000, w1h=3_000, w5m=0, out=40, ratios={"w_1h": 4.0, "r": 0.5}),
+        wake("c", 3300),
+        woke("c", 3310, hit=False, read=20_000, w1h=80_000, out=10),
+    ]
+    got = cli_cache.report(rows)
+    # d は寿命別の書き込み × 倍率 + 出力 × out（行に書いた倍率。b は書いた時点の 4.0 と 0.5 で出す）
+    ds = sorted([1_000 * W1H + 400 * W5M + 20 * OUT, 3_000 * 4.0 + 40 * OUT, 80_000 * W1H + 10 * OUT])
+    assert got["d_median"] == ds[1]
+    costs = sorted([100_000 * RD + ds[0], 100_000 * 0.5 + 3_000 * 4.0 + 40 * OUT, 20_000 * RD + 80_000 * W1H + 10 * OUT])
+    assert got["wake_cost_median"] == costs[1]
+    ages = got["hit_rate_by_age"]
+    assert ages["30m"] == {"wakes": 1, "hits": 1, "rate": 1.0}
+    assert ages["55m"] == {"wakes": 2, "hits": 1, "rate": 0.5}
+    assert ages["45m"]["rate"] is None and ages["60m+"]["wakes"] == 0
+
+
+def test_report_leaves_unpriced_wakes_out_of_d_and_cost_and_counts_the_wait():
+    rows = [start(), wake("a", 3000), woke("a", 3010, priced=False), end(6500)]
+    got = cli_cache.report(rows)
+    assert got["d_median"] is None and got["wake_cost_median"] is None
+    assert got["unpriced_waits"] == 1 and got["estimated_avoided_rewrites"] == 0
+
+
+def _avoided(*rows):
+    return cli_cache.report([start(), *rows])
+
+
+def test_report_estimates_one_avoided_rewrite_per_wait_after_the_wake_cost():
+    got = _avoided(wake("a", 3000), woke("a", 3010, out=10), wake("b", 5000), woke("b", 5010, out=10), end(6500))
+    assert got["estimated_avoided_rewrites"] == 1
+    assert got["estimated_avoided_tokens"] == 100_000
+    assert got["estimated_avoided_cost"] == pytest.approx((W1H - RD) * 100_000 - 2 * (100_000 * RD + 10 * OUT))
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        # 最後に当たった起床から寿命を越えて当たった（3,000 秒の起床、7,000 秒の入力）
+        [wake("a", 3000), woke("a", 3010), end(7000)],
+        # 待ちを終えた最初の呼び出しが外れた（後の Tool の呼び出しが当たっても数えない）
+        [wake("a", 3000), woke("a", 3010), end(6500, hit=False)],
+        # 待ちの長さは入力の時刻まで（3,590 秒。Stop は 3,650 秒）で寿命を越えない
+        [wake("a", 1500), woke("a", 1510), end(3590)],
+        # 起床 0 回で寿命を越えて自然に当たった
+        [end(6500)],
+        # 当たった起床が無い
+        [wake("a", 3000), woke("a", 3010, hit=False), end(6500)],
+        # `wake` と結べない `wake_result` の当たりは起床に帰せない
+        [woke("a", 3010), end(6500)],
+    ],
+)
+def test_report_does_not_count_rewrites_it_cannot_lay_to_a_wake(rows):
+    assert _avoided(*rows)["estimated_avoided_rewrites"] == 0
+
+
+def test_report_counts_preempted_wakes_at_no_cost_and_keeps_the_wait_priced():
+    got = _avoided(
+        wake("a", 3000), woke("a", 3010, out=10), wake("b", 5000), woke("b", 5010, outcome="preempted", hit=None, read=0, out=0), end(6500)
+    )
+    assert (got["preempted_wakes"], got["unpriced_waits"], got["estimated_avoided_rewrites"]) == (1, 0, 1)
+    assert got["estimated_avoided_cost"] == pytest.approx((W1H - RD) * 100_000 - (100_000 * RD + 10 * OUT))
+    # 割り込みの起床は当たりの率と d に入らない
+    assert sum(b["wakes"] for b in got["hit_rate_by_age"].values()) == 1
+
+
+def test_report_measures_wait_lengths_to_the_opening_input():
+    rows = []
+    for i, opened in enumerate((1000, 2000, 3000, 4000, 5000)):
+        wait = T0 + i * 100_000
+        rows += [start(wait), end(opened, wait)]
+    got = cli_cache.report(rows)
+    assert got["wait_seconds"] == {"p50": 3000.0, "p75": 4000.0, "p90": 4600.0}
+
+
+def test_report_since_drops_waits_started_before_and_voided_waits():
+    later = T0 + 10_000
+    rows = [
+        start(),
+        wake("a", 3000),
+        start(later),
+        wake("b", 13_000, later),
+        woke("b", 13_010, later),
+        woke("x", 20_000, T0 + 7),  # `wait_start` の無い待ち
+        start(T0 + 50_000),
+        crow("wait_void", 50_001, T0 + 50_000, reason="contested"),
+    ]
+    got = cli_cache.report(rows, since=T0 + 5_000)
+    assert (got["waits"], got["wakes"], got["partial_waits"], got["voided_waits"]) == (1, 1, 2, 1)
+
+
+def test_report_counts_waits_stopped_by_the_limit_and_by_unmatched_replies():
+    later = T0 + 10_000
+    rows = [
+        start(),
+        crow("stop_waking", 3000, reason="limit", scope="wait", k=9, n_max=9),
+        start(later),
+        wake("b", 13_000, later),
+        woke("b", 13_010, later, outcome="unknown", hit=None, priced=False),
+        crow("stop_waking", 13_020, later, reason="unmatched", scope="wait", k=1, n_max=9),
+        start(T0 + 20_000),
+        crow("stop_waking", 20_100, T0 + 20_000, reason="miss", scope="session", k=1, n_max=9),
+    ]
+    got = cli_cache.report(rows)
+    assert (got["waits"], got["limit_stopped_waits"], got["unmatched_stopped_waits"]) == (3, 1, 1)
+
+
+def _stops(ver, kind, n, mid=None, **kw):
+    return [crow(kind, 0, None, ver=ver, message_id=mid or f"{ver}-{kind}-{i}", **kw) for i in range(n)]
+
+
+def test_report_lost_ratio_by_version_follows_the_example_in_the_design():
+    v0, v2 = "2.1.330", "2.1.332"
+    rows = [
+        *_stops(v0, "work_stop", 6),
+        *_stops(v0, "work_stop", 1, "m1"),
+        *_stops(v0, "work_stop", 1, "m2"),
+        *_stops(v0, "contest", 1, "m1", works=1),
+        *_stops(v0, "contest", 1, "m2", works=0),
+        *_stops(v0, "contest", 1, "m3", works=0),
+        *_stops(v2, "work_stop", 8),
+        *_stops(v2, "work_stop", 1, "m4"),
+        *_stops(v2, "work_stop", 1, "m5"),
+        *_stops(v2, "contest", 1, "m4", works=1),
+        *_stops(v2, "arrival", 1, "m5", works=1, revoked=True, voided=False),
+        *_stops(v2, "arrival", 1, "m4", works=0, revoked=False, voided=False),
+    ]
+    got = cli_cache.report(rows)["by_version"]
+    assert got[v0] == {
+        "contests": 3,
+        "arrivals": 0,
+        "work_stops": 9,
+        "lost_work_stops": 3,
+        "contested_work_stops": 3,
+        "arrival_work_stops": 0,
+        "lost_ratio": pytest.approx(3 / 9),
+    }
+    assert got[v2] == {
+        "contests": 1,
+        "arrivals": 2,
+        "work_stops": 12,
+        "lost_work_stops": 4,
+        "contested_work_stops": 2,
+        "arrival_work_stops": 2,
+        "lost_ratio": pytest.approx(4 / 12),
+    }
+
+
+def test_report_by_version_names_unknown_versions_and_applies_since_to_each_row():
+    rows = [crow("work_stop", 0, None, ver=None, message_id="m1"), crow("work_stop", 9_000, None, ver=None, message_id="m2")]
+    assert cli_cache.report(rows)["by_version"]["unknown"]["work_stops"] == 2
+    assert cli_cache.report(rows, since=T0 + 5_000)["by_version"]["unknown"]["lost_ratio"] == 0.0
+
+
+def _write_log(directory, rows, extra=()):
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(r) for r in rows] + list(extra)
+    (directory / signals.CACHE_LOG).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_cli_cache_report_reads_every_wrapper_log_and_counts_broken_lines(capsys):
+    root = registry.wrappers_dir(identity.load().state_dir)
+    _write_log(root / "w1", [start(), wake("a", 3000), woke("a", 3010)], ["{broken", "[1]", json.dumps({"kind": "wake", "at": "x"})])
+    _write_log(root / "w2", [*_stops("2.1.330", "work_stop", 2)])
+    assert cli.main(["cache", "report"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["status"] == "ok" and "推定" in out["summary"]
+    m = out["metrics"]
+    assert (m["waits"], m["wakes"], m["skipped"], m["logs"]) == (1, 1, 3, 2)
+    assert m["by_version"]["2.1.330"]["work_stops"] == 2
+    assert cli.main(["cache", "report", "--since", stamp(T0 + 5_000)]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["partial_waits"] == 1
+
+
+def test_cli_cache_report_refuses_a_bad_since(capsys):
+    assert cli.main(["cache", "report", "--since", "昨日"]) == causes.exit_code("invalid")
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["status"] == "stopped"
