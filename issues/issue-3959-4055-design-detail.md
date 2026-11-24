@@ -42,7 +42,7 @@ plugins/ndf/
 │   └── cli.py                                   … --machine・入力の形の確かめ・cite
 ├── src/ndf/progress/gate/checks.py             … MvvFacts.review_holds・check_review_holds・区分ごとの検査・note
 ├── src/ndf/progress/gate/asking.py             … プランの承認資料に「MVV 判定」の節（mvv_lines）
-├── src/ndf/progress/command.py                 … stage_inputs_of（ID から判定のステップの入力。リポジトリを照合する）
+├── src/ndf/progress/stage_inputs.py *          … stage_inputs_of（ID から判定のステップの入力。リポジトリを照合する）
 ├── src/ndf/progress/model.py                   … MVV_SKIP_GATES・hold_checked・mvv_skip・mvv_answer_void（リリース承認ゲートと、保留を確かめていない判定で省かない）
 ├── src/ndf/progress/run.py                     … _running_move・_consume が数えない service:mvv の回答を読まず、それで済んだ承認ゲートを開き直す
 ├── src/ndf/progress/gate/records.py            … approved_head が区分の外の service:mvv の回答を承認にしない
@@ -74,7 +74,7 @@ plugins/ndf/
     └── domains/crossreview/test_crossreview_finish.py
 ```
 
-依存の向き: `records/cli.py` が `progress.command`（文脈を読む）と `records.mvv_gate` を読む。`mvv_gate` は今どおり `progress.gate.checks` と `progress.definition` を読む。`mvv_decide` は git もファイルも読まない純粋な関数だけを持つ。`progress` は `records` を読まない。循環は無い。
+依存の向き: `records/cli.py` が `progress.stage_inputs`（文脈を読む）と `records.mvv_gate` を読む。`mvv_gate` は今どおり `progress.gate.checks` と `progress.definition` を読む。`mvv_decide` は git もファイルも読まない純粋な関数だけを持つ。`progress` は `records` を読まない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -87,11 +87,11 @@ plugins/ndf/
 | `src/ndf/domains/records/mvv_decide.py` | 変更 | MVV の純粋な判定 | — | モジュール | `review_holds`（新設） |
 | `src/ndf/domains/records/mvv_material_decide.py` | 変更 | 判定の材料と出力 | — | モジュール | `gate_outcome`（変更）・`diff_rows`・`unquote_path`・`DiffError`・定数 `STOP_REASONS`（新設） |
 | `contracts/domains/ndf-files.json`・`contracts/schemas/internal/mvv-gate-failure.schema.json`（新設）・`src/ndf/contracts/internal.py` | 変更 | 診断の記録の置き場と行の形 | — | — | 表 ndf-files に `mvv-gate-failures`（保存先 `mvv-state`・`mvv-gate-failures.jsonl`・追跡しない・`ends: kept`）、`internal` の種類 `mvv-gate-failure`（`reading-check` と同じ登録の形） |
-| `src/ndf/domains/records/cli.py` | 変更 | `ndf records` のエントリポイント | `mvv_gate`・`progress.command` | モジュール | `_mvv_gate`（変更）・`_mvv_inputs`・`_env_inputs`・`_mvv_cite`（新設） |
+| `src/ndf/domains/records/cli.py` | 変更 | `ndf records` のエントリポイント | `mvv_gate`・`progress.stage_inputs` | モジュール | `_mvv_gate`（変更）・`_mvv_inputs`・`_env_inputs`・`_mvv_cite`（新設） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | `StageInputErrors`（新設）、モジュール | `validate_stage_input`（入れ子の `context` でなく、入力の object そのものを確かめる）・`stage_input_errors`・`stage_io`（新設） |
 | `src/ndf/progress/invoke.py` | 変更 | 工程から作業を呼ぶ層 | `definition` | モジュール | `resolve_inputs`（取り出した入力を `validate_stage_input` で確かめる） |
 | `contracts/workflow/stage-io.schema.json` | 変更 | 工程の入力と出力の型 | `context.schema.json` | — | `$defs.stage-in` を文脈のスキーマへの参照にし、`context`・`base`・`head` の囲みを外す |
-| `src/ndf/progress/command.py` | 変更 | ステートマシンの操作 | `store`・`invoke` | モジュール | `stage_inputs_of`（新設） |
+| `src/ndf/progress/stage_inputs.py` | 新設 | ステートマシンの ID から判定のステップの入力を組む | `store`・`invoke` | モジュール | `stage_inputs_of`（新設）。`progress/command.py` に置くと、ファイルの行数が `ndf check` の構造の規則の上限（1,000 行）を超えるので、新しいモジュールに置く（実装計画 `issues/issue-3959-plan.md` の「修正対象」） |
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認ゲートの質問と承認資料 | — | モジュール | `mvv_lines`（新設）・`material`（変更） |
 | `src/ndf/adapters/publish.py` | 変更 | 書き先へ出す本文の検査 | `run_log` | `Publisher`（変更） | `Publisher.guarded`（変更。引数 `assume_public: bool = False` を足し、真なら書き先の公開範囲を照会せず公開として伏せる。呼び手は `_mvv_cite` だけ）・`Publisher._private_refs`（変更。秘密を含む参照を照会しない）・`scrub`（変更。秘密と参照の一致範囲の和を 1 回で置き換える） |
 | `src/ndf/adapters/run_log.py` | 変更 | 秘密の伏せ字 | — | — | `secret_spans`（新設。秘密の一致範囲を返し、`redact` もそれで置き換える） |
@@ -560,7 +560,7 @@ PR を読む前の失敗（`gate` が受ける）:
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `stage_inputs_of` | `progress/command.py` | 新設 | `stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]` | ステートマシンの最新の定義から `step_id` のステップを持つ工程を引き、`machine_context` に `invoke.resolve_inputs` を当てた入力を返す。プランが `NDF_STAGE_INPUT` に渡すものと同じ値だけで、文脈のほかのキー（`design_pr` など）は足さない |
+| `stage_inputs_of` | `progress/stage_inputs.py` | 新設 | `stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]` | ステートマシンの最新の定義から `step_id` のステップを持つ工程を引き、`machine_context` に `invoke.resolve_inputs` を当てた入力を返す。プランが `NDF_STAGE_INPUT` に渡すものと同じ値だけで、文脈のほかのキー（`design_pr` など）は足さない |
 | `_mvv_inputs` | `records/cli.py` | 新設 | `_mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 区分ごとに入力を決める（下の表）。決められなければ `_InputError`（`invalid`・`refused`） |
 | `_env_inputs` | `records/cli.py` | 新設 | `_env_inputs(gate: str, inputs: Mapping[str, Any]) -> dict[str, Any]` | `NDF_STAGE_INPUT` の object を、プランが組むのと同じ規則で確かめる。下の手順 |
 | `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ |

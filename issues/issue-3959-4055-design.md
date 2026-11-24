@@ -99,7 +99,7 @@ graph LR
 | 見送りの区分（`crossreview/drive.py`・`journal.py`・`contracts/data/review-criteria.json`・`records/mvv.py`） | 修正担当が見送るときに区分 `defer`（`needs_user`・`filed`・`not_applicable`）を書き、ジャーナルが理由とともに持ち、`record_review` が `mvv-review` の `deferred` の行に書く |
 | cross-review の終わり方（`crossreview/drive.py`・`finish_decide.py`・`cli.py`） | 承認ゲートの判定に要る記録を書けなければ `mvv_record_failed` で止まる。#4076 から移した規則 |
 | 工程の入力のコントラクト（`stage-io.schema.json`・`progress/definition.py`・`progress/invoke.py`） | `stage-in` をプランが渡す平らな形にし、`validate_stage_input` をその形で確かめる。`resolve_inputs` と判定のエントリポイントが同じ関数で確かめる |
-| ステートマシンの文脈の読み手（`progress/command.py`） | ID から、判定のステップを持つ工程の入力をプランと同じ規則で組む |
+| ステートマシンの文脈の読み手（`progress/stage_inputs.py`。新設） | ID から、判定のステップを持つ工程の入力をプランと同じ規則で組む |
 | リリース承認ゲートの省略の止め（`progress/model.py`・`progress/run.py`・`progress/gate/records.py`） | 省いてよい承認ゲートの区分（`MVV_SKIP_GATES`）を設計承認ゲートだけにし、判定の出力によらずリリース承認ゲートを省かない（#4105 まで）。回答の読み口（`_running_move`・`_consume`・`approved_head`）は、区分の外の `service:mvv` の回答と、レビューの保留を確かめた証拠の無い `service:mvv` の回答を数えず人の回答を待つ。古いバージョンの回答で済んだ承認ゲートは、後ろのステップが済んでいなければ開き直す |
 | 手順書（`pace.md`・`approval-request.md`・`agent-layers.md`・`project-mvv.md`） | 進め方によらず判定すること、承認資料が今回の判定の出力から保留と判定を載せること、根拠の行の確かめ、supervisor が設計承認ゲートと手動のリリース承認ゲートの前に `--machine` で打つ手順 |
 
@@ -219,7 +219,7 @@ sequenceDiagram
 graph LR
   PL["プランの判定のステップ"] -->|NDF_STAGE_INPUT| CLI["records/cli.py"]
   SV["supervisor"] -->|--machine| CLI
-  CLI -->|ID| CMD["progress/command.py<br>stage_inputs_of"]
+  CLI -->|ID| CMD["progress/stage_inputs.py<br>stage_inputs_of"]
   CLI -->|NDF_STAGE_INPUT を確かめる| VS["progress/definition.py<br>validate_stage_input（stage-in）"]
   CMD -->|resolve_inputs（progress/invoke.py）| VS
   CLI --> GT["records/mvv_gate.py"]
@@ -327,7 +327,7 @@ graph LR
 - **質問**: #4055（プランの外で判定を打てない）を別の設計・実装にするか、#3959 にまとめるか
 - **選んだ案**: まとめる。#3959 は `normal` でも判定を打つので、supervisor が回すフェーズ（プランのテンプレートが無い工程。進め方を問わない）で判定を打つ場面が今より増える。#4055 のエントリポイントが無いと、#3959 の受け入れ条件 1・3 を supervisor のフェーズで満たせない。どちらも `records/cli.py` の `_mvv_gate` と `mvv_gate.gate` の入力の扱いを変える。#4055 は実装の PR で #3959 と一緒にクローズする
 - 採らなかった案: #4055 を別の設計にする（同じ 2 つの関数を 2 つの PR で順に変え、片方の PR の間は `normal` の判定を supervisor のフェーズで打てない）
-- **代償**: #3959 の実装の PR が大きくなる（エントリポイントの変更は `cli.py` と `command.py` の数十行）
+- **代償**: #3959 の実装の PR が大きくなる（エントリポイントの変更は `cli.py` と新設の `progress/stage_inputs.py` の数十行）
 - 根拠: Value 11 / Value 5（MVV バージョン 11）
 
 ### 決定 7: `fast`・`auto` でレッドラインが残る PR が省かれる期間を短くするため、この Issue の実装をほかの課題を待たずに正式版の PATCH で出す
@@ -492,8 +492,8 @@ graph LR
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3959 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/adapters/publish.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/mvv-gate-failure.schema.json`、`plugins/ndf/src/ndf/contracts/internal.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/progress/test_command_mvv_inputs.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/gate/test_gate_after_approval.py`、`plugins/ndf/tests/adapters/test_publish.py` |
-| #4055 | 統合する | #3959 | 上と同じ（`records/cli.py`・`progress/command.py`） |
+| #3959 | 実装する | — | `plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/records/mvv.py`、`plugins/ndf/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/progress/gate/checks.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`（新設）、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/adapters/publish.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/contracts/workflow/stage-io.schema.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/mvv-gate-failure.schema.json`、`plugins/ndf/src/ndf/contracts/internal.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/project-mvv.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv_review_holds.py`、`plugins/ndf/tests/domains/records/test_mvv_cite.py`、`plugins/ndf/tests/domains/records/test_mvv_record_review.py`、`plugins/ndf/tests/progress/gate/test_gate_checks.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/progress/test_command_mvv_inputs.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/gate/test_gate_after_approval.py`、`plugins/ndf/tests/adapters/test_publish.py` |
+| #4055 | 統合する | #3959 | 上と同じ（`records/cli.py`・`progress/stage_inputs.py`） |
 
 ## 未確認のまま残ること
 

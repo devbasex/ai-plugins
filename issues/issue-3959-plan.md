@@ -28,7 +28,7 @@
 | `plugins/ndf/contracts/schemas/internal/mvv-validation.schema.json` | 種類 `mvv-review` の行に任意の欄 `defer`（`needs_user`・`filed`・`not_applicable`） |
 | `plugins/ndf/src/ndf/progress/definition.py` | `validate_stage_input` が入力の object そのものを確かめる・`stage_input_errors`・`stage_io`（新設） |
 | `plugins/ndf/src/ndf/progress/invoke.py` | `resolve_inputs` が `validate_stage_input` で確かめる |
-| `plugins/ndf/src/ndf/progress/stage_inputs.py`（新設） | `stage_inputs_of`（新設）。詳細設計書の保存先は `progress/command.py` だが、`command.py` は計画 p9 の lsplit のスプリントブランチで 971 行あり、足すと `ndf check` の構造の規則（1,000 行）を超えるので新しいモジュールに置く |
+| `plugins/ndf/src/ndf/progress/stage_inputs.py`（新設） | `stage_inputs_of`（新設）。`progress/command.py` は計画 p9 の lsplit のスプリントブランチで 971 行あり、足すと `ndf check` の構造の規則（1,000 行）を超えるので、新しいモジュールに置く（詳細設計書の関数表も同じ保存先） |
 | `plugins/ndf/src/ndf/progress/model.py` | `MVV_SKIP_GATES`・`MVV_GATE_STEPS`・`hold_checked`・`mvv_answer_void`（新設）・`mvv_skip` |
 | `plugins/ndf/src/ndf/progress/run.py` | `_running_move`・`_consume`（区分の外の `service:mvv` の回答を数えない） |
 | `plugins/ndf/src/ndf/progress/gate/records.py` | `approved_head`（区分の外の `service:mvv` の回答を承認にしない） |
