@@ -298,6 +298,14 @@ def test_verify_keeps_comparing_after_an_unreachable_url(world: World) -> None:
     assert (got.samples, got.calls, len(world.fetched)) == (1, {"github": 2}, 2)
 
 
+def _change_policy(world: World, **policy: Any) -> None:
+    """取得の上限の設定の値を替える（None の値は外す）。"""
+    path = world.root / "contracts" / limits.NDF_SETTINGS / f"{verify.FETCH_POLICY}.json"
+    row = {**json.loads(path.read_text(encoding="utf-8")), **policy}
+    path.write_text(json.dumps({key: value for key, value in row.items() if value is not None}), encoding="utf-8")
+    contracts.use_dir(world.root / "contracts")
+
+
 @pytest.mark.parametrize(
     ("urls", "peer", "policy", "ok"),
     [
@@ -314,9 +322,7 @@ def test_verify_keeps_comparing_after_an_unreachable_url(world: World) -> None:
 def test_verify_stops_before_the_calls_exceed_the_limit(
     world: World, urls: int, peer: str | None, policy: dict[str, Any], ok: bool
 ) -> None:
-    path = world.root / "contracts" / limits.NDF_SETTINGS / f"{verify.FETCH_POLICY}.json"
-    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **policy}), encoding="utf-8")
-    contracts.use_dir(world.root / "contracts")
+    _change_policy(world, **policy)
     for i in range(urls):
         world.define(f"s{i}", url=f"{URL}/{i}")
         world.documents[f"{URL}/{i}"] = document()
@@ -327,6 +333,56 @@ def test_verify_stops_before_the_calls_exceed_the_limit(
         verify.verify(peer, world.fetch)
     assert caught.value.kind == "precondition"
     assert world.fetched == []
+
+
+@pytest.mark.parametrize(
+    ("defined", "peer", "policy", "over"),
+    [
+        # 超えた相手だけを、相手の名前の昇順で並べる
+        (
+            [("z", "1"), ("z", "2"), ("b", "3"), ("a", "4")],
+            None,
+            {"peers": {"z": 1, "b": 1}},
+            "a は最悪 1 回（上限 なし）、z は最悪 2 回（上限 1）",
+        ),
+        # 打ち直しの回数を、相手の URL の数に掛ける
+        ([("b", "1"), ("b", "2"), ("a", "3")], None, {"retries": 2, "peers": {"a": 3, "b": 5}}, "b は最悪 6 回（上限 5）"),
+        # 同じ URL を指す見本は 1 回に数える
+        ([("a", "1"), ("a", "1"), ("a", "2"), ("a", "2")], None, {"peers": {"a": 2}}, None),
+        ([("a", "1"), ("a", "1"), ("a", "2"), ("a", "2")], None, {"peers": {"a": 1}}, "a は最悪 2 回（上限 1）"),
+        # 2 つの相手が同じ URL を指せば、どちらにも数える
+        ([("a", "1"), ("b", "1")], None, {"peers": {"a": 0, "b": 0}}, "a は最悪 1 回（上限 0）、b は最悪 1 回（上限 0）"),
+        # 相手を選べば、ほかの相手は見ない
+        ([("a", "1"), ("b", "2")], "a", {"peers": {"a": 1}}, None),
+        ([("a", "1"), ("b", "2")], "b", {"peers": {"a": 1}}, "b は最悪 1 回（上限 なし）"),
+        # 選んだ相手の見本が無くても、上限の有無を確かめる
+        ([("a", "1")], "c", {"peers": {"a": 1}}, "c は最悪 0 回（上限 なし）"),
+        ([("a", "1")], "c", {"peers": {"a": 1, "c": 0}}, None),
+    ],
+)
+def test_verify_counts_the_worst_calls_of_each_peer(
+    world: World, defined: list[tuple[str, str]], peer: str | None, policy: dict[str, Any], over: str | None
+) -> None:
+    _change_policy(world, **policy)
+    for i, (owner, url) in enumerate(defined):
+        world.define(f"s{i}", peer=owner, url=f"{URL}/{url}")
+        world.documents[f"{URL}/{url}"] = document()
+    if over is None:
+        assert verify.verify(peer, world.fetch).outcomes == []
+        return
+    with pytest.raises(verify.VerifyError) as caught:
+        verify.verify(peer, world.fetch)
+    expected = f"記述の取得の要求の数が上限の設定 {verify.FETCH_POLICY} に収まらない: {over}"
+    assert (caught.value.kind, str(caught.value)) == ("precondition", expected)
+    assert world.fetched == []
+
+
+@pytest.mark.parametrize("key", ["peers", "retries"])
+def test_verify_refuses_a_policy_without_the_call_limits(world: World, key: str) -> None:
+    """見本の定義が 0 件でも、上限の設定に値が無ければ止める。"""
+    _change_policy(world, **{key: None})
+    with pytest.raises(limits.LimitsError, match=f"{verify.FETCH_POLICY} に {key} が無い"):
+        verify.verify(fetch=world.fetch)
 
 
 @pytest.mark.parametrize(
