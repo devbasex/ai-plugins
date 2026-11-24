@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 
@@ -93,13 +93,22 @@ class Completed(NamedTuple):
 Runner = Callable[[list[str], Optional[Path]], Completed]
 
 
-def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
-    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
+def _start(args: list[str], cwd: Optional[Path], text: bool) -> subprocess.CompletedProcess[Any]:
+    """git を 1 回起動する。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False, env={**os.environ, **NO_PROMPT})
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=text, check=False, env={**os.environ, **NO_PROMPT})
     except OSError as exc:
         raise GitError(f"git を起動できない: {exc}") from None
+
+
+def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
+    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
+    proc = _start(args, cwd, text=True)
     return Completed(proc.returncode, proc.stdout, proc.stderr)
+
+
+def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
+    return GitError(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}")
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -202,7 +211,14 @@ class Git:
         """git を起動して標準出力を返す。終了コードが 0 でなければ `GitError`。"""
         done = self.attempt(*args)
         if done.returncode != 0:
-            raise GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
+            raise _failed(args, done.returncode, done.stderr)
+        return done.stdout
+
+    def run_bytes(self, *args: str) -> bytes:
+        """git を起動して標準出力を元のバイト列のまま返す（改行を変えない）。終了コードが 0 でなければ `GitError`。"""
+        done = _start(list(args), self.cwd, text=False)
+        if done.returncode != 0:
+            raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
     def rev_parse(self, ref: str) -> str:

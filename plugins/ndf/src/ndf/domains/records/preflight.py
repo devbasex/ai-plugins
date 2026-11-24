@@ -58,17 +58,17 @@ def ndf_settings_checked(root: Path) -> pd.Checked:
     return pd.Checked(pd.NDF_SETTINGS, result.result(TOOL, result.OK, "プロジェクトの設定を読めた", warnings=warnings))
 
 
-def sha256_of(path: Path) -> Optional[str]:
+def sha256_of(path: Path, decl: Mapping[str, Any]) -> Optional[str]:
+    """本文の sha256（改行は承認の記録と合う形にそろえる。`mvv_decide.approved_form`）。"""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return hashlib.sha256(md.approved_form(decl, path.read_bytes())).hexdigest()
     except OSError:  # noqa: NDF401 ファイル: 読めない本文は sha256 の無い unreadable の状態にする
         return None
 
 
 def mvv_body(root: Path, decl: Mapping[str, Any]) -> Path:
-    """プロジェクト MVV の本文のパス（設定の `body`、無ければ表 ndf-files の mvv-body。設定と同じ保存先）。"""
-    body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
-    return files.path(root, "mvv").parent / body
+    """プロジェクト MVV の本文のパス（解き方は `mvv_decide.body_path`。パスが不正なら `MvvError`）。"""
+    return root / md.body_path(decl)
 
 
 def mvv_state(root: Path) -> str:
@@ -80,7 +80,23 @@ def mvv_state(root: Path) -> str:
         decl = jsonfile.read_object(path)
     except jsonfile.JsonFileError:
         return md.State.UNREADABLE
-    return md.status(decl, sha256_of(mvv_body(root, decl)))
+    if md.status(decl, None) == md.State.UNAPPROVED:
+        return md.State.UNAPPROVED
+    try:
+        body = mvv_body(root, decl)
+    except md.MvvError:
+        return md.State.UNREADABLE
+    return md.status(decl, sha256_of(body, decl))
+
+
+def _unusable(root: Path, decl: Optional[Mapping[str, Any]], state: str) -> str:
+    """手順 0 を止める理由。設定の `body` が不正なパスなら、設定の直し方が分かる文にする。"""
+    if decl is not None and state == md.State.UNREADABLE:
+        try:
+            md.body_path(decl)
+        except md.MvvError as exc:
+            return f"{files.relpath('mvv')}: {exc}"
+    return f"プロジェクト MVV の状態が {state}（本文を承認し直すか、承認した本文へ戻す）"
 
 
 def mvv_checked(root: Path) -> pd.Checked:
@@ -95,8 +111,7 @@ def mvv_checked(root: Path) -> pd.Checked:
         return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", legacy))
     state = mvv_state(root)
     if state in (md.State.MISMATCH, md.State.UNREADABLE):
-        detail = f"プロジェクト MVV の状態が {state}（本文を承認し直すか、承認した本文へ戻す）"
-        return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", detail))
+        return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", _unusable(root, decl, state)))
     return pd.Checked(pd.MVV, result.result(TOOL, result.OK, f"プロジェクト MVV: {state}"))
 
 

@@ -29,8 +29,7 @@ from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, may_skip, note, refusals
 from ndf.progress.model import MVV_PACES
 
-# 共通原則の本文（コントラクトの保存先からの相対）と、判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
-PRINCIPLES = "data/ndf-common-principles.md"
+# 判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 VERDICT_SCHEMA = "mvv-verdict"
 # 判定の 1 回の呼び出しの上限
 JUDGE_LIMIT = "supervise.judge-step"
@@ -42,11 +41,6 @@ Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
 
 class GateError(Exception):
     """判定を打てない（PR が無い・LLM が回答しない）。承認ゲートは省かずに人へ問う。"""
-
-
-def principles() -> str:
-    """共通原則の本文。"""
-    return (contracts.contracts_dir() / PRINCIPLES).read_text(encoding="utf-8")
 
 
 def boundary_paths(root: Path) -> tuple[str, ...]:
@@ -71,7 +65,7 @@ def base_facts(root: Path, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
     last = md.latest(decl)
     approved = last["sha256"] if last is not None else None
     body = preflight.mvv_body(root, decl)
-    held = MvvFacts(state, preflight.sha256_of(body), approved, ref, str(inputs.get("mode")), boundary_paths=paths)
+    held = MvvFacts(state, preflight.sha256_of(body, decl), approved, ref, str(inputs.get("mode")), boundary_paths=paths)
     return held, body.read_text(encoding="utf-8")
 
 
@@ -122,7 +116,7 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     why = refusals(facts) or mm.incomplete_patches(rows)
     if why:
         return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why, pull.head_sha))
-    shared = principles()
+    shared = mvv.principles().decode("utf-8")
     materials = {
         "NDF の共通原則": shared,
         "プロジェクト MVV": project,

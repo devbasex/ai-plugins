@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
+import tempfile
 from collections.abc import Callable, Mapping
 from functools import cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
-from ndf import identity
+from ndf import contracts, identity
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
 from ndf.contracts import facts, limits
@@ -21,6 +24,7 @@ from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.domains.records import usage_decide as ud
+from ndf.domains.records.mvv_decide import MvvError
 from ndf.domains.settings import renames
 from ndf.progress.gate.checks import Changed, MvvFacts
 
@@ -28,8 +32,30 @@ from ndf.progress.gate.checks import Changed, MvvFacts
 Judge = Callable[[Mapping[str, str]], tuple[str, Mapping[str, Any]]]
 
 
-class MvvError(ValueError):
-    """設定が読めない・メインディレクトリを解けない。"""
+# 共通原則の本文（コントラクトの保存先からの相対）
+PRINCIPLES = "data/ndf-common-principles.md"
+# 本文と共通原則のスナップショットのディレクトリ（`_state_dir()` の下）
+SNAPSHOT_DIR = "snapshots"
+# ファイル名に入れる sha256 の先頭の文字数
+_NAME_SHA = 12
+
+
+class Snapshot(NamedTuple):
+    """コミット `commit` の MVV を読んだ結果。
+
+    承認済みのときだけ `version`・`sha256`・`path`（本文のスナップショット）・`items`・`principles_*` を持つ。`blobs` は
+    読んだ設定と本文のパス → Git の blob の id（設定が無ければ空）。
+    """
+
+    state: str
+    version: Optional[int]
+    sha256: Optional[str]
+    path: Optional[Path]
+    items: tuple[str, ...]
+    blobs: Mapping[str, str]
+    commit: str
+    principles_sha256: str
+    principles_path: Optional[Path]
 
 
 def _state_dir() -> Path:
@@ -66,15 +92,19 @@ def decl_path() -> str:
 
 def decl_at(root: Path, ref: str) -> dict[str, Any]:
     """参照（`<リモート名>/<開発の起点>` など）にある MVV の設定を読む。読めなければ `MvvError`。"""
+    return decl_from(_blob(git_mod.Git(root), f"{ref}:{decl_path()}", f"{ref} の MVV の設定"), ref, root)
+
+
+def decl_from(raw: bytes, ref: str, root: Path) -> dict[str, Any]:
+    """参照 `ref` から読んだ MVV の設定のバイト列を解析して確かめる。壊れている・旧いキーが残るなら `MvvError`。"""
     try:
-        text = git_mod.Git(root).run("show", f"{ref}:{decl_path()}")
-        raw = json.loads(text)
-    except (git_mod.GitError, json.JSONDecodeError) as exc:
+        decl = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MvvError(f"{ref} の MVV の設定を読めない: {exc}") from exc
-    if not isinstance(raw, dict):
+    if not isinstance(decl, dict):
         raise MvvError(f"{ref} の MVV の設定が object でない")
-    _refuse_legacy(raw, root)
-    return raw
+    _refuse_legacy(decl, root)
+    return decl
 
 
 def _refuse_legacy(raw: Mapping[str, Any], root: Path) -> None:
@@ -82,6 +112,117 @@ def _refuse_legacy(raw: Mapping[str, Any], root: Path) -> None:
     legacy = renames.legacy_detail("mvv", raw, root)
     if legacy is not None:
         raise MvvError(legacy)
+
+
+def principles() -> bytes:
+    """共通原則の本文（元のバイト列）。"""
+    return (contracts.contracts_dir() / PRINCIPLES).read_bytes()
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _blob_id(data: bytes) -> str:
+    """Git の blob の id（Git を起動せずに元のバイト列から求める）。"""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+def _commit_of(g: git_mod.Git, ref: str) -> str:
+    try:
+        return g.rev_parse(ref)
+    except git_mod.GitError as exc:
+        raise MvvError(f"MVV を読む参照 {ref} をコミットへ解決できない: {exc}") from exc
+
+
+def _decl_blob(g: git_mod.Git, commit: str) -> Optional[str]:
+    """コミットのツリーにある設定の blob の名前。エントリが無いと確かめられたときだけ None（読めなければ `MvvError`）。"""
+    where = f"{commit} の {decl_path()}"
+    try:
+        listed = g.run("ls-tree", "-z", "--full-tree", commit, "--", decl_path())
+    except git_mod.GitError as exc:
+        raise MvvError(f"{where} があるかを確かめられない: {exc}") from exc
+    if not listed:
+        return None
+    mode, kind, oid = listed.partition("\t")[0].split()
+    if not stat.S_ISREG(int(mode, 8)):
+        raise MvvError(f"{where} が通常のファイルでない: {mode} {kind}")
+    return oid
+
+
+def _blob(g: git_mod.Git, name: str, where: str) -> bytes:
+    """blob `name` の元のバイト列。読めなければ `MvvError`（`where` は誤りに出すファイル）。"""
+    try:
+        return g.run_bytes("cat-file", "blob", name)
+    except git_mod.GitError as exc:
+        raise MvvError(f"{where}を読めない: {exc}") from exc
+
+
+def _is_private(path: Path) -> bool:
+    """`path` が所有者のほかに権限を与えていない通常のファイルか（無ければ偽。リンクは辿らない）。"""
+    if not os.path.lexists(path):
+        return False
+    mode = path.lstat().st_mode
+    return stat.S_ISREG(mode) and stat.S_IMODE(mode) & 0o077 == 0
+
+
+def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
+    """`path` を、所有者だけが読める（0600）中身 `data`（sha256 は `sha256`）のファイルにする。
+
+    中身と権限が同じなら書かない。違えば一時ファイルへ書いて置き換える（本文は非公開のリポジトリのものを含む）。
+    """
+    if _is_private(path) and _sha256(path.read_bytes()) == sha256:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix=f".{path.name}.") as tmp:
+        new = Path(tmp) / path.name
+        with open(os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+            out.write(data)
+        os.replace(new, path)
+    return path
+
+
+def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
+    """参照 `ref`（取得済みの参照かコミット）の MVV を読み、承認済みなら本文と共通原則のスナップショットを書いて返す。
+
+    設定がツリーに無いと確かめられたときだけ `absent`。参照・設定・本文を読めないときと、本文が承認の記録と合わない
+    とき（`allow_mismatch` でない）は `MvvError`、スナップショットを書けないときは `OSError`。
+    """
+    g = git_mod.Git(root)
+    commit = _commit_of(g, ref)
+    held = _decl_blob(g, commit)
+    if held is None:
+        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
+    raw = _blob(g, held, f"{commit} の MVV の設定（{decl_path()}）")
+    decl = decl_from(raw, commit, root)
+    if md.status(decl, None) == md.State.UNAPPROVED:
+        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
+    path = md.body_path(decl)
+    body = _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
+    blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
+    body = md.approved_form(decl, body)
+    sha = _sha256(body)
+    state = md.status(decl, sha)
+    if state == md.State.MISMATCH and not allow_mismatch:
+        raise MvvError(f"ベースの MVV の本文が承認の記録と合わない: {path}")
+    if state != md.State.APPROVED:
+        return Snapshot(state, None, None, None, (), blobs, commit, "", None)
+    version = md.current_version(decl)
+    if version is None:
+        raise MvvError(f"{commit} の MVV の設定の最後のバージョンに番号が無い: {decl_path()}")
+    shared = principles()
+    items = md.items_of(_text(body, path), shared.decode("utf-8"))
+    shared_sha, where = _sha256(shared), (_state_dir() / SNAPSHOT_DIR).absolute()
+    body_copy = _write_verified(where / f"v{version}-{sha[:_NAME_SHA]}.md", body, sha)
+    shared_copy = _write_verified(where / f"principles-{shared_sha[:_NAME_SHA]}.md", shared, shared_sha)
+    return Snapshot(state, version, sha, body_copy, items, blobs, commit, shared_sha, shared_copy)
+
+
+def _text(body: bytes, path: str) -> str:
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MvvError(f"MVV の本文 {path} を UTF-8 で読めない: {exc}") from exc
 
 
 def signals(root: Path, base_branch: str) -> md.Signals:

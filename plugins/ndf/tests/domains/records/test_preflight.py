@@ -93,6 +93,8 @@ def _approved(body: Any = "mvv.md", sha: Any = _SHA_X) -> bytes:
         (_approved(sha=1), {"mvv.md": b"x"}, "unapproved"),
         (_approved(), {"mvv.md": b"z"}, "mismatch"),
         (_approved(), {"mvv.md": None}, "unreadable"),
+        (_approved(body="../.ndf/mvv.md"), {"mvv.md": b"x"}, "unreadable"),
+        (json.dumps({"body": "../x.md", "versions": []}).encode("utf-8"), {}, "unapproved"),
     ],
 )
 def test_mvv_state_reads_the_ndf_settings_and_the_body(tmp_path: Path, decl: bytes | None, files: dict, state: str) -> None:
@@ -105,6 +107,14 @@ def test_mvv_state_reads_the_ndf_settings_and_the_body(tmp_path: Path, decl: byt
         else:
             (tmp_path / ".ndf" / name).write_bytes(data)
     assert preflight.mvv_state(tmp_path) == state
+
+
+def test_a_body_path_outside_the_settings_directory_stops_with_the_value(tmp_path: Path) -> None:
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "mvv.json").write_bytes(_approved(body="../x.md"))
+    got = preflight.mvv_checked(tmp_path).result
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert ".ndf/mvv.json" in got["summary"] and "../x.md" in got["summary"]
 
 
 # NOTE: 現状固定。UTF-8 でない設定は unreadable にならず、UnicodeDecodeError がそのまま出る

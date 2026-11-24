@@ -245,10 +245,14 @@ def conflicted_files(g: git.Git) -> tuple[str, ...]:
     return tuple(p for p in g.run("diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p)
 
 
-def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None) -> str:
-    """リモート名のリモートの PR のブランチを取り、その先頭のコミットを返す。`remote` を省けば `g.remote()`。"""
+def fetch_head(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> str:
+    """リモート名のリモートの PR のブランチを取り、その先頭のコミットを返す。`remote` を省けば `g.remote()`。
+
+    `base_branch` があれば同じ 1 回の取得でベースのリモート追跡参照も新しくする。どちらかを取れなければ `GitError`。
+    """
     remote = remote if remote is not None else g.remote()
-    g.run("fetch", "--", remote, f"+refs/heads/{head_branch}:refs/remotes/{remote}/{head_branch}")
+    branches = dict.fromkeys(b for b in (head_branch, base_branch) if b is not None)
+    g.run("fetch", "--", remote, *(f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in branches))
     return g.rev_parse(f"refs/remotes/{remote}/{head_branch}")
 
 
@@ -292,12 +296,15 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
         )
 
 
-def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None) -> SyncResult:
-    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。"""
+def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> SyncResult:
+    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。
+
+    `base_branch` は `fetch_head` へ渡す（同じ 1 回の取得でベースも取る）。
+    """
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
-    remote = fetch_head(g, head_branch, remote)
+    remote = fetch_head(g, head_branch, remote, base_branch)
     _refuse_lossy_sync(g, remote, before)
     own = own_commits(g, remote, before)
     g.run("reset", "--hard", remote)
