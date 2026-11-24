@@ -80,6 +80,23 @@ def test_context_over_the_limit_asks_for_a_handover_once():
     assert switch_decide.decide(state(context_tokens=799_999, context_limit=800_000)).kind == "wait"
 
 
+@pytest.mark.parametrize(
+    ("idle", "stall", "kind"),
+    [(1799.9, 1800.0, "wait"), (1800.0, 1800.0, "restart"), (9999.0, 0.0, "wait")],
+    ids=["just-before", "reached", "off"],
+)
+def test_the_stall_restarts_only_once_the_stall_seconds_are_reached(idle, stall, kind):
+    # #4049 の受け入れ条件 15（変えない振る舞い）: 止まりの秒の手前では起動し直さず、届いたら起動し直す。0 秒なら止まりを見ない
+    assert switch_decide.decide(state(idle_seconds=idle, stall_seconds=stall)).kind == kind
+
+
+def test_the_limit_switch_resumes_with_the_limit_prompt_even_when_the_stall_and_the_context_are_reached():
+    # #4049 の受け入れ条件 15（変えない振る舞い）: 上限に達した後の替え（守り 3）は引継ぎ・止まりより先で、最初の入力は今の文のまま
+    over = state(limit_pick=Pick("switch", "main", "上限"), idle_seconds=1800.0, context_tokens=800_000, context_limit=800_000)
+    got = switch_decide.decide(over)
+    assert (got.kind, got.prompt, got.account) == ("account", switch_decide.RESUME_PROMPT, "main")
+
+
 def test_handover_prompt_asks_to_keep_the_wait_line_and_check_the_document():
     # #3995 の 3995:7: 求める文は wait の行を残すことと ndf records handoff check を含み、背景の作業の終わりについて書かない
     prompt = switch_decide.HANDOVER_PROMPT
