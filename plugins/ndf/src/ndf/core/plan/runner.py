@@ -144,7 +144,8 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
-        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "presented_id": out.get("presented_id")})
+        shown = {k: out.get(k) for k in ("presented_id", "presentation_path", "production")}
+        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
@@ -421,17 +422,28 @@ def _run_item(inv: Invocation) -> dict[str, Any]:
 
 
 def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
-    """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。"""
+    """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。
+
+    待っているステップが承認資料（`presentation_path`）と「本番へ反映され得るか」（`metrics.production`）を出していれば、
+    そのまま載せる（承認する人が資料を開き、本番へ反映されるマージかを知ってから回答する。#4409）。
+    """
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の回答を待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}, *_pr_items(inv.state_dir)]
+    shown = read_json(step_presented_path(inv.state_dir, str(marker["step"])))
+    shown = shown if isinstance(shown, dict) else {}
+    metrics: dict[str, Any] = {"round": inv.round_no}
+    if isinstance(shown.get("production"), bool):
+        metrics["production"] = shown["production"]
+    material = shown.get("presentation_path")
     return result.result(
         TOOL,
         GATE,
         summary,
         items,
-        {"round": inv.round_no},
+        metrics,
         routes=marker["routes"],
         next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
+        presentation_path=material if isinstance(material, str) and material else None,
     )
 
 

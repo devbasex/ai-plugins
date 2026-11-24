@@ -275,13 +275,16 @@ def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[
     """承認の回答を待つ結果。`out` があれば承認の対象と承認資料を書く（書けなければ precondition）。"""
     production = production_merge.reaches_production(verdict)
     metrics: dict[str, Any] = {"gate": GATE_NAME, "verdict": verdict.value, "production": production}
+    material: Optional[str] = None
     if out is not None:
         try:
             metrics["presented_id"] = _presented(Path(out), target, production)
         except OSError as exc:
             return result.stopped(TOOL, "precondition", f"承認の対象を {out} へ書けない: {exc}", items=_pr_item_list(target.number))
+        material = str(Path(out).with_suffix(".md"))
     routes = {approval_words.APPROVED: None, approval_words.REJECTED: None}
-    return result.result(TOOL, result.GATE, summary, items=_pr_item_list(target.number), metrics=metrics, routes=routes)
+    items = _pr_item_list(target.number)
+    return result.result(TOOL, result.GATE, summary, items=items, metrics=metrics, routes=routes, presentation_path=material)
 
 
 def _stale(target: merge_approval.MergeTarget, detail: str, verdict: Optional[Verdict] = None) -> dict:

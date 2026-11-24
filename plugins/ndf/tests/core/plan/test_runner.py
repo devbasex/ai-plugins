@@ -384,6 +384,20 @@ def _the_step_result_carries_the_presented_id_of_a_gate():
     assert ok["presented_id"] is None
 
 
+def _the_gate_result_carries_the_material_and_whether_it_reaches_production(gated):
+    """r1-1: 待っているステップが示した承認資料のパスと「本番へ反映されるか」を、プランの承認待ちの結果に載せる。"""
+    from ndf.core.plan import steps
+
+    shown = {"presented_id": "p1"}
+    gate_out = result.result("ci", "gate", "待つ", metrics={"presented_id": "p1", "production": True}, presentation_path="m.md")
+    out = steps.outcome_of(model.Step(id="merge", run=["x"]), 10, json.dumps(gate_out) + "\n")
+    assert (out["presentation_path"], out["production"]) == ("m.md", True)
+    shown.update(presentation_path=out["presentation_path"], production=out["production"])
+    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", **shown})
+    got = runner.gate_result(gated, {"step": "merge", "routes": {}})
+    assert (got["presentation_path"], got["metrics"]["production"]) == ("m.md", True)
+
+
 def _next_refuses_an_actor_of_the_wrong_shape(capsys):
     from ndf.core.plan import cli
 
@@ -401,6 +415,10 @@ def _next_refuses_an_actor_of_the_wrong_shape(capsys):
         ),
         scenes.scene(_the_answer_record_without_a_presented_id_holds_null, id="the_answer_record_without_a_presented_id_holds_null"),
         scenes.scene(_the_step_result_carries_the_presented_id_of_a_gate, id="the_step_result_carries_the_presented_id_of_a_gate"),
+        scenes.scene(
+            _the_gate_result_carries_the_material_and_whether_it_reaches_production,
+            id="the_gate_result_carries_the_material_and_whether_it_reaches_production",
+        ),
         scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
     ],
 )

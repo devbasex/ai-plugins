@@ -21,6 +21,10 @@
           "type": "integer",
           "description": "回の番号（next）"
         },
+        "production": {
+          "type": "boolean",
+          "description": "承認待ちのステップが示した、この承認でマージが本番へ反映され得るか（next の承認待ち。ステップが示したときだけ）"
+        },
         "steps": {
           "type": "integer",
           "description": "流したステップの数（next）"
