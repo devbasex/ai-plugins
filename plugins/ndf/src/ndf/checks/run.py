@@ -126,9 +126,12 @@ def _git_objects(out: bytes) -> list[Optional[bytes]]:
     found: list[Optional[bytes]] = []
     while out:
         head, _, out = out.partition(b"\n")
-        size = None if head.endswith((b" missing", b" ambiguous")) else int(head.rpartition(b" ")[2])
-        found.append(None if size is None else out[:size])
-        out = out if size is None else out[size + 1 :]
+        if head.endswith((b" missing", b" ambiguous")):
+            found.append(None)
+            continue
+        size = int(head.rpartition(b" ")[2])
+        found.append(out[:size])
+        out = out[size + 1 :]
     return found
 
 
