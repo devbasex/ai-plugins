@@ -8,6 +8,7 @@
 | `next.json` | Stop の hook（`relay-marker`） | 次のセグメントのブロック。中継が読んで次のセグメントを始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の質問。中継が人かオーガナイザーへ回す |
 | `launch.json` | 中継のラッパー | 今の子の起動の ID（子へは `NDF_RELAY_LAUNCH` で渡す）。止めた子の hook に質問を書かせない（#3814） |
+| `busy-<起動の ID>.json` | 子の会話の hook（SessionStart・PreToolUse の `relay-busy` と Stop の `relay-marker`） | その起動のバックグラウンドの作業の件数。ラッパーは書かず、ほかの起動のものを消すだけである（#4049） |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、質問を `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
@@ -26,7 +27,7 @@ import json
 import os
 import re
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional, Union
@@ -38,6 +39,12 @@ QUESTION_FILE = "question.json"
 LAUNCH_FILE = "launch.json"
 LAUNCH_ENV = "NDF_RELAY_LAUNCH"
 ACTIVITY_FILE = "activity.json"
+BUSY_PREFIX = "busy-"
+BUSY_SOURCES = ("session", "start", "stop")
+# 起動の ID の形（ラッパーが作る `uuid.uuid4().hex`）
+LAUNCH_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+# 子を止める排他のファイル。質問の転送とバックグラウンドの作業の開始の記録が共有する
+STOP_LOCK = f"{QUESTION_FILE}.lock"
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -372,3 +379,72 @@ def read_activity(directory: Path) -> Optional[dict[str, Any]]:
 
 def _is_task(item: Any) -> bool:
     return isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("type"), str)
+
+
+def _busy_path(directory: Path, launch: str) -> Optional[Path]:
+    """起動の記録のファイル。起動の ID の形が違えば None（環境変数の値をファイルの名前に使わない）。"""
+    return directory / f"{BUSY_PREFIX}{launch}.json" if LAUNCH_ID_RE.fullmatch(launch) else None
+
+
+def write_busy(directory: Path, launch: str, session_id: str, count: int, source: str, monitors: int = 0) -> bool:
+    """起動の記録に作業の件数 `count` と監視の件数 `monitors` を書く。起動の ID の形が違うか書けなければ偽で、前の中身のまま（#4049）。
+
+    `source` は `BUSY_SOURCES` のどれか。排他は取らない（開始の記録は `record_start` が取って呼ぶ）。
+    """
+    path = _busy_path(directory, launch)
+    if path is None:
+        return False
+    data = {"launch": launch, "session_id": session_id, "count": count, "monitors": monitors, "source": source, "at": now_iso()}
+    try:
+        replace_json(path, data)
+    except OSError:  # noqa: NDF401 ファイル: 書けなければ偽を返し、呼び手が扱う
+        return False
+    return True
+
+
+def record_start(directory: Path, launch: str, session_id: str, wait: float) -> bool:
+    """子を止める排他を `wait` 秒まで待って取り、今の起動が `launch` のときだけ件数 1 を書く。書けなければ偽（#4049）。
+
+    ラッパーも同じ排他の中で子を止め、今の起動を外すので、止めた子の開始は偽になる。
+    """
+    try:
+        with held(directory / STOP_LOCK, wait) as got:
+            return got and current_launch(directory) == launch and write_busy(directory, launch, session_id, 1, "start")
+    except OSError:  # noqa: NDF401 ファイル: 排他を取れなければ偽を返し、呼び手が開始を拒否する
+        return False
+
+
+def read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str, int]]:
+    """今の起動・今の会話の記録の（作業の件数, `source`, 書いた時刻, 監視の件数）。無い・読めない・形が違えば None（不明）。"""
+    path = _busy_path(directory, launch)
+    try:
+        data = _read(path) if path is not None else None
+    except (SignalError, OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない記録は件数が分からないとして扱う
+        return None
+    if data is None or data.get("launch") != launch or data.get("session_id") != session_id:
+        return None
+    count, source, at = data.get("count"), data.get("source"), data.get("at")
+    monitors = data["monitors"] if "monitors" in data else 0
+    if not (_is_count(count) and _is_count(monitors) and source in BUSY_SOURCES and _is_zoned(at)):
+        return None
+    return count, source, at, monitors
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_zoned(value: Any) -> bool:
+    """タイムゾーンを持つ時刻の文字列か（`now_iso` の形）。"""
+    try:
+        return isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:  # noqa: NDF401 ファイル: 時刻として読めない値は形が違うとして扱う
+        return False
+
+
+def drop_other_busy(directory: Path, launch: str) -> None:
+    """ほかの起動の記録を消す。消せないものは残して続ける。"""
+    for path in list(directory.glob(f"{BUSY_PREFIX}*.json")):
+        if path.name != f"{BUSY_PREFIX}{launch}.json":
+            with suppress(OSError):  # noqa: NDF402 ファイル: 残っても起動ごとの名前なので読まれず、次の起動が消し直す
+                drop(directory, path.name)
