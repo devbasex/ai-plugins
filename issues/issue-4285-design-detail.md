@@ -105,7 +105,7 @@ plugins/ndf/
 
 `heads` に無い PR は調べられなかったものとして扱い、`missing` は `head_moved` に数えない。その後の扱いは呼び出し元で違う。hook は通して計測の記録に残し（「質問の前に記録を調べる（hook）」の表の順 5）、`reading.check` は `HeadUnknown` を送出して `ok` にしない。
 
-コマンド（AI が手順の中で打つ。コマンドの一覧では「内部」に分類する）。どれも入力は JSON のファイル 1 つで受け、複数行の文を引数に載せない。キーは、`prompt` が `files`（読ませるファイルのパスの配列）・`reader`（立場・ふだん使う言葉・知識）・`questions_kind`（`requirements`・`design`・`none`。言い直しに含めさせる問いの種類）、`add` が下の表の「担当」のキー、`check` が `questions` と `prs`（番号の配列）である。
+コマンド（AI が手順の中で打つ。コマンドの一覧では「内部」に分類する）。どれも入力は JSON のファイル 1 つで受け、複数行の文を引数に載せない。キーは、`prompt` が `files`（読ませるファイルのパスの配列）・`reader`（立場・ふだん使う言葉・知識）・`questions_kind`（`requirements`・`design`・`design-detail`・`none`。言い直しに含めさせる問いの種類で、詳細設計書は `design-detail`、文書の一部だけを読ませるときは `none`）、`add` が下の表の「担当」のキー、`check` が `questions` と `prs`（番号の配列）である。
 
 | コマンド | 終わり方 |
 | --- | --- |
