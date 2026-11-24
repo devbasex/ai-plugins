@@ -610,7 +610,7 @@ Claude Code を中継のラッパーの中で使っている場合だけの変�
 - `.ndf/project.json` の旧い形（`delivery` など）と `.ndf/worktree.json` の `branch_flow` は、そのリポジトリで `ndf project branch-strategy migrate` を打って `.ndf/project.json` の `branch_strategy` へ移す。ほかの設定のキーは `ndf settings migrate --root <リポジトリ>` で移す。どちらも差分と差分のハッシュを示してから、利用者の承認で書き換える（`--apply <ハッシュ>`・`--digest <ハッシュ>`）。自動で移せない値は出力の `failed` の行を利用者が答えて直す
 - 別のリポジトリで進行中のプラン・スプリントと引継ぎ文書（`.ndf/handoff/`）は、10 系の作業の記録として残し、書き換えない。11.0 は 10 系のスクリプト名を名指す文書を打てないため、続けたい作業は U1 の前に 10 系で終わらせ、11.0 では計画を立て直して始める
 
-**戻し方の版。** 11.0.0 を戻すときは、10 系の中身（`ndf--v10.27.77` と同じ）を `11.0.1` として出す。版数を下げずに PATCH で出すのは、取得元が版数の違いで中身を受け取るためである（#3341 の決定 10）。手順は `issues/issue-3341-design-swap.md` の「戻し方」B1〜B6 と #3378 にある。
+**戻し方の版。** 11.0.0 を戻すときは、10 系の中身（`ndf--v10.27.77` と同じ）を `11.0.1` として出す。版数を下げずに PATCH で出すのは、取得元が版数の違いで中身を受け取るためである（#3341 の決定 10）。手順は [`issues/issue-3341-design-swap.md`](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/issue-3341-design-swap.md) の「戻し方」B1〜B6 と #3378 にある。
 
 ## [ndf 10.27.77] - 2026-11-18
 

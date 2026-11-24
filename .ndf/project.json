@@ -383,7 +383,6 @@
         "paths": [
           "README.md",
           "docs/versioning-and-distribution.md",
-          "issues/old/issue-178-doc-staleness-checks.md",
           "plugins/mcp/mcp-aws-docs/README.md",
           "plugins/mcp/mcp-bigquery/README.md",
           "plugins/mcp/mcp-chrome-devtools/README.md",

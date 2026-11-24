@@ -115,6 +115,7 @@ def test_checked_builds_the_whole_ok_result() -> None:
                     "reason": "2 回目を行えなかった",
                 },
             ],
+            "worker_status": "ok",
         },
         # 辞書でない要素も対象の外の件数に入る（記録の総数 - 対象の数）
         "warnings": ["skip.md: リンク", reader_a, reader_b, "対象の外の文書の記録を 3 件外した"],
@@ -133,6 +134,7 @@ def test_checked_without_warnings_omits_the_key_and_keeps_a_pass_reason() -> Non
         "metrics": {
             "targets": [DESIGN],
             "readers": [{"doc": DESIGN, "verdict": "pass", "checks": [{"verdict": "pass", "restatements": ["要点"]}], "reason": "読めた"}],
+            "worker_status": "ok",
         },
     }
 

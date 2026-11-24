@@ -94,13 +94,16 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
   保存しておけば、予算を広げた打ち直しは着手前のテストを走らせ直さずに続く。自動で広げないのは明示した
   想定最大時間（出所 `explicit`）だけにした。省いた実行（出所 `default`）は利用者の上限を持たないため、`init_test.settle_window` が
   下限まで上げて出所を `floor` にする。明示で収まらないときは `SKIP=window` を出して止まり、駆動はリファクタリングを飛ばした
-  欠けの残る結果（終了コード 6）で返す。理由は [#2047 の設計](../../issues/issue-2047-design.md) の決定 2・決定 3 にある
+  欠けの残る結果（終了コード 6）で返す（#2047: 想定最大時間を省いた検査が下限に届かず止まっていた）。下限は着手前のテストの実測と
+  計画の後の見込みで決まり、プランを書く時点では分からないため、上げるのは supervise でなく `init` である。`refactor.py` の終了コードは
+  増やさない。手順書と単独起動の呼び手が分岐に使っており、`SKIP` の行を読まない呼び手は今どおり中断として扱える。終了コード 6 は
+  共通の結果 JSON の契約で「欠けの残る結果」の意味を既に持つ
 - **止めた後の打ち直しでだけ、枠の起点を打ち直した時刻へずらす。** 起点を `started_at + x` のまま残すと、止まってから人が
   打ち直すまでの数分が提案の枠から引かれ、下限どおりの予算で提案者が余裕だけで起動される。提案や計画の途中で落ちた再開まで
   ずらすと、提案が揃っているのに枠が想定最大時間を越えて止まる。計画を取り込んだ後は採った件数が期限に合わせてあるため、
   保存した期限で続ける
 - **要る想定最大時間の下限には、人が打ち直すまでの 300 秒（`RESUME_GRACE_SECONDS`）を足す。** 足さないと、出した下限で
-  打ち直したときに経過の分だけ o が伸びて再び収まらない。打ち直さずにその場で上げる `settle_window` は足さない（`grace_seconds=0`。#2047 の決定 2）
+  打ち直したときに経過の分だけ o が伸びて再び収まらない。打ち直さずにその場で上げる `settle_window` は足さない（`grace_seconds=0`。打ち直しが無いので o が伸びない）
 - **範囲テストの所要は、着手前のテストの行を履歴に別の種類（`kind: init_test`）として足して実測から引く。** 実行の行は
   最終ゲートを通った実行だけが書くため、中断した実行と init で打ち切られた実行が残らず、範囲が suite の `paths` を覆わない
   リポジトリではいつまでも所要が分からない。打ち切りの行は上限の秒を下限の実測として残し、次の実行は `3·上限` で走らせる
@@ -157,7 +160,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | `baseline.run_baseline(...)` | 上限を超えたら止めずに記録を返す（`timed_out: true`・`seconds` は上限の秒。既存失敗の読み取りは行わない）。止めるのは起動の失敗だけ。記録に `locations`（`scope` のときだけ）と `timed_out` を足した |
 | `init_test.resolve_scope_seconds(prep, scope, w, m=None)` | `(s, 出所)`。I8 の順で `history` / `recent` / `whole` / `(None, None)`。CI に任せる戦略でなければ履歴を読まずに m → w を採る |
 | `init_test.recent_whole_seconds(prep)` | 手元の全体テストの直近の実測 m（`whole_runs.recent_whole`）。無ければ `None` |
-| `init_test.extend_for_init_test(budget_minutes, timeout)` | 上限 T が `0.10·B` を超えるときだけ、テストの前にステップの延長へ `B·60 + (T − 0.10·B·60)` 秒を書く（`NDF_STEP_EXTEND_FILE` が無ければ何もしない。#2047 の決定 4） |
+| `init_test.extend_for_init_test(budget_minutes, timeout)` | 上限 T が `0.10·B` を超えるときだけ、テストの前にステップの延長へ `B·60 + (T − 0.10·B·60)` 秒を書く（`NDF_STEP_EXTEND_FILE` が無ければ何もしない。延ばさないと、上限内で終わるテストもステップの締め切りで先に切られる） |
 | `init_test.append_init_test(prep, budget_minutes, pr, baseline)` | `init_test` 行を 1 行追記する。書けなければ知らせて続ける |
 | `init_test.abort_timed_out(strategy, budget_minutes, baseline, timeout)` | `SKIP=init-timeout` と `SKIP_DETAIL` を出し、打ち切りの文で終了コード 4 にする。`scope` の CI に任せる戦略なら、次の実行の上限の見込み（`3·上限` を s とした `limits`）を添える |
 | `init_test.settle_window(state_file, state)` | `window_problem` が `None` なら印を消し、消したときだけ保存する。文を返し、出所（`budget_source`）が `explicit` なら `SKIP=window` と `SKIP_DETAIL` を出し、`window_stopped_at` を書いて保存し、終了コード 4。`default` / `floor` なら `budget_minutes` を `grace_seconds=0` の下限へ上げ、`limits` を組み直して出所を `floor`・`budget_floor` を書いて保存し、`ℹ` の 1 行を出して続ける |

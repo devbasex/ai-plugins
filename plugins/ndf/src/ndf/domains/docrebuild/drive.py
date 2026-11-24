@@ -41,8 +41,8 @@ WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
-# 読み手役の確かめが済んでいない記録の verdict（不合格と、1 回も立てられなかった）。`items` と `warnings` に残す
-UNFINISHED = ("fail", "not_run")
+# 読み手役の確かめが済んだ記録の verdict（合格と、worker 自身の読み直し）。ほか（不合格・立てられなかった）は `items` と `warnings` に残す
+_DONE = frozenset(VERDICTS) - {"fail", "not_run"}
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -401,7 +401,7 @@ def reader_items(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, s
     """
     items: list[dict[str, str]] = []
     warnings: list[str] = []
-    for rec in sorted((r for r in readers if r["verdict"] in UNFINISHED), key=lambda r: r["doc"]):
+    for rec in sorted((r for r in readers if r["verdict"] not in _DONE), key=lambda r: r["doc"]):
         if rec["verdict"] == "not_run":
             text = f"読み手役が {rec['doc']} をまだ確かめていない: {rec['reason']}"
         else:

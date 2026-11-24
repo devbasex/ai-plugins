@@ -250,6 +250,8 @@ dotfiles への symlink を許すため、名前を 1 回 `realpath` で解き�
 `mcp-needs-auth-cache.json`・`.ndf-statusline-auth.json`・`account.json`・`usage.json`・`.ndf-shared-base.json`・
 `.ndf-shared-base.next.json`・`.ndf-oauth-pending.json`。
 
+`account.json` の `capacity` は、スロットの大きさの設定である。スロットの大きさは、1 つのスロット（5 時間のクォータ・週のクォータ）の使用率が 0% から 100% になるまでに使える量（USD 換算）で、利用者が `ndf relay account capacity` でアカウントごとに書く。一覧（`capacity_declared`）に出すだけで、替え先の選び方には使わない。
+
 ## 外部連携
 
 | 相手 | 使い方 |

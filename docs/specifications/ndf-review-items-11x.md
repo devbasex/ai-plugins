@@ -2,7 +2,7 @@
 
 振り分け表（[ndf-review-items.md](ndf-review-items.md)）で版の列が `11.x` の行と、#1142 の要求の受け入れ条件の持ち主の表の行、合わせて 72 行に、11.x での行き先を 1 つずつ割り当てた表である。規則 `review-items` は、振り分け表の 11.x の行が指すこの文書の「対応表」を読み、項目の行があることと、行き先が `Z<数>`・`#<番号>`・`作らない` のどれかであることを確かめる（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) の「設計レビューの指摘の対応先（`review-items`）」）。
 
-- **出所**: #3388 の設計の対応表（`issues/issue-3388-design-routing.md`）の「列の読み方」と「対応表」を、セルを変えずに移した（#3960）。11.x の子の記号（`Z1`〜`Z13`）の中身・順番・先に要るものは、[コミット 784110e5 の issue-3388-design-children.md](https://github.com/devbasex/ai-plugins/blob/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues/issue-3388-design-children.md) にある
+- **出所**: #3388 の設計の対応表（[消す前のコミットの `issues/` の一覧](https://github.com/devbasex/ai-plugins/tree/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues) にある）の「列の読み方」と「対応表」を、セルを変えずに移した（#3960）。11.x の子の記号（`Z1`〜`Z13`）の中身・順番・先に要るものは、[コミット 784110e5 の #3388 の設計の 11.x の子の表](https://github.com/devbasex/ai-plugins/tree/784110e5461b3f856ba18f3c8ea7e995a06c8b0d/issues) （`issues/` の一覧にある）にある
 - 行き先ごとの件数・分類ごとの行き先・合わせて扱う Issue・突き合わせは移していない
 
 ## 列の読み方

@@ -169,7 +169,7 @@ def _rebuild_step(plan: dict) -> list[str]:
 
 @pytest.fixture
 def offline_repo(tmp_path, monkeypatch, no_wait_no_child):
-    """`git init` しない作業ディレクトリ。git の起動（`git._start`）は答えの表から返す偽にし、保存先とリポジトリの識別を
+    """`git init` しない作業ディレクトリ。git の起動（`git._start`）は回答の表から返す偽にし、保存先とリポジトリの識別を
     固定の値にする（test_plan.py の `no_git` と同じ形）。表に無い git と、待ち・子のプロセスの起動は、呼ばれたら落ちる。"""
     work = tmp_path / "work"
     work.mkdir()

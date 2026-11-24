@@ -12,16 +12,16 @@
 | テストと CI の予算 | — | テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数の上限 | — | — | `docs/specifications/ndf-split-tables-toolchain-and-budget.md` |
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを検証するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| suite の種別 | `kind` | テストの設定（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test | — | — | — |
-| 起動の失敗 | — | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う | — | — | — |
+| suite の種別 | `kind` | テストの設定（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 起動の失敗 | — | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | チェック | — | 機械が合否を返すもの。CI のジョブと、mvv-gate.py・doc-lint.py などのスクリプト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 全体テスト | — | リポジトリ全体を範囲にするテストか静的解析。テストは設定の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は設定の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す） | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 消したテスト | — | 着手前に走っていて、着手後の結果（走った・skip・deselect）のどれにも無く、テストのジャーナルに載るテストの nodeid。計測のスクリプトの diff が、着手後の木にその定義が残っていないことを検証する対象 | — | — | `docs/specifications/ndf-whole-test-duration.md` |
 | 現状固定テスト | — | 構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test） | — | — | `plugins/ndf/skills/refactoring/references/characterization-tests.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| テストの戦略 | `strategy` | 範囲テストの走らせ方・全体テストの保存先（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。設定の test.strategy か、同じ関数が所要から導く（#1334） | — | — | — |
+| テストの戦略 | `strategy` | 範囲テストの走らせ方・全体テストの保存先（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。設定の test.strategy か、同じ関数が所要から導く（#1334） | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（設定の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置く場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る | 範囲テストの雛形 | — | `docs/specifications/cross-refactoring-scope-template-probe.md` |
-| JUnit の保存先 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（設定の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
+| JUnit の保存先 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（設定の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ジョブの識別子 | — | CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。設定の suites[].ci_jobs と test.ci_exempt が使う | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 除外したジョブ | `ci_exempt` | 手元の検証で走らせないと定義したジョブ。設定の test.ci_exempt に理由と組で書く | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 必須のチェック | — | ブランチの ruleset の required_status_checks に context の名前で載ったチェック。落ちるか結果が無いとマージを塞ぐ | — | — | `docs/specifications/ci-required-checks-reconcile.md` |

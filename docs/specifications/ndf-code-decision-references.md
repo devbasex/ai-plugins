@@ -71,7 +71,7 @@
 ## テスト観点
 
 - 作り直しの決定を指す参照が、上の「参照の形」のどれかで書かれ、指す決定かセクションの見出しが確定仕様にあること
-- `git grep` で、`plugins/ndf` から作り直しの設計文書（`issues/issue-1142-*`・`issues/issue-3388-*` など）へのパスが 0 件であること
+- `git grep` で、`plugins/ndf` から作り直しの設計文書（#1142・#3347・#3388・#3395 の設計文書）へのパスが 0 件であること
 - 別の設計の決定を指す行（例 `answering.py` の「決定 99」）が、作り直しの確定仕様を指していないこと
 - 規則 `review-items` が [ndf-review-items.md](ndf-review-items.md) の 182 件を読み、`ndf check --write-spec` の後に `children.json` の差分が出ないこと
 
