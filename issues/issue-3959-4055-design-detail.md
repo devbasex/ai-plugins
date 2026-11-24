@@ -12,8 +12,8 @@
 
 | 語 | 意味 |
 | --- | --- |
-| MVV 判定 | 承認ゲートの手前で、LLM が PR の本文と差分を、NDF の共通原則とプロジェクト MVV（目指す姿と必ず人の承認が要る操作を書いた `.ndf/mvv.md`）と突き合わせる判定。`ndf records mvv gate` が打ち、結果は出力の `mvv_gate.verdict` に入る |
-| 「従う」 | MVV 判定の 3 つの結論（従う・従わない・判定できない）のうち、PR が MVV と共通原則に反していないという結論。`verdict.verdict` の値 |
+| MVV 判定 | 承認ゲートの手前で、LLM が PR の本文と差分を、NDF の共通原則とプロジェクト MVV（目指す姿と必ず人の承認が要る操作を書いた `.ndf/mvv.md`）と突き合わせる判定。`ndf records mvv gate` が打つ。LLM の結論は `outputs.mvv_gate.verdict.verdict` に `follow`（従う）・`not_follow`（従わない）・`unknown`（判定できない）のどれかで入る。`unknown` は LLM が判定を実行して判断できなかった結論で、理由は `verdict.reasons` にある。判定結果そのものを得られなかった場合（検査 1 が外れた・材料を読めない・LLM が回答しない など）は `outputs.mvv_gate.verdict` が `null` になり、止まった理由は `outputs.mvv_gate.stopped_by` に入る。`stopped_by` は `verdict` が `null` のときだけ置く |
+| 「従う」 | MVV 判定の 3 つの結論のうち、PR が MVV と共通原則に反していないという結論。`verdict.verdict` の値 `follow` |
 | レッドライン | MVV 判定が「従う」でも人の承認を省かない操作。共通原則の `C<番号>` とプロジェクト MVV の `P<番号>` の表にある。判定の出力では `verdict.boundary`、cross-review の記録では `outcome: redline` の行で表す |
 | `service:mvv` の回答 | MVV 判定が承認ゲートを省いてよいと決めたとき、人の代わりに NDF（`progress/run.py` の `_consume`）が承認ゲートへ書く承認の回答。回答の事象の payload の `by` が `service:mvv` で、判定の出力の写しを `mvv_gate` に持つ（`model.mvv_answer`） |
 | 承認ゲートを省く | 承認ゲートで人に問わず、`service:mvv` の回答で承認として進めること。進め方が `fast`・`auto` のときだけ起きる |
@@ -113,12 +113,12 @@ plugins/ndf/
 | 番号 | 検査（`progress/gate/checks.py`） | 外れたとき |
 | --- | --- | --- |
 | 1 | PR のベースのプロジェクト MVV が承認済みで、本文の sha256 が承認の記録と一致する（`judgeable`） | 判定を打たない |
-| 2 | スプリントの文脈の `mvv_ref` が承認の記録と一致する | 判定は打ち、省かない |
+| 2 | スプリントの文脈に `mvv_ref` があり、その値が、PR のベースで読んだ MVV の承認の記録（`.ndf/mvv.json`）の `sha256` と一致する（既存の `check_approval_record`。`mvv_ref` が無ければ外れる） | 判定は打ち、省かない |
 | 3 | モードが `operation` でも `documentation` でもない | 同上 |
 | 4 | PR の変えたファイルが、ベースの `.ndf/pace.json` の `boundary_paths`（レッドラインのパス）に当たらない | 同上 |
 | 5 | PR が `.ndf/mvv.md`・`.ndf/mvv.json` を変えない | 同上 |
 | 6 | 出し直しの指摘への対応表が「記載した」と書く PR 本文のセクションに中身がある | 同上 |
-| 7（新設） | 対象の PR のレビューの保留が 0 件で、記録 `mvv-validation.jsonl` を読める（`check_review_holds`） | 同上 |
+| 7（新設） | `design` では、レビューの記録 `mvv-validation.jsonl` を読み取った結果の保留が 0 件なら通す（`check_review_holds`）。記録がまだ作られていない場合は空として扱って通し、既存の記録を読めない場合は保留にする（`validation_rows`）。`release` では、#4105 まで保留を読まないので、この検査は何も返さない | 同上 |
 
 ### 関数の仕様
 
