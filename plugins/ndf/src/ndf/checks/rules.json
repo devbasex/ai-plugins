@@ -74,7 +74,7 @@
       {"words": ["DAYS"], "keys": ["count"]}
     ],
     "limit_constants": [
-      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（#3394 の決定 60）で 2 回に固定した値で、運用で変えない"},
+      {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの回答の形が合わないときの打ち直しの回数。形の確かめの設計（docs/specifications/ndf-rebuild-scripted-flow.md の決定 60）で 2 回に固定した値で、運用で変えない"},
       {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},
       {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
       {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
@@ -225,7 +225,7 @@
   "spec": {
     "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public", "review-items"],
     "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"],
-    "review_items_source": "issues/issue-1142-design-review-routing.md",
+    "review_items_source": "docs/specifications/ndf-review-items.md",
     "review_items_columns": {"id": "項目", "text": "要旨", "routed_to": "行き先の子", "order": "順番", "kind": "新設か追補か", "requirement_line": "要求の行", "release": "版"},
     "correspondence_columns": {"id": "行", "routed_to": "11.x の行き先"},
     "correspondence_routes": "Z[0-9]+|#[0-9]+|作らない"

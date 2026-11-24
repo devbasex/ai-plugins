@@ -10,7 +10,7 @@
 
 | 構成要素 | 責務 |
 | --- | --- |
-| 振り分け表（#3395 の設計の材料） | 182 項目の行き先の子・順番・要求の行・版。結果は各子の Issue の本文が持ち、確定仕様へ移さない |
+| 振り分け表（#3395 の設計の材料） | 182 項目の行き先の子・順番・要求の行・版。182 項目の表は [ndf-review-items.md](ndf-review-items.md)、11.x の対応表は [ndf-review-items-11x.md](ndf-review-items-11x.md) にある。要求の受け入れ条件の持ち主の表は移していない |
 | 機能の対応表（`scripts/ndf-next-parity/parity/`） | 10 系の機能 1 つを 1 行にし、行き先の子か作らない理由と試走の結果を持つ。形はスキーマ `schema.json` と `table.shape_errors` が縛る |
 | #3388 | 11.x へ回した項目の受け皿。11.x の行の行き先は #3388 の対応表が持つ |
 | `ndf issues settle`（`plugins/ndf/src/ndf/domains/backlog/settle.py`・`settle_decide.py`） | 解消する Issue を、閉じる証拠を確かめてから閉じる唯一の操作 |
@@ -36,7 +36,7 @@
 ## 対象範囲
 
 - **含む**: 作り直しの子の範囲と版の決まり、11.0.0 の受け入れ条件、11.x の受け皿、解消する Issue を閉じる操作、テストと CI の予算、依存の更新の手段の選択、リリースの workflow とリリース記録の範囲
-- **含まない**: 182 項目ごとの割り当ての結果（各子の Issue の本文と #3388 の対応表が持つ）、目的の物差し（[ndf-rebuild-measure.md](ndf-rebuild-measure.md)）、選択の記録の契約（[ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md)）、11.x の子の設計（#3388 のサブ Issue が持つ）
+- **含まない**: 182 項目ごとの割り当ての結果（182 項目の表と 11.x の対応表は [ndf-review-items.md](ndf-review-items.md)・[ndf-review-items-11x.md](ndf-review-items-11x.md) にあり、要求の受け入れ条件の持ち主の表は移していない）、目的の物差し（[ndf-rebuild-measure.md](ndf-rebuild-measure.md)）、選択の記録の契約（[ndf-rebuild-scripted-flow.md](ndf-rebuild-scripted-flow.md)）、11.x の子の設計（#3388 のサブ Issue が持つ）
 - **プロジェクトごとに違うもの**: 無い。ai-plugins の作り直しの計画の決まりで、利用先のリポジトリでは働かない。ブランチは `.ndf/project.json` の `branch_strategy` から読む
 
 ## 仕様
@@ -53,7 +53,7 @@
 
 | #3395 の設計のうち 11.x にしたもの | 今の姿 |
 | --- | --- |
-| 設計レビューの指摘の一覧（振り分け表）と、作り直しの作業（子）の一覧 `children.json` を比べる検査（指摘の番号は 3395-2） | 11.0.0 の後に作った。`ndf check --write-spec` が振り分け表から `plugins/ndf/src/ndf/checks/children.json` の `review_items` を生成し、規則 `review-items` が、表との違いと対応先の無い項目を見つけて落とす（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)） |
+| 設計レビューの指摘の一覧（振り分け表 [ndf-review-items.md](ndf-review-items.md)）と、作り直しの作業（子）の一覧 `children.json` を比べる検査（指摘の番号は 3395-2） | 11.0.0 の後に作った。`ndf check --write-spec` が振り分け表から `plugins/ndf/src/ndf/checks/children.json` の `review_items` を生成し、規則 `review-items` が、表との違いと対応先の無い項目を見つけて落とす（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)） |
 | テストの数と CI の所要の予算を縛る検査（3395-10） | 無い（「テストと CI の予算」） |
 | lock にある部品への置き換え（3395-9） | 新しく書く箇所は lock の部品を使い、残った自作は「ロックと打ち直しの部品」の表にある |
 
@@ -81,7 +81,7 @@
 
 ### 子の分け方
 
-- **閉じた子へ足す作業は追補の単位にする**（決定 110）。元の子の記号に `+` を付け（X0+・D1+・T1+・AD1+ など）、Issue は元の子の番号を閉じたまま使い、受け入れ条件は元の子の本文の「追補（<記号>）」の節に置き、PR は `Refs #<元の子> #<出所>` と書く。子の表のコピー `children.json` は追補の単位を別の子の行として持つ
+- **閉じた子へ足す作業は追補の単位にする**（決定 110）。元の子の記号に `+` を付け（X0+・D1+・T1+・AD1+ など）、Issue は元の子の番号を閉じたまま使い、受け入れ条件は元の子の本文の「追補（<記号>）」の節に置き、PR は `Refs #<元の子> #<出所>` と書く。子の表 `children.json` は追補の単位を別の子の行として持つ
 - **受け入れ条件が 25 行を超える子は分ける**（決定 111）。#3297 は M3a #3297（hook）と M3b #3407（中継）に、#3303 は S1a #3303・S1b #3409・S1c #3410 に分けた
 - **持ち主の無い機能には子を新設した**（決定 112）。X3 #3406（機能の対応表と直しの棚卸し）・M8 #3408（worktree とディスクの片付け）・T2 #3411（入れ替えの前の試走）・S3 #3412（確定仕様化と測り直し）
 
@@ -159,7 +159,7 @@ done
 項目ごとに行き先の子・順番・新設か追補か・要求の行・版を 1 行で持ち、抜き出しのコマンドの出力（182 件）と表の 1 列目を突き合わせて漏れを 0 件にした。行き先は各子の Issue の本文の受け入れ条件へ写し、11.x の行は #3388 へ移した。
 
 - 採らなかった案: 項目を分類ごとの Issue の本文に残し、子の本文から指す。項目と子の対応が 2 か所に分かれ、どちらが正か決まらない
-- 11.0.0 の後に足した検査: 振り分け表の項目を子の表のコピー `children.json` に生成し、規則 `review-items` で表と比べる（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)）。要旨のハッシュ（`text_sha`）は、Issue の本文ではなく表の要旨から計算する
+- 11.0.0 の後に足した検査: [ndf-review-items.md](ndf-review-items.md) の 182 項目の表を `children.json` に生成し、規則 `review-items` で表と比べる（[ndf-contract-fact-checks.md](ndf-contract-fact-checks.md)）。要旨のハッシュ（`text_sha`）は、Issue の本文ではなく表の要旨から計算する
 
 ### 決定 110: 閉じた子の範囲を閉じたまま追えるよう、閉じた子への作業は追補の単位にする
 
