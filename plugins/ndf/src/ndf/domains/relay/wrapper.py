@@ -37,7 +37,6 @@ from ptyprocess import PtyProcess
 from ndf import identity
 from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
-from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
     account_registry,
@@ -59,6 +58,7 @@ from ndf.domains.relay import (
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
 from ndf.domains.relay.wrapper_auth import AuthSteps
+from ndf.domains.relay.wrapper_fetch import FetchSteps
 from ndf.domains.relay.wrapper_guard import GuardSteps
 from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
 from ndf.domains.relay.wrapper_stop import StopSteps
@@ -262,7 +262,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
+class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -410,50 +410,6 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             drift_pick=self._revoked_pick(sec, self.wall.now()) if stopped else None,
             metered=account_decide.metered(sec.account),
         )
-
-    def _queue_fetch(self, now: float) -> None:
-        """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
-
-        取り直すのは、最後に試した時刻から `relay.usage-fetch` を過ぎたか、その後のリセットを過ぎたとき（`accounts.due_at`）。
-        取得の記録のスタンプと `tried` が同じ間は、その時刻を再利用する（見回りごとに取得の記録を開かない）。
-        """
-        f = self.fetcher
-        usage = self._inputs(now, False).usage if f is not None else None
-        if f is None or usage is None:
-            return
-        interval = limits.seconds("relay.usage-fetch")
-        for name, gen in usage.generations.items():
-            last = f.tried.get(name)
-            tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
-            if name in f.busy:
-                continue
-            path = accounts.fetch_path(self.store, name, gen)
-            key = (gen, launch_inputs.stamp(path), tried)
-            memo = self.due_memo.get(name)
-            at = memo[1] if memo is not None and memo[0] == key else accounts.due_at(path, interval, tried)
-            if at <= now:
-                f.put(accounts.FetchTarget(self.store, name, gen), now)
-                self.due_memo.pop(name, None)
-            else:
-                self.due_memo[name] = (key, at)
-
-    def _drain_fetch(self) -> None:
-        """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""
-        f = self.fetcher
-        if f is None:
-            return
-        failed = []
-        for name, got in f.results():
-            if isinstance(got, Exception):
-                failed.append({"account": name, "error": type(got).__name__})
-            elif got is not None and got.error == "shape" and not f.shape_told:
-                f.shape_told = True
-                self._say(wrapper_fetch.SHAPE_LINE)
-                self._log({"kind": "usage_shape", "account": name, "items": list(got.missing)})
-            elif got is not None and got.error is None:
-                f.shape_told = False
-        if failed:
-            self._log({"kind": "usage_fetch_failed", "count": len(failed), "sample": failed[:10]})
 
     @staticmethod
     def _length(sec: Section, now: float) -> float:
