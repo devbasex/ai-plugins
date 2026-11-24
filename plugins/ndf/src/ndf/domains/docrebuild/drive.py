@@ -19,7 +19,8 @@ from typing import Any, Optional
 
 from ndf import cli, contracts, identity
 from ndf.adapters import git
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
+from ndf.core import issue_docs
 from ndf.domains.docrebuild import select_decide as sd
 from ndf.domains.docrebuild.select_decide import Inspection, Target
 
@@ -32,6 +33,9 @@ RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
 REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
+# 保存先の中の起動指示と worker の結果ファイルの名前
+PROMPT_NAME = f"{WORK_KIND}.prompt.md"
+RESULT_NAME = f"{WORK_KIND}.result.json"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
@@ -124,16 +128,28 @@ def diff_paths(g: git.Git, start: str, head: str) -> list[str]:
     return [p for p in done.stdout.split("\0") if p]
 
 
-def _stat_or_none(path: Path) -> Optional[os.stat_result]:
-    """`lstat` の結果。作業場所に無ければ None。"""
+class Outside(Exception):
+    """パスの親ディレクトリのどれかがリンクかディレクトリでなく、パスが作業場所の中にあると言えない。"""
+
+
+def _stat_or_none(cwd: Path, rel: str) -> Optional[os.stat_result]:
+    """作業場所 `cwd` の中の `rel` の `lstat` の結果。作業場所に無ければ None。
+
+    末尾の名前だけでなく、`cwd` から末尾の手前までの親ディレクトリも 1 つずつ `lstat` し、リンクかディレクトリでない
+    要素があれば `Outside` を上げる。親ディレクトリがリンクだと、末尾が通常ファイルでも作業場所の外のファイルを指すためである。
+    """
+    parts = Path(rel).parts
     try:
-        return os.lstat(path)
+        for depth in range(1, len(parts)):
+            if not stat.S_ISDIR(os.lstat(cwd.joinpath(*parts[:depth])).st_mode):
+                raise Outside(rel)
+        return os.lstat(cwd / rel)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 作業場所に無いものは None で返し、呼び手が外す理由にする
         return None
 
 
 def inspect(cwd: Path, found: Sequence[Target]) -> Inspection:
-    """候補を `lstat` し、通常ファイル・作業場所にあるもの・実装計画の本文と、外す理由を返す（git を打たない）。"""
+    """候補を親ディレクトリから `lstat` し、通常ファイル・作業場所にあるもの・実装計画の本文と、外す理由を返す（git を打たない）。"""
     regular: set[str] = set()
     present: set[str] = set()
     excluded: dict[str, str] = {}
@@ -142,7 +158,11 @@ def inspect(cwd: Path, found: Sequence[Target]) -> Inspection:
     for t in found:
         path = cwd / t.path
         try:
-            st = _stat_or_none(path)
+            st = _stat_or_none(cwd, t.path)
+        except Outside:
+            present.add(t.path)
+            excluded[t.path] = "親ディレクトリがリンクで、作業場所の中にあると確かめられない"
+            continue
         except OSError as exc:
             present.add(t.path)
             excluded[t.path] = f"確かめられない（{type(exc).__name__}: {exc.strerror or exc}）"
@@ -166,35 +186,52 @@ def inspect(cwd: Path, found: Sequence[Target]) -> Inspection:
     return Inspection(frozenset(regular), frozenset(present), excluded, plans, unreadable)
 
 
-def requirements_of(cwd: Path, issues: Sequence[int]) -> list[str]:
-    """組になる要求仕様のコピーのうち、作業場所の通常ファイルのもの。"""
-    paths = dict.fromkeys(REQUIREMENTS_FILE.format(number=n) for n in issues)
-    return [rel for rel in paths if _is_regular(cwd / rel)]
+def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]]:
+    """設計書ごとの、組になる要求仕様のコピー（作業場所の中の通常ファイルのもの）。
+
+    組になるのは、設計書の名前に含まれる課題の番号すべての要求仕様である（`issue-7-8-design.md` なら課題 7 と 8）。
+    工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
+    """
+    out: dict[str, list[str]] = {}
+    for t in targets:
+        if t.kind != "design":
+            continue
+        paths = [REQUIREMENTS_FILE.format(number=n) for n in sorted(issue_docs.design_issues(t.path))]
+        found = [rel for rel in paths if _is_regular(cwd, rel)]
+        if found:
+            out[t.path] = found
+    return out
 
 
-def _is_regular(path: Path) -> bool:
+def _is_regular(cwd: Path, rel: str) -> bool:
     try:
-        return stat.S_ISREG(os.lstat(path).st_mode)
-    except OSError:  # noqa: NDF401 ファイル: 無い・確かめられない要求仕様は起動指示に載せない
+        st = _stat_or_none(cwd, rel)
+    except (Outside, OSError):  # noqa: NDF401 ファイル: 作業場所の外を指す・確かめられない要求仕様は起動指示に載せない
         return False
+    return st is not None and stat.S_ISREG(st.st_mode)
 
 
 def _root() -> Path:
     return identity.load().root
 
 
-def prompt_text(targets: Sequence[Target], requirements: Sequence[str], skill: Path) -> str:
-    """起動指示のテンプレートへ対象・要求仕様のコピー・手順書のパスを差し込む。読めなければ `Precondition`。"""
+def _target_line(t: Target, requirements: Mapping[str, Sequence[str]]) -> str:
+    """対象 1 件の行。設計書には、その設計書と組になる要求仕様のコピーを次の行に添える（無ければ「無し」）。"""
+    line = f"- `{t.path}`（{t.kind}）"
+    if t.kind != "design":
+        return line
+    paired = "・".join(f"`{r}`" for r in requirements[t.path]) if t.path in requirements else "無し"
+    return f"{line}\n  - 組になる要求仕様のコピー: {paired}"
+
+
+def prompt_text(targets: Sequence[Target], requirements: Mapping[str, Sequence[str]], skill: Path) -> str:
+    """起動指示のテンプレートへ対象（設計書ごとの要求仕様のコピーを添える）と手順書のパスを差し込む。読めなければ `Precondition`。"""
     path = _root() / PROMPT_TEMPLATE
     try:
         template = string.Template(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise Precondition(f"起動指示のテンプレート {path} を読めない: {exc.strerror or exc}") from None
-    return template.substitute(
-        targets="\n".join(f"- `{t.path}`（{t.kind}）" for t in targets),
-        requirements="\n".join(f"- `{r}`" for r in requirements) or "- 無し",
-        skill=str(skill),
-    )
+    return template.substitute(targets="\n".join(_target_line(t, requirements) for t in targets), skill=str(skill))
 
 
 def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -211,31 +248,47 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return got
 
 
-def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
-    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
-    prompt_file = args.state_dir / f"{WORK_KIND}.prompt.md"
-    result_file = args.state_dir / f"{WORK_KIND}.result.json"
-    try:
-        args.state_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt, encoding="utf-8")
-    except OSError as exc:
-        raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
-    argv = [
+def _argv(wd: worker_paths.WorkDir, cwd: Path) -> list[str]:
+    """`ndf worker run` の引数。保存先は開いて解いたパスで渡し、`--result-dir-id` で開いた保存先と突き合わせさせる。"""
+    dev, ino = worker_paths.dir_id(wd)
+    return [
         str(identity.entrypoint(_root())),
         "worker",
         "run",
         "--kind",
         WORK_KIND,
         "--prompt-file",
-        str(prompt_file),
+        str(wd.path / PROMPT_NAME),
         "--result-file",
-        str(result_file),
+        str(wd.path / RESULT_NAME),
         "--cwd",
-        str(args.cwd),
+        str(cwd),
         "--state-dir",
-        str(args.state_dir),
+        str(wd.path),
+        "--result-dir-id",
+        f"{dev}:{ino}",
     ]
-    return _worker_result(runner(argv, args.cwd)), result_file
+
+
+def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と、`ok` なら worker の結果ファイルの中身を返す。
+
+    保存先は 1 回だけ開いた記述子を最後まで持つ（`worker_paths.open_or_create`）。起動指示は既存のファイルを開かずに
+    私有の新しいファイルとして置き換え（`write_file(private=True)`）、既存のリンクをたどって別のファイルを上書きしない。
+    `ndf worker run` は起動指示をパスで開き直すので、渡す前に名前と祖先をほかの利用者が差し替えられないことを確かめる。
+    結果ファイルは、`--result-dir-id` で同じ保存先を確かめた `ndf worker run` が `ok` を返した後に、同じ記述子から
+    呼んだ利用者の私有のファイルだけを 1 回読む（`read_file(owned=True)`）。名前を開き直さないので、別の場所や
+    別の利用者が差し替えた結果を後ろの確かめへ渡さない。読めなければ `BadReport`、保存先を使えなければ `Precondition`。
+    """
+    try:
+        with worker_paths.open_or_create(args.state_dir) as wd:
+            worker_paths.write_file(wd, PROMPT_NAME, prompt, private=True)
+            worker_paths.check_unshared(wd, PROMPT_NAME)
+            out = _worker_result(runner(_argv(wd, args.cwd), args.cwd))
+            report = _read_report(wd) if out.get("status") == result.OK else None
+    except (worker_paths.EntryError, OSError) as exc:
+        raise Precondition(f"起動指示と結果の保存先 {args.state_dir} を使えない: {exc}") from None
+    return out, report
 
 
 def added_items(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]:
@@ -359,11 +412,16 @@ def _worker_stopped(out: Mapping[str, Any]) -> dict[str, Any]:
     return result.stopped(TOOL, kind or "work_stopped", f"組み直す worker が止まった: {said}", gaps=gaps)
 
 
-def _read_report(path: Path) -> dict[str, Any]:
+def _read_report(wd: worker_paths.WorkDir) -> dict[str, Any]:
+    """開いた保存先 `wd` の結果ファイルを、呼んだ利用者の私有のファイルだけ 1 回読む。無い・読めない・形が違えば `BadReport`。"""
+    path = wd.path / RESULT_NAME
     try:
-        report = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        text = worker_paths.read_file(wd, RESULT_NAME, owned=True)
+        report = json.loads(text) if text is not None else None
+    except (worker_paths.EntryError, ValueError) as exc:
         raise BadReport(f"worker の結果ファイル {path} を読めない: {exc}") from None
+    if text is None:
+        raise BadReport(f"worker の結果ファイル {path} が無い")
     if not isinstance(report, dict):
         raise BadReport(f"worker の結果ファイル {path} の中身がオブジェクトでない")
     return report
@@ -413,18 +471,14 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
         return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
     try:
-        prompt = prompt_text(chosen.targets, requirements_of(args.cwd, args.issues), _root() / SKILL)
-        out, result_file = run_worker(args, prompt, runner)
+        prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
+        out, report = run_worker(args, prompt, runner)
     except Precondition as exc:
         return result.stopped(TOOL, "precondition", exc.detail)
     except BadReport as exc:
         return result.stopped(TOOL, "bad_report", exc.detail)
     attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
     log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
-    if out.get("status") != result.OK:
+    if out.get("status") != result.OK or report is None:
         return _worker_stopped(out)
-    try:
-        report = _read_report(result_file)
-    except BadReport as exc:
-        return result.stopped(TOOL, "bad_report", exc.detail)
     return _checked(report, chosen.targets, chosen.skipped)
