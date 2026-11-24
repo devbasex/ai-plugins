@@ -47,9 +47,10 @@ MIN_ACCOUNT_CHARS = 3
 # 参照として拾い、秘密の範囲と重なる URL を全体ごと伏せるためである（#3959）。
 # リポジトリ名はリポジトリ名に使えない文字の手前で切り（日本語の句読点・全角の括弧・`,` に接しても一致する）、
 # 境界の `\w` は `re.ASCII` で ASCII に限る（`参照はacme/x#12` のように日本語の文字に接した参照も拾う）。
-# URL の続き（`/issues/1` など）は `/#?` で始まるときだけ、ASCII の区切りでない文字まで含める
+# URL の続き（`/issues/1` など）は `/#?` で始まるときだけ、ASCII の区切りでない文字まで含める。
+# スキームとホストは URL の規則どおり大文字・小文字を区別しない（`HTTPS://tok@GitHub.com/...` も URL の全体を拾って伏せる）
 _REPO_URL = re.compile(
-    r"(?<![\w.@-])(?:(?:https?|ssh|git)://(?:[^\s/@]+@)?|git@)?(?:git@github\.com:|(?:api\.github\.com/repos/|(?:www\.)?github\.com/))"
+    r"(?<![\w.@-])(?i:(?:(?:https?|ssh|git)://(?:[^\s/@]+@)?|git@)?(?:git@github\.com:|(?:api\.github\.com/repos/|(?:www\.)?github\.com/)))"
     r"(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?![A-Za-z0-9._-])(?:[/#?][^\s)\]>\"'`\u0080-\U0010ffff]*)?",
     re.ASCII,
 )
