@@ -203,7 +203,7 @@ scripts/
 | --- | --- | --- | --- | --- |
 | `Gh.__init__` | `scripts/ci_test_durations.py` | 新設 | `__init__(self, deadline: float \| None = None, clock: Callable[[], float] = time.time) -> None` | 呼び出しの締め切り（UNIX 時刻の秒）を持つ。`None` なら締め切りを持たない。`trend` は締め切りを渡し、手で打つ `run` は渡さない |
 | `Gh.get` | `scripts/ci_test_durations.py` | 新設 | `get(self, path: str, kind: str) -> Any` | `gh api <path>` を 1 回打ち、JSON を返す。呼び出しの数を `kind` ごとに数える |
-| `Gh.raw` | `scripts/ci_test_durations.py` | 新設 | `raw(self, path: str, kind: str) -> bytes` | `gh api <path>` を 1 回打ち、応答をそのまま返す（成果物の ZIP）。数え方は `get` と同じ |
+| `Gh.raw` | `scripts/ci_test_durations.py` | 新設 | `raw(self, path: str, kind: str, limit: int \| None = None) -> bytes` | `gh api <path>` を 1 回打ち、応答をそのまま返す（成果物の ZIP）。`limit` があれば、受け取ったバイト数が `limit` を超えた時点で `gh` を止める。数え方は `get` と同じ |
 | `read_config` | `scripts/ci_test_durations.py` | 新設 | `read_config(path: Path = CONFIG) -> dict[str, int \| float]` | 所要の設定を読み、3 つのキーの型を確かめる |
 | `shard_jobs` | `scripts/ci_test_durations.py` | 新設 | `shard_jobs(jobs: list[dict]) -> tuple[int, dict[int, dict]]` | ジョブの一覧から名前が `pytest (<番号>/<総数>)` のジョブを拾い、総数と番号ごとのジョブを返す |
 | `parse_junit` | `scripts/ci_test_durations.py` | 新設 | `parse_junit(data: bytes) -> list[tuple[str, float]]` | JUnit XML の `testcase` ごとに、テストの id（`classname::name`）と `time` を返す |
@@ -224,6 +224,7 @@ scripts/
   - 事後条件: `self.calls[kind]` が 1 増えている。`kind` は `jobs`・`pages`・`zips`・`artifacts` のどれかで、`trend` の最後の行に出すのは前の 3 つである
   - 1 回の上限の秒: 締め切りが無ければ `CALL_TIMEOUT` である。締め切りがあれば、`CALL_TIMEOUT` と締め切りまでの残りの秒の小さい方である。残りが 0 以下なら `gh` を起動せずに `GhTimeUp`（`GhError` の一種）を上げ、`calls` も増やさない
   - 副作用: 外部コマンド `gh api --method GET <path>` を上の上限で打つ（ネットワーク）
+  - `Gh.raw` の受信の上限: `limit` があるときは、`subprocess.Popen` で `gh` を起動し、標準出力を 64 KiB ずつ読む。受け取ったバイト数の和が `limit` を超えたら、`gh` を止め（`kill` の後に `wait`）、`ArtifactTooLarge`（受け取ったバイト数を持つ）を上げる。メモリに入るのは `limit` に 1 回分の読み取りを足したバイト数までである。上限の秒は `threading.Timer` で数え、過ぎたら `gh` を止めて `get` と同じ例外を上げる。`limit` が無いとき（`trend` が引く過去の回の集計の ZIP）は `get` と同じく `subprocess.run` で打つ
 - `read_parts`
   - 事前条件: `xml_dir` の下が、成果物の名前ごとのディレクトリである。`actions/download-artifact` を `merge-multiple` なしで使ったときと、`fetch_run` の展開の形がこれに当たる
   - 事後条件: ディレクトリの名前が `pytest-junit-<番号>` なら根、`pytest-ndf-junit-<番号>` なら NDF の部品になる。各部品は、中の `*.xml` の項目と、`shard-attempt-<番号>.txt` の整数（無いか読めなければ `None`）を持つ。XML の有無と試行の番号の有無は、別々に確かめる
@@ -246,17 +247,21 @@ scripts/
     | 検証するもの | 受け入れる形 | 外れたとき |
     | --- | --- | --- |
     | 成果物の名前 | `ARTIFACT_NAME` の正規表現 `^pytest(-ndf)?-junit-(\d+)$` に全体が当たり、番号がジョブの一覧の総数より小さい | 取りに行かない（ZIP を引かない）。その成果物は無いとして扱う |
-    | 成果物の大きさ | 成果物の一覧の `size_in_bytes` が `ARTIFACT_LIMIT` 以下で、それまでに取った成果物の大きさとの和が `TOTAL_LIMIT` 以下。取った後の ZIP のバイト数も `ARTIFACT_LIMIT` 以下 | 取りに行かない（取った後なら捨てる）。その成果物は無いとして扱い、読み飛ばした理由を標準エラーへ書く |
+    | 成果物の大きさ | 成果物の一覧の `size_in_bytes` が、`ARTIFACT_LIMIT` と累積の残り（`TOTAL_LIMIT` からそれまでに実際に受け取ったバイト数の和を引いた値）の小さい方以下 | 取りに行かない。その成果物は無いとして扱い、読み飛ばした理由を標準エラーへ書く |
+    | 受け取る ZIP の大きさ | `Gh.raw` に `limit` として、`ARTIFACT_LIMIT` と累積の残りの小さい方を渡す。一覧の `size_in_bytes` と実際の応答が違っても、受け取るのはこの上限までである | `ArtifactTooLarge` で受け取りを止め、その成果物は無いとして扱う。止めるまでに受け取ったバイト数も累積に足す。読み飛ばした理由を標準エラーへ書く |
     | ZIP の中のエントリの名前 | ディレクトリを含まない名前（`/`・`\` を含まない、`..` でない、空でない）で、成果物の番号と同じ番号の `pytest-junit-<番号>.xml`・`pytest-ndf-junit-<番号>.xml`（成果物の種類に合う方）・`shard-attempt-<番号>.txt` のどれかと一致する | 書き出さずに飛ばす。読むべきファイルが残らなければ、`read_parts` が XML の無い部品として扱う |
-    | 書き出すエントリの大きさ | 1 つの成果物から書き出すエントリの、展開した後のバイト数の和が `ARTIFACT_LIMIT` 以下 | その成果物から書いたファイルを消し、無いとして扱う。読み飛ばした理由を標準エラーへ書く |
+    | 書き出すエントリの大きさ | 受け入れる名前のエントリの、ZIP の見出しの `file_size` の和が `ARTIFACT_LIMIT` 以下 | 1 つも書き出さず、その成果物は無いとして扱う。読み飛ばした理由を標準エラーへ書く |
+    | ZIP が壊れていない | `zipfile.ZipFile` で開け、書き出す各エントリを最後まで読んで `BadZipFile` が出ない（`ZipExtFile` は見出しの `file_size` で読むのを打ち切り、CRC が合わなければ `BadZipFile` を上げる） | その成果物から書いたファイルをすべて消し、無いとして扱う。標準エラーへ「成果物 <名前> を読めない（壊れた ZIP）」を書く |
     | 書き出す先 | `dest / <成果物の名前> / <エントリの名前>` を `resolve()` した結果が、`dest.resolve()` の下にある | 書き出さずに飛ばす（上の 2 つが通れば起きないが、書く直前に必ず確かめる） |
 
-  - 書き出しは、検証を通ったエントリを `ZipFile.open` で開き、64 KiB ずつ読んで決めたパスへ書く。ZIP の中のパスをそのまま書き先に使わない。展開した後のバイト数は、ZIP の見出しの `file_size` を信用せず、読んだ実際のバイト数で数える。上限を超えた時点で読むのをやめる。`ZipFile.read` で一度に読まないのは、圧縮率の高い ZIP を展開したときに手元のメモリを使い切らないためである
-  - 読み飛ばした成果物は、`read_parts` から見ると部品が無いのと同じなので、`run` の出力では部分集計の「欠けたジョブ」に出る。標準エラーの理由は 1 成果物 1 行で、「成果物 <名前> を読み飛ばした（大きさの上限 <バイト数> を超えた）」の形にする
+  - 書き出しは、検証を通ったエントリを `ZipFile.open` で開き、64 KiB ずつ読んで決めたパスへ書く。ZIP の中のパスをそのまま書き先に使わない。`ZipFile.read` で一度に読まないのは、展開した中身を丸ごとメモリに置かないためである
+  - 展開した後の大きさは、見出しの `file_size` の和で書き出す前に判定する。標準ライブラリの `ZipExtFile` は `file_size` を超えて返さないので、見出しを小さく偽った ZIP は、実際の展開量で上限を超えることはなく、CRC の不一致で壊れた ZIP として扱われる
+  - 書きかけの片付け: 1 つの成果物の書き出しは、`dest/<成果物の名前>/` を作ってから始める。途中で `BadZipFile`・`OSError` が出たら、そのディレクトリごと消す。そのため、その成果物は `read_parts` から見て無いのと同じになる
+  - 読み飛ばした成果物は、`read_parts` から見ると部品が無いのと同じなので、`run` の出力では部分集計の「欠けたジョブ」に出る。標準エラーの理由は 1 成果物 1 行で、「成果物 <名前> を読み飛ばした（大きさの上限 <バイト数> を超えた）」か「成果物 <名前> を読めない（壊れた ZIP）」の形にする
   - 副作用: 成果物の一覧（`actions/runs/<run の ID>/artifacts?per_page=100`）・ジョブの一覧・成果物の ZIP を引く。`dest` にファイルを書く（呼ぶ側の `cmd_run` が一時ディレクトリを渡し、終わりに消す）
 - `cmd_trend`
   - 時間の予算: 中央値のジョブ全体を `JOB_BUDGET`（60）秒に収めるため、`Gh` に締め切りを渡す。締め切りは、ジョブの最初の手順が記録した時刻（環境変数 `CI_TEST_DURATION_STARTED`、UNIX 時刻の秒）に `JOB_BUDGET` を足し、集計を上げる手順の分 `UPLOAD_RESERVE` 秒を引いた時刻である。環境変数が無い（手で打つ）か整数でなければ、`trend` を始めた時刻を起点にする。`main` に `gh` を渡したテストでは、偽物の `Gh` が締め切りを持つ
-  - 時間切れのとき: どの取得で時間切れになっても、この回の集計は書き、判定はしない。出す注記は、時間切れになった取得で分かれる（「処理の手順」の `cmd_trend` の表）。この回のジョブの一覧で時間切れになったら、無効な集計（`reason` は「ジョブの一覧を取れない（時間の上限）」）を書き、`::warning title=テストの所要の読み取り::` だけを出す。過去の回の取得で時間切れになったら、有効な集計を書き、`::notice title=テストの所要::` にそろった回数と止めた理由「時間の上限」を書く
+  - 時間切れのとき: どの取得で時間切れになっても、この回の集計は書き、判定はしない。出す注記は、時間切れになった取得で分かれる（「処理の手順」の `cmd_trend` の表）。この回のジョブの一覧で時間切れになったら、無効な集計（`reason` は「ジョブの一覧を取れない（時間の上限）」）を書き、`::warning title=テストの所要の読み取り::` だけを出す。過去の回の取得で時間切れになったら、有効な集計を書き、`::notice title=テストの所要::` にそろった回数と止めた理由「時間の上限」を書く。時間切れの前に壊れた集計を飛ばしていたら（`unreadable` が空でない）、その notice に加えて `::warning title=テストの所要の読み取り::` も 1 行出し、飛ばした回の ID を並べる。時間切れでも、壊れた集計の警告は省かない
   - 事後条件: `--out` に集計の JSON がある（書けなかったときを除く）。`GITHUB_STEP_SUMMARY` があれば要約が書き足してある。終了コードは、引数の誤りと設定の誤りのときだけ 2 で、ほかは 0 である
   - 副作用: `--out` と `GITHUB_STEP_SUMMARY` のファイルを書く。標準出力へ注記の行を書く
 
@@ -279,7 +284,8 @@ scripts/
 | `cmd_run` | `gh` を使えない・run の ID の実行が無い・成果物の一覧が取れない | `GhUnavailable`・`GhError` | `fetch_run` | 止める | 標準エラーへ理由を書き、2 | 一時ディレクトリを消す。再実行できる |
 | `cmd_run` | 根か NDF の XML が 1 つも読めない | 残す前の回・保存期間を過ぎた回 | `cmd_run`（`read_parts` の結果） | 止める | 標準エラーへ「根の JUnit XML が無い」か「NDF の JUnit XML が無い」（両方なら 2 行）を書き、1 | 一時ディレクトリを消す |
 | `cmd_run` | 一部の成果物の ZIP が取れない | `GhError` | `fetch_run` | 既定値で続ける（その成果物を無いとして扱い、部分集計にする） | 先頭の行の「部分集計（欠けたジョブ: <番号>…）」。終了コード 0 | — |
-| `cmd_run` | 成果物が大きさの上限を超えた | 第三者の Pull Request が大きな成果物や圧縮率の高い ZIP を上げた | `fetch_run`（一覧の `size_in_bytes`・取った ZIP のバイト数・展開した実際のバイト数） | 既定値で続ける（その成果物を読み飛ばし、無いとして扱う） | 標準エラーへ読み飛ばした成果物の名前と上限を 1 行ずつ書く。先頭の行の「部分集計（欠けたジョブ: <番号>…）」。根か NDF の XML がすべて読み飛ばされたら 1 | 書きかけのファイルは消す。一時ディレクトリは `cmd_run` が消す |
+| `cmd_run` | 成果物が大きさの上限を超えた | 第三者の Pull Request が大きな成果物や圧縮率の高い ZIP を上げた | `fetch_run`（一覧の `size_in_bytes`・`Gh.raw` の `ArtifactTooLarge`・見出しの `file_size` の和） | 既定値で続ける（その成果物を読み飛ばし、無いとして扱う） | 標準エラーへ読み飛ばした成果物の名前と上限を 1 行ずつ書く。先頭の行の「部分集計（欠けたジョブ: <番号>…）」。根か NDF の XML がすべて読み飛ばされたら 1 | 書き出す前に判定するので、書きかけは残らない。一時ディレクトリは `cmd_run` が消す |
+| `cmd_run` | 成果物の ZIP が壊れている | 見出しの `file_size` や CRC が中身と合わない ZIP | `fetch_run`（`zipfile.BadZipFile`） | 既定値で続ける（その成果物を読めないものとして、無いとして扱う） | 標準エラーへ「成果物 <名前> を読めない（壊れた ZIP）」を書く。先頭の行の「部分集計（欠けたジョブ: <番号>…）」。根か NDF の XML がすべて読めなければ 1 | その成果物のディレクトリごと消す。一時ディレクトリは `cmd_run` が消す |
 | `main` | 引数の誤り | 利用者の打ち間違い | `argparse` | 止める | `argparse` の使い方の表示と 2 | — |
 
 `cmd_trend` の中で上の表に無い例外が出たときは、捕まえずに 1 で終わる。中央値のジョブは `continue-on-error: true` を持つので、ワークフローの結論には入らない（決定 3）。
@@ -320,7 +326,7 @@ scripts/
 | 有効で、設定の `runs` が 1 | 呼ばない（過去の回は要らない） | この回の合計だけを `verdict` に渡して判定する | 超えたら `::warning title=テストの所要::` が 1 行。上限以下なら出さない | 数えた回・中央値・上限・差の表 |
 | 有効 | `totals` が `runs − 1` 回（中央値に数える値が `runs` 回） | `verdict` で判定する | 超えたら `::warning title=テストの所要::` が 1 行。上限以下なら出さない | 数えた回・中央値・上限・差の表 |
 | 有効 | `totals` が `runs − 1` 回に満たない（過去の回の取得の時間切れ `stop="time_limit"` を含む） | しない | `::notice title=テストの所要::` が 1 行（そろった回数と止めた理由。時間切れなら「時間の上限」） | そろった回数と止めた理由 |
-| どちらでも | `unreadable` が空でない・`stop="list_error"` | 上の行のとおり | 上の行に加えて `::warning title=テストの所要の読み取り::` が 1 行 | 上の行に加えて読めなかったもの |
+| どちらでも | `unreadable` が空でない・`stop="list_error"` | 上の行のとおり | 上の行に加えて `::warning title=テストの所要の読み取り::` が 1 行。`stop="time_limit"` で `unreadable` が空でなければ、`::notice title=テストの所要::` の 1 行とこの警告の 1 行の両方を出す | 上の行に加えて読めなかったもの |
 
 - 繰り返しの終わる条件: `past_totals` は、ページの取得が 2 つの一覧の合計で `PAGE_LIMIT`（10）回、ZIP の取得が `2 × (runs − 1)` 回で必ず止まる。どちらも取得の前に数を確かめる。回数の上限だけでは、1 回 `CALL_TIMEOUT`（30）秒の呼び出しが最大 29 回並ぶと 870 秒かかるので、`Gh` の締め切りでも止める（`cmd_trend` の「時間の予算」）
 - 計算量の注意: 実行の一覧は `created_at` の新しい順に返る。実行番号は作られた順に振られるので、ページをまたいでも実行番号の大きい順と食い違わない。ページの中だけは `run_number` の大きい順に並べ直す。成果物の一覧は読んだページを `workflow_run.id` から成果物への辞書に足していき、候補ごとに一覧を読み直さない
@@ -406,11 +412,11 @@ scripts/
 | `match_attempts` | 6 つとも試行が一致し成功なら `accepted` が 6 つ | 試行の番号が 1 つだけ違うジョブは `stale` に入る。`conclusion` が `failure` のジョブは `accepted` と `failed` の両方に入る | 根だけあって NDF が無いジョブは `missing`。NDF の部品が試行の番号のファイルだけを持ち、その番号が一覧の `run_attempt` と一致しても `missing` に入り、`accepted` に入らない |
 | `current_total` | 組がそろうと `valid` が真で、根・NDF・合計の秒を持つ | `shard_attempts` が番号 0〜5 の順に並ぶ | 試行の番号が違う・ジョブの一覧が取れない・XML が壊れている、のどれでも `valid` が偽、秒が `None`、`reason` を持ち、`--out` のファイルは書かれる |
 | `past_totals` | 1 ページ目で 9 回がそろうと、ページ 2 回・ZIP 9 回で `enough` | 18 回目の ZIP で 9 回がそろうと `enough`。そろわなければ `zip_limit`。候補が 1 ページ目で足りないと 2 ページ目を読む。実行番号がこの回以上の実行は数えない。成果物の作成時刻が逆になっても実行番号の順で数える | 壊れた 1 回を飛ばして次の回を数える。`valid` が偽の集計と、`attempt` が `run_attempt` と違う集計を数えない。`run` が違う集計を数えず `unreadable` に足す。一覧が取れないと `list_error`。偽物の `Gh` が 3 回目の ZIP で `GhTimeUp` を上げると、2 回分の `totals` を持って `time_limit` で終わり、`unreadable` は空 |
-| `Gh.get`・`Gh.raw` | 締め切りまで残りがあると、`gh` の上限に残りの秒と `CALL_TIMEOUT` の小さい方を渡す（`subprocess.run` を差し替えて渡った `timeout` を見る） | 残りが 0 以下だと `subprocess.run` を呼ばずに `GhTimeUp`。時刻は偽の `clock` で進め、実際には待たない | — |
+| `Gh.get`・`Gh.raw` | 締め切りまで残りがあると、`gh` の上限に残りの秒と `CALL_TIMEOUT` の小さい方を渡す（`subprocess.run` を差し替えて渡った `timeout` を見る） | 残りが 0 以下だと `subprocess.run` を呼ばずに `GhTimeUp`。時刻は偽の `clock` で進め、実際には待たない。`Gh.raw` に `limit` を渡すと、偽の `Popen` の出力が `limit` を超えた時点で `kill` が呼ばれ、`ArtifactTooLarge` が上がる | — |
 | `verdict` | 中央値が上限を超えると `over` が真で、差が正 | 中央値が上限と等しいと `over` が偽 | — |
 | `render_trend` | 超えたとき `::warning title=テストの所要::` に中央値・上限・超えた秒が入る | 上限以下では `::warning` の行が無い。回数が足りないと `::notice title=テストの所要::` が 1 行だけ出る | 読めないものがあると `::warning title=テストの所要の読み取り::` に回の ID が入る |
-| `cmd_trend` | 超えたときも 0 を返す。`GITHUB_STEP_SUMMARY` に表を書く | 設定の `limit_seconds` だけを変えると判定が変わる。設定の `runs` が 1 なら、一覧のページと ZIP の呼び出しが 0 回で、この回の合計で判定する | `gh` が無いときも 0 を返し、この回の集計（無効）を書く。この回のジョブの一覧で `GhTimeUp` が上がると、無効な集計を書き、`::warning title=テストの所要の読み取り::` が 1 行で `::notice` は出ない。過去の回の取得で `GhTimeUp` が上がると、有効な集計を書き、`::notice title=テストの所要::` が 1 行で「時間の上限」を含む |
-| `fetch_run`・`cmd_run`・`render_run` | 根と NDF の両方の合計・遅い順の上位・ジョブごとの手順の秒を出す | 一部のジョブの成果物が無い・古い試行のジョブがある・試行の番号のファイルだけで XML の無い成果物があると、先頭に部分集計の行が出て 0 を返す。落ちたジョブの最新の XML は合計に入り、先頭に「失敗したジョブを含む」が出る | 根か NDF の XML が 1 つも無いと 1 を返し、無い側を標準エラーへ書く。期限切れの成果物は取りに行かない。`gh` が無いと 2。ZIP に `../x.xml`・`/tmp/x.xml`・`sub/pytest-junit-0.xml`・ほかの番号の XML を入れても、`dest` の外にも中にも書かれない。名前が `pytest-junit-0x` の成果物と、番号が総数以上の `pytest-junit-6` は ZIP を引かない。`size_in_bytes` が `ARTIFACT_LIMIT` を超える成果物は ZIP を引かない。見出しの `file_size` が小さくても展開すると `ARTIFACT_LIMIT` を超えるエントリを持つ ZIP は、その成果物のファイルを残さず、標準エラーに読み飛ばした理由が出る（上限は monkeypatch で小さくして確かめる） |
+| `cmd_trend` | 超えたときも 0 を返す。`GITHUB_STEP_SUMMARY` に表を書く | 設定の `limit_seconds` だけを変えると判定が変わる。設定の `runs` が 1 なら、一覧のページと ZIP の呼び出しが 0 回で、この回の合計で判定する | `gh` が無いときも 0 を返し、この回の集計（無効）を書く。この回のジョブの一覧で `GhTimeUp` が上がると、無効な集計を書き、`::warning title=テストの所要の読み取り::` が 1 行で `::notice` は出ない。過去の回の取得で `GhTimeUp` が上がると、有効な集計を書き、`::notice title=テストの所要::` が 1 行で「時間の上限」を含む。壊れた集計を 1 回飛ばした後の ZIP で `GhTimeUp` が上がると、その notice の 1 行と、飛ばした回の ID を含む `::warning title=テストの所要の読み取り::` の 1 行の両方が出る |
+| `fetch_run`・`cmd_run`・`render_run` | 根と NDF の両方の合計・遅い順の上位・ジョブごとの手順の秒を出す | 一部のジョブの成果物が無い・古い試行のジョブがある・試行の番号のファイルだけで XML の無い成果物があると、先頭に部分集計の行が出て 0 を返す。落ちたジョブの最新の XML は合計に入り、先頭に「失敗したジョブを含む」が出る | 根か NDF の XML が 1 つも無いと 1 を返し、無い側を標準エラーへ書く。期限切れの成果物は取りに行かない。`gh` が無いと 2。ZIP に `../x.xml`・`/tmp/x.xml`・`sub/pytest-junit-0.xml`・ほかの番号の XML を入れても、`dest` の外にも中にも書かれない。名前が `pytest-junit-0x` の成果物と、番号が総数以上の `pytest-junit-6` は ZIP を引かない。`size_in_bytes` が `ARTIFACT_LIMIT` を超える成果物は ZIP を引かない。一覧の `size_in_bytes` が小さくても、偽の `Gh.raw` の応答が `limit` を超えると `ArtifactTooLarge` で読み飛ばし、受け取ったバイト数が累積に足される。見出しを正しく書いた ZIP で、エントリの `file_size` の和が `ARTIFACT_LIMIT` を超えると、1 つも書き出さず標準エラーに読み飛ばした理由が出る。CRC を書き換えた ZIP と、見出しの `file_size` を小さく書き換えた ZIP は、壊れた ZIP として扱い、その成果物のディレクトリを残さない（上限は monkeypatch で小さくして確かめる） |
 | `main` | サブコマンドへ振り分ける | — | 引数が足りないと 2 |
 
 ## 所要の設定

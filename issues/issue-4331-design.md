@@ -422,13 +422,18 @@ sequenceDiagram
   - **許容する増分**: 増分が 10 秒以内であること。増分は、マージの前は ZIP の取得の秒の差で、マージの後は `elapsed_seconds` の差である。マージの後は、変更後の `elapsed_seconds` が測定の締め切り 120 秒に収まることも確かめる。10 秒は、見積もりの約 7 秒に 3 秒の余裕を足した値である。見積もりは 3 回の計測から求め、回ごとの差は 0.34 秒（6 個で 6.44〜6.78 秒）だったが、計測した日以外の回線の混み具合は測っていないため、余裕を置く
   - **比べる実行の決め方**: `ndf project measure` は、計測する実行を指定できない。`Python tests` の代表は、リポジトリ全体の成功した実行のうち、ジョブを飛ばしていない最新の実行である（`measure_ci.py` の `_measure_runs` と `_representative`）。変更後は、Pull Request の実行では中央値のジョブが飛ばされるので、代表に選ばれるのは `main` への push の実行だけになる。そのため、マージの前の判定は、実行の ID を指定して ZIP を直接取る秒で行う。`ndf project measure` は、マージの後に、選ばれた実行の ID を確かめてから値を読む
   - **マージの前の判定**: 変更前は `main` の run 45495601478 の根の JUnit の成果物 6 個、変更後は実装の Pull Request の CI の実行の 12 個を測る。どちらも、`ndf project measure` と同じく `gh api repos/devbasex/ai-plugins/actions/artifacts/<成果物の ID>/zip` で 1 個ずつ順に取り、合計の秒を 3 回ずつ測る。2 つは同じ機械で同じ日に続けて測る。変更後の中央値から変更前の中央値を引いた秒が増分である。2 つの実行の ID と 6 回の秒を Pull Request に書く
-  - **マージの後の確かめ**: 変更前の値は、実装に着手するときに `ndf project measure` を打って読む。変更後の値は、マージの後の最初の `main` への push の実行が成功してから、同じ機械で同じコマンドを打って読む。どちらも、結果の `test_duration` の `ci-junit` の説明（`run <ID>（.github/workflows/pytest.yml）の JUnit <本数> 本の合計`）から、選ばれた実行の ID と XML の本数を読む。変更前は変更を含まない実行で 6 本、変更後はマージの後の `main` の実行で 12 本であることを確かめる。違う実行が選ばれていたら、その値は使わず、意図した実行が最新になってから打ち直す。2 回の `elapsed_seconds`・実行の ID・本数を、要求の Issue（[#4331](https://github.com/devbasex/ai-plugins/issues/4331)）の本文に書く。マージの後で増分が 10 秒を超えたら、下の「まとめる形」へ変える変更を起票する
+  - **マージの後の確かめ**: マージの後は、選ばれた実行が次の条件に当たれば、その回の値を採用する。最初の実行を取り逃がしても、後の実行で測り直せる
+    - 変更前の値: 実装に着手するときに `ndf project measure` を打って読む。採用できるのは、選ばれた実行が変更を含まない実行で、XML が 6 本のときである
+    - 変更後の値: マージの後に、同じ機械で同じコマンドを打って読む。採用できるのは、選ばれた実行が `main` への push の実行で、その `head_sha` がマージのコミットを含み、XML が 12 本のときである。マージの後の最初の実行でなくてよい。変更後は、ジョブを飛ばしていない `Python tests` の実行が `main` への push の実行だけになるので、マージの後に成功した `main` の実行が 1 回でもあれば、その最新のものが選ばれる
+    - 選ばれた実行の読み方: 結果の `test_duration` の `ci-junit` の説明（`run <ID>（.github/workflows/pytest.yml）の JUnit <本数> 本の合計`）から、実行の ID と XML の本数を読む。`head_sha` は `gh api repos/devbasex/ai-plugins/actions/runs/<ID> --jq .head_sha` で読み、`git merge-base --is-ancestor <マージのコミット> <head_sha>` で含むかを確かめる
+    - 条件に当たらないとき: その値は採用しない。変更後は、マージの後の `main` の実行が成功するのを待ってから打ち直す
+    - 書く先: 2 回の `elapsed_seconds`・実行の ID・本数を、要求の Issue（[#4331](https://github.com/devbasex/ai-plugins/issues/4331)）の本文に書く。マージの後で増分が 10 秒を超えたら、下の「まとめる形」へ変える変更を起票する
   - **超えたとき**: マージの前の判定で増分が 10 秒を超えたら、同じ Pull Request の中で、根と NDF の XML を 1 つの成果物にまとめ（まとめる形）、ZIP を 6 個に戻してからマージする。変えるのは次の 4 か所で、最後に `run` で確かめる
-    - ワークフロー: 根の成果物を上げる手順を NDF のテストの後へ移し、`pytest-junit-<番号>` に根の XML・NDF の XML・試行の番号のファイルの 3 つを入れる。成果物 `pytest-ndf-junit-<番号>` は作らない
+    - ワークフロー: 根の成果物を上げる手順を NDF のテストの後へ移し、`pytest-junit-<番号>` に根の XML・NDF の XML・試行の番号のファイルの 3 つを入れる。成果物 `pytest-ndf-junit-<番号>` は作らない。移した手順の `if` は今と同じ `always()` のままにする。`if-no-files-found: warn` も今のままで、`continue-on-error` は付けない（転送の失敗は今と同じくジョブを落とす）。NDF のテストが落ちた回とキャンセルされた回にも、先に終わった根のテストの XML を残すためである。`!cancelled()` や `if` の省略にすると、キャンセルされた回や NDF のテストが落ちた回に根の XML が残らない
     - `fetch_run` の展開の規則: 成果物 `pytest-junit-<番号>` の中の `pytest-junit-<番号>.xml`・`pytest-ndf-junit-<番号>.xml`・`shard-attempt-<番号>.txt` の 3 つを受け入れる。今の規則は、この成果物の中の NDF の XML を飛ばすので、変えないと `run` に NDF の XML が届かない
     - `read_parts`: 根と NDF の部品を、成果物の名前でなく中のファイルの名前で見分ける。試行の番号のファイルは、同じ番号の根と NDF の両方の部品に使う
     - `seconds`（`scripts/pytest_shard.py` の `_seconds`）: `pytest-ndf-junit-` を含むかを、成果物のディレクトリの名前でなく XML のファイルの名前で見る
-    - 確かめ: まとめる形の CI の実行を `run` で読み、終了コードが 0 で、部分集計の行が出ず、根と NDF の両方の合計が出ることを確かめる
+    - 確かめ: 次の 3 つを確かめる。(1) まとめる形の CI の実行を `run` で読み、終了コードが 0 で、部分集計の行が出ず、根と NDF の両方の合計が出る。(2) 移した手順の `if` が `always()` であることを、Pull Request の差分で確かめる。(3) `read_parts` の範囲テストで、成果物に根の XML と試行の番号のファイルだけがある場合（NDF のテストが落ちたかキャンセルされた回）に、根の部品が読め、NDF の部品が欠けとして数えられる。NDF のテストをわざと落とした CI の実行は作らない
 - **同じファイルを触る別の変更**: `.github/workflows/pytest.yml` と `.ndf/project.json` は多くの変更が触る。マージの前に `main` を取り込み、ジョブの数を数え直す
 
 ### 代表のリポジトリでの振る舞い
