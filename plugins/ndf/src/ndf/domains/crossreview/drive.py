@@ -331,13 +331,19 @@ def _settle_resolved(run: _Run, left: Sequence[prior_decide.Thread], done: dict[
 
 def _carry(run: _Run, prior: _Prior) -> None:
     """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
-    結び（閉じたら返信して resolve する）、スレッドの無い指摘は最新の記録のコメントから戻す。状態ファイルが既に持つ
-    スレッド・指摘は引き継がず、そのうち別の実行が resolve したスレッドの指摘は修正の対象から外す。"""
+    結び（閉じたら返信して resolve する）、スレッドの無い指摘と、スレッドから引き継げなかった NDF の指摘（resolve 済みなど）は
+    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がず、そのうち別の実行が resolve したスレッドの
+    指摘は修正の対象から外す。"""
     done = run.data.setdefault(threads.THREADS, {})
     settled = _settle_resolved(run, prior.threads, done)
     tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
-    carried = prior_decide.carried(prior.threads, tracked) + prior_decide.recorded(prior.comments)
-    added = set(run.journal.carry(carried))
+    listed, marks = prior_decide.recorded(prior.comments)
+    carried = prior_decide.carried(prior.threads, tracked, marks)
+    held = tracked | {c.comment for c in carried}
+    carried += [c for c in listed if c.thread is None or c.thread not in held]
+    items = run.snapshot.items if run.snapshot is not None else ()
+    added = set(run.journal.carry(carried, items, run.mvv))
+    run.warnings += run.journal.warnings
     for c in carried:
         if c.id in added and c.comment is not None:
             done[c.id] = {"comment": c.comment}

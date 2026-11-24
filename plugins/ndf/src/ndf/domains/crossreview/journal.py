@@ -12,10 +12,10 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
-from ndf import identity
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records.mvv_decide import State
 
 
@@ -32,22 +32,13 @@ def _text(value: object) -> Optional[str]:
 OCCURRENCE = "occurrence"
 
 
-# 指摘がプロジェクト MVV に反するときの欄（#4076）。下の識別子は、どの MVV かを表す文字列（`records.mvv.Snapshot.identity`）
-# 反する項目（`Value 5`・`P1` など）
-MVV = "mvv"
-# 重さを、修正担当へ渡す重さに固定したか（`Value`・`Vision`・`Mission` に反する指摘）と、固定する前の重さ
-PINNED = "mvv_pinned"
-UNPINNED = "unpinned_severity"
-# 必ず人の承認が要る操作に当たるか（欄の名前は `finish_decide` が持つ）と、相手役が挙げたその番号（`P1`・`C7`）
-REDLINE_ITEMS = "redline_items"
-# 上の 5 つを決めたときの MVV の識別子
-JUDGED = "judged_mvv"
+# 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
+# `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
 HISTORY = "mvv_history"
 # 見送ったときの MVV の識別子
 SKIPPED_MVV = "skipped_mvv"
-# NDF が機械で確かめて作った指摘の `by` と、修正担当の結果で終わり方を変えない指摘へ修正担当が返した理由の欄
-BY_NDF = identity.FIXED_WORDS["entrypoint"]
+# 修正担当の結果で終わり方を変えない指摘へ修正担当が返した理由の欄
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
@@ -176,12 +167,35 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
 
 
+def _restore(row: dict[str, Any], c: prior_decide.Carried, items: Sequence[str], mvv: Optional[str]) -> bool:
+    """引き継いだ指摘 `row` に、前の実行が残した MVV の判定を戻す。別の MVV での判定は外して履歴に残す。同じ MVV なのに項目が
+    `items`（MVV の項目）に無ければ、判定を外して偽。"""
+    if c.judged_mvv is None:
+        return True
+    row |= {k: v for k, v in c._asdict().items() if k in MARKS and v is not None}
+    if c.judged_mvv != mvv:
+        _unclassify(row)
+        return True
+    if row["by"] == BY_NDF:
+        return True
+    named = [i for i in (c.mvv, *store.list_of(row, REDLINE_ITEMS)) if criteria_decide.mvv_item(i, items)]
+    if not named:
+        _unclassify(row)
+        return False
+    _classify(row, {}, named[0], items, mvv)
+    return True
+
+
+def _unknown_items(where: str, unknown: Sequence[str]) -> str:
+    """挙げた項目が MVV に無い指摘の注意。"""
+    return f"{where} {'・'.join(dict.fromkeys(unknown))} の mvv が承認済みの MVV の項目に無いので、普通の指摘として扱った"
+
+
 def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[str]) -> list[str]:
     """MVV の項目の書き方に問題のある指摘の注意（無ければ空）。相手役が書いた文は載せず、指摘の id だけを並べる。"""
     out = []
     if unknown:
-        names = "・".join(dict.fromkeys(unknown))
-        out.append(f"round {round_no} の指摘 {names} の mvv が承認済みの MVV の項目に無いので、普通の指摘として扱った")
+        out.append(_unknown_items(f"round {round_no} の指摘", unknown))
     if unexplained:
         names = "・".join(dict.fromkeys(unexplained))
         out.append(f"round {round_no} の MVV に反する指摘 {names} に起きること（impact）が無いが、重さを下げずに扱った")
@@ -200,7 +214,7 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で、相手役の指摘について結果に残す注意
+        # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
 
     def _next_id(self, round_no: int, by_ndf: bool = False) -> str:
@@ -314,10 +328,12 @@ class FindingJournal:
         row |= {"key": oscillation.finding_key(error["text"]), "text": error["text"], "severity": criteria_decide.at_least_blocking(None)}
         row |= {CITATION_KEY: key, "cited": error["cited"], "unknown": error["unknown"], JUDGED: mvv}
 
-    def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
+    def carry(self, carried: Sequence[prior_decide.Carried], items: Sequence[str] = (), mvv: Optional[str] = None) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
-        あれば入れない（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）。"""
+        あれば入れない（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）。`items` は承認済みの
+        MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
         added = []
+        unknown = []
         keys = {f.get("key") for f in self.rows.values()}
         for c in carried:
             key = oscillation.finding_key(c.text)
@@ -326,8 +342,11 @@ class FindingJournal:
             keys.add(key)
             row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
-            self.rows[c.id] = row | located
+            row = self.rows[c.id] = row | located
+            if not _restore(row, c, items, mvv):
+                unknown.append(c.id)
             added.append(c.id)
+        self.warnings = [_unknown_items("引き継いだ指摘", unknown)] if unknown else []
         return added
 
     def restate(self, mvv: Optional[str]) -> list[str]:
