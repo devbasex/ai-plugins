@@ -188,7 +188,7 @@ v10.5.0 は 22 件を 5 本の Pull Request へ束ねて通した。束の中の
 - 承認資料が承認したときと変わっていない
 - 承認したときの head が今の head の祖先である（履歴を書き換えた PR では問い直す）
 - プロジェクトが `.ndf/project.json` の `docs.behavior`（振る舞いを決める文書のパターンの配列）を宣言している。宣言ありとは、文字列の配列が書いてあることで、空の配列 `"behavior": []`（振る舞いを決める文書は無いという宣言）も含む。キーを省いたときは、どの文書が振る舞いを決めるか分からないので問い直す（`progress/command.py` の `behavior_declared`）
-- 承認したときの head から今の head までの差分が、文書だけの変更である。文書かどうかは拡張子ではなく、`.ndf/project.json` の `docs.files`（文書とみなすパスのパターン）で判定する。`docs.files` を省いたときは `**/*.md` を使う（`progress/command.py` の `DOC_FILES`）。具体的には、変わったファイルが 1 件以上あり、そのすべてが `docs.files` に当たり、`docs.behavior` に当たるファイルが 1 件も無いことを確かめる（工程の条件 `docs_only_diff` と同じ判定）。空のコミットや、変更を打ち消すコミットで head だけが進み、変わったファイルが 0 件のときは問い直す
+- 承認したときの head から今の head までの差分が、文書だけの変更である。文書かどうかは拡張子ではなく、`.ndf/project.json` の `docs.files`（文書とみなすパスのパターン）で判定する。`docs.files` を省いたときは `**/*.md` を使う（`progress/command.py` の `DOC_FILES`）。`docs.files` と `docs.behavior` のパターンは、どちらもリポジトリのルートからのパスに対する Git の glob として評価し、`!` で始まるパターンは一致したパスを結果から除外する（`progress/command.py` の `_pathspecs` が `git diff` の pathspec の `:(exclude,glob)` に変える）。変わったファイルが 1 件以上あり、そのすべてが `docs.files` の結果に含まれ、`docs.behavior` の結果に含まれるファイルが 1 件も無ければ、この条件を満たす（工程の条件 `docs_only_diff` と同じ判定）。空のコミットや、変更を打ち消すコミットで head だけが進み、変わったファイルが 0 件のときは問い直す
 
 どれか 1 つでも欠けるか、git の履歴を読めなければ、問い直す側に倒す（`progress/gate/answering.py` の `git_docs_only`）。
 
