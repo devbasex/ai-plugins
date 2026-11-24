@@ -39,7 +39,7 @@ src/ndf/
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 語の指摘の行の規則 | — | `FindingJournal` | `enter_words`・`settle_words`（新設）、`apply_fix`・`reopen`・`restore_fixed`（変更） |
 | `src/ndf/domains/crossreview/push.py` | 変更 | 修正の push | — | モジュール | `push_fix`（変更） |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 修正担当への指示の文 | — | モジュール | `fixer_docs`・`fixer_words`（新設） |
-| `src/ndf/progress/gate/words.py` | 新設 | 承認資料の前の検査 | `core.words`・`adapters.git` | モジュール | `gate_words`・`save_relaxed`・`new_relaxed`（新設） |
+| `src/ndf/progress/gate/words.py` | 新設 | 承認資料の前の検査 | `core.words`・`adapters.git` | モジュール | `gate_words`・`save_presented`・`presented`・`new_relaxed`（新設） |
 | `src/ndf/progress/gate/entry.py` | 変更 | 承認ゲートの待ちの結果 | `gate.words` | モジュール | `present`・`_progress`（変更） |
 | `src/ndf/progress/gate/asking.py` | 変更 | 承認資料の文と承認の対象 | `adapters.github`（`Pull` の型だけ） | `Target` | `material`（変更）・`material_text`・`quoted`（新設） |
 | `src/ndf/progress/gate/answering.py` | 変更 | 対象の読み取りと見直し | `gate.words` の型 | モジュール | `github_observe`・`recheck`（変更） |
@@ -145,7 +145,7 @@ src/ndf/
 | `in_text` | 同上 | 新設 | `in_text(name: str, text: str, source: Source) -> list[Hit]` | 文の全行（Markdown として）の当たりを返す。`name` は当たりの `path` になる |
 | `check_pull` | `core/words/pull.py` | 新設 | `check_pull(g: Git, pull: Pull, texts: Sequence[tuple[str, str]] = ()) -> Optional[PullCheck]` | 渡された PR の題・本文・足した行と `texts` を検査する。`PullCheck` は `hits`・`relaxed`・`head`・`base`（分岐点）・`removed`（分岐点にあった設定が head に無い）・`warning`（分岐点の規則を読めなかった理由。無ければ None）。head と分岐点の両方に用語集の設定が無いときだけ None |
 | `check_range` | 同上 | 新設 | `check_range(g: Git, base: str, head: str, texts: Sequence[tuple[str, str]] = ()) -> Optional[PullCheck]` | 分岐点 `base` と `head` の規則で、足した行と文を検査する。`check_pull` と `--base` が使う |
-| `may_have_settings` | 同上 | 新設 | `may_have_settings(g: Git, head: str) -> bool` | `head` に用語集の設定があるか、`head` の履歴に設定のパスを変えたコミットがあるか（`git log -1 --full-history --format=%H --end-of-options <head> -- <設定のパス>`。履歴の簡略化で消したコミットを飛ばさない） |
+| `may_have_settings` | 同上 | 新設 | `may_have_settings(g: Git, head: str) -> bool` | `head` の履歴に設定のパスを変えたコミットがあるか。`head` に設定があれば必ずあるので、設定の読み取りを別に打たない（`git log -1 --full-history --format=%H --end-of-options <head> -- <設定のパス>`。履歴の簡略化で消したコミットを飛ばさない） |
 | `fetch_missing` | 同上 | 新設 | `fetch_missing(g: Git, pull: Pull, head: bool, base: bool) -> None` | `head`・`base` で求められたコミット（`pull.head_sha`・`pull.base_sha`）のうち手元に無いものだけを、1 回の `git fetch` で取る（`refs/pull/<番号>/head`・`refs/heads/<ベース>`）。取った後も無ければ `GitError` |
 | `full_diff` | `adapters/git.py` | 新設 | `full_diff(a: str, b: str) -> str` | 全文つきの差分を、置き換え文字で読んで返す |
 | `has_commit` | 同上 | 新設 | `has_commit(sha: str) -> bool` | コミットが手元にあるか（`git cat-file -e <sha>`。終了コード 1 が無い） |
@@ -162,7 +162,7 @@ src/ndf/
 - `in_text`・`in_files`
   - 事後条件: `in_text` は名前と拡張子によらず全体を Markdown として、`in_files` は `.md` のファイルだけを Markdown として扱う（PR の題・本文の当たりの名前は拡張子を持たない）。Markdown のコードブロックの行（`markdown.code_lines`）と、左の空白を除いて `>` で始まる行は見ない。見出しの行（`markdown.block_kinds` の `heading`）は `heading=True` で当てる。`Source.examples` のファイルと語の組は返さない
 - `check_pull`
-  - 手順: (1) `pull.head_sha` が手元に無ければ、`pull.base_sha`（無いとき）と合わせて 1 回で取る。手元の HEAD と追跡ブランチの設定の有無で代えない。(2) `may_have_settings(head)` が偽なら、分岐点（head の履歴にある）にも設定は無いので、ほかに何も打たずに None を返す。(3) `pull.base_sha` がまだ手元に無ければ取る（(1) で取っていれば打たないので、fetch は高々 1 回）。(4) `merge_base(pull.base_sha, pull.head_sha)` と題・本文・`texts` を `check_range` に渡す
+  - 手順: (1) 先に `may_have_settings(head)` を打つ。git が失敗したときだけ `has_commit(head)` を見て、手元に無ければ `has_commit(base)` も見て、無いものを 1 回で取り、`may_have_settings` を打ち直す（手元にあるのに失敗したなら `GitError`）。手元の HEAD と追跡ブランチの設定の有無で代えない。(2) 偽なら、分岐点（head の履歴にある）にも設定は無いので、ほかに何も打たずに None を返す。(3) `pull.base_sha` がまだ手元に無ければ取る（(1) で取っていれば打たないので、fetch は高々 1 回）。起動の回数は設計文書の「非機能の実現方式」の表と同じにする。(4) `merge_base(pull.base_sha, pull.head_sha)` と題・本文・`texts` を `check_range` に渡す
   - 事後条件: GitHub を読まない。取れないコミットがあれば `GitError`（コマンドは `precondition`、承認ゲートは `refused`）で、None を返さない
 - `check_range`
   - 手順: 規則を `base` と `head` の両方のコミットから読み、両方に設定が無ければ差分を読まずに None を返す。どちらかにあれば `read_added` を 1 回打つ。head の規則の当たりを `hits`、規則が違うときに `base` の規則でだけ当たるもの（パス・行・語で比べる）を `relaxed` にする。足した行と `texts` に同じように当てる
@@ -209,7 +209,7 @@ src/ndf/
 | `check_pull` | PR の head の差分と用語集で当たる | 打つ場所の HEAD が PR と違う・コミットが手元にあれば fetch しない・head が手元にあり設定も履歴も無ければ fetch も差分も打たない・head が手元に無く、HEAD にも追跡ブランチにも設定が無い PR が用語集を新設する（取って当たる）・設定を消した PR（足した行・題・本文・文の当たりの全部が `relaxed`、`hits` は空）・`except` を足した PR の `relaxed`（題・本文・文を含む） | 取れない・取った後もコミットが無ければ `GitError`・分岐点の用語集だけが壊れていれば `warning` |
 | `Pull.from_rest`・`from_graphql` | 題と `base_sha` が入る | REST の上限で GraphQL に替わっても入る（`PULL_FIELDS` に 2 項目がある） | — |
 | `in_text` | 拡張子の無い名前（PR の題・本文）と `.txt` も Markdown として見た当たり | コードブロック・インラインコード・`>` の行・`>` の次の本文 | — |
-| `_glossary_words` | 0 件は `ok`、1 件以上は `check_failed`、3 つの対象をまとめる | 用語集の設定が両方に無い（`ok`）・対象にだけ無い（`ok` と `metrics.relaxed`） | 壊れた用語集は `config_broken`・引数なしと `--base --pr` は `invalid` |
+| `_glossary_words` | 0 件は `ok`、1 件以上は `check_failed`、3 つの対象をまとめる | 用語集の設定が両方に無い（`ok`）・対象にだけ無い（`ok` と `metrics.relaxed`） | 対象の壊れた用語集は `config_broken`・分岐点の側だけなら `ok` と `warnings`・引数なしと `--base --pr` は `invalid` |
 
 ## cross-review の語の検査
 
@@ -311,15 +311,17 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `gate_words` | `progress/gate/words.py` | 新設 | `gate_words(cwd: Path) -> WordsCheck` | 質問・読んだ対象・承認資料の文を受けて `check_pull` の結果を返す関数を作る（`WordsCheck = Callable[[Question, Target, Optional[str]], Optional[PullCheck]]`）。GitHub を読まない |
-| `Target` | `progress/gate/asking.py` | 変更 | `Target(head, material, pull: Optional[Pull] = field(default=None, compare=False, repr=False))` | 対象を読んだときの PR を持つ。`differs`・`as_dict`・`from_dict` は `pull` を扱わない |
+| `Target` | `progress/gate/asking.py` | 変更 | `Target(head, material, words: Optional[str] = None, pull: Optional[Pull] = field(default=None, compare=False, repr=False))` | `words` は回答する者が見た提示の記録の sha256（`as_dict`・`from_dict` のキーは `words_sha256`。`routes` は `--words-sha256`、`describe` は `words_sha256` に載せる）で、`differs` は比べない（今の側は決まらない。`recheck` が中身で比べる）。`pull` は対象を読んだときの PR で、`differs`・`as_dict`・`from_dict` は扱わない |
+| `ndf answer` の引数 | `progress/gate/entry.py` | 変更 | `--words-sha256`（任意。64 桁の 16 進でなければ `invalid`） | `_cmd_give` が `Target.words` に入れる。リリースのリクエストへの回答は `.seen.json` の `words_sha256` を使う |
 | `github_observe` | `progress/gate/answering.py` | 変更 | 変わらない | 読んだ `Pull` を `Target.pull` に入れる（読む回数は今の 1 回） |
-| `recheck` | 同上 | 変更 | `recheck(st, machine_id, observe, docs_only=never_docs_only, words: Optional[WordsCheck] = None)` | 文書だけの変更と決まった後・`_accept` の前に、`words(q, now, None)` を打つ。当たりがある・用語集か設定が `seen.head` と `now.head` で違う・`new_relaxed` が空でない・例外のどれかなら、`_accept` せずに今の「待ちへ戻す」処理へ進む |
-| `save_relaxed` | `progress/gate/words.py` | 新設 | `save_relaxed(path: Path, check: PullCheck) -> None` | 提示した `head` と `relaxed` を `<質問の id>.words.json`（承認資料の隣）に書く。出し直せば上書きする |
-| `new_relaxed` | 同上 | 新設 | `new_relaxed(path: Path, seen_head: Optional[str], check: PullCheck) -> list[Hit]` | `check.relaxed` のうち、記録に無い当たり（パス・語・中身の組を数で比べ、行の番号は比べない）を返す。記録が無い・読めない・記録の head が `seen_head` と違うなら `check.relaxed` の全部を返す |
+| `recheck` | 同上 | 変更 | `recheck(st, machine_id, observe, docs_only=never_docs_only, words: Optional[WordsCheck] = None)` | `words(q, now, None)` を打つのは 2 か所で、(a) 文書だけの変更と決まった後・`_accept` の前、(b) `differs` が空で、`presented(seen.words)` の記録の `text` が `now.pull` の題・本文・ベースの名前と違うとき（`differs` が空なら返る今の行の前。記録が無いときも打つ。記録の `checked` が偽でベースの名前が同じなら打たない）。当たりがある・用語集か設定が `seen.head` と `now.head` で違う・`new_relaxed` が空でない・例外のどれかなら、今の「待ちへ戻す」処理へ進む。payload に `model.MVV_KEY` がある回答（MVV 判定が省いた）では (a)・(b) とも打たない。(b) で問題が無ければ None を返す（承認をそのまま使う） |
+| `save_presented` | `progress/gate/words.py` | 新設 | `save_presented(dir: Path, gate_id: str, pull: Pull, check: Optional[PullCheck]) -> str` | 提示の記録 `{"head", "text", "base_ref", "checked", "relaxed"}` を `<質問の id>.<中身の sha256>.words.json`（承認資料の隣）に書き、sha256 を返す。`text` は題と本文とベースの名前の sha256、`checked` は用語集の設定があって検査したか（`check` が None なら偽・`relaxed` は空）。同じ名前があれば書かない。上書きしない |
+| `presented` | 同上 | 新設 | `presented(dir: Path, gate_id: str, words: Optional[str]) -> Optional[dict[str, Any]]` | 回答が指す提示の記録を返す。`words` が無い・記録が無い・読めないなら None |
+| `new_relaxed` | 同上 | 新設 | `new_relaxed(record: Optional[Mapping[str, Any]], seen_head: Optional[str], check: PullCheck) -> list[Hit]` | `check.relaxed` のうち、記録に無い当たり（パス・語・中身の組を数で比べ、行の番号は比べない）を返す。記録が None か記録の head が `seen_head` と違うなら `check.relaxed` の全部を返す |
 | `quoted` | `progress/gate/asking.py` | 新設 | `quoted(items: Iterable[str]) -> list[str]` | 項目を `str.splitlines()` で分け、すべての行を引用の行にする（先頭の行は `> - `、続きの行は `>   `）。空なら `bullets` と同じ 1 行 |
 | `material_text` | `progress/gate/asking.py` | 新設 | `material_text(root: Path, v: run.View, q: Question) -> str` | 書いてある承認資料があればその文、無ければ `material(v, q)` を返す |
 | `material` | 同上 | 変更 | 変わらない | 「未確認の点」を `quoted` で出す |
-| `present` | `progress/gate/entry.py` | 変更 | `present(st, machine_id, cwd, out, observe, env=None, words: Optional[WordsCheck] = None)` | `observe` で対象を読み、その `Target` で検査し、当たりがあれば `check_failed` の結果を返す。無ければ承認資料を書き、`replace(読んだ対象, material=書いた資料の sha256)` を質問の対象にする（対象を読み直さない）。`relaxed` は `metrics.words_relaxed` と `warnings` に載せ、検査したときは空でも `save_relaxed` で記録する |
+| `present` | `progress/gate/entry.py` | 変更 | `present(st, machine_id, cwd, out, observe, env=None, words: Optional[WordsCheck] = None)` | `observe` で対象を読み、その `Target` で検査し、当たりがあれば `check_failed` の結果を返す。無ければ承認資料を書き、`replace(読んだ対象, material=書いた資料の sha256)` を質問の対象にする（対象を読み直さない）。`relaxed` は `metrics.words_relaxed` と `warnings` に、`PullCheck.warning` は `warnings` に載せる。PR があれば（用語集の有無と `relaxed` の有無によらず）`save_presented` の返した sha256 を `Target.words` に入れてから `request_release` と `gate_result` に渡す（`.seen.json` は今と同じく初回だけ書く） |
 | `_progress` | 同上 | 変更 | 変わらない | `gate_words(cwd)` を 1 つ作り、`recheck` と `present` に渡す |
 
 - `gate_words` が返す関数
@@ -332,7 +334,7 @@ src/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `gate_words` が返す関数 | PR のコミットを取得できない | git の失敗 | その関数の中 | `model.Refused` を投げる | `refused`（今の観測の失敗と同じ） | 待ちのまま。打ち直せる |
-| `present` | 用語集が読めない | `WordsUnreadable` | `gate_words` が返す関数 | 資料を書かずに止まる結果を返す | `config_broken` | 待ちのまま。直して打ち直す |
+| `present` | PR の head の用語集が読めない（分岐点の側だけなら止めず `warnings`） | `WordsUnreadable` | `gate_words` が返す関数 | 資料を書かずに止まる結果を返す | `config_broken` | 待ちのまま。直して打ち直す |
 | `present` | 当たりがある | 廃止した語 | 検査 | 資料もリクエストも出さずに止まる結果を返す | `check_failed`（終了コード 1）。`items` に当たり、`summary` に件数 | 待ちのまま。直して打ち直せば承認ゲートになる |
 
 ### 既存の部品の再利用
@@ -347,8 +349,8 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `present` | 当たりがあれば資料のファイルもリクエストも無く `check_failed`、直せば `gate` | 2 回目の検査も全部の語・プランの中の承認ゲートでは検査しない・用語集が無い・PR の読み取りは 1 回で、質問の head は検査した head と同じ・`relaxed` があれば `gate` の結果に並ぶ | 用語集が壊れていれば `config_broken`・PR を読めなければ `refused` |
-| `recheck` | 当たりの無い文書だけの変更は今と同じく新しい head を記録する | 当たりがあれば記録せずに待ちへ戻る・用語集が変われば待ちへ戻る・提示したものと同じ `relaxed` だけなら記録し、1 件増えれば待ちへ戻る・提示の記録の head が違えば待ちへ戻る（`relaxed` があるとき）・用語集が無ければ今と同じ | 検査できなければ待ちへ戻る |
+| `present` | 当たりがあれば資料のファイルもリクエストも無く `check_failed`、直せば `gate` | 2 回目の検査も全部の語・プランの中の承認ゲートでは検査しない・用語集が無い・PR の読み取りは 1 回で、質問の head は検査した head と同じ・`relaxed` があれば `gate` の結果に並ぶ・`relaxed` の変わった出し直しが別の記録を作り、初回の記録と `.seen.json` が変わらない | head の用語集が壊れていれば `config_broken`・分岐点の側だけが壊れていれば `gate` と `warnings`・PR を読めなければ `refused` |
+| `recheck` | 当たりの無い文書だけの変更は今と同じく新しい head を記録する | 当たりがあれば記録せずに待ちへ戻る・用語集が変われば待ちへ戻る・提示したものと同じ `relaxed` だけなら記録し、1 件増えれば待ちへ戻る・提示の記録の head が違えば待ちへ戻る（`relaxed` があるとき）・head が同じで題か本文に当たりが増えれば待ちへ戻り、当たりの無い編集なら承認のまま・題と本文も同じなら検査を呼ばない・出し直しの後でも初回のリクエストへの回答は初回の記録と比べる・用語集が無い記録なら検査を呼ばない・MVV 判定が省いた回答では検査を呼ばない | 検査できなければ待ちへ戻る |
 | `material`・`quoted` | 未確認の点が引用の行になる | 未確認の点が無い・複数行の名前と理由のすべての行が `>` で始まる | — |
 
 ## 用語集のデータと設定
