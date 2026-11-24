@@ -49,7 +49,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `participants`・`drive` | `Resolved`（変更） | `_reviewers`（変更）・`_run_config`・`cmd_scope`・`_state_parsers`（読む値か help だけ変える） |
 | `src/ndf/domains/crossrefactor/launch.py` | 変更 | cross-refactoring の工程の担当の起動 | `participants` | モジュール | `_read_only`・`_collect_stdout`（呼ぶ先だけ変える）。`_answer_text` と定数 `READ_TOOLS` は消す（participants へ移す） |
 | `contracts/domains/cli-floors.json` | 変更 | 外部 CLI の下限の表 | — | — | `claude` の行に `"flag_floors": {"--restricted": "2.1.316"}` を足す。`min_version`（`2.1.268`）は変えない。`columns.flag_floors.summary` に「引数の名前から下限への対応。その引数で NDF が頼る振る舞いの不具合が直った最初のバージョンで、行の `min_version` 以上。行に無ければ `min_version` だけで比べる」と、足した理由（`--restricted` の読み取りの境界、#3955）を書く |
-| `src/ndf/adapters/cli_floor.py` | 変更 | 外部 CLI のバージョンを下限と比べる | `contracts.facts` | モジュール | `require(name, argv0, env=None, cwd=None, args: Sequence[str] = ())`（変更）。`args` に行の `flag_floors` の引数があれば、その下限のうち最も高いものと比べる。無ければ今のとおり `min_version` と比べる。`refuse_old`・`version` は変えない |
+| `src/ndf/adapters/cli_floor.py` | 変更 | 外部 CLI のバージョンを下限と比べる | `contracts.facts` | モジュール | `require(name, argv0, env=None, cwd=None, args: Sequence[str] = ())`（変更）。`args` に行の `flag_floors` の引数があれば、その下限のうち最も高いものと比べる。このとき、実行ファイルが見つからないか版を読めなければ、`Unverified`（`TooOld` の派生。新設）を投げて起動させない。`args` に `flag_floors` の引数が無ければ、今のとおり `min_version` と比べ、版を読めなければ通す。`refuse_old`・`version` は変えない |
 | `src/ndf/adapters/agents.py` | 変更 | 外部 CLI の起動と監視 | `cli_floor` | モジュール | `_guarded_run`（変更）。`cli_floor.require` に `args=spec.argv[1:]` を渡す |
 | `skills/cross-review/SKILL.md` | 変更 | cross-review の手順書 | — | — | 相手役の説明・終わり方の表・`review-scope` が起動の前に分かる席だけで範囲を決めること（受け入れ条件 14） |
 | `skills/cross-review/docs/01-state-and-review.md` | 変更 | 状態ファイルとレビューの資料の説明 | — | — | ラウンドの記録の `filled`・`reviewers` の意味・実行ごとに新しく作り、終わりに消す資料のディレクトリ `review-input-<ランダムな接尾辞>/` |
@@ -200,6 +200,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `ClaudeCall` | 読める場所を権限 `TOOLS` 以外で渡す | 呼び手の誤り | `__post_init__` | `ValueError` を投げる | テストで落ちる（利用者には出ない） | — |
 | `answer_text` | claude の出力の外側が JSON でない | 途中で切れた出力 | `json.loads` | 出力をそのまま返す（今と同じ） | 呼び手が `findings` を探し、無ければ結果が無いとして扱う | — |
 | `answer_text` | 出力のファイルが無い | 起動の失敗 | `read_text` の `OSError` | 呼び手へ返す（今と同じ。cross-refactoring は `is_file` で先に確かめる。cross-review は `_reviewer_findings` が受ける） | — | — |
+| 席の claude の起動 | claude の版を確かめられない | `--version` の出力の形が変わった・実行ファイルが見つからない | `agents.run_agent` の `cli_floor.require`（`--restricted` があるときだけ） | `Unverified` を受けて、起動せずに `refused` の状態を返す。版を確かめずに起動すると、読み取りの境界の不具合を含む版かもしれないためである | 駆動がその席を結果が無いとして扱う。注意に「版を確かめられない」理由が載る。修正担当とほかの席の起動は今のとおり通す | claude の `--version` が読めるように直して打ち直す |
 | 席の claude の起動 | claude が `--restricted` の下限より古い | 2.1.316 より前 | `agents.run_agent` の `cli_floor.require`（起動の引数の `--restricted` で `flag_floors` の下限を引く） | 起動せずに `refused` の状態を返す | 駆動がその席を結果が無いとして扱う。修正担当とほかの席の起動は今の下限で確かめるので断られない | claude を更新して打ち直す |
 
 ### 既存の部品の再利用
@@ -462,6 +463,6 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 - `cli-floors.json` に `flag_floors` を足した後は、`agents.run_agent` の `cli_floor.require` が、`--restricted` を付けた 2.1.315 以前の claude の起動だけを起動せずに `refused` で返す。`--restricted` を付けない起動は、今のとおり `min_version`（2.1.268）と比べる
 - テストは 2 か所に置く。どちらもバージョンの検査を差し替え、子のプロセスを起動しない（設計文書のテスト設計の「claude の下限」）
-  - `tests/adapters/test_cli_floor.py`: 2.1.315 のとき、`args` に `--restricted` があれば `TooOld`、無ければ通る。2.1.316 ならどちらも通る。2.1.267 ならどちらも `TooOld`
+  - `tests/adapters/test_cli_floor.py`: 2.1.315 のとき、`args` に `--restricted` があれば `TooOld`、無ければ通る。2.1.316 ならどちらも通る。2.1.267 ならどちらも `TooOld`。版を読めない（`--version` の出力が形に合わない）とき、`args` に `--restricted` があれば `Unverified`、無ければ今のとおり通る
   - `tests/domains/crossreview/test_crossreview_run.py`: 2.1.315 で、席を埋めない実行（codex と kiro が両方結果を返す）がレビューと修正担当の起動まで今と同じに進む。kiro の席を埋める実行では、席の claude だけが断られて結果の無い席になる
 - 手順書と確定仕様の文言は `.md` を照合するテストで縛らない（AGENTS.md の DON'T）。設計 PR と実装の PR のレビューで確かめる
