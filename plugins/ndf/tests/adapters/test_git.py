@@ -311,6 +311,32 @@ def test_run_bytes_returns_stdout_without_newline_conversion(tmp_path: Path) -> 
         git.Git(path).run_bytes("cat-file", "blob", "nope")
 
 
+def test_blobs_reads_every_name_in_one_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict] = []
+    oid = b"a" * 40
+    out = oid + b" blob 2\na\n\n" + b"HEAD:nope missing\n" + oid + b" tree 3\n\x00\n1\n" + oid + b" blob 4\nb\r\n\n\n"
+
+    def fake_run(cmd, **kwargs):
+        seen.append({"cmd": cmd, **kwargs})
+        return subprocess.CompletedProcess(cmd, 0, out, b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.Git(Path("/w")).blobs("HEAD:a", "HEAD:nope", "HEAD:d", "HEAD:b") == [b"a\n", None, None, b"b\r\n\n"]
+    assert [(s["cmd"], s["input"]) for s in seen] == [(["git", "cat-file", "--batch"], b"HEAD:a\nHEAD:nope\nHEAD:d\nHEAD:b\n")]
+
+
+@pytest.mark.parametrize(
+    ("ref", "want"), [("", "a" * 40), ("refs/tags/v1", "a" * 40), ("refs/heads/v1", None), ("refs/remotes/origin/v1", None), (None, None)]
+)
+def test_commit_named_resolves_commits_that_are_not_branches(ref: str | None, want: str | None) -> None:
+    def runner(args: list[str], cwd: Path | None) -> git.Completed:
+        if "--symbolic-full-name" not in args:
+            return git.Completed(0, "a" * 40 + "\n", "")
+        return git.Completed(1, "", "") if ref is None else git.Completed(0, ref + "\n", "")
+
+    assert git.Git(Path("/w"), runner).commit_named("v1") == want
+
+
 def test_run_bytes_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict = {}
 

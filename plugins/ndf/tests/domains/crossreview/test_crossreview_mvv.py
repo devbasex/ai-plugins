@@ -6,12 +6,10 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from ndf.adapters.github import Pull
 from ndf.domains.crossreview import criteria_decide, store, threads
 from ndf.domains.records import mvv
 
@@ -185,14 +183,18 @@ def _gathered_in_sprint_branch(repos: Repos) -> str:
     return gathered
 
 
+@pytest.mark.parametrize("form", ["full", "short", "tag"])
 def test_base_given_as_a_commit_reads_the_mvv_from_the_merge_target(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path, hub
+    form: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path, hub
 ) -> None:
-    """`--base` がコミットの SHA なら、MVV は PR のマージ先のブランチから読み、レビュー中のブランチが変えた MVV を使わない。
+    """`--base` がコミット（SHA・短縮した SHA・タグ）なら、MVV は PR のマージ先のブランチから読み、レビュー中のブランチが変えた MVV を使わない。
     差分は渡されたコミットと比べる。"""
     gathered = _gathered_in_sprint_branch(repos)
+    sh(wt, "fetch", "-q", "origin")
+    sh(wt, "tag", "gathered", gathered)
     fake = _fixing(tmp_path)
-    code, got = _run(capsys, monkeypatch, fake, wt, "--base", gathered)
+    given = {"full": gathered, "short": gathered[:10], "tag": "gathered"}[form]
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", given)
     assert (code, got["status"]) == (0, "ok")
     body, _ = _criterion_paths(_prompt(fake, "codex"), mvv_state)
     assert "バージョン 11" in _prompt(fake, "codex") and body.read_text(encoding="utf-8") == BODY
@@ -215,6 +217,38 @@ def test_unreadable_merge_target_stops_before_any_agent(repos: Repos, wt: Path, 
 
 
 def test_merge_target_is_the_base_of_the_pull_request() -> None:
-    pull = Pull(PR, "open", False, "h" * 40, BRANCH, "release", "", "", "", "")
-    hub = SimpleNamespace(pull=lambda number: pull if number == PR else None)
-    assert threads.GitHubPort(hub, None, PR, RuntimeError).base() == "release"
+    """マージ先はスレッドの一覧と同じ応答から読む。続くスレッドの読み取りは 1 回だけその一覧を使い、次は読み直す。"""
+
+    class Hub:
+        base = "release"
+        reads = 0
+
+        def repository(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+            self.reads += 1
+            page = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}
+            return {"pullRequest": {"baseRefName": self.base, "reviewThreads": page}}
+
+    hub = Hub()
+    port = threads.GitHubPort(hub, None, PR, RuntimeError)
+    assert (port.base(), port.open_threads(), port.base(), hub.reads) == ("release", [], "release", 1)
+    port.open_threads()
+    assert hub.reads == 2
+    hub.base = None
+    with pytest.raises(RuntimeError, match="マージ先"):
+        threads.GitHubPort(hub, None, PR, RuntimeError).base()
+
+
+@pytest.mark.parametrize("item", ["P1", "C1"])
+def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, item: str) -> None:
+    """必ず人の承認が要る操作の指摘は、軽い重さでも修正担当へ渡さず、未解決の欠けとして止めて人の判断へ戻す。"""
+    body = BODY + "\n## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n| P1 | 消す | 戻せない |\n"
+    _push_base(repos, body=body)
+    held = {"text": "人に聞く操作", "severity": "minor", "mvv": item}
+    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}, held], []], "kiro": [[], []]})
+    _, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "incomplete")
+    assert [g["reason"] for g in got["gaps"]] == ["人に聞く操作"]
+    assert "止まる" in _prompt(fake, "claude") and "人に聞く操作" not in _prompt(fake, "claude")
+    assert any(item in w and "人の判断" in w for w in got["warnings"])
+    rows = {r["text"]: r for r in _state(fake.state_dir)["findings"]}
+    assert (rows["人に聞く操作"]["mvv"], rows["止まる"]["mvv"], rows["止まる"]["outcome"]) == (item, "Value 1", "fixed")

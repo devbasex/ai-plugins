@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -238,3 +240,37 @@ def test_occurrence_is_new_for_each_raise_and_written_for_older_rows() -> None:
     assert journal_mod.with_occurrences(data)
     assert len(data["findings"][0][journal_mod.OCCURRENCE]) == 12 and data["findings"][1][journal_mod.OCCURRENCE] == "kept00000000"
     assert not journal_mod.with_occurrences(data)
+
+
+ITEMS = ("Value 1", "P1", "C7")
+
+
+def _named(text: str, mvv: str) -> dict:
+    return {"text": text, "severity": "major", "impact": IMPACT, "by": "codex", "mvv": mvv}
+
+
+@pytest.mark.parametrize("order", [("Value 1", "C7", "P1"), ("P1", "Value 1", "C7"), ("C7", "P1", "Value 1")])
+def test_redline_wins_over_other_items_in_any_order(order: tuple[str, ...]) -> None:
+    journal = journal_mod.FindingJournal()
+    assert journal.enter(1, [_named("A", m) for m in order], ITEMS) == frozenset()
+    [row] = journal.redlines()
+    assert (row["mvv"], row["redline_items"]) == ("P1", ["P1", "C7"])
+    assert journal.pending([]) == ([], [])
+
+
+def test_unknown_mvv_is_an_ordinary_finding() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(1, [_named("A", "P9")], ITEMS)
+    assert journal.redlines() == [] and [r["text"] for r in journal.pending([])[0]] == ["A"]
+
+
+def test_redline_reopens_what_the_fixer_deferred_but_not_what_a_person_decided() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(1, [_named("A", "Value 1")], ITEMS)
+    deferred = [{"id": "r1-1", "outcome": fin.SKIPPED, "reason": "当たらない"}]
+    journal.apply_fix(deferred, (), 1)
+    journal.enter(2, [_named("A", "P1")], ITEMS)
+    assert [r["id"] for r in journal.redlines()] == ["r1-1"] and journal.revived == ["r1-1"]
+    journal.apply_fix(deferred, (), 2)
+    journal.enter(3, [_named("A", "P1")], ITEMS)
+    assert journal.redlines() == []

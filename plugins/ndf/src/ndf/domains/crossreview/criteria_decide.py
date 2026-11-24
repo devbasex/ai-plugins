@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -30,6 +31,8 @@ SEVERITIES = "severities"
 DECL_VERSION = 1
 # 修正担当の会話を保存するかのキー（#4013）
 FIXER_SESSIONS = "fixer_sessions"
+# 必ず人の承認が要る操作の番号（`P1`・`C7`。MVV の項目の `Value 5`・`Vision` と見分ける）
+_REDLINE = re.compile(r"[A-Z][0-9]+")
 
 
 class ReviewDeclInvalid(ValueError):
@@ -49,6 +52,11 @@ def severity_of(value: Any) -> Optional[str]:
 def blocking(severity: Optional[str]) -> bool:
     """収束の妨げになる重要度か。分からない重要度（None）は妨げになる側に倒す。"""
     return severity is None or bool(facts.value(SEVERITIES, severity, "blocking"))
+
+
+def at_least_blocking(severity: Optional[str]) -> str:
+    """収束の妨げになる重さならそのまま、ほか（分からない重要度を含む）は妨げになる重さのうち最も軽いもの（major）。"""
+    return severity if severity is not None and blocking(severity) else _lightest_blocking()
 
 
 def _rank(severity: Optional[str]) -> int:
@@ -141,6 +149,11 @@ def mvv_item(value: object, items: Sequence[str]) -> Optional[str]:
     """相手役が指摘の `mvv` に書いた MVV の項目（例: `Value 5`）。前後の空白を除き、`items` に無ければ None。"""
     item = value.strip() if isinstance(value, str) else None
     return item if item in items else None
+
+
+def redline(item: str) -> bool:
+    """MVV の項目（`mvv_item` の値）が、必ず人の承認が要る操作か。"""
+    return _REDLINE.fullmatch(item) is not None
 
 
 def _mvv_lines(who: str, mvv: Optional[Snapshot]) -> list[str]:

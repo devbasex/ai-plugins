@@ -28,6 +28,11 @@ def _text(value: object) -> Optional[str]:
 OCCURRENCE = "occurrence"
 
 
+# 必ず人の承認が要る操作に当たる指摘かどうかと、相手役が挙げたその番号（`P1`・`C7`）の欄（#4076）
+REDLINE = "redline"
+REDLINE_ITEMS = "redline_items"
+
+
 def new_occurrence() -> str:
     """指摘の新しい発生の値（`uuid4` の 16 進の先頭 12 字）。"""
     return uuid.uuid4().hex[:12]
@@ -92,7 +97,8 @@ def _blocking(row: dict[str, Any]) -> bool:
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
-    指摘はキーで重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。
+    指摘はキーで重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。必ず人の承認が要る操作に
+    当たる指摘は、修正担当へ渡さず未解決のまま残す（終わり方の判定が欠けにして、人の判断へ戻す）。
     """
 
     def __init__(self, rows: Sequence[Any] = ()):
@@ -104,8 +110,9 @@ class FindingJournal:
         """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
         return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
 
-    def enter(self, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
-        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。見送り済みは扱わず、
+    def enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = ()) -> frozenset[str]:
+        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
+        MVV の項目で、指摘の `mvv` がこの中にあれば行に残す。見送り済みは扱わず、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
@@ -123,8 +130,25 @@ class FindingJournal:
                 by_key[key] = known
             else:
                 self._raised_again(known, item, round_no)
+            self._classify(known, criteria_decide.mvv_item(item.get("mvv"), items), items)
             touched[key] = known
-        return frozenset(key for key, row in touched.items() if _blocking(row))
+        return frozenset(key for key, row in touched.items() if _blocking(row) and not row.get(REDLINE))
+
+    def _classify(self, row: dict[str, Any], named: Optional[str], items: Sequence[str]) -> None:
+        """指摘が反する MVV の項目 `named` を行に残す。必ず人の承認が要る操作なら、`Value` などの項目や見送りより優先し、
+        軽い重さでも人の判断へ戻るよう収束の妨げになる重さにする。前に人が決めた同じ指摘は開き直さない。"""
+        if named is None:
+            return
+        if not criteria_decide.redline(named):
+            row.setdefault("mvv", named)
+            return
+        if not row.get(REDLINE) and row.get("outcome") == fin.SKIPPED:
+            row |= {"outcome": fin.UNRESOLVED, "reason": None, OCCURRENCE: new_occurrence()}
+            self.revived.append(str(row["id"]))
+        held = {named, *store.list_of(row, REDLINE_ITEMS)}
+        found = [i for i in items if i in held]
+        severity = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("severity")))
+        row |= {REDLINE: True, REDLINE_ITEMS: found, "mvv": found[0], "severity": severity}
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int) -> None:
         """既にある指摘が出し直されたとき。直した指摘なら未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す。
@@ -174,10 +198,14 @@ class FindingJournal:
         return [f["text"] for f in self.rows.values() if f.get("outcome") == fin.SKIPPED]
 
     def pending(self, handed: Sequence[fin.Handed]) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
-        """未解決の指摘と、まだ決めていない足すべき内容。"""
-        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f)]
+        """修正担当へ渡す未解決の指摘と、まだ決めていない足すべき内容（必ず人の承認が要る操作に当たる指摘は渡さない）。"""
+        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f) and not f.get(REDLINE)]
         undecided = [h for h in handed if h.id not in self.rows or self.rows[h.id].get("outcome") not in fin.DECIDED]
         return open_, undecided
+
+    def redlines(self) -> list[dict[str, Any]]:
+        """人の判断を待つ、必ず人の承認が要る操作に当たる未解決の指摘。"""
+        return [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and f.get(REDLINE)]
 
     def apply_fix(self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int) -> list[dict[str, Any]]:
         """修正の結果の指摘ごとの終わり方をマージ、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。"""

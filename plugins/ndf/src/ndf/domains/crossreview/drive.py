@@ -13,7 +13,8 @@
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
-   無ければ収束。前々ラウンドの指摘が戻っていれば振動で止める
+   無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は修正担当へ渡さず、未解決のまま欠けにして
+   人の判断へ戻す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
@@ -54,7 +55,7 @@ from ndf.domains.crossreview import (
     threads,
 )
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.journal import FindingJournal
+from ndf.domains.crossreview.journal import REDLINE_ITEMS, FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import mvv
 from ndf.testing import declared, scoped
@@ -122,7 +123,7 @@ class _Run:
     history: list[frozenset[str]]
     # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
-    # 起動の始めにベースブランチ（`--base` がコミットの SHA なら PR のマージ先）から読んだプロジェクト MVV（#4076）
+    # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
@@ -175,23 +176,15 @@ class _Prior(NamedTuple):
     comments: Sequence[prior_decide.Remark] = ()
 
 
-def _base_branch(base: str, remote: str) -> Optional[str]:
-    """`--base` から、リモートから取得するブランチの名前を決める。`<リモート>/<ブランチ>` の形も受ける。
-
-    コミットの SHA なら None（スプリントブランチへ単位の PR を集めた後のレビューは、集めた時点のコミットを `--base` に渡す）。
-    """
-    return None if git.FULL_SHA.match(base) else base.removeprefix(f"{remote}/")
-
-
 def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
     """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
 
-    `--base` がコミットの SHA のときだけ使う。その SHA はレビュー中のブランチの途中のことがあり、そこから MVV を読むと、
+    `--base` がコミット（SHA・タグなど）のときだけ使う。そのコミットはレビュー中のブランチの途中のことがあり、そこから MVV を読むと、
     レビュー中のブランチが自分で書き換えた MVV で自分を確かめることになる。
     """
     pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
     if reader_for is None:
-        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い（--base がコミットの SHA なので要る）")
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い（--base がコミットなので要る）")
     try:
         return reader_for(pr).base()
     except Exception as exc:
@@ -199,26 +192,55 @@ def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
         raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
 
 
-def _snapshot(cfg: RunConfig, ref: str) -> mvv.Snapshot:
-    """取得済みの参照 `ref` の MVV を読む。読めなければ、MVV を確かめないレビューにならないよう担当の起動前に止める（#4076）。"""
+class _Based(NamedTuple):
+    """起動の始めの同期の結果と、MVV を読むブランチ・差分の比較元のコミット。"""
+
+    synced: worktree.SyncResult
+    branch: str
+    commit: str
+
+
+def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
+    """PR のブランチと MVV を読むブランチを 1 回で取得して同期する。
+
+    `--base` がブランチ（`<リモート>/<ブランチ>` の形も受ける）なら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。
+    コミット（SHA・短縮した SHA・タグなど）なら、比較元はそのコミットのまま、MVV は PR のマージ先から読む（スプリントブランチへ
+    単位の PR を集めた後のレビューは、集めた時点のコミットを渡す）。完全な SHA でなければブランチとして取得し、取得できずに
+    手元でブランチでないコミットを指すときだけコミットとして扱う（ブランチ名の起動で Git を余計に打たない）。
+    """
+    remote = g.remote()
+    commit = cfg.base if git.FULL_SHA.match(cfg.base) else None
+    if commit is None:
+        branch = cfg.base.removeprefix(f"{remote}/")
+        try:
+            synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
+            return _Based(synced, branch, synced.base)
+        except git.GitError:
+            commit = g.commit_named(cfg.base)
+            if commit is None:
+                raise
+    target = _merge_target(cfg, reader_for)
+    return _Based(worktree.sync_worktree(g, cfg.branch, remote, base_branch=target), target, commit)
+
+
+def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
+    """同期で取得したコミットの MVV を読む。読めなければ、MVV を確かめないレビューにならないよう担当の起動前に止める（#4076）。"""
     try:
-        return mvv.current(cfg.worktree, ref)
+        return mvv.current(cfg.worktree, based.synced.base, outside=cfg.worktree)
     except (mvv.MvvError, identity.IdentityError, OSError) as exc:
-        raise DriveStopped("precondition", f"{ref} の MVV を読めない: {exc}") from exc
+        raise DriveStopped("precondition", f"{based.branch} の MVV を読めない: {exc}") from exc
 
 
 def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
-    remote = g.remote()
-    branch = _base_branch(cfg.base, remote)
-    source = branch if branch is not None else _merge_target(cfg, reader_for)
-    synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=source)
+    based = _sync(cfg, g, reader_for)
+    synced = based.synced
     if synced.conflicts:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
-    snap = _snapshot(cfg, f"refs/remotes/{remote}/{source}")
+    snap = _snapshot(cfg, based)
     # 差分の比較元をコミットで持つ。起動の途中で別のセッションがベースを取得しても、比べる相手は変わらない（#4090）
-    cfg = replace(cfg, base_commit=snap.commit if branch is not None else cfg.base)
+    cfg = replace(cfg, base_commit=based.commit)
     warnings: list[str] = []
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
@@ -630,6 +652,9 @@ def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。"""
     findings = run.journal.findings()
+    for row in run.journal.redlines():
+        named = "・".join(row[REDLINE_ITEMS])
+        run.warnings.append(f"指摘 {row['id']} は必ず人の承認が要る操作（{named}）に当たるので、修正担当へ渡さず人の判断に残した")
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -730,7 +755,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
-    run.history.append(run.journal.enter(round_no, raised))
+    run.history.append(run.journal.enter(round_no, raised, run.snapshot.items if run.snapshot is not None else ()))
     _detach_revived(run)
     record: dict[str, Any] = {
         "round": round_no,
@@ -786,7 +811,7 @@ def _reusable(run: _Run) -> bool:
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、PR のマージ先は `--base` がコミットの SHA のときだけ読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)

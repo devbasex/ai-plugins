@@ -94,7 +94,7 @@
 ### Task 7: 基準 5 の指示と、起動の始めのスナップショットとベースのコミットの固定
 
 - **対象ファイル:** `plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_mvv.py`（新設）
-- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を `<リモート>/<ベース>` で呼び、`settings.RunConfig` に足す `base_commit` を `dataclasses.replace(cfg, base_commit=snap.commit)` で固定、`MvvError` で相手役を起動せず `refused`）。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
+- **変更内容:** #4090 #4099 の詳細設計の「基準 5 と識別子」の節のうち指示の側（`criteria_lines`・`reviewer_block`・`fixer_block`・`mvv_item`、共通原則のスナップショットのパスを指示に載せる）と、「MVV の写し」の節の `drive._start`（`sync_worktree` に `base_branch`、`current` を同期で得たベースのコミットで呼び、`settings.RunConfig` に足す `base_commit` を起動の始めに固定、`MvvError` で相手役を起動せず `refused`）。`base_commit` は、`--base` がブランチなら `snap.commit`、コミット（SHA・短縮した SHA・タグ）なら渡されたコミットで、後者では MVV だけを PR のマージ先から読む（`snap.commit` を差分の起点にしない）。基準 5 を有効にするのと同時に、ジャーナルが指摘の `mvv` を持ち、`P`・`C` の指摘（`redline`・`redline_items`）を修正担当へ渡さず、未解決の欠けとして止めて人の判断へ戻す。`_merge_base` と相手役の差分の起点は固定したコミットを使う。`test_crossreview_mvv.py` は起動を通すテストの置き先（「修正対象」の頭のとおり）
 - **満たす受け入れ条件:** 4076:1、4076:2、4076:8（テスト設計の 4090-9・4090-11 の指示の側）
 - **進め方:** 失敗するテスト（承認済みの MVV があるのに指示に基準 5 とスナップショットのパスが無い）→ 通す最小実装 → 整理
 
@@ -122,9 +122,9 @@
 ### Task 11: ジャーナルの MVV の分類とレッドライン
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`
-- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（`ingest`・`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
+- **変更内容:** #4076 の詳細設計の「ジャーナルとレッドライン」を #4090 #4099 の「ジャーナルと引継ぎ」で置き換えた形のうち、引継ぎを除く部分（U5 が先に入れた `mvv`・`redline`・`redline_items` の上に、`ingest`・`enter` の `judged_mvv`・`unpinned_severity`、`handable`・`skipped_texts`・`apply_fix` の `skipped_mvv`、`restate`、`mvv_history`）。`_finding_gaps` はレッドラインを最初に除き、`mvv` を持つ指摘の未解決を `mvv_unresolved` にする。`drive.py` は修正担当へ `handable` の結果を渡す
 - **満たす受け入れ条件:** 4076:2、4076:4（テスト設計の 4090-6）
-- **進め方:** 失敗するテスト（`P1` の指摘が修正担当へ渡る）→ 通す最小実装 → 整理
+- **進め方:** 失敗するテスト（`P1` の指摘が収束を止める。修正担当へ渡らないことは U5 のテストが縛る）→ 通す最小実装 → 整理
 
 ### Task 12: 根拠の行の確かめの配線と確かめの成否
 

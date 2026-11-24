@@ -18,8 +18,9 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import git as git_mod
+from ndf.adapters import markdown
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import facts, limits
+from ndf.contracts import facts, limits, worker_paths
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -158,12 +159,37 @@ def _blob(g: git_mod.Git, name: str, where: str) -> bytes:
         raise MvvError(f"{where}を読めない: {exc}") from exc
 
 
+def _blobs(g: git_mod.Git, *names: str) -> list[Optional[bytes]]:
+    """blob の元のバイト列（無い・blob でないものは None）。git が失敗すれば `MvvError`。"""
+    try:
+        return g.blobs(*names)
+    except git_mod.GitError as exc:
+        raise MvvError(f"MVV の設定と本文を読めない: {exc}") from exc
+
+
 def _is_private(path: Path) -> bool:
-    """`path` が所有者のほかに権限を与えていない通常のファイルか（無ければ偽。リンクは辿らない）。"""
+    """`path` が、この利用者が所有し、ほかに権限を与えていない通常のファイルか（無ければ偽。リンクは辿らない）。"""
     if not os.path.lexists(path):
         return False
-    mode = path.lstat().st_mode
-    return stat.S_ISREG(mode) and stat.S_IMODE(mode) & 0o077 == 0
+    st = path.lstat()
+    return stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) & 0o077 == 0
+
+
+def _snapshot_dir(outside: Optional[Path]) -> Path:
+    """スナップショットのディレクトリ（リンクをたどった実体のパス。無ければ作る）。
+
+    担当はこのパスを後で開くので、確かめた後に中身を差し替えられる場所（`outside` の中・ほかの利用者が根までのどこかの
+    項目を差し替えられる場所）なら `MvvError`。
+    """
+    where = Path(os.path.realpath(_state_dir() / SNAPSHOT_DIR))
+    if outside is not None and where.is_relative_to(os.path.realpath(outside)):
+        raise MvvError(f"MVV のスナップショットの保存先 {where} がレビューする worktree {outside} の中にある。worktree の外にする")
+    try:
+        with worker_paths.open_or_create(where) as wd:
+            worker_paths.check_unshared(wd)
+            return wd.path
+    except worker_paths.EntryError as exc:
+        raise MvvError(f"MVV のスナップショットの保存先 {where} を使えない（ほかの利用者が中身を差し替えられる）: {exc}") from exc
 
 
 def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
@@ -182,23 +208,40 @@ def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
     return path
 
 
-def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
+def items(body: str, shared: str) -> tuple[str, ...]:
+    """MVV の本文と共通原則に実在する項目（`mvv_decide.items_of`）。コードブロックの中の例は数えない。"""
+    return md.items_of(_without_code(body), _without_code(shared))
+
+
+def _without_code(text: str) -> str:
+    """Markdown の本文の、コードブロックの行を空にする。"""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    inside = markdown.code_lines(text)
+    return "\n".join("" if no < len(inside) and inside[no] else line for no, line in enumerate(lines))
+
+
+def current(root: Path, ref: str, allow_mismatch: bool = False, outside: Optional[Path] = None) -> Snapshot:
     """参照 `ref`（取得済みの参照かコミット）の MVV を読み、承認済みなら本文と共通原則のスナップショットを書いて返す。
 
+    `ref` が完全な SHA なら解決し直さない。`outside` の中にはスナップショットを書かない（レビューする worktree を渡す）。
     設定がツリーに無いと確かめられたときだけ `absent`。参照・設定・本文を読めないときと、本文が承認の記録と合わない
     とき（`allow_mismatch` でない）は `MvvError`、スナップショットを書けないときは `OSError`。
     """
     g = git_mod.Git(root)
-    commit = _commit_of(g, ref)
+    commit = ref if git_mod.FULL_SHA.match(ref) else _commit_of(g, ref)
     held = _decl_blob(g, commit)
     if held is None:
         return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None)
-    raw = _blob(g, held, f"{commit} の MVV の設定（{decl_path()}）")
+    usual = md.body_path({})
+    # 本文は既定のパスにあると見込んで、設定と同じ 1 回の起動で読む
+    raw, guess = _blobs(g, held, f"{commit}:{usual}")
+    if raw is None:
+        raise MvvError(f"{commit} の MVV の設定（{decl_path()}）を読めない: {held}")
     decl = decl_from(raw, commit, root)
     if md.status(decl, None) == md.State.UNAPPROVED:
         return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None)
     path = md.body_path(decl)
-    body = _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
+    body = guess if path == usual and guess is not None else _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
     blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
     body = md.approved_form(decl, body)
     sha = _sha256(body)
@@ -211,11 +254,11 @@ def current(root: Path, ref: str, allow_mismatch: bool = False) -> Snapshot:
     if version is None:
         raise MvvError(f"{commit} の MVV の設定の最後のバージョンに番号が無い: {decl_path()}")
     shared = principles()
-    items = md.items_of(_text(body, path), shared.decode("utf-8"))
-    shared_sha, where = _sha256(shared), (_state_dir() / SNAPSHOT_DIR).absolute()
+    found = items(_text(body, path), shared.decode("utf-8"))
+    shared_sha, where = _sha256(shared), _snapshot_dir(outside)
     body_copy = _write_verified(where / f"v{version}-{sha[:_NAME_SHA]}.md", body, sha)
     shared_copy = _write_verified(where / f"principles-{shared_sha[:_NAME_SHA]}.md", shared, shared_sha)
-    return Snapshot(state, version, sha, body_copy, items, blobs, commit, shared_sha, shared_copy)
+    return Snapshot(state, version, sha, body_copy, found, blobs, commit, shared_sha, shared_copy)
 
 
 def _text(body: bytes, path: str) -> str:
