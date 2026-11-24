@@ -1,0 +1,14 @@
+{
+  "summary": "リリースの承認の証跡の判定（ndf.domains.release.approval_decide）と、判定を付ける commit status の状態。承認だけが success で、待ちは pending にして必須のチェックがマージを止める",
+  "owner": "D2（contracts/domains）",
+  "shared_names": true,
+  "columns": {
+    "commit_state": {"type": "string", "summary": "commit status の state", "ref": "domains/ci-outcomes"}
+  },
+  "rows": [
+    {"id": "approved", "commit_state": "success"},
+    {"id": "rejected", "commit_state": "failure"},
+    {"id": "stale", "commit_state": "pending"},
+    {"id": "missing", "commit_state": "pending"}
+  ]
+}

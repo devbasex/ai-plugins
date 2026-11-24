@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from ndf.contracts import limits
 from ndf.core import durable
-from ndf.progress import model, store
+from ndf.progress import backup, model, store
 
 T0 = datetime(2026, 11, 14, 0, 0, tzinfo=UTC)
 
@@ -90,7 +91,7 @@ def test_eighth_backup_drops_the_oldest(root):
     with store.open_store(store.default_url(root), root, T0) as st:
         taken = [store.backup(st.engine, root, T0 + timedelta(days=i), force=True) for i in range(1, 9)]
     kept = store.backups(root)
-    assert len(kept) == store.KEEP_BACKUPS
+    assert len(kept) == limits.value(backup.KEEP_BACKUPS, "count")
     assert taken[-1] in kept and store.backups(root)[0] == taken[1]
 
 

@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 from ndf import cli as top
 from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import causes, result
+from ndf.contracts import causes, limits, result
 from ndf.domains.backlog import (
     actions,
     actions_decide,
@@ -47,7 +47,8 @@ from ndf.domains.backlog import selection_decide as sel
 from ndf.domains.backlog.cli_input import Ranked, Stop, ndf_settings, rank_board, read_json
 
 TOOL = top.tool_of(__name__)
-DEFAULT_LIMIT = 10
+# 集める候補の件数の上限の既定の方針（contracts/limits.json）
+CANDIDATES = "backlog.candidates"
 PLAN_KEYS = {"repo", "rank", "rejected", "reschedule", "reparent", "actions", "create"}
 
 
@@ -396,7 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="action", required=True)
     c = sub.add_parser("candidates", parents=[common], help="候補を集める（手順 1）")
     c.add_argument("--add", type=numbers, default=[], help="必ず候補に入れる番号（カンマ区切り。上限で切らない）")
-    c.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    c.add_argument("--limit", type=int, default=int(limits.value(CANDIDATES, "count")))
     _add_depth_and_since_ref(c, "差分の起点（タグか SHA）")
     r = sub.add_parser("rank", parents=[common], help="順位を算出する")
     r.add_argument("--scores", help='見積の入力（{"issues": [...]}）')

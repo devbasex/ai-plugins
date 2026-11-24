@@ -14,7 +14,7 @@ from ndf.core import durable_locks as locks
 
 @pytest.fixture(autouse=True)
 def short_wait(monkeypatch):
-    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 0.2)
 
 
 def test_lock_owner_without_a_record(tmp_path):
@@ -63,7 +63,7 @@ def test_exclusive_lock_on_an_unwritable_place_is_config_broken(tmp_path):
 
 def test_exclusive_store_lock_does_not_wait(root, monkeypatch):
     path = locks.store_lock_path(root)
-    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 60.0)
+    monkeypatch.setattr(locks, "lock_wait_seconds", lambda: 60.0)
     with locks.store_lock(root, exclusive=True) as got:
         assert got == path and _recorded_owner(path)["pid"] == os.getpid()
         with pytest.raises(locks.StoreInUse) as err, locks.store_lock(root, exclusive=True):

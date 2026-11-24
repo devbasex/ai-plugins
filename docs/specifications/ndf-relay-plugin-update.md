@@ -359,7 +359,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `relay.plugin-update` | 120 秒（更新のコマンド 1 回ずつと、錠を待つ上限） | `plugins/ndf/contracts/limits.json` |
 | `relay-plugin-update` | `root: config`・`path: ndf/plugin-update.lock`（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/plugin-update.lock`） | `plugins/ndf/contracts/domains/locations.json` |
-| 導入の一覧の上限 | 30 秒（`adapters/claude.py` の `PLUGIN_LIST_TIMEOUT`） | コード |
+| `claude-plugins.list` | 30 秒（導入の一覧の上限） | `plugins/ndf/contracts/limits.json` |
 
 `ndf relay` のサブコマンドと引数・結果 JSON・終了コードは、この仕組みで変わらない。
 

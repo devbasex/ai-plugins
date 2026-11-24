@@ -90,8 +90,8 @@ def test_the_context_accepts_the_paces_of_both_groups(pace, ok):
 
 def test_a_schema_is_parsed_once_for_the_constant_and_the_validator(monkeypatch):
     read: list[Path] = []
-    load = contracts.read_text_json
-    monkeypatch.setattr(contracts, "read_text_json", lambda path: read.append(path) or load(path))
+    load = contracts.read_json
+    monkeypatch.setattr(contracts, "read_json", lambda path: read.append(path) or load(path))
     contracts.use_dir(None)  # 読み手のキャッシュを捨てる
     contracts.schema_enum(chosen.SCHEMA, "/properties/chooser")
     contracts.schema_errors({}, chosen.SCHEMA)
@@ -100,8 +100,8 @@ def test_a_schema_is_parsed_once_for_the_constant_and_the_validator(monkeypatch)
 
 def test_the_context_schema_is_parsed_once_for_the_paces_and_the_keys(monkeypatch):
     read: list[Path] = []
-    load = contracts.read_text_json
-    monkeypatch.setattr(contracts, "read_text_json", lambda path: read.append(path) or load(path))
+    load = contracts.read_json
+    monkeypatch.setattr(contracts, "read_json", lambda path: read.append(path) or load(path))
     contracts.use_dir(None)  # 読み手のキャッシュを捨てる
     _reread(model)
     definition.context_source("pace")

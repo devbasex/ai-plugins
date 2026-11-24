@@ -43,15 +43,15 @@ import sqlalchemy as sa
 from ndf import contracts, identity
 from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import causes, facts, result
+from ndf.contracts import causes, facts, limits, result
 from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
 
 # 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
-# 番号のぶつかり（同時の追記）で読み直して書き直す回数
-APPEND_ATTEMPTS = 3
+# 番号のぶつかり（同時の追記）で読み直して書き直す回数の方針（contracts/limits.json）
+APPEND = "progress.append"
 PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 # プロジェクト MVV の設定（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）
 MVV_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/" + facts.value("ndf-files", "mvv", "path")
@@ -127,7 +127,7 @@ class FactUnknown(Exception):
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
 # 差分の語（`diff_kinds` のキー）
-DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
+DIFF_WORDS = contracts.schema_enum(model.NDF_SCHEMA, "/$defs/diff_word")
 
 
 def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:
@@ -432,14 +432,20 @@ def read_current(conn: Any, machine_id: str) -> Current:
     return Current(rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id))
 
 
+def append_attempts() -> int:
+    """番号のぶつかりで読み直して書き直す回数。"""
+    return int(limits.value(APPEND, "attempts"))
+
+
 def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
-    """`write(conn)` を 1 つのトランザクションで打つ。番号がぶつかれば（`store.Conflict`）APPEND_ATTEMPTS 回まで打ち直す。"""
-    for attempt in range(1, APPEND_ATTEMPTS + 1):
+    """`write(conn)` を 1 つのトランザクションで打つ。番号がぶつかれば（`store.Conflict`）`append_attempts` 回まで打ち直す。"""
+    attempts = append_attempts()
+    for attempt in range(1, attempts + 1):
         try:
             with store.transaction(st) as conn:
                 return write(conn)
         except store.Conflict:
-            if attempt == APPEND_ATTEMPTS:
+            if attempt == attempts:
                 raise
     raise AssertionError("到達しない")
 

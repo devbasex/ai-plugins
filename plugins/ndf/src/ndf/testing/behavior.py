@@ -9,12 +9,14 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-# 1 件の確認の費用の上限（USD）
-BUDGET_USD = 1
+from ndf.contracts import limits
+
+# 1 件の確認の費用の上限（USD）の方針（contracts/limits.json）
+BUDGET_POLICY = "behavior-check.budget"
 
 
-def claude_check_command(plugin_root: Path, prompt: str, budget_usd: float = BUDGET_USD) -> list[str]:
-    """1 件の確認の起動の語の並び。リクエスト文は引数で渡す。"""
+def claude_check_command(plugin_root: Path, prompt: str, budget_usd: float | None = None) -> list[str]:
+    """1 件の確認の起動の語の並び。リクエスト文は引数で渡す。費用の上限（USD）は省けば設定の値。"""
     return [
         "claude",
         "-p",
@@ -25,7 +27,7 @@ def claude_check_command(plugin_root: Path, prompt: str, budget_usd: float = BUD
         "--verbose",
         "--no-session-persistence",
         "--max-budget-usd",
-        str(budget_usd),
+        str(limits.value(BUDGET_POLICY, "count") if budget_usd is None else budget_usd),
         prompt,
     ]
 

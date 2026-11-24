@@ -17,13 +17,14 @@ from typing import Optional
 
 import sqlalchemy as sa
 
+from ndf.contracts import limits
 from ndf.core import durable
 
 # バックアップの保存先の名前は耐久の記録のバックアップと同じ
 BACKUP_DIR = durable.BACKUP_DIR
 BACKUP_PREFIX = "progress-"
-# 残すバックアップの本数（8 本目を取ると最も古い 1 本を消す）
-KEEP_BACKUPS = 7
+# 残すバックアップの本数の方針（contracts/limits.json。超えた分は最も古いものから消す）
+KEEP_BACKUPS = "progress.keep-backups"
 # 戻すときの一時名の接尾辞と、退避の名前のマーカー
 RESTORING_SUFFIX = ".restoring"
 BROKEN_MARK = ".broken-"
@@ -85,7 +86,7 @@ def backup(
         dest.unlink(missing_ok=True)
         raise BackupFailed(f"ステートマシンの DB のバックアップを書けない: {dest}: {exc}") from exc
     os.utime(dest, (now.timestamp(), now.timestamp()))
-    for old in backups(root)[:-KEEP_BACKUPS]:
+    for old in backups(root)[: -int(limits.value(KEEP_BACKUPS, "count"))]:
         old.unlink(missing_ok=True)
     return dest
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Iterator
+from enum import StrEnum
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,14 @@ def test_read_failed_shard_is_test_failure_while_aggregate_pending() -> None:
     assert reading.verdict == "test_failed"
     assert [c.name for c in reading.failed_tests] == ["pytest (0/2)"]
     assert ci.cause_of(reading, ["pytest"]) == "test_failed"
+
+
+def test_the_verdict_prefers_the_upper_row_of_the_table(monkeypatch) -> None:
+    runs = [run("pytest", conclusion="failure", rid=1), run("doc-lint", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["pytest", "doc-lint"], ["pytest"])
+    assert reading.verdict == "test_failed"
+    monkeypatch.setattr(ci, "Verdict", StrEnum("Verdict", [(v.name, v.value) for v in reversed(ci.Verdict)]))
+    assert reading.verdict == "check_failed"
 
 
 def test_read_failed_non_test_check_is_check_failed() -> None:
