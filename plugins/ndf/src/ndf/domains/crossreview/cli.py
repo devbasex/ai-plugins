@@ -304,8 +304,9 @@ def cmd_scope(args: argparse.Namespace) -> int:
     sections = drive.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
     basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
-    prev = round_scope.previous_head(g, data, basis, "HEAD")
-    got = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, scope_decide.reviewed_of(data))
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data)
+    found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
+    got = round_scope.descended(g, found, "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 

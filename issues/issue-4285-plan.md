@@ -24,7 +24,7 @@
 | `src/ndf/contracts/writing.py`（新設） | `criteria`・`types_section` | U1 |
 | `src/ndf/domains/crossreview/criteria_decide.py` | `document_block` | U1 |
 | `src/ndf/domains/crossreview/drive.py` | `_Run.documents`・`_prepare_round`・`_review_prompt`・`_fix_prompt` | U1 |
-| `src/ndf/domains/crossreview/round_scope.py`（新設）・`cli.py`・`scope_decide.py` | `previous_head`（差分の範囲と、基準 6 の制限に使う前のラウンドの head を同じ条件で決める） | U1 |
+| `src/ndf/domains/crossreview/round_scope.py`（新設）・`cli.py`・`scope_decide.py` | `previous_head`・`descended`（差分の範囲と、基準 6 の制限に使う前のラウンドの head を同じ条件で決める） | U1 |
 | `src/ndf/core/worker.py` | `system_prompt` | U1 |
 | `contracts/schemas/internal/reading-check.schema.json`（新設） | 記録の 1 行の形 | U2 |
 | `src/ndf/contracts/internal.py`・`contracts/data/internal-names.json` | 種類 `reading-check` の登録 | U2 |

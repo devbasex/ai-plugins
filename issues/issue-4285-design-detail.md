@@ -38,8 +38,8 @@ plugins/ndf/
 | `contracts/writing.py` | 新設 | 基準の本文を読む | `criteria`・`types_section` |
 | `domains/crossreview/criteria_decide.py` | 変更 | 指示の行を作る | `document_block`（新設） |
 | `domains/crossreview/drive.py` | 変更 | 指示に行を加える | `_prepare_round`・`_review_prompt`・`_fix_prompt` |
-| `domains/crossreview/round_scope.py` | 新設 | ラウンドで渡す差分の範囲と、文書の指摘の制限の両方に使う、前のラウンドの head を決める | `previous_head` |
-| `domains/crossreview/{cli,scope_decide}.py` | 変更 | `review-scope` が `previous_head` を使う。使われなくなった `state_scope` を消す | `cmd_scope` |
+| `domains/crossreview/round_scope.py` | 新設 | ラウンドで渡す差分の範囲と、文書の指摘の制限の両方に使う、前のラウンドの head を決める | `previous_head`・`descended` |
+| `domains/crossreview/{cli,scope_decide}.py` | 変更 | `review-scope` は範囲を先に決め、前の head からの差分になるときだけ、`descended` で祖先かを確かめる。使われなくなった `state_scope` を消す | `cmd_scope` |
 | `core/worker.py` | 変更 | worker の指示に本文を入れる | `system_prompt` |
 | `domains/records/reading_decide.py` | 新設 | 質問を通すか止めるかを決める純粋関数 | `question_key`・`missing`・`light_rows` |
 | `domains/records/reading.py` | 新設 | 読み手役への指示を作り、記録を書き、読む | `prompt`・`add`・`rows`・`check` |
@@ -56,6 +56,7 @@ plugins/ndf/
 | `writing.types_section` | 新設 | `() -> str` | 4 つの型の節だけを返す。見出しが無ければ `ContractError` |
 | `criteria_decide.document_block` | 新設 | `(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]` | 下の表の行を返す。`documents` が偽なら空。`previous` は前のラウンドの head（`head`）と、その head から今の head までの差分のファイル（`diff`）で、`round_scope.previous_head` が `None` なら `None` |
 | `round_scope.previous_head` | 新設 | `(g, state, basis, head) -> Optional[str]` | 前のラウンドの head を返す。今回のレビュアーの全員が読み、比較基点とレビューの重点が今回と同じで、今の head の祖先であるラウンドに限る。当てはまるラウンドが無ければ `None` を返し、範囲は全差分になる |
+| `round_scope.descended` | `drive.py` から移す | `(g, scope, head) -> Scope` | `review-scope` 用。前の head からの差分の範囲だけ、前の head が今の head の祖先かを確かめ、祖先でなければ全差分に戻す。全差分の範囲では git を起動しない |
 | `_prepare_round` | 変更 | 変えない | Pull Request の全体の差分（`cfg.base...HEAD`）に Markdown のファイルがあるかを `_Run.documents` に入れる（ラウンドごとの差分では決めない）。前のラウンドの head からの差分を、`previous` としてレビュアーの全員に渡す。ラウンドの差分が前の head からの差分なら、同じファイルを使う。設計の PR で全差分を渡すラウンドだけ、別のファイルに 1 回作る |
 | `_review_prompt`・`_fix_prompt` | 変更 | `_review_prompt` は `_Prepared` を受け取る | `document_block` の行を指示に加える |
 | `worker.system_prompt` | 変更 | 変えない | `document-style` を読む作業（`kinds.json`）では、手順書の節の後に `writing.criteria()` を続ける |
@@ -64,7 +65,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `reviewer` | 指摘の基準 6「文書の読み手に通じない文」と、重要度の決め方（誤らせる文は major、読みにくいだけの文は minor） | `review-criteria.json` |
 | `reviewer` | 指摘に書かせる項目（引用・型・つまずく理由・書き直した案） | `review-criteria.json` |
-| `reviewer` | `previous` があるときだけ（1 ラウンド目と、レビュアーや重点を変えたり巻き直したりして全差分を読み直すラウンドでは入れない）: 基準 6 を major にしてよい範囲、前のラウンドの head（SHA）、その head からの差分のファイル | `review-criteria.json` |
+| `reviewer` | `previous` があるときだけ入れる。1 ラウンド目と、レビュアー・比較基点・重点の変更や巻き直しのために全差分を読み直すラウンドには、入れない。全体が読まれていないセクションが残るため全差分を渡す設計の PR には、入れる。内容は、基準 6 を major にしてよい範囲、前のラウンドの head（SHA）、その head からの差分のファイル | `review-criteria.json` |
 | `reviewer`・`fixer` | 基準の全文 | `writing-criteria.md` |
 | `fixer` | 文や段落を書き直し、前後の段落と一緒に読み直す、という指示 | `review-criteria.json` |
 

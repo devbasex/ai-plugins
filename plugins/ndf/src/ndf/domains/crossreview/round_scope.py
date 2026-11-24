@@ -1,7 +1,7 @@
-"""差分の起点に使える前のラウンドの head を、git で確かめて決める（比較基点・相手役・重点が今回と合うかは `scope_decide`）。
+"""差分の起点に使える前のラウンドの head を git で確かめる（比較基点・相手役・重点が今回と合うかは `scope_decide`）。
 
-`run` と `review-scope` の範囲も、文書の指摘の重要度の制限（#4285）も、ここで決めた head だけを使う。範囲と制限が別の条件で
-決まると、全差分を読み直す相手役に「前に読んだ文」の制限がかかる。
+`run` の範囲も、文書の指摘の重要度の制限（#4285）も、`previous_head` が返す head だけを使う。範囲と制限が別の条件で
+決まると、全差分を読み直す相手役に「前に読んだ文」の制限がかかる。`review-scope` は `descended` で同じ範囲を決める。
 """
 
 from __future__ import annotations
@@ -14,16 +14,25 @@ from ndf.domains.crossreview import scope_decide
 
 
 def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[str]:
-    """今回の `basis` と合う、相手役の全員が読めた最後のラウンドの head。無いか、`head` の祖先でなければ None（PR の全差分を読む）。
-
-    巻き直しで前の変更を取り除いた後の `前の head...HEAD` は分岐点から今の側だけを表し、前の head からの削除が相手役に渡らない
-    （PR 3944 の r6-7）。"""
+    """今回の `basis` と合う、相手役の全員が読めた最後のラウンドの head。無いか、`head` の祖先でなければ None（PR の全差分を読む）。"""
     prev = scope_decide.read_by_all_head(state, basis)
-    if prev is None:
-        return None
+    return prev if prev is not None and _reachable_from(g, prev, head) else None
+
+
+def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:
+    """前の head を git で確かめる前に決めた範囲のうち、前の head からの差分（`SINCE`）は、その head が `head` の祖先のときだけ
+    使い、ほかは PR の全差分へ戻す。全差分の範囲には git を起動しない（`review-scope` は範囲だけを返すので、前の head が要らない）。"""
+    if scope.base is None or _reachable_from(g, scope.base, head):
+        return scope
+    return scope_decide.Scope(scope_decide.FULL, None, ())
+
+
+def _reachable_from(g: git.Git, prev: str, head: str) -> bool:
+    """前の head が `head` の祖先か。巻き直しで前の変更を取り除いた後の `前の head...HEAD` は分岐点から今の側だけを表し、
+    前の head からの削除が相手役に渡らない（PR 3944 の r6-7）。"""
     try:
         kept = g.is_ancestor(prev, head)
     except git.GitError:
         # 前の head のコミットが手元に無い（巻き直しで消えた）。前の head からの差分は作れないので全差分にする
         kept = False
-    return prev if kept else None
+    return kept

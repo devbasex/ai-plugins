@@ -166,6 +166,20 @@ def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_re
     assert got["items"] == [_scope(scope_decide.SINCE, scope_run.heads["def"], [])]
 
 
+def test_scope_that_is_full_does_not_ask_git_for_the_last_head(scope_run, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#4285: 詳細レビューを通らないセクションが残る設計の PR は、前の head によらず全差分なので、祖先かを git に尋ねない。"""
+    from ndf.adapters import git
+
+    asked: list = []
+    original = git.Git.is_ancestor
+    monkeypatch.setattr(git.Git, "is_ancestor", lambda self, *a: asked.append(a) or original(self, *a))
+    rounds = [{"round": 1, "head": "abc", "base": MB}]
+    assert scope_run("design", {"pr": 8, "rounds": rounds})[1]["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
+    assert asked == []
+    assert scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})[1]["items"][0]["scope"] == scope_decide.SINCE
+    assert len(asked) == 1
+
+
 def test_scope_is_full_when_the_last_head_is_not_an_ancestor(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """PR 3944 の r6-7: 前の head の変更を取り除いて巻き直した（前の head が今の HEAD の祖先でない）なら、前の head からの
     差分では削除が相手役に渡らないので、PR の全差分を返す。前の head のコミットが手元に無いときも全差分。"""
