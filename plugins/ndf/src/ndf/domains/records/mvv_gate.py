@@ -115,43 +115,62 @@ def mvv_declared_locally(root: Path, remote: str) -> bool:
 
 def _in_trees(g: Git, commits: list[str], path: str) -> Optional[bool]:
     """コミット `commits` のどれかのツリーに `path` があれば真、どれにも無いと確かめられれば偽、手元のツリーが欠けて
-    確かめられないコミットがあれば None。階層ごとに `git cat-file --batch` を 1 回起動し、ツリーだけを読む。"""
-    wanted = [f"{c}^{{tree}}" for c in commits]
+    確かめられないコミットがあれば None。階層ごとに `git cat-file --batch` を 1 回起動し、ツリーだけを読む。
+
+    同じコミット・同じサブツリーを指す ID は 1 度だけ問い合わせる。次の階層のツリーが 1 つも見つからなければ、そこで起動を止める。
+    """
+    wanted = list(dict.fromkeys(f"{c}^{{tree}}" for c in commits))
+    parts = path.split("/")
     unsure = False
-    for depth, name in enumerate(path.split("/")):
+    for depth, name in enumerate(parts):
         if not wanted:
             break
-        found = _tree_entries(g.run_bytes("cat-file", "--batch", stdin="".join(f"{w}\n" for w in wanted).encode("utf-8")), len(wanted))
-        unsure = unsure or any(entries is None for entries in found)
-        hits = [entries[name.encode("utf-8")] for entries in found if entries is not None and name.encode("utf-8") in entries]
-        if depth == len(path.split("/")) - 1:
+        raw = g.run_bytes("cat-file", "--batch", stdin="".join(f"{w}\n" for w in wanted).encode("utf-8"))
+        missed, hits = _find_entries(raw, len(wanted), name.encode("utf-8"))
+        unsure = unsure or missed
+        if depth == len(parts) - 1:
             return True if hits else (None if unsure else False)
-        wanted = [oid for oid, kind in hits if kind == b"tree"]
+        wanted = list(dict.fromkeys(oid for oid, is_tree in hits if is_tree))
     return None if unsure else False
 
 
-def _tree_entries(raw: bytes, count: int) -> list[Optional[dict[bytes, tuple[str, bytes]]]]:
-    """`git cat-file --batch` の `count` 件の応答を、ツリーごとの名前 →（オブジェクト ID, 種類）にする。手元に無い・ツリーでない応答は None。"""
-    out: list[Optional[dict[bytes, tuple[str, bytes]]]] = []
+def _find_entries(raw: bytes, count: int, name: bytes) -> tuple[bool, list[tuple[str, bool]]]:
+    """`git cat-file --batch` の `count` 件の応答から、各ツリーの `name` のエントリー（オブジェクト ID, ツリーか）を集める。
+
+    最初の値は、手元に無い・ツリーでない応答があったか。応答はオフセットで走査し、本体や残りの応答をコピーしない。
+    """
+    missed, pos = False, 0
+    hits: list[tuple[str, bool]] = []
     for _ in range(count):
-        line, _, raw = raw.partition(b"\n")
-        head = line.split(b" ")
+        end = raw.find(b"\n", pos)
+        if end < 0:  # 応答が途中で切れた
+            return True, hits
+        head = raw[pos:end].split(b" ")
+        pos = end + 1
         if len(head) != 3:  # `<名前> missing` など、本体の続かない応答
-            out.append(None)
+            missed = True
             continue
-        size, width = int(head[2]), len(head[0]) // 2
-        body, raw = raw[:size], raw[size + 1 :]
+        body_end = pos + int(head[2])
         if head[1] != b"tree":
-            out.append(None)
-            continue
-        entries: dict[bytes, tuple[str, bytes]] = {}
-        while body:
-            mode, _, body = body.partition(b" ")
-            name, _, body = body.partition(b"\0")
-            entries[name] = (body[:width].hex(), b"tree" if mode == b"40000" else b"blob")
-            body = body[width:]
-        out.append(entries)
-    return out
+            missed = True
+        else:
+            hit = _tree_entry(raw, pos, body_end, name, len(head[0]) // 2)
+            if hit is not None:
+                hits.append(hit)
+        pos = body_end + 1
+    return missed, hits
+
+
+def _tree_entry(raw: bytes, start: int, end: int, name: bytes, width: int) -> Optional[tuple[str, bool]]:
+    """`raw[start:end]` のツリーの本体で `name` のエントリーを探し、（オブジェクト ID, ツリーか）を返す。無ければ None。"""
+    pos = start
+    while pos < end:
+        space = raw.index(b" ", pos, end)
+        nul = raw.index(b"\0", space, end)
+        if nul - space - 1 == len(name) and raw.startswith(name, space + 1):
+            return raw[nul + 1 : nul + 1 + width].hex(), raw[pos:space] == b"40000"
+        pos = nul + 1 + width
+    return None
 
 
 def snapshot_facts(root: Path, snap: mvv.Snapshot, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
