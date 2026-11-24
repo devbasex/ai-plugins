@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reading-check.schema.json",
+  "title": "読み手役が確認した記録の 1 行",
+  "description": "承認と判断の質問を出す前に、読み手役が質問の文と文書を確認した記録の行（表 ndf-files の reading-checks）。書き手は ndf.domains.records.reading。文書の本文・質問の文・残った文の引用は入れない",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "repo", "question_key", "prs", "reads"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "記録した時刻"},
+    "repo": {"type": "string", "minLength": 1, "description": "リポジトリ（owner/name）"},
+    "question_key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "質問ごとの文・複数選択か・選択肢の名前と説明だけを残し、キーの順を固定した JSON の SHA-256。計算は reading_decide.question_key を使う"},
+    "prs": {
+      "type": "array",
+      "description": "承認する PR。判断の質問と、PR の無い承認では空",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "branch", "head"],
+        "properties": {
+          "number": {"type": "integer", "minimum": 1, "description": "PR の番号"},
+          "branch": {"type": "string", "minLength": 1, "description": "PR の head のブランチ"},
+          "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "読み手役の確認を終えた時点の PR の head"}
+        }
+      }
+    },
+    "reads": {
+      "type": "array",
+      "minItems": 1,
+      "description": "読ませたもの。name が question の要素を 1 つ以上含む",
+      "contains": {"type": "object", "properties": {"name": {"const": "question"}}, "required": ["name"]},
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "reader", "round", "result"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "description": "文書のパスか、question（質問の文）・material（質問の直前に示す材料か承認資料）"},
+          "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
+          "round": {"enum": [1, 2], "description": "その立場で何回目の読みか"},
+          "result": {"enum": ["passed", "remained"], "description": "合格か、2 回目にも残ったか"}
+        },
+        "if": {"properties": {"result": {"const": "remained"}}, "required": ["result"]},
+        "then": {"properties": {"round": {"const": 2}}}
+      }
+    }
+  }
+}
