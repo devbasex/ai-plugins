@@ -50,7 +50,7 @@
 | `plugins/ndf/src/ndf/progress/plan/__init__.py` | `ndf lanes status` の `machine_waits`（起動の待ちの理由と数・マシンの集計） |
 | `plugins/ndf/src/ndf/domains/relay/hub.py`・`hub_decide.py` | リレーハブの判定。判定のたびに上限を読み（`_max_named`）、置き換えの起動（`hub_decide.replace`）は元のラッパーを止める前に本数を判定する。続きの起動は席を確かめる（`_seated_ok`）。一覧（`listing`）は錠を持つラッパーをすべて載せる |
 | `plugins/ndf/src/ndf/domains/relay/cli.py` | `ndf relay cap [--named <数> \| --clear]` と、`ndf relay spawn` の `--replace`・`--seat`・`--seated`・`--held` |
-| `plugins/ndf/contracts/limits.json` | `relay.max-named`（6）・`parallel-machine.admit-lock`（10 秒）・`parallel-run.poll`（60 秒） |
+| `plugins/ndf/contracts/limits/` | `relay.max-named`（6）・`parallel-machine.admit-lock`（10 秒）・`parallel-run.poll`（60 秒） |
 
 置き換えの起動の手は、引数の多い関数の検査（PLR0913）に掛からないよう、`launch.spawn` の引数を増やさず別の関数 `launch.replace` に分けてある。上限の読み手を `ndf.contracts` に置くのは、既存の子 D1 が持つパッケージで、`progress` と `domains` のどちらからも依存の向きが逆にならないためである。
 
@@ -147,7 +147,7 @@ flowchart TD
 | --- | --- | --- |
 | マシンの設定（`<状態の保存先>/relay/hub/cap.json`） | 1 | `ndf relay cap --named <数>`・`--clear` |
 | 環境変数 `NDF_RELAY_MAX_NAMED` | 2 | 起動した環境 |
-| 上限の設定 `relay.max-named`（`plugins/ndf/contracts/limits.json`、6） | 3 | プラグイン |
+| 上限の設定 `relay.max-named`（`plugins/ndf/contracts/limits/`、6） | 3 | プラグイン |
 
 マシンの設定を環境変数より先に読むのは、動いているプロセスが引き継いだ古い値より、後から書いた値を効かせるためである。起動の許可（`machine.cap`）・リレーハブの判定（`spawn`・`restart`）・`ndf lanes status` が同じ関数 `named_cap.read` で読む。
 
@@ -194,7 +194,7 @@ jq 'del(.max_lanes, .max_plans) | .lanes |= map(del(.plans))' plan.json > plan.j
 | `cap` | 整数か null | 判定に使った上限（`lock` は null） |
 | `unreadable` | 文字列の配列 | 状態を読めなかった計画 |
 
-### 上限の設定（`plugins/ndf/contracts/limits.json`）
+### 上限の設定（`plugins/ndf/contracts/limits/`）
 
 | 名前 | 値 | 意味 |
 | --- | --- | --- |

@@ -10,7 +10,7 @@
 | 利用者が端末の 1 行を見てどう続けるか | `plugins/ndf/skills/development-workflow/references/relay.md` の「落ちたときの続け方」 |
 | ラッパーの本体の契約（セグメント・シグナルファイル・`log.jsonl`・`run` の終了コード） | [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) |
 | 起動の直前の準備（プラグインの更新とメジャーバージョンの違いで止まる） | [ndf-relay-plugin-update.md](ndf-relay-plugin-update.md) |
-| 停止理由の種類と終了コード | `plugins/ndf/contracts/causes.json` の `precondition` |
+| 停止理由の種類と終了コード | `plugins/ndf/contracts/causes/` の `precondition` |
 
 ## 概要
 

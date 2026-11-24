@@ -58,7 +58,7 @@
 | 集約 | 書き手 | 根 |
 | --- | --- | --- |
 | プラグインの定義 | 版上げの PR | `.claude-plugin/plugin.json`・`.codex-plugin/plugin.json` |
-| 止まった理由の表 | 結果 JSON の契約を変える PR（下流の読み手とそのテストも同じ PR で直す） | `contracts/causes.json` |
+| 止まった理由の表 | 結果 JSON の契約を変える PR（下流の読み手とそのテストも同じ PR で直す） | `contracts/causes/` |
 | 進行表 | `progress` の書き手 | 進行表の DB |
 | 耐久の記録 | DBOS の殻（ほかは殻の関数を通してだけ読み書きする） | 実行の鍵の記録（SQLite は鍵ごとのファイル、URL は鍵ごとの `application_name`） |
 | チェックアウトの置き場 | DBOS の殻が形の番号を確かめて用意する | `<git の共通ディレクトリ>/<プラグイン名>/state/` |
@@ -73,7 +73,7 @@
 | `bin/ndf`・`bin/start.py` | エントリポイント 1 本と、依存の環境の欠けを確かめてから副命令の表（`src/ndf/cli.py` の `COMMANDS`）の各パッケージを呼ぶスクリプト |
 | `bin/ndf-claude` | このプラグインだけを読む claude の起動（`ndf launch-args` の値を使う。決定 74） |
 | `pyproject.toml`・`uv.lock` | 自分の依存の宣言と lock（決定 78） |
-| `contracts/` | 事実の表（`facts/`）・止まった理由（`causes.json`）・結果 JSON のスキーマ・上限（`limits.json`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
+| `contracts/` | 事実の表（`facts/`）・止まった理由（`causes/`）・結果 JSON のスキーマ・上限（`limits/`）・領域の表・工程の定義（`workflow/`）・プランの雛形・hook の表（`hooks/`） |
 | `src/ndf/adapters/` | GitHub・git・CI・Markdown・通知・LLM・外部 CLI の呼び出し |
 | `src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を `plugin.json` と環境から求め、旧い置き場を退避する |
 | `src/ndf/core/` | 判断のループ・DBOS の殻（`durable*.py`。置き場・鍵ごとの記録・ロック・退避と片付け・待ちの一覧で、DBOS を import するのはここだけ）・プランの実行（`plan/`）・行き先の選び方・参照・worker の受け渡し・ブランチ戦略 |
@@ -324,12 +324,12 @@ CLI の起動形は別で、hook の経路に合わせない。
 | 経路 | 起動形 | 依存の環境 |
 | --- | --- | --- |
 | hook（`hooks/entry.py`・`hooks/boot.py`） | 用意済みの環境の python を直に起動する。`uv run` を挟まない | `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>` |
-| CLI（`bin/ndf`） | `uv run --frozen --no-dev --project <根> python -P bin/start.py`。uv が無ければ版を固定した uv を入れてから続け、`start.py` が依存の欠けを確かめてから `python -m ndf` と同じに呼ぶ | `<キャッシュ>/<プラグイン名>/venv/<NDF の版>`（`UV_PROJECT_ENVIRONMENT`） |
+| CLI（`bin/ndf`） | `uv sync --frozen --no-dev --inexact --project <根>` を 1 起動に 1 回打ってから `uv run --no-sync --no-dev --project <根> python -P bin/start.py`。uv が無ければバージョンを固定した uv を入れてから続け、同期できなければ結果 JSON（`stopped`・`deps_missing`）で止まる。`start.py` が依存の欠けを確かめてから `python -m ndf` と同じに呼ぶ | `<キャッシュ>/<プラグイン名>/venv/<NDF のバージョン>`（`UV_PROJECT_ENVIRONMENT`） |
 
 - 採らなかった案: hook も `bin/ndf` から起動する。依存の確かめと起動し直しが毎回の所要に入る
 - 採らなかった案: 古い環境の片付けを `uv cache prune` に任せる。NDF が lock の hash ごとに置いた環境は対象に入らない
 
-### 決定 90: 遅い hook と長い注入を CI で見つけるよう、事象ごとの予算を `limits.json` に置き、上限の順序を検査し、すべての登録に timeout を付ける
+### 決定 90: 遅い hook と長い注入を CI で見つけるよう、イベントごとの予算を `contracts/limits/` に置き、上限の順序を検査し、すべての登録に timeout を付ける
 
 | 事象 | p95 の目標 | 締め切り | 余白 | timeout | 注入の上限 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -341,7 +341,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | SessionEnd・Notification・StopFailure | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 0 字 |
 | SessionEnd（Codex） | 300 ms | 2 秒 | 0.5 秒 | 3 秒 | 0 字 |
 
-値は `limits.json` の `hook.budget.<事象>`（ランタイムで違えば `.<ランタイム>`）にある。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
+値は `contracts/limits/` の `hook.budget.<イベント>`（ランタイムで違えば `.<ランタイム>`）にある。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
 
 ### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは宣言した guard だけにする
 
@@ -384,7 +384,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 
 ### 決定 96: guard の止め方を 1 つで覚えられるよう、止める環境変数を `NDF_HOOK_OFF` の 1 つにする
 
-止める guard の名前をカンマでつなぐか `all` を渡す。閾値は `limits.json` に置き、環境変数で受けない。10 系の変数名（`NDF_SLEEP_GUARD` など）は読まない。
+止める guard の名前をカンマでつなぐか `all` を渡す。閾値は `contracts/limits/` に置き、環境変数で受けない。10 系の変数名（`NDF_SLEEP_GUARD` など）は読まない。
 
 ### 決定 97: 子が依存を迷わないため、先に要るものを「import する部品の持ち主」から引き、表に無い import を検査で落とす
 

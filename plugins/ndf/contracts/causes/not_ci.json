@@ -1,0 +1,7 @@
+{
+  "meaning": "マージが CI 以外の理由（保護の規則・権限）で断られた",
+  "std_type": "authorization",
+  "exit": "failed",
+  "route": "human",
+  "retry": null
+}

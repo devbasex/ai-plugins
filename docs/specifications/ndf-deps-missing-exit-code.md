@@ -31,6 +31,9 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 
 この文書が扱うのは、Skill と表に書かない決定の理由、常に成り立つ条件、部品の契約、テスト観点である。
 
+**11 系のエントリポイント `plugins/ndf/bin/ndf` が依存を用意できないとき**（uv が無い・入れられない・依存を同期できない）の結果 JSON と終了コード 69 は、
+[ndf-split-tables-toolchain-and-budget.md](ndf-split-tables-toolchain-and-budget.md) の「依存の用意」にある。以下の `deps.require` は 10 系のものである。
+
 ## 用語
 
 定義は [用語集](../glossary.md) が正である（`.ndf/glossary.json` の `document`）。この文書で使う語は

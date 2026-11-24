@@ -26,12 +26,12 @@ from ndf.domains.records import files
 from ndf.domains.project.items import MEASURED, QUESTION, obj, seq
 from ndf.domains.project.secret import has_secret, redact
 
-# 解析が測る設定の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形のバージョン・非推奨のキーと、
-# ndf project branch-strategy だけが書くブランチ戦略の設定
+# 解析が測る設定の項目（スキーマの並びの順）。外すのは人が書く項目（検査が読む toolchain・budget を含む）・解析の記録・
+# 形のバージョン・非推奨のキーと、ndf project branch-strategy だけが書くブランチ戦略の設定
 ITEM_KEYS = tuple(
     k
     for k, v in contracts.load_json(check.SCHEMA)["properties"].items()
-    if k not in ("$schema", "version", "docs", "analysis", "workflow", "branch_strategy") and not v.get("deprecated")
+    if k not in ("$schema", "version", "docs", "analysis", "workflow", "branch_strategy", "toolchain", "budget") and not v.get("deprecated")
 )
 SECRET_REASON = "秘密の形"
 CI_KEY = "test.ci.only"  # `analysis.written` に持つ指紋のキー

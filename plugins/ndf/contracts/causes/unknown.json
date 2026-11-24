@@ -1,0 +1,7 @@
+{
+  "meaning": "種類を決められない（例外・結果 JSON を出さない外部のコマンド）",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "conductor",
+  "retry": null
+}

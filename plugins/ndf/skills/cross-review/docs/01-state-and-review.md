@@ -31,7 +31,7 @@
 1 ラウンドは次の順に進む。ラウンドは `--max-rounds`（既定 3）まで、1 回の起動の中で続けて回す。
 
 1. **範囲を決める**（下の「範囲」）。`--base...HEAD` の差分をラウンドの差分のファイルへ書く。変わった Markdown が
-   `contracts/limits.json` の `cross-review.design-doc-lines`（1,000 行）を超えれば `warnings` に知らせる（止めない）
+   `contracts/limits/cross-review.design-doc-lines.json`（1,000 行）を超えれば `warnings` に知らせる（止めない）
 2. **相手役を並べて起動する。** 相手役は `--reviewer`（繰り返して複数）で名指しし、省けばランタイムの表の既定の席から
    読むだけの起動を持つ者を、修正担当（claude）を除いて並べる。相手役へは下の「指摘の基準」と、PR に既にある
    コメント（下の「既存のコメント」）を渡す。相手役は読むだけで、最後の行に

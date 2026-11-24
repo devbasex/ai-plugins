@@ -24,7 +24,7 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 | ルールの語と文の分け方 | [`reply_wait.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_wait.py) の定数と `read_prose` |
 | 判定のリクエスト（hook の側）・送信先の確かめ・休みのマーカー | [`reply_judge.py`](../../plugins/ndf/src/ndf/domains/hooks/reply_judge.py) |
 | 判定の子・質問の文・判定の例の組の確かめ | [`judge_child.py`](../../plugins/ndf/src/ndf/domains/hooks/judge_child.py) の `SYSTEM`・`QUESTION`・`run_cases` |
-| 値（モデル・秒・字数・休む間・周の数・送信先の確かめ） | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `hook.stop-wait.judge`・`hook.budget.stop`・`hook.budget.stop.codex`・`hook.pushback` |
+| 値（モデル・秒・字数・休む間・周の数・送信先の確かめ） | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `hook.stop-wait.judge`・`hook.budget.stop`・`hook.budget.stop.codex`・`hook.pushback` |
 | 判定の例の組 | [`contracts/hooks/reply-judge-cases.json`](../../plugins/ndf/contracts/hooks/reply-judge-cases.json) |
 | 問いの区分と出し方 | `development-workflow` の [`references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) |
 
@@ -160,9 +160,9 @@ hook の guard `stop-wait`（Stop で動く）は、最後の応答が `AskUserQ
 
 ## データ・設定
 
-`contracts/limits.json`:
+`contracts/limits/`:
 
-| 行 | 値 |
+| 方針 | 値 |
 | --- | --- |
 | `hook.stop-wait.judge` | `model` `haiku`・`runtimes` `["claude"]`・`seconds` 8・`max_chars` 1600・`rest_seconds` 600・`lock_seconds` 0.2・`rounds` 3・`auth_markers` `["Not logged in", "Invalid API key"]`・`endpoint`（上の「送信先の確かめ」） |
 | `hook.budget.stop`（Claude Code） | `p95_ms` 5000・`deadline` 10・`margin` 1.5・`timeout` 12・`inject_chars` 2000 |
@@ -247,7 +247,7 @@ ndf hooks judge-cases [--cases <パス>] [--rounds <周の数>]
 | 送信先 | Codex・エントリポイント `sdk-ts`・`CLAUDE_PROJECT_DIR` の欠け・相対の `CLAUDE_CONFIG_DIR`・`/proc` の読めない環境・node の祖先・`--settings` 付きの近い方の Claude Code・設定の層の `ANTHROPIC_BASE_URL` や `apiKeyHelper`・差し替わった実行ファイルのどれでも `claude` を起動しないこと。子の環境が出所の `ANTHROPIC_BASE_URL` では呼ぶこと |
 | 最小構成 | 起動の引数が最小構成と設定のモデルで、`MAX_THINKING_TOKENS=0` を渡し、作業ディレクトリがプロジェクトの外の空のディレクトリであること |
 | 変更要求の文 | ルールで止めたときだけ当たった文（120 字まで）を添え、モデルで止めたときは本文を引かないこと。文言は照合しない |
-| 設定と予算 | `limits.json` の値を替えると起動の引数と渡す字数が替わること。`ndf hooks check-budget` が通ること |
+| 設定と予算 | `contracts/limits/` の値を替えると起動の引数と渡す字数が替わること。`ndf hooks check-budget` が通ること |
 | 実際のモデル | `ndf hooks judge-cases` が 3 周のうち 1 周だけ外す偽の判定器で外れを出して 1 で終わること。マージの前に実際のモデルで外れ 0 件であること（手動） |
 | 手動 | リリース後、本文で質問を書いて応答を終え、`stop-wait` が変更を要求し計測に `judge` が残ること |
 

@@ -1,0 +1,7 @@
+{
+  "meaning": "手順は終わったが欠けが残る（結果は gaps を持つ）",
+  "std_type": "runtime",
+  "exit": "incomplete",
+  "route": "conductor",
+  "retry": null
+}

@@ -678,11 +678,35 @@
     {
       "term": "安定版と実験版",
       "context": "ndf-workflow",
-      "meaning": "NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/`",
+      "meaning": "NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/ndf/`（配るディレクトリの `plugins/ndf/` の外）",
       "deprecated": [
         "安定と試行"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "テストダブル",
+      "context": "ndf-ci-test",
+      "meaning": "テストが本物の代わりに差し込む偽の相手",
+      "source": "docs/specifications/ndf-live-samples-verify.md"
+    },
+    {
+      "term": "見本",
+      "context": "ndf-ci-test",
+      "meaning": "本物の相手の入出力を記録した JSON。テストダブルはこれだけから応答を組み立てる",
+      "source": "docs/specifications/ndf-live-samples-verify.md"
+    },
+    {
+      "term": "分割した表",
+      "context": "ndf-code-structure",
+      "meaning": "1 項目 1 ファイルへ分けたコントラクトの表。ディレクトリの名前がもとの表の名前で、ファイル名が項目のキーになる",
+      "source": "docs/specifications/ndf-split-tables-toolchain-and-budget.md"
+    },
+    {
+      "term": "テストと CI の予算",
+      "context": "ndf-ci-test",
+      "meaning": "テストの関数・CI のジョブ・使われない依存・置き換えられる自作の件数の上限",
+      "source": "docs/specifications/ndf-split-tables-toolchain-and-budget.md"
     },
     {
       "term": "系統（決定番号の）",
@@ -4901,7 +4925,7 @@
     {
       "term": "上限の設定",
       "context": "ndf-durable",
-      "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
+      "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに 1 ファイルで持つデータ（plugins/ndf/contracts/limits/。#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
       "code": "limits_declaration"
@@ -7307,7 +7331,7 @@
     {
       "term": "停止理由の表",
       "context": "ndf-durable",
-      "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
+      "meaning": "停止理由の種類ごとに、意味・既定のルート・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes/`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {

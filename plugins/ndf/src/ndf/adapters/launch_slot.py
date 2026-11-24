@@ -2,7 +2,7 @@
 
 テストのスロット（`ndf.testing.slots`）と同じ保存先・容量を `ndf.slot_pool` で数え、起動 1 本は `launch.weight.llm-cli` の
 重みを取る。スロットに空きが無いか、使えるメモリがテストのスロットの下限を割っていれば待つ。待ちの上限と間隔は
-`contracts/limits.json` の `launch.wait.llm-cli` で、越えたら `NoSlot` を送って起動しない。
+`contracts/limits/launch.wait.llm-cli.json` で、越えたら `NoSlot` を送って起動しない。
 
 スロットを持つ実行（テストのスロットの中など。環境変数 `NDF_TEST_SLOT_HELD`）の子孫は、親のスロットの中で動くので取らず待たない。
 取ったスロットは子へ渡す環境変数（`slot_pool.PARENT_ENV`）で受け継がせ、CLI が動かすテストは CLI の重みを含めて数える

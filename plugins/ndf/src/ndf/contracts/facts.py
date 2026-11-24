@@ -23,8 +23,8 @@ TABLE_DIRS = (FACTS_DIR, DOMAINS_DIR)
 SCHEMA_FILE = "fact.schema.json"
 SCHEMA = f"{FACTS_DIR}/{SCHEMA_FILE}"
 NAME = re.compile(r"^[a-z][a-z0-9-]*$")
-# 列の ref の 2 つの形（`limits.json#<接頭辞>` と `<保存先>/<表>`）のうち前者の頭。limits.json は limits.NDF_SETTINGS と同じ
-LIMITS_REF = "limits.json#"
+# 列の ref の 2 つの形（`limits#<接頭辞>` と `<保存先>/<表>`）のうち前者の頭。limits は limits.NDF_SETTINGS と同じ
+LIMITS_REF = "limits#"
 
 
 class FactsError(contracts.ContractError):
@@ -169,9 +169,9 @@ def _table_ref_errors(name: str, col: str, ref: str, values: list[tuple[str, Any
 
 
 def ref_errors(name: str, policy_names: set[str] | None) -> list[str]:
-    """列の `ref`（`limits.json#<接頭辞>` か `<保存先>/<表>`）の先に値があるかを確かめる。
+    """列の `ref`（`limits#<接頭辞>` か `<保存先>/<表>`）の先に値があるかを確かめる。
 
-    `policy_names` が None（上限の設定を読めない）なら `limits.json#` への参照は確かめない。
+    `policy_names` が None（上限の設定を読めない）なら `limits#` への参照は確かめない。
     読めない誤りは呼び出し側が 1 件で出しており、参照ごとに「無い」と重ねて出さないため。
     """
     t = table(name)
@@ -179,7 +179,7 @@ def ref_errors(name: str, policy_names: set[str] | None) -> list[str]:
 
 
 def _column_ref_errors(t: Table, col: str, ref: str | None, policy_names: set[str] | None) -> list[str]:
-    """列 1 つの `ref` の先に無い値。`ref` が無い列と、上限の設定を読めないときの `limits.json#` への参照は空。"""
+    """列 1 つの `ref` の先に無い値。`ref` が無い列と、上限の設定を読めないときの `limits#` への参照は空。"""
     if not ref:
         return []
     values = [(r["id"], r[col]) for r in t.rows if col in r]

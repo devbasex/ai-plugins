@@ -1,0 +1,7 @@
+{
+  "meaning": "記録の DB（ステートマシンの DB か DBOS のキーのファイル）が quick_check を通らない・ジャーナルに書けない。壊れたキーのファイルは broken/ へ移した。ステートマシンの DB は ndf progress restore でバックアップから戻す",
+  "std_type": "runtime",
+  "exit": "unreadable",
+  "route": "human",
+  "retry": null
+}

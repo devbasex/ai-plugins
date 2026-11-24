@@ -37,7 +37,7 @@ jobs:
           node-version: "22"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: bash scripts/build-runtime-plugins.sh --check
 
   skill-frontmatter-check:
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-skill-frontmatter.py
 
   skill-repo-assumptions-check:
@@ -55,7 +55,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-skill-repo-assumptions.py
 
   skill-shell-vars-check:
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-skill-shell-vars.py
 
   repo-secrets-check:
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-repo-secrets.py
 
   runtime-plugin-validate:
@@ -85,7 +85,7 @@ jobs:
           node-version: "22"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: npm install -g @anthropic-ai/claude-code
       - run: bash scripts/validate-runtime-plugins.sh
 
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-markdown-links.py --root .
       # Skill とエージェントの本文に残る 10 系のスクリプトの呼び出しを、一覧の数に固定する（#3799）
       - run: python3 scripts/check-legacy-script-calls.py --root .
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - run: python3 scripts/check-doc-line-limit.py --root .
 
   # ワークフローのジョブから決まるチェックの名前と、宛先のブランチの必須のチェックを突き合わせる（#653）。
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - env:
           GH_TOKEN: ${{ github.token }}
         run: >-

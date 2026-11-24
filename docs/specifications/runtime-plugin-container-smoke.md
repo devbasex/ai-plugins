@@ -254,12 +254,12 @@ artifact は既定で `tmp/runtime-smoke/<runtime>/` に出力する。`--artifa
 
 | 項目 | 仕様 |
 |---|---|
-| trigger | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch`（入力 `ref`、既定 `develop`）。`pull_request` と `push` では走らず、必須のチェックに入らない |
-| permissions | `contents: read`、`issues: write`。secret は渡さない |
-| job | `runtime-smoke-latest (<runtime>)`、matrix は `claude`, `codex`, `kiro`, `agy`、`fail-fast: false` |
+| trigger | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch`（入力 `ref`、既定 `main`）。`pull_request` と `push` では走らず、必須のチェックに入らない |
+| permissions | 既定は `contents: read`。`issues: write` を持つのはジョブ `report` だけ。secret は渡さない |
+| job | `runtime-smoke-latest (<runtime>)`（matrix は `claude`, `codex`、`fail-fast: false`）、`live-samples`（`ndf samples verify --peer github`）、`report`（失敗か食い違いのある日だけ）。仕様は [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) と [ndf-live-samples-verify.md](ndf-live-samples-verify.md) |
 | 版の解決 | `python3 scripts/runtime-smoke-latest.py resolve --runtime <runtime>` が取得元の最新を一覧の形で出し、`--cli-versions` で渡す。解決した一覧は step summary と artifact に残る |
-| 失敗の報告 | `python3 scripts/runtime-smoke-latest.py report` が題 `最新の版のスモークが落ちた: <runtime>` の開いている課題へコメントを足し、無ければ作る。本文に runtime・入れた版・実行の URL を書く。通っても課題は閉じない（直す PR が閉じる） |
-| artifact | `runtime-smoke-latest-<runtime>`（`tmp/runtime-smoke/<runtime>`） |
+| 失敗の報告 | `python3 scripts/runtime-smoke-latest.py report` が、題 `最新の版のスモークが落ちた: <runtime>` と `テストの見本が本物の記述と食い違った: <相手>` の開いている課題へコメントを足し、無ければ作る。本文に runtime か相手・実行の URL・入れたバージョンか食い違いを書く。通っても課題を自動では終わらせない（直す PR が終わらせる） |
+| artifact | `runtime-smoke-latest-<runtime>`（`tmp/runtime-smoke/<runtime>`）、`live-samples`（`ndf samples verify` の結果 JSON） |
 | 同時の実行 | `concurrency` で 1 つずつ並べ、取り消さない |
 
 authenticated workflow は `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` を protected environment から受け取る。BigQuery の secret は渡さない。`BIGQUERY_ACCESS_TOKEN` は 1 時間で切れ、保存した secret では保てないため、手元で `BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)` と `BIGQUERY_PROJECT` を付けて実行する。

@@ -620,5 +620,40 @@
       "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
       "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
     }
+  },
+  "toolchain": {
+    "workflows": ".github/workflows/*.y*ml",
+    "python_ci": [
+      "3.11",
+      "3.13"
+    ],
+    "python_compat": {
+      "versions": [
+        "3.10"
+      ],
+      "workflows": [
+        ".github/workflows/script-structure.yml"
+      ]
+    },
+    "plugin_pyprojects": [
+      "plugins/ndf/pyproject.toml"
+    ],
+    "launchers": [
+      "plugins/ndf/bin/ndf"
+    ]
+  },
+  "budget": {
+    "tests": 6000,
+    "ci_jobs": 40,
+    "unused_deps": 4,
+    "replaceable": 25,
+    "dep_modules": {
+      "markdown-it-py": "markdown_it",
+      "python-dotenv": "dotenv",
+      "ruamel-yaml": "ruamel"
+    },
+    "dep_exempt": {
+      "ruff": "子プロセスとして起動する（ndf check の lint）"
+    }
   }
 }

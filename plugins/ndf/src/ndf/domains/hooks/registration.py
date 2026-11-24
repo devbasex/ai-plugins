@@ -3,7 +3,7 @@
     ndf hooks render [--check]
 
 - 事象ごとに登録 1 行。事象はランタイムのコントラクト表（`contracts/hooks/runtimes.json`）の並びで、どの登録にも予算
-  （`limits.json` の `hook.budget.*`）の timeout を付ける。matcher は付けない（どの Tool の呼び出しでも起動し、guard の表が
+  （上限の設定の方針 `hook.budget.*`）の timeout を付ける。matcher は付けない（どの Tool の呼び出しでも起動し、guard の表が
   Tool で絞る）
 - 登録の command は `SCRIPT` を `sh -c` で打つ。引数は環境の python・`hooks/entry.py`・ランタイム・事象（決定 89）
 - 環境の python のパスは、`env.venv_python` と同じ保存先（プラグイン名と `uv.lock` の hash で決まる）を指す。キャッシュの根は
@@ -54,7 +54,7 @@ def render(runtime: str, plugin_root: Path = tables.PLUGIN_ROOT) -> dict[str, An
     for event in tables.runtimes()[runtime]["events"]:
         found = budget.budget_for(runtime, event)
         if found is None:
-            raise tables.TableError(f"{runtime} の {event} の予算が limits.json に無い")
+            raise tables.TableError(budget.missing_budget(runtime, event))
         entry = {"type": "command", "command": command(runtime, event, plugin_root), "timeout": found.timeout}
         hooks[event] = [{"hooks": [entry]}]
     return {"hooks": hooks}
