@@ -34,6 +34,8 @@ MVV_BRANCH = "mvv_branch"
 UNKNOWN_MVV = ""
 # MVV の記録の無いラウンド（記録を足す前のバージョンが書いた）の、MVV を見分ける値
 _NO_MVV = mvv_decide.identity_of(mvv_decide.State.ABSENT)
+# 承認済みの MVV の、MVV を見分ける値の始まり
+_APPROVED = f"{mvv_decide.State.APPROVED}:"
 # Markdown のコードブロックの囲み
 _FENCES = ("```", "~~~")
 
@@ -102,7 +104,8 @@ def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Option
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
     読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。`basis` の値があれば、そのラウンドの
     比較基点（`BASE`）が違う・そのラウンドを読んだ相手役（`REVIEWERS`）に無い相手役がいる・そのラウンドの重点（`FOCUS`）か
-    MVV（`MVV`）が違うときは None（PR の全差分を今回の相手役と重点と MVV で読み直す）。"""
+    MVV（`MVV`）が違うときは None（PR の全差分を今回の相手役と重点と MVV で読み直す）。承認済みの MVV があるのに、そのラウンドの
+    head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも None（#4090）。"""
     for r in reversed(store.list_of(state, store.ROUNDS)):
         if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
             continue
@@ -114,6 +117,8 @@ def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Option
         if basis.focus is not None and store.list_of(r, FOCUS) != list(basis.focus):
             return None
         if basis.mvv is not None and _known(_mvv_record(r).get(MVV_ID)) != basis.mvv:
+            return None
+        if basis.mvv is not None and basis.mvv.startswith(_APPROVED) and r.get(fin.MVV_CHECKED) is not True:
             return None
         return head if isinstance(head, str) and head else None
     return None

@@ -140,7 +140,7 @@ def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
     return value
 
 
-def _approved(mvv: Optional[Snapshot]) -> Optional[Snapshot]:
+def approved(mvv: Optional[Snapshot]) -> Optional[Snapshot]:
     """承認済みの MVV ならそのまま返す。MVV が無いか承認済みでなければ None。"""
     return mvv if mvv is not None and mvv.state == State.APPROVED else None
 
@@ -159,13 +159,13 @@ def redline(item: str) -> bool:
 def _mvv_lines(who: str, mvv: Optional[Snapshot]) -> list[str]:
     """MVV の指摘の書き方・扱い方の文（`who` は `reviewer` か `fixer`）。承認済みの MVV が無ければ空。"""
     t = _table()
-    return [t["mvv"][who].format(number=t["mvv_number"])] if _approved(mvv) else []
+    return [t["mvv"][who].format(number=t["mvv_number"])] if approved(mvv) else []
 
 
 def mvv_shape(mvv: Optional[Snapshot]) -> str:
     """相手役が出す指摘の JSON に足すキー `mvv` の説明。承認済みの MVV が無ければ空文字列。"""
     t = _table()
-    return str(t["mvv"]["shape"].format(number=t["mvv_number"])) if _approved(mvv) else ""
+    return str(t["mvv"]["shape"].format(number=t["mvv_number"])) if approved(mvv) else ""
 
 
 def criteria_lines(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:
@@ -174,7 +174,7 @@ def criteria_lines(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list
     items = dict(t["criteria"])
     if focus:
         items[t["focus_criterion"]] = f"{t['focus_label']}: {' / '.join(focus)}"
-    if (held := _approved(mvv)) is not None:
+    if (held := approved(mvv)) is not None:
         items[t["mvv_number"]] = t["mvv_criterion"].format(version=held.version, path=held.path, principles=held.principles_path)
     return [f"{n}. {items[n]}" for n in sorted(items, key=int)]
 
@@ -203,6 +203,14 @@ def fixer_impact(row: Mapping[str, Any]) -> str:
     """修正担当へ渡す指摘の行の末尾に添える起きることの 1 文（行が `impact` を持たなければ空。#4014）。"""
     impact = row.get("impact")
     return f"— {_table()['impact']['fixer_label']}: {impact.strip()}" if _has_impact(impact) else ""
+
+
+def citation_text(error: Mapping[str, Any], version: int) -> str:
+    """根拠の記述の誤り `error`（`mvv_decide.citation_errors` の 1 件）の指摘の文。`version` は承認済みのバージョン。行がずれても
+    同じ文になるよう、行の番号を入れない。"""
+    t = _table()["mvv"]
+    reason = t["citation_reasons"][error["kind"]].format(version=version)
+    return str(t["citation"].format(path=error["path"], cited=error["cited"], version=version, reason=reason))
 
 
 def fixer_ci_only() -> str:

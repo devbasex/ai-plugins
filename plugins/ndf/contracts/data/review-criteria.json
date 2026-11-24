@@ -1,5 +1,5 @@
 {
-  "summary": "cross-review の指摘の基準（#3941）。相手役と修正担当への指示は `ndf.domains.crossreview.criteria_decide` がここから組む。基準の番号は重点の設定が無くても詰めない。3 は `.ndf/review.json` の focus があるときだけ現れる（focus の名前を後ろに並べる）。重要度の尺度と収束の妨げになるか（blocking）は contracts/domains/severities.json が持つ。impact は critical・major に求める起きることの 1 文の指示（reviewer。{blocking}・{light_first}・{light} は尺度から埋める）と、修正担当への指示でその 1 文に添える名前（fixer_label）。ジャーナルへ入れるときは、1 文の無い critical・major は minor へ下げる。重要度の無い指摘と尺度に無い値の指摘は同じに扱い、1 文があれば major、無ければ minor にする（#4014）。fixer_ci_only は、修正担当の worktree の設定（`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only` が真）ときだけ、修正担当への指示の「指摘の基準」の後に足す文（#4030）。fix の SKILL.md の「指摘の基準」の表は同じ文を人向けに写したもの。mvv_criterion はプロジェクト MVV に反する変更を指摘させる基準の文、mvv_number はその番号で、ベースブランチ（cross-review の --base がコミットの SHA なら PR のマージ先）の MVV が承認済みのときだけ指示に載せる。{version}・{path}・{principles} には、承認されたバージョンと、起動の始めに保存した MVV の本文・NDF の共通原則のスナップショットのパスを入れる。mvv は、その基準の指摘の書き方（reviewer）・扱い方（fixer）と、相手役が出す指摘の JSON に足すキーの説明（shape）（#4076）",
+  "summary": "cross-review の指摘の基準（#3941）。相手役と修正担当への指示は `ndf.domains.crossreview.criteria_decide` がここから組む。基準の番号は重点の設定が無くても詰めない。3 は `.ndf/review.json` の focus があるときだけ現れる（focus の名前を後ろに並べる）。重要度の尺度と収束の妨げになるか（blocking）は contracts/domains/severities.json が持つ。impact は critical・major に求める起きることの 1 文の指示（reviewer。{blocking}・{light_first}・{light} は尺度から埋める）と、修正担当への指示でその 1 文に添える名前（fixer_label）。ジャーナルへ入れるときは、1 文の無い critical・major は minor へ下げる。重要度の無い指摘と尺度に無い値の指摘は同じに扱い、1 文があれば major、無ければ minor にする（#4014）。fixer_ci_only は、修正担当の worktree の設定（`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only` が真）ときだけ、修正担当への指示の「指摘の基準」の後に足す文（#4030）。fix の SKILL.md の「指摘の基準」の表は同じ文を人向けに写したもの。mvv_criterion はプロジェクト MVV に反する変更を指摘させる基準の文、mvv_number はその番号で、ベースブランチ（cross-review の --base がコミットの SHA なら PR のマージ先）の MVV が承認済みのときだけ指示に載せる。{version}・{path}・{principles} には、承認されたバージョンと、起動の始めに保存した MVV の本文・NDF の共通原則のスナップショットのパスを入れる。mvv は、その基準の指摘の書き方（reviewer）・扱い方（fixer）と、相手役が出す指摘の JSON に足すキーの説明（shape）、NDF が機械で見つけた根拠の記述の誤りを指摘する文（citation。{path} は文書、{cited} は引いた項目、{version} は承認済みのバージョン）と、その {reason} に入れる誤りの種類ごとの文（citation_reasons。種類は `ndf.domains.records.mvv_decide`）（#4076）",
   "criteria": {
     "1": "利用者が普通に使う経路で、誤動作する・止まる・データを壊す",
     "2": "秘密・認証認可・利用者のデータ・戻せない操作に触れる（起きる確率によらず書く）",
@@ -12,7 +12,13 @@
   "mvv": {
     "reviewer": "基準 {number} の指摘では、mvv に反している項目を 1 つ書き（Value <番号>・Vision・Mission のどれか。必ず人の承認が要る操作なら表の番号 P<番号> か C<番号>）、impact に、MVV のどの文に反するかと利用者に何が起きるかを書く。必ず人の承認が要る操作の指摘は、見送り済みの指摘の一覧にあっても書く。",
     "shape": ", \"mvv\": \"<基準 {number} の指摘なら、反している MVV の項目 か 空>\"",
-    "fixer": "基準 {number} の指摘は、基準 {number} に書いたパスの MVV の本文と共通原則を読み、本当に反しているかを確かめてから、直すか見送るかを決める。"
+    "fixer": "基準 {number} の指摘は、基準 {number} に書いたパスの MVV の本文と共通原則を読み、本当に反しているかを確かめてから、直すか見送るかを決める。",
+    "citation": "{path} に足した根拠の記述「{cited}」は、{reason}。承認済みのプロジェクト MVV はバージョン {version} なので、その項目を「根拠: Value <番号>（MVV バージョン {version}）」の形で引く（当たる項目が無ければ「根拠: 根拠なし（MVV バージョン {version}）」）。NDF が機械で見つけた誤りで、直るまで残る（見送れない）。",
+    "citation_reasons": {
+      "version": "承認済みでないバージョンの MVV を引いている",
+      "unknown": "バージョン {version} の MVV に無い項目を引いている",
+      "format": "どのバージョンの MVV を引いたのかを読み取れない"
+    }
   },
   "not_written": ["字句や言い回し", "まず起きない条件での異常処理", "実装に影響しない文書どうしの食い違い", "番号や表記の揃え", "好みの設計"],
   "no_action": ["観察", "感想", "コードの引用だけ", "良い点"],

@@ -458,3 +458,85 @@ def test_reviewer_finding_with_the_same_text_does_not_classify_a_finding_made_by
     journal = journal_mod.FindingJournal([row])
     journal.enter(2, [_named("根拠の行の誤り", "P1")], ITEMS, V11)
     assert "mvv" not in journal.rows["n1"] and [r["id"] for r in journal.handable()] == ["n1"]
+
+
+# --- MVV の根拠の記述の誤り --------------------------------------------------------------------
+
+
+def _error(path: str = "doc.md", line: int = 3, cited: str = "Value 5", kind: str = "version", **other) -> dict:
+    return {"path": path, "line": line, "cited": cited, "kind": kind, "version": 1, "unknown": [], "text": f"{path} の {cited}", **other}
+
+
+def test_citation_key_is_made_of_the_place_the_item_and_the_kind() -> None:
+    """行・バージョン・指摘の文が変わっても同じ誤りとみなし、文書・引いた項目・種類のどれかが違えば別の誤りとみなす。"""
+    key = journal_mod.citation_key(_error())
+    assert key == journal_mod.citation_key(_error(line=9, version=2, text="別の文"))
+    others = [_error(path="other.md"), _error(cited="Value 6"), _error(kind="format"), _error(path='doc.md","Value 5', cited="")]
+    assert len({key, *map(journal_mod.citation_key, others)}) == 5
+
+
+def test_citation_errors_become_findings_for_the_fixer() -> None:
+    """誤りは、P の番号を引いていても MVV の項目の分類を持たない重い指摘になり、修正担当へ渡す。同じ誤りが 2 行にあれば 1 件で、
+    最初の行を指す。"""
+    journal = drive.FindingJournal([_row("r2-1", "相手役の指摘", 2)])
+    errors = [_error(cited="P1", unknown=["P1"]), _error(cited="P1", line=8), _error(cited="Value 5")]
+    assert journal.ingest_citations(errors, V11, 2)
+    [first, second] = [journal.rows["r2-n1"], journal.rows["r2-n2"]]
+    assert (first["cited"], first["unknown"], first["line"], second["cited"]) == ("P1", ["P1"], 3, "Value 5")
+    assert (first["severity"], first["judged_mvv"], first["by"]) == ("major", V11, "ndf")
+    assert not {"mvv", "mvv_pinned", "redline", "redline_items"} & set(first)
+    assert [f["id"] for f in journal.handable()] == ["r2-1", "r2-n1", "r2-n2"]
+    assert [f.by_ndf for f in journal.findings()] == [False, True, True]
+    assert journal.enter(2, [{"text": "次の指摘", "by": "kiro"}]) is not None and "r2-2" in journal.rows
+
+
+def test_the_same_citation_errors_change_nothing() -> None:
+    journal = drive.FindingJournal()
+    assert journal.ingest_citations([_error()], V11, 1)
+    assert not journal.ingest_citations([_error()], V11, 1)
+    assert not journal.ingest_citations(None, V11, 1)
+    assert not drive.FindingJournal([_row("r1-1", "a", 1)]).ingest_citations([], V11, 1)
+
+
+def test_only_the_check_decides_whether_a_citation_error_is_fixed() -> None:
+    """見つかった誤りは未解決のまま（位置は今のラウンドのもの）、見つからなければ直したとする。確かめられなければ変えない。
+    MVV が変わっても、同じ誤りは元の指摘のまま今の MVV の指摘にする。"""
+    journal = drive.FindingJournal()
+    journal.ingest_citations([_error()], V11, 1)
+    occurrence = journal.rows["r1-n1"][journal_mod.OCCURRENCE]
+    assert journal.ingest_citations([_error(line=9)], V11, 2)
+    row = journal.rows["r1-n1"]
+    assert (row["outcome"], row["line"], row["round"], row[journal_mod.OCCURRENCE]) == (fin.UNRESOLVED, 9, 2, occurrence)
+    assert not journal.ingest_citations(None, V11, 3) and row["outcome"] == fin.UNRESOLVED
+    journal.restate(V12)
+    assert journal.ingest_citations([_error(line=9)], V12, 2) and (list(journal.rows), row["judged_mvv"]) == (["r1-n1"], V12)
+    assert journal.ingest_citations([], V11, 3)
+    assert (row["outcome"], row["judged_mvv"]) == (fin.FIXED, V11)
+
+
+def test_citation_error_that_comes_back_is_open_again_with_a_new_occurrence() -> None:
+    """直ったとした誤りがまた見つかれば、新しい発生として未解決へ戻す（解決済みの古いスレッドに結び付けない）。"""
+    journal = drive.FindingJournal()
+    journal.ingest_citations([_error()], V11, 1)
+    occurrence = journal.rows["r1-n1"][journal_mod.OCCURRENCE]
+    journal.ingest_citations([], V11, 2)
+    assert journal.ingest_citations([_error(line=9)], V11, 3)
+    row = journal.rows["r1-n1"]
+    assert (row["outcome"], row["line"], row["round"]) == (fin.UNRESOLVED, 9, 3)
+    assert row[journal_mod.OCCURRENCE] != occurrence and journal.revived == ["r1-n1"]
+
+
+def test_open_citation_error_keeps_its_place_when_the_head_has_no_round() -> None:
+    """ラウンドの記録に無いコミットで見つけた行の番号は、未解決の指摘の位置にしない。"""
+    journal = drive.FindingJournal()
+    journal.ingest_citations([_error()], V11, 1)
+    assert not journal.ingest_citations([_error(line=9)], V11, 2, recorded=False)
+    assert (journal.rows["r1-n1"]["line"], journal.rows["r1-n1"]["round"]) == (3, 1)
+
+
+def test_finding_without_a_key_is_replaced_by_a_new_one() -> None:
+    """誤りを見分ける値を持たない NDF の指摘（PR の記録から戻したもの）は解決とし、同じ誤りは新しい指摘として 1 回だけ足す。"""
+    journal = drive.FindingJournal([_row("t77", "doc.md の Value 5", 0, by="ndf")])
+    assert journal.ingest_citations([_error()], V11, 1)
+    assert not journal.ingest_citations([_error()], V11, 1)
+    assert {fid: f["outcome"] for fid, f in journal.rows.items()} == {"t77": fin.FIXED, "r1-n1": fin.UNRESOLVED}

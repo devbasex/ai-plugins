@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from ndf import identity
@@ -47,6 +49,8 @@ SKIPPED_MVV = "skipped_mvv"
 # NDF が機械で確かめて作った指摘の `by` と、その指摘へ修正担当が返した理由の欄
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 FIXER_REASON = "fixer_reason"
+# 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
+CITATION_KEY = "citation_key"
 
 
 def new_occurrence() -> str:
@@ -79,7 +83,14 @@ def with_occurrences(data: dict[str, Any]) -> bool:
     return wrote
 
 
-def _located(item: dict[str, Any]) -> dict[str, Any]:
+def citation_key(error: Mapping[str, Any]) -> str:
+    """根拠の記述の誤りを見分ける値。ファイルと引いた項目と誤りの種類で決め、行がずれても変えない。元の文字列のまま比べるので、
+    手元の状態ファイルだけに持ち、公開のコメントへ載せない。"""
+    raw = json.dumps([error["path"], error["cited"], error["kind"]], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _located(item: Mapping[str, Any]) -> dict[str, Any]:
     """相手役が返した重要度と位置（`severity`・`path`・`line`。#3941）のうち、形の合うものだけ。"""
     out: dict[str, Any] = {}
     severity = criteria_decide.severity_of(item.get("severity"))
@@ -191,9 +202,11 @@ class FindingJournal:
         # 最後の `enter` で、相手役の指摘について結果に残す注意
         self.warnings: list[str] = []
 
-    def _next_id(self, round_no: int) -> str:
-        """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
-        return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
+    def _next_id(self, round_no: int, by_ndf: bool = False) -> str:
+        """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`。NDF が確かめて作った指摘は番号の前に
+        `n` を付け、相手役の指摘と分けて数える）。"""
+        mine = [f for f in self.rows.values() if f.get("round") == round_no and (f.get("by") == BY_NDF) == by_ndf]
+        return f"r{round_no}-{'n' if by_ndf else ''}{len(mine) + 1}"
 
     def enter(
         self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None
@@ -261,6 +274,43 @@ class FindingJournal:
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
+
+    def ingest_citations(
+        self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True
+    ) -> bool:
+        """根拠の記述の確かめの結果 `errors`（`changes.citations`。None は確かめられなかった）を NDF の指摘にする。指摘が増えたか
+        変わったら真。
+
+        見つかった誤りは、修正担当の回答やスレッドの resolve によらず未解決にし、見つからなかった未解決の指摘は直したとする。
+        確かめられなければ何も変えない。`recorded` は、確かめた head のラウンドの記録があるか（無ければ、未解決の指摘の位置を
+        記録のあるラウンドのまま残す。PR のスレッドは、ラウンドの記録の head に付けるためである）。"""
+        if errors is None:
+            return False
+        mine = [f for f in self.rows.values() if f.get("by") == BY_NDF]
+        held = {f.get(CITATION_KEY): f for f in mine}
+        found = {citation_key(e): e for e in reversed(errors)}
+        before = {str(f["id"]): dict(f) for f in mine}
+        for key, error in reversed(found.items()):
+            self._cite(held.get(key), key, error, mvv, round_no, recorded)
+        for row in mine:
+            if row.get("outcome") == fin.UNRESOLVED and row.get(CITATION_KEY) not in found:
+                row |= {"outcome": fin.FIXED, "reason": None, JUDGED: mvv}
+        return before != {str(f["id"]): f for f in self.rows.values() if f.get("by") == BY_NDF}
+
+    def _cite(
+        self, row: Optional[dict[str, Any]], key: str, error: Mapping[str, Any], mvv: Optional[str], round_no: int, recorded: bool
+    ) -> None:
+        """根拠の記述の誤り 1 件を、同じ誤りの指摘 `row` に書く。無ければ新しい指摘にする。"""
+        place = _located(error)
+        if row is None:
+            fid = self._next_id(round_no, by_ndf=True)
+            row = self.rows[fid] = _journal_row(fid, round_no, error["text"], BY_NDF) | place
+        elif row.get("outcome") != fin.UNRESOLVED:
+            self._revive(row, place, None, round_no)
+        elif recorded:
+            row |= {"round": round_no, **place}
+        row |= {"key": oscillation.finding_key(error["text"]), "text": error["text"], "severity": criteria_decide.at_least_blocking(None)}
+        row |= {CITATION_KEY: key, "cited": error["cited"], "unknown": error["unknown"], JUDGED: mvv}
 
     def carry(self, carried: Sequence[prior_decide.Carried]) -> list[str]:
         """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
@@ -351,6 +401,7 @@ class FindingJournal:
                 criteria_decide.severity_of(f.get("severity")),
                 _text(f.get(MVV)),
                 bool(f.get(fin.REDLINE)),
+                f.get("by") == BY_NDF,
             )
             for f in self.rows.values()
             if f.get("outcome") in fin.OUTCOMES

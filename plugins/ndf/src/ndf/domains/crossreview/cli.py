@@ -372,12 +372,14 @@ def _review(path: str) -> fin.Review:
 
 
 def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
-    """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。"""
+    """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。結果 JSON の最上位の
+    gaps は incomplete だけが持てるので、ほかの理由で止まったときの欠けは outputs にだけ載せる。"""
     warnings = [*extra.pop("warnings", ()), *verdict.warnings]
     shared = {"decisions": list(verdict.decisions), "warnings": warnings, "outputs": {"gaps": list(verdict.gaps)}, **extra}
     if verdict.status == fin.OK:
         return _ok(verdict.summary, **shared)
-    return _stop(str(verdict.kind), verdict.summary, gaps=list(verdict.gaps), **shared)
+    gaps = list(verdict.gaps) if verdict.kind == "incomplete" else None
+    return _stop(str(verdict.kind), verdict.summary, gaps=gaps, **shared)
 
 
 def cmd_finish(args: argparse.Namespace) -> int:

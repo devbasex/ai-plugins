@@ -8,7 +8,9 @@
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
 - 収束の妨げにならない重さ（`minor`・`nit`。`criteria_decide.blocking`）の未解決の指摘は欠けにしない（#3941）
 - 必ず人の承認が要る操作に当たる指摘（`redline`）は、どの欠けにもせず、件数を要約に載せる。ほかの、プロジェクト MVV の項目に
-  反する指摘（`mvv`）の未解決は、欠けの種類を分ける（#4076）
+  反する指摘（`mvv`）と、NDF が機械で確かめて作った指摘（`by_ndf`。MVV の根拠の記述の誤り）の未解決は、欠けの種類を分ける。
+  最後の head で根拠の記述を確かめられなかったときも同じ種類の欠けにし、この種類が 1 件でもあれば、次の工程へ進まない
+  `mvv_unresolved` で止まる（#4076）
 - 一部の相手役が起動し直しても結果を残さなかった（`incomplete_reviewers`。#3941）ら、欠けによらず `work_stopped` で止まる
   （読めなかった相手役の分を収束に数えない）
 """
@@ -44,11 +46,17 @@ GAP_NO_REASON = "skip_without_reason"
 GAP_MVV = "mvv_unresolved"
 # 必ず人の承認が要る操作に当たる指摘かどうかの欄（ジャーナルと要約の指摘）
 REDLINE = "redline"
+# NDF が機械で確かめて作った指摘かどうかの欄（要約の指摘）
+BY_NDF = "by_ndf"
+# 根拠の記述を確かめられたかの欄（ラウンドの記録と要約）と、確かめられなかった欠けの名前
+MVV_CHECKED = "mvv_checked"
+CITATION_CHECK = "citation_check"
 
 
 class Finding(NamedTuple):
     """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）、
-    `mvv` は反する MVV の項目（無ければ None）、`redline` は必ず人の承認が要る操作に当たるか。"""
+    `mvv` は反する MVV の項目（無ければ None）、`redline` は必ず人の承認が要る操作に当たるか、`by_ndf` は NDF が機械で確かめて
+    作った指摘か。"""
 
     id: str
     text: str
@@ -57,6 +65,7 @@ class Finding(NamedTuple):
     severity: Optional[str] = None
     mvv: Optional[str] = None
     redline: bool = False
+    by_ndf: bool = False
 
 
 def blocking(f: Finding) -> bool:
@@ -72,11 +81,13 @@ class Handed(NamedTuple):
 
 
 class Review(NamedTuple):
-    """収束ループの終わり方・終えたラウンドの数・指摘。"""
+    """収束ループの終わり方・終えたラウンドの数・指摘。`mvv_checked` は、終わり方を決めた head で PR の足した根拠の記述を
+    確かめられたか（承認済みの MVV が無ければ真）。"""
 
     final: str
     rounds: int
     findings: tuple[Finding, ...]
+    mvv_checked: bool = True
 
 
 class Verdict(NamedTuple):
@@ -94,14 +105,17 @@ def _gap(kind: str, name: str, reason: str) -> dict[str, str]:
     return {"kind": kind, "name": name, "reason": reason}
 
 
-def _finding_gaps(findings: Sequence[Finding]) -> list[dict[str, str]]:
+def _finding_gaps(findings: Sequence[Finding], *, mvv_checked: bool = True) -> list[dict[str, str]]:
     rest = [f for f in findings if not f.redline]
     gaps = [
-        _gap(GAP_MVV if f.mvv else GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い")
+        _gap(GAP_MVV if f.mvv or f.by_ndf else GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い")
         for f in rest
         if f.outcome == UNRESOLVED and blocking(f)
     ]
     gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {f.text}") for f in rest if f.outcome == SKIPPED and not f.reason]
+    if not mvv_checked:
+        reason = "PR が足した根拠の記述が承認済みの MVV に合うかを、最後のコミットで確かめられなかった（原因は注意にある）"
+        gaps.append(_gap(GAP_MVV, CITATION_CHECK, reason))
     return gaps
 
 
@@ -137,6 +151,13 @@ def _counts(findings: Sequence[Finding]) -> str:
     return f"指摘 {len(findings)} 件（直した {n[FIXED]}・見送った {n[SKIPPED]}・未解決 {n[UNRESOLVED]}{tail}）"
 
 
+def _mvv_left(gaps: Sequence[Mapping[str, str]], findings: Sequence[Finding]) -> list[str]:
+    """MVV に関わる欠けの名前（反する項目があれば添える）。"""
+    items = {f.id: f.mvv for f in findings}
+    names = [g["name"] for g in gaps if g["kind"] == GAP_MVV]
+    return [f"{name}（{items[name]}）" if items.get(name) else name for name in names]
+
+
 def _limit_decision(review: Review) -> dict[str, str]:
     return {
         "decision": f"収束ループは {review.final} で終わったが、欠けが 0 件なので次の工程へ進む",
@@ -161,11 +182,15 @@ def finish(review: Review, handed: Sequence[Handed] = ()) -> Verdict:
     if review.final == ERROR and review.rounds == 0:
         return Verdict(STOPPED, "work_stopped", "収束ループが 1 ラウンドも終えずに誤りで終わった", (), (), ())
     decisions, gaps = _handed(handed, review.findings)
-    gaps = _finding_gaps(review.findings) + gaps
+    gaps = _finding_gaps(review.findings, mvv_checked=review.mvv_checked) + gaps
     counts = _counts(review.findings)
     if review.final == INCOMPLETE_REVIEWERS:
         summary = f"{review.rounds} ラウンドで {review.final}（相手役が起動し直しても差分を読めなかった。理由は warnings）。{counts}"
         return Verdict(STOPPED, "work_stopped", summary, tuple(gaps), tuple(decisions), ())
+    left = _mvv_left(gaps, review.findings)
+    if left:
+        summary = f"{review.rounds} ラウンドで {review.final}。MVV に関わる未解決が残る: {'・'.join(left)}。{counts}・欠け {len(gaps)} 件"
+        return Verdict(STOPPED, "mvv_unresolved", summary, tuple(gaps), tuple(decisions), ())
     if gaps:
         summary = f"{review.rounds} ラウンドで {review.final}。{counts}・欠け {len(gaps)} 件"
         return Verdict(STOPPED, "incomplete", summary, tuple(gaps), tuple(decisions), ())
@@ -198,20 +223,23 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         severity = criteria_decide.severity_of(item.get("severity"))
         why = reason if reason else None  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
         mvv = item.get("mvv")
-        out.append(Finding(name, text, item["outcome"], why, severity, mvv if isinstance(mvv, str) else None, bool(item.get(REDLINE))))
+        item_mvv = mvv if isinstance(mvv, str) else None
+        out.append(Finding(name, text, item["outcome"], why, severity, item_mvv, bool(item.get(REDLINE)), bool(item.get(BY_NDF))))
     return tuple(out)
 
 
 def as_review(data: Mapping[str, Any]) -> Review:
-    """要約（`summary_of` の形）を読む。指摘の形が違えば `ValueError`、ラウンドの数が整数でなければ 0。"""
+    """要約（`summary_of` の形）を読む。指摘の形が違えば `ValueError`、ラウンドの数が整数でなければ 0。根拠の記述の確かめの成否が
+    無い要約（駆動を通さずに作ったもの）は、確かめる対象が無かったとみなす。"""
     findings = store.list_of(data, store.FINDINGS)
     rounds = data.get(store.ROUNDS)
-    return Review(str(data.get("final")), rounds if type(rounds) is int else 0, as_findings(findings))
+    return Review(str(data.get("final")), rounds if type(rounds) is int else 0, as_findings(findings), data.get(MVV_CHECKED) is not False)
 
 
 def summary_of(review: Review, pr: int) -> dict[str, Any]:
-    """要約の形（終わり方・ラウンドの数・指摘・元の PR 番号）。`as_review` が読む。"""
-    return {"final": review.final, store.ROUNDS: review.rounds, store.FINDINGS: [dict(f._asdict()) for f in review.findings], "pr": pr}
+    """要約の形（終わり方・ラウンドの数・指摘・根拠の記述の確かめの成否・元の PR 番号）。`as_review` が読む。"""
+    findings = [dict(f._asdict()) for f in review.findings]
+    return {"final": review.final, store.ROUNDS: review.rounds, store.FINDINGS: findings, MVV_CHECKED: review.mvv_checked, "pr": pr}
 
 
 def as_handed(items: Sequence[Any]) -> tuple[Handed, ...]:

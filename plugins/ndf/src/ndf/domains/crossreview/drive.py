@@ -5,7 +5,8 @@
 1 ラウンドは次の順に進む:
 
 1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）。変わった
-   Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）
+   Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）。承認済みの MVV があれば、PR 全体で
+   足した MVV の根拠の記述を機械で確かめ、誤りを NDF の指摘としてジャーナルへ入れる（`changes.citations`。解決も次の確かめだけが決める。#4076）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
    指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（起動の始めに 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
    コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
@@ -18,8 +19,8 @@
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら `summary.json`
-（`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
+状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
+確かめてから `summary.json`（`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
 自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
 merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
@@ -55,7 +56,7 @@ from ndf.domains.crossreview import (
     threads,
 )
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.journal import FindingJournal
+from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import mvv
 from ndf.testing import declared, scoped
@@ -128,6 +129,10 @@ class _Run:
     # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
+    # PR が足した根拠の記述の確かめ（`changes.CitationRun`）
+    checked_head: Optional[str] = None
+    last_target: Optional[changes.Target] = None
+    citations: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
@@ -308,12 +313,15 @@ RESOLVED_ELSEWHERE = "別の実行か人がスレッドを resolve した"
 
 def _settle_resolved(run: _Run, left: Sequence[prior_decide.Thread], done: dict[str, Any]) -> int:
     """状態ファイルが追う自分のスレッドのうち、別の実行（か人）が resolve したものの未解決の指摘を、修正の対象から外す
-    （直したとして、そのスレッドへ返信も resolve もし直さない。PR 3944 の r2-6）。外した件数を返す。"""
+    （直したとして、そのスレッドへ返信も resolve もし直さない。PR 3944 の r2-6）。外した件数を返す。NDF が機械で確かめて作った
+    指摘は外さない（直ったかは次の確かめだけが決める。#4090）。"""
     resolved = {t.comment for t in left if t.resolved}
     settled = 0
     for fid, mark in done.items():
         row = run.journal.rows.get(fid)
         if not isinstance(mark, dict) or mark.get("comment") not in resolved or row is None or row.get("outcome") != fin.UNRESOLVED:
+            continue
+        if row.get("by") == BY_NDF:
             continue
         row |= {"outcome": fin.FIXED, "reason": RESOLVED_ELSEWHERE}
         mark |= {"replied": True, "resolved": True}
@@ -663,11 +671,47 @@ def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
     return None
 
 
+def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_no: int, recorded: bool = True) -> bool:
+    """根拠の記述の確かめの結果をジャーナルへ入れる。ジャーナルが変わったら真。"""
+    wrote = run.journal.ingest_citations(errors, run.mvv, round_no, recorded=recorded)
+    _detach_revived(run)
+    return wrote
+
+
+def _mvv_checked(run: _Run, head: str) -> bool:
+    """`head` で根拠の記述を確かめ終えたか（承認済みの MVV が無ければ真）。"""
+    return criteria_decide.approved(run.snapshot) is None or run.checked_head == head
+
+
+def _final_head(run: _Run, final: str, rounds: int) -> str:
+    """終わり方を決めるコミット。修正を送っていればそのコミット、送れなかったか修正担当が途中で終わったなら作業場所のコミット。"""
+    last = store.last_round(run.data)
+    if rounds == 0 or final == fin.ERROR:
+        return run.g.rev_parse("HEAD")
+    fix = last.get("fix")
+    return str(fix["pushed"] if isinstance(fix, dict) and "pushed" in fix else last["head"])
+
+
+def _check_final_head(run: _Run, final: str, rounds: int) -> bool:
+    """終わり方を決めるコミットで根拠の記述を確かめ、確かめ終えたかを返す。最後の修正で増えた・直った誤りを、判定の前に状態ファイルへ
+    残す（変わらなければ書かない）。"""
+    if criteria_decide.approved(run.snapshot) is None:
+        return True
+    head = _final_head(run, final, rounds)
+    n = len(store.list_of(run.data, store.ROUNDS))
+    recorded = store.last_round(run.data).get("head") == head
+    # 記録の無いコミットで見つけた誤りは、次の起動の最初のラウンドの指摘にする
+    if _ingest_citations(run, changes.final_citations(run, head), n if recorded else n + 1, recorded):
+        _save(run)
+    return _mvv_checked(run, head)
+
+
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
-    """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。"""
-    findings = run.journal.findings()
+    """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。
+    前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
+    checked = reused or _check_final_head(run, final, rounds)
     path = run.cfg.state_dir / SUMMARY_NAME
-    review = fin.Review(final, rounds, findings)
+    review = fin.Review(final, rounds, run.journal.findings(), checked)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
     return Outcome(review, path, tuple(run.warnings), tuple(run.process), _read_by_all_this_run(run, rounds), reused)
 
@@ -698,7 +742,7 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
-    """範囲を決めて差分のファイルを書く。"""
+    """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。"""
     cfg = run.cfg
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
@@ -710,6 +754,8 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     diff = _round_stem(run, round_no, ".diff")
     diff.write_text(changes.review_diff(run.g, scope.base or merge_base, head), encoding="utf-8")
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
+    run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
+    _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, changed.docs, full_diff)
 
 
@@ -785,6 +831,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         scope_decide.REVIEWERS: list(run.cfg.reviewers),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
+        fin.MVV_CHECKED: _mvv_checked(run, prep.head),
         "scope": prep.scope.kind,
     }
     rounds.append(record)

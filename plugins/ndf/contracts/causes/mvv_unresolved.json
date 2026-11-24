@@ -1,0 +1,7 @@
+{
+  "meaning": "プロジェクト MVV に反する指摘か、PR が足した MVV の根拠の記述の誤りが残った。または、根拠の記述を確かめられなかった（欠けは結果の outputs.gaps にある）",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "conductor",
+  "retry": null
+}

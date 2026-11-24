@@ -13,6 +13,7 @@
     {"version": 9, "sha256": "7f5db185f063ae53adfecc9c9a5137a24c3e1a22aede75c541376232da9bb968"},
     {"version": 10, "sha256": "3d060d6b615692cec794beaf628aadaf5d0e992f1bfcca1be0907b46ebce6d36"},
     {"version": 11, "sha256": "cec6d0dd433aa1bda82173d0b3fd9d75bc9bd3ad7501e7fa77738fa7026f1835"},
-    {"version": 12, "sha256": "53f45539724d9524e940acf7f31eaa3b77be22078da2f2b1632904dd354ab78d"}
+    {"version": 12, "sha256": "53f45539724d9524e940acf7f31eaa3b77be22078da2f2b1632904dd354ab78d"},
+    {"version": 13, "sha256": "aa07babc0f43ba265fbd75b19c9ab2517388d097230c496f1971577ae0afc70f"}
   ]
 }

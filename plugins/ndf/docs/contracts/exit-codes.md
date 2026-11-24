@@ -41,6 +41,7 @@
 | `interrupted` | 期限・シグナル・遅れの見張りで打ち切った | timeout | 1（failed） | conductor | — | — |
 | `invalid` | 読めない・呼び出しの誤り・結果の形の誤り | validation | 2（unreadable） | conductor | — | — |
 | `merge_method` | マージの方式がマージ先のブランチで許されていない | configuration | 1（failed） | human | — | — |
+| `mvv_unresolved` | プロジェクト MVV に反する指摘か、PR が足した MVV の根拠の記述の誤りが残った。または、根拠の記述を確かめられなかった（欠けは結果の outputs.gaps にある） | runtime | 1（failed） | conductor | — | — |
 | `needs_human` | 判断の呼び出しの回答が 2 回とも形に合わなかった | runtime | 1（failed） | human | — | — |
 | `not_applicable` | 正常な否定の結果（立たない・変更なし・飛ばしてよい）。ルートはプランの on_cause が書く | validation | 3（precondition） | conductor | — | — |
 | `not_ci` | マージが CI 以外の理由（保護の規則・権限）で断られた | authorization | 1（failed） | human | — | — |
