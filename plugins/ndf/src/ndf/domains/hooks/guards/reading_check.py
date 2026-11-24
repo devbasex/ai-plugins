@@ -57,7 +57,7 @@ def check(ctx, svc) -> Verdict:
     key = rd.question_key(ctx.tool_input.get("questions"))
     row = rd.used_row(key, repo, rows)
     prs = _pulls_of(kind, row)
-    heads = _tracked(root, prs, _seconds(ctx, svc)) if prs else {}
+    heads = _tracked(root, prs, _git_seconds(ctx, svc)) if prs else {}
     words = rd.missing(key, repo, [row] if row is not None else [], heads)
     if words:
         return deny(denial(kind, words))
@@ -102,7 +102,7 @@ def _pulls_of(kind: str, row: Optional[Mapping[str, Any]]) -> list[dict[str, Any
     return list(row["prs"]) if kind == GATE and row is not None else []
 
 
-def _seconds(ctx, svc) -> float:
+def _git_seconds(ctx, svc) -> float:
     """git に使える秒: 締め切りから余白を引いた残りと、git を 1 回起動する上限の小さい方。予算が無ければ 0。"""
     found = budget.budget_for(ctx.runtime, ctx.event)
     if found is None:
