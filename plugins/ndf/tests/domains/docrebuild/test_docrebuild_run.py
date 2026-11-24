@@ -181,20 +181,28 @@ def test_changed_paths_stops_without_a_merge_base(tmp_path: Path) -> None:
     assert not any(c[0] == "merge-base" for c in fake.calls)
 
 
-def test_run_worker_does_not_follow_a_linked_prompt_file(tmp_path: Path) -> None:
-    """保存先の起動指示がリンクなら、リンク先を上書きせず、worker も起動せずに止まる。"""
+class _Launched(Exception):
+    """worker の起動の直前で止めるための例外。"""
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_run_worker_replaces_a_linked_prompt_file_without_touching_its_target(tmp_path: Path, link: str) -> None:
+    """保存先の起動指示がシンボリックリンクでもハードリンクでも、その先のファイルを書き換えず、起動指示を新しいファイルで置き換える。"""
     args = _args(tmp_path)
     args.state_dir.mkdir()
     other = tmp_path / "other.txt"
     other.write_text("利用者のデータ\n", encoding="utf-8")
-    (args.state_dir / f"{drive.WORK_KIND}.prompt.md").symlink_to(other)
+    prompt_file = args.state_dir / f"{drive.WORK_KIND}.prompt.md"
+    prompt_file.symlink_to(other) if link == "symlink" else os.link(other, prompt_file)
 
     def runner(argv: Sequence[str], cwd: Path) -> Any:
-        raise AssertionError("worker を起動しない")
+        raise _Launched
 
-    with pytest.raises(drive.Precondition):
+    with pytest.raises(_Launched):
         drive.run_worker(args, "起動指示", runner)
     assert other.read_text(encoding="utf-8") == "利用者のデータ\n"
+    assert not prompt_file.is_symlink() and prompt_file.read_text(encoding="utf-8") == "起動指示"
+    assert sorted(p.name for p in args.state_dir.iterdir()) == [prompt_file.name]
 
 
 # --- 作業場所の確かめ ---

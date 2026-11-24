@@ -12,6 +12,7 @@ import os
 import stat
 import string
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,8 +37,6 @@ REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
-# 起動指示を書くときの開き方（既存の内容を消して書き、リンクはたどらない）
-_PROMPT_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
 WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
@@ -237,16 +236,29 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return got
 
 
+def _replace_file(path: Path, text: str) -> None:
+    """`path` を、同じディレクトリに新しく作ったファイルで置き換える。
+
+    既存の `path` を開いて書き換えないので、`path` がシンボリックリンクでもハードリンクでも、その先のファイルの中身は変わらない
+    （`os.replace` は名前だけを置き換える）。書けなければ作ったファイルを消して `OSError` を上げる。
+    """
+    fd, temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+        os.replace(temp, path)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
+
+
 def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
     """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
     prompt_file = args.state_dir / f"{WORK_KIND}.prompt.md"
     result_file = args.state_dir / f"{WORK_KIND}.result.json"
     try:
         args.state_dir.mkdir(parents=True, exist_ok=True)
-        # 保存先の起動指示がリンクなら、たどってリンク先を上書きせずに止まる（O_NOFOLLOW は最後の要素がリンクなら ELOOP）
-        fd = os.open(prompt_file, _PROMPT_FLAGS, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(prompt)
+        _replace_file(prompt_file, prompt)
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
     argv = [
