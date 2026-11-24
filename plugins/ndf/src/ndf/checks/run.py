@@ -39,19 +39,22 @@ from ndf.contracts import ContractError, causes, result
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
+# 規則の関数: 見る範囲と規則のデータを受け、指摘を返す
+Rule = Callable[[Scope, dict[str, Any]], list[Finding]]
+
 # 文字のファイルの拡張子。Skill が配る JavaScript（`skills/release/assets/slides/build-deck.js` など）も既定で動くコードとして見る。
 # TypeScript はビルドしてから動くため、そのまま配る形に無い
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt", ".js", ".mjs", ".cjs"})
 # リポジトリの設定（`Scope.settings`）を読む規則: 規則の名前 → 規則。`--only` に名前が無ければ当てない（設定を読まない）。
 # 設定を読まない規則だけを選んだ検査は、編集中の設定のファイルが壊れていても止まらない
-SETTINGS_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {toolchain.RULE: toolchain.check}
+SETTINGS_RULES: dict[str, Rule] = {toolchain.RULE: toolchain.check}
 # コントラクトのうち要るファイルだけを自分で読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則。
 # ほかの規則はコントラクトの表（停止理由の表など）が壊れていると止まるため、その前に当てる
-CONTRACT_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {contracts_split.RULE: contracts_split.check}
+CONTRACT_RULES: dict[str, Rule] = {contracts_split.RULE: contracts_split.check}
 # 検査が集めたプラグインのファイルを読み、`--only` に名前が無ければ当てない規則: 規則の名前 → 規則
-SELECTED_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {experimental.RULE: experimental.check}
+SELECTED_RULES: dict[str, Rule] = {experimental.RULE: experimental.check}
 # 規則の一部だけを当てる名前。全体の規則が同じ違反を出すので、`--only` に名前があるときだけ当てる
-PARTIAL_RULES: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]] = {budget.JOBS_RULE: budget.check_jobs}
+PARTIAL_RULES: dict[str, Rule] = {budget.JOBS_RULE: budget.check_jobs}
 
 
 class Halted(CheckError):
@@ -139,9 +142,7 @@ def _require_own_contracts(scope: Scope, rules: dict[str, Any]) -> None:
         raise CheckError(str(exc)) from None
 
 
-def _chosen(
-    table: dict[str, Callable[[Scope, dict[str, Any]], list[Finding]]], scope: Scope, rules: dict[str, Any], only: list[str] | None
-) -> Iterator[list[Finding]]:
+def _chosen(table: dict[str, Rule], scope: Scope, rules: dict[str, Any], only: list[str] | None) -> Iterator[list[Finding]]:
     """`table` の規則のうち `only` に名前があるもの（`only` が無ければすべて）を 1 つずつ当てる。"""
     for name, rule in table.items():
         if not only or name in only:
