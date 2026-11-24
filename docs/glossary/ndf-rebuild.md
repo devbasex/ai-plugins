@@ -16,8 +16,8 @@
 | 旧い保存先 | — | 10 系の NDF（今の `plugins/ndf/`）が状態を書く保存先（14 種）。プラグイン名を含む保存先（`~/.local/state/ndf`・`.git/ndf/state`・`~/.claude/ndf/relay.py` など）が新しい NDF の保存先と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後である。リポジトリの `.ndf/` のように名前を含まない保存先は、入れ替えの前から新しい NDF と同じパスを使う。同じパスになることと退避することは別で、新しい NDF が最初の起動で退避するのは状態のホーム（`~/.local/state/ndf`）とチェックアウトの保存先（`.git/ndf/state`）の 2 つだけである。ほかの重なる保存先（共有の設定ディレクトリの `relay.py`・statusline、リポジトリの `.ndf/`）は退避せずに扱いの規則に従う | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 新しいプラグイン | — | 入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next` | — | — | `docs/specifications/ndf-rebuild.md` |
 | 文書のルート | — | プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）とオーナーの子と時期 | — | — | — |
-| 入れ替えの起点のコミット | — | 入れ替えの PR が分かれた main のコミット（git merge-base origin/main HEAD）。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う | — | — | — |
-| 非公開の参照 | — | 公開のリポジトリや公開の Issue に入っている、非公開リポジトリへの完全な参照・手元のアカウント名・個人のメール。一覧には場所と分類だけを書き、値を写さない | — | — | — |
+| 入れ替えの起点のコミット | — | 入れ替えの PR が分かれた main のコミット（git merge-base origin/main HEAD）。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う | — | — | `docs/specifications/ndf-rebuild.md` |
+| 非公開の参照 | — | 公開のリポジトリや公開の Issue に入っている、非公開リポジトリへの完全な参照・手元のアカウント名・個人のメール。一覧には場所と分類だけを書き、値を写さない | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | プラグインの定義 | — | プラグインの `plugin.json` が持つプラグイン名とバージョン | — | — | `docs/specifications/ndf-rebuild.md` |
 | 初期構成 | — | 新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの保存先（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別 | — | — | `docs/specifications/ndf-rebuild.md` |
 | レビューの項目 | — | 設計レビューの Issue の本文（進行のセクションより前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し） | — | — | `docs/specifications/ndf-rebuild.md` |
@@ -34,5 +34,4 @@
 | 起票の前に人へ見せる場 | — | 多観点レビューの範囲の外の指摘を分類し、分類ごとの目指す姿と受け入れ条件の案を、設計承認ゲートの承認資料のセクション「多観点レビューの分類」に載せる場。人が回答した承認ゲートの後にだけ起票する（#3388） | — | — | `docs/specifications/ndf-rebuild.md` |
 | 11.x の対応表 | — | 振り分け表の 11.x の行ごとに、11.x でのルート（11.x の子の記号・開いている Issue・作らない理由のどれか 1 つ）を持つ #3388 の表。11.x の行のルートの SSOT（#3388） | — | — | `docs/specifications/ndf-rebuild-review-scope.md` |
 | 11.x の子 | — | 11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388） | — | — | `docs/specifications/ndf-rebuild-review-scope.md` |
-| 外からの参照 | — | `plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。実行する参照・作り直す生成物・根の検査のテスト・文書の 4 種類に分ける。実行する参照は、書き換えの表と検査をプラグインの入れ替えより前に main へ入れ、書き換えそのものは入れ替えの PR で行う | — | — | — |
-| 外からの参照の書き換えの表 | `plugin_refs_swap` | 入れ替えで消えるパスを指す実行する参照を、行ごとに入れ替えの後の参照先へ対応づけた表（scripts/plugin-refs-swap.json）。入れ替えの PR が当て、外からの参照の検査が実在を確かめる | — | — | — |
+| 外からの参照 | — | `plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。実行する参照・作り直す生成物・根の検査のテスト・文書の 4 種類に分ける。実行する参照は、書き換えの表と検査をプラグインの入れ替えより前に main へ入れ、書き換えそのものは入れ替えの PR で行う | — | — | `docs/specifications/ndf-rebuild.md` |

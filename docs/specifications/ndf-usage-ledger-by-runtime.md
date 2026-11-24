@@ -215,6 +215,7 @@ Python の起動の共有処理（`call_claude`・`record_probe`・`record_jev`�
 | サブエージェント | hook の入力の `agent_transcript_path` の会話の記録。assistant の `message.usage` を `message.id` ごとに 1 回足し、書き込みを 5 分と 1 時間に分ける | 記録が読めなければ `"unknown"` |
 
 `record-cli` の起動の時刻と作業ディレクトリは `<stem>-launch.json` の `started_at`・`workdir` から読む。
+`<stem>-launch.json` は起動の記録で、外部の CLI を 1 回起動するたびに、起動した側（`ndf.adapters.agents`）が自分で書く。
 
 ### 集計
 

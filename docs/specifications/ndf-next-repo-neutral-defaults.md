@@ -252,6 +252,29 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 `.github/workflows/ndf-next-release.yml` は、`.ndf/worktree.json` に `base_branch`・`production_branch` が無いとき、
 `github.event.repository.default_branch` を使う。スキーマの「未指定ならリモートの HEAD が指すブランチ」の GitHub 上の値である。
 
+### リリースの形とバージョンの保存先（#3615）
+
+`ndf release-steps` の材料の収集・組み立て・タグは、プラグインの登録（`.claude-plugin/`）を前提にしない。ai-plugins の値（形 `package-plugin`・保存先 `plugin`・タグ `{plugin}--v{version}`）は ai-plugins の `.ndf/project.json` の `branch_strategy.release` にだけ置き、コードの既定にしない。
+
+| 設定（`branch_strategy.release`） | 決めること |
+| --- | --- |
+| `form` | リリースの形（利用者へ届く仕組みの種類）。リリースの形の表 `contracts/domains/release-forms.json` の行を指し、表が届き方と扱い（`supported`）を持つ。扱わない形（`desktop`）では `materials`・`assemble`・`publish` が何もせずに `precondition` で止まり、表の理由を出す |
+| `version_store` | バージョンの保存先（`plugin`・`json`・`pubspec`・`tag`・`none`）。種類ごとの保存先のアダプター（`domains/release/version_store.py`）が、バージョンの単位の一覧・バージョンの読み書き・書き換えてよいパスを同じインタフェースで持つ。バージョンの単位は、保存先 `plugin` ではマーケットプレイスに登録したプラグイン 1 つ、ほかではリポジトリ全体の 1 つ |
+| `tag`・`branch`・`changelog_heading` | 名前の書式。タグ・リリースブランチ・CHANGELOG の見出しを作り、同じ書式で読み戻す。`tag` は既定を持たない（`null` はタグを作らない）。`branch` の既定は `release/v{version}`、見出しの既定は `## [{plugin} {version}] - {date}` |
+
+- 材料の収集・組み立て・タグは保存先の種類の名前で分岐せず、アダプターのインタフェースだけを呼ぶ。種類を足すときは、アダプター 1 つと `version_store.KINDS` とスキーマの行を足す
+- 範囲の起点（承認資料とリリースブランチに集める差分の古い側の端）は、リリース方式ごとに次の表のとおり決まる（`domains/release/since_decide.py` の区分）。`trunk` の `release_pr` と `release_branch` は別の方式で、どちらもバージョンの単位ごとの前のリリースを起点にする。前のリリースの起点は、前のバージョンのタグ、無ければ今のバージョンが保存先に入ったコミット、それも無ければ本番ブランチの最初のコミットである。`trunk` で本番ブランチの HEAD を起点にしないのは、ベースブランチと本番ブランチが同じなので範囲が空になるためである
+
+  | リリース方式 | 範囲の起点 | 範囲の終点 |
+  | --- | --- | --- |
+  | `merge_base_branch` | 本番ブランチの HEAD | ベースブランチの HEAD |
+  | `trunk` の `release_pr` | バージョンの単位ごとの前のリリースの起点 | 本番ブランチの HEAD |
+  | `release_branch`（選んだスプリントを集める） | バージョンの単位ごとの前のリリースの起点 | 選んだスプリントを集めた先頭 |
+  | `production_pr` | 本番の PR と本番ブランチの分岐点 | PR の先頭 |
+- 書式に合わない名前は読み戻さず、前のバージョンの候補にしない
+- リリース対象外のファイル（バージョンを上げるかの判定で数えないファイル）の既定は、テストのファイルの表 `contracts/domains/test-files.json` の行から作る。`.ndf/release.json` の `undistributed` は既定へ足し、置き換えない。リリース対象外のファイルだけが変わった場合、既定ではバージョンを上げない。`.ndf/release.json` の `bump_undistributed` が `true` なら、対象外のファイルだけの変更でもバージョンを上げる（`domains/release/changes_decide.py` の `needs_bump`）
+- 利用者のリポジトリは、置いたテンプレートの workflow から再利用可能なワークフロー（`workflow_call` を持ち、ほかのリポジトリから `uses:` で呼べる workflow。`.github/workflows/ndf-release-reusable.yml`）を呼ぶ。再利用可能なワークフローは秘密の名前を決め打たない。呼び出し元は、リリースに使う認証情報（自分のリポジトリの秘密）を `release_token` に割り当てる。`merge` のジョブでは `release_token` が必須で、無ければマージの前に失敗して止まる。`assemble` と `publish` のジョブは、省略すると `github.token` を使う。`github.token` で作成したリリース PR の CI は、書き込み権限のある人が PR の画面で起動を承認するまで待つ
+
 ### Skill の本文
 
 - `merged` は管理者の迂回（`--admin`）を使わない側を既定にし、`.ndf/project.json` の `production_merge.admin` の宣言と、本番ブランチの

@@ -6,14 +6,10 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
-| 一括の整形 | — | リポジトリの全対象へ formatter を掛け、結果を 1 つのコミットにしたもの。.git-blame-ignore-revs に載せる単位 | — | — | — |
-| 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じバージョン・同じ設定で走らせる 1 つのコマンド | — | — | — |
-| 一括の自動修正 | — | リポジトリの全対象へ ruff check --fix を掛け、結果を 1 つのコミットにしたもの。一括の整形と同じく .git-blame-ignore-revs に載せる | — | — | — |
-| 抑止 | — | 静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える | — | — | — |
+| 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じバージョン・同じ設定で走らせる 1 つのコマンド | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | 古いバイトコード | — | Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | git を使うテストの基盤 | — | cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow） | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | CLI のバージョンの一覧 | — | スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。バージョンを上げるときに書き換える唯一の場所 | — | — | `docs/specifications/runtime-smoke-cli-versions.md` |
-| 前提のコマンドの一覧 | `required_commands` | 根の conftest.py が持つ、テストの置く場所（パス、またはパスに :: でつないだファイルの中のクラス）ごとに要る外部コマンドの表。収集した項目に当たるコマンドが PATH に無ければ、読み飛ばしの指定が無い限り収集を失敗させる | — | — | — |
 | リポジトリ前提の検査 | — | リリース対象の Skill とスクリプトに ai-plugins にしか無い語が無いかを見る CI のジョブ `skill-repo-assumptions-check` | — | — | `docs/specifications/ndf-repo-assumptions-check.md` |
 | 既知の当たり | — | リポジトリ前提の検査に当たるが、NDF 自身の保存先を読むなど違反でない箇所か、ルートの課題が直すまで残す箇所。語とファイルの組ごとに当たりの数を例外リストへ定義する | — | — | `docs/specifications/ndf-repo-assumptions-check.md` |
 | import の輪 | — | NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ | — | — | `docs/specifications/ndf-scripts-import-cycles.md` |
