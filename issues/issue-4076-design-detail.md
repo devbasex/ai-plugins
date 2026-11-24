@@ -93,8 +93,8 @@ plugins/ndf/
   - 手順
     1. `git rev-parse --verify <ref>^{commit}` でコミットへ解く。失敗は `MvvError`（`precondition`）
     2. `git ls-tree -z <コミット> -- .ndf/mvv.json` を打つ。成功して出力が空のとき（ツリーに設定のエントリが無いと確かめられたとき）だけ `absent`（`commit` は置き、共通原則は読まない）。`ls-tree` の失敗、エントリが通常のファイルの blob でない（`tree`・`commit`・シンボリックリンク）は `MvvError`（`precondition`）
-    3. 設定を `ls-tree` で得た blob の名前で `run_bytes` で読み、`decl_from` で検査する。`body_path(decl)` で本文のパスを決め、本文を `run_bytes` で読む。設定の blob の読み取りの失敗（blob の欠損を含む）・本文が読めない・JSON でない・旧い形は `MvvError`（`precondition`）。読めなかったことを `absent` に落とさない
-    4. `mvv_decide.status` で状態を決める。`mismatch` は、`allow_mismatch` が偽なら `MvvError`（「ベースの MVV の本文が承認の記録と合わない: <本文のパス>」）。真なら状態 `mismatch`・項目なし・スナップショットを書かずに返す（基準 5 は外れる）。`unapproved` はそのまま返す
+    3. 設定を `ls-tree` で得た blob の名前で `run_bytes` で読み、`decl_from` で検査する。設定の blob の読み取りの失敗（blob の欠損を含む）・JSON でない・旧い形は `MvvError`（`precondition`）。読めなかったことを `absent` に落とさない。`mvv_decide.status(decl, None)` が `unapproved`（承認済みのハッシュが無い）なら、本文のパスを解かず本文も読まずに `unapproved` を返す（設定だけを先に置いたプロジェクトを止めない。`blobs` は設定だけ）
+    4. 承認済みのハッシュがあるときだけ、`body_path(decl)` で本文のパスを決め、本文を必須で読む（読めなければ `MvvError`）。本文の sha256 を `mvv_decide.status` に渡して状態を決める。`mismatch` は、`allow_mismatch` が偽なら `MvvError`（「ベースの MVV の本文が承認の記録と合わない: <本文のパス>」）。真なら状態 `mismatch`・項目なし・スナップショットを書かずに返す（基準 5 は外れる）
     5. 承認済みなら、本文のスナップショットと共通原則のスナップショット（`mvv.principles` のバイト列から sha256 を求め、`principles-<先頭 12 文字>.md`）を `_write_verified` で書き、`items_of` で項目の一覧を作る。`blobs` の鍵は設定のパスと `body_path` のパス
   - バイト列の読み方: `Git.run` は `text=True` で起動し CRLF を LF に変えるので、設定と本文の `git show` には使わない。`adapters/git.py` に、同じ `NO_PROMPT` の環境で標準出力をバイト列のまま返す `Git.run_bytes(*args) -> bytes` を足し、`current` は設定と本文をこれで 1 回ずつ読む。同じバイト列から `blobs` の id を計算し、UTF-8 で復号して解析する（設定は `mvv.py` に足す `decl_from(raw: bytes, ref, root)` で `decl_at` と同じ検査をかける。`decl_at` は `run_bytes` の結果を `decl_from` へ渡す形にする）。本文の sha256 も同じバイト列から計算する。解析と id の計算で別々に Git を打たない
   - 副作用: `git rev-parse`・`git ls-tree` を 1 回ずつ、設定と本文の読み取り（`run_bytes`）を 2 回（`absent` では 0 回）。スナップショットのファイルを 2 つまで読み、違えば書く。CLI の `_mvv_current` だけは、読む前に `fetch_branch_or_raise` で `+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を 1 回取得する（`git fetch <リモート> <ブランチ>` は、`--single-branch` で別のブランチを clone した作業場所でリモート追跡参照を更新しない）。cross-review は下の同期でベースブランチも取得した参照を渡すので打たない
@@ -102,7 +102,7 @@ plugins/ndf/
   - 手順: `drive._start` は `remote = g.remote()` を 1 回求め、`worktree.sync_worktree(g, cfg.branch, remote, base_branch=cfg.base)` を打つ。同期が成功した後に `snap = current(root, f"{remote}/{cfg.base}")` を呼び（この参照は直前の fetch で更新したリモート追跡参照で、取得し直さない。`allow_mismatch` を渡さない）、`cfg = dataclasses.replace(cfg, base_commit=snap.commit)` とする。`RunConfig` に `base_commit: Optional[str] = None` を足す。以後の `changed(run.g, cfg.base_commit, …)`・`_merge_base`（`run.g.merge_base(cfg.base_commit, head)`）・差分（`f"{scope.base or merge_base}...HEAD"`）・`Basis` はこのコミットを使い、`cfg.base`（名前）は表示と取得にだけ使う。`crossreview/cli.py` の同期のコマンド（`worktree.sync_worktree(git.Git(Path(args.worktree)), args.branch)`）も `--base` を受けるときは同じく `base_branch` を渡す（後に打つ `review-scope` が読む参照を新しくする）
   - 取得の失敗: ベースの refspec も同じ `git fetch` に入るので、ベースを取れないときは同期ごと失敗し、今の同期の失敗と同じく `GitError` で `run` が止まる。古いベースの参照を読んで続けない
   - 他の呼び手（`crossrefactor` の `workspace`・`final_gate`・`drive`、`crossreview/push.py` の `_rebase_onto_origin`）は `base_branch` を渡さず、今と同じ
-- `cmd_scope`（`review-scope`）: 手元の `<リモート>/<ベース>` を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「再利用の条件に MVV を足す」）。ネットワークに出ずスナップショットを書かない
+- `cmd_scope`（`review-scope`）: 手元の `<リモート>/<ベース>` を `git rev-parse` で 1 回コミットに解き、そのコミットで `git ls-tree` を打つ。承認済みのハッシュの無い設定は、本文を見ずに `unapproved` の識別子にする。本文のパスは `ls-tree` で得た設定の blob を `git cat-file` で読み `body_path` で解く（設定の blob が最後のラウンドの記録と同じなら、記録のパスを使い読まない）。共通原則の sha256 は、承認済みのときだけプラグインのファイルから求める（識別子の規則は「再利用の条件に MVV を足す」）。ネットワークに出ずスナップショットを書かない
 - `items_of`
   - 事後条件: `## Value` の下の行頭の `<番号>.` から `Value <番号>` を作る。`## 必ず人の承認が要る操作` の表と共通原則の表から `P<番号>`・`C<番号>` を作る（`mvv_material_decide.redlines` を使う）。`## Mission`・`## Vision` があれば `Mission`・`Vision` を作る。重複を除き、出た順
 
@@ -113,7 +113,7 @@ plugins/ndf/
 | `current` | 参照を解決できない | 取得していない・名前の誤り | `git rev-parse --verify` の失敗 | `MvvError` を呼び出し元へ返す（`absent` にしない） | `refused`（`precondition`）、`summary` に参照と理由 | 取得し直して打ち直す |
 | `current` | 設定が無い | 解決したコミットのツリーに `.ndf/mvv.json` のエントリが無い | `git ls-tree` が成功して出力が空 | 状態 `absent` を返す | `ok`・`outputs.mvv.state: absent` | 無し |
 | `current` | 設定の有無を確かめられない | `git ls-tree` の失敗・設定のエントリが通常のファイルでない・設定の blob の欠損 | `ls-tree` の終了コードと出力・`git show` の失敗 | `MvvError`（`absent` にしない） | `refused`（`precondition`）、`summary` に `.ndf/mvv.json` とコミット | 直して打ち直す |
-| `current` | 設定はあるが本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
+| `current` | 承認済みのハッシュがあるのに本文を読めない | 設定の `body` のパスに本文が無い・`git show` の失敗 | `git show` の失敗 | `MvvError` | `refused`（`precondition`）、`summary` に `body_path` のパス | 直して打ち直す |
 | `body_path` | パスが不正 | 絶対パス・`..`・空 | 値の検査 | `MvvError` | `refused`（`precondition`）、`summary` に値 | 設定を直して打ち直す |
 | `current` | 本文の sha256 が合わない | 承認の後に本文が変わった | sha256 の比較 | `MvvError`（`allow_mismatch` が偽のとき。`mismatch` を状態として返さない） | `ndf records mvv current`・`ndf cross-review run` とも `refused`（`precondition`）、`summary` に「ベースの MVV の本文が承認の記録と合わない」とパス | 本文を戻すか承認し直して打ち直す。直す PR も cross-review を通らないので、人が cross-review を通さずにマージする。直す工程の起動指示は `ndf records mvv current --allow-mismatch`（`ok`・`state: mismatch`・警告つき）の結果を書く。cross-review は相手役を起動せず、状態ファイルとジャーナルを書かない |
 | `current` | 設定が壊れている・旧い形 | JSON でない・`_refuse_legacy` | `decl_at` | `MvvError` を呼び出し元へ返す | `refused`（`precondition`）、`summary` に理由 | 設定を直して打ち直す |
@@ -149,7 +149,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `body_path` | 既定（キー無し）→ `.ndf/mvv.md`。`"docs/x.md"` → `.ndf/docs/x.md` | 文字列でない `body` → 既定 | 絶対パス・`../x.md`・空 → `MvvError` |
-| `current` | ベースの承認済みの本文からスナップショットを書き、バージョン 11・項目を返す。作業場所の本文が違ってもスナップショットはベースの中身。既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身で 2 回打つと書き直さずファイルは 1 つ。同じ名前で違う中身のファイルは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | 解決できない参照・設定はあるが本文が無い・壊れた設定・設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない）。`mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・スナップショットなし）。`unapproved` → 状態を返す |
+| `current` | ベースの承認済みの本文からスナップショットを書き、バージョン 11・項目を返す。作業場所の本文が違ってもスナップショットはベースの中身。既定外のパスで承認したリポジトリ → 承認済み・`blobs` にそのパス。`commit` が解いたコミット | 同じ中身で 2 回打つと書き直さずファイルは 1 つ。同じ名前で違う中身のファイルは検証済みの中身になる。ツリーに `.ndf/mvv.json` が無い → `absent` | 解決できない参照・設定はあるが本文が無い・壊れた設定・設定の blob を欠損させたコミット・`ls-tree` の失敗 → `MvvError`（`absent` にならない）。`mismatch` → `MvvError`（`allow_mismatch=True` なら状態 `mismatch`・スナップショットなし）。承認済みのハッシュの無い設定だけがあり本文が無いベース → `unapproved`（止まらず本文も読まない） |
 | `_mvv_current` | `--single-branch` で別のブランチを clone した作業場所で新しいバージョンを返す | `--allow-mismatch` で `mismatch` のベース → `ok`・`state: mismatch`・警告 | 取得の失敗 → `refused` |
 | `sync_worktree`・`fetch_head` | `base_branch` を渡すと 1 回の `git fetch` に head とベースの 2 本の refspec が並び、リモート追跡参照のベースが新しくなる。`drive._start` はその後に `current` を `<リモート>/<ベース>` で呼ぶ（手元のベースが古く、リモートで新しい MVV が承認済みのとき、新しい版を読み、前の収束を再利用しない） | `base_branch` が None か head と同じ → refspec は 1 本（今と同じ） | ベースを取れない → 同期ごと失敗し、`current` を呼ばない |
 | `drive._start` | ローカルの `main` が古くても、merge-base・差分・`Basis.base` がリモートのコミットから作られる | `mismatch` のベースで、PR が本文を戻していても相手役を起動しない | `MvvError` → 相手役を起動しない |

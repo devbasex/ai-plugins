@@ -96,8 +96,8 @@ graph LR
 | --- | --- |
 | 入力 | `--base`（必須。ベースブランチ）・`--allow-mismatch`（任意）。`Git.fetch_branch_or_raise` で `+refs/heads/<ブランチ>:refs/remotes/<リモート>/<ブランチ>` を取得し、`<リモート>/<ブランチ>` を解いたコミットから `.ndf/mvv.json` と本文を読む。本文の場所は設定の最上位の `body`（既定 `mvv.md`）を `.ndf/` からの相対で解く |
 | 出力（`ok`） | `outputs.mvv`: `{"state": "approved", "version": 11, "sha256": "<64 桁>", "path": "<本文のスナップショットの絶対パス>", "principles_path": "<共通原則のスナップショットの絶対パス>", "items": ["Mission", "Vision", "Value 1", …, "Value 17", "P1", …, "P4", "C1", …, "C8"]}` |
-| 出力（承認済みでない） | `ok` で `outputs.mvv` は `{"state": "absent" か "unapproved"}` だけ。スナップショットを書かない。`absent` は、参照をコミットへ解決できて、`git ls-tree` でそのコミットのツリーに `.ndf/mvv.json` のエントリが無いと確かめたときだけ |
-| 失敗 | 参照をコミットへ解決できない・取得に失敗した・設定の有無を確かめられない（ツリーや blob の読み取りの失敗）・設定や本文を読めない（`unreadable`）・本文のパスが絶対パスか `..` を含む・設定が壊れている・本文が承認の記録と合わない（`mismatch`）・スナップショットを書けないは `refused`（`cause.kind`: `precondition`）。`summary` に読めない参照かファイルと理由（`mismatch` は「ベースの MVV の本文が承認の記録と合わない」と本文のパス）。`--allow-mismatch` を付けた `mismatch` だけは `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示が使う。cross-review は使わない） |
+| 出力（承認済みでない） | `ok` で `outputs.mvv` は `{"state": "absent" か "unapproved"}` だけ。スナップショットを書かない。承認済みのハッシュの無い設定は、本文が無くても `unapproved`。`absent` は、参照をコミットへ解決できて、`git ls-tree` でそのコミットのツリーに `.ndf/mvv.json` のエントリが無いと確かめたときだけ |
+| 失敗 | 参照をコミットへ解決できない・取得に失敗した・設定の有無を確かめられない（ツリーや blob の読み取りの失敗）・設定を読めない・承認済みのハッシュがあるのに本文を読めない（`unreadable`）・本文のパスが絶対パスか `..` を含む・設定が壊れている・本文が承認の記録と合わない（`mismatch`）・スナップショットを書けないは `refused`（`cause.kind`: `precondition`）。`summary` に読めない参照かファイルと理由（`mismatch` は「ベースの MVV の本文が承認の記録と合わない」と本文のパス）。`--allow-mismatch` を付けた `mismatch` だけは `ok`・`outputs.mvv.state: mismatch`・`warnings` に同じ文（MVV を直す工程の起動指示が使う。cross-review は使わない） |
 | スナップショットの保存先 | MVV の記録の保存先（`NDF_MVV_STATE_DIR`）の下の `snapshots/v<バージョン>-<sha256 の先頭 12 文字>.md` と `snapshots/principles-<sha256 の先頭 12 文字>.md`。同じ名前のファイルも全 SHA-256 で確かめ、同じ中身なら書き直さず、違えば検証済みの中身で置き換える |
 | 項目の一覧 | `## Value` の番号つきの項目の番号、`## 必ず人の承認が要る操作` の表の `P<番号>`、共通原則の表の `C<番号>`、`Mission`・`Vision`（セクションがあるとき） |
 
