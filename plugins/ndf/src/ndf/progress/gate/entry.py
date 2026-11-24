@@ -412,7 +412,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--notes", help="変更要求（request_changes）の指摘ファイル")
     ap.add_argument("--head", help="見た PR の head の SHA")
     ap.add_argument("--material-sha256", help="見た承認資料の sha256")
-    ap.add_argument("--presentation", help="見た資料の提示の識別子（承認ゲートの結果の routes が固定する。資料を出し直すと変わる）")
+    ap.add_argument(
+        "--presentation",
+        help="見た資料の提示の識別子。提示した承認の対象を持つ承認ゲートでは必須（routes が埋める。資料を出し直すと変わる）",
+    )
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
     return ap
 

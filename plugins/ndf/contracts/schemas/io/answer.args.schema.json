@@ -46,7 +46,7 @@
         },
         "--presentation": {
           "type": "string",
-          "description": "見た資料の提示の識別子（承認ゲートの結果の routes が固定する。資料を出し直すと変わる）"
+          "description": "見た資料の提示の識別子。提示した承認の対象を持つ承認ゲートでは必須（routes が埋める。資料を出し直すと変わる）"
         },
         "--drop": {
           "type": "array",

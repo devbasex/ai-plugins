@@ -161,7 +161,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン>` と `wait <実装のプラン>... <開発版のプラン>` をバックグラウンドで起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が回答したら `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>` を打つ
+   利用者が回答したら 承認ゲートの結果の `routes` の回答の語のコマンド（`--head`・`--material-sha256`・`--presentation` を含む）に `--reason <要約> --by human --key <冪等のキー>` を足して打つ
 4. 承認の後、リリースのワークフローを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <リリースのワークフロー>` と `wait <リリースのワークフロー>` をバックグラウンドで起動する。リリースのワークフローの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
@@ -190,15 +190,15 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    設計の前に別の課題を統合すると決めていれば `--absorb <課題>:<統合先>` を足す（統合した課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json` と `sv wait $O/1-design-1052.json`
 3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が回答したら、設計 PR ごとに
-   `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>` を打つ
+   承認ゲートの結果の `routes` の回答の語のコマンド（`--head`・`--material-sha256`・`--presentation` を含む）に `--reason <要約> --by human --key <冪等のキー>` を足して打つ
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
    --then $O/7-check.json --then $O/8-release.json` と、同じプランの並びで `sv wait`。マージのプランは 3 の記録を見て
    マージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら `ndf answer <ステートマシン> --gate <質問の id> --result <approved か request_changes> --reason <要約> --by human --key <冪等のキー>`
-   を打つ。変更を要求されたら 6 を打たない
+   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら、承認ゲートの結果の `routes` の回答の語のコマンド（`--head`・`--material-sha256`・`--presentation` を含む）に
+   `--reason <要約> --by human --key <冪等のキー>` を足して打つ。変更を要求されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップがクリーンアップを行う
 
