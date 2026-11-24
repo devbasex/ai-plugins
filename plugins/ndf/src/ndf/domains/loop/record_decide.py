@@ -205,38 +205,30 @@ def _lap_index(state: LoopState, number: int) -> int:
     raise RecordError(f"記録に無い周 {number} への事象")
 
 
-def _with_lap(state: LoopState, number: int, **change: Any) -> LoopState:
-    i = _lap_index(state, number)
-    laps = list(state.laps)
-    laps[i] = replace(laps[i], **change)
-    return replace(state, laps=tuple(laps))
-
-
-def _lap_change(lap: Lap, ev: Mapping[str, Any]) -> dict[str, Any]:
-    """周に付く事象から、周 `lap` の変わる欄と新しい値を求める。"""
+def _changed_lap(lap: Lap, ev: Mapping[str, Any]) -> Lap:
+    """周に付く事象を当てた後の周。"""
     kind = ev["kind"]
     if kind == MODE_DECIDED:
-        return {"mode": ev["mode"], "basis": ev["basis"]}
+        return replace(lap, mode=ev["mode"], basis=ev["basis"])
     if kind == ISSUE_EXCLUDED:
         # 外すと課題の組が変わるので、決めたモードを捨てて決め直させる（#2923）
-        return {"excluded": (*lap.excluded, (int(ev["issue"]), ev["reason"])), "mode": None, "basis": None}
+        return replace(lap, excluded=(*lap.excluded, (int(ev["issue"]), ev["reason"])), mode=None, basis=None)
     if kind == ISSUES_CREATED:
-        return {"created": (*lap.created, *(int(i) for i in ev["issues"] if int(i) not in lap.created))}
+        return replace(lap, created=(*lap.created, *(int(i) for i in ev["issues"] if int(i) not in lap.created)))
     if kind == GATE_SHOWN:
-        return {"gates": (*lap.gates, (int(ev["pr"]), ev["head"]))}
+        return replace(lap, gates=(*lap.gates, (int(ev["pr"]), ev["head"])))
     if kind == GATE_ANSWERED:
         got = Answer(int(ev["pr"]), ev["answer"], ev["head"], ev["note"], _at(ev))
-        return {"answers": (*lap.answers, got)}
+        return replace(lap, answers=(*lap.answers, got))
     if kind == VERSION_SHIPPED:
-        return {"released": (*lap.released, str(ev["product_version"]))}
-    return {"outcome": ev["outcome"], "reason": ev["reason"]}
+        return replace(lap, released=(*lap.released, str(ev["product_version"])))
+    return replace(lap, outcome=ev["outcome"], reason=ev["reason"])
 
 
 def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     """周に付く事象を当てる。"""
-    n = int(ev["lap"])
-    lap = state.laps[_lap_index(state, n)]
-    return _with_lap(state, n, **_lap_change(lap, ev))
+    i = _lap_index(state, int(ev["lap"]))
+    return replace(state, laps=(*state.laps[:i], _changed_lap(state.laps[i], ev), *state.laps[i + 1 :]))
 
 
 def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:

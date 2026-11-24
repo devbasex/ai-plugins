@@ -251,7 +251,7 @@ def test_candidates_reject_bad_rows() -> None:
     assert sel.rows_of([{"issue": 2, "needs": [3]}]) == [sel.Row(2, needs=(3,))]
 
 
-# --- 現状固定: 周に付く事象の当て方（record_decide._with_lap / _lap / _apply_lap） ---
+# --- 現状固定: 周に付く事象の当て方（record_decide._changed_lap / _apply_lap） ---
 
 
 def _two_laps() -> rec.LoopState:
