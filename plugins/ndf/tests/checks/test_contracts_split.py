@@ -44,14 +44,19 @@ def _check(root: Path, rules: dict) -> list[Finding]:
     return contracts_split.check(_scope(root), rules)
 
 
+def _in_plugin(root: Path, path: str) -> str:
+    """リポジトリの根からの相対パスを、プラグインの根からの相対にする。"""
+    return (root.parents[1] / path).relative_to(root).as_posix()
+
+
 def _paths(root: Path, found: list[Finding]) -> list[str]:
     """指摘のパス（プラグインの根からの相対）。"""
-    return [(root.parents[1] / f.path).relative_to(root).as_posix() for f in found]
+    return [_in_plugin(root, f.path) for f in found]
 
 
 def _item_paths(root: Path, report: dict) -> list[str]:
     """結果 JSON の `items` のパス（プラグインの根からの相対）。"""
-    return [(root.parents[1] / item["path"]).relative_to(root).as_posix() for item in report["items"]]
+    return [_in_plugin(root, item["path"]) for item in report["items"]]
 
 
 def _merge_back(root: Path, table: str) -> None:
