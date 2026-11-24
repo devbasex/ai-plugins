@@ -533,9 +533,10 @@ def cmd_report(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     ref = store.state_pr(state_dir, args.pr)
     data = store.read_state(ref)
+    unwritten = (drive.RECORDS_UNWRITTEN,) if store.MVV_RECORD_ERROR in data else ()
     try:
         url, notes = _post_report(
-            state_dir, args.pr, report_decide.final_of(data), (), lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+            state_dir, args.pr, report_decide.final_of(data), unwritten, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))

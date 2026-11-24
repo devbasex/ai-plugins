@@ -67,9 +67,9 @@ CHANGES_REQUIRED = fixgate_decide.CHANGES_REQUIRED
 RETRY_SUFFIX = "-retry"
 # PR に届いていないコミットの根拠の記述を確かめられなかった注意（PR へ載るので、原因は状態ファイルにだけ残す）
 UNSENT_UNCHECKED = "PR に届いていない手元のコミットの根拠の記述を確かめられない（原因は状態ファイルの unsent_citations にある）"
-# 状態ファイルのキー（MVV の記録を書けなかった原因。書けたら消す）と、そのときの注意（PR へ載るので、保存先のパスを含む例外の文を入れない）
-MVV_RECORD_ERROR = "mvv_record_error"
-RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原因は状態ファイルの {MVV_RECORD_ERROR} にある）"
+# MVV の記録を書けなかった注意と、その原因を状態ファイルへ残せない（消せない）注意（PR へ載るので、保存先のパスを含む例外の文を入れない）
+RECORDS_UNWRITTEN = f"MVV の記録を書けない（次の起動で書く。原因は状態ファイルの {store.MVV_RECORD_ERROR} にある）"
+CAUSE_UNSAVED = f"状態ファイルの {store.MVV_RECORD_ERROR} を書き直せない（次の起動で書き直す）"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -623,11 +623,15 @@ def _record_mvv(run: _Run, snap: mvv.Snapshot, rows: Sequence[Mapping[str, Any]]
     except (mvv.MvvError, identity.IdentityError, internal.InternalError, OSError, UnicodeDecodeError) as exc:
         error = f"{type(exc).__name__}: {exc}"
         run.warnings.append(RECORDS_UNWRITTEN)
-    held = run.data.pop(MVV_RECORD_ERROR, None)
+    held = run.data.pop(store.MVV_RECORD_ERROR, None)
     if error is not None:
-        run.data[MVV_RECORD_ERROR] = error
+        run.data[store.MVV_RECORD_ERROR] = error
     if error != held:
-        _save(run)
+        try:
+            _save(run)
+        except OSError:
+            # 空き容量の不足では状態ファイルも書けない。レビューの結果は返す
+            run.warnings.append(CAUSE_UNSAVED)
     return error is None
 
 
