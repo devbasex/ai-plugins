@@ -7,21 +7,19 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf import identity
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import facts, limits
+from ndf.contracts import limits
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
-from ndf.domains.records import usage_decide as ud
 from ndf.domains.settings import renames
+from ndf.progress.gate import records
 from ndf.progress.gate.checks import Changed, MvvFacts
 
 # LLM の判定の関数: MVV 判定の入力を受け、判定の語と費用・秒の実測値を返す
@@ -32,16 +30,9 @@ class MvvError(ValueError):
     """設定が読めない・メインディレクトリを解けない。"""
 
 
-def _state_dir() -> Path:
-    var = facts.value("locations", "mvv-state", "env")
-    # 環境変数があれば identity を読まない。状態の保存先を解けなければ IdentityError のまま
-    state = None if os.environ.get(var) else identity.load().state_dir
-    return ud.state_location_dir(os.environ, var, state, facts.value("locations", "mvv-state", "path"))
-
-
 def record_path(file_id: str) -> Path:
     """記録のファイル（表 ndf-files の mvv-validation・mvv-signals）。"""
-    return _state_dir() / facts.value("ndf-files", file_id, "path")
+    return records.mvv_record_path(file_id)
 
 
 @cache
