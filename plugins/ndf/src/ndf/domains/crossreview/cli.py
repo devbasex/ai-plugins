@@ -333,12 +333,12 @@ def _local_mvv(wt: Path, ref: Optional[str]) -> tuple[str, list[str]]:
     return scope_decide.UNKNOWN_MVV, [f"前のラウンドと MVV が同じかを確かめられないので、全差分を範囲にした: {why}"]
 
 
-def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[Optional[list[str]], list[str]]:
-    """変わった Markdown のセクションと注意。手元のオブジェクトだけで読めなければ None（全差分になる）。"""
+def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optional[str]]:
+    """変わった Markdown のセクション。手元のオブジェクトだけで読めなければ、読めない理由（全差分になる）。"""
     try:
-        return changes.changed_sections(g, base, wt), []
+        return changes.changed_sections(g, base, wt), None
     except git.GitError as exc:
-        return None, [f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"]
+        return [], f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"
 
 
 def cmd_scope(args: argparse.Namespace) -> int:
@@ -362,15 +362,16 @@ def cmd_scope(args: argparse.Namespace) -> int:
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）。`--base` の誤りは、セクションを読む前にここで止まる
     merge_base = g.merge_base(based.commit, "HEAD")
     sections, unread = _local_sections(g, based.commit, wt)
-    now, unsure = _local_mvv(wt, based.mvv_ref)
-    if sections is None:
-        got = scope_decide.Scope(scope_decide.FULL, None, ())
+    if unread is not None:
+        # 全差分に決まっているので、範囲を変えない MVV を読まない
+        got, warnings = scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
     else:
+        now, unsure = _local_mvv(wt, based.mvv_ref)
+        warnings = unsure if rounds else []
         basis = scope_decide.Basis(merge_base, resolved.reviewers, resolved.settings.focus, now)
         got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
-    warnings = [*unread, *(unsure if rounds else ())]
     return _ok(summary, [item], **({"warnings": warnings} if warnings else {}))
 
 

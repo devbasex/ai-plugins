@@ -8,6 +8,7 @@ import pytest
 
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.records import mvv
 
 from ._repos import Repos, commit, run_cli, sh
 
@@ -284,7 +285,8 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
 def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
     repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。"""
+    """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。
+    範囲を変えない MVV は読まない。"""
     from ndf.adapters import git
     from ndf.domains.crossreview import changes
 
@@ -303,6 +305,7 @@ def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
         raise git.GitError("could not fetch from promisor remote")
 
     monkeypatch.setattr(changes, "changed_sections", missing)
+    monkeypatch.setattr(mvv, "identity_at", lambda *a: pytest.fail("全差分に決まった後に MVV を読んだ"))
     code, got = run_cli(capsys, *base)
     assert (code, got["items"][0]["scope"], got["items"][0]["base"]) == (0, scope_decide.FULL, None)
     assert "promisor" in got["warnings"][0] and [g.env for g in used] == [git.NO_LAZY_FETCH]
