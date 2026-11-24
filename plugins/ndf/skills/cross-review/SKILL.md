@@ -35,8 +35,8 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 埋めた席は、状態ファイルのラウンドの記録（`filled`）・結果 JSON の `warnings`・記録のコメントのラウンドの表の「相手役」の列に残る。
 **claude の席は起動し直さない。** 結果を返さなかった席の数と種類で、止まり方が次のように決まる。
 
-- どの席も結果を返さなければ `precondition` で止まる。理由は `cause.detail` にある
-- 一部の席が結果を返し、結果の無い席に claude の席が含まれれば `incomplete_reviewers` で止まる
+- どの席も結果を返さなければ、結果 JSON は `status: stopped`・`cause.kind: precondition` になる。席ごとの理由と対処は `cause.detail` に出る
+- 一部の席が結果を返し、結果の無い席に claude の席が含まれれば、そのラウンドを `incomplete_reviewers` と判定する。結果 JSON は `status: stopped`・`cause.kind: work_stopped` になり、席ごとの理由と対処は `warnings` に出る
 - 席の claude が、リクエストで渡した差分のファイルの読み取りを拒否された場合（出力の `permission_denials`）は、`{"findings": []}` で終わっても結果を返さなかった席と数える
 
 席の claude の起動は claude 2.1.316 以上を要する
