@@ -94,3 +94,14 @@ def test_there_is_no_approved_head_after_a_rejection(st, new_table, release_ques
     _approve(st, tid, release_question(tid), "h1", value="rejected")
     assert gate.approved_head(run.read(st, tid), "release") is None
     assert model.gate_label("release")
+
+
+def test_a_service_answer_that_is_not_counted_is_no_approval_even_after_a_human_one(st, new_table, release_question):
+    # #3959 の決定 3: リリース承認ゲートの service:mvv の回答は承認にしない。前の人の承認へさかのぼらない
+    tid = new_table()
+    _approve(st, tid, release_question(tid), "h1")
+    v = run.read(st, tid)
+    payload = {"answer": "approved", "step": "release-gate", "kind": "listen", "notes": None, "by": model.MVV_SERVICE,
+               "gate": "release", "gate_id": "x", "seen": {"head": "h2", "material_sha256": None}, model.MVV_KEY: {"holds": []}}  # fmt: skip
+    run._write(st, tid, model.EventDraft(run.ANSWERED, run.CONDUCTOR, "デプロイ", reason="古い NDF", payload=payload, rev=v.rev))
+    assert gate.approved_head(run.read(st, tid), "release") is None

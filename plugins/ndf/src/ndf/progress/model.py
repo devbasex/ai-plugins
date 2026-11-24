@@ -33,6 +33,8 @@ MVV_PACES = contracts.schema_enum(CONTEXT, "/$defs/mvv_pace")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
 # 承認ゲートの区分 → その手前の MVV 判定のステップの id（工程の定義 stages/design.json・deploy.json の `<区分>-mvv`。表は 1 か所）
 MVV_GATE_STEPS = {gate: f"{gate}-mvv" for gate in contracts.schema_enum(CONTEXT, "/$defs/mvv_gate/properties/gate")}
+# MVV 判定で省いてよい承認ゲートの区分。リリース承認ゲートは保留を読む PR の範囲が決まるまで省かない（#3959 の決定 3。#4105 が足す）
+MVV_SKIP_GATES: tuple[str, ...] = ("design",)
 # 承認ゲートの質問の id の長さ（sha256 の頭）
 QUESTION_ID_LENGTH = 16
 
@@ -151,10 +153,30 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
 
     読むのは承認ゲートの直前のステップ `before`（専用の判定 `ndf records mvv gate`）の済んだ結果（`done`）の出力 `MVV_KEY`
     だけである（#3745）。先のステップ（設計など）が出力に省けると書いても採らず、直前の判定が止めた承認ゲートは省かない。
+    省いてよい区分（`MVV_SKIP_GATES`）の判定で、レビューの保留を確かめて 0 件だった（`hold_checked`）ものだけを採る。
+    `holds` のキーが無い（更新前の NDF が書いた判定）・`null`（保留を読む前に止まった）・保留がある判定は採らない（#3959 の決定 3）。
     """
     report = done[before] if before is not None and before in done else None
     held = _outputs(report).get(MVV_KEY) if report is not None else None
+    if gate not in MVV_SKIP_GATES or not hold_checked(held):
+        return None
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
+
+
+def hold_checked(held: Any) -> bool:
+    """判定の出力 `held` がレビューの保留を確かめて 0 件だったか（`holds` が空のリスト）。"""
+    return isinstance(held, dict) and isinstance(held.get("holds"), list) and not held["holds"]
+
+
+def mvv_answer_void(payload: Mapping[str, Any], gate: Optional[str]) -> bool:
+    """回答の事象の payload が、回答として数えない MVV 判定の回答か（#3959 の決定 3）。
+
+    回答した者が `MVV_SERVICE` で、区分 `gate`（呼び手がステップか問い合わせの区分で渡す。payload の `gate` は読まない）が省いてよい
+    区分でないか、添えた判定の写しが保留を確かめた証拠を持たないなら真。更新前の NDF が書いた回答はここに当たる。
+    """
+    if payload.get("by") != MVV_SERVICE:
+        return False
+    return gate not in MVV_SKIP_GATES or not hold_checked(payload.get(MVV_KEY))
 
 
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
