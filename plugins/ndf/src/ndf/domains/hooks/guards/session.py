@@ -1,4 +1,4 @@
-"""SessionStart で予算の順序を検査する guard（#3345 の決定 90）。破れがあれば 1 行の案内を出して続ける。"""
+"""SessionStart で予算の順序を検査する guard（docs/specifications/ndf-rebuild.md の決定 90）。破れがあれば 1 行の案内を出して続ける。"""
 
 from __future__ import annotations
 

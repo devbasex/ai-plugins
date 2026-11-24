@@ -1,4 +1,4 @@
-"""hook の計測（#3345 の決定 94・IH9）。
+"""hook の計測（docs/specifications/ndf-rebuild.md の決定 94・IH9）。
 
 エントリポイントは起動ごとに `<状態の保存先>/hooks/<日付>.jsonl` へ 1 行を 1 回の追記（`O_APPEND`）で書く。書けなくても
 判定は変えない。古い日のファイルを消すのは SessionStart のエントリポイントだけ（`prune`）で、ほかの事象ではディレクトリを

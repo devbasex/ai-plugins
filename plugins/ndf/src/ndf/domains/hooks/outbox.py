@@ -1,4 +1,4 @@
-"""送信待ち（#3345 の決定 93・IH7）。
+"""送信待ち（docs/specifications/ndf-rebuild.md の決定 93・IH7）。
 
 hook のエントリポイントは通信しない。通知は 1 件を 1 ファイルとして `<状態の保存先>/hooks/outbox/<送信先>/` へ一時の名前で書いて
 名前を変え（`enqueue`）、NDF 自身の送り手（`ndf.domains.hooks.sender`）を切り離して起動する（`kick`）。

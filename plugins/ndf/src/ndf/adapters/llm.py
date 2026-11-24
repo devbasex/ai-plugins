@@ -4,7 +4,7 @@
 - 任意の JSON のモード（`schema`）: 回答は渡したスキーマだけに合えばよい。`decision` は求めない（IS6b）
 
 質問を `claude -p --json-schema` で渡し、回答を `jsonschema` で確かめ直す。合わなければ 1 回だけ打ち直し、
-なお合わなければ `needs_human` で人へ戻す（決定 60）。回答の文から近い選択肢を拾わない。
+なお合わなければ `needs_human` で人へ戻す（docs/specifications/ndf-rebuild-scripted-flow.md の決定 60）。回答の文から近い選択肢を拾わない。
 起動は判断の権限（`claude.Permission.JUDGE`。Tool を使わせない）で行う（#3364）。
 
 claude を起動できない・期限を超えた・利用上限・学習の設定のスナップショットが無い・重い起動のスロットが空かないは、打ち直しても直らないので打ち直さず、それぞれの停止理由
@@ -24,7 +24,7 @@ from jsonschema.exceptions import SchemaError
 from ndf.adapters import claude, run_log
 from ndf.contracts import causes, facts
 
-# 打つ回数（最初の 1 回を含む）。上限の設定ではなく決定 60 で固定した回数
+# 打つ回数（最初の 1 回を含む）。上限の設定ではなく docs/specifications/ndf-rebuild-scripted-flow.md の決定 60 で固定した回数
 ATTEMPTS = 2
 # needs_human の説明に載せる、回答の先頭の字数
 ANSWER_HEAD = 200
@@ -112,7 +112,7 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
     errors: list[str] = []
     heads: list[str] = []
     cost = 0.0
-    for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 回
+    for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: docs/specifications/ndf-rebuild-scripted-flow.md の決定 60 の 2 回
         reply = run(argv, _prompt(question, material, errors), timeout)
         cost += reply.cost
         if reply.failure is not None:

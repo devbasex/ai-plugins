@@ -1,5 +1,5 @@
 {
-  "summary": "作り直しの子の表のコピー（#3347 の決定 97）。SSOT は issues/issue-3347-design-detail.md の「実装計画」と、#3395 の設計（issues/issue-3395-design.md の「構成要素」）が足して分けた子である。規則 child-deps が import のオーナー・順番・レーン・表の書き手を照らす。表を変えるときは、SSOT を直す設計 PR を先に通してから直す。入れ替え（S2）がこのファイルと規則 child-deps を消す。review_items（設計レビューの項目のルート）は ndf check --write-spec が生成する（手で直さない）",
+  "summary": "作り直しの子の表。子ごとのサブパッケージ・先に要る子・順番・レーンと、共有の表の書き込み元の SSOT はこのファイルである（docs/specifications/ndf-rebuild.md の決定 97）。docs/specifications/ndf-rebuild.md の「子の記号」は、読み手のために記号・Issue・中身だけを持つ。規則 child-deps が import のオーナー・順番・レーン・表の書き手を照らし、入れ替え（S2）の後も使う。表を変えるときは、設計 PR が設計書の「子の表の変更」のセクションに変える行を書き、設計の承認の後に実装の PR がその行のとおりにこのファイルを直し、レビューが差分と行を 1 行ずつ突き合わせる（README.md の「子の表の規則」）。review_items（設計レビューの項目のルート）は ndf check --write-spec が生成する（手で直さない）",
   "children": {
     "X0": {"issue": 3282, "packages": ["ndf.cli", "ndf.identity"], "needs": [], "order": 1, "lane": "lrebuild", "closed": true},
     "X0+": {"issue": 3282, "packages": [], "needs": ["X0", "D1"], "order": 3, "lane": "lrebuild", "closed": true},

@@ -59,7 +59,7 @@ plugins/ndf/bin/ndf check
 
 入れ子の関数・クラス・`lambda` は、外の関数の長さ以外では外の関数に数えず、それぞれ 1 つの関数として数える。
 
-**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の抑制コメントは NDF の規則として `suppressions` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから抑制コメントを当てる。
+**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（docs/specifications/ndf-rebuild-data-and-smells.md の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の抑制コメントは NDF の規則として `suppressions` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから抑制コメントを当てる。
 
 ### 抑制コメント
 
@@ -151,7 +151,13 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 ## 子の表の規則
 
-`child-deps` は、作り直しの子の表のコピー `children.json` と、コードの import・子の順番とレーンを照らす（#3347 の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。SSOT は [issue-3347-design-detail.md](../../../../../issues/issue-3347-design-detail.md) の「実装計画」と、[issue-3395-design.md](../../../../../issues/issue-3395-design.md) の「構成要素」が足して分けた子である。表を変えるときは、SSOT を直す設計 PR を先に通す。
+`child-deps` は、作り直しの子の表 `children.json` と、コードの import・子の順番とレーンを照らす（docs/specifications/ndf-rebuild.md の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。
+
+**子の表の SSOT は `children.json` である。** docs/specifications/ndf-rebuild.md の「子の記号」は、読み手のために記号・Issue・中身だけを持ち、先に要る子・順番・レーン・サブパッケージ・書き込み元を写さない。規則 `child-deps` は入れ替え（S2）の後も使う。表は次の順で変える。
+
+1. 設計 PR が、その変更の設計書 `issues/issue-<番号>-design.md` の「子の表の変更」のセクションに、変える行を書く。列は「記号か表・項目・変更の前・変更の後」で、足す子と消す子は全項目を書く。`children.json` はまだ変えない
+2. 設計の承認の後、実装の PR が `children.json` をその行のとおりに直し、PR の本文からそのセクションへリンクする。記号・Issue・中身が変わるときだけ、「子の記号」の表も同じ PR で直す
+3. レビューが、`children.json` の `children` と `tables` の差分をセクションの行と 1 行ずつ突き合わせる。行に無い差分があれば変更を求める。`review_items` は設計レビューの項目の表から `ndf check --write-spec` が生成するので、セクションと突き合わせず、生成し直した中身との一致を確かめる（規則 `review-items` が違いを落とす）
 
 | 違反と数えるもの | 指摘の保存先 |
 | --- | --- |

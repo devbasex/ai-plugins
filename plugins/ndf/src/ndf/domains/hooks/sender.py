@@ -1,4 +1,4 @@
-"""送信待ちの送り手（#3345 の決定 93）。hook のエントリポイントが `outbox.kick` で切り離して起動する。
+"""送信待ちの送り手（docs/specifications/ndf-rebuild.md の決定 93）。hook のエントリポイントが `outbox.kick` で切り離して起動する。
 
     python -P -m ndf.domains.hooks.sender <状態の保存先>
 

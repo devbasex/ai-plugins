@@ -1,4 +1,4 @@
-"""hook の 1 回の事象の文脈（#3345 の決定 88・IH1）。
+"""hook の 1 回の事象の文脈（docs/specifications/ndf-rebuild.md の決定 88・IH1）。
 
 payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、
 ほかの guard は同じものを使う。解析はこのモジュールの関数（`parse_payload`・`parse_shell`・`read_tail`）と、本文の

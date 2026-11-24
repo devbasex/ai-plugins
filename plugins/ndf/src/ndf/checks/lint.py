@@ -1,4 +1,4 @@
-"""ruff で数える兆候（決定 36: 既存の規則で見られるものを自作しない）。
+"""ruff で数える兆候（docs/specifications/ndf-rebuild-data-and-smells.md の決定 36: 既存の規則で見られるものを自作しない）。
 
 `rules.json` の `smells` のうち `by` が `ruff` の規則を、見るファイルすべてへ 1 回の起動で当てる。
 しきい値は `rules.json` の `ruff.config` にあり、`--config` で 1 つずつ渡す。ruff の `# noqa` は読ませない
