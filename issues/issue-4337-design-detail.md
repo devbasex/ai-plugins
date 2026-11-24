@@ -54,7 +54,7 @@ plugins/ndf/
 | `src/ndf/domains/docrebuild/__init__.py` | 新設 | パッケージの説明だけを持つ | — | — | — |
 | `src/ndf/domains/docrebuild/select_decide.py` | 新設 | 差分のパスと課題の番号から候補を挙げ、通常ファイルと実装計画の頭で対象を決める | `ndf.core.issue_docs` | モジュール | `Target`・`Selection`・`Inspection`・`kind_of`・`plan_paths`・`omits_design`・`candidates`・`select`（すべて新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`changed_paths`・`contained`・`inspect`・`prompt_text`・`launch_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
-| `src/ndf/domains/docrebuild/cli.py` | 新設 | `ndf document-rebuild run` の引数を定義し、`drive` を呼び、`--out` と標準出力へ同じ結果を書く | `ndf.cli`・`ndf.identity`・`ndf.contracts.result`・`ndf.contracts.causes`・`drive` | モジュール | `_parser`・`main`（新設） |
+| `src/ndf/domains/docrebuild/cli.py` | 新設 | `ndf document-rebuild run` の引数を定義し、`drive` を呼び、`--out` と標準出力へ同じ結果を書く | `ndf.cli`・`ndf.identity`・`ndf.contracts.result`・`ndf.contracts.causes`・`drive` | モジュール | `_parser`・`adopt`・`main`（新設） |
 | `src/ndf/cli.py` | 変更 | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を足す | — | `COMMANDS` | — |
 | `src/ndf/checks/children.json` | 変更 | 新しいモジュールの持ち主を足す（設計書の「設計の結果」の段落） | — | — | — |
 | `contracts/worker/document-rebuild.md` | 新設 | 組み直す worker への起動指示のテンプレート | — | — | — |
@@ -422,10 +422,19 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_parser` | `src/ndf/domains/docrebuild/cli.py` | 新設 | `() -> argparse.ArgumentParser` | `run` の引数（`--base`・`--remote`・`--state-dir`・`--out` は必須、`--issue` は `type=int` で `action="append"`・`required=True`、`--kind` は `choices=select_decide.KINDS` で `action="append"`・`required=True`）を定義する |
-| `main` | 同上 | 新設 | `(argv: list[str]) -> int` | 引数を読み、`drive.drive` を呼び、例外を停止理由にし、`--out` と標準出力へ同じ結果 JSON を書く |
+| `adopt` | 同上 | 新設 | `(obj: dict[str, Any]) -> tuple[dict[str, Any], int]` | 結果を共通の結果スキーマと専用の結果スキーマで確かめ、書き出す結果と終了コードを決める |
+| `main` | 同上 | 新設 | `(argv: list[str]) -> int` | 引数を読み、`drive.drive` を呼び、例外を停止理由にし、`adopt` が決めた同じ結果 JSON を `--out` と標準出力へ書く |
 
+既存の `result.emit` は、形が違う結果を受けると代わりの `stopped`（`invalid`）を標準出力へ書き、呼び手には終了コードだけを返す。`emit` の後に元の結果を `--out` へ書くと、標準出力では止まった回の項目を、`--out` を読むレビューが引き継いでしまう。そこで、確かめと書き出す結果の決定を `adopt` に分け、`main` は `adopt` が返した 1 つの結果を両方へ書く。
+
+- `adopt`
+  - 事後条件: 次の 3 つの誤りが無ければ `(obj, result.code_for(obj))` を返す。1 つでもあれば `result.stopped(ENTRY, "invalid", <誤りの件数>)` と `causes.exit_code("invalid")` を返す
+    - `result.errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応）
+    - `contracts.broken_rules(obj, RESULT_SCHEMA)`（専用の結果スキーマ `io/document-rebuild.result`。`items` の `doc`・`metrics.readers` の形）
+    - `result.code_for(obj)` が `None`（`stopped` に `cause` が無い）
+  - 副作用: 誤りがあれば、`contracts.broken_rules` の文（結果の値を含まない）を標準エラーへ 1 行ずつ書く。`result.errors` の文は結果の値を含むので書かない
 - `main`
-  - 事後条件: `--out` のファイルと標準出力の最後の 1 行が同じ結果 JSON（`result.emit` が確かめた後のもの）。`--out` は `core.plan.files.write_json` で一時ファイルから置き換える
+  - 事後条件: `drive.drive` の結果（例外のときは停止理由の結果）を `adopt` に通し、返った結果を先に `--out` へ、次に `result.emit` で標準出力へ書く。`adopt` を通った結果なので `emit` は差し替えず、`--out` のファイルと標準出力の最後の 1 行は同じ JSON になる。`--out` は `core.plan.files.write_json` で一時ファイルから置き換える。終了コードは `adopt` が返したもの
   - 副作用: `--out` のファイルを書く。`cwd` は打った場所（`Path.cwd()`）
 
 `spec_render.py` は `_parser` から引数のスキーマと `commands.md` を作る。`checks/spec_model.py` が読む形（`add_subparsers(dest="action")` の下の `run`）は `crossrefactor/cli.py` にそろえる。
@@ -438,6 +447,21 @@ plugins/ndf/
 | `main` | 起点・差分の失敗 | `drive.Precondition` | `drive` の中で結果 JSON にする | 止める | `stopped`（`precondition`） | 打ち直せる |
 | `main` | `--out` を書けない | 保存先の権限など | `write_json` の `OSError` | 止める | 標準出力に `stopped`（`precondition`）と `--out` のパス | 打ち直せる |
 | `main` | 想定外の例外 | 実装の誤り | `except Exception` | 止める | `stopped`（`unknown`）を標準出力と `--out` へ（書ければ） | 打ち直せる |
+| `adopt` | 結果の形が違う | `drive` の組み立ての誤り | 上の 3 つの確かめ | 止める（`stopped`（`invalid`）に差し替える） | 差し替えた `stopped`（`invalid`）を `--out` と標準出力へ。元の `items` はどちらにも書かない。誤りの文を標準エラーへ | 打ち直せる |
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `RESULT_SCHEMA` | 定数 | `src/ndf/domains/docrebuild/cli.py` | `contracts.schema_path("io/document-rebuild.result")`（`domains/materials/collect.py` の 34 行目と同じ読み方） |
+| `ENTRY` | 定数 | 同上 | `result.ENTRY` |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `adopt` | 形の正しい `ok` をそのまま返す | `stopped` の結果も同じ終了コードで返す | `add-` の項目に `doc` が無い・`metrics.readers` の `verdict` が表に無い → `stopped`（`invalid`）に差し替わる |
+| `main` | `--out` と標準出力の最後の 1 行が同じ JSON | — | `adopt` が差し替えたとき、`--out` にも差し替えた `stopped` が書かれ、元の `items` が残らない |
 
 ## 契約とテンプレート
 
