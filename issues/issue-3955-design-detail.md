@@ -1,8 +1,11 @@
 # #3955 の詳細設計: cross-review の空いた席を claude の読むだけの起動で埋める
 
-設計文書 [issue-3955-design.md](./issue-3955-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるため、別ファイルにした。前提は今の `main` のコードの形（`participants.assign`・`drive._review`・`drive._launch_reviewers`・`crossrefactor.launch._read_only` など）である。
+設計文書 [issue-3955-design.md](./issue-3955-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるため、別ファイルにした。前提は今の `main` のコードの形である（`participants.assign`・`drive._review`・`drive._launch_reviewers`・`crossrefactor.launch._read_only` など）。
 
-**埋めた席の記録の読み書きは、ラウンドの範囲の判断（`scope_decide.py`）に置く。** 設計文書の「設計の結果」に無かったファイルで、この文書で足した（構成要素の表と「設計の結果」にも足した）。ラウンドの記録のキー（`base`・`reviewers`・`focus`）を持つのが今このモジュールであり、記録のコメント（`report_decide.py`）と再利用の判定（`drive._reusable`）の両方が読むためである。`participants.py` に置くと、判断のモジュール（`report_decide.py`・`scope_decide.py`）が、学習の設定や起動の部品を読む `participants.py` を読むことになる。
+**埋めた席の記録の読み書きは、ラウンドの範囲の判断（`scope_decide.py`）に置く。** 理由は次の 2 つである。
+
+- ラウンドの記録のキー（`base`・`reviewers`・`focus`）を持つのが、今このモジュールである。記録のコメント（`report_decide.py`）と再利用の判定（`drive._reusable`）の両方が、このモジュールを読む
+- `participants.py` は学習の設定や起動の部品を読む。そこに置くと、判断のモジュール（`report_decide.py`・`scope_decide.py`）が `participants.py` を読むことになる
 
 ## 地図
 
@@ -20,7 +23,7 @@ plugins/ndf/
 │   ├── report_decide.py                          … ラウンドの表に「相手役」の列
 │   └── cli.py                                    … review_seats で席を決め、駆動の設定へ渡す
 ├── skills/cross-review/SKILL.md                  … 相手役の説明と終わり方の表
-├── skills/cross-review/docs/01-state-and-review.md … 状態ファイルの filled と資料の置き場
+├── skills/cross-review/docs/01-state-and-review.md … 状態ファイルの filled と資料のディレクトリ
 └── tests/
     ├── adapters/test_claude_args.py
     ├── core/converge/test_converge.py
@@ -44,7 +47,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `src/ndf/domains/crossrefactor/launch.py` | 変更 | cross-refactoring の工程の担当の起動 | `participants` | モジュール | `_read_only`・`_collect_stdout`（呼ぶ先だけ変える）。`_answer_text` と定数 `READ_TOOLS` は消す（participants へ移す） |
 | `contracts/domains/cli-floors.json` | 変更 | 外部 CLI の下限の表 | — | — | `claude` の行の `min_version` を `2.1.316`。`columns.min_version.summary` に「NDF が頼る振る舞いの不具合が直った最初のバージョン」と、上げた理由（`--restricted` の読み取りの境界、#3955）を足す |
 | `skills/cross-review/SKILL.md` | 変更 | cross-review の手順書 | — | — | 相手役の説明・終わり方の表・`review-scope` が起動の前に分かる席だけで範囲を決めること（受け入れ条件 14） |
-| `skills/cross-review/docs/01-state-and-review.md` | 変更 | 状態ファイルとレビューの資料の説明 | — | — | ラウンドの記録の `filled`・`reviewers` の意味・資料の置き場 `review-input/` |
+| `skills/cross-review/docs/01-state-and-review.md` | 変更 | 状態ファイルとレビューの資料の説明 | — | — | ラウンドの記録の `filled`・`reviewers` の意味・資料のディレクトリ `review-input/` |
 | `docs/specifications/cross-review-participants-and-seats.md` | 変更 | 席の確定仕様 | — | — | 席の決め方・埋め方・席の名前 `claude-2` を今の形に書き直す |
 
 ## 席を決める（participants.py）
@@ -61,11 +64,18 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `review_seats` | `core/converge/participants.py` | 新設 | `review_seats(requested: Sequence[str], allowed: Optional[Collection[str]], fixer: str = FIXER) -> Seats` | cross-review の起動の前の席を決める |
 | `runtime_of` | `core/converge/participants.py` | 新設 | `runtime_of(seat: str) -> str` | 席の名前からランタイムの名前を引く（`claude-<数>` は `claude`、ほかはそのまま） |
 | `free_seat` | `core/converge/participants.py` | 新設 | `free_seat(taken: Collection[str]) -> str` | `claude`・`claude-2`・`claude-3`… のうち `taken` に無い最初の名前 |
-| `fill_targets` | `core/converge/participants.py` | 新設 | `fill_targets(seats: Sequence[str], unread: Collection[str]) -> tuple[str, ...]` | 起動し直しの後に埋める席（設計文書の分岐の表の 0〜3 行目）。`seats` の順で返す |
+| `fill_targets` | `core/converge/participants.py` | 新設 | `fill_targets(seats: Sequence[str], unread: Collection[str]) -> tuple[str, ...]` | 起動し直しの後に埋める席（設計文書の「1 ラウンドの流れ」の分岐の表の、順 0〜3 の行。下の「処理の手順」の表と同じ）。`seats` の順で返す |
 
 - `review_seats`
   - 事前条件: `requested` は `--reviewer` の値をそのまま並べたもの（重なりを含んでよい）
-  - 事後条件: 名指しがあれば `names` は重なりと修正担当を除いた名指しの並び、`added` は空、`reason` は None、`may_fill` は `len(names) != 1`。名指しが無ければ `names` は既定の席（`assign` の既定と同じ選び方）に、`SEAT_COUNT` に足りない分の `free_seat` の名前を続けたもの、`added` は足した名前、`reason` は足したときだけ `allowed の相手役 <数>（<名前を ・ で並べる>）`（数が 0 なら括弧を付けない）、`may_fill` は真
+  - 事後条件: 名指しの有無で次のとおりになる
+
+    | フィールド | 名指しがある | 名指しが無い |
+    | --- | --- | --- |
+    | `names` | 重なりと修正担当を除いた名指しの並び | 既定の席（`assign` の既定と同じ選び方）に、`SEAT_COUNT` に足りない分の `free_seat` の名前を続けたもの |
+    | `added` | 空 | 足した名前 |
+    | `reason` | None | 足したときだけ `allowed の相手役 <数>（<名前を ・ で並べる>）`（数が 0 なら括弧を付けない） |
+    | `may_fill` | `len(names) != 1` | 真 |
 - `fill_targets`
   - 事後条件: 結果の無い席が 0 か、全員か、claude の席（`runtime_of` が `FIXER`）を 1 つでも含むなら空。ほかは結果の無い席を `seats` の順に並べたもの。全員のときの `precondition` と、claude の席を含むときの `incomplete_reviewers` は呼び手が決める
 
@@ -92,7 +102,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `fill_targets` | 席 `codex`・`claude`、結果無し `claude` | 空（呼び手が `incomplete_reviewers`） |
 | `fill_targets` | 席 `codex`・`claude`、結果無し `codex`・`claude` | 空（呼び手が `precondition`） |
 
-名指しが 1 者なら席は 1 つで、結果が無ければ全員に当たるので、`fill_targets` は `may_fill` を受けなくても埋めない。`may_fill` が効くのは始める前の確かめ（`drive._fill_refused`）だけである。
+名指しが 1 者なら席は 1 つで、結果が無ければ全員に当たるので、`fill_targets` は `may_fill` を受けなくても埋めない。`may_fill` を読むのは、始める前の確かめ（`drive._fill_refused`）と、再利用の判定（`drive._reusable` の `stand_in`）の 2 か所である。
 
 ### 内部のデータと定数
 
@@ -112,7 +122,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 ### 単体テストの観点
 
-置き場は `tests/core/converge/test_converge.py`。
+テストのファイルは `tests/core/converge/test_converge.py`。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -168,7 +178,13 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_collect_stdout` | `crossrefactor/launch.py` | 変更（呼ぶ先だけ） | 今のまま | `participants.answer_text(req.runtime, out)` を呼ぶ |
 
 - `permission_args`
-  - 事後条件: `readable` が空でないとき、引数は `["--tools", t, "--allowed-tools", t, "--restricted", "--add-dir", p1, …, "--permission-mode", "dontAsk"]` の順である。`--allowed-tools` と `--add-dir` は複数の値を取る引数なので、値を取る `--permission-mode` を最後に置き、後ろに続く依頼文（`Launch` の最後の引数）が `--add-dir` の値として読まれないようにする
+  - 事後条件: `readable` が空でないとき、引数は次の順である
+
+    ```text
+    ["--tools", t, "--allowed-tools", t, "--restricted", "--add-dir", p1, …, "--permission-mode", "dontAsk"]
+    ```
+
+    `--allowed-tools` と `--add-dir` は複数の値を取る引数である。そこで、値を 1 つだけ取る `--permission-mode` を最後に置く。後ろに続く依頼文（`Launch` の最後の引数）が、`--add-dir` の値として読まれないようにするためである
 - `read_only_launch`
   - 副作用: 無い（起動の形を作るだけ。起動は `agents.run_agent`）
 
@@ -191,7 +207,11 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 ### 単体テストの観点
 
-置き場は `tests/adapters/test_claude_args.py`・`tests/domains/crossrefactor/test_launch_and_phase.py`・`tests/core/converge/test_converge.py`。
+テストのファイルは次の 3 つである。
+
+- `tests/adapters/test_claude_args.py`
+- `tests/domains/crossrefactor/test_launch_and_phase.py`
+- `tests/core/converge/test_converge.py`
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -216,7 +236,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `read_by_all_head` | `domains/crossreview/scope_decide.py` | 変更 | 今のまま | `basis.stand_in` が真なら `set(stood_for(r))`、偽なら今のとおり `set(reviewers)` で包含を見る |
 
 - `stood_for`
-  - 事後条件: 返す並びの長さは `reviewers` と同じで、前の 1 つの席は 1 つの名前にしか対応しない（設計文書の「前回の 1 つの席で今回の 2 つの席を満たさない」）
+  - 事後条件: 返す並びの長さは `reviewers` と同じである。前の 1 つの席は 1 つの名前にしか対応しない（設計文書の「前回の 1 つの席で今回の 2 つの席を満たさない」）
 
 `stand_in` を真にするのは `drive._reusable` だけで、`may_fill` が真のときである。差分の起点を決める `round_scope.previous_head` と CLI の `review-scope` は `stand_in` を渡さず、今のとおり席の名前で比べる。
 
@@ -230,11 +250,11 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `Filled`・`filled_of`・`stood_for` | `scope_decide` の `REVIEWERS`・`store.list_of` | `scope_decide.py` を読んだ | 記録のキーの置き場を同じにし、配列の読み出しに `store.list_of` を使う |
+| `Filled`・`filled_of`・`stood_for` | `scope_decide` の `REVIEWERS`・`store.list_of` | `scope_decide.py` を読んだ | 記録のキーを同じモジュールに置き、配列の読み出しに `store.list_of` を使う |
 
 ### 単体テストの観点
 
-置き場は `tests/domains/crossreview/test_crossreview_scope.py`。
+テストのファイルは `tests/domains/crossreview/test_crossreview_scope.py`。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -250,7 +270,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `RunConfig` | `domains/crossreview/drive.py` | 変更 | フィールド `may_fill: bool = True`・`prefilled: tuple[scope_decide.Filled, ...] = ()` を足す | 名指しが 1 者でないか、`allowed` のために起動の前に埋めた席。`reviewers` は起動の前に決めた席（`Seats.names`）で、書き換えない |
+| `RunConfig` | `domains/crossreview/drive.py` | 変更 | フィールド `may_fill: bool = True`・`prefilled: tuple[scope_decide.Filled, ...] = ()` を足す | `may_fill` は、名指しが 1 者でないか。`prefilled` は、`allowed` のために起動の前に埋めた席。`reviewers` は起動の前に決めた席（`Seats.names`）で、書き換えない |
 | `_Run` | `domains/crossreview/drive.py` | 変更 | フィールド `seats: list[str]`・`filled: list[scope_decide.Filled]` を足す | 今の席と、この実行で埋めた席。`_start` が `cfg.reviewers`・`cfg.prefilled` で始める |
 | `_Unread` | `domains/crossreview/drive.py` | 新設 | `class _Unread(NamedTuple): hint: str; cause: str` | 結果の無い席 1 つの直し方（`precondition` の詳細の行）と理由（`filled` の `reason`） |
 | `_Reviewed` | `domains/crossreview/drive.py` | 新設 | `class _Reviewed(NamedTuple): raised: list[dict[str, Any]]; unread: dict[str, _Unread]; silent: bool` | 1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか |
@@ -271,12 +291,18 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `drive` | `domains/crossreview/drive.py` | 変更 | 今のまま | 再利用なら `_reused_warnings` の後に返す。返さないなら `cfg.prefilled` の注意を足し、`_fill_refused` の後にラウンドへ進む |
 
 - `_review`
-  - 事後条件: 起動し直したのは claude 以外の席だけで、1 つの席の起動は 1 ラウンドに起動し直しを含めて 2 回まで、claude の席は 1 回である。`silent` が真なら席を置き換えていない
+  - 事後条件: 起動し直したのは claude 以外の席だけである。1 つの席の起動は 1 ラウンドに起動し直しを含めて 2 回まで、claude の席は 1 回である。`silent` が真なら席を置き換えていない
 - `_fill`
   - 事前条件: `targets` は `fill_targets` が返した席と、その起動し直しの理由
   - 事後条件: `run.seats` の欠けた席の位置に埋めた名前が入り、`run.filled` に `Filled(席, 欠けた相手役, 理由)` が足されている。ラウンドの範囲（`prep.scope`）は変えていない
   - 副作用: 前の head からの差分のラウンドなら、`_input_path(run, round_no, "-full.diff")` に `--base` からの全差分を書く。claude を起動する
-  - 依頼文: `_review_prompt` に `prep._replace(scope=Scope(FULL, None, prep.scope.unreviewed), diff=<全差分>, previous=None)` を渡して組み立てる。置き換えた `prep` はこの依頼文にだけ使い、記録には使わない。埋めた claude はどれもこの実行で初めて加わる担当なので、いつもこの形にする
+  - 依頼文: `_review_prompt` に次の `prep` を渡して組み立てる。置き換えた `prep` はこの依頼文にだけ使い、記録には使わない。
+
+    ```python
+    prep._replace(scope=Scope(FULL, None, prep.scope.unreviewed), diff=<全差分>, previous=None)
+    ```
+
+    埋めた claude はどれもこの実行で初めて加わる担当なので、いつもこの形にする
 - `_fill_refused`
   - 事後条件: 断られた担当が無ければ何もしない。修正担当が断られた、または `may_fill` が偽で相手役が断られたなら、どの担当も起動せずに `DriveStopped("precondition", "担当を起動できない: …")`（今と同じ文）。ほかは断られた席ごとに `Filled(席, 断られた相手役, "unready: " + 理由)` を足して席を置き換える
   - 副作用: `participants.refusals` が学習の設定を確かめる
@@ -339,7 +365,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_input_path` | `_round_stem` | `grep -n "_round_stem" drive.py` | 名前の作り方は同じにし、置き場だけ分ける。出力・修正担当の結果・ログは今のとおり `_round_stem`（保存先の直下）に置く |
+| `_input_path` | `_round_stem` | `grep -n "_round_stem" drive.py` | 名前の作り方は同じにし、ディレクトリだけ分ける。出力・修正担当の結果・ログは今のとおり `_round_stem`（保存先の直下）に置く |
 | `_seat_launch` | `participants.review_launch`・`read_only_launch` | `participants.py` を読んだ | 2 つを席の種類で呼び分けるだけにする |
 | `_fill` | `_launch_reviewers`・`_review_prompt`・`_write_diff` | `drive.py` を読んだ | 起動・依頼文・全差分の書き出しはどれも使う |
 | `_fill_refused` | `participants.unready` | 同上 | どのランタイムが断られたかが分からないので `refusals` を使う |
@@ -348,7 +374,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 ### 単体テストの観点
 
-置き場は `tests/domains/crossreview/test_crossreview_run.py`。相手役の起動は偽物にし、席ごとに回答の有無を決める（設計文書の「テスト設計」）。
+テストのファイルは `tests/domains/crossreview/test_crossreview_run.py`。相手役の起動は偽物にし、席ごとに回答の有無を決める（設計文書の「テスト設計」）。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -378,7 +404,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 ### 単体テストの観点
 
-置き場は `tests/domains/crossreview/test_crossreview_report.py`。
+テストのファイルは `tests/domains/crossreview/test_crossreview_report.py`。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -408,7 +434,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 ### 単体テストの観点
 
-置き場は `tests/domains/crossreview/test_crossreview_run.py`。
+テストのファイルは `tests/domains/crossreview/test_crossreview_run.py`。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -420,5 +446,5 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 コードの関数は無い。変える中身は地図の表の行にある。
 
-- `cli-floors.json` の下限を上げた後は、`agents.run_agent` の `cli_floor.require` が 2.1.315 以前の claude を起動せずに `refused` で返す。テストは `tests/domains/crossreview/test_crossreview_run.py` で、バージョンの検査を差し替えて 2.1.315 と 2.1.316 を比べる（設計文書のテスト設計の「claude の下限」）
+- `cli-floors.json` の下限を上げた後は、`agents.run_agent` の `cli_floor.require` が 2.1.315 以前の claude を起動せずに `refused` で返す。テストは `tests/domains/crossreview/test_crossreview_run.py` に置く。バージョンの検査を差し替えて、2.1.315 と 2.1.316 を比べる（設計文書のテスト設計の「claude の下限」）
 - 手順書と確定仕様の文言は `.md` を照合するテストで縛らない（AGENTS.md の DON'T）。設計 PR と実装の PR のレビューで確かめる
