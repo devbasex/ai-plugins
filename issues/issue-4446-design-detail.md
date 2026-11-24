@@ -66,14 +66,14 @@ plugins/ndf/
 | `src/ndf/progress/lane/launch.py` | 変更 | 行の入力 `kind: release` を起動するコマンドを組む | `lane.types` | モジュール | `start_commands`・`_workflow_args`（変更）、`release_commands`（新設） |
 | `src/ndf/progress/lane/types.py` | 変更 | 行の入力のリクエストを読む | — | `LaneRow` | `LaneRow.requests`（新設） |
 | `contracts/workflow/stages/design.json`・`deploy.json` | 変更 | `design-reading`・`release-reading` を足す | — | — | — |
-| `contracts/workflow/modes/release-bump.json`・`stages/release-bump.json`・`templates/release-bump.json` | 新設 | 版上げのスプリントの工程 | — | — | — |
+| `contracts/workflow/modes/release-bump.json`・`contracts/workflow/stages/release-bump.json`・`contracts/templates/release-bump.json` | 新設 | 版上げのスプリントの工程 | — | — | — |
 | `contracts/workflow/ndf.schema.json`・`parallel-plan.schema.json` | 変更 | ステップの種類 `reading` と行の入力 `kind: release` | — | — | — |
 | `contracts/schemas/internal/reading-docs.schema.json` | 新設 | 読ませたものの記録の行の形 | — | — | — |
 | `contracts/schemas/io/document-rebuild.args.schema.json`・`document-rebuild.result.schema.json` | 変更 | `gate` の引数と結果 | — | — | — |
 | `contracts/domains/ndf-files.json`・`release-forms.json` | 変更 | 記録の保存先と、リリースの形の列 `approve` | — | — | — |
 | `contracts/worker/document-rebuild.md`・`document-rebuild-gate.md` | 変更・新設 | worker の起動指示 | — | — | — |
 
-`src/ndf/progress/stages.py`・`src/ndf/progress/gate/release.py`・`src/ndf/progress/gate/entry.py` は、設計書の「設計の結果」の触るファイルに無かった。詳細設計で関数を下ろすと要るので、設計書の触るファイルにも足した（理由は各構成要素の小見出し）。
+`src/ndf/progress/stages.py`・`src/ndf/progress/gate/release.py`・`src/ndf/progress/gate/entry.py` は、設計書の「設計の結果」の触るファイルに無かった。関数の粒度まで下ろすと、これらのファイルも変える必要がある。そのため、設計書の触るファイルにも足した（理由は各構成要素の小見出し）。
 
 ## `ndf document-rebuild gate`（新設のサブコマンド）
 
@@ -114,7 +114,7 @@ plugins/ndf/
 
 ### 異常系の処理
 
-どの止まりも、完了の行を書かずに終える。打ち直すと、手順 1 から進む。
+どの失敗で止まったときも、完了の行を書かずに終える。打ち直すと、手順 1 から進む。
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -285,7 +285,7 @@ plugins/ndf/
 | `Form` | `release/forms_decide.py` | 変更 | `Form(id, label, reach, supported, why, approve: str)` | 列 `approve` を持つ |
 | `form_of` | `release/forms_decide.py` | 変更 | 今のまま | 行から `approve` も読む |
 
-表の列 `approve` の値は、設計書の「リリースの形」の表のとおり。`supported` が偽の行にも値を置かない（`form_of` がその行で止めるため）。
+表の列 `approve` の値は、設計書の「リリースの形」の表のとおり。`supported` が偽の行には値を置かない（`form_of` がその行で止めるため）。
 
 ### 単体テストの観点
 
@@ -374,7 +374,7 @@ plugins/ndf/
 | --- | --- | --- |
 | `select_reads` | 今回の結果がある | 完了の行が無くても候補に入れる |
 | `select_reads` | 過去の結果だけ | 完了した確認の行で、ハッシュが今と同じものだけを候補にする |
-| `select_reads` | 候補が複数の確認にまたがる | 最も新しい確認を選び、その中の最後の回を使う（回の大きさで選ばない） |
+| `select_reads` | 候補が複数の確認にまたがる | 最も新しい確認を選び、その中の最後の回を使う（回（`round`）の値の大小で選ばない） |
 | `select_reads` | 対象が `carried` にある | `round: 2`・`result: remained` |
 
 前に残った文の扱いの判定（「今の中身に無い」の判定・同じ指摘とみなす基準・全体を読ませたときの扱い）は、設計書の「未確認」の (3) のとおり計画で決める。
@@ -588,7 +588,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `answer` | `--by user` で資料のハッシュが無い・最新の提示と違う | 提示し直した資料への回答でない | 最新の提示との比較 | 呼び出し元へ返す（`TrailError`） | `stopped`（今の `TrailError` と同じ形） | 書かない。新しい資料に回答を取り直す |
 | `answer` | `--by mvv` に資料のハッシュが渡された | 呼ぶ側の誤り | 引数 | 呼び出し元へ返す（`TrailError`） | `stopped` | 書かない |
-| `judge` | 前の版の利用者の証跡（資料の行が無い） | 変更の前の回答 | `Trail` の資料のハッシュが None | 数えない | `post_status` が承認済みにしない | 提示し直して回答を取り直す |
+| `judge` | この変更の前の形式で書かれた利用者の証跡（資料の行が無い） | 変更の前の回答 | `Trail` の資料のハッシュが None | 数えない | `post_status` が承認済みにしない | 提示し直して回答を取り直す |
 
 ### 既存の部品の再利用
 
