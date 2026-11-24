@@ -25,7 +25,7 @@
 
 **#4089（会話の記録の末尾を読む部品）との順序。** #4089 は未実装で、この実装の前でも後でもよい。
 
-- この実装が先のとき: 下の表の #4089 の部品（`src/ndf/adapters/transcript.py`）を、#4089 の詳細設計の「記録の読み手」のとおりにこの実装の中で作り、`read_tail` を `domains/hooks/context.py` から移して import に替える。呼び手（guard・ラッパー・`observe`）の置き換えは #4089 の実装に残す
+- この実装が先のとき: 下の表の #4089 の部品（`src/ndf/adapters/transcript.py`）を、#4089 の詳細設計の「記録の読み手」のとおりにこの実装の中で作る。`read_tail` は `domains/hooks/context.py` から移して import に替える。呼び手（guard・ラッパー・`observe`）の置き換えは #4089 の実装に残す
 - #4089 が先のとき: 作らずに使う
 
 使うものは次のとおりである。
@@ -133,7 +133,7 @@ plugins/ndf/
 
 ### `last_turn` の返し方
 
-`tail` は `read_tail` の文字列で、`started` は hook の動き始めの時刻である。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼び、その状態から、次の表の上から順に最初に当たった行の値を返す。項目の取り出し元は #4089 の詳細設計の「#4068 との受け渡し」の表に従う。`ref` は、突き合わせた最後の `assistant` の行の `message.id` と `timestamp` の UNIX 秒の組 `(message_id, at)` である（`last_context` が `form` でも返す `ContextRead.message_id`・`timestamp` から作る）。
+`tail` は `read_tail` の文字列で、`started` は hook の動き始めの時刻である。中で `last_context(tail, Reply(last_message))` を 1 回だけ呼び、その状態から、次の表の上から順に最初に当たった行の値を返す。項目の取り出し元は #4089 の詳細設計の「#4068 との受け渡し」の表に従う。`ref` は、突き合わせた最後の `assistant` の行の `message.id` と `timestamp` の UNIX 秒の組 `(message_id, at)` である。`last_context` が `form` でも返す `ContextRead.message_id`・`timestamp` から作る。
 
 | 順 | `last_context` の状態と条件 | 返す値 | 意味 |
 | --- | --- | --- | --- |
@@ -205,7 +205,7 @@ plugins/ndf/
 
 1. **起動を突き合わせる。** `signals.current_launch` が `t.launch` でなければ、世代も含めて何も書かずに `Settled(stale=True)` を返す
 2. **世代を取る。** `bump_generation(Generation(at=turn.at, by=t.hook_id, message_id=turn.message_id))` を呼ぶ。`bump_generation` は次の順で判定する
-   1. (2a) 取り合い: 世代の `message_id` が `turn.message_id` と同じで、書き込み元が自分でなければ、時刻を比べずに世代の `by` だけを `contested` に替え（既に `contested` ならそのまま）、世代のほかの項目も状態のほかの項目も書かずに `stale` を返す。どちらの hook も起こさない（設計の決定 4）
+   1. (2a) 取り合い: 世代の `message_id` が `turn.message_id` と同じで、書き込み元が自分でなければ、時刻を比べずに世代の `by` だけを `contested` に替える（既に `contested` ならそのまま）。世代のほかの項目も状態のほかの項目も書かずに `stale` を返す。どちらの hook も起こさない（設計の決定 4）
    2. (2b) 古い: そうでなく、世代の時刻が `turn.at` より新しいか同じなら、何も書かずに `stale` を返す
    3. (2c) ほかは世代を書く
 
@@ -243,7 +243,7 @@ plugins/ndf/
 
 ### 状態のファイル（`keep-<会話>.json`）
 
-中継の保存先の `<名前>/keep-<会話>.json` に、会話（`session_id`）ごとに 1 つ置く。読み書きは `signals` の `read_keep`・`bump_generation`・`update_keep` で行い、どれも子を止めるロックの中で書く（眠る hook の世代の読み取りだけはロックを取らない）。ファイルはラッパーの保存先と同じ掃除の対象である（`ndf-files.json` の `relay-keep`）。項目の意味と理由は設計文書の「データ構造」の起こす状態の表にある。
+中継の保存先の `<名前>/keep-<会話>.json` に、会話（`session_id`）ごとに 1 つ置く。読み書きは `signals` の `read_keep`・`bump_generation`・`update_keep` で行う。どれも子を止めるロックの中で書く（眠る hook の世代の読み取りだけはロックを取らない）。ファイルはラッパーの保存先と同じ掃除の対象である（`ndf-files.json` の `relay-keep`）。項目の意味と理由は設計文書の「データ構造」の起こす状態の表にある。
 
 | 項目 | 型 | 誰が書くか | いつ消すか |
 | --- | --- | --- | --- |
@@ -270,7 +270,7 @@ plugins/ndf/
 | 起きた応答の値付け（`wake_result` の `model`・`ttl`・`r` と、`w_1h`・`w_5m`・`out`） | フラグに書いた `model`・`ttl`（起こした時の判定に使った応答のもの）。`w_1h`・`w_5m` は寿命ごとの定数 | フラグは今回の応答の形が違う（`form`）・範囲から欠けた（`truncated`）Stop でも読める |
 | 避けた書き直し（`wait_end`） | 待ちを終えた応答の 1 つ前（状態の `last`） | 設計の決定 15 |
 
-例: Opus 5.5・1 時間・`S` 250,000 で待ちが始まり（`n_max` 33）、`k` 20 の判定の時の応答も 1 時間なら、費用の照合は `w` 2.0・`r` 0.05 で行い、フラグに `claude-opus-5-5`・`1h` を書く。起きた応答が 5 分へだけ書けば、次の Stop の `wake_result` は `ttl` `1h`・`r` 0.05（フラグの値）で、書き込みは `cache_write_5m × w_5m` で数える。同じ Stop の `Settled.turn.ttl` は `5m` になり、状態の `ttl` も `5m` に書き換わる。`wake_at` が None なので起こさず、`k` 21・`n_max` 33・`spent` は残る（待ちは通常の入力で終わるまで続き、`wait_end` の `w` は `last` の `5m` の 1.25）。続く Stop の応答が 1 時間へ書けば、同じ待ちの `k` 21 から、その応答の寿命とモデルで判定を続ける
+例: Opus 5.5・1 時間・`S` 250,000 で待ちが始まり（`n_max` 33）、`k` 20 の判定の時の応答も 1 時間とする。このとき費用の照合は `w` 2.0・`r` 0.05 で行い、フラグに `claude-opus-5-5`・`1h` を書く。起きた応答が 5 分へだけ書けば、次の Stop の `wake_result` は `ttl` `1h`・`r` 0.05（フラグの値）で、書き込みは `cache_write_5m × w_5m` で数える。同じ Stop の `Settled.turn.ttl` は `5m` になり、状態の `ttl` も `5m` に書き換わる。`wake_at` が None なので起こさず、`k` 21・`n_max` 33・`spent` は残る（待ちは通常の入力で終わるまで続き、`wait_end` の `w` は `last` の `5m` の 1.25）。続く Stop の応答が 1 時間へ書けば、同じ待ちの `k` 21 から、その応答の寿命とモデルで判定を続ける
 
 ### 処理の手順
 
@@ -286,7 +286,7 @@ plugins/ndf/
    | 突き合わせを通り、起こしたフラグが無い | 書いていなければ `stopped`（記録の形）と `stop_waking`（`scope` `session`） |
    | 突き合わせを通り、起こしたフラグが在る | `_reconcile` で `wake_result` を書いてフラグを消し（起床の結果の照合は今回の応答の形の検証と分ける。#4199 の受け入れ条件 8）、続けて書いていなければ `stopped` と `stop_waking`（`scope` `session`） |
 
-   突き合わせを通ったなら、`ref.at` は世代の時刻より新しい。`_finish` は起こした時刻を世代に書くので、フラグの起こした時刻は必ず `ref.at` より前である（フラグより前の応答を持つ hook は世代を取れず、上の表の「起動が今の起動でない・世代を取れない」の行に入る）。そのためフラグの時刻と `ref.at` を別に比べない
+   突き合わせを通ったなら、`ref.at` は世代の時刻より新しい。`_finish` は起こした時刻を世代に書くので、フラグの起こした時刻は必ず `ref.at` より前である。フラグより前の応答を持つ hook は世代を取れず、上の表の「起動が今の起動でない・世代を取れない」の行に入る。そのためフラグの時刻と `ref.at` を別に比べない
 4. `_settle` を呼ぶ。`stale` なら 0（#4068 の受け入れ条件 2。取り合いも含む）。`stopped` か `wait_stop` があれば 0（#4068 の受け入れ条件 4・8）。待つ子でなければ 0（`works` が 0。監視だけの子を含む）。寿命が未定（`Settled.turn.ttl` が None）なら 0（`_settle` が `stop_waking` を 1 度書いている。#4199 の受け入れ条件 4）
 5. 倍率を 1 度だけ求める。`q = keep_cache.ratios(tables.policy_value, Settled.turn.model, Settled.turn.ttl)`。`TableError` などで読めなければ 0。`wake_at(Settled.turn.at, Settled.turn.ttl, q.wake_margin)` が None なら 0（5 分の寿命。起こす対象の外なので `stop_waking` は書かない。#4068 の受け入れ条件 11 の「やめた」は、起こす対象の待ちで起こすのをやめたときを指し、5 分の待ちは `wait_start` の `ttl` が `5m` であることで集計から見分ける）。`wake_at` が今の時刻以前なら、起こさず止めずに 0（この節の 3 と同じく `once` を 1 度）。`_wait` が偽なら 0（#4068 の受け入れ条件 1・2）
 6. `_finish(t, gen, Settled.turn, q, stderr, clock)` を呼ぶ（#4068 の受け入れ条件 4・10・11）
@@ -346,7 +346,7 @@ plugins/ndf/
 
 ## hook の登録（`registration`・`runtimes.json`・`entry.py`）
 
-起こす hook はプラグインの登録（`hooks/claude.json`）に足さず、ラッパーが中継の子の起動にだけ `--settings` で渡す。中継の外の会話の Stop では、この hook のプロセスは起動しない（設計の決定 1）。登録を渡した子では、バックグラウンドの作業も予約も無い応答を含めて Stop ごとに 1 回起動する。Stop の登録は `matcher` を取らず、登録の条件で対象外の Stop を除けないためである（「処理の手順」の 2 の早期終了は起動の後に効く）。この追加の費用は、設計の決定 7 の実測 11（短い応答を 50 回続ける中継で、hook の起動から終了までの 95 パーセンタイルと応答 1 回の所要時間を、登録ありとなしで比べる）で測り、通ったバージョンだけを `cache.rewake` の `versions` に入れる。
+起こす hook はプラグインの登録（`hooks/claude.json`）に足さず、ラッパーが中継の子の起動にだけ `--settings` で渡す。中継の外の会話の Stop では、この hook のプロセスは起動しない（設計の決定 1）。登録を渡した子では、バックグラウンドの作業も予約も無い応答を含めて Stop ごとに 1 回起動する。Stop の登録は `matcher` を取らず、登録の条件で対象外の Stop を除けないためである（「処理の手順」の 2 の早期終了は起動の後に効く）。この追加の費用は、設計の決定 7 の実測 11 で測り、通ったバージョンだけを `cache.rewake` の `versions` に入れる。実測 11 は、短い応答を 50 回続ける中継で、hook の起動から終了までの 95 パーセンタイルと応答 1 回の所要時間を、登録ありとなしで比べる。
 
 - `runtimes.json` の claude の `Stop` に `"async_rewake": {"budget": "stop-rewake", "timeout_max": 3300}` を足す。`timeout_max` はバックグラウンドの登録だけの上限で、事象の `timeout_max`（同期の Stop の登録の上限。ランタイムの 600）は変えない。この行は `render` が読まず、`rewake_entry` と予算の検査だけが読む
 - 方針のファイル `contracts/limits/hook.budget.stop-rewake.json` を今の `hook.budget.*` の形（`p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）で置く。値は次のとおりである。3,300 秒を受け付けないバージョンでは、設計の決定 7 のとおりバージョンの一覧に入れない
@@ -366,7 +366,7 @@ plugins/ndf/
 
   `--settings` の hook にはプラグインの根の環境変数が渡らないので、絶対パスで書く。timeout は宣言（`contracts/limits/hook.budget.stop-rewake.json`）から読み、3,300 を埋め込まない。事象の行に `async_rewake` が無い・`rewake_budget` が None なら `tables.TableError`
 - `registration.rewake_settings(plugin_root: Path) -> dict[str, Any]` を足す。返す値は `{"hooks": {"Stop": [{"hooks": [rewake_entry("claude", "Stop", plugin_root)]}]}}` である。`render` は変えない（プラグインの登録に `asyncRewake` は現れない）
-- 検査: `budget.rewake_registrations(runtime: Optional[str] = None) -> list[dict]` を足し、`async_rewake` を持つ事象ごとにバックグラウンドの行を 1 つ作る（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`、`async_rewake` は真）。`budget_registrations` は今の行にこのバックグラウンドの行を足す。`registrations_of` は、登録のファイルが在るランタイムでだけ `_file_registrations` の行にバックグラウンドの行を足す（配布物の `hooks/claude.json` にバックグラウンドの登録は載らないので、ファイルの行だけではバックグラウンドの予算と `cache.wake` を検査できない）。ファイルの無いランタイムでは `budget_registrations` が足した行をそのまま使い、重ねて足さない。どちらの経路でもバックグラウンドの行は事象ごとに 1 つである。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、バックグラウンドの行を `rewake_budget` の締め切りと `async_rewake.timeout_max` で突き合わせる。ほかの行は今のとおり事象の予算と `timeout_max` で突き合わせる。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）。バックグラウンドの行には、`rewake_reach` の診断も破れとして足す
+- 検査: `budget.rewake_registrations(runtime: Optional[str] = None) -> list[dict]` を足し、`async_rewake` を持つ事象ごとにバックグラウンドの行を 1 つ作る（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`、`async_rewake` は真）。`budget_registrations` は今の行にこのバックグラウンドの行を足す。`registrations_of` は、登録のファイルが在るランタイムでだけ `_file_registrations` の行にバックグラウンドの行を足す。配布物の `hooks/claude.json` にバックグラウンドの登録は載らないので、ファイルの行だけではバックグラウンドの予算と `cache.wake` を検査できない。ファイルの無いランタイムでは `budget_registrations` が足した行をそのまま使い、重ねて足さない。どちらの経路でもバックグラウンドの行は事象ごとに 1 つである。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、バックグラウンドの行を `rewake_budget` の締め切りと `async_rewake.timeout_max` で突き合わせる。ほかの行は今のとおり事象の予算と `timeout_max` で突き合わせる。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）。バックグラウンドの行には、`rewake_reach` の診断も破れとして足す
 - `budget.rewake_reach(budget: Budget) -> Optional[str]` を足す。`cache.wake` の `seconds`（余白）と `interval`（確かめる間隔）を `tables.policy_value` で読み、次のどれかなら理由の文（値と超えた秒を含む）を、どれでもなければ None を返す。`interval` が 0 以下か、`ceil((TTL_SECONDS["1h"] − seconds) / interval)` が `keep_cache.MAX_CHECKS`（300 回）を越える（余白 550・間隔 10 は 305 回で越える）。`seconds` が 0 未満か `TTL_SECONDS["1h"]` 以上。`TTL_SECONDS["1h"] − seconds + interval + budget.margin` が `budget.timeout` を越える（既定の 600・60・240 で 3,000 + 60 + 240 = 3,300 秒ちょうど。余白を 120 秒にすると 3,780 秒で越える）。`registration.rewake_unreachable()` は `rewake_budget("claude", "Stop")` を渡してこの値を返す。`cache.wake` の `read_by` に `ndf.domains.hooks.budget` を足す
 - `entry.py` は `argv[3] == "rewake"` なら `call("ndf.domains.hooks.rewake", "run", argv)` の値を返す（ほかは今のとおり 0）
 
@@ -386,7 +386,7 @@ plugins/ndf/
   2. `bump_generation(Generation(at=clock(), by="turn"))` を呼ぶ（眠る hook の予約を失効させる）。状態のファイルが無い会話では、世代だけを持つ状態を作る。最初の待ちでバックグラウンドの hook より先に入力が届いても、後から動く hook は入力より古い応答の時刻しか持たず、世代を取れない
   3. 状態に待ち（`wait_id`）が在り、起こしたフラグ（`pending`）が無ければ、同じ区間で `opened` にその `clock()` を書く（既に在れば書き換えない）。起こす文の入力は、必ず `_finish` が `pending` を書いた後に届くので、`pending` の無い待ちへの入力は通常の入力である。`pending` が在る間の入力は、入力の `prompt` で見分ける。頭が `WAKE_HEAD` なら起床の文で書かず、ほかの入力（利用者の割り込み・バックグラウンドの作業の知らせ）なら `opened` を書く。起床の文が `prompt` に載ることは設計の決定 7 の実測 5 で確かめる。載らないバージョンはバージョンの門の一覧に入れない（設計の決定 10）。フラグの直後の入力の行が末尾の範囲の外へ押し出され、`wake_reply` が `truncated`、`opening` が `unknown` を返すことがある。そのときも `opened` があれば `_settle` の (5) で待ちを終える。`opened` は、待ちを旧い `k`・`wait_stop` から切り離すために使う。通常の入力の後の Tool の結果が大きく、次の Stop の `opening` が入力の行を末尾の範囲の外へ押し出されて `unknown` を返すときに効く
 - この guard はプラグインの登録の今の UserPromptSubmit の上で動くので、プロセスは増えない。状態のファイルを作るのは、起こす hook の登録を渡した中継の子だけである
-- 起こす文の見分け: guard（`turn.check`）は今、#3995 の数え手（判断開始の値の知らせを、利用者の入力ごとに数え直すカウンター）の `svc.counter.reset(source=...)` を入力ごとに呼ぶ。中継のマーカーを消せた入力は `source="relay"` で呼び、数え手は数え直さない。ほかは `"human"` で呼び、数え手は数え直す（利用者の入力の番号を 1 つ進める）。頭が `WAKE_HEAD` の `prompt` の入力も `"relay"` で呼び、利用者の入力（`"human"`）として数え直さない。`"human"` で数え直すと、起こすたびに判断開始の値の知らせが出直し、文脈の大きい子に知らせが増える（設計の決定 10）。ラッパーが初回のプロンプトに置く今の中継のマーカー（`markers.take`）の扱いは変えない
+- 起こす文の見分け: guard（`turn.check`）は今、#3995 の数え手の `svc.counter.reset(source=...)` を入力ごとに呼ぶ。数え手は、判断開始の値の知らせを利用者の入力ごとに数え直すカウンターである。中継のマーカーを消せた入力は `source="relay"` で呼び、数え手は数え直さない。ほかは `"human"` で呼び、数え手は数え直す（利用者の入力の番号を 1 つ進める）。頭が `WAKE_HEAD` の `prompt` の入力も `"relay"` で呼び、利用者の入力（`"human"`）として数え直さない。`"human"` で数え直すと、起こすたびに判断開始の値の知らせが出直し、文脈の大きい子に知らせが増える（設計の決定 10）。ラッパーが初回のプロンプトに置く今の中継のマーカー（`markers.take`）の扱いは変えない
 
 | 観点 | テスト |
 | --- | --- |
@@ -399,7 +399,7 @@ plugins/ndf/
 
 ## ラッパー（`wrapper._start`）
 
-- バージョンの門は、起動先（候補）ごとに、実際に起動する実行ファイルで決める。起動先を選ぶ前の `_start` の `cli_floor.require`（下限の確かめ）の版は門に使わない。従量の接続の設定は子の環境の `PATH` を上書きでき（`account_choice.fallbacks` が最終の環境で `claude` を解き直すのと同じ理由）、選ぶ前の環境で解いた `claude` と、子として起動する `claude` が別の実行ファイルになり得るためである。`cli_floor.require` は変えない
+- バージョンの門は、起動先（候補）ごとに、実際に起動する実行ファイルで決める。起動先を選ぶ前の `_start` の `cli_floor.require`（下限の確かめ）の版は門に使わない。従量の接続の設定は子の環境の `PATH` を上書きできる（`account_choice.fallbacks` が最終の環境で `claude` を解き直すのと同じ理由）。そのため、選ぶ前の環境で解いた `claude` と、子として起動する `claude` が別の実行ファイルになり得る。`cli_floor.require` は変えない
 - 起動の手順（`_start`・`wrapper_launch._try`・`_fallback`）:
   1. `_start` は、次の 3 つがそろうときだけ、`_launch_target` へ渡す起動の引数（`[CLAUDE, *head, *self.s.args, *once]`）とは別に、`head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足した引数（以下「登録つきの引数」）を作る。そろわなければ作らず、どの候補にも登録を渡さない
      - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
@@ -408,16 +408,16 @@ plugins/ndf/
   2. 1 で登録つきの引数を作ったときだけ、2〜4 を行う（作らなかった起動では版を読まず、5 で登録の無い引数を選ぶ。`--version` は増えない）
      - やること: 候補が `metered`（従量の接続）なら、`_try` は従量の接続の設定を候補ごとに 1 回だけ読む（新設の `account_choice.metered_of(store, env) -> Union[Decl, str]`。今の `_decl_of` を公開した名前）。読めなければ（理由の符号）、版を読まず、用意もせずに、今のとおりその理由で飛ばす。読めた値 `decl` を、版を読む環境（下の `version_env`）と起動先の用意の両方へ同じ値で渡す
      - 渡し方: `target_env`・`key_target` に引数 `decl: Optional[Decl] = None` を足し、在れば `_decl_of` を読み直さない。`target_env` から `key_target`、`key_target` から `_launch_made` へも同じ値を渡す。`key_child` も `decl` を受ける
-     - 版を読む環境: 新設の `account_choice.version_env(env: Mapping[str, str], decl: Optional[Decl]) -> dict[str, str]` が返す。`decl` があれば `session_env.metered_env` に当てた環境（子と同じく親の認証の変数・秘密の変数を外し、設定の `PATH` を重ねた環境）を、None（既定のログイン・登録済みアカウント・`key:<名前>`）なら `env` をそのまま返す。設定のファイルを読まず、ファイルを書かず、届けも検証も `--version` もしない
-     - 理由: 設定を 1 回だけ読むのは、`ndf relay accounts` などが間に `metered.json` や環境の設定を書き換えても、版を判定した実行ファイルと、用意して起動する子の `PATH` が同じ 1 回の読み取りから決まるためである。子の環境の `PATH` を変えるのは従量の接続の設定だけで（`account_env`・`key_env` は `PATH` を触らない）、`metered_env` は用意のときと同じ関数に同じ `decl` を当てる。そのため `version_env` が返す環境の `PATH` は、用意した `Target.env` の `PATH` と一致する
-  3. その環境（以下 `venv`）と作業ディレクトリで `exe = cli_floor.resolve(CLAUDE, venv, cwd)` を呼ぶ。`spawn_pty` が起動する実行ファイル（`cli_floor.locate(argv[0], Target.env, cwd)`）と同じものを指す。版（`cli_floor.version_at("claude", exe, venv, cwd)`）を読む時点は、`--version` の起動が増えるかどうかで次の 3 つに分ける。`version_at` は `cli_floor` の既存の記録（実パス・更新時刻・大きさの組）を使い、同じ記録をキーの子の版の下限の確かめ（`account_choice._gate_off` の `claude_version`）も読む。`--version` の起動は `venv`（親の API キー・認証ヘッダーを外した従量の子と同じ環境）で行い、親の環境は渡さない
+     - 版を読む環境: 新設の `account_choice.version_env(env: Mapping[str, str], decl: Optional[Decl]) -> dict[str, str]` が返す。`decl` があれば `session_env.metered_env` に当てた環境を返す。子と同じく親の認証の変数・秘密の変数を外し、設定の `PATH` を重ねた環境である。None（既定のログイン・登録済みアカウント・`key:<名前>`）なら `env` をそのまま返す。設定のファイルを読まず、ファイルを書かず、届けも検証も `--version` もしない
+     - 理由: 間に `ndf relay accounts` などが `metered.json` や環境の設定を書き換えることがある。設定を 1 回だけ読めば、版を判定した実行ファイルと、用意して起動する子の `PATH` が同じ 1 回の読み取りから決まる。子の環境の `PATH` を変えるのは従量の接続の設定だけで（`account_env`・`key_env` は `PATH` を触らない）、`metered_env` は用意のときと同じ関数に同じ `decl` を当てる。そのため `version_env` が返す環境の `PATH` は、用意した `Target.env` の `PATH` と一致する
+  3. その環境（以下 `venv`）と作業ディレクトリで `exe = cli_floor.resolve(CLAUDE, venv, cwd)` を呼ぶ。`spawn_pty` が起動する実行ファイル（`cli_floor.locate(argv[0], Target.env, cwd)`）と同じものを指す。版（`cli_floor.version_at("claude", exe, venv, cwd)`）を読む時点は、`--version` の起動が増えるかどうかで次の 3 つに分ける。`version_at` は `cli_floor` の既存の記録（実パス・更新時刻・大きさの組）を使う。同じ記録を、キーの子の版の下限の確かめ（`account_choice._gate_off` の `claude_version`）も読む。`--version` の起動は `venv`（親の API キー・認証ヘッダーを外した従量の子と同じ環境）で行い、親の環境は渡さない
 
      | 候補 | 版を読む時点 | `--version` の起動 |
      | --- | --- | --- |
      | `exe` が `_start` の `require` と同じ実行ファイル（`metered` 以外の候補はいつもこれ） | 用意の前 | 記録を読むだけで打たない |
      | 別の実行ファイルを指す従量の接続（API キーの設定のキーの子も、それ以外も） | 用意の後 | 先に登録の無い引数で用意し（`target_env`・`key_target` の `_build` と `verify`）、実効の設定の確かめ（`metered_overridden`・`key_overridden`）と固定できるか（`key_pin`）を通った候補でだけ版を読む。キーの子では、`verify` の中の版の下限の確かめ（`_gate_off`）がこの 2 つを通った後に同じ実行ファイルの版を今も読むので、その 1 回が `cli_floor` の記録に残り、用意の後の `version_at` は記録を読むだけで打たない（版の下限の確かめと起こす登録の判定が同じ 1 回の版を使う。候補あたりの起動は今と同じ 1 回）。キーでない子は通った候補でだけ `--version` を 1 回起動する。どちらも、確かめや固定で落ちる候補では打たない。版が一覧に在れば登録を足す。キーでない子は、用意した `Target.argv` の `head` の直後に `--settings` と `rewake_settings` の JSON を差し込む（`_build` は `--model` をオプションの最後へ移すだけで、`head` と `--settings` に触らない）。キーの子は、`_compose` が作った 1 つの `--settings` の JSON（登録つきの引数を作れる起動では利用者の `--settings` が無いので、ファイルでなく引数の JSON の文字列で、一時ファイルも作らない）の `hooks.Stop` に `rewake_entry` を足して書き直し、`--settings` を 2 つにしない。足す設定は `hooks.Stop` だけで、`verify` が見る接続先・認証・helper を変えず、固定（`Resolved.pins`）は設定のファイルにだけ掛かって引数の JSON には掛からないので、確かめ直さず固定も書き直さない |
   4. 用意の前に版を読む候補（3 の表の 1 行目）だけ、ここで引数を選ぶ。登録つきの引数があり、`version` が一覧のどれかと完全に一致すれば（`semver` の大小では比べない）登録つきの引数を、ほか（一覧に無い・None・登録つきの引数が無い）は登録の無い引数を使う。用意の後に版を読む候補（3 の表の 2 行目）は、ここで引数を選ばない。登録の無い引数で用意した `Target.argv` に、版が一覧と完全に一致したときだけ 3 の表のとおり登録を足し、その `Target.argv` をそのまま起動に使う。`_start` が作った登録つきの引数で置き換えない（置き換えると、キーの子の合成した `--settings` の `apiKeyHelper` と `ConfigChange` の hook が落ちる）
-  5. 用意の前に版を読む候補は、選んだ引数で起動先を 1 度だけ用意する（`target_env`・`key_target`。既定のログインは引数をそのまま使う）。用意の後に版を読む候補は 3 の表のとおり登録を足すだけで、用意し直さない。どちらでも、使用の届け・一時ファイル・実効の設定の確かめ（`verify` の `effective_env`）は候補ごとに今と同じ 1 回である。API キーの従量の子では、`account_choice._source` が選んだ引数の 1 つの `--settings` を元の設定として読み、`_compose` が `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直す。そのため `hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。登録つきの起動先だけ、`Target.env` に `NDF_RELAY_REWAKE=1` を足す
+  5. 用意の前に版を読む候補は、選んだ引数で起動先を 1 度だけ用意する（`target_env`・`key_target`。既定のログインは引数をそのまま使う）。用意の後に版を読む候補は 3 の表のとおり登録を足すだけで、用意し直さない。どちらでも、使用の届け・一時ファイル・実効の設定の確かめ（`verify` の `effective_env`）は候補ごとに今と同じ 1 回である。API キーの従量の子では、`account_choice._source` が選んだ引数の 1 つの `--settings` を元の設定として読む。`_compose` が、それに `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直す。そのため `hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。登録つきの起動先だけ、`Target.env` に `NDF_RELAY_REWAKE=1` を足す
   6. その候補を起動する直前（`_spawn_target` の前）に、`signals.set_launch(self.dir, launch, rewake=<登録つきの起動先か>)` で今の起動の記録を書き直す（`_start` が候補を試す前に書く記録は `rewake` 偽。子の最初の UserPromptSubmit より前に真偽が決まる）。UserPromptSubmit の guard が `signals.rewake_on` で読む。起動の行（`account`）に `rewake`（真偽）と `claude_version`（3 で読んだ `version`）を足す
 
   `<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。登録の無い起動先では、親の環境に `NDF_RELAY_REWAKE` があっても子の環境から外す（登録の無い子の hook が眠らないように）。こうして候補ごとに、登録・`NDF_RELAY_REWAKE`・起動の記録の `rewake` が、その候補の実行ファイルの版の 1 つの判定でそろう。`--resume` で起動し直すときも同じ判定で毎回行う（`--settings` は起動ごとの引数で、会話に残らない）
@@ -485,7 +485,7 @@ plugins/ndf/
 
 ### 読み手の突き合わせ（規則 `limit-readers`）
 
-`ndf check` の規則 `limit-readers`（`src/ndf/checks/limits_readers.py`）は、方針の `read_by` と、方針を引く読み口（`src/ndf/checks/rules.json` の `limits`）の呼び手を突き合わせる。新しい読み口と読み手は、次のとおり `rules.json` と `read_by` に足す。
+`ndf check` の規則 `limit-readers`（`src/ndf/checks/limits_readers.py`）は、2 つを突き合わせる。方針の `read_by` と、方針を引く読み口（`src/ndf/checks/rules.json` の `limits`）の呼び手である。新しい読み口と読み手は、次のとおり `rules.json` と `read_by` に足す。
 
 | 引く箇所 | `rules.json` の `limits` に足す行 | 読み手に数えるモジュール（`read_by`） |
 | --- | --- | --- |
@@ -496,7 +496,7 @@ plugins/ndf/
 
 `keep_cache.ratios` と `rewake_budget` の中で方針の名前を引く式は、上の表の `expr` と同じ綴りで書く（綴りが違えば規則が読み口を解けない）。実装の完了の条件に、方針のファイルを差し替えるテスト（下）に加えて、`ndf check` の規則 `limit-readers` が破れ 0 件で通ること（PR の CI の検査）を入れる。
 
-`limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、差し替えた `contracts/limits/` の方針のファイル（`cache.write-ratio.json`・`cache.read-ratio.json`・`cache.rewake.json`）をエントリポイントにして、次の 4 つが差し替えた値どおりになることを確かめる。
+`limits.value` は、値が数でない（`ratios`・`versions`）ときに `LimitsError` を上げる。テスト（設計のテスト設計の 13）は、`contracts/limits/` の方針のファイル（`cache.write-ratio.json`・`cache.read-ratio.json`・`cache.rewake.json`）を差し替える。そのうえでエントリポイントから、次の 4 つが差し替えた値どおりになることを確かめる。
 
 - hook の `ratios` の結果（辞書の `ratios` と `default`）
 - hook が書いた行の倍率
