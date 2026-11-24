@@ -8,7 +8,7 @@
 
 ```text
 plugins/ndf/
-├── contracts/workflow/context.schema.json      … mvv_gate に holds・noted・note_url
+├── contracts/workflow/context.schema.json      … mvv_gate に holds・noted・note_url・stopped_by
 ├── contracts/workflow/stage-io.schema.json     … stage-in をプランが渡す平らな形に直す
 ├── contracts/data/review-criteria.json         … 見送りの区分の選び方
 ├── src/ndf/progress/definition.py              … validate_stage_input を平らな形で確かめる
@@ -69,7 +69,7 @@ plugins/ndf/
 | `contracts/data/review-criteria.json` | 変更 | 指摘の基準の文 | — | — | 見送りの区分の選び方 |
 | `src/ndf/domains/crossreview/finish_decide.py` | 変更 | 終わり方の判定 | — | モジュール | `finish`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `finish_decide` | モジュール | `cmd_run`（変更） |
-| `contracts/workflow/context.schema.json` | 変更 | 文脈の型 | — | — | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`note_url` |
+| `contracts/workflow/context.schema.json` | 変更 | 文脈の型 | — | — | `$defs.mvv_gate` に任意のキー `holds`・`noted`・`note_url`・`stopped_by` |
 
 ## 判定を打つ条件と省く条件
 
@@ -117,7 +117,21 @@ plugins/ndf/
 - `_recorded`: `note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"] or ())` を書く（`holds` は下の `gate_outcome` のとおり常にあり、未確認の null は空として渡す）。`why`・`holds` の原因の文は、下の「結果に入れる原因の文」のとおり `public_cause` で変えた後の値である。それでも PR へ書く本文には判定の理由など他の文も入るので、書き込みは今どおり `post_note`（`publish.Publisher(hub).comment`）だけを通し、`_mvv_cite` と同じ包み（`Publisher.guarded`。書き先の公開範囲の照会と、秘密・ホームのパス・メールアドレス・アカウント名・非公開の参照の除去）を通した後の本文だけを PR に書く。`hub.rest` を直接呼んで書かない。公開範囲の照会に失敗したときも `GitHubError` として下の投稿の失敗と同じに扱う。書き込みの `GitHubError` は外へ出さず、`skip` を偽にし、`why` の末尾に「判定の記録を PR に書けない: <原因>」を足し、出力に `noted: false` を置いて返す（`verdict` と `head` は保つ）。書けたときは `noted: true` と、今回書いたコメントの URL `note_url`（`Publisher.comment` が返す `Published.url`。投稿の応答の `html_url` なので、GitHub の呼び出しは増えない）を置く。`post_note` は `Published` を返すように変える
 - 結果に入れる原因の文: 出力（結果 JSON の `outputs.mvv_gate`）の `why` と `holds` に入れる原因は、生の例外の文字列でなく、`public_cause(<例外>, hub.repo)` で変えた文にする。例外の文には、PR にも記録にも無い手元の端末の情報（ホームの絶対パス・アカウント名・秘密の値）と、判定する PR と関係の無い他のリポジトリへの参照が入りうる。出力は承認資料へ全件転記され（下の「手順書」の「載せ方」）、PR のコメントにもなるので、書き先の公開範囲を照会せずに、公開の書き先と同じに伏せる。判定の理由と保留の自由記述は、この関数の対象でない（下の「手順書」の「承認資料の開示の範囲」）。対象は、`gate` の手順 (3) の「MVV 判定を打てない: <理由>」、下の「PR を読んだ後の失敗」の表の各行の `<原因>`、手順 (5) の保留「MVV の記録（mvv-validation.jsonl）を読めない: <原因>」、手順 (7) の追記の失敗の原因（`unrecorded`）と LLM の失敗の理由、`_recorded` の「判定の記録を PR に書けない: <原因>」のすべてである。例外を受けたその場で変え、生の文字列を `gate_outcome` へ渡さない。`warnings` にも生の文字列を載せない
 - `note`（`checks.py`）: シグネチャを `note(gate: str, verdict: Any, why: Sequence[str], holds: Sequence[str] = ()) -> str` に変え、`holds` が空でなければ「### レビューの保留」の箇条書きを足す。呼び手は `mvv_gate._recorded` だけ
-- `gate_outcome`（`mvv_material_decide.py`）: 引数 `holds: Optional[Sequence[str]] = None` を足し、出力に `holds` のキーを常に置く。保留を読んだ（`_judged` の手順 (5) まで進み、`review_prs` が PR を返した）ときは読んだ結果の配列（無ければ空の配列 `[]`。読めなかったときは読めない理由の 1 件）、保留を読んでいないときは `null`。`null` になるのは、(5) より前で終わった終わり方（(2) のベースの取得・(3) の検査 1・(4) の差分と読み直しの失敗）と、保留を読む PR の範囲を決めない `release`（#4105 まで）である。`null` と `[]` を同じ表示にしない（下の「手順書」の載せ方）。`context.schema.json` の `$defs.mvv_gate` に任意のキー `holds`（文字列の配列か null）と `noted`（真偽値）と `note_url`（文字列。`noted` が真のときだけ）を足す。`gate_outcome` は `noted: false` を既定で置き、`_recorded` が書けたときだけ `noted: true` と `note_url` に置き換える。今回のコメントを書いたかを、キーの有無でなく値で表すためである（キーを省く形では、書けた判定と、差分を読む間に PR が動いて書かなかった判定を見分けられない）。判定した PR の番号・宛先・ベースのコミットを出力に足して省いた回答と照合するのは #4106
+- `gate_outcome`（`mvv_material_decide.py`）: 引数 `holds: Optional[Sequence[str]] = None` を足し、出力に `holds` のキーを常に置く。保留を読んだ（`_judged` の手順 (5) まで進み、`review_prs` が PR を返した）ときは読んだ結果の配列（無ければ空の配列 `[]`。読めなかったときは読めない理由の 1 件）、保留を読んでいないときは `null`。`null` になるのは、(5) より前で終わった終わり方（(2) のベースの取得・(3) の検査 1・(4) の差分と読み直しの失敗）と、保留を読む PR の範囲を決めない `release`（#4105 まで）である。`null` と `[]` を同じ表示にしない（下の「手順書」の載せ方）。`context.schema.json` の `$defs.mvv_gate` に任意のキー `holds`（文字列の配列か null）と `noted`（真偽値）と `note_url`（文字列。`noted` が真のときだけ）を足す。`gate_outcome` は `noted: false` を既定で置き、`_recorded` が書けたときだけ `noted: true` と `note_url` に置き換える。今回のコメントを書いたかを、キーの有無でなく値で表すためである（キーを省く形では、書けた判定と、差分を読む間に PR が動いて書かなかった判定を見分けられない）。判定した PR の番号・宛先・ベースのコミットを出力に足して省いた回答と照合するのは #4106。`$defs.mvv_gate` には下の `stopped_by`（`kind` は下の表の種類の列挙、`text` は文字列）も足す
+
+- `stopped_by`（`mvv_material_decide.py`）: `verdict` が null の出力には、判定できなかった理由の種類 `stopped_by: {"kind": <種類>, "text": <定型文>}` を置く（`verdict` があればキーを置かない）。定型文は、承認する人が次に何を確かめるかが分かる文で、PR から取った値（ファイル名・ブランチ名・PR の番号・リポジトリ名）も例外の文も含めない。種類と定型文の表は `mvv_material_decide.py` の定数 `STOP_REASONS` の 1 か所に置き、`gate_outcome` が引数 `stop: Optional[str]`（種類）から `text` を引く。手順書は文を写さず、出力の `text` を載せる。`why` は今どおり詳しい理由（原因の文を含む）を持つ
+
+| 種類 | 終わり方 | 定型文 |
+| --- | --- | --- |
+| `no_gate` | モードがその承認ゲートを持たない | このモードには MVV 判定の対象の承認ゲートが無い |
+| `no_pr` | 開いた PR が無い・PR を読めない | 判定する PR を決められないか、GitHub から読めない。PR が開いているかと GitHub への接続を確かめる |
+| `mvv_unapproved` | 検査 1 が外れる | ベースブランチに承認済みのプロジェクト MVV が無いか、MVV の本文が承認の記録と合わない。MVV の承認の状態を確かめる |
+| `base_unreadable` | ベースの MVV・レッドラインの設定を読めない | ベースブランチの MVV か、人の承認が要るパスの設定を読めない。取得をやり直して判定を打ち直す |
+| `diff_unreadable` | 差分を読めない | 変更したファイルを読めない。判定を打ち直す |
+| `pr_moved` | 差分を読む間に head か宛先が動いた | 判定の材料を読む間に PR の内容か宛先が変わった。判定を打ち直す |
+| `pr_reread_failed` | 差分の後に PR を読み直せない | 判定の材料を読んだ後に PR を読み直せない。判定を打ち直す |
+| `incomplete_patches` | 差分の全体が材料に載らない | 変更が大きく、差分の全体を判定の材料に載せられない。PR を分ける |
+| `llm_no_answer` | LLM が回答しない | 判定する AI が回答しない。判定を打ち直す |
 
 ### 処理の手順
 
@@ -167,6 +181,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `pr_number` | `worktree` の指すブランチの PR | 文脈に `design_pr` があっても読まない | 開いた PR が無い → `GateError` |
 | `_judged`（PR を読んだ後の失敗） | 上の表の各行が、表の `verdict`・`head`（(1) の値）・`why`・コメントの有無になり、例外を外へ出さない。どの行も `Gated.target` は (1) で読んだ PR | `compare_files` の後の読み直しで head が動いた・head を変えずに宛先が変わった・読み直しが `GitHubError` → 差分を判定に使わず LLM を呼ばず、コメントを書かない | ベースの `fetch_branch_or_raise` の `GitError` → `verdict: null`・`head` あり・コメント 1 件。コメントの書き込みの失敗 → `noted: false`・`skip` 偽・`verdict` は保つ。ベースの本文のハッシュが承認の記録と合わない → (2) で止まらず検査 1 の分岐になり、`verdict: null`・`noted: false`・コメント無し（`post_note` のスタブが呼ばれない）。偽のホームの絶対パス（`/home/<偽の名前>/...`）と偽のアカウント名を含む `OSError` で記録を読めない（と追記できない）判定を、公開の書き先で書く → `post_note` が受けた本文（`Publisher` の `hub.rest` のスタブが受けた `body`）に偽のパスとアカウント名が無い。同じ判定の出力の `why` と `holds`、その出力で `mvv_lines` が組んだ承認資料の行にも、偽のパスとアカウント名が無い。ベースの取得の `GitError` の文に偽のパス・偽のアカウント名・偽の秘密（環境変数に置いた値）・別のリポジトリへの参照を含めても、出力の `why` にどれも無い。同じ `GitError` の文に、非公開の偽の所有者とリポジトリを指す認証情報付きのリモートの URL（`https://x-access-token:<偽のトークン>@github.com/<偽の所有者>/<偽のリポジトリ>.git`）と、`***@` に伏せ字済みの同じ URL を含める → 出力の `why`、その出力で `mvv_lines` が組んだ承認資料の行、`post_note` が受けた本文のどれにも、偽のトークン・偽の所有者名・偽のリポジトリ名が無い |
 | `public_cause` | 偽のホームの絶対パスと偽のアカウント名を含む `OSError` → どちらも伏せ字になり、ほかの文は残る | 判定する PR のリポジトリへの参照 → 残る。別のリポジトリへの参照 → 伏せる。公開範囲の照会（`visibilities`）を呼ばない | 偽の秘密（環境変数に置いた値）を含む文 → 秘密が残らない。ベースの取得の `GitError` の文に、別の非公開の所有者とリポジトリを指す `https://x-access-token:<偽のトークン>@github.com/<偽の所有者>/<偽のリポジトリ>.git` と、`git._mask_urls` が伏せた後の `https://***@github.com/<偽の所有者>/<偽のリポジトリ>` を含める → 結果の文に偽のトークン・偽の所有者名・偽のリポジトリ名のどれも無い。同じ 2 つの URL が判定する PR のリポジトリを指すときも、URL の全体が伏せ字になる |
+| `gate_outcome`（`stopped_by`） | `stop` を渡す → `stopped_by` の `kind` と、`STOP_REASONS` のその種類の `text` | `verdict` あり → `stopped_by` のキーが無い | `_judged` の各終わり方（ベースの取得の失敗・差分を読む間に head が動いた・LLM が回答しない など）の出力の `stopped_by.kind` が表の種類。偽のファイル名・偽のブランチ名を含む失敗でも、`stopped_by.text` にどちらも無い |
 | `_recorded`・`gate_outcome`（`noted`） | 投稿できた → `noted: true` と、`Publisher` の `hub.rest` のスタブが返した `html_url` と同じ `note_url`。REST の呼び出しは投稿の 1 回だけ | 差分を読む間に head が動いた・検査 1 が外れた → `noted: false` で `note_url` が無い（キーを省かない） | 投稿の `GitHubError` → `noted: false` で `note_url` が無い |
 | `note` | 保留と判定を載せる | 保留が空なら節を出さない | — |
 
@@ -366,7 +381,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | 経路 | 資料を置く場所・渡す先 | その場所で既に読めるもの | 欄の自由記述の扱い |
 | --- | --- | --- | --- |
 | プランの経路（`write_material`・`presentation_path`） | 判定を打った実行環境の、リポジトリの Git ディレクトリの中（`material_path` の `<Git ディレクトリ>/ndf/state/progress-work/<ステートマシンの識別子の sha256 の頭>/` の下） | 同じ Git ディレクトリに、判定した PR のブランチ（差分の全体）と、PR を読んだ GitHub の認証がある | そのまま載せる。このファイルを読める人は、同じ場所で PR の差分そのものを読めるので、新しく開示する情報は無い |
-| supervisor の経路（`approval-request.md`） | 呼び出し元へ返す資料の本文。呼び出し元はそれを承認する人へ転送する（チャットへの貼り付けなど） | 確かめられない。supervisor が判定した PR の作業場所で動いても、同じ実行環境にあることは、呼び出し元やその先で資料を読む人が Git ディレクトリと同じ権限を持つ証拠にならない | PR から取った値を含みうる文は、本文を載せずに件数だけを載せる。対象は、判定の理由・レッドライン・保留の文と `why` である。`why` は保留の文を含まない（上の `check_review_holds`）が、差分に載らないファイルの名前・ブランチ名・PR の番号など、非公開の PR から取った値を含みうる。そこで `why` も 1 件ずつの本文を載せず、「省かない理由 <件数> 件（全文は下の添え書きの場所で読む）」の 1 行にする。`verdict` が null のときも「判定できない: <why>」でなく「判定できない（理由 <件数> 件）」にする。載せるのは、判定（従う・従わない・判定できない）・`skip`・根拠の項目の名前・保留の件数・`why` の件数・`noted` だけである。全文の参照先を 1 つ添える。`noted` が真なら「理由と保留の全文は、今回の判定のコメント <note_url> で読む」とする（PR のコメントは `Publisher.guarded` を通っているので、PR を見られる人だけが全文を読める）。`noted` が真でない（`false`・キーが無い）なら、PR の既存のコメントを指さない。前回の判定のコメントを今回の理由として読ませないためである。代わりに、supervisor が同じ実行で `ndf records mvv gate` の結果 JSON を保存したファイル（作業ディレクトリの `mvv-gate-<区分>.json`）のパスを添え、「理由と保留の全文は、判定を打った実行環境の <パス> で読む」とする |
+| supervisor の経路（`approval-request.md`） | 呼び出し元へ返す資料の本文。呼び出し元はそれを承認する人へ転送する（チャットへの貼り付けなど） | 確かめられない。supervisor が判定した PR の作業場所で動いても、同じ実行環境にあることは、呼び出し元やその先で資料を読む人が Git ディレクトリと同じ権限を持つ証拠にならない | PR から取った値を含みうる文は、本文を載せずに件数だけを載せる。対象は、判定の理由・レッドライン・保留の文と `why` である。`why` は保留の文を含まない（上の `check_review_holds`）が、差分に載らないファイルの名前・ブランチ名・PR の番号など、非公開の PR から取った値を含みうる。そこで `why` も 1 件ずつの本文を載せず、「省かない理由 <件数> 件（全文は下の添え書きの場所で読む）」の 1 行にする。`verdict` が null のときは「判定できない。理由: <`stopped_by.text`>。今回の詳しい結果は <下の参照先> で確かめる」とする。`stopped_by.text` は PR の値を含まない定型文なので、そのまま載せる（上の `stopped_by` の表）。承認する人は、この文で MVV が承認されていないのか、材料の取得に失敗して打ち直しが要るのかを判断できる。載せるのは、判定（従う・従わない・判定できない）・`stopped_by.text`・`skip`・根拠の項目の名前・保留の件数・`why` の件数・`noted` だけである。全文の参照先を 1 つ添える。`noted` が真なら「理由と保留の全文は、今回の判定のコメント <note_url> で読む」とする（PR のコメントは `Publisher.guarded` を通っているので、PR を見られる人だけが全文を読める）。`noted` が真でない（`false`・キーが無い）なら、PR の既存のコメントを指さない。前回の判定のコメントを今回の理由として読ませないためである。代わりに、supervisor が同じ実行で `ndf records mvv gate` の結果 JSON を保存したファイル（作業ディレクトリの `mvv-gate-<区分>.json`）のパスを添え、「理由と保留の全文は、判定を打った実行環境の <パス> で読む」とする |
 | supervisor の工程の出力（規則 15 の出力の JSON ファイルと、`ndf progress finish` が書くステートマシンの記録） | 作業ディレクトリのファイルと、ステートマシンの保存先（どちらも判定を打った実行環境の手元） | プランの経路と同じ。手元の記録として持ち、呼び出し元へ返す本文に含めない | `outputs.mvv_gate` をそのまま持つ（承認ゲートを省くかを決める `mvv_skip` と、プランの経路の資料がこの値を読むため）。フェーズレポートにはパスだけを書き、中身を写さない。中身をレポートや資料に書くときは、上の supervisor の経路の行の伏せ方に従う |
 | PR のコメント（`_recorded`） | GitHub の PR | PR を見られる人 | `Publisher.guarded` が書き先の公開範囲を照会して伏せる。照会できなければ公開の書き先と同じに伏せる（上の `_recorded`） |
 | 上のほかの書き先（実行環境の外のファイル・チャット・メールなど） | 今は無い | 確かめられない | 載せない。経路を足す変更の中で、自由記述を `Publisher.guarded` と同じ包みに通すか、`WITHHELD` の文に置き換える処理を入れ、受け手が PR を見られるかを確かめられないときは伏せる |
