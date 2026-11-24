@@ -42,8 +42,9 @@ REMOTE_SCHEMA = ("contracts/schemas/ndf-settings/worktree.schema.json", ("proper
 WORKTREE_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
-# 部分クローン（`--filter`）で手元に無いオブジェクトを、読み取りの途中でリモートから取得させない環境変数
-NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1"}
+# 部分クローン（`--filter`）で手元に無いオブジェクトを、読み取りの途中でリモートから取得させない環境変数。
+# `GIT_NO_LAZY_FETCH` を読まない版（2.43.0・2.44.0 など）も、通信の手段を 1 つも許さなければ取得が通信の前に失敗する
+NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
 # （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
 # 前に置き、checkout は SHA へ解決してから渡し、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
@@ -224,7 +225,7 @@ class Git:
 
     @classmethod
     def offline(cls, cwd: Optional[Path]) -> Git:
-        """手元に無いオブジェクトをリモートから取得しない `Git`（`NO_LAZY_FETCH`）。欠けたオブジェクトは無いものとして読む。"""
+        """手元に無いオブジェクトをリモートから取得しない `Git`（`NO_LAZY_FETCH`）。欠けたオブジェクトは、git の版と操作により、無いものとして読むか `GitError`。"""
         return cls(cwd, functools.partial(run_git, env=NO_LAZY_FETCH), NO_LAZY_FETCH)
 
     def attempt(self, *args: str) -> Completed:
