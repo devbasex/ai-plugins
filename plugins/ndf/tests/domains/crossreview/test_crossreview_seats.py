@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import pytest
 
@@ -344,3 +344,35 @@ def test_issue_3955_old_or_unknown_claude_refuses_only_the_seat(wt: Path, tmp_pa
     code, got = _run(capsys, monkeypatch, _guarded(seated, monkeypatch, version), wt)
     assert fin.INCOMPLETE_REVIEWERS in got["summary"] and seated.seat_calls == []
     assert any("相手役 claude が差分を読めなかった" in w and "refused" in w for w in got["warnings"])
+
+
+
+class _Denied(Fake):
+    """席の claude の出力の外側の JSON に、`target`（リクエストで渡した差分のファイルのパスを受け取る）の Read の拒否を足す偽物。"""
+
+    def __init__(self, state_dir: Path, script: dict, target: Callable[[str], str]):
+        super().__init__(state_dir, script)
+        self.target = target
+
+    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        status = super().__call__(spec)
+        if spec.agent == "claude" and "--restricted" in spec.argv:
+            found = re.search(r"差分は (\S+?)（", spec.argv[-1])
+            assert found is not None
+            body = json.loads(spec.paths.out.read_text(encoding="utf-8"))
+            body["permission_denials"] = [{"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": self.target(found.group(1))}}]
+            spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        return status
+
+
+def test_pr_4461_seat_claude_denied_the_diff_is_not_an_answer(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 4461 の r1-1: 埋めた claude が渡した差分のファイルの Read を拒否されたら、`{"findings": []}` で完了しても結果が無い席と
+    数え、収束にせず incomplete_reviewers で止まる。拒否が差分のファイルでなければ回答として扱う。"""
+    script = {"codex": [[]], "kiro": [FAIL, FAIL], "claude": [[]]}
+    fake = _Denied(tmp_path / "st", script, lambda diff: diff)
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert fin.INCOMPLETE_REVIEWERS in got["summary"] and fake.seat_calls == ["claude"]
+    assert any("相手役 claude が差分を読めなかった" in w and drive.DENIED_READ in w for w in got["warnings"])
+    other = _Denied(tmp_path / "st2", script, lambda diff: "/etc/passwd")
+    code, got = _run(capsys, monkeypatch, other, wt)
+    assert (code, got["status"]) == (0, "ok")

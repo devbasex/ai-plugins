@@ -242,6 +242,32 @@ def answer_text(runtime: str, out: Path) -> str:
     return body if isinstance(body, str) else raw
 
 
+def denied_reads(out: Path, required: Sequence[Path]) -> tuple[str, ...]:
+    """claude の出力の外側の JSON の `permission_denials` のうち、`required` のファイル（か、それを含むディレクトリ）を読む
+    `READ_TOOLS` の呼び出しが拒否されたもののパス。拒否が無い・外側が JSON でなければ空（PR 4461 の r1-1）。"""
+    try:
+        payload = json.loads(out.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 出力の無い・途中で切れた claude は拒否を確かめられない（呼び手が回答の有無で扱う）
+        return ()
+    denials = payload.get("permission_denials") if isinstance(payload, dict) else None
+    if not isinstance(denials, list):
+        return ()
+    wanted = [Path(os.path.abspath(p)) for p in required]
+    tools = READ_TOOLS.split(",")
+    found: list[str] = []
+    for d in denials:
+        if not isinstance(d, dict) or d.get("tool_name") not in tools or not isinstance(d.get("tool_input"), dict):
+            continue
+        for value in d["tool_input"].values():
+            if isinstance(value, str) and value and any(_covers(Path(os.path.abspath(value)), w) for w in wanted):
+                found.append(value)
+    return tuple(dict.fromkeys(found))
+
+
+def _covers(denied: Path, wanted: Path) -> bool:
+    return denied == wanted or denied in wanted.parents
+
+
 def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:
     """`at` から始まる JSON の値。JSON の始まりでなければ None。"""
     try:
