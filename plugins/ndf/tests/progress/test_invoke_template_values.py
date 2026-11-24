@@ -14,7 +14,7 @@ import pytest
 import strategy_fixture
 
 from ndf.core import route
-from ndf.progress import invoke, merge_pending
+from ndf.progress import invoke, issue_values, merge_pending
 
 # 設定（`.ndf/project.json`）のうち、実装のプランの差し込みを埋める値（review の起動は持たない。既定の起動を補わせる）
 PROJECT = {
@@ -42,7 +42,7 @@ def filled(monkeypatch):
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: read.append("merge_method") or "squash")
     return read
 
@@ -160,7 +160,7 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
     def fail(location, n):
         raise invoke.github.GitHubError("読めない")
 
-    monkeypatch.setattr(invoke, "issue_text", fail)
+    monkeypatch.setattr(issue_values, "issue_text", fail)
     with pytest.raises(invoke.github.GitHubError):
         _close(tmp_path, local)
     assert filled == []
@@ -175,7 +175,7 @@ def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_
         with pytest.raises(invoke.TemplateValuesMissing) as got:
             _close(tmp_path, local)
         assert set(got.value.missing) == {"merge_method"}
-        invoke.clear_values([tmp_path / "w"])
+        issue_values.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
     assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
     assert got["merge_method"] == "squash" and not (tmp_path / "w" / merge_pending.PENDING_FILE).exists()
@@ -199,10 +199,10 @@ def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_a
         raise invoke.github.GitHubError("読めない", status=502)
 
     with monkeypatch.context() as m:
-        m.setattr(invoke, "issue_text", fail)
+        m.setattr(issue_values, "issue_text", fail)
         with pytest.raises(invoke.github.GitHubError):
             _close(tmp_path, local)
-    invoke.clear_values([tmp_path / "w"])
+    issue_values.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
     assert filled == ["merge_method", 3092]
     assert got["merge_method"] == "squash" and not pending.exists()

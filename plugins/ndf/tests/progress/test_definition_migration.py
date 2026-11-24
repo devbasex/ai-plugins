@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import result
-from ndf.progress import command, definition, invoke, run, stages
+from ndf.progress import command, definition, invoke, run, run_view, stages
 
 MODE = "light"
 
@@ -67,7 +67,7 @@ def _new_old(capsys, monkeypatch) -> str:
 
 
 def _migrations(st, tid: str) -> int:
-    return sum(1 for e in run.read(st, tid).events if e.draft.kind == run.DEFINITION_MIGRATED)
+    return sum(1 for e in run.read(st, tid).events if e.draft.kind == run_view.DEFINITION_MIGRATED)
 
 
 def _ids(st, tid: str) -> list[str]:
@@ -140,6 +140,6 @@ def test_a_finished_cleanup_or_a_started_deploy_is_not_migrated(repo, st, capsys
 
 def test_a_migration_event_with_other_stages_is_ignored():
     snap = _old_snapshot()
-    draft = run.model.EventDraft(run.DEFINITION_MIGRATED, run.ACTOR, None, payload={"order": ["知らない工程"]}, rev=1)
+    draft = run.model.EventDraft(run_view.DEFINITION_MIGRATED, run.ACTOR, None, payload={"order": ["知らない工程"]}, rev=1)
     bad = run.model.Event(1, datetime.now(timezone.utc), draft)
-    assert run._migrated_order(snap, [bad]) == snap
+    assert run_view.migrated_order(snap, [bad]) == snap

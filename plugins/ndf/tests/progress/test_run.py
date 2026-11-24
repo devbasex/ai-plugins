@@ -21,7 +21,7 @@ from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import route
-from ndf.progress import command, definition, gate, invoke, model, records, run, stages, store
+from ndf.progress import command, definition, gate, invoke, issue_values, model, records, run, stages, store
 
 ISSUE = 3092
 
@@ -854,7 +854,7 @@ def test_values_that_cannot_be_cleared_stop_as_precondition_before_started(repo,
     def fail(state_dirs):
         raise PermissionError("読み取り専用")
 
-    monkeypatch.setattr(invoke, "clear_values", fail)
+    monkeypatch.setattr(issue_values, "clear_values", fail)
     tid = _new(capsys)
     out = run.advance(st, tid, repo, env.env)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
@@ -896,7 +896,7 @@ def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs
     for d in dirs:
         invoke.write_values(d, "古い", {}, {}, True)
     # 課題のコピーも消す。残すと新しい試行が GitHub で直した題・本文を使わない
-    copies = [dirs[0] / invoke.ISSUE_BODY_FILE.format(number=ISSUE), dirs[0] / invoke.ISSUE_TITLE_FILE.format(number=ISSUE)]
+    copies = [dirs[0] / issue_values.ISSUE_BODY_FILE.format(number=ISSUE), dirs[0] / issue_values.ISSUE_TITLE_FILE.format(number=ISSUE)]
     for c in copies:
         c.write_text("{}", encoding="utf-8")
     prepared = []

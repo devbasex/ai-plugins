@@ -24,7 +24,7 @@ import hashlib
 import json
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -35,18 +35,24 @@ from ndf import process_group
 from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
-from ndf.progress import command, definition, invoke, model, stages, store
+from ndf.progress import command, definition, invoke, issue_values, model, stages, store
 from ndf.progress.records import Records, github_records, sync_records
+from ndf.progress.run_view import (
+    ACTOR,
+    ANSWERED,
+    CONDUCTOR,
+    FAILED,
+    FINISHED,
+    ORGANIZER,
+    STARTED,
+    STEP_EVENT,
+    View,
+    migrated_order,
+    migration_drafts,
+    payload_of,
+)
 
 TOOL = __package__.rpartition(".")[2]
-ACTOR = invoke.ACTOR
-# 回答の事象を書く書き手（progress.json の actors のキー。回答した者は payload の by に分けて残す）
-CONDUCTOR, ORGANIZER = "conductor", "organizer"
-
-
-def _event(kind: str) -> str:
-    """進行の事象の種類（コントラクト `workflow/progress.json` のスプリントの行）。表に無ければ import の時点で `KeyError`。"""
-    return model.rules()[("sprint", kind)].kind
 
 
 def _answer(word: str) -> str:
@@ -54,18 +60,6 @@ def _answer(word: str) -> str:
     return str(facts.row(result.ANSWERS, word)["id"])
 
 
-# 事象の種類。行を終える事象の種類は、終えた行の状態とステップの記録の status にも使う
-STARTED = _event("started")
-STEP_EVENT = _event("step_recorded")
-ANSWERED = _event("answered")
-FAILED = _event("failed")
-FINISHED = _event("finished")
-# 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
-RETRY_EVENT = _event("retry")
-# 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
-DEFINITION_MIGRATED = _event("definition_migrated")
-# 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
-CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
 # 回答の語（承認・変更要求・承認しない）
 APPROVED = invoke.APPROVED
 REQUEST_CHANGES = _answer("request_changes")
@@ -81,91 +75,16 @@ LAUNCH_FILE = "launched.json"
 # --- ステートマシンの読み書き ---------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class View:
-    """1 つのトランザクションで読んだステートマシン（最新の改訂・定義・事象）。"""
-
-    machine_id: str
-    rev: int
-    snap: stages.Snapshot
-    doc: dict[str, Any]
-    events: list[model.Event]
-
-    @property
-    def rows(self) -> dict[str, model.RowState]:
-        return model.fold(self.events, self.rev)
-
-    @property
-    def whole(self) -> Optional[str]:
-        return model.table_state("sprint", self.events)
-
-    def row_events(self, stage: str) -> list[model.Event]:
-        return [e for e in self.events if e.draft.row_key == stage and e.draft.rev == self.rev]
-
-    def context(self) -> dict[str, Any]:
-        """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-        return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
-
-
-def payload_of(ev: model.Event) -> dict[str, Any]:
-    """事象の payload。無ければ空。"""
-    return ev.draft.payload if ev.draft.payload is not None else {}
-
-
 def view(conn: Any, machine_id: str) -> View:
     rev, raw, snap, events = command.read_current(conn, machine_id)
-    return View(machine_id, rev, _migrated_order(snap, events), raw, events)
-
-
-def _migrated_order(snap: stages.Snapshot, events: Sequence[model.Event]) -> stages.Snapshot:
-    """事象 `definition_migrated` があれば、その工程の順に並べ替えた写し。無い・工程の名前の集合が合わなければ写しのまま。
-
-    写しそのもの（`sha256`・`definition_version`）は書き換えない（写しの由来を残す）。
-    """
-    held = next((payload_of(e).get("order") for e in events if e.draft.kind == DEFINITION_MIGRATED), None)
-    by_name = {s.name: s for s in snap.stages}
-    if not isinstance(held, list) or sorted(map(str, held)) != sorted(by_name) or len(held) != len(by_name):
-        return snap
-    return replace(snap, stages=tuple(by_name[str(n)] for n in held))
-
-
-def _new_order(v: View) -> Optional[list[str]]:
-    """古い順（クリーンアップ → デプロイ）の写しで、デプロイが始まっておらず、クリーンアップが終わっていなければ、
-    クリーンアップをデプロイの直後へ移した工程の名前の並び。移さないなら None。"""
-    if any(e.draft.kind == DEFINITION_MIGRATED for e in v.events):
-        return None
-    ids = [s.id for s in v.snap.stages]
-    if CLEANUP_STAGE_ID not in ids or DEPLOY_STAGE_ID not in ids or ids.index(CLEANUP_STAGE_ID) > ids.index(DEPLOY_STAGE_ID):
-        return None
-    cleanup, deploy = (v.snap.stages[ids.index(i)] for i in (CLEANUP_STAGE_ID, DEPLOY_STAGE_ID))
-    if v.row_events(deploy.name) and any(e.draft.kind == STARTED for e in v.row_events(deploy.name)):
-        return None
-    row = v.rows.get(cleanup.name)
-    if row is not None and row.state == FINISHED:
-        return None
-    names = [s.name for s in v.snap.stages if s.name != cleanup.name]
-    names.insert(names.index(deploy.name) + 1, cleanup.name)
-    return names
+    return View(machine_id, rev, migrated_order(snap, events), raw, events)
 
 
 def migrate_definition(st: store.Store, machine_id: str) -> Optional[int]:
     """このリリースの前に始めた状態機械の写しで、クリーンアップをデプロイの直後へ移す事象を 1 回だけ書き、その番号を返す
-    （#4409 の決定 6）。クリーンアップが開いた PR で止まった（`precondition` の失敗）状態機械も移す。移さなければ None。"""
-
-    def build(v: View) -> list[model.EventDraft]:
-        order = _new_order(v)
-        if order is None:
-            return []
-        moved = model.EventDraft(DEFINITION_MIGRATED, ACTOR, None, reason="クリーンアップをデプロイの後へ移した", payload={"order": order}, rev=v.rev)
-        cleanup = next(s.name for s in v.snap.stages if s.id == CLEANUP_STAGE_ID)
-        row = v.rows.get(cleanup)
-        if row is None or row.state != FAILED:
-            return [moved]
-        # 開いた PR で止まったクリーンアップは、デプロイの後に流し直すまで結果を使わない（失敗を待ちへ戻す）
-        why = "クリーンアップをデプロイの後へ移したので、デプロイの後に流し直す"
-        return [moved, model.EventDraft(RETRY_EVENT, CONDUCTOR, cleanup, reason=why, rev=v.rev)]
-
-    seqs = append(st, machine_id, build)
+    （#4409 の決定 6。下書きは `run_view.migration_drafts`）。クリーンアップが開いた PR で止まった（`precondition` の失敗）
+    状態機械も移す。移さなければ None。"""
+    seqs = append(st, machine_id, migration_drafts)
     return seqs[0] if seqs else None
 
 
@@ -590,7 +509,7 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     2 つ目以降のプランのステップは前のステップが作った値を差し込みに使うので、ここでは組まず、流すときに `plan_path` が組む。
     """
     try:
-        invoke.clear_values(step_dir(d, v, s, st) for st in s.steps)
+        issue_values.clear_values(step_dir(d, v, s, st) for st in s.steps)
     except OSError as exc:
         return result.stopped(invoke.PLAN, "precondition", f"前の試行の値を保存先から消せない: {exc}")
     prog = step_progress(v, s.name)
@@ -923,7 +842,7 @@ def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
         d.write(_failed(s, None, v.rev, "bad_report", f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"))
         return
     draft, warnings = stages.outputs_draft(s, v.rev, merged, ACTOR)
-    done = model.EventDraft("finished", ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
+    done = model.EventDraft(FINISHED, ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
     d.write(*([draft] if draft is not None else []), done)
     d.warnings.extend(warnings)
 

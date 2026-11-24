@@ -28,7 +28,7 @@ from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, route
 from ndf.core.plan import model, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, AwaitAnswer, Outcome, RunStep
-from ndf.progress import command, gate, invoke, run, store
+from ndf.progress import command, gate, invoke, issue_values, run, store
 from ndf.progress.gate import asking
 
 ISSUE = 4409
@@ -79,7 +79,7 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "merge")
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
 
     class FakeGit:
         def __init__(self, *_: object) -> None:

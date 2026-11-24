@@ -20,7 +20,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, invoke, model, stages
+from ndf.progress import definition, invoke, issue_values, model, stages
 
 
 # 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
@@ -266,7 +266,7 @@ def test_template_values_missing_from_every_source_stop_as_precondition_by_name(
     # 課題を読む前に止まるので、課題の出所の差し込み（title・body_file・issue）はまだ挙げない（PR 4289 の r2-1）
     repo = _sprint_repo(tmp_path)
     sprint_fixture.without_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
@@ -289,7 +289,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -311,7 +311,7 @@ def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tm
     # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     run = _stage_run_of("impl", repo, [4, 3])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
@@ -326,7 +326,7 @@ def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeyp
     repo = _sprint_repo(tmp_path, PROJECT)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("完了判定は課題の題と本文を読まない"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda *a: pytest.fail("完了判定は課題の題と本文を読まない"))
     work = tmp_path / "w"
     work.mkdir()
     argv = invoke.plan_argv(_stage_run_of("quality-gates", repo, [1, 2]), work, None, repo)
@@ -339,7 +339,7 @@ def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeyp
 def test_template_values_fill_the_title_and_the_body_file_from_the_issue(tmp_path, monkeypatch, name):
     _, text, _, work = _filled_plan(tmp_path, monkeypatch, name)
     assert "#3092 の題" in text
-    body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
+    body = work / issue_values.ISSUE_BODY_FILE.format(number=3092)
     assert body.read_text() == "#3092 の本文" and str(body) in text
 
 
@@ -388,7 +388,7 @@ def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path,
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
@@ -563,7 +563,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: None)
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: None)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -571,17 +571,17 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     named = {i["key"]: i["source"] for i in got.report["items"]}
     assert named["title"] == invoke.FROM_UNTRUSTED_ISSUE and named["body_file"] == invoke.FROM_UNTRUSTED_ISSUE
-    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+    assert not (work / issue_values.ISSUE_BODY_FILE.format(number=3092)).exists()
 
 
 def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
     # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue をコピーする
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
-    got = invoke._issue_values(_stage_run_of("impl", repo, [4211, 3908]), work, repo)
-    body = work / invoke.ISSUE_BODY_FILE.format(number=3908)
+    got = issue_values.issue_values(_stage_run_of("impl", repo, [4211, 3908]).inputs, work, repo)
+    body = work / issue_values.ISSUE_BODY_FILE.format(number=3908)
     assert got == {"title": "#3908 の題", "body_file": str(body), "issue": "3908"}
     # 残りの課題（#4211）の閉鎖参照は足さない。設計の PR にも同じ本文が渡り、課題を閉じるのはスプリントの PR の
     # 本文と「スプリントを閉じる」である（`/ndf:pr`。#3908 の r2-2・r2-3）
@@ -609,12 +609,12 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
         reads.append(n)
         return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
 
-    monkeypatch.setattr(invoke, "issue_text", read)
+    monkeypatch.setattr(issue_values, "issue_text", read)
     work = tmp_path / "w"
     work.mkdir()
     run = _stage_run_of("impl", repo, [3092])
-    first = invoke._issue_values(run, work, repo)
-    again = invoke._issue_values(run, work, repo)
+    first = issue_values.issue_values(run.inputs, work, repo)
+    again = issue_values.issue_values(run.inputs, work, repo)
     assert reads == [3092] and first == again and first["title"] == "#3092 の題（1 回目）"
     assert Path(first["body_file"]).read_text() == "#3092 の本文（1 回目）"
 
@@ -638,14 +638,14 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
     def fail(location, n):
         raise error
 
-    monkeypatch.setattr(invoke, "issue_text", fail)
+    monkeypatch.setattr(issue_values, "issue_text", fail)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == kind
     assert str(error) in got.cause["detail"]
-    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+    assert not (work / issue_values.ISSUE_BODY_FILE.format(number=3092)).exists()
 
 
 def test_the_issue_text_is_withheld_unless_the_author_is_trusted(monkeypatch):
@@ -665,9 +665,9 @@ def test_the_issue_text_is_withheld_unless_the_author_is_trusted(monkeypatch):
     monkeypatch.setattr(invoke.github, "GitHub", Hub)
     monkeypatch.setattr(invoke.github, "client", lambda: None)
     monkeypatch.setattr(invoke.git.Git, "remote_repo", lambda self: "o/r")
-    assert invoke.issue_text(Path("."), 1) is None
+    assert issue_values.issue_text(Path("."), 1) is None
     authored = github.Authored("owner", "OWNER", "本文")
-    assert invoke.issue_text(Path("."), 1) == ("題", "本文")
+    assert issue_values.issue_text(Path("."), 1) == ("題", "本文")
 
 
 def test_every_template_value_has_one_source():
