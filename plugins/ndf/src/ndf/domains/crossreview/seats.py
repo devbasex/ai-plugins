@@ -66,8 +66,9 @@ def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequ
     return _SeatResult(None, denied) if denied else _SeatResult(participants.findings_of(answer.text))
 
 
-def _unread_hint(seat: str, cause: str, err: Path) -> str:
-    """読めなかった席 1 つの理由と直し方（precondition の詳細の 1 行）。直し方は席のランタイムで引く。"""
+def _unread_hint(seat: str, cause: str, err: str) -> str:
+    """読めなかった席 1 つの理由と直し方の 1 行。直し方は席のランタイムで引く。`err` は標準エラーのログの示し方
+    （PR のコメントに載る注意にはファイル名、手元の precondition の詳細には絶対パス。PR 4461 の r3-1）。"""
     row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
     if cause.startswith(DENIED_READ):
         fix = DENIED_FIX
@@ -82,10 +83,12 @@ def _unread_hint(seat: str, cause: str, err: Path) -> str:
 
 
 class Unread(NamedTuple):
-    """結果の無い席 1 つの直し方（precondition の詳細の行）と理由（埋めた席の `reason`）。"""
+    """結果の無い席 1 つの直し方と理由（埋めた席の `reason`）。`hint` は PR のコメントに載る注意の行で、標準エラーのログを
+    ファイル名だけで示す。`local` は手元の precondition の詳細の行で、ログを絶対パスで示す（PR 4461 の r3-1）。"""
 
     hint: str
     cause: str
+    local: str
 
 
 def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path) -> agents.Launch:
@@ -125,7 +128,8 @@ def launch_reviewers(
                 cause = f"{status.state}: {status.detail}"
             warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{cause}）"
             run.note(round_no, seat, f"回答無し{again}（{kind}）", warning)
-            unread[seat] = Unread(_unread_hint(seat, cause, spec.paths.err), cause)
+            err = spec.paths.err
+            unread[seat] = Unread(_unread_hint(seat, cause, err.name), cause, _unread_hint(seat, cause, str(err)))
             continue
         run.note(round_no, seat, f"指摘 {len(found)} 件{again}")
         raised += [{**f, "by": seat} for f in found]

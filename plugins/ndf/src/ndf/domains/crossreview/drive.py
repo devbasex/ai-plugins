@@ -822,8 +822,10 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     got = _review_round(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)), launch)
     raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
     if got.silent:
-        # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
-        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
+        # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く。
+        # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
+        local = [u.local for u in got.unread.values()]
+        raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
     _detach_revived(run)
