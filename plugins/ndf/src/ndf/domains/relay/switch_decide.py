@@ -285,7 +285,7 @@ def _ended(state: SectionState) -> Step:
         return Step("spin", f"子が終了コード {state.child_exit} で終わった。{SPIN_REASON}")
     if state.child_exit == 0:
         return Step("finish", "子が次のセグメントのブロックを書かずに終わった")
-    return _restart_or_stop(state, f"子が終了コード {state.child_exit} で終わった")
+    return _spin_or(state, Step("restart", f"子が終了コード {state.child_exit} で終わった"))
 
 
 def _context_over(state: SectionState) -> bool:
@@ -309,9 +309,5 @@ def _alive(state: SectionState, quiet: bool) -> Step:
     if stalled and found is not None and found.monitors:
         return Step("wait_background", MONITOR_WAIT.format(**found._asdict()))
     if stalled:
-        return _restart_or_stop(state, f"子の出力が {state.idle_seconds:g} 秒止まっている", busy="none_running")
+        return _spin_or(state, Step("restart", f"子の出力が {state.idle_seconds:g} 秒止まっている", busy="none_running"))
     return _wait_background(None) if ask else Step("active", ACTIVE)
-
-
-def _restart_or_stop(state: SectionState, why: str, busy: Optional[str] = None) -> Step:
-    return _spin_or(state, Step("restart", why, busy=busy))
