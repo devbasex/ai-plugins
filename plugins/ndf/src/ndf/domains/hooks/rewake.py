@@ -85,14 +85,11 @@ def run(
 
 def _target(payload: Mapping[str, Any], environ: Mapping[str, str], started: float) -> Optional[Target]:
     """ラッパーが登録を渡した中継の子の会話の Stop なら `Target`。ほか（入れ子の claude・登録の無い起動）は None。"""
-    if not signals.rewake_registered(environ):
-        return None
-    directory, launch = signals.relay_dir(environ), signals.relay_launch(environ)
     session, path = payload.get("session_id"), payload.get("transcript_path")
-    if directory is None or launch is None or not isinstance(path, str) or not path:
+    found = signals.rewake_child(environ, session)
+    if found is None or not isinstance(path, str) or not path:
         return None
-    if session != signals.relay_session(environ) or signals.keep_path(directory, session) is None:
-        return None
+    directory, launch = found
     tasks = payload.get("background_tasks")
     works, monitors = relay_busy.work_count(tasks, relay_busy.table_params()) if isinstance(tasks, list) else (0, 0)
     last = payload.get("last_assistant_message")

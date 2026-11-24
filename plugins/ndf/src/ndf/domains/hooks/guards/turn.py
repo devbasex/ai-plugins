@@ -33,13 +33,7 @@ def _relayed(ctx, svc) -> bool:
 
 def _rewake_child(ctx) -> Any:
     """起床の状態を書いてよい中継の子なら（保存先, 起動の ID）。ほかは None（登録を渡していない子はファイルを見ずに None）。"""
-    if not signals.rewake_registered(ctx.env):
-        return None
-    directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
-    session = ctx.session_id
-    if directory is None or launch is None or session != signals.relay_session(ctx.env):
-        return None
-    return (directory, launch) if signals.keep_path(directory, session) is not None else None
+    return signals.rewake_child(ctx.env, ctx.session_id)
 
 
 def _keep_turn(ctx) -> bool:

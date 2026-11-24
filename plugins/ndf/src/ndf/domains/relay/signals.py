@@ -131,6 +131,16 @@ def relay_session(env: Mapping[str, str]) -> Optional[str]:
     return env.get(identity.env_name("relay-session")) or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う
 
 
+def rewake_child(env: Mapping[str, str], session_id: Any) -> Optional[tuple[Path, str]]:
+    """起床の状態を書いてよい中継の子なら（保存先, 起動の ID）。ほかは None（登録を渡していない子はファイルを見ずに None）。"""
+    if not rewake_registered(env):
+        return None
+    directory, launch = relay_dir(env), relay_launch(env)
+    if directory is None or launch is None or session_id != relay_session(env):
+        return None
+    return (directory, launch) if keep_path(directory, session_id) is not None else None
+
+
 def set_launch(directory: Path, launch: Optional[str], rewake: bool = False, claude_version: Optional[str] = None) -> None:
     """今の起動の ID を記録する。None は「今の起動が無い」で、止めた子の hook が書く前に外す（`question.json.lock` を持って呼ぶ）。
 
