@@ -99,6 +99,18 @@ def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path) -> agents.Lau
     return participants.reading_launch(seat, SEAT_SYSTEM, run.cfg.worktree, prompt, stem, readable=readable)
 
 
+def _unread_cause(sandbox: Optional[str], got: _SeatResult, status: agents.AgentStatus) -> tuple[str, str]:
+    """結果の無い席の過程に載せる種類と、注意に載せる理由の組。サンドボックスの失敗・差分のファイルの読み取りの拒否・
+    完了でない状態の順に決める。"""
+    if sandbox is not None:
+        return "sandbox", sandbox
+    if got.denied:
+        # 注意は PR のコメントに載るので、差分のファイルの名前だけを書く。絶対パスは手元の結果 JSON の過程にだけ残す（PR 4461 の r2-1）
+        cause = f"{DENIED_READ}: " + " / ".join(p.name for p in got.denied)
+        return f"{DENIED_READ}: " + " / ".join(str(p) for p in got.denied), cause
+    return str(status.state), f"{status.state}: {status.detail}"
+
+
 def launch_reviewers(
     run: SeatRun, round_no: int, prompts: Mapping[str, str], required: Sequence[Path], launch: Launcher, suffix: str = ""
 ) -> tuple[list[dict[str, Any]], dict[str, Unread]]:
@@ -117,15 +129,7 @@ def launch_reviewers(
         got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required)
         found = got.findings
         if found is None:
-            kind = "sandbox" if sandbox is not None else DENIED_READ if got.denied else str(status.state)
-            if sandbox is not None:
-                cause = sandbox
-            elif got.denied:
-                # 注意は PR のコメントに載るので、差分のファイルの名前だけを書く。絶対パスは手元の結果 JSON の過程にだけ残す（PR 4461 の r2-1）
-                cause = f"{DENIED_READ}: " + " / ".join(p.name for p in got.denied)
-                kind += ": " + " / ".join(str(p) for p in got.denied)
-            else:
-                cause = f"{status.state}: {status.detail}"
+            kind, cause = _unread_cause(sandbox, got, status)
             warning = f"round {round_no} の相手役 {seat} が差分を読めなかった{again}（{cause}）"
             run.note(round_no, seat, f"回答無し{again}（{kind}）", warning)
             hint, local = _unread_hint(seat, cause, spec.paths.err)
