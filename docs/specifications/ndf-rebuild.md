@@ -341,7 +341,7 @@ CLI の起動形は別で、hook の経路に合わせない。
 | SessionEnd・Notification・StopFailure | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 0 字 |
 | SessionEnd（Codex） | 300 ms | 2 秒 | 0.5 秒 | 3 秒 | 0 字 |
 
-値は `contracts/limits/` の `hook.budget.<イベント>`（ランタイムで違えば `.<ランタイム>`）にある。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
+値は `contracts/limits/` の `hook.budget.<予算のキー>` にある。キーは契約表 `contracts/hooks/runtimes.json` のイベントが持ち、ランタイムで予算が違うイベントは別のキー（`stop.codex` など）を指す。UserPromptSubmit と Stop の注入の上限は、人のいない実行の案内が収まる字数である。部品の上限は `締め切り − 余白` 以下にする。鍵をまたぐ順序は JSON Schema で書けないため `check_budget` が確かめ、SessionStart では 1 行の案内を出して続ける。注入の上限は Claude Code が会話へ入れる上限 10,000 字より小さい。
 
 ### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは宣言した guard だけにする
 

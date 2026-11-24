@@ -19,9 +19,9 @@ name: Script structure
 # script-structure-check の最後の手順は、NDF（plugins/ndf/）だけを見る検査（plugins/ndf/bin/ndf check。規則は
 # plugins/ndf/src/ndf/checks/README.md）と、lock・plugin.json・エントリポイントの構文・選べる値の検査を打つ。入れ替え（#3304）の
 # 前は ndf-next-checks.yml がパスで絞って打っていた。Pull Request では同じ形に、差分が NDF の検査の入力（NDF_PATHS）に
-# 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。規則 toolchain はワークフローを読むため、
-# 差分が NDF_PATHS に当たらず .github/workflows にだけ当たる PR では、ndf check を --only toolchain --only budget-ci-jobs
-# （CI のジョブの数の上限）で打つ。差分は 1 回だけ取る。
+# 当たるときだけ打つ（文書だけ・根の scripts/ だけの PR でプラグインの環境を作らない）。差分が NDF_PATHS に当たらず、設計レビューの
+# 項目の表（REVIEW_ITEMS_PATHS）かワークフロー（TOOLCHAIN_PATHS）に当たる PR では、当たった入力を読む規則だけを --only に並べて
+# ndf check を 1 回打つ。差分は 1 回だけ取る。
 # merge queue と push では常にすべてを打つ
 #
 # lock と定義の一致の検査（uv lock --check）は、uv のプロジェクトごと（根・plugins/ndf・playwright-kit）に
@@ -67,8 +67,7 @@ env:
   NDF_PATHS: plugins/ndf .ndf docs/glossary/glossary.json scripts/ndf-choices.json scripts/check-ndf-choices.py .github/workflows/script-structure.yml
   # ndf check の規則 review-items だけが読む表（設計レビューの項目の表と 11.x の対応表）。これだけに当たる Pull Request では、その規則だけを打つ
   REVIEW_ITEMS_PATHS: issues/issue-1142-design-review-routing.md issues/issue-3388-design-routing.md
-  # 規則 toolchain と CI のジョブの数の上限だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここにだけ当たれば、
-  # ndf check をこの 2 つに絞る
+  # 規則 toolchain と CI のジョブの数の上限だけの入力（ワークフロー）。差分が NDF_PATHS に当たらずここに当たれば、この 2 つを打つ
   TOOLCHAIN_PATHS: .github/workflows
 
 jobs:
@@ -175,14 +174,14 @@ jobs:
         if: steps.scope.outputs.ndf == 'true'
         # ラチェットの基準（plugins/ndf/src/ndf/checks/ratchet.json）を、変更の前（HEAD^1）の基準より上げていないかも見る
         run: plugins/ndf/bin/ndf check --ratchet-base HEAD^1
-      # 表だけの差分では全体の検査を打たず、行き先と生成済みの review_items の照合だけを打つ（全体の検査は同じ規則を含む）
-      - name: Check the design review items
-        if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.review_items == 'true'
-        run: plugins/ndf/bin/ndf check --only review-items
-      # NDF の入力が変わらずワークフローだけが変わった PR は、ワークフローを読む規則 toolchain と CI のジョブの数の上限だけを打つ
-      - name: Check the toolchain pins and the job count of the workflows
-        if: steps.scope.outputs.ndf != 'true' && steps.scope.outputs.toolchain == 'true'
-        run: plugins/ndf/bin/ndf check --only toolchain --only budget-ci-jobs
+      # NDF の入力が変わらない PR は、当たった入力を読む規則だけを 1 回の起動で打つ（全体の検査は同じ規則を含む）。
+      # 設計レビューの項目の表: 行き先と生成済みの review_items の照合。ワークフロー: 規則 toolchain と CI のジョブの数の上限
+      - name: Check only the rules whose inputs changed
+        if: steps.scope.outputs.ndf != 'true' && (steps.scope.outputs.review_items == 'true' || steps.scope.outputs.toolchain == 'true')
+        run: >-
+          plugins/ndf/bin/ndf check
+          ${{ steps.scope.outputs.review_items == 'true' && '--only review-items' || '' }}
+          ${{ steps.scope.outputs.toolchain == 'true' && '--only toolchain --only budget-ci-jobs' || '' }}
       # 定義と lock の一致（IG5）。plugins/ndf の分は入れ替えの前は ndf-next-checks.yml が持っていた（#3304 で移した）
       - name: Check that the root lock matches its declaration
         if: steps.scope.outputs.lock_root == 'true'

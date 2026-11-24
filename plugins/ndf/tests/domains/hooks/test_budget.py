@@ -251,10 +251,10 @@ def test_one_hook_run_reads_only_the_policies_it_uses(tmp_path, monkeypatch, rea
 
 @pytest.mark.parametrize(
     ("runtime", "checked"),
-    [("codex", ["hook.budget.stop.codex.json"]), ("claude", ["hook.budget.stop.claude.json", "hook.budget.stop.json"])],
+    [("codex", ["hook.budget.stop.codex.json"]), ("claude", ["hook.budget.stop.json"])],
 )
-def test_budget_lookup_tries_each_policy_file_once(monkeypatch, runtime, checked):
-    """予算の選択と読み込みが、方針のファイルの有無を照会せず、1 回の読みの結果を分け合う。"""
+def test_budget_lookup_reads_only_the_policy_file_it_uses(monkeypatch, runtime, checked):
+    """予算の選択と読み込みが、方針のファイルの有無を照会せず、使う方針のファイルだけを 1 回読む。"""
     tried: list[str] = []
     stats: list[str] = []
     real_read, real_is_file = tables._read_json, Path.is_file

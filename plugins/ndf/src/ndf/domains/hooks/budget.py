@@ -1,6 +1,7 @@
 """hook の予算の読み手と、上限の順序の検査（#3345 の決定 90・IH3）。
 
-予算は上限の設定の方針 `hook.budget.<イベント>`（ランタイムで違うイベントは `hook.budget.<イベント>.<ランタイム>` が先）にある。
+予算は上限の設定の方針 `hook.budget.<予算のキー>` にある。キーはランタイムのコントラクト表のイベントが持ち、ランタイムで予算が違う
+イベントは別のキー（`stop` と `stop.codex`）を指す（方針のファイルの有無を試して選ばない）。
 使う方針のファイルだけを読む（hook の起動のたびに全件を読まない）。
 検査はキーをまたぐ順序を見る（JSON Schema では書けない）:
 
@@ -40,14 +41,12 @@ class Budget:
 
 
 def _budget_policy(runtime: str, event: str) -> Optional[tuple[str, Optional[dict[str, Any]]]]:
-    """イベントの予算の方針の名前と中身（ランタイム固有の方針が先）。コントラクト表に無いイベントは None。"""
+    """イベントの予算の方針の名前と中身。コントラクト表に無いイベントは None。"""
     spec = tables.event_spec(runtime, event)
     if spec is None:
         return None
-    specific = f"hook.budget.{spec['budget']}.{runtime}"
-    common = f"hook.budget.{spec['budget']}"
-    own = tables.policy(specific)
-    return (specific, own) if own is not None else (common, tables.policy(common))
+    name = f"hook.budget.{spec['budget']}"
+    return name, tables.policy(name)
 
 
 def budget_for(runtime: str, event: str) -> Optional[Budget]:

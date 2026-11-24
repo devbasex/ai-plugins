@@ -128,7 +128,8 @@ ai-plugins の値を利用先のリポジトリへ持ち込まないためであ
 ### 規則の当て方
 
 - 4 つの規則は既にある必須チェック `script-structure-check` の `ndf check` の中で走る。必須チェックは増えない
-- 差分が NDF の検査の入力に当たらずワークフローだけに当たる Pull Request では、`ndf check --only toolchain --only budget-ci-jobs` を打つ
+- 差分が NDF の検査の入力に当たらずワークフローか設計レビューの項目の表に当たる Pull Request では、`ndf check` を 1 回だけ打つ。
+  ワークフローに当たれば `--only toolchain --only budget-ci-jobs`、表に当たれば `--only review-items` を並べる
 - 途中の規則が止まっても、止まる前の指摘は結果 JSON の `items` に残り、`config_broken`（2）で終わる
 
 ### 依存の用意（`plugins/ndf/bin/ndf`）
