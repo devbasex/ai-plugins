@@ -11,7 +11,7 @@ import pytest
 
 from ndf.adapters import publish
 from ndf.adapters.github import PUBLIC, GitHubError
-from ndf.domains.crossreview import cli, drive, report_decide, store
+from ndf.domains.crossreview import cli, drive, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.prior_decide import Remark
 from ndf.domains.records import jsonl, mvv
@@ -137,7 +137,7 @@ def test_issue_4090_7_unreachable_github_hides_the_free_text_and_the_records_are
     """公開範囲を照会できない起動も、収束した結果を返す。自由記述は結果で固定の文になり、記録には書かない。照会できる打ち直しが記録を埋める。"""
     seen = Visibility(GitHubError(f"{LEAK} を読めない", unreached=True))
     got = review.run(seen)
-    out, hidden = got["outputs"]["mvv"], report_decide.WITHHELD
+    out, hidden = got["outputs"]["mvv"], publish.WITHHELD
     assert review.asked == (1, [])
     assert [(d["id"], d["reason"]) for d in out["disputed"]] == [("r1-1", hidden)]
     assert [(r["id"], r["item"], r["text"]) for r in out["redlines"]] == [("r1-2", "P1", hidden)]

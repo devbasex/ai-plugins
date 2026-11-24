@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
-from ndf.adapters import agents, git, run_log
+from ndf.adapters import agents, git, publish, run_log
 from ndf.contracts import facts, internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
@@ -644,7 +644,7 @@ def _mvv_results(run: _Run) -> Optional[dict[str, Any]]:
     snap = criteria_decide.approved(run.snapshot)
     if snap is None:
         return None
-    rows, seen = list(run.journal.rows.values()), report_decide.once(run.clean)
+    rows, seen = list(run.journal.rows.values()), publish.once(run.clean)
     out = report_decide.mvv_outputs(rows, snap, run.sent, seen)
     if seen.failure is not None:
         run.warnings.append(f"MVV の結果の自由記述を伏せた（参照先の公開範囲を照会できない）: {seen.failure}")

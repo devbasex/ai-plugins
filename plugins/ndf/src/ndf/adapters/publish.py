@@ -17,7 +17,7 @@ from __future__ import annotations
 import getpass
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -220,6 +220,46 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
             if n:
                 dropped[kind] = n
     return Scrubbed(text, dropped)
+
+
+# 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
+WITHHELD = "（参照先の公開範囲を確かめられず伏せた）"
+
+
+def _query_failure(exc: Exception) -> str:
+    """伏せる処理の失敗の原因。例外の文は、照会した先のリポジトリの名前を含みうるので使わない（GitHub の失敗は
+    `adapters.github.GitHubError` の欄だけから決める）。"""
+    if not all(hasattr(exc, k) for k in ("quota", "unreached", "status")):
+        return f"照会の失敗（{type(exc).__name__}）"
+    if exc.quota:
+        return "レート制限"
+    return "通信の障害" if exc.unreached else f"GitHub が照会を断った（HTTP {exc.status}）"
+
+
+class Once:
+    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ。失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因
+    （無ければ None）。"""
+
+    def __init__(self, clean: Callable[[Sequence[str]], Sequence[str]]) -> None:
+        self._clean = clean
+        self._done: dict[str, str] = {}
+        self.failure: Optional[str] = None
+        # 失敗した例外（手元の診断の記録へ渡す。結果や PR へ載せるのは `failure` だけ）
+        self.error: Optional[Exception] = None
+
+    def __call__(self, texts: Sequence[str]) -> list[str]:
+        new = [t for t in dict.fromkeys(texts) if t not in self._done]
+        if new and self.failure is None:
+            try:
+                self._done |= dict(zip(new, self._clean(new), strict=True))
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 照会できなくてもレビューの結果は返し、自由記述を伏せる
+                self.failure, self.error = _query_failure(exc), exc
+        return [WITHHELD if self.failure is not None else self._done[t] for t in texts]
+
+
+def once(clean: Callable[[Sequence[str]], Sequence[str]]) -> Once:
+    """レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み。"""
+    return Once(clean)
 
 
 @dataclass
