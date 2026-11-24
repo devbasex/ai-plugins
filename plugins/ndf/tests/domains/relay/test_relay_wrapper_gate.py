@@ -21,7 +21,7 @@ from ndf.contracts import limits
 from ndf.domains.relay import account_choice, account_dir, accounts, launch_inputs, launch_target, registry, stop_signal, wrapper
 from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.account_decide import Usage
-from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, put_usages, register, rows_of
+from relay_children import LIMIT_LINE, FakeChild, Spawner, clock_ticks, make_settings, no_work, put_usages, register, rows_of
 
 
 def _run(tmp_path, children, prepare=None, markers=None, spawner=None, **changes):
@@ -214,7 +214,7 @@ def test_the_same_conversation_does_not_move_to_the_default_login(tmp_path, monk
     calls = _fail_after_first(monkeypatch)
     if kind == "handover":
         monkeypatch.setattr(wrapper.observe, "context_tokens", lambda path, size: 900_000)
-        first = FakeChild([b"working\r\n"], None)
+        first = no_work(FakeChild([b"working\r\n"], None))
     else:
         first = FakeChild([], 1)
     ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], lambda state: accounts.use(state, "work1"))

@@ -64,16 +64,15 @@ def test_question_and_locations_from_the_environment(tmp_path):
     assert signals.has_question(tmp_path)
     assert json.loads((tmp_path / signals.QUESTION_FILE).read_text(encoding="utf-8"))["questions"] == [{"question": "q"}]
     assert signals.relay_dir({}) is None and signals.relay_dir({"NDF_RELAY_DIR": str(tmp_path / "none")}) is None
-    assert signals.relay_dir(signals.launch_env(tmp_path, "L1")) == tmp_path
+    assert signals.relay_dir(signals.launch_env(tmp_path, "L1", "s1")) == tmp_path
     assert signals.organizer_question_path({"NDF_ORGANIZER_DIR": "/o", "NDF_ORGANIZER_LANE": "l1"}) == Path("/o/questions/l1.json")
     assert signals.organizer_question_path({"NDF_ORGANIZER_DIR": "/o", "NDF_ORGANIZER_LANE": "../x"}) is None
 
 
 def test_launch_env_passes_the_launch_id_and_the_hook_reads_it(tmp_path):
     # 子へ起動の ID を渡し、hook が環境から読む（#3814）
-    env = signals.launch_env(tmp_path, "L1")
-    assert env == {"NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_LAUNCH": "L1"}
-    assert signals.relay_launch(env) == "L1"
+    env = signals.launch_env(tmp_path, "L1", "s1")
+    assert (signals.relay_dir(env), signals.relay_launch(env), signals.relay_session(env)) == (tmp_path, "L1", "s1")
     assert signals.relay_launch({"NDF_RELAY_DIR": str(tmp_path)}) is None
     assert signals.relay_launch({"NDF_RELAY_LAUNCH": ""}) is None
 

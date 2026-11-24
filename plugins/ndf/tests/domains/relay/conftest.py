@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from ndf.domains.relay import account_dir
+from ndf.domains.relay import account_dir, wrapper
+from relay_children import Patrol
 
 
 def _hold_lock(path: Path) -> int:
@@ -31,3 +32,19 @@ def no_managed_settings(tmp_path, monkeypatch):
     etc = tmp_path / "etc" / "claude-code"
     monkeypatch.setattr(account_dir, "MANAGED_FILES", (etc / "managed-settings.json",))
     monkeypatch.setattr(account_dir, "MANAGED_DIR", etc / "managed-settings.d")
+
+
+@pytest.fixture
+def patrol(tmp_path, monkeypatch):
+    """見回りを 1 回ずつ打つラッパーを作る関数（`Patrol` の引数を渡す）。"""
+    made: list[Patrol] = []
+    monkeypatch.setattr(wrapper.observe, "context_tokens", lambda path, size: made[-1].tokens if made else 0)
+
+    def make(**changes) -> Patrol:
+        made.append(Patrol(tmp_path, **changes))
+        return made[-1]
+
+    yield make
+    for p in made:
+        for child in p.spawn.made + p.spawn.children:
+            child.close()

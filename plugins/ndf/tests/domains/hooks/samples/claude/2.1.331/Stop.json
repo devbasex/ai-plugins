@@ -1,0 +1,30 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "permission_mode": "default",
+  "effort": {
+    "level": "<text>"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "<text>",
+  "background_tasks": [
+    {
+      "id": "<text>",
+      "type": "shell",
+      "status": "running",
+      "description": "<text>",
+      "command": "sleep 20"
+    },
+    {
+      "id": "<text>",
+      "type": "monitor",
+      "status": "running",
+      "description": "<text>",
+      "command": "sleep 21; echo tick"
+    }
+  ],
+  "session_crons": []
+}

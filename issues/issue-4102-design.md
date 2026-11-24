@@ -157,7 +157,7 @@ sequenceDiagram
 | 重なる設計 | その設計が決めたこと | この設計との境界 |
 | --- | --- | --- |
 | #4061（`issue-4061-4062-4064-design.md`） | `signals.relay_role` が「中継の外」「子の会話」「入れ子」を決め、`relay-marker` は子の会話だけが書く。`NDF_RELAY_LAUNCH` は止めた前の起動を見分けるために残す。「止めた前の起動への保証」の表で `next.json` を「照らさない。変えない」とし、この課題へ分けた | 役割の判定は変えない。子の会話の中で、どの起動のファイルへ書くかをこの課題が決める。#4061 の表の `next.json` の行は、この課題の実装で「起動ごとのファイル」に変わる（#4061 の設計文書は書き換えない） |
-| #4049（`issue-4049-design.md`） | `busy-<起動>.json`・`LAUNCH_ID_RE`・`drop_other_busy`。`relay-marker` が Stop で背景の作業の件数を書いてからマーカーを書く。採らなかった案に「マーカーにも起動の ID を書いて照らす」（範囲の外） | 同じ形にそろえる。`drop_other_busy` を `drop_other_launches` に置き換える（決定 3）。`relay-marker` の件数の書き込みと作業が残るときの変更要求は変えない |
+| #4049（確定仕様 `docs/specifications/ndf-relay-background-wait.md`） | `busy-<起動>.json`・`LAUNCH_ID_RE`・`drop_other_busy`。`relay-marker` が Stop で背景の作業の件数を書いてからマーカーを書く。採らなかった案に「マーカーにも起動の ID を書いて照らす」（範囲の外） | 同じ形にそろえる。`drop_other_busy` を `drop_other_launches` に置き換える（決定 3）。`relay-marker` の件数の書き込みと作業が残るときの変更要求は変えない |
 | #3814（確定仕様 `docs/specifications/ndf-relay-pending-question-guard.md`） | 質問のファイルは子を止める排他の中で起動の ID を照らす | 変えない。マーカーは排他を取らない（決定 2） |
 | #4103（設計 PR #4112、マージ前） | ハブがラッパーを起動するときの起動の券と印（`NDF_RELAY_LAUNCH_GEN`）。`signals.NAME_RE` を `core/launch_ticket` の検査へ寄せる | ラッパーの起動（ハブの層）とラッパーの中の子の起動（この課題）は別の ID である。`signals.py` で触る関数は重ならない |
 

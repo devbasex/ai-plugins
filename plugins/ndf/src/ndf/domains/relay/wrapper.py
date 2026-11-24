@@ -37,7 +37,6 @@ from ptyprocess import PtyProcess
 from ndf import identity
 from ndf.adapters import cli_floor
 from ndf.adapters.claude import CLAUDE
-from ndf.contracts import limits
 from ndf.domains.relay import (
     account_decide,
     account_registry,
@@ -59,6 +58,8 @@ from ndf.domains.relay import (
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
 from ndf.domains.relay.wrapper_auth import AuthSteps
+from ndf.domains.relay.wrapper_busy import _BUSY_ALLOW, BusySteps
+from ndf.domains.relay.wrapper_fetch import FetchSteps
 from ndf.domains.relay.wrapper_guard import GuardSteps
 from ndf.domains.relay.wrapper_launch import AGAIN_RESTART, LAUNCH_FAILED, STOP_REASON, Ended, Halt, Launched, LaunchSteps
 from ndf.domains.relay.wrapper_stop import StopSteps
@@ -85,7 +86,6 @@ NOT_FOUND = "子の PATH に {exe} が無い"
 NO_ENTER = "作業ディレクトリ {cwd} に入れない: {why}"
 # 計画のリクエストへ渡す質問のコピー（質問のファイルは hook が消すまで残すので、渡すのはこの写し。#3814）
 FORWARD_FILE = ".question.forward.json"
-# 質問の hook と同じロック。ラッパーはこれを持ったまま質問が無いと確かめて子を止める（#3814 の I4）
 # 再起動ループの検出に当たり、子が動いている間に一度だけ端末へ出す 1 行（#3864 の決定 13）
 # `again` は端末のラッパーなら AGAIN_RUN、名前つきのラッパー（NDF_RELAY_SPAWNED）なら AGAIN_RESTART（起動引数の中身は出さない）
 SPIN_LINE = (
@@ -262,7 +262,7 @@ def exit_code(child: PtyProcess) -> Optional[int]:
     return None
 
 
-class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
+class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySteps):
     """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（壁時計）はテストで差し替える。"""
 
     def __init__(
@@ -384,7 +384,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         # 見回りは上限も認証の失敗も無く子が動いている見回りだけ（子が終わった後に会話を別のアカウントで再開しない）
         guard = self._guard_pick(sec, self.wall.now()) if not sec.must_end and limit is None and auth is None and alive else None
         safe = guard is not None and guard.kind == "switch" and self._safe_point(sec, now - sec.last_output)
-        return switch_decide.SectionState(
+        state = switch_decide.SectionState(
             question=question,
             question_forwarded=forwarded,
             question_id=qid,
@@ -410,50 +410,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
             drift_pick=self._revoked_pick(sec, self.wall.now()) if stopped else None,
             metered=account_decide.metered(sec.account),
         )
-
-    def _queue_fetch(self, now: float) -> None:
-        """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
-
-        取り直すのは、最後に試した時刻から `relay.usage-fetch` を過ぎたか、その後のリセットを過ぎたとき（`accounts.due_at`）。
-        取得の記録のスタンプと `tried` が同じ間は、その時刻を再利用する（見回りごとに取得の記録を開かない）。
-        """
-        f = self.fetcher
-        usage = self._inputs(now, False).usage if f is not None else None
-        if f is None or usage is None:
-            return
-        interval = limits.seconds("relay.usage-fetch")
-        for name, gen in usage.generations.items():
-            last = f.tried.get(name)
-            tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
-            if name in f.busy:
-                continue
-            path = accounts.fetch_path(self.store, name, gen)
-            key = (gen, launch_inputs.stamp(path), tried)
-            memo = self.due_memo.get(name)
-            at = memo[1] if memo is not None and memo[0] == key else accounts.due_at(path, interval, tried)
-            if at <= now:
-                f.put(accounts.FetchTarget(self.store, name, gen), now)
-                self.due_memo.pop(name, None)
-            else:
-                self.due_memo[name] = (key, at)
-
-    def _drain_fetch(self) -> None:
-        """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""
-        f = self.fetcher
-        if f is None:
-            return
-        failed = []
-        for name, got in f.results():
-            if isinstance(got, Exception):
-                failed.append({"account": name, "error": type(got).__name__})
-            elif got is not None and got.error == "shape" and not f.shape_told:
-                f.shape_told = True
-                self._say(wrapper_fetch.SHAPE_LINE)
-                self._log({"kind": "usage_shape", "account": name, "items": list(got.missing)})
-            elif got is not None and got.error is None:
-                f.shape_told = False
-        if failed:
-            self._log({"kind": "usage_fetch_failed", "count": len(failed), "sample": failed[:10]})
+        return self._with_background(sec, state)
 
     @staticmethod
     def _length(sec: Section, now: float) -> float:
@@ -609,36 +566,34 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
                 self._log({"kind": "account_recheck", "account": sec.choice.names[0] if sec.choice else None, "reason": why})
                 return None
         # キーの子は `_stop_revoked` が止め、`_revoked_pick` が止める直前の確かめも済ませてある
-        stopped = "stopped" if sec.must_end else self._stop_if_clear(sec)
+        stopped = "stopped" if sec.must_end else self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
-        ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
-        if ended is None:
-            # 替える手は子を止める前に確定した起動順をそのまま使う（尽きたら今のアカウント。既定のログインへ落とさない）。
-            # 起動し直しは今の起動先に固定する
-            if step.kind == "account":
-                choice, reason = sec.choice or Choice(launch_target.named(step.account), sec.account), sec.choice_reason
-            else:
-                choice, reason = Choice(launch_target.named(sec.account), fixed=True), "cut"
-            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason=reason)
-            ended = self._start(req)
-        if ended is None:
-            # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
-            self._current().handover_asked = sec.handover_asked
-        return ended
+        # 替える手は子を止める前に確定した起動順をそのまま使う（尽きたら今のアカウント。既定のログインへ落とさない）。
+        # 起動し直しは今の起動先に固定する
+        if step.kind == "account":
+            choice, reason = sec.choice or Choice(launch_target.named(step.account), sec.account), sec.choice_reason
+        else:
+            choice, reason = Choice(launch_target.named(sec.account), fixed=True), "cut"
+        # 同じセグメントを続けるので、引継ぎを頼んだかどうかも引き継ぐ（同じセグメントで 2 回頼まない）
+        return self._relaunch(step, sec, choice, reason, handover_asked=sec.handover_asked)
 
     def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         # 子の端末へは書かず、子を止めて同じ会話を引継ぎを頼む文（HANDOVER_PROMPT）で起動し直す。起動し直しの回数には数えない（I6）
-        stopped = self._stop_if_clear(sec)
+        stopped = self._stop_if_clear(sec, allow=_BUSY_ALLOW.get(step.busy))
         if stopped != "stopped":
             return self._not_stopped(stopped, sec)
+        choice = Choice(launch_target.named(sec.account), fixed=True)  # 同じ会話を別の認証で続けない
+        return self._relaunch(step, sec, choice, "cut", handover_asked=True)
+
+    def _relaunch(self, step: switch_decide.Step, sec: Section, choice: Choice, reason: str, handover_asked: bool) -> Optional[Ended]:
+        """子を止めた後に同じ会話を起動し直す。起動できたら、続きのセグメントに引継ぎを頼んだかを書く。"""
         ended = self._before_start(update=False)  # 同じ会話を続ける手は更新しない（I3）
         if ended is None:
-            choice = Choice(launch_target.named(sec.account), fixed=True)  # 同じ会話を別の認証で続けない
-            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason="cut")
+            req = Launch(sec.number, sec.session_id, choice, step.prompt, resume=True, kind=step.kind, reason=reason)
             ended = self._start(req)
         if ended is None:
-            self._current().handover_asked = True
+            self._current().handover_asked = handover_asked
         return ended
 
     def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
@@ -663,6 +618,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
     _ACTIONS: ClassVar[dict[str, Callable[[Wrapper, switch_decide.Step, Section], Optional[Ended]]]] = {
         "forward": _on_wait_like,
         "wait_reset": _on_wait_like,
+        "wait_background": _on_wait_like,
+        "active": BusySteps._on_active,
         "stalled": _on_wait_like,
         "switch": _on_switch,
         "account": _on_resume,
@@ -688,7 +645,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         if missing is not None:
             return missing
         try:
-            cli_floor.require("claude", CLAUDE, self._env_for(None, launch), self.s.cwd)
+            cli_floor.require("claude", CLAUDE, self._env_for(None, launch, req.session_id), self.s.cwd)
         except cli_floor.TooOld as exc:
             return Ended("precondition", LAUNCH_FAILED.format(why=exc))
         begun = self.wall.now()  # 子が記録を書くより前（認証の失敗の確かめは、この時刻より後の記録だけを読む）
@@ -697,6 +654,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
+        signals.drop_other_busy(self.dir, launch)  # 今の起動の記録は子の SessionStart の hook が書く（#4049）
         try:
             got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once], launch)
         except Halt as halt:
@@ -732,12 +690,12 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps):
         again = AGAIN_RESTART.format(name=self.s.name) if self.s.environ.get("NDF_RELAY_SPAWNED") else AGAIN_RUN
         return SPIN_LINE.format(seconds=self.s.spin.seconds, count=self.s.spin.count, again=again)
 
-    def _env_for(self, account: Optional[str], launch: str) -> dict[str, str]:
-        """起動先を確定した子の環境の基になる環境（`child_env(decided=True)`・起動先の NDF の `PATH`・起動の ID）。"""
+    def _env_for(self, account: Optional[str], launch: str, session_id: str) -> dict[str, str]:
+        """起動先を確定した子の環境の基になる環境（`child_env(decided=True)`・起動先の NDF の `PATH`・起動の ID・会話の ID）。"""
         env = session_env.child_env(self.s.environ, self.s.state_dir, account, decided=True)
         if self.launched_root is not None:
             env = session_env.with_launched_ndf(env, self.launched_root)
-        return {**env, **signals.launch_env(self.dir, launch)}
+        return {**env, **signals.launch_env(self.dir, launch, session_id)}
 
     def _inputs(self, now: float, need_candidates: bool) -> launch_inputs.Inputs:
         return self.reader.read(now, need_candidates)
