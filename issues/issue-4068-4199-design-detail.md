@@ -15,6 +15,7 @@
 | 世代 | 眠っている起こす hook のうち、どれが起こしてよいかを会話ごとに 1 つに決める印。最新の出来事の時刻・書いた者の ID・取った応答の ID の組（`Generation`）で、新しい応答や入力が来ると書き換わり、古い hook の予定（予約）を取り消す |
 | `S` | 判定に使う応答の文脈の量。その応答の `usage` の入力・読み出し・書き込みの合計（`LastTurn.tokens`） |
 | 従量の接続 | API キーなどの従量課金で接続する起動先（`metered`）。その設定は子の環境の `PATH` を上書きでき、別の `claude` を起動し得る |
+| API キーの従量の子（キーの子） | 従量の接続のうち、API キーで接続する設定のもの。起動の前に、接続の設定に要る版の下限を確かめる（`account_choice._gate_off`）。登録済みの API キーを使う候補 `key:<名前>` とは別である（`key:<名前>` は接続の設定を読まず、`decl` は None） |
 | 見回り | ラッパーが子を動かしている間に一定の間隔で子の状態を確かめる処理（`Wrapper._loop`） |
 
 **前に実装されているもの。** 次の 3 つの機能の上に実装する。どれも main にある。
@@ -37,15 +38,16 @@
 | バックグラウンドの作業の分け方 | #4049 の `relay_busy.task_kind`・`work_count` |
 | 会話の記録の末尾と最後の応答 | #4089 の `adapters/transcript.read_tail`・`last_context`・`timestamp_seconds`（#4089 の詳細設計の「#4068 との受け渡し」。未実装。上の段落） |
 
-#4089 の `last_context(tail, Reply(<文>))` が返す状態の要点（正本は #4089 の詳細設計の「#4068 との受け渡し」）:
+#4089 の `last_context(tail, Reply(<文>))` が返す状態（`current`・`behind`・`none`）と、`none` の理由の要点（正本は #4089 の詳細設計の「#4068 との受け渡し」）。表では、理由を状態の後の括弧に書く:
 
 | 状態 | 意味 | この実装での扱い |
 | --- | --- | --- |
 | `current` | 末尾の最後の応答が、渡した文（Stop の `last_assistant_message`）と同じで、量・時刻・`message.id` を読めた | 今回の応答として使う |
 | `behind` | 末尾の最後の応答が渡した文と違う（今回の応答がまだ記録に無い） | `unrecorded`（一時的） |
-| `compacted`・`partial` | 圧縮の境の後でまだ応答が無い・同じ応答の行が書きかけ | `unrecorded`（一時的） |
-| `empty`（#4089 で「応答が無い」（`none`）に分類される状態の 1 つ） | 末尾が空か、応答の行が無い（`read_tail` が読めなかったときを含む） | `unrecorded`（一時的） |
-| `form` | 突き合わせた応答の採用行の `usage`・`message.id`・`timestamp` の形が違う。採用行は、最後の応答の行のうち最も新しい物理の行（同じ `message.id` の行が複数あれば最後の行）で、量・ID・時刻はこの行だけから読む（#4089 の設計の「読む単位の決まり」） | `form`（記録の形が違う。会話で止める） |
+| `none`（`compacted`・`partial`） | 圧縮の境の後でまだ応答が無い・同じ応答の行が書きかけ | `unrecorded`（一時的） |
+| `none`（`empty`） | 末尾が空か、応答の行が無い（`read_tail` が読めなかったときを含む） | `unrecorded`（一時的） |
+| `none`（`unrecorded`） | 突き合わせに外れた最後の応答の採用行の形が違う | `unrecorded`（一時的） |
+| `none`（`form`） | 突き合わせた応答の採用行の `usage`・`message.id`・`timestamp` の形が違う。採用行は、最後の応答の行のうち最も新しい物理の行（同じ `message.id` の行が複数あれば最後の行）で、量・ID・時刻はこの行だけから読む（#4089 の設計の「読む単位の決まり」） | `form`（記録の形が違う。会話で止める） |
 
 ## 地図
 
@@ -97,7 +99,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/domains/relay/keep_cache.py` | 新設 | 起こす時点・上限・次の手を決め、渡された会話の記録の末尾から最後の応答・起床の呼び出し・待ちを終えた入力を読む | 標準ライブラリ・`adapters.transcript`（`last_context`・`timestamp_seconds`） | `LastTurn`・`TurnRead`・`Usage`・`Reply`・`Opening`・`Ratios`・`Step`・モジュール `keep_cache` | `last_turn`・`wake_reply`・`opening`・`is_wake_input`・`ratios`・`wake_at`・`n_max`・`next_step`・`hit`（新設） |
 | `src/ndf/domains/hooks/rewake.py` | 新設 | Stop のバックグラウンドで起動し、今回の応答を確かめて世代を書き、眠って確かめ直し、起こすなら終了コード 2 で終わる | `keep_cache`・`signals`・`hooks.tables`・`relay_busy`・`adapters.transcript`（`read_tail`） | モジュール `rewake` | `run`・`_target`・`_settle`・`_reconcile`・`_wait`・`_finish`（新設） |
-| `src/ndf/domains/hooks/guards/turn.py` | 変更 | 中継の下の UserPromptSubmit で、今の起動を突き合わせてから起こす状態の世代を入力の時刻に書き換え（状態が無ければ世代だけの状態を作る）、起こす文の入力を `prompt` の頭（`WAKE_HEAD`）で中継の入力と見分ける（決定 10） | `signals`・`keep_cache` | — | `check`（変更） |
+| `src/ndf/domains/hooks/guards/turn.py` | 変更 | 中継の下の UserPromptSubmit で、今の起動を突き合わせてから起こす状態の世代を入力の時刻に書き換え（状態が無ければ世代だけの状態を作る）、`prompt` の頭が `WAKE_HEAD` の入力を、利用者の入力でなく中継が送った起こす文の入力として見分ける（決定 10） | `signals`・`keep_cache` | — | `check`（変更） |
 | `hooks/entry.py` | 変更 | 引数が 4 つ以上で `argv[3]` が `rewake` なら `rewake.run` の終了コードを返す。ほか（既存の登録の 3 つの引数の形を含む）は今のとおり `run_entry` に委ねる | — | — | `main`（変更） |
 | `src/ndf/domains/hooks/registration.py` | 変更 | 中継の子へ `--settings` で渡す起こす hook の登録（Stop の `asyncRewake: true` 1 つ・`timeout` はバックグラウンドの予算から・command は `hooks/entry.py` の絶対パス）を作る。プラグインの登録（`render`）には足さない | `hooks.tables`・`hooks.budget` | — | `rewake_entry`・`rewake_settings`・`rewake_unreachable`（新設。`budget.rewake_reach` をそのまま返す）。`render` は変えない |
 | `src/ndf/domains/hooks/budget.py` | 変更 | バックグラウンドの登録（`rewake_entry` と同じく `rewake_budget` の `timeout` を持つ行）を `async_rewake` の予算と上限で検査し、`cache.wake` の起こす時点と確かめる間隔がバックグラウンドの `timeout` の内に届くか（`rewake_reach`）を確かめ、プラグインの登録のファイルに `asyncRewake` の登録があれば破れとする。同期の登録は今の予算と上限で検査する | `hooks.tables`・`relay.keep_cache`（定数の `TTL_SECONDS`・`MAX_CHECKS` だけ。関数は読まない）（`registration` は読まない。`registration` が `budget` を読むので輪を作らない） | — | `rewake_budget`・`rewake_reach`・`rewake_registrations`（新設）・`registrations_of`・`budget_registrations`・`_file_registrations`・`_registration_errors`（変更） |
@@ -140,9 +142,9 @@ plugins/ndf/
 
 | 順 | `last_context` の状態と条件 | 返す値 | 意味 |
 | --- | --- | --- | --- |
-| 1 | `current` か `form` で、`ref` が在り、`ref.at > started` | `TurnRead(None, "newer")` | 遅れて動いた古い hook が、自分の Stop の後に書かれた次の応答を読んだ。形の違いより先に確かめる |
-| 2 | `form` | `TurnRead(None, "form", ref)`。`message.id` か時刻が読めなければ `ref` は None | 突き合わせた応答の形が違う。前の行へさかのぼらない |
-| 3 | `behind`・`compacted`・`partial`・`empty`（`read_tail` が読めずに空の文字列を返したときを含む） | `TurnRead(None, "unrecorded")` | 今回の応答がまだ記録に無い・読めない（一時的） |
+| 1 | `current` か `none`（`form`）で、`ref` が在り、`ref.at > started` | `TurnRead(None, "newer")` | 遅れて動いた古い hook が、自分の Stop の後に書かれた次の応答を読んだ。形の違いより先に確かめる |
+| 2 | `none`（`form`） | `TurnRead(None, "form", ref)`。`message.id` か時刻が読めなければ `ref` は None | 突き合わせた応答の形が違う。前の行へさかのぼらない |
+| 3 | `behind`（理由を問わない）か、`none`（`unrecorded`・`compacted`・`partial`・`empty`。`empty` は `read_tail` が読めずに空の文字列を返したときを含む）。`Reply` を渡すので、理由 `after`（`Tail` のときだけ）は返らない | `TurnRead(None, "unrecorded")` | 今回の応答がまだ記録に無い・読めない（一時的） |
 | 4 | `current` | `TurnRead(LastTurn, None)` | 今回の応答 |
 
 寿命は、応答の寿命別の書き込みだけで決める。1 時間が正なら `1h`、1 時間が 0 で 5 分が正なら `5m`、両方 0 なら `ttl` を None（未定）で返す。状態の寿命は受けない（ロックの外で読んだ状態を補いに使わない。設計の決定 13）。補うのは `_settle` だけである。
@@ -169,7 +171,7 @@ plugins/ndf/
 
 | 関数 | 失敗の種類 | 原因 | 検出する場所 | 検出したときの処理 | 利用者への通知 | 回復の手段 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `last_turn` | 最後の応答が載っていない・記録が読めない | Stop の時点で未記録（公式の hook の文書が「Stop の時点で最後の応答を記録に含まないことがある」と書くバージョン。設計の「外部の調査」の PRD3）・`read_tail` が空の文字列を返した（権限・ファイルが無い） | `last_context` の状態（`behind`・`compacted`・`partial`・`empty`。冒頭の状態の表と「`last_turn` の返し方」の 3 行目と同じ 4 つ） | `reason` `unrecorded` | 無し（呼び手が `stop_waking`（`scope` `once`）を会話で 1 度書く。止めない） | 次の Stop で読み直す |
+| `last_turn` | 最後の応答が載っていない・記録が読めない | Stop の時点で未記録（公式の hook の文書が「Stop の時点で最後の応答を記録に含まないことがある」と書くバージョン。設計の「外部の調査」の PRD3）・`read_tail` が空の文字列を返した（権限・ファイルが無い） | `last_context` の状態（`behind`、または `none` の `unrecorded`・`compacted`・`partial`・`empty`。「`last_turn` の返し方」の 3 行目と同じ） | `reason` `unrecorded` | 無し（呼び手が `stop_waking`（`scope` `once`）を会話で 1 度書く。止めない） | 次の Stop で読み直す |
 | `last_turn` | 形が違う | Claude Code の記録の形の変化 | `last_context` の `form`・#4089 の表の項目の型 | `reason` `form` | 無し（呼び手が `stopped` と `stop_waking`（`scope` `session`）を 1 度書く） | 読み方を直す |
 | `last_turn` | 次の応答を読んだ | 遅れて動いた古い hook | 応答の時刻と `started` の比べ | `reason` `newer` | 無し（呼び手は何も書かずに 0） | — |
 | `wake_reply` | 起床の呼び出しが末尾の範囲に無い | 起床の後の大きな Tool の結果が `hook.transcript-tail` の大きさを越えた | `after_id` の応答が `tail` に無い | `kind` `truncated` | 無し（呼び手が `hit` null・`priced` 偽の `wake_result` を書いてフラグを消す。止めない） | — |
@@ -461,7 +463,7 @@ plugins/ndf/
 
 ## 上限の設定の方針のファイル（`contracts/limits/<方針の名前>.json`）
 
-今の上限の設定は、`contracts/limits/` に方針 1 つにつき 1 ファイルで置く。`contracts/limits.py` の `policy(name)` がそのファイルだけを読む（1 つの `limits.json` は無い。#3687）。足す方針は次の 9 ファイルである。どれも今の方針のファイルと同じく `summary` と `read_by`（方針を引くモジュール。規則 `limit-readers` が実際の読み手と突き合わせる）を持つ。今の `hook.transcript-tail.json` は、`read_by` に `ndf.domains.hooks.rewake` を足す（起こす hook が末尾の大きさを読む）。
+今の上限の設定は、`contracts/limits/` に方針 1 つにつき 1 ファイルで置く。`contracts/limits.py` の `policy(name)` がそのファイルだけを読む（1 つの `limits.json` は無い。#3687）。足す方針は次の 8 ファイルである。どれも今の方針のファイルと同じく `summary` と `read_by`（方針を引くモジュール。規則 `limit-readers` が実際の読み手と突き合わせる）を持つ。今の `hook.transcript-tail.json` は、`read_by` に `ndf.domains.hooks.rewake` を足す（起こす hook が末尾の大きさを読む）。
 
 | ファイル | 形（`summary`・`read_by` を除く） | `read_by` |
 | --- | --- | --- |

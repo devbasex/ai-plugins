@@ -235,7 +235,7 @@ PostToolUse（判断開始の値の知らせ。拒否はしない）:
 | `current` か `none`（`form`）で、`ref` が在り `ref.at > started` | `TurnRead(None, "newer")`（遅れて動いた古い hook が次の応答を読んだ。形の違いより先に確かめる。#4068 の詳細設計の `last_turn`） |
 | `none`（`form`） | `TurnRead(None, "form", ref)` |
 | `current` | 下の表の項目をすべて `ContextRead` とその `entry`（量と同じ採用行）から読む。項目の 1 つでも「欠け・型違い」に当たれば `TurnRead(None, "form", ref)`、ほかは `TurnRead(LastTurn, None)` |
-| `behind`・`none`（`unrecorded`・`compacted`・`partial`・`empty`） | `TurnRead(None, "unrecorded")`（一時的） |
+| `behind`（理由を問わない）か、`none`（`unrecorded`・`compacted`・`partial`・`empty`） | `TurnRead(None, "unrecorded")`（一時的）。`last_turn` は `Reply` を渡すので、理由 `after`（`Tail` のときだけ）は返らない |
 
 `current` のときの `LastTurn` の項目の取り出し元（`u` は `entry["message"]["usage"]`）:
 
