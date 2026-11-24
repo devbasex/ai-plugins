@@ -261,14 +261,20 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
     """承認資料を書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。
 
     質問の対象（`q.target`）を、提示した承認の対象として隣（`presented_path`）へ同じく 1 度だけ書く（#4409 の決定 7）。
+    ただし、提示した承認の対象と `q.target` の承認の対象（マージ先・HEAD）か「本番へ反映されるか」が違えば、
+    資料と提示した対象の両方を `q.target` で書き直す（待ちの間に PR が動いた。古い資料のまま新しい HEAD の回答の経路を
+    返さない）。資料の sha256 が変わるので、古い資料を見て打った回答は断られる。
     """
     path = material_path(root, q)
+    shown = presented_path(root, q)
+    if _moved(read_presented(root, q), q.target):
+        path.unlink(missing_ok=True)
+        shown.unlink(missing_ok=True)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(material(v, q), encoding="utf-8")
         tmp.replace(path)
-    shown = presented_path(root, q)
     if not shown.exists():
         tmp = shown.with_name(f".{shown.name}.tmp")
         tmp.write_text(json.dumps(q.target.as_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
@@ -280,6 +286,14 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
 PRESENTED_SUFFIX = ".target.json"
 # 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
+
+
+def _moved(held: Target, now: Target) -> bool:
+    """提示した承認の対象 `held` と今の対象 `now` の、承認の対象か「本番へ反映されるか」が違うか（両方がそろうときだけ比べる）。"""
+    then, current = held.binding(), now.binding()
+    if then is None or current is None:
+        return False
+    return not then.same(current) or held.production != now.production
 
 
 def presented_path(root: Path, q: Question) -> Path:

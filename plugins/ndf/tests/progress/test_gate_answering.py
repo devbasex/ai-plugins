@@ -147,6 +147,24 @@ def _a_base_changed_after_the_question_is_refused(repo, st, env, capsys):
     assert posts.rows == [] and _answered(st, q) == []
 
 
+def _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it(repo, st, env, capsys):
+    """受け入れ条件 5（待ちの間に HEAD が動いた）: 資料が古い HEAD のままなら新しい HEAD への回答も断る。
+    提示し直すと資料と提示した対象が新しい HEAD で書き直され、その回答は新しい HEAD の証跡になる。"""
+    q = _asked(st, repo, env, capsys)
+    moved = "f" * 40
+    posts = Posts()
+    a = gate.Answer(q.id, "approved", "回答した", "human", "k1", seen=gate.Target(head=moved))
+    with pytest.raises(model.Refused, match="承認の対象が変わった"):
+        gate.answer(st, q.machine_id, a, lambda _q: _target(head=moved), posts)
+    assert posts.rows == [] and _answered(st, q) == []
+    v = run.read(st, q.machine_id)
+    asking.write_material(st.root, v, replace(q, target=_target(head=moved)))
+    assert asking.read_presented(st.root, q).head == moved
+    assert moved in asking.material_path(st.root, q).read_text(encoding="utf-8")
+    gate.answer(st, q.machine_id, a, lambda _q: _target(head=moved), posts)
+    assert [r.target.head for r in posts.rows] == [moved]
+
+
 def _the_material_says_the_merge_reaches_production(repo, st, env, capsys):
     """受け入れ条件 6（承認資料）: 本番へ反映され得る承認の対象の承認資料は、その行を持つ。持たない対象は行が無い。"""
     q = _asked(st, repo, env, capsys)
@@ -193,6 +211,10 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
         ],
         scenes.scene(_service_mvv_and_non_production_answers_write_no_trail, id="service_mvv_and_non_production_answers_write_no_trail"),
         scenes.scene(_a_base_changed_after_the_question_is_refused, id="a_base_changed_after_the_question_is_refused"),
+        scenes.scene(
+            _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it,
+            id="a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it",
+        ),
         scenes.scene(_the_material_says_the_merge_reaches_production, id="the_material_says_the_merge_reaches_production"),
         scenes.scene(_an_old_seen_reads_as_a_target_without_binding, id="an_old_seen_reads_as_a_target_without_binding"),
         scenes.scene(_stale_routes_carry_the_retry_and_the_next, id="stale_routes_carry_the_retry_and_the_next"),
