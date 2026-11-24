@@ -81,6 +81,8 @@ def add(entry: Mapping[str, Any], root: Path) -> dict[str, Any]:
     _require_keys(entry, ADD_KEYS)
     key = _key(entry["questions"])
     row = {"repo": Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
+    if not rd.has_used_keys(row):
+        raise ReadingInvalid("prs は、number（整数）・branch（1 つのブランチの名前）・head（SHA）を持つオブジェクトの配列にする")
     try:
         return jsonl.append_locked(checks_path(), row, kind="reading-check")
     except internal.InternalError as exc:
@@ -90,9 +92,9 @@ def add(entry: Mapping[str, Any], root: Path) -> dict[str, Any]:
 
 
 def rows() -> list[dict[str, Any]]:
-    """記録の行（古い順）。壊れた行は除く。ファイルが無ければ空、開けなければ `OSError`、新しいバージョンの行があれば `InternalError`。"""
+    """記録の行（古い順）。壊れた行（ブランチの名前でない `branch` を含む）は除く。ファイルが無ければ空、開けなければ `OSError`、新しいバージョンの行があれば `InternalError`。"""
     found, _ = jsonl.read_rows(checks_path(), kind="reading-check")
-    return found
+    return [row for row in found if rd.has_used_keys(row)]
 
 
 def check(entry: Mapping[str, Any], root: Path, hub: Callable[[Path], GitHub]) -> list[str]:

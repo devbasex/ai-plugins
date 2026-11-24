@@ -117,7 +117,7 @@ plugins/ndf/
 | キー | 型 | 誰が書くか | 値 |
 | --- | --- | --- | --- |
 | `questions` | 配列 | 担当 | `AskUserQuestion` に渡す `questions` と同じ形。行には書かず、`question_key` の計算に使う |
-| `prs[].number`・`prs[].branch`・`prs[].head` | 整数・文字列・文字列 | 担当 | 承認する PR と、読み手役の確認を終えた時点の head。判断の質問と、PR の無い承認では `prs` を空にする |
+| `prs[].number`・`prs[].branch`・`prs[].head` | 整数・文字列・文字列 | 担当 | 承認する PR と、読み手役の確認を終えた時点の head。`branch` は refspec に入るので、1 つのブランチを表す名前（git の `check-ref-format` の規則）だけを受ける。`*` などを含む値は `add` が拒み、書いてある行は壊れた行として読まない（`reading.rows` と `light_rows` の両方）。判断の質問と、PR の無い承認では `prs` を空にする |
 | `reads[].name` | 文字列 | 担当 | 文書のパスか、固定の文字列 `question`（質問の文）・`material`（質問の直前に示す材料か承認資料）。`question` が 1 つも無い記録は拒む |
 | `reads[].reader` | 文字列 | 担当 | 読み手の立場 |
 | `reads[].round` | 1 か 2 | 担当 | その立場で何回目の読みか |

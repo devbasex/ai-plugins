@@ -161,6 +161,7 @@ def test_add_fills_the_row_and_keeps_no_text(repo: Path, capsys, last_result) ->
         {"reads": [READS[1]]},
         {"reads": [{**READS[0], "result": "remained"}]},
         {"prs": [{"number": 7, "branch": "design/x"}]},
+        {"prs": [{**PRS[0], "branch": "*"}]},
         {"questions": []},
         {"questions": [{"question": " ", "options": []}]},
         {"questions": "設計を承認しますか"},
@@ -171,6 +172,20 @@ def test_add_refuses_a_wrong_shape_without_writing(change: dict, repo: Path, cap
     code, got = _run(capsys, last_result, repo, "add", {**ENTRY, **change})
     assert code != 0 and got["cause"]["kind"] == "invalid"
     assert reading.rows() == []
+
+
+@pytest.mark.parametrize(
+    ("branch", "kept"),
+    [("main", True), ("feature/4285-日本語.1", True)]
+    + [(b, False) for b in ("*", "a/*", "a:b", "^a", "a..b", "/a", "a/", "a//b", ".a", "a/.b", "a.lock", "a.", "a@{1}", "a b", "a\n", "")],
+)
+def test_rows_keep_only_a_single_branch_name(branch: str, kept: bool, repo: Path) -> None:
+    """記録のブランチは強制更新の refspec に入るので、書いてある行も 1 つのブランチを表す名前だけを読む。"""
+    row = {**reading.add(ENTRY, repo), "prs": [{**PRS[0], "branch": branch}]}
+    text = json.dumps(row) + "\n"
+    reading.checks_path().write_text(text, encoding="utf-8")
+    assert reading.rows() == ([row] if kept else [])
+    assert rd.light_rows(text, internal.version()) == ([row] if kept else [])
 
 
 def test_rows_stop_on_a_newer_version(repo: Path) -> None:
