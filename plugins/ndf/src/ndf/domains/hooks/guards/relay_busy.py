@@ -11,7 +11,7 @@ SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出
 
 すべての PreToolUse に当たる `fail_closed` の行なので、対象外の呼び出しは、例外を上げうる処理（記録・構文解析・表の読み込み）
 より先に通す。作業を始め得ない呼び出し（Read・フォアグラウンドの Bash など）は、環境変数のコントラクトを読む会話の確かめ
-（`_target`）よりも先に、Tool の名前と `run_in_background` だけで通す。
+（`is_child`）よりも先に、Tool の名前と `run_in_background` だけで通す。
 """
 
 from __future__ import annotations
@@ -45,10 +45,10 @@ _CUT_MARK = "… [+"
 
 def check(ctx, svc) -> Optional[Verdict]:
     if ctx.event != "PreToolUse":  # SessionStart
-        if ctx.payload.get("source") in _FRESH_SOURCES and _target(ctx.env, ctx.session_id):
+        if ctx.payload.get("source") in _FRESH_SOURCES and is_child(ctx.env, ctx.session_id):
             record_count(ctx.env, ctx.session_id, 0, "session")
         return None
-    if not _may_start(ctx.tool, ctx.tool_input) or not _target(ctx.env, ctx.session_id):
+    if not _may_start(ctx.tool, ctx.tool_input) or not is_child(ctx.env, ctx.session_id):
         return None
     if _starts_background(ctx.tool, ctx.tool_input, svc.params):
         return _record_start(ctx)
@@ -63,7 +63,7 @@ def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
     ctx = HookContext("", "PreToolUse", payload, env=dict(env))
     if not _may_start(ctx.tool, ctx.tool_input):
         return None
-    if not _target(env, ctx.session_id) or _recorded is payload:
+    if not is_child(env, ctx.session_id) or _recorded is payload:
         return None
     return BUSY_START_FAILED if _starts_background(ctx.tool, ctx.tool_input, table_params()) else None
 
@@ -114,7 +114,7 @@ def _lock_wait() -> float:
     return float(tables.policy_value("hook.counter-lock", "seconds"))
 
 
-def _target(env: Mapping[str, str], session_id: Any) -> bool:
+def is_child(env: Mapping[str, str], session_id: Any) -> bool:
     """中継のラッパーが起動した子の会話か。入れ子の claude は会話の ID が違う。コントラクトの誤りも対象外とし、例外を外へ出さない。
 
     保存先が在るかは見ない（保存先が消えた子の会話を、中継の外と取り違えて作業を始めさせない）。

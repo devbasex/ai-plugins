@@ -77,4 +77,4 @@ def _recorded(ctx, directory: Path) -> tuple[int, int]:
 def _counts(ctx, tasks) -> bool:
     """起動ごとの記録へ件数を書く Stop か（子の会話で、一覧があり、`relay-busy` を止めていない）。"""
     off = tables.off_names(ctx.env.get("NDF_HOOK_OFF"))
-    return isinstance(tasks, list) and relay_busy._target(ctx.env, ctx.session_id) and not tables.is_off(relay_busy.GUARD_NAME, off)
+    return isinstance(tasks, list) and relay_busy.is_child(ctx.env, ctx.session_id) and not tables.is_off(relay_busy.GUARD_NAME, off)

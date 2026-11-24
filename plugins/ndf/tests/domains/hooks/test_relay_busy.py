@@ -107,7 +107,7 @@ def test_other_calls_pass_when_the_record_cannot_be_written(relay_child, tmp_pat
 
 @pytest.mark.parametrize("name", [n for n in OTHERS if not n.startswith("watch-")])
 def test_calls_that_cannot_start_a_work_do_not_read_the_env_contract(relay_child, tmp_path, monkeypatch, name):
-    monkeypatch.setattr(relay_busy, "_target", boom)
+    monkeypatch.setattr(relay_busy, "is_child", boom)
     call = payload(tmp_path, OTHERS[name])
     ctx = HookContext("claude", "PreToolUse", call)
     svc = dispatch.GuardServices(tmp_path, Counter.unusable(), 0.0, params=dict(relay_busy.table_params()))
