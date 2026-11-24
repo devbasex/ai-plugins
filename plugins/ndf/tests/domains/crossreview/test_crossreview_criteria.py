@@ -123,6 +123,22 @@ def test_light_findings_do_not_block_and_are_not_handed_to_the_fixer(wt: Path, t
     assert f"| r1-1 | codex | nit | doc.md:3 | 語の揺れ | {report_decide.LIGHT_LABEL} | — |" in hub.comments[-1][2]
 
 
+def _assert_only_table_criteria(fake: Recording, focus: tuple[str, ...], tmp_path: Path) -> None:
+    """#4076 の受け入れ条件 8: `.ndf/mvv.json` の無いリポジトリでは、相手役と修正担当の指示の基準は表の基準（重点があれば
+    基準 3 を足す）だけで、MVV の文は 1 行も現れない。"""
+    table = criteria_decide._table()
+    want = {n: text for n, text in table["criteria"].items() if n in ("1", "2", "4")}
+    if focus:
+        want["3"] = f"{table['focus_label']}: {' / '.join(focus)}"
+    # 基準のほかの行の数（見出し・前置き・書かないものなど）。前と後ろの行は起動ごとに違う
+    for agent, build, others in (("codex", criteria_decide.reviewer_block, 5), ("claude", criteria_decide.fixer_block, 4)):
+        lines = next(p for a, _, p in fake.prompts if a == agent).splitlines()
+        block = lines[lines.index("## 指摘の基準") : -1]
+        assert block == build(focus) and len(block) == len(want) + others
+        assert dict(x.split(". ", 1) for x in block if x[:1].isdigit()) == want
+        assert not any("mvv" in x.lower() for x in (*block, lines[-1].replace(str(tmp_path), "")))
+
+
 def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """基準と重要度を相手役へ渡し、重い指摘だけを修正担当へ基準つきで渡す。スレッドは相手役が返した path・line に付ける。"""
     major = {"text": "止まる", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
@@ -135,6 +151,7 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
     fix = next(p for a, _, p in fake.prompts if a == "claude")
     assert f"- r1-1: 止まる（major・doc.md:5）— 起きること: {IMPACT}" in fix and "r1-2" not in fix
     assert all(line in fix for line in criteria_decide.fixer_block(()))
+    _assert_only_table_criteria(fake, (), tmp_path)
     assert [(path, line) for path, line, _, _ in hub.port.opened] == [("doc.md", 5)]
     assert threads.location({"path": "doc.md", "line": 5, "section": "x.md#y"}) == ("doc.md", 5)
 
@@ -184,6 +201,7 @@ def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path
     _run(capsys, monkeypatch, fake, wt)
     [focus_line] = [line for line in criteria_decide.criteria_lines(("処理の回数",)) if line.startswith("3.")]
     assert all(focus_line in p for a, _, p in fake.prompts)
+    _assert_only_table_criteria(fake, ("処理の回数",), tmp_path)
 
 
 def test_review_json_with_profiles_is_invalid(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
