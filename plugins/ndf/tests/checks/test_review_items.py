@@ -184,8 +184,8 @@ def test_only_review_items_reads_no_other_input(copy, monkeypatch):
     copy.write_items(ROUTED, ("1-2", "要旨", "—", *ROUTED[3:]))
     found = run.select(Scope(copy.repo, copy.root, "p"), load_rules(), [spec_docs.REVIEW_ITEMS])
     assert [(f.rule, f.path) for f in found] == [
-        (spec_docs.REVIEW_ITEMS, f"plugins/p/{child_deps.CHILDREN_REL}"),
         (spec_docs.REVIEW_ITEMS, copy.spec["review_items_source"]),
+        (spec_docs.REVIEW_ITEMS, f"plugins/p/{child_deps.CHILDREN_REL}"),
     ]
 
 

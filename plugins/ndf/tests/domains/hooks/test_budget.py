@@ -156,7 +156,8 @@ def test_registration_file_without_a_hooks_object_has_no_rows(tmp_path):
 def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
     broken = compared_policies()
     broken["hook.counter-lock"]["seconds"] = 30
-    monkeypatch.setattr(tables, "policy", broken.get)
+    real = tables.policy
+    monkeypatch.setattr(tables, "policy", lambda name: broken[name] if name in broken else real(name))
     out = call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
     assert "予算の検査で破れ" in out["hookSpecificOutput"]["additionalContext"]
     monkeypatch.undo()

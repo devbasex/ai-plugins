@@ -261,7 +261,7 @@ approves」を定める。したがって `permissionDecision` を `"allow"` に
 | worker の名前の形 | `plugins/ndf/src/ndf/contracts/worker_paths.py` の `NAME_RE` | `[A-Za-z0-9._-]{1,64}` |
 | 4 つの接尾辞 | 同上 | `.prompt.md`・`.report.md`・`.done`（報告のパスの後ろに付ける）・`.result.json` |
 | 追記のロックのファイル名 | `plugins/ndf/src/ndf/core/worker_append.py` の `LOCK_FILE` | `worker-append.lock`（利用者ごとの状態の保存先の直下） |
-| ロックを待つ上限 | `plugins/ndf/contracts/limits.json` の `durable.lock-wait` | 300 秒 |
+| ロックを待つ上限 | `plugins/ndf/contracts/limits/durable.lock-wait.json` の `durable.lock-wait` | 300 秒 |
 | guard の設定 | `plugins/ndf/contracts/hooks/guards.json` の `rm-variable` の行 | `events: ["PreToolUse"]`・`tools: ["Bash"]`・`order: 26`・`strict: false`・`deny_key: "none"`・`fail_closed: false`・`suggests` に `ndf worker prepare` の見本 |
 
 `deny_key` を `"none"` にするのは、同じ拒否を数えて上限の後に案内へ下げる仕組みから外すためである。
