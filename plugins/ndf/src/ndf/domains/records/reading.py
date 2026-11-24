@@ -47,14 +47,8 @@ def checks_path() -> Path:
 
 def prompt(entry: Mapping[str, Any]) -> str:
     """読み手役への指示。文書は加工しない（補足を外した文書・直した部分だけの文書は、頼む側が先に別のファイルへ作る）。"""
-    _require_keys(entry, PROMPT_KEYS)
+    _require_prompt(entry)
     files, reader, kind = entry["files"], entry["reader"], entry["questions_kind"]
-    if not (isinstance(files, list) and files and all(isinstance(f, str) and f.strip() for f in files)):
-        raise ReadingInvalid("files は、読ませるファイルのパスの空でない配列にする")
-    if not (isinstance(reader, Mapping) and set(reader) == set(READER) and all(isinstance(v, str) and v.strip() for v in reader.values())):
-        raise ReadingInvalid(f"reader は、{'・'.join(READER)} の 3 つの空でない文字列を持つオブジェクトにする")
-    if not (isinstance(kind, str) and (kind == "none" or kind in RESTATE)):
-        raise ReadingInvalid(f"questions_kind は {'・'.join(RESTATE)}・none のどれかにする")
     lines = [
         "次の文書を、下に示す読み手になったつもりで最初から最後まで読み、読み手に通じるかを確かめてください。",
         "読むのは次の文書だけです。ほかのファイル・Issue・Pull Request・会話の記録を読まず、ファイルを変えないでください。",
@@ -71,7 +65,7 @@ def prompt(entry: Mapping[str, Any]) -> str:
         writing.types_section(),
         "",
         "## 返すもの",
-        "1. 要点を自分の言葉で言い直したもの。" + (RESTATE[kind] if kind in RESTATE else ""),
+        "1. 要点を自分の言葉で言い直したもの。" + RESTATE.get(kind, ""),
         "2. 通じない文の一覧。1 件ごとに、文の引用・型（A〜D）・読み手がつまずく理由・書き直した案・区分（「判断や作業を誤らせる文」か「読みにくいだけの文」）を書く。無ければ「無し」と書く。",
         "3. 2 に入れるか迷って入れなかった文。最大 3 つで、迷った理由も書く。無ければ「無し」と書く。",
         "",
@@ -127,6 +121,21 @@ def check(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) ->
     if unread and not short:
         raise HeadUnknown("GitHub に PR が無い: " + "・".join(f"#{n}" for n in unread))
     return short
+
+
+def _require_prompt(entry: Any) -> None:
+    _require_keys(entry, PROMPT_KEYS)
+    files, reader, kind = entry["files"], entry["reader"], entry["questions_kind"]
+    if not (isinstance(files, list) and files and all(_is_text(f) for f in files)):
+        raise ReadingInvalid("files は、読ませるファイルのパスの空でない配列にする")
+    if not (isinstance(reader, Mapping) and set(reader) == set(READER) and all(_is_text(v) for v in reader.values())):
+        raise ReadingInvalid(f"reader は、{'・'.join(READER)} の 3 つの空でない文字列を持つオブジェクトにする")
+    if not (isinstance(kind, str) and (kind == "none" or kind in RESTATE)):
+        raise ReadingInvalid(f"questions_kind は {'・'.join(RESTATE)}・none のどれかにする")
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _key(questions: Any) -> str:
