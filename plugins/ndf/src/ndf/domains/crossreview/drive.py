@@ -84,6 +84,8 @@ SEAT_SYSTEM = "cross-review の相手役（読むだけ）"
 FULL_DIFF_SUFFIX = "-full.diff"
 # claude の席が渡した差分のファイルの読み取りを拒否された理由の頭（結果の無い席の理由と過程に載せる）
 DENIED_READ = "permission_denials"
+# その席の直し方（ログインでなく、読み取りの権限を確かめさせる。PR 4461 の r3-2）
+DENIED_FIX = "claude が理由に示した差分のファイルを読める設定か（`--restricted`・`--add-dir` の読み取りの範囲と、利用者の permissions の deny）を確かめる"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -515,7 +517,9 @@ def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequ
 def _unread_hint(seat: str, cause: str, err: Path) -> str:
     """読めなかった席 1 つの理由と直し方（precondition の詳細の 1 行）。直し方は席のランタイムで引く。"""
     row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
-    if cause.startswith(agents.SANDBOX_FAILED):
+    if cause.startswith(DENIED_READ):
+        fix = DENIED_FIX
+    elif cause.startswith(agents.SANDBOX_FAILED):
         fix = (
             "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、外で隔離された環境で打つ"
             "（`unshare -Ur true` が通らない環境では NDF がサンドボックスを外して起動する）"
