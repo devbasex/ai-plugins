@@ -275,7 +275,7 @@ def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[S
     commit = ref if git_mod.FULL_SHA.match(ref) else _commit_of(g, ref)
     held = _decl_blob(g, commit)
     if held is None:
-        return Snapshot(md.State.ABSENT, None, None, None, (), {}, commit, "", None), b"", b""
+        return _without_approval(md.State.ABSENT, {}, commit), b"", b""
     usual = md.body_path({})
     # 本文は既定のパスにあると見込んで、設定と同じ 1 回の起動で読む
     raw, guess = _blobs(g, held, f"{commit}:{usual}")
@@ -283,7 +283,7 @@ def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[S
         raise MvvError(f"{commit} の MVV の設定（{decl_path()}）を読めない: {held}")
     decl = decl_from(raw, commit, root)
     if md.status(decl, None) == md.State.UNAPPROVED:
-        return Snapshot(md.State.UNAPPROVED, None, None, None, (), {decl_path(): _blob_id(raw)}, commit, "", None), b"", b""
+        return _without_approval(md.State.UNAPPROVED, {decl_path(): _blob_id(raw)}, commit), b"", b""
     path = md.body_path(decl)
     body = guess if path == usual and guess is not None else _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
     blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
@@ -293,12 +293,17 @@ def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[S
     if state == md.State.MISMATCH and not allow_mismatch:
         raise MvvError(mismatch_detail(blobs))
     if state != md.State.APPROVED:
-        return Snapshot(state, None, None, None, (), blobs, commit, "", None), b"", b""
+        return _without_approval(state, blobs, commit), b"", b""
     version = md.current_version(decl)
     if version is None:
         raise MvvError(f"{commit} の MVV の設定の最後のバージョンに番号が無い: {decl_path()}")
     shared = principles()
     return Snapshot(state, version, sha, None, (), blobs, commit, _sha256(shared), None), body, shared
+
+
+def _without_approval(state: str, blobs: Mapping[str, str], commit: str) -> Snapshot:
+    """承認済みでない状態 `state` の `Snapshot`（承認済みのときだけ持つ値は空）。"""
+    return Snapshot(state, None, None, None, (), blobs, commit, "", None)
 
 
 def _text(body: bytes, path: str) -> str:
