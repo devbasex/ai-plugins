@@ -30,7 +30,7 @@ ENTRY = result.ENTRY
 
 @contracts.cached_reader
 def _own_validator() -> Draft202012Validator:
-    """専用の結果スキーマから、共通の結果スキーマへの `$ref`（`allOf`）を外した検証器（共通の側は `result.errors` が確かめる）。"""
+    """専用の結果スキーマから、共通の結果スキーマへの `$ref`（`allOf`）を外した検証器（共通の側は `result.safe_errors` が確かめる）。"""
     schema = contracts.load_schema(RESULT_SCHEMA)
     return Draft202012Validator({k: v for k, v in schema.items() if k != "allOf"})
 
