@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 import strategy_fixture
 
+from ndf.adapters import git as git_adapter
 from ndf.contracts import result, worker_kinds
 from ndf.core import durable, loop, route, worker_outcome
 from ndf.core.plan import records, runner, steps, transition_decide
@@ -166,15 +167,51 @@ def _rebuild_step(plan: dict) -> list[str]:
     return next(step["run"] for step in plan["steps"] if step["id"] == "rebuild")
 
 
-def test_standard_sprint_without_the_rebuild_setting_launches_the_default_command(repo, st, capsys, monkeypatch):
+@pytest.fixture
+def offline_repo(tmp_path, monkeypatch, no_wait_no_child):
+    """`git init` しない作業ディレクトリ。git の起動（`git._start`）は答えの表から返す偽にし、保存先とリポジトリの識別を
+    固定の値にする（test_plan.py の `no_git` と同じ形）。表に無い git と、待ち・子のプロセスの起動は、呼ばれたら落ちる。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    root = tmp_path / "store"
+    monkeypatch.setattr(command, "store_root_of", lambda _cwd: root)
+    monkeypatch.setattr(command, "repo_id", lambda _cwd, _root: "https://example.invalid/o/work")
+    answers = {
+        ("rev-parse", "--show-toplevel"): f"{work}\n",
+        ("rev-parse", "--is-inside-work-tree"): "true\n",
+        ("worktree", "list", "--porcelain", "-z"): f"worktree {work}\0HEAD {'0' * 40}\0branch refs/heads/{BRANCH}\0\0",
+    }
+
+    def start(args, cwd, text, stdin=None, env=None):
+        if args[:2] == ["rev-parse", "--verify"]:
+            # コミットの無いリポジトリと同じく、集めた時点（偽の SHA）はコミットへ解決できない。コードレビューはそこで止まる
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if tuple(args) not in answers:
+            raise AssertionError(f"想定していない git: {args}")
+        return subprocess.CompletedProcess(["git", *args], 0, answers[tuple(args)], "")
+
+    monkeypatch.setattr(git_adapter, "_start", start)
+    yield work
+    durable.release_store(root)
+
+
+@pytest.fixture
+def offline_st(offline_repo):
+    root = durable.prepare_store(command.store_root_of(offline_repo)).root
+    with store.open_store(store.default_url(root), root) as opened:
+        yield opened
+
+
+def test_standard_sprint_without_the_rebuild_setting_launches_the_default_command(offline_repo, offline_st, capsys, monkeypatch):
     """#4337 の条件 1・2: 設定 `workflow.launch.rebuild` が無くても、工程「設計」と「ドキュメント再構成」のプランが組め、
     組み直すステップに `ndf document-rebuild run` と `--out` が入る。
 
-    確かめるのはプランの引数だけなので、ブランチ名は git の境界（`invoke._branch_of`）の偽物から返し、2 つのプランを
-    組んだ手で止める。設計の承認の後の 1 手は工程「コードレビュー」まで続けて流れ、集めた時点（`gathered`）が偽の SHA
-    なのでそこで止まるが、2 つのプランはその前に組み終わっている。そのため SHA は git から求めず、止まったかは
-    2 つのプランが組まれていないときだけ確かめる。
+    確かめるのはプランの引数だけなので、子のプロセスを起動しない（`offline_repo`）。ブランチ名は `invoke._branch_of` の
+    偽物から返し、2 つのプランを組んだ手で止める。設計の承認の後の 1 手は工程「コードレビュー」まで続けて流れるが、
+    2 つのプランはその前に組み終わっている。そのため止まったかは、2 つのプランが組まれていないときだけ確かめる。
     """
+    repo, st = offline_repo, offline_st
     monkeypatch.setattr(invoke, "_branch_of", lambda run: BRANCH)
     s = _sprint(repo, monkeypatch, "0" * 40, project=PROJECT_WITHOUT_REBUILD)
     tid = _new(capsys, "standard")
