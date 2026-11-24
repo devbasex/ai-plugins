@@ -10,7 +10,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
-from ndf.checks import child_deps, run
+from ndf.checks import child_deps, run, spec_docs, spec_render
 from ndf.checks.model import Finding, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +18,8 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # ディレクトリ名も当てることを確かめるため、どちらも `ndf` と違う名前にする（#3347 の決定 100）
 DIR = "ndf-dev"
 NAME = "ndfdev"
+# 規約の規則のテストが一時の保存先へ写すディレクトリ
+COPIED = ("contracts", "docs", "bin", "skills", "agents", "manifests")
 
 
 @dataclass
@@ -72,3 +74,56 @@ def _where(found: list[Finding]) -> list[tuple[str, int]]:
 def where():
     """指摘を（ファイル名, 行）の組に縮める関数（`where(found)`）。"""
     return _where
+
+
+class Copy:
+    """プラグインの規約の入力と生成物を写したリポジトリ。設計レビューの項目の表と 11.x の対応表は合成する。"""
+
+    def __init__(self, tmp: Path) -> None:
+        self.repo = tmp / "repo"
+        self.root = self.repo / "plugins" / "p"
+        self.spec = load_rules()["spec"]
+        self.table = self.repo / self.spec["review_items_source"]
+        for name in COPIED:
+            shutil.copytree(PLUGIN_ROOT / name, self.root / name, ignore=shutil.ignore_patterns("__pycache__"))
+        self.write_items(("1-1", "要旨", "S2", "10", "既存", "344", "11.0.0"))
+        self.write_children(spec_render.review_items(self.table, self.spec["review_items_columns"]))
+
+    def path(self, rel: str) -> Path:
+        return self.root / rel
+
+    def edit_json(self, rel: str, change) -> None:
+        path = self.path(rel)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        change(data)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def write(self, rel: str, text: str) -> None:
+        path = self.path(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def write_items(self, *rows: tuple[str, ...], columns: tuple[str, ...] | None = None) -> None:
+        """項目の表（列は `rules.json` の順。`columns` を渡せばその列）を書く。"""
+        self._table(self.table, columns or tuple(self.spec["review_items_columns"].values()), rows)
+
+    def write_correspondence(self, name: str, *rows: tuple[str, ...]) -> None:
+        """項目の表と同じ保存先に、対応表 `name` を書く。"""
+        self._table(self.table.parent / name, tuple(self.spec["correspondence_columns"].values()), rows)
+
+    def _table(self, path: Path, columns: tuple[str, ...], rows: tuple[tuple[str, ...], ...]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# 表\n\n" + spec_render.md_table(list(columns), [list(r) for r in rows]) + "\n\n後の文\n", encoding="utf-8")
+
+    def write_children(self, items: list[dict]) -> None:
+        self.write(child_deps.CHILDREN_REL, spec_render.children({"summary": "s", "children": {}, "tables": {}}, items))
+
+    def findings(self, write_spec: bool = False):
+        scope = Scope(self.repo, self.root, "p")
+        scope.sources = run.collect(self.root, self.repo)
+        return spec_docs.check(scope, load_rules(), write_spec)
+
+
+@pytest.fixture
+def copy(tmp_path: Path) -> Copy:
+    return Copy(tmp_path)

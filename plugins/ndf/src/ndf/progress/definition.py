@@ -212,9 +212,8 @@ def _ndf_meta(node: Mapping[str, Any]) -> Any:
     return dig(node, "metadata", NAMESPACE)
 
 
-@contracts.cached_reader
-def _context_properties() -> dict[str, Any]:
-    return contracts.load_json(CONTEXT)["properties"]
+def _context_properties() -> Mapping[str, Any]:
+    return contracts.load_schema(CONTEXT)["properties"]
 
 
 def _context_keys() -> set[str]:

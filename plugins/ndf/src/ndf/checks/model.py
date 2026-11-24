@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -150,6 +151,19 @@ def module_rel(module: str, suffix: str) -> str:
 def source_imports(src: Source, module: str) -> list[imports.Import]:
     """ファイルの import（`__init__.py` はパッケージとして相対の import を解く）。"""
     return imports.collect(src.tree, module, src.path.name == "__init__.py")
+
+
+def contained(root: Path, rel: str | Path) -> Path:
+    """`root` の下の `rel` の解決後のパス。`root` の外を指すか、シンボリックリンクを通れば `CheckError`（たどって読み書きしない）。"""
+    base = root.resolve()
+    named = Path(os.path.normpath(base / rel))
+    try:
+        resolved = named.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise CheckError(f"パスを解決できない: {rel}: {exc}") from exc
+    if resolved != named or not resolved.is_relative_to(base):
+        raise CheckError(f"{base} の外を指すか、シンボリックリンクを通るパスは読み書きしない: {rel}")
+    return resolved
 
 
 def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
