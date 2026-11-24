@@ -529,22 +529,19 @@ def test_failed_push_keeps_the_local_errors_out_of_the_pr(
     assert finished.kind == "mvv_unresolved"
 
 
-def test_commit_left_by_a_fixer_without_a_result_stays_out_of_the_pr(
+def test_commit_left_by_a_fixer_without_a_result_stops_before_any_launch(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
 ) -> None:
-    """修正の記録の無い未送信のコミット（修正担当がコミットだけを残して終わった）の誤りは、ラウンドの始めにも指摘にせず、手元の状態
-    ファイルだけに残して止まる。打ち直しはその収束を使い回さず、送れば普通の指摘になる。"""
+    """修正の記録の無い未送信のコミット（修正担当がコミットだけを残して終わった）があれば、何度打ち直しても担当を起動せず、PR へ何も
+    書かずに止まる。送れば普通にレビューし、その中の誤りも指摘になる。"""
     _push_base(repos)
     commit(wt, "new.md", f"# 新しい\n{WRONG}\n", "送られなかった修正")
     state_dir = tmp_path / "st"
     for _ in range(2):
         again = Fixer(state_dir, wt)
         _, got = _base(capsys, monkeypatch, again, wt)
-        assert got["cause"]["kind"] == "mvv_unresolved" and sorted(again.calls) == ["codex", "kiro"]
-        assert [g["name"] for g in got["outputs"]["gaps"]] == [fin.UNSENT_CITATIONS]
-        assert _by_ndf(state_dir) == [] and _state(state_dir)["rounds"][-1]["mvv_checked"] is False
-        assert [e["path"] for e in _state(state_dir)["unsent_citations"]["errors"]] == ["new.md"]
-        assert "new.md" not in json.dumps(got, ensure_ascii=False) and not [c for c in hub.comments if "new.md" in c[2]]
+        assert (got["cause"]["kind"], again.calls, hub.comments, hub.port.opened) == ("precondition", [], [], [])
+        assert "push-fix" in got["cause"]["detail"] and "new.md" not in json.dumps(got, ensure_ascii=False)
     sh(wt, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     code, got = _base(capsys, monkeypatch, Fixer(state_dir, wt, ("new.md", f"{RIGHT}\n")), wt)
     assert (code, got["status"], [f["path"] for f in _by_ndf(state_dir)]) == (0, "ok", ["new.md"])

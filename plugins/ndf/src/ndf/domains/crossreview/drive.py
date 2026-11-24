@@ -181,6 +181,16 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
 
 
+def _refuse_unsent(run: _Run, synced: worktree.SyncResult) -> None:
+    """承認済みの MVV があるとき、送れていない自分のコミット（修正担当が結果を残さずに終わったもの。修正の記録があれば `_resend` が
+    送り終えている）が残っていれば、担当の起動前に止める。PR に無い中身の指摘・注意を PR に載せず、送られないまま収束させない。"""
+    if synced.replayed == 0 or run.sent != synced.remote or criteria_decide.approved(run.snapshot) is None:
+        return
+    send = f"{identity.FIXED_WORDS['entrypoint']} cross-review push-fix {run.cfg.worktree} --branch {run.cfg.branch}"
+    detail = f"PR に届いていない自分のコミットが {synced.replayed} 件あるので、担当を起動せずに止めた"
+    raise DriveStopped("precondition", f"{detail}。`{send}` で送るか、取り消してから打ち直す")
+
+
 class _Prior(NamedTuple):
     """起動の始めに PR から読んだ、引き継ぎの確かめに要るもの（スレッドと PR コメント）。読めなければ空。"""
 
@@ -268,6 +278,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
         _save(run)
     _ingest_pending(run)
     _resend(run, synced)
+    _refuse_unsent(run, synced)
     return run
 
 
@@ -684,9 +695,8 @@ def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_n
 
 
 def _mvv_checked(run: _Run, head: str) -> bool:
-    """`head` で根拠の記述を確かめ終えたか（承認済みの MVV が無ければ真）。PR に届いていない `head` は、確かめても偽にする
-    （打ち直しが、手元だけのコミットの収束を使わない）。"""
-    return criteria_decide.approved(run.snapshot) is None or run.checked_head == head == run.sent
+    """`head` で根拠の記述を確かめ終えたか（承認済みの MVV が無ければ真）。"""
+    return criteria_decide.approved(run.snapshot) is None or run.checked_head == head
 
 
 def _final_head(run: _Run, final: str, rounds: int) -> str:
@@ -741,7 +751,7 @@ def _check_unsent(run: _Run, head: str) -> Optional[int]:
     detail = run.warnings[seen:]
     run.data[fin.UNSENT_CITATIONS] = {"head": head, "errors": errors, "detail": detail}
     if errors is None:
-        run.warnings[seen:] = [] if UNSENT_UNCHECKED in run.warnings[:seen] else [UNSENT_UNCHECKED]
+        run.warnings[seen:] = [UNSENT_UNCHECKED]
         return None
     return len(errors)
 
@@ -782,8 +792,7 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
-    """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。head が PR に届いていなければ（前の起動の修正担当が
-    コミットだけを残して終わった）、結果を指摘にせず手元の状態ファイルだけに残す。"""
+    """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。"""
     cfg = run.cfg
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
@@ -796,10 +805,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     diff.write_text(changes.review_diff(run.g, scope.base or merge_base, head), encoding="utf-8")
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
     run.last_target = changes.Target(merge_base, head, changed.docs, full_diff)
-    if head == run.sent or criteria_decide.approved(run.snapshot) is None:
-        _ingest_citations(run, changes.citations(run, run.last_target), round_no)
-    else:
-        _check_unsent(run, head)
+    _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     return _Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, changed.docs, full_diff)
 
 
