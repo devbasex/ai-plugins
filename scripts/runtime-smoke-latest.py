@@ -4,10 +4,12 @@
 - `resolve --runtime <claude|codex|all>`: 取得元の最新の版を、CLI の版の一覧
   （`tests/runtime-smoke/cli-versions.env`）と同じ `KEY=VALUE` の形で標準出力へ出す。
   取得元に届かない・形が読めないときは終了コード 1 で、標準エラーへ取得元の URL を書く
-- `report --run-url <URL> [--outcomes <ディレクトリ>] [--samples <結果 JSON>] [--repo <owner/name>]`: ジョブの成果物を
-  JSON のデータとして読み、`--outcomes` の `<ランタイム>.json` が `failure` のランタイムと、`--samples`（`ndf samples verify` の
-  結果 JSON）に食い違い（`kind: mismatch`）のある相手ごとに、同じ題の開いている課題があればコメントを足し、無ければ作る。
-  無いファイルは読まない。成果物の値は決めた形に合うものだけを題と本文へコピーし、外れた値は標準エラーにも出さない。
+- `report --run-url <URL> [--outcomes <ジョブの出力の JSON>] [--samples <結果 JSON>] [--repo <owner/name>]`: 前のジョブの結果を
+  JSON のデータとして読み、`--outcomes` が成功とも取り消しとも言わないランタイム（結果を残さずに終わったものを含む）と、
+  `--samples`（`ndf samples verify` の結果 JSON）に食い違い（`kind: mismatch`）のある相手ごとに、同じ題の開いている課題が
+  あればコメントを足し、無ければ作る。`--outcomes` が空なら（ランタイムのジョブが成功した）ランタイムの報告はせず、
+  `--samples` のファイルが無ければ見本の報告はしない。
+  読んだ値は決めた形に合うものだけを題と本文へコピーし、外れた値は標準エラーにも出さない。
   課題の一覧は報告があるときに 1 回だけ取り、取れなければ終了コード 1。作成とコメントが失敗したら、残りの報告を続けてから終了コード 1
 
 版を上げる手順（`tests/runtime-smoke/README.md`）も `resolve` の出力を一覧へ写す。
@@ -28,7 +30,7 @@ RUNTIMES = ("claude", "codex")
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+)+$")
 # ランタイムごとに課題へコピーしてよいバージョンのキー（RESOLVERS が出すキーと同じ）
 VERSION_KEYS = {"claude": ("CLAUDE_CODE_VERSION",), "codex": ("CODEX_VERSION",)}
-STATUSES = ("success", "failure", "cancelled")  # job.status の値
+NOT_FAILED = ("success", "cancelled")  # 報告しない job.status の値
 PEER_RE = re.compile(r"[a-z0-9-]+")
 # 見本の定義のスキーマ（plugins/ndf/contracts/schemas/live-sample.schema.json）の sample と同じ形
 SAMPLE_RE = re.compile(r"tests/samples/([a-z0-9][a-z0-9_-]*/)+[a-z0-9][a-z0-9_-]*\.json")
@@ -112,6 +114,15 @@ def read_json(path: Path) -> object:
         return None
 
 
+def json_object(text: object) -> dict:
+    """JSON のオブジェクトの文字列。文字列でない・読めない・オブジェクトでないなら空"""
+    try:
+        data = json.loads(text) if isinstance(text, str) else None
+    except (ValueError, RecursionError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def allowed_versions(runtime: str, text: object) -> str:
     """バージョンの一覧のうち、許すキーと形に合うものだけを並べる。1 つも無ければ空"""
     kept = []
@@ -122,19 +133,22 @@ def allowed_versions(runtime: str, text: object) -> str:
     return "\n".join(kept)
 
 
-def failed_runtimes(outcomes: Path) -> list[tuple[str, str]]:
-    """失敗で終わったランタイムと、課題へコピーしてよいバージョンの一覧。読むのは RUNTIMES の名前のファイルだけ"""
+def failed_runtimes(outcomes: str) -> list[tuple[str, str]]:
+    """成功も取り消しもしていないランタイムと、課題へコピーしてよいバージョンの一覧。
+
+    `outcomes` は matrix のジョブの出力の JSON（ランタイム → `{status, versions}` の JSON の文字列）。ジョブの失敗は分かって
+    いるので、結果が無いか読めないランタイムも失敗とみなす。読むのは RUNTIMES の名前の値だけ
+    """
     failed = []
+    by_runtime = json_object(outcomes)
     for runtime in RUNTIMES:
-        path = outcomes / f"{runtime}.json"
-        data = read_json(path)
-        if data is None:
+        data = json_object(by_runtime.get(runtime))
+        status = data.get("status")
+        if status in NOT_FAILED:
             continue
-        status = data.get("status") if isinstance(data, dict) and data.get("runtime") == runtime else None
-        if status not in STATUSES:
-            print(f"WARNING: runtime か status が決めた形でないため報告しない: {path}", file=sys.stderr)
-        elif status == "failure":
-            failed.append((runtime, allowed_versions(runtime, data.get("versions"))))
+        if status != "failure":
+            print(f"WARNING: 結果が無いか決めた形でないため失敗とみなす: {runtime}", file=sys.stderr)
+        failed.append((runtime, allowed_versions(runtime, data.get("versions"))))
     return failed
 
 
@@ -247,7 +261,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     repo = args.repo or os.environ.get("GITHUB_REPOSITORY") or None
-    failed = failed_runtimes(Path(args.outcomes)) if args.outcomes else []
+    failed = failed_runtimes(args.outcomes) if args.outcomes else []
     found = mismatches(Path(args.samples)) if args.samples else {}
     issues = [(TITLE.format(runtime=name), report_body(name, args.run_url, versions)) for name, versions in failed]
     issues += [(SAMPLES_TITLE.format(peer=peer), samples_body(peer, args.run_url, lines)) for peer, lines in found.items()]
@@ -276,7 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_resolve)
     p = sub.add_parser("report", help="失敗の課題を作るか、開いている課題へコメントを足す")
     p.add_argument("--run-url", required=True)
-    p.add_argument("--outcomes", help="ランタイムごとの結果（<ランタイム>.json）のディレクトリ（無ければ読まない）")
+    p.add_argument("--outcomes", help="ランタイムごとの結果（matrix のジョブの出力の JSON。空なら読まない）")
     p.add_argument("--samples", help="見本の突き合わせの結果 JSON（無ければ読まない）")
     p.add_argument("--repo", help="owner/name（省くと GITHUB_REPOSITORY か gh の既定）")
     p.set_defaults(func=cmd_report)

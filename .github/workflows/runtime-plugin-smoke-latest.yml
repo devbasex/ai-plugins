@@ -38,6 +38,10 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [claude, codex]
+    # ランタイムごとの結果。matrix の各ジョブは自分の名前の出力だけを書く（空の値はほかのジョブの値を上書きしない）
+    outputs:
+      claude: ${{ steps.outcome.outputs.claude }}
+      codex: ${{ steps.outcome.outputs.codex }}
     env:
       RUNTIME: ${{ matrix.runtime }}
       LATEST_VERSIONS: tmp/runtime-smoke-latest/cli-versions.env
@@ -101,27 +105,25 @@ jobs:
         env:
           FLOORS_ROOT: ${{ (inputs.floors_ref != '' && inputs.floors_ref != 'main') && 'tmp/deps-floors' || 'tmp/deps-tool' }}
         run: python3 tmp/deps-tool/scripts/plugin-deps.py cli-help --root tmp/deps-tool --floors "$FLOORS_ROOT" --runtime gh
-      # needs.<job>.result は matrix の全体で 1 つの値なので、どのランタイムが落ちたかは成果物で report へ渡す
-      - name: Write the outcome for the report job
-        if: always()
-        env:
-          STATUS: ${{ job.status }}
-        run: |
-          mkdir -p tmp/runtime-smoke-latest/outcome
-          versions=""
-          if [ -f "$LATEST_VERSIONS" ]; then versions="$(cat "$LATEST_VERSIONS")"; fi
-          jq -n --arg runtime "$RUNTIME" --arg status "$STATUS" --arg versions "$versions" \
-            '{runtime: $runtime, status: $status, versions: $versions}' \
-            > "tmp/runtime-smoke-latest/outcome/$RUNTIME.json"
       - name: Upload smoke artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: runtime-smoke-latest-${{ matrix.runtime }}
-          path: |
-            tmp/runtime-smoke/${{ matrix.runtime }}
-            tmp/runtime-smoke-latest/outcome/
+          path: tmp/runtime-smoke/${{ matrix.runtime }}
           if-no-files-found: ignore
+      # needs.<job>.result は matrix の全体で 1 つの値なので、どのランタイムが落ちたかはジョブの出力で report へ渡す。
+      # 成果物のアップロードの失敗も job.status に含めるため、最後の手順にする
+      - name: Pass the outcome to the report job
+        id: outcome
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          versions=""
+          if [ -f "$LATEST_VERSIONS" ]; then versions="$(cat "$LATEST_VERSIONS")"; fi
+          outcome="$(jq -nc --arg status "$STATUS" --arg versions "$versions" '{status: $status, versions: $versions}')"
+          echo "$RUNTIME=$outcome" >> "$GITHUB_OUTPUT"
 
   live-samples:
     runs-on: ubuntu-latest
@@ -170,7 +172,7 @@ jobs:
           if-no-files-found: ignore
 
   # 課題へ書くのは、検証したコードがすべて main の実行だけ。任意の ref か floors_ref を試した手の起動では動かさない
-  # （matrix のジョブがその ref のコードを動かし、成果物を書けるため）
+  # （matrix のジョブがその ref のコードを動かし、成果物と出力を書けるため）
   report:
     needs: [runtime-smoke-latest, live-samples]
     if: ${{ !cancelled() && (needs.runtime-smoke-latest.result == 'failure' || needs.live-samples.outputs.mismatch-artifact-id != '') && (github.event_name == 'schedule' || ((inputs.ref || 'main') == 'main' && (inputs.floors_ref || 'main') == 'main')) }}
@@ -187,14 +189,6 @@ jobs:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: scripts/runtime-smoke-latest.py
-      # 名前でなく pattern で落とす（成果物が無い日も落ちない）。merge-multiple が無いと、落とした成果物の数で並びが変わる
-      - name: Download the runtime outcomes
-        if: ${{ needs.runtime-smoke-latest.result != 'success' }}
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: runtime-smoke-latest-*
-          path: tmp/report/runtimes
-          merge-multiple: true
       # 名前で探すと、再実行のとき前の試行の結果を読む。検証のジョブが上げた成果物の ID で落とす
       - name: Download the result of the samples
         if: ${{ !cancelled() && needs.live-samples.outputs.mismatch-artifact-id != '' }}
@@ -203,13 +197,14 @@ jobs:
           artifact-ids: ${{ needs.live-samples.outputs.mismatch-artifact-id }}
           path: tmp/report/samples
           merge-multiple: true
-      # 片方の成果物を落とせなくても、落とせた分は報告する（落とせなかった手順の失敗でジョブは失敗のまま終わる）
+      # 見本の成果物を落とせなくても、ランタイムの分は報告する（落とせなかった手順の失敗でジョブは失敗のまま終わる）
       - name: Report the failures as issues
         if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
+          OUTCOMES: ${{ needs.runtime-smoke-latest.result != 'success' && toJSON(needs.runtime-smoke-latest.outputs) || '' }}
         run: >-
           python3 scripts/runtime-smoke-latest.py report
           --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          --outcomes tmp/report/runtimes/runtime-smoke-latest/outcome
+          --outcomes "$OUTCOMES"
           --samples tmp/report/samples/result.json

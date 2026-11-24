@@ -109,8 +109,8 @@ RUN_URL = "https://github.com/o/r/actions/runs/123"
 SAMPLE = "tests/samples/github/rest/issue.json"
 
 
-def outcome(runtime, status="failure", versions="", **extra):
-    return {"runtime": runtime, "status": status, "versions": versions, **extra}
+def outcome(status="failure", versions="", **extra):
+    return {"status": status, "versions": versions, **extra}
 
 
 def mismatch(peer="github", sample=SAMPLE, detail="user/login: type", kind="mismatch"):
@@ -118,17 +118,21 @@ def mismatch(peer="github", sample=SAMPLE, detail="user/login: type", kind="mism
 
 
 def run_report(mod, monkeypatch, tmp_path, outcomes=None, samples=None, issues=(), fail=False):
-    """成果物を置いて `report` を打ち、終了コードと偽の gh を返す。`outcomes` はファイル名 → 中身（文字列はそのまま書く）。"""
-    folder = tmp_path / "outcome"
-    folder.mkdir()
-    for name, data in (outcomes or {}).items():
-        (folder / name).write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+    """前のジョブの結果を渡して `report` を打ち、終了コードと偽の gh を返す。
+
+    `outcomes` はランタイム → 結果（文字列はそのまま渡す。書かないランタイムは成功）。None ならジョブは成功、文字列なら出力そのもの。
+    """
+    if outcomes is None or isinstance(outcomes, str):
+        outputs = outcomes or ""
+    else:
+        given = {**{r: outcome(status="success") for r in mod.RUNTIMES}, **outcomes}
+        outputs = json.dumps({r: data if isinstance(data, str) else json.dumps(data) for r, data in given.items()})
     result = tmp_path / "result.json"
     if samples is not None:
         result.write_text(samples if isinstance(samples, str) else json.dumps({"tool": "samples", "items": samples}), encoding="utf-8")
     gh = FakeGh(list(issues), fail=fail)
     monkeypatch.setattr(mod, "run_gh", gh)
-    argv = ["--run-url", RUN_URL, "--outcomes", str(folder), "--samples", str(result), "--repo", "o/r"]
+    argv = ["--run-url", RUN_URL, "--outcomes", outputs, "--samples", str(result), "--repo", "o/r"]
     return run(mod, "report", *argv), gh
 
 
@@ -146,8 +150,8 @@ def test_version_keys_are_the_keys_the_resolvers_emit(mod, monkeypatch):
 
 def test_report_creates_issue_with_runtime_versions_and_run_url(mod, monkeypatch, tmp_path):
     outcomes = {
-        "claude.json": outcome("claude", versions="CLAUDE_CODE_VERSION=2.1.300\n"),
-        "codex.json": outcome("codex", status="success", versions="CODEX_VERSION=0.163.0\n"),
+        "claude": outcome(versions="CLAUDE_CODE_VERSION=2.1.300\n"),
+        "codex": outcome(status="success", versions="CODEX_VERSION=0.163.0\n"),
     }
     issues = [{"number": 5, "title": "最新の版のスモークが落ちた: codex"}]
     code, gh = run_report(mod, monkeypatch, tmp_path, outcomes, issues=issues)
@@ -163,7 +167,7 @@ def test_report_creates_issue_with_runtime_versions_and_run_url(mod, monkeypatch
 @pytest.mark.parametrize(
     ("given", "title"),
     [
-        ({"outcomes": {"codex.json": outcome("codex")}}, "最新の版のスモークが落ちた: codex"),
+        ({"outcomes": {"codex": outcome()}}, "最新の版のスモークが落ちた: codex"),
         ({"samples": [mismatch()]}, "テストの見本が本物の記述と食い違った: github"),
     ],
     ids=["runtime", "samples"],
@@ -179,7 +183,7 @@ def test_report_comments_on_open_issue_instead_of_creating(mod, monkeypatch, tmp
 
 
 def test_report_fails_when_gh_fails_after_trying_the_rest(mod, monkeypatch, tmp_path, capsys):
-    outcomes = {f"{r}.json": outcome(r) for r in mod.RUNTIMES}
+    outcomes = {r: outcome() for r in mod.RUNTIMES}
     code, gh = run_report(mod, monkeypatch, tmp_path, outcomes, [mismatch()], fail=True)
     assert code == 1
     # 一覧は報告が何件でも 1 回だけ取る
@@ -188,7 +192,7 @@ def test_report_fails_when_gh_fails_after_trying_the_rest(mod, monkeypatch, tmp_
 
 
 def test_report_fails_without_writing_when_listing_fails(mod, monkeypatch, tmp_path, capsys):
-    code, gh = run_report(mod, monkeypatch, tmp_path, {"claude.json": outcome("claude")}, [mismatch()], fail="list")
+    code, gh = run_report(mod, monkeypatch, tmp_path, {"claude": outcome()}, [mismatch()], fail="list")
     assert code == 1
     assert gh.kinds() == [["issue", "list"]]
     assert "gh" in capsys.readouterr().err
@@ -220,28 +224,41 @@ def test_report_creates_one_issue_per_mismatched_peer(mod, monkeypatch, tmp_path
 
 
 @pytest.mark.parametrize(
-    ("outcomes", "failed", "refused"),
+    ("outcomes", "failed", "unknown"),
     [
-        ({}, [], 0),
-        ({"claude.json": outcome("claude"), "codex.json": outcome("codex")}, ["claude", "codex"], 0),
-        ({"claude.json": outcome("claude", status="success"), "codex.json": outcome("codex", status="cancelled")}, [], 0),
-        ({"EVIL.json": outcome("EVIL"), "kiro.json": outcome("kiro")}, [], 0),
-        ({"claude.json": outcome("EVIL"), "codex.json": outcome("claude")}, [], 2),
-        ({"claude.json": outcome("claude", status="EVIL"), "codex.json": outcome("codex", status=["failure"])}, [], 2),
-        ({"claude.json": "{EVIL", "codex.json": outcome("codex")}, ["codex"], 1),
-        ({"claude.json": "[]", "codex.json": json.dumps("EVIL")}, [], 2),
+        (None, [], 0),
+        ({"claude": outcome(), "codex": outcome()}, ["claude", "codex"], 0),
+        ({"claude": outcome(status="success"), "codex": outcome(status="cancelled")}, [], 0),
+        ({"EVIL": outcome(), "kiro": outcome()}, [], 0),
+        ({"claude": outcome(status="EVIL"), "codex": outcome(status=["failure"])}, ["claude", "codex"], 2),
+        ({"claude": "{EVIL", "codex": outcome()}, ["claude", "codex"], 1),
+        ({"claude": "[]", "codex": json.dumps("EVIL")}, ["claude", "codex"], 2),
+        ({"codex": ""}, ["codex"], 1),
+        ("{}", ["claude", "codex"], 2),
+        ("EVIL", ["claude", "codex"], 2),
     ],
-    ids=["none", "both", "not-failure", "unknown-runtime", "name-differs", "bad-status", "broken-json", "not-object"],
+    ids=[
+        "job-succeeded",
+        "both",
+        "not-failure",
+        "unknown-runtime",
+        "bad-status",
+        "broken-json",
+        "not-object",
+        "no-outcome",
+        "no-outputs",
+        "broken-outputs",
+    ],
 )
-def test_report_reads_only_failed_outcomes_of_known_runtimes(mod, monkeypatch, tmp_path, capsys, outcomes, failed, refused):
+def test_report_reports_known_runtimes_not_known_to_have_passed(mod, monkeypatch, tmp_path, capsys, outcomes, failed, unknown):
     code, gh = run_report(mod, monkeypatch, tmp_path, outcomes)
     assert code == 0
     assert [title for title, _ in written(gh)] == [f"最新の版のスモークが落ちた: {r}" for r in failed]
     assert gh.kinds().count(["issue", "list"]) == bool(failed)
     out = capsys.readouterr()
     assert "EVIL" not in f"{out.out}{out.err}{gh.calls}"
-    # 読めたのに報告しないファイルは標準エラーへ知らせる（知らない名前のファイルは読まない）
-    assert len(out.err.splitlines()) == refused
+    # 結果が無いか読めないランタイムは、失敗とみなしたことを標準エラーへ知らせる（知らない名前の値は読まない）
+    assert len(out.err.splitlines()) == unknown
 
 
 @pytest.mark.parametrize(
@@ -257,8 +274,8 @@ def test_report_reads_only_failed_outcomes_of_known_runtimes(mod, monkeypatch, t
     ids=["other-keys", "bad-version", "bad-line", "empty", "list", "null"],
 )
 def test_report_copies_only_allowed_version_lines(mod, monkeypatch, tmp_path, versions, kept):
-    data = outcome("claude", versions=versions, title="EVIL", note="EVIL")
-    code, gh = run_report(mod, monkeypatch, tmp_path, {"claude.json": data})
+    data = outcome(versions=versions, title="EVIL", note="EVIL")
+    code, gh = run_report(mod, monkeypatch, tmp_path, {"claude": data})
     assert code == 0
     [(_, body)] = written(gh)
     assert f"```text\n{kept}\n```" in body
