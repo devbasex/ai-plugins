@@ -122,7 +122,7 @@ class _Run:
     history: list[frozenset[str]]
     # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
-    # 起動の始めにベースのコミットから読んだプロジェクト MVV（#4076）
+    # 起動の始めにベースブランチ（`--base` がコミットの SHA なら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
     # HEAD の SHA から `--base` との merge-base の SHA（同じ head で求め直さない。PR 3944 の r3-5）
     merge_bases: dict[str, str] = field(default_factory=dict)
@@ -178,10 +178,25 @@ class _Prior(NamedTuple):
 def _base_branch(base: str, remote: str) -> Optional[str]:
     """`--base` から、リモートから取得するブランチの名前を決める。`<リモート>/<ブランチ>` の形も受ける。
 
-    コミットの SHA なら取得するブランチが無いので None（スプリントの単位の PR を集めた後のレビューは、集めた時点の
-    コミットを `--base` に渡す）。
+    コミットの SHA なら None（スプリントブランチへ単位の PR を集めた後のレビューは、集めた時点のコミットを `--base` に渡す）。
     """
     return None if git.FULL_SHA.match(base) else base.removeprefix(f"{remote}/")
+
+
+def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
+    """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
+
+    `--base` がコミットの SHA のときだけ使う。その SHA はレビュー中のブランチの途中のことがあり、そこから MVV を読むと、
+    レビュー中のブランチが自分で書き換えた MVV で自分を確かめることになる。
+    """
+    pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
+    if reader_for is None:
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い（--base がコミットの SHA なので要る）")
+    try:
+        return reader_for(pr).base()
+    except Exception as exc:
+        # 認証・通信・応答のどの失敗でも、MVV を決められないので止める
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
 
 
 def _snapshot(cfg: RunConfig, ref: str) -> mvv.Snapshot:
@@ -189,20 +204,21 @@ def _snapshot(cfg: RunConfig, ref: str) -> mvv.Snapshot:
     try:
         return mvv.current(cfg.worktree, ref)
     except (mvv.MvvError, identity.IdentityError, OSError) as exc:
-        raise DriveStopped("precondition", f"ベース {cfg.base} の MVV を読めない: {exc}") from exc
+        raise DriveStopped("precondition", f"{ref} の MVV を読めない: {exc}") from exc
 
 
-def _start(cfg: RunConfig) -> _Run:
+def _start(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     remote = g.remote()
     branch = _base_branch(cfg.base, remote)
-    synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
+    source = branch if branch is not None else _merge_target(cfg, reader_for)
+    synced = worktree.sync_worktree(g, cfg.branch, remote, base_branch=source)
     if synced.conflicts:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
-    # MVV と差分を同じコミットから作る。起動の途中で別のセッションがベースを取得しても、比べる相手は変わらない（#4090）
-    snap = _snapshot(cfg, cfg.base if branch is None else f"refs/remotes/{remote}/{branch}")
-    cfg = replace(cfg, base_commit=snap.commit)
+    snap = _snapshot(cfg, f"refs/remotes/{remote}/{source}")
+    # 差分の比較元をコミットで持つ。起動の途中で別のセッションがベースを取得しても、比べる相手は変わらない（#4090）
+    cfg = replace(cfg, base_commit=snap.commit if branch is not None else cfg.base)
     warnings: list[str] = []
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
@@ -770,14 +786,14 @@ def _reusable(run: _Run) -> bool:
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optional[ReaderFor] = None) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
+    いつも読み、PR のマージ先は `--base` がコミットの SHA のときだけ読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         # 既存の通常ファイル・書き込めない場所を渡されても、トレースバックでなく前提の欠けとして返す（PR 3944 の r13-1）
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
-    run = _start(cfg)
+    run = _start(cfg, reader_for)
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)

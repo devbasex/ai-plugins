@@ -66,6 +66,9 @@ class FakePort:
         self.review_reads = 0
         self.thread_reads = 0
         self.changed_reads = 0
+        # PR のマージ先のブランチ（None なら読み取りに失敗する）と、読んだ回数
+        self.base_ref: str | None = "main"
+        self.base_reads = 0
 
     def at(self, pr: int) -> "FakePort":
         """PR を切り替える（作ったスレッドは PR ごとに読む）。"""
@@ -83,6 +86,12 @@ class FakePort:
     def changed(self):
         self.changed_reads += 1
         return _Everything() if self.files is None else frozenset(self.files)
+
+    def base(self):
+        self.base_reads += 1
+        if self.base_ref is None:
+            raise RuntimeError("PR を読めない")
+        return self.base_ref
 
     def open_threads(self):
         self.thread_reads += 1

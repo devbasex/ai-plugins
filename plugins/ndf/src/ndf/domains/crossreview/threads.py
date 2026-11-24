@@ -88,7 +88,10 @@ class Port(Protocol):
 
 class Reader(Protocol):
     """PR のコメントを読む口（テストは偽物）。失敗は例外。`comments` は PR コメント（引き継ぎの確かめに要る記録のコメントを
-    含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。"""
+    含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。`base` は PR の
+    マージ先のブランチの名前。"""
+
+    def base(self) -> str: ...
 
     def comments(self) -> list[prior_decide.Remark]: ...
 
@@ -497,6 +500,10 @@ class GitHubPort:
         if self._pr_head is None:
             self._pr_head = str(self.hub.rest("GET", f"/repos/{self.hub.repo}/pulls/{self.pr}")["head"]["sha"])
         return self._pr_head
+
+    def base(self) -> str:
+        """PR のマージ先のブランチの名前。"""
+        return str(self.hub.pull(self.pr).base_ref)
 
     def changed(self) -> frozenset[str]:
         """PR の変更ファイル（1 回だけ読み、`open_thread` と共有する）。"""

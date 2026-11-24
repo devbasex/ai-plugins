@@ -6,11 +6,13 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, store
+from ndf.adapters.github import Pull
+from ndf.domains.crossreview import criteria_decide, store, threads
 from ndf.domains.records import mvv
 
 from ._repos import BRANCH, Repos, commit, sh
@@ -134,9 +136,7 @@ def test_base_missing_on_the_remote_stops_before_any_agent(wt: Path, tmp_path: P
 
 
 @pytest.mark.parametrize("base", ["main", "origin/main"])
-def test_issue_4090_9_stale_local_base_is_not_used(
-    base: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path
-) -> None:
+def test_issue_4090_9_stale_local_base_is_not_used(base: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """手元の `main` が古くても、MVV と差分はリモートの最新の `main` から作る。`main` に入っている変更は、相手役へ渡す
     差分にも、詳細レビュー済みのセクションにも現れない。"""
     _push_base(repos, 12)
@@ -151,6 +151,8 @@ def test_issue_4090_9_stale_local_base_is_not_used(
     assert [r["base"] for r in state["rounds"]] == [remote, remote]
     assert state["reviewed_sections"] and not any("mvv" in x for x in state["reviewed_sections"])
     assert "バージョン 12" in _prompt(fake, "codex")
+    # ブランチ名を渡した起動では、マージ先を GitHub へ読みに行かない
+    assert hub.port.base_reads == 0
 
 
 def test_issue_4090_9_base_moved_during_the_run_is_not_used(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -168,10 +170,48 @@ def test_issue_4090_9_base_moved_during_the_run_is_not_used(repos: Repos, wt: Pa
     assert [r["base"] for r in _state(fake.state_dir)["rounds"]] == [fixed, fixed]
 
 
-def test_base_given_as_a_commit_is_used_without_fetching_a_branch(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """`--base` にコミットの SHA を渡すと、ブランチとして取得せず、そのコミットと比べる。"""
-    gathered = sh(wt, "rev-parse", "origin/main").strip()
+def _gathered_in_sprint_branch(repos: Repos) -> str:
+    """`main` には承認済みの MVV のバージョン 11、レビュー中のブランチには勝手に上げたバージョン 99 がある状態にして、
+    そのブランチの途中のコミットを返す。"""
+    _push_base(repos, 11)
+    _merge_base_into_pr(repos)
+    _approve(repos.other, 99, BODY + "3. **レビュー中のブランチが足した**\n")
+    gathered = commit(repos.other, "unit.md", "# 単位\n", "集めた単位")
+    commit(repos.other, "after.md", "# 後\n", "集めた後の変更")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    return gathered
+
+
+def test_base_given_as_a_commit_reads_the_mvv_from_the_merge_target(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path, hub
+) -> None:
+    """`--base` がコミットの SHA なら、MVV は PR のマージ先のブランチから読み、レビュー中のブランチが変えた MVV を使わない。
+    差分は渡されたコミットと比べる。"""
+    gathered = _gathered_in_sprint_branch(repos)
     fake = _fixing(tmp_path)
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", gathered)
     assert (code, got["status"]) == (0, "ok")
-    assert {r["base"] for r in _state(fake.state_dir)["rounds"]} == {gathered}
+    body, _ = _criterion_paths(_prompt(fake, "codex"), mvv_state)
+    assert "バージョン 11" in _prompt(fake, "codex") and body.read_text(encoding="utf-8") == BODY
+    assert [r["base"] for r in _state(fake.state_dir)["rounds"]] == [gathered, gathered]
+    diff = (fake.state_dir / "round1.diff").read_text(encoding="utf-8")
+    assert "after.md" in diff and "unit.md" not in diff and "mvv" not in diff
+    assert hub.port.base_reads == 1
+
+
+def test_unreadable_merge_target_stops_before_any_agent(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """`--base` がコミットの SHA で PR のマージ先を読めなければ、渡されたコミットの MVV で代用せず、担当を起動せずに止める。"""
+    gathered = _gathered_in_sprint_branch(repos)
+    hub.port.base_ref = None
+    fake = _fixing(tmp_path)
+    _, got = _run(capsys, monkeypatch, fake, wt, "--base", gathered)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "precondition")
+    assert "マージ先" in got["summary"] and "PR を読めない" in got["summary"]
+    assert fake.calls == []
+    assert not store.state_pr(fake.state_dir, PR).path.exists()
+
+
+def test_merge_target_is_the_base_of_the_pull_request() -> None:
+    pull = Pull(PR, "open", False, "h" * 40, BRANCH, "release", "", "", "", "")
+    hub = SimpleNamespace(pull=lambda number: pull if number == PR else None)
+    assert threads.GitHubPort(hub, None, PR, RuntimeError).base() == "release"
