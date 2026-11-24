@@ -105,15 +105,9 @@ def test_backoff_grows_and_is_capped():
 # 現状固定（I-017）: 打ち直しに retry_after が要るかは表の requires_retry_after、打ち直さないときのルートは表の exhausted から決まる。
 def test_pick_reads_requires_retry_after_and_exhausted_from_the_table(contracts_copy):
     assert routing.pick("infra_wait") == routing.Route("retry", None, 600.0, "infra_wait")
-    contracts_copy(
-        "causes.json",
-        lambda d: {**d, "causes": [{**c, "requires_retry_after": True} if c["kind"] == "infra_wait" else c for c in d["causes"]]},
-    )
+    contracts_copy("causes/infra_wait.json", lambda c: {**c, "requires_retry_after": True})
     assert routing.pick("infra_wait") == routing.Route("conductor", None, 0.0, "infra_wait")
     assert routing.pick("infra_wait", on_fail="f") == routing.Route("step", "f", 0.0, "infra_wait")
     assert routing.pick("infra_wait", retry=routing.RetryState(retry_after=7.0)) == routing.Route("retry", None, 7.0, "infra_wait")
-    contracts_copy(
-        "causes.json",
-        lambda d: {**d, "causes": [{**c, "exhausted": "human"} if c["kind"] == "infra_wait" else c for c in d["causes"]]},
-    )
+    contracts_copy("causes/infra_wait.json", lambda c: {**c, "exhausted": "human"})
     assert routing.pick("infra_wait", on_fail="f") == routing.Route("human", None, 0.0, "infra_wait")

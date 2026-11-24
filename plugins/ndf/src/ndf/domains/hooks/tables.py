@@ -1,4 +1,4 @@
-"""hook が読むコントラクトの表（`contracts/limits.json` と `contracts/hooks/*.json`）の読み込みと、出力の組み立て。
+"""hook が読むコントラクトの表（`contracts/limits/` と `contracts/hooks/*.json`）の読み込みと、出力の組み立て。
 
 標準ライブラリだけで書く（環境が無いときのエントリポイントも `strict` の回答をここで出力の形にする）。
 
@@ -9,27 +9,77 @@ hook の経路では `ndf.contracts`（jsonschema を読む）を import しな�
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Collection, Optional
 
 # このファイルから 4 つ上がプラグインの根（src/ndf/domains/hooks/tables.py）
 PLUGIN_ROOT = Path(__file__).resolve().parents[4]
 CONTRACTS = PLUGIN_ROOT / "contracts"
+# 上限の設定の分けた表（1 方針 1 ファイル）
+LIMITS_DIR = CONTRACTS / "limits"
 
 
 class TableError(Exception):
     """コントラクトの表が無い・読めない・引いた行が無い。"""
 
 
+class TableMissing(TableError):
+    """コントラクトの表のファイルが無い。"""
+
+
 @lru_cache(maxsize=None)
 def load(rel: str) -> Any:
     """`contracts/` からの相対パスの表を 1 プロセスに 1 回読む。"""
-    path = CONTRACTS / rel
+    return _read_json(CONTRACTS / rel)
+
+
+def _read_json(path: Path) -> Any:
+    """表のファイル 1 つを読む。同じキーが 2 つあれば断る（`ndf.contracts` の `load_json` と同じ規則）。"""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_refuse_duplicate_keys)
+    except FileNotFoundError as exc:
+        raise TableMissing(f"コントラクトの表が無い: {path}") from exc
     except (OSError, ValueError) as exc:
         raise TableError(f"コントラクトの表を読めない: {path}: {exc}") from exc
+
+
+def _refuse_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict:
+    out = dict(pairs)
+    if len(out) != len(pairs):
+        raise ValueError("同じキーが 2 つある")
+    return out
+
+
+def _split_keys(rel: str) -> list[str]:
+    """分けた表の項目のキー（ファイル名の昇順）。`.json` でないファイルと、大小文字だけが違うキーは断る。"""
+    root = CONTRACTS / rel
+    if not root.is_dir():
+        raise TableError(f"分けた表のディレクトリ {root} が無い")
+    # 先頭が _ のファイルは項目でない（`ndf.contracts` の `META_PREFIX` と同じ規則）
+    stems = [os.path.splitext(n) for n in sorted(os.listdir(root)) if not n.startswith("_")]
+    odd = [stem + ext for stem, ext in stems if ext != ".json"]
+    if odd:
+        raise TableError(f"分けた表 {root} に拡張子が .json でないファイルがある: {', '.join(odd)}")
+    keys = [stem for stem, _ in stems]
+    folded = [k.casefold() for k in keys]
+    if len(set(folded)) != len(folded):
+        clash = [k for k, f in zip(keys, folded) if folded.count(f) > 1]
+        raise TableError(f"分けた表 {root} に大小文字だけが違うキーがある: {', '.join(clash)}")
+    return keys
+
+
+def _split_item(rel: str, key: str) -> dict[str, Any]:
+    item = load(f"{rel}/{key}.json")
+    if not isinstance(item, dict):
+        raise TableError(f"分けた表の項目 {CONTRACTS / rel / key}.json がオブジェクトでない（{type(item).__name__}）")
+    return item
+
+
+def load_split(rel: str) -> dict[str, Any]:
+    """分けた表 `contracts/<rel>/` の、ファイル名（拡張子 `.json` を除く）→ 中身の辞書。規則は `ndf.contracts.load_split` と同じ。"""
+    return {key: _split_item(rel, key) for key in _split_keys(rel)}
 
 
 def json_object(text: str) -> Optional[dict[str, Any]]:
@@ -46,14 +96,34 @@ def hooks_dir(state_dir: Path) -> Path:
     return state_dir / "hooks"
 
 
-def policies() -> dict[str, dict[str, Any]]:
-    """上限の設定の方針の表（名前 → 値）。"""
-    return load("limits.json")["policies"]
+def policies(names: Collection[str]) -> dict[str, dict[str, Any]]:
+    """上限の設定のうち、`names` にある方針（名前 → 値）。無い方針は含めず、ある方針の数だけファイルを読む。
+
+    hook の起動の経路では `policy`・`policy_value` で 1 方針だけを読み、ここを呼ぶのは予算の検査だけである。
+    """
+    return {key: _split_item(LIMITS_DIR.name, key) for key in _split_keys(LIMITS_DIR.name) if key in names}
+
+
+def policy_path(name: str) -> str:
+    """方針のファイルの、プラグインの根からの相対パス（直す先として示す）。"""
+    return f"{CONTRACTS.name}/{LIMITS_DIR.name}/{name}.json"
+
+
+@lru_cache(maxsize=None)
+def policy(name: str) -> Optional[dict[str, Any]]:
+    """方針 1 つの中身。そのファイルだけを 1 プロセスに 1 回読む。方針が無ければ None。
+
+    ファイルの有無を先に照会せず、読めなかったことから欠けを知る（無いことも 1 プロセスに 1 回だけ確かめる）。
+    """
+    try:
+        return _split_item(LIMITS_DIR.name, name)
+    except TableMissing:  # noqa: NDF401 ファイル: 方針が無いことは値の無さとして返し、要る側（`policy_value` など）が断る
+        return None
 
 
 def policy_value(name: str, key: str) -> Any:
     """方針の 1 つの値。無ければ `TableError`。"""
-    row = policies().get(name)
+    row = policy(name)
     if row is None or key not in row:
         raise TableError(f"上限の設定の方針 {name} に {key} が無い")
     return row[key]

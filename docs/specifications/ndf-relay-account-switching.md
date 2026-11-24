@@ -30,7 +30,7 @@
 | 替えるかの判断（純粋な関数） | `plugins/ndf/src/ndf/domains/relay/account_decide.py`・`switch_decide.py` |
 | 使用率の取得・取得の記録・外した間 | `plugins/ndf/src/ndf/domains/relay/accounts.py`・`plugins/ndf/src/ndf/adapters/claude_usage.py`・`adapters/http.py` |
 | 見回り・止めてよい時点・認証の失敗の確かめ | `plugins/ndf/src/ndf/domains/relay/wrapper.py`・`wrapper_guard.py`・`wrapper_auth.py`・`wrapper_fetch.py`・`observe.py` |
-| 閾値と秒 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `relay.*`（下の「データ・設定」） |
+| 閾値と秒 | [`contracts/limits/`](../../plugins/ndf/contracts/limits/) の `relay.*`（下の「データ・設定」） |
 | 記録の置き場 | [`contracts/domains/ndf-files.json`](../../plugins/ndf/contracts/domains/ndf-files.json) の `relay-usage-fetch`・`relay-auth-held` |
 
 ## 用語
@@ -298,7 +298,7 @@ I1〜I5・I10 は [ndf-relay-account-config-dir.md](ndf-relay-account-config-dir
 数が `relay.spin` の `count`（3）に達したら、次のセグメントを起動しない（`spin`）。子が動いていれば止めずに中継を続け、
 そのセグメントの間は以後の区切り・替えでも起動しない（保持）。画面に理由の 1 行、`log.jsonl` に `stop` の行（理由 `spin`）を
 出す。保持はそのセグメントが起動から 120 秒に達したら解け、上限の後の替えを含めて通常どおり続く。子が終わっていれば `end` の
-行（理由 `spin`）を書いて終わる（停止理由 `spin`。`contracts/causes.json`）。当たるかは、判断の関数の替え先ではなく実際に
+行（理由 `spin`）を書いて終わる（停止理由 `spin`。`contracts/causes/`）。当たるかは、判断の関数の替え先ではなく実際に
 起動する起動先ごとに決める。1 つ目のセグメントも数え、待つ手（`wait_reset`・`stalled`）はセグメントを終えない。
 
 秒は環境変数 `NDF_RELAY_SPIN` で替え、0 で検出を切る。リレーハブの `ndf relay restart` は、対象を止める前に後継へ渡す環境で
@@ -334,7 +334,7 @@ I1〜I5・I10 は [ndf-relay-account-config-dir.md](ndf-relay-account-config-dir
 新しい世代の項目は残る）。終わった項目と世代の違う項目は読む側が無いものとし、次に書くときに消す。登録・削除の成功の後に
 `forget` が旧い世代の項目・ファイルを消す。
 
-| 上限の値（`contracts/limits.json`） | 値 | 使い方 |
+| 上限の値（`contracts/limits/`） | 値 | 使い方 |
 | --- | --- | --- |
 | `relay.five-hour-guard` | `count: 85` | 閾値 A |
 | `relay.weekly-prefer` | `count: 70` | 閾値 B（カットポイントと替え先の選び方だけ） |
@@ -410,7 +410,7 @@ I1〜I5・I10 は [ndf-relay-account-config-dir.md](ndf-relay-account-config-dir
 
 | 場面 | 停まるか | 扱い |
 | --- | --- | --- |
-| 止めてよい時点が来ないまま上限に届く（長い 1 回の応答・長い Tool の実行）・1 回の呼び出しで閾値の手前から上限まで動く・閾値を越えてから次の取得（最長 300 秒）までに上限へ届く | 停まる | 守り 3 で戻る。停まった応答の途中の作業は、会話の記録に残った所までになる。閾値は `limits.json` で下げる |
+| 止めてよい時点が来ないまま上限に達する（長い 1 回の応答・長い Tool の実行）・1 回の呼び出しで閾値の手前から上限まで動く・閾値を越えてから次の取得（最長 300 秒）までに上限に達する | 停まる | 守り 3 で戻る。停まった応答の途中の作業は、会話の記録に残った所までになる。閾値は `contracts/limits/` で下げる |
 | 既定のログインで起動した最初のセグメント | 守り 1 が効かない（既定のログインの使用率は取らない） | 守り 3 で登録済みアカウントへ替わった後は効く。`ndf relay account use` で指定すれば最初から効く |
 | 使用率の API が窓を返さない席（Team・Enterprise の席など。未確認） | 守り 1 が効かない | 使用率の分からない候補として扱い、守り 3 だけが効く |
 | 登録済みアカウントがすべて上限で、従量の接続も API キーも無い | 停まる（避けられない） | 最も早く解けるアカウントの時刻まで待ち、人の入力無しで戻る |

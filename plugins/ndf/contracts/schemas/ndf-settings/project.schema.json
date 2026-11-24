@@ -218,6 +218,14 @@
         }
       },
       "additionalProperties": false
+    },
+    "toolchain": {
+      "$ref": "#/$defs/Toolchain",
+      "description": "このリポジトリの CI が何で回すか。検査（ndf check の規則 toolchain）が読む。キーごとに独立して効き、無いキーは突き合わせない。NDF 自身が動く条件は配るコントラクト（contracts/data/toolchain.json）が持つ"
+    },
+    "budget": {
+      "$ref": "#/$defs/Budget",
+      "description": "このリポジトリの件数の上限と、使われない依存の数え方。検査（ndf check の規則 budget）が読む。キーが無い項目は上限と比べない"
     }
   },
   "x-ndf-location": "worktree",
@@ -1376,6 +1384,48 @@
       },
       "description": "版数を書き換える追加のファイル（旧い .ndf/release.json の version_files の移す先）"
     },
+    "Budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "テストの件数（def test_ の定義の数）の上限"
+        },
+        "ci_jobs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CI のジョブの数の上限"
+        },
+        "unused_deps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "使われない依存の数の上限"
+        },
+        "replaceable": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "既存のライブラリで置き換えられる自作の箇所の数の上限"
+        },
+        "dep_modules": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "依存の名前（正規化した小文字）→ import の名前。書かない依存は、名前の - と . を _ へ替えたものを import の名前とみなす"
+        },
+        "dep_exempt": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "使っているとみなす依存の名前 → 理由（子プロセスとして起動する・プラグインとして読み込まれるなど、import に現れない使い方）"
+        }
+      }
+    },
     "CauseType": {
       "additionalProperties": false,
       "properties": {
@@ -2111,6 +2161,34 @@
       "title": "Product",
       "type": "object"
     },
+    "PythonCompat": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "Python のバージョン（例: 3.10）"
+          },
+          "description": "workflows に挙げたワークフローだけに書いてよい Python のバージョン。ほかのワークフローに書けば違反"
+        },
+        "workflows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepoRelativePath"
+          },
+          "description": "versions のバージョンを書いてよいワークフローのパス（リポジトリの根から）"
+        }
+      }
+    },
+    "RepoRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(.*/)?\\.\\.(/|$))",
+      "description": "リポジトリの根からの相対のパスかグロブ。/ や \\ やドライブ名で始まる絶対パスと、.. の区切りは書けない"
+    },
     "Seeds": {
       "additionalProperties": false,
       "properties": {
@@ -2477,6 +2555,43 @@
       ],
       "title": "Tool",
       "type": "object"
+    },
+    "Toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflows": {
+          "$ref": "#/$defs/RepoRelativePath",
+          "description": "検査が見るワークフローのグロブ（リポジトリの根からの相対。絶対パスと .. は書けない）。無ければワークフローを見ない"
+        },
+        "python_ci": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "Python のバージョン（例: 3.11）"
+          },
+          "description": "setup-python の python-version に書いてよい値の一覧（通常の CI のバージョン）"
+        },
+        "python_compat": {
+          "$ref": "#/$defs/PythonCompat",
+          "description": "対応の下限を確かめる手順だけに書いてよいバージョンと、それを書いてよいワークフロー。無ければ python_ci だけを許す"
+        },
+        "plugin_pyprojects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepoRelativePath"
+          },
+          "description": "requires-python を配るコントラクトの python.floor と突き合わせる pyproject.toml の一覧。無ければ突き合わせない"
+        },
+        "launchers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepoRelativePath"
+          },
+          "description": "UV_VERSION=・UV_INSTALLER_SHA256= の行を配るコントラクトの uv の設定と突き合わせるランチャーの一覧。無ければ突き合わせない"
+        }
+      }
     },
     "Unknown": {
       "additionalProperties": false,

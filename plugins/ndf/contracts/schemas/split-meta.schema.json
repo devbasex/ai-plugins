@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "split-meta.schema.json",
+  "title": "分けた表そのものの値",
+  "description": "contracts/<分けた表>/_meta.json の形。項目のファイルの値は表ごとのスキーマ（limits.schema.json・causes.schema.json）が持つ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["owner"],
+  "properties": {
+    "owner": {"type": "string", "minLength": 1, "description": "表を書き換えてよいオーナー（子 Issue の記号とパッケージ）"}
+  }
+}

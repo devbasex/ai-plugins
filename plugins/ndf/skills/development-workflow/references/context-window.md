@@ -42,7 +42,7 @@ worker の 3 層）は [agent-layers.md](agent-layers.md) が持つ。
 | 判断開始の値（上限の設定の `context.decide-from`） | 250,000 | hook が conductor に知らせ、conductor は次の切りどころで引継ぎ文書を書いて切る。工程の途中の Tool は止めない |
 | 運用上限（上限の設定の `context.limit`） | 500,000 | hook が引継ぎに要る呼び出しを除いて止め続け、中継のラッパーが子に引継ぎを頼む |
 
-2 つの値は `contracts/limits.json` の 1 か所にあり、hook・ラッパー・`ndf relay context resolve` が同じ値を読む。
+2 つの値は `contracts/limits/` の方針 `context.decide-from`・`context.limit` だけにあり、hook・ラッパー・`ndf relay context resolve` が同じ値を読む。
 
 **切る規定は実測で守られていなかった**（#827。会話の記録から conductor のコンテキスト量を数えた）。
 表の「20 万」は当時の集計の基準で、上の 2 つの値とは別である。

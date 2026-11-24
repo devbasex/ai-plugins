@@ -188,7 +188,7 @@ ndf-next の Skill・エージェント・hook の本文は、今の NDF のス�
 
 ### 止まった理由の種類
 
-既存の種類から選び、種類の表（`contracts/causes.json`）に足さない。
+既存の種類から選び、種類の表（`contracts/causes/`）に足さない。
 
 | 事象 | 種類 | 終了コード |
 | --- | --- | --- |
@@ -205,7 +205,7 @@ ndf-next の Skill・エージェント・hook の本文は、今の NDF のス�
 
 | 項目 | 値 |
 | --- | --- |
-| 上限の秒数（`contracts/limits.json`） | gws の確認の認証の状態の読み取りと `npm prefix -g` は `google-workspace.call`（120 秒）、npm の導入は `google-workspace.install`（600 秒）、サムネイルの保存の gws・認証の状態の読み取り・curl は `google-workspace.thumbnails`（120 秒）。`ndf records gws-check` は既定の `gws.auth-status` を使い続ける |
+| 上限の秒数（`contracts/limits/`） | gws の確認の認証の状態の読み取りと `npm prefix -g` は `google-workspace.call`（120 秒）、npm の導入は `google-workspace.install`（600 秒）、サムネイルの保存の gws・認証の状態の読み取り・curl は `google-workspace.thumbnails`（120 秒）。`ndf records gws-check` は既定の `gws.auth-status` を使い続ける |
 | 承認資料の置き場 | 置き場の表（`contracts/domains/locations.json`）の `google-workspace`（起点 `state`・パス `gws`）。状態の置き場の下に置くので、リポジトリの外でも書ける |
 | 承認資料のファイル | ファイルの表（`contracts/domains/ndf-files.json`）の `gws-install-material`（パス `install.md`・種類 `document`・書き手 S1d・消す時点 `replaced`）。同じディレクトリの一時ファイルへ書いてから付け替え、打つたびにファイルは増えない |
 | 承認資料の中身 | 4 つの節（対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方）。取得元 npm の `@googleworkspace/cli`・打つコマンド `npm install -g @googleworkspace/cli`・入る先（`npm prefix -g` の値。読めなければその旨）・Google の公式サポート外で版は 0.x・戻し方 `npm uninstall -g @googleworkspace/cli` |

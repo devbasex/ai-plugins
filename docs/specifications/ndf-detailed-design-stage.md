@@ -173,7 +173,7 @@ flowchart TD
 ### 設計文書の種類の契約
 
 `plugins/ndf/contracts/design-docs.json` が、設計文書の置き場と種類ごとの名前の末尾・扱いを持つ。
-読み手は `scripts/lib/doc_kinds.py` の 1 つだけで、プラグインの根からの相対で探す（`contracts/limits.json`
+読み手は `scripts/lib/doc_kinds.py` の 1 つだけで、プラグインの根からの相対で探す（`contracts/limits/`
 と同じ探し方）。
 
 ```json

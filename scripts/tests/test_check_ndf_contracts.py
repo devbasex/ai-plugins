@@ -15,7 +15,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "scripts" / "check-ndf-contracts.py"
-LIMITS = {"policies": {"monitor.cli-margin": {"summary": "CLI の上限の差", "seconds": 120}}}
+LIMITS = "plugins/ndf/contracts/limits"
+POLICY = "monitor.cli-margin"
 CODE = "plugins/ndf/src/ndf/tool.py"
 
 
@@ -35,12 +36,13 @@ def _write(p: Path, text: str) -> None:
 
 
 def _tree(root: Path) -> Path:
-    """違反の無い小さな木（スキーマのコピー 4 本・上限の宣言・宣言どおりに引くコード）。"""
+    """違反の無い小さな木（スキーマのコピー 4 本・上限の設定・設定にある方針を引くコード）。"""
     for copy, name in ck.SCHEMA_COPIES:
         body = json.dumps({"title": name}, ensure_ascii=False) + "\n"
         _write(root / f"{ck.SETTINGS_SCHEMAS}/{name}.schema.json", body)
         _write(root / copy, body)
-    _write(root / "plugins/ndf/contracts/limits.json", json.dumps(LIMITS, ensure_ascii=False))
+    _write(root / LIMITS / "_meta.json", '{"owner": "o"}')
+    _write(root / LIMITS / f"{POLICY}.json", '{"summary": "CLI の上限の差", "seconds": 120}')
     _write(
         root / CODE,
         'from ndf.contracts import limits\nMARGIN = "monitor.cli-margin"\n\n\ndef f(name):\n'
@@ -56,6 +58,11 @@ def run(root: Path, *args: str) -> tuple[int, dict]:
 
 def _kinds(out: dict) -> list[tuple[str, str, str]]:
     return [(i["kind"], i["path"], i["name"]) for i in out["items"]]
+
+
+def _in_scope(root: Path, target: str) -> list[tuple[str, str, str]]:
+    """`target` を範囲に渡したときに数える違反（同じプロセスの中で確かめる）。"""
+    return _kinds({"items": ck.judge(ck.find(root), {target})[0]})
 
 
 def test_clean_tree_passes(tmp_path: Path):
@@ -109,18 +116,32 @@ def test_plain_import_alias_is_also_read(tmp_path: Path):
 
 def test_names_that_cannot_be_read_statically_and_unused_policies_pass(tmp_path: Path):
     root = _tree(tmp_path)
-    decl = root / "plugins/ndf/contracts/limits.json"
-    decl.write_text(json.dumps({"policies": {**LIMITS["policies"], "never.used": {"summary": "s", "seconds": 1}}}), encoding="utf-8")
+    _write(root / LIMITS / "never.used.json", '{"summary": "s", "seconds": 1}')
     assert run(root)[0] == 0
 
 
-@pytest.mark.parametrize("text", ["{", "[]", '{"policies": []}'])
-def test_unreadable_limits_declaration_fails(tmp_path: Path, text: str):
+def test_policy_bodies_are_left_to_the_contracts_check(tmp_path: Path):
+    """参照先の検査はファイル名だけを見る。中身は `ndf contracts check` が確かめる。"""
     root = _tree(tmp_path)
-    (root / "plugins/ndf/contracts/limits.json").write_text(text, encoding="utf-8")
-    code, out = run(root)
-    assert code == 1
-    assert _kinds(out) == [("limits-shape", "plugins/ndf/contracts/limits.json", "")]
+    _write(root / LIMITS / f"{POLICY}.json", "{")
+    assert ck.find(root) == []
+
+
+def test_files_that_are_not_policies_do_not_satisfy_a_reference(tmp_path: Path):
+    root = _tree(tmp_path)
+    for name in ("_meta.json", "never.used.json", "no.such.txt"):
+        _write(root / LIMITS / name, "{}")
+    _write(root / CODE, "from ndf.contracts import limits\nlimits.policy('_meta')\nlimits.policy('no.such')\n")
+    assert sorted(_kinds({"items": ck.find(root)})) == [("limits-unknown", CODE, "_meta"), ("limits-unknown", CODE, "no.such")]
+
+
+def test_removed_policy_fails_in_the_scope_of_its_file_and_an_empty_table_fails(tmp_path: Path):
+    root = _tree(tmp_path)
+    _write(root / LIMITS / "never.used.json", '{"summary": "s", "seconds": 1}')
+    (root / LIMITS / f"{POLICY}.json").unlink()
+    assert _in_scope(root, f"{LIMITS}/{POLICY}.json") == [("limits-unknown", CODE, POLICY)]
+    (root / LIMITS / "never.used.json").unlink()
+    assert _in_scope(root, LIMITS) == [("limits-shape", LIMITS, "")]
 
 
 def test_scope_counts_violations_by_path_or_via(tmp_path: Path):

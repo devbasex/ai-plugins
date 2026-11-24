@@ -11,8 +11,8 @@ def test_every_domain_table_has_its_owner_and_valid_references():
     policy_names = set(limits.table())
     domain_tables = [n for n in facts.names() if facts.location(n).startswith(f"{facts.DOMAINS_DIR}/")]
     assert (
-        len(domain_tables) == 20
-    )  # test-runners は 3392-3 で消した。launchers・manual-args・skill-io は #3518、release-forms は #3615、cli-floors は #3691 で足した
+        len(domain_tables) == 21
+    )  # test-runners は 3392-3 で消した。launchers・manual-args・skill-io は #3518、release-forms は #3615、cli-floors は #3691、split-tables は #3687 で足した
     for name in domain_tables:
         assert facts.table(name).owner.startswith("D2")
         assert facts.ref_errors(name, policy_names) == []

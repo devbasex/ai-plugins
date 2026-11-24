@@ -1,0 +1,8 @@
+{
+  "meaning": "基盤の待ち（Runner が付かない・GitHub の API の上限・作業マシンのメモリが足りずテストを止めた）",
+  "std_type": "communication",
+  "exit": "infra_wait",
+  "route": "retry",
+  "retry": "cause.infra-wait",
+  "exhausted": "step"
+}

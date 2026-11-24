@@ -1,0 +1,7 @@
+{
+  "meaning": "テスト以外のチェック（静的解析・文書の検査・PR の本文の検査）が落ちた",
+  "std_type": "validation",
+  "exit": "failed",
+  "route": "step",
+  "retry": null
+}

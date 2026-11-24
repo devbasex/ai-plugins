@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from ndf import contracts
 from ndf.contracts import version
 
 
@@ -20,7 +21,7 @@ def test_plugin_contracts_match_the_last_version():
 @pytest.mark.parametrize(
     ("rel", "change"),
     [
-        ("causes.json", lambda d: {**d, "causes": [*d["causes"], {**d["causes"][0], "kind": "new_kind"}]}),
+        ("causes/new_kind.json", lambda _: contracts.load_json("causes/unknown.json")),
         ("facts/answers.json", lambda t: {**t, "rows": [*t["rows"], {"id": "hold", "label": "保留する"}]}),
         ("schemas/result.schema.json", lambda s: {**s, "required": [*s["required"], "run_id"]}),
         ("schemas/route-chosen.schema.json", lambda s: {**s, "required": [*s["required"], "cause"]}),
@@ -38,7 +39,7 @@ def test_contract_change_needs_a_version_bump(contracts_copy, rel, change):
 
 def test_wording_and_whitespace_do_not_change_the_fingerprint(contracts_copy):
     before = version.fingerprint()
-    contracts_copy("causes.json", lambda d: {**d, "causes": [{**c, "meaning": c["meaning"] + "。"} for c in d["causes"]]})
+    contracts_copy("causes/unknown.json", lambda c: {**c, "meaning": c["meaning"] + "。"})
     path = contracts_copy.root / "schemas/result.schema.json"
     path.write_text(json.dumps(json.loads(path.read_text(encoding="utf-8")), indent=4), encoding="utf-8")
     assert version.fingerprint() == before

@@ -245,7 +245,7 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 | `from-issue:3569-relay-attach` | 結果 JSON を返す副命令の形に合わない。`tmux -L ndf-lanes attach -t <名前>` で足りる |
 | `from-issue:3569-relay-hook-bodies` | 旧い `mark`・`startup`・`is-child` の役目は、Stop の hook の guard（`src/ndf/domains/hooks/guards/relay_mark.py`）・`ndf relay install`・`ndf relay notice` の `metrics.inside` が持つ |
 | `from-issue:3569-context-report-table` | 結果 JSON の `items` を表として読むのは呼び手である |
-| `from-issue:3569-relay-cap` | マシン全体の本数の上限は、マシンの設定（`ndf relay cap` が書く）→ 環境変数 `NDF_RELAY_MAX_NAMED` → 上限の宣言 `relay.max-named` の順で読む（`ndf.contracts.named_cap.read`）。値を書き込む副命令を持たないとした決定は #3989 で改めた（[ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md)） |
+| `from-issue:3569-relay-cap` | マシン全体の本数の上限は、マシンの設定（`ndf relay cap` が書く）→ 環境変数 `NDF_RELAY_MAX_NAMED` → 上限の設定 `relay.max-named` の順で読む（`ndf.contracts.named_cap.read`）。値を書き込む副命令を持たないとした決定は #3989 で改めた（[ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md)） |
 
 `NDF_RELAY_MAX_NAMED` は、リレーハブとマシン全体の本数の判定が同じ規則（`limits.from_env`）で読む。数でない・0 以下の値は
 誤りとして扱う。`ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ。
@@ -274,7 +274,7 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 | `src/ndf/cli.py` の `COMMANDS` | `"project": "ndf.domains.project.cli"`・`"statusline": "ndf.domains.statusline.cli"`・`"materials": "ndf.domains.materials.cli"` |
 | `scripts/ndf-next-parity/parity/features.json` | 行 `entrypoint:scripts/project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の `to` は S1e。`locations` の `S1e` は `src/ndf/domains/project/`・`statusline/`・`materials/`。`supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`stage-check.sh` の行は副命令を持つ子（C2・M3b・P1a）のまま |
 | `src/ndf/checks/children.json` | 子 S1e（#3569）: パッケージ `ndf.domains.project`・`ndf.domains.statusline`・`ndf.domains.materials` と `ndf.domains.relay` の足したモジュール（`account_*`・`cli`・`cli_account`・`cli_context`・`context_*`）、順番 8、レーン lr-t2。T2 の `needs` に S1e が入る |
-| `contracts/limits.json` | `project.measure`（120 秒）・`project.git`（60 秒）・`statusline.lock`（10 秒）。アカウントの排他と認証は既存の `claude-accounts.lock`・`relay.claude-auth`・`relay.login-url` を使う |
+| `contracts/limits/` | `project.measure`（120 秒）・`project.git`（60 秒）・`statusline.lock`（10 秒）。アカウントの排他と認証は既存の `claude-accounts.lock`・`relay.claude-auth`・`relay.login-url` を使う |
 | `contracts/domains/env.json` | 読む環境変数 `NDF_ACCOUNTS_DIR`・`NDF_SHARED_CONFIG_DIR`・`NDF_CONTEXT_DIR` の行 |
 | `scripts/ndf-next-parity/parity/trial/2026-11-16.json` | T2 #3411 の 2 回目の試走の記録。手順 0 の `$SCRIPTS` は空のままで、宣言の判定・測定・書き出しは `ndf project` で通った |
 

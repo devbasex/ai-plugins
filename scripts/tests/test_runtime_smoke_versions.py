@@ -89,9 +89,11 @@ def test_latest_workflow_triggers_and_permissions():
     # PyYAML は `on` を True と読む
     triggers = data.get("on", data.get(True))
     assert set(triggers) == {"schedule", "workflow_dispatch"}
-    assert data["permissions"] == {"contents": "read", "issues": "write"}
-    for job in data["jobs"].values():
-        assert job.get("permissions") in (None, {"contents": "read", "issues": "write"})
+    assert data["permissions"] == {"contents": "read"}
+    # 書き込みの権限は、入力の ref のコードを動かさない report だけが持つ（#3687）
+    writers = {name for name, job in data["jobs"].items() if "write" in (job.get("permissions") or {}).values()}
+    assert writers == {"report"}
+    assert data["jobs"]["report"]["permissions"] == {"contents": "read", "issues": "write"}
     assert "secrets." not in LATEST_WORKFLOW.read_text(encoding="utf-8")
 
 

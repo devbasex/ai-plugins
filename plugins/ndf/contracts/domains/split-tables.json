@@ -1,0 +1,15 @@
+{
+  "summary": "1 ファイルから項目ごとのファイルへ分けた表。表は contracts/<表の名前>/ のディレクトリに置き、項目のファイル名（拡張子 .json を除く）がキーになる。_ で始まるファイルは表そのものの値（_meta.json）で、項目ではない",
+  "owner": "D2（contracts/domains。最初のバージョンは #3687）",
+  "shared_names": true,
+  "columns": {
+    "unit": {"type": "string", "summary": "1 ファイルが持つ項目の単位"},
+    "key_from": {"type": "string", "summary": "項目のキーの出所"},
+    "source_key": {"type": "string", "summary": "分ける前の 1 ファイルで項目を並べていたキーの名前"},
+    "key_field": {"type": "string", "summary": "ファイル名を値として入れる項目の欄の名前。無い表はファイル名をキーにするだけで、中身へ足さない", "optional": true}
+  },
+  "rows": [
+    {"id": "limits", "unit": "方針", "key_from": "ファイル名", "source_key": "policies"},
+    {"id": "causes", "unit": "停止理由", "key_from": "ファイル名", "source_key": "causes", "key_field": "kind"}
+  ]
+}

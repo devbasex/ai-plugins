@@ -8,7 +8,7 @@ COLUMNS = {
     "flag": {"type": "boolean", "summary": "真偽"},
     "size": {"type": "integer", "summary": "数"},
     "tags": {"type": "array", "summary": "文字列の並び", "optional": True},
-    "policy": {"type": "string", "summary": "方針", "optional": True, "ref": "limits.json#monitor.phase."},
+    "policy": {"type": "string", "summary": "方針", "optional": True, "ref": "limits#monitor.phase."},
     "code": {"type": "string", "summary": "区分", "optional": True, "ref": "facts/exit-codes"},
 }
 ROWS = [
