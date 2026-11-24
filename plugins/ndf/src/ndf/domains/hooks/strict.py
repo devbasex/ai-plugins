@@ -31,15 +31,20 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 
 from ndf import identity
 from ndf.adapters import git as git_mod
+from ndf.core import production_merge
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 from ndf.testing import weight
 
 # マージ先のリポジトリの設定（ブランチ戦略の設定の届け先の行を読む）
 _PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
-# 届け先の行の保存先（`branch_strategy` の中の位置。`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
-_SECTION, _DELIVERIES = "branch_strategy", ("release", "deliveries")
-_DELIVERIES_KEY = f"{_SECTION}.{'.'.join(_DELIVERIES)}"
+# ブランチ戦略の設定の保存先（`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
+_SECTION = "branch_strategy"
+_DELIVERIES_KEY = f"{_SECTION}.release.deliveries"
+# マージの承認の証跡のマーカーの語（`domains.release.trail.MERGE_MARK` の中身。hook は trail を読めないので語だけを持つ）
+MERGE_MARK_WORD = f"{identity.FIXED_WORDS['workflow_namespace']}:merge-approval"
+# コメントの本文をファイルから読む引数（`gh pr comment`・`gh issue comment` の `--body-file`・`-F`、`gh api` の `--input`）
+_BODY_FILE_FLAGS = ("--body-file", "-F", "--input")
 
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"
@@ -75,10 +80,12 @@ class MergeCall(NamedTuple):
 
 
 class ShellContext(NamedTuple):
-    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）とマージ先 `gh_repo`（`GH_REPO` の値、無ければ None）。"""
+    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）とマージ先 `gh_repo`（`GH_REPO` の値、無ければ None）。
+    `script` は Bash の Tool に渡したコマンドの全文（ヒアドキュメントの本文を含む。証跡のマーカーを探す）。"""
 
     here: Optional[Path]
     gh_repo: Optional[str]
+    script: str = ""
 
 
 def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[float]]:
@@ -95,7 +102,7 @@ def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Opti
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
-    return _script_denial(text, ShellContext(Path(root), gh_repo), 0)
+    return _script_denial(text, ShellContext(Path(root), gh_repo, text), 0)
 
 
 def _script_denial(text: str, ctx: ShellContext, depth: int) -> Optional[Verdict]:
@@ -110,8 +117,8 @@ def _script_denial(text: str, ctx: ShellContext, depth: int) -> Optional[Verdict
 
 
 def _mentions_merge(text: str) -> bool:
-    """字句を読む前の粗い絞り込み（`gh` と `merge` を含むか）。"""
-    return "gh" in text and "merge" in text
+    """字句を読む前の粗い絞り込み（`gh` と、`merge` か本文をファイルから読む引数を含むか）。"""
+    return "gh" in text and ("merge" in text or any(flag in text for flag in _BODY_FILE_FLAGS))
 
 
 def _first_denial(parts: List[Union[List[str], str]], ctx: ShellContext, depth: int = 0) -> Optional[Verdict]:
@@ -276,7 +283,65 @@ def _shell_script(words: List[str]) -> Optional[str]:
 
 def _call_verdict(ctx: ShellContext, words: List[str]) -> Optional[Verdict]:
     call = _merge_call(words, ctx.gh_repo)
-    return None if call is None else _judge(ctx.here, call)
+    if call is not None:
+        return _judge(ctx.here, call)
+    return _writes_merge_mark(ctx.here, words, ctx.script)
+
+
+def _comment_call(words: List[str]) -> Optional[List[str]]:
+    """`gh pr comment`・`gh issue comment`・`gh api` の呼び出しなら `gh` の後ろの語。ほかは None。"""
+    words = _command_words(words)
+    if not words or os.path.basename(words[0]) != "gh":
+        return None
+    positional = [w for w in words[1:] if not w.startswith("-")]
+    if positional[:2] in (["pr", "comment"], ["issue", "comment"]) or positional[:1] == ["api"]:
+        return words[1:]
+    return None
+
+
+def _writes_merge_mark(here: Optional[Path], words: List[str], text: str) -> Optional[Verdict]:
+    """コメントを書く `gh` の呼び出しで、コマンドの全文か本文のファイルにマージの承認の証跡のマーカーがあれば止める（#4409 の決定 7）。
+
+    証跡は NDF の回答の経路（工程の承認ゲート・MVV 判定・`ndf ci answer`）だけが書く。本文のファイルを読めない
+    （標準入力 `-`・無いパス）ときは通す。防ぐ相手はうっかりで、読めないコメントをすべて止めると通常のコメントも止まる。
+    """
+    args = _comment_call(words)
+    if args is None:
+        return None
+    if MERGE_MARK_WORD in text or any(MERGE_MARK_WORD in _body_file(here, path) for path in _body_files(args)):
+        return deny(
+            f"本文にマージの承認の証跡のマーカー（{MERGE_MARK_WORD}）がある。証跡は承認ゲートへの回答（`ndf answer`・"
+            "`ndf plan next --answer <回答> --by human`）だけが書く。Bash のコメントで書かない"
+        )
+    return None
+
+
+def _body_files(args: List[str]) -> List[str]:
+    """本文をファイルから読む引数の値（`--body-file x`・`--body-file=x`・`-F x`・`--input x`）。"""
+    found: List[str] = []
+    it = iter(args)
+    for word in it:
+        if word in _BODY_FILE_FLAGS:
+            found.append(next(it, ""))
+        elif word.startswith(tuple(f"{flag}=" for flag in _BODY_FILE_FLAGS if flag.startswith("--"))):
+            found.append(word.split("=", 1)[1])
+    return found
+
+
+def _body_file(here: Optional[Path], path: str) -> str:
+    """本文のファイルの中身（`gh api -F <キー>=@<パス>` の `@` の後ろも読む）。標準入力 `-`・読めないパスは空。"""
+    path = path.split("=@", 1)[1] if "=@" in path else path.removeprefix("@")
+    if not path or path == "-":
+        return ""
+    target = Path(os.path.expanduser(path))
+    if not target.is_absolute():
+        if here is None:
+            return ""
+        target = here / target
+    try:
+        return target.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 本文のファイルを読めなければ通す（うっかりだけを防ぐ）
+        return ""
 
 
 def _command_text(raw: object) -> Optional[str]:
@@ -364,19 +429,15 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
                 f"マージ先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
                 f"マージ先の設定を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
             )
-    rows = _deliveries(repo_root)
-    if rows is None:
+    verdict = production_merge.automatic_rows(_deliveries(repo_root))
+    if verdict is production_merge.Verdict.UNKNOWN:
         return deny(f"{repo_root} の {_PROJECT_FILE} の {_DELIVERIES_KEY} を読めず、本番へ届くかを決められない。{_MERGE_HELP}")
-    if not any(_automatic_production(row) for row in rows):
+    if verdict is not production_merge.Verdict.AUTOMATIC:
         return None
     return deny(
         f"{repo_root} は本番チャネルへのマージが自動で本番へ届く（{_DELIVERIES_KEY}）。hook の中では Pull Request のマージ先を"
         f"確かめられないため、直の gh pr merge を止めた。{_MERGE_HELP}"
     )
-
-
-def _automatic_production(row: object) -> bool:
-    return isinstance(row, dict) and row.get("channel") == "production" and row.get("kind") != "manual"
 
 
 def _repo_root(here: Path) -> Optional[Path]:
@@ -436,24 +497,13 @@ def slug_of_url(url: str) -> Optional[str]:
     return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else None
 
 
-def _deliveries(repo_root: Path) -> Optional[list]:
-    """ブランチ戦略の設定の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
+def _deliveries(repo_root: Path) -> object:
+    """ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）。ファイルを読めなければ None。
 
-    `deliveries` はスキーマで任意で、ブランチ戦略のプリセットは書かない。`release` のセクションまで読めてキーが無ければ、
-    `release.cd`（本番へのマージで動く CD の workflow）の有無で決める: あれば自動の本番の届け先 1 行、無ければ空の行
-    （キーが無いことと読めないことを分ける）。設定のファイル・`branch_strategy`・`release` が無いか形が違う・
-    `deliveries` が配列でなければ読めないとする。"""
+    届け先の規則（`release.deliveries` と `release.cd` の読み方）は判定の部品 `core.production_merge` が持つ（#4409 の決定 2）。
+    """
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 設定を読めないことを None で返し、呼び手が止める
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 設定を読めないことを None で返し、判定の部品が unknown にする
         return None
-    cur: object = data.get(_SECTION) if isinstance(data, dict) else None
-    *parents, leaf = _DELIVERIES
-    for key in parents:
-        cur = cur.get(key) if isinstance(cur, dict) else None
-    if not isinstance(cur, dict):
-        return None
-    if leaf not in cur:
-        return [{"channel": "production", "kind": "auto"}] if cur.get("cd") else []
-    rows = cur[leaf]
-    return rows if isinstance(rows, list) else None
+    return data.get(_SECTION) if isinstance(data, dict) else None

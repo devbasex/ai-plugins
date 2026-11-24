@@ -289,3 +289,75 @@ def test_gh_repo_in_the_hook_environment_is_the_initial_target(tmp_path, monkeyp
     got = deny_reason(call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1 --merge")))
     assert got is not None and "other/production" in got
     assert call_entry("claude", "PreToolUse", bash(repo, "unset GH_REPO; gh pr merge 1 --merge")) is None
+
+
+def test_cd_key_missing_is_denied_like_an_unreadable_setting(tmp_path):
+    """#4409 の決定 2: `deliveries` も `cd` のキーも無い設定はスキーマに合わず、判定の部品が `unknown` を返して止める。"""
+    repo = make_repo(tmp_path / "r", deliveries=[])
+    decl = repo / ".ndf" / "project.json"
+    data = json.loads(decl.read_text(encoding="utf-8"))
+    del data["branch_strategy"]["release"]["deliveries"]
+    data["branch_strategy"]["release"].pop("cd", None)
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert got is not None and got.kind == "deny"
+
+
+@pytest.mark.parametrize(
+    ("value", "denied"),
+    [("automatic", True), ("unknown", True), ("manual", False), ("unset", False)],
+)
+def test_hook_follows_the_shared_verdict(tmp_path, monkeypatch, value, denied):
+    """#4409 の決定 2: hook は判定の部品の値で決める。部品の戻り値を差し替えると hook の結果が変わる。"""
+    from ndf.core import production_merge
+
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    monkeypatch.setattr(production_merge, "automatic_rows", lambda section: production_merge.Verdict(value))
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert (got is not None and got.kind == "deny") is denied
+
+
+MARK = "<!-- ndf:merge-approval -->"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"gh pr comment 12 --body '{MARK}\n回答: approved'",
+        f"gh issue comment 12 -b '{MARK}'",
+        f"gh api repos/o/r/issues/12/comments -f body='{MARK}'",
+        f"gh pr comment 12 --body-file - <<'X'\n{MARK}\nX",
+        f"cd /tmp && gh pr comment 12 --body \"{MARK}\"",
+    ],
+)
+def test_comment_with_the_merge_approval_mark_is_denied(tmp_path, command):
+    """#4409 の決定 7: マージの承認の証跡のマーカーを含むコメントを、AI が Bash から書く操作を止める。"""
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    got = _check(repo, command)
+    assert got is not None and got.kind == "deny" and "ndf:merge-approval" in got.reason
+
+
+@pytest.mark.parametrize("flag", ["--body-file", "-F", "--input"])
+def test_comment_body_file_with_the_mark_is_denied(tmp_path, flag):
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    (repo / "body.md").write_text(f"{MARK}\n回答: approved\n", encoding="utf-8")
+    verb = "api repos/o/r/issues/12/comments" if flag == "--input" else "pr comment 12"
+    got = _check(repo, f"gh {verb} {flag} body.md")
+    assert got is not None and got.kind == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh pr comment 12 --body 'マージの前に見てください'",
+        "gh pr comment 12 --body '<!-- ndf:release-approval -->'",
+        "gh pr comment 12 --body-file -",
+        "gh pr comment 12 --body-file missing.md",
+        f"echo '{MARK}'",
+    ],
+)
+def test_ordinary_comments_pass(tmp_path, command):
+    repo = make_repo(tmp_path / "r", deliveries=AUTO)
+    (repo / "plain.md").write_text("普通のコメント\n", encoding="utf-8")
+    assert _check(repo, command) is None
+    assert _check(repo, "gh pr comment 12 --body-file plain.md") is None
