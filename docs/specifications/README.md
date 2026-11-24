@@ -217,5 +217,6 @@
 | [ndf-live-samples-verify.md](ndf-live-samples-verify.md) | テストの見本を相手の公開する記述と毎日突き合わせる `ndf samples verify` と、失敗と食い違いを課題にするジョブ。見本の定義・食い違いの種類・取得の上限・終了コード |
 | [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) | `ndf check` が落とす 4 つ。使うモジュールの無い上限（`read_by` と規則 `limit-readers`）、スキーマの `enum` や上限と同じ値を持つ定数（`const-fact`）、コピーで増えた重複（`copy-dup` とラチェット）、対応先の無い設計レビューの指摘（`review-items`）。見つかった定数の直し方と、結果 JSON の `items` の欄も持つ |
 | [ndf-internal-data-versions.md](ndf-internal-data-versions.md) | NDF が書いて後で自分で読む記録（使用量・MVV・開発ループのイベント・工程どうしで引き継ぐ値など）の型とバージョン。古い形を読むときの変換、新しい形を読んだときの止まり方、製品のバージョンのキー `product_version`、キーの名前をそろえる規則 `internal-names` |
+| [ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md) | 文書の種類ごとの読み手と、通じない文の見分け方をまとめた基準を、書く・レビューする・直す AI の指示に入れる仕組み。cross-review の基準 6 の重要度と 2 ラウンド目以降の範囲、読み手役の合否と 2 回まで、確認の記録 `reading-checks.jsonl` と `ndf records reading`、記録の無い質問を止める hook `reading-check`（2 回まで。`NDF_HOOK_OFF` で止められる）と、そう決めた理由 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
