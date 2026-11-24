@@ -287,7 +287,9 @@ def test_a_failed_lookup_withholds_every_field_and_stays_refused(run: Cite) -> N
     assert out["cause"]["kind"] == "refused"
     assert item["cited"] == item["path"] == publish.WITHHELD and item["unknown"] == [publish.WITHHELD] * 2
     (warning,) = out["warnings"]
-    assert warning.startswith("根拠の行の誤りの自由記述を伏せた（参照先の公開範囲を照会できない）: " + mm.STOP_REASONS["cite_lookup_failed"])
+    assert warning.startswith(
+        "根拠の行の誤りの自由記述を伏せた（参照先の公開範囲を照会できない）: " + mm.STOP_REASONS["cite_lookup_failed"]
+    )
     assert SECRET not in warning and HOST not in warning and "other-owner" not in warning
 
 

@@ -17,7 +17,11 @@ from ndf.domains.records import jsonl, mvv, mvv_gate
 from ndf.domains.records import mvv_decide as md
 from ndf.progress import gate
 
-from .test_mvv_gate import DOCS, FOLLOW, HEAD, SHA, Ask, _hub, _inputs, notes, repo  # noqa: F401 フィクスチャを読み込む
+from . import test_mvv_gate
+from .test_mvv_gate import DOCS, FOLLOW, HEAD, SHA, Ask, _hub, _inputs
+
+# 判定の場所と PR のコメントのフィクスチャを test_mvv_gate から読み込む（引数の名前と同じ名前で import すると F811 になる）
+repo, notes = test_mvv_gate.repo, test_mvv_gate.notes
 
 PR = 5
 NOW = "2026-11-24T00:00:0{}+00:00"
@@ -121,7 +125,12 @@ GATES = {
 
 @pytest.mark.parametrize(("prepare", "skip", "held", "unwritten"), GATES.values(), ids=GATES.keys())
 def test_fast_design_gate_is_not_skipped_while_the_review_holds_remain(
-    repo: Path, notes: list[tuple[int, str]], prepare: Callable[[], None], skip: bool, held: int, unwritten: bool
+    repo: Path,
+    notes: list[tuple[int, str]],
+    prepare: Callable[[], None],
+    skip: bool,
+    held: int,
+    unwritten: bool,
 ) -> None:
     # 受け入れ条件 4: 直っていないレッドライン・利用者の判断が要る見送り・読めない記録は、fast でも「従う」の判定で省かない
     RepoKey.value = mvv.repo_key(repo)
