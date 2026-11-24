@@ -15,7 +15,7 @@
     "C1+": {"issue": 3285, "packages": [], "needs": ["C1"], "order": 3, "lane": "lr-flow", "closed": true},
     "T1": {"issue": 3286, "packages": ["ndf.process_group", "ndf.slot_pool", "ndf.testing"], "needs": ["X0"], "order": 2, "lane": "lr-fix-b", "closed": true},
     "T1+": {"issue": 3286, "packages": [], "needs": ["T1", "D1"], "order": 3, "lane": "lr-fix-b", "closed": true},
-    "AD1": {"issue": 3288, "packages": ["ndf.adapters.ci", "ndf.adapters.git", "ndf.adapters.github", "ndf.adapters.github_limits", "ndf.adapters.publish", "ndf.adapters.write_gate", "ndf.ci_cli"], "needs": ["D1", "T1", "AD3"], "order": 3, "lane": "lr-fix-a", "closed": true},
+    "AD1": {"issue": 3288, "packages": ["ndf.adapters.ci", "ndf.adapters.git", "ndf.adapters.github", "ndf.adapters.github_limits", "ndf.adapters.github_rules", "ndf.adapters.publish", "ndf.adapters.write_gate", "ndf.ci_cli"], "needs": ["D1", "T1", "AD3"], "order": 3, "lane": "lr-fix-a", "closed": true},
     "AD1+": {"issue": 3288, "packages": [], "needs": ["AD1", "D1+", "T1+"], "order": 4, "lane": "lr-fix-a", "closed": false},
     "AD2": {"issue": 3289, "packages": ["ndf.adapters.claude_usage", "ndf.adapters.http", "ndf.adapters.markdown", "ndf.adapters.notify", "ndf.adapters.paths"], "needs": ["X0", "T1"], "order": 3, "lane": "lr-data", "closed": true},
     "AD2+": {"issue": 3289, "packages": [], "needs": ["AD2", "T1+"], "order": 4, "lane": "lr-data", "closed": true},

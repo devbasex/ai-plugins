@@ -87,13 +87,13 @@ def _common_dir(where: Path) -> str:
     return Git(where).run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
 
 
-def _same_repo(where: Path, root: Path) -> bool:
+def _is_worktree_of(where: Path, root: Path) -> bool:
     """作業場所 `where` が `root` と同じリポジトリか。同じパスなら Git を呼ばず、違うパスのときだけ共通ディレクトリを比べる。"""
     try:
         if where.resolve() == root.resolve():
             return True
         return _common_dir(where) == _common_dir(root)
-    except (GitError, OSError):
+    except (GitError, OSError):  # noqa: NDF401 外部コマンド: worktree でないパスは同じリポジトリでないとして呼ぶ側の GateError で止める
         return False
 
 
@@ -115,7 +115,7 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
     if gate == RELEASE:
         return release_pr(inputs)
     where = Path(inputs["worktree"]) if isinstance(inputs.get("worktree"), str) else root
-    if not _same_repo(where, root):
+    if not _is_worktree_of(where, root):
         raise GateError(f"作業場所 {where} が判定するリポジトリの worktree でない")
     branch = Git(where).run("rev-parse", "--abbrev-ref", "HEAD").strip()
     opened = hub.open_pulls_of_head(branch, enough=2)
