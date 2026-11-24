@@ -186,6 +186,50 @@ def test_judgement_of_another_mvv_in_the_record_is_not_put_on_the_finding_alread
     assert (_marks(journal)[REDLINE], journal.merged, REDLINE in _handed(journal)) == ({}, [], True)
 
 
+def _record(*rows: dict[str, Any]) -> list[prior_decide.Carried]:
+    """別の保存先の記録のコメントから戻す指摘（伏せる処理を通した後）。"""
+    journal = FindingJournal([{"by": "codex", "outcome": fin.UNRESOLVED, "severity": "major", **r} for r in rows])
+    return prior_decide.recorded([_published(journal)])[0]
+
+
+def _redline(fid: str, text: str) -> dict[str, Any]:
+    return {"id": fid, "text": text, "redline": True, "mvv": "P1", "redline_items": ["P1"], "judged_mvv": V11}
+
+
+def test_another_finding_with_the_same_recorded_id_is_carried_under_a_free_id() -> None:
+    """別の保存先の指摘は、本文が違えば id が重なっても引き継ぎ、次の起動でも重ねない。"""
+    journal = _resumed(_record({"id": "r1-1", "text": VALUE}))
+    listed = _record(_redline("r1-1", REDLINE))
+    assert journal.carry(listed, ITEMS, V11) == ["p-r1-1-2"]
+    assert journal.rows["p-r1-1-2"]["redline"] is True and _handed(journal) == [VALUE]
+    assert journal.carry(listed, ITEMS, V11) == [] and journal.carry(_record(*journal.rows.values()), ITEMS, V11) == []
+
+
+PREFIX = "共通の状況の説明。" * 20
+
+
+def test_findings_that_only_start_alike_are_carried_apart() -> None:
+    """本文の先頭だけが同じ指摘には、MVV の判定を重ねない。出し直しは、本文の全体が同じ方へ重ねる。"""
+    journal = FindingJournal()
+    journal.enter(1, [{**PLAIN, "text": f"{PREFIX}止まる"}], ITEMS, V11)
+    assert journal.carry(_record(_redline("r1-1", f"{PREFIX}消す")), ITEMS, V11) == ["p-r1-1"] and journal.merged == []
+    assert _handed(journal) == [f"{PREFIX}止まる"]
+    blocking = journal.enter(2, [{**PLAIN, "text": f"{PREFIX}{t}"} for t in ("止まる", "消す")], ITEMS, V11)
+    assert (len(journal.rows), len(blocking), _handed(journal)) == (2, 1, [f"{PREFIX}止まる"])
+
+
+def test_masked_texts_of_the_record_go_back_to_their_own_findings() -> None:
+    """伏せた本文が同じになる 2 つの指摘も、それぞれの指摘へ戻る（重ねず、判定を取り違えない）。"""
+    journal = FindingJournal()
+    journal.enter(1, [{**PLAIN, "text": f"/home/{who} を消す"} for who in ("alice", "bob")], ITEMS, V11)
+    texts = {r["id"]: r["text"] for r in journal.rows.values()}
+    listed = _record({"id": "r1-1", "text": texts["r1-1"]}, _redline("r1-2", texts["r1-2"]))
+    assert listed[0].text == listed[1].text != texts["r1-1"]
+    assert journal.carry(listed, ITEMS, V11) == [] and journal.merged == ["r1-2"]
+    assert _handed(journal) == [texts["r1-1"]]
+    assert _handed(_resumed(listed)) == [listed[0].text]
+
+
 def test_redline_judged_on_a_tracked_thread_reaches_the_first_state_directory(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
 ) -> None:

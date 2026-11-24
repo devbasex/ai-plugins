@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Optional
 
+from ndf.adapters import run_log
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
@@ -167,6 +168,17 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
 
 
+def _whole(row: Mapping[str, Any]) -> str:
+    """指摘の本文の全体（空白と大文字小文字をそろえる）。"""
+    text = row.get("text")
+    return oscillation.whole(text) if isinstance(text, str) else ""
+
+
+def _same_text(a: str, b: str) -> bool:
+    """本文の全体（`_whole`）が同じか。PR に残した本文は伏せてあるので、一方が他方を伏せたものも同じとみなす。"""
+    return bool(a and b) and (a == b or run_log.covers(a, b) or run_log.covers(b, a))
+
+
 def _judged_items(marks: Mapping[str, Any], items: Sequence[str]) -> list[str]:
     """前の実行が残した判定 `marks`（`report_decide.MARKS` の欄）の項目のうち、`items`（MVV の項目）にあるもの。"""
     return [i for i in (marks.get(MVV), *store.list_of(marks, REDLINE_ITEMS)) if criteria_decide.mvv_item(i, items)]
@@ -237,7 +249,6 @@ class FindingJournal:
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
-        by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
@@ -248,12 +259,11 @@ class FindingJournal:
                 continue
             key = oscillation.finding_key(text)
             named = criteria_decide.mvv_item(item.get("mvv"), items)
-            known = by_key.get(key)
+            known = self._with_key(key, text)
             if known is None:
                 fid = self._next_id(round_no)
                 row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
                 known = self.rows[fid] = row | _raised(item, named)
-                by_key[key] = known
             else:
                 self._raised_again(known, item, round_no, named, mvv)
             if named is not None and known.get("by") != BY_NDF:
@@ -262,9 +272,34 @@ class FindingJournal:
                     unexplained.append(str(known["id"]))
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
-            touched[key] = known
+            touched[str(known["id"])] = known
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
-        return frozenset(key for key, row in touched.items() if _blocking(row))
+        return frozenset(row["key"] for row in touched.values() if _blocking(row))
+
+    def _with_key(self, key: str, text: str) -> Optional[dict[str, Any]]:
+        """同じキーの行。引き継いだ指摘はキー（本文の先頭）が同じでも別の行を持つので、本文の全体が同じ行を先に選ぶ。"""
+        rows = [f for f in self.rows.values() if f.get("key") == key]
+        whole = oscillation.whole(text)
+        found = [f for f in rows if _whole(f) == whole] or rows
+        return found[-1] if found else None
+
+    def _carried_already(self, c: prior_decide.Carried, taken: Collection[str]) -> Optional[dict[str, Any]]:
+        """引き継ぐ指摘 `c` と同じ指摘の行（同じスレッドか、本文の全体が同じもの）。記録のコメントの 1 つの一覧にある指摘は
+        互いに別なので、`taken`（一覧のほかの指摘の行）を除く。伏せた本文では違う指摘とも合うので、id の対応する行を先に選ぶ。"""
+        if c.comment is not None and c.id in self.rows:
+            return self.rows[c.id]
+        whole = oscillation.whole(c.text)
+        same = [f for fid, f in self.rows.items() if fid not in taken and _same_text(_whole(f), whole)]
+        ids = (c.id, c.id.removeprefix(prior_decide.RECORDED_PREFIX))
+        return min(same, key=lambda f: (f["id"] not in ids, _whole(f) != whole), default=None)
+
+    def _free_id(self, fid: str) -> str:
+        """`fid` か、別の指摘が使っていれば `<fid>-<2 からの番号>` のうち空いているもの。"""
+        n, free = 1, fid
+        while free in self.rows:
+            n += 1
+            free = f"{fid}-{n}"
+        return free
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
@@ -336,30 +371,30 @@ class FindingJournal:
         row |= {CITATION_KEY: key, "cited": error["cited"], "unknown": error["unknown"], JUDGED: mvv}
 
     def carry(self, carried: Sequence[prior_decide.Carried], items: Sequence[str] = (), mvv: Optional[str] = None) -> list[str]:
-        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
+        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じスレッドか同じ本文の行が
         あれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定だけをその行へ
-        重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
+        重ねる（`merge_marks`）。記録のコメントの id は別の保存先の違う指摘とも重なるので、重なれば空いた id にする。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
         added = []
         unknown = []
         self.merged = []
-        by_key = {f.get("key"): f for f in self.rows.values()}
+        taken: set[str] = set()
         for c in carried:
-            key = oscillation.finding_key(c.text)
-            # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
-            known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
+            listed = c.comment is None
+            known = self._carried_already(c, taken if listed else ())
+            fid = self._free_id(c.id) if known is None else str(known["id"])
+            if listed:
+                taken.add(fid)
             if known is not None:
                 place = _located({"path": c.path, "line": c.line}) | {"section": _text(c.section)}
-                if self.merge_marks(str(known["id"]), c._asdict(), items, mvv, place):
-                    self.merged.append(str(known["id"]))
+                if self.merge_marks(fid, c._asdict(), items, mvv, place):
+                    self.merged.append(fid)
                 continue
-            if c.id in self.rows:
-                continue
-            row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
+            row = _journal_row(fid, 0, c.text, _text(c.by), oscillation.finding_key(c.text), _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
-            row = self.rows[c.id] = by_key[key] = row | located
+            row = self.rows[fid] = row | located
             if not _restore(row, c, items, mvv):
-                unknown.append(c.id)
-            added.append(c.id)
+                unknown.append(fid)
+            added.append(fid)
         self.warnings = [_unknown_items("引き継いだ指摘", unknown)] if unknown else []
         return added
 
