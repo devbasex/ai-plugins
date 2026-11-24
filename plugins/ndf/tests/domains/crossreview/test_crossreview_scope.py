@@ -203,6 +203,69 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
     assert scope_decide.state_scope(after_full, False, 3, []) == scope_decide.Scope(scope_decide.SINCE, "h1", ())
 
 
+APPROVED = "approved:11:aaa:ccc"
+
+
+def _read_with(mvv: object) -> dict:
+    """MVV の記録が `mvv`（None なら記録が無い）の 1 ラウンドを持つ状態ファイルの中身。"""
+    row = {"round": 1, "head": "h1", "verdict": "converged"}
+    return {"rounds": [row if mvv is None else {**row, scope_decide.MVV: mvv}]}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "now", "head"),
+    [
+        ({"id": APPROVED, "branch": "main"}, APPROVED, "h1"),
+        ({"id": "absent:::"}, "absent:::", "h1"),
+        # MVV の記録が無いラウンド（この記録を足す前のバージョンが書いた）は、今も MVV が無いときだけ同じとみなす
+        (None, "absent:::", "h1"),
+        ("壊れた値", "absent:::", "h1"),
+        (None, APPROVED, None),
+        (None, "unapproved:::", None),
+        # バージョン・本文・共通原則・承認の状態のどれか 1 つでも違えば、前のラウンドを使わない
+        ({"id": APPROVED}, "approved:12:aaa:ccc", None),
+        ({"id": APPROVED}, "approved:11:bbb:ccc", None),
+        ({"id": APPROVED}, "approved:11:aaa:ddd", None),
+        ({"id": APPROVED}, "absent:::", None),
+        ({"id": "absent:::"}, APPROVED, None),
+        # 今の MVV を確かめられなければ、どの記録とも違うとみなす
+        ({"id": APPROVED}, scope_decide.UNKNOWN_MVV, None),
+        ({"id": scope_decide.UNKNOWN_MVV}, scope_decide.UNKNOWN_MVV, None),
+        (None, scope_decide.UNKNOWN_MVV, None),
+    ],
+)
+def test_previous_round_is_reused_only_under_the_same_mvv(recorded: object, now: str, head: str | None) -> None:
+    state = _read_with(recorded)
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(mvv=now)) == head
+
+
+@pytest.mark.parametrize(
+    ("recorded", "now", "reviewed"),
+    [
+        (APPROVED, APPROVED, {A, B}),
+        (None, "absent:::", {A, B}),
+        (None, APPROVED, set()),
+        (APPROVED, "approved:12:bbb:ccc", set()),
+        (APPROVED, scope_decide.UNKNOWN_MVV, set()),
+        (APPROVED, None, {A, B}),
+    ],
+)
+def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | None, now: str | None, reviewed: set[str]) -> None:
+    """前と違う MVV で詳細レビューを通ったセクションは、設計の PR ではまだ通っていないセクションとして並ぶ。"""
+    state = {**_read_with({"id": recorded} if recorded else None), store.REVIEWED: [A, B]}
+    if recorded:
+        state[store.REVIEWED_MVV] = recorded
+    assert scope_decide.reviewed_of(state, now) == reviewed
+    got = scope_decide.state_scope(state, True, 2, [A, B], scope_decide.Basis(mvv=now))
+    assert got == (scope_decide.Scope(scope_decide.SINCE, "h1", ()) if reviewed else scope_decide.Scope(scope_decide.FULL, None, (A, B)))
+
+
+def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
+    rounds = [{scope_decide.MVV: {"id": APPROVED, "branch": "main"}}, {"round": 2}, "壊れたラウンド"]
+    assert scope_decide.mvv_branch({"rounds": rounds}) == "main"
+    assert scope_decide.mvv_branch({"rounds": [{"round": 1}]}) is None
+
+
 def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """PR 3944 の r3-4: 前のラウンドを読んでいない相手役を足すと、`run` と同じく全差分を返す（担当の既定も `run` と同じ）。"""
     wt = repos.add_worktree(tmp_path / "pr8")

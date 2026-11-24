@@ -101,10 +101,11 @@
 
 1 ラウンド目は全差分（`--base...HEAD`）を渡す。2 ラウンド目からは、相手役の全員が読めた最後のラウンド（`incomplete_reviewers` の
 ラウンドを飛ばす）の head からの差分へ絞る。そのラウンドが無い・その比較基点（`--base` と HEAD の merge-base の SHA）が今回と違う・
-そのラウンドを読んでいない相手役が今回いる・そのラウンドの重点（`focus`）が今回と違えば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
-全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残る。範囲だけを読むときは
+そのラウンドを読んでいない相手役が今回いる・そのラウンドの重点（`focus`）かプロジェクト MVV（`mvv`）が今回と違えば全差分を渡す。設計の PR（`--purpose` が設計のプランのテンプレートの purpose）は、変わった Markdown のセクションが詳細レビューを通るまで
+全差分を渡す。詳細レビューを通ったセクションは状態ファイルの `reviewed_sections` に残り、MVV が変われば通し直す。範囲だけを読むときは
 `ndf cross-review review-scope <worktree> --purpose <P> --base <B> --state-dir <D> --pr <N> [--reviewer <R> ...]` を打つ（読むだけ）。
-`--reviewer` は `run` へ渡すものと同じにする（省けば `run` と同じ既定の相手役で決める）。
+`--reviewer` は `run` へ渡すものと同じにする（省けば `run` と同じ既定の相手役で決める）。このコマンドは GitHub にもリモートにも
+問い合わせず、取得済みのベースブランチの MVV を読む。MVV を確かめられなければ全差分を返し、理由を `warnings` に載せる。
 
 ## 判定
 
@@ -123,9 +124,10 @@
 
 | キー | 中身 |
 | --- | --- |
-| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`focus`（そのラウンドで渡した重点）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
+| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドの相手役）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`branch` は MVV を読んだブランチ）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（ジャーナルへ入れるときに下げた後の値）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。引き継いだ指摘の行は記録された `severity` だけを持つ |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
+| `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |
 | `threads` | 指摘の番号ごとに、PR に作ったスレッドの最初のコメントの id（`comment`）と、返信・resolve を済ませたか（`replied`・`resolved`）。打ち直しても二重に書かない（#3939） |
 | `report_comment` | PR へ書いた記録のコメントの URL。次からは同じコメントを書き換える（#3939） |
 | `report_published` | 記録のコメントへ公開できた状態（PR の番号・終わり方・ラウンド・指摘・スレッド）の要約。スレッドを書き切れなかったときは残さない |
@@ -139,7 +141,7 @@
 
 **同じコマンドを打ち直すと、状態ファイルの最後のラウンドの続きから回す。** 前のラウンドは消さず、次の番号のラウンドから
 `--max-rounds` の数だけ回す。差分を足した PR にもう一度回すときも、同じコマンドを打ち直すだけである。状態ファイルを
-開かない・`mv` しない・書き換えない。最後のラウンドが `converged` で head も `--base` も変わっていなければ、相手役を起動せずに
+開かない・`mv` しない・書き換えない。最後のラウンドが `converged` で head も `--base` も MVV も変わっていなければ、相手役を起動せずに
 前回の結果を返す（`process` に「前回の結果（converged）を返した」と載る）。
 
 ## 部分の命令

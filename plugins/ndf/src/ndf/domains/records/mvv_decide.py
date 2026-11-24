@@ -127,6 +127,16 @@ def status(decl: Optional[Mapping[str, Any]], body_sha256: Optional[str]) -> str
     return State.APPROVED if last["sha256"] == body_sha256 else State.MISMATCH
 
 
+def identity_of(state: str, version: Optional[int] = None, sha256: Optional[str] = None, principles_sha256: str = "") -> str:
+    """読んだ MVV を見分ける値。承認済みなら状態・バージョン・本文の sha256・共通原則の sha256、ほかは状態だけで決まる。
+
+    承認済みでない MVV は共通原則をレビューに使わないので、共通原則（NDF の更新で変わる）が変わっても同じ値にする。
+    """
+    if state != State.APPROVED:
+        return f"{state}:::"
+    return f"{state}:{version}:{sha256}:{principles_sha256}"
+
+
 def approved_form(decl: Optional[Mapping[str, Any]], body: bytes) -> bytes:
     """本文のバイト列を、承認の記録の sha256 と合う改行の形にして返す（合う形が無ければ元のまま）。
 

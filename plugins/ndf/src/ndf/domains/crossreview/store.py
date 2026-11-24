@@ -27,6 +27,8 @@ CURRENT_KEY = "current_pr"
 REPO_KEY = "target_repo"
 ROUNDS = "rounds"
 REVIEWED = "reviewed_sections"
+# `reviewed_sections` のセクションを読んだときの MVV を見分ける値（#4076）
+REVIEWED_MVV = "reviewed_mvv"
 FINDINGS = "findings"
 
 
