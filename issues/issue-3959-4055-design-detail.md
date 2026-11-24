@@ -564,7 +564,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `stage_inputs_of` | `progress/stage_inputs.py` | 新設 | `stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]` | ステートマシンの最新の定義から `step_id` のステップを持つ工程を引き、`machine_context` に `invoke.resolve_inputs` を当てた入力を返す。プランが `NDF_STAGE_INPUT` に渡すものと同じ値だけで、文脈のほかのキー（`design_pr` など）は足さない |
 | `_mvv_inputs` | `records/cli.py` | 新設 | `_mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 区分ごとに入力を決める（下の表）。決められなければ `_InputError`（`invalid`・`refused`） |
 | `_env_inputs` | `records/cli.py` | 新設 | `_env_inputs(gate: str, inputs: Mapping[str, Any]) -> dict[str, Any]` | `NDF_STAGE_INPUT` の object を、プランが組むのと同じ規則で確かめる。下の手順 |
-| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。出力は伏せずに返す（自由記述を伏せるのは、閲覧範囲を限れない DB へ保存するときの `store.append_events` だけ。「手元のファイルの閲覧範囲」） |
+| `_mvv_gate` | `records/cli.py` | 変更 | シグネチャは同じ。引数 `--machine <ID>` と `--expect-pr <番号>` を足す | `_mvv_inputs` の後に `gate` を呼ぶ。`--expect-pr` があれば、`gate` を呼ぶ前に、同じ入力で `mvv_gate.pr_number(root, "release", inputs, hub)` を呼んで判定する PR を求める（`release` では文脈の `pr` を読むだけで GitHub を呼ばない）。番号が違えば `gate` を呼ばずに `stopped`・`not_applicable`（`summary` は定型文だけで PR の番号を載せない）を返す。`--expect-pr` を `--gate design` で渡せば `invalid`（上の「手順書」のリリース承認ゲートの箇条）。出力は伏せずに返す（自由記述を伏せるのは、閲覧範囲を限れない DB へ保存するときの `store.append_events` だけ。「手元のファイルの閲覧範囲」） |
 
 | 区分 | `NDF_STAGE_INPUT` | `--machine` | 入力 |
 | --- | --- | --- | --- |
@@ -610,20 +610,23 @@ PR を読む前の失敗（`gate` が受ける）:
     - フェーズレポートの `終えた工程` にはファイルのパスだけを書き、`outputs.mvv_gate` の中身（判定の理由・レッドライン・`why`・`holds`）をレポートの本文（`理由`・`summary` など）へ写さない
     - conductor はパスを `ndf progress finish --output` へ渡すだけで、中身を読んで人へ転送しない
     - 承認資料の欄と、レポートの本文に判定を書くときは、下の「承認資料の開示の範囲」の supervisor の経路の行のとおり自由記述を伏せる
-  - リリース承認ゲート（プランを使わず、本番に反映される操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、判定する PR と承認する PR を先に決め、2 つが同じときだけ判定を打つ。判定を打った後で対象の違いに気づいて結果を捨てると、使わない判定（LLM の呼び出し）と PR へのコメントが、ゲートごとに 1 回ずつ無駄になるためである。
-    - 判定する PR: `ndf records mvv gate --gate release` が判定するのは文脈の `pr` である（`pr_number` の `release` の行）。`ndf progress show <ステートマシンの ID>` の文脈の `pr` で読む
+  - リリース承認ゲート（プランを使わず、本番に反映される操作の前で `結果: 承認ゲート` を返す手動の経路。フェーズの表の「仕上げ」など）を返す前に、承認する PR を先に決め、その番号を判定のコマンドに渡す。判定のコマンドは、自分が組んだ入力の判定する PR がその番号と同じときだけ判定する。判定を打った後で対象の違いに気づいて結果を捨てると、使わない判定（LLM の呼び出し）と PR へのコメントが、ゲートごとに 1 回ずつ無駄になる。比べる相手を別のコマンド（`ndf progress show`）で先に読むと、読んだ後で判定の前に文脈の `pr` が変わったときに同じ無駄が起きる。そこで、比べるのは判定のコマンドの中で、判定に使う入力そのものと比べる
     - 承認する PR: このリリースで承認する人がマージを承認する PR で、承認資料の「対象を開くためのもの」に載せる PR である。取得元は次の 1 つに決める
-      - このリリースで supervisor が `ndf release assemble` を打った（リリース用の PR を組み立てた）なら、その結果 JSON の `outputs.pr`（組み立てた PR の番号）である。ブランチ戦略が `trunk` で版上げの PR を作る運用では、これが版上げの PR（版数と CHANGELOG だけの PR）で、スプリントの実装を取り込んだ PR（文脈の `pr`）と別になる
-      - ブランチ戦略がリリース用の PR を作らない（`route_decide` の `release_pr` が偽で、`ndf release assemble` を打たない）なら、承認する PR はスプリントの PR そのもので、文脈の `pr` と同じ値を使う
+      - このリリースで supervisor が `ndf release assemble` を打った（リリース用の PR を組み立てた）なら、その結果 JSON の `outputs.pr`（組み立てた PR の番号）である。ブランチ戦略が `trunk` で版上げの PR を作る運用では版上げの PR（版数と CHANGELOG だけの PR）、`merge_base_branch` で版数の保存先が `none` の運用ではベースブランチから本番ブランチへ変更を取り込む PR になる。どちらもスプリントの実装を取り込んだ PR（文脈の `pr`）と別になりうる
+      - ブランチ戦略がリリース用の PR を作らない（`route_decide` の `release_pr` が偽で、`ndf release assemble` を打たない）なら、承認する PR はスプリントの PR そのもので、番号を渡さずに判定を打つ（判定する PR が承認する PR なので比べる必要が無い）
       - 文脈の `release_pr` は使わない。承認の回答が書く「リリース記録を書いた PR」で、承認ゲートの時点ではまだ無いためである。`gh` でブランチ名から PR を探すこともしない（同じブランチの PR が複数あると決まらない）
-    - 2 つが同じ: 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID>` を打ち、結果 JSON を作業ディレクトリの `mvv-gate-release.json` に保存する。以下の箇条のとおり承認資料に載せる
-    - 2 つが違う: 判定を打たない（判定もコメントも作らない）。承認資料の「MVV 判定」の欄には、承認する人が自分で何を確認するかが分かる次の文だけを載せ、人へ問う
-      - 「今回マージする版上げの PR（<承認する PR の URL>）について、プロジェクトの判断基準に沿っているかの自動判定は行っていません。この PR の変更内容を確認して、リリースを承認するか判断してください。レビューで保留になった指摘は確認していません」
+    - 承認する PR を決められない（`ndf release assemble` を打つ戦略なのに、その結果 JSON に `outputs.pr` が無い・`ndf release assemble` が `ok` でない）: 判定を打たず、承認も求めない。承認する人に確認する PR を示せないまま承認させないためである。`結果: 判断が要る` で呼び出し元へ返し、`理由` に「承認するリリース用の PR を特定できない」と、`ndf release assemble` の結果 JSON のパスを書く
+    - 判定のコマンド: 作業場所で `ndf records mvv gate --gate release --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]` を打ち、結果 JSON を作業ディレクトリの `mvv-gate-release.json` に保存する
+      - `--expect-pr`（新設。`--gate release` のときだけ受け、`design` では `invalid`）: `_mvv_gate` は、入力を組んで `pr_number` で判定する PR を決めた直後、`gate` の `_judged` の手順 (1) の `hub.pull` より前に、その番号と比べる。違えば、PR を読まず、LLM も呼ばず、PR にコメントも書かずに、`stopped`・`not_applicable`（`exit-codes.md` の既存の種類。正常な否定の結果）を返す。`summary` は定型の「判定する PR が承認する PR と違うので判定しない」だけにし、どちらの PR の番号も載せない（判定する PR は承認の対象でなく、結果が承認資料へ写されうるため）。`pr_number` は文脈の値を読むだけで GitHub を呼ばないので、比べるための呼び出しは増えない
+      - 文脈に `pr` が無いなど、判定する PR を決められないときは、今どおり `input_missing` などで止まる（下の「結果が `ok` でないとき」）
+    - 結果が `ok`: 以下の箇条のとおり承認資料に載せる
+    - 結果が `not_applicable`（判定する PR が承認する PR と違った）: 承認資料の「MVV 判定」の欄には、承認する人が自分で何を確認するかが分かる次の文だけを載せ、人へ問う
+      - 「今回のリリースでマージする PR（<承認する PR の URL>）について、プロジェクトの判断基準に沿っているかの自動判定は行っていません。この PR の変更内容を確認して、リリースを承認するか判断してください。レビューで保留になった指摘は確認していません」
       - スプリントの PR（文脈の `pr`）の URL や番号は載せない。資料は呼び出し元を経て転送されるので、承認の対象でない非公開の PR を、閲覧の権限を確かめられない受け手へ開示しないためである
-      - 版上げの PR そのものを判定する契約は、判定する PR をブランチ戦略から選ぶ #4105（リリースの判定の対象と保留を読む範囲を決める Issue）の設計が持つ。判定する PR を選ぶ規則を 2 つの Issue に分けないためで、承認資料には書かない
-    - どちらかを決められない（文脈に `pr` が無い・`ndf release assemble` を打つ戦略なのに結果 JSON の `outputs.pr` が無い・`ndf progress show` が `ok` でない）: 判定を打たない。欄に「今回のリリースについて、プロジェクトの判断基準に沿っているかの自動判定は行っていません（判定する対象を決められませんでした）。マージする PR の変更内容を確認して、リリースを承認するか判断してください。レビューで保留になった指摘は確認していません」を載せ、人へ問う。決められなかった理由（どちらの PR か・どの値が無いか）は、フェーズレポートの `理由` に書いて呼び出し元へ返す
+      - 承認する PR そのものを判定する契約は、判定する PR をブランチ戦略から選ぶ #4105（リリースの判定の対象と保留を読む範囲を決める Issue）の設計が持つ。判定する PR を選ぶ規則を 2 つの Issue に分けないためで、承認資料には書かない
+    - 判定する PR だけを決められない（結果が `input_missing` など、下の「結果が `ok` でないとき」）: 承認する PR は決まっているので、承認資料に承認する PR を示し、下の文で人へ問う
     - 結果の `outputs.mvv_gate` は承認資料の「MVV 判定」の欄にだけ載せ、工程の出力へは載せない（#4105 までリリース承認ゲートは省かないので、ゲートが読む出力が要らない）
-    - 結果が `ok` でないときは、欄に次の文を載せて承認ゲートを返す（止まらずに人へ問う）。`ok` でないのは、ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`、入力の形が違う `invalid` である。載せる文は「判定できない: 判定の入力を組めない（<結果の `status`>・<`cause.kind`>）。結果の全文は、判定を打った実行環境の <`mvv-gate-release.json` のパス> で読む」である。`summary`・`cause.detail`・`warnings` は承認資料にもフェーズレポートにも写さない。スキーマの誤りの文には、無効だった入力の値（作業ツリーのパスや非公開の識別子）が入りうるためである。`status` と `cause.kind` は決まった値の列挙なので、そのまま載せる。設計承認ゲートで `ok` でないときも同じ書き方にする
+    - 結果が `ok` でも `not_applicable` でもないときは、欄に次の文を載せて承認ゲートを返す（止まらずに人へ問う）。`ok` でないのは、ステートマシンが無い・モードが `release-mvv` を持たない `refused`、文脈に `pr` が無い `input_missing`、入力の形が違う `invalid` である。載せる文は「判定できない: 判定の入力を組めない（<結果の `status`>・<`cause.kind`>）。結果の全文は、判定を打った実行環境の <`mvv-gate-release.json` のパス> で読む」である。`summary`・`cause.detail`・`warnings` は承認資料にもフェーズレポートにも写さない。スキーマの誤りの文には、無効だった入力の値（作業ツリーのパスや非公開の識別子）が入りうるためである。`status` と `cause.kind` は決まった値の列挙なので、そのまま載せる。設計承認ゲートで `ok` でないときも同じ書き方にする
     - プランの経路（`release-mvv` を持つ本番のリリースプラン）では打たない（判定のステップが打つ）
 - 手順書: `pace.md` の「MVV 判定」の表から順 2（進め方）を外し、「進め方は省くかだけを決める」と `--machine` の行を足す。`project-mvv.md` の「工程での読み方」（#4076 が足す節）の承認ゲートの行から `pace.md` を指す
 
@@ -639,6 +642,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | --- | --- | --- | --- |
 | `stage_inputs_of` | 設計の工程の入力（`issues`・`worktree`・`mode`・`pace`・`mvv_ref`）が、同じ文脈で `resolve_inputs` が組むものと同じ | 記録された出力（`design_pr`）が重なった文脈でも、返す入力に `design_pr` が無い | 無い ID → `Refused`。同じ DB に作った別リポジトリ（`repo` の違う行）の ID → `Refused` で、`store.read_definition`・`store.read_events`・`resolve_inputs` を呼ばず文脈を返さない（`_mvv_gate` は `gate` を呼ばず、PR へ書かない）。拒否の結果 JSON（`summary` と `warnings`）に、その行の `repo` の値（リモートの URL・絶対パス）が現れない。判定のステップを持たないモード → `Refused`。`mvv_ref` が文脈に無い → `StageInputMissing` |
 | `_mvv_inputs` | 上の表の 4 行（環境変数だけ・`--machine` だけ・両方・どちらも無し）を、`design`・`release` のそれぞれで確かめる（4 行 × 2 区分） | — | 両方ある → `invalid` |
+| `_mvv_gate`（`--expect-pr`） | `--gate release --machine <ID> --expect-pr <文脈の pr と同じ番号>` → 今どおり `gate` を呼んで判定する | 文脈の `pr` が 12 で `--expect-pr 34` → `gate`・`hub.pull`・LLM のスタブ・`post_note` のスタブのどれも呼ばれず、`stopped`・`not_applicable`。`summary` と `warnings` に `12` も `34` も無い。先に `--expect-pr 12` で比べる前提の値を作った後、同じステートマシンの文脈の `pr` を 56 に書き換えてから `--expect-pr 12` で打つ → 同じく判定しない（比べるのは判定に使う入力そのもの） | `--gate design` で `--expect-pr` → `invalid`。文脈に `pr` が無い → 今どおり `input_missing` |
 | `_env_inputs` | プランが組む入力（`resolve_inputs` の結果）→ 同じ値を返す | 文脈のキーでない余分なキーを持つ入力 → `invalid`。文脈にはあるが工程で宣言していないキー（`design_pr`）を足した入力 → `invalid`（除いて通さない。`gate` を呼ばない） | `{"context": {...}}` の形（最上位に `mode` が無く、`schema` と `missing` の両方に当たる）→ 例外を出さず `invalid`（判定を打たず、`gate` を呼ばない）。`mode` だけが無く形は合う → `input_missing`。`pace` の値が文脈のスキーマに無い → `invalid`。object でない（配列）→ `invalid` |
 | `stage_input_errors`・`stage_io` | `stage_io("design")` の `inputs`・`input_ref` が `load_definition(<design-mvv を持つモード>)` の設計の工程と同じ | `{"context": {...}}` → `schema` と `missing` の両方が空でない。`validate_stage_input` が 2 つを合わせたものと同じ。文脈のスキーマにはあるが設計の工程の `inputs`・`optional_inputs` に無いキー（`design_pr`）を足した入力 → `schema` に「宣言されていないキー design_pr」の 1 件 | object でない → `schema` だけ |
 | `_mvv_gate`（両方のエントリポイント） | 同じステートマシンの文脈で、`NDF_STAGE_INPUT`（プランが組む入力）と `--machine` の 2 回の起動が同じ入力で `gate` を呼び、同じ PR の番号を読み、同じ判定のスタブの結果から同じ `mvv_gate` を返す | 文脈の `design_pr` が `worktree` のブランチの PR と違う → 両方とも `worktree` のブランチの PR を判定する | — |
@@ -654,7 +658,7 @@ PR を読む前の失敗（`gate` が受ける）:
 | `skills/development-workflow/references/approval-request.md` | 「MVV 判定」の行の出所を、進め方によらず今回の判定の出力 `outputs.mvv_gate` にし（下の「承認資料の出所」）、保留（`holds`）を足す。`pace: normal` は助言、の注記を消す。設計文書が 2 本以上の資料のまとまりの見出しを `# <設計文書の H1>（#<課題番号>）` の形にし（`cite` がまとまりを見分ける。上の「承認資料の見出しの契約」）、「目指す姿の根拠」の欄は、深さ 2 までの見出し（まとまりの見出しが `#` なら `## 目指す姿の根拠`）にし、決定の見出し（`### 決定 <数>: <題>`）の下へ根拠の行を載せる形にする（上の「根拠の行の確かめ」の「承認資料の見出しの契約」）。承認資料を渡す前に `ndf records mvv cite` を打ち、`ok`・`refused`・`precondition` で分ける手順を足す。supervisor が呼び出し元へ返す資料では、「MVV 判定」の欄の判定の理由・レッドライン・保留の文と `why` の本文を載せず、件数だけを載せる（下の「承認資料の開示の範囲」の表）。全文の参照先が今回の判定のコメントのときは、コメントを開けない・判断に必要な理由が伏せ字で読めない場合は承認せずに返すよう、承認する人へ求める一文を欄に足す（下の「受け入れ条件 3・4 との関係」の表） |
 | `skills/development-workflow/references/agent-layers.md` | supervisor が守る規則に、設計承認ゲートとリリース承認ゲート（手動の経路）を返す前の `--machine` の判定と、結果を載せる先と、`cite` を足す（上の「プランの外のエントリポイント」の手順書）。規則 15 に、工程の出力の `mvv_gate` は出力の JSON ファイルにだけ置き、フェーズレポートの本文へ写さないことと、そのファイルと `--machine` の結果 JSON を `mktemp` で作った新しいファイルに書いてから置き換えることを足す（下の「承認資料の開示の範囲」の表と「手元のファイルの閲覧範囲」） |
 | `skills/development-workflow/references/project-mvv.md` | 「工程での読み方」の承認ゲートの行（判定はどの進め方でも打つ） |
-| `docs/contracts/commands.md` | `ndf records mvv gate` の `--machine` と、`ndf records mvv cite` の行 |
+| `docs/contracts/commands.md` | `ndf records mvv gate` の `--machine`・`--expect-pr` と、`ndf records mvv cite` の行 |
 | `docs/glossary/glossary.json` | 語「レビューの保留」を追加、「MVV 判定」の意味を変え、`ndf records glossary render` で `docs/glossary.md` を作り直す |
 
 承認資料の出所（プランの経路は `progress/gate/asking.py` の `material` が、supervisor の経路は `approval-request.md` の手順が、同じ規則で組む）:
