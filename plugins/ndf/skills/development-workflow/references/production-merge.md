@@ -1,18 +1,16 @@
 # 自動反映の本番チャネルへのマージ（リリース承認ゲート）
 
 `SKILL.md` の「本番系へ届く操作」のうち、Pull Request のマージがリリース承認ゲートに当たる場面の細部。
-マージ先が自動反映の本番チャネルである場合と、設定から本番チャネルを特定できない場合は、承認を得てからマージする。
-詳しい条件は下の「マージ先ごとの判定」にある。
+次の 3 つの場合は、承認を得てからマージする。詳しい判定は下の「マージ先ごとの判定」の表にある。
+
+- 設定から本番チャネルを特定できない（マージ先を問わない）
+- 本番チャネル宛てで、自動で反映する設定がある
+- 本番チャネル宛てで、反映の方法の設定（`release.deliveries`）が無いか形が違う
 
 ## 例: project-trygroup-prd の 2 本のマージ
 
-`release.deliveries` を書いた構成では、本番チャネル（`branches.production`）宛てのマージで、本番チャネルへ自動で反映する
-届け先の行（`release.deliveries` の `channel: production` で `kind` が `manual` でない行）があるときに承認が要る。
-本番チャネルを特定でき、`release.deliveries` が無い場合は、本番チャネル宛てのマージに承認が要る。
-設定を読めず本番チャネルを特定できない場合（設定のファイルが無い・JSON として読めない・`branches.production` が無い）は、マージ先にかかわらず承認が要る。
-どちらも下の「マージ先ごとの判定」の表にある。
-
-次の例は `release.deliveries` を書いた構成である。
+次の例は、`release.deliveries` に自動で反映する設定を書いた構成である。自動で反映する設定は、`release.deliveries` の
+`channel: production` で `kind` が `manual` でない行である。
 ブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）が `branches.base: develop`・`branches.production: main` を持ち、
 `release.deliveries` に、stg へ自動で反映する `channel: base`・`kind: auto` の行と、prd へ自動で反映する `channel: production`・`kind: auto` の行を持つとき:
 
