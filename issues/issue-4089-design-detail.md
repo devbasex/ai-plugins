@@ -87,8 +87,8 @@ tests/
 
 - **会話の行**: `type` が `user` か `assistant` で、`isSidechain` が真でない行
 - **会話でない行**: 会話の行でない行のすべて。`type` が `user`・`assistant` でない行（`last-prompt`・`api-request`・`attachment`・`system` など。ただし `system` の `compact_boundary` の行は境として別に扱う）と、`isSidechain` が真の行（サブエージェントの会話）である。走査では飛ばし、利用者の行にも応答にも数えない
-- **利用者の行**: `type` が `user` の会話の行のすべてである。入力の行だけでなく、Tool の結果の行（`content` が `tool_result` の要素の行）と `isMeta` の行も含む。どれも応答の後に足された文脈なので、その後に応答が無ければ最後の応答の量は古い。`Reply` と `Tail` の「その後に利用者の行が無い」は、Tool の結果の行が 1 行でもあれば満たさない（`Reply` では `behind`、`Tail` では `behind`（`after`））
-- #4068 の `wake_reply`・`opening` の「入力の行」は、利用者の行から Tool の結果の行・圧縮の要約の行と、付随する `isMeta` の行を除いたものである。`isMeta` の行は一律には除かない。Tool の結果でない `user` の行には `isMeta` を見る前に #4068 の `is_wake_input` を当て、真（起床の文）か偽（利用者の入力・作業の知らせ）を返した行は、`isMeta` が真でも入力の行にする。None を返した `isMeta` の行だけを付随する行として除く（判定の順の正本は #4068 の詳細設計の「`wake_reply` と `opening` が数える行」）。#4068 は起床と待ちを終えた独立した入力を探すので付随する行を入力に数えないが、この部品の「利用者の行」は量の古さを決めるので Tool の結果を含める。2 つは別の語で、食い違いではない（#4068 の詳細設計の「`wake_reply` と `opening` が数える行」）
+- **利用者の行**: `type` が `user` の会話の行のすべてである。入力の行だけでなく、Tool の結果の行（`content` が `tool_result` の要素の行）と `isMeta` の行も含む。どれも応答の後に足された文脈なので、その後に応答が無ければ最後の応答の量は古い。`Reply` と `Tail` の「その後に利用者の行が無い」は、Tool の結果の行が 1 行でもあれば満たさない。そのとき `Reply` では `behind`、`Tail` では `behind`（`after`）になる
+- #4068 の `wake_reply`・`opening` の「入力の行」は、利用者の行から Tool の結果の行・圧縮の要約の行と、付随する `isMeta` の行を除いたものである。`isMeta` の行は一律には除かない。Tool の結果でない `user` の行には、`isMeta` を見る前に #4068 の `is_wake_input` を当てる。真（起床の文）か偽（利用者の入力・作業の知らせ）を返した行は、`isMeta` が真でも入力の行にする。None を返した `isMeta` の行だけを付随する行として除く（判定の順の正本は #4068 の詳細設計の「`wake_reply` と `opening` が数える行」）。#4068 は起床と待ちを終えた独立した入力を探すので付随する行を入力に数えないが、この部品の「利用者の行」は量の古さを決めるので Tool の結果を含める。2 つは別の語で、食い違いではない（#4068 の詳細設計の「`wake_reply` と `opening` が数える行」）
 
 形を確かめるのは、手がかりで `current` か `behind` を決めた後の、最後の応答の採用行（最も新しい物理の行）の 1 行だけである。確かめる項目は次の 3 つである。`message.usage` は設計文書の「文脈の量」の形か。`message.id` は空でない文字列か。`timestamp` は `timestamp_seconds` が None でない文字列か。量・ID・時刻はこの行から読み、同じ応答の前の行へ替えない。この 3 つが `form` の条件のすべてで、要求の受け入れ条件 6・10 と設計文書の決定 6 も同じ 3 つを指す。採用行の object は `ContextRead.entry` に入れて返す。`message.id` が文字列でない採用行は、その行だけを 1 つの応答として突き合わせる（突き合わせは形に依らずに決まる）。`form` は `current` の候補の形の違いだけに出す。`behind` の候補の形の違いは、突き合わせの理由（`unrecorded`・`after`）のまま `none` にする。#4068 が今回でない応答の欠けで会話ごと止めないためである。
 
@@ -160,7 +160,7 @@ tests/
 - `check`
   - 事前条件: 入力に `tool_use_id` が無い（空の）呼び出しは `ToolUse("")` を渡し、突き合わせは必ず外れる（`behind` か `none`）
   - 事後条件: イベントごとに下の 2 つの表のとおり。`state` が `none` の量は「量が読めない」（None）として扱う。`passing`・`deny`・`advise` の `notes` は `context_tokens` と `context_state` を持つ
-  - 副作用: PreToolUse で覚える値を、今の `_remember` の `{"tokens": …, "cwd": <_cwd_digest(ctx.cwd)>}` に `state` を足した `{"tokens": …, "cwd": …, "state": …}` にする（#3995 の詳細設計の `remember` の `value`。`cwd` のダイジェストは落とさない）。PostToolUse は今の `_remembered` と同じく、`take` が返した値の `cwd` が `_cwd_digest(ctx.cwd)` と同じで `tokens` が整数のときだけ有効な保存値として再利用する。有効な保存値の `state` が `current`・`behind` のどちらでもなければ（無い・別の値）`behind` とみなす。`cwd` が違う・`tokens` が整数でない保存値は今のとおり無効で、覚えた値が無いときと同じく会話の記録を読む。覚える条件・消す規則は #3995 のまま
+  - 副作用: PreToolUse で覚える値を `{"tokens": …, "cwd": …, "state": …}` にする。今の `_remember` の `{"tokens": …, "cwd": <_cwd_digest(ctx.cwd)>}` に `state` を足した形である（#3995 の詳細設計の `remember` の `value`。`cwd` のダイジェストは落とさない）。PostToolUse は、今の `_remembered` と同じ条件の保存値だけを有効として再利用する。条件は、`take` が返した値の `cwd` が `_cwd_digest(ctx.cwd)` と同じで、`tokens` が整数であることである。有効な保存値の `state` が `current`・`behind` のどちらでもなければ（無い・別の値）`behind` とみなす。`cwd` が違う・`tokens` が整数でない保存値は今のとおり無効で、覚えた値が無いときと同じく会話の記録を読む。覚える条件・消す規則は #3995 のまま
   - `state` を覚える目的: 判定（止める・知らせる）は状態を問わず量だけで決まる（設計文書の決定 5）。`state` は判定に使わず、PostToolUse の判定の記録（`notes` の `context_state`）に、読み直さずに PreToolUse の時点の古さを残すためだけに覚える。古い量で止めた・知らせた回数を後から記録で数え、決定 5 の代償（古い量は厳密な下限でない）を見直す材料にする
 
 PreToolUse（運用上限の止め）:
