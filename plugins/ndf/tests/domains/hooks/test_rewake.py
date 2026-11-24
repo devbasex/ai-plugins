@@ -85,9 +85,10 @@ def write_tail(directory: Path, *lines: str) -> Path:
     return path
 
 
-def stop(directory: Path, last="待つ", tasks=WORK, clock=None, environ=None, session=SID) -> tuple:
+def stop(directory: Path, last="待つ", tasks=WORK, clock=None, environ=None, session=SID, path=None) -> tuple:
     clock = clock or Clock(T0 + 1)
-    payload = {"session_id": session, "transcript_path": str(directory.parent / "transcript.jsonl"), "last_assistant_message": last}
+    path = path or directory.parent / "transcript.jsonl"
+    payload = {"session_id": session, "transcript_path": str(path), "last_assistant_message": last}
     if tasks is not None:
         payload["background_tasks"] = tasks
     err = io.StringIO()
@@ -218,6 +219,32 @@ def test_unknown_ttl_is_filled_from_state_or_noted(child):
     assert code == 2 and keep(child)["last"]["ttl"] == "1h"
 
 
+def test_zero_write_reply_keeps_the_ttl_an_earlier_hook_wrote_before_the_lock(child, monkeypatch):
+    """#4199 の条件 1 の順: 後の応答の hook がロックの外で状態を読む（寿命は不明）→ 先の応答の hook が 1 時間の待ちを
+    始める → 後の hook がロックを取る。後の hook の後も寿命は 1 時間で、起床の時点は 1 時間の寿命から決まる。"""
+    early = child.parent / "early.jsonl"
+    early.write_text(said("x") + "\n" + reply("m1") + "\n", encoding="utf-8")
+    write_tail(child, said("x"), reply("m1"), said("y", at=T0 + 10), reply("m2", "続き", use(read=99_000), at=T0 + 20))
+    real = rewake._settle
+    seen = {}
+
+    def halt(clock):
+        raise RuntimeError("先の hook は待ちを始めて眠りに入ったまま")
+
+    def settle(t, turn, tail, q_for, clock):
+        if turn.message_id == "m2":
+            seen["outside"] = keep(child)
+            seen["earlier"] = stop(child, path=early, clock=Clock(T0 + 1, halt))[0]
+            seen["ttl_before_lock"] = keep(child).get("ttl")
+        return real(t, turn, tail, q_for, clock)
+
+    monkeypatch.setattr(rewake, "_settle", settle)
+    code, _, clock = stop(child, last="続き", clock=Clock(T0 + 21))
+    assert seen == {"outside": {}, "earlier": 0, "ttl_before_lock": "1h"}
+    assert code == 2 and clock.now == T0 + 20 + 3000
+    assert keep(child)["ttl"] == "1h" and keep(child)["last"]["ttl"] == "1h" and "ttl_unknown" not in keep(child).get("noted", [])
+
+
 def test_contested_reply_wakes_nobody(child):
     write_tail(child, said("x"), reply("m1"))
     holder = {}
@@ -286,6 +313,29 @@ def test_woken_reply_that_hit_keeps_waking(child, wake_head):
     assert keep(child)["k"] == 2 and "stopped" not in keep(child)
 
 
+def test_next_wake_counts_from_the_last_reply_even_when_the_woken_child_used_a_tool(child, wake_head):
+    """#4068 の条件 14: 起きた子が Tool を呼んでも、次の起床の時点はその応答の最後の応答の時刻から数える。"""
+    write_tail(child, said("x"), reply("m1"))
+    assert stop(child)[0] == 2
+    at = T0 + 3000
+    call = {"id": "w1", "model": "claude-opus-5-5", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]}
+    call["usage"] = use(read=95_000, w1h=10)
+    result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}
+    write_tail(
+        child,
+        said("x"),
+        reply("m1"),
+        said(keep_cache.WAKE_HEAD + "起床", at=at),
+        json.dumps({"type": "assistant", "timestamp": stamp(at + 2), "message": call}),
+        json.dumps({"type": "user", "timestamp": stamp(at + 3), "message": result}),
+        reply("w2", "待機を続ける", use(read=96_000, w1h=5), at=at + 40),
+    )
+    code, _, clock = stop(child, last="待機を続ける", clock=Clock(at + 41))
+    rows = [r for r in log(child) if r["kind"] == "wake_result"]
+    assert rows[0]["calls"] == 2 and rows[0]["hit"] is True
+    assert code == 2 and clock.now == at + 40 + 3000 and keep(child)["k"] == 2
+
+
 def test_woken_reply_that_missed_stops_the_session(child, wake_head):
     code, _, _ = _woken(child, 89_000)
     rows = [r for r in log(child) if r["kind"] == "wake_result"]
@@ -311,6 +361,26 @@ def test_normal_input_ends_the_wait_with_the_last_reply(child, wake_head):
     # 起床の応答の Stop を流していないので、待ちの終わりの直前の応答は待ちを始めた m1
     assert (end["tokens"], end["ttl"], end["model"], end["w"], end["r"]) == (100_001, "1h", "claude-opus-5-5", 2.0, 0.05)
     assert "wait_id" not in keep(child) and keep(child)["last"]["message_id"] == "m3"
+
+
+def test_next_wait_after_a_five_minute_ending_reply_does_not_wake(child, wake_head):
+    """#4199 の条件 10: 待ちを終えた応答が 5 分へだけ書けば、その応答で始まる次の待ちでは起床させない。"""
+    write_tail(child, said("x"), reply("m1"))
+    stop(child)
+    at = T0 + 3000
+    write_tail(
+        child,
+        said("x"),
+        reply("m1"),
+        said(keep_cache.WAKE_HEAD + "起床", at=at),
+        reply("w1", "待機を続ける", use(read=95_000), at=at + 2),
+        said("割り込み", at=at + 100),
+        reply("m3", "done", use(read=20_000, w5m=50), at=at + 110),
+    )
+    code, _, clock = stop(child, last="done", clock=Clock(at + 111))
+    assert (code, clock.slept) == (0, 0) and kinds(child).count("wake") == 1
+    assert [r["ttl"] for r in log(child) if r["kind"] == "wait_start"] == ["1h", "5m"]
+    assert keep(child)["ttl"] == "5m" and keep(child)["wait_id"] == at + 110
 
 
 def test_unknown_input_after_a_wake_keeps_the_wait_and_stops_it(child, monkeypatch):
@@ -349,6 +419,15 @@ def test_unrecorded_with_a_woken_wait_keeps_it(child):
     signals.update_keep(child, SID, {**keep(child), "wait_id": T0 - 50, "k": 1, "n_max": 9, "spent": 1})
     code, _, _ = stop(child, last="未記録")
     assert code == 0 and keep(child)["wait_id"] == T0 - 50 and "wait_void" not in kinds(child)
+
+
+def test_unreadable_transcript_does_not_wake_and_reads_again_on_the_next_stop(child):
+    """#4068 の条件 7 の 1 行目: 会話の記録が読めなければ起床させず、会話では止めず、次の Stop で読み直す。"""
+    code, _, clock = stop(child)
+    assert (code, clock.slept) == (0, 0) and "stopped" not in keep(child) and keep(child)["noted"] == ["unrecorded"]
+    write_tail(child, said("x"), reply("m1"))
+    code, _, clock = stop(child, clock=Clock(T0 + 2))
+    assert code == 2 and clock.now == T0 + 3000
 
 
 def test_form_stops_the_session_once(child):
