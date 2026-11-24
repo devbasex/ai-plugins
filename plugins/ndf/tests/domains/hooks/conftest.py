@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ._hooks import ENV_NAMES
-from ._hooks import counted_tail, relay  # noqa: F401  fixture の登録（会話の記録の読み取りの回数・中継の作業ディレクトリ）
+from ._hooks import counted_tail, relay, relay_child  # noqa: F401  fixture の登録（会話の記録の読み取りの回数・中継の作業ディレクトリ・子の会話）
 
 
 @pytest.fixture(autouse=True)

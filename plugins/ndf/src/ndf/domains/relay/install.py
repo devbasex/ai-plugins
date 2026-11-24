@@ -90,7 +90,7 @@ class Installed(NamedTuple):
 
 
 def config_dir(environ: Mapping[str, str]) -> Path:
-    return signals.claude_config_root(environ) / identity.FINAL_NAME
+    return identity.claude_config_root(environ) / identity.FINAL_NAME
 
 
 def bin_dir(environ: Mapping[str, str]) -> Path:

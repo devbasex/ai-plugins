@@ -77,6 +77,7 @@
     {"id": "relay-wrapper-log", "location": "relay-wrappers", "path": "<名前>/log.jsonl", "kind": "record", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "cleanup"},
     {"id": "relay-next", "location": "relay-wrappers", "path": "<名前>/next.json", "kind": "exchange", "tracked": false, "writer": "Stop の hook（M3a）", "ends": "run"},
     {"id": "relay-question", "location": "relay-wrappers", "path": "<名前>/question.json", "kind": "exchange", "tracked": false, "writer": "PreToolUse の hook（M3a）", "ends": "run"},
+    {"id": "relay-busy", "location": "relay-wrappers", "path": "<名前>/busy-<起動>.json", "kind": "exchange", "tracked": false, "writer": "子の会話の SessionStart・PreToolUse・Stop の hook（M3a）。中継のラッパーはほかの起動のものを消す", "ends": "run"},
     {"id": "relay-shells-ended", "location": "relay-wrappers", "path": "<名前>/shells-ended.json", "kind": "exchange", "tracked": false, "writer": "ndf relay ls --activity（M3b）", "ends": "replaced"},
     {"id": "relay-stop", "location": "relay-wrappers", "path": "<名前>/stop", "kind": "exchange", "tracked": false, "writer": "ndf relay stop（M3b）と人（touch）", "ends": "run"},
     {"id": "relay-usage-fetch", "location": "relay-account-store", "path": ".usage-fetch/<名前>/<世代>.json", "kind": "measured", "tracked": false, "writer": "中継のラッパー（使用率の API の取得）", "ends": "replaced", "keys": ["at", "fetched_at", "error", "spend_limit_reached", "windows"]},

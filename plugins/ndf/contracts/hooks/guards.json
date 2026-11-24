@@ -208,6 +208,20 @@
       "fail_closed": true
     },
     {
+      "name": "relay-busy",
+      "summary": "中継のラッパーが起動した会話（子）で、バックグラウンドの作業の件数を起動ごとの記録に書く。SessionStart（startup・resume）で 0 件を書く。作業を始める呼び出し（Agent と、実行するコマンドが params.wait_commands だけではない Monitor・run_in_background の Bash）の前に、子を止めるのと同じロックを取って「1 件以上」を書き、書けなければ、hook が時間切れになったときも含めて呼び出しを拒否する。監視を始める呼び出し（実行するコマンドが params.wait_commands だけの Monitor・run_in_background の Bash）の前には、作業の件数を変えずに監視を 1 件以上にし、書けなくても拒否しない（ラッパーは、この記録で作業が 0 件と確かめた子だけを引継ぎで止める。#4049）",
+      "module": "ndf.domains.hooks.guards.relay_busy",
+      "events": ["SessionStart", "PreToolUse"],
+      "tools": [],
+      "order": 65,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.counter-lock"],
+      "params": {"wait_commands": ["ndf lanes wait", "ndf plan wait", "ndf ci watch"]},
+      "fail_closed": true
+    },
+    {
       "name": "ask-answered",
       "summary": "中継の下で AskUserQuestion に回答したら、同じ tool_use_id の質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
       "module": "ndf.domains.hooks.guards.ask_clear",
@@ -237,7 +251,7 @@
     },
     {
       "name": "relay-marker",
-      "summary": "中継の下で最後の応答が次のセグメントのブロックを持てば、背景の作業が残る間は変更要求、無ければ中継のマーカーを書く（#1877・#2438）",
+      "summary": "中継のラッパーが起動した会話（子）の Stop で、残っている作業と監視の件数を起動ごとの記録に書く（入力に background_tasks が無いときと、relay-busy を止めた環境では書かない）。最後の応答が次のセグメントのブロックを持てば、作業が残る間（background_tasks が無ければ前の記録の件数で決める）はマーカーを書かずに応答を続けさせ、作業が無ければ、監視が残っていてもマーカーを書く（#1877・#2438・#4049）",
       "module": "ndf.domains.hooks.guards.relay_mark",
       "events": ["Stop"],
       "tools": [],

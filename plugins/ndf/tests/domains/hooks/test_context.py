@@ -156,6 +156,125 @@ def test_inner_scripts_stop_at_the_depth_limit():
     assert len(waits) == 1 + context._INNER_DEPTH and ("sleep", "1") not in [c.argv for c in waits]
 
 
+def _waits(text: str) -> bool:
+    """待つコマンドが `ndf lanes wait` と `ndf ci watch` だけのときの `only_commands`。"""
+    return context.only_commands(text, lambda cmd: cmd.body_argv[:3] in (("ndf", "lanes", "wait"), ("ndf", "ci", "watch")))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ndf lanes wait p",
+        "ndf lanes wait a; ndf lanes wait b && ndf ci watch --pr 1 || ndf lanes wait c",
+        "ndf lanes wait a\nndf lanes wait b\n",
+        "ndf lanes wait p > log 2>&1",
+        "> log ndf lanes wait p",
+        "ndf lanes wait p &> log",
+        'ndf lanes wait "$P"',
+        "bash -c 'ndf lanes wait p'",
+        'bash -c "ndf lanes wait p"',
+        r"bash -c ndf\ lanes\ wait\ p",
+        # 外側のシェルは `\$` を展開しない
+        r'bash -c "ndf lanes wait \$P"',
+        "bash --norc -eu -c 'ndf lanes wait p' name arg",
+        'timeout 600 bash -c "ndf ci watch --pr 1"',
+        "eval ndf lanes wait p",
+        "eval ndf lanes wait p --after 3",
+        "ndf lanes wait a && ndf lanes wait b > log",
+        "ndf lanes wait a || ndf lanes wait b > log 2>&1",
+        "timeout -k 5 600 nice -n 10 ndf lanes wait p",
+        "eval 'ndf lanes wait a;' 'ndf lanes wait b'",
+    ],
+)
+def test_only_commands_accepts_a_text_made_of_accepted_commands(text):
+    assert _waits(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 受け入れないコマンド・空の文
+        "ndf lanes wait p && rm x",
+        "ndf lanes wait p\nrm x",
+        "bash x.sh",
+        "",
+        "bash -c ''",
+        # 単純なコマンドの並びでない形
+        "ndf lanes wait p | tail",
+        "ndf lanes wait p &",
+        "ndf lanes wait p; > output",
+        "for i in 1; do ndf lanes wait p; done",
+        "until ndf lanes wait p; do ndf lanes wait q; done",
+        "if ndf lanes wait p; then ndf lanes wait q; fi",
+        "(ndf lanes wait p)",
+        "{ ndf lanes wait p; }",
+        "! ndf lanes wait p",
+        "f() { ndf lanes wait p; }",
+        "A=1 ndf lanes wait p",
+        "ndf lanes wait p <<E\na\nE\n",
+        "ndf lanes wait p <<< a",
+        "ndf lanes wait p > >(cat)",
+        "ndf lanes wait $(rm x)",
+        'ndf lanes wait "${X:-$(rm y)}"',
+        # 構文の誤り
+        "ndf lanes wait 'p",
+        "ndf lanes wait p; done",
+        # 中の文に受け入れないコマンドか形がある
+        'bash -c "ndf lanes wait p; rm x"',
+        "bash -c 'ndf lanes wait p &'",
+        r'bash -c "ndf lanes wait \$(rm x)"',
+        "eval 'ndf lanes wait p' ';' 'rm x'",
+        # 中の文が外側の展開で決まる
+        'bash -c "ndf lanes wait $ARGS"',
+        'eval "$CMD"',
+        "eval ndf lanes wait *",
+        r"bash -c ndf\ lanes\ wait\ $P",
+        "bash -c 'ndf lanes wait '\"$P\"",
+        'timeout 600 bash -c "ndf lanes wait $ARGS"',
+        # `-c` が外側のシェルのオプションと決まらない
+        "bash x.sh -c 'ndf lanes wait p'",
+        "bash -- -c 'ndf lanes wait p'",
+        "bash -c$O 'ndf lanes wait p'",
+        # シェルが起動ファイルを読みうる
+        "bash -lc 'ndf lanes wait p'",
+        "bash -l -c 'ndf lanes wait p'",
+        "bash -ic 'ndf lanes wait p'",
+        "bash --rcfile=x -c 'ndf lanes wait p'",
+        "zsh -c 'ndf lanes wait p'",
+        "env 'BASH_ENV=./setup.sh' bash -c 'ndf lanes wait p'",
+        "exec -l bash -c 'ndf lanes wait p'",
+        # ラッパーかコマンド名が、動かすものを展開・置き換えで変えうる
+        "timeout $D ndf lanes wait p",
+        "timeout 5 $X ndf lanes wait p",
+        "$X/ndf lanes wait p",
+        "xargs -I wait ndf lanes wait p",
+        "timeout 5 'xargs' -I wait ndf lanes wait p",
+        # ロケールで翻訳される引用
+        'bash -c $"ndf lanes wait p"',
+        'ndf $"lanes" wait p',
+        'timeout 5 $"ndf" lanes wait p',
+        'eval $"ndf lanes wait p"',
+        'eval ndf lanes wait "a"$"b"',
+        # コマンドの列に付いたリダイレクトの中のコマンドの無いリダイレクト
+        "ndf lanes wait p && > output",
+        "ndf lanes wait a && rm x > log",
+        # `env -S` で分けた語は引数のノードと対応しない
+        "env -S \"bash -c 'ndf lanes wait p'\"",
+    ],
+)
+def test_only_commands_rejects_a_text_it_cannot_confirm(text):
+    assert not _waits(text)
+
+
+@pytest.mark.parametrize("depth, expected", [(context._INNER_DEPTH, True), (context._INNER_DEPTH + 1, False)])
+def test_only_commands_reads_nested_scripts_up_to_the_depth_limit(depth, expected):
+    text = "ndf lanes wait p"
+    for _ in range(depth):
+        text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        text = f"bash -c {text}"
+    assert _waits(text) is expected
+
+
 @pytest.mark.parametrize(
     ("command", "body"),
     [

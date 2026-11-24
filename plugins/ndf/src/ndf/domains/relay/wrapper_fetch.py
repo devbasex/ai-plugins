@@ -2,7 +2,7 @@
 
 見回りが取り直すアカウントをキューへ入れ、別のスレッドが 1 本ずつ `accounts.fetch_usage` を打って結果を返りのキューへ
 入れる。見回りと端末の中継を止めない。ファイルを書くのは取得の中だけで、このスレッドは画面と `log.jsonl` に書かない
-（返りを読む見回り（`Wrapper._drain_fetch`）が書く）。止めるとき（`close`）は未開始の取得を捨て、`FetchGate` を閉じて
+（返りを読む見回り（`FetchSteps._drain_fetch`）が書く）。止めるとき（`close`）は未開始の取得を捨て、`FetchGate` を閉じて
 新しい GET と更新を始めさせず、送り始めた往復が終わるのを待つ。
 """
 
@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Callable, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Mapping, Optional, Union
 
 from ndf.adapters import claude_usage
-from ndf.domains.relay import accounts
+from ndf.contracts import limits
+from ndf.domains.relay import accounts, launch_inputs
 
 # 使用率の API の応答の形が変わったときの 1 行（値と本文は出さない）
 SHAPE_LINE = "ndf-relay: 使用率の API の応答の形が変わった。最後に取れた値で続ける"
@@ -83,3 +85,61 @@ class Fetcher:
         self.gate.close()
         if self.thread is not None:
             self.thread.join(accounts.fetch_wait())
+
+
+class FetchSteps:
+    """`Wrapper` の使用率の取得の手。属性と記録の手（`_log`・`_say`・`_inputs`）は `Wrapper` が持つ。"""
+
+    store: Path
+    fetcher: Optional[Fetcher]
+    due_memo: dict[str, tuple[tuple, float]]
+    _log: Callable[[Mapping[str, Any]], None]
+    _say: Callable[[str], None]
+    _inputs: Callable[[float, bool], launch_inputs.Inputs]
+
+    def _queue_fetch(self, now: float) -> None:
+        """取り直す登録済みアカウント（動いていないものも、待つ間も）を今の登録の世代と組にしてキューへ入れる（決定 4）。
+
+        取り直すのは、最後に試した時刻から `relay.usage-fetch` を過ぎたか、その後のリセットを過ぎたとき（`accounts.due_at`）。
+        取得の記録のスタンプと `tried` が同じ間は、その時刻を再利用する（見回りごとに取得の記録を開かない）。
+        """
+        f = self.fetcher
+        usage = self._inputs(now, False).usage if f is not None else None
+        if f is None or usage is None:
+            return
+        interval = limits.seconds("relay.usage-fetch")
+        for name, gen in usage.generations.items():
+            last = f.tried.get(name)
+            tried = last[1] if last is not None and last[0] == gen else None  # 登録し直した名前は旧い世代の投入時刻を使わない
+            if name in f.busy:
+                continue
+            path = accounts.fetch_path(self.store, name, gen)
+            key = (gen, launch_inputs.stamp(path), tried)
+            memo = self.due_memo.get(name)
+            at = memo[1] if memo is not None and memo[0] == key else accounts.due_at(path, interval, tried)
+            if at <= now:
+                f.put(accounts.FetchTarget(self.store, name, gen), now)
+                self.due_memo.pop(name, None)
+            else:
+                self.due_memo[name] = (key, at)
+
+    def _drain_fetch(self) -> None:
+        """取得の返りを読む。形の変化は 1 つのラッパーで 1 回だけ知らせ、取れたら次の変化でまた知らせる（決定 4）。"""
+        f = self.fetcher
+        if f is None:
+            return
+        failed = []
+        for name, got in f.results():
+            if isinstance(got, Exception):
+                failed.append({"account": name, "error": type(got).__name__})
+                continue
+            if got is None:
+                continue
+            if got.error == "shape" and not f.shape_told:
+                f.shape_told = True
+                self._say(SHAPE_LINE)
+                self._log({"kind": "usage_shape", "account": name, "items": list(got.missing)})
+            elif got.error is None:
+                f.shape_told = False
+        if failed:
+            self._log({"kind": "usage_fetch_failed", "count": len(failed), "sample": failed[:10]})

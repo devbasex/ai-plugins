@@ -834,12 +834,12 @@ def test_relay_mark_writes_the_next_section_even_when_goal_continues(tmp_path, m
 
 
 def test_relay_mark_pushes_back_while_background_tasks_remain(tmp_path, monkeypatch):
-    # 背景の作業が残る応答は、/goal の続きでも変更を要求する（#1877）
+    # バックグラウンドの作業が残る応答は、/goal の続きでも変更を要求する（#1877）
     relay = tmp_path / "relay"
     relay.mkdir()
     monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
     out = call_entry("claude", "Stop", stop(tmp_path, FENCE, stop_hook_active=True, background_tasks=[{"id": "b1"}]))
-    assert "背景の作業が 1 件" in out["reason"] and signals.read_next(relay) is None
+    assert "バックグラウンドの作業が 1 件" in out["reason"] and signals.read_next(relay) is None
 
 
 def test_relay_mark_does_nothing_outside_the_relay(tmp_path):
