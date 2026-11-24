@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -302,8 +303,15 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
         proc = _start(spec)
     except OSError as exc:
-        return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", ())
+        # 文面はログ・実行ファイルの絶対パスを含み得るので、公開用はファイル名と理由だけにする（PR 4461 の r2-1）
+        return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", (), public=f"起動できない: {_os_error_public(exc)}")
     return watch(proc, spec, poll)
+
+
+def _os_error_public(exc: OSError) -> str:
+    """`OSError` の、パスをファイル名だけに縮めた文面。"""
+    why = exc.strerror or type(exc).__name__
+    return why if exc.filename is None else f"{why}: {Path(os.fsdecode(exc.filename)).name}"
 
 
 def _not_started(spec: Launch, state: AgentState, detail: str, public: Optional[str] = None) -> AgentStatus:
