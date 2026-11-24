@@ -337,11 +337,7 @@ def unknown_keys(sample: Any, target: Target, extra: list[str]) -> list[str]:
     left = set(extra)
     for at in _positions(sample, target):
         names = _names(at.layers.nodes)
-        if (
-            not any("properties" in node for node in at.layers.nodes)
-            or any(_is_open(node) for node in at.layers.nodes)
-            or not at.layers.matched
-        ):
+        if not _is_countable(at.layers):
             continue
         unknown = {"/".join((*_base(at.path), key)) for key in at.value if key not in names}
         left -= unknown
@@ -349,6 +345,12 @@ def unknown_keys(sample: Any, target: Target, extra: list[str]) -> list[str]:
         if count:
             out.append(f"{safe_path(at.path, target)}: 定義に無いキー {count} 件")
     return sorted(out + ([f"既知の、定義に無いキーが消えた: {len(left)} 件"] if left else []))
+
+
+def _is_countable(layers: Layers) -> bool:
+    """定義に無いキーを数える位置か。`properties` を書き、ほかのキーを受ける定義が無く、枝を持つなら見本に合う枝がある位置だけを数える。"""
+    nodes = layers.nodes
+    return any("properties" in node for node in nodes) and not any(_is_open(node) for node in nodes) and layers.matched
 
 
 def added_keys(sample: Any, target: Target, absent: list[str]) -> list[str]:
