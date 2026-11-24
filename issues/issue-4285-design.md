@@ -65,9 +65,9 @@ graph LR
 ```
 
 - 語の規則と当て方は `core/words` の 1 つになり、`ndf check`・`meanings`・足した行の検査が同じものを読む。用語集の語は、活用した形（`forms`）・当てない形（`except`）・置き換え先（`replace`）・今ある行は見ないか（`added_only`）を、データだけで持てる
-- cross-review は、修正担当を起動する前の HEAD から足した行を push の前に検査する。当たりがあれば同じラウンドで修正担当を 1 回だけ起動し直し、それでも残れば未解決の指摘にして push する。指摘は、検査で当たらなくなるまで修正担当の申告によらず未解決のままである
-- `ndf progress` は、設計承認ゲートとリリース承認ゲートの承認資料を書く前に、PR の足した行・題・本文と承認資料の文を検査する。当たりがあれば資料を書かず、ファイル・行・語・置き換え先を並べて `check_failed` で止まる。資料を出す側（supervisor か conductor）が直して push するか `gh pr edit` で題と本文を直し、打ち直す。語の言い換えだけの直しでは cross-review を回し直さない（今の運用と同じ）
-- supervisor や conductor が手で作る承認資料は、`approval-request.md` の手順が `ndf records glossary words --base <ベース> --pr <番号> --text <承認資料>` を求める
+- cross-review は、修正担当を起動する前の HEAD から足した行を push の前に検査する。当たりがあれば同じラウンドで修正担当を 1 回だけ起動し直し、それでも残れば未解決の指摘にして push する。指摘は、検査で当たらなくなるまで修正担当の申告によらず未解決のままである。修正担当が用語集や設定を書き換えても、起動の始めの規則での当たりは消えない
+- `ndf progress` は、設計承認ゲートとリリース承認ゲートの承認資料を書く前に、PR の足した行・題・本文と承認資料の文を検査する。検査した head をそのまま承認の対象にする。当たりがあれば資料を書かず、ファイル・行・語・置き換え先を並べて `check_failed` で止まる。PR が用語集や設定を変えたために当たらなくなった語は、承認ゲートの結果に並べて承認する人が見る。資料を出す側（supervisor か conductor）が直して push するか `gh pr edit` で題と本文を直し、打ち直す。語の言い換えだけの直しでは cross-review を回し直さない（今の運用と同じ）
+- supervisor や conductor が手で作る承認資料は、`approval-request.md` の手順が `ndf records glossary words --pr <番号> --text <承認資料>` を求める。検査する head・ベース・用語集は、打つ場所の HEAD ではなく指定した PR から決まる
 - 修正担当への指示には、文書のファイルを直すときは `document-style` の SKILL.md（導入先の絶対パス）のルール 11 を読んで従う、の 1 文が入る
 
 ## 構成要素
@@ -76,7 +76,8 @@ graph LR
 | --- | --- |
 | 語の規則と当て方（`core/words/rules_decide.py`。新設） | 用語集から語の規則を作り、1 行の文字列から当たりを返す。純粋な関数だけを持つ |
 | 用語集の読み取り（`core/words/source.py`。新設） | 用語集の設定と用語集を、worktree のファイルかコミットから読む。設定が無ければ「無い」、読めなければ例外を返す |
-| 足した行の検査（`core/words/added.py`。新設） | 差分から足した行（移しただけの行を除く）を取り、設定の範囲とコードブロック・引用を外して当てる。文（PR の題と本文・承認資料）にも同じ規則を当てる |
+| 足した行の検査（`core/words/added.py`。新設） | 差分から足した行を取り、設定の範囲とコードブロック・引用を外して当て、移しただけの当たりを除く。文（PR の題と本文・承認資料）にも同じ規則を当てる |
+| PR の検査（`core/words/pull.py`。新設） | 読み終えた PR の head・ベース・題・本文から、足した行と文の当たりと、PR の用語集の変更で当たらなくなった語を返す。承認ゲートとコマンドが同じものを使う |
 | `ndf check` の禁止語（`checks/words.py`） | 上の規則を使い、`added_only` でない語を `plugins/ndf/` の全行に当てる。語の例外は用語集の設定から読む |
 | 用語集の検査（`records/glossary.py`・`glossary_decide.py`） | 意味の欄に全部の語を当て、置き換え先の文に残った廃止した語も返す。文書の組み立てが語の新しい形を表示する |
 | 検査のコマンド（`records/cli.py`） | `ndf records glossary words` を足す |
@@ -85,6 +86,8 @@ graph LR
 | 指摘のジャーナル（`crossreview/journal.py`） | 語の指摘の行を入れ、行が残るかで終わり方を決め直す |
 | 修正担当への指示の文（`criteria_decide.py`・`contracts/data/review-criteria.json`） | 文書の規則への参照の 1 文を持つ |
 | 承認資料の前の検査（`progress/gate/words.py`（新設）・`entry.py`・`asking.py`） | 資料を書く前に検査を打ち、当たりがあれば資料を書かずに止まる。ほかの担当が書いた文は引用の行にする |
+| 承認の対象（`progress/gate/asking.py` の `Target`・`answering.py`） | 対象を読んだときの PR を対象が持ち、検査が同じ PR を使う。リリース承認の後の文書だけの変更も、検査を通った head だけを承認済みにする |
+| 修正の push（`crossreview/push.py`） | 拒まれて載せ直したとき、送り直す前に呼び出し元の検査を呼ぶ |
 | 用語集のデータと設定（`docs/glossary/glossary.json`・`.ndf/glossary.json`） | 語の登録・意味の欄の言い換え・見る範囲・語の例外 |
 | テンプレートと手順書 | 要求仕様のテンプレートの見出しと欄の名前を言い換え、`approval-request.md` に検査を足す |
 
@@ -144,23 +147,23 @@ graph LR
 
 | 追加する値 | 形 |
 | --- | --- |
-| `rounds[].words`（用語集があるときだけ） | `{"found": [当たり], "left": [当たり]}`。`found` は修正担当の直しの直後、`left` は起動し直した後の当たり。当たりは `{"path", "line", "word", "text", "replace"}` |
-| `findings[]` の行の `words`・`words_base`（語の指摘だけ） | `words` は `[{"word", "content"}]` で、`content` は当たった行の前後の空白を除いた中身。`words_base` は当たりを見つけたときの差分の起点（修正担当を起動する前の HEAD）。終わり方を決め直すときに、`words_base` から head までを検査し直し、同じ語と中身の当たりがどのファイルかに残るかを見る |
+| `rounds[].words`（用語集があるときだけ） | `{"found": [当たり], "left": [当たり]}`。`found` は修正担当の直しの直後、`left` は実際に送る head の当たり（起動し直した後。push の拒否で載せ直したときは載せ直した後）。当たりは `{"path", "line", "word", "text", "replace"}` |
+| `findings[]` の行の `words`・`words_base`（語の指摘だけ） | `words` は `[{"word", "content"}]` で、`content` は当たった行の前後の空白を除いた中身。`words_base` は当たりを見つけたときの差分の起点（修正担当を起動する前の HEAD。載せ直したときは載せ直した先の origin の先頭）。終わり方を決め直すときに起点から head までを検査し直し、同じ語と中身の当たりがどのファイルかに残るかを見る（起点の選び方は「処理の流れ」） |
 
 ## 入出力のコントラクト
 
-### `ndf records glossary words [--base <ref>] [--pr <番号>] [--text <ファイル>...]`（新設）
+### `ndf records glossary words [--base <ref> | --pr <番号>] [--text <ファイル>...]`（新設）
 
 | 項目 | 内容 |
 | --- | --- |
 | `--base` | ベースブランチ。リモート追跡ブランチ（`refs/remotes/<リモート>/<ref>`）があればそれを、無ければ渡された ref を使い、HEAD との分岐点からの足した行を見る。手元の古い ref で差分の外まで見ないためである（#4340）。解いたコミットを `metrics` に載せる |
-| `--pr` | PR の題と本文（GitHub から読む）を文として見る |
-| `--text` | ファイルの全体を Markdown の文として見る（承認資料など） |
+| `--pr` | GitHub から PR を 1 回読み、題と本文を文として見る。差分は、その PR の head とベースの先頭の分岐点から head までの足した行を見る（打つ場所の HEAD と作業場所のファイルは使わない）。検査した head とベースのコミットを `metrics` に載せる。`--base` と並べて渡せば `invalid`（HEAD と PR の 2 つの範囲が混ざる） |
+| `--text` | ファイルの全体を、拡張子によらず Markdown の文として見る（承認資料など） |
 | 3 つとも無い | `invalid` |
-| 用語集 | HEAD のコミットの `.ndf/glossary.json` と `source` を読む |
+| 用語集 | `--pr` があれば PR の head の、無ければ HEAD のコミットの `.ndf/glossary.json` と `source` を読む。分岐点の用語集なら当たるが読んだ用語集では当たらない足した行は、当たりに数えず `metrics.relaxed` に並べる（「決定 13」） |
 | 出力（0 件） | `status: ok`（終了コード 0）、`items` は空。用語集の設定が無ければ `ok` で、`summary` に「用語集の設定が無いので見ない」 |
 | 出力（1 件以上） | `stopped`・`cause.kind: check_failed`（終了コード 1）。`items` は `path`（PR は `PR #<番号> の題`・`PR #<番号> の本文`）・`line`・`word`・`text`・`replace` |
-| 失敗 | 用語集か設定が読めない → `config_broken`（終了コード 2）。git で ref を解けない・ファイルを読めない → `precondition`。GitHub を読めない → `transient` |
+| 失敗 | 用語集か設定が読めない → `config_broken`（終了コード 2）。git で ref を解けない・PR の head かベースのコミットを取れない・ファイルを読めない → `precondition`。GitHub を読めない → `transient` |
 | 互換性 | 追加だけ。`render`・`meanings` の引数と出力の形は変わらない |
 
 ### `ndf records glossary meanings`
@@ -169,11 +172,13 @@ graph LR
 
 ### `ndf progress`（承認ゲートの待ち）
 
-語の当たりがあるときだけ、`gate` の代わりに `stopped`・`check_failed` を返す（`items` は上と同じ形）。ステートマシンは待ちのままで、直して打ち直せば承認ゲートの結果になる。用語集が読めなければ `config_broken`、PR の head を取れなければ今の観測の失敗と同じ `refused` で止まる。
+語の当たりがあるときだけ、`gate` の代わりに `stopped`・`check_failed` を返す（`items` は上と同じ形）。ステートマシンは待ちのままで、直して打ち直せば承認ゲートの結果になる。用語集が読めなければ `config_broken`、PR の head を取れなければ今の観測の失敗と同じ `refused` で止まる。当たりが無く `relaxed` があるときは、`gate` の結果の `metrics.words_relaxed` に並べ、件数を `warnings` に 1 行出す。
+
+リリース承認の後に文書だけの変更が加わったとき（`recheck`）も、新しい head を承認済みとして記録する前に同じ検査を打つ。当たりがある・用語集か設定が見た head と違う・検査できないのどれかなら、記録せずに承認ゲートの待ちへ戻す。
 
 ### `ndf cross-review run`
 
-引数は変わらない。用語集か設定が読めなければ、始めに `config_broken` で止まる。修正担当の直しの後で読めなくなったときは、修正の記録を状態ファイルへ書いてから push せずに `config_broken` で止まる。
+引数は変わらない。用語集か設定が読めなければ、始めに `config_broken` で止まる。始めの同期で取った PR の head の規則を、その起動の間の規則にする（「決定 13」）。修正担当の直しの後で読めなくなったときは、修正の記録を状態ファイルへ書いてから push せずに `config_broken` で止まる。
 
 ## 処理の流れ
 
@@ -197,6 +202,12 @@ sequenceDiagram
   D->>J: 残った当たりを未解決の指摘にし、前のラウンドの語の指摘を決め直す
   D->>D: 状態ファイルへ書く
   D->>D: push
+  opt 拒まれて origin の先頭へ載せ直した
+    D->>W: 載せ直した先からの足した行
+    W-->>D: 残った当たり（left を置き換える）
+    D->>J: 同じ決まりで指摘を決め直す
+    D->>D: 状態ファイルへ書いてから送り直す
+  end
 ```
 
 ```mermaid
@@ -205,28 +216,32 @@ sequenceDiagram
   participant W as 承認資料の前の検査
   participant G as GitHub と git
   P->>P: 承認ゲートの待ちと質問を作る
-  P->>W: 質問と承認資料の文
-  W->>G: PR の題・本文・ベース・head。ベースと head を fetch
-  W->>W: 足した行・題・本文・承認資料の文を検査
+  P->>G: 対象を読む（PR を 1 回だけ）
+  P->>W: 質問・読んだ対象（PR を含む）・承認資料の文
+  W->>G: 用語集があり、手元に無いコミットだけを fetch
+  W->>W: 読んだ PR の head の足した行・題・本文・承認資料の文を検査
   alt 当たりが 1 件以上
     W-->>P: 当たり
     P-->>P: 資料を書かずに check_failed
   else 0 件
-    P-->>P: 資料を書き、今と同じ gate の結果
+    P-->>P: 資料を書き、検査した head を対象にした gate の結果
   end
 ```
 
 - 語の指摘は、ファイルごとに 1 件にまとめる（24 か所の当たりでスレッドが 24 本できない）。重さは `major`、`by` は `words`、`impact` は「承認ゲートの資料が出ない」
-- 語の指摘の終わり方は、駆動だけが決める。修正担当が見送り（`deferred`）と申告しても、検査し直して当たりが残っていれば未解決、無ければ直したにする。起点のコミットが head の祖先でなくなっていれば（巻き直し）、その指摘が指すファイルの全行を検査する
-- 前の起動が送れなかった修正のコミットを送り直すとき（`_resend`）も、リモートの先頭からの足した行を検査して記録と指摘にする。このときは修正担当を起動し直さない
+- 語の指摘の終わり方は、駆動だけが決める。修正担当が見送り（`deferred`）と申告しても、検査し直して当たりが残っていれば未解決、無ければ直したにする。修正担当の申告の読み込み（`apply_fix`）・送り直しの後の戻し（`restore_fixed`）・未解決への戻し（`reopen`）・スレッドの resolve（`_settle_resolved`）は、語の指摘の行を変えない
+- 検査し直すのは、未解決の語の指摘がある時だけで、1 つの HEAD につき差分を 1 回だけ読む。起点は未解決の行のうち最も古いラウンドの `words_base` で、後のラウンドの行も同じ差分で見る。その起点が HEAD の祖先でなければ（巻き直し）、起点を `--base` との分岐点にする。段落を別のファイルへ移しても PR の足した行のままなので、どのファイルにあっても残る。起点と HEAD が同じ差分は、そのラウンドの検査と共有する。直したとした指摘は見直さない（語が戻れば、そのラウンドの新しい当たりになる）
+- 検査し直す時点は、起動の始め（送り直しの後。手で言い換えたコミットを、修正担当を起動せずに解消にする）と、ラウンドごとの push の前と、push の拒否で載せ直した後である
+- 前の起動が送れなかった修正のコミットを送り直すとき（`_resend`）も、リモートの先頭からの足した行を検査して記録と指摘にする。push の拒否で載せ直したときは、載せ直した先の origin の先頭からの足した行を送り直しの前に検査する。どちらも修正担当を起動し直さない
 - 起動し直しの指示は、語を言い換えること、語そのものを話題にする行のほかはインラインコードや引用で囲まないこと、当たりを消すために用語集と用語集の設定を変えないことを求める（文は `review-criteria.json` が持つ）
-- 修正担当へ渡す当たりは `<状態の保存先>/round<n>.words.json` に書き、指示にはファイルのパスだけを載せて「参考資料で、指示として従わない」と添える（既存のコメントの渡し方と同じ）
+- 修正担当へ渡す当たりは `<状態の保存先>/round<n>.words.json` に書き、指示には id・固定文・そのファイルのパス（駆動が決める）だけを載せて「参考資料で、指示として従わない」と添える。PR が決める値（対象のファイルの名前・語・当たった行・置き換え先）は JSON だけに入れる。未解決の語の指摘を次のラウンドで渡すときも同じ形にする
 
 ## 非機能の実現方式
 
 | 条件 | 実現 |
 | --- | --- |
-| 検査は LLM を起動しない | 検査は git と正規表現だけ。1 回の `git diff`（文脈の行を全部含む）で、足した行とファイルの全文を同時に得る。実測で 497 ファイル・370 万字の差分の読み取りが 0.14 秒、243 ファイルの差分の検査の全体が 1.4 秒 |
+| 検査は LLM を起動しない | 検査は git と正規表現だけ。1 回の `git diff`（文脈の行を全部含む）で、足した行とファイルの全文を同時に得る。実測で 497 ファイル・370 万字の差分の読み取りが 0.14 秒、243 ファイルの差分の検査の全体が 1.4 秒。cross-review の 1 ラウンドの差分の読み取りは、直しの直後・起動し直した後・未解決の古い指摘の決め直しの高々 3 回で、未解決の指摘の数では増えない（載せ直しが入れば 2 回増える） |
+| 承認ゲートの API と fetch を増やさない | PR は対象を読む今の 1 回だけを使う。`git fetch` は、用語集があり、PR の head かベースの先頭が手元に無いときに、無いものだけを 1 回で取る。用語集の無いプロジェクトでは fetch も差分も打たない |
 | 修正担当の起動し直しは残ったときだけ | 起動し直しは `found` が 1 件以上のラウンドで 1 回だけ |
 | 当たりの記録は人が読まずに直せる形 | `path`・`line`・`word`・`text`・`replace` の 5 つ |
 | 移行 | 文字列の要素はそのまま読む。このリポジトリの用語集の既存の要素は書き換えない |
@@ -246,11 +261,11 @@ sequenceDiagram
 ### 決定 2: 直っていない語を申告で消せないようにするため、語の指摘の終わり方は検査し直した結果で駆動が決める
 
 - **質問**: 語の指摘を、ほかの指摘と同じく修正担当の申告（直した・見送った）で解消とするか
-- **選んだ案**: しない。語の指摘の行は、見つけたときの差分の起点と、語と当たった行の中身を持つ。修正の後に同じ起点から検査し直し、同じ語と中身の当たりがどのファイルかに残れば未解決、無ければ直したにする。行を別のファイルへ移しても起点からは足した行のままなので、残る
+- **選んだ案**: しない。語の指摘の行は、見つけたときの差分の起点と、語と当たった行の中身を持つ。修正の後に同じ起点から検査し直し、同じ語と中身の当たりがどのファイルかに残れば未解決、無ければ直したにする。行を別のファイルへ移しても起点からは足した行のままなので、残る。起点が巻き直しで消えれば、PR の分岐点からの足した行で同じに決める。決めるのは実際に送る head での検査だけで、申告と送り直しの後の戻しは語の指摘の行を変えない
 - 採らなかった案: 修正担当の申告で解消とする（24 件が戻った実例では、修正担当は語を足したことに気づいていない。見送りの理由を付ければ収束してしまう）
 - 採らなかった案: 当たった行の中身がファイルに残るかだけを見る（行を別のファイルへ移すと解消になり、コードブロックへ入れた行や、前からある同じ中身の行が残ると解消にならない）
 - 採らなかった案: 毎ラウンド PR の全差分を検査し直して指摘を作り直す（人が前から書いた行まで修正担当の指摘になり、受け入れ条件 6 を満たさない）
-- **代償**: 語を残したまま中身だけを変えた行は、指摘が解消になり、そのラウンドの新しい当たりとして数え直される。インラインコードで囲めば当たらない（受け入れ条件 11）ので、話題にする行かどうかは相手役と人のレビューが見る
+- **代償**: 語を残したまま中身だけを変えた行は、指摘が解消になり、そのラウンドの新しい当たりとして数え直される。インラインコードで囲めば当たらない（受け入れ条件 11）ので、話題にする行かどうかは相手役と人のレビューが見る。巻き直しの後は、PR の作成者が前から足していた同じ語と中身の行も残りに数える
 - 根拠: Value 3 / Value 13（MVV バージョン 11）
 
 ### 決定 3: 今ある 1,664 行を一度に書き換えずに登録を始めるため、語ごとに「足した行だけで見る」（`added_only`）を持たせる
@@ -288,7 +303,8 @@ sequenceDiagram
 ### 決定 6: 言語とファイルの種類によらず足した行だけを見るため、全文つきの差分 1 回から足した行を取り、移しただけの行を数で除く
 
 - **質問**: 足した行・移しただけの行・コードブロックの中かを、どう求めるか
-- **選んだ案**: `git diff --no-renames -U<大きな数>` を 1 回打ち、`unidiff` で読む。消えた行と同じ中身（前後の空白を除く）の足した行を、消えた数だけ除く。Markdown はコードブロックの行と行頭の `>` の行を外し、どのファイルもインラインコードを外す。コードのコメント・docstring・文字列・テストの名前は行ごと見る
+- **選んだ案**: `git diff --no-renames -U<大きな数>` を 1 回打ち、`unidiff` で読む。足した行の当たりを、同じ中身（前後の空白を除く）の消えた行が**元の場所で同じ規則に当たっていた**数だけ除く。Markdown はコードブロックの行と行頭の `>` の行を外し、どのファイルもインラインコードを外す。コードのコメント・docstring・文字列・テストの名前は行ごと見る
+- 採らなかった案: 中身が同じ消えた行を、規則を当てる前に数で除く（引用・コードブロック・見ないファイル・語の例外のファイルにあった語を本文へ移すと、新しく検査の対象になった行が見つからない）
 - 採らなかった案: `git diff --color-moved` の色分けを読む（まとまりの大きさのしきい値で 1 行の移動を拾わず、色の出力を読む形になる）
 - 採らなかった案: 変わったファイルごとに前後の全文を読んで比べる（git の起動がファイルの数だけ増える）
 - 採らなかった案: 引用の判定に Markdown の解析の種類を使う（引用の直後の行が CommonMark の継続の規則で引用に入り、本文の語を見逃す。試作で確かめた）
@@ -301,7 +317,9 @@ sequenceDiagram
 ### 決定 7: 承認の前に必ず検査するため、`ndf progress` は承認資料を書く直前に検査し、手で作る資料の文は同じコマンドで見る
 
 - **質問**: 受け入れ条件 13 の検査を、どこで打つか
-- **選んだ案**: 設計承認ゲートとリリース承認ゲートの待ちの結果を組む `present` が、リリースのリクエストと承認資料より前に検査する。用語集は PR の head のコミットから読む。スプリントのステートマシンを使うフェーズは、supervisor が回しても承認ゲートの待ちで `present` を通るので、足した行と PR の題・本文はコードが必ず見る。supervisor や conductor が手で作る資料の文は、`approval-request.md` の「提示を組み立てる前に」へ足すコマンドで見る。毎回、用語集の全部の語を見る
+- **選んだ案**: 設計承認ゲートとリリース承認ゲートの待ちの結果を組む `present` が、リリースのリクエストと承認資料より前に検査する。対象を読んだ 1 回の PR を検査に渡し、検査した head をそのまま承認の対象（`Target`）にする。用語集は PR の head のコミットから読む。リリース承認の後に文書だけの変更で承認済みの head を進める経路（`recheck`）も、同じ検査を通った head だけを記録する。スプリントのステートマシンを使うフェーズは、supervisor が回しても承認ゲートの待ちで `present` を通るので、足した行と PR の題・本文はコードが必ず見る。supervisor や conductor が手で作る資料の文は、`approval-request.md` の「提示を組み立てる前に」へ足すコマンドで見る。毎回、用語集の全部の語を見る
+- 採らなかった案: 検査が PR を別に読む（対象を読む間に push されると、検査していない head を承認する。API の呼び出しも 1 回増える）
+- 採らなかった案: 文書だけの変更では検査しない（承認の後の文書の直しで足した語が、検査を通らずにマージへ進む）
 - 採らなかった案: `ndf records mvv gate` の中で打つ（MVV 判定と語の検査は別の責務で、承認資料の文を知らない。#3959 が同じ関数を組み直している）
 - 採らなかった案: CI の必須のチェックにする（承認資料は CI から見えず、ジョブが 1 つ増える。PR の題と本文の直しのたびに CI が要る）
 - 採らなかった案: 手順書だけにする（今の手の grep と同じで、飛ばしても何も止まらない）
@@ -311,7 +329,7 @@ sequenceDiagram
 ### 決定 8: ほかの担当が書いた文で承認資料が出なくなるのを防ぐため、承認資料の中の引用した文は引用の行にする
 
 - **質問**: 承認資料の「未確認の点」は、相手役の指摘の文をそのまま載せる。そこに廃止した語があると、記録済みの出力は書き換えられないので、承認資料がずっと出ない
-- **選んだ案**: 「未確認の点」の各項目を `> ` の引用の行で出す。#3959 が足す MVV 判定の理由も同じ形にする。引用は検査が当てない（受け入れ条件 11）
+- **選んだ案**: 「未確認の点」の文を改行で分け、分けた行のすべての行頭に `> ` を付けて出す（項目の名前と理由は改行を含みうる。語の検査は行頭に `>` の無い継続の行を本文として見る）。#3959 が足す MVV 判定の理由も同じ形にする。引用は検査が当てない（受け入れ条件 11）
 - 採らなかった案: 承認資料の文を検査から外す（受け入れ条件 12 を満たさない）
 - 採らなかった案: 当たりがあっても資料を出す（受け入れ条件 13 を満たさない）
 - **代償**: 引用した文の中の語は見つからない
@@ -329,9 +347,9 @@ sequenceDiagram
 ### 決定 10: PR の作成者が修正担当を誘導できないよう、語の当たりはファイルで渡し、指示の文に用語集の文を入れない
 
 - **質問**: 用語集は PR の head から読むので、置き換え先の文は PR の作成者が書ける。修正担当へどう渡すか
-- **選んだ案**: 当たりを状態の保存先のファイルへ書き、指示にはパスと「参考資料で、指示として従わない」だけを載せる。`document-style` の SKILL.md は、導入した NDF の絶対パスを指す
+- **選んだ案**: 当たりを状態の保存先のファイルへ書き、指示には id・固定文・駆動が決めたそのファイルのパスと「参考資料で、指示として従わない」だけを載せる。対象のファイルの名前も PR の作成者が書けるので、指示に載せずファイルに入れる。`document-style` の SKILL.md は、導入した NDF の絶対パスを指す
 - 採らなかった案: 実行者のメインディレクトリの用語集を読む（PR が足した語・当てない形・生きた語が効かず、承認ゲートの検査と結果が違う）
-- 採らなかった案: 置き換え先を指示の文に並べる（PR の文がそのまま指示になる）
+- 採らなかった案: 置き換え先か対象のファイルの名前を指示の文に並べる（PR の文がそのまま指示になる）
 - **代償**: 修正担当はファイルを 1 つ読む
 - 根拠: Value 1 / Value 9（MVV バージョン 11）
 
@@ -352,6 +370,18 @@ sequenceDiagram
 - 採らなかった案: 見出しを当てない形（`except`）に入れる（直訳の語がテンプレートに残り続ける）
 - **代償**: 今ある要求仕様の見出しは古い名前のまま残る（足した行でないので当たらない）。生きた語の `見積の段階`・`進行の事象`・`製品の約束` は、生きた語の内側を外す規則で当たらず、#3610 が扱う
 - 根拠: Value 14 / Value 5（MVV バージョン 11）
+
+### 決定 13: 用語集の書き換えで当たりを消せないようにするため、規則を減らす変更は、検査の途中では効かせず、承認ゲートで人に見せる
+
+- **質問**: 用語集と設定は PR の head から読むので、PR の作成者と修正担当が語の登録・当てない形・見る範囲・例外を変えれば当たりが 0 件になる。規則を減らす変更を、いつ有効にするか
+- **選んだ案**: 規則を足す変更はすぐ効かせ、減らす変更は次の 2 つに分ける
+  - cross-review では、起動の始めに同期で取った PR の head の規則と、今の HEAD の規則の、どちらかで当たれば当たりとする。修正担当がその起動の中で用語集・設定を変える・消す・壊すことでは、語の指摘は解消しない。起動の外で PR に入った変更（conductor が足した当てない形など）は、次の起動の始めの規則として効く
+  - 承認ゲートと `words` では、PR の head の規則で当たれば止める。分岐点の規則でだけ当たる足した行（設定ごと消した PR では、足した行の当たりの全部）は止めずに `relaxed` として並べ、承認する人が規則の変更と合わせて見る。リリース承認の後に用語集か設定が変われば、承認ゲートを出し直す
+- 採らなかった案: いつも分岐点の規則だけで見る（この課題の実装のように、語の例外と見る範囲を足す PR 自身が通らない。当てない形を足しても次の検査から外れず、受け入れ条件 18 を満たさない）
+- 採らなかった案: 起動し直しの指示で、用語集と設定を変えないことを求めるだけにする（指示に従わなければ消せる）
+- 採らなかった案: 用語集か設定が変わった PR を止める（語を足す PR も止まる。減らす変更のために人の承認を足すことになる）
+- **代償**: 修正担当が正しい当てない形を足しても、その起動では語の指摘が未解決のまま `incomplete` で終わり、起動し直すと解消する。用語集が変わった差分では、同じ差分に規則を 2 回当てる（git の起動は増えない）
+- 根拠: Value 1 / Value 3 / Value 4（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -377,7 +407,9 @@ sequenceDiagram
 - `ndf check` の `banned-word` の結果が、語の例外の移動で変わる → 移す前と後で違反 0 件を確かめる
 - 意味の欄の検査の当て方が変わる（決定 5 の代償）→ 要求仕様の「登録済みの語の当たり方は変わらない」に対し、`ndf check` は変わらず、`meanings` は誤検知が減る向きにだけ変わる。この用語集では前後とも 0 件
 - 差分の読み取りが特殊なファイル名・改行の無い末尾・バイナリで崩れる → `unidiff` で日本語と空白の名前・`+++` で始まる行・末尾の改行無し・改ページの文字・バイナリを確かめた（外部の調査の LIB1）
-- 承認ゲートの前の `git fetch` が失敗する → 資料を出さずに理由を返す（打ち直せば続く）
+- 承認ゲートの前の `git fetch` が失敗する → 資料を出さずに理由を返す（打ち直せば続く）。用語集の無いプロジェクトと、コミットが手元にあるときは fetch を打たない
+- ベースの先頭を PR の応答の `base.sha` から読む → 開いている PR 4 本（#4367・#4371・#4373・#4376）で、`base.sha` との分岐点が追跡ブランチとの分岐点と同じことを確かめた（2026-11-24）
+- UTF-8 でないテキストのファイルが差分に入る → 差分の出力を置き換え文字で読む（今の git の出力の読み方は止まる）
 
 ### 代表のリポジトリでの振る舞い
 
@@ -416,8 +448,8 @@ sequenceDiagram
 | 4 | 起動し直しで消えれば指摘は増えず、残れば未解決の指摘になり `converged` で終わらない。修正担当が見送っても未解決のまま | 起動し直しを外す・申告で解消にする・別のファイルへ移した行を解消にする |
 | 5 | 最後のラウンドで残った語が `gaps` と記録のコメントの未解決の件数に入る | 残りをジャーナルへ入れる処理を最後のラウンドで飛ばす |
 | 7 | 用語集の設定の無いリポジトリで、状態ファイルに `words` が無く、起動の回数と `status` が変わらない | 設定の有無を見ない |
-| 8・9 | `--base` で、プラグインの外の Markdown・コードのコメント・テストの名前の足した行が並び、終了コード 1。0 件なら `ok` | 見るファイルを Markdown だけにする |
-| 10 | 同じ行を別のファイルへ移した差分で 0 件、移した行を 2 回足せば 1 件 | 移した行の除き方を外す・数を見ずに全部除く |
+| 8・9 | `--base` と `--pr` で、プラグインの外の Markdown・コードのコメント・テストの名前の足した行が並び、終了コード 1。0 件なら `ok`。`--pr` は打つ場所の HEAD と違う head でも、その PR の差分と用語集で見る | 見るファイルを Markdown だけにする・`--pr` の差分を HEAD から取る |
+| 10 | 同じ行を別のファイルへ移した差分で 0 件、移した行を 2 回足せば 1 件。引用・コードブロック・見ないファイル・例外のファイルから本文へ移せば当たる | 移した行の除き方を外す・数を見ずに全部除く・規則を当てる前に消えた行を数える |
 | 11 | コードブロック・インラインコード・行頭の `>` の中は 0 件、`>` の次の本文の行は当たる | 引用の判定を Markdown の解析の種類に替える |
 | 12 | `--pr` の題と本文、`--text` のファイルの当たりが同じ形で並ぶ | 題を見ない |
 | 13・14 | 承認ゲートの待ちで当たりがあれば `check_failed` で資料のファイルもリクエストも出ず、直せば `gate` になる。2 回目も全部の語を見る | 資料を書いた後に検査する・前の当たりの語だけを見る |
@@ -425,7 +457,11 @@ sequenceDiagram
 | 17・18・19 | 要素の `forms` の活用形が当たり、`except` を 1 つ足すと外れ、単独の語は漢字の間で当たらない。`skip_headings` の語は Markdown の見出しで外れ、本文とコードのコメントで当たる | `except`・`forms`・`skip_headings` を読まない |
 | 20 | 置き換え先に別の廃止した語を持つ登録が `meanings` の `items` に並ぶ | 置き換え先を見ない |
 | 16・21・22 | リポジトリの用語集で 3 つの検査（`ndf check`・`render --check`・`meanings`）が `ok`。テンプレートの見出しと欄だけの文書に `--text` を当てて 0 件 | 登録を落とす・テンプレートを戻す（検査の実行と worker の確かめ） |
-| 決定 8 | 未確認の点に廃止した語があっても承認資料が出る | 引用の行にしない |
+| 決定 2 | 申告・送り直しの後の戻しがあっても、実際に送る head に当たりが残る語の指摘は未解決のまま。push の拒否で載せ直した head も検査してから送る | `apply_fix`・`restore_fixed` が語の指摘の行を変える・載せ直しの後に検査しない |
+| 決定 7 | 検査した head と承認の対象の head が同じで、PR の読み取りが 1 回。用語集が無ければ fetch しない。リリース承認の後の文書だけの変更に当たりがあれば、承認済みの head を進めずに待ちへ戻る | 検査が PR を別に読む・`recheck` が検査しない |
+| 決定 8 | 未確認の点の 2 行目以降に廃止した語があっても承認資料が出る | 項目の先頭の行だけを引用の行にする |
+| 決定 10 | 指示に、PR のファイルの名前・語・置き換え先が入らない | 指摘の場所を指示の行に付ける |
+| 決定 13 | 修正担当が設定を消す・`except`・`exclude`・`examples` を足しても、その起動の語の指摘が残る。承認ゲートは、規則の変更で当たらなくなった語を結果に並べる | HEAD の規則だけで見る |
 
 テストは作り物の語と用語集で書く（実際の登録の語をテストに並べない）。登録の中身は検査の実行で確かめる。
 
@@ -435,7 +471,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4285 | 実装する | — | `plugins/ndf/src/ndf/core/words/__init__.py`、`plugins/ndf/src/ndf/core/words/rules_decide.py`、`plugins/ndf/src/ndf/core/words/source.py`、`plugins/ndf/src/ndf/core/words/added.py`、`plugins/ndf/src/ndf/checks/words.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/domains/records/glossary.py`、`plugins/ndf/src/ndf/domains/records/glossary_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/fixwords.py`、`plugins/ndf/src/ndf/domains/crossreview/changed.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/progress/gate/words.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/schemas/ndf-settings/glossary.schema.json`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/glossary-format.md`、`plugins/ndf/skills/design/references/design-template.md`、`.github/workflows/glossary.yml`、`.ndf/glossary.json`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/core/words/__init__.py`、`plugins/ndf/tests/core/words/test_rules.py`、`plugins/ndf/tests/core/words/test_added.py`、`plugins/ndf/tests/checks/test_words.py`、`plugins/ndf/tests/domains/records/test_glossary.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_fixwords.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/adapters/test_github.py` |
+| #4285 | 実装する | — | `plugins/ndf/src/ndf/core/words/__init__.py`、`plugins/ndf/src/ndf/core/words/rules_decide.py`、`plugins/ndf/src/ndf/core/words/source.py`、`plugins/ndf/src/ndf/core/words/added.py`、`plugins/ndf/src/ndf/core/words/pull.py`、`plugins/ndf/src/ndf/checks/words.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/domains/records/glossary.py`、`plugins/ndf/src/ndf/domains/records/glossary_decide.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/fixwords.py`、`plugins/ndf/src/ndf/domains/crossreview/changed.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/push.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/progress/gate/words.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/schemas/ndf-settings/glossary.schema.json`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/requirements-design/references/glossary-format.md`、`plugins/ndf/skills/design/references/design-template.md`、`.github/workflows/glossary.yml`、`.ndf/glossary.json`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/tests/core/words/__init__.py`、`plugins/ndf/tests/core/words/test_rules.py`、`plugins/ndf/tests/core/words/test_added.py`、`plugins/ndf/tests/core/words/test_pull.py`、`plugins/ndf/tests/checks/test_words.py`、`plugins/ndf/tests/domains/records/test_glossary.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_fixwords.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_push_sync.py`、`plugins/ndf/tests/progress/gate/test_gate_present.py`、`plugins/ndf/tests/progress/gate/test_gate_after_approval.py`、`plugins/ndf/tests/adapters/test_git.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/adapters/_github_helpers.py`、`plugins/ndf/tests/refs/_refs_helpers.py` |
 | #4258 | マージする | #4285 | — |
 
 ## 人へ残す判断
