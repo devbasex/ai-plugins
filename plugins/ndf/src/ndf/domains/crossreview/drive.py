@@ -696,8 +696,7 @@ def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed]
     round_no = rounds[-1].get("round") or len(rounds)
     journal = FindingJournal(store.list_of(data, store.FINDINGS))
     rounds[-1]["fix"] = _fix_record(journal, ref, path, handed, round_no)
-    data[store.FINDINGS] = list(journal.rows.values())
-    store.write_object(ref.path, data)
+    _write_journal(ref, data, journal)
     _consume(path, round_no)
     return round_no
 
@@ -792,9 +791,14 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
 # --- 記録 -------------------------------------------------------------------------------
 
 
+def _write_journal(ref: store.StateRef, data: dict[str, Any], journal: FindingJournal) -> None:
+    """ジャーナルの行を状態の指摘へ入れて状態ファイルへ書く（`_save` と `merge_fix` で共有）。"""
+    data[store.FINDINGS] = list(journal.rows.values())
+    store.write_object(ref.path, data)
+
+
 def _save(run: _Run) -> None:
-    run.data[store.FINDINGS] = list(run.journal.rows.values())
-    store.write_object(run.ref.path, run.data)
+    _write_journal(run.ref, run.data, run.journal)
 
 
 def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
