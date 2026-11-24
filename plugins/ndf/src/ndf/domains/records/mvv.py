@@ -701,7 +701,6 @@ def _append_reviews(
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ordered = sorted(held, key=lambda r: internal.epoch(r["at"]))
-        last = {r["key"]: r for r in ordered}
         # 足す行のキーは記録に無くても空の並びを持つ（空の並びは保留の候補にならない）
         seqs: dict[str, list[dict[str, Any]]] = {e["key"]: [] for e in entries}
         for r in ordered:
@@ -713,7 +712,8 @@ def _append_reviews(
             return md.plain_fix_clears(seqs[e["key"]], resolving[e["key"]])
 
         wanted = [e for e in entries if kept(e)]
-        new = [e for e in wanted if not md.review_recorded(last.get(e["key"]), e)]
+        # 並びの末尾が同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）
+        new = [e for e in wanted if not md.review_recorded(seqs[e["key"]][-1] if seqs[e["key"]] else None, e)]
         cleared = {e["key"] for e in new if e["key"] in resolving and _plain_fix_entry(e)}
         left.update(md.holding_keys(seqs) - cleared)
         return new
