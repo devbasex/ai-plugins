@@ -19,13 +19,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf.adapters import git
-from ndf.contracts import facts
+from ndf.contracts import facts, limits
 from ndf.domains.project import check
 from ndf.domains.project.items import MAX_EVIDENCE, measured, obj, question, seq
 from ndf.domains.project.secret import is_secret_path, redact
 
 MAX_READ = 512 * 1024
-CALL_LIMIT = 30.0
+# git・gh の 1 回の上限の方針（contracts/limits.json）
+CALL_POLICY = "project.measure-call"
 LANG_EXT = {ext: row["id"] for row in facts.rows("languages", code=True) for ext in row["extensions"]}
 # 依存の名前とフレームワークの組（バージョンは依存の定義の主の数字）
 FRAMEWORKS = (
@@ -82,6 +83,11 @@ PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
 RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
 
 
+def call_limit() -> float:
+    """git・gh の 1 回の上限の秒。"""
+    return limits.seconds(CALL_POLICY)
+
+
 class TimeUp(Exception):
     """測定の締め切りを越えた。読めなかったことを「ファイルが無い」と区別するため、`None` を返さずに上げる。"""
 
@@ -105,7 +111,7 @@ class Tree:
         if left <= 0:
             raise TimeUp
         try:
-            done = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, timeout=min(CALL_LIMIT, left))
+            done = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, timeout=min(call_limit(), left))
         except subprocess.TimeoutExpired:
             if self.left() <= 0:
                 raise TimeUp from None

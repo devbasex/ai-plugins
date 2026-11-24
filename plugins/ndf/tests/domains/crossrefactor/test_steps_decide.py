@@ -91,10 +91,10 @@ def test_flaky_fix_violations_send_back_once_then_revert() -> None:
     bad = flaky_decide.Commit("b2", "", ("src/b.py",))
     found = flaky_decide.violations([ok, bad], ["pytest:b"], lambda p: p.startswith("tests/"))
     assert [f["kind"] for f in found] == ["trailer", "non_test"]
-    assert flaky_decide.outcome([ok, bad], found, 1) == flaky_decide.SENDBACK
-    assert flaky_decide.outcome([ok, bad], found, 2) == flaky_decide.REVERTED
-    assert flaky_decide.outcome([ok], [], 1) == flaky_decide.KEPT
-    assert flaky_decide.outcome([], [], 1) == flaky_decide.NONE
+    assert flaky_decide.outcome([ok, bad], found, 1, 2) == flaky_decide.SENDBACK
+    assert flaky_decide.outcome([ok, bad], found, 2, 2) == flaky_decide.REVERTED
+    assert flaky_decide.outcome([ok], [], 1, 2) == flaky_decide.KEPT
+    assert flaky_decide.outcome([], [], 1, 2) == flaky_decide.NONE
     assert flaky_decide.fixed([ok]) == {"pytest:b": "a1"}
 
 

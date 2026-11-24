@@ -64,8 +64,6 @@ NOTES_ENV = "NDF_STAGE_NOTES"
 # skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
 SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"
-# 打ち直しても直らない `claude -p` の失敗 → 停止理由（表に無い失敗は前提の欠け）
-SKILL_FAILURES = {claude.Failure.USAGE_LIMIT: "usage_limit", claude.Failure.TIMEOUT: "interrupted"}
 ACTOR = model.WORKFLOW_ACTOR
 # 承認の回答の語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
 APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
@@ -933,7 +931,7 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
     """`claude -p` が回答を返せなかった理由 → 停止理由。理由の無い失敗は打ち直せば直りうる。"""
     if failure is None:
         return "transient"
-    return SKILL_FAILURES[failure] if failure in SKILL_FAILURES else "precondition"
+    return str(facts.value(claude.FAILURES, failure, "skill_cause"))
 
 
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:

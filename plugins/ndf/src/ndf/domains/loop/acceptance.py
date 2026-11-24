@@ -31,8 +31,8 @@ from ndf.domains.loop import acceptance_decide as acc
 
 # 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
-# 書いた後の読み直しで自分の記録がそろわないときに当て直す回数
-REAPPLY_LIMIT = 3
+# 書いた後の読み直しで自分の記録がそろわないときに当て直す回数の方針（contracts/limits.json）
+REAPPLY = "loop.acceptance-reapply"
 # `issueOrPullRequest`（union）から本文を選ぶ選択
 BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
 
@@ -97,11 +97,16 @@ def _unsettled(body: str, want: dict[int, acc.Check | None]) -> list[int]:
     return [n for n, c in sorted(want.items()) if have.get(n) != c]
 
 
+def reapply_limit() -> int:
+    """当て直す回数。"""
+    return int(limits.value(REAPPLY, "count"))
+
+
 def _reapply(cwd: Path, issue: int, body: str, want: dict[int, acc.Check | None], pre: dict[int, str], post: list[int]) -> tuple[str, bool]:
-    """`want` の記録が本文にそろうまで書いて読み直す（最初の 1 回と当て直し `REAPPLY_LIMIT` 回まで）。
+    """`want` の記録が本文にそろうまで書いて読み直す（最初の 1 回と当て直し `REAPPLY` の回数まで）。
     最後に読んだ本文と、1 度でも書いたかを返す。ロックは呼び手が持つ。"""
     current, wrote = body, False
-    for _ in range(1 + REAPPLY_LIMIT):
+    for _ in range(1 + reapply_limit()):
         if not _unsettled(current, want):
             break
         write_body(cwd, issue, acc.recorded_body(current, pre, post))
@@ -132,7 +137,7 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
         # ロックの外の書き手が古い本文で上書きし続けた
         gaps = [{"kind": "criterion", "name": f"{a.issue}:{n}", "reason": "書いた記録が本文から消され続けた"} for n in left]
         detail = (
-            f"#{a.issue}: 当て直しを {REAPPLY_LIMIT} 回しても条件 {left} の記録が本文にそろわない（ロックの外の書き手が上書きしている）"
+            f"#{a.issue}: 当て直しを {reapply_limit()} 回しても条件 {left} の記録が本文にそろわない（ロックの外の書き手が上書きしている）"
         )
         return result.stopped(TOOL, "incomplete", detail, items=_items(checks), gaps=gaps)
     pre_n = sum(c.kind == acc.PRE_MERGE for c in checks.values())

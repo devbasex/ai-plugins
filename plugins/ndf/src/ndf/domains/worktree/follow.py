@@ -16,10 +16,11 @@ from typing import Optional
 from filelock import Timeout
 
 from ndf.adapters.git import Git
+from ndf.contracts import limits
 from ndf.domains.worktree import ndf_settings, mainlock, repo, session_decide
 
-# セッションの開始で排他を待つ秒（開始を長く止めない）
-LOCK_WAIT = 60
+# セッションの開始で排他を待つ上限の方針（contracts/limits.json）
+LOCK_POLICY = "worktree.follow-lock"
 
 
 def resolve(main: Git, name: str, remote: str) -> Optional[str]:
@@ -71,7 +72,7 @@ def follow(main_dir: Path, decl: Optional[ndf_settings.NdfSettings]) -> Optional
     if wanted is None or wanted == main.rev_parse("HEAD"):
         return None
     try:
-        with mainlock.held(main, timeout=LOCK_WAIT):
+        with mainlock.held(main, timeout=limits.seconds(LOCK_POLICY)):
             done = main.checkout_detached(wanted)
     except Timeout:
         return f"メインディレクトリを {label} へ合わせられなかった（排他を取れない）。作業は続けられる。"

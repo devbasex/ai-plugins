@@ -1,0 +1,17 @@
+{
+  "summary": "PR の必須のチェックを読んだ結果（ndf.adapters.ci の Reading.verdict。上の行を優先する）と停止理由の種類（contracts/causes.json の kind）。ndf.adapters.ci の Verdict の語彙はこの表の id から組み立てる",
+  "owner": "D2（contracts/domains）",
+  "shared_names": true,
+  "columns": {
+    "meaning": {"type": "string", "summary": "読んだ結果の意味"},
+    "cause": {"type": "string", "summary": "停止理由の種類。通っている行は持たない（マージの後なら not_ci）", "optional": true}
+  },
+  "rows": [
+    {"id": "test_failed", "meaning": "テストのチェックが落ちた", "cause": "test_failed"},
+    {"id": "check_failed", "meaning": "テスト以外のチェックが落ちた", "cause": "check_failed"},
+    {"id": "pending", "meaning": "まだ結論が出ていない", "cause": "ci_pending"},
+    {"id": "missing", "meaning": "必須のチェックが無い", "cause": "precondition"},
+    {"id": "stale", "meaning": "終わった時刻があるのに結論が無い", "cause": "infra_wait"},
+    {"id": "passed", "meaning": "必須のチェックがすべて通った"}
+  ]
+}

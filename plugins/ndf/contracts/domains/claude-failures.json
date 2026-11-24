@@ -1,0 +1,18 @@
+{
+  "summary": "`claude -p` の 1 回が回答を返せなかった理由のうち、打ち直しても直らないもの（#3394）と、呼び手ごとの停止理由の種類（contracts/causes.json の kind）。ndf.adapters.claude の Failure の語彙はこの表の id から組み立てる",
+  "owner": "D2（contracts/domains）",
+  "shared_names": true,
+  "columns": {
+    "meaning": {"type": "string", "summary": "回答を返せなかった理由"},
+    "judge_cause": {"type": "string", "summary": "判断の呼び出し（ndf.adapters.llm）の停止理由の種類"},
+    "work_cause": {"type": "string", "summary": "worker の起動（ndf.core.worker）の停止理由の種類"},
+    "skill_cause": {"type": "string", "summary": "Skill を回す工程の作業（ndf.progress.invoke）の停止理由の種類"}
+  },
+  "rows": [
+    {"id": "launch", "meaning": "claude を起動できなかった", "judge_cause": "precondition", "work_cause": "precondition", "skill_cause": "precondition"},
+    {"id": "timeout", "meaning": "期限を超えた", "judge_cause": "interrupted", "work_cause": "interrupted", "skill_cause": "interrupted"},
+    {"id": "usage_limit", "meaning": "利用上限に当たった", "judge_cause": "usage_limit", "work_cause": "usage_limit", "skill_cause": "usage_limit"},
+    {"id": "refused", "meaning": "学習に使わない設定と確かめられていないか、claude が下限より古いので起動しなかった", "judge_cause": "precondition", "work_cause": "refused", "skill_cause": "precondition"},
+    {"id": "no_slot", "meaning": "重い起動のスロットが待ちの上限までに空かなかった", "judge_cause": "infra_wait", "work_cause": "infra_wait", "skill_cause": "precondition"}
+  ]
+}

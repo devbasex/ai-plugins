@@ -272,7 +272,7 @@ def test_ask_kills_the_group_on_timeout_even_if_the_leader_already_ended() -> No
     # 偽の wait はすぐ返る（判定の子だけが SIGTERM で先に終わった）。組に残る claude へ SIGKILL が届いてから回収する
     judged, _, _, log = ask_with("", finished=False, seconds=0.0)
     assert judged.kind is None and judged.failure == "timeout"
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_stops_the_group_and_reraises_an_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,7 +288,7 @@ def test_ask_stops_the_group_and_reraises_an_interrupt(monkeypatch: pytest.Monke
             reply_judge.ask("本文", 5.0, {}, LAUNCH, popen=Spawner(proc), killpg=Killer(log))
     finally:
         proc.close()
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_kills_the_group_before_reaping_when_the_grace_is_interrupted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +306,7 @@ def test_ask_kills_the_group_before_reaping_when_the_grace_is_interrupted(monkey
             reply_judge.ask("本文", 0.0, {}, LAUNCH, popen=Spawner(proc), killpg=Killer(log))
     finally:
         proc.close()
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, ("wait", None)]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, ("wait", None)]
 
 
 def test_ask_reports_a_launch_failure() -> None:
@@ -393,7 +393,7 @@ def test_awaited_stops_gently_on_timeout_and_closes_the_streams_after_reaping(mo
     judged, proc, log, _ = awaited_with(monkeypatch, lambda: None, code=-signal.SIGTERM)
     assert isinstance(judged, reply_judge.Judged)
     assert (judged.kind, judged.failure, judged.calls) == (None, "timeout", 0) and judged.ms >= 0
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, WAIT_OPEN]
     assert proc.stdin.closed and proc.stdout.closed
 
 
@@ -404,7 +404,7 @@ def test_awaited_stops_gently_and_reraises_the_same_error(monkeypatch: pytest.Mo
 
     raised, proc, log, _ = awaited_with(monkeypatch, broken)
     assert raised is error
-    assert log == [TERM, ("sleep", reply_judge.GROUP_GRACE), KILL, WAIT_OPEN]
+    assert log == [TERM, ("sleep", reply_judge.kill_grace()), KILL, WAIT_OPEN]
     assert proc.stdin.closed and proc.stdout.closed
 
 

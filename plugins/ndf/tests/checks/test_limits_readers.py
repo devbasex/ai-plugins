@@ -5,11 +5,13 @@ from __future__ import annotations
 import ast
 import json
 from collections import defaultdict
+from pathlib import Path
 
 import pytest
 
 from ndf.checks import limits_readers, run
-from ndf.checks.model import CheckError
+from ndf.checks.model import CheckError, Source
+from ndf.contracts import limits
 
 READERS = {
     "ndf.contracts.limits.policy": {"arg": "name", "index": 0},
@@ -26,17 +28,22 @@ def rules_of(readers=(), dynamic=(), whole=(), tables=("ndf.contracts.limits.tab
     return {"limits": {"readers": {**READERS, **dict(readers)}, "tables": list(tables), "whole": list(whole), "dynamic": list(dynamic)}}
 
 
+def source_in(base: Path):
+    """保存先 `base` のコントラクトのファイルを返す関数。"""
+    return lambda rel: Source(base / rel, rel)
+
+
 def got(tmp_path, files: dict[str, str], rules=None) -> dict[str, list[str]]:
     """合成したモジュールが引く方針 → モジュールの名前（`ndf.` を除く）。"""
     trees = {f"src/ndf/{rel}": ast.parse(text) for rel, text in files.items()}
-    conf = limits_readers.settings(rules if rules is not None else rules_of(), tmp_path)
+    conf = limits_readers.settings(rules if rules is not None else rules_of(), source_in(tmp_path))
     found = limits_readers.actual(trees, conf)
     return {name: sorted(m.removeprefix("ndf.") for m in mods) for name, mods in found.items()}
 
 
 def unresolved(tmp_path, files: dict[str, str], rules=None) -> list[tuple[str, int]]:
     trees = {f"src/ndf/{rel}": ast.parse(text) for rel, text in files.items()}
-    conf = limits_readers.settings(rules if rules is not None else rules_of(), tmp_path)
+    conf = limits_readers.settings(rules if rules is not None else rules_of(), source_in(tmp_path))
     return [(r.module.removeprefix("ndf."), r.line) for r in limits_readers.reads(trees, conf) if r.names is None]
 
 
@@ -265,7 +272,7 @@ def test_a_vocabulary_that_cannot_be_read_stops(tmp_path, vocabulary):
     (tmp_path / "r.json").write_text(json.dumps(BUDGETS))
     row = {**BUDGET, "expr": "event", "template": "{}", "vocabulary": vocabulary}
     with pytest.raises(CheckError, match="動的な読み口の語彙"):
-        limits_readers.settings(rules_of(dynamic=[row]), tmp_path)
+        limits_readers.settings(rules_of(dynamic=[row]), source_in(tmp_path))
 
 
 def test_reading_the_whole_table_needs_a_reason(tmp_path):
@@ -302,7 +309,7 @@ def findings(plugin, rules=None) -> list[tuple[str, int, str]]:
 def test_declared_returns_the_readers_of_each_policy(with_limits):
     plugin = with_limits(a_b=policy("ndf.m"), c_d=policy("ndf.m", "ndf.n"))
     raw = json.loads((plugin.root / "contracts/limits.json").read_text())
-    assert limits_readers.declared(raw) == {"a.b": frozenset({"ndf.m"}), "c.d": frozenset({"ndf.m", "ndf.n"})}
+    assert limits_readers.declared(limits.validate(raw)) == {"a.b": frozenset({"ndf.m"}), "c.d": frozenset({"ndf.m", "ndf.n"})}
 
 
 def test_no_findings_when_the_readers_match(with_limits):
@@ -359,20 +366,26 @@ def test_broken_settings_stop_and_a_plugin_without_settings_is_skipped(plugin, w
         findings(plugin)
 
 
-def test_each_contract_file_is_read_once(with_limits, monkeypatch):
+def test_the_check_reads_each_contract_file_and_validates_the_limits_once(with_limits, rules, monkeypatch):
     plugin = with_limits(a_b=policy("ndf.m"))
     plugin.write("contracts/r.json", json.dumps(BUDGETS))
+    plugin.write("contracts/schemas/a.schema.json", json.dumps({"enum": ["a", "b"]}))
+    monkeypatch.setattr(run.lint, "scan", lambda *_: defaultdict(set))  # ruff を起動しない
+    monkeypatch.setattr(run.spec_docs, "check", lambda *_: [])  # 規約の生成物を持たない合成のプラグイン
     opened: list[str] = []
-    real = limits_readers.contracts.read_text_json
+    validated: list[object] = []
+    read_text, validate = Path.read_text, limits.validate
 
-    def counting(path):
-        opened.append(path.name)
-        return real(path)
+    def counting(path, *args, **kwargs):
+        if path.is_relative_to(plugin.root / "contracts"):
+            opened.append(path.name)
+        return read_text(path, *args, **kwargs)
 
-    monkeypatch.setattr(limits_readers.contracts, "read_text_json", counting)
-    limits_readers.check(plugin.scope(), rules_of(dynamic=DYNAMIC))
-    # 上限の設定のスキーマは検証器のキャッシュの有無で読む回数が変わるので数えない
-    assert sorted(n for n in opened if n != "limits.schema.json") == ["limits.json", "r.json"]
+    monkeypatch.setattr(Path, "read_text", counting)
+    monkeypatch.setattr(limits, "validate", lambda raw: validated.append(raw) or validate(raw))
+    rules["limits"] = rules_of(dynamic=DYNAMIC)["limits"]
+    run.check(plugin.scope(), rules)
+    assert sorted(opened) == ["a.schema.json", "limits.json", "r.json"] and len(validated) == 1
 
 
 def test_the_rule_runs_in_the_check(with_limits, rules, monkeypatch):

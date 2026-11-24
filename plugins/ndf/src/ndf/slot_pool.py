@@ -34,8 +34,8 @@ POOL_LOCK = "pool.lock"
 WEIGHT_KEY = "weight_mib"
 # 重みの方針の名前の頭（`launch.weight.test`・`launch.weight.llm-cli` など）
 WEIGHT_POLICY = "launch.weight."
-# 取る判定の排他を待つ上限の秒
-POOL_LOCK_SECONDS = 10.0
+# 取る判定の排他を待つ上限の方針（contracts/limits.json）
+POOL_LOCK_POLICY = "launch.slot-lock"
 # スロットを持つ起動の子孫が受け継ぐ環境変数。値は親のスロットのパスの頭（`slot-<番号>`）
 PARENT_ENV = "NDF_LAUNCH_SLOT_PARENT"
 
@@ -43,6 +43,11 @@ PARENT_ENV = "NDF_LAUNCH_SLOT_PARENT"
 def weight_mib(kind: str) -> int:
     """起動の種類 `kind` の重み（MiB）。方針が無ければ `limits.LimitsError`。"""
     return int(limits.value(WEIGHT_POLICY + kind, "gib") * 1024)
+
+
+def pool_lock_seconds() -> float:
+    """取る判定の排他を待つ上限の秒。"""
+    return limits.seconds(POOL_LOCK_POLICY)
 
 
 def lock(path: Path) -> FileLock:
@@ -196,17 +201,17 @@ def take(
     owner: Mapping[str, object],
     *,
     absorbed: int | None = None,
-    lock_seconds: float = POOL_LOCK_SECONDS,
+    lock_seconds: float | None = None,
 ) -> Taken | None:
     """重み `weight`（MiB）のスロットを取る。生きたオーナーの重みと足して容量を超えれば None。
 
     オーナーが 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親のスロットの番号で、
     その重みと、親と同じ種類（`kind`）のほかのオーナーの重みは数えない（子孫の重みが親の分を含む。親やほかの CLI の
     持つ分で子孫が待たない）。「オーナーが無ければ取る」も数えるオーナーだけで見る。
-    `lock_seconds` は排他を待つ上限の秒（0 なら待たない）。
+    `lock_seconds` は排他を待つ上限の秒（0 なら待たない。省けば設定の上限）。
     排他を待ちきれないときは `filelock.Timeout`、保存先へ書けないときは `OSError` を送る。
     """
-    with lock(directory / POOL_LOCK).acquire(timeout=lock_seconds):
+    with lock(directory / POOL_LOCK).acquire(timeout=pool_lock_seconds() if lock_seconds is None else lock_seconds):
         owners = _live_owners(directory)
         counted = _counted(owners, absorbed)
         if counted and sum(_weight(description) for description in counted.values()) + weight > capacity_mib:
