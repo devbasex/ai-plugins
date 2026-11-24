@@ -405,8 +405,8 @@ def _start(cfg: RunConfig) -> _Run:
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
     if _proposed_differs(g, synced.remote, cfg.settings.raw):
-        rel = _settings_path(Path(), "review").as_posix()
-        warnings.append(FOCUS_DIFFERS.format(pr_path=rel, trusted=_settings_path(cfg.main or cfg.worktree, "review")))
+        rel = _settings_path(Path(), "review")
+        warnings.append(FOCUS_DIFFERS.format(pr_path=rel.as_posix(), trusted=(cfg.main or cfg.worktree) / rel))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
     rebound = report_decide.bind_pr(data, ref.current_pr, ref.origin_pr)
