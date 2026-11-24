@@ -93,13 +93,25 @@ def boundary_paths(root: Path, ref: str) -> tuple[str, ...]:
 
 
 def mvv_declared_locally(root: Path, remote: str) -> bool:
-    """手元の HEAD かリモート `remote` の追跡ブランチのどれかに MVV の設定があるか（ネットワークに出ない。#3959）。
+    """手元の作業ツリー・HEAD・リモート `remote` の追跡ブランチのどれかに MVV の設定があるか（ネットワークに出ない。#3959）。
 
     どこにも無ければ、PR のベースにも承認済みの MVV は無いと見て、PR の取得とベースの取得を省く。手元が古くて見落としても、
-    判定を打たずに人へ問うだけで、承認ゲートを省く側へは倒れない。"""
-    g = Git(root)
-    tips = g.run("rev-parse", f"--remotes={remote}").split()
-    return any(raw is not None for raw in g.blobs(*[f"{ref}:{mvv.decl_path()}" for ref in ["HEAD", *tips]]))
+    判定を打たずに人へ問うだけで、承認ゲートを省く側へは倒れない。
+    - 作業ツリーに設定のファイルがあれば、git を起動せずに真（MVV を導入したリポジトリで起動を増やさない）
+    - 無いときだけ、取得しない `Git.offline` で HEAD と追跡ブランチの先端を見る（git の起動 2 回）。部分クローンで手元に無い
+      設定の blob は、取得せずに無いと扱う（判定を打たずに人へ問う側）
+    - git が失敗して確かめられなければ真にし、今までどおり PR とベースを取得する経路へ進む
+    """
+    if (root / mvv.decl_path()).is_file():
+        return True
+    g = Git.offline(root)
+    try:
+        tips = g.run("rev-parse", f"--remotes={remote}").split()
+        names = "".join(f"{ref}:{mvv.decl_path()}\n" for ref in ["HEAD", *tips]).encode("utf-8")
+        found = g.run_bytes("cat-file", "--batch-check=%(objectname)", stdin=names)
+    except GitError:  # noqa: NDF401 外部コマンド: 手元で確かめられなければ、MVV があるものとして今までの経路（PR とベースの取得）へ進む
+        return True
+    return any(not line.endswith(b" missing") for line in found.splitlines())
 
 
 def snapshot_facts(root: Path, snap: mvv.Snapshot, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
