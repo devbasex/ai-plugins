@@ -35,8 +35,16 @@ from ndf.adapters import agents, git, run_log
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
-from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import changes, drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.settings import (
+    DEFAULT_MAX_ROUNDS,
+    DriveStopped,
+    ReviewSettings,
+    RunConfig,
+    outside_checkout,
+    read_settings,
+)
 
 TOOL = cli.tool_of(__name__)
 # 作業の名前（lock の理由に載せる）
@@ -301,7 +309,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     g = git.Git(wt)
-    sections = drive.changed_sections(g, args.base, wt)
+    sections = changes.changed_sections(g, args.base, wt)
     # ラウンドの記録の比較基点は merge-base の SHA（PR 3944 の r2-1）
     basis = scope_decide.Basis(g.merge_base(args.base, "HEAD"), resolved.reviewers, resolved.settings.focus)
     got = drive.descended(g, scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections, basis), "HEAD")
@@ -383,7 +391,7 @@ class Resolved(NamedTuple):
 
     policy: Policy
     reviewers: tuple[str, ...]
-    settings: drive.ReviewSettings
+    settings: ReviewSettings
 
 
 def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
@@ -391,14 +399,14 @@ def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
     policy = _policy(wt)
     reviewers = _reviewers(requested, policy)
     # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-    return Resolved(policy, reviewers, drive.read_settings(policy.main, wt))
+    return Resolved(policy, reviewers, read_settings(policy.main, wt))
 
 
-def _run_config(args: argparse.Namespace) -> drive.RunConfig:
+def _run_config(args: argparse.Namespace) -> RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
     got = _resolve(wt, args.reviewer)
-    return drive.RunConfig(
+    return RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
         base=args.base,
@@ -473,7 +481,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     return _ok(f"PR #{args.pr} へ cross-review の記録を書いた: {url}", [{"kind": "comment", "number": args.pr, "url": url}], warnings=notes)
 
 
-def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | int:
+def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
     """起動の前の準備（設定・保存先の検査・状態の対象のリポジトリ）。止めるなら結果を出した終了コードを返す。"""
     try:
         cfg = _run_config(args)
@@ -489,8 +497,8 @@ def _ready(args: argparse.Namespace) -> tuple[drive.RunConfig, Optional[str]] | 
         return _unregistered(exc, str(exc.worktree))
     try:
         # 保存先の検査は状態を最初に読む前に（worktree の中の状態ファイルやリンク先を開かない。PR 3944 の r8-2）
-        cfg = drive.outside_checkout(cfg)
-    except drive.DriveStopped as exc:
+        cfg = outside_checkout(cfg)
+    except DriveStopped as exc:
         return _stop(exc.kind, str(exc))
     try:
         state_repo = store.state_repo(store.state_pr(cfg.state_dir, cfg.pr))
@@ -529,7 +537,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
         return _stop("precondition", str(exc))
-    except drive.DriveStopped as exc:
+    except DriveStopped as exc:
         return _stop(exc.kind, str(exc))
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
@@ -539,7 +547,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     return _emit_verdict(verdict, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
-def _report(cfg: drive.RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
+def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
     """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、今の PR へ今と同じ状態の
     記録を公開できていれば書き直さない（PR 3944 の r2-10・r3-2。URL があるだけでは、最新のラウンドの公開に失敗した後の
     古い記録かもしれない）。"""
@@ -605,7 +613,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--branch")
     r.add_argument("--purpose", default=TOOL)
     r.add_argument("--reviewer", action="append")
-    r.add_argument("--max-rounds", type=int, default=drive.DEFAULT_MAX_ROUNDS)
+    r.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
 

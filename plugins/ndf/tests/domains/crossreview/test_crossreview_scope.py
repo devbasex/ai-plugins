@@ -222,7 +222,7 @@ def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
     渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
     from ndf.adapters import git
-    from ndf.domains.crossreview import drive
+    from ndf.domains.crossreview import changes
 
     outside = tmp_path / "outside.md"
     outside.write_text("# 利用者の秘密の見出し\n", encoding="utf-8")
@@ -233,14 +233,14 @@ def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     sh(wt, "add", "link.md", "docs/real.md")
     sh(wt, "commit", "-q", "-m", "リンクと文書")
     (wt / "docs" / "real.md").write_text("# 手元だけ\n", encoding="utf-8")
-    assert drive.changed_sections(git.Git(wt), "origin/main", wt) == ["docs/real.md#本物"]
+    assert changes.changed_sections(git.Git(wt), "origin/main", wt) == ["docs/real.md#本物"]
 
 
 def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path) -> None:
     """PR 3944 の r7-4: 改行を CRLF で取り出した Markdown は作業場所のファイルから読み（git を起動しない）、作業場所と
     違う Markdown は何件あってもコミットの本文を 1 回の git の起動で読む。"""
     from ndf.adapters import git
-    from ndf.domains.crossreview import drive
+    from ndf.domains.crossreview import changes
 
     wt = repos.add_worktree(tmp_path / "pr8")
     for name in ("a.md", "b.md", "c.md", "empty.md"):
@@ -255,7 +255,7 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path)
 
     g = git.Git(wt, counted)
     (wt / "a.md").write_bytes("# a.md\r\n\r\n## セクション a.md\r\n".encode("utf-8"))
-    assert drive.changed_sections(g, "origin/main", wt) == [
+    assert changes.changed_sections(g, "origin/main", wt) == [
         "a.md#a.md",
         "a.md#セクション a.md",
         "b.md#b.md",
@@ -267,7 +267,7 @@ def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path)
     calls.clear()
     for name in ("b.md", "c.md", "empty.md"):
         (wt / name).write_text("# 手元だけ\n", encoding="utf-8")
-    assert drive.changed_sections(g, "origin/main", wt) == [
+    assert changes.changed_sections(g, "origin/main", wt) == [
         "a.md#a.md",
         "a.md#セクション a.md",
         "b.md#b.md",

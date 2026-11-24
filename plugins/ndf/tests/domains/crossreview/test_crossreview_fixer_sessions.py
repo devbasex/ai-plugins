@@ -12,7 +12,7 @@ import pytest
 
 from ndf.adapters import agents, claude, git
 from ndf.core.converge import participants
-from ndf.domains.crossreview import cli, criteria_decide, drive, resume_decide, store
+from ndf.domains.crossreview import cli, criteria_decide, drive, resume_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, run_cli
@@ -247,7 +247,7 @@ def test_issue_4013_without_saved_sessions_a_missing_mark_is_not_relaunched(
 
 
 def test_issue_4013_review_settings_default_to_not_saving() -> None:
-    assert drive.ReviewSettings().fixer_sessions is False
+    assert settings.ReviewSettings().fixer_sessions is False
 
 
 def test_issue_4013_saved_sessions_are_read_from_a_plain_file_or_a_link_outside_the_worktree(
@@ -255,12 +255,12 @@ def test_issue_4013_saved_sessions_are_read_from_a_plain_file_or_a_link_outside_
 ) -> None:
     """#4013: メインディレクトリの通常のファイルと、worktree の外を指すリンクの先の真は受ける。"""
     _declare(repos, SAVED)
-    assert drive.read_settings(repos.main, wt).fixer_sessions is True
+    assert settings.read_settings(repos.main, wt).fixer_sessions is True
     outside = tmp_path / "outside.json"
     outside.write_text(json.dumps(SAVED), encoding="utf-8")
     (repos.main / ".ndf" / "review.json").unlink()
     (repos.main / ".ndf" / "review.json").symlink_to(outside)
-    assert drive.read_settings(repos.main, wt).fixer_sessions is True
+    assert settings.read_settings(repos.main, wt).fixer_sessions is True
 
 
 @pytest.mark.parametrize("link", ["dir", "file"])
@@ -277,26 +277,26 @@ def test_issue_4013_saved_sessions_inside_the_reviewed_worktree_stop_before_any_
         (repos.main / ".ndf").mkdir()
         (repos.main / ".ndf" / "review.json").symlink_to(wt / ".ndf" / "review.json")
     with pytest.raises(criteria_decide.ReviewDeclInvalid):
-        drive.read_settings(repos.main, wt)
+        settings.read_settings(repos.main, wt)
     fake = Sessions(tmp_path / "st", TWO_FIXES)
     monkeypatch.setattr(cli, "LAUNCH", fake)
     argv = ["run", "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "origin/main", "--worktree", str(wt)]
     code, got = run_cli(capsys, *argv, "--branch", BRANCH, "--reviewer", "codex")
     assert got["cause"]["kind"] == "invalid" and "claude" not in fake.calls
     (wt / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["重点"]}), encoding="utf-8")
-    assert drive.read_settings(repos.main, wt) == drive.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
+    assert settings.read_settings(repos.main, wt) == settings.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
 
 
 def test_issue_4013_saved_sessions_in_the_reviewed_worktree_itself_stop(repos: Repos) -> None:
     """#4013: レビューする worktree がメインディレクトリそのものなら、真の設定は止める。"""
     _declare(repos, SAVED)
     with pytest.raises(criteria_decide.ReviewDeclInvalid):
-        drive.read_settings(repos.main, repos.main)
+        settings.read_settings(repos.main, repos.main)
 
 
 def test_issue_4013_fixer_launch_carries_the_session_and_the_output_name(repos: Repos, wt: Path, tmp_path: Path) -> None:
     """#4013: `_fixer_launch` は渡した会話の指定を引数に載せ、出力の名前を `round<n><suffix>` にする。"""
-    cfg = drive.RunConfig(wt, BRANCH, "origin/main", PR, tmp_path / "st", False, ("codex",))
+    cfg = settings.RunConfig(wt, BRANCH, "origin/main", PR, tmp_path / "st", False, ("codex",))
     run = drive._Run(cfg, git.Git(wt), store.state_pr(cfg.state_dir, PR), {}, None, [], [], [])  # type: ignore[arg-type]
     plain = drive._fixer_launch(run, 2, "質問", None)
     assert plain.paths.out.name == "round2-fix.out" and "--no-session-persistence" in plain.argv
@@ -312,7 +312,9 @@ def _unit_run(tmp_path: Path, wt: Path, last: Optional[resume_decide.Previous], 
     """`fixer_sessions` が真の `_Run`（git は使わない）。前回記録 `last` と増分の最大 `growth` を置く。"""
     state_dir = tmp_path / "st"
     state_dir.mkdir(exist_ok=True)
-    cfg = drive.RunConfig(wt, BRANCH, "origin/main", PR, state_dir, False, ("codex",), settings=drive.ReviewSettings(fixer_sessions=True))
+    cfg = settings.RunConfig(
+        wt, BRANCH, "origin/main", PR, state_dir, False, ("codex",), settings=settings.ReviewSettings(fixer_sessions=True)
+    )
     run = drive._Run(cfg, None, store.state_pr(state_dir, PR), {}, None, [], [], [])  # type: ignore[arg-type]
     run.fixer_last, run.fixer_growth = last, growth
     return run
