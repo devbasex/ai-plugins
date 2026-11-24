@@ -7,7 +7,11 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | セッション | `session` | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| シグナルファイル | — | ラッパーへ知らせるファイル（`next.json` と `stop`） | 合図 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| シグナルファイル | — | 中継のラッパーが動きを決めるために読むファイル（次のセグメントへ切り替える `next.json`・次のセッションを起動させない `stop`・バックグラウンドの作業の記録など） | 合図 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| バックグラウンドの作業 | — | Claude Code が会話の外で動かし、終わると会話へ知らせるもの（バックグラウンドの Agent・`run_in_background` の Bash・Monitor など）。Stop の hook の入力の `background_tasks` に載る。作業と監視に分かれる | — | — | `plugins/ndf/skills/development-workflow/references/relay-background.md` |
+| 監視 | — | バックグラウンドの作業のうち、待つだけで止めてよいもの。実行するコマンドが `ndf lanes wait`・`ndf plan wait`・`ndf ci watch` だけの、Monitor とバックグラウンドの Bash | — | — | `plugins/ndf/skills/development-workflow/references/relay-background.md` |
+| 作業 | — | バックグラウンドの作業のうち、監視でないもの。止めると成果が失われる。監視だと確かめられないものも作業とする | — | — | `plugins/ndf/skills/development-workflow/references/relay-background.md` |
+| バックグラウンドの作業の記録 | — | 中継のラッパーが起動した claude（子）ごとに、残っている作業と監視の件数を書くシグナルファイル（`busy-<起動の ID>.json`。起動の ID はラッパーが起動のたびに振る）。子の会話の hook（SessionStart・PreToolUse・Stop）が書き、ラッパーが読む | — | — | `plugins/ndf/skills/development-workflow/references/relay-background.md` |
 | アナウンス | — | ndf-next のブロックの直前にそのまま置く 1 文 | 告知 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | アイドル | — | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | 静止 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | パススルー | — | ラッパーを挟まず、本物の claude をそのまま起動すること | 素通し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |

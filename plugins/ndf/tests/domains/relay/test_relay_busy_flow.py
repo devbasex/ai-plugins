@@ -106,7 +106,7 @@ def test_2_11_a_stopped_child_with_works_or_watches_is_not_restarted_by_the_stal
     hooks.stop(*tasks)
     steps = [p.later(1000.0) for _ in range(3)]
     assert {s.kind for s in steps} == {"wait_background"} and len(p.spawn.calls) == 1
-    assert ("起動し直すと監視を張り直さない" in steps[0].reason) is not waits
+    assert steps[0].reason.startswith("監視 ") is not waits
 
 
 OFF = {"NDF_HOOK_OFF": "relay-busy"}
