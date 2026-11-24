@@ -40,9 +40,9 @@ flowchart LR
 
 - 36 本を消すのは #3990 で、この変更のマージを待つ。この変更は 36 本を消さない
 - コードの振る舞いは変えない。`.py` は、コメントと docstring を除いた構文木が前後で一致する
-- 1 ファイル 1,000 行・1 関数 60 行・1 行 140 桁（全角は 2 桁）の上限がある。行を増やせないファイルは `github.py`（1,000 行）・`account_dir.py`（999 行）・`test_invoke.py`（998 行）である。パスは長いので、今の行に収まらなければ説明の文を言い換えて収める
+- 1 ファイル 1,000 行・1 関数 60 行・1 行 140 桁（全角は 2 桁）の上限がある。触るファイルのうち行を増やせないのは `github.py`（1,000 行）である。パスは長いので、今の行に収まらなければ説明の文を言い換えて収める
 - 耐久ワークフローの関数の中に「決定 N」のコメントは無い（構文木で確かめた）。形の番号の hash のテストは変わらない
-- 同じ計画の他のレーンも `plugins/ndf` のファイルに触る。コメントの行だけを変え、衝突は取り込みで解く。増えた行は、マージの直前に下の「確かめのコマンド」を打ち直して拾う
+- 同じ計画の他のレーンも `plugins/ndf` のファイルに触る。コメントの行だけを変え、衝突は取り込みで解く。増えた行は、マージの直前に「確かめのコマンド」を打ち直して拾う
 - `plugins/ndf` は利用者へ配るが、`docs/specifications/` は配らない。コメントのパスは NDF のリポジトリの中のパスである。Skill の本文が NDF のリポジトリの確定仕様を指すのと同じ扱いである
 
 ## 解き方の全体像
@@ -71,6 +71,18 @@ flowchart LR
 - 設計レビューの項目の表と 11.x の対応表は、確定仕様の 2 本にある。規則は入力のパスだけが替わり、同じ 182 件を同じ条件で確かめる
 - `issues/` の設計文書 36 本は、`plugins/ndf` とこの変更が触る確定仕様から参照されない。#3990 が消しても検査は落ちない
 
+## 要求の読み方
+
+要求仕様は課題の本文のコピーなので、この PR では手で直さない。実装と合否の判定は次の読み方に従う。設計承認ゲートでは、要求の未決 2 件（決定 1・2）とあわせてこの読み方を確かめる。
+
+| 要求 | 読み方 |
+| --- | --- |
+| 受け入れ条件 2（すべて新しい形） | 対象は、確定仕様 6 本に見出しのある決定を指す参照である。「書き換えの手順」で `移設対象外`・`決められない` に分けた参照は対象に数えず、一覧に理由があれば条件 2 は合格とする。どちらにも分けずに旧い形で残した参照が 1 つでもあれば不合格とする |
+| 受け入れ条件 5（決められない行） | `決められない` と `移設対象外` の両方を、行と理由を添えて PR の本文に挙げる |
+| 受け入れ条件 7（SSOT に載り、値が一致する） | SSOT が `children.json` 自身なので、比べる相手は変更の前の `children.json` と、変更の前の「子の記号」の表である。変更の前と 1 つでも違えば不合格とする |
+| 「含まない」の「確定仕様の決定の中身の変更」 | 決定の見出し・選んだ内容・採らなかった案は変えない。変えるのは、表の保存先を書いた文だけである（決定 2 の表） |
+| 「規則 `review-items` の入力（振り分け表と 11.x の対応表）」 | 用語集の「振り分け表」は要求のオーナーの表も含む。移すのは規則が読む 182 項目の表と 11.x の対応表だけである（決定 2 の表） |
+
 ## 構成要素
 
 | 要素 | 責務 |
@@ -86,36 +98,46 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  A["1. 決定を指す行を集める"] --> B{"2. 課題の番号か<br/>設計文書のパスがあるか"}
-  B -->|作り直しの系統| D["4. 番号の対応表で今の番号にし<br/>決定の見出しのファイルを引く"]
-  B -->|別の課題| E["書き換えない"]
+  A["1. 「決定 N」の参照を 1 つずつ一覧へ出す"] --> B{"2. 課題の番号か<br/>設計文書のパスがあるか"}
+  B -->|作り直しの系統| K{"4. 番号の対応表で<br/>「移さない」の決定か"}
+  B -->|ほかの課題の番号| O{"番号と中身が<br/>作り直しの決定と合うか"}
   B -->|無い| C{"3. 前後 10 行と<br/>同じファイルの参照で決まるか"}
-  C -->|作り直し| D
+  O -->|合う| K
+  O -->|別の決定| E["別の設計<br/>書き換えない"]
+  O -->|決まらない| F["決められない<br/>書き換えず PR の本文に挙げる"]
+  C -->|作り直し| K
   C -->|別の設計| E
-  C -->|決まらない| F["書き換えず<br/>PR の本文に挙げる"]
+  C -->|決まらない| F
+  K -->|移さない| M["移設対象外<br/>確定仕様の決定へは向けず<br/>PR の本文に挙げる"]
+  K -->|ほか| D["対応表で今の番号にし<br/>決定の見出しのファイルを引く"]
   D --> G{"5. 決定の中身が<br/>コメントと合うか"}
-  G -->|合う| H["6. 形に書き換え<br/>対応の一覧へ 1 行"]
+  G -->|合う| H["6. 書き換え<br/>形に直す"]
   G -->|合わない| F
 ```
+
+**手順 1 の一覧。** 「参照の確かめ」の `list` が、変更の前の参照を番号ごとに 1 行（ファイル・行の文・番号・分類・新しい参照・根拠）の TSV へ出す。分類は図の `書き換え`・`別の設計`・`移設対象外`・`決められない` のどれか 1 つで、根拠は全行に書く。新しい参照は `書き換え` の行だけが `ndf-rebuild.md#75` の形で持つ。TSV はコミットしない。PR の本文には `別の設計` のほかの行と、分類ごとの件数を載せる（条件 4・5）。
 
 系統の見分け方と、書き換えの先は次の表で決める。番号だけが同じ行を別の決定と取り違えないよう、手順 5 で決定の本文とコメントの文を 1 行ずつ突き合わせる。
 
 | 行の書き方 | 読み方 |
 | --- | --- |
-| `#1142`・`#3347`・`#3388`・`#3395` の決定、または 36 本のパスを添えた行 | 作り直しの決定。#3388 の決定 1〜10 は確定仕様に無いので書き換えない |
+| `#1142`・`#3347`・`#3388`・`#3395` の決定、または 36 本のパスを添えた行 | 作り直しの決定。対応表の「移さない」に当たるかを先に見る |
 | `#3344` の決定 81〜86、`#3345` の決定 88〜96 | `ndf-rebuild.md` の同じ番号の決定 |
-| `#3394` の決定 60 など、ほかの課題の番号 | 見出しの番号と中身の両方が確定仕様の決定と合うときだけ書き換える（例: `llm.py` の回数 2 の打ち直しは `ndf-rebuild-scripted-flow.md` の決定 60） |
+| `#3394` の決定 60 など、ほかの課題の番号 | 番号と中身の両方が作り直しの決定と合うときだけ、作り直しの系統として手順 4 へ進む（例: `llm.py` の回数 2 の打ち直しは `ndf-rebuild-scripted-flow.md` の決定 60） |
 | 番号だけの行 | 前後 10 行のコメントと、同じファイルのほかの参照の系統で決める |
-| 置き換わった番号（例: 決定 20 → 89） | [ndf-rebuild.md の「番号の対応表」](../docs/specifications/ndf-rebuild.md#番号の対応表) の替わった先を指す。確定仕様に移していない決定（64・69〜72・121）に当たれば書き換えずに PR に挙げる |
+| 置き換わった番号（例: 決定 20 → 89） | [ndf-rebuild.md の「番号の対応表」](../docs/specifications/ndf-rebuild.md#番号の対応表) の替わった先を指す |
+| 移設対象外の決定（`fixes` の決定 69〜75・`#3388` の決定 1〜10・`scripted-flow` の決定 64・`#3395` の決定 121） | 分類は `移設対象外`。パスの無い行は変えない。36 本へのパスを伴う行は、パスだけを `docs/specifications/ndf-rebuild.md の「番号の対応表」` に替え、元の系統の名前と番号は残す（条件 1 のため）。例: `fixes の決定 70（docs/specifications/ndf-rebuild.md の「番号の対応表」）` |
+| 番号が同じ別の系統の行（例: `fixes` の決定 75 と `next` の決定 75、#3097 の決定 99） | 番号だけで除外しない。コメントの文を両方の決定の本文と突き合わせて系統を決め、どちらとも決まらなければ `決められない` とする |
+| `決められない` に分けた、36 本へのパスを伴う行 | パスだけを同じ形で「番号の対応表」に替え、番号と文は残す |
 | 不変条件だけの参照（例: `invariants.py` の 1 行目） | `docs/specifications/ndf-rebuild.md の「常に成り立つ条件」` のようにセクションの名前で指す |
 
 書き換えた後の形は次のとおりである。
 
 - 1 行に複数の番号があるときは、ファイルごとに 1 回のパスの後ろに並べる。例: `docs/specifications/ndf-rebuild.md の決定 75・79`。範囲（`81〜86`）は使わず、番号を並べる
-- パスと番号は 1 行に置き、改行で分けない。下の「確かめのコマンド」が 1 行ずつ読むためである
+- パスと番号は 1 行に置き、改行で分けない。番号の並びの直後に `、` などを挟んで別の数を続けない（例: `決定 83、14 日`）。どちらも「参照の確かめ」が形の違いとして挙げる
 - 不変条件の番号（`IH2` など）は、決定の番号の後ろに並べて残す
 - `# noqa` の理由の中の決定は、抑制コメントの形を保ったまま置き換える
-- `contracts/` の JSON の説明を変えたときは、`ndf check --write-spec` で生成物を作り直す。変わった分は同じ PR に含める（今の `docs/contracts/` に「決定 N」の行は無い）
+- `contracts/` の JSON の説明を変えたときは、`ndf check --write-spec` で生成物を作り直す。今の生成物（`plugins/ndf/docs/contracts/` と `contracts/schemas/io/`）は「決定 N」を 1 つも持たず、書き換える `summary` の文も載らないので、差分は出ない見込みである。出れば同じ PR に含める
 
 設計文書のパスを書く 7 ファイルの書き換え先は次のとおりである。
 
@@ -135,14 +157,27 @@ flowchart TD
 | --- | --- |
 | `child_deps.py` の docstring の「入れ替え（S2）がこのモジュールと `children.json` を消す」 | 消して、規則が残っていることを書く |
 | `.github/workflows/script-structure.yml` の `REVIEW_ITEMS_PATHS` と、`ndf-contract-fact-checks.md` の 2 つのリンク | 新しい 2 本に向ける |
-| 確定仕様の「子の表のコピー」「振り分け表は確定仕様へ移さない」の記述（`ndf-rebuild.md`・`ndf-rebuild-review-scope.md`） | 今の姿に合わせて直す |
+| 確定仕様の「子の表のコピー」「振り分け表は確定仕様へ移さない」の記述（`ndf-rebuild.md`・`ndf-rebuild-review-scope.md`） | 決定 2 の表のとおりに直す |
 
 ## 決定の記録
 
 ### 決定 1: 子の表の値を 1 か所にするため、`children.json` を SSOT にし、確定仕様には記号・Issue・中身だけを残す
 
 - **質問**: 子の表（子ごとのサブパッケージ・先に要る子・順番・レーンと、共有の表の書き込み元）の SSOT をどこに置くか
-- **選んだ案**: 検査が読む `children.json` を SSOT にする。`ndf-rebuild.md` の「子の記号」は、先に要るもの・順番・レーンの 3 列を消し、`children.json` を指す。R0・R1 の 2 行は `children.json` に無いので表から外し、直前の段落の文にする。M3b+ と X9 の 2 行を足す。行数は 500 行のまま変わらない。表を変えるときは、変える行を書いた設計 PR を先に通し、その後に `children.json` を直す（今の約束の強さを保つ）
+- **選んだ案**: 検査が読む `children.json` を SSOT にする。`ndf-rebuild.md` の「子の記号」は、先に要るもの・順番・レーンの 3 列を消し、`children.json` を指す。R0・R1 の 2 行は `children.json` に無いので表から外し、直前の段落の文にする。M3b+ と X9 の 2 行を足す。行数の増減と、表の変え方は下に書く
+- **`ndf-rebuild.md` の行数**: 500 行のままである（下の変更を手元で当てて数えた）
+
+| 変更 | 増減 |
+| --- | ---: |
+| 表から R0・R1 の 2 行を外す | −2 |
+| 表に M3b+・X9 の 2 行を足す | +2 |
+| R0・R1 の Issue と中身を、表の直前の段落（1 行）の「末尾の R0・R1 は…」の文と替える | 0 |
+| 3 列を消す・SSOT の説明（表の直前の段落、「構造」と「入れ替えの結果」の「子の表のコピー」）を行の中で替える | 0 |
+
+- **表の変え方**: 次の順に進め、`checks/README.md` の「子の表の規則」にも同じ順を書く
+  1. 設計 PR が、その変更の設計書 `issues/issue-<番号>-design.md` の「子の表の変更」のセクションに、変える行を書く。列は「記号か表・項目・変更の前・変更の後」で、足す子と消す子は全項目を書く。`children.json` はまだ変えない
+  2. 設計の承認の後、実装の PR が `children.json` をその行のとおりに直し、PR の本文からそのセクションへリンクする。記号・Issue・中身が変わるときだけ「子の記号」の表も同じ PR で直す
+  3. レビューが、`children.json` の差分とセクションの行を 1 行ずつ突き合わせる。行に無い差分があれば差し戻す
 - 採らなかった案: `packages` と `tables` の表を新しい確定仕様（`ndf-rebuild-children.md`）に置く（同じ値を文書と JSON の 2 か所に持つ。値を変える PR が 2 か所を直す。M3b+ と X9 は今も JSON にだけある）
 - 採らなかった案: 新しい確定仕様を置き、JSON との一致を検査で縛る（一致を保つ検査が要る形は、値を 2 か所に持つことの後始末である。検査の追加は振る舞いの変更に当たる）
 - **代償**: 表を読むには確定仕様から JSON へ進む。記号と Issue の番号は読み手のために確定仕様にも残り、記号を足すときは 2 か所に 1 行ずつ足す
@@ -151,7 +186,19 @@ flowchart TD
 ### 決定 2: 36 本を消しても検査が入力を読めるよう、規則 `review-items` が読む 2 つの表を確定仕様の 2 本に移す
 
 - **質問**: 規則 `review-items` の入力（設計レビューの項目の表と 11.x の対応表）の、消さない保存先をどこにするか
-- **選んだ案**: `docs/specifications/ndf-review-items.md` と `ndf-review-items-11x.md` に置く。名前は規則の名前に合わせ、`ndf-rebuild` で始めない（決定の番号を持つ 6 本の数え方を変えないため）。表の値は要旨のセルを 1 文字も変えず、11.x の行のリンク先の文書の名前だけを替える。文書の頭には、読み方と出所を書く。規則が読まないセクション（件数の集計・抜き出しのコマンド・要求の行のオーナーの表など）は移さない。要求の行番号が指す文書（コミット 4e1f1f1ca の時点）は、そのコミットの `issues/` のディレクトリへの固定リンクで示す
+- **選んだ案**: `docs/specifications/ndf-review-items.md` と `ndf-review-items-11x.md` に置く。名前は規則の名前に合わせ、`ndf-rebuild` で始めない（決定の番号を持つ 6 本の数え方を変えないため）。表の値は要旨のセルを 1 文字も変えず、11.x の行のリンク先の文書の名前だけを替える。文書の頭には、読み方と出所を書く。移す範囲は下の表で決める。要求の行番号が指す文書（コミット 4e1f1f1ca の時点）は、そのコミットの `issues/` のディレクトリへの固定リンクで示す
+
+| 今の場所 | 扱い |
+| --- | --- |
+| `issue-1142-design-review-routing.md` の「行き先の表」（182 項目）と「列の読み方」 | `ndf-review-items.md` へ移す |
+| 同じ文書のほかのセクション（抜き出しのコマンド・件数・決定 127 で戻した行・要求の受け入れ条件の持ち主・作らない要求の行） | 移さない。要求のオーナーの表も規則の入力ではない |
+| `issue-3388-design-routing.md` の「対応表」（72 行）と「列の読み方」 | `ndf-review-items-11x.md` へ移す |
+| 同じ文書のほかのセクション（件数・分類ごとの行き先・合わせて扱う Issue・突き合わせ） | 移さない |
+| `ndf-rebuild-review-scope.md` の決定 109 | 変えるのは「11.0.0 の後に足した検査」の項目だけで、「振り分け表の項目」を「`ndf-review-items.md` の 182 項目の表」に、「子の表のコピー `children.json`」を「`children.json`」に替える。見出し・本文・採らなかった案は変えない |
+| 同じ文書の構成要素の表「振り分け表」の「確定仕様へ移さない」と、対象範囲の「含まない」の「182 項目ごとの割り当ての結果」 | 182 項目の表と 11.x の対応表は `ndf-review-items.md`・`ndf-review-items-11x.md` にあり、要求のオーナーの表は移していない、と替える |
+| 同じ文書の「版の基準」と「子の分け方」、`ndf-rebuild.md` の「構造」「入れ替えの結果」「子の記号」 | 表の名前と「子の表のコピー」の語を今の保存先にそろえる |
+| `ndf-rebuild.md` の「番号の対応表」（「移さない」の行） | 変えない。どれも決定の番号の扱いで、2 つの表の保存先ではない |
+
 - 採らなかった案: `children.json` の `review_items` を SSOT にし、生成を止める（生成し直した中身との違いを違反にする今の検査が成り立たない。振る舞いが変わる）
 - 採らなかった案: `plugins/ndf/src/ndf/checks/` に置く（利用者へ配る量が増える。プラグインを使うプロジェクトに関係の無い 182 件を届ける）
 - 採らなかった案: 1 本の文書に 2 つの表を置く（11.x の行のリンクが同じ文書の頭を指し、読み手が表に行き着けない）
@@ -170,7 +217,7 @@ flowchart TD
 ### 決定 4: 一度きりの確かめを検査に足さないため、参照の実在と表の一致はコマンドで数える
 
 - **質問**: 「決定 N」の実在・子の表の一致・構文木の一致を、CI の検査に足すか
-- **選んだ案**: 足さない。「確かめのコマンド」の 3 つを打ち、出力を PR に載せる。3 つは、存在しない番号・範囲・形の違う行を混ぜると違反を返すことを確かめた
+- **選んだ案**: 足さない。「確かめのコマンド」の 4 つを打ち、出力を PR に載せる。4 つとも、違反が 1 件でもあれば終了コード 1、無ければ 0 を返す。使い捨ての clone で、変更を当てた形が 0 を、壊した形が 1 を返すことを確かめた（結果は [issue-3960-design-checks.md](./issue-3960-design-checks.md) の各コマンドの下にある）
 - 採らなかった案: `ndf check` に、参照の実在を見る規則を足す（検査の追加は振る舞いの変更で、この Issue の範囲の外である）
 - **代償**: 後から書き足された参照が壊れても機械は知らせない。参照の形の書き方はレビューが見る
 - 根拠: Value 11（MVV バージョン 11）
@@ -180,7 +227,7 @@ flowchart TD
 - **働く範囲**: このリポジトリの検査と文書。利用先のリポジトリへは、配るコードのコメントと JSON の説明の文だけが届き、振る舞いは変わらない
 - **プロジェクトごとに違うもの**: 無い。設定と引数を足さない
 - **当たるモード**: どのモードの工程も変わらない
-- **壊れうる箇所**: 取り違えた参照（別の設計の決定を書き換える）は、対応の一覧と決定の本文の突き合わせで拾う。行の上限に近いファイル（`github.py`・`account_dir.py`・`test_invoke.py`）は、行を増やさずに書き換える
+- **壊れうる箇所**: 取り違えた参照（別の設計の決定を書き換える）は、対応の一覧と決定の本文の突き合わせで拾う。行の上限にあるファイル（`github.py`）は、行を増やさずに書き換える
 - **並行する変更**: `plugins/ndf` の多くのファイルに触る。コメントの行だけを変えるので、衝突は取り込みのときに両方の行を残して解く。マージの直前に「決定 N」の行を数え直す
 - **#3990 との関係**: 36 本の削除は、この変更のマージの後に行う。着手の条件（`checks/README.md` の書き換え）は満たされる
 
@@ -209,123 +256,26 @@ flowchart TD
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1 参照の 0 件 | `git grep` の結果が 0 件 | 7 ファイルの 1 つでも設計文書のパスを残すと当たる |
-| 2・3 確定仕様の形と実在 | 「確かめのコマンド」の参照の確かめが違反 0 件 | 無い番号・範囲・形の違う行を混ぜると違反を返す |
-| 4・5 対応の一覧と残した行 | PR の本文に一覧があり、書き換えた行の数と合う | 一覧に無い書き換えがあれば、差分と数が合わない |
+| 2・3 確定仕様の形と実在 | 「参照の確かめ」が終了コード 0。候補の全件が一覧で分類され、書き換えた参照と残した参照の数がファイルごとに一覧と合う | 旧い形の残り・無い番号・範囲・読点の並び・改行・一覧の漏れを混ぜると 1 を返す |
+| 4・5 対応の一覧と残した行 | PR の本文に `別の設計` のほかの行と分類ごとの件数があり、参照の確かめに使った TSV と合う | 一覧に無い書き換えがあれば、参照の確かめが 1 を返す |
 | 6 別の設計の行 | `git diff` に、別の設計の決定を指す行が無い | 「決定 99」や中継の「決定 13」の行が変われば差分に出る |
-| 7 子の表の SSOT | 「確かめのコマンド」の子の表の確かめで、記号と Issue が一致し、C4 と `contracts/limits/` の書き込み元が `children.json` にある | 記号を 1 つ削ると違いが出る |
+| 7 子の表の SSOT | 「子の表の確かめ」が終了コード 0。変更の前の `children.json` の全部の子と表、変更の前の「子の記号」の値と一致し、C4 と `contracts/limits/` の書き込み元が引ける | `needs`・`packages`・表の書き込み元・子を 1 つ削ると 1 を返す |
 | 8 README と summary | 指す先が `children.json` で、「S2 が消す」の記述が 0 件 | 旧い記述を戻すと検索に当たる |
 | 9 36 本を消した状態 | 使い捨ての worktree で 36 本を消し、`ndf check` とリンクの検査が通る | 参照を 1 つ残すと落ちる |
-| 10 振る舞いの不変 | 「確かめのコマンド」の構文木の確かめが違い 0 件 | コードの定数を 1 つ変えると挙がる |
+| 10 振る舞いの不変 | 「構文木の確かめ」と「`.py` のほかの値の確かめ」がどちらも終了コード 0 | コードの定数・limits の数値・依存・起動の行・検査の規則の値を 1 つ変えると 1 を返す |
 | 11 review-items | 182 件のまま `ok`。既存の `test_review_items.py` が通る | ルートを空にする・対応表の行を消すと違反になる |
 | 12 生成物 | `ndf check --write-spec` の後に差分が無く、`ndf records glossary render --check` が `ok` | JSON の説明だけを変えて生成し直さないと落ちる |
 | 13 退行しない | CI の必須のジョブが通り、足した 2 本が 500 行以下 | 行数の検査が超えた文書を挙げる |
 
 ### 確かめのコマンド
 
-どれもリポジトリの根で打つ。
-
-#### 参照の確かめ（条件 3）
-
-```bash
-python3 - <<'PY'
-import re, subprocess, sys
-PATH = r"docs/specifications/(ndf-rebuild(?:-[a-z]+)*)\.md"
-REF = re.compile(PATH + r" の(決定 \d+(?:[・〜]\d+)*)")
-held = {}
-def decisions(name):
-    if name not in held:
-        try:
-            text = open(f"docs/specifications/{name}.md", encoding="utf-8").read()
-        except OSError:
-            text = ""
-        held[name] = set(re.findall(r"^#{2,4} 決定 (\d+)", text, re.M))
-    return held[name]
-shown = subprocess.run(["git", "grep", "-n", "ndf-rebuild", "--", "plugins/ndf"], capture_output=True, text=True).stdout
-refs = bad = 0
-def ng(why, line):
-    global bad
-    bad += 1
-    print(why, line[:200])
-for line in shown.splitlines():
-    rest = REF.sub("", line)
-    if re.search(r"ndf-rebuild[a-z-]*\.md", rest) and re.search(r"決定 ?\d", rest):
-        ng("形が違う:", line)
-    for m in REF.finditer(line):
-        if "〜" in m[2]:
-            ng("番号を範囲で書いている:", line)
-        for n in re.findall(r"\d+", m[2]):
-            refs += 1
-            if n not in decisions(m[1]):
-                ng(f"決定が無い（{m[1]} の {n}）:", line)
-print("参照", refs, "件・違反", bad, "件")
-sys.exit(bool(bad))
-PY
-```
-
-- 変更の前の `main`: `参照 0 件・違反 0 件`
-- 実在する 2 行・無い番号・無い文書・範囲・形の違う行・決定を書かない行を混ぜたとき: `参照 7 件・違反 4 件`
-
-#### 子の表の確かめ（条件 7）
-
-```bash
-python3 - <<'PY'
-import json, re
-held = json.load(open("plugins/ndf/src/ndf/checks/children.json", encoding="utf-8"))
-text = open("docs/specifications/ndf-rebuild.md", encoding="utf-8").read()
-sec = text[text.index("## 子の記号"):text.index("## 決定と理由")]
-rows = {}
-for line in sec.splitlines():
-    cells = [c.strip() for c in line.strip("|").split("|")]
-    if re.fullmatch(r"[A-Z]+[0-9]+[a-z]?\+?", cells[0]):
-        rows[cells[0]] = cells[1]
-kids = held["children"]
-print("確定仕様だけ", sorted(set(rows) - set(kids)), "JSON だけ", sorted(set(kids) - set(rows)))
-print("Issue の違い", [k for k in rows if k in kids and rows[k] != f"#{kids[k]['issue']}"])
-print("ndf.core.refs のオーナー", [k for k, v in kids.items() if "ndf.core.refs" in v["packages"]])
-print("contracts/limits/ の書き込み元", held["tables"]["contracts/limits/"])
-PY
-```
-
-- 変更の前の確定仕様: `確定仕様だけ ['R0', 'R1'] JSON だけ ['M3b+', 'X9']`
-- 変更の後: 2 つの並びと Issue の違いがすべて空になる
-
-#### 構文木の確かめ（条件 10）
-
-`<base>` は変更の前のコミットである。
-
-```bash
-python3 - <base> <<'PY'
-import ast, subprocess, sys
-base = sys.argv[1]
-def tree(text):
-    t = ast.parse(text)
-    for n in ast.walk(t):
-        if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and ast.get_docstring(n, clean=False) is not None:
-            n.body[0].value.value = ""
-    return ast.dump(t)
-run = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout
-names = run("ls-files", "--", "plugins/ndf/*.py").split()
-old = {n for n in run("ls-tree", "-r", "--name-only", base, "plugins/ndf").split("\n") if n.endswith(".py")}
-bad = sorted(set(names) ^ old)
-for n in sorted(set(names) & old):
-    before, after = run("show", f"{base}:{n}"), open(n, encoding="utf-8").read()
-    if before != after and tree(before) != tree(after):
-        bad.append(n)
-print("\n".join(bad))
-print("違い", len(bad), "件")
-sys.exit(bool(bad))
-PY
-```
-
-- 変更の前: `違い 0 件`
-- docstring を 1 行替えたとき: 0 件
-- `llm.py` の定数を 1 つ替えたとき: 1 件
+4 つのコマンドの全文と、合否を確かめた結果は [issue-3960-design-checks.md](./issue-3960-design-checks.md) にある。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3960 | 実装する | — | `plugins/ndf/bin/ndf-claude`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/limits/durable.keep.json`、`plugins/ndf/contracts/limits/durable.prepare.json`、`plugins/ndf/contracts/limits/hook.ask-forward.json`、`plugins/ndf/contracts/limits/hook.budget.pre-tool-use.json`、`plugins/ndf/contracts/limits/hook.counter-lock.json`、`plugins/ndf/contracts/limits/hook.deny-repeat.json`、`plugins/ndf/contracts/limits/hook.metrics-keep.json`、`plugins/ndf/contracts/limits/hook.pushback.json`、`plugins/ndf/contracts/limits/hook.venv-keep.json`、`plugins/ndf/hooks/boot.py`、`plugins/ndf/hooks/entry.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/checks/child_deps.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/checks/facts.py`、`plugins/ndf/src/ndf/checks/invariants.py`、`plugins/ndf/src/ndf/checks/lint.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/smells.py`、`plugins/ndf/src/ndf/core/durable.py`、`plugins/ndf/src/ndf/core/durable_runs.py`、`plugins/ndf/src/ndf/core/durable_sweep.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/domains/hooks/__init__.py`、`plugins/ndf/src/ndf/domains/hooks/boot.py`、`plugins/ndf/src/ndf/domains/hooks/budget.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/env.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`、`plugins/ndf/src/ndf/domains/hooks/guards/read_repeat.py`、`plugins/ndf/src/ndf/domains/hooks/guards/session.py`、`plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/guards/turn.py`、`plugins/ndf/src/ndf/domains/hooks/guards/unattended.py`、`plugins/ndf/src/ndf/domains/hooks/main.py`、`plugins/ndf/src/ndf/domains/hooks/metrics.py`、`plugins/ndf/src/ndf/domains/hooks/outbox.py`、`plugins/ndf/src/ndf/domains/hooks/registration.py`、`plugins/ndf/src/ndf/domains/hooks/sender.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/src/ndf/domains/relay/__init__.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/markers.py`、`plugins/ndf/src/ndf/domains/relay/pending.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/release/__init__.py`、`plugins/ndf/src/ndf/domains/worktree/write_target.py`、`plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/progress/backup.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/tests/checks/conftest.py`、`plugins/ndf/tests/conftest.py`、`plugins/ndf/tests/core/test_durable.py`、`plugins/ndf/tests/core/test_durable_format.py`、`plugins/ndf/tests/core/test_durable_store.py`、`plugins/ndf/tests/core/test_durable_sweep.py`、`plugins/ndf/tests/core/test_durable_url.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/progress/load_measure.py`、`plugins/ndf/tests/progress/test_store_pg.py`、`plugins/ndf/tests/progress/test_store_sqlite.py`、`docs/specifications/ndf-review-items.md`、`docs/specifications/ndf-review-items-11x.md`、`docs/specifications/README.md`、`docs/specifications/ndf-rebuild.md`、`docs/specifications/ndf-rebuild-review-scope.md`、`docs/specifications/ndf-contract-fact-checks.md`、`.github/workflows/script-structure.yml`、`docs/glossary/glossary.json`、`docs/glossary/ndf-rebuild.md` |
+| #3960 | 実装する | — | `plugins/ndf/bin/ndf-claude`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/hooks/runtimes.json`、`plugins/ndf/contracts/limits/durable.keep.json`、`plugins/ndf/contracts/limits/durable.prepare.json`、`plugins/ndf/contracts/limits/hook.ask-forward.json`、`plugins/ndf/contracts/limits/hook.budget.pre-tool-use.json`、`plugins/ndf/contracts/limits/hook.counter-lock.json`、`plugins/ndf/contracts/limits/hook.deny-repeat.json`、`plugins/ndf/contracts/limits/hook.metrics-keep.json`、`plugins/ndf/contracts/limits/hook.pushback.json`、`plugins/ndf/contracts/limits/hook.venv-keep.json`、`plugins/ndf/hooks/boot.py`、`plugins/ndf/hooks/entry.py`、`plugins/ndf/pyproject.toml`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/checks/README.md`、`plugins/ndf/src/ndf/checks/child_deps.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/checks/facts.py`、`plugins/ndf/src/ndf/checks/invariants.py`、`plugins/ndf/src/ndf/checks/lint.py`、`plugins/ndf/src/ndf/checks/rules.json`、`plugins/ndf/src/ndf/checks/smells.py`、`plugins/ndf/src/ndf/core/durable.py`、`plugins/ndf/src/ndf/core/durable_runs.py`、`plugins/ndf/src/ndf/core/durable_sweep.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/domains/hooks/__init__.py`、`plugins/ndf/src/ndf/domains/hooks/boot.py`、`plugins/ndf/src/ndf/domains/hooks/budget.py`、`plugins/ndf/src/ndf/domains/hooks/cli.py`、`plugins/ndf/src/ndf/domains/hooks/context.py`、`plugins/ndf/src/ndf/domains/hooks/counter.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/env.py`、`plugins/ndf/src/ndf/domains/hooks/guards/ask.py`、`plugins/ndf/src/ndf/domains/hooks/guards/read_repeat.py`、`plugins/ndf/src/ndf/domains/hooks/guards/session.py`、`plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/hooks/guards/turn.py`、`plugins/ndf/src/ndf/domains/hooks/guards/unattended.py`、`plugins/ndf/src/ndf/domains/hooks/main.py`、`plugins/ndf/src/ndf/domains/hooks/metrics.py`、`plugins/ndf/src/ndf/domains/hooks/outbox.py`、`plugins/ndf/src/ndf/domains/hooks/registration.py`、`plugins/ndf/src/ndf/domains/hooks/sender.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/src/ndf/domains/relay/__init__.py`、`plugins/ndf/src/ndf/domains/relay/account_registry.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/src/ndf/domains/relay/markers.py`、`plugins/ndf/src/ndf/domains/relay/pending.py`、`plugins/ndf/src/ndf/domains/relay/signals.py`、`plugins/ndf/src/ndf/domains/release/__init__.py`、`plugins/ndf/src/ndf/domains/worktree/write_target.py`、`plugins/ndf/src/ndf/identity.py`、`plugins/ndf/src/ndf/progress/backup.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/tests/bin/test_ndf_claude.py`、`plugins/ndf/tests/checks/conftest.py`、`plugins/ndf/tests/conftest.py`、`plugins/ndf/tests/core/test_durable.py`、`plugins/ndf/tests/core/test_durable_format.py`、`plugins/ndf/tests/core/test_durable_store.py`、`plugins/ndf/tests/core/test_durable_sweep.py`、`plugins/ndf/tests/core/test_durable_url.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py`、`plugins/ndf/tests/domains/relay/test_relay_hub.py`、`plugins/ndf/tests/domains/relay/test_relay_parts.py`、`plugins/ndf/tests/progress/load_measure.py`、`plugins/ndf/tests/progress/test_store_pg.py`、`plugins/ndf/tests/progress/test_store_sqlite.py`、`docs/specifications/ndf-review-items.md`、`docs/specifications/ndf-review-items-11x.md`、`docs/specifications/README.md`、`docs/specifications/ndf-rebuild.md`、`docs/specifications/ndf-rebuild-review-scope.md`、`docs/specifications/ndf-contract-fact-checks.md`、`.github/workflows/script-structure.yml`、`docs/glossary/glossary.json`、`docs/glossary/ndf-rebuild.md` |
 
 「決定 N」を指す行の見分けは実装で決めるため、この一覧は下調べで作り直しの決定に見えたファイルである。実装で別のファイルの行も作り直しの決定と決まれば、同じ PR で書き換え、PR の本文に挙げる。
 
