@@ -99,7 +99,7 @@ def _shape_span(m: re.Match[str], repl: str) -> tuple[int, int]:
 
 
 def union_marked_spans(spans: list[tuple[int, int, bool]]) -> list[tuple[int, int, bool]]:
-    """印付きの範囲（始まり・終わり・印）の重なりを和にまとめ、始まりの順に並べる。まとめた範囲の印は、どれかに印があれば真。"""
+    """伏せる範囲（始まり・終わり・秘密か）の重なりを和にまとめ、始まりの順に並べる。まとめた範囲は、どれかが秘密なら真。"""
     out: list[tuple[int, int, bool]] = []
     for start, end, mark in sorted(spans):
         if out and start < out[-1][1]:
