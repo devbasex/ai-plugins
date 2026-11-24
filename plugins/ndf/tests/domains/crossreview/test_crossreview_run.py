@@ -18,7 +18,7 @@ import pytest
 
 from ndf.adapters import agents, git
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, settings, store
+from ndf.domains.crossreview import cli, drive, report_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
@@ -93,6 +93,10 @@ class Fake:
         store.fix_result_path(self.state_dir, ref).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
         spec.paths.out.write_text("{}", encoding="utf-8")
         return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+
+# 修正担当の結果に載る指摘の id と、その指摘を作ったもの
+MADE_BY = (("n1", "ndf"), ("r1-1", "codex"))
 
 
 def _run(capsys, monkeypatch, fake: Fake, wt: Path, *extra: str) -> tuple[int, dict]:
@@ -325,6 +329,37 @@ def test_resend_after_a_refused_push_restores_the_fixed_findings(repos: Repos, w
     assert "fix0.txt" in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
 
 
+def test_issue_4109_resend_does_not_restore_a_finding_made_by_ndf(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """NDF が機械で確かめて作った指摘へ修正担当が「直した」と書いた結果をマージし、その修正のコミットを次の起動が送り直しても、
+    指摘は未解決のままで、ラウンドの表の「直した指摘」にも出ない（#4109）。"""
+    state_dir = tmp_path / "st"
+    ref = store.state_pr(state_dir, PR)
+    rows = [{"id": i, "text": f"{i} の本文", "round": 1, "outcome": fin.UNRESOLVED, "reason": None, "by": by} for i, by in MADE_BY]
+    head = sh(wt, "rev-parse", "HEAD").strip()
+    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": rows})
+    sha = commit(wt, "fix.txt", "直した", "直す")
+    path = store.fix_result_path(state_dir, ref)
+    found = [{"id": i, "outcome": fin.FIXED, "reason": f"{i} を直した"} for i, _ in MADE_BY]
+    path.write_text(json.dumps({"pr": PR, "commit": sha, "findings": found}, ensure_ascii=False), encoding="utf-8")
+    drive.merge_fix(state_dir, PR, path)
+    taken = _state(state_dir)
+    assert taken["rounds"][0]["fix"] == {"commit": sha, "reported": 1, "fixed": ["r1-1"]}
+    assert (taken["findings"][0]["outcome"], taken["findings"][0]["fixer_reason"]) == (fin.UNRESOLVED, "n1 を直した")
+    resend, seen = drive._resend, []
+
+    def observed(run: Any, synced: Any) -> None:
+        resend(run, synced)
+        seen.append({i: run.journal.rows[i]["outcome"] for i, _ in MADE_BY})
+
+    monkeypatch.setattr(drive, "_resend", observed)
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}, decide=lambda fid: None), wt, "--max-rounds", "1")
+    assert "fix.txt" in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
+    # 送り直した直後に見る（後の処理が未解決へ戻して隠さないように）
+    assert seen == [{"n1": fin.UNRESOLVED, "r1-1": fin.FIXED}]
+    first = next(x for x in report_decide.comment(PR, _state(state_dir), None).splitlines() if x.startswith("| 1 |"))
+    assert first.endswith("| r1-1 |")
+
+
 def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monkeypatch) -> None:
     """PR #3466 の指摘: 相対の --state-dir と --worktree は打った場所の cwd を基準に絶対パスへそろえて子へ渡す。"""
     monkeypatch.chdir(tmp_path)
@@ -405,7 +440,7 @@ def _rounds_without_heads(state: dict) -> list[dict]:
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
-        assert r["mvv"] == {"id": "absent:::", "branch": "main"}
+        assert r["mvv"] == {"id": "absent:::", "mvv_branch": "main"}
         row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
@@ -445,8 +480,16 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "セクション B の根拠が無い"},
-            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義"},
+            {
+                "id": "r1-1",
+                "outcome": fin.FIXED,
+                "reason": None,
+                "severity": "major",
+                "text": "セクション B の根拠が無い",
+                "mvv": None,
+                "redline": False,
+            },
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "severity": "major", "text": "語の定義", "mvv": None, "redline": False},
         ],
         "pr": PR,
         "rounds": 2,
@@ -475,7 +518,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
     assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
-        _entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"),
+        {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::"},
     ]
     prompts = {name: p for _, name, p in fake.prompts}
     assert "見送り済み" not in prompts["round1-codex.out"]

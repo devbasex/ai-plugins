@@ -242,35 +242,219 @@ def test_occurrence_is_new_for_each_raise_and_written_for_older_rows() -> None:
     assert not journal_mod.with_occurrences(data)
 
 
-ITEMS = ("Value 1", "P1", "C7")
+# --- プロジェクト MVV に反する指摘 -----------------------------------------------------------
+
+ITEMS = ("Mission", "Value 1", "Value 5", "P1", "C7")
+V11, V12, ABSENT = "approved:11:aaa:ccc", "approved:12:bbb:ccc", "absent:::"
 
 
-def _named(text: str, mvv: str) -> dict:
-    return {"text": text, "severity": "major", "impact": IMPACT, "by": "codex", "mvv": mvv}
+def _named(text: str, mvv: object = None, severity: str = "major", **more: object) -> dict:
+    """相手役の指摘。`mvv` があれば、反する MVV の項目として書く。"""
+    named = {} if mvv is None else {"mvv": mvv}
+    return {"text": text, "severity": severity, "impact": IMPACT, "by": "codex", **named, **more}
 
 
-@pytest.mark.parametrize("order", [("Value 1", "C7", "P1"), ("P1", "Value 1", "C7"), ("C7", "P1", "Value 1")])
-def test_redline_wins_over_other_items_in_any_order(order: tuple[str, ...]) -> None:
+def _entered(*raised: dict, mvv: str = V11) -> journal_mod.FindingJournal:
     journal = journal_mod.FindingJournal()
-    assert journal.enter(1, [_named("A", m) for m in order], ITEMS) == frozenset()
-    [row] = journal.redlines()
-    assert (row["mvv"], row["redline_items"]) == ("P1", ["P1", "C7"])
-    assert journal.pending([]) == ([], [])
+    journal.enter(1, raised, ITEMS, mvv)
+    return journal
 
 
-def test_unknown_mvv_is_an_ordinary_finding() -> None:
+def _decide(journal: journal_mod.FindingJournal, outcome: str, mvv: str | None = V11, round_no: int = 1) -> None:
+    """指摘 `r1-1` の修正の結果をマージする。"""
+    journal.apply_fix([{"id": "r1-1", "outcome": outcome, "reason": "反しない"}], (), round_no, mvv=mvv)
+
+
+def test_mvv_finding_is_held_at_a_blocking_severity_with_the_one_before() -> None:
+    """MVV の項目に反する指摘は、軽い重さでも修正担当へ渡す重さに固定し、固定する前の重さと判定した MVV の識別子を残す。"""
     journal = journal_mod.FindingJournal()
-    journal.enter(1, [_named("A", "P9")], ITEMS)
-    assert journal.redlines() == [] and [r["text"] for r in journal.pending([])[0]] == ["A"]
+    assert len(journal.enter(1, [_named("A", "Value 5", "minor")], ITEMS, V11)) == 1
+    [row] = journal.handable()
+    assert (row["mvv"], row["mvv_pinned"], row["judged_mvv"]) == ("Value 5", True, V11)
+    assert (row["severity"], row["unpinned_severity"]) == ("major", "minor")
+    assert "redline" not in row and journal.warnings == []
 
 
-def test_redline_reopens_what_the_fixer_deferred_but_not_what_a_person_decided() -> None:
+@pytest.mark.parametrize("severity", ["major", "critical"])
+def test_mvv_finding_without_impact_is_not_lowered_but_warned(severity: str) -> None:
+    journal = _entered(_named("A", "Value 5", severity, impact=" "))
+    [row] = journal.handable()
+    assert (row["severity"], row["unpinned_severity"]) == (severity, "minor")
+    [warning] = journal.warnings
+    assert "r1-1" in warning and "起きること" in warning
+
+
+@pytest.mark.parametrize("value", ["P9", "Value", 5, ["Value 5"]])
+def test_unknown_mvv_item_is_an_ordinary_finding_with_a_warning(value: object) -> None:
+    journal = _entered(_named("A", value, "minor"), _named("B", " "))
+    [a, b] = journal.rows.values()
+    assert (a["severity"], "mvv" in a, "judged_mvv" in a) == ("minor", False, False)
+    assert [r["text"] for r in journal.handable()] == ["B"]
+    [warning] = journal.warnings
+    assert "r1-1" in warning and "r1-2" not in warning
+    # 注意は次のラウンドへ持ち越さない。MVV が承認されていなければ、項目が書かれていても注意しない
+    journal.enter(2, [_named("A", value, "minor")], (), ABSENT)
+    assert journal.warnings == []
+
+
+@pytest.mark.parametrize(
+    "order",
+    [("Value 1", "C7", "P1"), ("P1", "Value 1", "C7"), ("C7", "P1", "Value 1")],
+)
+@pytest.mark.parametrize("rounds", ["同じラウンド", "後のラウンド"])
+def test_redline_wins_over_other_items_in_any_order(order: tuple[str, ...], rounds: str) -> None:
+    """必ず人の承認が要る操作と言われた指摘は、言われた順によらず、その番号をすべて残し、修正担当へ渡さず収束も止めない。"""
+    raised = [_named("A", m, "minor") for m in order]
     journal = journal_mod.FindingJournal()
-    journal.enter(1, [_named("A", "Value 1")], ITEMS)
-    deferred = [{"id": "r1-1", "outcome": fin.SKIPPED, "reason": "当たらない"}]
-    journal.apply_fix(deferred, (), 1)
-    journal.enter(2, [_named("A", "P1")], ITEMS)
-    assert [r["id"] for r in journal.redlines()] == ["r1-1"] and journal.revived == ["r1-1"]
-    journal.apply_fix(deferred, (), 2)
-    journal.enter(3, [_named("A", "P1")], ITEMS)
-    assert journal.redlines() == []
+    for no, batch in enumerate([raised] if rounds == "同じラウンド" else [[r] for r in raised], 1):
+        keys = journal.enter(no, batch, ITEMS, V11)
+    assert keys == frozenset() and journal.pending([]) == ([], [])
+    [row] = journal.rows.values()
+    got = {k: v for k, v in row.items() if "mvv" in k or "redline" in k or "severity" in k}
+    assert got == {
+        "mvv": "P1",
+        "redline": True,
+        "redline_items": ["P1", "C7"],
+        "judged_mvv": V11,
+        "severity": "minor",
+        "raised_severity": "minor",
+    }
+
+
+def test_first_item_in_the_mvv_is_kept_for_a_finding_named_with_two_values() -> None:
+    got = [_entered(*(_named("A", m) for m in order)).rows["r1-1"]["mvv"] for order in (("Value 5", "Value 1"), ("Value 1", "Value 5"))]
+    assert got == ["Value 1", "Value 1"]
+
+
+def test_handable_omits_decided_and_light_findings() -> None:
+    journal = _entered(_named("A", "Value 5"), _named("B"), _named("C", severity="nit"), _named("D"))
+    journal.apply_fix([{"id": "r1-2", "outcome": fin.FIXED}, {"id": "r1-4", "outcome": fin.SKIPPED, "reason": "別"}], (), 1, mvv=V11)
+    assert [r["text"] for r in journal.handable()] == ["A"]
+
+
+def test_finding_deferred_as_a_value_becomes_a_redline_when_it_is_raised_as_one() -> None:
+    """修正担当が MVV に反しないと見送った指摘でも、同じ MVV で必ず人の承認が要る操作と言われたら、人の判断を待つ指摘に戻す。"""
+    journal = _entered(_named("A", "Value 5"))
+    _decide(journal, fin.SKIPPED)
+    journal.enter(2, [_named("A", "P1")], ITEMS, V11)
+    [row] = journal.rows.values()
+    assert (row["redline"], row["redline_items"], row["outcome"]) == (True, ["P1"], fin.UNRESOLVED)
+    assert journal.revived == ["r1-1"] and journal.handable() == [] and journal.skipped_texts(V11) == []
+
+
+@pytest.mark.parametrize(
+    ("skipped_at", "now", "listed"),
+    [
+        (V11, V11, True),
+        (V11, V12, False),
+        (V11, ABSENT, False),
+        (ABSENT, V11, False),
+        # 識別子の無い見送り（前のバージョンの NDF が書いた）は、MVV が無い間だけ同じとみなす
+        (None, ABSENT, True),
+        (None, V11, False),
+        (None, "unapproved:::", False),
+    ],
+)
+def test_only_findings_deferred_under_the_same_mvv_stay_deferred(skipped_at: str | None, now: str, listed: bool) -> None:
+    """見送り済みの一覧に載せる（出し直さないよう求める）のは同じ MVV での見送りだけで、違う MVV での見送りは出し直されたら判定し直す。"""
+    journal = _entered(_named("A"))
+    _decide(journal, fin.SKIPPED, skipped_at)
+    assert journal.skipped_texts(now) == (["A"] if listed else [])
+    keys = journal.enter(2, [_named("A", path="b.py", line=3)], ITEMS, now)
+    [row] = journal.rows.values()
+    assert len(keys) == 1 and row["outcome"] == (fin.SKIPPED if listed else fin.UNRESOLVED)
+    assert journal.revived == ([] if listed else ["r1-1"])
+    assert ("path" in row, "skipped_mvv" in row) == (not listed, listed and skipped_at is not None)
+
+
+def test_deferring_records_the_mvv_and_fixing_forgets_it() -> None:
+    journal = _entered(_named("A"))
+    for outcome, mvv, want in [(fin.SKIPPED, V11, V11), (fin.SKIPPED, V12, V12), (fin.SKIPPED, None, None), (fin.SKIPPED, V11, V11)]:
+        _decide(journal, outcome, mvv)
+        assert journal.rows["r1-1"].get("skipped_mvv") == want
+    _decide(journal, fin.FIXED)
+    assert "skipped_mvv" not in journal.rows["r1-1"]
+
+
+def test_issue_4090_6_redline_of_an_earlier_mvv_is_judged_again() -> None:
+    """前の MVV で必ず人の承認が要る操作だった指摘が、今の MVV で Value の項目に反すると出し直されたら、修正担当へ渡し収束を止める。"""
+    journal = _entered(_named("A", "P1"))
+    assert len(journal.enter(2, [_named("A", "Value 5", "minor")], ITEMS, V12)) == 1
+    [row] = journal.handable()
+    assert (row["mvv"], row["mvv_pinned"], row["severity"], row["judged_mvv"]) == ("Value 5", True, "major", V12)
+    assert "redline" not in row and "redline_items" not in row
+    assert row["mvv_history"] == [{"judged_mvv": V11, "mvv": "P1", "redline_items": ["P1"], "outcome": fin.UNRESOLVED}]
+    # 同じ MVV で出し直されても履歴は増えない
+    journal.enter(3, [_named("A", "Value 5")], ITEMS, V12)
+    assert len(row["mvv_history"]) == 1
+    # 次に MVV が変わったときは、前の履歴に足す
+    journal.restate("approved:13:ddd:ccc")
+    assert [h["mvv"] for h in row["mvv_history"]] == ["P1", "Value 5"]
+
+
+@pytest.mark.parametrize(("before", "after"), [("minor", "minor"), ("major", "major")])
+def test_issue_4090_6_held_severity_of_an_earlier_mvv_is_not_kept(before: str, after: str) -> None:
+    """前の MVV で固定した重さは、今の MVV で項目なしに出し直されたら固定する前へ戻る（固定する前から重ければ重いまま）。"""
+    journal = _entered(_named("A", "Value 5", before))
+    _decide(journal, fin.FIXED)
+    keys = journal.enter(2, [_named("A", severity="minor")], ITEMS, V12)
+    [row] = journal.rows.values()
+    assert (row["severity"], row["outcome"], len(keys)) == (after, fin.UNRESOLVED, int(after == "major"))
+    assert not {"mvv", "mvv_pinned", "judged_mvv", "unpinned_severity"} & set(row)
+    assert row["mvv_history"] == [{"judged_mvv": V11, "mvv": "Value 5", "outcome": fin.FIXED}]
+
+
+def test_held_severity_remembers_the_heaviest_one_before_holding() -> None:
+    journal = _entered(_named("A", "Value 5", "minor"), _named("A", severity="critical"))
+    journal.restate(V12)
+    assert journal.rows["r1-1"]["severity"] == "critical"
+
+
+def test_issue_4090_6_restate_drops_classifications_of_an_earlier_mvv() -> None:
+    """MVV が変わったら、出し直されない指摘の分類も外して履歴に残す。終わり方は変えず、同じ MVV の指摘はそのまま残す。"""
+    journal = _entered(_named("A", "P1", "minor"), _named("B", "Value 5", "minor"), _named("C"), _named("D", "Value 1"))
+    journal.apply_fix([{"id": "r1-2", "outcome": fin.SKIPPED, "reason": "反しない"}, {"id": "r1-4", "outcome": fin.FIXED}], (), 1, mvv=V11)
+    assert journal.restate(V11) == []
+    assert journal.restate(V12) == ["r1-1", "r1-2", "r1-4"]
+    rows = journal.rows
+    assert all(not {"mvv", "mvv_pinned", "redline", "redline_items", "judged_mvv", "unpinned_severity"} & set(r) for r in rows.values())
+    assert [(r["outcome"], r["severity"]) for r in rows.values()] == [
+        (fin.UNRESOLVED, "minor"),
+        (fin.SKIPPED, "minor"),
+        (fin.UNRESOLVED, "major"),
+        (fin.FIXED, "major"),
+    ]
+    assert rows["r1-2"]["mvv_history"] == [{"judged_mvv": V11, "mvv": "Value 5", "outcome": fin.SKIPPED, "skipped_mvv": V11}]
+    assert "mvv_history" not in rows["r1-3"]
+    assert [r["text"] for r in journal.handable()] == ["C"]
+    assert journal.restate(V12) == []
+
+
+def test_findings_carry_the_mvv_item_and_whether_it_is_a_redline() -> None:
+    journal = _entered(_named("A", "Value 5"), _named("B", "P1"), _named("C"))
+    assert [(f.mvv, f.redline) for f in journal.findings()] == [("Value 5", False), ("P1", True), (None, False)]
+
+
+def test_result_for_a_finding_made_by_ndf_is_not_taken_as_its_outcome() -> None:
+    """NDF が機械で確かめて作った指摘は、修正担当の結果では閉じない。理由だけ残し、マージした件に数えない（#4109）。"""
+    rows = [_row("n1", "根拠の行の誤り", 1, by="ndf"), _row("n2", "もう 1 つの誤り", 1, by="ndf"), _row("r1-1", "a", 1)]
+    journal = journal_mod.FindingJournal(rows)
+    items = [
+        {"id": "n1", "outcome": fin.FIXED},
+        {"id": "r1-1", "outcome": fin.FIXED},
+        {"id": "n2", "outcome": fin.SKIPPED, "reason": "誤りでない"},
+    ]
+    assert journal.apply_fix(items, (), 1, mvv=V11) == [items[1]]
+    assert [(r["outcome"], r["reason"]) for r in journal.rows.values()] == [
+        (fin.UNRESOLVED, None),
+        (fin.UNRESOLVED, None),
+        (fin.FIXED, None),
+    ]
+    assert (journal.rows["n2"]["fixer_reason"], "skipped_mvv" in journal.rows["n2"]) == ("誤りでない", False)
+
+
+def test_reviewer_finding_with_the_same_text_does_not_classify_a_finding_made_by_ndf() -> None:
+    row = _row("n1", "根拠の行の誤り", 1, by="ndf")
+    journal = journal_mod.FindingJournal([row])
+    journal.enter(2, [_named("根拠の行の誤り", "P1")], ITEMS, V11)
+    assert "mvv" not in journal.rows["n1"] and [r["id"] for r in journal.handable()] == ["n1"]

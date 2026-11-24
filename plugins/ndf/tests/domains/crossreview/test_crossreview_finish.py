@@ -77,6 +77,25 @@ def test_pr_3462_incomplete_review_keeps_gaps_in_its_result_json(tmp_path: Path,
     assert got["outputs"] == {"gaps": got["gaps"]}
 
 
+def test_mvv_findings_left_open_are_a_gap_of_their_own(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """MVV に反する指摘の未解決は、ほかの未解決と別の種類の欠けにする。"""
+    mvv = {"id": "F1", "text": "反する", "outcome": fin.UNRESOLVED, "severity": "major", "mvv": "Value 5"}
+    other = {"id": "F2", "text": "止まる", "outcome": fin.UNRESOLVED, "severity": "major"}
+    deferred = {**mvv, "id": "F3", "outcome": fin.SKIPPED, "reason": "反しない"}
+    _, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.MAX_ROUNDS, 2, [mvv, other, deferred])))
+    assert [(g["kind"], g["name"]) for g in got["gaps"]] == [(fin.GAP_MVV, "F1"), (fin.GAP_UNRESOLVED, "F2")]
+
+
+@pytest.mark.parametrize("severity", ["major", "minor"])
+def test_redlines_are_not_gaps_but_are_counted(tmp_path: Path, capsys: pytest.CaptureFixture[str], severity: str) -> None:
+    """必ず人の承認が要る操作の指摘だけが残っていれば収束とし、件数を要約に載せる。"""
+    left = {"id": "F1", "text": "消す", "outcome": fin.UNRESOLVED, "severity": severity, "mvv": "P1", "redline": True}
+    shown = {**left, "id": "F2", "outcome": fin.SKIPPED}
+    code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, [left, shown])))
+    assert (code, got["status"]) == (0, "ok")
+    assert got["summary"].endswith("指摘 2 件（直した 0・見送った 1・未解決 0・人の承認を待つ 1）")
+
+
 def test_error_before_any_round_is_work_stopped() -> None:
     assert fin.finish(fin.Review(fin.ERROR, 0, ())).kind == "work_stopped"
 

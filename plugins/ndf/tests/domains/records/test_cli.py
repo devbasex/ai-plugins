@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 from ndf import cli
 from ndf.contracts import result
 from ndf.domains.records import cli as records_cli
+from ndf.domains.records import mvv
 
 
 @pytest.fixture
@@ -271,3 +273,107 @@ def test_mvv_signals_stops_when_the_base_branch_has_no_ndf_settings(mvv_repo: Pa
     code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "none")
     assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
     assert got["summary"].startswith("origin/none の MVV の設定を読めない: ")
+
+
+# `ndf records mvv current`: リモートのベースブランチを取得して、承認済みの MVV を読む
+NDF_DIR = ".ndf"
+BODY_AT = f"{NDF_DIR}/mvv.md"
+BODY = "# 見本の MVV\n\n## Mission\n\n使命\n\n## Value\n\n1. **一つ目**\n"
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _push_mvv(repo: Path, versions: object, body: str | None = BODY) -> None:
+    """`versions` を承認の記録とする MVV を、リモートの `main` へ push する。"""
+    (repo / NDF_DIR / "mvv.json").write_text(json.dumps({"versions": versions}), encoding="utf-8")
+    if body is not None:
+        (repo / BODY_AT).write_text(body, encoding="utf-8")
+    git_sandbox.sh(repo, "add", "-A")
+    git_sandbox.sh(repo, "commit", "-q", "-m", "MVV")
+    git_sandbox.sh(repo, "push", "-q", "origin", "main")
+
+
+def _current(capsys, last_result, root: Path, *argv: str) -> tuple[int, dict]:
+    return _run(capsys, last_result, "--cwd", str(root), "mvv", "current", "--base", "main", *argv)
+
+
+def _assert_refused(code: int, got: dict, text: str) -> None:
+    assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition" and "outputs" not in got
+    assert text in got["summary"]
+
+
+def test_mvv_current_fetches_the_base_even_in_a_single_branch_clone(mvv_repo: Path, capsys, last_result) -> None:
+    """別のブランチだけを clone した作業場所でも、リモートの `main` で後から承認されたバージョンを返す（#4090）。"""
+    git_sandbox.sh(mvv_repo, "push", "-q", "origin", "main:work")
+    _push_mvv(mvv_repo, [{"version": 1, "sha256": _sha(BODY)}])
+    origin, clone = mvv_repo.parent / "origin.git", mvv_repo.parent / "clone"
+    git_sandbox.sh(mvv_repo.parent, "clone", "-q", "--single-branch", "--branch", "work", origin.as_uri(), str(clone))
+    for version, body in ((1, BODY), (2, BODY + "2. **二つ目**\n")):
+        if version > 1:
+            _push_mvv(mvv_repo, [{"version": version, "sha256": _sha(body)}], body)
+        code, got = _current(capsys, last_result, clone)
+        assert code == 0 and got["status"] == "ok"
+        assert (got["outputs"]["mvv"]["version"], got["outputs"]["mvv"]["sha256"]) == (version, _sha(body))
+
+
+def test_mvv_current_outputs_the_approved_snapshot(mvv_repo: Path, capsys, last_result) -> None:
+    _push_mvv(mvv_repo, [{"version": 3, "sha256": _sha(BODY)}])
+    (mvv_repo / BODY_AT).write_text("作業場所で変えた本文", encoding="utf-8")
+    code, got = _current(capsys, last_result, mvv_repo)
+    out = got["outputs"]["mvv"]
+    assert code == 0 and got["status"] == "ok" and "warnings" not in got
+    assert set(out) == {"state", "version", "sha256", "path", "principles_path", "items"}
+    assert (out["state"], out["version"], out["sha256"]) == ("approved", 3, _sha(BODY))
+    assert Path(out["path"]).is_absolute() and Path(out["path"]).read_text(encoding="utf-8") == BODY
+    assert Path(out["principles_path"]).read_bytes() == mvv.principles()
+    assert out["items"][:2] == ["Mission", "Value 1"] and "C1" in out["items"]
+
+
+@pytest.mark.parametrize("state", ["absent", "unapproved"])
+def test_mvv_current_of_a_base_without_an_approved_mvv_outputs_only_the_state(
+    mvv_repo: Path, capsys, last_result, state: str, tmp_path: Path
+) -> None:
+    if state == "absent":
+        git_sandbox.sh(mvv_repo, "rm", "-q", f"{NDF_DIR}/mvv.json")
+        git_sandbox.sh(mvv_repo, "commit", "-q", "-m", "MVV を消す")
+        git_sandbox.sh(mvv_repo, "push", "-q", "origin", "main")
+    else:
+        _push_mvv(mvv_repo, [], body=None)
+    code, got = _current(capsys, last_result, mvv_repo)
+    assert code == 0 and got["status"] == "ok" and got["outputs"] == {"mvv": {"state": state}} and "warnings" not in got
+    assert not (tmp_path / "mvv-state").exists()
+
+
+def test_mvv_current_refuses_a_body_changed_after_approval_unless_allowed(mvv_repo: Path, capsys, last_result, tmp_path: Path) -> None:
+    """承認の後に変わった本文では止まり、`--allow-mismatch` なら本文が合わないことを警告して状態だけを返す（#4099）。"""
+    _push_mvv(mvv_repo, [{"version": 1, "sha256": _sha("承認した本文")}])
+    text = f"ベースの MVV の本文が承認の記録と合わない: {BODY_AT}"
+    _assert_refused(*_current(capsys, last_result, mvv_repo), text)
+    code, got = _current(capsys, last_result, mvv_repo, "--allow-mismatch")
+    assert code == 0 and got["status"] == "ok" and got["outputs"] == {"mvv": {"state": "mismatch"}} and got["warnings"] == [text]
+    assert not (tmp_path / "mvv-state").exists()
+
+
+def test_mvv_current_does_not_read_the_old_base_when_the_fetch_fails(mvv_repo: Path, capsys, last_result) -> None:
+    _push_mvv(mvv_repo, [{"version": 1, "sha256": _sha(BODY)}])
+    git_sandbox.sh(mvv_repo, "remote", "set-url", "origin", str(mvv_repo.parent / "none.git"))
+    _assert_refused(*_current(capsys, last_result, mvv_repo), "MVV を読むベースブランチを取得できない: origin の main ")
+
+
+def test_mvv_current_refuses_unreadable_settings(mvv_repo: Path, capsys, last_result) -> None:
+    """設定のファイルを読めないベースを、MVV の無いベースとして扱わない（#4099）。"""
+    (mvv_repo / NDF_DIR / "mvv.json").write_text("{", encoding="utf-8")
+    git_sandbox.sh(mvv_repo, "commit", "-qam", "壊れた設定")
+    git_sandbox.sh(mvv_repo, "push", "-q", "origin", "main")
+    _assert_refused(*_current(capsys, last_result, mvv_repo, "--allow-mismatch"), "の MVV の設定を読めない")
+    oid = git_sandbox.sh(mvv_repo, "rev-parse", f"HEAD:{NDF_DIR}/mvv.json", strip=True)
+    (mvv_repo / ".git" / "objects" / oid[:2] / oid[2:]).unlink()
+    _assert_refused(*_current(capsys, last_result, mvv_repo), "")
+
+
+def test_mvv_current_refuses_when_the_snapshot_cannot_be_written(mvv_repo: Path, capsys, last_result, tmp_path: Path) -> None:
+    _push_mvv(mvv_repo, [{"version": 1, "sha256": _sha(BODY)}])
+    (tmp_path / "mvv-state").write_text("ディレクトリでない", encoding="utf-8")
+    _assert_refused(*_current(capsys, last_result, mvv_repo), str(tmp_path / "mvv-state"))

@@ -13,8 +13,8 @@
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
-   無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は修正担当へ渡さず、未解決のまま欠けにして
-   人の判断へ戻す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
+   無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は、修正担当へ渡さず、収束も止めず、
+   人の承認を待つ指摘として残す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
@@ -55,7 +55,7 @@ from ndf.domains.crossreview import (
     threads,
 )
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.journal import REDLINE_ITEMS, FindingJournal
+from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import mvv
 from ndf.testing import declared, scoped
@@ -341,6 +341,14 @@ def _carry(run: _Run, prior: _Prior) -> None:
         _save(run)
 
 
+def _restate(run: _Run) -> None:
+    """MVV が前の起動から変わっていれば、前の MVV で決めた判定を指摘から外す（最初のラウンドの前に 1 回）。"""
+    stale = run.journal.restate(run.mvv)
+    if stale:
+        run.process.append({"run": "start", "result": f"MVV が変わったので、前の MVV で判定した指摘 {len(stale)} 件の判定を外した"})
+        _save(run)
+
+
 def _round_stem(run: _Run, round_no: int, suffix: str) -> Path:
     """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
     return run.cfg.state_dir / f"round{round_no}{suffix}"
@@ -385,7 +393,7 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
 
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path, remarks: Optional[Path] = None) -> str:
-    decided = run.journal.skipped_texts()
+    decided = run.journal.skipped_texts(run.mvv)
     handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
@@ -507,18 +515,20 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str, session: Optional[claud
     )
 
 
-def _fix_record(journal: FindingJournal, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
-    """修正の結果ファイルを読んでジャーナルへ読み込み、ラウンドの修正の記録（commit・reported・fixed）を返す。
-    番号が合わなければ `store.FixResultMismatch`。"""
+def _fix_record(
+    journal: FindingJournal, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int, mvv: Optional[str] = None
+) -> dict[str, Any]:
+    """修正の結果ファイルを読んでジャーナルへ読み込み、ラウンドの修正の記録（commit・reported・fixed）を返す。`mvv` は
+    修正担当を起動したときの MVV の識別子（前の起動が残した結果では、どの MVV での結果か決められないので None）。番号が合わなければ `store.FixResultMismatch`。"""
     found = store.read_fix_result(path, ref)
-    reported = journal.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
+    reported = journal.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no, mvv=mvv)
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
-def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
+def _take_fix(run: _Run, path: Path, round_no: int, mvv: Optional[str] = None) -> dict[str, Any]:
     """修正の結果をジャーナルへ読み込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
-    return _fix_record(run.journal, run.ref, path, run.cfg.handed, round_no)
+    return _fix_record(run.journal, run.ref, path, run.cfg.handed, round_no, mvv)
 
 
 def _consume(path: Path, round_no: int, label: str = "round") -> None:
@@ -562,7 +572,7 @@ def _fix(
         _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）{how}", warning)
         return None
     try:
-        fix = _take_fix(run, result_path, round_no)
+        fix = _take_fix(run, result_path, round_no, run.mvv)
     except (store.FixResultMismatch, store.StateBroken) as exc:
         # 合わない・書きかけ（DONE でない修正担当）のファイルを残すと、次の起動が同じファイルを読み込もうとして
         # 止まり続けるので、退避する
@@ -656,9 +666,6 @@ def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
 def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcome:
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。"""
     findings = run.journal.findings()
-    for row in run.journal.redlines():
-        named = "・".join(row[REDLINE_ITEMS])
-        run.warnings.append(f"指摘 {row['id']} は必ず人の承認が要る操作（{named}）に当たるので、修正担当へ渡さず人の判断に残した")
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -742,7 +749,7 @@ def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Ha
 
 
 def _detach_revived(run: _Run) -> None:
-    """直したのに出し直された指摘から、resolve した古いスレッドと巻き直しの前に済んだ記録を外す（PR 3944 の r6-6）。
+    """直した・見送ったのに出し直された指摘から、resolve した古いスレッドと巻き直しの前に済んだ記録を外す（PR 3944 の r6-6）。
     外さないと、同じ保存先の再開は古い resolve を根拠に再発を直したとし（`_settle_resolved`）、別の保存先の再開は
     閉じたスレッドと、スレッドを持つとした記録のコメントの双方から再発を取りこぼす。外した指摘は、記録の公開で新しい
     スレッドを開くか、スレッドの無い未解決の指摘として記録のコメントに残る。"""
@@ -767,7 +774,9 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(unread.values()))
-    run.history.append(run.journal.enter(round_no, raised, run.snapshot.items if run.snapshot is not None else ()))
+    items = run.snapshot.items if run.snapshot is not None else ()
+    run.history.append(run.journal.enter(round_no, raised, items, run.mvv))
+    run.warnings += run.journal.warnings
     _detach_revived(run)
     record: dict[str, Any] = {
         "round": round_no,
@@ -836,6 +845,7 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent, reader_for: Optio
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     _carry(run, prior)
+    _restate(run)
     if _reusable(run):
         # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）
         n = len(store.list_of(run.data, store.ROUNDS))

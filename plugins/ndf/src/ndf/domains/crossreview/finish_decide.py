@@ -7,6 +7,8 @@
 - 上限（`max_rounds`）・振動（`oscillating`）・途中の誤り（`errored`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
 - 収束の妨げにならない重さ（`minor`・`nit`。`criteria_decide.blocking`）の未解決の指摘は欠けにしない（#3941）
+- 必ず人の承認が要る操作に当たる指摘（`redline`）は、どの欠けにもせず、件数を要約に載せる。ほかの、プロジェクト MVV の項目に
+  反する指摘（`mvv`）の未解決は、欠けの種類を分ける（#4076）
 - 一部の相手役が起動し直しても結果を残さなかった（`incomplete_reviewers`。#3941）ら、欠けによらず `work_stopped` で止まる
   （読めなかった相手役の分を収束に数えない）
 """
@@ -39,16 +41,22 @@ FINALS = (CONVERGED, MAX_ROUNDS, OSCILLATING, ERROR, INCOMPLETE_REVIEWERS)
 GAP_UNRESOLVED = "unresolved_finding"
 GAP_UNHANDLED = "unhandled_finding"
 GAP_NO_REASON = "skip_without_reason"
+GAP_MVV = "mvv_unresolved"
+# 必ず人の承認が要る操作に当たる指摘かどうかの欄（ジャーナルと要約の指摘）
+REDLINE = "redline"
 
 
 class Finding(NamedTuple):
-    """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）。"""
+    """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）、
+    `mvv` は反する MVV の項目（無ければ None）、`redline` は必ず人の承認が要る操作に当たるか。"""
 
     id: str
     text: str
     outcome: str
     reason: Optional[str]
     severity: Optional[str] = None
+    mvv: Optional[str] = None
+    redline: bool = False
 
 
 def blocking(f: Finding) -> bool:
@@ -87,8 +95,13 @@ def _gap(kind: str, name: str, reason: str) -> dict[str, str]:
 
 
 def _finding_gaps(findings: Sequence[Finding]) -> list[dict[str, str]]:
-    gaps = [_gap(GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い") for f in findings if f.outcome == UNRESOLVED and blocking(f)]
-    gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {f.text}") for f in findings if f.outcome == SKIPPED and not f.reason]
+    rest = [f for f in findings if not f.redline]
+    gaps = [
+        _gap(GAP_MVV if f.mvv else GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い")
+        for f in rest
+        if f.outcome == UNRESOLVED and blocking(f)
+    ]
+    gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {f.text}") for f in rest if f.outcome == SKIPPED and not f.reason]
     return gaps
 
 
@@ -116,9 +129,11 @@ def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list
 
 
 def _counts(findings: Sequence[Finding]) -> str:
-    n = {o: sum(1 for f in findings if f.outcome == o and (o != UNRESOLVED or blocking(f))) for o in OUTCOMES}
-    light = sum(1 for f in findings if f.outcome == UNRESOLVED and not blocking(f))
-    tail = f"・軽い指摘 {light}" if light else ""
+    waiting = sum(1 for f in findings if f.outcome == UNRESOLVED and f.redline)
+    rest = [f for f in findings if f.outcome != UNRESOLVED or not f.redline]
+    n = {o: sum(1 for f in rest if f.outcome == o and (o != UNRESOLVED or blocking(f))) for o in OUTCOMES}
+    light = sum(1 for f in rest if f.outcome == UNRESOLVED and not blocking(f))
+    tail = (f"・軽い指摘 {light}" if light else "") + (f"・人の承認を待つ {waiting}" if waiting else "")
     return f"指摘 {len(findings)} 件（直した {n[FIXED]}・見送った {n[SKIPPED]}・未解決 {n[UNRESOLVED]}{tail}）"
 
 
@@ -181,7 +196,9 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         name = _id_of(item, "finding", i)
         text = str(item["text"]) if "text" in item else ""
         severity = criteria_decide.severity_of(item.get("severity"))
-        out.append(Finding(name, text, item["outcome"], reason if reason else None, severity))  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
+        why = reason if reason else None  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
+        mvv = item.get("mvv")
+        out.append(Finding(name, text, item["outcome"], why, severity, mvv if isinstance(mvv, str) else None, bool(item.get(REDLINE))))
     return tuple(out)
 
 
