@@ -245,15 +245,18 @@ scripts/
 
     | 検証するもの | 受け入れる形 | 外れたとき |
     | --- | --- | --- |
-    | 成果物の名前 | `ARTIFACT_NAME` の正規表現 `^pytest(-ndf)?-junit-(\d+)$` に全体が当たる | 取りに行かない（ZIP を引かない）。その成果物は無いとして扱う |
+    | 成果物の名前 | `ARTIFACT_NAME` の正規表現 `^pytest(-ndf)?-junit-(\d+)$` に全体が当たり、番号がジョブの一覧の総数より小さい | 取りに行かない（ZIP を引かない）。その成果物は無いとして扱う |
+    | 成果物の大きさ | 成果物の一覧の `size_in_bytes` が `ARTIFACT_LIMIT` 以下で、それまでに取った成果物の大きさとの和が `TOTAL_LIMIT` 以下。取った後の ZIP のバイト数も `ARTIFACT_LIMIT` 以下 | 取りに行かない（取った後なら捨てる）。その成果物は無いとして扱い、読み飛ばした理由を標準エラーへ書く |
     | ZIP の中のエントリの名前 | ディレクトリを含まない名前（`/`・`\` を含まない、`..` でない、空でない）で、成果物の番号と同じ番号の `pytest-junit-<番号>.xml`・`pytest-ndf-junit-<番号>.xml`（成果物の種類に合う方）・`shard-attempt-<番号>.txt` のどれかと一致する | 書き出さずに飛ばす。読むべきファイルが残らなければ、`read_parts` が XML の無い部品として扱う |
+    | 書き出すエントリの大きさ | 1 つの成果物から書き出すエントリの、展開した後のバイト数の和が `ARTIFACT_LIMIT` 以下 | その成果物から書いたファイルを消し、無いとして扱う。読み飛ばした理由を標準エラーへ書く |
     | 書き出す先 | `dest / <成果物の名前> / <エントリの名前>` を `resolve()` した結果が、`dest.resolve()` の下にある | 書き出さずに飛ばす（上の 2 つが通れば起きないが、書く直前に必ず確かめる） |
 
-  - 書き出しは、検証を通ったエントリを `ZipFile.read` で読み、決めたパスへ `write_bytes` で書く。ZIP の中のパスをそのまま書き先に使わない
+  - 書き出しは、検証を通ったエントリを `ZipFile.open` で開き、64 KiB ずつ読んで決めたパスへ書く。ZIP の中のパスをそのまま書き先に使わない。展開した後のバイト数は、ZIP の見出しの `file_size` を信用せず、読んだ実際のバイト数で数える。上限を超えた時点で読むのをやめる。`ZipFile.read` で一度に読まないのは、圧縮率の高い ZIP を展開したときに手元のメモリを使い切らないためである
+  - 読み飛ばした成果物は、`read_parts` から見ると部品が無いのと同じなので、`run` の出力では部分集計の「欠けたジョブ」に出る。標準エラーの理由は 1 成果物 1 行で、「成果物 <名前> を読み飛ばした（大きさの上限 <バイト数> を超えた）」の形にする
   - 副作用: 成果物の一覧（`actions/runs/<run の ID>/artifacts?per_page=100`）・ジョブの一覧・成果物の ZIP を引く。`dest` にファイルを書く（呼ぶ側の `cmd_run` が一時ディレクトリを渡し、終わりに消す）
 - `cmd_trend`
   - 時間の予算: 中央値のジョブ全体を `JOB_BUDGET`（60）秒に収めるため、`Gh` に締め切りを渡す。締め切りは、ジョブの最初の手順が記録した時刻（環境変数 `CI_TEST_DURATION_STARTED`、UNIX 時刻の秒）に `JOB_BUDGET` を足し、集計を上げる手順の分 `UPLOAD_RESERVE` 秒を引いた時刻である。環境変数が無い（手で打つ）か整数でなければ、`trend` を始めた時刻を起点にする。`main` に `gh` を渡したテストでは、偽物の `Gh` が締め切りを持つ
-  - 時間切れのとき: この回の集計は書く。判定はしない。`::notice title=テストの所要::` に、そろった回数と止めた理由「時間の上限」を書く。この回のジョブの一覧が時間切れで取れなければ、無効な集計（`reason` は「ジョブの一覧を取れない（時間の上限）」）を書く
+  - 時間切れのとき: どの取得で時間切れになっても、この回の集計は書き、判定はしない。出す注記は、時間切れになった取得で分かれる（「処理の手順」の `cmd_trend` の表）。この回のジョブの一覧で時間切れになったら、無効な集計（`reason` は「ジョブの一覧を取れない（時間の上限）」）を書き、`::warning title=テストの所要の読み取り::` だけを出す。過去の回の取得で時間切れになったら、有効な集計を書き、`::notice title=テストの所要::` にそろった回数と止めた理由「時間の上限」を書く
   - 事後条件: `--out` に集計の JSON がある（書けなかったときを除く）。`GITHUB_STEP_SUMMARY` があれば要約が書き足してある。終了コードは、引数の誤りと設定の誤りのときだけ 2 で、ほかは 0 である
   - 副作用: `--out` と `GITHUB_STEP_SUMMARY` のファイルを書く。標準出力へ注記の行を書く
 
@@ -276,6 +279,7 @@ scripts/
 | `cmd_run` | `gh` を使えない・run の ID の実行が無い・成果物の一覧が取れない | `GhUnavailable`・`GhError` | `fetch_run` | 止める | 標準エラーへ理由を書き、2 | 一時ディレクトリを消す。再実行できる |
 | `cmd_run` | 根か NDF の XML が 1 つも読めない | 残す前の回・保存期間を過ぎた回 | `cmd_run`（`read_parts` の結果） | 止める | 標準エラーへ「根の JUnit XML が無い」か「NDF の JUnit XML が無い」（両方なら 2 行）を書き、1 | 一時ディレクトリを消す |
 | `cmd_run` | 一部の成果物の ZIP が取れない | `GhError` | `fetch_run` | 既定値で続ける（その成果物を無いとして扱い、部分集計にする） | 先頭の行の「部分集計（欠けたジョブ: <番号>…）」。終了コード 0 | — |
+| `cmd_run` | 成果物が大きさの上限を超えた | 第三者の Pull Request が大きな成果物や圧縮率の高い ZIP を上げた | `fetch_run`（一覧の `size_in_bytes`・取った ZIP のバイト数・展開した実際のバイト数） | 既定値で続ける（その成果物を読み飛ばし、無いとして扱う） | 標準エラーへ読み飛ばした成果物の名前と上限を 1 行ずつ書く。先頭の行の「部分集計（欠けたジョブ: <番号>…）」。根か NDF の XML がすべて読み飛ばされたら 1 | 書きかけのファイルは消す。一時ディレクトリは `cmd_run` が消す |
 | `main` | 引数の誤り | 利用者の打ち間違い | `argparse` | 止める | `argparse` の使い方の表示と 2 | — |
 
 `cmd_trend` の中で上の表に無い例外が出たときは、捕まえずに 1 で終わる。中央値のジョブは `continue-on-error: true` を持つので、ワークフローの結論には入らない（決定 3）。
@@ -308,13 +312,15 @@ scripts/
 
 `cmd_trend` の流れと、判定するかの規則:
 
-| この回の集計 | `past_totals` の結果 | 判定 | 注記の行 |
-| --- | --- | --- | --- |
-| 無効 | 呼ばない（API の呼び出しを増やさない） | しない | `::warning title=テストの所要の読み取り::`（この回の理由） |
-| 有効で、設定の `runs` が 1 | 呼ばない（過去の回は要らない） | この回の合計だけを `verdict` に渡して判定する | 超えたら `::warning title=テストの所要::`。上限以下なら出さない |
-| 有効 | `totals` が `runs − 1` 回（中央値に数える値が `runs` 回） | `verdict` で判定する | 超えたら `::warning title=テストの所要::`。上限以下なら出さない |
-| 有効 | `totals` が `runs − 1` 回に満たない（`stop="time_limit"` を含む） | しない | `::notice title=テストの所要::`（そろった回数と止めた理由） |
-| どちらでも | `unreadable` が空でない・`stop="list_error"` | 上の行のとおり | 上の行に加えて `::warning title=テストの所要の読み取り::` |
+時間切れは、どの取得で起きたかで扱いが分かれる。この回のジョブの一覧で起きたら、この回の集計が無効になるので「読み取りの警告」を出す。過去の回の取得で起きたら、回数が足りないだけなので「回数の知らせ」を出す。
+
+| この回の集計 | `past_totals` の結果 | 判定 | 注記の行（件数） | ジョブの要約 |
+| --- | --- | --- | --- | --- |
+| 無効（この回のジョブの一覧が時間切れで取れなかった場合を含む） | 呼ばない（API の呼び出しを増やさない） | しない | `::warning title=テストの所要の読み取り::` が 1 行（この回の理由。時間切れなら「ジョブの一覧を取れない（時間の上限）」）。`::notice` は出さない | 読めなかったもの |
+| 有効で、設定の `runs` が 1 | 呼ばない（過去の回は要らない） | この回の合計だけを `verdict` に渡して判定する | 超えたら `::warning title=テストの所要::` が 1 行。上限以下なら出さない | 数えた回・中央値・上限・差の表 |
+| 有効 | `totals` が `runs − 1` 回（中央値に数える値が `runs` 回） | `verdict` で判定する | 超えたら `::warning title=テストの所要::` が 1 行。上限以下なら出さない | 数えた回・中央値・上限・差の表 |
+| 有効 | `totals` が `runs − 1` 回に満たない（過去の回の取得の時間切れ `stop="time_limit"` を含む） | しない | `::notice title=テストの所要::` が 1 行（そろった回数と止めた理由。時間切れなら「時間の上限」） | そろった回数と止めた理由 |
+| どちらでも | `unreadable` が空でない・`stop="list_error"` | 上の行のとおり | 上の行に加えて `::warning title=テストの所要の読み取り::` が 1 行 | 上の行に加えて読めなかったもの |
 
 - 繰り返しの終わる条件: `past_totals` は、ページの取得が 2 つの一覧の合計で `PAGE_LIMIT`（10）回、ZIP の取得が `2 × (runs − 1)` 回で必ず止まる。どちらも取得の前に数を確かめる。回数の上限だけでは、1 回 `CALL_TIMEOUT`（30）秒の呼び出しが最大 29 回並ぶと 870 秒かかるので、`Gh` の締め切りでも止める（`cmd_trend` の「時間の予算」）
 - 計算量の注意: 実行の一覧は `created_at` の新しい順に返る。実行番号は作られた順に振られるので、ページをまたいでも実行番号の大きい順と食い違わない。ページの中だけは `run_number` の大きい順に並べ直す。成果物の一覧は読んだページを `workflow_run.id` から成果物への辞書に足していき、候補ごとに一覧を読み直さない
@@ -338,6 +344,8 @@ scripts/
 | `CONFIG` | 定数 | `scripts/ci_test_durations.py` | `ROOT / "scripts" / "ci-test-duration.json"` |
 | `ROOT_ARTIFACT`・`NDF_ARTIFACT` | 定数（成果物の名前の頭） | `scripts/ci_test_durations.py` | `"pytest-junit-"`・`"pytest-ndf-junit-"` |
 | `ARTIFACT_NAME` | 定数（正規表現。`fetch_run` が取りに行く成果物の名前） | `scripts/ci_test_durations.py` | `r"^pytest(-ndf)?-junit-(\d+)$"` |
+| `ARTIFACT_LIMIT` | 定数（`fetch_run` が 1 つの成果物に許す ZIP と展開した後の大きさのバイト数） | `scripts/ci_test_durations.py` | `16 * 1024 * 1024` |
+| `TOTAL_LIMIT` | 定数（`fetch_run` が 1 回の実行で取る ZIP の大きさの和のバイト数） | `scripts/ci_test_durations.py` | `64 * 1024 * 1024` |
 | `TOTAL_ARTIFACT` | 定数 | `scripts/ci_test_durations.py` | `"ci-test-duration-total"` |
 | `ATTEMPT_FILE` | 定数 | `scripts/ci_test_durations.py` | `"shard-attempt-{index}.txt"` |
 | `SHARD_JOB` | 定数（正規表現） | `scripts/ci_test_durations.py` | `r"^pytest \((\d+)/(\d+)\)$"` |
@@ -353,6 +361,7 @@ scripts/
 | `runs`・`limit_seconds`・`top` | 設定値 | `scripts/ci-test-duration.json`（所要の設定） | 設計文書の「所要の設定」の形 |
 
 - テストのジョブの数（6）は定数に置かない。`shard_jobs` がジョブの名前の `<総数>` から読む。ワークフローの `matrix` と 2 か所に持たないためである
+- `ARTIFACT_LIMIT` と `TOTAL_LIMIT` は、第三者の Pull Request の成果物を読んでも手元のメモリと一時領域を使い切らないための上限である。根の JUnit XML の ZIP は 1 個 2.7〜9.6 KB だった（設計文書の決定 10）。NDF の XML の大きさは測っていない（未確認: NDF の JUnit XML の成果物はまだ無い）。1 個 16 MiB は、根の ZIP の最大の 1,700 倍を超えるので、NDF のテストが根の数十倍の件数でも届かない。`TOTAL_LIMIT` の 64 MiB は、ふつうの回の 12 個の和が届かない値として、1 個の上限の 4 倍にした
 - `RETENTION_DAYS` は、リポジトリの設定（`actions/permissions/artifact-and-log-retention` の `days`）の写しである。その API は管理者の権限を要し、中央値のジョブのトークン（`actions: read`）では読めないため、定数で持つ。設定を変えたら、ここも変える
 - ZIP の取得の上限 `2 × (runs − 1)` は、設定の `runs` から求め、定数に置かない
 
@@ -400,8 +409,8 @@ scripts/
 | `Gh.get`・`Gh.raw` | 締め切りまで残りがあると、`gh` の上限に残りの秒と `CALL_TIMEOUT` の小さい方を渡す（`subprocess.run` を差し替えて渡った `timeout` を見る） | 残りが 0 以下だと `subprocess.run` を呼ばずに `GhTimeUp`。時刻は偽の `clock` で進め、実際には待たない | — |
 | `verdict` | 中央値が上限を超えると `over` が真で、差が正 | 中央値が上限と等しいと `over` が偽 | — |
 | `render_trend` | 超えたとき `::warning title=テストの所要::` に中央値・上限・超えた秒が入る | 上限以下では `::warning` の行が無い。回数が足りないと `::notice title=テストの所要::` が 1 行だけ出る | 読めないものがあると `::warning title=テストの所要の読み取り::` に回の ID が入る |
-| `cmd_trend` | 超えたときも 0 を返す。`GITHUB_STEP_SUMMARY` に表を書く | 設定の `limit_seconds` だけを変えると判定が変わる。設定の `runs` が 1 なら、一覧のページと ZIP の呼び出しが 0 回で、この回の合計で判定する | `gh` が無いときも 0 を返し、この回の集計（無効）を書く |
-| `fetch_run`・`cmd_run`・`render_run` | 根と NDF の両方の合計・遅い順の上位・ジョブごとの手順の秒を出す | 一部のジョブの成果物が無い・古い試行のジョブがある・試行の番号のファイルだけで XML の無い成果物があると、先頭に部分集計の行が出て 0 を返す。落ちたジョブの最新の XML は合計に入り、先頭に「失敗したジョブを含む」が出る | 根か NDF の XML が 1 つも無いと 1 を返し、無い側を標準エラーへ書く。期限切れの成果物は取りに行かない。`gh` が無いと 2。ZIP に `../x.xml`・`/tmp/x.xml`・`sub/pytest-junit-0.xml`・ほかの番号の XML を入れても、`dest` の外にも中にも書かれない。名前が `pytest-junit-0x` の成果物は ZIP を引かない |
+| `cmd_trend` | 超えたときも 0 を返す。`GITHUB_STEP_SUMMARY` に表を書く | 設定の `limit_seconds` だけを変えると判定が変わる。設定の `runs` が 1 なら、一覧のページと ZIP の呼び出しが 0 回で、この回の合計で判定する | `gh` が無いときも 0 を返し、この回の集計（無効）を書く。この回のジョブの一覧で `GhTimeUp` が上がると、無効な集計を書き、`::warning title=テストの所要の読み取り::` が 1 行で `::notice` は出ない。過去の回の取得で `GhTimeUp` が上がると、有効な集計を書き、`::notice title=テストの所要::` が 1 行で「時間の上限」を含む |
+| `fetch_run`・`cmd_run`・`render_run` | 根と NDF の両方の合計・遅い順の上位・ジョブごとの手順の秒を出す | 一部のジョブの成果物が無い・古い試行のジョブがある・試行の番号のファイルだけで XML の無い成果物があると、先頭に部分集計の行が出て 0 を返す。落ちたジョブの最新の XML は合計に入り、先頭に「失敗したジョブを含む」が出る | 根か NDF の XML が 1 つも無いと 1 を返し、無い側を標準エラーへ書く。期限切れの成果物は取りに行かない。`gh` が無いと 2。ZIP に `../x.xml`・`/tmp/x.xml`・`sub/pytest-junit-0.xml`・ほかの番号の XML を入れても、`dest` の外にも中にも書かれない。名前が `pytest-junit-0x` の成果物と、番号が総数以上の `pytest-junit-6` は ZIP を引かない。`size_in_bytes` が `ARTIFACT_LIMIT` を超える成果物は ZIP を引かない。見出しの `file_size` が小さくても展開すると `ARTIFACT_LIMIT` を超えるエントリを持つ ZIP は、その成果物のファイルを残さず、標準エラーに読み飛ばした理由が出る（上限は monkeypatch で小さくして確かめる） |
 | `main` | サブコマンドへ振り分ける | — | 引数が足りないと 2 |
 
 ## 所要の設定
@@ -420,12 +429,24 @@ scripts/
 
 | 手順 | 条件（`if`） | 結果 |
 | --- | --- | --- |
-| ジョブ全体 | `!cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.pytest-shard.result == 'success' && needs.pytest-ndf-ok-tools.result == 'success'` | `needs: [pytest-shard, pytest-ndf-ok-tools]`・`continue-on-error: true`・`permissions: { actions: read, contents: read }`・`runs-on: ubuntu-latest` |
+| ジョブ全体 | `!cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.pytest-shard.result == 'success' && needs.pytest-ndf-ok-tools.result == 'success'` | `needs: [pytest-shard, pytest-ndf-ok-tools]`・`continue-on-error: true`・`permissions: { actions: read, contents: read }`・`runs-on: ubuntu-latest`・`timeout-minutes: 4` |
 | 始めた時刻（新設） | ジョブの条件のとおり（手順の `if` は指定しない） | ジョブの最初の手順に置く。`echo "CI_TEST_DURATION_STARTED=$(date +%s)" >> "$GITHUB_ENV"` で、後の手順に時刻を渡す。`trend` はこの時刻から時間の予算を数える（「所要の読み取り」の `cmd_trend`） |
 | checkout | ジョブの条件のとおり | `actions/checkout`（ほかのジョブと同じ固定の版） |
-| この回の XML を取る | ジョブの条件のとおり | `actions/download-artifact`（同じ固定の版）で `pattern: pytest-*junit-*`・`path: ${{ runner.temp }}/junit`。`merge-multiple` は付けない（成果物の名前ごとのディレクトリを `read_parts` が読む） |
-| 中央値 | `!cancelled()`（取得が落ちても無効な集計を書く） | `python3 scripts/ci_test_durations.py trend "$RUNNER_TEMP/junit" --run ${{ github.run_id }} --run-number ${{ github.run_number }} --attempt ${{ github.run_attempt }} --out "$RUNNER_TEMP/ci-test-duration-total.json"`。環境変数 `GH_TOKEN: ${{ github.token }}` |
-| 集計を上げる | `always()` | `actions/upload-artifact` で `name: ci-test-duration-total`・`path: ${{ runner.temp }}/ci-test-duration-total.json`・`overwrite: true`・`if-no-files-found: warn` |
+| この回の XML を取る | ジョブの条件のとおり | `actions/download-artifact`（同じ固定の版）で `pattern: pytest-*junit-*`・`path: ${{ runner.temp }}/junit`。`merge-multiple` は付けない（成果物の名前ごとのディレクトリを `read_parts` が読む）。`timeout-minutes: 1` |
+| 中央値 | `!cancelled()`（取得が落ちても無効な集計を書く） | `python3 scripts/ci_test_durations.py trend "$RUNNER_TEMP/junit" --run ${{ github.run_id }} --run-number ${{ github.run_number }} --attempt ${{ github.run_attempt }} --out "$RUNNER_TEMP/ci-test-duration-total.json"`。環境変数 `GH_TOKEN: ${{ github.token }}`。`timeout-minutes: 1` |
+| 集計を上げる | `always()` | `actions/upload-artifact` で `name: ci-test-duration-total`・`path: ${{ runner.temp }}/ci-test-duration-total.json`・`overwrite: true`・`if-no-files-found: warn`・`timeout-minutes: 1` |
+
+時間の上限の当て方: 設計文書の非機能の許容 (1) の 60 秒は、中央値のジョブ全体の所要の目標である。この 60 秒を秒単位で止められるのは、`trend` が打つ `gh` の呼び出しだけである。ほかの手順は GitHub Actions の `timeout-minutes`（分単位）でしか止められないので、止まったときにも集計が残るように、手順ごとの上限と残る集計を次のように決める。
+
+| 処理 | 60 秒の目標への当て方 | 実行の上限 | 上限で止まったときに残る集計 |
+| --- | --- | --- | --- |
+| 始めた時刻・checkout | 締め切りの起点に含める（`trend` の残りの秒が減る） | ジョブの `timeout-minutes: 4` | ジョブごと止まり、集計は残らない。その回は「成果物が見つからない」で中央値に数えない |
+| この回の XML を取る | 同上 | 手順の `timeout-minutes: 1` | 手順が失敗になり、`!cancelled()` の `trend` が走る。XML がそろわないので無効な集計を書き、上げる |
+| `trend` の `gh` の呼び出し | 締め切り（始めた時刻に `JOB_BUDGET` を足し、`UPLOAD_RESERVE` を引いた時刻）で止める（「所要の読み取り」の `cmd_trend` の「時間の予算」） | 呼び出しごとに残りの秒。手順の `timeout-minutes: 1` は締め切りが効かなかったときの備えである | 時間切れは「処理の手順」の `cmd_trend` の表のとおりの集計を書く。手順の上限で止まりファイルが無ければ、上げる手順が `if-no-files-found: warn` で知らせ、前の試行の集計は `attempt` の照合で外れる |
+| 集計を上げる | `UPLOAD_RESERVE` の秒を残しておく | 手順の `timeout-minutes: 1` | 上げられなかった回は「成果物が見つからない」で中央値に数えない |
+| ジョブの終わりの処理（実行機が行う後片付け） | 当てない | ジョブの `timeout-minutes: 4` | 集計は上げた後なので残る |
+
+60 秒を超えた回は、設計文書の非機能の「ワークフロー全体」の確かめ方で見つける。`trend` の締め切りで守れない処理（XML の取得・集計の上げ・後片付け）が 60 秒を超えさせていたら、確かめ方のとおり取得を減らす変更を起票する。ジョブの `timeout-minutes: 4` は、上の 3 つの手順の上限の合計（3 分）に、始めた時刻と checkout の分の 1 分を足した値である。
 
 - setup-python も setup-uv も置かない。実行機の `python3` で `trend` を打つ（決定 4、非機能の「ワークフロー全体」）
 - 実行の一覧と成果物の一覧の API は、ワークフローの `permissions` の `actions: read` で読める。ジョブの `permissions` は、ワークフローの上位の指定を置き換える
