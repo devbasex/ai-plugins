@@ -194,6 +194,20 @@
       "fail_closed": true
     },
     {
+      "name": "relay-busy",
+      "summary": "中継の下の子の会話で、SessionStart（startup・resume）に起動ごとの記録へ 0 件を、作業を始める呼び出し（Agent と、コマンドが params.wait_commands だけでできていない Monitor と run_in_background の Bash）の前に子を止める排他の中で「1 件以上」を書く。書けない開始は締め切りの経路でも止める。監視を始める呼び出し（待つだけのコマンドの Monitor とバックグラウンドの Bash）には触れない（ラッパーはこの guard が書いた記録で 0 件と確かめた子だけを引継ぎで止める。#4049）",
+      "module": "ndf.domains.hooks.guards.relay_busy",
+      "events": ["SessionStart", "PreToolUse"],
+      "tools": [],
+      "order": 65,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.counter-lock"],
+      "params": {"wait_commands": ["ndf lanes wait", "ndf plan wait", "ndf ci watch"]},
+      "fail_closed": true
+    },
+    {
       "name": "ask-answered",
       "summary": "中継の下で AskUserQuestion に回答したら、同じ tool_use_id の質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
       "module": "ndf.domains.hooks.guards.ask_clear",

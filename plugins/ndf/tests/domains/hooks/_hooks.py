@@ -56,7 +56,9 @@ def read_sample(path: Path, cwd: Path, **override: Any) -> dict[str, Any]:
 
 
 def sample(runtime: str, event: str, cwd: Path, **override: Any) -> dict[str, Any]:
-    return read_sample(next(SAMPLES.glob(f"{runtime}/*/{event}.json")), cwd, **override)
+    """表の最初の本体のバージョンの見本（事象のすべてを持つ）。"""
+    version = tables.runtimes()[runtime]["samples"][0]
+    return read_sample(SAMPLES / runtime / version / f"{event}.json", cwd, **override)
 
 
 def bash(cwd: Path, command: str, runtime: str = "claude", **tool_input: Any) -> dict[str, Any]:
@@ -85,6 +87,30 @@ def relay(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_RELAY_LAUNCH", "L1")
     signals.set_launch(directory, "L1")
     return directory
+
+
+LAUNCH = "a" * 32
+"""`relay_child` の起動の ID（ラッパーが作る形）。"""
+
+
+@pytest.fixture
+def relay_child(relay, monkeypatch):
+    """中継のラッパーが起動した子の会話 `s1` の環境（起動は `LAUNCH`）。返すのは中継の作業ディレクトリ。"""
+    signals.set_launch(relay, LAUNCH)
+    monkeypatch.setenv("NDF_RELAY_LAUNCH", LAUNCH)
+    monkeypatch.setenv("NDF_RELAY_SESSION", "s1")
+    return relay
+
+
+def busy(directory: Path) -> tuple[int, int, str] | None:
+    """子の会話の起動の記録の（作業の件数, 監視の件数, 書いた事象）。無ければ None。"""
+    got = signals.read_busy(directory, LAUNCH, "s1")
+    return (got[0], got[3], got[1]) if got is not None else None
+
+
+def boom(*_args: Any, **_kwargs: Any) -> Any:
+    """呼ばれないことを確かめる差し替え・失敗させる差し替え。"""
+    raise RuntimeError("呼ばれた")
 
 
 @pytest.fixture

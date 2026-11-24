@@ -1,19 +1,111 @@
-"""中継の子の会話のバックグラウンドの作業 1 件を、待つべき作業と止めてよい監視に分ける（#4049 の決定 7）。
+"""中継の子の会話のバックグラウンドの作業を、起動ごとの記録（`busy-<起動の ID>.json`）へ書く guard（#4049 の決定 2・3・7）。
 
-監視は、コマンドが待つだけの NDF のコマンド（`params.wait_commands`）だけでできている Monitor とバックグラウンドの Bash だけで、
-確かめきれないものはすべて作業とする（監視と取り違えると、引継ぎで作業を失う）。
+SessionStart（`startup`・`resume`）で 0 件を、作業を始める呼び出しの前に、子を止める排他の中で「1 件以上」を書く。書けない
+開始は、締め切りの経路でも拒否する。記録が 0 件の子は、その後に作業を始めていない。件数は Stop の `relay-marker` が書き直す。
+
+バックグラウンドの作業 1 件は、待つべき作業と止めてよい監視に分ける。監視は、コマンドが待つだけの NDF のコマンド
+（`params.wait_commands`）だけでできている Monitor とバックグラウンドの Bash だけで、確かめきれないものはすべて作業とする
+（監視と取り違えると、引継ぎで作業を失う）。
+
+すべての PreToolUse に当たる `fail_closed` の行なので、対象外の呼び出しは、例外を上げうる処理（記録・構文解析・表の読み込み）
+より先に通す。
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
+from ndf import identity
+from ndf.domains.hooks import tables
 from ndf.domains.hooks.context import ShellCommand, only_commands
+from ndf.domains.hooks.guards.shell import background_call
+from ndf.domains.hooks.verdict import Verdict, deny
+from ndf.domains.relay import signals
+
+GUARD_NAME = "relay-busy"
+BUSY_START_FAILED = (
+    "バックグラウンドの作業の開始を中継へ記録できなかったので、始めない。もう一度呼ぶ"
+    "（中継のラッパーは記録の無いバックグラウンドの作業を守れない）"
+)
+
+_recorded: Optional[dict] = None
+"""開始を記録し終えた事象の payload（同じ実行の `on_deadline` が受け取る payload と同じオブジェクト。`ask._recorded` と同じ扱い）。"""
+
+# 0 件を書く SessionStart の `source`（`compact`・`clear` は前のバックグラウンドの作業が残りうる）
+_FRESH_SOURCES = ("startup", "resume")
 
 # 監視になりうる種類（`background_tasks` の `type`。Monitor とバックグラウンドの Bash）
 _WATCHABLE = ("monitor", "shell")
 # 長いコマンドを Claude Code が切ったときに末尾へ足す文字列（`… [+N chars]`）
 _CUT_MARK = "… [+"
+
+
+def check(ctx, svc) -> Optional[Verdict]:
+    if ctx.event == "SessionStart":
+        if ctx.payload.get("source") in _FRESH_SOURCES and _target(ctx.env, ctx.session_id):
+            record_count(ctx.env, ctx.session_id, 0, "session")
+        return None
+    if not _target(ctx.env, ctx.session_id) or not _starts_background(ctx.tool, ctx.tool_input, svc.params):
+        return None
+    return _record_start(ctx)
+
+
+def on_deadline(env: Mapping[str, str], payload: dict) -> Optional[str]:
+    """エントリポイントの締め切りを過ぎたときの拒否の理由。記録し終えていない子の会話の作業の開始だけを拒否し、ほかは None（通す）。"""
+    if payload.get("hook_event_name") != "PreToolUse" or not _target(env, payload.get("session_id")):
+        return None
+    if _recorded is payload or not _starts_background(payload.get("tool_name"), payload.get("tool_input"), table_params()):
+        return None
+    return BUSY_START_FAILED
+
+
+def table_params() -> Mapping[str, Any]:
+    """guard の表のこの guard の `params`。`svc.params` を受け取らない呼び手が使う。読めなければ空（すべて作業に数える）。"""
+    try:
+        params = next(row["params"] for row in tables.guards() if row["name"] == GUARD_NAME)
+    except Exception:  # noqa: BLE001 ファイル: 読めない表では待つコマンドが分からないので、すべて作業に数える
+        return {}
+    return params if isinstance(params, dict) else {}
+
+
+def record_count(env: Mapping[str, str], session_id: str, count: int, source: str, monitors: int = 0) -> bool:
+    """子の会話の作業の件数を書けたか。保存先か起動の ID が無ければ書かずに偽（記録はラッパーが不明として読む）。"""
+    directory, launch = signals.relay_dir(env), signals.relay_launch(env)
+    if directory is None or launch is None:
+        return False
+    return signals.write_busy(directory, launch, session_id, count, source, monitors)
+
+
+def _record_start(ctx) -> Optional[Verdict]:
+    """作業の開始を記録する。保存先か起動の ID が無いか、書けなければ拒否。"""
+    global _recorded
+    directory, launch = signals.relay_dir(ctx.env), signals.relay_launch(ctx.env)
+    wait = float(tables.policy_value("hook.counter-lock", "seconds"))
+    if directory is None or launch is None or not signals.record_start(directory, launch, ctx.session_id, wait):
+        return deny(BUSY_START_FAILED)
+    _recorded = ctx.payload
+    return None
+
+
+def _target(env: Mapping[str, str], session_id: Any) -> bool:
+    """中継のラッパーが起動した子の会話か。入れ子の claude は会話の ID が違う。コントラクトの誤りも対象外とし、例外を外へ出さない。
+
+    保存先が在るかは見ない（保存先が消えた子の会話を、中継の外と取り違えて作業を始めさせない）。
+    """
+    if not signals.keys_known() or not env.get(identity.env_name("relay-dir")):
+        return False
+    child = signals.relay_session(env)
+    return child is not None and session_id == child
+
+
+def _starts_background(tool: Any, tool_input: Any, params: Mapping[str, Any]) -> bool:
+    """作業を始める呼び出しか。例外を外へ出さない。Monitor は必ずバックグラウンドで動くので、確かめられない入力は作業とする。"""
+    given = tool_input if isinstance(tool_input, dict) else {}
+    if tool == "Monitor":
+        return task_kind("monitor", given.get("command"), params) == "work"
+    if tool == "Bash":
+        return background_call(given) and task_kind("shell", given.get("command"), params) == "work"
+    return tool == "Agent"
 
 
 def task_kind(kind: Any, command: Any, params: Mapping[str, Any]) -> str:
