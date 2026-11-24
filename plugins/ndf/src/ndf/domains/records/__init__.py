@@ -12,6 +12,7 @@
 | MVV の記録（検証の再利用・改訂の兆候・判定の材料と指示文） | `mvv_decide`・`mvv_material_decide`・`mvv` |
 | 手順 0 の 3 つの確かめのまとめ | `preflight_decide`・`preflight` |
 | 工程の終わり（スプリントを閉じる条件・クリーンアップの工程の記録・gws の認証） | `close_decide`・`cleanup_stage`・`gws` |
+| 読み手役への指示・確認した記録・質問を出す前に足りないもの | `reading_decide`・`reading` |
 | 設定のファイルの保存先（表 ndf-files の location と path の解き方） | `files` |
 | 記録の JSONL の読み書き | `jsonl` |
 | 設定・SSOT の JSON のファイルの読み込み | `jsonfile` |

@@ -16,7 +16,7 @@ from ndf.domains.relay.context_thresholds import Thresholds
 
 CONTINUE = "継続"
 # record_row に渡す 2 つの値（#3995 の決定 1）
-APPLIED = Thresholds(250_000, 500_000, {"decide_from": "default", "limit": "default"})
+APPLIED = Thresholds(450_000, 600_000, {"decide_from": "default", "limit": "default"})
 # 方針を消す前の行だけが持つ列（#3995 の決定 1）
 POLICY_COLUMNS = ("policy", "margin", "config_error")
 
@@ -332,7 +332,7 @@ def test_append_and_read_skip_broken_lines(tmp_path):
     assert [r["at"] for r in rows] == [early["at"], late["at"]]
     assert skipped == 1
     assert {r["version"] for r in rows} == {1}
-    assert rows[0]["verdict"] == "再起動" and rows[0]["reason"] == "手動" and rows[0]["limit"] == 500_000
+    assert rows[0]["verdict"] == "再起動" and rows[0]["reason"] == "手動" and rows[0]["limit"] == 600_000
 
 
 def test_append_refuses_a_row_outside_the_shape_and_writes_nothing(tmp_path):
@@ -391,12 +391,12 @@ def test_cli_record_rejects_a_reason_outside_the_table(tmp_path, monkeypatch, ca
     assert cli.main(["context", "record", "--verdict", "再起動", "--work", "#1"]) == 2
     assert cli.main(["context", "record", "--event", "引継ぎ開始", "--reason", "手動", "--work", "#1"]) == 2
     capsys.readouterr()
-    monkeypatch.setenv("NDF_CONTEXT_LIMIT", "300000")
+    monkeypatch.setenv("NDF_CONTEXT_LIMIT", "500000")
     assert cli.main(["context", "record", "--event", "引継ぎ開始", "--work", "#1"]) == 0
     row = _last(capsys)["items"][0]
     assert row["event"] == "引継ぎ開始"
     # record は resolve と同じ 2 つの値を行に書く（#3995 の決定 1）
-    assert (row["decide_from"], row["limit"], row["sources"]["limit"]) == (250_000, 300_000, "env")
+    assert (row["decide_from"], row["limit"], row["sources"]["limit"]) == (450_000, 500_000, "env")
     assert not set(POLICY_COLUMNS) & set(row)
 
 
@@ -574,7 +574,7 @@ def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
 @pytest.mark.parametrize(("event", "reason"), [(context_records.MARK_HANDOFF, None), (None, "手動")])
 def test_record_row_writes_the_two_values_without_the_policy_columns(event, reason):
     row = context_records.record_row("s1", "#1", APPLIED, event, reason)
-    assert (row["decide_from"], row["limit"], row["sources"]) == (250_000, 500_000, APPLIED.sources)
+    assert (row["decide_from"], row["limit"], row["sources"]) == (450_000, 600_000, APPLIED.sources)
     assert not set(POLICY_COLUMNS) & set(row)
 
 

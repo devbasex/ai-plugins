@@ -14,4 +14,4 @@
 | 議論用の文書 | — | 仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書 | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 形式別ガイド | — | 文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 目的別ガイド | — | 文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
-| 読み手役 | — | 組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI） | — | — | `plugins/ndf/skills/document-rebuild/SKILL.md` |
+| 読み手役 | — | 文書と、想定した読み手の説明と、通じない文の 4 つの型だけを渡され、会話や経緯を知らずに読む AI（サブエージェントか external-ai で呼ぶ別の CLI）。要点の言い直しと、読み手に通じない文の引用を返す | — | — | `plugins/ndf/skills/document-rebuild/SKILL.md` |

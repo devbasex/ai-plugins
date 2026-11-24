@@ -12,8 +12,8 @@
 | K2 | 内容を足さない。足すべき内容はメモして報告に残す | [SKILL.md の手順 2](../SKILL.md#手順-2-組み直す) | — |
 | K3 | 別の Skill が固定した章（設計文書の承認する人が読む欄（題・要約の段落・今の姿・解き方の全体像・決定の見出し・影響と危険。`legacy-refactor` の設計文書は目的・適用範囲・目指す姿・目指す姿の根拠）・要求のテンプレート・Pull Request の本文の形・`type-*.md` の必ず書くセクション・出典のセクション）を動かさず、消さない | 各 Skill。一覧は [related-skills.md](related-skills.md) | — |
 | K4 | 読み手が抽象の説明を実物で確かめられる。例: 抽象の説明に実物の例を添え、最初の例を目的別の構成の 1 番目の章に置く | このファイル（この行） | 小説 |
-| K5 | 読み手が書き手の文脈を持たずに読める。例: 説明文に内部の識別子・略語・会話でできた語・検討過程・変更履歴を持ち込まない | [document-style のルール 1・3・4](../../document-style/SKILL.md#重要ルール) | 小説 |
-| K6 | 読み手が初めて見ても意味が通じる語で書かれている。例: 訳語や造語を作らず、読み手の業界で流通している語（カタカナ語・英語を含む）を使い、1 語 1 意味にする。key term は「キーワード」と書き、「キーの語」と訳さない。キーワードは [keyword-check.md](keyword-check.md) で確かめる | [document-style のルール 2・11](../../document-style/SKILL.md#重要ルール)、[keyword-check.md](keyword-check.md) | — |
+| K5 | [文書の書き方・直し方の基準](../../../contracts/data/writing-criteria.md) の「1. 読み手を想定する」の表で決めた読み手が、書き手の文脈を持たずに読める | [基準](../../../contracts/data/writing-criteria.md)、[document-style のルール 1・3・4](../../document-style/SKILL.md#重要ルール) | 小説 |
+| K6 | [文書の書き方・直し方の基準](../../../contracts/data/writing-criteria.md) の「2. 言葉を選ぶ」のとおりに、読み手に通じる言葉で書かれている。キーワードは [keyword-check.md](keyword-check.md) で確かめる | [基準](../../../contracts/data/writing-criteria.md)、[document-style のルール 2・11](../../document-style/SKILL.md#重要ルール)、[keyword-check.md](keyword-check.md) | — |
 | K7 | 読み手が、確かめた事実と推測を見分けられる。例: 確かめていないことを断定しない。否定の結論には根拠を添える | [document-style のルール 5・6](../../document-style/SKILL.md#重要ルール) | 小説・エッセイ |
 | K8 | 読み手と書き手の関係者が、文書から害を受けない。例: 個人情報と機密を書かない | [document-style のルール 7](../../document-style/SKILL.md#重要ルール) | — |
 | K9 | 読み手が、目安を超えた箇所とその理由を知れる。例: 目安を超えたら、測った値・理由・採らなかった直し方を残して進む | [SKILL.md の手順 4](../SKILL.md#手順-4-測り直す) | — |

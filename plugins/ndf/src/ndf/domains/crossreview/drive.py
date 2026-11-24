@@ -48,6 +48,7 @@ from ndf.domains.crossreview import (
     prior_decide,
     report_decide,
     resume_decide,
+    round_scope,
     scope_decide,
     settings,
     store,
@@ -137,6 +138,7 @@ class _Run:
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
+    documents: bool = False  # PR の全差分に Markdown のファイルがあるか（文書の基準を指示に入れる。#4285）
 
     @property
     def mvv_items(self) -> tuple[str, ...]:
@@ -665,7 +667,7 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
 
 class _Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
-    PR の全差分で変わったファイル・比較基点の merge-base の SHA）。"""
+    PR の全差分で変わったファイル・比較基点の merge-base の SHA・今回の相手役の全員が読んだ前のラウンド）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -674,6 +676,7 @@ class _Prepared(NamedTuple):
     diff: Path
     files: tuple[str, ...]
     base: str
+    previous: Optional[criteria_decide.Previous]
 
 
 def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
@@ -683,6 +686,13 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
     for path, n in scope_decide.oversized(lengths, limit):
         if not any(w.startswith(f"設計文書 {path} が ") for w in run.warnings):
             run.warnings.append(f"設計文書 {path} が {n} 行ある（{limit} 行を超える）。読み手とレビューが追えるよう分けることを考える")
+
+
+def _write_diff(run: _Run, round_no: int, suffix: str, base: str) -> Path:
+    """`base...HEAD` の差分をラウンドのファイルへ書く。"""
+    path = _round_stem(run, round_no, suffix)
+    path.write_text(run.g.run("diff", f"{base}...HEAD"), encoding="utf-8")
+    return path
 
 
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
@@ -777,7 +787,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     rounds = run.data.setdefault(store.ROUNDS, [])
     prep = _prepare_round(run, round_no)
-    prompt = _review_prompt(run, round_no, prep.scope, prep.diff, _remarks_file(run, round_no, _remarks(run, prep)))
+    prompt = _review_prompt(run, round_no, prep, _remarks_file(run, round_no, _remarks(run, prep)))
     raised, unread = _review(run, round_no, prompt, launch)
     if len(unread) == len(run.cfg.reviewers):
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く

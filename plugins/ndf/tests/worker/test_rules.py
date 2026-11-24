@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from ndf import identity
+from ndf.contracts import worker_kinds, writing
 from ndf.core import worker
+
+_SKILLS = identity.ROOT / worker.SKILLS_DIR
 
 
 def _skills(tmp_path, name="fix", text="# fix の手順"):
@@ -40,6 +44,32 @@ def test_a_kind_without_a_procedure_gets_none(tmp_path):
 def test_a_missing_procedure_stops_before_launch(tmp_path):
     with pytest.raises(worker.WorkerError) as err:
         worker.system_prompt("fix", tmp_path, tmp_path / "skills")
+    assert err.value.kind == "precondition"
+
+
+def test_issue_4285_only_kinds_that_read_document_style_get_the_criteria(tmp_path):
+    # 受け入れ条件 7・11: 文書を書く作業（kinds.json で document-style を読む作業）だけに、文書の基準の全文を渡す
+    for kind, row in worker_kinds.work_kinds().items():
+        text = worker.system_prompt(kind, tmp_path / "state", _SKILLS)
+        assert (writing.criteria() in text) is ("document-style" in row["skills"]), kind
+    # 作業の定義に無い作業種別の規則文は、規則と手順書だけのまま
+    assert writing.criteria() not in worker.system_prompt("sweep", tmp_path / "state", _SKILLS)
+
+
+def test_issue_4285_the_rules_of_a_kind_without_documents_are_unchanged(tmp_path):
+    # 受け入れ条件 11: 文書を書かない作業の規則文は、規則・手順・手順書・書き手の付いた本文だけからなる（退行テスト）
+    rules = "\n".join(worker.WORK_RULES).format(pr_body_draft=worker.pr_body_draft(tmp_path), state_dir=tmp_path)
+    assert worker.system_prompt("impl", tmp_path, tmp_path / "skills") == f"{rules}\n\n" + "\n".join(worker.ACCEPTANCE_RULES)
+    assert worker.system_prompt("fix-push", tmp_path, tmp_path / "skills") == rules
+
+
+def test_issue_4285_unreadable_criteria_stop_before_launch(tmp_path, monkeypatch):
+    def broken():
+        raise writing.CriteriaBroken("文書の基準を読めない")
+
+    monkeypatch.setattr(writing, "criteria", broken)
+    with pytest.raises(worker.WorkerError) as err:
+        worker.system_prompt("design", tmp_path, tmp_path / "skills")
     assert err.value.kind == "precondition"
 
 

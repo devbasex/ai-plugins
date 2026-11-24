@@ -4570,7 +4570,7 @@
     {
       "term": "読み手役",
       "context": "ndf-document",
-      "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
+      "meaning": "文書と、想定した読み手の説明と、通じない文の 4 つの型だけを渡され、会話や経緯を知らずに読む AI（サブエージェントか external-ai で呼ぶ別の CLI）。要点の言い直しと、読み手に通じない文の引用を返す",
       "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
     },
     {
@@ -5400,13 +5400,13 @@
     {
       "term": "判断開始の値",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 250,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
+      "meaning": "これ以上になったら hook（guard `context-limit`）が conductor に利用者の入力ごとに 1 度知らせ、conductor が次の切りどころで引継ぎ文書を書いて切る文脈の量（既定 450,000。上限の設定の `context.decide-from`）。工程の途中の Tool は止めない",
       "source": "docs/specifications/ndf-context-thresholds.md"
     },
     {
       "term": "運用上限",
       "context": "ndf-context",
-      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 500,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
+      "meaning": "これ以上になったら hook が引継ぎに要る呼び出しを除く Tool の呼び出しを止め続け、中継のラッパーが子に引継ぎを頼む文脈の量（既定 600,000。上限の設定の `context.limit`。`NDF_CONTEXT_LIMIT` で替える）。判断開始の値と組で 1 通りに働き、方針の名前を持たない",
       "source": "docs/specifications/ndf-context-thresholds.md",
       "deprecated": [
         "再起動の方針",
@@ -7531,7 +7531,7 @@
     {
       "term": "子の表",
       "context": "ndf-rebuild",
-      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`）",
+      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・サブパッケージ・先に要る子・順番・レーン・閉じたかで持ち、共有の表の書き込み元も持つ表（`plugins/ndf/src/ndf/checks/children.json`）。この表が SSOT である",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {

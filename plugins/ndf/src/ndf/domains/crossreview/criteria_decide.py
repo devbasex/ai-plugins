@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import contracts
-from ndf.contracts import facts
+from ndf.contracts import facts, writing
 from ndf.contracts.result import SEVERITIES
 from ndf.domains.records.mvv_decide import State
 
@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 TABLE = "data/review-criteria.json"
 # 読む設定のバージョン
 DECL_VERSION = 1
+# 文書の基準を足す指示の相手
+REVIEWER, FIXER = "reviewer", "fixer"
 # 修正担当の会話を保存するかのキー（#4013）
 FIXER_SESSIONS = "fixer_sessions"
 # 必ず人の承認が要る操作の番号（`P1`・`C7`。MVV の項目の `Value 5`・`Vision` と見分ける）
@@ -231,3 +233,28 @@ def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[st
         t["out_of_scope"],
         *_mvv_lines("fixer", mvv),
     ]
+
+
+class Previous(NamedTuple):
+    """今回の相手役の全員が読んだ前のラウンド。`head` はその head、`diff` は `head` から今の head までの差分のファイル。"""
+
+    head: str
+    diff: Path
+
+
+def document_block(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]:
+    """文書を含む PR（`documents`）の指示に足す「文書の指摘の基準」のセクション（#4285 の決定 4〜6）。含まなければ空。
+
+    `role` は `REVIEWER`（相手役）か `FIXER`（修正担当）。`previous` は今回の相手役の全員が読んだ
+    前のラウンドで、比較元に使える前のラウンドが無ければ None。基準の本文を読めなければ `writing.CriteriaBroken`。"""
+    if not documents:
+        return []
+    doc = _table()["document"]
+    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", f"{doc['number']}. {doc['text']}"]
+    if role == REVIEWER:
+        lines += doc["fields"]
+        if previous is not None:
+            lines.append(doc["since"].format(since=previous.head, diff=previous.diff))
+    else:
+        lines.append(doc["fixer"])
+    return [*lines, writing.criteria().rstrip()]
