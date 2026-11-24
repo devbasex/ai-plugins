@@ -7,7 +7,9 @@ from ndf.domains.hooks.verdict import Verdict, advise
 
 
 def check(ctx, svc) -> Verdict | None:
-    errors = budget.check_budget(budget.registrations_of(tables.PLUGIN_ROOT))
+    # 起床の hook の行は検査しない（#4068）。その予算と `cache.wake` は使う時点のラッパーの起動（`registration.rewake_unreachable`）と
+    # `ndf hooks check-budget` が読む。SessionStart の 1 起動で読む方針を増やさない（test_budget の読む方針の数）
+    errors = budget.check_budget(budget.registrations_of(tables.PLUGIN_ROOT, rewake=False))
     if not errors:
         return None
     return advise(

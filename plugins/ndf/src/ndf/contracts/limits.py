@@ -63,6 +63,13 @@ class Policy(NamedTuple):
     retries: Optional[int] = None
     max_bytes: Optional[int] = None
     peers: Optional[dict[str, int]] = None
+    # プロンプトのキャッシュの起床（`cache.*`。#4068）だけが持つ値
+    ratios: Optional[dict[str, float]] = None
+    default: Optional[float] = None
+    ratio: Optional[float] = None
+    versions: Optional[tuple[str, ...]] = None
+    calls: Optional[int] = None
+    start: Optional[int] = None
     # 読み手の指定: 方針を引くモジュールの名前（規則 `limit-readers` が実際の読み手と突き合わせる。値として引かない）
     read_by: tuple[str, ...] = ()
 
@@ -70,6 +77,8 @@ class Policy(NamedTuple):
 # 方針の数の値の名前（型が数の Policy の項目）。数でない値（判定のモデル・ランタイム・文字列の並び・送信先の確かめ・相手ごとの
 # 上限）は `value` で引かず、判定の子・hook の表・見本の突き合わせが項目から読む
 VALUE_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t in (Optional[int], Optional[float]))
+# 方針の文字列の並びの名前（型が文字列の tuple の Policy の項目。`texts` で引く）
+TEXT_KEYS = tuple(f for f, t in get_type_hints(Policy).items() if t == Optional[tuple[str, ...]])
 
 
 def validate(raw: dict[str, Any]) -> dict[str, Policy]:
@@ -81,7 +90,12 @@ def validate(raw: dict[str, Any]) -> dict[str, Policy]:
     ]
     if errs:
         raise LimitsError(f"上限の設定 {NDF_SETTINGS} の形が違う: {'; '.join(errs)}")
-    return {name: Policy(name=name, **{**row, "read_by": tuple(row["read_by"])}) for name, row in raw.items()}
+    return {name: Policy(name=name, **{**row, **_tuples(row)}) for name, row in raw.items()}
+
+
+def _tuples(row: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """配列で書く文字列の並び（`read_by` と `TEXT_KEYS`）を tuple にする。"""
+    return {k: tuple(row[k]) for k in ("read_by", *TEXT_KEYS) if k in row}
 
 
 @contracts.cached_reader
@@ -111,10 +125,18 @@ def policy(name: str) -> Policy:
 
 
 def value(name: str, key: str) -> float:
-    """方針の 1 つの値。方針にその値が無ければ `LimitsError`。"""
+    """方針の 1 つの数の値。方針にその値が無い・数でない（`ratios`・`versions`）なら `LimitsError`。"""
     got = getattr(policy(name), key) if key in VALUE_KEYS else None
     if got is None:
         raise LimitsError(f"上限の設定の方針 {name} に {key} が無い")
+    return got
+
+
+def texts(name: str, key: str) -> tuple[str, ...]:
+    """方針の文字列の並び（`versions`）。方針にその値が無い・文字列の並びでなければ `LimitsError`。"""
+    got = getattr(policy(name), key) if key in TEXT_KEYS else None
+    if got is None:
+        raise LimitsError(f"上限の設定の方針 {name} に文字列の並びの {key} が無い")
     return got
 
 

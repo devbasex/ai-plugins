@@ -79,6 +79,7 @@
       {"name": "ndf.core.durable_locks.PG_HEARTBEAT_SECONDS", "kind": "implementation", "reason": "ロックを持つ接続が idle_session_timeout（PG_IDLE_SESSION_MS）に切られないよう打つ問い合わせの間隔。接続の設定と組で決まる"},
       {"name": "ndf.domains.records.mvv.COMPARE_FILES_CAP", "kind": "external", "reason": "GitHub の比較の API が files を返す上限の件数（GitHub REST API の仕様）"},
       {"name": "ndf.domains.relay.account_login.POLL_INTERVAL", "kind": "implementation", "reason": "ログインの締め切りまで条件を見直す間隔。プロセスを止める猶予の方針とは別の事実で、値が同じなのは偶然"},
+      {"name": "ndf.domains.relay.keep_cache.MAX_CHECKS", "kind": "implementation", "reason": "眠る hook 1 つが 1 回の眠りで世代を確かめる回数の守り（#4068）。利用者が設定した間隔の値を拒む境で、上限の設定の値ではない"},
       {"name": "ndf.domains.release.land.QUEUE_POLL_SECONDS", "kind": "implementation", "reason": "マージキューの PR を読み直す間隔。待ちの上限は別に持ち、間隔は問い合わせの都合で決めた"},
       {"name": "ndf.domains.statusline.settings.REFRESH_INTERVAL", "kind": "implementation", "reason": "statusLine の設定へ書く再描画の間隔。表示の都合で決めた"},
       {"name": "ndf.domains.worktree.guard_decide.MAX_LISTED", "kind": "implementation", "reason": "案内の文に並べるパスの件数。表示の都合で決めた"},
@@ -166,6 +167,7 @@
       "ndf.contracts.limits.policy": {"arg": "name", "index": 0},
       "ndf.contracts.limits.value": {"arg": "name", "index": 0},
       "ndf.contracts.limits.seconds": {"arg": "name", "index": 0},
+      "ndf.contracts.limits.texts": {"arg": "name", "index": 0},
       "ndf.contracts.limits.scaled": {"arg": "name", "index": 0},
       "ndf.contracts.limits.from_env": {"arg": "policy_name", "index": 2},
       "ndf.domains.hooks.tables.policy_value": {"arg": "name", "index": 0},
@@ -180,6 +182,7 @@
       "ndf.domains.gws.call": {"arg": "limit_name", "index": 1},
       "ndf.domains.records.gws.auth_status": {"arg": "limit", "index": 0},
       "ndf.domains.relay.context_thresholds.thresholds.value": {"arg": "name", "index": 0},
+      "ndf.domains.relay.keep_cache.ratios.get": {"arg": "name", "index": 0},
       "ndf.process_group._grace": {"arg": "grace_key", "index": 0},
       "ndf.process_group.stop_group": {"arg": "grace_key", "index": 1},
       "ndf.process_group.stop_detached_group": {"arg": "grace_key", "index": 1},
@@ -196,6 +199,7 @@
       {"at": "ndf.contracts.causes.policy_of", "expr": "row(kind).retry", "template": "{}", "vocabulary": "causes#/*/retry", "reason": "停止理由の表の行が指す再試行の方針を引く"},
       {"at": "ndf.domains.crossrefactor.launch.phase_limit", "expr": "f\"monitor.phase.{phase}\"", "template": "monitor.phase.{}", "vocabulary": "domains/loop-phases.json#/rows/*/id", "reason": "工程の監視の上限を、工程の名前から引く"},
       {"at": "ndf.domains.hooks.budget._budget_policy", "expr": "f\"hook.budget.{spec['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/*/events/*/budget", "reason": "事象の予算を、ランタイムのコントラクト表の予算のキーから引く"},
+      {"at": "ndf.domains.hooks.budget.rewake_budget", "expr": "f\"hook.budget.{spec['async_rewake']['budget']}\"", "template": "hook.budget.{}", "vocabulary": "hooks/runtimes.json#/runtimes/claude/events/Stop/async_rewake/budget", "reason": "バックグラウンドの登録の予算を、ランタイムのコントラクト表の async_rewake の予算のキーから引く"},
       {"at": "ndf.domains.hooks.budget._pair_errors", "expr": "guard['limits']", "template": "{}", "vocabulary": "hooks/guards.json#/guards/*/limits/*", "reason": "guard の部品の上限を予算と比べる"}
     ]
   },

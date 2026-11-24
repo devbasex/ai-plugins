@@ -1,0 +1,9 @@
+{
+  "summary": "裏の作業を待つ子のキャッシュを起床させる時点の余白（秒。1 時間の寿命からこの秒を引いた時点で起床させる）と、眠る hook が世代を確かめる間隔（秒）",
+  "seconds": 600,
+  "interval": 60,
+  "read_by": [
+    "ndf.domains.hooks.budget",
+    "ndf.domains.relay.keep_cache"
+  ]
+}
