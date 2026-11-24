@@ -120,6 +120,10 @@ class Scope:
     def rel(self, path: Path) -> str:
         return path.relative_to(self.repo_root).as_posix()
 
+    def _in_repo(self, path: Path) -> bool:
+        """シンボリックリンクを解いた先がリポジトリの中か。"""
+        return path.resolve().is_relative_to(self.repo_root.resolve())
+
     def repo_files(self, glob: str) -> list[Path]:
         """`repo_root` からの相対のグロブに当たるファイル（プラグインの外も引ける）。並びは昇順。
 
@@ -149,14 +153,13 @@ class Scope:
         """
         if top.is_relative_to(self.plugin_root):
             return [s for s in self.python() if s.path.is_relative_to(top)]
-        root = self.repo_root.resolve()
-        if not top.resolve().is_relative_to(root):
+        if not self._in_repo(top):
             return []
         found = [s for s in self.python() if s.path.is_relative_to(top)]
         for path in walk(top):
             if path.suffix != ".py" or path.is_relative_to(self.plugin_root):
                 continue
-            if path.resolve().is_relative_to(root) and path.is_file():
+            if self._in_repo(path) and path.is_file():
                 found.append(_parsed(Source(path, self.rel(path))))
         return found
 
