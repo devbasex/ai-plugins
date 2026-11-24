@@ -282,3 +282,42 @@ def test_the_prompt_takes_no_background(change: dict) -> None:
     """受け入れ条件 12: 文書を作った経緯を渡す引数が無い。"""
     with pytest.raises(reading.ReadingInvalid):
         reading.prompt({"files": ["a.md"], "reader": READER, "questions_kind": "none", **change})
+
+
+@pytest.mark.parametrize(
+    ("change", "named"),
+    [
+        *(({"files": files}, "files") for files in ("a.md", ("a.md",), None, [""], [" \n"], ["a.md", ""], [1], [None])),
+        *(({"reader": reader}, "reader") for reader in (None, "承認する人", list(READER), {})),
+        *(({"reader": {**READER, key: value}}, "reader") for key in READER for value in ("", " \n", None, 1, ["語"])),
+        *(({"questions_kind": kind}, "questions_kind") for kind in ("", "None", "design ", None, 1, [], ["design"], {})),
+        ({"files": [], "reader": {}, "questions_kind": ""}, "files"),
+        ({"reader": {}, "questions_kind": ""}, "reader"),
+        ({"files": [], "reader": {}, "questions_kind": "", "background": ""}, "入力"),
+    ],
+)
+def test_the_prompt_names_the_first_wrong_input(change: dict, named: str) -> None:
+    """値の型と空白だけの文字列まで見て、キー・files・reader・questions_kind の順で最初の違いを知らせる。"""
+    with pytest.raises(reading.ReadingInvalid) as caught:
+        reading.prompt({"files": ["a.md"], "reader": READER, "questions_kind": "none", **change})
+    assert str(caught.value).startswith((f"{named} は", f"{named}は"))
+
+
+@pytest.mark.parametrize("kind", sorted(reading.RESTATE))
+def test_the_prompt_differs_only_by_the_restate_question(kind: str) -> None:
+    """文書の種類で変わるのは、足す質問だけ。none は質問の所に何も足さない。"""
+    entry = {"files": ["a.md", "b.md"], "reader": READER}
+    with_question = reading.prompt({**entry, "questions_kind": kind})
+    assert with_question.count(reading.RESTATE[kind]) == 1
+    assert with_question.replace(reading.RESTATE[kind], "") == reading.prompt({**entry, "questions_kind": "none"})
+
+
+def test_the_prompt_keeps_the_given_text_and_order() -> None:
+    """ファイルの順はそのまま、読み手の順は READER の順。前後の空白を削らず、入力を変えない。"""
+    entry = {"files": [" b.md ", "a.md"], "reader": {key: f" {key} の説明 " for key in reversed(READER)}, "questions_kind": "none"}
+    before = json.loads(json.dumps(entry))
+    lines = reading.prompt(entry).splitlines()
+    assert lines[lines.index("-  b.md ") + 1] == "- a.md"
+    first = next(i for i, line in enumerate(lines) if line.endswith(" position の説明 "))
+    assert lines[first : first + 3] == [f"- {label}:  {key} の説明 " for key, label in reading.READER.items()]
+    assert entry == before
