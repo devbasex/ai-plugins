@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import llm, publish
+from ndf.adapters import llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.contracts import limits
-from ndf.domains.records import files, jsonfile, mvv, preflight
+from ndf.contracts import internal, limits
+from ndf.domains.records import files, jsonfile, jsonl, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
@@ -102,6 +102,39 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
     if len(opened) > 1:
         raise GateError(f"ブランチ {branch} の開いた PR が複数あり、判定する PR を 1 つに決められない")
     return opened[0].number
+
+
+def _repo_of(where: Mapping[str, Any]) -> Optional[str]:
+    root = where.get("root")
+    if root is None:
+        return None
+    try:
+        return mvv.repo_key(Path(root))
+    except mvv.MvvError:  # noqa: NDF401 外部コマンド: メインディレクトリを解けなければ、診断の記録の repo を null にして書く
+        return None
+
+
+def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) -> str:
+    """失敗の原因を、PR のコメントと承認資料へ載せてよい文（「<定型文>（診断の記録 <id>）」）に変える（#3959）。
+
+    例外の文は返す文に入れない。例外の文には手元のパス・社内の Git ホスト名・他のリポジトリへの参照が入りえ、伏せる処理は
+    形の決まらない値を見分けないためである。全文は秘密の値だけを伏せて手元の診断の記録（`mvv.record_failure`）へ書く。
+    `where` の `gate`・`pr`・`head` を記録に写し（無ければ null）、`root` があれば記録の `repo` を解く。記録に書けなくても例外を
+    出さず「<定型文>（診断の記録に書けない）」を返す。GitHub も公開範囲の照会も呼ばない。
+    """
+    text = mm.STOP_REASONS[kind]
+    row = {
+        "at": jsonl.now(),
+        "repo": _repo_of(where),
+        **{k: where.get(k) for k in ("gate", "pr", "head")},
+        "kind": kind,
+        "cause": run_log.redact(str(exc)),
+    }
+    try:
+        ident = mvv.record_failure(row)
+    except (OSError, internal.InternalError):
+        return f"{text}（診断の記録に書けない）"
+    return f"{text}（診断の記録 {ident}）"
 
 
 def judge_with(ask: Ask) -> mvv.Judge:

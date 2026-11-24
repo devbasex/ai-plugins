@@ -108,11 +108,82 @@ def test_a_longer_repo_name_is_not_taken_for_its_prefix() -> None:
     assert publish.repo_refs(f"https://github.com/{PRIVATE_REPO}.github を見た") == {f"{PRIVATE_REPO}.github"}
 
 
-def test_private_refs_are_dropped_before_secrets_are_masked(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 秘密の伏せ字が URL の利用者の部分を書き換えても、非公開の参照は原文から先に落ちている
-    monkeypatch.setattr(publish.run_log, "redact", lambda t: t.replace("git@", "[REDACTED]@"))
+def test_a_private_ssh_url_is_dropped_whole_as_a_reference() -> None:
+    # 秘密の範囲も参照の範囲も原文の上で求めるので、SSH の URL の参照は原文のまま一致して伏せる
     got = publish.scrub(f"ssh://git@github.com/{PRIVATE_REPO}.git を見た", True, {PRIVATE_REPO})
     assert got.text == f"{publish.PRIVATE_REF_TEXT} を見た" and got.dropped == {"private_ref": 1}
+
+
+@pytest.mark.parametrize("public", [True, False])
+def test_a_secret_crossing_the_end_of_a_reference_leaves_no_fragment(monkeypatch: pytest.MonkeyPatch, public: bool) -> None:
+    # #3959 Task 9: 秘密の前半が参照の中、後半が参照の外にあっても、秘密のどの断片も残さない
+    secret = "zz-secret-tail-9876"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    text = f"見た: https://github.com/{PRIVATE_REPO}/issues/1{secret} の件"
+    got = publish.scrub(text, public, {PRIVATE_REPO})
+    assert all(secret[i : i + 4] not in got.text for i in range(len(secret) - 3))
+    assert got.dropped.get("secret") == 1 and PRIVATE_REPO not in got.text
+
+
+@pytest.mark.parametrize("public", [True, False])
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://x-access-token:{TOKEN}@github.com/{PRIVATE_REPO}.git",
+        f"https://***@github.com/{PRIVATE_REPO}",
+        f"https://git@github.com/{PUBLIC_REPO}",
+    ],
+)
+def test_a_url_with_credentials_is_masked_whole_on_any_target(url: str, public: bool) -> None:
+    # 認証情報の付いた URL は、書き先の公開範囲によらず、所有者名とリポジトリ名を含む URL の全体を秘密の伏せ字にする
+    got = publish.scrub(f"取得元: {url} だった", public, set())
+    assert got.text == f"取得元: {publish.run_log.MASK} だった" and got.dropped == {"secret": 1}
+
+
+def test_the_public_ssh_url_keeps_its_owner_and_repo() -> None:
+    # 固定の SSH の利用者名 git@ は秘密でない。公開のリポジトリの SSH の URL は今どおり残す
+    text = f"ssh://git@github.com/{PUBLIC_REPO}.git"
+    assert publish.scrub(text, True, set()) == (text, {})
+    assert publish.repo_refs(text) == {PUBLIC_REPO}
+
+
+class StubHub:
+    """公開範囲の照会（`visibilities`）と書き込み（`rest`）の引数を残す偽物。HTTP の層を通さない。"""
+
+    def __init__(self, repo: str, visibility: dict[str, str]) -> None:
+        self.repo, self.visibility = repo, visibility
+        self.asked: list[list[str]] = []
+        self.writes: list[dict] = []
+
+    def visibilities(self, repos) -> dict[str, str]:
+        self.asked.append(sorted(repos))
+        return {r: self.visibility.get(r, "UNKNOWN") for r in repos}
+
+    def rest(self, method: str, path: str, payload: dict) -> dict:
+        self.writes.append(payload)
+        return {"number": 9, "html_url": "https://github.com/x/y/issues/9"}
+
+
+def test_references_overlapping_secrets_are_not_looked_up_and_are_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 秘密を含む参照は公開範囲の照会へ送らない。照会するのは秘密と重ならない参照だけ
+    secret = "zz-owner-secret-42"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    stub = StubHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", "other/public": "PUBLIC"})
+    body = (
+        f"{secret}/repo#1 と ssh://{secret}@github.com/{PUBLIC_REPO} と https://x-access-token:{TOKEN}@github.com/acme/hidden.git"
+        " と ssh://git@github.com/other/public.git"
+    )
+    publish.Publisher(stub, ACCOUNTS).comment(4, body)  # type: ignore[arg-type]
+    sent = stub.writes[0]["body"]
+    assert secret not in sent and TOKEN not in sent and "acme/hidden" not in sent and "ssh://git@github.com/other/public.git" in sent
+    assert stub.asked == [[PUBLIC_REPO], ["other/public"]]
+
+
+def test_assume_public_scrubs_without_reading_the_target_visibility() -> None:
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PRIVATE"})
+    (text,), dropped = publish.Publisher(stub, ACCOUNTS).guarded("/home/alice-local と alice@example.co.jp", assume_public=True)  # type: ignore[arg-type]
+    assert text == f"{publish.HOME_TEXT} と {publish.EMAIL_TEXT}" and dropped == {"home": 1, "email": 1}
+    assert stub.asked == []
 
 
 def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:

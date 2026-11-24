@@ -287,3 +287,33 @@ def test_redact_hides_dict_keys_bytes_and_non_json_values(monkeypatch):
     assert token not in json.dumps(got) and "s3cr3t-value-123" not in json.dumps(got)
     assert got["keep"] == [3, 1.5, True, None]
     assert got["raw"] == "use " + run_log.MASK and got[run_log.MASK] == 1
+
+
+SECRET = "s3cr3t-value-123"
+
+
+def test_secret_spans_are_the_ranges_redact_replaces(monkeypatch):
+    # #3959 Task 9: 秘密の一致範囲を原文の上で求め、redact はその範囲を伏せ字にする
+    monkeypatch.setenv("NDF_TEST_TOKEN", SECRET)
+    text = f"a {SECRET} b https://user:pa55@github.com/o/r Authorization: Bearer x.y"
+    spans = run_log.secret_spans(text)
+    assert [text[s:e] for s, e in spans] == [SECRET, "user:pa55", "Bearer x.y"]
+    assert run_log.redact(text) == f"a {run_log.MASK} b https://{run_log.MASK}@github.com/o/r Authorization: {run_log.MASK}"
+
+
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        ("ssh://git@github.com/o/r.git", True),
+        ("ssh://git@github.com:22/o/r.git", True),
+        ("https://git@github.com/o/r", False),
+        ("ssh://git@github.com.example/o/r", False),
+        ("ssh://git:pw@github.com/o/r", False),
+        ("ssh://deploy@github.com/o/r", False),
+        ("xssh://git@github.com/o/r", False),
+    ],
+)
+def test_only_the_fixed_ssh_user_of_github_is_not_a_secret(text, kept):
+    # スキームが ssh・利用者名が git・ホストが github.com の 3 つがそろうときだけ、利用者名を秘密に数えない
+    assert (run_log.secret_spans(text) == []) is kept
+    assert (run_log.redact(text) == text) is kept

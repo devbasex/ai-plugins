@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -360,6 +361,16 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     rows = [{"at": at, "kind": kind, "mvv_version": got, "repo": repo, **pair} for kind in kinds]
     path = record_path("mvv-signals")
     return [jsonl.append_locked(path, row, kind="mvv-signals") for row in rows]
+
+
+def record_failure(row: Mapping[str, Any]) -> str:
+    """失敗の診断の記録（表 ndf-files の mvv-gate-failures）へ 1 行足し、行の識別子を返す。書けなければ例外をそのまま投げる。
+
+    識別子は乱数で、PR の値も例外の文も含まない（PR のコメントと承認資料はこの識別子で記録を指す。#3959）。
+    """
+    ident = secrets.token_hex(8)
+    jsonl.append_locked(record_path("mvv-gate-failures"), {**row, "id": ident}, kind="mvv-gate-failure")
+    return ident
 
 
 def record_key(text: str) -> str:

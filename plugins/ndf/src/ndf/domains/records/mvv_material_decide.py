@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
+from ndf import contracts
 from ndf.progress.gate.checks import Changed, MvvFacts, sections
 
 # ステップの結果の区分（「テスト」のセクションの列）
@@ -25,6 +26,9 @@ RESPONSE_SECTION = "出し直しの指摘への対応"
 _CLAIMED = re.compile(r"「([^」]+)」のセクションに(?:記載|追記|足)した")
 # 出力を材料に載せる上限の行数（長い出力は末尾を残す）
 OUTPUT_LINES = 20
+# 失敗の種類 → PR のコメントと承認資料へ載せてよい定型文（contracts/data/mvv-stop-reasons.json。#3959）。例外の全文は手元の
+# 診断の記録（mvv-gate-failures.jsonl）にだけ残し、文には記録の識別子を添える（mvv_gate.failure_text）
+STOP_REASONS: dict[str, str] = contracts.load_json("data/mvv-stop-reasons.json")["reasons"]
 
 
 @dataclass(frozen=True)

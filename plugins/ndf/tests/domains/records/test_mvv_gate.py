@@ -514,3 +514,49 @@ def test_the_design_pr_is_the_open_pr_of_the_worktree_branch_in_this_repository(
     twice = {**case, "pulls": [mine, SimpleNamespace(number=6, state="open", cross_repository=False)]}
     with pytest.raises(mvv_gate.GateError, match="複数"):
         mvv_gate.pr_number(repo, "design", _plan_inputs(repo), Hub(5, twice))
+
+
+# --- #3959 Task 9: 失敗の原因を定型文と手元の診断の記録に分ける ---
+
+HOST = "git.corp-internal.example.jp"
+
+
+def _failures() -> list[dict[str, Any]]:
+    rows, broken = jsonl.read_rows(mvv.record_path("mvv-gate-failures"), kind="mvv-gate-failure")
+    assert not broken
+    return rows
+
+
+def test_failure_text_keeps_the_exception_only_in_the_local_record(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NDF_TEST_TOKEN", "zz-fake-secret-77")
+    exc = git.GitError(f"fetch https://x-access-token:zz-fake-secret-77@{HOST}/team/repo.git に失敗した")
+    got = mvv_gate.failure_text("base_unreadable", exc, {"gate": "design", "pr": 5, "root": repo})
+    (row,) = _failures()
+    assert got == f"{mm.STOP_REASONS['base_unreadable']}（診断の記録 {row['id']}）"
+    assert HOST not in got and "team/repo" not in got and "zz-fake" not in got
+    assert (row["kind"], row["gate"], row["pr"], row["head"], row["repo"]) == ("base_unreadable", "design", 5, None, mvv.repo_key(repo))
+    assert HOST in row["cause"] and "zz-fake-secret-77" not in row["cause"]
+
+
+def test_failure_text_writes_a_new_row_each_time_and_keeps_an_empty_cause(repo: Path) -> None:
+    first = mvv_gate.failure_text("llm_no_answer", "", {"gate": "release"})
+    second = mvv_gate.failure_text("llm_no_answer", "", {"gate": "release"})
+    rows = _failures()
+    assert first != second and [r["cause"] for r in rows] == ["", ""] and len({r["id"] for r in rows}) == 2
+
+
+def test_failure_text_does_not_raise_when_the_record_cannot_be_written(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.write_text("ファイルなのでディレクトリにできない")
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(blocked / "state"))
+    got = mvv_gate.failure_text("diff_unreadable", OSError(f"/home/someone/{HOST}"), {})
+    assert got == f"{mm.STOP_REASONS['diff_unreadable']}（診断の記録に書けない）"
+
+
+def test_every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr() -> None:
+    assert set(mm.STOP_REASONS) == {
+        "no_gate", "no_pr", "mvv_unapproved", "base_unreadable", "diff_unreadable", "pr_moved", "pr_reread_failed",
+        "incomplete_patches", "llm_no_answer", "records_unreadable", "records_unwritable", "note_unwritten",
+        "cite_precondition", "cite_lookup_failed",
+    }  # fmt: skip
+    assert all(text and "{" not in text for text in mm.STOP_REASONS.values())
