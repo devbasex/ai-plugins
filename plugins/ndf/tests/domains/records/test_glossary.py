@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.contracts import limits
 from ndf.domains.records import glossary
 from ndf.domains.records import glossary_decide as gd
 
@@ -103,7 +104,7 @@ def test_layout_reports_unreadable_json_and_a_ndf_settings_without_source_or_doc
 
 def test_layout_falls_back_to_the_defaults_for_a_non_int_max_lines(tmp_path: Path) -> None:
     root = _decl_only(tmp_path, json.dumps({"source": "glossary.json", "document": "docs/g.md", "max_lines": "9"}).encode("utf-8"))
-    assert glossary.layout(root) == gd.Layout("glossary.json", "docs/g.md", "docs/g", glossary.DEFAULT_MAX_LINES)
+    assert glossary.layout(root) == gd.Layout("glossary.json", "docs/g.md", "docs/g", int(limits.value(glossary.MAX_LINES, "count")))
 
 
 def test_load_reports_a_missing_or_malformed_source(tmp_path: Path) -> None:

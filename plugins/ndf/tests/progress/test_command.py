@@ -488,7 +488,7 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     root = command.store_root_of(repo)
     with store.open_store(store.default_url(root), root) as st, pytest.raises(store.Conflict):
         command._append(st, tid, build)
-    assert calls["n"] == command.APPEND_ATTEMPTS and len(builds) == command.APPEND_ATTEMPTS
+    assert calls["n"] == command.append_attempts() and len(builds) == command.append_attempts()
 
 
 def _git(repo: Path, *args: str) -> None:

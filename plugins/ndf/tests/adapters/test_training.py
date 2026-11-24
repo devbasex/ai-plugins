@@ -9,7 +9,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from ndf.adapters import agents, claude, llm, training
+from ndf.adapters import agents, claude, training
+from ndf.contracts import causes, facts
 
 TOKEN = "oauth-token-value-123456"
 NOW = time.time()
@@ -257,10 +258,9 @@ def test_run_agent_refuses_codex_without_cache(marker_launch, monkeypatch):
     assert not marker.exists()
 
 
-def test_judge_maps_every_failure_to_a_cause():
-    assert set(llm.FAILURE_CAUSES) == set(claude.Failure)
-    assert llm.FAILURE_CAUSES[claude.Failure.REFUSED] == "precondition"
-    assert llm.FAILURE_CAUSES[claude.Failure.NO_SLOT] == "infra_wait"
+@pytest.mark.parametrize("column", ["judge_cause", "work_cause", "skill_cause"])
+def test_every_failure_has_a_cause_in_the_causes_table(column):
+    assert set(facts.column(claude.FAILURES, column).values()) <= set(causes.table())
 
 
 def test_main_rejects_unknown_runtime(capsys):

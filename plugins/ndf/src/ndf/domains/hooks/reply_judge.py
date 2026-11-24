@@ -39,8 +39,8 @@ THINKING_OFF = {"MAX_THINKING_TOKENS": "0"}
 REST_NAME = "judge-rest.json"
 # 休みのマーカーの更新を直列にする錠のファイルの名前（`.` で始まる名前は `metrics.prune_state` が消さない）
 REST_LOCK_NAME = ".judge-rest.lock"
-# 組へ SIGTERM を送った後、SIGKILL までに待つ秒
-GROUP_GRACE = 0.2
+# 組へ SIGTERM を送った後、SIGKILL までに待つ秒の方針（contracts/limits.json）
+KILL_GRACE = "hook.stop-wait.kill-grace"
 # 子の標準出力を 1 回に読む上限のバイト数
 READ_CHUNK = 65536
 # 子の標準入力へ 1 回に書くバイト数（書ける状態と分かった後なら止まらない上限）
@@ -70,6 +70,11 @@ class Judged(NamedTuple):
 def judge_setting(key: str) -> Any:
     """判定の設定（`limits.json` の `hook.stop-wait.judge`）の 1 つの値。"""
     return tables.policy_value("hook.stop-wait.judge", key)
+
+
+def kill_grace() -> float:
+    """組へ SIGTERM を送った後、SIGKILL までに待つ秒。"""
+    return tables.policy_value(KILL_GRACE, "seconds")
 
 
 def judge_text(text: str, code_lines: list[bool], max_chars: int, keep: Sequence[str] = ()) -> str:
@@ -243,14 +248,14 @@ def _stop_group(proc: Any, killpg: Callable[[int, int], None], gentle: bool) -> 
     """組を止めてから組のリーダー（判定の子）を回収する。
 
     リーダーを回収するまでは組の番号が再利用されないので、組への送信は必ず回収の前に済ませる。リーダーが先に
-    終わっても組に `claude` が残りうるため、`gentle` なら SIGTERM の後に `GROUP_GRACE` 秒おき、どの経路でも
+    終わっても組に `claude` が残りうるため、`gentle` なら SIGTERM の後に `KILL_GRACE` の秒だけおき、どの経路でも
     最後に組へ SIGKILL を送ってから回収する。
     """
     try:
         try:
             if gentle:
                 _signal_group(proc.pid, signal.SIGTERM, killpg)
-                _pause(GROUP_GRACE)
+                _pause(kill_grace())
         finally:
             # 猶予の待ちが締め切りの SIGALRM などで破られても、SIGKILL を送ってから回収する
             _signal_group(proc.pid, signal.SIGKILL, killpg)

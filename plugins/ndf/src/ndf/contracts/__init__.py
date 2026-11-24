@@ -67,17 +67,22 @@ def _refuse_duplicate_keys(pairs: list) -> dict:
 
 def load_json(rel: str) -> Any:
     """`contracts/<rel>` を読む。同じキーが 2 つあれば断る（後の値で黙って上書きしない）。"""
-    return read_text_json(_dir / rel)[1]
+    return read_json(_dir / rel)
 
 
-def read_text_json(path: Path) -> tuple[str, Any]:
-    """コントラクトのファイルの本文と値。断るものは `load_json` と同じ（検査が、保存先の外の表を同じ規則で読む）。"""
+def read_json(path: Path) -> Any:
+    """コントラクトのファイル 1 本の値。断るものは `load_json` と同じ。"""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ContractError(f"コントラクト {path} を読めない: {exc.strerror or exc}") from None
+    return parse_json(path, text)
+
+
+def parse_json(path: Path, text: str) -> Any:
+    """コントラクトのファイルの本文 `text` の値。断るものは `load_json` と同じ（検査が、読み込み済みの本文を同じ規則で読む）。"""
     try:
-        return text, json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
+        return json.loads(text, object_pairs_hook=_refuse_duplicate_keys)
     except ContractError as exc:
         raise ContractError(f"コントラクト {path}: {exc}") from None
     except ValueError as exc:

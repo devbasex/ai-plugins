@@ -687,7 +687,7 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     calls, builds[:] = conflicts(None), []
     with pytest.raises(store.Conflict):
         run.append(st, tid, lambda v: builds.append(v) or _started(v))
-    assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
+    assert calls["n"] == command.append_attempts() and len(builds) == command.append_attempts()
 
 
 def test_append_runs_after_in_the_same_transaction_and_a_failure_rolls_the_append_back(repo, st, capsys):

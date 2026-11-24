@@ -369,7 +369,7 @@ def test_estimate_counts_samples_and_needs_three(tmp_path):
 def test_calibrate_writes_estimates_and_keeps_old_on_failure(tmp_path, monkeypatch):
     env = {"NDF_CONTEXT_DIR": str(tmp_path)}
     monkeypatch.setattr(context_records, "repo_key", lambda root: "o__r")
-    body = context_records.calibrate(None, 30, 0.0, env)
+    body, _ = context_records.calibrate(None, 30, 0.0, env)
     path = context_records.estimates_path("o__r", env)
     assert json.loads(path.read_text(encoding="utf-8"))["samples"] == body["samples"]
     path.parent.chmod(0o500)
@@ -542,6 +542,16 @@ def test_report_parts_of_old_rows_only(tmp_path):
     assert got["auto_compacts"] == 1
 
 
+def test_calibrate_reports_the_rows_it_skipped(tmp_path, monkeypatch, capsys, last_result):
+    monkeypatch.setenv("NDF_CONTEXT_DIR", str(tmp_path))
+    monkeypatch.setattr(context_records, "toplevel", lambda cwd: None)
+    path = context_records.decisions_path(context_records.LOCAL, {"NDF_CONTEXT_DIR": str(tmp_path)})
+    path.parent.mkdir(parents=True)
+    path.write_text("{}\n[]\n", encoding="utf-8")
+    assert cli.main(["context", "calibrate"]) == 0
+    assert last_result(capsys.readouterr().out)["metrics"] == {"samples": 0, "skipped": 2}
+
+
 def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
     # 方針の列を持つ旧い行だけの記録から較正した見込みを縛る（U2 で新しい行と混ぜても同じであることの基準）
     env = {"NDF_CONTEXT_DIR": str(tmp_path / "ctx")}
@@ -552,7 +562,7 @@ def test_calibrate_estimates_of_old_rows_only(tmp_path, monkeypatch):
         handoff = {"at": "2026-11-15T01:06:00Z", "session_id": f"s{n}", "transcript": t, "event": context_records.MARK_HANDOFF}
         _append_old(restored, env)
         _append_old(handoff, env)
-    body = context_records.calibrate(None, 30, 0.0, env)
+    body, _ = context_records.calibrate(None, 30, 0.0, env)
     assert body["samples"]["restore"] == 3 and body["samples"]["handoff"] == 3
     assert (body["restore_context"], body["restore_calls"]) == (101.0, 1.0)
     assert (body["handoff_calls"], body["handoff_output"]) == (1.0, 10.0)
@@ -615,7 +625,7 @@ def test_calibrate_of_mixed_rows_equals_old_rows_only(tmp_path, monkeypatch):
                 _append_old(handoff, env)
             else:
                 context_records.append("o__r", context_records.record_row(None, "", APPLIED, handoff["event"], None) | handoff, env)
-        body = context_records.calibrate(None, 30, 0.0, env)
+        body, _ = context_records.calibrate(None, 30, 0.0, env)
         body.pop("at")
         bodies.append(body)
     assert bodies[0] == bodies[1]

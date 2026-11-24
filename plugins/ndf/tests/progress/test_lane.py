@@ -230,7 +230,7 @@ def test_answer_without_a_following_next_is_read_as_a_stall(opened):
     _, rows = _rows(opened, pid)
     assert rows["a"][0].awaiting_next
 
-    later = datetime.now(UTC) + timedelta(seconds=plan.ANSWER_NEXT_GRACE_SECONDS + 60)
+    later = datetime.now(UTC) + timedelta(seconds=plan.answer_next_grace() + 60)
     with store.transaction(opened) as conn:
         out = plan.status(conn, pid, later)
     waiting = out["items"][0]["rows"][0]["awaiting_next"]

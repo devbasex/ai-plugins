@@ -2,7 +2,7 @@
 
     ndf check [--only <規則>]... [--write-spec]
 
-`--only` があれば、その規則の指摘だけを違反にする。`--write-spec` があれば、規約の
+`--only` があれば、その規則の指摘だけを違反にする。`--only review-items` だけなら、その規則の入力だけを読み、ほかの規則を当てない。`--write-spec` があれば、規約の
 生成物（コントラクトのページと引数のスキーマ。`spec_docs`）を書いてから検査する。
 結果 JSON（結果のコントラクト `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は停止理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
@@ -101,7 +101,12 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 def select(
     scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
 ) -> list[Finding]:
-    """`only` の規則の指摘だけを返す（無ければすべての規則）。"""
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。
+
+    `review-items` だけなら、その規則だけを当てる（項目の表だけを変えた PR で、全体の検査を打たない）。
+    """
+    if only and set(only) == {spec_docs.REVIEW_ITEMS} and not write_spec:
+        return spec_docs.check_review_items(scope, rules)
     scope.sources = collect(scope.plugin_root, scope.repo_root)
     found = check(scope, rules, write_spec, written)
     return [f for f in found if not only or f.rule in only]

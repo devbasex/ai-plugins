@@ -76,7 +76,7 @@ def test_read_seen_finds_the_request_and_the_answer_without_next(opened):
         lane.start_row(conn, pid, "a", "r1", sid)
         lane.record_answer(conn, sid, {"choice": "approved"})
         key = plan.open_request(conn, pid, {"lane": "a", "kind": "lane_add"}, "レーンを足したい", "organizer")
-    later = datetime.now(UTC) + timedelta(seconds=plan.ANSWER_NEXT_GRACE_SECONDS + 60)
+    later = datetime.now(UTC) + timedelta(seconds=plan.answer_next_grace() + 60)
     with store.transaction(opened) as conn:
         seen = wait.read_seen(conn, pid, after, later)
     assert [n["row_key"] for n in seen.notices] == [key] and seen.stalls == ("a/r1",)

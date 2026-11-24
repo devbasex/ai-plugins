@@ -20,14 +20,15 @@ from typing import Any, Iterator, Optional
 
 from filelock import FileLock, Timeout
 
+from ndf.contracts import limits
 from ndf.domains.worktree import allocations, outcomes, testenv
 from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
 DEFAULT_TTL = "8h"
-# 公開を開く・閉じる操作の排他（割り当て表の隣の保存先）と、その待ちの上限（秒。開く手段の所要を含む）
+# 公開を開く・閉じる操作の排他（割り当て表の隣の保存先）と、その待ちの上限の方針（contracts/limits.json）
 EXPOSE_LOCK = "expose.lock"
-EXPOSE_LOCK_WAIT = 300
+EXPOSE_LOCK_POLICY = "worktree.expose-lock"
 
 
 def _age(stamp: Any) -> Optional[float]:
@@ -109,15 +110,20 @@ def _close(row: dict[str, Any]) -> None:
     row["expose"]["closed_at"] = allocations.now()
 
 
+def expose_lock_seconds() -> float:
+    """公開を開く・閉じる操作の排他を待つ上限の秒。"""
+    return limits.seconds(EXPOSE_LOCK_POLICY)
+
+
 @contextmanager
 def _exposing_lock(t: Target) -> Iterator[None]:
     """公開を開く・閉じる操作の排他（記録の取得から手段の完了まで。開く途中に閉じる側が記録を閉じないように）。"""
     t.book.path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with FileLock(str(t.book.path.parent / EXPOSE_LOCK), timeout=EXPOSE_LOCK_WAIT):
+        with FileLock(str(t.book.path.parent / EXPOSE_LOCK), timeout=expose_lock_seconds()):
             yield
     except Timeout as exc:
-        raise TestenvError(f"拒否: 別の公開操作が {EXPOSE_LOCK_WAIT} 秒を過ぎても終わらない") from exc
+        raise TestenvError(f"拒否: 別の公開操作が {expose_lock_seconds():g} 秒を過ぎても終わらない") from exc
 
 
 def expose(t: Target) -> str:

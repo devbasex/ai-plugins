@@ -16,17 +16,15 @@ from __future__ import annotations
 import ast
 import re
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf import contracts
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope
-from ndf.checks.spec_model import CONTRACTS
+from ndf.checks.model import CONTRACTS, CheckError, Finding, Scope, Source
 from ndf.contracts import limits
 
 RULE = "limit-readers"
@@ -103,14 +101,6 @@ def _filled(template: str, value: str, keys: tuple[str, ...]) -> str:
     return name
 
 
-def _contract(path: Path, unreadable: str) -> tuple[str, Any]:
-    """コントラクトのファイルの本文と値。実行時の読み手と同じく、同じキーが 2 つあれば断る。"""
-    try:
-        return contracts.read_text_json(path)
-    except (contracts.ContractError, UnicodeDecodeError) as exc:
-        raise CheckError(f"{unreadable}: {exc}") from exc
-
-
 def dynamic_names(row: Mapping[str, str], data: Any) -> frozenset[str]:
     """`dynamic` の 1 行が組み立てうる方針の名前。語彙の値のうち文字列でないもの（null など）は名前を作らない。"""
     try:
@@ -126,11 +116,14 @@ def _dynamic(row: Mapping[str, str], data: Any) -> Dynamic:
     return Dynamic(row["at"], expr, shape, dynamic_names(row, data))
 
 
-def settings(rules: dict[str, Any], contracts_dir: Path) -> Settings:
-    """`rules.json` の `limits` を読み、動的な読み口の名前をコントラクトのファイルの語彙から組み立てる（ファイルは 1 回ずつ読む）。"""
+def settings(rules: dict[str, Any], source: Callable[[str], Source]) -> Settings:
+    """`rules.json` の `limits` を読み、動的な読み口の名前をコントラクトのファイルの語彙から組み立てる。
+
+    `source` は、コントラクトの保存先からの相対パスのファイルを返す。
+    """
     conf = rules["limits"]
     rels = {row["vocabulary"].partition("#")[0] for row in conf["dynamic"]}
-    data = {rel: _contract(contracts_dir / rel, "動的な読み口の語彙を読めない")[1] for rel in sorted(rels)}
+    data = {rel: source(rel).contract("動的な読み口の語彙を読めない") for rel in sorted(rels)}
     dynamic = tuple(_dynamic(row, data[row["vocabulary"].partition("#")[0]]) for row in conf["dynamic"])
     readers = {name: Reader(**row) for name, row in conf["readers"].items()}
     whole = frozenset(row["module"] for row in conf["whole"])
@@ -629,9 +622,9 @@ def _by_policy(found: list[Read]) -> defaultdict[str, set[str]]:
     return out
 
 
-def declared(raw: object) -> dict[str, frozenset[str]]:
-    """上限の設定の中身から、方針ごとの指定された読み手のモジュールの名前。"""
-    return {name: frozenset(policy.read_by) for name, policy in limits.validate(raw).items()}
+def declared(policies: Mapping[str, limits.Policy]) -> dict[str, frozenset[str]]:
+    """方針ごとの指定された読み手のモジュールの名前。"""
+    return {name: frozenset(policy.read_by) for name, policy in policies.items()}
 
 
 def _line_of(text: str, name: str) -> int:
@@ -639,13 +632,12 @@ def _line_of(text: str, name: str) -> int:
     return next((i for i, line in enumerate(text.splitlines(), 1) if f'"{name}":' in line), 1)
 
 
-def _unread(scope: Scope, text: str, want: Mapping[str, frozenset[str]], found: list[Read]) -> list[Finding]:
+def _unread(source: Source, want: Mapping[str, frozenset[str]], found: list[Read]) -> list[Finding]:
     """指定した読み手が引いていない方針（`unread`）。"""
     got = _by_policy(found)
-    path = scope.plugin_root / CONTRACTS / limits.NDF_SETTINGS
     missing = [(name, mod) for name, mods in want.items() for mod in sorted(mods) if mod not in got[name]]
     return [
-        Finding(RULE, scope.rel(path), _line_of(text, name), f"unread: 方針 {name} の読み手 {mod} がこの方針を引いていない")
+        Finding(RULE, source.rel, _line_of(source.text, name), f"unread: 方針 {name} の読み手 {mod} がこの方針を引いていない")
         for name, mod in missing
     ]
 
@@ -671,16 +663,10 @@ def _extra(scope: Scope, want: Mapping[str, frozenset[str]], found: list[Read]) 
 
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     """指定と実際の食い違い（`unread`・`undeclared`・`unresolved`）。上限の設定を持たないプラグインには当てない。"""
-    contracts_dir = scope.plugin_root / CONTRACTS
-    if not (contracts_dir / limits.NDF_SETTINGS).is_file():
+    if scope.limit_settings is None:
         return []
-    # 指定と行番号の両方に使う本文を 1 回だけ読む
-    text, raw = _contract(contracts_dir / limits.NDF_SETTINGS, "上限の設定を読めない")
-    try:
-        want = declared(raw)
-    except limits.LimitsError as exc:
-        raise CheckError(str(exc)) from exc
-    conf = settings(rules, contracts_dir)
+    want = declared(scope.limit_settings.policies)
+    conf = settings(rules, lambda rel: scope.source(scope.plugin_root / CONTRACTS / rel))
     trees = {scope.plugin_rel(src): src.tree for src in scope.code()}
     found = reads(trees, conf)
-    return _unread(scope, text, want, found) + _extra(scope, want, found)
+    return _unread(scope.limit_settings.source, want, found) + _extra(scope, want, found)

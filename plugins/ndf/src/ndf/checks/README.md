@@ -30,6 +30,7 @@ plugins/ndf/bin/ndf check
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
 | コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public）・内部データの名前（種類のスキーマ） |
+| 設計レビューの項目の表（リポジトリの根からのパスは `rules.json` の `spec.review_items_source`）と 11.x の対応表 | review-items |
 
 ## 兆候の規則
 
@@ -84,10 +85,10 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない |
+| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない。辞書の定数は、キーの集まりのほかに値の集まりも `<名前>.values` として読む。ほかに、手書きのスキーマの `enum` と同じ集まり（`enum-set`）とその一部（`enum-subset`）、名前が上限・回数・待ちを表し上限の設定と同じ数を持つ定数（`limit-num`。名前の語と値のキーの対応は `rules.json` の `facts.limit_kinds`、定数のまま置く値と理由は `facts.limit_constants`）、当たらなくなった `facts.limit_constants` の行（`stale`）を、1 つのファイルの定数だけでも数える |
 | `fact-table` | 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`。`*.schema.json` を除く）が、`contracts/facts/fact.schema.json`（表の共通の形）に合わない・読めない・行の並び `rows` が無い・行に文字列の `id` が無い・`id` が重なる・表の名前が 2 つの保存先で重なる |
 
-重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）。
+重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む・スキーマの `enum` を `ndf.contracts.schema_enum` で読む・上限の設定から引く）。
 
 ## 上限の設定の読み手の規則
 
@@ -150,6 +151,7 @@ plugins/ndf/bin/ndf check                     # 書かずに検査する（CI �
 | `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
 | `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
 | `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
+| `review-items` | 設計レビューの項目の表に、ルートの空の項目がある。11.x へ回した項目が、ルートの指す対応表に無いか、対応表のルートが `spec.correspondence_routes` の形に当たらない（空・仮の `—` を含む）。子の表 `children.json` の `review_items` が、表から生成し直した中身と違う（`text_sha` の原文は表の要旨）。表が無い・列が足りない・数の列が読めない・表か `children.json` がリポジトリの外かシンボリックリンクを通るときは検査を止める（`config_broken`）。見出しは `rules.json` の `spec.review_items_columns`・`spec.correspondence_columns` が持つ。`ndf check --only review-items` はこの規則の入力だけを読む |
 
 サブコマンドの引数は、サブコマンドの `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果のコントラクトと結果のスキーマで確かめる。
 

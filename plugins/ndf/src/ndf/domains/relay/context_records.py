@@ -427,12 +427,12 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
     }
 
 
-def calibrate(root: Optional[Path], days: int, now: float, environ: Mapping[str, str]) -> dict[str, Any]:
-    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書く。書けなければ `OSError`（前の見込みは残る）。"""
+def calibrate(root: Optional[Path], days: int, now: float, environ: Mapping[str, str]) -> tuple[dict[str, Any], int]:
+    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書き、見込みと飛ばした行の数を返す。書けなければ `OSError`（前の見込みは残る）。"""
     repo = repo_key(root)
-    rows, _ = read(repo, environ)
+    rows, skipped = read(repo, environ)
     body = estimate(rows, since=now - days * 86400)
     path = estimates_path(repo, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     signals.replace_json(path, body)
-    return body
+    return body, skipped
