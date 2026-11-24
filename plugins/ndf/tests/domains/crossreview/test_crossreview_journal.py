@@ -43,7 +43,7 @@ def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks(
         {"text": 3, "by": "kiro"},
         {"text": "二つ目", "by": "kiro", "section": " ", "impact": IMPACT},
     ]
-    assert journal.enter(1, raised) == frozenset({"一つ目", "二つ目"})
+    assert journal.enter(1, raised) == frozenset({"r1-1", "r1-2"})
     raised_rows = {"severity": "major", "raised_severity": None, "impact": IMPACT}
     assert all(len(r[journal_mod.OCCURRENCE]) == 12 for r in journal.rows.values())
     assert _plain(journal.rows.values()) == [
@@ -54,7 +54,7 @@ def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks(
 
 def test_enter_skips_deferred_findings_and_reopens_fixed_ones() -> None:
     journal = drive.FindingJournal([_row("r1-1", "直した", 1, fin.FIXED), _row("r1-2", "見送った", 1, fin.SKIPPED, "別で直す")])
-    assert journal.enter(2, [{"text": "直した", "by": "kiro"}, {"text": "見送った", "by": "kiro"}]) == frozenset({"直した", "見送った"})
+    assert journal.enter(2, [{"text": "直した", "by": "kiro"}, {"text": "見送った", "by": "kiro"}]) == frozenset({"r1-1", "r1-2"})
     assert _plain(journal.rows.values()) == [_row("r1-1", "直した", 2), _row("r1-2", "見送った", 1, fin.SKIPPED, "別で直す")]
     # 再発した指摘は新しい発生の値を持ち、見送り済みの行は書き換えない（#4016）
     assert journal_mod.OCCURRENCE in journal.rows["r1-1"] and journal_mod.OCCURRENCE not in journal.rows["r1-2"]

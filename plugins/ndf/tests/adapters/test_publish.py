@@ -159,6 +159,7 @@ def test_publisher_reads_the_same_reference_once_only_when_the_checks_share_what
         (f"a {publish.HOME_TEXT} b", "a /home/x c", False),
         (f"ab{publish.HOME_TEXT}bc", "abc", False),
         ("a b", "a b", False),
+        (f" {publish.HOME_TEXT} ", "  x ", False),
     ],
 )
 def test_masked_text_covers_the_text_it_was_made_from(masked: str, text: str, same: bool) -> None:

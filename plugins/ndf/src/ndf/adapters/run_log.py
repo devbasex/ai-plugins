@@ -95,10 +95,17 @@ def _mask(text: str, secrets: list[str]) -> str:
     return text
 
 
+def masked(text: str) -> bool:
+    """伏せた所のある本文か。"""
+    return _MASKED.search(text) is not None
+
+
 def covers(masked: str, text: str) -> bool:
-    """`masked` が `text` の一部を伏せた本文とみなせるか（伏せた所のほかが、同じ順にすべて一致する）。伏せた所が無ければ偽。"""
-    head, *rest = _MASKED.split(masked)
-    if not rest or not text.startswith(head):
+    """`masked` が `text` の一部を伏せた本文とみなせるか（伏せた所のほかが、同じ順にすべて一致する）。伏せた所が無いか、伏せた所の
+    ほかに何も無ければ偽。"""
+    parts = _MASKED.split(masked)
+    head, *rest = parts
+    if not rest or not any(p.strip() for p in parts) or not text.startswith(head):
         return False
     at = len(head)
     *middle, tail = rest

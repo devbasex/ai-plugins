@@ -33,7 +33,16 @@ UNPINNED = "unpinned_severity"
 REDLINE_ITEMS = "redline_items"
 # 上の 4 つを決めたときの MVV の識別子
 JUDGED = "judged_mvv"
-# 上の 5 つの欄
+# 指摘の発生の値の欄。番号は別の状態ファイルでも再発でも使い回されるので、PR のスレッドは番号とこの値の両方で
+# 指摘に結び付ける（#4016 の不変条件 I4）
+OCCURRENCE = "occurrence"
+# 指摘が初めて記録されたときの発生の値。別の保存先へ引き継いでも再発しても変わらず、伏せた本文どうしでも同じ指摘かが分かる。
+# 発生の値と違うとき（引き継いだ・再発した）だけ指摘が持つ
+ORIGIN = "origin"
+# 最初のコメントと返信の本文に置く発生の値の行
+OCCURRENCE_LINE = "<!-- ndf-occurrence: {value} -->"
+OCCURRENCE_IN = re.compile(r"<!-- ndf-occurrence: (\S+) -->")
+# 上の判定の 5 つの欄
 MARKS = (MVV, PINNED, REDLINE_ITEMS, JUDGED, UNPINNED)
 # NDF が機械で確かめて作った指摘の `by`
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
@@ -246,6 +255,7 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         mark = done.get(f.get("id"))
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
         keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
+        keep[ORIGIN] = f.get(ORIGIN) or f.get(OCCURRENCE)
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
