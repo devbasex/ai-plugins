@@ -36,7 +36,20 @@
         "skip": {"type": "boolean", "description": "承認ゲートを省けるか（ndf.progress.gate.checks.may_skip）"},
         "verdict": {"type": ["object", "null"], "description": "LLM の判定の応答（verdict・reasons・boundary・basis）。判定を打たなかったら null"},
         "why": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "省かない理由。省けるなら空"},
-        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた回答が見た対象（seen）に持ち、後に進んだ head は回答の検証とマージが断る。PR を読む前に止めたら無い"}
+        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた回答が見た対象（seen）に持ち、後に進んだ head は回答の検証とマージが断る。PR を読む前に止めたら無い"},
+        "target": {
+          "type": "object",
+          "description": "判定した PR の承認の対象（#4409 の決定 7）。省いた回答が見た対象（seen）へ写し、デプロイのマージ（release-merge）が承認した HEAD とマージ先として読む。PR を読む前に止めたら無い",
+          "additionalProperties": false,
+          "required": ["repo", "pr", "base", "head", "production"],
+          "properties": {
+            "repo": {"type": "string", "minLength": 1, "description": "PR のベースリポジトリ（<所有者>/<リポジトリ>）"},
+            "pr": {"type": "integer", "minimum": 1, "description": "PR の番号"},
+            "base": {"type": "string", "minLength": 1, "description": "PR のマージ先"},
+            "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA"},
+            "production": {"type": "boolean", "description": "承認でマージが本番へ反映され得るか（判定の部品の reaches_production）"}
+          }
+        }
       }
     },
     "delivery": {

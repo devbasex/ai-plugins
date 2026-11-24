@@ -17,10 +17,12 @@ import git_sandbox
 import pytest
 
 from ndf import contracts, identity
+from ndf.adapters.github import FileAt
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.domains.records import cli, jsonfile, jsonl, mvv, mvv_gate
+from ndf.domains.release import trail
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import note, refusals
 
@@ -75,6 +77,10 @@ def notes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     return posted
 
 
+# 判定した PR の承認の対象（Hub の PR 5 番・main 宛て・自動反映。#4409）
+_TARGET = {"repo": "o/r", "pr": 5, "base": "main", "head": "a" * 40, "production": True}
+
+
 class Hub:
     """GitHub の偽物。設計のブランチ design/x の開いた PR と、その本文・変えたファイルを返す。"""
 
@@ -88,7 +94,12 @@ class Hub:
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
-        return SimpleNamespace(body=self.case["body"], head_sha=self.case.get("head", "h" * 40))
+        return SimpleNamespace(body=self.case["body"], head_sha=self.case.get("head", "h" * 40), base_ref="main", number=number)
+
+    def branch_file(self, base: str, path: str) -> FileAt:
+        """マージ先 main の設定（自動反映の本番チャネル。#4409）。"""
+        section = {"branches": {"base": "main", "production": "main"}, "release": {"deliveries": [{"channel": "production", "kind": "auto"}]}}
+        return FileAt("o/r", json.dumps({"branch_strategy": section}), "c1")
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
         assert path == f"/repos/o/r/pulls/{self.number}/files"
@@ -147,6 +158,10 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
+    # 省いた判定の記録は、担い手 mvv のマージの承認の証跡の行を同じコメントに持つ（#4409 の決定 7。投稿は 1 件のまま）
+    hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text)])
+    (row,) = trail.merge_rows(hub, 5, "octocat")  # type: ignore[arg-type]
+    assert (row.answer, row.by, row.target, row.production) == ("approved", "mvv", trail.MergeTarget("o/r", 5, "main", "h" * 40), True)
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
@@ -279,7 +294,7 @@ def test_checks_after_reading_the_pr_return_the_head_and_leave_a_note(
 ) -> None:
     (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": ["docs/**"]}), encoding="utf-8")
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files, "head": "a" * 40}), Ask(FOLLOW))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40}
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40, "target": _TARGET}
     assert notes == [(5, note("design", None, [why]))]
 
 
@@ -288,7 +303,7 @@ def test_a_verdict_that_keeps_the_gate_returns_the_verdict_and_the_head(repo: Pa
     verdict = DESIGN_2213["verdict"]
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), Ask(verdict))
     why = ["レッドラインに当たる: " + " / ".join(verdict["boundary"])]
-    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40}
+    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40, "target": _TARGET}
     assert notes == [(5, note("design", verdict, why))]
 
 

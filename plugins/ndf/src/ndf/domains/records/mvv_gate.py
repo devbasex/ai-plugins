@@ -22,6 +22,8 @@ from ndf.adapters import llm, publish
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits
+from ndf.core import production_merge
+from ndf.domains.release import approval_decide, trail
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -111,13 +113,14 @@ def _judged(
     number = pr_number(root, gate_name, inputs, hub)
     # 判定する head を先に読む。省いた回答はこの head を見た対象に持ち、後に進んだ head は承認の検証とマージが断る
     pull = hub.pull(number)
+    target = _target(hub, pull)
     rows = mvv.pr_files(hub, number)
     facts = mvv.pr_facts(hub, number, facts, rows, pull)
     # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の設定の変更）は LLM を呼ぶ前に当てる。
     # 差分の全体が材料に載らない PR も、省いた部分を判定できないため LLM を呼ばずに人へ問う
     why = refusals(facts) or mm.incomplete_patches(rows)
     if why:
-        return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why, pull.head_sha))
+        return _recorded(hub, number, {**mm.gate_outcome(gate_name, None, False, why, pull.head_sha), "target": target})
     shared = mvv.principles().decode("utf-8")
     materials = {
         "NDF の共通原則": shared,
@@ -129,7 +132,16 @@ def _judged(
     asked = {"gate": gate_name, "question": mm.SYSTEM, "material": text}
     verdict = _verdict(mvv.mvv_validate_sprint(root, asked, judge_with(ask), warnings=warnings))
     skip, why = may_skip(facts, verdict)
-    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha))
+    return _recorded(hub, number, {**mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha), "target": target})
+
+
+def _target(hub: GitHub, pull: Any) -> dict[str, Any]:
+    """判定した PR の承認の対象（出力 `mvv_gate.target`）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。"""
+    found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
+    same = found.repo.lower() == hub.repo.lower()
+    verdict = production_merge.judge_text(found.text, pull.base_ref) if same else production_merge.Verdict.UNKNOWN
+    production = production_merge.reaches_production(verdict)
+    return {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
 
 
 def post_note(hub: GitHub, number: int, text: str) -> None:
@@ -138,8 +150,17 @@ def post_note(hub: GitHub, number: int, text: str) -> None:
 
 
 def _recorded(hub: GitHub, number: int, outcome: dict[str, Any]) -> dict[str, Any]:
-    """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。書けなければ例外で省かない側へ倒す。"""
-    post_note(hub, number, note(outcome["gate"], outcome["verdict"], outcome["why"]))
+    """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。書けなければ例外で省かない側へ倒す。
+
+    承認ゲートを省くと決めたときだけ、判定の記録の本文の後ろに担い手 `mvv` のマージの承認の証跡の行を入れて 1 件で書く
+    （#4409 の決定 7。投稿は増えない）。レッドラインや省かない判定では証跡の行を入れない。"""
+    text = note(outcome["gate"], outcome["verdict"], outcome["why"])
+    held = outcome.get("target")
+    if outcome["skip"] and isinstance(held, dict):
+        t = trail.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
+        row = trail.MergeRow(approval_decide.APPROVED, trail.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}")
+        text = f"{text}\n{trail.render_merge_row(row)}"
+    post_note(hub, number, text)
     return outcome
 
 

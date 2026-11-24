@@ -86,7 +86,7 @@ TARGET_LINE = "対象:"
 PRODUCTION_LINE = "本番へ反映される:"
 RECORD_LINE = "回答の記録:"
 _YES, _NO = "はい", "いいえ"
-_TARGET = re.compile(r"^`(?P<repo>[^`]+)` (?P<number>\d+) `(?P<base>[^`]+)` `(?P<head>[0-9a-f]+)`$")
+_TARGET = re.compile(r"^`(?P<repo>[^`]+)` (?P<number>\d+) `(?P<base>[^`]+)` `(?P<head>[^`]+)`$")
 # 承認資料の、承認でマージが本番へ反映され得ることを示す行（`ndf ci ask`・`ndf ci merge` と工程の承認ゲートの承認資料が使う）
 PRODUCTION_MATERIAL_LINE = "この承認で PR がマージされ、本番へ反映され得る"
 # 担い手 `mvv` の証跡を数えるのは、MVV 判定の記録（`progress.gate.checks.note` の見出し）と同じコメントだけ
