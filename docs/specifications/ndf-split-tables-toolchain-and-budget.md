@@ -35,7 +35,7 @@ Pull Request と衝突しない。テストの関数が上限 6,000 を超える
 | --- | --- |
 | 分割した表の形と読み手、規則 `contracts-split` | 分割した表に挙げていないコントラクトの表の分割 |
 | 配る構成の設定とリポジトリの設定 `toolchain`、規則 `toolchain` | `.python-version`（作らない。手元で使う Python の指定は `requires-python` に従う） |
-| テスト・CI のジョブ・使われない依存・ライブラリへ置き換えられる自作の件数の上限（設定 `budget`）と、それを調べる規則 `budget` | 前の件数より増やさない仕組み（[ラチェット](ndf-contract-fact-checks.md)）、CI でのテストの実行時間の計測（#4331） |
+| テスト・CI のジョブ・使われない依存・ライブラリへ置き換えられる自作の件数の上限（設定 `budget`）と、それを調べる規則 `budget` | 前の件数より増やさない仕組み（[ラチェット](ndf-contract-fact-checks.md)）、CI でのテストの実行時間の計測（ai-plugins の `scripts/ci_test_durations.py`。#4331） |
 | 実験版の保存先と規則 `experimental` | 実験版の台帳（[10 系の台帳](../archive/ndf-experiments.md) の後は未定） |
 | `plugins/ndf/bin/ndf` の依存の用意 | `start.py` が呼び出し元の環境変数を戻す形（[ndf-entrypoint-caller-env.md](ndf-entrypoint-caller-env.md)） |
 
@@ -92,6 +92,11 @@ ai-plugins の値を利用先のリポジトリへ持ち込まないためであ
 
 設定のキーごとに独立して効く。`toolchain` も `budget` も無いリポジトリでは、規則 `toolchain` は何も読まず、規則 `budget` は件数を
 `metrics.budget` に出すだけである。設定の値は `.ndf/project.json` と `plugins/ndf/contracts/data/toolchain.json` が正で、ここにはコピーしない。
+
+**テストの件数の上限 `budget.tests` は NDF の機能として残す。** 実行時間を測る仕組みを持たないリポジトリが、量の上限を置く手段だからである。
+ai-plugins はテストの量を件数でなく CI の実行時間で見るので、`.ndf/project.json` に `budget.tests` を置かない（#4331 の決定 5）。
+テストの件数は今と同じく `metrics.budget.tests` に出るが、Pull Request は件数で落ちない。実行時間は `main` への push ごとに
+ジョブ `pytest (所要)` が直近 10 回の中央値を上限（`scripts/ci-test-duration.json`）と比べ、超えたら警告の注記で知らせる。
 
 ### 規則 `toolchain`
 
@@ -163,6 +168,7 @@ ai-plugins の値を利用先のリポジトリへ持ち込まないためであ
 | 使われない依存を `ndf check` の中で数える | deptry を使うと、例外の設定が 2 か所に分かれる |
 | `exec` の前に同期を 1 回打つ | `exec` の後に uv が落ちると、結果 JSON を出せない。同期済みなら 1 回 15 ミリ秒（2026-11-23 の実測） |
 | 上限に現在の件数の余裕を置くのは `tests` と `ci_jobs` だけ | 使われない依存と置き換えられる自作は増やしてよいものではない。減らす作業は #4330 が持つ |
+| ai-plugins の設定から `budget.tests` を外し、規則は残す（#4331） | 件数の上限は機能を足すたびに上げ直しになり、遅いテストも見つけられない。規則は設定にキーがあるときだけ効くので、残しても使わないリポジトリに影響しない |
 
 ## 運用
 

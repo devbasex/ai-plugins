@@ -81,7 +81,9 @@ jobs:
   # uv.lock。docs/specifications/ndf-rebuild.md の決定 78）で回す。根の pytest は plugins/ndf を収集しない（根の conftest.py）。ファイルの割り当ては
   # 同じ scripts/pytest_shard.py を pytest のプラグイン（-p pytest_shard）として読み込み、収集の前に実測秒で決める（#4331 の決定 6）
   #
-  # 根と NDF の JUnit XML（テスト 1 件ごとの秒）を成果物に残す。成果物の名前は scripts/pytest_shard.py も同じ値を持つ
+  # 根と NDF の JUnit XML（テスト 1 件ごとの秒）を成果物に残し、main の push では中央値のジョブ pytest (所要) が読む。
+  # 成果物の名前・試行の番号のファイル・手順の名前（根のテスト・NDF のテスト）は scripts/ci_test_durations.py と
+  # scripts/pytest_shard.py も同じ値を持つ。変えるときは 3 か所をそろえる
   pytest-shard:
     name: pytest (${{ matrix.shard }}/6)
     needs: ci-scope
@@ -204,6 +206,49 @@ jobs:
           if missing:
               sys.exit("ok の出力が確かめられない副命令: " + ", ".join(missing))
           '
+
+  # main への push で、テスト 1 件ごとの秒の合計（根と NDF）を集計に残し、直近の回の中央値を上限と比べる（#4331）。
+  # 超えたら警告の注記とジョブの要約で知らせるだけで、ワークフローの結論に入れない（集約のジョブ pytest の needs に入れない）。
+  # 回数と上限は scripts/ci-test-duration.json。uv も setup-python も置かず、実行機の python3 で打つ
+  pytest-duration:
+    name: pytest (所要)
+    needs: [pytest-shard, pytest-ndf-ok-tools]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.pytest-shard.result == 'success' && needs.pytest-ndf-ok-tools.result == 'success' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      # trend の時間の予算（60 秒）を数える起点
+      - name: 始めた時刻
+        run: echo "CI_TEST_DURATION_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 成果物の名前ごとのディレクトリを read_parts が読むので merge-multiple を付けない
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 1
+        with:
+          pattern: pytest-*junit-*
+          path: ${{ runner.temp }}/junit
+      # 取得が落ちても無効な集計を書く
+      - name: 中央値
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci_test_durations.py trend "$RUNNER_TEMP/junit"
+          --run ${{ github.run_id }} --run-number ${{ github.run_number }} --attempt ${{ github.run_attempt }}
+          --out "$RUNNER_TEMP/ci-test-duration-total.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        timeout-minutes: 1
+        with:
+          name: ci-test-duration-total
+          path: ${{ runner.temp }}/ci-test-duration-total.json
+          overwrite: true
+          if-no-files-found: warn
 
   # 文書のファイルだけの PR で、テストが読む文書を読むテストだけを回す（#2925）。テストの一覧は判定の出力を
   # 環境変数で渡す（PR の宣言から来る値を式でシェルへ埋めない）
