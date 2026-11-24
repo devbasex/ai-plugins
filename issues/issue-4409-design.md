@@ -94,12 +94,13 @@ graph TD
 | --- | --- |
 | 本番チャネルの判定の部品（新設 `src/ndf/core/production_merge.py`） | `branch_strategy` のセクション（読めなければ無し）とマージ先のブランチから、判定の値（「処理の流れ」の最後の表にある 5 つ）を返す。外部を呼ばない純粋な関数で、標準ライブラリだけで書く |
 | `ndf ci merge`（変更） | PR のベースリポジトリから、マージ先のブランチの設定を読み、判定の部品で承認の要否を決める。承認が要れば承認の証跡を確かめる。証跡が無ければ、引数で選んだ形（プランの中で止まる / デプロイへ先送りする / 承認ゲートへ戻す）で終える。`--branch` に加えて `--pr` で PR を指せる。`--approved-head`・`--approved-base` を受けたら、判定の結果によらず、承認の時点の HEAD とマージ先を今の PR と照らす |
-| 承認の対象（新設。`domains/release/trail.py` に置く） | 承認を結び付ける 4 つの値の組。ベースリポジトリ・PR の番号・マージ先・HEAD である。質問・回答の照合・証跡の書き込み・`ndf ci merge` の確かめが、同じ組を受け渡す。証跡の行と判定の出力 `mvv_gate` は、この 4 つに「本番へ反映されるか」（はい / いいえ）を足して持つ（決定 7） |
-| マージの承認の証跡（`domains/release/trail.py`、変更） | リリースの PR の証跡（マーカー `ndf:release-approval`）とは別のマーカー `ndf:merge-approval` で書く。行は回答（承認・却下）・担い手・承認の対象・「本番へ反映されるか」・回答の記録の識別子である。読むのは `ndf ci merge` だけで、既存のリリースの証跡の判定（`trail.check`）と CD の workflow は読まない（決定 7） |
+| 承認の対象（新設。`core/merge_approval.py` に置く） | 承認を結び付ける 4 つの値の組。ベースリポジトリ・PR の番号・マージ先・HEAD である。質問・回答の照合・証跡の書き込み・`ndf ci merge` の確かめが、同じ組を受け渡す。証跡の行と判定の出力 `mvv_gate` は、この 4 つに「本番へ反映されるか」（はい / いいえ）を足して持つ（決定 7） |
+| マージの承認の証跡（新設 `core/merge_approval.py`） | リリースの PR の証跡（マーカー `ndf:release-approval`）とは別のマーカー `ndf:merge-approval` で書く。行は回答（承認・却下）・担い手・承認の対象・「本番へ反映されるか」・回答の記録の識別子である。読むのは `ndf ci merge` だけで、既存のリリースの証跡の判定（`trail.check`）と CD の workflow は読まない（決定 7）。工程（`progress/gate`）とドメイン（`domains/records/mvv_gate.py`・`domains/release/trail.py`）の両方が使うので、層の規則（下の層は上の層を読まない）に合わせて、両方より下の `ndf.core` に置く。担い手の語（`user`・`mvv`）と、証跡を書けないときの例外 `TrailError` もここが持ち、`trail.py` はここから読む |
+| 回答の語（新設 `core/approval_words.py`） | 回答の語（`approved`・`rejected`）と、承認資料が対象にしたコミットの行の見出し（`提示したコミット:`）。リリースの証跡の判断のモジュール（`domains/release/approval_decide.py`）・マージの承認の証跡・工程の承認ゲート・`ndf ci` が同じ綴りを使う。判断のモジュールが読むので外部との接続を読まないモジュールに分け、`approval_decide.py` はここから読む |
 | 回答を証跡に書くコマンド `ndf ci answer`（新設） | 単発のプランの回答の記録（`--answer-record <ファイル>`）を読み、記録された回答（承認・却下）と承認の対象で証跡を PR へ書く。回答の記録が無い・回答した者が利用者でない・承認の対象が今の PR と違うときは、書かずに `refused` で止まる。担い手は `user` だけを書き、`mvv` は書かない |
 | PR の承認を問うコマンド `ndf ci ask`（新設） | `--branch` の PR の承認の対象を承認資料に載せ、承認の対象をファイル（`--presented-out`）に残して終了コード 10 で止まる。ファイルと結果の `metrics.presented_id` には、提示ごとに新しく作る提示の識別子を入れる。判定が `automatic`・`unset`・`unknown` なら、承認資料に本番へ反映され得ることを書く。差し込み `gate` の既定（`contracts/templates/params.json`）を `ndf answer ask` からこれに替える |
-| プランの実行（`core/plan/runner.py`、変更） | `ndf plan next --answer <回答> --by <回答した者>` を受けたら、続きを流す前に、待っていたステップの回答の記録を `{state_dir}/answers/<ステップ>.json` に書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。提示の識別子は、待っていたステップの結果の `metrics.presented_id` から写す。`--by` は `ndf answer` と同じ形で、承認ゲートのステップへの回答では省けない。承認待ちの結果の `routes` には `ndf plan next <プラン> --answer <回答> --by human` を載せる。`ndf ci answer` はこのファイルを読む |
-| 工程の承認ゲートの回答（`progress/gate/answering.py`、変更） | 質問が PR を持つ承認ゲート（設計承認ゲート・リリース承認ゲート）で回答（承認・却下）を受けたら、承認の対象で証跡を PR へ書いてから、回答を記録する（順序は決定 7）。担い手 `user` は、回答した者が利用者のとき（`human`、または中継を確かめられた `organizer`。決定 7）だけ書く。`service:mvv` の回答は MVV 判定の記録として扱い、ここでは証跡を書かない（書くのは `mvv_gate.py`）。`conductor` とほかの `service:<主体>` の回答は証跡を書かずに断る |
+| プランの実行（`core/plan/runner.py`、変更） | `ndf plan next --answer <回答> --by <回答した者>` を受けたら、続きを流す前に、待っていたステップの回答の記録を `{state_dir}/answer-records/<ステップ>.json` に書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。提示の識別子は、待っていたステップの結果の `metrics.presented_id` から写す。`--by` は `ndf answer` と同じ形で、承認ゲートのステップへの回答では省けない。承認待ちの結果の `routes` には `ndf plan next <プラン> --answer <回答> --by human` を載せる。`ndf ci answer` はこのファイルを読む |
+| 工程の承認ゲートの回答（`progress/gate/answering.py`、変更） | 質問が PR を持つ承認ゲート（設計承認ゲート・リリース承認ゲート）で回答（承認・却下）を受けたら、承認の対象で証跡を PR へ書いてから、回答を記録する（順序は決定 7）。担い手 `user` は、回答した者が利用者のとき（`human`、または中継を確かめられた `organizer`。決定 7）だけ書く。`service:mvv` の回答は MVV 判定の記録として扱い、ここでは証跡を書かない（書くのは `mvv_gate.py`）。`conductor` とほかの `service:<主体>` の回答は証跡を書かず、承認でマージが本番へ反映され得る（見た対象の「本番へ反映されるか」が「はい」の）ときだけ断る。反映されないときは今と同じく回答を記録する（既存の Factory の `service:factory` の回答を壊さない）。外のオーガナイザーのファイルを中継した `organizer` の回答は、中継を確かめられないので断る |
 | 承認ゲートの質問（`progress/gate/asking.py` の `Target`、変更） | 見た対象に、ベースリポジトリ・PR の番号・マージ先を足す。今は HEAD と承認資料の sha256 だけである |
 | MVV 判定の承認ゲート（`domains/records/mvv_gate.py`・`progress/run.py`、変更） | `pace: fast` / `pace: auto` で承認ゲートを通すときに、担い手 `mvv` の証跡を、今の判定の記録のコメントに入れて書く（投稿は増えない）。レッドラインに当たれば通さず、証跡も書かない。判定の出力 `mvv_gate` に承認の対象（ベースリポジトリ・PR の番号・マージ先・HEAD・本番へ反映されるか）を入れる。承認ゲートのステップ（`progress/run.py`）が回答した者 `service:mvv` で通すときは、この承認の対象を回答の事象の `seen` に残す。利用者の回答と同じ形なので、差し込みの組み立ては同じ所から読める |
 | 承認資料（`progress/gate/asking.py` の `material` と、`merge`・`merge-gate` の承認資料、変更） | 判定が `automatic`・`unset`・`unknown` のときは、すべての承認資料に「この承認で PR がマージされ、本番へ反映され得る」と書く。証跡の「本番へ反映されるか」を「はい」とする条件（決定 7）と同じ条件で書く |
@@ -108,7 +109,7 @@ graph TD
 | 共有のステップ `merge`（変更） | `--production-gate {{production_gate}}` と `--presented-out {state_dir}/presented-merge.json` を足す。`on_answer` は `approved` → `approve-merge`、`rejected` → `reject-merge` |
 | 共有のステップ `approve-merge`・`approve-gate`・`reject-merge`・`reject-gate`（新設） | 回答の後にだけ流れるステップ。どれも `ndf ci answer` で回答の証跡を書く。`approve-*` は `next` で `merge` へ進み、`reject-*` は終わる。`*-merge` は `merge` の回答、`*-gate` は `merge-gate` の回答を読む。通常の遷移ではどのステップからも到達しない |
 | テンプレート `release`（変更） | 最初のステップ `release-merge` で、入力 `pr` のスプリントの PR を、リリース承認ゲートで承認した HEAD とマージ先を添えてマージする。その後に今までの作業（worker）を流す |
-| 差し込みの組み立て（`progress/invoke.py`、変更） | 工程から組むプランの `production_gate` を決める。`merge`（`pr-merge`・`docs-merge`）と `plan-to-spec` は `defer`、`design-merge` と `release` は `stale`。`release` には、リリース承認ゲートの回答の事象の `seen`（利用者の回答でも、MVV 判定が通した回答 `service:mvv` でも同じ形）に残った承認の対象から `approved_head`・`approved_base` を入れる |
+| 差し込みの組み立て（`progress/invoke.py`、変更） | 工程から組むプランの `production_gate` を決める。`merge`（`pr-merge`・`docs-merge`）と `plan-to-spec` は `defer`、`design-merge` と `release` は `stale`。ただし承認ゲートを持たない工程（`light` の設計）の `design-merge` は `defer` にする（`stale` では承認を取り直す場所が無く止まり続ける）。表に無いテンプレートは止めず、既定の `stop` のまま組む。値の語（`stop`・`defer`・`stale`）は `core/production_merge.py` の `GATES` が持ち、`ndf ci merge` の `--production-gate` と同じ所から読む。`release` には、リリース承認ゲートの回答の事象の `seen`（利用者の回答でも、MVV 判定が通した回答 `service:mvv` でも同じ形）に残った承認の対象から `approved_head`・`approved_base` を入れる |
 | 工程の順（`contracts/workflow/modes/*.json`、変更） | 5 つのモードで、クリーンアップをデプロイの直後へ移す |
 | 工程の定義の写しの移行（`progress/run.py`、変更） | 状態機械を読むときに、写しの工程の順が古い形（クリーンアップ → デプロイ）で、デプロイがまだ始まっておらず、クリーンアップが終わっていなければ、写しの順を新しい形へ置き換え、事象 `definition_migrated` を 1 回記録する。クリーンアップが開いた PR で止まっていた状態機械も含む |
 
@@ -149,7 +150,7 @@ graph TD
 
 | 差し込み・ステップ | 工程から組むプラン | 単発のプラン（`ndf route render`） |
 | --- | --- | --- |
-| `production_gate` | `pr-merge`・`docs-merge`・確定仕様化は `defer`（承認はデプロイの工程のリリース承認ゲートで取るため）。`design-merge` と `release` は `stale`（承認は工程の承認ゲートで取り直すため） | 既定 `stop` |
+| `production_gate` | `pr-merge`・`docs-merge`・確定仕様化は `defer`（承認はデプロイの工程のリリース承認ゲートで取るため）。`design-merge` と `release` は `stale`（承認は工程の承認ゲートで取り直すため）。承認ゲートを持たない工程（`light` の設計）の `design-merge` は `defer`。表に無いテンプレートは既定 `stop` のまま | 既定 `stop` |
 | `approved_head`・`approved_base` | `release` だけに入れる。リリース承認ゲートの回答の事象に残った承認の対象の HEAD とマージ先である | 使わない |
 | ステップ `merge-gate` | 差し込み `gate` は `true`。成功して通常の遷移で `merge` へ進む。`merge` は設計承認ゲートの回答が書いた証跡を確かめてマージする | 差し込み `gate` の既定 `ndf ci ask` が終了コード 10 で止まる。プランの実行が `ndf plan next --answer <回答> --by <回答した者>` を受けると、回答の記録を書き、`on_answer` で `approve-gate`（承認）か `reject-gate`（却下）へ進む。どちらも証跡を書く。`approve-gate` の後の `merge` は証跡を確かめるので、もう一度止まらない |
 | ステップ `merge` | `--production-gate {{production_gate}}` を足す。マージした・先送りした（`deferred`）ときはどちらも `ok` で、今と同じ `next`（多くは終わり）へ進む。`design-merge` で有効な証跡が無ければ `approval_stale` で止まり、設計の工程を最初から流し直す。どの場合も `on_answer` へは流れない | 同じ。証跡が無ければ終了コード 10 で止まる。回答 `approved` で `approve-merge` へ進み、証跡を書いてから `merge` を打ち直す。回答 `rejected` で `reject-merge` へ進み、却下の証跡を書いて終わる |
@@ -282,7 +283,7 @@ hook の振る舞いが変わるのは、`release.cd` のキーが無い設定�
 ### 決定 4: 承認ゲートを増やさずにデプロイまで進めるため、工程から流すプランでは承認の無いマージをデプロイの工程へ先送りする
 
 - **質問**: 工程から流すプラン（`pr-merge`・`docs-merge`・確定仕様化）が、承認の無いマージに着いたときの扱い。そこで承認を待つか、先へ進めるか
-- **選んだ案**: マージせずにステップを `ok` で終え（`--production-gate defer`）、プランと工程を先へ進める。承認はデプロイの工程のリリース承認ゲートが 1 回で取る。単発のプランは工程の外で流れる。そのため、そのプランの中で承認待ち（終了コード 10）で止まる。工程から組む `design-merge` は `defer` にしない。設計承認ゲートの回答が証跡になるので通常は止まらない。承認の後に HEAD やマージ先が動いて有効な証跡が無いときは、`--production-gate stale` で `approval_stale` として止まる。工程の実行側は、結果の `routes` に `ndf progress retry <ID> 設計 --reason approval_stale` と `ndf progress next <ID>` を載せる。この 2 つを順に打って設計の工程を最初から流し直すと、設計承認ゲートが承認資料を作り直して質問し直す。回答はいつも設計承認ゲートの回答として記録し、プランの中の承認待ちを経ない
+- **選んだ案**: マージせずにステップを `ok` で終え（`--production-gate defer`）、プランと工程を先へ進める。承認はデプロイの工程のリリース承認ゲートが 1 回で取る。単発のプランは工程の外で流れる。そのため、そのプランの中で承認待ち（終了コード 10）で止まる。工程から組む `design-merge` は `defer` にしない（承認ゲートを持たない `light` の設計の工程だけは `defer` にする。「実装で設計から変えた点」）。設計承認ゲートの回答が証跡になるので通常は止まらない。承認の後に HEAD やマージ先が動いて有効な証跡が無いときは、`--production-gate stale` で `approval_stale` として止まる。工程の実行側は、結果の `routes` に `ndf progress retry <ID> 設計 --reason approval_stale` と `ndf progress next <ID>` を載せる。この 2 つを順に打って設計の工程を最初から流し直すと、設計承認ゲートが承認資料を作り直して質問し直す。回答はいつも設計承認ゲートの回答として記録し、プランの中の承認待ちを経ない
 - 採らなかった案: 工程から流すプランでも承認待ちで止まる。工程の進行がその場で回答を待ち、デプロイのリリース承認ゲートへ進めない。回答すればリリース承認ゲートとの 2 回の承認になり、受け入れ条件 6・10 に反する
 - 採らなかった案: 工程「Pull Request」に承認ゲートを足す。承認ゲートの数を増やすので、要求仕様の「境界」で行わない
 - **代償**: 工程「Pull Request」が `ok` で終わっても、スプリントの PR はまだマージされていない。マージ済みかは PR の状態と結果の `metrics.merge` で見分ける
@@ -376,7 +377,7 @@ hook の振る舞いが変わるのは、`release.cd` のキーが無い設定�
 | --- | --- | --- | --- |
 | 工程の承認ゲート（設計承認ゲート `design-gate`・リリース承認ゲート `release-gate`） | `progress/gate/answering.py` | `ndf answer` が受けた回答。回答した者（`--by`）が `human` のときと、中継を確かめられた `organizer` のとき（下の箇条）だけ書く | 利用者 `user` |
 | `pace: fast` / `pace: auto` の MVV 判定が承認ゲートを通した | `domains/records/mvv_gate.py`。今も PR へ投稿している判定の記録のコメントに、証跡の行とマーカーを入れて 1 件で書く。レッドラインに当たれば通さず、証跡の行を入れない | MVV 判定の結果。承認ゲートのステップは、同じ承認の対象を回答した者 `service:mvv` の回答の事象に残す | MVV 判定 `mvv` |
-| 単発のプランの承認待ち | ステップ `approve-*`（承認）・`reject-*`（却下）が打つ `ndf ci answer` | プランの実行が書いた回答の記録（`{state_dir}/answers/<ステップ>.json`）。回答した者が `human` で、記録の提示の識別子が `--presented-out` のファイルの識別子と同じときだけ書く | 利用者 `user` |
+| 単発のプランの承認待ち | ステップ `approve-*`（承認）・`reject-*`（却下）が打つ `ndf ci answer` | プランの実行が書いた回答の記録（`{state_dir}/answer-records/<ステップ>.json`）。回答した者が `human` で、記録の提示の識別子が `--presented-out` のファイルの識別子と同じときだけ書く | 利用者 `user` |
 
 MVV 判定の通過では、証跡を別のコメントにしない。今の判定の記録のコメント（`mvv_gate.py` の `_recorded`。人が後から判定を確かめるための記録）に、証跡の行とマーカーを入れる。
 
@@ -389,7 +390,7 @@ MVV 判定の通過では、証跡を別のコメントにしない。今の判�
 - プランの実行は、`--by` の無い `ndf plan next --answer` を承認ゲートのステップへの回答として受けない
 - 単発のプランでは、回答の記録の提示の識別子と `--presented-out` のファイルの識別子が違えば、`ndf ci answer` は `refused` で止まる。流し直しで提示のファイルが新しい HEAD の内容に置き換わっても、前の提示への回答を新しい提示の承認として書かない
 - `organizer` の回答は、利用者へ問うリクエストを経たときだけ受ける。工程の承認ゲートは、その質問に結び付いたリクエスト（`request_id(q)`）に利用者の回答が記録され、その回答の語が同じときだけ証跡を書く。単発のプランはリクエストを出さないので、`organizer` の回答では書かない
-- 回答した者を `conductor`・`service:<主体>`（MVV 判定の `service:mvv` を除く）とした回答では、どちらの経路も証跡を書かない。PR を持つ工程の承認ゲート（設計承認ゲート・リリース承認ゲート）は回答を断る。単発のプランの `approve-*`・`reject-*` は、`ndf ci answer` が `refused` で止まる。AI が自分の判断で承認の回答を打っても、担い手 `user` の証跡にならない
+- 回答した者を `conductor`・`service:<主体>`（MVV 判定の `service:mvv` を除く）とした回答では、どちらの経路も証跡を書かない。PR を持つ工程の承認ゲート（設計承認ゲート・リリース承認ゲート）は、承認でマージが本番へ反映され得るときだけ回答を断る。反映されないときは証跡を書かずに回答を記録する（既存の Factory の `service:factory` の回答を壊さない）。単発のプランの `approve-*`・`reject-*` は、`ndf ci answer` が `refused` で止まる。AI が自分の判断で承認の回答を打っても、担い手 `user` の証跡にならない
 - `ndf ci answer` を端末から直接打っても、回答の記録が無ければ書かない
 - 証跡のマーカーを含むコメントを AI が Bash（`gh pr comment`・`gh api` など）で書く操作は、hook の guard `merge-production` が止める。証跡は上の 3 つの経路からしか書けない
 - 以上で、うっかり打った場合と、承認の権限を持たない人が打った場合を止める。承認の権限を持つ利用者のアカウントで、AI が回答した者を `human` と偽る・回答の記録ごと偽る・hook の外から書く場合は、脅威に入れない（承認の仕組みの脅威の整理。 https://github.com/devbasex/ai-plugins/issues/2773 ）。今の工程の承認ゲート（`ndf answer --by human`）とリリースの PR の証跡も、同じ前提で人の回答を受けている
@@ -523,13 +524,49 @@ MVV 判定の通過では、証跡を別のコメントにしない。今の判�
 
 テストは GitHub と Git を差し替えた偽物で書き、子のプロセスの起動と本物の時間の待ちは使わない。
 
+## 実装で設計から変えた点
+
+実装で次の 5 点を設計から変えた。この設計書は実装に合わせて直してある（実装を正とする）。
+
+| 変えた点 | 設計の時点 | 実装 | 理由 |
+| --- | --- | --- | --- |
+| 承認ゲートを持たない工程の `design-merge` | 工程から組む `design-merge` はいつも `stale` | 工程が承認ゲートを持たないとき（`light` の設計の工程）は `defer`。差し込みの組み立て（`progress/invoke.py`）が、工程の承認ゲートの有無（`StageRun.gated`）で決める | `light` の設計の工程は承認ゲートを持たない。`stale` では承認を取り直す場所が無く、`approval_stale` で止まり続ける |
+| 表 `PRODUCTION_GATE` に無いテンプレート | 止める（`TemplateValuesMissing`） | 止めず、既定の `stop` のまま組む | `stop` は承認待ち（終了コード 10）で止まり、承認の無いマージをしない。表に無いことを理由に工程を止める必要が無い |
+| 工程の承認ゲートで回答した者を確かめる範囲 | `conductor`・`service:<主体>`（`service:mvv` を除く）の回答はいつも断る | 承認でマージが本番へ反映され得る承認の対象（見た対象の「本番へ反映されるか」が「はい」）のときだけ断る。反映されないときは証跡を書かずに回答を記録する。外のオーガナイザーのファイルを中継した回答は、中継を確かめられないので断る | 既存の Factory の `service:factory` の回答を壊さない。守るのは、AI の回答から担い手 `user` の証跡を作らないことで、本番へ反映されない承認には証跡が要らない |
+| 回答の記録の保存先 | `{state_dir}/answers/<ステップ>.json` | `{state_dir}/answer-records/<ステップ>.json` | `answers` は結果 JSON の語（`result.ANSWERS`）と同じ文字列になり、`ndf check` の事実の重複に当たる |
+| 承認の対象とマージの承認の証跡の置き場 | `domains/release/trail.py` | `core/merge_approval.py`（回答の語は `core/approval_words.py`） | 工程（`progress/gate`）が使うので、`domains` に置くと下の層が上の層を読む（`ndf check` の規則 `layer`）。両方が使う部品を両方より下の `ndf.core` へ移した。振る舞いは変えていない |
+
+## 子の表の変更
+
+新設したモジュール（`ndf.core.production_merge`・`ndf.core.actors`・`ndf.core.merge_approval`・`ndf.core.approval_words`）のオーナーの子 `PM1` を足し、それを読む子の先に要る子へ `PM1` を足す（規則 IG1）。閉じた子 `C2`（`core/plan` が `ndf.core.actors` を読む）へは作業を足さず、追補の子 `C2+` を足す。`AD1`（`ci_cli.py`）は閉じているので、追補の `AD1+` に足す。`PM1` と `C2+` の中身はこの PR で入れ終えるので、`closed` を真にする。
+
+| 記号か表 | 項目 | 変更の前 | 変更の後 |
+| --- | --- | --- | --- |
+| `PM1`（足す） | `issue` | — | `4409` |
+| `PM1`（足す） | `packages` | — | `ndf.core.actors`・`ndf.core.approval_words`・`ndf.core.merge_approval`・`ndf.core.production_merge` |
+| `PM1`（足す） | `needs` | — | `X0`・`AD1` |
+| `PM1`（足す） | `order` | — | `4` |
+| `PM1`（足す） | `lane` | — | `l4409` |
+| `PM1`（足す） | `closed` | — | 真 |
+| `C2+`（足す） | `issue` | — | `4409` |
+| `C2+`（足す） | `packages` | — | （無し） |
+| `C2+`（足す） | `needs` | — | `C2`・`PM1` |
+| `C2+`（足す） | `order` | — | `5` |
+| `C2+`（足す） | `lane` | — | `l4409` |
+| `C2+`（足す） | `closed` | — | 真 |
+| `AD1+` | `needs` | `AD1`・`D1+`・`T1+` | `AD1`・`D1+`・`T1+`・`PM1` |
+| `M2` | `needs` | `P1a`・`AD1`・`AD1+`・`B1` | `P1a`・`AD1`・`AD1+`・`B1`・`PM1` |
+| `M3a` | `needs` | `M3b`・`D2`・`AD1`・`AD2`・`AD3`・`T1` | `M3b`・`D2`・`AD1`・`AD2`・`AD3`・`T1`・`PM1` |
+| `P1b` | `needs` | `P1a`・`C2`・`C3`・`AD3`・`AD3+` | `P1a`・`C2`・`C3`・`AD3`・`AD3+`・`PM1` |
+| `P2` | `needs` | `P1b`・`P3` | `P1b`・`P3`・`PM1` |
+
 ## 設計の結果
 
 ファイルと関数の粒度の設計は、詳細設計書 [issue-4409-design-detail.md](./issue-4409-design-detail.md) にある。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるため、別ファイルにした。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4409 | 実装する | — | `plugins/ndf/src/ndf/core/production_merge.py`（新設）、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/release/trail.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/causes/approval_stale.json`（新設）、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/templates/merge.json`、`plugins/ndf/contracts/templates/plan-to-spec.json`、`plugins/ndf/contracts/templates/close.json`、`plugins/ndf/contracts/templates/fix.json`、`plugins/ndf/contracts/templates/check.json`、`plugins/ndf/contracts/templates/design-merge.json`、`plugins/ndf/contracts/templates/release.json`、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/light.json`、`plugins/ndf/contracts/workflow/modes/operation.json`、`plugins/ndf/contracts/workflow/modes/documentation.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/production-merge.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/core/test_production_merge.py`（新設）、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/domains/hooks/test_strict.py`、`plugins/ndf/tests/progress/test_invoke_template_values.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_production_merge_flow.py`（新設）、`plugins/ndf/tests/progress/test_definition_migration.py`（新設）、`plugins/ndf/tests/domains/release/test_trail.py`、`plugins/ndf/tests/adapters/test_github_merge.py`、`plugins/ndf/tests/progress/test_gate_answering.py`、`plugins/ndf/tests/core/plan/test_runner.py` |
+| #4409 | 実装する | — | `plugins/ndf/src/ndf/core/production_merge.py`（新設）、`plugins/ndf/src/ndf/core/merge_approval.py`（新設）、`plugins/ndf/src/ndf/core/approval_words.py`（新設）、`plugins/ndf/src/ndf/core/actors.py`（新設）、`plugins/ndf/src/ndf/domains/release/approval_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/src/ndf/checks/children.json`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/release/trail.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/hooks/strict.py`、`plugins/ndf/contracts/hooks/imports.json`、`plugins/ndf/contracts/causes/approval_stale.json`（新設）、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/templates/merge.json`、`plugins/ndf/contracts/templates/plan-to-spec.json`、`plugins/ndf/contracts/templates/close.json`、`plugins/ndf/contracts/templates/fix.json`、`plugins/ndf/contracts/templates/check.json`、`plugins/ndf/contracts/templates/design-merge.json`、`plugins/ndf/contracts/templates/release.json`、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/light.json`、`plugins/ndf/contracts/workflow/modes/operation.json`、`plugins/ndf/contracts/workflow/modes/documentation.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/production-merge.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/core/test_production_merge.py`（新設）、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/domains/hooks/test_strict.py`、`plugins/ndf/tests/progress/test_invoke_template_values.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_production_merge_flow.py`（新設）、`plugins/ndf/tests/progress/test_definition_migration.py`（新設）、`plugins/ndf/tests/domains/release/test_trail.py`、`plugins/ndf/tests/adapters/test_github_merge.py`、`plugins/ndf/tests/progress/test_gate_answering.py`、`plugins/ndf/tests/core/plan/test_runner.py` |
 
 ## 外部の調査
 
