@@ -1,0 +1,10 @@
+{
+  "summary": "キャッシュへの書き込みの倍率（入力の単価に掛ける。寿命ごと）",
+  "ratios": {
+    "1h": 2.0,
+    "5m": 1.25
+  },
+  "read_by": [
+    "ndf.domains.relay.keep_cache"
+  ]
+}

@@ -654,7 +654,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
+        self.rewake_used = {}  # 今の起動の記録は登録なし。登録を渡す候補だけが `_rewake_child` で書き直す
         signals.drop_other_busy(self.dir, launch)  # 今の起動の記録は子の SessionStart の hook が書く（#4049）
+        self.rewake = self._rewake_plan(self._env_for(None, launch, req.session_id))  # 起床の hook の登録の前提（#4068）
         try:
             got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once], launch)
         except Halt as halt:
@@ -680,9 +682,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}
         self._log(log)
         prev_account = prev.account if prev is not None else None
-        self._log(
-            {"kind": "account", "from": prev_account, "account": target.account, "reason": target.reason, "skipped": list(target.skipped)}
-        )
+        row = {"kind": "account", "from": prev_account, "account": target.account, "reason": target.reason, "skipped": list(target.skipped)}
+        self._log({**row, **self.rewake_used})
         return None
 
     def _spin_line(self) -> str:

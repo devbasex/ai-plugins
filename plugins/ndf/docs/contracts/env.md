@@ -66,6 +66,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_NAME` | user | string | — | 名前つきのラッパーの名前。無ければリレーハブが t1・t2… を付ける | 内部（予告なく変えてよい） |
 | `NDF_RELAY_PIN` | ndf | string | — | 親の接続の識別。ラッパーが従量の接続と API キーの子にだけ入れ、ほかの子では外す。入れ子の ndf plan の claude -p は、読み直した設定の識別がこの値と同じときだけ起動する（値はキーを含まないハッシュか名前と世代） | 内部（予告なく変えてよい） |
 | `NDF_RELAY_PLAN` | ndf | string | — | リレーハブが spawn --plan で起動したラッパーの並列の計画の名前。あればラッパーは子の AskUserQuestion の質問を ndf lanes question で計画のリクエストとして載せる | 内部（予告なく変えてよい） |
+| `NDF_RELAY_REWAKE` | ndf | string | — | 中継のラッパーが起床の hook の登録を渡した子にだけ 1 で渡す。起床の hook はこれが 1 でなければ眠らず状態と記録を読まずに終わる（#4068） | 内部（予告なく変えてよい） |
 | `NDF_RELAY_ROLE` | ndf | string | — | リレーハブが spawn --role で起動したラッパーの役割 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_SESSION` | ndf | string | — | 中継のラッパーが子へ渡す子の会話の ID。hook は入力の session_id がこれと同じ会話を中継の対象としてバックグラウンドの作業の記録を書き、書けない開始を止める（子のシェルから起動した claude を外す） | 内部（予告なく変えてよい） |
 | `NDF_RELAY_SPAWNED` | ndf | flag | — | リレーハブが tmux で起動したラッパーのマーカー | 内部（予告なく変えてよい） |

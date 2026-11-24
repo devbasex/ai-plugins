@@ -1,0 +1,7 @@
+{
+  "summary": "出力の倍率（入力の単価に掛ける）",
+  "default": 5,
+  "read_by": [
+    "ndf.domains.relay.keep_cache"
+  ]
+}

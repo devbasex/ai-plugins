@@ -85,3 +85,9 @@ def test_hook_scripts_pass_when_the_body_cannot_be_read(monkeypatch):
         spec.loader.exec_module(module)
         monkeypatch.setitem(sys.modules, body, None)
         assert module.main([f"{name}.py", "claude", "Stop"]) == 0
+
+
+def test_plugin_registration_has_no_async_rewake():
+    # #4068 の受け入れ条件 3: 起床の hook はプラグインの登録（render と hooks/claude.json）に載せない
+    assert "asyncRewake" not in json.dumps(registration.render("claude"))
+    assert "asyncRewake" not in registration.path_of("claude").read_text(encoding="utf-8")

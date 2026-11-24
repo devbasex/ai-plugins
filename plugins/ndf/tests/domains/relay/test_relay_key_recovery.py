@@ -172,9 +172,11 @@ def test_d12_settings_that_bring_other_credentials_refuse_the_registry_key(tmp_p
 def test_d12_target_env_refuses_a_missing_or_off_key(tmp_path):
     store = register(tmp_path)
     s, _, env = _child(tmp_path)
-    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    assert (
+        account_choice.target_env(env, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"])) == "key_missing"
+    )
     put_book(store, use="off")
-    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_off"
+    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"])) == "key_off"
 
 
 def _launched(tmp_path, monkeypatch):
@@ -185,7 +187,7 @@ def _launched(tmp_path, monkeypatch):
     d.mkdir(mode=0o700)
     os.chmod(d, 0o700)
     rec = key_helper.create(d)
-    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], (rec.path, rec.helper_id))
+    got = account_choice.key_target(env, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]), (rec.path, rec.helper_id))
     assert isinstance(got, account_choice.Built), got
     assert got.generation == "gen-1" and got.pin_file is not None and got.pin_file.is_file()
     for k, v in got.env.items():
@@ -403,7 +405,10 @@ def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
     s, environ, child = _child(tmp_path)
     probes = account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset())
     assert [(p.name, p.reason) for p in probes] == [("key:key-main", "key_missing")]
-    assert account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    assert (
+        account_choice.target_env(child, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]))
+        == "key_missing"
+    )
     reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
     assert "key:key-main" not in reader.read(0.0, True).fallbacks()
     with pytest.raises(reg.AccountError):
@@ -477,7 +482,7 @@ def test_r6_3_the_watch_reads_the_version_checked_at_launch(tmp_path, monkeypatc
     store = register(tmp_path)
     put_book(store)
     s, _, child = _child(tmp_path)
-    built = account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"])
+    built = account_choice.target_env(child, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]))
     monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: None)
     started = account_choice.Started("gen-1", built.resolved.helper, "2.1.330")
     assert account_choice.drift("key:key-main", built.env, built.argv, tmp_path, store, started)[:2] == (None, None)
