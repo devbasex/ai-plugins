@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
-from ndf import slot_pool
+from ndf import values
 from ndf.adapters import transcript
 from ndf.domains.hooks.tables import TableError
 
@@ -108,7 +108,7 @@ def _usage_row(rec: Mapping[str, Any]) -> Mapping[str, Any]:
 def _amount(usage: Mapping[str, Any], key: str) -> int:
     """`usage` の量の項目。無いか整数でなければ 0（合計に入れない）。"""
     got = usage[key] if key in usage else 0
-    return got if slot_pool.is_int(got) else 0
+    return got if values.is_int(got) else 0
 
 
 def _split_writes(usage: Mapping[str, Any]) -> Optional[tuple[int, int]]:
@@ -117,7 +117,7 @@ def _split_writes(usage: Mapping[str, Any]) -> Optional[tuple[int, int]]:
     if not isinstance(split, dict):
         return None
     got = tuple(split[k] if k in split else None for k in WRITE_KEYS.values())
-    return got if all(slot_pool.is_int(v) and v >= 0 for v in got) else None
+    return got if all(values.is_int(v) and v >= 0 for v in got) else None
 
 
 def ttl_of(writes: tuple[int, int]) -> Optional[str]:
@@ -149,7 +149,7 @@ def _turn_of(entry: Mapping[str, Any], ref: tuple[str, float], tokens: Optional[
     model = entry["message"].get("model")
     output = usage.get("output_tokens")
     writes = _split_writes(usage)
-    if tokens is None or not slot_pool.is_int(output) or not isinstance(model, str) or not model or writes is None:
+    if tokens is None or not values.is_int(output) or not isinstance(model, str) or not model or writes is None:
         return None
     return LastTurn(ref[0], ref[1], tokens, ttl_of(writes), model, _amount(usage, _READ), _amount(usage, _WRITE), output)
 
@@ -208,7 +208,7 @@ def _count(usage: Mapping[str, Any], key: str, absent_zero: bool) -> bool:
     """費用に使う量の項目が 0 以上の整数か。`absent_zero` の項目は、無ければ 0 として通す（会話の記録の読み取りと同じ扱い）。"""
     if key not in usage:
         return absent_zero
-    return slot_pool.is_int(usage[key]) and usage[key] >= 0
+    return values.is_int(usage[key]) and usage[key] >= 0
 
 
 def _priced_call(usage: Mapping[str, Any], split: Optional[tuple[int, int]]) -> bool:

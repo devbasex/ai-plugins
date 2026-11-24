@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping, Optional, Union
 
-from ndf import slot_pool
+from ndf import values
 
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 SYNTHETIC_MODEL = "<synthetic>"
@@ -147,12 +147,12 @@ def _squeeze(text: str) -> str:
 def usage_tokens(rec: Mapping[str, Any]) -> Optional[int]:
     """採用行の `usage` の 3 つの項目の和。形が違えば None（キャッシュの項目は無ければ 0）。"""
     usage = _message(rec).get("usage")
-    if not isinstance(usage, dict) or not slot_pool.is_int(usage.get("input_tokens")):
+    if not isinstance(usage, dict) or not values.is_int(usage.get("input_tokens")):
         return None
     total = 0
     for key in USAGE_KEYS:
         value = usage[key] if key in usage else 0
-        if not slot_pool.is_int(value):
+        if not values.is_int(value):
             return None
         total += value
     return total
