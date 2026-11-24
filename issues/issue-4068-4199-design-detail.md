@@ -57,11 +57,11 @@ plugins/ndf/
 | `src/ndf/domains/hooks/rewake.py` | 新設 | Stop の背景で起動し、今回の応答を確かめて世代を書き、眠って確かめ直し、起こすなら終了コード 2 で終わる | `keep_cache`・`signals`・`markers`・`hooks.tables`・`relay_busy`・`adapters.transcript`（`read_tail`） | モジュール `rewake` | `run`・`_target`・`_settle`・`_wait`・`_finish`（新設） |
 | `src/ndf/domains/hooks/guards/turn.py` | 変更 | 中継の下の UserPromptSubmit で、今の起動を照らしてから起こす状態の世代を入力の時刻に書き換え（状態が無ければ世代だけの状態を作る）、起こす文の入力を中継の入力と見分ける（決定 10 の実測で決めた形） | `signals`・`keep_cache` | — | `check`（変更） |
 | `hooks/entry.py` | 変更 | `argv[3]` が `rewake` なら `rewake.run` の終了コードを返す | — | — | `main`（変更） |
-| `src/ndf/domains/hooks/registration.py` | 変更 | 中継の子へ `--settings` で渡す起こす hook の登録（Stop の `asyncRewake: true` 1 つ・`timeout` は背景の予算から・command は `hooks/entry.py` の絶対パス）を作る。プラグインの登録（`render`）には足さない | `hooks.tables`・`hooks.budget` | — | `rewake_entry`・`rewake_settings`（新設）。`render` は変えない |
-| `src/ndf/domains/hooks/budget.py` | 変更 | 背景の登録（`rewake_entry` と同じく `rewake_budget` の `timeout` を持つ行）を `async_rewake` の予算と上限で検査し、プラグインの登録のファイルに `asyncRewake` の登録があれば破れとする。同期の登録は今の予算と上限で検査する | `hooks.tables`（`registration` は読まない。`registration` が `budget` を読むので輪を作らない） | — | `rewake_budget`（新設）・`budget_registrations`・`_file_registrations`・`_registration_errors`（変更） |
+| `src/ndf/domains/hooks/registration.py` | 変更 | 中継の子へ `--settings` で渡す起こす hook の登録（Stop の `asyncRewake: true` 1 つ・`timeout` は背景の予算から・command は `hooks/entry.py` の絶対パス）を作る。プラグインの登録（`render`）には足さない | `hooks.tables`・`hooks.budget` | — | `rewake_entry`・`rewake_settings`・`rewake_unreachable`（新設。`budget.rewake_reach` をそのまま返す）。`render` は変えない |
+| `src/ndf/domains/hooks/budget.py` | 変更 | 背景の登録（`rewake_entry` と同じく `rewake_budget` の `timeout` を持つ行）を `async_rewake` の予算と上限で検査し、`cache.wake` の起こす時点と確かめる間隔が背景の `timeout` の内に届くか（`rewake_reach`）を確かめ、プラグインの登録のファイルに `asyncRewake` の登録があれば破れとする。同期の登録は今の予算と上限で検査する | `hooks.tables`・`relay.keep_cache`（`TTL_SECONDS` だけ）（`registration` は読まない。`registration` が `budget` を読むので輪を作らない） | — | `rewake_budget`・`rewake_reach`（新設）・`budget_registrations`・`_file_registrations`・`_registration_errors`（変更） |
 | `src/ndf/adapters/cli_floor.py` | 変更 | `require` が下限の確かめに使った版を返す | 標準ライブラリ・`semver` | — | `require`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 起こす状態（会話ごと）と起こす記録の読み書き。世代は新しい時刻でだけ書き換え、同じ応答の取り合いを `contested` にする。今の起動の記録（`launch.json`）に起こす hook の登録を渡したか（`rewake`）を持つ | 標準ライブラリ | — | `read_keep`・`bump_generation`・`update_keep`・`append_cache_log`・`rewake_on`（新設）・`set_launch`（`rewake` の引数を足す）、定数 `KEEP_PREFIX`・`CACHE_LOG`・`SESSION_ID_RE` |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | `_start` の版の確かめ（`cli_floor.require`）の版が `cache.rewake` の `versions` のどれかと完全に一致し、利用者の `--settings` が無ければ、子の起動の引数に `--settings <rewake_settings の JSON>` を、子の環境に `NDF_RELAY_REWAKE=1` を足す | `signals`・`adapters.cli_floor`・`hooks.registration`（`rewake_settings`） | `Wrapper` | `_start`（変更） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | `_start` の版の確かめ（`cli_floor.require`）の版が `cache.rewake` の `versions` のどれかと完全に一致し、利用者の `--settings` が無く、`registration.rewake_unreachable()` が None なら、子の起動の引数に `--settings <rewake_settings の JSON>` を、子の環境に `NDF_RELAY_REWAKE=1` を足す | `signals`・`adapters.cli_floor`・`hooks.registration`（`rewake_settings`） | `Wrapper` | `_start`（変更） |
 | `src/ndf/domains/relay/cli_cache.py` | 新設 | `ndf relay cache report` | `keep_cache`・`signals` | モジュール `cli_cache` | `report`・`run`（新設） |
 | `src/ndf/domains/relay/cli.py` | 変更 | サブコマンド `cache report` を足す | `cli_cache` | — | `build_parser`（変更） |
 | `contracts/limits/<方針の名前>.json`・`contracts/schemas/limits.schema.json`・`src/ndf/contracts/limits.py` | 新設（方針のファイル）・変更 | 方針のファイル `cache.wake`・`cache.write-ratio`・`cache.read-ratio`・`cache.output-ratio`・`cache.wake-cost`・`cache.hit`・`cache.handoff`・`cache.rewake`・`hook.budget.stop-rewake`（どれも `contracts/limits/` に 1 方針 1 ファイル）を足し、スキーマと `Policy` に `ratios`・`default`・`ratio`・`versions`・`calls`・`start` の項目を足す | — | `Policy` | `texts`（新設）・`value`（数でない値で `LimitsError`） |
@@ -84,7 +84,7 @@ plugins/ndf/
 | `wake_reply` | 同上 | 新設 | `wake_reply(tail: str, after_id: str) -> Reply` | `tail` は `last_turn` と同じ `read_tail` の文字列（読み直さない）。`after_id` の応答の直後にある最初の入力の行だけを見る（Tool の結果の行は入力に数えない）。起床の文の形（設計の決定 7 の実測 8 で決めた形を `is_wake_input` に閉じる）なら、その次から次の入力の手前（無ければ末尾）までの `assistant` の `message.id` をその起床の呼び出しとし、`Reply("wake", <最初の呼び出しの読み出し>, <全呼び出しの Usage>)`。最初の呼び出しの書き込みが両方 0 でも `wake` で返す。利用者の入力か背景の作業の知らせの形なら、その先を探さずに `Reply("preempted", None, None)`。どちらとも決められないなら `Reply("unknown", None, None)`。`after_id` の応答が `tail` に無い（起床の後の大きな Tool の結果で、読み取りの上限の外へ押し出された）なら `Reply("truncated", None, None)`。`after_id` が `tail` に在れば、その後の行は末尾まで連続して `tail` に在るので、途中の呼び出しだけが欠けることは無い |
 | `opening` | 同上 | 新設 | `opening(tail: str, message_id: str) -> Opening` | `message_id` の応答を始めた入力（さかのぼって最初の、Tool の結果でない入力の行）と、その入力の直後の最初のモデル呼び出しを返す。`kind` はその入力に `is_wake_input` を打った値から `wake`（起床の文）・`normal`（通常の入力）・`unknown`（決められない・入力の行が `tail` に無い）。`normal` のときだけ `at`（入力の行の `timestamp` の UNIX 秒）と `first_read`（最初の呼び出しの読み出し）を持つ。`_settle` が待ちを明けるかと、`wait_end` の当たり・時刻を決めるのに使う。今回の応答の最後の呼び出しや Stop の時刻は使わない |
 | `is_wake_input` | 同上 | 新設 | `is_wake_input(line: Mapping[str, Any]) -> Optional[bool]` | 入力の行 1 つが起床の文なら真、通常の入力なら偽、決められなければ None。実測 8 の形だけを知る関数で、実測の前は常に None（版の門も閉じている） |
-| `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から待ちの寿命の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境、`cache.handoff` の `calls`・`count`・`start`。辞書でない・数でない値は `tables.TableError` |
+| `ratios` | 同上 | 新設 | `ratios(get: Callable[[str, str], Any], model: str, ttl: str) -> Ratios` | `get(name, key)` で上限の設定の値を読む（hook は `tables.policy_value` を渡す。集計は読まない）。`cache.write-ratio` の `ratios`（辞書）から待ちの寿命の `w` と、`1h`・`5m` の `w_1h`・`w_5m`、`cache.read-ratio` の `ratios`（辞書。表に無いモデルは `default`）から `r`、`d`・出力の倍率・余白・確かめる間隔・当たりの境、`cache.handoff` の `calls`・`count`・`start`。辞書でない・数でない値は `tables.TableError`。確かめる間隔（`cache.wake.interval`）が 0 以下か、余白（`cache.wake.seconds`）が 0 未満か 1 時間の寿命（`TTL_SECONDS["1h"]`）以上でも `tables.TableError`（スキーマの `interval`・`seconds` はほかの方針と共通で 0 を許すので、ここで拒む。`_wait` が休まずに世代を読み続けない） |
 | `wake_at` | 同上 | 新設 | `wake_at(at: float, ttl: str, margin: float) -> Optional[float]` | `at + TTL_SECONDS[ttl] − margin`。`ttl` は `_settle` が補った寿命（未定のまま呼ばない）。`margin` が寿命以上なら None（5 分の寿命は起こさない） |
 | `n_max` | 同上 | 新設 | `n_max(tokens: int, q: Ratios) -> int` | `floor((w − r) × S / (r × S + d))`。0 未満にしない |
 | `handoff_fits` | 同上 | 新設 | `handoff_fits(spent: float, tokens: int, q: Ratios) -> bool` | 引継ぎの起床の費用 `C_h(S) = calls × r × S + count + w × start` として、`spent + C_h(S) <= (w − r) × S`（`S` は判定の時の `tokens`）。待ちの始まりの `S` は使わない（設計の決定 5） |
@@ -115,7 +115,7 @@ plugins/ndf/
 | `last_turn` | 次の応答を読んだ | 遅れて動いた古い hook | 応答の時刻と `started` の比べ | `reason` `newer` | 無し（呼び手は何も書かずに 0） | — |
 | `wake_reply` | 起床の呼び出しが末尾の範囲に無い | 起床の後の大きな Tool の結果が `hook.transcript-tail` の大きさを越えた | `after_id` の応答が `tail` に無い | `kind` `truncated` | 無し（呼び手が `hit` null・`priced` 偽の `wake_result` を書いて印を消す。止めない） | — |
 | `wake_reply` | 寿命別の書き込みが読めない | 記録の形の変化・和の食い違い | 各呼び出しの `cache_creation` の照らし | `Usage.priced` 偽 | 無し（集計が費用から外して `unpriced_waits` に数える） | 読み方を直す |
-| `ratios` | 行が無い・値が数でない | 上限の設定の壊れ | 型の照らし | `tables.TableError` を投げる | 無し（呼び手が起こさない） | 上限の設定を直す（`ndf check` が落とす） |
+| `ratios` | 行が無い・値が数でない・間隔が 0 以下・余白が範囲の外 | 上限の設定の壊れ・利用者の宣言 | 型と範囲の照らし | `tables.TableError` を投げる | 無し（呼び手が起こさない） | 上限の設定を直す（`ndf check` が落とす） |
 
 ### 単体テストの観点
 
@@ -124,6 +124,7 @@ plugins/ndf/
 | `last_turn` | 実測の形の見本を読める。最後の `assistant` の行に `usage` が無い見本では、前の行が完全でも `form`。完全な前の応答だけが残り `last_message` が違う見本では `unrecorded`。`last_message` が None でも `unrecorded`。同じ文で時刻が `started` の 1 秒後なら `newer`、`started` と同じなら読める。空の文字列（`read_tail` が読めなかった）で `unrecorded`。寿命: 1 時間が正で `1h`、5 分だけ正で `5m`、両方 0 で None（引数に状態の寿命を取らない）、`cache_creation` が無い・負で `form` |
 | `wake_reply` | 起床の文の後の応答を返す。Tool を 2 回使った起床の見本では `first_read` が最初の呼び出しの読み出し、`usage.calls` が 3 で合計が 3 つの和、Tool の結果の行で区切らない。1 回目が 1 時間へ 300・2 回目が 5 分へ 1,000 書いた見本で `cache_write_1h` 300・`cache_write_5m` 1,000・`priced` 真。最初の呼び出しの書き込みが両方 0 の見本でも `wake` で `first_read` を返す。どれかの呼び出しの寿命別の項目が欠ける・整数でない・負・和が合計と違う見本で `priced` 偽・2 つの合計が None。起床の後に利用者の入力が続く見本では、その入力の後の応答を含めない。印の直後の最初の入力が利用者の入力の見本では、その後に起床の文の応答があっても `preempted`。最初の入力の形を決められない見本では `unknown`。引継ぎの起床で 2 回目の Tool の結果が `tail` の大きさを越え、`after_id` の応答が `tail` の外へ押し出された見本では `truncated`。同じ大きな結果でも `after_id` が `tail` に残る大きさでは `wake` で 3 つの和 |
 | `opening` | 利用者の入力で始まり Tool を使った応答で `normal`（Tool の結果の行を飛ばす）、`at` が入力の行の時刻、`first_read` が入力の直後の最初の呼び出しの読み出し（最初の呼び出しの読み出し 20,000・後の Tool の呼び出しの読み出し 101,000 の見本で 20,000）。起床の文で始まった応答で `wake`。形を決められない入力・入力の行が `tail` に無い見本で `unknown` |
+| `ratios` | `cache.wake` の `interval` を 0・-1 にした見本、`seconds` を -1・3,600 にした見本で `tables.TableError`（hook は眠らずに 0）。`interval` 60・`seconds` 600 で通る |
 | `n_max` | Opus 5.5・`1h`・`d` 2,000 で `S` 400,000 → 35、500,000 → 36、20,000 → 13。読み出し 0.1 で 400,000 → 18 |
 | `wake_at` | `1h`・余白 600 で `at + 3000`、`5m` で None |
 | `handoff_fits` | Opus 5.5・`1h`・`d` 2,000・`calls` 4・`count` 25,000・`start` 60,000 で、`S` 250,000・`spent` 292,500 → 真（487,500 ちょうど）、292,501 → 偽。`count` を 400,000 にすると `spent` 0 でも偽 |
@@ -233,14 +234,15 @@ plugins/ndf/
 
   `--settings` の hook にはプラグインの根の環境変数が渡らないので、絶対パスで書く。timeout は宣言（`contracts/limits/hook.budget.stop-rewake.json`）から読み、3,300 を埋め込まない。事象の行に `async_rewake` が無い・`rewake_budget` が None なら `tables.TableError`
 - `registration.rewake_settings(plugin_root: Path) -> dict[str, Any]` を足す。返す値は `{"hooks": {"Stop": [{"hooks": [rewake_entry("claude", "Stop", plugin_root)]}]}}` である。`render` は変えない（プラグインの登録に `asyncRewake` は現れない）
-- 検査: `budget_registrations` は、`async_rewake` を持つ事象に背景の行を 1 つ足す（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`）。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、背景の行を `rewake_budget` の締め切りと `async_rewake.timeout_max` で照らす。ほかの行は今のとおり事象の予算と `timeout_max` で照らす。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）
+- 検査: `budget_registrations` は、`async_rewake` を持つ事象に背景の行を 1 つ足す（登録のファイルからは読まない。`timeout` は `rewake_entry` が使うのと同じ `rewake_budget` の `timeout`）。`_file_registrations` は登録のファイルの登録ごとに `async_rewake`（登録の `asyncRewake` が真か）を行に足す。`_registration_errors` は、背景の行を `rewake_budget` の締め切りと `async_rewake.timeout_max` で照らす。ほかの行は今のとおり事象の予算と `timeout_max` で照らす。登録のファイルに `asyncRewake` が真の登録があれば、事象によらず破れとする（プラグインを入れた全ての会話で起動させない）。背景の行には、`rewake_reach` の診断も破れとして足す
+- `budget.rewake_reach(budget: Budget) -> Optional[str]` を足す。`cache.wake` の `seconds`（余白）と `interval`（確かめる間隔）を `tables.policy_value` で読み、次のどれかなら理由の文（値と超えた秒を含む）を、どれでもなければ None を返す。`interval` が 0 以下。`seconds` が 0 未満か `TTL_SECONDS["1h"]` 以上。`TTL_SECONDS["1h"] − seconds + interval + budget.margin` が `budget.timeout` を越える（既定の 600・60・240 で 3,000 + 60 + 240 = 3,300 秒ちょうど。余白を 120 秒にすると 3,780 秒で越える）。`registration.rewake_unreachable()` は `rewake_budget("claude", "Stop")` を渡してこの値を返す。`cache.wake` の `read_by` に `ndf.domains.hooks.budget` を足す
 - `entry.py` は `argv[3] == "rewake"` なら `call("ndf.domains.hooks.rewake", "run", argv)` の値を返す（ほかは今のとおり 0）
 
 | 観点 | テスト |
 | --- | --- |
 | 中継の外で起動しない | `render("claude")` と生成した `hooks/claude.json` のどの事象にも `asyncRewake` の登録が無く、Stop の登録は 1 つ。`hooks/claude.json` の Stop に `asyncRewake: true` の登録を足すと `check_budget` が破れとする |
 | 背景の登録 | `rewake_settings(<一時の根>)` の Stop の登録が 1 つで、`asyncRewake: true`・`timeout`（`hook.budget.stop-rewake` の値）を持ち、command が `<一時の根>/hooks/entry.py` の絶対パスと `rewake` を含み、`${CLAUDE_PLUGIN_ROOT}` を含まない。空白を含む根でも引数が 1 つに保たれる。`contracts/limits/hook.budget.stop-rewake.json` の値を差し替えると `timeout` が変わる。codex の登録は変わらない |
-| 予算の検査 | 生成した登録で `check_budget` が空。同期の Stop の登録の timeout を 601 にすると破れ（上限 600 のまま）。背景の予算の timeout を 3,301 にすると破れ。背景の予算の timeout を同期の予算の締め切り未満にしても、背景の予算の締め切り以上なら破れない。`async_rewake` の行を消すと `rewake_entry` が `TableError` |
+| 予算の検査 | 生成した登録で `check_budget` が空。同期の Stop の登録の timeout を 601 にすると破れ（上限 600 のまま）。背景の予算の timeout を 3,301 にすると破れ。背景の予算の timeout を同期の予算の締め切り未満にしても、背景の予算の締め切り以上なら破れない。`async_rewake` の行を消すと `rewake_entry` が `TableError`。`cache.wake` の `seconds` を 120 にすると `rewake_reach` が理由の文を返し、`check_budget` が破れとする。`interval` を 0 にしても同じ。既定の値では None |
 | 入口 | `rewake` の引数で `run` の 2 がそのまま返り、`run` を読めなければ 0。`NDF_RELAY_REWAKE` の無い環境で `rewake` の引数を渡すと、眠りの関数 0 回・状態と記録の読み取り 0 回で 0（登録の無い起動から直接呼んだとき） |
 
 ## UserPromptSubmit の guard（`turn`）
@@ -267,6 +269,7 @@ plugins/ndf/
 - `_start` は `cli_floor.require("claude", CLAUDE, env, self.s.cwd)` の返り値を版として使う。次の 2 つがそろえば、`_launch_target` へ渡す起動の引数（`[CLAUDE, *head, *self.s.args, *once]`）の `head` の後に `--settings` と `json.dumps(registration.rewake_settings(<根>))` を足す。起動先を決めた後の `Target.argv` には足さない。API キーの従量の子では、`account_choice._source` がこの 1 つの `--settings` を元の設定として読み、`_compose` が `apiKeyHelper` と `ConfigChange` の hook を合わせて 1 つの `--settings` に作り直すので、`hooks.Stop` の起こす登録はそのまま残る（`_compose` は元の `hooks` の `ConfigChange` 以外のキーを保つ）。キーでない子は足した引数をそのまま受ける
   - 版の文字列が `limits.texts("cache.rewake", "versions")`（`contracts/limits/cache.rewake.json` を読む）のどれかと完全に一致する（`semver` の大小では比べない）
   - 受け継ぐ引数（`claude_args.Parsed.carried`）に `--settings` の語も `--settings=` で始まる語も無い
+  - `registration.rewake_unreachable()` が None（起こす時点と確かめる間隔が背景の `timeout` の内に届く）。理由の文が返れば登録も `NDF_RELAY_REWAKE` も足さず、ラッパーの `log.jsonl` に `{"kind": "rewake_off", "reason": <理由の文>}` を起動ごとに 1 行書く（`ndf check` も同じ理由で破れとする）
 
   `<根>` は `self.launched_root` があればそれ、無ければ `tables.PLUGIN_ROOT`。一覧に無い・None・一覧が空・利用者の `--settings` があるなら足さない。利用者の `--settings` があるときは、受け継ぐ引数を並びも中身も変えずに渡す（`--settings` は最後の 1 つだけが効くので、重ねると利用者の設定が効かなくなる。#1543 の実測）。登録を足すときは、子の環境に `NDF_RELAY_REWAKE=1` も足す。足さないときは、親の環境に同じ名前があっても子の環境から外す（登録の無い子の hook が眠らないように）。`--resume` で起動し直すときも同じ判定で毎回足す（`--settings` は起動ごとの引数で、会話に残らない）。足したかは `signals.set_launch(self.dir, launch, rewake=<足したか>)` で今の起動の記録に書く。UserPromptSubmit の guard が `signals.rewake_on` で読む
 - 見回りでは版を読まない
@@ -274,6 +277,7 @@ plugins/ndf/
 | 観点 | テスト |
 | --- | --- |
 | 版の門 | `versions` を `["2.1.330", "2.1.332"]` にした値で、版 2.1.330 と 2.1.332 は足す・2.1.331（両端の間の測っていない版）・2.1.329・2.1.333 は足さない。読めない・一覧が空でも足さない。足した引数の JSON が `rewake_settings` と同じ。足した起動の子の環境に `NDF_RELAY_REWAKE=1` があり、足さない起動（一覧に無い版・利用者の `--settings`）では、親の環境に `NDF_RELAY_REWAKE=1` があっても子の環境に無い |
+| 届かない宣言 | 版が一覧に在り、`cache.wake` の `seconds` を 120 にした値で、初回の起動と `--resume` の再開のどちらも `--settings` の登録も `NDF_RELAY_REWAKE` も足さず、`log.jsonl` に `rewake_off` の行があり、今の起動の記録の `rewake` が偽 |
 | 利用者の `--settings` | 版が一覧に在り、受け継ぐ引数に `--settings=x.json` があるときと `--settings x.json` があるときのどちらも、初回の起動と `--resume` の再開の引数に `--settings` が 1 つだけで、利用者の値がそのまま並び、`rewake_settings` の JSON が無い。今の起動の記録の `rewake` が偽 |
 | 従量キーの子 | 版が一覧に在り、利用者の `--settings` が無く、起動先が API キーの従量の接続の子のとき、初回の起動と `--resume` の再開のどちらでも、子の起動の引数に `--settings` が 1 つだけで、その JSON が `apiKeyHelper`・`hooks.ConfigChange` の `config-gate` の hook・`hooks.Stop` の `rewake_settings` の登録の 3 つをすべて持つ。起動先の理由が `key_unresolved`・`key_overridden` にならない |
 | 版の取得 | `require` が下限の確かめに読んだ版を返し、下限より古ければ今のとおり `TooOld`。`_start` から通した 1 回の起動で、差し替えた `--version` の実行が 1 回だけ |
@@ -301,7 +305,7 @@ plugins/ndf/
 
 | ファイル | 形（`summary`・`read_by` を除く） | `read_by` |
 | --- | --- | --- |
-| `cache.wake.json` | `{"seconds": 600, "interval": 60}` | `ndf.domains.relay.keep_cache`（`ratios` の中で方針の名前を文字列リテラルで書いて `get` を呼ぶ。下の「読み手の突き合わせ」） |
+| `cache.wake.json` | `{"seconds": 600, "interval": 60}` | `ndf.domains.relay.keep_cache`（`ratios` の中で方針の名前を文字列リテラルで書いて `get` を呼ぶ。下の「読み手の突き合わせ」）・`ndf.domains.hooks.budget`（`rewake_reach` が `tables.policy_value` で読む） |
 | `cache.write-ratio.json` | `{"ratios": {"1h": 2.0, "5m": 1.25}}` | 同上 |
 | `cache.read-ratio.json` | `{"default": 0.1, "ratios": {"claude-opus-5-5": 0.05, "claude-sonnet-5-5": 0.05, "claude-fable-5-1": 0.025, "claude-fable-5-2": 0.025, "claude-mythos-5-1": 0.025, "claude-mythos-5-2": 0.025}}` | 同上 |
 | `cache.output-ratio.json` | `{"default": 5}` | 同上 |
