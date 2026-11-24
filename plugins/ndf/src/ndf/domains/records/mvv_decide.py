@@ -393,8 +393,7 @@ def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
     seq = seq[:end]
     if not seq:
         return False
-    lines = [n for n, r in enumerate(seq) if r.get("outcome") == REVIEW_REDLINE]
-    if lines and not any(r.get("outcome") == REVIEW_FIXED for r in seq[lines[-1] + 1 :]):
+    if _open_redline(seq):
         return False
     last = seq[-1]
     if last.get("outcome") != REVIEW_DEFERRED or not defer_holds(last.get(REVIEW_DEFER)) or "item" in last:
@@ -482,10 +481,20 @@ def _named(row: Mapping[str, Any]) -> str:
     return str(row["item"]) if isinstance(row.get("item"), str) else f"指摘 {row.get('id')}"
 
 
-def _key_hold(seq: Sequence[Mapping[str, Any]], mvv: tuple[int, str], hidden: str) -> Optional[str]:
-    """1 つのキーの記録の並びの保留（無ければ None）。優先順はレッドライン・伏せた行・見送り。"""
+def _open_redline(seq: Sequence[Mapping[str, Any]]) -> list[int]:
+    """1 つのキーの記録の並び `seq` に直っていないレッドラインがあれば、`redline` の行の位置（記録の順）。無ければ空。
+
+    直っていないとは、最後の `redline` の行より後に `fixed` の行が無いこと（バージョンを問わない）。"""
     lines = [n for n, r in enumerate(seq) if r.get("outcome") == REVIEW_REDLINE]
     if lines and not any(r.get("outcome") == REVIEW_FIXED for r in seq[lines[-1] + 1 :]):
+        return lines
+    return []
+
+
+def _key_hold(seq: Sequence[Mapping[str, Any]], mvv: tuple[int, str], hidden: str) -> Optional[str]:
+    """1 つのキーの記録の並びの保留（無ければ None）。優先順はレッドライン・伏せた行・見送り。"""
+    lines = _open_redline(seq)
+    if lines:
         items = dict.fromkeys(i for n in lines for i in _named(seq[n]).split("・"))
         last = seq[lines[-1]]
         return f"{'・'.join(items)}（redline）: {hidden if last.get('withheld') else _note(last, 'text')}"
