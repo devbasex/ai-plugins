@@ -215,7 +215,7 @@
           },
           "question_key": {
             "type": "string",
-            "description": "質問の文の SHA-256（reading add）"
+            "description": "質問ごとの文・複数選択か・選択肢の名前と説明だけを残し、キーの順を固定した JSON の SHA-256。計算は reading_decide.question_key を使う（reading add）"
           },
           "prs": {
             "type": "array",
