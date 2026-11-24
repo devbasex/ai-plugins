@@ -21,7 +21,7 @@ plugins/ndf/
 ├── src/ndf/domains/crossrefactor/launch.py       … claude の読むだけの起動と本文の取り出しを participants の関数で行う
 ├── src/ndf/domains/crossreview/
 │   ├── scope_decide.py                           … 埋めた席の記録（Filled）・前回の席が誰の代わりに読んだか
-│   ├── drive.py                                  … 今の席を持つ・起動し直しの後に埋める・資料を review-input/ に書く
+│   ├── drive.py                                  … 今の席を持つ・起動し直しの後に埋める・資料を実行ごとの review-input-*/ に書く
 │   ├── report_decide.py                          … ラウンドの表に「相手役」の列
 │   └── cli.py                                    … review_seats で席を決め、駆動の設定へ渡す
 ├── skills/cross-review/SKILL.md                  … 相手役の説明と終わり方の表
@@ -44,7 +44,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役と席を決め、読むだけの起動を組み立てる | `adapters.claude`・`adapters.agents`・`adapters.training`・`contracts.facts` | `Seats`（新設）、モジュール | `review_seats`・`runtime_of`・`free_seat`・`fill_targets`・`refusals`・`read_only_launch`・`answer_text`・`_able`・定数 `READ_TOOLS`・`SEAT_COUNT`（新設）・`unready`・`assign`（中身だけ変更） |
 | `src/ndf/adapters/claude.py` | 変更 | `claude -p` の起動の引数 | — | `ClaudeCall`（変更） | `permission_args`（変更）・`claude_launch`（読める場所を渡すだけ）・定数 `DONT_ASK`・`RESTRICTED`（新設） |
 | `src/ndf/domains/crossreview/scope_decide.py` | 変更 | ラウンドの範囲と記録のキー | `store`・`finish_decide` | `Filled`（新設）・`Basis`（変更） | `filled_of`・`stood_for`・定数 `FILLED`（新設）・`read_by_all_head`（変更） |
-| `src/ndf/domains/crossreview/drive.py` | 変更 | cross-review の収束ループの駆動 | `participants`・`scope_decide`・`report_decide` | `RunConfig`・`_Run`（変更）・`_Unread`・`_Reviewed`（新設） | `_input_path`・`_seat_launch`・`_fill`・`_fill_refused`・`_filled_warning`・`_reused_warnings`（新設）・`_launch_reviewers`・`_review`・`_reviewer_findings`・`_unread_hint`・`_round`・`_reusable`・`drive`（変更）・`_write_diff`・`_remarks_file`・`_prepare_round`（書き先か読む値だけ変える） |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | cross-review の収束ループの駆動 | `participants`・`scope_decide`・`report_decide` | `RunConfig`・`_Run`（変更）・`_Unread`・`_Reviewed`（新設） | `_input_path`・`_drop_inputs`・`_seat_launch`・`_fill`・`_fill_refused`・`_filled_warning`・`_reused_warnings`（新設）・`_launch_reviewers`・`_review`・`_reviewer_findings`・`_unread_hint`・`_round`・`_reusable`・`drive`（変更）・`_write_diff`・`_remarks_file`・`_prepare_round`（書き先か読む値だけ変える） |
 | `src/ndf/domains/crossreview/report_decide.py` | 変更 | 記録のコメントの本文 | `scope_decide` | モジュール | `_seats_cell`（新設）・`_round_rows`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | `ndf cross-review` のエントリポイント | `participants`・`drive` | `Resolved`（変更） | `_reviewers`（変更）・`_run_config`・`cmd_scope`・`_state_parsers`（読む値か help だけ変える） |
 | `src/ndf/domains/crossrefactor/launch.py` | 変更 | cross-refactoring の工程の担当の起動 | `participants` | モジュール | `_read_only`・`_collect_stdout`（呼ぶ先だけ変える）。`_answer_text` と定数 `READ_TOOLS` は消す（participants へ移す） |
@@ -52,7 +52,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `src/ndf/adapters/cli_floor.py` | 変更 | 外部 CLI のバージョンを下限と比べる | `contracts.facts` | モジュール | `require(name, argv0, env=None, cwd=None, args: Sequence[str] = ())`（変更）。`args` に行の `flag_floors` の引数があれば、その下限のうち最も高いものと比べる。無ければ今のとおり `min_version` と比べる。`refuse_old`・`version` は変えない |
 | `src/ndf/adapters/agents.py` | 変更 | 外部 CLI の起動と監視 | `cli_floor` | モジュール | `_guarded_run`（変更）。`cli_floor.require` に `args=spec.argv[1:]` を渡す |
 | `skills/cross-review/SKILL.md` | 変更 | cross-review の手順書 | — | — | 相手役の説明・終わり方の表・`review-scope` が起動の前に分かる席だけで範囲を決めること（受け入れ条件 14） |
-| `skills/cross-review/docs/01-state-and-review.md` | 変更 | 状態ファイルとレビューの資料の説明 | — | — | ラウンドの記録の `filled`・`reviewers` の意味・資料のディレクトリ `review-input/` |
+| `skills/cross-review/docs/01-state-and-review.md` | 変更 | 状態ファイルとレビューの資料の説明 | — | — | ラウンドの記録の `filled`・`reviewers` の意味・実行ごとに新しく作り、終わりに消す資料のディレクトリ `review-input-<ランダムな接尾辞>/` |
 | `docs/specifications/cross-review-participants-and-seats.md` | 変更 | 席の確定仕様 | — | — | 席の決め方・埋め方・席の名前 `claude-2` を今の形に書き直す |
 
 ## 席を決める（participants.py）
@@ -276,12 +276,13 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `RunConfig` | `domains/crossreview/drive.py` | 変更 | フィールド `may_fill: bool = True`・`prefilled: tuple[scope_decide.Filled, ...] = ()` を足す | `may_fill` は、名指しが 1 者でないか。`prefilled` は、`allowed` のために起動の前に埋めた席。`reviewers` は起動の前に決めた席（`Seats.names`）で、書き換えない |
-| `_Run` | `domains/crossreview/drive.py` | 変更 | フィールド `seats: list[str]`・`filled: list[scope_decide.Filled]` を足す | 今の席と、この実行で埋めた席。`_start` が `cfg.reviewers`・`cfg.prefilled` で始める |
+| `_Run` | `domains/crossreview/drive.py` | 変更 | フィールド `seats: list[str]`・`filled: list[scope_decide.Filled]`・`input_dir: Optional[Path]` を足す | 今の席と、この実行で埋めた席と、この実行の資料のディレクトリ。`_start` が `cfg.reviewers`・`cfg.prefilled` で始め、`input_dir` は None で始める |
 | `_Unread` | `domains/crossreview/drive.py` | 新設 | `class _Unread(NamedTuple): hint: str; cause: str` | 結果の無い席 1 つの直し方（`precondition` の詳細の行）と理由（`filled` の `reason`） |
 | `_Reviewed` | `domains/crossreview/drive.py` | 新設 | `class _Reviewed(NamedTuple): raised: list[dict[str, Any]]; unread: dict[str, _Unread]; silent: bool` | 1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか |
-| `_input_path` | `domains/crossreview/drive.py` | 新設 | `_input_path(run: _Run, round_no: int, suffix: str) -> Path` | 相手役へ渡す資料のパス（保存先の下の `review-input/round<n><suffix>`）。ディレクトリが無ければ作る |
+| `_input_path` | `domains/crossreview/drive.py` | 新設 | `_input_path(run: _Run, round_no: int, suffix: str) -> Path` | 相手役へ渡す資料のパス（`run.input_dir / f"round{round_no}{suffix}"`）。`run.input_dir` が None なら、`tempfile.mkdtemp(prefix=INPUT_PREFIX, dir=run.cfg.state_dir)` で新しいディレクトリを作って持つ。既存のディレクトリを探さず、再利用しない |
+| `_drop_inputs` | `domains/crossreview/drive.py` | 新設 | `_drop_inputs(run: _Run) -> None` | `run.input_dir` があれば消す（`shutil.rmtree(…, ignore_errors=True)`）。`drive` の終わりに、止まったときも含めて呼ぶ |
 | `_write_diff`・`_remarks_file` | `domains/crossreview/drive.py` | 変更（書き先だけ） | 今のまま | `_round_stem` でなく `_input_path` に書く |
-| `_seat_launch` | `domains/crossreview/drive.py` | 新設 | `_seat_launch(run: _Run, seat: str, prompt: str, stem: Path) -> agents.Launch` | 席の起動。claude の席は `participants.read_only_launch`（読める場所は `review-input/` だけ、上限は `REVIEW_TIMEOUT`）、ほかは `participants.review_launch(runtime_of(seat), …)` |
+| `_seat_launch` | `domains/crossreview/drive.py` | 新設 | `_seat_launch(run: _Run, seat: str, prompt: str, stem: Path) -> agents.Launch` | 席の起動。claude の席は `participants.read_only_launch`（読める場所は `run.input_dir` だけ、上限は `REVIEW_TIMEOUT`）、ほかは `participants.review_launch(runtime_of(seat), …)` |
 | `_reviewer_findings` | `domains/crossreview/drive.py` | 変更 | `_reviewer_findings(status: agents.AgentStatus, out: Path, runtime: str) -> Optional[list[dict[str, Any]]]` | claude の席は `participants.answer_text` の本文から、ほかは今のとおり出力の全文から `findings` を取り出す |
 | `_unread_hint` | `domains/crossreview/drive.py` | 変更（責務） | 今のまま（1 つ目の引数を席の名前として受ける） | 表の行を `runtime_of(seat)` で引き、行の頭には席の名前を書く |
 | `_launch_reviewers` | `domains/crossreview/drive.py` | 変更 | `_launch_reviewers(run: _Run, round_no: int, prompts: Mapping[str, str], launch: Launcher, suffix: str = "") -> tuple[list[dict[str, Any]], dict[str, _Unread]]` | 席ごとの依頼文で並べて起動する。出力の名前・指摘の担当（`by`）・注意・過程には席の名前を使う |
@@ -293,7 +294,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_prepare_round` | `domains/crossreview/drive.py` | 変更（読む値だけ） | 今のまま | `Basis` に `cfg.reviewers` でなく `run.seats` を渡す |
 | `_round` | `domains/crossreview/drive.py` | 変更 | 今のまま | `_review` の `silent` で `precondition`、`unread` が残れば `incomplete_reviewers`。記録の `reviewers` に `run.seats`、`run.filled` が空でなければ `filled` を書く |
 | `_reusable` | `domains/crossreview/drive.py` | 変更 | 今のまま | `Basis(…, run.seats, focus, stand_in=cfg.may_fill)` で比べる |
-| `drive` | `domains/crossreview/drive.py` | 変更 | 今のまま | 再利用なら `_reused_warnings` の後に返す。返さないなら `cfg.prefilled` の注意を足し、`_fill_refused` の後にラウンドへ進む |
+| `drive` | `domains/crossreview/drive.py` | 変更 | 今のまま | 再利用なら `_reused_warnings` の後に返す。返さないなら `cfg.prefilled` の注意を足し、`_fill_refused` の後にラウンドへ進む。終わるとき（止まったときを含む）に `_drop_inputs` を呼ぶ |
 
 - `_review`
   - 事後条件: 起動し直したのは claude 以外の席だけである。1 つの席の起動は 1 ラウンドに起動し直しを含めて 2 回まで、claude の席は 1 回である。`silent` が真なら席を置き換えていない
@@ -321,7 +322,8 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_fill_refused` | 修正担当が断られる | claude の学習の設定 | `refusals` の結果に `cfg.fixer` | `DriveStopped("precondition")` | 今と同じ | 設定を直して打ち直す |
 | `_fill_refused` | 名指し 1 者が断られる | その相手役の学習の設定 | `may_fill` が偽 | `DriveStopped("precondition")`（決定 6） | 今と同じ | 同上 |
 | `_reviewer_findings` | 出力を読めない | 出力のファイルが無い | `OSError` | None を返す（今と同じ） | 結果が無い席として注意に載る | — |
-| `_input_path` | `review-input/` を作れない | 保存先に書けない | `mkdir` の `OSError` | 呼び出し元へ返す（今の `_write_diff` の書き込みの失敗と同じ扱い） | トレースバック（今の差分のファイルの書き込みの失敗と同じ） | 保存先を直して打ち直す |
+| `_input_path` | 資料のディレクトリを作れない | 保存先に書けない | `mkdtemp` の `OSError` | 呼び出し元へ返す（今の `_write_diff` の書き込みの失敗と同じ扱い） | トレースバック（今の差分のファイルの書き込みの失敗と同じ） | 保存先を直して打ち直す |
+| `_drop_inputs` | 資料のディレクトリを消せない | 保存先の権限の変化など | `rmtree` の `ignore_errors` | 何もしない。実行の結果は変えない | 無し | 消し残しは次の実行の `--add-dir` に渡らない（次の実行は新しいディレクトリを作る） |
 
 ### 処理の手順
 
@@ -341,6 +343,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 3. `cfg.prefilled` ごとに `_filled_warning(f, "起動の前")` を注意へ足す
 4. `_fill_refused` を呼ぶ
 5. ラウンドを回す
+6. 終わるとき（止まったときを含む）に `_drop_inputs` で資料のディレクトリを消す
 
 - 繰り返しの終わる条件: `_fill` は `targets` の席ごとに 1 回だけ起動し、結果を返さなくても繰り返さない
 - 計算量の注意: 1 ラウンドの起動は、席の数 + 起動し直し（claude 以外の結果の無い席）+ 埋めた席の数で、席が 2 つなら最大 4 回である
@@ -349,14 +352,14 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `INPUT_DIR` | 定数 | `domains/crossreview/drive.py` | `"review-input"` |
+| `INPUT_PREFIX` | 定数 | `domains/crossreview/drive.py` | `"review-input-"`（実行ごとの資料のディレクトリの名前の頭。後ろは `mkdtemp` が付けるランダムな文字列） |
 | 席の claude の system の文 | 定数 `SEAT_SYSTEM` | `domains/crossreview/drive.py` | `"cross-review の相手役（読むだけ）"` |
 
 ### 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じラウンドに並べて起動した席 | `review-input/` の資料（読むだけ）と、席ごとの出力のファイル | 出力のファイルの名前を席の名前で分ける（`round<n>-<席>`・`round<n>-<席>-retry`）。`claude` と `claude-2` が重ならないのは決定 3 による | 埋めた後に止まっても、状態ファイルに書くのはラウンドの記録を足すときだけなので、打ち直せば席を決め直す |
+| 同じラウンドに並べて起動した席 | `run.input_dir` の資料（読むだけ）と、席ごとの出力のファイル | 出力のファイルの名前を席の名前で分ける（`round<n>-<席>`・`round<n>-<席>-retry`）。`claude` と `claude-2` が重ならないのは決定 3 による | 埋めた後に止まっても、状態ファイルに書くのはラウンドの記録を足すときだけなので、打ち直せば席を決め直す |
 
 ### ログと記録の出力
 
@@ -370,7 +373,7 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_input_path` | `_round_stem` | `grep -n "_round_stem" drive.py` | 名前の作り方は同じにし、ディレクトリだけ分ける。出力・修正担当の結果・ログは今のとおり `_round_stem`（保存先の直下）に置く |
+| `_input_path` | `_round_stem`・`tempfile.mkdtemp` | `grep -n "_round_stem" drive.py`・Python の `tempfile` の説明 | 名前の作り方は同じにし、ディレクトリだけ分ける。ディレクトリは標準ライブラリの `mkdtemp` で作り、名前の重なりの扱いを自前で書かない。出力・修正担当の結果・ログは今のとおり `_round_stem`（保存先の直下）に置く |
 | `_seat_launch` | `participants.review_launch`・`read_only_launch` | `participants.py` を読んだ | 2 つを席の種類で呼び分けるだけにする |
 | `_fill` | `_launch_reviewers`・`_review_prompt`・`_write_diff` | `drive.py` を読んだ | 起動・依頼文・全差分の書き出しはどれも使う |
 | `_fill_refused` | `participants.unready` | 同上 | どのランタイムが断られたかが分からないので `refusals` を使う |
@@ -387,7 +390,8 @@ docs/specifications/cross-review-participants-and-seats.md … 席の決め方�
 | `_round` | 記録の `reviewers` が `codex`・`claude`、`filled` が 1 件 | 全員が結果を返すと `filled` が無い | 全員が結果を返さず `precondition`、claude の席だけが結果を返さず `incomplete_reviewers` |
 | `_fill_refused` | kiro を断ると席が `codex`・`claude`、`reason` が `unready: ` で始まる | 両方断ると `claude`・`claude-2` | 修正担当を断ると `precondition`、`--reviewer kiro` で kiro を断ると `precondition` |
 | `_reusable`・`_reused_warnings` | 埋めた席で収束した同じ head の打ち直しで前回の結果を返し、注意が載る | `allowed` を変えた打ち直しで前回の結果を返さない | 名指し 1 者の打ち直しで代わりに数えない |
-| `_seat_launch` | `claude-2` の起動の `agent` が `claude`、出力の名前が `round<n>-claude-2` | 依頼文が指すファイルがすべて `review-input/` の下 | — |
+| `_seat_launch` | `claude-2` の起動の `agent` が `claude`、出力の名前が `round<n>-claude-2` | 依頼文が指すファイルがすべて `run.input_dir` の下 | — |
+| `_input_path`・`_drop_inputs` | 1 回の実行の資料が 1 つのディレクトリにそろい、`--add-dir` がそのディレクトリを指す | 同じ保存先に前の実行の `review-input-*` のディレクトリ（別の PR の差分のファイル入り）と、`review-input-` で始まるシンボリックリンクを置いてから実行すると、`--add-dir` はどちらとも違う新しいディレクトリを指し、そこに前の実行のファイルが無い | 実行が `precondition` で止まっても、資料のディレクトリが消えている |
 | `_reviewer_findings` | `{"findings": []}` は成功 | — | 終了コード 0 でも `findings` が無ければ結果が無い |
 
 ## 記録のコメントの「相手役」の列（report_decide.py）
