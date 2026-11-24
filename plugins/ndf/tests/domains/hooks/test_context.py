@@ -176,9 +176,13 @@ def _waits(text: str) -> bool:
         r"bash -c ndf\ lanes\ wait\ p",
         # 外側のシェルは `\$` を展開しない
         r'bash -c "ndf lanes wait \$P"',
-        "bash --norc -l -c 'ndf lanes wait p' name arg",
+        "bash --norc -eu -c 'ndf lanes wait p' name arg",
         'timeout 600 bash -c "ndf ci watch --pr 1"',
         "eval ndf lanes wait p",
+        "eval ndf lanes wait p --after 3",
+        "ndf lanes wait a && ndf lanes wait b > log",
+        "ndf lanes wait a || ndf lanes wait b > log 2>&1",
+        "timeout -k 5 600 nice -n 10 ndf lanes wait p",
         "eval 'ndf lanes wait a;' 'ndf lanes wait b'",
     ],
 )
@@ -231,6 +235,29 @@ def test_only_commands_accepts_a_text_made_of_accepted_commands(text):
         "bash x.sh -c 'ndf lanes wait p'",
         "bash -- -c 'ndf lanes wait p'",
         "bash -c$O 'ndf lanes wait p'",
+        # シェルが起動ファイルを読みうる
+        "bash -lc 'ndf lanes wait p'",
+        "bash -l -c 'ndf lanes wait p'",
+        "bash -ic 'ndf lanes wait p'",
+        "bash --rcfile=x -c 'ndf lanes wait p'",
+        "zsh -c 'ndf lanes wait p'",
+        "env 'BASH_ENV=./setup.sh' bash -c 'ndf lanes wait p'",
+        "exec -l bash -c 'ndf lanes wait p'",
+        # ラッパーかコマンド名が、動かすものを展開・置き換えで変えうる
+        "timeout $D ndf lanes wait p",
+        "timeout 5 $X ndf lanes wait p",
+        "$X/ndf lanes wait p",
+        "xargs -I wait ndf lanes wait p",
+        "timeout 5 'xargs' -I wait ndf lanes wait p",
+        # ロケールで翻訳される引用
+        'bash -c $"ndf lanes wait p"',
+        'ndf $"lanes" wait p',
+        'timeout 5 $"ndf" lanes wait p',
+        'eval $"ndf lanes wait p"',
+        'eval ndf lanes wait "a"$"b"',
+        # コマンドの列に付いたリダイレクトの中のコマンドの無いリダイレクト
+        "ndf lanes wait p && > output",
+        "ndf lanes wait a && rm x > log",
         # `env -S` で分けた語は引数のノードと対応しない
         "env -S \"bash -c 'ndf lanes wait p'\"",
     ],

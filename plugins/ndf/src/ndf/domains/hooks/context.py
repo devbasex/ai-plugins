@@ -35,6 +35,11 @@ _PLAIN_NODES = _WORD_NODES - {"ansi_c_string"} | frozenset(
 )
 # 外側のシェルが展開しうる字（引用の外）
 _EXPANDING = re.compile(r"[$`*?\[{~]")
+# `only_commands` が外すラッパー（動かすコマンドと引数が字面で決まるもの。`env` は環境を、`xargs` は引数を、`exec` は argv[0] を変える）
+_STEADY_WRAPPERS = frozenset({"timeout", "nice", "ionice", "stdbuf", "nohup", "time", "command"})
+# `only_commands` が中の文を読むシェル（`zsh` は `-c` でも起動ファイルを読む）と、起動ファイルを読まないオプション
+_STEADY_SHELLS = frozenset({"sh", "bash", "dash", "ksh"})
+_STEADY_OPTION = re.compile(r"-[cefuvx]+|--norc|--noprofile")
 
 # 人へ問う Tool の名前（会話の記録の `tool_use` の `name`）
 _ASK_TOOL = "AskUserQuestion"
@@ -145,7 +150,8 @@ def only_commands(text: str, accept: Callable[[ShellCommand], bool]) -> bool:
     """文の全体が、`accept` を満たす単純なコマンドを `;`・`&&`・`||`・改行でつないだ列と、それに付いたリダイレクトだけか（#4049）。
 
     `bash -c` 系・`eval` は外側のコマンドを `accept` に渡さず、中の文に同じ確かめを当てる。確かめきれない文（コマンドが無い・
-    構文の誤り・ほかの形・外側のシェルの展開で決まる中の文・深さの上限）は偽。
+    構文の誤り・ほかの形・展開かロケールの翻訳（`$"…"`）で決まるコマンド名と中の文・動かすものを変えうるラッパー・起動ファイルを
+    読みうるシェル・深さの上限）は偽。
     """
     return _only(text, accept, 0)
 
@@ -167,47 +173,68 @@ def _only(text: str, accept: Callable[[ShellCommand], bool], depth: int) -> bool
 
 
 def _is_plain(node: Any) -> bool:
-    """`only_commands` が許すセクションか。バックグラウンドへ回す `&` と、コマンドの無いリダイレクト（`; > output`）は偽。"""
+    """`only_commands` が許すセクションか。
+
+    バックグラウンドへ回す `&`・ロケールで翻訳される引用（`$"…"`）・コマンドの無いリダイレクト（`; > output`）は偽。
+    """
     if not node.is_named:
-        return node.type != "&"
+        following = node.next_sibling
+        return node.type != "&" and not (node.type == "$" and following is not None and following.type == "string")
     if node.type == "redirected_statement":
         body = node.child_by_field_name("body")
-        return body is not None and body.type == "command"
+        return body is not None and body.type in ("command", "list")
     return node.type in _PLAIN_NODES
 
 
 def _only_command(node: Any, accept: Callable[[ShellCommand], bool], depth: int) -> bool:
     cmd = _command(node)
+    if not _is_steady(node, cmd):
+        return False
     inner = _inner_scripts(cmd)
     if not inner:
         return accept(cmd)
     return depth < _INNER_DEPTH and _fixed_inner(node, cmd) and all(_only(script, accept, depth + 1) for script in inner)
 
 
-def _fixed_inner(node: Any, cmd: ShellCommand) -> bool:
-    """`_inner_scripts` が返す中の文が、外側のシェルの展開によらず決まるか。
+def _is_steady(node: Any, cmd: ShellCommand) -> bool:
+    """動かすコマンドが字面で決まるか（外したラッパーの語とコマンド名の値がすべて決まり、ラッパーが動かすものを変えない）。
 
-    `bash` などは、`-c` までの語がすべて 1 語のオプションで（`bash x.sh -c …` は `x.sh` を動かす）、`-c` の語とその次の語の値が
-    決まるときだけ真。`eval` は引数のすべての値が決まるときだけ真。`env -S` で分けた語はセクションと対応しないので偽。
+    `env -S` で分けた語はセクションと対応しないので偽。
     """
     skipped = len(cmd.source) - len(cmd.body_source)
     if skipped < 0 or cmd.source[skipped:] != cmd.body_source:
         return False
-    words = _word_groups(node)[skipped + 1 :]
+    names = {os.path.basename(shell_value(text)) for text in cmd.source[:skipped]}
+    return not names & (_WRAPPER_ARGS.keys() - _STEADY_WRAPPERS) and _all_fixed(_word_groups(node)[: skipped + 1])
+
+
+def _fixed_inner(node: Any, cmd: ShellCommand) -> bool:
+    """動くのが `_inner_scripts` の返す中の文だけで、外側のシェルの展開によらず決まるか（`_is_steady` が真のコマンドに使う）。
+
+    シェルは、`-c` までの語がすべて起動ファイルを読まない 1 語のオプションで（`bash x.sh -c …` は `x.sh` を、`bash -lc …` は
+    起動ファイルを動かす）、`-c` の語とその次の語の値が決まるときだけ真。`eval` は引数のすべての値が決まるときだけ真。
+    """
+    words = _word_groups(node)[len(cmd.source) - len(cmd.body_source) + 1 :]
     if cmd.body_name != "eval":
         options = cmd.body_argv[1:]
         position = next(i for i, word in enumerate(options) if _is_c_option(word))
-        if any(not word.startswith("-") or word in ("-", "--") for word in options[:position]):
+        if cmd.body_name not in _STEADY_SHELLS or not all(_STEADY_OPTION.fullmatch(word) for word in options[: position + 1]):
             return False
         words = words[: position + 2]
-    return all(len(group) == 1 and _is_fixed(group[0]) for group in words)
+    return _all_fixed(words)
+
+
+def _all_fixed(groups: list[list[Any]]) -> bool:
+    return all(len(group) == 1 and _is_fixed(group[0]) for group in groups)
 
 
 def _is_fixed(node: Any) -> bool:
-    """語の値が展開によらず決まるか（単引用・展開を含まない二重引用・展開しうる字を含まない語）。"""
+    """語の値が展開によらず決まるか（単引用・展開を含まない二重引用・展開しうる字を含まない語と数値）。"""
     if node.type == "string":
         return all(child.type == "string_content" for child in node.named_children)
-    return node.type == "raw_string" or (node.type == "word" and not _EXPANDING.search(node.text.decode("utf-8", "replace")))
+    if node.type in ("word", "number"):
+        return not _EXPANDING.search(node.text.decode("utf-8", "replace"))
+    return node.type == "raw_string"
 
 
 def _redirect(node: Any) -> Redirect:
