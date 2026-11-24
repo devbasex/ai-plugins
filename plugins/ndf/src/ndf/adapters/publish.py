@@ -159,14 +159,7 @@ def _hidden_spans(text: str, private: set[str], bare: Optional[str] = None) -> l
                 marked.append((m.start(), m.end(), False))
     if bare is not None and bare.lower() in lowered:
         marked += [(m.start(), m.end(), False) for m in _bare_repo(bare).finditer(text)]
-    out: list[tuple[int, int, bool]] = []
-    for start, end, secret in sorted(marked):
-        if out and start < out[-1][1]:
-            last = out[-1]
-            out[-1] = (last[0], max(last[1], end), last[2] or secret)
-        else:
-            out.append((start, end, secret))
-    return out
+    return run_log.union_marked_spans(marked)
 
 
 def _drop_hidden(text: str, private: set[str], bare: Optional[str] = None) -> tuple[str, dict[str, int]]:

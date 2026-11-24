@@ -98,15 +98,21 @@ def _shape_span(m: re.Match[str], repl: str) -> tuple[int, int]:
     return start, m.end() - 1 if repl.endswith("@") else m.end()
 
 
+def union_marked_spans(spans: list[tuple[int, int, bool]]) -> list[tuple[int, int, bool]]:
+    """印付きの範囲（始まり・終わり・印）の重なりを和にまとめ、始まりの順に並べる。まとめた範囲の印は、どれかに印があれば真。"""
+    out: list[tuple[int, int, bool]] = []
+    for start, end, mark in sorted(spans):
+        if out and start < out[-1][1]:
+            last = out[-1]
+            out[-1] = (last[0], max(last[1], end), last[2] or mark)
+        else:
+            out.append((start, end, mark))
+    return out
+
+
 def union_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """重なる範囲を和にまとめ、始まりの順に並べる。"""
-    out: list[tuple[int, int]] = []
-    for start, end in sorted(spans):
-        if out and start < out[-1][1]:
-            out[-1] = (out[-1][0], max(out[-1][1], end))
-        else:
-            out.append((start, end))
-    return out
+    return [(start, end) for start, end, _ in union_marked_spans([(start, end, False) for start, end in spans])]
 
 
 def secret_spans(text: str, secrets: Optional[list[str]] = None) -> list[tuple[int, int]]:
