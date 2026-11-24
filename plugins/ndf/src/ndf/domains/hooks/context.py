@@ -199,7 +199,7 @@ def _is_steady(node: Any, cmd: ShellCommand) -> bool:
 
     `env -S` で分けた語はセクションと対応しないので偽。
     """
-    skipped = len(cmd.source) - len(cmd.body_source)
+    skipped = _skipped_words(cmd)
     if skipped < 0 or cmd.source[skipped:] != cmd.body_source:
         return False
     names = {os.path.basename(shell_value(text)) for text in cmd.source[:skipped]}
@@ -213,14 +213,17 @@ def _fixed_inner(node: Any, cmd: ShellCommand) -> bool:
     シェルは、`-c` までの語がすべて起動ファイルを読まない 1 語のオプションで（`bash x.sh -c …` は `x.sh` を、`bash -lc …` は
     起動ファイルを動かす）、`-c` の語とその次の語の値が決まるときだけ真。`eval` は引数のすべての値が決まるときだけ真。
     """
-    words = _word_groups(node)[len(cmd.source) - len(cmd.body_source) + 1 :]
-    if cmd.body_name != "eval":
-        options = cmd.body_argv[1:]
-        position = next(i for i, word in enumerate(options) if _is_c_option(word))
-        if cmd.body_name not in _STEADY_SHELLS or not all(_STEADY_OPTION.fullmatch(word) for word in options[: position + 1]):
-            return False
-        words = words[: position + 2]
-    return _all_fixed(words)
+    body = _word_groups(node)[_skipped_words(cmd) :]
+    position = _c_option_position(cmd)
+    if position is None:
+        return _all_fixed(body[1:])
+    steady = cmd.body_name in _STEADY_SHELLS and all(_STEADY_OPTION.fullmatch(word) for word in cmd.body_argv[1 : position + 1])
+    return steady and _all_fixed(body[1 : position + 2])
+
+
+def _skipped_words(cmd: ShellCommand) -> int:
+    """外したラッパーの語数（`env -S` で語が増えたときは負になる）。"""
+    return len(cmd.source) - len(cmd.body_source)
 
 
 def _all_fixed(groups: list[list[Any]]) -> bool:
@@ -297,14 +300,17 @@ def _inner_scripts(cmd: ShellCommand) -> list[str]:
 
     外側のシェルが引用とエスケープを解いた後の値を返す（`bash -c "rm \\"\\$W\\""` の中身は `rm "$W"`）。
     """
-    body_argv, head = cmd.body_argv, cmd.body_name
-    if head == "eval" and len(body_argv) > 1:
+    if cmd.body_name == "eval" and len(cmd.body_argv) > 1:
         return [" ".join(shell_value(text) for text in cmd.body_source[1:])]
-    if head in _SHELLS:
-        for i, word in enumerate(body_argv[1:-1], start=1):
-            if _is_c_option(word):
-                return [shell_value(cmd.body_source[i + 1])]
-    return []
+    position = _c_option_position(cmd)
+    return [] if position is None else [shell_value(cmd.body_source[position + 1])]
+
+
+def _c_option_position(cmd: ShellCommand) -> Optional[int]:
+    """シェルの先頭の `-c` の語の `body_argv` での位置。シェルでないか、後ろに中の文が無ければ None。"""
+    if cmd.body_name not in _SHELLS:
+        return None
+    return next((i for i, word in enumerate(cmd.body_argv[1:-1], start=1) if _is_c_option(word)), None)
 
 
 def _is_c_option(word: str) -> bool:
