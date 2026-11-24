@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import io
 import subprocess
 import sys
@@ -63,13 +64,28 @@ def covered(decl: diff_kinds.DocsDecl, doc: str, test: str) -> bool:
     )
 
 
+@functools.cache
+def raw_of(test: str) -> str:
+    return (REPO / test).read_text(encoding="utf-8", errors="replace")
+
+
+@functools.cache
+def code_of_test(test: str) -> str:
+    """注記を除いたテストのソース。検査の間で同じテストを解析し直さない。"""
+    return code_of(raw_of(test))
+
+
 def leaks(decl: diff_kinds.DocsDecl, files: list[str]) -> list[str]:
     docs = [f for f in files if "/" in f and path_matches(f, decl.files)]
     tests = [f for f in files if Path(f).name.startswith("test_") and f.endswith(".py")]
     out = []
     for test in tests:
-        source = code_of((REPO / test).read_text(encoding="utf-8", errors="replace"))
-        out += [f"{test}: {doc}" for doc in docs if mentions(source, doc) and not covered(decl, doc, test)]
+        # 全文での照合で候補を絞り、パスを含むテストだけ注記を外して確かめる
+        candidates = [doc for doc in docs if mentions(raw_of(test), doc)]
+        if not candidates:
+            continue
+        source = code_of_test(test)
+        out += [f"{test}: {doc}" for doc in candidates if mentions(source, doc) and not covered(decl, doc, test)]
     return out
 
 
