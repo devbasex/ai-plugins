@@ -12,7 +12,7 @@ from ndf.domains.crossreview import criteria_decide, drive, store
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, sh
-from .test_crossreview_run import PR, Recording, _run, _state
+from .test_crossreview_run import FAIL, PR, Recording, _run, _state
 
 IMPACT = "承認する人が、何を承認するのかを取り違える"
 MAJOR = {"text": "「語の決まり」が読み取れない", "severity": "major", "impact": IMPACT, "path": "doc.md", "line": 5}
@@ -175,3 +175,19 @@ def test_issue_4285_unreadable_criteria_stop_before_any_launch(wt: Path, tmp_pat
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
     assert fake.calls == []
     assert issubclass(writing.CriteriaBroken, contracts.ContractError)
+
+
+def test_issue_3955_claude_first_seated_in_a_full_round_is_not_limited(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """#3955 の「埋めた claude のリクエストの文」: 設計の PR で round 2 も全差分で前の head があるとき、codex のリクエストは major を
+    前回以降に限り、round 2 で初めて加わった claude のリクエストはその制限を含まない。"""
+    state_dir = tmp_path / "st"
+    data = _first_round(capsys, monkeypatch, state_dir, wt)
+    data[store.REVIEWED] = []
+    store.write_object(store.state_pr(state_dir, PR).path, data)
+    fake = Recording(state_dir, {"codex": [[]], "kiro": [FAIL, FAIL], "claude": [[]]})
+    _run(capsys, monkeypatch, fake, wt, "--purpose", "design")
+    limit = _limit(data["rounds"][0]["head"], fake.input_dir / "round2-since.diff")
+    assert limit in _prompt(fake, "round2-codex.out")
+    seat = _prompt(fake, "round2-claude.out")
+    assert criteria_decide._table()["document"]["since"].split("{")[0] not in seat
+    assert _state(state_dir)["rounds"][-1]["scope"] == "full"
