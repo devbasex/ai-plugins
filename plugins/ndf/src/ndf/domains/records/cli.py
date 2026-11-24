@@ -233,7 +233,7 @@ def _reading(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         return result.stopped(TOOL, "invalid", f"入力の形が違う: {exc}", items=[{"error": str(exc)}])
     except OSError as exc:
         return result.stopped(TOOL, "precondition", f"読み手役が確認した記録を読み書きできない: {exc}")
-    except github_mod.GitHubError as exc:
+    except (github_mod.GitHubError, reading.HeadUnknown) as exc:
         return result.stopped(TOOL, "unknown", f"承認する PR の今の head を GitHub から読めない: {exc}")
 
 

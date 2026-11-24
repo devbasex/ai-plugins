@@ -241,6 +241,19 @@ def test_check_stops_as_unknown_when_github_cannot_be_read(repo: Path, capsys, l
     assert got["status"] == "stopped" and got["cause"]["kind"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    ("heads", "prs", "kind"), [({}, [7, 8], "unknown"), ({7: HEAD}, [7], "unknown"), ({7: MOVED}, [7, 8], "precondition")]
+)
+def test_check_does_not_pass_a_pull_request_without_a_head(
+    heads: dict[int, str], prs: list[int], kind: str, repo: Path, capsys, last_result, monkeypatch
+) -> None:
+    """GitHub が None を返した PR は、確かめられていない。head が違うと分かった PR があれば、そちらを先に知らせる。"""
+    reading.add({**ENTRY, "prs": [*PRS, {"number": 8, "branch": "design/y", "head": HEAD}]}, repo)
+    _hub(monkeypatch, heads)
+    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
+    assert got["status"] == "stopped" and got["cause"]["kind"] == kind
+
+
 # --- 読み手役への指示 -----------------------------------------------------------------------------------
 
 
