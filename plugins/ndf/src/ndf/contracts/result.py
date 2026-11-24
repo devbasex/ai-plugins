@@ -180,13 +180,13 @@ def refused_newer(obj: Any) -> Optional[dict[str, Any]]:
 
 
 def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
-    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。"""
+    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。渡された終了コードは文に入れない。"""
     errs: list[str] = []
     if not exit_codes.matches(obj["status"], code):
-        errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+        errs.append(f"status {obj['status']} と終了コードが合わない")
     expected = code_for(obj)
     if obj["status"] == STOPPED and expected is not None and code != expected:
-        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
+        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected} で、渡された終了コードと合わない")
     return errs
 
 
