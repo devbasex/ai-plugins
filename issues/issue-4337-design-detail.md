@@ -60,7 +60,6 @@ plugins/ndf/
 | `src/ndf/domains/docrebuild/drive.py` | 新設 | 起点を決め、差分を読み、worker を 1 回起動し、結果を確かめて結果 JSON を組む | `ndf.adapters.git`・`ndf.contracts.result`・`ndf.core.issue_docs`・`ndf.identity`・`select_decide` | モジュール | `RunArgs`・`Precondition`・`BadReport`・`start_point`・`diff_paths`・`inspect`・`requirements_of`・`prompt_text`・`run_worker`・`added_items`・`reader_gaps`・`reader_items`・`drive`（すべて新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 新設 | `ndf document-rebuild run` の引数を定義し、`drive` を呼び、`--out` と標準出力へ同じ結果を書く | `ndf.cli`・`ndf.identity`・`ndf.contracts.result`・`ndf.contracts.causes`・`drive` | モジュール | `_parser`・`adopt`・`main`（新設） |
 | `src/ndf/cli.py` | 変更 | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を足す | — | `COMMANDS` | — |
-| `src/ndf/contracts/result.py` | 変更 | 値を含まない誤りの文を返す `_safe_errors` を `safe_errors` として公開し、終了コードを決められないときの文を定数 `NO_CODE` にする。`emit` の振る舞いは変えない | — | — | `safe_errors(obj: Any, code: Optional[int]) -> list[str]`（名前だけ変える）・`NO_CODE`（新設） |
 | `src/ndf/adapters/git.py` | 変更 | 参照のコミットの SHA を、読めなければ None、git の失敗は `GitError` で返す | — | `Git` | `Git.commit_or_none(ref: str) -> Optional[str]`（新設） |
 | `src/ndf/checks/children.json` | 変更 | 新しいモジュールの持ち主を足す（設計書の「設計の結果」の段落） | — | — | — |
 | `contracts/worker/document-rebuild.md` | 新設 | 組み直す worker への起動指示のテンプレート | — | — | — |
@@ -296,7 +295,7 @@ plugins/ndf/
 | `run_worker` | 同上 | 新設 | `(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]` | 起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す |
 | `added_items` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | worker の `items` を確かめ、`id` を `add-<番号>` に振り直す |
 | `reader_gaps` | 同上 | 新設 | `(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]` | 確かめの記録（`metrics.readers`。形は設計書の「確かめの記録」の表）の欠けを、対象の文書ごとの `gaps` の要素にする（I4） |
-| `reader_items` | 同上 | 新設 | `(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]` | `fail` と `not_run` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。渡すのは、`reader_gaps` を通った対象の文書の記録を 1 件ずつだけ |
+| `reader_items` | 同上 | 新設 | `(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]` | `fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。渡すのは、`reader_gaps` を通った対象の文書の記録を 1 件ずつだけ |
 | `drive` | 同上 | 新設 | `(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]` | 起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す |
 
 - `start_point`
@@ -314,17 +313,6 @@ plugins/ndf/
   - 副作用: 起動指示のファイルを書く。子プロセス `ndf worker run` を 1 回。その中で `claude -p` を通常 1 回、worker が結果ファイルを書かずに応答を終えたときは `core/worker.py` の `RESUMES`（今は 3）回まで再起動するので最大 4 回打つ。読み手役のサブエージェントは worker の会話の中で立ち、上限は設計書の「影響と危険」の Claude の起動の行にある。再起動の回数は `ndf worker run` の標準出力の `metrics.attempts` に出るので、`drive` はそれを `info` のログに出す
 - `drive`
   - 事後条件: どの終わり方でも、設計書の「終わり方」の表の結果 JSON を返す。`ok` の `metrics` は `targets`（対象のパス）と `readers`（`reader_gaps` を通った、対象の文書ごとに 1 件の記録。対象の外の記録は入れない）。対象が 0 件なら `run_worker` を呼ばない
-  - 事後条件（`metrics.worker_status`）: `run_worker` が標準出力の結果 JSON を返した後の終わり方では、その `status`（`ok`・`gate`・`stopped` のどれか）を `metrics.worker_status` に写す。手動確認の担当者が、`--out` だけで worker が `ok` で終わったかを確かめ、条件 16 の判定に進むかを決めるためである。経路ごとの値は次の表のとおりで、表に無い経路（対象が 0 件、起点を決められない、起動指示を書けない、標準出力に結果 JSON が無い）では書かない
-
-    | 経路 | `status` | `metrics.worker_status` |
-    | --- | --- | --- |
-    | 組み直した（読み手役の不合格・`not_run` を含む） | `ok` | `ok` |
-    | 確かめの記録が欠けた（I4） | `stopped`（`incomplete`） | `ok` |
-    | 足すべき内容の形が違う・結果ファイルを読めない | `stopped`（`bad_report`） | `ok` |
-    | worker が `stopped` で終わった（I7） | `stopped`（worker の `cause.kind`） | `stopped` |
-    | worker が `gate` で終わった（I7） | `stopped`（`work_stopped`） | `gate` |
-
-    `bad_report` の経路は、worker が `ok` で終えた後の検査で止まったので `ok` を写す。`added_items` の検査は `reader_gaps` より先なので、この経路では確かめの記録を検査していない。手動確認がこの実行で条件 16 を判定しないことは、設計書の手動確認の節に書く
   - 副作用: 上の関数のものだけ。コミット・`push`・GitHub への書き込みを持たない（条件 13）
 
 `Runner` の形と既定の値は次のとおりである。テストは偽物に替える。
@@ -370,7 +358,7 @@ plugins/ndf/
 
 `checks` の各要素は、`verdict` が `pass` か `fail`、`restatements` が空でない文字列の並び、`fail` なら `reason` が空でない文字列であること。同じ対象の `doc` を持つ記録が 2 件以上あれば、どれが正しいか決められないので、その文書の欠け（`記録が 2 件以上ある`）にする。`readers` に対象の外の `doc` の記録があっても欠けにせず、形も確かめない。
 
-`drive` は、`reader_gaps` が空のとき、`readers` から `doc` が対象のパスである記録だけを取り出す。取り出した並びは対象の文書ごとに 1 件で、どれも `reader_gaps` を通っている。`drive` はこの並びを `reader_items` に渡し、結果の `metrics.readers` にも同じ並びを書く。対象の外の記録は結果のどこにも書かず、件数だけを `warnings` に 1 件（`対象の外の文書の記録を N 件外した`）載せる。そのため、`items` と `warnings` には組み直した文書の不合格と未確認だけが現れ、専用の結果スキーマが `metrics.readers` の各要素に求める形（`cli.adopt` が確かめる）を、対象の外の記録が破ることもない。
+`drive` は、`reader_gaps` が空のとき、`readers` から `doc` が対象のパスである記録だけを取り出す。取り出した並びは対象の文書ごとに 1 件で、どれも `reader_gaps` を通っている。`drive` はこの並びを `reader_items` に渡し、結果の `metrics.readers` にも同じ並びを書く。対象の外の記録は結果のどこにも書かず、件数だけを `warnings` に 1 件（`対象の外の文書の記録を N 件外した`）載せる。そのため、`items` と `warnings` には組み直した文書の不合格だけが現れ、専用の結果スキーマが `metrics.readers` の各要素に求める形（`cli.adopt` が確かめる）を、対象の外の記録が破ることもない。
 
 `drive` の進み方:
 
@@ -423,10 +411,9 @@ plugins/ndf/
 | `inspect` | 作業場所の通常ファイルが `regular` に入り、省いた行を持つ実装計画の本文が `plans` に入る | 実装計画が作業場所に無い → `present` に入らない | `.md` のシンボリックリンク・リンクの実装計画 → `excluded`。UTF-8 でない実装計画 → `unreadable`（I1） |
 | `added_items` | `id` を `add-1`… に振り直す | 同じ `id` 2 件・`reader-1` の `id`・`id` 無し → 全件が残り重ならない（I6） | `text` 無し・`doc` が対象に無い → `BadReport`（I3） |
 | `reader_gaps` | `plan` の `self`・原稿の `self` と `pass`・設計書の `fail`（`checks` 2）・設計書と原稿の `not_run` | 設計書の `fail` で `checks` 1 と `reason`。対象の外の `doc` の記録が形を問わず欠けにならない | 対象の行が無い・同じ対象の行が 2 件・`restatements` が無い・`plan` に `pass` か `not_run`・設計書に `self`・`checks` 2 の先頭が `pass`・`not_run` か `self` に理由が無いか `checks` が空でない（I4） |
-| `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件・`not_run` 1 件でも同じ（I5） | `fail` と `not_run` が無ければ空 | — |
+| `reader_items` | `fail` 1 件で `reader-1` と `warnings` 1 件（I5） | `fail` が無ければ空 | — |
 | `drive` | `readers` に対象の外の `doc` の `fail` や形の違う記録があっても、`items` にも `metrics.readers` にも出ず、`warnings` に外した件数だけが出る。その結果が `cli.adopt` を通って `ok` で書かれる | — | 同じ対象の記録が 2 件 → `stopped`（`incomplete`） |
-| `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `run_worker` を呼ばない（条件 10）。そのとき `metrics.worker_status` が無い | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
-| `drive` | 組み直した `ok` の `metrics.worker_status` が `ok` | 確かめの記録が欠けた `stopped`（`incomplete`）（I4）で `metrics.worker_status` が `ok` | worker の `stopped` で `metrics.worker_status` が `stopped`、`gate` で `gate`。どちらも結果を `cli.adopt` に通しても差し替わらず、返った結果に同じ値が残る（I7） |
+| `drive` | 条件 3・4 の作業場所で、渡る対象がこの課題の設計書だけ | 対象 0 件で `run_worker` を呼ばない（条件 10） | worker の `stopped`・`gate` で結果ファイルを読まない。`ok` で標準出力の `items` を読まない（I7） |
 | `drive` | 起動する子が `git` の読み取りと `ndf worker run` だけで、`push`・`commit` を含まない（条件 13） | — | — |
 
 ## サブコマンドの入口（`ndf.domains.docrebuild.cli`）
@@ -445,13 +432,10 @@ plugins/ndf/
 
 - `adopt`
   - 事後条件: 次の 3 つの誤りが無ければ `(obj, result.code_for(obj))` を返す。1 つでもあれば `result.stopped(ENTRY, "invalid", <誤りの件数>)` と `causes.exit_code("invalid")` を返す
-    - `result.safe_errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応。`result.errors` と同じ検査で、文に結果の値を含まない）
+    - `result.errors(obj, result.code_for(obj))`（共通の結果スキーマと、`status` と停止理由の対応）
     - `contracts.broken_rules(obj, RESULT_SCHEMA)`（専用の結果スキーマ `io/document-rebuild.result`。`items` の `doc`・`metrics.readers` の形）
     - `result.code_for(obj)` が `None`（`stopped` に `cause` が無い）
-  - 副作用: 誤りがあれば、`invalid` に差し替える原因のすべてについて、結果の値を含まない文を `結果の形の誤り: <文>` の形で標準エラーへ 1 行ずつ書く。共通の検査だけで差し替えたときも、担当者が直す箇所を見つけられるようにするためである。書く文は次の 3 つで、同じ文は 1 回だけ書く。共通の検査は 1 回だけ打ち、事後条件で得た文を差し替えの判定・件数・標準エラーに使い回す。`result.errors` は呼ばない（文が結果の値を含み、同じ検査を 2 回打つことになる）
-    - 共通の検査の文: 事後条件の `result.safe_errors` の文（`result.emit` が使っていた `_safe_errors` を公開に改めたもの。スキーマの場所と規則の名前と、`status` と停止理由の対応の誤り）
-    - 専用の結果スキーマの文: `contracts.broken_rule` の文
-    - 終了コードを決められないとき: `result.NO_CODE`（`emit` と同じ文）
+  - 副作用: 誤りがあれば、`contracts.broken_rules` の文（結果の値を含まない）を標準エラーへ 1 行ずつ書く。`result.errors` の文は結果の値を含むので書かない
 - `main`
   - 事後条件: `drive.drive` の結果（例外のときは停止理由の結果）を `adopt` に通し、返った結果を先に `--out` へ、次に `result.emit` で標準出力へ書く。`adopt` を通った結果なので `emit` は差し替えず、`--out` のファイルと標準出力の最後の 1 行は同じ JSON になる。`--out` は `core.plan.files.write_json` で一時ファイルから置き換える。終了コードは `adopt` が返したもの
   - 副作用: `--out` のファイルを書く。`cwd` は打った場所（`Path.cwd()`）
@@ -479,7 +463,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `adopt` | 形の正しい `ok` をそのまま返す | `stopped` の結果も同じ終了コードで返す | `add-` の項目に `doc` が無い・`metrics.readers` の `verdict` が表に無い → `stopped`（`invalid`）に差し替わる。`summary` が無い・`stopped` に `cause` が無い・`metrics.worker_status` が列挙に無い → 標準エラーに値を含まない `結果の形の誤り:` の行が出る |
+| `adopt` | 形の正しい `ok` をそのまま返す | `stopped` の結果も同じ終了コードで返す | `add-` の項目に `doc` が無い・`metrics.readers` の `verdict` が表に無い → `stopped`（`invalid`）に差し替わる |
 | `main` | `--out` と標準出力の最後の 1 行が同じ JSON | — | `adopt` が差し替えたとき、`--out` にも差し替えた `stopped` が書かれ、元の `items` が残らない |
 
 ## 契約とテンプレート
@@ -492,8 +476,8 @@ plugins/ndf/
 | --- | --- |
 | `contracts/workflow/stages/document-rebuild.json` | `metadata.ndf.inputs` を `["issues", "worktree", "mode"]` にする。値を入れるコードは足さない（設計書の構成要素の表の工程の定義の行） |
 | `contracts/templates/params.json` | `rebuild` の `summary` の後ろに「工程から組むときに設定（`workflow.launch.rebuild`）が無ければ、`ndf document-rebuild run` を組む」を、`review` の説明と同じ形で足す |
-| `contracts/worker/document-rebuild.md` | `prompt_text` が差し込む `$targets`（対象のパスと種類の箇条。設計書の行の下に、組になる要求仕様のコピーの行を添える）・`$skill` を持つ。書くこと: 作業場所でコミットし push も Pull Request もしない・要求仕様のコピーを変えない・対象の外で直すべきことは当たる対象の `doc` を添えて結果ファイルの `items` に書く・文書ごとの確かめの記録を `metrics.readers` に書く（形は設計書の「確かめの記録」の表）・誰が確かめるかは設計書の「誰が確かめるか」のとおりで、`document-rebuild` の手順の「読み手役に読ませる」の「対象」の行に従う・読み手役に限りサブエージェントを、読み手役の対象の文書 1 件につき最大 2 回（1 回目が不合格のときだけ 2 回目）立ててよい・実装計画と対象に当たらない種類の原稿は自分で読み直し、`self` と文書の種類を書く・組み直しを終えて読み手役だけを立てられなければ、worker の結果は `ok` のまま、その文書の記録を `not_run` と理由にする（自分で読み直しても `pass`・`self` にしない） |
-| `contracts/schemas/io/document-rebuild.result.schema.json` | `items` の要素は `id`・`text` が必須で、`add-` の要素は `doc` も必須。`metrics` は `targets`（文字列の並び）と `readers`（設計書の「確かめの記録」の表の形。`verdict` は `pass`・`fail`・`not_run`・`self`）と `worker_status`（文字列で、値は `ok`・`gate`・`stopped` の列挙。必須にしない。対象が 0 件の `ok` には無いからである。書く経路は `drive` の事後条件の表のとおり）。`refactor.result.schema.json` と同じく `result.schema.json` を土台にする |
+| `contracts/worker/document-rebuild.md` | `prompt_text` が差し込む `$targets`（対象のパスと種類の箇条。設計書の行の下に、組になる要求仕様のコピーの行を添える）・`$skill` を持つ。書くこと: 作業場所でコミットし push も Pull Request もしない・要求仕様のコピーを変えない・対象の外で直すべきことは当たる対象の `doc` を添えて結果ファイルの `items` に書く・文書ごとの確かめの記録を `metrics.readers` に書く（形は設計書の「確かめの記録」の表）・誰が確かめるかは設計書の「誰が確かめるか」のとおりで、`document-rebuild` の手順の「読み手役に読ませる」の「対象」の行に従う・読み手役に限りサブエージェントを、読み手役の対象の文書 1 件につき最大 2 回（1 回目が不合格のときだけ 2 回目）立ててよい・実装計画と対象に当たらない種類の原稿は自分で読み直し、`self` と文書の種類を書く・読み手役を立てられなければ `not_run` と理由を書く |
+| `contracts/schemas/io/document-rebuild.result.schema.json` | `items` の要素は `id`・`text` が必須で、`add-` の要素は `doc` も必須。`metrics` は `targets`（文字列の並び）と `readers`（設計書の「確かめの記録」の表の形。`verdict` は `pass`・`fail`・`not_run`・`self`）。`refactor.result.schema.json` と同じく `result.schema.json` を土台にする |
 | `skills/development-workflow/references/agent-layers.md` | 役割の表の worker の行とは別の行に、「`ndf worker run` が起動する組み直しの worker（`ndf document-rebuild run` が起動するもの）に限り、読み手役のサブエージェントを立ててよい。`ndf:worker` で起動した worker には当たらない」を足す（#4285 が足す、conductor が読み手役を立ててよいという文と別の行にする。設計書の「影響と危険」） |
 | `src/ndf/checks/children.json` | `P1b` の `packages` に `ndf.progress.rebuild_values`、`M1` の `packages` に `ndf.domains.docrebuild`、`C3` の `packages` に `ndf.core.issue_docs` を足す。`needs` は変えない（`C3` は `P1b` と `M1` の両方の `needs` に既にある） |
 | `src/ndf/cli.py` | `COMMANDS` に `"document-rebuild": "ndf.domains.docrebuild.cli"` を、辞書順の位置へ足す |

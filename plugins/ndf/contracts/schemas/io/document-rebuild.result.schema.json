@@ -31,15 +31,6 @@
           "items": {
             "$ref": "#/$defs/reader"
           }
-        },
-        "worker_status": {
-          "type": "string",
-          "enum": [
-            "ok",
-            "gate",
-            "stopped"
-          ],
-          "description": "ndf worker run が標準出力に返した検査後の status。worker を起動しなかった終わり方（対象が 0 件・起点を決められない など）には無い"
         }
       }
     },

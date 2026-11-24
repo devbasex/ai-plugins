@@ -12,7 +12,6 @@ import os
 import stat
 import string
 import subprocess
-import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,8 +40,6 @@ WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
-# 読み手役の確かめが済んだ記録の verdict（合格と、worker 自身の読み直し）。ほか（不合格・立てられなかった）は `items` と `warnings` に残す
-_DONE = frozenset(VERDICTS) - {"fail", "not_run"}
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -236,29 +233,13 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return got
 
 
-def _replace_file(path: Path, text: str) -> None:
-    """`path` を、同じディレクトリに新しく作ったファイルで置き換える。
-
-    既存の `path` を開いて書き換えないので、`path` がシンボリックリンクでもハードリンクでも、その先のファイルの中身は変わらない
-    （`os.replace` は名前だけを置き換える）。書けなければ作ったファイルを消して `OSError` を上げる。
-    """
-    fd, temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(text)
-        os.replace(temp, path)
-    except BaseException:
-        Path(temp).unlink(missing_ok=True)
-        raise
-
-
 def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
     """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
     prompt_file = args.state_dir / f"{WORK_KIND}.prompt.md"
     result_file = args.state_dir / f"{WORK_KIND}.result.json"
     try:
         args.state_dir.mkdir(parents=True, exist_ok=True)
-        _replace_file(prompt_file, prompt)
+        prompt_file.write_text(prompt, encoding="utf-8")
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
     argv = [
@@ -395,38 +376,26 @@ def _clean_check(check: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def reader_items(readers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, str]], list[str]]:
-    """`fail` と `not_run` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。
-
-    `not_run` は読み手役の確かめが済んでいない文書なので、合格と同じには扱わず、残った確かめとして次の工程へ渡す。
-    """
+    """`fail` の文書を、パスの順に `reader-<番号>` の項目と `warnings` の文にする（I5）。"""
     items: list[dict[str, str]] = []
     warnings: list[str] = []
-    for rec in sorted((r for r in readers if r["verdict"] not in _DONE), key=lambda r: r["doc"]):
-        if rec["verdict"] == "not_run":
-            text = f"読み手役が {rec['doc']} をまだ確かめていない: {rec['reason']}"
-        else:
-            why = "・".join(w for w in (rec["checks"][-1].get("reason"), rec.get("reason")) if isinstance(w, str) and w.strip())
-            text = f"読み手役が {rec['doc']} を不合格とした: {why}"
+    for rec in sorted((r for r in readers if r["verdict"] == "fail"), key=lambda r: r["doc"]):
+        why = "・".join(w for w in (rec["checks"][-1].get("reason"), rec.get("reason")) if isinstance(w, str) and w.strip())
+        text = f"読み手役が {rec['doc']} を不合格とした: {why}"
         items.append({"id": f"{READER_PREFIX}-{len(items) + 1}", "text": text, "doc": rec["doc"]})
         warnings.append(text)
     return items, warnings
 
 
-def _worker_metrics(status: str) -> dict[str, str]:
-    """`ndf worker run` が標準出力に返した検査後の `status` を写した `metrics`（手動確認が `--out` だけで worker の終わり方を見分ける）。"""
-    return {"worker_status": status}
-
-
 def _worker_stopped(out: Mapping[str, Any]) -> dict[str, Any]:
     """worker が `ok` で終えなかったときの結果（I7。結果ファイルは読まない）。`gate` も `stopped` にする。"""
     said = out.get("summary") or "（要約なし）"
-    metrics = _worker_metrics(str(out.get("status")))
     if out.get("status") == result.GATE:
-        return result.stopped(TOOL, "work_stopped", f"組み直す worker が判断を求めた: {said}", metrics=metrics)
+        return result.stopped(TOOL, "work_stopped", f"組み直す worker が判断を求めた: {said}")
     cause = out.get("cause")
     kind = cause.get("kind") if isinstance(cause, dict) else None
     gaps = out.get("gaps") if kind == "incomplete" else None
-    return result.stopped(TOOL, kind or "work_stopped", f"組み直す worker が止まった: {said}", gaps=gaps, metrics=metrics)
+    return result.stopped(TOOL, kind or "work_stopped", f"組み直す worker が止まった: {said}", gaps=gaps)
 
 
 def _read_report(path: Path) -> dict[str, Any]:
@@ -454,24 +423,20 @@ def _reader_summary(
 
 
 def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequence[str]) -> dict[str, Any]:
-    """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。
-
-    worker は `ok` で終えているので、どの結果にも `metrics.worker_status` の `ok` を載せる。
-    """
-    worker = _worker_metrics(result.OK)
+    """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。"""
     try:
         added = added_items(report.get("items"), targets)
     except BadReport as exc:
-        return result.stopped(TOOL, "bad_report", exc.detail, metrics=worker)
+        return result.stopped(TOOL, "bad_report", exc.detail)
     metrics = report.get("metrics")
     raw = metrics.get("readers") if isinstance(metrics, dict) else None
     gaps = reader_gaps(raw, targets)
     if gaps:
-        return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps, metrics=worker)
+        return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
     readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
-    summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格か未確認 {len(found)} 件）"
-    return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers, **worker}, warnings=warnings)
+    summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格 {len(found)} 件）"
+    return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
 
 
 def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str]]:
@@ -507,10 +472,7 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
         if out.get("status") != result.OK:
             return _worker_stopped(out)
+        report = _read_report(result_file)
     except Stop as exc:
         return result.stopped(TOOL, exc.kind, exc.detail)
-    try:
-        report = _read_report(result_file)
-    except Stop as exc:  # worker は ok で終えたので、結果ファイルを読めなくても worker の status を残す
-        return result.stopped(TOOL, exc.kind, exc.detail, metrics=_worker_metrics(result.OK))
     return _checked(report, chosen.targets, chosen.skipped)

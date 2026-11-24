@@ -128,11 +128,11 @@ def code_for(obj: Any) -> Optional[int]:
 
 def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     """結果の形の誤りを並べる。空なら正しい。`code` を渡すと status と種類との対応も確かめる。スキーマの誤りの文は結果の値を含む
-    （`emit` が外へ出す文は `safe_errors`）。"""
+    （`emit` が外へ出す文は `_safe_errors`）。"""
     return contracts.schema_errors(obj, SCHEMA) + _table_errors(obj, code)
 
 
-def safe_errors(obj: Any, code: Optional[int]) -> list[str]:
+def _safe_errors(obj: Any, code: Optional[int]) -> list[str]:
     """結果の値もキーも含まない誤りの文（誤り 1 件につき 1 つ）。スキーマの誤りは、スキーマの場所と規則の名前にする。"""
     return contracts.broken_rules(obj, SCHEMA) + _table_errors(obj, code)
 
@@ -207,18 +207,14 @@ def dumps_line(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
-# 終了コードを決められない結果の誤りの文（値を含まない）
-NO_CODE = "終了コードを決められない（stopped に cause が無い）"
-
-
 def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
     """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、値を含まない誤りの文を標準エラーへ書き、代わりの `stopped`（invalid）を
     1 行で出して invalid の終了コードを返す。"""
     if code is None:
         code = code_for(obj)
-    errs = safe_errors(obj, code)
+    errs = _safe_errors(obj, code)
     if errs or code is None:
-        return _emit_instead(errs or [NO_CODE], stream)
+        return _emit_instead(errs or ["終了コードを決められない（stopped に cause が無い）"], stream)
     print(dumps_line(obj), file=stream or sys.stdout)
     return code
 

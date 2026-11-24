@@ -181,30 +181,6 @@ def test_changed_paths_stops_without_a_merge_base(tmp_path: Path) -> None:
     assert not any(c[0] == "merge-base" for c in fake.calls)
 
 
-class _Launched(Exception):
-    """worker の起動の直前で止めるための例外。"""
-
-
-@pytest.mark.parametrize("link", ["symlink", "hardlink"])
-def test_run_worker_replaces_a_linked_prompt_file_without_touching_its_target(tmp_path: Path, link: str) -> None:
-    """保存先の起動指示がシンボリックリンクでもハードリンクでも、その先のファイルを書き換えず、起動指示を新しいファイルで置き換える。"""
-    args = _args(tmp_path)
-    args.state_dir.mkdir()
-    other = tmp_path / "other.txt"
-    other.write_text("利用者のデータ\n", encoding="utf-8")
-    prompt_file = args.state_dir / f"{drive.WORK_KIND}.prompt.md"
-    prompt_file.symlink_to(other) if link == "symlink" else os.link(other, prompt_file)
-
-    def runner(argv: Sequence[str], cwd: Path) -> Any:
-        raise _Launched
-
-    with pytest.raises(_Launched):
-        drive.run_worker(args, "起動指示", runner)
-    assert other.read_text(encoding="utf-8") == "利用者のデータ\n"
-    assert not prompt_file.is_symlink() and prompt_file.read_text(encoding="utf-8") == "起動指示"
-    assert sorted(p.name for p in args.state_dir.iterdir()) == [prompt_file.name]
-
-
 # --- 作業場所の確かめ ---
 
 
@@ -359,15 +335,6 @@ def test_reader_items_turn_failures_into_items_and_warnings() -> None:
     assert drive.reader_items([_reader(DESIGN)]) == ([], [])
 
 
-def test_reader_items_keep_documents_the_reader_did_not_check() -> None:
-    """I5: 読み手役を 1 回も立てられなかった文書（`not_run`）も、合格と同じには扱わず項目と `warnings` に残す。"""
-    items, warnings = drive.reader_items(
-        [_reader(DESIGN, "not_run", reason="Tool が無い"), _reader("docs/a.md", "self", reason="実装計画")]
-    )
-    assert items == [{"id": "reader-1", "text": warnings[0], "doc": DESIGN}]
-    assert DESIGN in warnings[0] and "Tool が無い" in warnings[0]
-
-
 # --- 1 回の実行 ---
 
 
@@ -484,9 +451,6 @@ def test_drive_does_not_read_the_result_file_unless_ok(tmp_path: Path, out: dict
     got = _run(tmp_path, fake, FakeWorker({"broken": True}, out))
     assert got["status"] == "stopped" and got["cause"]["kind"] == kind
     assert ("gaps" in got) is (kind == "incomplete")
-    assert got["metrics"] == {"worker_status": out["status"]}
-    written, code = cli.adopt(got)
-    assert written is got and code == causes.exit_code(kind)
 
 
 def test_drive_reads_items_from_the_result_file_not_stdout(tmp_path: Path) -> None:
@@ -521,9 +485,6 @@ def test_drive_stops_on_bad_reports(tmp_path: Path, worker: FakeWorker, kind: st
     assert got["cause"]["detail"].startswith(detail)
     if kind == "incomplete":
         assert got["gaps"][0]["name"] == DESIGN
-    launched = worker.stdout is None  # 標準出力が壊れた実行は worker の status を読めない
-    assert got["metrics"] == ({"worker_status": "ok"} if launched else {})
-    assert cli.adopt(got)[0] is got
 
 
 def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Path) -> None:
@@ -536,7 +497,7 @@ def test_drive_keeps_failures_and_drops_records_outside_the_targets(tmp_path: Pa
         {"doc": "docs/x.md", "verdict": "?"},
     ]
     got = _run(tmp_path, fake, FakeWorker(_report(readers=[fail, *outside])))
-    assert got["status"] == "ok" and got["metrics"]["worker_status"] == "ok"
+    assert got["status"] == "ok"
     assert [i["id"] for i in got["items"]] == ["reader-1"]
     assert [r["doc"] for r in got["metrics"]["readers"]] == [DESIGN]
     assert got["warnings"][-1] == "対象の外の文書の記録を 2 件外した"
@@ -715,22 +676,6 @@ def test_adopt_replaces_a_wrong_result(items: list, metrics: dict) -> None:
     out, code = cli.adopt(bad)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and out["items"] == []
     assert code == causes.exit_code("invalid")
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        {"tool": "document-rebuild", "status": "ok", "items": [], "metrics": {}},
-        {"tool": "document-rebuild", "status": "stopped", "summary": "s", "items": [], "metrics": {}},
-        {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [], "metrics": {"worker_status": "done"}},
-    ],
-)
-def test_adopt_writes_why_it_replaced_the_result(bad: dict, capsys: pytest.CaptureFixture[str]) -> None:
-    """共通の検査だけで差し替えたときも、値を含まない誤りの文を標準エラーへ書く。"""
-    out, _ = cli.adopt(bad)
-    assert out["cause"]["kind"] == "invalid"
-    err = capsys.readouterr().err
-    assert err.startswith("結果の形の誤り: ") and "done" not in err
 
 
 def _main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, got: dict[str, Any]) -> tuple[int, dict[str, Any], str]:

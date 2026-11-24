@@ -30,7 +30,7 @@ ENTRY = result.ENTRY
 
 @contracts.cached_reader
 def _own_validator() -> Draft202012Validator:
-    """専用の結果スキーマから、共通の結果スキーマへの `$ref`（`allOf`）を外した検証器（共通の側は `result.safe_errors` が確かめる）。"""
+    """専用の結果スキーマから、共通の結果スキーマへの `$ref`（`allOf`）を外した検証器（共通の側は `result.errors` が確かめる）。"""
     schema = contracts.load_schema(RESULT_SCHEMA)
     return Draft202012Validator({k: v for k, v in schema.items() if k != "allOf"})
 
@@ -51,15 +51,13 @@ def _parser() -> argparse.ArgumentParser:
 def adopt(obj: dict[str, Any]) -> tuple[dict[str, Any], int]:
     """結果を共通の結果スキーマと専用の結果スキーマで確かめ、書き出す結果と終了コードを決める。"""
     code = result.code_for(obj)
-    # 共通の検査は 1 回だけ打ち、値を含まない文を判定・件数・標準エラーに使い回す
-    common = result.safe_errors(obj, code)
+    common = result.errors(obj, code)
     own = sorted(contracts.broken_rule(e) for e in _own_validator().iter_errors(obj))
     if not common and not own and code is not None:
         return obj, code
-    lines = [*common, *own, *([result.NO_CODE] if code is None else [])]
-    for line in dict.fromkeys(lines):
+    for line in own:
         print(f"結果の形の誤り: {line}", file=sys.stderr)
-    count = len(lines)
+    count = len(common) + len(own) + (code is None)
     return result.stopped(ENTRY, "invalid", f"結果 JSON の形が違う（{count} 件）"), causes.exit_code("invalid")
 
 
