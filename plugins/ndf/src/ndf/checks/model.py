@@ -9,7 +9,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -189,6 +189,11 @@ def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
 def read_json(path: Path | str, unreadable: str) -> Any:
     """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
     return read_json_text(path, unreadable)[1]
+
+
+def key_line(lines: Sequence[str], name: str) -> int:
+    """JSON の本文の行の並び `lines` で、キー `name` が最初に現れる行の番号。無ければ 1。"""
+    return next((n for n, line in enumerate(lines, 1) if f'"{name}":' in line), 1)
 
 
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:

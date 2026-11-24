@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.checks import imports
-from ndf.checks.model import CONTRACTS, CheckError, Finding, Scope, Source
+from ndf.checks.model import CONTRACTS, CheckError, Finding, Scope, Source, key_line
 from ndf.contracts import limits
 
 RULE = "limit-readers"
@@ -643,7 +643,7 @@ def declared(policies: Mapping[str, limits.Policy]) -> dict[str, frozenset[str]]
 
 def _line_of(text: str, name: str) -> int:
     """上限の設定の本文の、方針 `name` の行。"""
-    return next((i for i, line in enumerate(text.splitlines(), 1) if f'"{name}":' in line), 1)
+    return key_line(text.splitlines(), name)
 
 
 def _unread(source: Source, want: Mapping[str, frozenset[str]], found: list[Read]) -> list[Finding]:

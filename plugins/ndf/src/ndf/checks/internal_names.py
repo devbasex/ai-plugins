@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from ndf import contracts
-from ndf.checks.model import CheckError, Finding, Scope, Source
+from ndf.checks.model import CheckError, Finding, Scope, Source, key_line
 from ndf.checks.spec_model import SCHEMA_SUFFIX
 from ndf.contracts import internal
 
@@ -87,7 +87,7 @@ def _schema_names(src: Source, names: frozenset[str]) -> list[tuple[str, int]]:
     out = []
     for name, spec in _properties(schema):
         if name in names or _is_time(spec):
-            out.append((name, next((n for n, text in enumerate(lines, 1) if f'"{name}":' in text), 1)))
+            out.append((name, key_line(lines, name)))
     return out
 
 
