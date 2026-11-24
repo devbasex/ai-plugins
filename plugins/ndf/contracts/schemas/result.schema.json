@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["tool", "status", "summary", "items", "metrics"],
   "properties": {
+    "version": {"type": "integer", "minimum": 1, "description": "結果の形のバージョン。無ければ 1。読めるバージョン（内部データの共通の欄のスキーマの version）までかは、読み手（ndf.contracts.result）が確かめる"},
     "tool": {"type": "string", "minLength": 1},
     "status": {"enum": ["ok", "gate", "stopped"]},
     "summary": {"type": "string"},

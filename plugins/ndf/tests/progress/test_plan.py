@@ -346,6 +346,14 @@ def test_cli_refuses_a_plan_file_of_the_wrong_shape(repo, capsys, tmp_path):
     assert out["cause"]["kind"] == "invalid" and code == causes.exit_code("invalid")
 
 
+@pytest.mark.parametrize(("version", "kind"), [(2, "precondition"), (0, "invalid"), ("2", "invalid"), (None, "invalid")])
+def test_a_plan_file_of_a_newer_version_is_told_from_the_wrong_shape(repo, capsys, tmp_path, version, kind):
+    path = _plan_file(tmp_path / "plan.json", {**_doc(_decl("a", [[1]])), "version": version})
+    code = cli.main(["lanes", "init", path])
+    out = last_result(capsys.readouterr().out)
+    assert out["cause"]["kind"] == kind and code == causes.exit_code(kind)
+
+
 def test_cli_status_of_an_unknown_plan_is_refused(repo, capsys):
     code, out = _cli(capsys, "status", "nothing")
     assert out["cause"]["kind"] == "refused" and code != 0

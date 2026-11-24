@@ -262,7 +262,7 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 
 def read_report(stdout: str) -> Optional[dict[str, Any]]:
-    """標準出力の最後の空でない行の結果 JSON。読めないか形が違えば None。"""
+    """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
     lines = [line for line in stdout.splitlines() if line.strip()]
     if not lines:
         return None
@@ -270,7 +270,7 @@ def read_report(stdout: str) -> Optional[dict[str, Any]]:
         obj = json.loads(lines[-1])
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON を返さない作業は None で bad_report にする
         return None
-    return obj if not result.errors(obj) else None
+    return result.received(obj)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:
@@ -944,10 +944,9 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
-    elif not isinstance(reply.answer, dict) or result.errors(reply.answer):
-        got = bad_report(run, "回答が結果 JSON の形に合わない")
     else:
-        got = finished(run, reply.answer)
+        report = result.received(reply.answer)
+        got = finished(run, report) if report is not None else bad_report(run, "回答が結果 JSON の形に合わない")
     return got if notice is None else replace(got, warnings=(*got.warnings, notice))
 
 

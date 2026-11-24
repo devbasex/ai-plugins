@@ -151,6 +151,12 @@ def _errors(validator: Draft202012Validator, instance: Any) -> list[str]:
     return [f"{where}: {message}" for where, message in found]
 
 
+def broken_rules(instance: Any, rel: str) -> list[str]:
+    """`instance` が破った `contracts/<rel>` のスキーマの場所と規則の名前（重複なし・昇順）。値を含まない。"""
+    found = _schema_validator(rel).iter_errors(instance)
+    return sorted({f"{'/'.join(str(p) for p in e.absolute_schema_path)}（{e.validator}）" for e in found})
+
+
 def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:
     """`instance` が `contracts/<rel>` のスキーマに合わなければ `error_cls`（`<label> の形が違う: <誤り>`）を投げる。"""
     _refuse(schema_errors(instance, rel), error_cls, label)
