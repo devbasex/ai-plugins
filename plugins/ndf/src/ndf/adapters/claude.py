@@ -157,17 +157,20 @@ def list_plugins(
 
     一覧はプロジェクトの設定で変わるため、これから起動する `claude` と同じ `cwd` で読む。`env` を省けばこのプロセスの環境で打つ。
     """
+    argv = [CLAUDE, "plugin", "list", "--json"]
+    child_env = None if env is None else dict(env)
     try:
-        argv = [CLAUDE, "plugin", "list", "--json"]
-        child_env = None if env is None else dict(env)
         cli_floor.require("claude", CLAUDE, child_env, cwd)
         done = run(argv, capture_output=True, text=True, timeout=limits.seconds(PLUGIN_LIST), check=False, cwd=cwd, env=child_env)
     except (OSError, subprocess.SubprocessError, cli_floor.TooOld):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8。古い claude は起動の側の比べが止める）
         return None
-    if done.returncode != 0:
-        return None
+    return _parse_listed(done.stdout) if done.returncode == 0 else None
+
+
+def _parse_listed(stdout: str) -> Optional[list[dict[str, Any]]]:
+    """`claude plugin list --json` の標準出力の要素の並び。JSON でない・`id` が文字列の辞書の並びでないものは `None`。"""
     try:
-        listed = json.loads(done.stdout)
+        listed = json.loads(stdout)
     except ValueError:  # noqa: NDF401 外部コマンド: JSON でなければ読めなかったとして扱う
         return None
     if not isinstance(listed, list) or not all(isinstance(e, dict) and isinstance(e.get("id"), str) for e in listed):
