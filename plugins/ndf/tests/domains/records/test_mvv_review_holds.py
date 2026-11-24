@@ -1,6 +1,6 @@
 """レビューの保留（`review_holds`）と、承認ゲートの直前の MVV 判定がそれを読むこと（#3959 の受け入れ条件 4。決定 2・11）。
 
-判定は `test_mvv_gate` と同じく、LLM のアダプターと GitHub をスタブにし、git と記録のファイルは本物を使う。
+保留の有無ごとの判定は Git のアダプターを偽にして確かめ、git と GitHub のスタブを通す承認ゲートの全体は 1 件だけ打つ。
 """
 
 from __future__ import annotations
@@ -9,12 +9,14 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from ndf.domains.records import jsonl, mvv, mvv_gate
 from ndf.domains.records import mvv_decide as md
+from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import gate
 
 from . import test_mvv_gate
@@ -123,28 +125,52 @@ GATES = {
 }
 
 
+@pytest.fixture
+def fake_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Git のアダプターを偽にした判定の場所。メインディレクトリの一覧だけを返し、git のプロセスを起動しない。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    main = tmp_path / "main"
+    monkeypatch.setattr(mvv.git_mod.Git, "worktrees", lambda self: [SimpleNamespace(path=main)])
+    monkeypatch.setattr(mvv.git_mod.Git, "run", _no_git)
+    return main
+
+
+def _no_git(self: Any, *args: Any, **kw: Any) -> str:
+    raise AssertionError(f"git を起動しない: {args}")
+
+
 @pytest.mark.parametrize(("prepare", "skip", "held", "unwritten"), GATES.values(), ids=GATES.keys())
 def test_fast_design_gate_is_not_skipped_while_the_review_holds_remain(
-    repo: Path,
-    notes: list[tuple[int, str]],
-    prepare: Callable[[], None],
-    skip: bool,
-    held: int,
-    unwritten: bool,
+    fake_git: Path, prepare: Callable[[], None], skip: bool, held: int, unwritten: bool
 ) -> None:
-    # 受け入れ条件 4: 直っていないレッドライン・利用者の判断が要る見送り・読めない記録は、fast でも「従う」の判定で省かない
-    RepoKey.value = mvv.repo_key(repo)
+    # 受け入れ条件 4: 直っていないレッドライン・利用者の判断が要る見送り・読めない記録は、fast でも「従う」の判定で省かない。
+    # 承認ゲートの直前の判定と同じ手順 (5)・(7)・(8)（記録を読む・判定を記録する・省くかを決める）を、git を起動せずに通す
+    RepoKey.value = mvv.repo_key(fake_git)
     prepare()
+    pull = SimpleNamespace(head_sha=HEAD, base_ref="main")
+    j = mvv_gate._Judging(fake_git, "design", None, PR, pull)  # type: ignore[arg-type]
+    rec = mvv_gate._read_records(j, mvv.Snapshot(md.State.APPROVED, 1, SHA, None, (), {}, HEAD, "c" * 64, None), [])
     ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _inputs(), _hub(PR, DOCS), ask)
-    assert (out["skip"], len(out["holds"]), len(ask.calls), out["verdict"]) == (skip, held, 1, FOLLOW)
-    assert any(w.startswith("判定を記録（mvv-validation.jsonl）に書けない: ") for w in out["why"]) is unwritten
-    if not held:
-        return
-    [hold] = out["holds"]
+    asked = {"gate": "design", "question": "q", "material": "m"}
+    _, unrecorded = mvv.mvv_validate_sprint(
+        fake_git, asked, mvv_gate.judge_with(ask), reuse=rec.rows is not None, rows=rec.rows, broken=rec.broken
+    )
+    out = mm.gate_outcome("design", FOLLOW, unrecorded is None, [], rec.holds, pull=(PR, HEAD))
+    assert (out["skip"], len(out["holds"]), len(ask.calls)) == (skip, held, 1)
+    assert (unrecorded is not None) is unwritten
+    if held:
+        [hold] = out["holds"]
+        assert hold.startswith("PR #5 の ") or hold.startswith(mvv_gate.RECORDS_UNREADABLE)
+
+
+def test_the_gate_puts_the_holds_on_the_pr_and_the_approval_material(repo: Path, notes: list[tuple[int, str]]) -> None:
     # 保留の文は holds にだけ置き、why には件数の固定の文だけ。PR のコメントと承認資料にも保留が載る
+    RepoKey.value = mvv.repo_key(repo)
+    _write([_deferred(1)])
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(PR, DOCS), Ask(FOLLOW))
+    [hold] = out["holds"]
+    assert (out["skip"], hold) == (False, "PR #5 の Value 1（deferred・needs_user）: 理由 1")
     assert "レビューの保留が 1 件ある（内容は保留の欄）" in out["why"] and not any(hold in w for w in out["why"])
-    assert hold.startswith("PR #5 の ") or hold.startswith(mvv_gate.RECORDS_UNREADABLE)
     assert f"### レビューの保留\n\n- {hold}" in notes[-1][1]
     assert f"  - {hold}" in gate.mvv_lines(out, "design", PR, HEAD)
 
