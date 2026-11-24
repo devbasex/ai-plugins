@@ -447,7 +447,7 @@ plugins/ndf/
 | `d` の中央値 | 結べた組のうち `outcome` が `woke` で `priced` が真のものの `cache_write_1h × w_1h + cache_write_5m × w_5m + output × out`（起床に属する全呼び出しの合計。`priced` が偽の起床は入れない） |
 | 起床 1 回の実費の中央値 | 結べた組のうち `outcome` が `woke` で `priced` が真のものの `cache_read × r + cache_write_1h × w_1h + cache_write_5m × w_5m + output × out`（全呼び出しの合計。読み出しを含む） |
 | 待ちの長さの中央・75・90 パーセンタイル | `wait_id`（待ちが始まった応答の時刻）から `wait_end` の `opened_at`（待ちを終えた入力の時刻）まで。`wait_end` の行の `at`（Stop の時刻）は使わない |
-| 避けた書き直し（1 つの待ちで最大 1 回） | 待ちの長さ（上の行）が `wait_start` の `ttl` の寿命を越え、その待ちに `hit` が真の `wake_result`（結べた組）が 1 つ以上あり、`wait_end` の `hit`（待ちを終えた最初の呼び出しの読み出し）が真の待ちだけ。`unpriced_waits` の待ちは入れない。`preempted` の `wake_result` を持つだけでは外さない（費用 0）。token は `wait_end` の `tokens`、費用の差は `(w − r) × tokens` − その待ちの全ての `wake_result`（`wake` の無いものも含む。`preempted` は 0）の実費の合計。`wake` の無いまま寿命を越えて自然に当たった待ちは数えない |
+| 避けた書き直しの推定（1 つの待ちで最大 1 回。項目の名前と `summary` に「推定」を付ける） | 待ちの長さ（上の行）が `wait_start` の `ttl` の寿命を越え、その待ちに `hit` が真の `wake_result`（結べた組）が 1 つ以上あり、最後に当たった起床（その組の `wake` の行の `at`）から `wait_end` の `opened_at` までが `wait_end` の `ttl` の寿命以内で、`wait_end` の `hit`（待ちを終えた最初の呼び出しの読み出し）が真の待ちだけ。最後に当たった起床から寿命を越えて当たった待ちは、当たりを起床に帰せないので数えない。反実仮想の推定で、前提は設計の決定 9 にある。`unpriced_waits` の待ちは入れない。`preempted` の `wake_result` を持つだけでは外さない（費用 0）。token は `wait_end` の `tokens`、費用の差は `(w − r) × tokens` − その待ちの全ての `wake_result`（`wake` の無いものも含む。`preempted` は 0）の実費の合計。`wake` の無いまま寿命を越えて自然に当たった待ちは数えない |
 
 ## 上限の設定の方針のファイル（`contracts/limits/<方針の名前>.json`）
 
