@@ -154,6 +154,7 @@ class _Run:
     # この起動で最後に起動した修正担当の記録と、1 ラウンドの文脈の増分の最大（状態ファイルへは書かない。#4013）
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
+    documents: bool = False  # PR の全差分に Markdown のファイルがあるか（文書の基準を指示に入れる。#4285）
 
 
 # --- 範囲 -------------------------------------------------------------------------------
@@ -538,7 +539,6 @@ def _remarks_file(run: _Run, round_no: int, lines: Sequence[str]) -> Optional[Pa
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path, remarks: Optional[Path] = None) -> str:
     decided = run.journal.skipped_texts()
-    handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
         f"差分は {diff}（範囲: {scope.kind}{'・' + scope.base if scope.base else ''}）にある。worktree は {run.cfg.worktree}。",
@@ -546,8 +546,9 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     lines += criteria_decide.reviewer_block(run.cfg.settings.focus)
-    if handed:
-        lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
+    lines += criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, scope_decide.read_by_all_head(run.data))
+    if run.cfg.handed:
+        lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *(f"- {h.id}: {h.text}" for h in run.cfg.handed)]
     if decided:
         lines += ["理由を添えて見送り済みの指摘（出し直さない）:", *(f"- {t}" for t in decided)]
     if remarks is not None:
@@ -639,7 +640,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
         + str(run.ref.origin_pr)
         + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
     )
-    lines += criteria_decide.fixer_block(run.cfg.settings.focus)
+    lines += criteria_decide.fixer_block(run.cfg.settings.focus) + criteria_decide.document_block(criteria_decide.FIXER, run.documents)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
     if scoped.ci_only(declared.test_section(run.cfg.worktree)):
         lines.append(criteria_decide.fixer_ci_only())
@@ -841,6 +842,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     cfg = run.cfg
     changed = _changed(run.g, cfg.base, cfg.worktree)
     _oversized_docs(run, changed.docs)
+    run.documents = any(p.endswith(".md") for p in changed.files)
     reviewed = scope_decide.reviewed_of(run.data)
     sections = _sections(changed.docs)
     head = run.g.rev_parse("HEAD")

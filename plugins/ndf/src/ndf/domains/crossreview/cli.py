@@ -32,7 +32,7 @@ from typing import Any, Callable, ContextManager, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import limits, result
+from ndf.contracts import limits, result, writing
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
 from ndf.domains.crossreview import drive, fixgate_decide, journal, push, repo, report_decide, scope_decide, store, threads
@@ -531,6 +531,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         return _stop("precondition", str(exc))
     except drive.DriveStopped as exc:
         return _stop(exc.kind, str(exc))
+    except writing.CriteriaBroken as exc:
+        # 文書の基準の本文を読めない（指示を作る前。#4285）
+        return _stop("invalid", str(exc))
     verdict = fin.finish(got.review, cfg.handed)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")

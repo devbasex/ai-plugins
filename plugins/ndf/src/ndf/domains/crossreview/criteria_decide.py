@@ -16,12 +16,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import facts
+from ndf.contracts import facts, writing
 from ndf.contracts.result import SEVERITIES
 
 TABLE = "data/review-criteria.json"
 # 読む設定のバージョン
 DECL_VERSION = 1
+# 文書の基準を足す指示の相手
+REVIEWER, FIXER = "reviewer", "fixer"
 # 修正担当の会話を保存するかのキー（#4013）
 FIXER_SESSIONS = "fixer_sessions"
 
@@ -176,3 +178,21 @@ def fixer_block(focus: Sequence[str]) -> list[str]:
         f"当たらないもの: {'・'.join(t['not_written'])}",
         t["out_of_scope"],
     ]
+
+
+def document_block(role: str, documents: bool, since: Optional[str] = None) -> list[str]:
+    """文書を含む PR（`documents`）の指示に足す「文書の指摘の基準」のセクション（#4285 の決定 4〜6）。含まなければ空。
+
+    `role` は `REVIEWER`（相手役）か `FIXER`（修正担当）。`since` は相手役の全員が読めた前のラウンドの head で、
+    無ければ None（1 ラウンド目）。基準の本文を読めなければ `writing.CriteriaBroken`。"""
+    if not documents:
+        return []
+    doc = _table()["document"]
+    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", f"{doc['number']}. {doc['text']}"]
+    if role == REVIEWER:
+        lines += doc["fields"]
+        if since:
+            lines.append(doc["since"].format(since=since))
+    else:
+        lines.append(doc["fixer"])
+    return [*lines, writing.text().rstrip()]

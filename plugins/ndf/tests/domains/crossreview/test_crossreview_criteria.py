@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -151,15 +152,21 @@ def _fixer_prompt_with(tmp_path: Path, capsys, monkeypatch, wt: Path, project: d
 
 
 def _between_findings_and_result(lines: list[str]) -> list[str]:
-    """指摘の行（`- `）の後から結果ファイルの行（最後の行）の前まで。"""
-    start = max(i for i, line in enumerate(lines) if line.startswith("- ")) + 1
+    """指摘の行（`- r<ラウンド>-<番号>: `）の後から結果ファイルの行（最後の行）の前まで。"""
+    start = max(i for i, line in enumerate(lines) if re.match(r"- r\d+-\d+: ", line)) + 1
     return lines[start:-1]
+
+
+def _fixer_lines() -> list[str]:
+    """文書を変えた PR の修正担当への基準の行（`wt` は doc.md を変える）。"""
+    block = criteria_decide.fixer_block(()) + criteria_decide.document_block(criteria_decide.FIXER, True)
+    return "\n".join(block).splitlines()
 
 
 def test_issue_4030_ci_only_worktree_tells_the_fixer_not_to_run_tests(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#4030: 修正担当の worktree の設定が `test.ci.only: true` なら、指摘の基準の後にデータの文が 1 行だけ足される。"""
     lines = _fixer_prompt_with(tmp_path, capsys, monkeypatch, wt, {"test": {"ci": {"only": True}}})
-    assert _between_findings_and_result(lines) == [*criteria_decide.fixer_block(()), criteria_decide._table()["fixer_ci_only"]]
+    assert _between_findings_and_result(lines) == [*_fixer_lines(), criteria_decide._table()["fixer_ci_only"]]
 
 
 @pytest.mark.parametrize("project", [None, {}, {"test": {}}, {"test": {"ci": {"only": False}}}])
@@ -168,7 +175,7 @@ def test_issue_4030_without_ci_only_the_fixer_prompt_is_unchanged(
 ) -> None:
     """#4030: 設定・test のセクションが無いか `ci.only` が偽なら、その文は載らず、指摘の基準のほかに行は足されない。"""
     lines = _fixer_prompt_with(tmp_path, capsys, monkeypatch, wt, project)
-    assert _between_findings_and_result(lines) == criteria_decide.fixer_block(())
+    assert _between_findings_and_result(lines) == _fixer_lines()
 
 
 def test_review_json_focus_reaches_both_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

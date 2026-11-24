@@ -104,15 +104,23 @@ def load_json(rel: str) -> Any:
     return read_json(require_inside(_dir / rel, _dir.parent))
 
 
+def load_text(rel: str) -> str:
+    """`contracts/<rel>` の本文（JSON でないファイル。AI への指示に入れる文書など）。"""
+    return _read_text(require_inside(_dir / rel, _dir.parent))
+
+
 def read_json(path: Path) -> Any:
     """コントラクトのファイル 1 本の値。断るものは `load_json` と同じ。"""
+    return parse_file(path, _read_text(path))
+
+
+def _read_text(path: Path) -> str:
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ContractError(f"コントラクト {path} を読めない: {exc.strerror or exc}") from None
     except UnicodeDecodeError as exc:
         raise ContractError(f"コントラクト {path} を UTF-8 として読めない: 位置 {exc.start}") from None
-    return parse_file(path, text)
 
 
 def parse_file(path: Path, text: str) -> Any:
