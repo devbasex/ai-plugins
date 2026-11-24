@@ -343,7 +343,7 @@ PROJECT_KEYS = {
     "rebuild": ("workflow", "launch", "rebuild"),
     "refactor": ("workflow", "launch", "refactor"),
 }
-# 設定の `workflow`（launch・stages）の形。旧いプラグインの設定のスキーマへ足さず、読む側のここに置く（#3473）
+# 設定の `workflow`（launch・stages）の形。読む側が確かめる（#3473）
 WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
 # 課題の本文を書き出す保存先のファイルと、題の写し（プランの実行の保存先の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
