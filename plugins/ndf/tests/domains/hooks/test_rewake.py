@@ -545,3 +545,46 @@ def test_entry_routes_rewake_and_keeps_the_three_arguments(monkeypatch):
         ("ndf.domains.hooks.main", "run_entry", ["entry.py", "claude", "PreToolUse"]),
         ("ndf.domains.hooks.rewake", "run", ["entry.py", "claude", "Stop", "rewake"]),
     ]
+
+
+# ---------------------------------------------------------------- 眠りの後の次の手（_finish）と費用の累計
+
+# 起床 1 回 = r × S + d = 1250、書き直し 1 回 = (w − r) × S = 1750（S = 1000）。
+EXACT = keep_cache.Ratios(2.0, 2.0, 1.25, 0.25, 1000, 5, 600, 60, 0.9)
+GEN = signals.Generation(T0, "h1", "m1", True)
+
+
+def _waiting(directory: Path, k: int, limit: int, spent: float) -> None:
+    signals.update_keep(directory, SID, signals.with_generation({"wait_id": T0, "k": k, "n_max": limit, "spent": spent}, GEN))
+
+
+def _finish(directory: Path) -> tuple:
+    t = rewake.Target(directory, LAUNCH, SID, "", 1, 0, None, "h1", T0)
+    turn = keep_cache.LastTurn("m1", T0, 1000, "1h", "claude-opus-5-5", 0, 0, 0)
+    err = io.StringIO()
+    return rewake._finish(t, GEN, turn, EXACT, err, Clock(T0 + 3000)), err.getvalue()
+
+
+def test_finish_adds_one_wake_cost_to_the_total(child):
+    _waiting(child, 3, 9, 500)
+    code, err = _finish(child)
+    state = keep(child)
+    assert code == 2 and "（4/9）" in err
+    assert (state["k"], state["spent"]) == (4, 1750)
+    assert state["pending"]["tokens"] == 1000 and "wait_stop" not in state
+    assert log(child)[-1]["kind"] == "wake"
+
+
+def test_finish_stops_the_wait_when_the_next_wake_passes_the_rewrite_cost(child):
+    _waiting(child, 3, 9, 500.5)
+    code, err = _finish(child)
+    state = keep(child)
+    assert (code, err) == (0, "")
+    assert (state["k"], state["spent"], state["wait_stop"]) == (3, 500.5, "limit") and "pending" not in state
+    assert log(child)[-1]["kind"] == "stop_waking" and log(child)[-1]["scope"] == "wait"
+
+
+def test_finish_stops_the_wait_at_the_count_limit(child):
+    _waiting(child, 9, 9, 0)
+    assert _finish(child) == (0, "")
+    assert keep(child)["wait_stop"] == "limit" and keep(child)["k"] == 9

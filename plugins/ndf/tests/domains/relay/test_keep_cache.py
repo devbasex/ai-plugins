@@ -331,6 +331,45 @@ def test_next_step_count_and_cost():
     assert keep_cache.wake_step(20, 33, 290_000, 150_000, q) == Step("stop", "cost")
 
 
+# 起床 1 回 = r × S + d、書き直し 1 回 = (w − r) × S。S = 1000 で起床 1250・書き直し 1750（2 進で割り切れる値）。
+EXACT = Ratios(2.0, 2.0, 1.25, 0.25, 1000, 5, 600, 60, 0.9)
+
+
+def test_wake_step_wakes_when_the_total_reaches_the_rewrite_cost_exactly():
+    assert keep_cache.wake_step(0, 9, 500, 1000, EXACT) == Step("wake")
+    assert keep_cache.wake_step(0, 9, 500.5, 1000, EXACT) == Step("stop", "cost")
+
+
+def test_wake_step_checks_the_count_before_the_cost():
+    assert keep_cache.wake_step(9, 9, 10**9, 1000, EXACT) == Step("stop", "count")
+
+
+def test_wake_step_cost_uses_the_tokens_and_d_of_the_next_wake():
+    q = EXACT._replace(d=1750)
+    assert keep_cache.wake_step(0, 9, 0, 1000, q) == Step("stop", "cost")
+    assert keep_cache.wake_step(0, 9, 0, 1000, q._replace(d=1500)) == Step("wake")
+    assert keep_cache.wake_step(0, 9, 0, 1000, EXACT._replace(w=1.5)) == Step("wake")
+    assert keep_cache.wake_step(0, 9, 0, 1000, EXACT._replace(w=1.25)) == Step("stop", "cost")
+
+
+def test_n_max_counts_wakes_whose_total_stays_within_one_rewrite():
+    assert keep_cache.n_max(1000, EXACT) == 1
+    assert keep_cache.n_max(1000, EXACT._replace(d=250)) == 3
+    assert keep_cache.n_max(1000, EXACT._replace(d=1751)) == 0
+    assert keep_cache.n_max(1000, EXACT._replace(w=0.1)) == 0
+
+
+@pytest.mark.parametrize("tokens", [20_000, 150_000, 400_000, 510_500])
+@pytest.mark.parametrize("q", [opus(), opus(read=0.1), opus(ttl="5m"), opus(d=50_000)])
+def test_wake_step_stops_by_cost_right_after_n_max_wakes(tokens, q):
+    limit = keep_cache.n_max(tokens, q)
+    k, spent = 0, 0.0
+    while keep_cache.wake_step(k, 10**6, spent, tokens, q) == Step("wake"):
+        k, spent = k + 1, spent + q.r * tokens + q.d
+    assert k == limit
+    assert keep_cache.wake_step(k, 10**6, spent, tokens, q) == Step("stop", "cost")
+
+
 # ---------------------------------------------------------------- 起床の状態と記録（signals）
 
 from ndf.domains.relay import signals  # noqa: E402
