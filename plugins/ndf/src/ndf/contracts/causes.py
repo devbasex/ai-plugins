@@ -171,17 +171,25 @@ def policy_of(kind: str) -> Optional[limits.Policy]:
     return limits.policy(name) if name else None
 
 
+def _backoff(pol: limits.Policy, used: int) -> float:
+    """方針の間隔 × 倍率 ^ 打ち直した回数の秒。頭打ちがあればそこまで。"""
+    base = pol.interval if pol.interval is not None else 0.0
+    delay = base * ((pol.factor if pol.factor is not None else 1.0) ** used)
+    return min(delay, pol.max_interval) if pol.max_interval is not None else delay
+
+
 def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
     """打ち直しで直る止まりの次の待ちの秒。打ち直さない（ルートが retry でない・回数が尽きた）なら None。"""
     kind = kind_of(cause)
-    if cause is None or kind is None or not has(kind) or row(kind).route != "retry":
+    if cause is None or kind is None or not has(kind):
+        return None
+    found = row(kind)
+    if found.route != "retry":
         return None
     pol = policy_of(kind)
     if pol is None or pol.attempts is None or used >= pol.attempts:
         return None
-    if row(kind).requires_retry_after:
+    if found.requires_retry_after:
         after = cause.get("retry_after")
         return float(after) if isinstance(after, (int, float)) else None
-    base = pol.interval if pol.interval is not None else 0.0
-    delay = base * ((pol.factor if pol.factor is not None else 1.0) ** used)
-    return min(delay, pol.max_interval) if pol.max_interval is not None else delay
+    return _backoff(pol, used)
