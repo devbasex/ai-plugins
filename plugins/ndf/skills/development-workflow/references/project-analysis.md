@@ -135,11 +135,15 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
 
 移行の後は、`.ndf/project.json` の差分を確かめてコミットする。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る。
-解析の記録（`.ndf/analysis/project.json`）はコミットしない。`git status` にこのファイルが出たら、次のように直す。
+**解析の記録（`.ndf/analysis/project.json`）はコミットしないので、移行の後に、記録が追跡されておらず、git に除外されていることを次の順で確かめる。**
+`git status` の表示では判定しない。未追跡のファイルがディレクトリ名にまとめて出る場合や、追跡済みのファイルに差分が無い場合を見落とすためである。
 
-- 新しいファイルとして出る: 前からある `.ndf/analysis/.gitignore` が記録を外していない。`*` の行を書く
-- 変更として出る（`.ndf/analysis/project.json` をすでに追跡している）: `git rm --cached -- .ndf/analysis/project.json` で、そのファイルだけを追跡から外す。
-  コミットする前に `git diff --cached --name-status` で、ステージした削除がこのファイルだけであることを確かめる
+1. `git ls-files -- .ndf/analysis/project.json` が何か出力したら、記録は追跡されている。`git rm --cached -- .ndf/analysis/project.json` で、
+   そのファイルだけを追跡から外す。コミットする前に `git diff --cached --name-status` で、ステージした削除がこのファイルだけであることを確かめる
+2. `git check-ignore -- .ndf/analysis/project.json` が何も出力しなければ、記録は除外されていない。前からある `.ndf/analysis/.gitignore` に
+   `/project.json` の行を足し、もう一度 `git check-ignore` で確かめる。`*` は足さない。同じディレクトリに利用者が置いた未追跡のファイルまで、`git status` と `git add` の対象から外れるためである
+
+2 の確かめは 1 の後に行う。`git check-ignore` は、追跡しているファイルを除外の対象として報告しないためである。
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
