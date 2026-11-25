@@ -12,7 +12,8 @@
 残りが無い・途中で割り込みが来た）では、事象に当たる `fail_closed` の guard の `on_deadline` を呼び、拒否の理由を返したら
 拒否を出す（中継の下の AskUserQuestion。#3814 の I7）。SessionStart のときだけ、
 古い計測の記録と状態のファイルを消し（`metrics.prune`・`metrics.prune_state`）、根の目印と環境の最後に使った時刻を書き、
-置いてある中継の複製を更新後のプラグインへ向け直す（`relay.install.follow`）。
+置いてある中継の複製を更新後のプラグインへ向け直す（`relay.install.follow`）。Claude Code では `settings.json` の
+`cleanupPeriodDays` の下限と statusline も整える（`statusline.settings.keep_retention`・`ensure`）。
 """
 
 from __future__ import annotations
@@ -150,7 +151,7 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) 
         record["missing"] = missing
         return ""
     if event == "SessionStart":
-        _session_start(state_dir)
+        _session_start(runtime, state_dir)
     with Counter.open(ctx.session_id, state_dir) as counter:
         svc = dispatch.GuardServices(state_dir, counter, deadline)
         outcome = dispatch.run(ctx, dispatch.select(dispatch.load_specs(), ctx, off), found, svc)
@@ -205,7 +206,7 @@ def _record_outcome(record: dict, outcome: Any) -> None:
     )
 
 
-def _session_start(state_dir: Path) -> None:
+def _session_start(runtime: str, state_dir: Path) -> None:
     """SessionStart の entry だけが行う片付けとマーカー。"""
     from ndf.domains.hooks import env, metrics
 
@@ -215,6 +216,28 @@ def _session_start(state_dir: Path) -> None:
     env.mark_root(ident)
     env.touch_used(ident)
     _follow_relay()
+    if runtime == "claude":
+        _ensure_claude_settings()
+
+
+def _ensure_claude_settings() -> None:
+    """Claude Code の `settings.json` を整える。`cleanupPeriodDays` を下限まで引き上げ（#4515）、statusLine が無ければ
+    NDF の表示を設定し、NDF の表示なら本体を今のバージョンに置き直す（`ndf statusline ensure`）。
+
+    SessionStart の締め切りに収めるため排他は待たない。取れなければ次のセッションの開始に任せる。
+    """
+    from ndf.domains.statusline import settings
+
+    days = int(tables.policy_value("hook.transcript-retention", "count"))
+
+    def run(p: settings.Paths) -> settings.Switched:
+        settings.keep_retention(p, days)
+        return settings.ensure(p)
+
+    try:
+        settings.run_locked(settings.paths(os.environ), run, 0)
+    except (settings.StatuslineError, OSError):  # noqa: NDF401 ファイル: 書けなくてもセッションの開始は止めない
+        return
 
 
 def _follow_relay() -> None:

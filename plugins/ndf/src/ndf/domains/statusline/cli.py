@@ -18,7 +18,6 @@ from collections.abc import Callable
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.domains.project import secret
-from ndf.domains.relay import signals
 from ndf.domains.statusline import settings
 
 TOOL = cli.tool_of(__name__)
@@ -45,14 +44,7 @@ def _skipped(reason: str) -> int:
 
 
 def _locked(p: settings.Paths, run: Callable[[settings.Paths], settings.Switched]) -> settings.Switched:
-    """排他の中で `run` を打つ。待ちきれなければ `StatuslineError`（store_in_use）。"""
-    p.lock.parent.mkdir(parents=True, exist_ok=True)
-    with signals.held(p.lock, limits.seconds(LOCK_LIMIT)) as got:
-        if not got:
-            raise settings.StatuslineError(
-                "store_in_use", f"排他 {p.lock} を待ちきれない（別のセッションか旧い statusline-switch.sh が持つ）"
-            )
-        return run(p)
+    return settings.run_locked(p, run, limits.seconds(LOCK_LIMIT))
 
 
 def _ensure(p: settings.Paths) -> int:

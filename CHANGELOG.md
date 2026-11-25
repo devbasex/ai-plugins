@@ -11,6 +11,11 @@
 
 ## [Unreleased]
 
+### 利用者向けの変化
+
+- **Claude Code のセッション開始で、NDF の statusline をまた整えるようになった。** 11.0.0 で SessionStart の hook を作り直したときに `ndf statusline ensure` の呼び出しが抜け、`statusLine` が未設定でも NDF の表示が入らず、`~/.claude/ndf-statusline.sh` も更新後の版に置き直されなくなっていた（費用と 7d・5h の使用率の表示が届かない）。10 系と同じく、未設定なら NDF の表示を設定し、NDF の表示なら本体を今の版に置き直す。利用者の設定の `statusLine` は書き換えない。別のセッションが設定を書いている最中なら待たずに飛ばし、次のセッションの開始で整える
+- **Claude Code のセッション開始で、会話の記録を残す日数（`settings.json` の `cleanupPeriodDays`）をまた 90 日以上に保つようになった**（#4515）。同じ作り直しで 10 系の `ensure-retention.sh` の行き先が作られず、11 系だけを入れた環境では Claude Code の既定の 30 日で記録が消えていた。未設定か 90 未満なら 90 にし、90 以上なら触らない。下限は上限の表 `hook.transcript-retention` が持つ
+
 ## [ndf 11.0.36] - 2026-11-25
 
 ### 利用者向けの変化
