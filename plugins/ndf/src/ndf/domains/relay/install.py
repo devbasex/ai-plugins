@@ -8,7 +8,8 @@
 - PATH のエントリポイントは `<XDG_BIN_HOME か ~/.local/bin>/` に置く 2 つのシェルのスクリプトで、どちらも複製を呼ぶ。
   `ndf-relay` は複製が `bin/ndf relay …` を呼び、`ndf` は目印の引数 `--ndf` を付けて複製を呼び、複製は `relay` を足さずに
   `bin/ndf …` を呼ぶ（端末・tmux・Codex から `ndf` を打てる。#4528）。向け直しのしかけは複製の 1 か所にある
-- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。置いた後は、SessionStart がプラグインの
+- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。置いた後は、SessionStart が消えた
+  エントリポイントを置き直し（`restore_entries`。コンテナの再起動で `~/.local/bin` だけが消える環境のため。#4535）、プラグインの
   更新に合わせて `relay.root` と `relay.version` を向け直す（`follow`。旧いバージョンのディレクトリは更新で消えないため、
   消えたときの向け直しだけでは古いバージョンを呼び続ける）。撤去は、自分が置いたマーカーの行がある
   ファイルだけを消す（利用者が置いた同じ名前のファイルを消さない）
@@ -198,6 +199,32 @@ def follow(environ: Mapping[str, str], plugin_root: Path, version: str) -> Optio
     signals.replace_text(copy.parent / ROOT_FILE, f"{plugin_root}\n", 0o644)
     signals.replace_text(copy.parent / VERSION_FILE, f"{version}\n", 0o644)
     return version
+
+
+def restore_entries(environ: Mapping[str, str]) -> list[Path]:
+    """SessionStart が呼ぶ。NDF が置いた複製があるのに PATH のエントリポイントが無ければ置き直し、置いたパスを返す（#4535）。
+
+    `~/.local/bin` がコンテナの使い捨ての領域で複製だけが残る環境では、再起動でエントリポイントだけが消える。
+    利用者が入れた状態を戻すだけで、複製の無い（入れていない・`uninstall` した）環境には置かない。
+    置き直すのは無いものだけで、マーカーの無いもの・中身の違うもの（別のアカウントの `CLAUDE_CONFIG_DIR` が
+    置いたものなど）は触らない。
+    """
+    copy = config_dir(environ) / COPY_NAME
+    try:
+        if MARK not in copy.read_text(encoding="utf-8"):
+            return []
+    except FileNotFoundError:  # 複製が無ければ入れていない
+        return []
+    entries = (
+        (bin_dir(environ) / ENTRY_NAME, entry_script(copy)),
+        (bin_dir(environ) / NDF_NAME, ndf_script(copy)),
+    )
+    placed = []
+    for path, body in entries:
+        if not path.exists() and not path.is_symlink():
+            signals.replace_text(path, body, 0o755)
+            placed.append(path)
+    return placed
 
 
 def points_at(environ: Mapping[str, str], version: str) -> bool:

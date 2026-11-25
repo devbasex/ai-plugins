@@ -124,3 +124,30 @@ def test_stale_ndf_entry_is_rewritten_and_uninstall_removes_it(tmp_path):
     assert _run(ndf, "x") == "11.0.0 x\n"
     assert install.uninstall(env, CODE).ndf.state == "absent"
     assert not ndf.exists()
+
+
+def test_restore_entries_puts_back_entries_lost_with_the_container(tmp_path):
+    # #4535: ~/.local/bin が使い捨ての領域だと、再起動でエントリポイントだけが消える。複製があれば SessionStart が置き直す
+    env = _env(tmp_path)
+    got = install.install(env, _plugin(tmp_path / "cache", "11.0.0"), CODE, replace_foreign=False, version="11.0.0")
+    shutil.rmtree(tmp_path / "bin")
+    assert install.restore_entries(env) == [got.entry.path, got.ndf.path]
+    assert _run(got.entry.path, "x") == "11.0.0 relay x\n"
+    assert _run(got.ndf.path, "x") == "11.0.0 x\n"
+    assert install.restore_entries(env) == []
+
+
+def test_restore_entries_leaves_foreign_stale_and_uninstalled_alone(tmp_path):
+    env = _env(tmp_path)
+    install.install(env, _plugin(tmp_path / "cache", "11.0.0"), CODE, replace_foreign=False, version="11.0.0")
+    entry, ndf = tmp_path / "bin" / install.ENTRY_NAME, tmp_path / "bin" / install.NDF_NAME
+    entry.write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+    # 別のアカウントの CLAUDE_CONFIG_DIR が置いたエントリポイントは中身が違う（stale）。書き換え合わない
+    ndf.write_text(f'#!/bin/sh\n{install.NDF_MARK}\nexec python3 /other/relay.py --ndf "$@"\n', encoding="utf-8")
+    assert install.restore_entries(env) == []
+    assert entry.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
+    assert "/other/relay.py" in ndf.read_text(encoding="utf-8")
+    install.uninstall(env, CODE)
+    entry.unlink()
+    assert install.restore_entries(env) == []
+    assert not entry.exists() and not ndf.exists()
