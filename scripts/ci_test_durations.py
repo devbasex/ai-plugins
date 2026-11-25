@@ -283,16 +283,24 @@ def read_part(d: Path, kind: str, index: int) -> Part:
     return part
 
 
+def artifact_part(name: str) -> tuple[str, int] | None:
+    """成果物の名前から `(根か NDF, ジョブの番号)` を読む。名前が合わなければ `None`。"""
+    m = ARTIFACT_NAME.match(name)
+    if not m:
+        return None
+    return ("ndf" if m[1] else "root", int(m[2]))
+
+
 def read_parts(xml_dir: Path) -> dict[tuple[str, int], Part]:
     """成果物の名前ごとのディレクトリから、`(根か NDF, ジョブの番号)` ごとに XML の項目と試行の番号を読む。"""
     parts: dict[tuple[str, int], Part] = {}
     if not xml_dir.is_dir():
         return parts
     for d in sorted(p for p in xml_dir.iterdir() if p.is_dir()):
-        m = ARTIFACT_NAME.match(d.name)
-        if not m:
+        key = artifact_part(d.name)
+        if key is None:
             continue
-        part = read_part(d, "ndf" if m[1] else "root", int(m[2]))
+        part = read_part(d, *key)
         parts[(part.kind, part.index)] = part
     return parts
 
@@ -587,8 +595,8 @@ def fetch_run(gh: Gh, run_id: int, dest: Path) -> list[dict]:
     received = 0
     for a in sorted(arts, key=lambda a: str(a.get("name", ""))):
         name = str(a.get("name", ""))
-        m = ARTIFACT_NAME.match(name)
-        if not m or int(m[2]) >= total or a.get("expired"):
+        key = artifact_part(name)
+        if key is None or key[1] >= total or a.get("expired"):
             continue
         room = min(ARTIFACT_LIMIT, TOTAL_LIMIT - received)
         if int(a.get("size_in_bytes") or 0) > room:
@@ -606,7 +614,7 @@ def fetch_run(gh: Gh, run_id: int, dest: Path) -> list[dict]:
             sys.stderr.write(f"成果物 {name} を取れない（{e}）\n")
             continue
         received += len(data)
-        _extract(data, name, "ndf" if m[1] else "root", int(m[2]), dest)
+        _extract(data, name, *key, dest)
     return jobs
 
 
