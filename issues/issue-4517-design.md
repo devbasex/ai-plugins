@@ -312,7 +312,7 @@ flowchart LR
 ### 決定 8: 計画の時点の判定とスプリントの開始の判定が食い違ったら、スプリントの開始の判定を上げ下げどちらも採る
 
 - **質問**: 計画の値とスプリントの開始の判定が食い違ったとき、上げる方向だけを許すか、下げる方向も許すか
-- **選んだ案**: 工程「要求と受け入れ条件」の判定は、計画の値より上でも下でも採る。違ったときは `ndf progress next` の結果に注意（`mode_changed`）を出し、オーガナイザーか conductor が計画の行のモードを書き直す（実行計画では「見直し」の表に 1 行）。工程「要求と受け入れ条件」の終わりでは、作業場所も設計もまだ無い。だから判定を下げても失う作業が無く、上げ下げどちらも採れる。この工程を終えた後にモードを上げる必要が分かったときは、今の「途中でモードが変わったとき」の決まりに従い、上げる方向だけを許す
+- **選んだ案**: 工程「要求と受け入れ条件」の判定は、計画の値より上でも下でも採る。違ったときは、工程を終えるコマンド（`ndf progress finish`、または工程を流す `ndf progress next`）の結果 JSON の `items` に `mode_changed` の行を出し、オーガナイザーか conductor が計画の行のモードを書き直す（実行計画では「見直し」の表に 1 行）。工程「要求と受け入れ条件」の終わりでは、作業場所も設計もまだ無い。だから判定を下げても失う作業が無く、上げ下げどちらも採れる。この工程を終えた後にモードを上げる必要が分かったときは、今の「途中でモードが変わったとき」の決まりに従い、上げる方向だけを許す
 - 採らなかった案: 上げる方向だけを許す（計画で `standard` と見積もった課題が `standard` のまま残り、今の偏りが直らない）
 - 採らなかった案: 計画の値を正にする（計画の時点は要求仕様が無く、判定の入力が少ない）
 - **代償**: 計画の行と実際のスプリントのモードがずれることがあり、計画の書き直しが要る
@@ -401,6 +401,16 @@ flowchart LR
 | #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
 
 ファイルの役割・関数の責務・異常系は詳細設計（[issue-4517-design-detail.md](./issue-4517-design-detail.md)）にある。
+
+## 人へ残す判断
+
+設計 PR の cross-review で、必ず人の承認が要る操作に当たるとして直さずに残った指摘が 5 件ある（記録は https://github.com/devbasex/ai-plugins/pull/4519#issuecomment-7161816125 ）。どれも、設計に条件を足せば済む。推奨は「足す」で、承認と同じ 1 回で決める。
+
+| 判断 | 当たるレッドライン | なぜ当たるか |
+| --- | --- | --- |
+| `operation` で権限・保護の規則（認証・認可）を変えるときは、検証用の系でも、実行の前に既存の承認ゲート（本番系へ届く操作）で人の承認を得る条件を足すか（指摘 r1-10・r2-12） | C2 | 今の `operation-run.md` は検証用の系への操作を提示だけで進める。値の変更を `operation` に広げると、認証・認可の変更がその経路を通りうる。推奨: 足す（共通原則の C2 は環境を問わず人の承認を求める） |
+| リリース後レビューが PR のコメントと課題の本文に残す指摘・分け方の理由・リリース後テストの根拠から、公開していない情報（インフラの実際の値・社内の事情・他社の実データ）を除く条件を足すか。除けないときは書かずに人へ戻すか（指摘 r1-18・r3-11） | P4 | ai-plugins は公開のリポジトリで、PR と課題に置いた情報は取り消せない。推奨: 足す（項目名と変更の種類だけを書き、値が要るときは書かずに人へ戻す） |
+| `operation` の実行の記録・判定の根拠へ、変更の前後の値を書く手順で、秘密・公開していない値を書かずに項目名と変更の種類で表す条件を足すか（指摘 r2-11） | P4・C1 | `operation-run.md` は実行の記録をリポジトリのファイルに書く。値の変更を `operation` に広げると、秘密や公開していない値が記録に入りうる。推奨: 足す |
 
 ## 外部の調査
 
