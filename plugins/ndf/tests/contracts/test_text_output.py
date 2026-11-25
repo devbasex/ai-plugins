@@ -102,7 +102,18 @@ def test_a_given_stream_stays_json_even_with_text_chosen(tty):
 
 def test_declared_columns_set_the_order_and_headings(tty):
     tty = tty()
-    rows = [{"name": "main", "kind": "oauth", "email": "a@example.com", "pinned": True, "percent": 79.0, "five_hour": 12.0, "seven_day": 79.0, "state": "使える"}]
+    rows = [
+        {
+            "name": "main",
+            "kind": "oauth",
+            "email": "a@example.com",
+            "pinned": True,
+            "percent": 79.0,
+            "five_hour": 12.0,
+            "seven_day": 79.0,
+            "state": "使える",
+        }
+    ]
     result.emit(result.result("relay", "ok", "登録", items=rows), columns=account_registry.LIST_COLUMNS)
     head, _, row = tty.getvalue().splitlines()[2:5]
     assert head.split() == ["名前", "種類", "識別", "5h", "7d", "月の額", "状態"]
