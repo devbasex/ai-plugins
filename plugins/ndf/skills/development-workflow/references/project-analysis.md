@@ -134,20 +134,29 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 2. `analysis.written` の指紋を、取り除いた後の値で書き直す
 3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
 
-**移行の後は、設定をステージする前に、解析の記録（`.ndf/analysis/project.json`）を git の追跡と追加の対象から外す。その後で設定をコミットする。**
-先に `.ndf/` をまとめてステージすると、追跡済みの記録や除外されていない記録が、設定と一緒にコミットされるためである。
+**移行の後は、書き出しの結果をメインディレクトリで確かめ、コミットは移行用のブランチをチェックアウトした作業ディレクトリで行う。**
+移行用のブランチとは、設定の変更を Pull Request にするために作る、既定ブランチ以外のブランチである。
+`write` は、リンクされた worktree から打っても、設定と記録をメインディレクトリへ書く。
+メインディレクトリが既定ブランチをチェックアウトしているときにそこでコミットすると、Pull Request を経ずに既定ブランチへコミットしてしまう。
+メインディレクトリが移行用のブランチをチェックアウトしているなら、2 つの場所は同じである。
 
-次の git コマンドと `.gitignore` の確認は、すべてメインディレクトリのルートで行う。
-`write` は、リンクされた worktree から打っても設定と記録をメインディレクトリへ書くので、worktree で確かめると別の index を見てしまう。
+解析の記録（`.ndf/analysis/project.json`）は、設定をステージする前に、移行用のブランチで git の追跡と追加の対象から外す。
+先に `.ndf/` をまとめてステージすると、追跡済みの記録や除外されていない記録が、設定と一緒にコミットされるためである。
 追跡と除外は `git status` の表示では判定しない。未追跡のファイルがディレクトリ名にまとめて出る場合や、追跡済みのファイルに差分が無い場合を見落とすためである。
 
-1. `git ls-files -- .ndf/analysis/project.json` が何か出力したら、記録は追跡されている。`git rm --cached -- .ndf/analysis/project.json` で、
-   そのファイルだけを追跡から外す。`git diff --cached --name-status` で、ステージした削除がこのファイルだけであることを確かめる
-2. `git check-ignore -- .ndf/analysis/project.json` が何も出力しなければ、記録は除外されていない。前からある `.ndf/analysis/.gitignore` に
-   `/project.json` の行を足し、もう一度 `git check-ignore` で確かめる。`*` は足さない。同じディレクトリに利用者が置いた未追跡のファイルまで、`git status` と `git add` の対象から外れるためである。
-   この確かめは必ず 1 の後に行う。`git check-ignore` は、追跡しているファイルを除外の対象として報告しないためである
-3. `.ndf/project.json` の差分を確かめてステージする。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る。
-   `git diff --cached --name-status` で、ステージした変更が設定と 1 の削除だけで、`.ndf/analysis/project.json` の追加や変更が無いことを確かめてからコミットする
+1. メインディレクトリで、`.ndf/project.json` の差分を確かめる。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る
+2. メインディレクトリの `.ndf/project.json` を、移行用のブランチの作業ディレクトリへコピーする。解析の記録はコピーしない。
+   ここから後の git コマンドは、すべて移行用のブランチの作業ディレクトリのルートで打つ
+3. `git ls-files -- .ndf/analysis/project.json` が何か出力したら、記録はこのブランチで追跡されている。`git rm --cached -- .ndf/analysis/project.json` で、
+   そのファイルだけを追跡から外す
+4. `git ls-files -- .ndf/analysis/.gitignore` が何か出力したら、記録の保存先の `.gitignore` をチームで共有している。
+   このときは `git check-ignore -- .ndf/analysis/project.json` を打ち、何も出力しなければ、その `.gitignore` に `/project.json` の行を足す。
+   `*` は足さない。同じディレクトリに利用者が置いた未追跡のファイルまで、`git status` と `git add` の対象から外れるためである。
+   この確かめは必ず 3 の後に行う。`git check-ignore` は、追跡しているファイルを除外の対象として報告しないためである。
+   共有していなければ、何もしない。各 clone では `write` が `*` の `.gitignore` を作り、その `.gitignore` は自分自身も除外するのでコミットされない
+5. 設定をステージする。4 で `.ndf/analysis/.gitignore` を直したときは、その変更もステージする。
+   `git diff --cached --name-status` で、ステージした変更が設定・4 で直した `.gitignore`・3 の削除だけで、
+   `.ndf/analysis/project.json` の追加や変更が無いことを確かめてからコミットする
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
