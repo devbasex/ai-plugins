@@ -361,8 +361,8 @@ def _routes_answer_with_the_user_as_the_actor(gated):
 
 
 def _the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
-    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p1"})
-    runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "approved", "human")
+    marker = {"step": "merge", "seq": 1, "run": gated.run_id, "shown": {"presented_id": "p1"}, "routes": {}}
+    runner._record_answer(gated, marker, "approved", "human")
     got = json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))
     assert (got["step"], got["answer"], got["by"], got["run"], got["presented_id"]) == ("merge", "approved", "human", gated.run_id, "p1")
 
@@ -393,26 +393,34 @@ def _the_gate_result_carries_the_material_and_whether_it_reaches_production(gate
     out = steps.outcome_of(model.Step(id="merge", run=["x"]), 10, json.dumps(gate_out) + "\n")
     assert (out["presentation_path"], out["production"]) == ("m.md", True)
     shown.update(presentation_path=out["presentation_path"], production=out["production"])
-    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", **shown})
-    marker = {"step": "merge", "seq": 2, "routes": {"approved": result.command("plan", "next", "g.json"), "rejected": None}}
+    routes = {"approved": result.command("plan", "next", "g.json"), "rejected": None}
+    marker = {"step": "merge", "seq": 2, "run": "r1", "shown": shown, "routes": routes}
+    # 目印の外にある別の提示の写し（後で出し直した資料）は読まない（r2-2）
+    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p9", "production": False})
     got = runner.gate_result(gated, marker)
     assert (got["presentation_path"], got["metrics"]["production"]) == ("m.md", True)
-    # 回答コマンドは示した待ちと提示に固定される（前の承認コマンドの再送が次の承認待ちへ届かない）
-    assert got["routes"]["approved"]["argv"][-4:] == ["--waiting", "merge:2", "--presented", "p1"]
+    # 回答コマンドは示した回・待ち・提示に固定される（前の承認コマンドの再送が次の承認待ちへ届かない）
+    assert got["routes"]["approved"]["argv"][-4:] == ["--waiting", "r1:merge:2", "--presented", "p1"]
     assert got["routes"]["rejected"] is None
 
 
 def _a_human_answer_must_name_the_waiting_and_the_presentation_shown(gated):
     """r1-2: 利用者の回答は、今の待ちと提示の識別子が回答コマンドの固定と合うときだけ記録する。"""
-    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p2"})
-    baseline = {"step": "merge", "seq": 2, "routes": {}}
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:2", "p2")) is None
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:1", "p2")) is not None
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:2", "p1")) is not None
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human")) is not None
+    baseline = {"step": "merge", "seq": 2, "run": "r2", "shown": {"presented_id": "p2"}, "routes": {}}
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:2", "p2")) is None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:1", "p2")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:2", "p1")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human")) is not None
     # 工程の進行の回答は証跡にならないので、固定が無くても通す（渡されたら照らす）
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "conductor")) is None
-    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "conductor", None, "p1")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "conductor")) is None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "conductor", None, "p1")) is not None
+
+
+def _an_answer_to_the_same_step_of_an_earlier_run_is_refused():
+    """r2-3: 提示の識別子を持たない承認待ちでも、同じ保存先で流し直した前の回の回答コマンドは今の回へ記録しない。"""
+    baseline = {"step": "merge", "seq": 1, "run": "new", "shown": {}, "routes": {}}
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "old:merge:1")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "new:merge:1")) is None
 
 
 def _next_refuses_an_actor_of_the_wrong_shape(capsys):
@@ -439,6 +447,9 @@ def _next_refuses_an_actor_of_the_wrong_shape(capsys):
         scenes.scene(
             _a_human_answer_must_name_the_waiting_and_the_presentation_shown,
             id="a_human_answer_must_name_the_waiting_and_the_presentation_shown",
+        ),
+        scenes.scene(
+            _an_answer_to_the_same_step_of_an_earlier_run_is_refused, id="an_answer_to_the_same_step_of_an_earlier_run_is_refused"
         ),
         scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
     ],

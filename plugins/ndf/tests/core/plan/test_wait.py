@@ -134,12 +134,14 @@ def test_wait_reads_the_gate_marker_and_then_the_result(waiting, capsys):
     plan, sdir = waiting
     run = _started(sdir)
     routes = {"approved": result.command("plan", "next", plan, "--answer", "approved")}
-    marker = {"step": "s", "seq": 3, "routes": routes}
+    shown = {"presented_id": "p1", "presentation_path": "m.md", "production": True}
+    marker = {"step": "s", "seq": 3, "run": run, "shown": shown, "routes": routes}
     runner.waiting_path(sdir, run).write_text(json.dumps(marker), encoding="utf-8")
-    shown = {"step": "s", "presented_id": "p1", "presentation_path": "m.md", "production": True}
-    runner.write_json(runner.step_presented_path(sdir, "s"), shown)
+    # 目印の外の提示の写し（待ちの間に出し直した資料）は読まず、資料と回答コマンドを目印の一組から作る（r2-2）
+    runner.write_json(runner.step_presented_path(sdir, "s"), {"step": "s", "presented_id": "p2", "presentation_path": "n.md"})
     code, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "0")
-    pinned = {"approved": result.command("plan", "next", plan, "--answer", "approved", "--waiting", "s:3", "--presented", "p1")}
+    pin = ["--waiting", f"{run}:s:3", "--presented", "p1"]
+    pinned = {"approved": result.command("plan", "next", plan, "--answer", "approved", *pin)}
     assert out["status"] == "gate" and code == result.code_for(out) and out["routes"] == pinned
     # 待っている行は、回答コマンドと同じ提示の承認資料と「本番へ反映され得るか」を持つ（#4409）
     assert (out["items"][0]["presentation_path"], out["items"][0]["production"]) == ("m.md", True)

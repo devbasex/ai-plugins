@@ -142,8 +142,9 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))
     marker = files.read_json(runner.waiting_path(sdir, run))
     if marker is not None:
-        shown = runner.presentation_fields(sdir, str(marker["step"]))
-        return wait_decide.Watched(plan.name, GATE, routes=runner.presented_routes(sdir, marker), shown=shown)
+        # 資料と回答コマンドは、目印に入れた同じ提示の一組から作る（別々に読んだ写しを混ぜない）
+        shown = runner.presentation_fields(marker)
+        return wait_decide.Watched(plan.name, GATE, routes=runner.presented_routes(marker), shown=shown)
     return wait_decide.Watched(plan.name, None)
 
 

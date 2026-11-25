@@ -61,6 +61,8 @@ ANSWERS_DIR = "answer-records"
 PRESENTED_DIR = "presented"
 # 回答コマンドが固定する待ちと提示の識別子の引数（`ndf plan next` が受ける）
 WAITING_FLAG = "--waiting"
+# 承認待ちのステップの提示の写しの欄（提示の識別子・承認資料のパス・本番へ反映され得るか）
+SHOWN_KEYS = ("presented_id", "presentation_path", "production")
 PRESENTED_FLAG = "--presented"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
@@ -147,7 +149,7 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
-        shown = {k: out.get(k) for k in ("presented_id", "presentation_path", "production")}
+        shown = {k: out.get(k) for k in SHOWN_KEYS}
         write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
@@ -169,9 +171,15 @@ def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
 
 
 @durable.step
-def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]]) -> None:
-    """承認の回答を待つ目印を書く（呼び手と `wait` が読む）。"""
-    write_json(Path(path), {"step": step_id, "seq": seq, "routes": routes})
+def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]], run_id: str, state_dir: str) -> None:
+    """承認の回答を待つ目印を書く（呼び手と `wait` が読む）。
+
+    回の id と、待っているステップの提示の写し（提示の識別子・承認資料のパス・本番へ反映され得るか）を同じ目印に入れる。
+    結果の資料・回答コマンドと、回答を照らす値をこの一組から作り、別々に読んだ写しを混ぜない（#4409）。
+    """
+    shown = read_json(step_presented_path(Path(state_dir), step_id))
+    held = {k: shown.get(k) for k in SHOWN_KEYS} if isinstance(shown, dict) else {}
+    write_json(Path(path), {"step": step_id, "seq": seq, "run": run_id, "shown": held, "routes": routes})
 
 
 @durable.step
@@ -189,7 +197,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
         durable.recv(TOPIC_RETRY, act.seconds)
         return Outcome(SLEPT)
     if isinstance(act, AwaitAnswer):
-        mark_waiting(spec["waiting"], act.step, act.seq, spec["routes"][act.step])
+        mark_waiting(spec["waiting"], act.step, act.seq, spec["routes"][act.step], spec["run_id"], spec["state_dir"])
         answer = durable.recv(TOPIC_ANSWER, limits.seconds(ANSWER_WAIT))
         if answer is not None:
             clear_waiting(spec["waiting"])
@@ -359,24 +367,33 @@ def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def waiting_token(marker: dict[str, Any]) -> str:
-    """待ちの目印の識別子（`<ステップ>:<待ちの番号>`）。回答コマンドの `--waiting` に載せ、回答のときに今の待ちと照らす。"""
-    return f"{marker['step']}:{marker['seq']}"
+    """待ちの目印の識別子（`<回の id>:<ステップ>:<待ちの番号>`）。回答コマンドの `--waiting` に載せ、回答のときに今の待ちと照らす。
+
+    回の id を含めるので、同じ保存先で `--fresh` から流した別の回の待ちと、ステップと番号が同じでも取り違えない。
+    """
+    return f"{marker.get('run')}:{marker['step']}:{marker['seq']}"
 
 
-def shown_of(state_dir: Path, step: str) -> dict[str, Any]:
-    """承認待ちで止まったステップ `step` の提示の写し（提示の識別子・承認資料のパス・本番へ反映され得るか）。無ければ空。"""
-    shown = read_json(step_presented_path(state_dir, step))
+def shown_of(marker: dict[str, Any]) -> dict[str, Any]:
+    """待ちの目印に入れた提示の写し（提示の識別子・承認資料のパス・本番へ反映され得るか）。無ければ空。"""
+    shown = marker.get("shown")
     return shown if isinstance(shown, dict) else {}
 
 
-def presented_routes(state_dir: Path, marker: dict[str, Any]) -> dict[str, Any]:
+def presented_of(marker: dict[str, Any]) -> Optional[str]:
+    """待ちの目印の提示の識別子。提示が無ければ None。"""
+    presented = shown_of(marker).get("presented_id")
+    return presented if isinstance(presented, str) and presented else None
+
+
+def presented_routes(marker: dict[str, Any]) -> dict[str, Any]:
     """待ちの目印の routes に、今の待ち（`--waiting`）と提示の識別子（`--presented`。提示があれば）を足す。
 
     利用者に示した回答コマンドを、示した待ちと資料に固定する（前の承認コマンドを再送しても次の承認待ちへ届かない。#4409）。
     """
     pin = [WAITING_FLAG, waiting_token(marker)]
-    presented = shown_of(state_dir, str(marker["step"])).get("presented_id")
-    if isinstance(presented, str) and presented:
+    presented = presented_of(marker)
+    if presented is not None:
         pin += [PRESENTED_FLAG, presented]
     routes: dict[str, Any] = {}
     for answer, cmd in dict(marker["routes"]).items():
@@ -384,17 +401,17 @@ def presented_routes(state_dir: Path, marker: dict[str, Any]) -> dict[str, Any]:
     return routes
 
 
-def presentation_of(state_dir: Path, step: str) -> tuple[Optional[str], Optional[bool]]:
-    """承認待ちのステップ `step` が示した承認資料のパスと「本番へ反映され得るか」。示していなければ None。"""
-    shown = shown_of(state_dir, step)
+def presentation_of(marker: dict[str, Any]) -> tuple[Optional[str], Optional[bool]]:
+    """待ちの目印の承認資料のパスと「本番へ反映され得るか」。示していなければ None。"""
+    shown = shown_of(marker)
     material = shown.get("presentation_path")
     production = shown.get("production")
     return (material if isinstance(material, str) and material else None), (production if isinstance(production, bool) else None)
 
 
-def presentation_fields(state_dir: Path, step: str) -> dict[str, Any]:
+def presentation_fields(marker: dict[str, Any]) -> dict[str, Any]:
     """`presentation_of` の値を、結果の行へそのまま足す形（示していない値は持たない）。"""
-    material, production = presentation_of(state_dir, step)
+    material, production = presentation_of(marker)
     fields: dict[str, Any] = {"presentation_path": material} if material is not None else {}
     return fields if production is None else {**fields, "production": production}
 
@@ -408,12 +425,12 @@ class Reply(NamedTuple):
     presented: Optional[str] = None
 
 
-def _pin_mismatch(inv: Invocation, baseline: dict[str, Any], reply: Reply) -> Optional[str]:
+def _pin_mismatch(baseline: dict[str, Any], reply: Reply) -> Optional[str]:
     """回答コマンドの固定が今の待ちと提示に合わなければ理由。利用者の回答は、提示があれば提示の識別子を必ず照らす。"""
     if reply.waiting is not None and reply.waiting != waiting_token(baseline):
         return f"回答した待ち {reply.waiting} は今の待ち {waiting_token(baseline)} でない"
-    presented = shown_of(inv.state_dir, str(baseline["step"])).get("presented_id")
-    if not (isinstance(presented, str) and presented):
+    presented = presented_of(baseline)
+    if presented is None:
         return None
     human = reply.by == actors.HUMAN
     if reply.presented is None and not human:
@@ -430,7 +447,7 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
     if reply.by is None:
         detail = f"{inv.plan.name} への回答に回答した者（--by）が無い。返された経路（--answer <回答> --by human）で打ち直す"
         return result.stopped(TOOL, "invalid", detail)
-    mismatch = _pin_mismatch(inv, baseline, reply)
+    mismatch = _pin_mismatch(baseline, reply)
     if mismatch is not None:
         detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
         return result.stopped(TOOL, "approval_stale", detail)
@@ -445,18 +462,17 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
 def _record_answer(inv: Invocation, baseline: dict[str, Any], answer: str, by: str) -> None:
     """待っていたステップへの回答の記録を書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。
 
-    提示の識別子は、待っていたステップの結果の `metrics.presented_id` の写しから写す。無ければ null（`ndf ci answer` が断る）。
+    提示の識別子は、待ちの目印に入れた提示の写し（回答を照らしたのと同じ一組）から写す。無ければ null（`ndf ci answer` が断る）。
     一時ファイルから置き換えて書く。書けなければ `OSError`。
     """
     step = str(baseline["step"])
-    shown = read_json(step_presented_path(inv.state_dir, step))
     record = {
         "step": step,
         "answer": answer,
         "by": by,
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "run": inv.run_id,
-        "presented_id": shown.get("presented_id") if isinstance(shown, dict) else None,
+        "presented_id": presented_of(baseline),
     }
     write_json(answer_path(inv.state_dir, step), record)
 
@@ -516,7 +532,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     """
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の回答を待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}, *_pr_items(inv.state_dir)]
-    material, production = presentation_of(inv.state_dir, str(marker["step"]))
+    material, production = presentation_of(marker)
     metrics: dict[str, Any] = {"round": inv.round_no}
     if production is not None:
         metrics["production"] = production
@@ -526,7 +542,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
         summary,
         items,
         metrics,
-        routes=presented_routes(inv.state_dir, marker),
+        routes=presented_routes(marker),
         next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
         presentation_path=material,
     )
