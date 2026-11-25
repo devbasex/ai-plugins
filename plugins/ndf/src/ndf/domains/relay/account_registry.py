@@ -789,6 +789,9 @@ def parse_number(v: str) -> Optional[float]:
         return None
 
 
+DEFAULT_MONTHLY_USD = 200.0  # API キーの月の額の既定（ドル）。未設定でも使える
+
+
 def positive(v: Any) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
 
@@ -864,14 +867,14 @@ def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
     for k in sorted(book["keys"]):
         row = book["keys"][k]
         if isinstance(row, dict):
-            usd = positive(row.get("monthly_usd"))
+            usd = positive(row.get("monthly_usd")) or DEFAULT_MONTHLY_USD  # 未設定・0 は既定の額で使える
             rows.append(
                 {
                     "name": k,
                     "kind": "api_key",
                     "account": row.get("account"),
                     "monthly_usd": usd,
-                    "state": "使える" if usd else "月の額が未設定",
+                    "state": "使える",
                 }
             )
     return rows, warnings

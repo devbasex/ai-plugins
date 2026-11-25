@@ -652,8 +652,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "details": {"region": "us-east-1"},
             "state": "保存した設定",
         },
-        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": None, "state": "月の額が未設定"},
-        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": None, "state": "月の額が未設定"},
+        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": 200.0, "state": "使える"},
+        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": 200.0, "state": "使える"},
     ]
 
 
