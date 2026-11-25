@@ -108,7 +108,9 @@ CI の実行時間・JUnit の合計・ワークフローの一覧・言語ご�
   この指紋は、次の `write` が項目を前の `write` の値のままか、人が書き換えたかを見分けるためにある。設定と一緒にコミットする
 - `ndf project check` が読む解析の記録は、設定とは別のファイル（メインディレクトリの `.ndf/analysis/project.json`）に書く。
   中身は、解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋である。
-  このファイルはコミットしない（下の「`.ndf/` の追跡」）。出力には差分を出さず、ファイルごとに `書いた: <パス>（<要約>）` の 1 行だけが出る
+  このファイルはコミットしない（下の「`.ndf/` の追跡」）
+- 出力に差分が出るのは、`.ndf/project.json` を変えたときだけである。解析の記録とその `.gitignore` は、差分を出さず、書き込みごとに
+  `書いた: <パス>（<要約>）` の 1 行を出す。前の記録を書き換えるときは、書き出しの途中の印を付ける書き込みと最後の記録の書き込みで、同じパスの行が 2 回出る
 
 設定の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`ndf project schema` の生成物）。
 
@@ -133,10 +135,11 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
 
 移行の後は、`.ndf/project.json` の差分を確かめてコミットする。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る。
-`.ndf/analysis/` はコミットしない。`git status` に `.ndf/analysis/` が出たら、次のように直す。
+解析の記録（`.ndf/analysis/project.json`）はコミットしない。`git status` にこのファイルが出たら、次のように直す。
 
 - 新しいファイルとして出る: 前からある `.ndf/analysis/.gitignore` が記録を外していない。`*` の行を書く
-- 変更として出る（すでに追跡している）: `git rm -r --cached .ndf/analysis` で追跡から外し、その削除をコミットする
+- 変更として出る（`.ndf/analysis/project.json` をすでに追跡している）: `git rm --cached -- .ndf/analysis/project.json` で、そのファイルだけを追跡から外す。
+  コミットする前に `git diff --cached --name-status` で、ステージした削除がこのファイルだけであることを確かめる
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
