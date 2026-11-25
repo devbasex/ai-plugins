@@ -78,7 +78,7 @@ def notes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
 
 
 # 判定した PR の承認の対象（Hub の PR 5 番・main 宛て・自動反映。#4409）
-_TARGET = {"repo": "o/r", "pr": 5, "base": "main", "head": "a" * 40, "production": True}
+_TARGET = {"repo": "o/r", "pr": 5, "base": "main", "head": "h" * 40, "production": True}
 
 
 class Hub:
@@ -158,6 +158,8 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], "h" * 40)
+    # 承認ゲートを省くときだけ、マージ先の設定を読んで承認の対象を持つ（r1-7）
+    assert out["target"] == _TARGET
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
@@ -302,7 +304,8 @@ def test_checks_after_reading_the_pr_return_the_head_and_leave_a_note(
 ) -> None:
     (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "boundary_paths": ["docs/**"]}), encoding="utf-8")
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files, "head": "a" * 40}), Ask(FOLLOW))
-    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40, "target": _TARGET}
+    # 止まる判定はマージ先の設定を読まない（承認の対象を持たない。r1-7）
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [why], "head": "a" * 40}
     assert notes == [(5, note("design", None, [why]))]
 
 
@@ -311,7 +314,7 @@ def test_a_verdict_that_keeps_the_gate_returns_the_verdict_and_the_head(repo: Pa
     verdict = DESIGN_2213["verdict"]
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), Ask(verdict))
     why = ["レッドラインに当たる: " + " / ".join(verdict["boundary"])]
-    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40, "target": _TARGET}
+    assert out == {"gate": "design", "skip": False, "verdict": verdict, "why": why, "head": "a" * 40}
     assert notes == [(5, note("design", verdict, why))]
 
 

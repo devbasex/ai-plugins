@@ -228,7 +228,7 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf plan check` | `plans`（array of string・必須・位置） |
-| `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--by`（string・任意）: 回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
+| `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--by`（string・任意）: 回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す<br>`--waiting`（string・任意）: 回答する待ち（<ステップ>:<待ちの番号>）。返された routes が持つ。今の待ちと違えば記録しない<br>`--presented`（string・任意）: 回答する提示の識別子。返された routes が持つ。今の提示と違えば記録しない<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
 | `ndf plan pending` | 引数を受けない |
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--max`（integer・任意）: 同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `3000.0`） |

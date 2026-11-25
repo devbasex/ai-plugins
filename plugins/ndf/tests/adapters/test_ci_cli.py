@@ -549,6 +549,21 @@ def _ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_resu
     assert (ci_cli.PRODUCTION_LINE in out_file.with_suffix(".md").read_text(encoding="utf-8")) is production
 
 
+def _ask_with_a_md_out_keeps_the_target_apart_from_the_material(monkeypatch, capsys, last_result, tmp_path):
+    """r1-6: `--presented-out` が `.md` でも、承認の対象を資料で上書きせず、資料のシンボリックリンクの参照先も書き換えない。"""
+    _use(monkeypatch, merge_hub.MergeHub())
+    out_file = tmp_path / "approval.md"
+    kept = tmp_path / "kept.md"
+    kept.write_text("残す\n", encoding="utf-8")
+    ci_cli.material_beside(out_file).symlink_to(kept)
+    assert ci_cli.main(["ask", "--branch", "sprint/x", "--presented-out", str(out_file)]) == 10
+    found = _out(capsys, last_result)
+    assert json.loads(out_file.read_text(encoding="utf-8"))["presented_id"] == found["metrics"]["presented_id"]
+    assert found["presentation_path"] == str(ci_cli.material_beside(out_file)) != str(out_file)
+    assert ci_cli.PRODUCTION_LINE in ci_cli.material_beside(out_file).read_text(encoding="utf-8")
+    assert kept.read_text(encoding="utf-8") == "残す\n"
+
+
 def _ask_stops_when_the_presented_file_cannot_be_written(monkeypatch, capsys, last_result, tmp_path):
     _use(monkeypatch, merge_hub.MergeHub())
     blocker = tmp_path / "file"
@@ -736,6 +751,10 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
                 strict=True,
             )
         ],
+        scenes.scene(
+            _ask_with_a_md_out_keeps_the_target_apart_from_the_material,
+            id="ask_with_a_md_out_keeps_the_target_apart_from_the_material",
+        ),
         scenes.scene(_ask_stops_when_the_presented_file_cannot_be_written, id="ask_stops_when_the_presented_file_cannot_be_written"),
         *[
             scenes.scene(

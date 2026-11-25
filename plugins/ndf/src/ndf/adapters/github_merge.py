@@ -74,7 +74,7 @@ MERGE_QUEUE_STATE_QUERY = (
 _VERIFY_FIELDS = "nameWithOwner pullRequest(number: $number) {{ baseRefName headRefOid{extra} }} config: object(expression: $expr) {{ ... on Blob {{ oid text }} }}"
 VERIFY_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $expr: String!) { repository(owner: $owner, name: $name) { "
-    + _VERIFY_FIELDS.format(extra="")
+    + _VERIFY_FIELDS.format(extra=" id isInMergeQueue")
     + " } }"
 )
 # キューの状態の問い合わせに確かめの項目を足したもの（要求を増やさずに照らす）

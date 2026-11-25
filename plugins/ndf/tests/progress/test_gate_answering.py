@@ -226,6 +226,17 @@ def _the_material_says_the_merge_reaches_production(repo, st, env, capsys):
     assert replace(asking.read_presented(st.root, q), presentation=None) == _target()
 
 
+def _a_material_without_its_presented_target_is_rewritten(repo, st, env, capsys):
+    """r1-3: 旧版で書いた資料が残り、提示した対象の JSON だけが無ければ、資料も今の対象で書き直す。"""
+    q = _asked(st, repo, env, capsys)
+    v = run.read(st, q.machine_id)
+    asking.material_path(st.root, q).write_text("# 旧版の資料\n", encoding="utf-8")
+    asking.presented_path(st.root, q).unlink()
+    asking.write_material(st.root, v, q)
+    assert asking.material_path(st.root, q).read_text(encoding="utf-8") == asking.material(v, q)
+    assert replace(asking.read_presented(st.root, q), presentation=None) == _target()
+
+
 def _an_old_seen_reads_as_a_target_without_binding():
     old = gate.Target.from_dict({"head": HEAD, "material_sha256": None})
     assert old.binding() is None and old.production is None
@@ -277,6 +288,7 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
         scenes.scene(_a_production_change_after_the_question_is_refused, id="a_production_change_after_the_question_is_refused"),
         scenes.scene(_each_presentation_has_its_own_request_and_trail_ids, id="each_presentation_has_its_own_request_and_trail_ids"),
         scenes.scene(_the_material_says_the_merge_reaches_production, id="the_material_says_the_merge_reaches_production"),
+        scenes.scene(_a_material_without_its_presented_target_is_rewritten, id="a_material_without_its_presented_target_is_rewritten"),
         scenes.scene(_an_old_seen_reads_as_a_target_without_binding, id="an_old_seen_reads_as_a_target_without_binding"),
         scenes.scene(_stale_routes_carry_the_retry_and_the_next, id="stale_routes_carry_the_retry_and_the_next"),
     ],

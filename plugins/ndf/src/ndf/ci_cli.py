@@ -256,16 +256,28 @@ def _approval_material(target: merge_approval.MergeTarget, production: bool) -> 
     return "\n".join(lines) + "\n"
 
 
-def _presented(path: Path, target: merge_approval.MergeTarget, production: bool) -> str:
-    """提示の識別子を新しく作り、承認の対象と合わせて `path` へ、承認資料を隣（`.md`）へ書いて識別子を返す。"""
+def material_beside(path: Path) -> Path:
+    """承認の対象のファイル `path` の隣の承認資料のパス。`path` が `.md` でも同じパスにならない（対象を資料で上書きしない）。"""
+    return path.with_suffix(".md") if path.suffix != ".md" else path.with_name(f"{path.stem}.material.md")
+
+
+def _swap_in(path: Path, text: str) -> None:
+    """`path` を一時ファイルからの置き換えで書く（`path` がシンボリックリンクでも参照先を書き換えない）。"""
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _presented(path: Path, target: merge_approval.MergeTarget, production: bool) -> tuple[str, Path]:
+    """提示の識別子を新しく作り、承認の対象と合わせて `path` へ、承認資料を隣（`material_beside`）へ書いて、識別子と資料のパスを返す。"""
     presented_id = uuid.uuid4().hex
     body = {"presented_id": presented_id, **target._asdict(), "production": production}
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
-    path.with_suffix(".md").write_text(_approval_material(target, production), encoding="utf-8")
-    return presented_id
+    material = material_beside(path)
+    _swap_in(material, _approval_material(target, production))
+    _swap_in(path, json.dumps(body, ensure_ascii=False))
+    return presented_id, material
 
 
 def _pr_item_list(number: int) -> list[dict]:
@@ -279,10 +291,10 @@ def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[
     material: Optional[str] = None
     if out is not None:
         try:
-            metrics["presented_id"] = _presented(Path(out), target, production)
+            metrics["presented_id"], written = _presented(Path(out), target, production)
         except OSError as exc:
             return result.stopped(TOOL, "precondition", f"承認の対象を {out} へ書けない: {exc}", items=_pr_item_list(target.number))
-        material = str(Path(out).with_suffix(".md"))
+        material = str(written)
     routes = {approval_words.APPROVED: None, approval_words.REJECTED: None}
     items = _pr_item_list(target.number)
     return result.result(TOOL, result.GATE, summary, items=items, metrics=metrics, routes=routes, presentation_path=material)
@@ -448,9 +460,8 @@ def _merge(args: argparse.Namespace) -> dict:
             if _approval(hub, target) is not None:
                 return None
         except merge_approval.TrailError as exc:
-            # 初めの判定と同じく、token の利用者を読めなければキューから外して precondition（approval_stale にしない）
-            if pull.queued:
-                hub.dequeue(pull.number)
+            # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
+            # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
             return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
         return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
 

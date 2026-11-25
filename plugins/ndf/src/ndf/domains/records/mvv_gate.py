@@ -112,14 +112,13 @@ def _judged(
     number = pr_number(root, gate_name, inputs, hub)
     # 判定する head を先に読む。省いた回答はこの head を見た対象に持ち、後に進んだ head は承認の検証とマージが断る
     pull = hub.pull(number)
-    target = _target(hub, pull)
     rows = mvv.pr_files(hub, number)
     facts = mvv.pr_facts(hub, number, facts, rows, pull)
     # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の設定の変更）は LLM を呼ぶ前に当てる。
     # 差分の全体が材料に載らない PR も、省いた部分を判定できないため LLM を呼ばずに人へ問う
     why = refusals(facts) or mm.incomplete_patches(rows)
     if why:
-        return _recorded(hub, number, {**mm.gate_outcome(gate_name, None, False, why, pull.head_sha), "target": target})
+        return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why, pull.head_sha))
     shared = mvv.principles().decode("utf-8")
     materials = {
         "NDF の共通原則": shared,
@@ -131,11 +130,15 @@ def _judged(
     asked = {"gate": gate_name, "question": mm.SYSTEM, "material": text}
     verdict = _verdict(mvv.mvv_validate_sprint(root, asked, judge_with(ask), warnings=warnings))
     skip, why = may_skip(facts, verdict)
-    return _recorded(hub, number, {**mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha), "target": target})
+    outcome = mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha)
+    # マージ先の設定は、証跡を書く（承認ゲートを省く）ときだけ読む。止まる判定では GitHub への要求を増やさない
+    return _recorded(hub, number, {**outcome, "target": _target(hub, pull)} if skip else outcome)
 
 
 def _target(hub: GitHub, pull: Any) -> dict[str, Any]:
-    """判定した PR の承認の対象（出力 `mvv_gate.target`）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。"""
+    """判定した PR の承認の対象（出力 `mvv_gate.target`。承認ゲートを省くときだけ持つ）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。
+
+    マージ先の設定の読み取り（GraphQL 1 回）は、承認ゲートを省く判定でだけ打つ（設計の費用表の増分に記録する）。"""
     found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
     same = found.repo.lower() == hub.repo.lower()
     verdict = production_merge.judge_project_text(found.text, pull.base_ref) if same else production_merge.Verdict.UNKNOWN

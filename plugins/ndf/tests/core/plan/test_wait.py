@@ -134,9 +134,15 @@ def test_wait_reads_the_gate_marker_and_then_the_result(waiting, capsys):
     plan, sdir = waiting
     run = _started(sdir)
     routes = {"approved": result.command("plan", "next", plan, "--answer", "approved")}
-    runner.waiting_path(sdir, run).write_text(json.dumps({"routes": routes}), encoding="utf-8")
+    marker = {"step": "s", "seq": 3, "routes": routes}
+    runner.waiting_path(sdir, run).write_text(json.dumps(marker), encoding="utf-8")
+    shown = {"step": "s", "presented_id": "p1", "presentation_path": "m.md", "production": True}
+    runner.write_json(runner.step_presented_path(sdir, "s"), shown)
     code, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "0")
-    assert out["status"] == "gate" and code == result.code_for(out) and out["routes"] == routes
+    pinned = {"approved": result.command("plan", "next", plan, "--answer", "approved", "--waiting", "s:3", "--presented", "p1")}
+    assert out["status"] == "gate" and code == result.code_for(out) and out["routes"] == pinned
+    # 待っている行は、回答コマンドと同じ提示の承認資料と「本番へ反映され得るか」を持つ（#4409）
+    assert (out["items"][0]["presentation_path"], out["items"][0]["production"]) == ("m.md", True)
     # 結果のバックアップがあれば、承認の目印より先に読む
     _finished(sdir, run, {"status": "stopped", "cause": {"kind": "test_failed", "detail": "落ちた"}})
     code, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "0")

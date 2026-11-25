@@ -270,12 +270,13 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
     ただし、提示した承認の対象と `q.target` の承認の対象（マージ先・HEAD）か「本番へ反映されるか」が違えば、
     資料と提示した対象の両方を `q.target` で書き直す（待ちの間に PR が動いた。古い資料のまま新しい HEAD の回答の経路を
     返さない）。資料の sha256 が変わるので、古い資料を見て打った回答は断られる。
+    提示した対象が無い既存の資料（旧版で書いた資料・対象を書く前に落ちた資料）も、何を示したかを確かめられないので書き直す。
     提示した対象を書くたびに、新しい提示の識別子（`presentation`）を発行して一緒に書く。承認の対象が A → B → A と
     戻っても、最後の提示は最初の提示と別の識別子になる（リクエスト・回答・証跡を最初の提示と取り違えない）。
     """
     path = material_path(root, q)
     shown = presented_path(root, q)
-    if _presented_target_moved(read_presented(root, q), q.target):
+    if not shown.exists() or _presented_target_moved(read_presented(root, q), q.target):
         path.unlink(missing_ok=True)
         shown.unlink(missing_ok=True)
     if not path.exists():

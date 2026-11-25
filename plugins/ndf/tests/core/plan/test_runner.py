@@ -394,8 +394,25 @@ def _the_gate_result_carries_the_material_and_whether_it_reaches_production(gate
     assert (out["presentation_path"], out["production"]) == ("m.md", True)
     shown.update(presentation_path=out["presentation_path"], production=out["production"])
     runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", **shown})
-    got = runner.gate_result(gated, {"step": "merge", "routes": {}})
+    marker = {"step": "merge", "seq": 2, "routes": {"approved": result.command("plan", "next", "g.json"), "rejected": None}}
+    got = runner.gate_result(gated, marker)
     assert (got["presentation_path"], got["metrics"]["production"]) == ("m.md", True)
+    # 回答コマンドは示した待ちと提示に固定される（前の承認コマンドの再送が次の承認待ちへ届かない）
+    assert got["routes"]["approved"]["argv"][-4:] == ["--waiting", "merge:2", "--presented", "p1"]
+    assert got["routes"]["rejected"] is None
+
+
+def _a_human_answer_must_name_the_waiting_and_the_presentation_shown(gated):
+    """r1-2: 利用者の回答は、今の待ちと提示の識別子が回答コマンドの固定と合うときだけ記録する。"""
+    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p2"})
+    baseline = {"step": "merge", "seq": 2, "routes": {}}
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:2", "p2")) is None
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:1", "p2")) is not None
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human", "merge:2", "p1")) is not None
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "human")) is not None
+    # 工程の進行の回答は証跡にならないので、固定が無くても通す（渡されたら照らす）
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "conductor")) is None
+    assert runner._pin_mismatch(gated, baseline, runner.Reply("approved", "conductor", None, "p1")) is not None
 
 
 def _next_refuses_an_actor_of_the_wrong_shape(capsys):
@@ -418,6 +435,10 @@ def _next_refuses_an_actor_of_the_wrong_shape(capsys):
         scenes.scene(
             _the_gate_result_carries_the_material_and_whether_it_reaches_production,
             id="the_gate_result_carries_the_material_and_whether_it_reaches_production",
+        ),
+        scenes.scene(
+            _a_human_answer_must_name_the_waiting_and_the_presentation_shown,
+            id="a_human_answer_must_name_the_waiting_and_the_presentation_shown",
         ),
         scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
     ],

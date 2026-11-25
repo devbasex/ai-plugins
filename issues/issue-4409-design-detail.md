@@ -79,7 +79,7 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `automatic_rows` | `section` か `section["release"]` が `dict` でない | `UNKNOWN` |
-| `automatic_rows` | `release.deliveries` が配列で、`channel: production` かつ `kind` が `manual` でない行がある | `AUTOMATIC` |
+| `automatic_rows` | `release.deliveries` が配列で、`channel` が `production`・省略・`null` のどれかで、かつ `kind` が `manual` でない行がある（`channel` を省略した行と `null` の行は全チャネルに当たる。`forms_decide.deliveries_of` と同じ） | `AUTOMATIC` |
 | `automatic_rows` | `release.deliveries` が配列で、当たる行が無い | `MANUAL` |
 | `automatic_rows` | `release.deliveries` が配列でない | `UNKNOWN` |
 | `automatic_rows` | `deliveries` のキーが無く、`release.cd` が `dict` | `AUTOMATIC` |
@@ -100,7 +100,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `automatic_rows` | `kind: auto` の行で `AUTOMATIC`、`kind: manual` だけで `MANUAL` | `deliveries: []` で `MANUAL`、`cd: null` で `UNSET`、`cd` のキー無しで `UNKNOWN` | `release` が配列・`deliveries` が文字列で `UNKNOWN` |
+| `automatic_rows` | `channel: production`・`kind: auto` の行で `AUTOMATIC`、`channel` を省略した `kind: auto` の行と `channel: null` の `kind: auto` の行でも `AUTOMATIC`、`kind: manual` だけで `MANUAL` | `deliveries: []` で `MANUAL`、`channel` が `production` 以外の値（`staging` など）の `kind: auto` の行だけで `MANUAL`、`cd: null` で `UNSET`、`cd` のキー無しで `UNKNOWN` | `release` が配列・`deliveries` が文字列で `UNKNOWN` |
 | `judge` | `develop` 宛てで `NOT_PRODUCTION`、`main` 宛てで行の値 | `branches.production` が空文字で `UNKNOWN` | `section` が `None` で `UNKNOWN` |
 | `needs_approval` | 5 つの値の真偽が設計文書の表と一致する | — | — |
 
@@ -422,7 +422,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_judged` | `domains/records/mvv_gate.py` | 変更 | 今と同じ | 読んだ PR から承認の対象と判定（`production_merge.judge`）を作り、出力 `mvv_gate` に `target` として入れる |
+| `_judged` | `domains/records/mvv_gate.py` | 変更 | 今と同じ | 承認ゲートを省くと判定したときだけ、マージ先の設定を読み（GraphQL 1 回）、読んだ PR から承認の対象と判定（`production_merge.judge`）を作り、出力 `mvv_gate` に `target` として入れる。機械の検査や判定で止まるときは設定を読まず、`target` を持たない |
 | `_recorded` | `domains/records/mvv_gate.py` | 変更 | `(hub: GitHub, number: int, outcome: dict[str, Any]) -> dict[str, Any]` | 省くと決めた判定のときだけ、判定の記録の本文の後ろに `merge_approval.render_merge_row`（担い手 `mvv`）を足して 1 件で投稿する |
 | `_consume` | `progress/run.py` | 変更 | 今と同じ | `service:mvv` の回答を書くとき、`mvv_gate.target` を回答の事象の `seen` へ写す |
 

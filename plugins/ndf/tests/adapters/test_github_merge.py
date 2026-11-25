@@ -82,8 +82,9 @@ class Wire:
         return {}
 
 
-def _verify_data(base: str = "main", head: str = HEAD, oid: str = "c1", text: str = "{}", repo: str = REPO) -> dict:
-    return {"nameWithOwner": repo, "pullRequest": {"baseRefName": base, "headRefOid": head}, "config": {"oid": oid, "text": text}}
+def _verify_data(base: str = "main", head: str = HEAD, oid: str = "c1", text: str = "{}", repo: str = REPO, in_queue: bool = False) -> dict:
+    pr = {"baseRefName": base, "headRefOid": head, "id": "PR_7", "isInMergeQueue": in_queue}
+    return {"nameWithOwner": repo, "pullRequest": pr, "config": {"oid": oid, "text": text}}
 
 
 def _queue_data(base: str = "main", oid: str = "c1", in_queue: bool = False) -> dict:
@@ -150,6 +151,27 @@ def _changed_config_is_rejudged_from_the_same_response():
     # 設定を読み直す要求を足さない
     assert [s for s in wire.seen if s[0] == "GRAPHQL"] == [("GRAPHQL", "verify")]
     assert ("PUT", f"/repos/{REPO}/pulls/7/merge") not in wire.seen
+
+
+def _rejudged(text: Optional[str]) -> Optional[MergeOutcome]:
+    return MergeOutcome(False, "production_gate", "承認が要る", HEAD)
+
+
+def _a_rejudged_stop_takes_a_queued_pr_out_of_the_queue():
+    """r1-4: 直前の確かめで判定をやり直して止めるとき、確かめの応答でキューにある PR は外す（読み直しの要求を足さない）。"""
+    wire = Wire(verify=_verify_data(oid="c2", in_queue=True))
+    out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect(_rejudged))
+    assert (out.merged, out.kind) == (False, "production_gate")
+    assert [s for s in wire.seen if s[0] == "GRAPHQL"] == [("GRAPHQL", "verify"), ("GRAPHQL", "dequeue")]
+
+
+def _a_rejudged_stop_in_the_queue_state_takes_the_pr_out_of_the_queue():
+    """r1-4: キューの状態の問い合わせで判定をやり直して止めるとき、既にキューにある PR は外す。"""
+    queue = _queue_data(oid="c2", in_queue=True)
+    wire = Wire(verify=_verify_data(), queue=queue, put=_queue_refusal())
+    out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect(_rejudged))
+    assert (out.merged, out.kind) == (False, "production_gate")
+    assert wire.seen[-1] == ("GRAPHQL", "dequeue") and ("GRAPHQL", "enqueue") not in wire.seen
 
 
 def _changed_config_that_still_allows_the_merge_sends_it():
@@ -231,6 +253,11 @@ def _viewer_after_branch_file_sends_no_request(viewer, want):
         ],
         scenes.scene(_changed_config_is_rejudged_from_the_same_response, id="changed_config_is_rejudged_from_the_same_response"),
         scenes.scene(_changed_config_that_still_allows_the_merge_sends_it, id="changed_config_that_still_allows_the_merge_sends_it"),
+        scenes.scene(_a_rejudged_stop_takes_a_queued_pr_out_of_the_queue, id="a_rejudged_stop_takes_a_queued_pr_out_of_the_queue"),
+        scenes.scene(
+            _a_rejudged_stop_in_the_queue_state_takes_the_pr_out_of_the_queue,
+            id="a_rejudged_stop_in_the_queue_state_takes_the_pr_out_of_the_queue",
+        ),
         scenes.scene(
             _queue_is_verified_in_the_same_request_and_reread_after_enqueue,
             id="queue_is_verified_in_the_same_request_and_reread_after_enqueue",

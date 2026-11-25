@@ -50,6 +50,14 @@
           "type": "string",
           "description": "回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す"
         },
+        "--waiting": {
+          "type": "string",
+          "description": "回答する待ち（<ステップ>:<待ちの番号>）。返された routes が持つ。今の待ちと違えば記録しない"
+        },
+        "--presented": {
+          "type": "string",
+          "description": "回答する提示の識別子。返された routes が持つ。今の提示と違えば記録しない"
+        },
         "--set": {
           "type": "array",
           "items": {
