@@ -5,7 +5,7 @@
 | コンテキスト | 意味 | 語の数 | ファイル |
 | --- | --- | ---: | --- |
 | プロジェクトの用語集（`project-glossary`） | 各プロジェクトが持つユビキタス言語。語・意味・コンテキスト・廃止した語・SSOT | 15 | `docs/glossary/project-glossary.md` |
-| NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ | 137 | `docs/glossary/ndf-workflow.md` |
+| NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ | 138 | `docs/glossary/ndf-workflow.md` |
 | NDF の並列の計画（`ndf-parallel`） | 並列の計画がレーンを同時に進め、オーガナイザーがレーンのリクエストへ答え、エピックを進めるときの語。レーン・一時レーン・計画のジャーナル・マシンの上限 | 111 | `docs/glossary/ndf-parallel.md` |
 | NDF の開発ループと MVV（`ndf-loop`） | 開発ループがスプリントを続けて選び、pace と MVV 判定で承認ゲートを通すときの語。選定・予算・止まる条件・出し直しの指摘・MVV | 50 | `docs/glossary/ndf-loop.md` |
 | NDF のプランの実行（`ndf-supervise`） | supervise.py がプランをキューで流し、ステップを進めて結果を残すときの語。プラン・ステップ・ステージ・上限・進捗ログ | 63 | `docs/glossary/ndf-supervise.md` |

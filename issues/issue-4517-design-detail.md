@@ -20,6 +20,7 @@ plugins/ndf/
 │   │       ├── glossary.md
 │   │       ├── loop.md
 │   │       └── operation-run.md
+│   ├── document-drafting/references/type-repo-knowledge.md *
 │   ├── issue-plan-strategy/references/{parallel-plan.md, execution-plan.md}
 │   ├── out-of-scope/SKILL.md
 │   ├── quality-gates/SKILL.md
@@ -29,6 +30,7 @@ plugins/ndf/
 │   ├── templates/fix.json（削除）
 │   ├── workflow/
 │   │   ├── modes/hotfix.json *
+│   │   ├── stages/{document-sources,layout-review,plan-to-spec}.json
 │   │   ├── modes/legacy-refactor.json
 │   │   ├── stages/post-release-review.json *
 │   │   ├── stages/release-verification.json
@@ -80,8 +82,11 @@ plugins/ndf/
 | `src/ndf/progress/lane/__init__.py` | 変更 | `add_row`・`carry_issues` が行の判定を `row_errors` で確かめ、繰り越しで判定を写す | `judgment` | モジュール | `add_row`・`carry_issues`（変更） |
 | `contracts/workflow/modes/hotfix.json` | 新設 | `hotfix` の工程の並び | 工程の定義 | — | — |
 | `contracts/workflow/modes/legacy-refactor.json` | 変更 | 先頭に工程「要求と受け入れ条件」を足す（判定の場所） | 工程の定義 | — | — |
+| `contracts/workflow/stages/document-sources.json`・`layout-review.json`・`plan-to-spec.json` | 変更 | 条件（`when`）に `outside_reader` を足す | 条件の語 | — | — |
+| `skills/development-workflow/references/document-types.md` | 変更 | 「何が `documentation` に当たるか」の `README.md`・`docs/` の行を分け、タイプ「リポジトリの知識」を足す | — | — | — |
+| `skills/document-drafting/references/type-repo-knowledge.md` | 新設 | タイプ「リポジトリの知識」の執筆の手引き | — | — | — |
 | `contracts/workflow/stages/post-release-review.json` | 新設 | 工程「リリース後レビュー」の定義（入力 `pr`・`verification`、出力 `post_review`） | `cross-review` のテンプレート | — | — |
-| `contracts/workflow/stages/release-verification.json` | 変更 | 出力に `verification`（`result` は `pass`・`fail`・`hold`、`evidence`）を足す | — | — | — |
+| `contracts/workflow/stages/release-verification.json` | 変更 | 出力に `verification`（`result` は `pass`・`fail`・`hold`、`evidence`）を足す。条件（`when`）に `outside_reader` を足す | — | — | — |
 | `contracts/workflow/stages/requirements.json` | 変更 | 判定の作業 `mode` のステップと出力 `mode_judgment` | `kinds.json` の `mode` | — | — |
 | `contracts/workflow/context.schema.json` | 変更 | `gated_mode` に `hotfix`、`mode_judgment`・`mode_check`・`rerun_floor`・`verification`・`post_review` の形 | — | — | — |
 | `contracts/workflow/parallel-plan.schema.json` | 変更 | `kind: sprint` の行に必須の `judgments`（課題ごとのモードと根拠） | — | — | — |
@@ -89,7 +94,7 @@ plugins/ndf/
 | `src/ndf/progress/judgment.py` | 新設 | 判定の記録を確かめ、スプリントのモードを決め、工程表の作り直しの下書きを作る | `definition`・`stages`・`model` | モジュール | `sprint_mode`・`recheck`・`check`・`row_errors`・`redefine` |
 | `src/ndf/progress/store.py` | 変更 | 定義の改訂を足す | — | モジュール | `append_definition`（新設） |
 | `src/ndf/progress/command.py` | 変更 | `new` の `--mode` を省略できる参考の値にし、`--requirements` と `finish` で判定を当てる。`--carry` の写し元に未解決のモードの引き上げがあれば `rerun_floor` を作る。`show` の結果に `context`（`issues`・`pace`）と `parent` を足す | `judgment` | モジュール | `_sprint_new`・`_prepare_new`・`_cmd_finish`・`_cmd_show`・`parser`（変更） |
-| `src/ndf/progress/run.py` | 変更 | 工程が流れて終わったときに判定を当て、判定の無い後の工程を断る | `judgment` | モジュール | `_finish_stage`（変更）・`_judged`（新設） |
+| `src/ndf/progress/run.py` | 変更 | 工程が流れて終わったときに判定を当て、判定の無い後の工程を断る | `judgment` | モジュール | `_finish_stage`（変更）・`_judged`（新設）・`_outside_reader`（新設） |
 | `src/ndf/progress/plan/cli.py` | 変更 | `lanes init`・`lane add` が計画の行の `judgments` を `judgment.row_errors` で確かめ、`row add` に `--judgments` を足す | `judgment` | モジュール | `lanes init` の検査・`_row_add`（変更） |
 | `src/ndf/progress/lane/launch.py` | 変更 | 行の判定から決めたモードを参考の値として渡し、`DEFAULT_MODE` を消す | `judgment` | モジュール | `start_commands`（変更） |
 | `src/ndf/domains/crossreview/cli.py` | 変更 | マージ済みの PR を直さずに読むラウンド | 既存の `run` | モジュール | `run` の引数 `--post-release`（変更） |
@@ -398,6 +403,34 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | テンプレート `contracts/templates/fix.json`（`immediate_fix`） | 消す。課題番号の無いプランで判定とリリース後レビューを通らずにマージされる経路になるため |
 | `ndf route render immediate_fix` の案内（`conductor-entrypoints.md`、`src/ndf/core/route/__init__.py` の説明） | 消し、`hotfix` のスプリントの始め方へ置き換える |
 | SKILL.md の「即時修正」を指す参照（`out-of-scope/SKILL.md`・`agents/worker.md`・`agent-layers.md` の規則 7・`release-verification/SKILL.md`） | `mode-criteria.md` の 4 条件と、上の表の「作業中の直し」を指す |
+
+## `documentation` のタイプ「リポジトリの知識」
+
+満たす決定: 決定 10、受け入れ条件 9
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `_outside_reader` | `src/ndf/progress/run.py` | 新設 | `_outside_reader(v: View) -> bool` | 判定の記録の課題ごとの行に、タイプ（`doc_type`）が `repo-knowledge` の行が 1 つでもあれば偽、ほかは真を返す。`TABLE_FACTS` に `outside_reader` の語で足す |
+
+- 工程の定義 `stages/document-sources.json`・`stages/layout-review.json`・`stages/plan-to-spec.json`・`stages/release-verification.json` の条件（`when`）に `outside_reader` を足す。ほかのモードでは記録のタイプが無いので真になり、今の振る舞いのまま流れる
+- `check` は、`documentation` の課題の行に `doc_type`（今の 6 つと `repo-knowledge` のどれか）が無ければ誤りにし、ほかのモードの行に `doc_type` があっても誤りにする
+- 執筆の手引き `skills/document-drafting/references/type-repo-knowledge.md` を新設する。読み手（このリポジトリで作業するエンジニアと AI）・本体（仕組み・決まり・経緯）・構成案だけを書き体裁設計を作らないことを持つ
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `check` | `documentation` の行に `doc_type` が無い・知らない値 | 判定の作業の誤り | 要求の工程を終えるとき | 止める | `refused`、「documentation の課題はタイプを持つ」 | 何も書かない。出力を直して打ち直せる |
+| `_outside_reader` | 判定の記録がまだ無い | 要求の工程の前 | 工程を流す前 | 真として扱う（判定の前に後の工程は流れないので、当たる工程は無い） | — | — |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `_outside_reader` | `repo-knowledge` の行 → 偽。`proposal` の行 → 真 | `standard` のスプリント（`doc_type` が無い）→ 真 | — |
+| 工程の条件 | タイプ「リポジトリの知識」のスプリントで、素材の収集・体裁レビュー・確定仕様化・リリース後テストが無効になる | 提案のタイプでは 4 つとも有効のまま | — |
 
 ## レーンの起動と計画の行
 

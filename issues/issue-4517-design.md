@@ -75,10 +75,10 @@ flowchart LR
 
 | 順 | モード | 問い（すべて満たせば「はい」） |
 | --- | --- | --- |
-| 1 | `documentation` | 変えるのが、リポジトリの外の読み手へ渡すビジネス文書である（`README.md`・`docs/` は当たらない） |
+| 1 | `documentation` | 課題の目的物が文書そのもので、次のどちらかに当たる。(1) リポジトリの外の読み手へ渡すビジネス文書を作る・改訂する（今の 6 つのタイプ）。(2) リポジトリの知識の文書（`docs/` と `README.md`）を新しく書く、または章立て・置き場所を組み直す（加えるタイプ「リポジトリの知識」。決定 10）。既存の記述を実装に合わせて直すだけなら当たらず、`light` へ回る |
 | 2 | `hotfix` | 約束（受け入れ条件・手順書・仕様・既存のテスト）と違う振る舞いを直す不具合で、4 条件をすべて満たす（下の「`hotfix` の 4 条件」） |
 | 3 | `operation` | 変えるのが値だけである。値とは、設定ファイルの値・コードの中の定数と閾値・依存の版・IaC のパラメタ・外部の系の設定と状態（権限・保護の規則・リポジトリの設定・リリースの出し直し・データ）。値を読む処理（分岐・関数・スキーマ・入出力の形・キーの有無）は変えない。外部の系への実行を伴うかは問わない |
-| 4 | `light` | 振る舞いを変えない局所の直し（文言・誤記・リンク・コメント・リポジトリの説明文書と確定仕様・テストの追加・ログの追加・生成物の再生成）か、手順書（Skill の本文と `references/`）の直しで、1 つの Skill に閉じ、コマンド・出力の形・承認ゲート・工程表・ほかの Skill との受け渡しを変えないもの |
+| 4 | `light` | 振る舞いを変えない局所の直し（文言・誤記・リンク・コメント・`docs/` と `README.md` の既存の記述を実装に合わせる直し・テストの追加・ログの追加・生成物の再生成）か、手順書（Skill の本文と `references/`）の直しで、1 つの Skill に閉じ、コマンド・出力の形・承認ゲート・工程表・ほかの Skill との受け渡しを変えないもの |
 | 5 | `legacy-refactor` | 振る舞いを変えずに構造だけを変え、対象にテストが無い・少ない |
 | 6 | `standard` | 上のどれにも当たらない |
 
@@ -115,6 +115,13 @@ flowchart LR
 | バグ修正の大小 | 大小で決めない。4 条件で `hotfix` か `standard` | 小さくても契約を変える直しがある |
 | リリースした PR を戻す。差分は `git revert` で作った打ち消しだけ | `hotfix` | 4 条件の b と c は、戻した先（戻す PR の前の版）の契約と方針と比べる。戻す PR が契約を壊していても、戻せば元の契約に戻るので満たす。課題 1 つ・revert 1 回で戻せることも満たす |
 | 戻すときに競合を解く・ほかの直しを混ぜる | `standard` | 打ち消し以外の変更が入り、戻した先の版と同じになると言えない |
+| `docs/` に新しい文書を書く・`docs/` の章立てや置き場所を組み直す（例 #3412 確定仕様化と測り直し、#3990 設計文書 36 本の削除とリンクの固定） | `documentation`（タイプ「リポジトリの知識」） | 課題の目的物が文書で、構成を決める企画の承認が要る |
+| `docs/`・`README.md` の既存の記述を実装に合わせて直す（例 #4416） | `light` | 構成を変えない。企画の承認と提出先を小さな直しに掛けない |
+| コードの変更に伴って、その変更を説明する `docs/` の記述を足す・直す | 伴ったコードの変更と同じモード（文書の部分は別に判定しない） | 文書は変更の一部で、目的物ではない |
+| 工程の産物として書く文書（確定仕様化が `docs/specifications/` へ書く確定仕様・実装計画・課題と PR の本文）。確定仕様化だけを単独の PR で出したもの（例 #4468・#4214）を含む | 判定の対象外 | 工程の産物で、モードの判定の対象ではない（今の決まりのまま） |
+| Skill の本文・`references/`・エージェント定義 | `documentation` に当たらない。手順書として上の問い（`hotfix`・`light`・`standard`）で判定する | AI が従う手順で、AI の振る舞いを決める |
+| コードのコメント | `light`（今のまま） | 振る舞いを変えない |
+| 社外へ出す記事・発表資料（`docs/articles/`・`docs/presentations/`） | `documentation`（今の 6 つのタイプ。読み手が社外） | リポジトリの外の読み手へ渡す |
 | 1 つの課題・PR が、性質の違う部分を含む（例: リンクの直しと検査の追加） | 部分ごとに上から問い、得たモードのうち高いもの（`hotfix` は `standard` として比べる） | 分けられるなら課題を分ける |
 
 ### スプリントのモード
@@ -124,7 +131,7 @@ flowchart LR
 | 課題のモードの組 | スプリントのモード |
 | --- | --- |
 | 1 つのモードだけ | そのモード。ただし `hotfix` は課題が 1 つのときだけで、2 つ以上なら `standard` |
-| `documentation` とほかのモード | 断る（分ける。今の規則のまま） |
+| `documentation` とほかのモード | 断る（分ける。今の規則のまま。タイプ「リポジトリの知識」も同じ） |
 | それ以外の混ざり | 高いもの（`standard` > `legacy-refactor` > `operation` > `light`）。`hotfix` の課題は `standard` として数える。高さはモードの定義（`contracts/workflow/modes/*.json`）の `metadata.ndf.height` が持つ |
 
 ## 工程表
@@ -158,6 +165,27 @@ flowchart LR
 | `legacy-refactor` | 工程「要求と受け入れ条件」の行を先頭に足す。判定はこの工程の中で行うので、どのモードの工程表もこの行から始まる必要がある。このモードの要求仕様は今と同じく書かず、工程は判定の作業だけを通す |
 | すべて | 工程「要求と受け入れ条件」の最後に判定の作業 `mode` を通す |
 
+### `documentation` に加えるタイプ「リポジトリの知識」
+
+`docs/` と `README.md` を新しく書く・組み直す課題のタイプである。読み手はこのリポジトリで作業するエンジニアと AI で、読み手に求めるのは「理解して作業や判断に使うこと」、本体はリポジトリの仕組み・決まり・経緯である。今の 6 つのタイプと工程の違いは、配布物でないことと、読み手がリポジトリの中にいることから来る。
+
+| 工程 | 今の 6 つのタイプ | 「リポジトリの知識」 | 理由 |
+| --- | --- | --- | --- |
+| 要求と受け入れ条件・作業場所の用意 | 通す | 通す | — |
+| 設計（構成案と体裁設計）・ドキュメント再構成・ドキュメントレビュー | 通す（設計承認ゲート＝企画承認） | 通す。体裁設計は作らず、構成案だけを書く | 章立てと置き場所を決める企画の承認が要る。体裁は Markdown の描画で決まる |
+| 素材の収集と出典の確定 | 通す | 飛ばす | 素材はリポジトリの中のコード・確定仕様・記録で、外部の出典の数値を載せない |
+| 計画・実装（執筆）・コードレビュー・完了判定・Pull Request | 通す | 通す | — |
+| 確定仕様化 | 確定版を残す場合 | 飛ばす | 書いた文書そのものが `docs/` に残る |
+| クリーンアップ | 通す | 通す | — |
+| デプロイ | 生成と提出 | Pull Request のマージだけ。リリース承認ゲートは、マージ先が自動反映の本番チャネルのときだけ当たる（今の決まりのまま） | 配布物を作らない |
+| 体裁レビュー | 通す | 飛ばす | 生成物が無い |
+| リリース後テスト | 提出の後に確かめる経路がある場合 | 飛ばす | 配った版で確かめるものが無い |
+| 振り返り・棚卸し | 通す | 通す | — |
+
+- 飛ばす工程は、タイプで工程を変える条件の語 `outside_reader`（課題の判定の記録のタイプが「リポジトリの知識」なら偽、ほかは真）を、素材の収集と出典の確定・体裁レビュー・リリース後テスト・確定仕様化の工程の条件（`when`）に足して無効にする。条件の語はステートマシンから求める語（`run.py` の `TABLE_FACTS`）に足す。新しいモードの定義は作らない
+- 判定の記録の課題ごとの行は、`documentation` のときタイプ（`doc_type`）を持つ
+- 執筆の手引き（`document-drafting` の `type-*.md`）にこのタイプの 1 本を足す。正本の表（`document-types.md` の「何が `documentation` に当たるか」）の `README.md`・`docs/` の行を、新しく書く・組み直すときは `documentation`、既存の記述を直すときは `light` に分ける
+
 #### `light` の手順書の直しと振る舞いの確認
 
 `light` の手順書の直しでは、指示を変えたファイルにだけ振る舞いの確認を起動する。振る舞いの確認は、変えた手順書（Skill の本文・`references/`・エージェント定義）ごとに `claude -p` を 1 回起動し、変わった指示どおりに動くかを確かめて PR のコメントに残す工程である（SKILL.md の「差分の中身で選ぶ工程」）。
@@ -170,14 +198,14 @@ flowchart LR
 - どのファイルが「指示を変えた」かは、完了判定の照らし直しで差分を判定するときに、手順書のファイルごとに書き出す。振る舞いの確認はその一覧のファイルだけを起動する。一覧が空なら起動しない
 - `light` 以外のモードの振る舞いの確認は今のまま変えない
 
-直接マージ 52 本（11/19 以降の 7 日）のうち `light` の 13 本で数えると、採った案で増える起動は 2 回である（2026-11-25 に各 PR の変えたファイルと差分を読んで数えた）。
+直接マージ 52 本（11/19 以降の 7 日）のうち `light` の 8 本で数えると、採った案で増える起動は 2 回である（2026-11-25 に各 PR の変えたファイルと差分を読んで数えた）。
 
 | 区分 | PR の本数 | 手順書のファイル | 今の規則のままの起動 | 採った案の起動 |
 | --- | --- | --- | --- | --- |
-| 手順書に触れない（確定仕様・計画・CHANGELOG・閉じた課題の文書） | 9 | 0 | 0 | 0 |
+| 手順書に触れない（`docs/` の記述の直し・CHANGELOG・閉じた課題の文書） | 4 | 0 | 0 | 0 |
 | 手順書に触れるが、指示を変えない | 2（[#3924](https://github.com/devbasex/ai-plugins/pull/3924)・[#3837](https://github.com/devbasex/ai-plugins/pull/3837)） | 4 | 4 | 0 |
 | 手順書の指示を変える | 2（[#3840](https://github.com/devbasex/ai-plugins/pull/3840)・[#3850](https://github.com/devbasex/ai-plugins/pull/3850)） | 2 | 2 | 2 |
-| 合計 | 13 | 6 | 6 | 2 |
+| 合計 | 8 | 6 | 6 | 2 |
 
 - #3924 と #3837 は、ラッパー（中継）の振る舞いの説明を 11 系に合わせただけで、AI が従う手順は変えていない
 - #3840 は `release` の SKILL.md に「会話のセッションはリリースの PR をマージしない」という指示を足し、#3850 は `relay.md` にプラグインの更新を移る手順を足した。どちらも指示を変えたファイル 1 つである
@@ -191,12 +219,13 @@ flowchart LR
 | モード | 今の記録 | 今の切り方のまま判定し直す | モードで切ったとすると |
 | --- | --- | --- | --- |
 | `standard` | 61 | 53 | 53 |
-| `light` | 0 | 6 | 8 |
+| `light` | 0 | 4 | 6 |
+| `documentation`（リポジトリの知識） | 0 | 2 | 3 |
 | `hotfix` | 0 | 2 | 2 |
 | `operation` | 0 | 0 | 1 |
-| 合計 | 61 | 61 | 64 |
+| 合計 | 61 | 61 | 65 |
 
-- 「モードで切ったとすると」は、混ざっていた 3 本（`light` と `standard` が 2 本、`operation` と `standard` が 1 本）を分けた数である。課題単位では延べ 87 件（再実行で同じ課題が 2 本以上のスプリントに出たものを重ねて数えた）のうち `standard` 74・`light` 10・`hotfix` 2・`operation` 1 である
+- 「モードで切ったとすると」は、混ざっていた 3 本を分けた数である（`light` と `standard` が 1 本、`operation` と `standard` が 1 本、`standard`・`documentation`・`light` が 1 本）。`documentation` とほかが混ざった 1 本は、新しい基準では断られて分ける。「今の切り方のまま」の列ではその 1 本を `standard` に数えた。課題単位では延べ 87 件（再実行で同じ課題が 2 本以上のスプリントに出たものを重ねて数えた）のうち `standard` 74・`light` 7・`documentation` 3・`hotfix` 2・`operation` 1 である
 - `standard` に残る 53 本の大半は、機能の追加・契約の変更・2 つ以上の Skill にまたがる手順の変更である。課題を 2 つ以上まとめたレーンでは、不具合の課題も `standard` として数えた（#3604・#3877・#3908 など）。計画でモードを判定して切れば、このうち 4 条件を満たす課題は `hotfix` の行へ分かれる。ただし差分を読んで 4 条件を確かめていないので、上の表の `hotfix` の数（2）には足していない。表の `hotfix` は下限である
 - 標本
 
@@ -204,7 +233,7 @@ flowchart LR
 | --- | --- | --- |
 | `hotfix` | #4217 並列の計画の許可のテストが消え、受け入れ条件を満たさない | 約束（受け入れ条件）と違う。テストを戻すだけで契約と方針は変えない |
 | `light` | #3960 作り直しの決定を指すコメントの書き換え | コメントだけ |
-| `light` | #3990 設計文書 36 本の削除とリンクの固定 | リポジトリの文書だけ |
+| `documentation` | #3990 設計文書 36 本の削除とリンクの固定 | `docs/` の置き場所を組み直す（タイプ「リポジトリの知識」） |
 | `operation` | 別のリポジトリの、検証環境で外部の認証基盤を有効にする課題 | 設定の値と外部の系の状態だけ |
 | `standard` | #3989 並列の制御を 2 層にし、設定のキーを廃止する | 設定のキーと構造が変わる |
 | `standard` | #4409 承認の前のマージを止める | 不具合の直しだが、マージのコマンドの確かめと工程の順を変える（条件 b） |
@@ -214,10 +243,13 @@ flowchart LR
 | モード | 本数 | 内訳 |
 | --- | --- | --- |
 | `standard` | 26 | `feature/` 6、`fix/` 12、`docs/` 3（MVV の改訂 2・文書の規則 1）、ほか 5 |
-| `light` | 13 | `docs/` 10、`fix/` 2、ほか 1 |
+| `light` | 8 | `docs/` 6、`fix/` 2 |
 | `hotfix` | 11 | すべて `fix/` |
 | `operation` | 2 | `fix/` 2（閾値 #4418、待ちの上限 #4464） |
+| 判定の対象外（工程の産物） | 5 | 確定仕様化だけの PR 4（#4468・#4465・#4214・#3932）、実装計画だけの PR 1（#4317） |
+| `documentation`（リポジトリの知識） | 0 | `docs/` を新しく書く・組み直す PR は無かった |
 
+- `docs/` 13 本は、`light` 6（記述の直し・CHANGELOG・閉じた課題の文書の整理）・`standard` 3（MVV の改訂 2・文書の規則）・判定の対象外 4（確定仕様化だけ）に分かれた
 - `fix/` 27 本のうち `hotfix` は 11 本で、残りは契約の変更（#3831・#3940）・課題を 2 つ以上まとめた PR（#3869・#3870）・方針の変更（#4205）・機能の追加（#3944・#4116）などで `standard` だった
 - 標本
 
@@ -242,6 +274,7 @@ flowchart LR
 | テストの削除 | #4212 | `standard` |
 | 新しい Skill | #4189 | `standard` |
 | 設計書だけの課題 | 別のリポジトリの 3 件 | 実装する課題と同じスプリント。単独なら `light` |
+| `docs/` の文書を書く課題 | #3412・#3990 | 新しく書く・組み直すなら `documentation`（リポジトリの知識）、記述を直すだけなら `light`、確定仕様化の産物なら対象外 |
 | `hotfix` の「課題 1 つ」 | — | スプリントの性質。2 つ以上なら `standard` として数える |
 
 ## 決定の記録
@@ -329,6 +362,16 @@ flowchart LR
 - **代償**: 完了判定で外れると、そこまでの工程を新しいステートマシンでやり直す。決定 4 のように同じステートマシンを作り直さないのは、完了判定の時点では低いモードで終えた工程（省いた設計・マージした実装の単位）があり、終えた工程は同じステートマシンで開き直せないためである。要求の工程の終わりには、そうした工程がまだ無い
 - 根拠: Value 13 / Value 1（MVV バージョン 11）
 
+### 決定 10: `docs/` を新しく書く・組み直す仕事に企画の承認を掛けるため、`documentation` にタイプ「リポジトリの知識」を足す
+
+- **質問**: `docs/` の文書を書く仕事を、今のまま `light` にするか、`documentation` に入れるか、`docs/` 用の新しいモードを作るか
+- **選んだ案**: `documentation` にタイプ「リポジトリの知識」を足す。`docs/` と `README.md` を新しく書く・章立てや置き場所を組み直す課題はこのタイプで、既存の記述を実装に合わせて直すだけなら `light` に残す。このタイプは素材の収集と出典の確定・体裁レビュー・確定仕様化・リリース後テストを飛ばし（工程の条件の語 `outside_reader`）、設計 PR による企画の承認は残す。工程の産物の確定仕様は今のまま判定の対象外にする
+- 採らなかった案: `docs/` 用の新しいモードを作る（`documentation` はタイプと工程の条件で工程を変えられる。モードを増やすと工程表の列・モードの値・混ざりの規則が 1 つずつ増える）
+- 採らなかった案: `docs/` の変更をすべて `documentation` にする（記述を直すだけの小さな直しにも設計 PR と企画の承認が掛かる。#4416 のような直しが重くなる）
+- 採らなかった案: 今のまま `docs/` をすべて `light` にする（文書の章立てや置き場所を大きく変える #3990 のような仕事が、構成の承認を通らずに入る）
+- **代償**: 「新しく書く・組み直す」と「記述を直す」の境で判定が割れうる。割れたら完了判定の照らし直し（決定 9）が差分で確かめる
+- 根拠: Value 1 / Value 11（MVV バージョン 11）
+
 ## 影響と危険
 
 | 項目 | 内容 |
@@ -364,6 +407,7 @@ flowchart LR
 | 判定の記録（`mode_judgment`） | 追加 | 工程「要求と受け入れ条件」の出力。課題ごとのモードと根拠・スプリントのモード・参考の値 |
 | conductor・オーガナイザー・worker | 既存 | conductor は利用者と対話して工程を進める AI のセッション。オーガナイザーは並列の計画のレーンを起動・監視するセッション。worker は 1 つの作業だけを行うサブエージェント |
 | MVV・MVV 判定 | 既存 | MVV はこのリポジトリの判断の基準（`.ndf/mvv.md`）。MVV 判定は、利用者が任せた進め方で、AI が MVV に照らして承認ゲートを通してよいかを決めること |
+| リポジトリの知識（`documentation` のタイプ） | 追加 | `docs/` と `README.md` を新しく書く・組み直す仕事のタイプ。読み手はこのリポジトリで作業するエンジニアと AI。素材の収集・体裁レビュー・確定仕様化・リリース後テストを通らない |
 | P2 | 既存 | MVV の「必ず人の承認が要る操作」の 1 つ。代表のリポジトリの種類を NDF で扱えなくする変更 |
 
 ## テスト設計
@@ -393,12 +437,14 @@ flowchart LR
 | 6 | 完了判定の照らし直しが、`documentation` のスプリントで差分にコードがあれば、モードを上げずに分けるよう返す | 高さだけで比べる |
 | 7 | 行を作る入口（`lanes init`・`lane add`・`row add`・`row carry`）が、判定の無い行と `documentation` の混ざった行を断る | どれかの入口で検査を外す |
 | 8 | `.md` の文言は照合しない。参照切れは `ndf check` が見る | — |
+| 9 | タイプ「リポジトリの知識」の `documentation` のスプリントで、素材の収集と出典の確定・体裁レビュー・確定仕様化・リリース後テストが無効になり、提案のタイプでは有効のまま | 条件の語 `outside_reader` を外す・常に真にする |
+| 9 | `documentation` の課題の判定にタイプが無ければ要求の工程を終えられない | タイプの確かめを外す |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
+| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/skills/development-workflow/references/document-types.md`、`plugins/ndf/skills/document-drafting/references/type-repo-knowledge.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-sources.json`、`plugins/ndf/contracts/workflow/stages/layout-review.json`、`plugins/ndf/contracts/workflow/stages/plan-to-spec.json`、`plugins/ndf/contracts/workflow/stages/release-verification.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
 
 ファイルの役割・関数の責務・異常系は詳細設計（[issue-4517-design-detail.md](./issue-4517-design-detail.md)）にある。
 
