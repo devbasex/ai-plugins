@@ -4,7 +4,7 @@
   "entry": {
     "roots": ["ndf.domains.hooks.main"],
     "dependencies": ["tree_sitter", "tree_sitter_bash", "markdown_it", "mdit_py_plugins", "pygments"],
-    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.git", "ndf.adapters.markdown", "ndf.adapters.transcript", "ndf.core", "ndf.core.production_merge", "ndf.domains", "ndf.domains.hooks", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.keep_cache", "ndf.domains.relay.claude_options", "ndf.domains.relay.context_thresholds", "ndf.domains.relay.install", "ndf.domains.relay.markers", "ndf.domains.relay.blocks", "ndf.domains.records", "ndf.domains.records.reading_decide", "ndf.testing", "ndf.testing.declared", "ndf.testing.weight", "ndf.values"],
+    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.git", "ndf.adapters.markdown", "ndf.adapters.transcript", "ndf.core", "ndf.core.production_merge", "ndf.domains", "ndf.domains.hooks", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.keep_cache", "ndf.domains.relay.claude_options", "ndf.domains.relay.context_thresholds", "ndf.domains.relay.install", "ndf.domains.relay.markers", "ndf.domains.relay.blocks", "ndf.domains.records", "ndf.domains.records.reading_decide", "ndf.domains.statusline", "ndf.domains.statusline.settings", "ndf.testing", "ndf.testing.declared", "ndf.testing.weight", "ndf.values"],
     "forbidden": ["ndf.core.durable", "ndf.contracts", "ndf.adapters.notify", "ndf.adapters.github", "ndf.adapters.llm", "ndf.adapters.ci", "ndf.adapters.claude", "dbos", "httpx", "githubkit", "slack_sdk", "jsonschema"]
   },
   "stdlib_only": [

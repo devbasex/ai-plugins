@@ -50,7 +50,9 @@ from ndf.progress.gate.asking import (
     TOOL,
     Target,
     gate_result,
+    material_path,
     material_sha256,
+    presented_stale,
     question,
     read_presented,
     write_material,
@@ -73,14 +75,19 @@ def present(
         repo: Optional[str] = Git(cwd).remote_repo()
     except GitError:
         repo = None
-    # 対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）
+    # 対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）。
+    # その head の資料があり、提示した対象も変わっていなければ、書かずにハッシュも使い直す（#3959）
     first = question(v, m, repo=repo)
     seen = observe(first)
     asked = replace(first, target=replace(seen, material=None))
-    path = write_material(st.root, v, asked)
+    if seen.material is not None and not presented_stale(st.root, asked):
+        path, sha = material_path(st.root, asked), seen.material
+    else:
+        path = write_material(st.root, v, asked, private=st.private)
+        sha = material_sha256(path)
     # 提示の識別子は資料を書いたときに発行される（`write_material`）。リリースのリクエストの ID に使うので写す
     held = read_presented(st.root, asked)
-    q = replace(asked, target=replace(seen, material=material_sha256(path), presentation=held.presentation))
+    q = replace(asked, target=replace(seen, material=sha, presentation=held.presentation))
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:

@@ -1,21 +1,22 @@
 """マージの部品（`ndf.adapters.github` から分けた。通信をしない部品）。
 
-- 本番ブランチの ruleset と従来のブランチ保護を重ねた事実（`RuleFacts`）を、読んだ応答から組む
 - マージの方式の唯一の定義（`_MERGE_METHOD_SPECS`）と、規則・リポジトリの設定・マージキューが許す方式の選び方
 - マージの要求・確かめ・マージキューの GraphQL の形と、マージの結果の値（`MergeOutcome`・`FileAt`・`Verified`）
+- 要求を送らずに返すマージの結果（`preflight`・`method_refusal`・`queue_method_refusal`）
 
-GitHub への読み書きは `ndf.adapters.github.GitHub` が持ち、ここは送る形と、応答の値から事実と方式を決める規則だけを持つ。
+GitHub への読み書きは `ndf.adapters.github.GitHub` が持ち、ここは送る形と、応答の値から方式を決める規則だけを持つ。
+ruleset と従来のブランチ保護の事実は `ndf.adapters.github_rules` が持つ。
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Protocol
 
-# 迂回の可否（ruleset の `current_user_can_bypass`）の強さ。弱いほうを全体の値にする。`always`・`pull_requests_only` だけが
-# 本番の PR を越えられる（10 系の `release_case._BYPASS_ORDER` と同じ並び）
-BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
+from ndf.adapters import git
+from ndf.adapters.github_rules import PULL_REQUEST_RULE
+
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、設定が無いときに許された方式から選ぶ順
@@ -98,6 +99,21 @@ PREMERGE_MARK = "マージの前に決める"
 _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 
 
+class PullFacts(Protocol):
+    """要求を送らずに返す結果が読む PR の欄（`ndf.adapters.github.Pull` が満たす。import の輪を作らないための形）。"""
+
+    @property
+    def number(self) -> int: ...
+    @property
+    def merged(self) -> bool: ...
+    @property
+    def head_sha(self) -> str: ...
+    @property
+    def base_ref(self) -> str: ...
+    @property
+    def body(self) -> str: ...
+
+
 class MergeOutcome(NamedTuple):
     """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。"""
 
@@ -129,65 +145,6 @@ def premerge_risks(body: str) -> list[str]:
     return [line.strip() for line in body.splitlines() if PREMERGE_MARK in line and not _CHECKED_ITEM.match(line)]
 
 
-class RuleFacts(NamedTuple):
-    """本番ブランチの ruleset と従来のブランチ保護を重ねた事実（#3672 の I10。10 系の `release_case.RuleFacts` と同じ値）。
-
-    `bypass` は当たった ruleset の `current_user_can_bypass`（どれか 1 つでも越えられない値なら、その値。ruleset が無ければ None）。
-    `queue_merge_method` は merge queue の規則の `parameters.merge_method`（`MERGE`・`SQUASH`・`REBASE`）。
-    """
-
-    present: bool
-    approvals: int
-    queue: bool
-    up_to_date: bool
-    bypass: Optional[str]
-    queue_merge_method: Optional[str] = None
-
-
-NO_RULES = RuleFacts(False, 0, False, False, None)
-
-
-def _weakest(bypasses: Iterable[Optional[str]]) -> Optional[str]:
-    known = [b for b in bypasses if b in BYPASS_ORDER]
-    return min(known, key=BYPASS_ORDER.index) if known else None
-
-
-def _review_count(raw: Any) -> int:
-    value = raw.get("required_approving_review_count") if isinstance(raw, dict) else None
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def rule_facts_of(rules: Sequence[dict], bypasses: Sequence[Optional[str]]) -> RuleFacts:
-    """`rules/branches/<branch>` の規則の配列と、当たった ruleset ごとの迂回の可否から事実を組む。"""
-    if not rules:
-        return NO_RULES
-    params = [(r.get("type"), r.get("parameters") if isinstance(r.get("parameters"), dict) else {}) for r in rules]
-    reviews = [_review_count(p) for kind, p in params if kind == "pull_request"]
-    up_to_date = any(kind == "required_status_checks" and p.get("strict_required_status_checks_policy") for kind, p in params)
-    queue_method = next((p.get("merge_method") for kind, p in params if kind == "merge_queue"), None)
-    queue = any(kind == "merge_queue" for kind, _ in params)
-    return RuleFacts(True, max(reviews) if reviews else 0, queue, bool(up_to_date), _weakest(bypasses), queue_method)
-
-
-def classic_facts_of(protection: dict) -> RuleFacts:
-    """従来のブランチ保護（`branches/<branch>/protection`）から事実を組む。保護を読めるのは管理者だけなので、
-    管理者に保護を課さない（`enforce_admins` が偽）ときは迂回できる（`always`）とみなす。"""
-    checks = protection.get("required_status_checks")
-    enforce = protection.get("enforce_admins")
-    up_to_date = isinstance(checks, dict) and bool(checks.get("strict"))
-    enforced = isinstance(enforce, dict) and bool(enforce.get("enabled"))
-    approvals = _review_count(protection.get("required_pull_request_reviews"))
-    return RuleFacts(True, approvals, False, up_to_date, "never" if enforced else "always")
-
-
-def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
-    """ruleset と従来のブランチ保護の事実を重ねる。GitHub は両方を効かせるため、厳しいほうを採る（迂回は弱いほう）。"""
-    if not a.present or not b.present:
-        return a if a.present else b
-    bypass, queue_method = _weakest((a.bypass, b.bypass)), a.queue_merge_method or b.queue_merge_method
-    return RuleFacts(True, max(a.approvals, b.approvals), a.queue or b.queue, a.up_to_date or b.up_to_date, bypass, queue_method)
-
-
 def pick_merge_method(declared: Optional[str], allowed: Sequence[str]) -> Optional[str]:
     """マージの方式を決める（3378-2）。設定の値があればそれ（許されていなければ None）、無ければ許された方式の先頭。"""
     if declared is not None:
@@ -202,7 +159,7 @@ def ruleset_merge_methods(rules: Iterable[dict]) -> Optional[list[str]]:
     """
     found: Optional[set[str]] = None
     for rule in rules:
-        if rule["type"] != "pull_request" or "allowed_merge_methods" not in rule["parameters"]:
+        if rule["type"] != PULL_REQUEST_RULE or "allowed_merge_methods" not in rule["parameters"]:
             continue
         methods = set(rule["parameters"]["allowed_merge_methods"])
         found = methods if found is None else found & methods
@@ -224,3 +181,33 @@ def queue_merge_method(queue: Any) -> Optional[str]:
     config = queue.get("configuration") if isinstance(queue, dict) else None
     got = config.get("mergeMethod") if isinstance(config, dict) else None
     return got.lower() if isinstance(got, str) else None
+
+
+def preflight(pull: PullFacts, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
+    """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
+    if pull.merged:
+        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
+    if expect_head and not git.sha_matches(expect_head, pull.head_sha):
+        return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
+    risks = premerge_risks(pull.body)
+    if risks:
+        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
+    return None
+
+
+def method_refusal(pull: PullFacts, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
+    """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
+    want = method if method is not None else "（設定なし）"
+    detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
+    return MergeOutcome(False, METHOD_REFUSED, detail, pull.head_sha)
+
+
+def queue_method_refusal(pull: PullFacts, method: str, queue_method: Optional[str]) -> Optional[MergeOutcome]:
+    """キューのマージの方式 `queue_method` が求めた方式 `method` と違う（読めないときも）ときの、キューへ入れずに返す断り。"""
+    if queue_method == method:
+        return None
+    detail = (
+        f"#{pull.number} の基底 {pull.base_ref} のマージキューは {queue_method or '（読めない）'} でマージし、"
+        f"求めた {method} と違う。キューへ入れずに止める（キューのマージの方式を {method} にする）"
+    )
+    return MergeOutcome(False, "refused", detail, pull.head_sha)

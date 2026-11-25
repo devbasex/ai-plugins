@@ -201,13 +201,16 @@ JUDGED = "a" * 40
 
 
 def _mvv(kind: str, skip: bool, why: list[str]):
-    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR の head は JUDGED）。"""
+    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR は設計の PR で head は JUDGED。レビューの保留を
+    確かめて 0 件）。"""
     held = {
         "gate": kind,
         "skip": skip,
         "verdict": {"verdict": "follow", "reasons": ["Value 1"], "boundary": []},
         "why": why,
+        "pr": lanes.values(Path(), "sprint/s1")["design_pr"],
         "head": JUDGED,
+        "holds": [],
     }
     return lambda r: invoke.finished(r, result.result("script", "ok", "MVV 判定", outputs={"mvv_gate": held}))
 
@@ -218,7 +221,7 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     # 省いた回答を書いた駆動はそこで止まり、回答は次の next が検証（recheck）を通してから読む
     wrote = lanes.turn(st, tid, repo, env.env)
     assert wrote["status"] == "ok" and wrote["next"]["argv"][2] == "next" and wrote["metrics"]["stage"] == "設計"
-    assert gate.recheck(st, tid, lambda q: gate.Target(JUDGED)) is None
+    assert gate.recheck(st, tid, lambda q, **_: gate.Target(JUDGED)) is None
     out = lanes.turn(st, tid, repo, env.env)
     # 設計承認ゲートは人へ問わずに通り、次に人を待つのはリリース承認ゲート（判定は省かない）
     assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
@@ -238,7 +241,7 @@ def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, ca
     env.fake.script["design-mvv"] = [_mvv("design", True, [])]
     lanes.turn(st, tid, repo, env.env)  # 省いた回答を書いたところで駆動が止まる
     moved = "b" * 40
-    why = gate.recheck(st, tid, lambda q: gate.Target(moved))
+    why = gate.recheck(st, tid, lambda q, **_: gate.Target(moved))
     assert why is not None and moved in why
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"

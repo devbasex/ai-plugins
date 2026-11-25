@@ -32,20 +32,19 @@ from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLim
 
 from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, RuleFacts, Verified
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
 
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
-from ndf.adapters.github_merge import BYPASS_ORDER as BYPASS_ORDER
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
 T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
-# PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-PULL_FIELDS = (
+PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " isInMergeQueue"
+    " isInMergeQueue isCrossRepository"
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
@@ -207,10 +206,10 @@ class Pull(NamedTuple):
     merge_state: str
     author: str
     association: str
-    # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    merge_sha: str = ""
+    merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
     # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
     queued: bool = False
+    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
 
     @property
     def authored(self) -> Authored:
@@ -235,7 +234,7 @@ class Pull(NamedTuple):
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
             text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
-            raw.get("isInMergeQueue") is True,
+            raw.get("isInMergeQueue") is True, bool(raw.get("isCrossRepository")),
         )  # fmt: skip
 
 
@@ -294,18 +293,6 @@ def _refused_by_graphql(exc: GitHubError) -> bool:
     return exc.status == 0 and not exc.unreached and exc.quota is None
 
 
-def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
-    """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
-    if pull.merged:
-        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
-    if expect_head and not git.sha_matches(expect_head, pull.head_sha):
-        return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
-    risks = github_merge.premerge_risks(pull.body)
-    if risks:
-        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
-    return None
-
-
 def _file_at(repo: dict, key: str) -> FileAt:
     """`object(expression)` の応答（キー `key`）を `FileAt` にする。Blob でない・無いなら本文と oid が None。"""
     node = repo.get(key)
@@ -337,24 +324,6 @@ def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Opt
     if fresh.config.oid != expect.config_oid:
         return expect.rejudge(fresh.config.text)
     return None
-
-
-def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
-    """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
-    want = method if method is not None else "（設定なし）"
-    detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
-    return MergeOutcome(False, github_merge.METHOD_REFUSED, detail, pull.head_sha)
-
-
-def _queue_method_refusal(pull: Pull, method: str, queue_method: Optional[str]) -> Optional[MergeOutcome]:
-    """キューのマージの方式 `queue_method` が求めた方式 `method` と違う（読めないときも）ときの、キューへ入れずに返す断り。"""
-    if queue_method == method:
-        return None
-    detail = (
-        f"#{pull.number} の基底 {pull.base_ref} のマージキューは {queue_method or '（読めない）'} でマージし、"
-        f"求めた {method} と違う。キューへ入れずに止める（キューのマージの方式を {method} にする）"
-    )
-    return MergeOutcome(False, "refused", detail, pull.head_sha)
 
 
 def _response_body(resp: Any) -> Any:
@@ -536,6 +505,23 @@ class GitHub:
         got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
+    def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
+        """head のブランチが `branch` で、このリポジトリの開いた PR（フォークの同名ブランチを除く。新しい順）。
+
+        取得の時点で開いた PR に絞り、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
+        （候補が 1 件だけかを、取得の範囲から外れた古い PR で取り違えない）。`github.list-pages` ページを超えたら `GitHubError`。
+        """
+        pages = _page_cap("github.list-pages")
+        variables: dict[str, Any] = {"head": branch, "after": None}
+        found: list[Pull] = []
+        for _ in range(pages):
+            conn = self.repository(_OPEN_HEAD_PAGE, variables)["pullRequests"]
+            found += [p for p in (Pull.from_graphql(n) for n in conn["nodes"]) if not p.cross_repository]
+            if len(found) >= enough or not conn["pageInfo"]["hasNextPage"]:
+                return found[:enough]
+            variables["after"] = conn["pageInfo"]["endCursor"]
+        raise _too_many_pages(f"ブランチ {branch} の開いた PR の一覧が", pages, "github.list-pages")
+
     def pull(self, number: int) -> Pull:
         """PR を REST で読む。REST のスロットが一次の上限なら GraphQL のスロットで読み替える（不足 g）。二次レート制限は読み替えない。"""
         try:
@@ -677,7 +663,7 @@ class GitHub:
             classic = self._classic_facts(branch)
         except GitHubError:  # noqa: NDF401 ネットワーク: 読めない事実は None で返し、land が止める（比べずに入れない）
             return None
-        return None if classic is None else github_merge.merge_facts(github_merge.rule_facts_of(rules, bypasses), classic)
+        return None if classic is None else merge_facts(rule_facts_of(rules, bypasses), classic)
 
     def _classic_facts(self, branch: str) -> Optional[RuleFacts]:
         """従来のブランチ保護の事実。保護が無ければ `present` が偽、有る（か有無を読めない）のに詳細を読めなければ None。
@@ -687,12 +673,12 @@ class GitHub:
         info = self.rest("GET", path)
         protection = info.get("protection") if isinstance(info, dict) else None
         if isinstance(protection, dict) and protection.get("enabled") is False:
-            return github_merge.NO_RULES
+            return NO_RULES
         try:
             got = self.rest("GET", f"{path}/protection")
         except GitHubError:  # noqa: NDF401 ネットワーク: 保護の詳細を読めなければ None（呼び手が止める）
             return None
-        return github_merge.classic_facts_of(got) if isinstance(got, dict) else None
+        return classic_facts_of(got) if isinstance(got, dict) else None
 
     def count_issues(self, labels: Sequence[str] = (), state: str = "OPEN") -> int:
         """ラベルと状態の Issue（PR を除く）の件数を `totalCount` で数える。既定の件数の上限で切れない（#3393）。"""
@@ -874,13 +860,13 @@ class GitHub:
         真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。
         `expect` があれば最初の読み直しをやめ、方式の問い合わせの後・送る直前に照らす。"""
         pull = expect.pull if expect is not None else self.pull(number)
-        early = _preflight(pull, number, expect_head)
+        early = github_merge.preflight(pull, number, expect_head)
         if early is not None:
             return early
         allowed = self.allowed_merge_methods(pull.base_ref)
         chosen = github_merge.pick_merge_method(method, allowed)
         if chosen is None:
-            return _method_refusal(pull, number, method, allowed)
+            return github_merge.method_refusal(pull, number, method, allowed)
         if expect is not None:
             state = self.repository(github_merge.VERIFY_QUERY, {"number": int(number), "expr": f"{expect.base}:{expect.config_path}"})
             stop = _verify(number, _verified(state), expect, self.repo)
@@ -920,7 +906,7 @@ class GitHub:
         if stop is not None:  # 確かめで止めるとき（設定が変わり承認が要るようになった等）は、キューにある PR も外す
             self._leave_queue(repo)
         if stop is None and method is not None:
-            stop = _queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
+            stop = github_merge.queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
         if stop is None and not node["isInMergeQueue"]:
             stop = self._put_in_queue(pull, node["id"], jump, expect)
         if stop is not None:
@@ -975,6 +961,14 @@ _ISSUE_PAGE = (
     "query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!], $after: String) {"
     f" repository(owner: $owner, name: $name) {{ issues(labels: $labels, states: $states, first: {PER_PAGE}, after: $after) {{"
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
+)
+
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）。1 ブランチ専用の照会なので、
+# フォークの同名ブランチが先に並んでも往復が増えないよう、上限の件数（`PER_PAGE`）で読む
+_OPEN_HEAD_PAGE = (
+    "query($owner: String!, $name: String!, $head: String!, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PER_PAGE},"
+    f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
 

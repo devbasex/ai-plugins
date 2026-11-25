@@ -177,7 +177,7 @@ def test_an_old_marker_does_not_take_a_presentation_of_another_run(waiting):
     for saved in ({"step": "s", "run": "other", "presented_id": "p2"}, {"step": "s", "presented_id": "p2"}):
         runner.write_json(runner.step_presented_path(sdir, "s"), saved)
         marker = runner.read_marker(sdir, run)
-        assert marker["shown"] == {} and runner.unconfirmed(marker)
+        assert marker["shown"] == {} and runner.is_unconfirmed(marker)
 
 
 def test_a_stored_result_of_a_newer_version_is_watched_as_stopped(tmp_path):

@@ -231,17 +231,40 @@ def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
     return found
 
 
+def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> bool:
+    """回答 `ev` が、回答として数えない MVV 判定の回答か（`model.mvv_answer_void`）。"""
+    return ev is not None and model.mvv_answer_void(event_payload(ev), gate)
+
+
+def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
+    """数えない MVV 判定の回答で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959）。
+
+    更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に改めて人へ質問するためである。後ろのステップ（マージなど）
+    が済んでいれば、承認を取り直しても戻せないので開き直さない。記録の事象は書き換えない。
+    """
+    last = next((st for st in reversed(s.steps) if st.id in prog.done), None)
+    if last is None or not invoke.is_listen(last):
+        return
+    report = prog.done[last.id]
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    by_seq = {ev.seq: ev for ev in v.row_events(s.name) if ev.draft.kind == ANSWERED}
+    if _void_answer(v, by_seq.get(metrics.get("seq")), last.gate):
+        del prog.done[last.id]
+
+
 def _running_move(v: View, s: stages.StageDef) -> Move:
     prog = step_progress(v, s.name)
+    _reopen(v, s, prog)
     step = prog.next_step(s)
     if step is None:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
+    answer = None if _void_answer(v, prog.answer, step.gate) else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     skip = listen and prog.waiting is None and model.mvv_skip(prog.done, s.before(step.id), step.gate) is not None
-    if waiting and prog.answer is None and not skip:
+    if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
-    return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
+    return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
 
 
 def decide(v: View) -> Move:
@@ -558,10 +581,16 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
     省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。回答を読む前の検証（`gate.recheck`）はサブコマンドの
     エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が検証を通してから読む。
+    数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
+    waiting = replace(m, action=Action.GATE, event=None)
+    if m.event is not None and model.mvv_answer_void(event_payload(m.event), m.step.gate):
+        return report(v, waiting)
     if m.event is None:
         held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
+        if held is None:
+            return report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))

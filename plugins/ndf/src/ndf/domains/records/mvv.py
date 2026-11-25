@@ -10,18 +10,20 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import git as git_mod
-from ndf.adapters import markdown, run_log
-from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
-from ndf.contracts import internal, limits, worker_paths
+from ndf.adapters import markdown, publish, run_log
+from ndf.adapters.github import GitHub, GitHubError, Pull
+from ndf.contracts import internal, worker_paths
 from ndf.core.converge import oscillation
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
@@ -44,6 +46,11 @@ _NAME_SHA = 12
 # 設計文書の決定の見出し（`### 決定 4: 題`）のレベルと題の始まり
 _DECISION_LEVEL = 3
 _DECISION = re.compile(r"決定 [0-9]+\b")
+# 承認資料の「目指す姿の根拠」のセクションの題と、セクションにする見出しの深さの上限（決定の見出しが 3 の深さなので 2 まで）
+BASIS_TITLE = "目指す姿の根拠"
+_BASIS_LEVEL = 2
+# 設計文書ごとのまとまりの見出し（深さ 1 の `# <設計文書の H1>（#<課題番号>）`）
+_BLOCK = re.compile(r".*[（(]#[0-9]+[）)]$")
 
 
 class Snapshot(NamedTuple):
@@ -322,6 +329,107 @@ def decision_lines(text: str) -> frozenset[int]:
     return frozenset(got)
 
 
+class Cited(NamedTuple):
+    """`cite` の結果。`errors` は根拠の行の誤り（`citation_errors` の形）、`checked` は確かめた根拠の行の数（誤りが 0 件でも数える）。"""
+
+    errors: list[dict[str, Any]]
+    checked: int
+
+    def metrics(self, snap: Snapshot) -> dict[str, Any]:
+        """結果 JSON の `metrics`: 確かめた MVV のバージョンとベースのコミット、確かめた根拠の行の数。"""
+        return {"mvv_version": snap.version, "commit": snap.commit, "checked": self.checked}
+
+
+def _material_lines(text: str) -> list[str]:
+    """本文の行（Markdown の解析と同じく `\\r\\n`・`\\r`・`\\n` で区切る）。並びの n 番目が n 行目。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def cite(snap: Snapshot, files: Sequence[Path], require_basis: bool = False) -> Cited:
+    """承認資料 `files` の全体の根拠の行を、承認済みの MVV `snap` で確かめる（cross-review の `_citations` と同じ関数・同じ規則。#3959）。
+
+    先に `files` のすべてを UTF-8 で読み（読めなければ `OSError`・`UnicodeDecodeError`）、MVV が承認済みでなければ確かめずに
+    `Cited([], 0)`。
+    """
+    texts = [(str(path), path.read_bytes().decode("utf-8")) for path in files]
+    if snap.state != md.State.APPROVED or snap.version is None:
+        return Cited([], 0)
+    errors: list[dict[str, Any]] = []
+    checked = 0
+    for path, text in texts:
+        material = _Material(path, text)
+        lines = [(path, no, line, no in material.decisions) for no, line in enumerate(material.rows, 1) if no not in material.code]
+        checked += sum(1 for _, _, line, decision in lines if md.parse_citation(line, decision) is not None)
+        found = md.citation_errors(lines, {snap.version: snap.items}) + material.errors(require_basis)
+        errors += sorted(found, key=lambda e: int(e["line"]))
+    return Cited(errors, checked)
+
+
+class _Material:
+    """承認資料 1 つの見出しのコントラクト（「目指す姿の根拠」のセクション・決定の見出し・設計文書ごとのまとまり）の確かめ。行の番号は 1 始まり。"""
+
+    def __init__(self, path: str, text: str) -> None:
+        self.path, self.rows = path, _material_lines(text)
+        self.code, self.decisions = fenced_lines(text), decision_lines(text)
+        self.heads = markdown.atx_headings(text)
+        self.total = len(markdown.code_lines(text))
+
+    def _end(self, at: int, closes: Callable[[markdown.Heading], bool]) -> int:
+        """`at` 番目の見出しの範囲の最後の行（`closes` に当たる次の見出しの前の行。無ければ文書の最後の行）。"""
+        return next((h.line for h in self.heads[at + 1 :] if closes(h)), self.total)
+
+    def _basis(self, no: int) -> bool:
+        """`no` 行目が、コードブロックの外の根拠の行の形（`parse_citation` が決定の根拠の行として候補を返す行）か。"""
+        return no not in self.code and md.parse_citation(self.rows[no - 1], True) is not None
+
+    def _error(self, no: int) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "line": no,
+            "cited": self.rows[no - 1].strip(),
+            "kind": md.CITATION_HEADING,
+            "version": None,
+            "unknown": [],
+        }
+
+    def _sections(self) -> list[tuple[int, int]]:
+        """「目指す姿の根拠」のセクション（見出しの行・最後の行）。同じ深さか上位の次の見出しで閉じる。"""
+        return [
+            (h.line + 1, self._end(i, lambda g, h=h: g.level <= h.level))
+            for i, h in enumerate(self.heads)
+            if h.level <= _BASIS_LEVEL and h.title.strip() == BASIS_TITLE
+        ]
+
+    def _decisions(self, start: int, end: int) -> list[tuple[int, int]]:
+        """行 `start`〜`end` の決定の見出し（見出しの行・その下の最後の行）。"""
+        return [
+            (h.line + 1, self._end(i, lambda g: True))
+            for i, h in enumerate(self.heads)
+            if start <= h.line + 1 <= end and h.level == _DECISION_LEVEL and _DECISION.match(h.title)
+        ]
+
+    def _blocks(self) -> list[tuple[int, int]]:
+        """設計文書ごとのまとまり（見出しの行・最後の行）。まとまりの見出しが無ければ文書の全体を 1 つにする。"""
+        at = [i for i, h in enumerate(self.heads) if h.level == 1 and _BLOCK.match(h.title.strip())]
+        if not at:
+            return [(1, self.total)]
+        return [(self.heads[i].line + 1, self._end(i, lambda g: g.level == 1 and _BLOCK.match(g.title.strip()) is not None)) for i in at]
+
+    def errors(self, require_basis: bool) -> list[dict[str, Any]]:
+        """見出しのコントラクトの誤り。`require_basis`（設計承認ゲート）なら、セクションの無いまとまりと根拠の行の無い決定も誤りにする。"""
+        out: list[dict[str, Any]] = []
+        sections = self._sections()
+        for start, end in sections:
+            decisions = self._decisions(start, end)
+            out += [] if decisions else [self._error(start)]
+            out += [self._error(no) for no in range(start + 1, end + 1) if no not in self.decisions and self._basis(no)]
+            if require_basis:
+                out += [self._error(head) for head, last in decisions if not any(self._basis(no) for no in range(head + 1, last + 1))]
+        if require_basis:
+            out += [self._error(first) for first, last in self._blocks() if not any(first <= s <= last for s, _ in sections)]
+        return out
+
+
 def signals(root: Path, base_branch: str, *, warnings: list[dict[str, Any]]) -> md.Signals:
     """ベースブランチの設定の現行のバージョンで、改訂の兆候を数える（本番のブランチの古いバージョンで数えない）。
 
@@ -362,6 +470,60 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     return [jsonl.append_locked(path, row, kind="mvv-signals") for row in rows]
 
 
+# 診断の記録を開くフラグ。リンクをたどらず、読み手の無い FIFO を置かれても待たない（ENXIO で失敗する）
+_PRIVATE_APPEND = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def _append_private(path: Path, line: bytes) -> None:
+    """`path` を所有者だけが読めるファイルに限ってから 1 行足す。限れなければ書かずに `OSError`。
+
+    権限を確かめた記述子へそのまま書く。パスで権限を変えてから開き直すと、その間にファイル名を差し替えられうるためである。
+    """
+    fd = os.open(path, _PRIVATE_APPEND, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+            raise OSError(f"記録が自分の通常のファイルでない: {path}")
+        if st.st_mode & 0o077:
+            os.fchmod(fd, 0o600)
+        view = memoryview(line)
+        while view:
+            view = view[os.write(fd, view) :]
+    finally:
+        os.close(fd)
+
+
+def _append_record(path: Path, row: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    """種類 `kind` の 1 行を核で確かめてから、所有者だけが読めるファイル（0600）へ足し、書いた行を返す（錠は呼び手が持つ）。
+
+    判定の記録（mvv-validation）は判定の理由・レッドライン・指摘の本文を伏せずに持つので、同じホストのほかの OS の利用者に
+    読ませない（#3959）。"""
+    out = internal.write_record(kind, row)
+    _append_private(path, (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
+    return out
+
+
+def _private_lock(path: Path) -> Any:
+    """`path` の親を無ければ 0700 で作り（既にあれば権限を変えない）、記録の錠を返す。"""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return jsonl.lock(path)
+
+
+def record_failure(row: Mapping[str, Any]) -> str:
+    """失敗の診断の記録（表 ndf-files の mvv-gate-failures）へ 1 行足し、行の識別子を返す。書けなければ例外をそのまま投げる。
+
+    識別子は乱数で、PR の値も例外の文も含まない（PR のコメントと承認資料はこの識別子で記録を指す。#3959）。行の `cause` は
+    社内のホスト名や手元のパスを含むので、判定を打った OS の利用者だけが読めるファイル（0600）にだけ書く。親のディレクトリは
+    無ければ 0700 で作り、既にあるディレクトリの権限は変えない。
+    """
+    ident = secrets.token_hex(8)
+    out = internal.write_record("mvv-gate-failure", {**row, "id": ident})
+    path = record_path("mvv-gate-failures")
+    with _private_lock(path):
+        _append_private(path, (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
+    return ident
+
+
 def record_key(text: str) -> str:
     """cross-review の指摘の本文 `text` を見分ける値。起動をまたいで同じ指摘に同じ値になる。
 
@@ -371,32 +533,125 @@ def record_key(text: str) -> str:
     return _sha256(oscillation.finding_key(str(run_log.redact(text))).encode("utf-8"))
 
 
-def record_review(
-    repo: str,
-    pr: int,
-    head: str,
-    snapshot: Snapshot,
-    rows: Sequence[Mapping[str, Any]],
-    clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
-) -> int:
-    """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書き、書いた件数を返す。
+class ReviewTarget(NamedTuple):
+    """`record_review` が書く記録の `repo`（`repo_key` の値）・`pr`・`head`（レビューした PR とその head）。"""
 
-    `repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
-    自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
-    `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
-    書けなければ `OSError`・`MvvError`・`internal.InternalError`。
-    """
-    found = md.judged_findings(rows, snapshot.identity)
-    if not found:
-        return 0
-    shared = {"at": jsonl.now(), "repo": repo, "pr": pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
+    repo: str
+    pr: int
+    head: str
+
+
+class ReviewWrite(NamedTuple):
+    """`record_review` の結果。`written` は足した行の数、`missing` は記録に無いままの必須の行（`redline`・`deferred`）、
+    `cause` は最初の失敗の原因（`failure_cause` の形。失敗が無ければ None）。"""
+
+    written: int
+    missing: tuple[Mapping[str, Any], ...]
+    cause: Optional[str]
+
+
+# 記録の書き込みで止める失敗（どれも外へ出さず `ReviewWrite` にする）
+_WRITE_ERRORS = (OSError, UnicodeDecodeError, internal.InternalError, identity.IdentityError, MvvError)
+
+
+def failure_cause(step: str, exc: BaseException) -> str:
+    """記録を書けなかった原因（`<操作>: <例外の型>: <伏せた文>`）。秘密と認証情報の付いた URL の全体を伏せ、保存先のパスは残す。"""
+    return f"{step}: {type(exc).__name__}: {publish.scrub(str(exc), False).text}"
+
+
+def _review_rows_of(target: ReviewTarget, snapshot: Snapshot, found: Sequence[md.Judged], clean: Any) -> list[dict[str, Any]]:
+    # 同じ秒の中でも、直した時刻（`md.REVIEW_FIXED_AT`）との前後を見分けられるよう、時刻はマイクロ秒まで書く
+    shared = {"at": jsonl.now_exact(), "repo": target.repo, "pr": target.pr, "mvv_version": snapshot.version, "sha256": snapshot.sha256}
     texts = [t for f in found for t in f.free_texts] if clean is not None else []
     shown = dict(zip(texts, clean(texts), strict=True)) if clean is not None and texts else {}
     keyed = [(record_key(str(f.row["text"])), f) for f in found]
     reviews = [{**md.review_entry(f, shown if clean is not None else None), "key": key} for key, f in keyed]
-    wrote = _append_reviews([{**shared, "kind": md.MVV_REVIEW, "head": head, **e} for e in md.one_per_key(reviews)])
-    disputed = {key: str(f.row["id"]) for key, f in keyed if f.outcome == md.REVIEW_DEFERRED}
-    return wrote + _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": key, "id": fid} for key, fid in disputed.items()])
+    # 必須の行を先に書く（後の通常の行の失敗で、必須の行が欠けない）
+    ordered = sorted(md.one_per_key(reviews), key=lambda e: e["outcome"] not in md.REVIEW_REQUIRED)
+    return [{**shared, "kind": md.MVV_REVIEW, "head": target.head, **e} for e in ordered]
+
+
+def unwritable(snapshot: Snapshot, rows: Sequence[Mapping[str, Any]], cause: str) -> ReviewWrite:
+    """記録を書く前に止まった（呼び手が記録の `repo` を解けない）結果。今の MVV で判定した必須の行をすべて欠けとする。"""
+    found = md.judged_findings(rows, snapshot.identity, holds=True)
+    keyed = [{"key": record_key(str(f.row["text"])), "outcome": f.outcome} for f in found]
+    return ReviewWrite(0, tuple(e for e in md.one_per_key(keyed) if e["outcome"] in md.REVIEW_REQUIRED), cause)
+
+
+@dataclass
+class HoldIndex:
+    """同じ PR の、通常の指摘を直した記録で解ける保留のキーの候補（`md.holding_keys` を含む集合）と、それを読み終えた記録の
+    バイト位置 `size`（負なら未確認）。cross-review が状態ファイルに残し、直した通常の指摘が出た起動で、記録の全体を読まずに
+    `size` より後に足された行だけを読んで更新する。候補に無いキーの直しは、記録をロックせずに書かない（#3959）。"""
+
+    pr: int
+    size: int = -1
+    keys: set[str] = field(default_factory=set)
+
+
+def _of_pr_rows(repo: str, pr: int) -> Callable[[Mapping[str, Any]], bool]:
+    return lambda row: row.get("kind") == md.MVV_REVIEW and row.get("repo") == repo and row.get("pr") == pr
+
+
+def _skip_unheld(index: HoldIndex, repo: str, pr: int, resolving: dict[str, str], entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """候補 `index` に無いキーの、直した通常の指摘の記録を `entries` と `resolving` から外す。`index` は `size` より後に足された
+    行だけを読んで更新する（足された行の PR のキーはすべて候補に足す）。確かめられなければ何も外さない。"""
+    if index.size < 0:
+        return entries
+    tail = jsonl.read_rows_after(record_path("mvv-validation"), index.size, kind="mvv-validation", wanted=_of_pr_rows(repo, pr))
+    if tail is None or tail[1]:
+        index.size = -1
+        return entries
+    rows, _, end = tail
+    index.keys |= {str(r["key"]) for r in rows}
+    index.size = end
+    dropped = {k for k in resolving if k not in index.keys}
+    for k in dropped:
+        del resolving[k]
+    return [e for e in entries if not (e["key"] in dropped and _plain_fix_entry(e))]
+
+
+def _plain_fix_entry(entry: Mapping[str, Any]) -> bool:
+    """直した通常の指摘の記録か（項目の無い `fixed`）。"""
+    return entry.get("outcome") == md.REVIEW_FIXED and "item" not in entry
+
+
+def record_review(
+    target: ReviewTarget,
+    snapshot: Snapshot,
+    rows: Sequence[Mapping[str, Any]],
+    clean: Optional[Callable[[Sequence[str]], Sequence[str]]],
+    since: Optional[str] = None,
+    index: Optional[HoldIndex] = None,
+) -> ReviewWrite:
+    """cross-review の指摘 `rows` のうち、MVV `snapshot` で判定したものを MVV の記録へ、見送ったものを改訂の兆候へ書く。
+
+    `target.repo` は記録の `repo`（`repo_key` の値）。呼び手が解決済みのメインディレクトリから渡し、ここでは git を起動しない。
+    自由記述（見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りが引いた項目）は `clean` に 1 回で通して書く。
+    `clean` が None（伏せる所を確かめられなかった）なら、自由記述を書かずに `withheld` を置く。前の起動と同じ結果は書かない。
+    書けなくても例外を出さず、記録に無いままの必須の行と原因を返す（#3959。打ち直すと欠けた行だけを書く）。
+    直した通常の指摘は、直した時刻が `since`（前の起動が記録へ照らし終えた時刻）より後のものだけを、追記の前の読み取りで
+    同じキーの保留と照らす（`md.plain_fix_clears`）。`index` があれば、候補に無いキーの直しは記録をロックせずに外し、追記の前の
+    読み取りで候補を確かな値に更新する。
+    """
+    found = md.judged_findings(rows, snapshot.identity, holds=True, since=since)
+    if not found:
+        return ReviewWrite(0, (), None)
+    entries = _review_rows_of(target, snapshot, found, clean)
+    # 通常の指摘を直した記録は、同じキーの保留が通常の指摘の見送りで、その見送りより後に直したときだけ書く（追記の前の読み取りで照らす）
+    resolving = {record_key(str(f.row["text"])): str(f.row[md.REVIEW_FIXED_AT]) for f in found if f.plain and f.outcome == md.REVIEW_FIXED}
+    if resolving and index is not None:
+        entries = _skip_unheld(index, target.repo, target.pr, resolving, entries)
+        if not entries:
+            return ReviewWrite(0, (), None)
+    wrote, left, cause = _append_reviews(entries, resolving, index)
+    missing = tuple(e for e in left if e["outcome"] in md.REVIEW_REQUIRED)
+    if cause is not None:
+        return ReviewWrite(wrote, missing, cause)
+    shared = {k: entries[0][k] for k in ("at", "repo", "pr", "mvv_version", "sha256")}
+    disputed = {record_key(str(f.row["text"])): str(f.row["id"]) for f in found if f.outcome == md.REVIEW_DEFERRED and not f.plain}
+    more, _, cause = _append_disputed([{**shared, "kind": md.REVIEW_DISPUTED, "key": k, "id": fid} for k, fid in disputed.items()])
+    return ReviewWrite(wrote + more, missing, cause)
 
 
 def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
@@ -404,31 +659,76 @@ def _of_pr(entry: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
     return lambda row: all(row.get(k) == entry[k] for k in ("kind", "repo", "pr"))
 
 
-def _append_missing(kind: str, entries: list[dict[str, Any]], missing: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]) -> int:
-    """記録 `kind` をロックし、`entries` と同じ種類・リポジトリ・PR の記録から `missing` が選んだ記録だけを足して、足した件数を返す。"""
-    path = record_path(kind)
-    with jsonl.lock(path):
-        held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
-        new = missing(held)
-        for e in new:
-            jsonl.append(path, e, kind=kind)
-    return len(new)
+def _append_missing(
+    kind: str,
+    entries: list[dict[str, Any]],
+    missing: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
+    done_hook: Optional[Callable[[Path], None]] = None,
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """記録 `kind` をロックし、`entries` と同じ種類・リポジトリ・PR の記録から `missing` が選んだ記録だけを足す。
+
+    足す行を確定してから 1 行ずつ追記する。返すのは足した件数・記録に無いままの行・失敗の原因（無ければ None）。追記の前に
+    失敗したら、どの行が記録にあるか分からないので `entries` のすべてを記録に無い行とする。`done_hook` は、追記し終えた後に
+    ロックの中で記録のパスを渡して呼ぶ。
+    """
+    step, new, done = "保存先の決定", list(entries), 0
+    where = "" if kind == "mvv-validation" else f"{kind}.jsonl の"
+    try:
+        path = record_path(kind)
+        step = "ロックの取得"
+        with _private_lock(path):
+            step = "既存の行の読み取り"
+            held, _ = jsonl.read_rows(path, kind=kind, wanted=_of_pr(entries[0]))
+            new = missing(held)
+            step = "追記"
+            for e in new:
+                _append_record(path, e, kind)
+                done += 1
+            if done_hook is not None:
+                done_hook(path)
+    except _WRITE_ERRORS as exc:
+        return done, new[done:], failure_cause(where + step, exc)
+    return done, [], None
 
 
-def _append_reviews(entries: list[dict[str, Any]]) -> int:
-    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足し、足した件数を返す。"""
+def _append_reviews(
+    entries: list[dict[str, Any]], resolving: Mapping[str, str], index: Optional[HoldIndex] = None
+) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """指摘の記録のうち、同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）と違うものを足す。直した通常の指摘の記録で
+    キーが `resolving`（キー → 直した時刻）にあるものは、同じキーの保留を解けるときだけ足す（`md.plain_fix_clears`）。
+    レッドライン・見送りなど、ほかの終わり方の記録には照らさない。`index` は読んだ記録から確かな候補に更新する。"""
+    left: set[str] = set()
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        last = {r["key"]: r for r in sorted(held, key=lambda r: internal.epoch(r["at"]))}
-        return [e for e in entries if not md.review_recorded(last.get(e["key"]), e)]
+        ordered = sorted(held, key=lambda r: internal.epoch(r["at"]))
+        # 足す行のキーは記録に無くても空の並びを持つ（空の並びは保留の候補にならない）
+        seqs: dict[str, list[dict[str, Any]]] = {e["key"]: [] for e in entries}
+        for r in ordered:
+            seqs.setdefault(r["key"], []).append(r)
 
-    return _append_missing("mvv-validation", entries, missing)
+        def kept(e: Mapping[str, Any]) -> bool:
+            if e["key"] not in resolving or not _plain_fix_entry(e):
+                return True
+            return md.plain_fix_clears(seqs[e["key"]], resolving[e["key"]])
+
+        wanted = [e for e in entries if kept(e)]
+        # 並びの末尾が同じキーの最後の記録（時刻の順。同じ時刻なら追記の順）
+        new = [e for e in wanted if not md.review_recorded(seqs[e["key"]][-1] if seqs[e["key"]] else None, e)]
+        cleared = {e["key"] for e in new if e["key"] in resolving and _plain_fix_entry(e)}
+        left.update(md.holding_keys(seqs) - cleared)
+        return new
+
+    def done_hook(path: Path) -> None:
+        if index is not None:
+            index.size, index.keys = path.stat().st_size, set(left)
+
+    return _append_missing("mvv-validation", entries, missing, done_hook)
 
 
-def _append_disputed(entries: list[dict[str, Any]]) -> int:
-    """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足し、足した件数を返す。"""
+def _append_disputed(entries: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], Optional[str]]:
+    """見送りの兆候のうち、同じ MVV で同じキーの兆候がまだ無いものを足す。"""
     if not entries:
-        return 0
+        return 0, [], None
 
     def missing(held: list[dict[str, Any]]) -> list[dict[str, Any]]:
         known = {(r.get("key"), r["mvv_version"], r.get("sha256")) for r in held}
@@ -437,38 +737,113 @@ def _append_disputed(entries: list[dict[str, Any]]) -> int:
     return _append_missing("mvv-signals", entries, missing)
 
 
-def mvv_validate_sprint(
-    root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True, *, warnings: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """スプリント MVV を MVV 判定し、記録に足した行を返す。
+def review_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """`validation_rows` の行のうち、cross-review の指摘の記録（種類 `mvv-review`）だけ（#3959）。"""
+    return [dict(r) for r in rows if r.get("kind") == md.MVV_REVIEW]
 
-    `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。記録が無い・壊れた行を
-    含んでも止まらず LLM で判定し、読めない行は `warnings` へ足す。同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。
-    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
+
+def validation_rows(root: Path) -> tuple[list[dict[str, Any]], list[jsonl.Broken]]:
+    """記録 `mvv-validation.jsonl` のすべての種類の行と、読めずに除いた行（判定 1 回につき 1 回だけ読む。#3959）。
+
+    記録がまだ作られていない（保存先のパスに何も無い）ときだけ空を返す。パスに通常のファイルでないものがあれば `OSError`。
+    読めなければ `OSError`・`UnicodeDecodeError`・`internal.InternalError`（新しい形式のバージョンの行）をそのまま投げる。
+    `root` は判定するリポジトリ（記録の保存先はリポジトリによらない）。
+    """
+    del root
+    path = record_path("mvv-validation")
+    if not os.path.lexists(path):
+        return [], []
+    if not path.is_file():
+        raise OSError(f"MVV の記録の保存先がファイルでない: {path}")
+    return jsonl.read_rows(path, kind="mvv-validation")
+
+
+def mvv_validate_sprint(
+    root: Path,
+    inputs: Mapping[str, str],
+    judge: Judge,
+    reuse: bool = True,
+    rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    broken: Sequence[jsonl.Broken] = (),
+) -> tuple[dict[str, Any], Optional[str]]:
+    """スプリント MVV を MVV 判定し、記録に足した行と、足せなかったときの原因（足せたら None）を返す。
+
+    `reuse` なら、同じ MVV 判定の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。再利用の候補は読み済みの行 `rows`
+    （同じ読み取りで除いた行 `broken` も渡す）から選び、`rows` が None のときだけ記録を読む。
+    同じ入力の判定かもしれない読めない行が後にある判定は再利用しない。`reuse` が偽なら記録を読まない。
+    `project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。追記の `OSError` は外へ出さず、原因として返す。
     """
     key = md.mvv_validation_key(inputs)
     path = record_path("mvv-validation")
     repo = repo_key(root)
-    rows, broken = jsonl.read_rows_warned(path, kind="mvv-validation", warnings=warnings)
-    origin = md.reusable(rows, key, [(b.before, b.raw) for b in broken]) if reuse else None
+    origin = None
+    if reuse:
+        if rows is None:
+            rows, broken = jsonl.read_rows(path, kind="mvv-validation")
+        origin = md.reusable(list(rows), key, [(b.before, b.raw) for b in broken])
     if origin is not None:
         row = md.reuse_row(origin, jsonl.now(), repo)
     else:
         verdict, cost = judge(inputs)
         row = md.judged_row(key, verdict, jsonl.now(), repo, cost)
-    return jsonl.append_locked(path, row, kind="mvv-validation")
+    try:
+        with _private_lock(path):
+            return _append_record(path, row, "mvv-validation"), None
+    except OSError as exc:
+        return row, str(exc)
 
 
-def pr_files(hub: GitHub, number: int) -> list[dict[str, Any]]:
-    """PR の変えたファイル（GitHub の files の行。`github.list-pages` ページまで）。超えれば `GitHubError`。"""
-    pages = int(limits.value("github.list-pages", "count"))
-    out: list[dict[str, Any]] = []
-    for page in range(1, pages + 1):
-        got = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
-        out += got
-        if len(got) < PER_PAGE:
-            return out
-    raise GitHubError(f"PR #{number} の変更ファイルが {pages} ページを超えた（github.list-pages）")
+# 比較の API が `files` を返す上限の件数（GitHub REST API の「Working with large comparisons」）
+COMPARE_FILES_CAP = 300
+# 比較の API を読む権限が無いときの HTTP の状態。非公開のリポジトリで権限が無いと 404、明示の拒否は 403（手元の git で読む）
+COMPARE_DENIED = (403, 404)
+# 手元の git で比較を読み直すときの差分の形（手元の Git の設定で出力の形が変わらないよう固定する。#3959）
+LOCAL_DIFF = (
+    "--merge-base", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
+    "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/", "-M",
+)  # fmt: skip
+
+
+def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:
+    """コミット `base` と `head`（どちらも SHA）の 3 点の比較で変えたファイル（GitHub の files の行の形）。
+
+    比較の REST を 1 回打つ。ページを指定すると `files` は 1 ページ目に比較の全体の分（`COMPARE_FILES_CAP` 件まで）が載り、
+    コミットの一覧だけがページで区切られるので、`page=1&per_page=1` で使わないコミットの一覧を 1 件に抑える。
+    `files` が `COMPARE_FILES_CAP` 件に届いたときと、比較の API の認証情報に権限が無い（`COMPARE_DENIED`。非公開のリポジトリで
+    Contents の読み取りを持たない API の認証情報。`compare_denied`）ときは、head を取得して同じ組を手元の git（`--merge-base`）で読み直す。
+    基点を SHA で固定するので、読む間にマージ先が進んでも差分は変わらない。
+    比較を読めなければ `GitHubError`、手元で読めなければ `GitError`・`mvv_material_decide.DiffError`。
+    """
+    try:
+        got = hub.rest("GET", f"/repos/{hub.repo}/compare/{base}...{head}", params={"page": 1, "per_page": 1})
+    except GitHubError as exc:
+        if not compare_denied(exc):
+            raise
+        return _local_files(g, remote, base, head)
+    files = got.get("files") if isinstance(got, dict) else None
+    if not isinstance(files, list):
+        raise GitHubError(f"比較 {base}...{head} の応答に files が無い")
+    if len(files) < COMPARE_FILES_CAP:
+        return files
+    return _local_files(g, remote, base, head)
+
+
+def compare_denied(exc: GitHubError) -> bool:
+    """比較の API の失敗が、権限が無いことによる拒否か（手元の git で読み直してよいか）。
+
+    状態が `COMPARE_DENIED` でも、GitHub のアダプターがレート制限と識別した失敗（`quota`・`secondary`・`retry_after` のどれかを
+    持つ）は拒否でない。手元の git へ切り替えると、上限に当たるたびに `git fetch` と `git diff` が増えるので、そのまま投げる。
+    """
+    limited = exc.quota is not None or exc.secondary or exc.retry_after is not None
+    return exc.status in COMPARE_DENIED and not limited
+
+
+def _local_files(g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:
+    """head を取得し、`base` と `head` の組を手元の git で読む（`compare_files` の手元の経路）。"""
+    done = g.fetch(remote, head)
+    if done.returncode != 0:
+        raise git_mod.GitError(f"{remote} から {head} を取得できない: {done.stderr.strip()}")
+    return mm.diff_rows(g.diff_between(base, head, *LOCAL_DIFF))
 
 
 def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
@@ -477,11 +852,9 @@ def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
                     f["status"] == "renamed") for f in rows]  # fmt: skip
 
 
-def pr_facts(
-    hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None, pull: Optional[Pull] = None
-) -> MvvFacts:
+def pr_facts(hub: GitHub, number: int, base: MvvFacts, rows: list[dict[str, Any]], pull: Optional[Pull] = None) -> MvvFacts:
     """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。
 
-    `rows` は読み済みの変えたファイル（`pr_files` の結果）、`pull` は読み済みの PR。無ければここで読む。"""
+    `rows` は読み済みの変えたファイル（`compare_files` の結果）、`pull` は読み済みの PR（無ければここで読む）。"""
     body = (pull if pull is not None else hub.pull(number)).body
-    return mm.facts_from_pr(base, body, changed_of(rows if rows is not None else pr_files(hub, number)))
+    return mm.facts_from_pr(base, body, changed_of(rows))

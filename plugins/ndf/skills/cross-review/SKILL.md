@@ -58,7 +58,7 @@ PR を**読むだけの相手役（既定は codex と kiro）**にレビュー�
 反する指摘か根拠の行の誤りが残ったまま終わるか、根拠の行を最後のコミットで確かめられなければ、`mvv_unresolved` で止まる。
 
 /goal の引数として、または development-workflow の工程として呼ばれた場合は、`status: ok` になるまで同じコマンドを打ち直す。
-  * `work_stopped`・`mvv_unresolved`・`precondition`・`invalid` で止まったら異常終了とする
+  * `work_stopped`・`mvv_unresolved`・`mvv_record_failed`・`precondition`・`invalid` で止まったら異常終了とする
 
 詳細は `docs/` 配下に分割している。収束ループは `ndf cross-review run` が 1 回の起動で回す:
 
@@ -137,6 +137,7 @@ ndf cross-review run --pr <PR> --state-dir <状態の保存先> --base <マー�
 | `stopped`・`incomplete` | 未解決の指摘・扱わなかった足すべき内容・理由の無い見送りが残る（`gaps`） | `gaps` を報告する。続けるなら同じコマンドを打ち直す |
 | `stopped`・`mvv_unresolved` | 上限のラウンドまで回しても、MVV に反する指摘か根拠の行の誤りが残った・根拠の行を最後のコミットで確かめられなかった（欠けは `outputs.gaps`。理由は `warnings`） | 次の工程へ進まない。残った指摘と反する項目を報告して人へ戻す。PR を直した後に同じコマンドを打ち直す |
 | `stopped`・`work_stopped` | 1 ラウンドも終えずに誤りで終わった・前の起動の修正を送れない・一部の席が結果を返さなかった（`incomplete_reviewers`。claude の席が結果を返さない・埋めた claude も結果を返さない。席ごとの直し方は `warnings`） | `summary` と `warnings` を報告して止まる |
+| `stopped`・`mvv_record_failed` | 承認ゲートの判定に要るレビューの記録の行（`redline`・`deferred`）を書けなかった。記録が無いと、人の承認が必要な PR でも設計承認ゲートを自動で省くおそれがあるため、どの終わり方より優先してレビューを停止する（本来の終わり方は `summary`、注意は `warnings`、原因は状態ファイルの `mvv_record_error`） | 記録の保存先を直して同じコマンドを打ち直す |
 | `stopped`・`precondition` / `invalid` | worktree が登録されていない・同期で衝突した・相手役の名指しの誤り・`.ndf/runtimes.json` の外の相手役・`.ndf/review.json` が `version: 1` でない・マージ先のブランチの MVV を読めない（本文が承認の記録と合わないときも同じ）・席が誰も差分を読めなかった（未ログイン・起動やサンドボックスの失敗。席ごとの直し方は `cause.detail`）・始める前の確かめで修正担当か、1 者だけ名指した相手役が断られた・1 者だけ名指した相手役が読めなかった | `summary` を報告して止まる。原因を取り除いて打ち直す |
 
 **修正はメインで書かない。** 修正担当（claude）は `run` が起動し、送るのも `run` が行う（[docs/02](docs/02-fix-and-rotation.md)）。

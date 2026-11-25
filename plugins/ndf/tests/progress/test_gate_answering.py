@@ -173,7 +173,7 @@ def _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it(repo, s
     asking.write_material(st.root, v, replace(q, target=_target(head=moved)))
     again = asking.read_presented(st.root, q)
     assert again.head == moved
-    assert moved in asking.material_path(st.root, q).read_text(encoding="utf-8")
+    assert moved in asking.material_path(st.root, replace(q, target=again)).read_text(encoding="utf-8")
     a = replace(a, seen=gate.Target(head=moved, presentation=again.presentation))
     gate.answer(st, q.machine_id, a, lambda _q: _target(head=moved), posts)
     assert [r.target.head for r in posts.rows] == [moved]

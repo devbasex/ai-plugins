@@ -64,7 +64,7 @@ WAITING_FLAG = "--waiting"
 # 承認待ちのステップの提示の写しの欄（提示の識別子・承認資料のパス・本番へ反映され得るか）
 SHOWN_KEYS = ("presented_id", "presentation_path", "production")
 PRESENTED_FLAG = "--presented"
-# 旧い形の目印で、同じ回の提示を確かめられなかった印（`read_marker` が足す。目印のファイルには書かない）
+# 旧い形の目印で、同じ回の提示を確かめられなかったことを示すキー（`read_marker` が足す。目印のファイルには書かない）
 UNCONFIRMED = "unconfirmed"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
@@ -142,7 +142,7 @@ def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     return marker
 
 
-def unconfirmed(marker: dict[str, Any]) -> bool:
+def is_unconfirmed(marker: dict[str, Any]) -> bool:
     """旧い形の目印で、待ちと同じ回が書いた提示を確かめられなかったか（`read_marker`）。"""
     return marker.get(UNCONFIRMED) is True
 
@@ -476,12 +476,12 @@ def _unconfirmed_stop(inv: Invocation, baseline: dict[str, Any]) -> dict[str, An
     """同じ回の提示を確かめられない旧い形の待ち（`unconfirmed`）への回答を、記録も送信もせずに止める結果。
 
     待ちは解かず、ステップも打ち直さない。プランのステップは任意のコマンドで、資料だけを作り直す一般の経路が無く、
-    打ち直すとマージのステップが資料を出す前にマージまで進み得る。そのため打ち直しのコマンドは示さず、止まる理由だけを返す。
-    待ちの照合（`--waiting`）は先に済ませてある。
+    打ち直すとマージのステップが資料を出す前にマージまで進み得る。そのため打ち直しのコマンドは示さず、停止理由だけを返す。
+    待ちの確かめ（`--waiting`）は先に済ませてある。
     """
     step = str(baseline["step"])
     detail = (
-        f"{inv.plan.name} のステップ {step} の待ちは更新前の版が残したもので、示した資料がこの待ちのものか確かめられないため、"
+        f"{inv.plan.name} のステップ {step} の待ちは更新前のバージョンが残したもので、示した資料がこの待ちのものか確かめられないため、"
         "回答を記録しない。資料だけを作り直す経路が無く、ステップを打ち直すとマージなどの操作が資料を出す前に進み得るので、"
         "打ち直しは案内しない。承認の対象を人が確かめ、プランをどう進めるかを決める"
     )
@@ -499,7 +499,7 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
     if mismatch is not None:
         detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
         return result.stopped(TOOL, "approval_stale", detail)
-    if unconfirmed(baseline):
+    if is_unconfirmed(baseline):
         return _unconfirmed_stop(inv, baseline)
     try:
         _record_answer(inv, baseline, reply.answer, reply.by)

@@ -71,9 +71,11 @@ def test_scrub_on_a_private_target_drops_only_secrets() -> None:
     assert got.dropped == {"secret": 1}
 
 
-def test_repo_refs_finds_urls_and_short_refs_but_not_anchors() -> None:
+def test_repo_refs_finds_urls_and_short_refs_but_not_anchors_or_other_hosts() -> None:
     text = f"https://github.com/{PRIVATE_REPO}/pull/1) と {PUBLIC_REPO}#2、tools/app#3 でなく docs/x.md#見出し"
     assert publish.repo_refs(text) == {PRIVATE_REPO, PUBLIC_REPO, "tools/app"}
+    # SSH の利用者名とほかのホストは参照でない
+    assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
 
 
 @pytest.mark.parametrize(
@@ -108,15 +110,156 @@ def test_a_longer_repo_name_is_not_taken_for_its_prefix() -> None:
     assert publish.repo_refs(f"https://github.com/{PRIVATE_REPO}.github を見た") == {f"{PRIVATE_REPO}.github"}
 
 
-def test_private_refs_are_dropped_before_secrets_are_masked(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 秘密の伏せ字が URL の利用者の部分を書き換えても、非公開の参照は原文から先に落ちている
-    monkeypatch.setattr(publish.run_log, "redact", lambda t: t.replace("git@", "[REDACTED]@"))
+def test_a_private_ssh_url_is_dropped_whole_as_a_reference() -> None:
+    # 秘密の範囲も参照の範囲も原文の上で求めるので、SSH の URL の参照は原文のまま一致して伏せる
     got = publish.scrub(f"ssh://git@github.com/{PRIVATE_REPO}.git を見た", True, {PRIVATE_REPO})
     assert got.text == f"{publish.PRIVATE_REF_TEXT} を見た" and got.dropped == {"private_ref": 1}
 
 
-def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:
-    assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
+@pytest.mark.parametrize("public", [True, False])
+def test_a_secret_crossing_the_end_of_a_reference_leaves_no_fragment(monkeypatch: pytest.MonkeyPatch, public: bool) -> None:
+    # #3959 Task 9: 秘密の前半が参照の中、後半が参照の外にあっても、秘密のどの断片も残さない
+    secret = "zz-secret-tail-9876"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    text = f"見た: https://github.com/{PRIVATE_REPO}/issues/1{secret} の件"
+    got = publish.scrub(text, public, {PRIVATE_REPO})
+    assert all(secret[i : i + 4] not in got.text for i in range(len(secret) - 3))
+    assert got.dropped.get("secret") == 1 and PRIVATE_REPO not in got.text
+
+
+@pytest.mark.parametrize("public", [True, False])
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://x-access-token:{TOKEN}@github.com/{PRIVATE_REPO}.git",
+        f"https://***@github.com/{PRIVATE_REPO}",
+        f"https://git@github.com/{PUBLIC_REPO}",
+        f"HTTPS://user:pa55@GitHub.COM/{PRIVATE_REPO}",
+        f"Ssh://deploy@WWW.github.com/{PRIVATE_REPO}.git",
+    ],
+)
+def test_a_url_with_credentials_is_masked_whole_on_any_target(url: str, public: bool) -> None:
+    # 認証情報の付いた URL は、書き先の公開範囲によらず、所有者名とリポジトリ名を含む URL の全体を秘密の伏せ字にする
+    got = publish.scrub(f"取得元: {url} だった", public, set())
+    assert got.text == f"取得元: {publish.run_log.MASK} だった" and got.dropped == {"secret": 1}
+
+
+def test_the_public_ssh_url_keeps_its_owner_and_repo() -> None:
+    # 固定の SSH の利用者名 git@ は秘密でない。公開のリポジトリの SSH の URL は今どおり残す
+    text = f"ssh://git@github.com/{PUBLIC_REPO}.git"
+    assert publish.scrub(text, True, set()) == (text, {})
+    assert publish.repo_refs(text) == {PUBLIC_REPO}
+
+
+class StubHub:
+    """公開範囲の照会（`visibilities`）と書き込み（`rest`）の引数を残す偽物。HTTP の層を通さない。"""
+
+    def __init__(self, repo: str, visibility: dict[str, str]) -> None:
+        self.repo, self.visibility = repo, visibility
+        self.asked: list[list[str]] = []
+        self.writes: list[dict] = []
+
+    def visibilities(self, repos) -> dict[str, str]:
+        self.asked.append(sorted(repos))
+        return {r: self.visibility.get(r, "UNKNOWN") for r in repos}
+
+    def rest(self, method: str, path: str, payload: dict) -> dict:
+        self.writes.append(payload)
+        return {"number": 9, "html_url": "https://github.com/x/y/issues/9"}
+
+
+def test_references_overlapping_secrets_are_not_looked_up_and_are_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 秘密を含む参照は公開範囲の照会へ送らない。照会するのは秘密と重ならない参照だけ
+    secret = "zz-owner-secret-42"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    stub = StubHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", "other/public": "PUBLIC"})
+    body = (
+        f"{secret}/repo#1 と ssh://{secret}@github.com/{PUBLIC_REPO} と https://x-access-token:{TOKEN}@github.com/acme/hidden.git"
+        " と ssh://git@github.com/other/public.git"
+    )
+    publish.Publisher(stub, ACCOUNTS).comment(4, body)  # type: ignore[arg-type]
+    sent = stub.writes[0]["body"]
+    assert secret not in sent and TOKEN not in sent and "acme/hidden" not in sent and "ssh://git@github.com/other/public.git" in sent
+    assert stub.asked == [[PUBLIC_REPO], ["other/public"]]
+
+
+def test_assume_public_scrubs_without_reading_the_target_visibility() -> None:
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PRIVATE"})
+    (text,), dropped = publish.Publisher(stub, ACCOUNTS).guarded("/home/alice-local と alice@example.co.jp", assume_public=True)  # type: ignore[arg-type]
+    assert text == f"{publish.HOME_TEXT} と {publish.EMAIL_TEXT}" and dropped == {"home": 1, "email": 1}
+    assert stub.asked == []
+
+
+SELF_REFS = (f"{PRIVATE_REPO}#12", f"https://github.com/{PRIVATE_REPO}/pull/34")
+
+
+@pytest.mark.parametrize(("visibility", "kept"), [("PRIVATE", False), ("PUBLIC", True)])
+def test_assume_public_looks_up_references_to_the_target_itself(visibility: str, kept: bool) -> None:
+    # 結果の受け手は対象のリポジトリを読めるとは限らないので、自身への参照も公開と確かめられたときだけ残す
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: visibility})
+    texts, _ = publish.Publisher(stub, ACCOUNTS).guarded(*SELF_REFS, assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [[PRIVATE_REPO]]
+    if kept:
+        assert texts == list(SELF_REFS)
+    else:
+        assert texts == [publish.PRIVATE_REF_TEXT] * 2 and all("#12" not in t and "34" not in t for t in texts)
+
+
+def test_without_assume_public_references_to_the_target_itself_are_kept_unasked() -> None:
+    # PR のコメントの経路（書き先そのものが閲覧の範囲を決める）は、自身への参照を照会せずに残す
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PUBLIC"})
+    text = f"{SELF_REFS[0]} と {SELF_REFS[1]} と {PRIVATE_REPO}"
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(text)  # type: ignore[arg-type]
+    assert got == text and stub.asked == [[PRIVATE_REPO]]
+
+
+BARE_HIDDEN = [
+    (f"{PRIVATE_REPO}", "{}"),
+    (PRIVATE_REPO.upper(), "{}"),
+    (f"Fix this in {PRIVATE_REPO}.", "Fix this in {}."),
+    (f"{PRIVATE_REPO}、", "{}、"),
+    (f"({PRIVATE_REPO})", "({})"),
+    (f"{PRIVATE_REPO}/", "{}/"),
+    (f"{PRIVATE_REPO}.git", "{}"),
+]
+BARE_KEPT = [f"{PRIVATE_REPO}-2", f"{PRIVATE_REPO}.js", f"{PRIVATE_REPO}/sub", f"other-{PRIVATE_REPO}", f"z{PRIVATE_REPO}"]
+
+
+@pytest.mark.parametrize(("visibility", "hidden"), [("PRIVATE", True), ("PUBLIC", False)])
+def test_assume_public_hides_the_bare_full_name_of_a_private_target(visibility: str, hidden: bool) -> None:
+    # 単独の完全名は repo_refs が拾わない。照会の候補に対象のリポジトリを入れ、公開でなければ名前の範囲だけを伏せる
+    stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: visibility})
+    texts = [given for given, _ in BARE_HIDDEN] + BARE_KEPT
+    got, _ = publish.Publisher(stub, ACCOUNTS).guarded(*texts, assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [[PRIVATE_REPO]]
+    expected = [shape.format(publish.PRIVATE_REF_TEXT) for _, shape in BARE_HIDDEN] if hidden else [g for g, _ in BARE_HIDDEN]
+    assert got == expected + BARE_KEPT
+
+
+def test_assume_public_does_not_look_up_a_bare_name_holding_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 単独の完全名も、URL・番号付きの参照と同じく、秘密を含めば公開範囲の照会へ送らずに伏せる
+    secret = "zz-secret-name-42"
+    monkeypatch.setenv("NDF_TEST_TOKEN", secret)
+    stub = StubHub(f"acme/{secret}", {f"acme/{secret}": "PUBLIC"})
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(f"直す先は acme/{secret} だ", assume_public=True)  # type: ignore[arg-type]
+    assert stub.asked == [] and secret not in got and "acme" not in got
+
+
+def test_spellings_of_one_repository_are_looked_up_once() -> None:
+    # 大文字・小文字の違う同じリポジトリの参照は、照会の前にまとめて 1 件だけ問う。どの表記も伏せる
+    stub = StubHub(PRIVATE_REPO, {})
+    text = f"{PRIVATE_REPO.upper()}#1 と https://github.com/{PRIVATE_REPO.title()}/pull/2 と {PRIVATE_REPO}"
+    (got,), _ = publish.Publisher(stub, ACCOUNTS).guarded(text, assume_public=True)  # type: ignore[arg-type]
+    assert len(stub.asked) == 1 and len(stub.asked[0]) == 1 and stub.asked[0][0].lower() == PRIVATE_REPO
+    assert got == f"{publish.PRIVATE_REF_TEXT} と {publish.PRIVATE_REF_TEXT} と {publish.PRIVATE_REF_TEXT}"
+
+
+def test_the_bare_name_pattern_matches_only_the_name_and_its_git_suffix() -> None:
+    pattern = publish._bare_repo(PRIVATE_REPO)
+    assert [m.group() for m in pattern.finditer(f"{PRIVATE_REPO}.git と {PRIVATE_REPO}. と {PRIVATE_REPO}.js")] == [
+        f"{PRIVATE_REPO}.git",
+        PRIVATE_REPO,
+    ]
 
 
 def test_publisher_reads_visibilities_once_and_drops_private_refs_on_a_public_target() -> None:

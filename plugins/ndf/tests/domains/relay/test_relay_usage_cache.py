@@ -42,19 +42,6 @@ def test_i6_each_account_reads_its_own_record(tmp_path):
     assert accounts.windows_of(tmp_path, "work1", "g1") == {"five_hour": (15.0, LATER)}
 
 
-def test_an_account_seen_at_the_limit_is_limited_until_a_later_fetch(tmp_path):
-    # 上限を見た後の取得がまだ成功していなければ、記録の窓が 55% でも上限として読む（同じ読みの fetched_at で決める）
-    _record(tmp_path, "team", "g1", {"five_hour": {"percent": 55.0, "resets_at": LATER}})
-    gens = {"team": "g1"}
-    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g1", NOW + 1)})[0] == [Usage("team", 55.0, 55.0, None, None, True)]
-    # 見た時刻より後の取得が届けば、記録だけで決める
-    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g1", NOW - 1)})[0] == [Usage("team", 55.0, 55.0, None, None, False)]
-    # 違う世代で見た上限は効かせない
-    assert accounts.usage_rows(tmp_path, NOW, gens, {"team": ("g0", NOW + 1)})[0] == [Usage("team", 55.0, 55.0, None, None, False)]
-    # 記録が無ければ、使用率の分からない上限の行で返す
-    assert accounts.usage_rows(tmp_path, NOW, {"work9": "g9"}, {"work9": ("g9", NOW)})[0] == [Usage("work9", None, None, None, None, True)]
-
-
 def test_3864_3_reset_windows_read_as_zero_and_full_windows_are_limited(tmp_path):
     gens = {"work1": "g1", "work2": "g2", "work3": "g3", "work4": "g4", "work5": "g5"}
     past = {"five_hour": {"percent": 100.0, "resets_at": NOW - 1}, "seven_day": {"percent": 40.0, "resets_at": NOW}}
@@ -90,7 +77,7 @@ def test_spend_limit_reached_is_limited(tmp_path):
     _record(tmp_path, "work1", "g1", {"five_hour": {"percent": 30.0, "resets_at": LATER}}, spend_limit_reached=True)
     _record(tmp_path, "work2", "g2", {}, spend_limit_reached=True)  # 窓が無くても使用率の分からない上限の行
     _record(tmp_path, "work3", "g3", {"five_hour": {"percent": 30.0, "resets_at": LATER}}, spend_limit_reached=False)
-    rows, spent = accounts.usage_rows(tmp_path, NOW, gens, {})
+    rows, spent = accounts.usage_rows(tmp_path, NOW, gens)
     assert rows == [
         Usage("work1", 30.0, 30.0, None, None, True),
         Usage("work2", None, None, None, None, True),
@@ -98,7 +85,7 @@ def test_spend_limit_reached_is_limited(tmp_path):
     ]
     assert spent == frozenset({"work1", "work2"})
     # 世代の違う記録の上限の到達は読まない
-    assert accounts.usage_rows(tmp_path, NOW, {"work1": "g9"}, {}) == ([], frozenset())
+    assert accounts.usage_rows(tmp_path, NOW, {"work1": "g9"}) == ([], frozenset())
 
 
 def test_i7_unreadable_records_read_as_unknown(tmp_path):

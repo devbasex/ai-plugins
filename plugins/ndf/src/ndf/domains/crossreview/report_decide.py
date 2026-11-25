@@ -89,52 +89,17 @@ def _same(texts: Sequence[str]) -> Sequence[str]:
     return texts
 
 
-# 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
-WITHHELD = "（参照先の公開範囲を確かめられず伏せた）"
-
-
-def _query_failure(exc: Exception) -> str:
-    """伏せる処理の失敗の原因。例外の文は、照会した先のリポジトリの名前を含みうるので使わない（GitHub の失敗は
-    `adapters.github.GitHubError` の欄だけから決める）。"""
-    if not all(hasattr(exc, k) for k in ("quota", "unreached", "status")):
-        return f"照会の失敗（{type(exc).__name__}）"
-    if exc.quota:
-        return "レート制限"
-    return "通信の障害" if exc.unreached else f"GitHub が照会を断った（HTTP {exc.status}）"
-
-
-class Once:
-    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ。失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因
-    （無ければ None）。"""
-
-    def __init__(self, clean: Cleaner) -> None:
-        self._clean = clean
-        self._done: dict[str, str] = {}
-        self.failure: Optional[str] = None
-
-    def __call__(self, texts: Sequence[str]) -> list[str]:
-        new = [t for t in dict.fromkeys(texts) if t not in self._done]
-        if new and self.failure is None:
-            try:
-                self._done |= dict(zip(new, self._clean(new), strict=True))
-            except Exception as exc:  # noqa: BLE001 ネットワーク: 照会できなくてもレビューの結果は返し、自由記述を伏せる
-                self.failure = _query_failure(exc)
-        return [WITHHELD if self.failure is not None else self._done[t] for t in texts]
-
-
-def once(clean: Cleaner) -> Once:
-    """レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み。"""
-    return Once(clean)
-
-
 def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str, clean: Cleaner = _same) -> dict[str, Any]:
     """結果 JSON の `outputs.mvv`: MVV `snapshot` で判定した指摘の一覧。`head` はレビューしたコミット。
 
     見送りの理由・必ず人の承認が要る操作の指摘の本文・根拠の記述の誤りのパスと引いた項目は、`clean` に 1 回で通して出す。
+    同じ 1 回に、記録だけに書く通常の指摘の見送りの理由も通す（`clean` が `publish.Once` なら、記録の側は照会し直さない）。
     """
-    found = mvv_decide.judged_findings(rows, snapshot.identity)
+    # 記録（`mvv.record_review`）だけに書く通常の指摘の自由記述も同じ 1 回で伏せ、公開範囲の照会を 1 回にまとめる
+    everything = mvv_decide.judged_findings(rows, snapshot.identity, holds=True)
+    found = [f for f in everything if not f.plain]
     cited = [f.row for f in found if f.item is None]
-    texts = [t for f in found for t in f.free_texts]
+    texts = [t for f in everything for t in f.free_texts]
     texts += [t for row in cited for t in (row.get("path"), *store.list_of(row, "unknown")) if isinstance(t, str)]
     shown: dict[Any, str] = dict(zip(texts, clean(texts), strict=True)) if texts else {}
     out: dict[str, Any] = {"version": snapshot.version, "sha256": snapshot.sha256, "head": head}

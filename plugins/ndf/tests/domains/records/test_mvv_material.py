@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_material_decide as mm
@@ -103,13 +102,19 @@ class _Hub:
     def pull(self, number: int) -> SimpleNamespace:
         return SimpleNamespace(body=self.body)
 
-    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
-        assert path == "/repos/o/r/pulls/3/files"
-        return [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}, {"filename": "c.md", "status": "added"}]
-
 
 def test_pr_facts_reads_the_body_and_changed_files_of_the_pr() -> None:
     body = "## テスト\n\n通った\n\n## 出し直しの指摘への対応\n\n| a | 「テスト」のセクションに記載した |\n"
-    facts = mvv.pr_facts(_Hub(body), 3, BASE)  # type: ignore[arg-type]
+    rows = [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}, {"filename": "c.md", "status": "added"}]
+    facts = mvv.pr_facts(_Hub(body), 3, BASE, rows)  # type: ignore[arg-type]
     assert facts.claimed == ("テスト",) and check_claimed_sections(facts) is None
     assert facts.changed == (Changed("b.py", "a.py", True), Changed("c.md", None, False))
+
+
+def test_the_gate_outcome_carries_the_judged_pr_and_a_stop_before_the_pr_has_none() -> None:
+    # 承認資料が判定の PR を質問の PR と照らすため、判定した PR の番号を出力に持つ（#3959）
+    judged = mm.gate_outcome("design", {"verdict": "follow"}, False, [], pull=(7, "h1"))
+    assert (judged["pr"], judged["head"]) == (7, "h1")
+    stopped = mm.stop_outcome("design", "pr_moved", ["x"], pull=(7, "h1"))
+    assert (stopped["pr"], stopped["head"], stopped["stopped_by"]["kind"]) == (7, "h1", "pr_moved")
+    assert "pr" not in mm.stop_outcome("design", "no_pr", ["x"]) and "head" not in mm.stop_outcome("design", "no_pr", ["x"])

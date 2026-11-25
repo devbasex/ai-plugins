@@ -22,6 +22,11 @@ def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def now_exact() -> str:
+    """順序を同じ秒の中でも見分ける時刻（UTC・マイクロ秒まで・ISO 8601）。記録の行の `at` にも使える形である。"""
+    return datetime.now(UTC).isoformat(timespec="microseconds")
+
+
 class Broken(NamedTuple):
     """読めずに除いた行: 行番号（1 から）・理由・それより前にある読めた行の数・辞書として読めた中身（読めなければ None）。"""
 
@@ -57,6 +62,39 @@ def read_rows(
                 raise
             broken.append(Broken(number, str(exc), len(rows), raw))
     return rows, broken
+
+
+def read_rows_after(
+    path: Path, start: int, *, kind: str, wanted: Callable[[Mapping[str, Any]], bool] = lambda row: True
+) -> Optional[tuple[list[dict[str, Any]], int, int]]:
+    """バイト位置 `start` より後に足された、改行で終わる行のうち `wanted` が真の行と、読めなかった行の数と、読み終えた位置。
+
+    錠を取らない（追記の途中の、改行で終わらない行は読まない）。ファイルが無いか `start` より短ければ（置き換えられた）None。
+    """
+    try:
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            if f.tell() < start:
+                return None
+            f.seek(start)
+            data = f.read()
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 記録がまだ無ければ足された行も無い（置き換えられたときと同じく全体を読む）
+        return None
+    end = data.rfind(b"\n") + 1
+    rows: list[dict[str, Any]] = []
+    broken = 0
+    for line in data[:end].decode("utf-8").split("\n"):
+        if not line.strip():
+            continue
+        try:
+            raw = internal.parse_line(line)
+            if wanted(raw):
+                rows.append(internal.read_record(kind, raw))
+        except internal.InternalError as exc:
+            if exc.kind != "invalid":
+                raise
+            broken += 1
+    return rows, broken, start + end
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:

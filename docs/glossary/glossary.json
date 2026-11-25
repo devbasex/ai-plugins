@@ -740,11 +740,13 @@
     {
       "term": "即時修正",
       "context": "ndf-workflow",
-      "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
+      "meaning": "モード hotfix。4 つの条件（`development-workflow` の `references/mode-criteria.md`）を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にリリース後レビューで見ること",
       "deprecated": [
         "その場で直す"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "hotfix"
     },
     {
       "term": "棚卸し",
@@ -1978,12 +1980,18 @@
     {
       "term": "MVV 判定",
       "context": "ndf-loop",
-      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
+      "meaning": "承認ゲートの手前で、LLM が PR の本文と差分を NDF の共通原則・プロジェクト MVV と突き合わせる判定（ndf records mvv gate）。どの進め方でも、承認済みの MVV と PR の資料を取得できれば判定する。結果は開示範囲に合わせて表示し、PR のコメントには判定・理由・レッドライン・レビューの保留を載せ、承認資料では理由や保留の件数と全文の参照先を示す。fast・auto では設計承認ゲートを省くかの材料にもなる。結論は従う・従わない・判定できないのどれかで、判定結果を得られなければ verdict が null になり、判定できなかった理由の種類を stopped_by に置く",
       "source": "docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md",
       "deprecated": [
         "照合"
       ],
       "code": "mvv_validation"
+    },
+    {
+      "term": "レビューの保留",
+      "context": "ndf-loop",
+      "meaning": "対象の PR の cross-review の記録（mvv-validation.jsonl の mvv-review の行）に残る、直っていないレッドラインの指摘と、現在のプロジェクト MVV のバージョンで修正を見送り、利用者の判断を待っているレビュー指摘。1 件でもあれば承認ゲートを省かない。MVV 判定の出力 holds に載る",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "助言の MVV 判定",
@@ -7730,6 +7738,20 @@
       "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {
+      "term": "解析の記録",
+      "context": "ndf-project-settings",
+      "meaning": "解析が書く、解析をどの入力で行ったかの値（解析器のバージョン・入力のファイルのハッシュ・ブランチの構成）と、その解析が書いた設定の指紋。設定が古くなっていないかの判定が読む。git で追跡しないファイルに置き、設定には置かない",
+      "source": "",
+      "pending_source": "issues/issue-4516-requirements.md"
+    },
+    {
+      "term": "書いた値の指紋",
+      "context": "ndf-project-settings",
+      "meaning": "解析が書いた設定の値の SHA-256。今の値の指紋と一致すれば解析が書いた値、違えば人が直した値として扱う。設定の値が変わったときだけ変わるため、設定と一緒に追跡する",
+      "source": "",
+      "pending_source": "issues/issue-4516-requirements.md"
+    },
+    {
       "term": "ブランチ戦略",
       "context": "ndf-release",
       "meaning": "リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/project.json` のセクション `branch_strategy`（ブランチ戦略の設定）の `release_strategy` で、リリース方式の表の行を選ぶ",
@@ -8453,6 +8475,44 @@
       "context": "ndf-durable",
       "meaning": "GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る",
       "source": "docs/specifications/ndf-github-write-gate.md"
+    },
+    {
+      "term": "リリース後レビュー",
+      "context": "ndf-workflow",
+      "meaning": "hotfix のリリースの後に、マージ済みの差分を cross-review の相手役が読み、指摘を戻す・直す・見送るに分ける工程",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "post_release_review"
+    },
+    {
+      "term": "計画の時点の判定",
+      "context": "ndf-workflow",
+      "meaning": "開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモードと根拠（judgments）。行のモードはここからコードが決め、スプリントでは ndf progress new の --mode に渡る参考の値になる",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
+    },
+    {
+      "term": "判定の記録",
+      "context": "ndf-workflow",
+      "meaning": "工程「要求と受け入れ条件」の出力 mode_judgment。課題ごとのモードと根拠・スプリントのモード・参考の値を持ち、スプリントの工程表を決める",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "mode_judgment"
+    },
+    {
+      "term": "作業中の直し",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中で見つけた、今の作業を妨げる不具合のうち、4 条件を満たし今の作業場所の中で直せるものを、今の変更に含めて直すこと。同じ PR で完了判定とレビューを通る。今の作業を妨げない不具合は起票して hotfix のスプリントにする",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
+    },
+    {
+      "term": "リポジトリの知識",
+      "context": "ndf-workflow",
+      "meaning": "documentation のタイプの 1 つ。docs/ と README.md を新しく書く・組み直す仕事で、読み手はこのリポジトリで作業するエンジニアと AI。素材の収集と出典の確定・体裁レビュー・確定仕様化・リリース後テストを通らない。既存の記述を直すだけなら light",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "repo-knowledge"
     }
   ]
 }

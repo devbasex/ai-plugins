@@ -144,7 +144,7 @@ def test_an_answer_sent_back_to_waiting_restores_the_dropped_issues(st, lane_spr
     pid, tid = lane_sprint("--issues", "3092", "5")
     flow.turn(tid)
     out = _give(st, tid, _waiting(st, tid), drop=(3092,), seen=gate.Target(head="h1"))
-    assert gate.recheck(st, tid, lambda q: gate.Target(head="h2")) is not None
+    assert gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2")) is not None
     assert run.read(st, tid).context()["issues"] == [3092, 5]
     carried = next(r for r in _lane_rows(st, pid) if r.key == out["metrics"]["carried_row"])
     assert carried.state == lane.CANCELLED

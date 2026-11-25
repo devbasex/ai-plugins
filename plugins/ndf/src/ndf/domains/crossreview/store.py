@@ -33,6 +33,10 @@ REVIEWED_MVV = "reviewed_mvv"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"
+# 直した通常の指摘を MVV の記録の保留と照らし終えた状態（`{"pr": <番号>, "at": <時刻>, "size": <バイト位置>, "keys": [...]}`）。
+# `at` より前に直した指摘は次の起動で照らし直さない。`keys` は `size` まで読んだ記録での保留の候補で、次の起動は `size` より後に
+# 足された行だけを読んで更新し、候補に無いキーの直しでは記録をロックしない（`mvv.HoldIndex`。#3959）
+MVV_FIXES_CHECKED = "mvv_fixes_checked"
 
 
 class StateBroken(Exception):

@@ -293,6 +293,30 @@ def test_pulls_by_head_batches_branches() -> None:
     assert sorted(got) == sorted(["feat/a", 'feat/"b"']) and all(len(v) == 1 for v in got.values())
 
 
+def test_open_pulls_of_head_pages_until_two_same_repo_candidates() -> None:
+    # 開いた PR だけを取得し、フォークの同名ブランチを除いた候補が 2 件そろうまでページを送る
+    pages = [
+        ([7, 8], True, "c1"),  # 新しい 2 件はフォーク
+        ([5], True, "c2"),
+        ([4, 3], True, "c3"),  # 2 件目がそろった後のページは読まない
+        ([2], False, None),
+    ]
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        assert "states: [OPEN]" in sent["query"]
+        seen.append(sent["variables"])
+        numbers, more, cursor = pages[len(seen) - 1]
+        nodes = [{**_pr_node(n), "isCrossRepository": n in (7, 8)} for n in numbers]
+        conn = {"pageInfo": {"hasNextPage": more, "endCursor": cursor}, "nodes": nodes}
+        return httpx.Response(200, json={"data": {"repository": {"pullRequests": conn}}})
+
+    got = _hub(handler).open_pulls_of_head("design/x", enough=2)
+    assert [p.number for p in got] == [5, 4]
+    assert [v["after"] for v in seen] == [None, "c1", "c2"] and all(v["head"] == "design/x" for v in seen)
+
+
 def test_nodes_refuses_unknown_node() -> None:
     hub, _ = _hub_graphql(lambda q: {})
     with pytest.raises(ValueError):
@@ -936,50 +960,6 @@ def test_merge_as_admin_keeps_the_release_contract() -> None:
     server = _GraphQLRecorder(unreached=True)
     with pytest.raises(github.GitHubError):
         hub("o/r", server).merge_as_admin(7, HEAD)
-
-
-# --- 本番ブランチの ruleset の事実（#3672 の I10。10 系の release_case.read_rule_facts と同じ値） -------------
-
-
-def _rule_routes(rules: list, ruleset: dict | None, branch: dict, protection: httpx.Response) -> dict:
-    routes = {
-        ("GET", f"/repos/{REPO}/rules/branches/main"): [httpx.Response(200, json=rules)],
-        ("GET", f"/repos/{REPO}/branches/main"): [httpx.Response(200, json=branch)],
-        ("GET", f"/repos/{REPO}/branches/main/protection"): [protection],
-    }
-    if ruleset is not None:
-        routes[("GET", f"/repos/{REPO}/rulesets/5")] = [httpx.Response(200, json=ruleset)]
-    return routes
-
-
-def test_rule_facts_reads_rulesets_and_bypass() -> None:
-    rules = [
-        {"type": "pull_request", "ruleset_id": 5, "parameters": {"required_approving_review_count": 1}},
-        {"type": "merge_queue", "ruleset_id": 5, "parameters": {"merge_method": "MERGE"}},
-        {"type": "required_status_checks", "ruleset_id": 5, "parameters": {"strict_required_status_checks_policy": True}},
-    ]
-    server = RouteServer(
-        _rule_routes(rules, {"current_user_can_bypass": "pull_requests_only"}, {"protection": {"enabled": False}}, httpx.Response(404))
-    )
-    got = _hub(server).rule_facts("main")
-    assert got == github.RuleFacts(True, 1, True, True, "pull_requests_only", "MERGE")
-
-
-def test_rule_facts_without_rules_or_protection_is_absent_and_unreadable_is_none() -> None:
-    absent = RouteServer(_rule_routes([], None, {"protection": {"enabled": False}}, httpx.Response(404)))
-    assert _hub(absent).rule_facts("main") == github_merge.NO_RULES
-    # 従来の保護がある（か有無を読めない）のに詳細を読めなければ None（比べずに入れない）
-    hidden = RouteServer(_rule_routes([], None, {"protection": {"enabled": True}}, httpx.Response(404, json={"message": "no"})))
-    assert _hub(hidden).rule_facts("main") is None
-
-
-def test_rule_facts_merges_classic_protection_with_the_stricter_values() -> None:
-    protection = {"required_pull_request_reviews": {"required_approving_review_count": 2}, "enforce_admins": {"enabled": True}}
-    server = RouteServer(_rule_routes([], None, {"protection": {"enabled": True}}, httpx.Response(200, json=protection)))
-    assert _hub(server).rule_facts("main") == github.RuleFacts(True, 2, False, False, "never")
-    a = github.RuleFacts(True, 1, True, False, "always", "SQUASH")
-    b = github.RuleFacts(True, 2, False, True, "exempt")
-    assert github_merge.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
 
 
 def test_nodes_uses_the_named_batch_size(monkeypatch) -> None:

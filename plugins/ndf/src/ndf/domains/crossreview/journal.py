@@ -16,7 +16,8 @@ from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
-from ndf.domains.records.mvv_decide import State
+from ndf.domains.records import jsonl
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_FIXED_AT, State
 
 
 def _text(value: object) -> Optional[str]:
@@ -298,7 +299,7 @@ class FindingJournal:
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV):
+        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
@@ -419,7 +420,8 @@ class FindingJournal:
         self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int, *, mvv: Optional[str] = None
     ) -> list[dict[str, Any]]:
         """修正の結果の指摘ごとの終わり方をマージし、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。
-        `mvv` は修正担当を起動したときの MVV の識別子（分からなければ None）で、見送りに残す。
+        `mvv` は修正担当を起動したときの MVV の識別子（分からなければ None）で、見送りに残す。見送りの区分（`defer`）は知っている
+        値だけを残す（無い・知らない値の見送りは区分の無い見送りとして記録され、承認ゲートの保留になる。#3959）。
 
         NDF が機械で確かめて作った指摘（閉じるのは機械の確かめだけ）と、必ず人の承認が要る操作に当たる指摘（人の承認を待つ）への
         結果は、終わり方を変えず、修正担当の理由だけを残す。返す件にも入れない。返した件のうち直した指摘は、修正のコミットを
@@ -442,8 +444,15 @@ class FindingJournal:
                 continue
             row |= {"outcome": item["outcome"], "reason": reason}
             row.pop(SKIPPED_MVV, None)
+            row.pop(REVIEW_DEFER, None)
             if item["outcome"] == fin.SKIPPED and mvv is not None:
                 row[SKIPPED_MVV] = mvv
+            if item["outcome"] == fin.SKIPPED and item.get(REVIEW_DEFER) in DEFERS:
+                row[REVIEW_DEFER] = item[REVIEW_DEFER]
+            # 直した時刻は、別の状態ディレクトリが記録した見送りとの前後を照らすために残す（#3959）
+            row.pop(REVIEW_FIXED_AT, None)
+            if item["outcome"] == fin.FIXED:
+                row[REVIEW_FIXED_AT] = jsonl.now_exact()
         return taken
 
     def reopen(self, fids: Sequence[str]) -> None:
