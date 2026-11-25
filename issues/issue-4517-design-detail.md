@@ -740,8 +740,8 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | --- | --- | --- |
 | 結果のファイル（`--state-dir`） | すべて | — |
 | `--findings-out` | `id`・`outcome`・`held`・`summary`（項目名と変更の種類だけで書いた 1 行。相手役の本文から作らず、修正担当が書く）・`state_ref`（結果のファイルのパスと指摘の `id`）・`pr`・`commit` | `title`・`body`・`reason`・`evidence` |
-| PR のコメント | `summary`・`outcome`・`state_ref` | 同上 |
-| 起票する課題の本文（`revert`・`fix` に決まったとき） | `summary`・`state_ref`・`pr`・`commit` と、印 `ndf:post-release-finding` | 同上。直す人は `state_ref` から結果のファイルを読む |
+| PR のコメント | `summary`・`outcome`・`state_ref`。コメントの先頭には、ほかの指摘と同じく照合の印 `ndf:post-release-review` を置く（「再開の正本と起票の重複の防ぎ方」） | 同上 |
+| 起票する課題の本文（`revert`・`fix` に決まったとき） | `summary`・`state_ref`・`pr`・`commit`。本文の先頭には、打ち直しの照合に使う印 `ndf:post-release-finding` を置く（「再開の正本と起票の重複の防ぎ方」） | 同上。直す人は `state_ref` から結果のファイルを読む |
 
 `--findings-out` には、リポジトリの中のパスを渡しても非公開の情報が入らない。`hold` でない指摘の書き出しは今のまま（「工程『リリース後レビュー』」の事後条件）である。
 
@@ -751,7 +751,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | --- | --- | --- |
 | 承認の記録 | 検証用の系の認証・認可の変更で、2 のステップが回答を待ち、`ndf answer` で承認すると `next` で 3 が流れて適用する。`needs_approval` の単位が無い → `service:operation` の承認で人に問わずに 3 へ進む | 承認しない回答 → 適用せず工程を失敗にする。承認の後に計画を作り直して sha256 か `apply_request.id` が変わった → 適用しない。2 のステップが無い工程への `ndf answer` → 今のとおり断る |
 | 記録の値 | 項目名と変更の種類だけが記録・`mode_check`・`rerun_floor` に残る。`evidence` の型が `current`・`planned` を受けない | 秘密の形の値（`check-repo-secrets.py` の規則に当たるもの）が記録に入る → 書かずに止める |
-| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → `hold` になり、コメントも起票もせず `判断が要る` で止まる。`--findings-out` のその指摘は `summary` と `state_ref` だけで、`body`・`evidence` を持たない。人が `fix` に決めた後の `retry` → コメントと課題の本文は `summary`・`state_ref` だけで、`body`・`evidence` を含まない |
+| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → `hold` になり、コメントも起票もせず `判断が要る` で止まる。`--findings-out`・PR のコメント・課題の本文のそれぞれが、「`hold` だった指摘の書き出し」の表の「書く項目」をすべて持ち、「書かない項目」を持たないことを確かめる。人が `fix` に決めた後の `retry` でも同じで、課題の本文には照合の印 `ndf:post-release-finding` が入り、起票の直後に落ちて打ち直しても同じ課題を 2 件作らない |
 
 ## レーンの起動と計画の行
 
