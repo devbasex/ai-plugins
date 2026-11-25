@@ -328,18 +328,27 @@ def current_total(xml_dir: Path, gh: Gh, run_id: int, attempt: int) -> tuple[dic
     parts = read_parts(xml_dir)
     guess = max((i for _, i in parts), default=-1) + 1
 
-    def invalid(reason: str, total: int, attempts: list[int | None] | None = None) -> tuple[dict, list[str]]:
-        body = {
+    def body(
+        shard_attempts: list[int | None],
+        root: float | None,
+        ndf: float | None,
+        total: float | None,
+        reason: str | None,
+    ) -> dict:
+        return {
             "run": run_id,
             "attempt": attempt,
-            "shard_attempts": attempts if attempts is not None else [None] * total,
-            "valid": False,
-            "root_seconds": None,
-            "ndf_seconds": None,
-            "total_seconds": None,
+            "shard_attempts": shard_attempts,
+            "valid": reason is None,
+            "root_seconds": root,
+            "ndf_seconds": ndf,
+            "total_seconds": total,
             "reason": reason,
         }
-        return body, [f"この回（run {run_id}）: {reason}"]
+
+    def invalid(reason: str, total: int, attempts: list[int | None] | None = None) -> tuple[dict, list[str]]:
+        shard_attempts = attempts if attempts is not None else [None] * total
+        return body(shard_attempts, None, None, None, reason), [f"この回（run {run_id}）: {reason}"]
 
     try:
         listed = gh.get(f"{REPO_API}/actions/runs/{run_id}/jobs?filter=latest&per_page={PER_PAGE}", "jobs")["jobs"]
@@ -362,17 +371,8 @@ def current_total(xml_dir: Path, gh: Gh, run_id: int, attempt: int) -> tuple[dic
     if reasons:
         return invalid("。".join(reasons), total, match.shard_attempts)
     sums = _sums(parts, match.accepted)
-    body = {
-        "run": run_id,
-        "attempt": attempt,
-        "shard_attempts": match.shard_attempts,
-        "valid": True,
-        "root_seconds": round(sums["root"][0], 1),
-        "ndf_seconds": round(sums["ndf"][0], 1),
-        "total_seconds": round(sums["root"][0] + sums["ndf"][0], 1),
-        "reason": None,
-    }
-    return body, []
+    root, ndf = sums["root"][0], sums["ndf"][0]
+    return body(match.shard_attempts, round(root, 1), round(ndf, 1), round(root + ndf, 1), None), []
 
 
 def _when(text: str) -> datetime:
