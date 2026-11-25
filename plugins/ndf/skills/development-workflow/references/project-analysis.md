@@ -7,8 +7,8 @@
 ## 例: carmo-system-console で手順 0 を通す
 
 1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
-2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
-   ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
+2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・必須のチェック・
+   compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
    NDF の方針の検査を「質問」として、候補と根拠を付けて返す
 3. conductor が質問に回答する。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
    「PHPUnit・`app` のコンテナ越し」と決め、回答のファイルを書く
@@ -50,11 +50,15 @@ ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; e
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
 
-CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-steps`・`ci-junit` は、ワークフローごとの代表の run から測る。
-代表の run は、直近 50 件の成功の run のうち、そのワークフローの新しい順に最大 5 件を見て、ジョブを飛ばしていない最新の 1 件である。
-ジョブを飛ばした run は、conclusion が `skipped` のジョブを 1 つ以上含む run で、ワークフローやジョブの名前では判定しない。
-5 件ともジョブを飛ばしていたワークフローは、壁時計を持たない行になり、注記に `飛ばしていない run が無い: <パス>（候補 <n> 件）` が出る。
-候補のジョブの取得が時間切れになったら、そのワークフローから後は壁時計を持たない行になり、注記に `候補のジョブを取れない（時間切れ）: <パス>` が出る。
+**CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけである。**
+`gh` で呼ぶ API は、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 つだけである。
+CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない。
+テストの走らせ方（`test`）は、手がかりがあれば質問（`status: question`）になり、無ければ回答の要らない値になる。
+質問のときは、suite を次の順で決めて回答する。
+指示書・README にテストの走らせ方が書かれていれば、その記述に従う。
+書かれていなければ、測定が候補に挙げたテストの実行器とコマンド（`candidates` の `runners`・`commands`）から決め、使った設定ファイルやコマンドの行を `evidence` に挙げる。
+どちらからも走らせ方を確かめられなければ、`{"unknown": "<理由>"}` と回答する。`ci_jobs` は、どの場合もワークフローのファイルで確かめる。
+テストの実行器・テストを走らせるコマンド・指示書や README のテストの記述がどれも無いリポジトリでは、`test` は測った値（`status: measured`）の空の suite の一覧になるので、回答しない。
 
 ## 回答方
 
@@ -68,7 +72,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 
 | 項目 | 回答の `value` の形 | 決め方 |
 | --- | --- | --- |
-| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を回答として示し、手元で全体テストを回さない方針があるときだけ書き換える。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから回答する。CI テストの設定（`ci.only`）は回答しない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。設定があれば手元でテストを走らせず、合否を PR の CI の結果で決める |
+| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。解析はテストの所要時間を測らないので、`strategy` は指示書・README に書かれたテストの方針から選ぶ。既定は、`scope_command` が無ければ `round-only`、あれば `local-full` である。`local-scoped-ci-whole` を選ぶのは、全体テストを CI に任せる方針が指示書・README に書かれているときだけで、その行を回答の `evidence` に挙げる。CI のテストに時間がかかると分かっただけでは選ばない。方針が所要時間を理由にしているときは、所要時間を確かめた出所（指示書の記述や CI の実行の画面）も `evidence` に挙げる。方針を確かめられないときは、既定のままにする。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから回答する。CI テストの設定（`ci.only`）は回答しない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。設定が `true` なら、`strategy` が `local-scoped-ci-whole` でも手元では範囲テストも走らせず、合否を PR の CI の結果で決める。そのため、`ci_jobs` を書くと、手元で範囲テストを走らせる方針のリポジトリでも手元のテストが止まる。その方針を守るときは、書き出しの後に人が `.ndf/project.json` の `test.ci.only` に `false` を書く。書き出しは `false` を書き換えない。ただし、書き出しは `test` を `ci.only` も含めた 1 つの値として、解析が書いた値かどうかを見分ける。そのため `false` を書いた後は `test` 全体が人の書いた値になり、解析をやり直しても suite やコマンドは更新されない（食い違いは出力に `設定 <値> / 解析 <値>` の行で出る）。テストの走らせ方を変えたときは、`test` を人が書き直す |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 | `materials` | `{"product"?: {"kind", "users"?}, "needs"?: {"usage", "market"}, "seeds"?: {"libraries", "environment"}, "deferred_milestones", "cause_types"?, "code_measures"?, "failures"?}` | 棚卸しの見直しと大整理が読む材料の設定（`backlog-refinement` の `references/research.md`）。候補は README の冒頭と直接の依存から出る。調べる依存（`seeds.libraries`）は候補から人が残すものだけにする。利用の記録（`needs.usage`）の読むコマンドと範囲（`scope.aggregate_only`・`days`・`mask`）・市場と競合・周辺環境・後回しのマイルストーンは人が書く。決められなければ `{"unknown": "<理由>"}` と書き、見直しはすべての側面を飛ばす |
@@ -84,7 +88,9 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
                                 "junit": "build/ndf/junit.xml",
                                 "container": {"service": "app", "compose_files": ["docker-compose.yml"]},
                                 "needs": ["mysql"], "paths": ["tests"]}]},
-          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"}}
+          "evidence": [{"path": "AGENTS.md", "line": 34, "text": "docker compose exec app ./vendor/bin/phpunit"},
+                       {"path": "AGENTS.md", "line": 41, "text": "全体テストは約 64 分かかるので CI に任せ、手元では変えたテストだけを走らせる"}],
+          "reason": "走らせ方は AGENTS.md の手順に従い、全体テストを CI に任せる方針があるので local-scoped-ci-whole にした"}}
 ```
 
 `value` が項目の形に合わなければ、`write` はその項目を `{"unknown": "回答が形に合わない: <箇所>"}` にして続ける。
@@ -94,7 +100,6 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 手で書いた値は変えない。変えるのは、キーが無い項目と、前の `write` が書いた値のまま（`analysis.written` の指紋が一致する）の項目だけ。
   解析の値と食い違えば、出力に `設定 <値> / 解析 <値>` の行が出る
 - 新しい解析で不明になった項目は、前の値を残す
-- `ci` のワークフローの行に新しい解析の壁時計が無ければ、前の解析の同じパスの行の壁時計を残し、出力に `ci#<パス>: 不明（新しい解析に壁時計が無い）（前の値を残した）` の行が出る
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は設定・差分・出力のどれにも出ない
 - ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `ndf project branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
