@@ -32,8 +32,13 @@ def session(conftest: ModuleType, monkeypatch: pytest.MonkeyPatch) -> SimpleName
     return SimpleNamespace(config=SimpleNamespace(), exitstatus=0)
 
 
-def test_without_out_full_run_fails_on_unverified(conftest, session, monkeypatch) -> None:
-    monkeypatch.delenv(conftest.OK_TOOLS_OUT_ENV, raising=False)
+@pytest.mark.parametrize("out", [None, ""], ids=["unset", "empty"])
+def test_without_out_full_run_fails_on_unverified(conftest, session, monkeypatch, out: str | None) -> None:
+    """出力先が未設定でも空文字でも、全体の実行は ok を確かめなかったサブコマンドで落とす。"""
+    if out is None:
+        monkeypatch.delenv(conftest.OK_TOOLS_OUT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(conftest.OK_TOOLS_OUT_ENV, out)
 
     conftest.pytest_sessionfinish(session, 0)
 
@@ -49,11 +54,3 @@ def test_with_out_only_writes_record(conftest, session, monkeypatch, tmp_path: P
 
     assert session.exitstatus == 0
     assert out.read_text(encoding="utf-8") == "a\nb-not-a-command\n"
-
-
-def test_empty_out_is_same_as_unset(conftest, session, monkeypatch) -> None:
-    monkeypatch.setenv(conftest.OK_TOOLS_OUT_ENV, "")
-
-    conftest.pytest_sessionfinish(session, 0)
-
-    assert session.exitstatus == 1
