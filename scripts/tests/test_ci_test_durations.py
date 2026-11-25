@@ -193,6 +193,71 @@ def test_read_parts(tmp_path) -> None:
     assert parts[("ndf", 1)].error and parts[("root", 1)].error == "JUnit XML が無い"
 
 
+def test_read_parts_missing_dir_is_empty(tmp_path) -> None:
+    assert ctd.read_parts(tmp_path / "absent") == {}
+
+
+def test_read_parts_ignores_files_and_orders_by_dir_name(tmp_path) -> None:
+    (tmp_path / f"{ctd.ROOT_ARTIFACT}9").write_text("not a dir", encoding="utf-8")
+    write_part(tmp_path, "root", 1, 1)
+    write_part(tmp_path, "ndf", 0, 1)
+    write_part(tmp_path, "root", 0, 1)
+
+    parts = ctd.read_parts(tmp_path)
+
+    # 挿入順は成果物のディレクトリ名の順（pytest-junit-* が pytest-ndf-junit-* より前）
+    assert list(parts) == [("root", 0), ("root", 1), ("ndf", 0)]
+    assert all(p.kind == k and p.index == i for (k, i), p in parts.items())
+
+
+def test_read_parts_aggregates_xmls_in_sorted_path_order(tmp_path) -> None:
+    write_part(tmp_path, "root", 0, 1, xml=False)
+    d = tmp_path / f"{ctd.ROOT_ARTIFACT}0"
+    (d / "b.xml").write_text(xml_of(("b", "t", 2.0)), encoding="utf-8")
+    (d / "a.xml").write_text(xml_of(("a", "t1", 1.0), ("a", "t2", None)), encoding="utf-8")
+    (d / "sub").mkdir()
+    (d / "sub" / "c.xml").write_text(xml_of(("c", "t", 3.0)), encoding="utf-8")
+    (d / "note.txt").write_text("ignored", encoding="utf-8")
+
+    part = ctd.read_parts(tmp_path)[("root", 0)]
+
+    assert part.error is None and part.attempt == 1
+    assert part.cases == [("a::t1", 1.0), ("a::t2", 0.0), ("b::t", 2.0), ("c::t", 3.0)]
+
+
+def test_read_parts_stops_at_first_broken_xml_and_keeps_earlier_cases(tmp_path) -> None:
+    write_part(tmp_path, "ndf", 2, 3, xml=False)
+    d = tmp_path / f"{ctd.NDF_ARTIFACT}2"
+    (d / "a.xml").write_text(xml_of(("a", "t", 1.0)), encoding="utf-8")
+    (d / "b.xml").write_text("<broken", encoding="utf-8")
+    (d / "c.xml").write_text(xml_of(("c", "t", 3.0)), encoding="utf-8")
+
+    part = ctd.read_parts(tmp_path)[("ndf", 2)]
+
+    assert part.attempt == 3
+    assert part.cases == [("a::t", 1.0)]
+    assert part.error is not None and part.error.startswith("b.xml を読めない（")
+
+
+@pytest.mark.parametrize(
+    "name, body, expected",
+    [
+        ("shard-attempt-0.txt", "  4 \n", 4),
+        ("shard-attempt-0.txt", "abc\n", None),
+        ("shard-attempt-0.txt", "", None),
+        ("shard-attempt-1.txt", "2\n", None),
+    ],
+)
+def test_read_parts_attempt_file(tmp_path, name, body, expected) -> None:
+    write_part(tmp_path, "root", 0, None)
+    (tmp_path / f"{ctd.ROOT_ARTIFACT}0" / name).write_text(body, encoding="utf-8")
+
+    part = ctd.read_parts(tmp_path)[("root", 0)]
+
+    assert part.attempt == expected
+    assert part.error is None and part.cases == [("root.test_0::t", 1.0)]
+
+
 def test_match_attempts(tmp_path) -> None:
     full_dir(tmp_path)
     write_part(tmp_path, "ndf", 2, attempt=2)
