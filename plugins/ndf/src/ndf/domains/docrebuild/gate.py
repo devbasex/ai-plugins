@@ -185,8 +185,6 @@ def _replace(path: Path, text: str) -> None:
 def fix_head(run: Run) -> None:
     """PR を 1 回取得して head・題・本文を固定する。PR が決まらない・読めなければ `Precondition`。"""
     args = run.args
-    if args.material is not None and args.pr is None:
-        raise Precondition("--material の経路は --pr（リリースの PR）が要る")
     number = args.pr if args.pr is not None else _input_pr(args)
     branch = None if number is not None else drive.checked_out(run.g)
     try:
@@ -594,6 +592,9 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     contents = {reading.QUESTION: gd.question_text(plan.questions), reading.MATERIAL: draft}
     contents.update({path: _file_text(run.args.cwd / path) for path in plan.docs})
     parts = {t.name: _file_text(t.file) if t.partial else None for t in plan.targets}
+    if reading.MATERIAL in parts and plan.previous is not None:
+        # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す
+        parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
     rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised), hashes)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]

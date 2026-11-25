@@ -243,7 +243,7 @@ def git_docs_only(cwd: Path) -> DocsOnly:
 
 def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly) -> bool:
     """リリース承認ゲートで、違いが PR の head だけで、加わった範囲が文書だけか（出し直さない。#3020）。"""
-    if q.gate != RELEASE_GATE or (now.material is not None and now.material != seen.material):
+    if q.gate != RELEASE_GATE or replace(now, head=seen.head).differs(seen):
         return False
     return seen.head is not None and now.head is not None and docs_only(seen.head, now.head)
 

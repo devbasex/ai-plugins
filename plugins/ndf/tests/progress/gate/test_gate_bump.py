@@ -110,9 +110,14 @@ class _Hub:
 
     def __init__(self) -> None:
         self.posted: list = []
+        self.conclusion = "success"
 
     def rest(self, method, path, payload=None):
         self.posted.append((method, path, payload))
+        return {"workflow_run_id": 100 + len(self.posted)}
+
+    def workflow_run(self, run_id):
+        return {"status": "completed", "conclusion": self.conclusion, "html_url": f"https://example.invalid/runs/{run_id}"}
 
     def pull(self, number):
         return SimpleNamespace(body="承認資料の本文\n", head_ref="sprint/a")
@@ -128,7 +133,7 @@ def test_bump_commands_dispatch_once_copy_the_body_and_turn_the_presentation_int
     settings["branch_strategy"]["release"]["cd"] = {"workflow": "cd.yml"}
     (repo / ".ndf").mkdir(exist_ok=True)
     (repo / ".ndf" / "project.json").write_text(json.dumps({"branch_strategy": settings["branch_strategy"]}), encoding="utf-8")
-    hub, opened = _Hub(), [[], [], [9]]
+    hub, opened = _Hub(), [[], [9]]
 
     def ndf(argv, cwd):
         if argv[1] == "present":
@@ -139,12 +144,17 @@ def test_bump_commands_dispatch_once_copy_the_body_and_turn_the_presentation_int
     environ = {invoke.INPUT_ENV: json.dumps({"release_requests": [sprint.key], "release_plan": sprint.name, "pr": 9})}
     assert bump.main(["bump-assemble"], io, environ) == 0
     out = last_result(capsys.readouterr().out)
-    assert hub.posted == [("POST", f"/repos/{REPO}/actions/workflows/cd.yml/dispatches", {"ref": "main", "inputs": {"step": "assemble"}})]
+    sent = {"ref": "main", "inputs": {"step": "assemble"}, "return_run_details": True}
+    assert hub.posted == [("POST", f"/repos/{REPO}/actions/workflows/cd.yml/dispatches", sent)]
     material = out["outputs"]["material"]
     assert out["outputs"]["pr"] == 9 and open(material["path"], encoding="utf-8").read() == "承認資料の本文\n"
     # 打ち直し: 自分が起動して開いた PR は使い、workflow を起動し直さない
     opened.append([9])
     assert bump.main(["bump-assemble"], io, environ) == 0 and len(hub.posted) == 1
+    # 記録した PR が閉じていれば起動し直し、失敗した実行は待ち切らずに止める
+    hub.conclusion = "failure"
+    opened.extend([[], []])
+    assert bump.main(["bump-assemble"], io, environ) != 0 and len(hub.posted) == 2
     capsys.readouterr()
     environ = {invoke.INPUT_ENV: json.dumps({"pr": 9, "material": material})}
     assert bump.main(["bump-present"], io, environ) == 0

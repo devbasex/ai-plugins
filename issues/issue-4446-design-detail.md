@@ -50,7 +50,7 @@ plugins/ndf/
 | `src/ndf/domains/records/pull_view.py` | 新設 | PR の題・本文・head・変更量・コメントを 1 回の取得で読み、コメントを足す（gate と check が使う） | `adapters.github` | `PullView` と関数 | `pull_view`・`add_comment`（新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 変更 | サブコマンド `gate` の引数を受ける | `docrebuild.gate` | モジュール | `_parser`・`_gate_args`・`main`（変更） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 組み直しで読ませた文書を読ませたものの記録へ書き、`not_run` で止める | `records.reading` | モジュール | `_checked`・`_reader_gap`（変更）、`record_reads`（新設） |
-| `src/ndf/domains/records/reading.py` | 変更 | 承認の質問の組み立て・読ませたものの記録の読み書き・`check` の照合 | `reading_decide`・`release.forms_decide`・`adapters.github` | モジュール | `gate_questions`・`material_hashes`・`docs_path`・`materials_path`・`append_doc`・`completed`・`latest_read`・`remained_of`・`pending_review`・`select_reads`・`row_fingerprint`（新設）、`add`・`check`（変更） |
+| `src/ndf/domains/records/reading.py` | 変更 | 承認の質問の組み立て・読ませたものの記録の読み書き・`check` の照合 | `reading_decide`・`records.pull_view`・`release.forms_decide`・`adapters.github` | モジュール | `gate_questions`・`material_hashes`・`docs_path`・`materials_path`・`append_doc`・`completed`・`latest_read`・`remained_of`・`pending_review`・`select_reads`・`row_fingerprint`（新設）、`add`・`check`（変更） |
 | `src/ndf/domains/records/cli.py` | 変更 | `reading check` に `--gate`・`--pr`・`--material`・`--questions-out` を足す | `records.reading` | モジュール | `_add_reading`・`_reading_check`（変更） |
 | `src/ndf/domains/hooks/guards/reading_check.py` | 変更 | 止める理由の文の案内を、読み手役のステップの打ち直しに変える | — | モジュール | `denial`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | 変更 | 形の行に `approve` を持たせる | `contracts.facts` | `Form` | `Form`・`form_of`（変更） |
@@ -98,7 +98,7 @@ plugins/ndf/
 | `push_fixed` | `docrebuild/gate.py` | 新設 | `push_fixed(args: GateArgs, fixed: Fixed, docs: Sequence[str], g: git.Git, ci_watch: CiWatch) -> str` | 再レビュー待ちの行を書いてからコミット・push し、CI を待つ。push したコミットを返す |
 | `refetch_check` | `docrebuild/gate.py` | 新設 | `refetch_check(hub: GitHub, fixed: Fixed, head: str) -> Pull` | PR を 1 回取得し直し、head・題・本文が動いていないかを確かめる |
 | `send_back` | `docrebuild/gate.py` | 新設 | `send_back(run, plan, targets, raised) -> dict[str, Any]` | 題の案か PR の本文の行の直しがあるとき、変更要求の行を書き、記録を書かずに `stopped`（`precondition`）で止める（設計書の決定 10。PR の題と本文は書き換えない） |
-| `post_material` | `docrebuild/gate.py` | 新設 | `post_material(run, now, final) -> None` | 合格した承認資料の最終版を PR のコメントとして 1 件足す。同じ SHA-256 の本文のコメントがあれば足さない（改行の CRLF と末尾の改行の有無をそろえて比べる） |
+| `post_material` | `docrebuild/gate.py` | 新設 | `post_material(run, now, final) -> None` | 合格した承認資料の最終版を PR のコメントとして 1 件足す。同じ承認資料のコメントがあれば足さない（比べ方は `check` と同じ `reading.comment_has`） |
 | `record` | `docrebuild/gate.py` | 新設 | `record(args: GateArgs, fixed: Fixed, plan: Plan, report: Mapping[str, Any], check_id: str, pushed: Optional[str]) -> dict[str, Any]` | 設計書の手順 9 の 1〜5 を順に書き、`outputs.check` の値を返す |
 | `_parser`・`main` | `docrebuild/cli.py` | 変更 | 今のまま | サブコマンド `gate` を足し、`run` と同じ `adopt` で結果 JSON を受ける |
 
@@ -305,7 +305,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `check` | `records/reading.py` | 変更 | `check(gate: str, number: int, material: Optional[Path], root: Path, hub: Callable[[str], GitHub]) -> tuple[list[str], list[dict[str, Any]]]` | PR を 1 回取得し、その題で質問を作り直し、同じ取得の head と本文で照合する。（足りないもの, 質問）を返す |
+| `check` | `records/reading.py` | 変更 | `check(gate: str, number: int, material: Optional[Path], root: Path, hub: Callable[[str], GitHub]) -> tuple[list[str], list[dict[str, Any]]]` | PR をコメントも含めて 1 回取得し（`pull_view`）、その題で質問を作り直し、同じ取得の head と承認資料で照合する。（足りないもの, 質問）を返す |
 | `material_hashes` | `records/reading.py` | 新設 | `material_hashes(text: str, expected: Optional[str]) -> tuple[str, str]` | （読ませた版のハッシュ, ファイル全体のハッシュ）。`gate.strip_marks` と同じ規則で除く |
 | `row_fingerprint` | `records/reading.py` | 新設 | `row_fingerprint(row: Mapping[str, Any]) -> str` | 記録の行の JSON をキーの順を固定して作った SHA-256 |
 | `_reading_check` | `records/cli.py` | 変更 | `_reading_check(args: argparse.Namespace, root: Path) -> dict[str, Any]` | `--file` の入力を受けず、`--gate`・`--pr`・`--material`・`--questions-out` を受ける。質問をファイルへ書く |
@@ -314,7 +314,10 @@ plugins/ndf/
 - `check`
   - 事前条件: `number` は正の整数。`material` は会話のセッションのリリースのときだけ
   - 事後条件: 足りないものは `no_record`・`no_pr`・`head_moved`・`material_changed` のどれか。判定の順は設計書の「確認の id と完了の行」の 1〜3
-  - 副作用: GitHub の PR の取得 1 回・`git fetch`（今と同じ）
+  - `material_changed` の条件（PR の本文の経路。`material` が無い）: 次のどちらかが外れたとき。(a) 同じ取得のコメントに、完了の行のファイル全体の SHA-256 と同じ承認資料があるか（`comment_has`）。(b) 今の PR の本文の SHA-256 が、完了の行の PR の本文のハッシュと同じか
+  - `material_changed` の条件（`material` がある）: そのファイルの読ませた版のハッシュかファイル全体のハッシュが、完了の行と違うとき。コメントと本文は比べない
+  - `reading-materials` のコピーは照合に使わない（`gate` が差分の元にするだけである）
+  - 副作用: コメントを含む GitHub の PR の取得 1 回・`git fetch`（今と同じ）
 
 `gate` と `check` が同じ値を出すよう、2 つは同じ除き方を使う。`material_hashes` が `gate.strip_marks` を呼ぶのではなく、`gate.strip_marks` が `material_hashes` の除き方を使う（`records` から `docrebuild` を読まない向きを保つ）。
 
@@ -339,7 +342,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 記録した質問と同じキーの質問を作り、通す。PR の取得は 1 回 | 完了の行の無い最後の記録の行 → `no_record` | 本文だけの変更 → `material_changed`。題だけの変更 → `no_record` |
+| `check` | 記録した質問と同じキーの質問を作り、通す。PR の取得は 1 回 | 完了の行の無い最後の記録の行 → `no_record` | 本文だけの変更・承認資料のコメントの編集か削除 → `material_changed`。題だけの変更 → `no_record` |
 | `material_hashes` | セクションを除いた値と全体の値が違う | 印が 2 組 → 何も除かない | — |
 | `row_fingerprint` | キーの順が違っても同じ値 | — | — |
 

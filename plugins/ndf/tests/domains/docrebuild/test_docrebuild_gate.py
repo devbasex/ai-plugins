@@ -451,11 +451,14 @@ def test_release_material_route(tmp_path: Path, line_head: str, edit: Any, kind:
     material = tmp_path / "materials.md"
     material.write_text(f"# リリース\n\n提示したコミット: `{line_head}`\n\n- 中身\n", encoding="utf-8")
     worker = FakeWorker(edit=edit)
-    got = w.run(worker, "release", pr=7, material=material)
+    # 版上げの工程は PR の番号を引数でなく工程の入力で渡し、直前の MVV 判定は素材のファイルに載る
+    mvv = {"gate": "release", "skip": False, "verdict": None, "why": ["進め方 normal"]}
+    got = w.run(worker, "release", material=material, inputs={"pr": 7, "mvv_gate": mvv})
     if kind is not None:
         assert got["status"] == "stopped" and got["cause"]["kind"] == kind
         return
     assert got["status"] == "ok" and w.hub.posted == [] and w.hub.fetches == 2
+    assert json.loads((w.cwd / "state" / gate.FACTS_FILE).read_text(encoding="utf-8"))["mvv_gate"] == mvv
     questions = json.loads(Path(got["outputs"]["questions"]).read_text(encoding="utf-8"))["questions"]
     assert questions[0]["question"].endswith("アプリをストアの審査に提出してよいですか")
     assert reading.rows()[-1]["question_key"] == rd.question_key(questions)

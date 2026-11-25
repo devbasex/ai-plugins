@@ -29,6 +29,9 @@
         "pace",
         "mvv_ref"
       ],
+      "optional_inputs": [
+        "mvv_gate"
+      ],
       "outputs": [
         "delivery",
         "product_version",

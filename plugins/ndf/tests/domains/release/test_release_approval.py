@@ -61,6 +61,10 @@ def test_judge_counts_user_answers_to_the_latest_material_and_mvv_answers_by_hea
     assert (
         judged([mvv]).approved and judged([mvv, shown]).state == approval_decide.STALE and judged([mvv, shown, user("approved")]).approved
     )
+    # 旧いバージョンの提示と回答は資料の SHA-256 の行を持たない。SHA-256 を持つ提示が足されるまで数える
+    old_shown = ("octocat", f"{approval_decide.REQUEST_MARK}\n{approval_decide.HEAD_LINE} `{HEAD}`\n", True)
+    assert judged([old_shown, user("approved", None)]).approved
+    assert judged([old_shown, user("approved", None), shown]).state == approval_decide.STALE
 
 
 def test_judge_reports_stale_and_missing() -> None:

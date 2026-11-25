@@ -31,6 +31,7 @@
         "mvv_ref"
       ],
       "optional_inputs": [
+        "mvv_gate",
         "pr",
         "material",
         "product_version"

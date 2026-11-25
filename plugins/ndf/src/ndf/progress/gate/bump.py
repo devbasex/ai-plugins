@@ -1,6 +1,6 @@
 """版上げのスプリント（モード `release-bump`）のステップのコマンド（`ndf.progress.gate` の部品。#4446 の決定 9）。
 
-ndf progress bump-assemble   workflow の assemble を起動して版上げの PR を待ち、PR の本文（承認資料）をファイルへ写す
+ndf progress bump-assemble   workflow の assemble を起動して実行の終わりを待ち、版上げの PR の本文（承認資料）をファイルへ写す
 ndf progress bump-present    読み手役が確かめた承認資料を版上げの PR に提示する（承認は続く承認ゲートが受ける）
 ndf progress bump-record     まとめたリリースの回答を計画へ記録し、まとめた各スプリントのレーンの行へ回答を載せる
 
@@ -35,7 +35,7 @@ NO_BUMP_TARGET = "production_pr"
 UNITS_STRATEGY = "release_branch"
 # workflow の組み立てを待つ上限と間隔
 WAIT = "release-bump.assemble"
-# 保存先（チェックアウトの保存先の下）と、承認資料・起動のマーカーのファイル
+# 保存先（チェックアウトの保存先の下）と、承認資料・起動した実行と PR を持つマーカーのファイル
 BUMP_DIR = "bump"
 MATERIAL_FILE, DISPATCHED_FILE = "material.md", "dispatched"
 
@@ -117,31 +117,18 @@ def _units(io: Io, cwd: Path, strategy: branch_strategy.Strategy, requests: Sequ
 
 
 def bump_assemble(a: argparse.Namespace, cwd: Path, st: store.Store, io: Io, environ: Mapping[str, str]) -> dict[str, Any]:
-    """workflow の assemble を起動して版上げの PR を待つ。打ち直しでは、前に起動して開いた PR をそのまま使う。"""
+    """workflow の assemble を起動し、その実行が作った版上げの PR の本文を承認資料にする。"""
     inputs = _stage_values(environ, "release_requests", "release_plan")
     with store.transaction(st) as conn:
         _pid, view = _plan_of(conn, st, cwd, inputs["release_plan"])
         requests = _release_requests(view, inputs["release_requests"])
     strategy = branch_strategy.load(git.Git(cwd).common_dir().parent)
-    section = strategy.section
-    if section["approval"]["target"] == NO_BUMP_TARGET:
-        raise Stop(f"承認の対象が {section['approval']['target']} の設定は版上げの PR を作らず、版上げのスプリントを流せない")
+    if strategy.section["approval"]["target"] == NO_BUMP_TARGET:
+        raise Stop(f"承認の対象が {NO_BUMP_TARGET} の設定は版上げの PR を作らず、版上げのスプリントを流せない")
     ident = hashlib.sha256(json.dumps([inputs["release_plan"], inputs["release_requests"]]).encode()).hexdigest()
     work = st.root / run.WORK_DIR / BUMP_DIR / ident
     work.mkdir(parents=True, exist_ok=True)
-    mark, branches = work / DISPATCHED_FILE, section["branches"]
-    opened = _open_releases(io, cwd, branches)
-    if opened and not mark.exists():
-        listed = ", ".join(f"#{n}" for n in opened)
-        raise Stop(f"{branches['production']} 宛ての版上げの PR {listed} が既に開いている（閉じた後に打ち直す）")
-    if not opened:
-        hub = io.hub(cwd)
-        workflow = section["release"]["cd"]["workflow"]
-        body = {"ref": branches["production"], "inputs": {"step": "assemble", **_units(io, cwd, strategy, requests)}}
-        hub.rest("POST", f"/repos/{hub.repo}/actions/workflows/{workflow}/dispatches", body)
-        mark.write_text(workflow + "\n", encoding="utf-8")
-        opened = _await_release(io, cwd, branches, workflow)
-    number = opened[0]
+    number = _release_pr(io, cwd, strategy, requests, work / DISPATCHED_FILE)
     path = work / MATERIAL_FILE
     path.write_text(io.hub(cwd).pull(number).body, encoding="utf-8")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -150,15 +137,59 @@ def bump_assemble(a: argparse.Namespace, cwd: Path, st: store.Store, io: Io, env
     return result.result(TOOL, result.OK, f"版上げの PR #{number} の承認資料を {path} へ写した", outputs=outputs)
 
 
-def _await_release(io: Io, cwd: Path, branches: Mapping[str, str], workflow: str) -> list[int]:
+def _release_pr(io: Io, cwd: Path, strategy: branch_strategy.Strategy, requests: Sequence[lane.Request], mark: Path) -> int:
+    """このスプリントが起動した assemble の版上げの PR の番号。
+
+    マーカーは起動した実行の id（`run`）と、その実行が作った PR（`pr`）を持つ。打ち直しでは、記録した PR が開いていれば使い、
+    PR を記録する前に止まっていれば起動し直さずに同じ実行を待つ。"""
+    branches = strategy.section["branches"]
+    held = json.loads(mark.read_text(encoding="utf-8")) if mark.exists() else None
+    if held is not None and "pr" in held:
+        if held["pr"] in _open_releases(io, cwd, branches):
+            return held["pr"]
+        held = None  # 記録した PR は閉じたので組み直す
+    if held is None:
+        opened = _open_releases(io, cwd, branches)
+        if opened:
+            listed = ", ".join(f"#{n}" for n in opened)
+            raise Stop(f"{branches['production']} 宛ての版上げの PR {listed} が既に開いている（閉じた後に打ち直す）")
+        held = {"run": _dispatch(io.hub(cwd), cwd, io, strategy, requests)}
+        mark.write_text(json.dumps(held) + "\n", encoding="utf-8")
+    _await_run(io, io.hub(cwd), held["run"], mark)
+    opened = _open_releases(io, cwd, branches)
+    if len(opened) != 1:
+        mark.unlink()
+        raise Stop(f"assemble の実行 {held['run']} は成功したが、開いている版上げの PR が {len(opened)} 件で、作った PR を決められない")
+    mark.write_text(json.dumps({**held, "pr": opened[0]}) + "\n", encoding="utf-8")
+    return opened[0]
+
+
+def _dispatch(hub: GitHub, cwd: Path, io: Io, strategy: branch_strategy.Strategy, requests: Sequence[lane.Request]) -> int:
+    """workflow の assemble を起動し、起動した実行の id を返す（`return_run_details`）。"""
+    section = strategy.section
+    workflow = section["release"]["cd"]["workflow"]
+    inputs = {"step": "assemble", **_units(io, cwd, strategy, requests)}
+    body = {"ref": section["branches"]["production"], "inputs": inputs, "return_run_details": True}
+    got = hub.rest("POST", f"/repos/{hub.repo}/actions/workflows/{workflow}/dispatches", body)
+    if not isinstance(got, dict) or "workflow_run_id" not in got:
+        raise Stop(f"workflow {workflow} を起動したが実行の id が返らない（実行の結果を確かめる）")
+    return int(got["workflow_run_id"])
+
+
+def _await_run(io: Io, hub: GitHub, run_id: int, mark: Path) -> None:
+    """assemble の実行が終わるまで待つ。成功で終わらなければマーカーを消して止まる（打ち直しで起動し直す）。"""
     seconds, interval = limits.seconds(WAIT), limits.value(WAIT, "interval")
     deadline = io.clock() + seconds
     while io.clock() < deadline:
         io.sleep(interval)
-        opened = _open_releases(io, cwd, branches)
-        if opened:
-            return opened
-    raise Stop(f"workflow {workflow} の assemble が版上げの PR を作らない（{seconds:g} 秒待った。実行の結果を確かめる）", "wait_timeout")
+        got = hub.workflow_run(run_id)
+        if got["status"] != "completed":
+            continue
+        if got["conclusion"] != "success":
+            mark.unlink()
+            raise Stop(f"assemble の実行が {got['conclusion']} で終わった: {got['html_url']}", "check_failed")
+        return
+    raise Stop(f"assemble の実行 {run_id} が終わらない（{seconds:g} 秒待った。打ち直すと同じ実行を待つ）", "wait_timeout")
 
 
 def bump_present(a: argparse.Namespace, cwd: Path, st: store.Store, io: Io, environ: Mapping[str, str]) -> dict[str, Any]:
@@ -184,14 +215,14 @@ def bump_record(a: argparse.Namespace, cwd: Path, st: store.Store, io: Io, envir
     with store.transaction(st) as conn:
         pid, view = _plan_of(conn, st, cwd, inputs["release_plan"])
         requests = _release_requests(view, inputs["release_requests"])
-        pending = [r.key for r in requests if r.closed is None]
+        pending = [r for r in requests if r.closed is None]
         if pending:
-            plan.record_release(conn, pid, pending, plan.ReleaseAnswer(value, reason, version, release))
-        for r in requests:
+            plan.record_release(conn, pid, [r.key for r in pending], plan.ReleaseAnswer(value, reason, version, release))
+        for r in pending:
             sprint = r.body.get("sprint_state")
             if sprint and lane.record_answer(conn, sprint, {"answer": value}) is None:
                 warnings.append(f"スプリント {sprint} を持つレーンの行が無く、回答を載せていない")
-    summary = f"まとめたリリースの回答（{value}）をリクエスト {len(requests)} 件へ記録した"
+    summary = f"まとめたリリースの回答（{value}）をリクエスト {len(pending)} 件へ記録した"
     return result.result(TOOL, result.OK, summary, warnings=warnings)
 
 

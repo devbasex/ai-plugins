@@ -102,7 +102,9 @@ ndf release-steps records --pr <リリース記録の PR>
 
 **版上げのスプリント（モード `release-bump`）では、組み立てから提示までを工程が行う。** `ndf progress bump-assemble` が workflow の
 `assemble` を起動して版上げの PR の本文を承認資料にし、読み手役のステップが確かめ、`bump-present` が提示する。承認の後のリリースのステップは、
-版上げの PR の最後の提示のコメントにある `提示したコミット:` と `提示した資料:` の値を `answer` の `--presented` と `--material-sha256` に渡す。
+承認の質問を出したときの資料の値を `answer` に渡す。`--material-sha256` は工程の入力の `material.file_sha256`、`--presented` は
+`material.path` のファイルの行 `提示したコミット:` の値である。版上げの PR の最後の提示のコメントからは取らない。承認の後に提示が足されていると、
+利用者が見ていない資料への承認が記録される。値が分からないときと、`answer` が最新の提示と違うと断ったときは、最新の資料への承認を取り直す。
 `ndf release-steps open-releases --base <ベースブランチ> --production <本番ブランチ>` は、開いている版上げの PR の番号を返す。
 
 **`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。

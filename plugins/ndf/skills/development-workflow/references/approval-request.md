@@ -257,7 +257,7 @@ Pull Request のコメントにある（PR の題と本文は書き換えない�
    | 承認の待ち方 | やり直し方 |
    | --- | --- |
    | 工程の承認ゲートで待っている | `ndf progress reread <ステートマシンの ID>`。`ndf document-rebuild gate` は直接打たない。読み手役のステップを打ち直し、承認ゲートの待ちを新しい質問の id と今の対象で出し直す。結果の `metrics.gate` から head と回答のコマンドを読み直す |
-   | 会話のセッションのリリース | `ndf document-rebuild gate --material <ファイル>` を打ち直し、`outputs.material` のファイルで `present` を打ち直す。資料か head が違えば提示し直される |
+   | 会話のセッションのリリース | head が動いていれば（`head_moved`）、先に `ndf release-steps materials` で今の head の承認資料を組み直す。続けて `ndf document-rebuild gate --gate release --pr <番号> --material <承認資料> --state-dir <保存先> --out <結果のファイル>` を打ち直し、`outputs.material.path` のファイルで `present` を打ち直す。資料か head が違えば提示し直される |
 
    `no_pr`（記録に無い Pull Request を承認しようとしている）は、その Pull Request を指定して `gate` を打つ。`unknown`（GitHub を読めない）なら、
    調べられなかったことを承認資料に添えて進む。`ndf document-rebuild gate` が `stopped`（`precondition`。PR の題か本文の直しが要る）を返したら、PR の題か本文を
