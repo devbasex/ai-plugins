@@ -325,7 +325,7 @@ sequenceDiagram
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 解析の記録 | 解析が書く、解析をいつどの入力で行ったかの値（解析器のバージョン・解析した時刻・入力のファイルのハッシュ・ブランチの構成）。git で追跡しないファイルに置き、設定には置かない | 追加 |
-| 計測値 | 解析が測る、実行ごとに変わる数（言語ごとのファイル数・CI のワークフローごとの実行時間）。解析の記録と同じ、git で追跡しないファイルに置き、設定には置かない | 追加 |
+| 計測値 | 解析が測る、実行ごとに変わる数（言語ごとのファイル数・CI のワークフローごとの実行時間・直近の実行のジョブ数）。解析の記録と同じ、git で追跡しないファイルに置き、設定には置かない | 追加 |
 | 書いた値の指紋 | 解析が書いた設定の値の SHA-256。今の値の指紋と一致すれば解析が書いた値、違えば人が直した値として扱う。設定の値が変わったときだけ変わるため、設定と一緒に追跡する | 追加 |
 
 ## テスト設計
@@ -361,6 +361,13 @@ sequenceDiagram
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #4516 | 実装する | — | `.ndf/project.json`、`plugins/ndf/src/ndf/domains/project/measured.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/internal/project-measured.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_project_measured.py` |
+
+## 人へ残す判断
+
+| 判断 | 当たるレッドライン | なぜ当たるか |
+| --- | --- | --- |
+| 既存の `.ndf/project.json` から解析の記録・計測値・テストの所要時間を取り除き、`ci.workflows[].jobs` を定義の数へ変える移行を、開発の作業の始めの書き出しが自動で行う。書き換えはメインディレクトリの未コミットの差分として残り、コミットと取り込みは利用者が行う。取り込む Pull Request で人が見る | C7 | 利用者の設定（`.ndf/`）を書き換える。解析による新しい作成ではなく、既存の項目を取り除く変更である |
+| 実装の Pull Request の中で、このリポジトリの追跡している `.ndf/project.json` を新しい形へ移す（決定 4） | C7 | 利用者の設定（`.ndf/`）を書き換える。実装の中でコミットし、リリース承認ゲートで人が見る |
 
 ## 外部の調査
 
