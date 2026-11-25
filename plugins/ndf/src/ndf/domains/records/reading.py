@@ -58,6 +58,10 @@ def checks_path() -> Path:
 DOCS_SCHEMA = contracts.schema_path("internal/reading-docs")
 # 読ませる対象のうち、ゲートと PR で引く名前（文書はパス）
 QUESTION, MATERIAL = contracts.schema_enum(DOCS_SCHEMA, "/$defs/gated")
+# 2 回目にも残った文の読ませた行の合否
+REMAINED = "remained"
+# 変更要求の行の直す対象（PR の題・本文）
+SENT_BACK_TARGETS = contracts.schema_enum(DOCS_SCHEMA, "/properties/targets/items")
 # 読み手の立場（計画で決めたこと (6): 質問の文と承認資料は承認する人、設計 PR の文書はエンジニア）
 APPROVER, ENGINEER = "承認する人", "エンジニア"
 # 承認資料の末尾の「読み手役が残した文」のセクションのマーカーと見出し（gate と check が同じ値を使う）
@@ -149,7 +153,7 @@ def remained_of(rows: Sequence[Mapping[str, Any]], repo: str, gate: str, number:
 
 def remained_in(rows: Iterable[Mapping[str, Any]], check: str) -> list[Mapping[str, Any]]:
     """確認 `check` の、2 回目にも残った文の行。"""
-    return [r for r in rows if r.get("kind") == "read" and r["check"] == check and r["verdict"] == "remained"]
+    return [r for r in rows if r.get("kind") == "read" and r["check"] == check and r["verdict"] == REMAINED]
 
 
 def pending_review(rows: Iterable[Mapping[str, Any]], repo: str, branch: str) -> Optional[Mapping[str, Any]]:
@@ -190,21 +194,22 @@ def select_reads(
         newest = matched[-1]["check"]
         last = [r for r in matched if r["check"] == newest][-1]
         if name in keep:
-            out.append({"name": name, "reader": reader, "round": 2, "result": "remained"})
-        elif last["verdict"] in ("passed", "remained"):
+            out.append({"name": name, "reader": reader, "round": 2, "result": REMAINED})
+        elif last["verdict"] in ("passed", REMAINED):
             out.append({"name": name, "reader": reader, "round": last["round"], "result": last["verdict"]})
     return out
 
 
 def remained_section(remained: Sequence[Mapping[str, Any]]) -> str:
     """残った文から作る、マーカー付きの「読み手役が残した文」のセクション（承認資料の末尾に足す）。残った文が無ければ空。"""
-    lines = [f"- {_label(r['name'])}: {q['quote']}（{q['why']}）" for r in remained for q in r["quotes"]]
+    lines = [f"- {target_label(r['name'])}: {q['quote']}（{q['why']}）" for r in remained for q in r["quotes"]]
     if not lines:
         return ""
     return "\n".join(["", "", BEGIN, REMAINED_HEADING, "", *lines, END, ""])
 
 
-def _label(name: str) -> str:
+def target_label(name: str) -> str:
+    """対象の名前を、承認する人に見せる語にする（文書はパスのまま）。"""
     return _TARGET_LABEL[name] if name in _TARGET_LABEL else name
 
 
@@ -300,11 +305,14 @@ def prompt(entry: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def add(entry: Mapping[str, Any], root: Path) -> dict[str, Any]:
-    """確認の記録を 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` で、追記しない。GitHub を読まない。"""
+def add(entry: Mapping[str, Any], root: Path, repo: Optional[str] = None) -> dict[str, Any]:
+    """確認の記録を 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` で、追記しない。GitHub を読まない。
+
+    `repo` を省けば作業場所 `root` のリモートから求める。
+    """
     _require_keys(entry, ADD_KEYS)
     key = _key(entry["questions"])
-    row = {"repo": Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
+    row = {"repo": repo if repo is not None else Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
     if not rd.has_used_keys(row):
         raise ReadingInvalid("prs は、number（整数）・branch（1 つのブランチの名前）・head（SHA）を持つオブジェクトの配列にする")
     try:

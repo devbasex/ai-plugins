@@ -77,9 +77,10 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
+| `ndf document-rebuild gate` | `--gate`（string・必須・値 `design`・`release`）: 承認ゲートの種類<br>`--pr`（integer・任意）: 承認する PR の番号（省けば、設計は作業場所のブランチの PR、リリースは工程の入力の pr）<br>`--material`（string・任意）: リリースの承認資料のファイル（ndf release-steps materials の出力。--gate release だけ）<br>`--reviewed`（string・任意）: 設計のレビューを済ませた再レビュー待ちのコミット<br>`--no-doc-fix`（boolean・任意）: 文書を直させず、残った文として承認資料に書かせる<br>`--state-dir`（string・必須）: 起動指示・承認資料の作業用のコピー・worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
 | `ndf document-rebuild run` | `--base`（string・必須）: ベースブランチの名前（スプリントの PR のマージ先）<br>`--remote`（string・必須）: 起点の参照を探すリモートの名前<br>`--issue`（array of integer・必須）: 工程が扱う課題の番号（1 回以上）<br>`--kind`（array of string・必須・値 `design`・`plan`・`manuscript`）: 選ぶ文書の種類（1 回以上）<br>`--state-dir`（string・必須）: 起動指示と worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
 
-結果の `metrics`: `readers`（array of reader）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
+結果の `metrics`: `readers`（array of reader）・`reads`（array of object）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
 
 ## `ndf gws`
 

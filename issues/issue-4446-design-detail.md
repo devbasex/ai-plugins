@@ -45,7 +45,9 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/domains/docrebuild/gate.py` | 新設 | `ndf document-rebuild gate` の 1 回の実行を組む | `records.reading`・`adapters.git`・`adapters.github`・`docrebuild.drive` | `GateArgs`・`Fixed`・`Plan` と関数 | `drive_gate`・`fix_head`・`open_review_again`・`working_material`・`strip_marks`・`plan_reads`・`write_facts`・`gate_prompt`・`verify_worker`・`render_remained`・`push_fixed`・`refetch_check`・`rewrite_pr`・`record`（新設） |
+| `src/ndf/domains/docrebuild/gate.py` | 新設 | `ndf document-rebuild gate` の 1 回の実行を組む | `records.reading`・`records.pull_view`・`adapters.git`・`docrebuild.drive`・`docrebuild.gate_decide` | `GateArgs`・`Run`・`Plan`・`Read`・`Final` と関数 | `drive_gate`・`fix_head`・`same_tree`・`open_review_again`・`working_material`・`plan_reads`・`write_facts`・`gate_prompt`・`verify_worker`・`push_fixed`・`refetch_check`・`send_back`・`post_material`・`write_records`・`complete_check`（新設） |
+| `src/ndf/domains/docrebuild/gate_decide.py` | 新設 | gate の判断の部品（ファイル・git・GitHub を触らない） | `records.reading` | 関数 | `strip_marks`・`changed_part`・`body_edited`・`question_text`・`quotes_of`・`record_gap`・`carried_quotes`・`doc_rows_of`・`comment_has`・`remained_items`（新設） |
+| `src/ndf/domains/records/pull_view.py` | 新設 | PR の題・本文・head・変更量・コメントを 1 回の取得で読み、コメントを足す（gate と check が使う） | `adapters.github` | `PullView` と関数 | `pull_view`・`add_comment`（新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 変更 | サブコマンド `gate` の引数を受ける | `docrebuild.gate` | モジュール | `_parser`・`_gate_args`・`main`（変更） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 組み直しで読ませた文書を読ませたものの記録へ書き、`not_run` で止める | `records.reading` | モジュール | `_checked`・`_reader_gap`（変更）、`record_reads`（新設） |
 | `src/ndf/domains/records/reading.py` | 変更 | 承認の質問の組み立て・読ませたものの記録の読み書き・`check` の照合 | `reading_decide`・`release.forms_decide`・`adapters.github` | モジュール | `gate_questions`・`material_hashes`・`docs_path`・`materials_path`・`append_doc`・`completed`・`latest_read`・`remained_of`・`pending_review`・`select_reads`・`row_fingerprint`（新設）、`add`・`check`（変更） |
@@ -95,14 +97,15 @@ plugins/ndf/
 | `render_remained` | `docrebuild/gate.py` | 新設 | `render_remained(remained: Sequence[Mapping[str, Any]]) -> str` | 残った文から、印付きの「読み手役が残した文」のセクションを作る。同じ入力から同じ文字列を返す |
 | `push_fixed` | `docrebuild/gate.py` | 新設 | `push_fixed(args: GateArgs, fixed: Fixed, docs: Sequence[str], g: git.Git, ci_watch: CiWatch) -> str` | 再レビュー待ちの行を書いてからコミット・push し、CI を待つ。push したコミットを返す |
 | `refetch_check` | `docrebuild/gate.py` | 新設 | `refetch_check(hub: GitHub, fixed: Fixed, head: str) -> Pull` | PR を 1 回取得し直し、head・題・本文が動いていないかを確かめる |
-| `rewrite_pr` | `docrebuild/gate.py` | 新設 | 計画で決める | PR の題と本文を書き換える（設計書の手順 8）。計画で直し方が決まるまで実装しない |
+| `send_back` | `docrebuild/gate.py` | 新設 | `send_back(run, plan, targets, raised) -> dict[str, Any]` | 題の案か PR の本文の行の直しがあるとき、変更要求の行を書き、記録を書かずに `stopped`（`precondition`）で止める（設計書の決定 10。PR の題と本文は書き換えない） |
+| `post_material` | `docrebuild/gate.py` | 新設 | `post_material(run, now, final) -> None` | 合格した承認資料の最終版を PR のコメントとして 1 件足す。同じ SHA-256 の本文のコメントがあれば足さない（改行の CRLF と末尾の改行の有無をそろえて比べる） |
 | `record` | `docrebuild/gate.py` | 新設 | `record(args: GateArgs, fixed: Fixed, plan: Plan, report: Mapping[str, Any], check_id: str, pushed: Optional[str]) -> dict[str, Any]` | 設計書の手順 9 の 1〜5 を順に書き、`outputs.check` の値を返す |
 | `_parser`・`main` | `docrebuild/cli.py` | 変更 | 今のまま | サブコマンド `gate` を足し、`run` と同じ `adopt` で結果 JSON を受ける |
 
 - `drive_gate`
   - 事前条件: `args.gate` は `design` か `release`。`--material` は `release` のときだけ。引数の形は `document-rebuild.args.schema.json` が確かめ済み
   - 事後条件: `ok` なら、`reading-docs.jsonl` に今回の確認の行と完了の行があり、`review_again` が無ければ `reading-checks.jsonl` に 1 行が足されている。`stopped` なら、完了の行は無い
-  - 副作用: GitHub の PR の取得（2 回）・更新（`rewrite_pr` が要るときだけ）、`ndf worker run` の子のプロセス 1 回、`git commit`・`git push`・`ndf ci watch`（文書を直したときだけ）、2 つの記録とコピーのファイルへの追記と置き換え
+  - 副作用: GitHub の PR の取得（2 回）・コメントの追記（PR の本文の経路で、同じ承認資料のコメントが無いときだけ。PR の更新はしない）、`ndf worker run` の子のプロセス 1 回、`git commit`・`git push`・`ndf ci watch`（文書を直したときだけ）、2 つの記録とコピーのファイルへの追記と置き換え
 - `fix_head`
   - 事前条件: `--pr` が無ければ、経路ごとの決め方（設計書の「承認する PR と承認資料」の表）で PR が決まる
   - 事後条件: `Fixed` は PR の番号・ブランチ・head・題・本文・ベースを持ち、以後の基準になる。設計のステージでは、作業場所の HEAD が head と同じで、変更が無い
@@ -132,7 +135,7 @@ plugins/ndf/
 | `push_fixed` | push した head の CI が落ちた | 直した文書が検査を落とした | `ndf ci watch` | 止める | `stopped`（`check_failed`） | 行は残す |
 | `refetch_check` | head が動いた | 読ませている間に別のコミットが足された | 取得し直した `head_sha` | 止める | `stopped`（`precondition`） | 打ち直すと、足された部分だけを読ませる |
 | `refetch_check` | 題か本文がほかの人に変えられた | 読ませている間の編集 | 控えた題・本文との比較 | 止める | `stopped`（`precondition`） | 書き換えない。打ち直せる |
-| `rewrite_pr` | 書き換えの後の照合が合わない・ほかの人の編集と重なった | 更新の競合 | 書き換えの後の問い合わせ | 計画で決める（設計書の「未確認」の 2 行目と (5)） | 計画で決める | 計画で決める |
+| `send_back` | 題か本文を直さないと通じない | 読み手役の指摘 | 題の案のファイル・`gate_decide.body_edited` | 止める（変更要求） | `stopped`（`precondition`）、`cause.detail` に直す対象・指摘・直しの案のパス | 変更要求の行を残す。直してから工程を再開する。2 回目は変更要求しない |
 | `record` | 追記か置き換えに失敗した | ファイルを書けない | `OSError` | 止める | `stopped`（`precondition`） | 完了の行が無いので、`check` は `no_record` を返す。打ち直せる |
 
 ### 処理の手順
@@ -146,7 +149,8 @@ plugins/ndf/
 | `open_review_again` | 行がある・含まない・作業場所のブランチにも無い | 取り消しの行を追記して None |
 | `drive_gate` | 読ませるものが無い（`plan.targets` が空） | worker を起動せず、固定した head で `record` だけを打つ |
 | `drive_gate` | worker が文書を直した・`--no-doc-fix` が無い | `push_fixed` を打ち、`record` は `reading-checks.jsonl` に書かずに `review_again` を返す |
-| `drive_gate` | worker が承認資料か題だけを直した | push しない。`refetch_check` → `rewrite_pr`（計画で決まるまでは題と本文を書き換えない）→ `record` |
+| `drive_gate` | worker が判断の材料だけを直した | push しない。`refetch_check` → `post_material` → `write_records` |
+| `drive_gate` | worker が題の案を書いた・PR の本文から写した行を変えた | push しない。`refetch_check` → `send_back` |
 
 - 繰り返しの終わる条件: worker の中の読み手役は立場ごとに最大 2 回。設計のレビューへ戻すのは、同じ承認ゲートの前で 1 回まで（工程を進める仕組みが `--no-doc-fix` を渡す）
 - 計算量の注意: 2 つの記録は追記だけのファイルで、1 回の実行で全行を 1 回だけ読む。行は PR とゲートの数に比例して増えるので、読むのは `reading.latest_read` などの関数の中の 1 回にまとめる
@@ -196,7 +200,7 @@ plugins/ndf/
 | `render_remained` | — | `grep -rn "読み手役が残した文" src/ndf` で 0 件 | 新設 |
 | `push_fixed` | `ndf ci watch`（`ndf.ci_cli`） | `grep -n "\"ci\"" src/ndf/cli.py` | 子のプロセスで打つ。テストは `ci_watch` を差し替える |
 | `refetch_check` | `adapters.github.GitHub.pull` | 同上 | 使う |
-| `rewrite_pr` | `adapters.github.GitHub.graphql` | `grep -n "def graphql" src/ndf/adapters/github.py` | 書き換えの後の問い合わせに使う。更新の口は計画で決める |
+| `post_material` | `adapters.github.GitHub.rest` | `grep -n "def rest" src/ndf/adapters/github.py` | 使う（`POST /repos/<repo>/issues/<番号>/comments`）。`github.py` が安全網の 1000 行を超えるため、取得とコメントの口は `records/pull_view.py` に置いた |
 | `record` | `records.reading.add`・`append_doc`。コピーの置き換えは `os.replace`（`core/worker.py` と同じ形） | `grep -rn "os.replace" src/ndf/core` | 使う。原子的に書く共通の関数は無い（`grep -rn "def write_atomic\|def atomic_write" src/ndf` で 0 件） |
 
 ### 単体テストの観点

@@ -22,6 +22,7 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git
 from ndf.contracts import result
 from ndf.core import issue_docs
+from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
 from ndf.domains.records import reading
 from ndf.domains.docrebuild.select_decide import Inspection, Target
@@ -44,7 +45,7 @@ VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdic
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
 
 # 読み手役を立てられなかった記録の verdict と、その欠けの理由の頭（#4446 の決定 5。ok で進めずに止める）
-NOT_RUN = "not_run"
+NOT_RUN = gate_decide.NOT_RUN
 NOT_RUN_GAP = "読み手役を立てられなかった"
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
@@ -241,10 +242,15 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
     """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
-    prompt_file = args.state_dir / f"{WORK_KIND}.prompt.md"
-    result_file = args.state_dir / f"{WORK_KIND}.result.json"
+    return run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
+
+
+def run_worker_at(state_dir: Path, cwd: Path, kind: str, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
+    """`run_worker` の本体。保存先 `state_dir` と `ndf worker run --kind` の値 `kind` を引数に取る（gate も使う）。"""
+    prompt_file = state_dir / f"{kind}.prompt.md"
+    result_file = state_dir / f"{kind}.result.json"
     try:
-        args.state_dir.mkdir(parents=True, exist_ok=True)
+        state_dir.mkdir(parents=True, exist_ok=True)
         prompt_file.write_text(prompt, encoding="utf-8")
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
@@ -253,17 +259,17 @@ def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, An
         "worker",
         "run",
         "--kind",
-        WORK_KIND,
+        kind,
         "--prompt-file",
         str(prompt_file),
         "--result-file",
         str(result_file),
         "--cwd",
-        str(args.cwd),
+        str(cwd),
         "--state-dir",
-        str(args.state_dir),
+        str(state_dir),
     ]
-    return _worker_result(runner(argv, args.cwd)), result_file
+    return _worker_result(runner(argv, cwd)), result_file
 
 
 def added_items(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]:
@@ -487,7 +493,7 @@ def _read_rows(rec: Mapping[str, Any]) -> list[dict[str, Any]]:
         if check["verdict"] == "pass":
             out.append({"round": i, "verdict": "passed"})
         elif i == 2:
-            out.append({"round": 2, "verdict": "remained", "quotes": [{"quote": check["reason"], "why": ""}]})
+            out.append({"round": 2, "verdict": reading.REMAINED, "quotes": [{"quote": check["reason"], "why": ""}]})
         else:
             out.append({"round": i, "verdict": "failed"})
     return out
