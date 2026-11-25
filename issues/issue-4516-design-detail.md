@@ -1,6 +1,6 @@
 # #4516 の詳細設計: 読み手の無い値の測定をやめ、解析の記録を追跡しないファイルへ分ける
 
-設計文書 [issue-4516-design.md](./issue-4516-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。新設する関数は 4 つ（`analysis_record.strip_item`・`analysis_record.strip_legacy`・`analysis_record.load`・`analysis_record.written_digest`）、シグネチャを変えるものは 3 つ（`write.merge_project`・`write.Inputs`・`write.File`）ある。そのため別ファイルにした。
+設計文書 [issue-4516-design.md](./issue-4516-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。新設する関数は 5 つ（`analysis_record.strip_item`・`analysis_record.strip_legacy`・`analysis_record.load`・`analysis_record.written_digest`・`strategy_write.lock_file`）、置き場を移す関数は 1 つ（`write.value_digest` → `items.value_digest`）、シグネチャを変えるものは 5 つ（`write.merge_project`・`write.Inputs`・`write.File`・`check.repo_dirs`・`cli._inputs`）ある。そのため別ファイルにした。
 
 ## 地図
 
@@ -17,7 +17,9 @@ plugins/ndf/
 │   ├── measure_ci.py          ci を必須のチェックだけにし、実行・ジョブ・成果物・テストの所要時間の取得を消す
 │   ├── measure_repo.py        言語の行からファイル数を外し、名前の順に並べる
 │   ├── write.py               設定の値を決め、解析の記録を組み、書くファイルの計画を作る
-│   ├── check.py               新しさの判定・設定の読み込み
+│   ├── check.py               新しさの判定・設定の読み込み・作業場所と git の共通ディレクトリの解決
+│   ├── items.py               書いた値の指紋（value_digest）を write から移す
+│   ├── strategy_write.py      解決済みの共通ディレクトリから錠のパスを作る関数を足す
 │   └── cli.py                 測定の結果からテストの所要時間を外す・前の記録を入力に足す・錠・無視の確認・記録の要約の表示
 ├── contracts/
 │   ├── domains/locations.json      場所 measured を消し、analysis を足す
@@ -36,15 +38,18 @@ plugins/ndf/
     └── test_analysis_record.py *
 ```
 
-依存の向き: `cli` → `write` → `check` → `analysis_record`、`write` → `analysis_record`、`cli` → `strategy_write`（錠のパスだけ）、`analysis_record` → (`ndf.contracts`・`ndf.domains.records`・`items`)。`analysis_record` は `write` も `check` も読まない（`check` の定数 `ANALYZER`・`SCHEMA` を使わず、スキーマのパスは `ndf.contracts.schema_path` から自分で引く）。`measure_ci` と `measure_repo` は今のまま `cli` から呼ばれ、`analysis_record` を読まない。そのため依存に輪は無い。
+依存の向き: `cli` → `write` → `check` → `analysis_record`、`write` → `analysis_record`、`cli` → `strategy_write`（錠のパスだけ）、`analysis_record` → (`ndf.contracts`・`ndf.domains.records`・`items`)、`write` → `items`。`items` はこのパッケージのどのモジュールも読まない。`analysis_record` は `write` も `check` も読まない（`check` の定数 `ANALYZER`・`SCHEMA` を使わず、スキーマのパスは `ndf.contracts.schema_path` から自分で引く）。`measure_ci` と `measure_repo` は今のまま `cli` から呼ばれ、`analysis_record` を読まない。そのため依存に輪は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/project/analysis_record.py` | 新設 | 解析の記録の形を持ち、設定から旧い形のキーを取り除く | `ndf.contracts`・`ndf.domains.records.files`・`ndf.domains.records.jsonfile`・`items` | `analysis_record` | `strip_item`・`strip_legacy`・`load`・`written_digest`（新設）。定数 `VERSION`・`IGNORE_TEXT`・`SCHEMA` |
 | `plugins/ndf/src/ndf/domains/project/measure_ci.py` | 変更 | `ci` を必須のチェックだけにする | 変えない（`allocation`・`top_level_block` の取り込みを外す） | `measure_ci` | `measure`（変更）。`_time`・`span`・`_strip_comment`・`job_ids`・`workflow_jobs`・`junit_seconds`・`_xmls`・`_junit_of_run`・`_steps_of`・`_record_value`・`ndf_record`・`_test_duration`・`_has_skipped_job`・`_representative`・`_workflow_entry`・`_Runs`・`_measure_runs` と定数 `TEST_STEP`・`CANDIDATE_RUNS`・`RECENT`・`WORKFLOW_PATH`・`JUNIT_NAME`・`ARTIFACT_BYTES`（削除） |
 | `plugins/ndf/src/ndf/domains/project/measure_repo.py` | 変更 | 言語の行からファイル数を外し、名前の順に並べる | 変えない | `measure_repo` | `measure_languages`（変更） |
-| `plugins/ndf/src/ndf/domains/project/write.py` | 変更 | 設定の値を決め、解析の記録を組み、書くファイルの計画を作る | `analysis_record`・`check` | `write` | `merge_item`・`merge_project`・`_replace_ours`・`_declare_ci_tests`・`plan`・`Inputs`・`File`・`p_number`（変更）。`_carry_walls`・`_same_but_time`（削除） |
-| `plugins/ndf/src/ndf/domains/project/check.py` | 変更 | 新しさを解析の記録から判定する | `analysis_record` | `check` | `load`・`judge`（変更）。`ANALYZER` を 3 から 4 へ |
+| `plugins/ndf/src/ndf/domains/project/write.py` | 変更 | 設定の値を決め、解析の記録を組み、書くファイルの計画を作る | `analysis_record`・`check` | `write` | `merge_item`・`merge_project`・`_replace_ours`・`_declare_ci_tests`・`plan`・`Inputs`・`File`・`p_number`（変更）。`_carry_walls`・`_same_but_time`（削除）。`value_digest`（`items` へ移す。呼び出しは `items.value_digest` に直す） |
+| `plugins/ndf/src/ndf/domains/project/items.py` | 変更 | `write` から移した `value_digest` を置き、`write` と `analysis_record` が共用する | 変えない（標準ライブラリの `hashlib`・`json` だけを足す） | `items` | `value_digest`（`write` から移す。中身は変えない） |
+| `plugins/ndf/src/ndf/domains/project/strategy_write.py` | 変更 | 解決済みの git の共通ディレクトリから錠のパスを作る関数を足す | 変えない | `strategy_write` | `lock_file`（新設）。`lock_path`（責務を変えない。中で `lock_file` を使う） |
+| `plugins/ndf/src/ndf/domains/project/strategy_cli.py` | 変更 | `check.repo_dirs` の戻り値を名前で受ける | 変えない | `strategy_cli` | `check.repo_dirs` を呼ぶ箇所（137 行目）だけ |
+| `plugins/ndf/src/ndf/domains/project/check.py` | 変更 | 新しさを解析の記録から判定する | `analysis_record` | `check` | `load`・`judge`・`repo_dirs`（変更）。`RepoDirs`（新設の型）。`ANALYZER` を 3 から 4 へ |
 | `plugins/ndf/src/ndf/domains/project/cli.py` | 変更 | 測定の結果からテストの所要時間を外す。書き出しの入力に前の解析の記録を足す。記録のパスが git に無視されることを確かめる。記録を要約で表示する | `analysis_record`・`write`・`check`・`strategy_write` | `cli` | `_ci_items`・`_inputs`・`_write`・`_print_write`（変更） |
 | `.ndf/project.json` | 変更 | このリポジトリの追跡している設定を新しい形式へ移す（設計文書の決定 4） | 無し | — | — |
 | `plugins/ndf/contracts/schemas/internal/project-analysis.schema.json` | 新設 | 解析の記録の形（`version`・`analyzer`・`inputs`・`branches`・`written_digest` が必須、`pending` が任意、ほかのキーを許さない） | 無し | — | — |
@@ -59,7 +64,7 @@ plugins/ndf/
 | `docs/specifications/README.md` | 変更 | 上の行を消す | 無し | — | — |
 | `plugins/ndf/tests/domains/project/test_analysis_record.py` | 新設 | `analysis_record` の単体テスト | `analysis_record` | — | — |
 | `plugins/ndf/tests/domains/project/test_project_measure.py` | 変更 | 消した関数のテストを消し、`gh` の呼び出しが 3 か所だけであること・言語の行にファイル数が無く名前の順であることを確かめる | `measure_ci`・`measure_repo` | — | — |
-| `plugins/ndf/tests/domains/project/test_project_cli.py` | 変更 | 書き出しと判定のテストの期待を、解析の記録が `.ndf/analysis/project.json` にある形へ直す。`test_merge_item_carries_ci_walls` と、`test_duration` を扱う `_ci_items` のテストを消す | `cli`・`write`・`check` | — | — |
+| `plugins/ndf/tests/domains/project/test_project_cli.py` | 変更 | 書き出しと判定のテストの期待を、解析の記録が `.ndf/analysis/project.json` にある形へ直す。`test_merge_item_carries_ci_walls` と、`test_duration` を扱う `_ci_items` のテストを消す。`write.value_digest` の呼び出しを `items.value_digest` に直す | `cli`・`write`・`check` | — | — |
 
 ## 解析の記録（analysis_record.py）
 
@@ -72,7 +77,7 @@ plugins/ndf/
 | `strip_item` | `analysis_record.py` | 新設 | `strip_item(key: str, value: Any) -> tuple[Any, list[str]]` | 設定の 1 項目の値から旧い形のキーを取り除いた値と、取り除いたキーの名前を返す |
 | `strip_legacy` | `analysis_record.py` | 新設 | `strip_legacy(doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]` | 設定から旧い形のキーを取り除いたコピーと、見つけたキーの名前の並びを返す |
 | `load` | `analysis_record.py` | 新設 | `load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[str]]` | メインディレクトリの解析の記録を読み、(記録, None) か (None, 読めない理由) を返す |
-| `written_digest` | `analysis_record.py` | 新設 | `written_digest(doc: Optional[dict[str, Any]]) -> str` | 設定の書いた値の指紋（`analysis.written`）から、記録に対応する設定の指紋を作る |
+| `written_digest` | `analysis_record.py` | 新設 | `written_digest(doc: Optional[dict[str, Any]]) -> str` | 設定の書いた値の指紋（`analysis.written`）から、記録に対応する設定の指紋を作る。ハッシュは `items.value_digest` で取る |
 
 - `strip_item`
   - 事後条件: `key` が `languages` で値が配列なら、各行から `files` を除き、取り除いたら `["languages[].files"]` を返す。`ci` で値が object なら、`workflows` と `provider` を除き、取り除いたキーの名前（`ci.workflows`・`ci.provider`）を返す。`required_checks` の無い `ci` からは `{}` を返す（`ci` を消さない）。ほかのキー・不明（`{"unknown": …}`）・形の違う値は `(value, [])` をそのまま返す。入力を書き換えない
@@ -84,7 +89,7 @@ plugins/ndf/
   - 事後条件: 記録が在り、UTF-8 の JSON の object で、`SCHEMA`（`internal/project-analysis`）に合えば (記録, None)。途中の印（`pending: true`）の付いた記録もそのまま返す（判定は `check.judge` が行う）。旧い形の記録（`at` などの知らないキーを持つ）は形が違うとして返す
   - 副作用: ファイルを 1 つ読む
 - `written_digest`
-  - 事後条件: `doc["analysis"]["written"]` を `json.dumps(…, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` にした UTF-8 の SHA-256 の 16 進を返す。`doc` が None・`analysis` か `written` が無い・object でないときは `{}` から作る。`analysis.written` の外のキー（人が直した値・`branch_strategy`）は結果に影響しない
+  - 事後条件: `items.value_digest(doc["analysis"]["written"])` を返す。正規化した JSON の SHA-256 を自分で書かず、書いた値の指紋と同じ関数を使う。`doc` が None・`analysis` か `written` が無い・object でないときは `{}` から作る。`analysis.written` の外のキー（人が直した値・`branch_strategy`）は結果に影響しない
   - 副作用: 無し
 
 ### 異常系の処理
@@ -112,6 +117,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `load` | `ndf.domains.records.jsonfile.read_object`・`ndf.contracts.schema_errors` | `grep -n "def read_object\|def schema_errors" -r plugins/ndf/src/ndf` | 使う |
 | `strip_item`・`strip_legacy` | `items.obj`・`items.seq` | 読んだ | 使う |
+| `written_digest` | `write.value_digest`（正規化した JSON の SHA-256） | `grep -rn "def value_digest" plugins/ndf/src` | 使う。`analysis_record` は `write` を読まない（`write` が `analysis_record` を読むので、読むと依存が輪になる）ため、`value_digest` を両方が既に読む `items` へ移して共用する |
 
 ### 単体テストの観点
 
@@ -176,8 +182,9 @@ plugins/ndf/
   - 副作用: 無し（書くのは `cli._write`）
 - `_write` の手順
   - `--dry-run` のとき: 今と同じく錠を取らず、何も書かず、git も打たずに予定を表示する
-  - `--dry-run` でないとき: まず `FileLock(strategy_write.lock_path(<作業場所>), timeout=limits.seconds("branch-strategy.write-lock"))` を取る。`_inputs`（既存の設定と記録の読み込み）・`write.plan`・下の書き込みは、すべてこの錠の中で行う。錠は最後のファイルを書いた後か、途中で止めたときに放す
-  - `Plan.files` が空のとき: 確かめの git を起動せず、終了コード 0 で終わる
+  - 最初に `check.repo_dirs` を 1 回だけ呼び、作業場所・メインディレクトリ・git の共通ディレクトリを `RepoDirs` として求める。錠のパスと `_inputs` は、この解決済みの値を使い、git の共通ディレクトリを求め直さない。今の書き出しも `check.repo_dirs` を 1 回呼んでいるので、git の起動の回数は今と同じである
+  - `--dry-run` でないとき: 設定と記録を読む前に `FileLock(strategy_write.lock_file(dirs.common), timeout=limits.seconds("branch-strategy.write-lock"))` を取る。`_inputs(args, dirs)`（既存の設定と記録の読み込み）・`write.plan`・下の書き込みは、すべてこの錠の中で行う。錠は最後のファイルを書いた後か、途中で止めたときに放す
+  - `Plan.files` が空のとき: `git ls-files` と `git check-ignore` を打たず、終了コード 0 で終わる（`check.repo_dirs` の git と錠は、計画を作る前なので、この回も通る）
   - `Plan.files` に `.ndf/analysis/` の下のファイル（`.gitignore`・途中の印・記録のどれか。`.gitignore` だけでもよい）があるとき:
     1. `Plan.files` に `.gitignore` があれば、書く前にメインディレクトリで `git ls-files -- .ndf/analysis` を 1 回打つ。終了コードが 0 で、かつ標準出力が空のときだけ `.gitignore` を書く。終了コード 0 で出力が空でなければ「追跡されている」で止める。終了コードが 0 でなければ、出力によらず「確かめられない」で止める。どちらも何も書かない
     2. `git check-ignore -q <記録のパス>` を 1 回打つ。0 なら続ける。1 なら「無視されない」で止める。それ以外なら「確かめられない」で止める。どちらも残りを書かない。無視の出所（`.ndf/analysis/.gitignore`・根の `.gitignore`・`.git/info/exclude`・`core.excludesFile`）は問わない
@@ -214,7 +221,9 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `load` | `check.py` | 変更（責務） | 変えない | 設定を読み、`analysis_record.strip_legacy` で取り除いたコピーでスキーマを確かめ、取り除く前の値を返す（旧い形を「壊れている」にしない） |
 | `judge` | `check.py` | 変更（責務） | 変えない | 旧い形のキーがあれば「古い」。次に `analysis_record.load` の記録が無ければ「古い」。記録に途中の印（`pending: true`）があれば「古い」。記録の `written_digest` が `analysis_record.written_digest(<今の設定>)` と違えば「古い」。どれでもなければ記録の `analyzer`・`inputs`・`branches` で今と同じ判定をする |
-| `_inputs` | `cli.py` | 変更（責務） | 変えない | `analysis_record.load(main)` の記録を `Inputs.record` に渡す（読めなければ None） |
+| `repo_dirs` | `check.py` | 変更 | 前: `repo_dirs(root) -> tuple[git.Git, Path]`。後: `repo_dirs(root) -> RepoDirs`（`NamedTuple`。`top: git.Git`・`main: Path`・`common: Path`） | 作業場所・メインディレクトリ・git の共通ディレクトリを返す。共通ディレクトリは、今もメインディレクトリを求めるために取っている `top.common_dir()` の値をそのまま返し、git を余分に起動しない。呼び出し元（`check.py`・`cli.py` の 2 か所・`strategy_cli.py`）は名前で受ける |
+| `_inputs` | `cli.py` | 変更 | 前: `_inputs(args)`。後: `_inputs(args, dirs: check.RepoDirs)` | 渡された `dirs` の `main` から設定と記録を読み、`check.repo_dirs` を呼ばない。`analysis_record.load(main)` の記録を `Inputs.record` に渡す（読めなければ None） |
+| `lock_file` | `strategy_write.py` | 新設 | `lock_file(common: Path) -> Path` | 解決済みの git の共通ディレクトリから錠のパス（`common / LOCK_NAME`）を返す。git を起動しない。`lock_path(root)` は共通ディレクトリを求めてからこの関数を呼ぶ |
 
 ### 異常系の処理
 
@@ -233,4 +242,4 @@ plugins/ndf/
 | `judge` | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力かブランチが変わるか、記録の解析器のバージョンが古ければ「古い」 | worktree から打つとメインディレクトリの記録を読む。解析の書いていない項目や `branch_strategy` だけを変えた設定は「新しい」のまま | 記録が無い・壊れている・不正な UTF-8・途中の印・旧い形の設定・`analysis.written` だけを以前の値へ戻した設定（どれも終了コード 3） |
 | `load` | 新しい形の設定を返す | 旧い形の設定を、取り除かずに返す。`analysis.written` と `ci.required_checks` を両方省いた旧い形の設定も返す（取り除いた後の `analysis: {}`・`ci: {}` が形に合う） | 取り除いても形に合わない（終了コード 2） |
 | `plan`（`cli.main(["write", …])` から） | 2 回目の書き出しで `.ndf/project.json` も記録も書かない。記録を差分でなく要約の 1 行で表示する。記録の `written_digest` が書いた設定の値と合う | 移行の 1 回目（旧い形のキーを持つ設定。`analysis.written` と `ci.required_checks` を両方省いたものを含む）・記録の無い clone・`ci` が不明 | 前の記録の入力が今と同じで、`.ndf/project.json` か記録の書き込みを失敗させる（次の判定が「古い」）・記録のパスが無視されない（終了コード 1 で既存のファイルが前のまま） |
-| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える。`.ndf/analysis/.gitignore` が空でも `.git/info/exclude` が記録のパスを無視していれば書く（テストでは `GIT_CONFIG_GLOBAL` を空のファイルにし、`GIT_CONFIG_NOSYSTEM=1` にする） | 記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示の動詞が `書く（--dry-run）` になる。書くものが無い書き出しでは git を呼ばず終了コード 0（記録が追跡済みでも）。書くファイルが `.gitignore` だけで記録が追跡されていないとき、`git ls-files` と `git check-ignore` を 1 回ずつ呼ぶ（呼び出しを差し替えて回数を数える）。記録が追跡済みなら `git ls-files` だけを呼ぶ | 追跡していた `.gitignore` を作業ツリーで消した状態で、`.gitignore` を作らずに終了コード 1。`git ls-files` が終了コード 128 で出力が空なら `.gitignore` を作らずに終了コード 1。`git check-ignore` が 128 なら設定と記録を書かずに終了コード 1。錠を持った状態（上限を 0 秒に差し替える）で書き出すと、設定と記録を読まずに終了コード 1 |
+| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える。`.ndf/analysis/.gitignore` が空でも `.git/info/exclude` が記録のパスを無視していれば書く（テストでは `GIT_CONFIG_GLOBAL` を空のファイルにし、`GIT_CONFIG_NOSYSTEM=1` にする） | 記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示の動詞が `書く（--dry-run）` になる。書くものが無い書き出しでは `git ls-files` と `git check-ignore` を呼ばず終了コード 0（記録が追跡済みでも）。書くファイルが `.gitignore` だけで記録が追跡されていないとき、`git ls-files` と `git check-ignore` を 1 回ずつ呼ぶ（呼び出しを差し替えて回数を数える）。記録が追跡済みなら `git ls-files` だけを呼ぶ | 追跡していた `.gitignore` を作業ツリーで消した状態で、`.gitignore` を作らずに終了コード 1。`git ls-files` が終了コード 128 で出力が空なら `.gitignore` を作らずに終了コード 1。`git check-ignore` が 128 なら設定と記録を書かずに終了コード 1。錠を持った状態（上限を 0 秒に差し替える）で書き出すと、設定と記録を読まずに終了コード 1 |

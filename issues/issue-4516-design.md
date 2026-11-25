@@ -117,7 +117,9 @@ flowchart LR
 | `measure_ci.py`（変更） | `ci` を必須のチェックだけにする。実行の一覧・ジョブ・成果物の取得と、テストの所要時間の測定を消す |
 | `measure_repo.py`（変更） | 言語の行からファイル数を外し、並びを名前の順にする |
 | `write.py`（変更） | 設定の値を決め、解析の記録を組み、`.gitignore`・途中の印を付けた前の記録・`.ndf/project.json`・解析の記録を書く計画を作る。実行時間の引き継ぎを消す |
-| `check.py`（変更） | 設定が古くなっていないかを、`.ndf/project.json` でなく `.ndf/analysis/project.json` の解析の記録から判定する |
+| `check.py`（変更） | 設定が古くなっていないかを、`.ndf/project.json` でなく `.ndf/analysis/project.json` の解析の記録から判定する。作業場所を解決する `repo_dirs` が、メインディレクトリと一緒に git の共通ディレクトリも返す |
+| `items.py`（変更） | 書いた値の指紋を作る `value_digest` を `write.py` から移し、`write` と `analysis_record` が共用する |
+| `strategy_write.py`（変更） | 解決済みの git の共通ディレクトリから錠のパスを作る `lock_file` を足す |
 | `cli.py`（変更） | 測定の結果からテストの所要時間を外す。書き出しの入力に前の解析の記録を足す。既存の設定と記録を読む前に錠を取り、最後の記録を書くまで持つ。記録を書く前に、記録のパスが git に無視されることを確かめる。`.ndf/analysis/` の下のファイルは差分でなく要約で表示する |
 | 錠の待ちの上限（変更） | `plugins/ndf/contracts/limits/branch-strategy.write-lock.json` の `read_by` に `ndf.domains.project.cli` を足し、summary を「`.ndf/project.json` を書く錠の待ちの上限。ブランチ戦略の書き込みと解析の書き出しが共有する」へ直す。上限の 30 秒は変えない |
 | 設定のスキーマ（変更） | `analysis` を `written` だけにし、`languages[].files`・`ci.workflows`・`ci.provider`・`test_duration` と、それだけが使う定義（`TestDuration` など）を外す |
@@ -147,7 +149,7 @@ flowchart LR
 | `analyzer` | 整数 | 必須 | 解析器のバージョン（`check.ANALYZER`。測る項目を変えるので 3 から 4 へ上げる） | `check._stale_reasons` |
 | `inputs` | パス → blob の ID の表 | 必須 | 入力のファイルのハッシュ（`check.inputs`） | `check._stale_reasons` |
 | `branches` | `{head, present}` | 必須 | ブランチの構成（`check.branch_state`） | `check._stale_reasons` |
-| `written_digest` | 文字列（SHA-256 の 16 進） | 必須 | 記録に対応する設定の指紋。書き出しの後の `.ndf/project.json` の `analysis.written` を、キーを並べた JSON（`json.dumps(…, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`）にして取ったハッシュ。`analysis.written` が無ければ `{}` から取る（I9） | `check.judge`（今の設定から作った値と違えば「古い」） |
+| `written_digest` | 文字列（SHA-256 の 16 進） | 必須 | 記録に対応する設定の指紋。書き出しの後の `.ndf/project.json` の `analysis.written` を、キーを並べた JSON（`json.dumps(…, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`）にして取ったハッシュ。書いた値の指紋と同じ関数（`items.value_digest`）で取る。`analysis.written` が無ければ `{}` から取る（I9） | `check.judge`（今の設定から作った値と違えば「古い」） |
 | `pending` | 真偽値（`true` だけ） | 任意 | 書き出しの途中の印（I7） | `check.judge`（在れば「古い」） |
 
 記録に対応する設定の指紋を、設定のファイル全体でなく `analysis.written` から作るのは、人が値を直したときや `ndf project branch-strategy` がセクション `branch_strategy` を書いたときに「古い」と判定しないためである。そうした変更は解析の書いた値を変えないので、解析をやり直しても結果は同じである。設定だけを `git restore` で以前の状態へ戻すと、解析が書いた値と一緒に `analysis.written` も戻るので、記録の指紋と合わなくなり「古い」と判定される。
@@ -233,10 +235,10 @@ sequenceDiagram
 - 錠が無いと、組み合わせが食い違うたびに解析が 1 回余分に走る。食い違いを起こさない方が費用が小さい
 - 書き出しは `.ndf/project.json` 全体を読んでから書き直す。同じ時に `ndf project branch-strategy` がセクション `branch_strategy` を書くと、後から書いた側が先の変更を消す。これは指紋では見つからない
 
-- 錠のファイルは、`ndf project branch-strategy` が `.ndf/project.json` を書くときと同じ `<git の共通ディレクトリ>/ndf-branch-strategy.lock`（`strategy_write.lock_path`）である。どちらも `.ndf/project.json` 全体を読んで書き直すので、同じ錠で互いを待たせ、片方の書き込みがもう片方の変更を消さないようにする。git の共通ディレクトリはメインディレクトリと worktree で同じなので、錠はメインディレクトリ単位になる
+- 錠のファイルは、`ndf project branch-strategy` が `.ndf/project.json` を書くときと同じ `<git の共通ディレクトリ>/ndf-branch-strategy.lock`（`strategy_write.lock_file` で、解決済みの共通ディレクトリから作る）である。どちらも `.ndf/project.json` 全体を読んで書き直すので、同じ錠で互いを待たせ、片方の書き込みがもう片方の変更を消さないようにする。git の共通ディレクトリはメインディレクトリと worktree で同じなので、錠はメインディレクトリ単位になる
 - 待ちの上限は、ブランチ戦略の書き込みと同じ `branch-strategy.write-lock`（30 秒）を使う。上限までに取れなければ、何も読まず書かずに終了コード 1 で止まり、「別の実行が設定を書いています。終わってから打ち直してください」と出す。開発の作業の始めの手順は、ほかの終了コード 1 と同じく「解析: できなかった」と出して先へ進む。次の作業の始めの `ndf project check` が、待たせた側の書き出しの結果で判定し直す
 - `--dry-run` は何も書かないので錠を取らない
-- 錠の場所を求めるため、`--dry-run` でない書き出し 1 回につき git の起動（`git rev-parse --git-common-dir`）が 1 回増える。錠を取らないと上の食い違いを防げず、書き出しは測定（GitHub の API の呼び出し 3 回）の後に打つので、1 回の起動は比べて小さい
+- 錠のパスは、書き出しが最初に作業場所を解決したときの git の共通ディレクトリから作り、同じ解決結果で設定と記録を読む。今の書き出しも、メインディレクトリを求めるために共通ディレクトリを 1 回取っている（`check.repo_dirs`）。その値を錠にも使うので、錠のために git の起動は増えない
 
 書く順は `.ndf/analysis/.gitignore` → 記録のパスが無視されることの確認 → 途中の印（`pending: true`）を付けた前の記録 → `.ndf/project.json` → `.ndf/analysis/project.json`（印の無い新しい記録）である。
 
@@ -319,7 +321,7 @@ sequenceDiagram
   - 前の `analysis` の値は捨て、新しい解析の値で解析の記録を作る
 - NDF 自身のリポジトリ（このリポジトリ）では、実装の Pull Request の中で、追跡している `.ndf/project.json` もスキーマの変更と同じコミットで移す
   - 理由: `ndf check` の設定の形の検査（`spec-decl`）は、`check.load` を通らず、`checks/spec_docs.py` の `_real_errors` が実ファイルをスキーマで直接確かめる。このリポジトリの追跡している `.ndf/project.json` には旧い形のキーが残っているので、スキーマだけを先に厳しくすると、実装の Pull Request の CI が落ちる
-  - 移し方: 追跡している `.ndf/project.json` から、`analysis_record.strip_legacy` で旧い形のキーを取り除く。あわせて `analysis.written` のうち、取り除く前の値の指紋と一致していた項目の指紋を、取り除いた後の値の指紋（`write.value_digest`）に書き直す。一致していなかった項目の指紋は変えない。これは書き出しの移行（I3）と同じ結果になる。指紋を書き直さずにキーだけを取り除くと、次の書き出しで解析が書いた項目が人の値に見えてしまう
+  - 移し方: 追跡している `.ndf/project.json` から、`analysis_record.strip_legacy` で旧い形のキーを取り除く。あわせて `analysis.written` のうち、取り除く前の値の指紋と一致していた項目の指紋を、取り除いた後の値の指紋（`items.value_digest`）に書き直す。一致していなかった項目の指紋は変えない。これは書き出しの移行（I3）と同じ結果になる。指紋を書き直さずにキーだけを取り除くと、次の書き出しで解析が書いた項目が人の値に見えてしまう
   - 追跡している `.ndf/project.json` の移行に `ndf project write` は使わない。書き出しは worktree から打ってもメインディレクトリへ書くため、実装の Pull Request に入らない。移し方は実装の作業ディレクトリで、上の 2 つの関数を呼ぶ 1 回きりの手順として行い、スクリプトとしては残さない
   - 確かめ方: 受け入れ条件 14 を、新しくチェックアウトした場所（Pull Request の CI）の `ndf check` で確かめる。手元のメインディレクトリには利用者の未コミットの差分があり、その差分は確かめの対象にしない
   - このリポジトリの開発者への影響: この Pull Request が `main` に入ると、このリポジトリのメインディレクトリの未コミットの差分（ファイル数と `analysis` の書き直し）と、取り込む `.ndf/project.json` の変更がぶつかり、`git pull` が止まる。未コミットの差分は計測値の書き直しだけなので、開発者はそれを捨ててから取り込む（要求仕様の「含まない」の 3 つ目のとおり、片付けは開発者が行う）。NDF を使うほかのリポジトリには、この影響は無い
@@ -396,10 +398,10 @@ sequenceDiagram
 | 5・I4 | テストのリポジトリでは、利用者の全体の設定を読ませず（環境変数 `GIT_CONFIG_GLOBAL` を空のファイルに、`GIT_CONFIG_NOSYSTEM=1`）、`.git/info/exclude` を空にする。その上で、`.ndf/analysis/` の下へ書く書き出しで、既存の `.ndf/analysis/.gitignore` が空・`*` を含まない独自のパターン・記録が `git add -f` で追跡済み、のどれでも、書き出しは終了コード 1 で止まり、`.gitignore`・設定・記録の中身が前のまま。既存の `.ndf/analysis/.gitignore` が空でも、`.git/info/exclude` に `.ndf/analysis/` を書いてあれば、書き出しは終了コード 0 で設定と記録を書く | `.gitignore` があることだけで無視が効くとみなす・`.ndf/analysis/.gitignore` の中身だけで判定すると落ちる |
 | 5・I4 | git の呼び出しを差し替え、`git ls-files` が終了コード 128 で標準出力が空のとき、書き出しは `.gitignore` を作らず、git の標準エラー出力を理由に含めて終了コード 1 で止まる。`git check-ignore` が終了コード 128 のときも、設定と記録を書かずに終了コード 1 で止まる | 標準出力が空なことだけで `.gitignore` を作る・終了コード 1 以外の失敗を「無視される」とみなすと落ちる |
 | 5・I4 | 追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態で書き出すと、`.gitignore` を作らずに終了コード 1 で止まる。記録と設定が前と同じで `.gitignore` だけが消えている（書くファイルが `.gitignore` だけ）とき、記録が追跡されていなければ `git ls-files` と `git check-ignore` を 1 回ずつ呼び、`.gitignore` を作って終了コード 0 で終わる。記録が追跡済みなら `git ls-files` だけを呼び、`.gitignore` を作らずに終了コード 1 で止まる | `.gitignore` の存在だけを見て作り直す・`.gitignore` だけの計画で確かめないと落ちる |
-| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、git を呼ばずに終了コード 0 で「書くものが無い」と出る。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
+| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、`git ls-files` と `git check-ignore` を呼ばずに終了コード 0 で「書くものが無い」と出る（作業場所の解決と錠は計画を作る前なので、この回も通る）。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
 | 8 | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力のファイルかブランチの構成を変えるか、記録の解析器のバージョンを下げると「古い」 | 判定が `.ndf/project.json` の `analysis` を読むままだと落ちる |
 | 8・I9 | 書き出しを 2 回（解析が書く値が違う測定の結果で）打ち、2 回目の後で `.ndf/project.json` だけを 1 回目の後の中身に戻すと、記録の入力とブランチの構成が今と同じでも「古い」（理由「設定が解析の記録と対応しない」）。人が解析の書いていない項目を直したときと、`branch_strategy` を書き足したときは「新しい」のまま | 記録が設定の指紋を持たない・設定のファイル全体のハッシュで比べると落ちる |
-| 17・I10 | テストの中で錠（`strategy_write.lock_path` のファイル）を持ったまま、待ちの上限を 0 秒に差し替えて書き出すと、終了コード 1 で止まり、設定と記録が前のまま。書き出しが錠を取る前に設定と記録を読まない（読み込みの関数を差し替え、呼ばれた時点で錠が取られていることを確かめる） | 錠を取らない・錠を取る前に設定と記録を読むと落ちる |
+| 17・I10 | テストの中で錠（`strategy_write.lock_file` のファイル）を持ったまま、待ちの上限を 0 秒に差し替えて書き出すと、終了コード 1 で止まり、設定と記録が前のまま。書き出しが錠を取る前に設定と記録を読まない（読み込みの関数を差し替え、呼ばれた時点で錠が取られていることを確かめる）。書き出し 1 回で `check.repo_dirs` は 1 回だけ呼ばれる（呼び出しを差し替えて数える） | 錠を取らない・錠を取る前に設定と記録を読む・錠のために共通ディレクトリを求め直すと落ちる |
 | 9・I5 | 記録が無い・JSON でない・不正な UTF-8 を含む・スキーマに合わない（`at` などの知らないキーを持つ場合を含む）とき「古い」（終了コード 3）で、理由に解析の記録が無い・読めないと出る | 「壊れている」（終了コード 2）を返す・`UnicodeDecodeError` を捕まえないと落ちる |
 | 10 | 記録の無い状態で、前の指紋が一致する項目は新しい値になり、一致しない項目は残る | 記録が無いと指紋を読まない・すべてを置き換えると落ちる |
 | 11・I6 | 旧い形（`analysis` の全体・`files`・`ci.workflows`・`ci.provider`・`test_duration` を持つ）の設定で、判定が「古い」（終了コード 3）を返す。`analysis.written` と `ci.required_checks` を両方省いた旧い形の設定でも同じ | 旧い形を「壊れている」にする・`written` か `required_checks` を必須にすると落ちる |
@@ -409,13 +411,13 @@ sequenceDiagram
 | 15・I7 | 同じ測定の結果で回答だけを変えて書き出す（設定だけが変わる）か、印の残った記録の状態で同じ内容で打ち直すと、成功の後、記録に印が無く、次の判定が「新しい」 | 記録の中身が前と同じとき最後の記録を省くと落ちる |
 | 16 | 記録の無い状態で書き出すと、表示に `.ndf/project.json` の差分と、記録の 1 行の要約が出て、記録の入力のパスとハッシュの行は出ない | 記録を差分で出すと落ちる |
 
-詳細設計は [issue-4516-design-detail.md](./issue-4516-design-detail.md) にある（新設する関数 4・シグネチャを変える関数と型 3 のため別ファイルにした）。
+詳細設計は [issue-4516-design-detail.md](./issue-4516-design-detail.md) にある（新設する関数 5・置き場を移す関数 1・シグネチャを変える関数と型 5 のため別ファイルにした）。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4516 | 実装する | — | `.ndf/project.json`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/internal/project-analysis.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/limits/branch-strategy.write-lock.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/project-decl-ci-representative-run.md`、`docs/specifications/README.md`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py` |
+| #4516 | 実装する | — | `.ndf/project.json`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/project/items.py`、`plugins/ndf/src/ndf/domains/project/strategy_write.py`、`plugins/ndf/src/ndf/domains/project/strategy_cli.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/internal/project-analysis.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/limits/branch-strategy.write-lock.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/project-decl-ci-representative-run.md`、`docs/specifications/README.md`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py` |
 
 ## 人へ残す判断
 
